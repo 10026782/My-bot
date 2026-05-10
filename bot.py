@@ -54,7 +54,7 @@ def ask_claude(uid, msg):
             "content-type": "application/json"
         },
         json={
-            "model": "claude-sonnet-4-20250514",
+            "model": "claude-sonnet-3-5-20250514",
             "max_tokens": 1000,
             "system": SYSTEM_PROMPT,
             "messages": conversations[uid]
