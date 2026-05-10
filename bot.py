@@ -1,15 +1,26 @@
-import json, os, time, threading
+import os, json, threading, time
 from datetime import datetime
+from flask import Flask, request
 import httpx
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-TELEGRAM_TOKEN = "הטוקן שלך"
-ANTHROPIC_API_KEY = "המפתח שלך"
+# ==========================================
+# הגדרות
+ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
+TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
 
 DATA_FILE = "data.json"
 conversations = {}
+app = Flask(__name__)
 
+SYSTEM_PROMPT = """אתה עוזר עסקי אישי בשם מנהל.
+עונה תמיד בעברית, קצר וממוקד.
+עוזר בניהול משימות, הוצאות, קשרי לקוחות, ניסוח מודעות פרסום ותגובות ראשוניות ללקוחות."""
+
+# ==========================================
+# נתונים
+# ==========================================
 def load():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, 'r', encoding='utf-8') as f:
@@ -20,16 +31,19 @@ def save(data):
     with open(DATA_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-def ask_claude(uid, msg, data):
+# ==========================================
+# Claude
+# ==========================================
+def ask_claude(uid, msg):
     if uid not in conversations:
         conversations[uid] = []
-    open_tasks = [t for t in data['tasks'] if not t.get('done')]
+    data = load()
+    open_tasks = len([t for t in data['tasks'] if not t.get('done')])
     monthly = sum(e['amount'] for e in data['expenses']
                   if e.get('month') == datetime.now().strftime('%m/%Y'))
     conversations[uid].append({"role": "user", "content":
         f"תאריך: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
-        f"משימות פתוחות: {len(open_tasks)}\n"
-        f"הוצאות החודש: {monthly}₪\n\n{msg}"})
+        f"משימות פתוחות: {open_tasks}\nהוצאות החודש: {monthly}₪\n\n{msg}"})
     if len(conversations[uid]) > 20:
         conversations[uid] = conversations[uid][-20:]
     response = httpx.post(
@@ -41,8 +55,8 @@ def ask_claude(uid, msg, data):
         },
         json={
             "model": "claude-sonnet-4-20250514",
-            "max_tokens": 800,
-            "system": "אתה עוזר עסקי אישי בשם מנהל. עונה תמיד בעברית, קצר וממוקד.",
+            "max_tokens": 1000,
+            "system": SYSTEM_PROMPT,
             "messages": conversations[uid]
         },
         timeout=30
@@ -51,117 +65,122 @@ def ask_claude(uid, msg, data):
     conversations[uid].append({"role": "assistant", "content": reply})
     return reply
 
-async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+# ==========================================
+# פקודות משותפות
+# ==========================================
+def handle_command(text, uid):
     data = load()
-    data['chat_id'] = update.effective_chat.id
-    save(data)
-    await update.message.reply_text(
-        "👋 שלום! אני המנהל שלך.\n\n"
-        "📋 /tasks – משימות\n"
-        "➕ /add [משימה] – הוסף\n"
-        "✅ /done [מספר] – סיים\n"
-        "💰 /expense [סכום] [תיאור]\n"
-        "📊 /summary – סיכום\n\n"
-        "או כתוב לי חופשי! 💬"
+    if text.startswith("/add "):
+        task = text[5:]
+        data['tasks'].append({"text": task, "done": False,
+                               "date": datetime.now().strftime('%d/%m/%Y')})
+        save(data)
+        return f"✅ נוסף: {task}"
+    elif text == "/tasks":
+        open_t = [t for t in data['tasks'] if not t.get('done')]
+        if not open_t:
+            return "✅ אין משימות פתוחות!"
+        return "📋 משימות:\n\n" + "".join(f"{i}. {t['text']}\n"
+                                           for i, t in enumerate(open_t, 1))
+    elif text.startswith("/done "):
+        try:
+            open_t = [t for t in data['tasks'] if not t.get('done')]
+            t = open_t[int(text[6:]) - 1]
+            t['done'] = True
+            save(data)
+            return f"🎉 הושלם: {t['text']}"
+        except:
+            return "מספר לא תקין"
+    elif text.startswith("/expense "):
+        parts = text[9:].split(" ", 1)
+        try:
+            amount = float(parts[0])
+            desc = parts[1] if len(parts) > 1 else "הוצאה"
+            data['expenses'].append({"amount": amount, "description": desc,
+                "date": datetime.now().strftime('%d/%m/%Y'),
+                "month": datetime.now().strftime('%m/%Y')})
+            save(data)
+            monthly = sum(e['amount'] for e in data['expenses']
+                         if e.get('month') == datetime.now().strftime('%m/%Y'))
+            return f"💸 {desc} – {amount:,.0f}₪\nסה\"כ החודש: {monthly:,.0f}₪"
+        except:
+            return "שגיאה. כתוב: /expense 500 תיאור"
+    elif text == "/summary":
+        open_t = [t for t in data['tasks'] if not t.get('done')]
+        monthly = sum(e['amount'] for e in data['expenses']
+                     if e.get('month') == datetime.now().strftime('%m/%Y'))
+        days = ['שני','שלישי','רביעי','חמישי','שישי','שבת','ראשון']
+        day = days[datetime.now().weekday()]
+        txt = f"☀️ יום {day}, {datetime.now().strftime('%d/%m/%Y')}\n\n"
+        if open_t:
+            txt += f"📋 {len(open_t)} משימות:\n"
+            for t in open_t[:5]:
+                txt += f"• {t['text']}\n"
+        else:
+            txt += "✅ אין משימות!\n"
+        if monthly:
+            txt += f"\n💰 הוצאות החודש: {monthly:,.0f}₪"
+        return txt
+    else:
+        return ask_claude(uid, text)
+
+# ==========================================
+# וואטסאפ (Twilio webhook)
+# ==========================================
+@app.route("/whatsapp", methods=["POST"])
+def whatsapp():
+    from twilio.twiml.messaging_response import MessagingResponse
+    incoming = request.values.get("Body", "").strip()
+    sender = request.values.get("From", "")
+    reply = handle_command(incoming, sender)
+    resp = MessagingResponse()
+    resp.message(reply)
+    return str(resp)
+
+# ==========================================
+# טלגרם (polling בthread נפרד)
+# ==========================================
+def send_telegram(chat_id, text):
+    httpx.post(
+        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+        json={"chat_id": chat_id, "text": text},
+        timeout=10
     )
 
-async def tasks_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    data = load()
-    open_t = [t for t in data['tasks'] if not t.get('done')]
-    if not open_t:
-        await update.message.reply_text("✅ אין משימות פתוחות!")
-        return
-    text = "📋 משימות:\n\n"
-    for i, t in enumerate(open_t, 1):
-        text += f"{i}. {t['text']}\n"
-    await update.message.reply_text(text)
+def telegram_polling():
+    offset = 0
+    while True:
+        try:
+            r = httpx.get(
+                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates",
+                params={"offset": offset, "timeout": 30},
+                timeout=35
+            )
+            updates = r.json().get("result", [])
+            for update in updates:
+                offset = update["update_id"] + 1
+                msg = update.get("message", {})
+                chat_id = msg.get("chat", {}).get("id")
+                text = msg.get("text", "")
+                if chat_id and text:
+                    data = load()
+                    data['chat_id'] = chat_id
+                    save(data)
+                    reply = handle_command(text, str(chat_id))
+                    send_telegram(chat_id, reply)
+        except Exception as e:
+            print(f"שגיאת טלגרם: {e}")
+            time.sleep(5)
 
-async def add_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if not ctx.args:
-        await update.message.reply_text("כתוב: /add [משימה]")
-        return
-    data = load()
-    task = ' '.join(ctx.args)
-    data['tasks'].append({"text": task, "done": False,
-                          "date": datetime.now().strftime('%d/%m/%Y')})
-    save(data)
-    await update.message.reply_text(f"✅ נוסף: {task}")
+# ==========================================
+# הפעלה
+# ==========================================
+@app.route("/")
+def home():
+    return "✅ הבוט פועל — טלגרם + וואטסאפ!"
 
-async def done_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if not ctx.args:
-        await update.message.reply_text("כתוב: /done [מספר]")
-        return
-    data = load()
-    open_t = [t for t in data['tasks'] if not t.get('done')]
-    try:
-        t = open_t[int(ctx.args[0]) - 1]
-        t['done'] = True
-        save(data)
-        await update.message.reply_text(f"🎉 הושלם: {t['text']}")
-    except:
-        await update.message.reply_text("מספר לא תקין")
-
-async def expense_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if len(ctx.args) < 2:
-        await update.message.reply_text("כתוב: /expense [סכום] [תיאור]")
-        return
-    try:
-        amount = float(ctx.args[0])
-        desc = ' '.join(ctx.args[1:])
-        data = load()
-        data['expenses'].append({"amount": amount, "description": desc,
-            "date": datetime.now().strftime('%d/%m/%Y'),
-            "month": datetime.now().strftime('%m/%Y')})
-        save(data)
-        monthly = sum(e['amount'] for e in data['expenses']
-                      if e.get('month') == datetime.now().strftime('%m/%Y'))
-        await update.message.reply_text(
-            f"💸 {desc} – {amount:,.0f}₪\nסה\"כ החודש: {monthly:,.0f}₪")
-    except:
-        await update.message.reply_text("שגיאה")
-
-async def summary_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    data = load()
-    open_t = [t for t in data['tasks'] if not t.get('done')]
-    monthly = sum(e['amount'] for e in data['expenses']
-                  if e.get('month') == datetime.now().strftime('%m/%Y'))
-    days = ['שני','שלישי','רביעי','חמישי','שישי','שבת','ראשון']
-    day = days[datetime.now().weekday()]
-    text = f"☀️ יום {day}, {datetime.now().strftime('%d/%m/%Y')}\n\n"
-    if open_t:
-        text += f"📋 {len(open_t)} משימות:\n"
-        for t in open_t[:7]:
-            text += f"• {t['text']}\n"
-    else:
-        text += "✅ אין משימות!\n"
-    if monthly:
-        text += f"\n💰 הוצאות החודש: {monthly:,.0f}₪"
-    await update.message.reply_text(text)
-
-async def handle_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    data = load()
-    uid = str(update.effective_user.id)
-    try:
-        reply = ask_claude(uid, update.message.text, data)
-        await update.message.reply_text(reply)
-    except Exception as e:
-        await update.message.reply_text(f"שגיאה: {str(e)}")
-
-def main():
-    print("🚀 הבוט פועל!")
-    app = (Application.builder()
-           .token(TELEGRAM_TOKEN)
-           .base_url("https://149.154.166.110/bot{token}")
-           .base_file_url("https://149.154.166.110/file/bot{token}")
-           .build())
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("tasks", tasks_cmd))
-    app.add_handler(CommandHandler("add", add_cmd))
-    app.add_handler(CommandHandler("done", done_cmd))
-    app.add_handler(CommandHandler("expense", expense_cmd))
-    app.add_handler(CommandHandler("summary", summary_cmd))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
-    app.run_polling(drop_pending_updates=True)
-
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    t = threading.Thread(target=telegram_polling, daemon=True)
+    t.start()
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
