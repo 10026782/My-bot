@@ -42,8 +42,8 @@ def ask_claude(uid, msg):
     monthly = sum(e['amount'] for e in data['expenses']
                   if e.get('month') == datetime.now().strftime('%m/%Y'))
     conversations[uid].append({"role": "user", "content":
-        f"תאריך: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
-        f"משימות פתוחות: {open_tasks}\nהוצאות החודש: {monthly}₪\n\n{msg}"})
+        f"תאריך: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n
+    משימות פתוחות: {open_tasks}\nהוצאות החודש: {monthly}₪\n\n{msg}"})
     if len(conversations[uid]) > 20:
         conversations[uid] = conversations[uid][-20:]
     response = httpx.post(
@@ -54,7 +54,7 @@ def ask_claude(uid, msg):
             "content-type": "application/json"
         },
         json={
-            "model": "claude-sonnet-3-5-20250514",
+            "model": "claude-3-5-sonnet-20250514",
             "max_tokens": 1000,
             "system": SYSTEM_PROMPT,
             "messages": conversations[uid]
