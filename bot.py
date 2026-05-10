@@ -39,11 +39,10 @@ def ask_claude(uid, msg):
         conversations[uid] = []
     data = load()
     open_tasks = len([t for t in data['tasks'] if not t.get('done')])
-    monthly = sum(e['amount'] for e in data['expenses']
-                  if e.get('month') == datetime.now().strftime('%m/%Y'))
-    conversations[uid].append({"role": "user", "content":
-        f"תאריך: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n
-    משימות פתוחות: {open_tasks}\nהוצאות החודש: {monthly}₪\n\n{msg}"})
+    monthly = sum(e['amount'] for e in data['expenses'] if e.get('month') == datetime.now().strftime('%m/%Y'))
+    content_to_send = f"תאריך: {datetime.now().strftime('%d/%m/%Y %H:%M')}\nמשימות פתוחות: {open_tasks}\nהוצאות: {monthly}\n\n{msg}"
+    conversations[uid].append({"role": "user", "content": content_to_send}
+       
     if len(conversations[uid]) > 20:
         conversations[uid] = conversations[uid][-20:]
     response = httpx.post(
