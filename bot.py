@@ -107,4 +107,70 @@ def handle_command(text, uid):
         txt = f"☀️ יום {day}, {datetime.now().strftime('%d/%m/%Y')}\n\n"
         if open_t:
             txt += f"📋 {len(open_t)} משימות:\n"
-            for t in ope
+            for t in open_t[:5]:
+                txt += f"• {t['text']}\n"
+        else:
+            txt += "✅ אין משימות!\n"
+        if monthly:
+            txt += f"\n💰 הוצאות החודש: {monthly:,.0f}₪"
+        return txt
+    else:
+        try:
+            return ask_claude(uid, text)
+        except Exception as e:
+            return f"שגיאה: {str(e)}"
+
+@app.route("/whatsapp", methods=["POST"])
+def whatsapp():
+    from twilio.twiml.messaging_response import MessagingResponse
+    incoming = request.values.get("Body", "").strip()
+    sender = request.values.get("From", "")
+    reply = handle_command(incoming, sender)
+    resp = MessagingResponse()
+    resp.message(reply)
+    return str(resp)
+
+@app.route("/")
+def home():
+    return "הבוט פועל!"
+
+def send_telegram(chat_id, text):
+    try:
+        httpx.post(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+            json={"chat_id": chat_id, "text": text},
+            timeout=10
+        )
+    except:
+        pass
+
+def telegram_polling():
+    offset = 0
+    while True:
+        try:
+            r = httpx.get(
+                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates",
+                params={"offset": offset, "timeout": 30},
+                timeout=35
+            )
+            updates = r.json().get("result", [])
+            for update in updates:
+                offset = update["update_id"] + 1
+                msg = update.get("message", {})
+                chat_id = msg.get("chat", {}).get("id")
+                text = msg.get("text", "")
+                if chat_id and text:
+                    data = load()
+                    data['chat_id'] = chat_id
+                    save(data)
+                    reply = handle_command(text, str(chat_id))
+                    send_telegram(chat_id, reply)
+        except Exception as e:
+            print(f"שגיאת טלגרם: {e}")
+            time.sleep(5)
+
+if __name__ == "__main__":
+    t = threading.Thread(target=telegram_polling, daemon=True)
+    t.start()
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
