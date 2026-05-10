@@ -5,7 +5,7 @@ import httpx
 
 # ==========================================
 # הגדרות
- ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
 TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
