@@ -39,7 +39,7 @@ def ask_claude(uid, msg):
         open_tasks, monthly = 0, 0
 
     timestamp = datetime.now().strftime('%d/%m/%Y %H:%M')
-    user_content = f"תאריך: {timestamp}\nמשימות פתוחות: {open_tasks}\nהוצאות חודש: {monthly}\n\n{msg}"
+    user_content = f"תאריך: {timestamp}\nמשימות פתוחות: {open_tasks}\nהוצאות: {monthly}\n\n{msg}"
     conversations[uid].append({"role": "user", "content": user_content})
     
     if len(conversations[uid]) > 20:
@@ -54,7 +54,7 @@ def ask_claude(uid, msg):
                 "content-type": "application/json"
             },
             json={
-                "model": "claude-3-sonnet-20240229",
+                "model": "claude-3-haiku-20240307",
                 "max_tokens": 1024,
                 "messages": conversations[uid]
             },
@@ -62,8 +62,9 @@ def ask_claude(uid, msg):
         )
         result = response.json()
         if response.status_code != 200:
+            error_msg = result.get('error', {}).get('message', 'Unknown error')
             print(f"Anthropic API Error: {result}")
-            return f"שגיאת API: {result.get('error', {}).get('message', 'Unknown error')}"
+            return f"שגיאת API: {error_msg}"
         
         return result["content"][0]["text"]
     except Exception as e:
