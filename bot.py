@@ -54,7 +54,7 @@ def ask_claude(uid, msg):
                 "content-type": "application/json"
             },
             json={
-                "model": "claude-3-5-sonnet-20240620",
+                "model": "claude-3-sonnet-20240229",
                 "max_tokens": 1024,
                 "messages": conversations[uid]
             },
@@ -63,12 +63,12 @@ def ask_claude(uid, msg):
         result = response.json()
         if response.status_code != 200:
             print(f"Anthropic API Error: {result}")
-            return "מצטער, חלה שגיאה בתקשורת עם ה-API של קלוד."
+            return f"שגיאת API: {result.get('error', {}).get('message', 'Unknown error')}"
+        
         return result["content"][0]["text"]
     except Exception as e:
         print(f"System Error: {e}")
         return "חלה שגיאה פנימית בבוט."
-
 def handle_command(text, uid):
     data = load()
     if text.startswith("/add "):
