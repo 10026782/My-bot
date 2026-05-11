@@ -29,34 +29,45 @@ def save(data):
 def ask_claude(uid, msg):
     if uid not in conversations:
         conversations[uid] = []
-    data = load()
-    open_tasks = len([t for t in data['tasks'] if not t.get('done')])
-    monthly = sum(e['amount'] for e in data['expenses']
-                  if e.get('month') == datetime.now().strftime('%m/%Y'))
-    conversations[uid].append({
-        "role": "user",
-        "content": f"תאריך: {datetime.now().strftime('%d/%m/%Y %H:%M')}\nמשימות: {open_tasks}\nהוצאות: {monthly}\n\n{msg}"
-    })
+    
+    try:
+        data = load()
+        open_tasks = len([t for t in data.get('tasks', []) if not t.get('done')])
+        monthly = sum(e.get('amount', 0) for e in data.get('expenses', []) if e.get('month') == datetime.now().strftime('%m/%Y'))
+    except Exception as e:
+        print(f"Error loading data: {e}")
+        open_tasks, monthly = 0, 0
+
+    timestamp = datetime.now().strftime('%d/%m/%Y %H:%M')
+    user_content = f"תאריך: {timestamp}\nמשימות פתוחות: {open_tasks}\nהוצאות חודש: {monthly}\n\n{msg}"
+    conversations[uid].append({"role": "user", "content": user_content})
+    
     if len(conversations[uid]) > 20:
         conversations[uid] = conversations[uid][-20:]
-    response = httpx.post(
-        "https://api.anthropic.com/v1/messages",
-        headers={
-            "x-api-key": ANTHROPIC_API_KEY,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json"
-        },
-        json={
-            "model": "claude-sonnet-4-20250514",
-            "max_tokens": 1000,
-            "system": SYSTEM_PROMPT,
-            "messages": conversations[uid]
-        },
-        timeout=30
-    )
-    reply = response.json()["content"][0]["text"]
-    conversations[uid].append({"role": "assistant", "content": reply})
-    return reply
+
+    try:
+        response = httpx.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json"
+            },
+            json={
+                "model": "claude-3-5-sonnet-20240620",
+                "max_tokens": 1024,
+                "messages": conversations[uid]
+            },
+            timeout=30.0
+        )
+        result = response.json()
+        if response.status_code != 200:
+            print(f"Anthropic API Error: {result}")
+            return "מצטער, חלה שגיאה בתקשורת עם ה-API של קלוד."
+        return result["content"][0]["text"]
+    except Exception as e:
+        print(f"System Error: {e}")
+        return "חלה שגיאה פנימית בבוט."
 
 def handle_command(text, uid):
     data = load()
