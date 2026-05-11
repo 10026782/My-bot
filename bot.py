@@ -53,7 +53,7 @@ def ask_claude(uid, msg):
                 "content-type": "application/json"
             },
             json={
-                "model": "claude-3-opus-20240229",
+                "model": "claude-4.6-sonnet",
                 "max_tokens": 1024,
                 "messages": conversations[uid]
             },
@@ -61,7 +61,8 @@ def ask_claude(uid, msg):
         )
         result = response.json()
         if response.status_code != 200:
-            return f"שגיאה מהשרת: {result.get('error', {}).get('message', 'Unknown')}"
+            error_msg = result.get('error', {}).get('message', 'Unknown error')
+            return f"שגיאה מהשרת: {error_msg}"
         return result["content"][0]["text"]
     except Exception as e:
         return f"שגיאה טכנית: {str(e)}"
