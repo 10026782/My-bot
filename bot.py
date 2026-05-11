@@ -32,18 +32,17 @@ def ask_claude(uid, msg):
     
     try:
         data = load()
-        open_tasks = len([t for t in data.get('tasks', []) if not t.get('done')])
-        monthly = sum(e.get('amount', 0) for e in data.get('expenses', []) if e.get('month') == datetime.now().strftime('%m/%Y'))
-    except Exception as e:
-        print(f"Error loading data: {e}")
+        tasks = data.get('tasks', [])
+        open_tasks = len([t for t in tasks if isinstance(t, dict) and not t.get('done')])
+        monthly = sum(e.get('amount', 0) for e in data.get('expenses', []) if isinstance(e, dict) and e.get('month') == datetime.now().strftime('%m/%Y'))
+    except:
         open_tasks, monthly = 0, 0
 
-    timestamp = datetime.now().strftime('%d/%m/%Y %H:%M')
-    user_content = f"תאריך: {timestamp}\nמשימות פתוחות: {open_tasks}\nהוצאות: {monthly}\n\n{msg}"
+    user_content = f"תאריך: {datetime.now().strftime('%d/%m/%Y %H:%M')}\nמשימות: {open_tasks}\nהוצאות: {monthly}\n\n{msg}"
     conversations[uid].append({"role": "user", "content": user_content})
     
-    if len(conversations[uid]) > 20:
-        conversations[uid] = conversations[uid][-20:]
+    if len(conversations[uid]) > 15:
+        conversations[uid] = conversations[uid][-15:]
 
     try:
         response = httpx.post(
@@ -54,7 +53,7 @@ def ask_claude(uid, msg):
                 "content-type": "application/json"
             },
             json={
-                "model": "claude-3-haiku-20240307",
+                "model": "claude-3-opus-20240229",
                 "max_tokens": 1024,
                 "messages": conversations[uid]
             },
@@ -62,14 +61,10 @@ def ask_claude(uid, msg):
         )
         result = response.json()
         if response.status_code != 200:
-            error_msg = result.get('error', {}).get('message', 'Unknown error')
-            print(f"Anthropic API Error: {result}")
-            return f"שגיאת API: {error_msg}"
-        
+            return f"שגיאה מהשרת: {result.get('error', {}).get('message', 'Unknown')}"
         return result["content"][0]["text"]
     except Exception as e:
-        print(f"System Error: {e}")
-        return "חלה שגיאה פנימית בבוט."
+        return f"שגיאה טכנית: {str(e)}"
 def handle_command(text, uid):
     data = load()
     if text.startswith("/add "):
