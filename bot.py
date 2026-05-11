@@ -126,8 +126,8 @@ def whatsapp():
     incoming = request.values.get("Body", "").strip()
     sender = request.values.get("From", "")
     
-    try:
-    reply = handle_command(incoming, sender)
+  try:
+      reply = handle_command(incoming, sender)
     except Exception as e:
     reply = f"שגיאה: {str(e)}"
     resp = MessagingResponse()
