@@ -38,9 +38,12 @@ def ask_claude(uid, msg):
     except:
         open_tasks, monthly = 0, 0
 
-    user_content = f"תאריך: {datetime.now().strftime('%d/%m/%Y %H:%M')}\nמשימות: {open_tasks}\nהוצאות: {monthly}\n\n{msg}"
+    # בניית גוף ההודעה
+    timestamp = datetime.now().strftime('%d/%m/%Y %H:%M')
+    user_content = f"תאריך: {timestamp}\nמשימות: {open_tasks}\nהוצאות: {monthly}\n\n{msg}"
     conversations[uid].append({"role": "user", "content": user_content})
     
+    # שמירת היסטוריה של 15 הודעות אחרונות
     if len(conversations[uid]) > 15:
         conversations[uid] = conversations[uid][-15:]
 
@@ -53,19 +56,25 @@ def ask_claude(uid, msg):
                 "content-type": "application/json"
             },
             json={
-                "model": "claude-4.6-sonnet",
+                "model": "claude-3-5-sonnet-latest",
                 "max_tokens": 1024,
                 "messages": conversations[uid]
             },
             timeout=30.0
         )
+        
         result = response.json()
+        
         if response.status_code != 200:
-            error_msg = result.get('error', {}).get('message', 'Unknown error')
-            return f"שגיאה מהשרת: {error_msg}"
+            error_detail = result.get('error', {}).get('message', 'Unknown error')
+            print(f"Anthropic API Error: {result}")
+            return f"שגיאה מהשרת: {error_detail}"
+            
         return result["content"][0]["text"]
+        
     except Exception as e:
-        return f"שגיאה טכנית: {str(e)}"
+        print(f"System Error: {e}")
+        return "חלה שגיאה טכנית בחיבור לשרת."
 def handle_command(text, uid):
     data = load()
     if text.startswith("/add "):
