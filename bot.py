@@ -26,9 +26,9 @@ def save(data):
     with open(DATA_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 def ask_claude(uid, msg):
-    if uid not in conversations:
-        conversations[uid] = []
+    MASTER_NUMBER = "972548347342"
     
+    # טעינת נתונים (משימות והוצאות) - רק אליהו רואה אותם
     try:
         data = load()
         tasks = data.get('tasks', [])
@@ -37,54 +37,47 @@ def ask_claude(uid, msg):
     except:
         open_tasks, monthly = 0, 0
 
-    # הגדרת האישיות המקצועית של הבוט
-    system_prompt = (
-        "אתה עוזר אישי אינטליגנטי בשם 'הסוכן של אליהו'. "
-        "אתה מומחה בנדל\"ן, פיתוח פרויקטים (כולל יחידות דיור ומכירת קרקעות), גישור ומשפט מנהלי. "
-        "אתה גם מומחה DIY עם ידע טכני בתיקוני בית, חשמל ומכשירי חשמל. "
-        "הסגנון שלך הוא מקצועי, ענייני, אך חם ומסייע. "
-        f"נתונים נוכחיים: ישנן {open_tasks} משימות פתוחות, והוצאות החודש הן {monthly} ש\"ח."
-    )
+    # --- הגדרת ה"מוח" לפי זהות השולח ---
+    if uid == MASTER_NUMBER:
+        # הגדרה כאשר אליהו פונה לבוט
+        system_prompt = (
+            "אתה 'הסוכן של אליהו'. אתה העוזר האישי הבלעדי שלו. "
+            "תפקידך לנהל עבורו פרויקטים בנדל\"ן, משימות והוצאות. "
+            f"נתונים לאליהו: {open_tasks} משימות, {monthly} ש\"ח הוצאות."
+        )
+    else:
+        # הגדרה כאשר לקוח/אדם אחר פונה לבוט
+        system_prompt = (
+            "אתה נציג השירות המקצועי של אליהו חזן. "
+            "ענה ללקוחות באדיבות ובמקצועיות בנושאי נדל\"ן ופרויקטים. "
+            "אל תחשוף נתונים אישיים של אליהו (כמו הוצאות או משימות פרטיות). "
+            "הנוסח שלך צריך להיות שירותי ומכירתי כפי שנקבע: 'שלום, הגעתם למשרד של אליהו חזן, במה ניתן לעזור?'"
+        )
 
-    user_content = f"תאריך: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\nהודעה: {msg}"
-    
-    # הכנת ההודעות לשליחה (כולל היסטוריה)
-    messages_to_send = conversations[uid] + [{"role": "user", "content": user_content}]
-
+    # המשך שליחה ל-API (כמו קודם)
     try:
+        if uid not in conversations: conversations[uid] = []
+        messages_to_send = conversations[uid] + [{"role": "user", "content": msg}]
+        
         response = httpx.post(
             "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": ANTHROPIC_API_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json"
-            },
+            headers={"x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
             json={
                 "model": "claude-sonnet-4-6",
-                "max_tokens": 2048,
+                "max_tokens": 1024,
                 "system": system_prompt,
                 "messages": messages_to_send
             },
             timeout=30.0
         )
-        result = response.json()
-        if response.status_code != 200:
-            return f"שגיאה מהשרת: {result.get('error', {}).get('message', 'Unknown error')}"
+        bot_response = response.json()["content"][0]["text"]
         
-        bot_response = result["content"][0]["text"]
-        
-        # שמירת היסטוריית השיחה
+        # שמירת היסטוריה נפרדת לכל משתמש
         conversations[uid].append({"role": "user", "content": msg})
         conversations[uid].append({"role": "assistant", "content": bot_response})
-        
-        # הגבלת הזיכרון ל-10 הודעות אחרונות
-        if len(conversations[uid]) > 10:
-            conversations[uid] = conversations[uid][-10:]
-            
         return bot_response
-        
-    except Exception as e:
-        return f"שגיאה טכנית: {str(e)}"
+    except:
+        return "מצטער, יש לי עומס קל. נסה שוב בעוד רגע."
 def handle_command(text, uid):
     data = load()
     if text.startswith("/add "):
