@@ -26,12 +26,9 @@ def save(data):
     with open(DATA_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 def ask_claude(uid, msg):
-    MASTER_NUMBER = "972548347342"
-    
     if uid not in conversations:
         conversations[uid] = []
     
-    # טעינת נתונים (משימות והוצאות)
     try:
         data = load()
         tasks = data.get('tasks', [])
@@ -40,28 +37,18 @@ def ask_claude(uid, msg):
     except:
         open_tasks, monthly = 0, 0
 
-    # --- הגדרת ה"מוח" הדינמי (למידה תוך כדי תנועה) ---
-    if uid == MASTER_NUMBER:
-        # מצב מנהל: אליהו מעדכן את הבוט
-        system_prompt = (
-            "אתה 'הסוכן של אליהו'. תפקידך ללמוד מהנחיותיו של אליהו בזמן אמת. "
-            "אליהו עוסק בתחומים משתנים: נדל\"ן, ייבוא רהיטי עץ מלא (אלון), ותשתיות תקשורת (סיבים אופטיים). "
-            "אם אליהו נותן לך מידע חדש על מוצר, מחיר או שיטת עבודה - אמץ זאת מיד לזיכרון שלך. "
-            f"נתונים שוטפים: {open_tasks} משימות פתוחות, {monthly} ש\"ח הוצאות החודש."
-        )
-    else:
-        # מצב לקוח: הבוט מוכר ונותן שירות
-        system_prompt = (
-            "אתה נציג המכירות המקצועי של אליהו חזן. "
-            "ענה ללקוחות על סמך המידע העדכני ביותר שאליהו סיפק לך בשיחות הקודמות. "
-            "היה שירותי, מכירתי ומדויק טכנית (עץ מלא, סיבים, נדל\"ן). "
-            "נוסח פתיחה: 'שלום, הגעתם למשרד של אליהו חזן, במה ניתן לעזור?'"
-        )
+    # הגדרת האישיות המקצועית של הבוט
+    system_prompt = (
+        "אתה עוזר אישי אינטליגנטי בשם 'הסוכן של אליהו'. "
+        "אתה מומחה בנדל\"ן, פיתוח פרויקטים (כולל יחידות דיור ומכירת קרקעות), גישור ומשפט מנהלי. "
+        "אתה גם מומחה DIY עם ידע טכני בתיקוני בית, חשמל ומכשירי חשמל. "
+        "הסגנון שלך הוא מקצועי, ענייני, אך חם ומסייע. "
+        f"נתונים נוכחיים: ישנן {open_tasks} משימות פתוחות, והוצאות החודש הן {monthly} ש\"ח."
+    )
 
-    # הוספת הקשר תאריך ושעה
     user_content = f"תאריך: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\nהודעה: {msg}"
     
-    # שליחה ל-Claude עם ההיסטוריה (כדי שיזכור מה אמרת לו קודם)
+    # הכנת ההודעות לשליחה (כולל היסטוריה)
     messages_to_send = conversations[uid] + [{"role": "user", "content": user_content}]
 
     try:
@@ -81,21 +68,24 @@ def ask_claude(uid, msg):
             timeout=30.0
         )
         result = response.json()
+        if response.status_code != 200:
+            return f"שגיאה מהשרת: {result.get('error', {}).get('message', 'Unknown error')}"
+        
         bot_response = result["content"][0]["text"]
         
-        # שמירת השיחה בזיכרון (חשוב ללמידה!)
+        # שמירת היסטוריית השיחה
         conversations[uid].append({"role": "user", "content": msg})
         conversations[uid].append({"role": "assistant", "content": bot_response})
         
-        # הגבלת זיכרון ל-15 הודעות אחרונות
-        if len(conversations[uid]) > 15:
-            conversations[uid] = conversations[uid][-15:]
+        # הגבלת הזיכרון ל-10 הודעות אחרונות
+        if len(conversations[uid]) > 10:
+            conversations[uid] = conversations[uid][-10:]
             
         return bot_response
         
     except Exception as e:
-        return f"שגיאה בתקשורת: {str(e)}"
-        def handle_command(text, uid):
+        return f"שגיאה טכנית: {str(e)}"
+def handle_command(text, uid):
     data = load()
     if text.startswith("/add "):
         task = text[5:]
