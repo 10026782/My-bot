@@ -25,73 +25,43 @@ def load():
 def save(data):
     with open(DATA_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-def handle_command(text, uid):
-    # פונקציה לניהול משימות והוצאות - רצה מקומית בשרת
-    try:
-        data = load()
-        if "משימה" in text:
-            task = text.replace("משימה", "").strip()
-            if 'tasks' not in data: data['tasks'] = []
-            data['tasks'].append({"text": task, "done": False, "date": datetime.now().strftime("%d/%m/%Y")})
-            save(data)
-            return f"רשמתי לעצמי: {task}"
-        
-        if "הוצאה" in text:
-            import re
-            amount = re.findall(r'\d+', text)
-            if amount:
-                amt = int(amount[0])
-                desc = text.replace("הוצאה", "").replace(str(amt), "").strip()
-                if 'expenses' not in data: data['expenses'] = []
-                data['expenses'].append({
-                    "amount": amt, 
-                    "desc": desc, 
-                    "month": datetime.now().strftime("%m/%Y"),
-                    "date": datetime.now().strftime("%d/%m/%Y")
-                })
-                save(data)
-                return f"רשמתי הוצאה: {amt} ש\"ח על {desc}"
-    except Exception as e:
-        print(f"Error in handle_command: {e}")
-    return None
-
 def ask_claude(uid, msg):
-    # המספר האישי שלך לזיהוי "מנהל"
     MASTER_NUMBER = "972548347342"
     
-    # 1. אם זה אתה - בודקים אם שלחת פקודת רישום (משימה/הוצאה)
-    if uid == MASTER_NUMBER:
-        cmd_response = handle_command(msg, uid)
-        if cmd_response:
-            return cmd_response
-
-    # 2. ניהול זיכרון השיחה לכל משתמש
     if uid not in conversations:
         conversations[uid] = []
     
-    # 3. שליפת נתונים עדכניים עבור המוח של הבוט
+    # טעינת נתונים (משימות והוצאות)
     try:
         data = load()
-        open_tasks = len([t for t in data.get('tasks', []) if not t.get('done')])
-        monthly = sum(e.get('amount', 0) for e in data.get('expenses', []) if e.get('month') == datetime.now().strftime('%m/%Y'))
+        tasks = data.get('tasks', [])
+        open_tasks = len([t for t in tasks if isinstance(t, dict) and not t.get('done')])
+        monthly = sum(e.get('amount', 0) for e in data.get('expenses', []) if isinstance(e, dict) and e.get('month') == datetime.now().strftime('%m/%Y'))
     except:
         open_tasks, monthly = 0, 0
 
-    # 4. הגדרת האישיות לפי מי ששולח את ההודעה
+    # --- הגדרת ה"מוח" הדינמי (למידה תוך כדי תנועה) ---
     if uid == MASTER_NUMBER:
+        # מצב מנהל: אליהו מעדכן את הבוט
         system_prompt = (
-            "אתה 'הסוכן של אליהו'. עוזר אישי חכם שלומד מהנחיותיו של אליהו בזמן אמת. "
-            "אליהו עוסק בנדל\"ן, ייבוא רהיטים ותשתיות תקשורת. "
-            f"סטטוס: {open_tasks} משימות פתוחות, {monthly} ש\"ח הוצאות החודש."
+            "אתה 'הסוכן של אליהו'. תפקידך ללמוד מהנחיותיו של אליהו בזמן אמת. "
+            "אליהו עוסק בתחומים משתנים: נדל\"ן, ייבוא רהיטי עץ מלא (אלון), ותשתיות תקשורת (סיבים אופטיים). "
+            "אם אליהו נותן לך מידע חדש על מוצר, מחיר או שיטת עבודה - אמץ זאת מיד לזיכרון שלך. "
+            f"נתונים שוטפים: {open_tasks} משימות פתוחות, {monthly} ש\"ח הוצאות החודש."
         )
     else:
+        # מצב לקוח: הבוט מוכר ונותן שירות
         system_prompt = (
-            "אתה נציג המכירות המקצועי של אליהו חזן. ענה באדיבות ובאופן מכירתי. "
-            "אל תחשוף נתונים פנימיים. פתח בברכת שלום בשם המשרד."
+            "אתה נציג המכירות המקצועי של אליהו חזן. "
+            "ענה ללקוחות על סמך המידע העדכני ביותר שאליהו סיפק לך בשיחות הקודמות. "
+            "היה שירותי, מכירתי ומדויק טכנית (עץ מלא, סיבים, נדל\"ן). "
+            "נוסח פתיחה: 'שלום, הגעתם למשרד של אליהו חזן, במה ניתן לעזור?'"
         )
 
-    # 5. שליחת השאלה לקלוד (Sonnet 4.6)
+    # הוספת הקשר תאריך ושעה
     user_content = f"תאריך: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\nהודעה: {msg}"
+    
+    # שליחה ל-Claude עם ההיסטוריה (כדי שיזכור מה אמרת לו קודם)
     messages_to_send = conversations[uid] + [{"role": "user", "content": user_content}]
 
     try:
@@ -113,9 +83,11 @@ def ask_claude(uid, msg):
         result = response.json()
         bot_response = result["content"][0]["text"]
         
-        # שמירת השיחה בזיכרון (עד 15 הודעות)
+        # שמירת השיחה בזיכרון (חשוב ללמידה!)
         conversations[uid].append({"role": "user", "content": msg})
         conversations[uid].append({"role": "assistant", "content": bot_response})
+        
+        # הגבלת זיכרון ל-15 הודעות אחרונות
         if len(conversations[uid]) > 15:
             conversations[uid] = conversations[uid][-15:]
             
@@ -123,6 +95,68 @@ def ask_claude(uid, msg):
         
     except Exception as e:
         return f"שגיאה בתקשורת: {str(e)}"
+        def handle_command(text, uid):
+    data = load()
+    if text.startswith("/add "):
+        task = text[5:]
+        data['tasks'].append({"text": task, "done": False,
+                               "date": datetime.now().strftime('%d/%m/%Y')})
+        save(data)
+        return f"✅ נוסף: {task}"
+    elif text == "/tasks":
+        open_t = [t for t in data['tasks'] if not t.get('done')]
+        if not open_t:
+            return "✅ אין משימות פתוחות!"
+        return "📋 משימות:\n\n" + "".join(
+            f"{i}. {t['text']}\n" for i, t in enumerate(open_t, 1))
+    elif text.startswith("/done "):
+        try:
+            open_t = [t for t in data['tasks'] if not t.get('done')]
+            t = open_t[int(text[6:]) - 1]
+            t['done'] = True
+            save(data)
+            return f"🎉 הושלם: {t['text']}"
+        except:
+            return "מספר לא תקין"
+    elif text.startswith("/expense "):
+        parts = text[9:].split(" ", 1)
+        try:
+            amount = float(parts[0])
+            desc = parts[1] if len(parts) > 1 else "הוצאה"
+            data['expenses'].append({
+                "amount": amount,
+                "description": desc,
+                "date": datetime.now().strftime('%d/%m/%Y'),
+                "month": datetime.now().strftime('%m/%Y')
+            })
+            save(data)
+            monthly = sum(e['amount'] for e in data['expenses']
+                         if e.get('month') == datetime.now().strftime('%m/%Y'))
+            return f"💸 {desc} - {amount:,.0f}₪\nסהכ החודש: {monthly:,.0f}₪"
+        except:
+            return "שגיאה. כתוב: /expense 500 תיאור"
+    elif text == "/summary":
+        open_t = [t for t in data['tasks'] if not t.get('done')]
+        monthly = sum(e['amount'] for e in data['expenses']
+                     if e.get('month') == datetime.now().strftime('%m/%Y'))
+        days = ['שני','שלישי','רביעי','חמישי','שישי','שבת','ראשון']
+        day = days[datetime.now().weekday()]
+        txt = f"☀️ יום {day}, {datetime.now().strftime('%d/%m/%Y')}\n\n"
+        if open_t:
+            txt += f"📋 {len(open_t)} משימות:\n"
+            for t in open_t[:5]:
+                txt += f"• {t['text']}\n"
+        else:
+            txt += "✅ אין משימות!\n"
+        if monthly:
+            txt += f"\n💰 הוצאות החודש: {monthly:,.0f}₪"
+        return txt
+    else:
+        try:
+            return ask_claude(uid, text)
+        except Exception as e:
+            return f"שגיאה: {str(e)}"
+
 @app.route("/whatsapp", methods=["POST"])
 def whatsapp():
     from twilio.twiml.messaging_response import MessagingResponse
