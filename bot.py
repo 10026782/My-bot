@@ -94,8 +94,8 @@ def ask_claude(uid, msg):
         return bot_response
         
     except Exception as e:
-        return f"שגיאה בתקשורת: {str(e)}"
-        def handle_command(text, uid):
+         return f"שגיאה בתקשורת: {str(e)}"                                                                                      
+  def handle_command(text, uid):
     data = load()
     if text.startswith("/add "):
         task = text[5:]
