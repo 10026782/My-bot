@@ -25,7 +25,6 @@ def load():
 def save(data):
     with open(DATA_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-
 def ask_claude(uid, msg):
     if uid not in conversations:
         conversations[uid] = []
@@ -38,14 +37,19 @@ def ask_claude(uid, msg):
     except:
         open_tasks, monthly = 0, 0
 
-    # בניית גוף ההודעה
-    timestamp = datetime.now().strftime('%d/%m/%Y %H:%M')
-    user_content = f"תאריך: {timestamp}\nמשימות: {open_tasks}\nהוצאות: {monthly}\n\n{msg}"
-    conversations[uid].append({"role": "user", "content": user_content})
+    # הגדרת האישיות המקצועית של הבוט
+    system_prompt = (
+        "אתה עוזר אישי אינטליגנטי בשם 'הסוכן של אליהו'. "
+        "אתה מומחה בנדל\"ן, פיתוח פרויקטים (כולל יחידות דיור ומכירת קרקעות), גישור ומשפט מנהלי. "
+        "אתה גם מומחה DIY עם ידע טכני בתיקוני בית, חשמל ומכשירי חשמל. "
+        "הסגנון שלך הוא מקצועי, ענייני, אך חם ומסייע. "
+        f"נתונים נוכחיים: ישנן {open_tasks} משימות פתוחות, והוצאות החודש הן {monthly} ש\"ח."
+    )
+
+    user_content = f"תאריך: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\nהודעה: {msg}"
     
-    # שמירת היסטוריה של 15 הודעות אחרונות
-    if len(conversations[uid]) > 15:
-        conversations[uid] = conversations[uid][-15:]
+    # הכנת ההודעות לשליחה (כולל היסטוריה)
+    messages_to_send = conversations[uid] + [{"role": "user", "content": user_content}]
 
     try:
         response = httpx.post(
@@ -57,24 +61,30 @@ def ask_claude(uid, msg):
             },
             json={
                 "model": "claude-sonnet-4-6",
-                "max_tokens": 1024,
-                "messages": conversations[uid]
+                "max_tokens": 2048,
+                "system": system_prompt,
+                "messages": messages_to_send
             },
             timeout=30.0
         )
-        
         result = response.json()
-        
         if response.status_code != 200:
-            error_detail = result.get('error', {}).get('message', 'Unknown error')
-            print(f"Anthropic API Error: {result}")
-            return f"שגיאה מהשרת: {error_detail}"
+            return f"שגיאה מהשרת: {result.get('error', {}).get('message', 'Unknown error')}"
+        
+        bot_response = result["content"][0]["text"]
+        
+        # שמירת היסטוריית השיחה
+        conversations[uid].append({"role": "user", "content": msg})
+        conversations[uid].append({"role": "assistant", "content": bot_response})
+        
+        # הגבלת הזיכרון ל-10 הודעות אחרונות
+        if len(conversations[uid]) > 10:
+            conversations[uid] = conversations[uid][-10:]
             
-        return result["content"][0]["text"]
+        return bot_response
         
     except Exception as e:
-        print(f"System Error: {e}")
-        return "חלה שגיאה טכנית בחיבור לשרת."
+        return f"שגיאה טכנית: {str(e)}"
 def handle_command(text, uid):
     data = load()
     if text.startswith("/add "):
