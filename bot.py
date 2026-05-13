@@ -26,7 +26,6 @@ CLAUDE_MODEL = "claude-3-5-sonnet-20241022"
 
 
     
-
 # --- לוגיקת בינה מלאכותית משותפת ---
 def ask_claude(user_input):
     # מחק או שים # בתחילת השורה הזו:
@@ -41,6 +40,7 @@ def ask_claude(user_input):
         messages=[{"role": "user", "content": full_prompt}]
     )
     return message.content[0].text
+
 
 # --- חלק 1: WhatsApp (Flask) ---
 @app.route('/')
