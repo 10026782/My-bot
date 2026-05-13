@@ -20,31 +20,12 @@ DRIVE_FOLDER_ID = os.environ.get('DRIVE_FOLDER_ID') # מזהה תיקיית הנ
 client = anthropic.Anthropic(api_key=CLAUDE_KEY)
 
 # שם המודל היציב ביותר (פותר את שגיאת ה-404)
-CLAUDE_MODEL = "claude-3-5-sonnet-20240620"
+CLAUDE_MODEL = "claude-3-5-sonnet-20241022"
 
-# --- פונקציות גוגל דרייב (נדל"ן) ---
-def get_drive_context():
-    """שולף טקסט מתוך קבצי הנדל"ן בדרייב כדי לתת ל-Claude הקשר"""
-    try:
-        # דורש משתנה סביבה GOOGLE_CREDENTIALS שמכיל את תוכן קובץ ה-JSON
-        import json
-        creds_json = json.loads(os.environ.get('GOOGLE_CREDENTIALS'))
-        creds = service_account.Credentials.from_service_account_info(creds_json)
-        service = build('drive', 'v3', credentials=creds)
-        
-        # חיפוש קבצי טקסט/PDF בתיקייה
-        results = service.files().list(
-            q=f"'{DRIVE_FOLDER_ID}' in parents and trashed = false",
-            fields="files(id, name)").execute()
-        items = results.get('files', [])
-        
-        context_text = 'מידע נדל"ן רלוונטי:\n'
-        for item in items[:3]: # לוקח את 3 הקבצים הראשונים כדוגמה
-            context_text += f"- קובץ: {item['name']}\n"
-        return context_text
-    except Exception as e:
-        logging.error(f"Drive Error: {e}")
-        return 'לא ניתן היה לגשת לנתוני הנדל"ן כרגע.'
+
+
+
+    
 
 # --- לוגיקת בינה מלאכותית משותפת ---
 def ask_claude(user_input):
