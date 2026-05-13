@@ -44,7 +44,7 @@ def get_drive_context():
         return context_text
     except Exception as e:
         logging.error(f"Drive Error: {e}")
-        return "לא ניתן היה לגשת לנתוני הנדל"ן כרגע."
+        return 'לא ניתן היה לגשת לנתוני הנדל"ן כרגע.'
 
 # --- לוגיקת בינה מלאכותית משותפת ---
 def ask_claude(user_input):
