@@ -1,25 +1,53 @@
 import os
 import logging
+from flask import Flask, request
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 import anthropic
+from twilio.twiml.messaging_response import MessagingResponse
 
-# הגדרת לוגים כדי לראות מה קורה ב-Render
+# --- הגדרות בסיס ---
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+app = Flask(__name__) # ה-'app' שגוניקורן מחפש
 
-# משיכת המפתחות מה-Environment Variables ב-Render
+# משיכת מפתחות מה-Environment Variables ב-Render
 TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CLAUDE_KEY = os.environ.get('ANTHROPIC_API_KEY')
-
 client = anthropic.Anthropic(api_key=CLAUDE_KEY)
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(chat_id=update.effective_chat.id, text="שלום אלי! הסוכן העסקי שלך מוכן לפעולה. איך אני יכול לעזור?")
+# --- חלק 1: שרת Flask (עבור Render ו-WhatsApp) ---
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+@app.route('/')
+def health_check():
+    return "Bot is running", 200
+
+@app.route("/whatsapp", methods=['POST'])
+def whatsapp_reply():
+    user_msg = request.values.get('Body', '')
+    
+    # שליחת הודעה ל-Claude
+    response = client.messages.create(
+        model="claude-3-haiku-20240307",
+        max_tokens=500,
+        messages=[{"role": "user", "content": user_msg}]
+    )
+    
+    msg = MessagingResponse()
+    msg.message(response.content[0].text)
+    return str(msg)
+
+# --- חלק 2: לוגיקת טלגרם (הגרסה המקורית) ---
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id, 
+        text="שלום אלי! הסוכן העסקי שלך בטלגרם ובווטסאפ מוכן לפעולה."
+    )
+
+async def handle_telegram_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
     
-    # שליחת ההודעה ל-Claude
+    # שליחת הודעה ל-Claude
     response = client.messages.create(
         model="claude-3-haiku-20240307",
         max_tokens=500,
@@ -28,14 +56,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await context.bot.send_message(chat_id=update.effective_chat.id, text=response.content[0].text)
 
+# הגדרת אפליקציית הטלגרם
+telegram_app = ApplicationBuilder().token(TOKEN).build()
+telegram_app.add_handler(CommandHandler('start', start))
+telegram_app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_telegram_message))
+
+# --- חלק 3: הרצה ---
+
 if __name__ == '__main__':
-    application = ApplicationBuilder().token(TOKEN).build()
+    # הרצה מקומית (לצורך בדיקות)
+    import threading
     
-    start_handler = CommandHandler('start', start)
-    msg_handler = MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message)
+    # הפעלת הטלגרם בטרד נפרד
+    threading.Thread(target=telegram_app.run_polling).start()
     
-    application.add_handler(start_handler)
-    application.add_handler(msg_handler)
-    
-    # שימוש ב-Polling פשוט (מתאים לשרת ב-Render)
-    application.run_polling()
+    # הפעלת ה-Flask
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
