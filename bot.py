@@ -38,7 +38,7 @@ def get_drive_context():
             fields="files(id, name)").execute()
         items = results.get('files', [])
         
-        context_text = "מידע נדל"ן רלוונטי:\n"
+        context_text = 'מידע נדל"ן רלוונטי:\n'
         for item in items[:3]: # לוקח את 3 הקבצים הראשונים כדוגמה
             context_text += f"- קובץ: {item['name']}\n"
         return context_text
