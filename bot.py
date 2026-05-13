@@ -29,15 +29,16 @@ CLAUDE_MODEL = "claude-3-5-sonnet-20241022"
 
 # --- לוגיקת בינה מלאכותית משותפת ---
 def ask_claude(user_input):
-    real_estate_data = get_drive_context()
-    
-    system_prompt = f"אתה סוכן עסקי חכם. הנה מידע מהדרייב שלך: {real_estate_data}"
+    # מחק או שים # בתחילת השורה הזו:
+    # real_estate_data = get_drive_context() 
+
+    # שנה את בניית ההודעה כך שלא תכלול את הנתונים מהדרייב:
+    full_prompt = f"הודעת משתמש: {user_input}"
     
     message = client.messages.create(
         model=CLAUDE_MODEL,
         max_tokens=1000,
-        system=system_prompt,
-        messages=[{"role": "user", "content": user_input}]
+        messages=[{"role": "user", "content": full_prompt}]
     )
     return message.content[0].text
 
