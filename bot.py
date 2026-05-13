@@ -27,7 +27,7 @@ def whatsapp_reply():
     
     # שליחת הודעה ל-Claude
     response = client.messages.create(
-        model="claude-3-haiku-20240307",
+        model="claude-3-5-sonnet-20241022",
         max_tokens=500,
         messages=[{"role": "user", "content": user_msg}]
     )
@@ -49,7 +49,7 @@ async def handle_telegram_message(update: Update, context: ContextTypes.DEFAULT_
     
     # שליחת הודעה ל-Claude
     response = client.messages.create(
-        model="claude-3-haiku-20240307",
+        model="claude-3-5-sonnet-20241022",
         max_tokens=500,
         messages=[{"role": "user", "content": user_text}]
     )
