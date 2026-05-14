@@ -27,7 +27,7 @@ def save(data):
 
 def ask_claude(msg):
     try:
-        print(f"DEBUG: פונה לקלוד עם ההודעה: {msg[:20]}...")
+        print(f"DEBUG: פונה לקלוד...")
         response = httpx.post(
             "https://api.anthropic.com/v1/messages",
             headers={
@@ -36,18 +36,26 @@ def ask_claude(msg):
                 "content-type": "application/json"
             },
             json={
-                "model": "claude-3-5-sonnet-20240620",
-                "max_tokens": 400, # קיצרתי כדי שיענה מהר יותר
+                "model": "claude-3-haiku-20240307", # מודל מהיר וזול יותר שמונע טיימאאוט
+                "max_tokens": 400,
                 "system": "אתה עוזר עסקי אישי בשם מנהל. עונה בעברית קצרה.",
                 "messages": [{"role": "user", "content": msg}]
             },
-            timeout=15.0 # טיימאאוט קצר יותר למניעת קריסת וואטסאפ
+            timeout=15.0
         )
-        return response.json()["content"][0]["text"]
+        
+        res_json = response.json()
+        
+        # בדיקה אם יש תוכן לפני שמנסים לקרוא אותו
+        if "content" in res_json and len(res_json["content"]) > 0:
+            return res_json["content"][0]["text"]
+        else:
+            print(f"שגיאת מבנה מקלוד: {res_json}")
+            return "קיבלתי את ההודעה, אבל יש לי תקלה טכנית קלה בתשובה."
+            
     except Exception as e:
-        print(f"ERROR Claude: {e}")
-        return "מצטער, יש לי עומס כרגע. נסה שוב בעוד דקה."
-
+        print(f"ERROR Claude: {str(e)}")
+        return "מצטער, אני זמין רק לפקודות כמו /tasks כרגע."
 def handle_command(text, uid):
     data = load()
     text = text.strip()
