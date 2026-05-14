@@ -2,14 +2,11 @@ import os, json, threading, time
 from datetime import datetime
 from flask import Flask, request
 import httpx
+from twilio.twiml.messaging_response import MessagingResponse
 
-# מפתחות API וזהות - כולם נמשכים עכשיו ממשתני סביבה בלבד
+# משיכת מפתחות ממשתני סביבה (ללא גרשיים בקוד!)
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
-TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
-TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
-
-# נתוני Google - עברו למשתני סביבה לאבטחה מירבית
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_REFRESH_TOKEN = os.environ.get("GOOGLE_REFRESH_TOKEN", "")
@@ -17,10 +14,6 @@ GOOGLE_REFRESH_TOKEN = os.environ.get("GOOGLE_REFRESH_TOKEN", "")
 DATA_FILE = "data.json"
 conversations = {}
 app = Flask(__name__)
-
-SYSTEM_PROMPT = """אתה עוזר עסקי אישי בשם מנהל.
-עונה תמיד בעברית, קצר וממוקד.
-עוזר בניהול משימות, הוצאות, קשרי לקוחות, ניסוח מודעות פרסום ותגובות ראשוניות ללקוחות."""
 
 def load():
     if os.path.exists(DATA_FILE):
@@ -38,40 +31,37 @@ def ask_claude(uid, msg):
     if uid not in conversations:
         conversations[uid] = []
     data = load()
-    open_tasks = len([t for t in data['tasks'] if not t.get('done')])
-    monthly = sum(e['amount'] for e in data['expenses']
-                  if e.get('month') == datetime.now().strftime('%m/%Y'))
-    conversations[uid].append({
-        "role": "user",
-        "content": f"תאריך: {datetime.now().strftime('%d/%m/%Y %H:%M')}\nמשימות: {open_tasks}\nהוצאות: {monthly}\n\n{msg}"
-    })
-    if len(conversations[uid]) > 20:
-        conversations[uid] = conversations[uid][-20:]
+    open_tasks = [t for t in data['tasks'] if not t.get('done')]
     
-    response = httpx.post(
-        "https://api.anthropic.com/v1/messages",
-        headers={
-            "x-api-key": ANTHROPIC_API_KEY,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json"
-        },
-        json={
-            "model": "claude-sonnet-4-20250514",
-            "max_tokens": 1000,
-            "system": SYSTEM_PROMPT,
-            "messages": conversations[uid]
-        },
-        timeout=30
-    )
-    reply = response.json()["content"][0]["text"]
-    conversations[uid].append({"role": "assistant", "content": reply})
-    return reply
+    conversations[uid].append({
+        "role": "user", 
+        "content": f"תאריך: {datetime.now().strftime('%d/%m/%Y %H:%M')}\nמשימות פתוחות: {len(open_tasks)}\n\n{msg}"
+    })
+    
+    if len(conversations[uid]) > 15: conversations[uid] = conversations[uid][-15:]
+
+    try:
+        response = httpx.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json"
+            },
+            json={
+                "model": "claude-3-5-sonnet-20240620",
+                "max_tokens": 800,
+                "system": "אתה עוזר עסקי אישי בשם מנהל. עונה בעברית ממוקדת. עוזר במשימות והוצאות.",
+                "messages": conversations[uid]
+            },
+            timeout=30
+        )
+        return response.json()["content"][0]["text"]
+    except Exception as e:
+        return f"שגיאה: {e}"
 
 def check_calendar():
-    # בדיקה שהמפתחות אכן קיימים במערכת
-    if not all([GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN]):
-        return "שגיאה: חסרים מפתחות Google במשתני הסביבה."
-        
+    if not GOOGLE_REFRESH_TOKEN: return "יומן גוגל לא מוגדר."
     try:
         r = httpx.post("https://oauth2.googleapis.com/token", data={
             "client_id": GOOGLE_CLIENT_ID,
@@ -80,139 +70,80 @@ def check_calendar():
             "grant_type": "refresh_token"
         })
         access_token = r.json().get("access_token")
-        
         cal_r = httpx.get(
             "https://www.googleapis.com/calendar/v3/calendars/primary/events",
             headers={"Authorization": f"Bearer {access_token}"},
-            params={"maxResults": 5, "timeMin": datetime.utcnow().isoformat() + "Z"}
+            params={"maxResults": 3, "timeMin": datetime.utcnow().isoformat() + "Z"}
         )
         events = cal_r.json().get("items", [])
-        if not events: return "אין אירועים קרובים ביומן."
-        
-        res = "📅 אירועים קרובים:\n"
+        if not events: return "אין אירועים קרובים."
+        res = "📅 יומן:\n"
         for ev in events:
-            start = ev.get('start', {}).get('dateTime', ev.get('start', {}).get('date'))
-            res += f"• {ev.get('summary')} ({start[:10]})\n"
+            res += f"• {ev.get('summary')} ({ev.get('start').get('dateTime', ev.get('start').get('date'))[:10]})\n"
         return res
-    except Exception as e:
-        return f"שגיאה בגישה ליומן: {str(e)}"
+    except: return "שגיאה בסנכרון היומן."
 
 def handle_command(text, uid):
     data = load()
+    text = text.strip()
+
+    if text == "/start":
+        return "👋 שלום אליהו! אני המנהל שלך.\nנסה את /tasks, /cal או /summary"
+    
     if text == "/cal":
         return check_calendar()
-        
+
     if text.startswith("/add "):
         task = text[5:]
-        data['tasks'].append({"text": task, "done": False,
-                               "date": datetime.now().strftime('%d/%m/%Y')})
+        data['tasks'].append({"text": task, "done": False, "date": datetime.now().strftime('%d/%m/%Y')})
         save(data)
         return f"✅ נוסף: {task}"
-    elif text == "/tasks":
+
+    if text == "/tasks":
         open_t = [t for t in data['tasks'] if not t.get('done')]
-        if not open_t:
-            return "✅ אין משימות פתוחות!"
-        return "📋 משימות:\n\n" + "".join(
-            f"{i}. {t['text']}\n" for i, t in enumerate(open_t, 1))
-    elif text.startswith("/done "):
-        try:
-            open_t = [t for t in data['tasks'] if not t.get('done')]
-            t = open_t[int(text[6:]) - 1]
-            t['done'] = True
-            save(data)
-            return f"🎉 הושלם: {t['text']}"
-        except:
-            return "מספר לא תקין"
-    elif text.startswith("/expense "):
-        parts = text[9:].split(" ", 1)
-        try:
-            amount = float(parts[0])
-            desc = parts[1] if len(parts) > 1 else "הוצאה"
-            data['expenses'].append({
-                "amount": amount,
-                "description": desc,
-                "date": datetime.now().strftime('%d/%m/%Y'),
-                "month": datetime.now().strftime('%m/%Y')
-            })
-            save(data)
-            monthly = sum(e['amount'] for e in data['expenses']
-                         if e.get('month') == datetime.now().strftime('%m/%Y'))
-            return f"💸 {desc} - {amount:,.0f}₪\nסהכ החודש: {monthly:,.0f}₪"
-        except:
-            return "שגיאה. כתוב: /expense 500 תיאור"
-    elif text == "/summary":
-        open_t = [t for t in data['tasks'] if not t.get('done')]
-        monthly = sum(e['amount'] for e in data['expenses']
-                     if e.get('month') == datetime.now().strftime('%m/%Y'))
-        days = ['שני','שלישי','רביעי','חמישי','שישי','שבת','ראשון']
-        day = days[datetime.now().weekday()]
-        txt = f"☀️ יום {day}, {datetime.now().strftime('%d/%m/%Y')}\n\n"
-        txt += check_calendar() + "\n\n"
-        if open_t:
-            txt += f"📋 {len(open_t)} משימות:\n"
-            for t in open_t[:5]:
-                txt += f"• {t['text']}\n"
-        else:
-            txt += "✅ אין משימות!\n"
-        if monthly:
-            txt += f"\n💰 הוצאות החודש: {monthly:,.0f}₪"
-        return txt
-    else:
-        try:
-            return ask_claude(uid, text)
-        except Exception as e:
-            return f"שגיאה: {str(e)}"
+        if not open_t: return "✅ אין משימות פתוחות!"
+        return "📋 משימות:\n" + "\n".join(f"{i}. {t['text']}" for i, t in enumerate(open_t, 1))
+
+    if text == "/summary":
+        return f"☀️ סיכום:\n{check_calendar()}\n\nמשימות פתוחות: {len([t for t in data['tasks'] if not t.get('done')])}"
+
+    return ask_claude(uid, text)
 
 @app.route("/whatsapp", methods=["POST"])
 def whatsapp():
-    from twilio.twiml.messaging_response import MessagingResponse
-    incoming = request.values.get("Body", "").strip()
-    sender = request.values.get("From", "")
-    reply = handle_command(incoming, sender)
-    resp = MessagingResponse()
-    resp.message(reply)
-    return str(resp)
+    try:
+        incoming = request.values.get("Body", "").strip()
+        sender = request.values.get("From", "")
+        reply = handle_command(incoming, sender)
+        resp = MessagingResponse()
+        resp.message(reply)
+        return str(resp)
+    except:
+        return str(MessagingResponse().message("שגיאת תוכן בוואטסאפ."))
 
 @app.route("/")
-def home():
-    return "הבוט פועל!"
-
-def send_telegram(chat_id, text):
-    try:
-        httpx.post(
-            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-            json={"chat_id": chat_id, "text": text},
-            timeout=10
-        )
-    except:
-        pass
+def home(): return "הבוט של אליהו חי ב-Render!"
 
 def telegram_polling():
     offset = 0
+    print("--- Polling טלגרם התחיל ---")
     while True:
         try:
-            r = httpx.get(
-                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates",
-                params={"offset": offset, "timeout": 30},
-                timeout=35
-            )
+            r = httpx.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates", 
+                          params={"offset": offset, "timeout": 30}, timeout=35)
             updates = r.json().get("result", [])
             for update in updates:
                 offset = update["update_id"] + 1
                 msg = update.get("message", {})
-                chat_id = msg.get("chat", {}).get("id")
-                text = msg.get("text", "")
-                if chat_id and text:
-                    data = load()
-                    data['chat_id'] = chat_id
-                    save(data)
-                    reply = handle_command(text, str(chat_id))
-                    send_telegram(chat_id, reply)
-        except Exception as e:
-            time.sleep(5)
+                if msg.get("text"):
+                    chat_id = msg["chat"]["id"]
+                    reply = handle_command(msg["text"], str(chat_id))
+                    httpx.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
+                               json={"chat_id": chat_id, "text": reply})
+        except: 
+            time.sleep(10)
 
 if __name__ == "__main__":
-    t = threading.Thread(target=telegram_polling, daemon=True)
-    t.start()
+    threading.Thread(target=telegram_polling, daemon=True).start()
     port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, use_reloader=False)
