@@ -1,18 +1,16 @@
 import os, json, threading, time
 from datetime import datetime
 from flask import Flask, request, Response
-import httpx
-import anthropic
+import anthropic # שימוש בספריה הרשמית כפי שמופיע בקוד שלך
 from twilio.twiml.messaging_response import MessagingResponse
 
-# מפתחות מ-Render Environment
+# הגדרות מפתחות
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
-GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
-GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
-GOOGLE_REFRESH_TOKEN = os.environ.get("GOOGLE_REFRESH_TOKEN", "")
 
+# יצירת קליינט של אנתרופיק
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
 DATA_FILE = "data.json"
 app = Flask(__name__)
 
@@ -22,7 +20,7 @@ def load():
             with open(DATA_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except: pass
-    return {"tasks": [], "expenses": [], "chat_id": None}
+    return {"tasks": [], "expenses": []}
 
 def save(data):
     try:
@@ -30,28 +28,9 @@ def save(data):
             json.dump(data, f, ensure_ascii=False, indent=2)
     except: pass
 
-def check_calendar():
-    if not GOOGLE_REFRESH_TOKEN: return "⚠️ יומן גוגל לא מוגדר."
-    try:
-        r = httpx.post("https://oauth2.googleapis.com/token", data={
-            "client_id": GOOGLE_CLIENT_ID, "client_secret": GOOGLE_CLIENT_SECRET,
-            "refresh_token": GOOGLE_REFRESH_TOKEN, "grant_type": "refresh_token"
-        })
-        access_token = r.json().get("access_token")
-        cal_r = httpx.get(
-            "https://www.googleapis.com/calendar/v3/calendars/primary/events",
-            headers={"Authorization": f"Bearer {access_token}"},
-            params={"maxResults": 3, "timeMin": datetime.utcnow().isoformat() + "Z"}
-        )
-        events = cal_r.json().get("items", [])
-        res = "📅 אירועים קרובים:\n"
-        for ev in events: res += f"• {ev.get('summary')}\n"
-        return res if events else "📅 אין אירועים קרובים."
-    except: return "❌ שגיאה ביומן."
-
 def ask_claude(msg):
     try:
-        # מעדכן לשם המודל המדויק מהצילום מסך שלך
+        # המודל המדויק שביקשת לא לגעת בו לעולם
         response = client.messages.create(
             model="claude-sonnet-4-6", 
             max_tokens=1024,
@@ -60,20 +39,24 @@ def ask_claude(msg):
         )
         return response.content[0].text
     except Exception as e:
-        print(f"Claude Error: {e}")
-        return f"שגיאה: {str(e)}"
+        print(f"DEBUG Error: {e}")
+        return "מצטער, יש לי עיכוב קטן בתשובה. נסה שוב בעוד רגע."
 
 def handle_command(text, uid):
     data = load()
     text = text.strip()
-    if text == "/start": return "👋 שלום אליהו! המערכת מחוברת."
-    if text == "/cal": return check_calendar()
+    
     if text.startswith("/add "):
-        task = text[5:]; data['tasks'].append({"text": task, "done": False}); save(data)
-        return f"✅ נוסף: {task}"
+        task = text[5:]
+        data['tasks'].append({"text": task, "done": False, "date": datetime.now().strftime('%d/%m/%Y')})
+        save(data)
+        return f"✅ נוסף למשימות: {task}"
+    
     if text == "/tasks":
         open_t = [t for t in data['tasks'] if not t.get('done')]
-        return "📋 משימות:\n" + "\n".join(f"- {t['text']}" for t in open_t) if open_t else "✅ אין משימות."
+        if not open_t: return "✅ אין משימות פתוחות!"
+        return "📋 משימות פתוחות:\n" + "\n".join(f"{i}. {t['text']}" for i, t in enumerate(open_t, 1))
+
     return ask_claude(text)
 
 @app.route("/whatsapp", methods=["POST"])
@@ -86,10 +69,13 @@ def whatsapp():
     return Response(str(resp), mimetype='application/xml')
 
 @app.route("/")
-def home(): return "Bot is Live with Sonnet 4-6"
+def home():
+    return "The Boss is Live"
 
 def telegram_polling():
+    import httpx
     offset = 0
+    print("--- Polling טלגרם התחיל (מודל 4-6) ---")
     while True:
         try:
             r = httpx.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates", 
@@ -99,11 +85,17 @@ def telegram_polling():
                 offset = update["update_id"] + 1
                 if "message" in update and "text" in update["message"]:
                     chat_id = update["message"]["chat"]["id"]
-                    reply = handle_command(update["message"]["text"], str(chat_id))
+                    text = update["message"]["text"]
+                    reply = handle_command(text, str(chat_id))
                     httpx.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
                                json={"chat_id": chat_id, "text": reply})
-        except: time.sleep(10)
+        except:
+            time.sleep(5)
+
+# הפעלת טלגרם ברקע לפני הרצת השרת
+t = threading.Thread(target=telegram_polling, daemon=True)
+t.start()
 
 if __name__ == "__main__":
-    threading.Thread(target=telegram_polling, daemon=True).start()
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
