@@ -3,10 +3,16 @@ from datetime import datetime
 from flask import Flask, request
 import httpx
 
+# מפתחות API וזהות - כולם נמשכים עכשיו ממשתני סביבה בלבד
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
 TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
+
+# נתוני Google - עברו למשתני סביבה לאבטחה מירבית
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_REFRESH_TOKEN = os.environ.get("GOOGLE_REFRESH_TOKEN", "")
 
 DATA_FILE = "data.json"
 conversations = {}
@@ -18,8 +24,10 @@ SYSTEM_PROMPT = """אתה עוזר עסקי אישי בשם מנהל.
 
 def load():
     if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
+        try:
+            with open(DATA_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except: pass
     return {"tasks": [], "expenses": [], "chat_id": None}
 
 def save(data):
@@ -39,6 +47,7 @@ def ask_claude(uid, msg):
     })
     if len(conversations[uid]) > 20:
         conversations[uid] = conversations[uid][-20:]
+    
     response = httpx.post(
         "https://api.anthropic.com/v1/messages",
         headers={
@@ -58,8 +67,41 @@ def ask_claude(uid, msg):
     conversations[uid].append({"role": "assistant", "content": reply})
     return reply
 
+def check_calendar():
+    # בדיקה שהמפתחות אכן קיימים במערכת
+    if not all([GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN]):
+        return "שגיאה: חסרים מפתחות Google במשתני הסביבה."
+        
+    try:
+        r = httpx.post("https://oauth2.googleapis.com/token", data={
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "refresh_token": GOOGLE_REFRESH_TOKEN,
+            "grant_type": "refresh_token"
+        })
+        access_token = r.json().get("access_token")
+        
+        cal_r = httpx.get(
+            "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"maxResults": 5, "timeMin": datetime.utcnow().isoformat() + "Z"}
+        )
+        events = cal_r.json().get("items", [])
+        if not events: return "אין אירועים קרובים ביומן."
+        
+        res = "📅 אירועים קרובים:\n"
+        for ev in events:
+            start = ev.get('start', {}).get('dateTime', ev.get('start', {}).get('date'))
+            res += f"• {ev.get('summary')} ({start[:10]})\n"
+        return res
+    except Exception as e:
+        return f"שגיאה בגישה ליומן: {str(e)}"
+
 def handle_command(text, uid):
     data = load()
+    if text == "/cal":
+        return check_calendar()
+        
     if text.startswith("/add "):
         task = text[5:]
         data['tasks'].append({"text": task, "done": False,
@@ -105,6 +147,7 @@ def handle_command(text, uid):
         days = ['שני','שלישי','רביעי','חמישי','שישי','שבת','ראשון']
         day = days[datetime.now().weekday()]
         txt = f"☀️ יום {day}, {datetime.now().strftime('%d/%m/%Y')}\n\n"
+        txt += check_calendar() + "\n\n"
         if open_t:
             txt += f"📋 {len(open_t)} משימות:\n"
             for t in open_t[:5]:
@@ -166,7 +209,6 @@ def telegram_polling():
                     reply = handle_command(text, str(chat_id))
                     send_telegram(chat_id, reply)
         except Exception as e:
-            print(f"שגיאת טלגרם: {e}")
             time.sleep(5)
 
 if __name__ == "__main__":
