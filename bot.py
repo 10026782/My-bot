@@ -41,7 +41,7 @@ def load():
             with open(DATA_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except: pass
-    return {"tasks": [], "expenses": []}
+    return {"tasks": [], "expenses": [], "history": {}}
 
 def save(data):
     try:
@@ -99,6 +99,12 @@ def handle_command(text, uid):
     data = load()
     text = text.strip()
     
+    # חיבור פקודת החיפוש בדרייב
+    if text.lower().startswith("/find ") or text.lower().startswith("find "):
+        query = text[6:] if text.startswith("/") else text[5:]
+        return search_drive(query)
+    
+    # ניהול משימות
     if text.startswith("/add "):
         task = text[5:]
         data['tasks'].append({"text": task, "done": False, "date": datetime.now().strftime('%d/%m/%Y')})
@@ -110,7 +116,8 @@ def handle_command(text, uid):
         if not open_t: return "✅ אין משימות פתוחות!"
         return "📋 משימות פתוחות:\n" + "\n".join(f"{i}. {t['text']}" for i, t in enumerate(open_t, 1))
 
-    return ask_claude(text)
+    # שליחה ל-Claude עם ה-uid כדי שיזכור את המשתמש
+    return ask_claude(text, uid)
 
 @app.route("/whatsapp", methods=["POST"])
 def whatsapp():
