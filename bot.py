@@ -12,6 +12,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 DATA_FILE = "data.json"
+KNOWLEDGE_FILE = "import_knowledge_base.json"
 app = Flask(__name__)
 
 def load():
@@ -27,21 +28,41 @@ def save(data):
         with open(DATA_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except: pass
-
+def load_knowledge():
+    """טוענת את לוחות הברית של העסק"""
+    if os.path.exists(KNOWLEDGE_FILE):
+        try:
+            with open(KNOWLEDGE_FILE, 'r', encoding='utf-8') as f:
+                kb = json.load(f)
+                rules = "\n".join([f"- {r['hebrew_name']}: {r['description']}" for r in kb.get('the_ten_commandments', [])])
+                return rules
+        except: pass
+    return "אין לוחות ברית זמינים כרגע."
 def ask_claude(msg):
     try:
-        # המודל המדויק שביקשת לא לגעת בו לעולם
+        # טעינת הידע המקצועי לתוך ה-System Prompt
+        expert_rules = load_knowledge()
+        
+        # הגדרת האישיות ולוחות הברית
+        system_instruction = f"""
+        אתה העוזר האסטרטגי והשותף העסקי של אליהו חזן. 
+        האישיות שלך: חד, ממוקד, מנהל סיכונים מקצועי ותכליתי.
+        עליך לבסס כל ייעוץ על 'לוחות הברית' של העסק:
+        {expert_rules}
+        כשאתה נשאל על ייבוא, עץ או לוגיסטיקה, השתמש במושגים האלו (כמו חוק ה-9%, חוק הקידוח וכו').
+        ענה בעברית עסקית וקצר תהליכים.
+        """
+
         response = client.messages.create(
             model="claude-sonnet-4-6", 
             max_tokens=1024,
-            system="אתה עוזר עסקי אישי בשם מנהל. עונה בעברית.",
+            system=system_instruction, 
             messages=[{"role": "user", "content": msg}]
         )
         return response.content[0].text
     except Exception as e:
         print(f"DEBUG Error: {e}")
         return "מצטער, יש לי עיכוב קטן בתשובה. נסה שוב בעוד רגע."
-
 def handle_command(text, uid):
     data = load()
     text = text.strip()
