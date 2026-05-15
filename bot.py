@@ -1,4 +1,4 @@
-import os, json, threading, time
+import os, json, threading, time, httpx
 from datetime import datetime
 from flask import Flask, request, Response
 import anthropic # שימוש בספריה הרשמית כפי שמופיע בקוד שלך
