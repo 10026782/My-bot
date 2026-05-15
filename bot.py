@@ -14,7 +14,27 @@ client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 DATA_FILE = "data.json"
 KNOWLEDGE_FILE = "import_knowledge_base.json"
 app = Flask(__name__)
+def get_google_token():
+    r = httpx.post("https://oauth2.googleapis.com/token", data={
+        "client_id": os.environ.get("GOOGLE_CLIENT_ID"), 
+        "client_secret": os.environ.get("GOOGLE_CLIENT_SECRET"),
+        "refresh_token": os.environ.get("GOOGLE_REFRESH_TOKEN"), 
+        "grant_type": "refresh_token"
+    })
+    return r.json().get("access_token")
 
+def search_drive(query):
+    try:
+        token = get_google_token()
+        r = httpx.get("https://www.googleapis.com/drive/v3/files",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"q": f"name contains '{query}' and trashed = false", "fields": "files(name, webViewLink)"})
+        files = r.json().get("files", [])
+        if not files: return f"חיפשתי בדרייב, אבל אין כלום על '{query}'. בטוח שזה השם?"
+        res = f"מצאתי לך את זה בדרייב:\n"
+        for f in files: res += f"• {f['name']}\n🔗 {f['webViewLink']}\n\n"
+        return res
+    except: return "משהו נתקע בחיבור לדרייב. תבדוק את ההרשאות."
 def load():
     if os.path.exists(DATA_FILE):
         try:
@@ -38,31 +58,43 @@ def load_knowledge():
                 return rules
         except: pass
     return "אין לוחות ברית זמינים כרגע."
-def ask_claude(msg):
+def ask_claude(msg, uid):
+    data = load() # טעינת הנתונים והזיכרון
+    
+    # טעינת לוחות הברית מהקובץ שהעלינו לגיטהאב
     try:
-        # טעינת הידע המקצועי לתוך ה-System Prompt
-        expert_rules = load_knowledge()
-        
-        # הגדרת האישיות ולוחות הברית
-        system_instruction = f"""
-        אתה העוזר האסטרטגי והשותף העסקי של אליהו חזן. 
-        האישיות שלך: חד, ממוקד, מנהל סיכונים מקצועי ותכליתי.
-        עליך לבסס כל ייעוץ על 'לוחות הברית' של העסק:
-        {expert_rules}
-        כשאתה נשאל על ייבוא, עץ או לוגיסטיקה, השתמש במושגים האלו (כמו חוק ה-9%, חוק הקידוח וכו').
-        ענה בעברית עסקית וקצר תהליכים.
-        """
+        with open('import_knowledge_base.json', 'r', encoding='utf-8') as f:
+            kb = json.load(f)
+            rules = "\n".join([f"{r['hebrew_name']}: {r['description']}" for r in kb['the_ten_commandments']])
+    except:
+        rules = "חוקי הייבוא של אליהו חזן."
 
-        response = client.messages.create(
-            model="claude-sonnet-4-6", 
-            max_tokens=1024,
-            system=system_instruction, 
-            messages=[{"role": "user", "content": msg}]
-        )
-        return response.content[0].text
-    except Exception as e:
-        print(f"DEBUG Error: {e}")
-        return "מצטער, יש לי עיכוב קטן בתשובה. נסה שוב בעוד רגע."
+    if uid not in data.get('history', {}):
+        if 'history' not in data: data['history'] = {}
+        data['history'][uid] = []
+
+    history = data['history'][uid]
+
+    response = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=1024,
+        system=f"""אתה 'מנהל', העוזר האסטרטגי והחד של אליהו חזן. 
+        האישיות שלך: יזם נדל"ן ממולח, חד, עם חוש הומור ענייני.
+        עליך לפעול תמיד לפי 'לוחות הברית' האלו:
+        {rules}
+        
+        יש לך גישה לדרייב (/find) וליומן (/cal). 
+        אל תגיד שאתה לא זוכר! תשתמש בהיסטוריית השיחה המצורפת.""",
+        messages=history + [{"role": "user", "content": msg}]
+    )
+    
+    answer = response.content[0].text
+    # שמירת הזיכרון
+    data['history'][uid].append({"role": "user", "content": msg})
+    data['history'][uid].append({"role": "assistant", "content": answer})
+    data['history'][uid] = data['history'][uid][-10:] # זוכר 10 הודעות אחרונות
+    save(data)
+    return answer
 def handle_command(text, uid):
     data = load()
     text = text.strip()
