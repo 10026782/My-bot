@@ -22,8 +22,8 @@ def get_google_token():
         "grant_type": "refresh_token"
     })
     data = r.json()
-    # הדפס לדיבאג — תראה בלוגים של Render
-    print("Google token response:", data)
+    # שימוש ב-flush=True כדי להכריח את רנדר להציג את השגיאה מיד בלוגים
+    print("Google token response:", data, flush=True)
     return data.get("access_token")
 
 def search_drive(query):
