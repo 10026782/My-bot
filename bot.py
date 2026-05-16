@@ -15,17 +15,20 @@ DATA_FILE = "data.json"
 KNOWLEDGE_FILE = "import_knowledge_base.json"
 app = Flask(__name__)
 def get_google_token():
+    # משיכת המשתנים וניקוי רווחים נסתרים באופן אוטומטי בעזרת .strip()
+    client_id = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+    client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
+    refresh_token = os.environ.get("GOOGLE_REFRESH_TOKEN", "").strip()
+
     r = httpx.post("https://oauth2.googleapis.com/token", data={
-        "client_id": os.environ.get("GOOGLE_CLIENT_ID"), 
-        "client_secret": os.environ.get("GOOGLE_CLIENT_SECRET"),
-        "refresh_token": os.environ.get("GOOGLE_REFRESH_TOKEN"), 
+        "client_id": client_id, 
+        "client_secret": client_secret,
+        "refresh_token": refresh_token, 
         "grant_type": "refresh_token"
     })
     data = r.json()
-    # שימוש ב-flush=True כדי להכריח את רנדר להציג את השגיאה מיד בלוגים
     print("Google token response:", data, flush=True)
     return data.get("access_token")
-
 def search_drive(query):
     try:
         token = get_google_token()
