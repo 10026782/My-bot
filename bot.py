@@ -21,20 +21,27 @@ def get_google_token():
         "refresh_token": os.environ.get("GOOGLE_REFRESH_TOKEN"), 
         "grant_type": "refresh_token"
     })
-    return r.json().get("access_token")
+    data = r.json()
+    # הדפס לדיבאג — תראה בלוגים של Render
+    print("Google token response:", data)
+    return data.get("access_token")
 
 def search_drive(query):
     try:
         token = get_google_token()
+        if not token:
+            return "❌ לא הצלחתי לקבל טוקן מגוגל. בדוק את ה-env variables."
         r = httpx.get("https://www.googleapis.com/drive/v3/files",
             headers={"Authorization": f"Bearer {token}"},
             params={"q": f"name contains '{query}' and trashed = false", "fields": "files(name, webViewLink)"})
+        print("Drive response:", r.status_code, r.text[:300])  # דיבאג
         files = r.json().get("files", [])
         if not files: return f"חיפשתי בדרייב, אבל אין כלום על '{query}'. בטוח שזה השם?"
-        res = f"מצאתי לך את זה בדרייב:\n"
+        res = "מצאתי לך את זה בדרייב:\n"
         for f in files: res += f"• {f['name']}\n🔗 {f['webViewLink']}\n\n"
         return res
-    except: return "משהו נתקע בחיבור לדרייב. תבדוק את ההרשאות."
+    except Exception as e:
+        return f"❌ שגיאה: {str(e)}"
 def load():
     if os.path.exists(DATA_FILE):
         try:
