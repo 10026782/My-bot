@@ -14,30 +14,32 @@ client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 DATA_FILE = "data.json"
 KNOWLEDGE_FILE = "import_knowledge_base.json"
 
-# 2. הגדרת ה-app של Flask (חייב להופיע לפני הראוטים!)
+# 2. הגדרת ה-app של Flask
 app = Flask(__name__)
 
-# 3. נקודת הקצה (Webhook) של טלגרם
+# 3. הגדרת ה-Webhook של טלגרם - רץ אוטומטית כשהשרת עולה!
+RENDER_APP_URL = "https://my-bot-jqz2.onrender.com"
+try:
+    bot.remove_webhook()
+    bot.set_webhook(url=f"{RENDER_APP_URL}/{TELEGRAM_TOKEN}")
+    print("✅ טלגרם עבר למצב Webhook חסכוני ומדויק!", flush=True)
+except Exception as e:
+    print(f"❌ שגיאה בהגדרת ה-Webhook: {e}", flush=True)
+
+# 4. נקודת הקצה (Webhook) של טלגרם לקבלת הודעות
 @app.route(f'/{TELEGRAM_TOKEN}', methods=['POST'])
 def telegram_webhook():
     if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
         update = telebot.types.Update.de_json(json_string)
-        
-        # עיבוד הודעות טקסט נכנסות מטלגרם
         if update.message and update.message.text:
             chat_id = str(update.message.chat.id)
             text = update.message.text
-            
-            # הרצת הלוגיקה העסקית שלך ומענה
             reply = handle_command(text, chat_id)
             bot.send_message(chat_id, reply)
-            
         return '', 200
     else:
         abort(403)
-
-# 4. פונקציות הליבה של האפליקציה (ללא שינוי)
 def get_google_token():
     client_id = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
     client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
@@ -182,16 +184,7 @@ def whatsapp():
 def home():
     return "The Boss is Live"
 
-# 6. בלוק ההפעלה הראשי
 if __name__ == "__main__":
-    # מנקים הגדרות קודמות מול טלגרם
-    bot.remove_webhook()
-    
-    # חיבור ה-Webhook החסכוני לשרת ב-Render
-    RENDER_APP_URL = "https://my-bot-jgz2.onrender.com" 
-    bot.set_webhook(url=f"{RENDER_APP_URL}/{TELEGRAM_TOKEN}")
-    print("✅ טלגרם עבר למצב Webhook חסכוני!")
-    
-    # הרצת השרת
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
+
