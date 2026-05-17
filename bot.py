@@ -71,7 +71,134 @@ def search_drive(query):
         return res
     except Exception as e:
         return f"❌ שגיאה: {str(e)}"
+def read_drive_file(file_name):
+    """קריאת תוכן של קובץ טקסט או גוגל דוקס מתוך הדרייב והמרתו לטקסט נקי"""
+    try:
+        token = get_google_token()
+        if not token:
+            print("❌ חסר טוקן לקריאת קובץ", flush=True)
+            return None
+            
+        headers = {"Authorization": f"Bearer {token}"}
+        search_params = {"q": f"name contains '{file_name}' and trashed = false", "fields": "files(id, name, mimeType)"}
+        r = httpx.get("https://www.googleapis.com/drive/v3/files", headers=headers, params=search_params)
+        files = r.json().get("files", [])
+        
+        if not files:
+            return None
+            
+        file_id = files[0]['id']
+        mime_type = files[0].get('mimeType', '')
+        
+        if "apps.document" in mime_type:  # Google Doc
+            export_url = f"https://www.googleapis.com/drive/v3/files/{file_id}/export"
+            r_content = httpx.get(export_url, headers=headers, params={"mimeType": "text/plain"})
+            return r_content.text
+        else:  # קובץ טקסט רגיל
+            download_url = f"https://www.googleapis.com/drive/v3/files/{file_id}"
+            r_content = httpx.get(download_url, headers=headers, params={"alt": "media"})
+            return r_content.text
+    except Exception as e:
+        print(f"❌ שגיאה בקריאת קובץ: {e}", flush=True)
+        return None
 
+def create_calendar_event(summary, start_time, duration_minutes=60):
+    """קביעת פגישה חדשה ביומן גוגל (Google Calendar)"""
+    try:
+        token = get_google_token()
+        if not token: 
+            return "❌ חסר טוקן לחיבור ליומן. אנא בצע חיבור מחדש."
+        
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        from datetime import datetime, timedelta
+        
+        start_dt = datetime.fromisoformat(start_time)
+        end_dt = start_dt + timedelta(minutes=duration_minutes)
+        
+        event_data = {
+            "summary": summary,
+            "start": {"dateTime": start_dt.isoformat(), "timeZone": "Asia/Jerusalem"},
+            "end": {"dateTime": end_dt.isoformat(), "timeZone": "Asia/Jerusalem"}
+        }
+        
+        r = httpx.post("https://www.googleapis.com/calendar/v3/calendars/primary/events", headers=headers, json=event_data)
+        if r.status_code in [200, 201]:
+            return f"✅ הפגישה '{summary}' נקבעה בהצלחה ביומן!"
+        return f"❌ שגיאה מקלנדר: {r.text}"
+    except Exception as e:
+        return f"❌ שגיאה בקביעת פגישה: {str(e)}"
+
+def send_gmail(to_email, subject, body_text):
+    """שליחת אימייל מהיר דרך חשבון ה-Gmail שלך"""
+    try:
+        token = get_google_token()
+        if not token: 
+            return "❌ חסר טוקן לשליחת מייל."
+        
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        import base64
+        from email.mime.text import MIMEText
+        
+        message = MIMEText(body_text)
+        message['to'] = to_email
+        message['subject'] = subject
+        raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
+        
+        r = httpx.post("https://www.googleapis.com/gmail/v1/users/me/messages/send", headers=headers, json={"raw": raw_message})
+        if r.status_code == 200:
+            return f"📧 המייל ל-{to_email} נשלח בהצלחה!"
+        return f"❌ שגיאה בשליחת מייל: {r.text}"
+    except Exception as e:
+        return f"❌ שגיאה במערכת המייל: {str(e)}"
+
+def read_latest_emails(max_results=5):
+    """קריאת תקצירי האימיילים האחרונים מתיבת ה-Gmail שלך"""
+    try:
+        token = get_google_token()
+        if not token: 
+            return "❌ חסר טוקן לקריאת מיילים."
+        
+        headers = {"Authorization": f"Bearer {token}"}
+        r = httpx.get("https://www.googleapis.com/gmail/v1/users/me/messages", headers=headers, params={"maxResults": max_results})
+        messages = r.json().get("messages", [])
+        
+        if not messages: 
+            return "📬 אין מיילים חדשים בתיבה."
+        
+        summary = "📬 המיילים האחרונים שקיבלת:\n"
+        for msg in messages:
+            msg_info = httpx.get(f"https://www.googleapis.com/gmail/v1/users/me/messages/{msg['id']}", headers=headers).json()
+            snippet = msg_info.get("snippet", "")
+            summary += f"- {snippet}\n"
+        return summary
+    except Exception as e:
+        return f"❌ שגיאה בקריאת מיילים: {str(e)}"
+
+def append_to_sheet(spreadsheet_name, row_data_list):
+    """הוספת שורת נתונים (הערות, משקל, מדדי בריאות) לקובץ גוגל שיטס קיים"""
+    try:
+        token = get_google_token()
+        if not token: 
+            return "❌ חסר טוקן לחיבור לגוגל שיטס."
+        
+        headers = {"Authorization": f"Bearer {token}"}
+        search_params = {"q": f"name = '{spreadsheet_name}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false"}
+        r_search = httpx.get("https://www.googleapis.com/drive/v3/files", headers=headers, params=search_params)
+        files = r_search.json().get("files", [])
+        
+        if not files: 
+            return f"❌ לא מצאתי בדרייב קובץ גוגל שיטס בשם '{spreadsheet_name}'."
+        spreadsheet_id = files[0]['id']
+        
+        url = f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values/A1:append"
+        body = {"range": "A1", "majorDimension": "ROWS", "values": [row_data_list]}
+        r_append = httpx.post(url, headers=headers, params={"valueInputOption": "USER_ENTERED"}, json=body)
+        
+        if r_append.status_code == 200:
+            return f"📊 הנתונים נרשמו בהצלחה בטבלה '{spreadsheet_name}'!"
+        return f"❌ שגיאה ברישום לשיטס: {r_append.text}"
+    except Exception as e:
+        return f"❌ שגיאה במערכת גוגל שיטס: {str(e)}"
 def load():
     if os.path.exists(DATA_FILE):
         try:
