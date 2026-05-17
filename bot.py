@@ -85,18 +85,37 @@ def ask_claude(msg, uid):
 
     history = data['history'][uid]
 
-    response = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=1024,
-        system=f"""אתה 'מנהל', העוזר האסטרטגי והחד של אליהו חזן. 
-        האישיות שלך: יזם נדל"ן ממולח, חד, עם חוש הומור ענייני.
-        עליך לפעול תמיד לפי 'לוחות הברית' האלו:
-        {rules}
-        
-        יש לך גישה לדרייב (/find) וליומן (/cal). 
-        אל תגיד שאתה לא זוכר! תשתמש בהיסטוריית השיחה המצורפת.""",
-        messages=history + [{"role": "user", "content": msg}]
-    )
+    # 1. טעינת שני קבצי ה-JSON במקביל (קובץ ההגדרות וקובץ הידע)
+with open('config.json', 'r', encoding='utf-8') as f1, open(KNOWLEDGE_FILE, 'r', encoding='utf-8') as f2:
+    config = json.load(f1)          # קובץ התכונות, החיסכון והאישיות החדש
+    knowledge_base = json.load(f2)  # קובץ הידע הקיים שלך
+
+# 2. חילוץ חוקי הברזל (10 הדיברות) מתוך קובץ הידע לתוך המשתנה rules
+rules = knowledge_base.get("rules", "")
+
+# 3. ניהול מגבלת הזיכרון השוטף (שומר רק על 5 זוגות ההודעות האחרונות מתוך ההיסטוריה לחיסכון)
+memory_limit = config["bot_settings"]["memory_length"]
+if len(history) > (memory_limit * 2):
+    history = history[-(memory_limit * 2):]
+
+# 4. בדיקה האם הופעל "מצב מחקר" באמצעות סולמית (#) בתחילת ההודעה
+if msg.startswith('#'):
+    clean_msg = msg[1:].strip()  # מנקים את הסולמית מההודעה
+    max_tokens_to_send = config["bot_settings"]["max_tokens_research"]  # מאפשר תגובה ארוכה למחקר
+    # שילוב ה-System Prompt החדש מה-JSON (config) יחד עם ה-rules מקובץ הידע (knowledge_base)
+    current_system = f"{config['system_prompt']}\n{rules}\nמצב מחקר פעיל: נתח לעומק וענה בהרחבה."
+else:
+    clean_msg = msg
+    max_tokens_to_send = config["bot_settings"]["max_tokens_default"]   # נעילת ברזל על 50 טוקנים לחיסכון
+    current_system = f"{config['system_prompt']}\n{rules}\nמצב שוטף: ענה בשורה אחת קצרה וממוקדת בלבד."
+
+# 5. הפנייה המעודכנת והמאובטחת למודל Claude
+response = client.messages.create(
+    model=config["bot_settings"]["model_name"], # מושך אוטומטית את "claude-sonnet-4-6" מה-JSON
+    max_tokens=max_tokens_to_send,              # 50 בשוטף, 1024 במחקר
+    system=current_system,                      # ה-System Prompt המשותף והדינמי
+    messages=history + [{"role": "user", "content": clean_msg}]
+)
     
     answer = response.content[0].text
     # שמירת הזיכרון
