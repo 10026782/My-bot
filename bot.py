@@ -293,7 +293,7 @@ def handle_command(user_text, chat_id):
 
         # 2. שליחת ההודעה לקלוד לקבלת ניתוח והחלטה על כלים
         message = client.messages.create(
-            model="claude-3-5-sonnet-20241022",
+            model="claude-sonnet-4-6",
             max_tokens=1500,
             temperature=0.5,
             system=system_instruction,
@@ -336,7 +336,7 @@ def handle_command(user_text, chat_id):
                 # אם נשלף מידע מהכלים, קלוד מעבד אותו ומנסח את התשובה הסופית והמזהירה
                 if context_data:
                     final_message = client.messages.create(
-                        model="claude-3-5-sonnet-20241022",
+                        model="claude-sonnet-4-6",
                         max_tokens=1500,
                         system=system_instruction,
                         messages=[
