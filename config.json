@@ -1,7 +1,7 @@
 {
   "bot_settings": {
     "model_name": "claude-sonnet-4-6",
-    "max_tokens_default": 400,
+    "max_tokens_default": 800,
     "max_tokens_research": 2048,
     "memory_length": 5
   },
