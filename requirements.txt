@@ -8,3 +8,4 @@ schedule
 flask
 twilio
 gunicorn
+pyTelegramBotAPI
