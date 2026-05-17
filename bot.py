@@ -275,39 +275,85 @@ def ask_claude(msg, uid):
     save(data)
 
     return answer
+def handle_command(user_text, chat_id):
+    """המוח המרכזי של הבוט - מנתח את כוונת המשתמש, מפעיל כלים, ומשמש כשותף המזהיר"""
+    try:
+        # 1. הגדרת האישיות של הבוט כשותף המזהיר והשקול (האיפכא מסתברא)
+        system_instruction = (
+            "You are 'The Boss Bot' - an elite business strategist, real estate expert, and international trade advisor. "
+            "Your absolute primary mandate is to act as the 'Devil's Advocate' (איפכא מסתברא) and the cautious, protective partner. "
+            "The user and his business partner are naturally optimistic and visionary; they see the upside. Your job is to look for "
+            "the downside, the risks, what can go wrong, where they might be naive, and where the seller or partner might be misleading them. "
+            "Be the voice of reason, cold logic, and critical thinking. Stand at the gate and protect their capital. "
+            "Always respond in fluent, professional, and sharp Hebrew.\n\n"
+            "If the user asks to perform an action (like searching/reading Google Drive, checking Gmail, updating Google Sheets, "
+            "creating calendar events, or managing Airtable), reply by starting your message with a special JSON command block "
+            "wrapped in [TOOL_CALL] ... [/TOOL_CALL] so the system can execute it, then provide your critical business feedback below it."
+        )
 
-def handle_command(text, uid):
-    data = load()
-    text = text.strip()
-    
-    if text.lower().startswith("/find ") or text.lower().startswith("find "):
-        query = text[6:] if text.startswith("/") else text[5:]
-        return search_drive(query)
-    
-    if text.startswith("/add "):
-        task = text[5:]
-        data['tasks'].append({"text": task, "done": False, "date": datetime.now().strftime('%d/%m/%Y')})
-        save(data)
-        return f"✅ נוסף למשימות: {task}"
-    
-    if text == "/tasks":
-        open_t = [t for t in data['tasks'] if not t.get('done')]
-        if not open_t: return "✅ אין משימות פתוחות!"
-        return "📋 משימות פתוחות:\n" + "\n".join(f"{i}. {t['text']}" for i, t in enumerate(open_t, 1))
+        # 2. שליחת ההודעה לקלוד לקבלת ניתוח והחלטה על כלים
+        message = client.messages.create(
+            model="claude-3-5-sonnet-20241022",
+            max_tokens=1500,
+            temperature=0.5,
+            system=system_instruction,
+            messages=[{"role": "user", "content": user_text}]
+        )
+        
+        reply = message.content[0].text
+        context_data = ""
 
-    return ask_claude(text, uid)
+        # 3. מנגנון זיהוי והפעלת כלים אוטומטי (Intent Detection)
+        if "[TOOL_CALL]" in reply:
+            try:
+                # חילוץ הפקודה מתוך תגובות ה-JSON של קלוד
+                start_idx = reply.find("[TOOL_CALL]") + len("[TOOL_CALL]")
+                end_idx = reply.find("[/TOOL_CALL]")
+                import json
+                tool_json = json.loads(reply[start_idx:end_idx].strip())
+                clean_reply = reply[end_idx + len("[/TOOL_CALL]"):].strip()
+                
+                action = tool_json.get("action")
+                
+                # הפעלת הכלי הנכון לפי החלטת קלוד (בלי שהמשתמש יצטרך פקודה מפורשת)
+                if action == "search_drive":
+                    context_data = search_drive(tool_json.get("query"))
+                elif action == "read_file":
+                    file_content = read_drive_file(tool_json.get("file_name"))
+                    context_data = f"\n[תוכן הקובץ שנשלף מהדרייב]:\n{file_content}" if file_content else "❌ הקובץ לא נמצא או ריק."
+                elif action == "create_calendar":
+                    context_data = create_calendar_event(tool_json.get("summary"), tool_json.get("start_time"))
+                elif action == "send_email":
+                    context_data = send_gmail(tool_json.get("to"), tool_json.get("subject"), tool_json.get("body"))
+                elif action == "read_emails":
+                    context_data = read_latest_emails()
+                elif action == "append_sheet":
+                    context_data = append_to_sheet(tool_json.get("sheet_name"), tool_json.get("row_data"))
+                elif action == "airtable_update":
+                    # כאן נחבר את פונקציית האיירטאבל שנוסיף מיד
+                    context_data = "📊 פקודת איירטאבל התקבלה במערכת!"
+                
+                # אם נשלף מידע מהכלים, קלוד מעבד אותו ומנסח את התשובה הסופית והמזהירה
+                if context_data:
+                    final_message = client.messages.create(
+                        model="claude-3-5-sonnet-20241022",
+                        max_tokens=1500,
+                        system=system_instruction,
+                        messages=[
+                            {"role": "user", "content": user_text},
+                            {"role": "assistant", "content": reply},
+                            {"role": "user", "content": f"[תוצאת המערכת]: {context_data}\nכעת ענה למשתמש על בסיס נתונים אלו כשותף המזהיר שלו."}
+                        ]
+                    )
+                    return final_message.content[0].text
+                return clean_reply
+                
+            except Exception as tool_err:
+                print(f"Error executing tool: {tool_err}", flush=True)
 
-# 5. ראוטים נוספים ל-Flask
-@app.route("/whatsapp", methods=["POST"])
-def whatsapp():
-    incoming = request.values.get("Body", "").strip()
-    sender = request.values.get("From", "")
-    reply = handle_command(incoming, sender)
-    resp = MessagingResponse()
-    resp.message(reply)
-    return Response(str(resp), mimetype='application/xml')
-
-@app.route("/")
+        return reply
+    except Exception as e:
+        return f"❌ שגיאה בעיבוד ההודעה: {str(e)}"
 def home():
     return "The Boss is Live"
 
