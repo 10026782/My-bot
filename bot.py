@@ -1,19 +1,28 @@
 import os, json, threading, time, httpx
 from datetime import datetime
-from flask import Flask, request, Response
-import anthropic # שימוש בספריה הרשמית כפי שמופיע בקוד שלך
+from flask import Flask, request, Response, abort  # <-- הוספנו abort בסוף
+import anthropic
 from twilio.twiml.messaging_response import MessagingResponse
+import telebot  # <-- הוספנו את ספריית טלגרם
 
 # הגדרות מפתחות
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
-
+bot = telebot.TeleBot(TELEGRAM_TOKEN)
 # יצירת קליינט של אנתרופיק
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 DATA_FILE = "data.json"
 KNOWLEDGE_FILE = "import_knowledge_base.json"
-app = Flask(__name__)
+@app.route(f'/{TELEGRAM_TOKEN}', methods=['POST'])
+def telegram_webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return '', 200
+    else:
+        abort(403)
 def get_google_token():
     # משיכת המשתנים וניקוי רווחים נסתרים באופן אוטומטי בעזרת .strip()
     client_id = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
@@ -165,30 +174,36 @@ def whatsapp():
 def home():
     return "The Boss is Live"
 
-def telegram_polling():
-    import httpx
-    offset = 0
-    print("--- Polling טלגרם התחיל (מודל 4-6) ---")
-    while True:
-        try:
-            r = httpx.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates", 
-                          params={"offset": offset, "timeout": 20}, timeout=25)
-            updates = r.json().get("result", [])
-            for update in updates:
-                offset = update["update_id"] + 1
-                if "message" in update and "text" in update["message"]:
-                    chat_id = update["message"]["chat"]["id"]
-                    text = update["message"]["text"]
-                    reply = handle_command(text, str(chat_id))
-                    httpx.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                               json={"chat_id": chat_id, "text": reply})
-        except:
-            time.sleep(5)
-
-# הפעלת טלגרם ברקע לפני הרצת השרת
-t = threading.Thread(target=telegram_polling, daemon=True)
-t.start()
+@app.route(f'/{TELEGRAM_TOKEN}', methods=['POST'])
+def telegram_webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        
+        # בדיקה שיש הודעה וטקסט (בדיוק כמו הלוגיקה המקורית שלך)
+        if update.message and update.message.text:
+            chat_id = str(update.message.chat.id)
+            text = update.message.text
+            
+            # הרצת הפונקציה שלך שמחזירה תשובה
+            reply = handle_command(text, chat_id)
+            
+            # שליחת התשובה חזרה למשתמש
+            bot.send_message(chat_id, reply)
+            
+        return '', 200
+    else:
+        abort(403)
 
 if __name__ == "__main__":
+    # 1. מנקים הגדרות קודמות מול טלגרם
+    bot.remove_webhook()
+    
+    # 2. מחברים את הצינור החסכוני (https://my-bot-jqz2.onrender.com)
+    RENDER_APP_URL = "https://my-bot-jgz2.onrender.com" 
+    bot.set_webhook(url=f"{RENDER_APP_URL}/{TELEGRAM_TOKEN}")
+    print("✅ טלגרם עבר למצב Webhook חסכוני!")
+    
+    # 3. הרצת השרת בפורט של רנדר
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
