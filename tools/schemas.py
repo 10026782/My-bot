@@ -54,6 +54,65 @@ TOOL_SCHEMAS = [
         },
     },
     {
+        "name": "gmail_send",
+        "description": "שליחת אימייל דרך Gmail. השתמש כשמתבקשת לשלוח מייל לאדם כלשהו.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "to":      {"type": "string", "description": "כתובת המייל של הנמען"},
+                "subject": {"type": "string", "description": "נושא המייל"},
+                "body":    {"type": "string", "description": "תוכן המייל"},
+            },
+            "required": ["to", "subject", "body"],
+        },
+    },
+    {
+        "name": "gmail_read",
+        "description": "קריאת המיילים האחרונים מ-Gmail.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "max_results": {"type": "integer", "description": "כמות מיילים לשליפה (ברירת מחדל: 5)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "drive_search",
+        "description": "חיפוש קבצים ב-Google Drive לפי שם.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "מה לחפש בשם הקובץ"},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "drive_read_file",
+        "description": "קריאת תוכן קובץ מ-Google Drive (Docs, טקסט, וכו').",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "file_name": {"type": "string", "description": "שם הקובץ לקריאה"},
+            },
+            "required": ["file_name"],
+        },
+    },
+    {
+        "name": "calendar_create_event",
+        "description": "קביעת פגישה או אירוע ב-Google Calendar.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "summary":          {"type": "string", "description": "שם הפגישה/אירוע"},
+                "start_time":       {"type": "string", "description": "תאריך ושעה ב-ISO: 2025-06-01T14:00:00"},
+                "duration_minutes": {"type": "integer", "description": "משך בדקות (ברירת מחדל: 60)"},
+            },
+            "required": ["summary", "start_time"],
+        },
+    },
+    {
         "name": "airtable_update_record",
         "description": "עדכון רשומה קיימת ב-Airtable לפי record ID.",
         "input_schema": {

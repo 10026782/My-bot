@@ -22,6 +22,30 @@ def _airtable_url(table: str) -> str:
 def dispatch_tool(name: str, inputs: dict, tenant_id: str = "boss_hq") -> str:
     match name:
 
+        case "gmail_send":
+            from tools.google_tools import gmail_send
+            return gmail_send(inputs["to"], inputs["subject"], inputs["body"])
+
+        case "gmail_read":
+            from tools.google_tools import gmail_read
+            return gmail_read(inputs.get("max_results", 5))
+
+        case "drive_search":
+            from tools.google_tools import drive_search
+            return drive_search(inputs["query"])
+
+        case "drive_read_file":
+            from tools.google_tools import drive_read_file
+            return drive_read_file(inputs["file_name"])
+
+        case "calendar_create_event":
+            from tools.google_tools import calendar_create_event
+            return calendar_create_event(
+                inputs["summary"],
+                inputs["start_time"],
+                inputs.get("duration_minutes", 60),
+            )
+
         case "add_knowledge":
             from knowledge_engine import knowledge_engine
             ok = knowledge_engine.add_fact(tenant_id, inputs["fact"])
