@@ -17,12 +17,8 @@ CHANNEL_DOMAINS: dict[str, str] = {
 # דומיין ברירת מחדל כשאין מיפוי מוגדר
 DEFAULT_DOMAIN = "realestate"
 
-# ─── Global Feature Flags ──────────────────────────────────────────────────────
-FEATURES = {
-    "LEAD_QUALIFIER":    True,
-    "CREATIVE_GENERATOR": True,
-    "DOMAIN_ROUTING":    True,   # False = הכל הולך ל-DEFAULT_DOMAIN
-}
+# Feature flags: נשלטות דרך env vars — ראה feature_flags.py
+# LEAD_QUALIFIER=true, CREATIVE_GENERATOR=true (ב-Render)
 
 # ─── Helper ───────────────────────────────────────────────────────────────────
 
@@ -32,8 +28,5 @@ def get_domain(channel: str, sender: str) -> str:
     channel: "whatsapp" / "telegram" / "web"
     sender:  מספר טלפון או chat_id
     """
-    if not FEATURES.get("DOMAIN_ROUTING"):
-        return DEFAULT_DOMAIN
-
     key = f"{channel}:{sender}"
     return CHANNEL_DOMAINS.get(key, DEFAULT_DOMAIN)

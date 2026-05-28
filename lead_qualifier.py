@@ -156,7 +156,14 @@ def handle_lead_message(sender: str, message: str, channel: str = "whatsapp") ->
         flow = get_flow(domain)
         return flow[0][1]
 
-    session = lead_sessions[sender]
+    # get existing or create new session with correct domain
+    session = lead_sessions.get(sender)
+    if session is None:
+        domain = get_domain(channel, sender)
+        session = _new_session(domain)
+        lead_sessions._store[sender] = session
+        if len(lead_sessions._store) > lead_sessions._maxsize:
+            lead_sessions._store.popitem(last=False)
 
     # שיחה הסתיימה
     if session["done"]:

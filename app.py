@@ -128,7 +128,7 @@ def _extract_text(response) -> str:
     for block in response.content:
         if hasattr(block, "text"):
             return block.text
-    return ""
+    return "לא הצלחתי לייצר תשובה. נסה שוב."
 
 
 # ─── Webhook Endpoints ────────────────────────────────────────────────────────
@@ -159,8 +159,8 @@ def whatsapp_webhook_twilio():
         return Response(str(resp), mimetype="application/xml")
 
     # לקוח חיצוני → State Machine כרגיל
-    session = lead_sessions[sender]
-    if not session["done"]:
+    session = lead_sessions.get(sender)
+    if session is None or not session["done"]:
         reply = handle_lead_message(sender, user_message)
         if reply:
             resp = MessagingResponse()
