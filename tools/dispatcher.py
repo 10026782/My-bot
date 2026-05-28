@@ -19,7 +19,24 @@ def _airtable_url(table: str) -> str:
     return f"https://api.airtable.com/v0/{_AIRTABLE_BASE}/{requests.utils.quote(table)}"
 
 
-def dispatch_tool(name: str, inputs: dict, tenant_id: str = "boss_hq") -> str:
+def _airtable_check_response(r, table: str) -> str | None:
+    """מחזיר הודעת שגיאה מפורטת, או None אם הכל תקין."""
+    if r.status_code == 200 or r.status_code == 201:
+        return None
+    if r.status_code == 403:
+        return (
+            f"❌ Airtable 403 — אין הרשאה לטבלה '{table}'.\n"
+            f"לתיקון: כנס ל-airtable.com → Account → Personal Access Tokens\n"
+            f"ודא שה-Token כולל:\n"
+            f"  • Scope: data.records:read + data.records:write\n"
+            f"  • Base: הוסף את ה-Base הספציפי (לא 'All bases')\n"
+            f"  • AIRTABLE_BASE_ID בRender = {_AIRTABLE_BASE or '(ריק!)'}"
+        )
+    if r.status_code == 401:
+        return "❌ Airtable 401 — ה-AIRTABLE_API_KEY לא תקין או פג תוקף."
+    if r.status_code == 404:
+        return f"❌ Airtable 404 — טבלה '{table}' לא נמצאה. בדוק את שם הטבלה ואת AIRTABLE_BASE_ID."
+    return f"❌ Airtable שגיאה {r.status_code}: {r.text[:200]}"
     match name:
 
         case "gmail_send":
@@ -65,8 +82,9 @@ def dispatch_tool(name: str, inputs: dict, tenant_id: str = "boss_hq") -> str:
                     params=params,
                     timeout=10,
                 )
-                if r.status_code != 200:
-                    return f"❌ Airtable שגיאה {r.status_code}: {r.text[:200]}"
+                err = _airtable_check_response(r, table)
+                if err:
+                    return err
                 records = r.json().get("records", [])
                 if not records:
                     return f"לא נמצאו רשומות בטבלה '{table}'."
@@ -93,8 +111,9 @@ def dispatch_tool(name: str, inputs: dict, tenant_id: str = "boss_hq") -> str:
                     json={"fields": fields},
                     timeout=10,
                 )
-                if r.status_code not in (200, 201):
-                    return f"❌ Airtable שגיאה {r.status_code}: {r.text[:200]}"
+                err = _airtable_check_response(r, table)
+                if err:
+                    return err
                 rec_id = r.json().get("id", "")
                 return f"✅ רשומה נוצרה בטבלה '{table}' — ID: {rec_id}"
             except Exception as e:
@@ -115,8 +134,9 @@ def dispatch_tool(name: str, inputs: dict, tenant_id: str = "boss_hq") -> str:
                     json={"fields": fields},
                     timeout=10,
                 )
-                if r.status_code != 200:
-                    return f"❌ Airtable שגיאה {r.status_code}: {r.text[:200]}"
+                err = _airtable_check_response(r, table)
+                if err:
+                    return err
                 return f"✅ רשומה {record_id} עודכנה בטבלה '{table}'"
             except Exception as e:
                 logger.error(f"airtable_update_record error: {e}")
