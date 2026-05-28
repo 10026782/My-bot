@@ -19,12 +19,13 @@ from datetime import datetime
 
 _lock = Lock()
 
-# ─── Airtable Config ──────────────────────────────────────────────────────────
-_AT_TOKEN   = os.environ.get("AIRTABLE_API_KEY", "")
-_AT_BASE    = os.environ.get("AIRTABLE_BASE_ID", "")
-_AT_TABLE   = os.environ.get("AIRTABLE_PROFILE_TABLE", "Profile")
-_AT_HEADERS = {"Authorization": f"Bearer {_AT_TOKEN}", "Content-Type": "application/json"}
-_AT_URL     = f"https://api.airtable.com/v0/{_AT_BASE}/{_AT_TABLE}"
+def _at_headers() -> dict:
+    return {"Authorization": f"Bearer {os.environ.get('AIRTABLE_API_KEY', '')}", "Content-Type": "application/json"}
+
+def _at_url() -> str:
+    base  = os.environ.get("AIRTABLE_BASE_ID", "")
+    table = os.environ.get("AIRTABLE_PROFILE_TABLE", "Profile")
+    return f"https://api.airtable.com/v0/{base}/{table}"
 
 # ─── Cache קצר (60 שניות) — לא קוראים Airtable בכל הודעה ─────────────────────
 _cache: dict = {"profile": None, "record_id": None, "ts": 0}
@@ -58,8 +59,8 @@ def load_profile() -> dict:
 
         try:
             r = requests.get(
-                _AT_URL,
-                headers=_AT_HEADERS,
+                _at_url(),
+                headers=_at_headers(),
                 params={"filterByFormula": "{Name}='main'", "maxRecords": 1},
                 timeout=10,
             )
@@ -95,15 +96,15 @@ def save_profile(profile: dict):
 
             if record_id:
                 r = requests.patch(
-                    f"{_AT_URL}/{record_id}",
-                    headers=_AT_HEADERS,
+                    f"{_at_url()}/{record_id}",
+                    headers=_at_headers(),
                     json={"fields": {"ProfileData": payload}},
                     timeout=10,
                 )
             else:
                 r = requests.post(
-                    _AT_URL,
-                    headers=_AT_HEADERS,
+                    _at_url(),
+                    headers=_at_headers(),
                     json={"fields": {"Name": "main", "ProfileData": payload}},
                     timeout=10,
                 )
@@ -121,8 +122,8 @@ def _create_profile_record():
     try:
         payload = json.dumps(DEFAULT_PROFILE, ensure_ascii=False)
         r = requests.post(
-            _AT_URL,
-            headers=_AT_HEADERS,
+            _at_url(),
+            headers=_at_headers(),
             json={"fields": {"Name": "main", "ProfileData": payload}},
             timeout=10,
         )

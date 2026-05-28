@@ -4,19 +4,24 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-_AIRTABLE_BASE = os.environ.get("AIRTABLE_BASE_ID", "")
-_AIRTABLE_TOKEN = os.environ.get("AIRTABLE_API_KEY", "")
-
-
 def _airtable_headers() -> dict:
+    token = os.environ.get("AIRTABLE_API_KEY", "")
     return {
-        "Authorization": f"Bearer {_AIRTABLE_TOKEN}",
+        "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
 
 
 def _airtable_url(table: str) -> str:
-    return f"https://api.airtable.com/v0/{_AIRTABLE_BASE}/{requests.utils.quote(table)}"
+    base = os.environ.get("AIRTABLE_BASE_ID", "")
+    return f"https://api.airtable.com/v0/{base}/{requests.utils.quote(table)}"
+
+
+def _airtable_creds_ok() -> str | None:
+    """מחזיר הודעת שגיאה אם חסרים env vars, אחרת None."""
+    if not os.environ.get("AIRTABLE_API_KEY") or not os.environ.get("AIRTABLE_BASE_ID"):
+        return "❌ AIRTABLE_API_KEY או AIRTABLE_BASE_ID לא מוגדרים"
+    return None
 
 
 def _airtable_check_response(r, table: str) -> str | None:
@@ -30,7 +35,7 @@ def _airtable_check_response(r, table: str) -> str | None:
             f"ודא שה-Token כולל:\n"
             f"  • Scope: data.records:read + data.records:write\n"
             f"  • Base: הוסף את ה-Base הספציפי (לא 'All bases')\n"
-            f"  • AIRTABLE_BASE_ID בRender = {_AIRTABLE_BASE or '(ריק!)'}"
+            f"  • AIRTABLE_BASE_ID בRender = {os.environ.get('AIRTABLE_BASE_ID') or '(ריק!)'}"
         )
     if r.status_code == 401:
         return "❌ Airtable 401 — ה-AIRTABLE_API_KEY לא תקין או פג תוקף."
@@ -69,8 +74,9 @@ def _airtable_check_response(r, table: str) -> str | None:
             return "✅ עובדה נוספה" if ok else "❌ שגיאה בשמירה"
 
         case "airtable_get_records":
-            if not _AIRTABLE_TOKEN or not _AIRTABLE_BASE:
-                return "❌ AIRTABLE_API_KEY או AIRTABLE_BASE_ID לא מוגדרים"
+            creds_err = _airtable_creds_ok()
+            if creds_err:
+                return creds_err
             table = inputs["table"]
             params: dict = {"maxRecords": inputs.get("max_records", 10)}
             if inputs.get("filter_formula"):
@@ -100,8 +106,9 @@ def _airtable_check_response(r, table: str) -> str | None:
                 return f"❌ שגיאה: {e}"
 
         case "airtable_create_record":
-            if not _AIRTABLE_TOKEN or not _AIRTABLE_BASE:
-                return "❌ AIRTABLE_API_KEY או AIRTABLE_BASE_ID לא מוגדרים"
+            creds_err = _airtable_creds_ok()
+            if creds_err:
+                return creds_err
             table = inputs["table"]
             fields = inputs.get("fields", {})
             try:
@@ -121,8 +128,9 @@ def _airtable_check_response(r, table: str) -> str | None:
                 return f"❌ שגיאה: {e}"
 
         case "airtable_update_record":
-            if not _AIRTABLE_TOKEN or not _AIRTABLE_BASE:
-                return "❌ AIRTABLE_API_KEY או AIRTABLE_BASE_ID לא מוגדרים"
+            creds_err = _airtable_creds_ok()
+            if creds_err:
+                return creds_err
             table = inputs["table"]
             record_id = inputs["record_id"]
             fields = inputs.get("fields", {})
