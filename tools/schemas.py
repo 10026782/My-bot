@@ -55,7 +55,7 @@ TOOL_SCHEMAS = [
     },
     {
         "name": "gmail_send",
-        "description": "שליחת אימייל דרך Gmail. השתמש כשמתבקשת לשלוח מייל לאדם כלשהו.",
+        "description": "שמירת טיוטת מייל ב-Gmail — לא שולח ישירות! תמיד צור טיוטה ואמור למשתמש שהיא ממתינה לאישורו.",
         "input_schema": {
             "type": "object",
             "properties": {

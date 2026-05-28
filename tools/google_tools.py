@@ -47,6 +47,7 @@ def get_google_token() -> str | None:
 # ─── Gmail ────────────────────────────────────────────────────────────────────
 
 def gmail_send(to: str, subject: str, body: str) -> str:
+    """יוצר טיוטה ב-Gmail — לא שולח ישירות. תמיד טיוטה קודם."""
     token = get_google_token()
     if not token:
         return "❌ חסרים GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REFRESH_TOKEN"
@@ -58,16 +59,20 @@ def gmail_send(to: str, subject: str, body: str) -> str:
         raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
 
         r = httpx.post(
-            "https://www.googleapis.com/gmail/v1/users/me/messages/send",
+            "https://www.googleapis.com/gmail/v1/users/me/drafts",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            json={"raw": raw},
+            json={"message": {"raw": raw}},
             timeout=15,
         )
-        if r.status_code == 200:
-            return f"📧 מייל ל-{to} נשלח בהצלחה!"
+        if r.status_code in (200, 201):
+            return (
+                f"📝 טיוטה נשמרה ב-Gmail ל-{to}\n"
+                f"נושא: {subject}\n"
+                f"⚠️ הטיוטה ממתינה לאישורך — לא נשלחה עדיין."
+            )
         return f"❌ שגיאת Gmail {r.status_code}: {r.text[:200]}"
     except Exception as e:
-        return f"❌ שגיאה בשליחת מייל: {e}"
+        return f"❌ שגיאה ביצירת טיוטה: {e}"
 
 
 def gmail_read(max_results: int = 5) -> str:
