@@ -95,7 +95,8 @@ def dispatch_tool(name: str, inputs: dict, tenant_id: str = "boss_hq") -> str:
                     return err
                 records = r.json().get("records", [])
                 if not records:
-                    return f"לא נמצאו רשומות בטבלה '{table}'."
+                    filter_info = f" (סינון: {inputs['filter_formula']})" if inputs.get("filter_formula") else ""
+                    return f"✅ החיפוש הצליח — אין רשומות בטבלה '{table}'{filter_info}. זו תוצאה תקינה, לא שגיאה."
                 lines = [f"נמצאו {len(records)} רשומות מטבלה '{table}':"]
                 for rec in records:
                     fields = rec.get("fields", {})
