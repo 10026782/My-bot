@@ -103,3 +103,38 @@ def _mock_generate(template_name: str, context: str) -> str:
         f"הקשר: {context[:100]}...\n"
         f"הפעל CREATIVE_GENERATOR=true ב-env variables לתוצאות אמיתיות."
     )
+
+
+# ─── Telegram Command Handler ─────────────────────────────────────────────────
+
+_KEYWORD_TO_TEMPLATE = {
+    'נדל"ן': "property_listing",
+    "נדלן":  "property_listing",
+    "נדל":   "property_listing",
+    "ייבוא": "import_offer",
+    "יבוא":  "import_offer",
+    "וואטסאפ": "whatsapp_followup",
+    "ווטסאפ":  "whatsapp_followup",
+    "מייל":  "email_proposal",
+    "פוסט":  "social_post",
+    "רשתות": "social_post",
+}
+
+
+def handle_creative_command(text: str, chat_id: str) -> str:
+    """מזהה תבנית מתוך הטקסט ומייצר תוכן שיווקי מותאם."""
+    parts = text.split("קריאייטיב", 1)
+    context = parts[1].strip() if len(parts) > 1 else ""
+
+    if not context:
+        return list_templates()
+
+    template = "property_listing"
+    for keyword, tmpl in _KEYWORD_TO_TEMPLATE.items():
+        if keyword in context:
+            template = tmpl
+            break
+
+    result = generate(template, context)
+    label = template.replace("_", " ").title()
+    return f"*{label}*\n\n{result}"

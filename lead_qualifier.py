@@ -1,5 +1,7 @@
 import os
 import logging
+from enum import Enum
+from collections import defaultdict
 from anthropic import Anthropic
 from feature_flags import is_enabled
 
@@ -104,3 +106,48 @@ def _mock_qualify(lead_info: str) -> dict:
         "risk": "LEAD_QUALIFIER לא מופעל בסביבה זו.",
         "next_step": "הפעל LEAD_QUALIFIER=true ב-env variables.",
     }
+
+
+# ─── WhatsApp Lead Session State Machine ─────────────────────────────────────
+
+class LeadState(Enum):
+    INTRO = "intro"
+    BUDGET = "budget"
+    TIMELINE = "timeline"
+    DONE = "done"
+
+
+_FLOW = [
+    (LeadState.INTRO,    'מה אתה מחפש? נדל"ן / ייבוא / אחר?'),
+    (LeadState.BUDGET,   "מה התקציב שלך? (₪ / $)"),
+    (LeadState.TIMELINE, "מה לוח הזמנים שלך? (מיידי / חודש / גמיש)"),
+]
+
+
+def _new_session() -> dict:
+    return {"state": LeadState.INTRO, "answers": {}}
+
+
+lead_sessions: dict = defaultdict(_new_session)
+
+
+def handle_lead_message(sender: str, message: str) -> str | None:
+    """מנהל שיחת כישור ליד ב-WhatsApp. מחזיר שאלה הבאה, או None כשהסתיים."""
+    session = lead_sessions[sender]
+    state = session["state"]
+
+    if state == LeadState.DONE:
+        return None
+
+    step_index = next((i for i, (s, _) in enumerate(_FLOW) if s == state), 0)
+    session["answers"][state.value] = message
+
+    if step_index + 1 < len(_FLOW):
+        next_state, next_question = _FLOW[step_index + 1]
+        session["state"] = next_state
+        return next_question
+
+    session["state"] = LeadState.DONE
+    lead_info = "\n".join(f"{k}: {v}" for k, v in session["answers"].items())
+    result = qualify_lead(lead_info, sender)
+    return format_lead_report(result)
