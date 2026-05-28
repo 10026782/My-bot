@@ -1,58 +1,61 @@
-# action_validator.py — ACTION VALIDATOR
-# בודק שלמות פרמטרים לפני dispatch_tool.
-# זה ה-gate האמיתי: rule-based, לא confidence מ-LLM.
+# action_validator.py — v1.1
+# Gate לפני dispatch_tool — שלושה שלבים:
+# 1. PRESENCE CHECK  — פרמטרים חובה קיימים?
+# 2. STRUCTURE CHECK — פורמט תקין? (ISO datetime וכו')
+# 3. Unknown tool    — BLOCK קשיח (לא ALLOW שקט)
 #
-# זרימה:
-#   Claude מציע tool_use
-#   → validate_action(name, inputs)
-#   → BLOCK (חסר פרמטר) | ALLOW → dispatch_tool
-#
-# הודעת BLOCK חוזרת למשתמש כשאלה ישירה — לא שגיאה טכנית.
+# UX: מציג את כל החסרים מראש — מוריד round-trips
 
 from __future__ import annotations
+import re
 import logging
 
 logger = logging.getLogger(__name__)
 
 
 # ══════════════════════════════════════════════════
-# Required fields per tool
-# נגזר מ-schemas.py "required" — מקור יחיד לאמת
+# Required fields — נגזר מ-schemas.py
 # ══════════════════════════════════════════════════
 
 _REQUIRED: dict[str, list[str]] = {
-    "search_drive":         ["query"],
-    "read_drive_file":      ["file_name"],
-    "calendar_get_events":  [],                            # הכל אופציונלי
-    "calendar_create_event":["summary", "start_time"],
-    "gmail_draft":          ["to", "subject", "body"],
-    "gmail_send_draft":     ["draft_id"],
-    "gmail_read":           [],
-    "sheets_append":        ["sheet_name", "row_data"],
-    "airtable_get":         ["table"],
-    "airtable_add":         ["table", "fields"],
-    "airtable_update":      ["table", "record_id", "fields"],
+    "search_drive":          ["query"],
+    "read_drive_file":       ["file_name"],
+    "calendar_get_events":   [],
+    "calendar_create_event": ["summary", "start_time"],
+    "gmail_draft":           ["to", "subject", "body"],
+    "gmail_send_draft":      ["draft_id"],
+    "gmail_read":            [],
+    "sheets_append":         ["sheet_name", "row_data"],
+    "airtable_get":          ["table"],
+    "airtable_add":          ["table", "fields"],
+    "airtable_update":       ["table", "record_id", "fields"],
 }
 
-# הודעות שאלה ידידותיות לכל שדה חסר
 _FIELD_QUESTIONS: dict[str, str] = {
-    "query":            "מה לחפש ב-Drive?",
-    "file_name":        "מה שם הקובץ לקריאה?",
-    "summary":          "מה כותרת הפגישה?",
-    "start_time":       "מתי הפגישה? (תאריך ושעה)",
-    "to":               "למי לשלוח את המייל?",
-    "subject":          "מה נושא המייל?",
-    "body":             "מה תוכן המייל?",
-    "draft_id":         "מה מזהה הטיוטה לשליחה?",
-    "sheet_name":       "מה שם הגיליון?",
-    "row_data":         "מה הנתונים להוספה?",
-    "table":            "לאיזו טבלה? (CRM / Cashflow / Tasks)",
-    "fields":           "מה השדות לעדכון?",
-    "record_id":        "מה מזהה הרשומה לעדכון?",
+    "query":       "מה לחפש ב-Drive?",
+    "file_name":   "מה שם הקובץ לקריאה?",
+    "summary":     "מה כותרת הפגישה?",
+    "start_time":  "מתי הפגישה? (פורמט: YYYY-MM-DDTHH:MM:SS)",
+    "to":          "למי לשלוח את המייל?",
+    "subject":     "מה נושא המייל?",
+    "body":        "מה תוכן המייל?",
+    "draft_id":    "מה מזהה הטיוטה לשליחה?",
+    "sheet_name":  "מה שם הגיליון?",
+    "row_data":    "מה הנתונים להוספה?",
+    "table":       "לאיזו טבלה? (CRM / Cashflow / Tasks)",
+    "fields":      "מה השדות לעדכון?",
+    "record_id":   "מה מזהה הרשומה לעדכון?",
 }
 
-# כלים שדורשים אישור מפורש — ללא קשר לפרמטרים
 _SENSITIVE_TOOLS = {"gmail_send_draft", "airtable_update", "airtable_add"}
+
+# ISO 8601 datetime — YYYY-MM-DDTHH:MM:SS (עם וריאנטים נפוצים)
+_ISO_DATETIME_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?([+-]\d{2}:?\d{2}|Z)?$"
+)
+
+# כתובת מייל בסיסית
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 # ══════════════════════════════════════════════════
@@ -60,16 +63,69 @@ _SENSITIVE_TOOLS = {"gmail_send_draft", "airtable_update", "airtable_add"}
 # ══════════════════════════════════════════════════
 
 class ActionAllowed:
-    """הפעולה עברה validation — אפשר לבצע."""
     pass
 
 class ActionBlocked:
-    """הפעולה נחסמה — reason הוא מה להחזיר למשתמש."""
     def __init__(self, reason: str):
         self.reason = reason
-
     def __str__(self) -> str:
         return self.reason
+
+
+# ══════════════════════════════════════════════════
+# STEP 1 — Presence Check
+# ══════════════════════════════════════════════════
+
+def _check_presence(tool_name: str, inputs: dict) -> list[str]:
+    """מחזיר רשימת שדות חסרים (ריקים או None)."""
+    required = _REQUIRED.get(tool_name, [])
+    return [
+        field for field in required
+        if inputs.get(field) is None or inputs.get(field) == ""
+        # dict/list ריקים ({}, []) — תקינים, Claude ימלא תוכן
+    ]
+
+
+# ══════════════════════════════════════════════════
+# STEP 2 — Structure Check
+# פורמט נתונים — לא רק שהשדה קיים
+# ══════════════════════════════════════════════════
+
+def _check_structure(tool_name: str, inputs: dict) -> list[str]:
+    """
+    מחזיר רשימת שגיאות פורמט.
+    רק שדות שכבר קיימים (presence check קדם).
+    """
+    errors = []
+
+    # calendar_create_event: start_time חייב להיות ISO datetime
+    if tool_name == "calendar_create_event":
+        st = inputs.get("start_time", "")
+        if st and not _ISO_DATETIME_RE.match(str(st)):
+            errors.append(
+                f"start_time '{st}' אינו פורמט תקין. "
+                "נדרש: YYYY-MM-DDTHH:MM:SS (למשל 2025-06-01T14:00:00)"
+            )
+
+    # gmail_draft: to חייב להיות כתובת מייל תקינה
+    if tool_name == "gmail_draft":
+        to = inputs.get("to", "")
+        if to and not _EMAIL_RE.match(str(to)):
+            errors.append(
+                f"כתובת המייל '{to}' אינה תקינה. "
+                "נדרש: name@domain.com"
+            )
+
+    # airtable_update: record_id חייב להתחיל ב-rec
+    if tool_name == "airtable_update":
+        rid = inputs.get("record_id", "")
+        if rid and not str(rid).startswith("rec"):
+            errors.append(
+                f"record_id '{rid}' אינו תקין. "
+                "מזהה Airtable תמיד מתחיל ב-rec (למשל recXXXXXXXXXXXXXX)"
+            )
+
+    return errors
 
 
 # ══════════════════════════════════════════════════
@@ -78,80 +134,87 @@ class ActionBlocked:
 
 def validate_action(tool_name: str, inputs: dict) -> ActionAllowed | ActionBlocked:
     """
-    Gate לפני dispatch_tool.
+    שלושה שלבים:
+    1. Unknown tool → BLOCK קשיח (לא ALLOW שקט)
+    2. Presence check → כל החסרים מוצגים מראש
+    3. Structure check → פורמט תקין?
 
-    בודק:
-    1. כלי מוכר?
-    2. פרמטרים חובה — כולם קיימים ולא ריקים?
-    3. כלי רגיש — סומן להמתנה (event_bus מטפל באישור)
-
-    מחזיר ActionAllowed או ActionBlocked עם הודעה למשתמש.
+    UX: מציג את כל החסרים — מוריד round-trips.
     """
-    # כלי לא מוכר — dispatcher יטפל בזה, לא כאן
-    required = _REQUIRED.get(tool_name)
-    if required is None:
-        logger.warning(f"validate_action: unknown tool {tool_name}")
-        return ActionAllowed()
 
-    # בדוק פרמטרים חסרים
-    missing = [
-        field for field in required
-        if inputs.get(field) is None or inputs.get(field) == ""
-        # dict/list ריקים ({}, []) — תקינים (Claude ימלא תוכן)
-        # None ו-"" בלבד — חסרים אמיתיים
-    ]
+    # ── שלב 0: כלי לא מוכר → BLOCK קשיח ─────────
+    # ALLOW שקט = דלת פתוחה ל-typo injection
+    if tool_name not in _REQUIRED:
+        logger.error(f"Unknown tool blocked: {tool_name}")
+        return ActionBlocked(f"⚠️ כלי '{tool_name}' אינו מוכר במערכת. אנא פנה לתמיכה.")
 
+    # ── שלב 1: Presence check ─────────────────────
+    missing = _check_presence(tool_name, inputs)
     if missing:
-        # בנה שאלה ידידותית למשתמש
-        questions = [
-            _FIELD_QUESTIONS.get(f, f"חסר: {f}")
-            for f in missing
-        ]
-        # שאלה אחת בלבד (הראשונה הכי חשובה)
-        first_q = questions[0]
-        extra = f" (חסרים עוד {len(questions)-1} פרטים)" if len(questions) > 1 else ""
-        msg = f"{first_q}{extra}"
-
-        logger.info(f"ActionBlocked: {tool_name} missing {missing}")
+        questions = [_FIELD_QUESTIONS.get(f, f"חסר: {f}") for f in missing]
+        if len(questions) == 1:
+            msg = questions[0]
+        else:
+            # הצג את כל החסרים — מוריד round-trips
+            all_q  = " | ".join(f"({i+1}) {q}" for i, q in enumerate(questions))
+            msg = f"חסרים {len(questions)} פרטים: {all_q}"
+        logger.info(f"ActionBlocked (presence): {tool_name} missing {missing}")
         return ActionBlocked(msg)
 
-    # כלי רגיש — אישור מטופל ע"י event_bus (לא כאן)
-    # רק לוגים — event_bus.needs_approval יחסום אם צריך
+    # ── שלב 2: Structure check ────────────────────
+    struct_errors = _check_structure(tool_name, inputs)
+    if struct_errors:
+        msg = " | ".join(struct_errors)
+        logger.info(f"ActionBlocked (structure): {tool_name} — {msg}")
+        return ActionBlocked(msg)
+
+    # ── כלים רגישים: רק log — event_bus מטפל באישור
     if tool_name in _SENSITIVE_TOOLS:
-        logger.info(f"validate_action: sensitive tool {tool_name} — approval via event_bus")
+        logger.info(f"validate_action: sensitive tool {tool_name} → approval via event_bus")
 
     return ActionAllowed()
 
 
 # ══════════════════════════════════════════════════
-# Test — python3 action_validator.py
+# Tests — python3 action_validator.py
 # ══════════════════════════════════════════════════
 
 if __name__ == "__main__":
     tests = [
-        ("gmail_draft",    {"to": "a@b.com", "subject": "נושא", "body": "גוף"},   "ALLOW"),
-        ("gmail_draft",    {"subject": "נושא", "body": "גוף"},                     "BLOCK"),
-        ("gmail_draft",    {"to": "", "subject": "נושא", "body": "גוף"},           "BLOCK"),
-        ("airtable_update",{"table": "CRM", "record_id": "rec123", "fields": {}},  "ALLOW"),
-        ("airtable_update",{"table": "CRM", "fields": {}},                         "BLOCK"),
-        ("calendar_get_events", {},                                                  "ALLOW"),
-        ("airtable_get",   {"table": "CRM"},                                        "ALLOW"),
-        ("airtable_get",   {},                                                       "BLOCK"),
+        # (tool, inputs, expected, label)
+        # ── Presence ──────────────────────────────
+        ("gmail_draft",    {"to":"a@b.com","subject":"נושא","body":"גוף"},        "ALLOW", "gmail מלא"),
+        ("gmail_draft",    {"subject":"נושא","body":"גוף"},                        "BLOCK", "gmail ללא to"),
+        ("gmail_draft",    {"to":"","subject":"נושא","body":"גוף"},                "BLOCK", "gmail to ריק"),
+        ("airtable_update",{"table":"CRM","record_id":"rec123","fields":{"x":1}},  "ALLOW", "update מלא"),
+        ("airtable_update",{"table":"CRM","fields":{"x":1}},                       "BLOCK", "update ללא record_id"),
+        ("airtable_update",{"table":"CRM","record_id":"rec1","fields":{}},          "ALLOW", "update fields ריק"),
+        ("calendar_get_events", {},                                                  "ALLOW", "get_events ריק"),
+        ("airtable_get",   {"table":"CRM"},                                         "ALLOW", "get עם table"),
+        ("airtable_get",   {},                                                       "BLOCK", "get ללא table"),
+        # ── Structure ─────────────────────────────
+        ("calendar_create_event",{"summary":"פגישה","start_time":"2025-06-01T14:00:00"},"ALLOW","calendar ISO תקין"),
+        ("calendar_create_event",{"summary":"פגישה","start_time":"מחר ב-14"},            "BLOCK","calendar start_time לא ISO"),
+        ("gmail_draft",    {"to":"לא-מייל","subject":"נושא","body":"גוף"},          "BLOCK", "gmail to לא מייל"),
+        ("airtable_update",{"table":"CRM","record_id":"rec123","fields":{"x":1}},   "ALLOW", "update record_id תקין"),
+        ("airtable_update",{"table":"CRM","record_id":"WRONG_ID","fields":{"x":1}},"BLOCK", "update record_id לא rec"),
+        # ── Unknown tool ──────────────────────────
+        ("hack_tool",      {},                                                       "BLOCK", "כלי לא מוכר"),
+        ("send_email",     {"to":"a@b.com"},                                        "BLOCK", "typo — לא בschema"),
     ]
 
-    print("=" * 55)
-    print("ACTION VALIDATOR — בדיקות")
-    print("=" * 55)
-    all_pass = True
-    for name, inputs, expected in tests:
-        result = validate_action(name, inputs)
+    print("=" * 65)
+    print("ACTION VALIDATOR v1.1 — בדיקות")
+    print("=" * 65)
+    passed = 0
+    for tool, inputs, expected, label in tests:
+        result = validate_action(tool, inputs)
         actual = "ALLOW" if isinstance(result, ActionAllowed) else "BLOCK"
         ok = actual == expected
-        if not ok:
-            all_pass = False
-        status = "✅" if ok else "❌"
-        msg = f" | {result.reason}" if isinstance(result, ActionBlocked) else ""
-        print(f"{status} {name:25} → {actual:5} (צפוי: {expected}){msg}")
+        passed += ok
+        icon = "✅" if ok else "❌"
+        suffix = f" → {result.reason[:55]}" if isinstance(result, ActionBlocked) else ""
+        print(f"{icon} {label:35} {actual:5}{suffix}")
 
-    print("=" * 55)
-    print(f"{'✅ כל הבדיקות עברו' if all_pass else '❌ יש כשלים'}")
+    print("=" * 65)
+    print(f"{'✅ כל הבדיקות עברו' if passed == len(tests) else f'❌ {passed}/{len(tests)} עברו'}")
