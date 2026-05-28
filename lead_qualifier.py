@@ -1,7 +1,7 @@
 import os
 import logging
 from enum import Enum
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from anthropic import Anthropic
 from feature_flags import is_enabled
 
@@ -128,11 +128,42 @@ def _new_session() -> dict:
     return {"state": LeadState.INTRO, "answers": {}}
 
 
-lead_sessions: dict = defaultdict(_new_session)
+_RESET_KEYWORDS = {"איפוס", "reset", "restart", "התחל מחדש"}
+_MAX_SESSIONS = 1000
+
+
+class _LRUSessionStore:
+    """מאגר sessions עם פינוי LRU — מגביל זיכרון ל-1000 משתמשים."""
+
+    def __init__(self, maxsize: int = _MAX_SESSIONS):
+        self._store: OrderedDict = OrderedDict()
+        self._maxsize = maxsize
+
+    def __getitem__(self, key: str) -> dict:
+        if key not in self._store:
+            self._store[key] = _new_session()
+            if len(self._store) > self._maxsize:
+                self._store.popitem(last=False)
+        else:
+            self._store.move_to_end(key)
+        return self._store[key]
+
+    def get(self, key: str, default=None):
+        return self._store.get(key, default)
+
+    def delete(self, key: str) -> None:
+        self._store.pop(key, None)
+
+
+lead_sessions = _LRUSessionStore()
 
 
 def handle_lead_message(sender: str, message: str) -> str | None:
     """מנהל שיחת כישור ליד ב-WhatsApp. מחזיר שאלה הבאה, או None כשהסתיים."""
+    if message.strip() in _RESET_KEYWORDS:
+        lead_sessions.delete(sender)
+        return 'בוצע איפוס! מה אתה מחפש? נדל"ן / ייבוא / אחר?'
+
     session = lead_sessions[sender]
     state = session["state"]
 

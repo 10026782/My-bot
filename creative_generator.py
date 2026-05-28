@@ -148,7 +148,7 @@ def handle_creative_command(text: str, chat_id: str) -> str:
         if keyword in context:
             template = tmpl
             if keyword in _ANGLE_CONTEXT:
-                enriched_context = _ANGLE_CONTEXT[keyword]
+                enriched_context = f"{_ANGLE_CONTEXT[keyword]}\nפרטים: {context}"
             break
 
     result = generate(template, enriched_context)

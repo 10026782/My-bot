@@ -5,6 +5,7 @@
 
 import os
 import logging
+import requests as http_requests
 from flask import Flask, request, jsonify, Response
 from anthropic import Anthropic
 from tools import TOOL_SCHEMAS, dispatch_tool
@@ -17,8 +18,30 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-memory = ConversationMemory(max_interactions=5)
+
+# ─── Env Vars ─────────────────────────────────────────────────────────────────
+_api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+if not _api_key:
+    logger.critical("ANTHROPIC_API_KEY is not set — API calls will fail")
+client = Anthropic(api_key=_api_key)
+
+_telegram_token = os.environ.get("TELEGRAM_TOKEN", "")
+if not _telegram_token:
+    logger.critical("TELEGRAM_TOKEN is not set — Telegram webhook will not work")
+
+# ─── Per-User Memory (max 500 users) ──────────────────────────────────────────
+_user_memories: dict = {}
+_MAX_MEMORY_USERS = 500
+
+
+def _get_memory(user_id: str) -> ConversationMemory:
+    if user_id not in _user_memories:
+        if len(_user_memories) >= _MAX_MEMORY_USERS:
+            oldest = next(iter(_user_memories))
+            del _user_memories[oldest]
+        _user_memories[user_id] = ConversationMemory(max_interactions=5)
+    return _user_memories[user_id]
+
 
 # ─── System Prompt ────────────────────────────────────────────────────────────
 SYSTEM_PROMPT = """אתה "הבוס בוט" – עוזר מנכ"ל, מנהל פרויקטים ומומחה אסטרטגי חריף וחד.
@@ -33,16 +56,17 @@ SYSTEM_PROMPT = """אתה "הבוס בוט" – עוזר מנכ"ל, מנהל פ�
 3. רק אם ההודעה מתחילה ב-# — הפעל "מצב ניתוח עמוק" ותן ניתוח מורחב.
 4. אל תחזור על שאלת המשתמש. אל תוסיף מילות מחמאה. ישר לגוף העניין."""
 
-MAX_TOOL_TURNS = 2  # חוק הצינון
+MAX_TOOL_TURNS = 2
 
 # ─── Core Agent Loop ──────────────────────────────────────────────────────────
-def run_agent(user_message: str, channel: str = "telegram") -> str:
+def run_agent(user_message: str, channel: str = "telegram", user_id: str = "default") -> str:
     """
     לולאת הסוכן המרכזית עם הגנת תקציב קשיחה.
     channel: "whatsapp" | "telegram"
     """
-    memory.add_user_message(user_message)
-    messages = memory.get_messages()
+    mem = _get_memory(user_id)
+    mem.add_user_message(user_message)
+    messages = mem.get_messages()
 
     turn_count = 0
     response_text = "לא הצלחתי לעבד את הבקשה. נסה שוב."
@@ -50,7 +74,7 @@ def run_agent(user_message: str, channel: str = "telegram") -> str:
     try:
         while turn_count < MAX_TOOL_TURNS:
             turn_count += 1
-            logger.info(f"Agent turn {turn_count}/{MAX_TOOL_TURNS}")
+            logger.info(f"Agent turn {turn_count}/{MAX_TOOL_TURNS} | user={user_id}")
 
             response = client.messages.create(
                 model="claude-sonnet-4-6",
@@ -60,16 +84,13 @@ def run_agent(user_message: str, channel: str = "telegram") -> str:
                 messages=messages,
             )
 
-            # בדיקת סיבת עצירה
             stop_reason = response.stop_reason
 
             if stop_reason == "end_turn":
-                # המודל סיים — חלץ טקסט
                 response_text = _extract_text(response)
                 break
 
             elif stop_reason == "tool_use":
-                # עיבוד קריאות כלים
                 tool_results = []
                 for block in response.content:
                     if block.type == "tool_use":
@@ -81,7 +102,6 @@ def run_agent(user_message: str, channel: str = "telegram") -> str:
                             "content": str(result),
                         })
 
-                # הוסף את תגובת המודל + תוצאות הכלים לשיחה
                 messages = messages + [
                     {"role": "assistant", "content": response.content},
                     {"role": "user", "content": tool_results},
@@ -92,7 +112,6 @@ def run_agent(user_message: str, channel: str = "telegram") -> str:
                 break
 
         else:
-            # חריגה מהמונה — קטיעת לולאה
             logger.warning("MAX_TOOL_TURNS reached — cutting loop to prevent cost leak.")
             response_text = "הגעתי למגבלת הסיבובים. אנא פרט את הבקשה ונסה שוב."
 
@@ -100,7 +119,7 @@ def run_agent(user_message: str, channel: str = "telegram") -> str:
         logger.error(f"Agent error: {e}", exc_info=True)
         response_text = f"שגיאה פנימית: {e}"
 
-    memory.add_assistant_message(response_text)
+    mem.add_assistant_message(response_text)
     return response_text
 
 
@@ -111,14 +130,13 @@ def _extract_text(response) -> str:
     return ""
 
 
-# ─── Webhook Endpoints המעודכנים ──────────────────────────────────────────────
+# ─── Webhook Endpoints ────────────────────────────────────────────────────────
 
-# 1. נתיב הבית - פותר את ה-404 של UptimeRobot ו-Render Health
 @app.route("/", methods=["GET", "HEAD"])
 def home():
     return "OK", 200
 
-# 2. נתיב וואטסאפ - מותאם לפורמט של טוויליו (XML)
+
 @app.route("/whatsapp", methods=["POST"])
 def whatsapp_webhook_twilio():
     from twilio.twiml.messaging_response import MessagingResponse
@@ -135,17 +153,17 @@ def whatsapp_webhook_twilio():
             resp.message(reply)
             return Response(str(resp), mimetype="application/xml")
 
-    reply = run_agent(user_message, channel="whatsapp")
+    reply = run_agent(user_message, channel="whatsapp", user_id=sender)
     resp = MessagingResponse()
     resp.message(reply)
     return str(resp), 200, {"Content-Type": "text/xml"}
 
-# 3. נתיב טלגרם - מאובטח באמצעות משתנה סביבה ומקשיב דינמית לטוקן
-@app.route(f"/{os.environ.get('TELEGRAM_TOKEN')}", methods=["POST"])
+
+@app.route(f"/{_telegram_token}", methods=["POST"])
 def telegram_webhook():
-    print("🔥 Telegram hit", flush=True)
+    logger.info("Telegram webhook hit")
     data = request.json or {}
-    
+
     message_obj = data.get("message", {})
     user_message = message_obj.get("text", "")
     chat_id = message_obj.get("chat", {}).get("id")
@@ -153,31 +171,34 @@ def telegram_webhook():
     if not user_message:
         return "OK", 200
 
-    import requests
-    token = os.environ.get('TELEGRAM_TOKEN')
-    telegram_url = f"https://api.telegram.org/bot{token}/sendMessage"
+    telegram_url = f"https://api.telegram.org/bot{_telegram_token}/sendMessage"
 
     if "קריאייטיב" in user_message:
         reply = handle_creative_command(user_message, chat_id)
-        requests.post(telegram_url, json={
-            "chat_id": chat_id,
-            "text": reply,
-            "parse_mode": "Markdown"
-        })
+        try:
+            http_requests.post(telegram_url, json={
+                "chat_id": chat_id,
+                "text": reply,
+                "parse_mode": "Markdown"
+            }, timeout=5)
+        except Exception as e:
+            logger.error(f"Failed to send Telegram creative reply: {e}")
         return "OK", 200
 
-    reply = run_agent(user_message, channel="telegram")
-    requests.post(telegram_url, json={
-        "chat_id": chat_id,
-        "text": reply
-    })
+    reply = run_agent(user_message, channel="telegram", user_id=str(chat_id))
+    try:
+        http_requests.post(telegram_url, json={
+            "chat_id": chat_id,
+            "text": reply
+        }, timeout=5)
+    except Exception as e:
+        logger.error(f"Failed to send Telegram reply: {e}")
 
     return "OK", 200
 
 
 @app.route("/worker/trigger", methods=["POST"])
 def worker_trigger():
-    """Endpoint לטריגר ידני / Cron Job ב-Render."""
     from worker import run_proactive_check
     result = run_proactive_check()
     return jsonify({"status": "ok", "result": result})
@@ -188,7 +209,8 @@ def health():
     return jsonify({"status": "alive"})
 
 
-# ─── Bootstrap ────────────────────────────────────────────────────────────────
+# ─── Bootstrap — רץ גם תחת gunicorn ──────────────────────────────────────────
+schedule_background_worker()
+
 if __name__ == "__main__":
-    schedule_background_worker()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
