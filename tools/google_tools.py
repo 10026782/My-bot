@@ -209,3 +209,95 @@ def calendar_create_event(summary: str, start_time: str, duration_minutes: int =
         return f"❌ פורמט תאריך שגוי. השתמש ב-ISO: 2025-06-01T14:00:00"
     except Exception as e:
         return f"❌ שגיאה ביצירת אירוע: {e}"
+
+
+def calendar_get_events(max_results: int = 5, days_ahead: int = 7) -> str:
+    """שליפת אירועים קרובים מ-Google Calendar."""
+    token = get_google_token()
+    if not token:
+        return "❌ חסרים פרטי Google OAuth"
+
+    try:
+        from datetime import timezone
+        now     = datetime.now(timezone.utc)
+        time_max = now + timedelta(days=days_ahead)
+
+        r = httpx.get(
+            "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+            headers={"Authorization": f"Bearer {token}"},
+            params={
+                "maxResults":  max_results,
+                "orderBy":     "startTime",
+                "singleEvents": "true",
+                "timeMin":     now.isoformat(),
+                "timeMax":     time_max.isoformat(),
+            },
+            timeout=10,
+        )
+        if r.status_code != 200:
+            return f"❌ Calendar שגיאה {r.status_code}: {r.text[:200]}"
+
+        items = r.json().get("items", [])
+        if not items:
+            return f"✅ אין אירועים ב-{days_ahead} הימים הקרובים."
+
+        lines = [f"📅 {len(items)} אירועים קרובים:"]
+        for ev in items:
+            start = ev.get("start", {}).get("dateTime", ev.get("start", {}).get("date", "?"))
+            lines.append(f"• {ev.get('summary','(ללא שם)')} — {start}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"❌ שגיאה בשליפת אירועים: {e}"
+
+
+def gmail_send_draft(draft_id: str) -> str:
+    """שליחת טיוטה קיימת לפי draft ID."""
+    token = get_google_token()
+    if not token:
+        return "❌ חסרים פרטי Google OAuth"
+
+    try:
+        r = httpx.post(
+            f"https://www.googleapis.com/gmail/v1/users/me/drafts/send",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={"id": draft_id},
+            timeout=15,
+        )
+        if r.status_code == 200:
+            return f"📧 טיוטה {draft_id} נשלחה בהצלחה!"
+        return f"❌ שגיאת Gmail {r.status_code}: {r.text[:200]}"
+    except Exception as e:
+        return f"❌ שגיאה בשליחת טיוטה: {e}"
+
+
+def sheets_append(spreadsheet_name: str, row_data: list) -> str:
+    """הוספת שורה לגוגל שיטס לפי שם הקובץ בדרייב."""
+    token = get_google_token()
+    if not token:
+        return "❌ חסרים פרטי Google OAuth"
+
+    try:
+        headers = {"Authorization": f"Bearer {token}"}
+        search  = httpx.get(
+            "https://www.googleapis.com/drive/v3/files",
+            headers=headers,
+            params={
+                "q": f"name = '{spreadsheet_name}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false",
+                "fields": "files(id, name)",
+            },
+            timeout=10,
+        )
+        files = search.json().get("files", [])
+        if not files:
+            return f"❌ לא נמצא קובץ שיטס בשם '{spreadsheet_name}' בדרייב."
+
+        sid = files[0]["id"]
+        url = f"https://sheets.googleapis.com/v4/spreadsheets/{sid}/values/A1:append"
+        body = {"range": "A1", "majorDimension": "ROWS", "values": [row_data]}
+        r = httpx.post(url, headers=headers, params={"valueInputOption": "USER_ENTERED"},
+                       json=body, timeout=10)
+        if r.status_code == 200:
+            return f"📊 שורה נוספה לטבלה '{spreadsheet_name}' בהצלחה."
+        return f"❌ שגיאת Sheets {r.status_code}: {r.text[:200]}"
+    except Exception as e:
+        return f"❌ שגיאה בכתיבה לשיטס: {e}"

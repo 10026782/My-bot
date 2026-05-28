@@ -1,251 +1,246 @@
-"""
-הבוס בוט v2.1 — Flask App
-ארכיטקטורה: Native Tool Calling + Budget Protection + Proactive Worker + Identity Layer
-"""
+# app.py — The Boss Bot v3.2
+# Multi-Tenant Architecture: Identity → Context → Agent
 
 import os
 import logging
-import requests as http_requests
-from flask import Flask, request, jsonify, Response
-from anthropic import Anthropic
-from tools import TOOL_SCHEMAS, dispatch_tool
-from memory import ConversationMemory
-from worker import schedule_background_worker
-from lead_qualifier import handle_lead_message, lead_sessions
-from creative_generator import handle_creative_command
-from identity import resolve_identity
-from airtable_schema import format_schema_for_prompt
+from flask import Flask, request, Response, abort, jsonify
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+import anthropic
+import telebot
+from twilio.twiml.messaging_response import MessagingResponse
+
+from memory_store import memory
+from identity import resolve_identity, Role
+from context import build_context, check_tool_results
+from tool_registry import enforce, ToolDenied
+from scheduler import start_scheduler
+from tools import dispatch_tool
+from guards import idempotency, rate_limiter, validate_tool_output
+
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
+
+MAX_TOOL_TURNS = 4
+AGENT_TIMEOUT  = 25
+
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+TELEGRAM_TOKEN    = os.environ.get("TELEGRAM_TOKEN", "")
+RENDER_APP_URL    = os.environ.get("RENDER_APP_URL", "https://my-bot-jqz2.onrender.com")
+
+client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=AGENT_TIMEOUT)
+bot    = telebot.TeleBot(TELEGRAM_TOKEN)
 
 app = Flask(__name__)
 
-# ─── Env Vars ─────────────────────────────────────────────────────────────────
-_api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-if not _api_key:
-    logger.critical("ANTHROPIC_API_KEY is not set — API calls will fail")
-client = Anthropic(api_key=_api_key)
+try:
+    _scheduler = start_scheduler()
+    logger.info("Scheduler OK")
+except Exception as e:
+    logger.error(f"Scheduler failed: {e}")
 
-_telegram_token = os.environ.get("TELEGRAM_TOKEN", "")
-if not _telegram_token:
-    logger.critical("TELEGRAM_TOKEN is not set — Telegram webhook will not work")
-
-# ─── Per-User Memory (max 500 users) ──────────────────────────────────────────
-_user_memories: dict = {}
-_MAX_MEMORY_USERS = 500
-
-
-def _get_memory(user_id: str) -> ConversationMemory:
-    if user_id not in _user_memories:
-        if len(_user_memories) >= _MAX_MEMORY_USERS:
-            oldest = next(iter(_user_memories))
-            del _user_memories[oldest]
-        _user_memories[user_id] = ConversationMemory(max_interactions=5)
-    return _user_memories[user_id]
+if os.environ.get("SETUP_WEBHOOK") == "1":
+    try:
+        bot.remove_webhook()
+        bot.set_webhook(url=f"{RENDER_APP_URL}/{TELEGRAM_TOKEN}")
+        logger.info("Telegram Webhook set")
+    except Exception as e:
+        logger.error(f"Webhook failed: {e}")
 
 
-# ─── System Prompt ────────────────────────────────────────────────────────────
-SYSTEM_PROMPT = """אתה "הבוס בוט" – עוזר מנכ"ל, מנהל פרויקטים ומומחה אסטרטגי חריף וחד.
-המנהל שלך (אלייהו) הוא בעל חזון ואופטימי מטבעו.
-התפקיד שלך הוא להוות משקל נגד – לחפש את האותיות הקטנות, להציג את הסיכונים,
-את נקודות התורפה בעסקאות, והיכן שותפים או מוכרים עלולים להטעות אותו.
-היה קול ההיגיון הקר, הספקני והאנליטי.
-
-כלים זמינים — השתמש בהם לפני שאתה מנחש:
-- gmail_send: שמירת טיוטת מייל (לא שולח — תמיד טיוטה בלבד, אסור לשלוח ישירות)
-- gmail_read: קריאת מיילים אחרונים
-- drive_search: חיפוש קבצים ב-Google Drive
-- drive_read_file: קריאת תוכן קובץ מ-Drive
-- calendar_create_event: קביעת פגישה ב-Google Calendar
-- airtable_get_records: שליפת משימות/עסקאות/לידים מ-Airtable
-- airtable_create_record: יצירת רשומה חדשה ב-Airtable
-- airtable_update_record: עדכון רשומה קיימת ב-Airtable
-- add_knowledge: שמירת עובדה לזיכרון הבוט
-
-כללים נוקשים:
-1. תמיד תענה בעברית רהוטה, עסקית, חדה וללא גינונים מיותרים.
-2. ברירת מחדל: תשובה של שורה עד שתיים בלבד. קצר, חד, לעניין.
-3. רק אם ההודעה מתחילה ב-# — הפעל "מצב ניתוח עמוק" ותן ניתוח מורחב.
-4. אל תחזור על שאלת המשתמש. אל תוסיף מילות מחמאה. ישר לגוף העניין.
-5. כשנשאלים על נתונים (משימות/עסקאות/לידים) — קרא לכלי Airtable, אל תאמר שאין לך גישה."""
-
-MAX_TOOL_TURNS = 2
+def _summarize_tool_context(tool_results: list[dict]) -> str:
+    if not tool_results:
+        return ""
+    parts = []
+    for r in tool_results:
+        content = r.get("content", "")
+        if isinstance(content, str) and content and not content.startswith("❌"):
+            parts.append(content[:80].replace("\n", " "))
+    if not parts:
+        return ""
+    joined = " | ".join(parts)
+    return f"[הקשר כלים מהשיחה הקודמת: {joined}]"
 
 
-def _build_system_prompt() -> str:
-    schema = format_schema_for_prompt()
-    if schema:
-        return SYSTEM_PROMPT + f"\n\n{schema}"
-    return SYSTEM_PROMPT
+def run_agent(user_text: str, chat_id: str, channel: str = "telegram") -> str:
+    identity = resolve_identity(channel, chat_id)
 
+    if not rate_limiter.is_allowed(identity.memory_key):
+        return "⚠️ יותר מדי בקשות. המתן דקה ונסה שוב."
 
-# ─── Core Agent Loop ──────────────────────────────────────────────────────────
-def run_agent(user_message: str, channel: str = "telegram", user_id: str = "default") -> str:
-    """
-    לולאת הסוכן המרכזית עם הגנת תקציב קשיחה.
-    channel: "whatsapp" | "telegram"
-    """
-    mem = _get_memory(user_id)
-    mem.add_user_message(user_message)
-    messages = mem.get_messages()
-
-    turn_count = 0
-    response_text = "לא הצלחתי לעבד את הבקשה. נסה שוב."
+    if identity.role == Role.READONLY:
+        return "⚠️ אין לך גישה למערכת. פנה למנהל."
 
     try:
-        while turn_count < MAX_TOOL_TURNS:
-            turn_count += 1
-            logger.info(f"Agent turn {turn_count}/{MAX_TOOL_TURNS} | user={user_id}")
+        research_mode = user_text.startswith("#") and identity.is_owner
+        clean_msg     = user_text[1:].strip() if research_mode else user_text
 
+        ctx      = build_context(identity, user_text)
+        history  = memory.get_for_claude(ctx.memory_key)
+        messages = history + [{"role": "user", "content": clean_msg}]
+
+        logger.info(f"run_agent | {ctx.identity_label} | {ctx.model} | {ctx.max_tokens}tok")
+
+        final_reply     = "⚠️ לא התקבלה תשובה."
+        tool_calls_made = 0
+        all_tool_results: list[dict] = []
+
+        while True:
             response = client.messages.create(
-                model="claude-sonnet-4-6",
-                max_tokens=1000 if channel == "telegram" else 400,
-                system=_build_system_prompt(),
-                tools=TOOL_SCHEMAS,
-                messages=messages,
+                model=ctx.model,
+                max_tokens=ctx.max_tokens,
+                temperature=0.2,
+                system=ctx.system_prompt,
+                tools=ctx.allowed_tools,
+                messages=messages
             )
 
-            stop_reason = response.stop_reason
+            tool_uses   = [b for b in response.content if b.type == "tool_use"]
+            text_blocks = [b for b in response.content if b.type == "text"]
 
-            if stop_reason == "end_turn":
-                response_text = _extract_text(response)
+            if not tool_uses:
+                candidate = text_blocks[0].text if text_blocks else "✅ פעולה הושלמה."
+
+                if all_tool_results:
+                    grounded, err_msg = check_tool_results(all_tool_results)
+                    if not grounded:
+                        logger.warning("Grounding violation — blocking hallucinated answer")
+                        final_reply = err_msg
+                        break
+
+                final_reply = candidate
                 break
 
-            elif stop_reason == "tool_use":
-                tool_results = []
-                for block in response.content:
-                    if block.type == "tool_use":
-                        logger.info(f"Calling tool: {block.name} | input: {block.input}")
-                        result = dispatch_tool(block.name, block.input)
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": str(result),
-                        })
-
-                messages = messages + [
-                    {"role": "assistant", "content": response.content},
-                    {"role": "user", "content": tool_results},
-                ]
-
-            else:
-                logger.warning(f"Unexpected stop_reason: {stop_reason}")
+            if tool_calls_made >= MAX_TOOL_TURNS:
+                final_reply = (
+                    text_blocks[0].text if text_blocks
+                    else (
+                        "⚠️ לא הגעתי לתוצאה אחרי מספר ניסיונות. "
+                        "בדוק חיבור Airtable/Drive ונסה שוב, "
+                        "או פרק לשלבים."
+                    )
+                )
                 break
 
-        else:
-            logger.warning("MAX_TOOL_TURNS reached — cutting loop to prevent cost leak.")
-            response_text = "הגעתי למגבלת הסיבובים. אנא פרט את הבקשה ונסה שוב."
+            tool_results: list[dict] = []
 
+            for tu in tool_uses:
+                try:
+                    enforce(tu.name, identity)
+                except ToolDenied as e:
+                    logger.warning(f"Tool denied: {tu.name} for {identity.role}")
+                    tool_results.append({
+                        "type":        "tool_result",
+                        "tool_use_id": tu.id,
+                        "content":     str(e),
+                    })
+                    continue
+
+                logger.info(f"Tool: {tu.name} | {str(tu.input)[:80]}")
+                raw    = dispatch_tool(tu.name, tu.input)
+                result = validate_tool_output(tu.name, raw)
+                logger.info(f"  -> {result[:80]}")
+
+                tool_results.append({
+                    "type":        "tool_result",
+                    "tool_use_id": tu.id,
+                    "content":     result,
+                })
+
+            all_tool_results.extend(tool_results)
+            tool_calls_made += 1
+
+            messages.append({"role": "assistant", "content": response.content})
+            messages.append({"role": "user",      "content": tool_results})
+
+        tool_ctx    = _summarize_tool_context(all_tool_results)
+        user_memory = clean_msg
+        if tool_ctx:
+            user_memory = f"{clean_msg}\n{tool_ctx}"
+
+        memory.add(ctx.memory_key, "user",      user_memory)
+        memory.add(ctx.memory_key, "assistant", final_reply)
+
+        return final_reply
+
+    except anthropic.APIStatusError as e:
+        logger.error(f"Anthropic {e.status_code}: {e.message}")
+        return f"❌ שגיאת API ({e.status_code}). נסה שוב."
     except Exception as e:
-        logger.error(f"Agent error: {e}", exc_info=True)
-        response_text = f"שגיאה פנימית: {e}"
-
-    mem.add_assistant_message(response_text)
-    return response_text
-
-
-def _extract_text(response) -> str:
-    for block in response.content:
-        if hasattr(block, "text"):
-            return block.text
-    return "לא הצלחתי לייצר תשובה. נסה שוב."
-
-
-# ─── Webhook Endpoints ────────────────────────────────────────────────────────
-
-@app.route("/", methods=["GET", "HEAD"])
-def home():
-    return "OK", 200
-
-
-@app.route("/whatsapp", methods=["POST"])
-def whatsapp_webhook_twilio():
-    from twilio.twiml.messaging_response import MessagingResponse
-    user_message = request.values.get("Body", "").strip()
-    sender = request.values.get("From", "unknown")
-    if not user_message:
-        return "OK", 200
-
-    # ─── זיהוי תפקיד ───────────────────────────────────────────────────────────
-    phone = sender.replace("whatsapp:", "")
-    identity = resolve_identity("whatsapp", phone)
-    logger.info(f"WhatsApp message | sender={phone} | role={identity.role}")
-
-    # בעל בית / צוות → ישר ל-agent, בלי שאלות ליד
-    if identity.is_internal:
-        reply = run_agent(user_message, channel="whatsapp", user_id=identity.sender)
-        resp = MessagingResponse()
-        resp.message(reply)
-        return Response(str(resp), mimetype="application/xml")
-
-    # לקוח חיצוני → State Machine כרגיל
-    session = lead_sessions.get(sender)
-    if session is None or not session["done"]:
-        reply = handle_lead_message(sender, user_message)
-        if reply:
-            resp = MessagingResponse()
-            resp.message(reply)
-            return Response(str(resp), mimetype="application/xml")
-
-    reply = run_agent(user_message, channel="whatsapp", user_id=sender)
-    resp = MessagingResponse()
-    resp.message(reply)
-    return str(resp), 200, {"Content-Type": "text/xml"}
-
-
-@app.route(f"/{_telegram_token}", methods=["POST"])
-def telegram_webhook():
-    logger.info("Telegram webhook hit")
-    data = request.json or {}
-
-    message_obj = data.get("message", {})
-    user_message = message_obj.get("text", "")
-    chat_id = message_obj.get("chat", {}).get("id")
-
-    if not user_message:
-        return "OK", 200
-
-    telegram_url = f"https://api.telegram.org/bot{_telegram_token}/sendMessage"
-
-    if "קריאייטיב" in user_message:
-        reply = handle_creative_command(user_message, chat_id)
-        try:
-            http_requests.post(telegram_url, json={
-                "chat_id": chat_id,
-                "text": reply,
-                "parse_mode": "Markdown"
-            }, timeout=5)
-        except Exception as e:
-            logger.error(f"Failed to send Telegram creative reply: {e}")
-        return "OK", 200
-
-    reply = run_agent(user_message, channel="telegram", user_id=str(chat_id))
-    try:
-        http_requests.post(telegram_url, json={
-            "chat_id": chat_id,
-            "text": reply
-        }, timeout=5)
-    except Exception as e:
-        logger.error(f"Failed to send Telegram reply: {e}")
-
-    return "OK", 200
-
-
-@app.route("/worker/trigger", methods=["POST"])
-def worker_trigger():
-    from worker import run_proactive_check
-    result = run_proactive_check()
-    return jsonify({"status": "ok", "result": result})
+        logger.error(f"run_agent error: {e}", exc_info=True)
+        return f"❌ שגיאה פנימית: {e}"
 
 
 @app.route("/health", methods=["GET"])
 def health():
-    return jsonify({"status": "alive"})
+    return jsonify({
+        "status":         "ok",
+        "version":        "3.2",
+        "max_tool_turns": MAX_TOOL_TURNS,
+        "grounding":      "enabled",
+        "layers":         8,
+        "ttl_hours":      4,
+        "tool_memory":    "enabled",
+    }), 200
 
 
-# ─── Bootstrap — רץ גם תחת gunicorn ──────────────────────────────────────────
-schedule_background_worker()
+@app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
+def webhook_telegram():
+    if request.headers.get("content-type") != "application/json":
+        abort(403)
+    update = telebot.types.Update.de_json(request.get_data().decode("utf-8"))
+    if update.message and update.message.text:
+        chat_id = str(update.message.chat.id)
+        text    = update.message.text
+        if idempotency.is_duplicate("telegram", chat_id, text):
+            return "", 200
+        reply = run_agent(text, chat_id, channel="telegram")
+        try:
+            bot.send_message(chat_id, reply)
+        except Exception as e:
+            logger.error(f"Telegram send error: {e}")
+    return "", 200
+
+
+@app.route("/webhook/whatsapp", methods=["POST"])
+def webhook_whatsapp():
+    incoming = request.values.get("Body", "").strip()
+    sender   = request.values.get("From", "whatsapp:unknown")
+    msg_sid  = request.values.get("MessageSid", "")
+    if not incoming:
+        return Response(str(MessagingResponse()), mimetype="application/xml")
+    dedup_key = msg_sid if msg_sid else incoming
+    if idempotency.is_duplicate("whatsapp", sender, dedup_key):
+        return Response(str(MessagingResponse()), mimetype="application/xml")
+    resp = MessagingResponse()
+    resp.message(run_agent(incoming, sender, channel="whatsapp"))
+    return Response(str(resp), mimetype="application/xml")
+
+
+@app.route("/worker/trigger", methods=["POST"])
+def worker_trigger():
+    try:
+        payload = request.get_json(force=True) or {}
+        chat_id = payload.get("chat_id", "")
+        event   = payload.get("event", "")
+        if not chat_id or not event:
+            return jsonify({"error": "chat_id and event required"}), 400
+        reply = run_agent(f"[אירוע מערכת]: {event}", chat_id)
+        try:
+            bot.send_message(chat_id, reply)
+        except Exception as e:
+            logger.error(f"worker telegram: {e}")
+        return jsonify({"status": "ok", "reply": reply[:200]}), 200
+    except Exception as e:
+        logger.error(f"worker_trigger: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/")
+def home():
+    return "The Boss is Live v3.2 — 8-Layer Agent OS ✅"
+
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)

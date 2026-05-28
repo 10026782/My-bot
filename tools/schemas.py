@@ -1,69 +1,75 @@
 TOOL_SCHEMAS = [
     {
         "name": "add_knowledge",
-        "description": "הוספת עובדה לzero-shot memory של הבוט (business_memory)",
+        "description": "הוספת עובדה לzero-shot memory של הבוט",
         "input_schema": {
             "type": "object",
-            "properties": {
-                "fact": {"type": "string", "description": "העובדה לשמירה"}
-            },
+            "properties": {"fact": {"type": "string"}},
             "required": ["fact"],
         },
     },
+    # ─── Airtable ────────────────────────────────────────────────────────────
     {
-        "name": "airtable_get_records",
-        "description": (
-            "שליפת רשומות מ-Airtable. השתמש כדי לקבל משימות, עסקאות, לידים, "
-            "קשרי לקוחות, מלאי — כל מידע שמור ב-Airtable."
-        ),
+        "name": "airtable_get",
+        "description": "שליפת רשומות מ-Airtable. השתמש לקבלת משימות, עסקאות, לידים, מלאי.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "table": {
-                    "type": "string",
-                    "description": "שם הטבלה ב-Airtable (למשל: Tasks, Leads, Deals)",
-                },
-                "filter_formula": {
-                    "type": "string",
-                    "description": "נוסחת סינון אופציונלית בפורמט Airtable (למשל: {Status}='Open')",
-                },
-                "max_records": {
-                    "type": "integer",
-                    "description": "מקסימום רשומות לשליפה (ברירת מחדל: 10)",
-                },
+                "table":          {"type": "string",  "description": "שם הטבלה"},
+                "filter_formula": {"type": "string",  "description": "נוסחת סינון Airtable (אופציונלי)"},
+                "max_records":    {"type": "integer", "description": "מקסימום רשומות (ברירת מחדל: 10)"},
             },
             "required": ["table"],
         },
     },
     {
-        "name": "airtable_create_record",
-        "description": "יצירת רשומה חדשה ב-Airtable (משימה, ליד, עסקה וכו').",
+        "name": "airtable_add",
+        "description": "יצירת רשומה חדשה ב-Airtable.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "table": {
-                    "type": "string",
-                    "description": "שם הטבלה ב-Airtable",
-                },
-                "fields": {
-                    "type": "object",
-                    "description": "שדות הרשומה החדשה — מפתח: שם שדה, ערך: תוכן",
-                },
+                "table":  {"type": "string", "description": "שם הטבלה"},
+                "fields": {"type": "object", "description": "שדות הרשומה החדשה"},
             },
             "required": ["table", "fields"],
         },
     },
     {
-        "name": "gmail_send",
-        "description": "שמירת טיוטת מייל ב-Gmail — לא שולח ישירות! תמיד צור טיוטה ואמור למשתמש שהיא ממתינה לאישורו.",
+        "name": "airtable_update",
+        "description": "עדכון רשומה קיימת ב-Airtable לפי record ID.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "to":      {"type": "string", "description": "כתובת המייל של הנמען"},
-                "subject": {"type": "string", "description": "נושא המייל"},
-                "body":    {"type": "string", "description": "תוכן המייל"},
+                "table":     {"type": "string", "description": "שם הטבלה"},
+                "record_id": {"type": "string", "description": "ID הרשומה (rec...)"},
+                "fields":    {"type": "object", "description": "שדות לעדכון"},
+            },
+            "required": ["table", "record_id", "fields"],
+        },
+    },
+    # ─── Gmail ───────────────────────────────────────────────────────────────
+    {
+        "name": "gmail_draft",
+        "description": "שמירת טיוטת מייל ב-Gmail — לא שולח ישירות! תמיד טיוטה, אסור לשלוח ישירות.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "to":      {"type": "string"},
+                "subject": {"type": "string"},
+                "body":    {"type": "string"},
             },
             "required": ["to", "subject", "body"],
+        },
+    },
+    {
+        "name": "gmail_send_draft",
+        "description": "שליחת טיוטה קיימת לפי draft ID (רק אחרי אישור מפורש).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "draft_id": {"type": "string", "description": "ה-ID של הטיוטה לשליחה"},
+            },
+            "required": ["draft_id"],
         },
     },
     {
@@ -72,66 +78,71 @@ TOOL_SCHEMAS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "max_results": {"type": "integer", "description": "כמות מיילים לשליפה (ברירת מחדל: 5)"},
+                "max_results": {"type": "integer", "description": "כמות מיילים (ברירת מחדל: 5)"},
             },
             "required": [],
         },
     },
+    # ─── Google Drive ─────────────────────────────────────────────────────────
     {
-        "name": "drive_search",
+        "name": "search_drive",
         "description": "חיפוש קבצים ב-Google Drive לפי שם.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "מה לחפש בשם הקובץ"},
+                "query": {"type": "string"},
             },
             "required": ["query"],
         },
     },
     {
-        "name": "drive_read_file",
-        "description": "קריאת תוכן קובץ מ-Google Drive (Docs, טקסט, וכו').",
+        "name": "read_drive_file",
+        "description": "קריאת תוכן קובץ מ-Google Drive.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "file_name": {"type": "string", "description": "שם הקובץ לקריאה"},
+                "file_name": {"type": "string"},
             },
             "required": ["file_name"],
         },
     },
+    # ─── Google Calendar ──────────────────────────────────────────────────────
     {
-        "name": "calendar_create_event",
-        "description": "קביעת פגישה או אירוע ב-Google Calendar.",
+        "name": "calendar_get_events",
+        "description": "שליפת אירועים קרובים מ-Google Calendar. השתמש לפני יצירת פגישה.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "summary":          {"type": "string", "description": "שם הפגישה/אירוע"},
-                "start_time":       {"type": "string", "description": "תאריך ושעה ב-ISO: 2025-06-01T14:00:00"},
-                "duration_minutes": {"type": "integer", "description": "משך בדקות (ברירת מחדל: 60)"},
+                "max_results": {"type": "integer", "description": "כמות אירועים (ברירת מחדל: 5)"},
+                "days_ahead":  {"type": "integer", "description": "כמה ימים קדימה (ברירת מחדל: 7)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "calendar_create_event",
+        "description": "קביעת פגישה ב-Google Calendar. בדוק calendar_get_events לפני.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "summary":          {"type": "string"},
+                "start_time":       {"type": "string", "description": "ISO: 2025-06-01T14:00:00"},
+                "duration_minutes": {"type": "integer"},
             },
             "required": ["summary", "start_time"],
         },
     },
+    # ─── Google Sheets ────────────────────────────────────────────────────────
     {
-        "name": "airtable_update_record",
-        "description": "עדכון רשומה קיימת ב-Airtable לפי record ID.",
+        "name": "sheets_append",
+        "description": "הוספת שורה לגוגל שיטס.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "table": {
-                    "type": "string",
-                    "description": "שם הטבלה ב-Airtable",
-                },
-                "record_id": {
-                    "type": "string",
-                    "description": "ה-ID של הרשומה לעדכון (מתחיל ב-rec...)",
-                },
-                "fields": {
-                    "type": "object",
-                    "description": "השדות לעדכון — רק שדות שצריך לשנות",
-                },
+                "spreadsheet_name": {"type": "string", "description": "שם הקובץ בדרייב"},
+                "row_data":         {"type": "array",  "description": "רשימת ערכים לשורה", "items": {"type": "string"}},
             },
-            "required": ["table", "record_id", "fields"],
+            "required": ["spreadsheet_name", "row_data"],
         },
     },
 ]
