@@ -282,8 +282,14 @@ def webhook_whatsapp():
     return Response(str(resp), mimetype="application/xml")
 
 
+_WORKER_SECRET = os.environ.get("WORKER_SECRET", "")
+
 @app.route("/worker/trigger", methods=["POST"])
 def worker_trigger():
+    # Require shared-secret auth — prevents anyone with the URL from triggering actions
+    auth = request.headers.get("X-Worker-Secret", "")
+    if not _WORKER_SECRET or auth != _WORKER_SECRET:
+        abort(403)
     try:
         payload = request.get_json(force=True) or {}
         chat_id = payload.get("chat_id", "")
@@ -298,7 +304,7 @@ def worker_trigger():
         return jsonify({"status": "ok", "reply": reply[:200]}), 200
     except Exception as e:
         logger.error(f"worker_trigger: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal error"}), 500
 
 
 @app.route("/")
