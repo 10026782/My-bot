@@ -108,16 +108,29 @@ def _mock_generate(template_name: str, context: str) -> str:
 # ─── Telegram Command Handler ─────────────────────────────────────────────────
 
 _KEYWORD_TO_TEMPLATE = {
-    'נדל"ן': "property_listing",
-    "נדלן":  "property_listing",
-    "נדל":   "property_listing",
-    "ייבוא": "import_offer",
-    "יבוא":  "import_offer",
+    'נדל"ן':  "property_listing",
+    "נדלן":   "property_listing",
+    "נדל":    "property_listing",
+    "ייבוא":  "import_offer",
+    "יבוא":   "import_offer",
     "וואטסאפ": "whatsapp_followup",
     "ווטסאפ":  "whatsapp_followup",
-    "מייל":  "email_proposal",
-    "פוסט":  "social_post",
-    "רשתות": "social_post",
+    "מייל":   "email_proposal",
+    "פוסט":   "social_post",
+    "רשתות":  "social_post",
+    "תשואה":  "property_listing",
+    "ביטחון": "property_listing",
+    "עיתוי":  "property_listing",
+    "קהילה":  "property_listing",
+    "דחיפות": "property_listing",
+}
+
+_ANGLE_CONTEXT = {
+    "תשואה":  'זווית: תשואה — השקעה שמניבה תשואה יציבה בנדל"ן',
+    "ביטחון": 'זווית: ביטחון — נכס בטוח כהגנה מפני אי-ודאות כלכלית',
+    "עיתוי":  'זווית: עיתוי — הרגע הנכון להיכנס לשוק הנדל"ן',
+    "קהילה":  'זווית: קהילה — סביבת מגורים איכותית ותחושת שייכות',
+    "דחיפות": 'זווית: דחיפות — הזדמנות מוגבלת בזמן שאסור לפספס',
 }
 
 
@@ -130,11 +143,14 @@ def handle_creative_command(text: str, chat_id: str) -> str:
         return list_templates()
 
     template = "property_listing"
+    enriched_context = context
     for keyword, tmpl in _KEYWORD_TO_TEMPLATE.items():
         if keyword in context:
             template = tmpl
+            if keyword in _ANGLE_CONTEXT:
+                enriched_context = _ANGLE_CONTEXT[keyword]
             break
 
-    result = generate(template, context)
+    result = generate(template, enriched_context)
     label = template.replace("_", " ").title()
     return f"*{label}*\n\n{result}"
