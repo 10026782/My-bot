@@ -1,0 +1,766 @@
+============================================================
+  CODE REVIEW — כל השינויים בפרויקט My-bot
+  תאריך: 2026-05-28
+============================================================
+
+BRANCHES שהשתנו:
+  1. claude/my-bot-setup-8vf4m  → קבצים חדשים (vs main)
+  2. bot.boss                   → שילוב בתוך app.py (vs main)
+
+============================================================
+
+### 1. BRANCH: claude/my-bot-setup-8vf4m — קבצים חדשים (vs main) ###
+
+diff --git a/.gitignore b/.gitignore
+new file mode 100644
+index 0000000..3734e7a
+--- /dev/null
++++ b/.gitignore
+@@ -0,0 +1,5 @@
++__pycache__/
++*.py[cod]
++*.pyo
++.env
++data.json
+diff --git a/creative_generator.py b/creative_generator.py
+new file mode 100644
+index 0000000..6815f84
+--- /dev/null
++++ b/creative_generator.py
+@@ -0,0 +1,105 @@
++import os
++import logging
++from anthropic import Anthropic
++from feature_flags import is_enabled
++
++logger = logging.getLogger(__name__)
++
++_PERSONA = (
++    "אתה קופירייטר עסקי דובר עברית ברמה גבוהה, המתמחה בנדל\"ן ובייבוא סחורות מסין. "
++    "הסגנון: ישיר, שכנועי, ללא מילים מיותרות. ממוקד בתועלת ללקוח."
++)
++
++TEMPLATES: dict[str, str] = {
++    "property_listing": (
++        "כתוב מודעת נדל\"ן מוכרת לנכס הבא. "
++        "כלול: כותרת חזקה, 3 יתרונות מפתח, קריאה לפעולה. עד 120 מילה."
++    ),
++    "import_offer": (
++        "כתוב הצעת מחיר שיווקית לסחורה המיובאת. "
++        "הדגש: איכות, מחיר תחרותי, אמינות הספק. עד 100 מילה."
++    ),
++    "whatsapp_followup": (
++        "כתוב הודעת WhatsApp קצרה ואנושית למעקב אחרי ליד שלא ענה. "
++        "טון: ידידותי אך עסקי. עד 50 מילה."
++    ),
++    "email_proposal": (
++        "כתוב אימייל מקצועי עם הצעה עסקית. "
++        "מבנה: פתיחה חמה, בעיה+פתרון, קריאה לפעולה ברורה. עד 200 מילה."
++    ),
++    "social_post": (
++        "כתוב פוסט לרשתות חברתיות (פייסבוק / לינקדאין). "
++        "כלול האשטאג רלוונטי. עד 80 מילה."
++    ),
++}
++
++_client = None
++
++
++def _get_client() -> Anthropic:
++    global _client
++    if _client is None:
++        _client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
++    return _client
++
++
++def generate(template_name: str, context: str, tone: str = "professional") -> str:
++    """מייצר תוכן שיווקי לפי תבנית נבחרת והקשר עסקי."""
++    if template_name not in TEMPLATES:
++        available = ", ".join(TEMPLATES.keys())
++        return f"❌ תבנית לא קיימת. אפשרויות: {available}"
++
++    if not is_enabled("CREATIVE_GENERATOR"):
++        return _mock_generate(template_name, context)
++
++    instruction = TEMPLATES[template_name]
++    tone_note = {"casual": "סגנון: קליל ולא פורמלי.", "urgent": "סגנון: דחוף, צור מסגרת זמן."}.get(tone, "")
++
++    prompt = f"{instruction}\n{tone_note}\n\nפרטי ההקשר:\n{context}"
++
++    try:
++        response = _get_client().messages.create(
++            model="claude-sonnet-4-6",
++            max_tokens=512,
++            system=_PERSONA,
++            messages=[{"role": "user", "content": prompt}],
++        )
++        return response.content[0].text.strip()
++    except Exception as e:
++        logger.error(f"generate error: {e}")
++        return f"❌ שגיאה בייצור תוכן: {e}"
++
++
++def generate_ab_variants(template_name: str, context: str, n: int = 2) -> list[str]:
++    """מייצר N גרסאות שונות לאותו תוכן לבדיקת A/B."""
++    n = min(max(n, 2), 4)
++    variants = []
++    tones = ["professional", "casual", "urgent", "professional"]
++    for i in range(n):
++        variant = generate(template_name, context, tone=tones[i])
++        variants.append(f"גרסה {i + 1}:\n{variant}")
++    return variants
++
++
++def list_templates() -> str:
++    """מחזיר רשימה של כל התבניות הזמינות."""
++    lines = ["📝 תבניות יצירת תוכן זמינות:\n"]
++    descriptions = {
++        "property_listing": "מודעת נדל\"ן",
++        "import_offer": "הצעת מחיר לייבוא",
++        "whatsapp_followup": "מעקב WhatsApp",
++        "email_proposal": "אימייל הצעה עסקית",
++        "social_post": "פוסט לרשתות חברתיות",
++    }
++    for key, desc in descriptions.items():
++        lines.append(f"• `{key}` — {desc}")
++    return "\n".join(lines)
++
++
++def _mock_generate(template_name: str, context: str) -> str:
++    return (
++        f"[מצב הדגמה — CREATIVE_GENERATOR לא מופעל]\n"
++        f"תבנית: {template_name}\n"
++        f"הקשר: {context[:100]}...\n"
++        f"הפעל CREATIVE_GENERATOR=true ב-env variables לתוצאות אמיתיות."
++    )
+diff --git a/lead_qualifier.py b/lead_qualifier.py
+new file mode 100644
+index 0000000..9243ff4
+--- /dev/null
++++ b/lead_qualifier.py
+@@ -0,0 +1,106 @@
++import os
++import logging
++from anthropic import Anthropic
++from feature_flags import is_enabled
++
++logger = logging.getLogger(__name__)
++
++QUALIFICATION_SYSTEM = """
++אתה מנתח לידים מקצועי עבור עסקי נדל"ן וייבוא סחורה מסין.
++תפקידך לנתח כל ליד בקפדנות ולתת ציון מ-0 עד 100.
++
++קריטריוני ניקוד:
++- תקציב ורצינות פיננסית (25 נקודות)
++- התאמה לתחומי הפעילות: נדל"ן / ייבוא רהיטים (25 נקודות)
++- דחיפות ולוח זמנים ריאלי (20 נקודות)
++- אמינות ונסיון קודם (20 נקודות)
++- פוטנציאל לעסקאות חוזרות (10 נקודות)
++
++החזר תמיד בפורמט:
++ציון: [0-100]
++סיווג: [HOT/WARM/COLD]
++סיכום: [2-3 שורות]
++סיכון עיקרי: [משפט אחד]
++צעד הבא: [פעולה ספציפית אחת]
++"""
++
++_client = None
++
++
++def _get_client() -> Anthropic:
++    global _client
++    if _client is None:
++        _client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
++    return _client
++
++
++def qualify_lead(lead_info: str, tenant_id: str = "default") -> dict:
++    """מנתח ליד ומחזיר ציון, סיווג והמלצה לצעד הבא."""
++    if not is_enabled("LEAD_QUALIFIER"):
++        return _mock_qualify(lead_info)
++
++    try:
++        response = _get_client().messages.create(
++            model="claude-sonnet-4-6",
++            max_tokens=512,
++            system=QUALIFICATION_SYSTEM,
++            messages=[{"role": "user", "content": f"נתח את הליד הבא:\n{lead_info}"}],
++        )
++        return _parse_response(response.content[0].text)
++    except Exception as e:
++        logger.error(f"qualify_lead error: {e}")
++        return {"score": 0, "tier": "COLD", "summary": "שגיאה בניתוח הליד.", "risk": str(e), "next_step": "נסה שנית"}
++
++
++def batch_qualify(leads: list[str], tenant_id: str = "default") -> list[dict]:
++    """מנתח רשימת לידים ומחזיר אותם מסודרים לפי ציון יורד."""
++    results = []
++    for lead in leads:
++        result = qualify_lead(lead, tenant_id)
++        result["raw"] = lead
++        results.append(result)
++    results.sort(key=lambda x: x.get("score", 0), reverse=True)
++    return results
++
++
++def format_lead_report(qualification: dict) -> str:
++    """ממיר תוצאת ניתוח לליד לטקסט מוכן לשליחה בטלגרם."""
++    tier_emoji = {"HOT": "🔥", "WARM": "🟡", "COLD": "🧊"}.get(qualification.get("tier", ""), "❓")
++    score = qualification.get("score", 0)
++    return (
++        f"{tier_emoji} *ציון ליד: {score}/100*\n"
++        f"📋 {qualification.get('summary', '')}\n"
++        f"⚠️ סיכון: {qualification.get('risk', '')}\n"
++        f"➡️ צעד הבא: {qualification.get('next_step', '')}"
++    )
++
++
++def _parse_response(text: str) -> dict:
++    result = {"score": 0, "tier": "COLD", "summary": "", "risk": "", "next_step": ""}
++    for line in text.splitlines():
++        line = line.strip()
++        if line.startswith("ציון:"):
++            try:
++                result["score"] = int("".join(filter(str.isdigit, line.split(":", 1)[1])))
++            except ValueError:
++                pass
++        elif line.startswith("סיווג:"):
++            raw = line.split(":", 1)[1].strip().upper()
++            result["tier"] = raw if raw in ("HOT", "WARM", "COLD") else "COLD"
++        elif line.startswith("סיכום:"):
++            result["summary"] = line.split(":", 1)[1].strip()
++        elif line.startswith("סיכון עיקרי:"):
++            result["risk"] = line.split(":", 1)[1].strip()
++        elif line.startswith("צעד הבא:"):
++            result["next_step"] = line.split(":", 1)[1].strip()
++    return result
++
++
++def _mock_qualify(lead_info: str) -> dict:
++    return {
++        "score": 50,
++        "tier": "WARM",
++        "summary": f"ניתוח מקדים (מצב ללא API): {lead_info[:80]}...",
++        "risk": "LEAD_QUALIFIER לא מופעל בסביבה זו.",
++        "next_step": "הפעל LEAD_QUALIFIER=true ב-env variables.",
++    }
+
+### 2. BRANCH: bot.boss — שינויים ב-app.py + קבצים חדשים (vs main) ###
+
+diff --git a/.gitignore b/.gitignore
+new file mode 100644
+index 0000000..e0cabee
+--- /dev/null
++++ b/.gitignore
+@@ -0,0 +1,5 @@
++__pycache__/
++*.pyc
++*.pyo
++.env
++*.log
+diff --git a/app.py b/app.py
+new file mode 100644
+index 0000000..81c39fb
+--- /dev/null
++++ b/app.py
+@@ -0,0 +1,194 @@
++"""
++הבוס בוט v2.0 — Flask App
++ארכיטקטורה: Native Tool Calling + Budget Protection + Proactive Worker
++"""
++
++import os
++import logging
++from flask import Flask, request, jsonify, Response
++from anthropic import Anthropic
++from tools import TOOL_SCHEMAS, dispatch_tool
++from memory import ConversationMemory
++from worker import schedule_background_worker
++from lead_qualifier import handle_lead_message, lead_sessions
++from creative_generator import handle_creative_command
++
++logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
++logger = logging.getLogger(__name__)
++
++app = Flask(__name__)
++client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
++memory = ConversationMemory(max_interactions=5)
++
++# ─── System Prompt ────────────────────────────────────────────────────────────
++SYSTEM_PROMPT = """אתה "הבוס בוט" – עוזר מנכ"ל, מנהל פרויקטים ומומחה אסטרטגי חריף וחד.
++המנהל שלך (אלייהו) הוא בעל חזון ואופטימי מטבעו.
++התפקיד שלך הוא להוות משקל נגד – לחפש את האותיות הקטנות, להציג את הסיכונים,
++את נקודות התורפה בעסקאות, והיכן שותפים או מוכרים עלולים להטעות אותו.
++היה קול ההיגיון הקר, הספקני והאנליטי.
++
++כללים נוקשים:
++1. תמיד תענה בעברית רהוטה, עסקית, חדה וללא גינונים מיותרים.
++2. ברירת מחדל: תשובה של שורה עד שתיים בלבד. קצר, חד, לעניין.
++3. רק אם ההודעה מתחילה ב-# — הפעל "מצב ניתוח עמוק" ותן ניתוח מורחב.
++4. אל תחזור על שאלת המשתמש. אל תוסיף מילות מחמאה. ישר לגוף העניין."""
++
++MAX_TOOL_TURNS = 2  # חוק הצינון
++
++# ─── Core Agent Loop ──────────────────────────────────────────────────────────
++def run_agent(user_message: str, channel: str = "telegram") -> str:
++    """
++    לולאת הסוכן המרכזית עם הגנת תקציב קשיחה.
++    channel: "whatsapp" | "telegram"
++    """
++    memory.add_user_message(user_message)
++    messages = memory.get_messages()
++
++    turn_count = 0
++    response_text = "לא הצלחתי לעבד את הבקשה. נסה שוב."
++
++    try:
++        while turn_count < MAX_TOOL_TURNS:
++            turn_count += 1
++            logger.info(f"Agent turn {turn_count}/{MAX_TOOL_TURNS}")
++
++            response = client.messages.create(
++                model="claude-sonnet-4-6",
++                max_tokens=1000 if channel == "telegram" else 400,
++                system=SYSTEM_PROMPT,
++                tools=TOOL_SCHEMAS,
++                messages=messages,
++            )
++
++            # בדיקת סיבת עצירה
++            stop_reason = response.stop_reason
++
++            if stop_reason == "end_turn":
++                # המודל סיים — חלץ טקסט
++                response_text = _extract_text(response)
++                break
++
++            elif stop_reason == "tool_use":
++                # עיבוד קריאות כלים
++                tool_results = []
++                for block in response.content:
++                    if block.type == "tool_use":
++                        logger.info(f"Calling tool: {block.name} | input: {block.input}")
++                        result = dispatch_tool(block.name, block.input)
++                        tool_results.append({
++                            "type": "tool_result",
++                            "tool_use_id": block.id,
++                            "content": str(result),
++                        })
++
++                # הוסף את תגובת המודל + תוצאות הכלים לשיחה
++                messages = messages + [
++                    {"role": "assistant", "content": response.content},
++                    {"role": "user", "content": tool_results},
++                ]
++
++            else:
++                logger.warning(f"Unexpected stop_reason: {stop_reason}")
++                break
++
++        else:
++            # חריגה מהמונה — קטיעת לולאה
++            logger.warning("MAX_TOOL_TURNS reached — cutting loop to prevent cost leak.")
++            response_text = "הגעתי למגבלת הסיבובים. אנא פרט את הבקשה ונסה שוב."
++
++    except Exception as e:
++        logger.error(f"Agent error: {e}", exc_info=True)
++        response_text = f"שגיאה פנימית: {e}"
++
++    memory.add_assistant_message(response_text)
++    return response_text
++
++
++def _extract_text(response) -> str:
++    for block in response.content:
++        if hasattr(block, "text"):
++            return block.text
++    return ""
++
++
++# ─── Webhook Endpoints המעודכנים ──────────────────────────────────────────────
++
++# 1. נתיב הבית - פותר את ה-404 של UptimeRobot ו-Render Health
++@app.route("/", methods=["GET", "HEAD"])
++def home():
++    return "OK", 200
++
++# 2. נתיב וואטסאפ - מותאם לפורמט של טוויליו (XML)
++@app.route("/whatsapp", methods=["POST"])
++def whatsapp_webhook_twilio():
++    from twilio.twiml.messaging_response import MessagingResponse
++    user_message = request.values.get("Body", "").strip()
++    sender = request.values.get("From", "unknown")
++    if not user_message:
++        return "OK", 200
++
++    session = lead_sessions[sender]
++    if session["state"].value != "done":
++        reply = handle_lead_message(sender, user_message)
++        if reply:
++            resp = MessagingResponse()
++            resp.message(reply)
++            return Response(str(resp), mimetype="application/xml")
++
++    reply = run_agent(user_message, channel="whatsapp")
++    resp = MessagingResponse()
++    resp.message(reply)
++    return str(resp), 200, {"Content-Type": "text/xml"}
++
++# 3. נתיב טלגרם - מאובטח באמצעות משתנה סביבה ומקשיב דינמית לטוקן
++@app.route(f"/{os.environ.get('TELEGRAM_TOKEN')}", methods=["POST"])
++def telegram_webhook():
++    print("🔥 Telegram hit", flush=True)
++    data = request.json or {}
++    
++    message_obj = data.get("message", {})
++    user_message = message_obj.get("text", "")
++    chat_id = message_obj.get("chat", {}).get("id")
++
++    if not user_message:
++        return "OK", 200
++
++    import requests
++    token = os.environ.get('TELEGRAM_TOKEN')
++    telegram_url = f"https://api.telegram.org/bot{token}/sendMessage"
++
++    if "קריאייטיב" in user_message:
++        reply = handle_creative_command(user_message, chat_id)
++        requests.post(telegram_url, json={
++            "chat_id": chat_id,
++            "text": reply,
++            "parse_mode": "Markdown"
++        })
++        return "OK", 200
++
++    reply = run_agent(user_message, channel="telegram")
++    requests.post(telegram_url, json={
++        "chat_id": chat_id,
++        "text": reply
++    })
++
++    return "OK", 200
++
++
++@app.route("/worker/trigger", methods=["POST"])
++def worker_trigger():
++    """Endpoint לטריגר ידני / Cron Job ב-Render."""
++    from worker import run_proactive_check
++    result = run_proactive_check()
++    return jsonify({"status": "ok", "result": result})
++
++
++@app.route("/health", methods=["GET"])
++def health():
++    return jsonify({"status": "alive"})
++
++
++# ─── Bootstrap ────────────────────────────────────────────────────────────────
++if __name__ == "__main__":
++    schedule_background_worker()
++    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+diff --git a/creative_generator.py b/creative_generator.py
+new file mode 100644
+index 0000000..e8015be
+--- /dev/null
++++ b/creative_generator.py
+@@ -0,0 +1,140 @@
++import os
++import logging
++from anthropic import Anthropic
++from feature_flags import is_enabled
++
++logger = logging.getLogger(__name__)
++
++_PERSONA = (
++    "אתה קופירייטר עסקי דובר עברית ברמה גבוהה, המתמחה בנדל\"ן ובייבוא סחורות מסין. "
++    "הסגנון: ישיר, שכנועי, ללא מילים מיותרות. ממוקד בתועלת ללקוח."
++)
++
++TEMPLATES: dict[str, str] = {
++    "property_listing": (
++        "כתוב מודעת נדל\"ן מוכרת לנכס הבא. "
++        "כלול: כותרת חזקה, 3 יתרונות מפתח, קריאה לפעולה. עד 120 מילה."
++    ),
++    "import_offer": (
++        "כתוב הצעת מחיר שיווקית לסחורה המיובאת. "
++        "הדגש: איכות, מחיר תחרותי, אמינות הספק. עד 100 מילה."
++    ),
++    "whatsapp_followup": (
++        "כתוב הודעת WhatsApp קצרה ואנושית למעקב אחרי ליד שלא ענה. "
++        "טון: ידידותי אך עסקי. עד 50 מילה."
++    ),
++    "email_proposal": (
++        "כתוב אימייל מקצועי עם הצעה עסקית. "
++        "מבנה: פתיחה חמה, בעיה+פתרון, קריאה לפעולה ברורה. עד 200 מילה."
++    ),
++    "social_post": (
++        "כתוב פוסט לרשתות חברתיות (פייסבוק / לינקדאין). "
++        "כלול האשטאג רלוונטי. עד 80 מילה."
++    ),
++}
++
++_client = None
++
++
++def _get_client() -> Anthropic:
++    global _client
++    if _client is None:
++        _client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
++    return _client
++
++
++def generate(template_name: str, context: str, tone: str = "professional") -> str:
++    """מייצר תוכן שיווקי לפי תבנית נבחרת והקשר עסקי."""
++    if template_name not in TEMPLATES:
++        available = ", ".join(TEMPLATES.keys())
++        return f"❌ תבנית לא קיימת. אפשרויות: {available}"
++
++    if not is_enabled("CREATIVE_GENERATOR"):
++        return _mock_generate(template_name, context)
++
++    instruction = TEMPLATES[template_name]
++    tone_note = {"casual": "סגנון: קליל ולא פורמלי.", "urgent": "סגנון: דחוף, צור מסגרת זמן."}.get(tone, "")
++
++    prompt = f"{instruction}\n{tone_note}\n\nפרטי ההקשר:\n{context}"
++
++    try:
++        response = _get_client().messages.create(
++            model="claude-sonnet-4-6",
++            max_tokens=512,
++            system=_PERSONA,
++            messages=[{"role": "user", "content": prompt}],
++        )
++        return response.content[0].text.strip()
++    except Exception as e:
++        logger.error(f"generate error: {e}")
++        return f"❌ שגיאה בייצור תוכן: {e}"
++
++
++def generate_ab_variants(template_name: str, context: str, n: int = 2) -> list[str]:
++    """מייצר N גרסאות שונות לאותו תוכן לבדיקת A/B."""
++    n = min(max(n, 2), 4)
++    variants = []
++    tones = ["professional", "casual", "urgent", "professional"]
++    for i in range(n):
++        variant = generate(template_name, context, tone=tones[i])
++        variants.append(f"גרסה {i + 1}:\n{variant}")
++    return variants
++
++
++def list_templates() -> str:
++    """מחזיר רשימה של כל התבניות הזמינות."""
++    lines = ["📝 תבניות יצירת תוכן זמינות:\n"]
++    descriptions = {
++        "property_listing": "מודעת נדל\"ן",
++        "import_offer": "הצעת מחיר לייבוא",
++        "whatsapp_followup": "מעקב WhatsApp",
++        "email_proposal": "אימייל הצעה עסקית",
++        "social_post": "פוסט לרשתות חברתיות",
++    }
++    for key, desc in descriptions.items():
++        lines.append(f"• `{key}` — {desc}")
++    return "\n".join(lines)
++
++
++def _mock_generate(template_name: str, context: str) -> str:
++    return (
++        f"[מצב הדגמה — CREATIVE_GENERATOR לא מופעל]\n"
++        f"תבנית: {template_name}\n"
++        f"הקשר: {context[:100]}...\n"
++        f"הפעל CREATIVE_GENERATOR=true ב-env variables לתוצאות אמיתיות."
++    )
++
++
++# ─── Telegram Command Handler ─────────────────────────────────────────────────
++
++_KEYWORD_TO_TEMPLATE = {
++    'נדל"ן': "property_listing",
++    "נדלן":  "property_listing",
++    "נדל":   "property_listing",
++    "ייבוא": "import_offer",
++    "יבוא":  "import_offer",
++    "וואטסאפ": "whatsapp_followup",
++    "ווטסאפ":  "whatsapp_followup",
++    "מייל":  "email_proposal",
++    "פוסט":  "social_post",
++    "רשתות": "social_post",
++}
++
++
++def handle_creative_command(text: str, chat_id: str) -> str:
++    """מזהה תבנית מתוך הטקסט ומייצר תוכן שיווקי מותאם."""
++    parts = text.split("קריאייטיב", 1)
++    context = parts[1].strip() if len(parts) > 1 else ""
++
++    if not context:
++        return list_templates()
++
++    template = "property_listing"
++    for keyword, tmpl in _KEYWORD_TO_TEMPLATE.items():
++        if keyword in context:
++            template = tmpl
++            break
++
++    result = generate(template, context)
++    label = template.replace("_", " ").title()
++    return f"*{label}*\n\n{result}"
+diff --git a/lead_qualifier.py b/lead_qualifier.py
+new file mode 100644
+index 0000000..eb65a0c
+--- /dev/null
++++ b/lead_qualifier.py
+@@ -0,0 +1,153 @@
++import os
++import logging
++from enum import Enum
++from collections import defaultdict
++from anthropic import Anthropic
++from feature_flags import is_enabled
++
++logger = logging.getLogger(__name__)
++
++QUALIFICATION_SYSTEM = """
++אתה מנתח לידים מקצועי עבור עסקי נדל"ן וייבוא סחורה מסין.
++תפקידך לנתח כל ליד בקפדנות ולתת ציון מ-0 עד 100.
++
++קריטריוני ניקוד:
++- תקציב ורצינות פיננסית (25 נקודות)
++- התאמה לתחומי הפעילות: נדל"ן / ייבוא רהיטים (25 נקודות)
++- דחיפות ולוח זמנים ריאלי (20 נקודות)
++- אמינות ונסיון קודם (20 נקודות)
++- פוטנציאל לעסקאות חוזרות (10 נקודות)
++
++החזר תמיד בפורמט:
++ציון: [0-100]
++סיווג: [HOT/WARM/COLD]
++סיכום: [2-3 שורות]
++סיכון עיקרי: [משפט אחד]
++צעד הבא: [פעולה ספציפית אחת]
++"""
++
++_client = None
++
++
++def _get_client() -> Anthropic:
++    global _client
++    if _client is None:
++        _client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
++    return _client
++
++
++def qualify_lead(lead_info: str, tenant_id: str = "default") -> dict:
++    """מנתח ליד ומחזיר ציון, סיווג והמלצה לצעד הבא."""
++    if not is_enabled("LEAD_QUALIFIER"):
++        return _mock_qualify(lead_info)
++
++    try:
++        response = _get_client().messages.create(
++            model="claude-sonnet-4-6",
++            max_tokens=512,
++            system=QUALIFICATION_SYSTEM,
++            messages=[{"role": "user", "content": f"נתח את הליד הבא:\n{lead_info}"}],
++        )
++        return _parse_response(response.content[0].text)
++    except Exception as e:
++        logger.error(f"qualify_lead error: {e}")
++        return {"score": 0, "tier": "COLD", "summary": "שגיאה בניתוח הליד.", "risk": str(e), "next_step": "נסה שנית"}
++
++
++def batch_qualify(leads: list[str], tenant_id: str = "default") -> list[dict]:
++    """מנתח רשימת לידים ומחזיר אותם מסודרים לפי ציון יורד."""
++    results = []
++    for lead in leads:
++        result = qualify_lead(lead, tenant_id)
++        result["raw"] = lead
++        results.append(result)
++    results.sort(key=lambda x: x.get("score", 0), reverse=True)
++    return results
++
++
++def format_lead_report(qualification: dict) -> str:
++    """ממיר תוצאת ניתוח לליד לטקסט מוכן לשליחה בטלגרם."""
++    tier_emoji = {"HOT": "🔥", "WARM": "🟡", "COLD": "🧊"}.get(qualification.get("tier", ""), "❓")
++    score = qualification.get("score", 0)
++    return (
++        f"{tier_emoji} *ציון ליד: {score}/100*\n"
++        f"📋 {qualification.get('summary', '')}\n"
++        f"⚠️ סיכון: {qualification.get('risk', '')}\n"
++        f"➡️ צעד הבא: {qualification.get('next_step', '')}"
++    )
++
++
++def _parse_response(text: str) -> dict:
++    result = {"score": 0, "tier": "COLD", "summary": "", "risk": "", "next_step": ""}
++    for line in text.splitlines():
++        line = line.strip()
++        if line.startswith("ציון:"):
++            try:
++                result["score"] = int("".join(filter(str.isdigit, line.split(":", 1)[1])))
++            except ValueError:
++                pass
++        elif line.startswith("סיווג:"):
++            raw = line.split(":", 1)[1].strip().upper()
++            result["tier"] = raw if raw in ("HOT", "WARM", "COLD") else "COLD"
++        elif line.startswith("סיכום:"):
++            result["summary"] = line.split(":", 1)[1].strip()
++        elif line.startswith("סיכון עיקרי:"):
++            result["risk"] = line.split(":", 1)[1].strip()
++        elif line.startswith("צעד הבא:"):
++            result["next_step"] = line.split(":", 1)[1].strip()
++    return result
++
++
++def _mock_qualify(lead_info: str) -> dict:
++    return {
++        "score": 50,
++        "tier": "WARM",
++        "summary": f"ניתוח מקדים (מצב ללא API): {lead_info[:80]}...",
++        "risk": "LEAD_QUALIFIER לא מופעל בסביבה זו.",
++        "next_step": "הפעל LEAD_QUALIFIER=true ב-env variables.",
++    }
++
++
++# ─── WhatsApp Lead Session State Machine ─────────────────────────────────────
++
++class LeadState(Enum):
++    INTRO = "intro"
++    BUDGET = "budget"
++    TIMELINE = "timeline"
++    DONE = "done"
++
++
++_FLOW = [
++    (LeadState.INTRO,    'מה אתה מחפש? נדל"ן / ייבוא / אחר?'),
++    (LeadState.BUDGET,   "מה התקציב שלך? (₪ / $)"),
++    (LeadState.TIMELINE, "מה לוח הזמנים שלך? (מיידי / חודש / גמיש)"),
++]
++
++
++def _new_session() -> dict:
++    return {"state": LeadState.INTRO, "answers": {}}
++
++
++lead_sessions: dict = defaultdict(_new_session)
++
++
++def handle_lead_message(sender: str, message: str) -> str | None:
++    """מנהל שיחת כישור ליד ב-WhatsApp. מחזיר שאלה הבאה, או None כשהסתיים."""
++    session = lead_sessions[sender]
++    state = session["state"]
++
++    if state == LeadState.DONE:
++        return None
++
++    step_index = next((i for i, (s, _) in enumerate(_FLOW) if s == state), 0)
++    session["answers"][state.value] = message
++
++    if step_index + 1 < len(_FLOW):
++        next_state, next_question = _FLOW[step_index + 1]
++        session["state"] = next_state
++        return next_question
++
++    session["state"] = LeadState.DONE
++    lead_info = "\n".join(f"{k}: {v}" for k, v in session["answers"].items())
++    result = qualify_lead(lead_info, sender)
++    return format_lead_report(result)
