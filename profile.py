@@ -20,7 +20,7 @@ from datetime import datetime
 _lock = Lock()
 
 # ─── Airtable Config ──────────────────────────────────────────────────────────
-_AT_TOKEN   = os.environ.get("AIRTABLE_TOKEN", "")
+_AT_TOKEN   = os.environ.get("AIRTABLE_API_KEY", "")
 _AT_BASE    = os.environ.get("AIRTABLE_BASE_ID", "")
 _AT_TABLE   = os.environ.get("AIRTABLE_PROFILE_TABLE", "Profile")
 _AT_HEADERS = {"Authorization": f"Bearer {_AT_TOKEN}", "Content-Type": "application/json"}

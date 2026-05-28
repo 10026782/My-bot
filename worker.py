@@ -12,7 +12,7 @@ from time import sleep
 
 logger = logging.getLogger(__name__)
 
-AIRTABLE_TOKEN = os.environ.get("AIRTABLE_TOKEN", "")
+AIRTABLE_TOKEN = os.environ.get("AIRTABLE_API_KEY", "")
 AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")  # same var as app.py
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")

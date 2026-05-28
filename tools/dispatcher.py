@@ -5,7 +5,7 @@ import requests
 logger = logging.getLogger(__name__)
 
 _AIRTABLE_BASE = os.environ.get("AIRTABLE_BASE_ID", "")
-_AIRTABLE_TOKEN = os.environ.get("AIRTABLE_TOKEN", "")
+_AIRTABLE_TOKEN = os.environ.get("AIRTABLE_API_KEY", "")
 
 
 def _airtable_headers() -> dict:
@@ -53,7 +53,7 @@ def dispatch_tool(name: str, inputs: dict, tenant_id: str = "boss_hq") -> str:
 
         case "airtable_get_records":
             if not _AIRTABLE_TOKEN or not _AIRTABLE_BASE:
-                return "❌ AIRTABLE_TOKEN או AIRTABLE_BASE_ID לא מוגדרים"
+                return "❌ AIRTABLE_API_KEY או AIRTABLE_BASE_ID לא מוגדרים"
             table = inputs["table"]
             params: dict = {"maxRecords": inputs.get("max_records", 10)}
             if inputs.get("filter_formula"):
@@ -83,7 +83,7 @@ def dispatch_tool(name: str, inputs: dict, tenant_id: str = "boss_hq") -> str:
 
         case "airtable_create_record":
             if not _AIRTABLE_TOKEN or not _AIRTABLE_BASE:
-                return "❌ AIRTABLE_TOKEN או AIRTABLE_BASE_ID לא מוגדרים"
+                return "❌ AIRTABLE_API_KEY או AIRTABLE_BASE_ID לא מוגדרים"
             table = inputs["table"]
             fields = inputs.get("fields", {})
             try:
@@ -103,7 +103,7 @@ def dispatch_tool(name: str, inputs: dict, tenant_id: str = "boss_hq") -> str:
 
         case "airtable_update_record":
             if not _AIRTABLE_TOKEN or not _AIRTABLE_BASE:
-                return "❌ AIRTABLE_TOKEN או AIRTABLE_BASE_ID לא מוגדרים"
+                return "❌ AIRTABLE_API_KEY או AIRTABLE_BASE_ID לא מוגדרים"
             table = inputs["table"]
             record_id = inputs["record_id"]
             fields = inputs.get("fields", {})
