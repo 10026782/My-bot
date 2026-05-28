@@ -6,6 +6,8 @@
 # • hybrid prompt: Layer 7+8 עוברים ל-user message (חיסכון ~100 טוקן/בקשה)
 # • grounding: בודק last_turn_results בלבד (לא all) — מאפשר retry
 # • UX: typing indicator לפני כל תשובה
+# app.py — The Boss Bot v3.2
+# Multi-Tenant Architecture: Identity → Context → Agent
 
 import os
 import logging
@@ -18,7 +20,6 @@ from twilio.twiml.messaging_response import MessagingResponse
 from memory_store import memory
 from identity import resolve_identity, Role
 from context import build_context, check_tool_results
-from action_validator import validate_action, ActionBlocked
 from tool_registry import enforce, ToolDenied
 from scheduler import start_scheduler
 from tools import dispatch_tool
@@ -57,23 +58,13 @@ if os.environ.get("SETUP_WEBHOOK") == "1":
         logger.error(f"Webhook failed: {e}")
 
 
-# ══════════════════════════════════════════════════
-# _summarize_tool_context
-# ══════════════════════════════════════════════════
-
 def _summarize_tool_context(tool_results: list[dict]) -> str:
-    """
-    בונה סיכום קצר של תוצאות הכלים לשמירה בזיכרון.
-    כך בהודעה הבאה Claude יודע "מה שלפתי בשיחה הקודמת"
-    מבלי לשמור את מבנה ה-tool_result הטכני (שאינו valid כהיסטוריה).
-    """
     if not tool_results:
         return ""
     parts = []
     for r in tool_results:
         content = r.get("content", "")
         if isinstance(content, str) and content and not content.startswith("❌"):
-            # קח רק 80 תווים ראשונים — מספיק להקשר, לא מציף
             parts.append(content[:80].replace("\n", " "))
     if not parts:
         return ""
@@ -81,19 +72,12 @@ def _summarize_tool_context(tool_results: list[dict]) -> str:
     return f"[הקשר כלים מהשיחה הקודמת: {joined}]"
 
 
-# ══════════════════════════════════════════════════
-# run_agent — Identity-Aware Agent Loop
-# ══════════════════════════════════════════════════
-
 def run_agent(user_text: str, chat_id: str, channel: str = "telegram") -> str:
-    # ─── Identity ──────────────────────────────────
     identity = resolve_identity(channel, chat_id)
 
-    # ─── Rate Limit ────────────────────────────────
     if not rate_limiter.is_allowed(identity.memory_key):
         return "⚠️ יותר מדי בקשות. המתן דקה ונסה שוב."
 
-    # ─── Readonly block ────────────────────────────
     if identity.role == Role.READONLY:
         return "⚠️ אין לך גישה למערכת. פנה למנהל."
 
@@ -149,6 +133,13 @@ def run_agent(user_text: str, chat_id: str, channel: str = "telegram") -> str:
                     grounded, err_msg = check_tool_results(last_turn_results)
                     if not grounded:
                         logger.warning("Grounding: last-turn tool failure — blocking answer")
+            if not tool_uses:
+                candidate = text_blocks[0].text if text_blocks else "✅ פעולה הושלמה."
+
+                if all_tool_results:
+                    grounded, err_msg = check_tool_results(all_tool_results)
+                    if not grounded:
+                        logger.warning("Grounding violation — blocking hallucinated answer")
                         final_reply = err_msg
                         break
 
@@ -167,9 +158,6 @@ def run_agent(user_text: str, chat_id: str, channel: str = "telegram") -> str:
                 )
                 break
 
-            # ─── Tool Loop ──────────────────────────
-            # tool_results הוא list[dict] — תקני ל-Anthropic API
-            # (role=user, content=list) — לא שומרים מבנה זה בזיכרון
             tool_results: list[dict] = []
 
             for tu in tool_uses:
@@ -243,15 +231,11 @@ def run_agent(user_text: str, chat_id: str, channel: str = "telegram") -> str:
         return f"❌ שגיאה פנימית: {e}"
 
 
-# ══════════════════════════════════════════════════
-# Endpoints
-# ══════════════════════════════════════════════════
-
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({
         "status":         "ok",
-        "version":        "3.3",
+        "version":        "3.2",
         "max_tool_turns": MAX_TOOL_TURNS,
         "grounding":      "enabled",
         "layers":         8,
@@ -319,7 +303,7 @@ def worker_trigger():
 
 @app.route("/")
 def home():
-    return "The Boss is Live v3.3 — Hybrid Prompt + Action Validator ✅"
+    return "The Boss is Live v3.2 — 8-Layer Agent OS ✅"
 
 
 if __name__ == "__main__":
