@@ -4,6 +4,7 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+
 def _airtable_headers() -> dict:
     token = os.environ.get("AIRTABLE_API_KEY", "")
     return {
@@ -18,15 +19,13 @@ def _airtable_url(table: str) -> str:
 
 
 def _airtable_creds_ok() -> str | None:
-    """מחזיר הודעת שגיאה אם חסרים env vars, אחרת None."""
     if not os.environ.get("AIRTABLE_API_KEY") or not os.environ.get("AIRTABLE_BASE_ID"):
         return "❌ AIRTABLE_API_KEY או AIRTABLE_BASE_ID לא מוגדרים"
     return None
 
 
 def _airtable_check_response(r, table: str) -> str | None:
-    """מחזיר הודעת שגיאה מפורטת, או None אם הכל תקין."""
-    if r.status_code == 200 or r.status_code == 201:
+    if r.status_code in (200, 201):
         return None
     if r.status_code == 403:
         return (
@@ -40,8 +39,11 @@ def _airtable_check_response(r, table: str) -> str | None:
     if r.status_code == 401:
         return "❌ Airtable 401 — ה-AIRTABLE_API_KEY לא תקין או פג תוקף."
     if r.status_code == 404:
-        return f"❌ Airtable 404 — טבלה '{table}' לא נמצאה. בדוק את שם הטבלה ואת AIRTABLE_BASE_ID."
+        return f"❌ Airtable 404 — טבלה '{table}' לא נמצאה. בדוק שם טבלה ו-AIRTABLE_BASE_ID."
     return f"❌ Airtable שגיאה {r.status_code}: {r.text[:200]}"
+
+
+def dispatch_tool(name: str, inputs: dict, tenant_id: str = "boss_hq") -> str:
     match name:
 
         case "gmail_send":
