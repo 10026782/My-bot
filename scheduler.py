@@ -1,93 +1,109 @@
-# scheduler.py
-import logging
-import os
-import threading
-import time
+# scheduler.py — v3.3
+# משימות רקע: דוח בוקר + מאסף יומי + ניקוי + תשלומים
 
+import os
+import logging
+import threading
 import schedule
+import time
 
 logger = logging.getLogger(__name__)
 
-_started = False
 
-
-def _send_digest_message(text: str) -> None:
-    import telebot
-
-    token = os.environ.get("TELEGRAM_TOKEN", "")
-    chat_id = os.environ.get("DIGEST_CHAT_ID", "")
-    if not token or not chat_id:
-        return
-    bot = telebot.TeleBot(token)
-    bot.send_message(chat_id, text, parse_mode="Markdown")
+def _job_cleanup_pending():
+    try:
+        from event_bus import pending
+        pending.cleanup()
+    except Exception as e:
+        logger.error(f"cleanup_pending error: {e}")
 
 
 def _job_daily_digest():
-    """Morning digest with reminders and pending surveys."""
     try:
-        report = (
-            "🌅 *דוח בוקר*\n\n"
-            "• בדוק משימות פתוחות\n"
-            "• אשר פגישות ותשלומים\n"
-            "• זהה פעולה אחת שמקדמת הכנסה\n"
-        )
-
-        from feature_flags import is_enabled
-
-        if is_enabled("SUPABASE"):
-            try:
-                import httpx
-
-                url = os.environ.get("SUPABASE_URL", "")
-                key = os.environ.get("SUPABASE_KEY", "")
-                r = httpx.get(
-                    f"{url}/rest/v1/pending_surveys",
-                    headers={"apikey": key, "Authorization": f"Bearer {key}"},
-                    params={"answered_at": "is.null", "limit": "5"},
-                    timeout=5,
-                )
-                surveys = r.json() if r.status_code == 200 else []
-                if surveys:
-                    report += "\n\n📝 *סקרים ממתינים:*\n"
-                    for s in surveys:
-                        outcome = "🎉" if s.get("outcome") == "won" else "📋"
-                        report += f"  {outcome} {s.get('contact_name','?')} — {s.get('outcome','')}\n"
-                    report += "_שלח 'ענה לסקרים' לפתיחה_"
-            except Exception:
-                pass
-
-        _send_digest_message(report)
+        from daily_digest import send_daily_digest
+        import telebot
+        token   = os.environ.get("TELEGRAM_TOKEN", "")
+        chat_id = os.environ.get("DIGEST_CHAT_ID", "")
+        if not token or not chat_id:
+            logger.warning("DIGEST_CHAT_ID לא מוגדר — דוח בוקר דולג")
+            return
+        bot = telebot.TeleBot(token)
+        send_daily_digest(bot=bot, chat_id=chat_id)
+        logger.info(f"✅ Daily digest נשלח ל-{chat_id}")
+    except ImportError:
+        logger.info("daily_digest לא קיים — דולג")
     except Exception as e:
-        logger.error(f"Daily digest: {e}")
+        logger.error(f"daily_digest error: {e}")
 
 
-def _job_weekly_debrief():
-    """Friday 17:00 — weekly debrief."""
+def _job_overdue_payments():
     try:
-        _send_digest_message(
-            "📊 *סיכום שבועי — מה למדת?*\n\n"
-            "כתוב בחופשיות:\n"
-            "• עסקאות שסגרת / נפלו\n"
-            "• בעיות שנתקלת\n"
-            "• מה עבד טוב\n"
-            "• תובנות לזכור\n\n"
-            "_המערכת תזקק ותשמור._"
-        )
+        from crm import crm_overdue_payments
+        result = crm_overdue_payments()
+        if "🚨" in result:
+            logger.info(f"Overdue payments: {result[:100]}")
+    except ImportError:
+        pass
     except Exception as e:
-        logger.error(f"Weekly debrief: {e}")
+        logger.error(f"overdue_payments error: {e}")
 
 
-def _run_loop():
+def _job_daily_collector():
+    """
+    המאסף היומי — רץ ב-23:00.
+    עובר על שיחות היום, מזהה נתונים שאולי לא נשמרו,
+    ושולח לאליהו סיכום בטלגרם.
+    """
+    try:
+        from daily_collector import send_daily_collector
+        import telebot
+
+        token      = os.environ.get("TELEGRAM_TOKEN", "")
+        chat_id    = os.environ.get("DIGEST_CHAT_ID", "")
+        owner_key  = os.environ.get("OWNER_MEMORY_KEY", "boss_hq:eliyahu")
+
+        if not token or not chat_id:
+            logger.warning("DIGEST_CHAT_ID לא מוגדר — מאסף דולג")
+            return
+
+        bot = telebot.TeleBot(token)
+        send_daily_collector(bot=bot, chat_id=chat_id, memory_key=owner_key)
+
+    except ImportError:
+        logger.info("daily_collector לא קיים — דולג")
+    except Exception as e:
+        logger.error(f"daily_collector error: {e}")
+
+
+# ══════════════════════════════════════════════════
+# Runner
+# ══════════════════════════════════════════════════
+
+def _run_scheduler():
+    logger.info("🕐 Scheduler thread started")
     while True:
-        schedule.run_pending()
+        try:
+            schedule.run_pending()
+        except Exception as e:
+            logger.error(f"Scheduler run error: {e}")
         time.sleep(30)
 
 
-def start_scheduler():
-    global _started
-    if _started:
-        return
-    schedule.every().day.at("08:00").do(_job_daily_digest)
-    schedule.every().friday.at("17:00").do(_job_weekly_debrief)
-    threading.Thread(target=_run_loop, daemon=True).start()
-    _started = True
+def start_scheduler() -> threading.Thread:
+    digest_time      = os.environ.get("DIGEST_TIME",           "07:30")
+    collector_time   = os.environ.get("COLLECTOR_TIME",        "23:00")
+    cleanup_interval = int(os.environ.get("CLEANUP_INTERVAL_MIN", "60"))
+
+    schedule.every().day.at(digest_time).do(_job_daily_digest)
+    schedule.every().day.at(collector_time).do(_job_daily_collector)
+    schedule.every(cleanup_interval).minutes.do(_job_cleanup_pending)
+    schedule.every().day.at("00:05").do(_job_overdue_payments)
+
+    logger.info(
+        f"📅 Scheduler | digest={digest_time} | "
+        f"collector={collector_time} | cleanup=every {cleanup_interval}min"
+    )
+
+    t = threading.Thread(target=_run_scheduler, daemon=True, name="scheduler")
+    t.start()
+    return t
