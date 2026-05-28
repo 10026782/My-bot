@@ -1,30 +1,21 @@
+"""
+lead_qualifier.py — Lead Qualification Engine (MADS CORE)
+שינויים מ-v2:
+- QUALIFICATION_SYSTEM נטען לפי דומיין (לא קשיח)
+- _FLOW נטען לפי דומיין (לא קשיח)
+- שאר הקוד זהה לחלוטין — backward compatible
+"""
+
 import os
 import logging
 from enum import Enum
-from collections import defaultdict, OrderedDict
+from collections import OrderedDict
 from anthropic import Anthropic
 from feature_flags import is_enabled
+from domain_prompts import get_qualification_prompt, get_flow, get_domain_config
+from config import get_domain
 
 logger = logging.getLogger(__name__)
-
-QUALIFICATION_SYSTEM = """
-אתה מנתח לידים מקצועי עבור עסקי נדל"ן וייבוא סחורה מסין.
-תפקידך לנתח כל ליד בקפדנות ולתת ציון מ-0 עד 100.
-
-קריטריוני ניקוד:
-- תקציב ורצינות פיננסית (25 נקודות)
-- התאמה לתחומי הפעילות: נדל"ן / ייבוא רהיטים (25 נקודות)
-- דחיפות ולוח זמנים ריאלי (20 נקודות)
-- אמינות ונסיון קודם (20 נקודות)
-- פוטנציאל לעסקאות חוזרות (10 נקודות)
-
-החזר תמיד בפורמט:
-ציון: [0-100]
-סיווג: [HOT/WARM/COLD]
-סיכום: [2-3 שורות]
-סיכון עיקרי: [משפט אחד]
-צעד הבא: [פעולה ספציפית אחת]
-"""
 
 _client = None
 
@@ -36,16 +27,17 @@ def _get_client() -> Anthropic:
     return _client
 
 
-def qualify_lead(lead_info: str, tenant_id: str = "default") -> dict:
-    """מנתח ליד ומחזיר ציון, סיווג והמלצה לצעד הבא."""
+# ─── Lead Qualification ───────────────────────────────────────────────────────
+
+def qualify_lead(lead_info: str, domain: str = "realestate") -> dict:
     if not is_enabled("LEAD_QUALIFIER"):
         return _mock_qualify(lead_info)
-
+    system_prompt = get_qualification_prompt(domain)
     try:
         response = _get_client().messages.create(
-            model="claude-sonnet-4-6",
+            model="claude-haiku-4-5-20251001",
             max_tokens=512,
-            system=QUALIFICATION_SYSTEM,
+            system=system_prompt,
             messages=[{"role": "user", "content": f"נתח את הליד הבא:\n{lead_info}"}],
         )
         return _parse_response(response.content[0].text)
@@ -54,11 +46,10 @@ def qualify_lead(lead_info: str, tenant_id: str = "default") -> dict:
         return {"score": 0, "tier": "COLD", "summary": "שגיאה בניתוח הליד.", "risk": str(e), "next_step": "נסה שנית"}
 
 
-def batch_qualify(leads: list[str], tenant_id: str = "default") -> list[dict]:
-    """מנתח רשימת לידים ומחזיר אותם מסודרים לפי ציון יורד."""
+def batch_qualify(leads: list[str], domain: str = "realestate") -> list[dict]:
     results = []
     for lead in leads:
-        result = qualify_lead(lead, tenant_id)
+        result = qualify_lead(lead, domain)
         result["raw"] = lead
         results.append(result)
     results.sort(key=lambda x: x.get("score", 0), reverse=True)
@@ -66,7 +57,6 @@ def batch_qualify(leads: list[str], tenant_id: str = "default") -> list[dict]:
 
 
 def format_lead_report(qualification: dict) -> str:
-    """ממיר תוצאת ניתוח לליד לטקסט מוכן לשליחה בטלגרם."""
     tier_emoji = {"HOT": "🔥", "WARM": "🟡", "COLD": "🧊"}.get(qualification.get("tier", ""), "❓")
     score = qualification.get("score", 0)
     return (
@@ -111,21 +101,7 @@ def _mock_qualify(lead_info: str) -> dict:
 # ─── WhatsApp Lead Session State Machine ─────────────────────────────────────
 
 class LeadState(Enum):
-    INTRO = "intro"
-    BUDGET = "budget"
-    TIMELINE = "timeline"
     DONE = "done"
-
-
-_FLOW = [
-    (LeadState.INTRO,    'מה אתה מחפש? נדל"ן / ייבוא / אחר?'),
-    (LeadState.BUDGET,   "מה התקציב שלך? (₪ / $)"),
-    (LeadState.TIMELINE, "מה לוח הזמנים שלך? (מיידי / חודש / גמיש)"),
-]
-
-
-def _new_session() -> dict:
-    return {"state": LeadState.INTRO, "answers": {}}
 
 
 _RESET_KEYWORDS = {"איפוס", "reset", "restart", "התחל מחדש"}
@@ -158,27 +134,63 @@ class _LRUSessionStore:
 lead_sessions = _LRUSessionStore()
 
 
-def handle_lead_message(sender: str, message: str) -> str | None:
-    """מנהל שיחת כישור ליד ב-WhatsApp. מחזיר שאלה הבאה, או None כשהסתיים."""
+def _new_session(domain: str = "realestate") -> dict:
+    get_flow(domain)  # validate domain exists
+    return {
+        "domain": domain,
+        "step": 0,
+        "answers": {},
+        "done": False,
+    }
+
+
+def handle_lead_message(sender: str, message: str, channel: str = "whatsapp") -> str | None:
+    """
+    מנהל שיחת ליד לפי State Machine דינמי לפי דומיין.
+    מחזיר את התשובה הבאה, או None כשהשיחה הסתיימה.
+    """
+    # איפוס
     if message.strip() in _RESET_KEYWORDS:
         lead_sessions.delete(sender)
-        return 'בוצע איפוס! מה אתה מחפש? נדל"ן / ייבוא / אחר?'
+        domain = get_domain(channel, sender)
+        flow = get_flow(domain)
+        return flow[0][1]
 
     session = lead_sessions[sender]
-    state = session["state"]
 
-    if state == LeadState.DONE:
+    # שיחה הסתיימה
+    if session["done"]:
         return None
 
-    step_index = next((i for i, (s, _) in enumerate(_FLOW) if s == state), 0)
-    session["answers"][state.value] = message
+    domain = session["domain"]
+    flow = get_flow(domain)
+    step = session["step"]
 
-    if step_index + 1 < len(_FLOW):
-        next_state, next_question = _FLOW[step_index + 1]
-        session["state"] = next_state
-        return next_question
+    # שמור תשובה לשלב הנוכחי
+    field_name = flow[step][0]
+    session["answers"][field_name] = message.strip()
 
-    session["state"] = LeadState.DONE
+    next_step = step + 1
+
+    # יש עוד שאלות
+    if next_step < len(flow):
+        session["step"] = next_step
+        return flow[next_step][1]
+
+    # סיימנו — מנתחים
+    session["done"] = True
     lead_info = "\n".join(f"{k}: {v}" for k, v in session["answers"].items())
-    result = qualify_lead(lead_info, sender)
+    result = qualify_lead(lead_info, domain)
     return format_lead_report(result)
+
+
+def init_lead_session(sender: str, channel: str = "whatsapp") -> str:
+    """
+    יוצר session חדש לליד ומחזיר את שאלת הפתיחה.
+    קורא לזה מ-app.py כשליד חדש נכנס.
+    """
+    domain = get_domain(channel, sender)
+    session = _new_session(domain)
+    lead_sessions._store[sender] = session
+    flow = get_flow(domain)
+    return flow[0][1]

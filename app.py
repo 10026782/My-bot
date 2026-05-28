@@ -160,7 +160,7 @@ def whatsapp_webhook_twilio():
 
     # לקוח חיצוני → State Machine כרגיל
     session = lead_sessions[sender]
-    if session["state"].value != "done":
+    if not session["done"]:
         reply = handle_lead_message(sender, user_message)
         if reply:
             resp = MessagingResponse()
