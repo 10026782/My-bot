@@ -1,9 +1,34 @@
+# dispatcher.py — v2.0
+# נקודת כניסה יחידה לכל הכלים.
+#
+# שינוי קריטי מ-v1:
+# dispatch_tool(name, inputs, identity) — identity חובה.
+# ─── שכבת אבטחה ───────────────────────────────────────
+# 1. tool_registry.enforce()                        → הרשאת role (ב-app.py)
+# 2. airtable_security.enforce_tenant_scope()       → tenant filter (כאן)
+# 3. airtable_security.audit_log_airtable()         → לוג לכל פעולה (כאן)
+# 4. gmail_read — owner בלבד (כאן)
+
+from __future__ import annotations
 import os
 import logging
 import requests
+from typing import TYPE_CHECKING
+
+from .airtable_security import enforce_tenant_scope, audit_log_airtable, TenantScopeViolation
+
+if TYPE_CHECKING:
+    from identity import Identity
 
 logger = logging.getLogger(__name__)
 
+# כלים שדורשים tenant enforcement לפני קריאה
+_TENANT_SCOPED_TOOLS = {"airtable_get", "airtable_add", "airtable_update"}
+
+
+# ──────────────────────────────────────────────────────────────────
+# Airtable helpers
+# ──────────────────────────────────────────────────────────────────
 
 def _airtable_headers() -> dict:
     token = os.environ.get("AIRTABLE_API_KEY", "")
@@ -37,124 +62,170 @@ def _airtable_check_response(r, table: str) -> str | None:
     return f"❌ Airtable שגיאה {r.status_code}: {r.text[:200]}"
 
 
-def dispatch_tool(name: str, inputs: dict, tenant_id: str = "boss_hq") -> str:
-    match name:
+# ──────────────────────────────────────────────────────────────────
+# Main dispatcher
+# ──────────────────────────────────────────────────────────────────
 
-        # ─── Knowledge ───────────────────────────────────────────────────────
-        case "add_knowledge":
-            from knowledge_engine import knowledge_engine
-            ok = knowledge_engine.add_fact(tenant_id, inputs["fact"])
-            return "✅ עובדה נוספה" if ok else "❌ שגיאה בשמירה"
+def dispatch_tool(name: str, inputs: dict, identity: "Identity") -> str:
+    """
+    מקבל שם כלי + inputs + identity ומחזיר תוצאה כטקסט.
 
-        # ─── Airtable ────────────────────────────────────────────────────────
-        case "airtable_get":
-            creds_err = _airtable_creds_ok()
-            if creds_err:
-                return creds_err
-            table = inputs["table"]
-            params: dict = {"maxRecords": inputs.get("max_records", 10)}
-            if inputs.get("filter_formula"):
-                params["filterByFormula"] = inputs["filter_formula"]
+    identity הוא חובה — לא optional.
+    כל כלי tenant_scoped עובר דרך enforce_tenant_scope לפני ביצוע.
+    """
+    try:
+        # ── Tenant Scope Enforcement ────────────────────────────────
+        if name in _TENANT_SCOPED_TOOLS:
             try:
-                r = requests.get(_airtable_url(table), headers=_airtable_headers(),
-                                 params=params, timeout=10)
-                err = _airtable_check_response(r, table)
-                if err:
-                    return err
-                records = r.json().get("records", [])
-                if not records:
-                    filter_info = f" (סינון: {inputs['filter_formula']})" if inputs.get("filter_formula") else ""
-                    return f"✅ החיפוש הצליח — אין רשומות בטבלה '{table}'{filter_info}. זו תוצאה תקינה, לא שגיאה."
-                lines = [f"נמצאו {len(records)} רשומות מטבלה '{table}':"]
-                for rec in records:
-                    fields  = rec.get("fields", {})
-                    rec_id  = rec.get("id", "")
-                    fstr    = " | ".join(f"{k}: {v}" for k, v in fields.items())
-                    lines.append(f"[{rec_id}] {fstr}")
-                return "\n".join(lines)
-            except Exception as e:
-                logger.error(f"airtable_get error: {e}")
-                return f"❌ שגיאה: {e}"
+                inputs = enforce_tenant_scope(name, identity, inputs)
+            except TenantScopeViolation as e:
+                logger.error(f"TenantScopeViolation: {name} | {identity.memory_key}")
+                return str(e)
 
-        case "airtable_add":
-            creds_err = _airtable_creds_ok()
-            if creds_err:
-                return creds_err
-            table  = inputs["table"]
-            fields = inputs.get("fields", {})
-            try:
-                r = requests.post(_airtable_url(table), headers=_airtable_headers(),
-                                  json={"fields": fields}, timeout=10)
-                err = _airtable_check_response(r, table)
-                if err:
-                    return err
-                rec_id = r.json().get("id", "")
-                return f"✅ רשומה נוצרה בטבלה '{table}' — ID: {rec_id}"
-            except Exception as e:
-                logger.error(f"airtable_add error: {e}")
-                return f"❌ שגיאה: {e}"
+        # ── Dispatch ────────────────────────────────────────────────
+        match name:
 
-        case "airtable_update":
-            creds_err = _airtable_creds_ok()
-            if creds_err:
-                return creds_err
-            table     = inputs["table"]
-            record_id = inputs["record_id"]
-            fields    = inputs.get("fields", {})
-            try:
-                r = requests.patch(f"{_airtable_url(table)}/{record_id}",
-                                   headers=_airtable_headers(),
-                                   json={"fields": fields}, timeout=10)
-                err = _airtable_check_response(r, table)
-                if err:
-                    return err
-                return f"✅ רשומה {record_id} עודכנה בטבלה '{table}'"
-            except Exception as e:
-                logger.error(f"airtable_update error: {e}")
-                return f"❌ שגיאה: {e}"
+            # ─── Knowledge ─────────────────────────────────────────
+            case "add_knowledge":
+                from knowledge_engine import knowledge_engine
+                ok = knowledge_engine.add_fact(identity.tenant_id, inputs["fact"])
+                return "✅ עובדה נוספה" if ok else "❌ שגיאה בשמירה"
 
-        # ─── Gmail ───────────────────────────────────────────────────────────
-        case "gmail_draft":
-            from tools.google_tools import gmail_send
-            return gmail_send(inputs["to"], inputs["subject"], inputs["body"])
+            # ─── Airtable ──────────────────────────────────────────
+            case "airtable_get":
+                creds_err = _airtable_creds_ok()
+                if creds_err:
+                    return creds_err
+                table = inputs["table"]
+                params: dict = {"maxRecords": inputs.get("max_records", 10)}
+                if inputs.get("filterByFormula"):
+                    params["filterByFormula"] = inputs["filterByFormula"]
+                elif inputs.get("filter_formula"):
+                    params["filterByFormula"] = inputs["filter_formula"]
+                try:
+                    r = requests.get(_airtable_url(table), headers=_airtable_headers(),
+                                     params=params, timeout=10)
+                    err = _airtable_check_response(r, table)
+                    if err:
+                        return err
+                    records = r.json().get("records", [])
+                    if not records:
+                        filter_info = f" (סינון: {params.get('filterByFormula','')})" if params.get("filterByFormula") else ""
+                        return f"✅ החיפוש הצליח — אין רשומות בטבלה '{table}'{filter_info}. זו תוצאה תקינה, לא שגיאה."
+                    lines = [f"נמצאו {len(records)} רשומות מטבלה '{table}':"]
+                    for rec in records:
+                        fields = rec.get("fields", {})
+                        rec_id = rec.get("id", "")
+                        fstr   = " | ".join(f"{k}: {v}" for k, v in fields.items())
+                        lines.append(f"[{rec_id}] {fstr}")
+                    result = "\n".join(lines)
+                    audit_log_airtable(name, identity, inputs, result)
+                    return result
+                except Exception as e:
+                    logger.error(f"airtable_get error: {e}")
+                    return f"❌ שגיאה: {e}"
 
-        case "gmail_send_draft":
-            from tools.google_tools import gmail_send_draft
-            return gmail_send_draft(inputs["draft_id"])
+            case "airtable_add":
+                creds_err = _airtable_creds_ok()
+                if creds_err:
+                    return creds_err
+                table  = inputs["table"]
+                fields = dict(inputs.get("fields", {}))
+                # הוסף tenant_id אוטומטית לרשומות של external users
+                if not identity.is_internal:
+                    fields.setdefault("tenant_id", identity.tenant_id)
+                try:
+                    r = requests.post(_airtable_url(table), headers=_airtable_headers(),
+                                      json={"fields": fields}, timeout=10)
+                    err = _airtable_check_response(r, table)
+                    if err:
+                        return err
+                    rec_id = r.json().get("id", "")
+                    result = f"✅ רשומה נוצרה בטבלה '{table}' — ID: {rec_id}"
+                    audit_log_airtable(name, identity, inputs, result)
+                    return result
+                except Exception as e:
+                    logger.error(f"airtable_add error: {e}")
+                    return f"❌ שגיאה: {e}"
 
-        case "gmail_read":
-            from tools.google_tools import gmail_read
-            return gmail_read(inputs.get("max_results", 5))
+            case "airtable_update":
+                creds_err = _airtable_creds_ok()
+                if creds_err:
+                    return creds_err
+                table     = inputs["table"]
+                record_id = inputs["record_id"]
+                fields    = inputs.get("fields", {})
+                try:
+                    r = requests.patch(f"{_airtable_url(table)}/{record_id}",
+                                       headers=_airtable_headers(),
+                                       json={"fields": fields}, timeout=10)
+                    err = _airtable_check_response(r, table)
+                    if err:
+                        return err
+                    result = f"✅ רשומה {record_id} עודכנה בטבלה '{table}'"
+                    audit_log_airtable(name, identity, inputs, result)
+                    return result
+                except Exception as e:
+                    logger.error(f"airtable_update error: {e}")
+                    return f"❌ שגיאה: {e}"
 
-        # ─── Google Drive ─────────────────────────────────────────────────────
-        case "search_drive":
-            from tools.google_tools import drive_search
-            return drive_search(inputs["query"])
+            # ─── Gmail ─────────────────────────────────────────────
+            case "gmail_draft":
+                from tools.google_tools import gmail_send
+                return gmail_send(inputs["to"], inputs["subject"], inputs["body"])
 
-        case "read_drive_file":
-            from tools.google_tools import drive_read_file
-            return drive_read_file(inputs["file_name"])
+            case "gmail_send_draft":
+                from tools.google_tools import gmail_send_draft
+                return gmail_send_draft(inputs["draft_id"])
 
-        # ─── Google Calendar ──────────────────────────────────────────────────
-        case "calendar_get_events":
-            from tools.google_tools import calendar_get_events
-            return calendar_get_events(
-                inputs.get("max_results", 5),
-                inputs.get("days_ahead", 7),
-            )
+            case "gmail_read":
+                # owner בלבד — staff לא יכול לקרוא מיילים
+                if not identity.is_owner:
+                    logger.warning(f"gmail_read blocked for role={identity.role}")
+                    return "❌ gmail_read — מורשה לבעלים בלבד."
+                from tools.google_tools import gmail_read
+                return gmail_read(inputs.get("max_results", 3))
 
-        case "calendar_create_event":
-            from tools.google_tools import calendar_create_event
-            return calendar_create_event(
-                inputs["summary"],
-                inputs["start_time"],
-                inputs.get("duration_minutes", 60),
-            )
+            # ─── Google Drive ───────────────────────────────────────
+            case "search_drive":
+                from tools.google_tools import drive_search
+                return drive_search(inputs["query"])
 
-        # ─── Google Sheets ────────────────────────────────────────────────────
-        case "sheets_append":
-            from tools.google_tools import sheets_append
-            return sheets_append(inputs["spreadsheet_name"], inputs["row_data"])
+            case "read_drive_file":
+                from tools.google_tools import drive_read_file
+                return drive_read_file(inputs["file_name"])
 
-        case _:
-            return f"❌ כלי לא מוכר: {name}"
+            # ─── Google Calendar ────────────────────────────────────
+            case "calendar_get_events":
+                from tools.google_tools import calendar_get_events
+                return calendar_get_events(
+                    inputs.get("max_results", 5),
+                    inputs.get("days_ahead", 7),
+                )
+
+            case "calendar_create_event":
+                from tools.google_tools import calendar_create_event
+                return calendar_create_event(
+                    inputs["summary"],
+                    inputs["start_time"],
+                    inputs.get("duration_minutes", 60),
+                )
+
+            # ─── Google Sheets ──────────────────────────────────────
+            case "sheets_append":
+                from tools.google_tools import sheets_append
+                return sheets_append(inputs["sheet_name"], inputs["row_data"])
+
+            case _:
+                logger.error(f"Unknown tool called: {name}")
+                return f"⚠️ כלי לא מוכר: {name}"
+
+    except KeyError as e:
+        logger.error(f"Tool {name} missing param: {e}")
+        return f"❌ פרמטר חסר בכלי {name}: {e}"
+    except RuntimeError as e:
+        logger.error(f"Tool {name} auth/config error: {e}")
+        return f"❌ {e}"
+    except Exception as e:
+        logger.error(f"Tool {name} error: {e}", exc_info=True)
+        return f"❌ שגיאה בכלי {name}: {e}"
