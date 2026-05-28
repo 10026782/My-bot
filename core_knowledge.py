@@ -176,24 +176,22 @@ def build_context_layer() -> str:
         now = datetime.now()
 
     days_he = ["שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת", "ראשון"]
-    day_name = days_he[now.weekday()]
-    date_str = now.strftime("%d/%m/%Y")
-    time_str = now.strftime("%H:%M")
-
-    return f"""
-═══════════════════════════════════════
-LAYER 7 — CONTEXT (מצב מערכת בזמן אמת)
-═══════════════════════════════════════
-📅 עכשיו: {date_str} | יום {day_name} | {time_str} (ישראל)
-⚠️ השתמש בתאריך ושעה אלו בלבד. אל תנחש זמן.
-"""
+    return (
+        f"[הקשר: {now.strftime('%d/%m/%Y')} | "
+        f"יום {days_he[now.weekday()]} | "
+        f"{now.strftime('%H:%M')} ישראל]"
+    )
 
 
 # ══════════════════════════════════════════════════
-# Dynamic Context — data.json
+# LAYER 8 — נתונים דינמיים (נכנס ל-user message)
 # ══════════════════════════════════════════════════
 
 class DynamicContext:
+    """
+    טוען data.json — מחזיר שורת הקשר קצרה ל-user message.
+    cache עם invalidation.
+    """
     def __init__(self, data_file: str = "data.json"):
         self._data_file = data_file
         self._cache: str = ""
@@ -217,14 +215,13 @@ class DynamicContext:
             with open(self._data_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
             self._cache = self._build(data)
+            logger.info("✅ Dynamic context loaded")
         except Exception as e:
-            logger.error(f"Dynamic context load error: {e}")
+            logger.error(f"❌ Dynamic context error: {e}")
             self._cache = ""
 
     def _build(self, data: dict) -> str:
-        parts = ["\n═══════════════════════════════════════",
-                 "LAYER 8 — ASSEMBLY (נתונים דינמיים ממערכת)",
-                 "═══════════════════════════════════════"]
+        parts = []
 
         tasks = [t for t in data.get("tasks", [])
                  if t.get("status", "").lower() not in ("done", "cancelled")]
