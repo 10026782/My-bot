@@ -113,12 +113,15 @@ def drive_search(query: str) -> str:
     if not token:
         return "❌ חסרים פרטי Google OAuth"
 
+    # Sanitize: strip single-quotes to prevent Drive query injection
+    safe_query = str(query).replace("'", "\\'")
+
     try:
         r = httpx.get(
             "https://www.googleapis.com/drive/v3/files",
             headers={"Authorization": f"Bearer {token}"},
             params={
-                "q": f"name contains '{query}' and trashed = false",
+                "q": f"name contains '{safe_query}' and trashed = false",
                 "fields": "files(name, webViewLink)",
             },
             timeout=10,
@@ -139,13 +142,16 @@ def drive_read_file(file_name: str) -> str:
     if not token:
         return "❌ חסרים פרטי Google OAuth"
 
+    # Sanitize: strip single-quotes to prevent Drive query injection
+    safe_name = str(file_name).replace("'", "\\'")
+
     try:
         headers = {"Authorization": f"Bearer {token}"}
         search = httpx.get(
             "https://www.googleapis.com/drive/v3/files",
             headers=headers,
             params={
-                "q": f"name contains '{file_name}' and trashed = false",
+                "q": f"name contains '{safe_name}' and trashed = false",
                 "fields": "files(id, name, mimeType)",
             },
             timeout=10,

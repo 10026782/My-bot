@@ -1,13 +1,11 @@
-# app.py — The Boss Bot v3.3
+# app.py — The Boss Bot v3.4
 # Multi-Tenant Architecture: Identity → Context → Agent
 #
-# תיקונים v3.3 (על גבי v3.2):
-# • action_validator: gate לפני dispatch_tool — בדיקת פרמטרים rule-based
-# • hybrid prompt: Layer 7+8 עוברים ל-user message (חיסכון ~100 טוקן/בקשה)
-# • grounding: בודק last_turn_results בלבד (לא all) — מאפשר retry
-# • UX: typing indicator לפני כל תשובה
-# app.py — The Boss Bot v3.2
-# Multi-Tenant Architecture: Identity → Context → Agent
+# תיקוני v3.4 (security hardening):
+# • [SEC-1] dispatch_tool מקבל identity — tenant enforcement אמיתי
+# • [SEC-2] /worker/trigger מאומת עם WORKER_SECRET
+# • [SEC-3] gmail_read חסום לowner בלבד (דרך dispatcher)
+# • [SEC-4] identity propagation לאורך כל ה-tool loop
 
 import os
 import logging
@@ -20,6 +18,7 @@ from twilio.twiml.messaging_response import MessagingResponse
 from memory_store import memory
 from identity import resolve_identity, Role
 from context import build_context, check_tool_results
+from action_validator import validate_action, ActionBlocked
 from tool_registry import enforce, ToolDenied
 from scheduler import start_scheduler
 from tools import dispatch_tool
@@ -30,8 +29,11 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger(__name__)
 
 # ─── קבועים ────────────────────────────────────────
-MAX_TOOL_TURNS = 4       # היה 2 — מאפשר שרשרת כלים מלאה
-AGENT_TIMEOUT  = 25      # שניות
+MAX_TOOL_TURNS = 4
+AGENT_TIMEOUT  = 25
+
+# ─── [SEC-2] Worker secret — חובה להגדיר ב-env ─────
+WORKER_SECRET = os.environ.get("WORKER_SECRET", "")
 
 # ─── קליינטים ──────────────────────────────────────
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -58,7 +60,15 @@ if os.environ.get("SETUP_WEBHOOK") == "1":
         logger.error(f"Webhook failed: {e}")
 
 
+# ══════════════════════════════════════════════════
+# _summarize_tool_context
+# ══════════════════════════════════════════════════
+
 def _summarize_tool_context(tool_results: list[dict]) -> str:
+    """
+    בונה סיכום קצר של תוצאות הכלים לשמירה בזיכרון.
+    כך בהודעה הבאה Claude יודע "מה שלפתי בשיחה הקודמת".
+    """
     if not tool_results:
         return ""
     parts = []
@@ -68,16 +78,27 @@ def _summarize_tool_context(tool_results: list[dict]) -> str:
             parts.append(content[:80].replace("\n", " "))
     if not parts:
         return ""
-    joined = " | ".join(parts)
-    return f"[הקשר כלים מהשיחה הקודמת: {joined}]"
+    return f"[הקשר כלים מהשיחה הקודמת: {' | '.join(parts)}]"
 
+
+# ══════════════════════════════════════════════════
+# run_agent — Identity-Aware Agent Loop
+# ══════════════════════════════════════════════════
 
 def run_agent(user_text: str, chat_id: str, channel: str = "telegram") -> str:
+    # ─── Identity ──────────────────────────────────
     identity = resolve_identity(channel, chat_id)
 
+    # ─── [SEC-1] Guard: identity חובה לכל tool ─────
+    if identity is None:
+        logger.error("run_agent called with None identity — hard block")
+        return "⚠️ שגיאת אבטחה פנימית."
+
+    # ─── Rate Limit ────────────────────────────────
     if not rate_limiter.is_allowed(identity.memory_key):
         return "⚠️ יותר מדי בקשות. המתן דקה ונסה שוב."
 
+    # ─── Readonly block ────────────────────────────
     if identity.role == Role.READONLY:
         return "⚠️ אין לך גישה למערכת. פנה למנהל."
 
@@ -89,7 +110,6 @@ def run_agent(user_text: str, chat_id: str, channel: str = "telegram") -> str:
         ctx      = build_context(identity, user_text)
         history  = memory.get_for_claude(ctx.memory_key)
 
-        # Layer 7+8 נכנסים ל-user message (לא system) — חוסך ~100 טוקן/בקשה
         from core_knowledge import build_context_layer, dynamic_context
         ctx_line  = build_context_layer()
         data_line = dynamic_context.get()
@@ -104,8 +124,8 @@ def run_agent(user_text: str, chat_id: str, channel: str = "telegram") -> str:
 
         final_reply     = "⚠️ לא התקבלה תשובה."
         tool_calls_made = 0
-        all_tool_results: list[dict] = []   # לסיכום זיכרון בלבד
-        last_turn_results: list[dict] = []  # ל-grounding (הסיבוב האחרון בלבד)
+        all_tool_results:  list[dict] = []
+        last_turn_results: list[dict] = []
 
         # ══════════════════════════════════════════
         # Agent Loop
@@ -123,44 +143,32 @@ def run_agent(user_text: str, chat_id: str, channel: str = "telegram") -> str:
             tool_uses   = [b for b in response.content if b.type == "tool_use"]
             text_blocks = [b for b in response.content if b.type == "text"]
 
-            # ─── תשובה סופית — אין כלים נוספים ────
+            # ─── תשובה סופית ───────────────────────
             if not tool_uses:
                 candidate = text_blocks[0].text if text_blocks else "✅ פעולה הושלמה."
-
-                # Grounding: בדוק רק את הכלים של הסיבוב האחרון.
-                # אם Claude ניסה כלי חלופי והצליח — לא חוסמים בגלל כשל ישן.
                 if last_turn_results:
                     grounded, err_msg = check_tool_results(last_turn_results)
                     if not grounded:
                         logger.warning("Grounding: last-turn tool failure — blocking answer")
-            if not tool_uses:
-                candidate = text_blocks[0].text if text_blocks else "✅ פעולה הושלמה."
-
-                if all_tool_results:
-                    grounded, err_msg = check_tool_results(all_tool_results)
-                    if not grounded:
-                        logger.warning("Grounding violation — blocking hallucinated answer")
                         final_reply = err_msg
                         break
-
                 final_reply = candidate
                 break
 
-            # ─── MAX_TOOL_TURNS הגיע לסוף ──────────
+            # ─── MAX_TOOL_TURNS ─────────────────────
             if tool_calls_made >= MAX_TOOL_TURNS:
                 final_reply = (
                     text_blocks[0].text if text_blocks
-                    else (
-                        "⚠️ לא הגעתי לתוצאה אחרי מספר ניסיונות. "
-                        "בדוק חיבור Airtable/Drive ונסה שוב, "
-                        "או פרק לשלבים."
-                    )
+                    else "⚠️ לא הגעתי לתוצאה אחרי מספר ניסיונות. פרק לשלבים."
                 )
                 break
 
+            # ─── Tool Loop ──────────────────────────
             tool_results: list[dict] = []
 
             for tu in tool_uses:
+
+                # [SEC-1a] Policy check — role מול tool
                 try:
                     enforce(tu.name, identity)
                 except ToolDenied as e:
@@ -172,7 +180,7 @@ def run_agent(user_text: str, chat_id: str, channel: str = "telegram") -> str:
                     })
                     continue
 
-                # ACTION VALIDATOR — gate לפני dispatch
+                # ACTION VALIDATOR — פורמט + שדות חובה
                 av = validate_action(tu.name, tu.input)
                 if isinstance(av, ActionBlocked):
                     logger.info(f"ActionBlocked: {tu.name} — {av.reason}")
@@ -184,40 +192,28 @@ def run_agent(user_text: str, chat_id: str, channel: str = "telegram") -> str:
                     continue
 
                 logger.info(f"Tool: {tu.name} | {str(tu.input)[:80]}")
-                raw    = dispatch_tool(tu.name, tu.input)
+
+                # [SEC-1b] dispatch עם identity — tenant enforcement בפנים
+                raw    = dispatch_tool(tu.name, tu.input, identity)
                 result = validate_tool_output(tu.name, raw)
                 logger.info(f"  -> {result[:80]}")
 
                 tool_results.append({
                     "type":        "tool_result",
                     "tool_use_id": tu.id,
-                    "content":     result,   # תמיד string — תקני ל-API
+                    "content":     result,
                 })
 
-            # last_turn = סיבוב נוכחי בלבד (ל-grounding)
-            # all = מצטבר (לסיכום זיכרון)
             last_turn_results = tool_results
             all_tool_results.extend(tool_results)
-
             tool_calls_made += 1
 
-            # ── הזן לאנתרופיק: assistant (כולל tool_use) + user (tool_result list) ──
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user",      "content": tool_results})
-            # ↑ content=list תקני לאנתרופיק בלולאה הפנימית.
-            # לא נשמר ב-memory_store (ראה למטה).
 
-        # ══════════════════════════════════════════
-        # שמירת זיכרון ארוך-טווח
-        # שומרים גם סיכום הקשר כלים
-        # ══════════════════════════════════════════
-        tool_ctx = _summarize_tool_context(all_tool_results)
-
-        # user: ההודעה + הקשר כלים (אם יש) — מאפשר ל-Claude לדעת "מה שלפתי"
-        user_memory = clean_msg
-        if tool_ctx:
-            user_memory = f"{clean_msg}\n{tool_ctx}"
-
+        # ─── שמירת זיכרון ──────────────────────────
+        tool_ctx    = _summarize_tool_context(all_tool_results)
+        user_memory = f"{clean_msg}\n{tool_ctx}" if tool_ctx else clean_msg
         memory.add(ctx.memory_key, "user",      user_memory)
         memory.add(ctx.memory_key, "assistant", final_reply)
 
@@ -231,16 +227,21 @@ def run_agent(user_text: str, chat_id: str, channel: str = "telegram") -> str:
         return f"❌ שגיאה פנימית: {e}"
 
 
+# ══════════════════════════════════════════════════
+# Endpoints
+# ══════════════════════════════════════════════════
+
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({
         "status":         "ok",
-        "version":        "3.2",
+        "version":        "3.4",
         "max_tool_turns": MAX_TOOL_TURNS,
         "grounding":      "enabled",
         "layers":         8,
         "ttl_hours":      4,
         "tool_memory":    "enabled",
+        "security":       "tenant-enforced",
     }), 200
 
 
@@ -254,7 +255,6 @@ def webhook_telegram():
         text    = update.message.text
         if idempotency.is_duplicate("telegram", chat_id, text):
             return "", 200
-        # UX: הצג "מקליד..." כדי שהמשתמש ידע שהבוט עובד (לא תקוע)
         try:
             bot.send_chat_action(chat_id, "typing")
         except Exception:
@@ -284,6 +284,16 @@ def webhook_whatsapp():
 
 @app.route("/worker/trigger", methods=["POST"])
 def worker_trigger():
+    # [SEC-2] אימות secret — חוסם כל קריאה לא מורשית
+    if not WORKER_SECRET:
+        logger.error("WORKER_SECRET לא מוגדר — /worker/trigger חסום")
+        abort(503)
+
+    auth = request.headers.get("X-Worker-Secret", "")
+    if auth != WORKER_SECRET:
+        logger.warning(f"worker_trigger: unauthorized attempt | ip={request.remote_addr}")
+        abort(403)
+
     try:
         payload = request.get_json(force=True) or {}
         chat_id = payload.get("chat_id", "")
@@ -298,12 +308,12 @@ def worker_trigger():
         return jsonify({"status": "ok", "reply": reply[:200]}), 200
     except Exception as e:
         logger.error(f"worker_trigger: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal error"}), 500
 
 
 @app.route("/")
 def home():
-    return "The Boss is Live v3.2 — 8-Layer Agent OS ✅"
+    return "The Boss is Live v3.4 — Tenant-Enforced Security ✅"
 
 
 if __name__ == "__main__":
