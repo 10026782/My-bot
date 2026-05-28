@@ -1,6 +1,6 @@
 """
-הבוס בוט v2.0 — Flask App
-ארכיטקטורה: Native Tool Calling + Budget Protection + Proactive Worker
+הבוס בוט v2.1 — Flask App
+ארכיטקטורה: Native Tool Calling + Budget Protection + Proactive Worker + Identity Layer
 """
 
 import os
@@ -13,6 +13,7 @@ from memory import ConversationMemory
 from worker import schedule_background_worker
 from lead_qualifier import handle_lead_message, lead_sessions
 from creative_generator import handle_creative_command
+from identity import resolve_identity
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -145,6 +146,19 @@ def whatsapp_webhook_twilio():
     if not user_message:
         return "OK", 200
 
+    # ─── זיהוי תפקיד ───────────────────────────────────────────────────────────
+    phone = sender.replace("whatsapp:", "")
+    identity = resolve_identity("whatsapp", phone)
+    logger.info(f"WhatsApp message | sender={phone} | role={identity.role}")
+
+    # בעל בית / צוות → ישר ל-agent, בלי שאלות ליד
+    if identity.is_internal:
+        reply = run_agent(user_message, channel="whatsapp", user_id=identity.sender)
+        resp = MessagingResponse()
+        resp.message(reply)
+        return Response(str(resp), mimetype="application/xml")
+
+    # לקוח חיצוני → State Machine כרגיל
     session = lead_sessions[sender]
     if session["state"].value != "done":
         reply = handle_lead_message(sender, user_message)
