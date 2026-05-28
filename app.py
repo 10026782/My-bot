@@ -14,6 +14,7 @@ from worker import schedule_background_worker
 from lead_qualifier import handle_lead_message, lead_sessions
 from creative_generator import handle_creative_command
 from identity import resolve_identity
+from airtable_schema import format_schema_for_prompt
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -71,6 +72,14 @@ SYSTEM_PROMPT = """אתה "הבוס בוט" – עוזר מנכ"ל, מנהל פ�
 
 MAX_TOOL_TURNS = 2
 
+
+def _build_system_prompt() -> str:
+    schema = format_schema_for_prompt()
+    if schema:
+        return SYSTEM_PROMPT + f"\n\n{schema}"
+    return SYSTEM_PROMPT
+
+
 # ─── Core Agent Loop ──────────────────────────────────────────────────────────
 def run_agent(user_message: str, channel: str = "telegram", user_id: str = "default") -> str:
     """
@@ -92,7 +101,7 @@ def run_agent(user_message: str, channel: str = "telegram", user_id: str = "defa
             response = client.messages.create(
                 model="claude-sonnet-4-6",
                 max_tokens=1000 if channel == "telegram" else 400,
-                system=SYSTEM_PROMPT,
+                system=_build_system_prompt(),
                 tools=TOOL_SCHEMAS,
                 messages=messages,
             )
