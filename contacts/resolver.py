@@ -1,18 +1,7 @@
 # contacts/resolver.py
 import httpx
 import logging
-
-try:
-    from tenant_config import get_airtable_base, get_airtable_key
-except ImportError:
-    import os
-
-    def get_airtable_base(tenant_id: str = "boss_hq"):
-        return os.environ.get("AIRTABLE_BASE_ID", "")
-
-    def get_airtable_key(tenant_id: str = "boss_hq"):
-        return os.environ.get("AIRTABLE_API_KEY", "")
-
+from tenant_config import get_airtable_base, get_airtable_key
 
 logger = logging.getLogger(__name__)
 
