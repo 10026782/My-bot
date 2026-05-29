@@ -60,7 +60,7 @@ def build_digest() -> str:
     # ── עסקאות פתוחות ────────────────────────────
     if crm_deals:
         try:
-            deals = crm_deals(status="open")
+            deals = crm_deals(status="Active")   # DealStatus.ACTIVE — סטטוס תקין
             if deals and "אין" not in deals:
                 lines.append("🤝 *עסקאות פתוחות:*")
                 lines.append(deals)

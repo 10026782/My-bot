@@ -41,12 +41,16 @@ class AgentContext:
 
 _ROLE_TOOLS: dict = {
     Role.OWNER: {
+        "add_knowledge",
         "search_drive", "read_drive_file",
         "calendar_get_events", "calendar_create_event",
         "gmail_draft", "gmail_send_draft", "gmail_read",
         "sheets_append",
         "airtable_get", "airtable_add", "airtable_update",
-        "add_knowledge",
+        # CRM — גישה מלאה
+        "crm_add_contact", "crm_find_contact", "crm_list_contacts", "crm_update_last_contact",
+        "crm_add_deal", "crm_list_deals", "crm_update_deal_status",
+        "crm_add_payment", "crm_upcoming_payments", "crm_overdue_payments", "crm_mark_payment_paid",
     },
     Role.STAFF: {
         "search_drive", "read_drive_file",
@@ -54,6 +58,10 @@ _ROLE_TOOLS: dict = {
         "gmail_draft", "gmail_read",
         "sheets_append",
         "airtable_get", "airtable_add", "airtable_update",
+        # CRM — גישה מלאה (crm_mark_payment_paid דורש אישור — נשלט ע"י registry)
+        "crm_add_contact", "crm_find_contact", "crm_list_contacts", "crm_update_last_contact",
+        "crm_add_deal", "crm_list_deals", "crm_update_deal_status",
+        "crm_add_payment", "crm_upcoming_payments", "crm_overdue_payments", "crm_mark_payment_paid",
     },
     Role.CLIENT: {
         "airtable_get",

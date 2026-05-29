@@ -41,8 +41,9 @@ def _get(table: str, formula: str = "", fields: list = None, identity=None) -> l
     [SEC] identity — אם עובר ו-is_external, מוסיף tenant filter אוטומטי.
     scheduler / daily_digest קוראים בלי identity → עוברים כ-internal (owner-level).
     """
-    tenant_id   = getattr(identity, "tenant_id", None)
-    is_external = getattr(identity, "is_external", False)
+    tenant_id = getattr(identity, "tenant_id", None)
+    # Identity לא מגדיר is_external — נגזר מ-is_internal (owner/staff = internal)
+    is_external = identity is not None and not getattr(identity, "is_internal", True)
 
     if is_external and tenant_id and tenant_id != "unknown":
         tenant_filter = f"{{tenant_id}}='{tenant_id}'"
@@ -364,44 +365,3 @@ def crm_overdue_payments(identity=None) -> str:
     except Exception as e:
         return f"❌ שגיאה: {e}"
 
-
-# ══════════════════════════════════════════════════
-# CRM DISPATCHER
-# ══════════════════════════════════════════════════
-
-def crm_dispatch(action: str, payload: dict, chat_id: str = "") -> str:
-    """מנתב פעולות CRM מ-Claude TOOL_CALL."""
-    dispatch_map = {
-        "crm_add_contact":        lambda p: crm_add_contact(
-            p.get("name", ""), p.get("phone", ""), p.get("email", ""),
-            p.get("type", ContactType.CLIENT), p.get("company", ""), p.get("notes", "")
-        ),
-        "crm_find_contact":       lambda p: crm_find_contact(p.get("query", "")),
-        "crm_list_contacts":      lambda p: crm_list_contacts(p.get("type", "")),
-        "crm_update_last_contact":lambda p: crm_update_last_contact(p.get("record_id", "")),
-        "crm_add_deal":           lambda p: crm_add_deal(
-            p.get("name", ""), p.get("address", ""), p.get("price", 0),
-            p.get("funding_cost_pct", 0), p.get("contact_id", ""),
-            p.get("deadline", ""), p.get("notes", "")
-        ),
-        "crm_update_deal_status": lambda p: crm_update_deal_status(
-            p.get("record_id", ""), p.get("status", ""), p.get("notes", "")
-        ),
-        "crm_list_deals":         lambda p: crm_list_deals(p.get("status", "")),
-        "crm_add_payment":        lambda p: crm_add_payment(
-            p.get("name", ""), p.get("amount", 0), p.get("due_date", ""),
-            p.get("deal_id", ""), p.get("contact_id", ""), p.get("notes", "")
-        ),
-        "crm_upcoming_payments":  lambda p: crm_upcoming_payments(p.get("days_ahead", 7)),
-        "crm_mark_payment_paid":  lambda p: crm_mark_payment_paid(p.get("record_id", "")),
-        "crm_overdue_payments":   lambda p: crm_overdue_payments(),
-    }
-
-    handler = dispatch_map.get(action)
-    if not handler:
-        return f"⚠️ פעולת CRM לא מוכרת: {action}"
-    try:
-        return handler(payload)
-    except Exception as e:
-        logger.error(f"crm_dispatch [{action}]: {e}")
-        return f"❌ שגיאה ב-{action}: {e}"

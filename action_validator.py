@@ -18,36 +18,67 @@ logger = logging.getLogger(__name__)
 # ══════════════════════════════════════════════════
 
 _REQUIRED: dict[str, list[str]] = {
-    "search_drive":          ["query"],
-    "read_drive_file":       ["file_name"],
-    "calendar_get_events":   [],
-    "calendar_create_event": ["summary", "start_time"],
-    "gmail_draft":           ["to", "subject", "body"],
-    "gmail_send_draft":      ["draft_id"],
-    "gmail_read":            [],
-    "sheets_append":         ["sheet_name", "row_data"],
-    "airtable_get":          ["table"],
-    "airtable_add":          ["table", "fields"],
-    "airtable_update":       ["table", "record_id", "fields"],
+    "add_knowledge":           ["fact"],
+    "search_drive":            ["query"],
+    "read_drive_file":         ["file_name"],
+    "calendar_get_events":     [],
+    "calendar_create_event":   ["summary", "start_time"],
+    "gmail_draft":             ["to", "subject", "body"],
+    "gmail_send_draft":        ["draft_id"],
+    "gmail_read":              [],
+    "sheets_append":           ["sheet_name", "row_data"],
+    "airtable_get":            ["table"],
+    "airtable_add":            ["table", "fields"],
+    "airtable_update":         ["table", "record_id", "fields"],
+    # ─── CRM — אנשי קשר ──────────────────────────
+    "crm_add_contact":         ["name"],
+    "crm_find_contact":        ["query"],
+    "crm_list_contacts":       [],
+    "crm_update_last_contact": ["record_id"],
+    # ─── CRM — עסקאות ────────────────────────────
+    "crm_add_deal":            ["name", "address", "price", "funding_cost_pct"],
+    "crm_list_deals":          [],
+    "crm_update_deal_status":  ["record_id", "status"],
+    # ─── CRM — תשלומים ───────────────────────────
+    "crm_add_payment":         ["name", "amount", "due_date"],
+    "crm_upcoming_payments":   [],
+    "crm_overdue_payments":    [],
+    "crm_mark_payment_paid":   ["record_id"],
 }
 
 _FIELD_QUESTIONS: dict[str, str] = {
-    "query":       "מה לחפש ב-Drive?",
-    "file_name":   "מה שם הקובץ לקריאה?",
-    "summary":     "מה כותרת הפגישה?",
-    "start_time":  "מתי הפגישה? (פורמט: YYYY-MM-DDTHH:MM:SS)",
-    "to":          "למי לשלוח את המייל?",
-    "subject":     "מה נושא המייל?",
-    "body":        "מה תוכן המייל?",
-    "draft_id":    "מה מזהה הטיוטה לשליחה?",
-    "sheet_name":  "מה שם הגיליון?",
-    "row_data":    "מה הנתונים להוספה?",
-    "table":       "לאיזו טבלה? (CRM / Cashflow / Tasks)",
-    "fields":      "מה השדות לעדכון?",
-    "record_id":   "מה מזהה הרשומה לעדכון?",
+    "query":            "מה לחפש?",
+    "file_name":        "מה שם הקובץ לקריאה?",
+    "summary":          "מה כותרת הפגישה?",
+    "start_time":       "מתי הפגישה? (פורמט: YYYY-MM-DDTHH:MM:SS)",
+    "to":               "למי לשלוח את המייל?",
+    "subject":          "מה נושא המייל?",
+    "body":             "מה תוכן המייל?",
+    "draft_id":         "מה מזהה הטיוטה לשליחה?",
+    "sheet_name":       "מה שם הגיליון?",
+    "row_data":         "מה הנתונים להוספה?",
+    "table":            "לאיזו טבלה? (Contacts / Deals / Payments)",
+    "fields":           "מה השדות לעדכון?",
+    "record_id":        "מה מזהה הרשומה? (מתחיל ב-rec...)",
+    "fact":             "מה העובדה לשמירה?",
+    # CRM
+    "name":             "מה השם?",
+    "contact_type":     "מה סוג איש הקשר? (Client / Supplier / Partner / Other)",
+    "address":          "מה כתובת הנכס?",
+    "price":            "מה מחיר הנכס (₪)?",
+    "funding_cost_pct": "מה עלות המימון (%)? מקסימום 9%",
+    "amount":           "מה סכום התשלום (₪)?",
+    "due_date":         "מה תאריך התשלום? (YYYY-MM-DD)",
+    "status":           "מה הסטטוס החדש?",
 }
 
-_SENSITIVE_TOOLS = {"gmail_send_draft", "airtable_update", "airtable_add"}
+_SENSITIVE_TOOLS = {"gmail_send_draft", "airtable_update", "airtable_add", "crm_mark_payment_paid"}
+
+# כלים עם record_id — חייב להתחיל ב-rec
+_RECORD_ID_TOOLS = {
+    "airtable_update", "crm_update_last_contact",
+    "crm_update_deal_status", "crm_mark_payment_paid",
+}
 
 # ISO 8601 datetime — YYYY-MM-DDTHH:MM:SS (עם וריאנטים נפוצים)
 _ISO_DATETIME_RE = re.compile(
@@ -116,14 +147,27 @@ def _check_structure(tool_name: str, inputs: dict) -> list[str]:
                 "נדרש: name@domain.com"
             )
 
-    # airtable_update: record_id חייב להתחיל ב-rec
-    if tool_name == "airtable_update":
+    # כלים עם record_id — חייב להתחיל ב-rec
+    if tool_name in _RECORD_ID_TOOLS:
         rid = inputs.get("record_id", "")
         if rid and not str(rid).startswith("rec"):
             errors.append(
                 f"record_id '{rid}' אינו תקין. "
                 "מזהה Airtable תמיד מתחיל ב-rec (למשל recXXXXXXXXXXXXXX)"
             )
+
+    # crm_add_deal: חוק ברזל — מימון >9% חסום
+    if tool_name == "crm_add_deal":
+        pct = inputs.get("funding_cost_pct")
+        if pct is not None:
+            try:
+                if float(pct) > 9:
+                    errors.append(
+                        f"funding_cost_pct {pct}% חורג מהמותר. "
+                        "🔴 חוק ברזל: מימון >9% חסום אוטומטית."
+                    )
+            except (ValueError, TypeError):
+                errors.append(f"funding_cost_pct '{pct}' אינו מספר תקין.")
 
     return errors
 
