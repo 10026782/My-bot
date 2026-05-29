@@ -1,12 +1,13 @@
 # daily_digest.py
 # דוח בוקר יומי — נשלח ב-08:00 לאליהו בטלגרם.
-# scheduler-3.py מנסה לייבא send_daily_digest — חובה שיהיה קיים.
+# scheduler.py מנסה לייבא send_daily_digest — חובה שיהיה קיים.
 #
 # מה שהדוח כולל:
 # 1. תשלומים קרובים (7 ימים)
 # 2. תשלומים באיחור
 # 3. סיכום עסקאות פתוחות
-# 4. תזכורת יומית קצרה
+# 4. לוח זמנים פרויקט (ProjectTimeline)
+# 5. תזכורת יומית קצרה
 
 import logging
 from datetime import date
@@ -66,6 +67,18 @@ def build_digest() -> str:
                 lines.append("")
         except Exception as e:
             logger.error(f"daily_digest deals: {e}")
+
+    # ── ProjectTimeline ───────────────────────────
+    try:
+        from project_timeline import get_timeline_summary, format_timeline_digest_block
+        timeline_block = format_timeline_digest_block(get_timeline_summary())
+        if timeline_block:
+            lines.append(timeline_block)
+            lines.append("")
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.warning(f"daily_digest timeline: {e}")
 
     lines.append("_Boss HQ — יום מוצלח!_ 💪")
     return "\n".join(lines)
