@@ -32,12 +32,13 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class AgentContext:
-    system_prompt:  str
-    allowed_tools:  list       # schemas מסוננים לפי role
-    memory_key:     str        # מפתח לשליפת היסטוריה
-    max_tokens:     int
-    model:          str
-    identity_label: str        # לlog בלבד
+    system_prompt:      str
+    allowed_tools:      list       # schemas מסוננים לפי role
+    memory_key:         str        # מפתח לשליפת היסטוריה
+    max_tokens:         int
+    model:              str
+    identity_label:     str        # לlog בלבד
+    user_context_hint:  str = ""   # שורת הקשר דינמי לתחילת הודעת המשתמש
 
 
 # ══════════════════════════════════════════════════
@@ -198,18 +199,30 @@ def build_context(identity: "Identity", user_text: str = "") -> AgentContext:
 
     allowed_tools = _filter_tools(identity.role)
 
+    # build dynamic hint from core_knowledge (injected as user message prefix)
+    hint_parts = []
+    try:
+        from core_knowledge import build_context_layer, dynamic_context
+        ctx_line  = build_context_layer()
+        data_line = dynamic_context.get()
+        hint_parts = [p for p in [ctx_line, data_line] if p]
+    except Exception:
+        pass
+    user_context_hint = "\n".join(hint_parts)
+
     logger.info(
         f"Context built | {identity.tenant_id}/{identity.user_id}/{identity.role} "
         f"| {model} | {max_tokens}tok | tools={len(allowed_tools)}"
     )
 
     return AgentContext(
-        system_prompt  = system,
-        allowed_tools  = allowed_tools,
-        memory_key     = identity.memory_key,
-        max_tokens     = max_tokens,
-        model          = model,
-        identity_label = f"{identity.tenant_id}/{identity.user_id}/{identity.role}",
+        system_prompt     = system,
+        allowed_tools     = allowed_tools,
+        memory_key        = identity.memory_key,
+        max_tokens        = max_tokens,
+        model             = model,
+        identity_label    = f"{identity.tenant_id}/{identity.user_id}/{identity.role}",
+        user_context_hint = user_context_hint,
     )
 
 

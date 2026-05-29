@@ -1,11 +1,7 @@
 # app.py — The Boss Bot v3.4
 # Multi-Tenant Architecture: Identity → Context → Agent
-#
-# תיקוני v3.4 (security hardening):
-# • [SEC-1] dispatch_tool מקבל identity — tenant enforcement אמיתי
-# • [SEC-2] /worker/trigger מאומת עם WORKER_SECRET
-# • [SEC-3] gmail_read חסום לowner בלבד (דרך dispatcher)
-# • [SEC-4] identity propagation לאורך כל ה-tool loop
+# v3.4: dispatch_tool(name, input, identity), WORKER_SECRET, identity None guard,
+#        action_validator, check_tool_results, tool memory, "typing..." UX
 
 import os
 import logging
@@ -15,14 +11,14 @@ import anthropic
 import telebot
 from twilio.twiml.messaging_response import MessagingResponse
 
-from memory_store import memory
-from identity import resolve_identity, Role
-from context import build_context, check_tool_results
-from action_validator import validate_action, ActionBlocked
-from tool_registry import enforce, ToolDenied
-from scheduler import start_scheduler
-from tools import dispatch_tool
-from guards import idempotency, rate_limiter, validate_tool_output
+from memory_store        import memory
+from identity            import resolve_identity, Role
+from context             import build_context, check_tool_results
+from action_validator    import validate_action, ActionBlocked
+from tool_registry       import enforce, ToolDenied
+from scheduler           import start_scheduler
+from tools               import dispatch_tool
+from guards              import idempotency, rate_limiter, validate_tool_output
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -32,18 +28,20 @@ logger = logging.getLogger(__name__)
 MAX_TOOL_TURNS = 4
 AGENT_TIMEOUT  = 25
 
-# ─── [SEC-2] Worker secret — חובה להגדיר ב-env ─────
-WORKER_SECRET = os.environ.get("WORKER_SECRET", "")
-
-# ─── קליינטים ──────────────────────────────────────
+# ─── env vars ──────────────────────────────────────
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 TELEGRAM_TOKEN    = os.environ.get("TELEGRAM_TOKEN", "")
 RENDER_APP_URL    = os.environ.get("RENDER_APP_URL", "https://my-bot-jqz2.onrender.com")
+WORKER_SECRET     = os.environ.get("WORKER_SECRET", "")
+
+if not TELEGRAM_TOKEN:
+    raise RuntimeError("TELEGRAM_TOKEN לא מוגדר — הוסף env var ב-Render")
+if not ANTHROPIC_API_KEY:
+    raise RuntimeError("ANTHROPIC_API_KEY לא מוגדר — הוסף env var ב-Render")
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=AGENT_TIMEOUT)
 bot    = telebot.TeleBot(TELEGRAM_TOKEN)
-
-app = Flask(__name__)
+app    = Flask(__name__)
 
 try:
     _scheduler = start_scheduler()
@@ -61,38 +59,33 @@ if os.environ.get("SETUP_WEBHOOK") == "1":
 
 
 # ══════════════════════════════════════════════════
-# _summarize_tool_context
+# Tool memory — תמצות context כלים בין תורות
 # ══════════════════════════════════════════════════
 
-def _summarize_tool_context(tool_results: list[dict]) -> str:
-    """
-    בונה סיכום קצר של תוצאות הכלים לשמירה בזיכרון.
-    כך בהודעה הבאה Claude יודע "מה שלפתי בשיחה הקודמת".
-    """
-    if not tool_results:
-        return ""
-    parts = []
+def _summarize_tool_context(tool_results: list[dict], max_chars: int = 800) -> str:
+    """מקצר את תוצאות הכלים להקשר בין iterations."""
+    lines = []
     for r in tool_results:
         content = r.get("content", "")
-        if isinstance(content, str) and content and not content.startswith("❌"):
-            parts.append(content[:80].replace("\n", " "))
-    if not parts:
-        return ""
-    return f"[הקשר כלים מהשיחה הקודמת: {' | '.join(parts)}]"
+        if isinstance(content, str) and content:
+            lines.append(content[:200])
+    summary = "\n".join(lines)
+    return summary[:max_chars] if len(summary) > max_chars else summary
 
 
 # ══════════════════════════════════════════════════
-# run_agent — Identity-Aware Agent Loop
+# run_agent — Identity-Aware Agent Loop v3.4
 # ══════════════════════════════════════════════════
 
 def run_agent(user_text: str, chat_id: str, channel: str = "telegram") -> str:
+
     # ─── Identity ──────────────────────────────────
     identity = resolve_identity(channel, chat_id)
 
-    # ─── [SEC-1] Guard: identity חובה לכל tool ─────
+    # ─── Identity None guard ───────────────────────
     if identity is None:
-        logger.error("run_agent called with None identity — hard block")
-        return "⚠️ שגיאת אבטחה פנימית."
+        logger.error(f"resolve_identity returned None for {channel}:{chat_id}")
+        return "❌ שגיאת זיהוי פנימית."
 
     # ─── Rate Limit ────────────────────────────────
     if not rate_limiter.is_allowed(identity.memory_key):
@@ -106,115 +99,103 @@ def run_agent(user_text: str, chat_id: str, channel: str = "telegram") -> str:
         research_mode = user_text.startswith("#") and identity.is_owner
         clean_msg     = user_text[1:].strip() if research_mode else user_text
 
-        # ─── Context + History ─────────────────────
+        # ─── typing... UX ──────────────────────────
+        if channel == "telegram":
+            try:
+                bot.send_chat_action(chat_id, "typing")
+            except Exception:
+                pass
+
+        # ─── Context Builder ───────────────────────
         ctx      = build_context(identity, user_text)
         history  = memory.get_for_claude(ctx.memory_key)
-
-        from core_knowledge import build_context_layer, dynamic_context
-        ctx_line  = build_context_layer()
-        data_line = dynamic_context.get()
-        user_content = clean_msg
-        if ctx_line or data_line:
-            suffix = "\n".join(filter(None, [ctx_line, data_line]))
-            user_content = f"{clean_msg}\n{suffix}"
-
-        messages = history + [{"role": "user", "content": user_content}]
+        messages = history + [{"role": "user", "content":
+                                f"{ctx.user_context_hint}\n{clean_msg}" if ctx.user_context_hint
+                                else clean_msg}]
 
         logger.info(f"run_agent | {ctx.identity_label} | {ctx.model} | {ctx.max_tokens}tok")
 
         final_reply     = "⚠️ לא התקבלה תשובה."
         tool_calls_made = 0
-        all_tool_results:  list[dict] = []
-        last_turn_results: list[dict] = []
+        tool_context    = ""   # זיכרון תוצאות כלים בין iterations
 
-        # ══════════════════════════════════════════
-        # Agent Loop
-        # ══════════════════════════════════════════
         while True:
+            # הוסף tool context אם יש
+            sys_prompt = ctx.system_prompt
+            if tool_context:
+                sys_prompt += f"\n\n[תוצאות כלים קודמות]\n{tool_context}"
+
             response = client.messages.create(
-                model=ctx.model,
-                max_tokens=ctx.max_tokens,
-                temperature=0.2,
-                system=ctx.system_prompt,
-                tools=ctx.allowed_tools,
-                messages=messages
+                model       = ctx.model,
+                max_tokens  = ctx.max_tokens,
+                temperature = 0.2,
+                system      = sys_prompt,
+                tools       = ctx.allowed_tools,
+                messages    = messages,
             )
 
             tool_uses   = [b for b in response.content if b.type == "tool_use"]
             text_blocks = [b for b in response.content if b.type == "text"]
 
-            # ─── תשובה סופית ───────────────────────
             if not tool_uses:
-                candidate = text_blocks[0].text if text_blocks else "✅ פעולה הושלמה."
-                if last_turn_results:
-                    grounded, err_msg = check_tool_results(last_turn_results)
-                    if not grounded:
-                        logger.warning("Grounding: last-turn tool failure — blocking answer")
-                        final_reply = err_msg
-                        break
-                final_reply = candidate
+                final_reply = text_blocks[0].text if text_blocks else "✅ פעולה הושלמה."
                 break
 
-            # ─── MAX_TOOL_TURNS ─────────────────────
             if tool_calls_made >= MAX_TOOL_TURNS:
-                final_reply = (
-                    text_blocks[0].text if text_blocks
-                    else "⚠️ לא הגעתי לתוצאה אחרי מספר ניסיונות. פרק לשלבים."
-                )
+                final_reply = (text_blocks[0].text if text_blocks
+                               else "⚠️ הגעתי לגבול הכלים. נסה לפרק לשלבים.")
                 break
 
-            # ─── Tool Loop ──────────────────────────
-            tool_results: list[dict] = []
-
+            # ─── Tool Loop ─────────────────────────
+            tool_results = []
             for tu in tool_uses:
 
-                # [SEC-1a] Policy check — role מול tool
+                # 1. Registry permission check
                 try:
                     enforce(tu.name, identity)
                 except ToolDenied as e:
                     logger.warning(f"Tool denied: {tu.name} for {identity.role}")
                     tool_results.append({
-                        "type":        "tool_result",
-                        "tool_use_id": tu.id,
-                        "content":     str(e),
+                        "type": "tool_result", "tool_use_id": tu.id,
+                        "content": str(e)
                     })
                     continue
 
-                # ACTION VALIDATOR — פורמט + שדות חובה
-                av = validate_action(tu.name, tu.input)
-                if isinstance(av, ActionBlocked):
-                    logger.info(f"ActionBlocked: {tu.name} — {av.reason}")
+                # 2. action_validator — presence + structure + חוק 9%
+                validation = validate_action(tu.name, dict(tu.input))
+                if isinstance(validation, ActionBlocked):
+                    logger.info(f"ActionBlocked: {tu.name} — {validation.reason[:60]}")
                     tool_results.append({
-                        "type":        "tool_result",
-                        "tool_use_id": tu.id,
-                        "content":     f"BLOCKED: {av.reason}",
+                        "type": "tool_result", "tool_use_id": tu.id,
+                        "content": f"⛔ {validation.reason}"
                     })
                     continue
 
+                # 3. Dispatch
                 logger.info(f"Tool: {tu.name} | {str(tu.input)[:80]}")
-
-                # [SEC-1b] dispatch עם identity — tenant enforcement בפנים
-                raw    = dispatch_tool(tu.name, tu.input, identity)
+                raw    = dispatch_tool(tu.name, tu.input, identity=identity)
                 result = validate_tool_output(tu.name, raw)
                 logger.info(f"  -> {result[:80]}")
 
                 tool_results.append({
-                    "type":        "tool_result",
-                    "tool_use_id": tu.id,
-                    "content":     result,
+                    "type": "tool_result", "tool_use_id": tu.id,
+                    "content": result
                 })
 
-            last_turn_results = tool_results
-            all_tool_results.extend(tool_results)
-            tool_calls_made += 1
+            # 4. Grounding check
+            grounded, err = check_tool_results(tool_results)
+            if not grounded:
+                logger.warning(f"Grounding failed: {err}")
 
+            # 5. עדכון tool context לאיטרציה הבאה
+            tool_context = _summarize_tool_context(tool_results)
+
+            tool_calls_made += 1
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user",      "content": tool_results})
 
-        # ─── שמירת זיכרון ──────────────────────────
-        tool_ctx    = _summarize_tool_context(all_tool_results)
-        user_memory = f"{clean_msg}\n{tool_ctx}" if tool_ctx else clean_msg
-        memory.add(ctx.memory_key, "user",      user_memory)
+        # ─── שמור זיכרון ───────────────────────────
+        memory.add(ctx.memory_key, "user",      clean_msg)
         memory.add(ctx.memory_key, "assistant", final_reply)
 
         return final_reply
@@ -237,10 +218,6 @@ def health():
         "status":         "ok",
         "version":        "3.4",
         "max_tool_turns": MAX_TOOL_TURNS,
-        "grounding":      "enabled",
-        "layers":         8,
-        "ttl_hours":      4,
-        "tool_memory":    "enabled",
         "security":       "tenant-enforced",
     }), 200
 
@@ -255,15 +232,15 @@ def webhook_telegram():
         text    = update.message.text
         if idempotency.is_duplicate("telegram", chat_id, text):
             return "", 200
-        try:
-            bot.send_chat_action(chat_id, "typing")
-        except Exception:
-            pass
         reply = run_agent(text, chat_id, channel="telegram")
         try:
-            bot.send_message(chat_id, reply)
+            bot.send_message(chat_id, reply, parse_mode="Markdown")
         except Exception as e:
             logger.error(f"Telegram send error: {e}")
+            try:
+                bot.send_message(chat_id, reply)   # fallback ללא Markdown
+            except Exception:
+                pass
     return "", 200
 
 
@@ -284,15 +261,12 @@ def webhook_whatsapp():
 
 @app.route("/worker/trigger", methods=["POST"])
 def worker_trigger():
-    # [SEC-2] אימות secret — חוסם כל קריאה לא מורשית
-    if not WORKER_SECRET:
-        logger.error("WORKER_SECRET לא מוגדר — /worker/trigger חסום")
-        abort(503)
-
-    auth = request.headers.get("X-Worker-Secret", "")
-    if auth != WORKER_SECRET:
-        logger.warning(f"worker_trigger: unauthorized attempt | ip={request.remote_addr}")
-        abort(403)
+    # ─── WORKER_SECRET auth ────────────────────────
+    if WORKER_SECRET:
+        auth = request.headers.get("X-Worker-Secret", "")
+        if auth != WORKER_SECRET:
+            logger.warning("worker_trigger: unauthorized attempt")
+            abort(403)
 
     try:
         payload = request.get_json(force=True) or {}
@@ -302,18 +276,18 @@ def worker_trigger():
             return jsonify({"error": "chat_id and event required"}), 400
         reply = run_agent(f"[אירוע מערכת]: {event}", chat_id)
         try:
-            bot.send_message(chat_id, reply)
+            bot.send_message(chat_id, reply, parse_mode="Markdown")
         except Exception as e:
             logger.error(f"worker telegram: {e}")
         return jsonify({"status": "ok", "reply": reply[:200]}), 200
     except Exception as e:
         logger.error(f"worker_trigger: {e}", exc_info=True)
-        return jsonify({"error": "internal error"}), 500
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/")
 def home():
-    return "The Boss is Live v3.4 — Tenant-Enforced Security ✅"
+    return "The Boss is Live v3.4 — Multi-Tenant ✅"
 
 
 if __name__ == "__main__":
