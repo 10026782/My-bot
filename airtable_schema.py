@@ -67,3 +67,93 @@ def invalidate_cache():
     """מרוקן את הcache — לקריאה מחדש בבקשה הבאה."""
     _cache["schema"] = None
     _cache["ts"] = 0
+
+
+# ══════════════════════════════════════════════════
+# Schema constants — שמות טבלאות ושדות ב-Airtable
+# crm.py מייבא מכאן — מקור יחיד לאמת
+# ══════════════════════════════════════════════════
+
+class Tables:
+    CONTACTS = "Contacts"
+    DEALS    = "Deals"
+    PAYMENTS = "Payments"
+
+
+class ContactFields:
+    NAME         = "Name"
+    PHONE        = "Phone"
+    EMAIL        = "Email"
+    COMPANY      = "Company"
+    TYPE         = "Type"
+    STATUS       = "Status"
+    LAST_CONTACT = "Last Contact"
+    NOTES        = "Notes"
+
+
+class ContactType:
+    CLIENT   = "Client"
+    SUPPLIER = "Supplier"
+    PARTNER  = "Partner"
+    OTHER    = "Other"
+
+
+class ContactStatus:
+    ACTIVE   = "Active"
+    INACTIVE = "Inactive"
+
+
+class DealFields:
+    NAME         = "Name"
+    ADDRESS      = "Address"
+    STATUS       = "Status"
+    PRICE        = "Price"
+    FUNDING_COST = "Funding Cost %"
+    ROI          = "ROI %"
+    RISK_LEVEL   = "Risk Level"
+    CONTACT      = "Contact"
+    DEADLINE     = "Deadline"
+    NOTES        = "Notes"
+
+
+class DealStatus:
+    PROSPECT      = "Prospect"
+    DUE_DILIGENCE = "Due Diligence"
+    ACTIVE        = "Active"
+    CLOSED        = "Closed"
+    CANCELLED     = "Cancelled"
+
+
+class RiskLevel:
+    LOW    = "Low"
+    MEDIUM = "Medium"
+    HIGH   = "High"
+
+
+class PaymentFields:
+    NAME     = "Name"
+    AMOUNT   = "Amount"
+    DUE_DATE = "Due Date"
+    STATUS   = "Status"
+    DEAL     = "Deal"
+    CONTACT  = "Contact"
+    NOTES    = "Notes"
+
+
+class PaymentStatus:
+    PENDING  = "Pending"
+    PAID     = "Paid"
+    OVERDUE  = "Overdue"
+
+
+def validate_funding_cost(pct: float) -> tuple[bool, str]:
+    """
+    חוק ברזל: מימון מעל 9% — חסום אוטומטית.
+    מחזיר (ok, warning_message).
+    """
+    if pct > 9:
+        return False, (
+            f"⚠️ עלות מימון {pct}% חורגת מהמותר (9%).\n"
+            "🔴 חוק ברזל: עסקאות עם מימון >9% — חסומות אוטומטית."
+        )
+    return True, ""
