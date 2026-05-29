@@ -5,6 +5,7 @@
 import os
 import httpx
 import logging
+import urllib.parse
 from datetime import datetime, date, timedelta
 
 from airtable_schema import (
@@ -30,7 +31,7 @@ def _headers() -> dict:
 
 def _base_url(table: str) -> str:
     base = os.environ.get("AIRTABLE_BASE_ID", "")
-    return f"https://api.airtable.com/v0/{base}/{table}"
+    return f"https://api.airtable.com/v0/{base}/{urllib.parse.quote(table, safe='')}"
 
 def _creds_ok() -> bool:
     return bool(os.environ.get("AIRTABLE_API_KEY")) and bool(os.environ.get("AIRTABLE_BASE_ID"))
