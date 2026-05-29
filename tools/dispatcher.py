@@ -88,7 +88,8 @@ def dispatch_tool(name: str, inputs: dict, identity: "Identity") -> str:
             # ─── Knowledge ─────────────────────────────────────────
             case "add_knowledge":
                 from knowledge_engine import knowledge_engine
-                ok = knowledge_engine.add_fact(identity.tenant_id, inputs["fact"])
+                fact = f"{inputs['key']}: {inputs['value']}"
+                ok = knowledge_engine.add_fact(identity.tenant_id, fact)
                 return "✅ עובדה נוספה" if ok else "❌ שגיאה בשמירה"
 
             # ─── Airtable ──────────────────────────────────────────

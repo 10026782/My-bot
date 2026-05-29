@@ -17,12 +17,9 @@ from airtable_schema import (
 
 logger = logging.getLogger(__name__)
 
-AIRTABLE_API_KEY = os.environ.get("AIRTABLE_API_KEY", "")
-AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "")
-
 
 # ══════════════════════════════════════════════════
-# Helpers
+# Helpers — קוראים env בכל קריאה (לא module-level)
 # ══════════════════════════════════════════════════
 
 def _headers() -> dict:
@@ -35,14 +32,16 @@ def _base_url(table: str) -> str:
     base = os.environ.get("AIRTABLE_BASE_ID", "")
     return f"https://api.airtable.com/v0/{base}/{table}"
 
+def _creds_ok() -> bool:
+    return bool(os.environ.get("AIRTABLE_API_KEY")) and bool(os.environ.get("AIRTABLE_BASE_ID"))
+
 def _get(table: str, formula: str = "", fields: list = None, identity=None) -> list:
-    """GET records מטבלה, מחזיר list של records.
+    """GET records מטבלה.
 
     [SEC] identity — אם עובר ו-is_external, מוסיף tenant filter אוטומטי.
-    scheduler / daily_digest קוראים בלי identity → עוברים כ-internal (owner-level).
+    scheduler / daily_digest קוראים בלי identity → עוברים כ-internal.
     """
-    tenant_id = getattr(identity, "tenant_id", None)
-    # Identity לא מגדיר is_external — נגזר מ-is_internal (owner/staff = internal)
+    tenant_id   = getattr(identity, "tenant_id", None)
     is_external = identity is not None and not getattr(identity, "is_internal", True)
 
     if is_external and tenant_id and tenant_id != "unknown":
@@ -55,19 +54,34 @@ def _get(table: str, formula: str = "", fields: list = None, identity=None) -> l
     if fields:
         for i, f in enumerate(fields):
             params[f"fields[{i}]"] = f
+
     r = httpx.get(_base_url(table), headers=_headers(), params=params, timeout=10)
+    if r.status_code == 401:
+        raise RuntimeError("AIRTABLE_API_KEY לא תקין או פג — עדכן ב-Render")
+    if r.status_code == 403:
+        raise RuntimeError(f"אין הרשאה לטבלה '{table}' — בדוק שהטבלה קיימת ושה-token מורשה")
+    if r.status_code == 404:
+        raise RuntimeError(f"טבלה '{table}' לא נמצאה ב-Airtable Base")
     r.raise_for_status()
     return r.json().get("records", [])
 
 def _post(table: str, fields: dict) -> dict:
     r = httpx.post(_base_url(table), headers=_headers(),
                    json={"fields": fields}, timeout=10)
+    if r.status_code == 401:
+        raise RuntimeError("AIRTABLE_API_KEY לא תקין או פג — עדכן ב-Render")
+    if r.status_code == 403:
+        raise RuntimeError(f"אין הרשאה לטבלה '{table}' — בדוק שהטבלה קיימת ושה-token מורשה")
     r.raise_for_status()
     return r.json()
 
 def _patch(table: str, record_id: str, fields: dict) -> dict:
     r = httpx.patch(f"{_base_url(table)}/{record_id}", headers=_headers(),
                     json={"fields": fields}, timeout=10)
+    if r.status_code == 401:
+        raise RuntimeError("AIRTABLE_API_KEY לא תקין או פג — עדכן ב-Render")
+    if r.status_code == 403:
+        raise RuntimeError(f"אין הרשאה לטבלה '{table}' / רשומה '{record_id}'")
     r.raise_for_status()
     return r.json()
 
@@ -85,7 +99,7 @@ def _fmt_date(iso: str) -> str:
 def crm_add_contact(name: str, phone: str = "", email: str = "",
                     contact_type: str = ContactType.CLIENT,
                     company: str = "", notes: str = "") -> str:
-    if not os.environ.get("AIRTABLE_API_KEY") or not os.environ.get("AIRTABLE_BASE_ID"):
+    if not _creds_ok():
         return "❌ חסרים מפתחות Airtable"
     if not name:
         return "❌ שם הוא שדה חובה"
@@ -109,10 +123,10 @@ def crm_add_contact(name: str, phone: str = "", email: str = "",
 
 
 def crm_find_contact(query: str, identity=None) -> str:
-    if not os.environ.get("AIRTABLE_API_KEY") or not os.environ.get("AIRTABLE_BASE_ID"):
+    if not _creds_ok():
         return "❌ חסרים מפתחות Airtable"
     try:
-        safe  = str(query).replace("'", "\\'")
+        safe = str(query).replace("'", "\\'")
         formula = (
             f"OR(FIND(LOWER('{safe}'), LOWER({{Name}})), "
             f"FIND(LOWER('{safe}'), LOWER({{Company}})))"
@@ -149,7 +163,7 @@ def crm_update_last_contact(record_id: str) -> str:
 
 
 def crm_list_contacts(contact_type: str = "", identity=None) -> str:
-    if not os.environ.get("AIRTABLE_API_KEY") or not os.environ.get("AIRTABLE_BASE_ID"):
+    if not _creds_ok():
         return "❌ חסרים מפתחות Airtable"
     try:
         formula = f"{{Status}} = '{ContactStatus.ACTIVE}'"
@@ -180,7 +194,7 @@ def crm_list_contacts(contact_type: str = "", identity=None) -> str:
 def crm_add_deal(name: str, address: str, price: float,
                  funding_cost_pct: float, contact_id: str = "",
                  deadline: str = "", notes: str = "") -> str:
-    if not os.environ.get("AIRTABLE_API_KEY") or not os.environ.get("AIRTABLE_BASE_ID"):
+    if not _creds_ok():
         return "❌ חסרים מפתחות Airtable"
 
     ok, warning = validate_funding_cost(funding_cost_pct)
@@ -229,7 +243,7 @@ def crm_update_deal_status(record_id: str, status: str, notes: str = "") -> str:
 
 
 def crm_list_deals(status: str = "", identity=None) -> str:
-    if not os.environ.get("AIRTABLE_API_KEY") or not os.environ.get("AIRTABLE_BASE_ID"):
+    if not _creds_ok():
         return "❌ חסרים מפתחות Airtable"
     try:
         formula = f"{{Status}} = '{status}'" if status else ""
@@ -259,7 +273,7 @@ def crm_list_deals(status: str = "", identity=None) -> str:
 
 def crm_add_payment(name: str, amount: float, due_date: str,
                     deal_id: str = "", contact_id: str = "", notes: str = "") -> str:
-    if not os.environ.get("AIRTABLE_API_KEY") or not os.environ.get("AIRTABLE_BASE_ID"):
+    if not _creds_ok():
         return "❌ חסרים מפתחות Airtable"
     try:
         fields = {
@@ -289,7 +303,7 @@ def crm_add_payment(name: str, amount: float, due_date: str,
 
 
 def crm_upcoming_payments(days_ahead: int = 7, identity=None) -> str:
-    if not os.environ.get("AIRTABLE_API_KEY") or not os.environ.get("AIRTABLE_BASE_ID"):
+    if not _creds_ok():
         return "❌ חסרים מפתחות Airtable"
     try:
         today    = date.today()
@@ -333,7 +347,7 @@ def crm_mark_payment_paid(record_id: str) -> str:
 
 
 def crm_overdue_payments(identity=None) -> str:
-    if not os.environ.get("AIRTABLE_API_KEY") or not os.environ.get("AIRTABLE_BASE_ID"):
+    if not _creds_ok():
         return "❌ חסרים מפתחות Airtable"
     try:
         today   = date.today().isoformat()
@@ -364,4 +378,3 @@ def crm_overdue_payments(identity=None) -> str:
         return "\n".join(lines)
     except Exception as e:
         return f"❌ שגיאה: {e}"
-

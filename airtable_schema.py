@@ -1,159 +1,195 @@
-"""
-airtable_schema.py — טוען סכמת טבלאות מ-Airtable ומזריק לsystem prompt.
-דורש scope: schema.bases:read בPersonal Access Token.
-"""
-
-import os
-import time
-import logging
-import requests
-
-logger = logging.getLogger(__name__)
-
-_cache: dict = {"schema": None, "ts": 0}
-_CACHE_TTL = 600  # 10 דקות
-
-
-def fetch_schema() -> list[dict]:
-    """שולף את כל הטבלאות והשדות מה-base דרך Airtable Metadata API."""
-    if _cache["schema"] and (time.time() - _cache["ts"]) < _CACHE_TTL:
-        return _cache["schema"]
-
-    token = os.environ.get("AIRTABLE_API_KEY", "")
-    base_id = os.environ.get("AIRTABLE_BASE_ID", "")
-
-    if not token or not base_id:
-        logger.warning("AIRTABLE_API_KEY or AIRTABLE_BASE_ID missing — schema unavailable")
-        return []
-
-    try:
-        r = requests.get(
-            f"https://api.airtable.com/v0/meta/bases/{base_id}/tables",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=10,
-        )
-        if r.status_code != 200:
-            logger.warning(f"Airtable schema fetch failed: {r.status_code} {r.text[:200]}")
-            return []
-
-        tables = r.json().get("tables", [])
-        _cache["schema"] = tables
-        _cache["ts"] = time.time()
-        logger.info(f"Airtable schema loaded: {len(tables)} tables")
-        return tables
-
-    except Exception as e:
-        logger.error(f"fetch_schema error: {e}")
-        return []
-
-
-def format_schema_for_prompt() -> str:
-    """מחזיר מחרוזת קריאה של הסכמה להזרקה לsystem prompt."""
-    tables = fetch_schema()
-    if not tables:
-        return ""
-
-    lines = ["מבנה הטבלאות ב-Airtable (שמות מדויקים — השתמש בהם בדיוק):"]
-    for table in tables:
-        name = table.get("name", "")
-        fields = [f.get("name", "") for f in table.get("fields", [])]
-        fields_str = " | ".join(fields)
-        lines.append(f"• {name}: {fields_str}")
-
-    return "\n".join(lines)
-
-
-def invalidate_cache():
-    """מרוקן את הcache — לקריאה מחדש בבקשה הבאה."""
-    _cache["schema"] = None
-    _cache["ts"] = 0
-
+# airtable_schema.py
+# קבועי סכמה לכל טבלאות Airtable של אליהו חזן
+# שנה כאן → משתנה בכל המערכת. אין magic strings.
 
 # ══════════════════════════════════════════════════
-# Schema constants — שמות טבלאות ושדות ב-Airtable
-# crm.py מייבא מכאן — מקור יחיד לאמת
+# שמות טבלאות
 # ══════════════════════════════════════════════════
 
 class Tables:
-    CONTACTS = "Contacts"
-    DEALS    = "Deals"
-    PAYMENTS = "Payments"
+    # ── שמות מדויקים כפי שמופיעים ב-Airtable ──
+    CONTACTS   = "אנשי קשר (Contacts)"
+    DEALS      = "עסקאות (Deals)"
+    TASKS      = "משימות (Tasks)"
+    EXPENSES   = "הוצאות (Expenses)"
+    PAYMENTS   = "תשלומים (Payments)"
+    LEARNINGS  = "למידות ותובנות (Learnings & Insights)"
+    PROFILE    = "Profile"
+    CASHFLOW   = "Weekly Cash Flow Reports"
+    SALES_DEBT = "Unit Sales & Debt Distribution"
+    DEADLINES  = "משימות ודד ליינים"
+    PROJECTS   = "Projects"
+    UNITS      = "Units"
+    LOANS      = "Loans"
+    DEBT_MGMT  = "Company A - Debt Management"
+    # IMPORTS — אין טבלה תואמת עדיין ב-Airtable
 
+
+# ══════════════════════════════════════════════════
+# שדות לכל טבלה
+# ══════════════════════════════════════════════════
 
 class ContactFields:
-    NAME         = "Name"
-    PHONE        = "Phone"
-    EMAIL        = "Email"
-    COMPANY      = "Company"
-    TYPE         = "Type"
-    STATUS       = "Status"
-    LAST_CONTACT = "Last Contact"
-    NOTES        = "Notes"
-
-
-class ContactType:
-    CLIENT   = "Client"
-    SUPPLIER = "Supplier"
-    PARTNER  = "Partner"
-    OTHER    = "Other"
-
-
-class ContactStatus:
-    ACTIVE   = "Active"
-    INACTIVE = "Inactive"
+    NAME        = "Name"
+    PHONE       = "Phone"
+    EMAIL       = "Email"
+    TYPE        = "Type"          # Client | Supplier | Partner | Lawyer | Accountant
+    COMPANY     = "Company"
+    NOTES       = "Notes"
+    LAST_CONTACT = "Last Contact"  # Date
+    STATUS      = "Status"        # Active | Inactive
 
 
 class DealFields:
-    NAME         = "Name"
-    ADDRESS      = "Address"
-    STATUS       = "Status"
-    PRICE        = "Price"
-    FUNDING_COST = "Funding Cost %"
-    ROI          = "ROI %"
-    RISK_LEVEL   = "Risk Level"
-    CONTACT      = "Contact"
-    DEADLINE     = "Deadline"
-    NOTES        = "Notes"
+    NAME        = "Name"
+    ADDRESS     = "Address"
+    STATUS      = "Status"        # Prospect | Due Diligence | Active | Closed | Cancelled
+    PRICE       = "Price"         # ₪
+    FUNDING_COST = "Funding Cost %" # % — כלל ה-9%
+    ROI         = "ROI %"
+    CONTACT     = "Contact"       # Link → Contacts
+    DEADLINE    = "Deadline"
+    NOTES       = "Notes"
+    RISK_LEVEL  = "Risk Level"    # Low | Medium | High
 
 
-class DealStatus:
-    PROSPECT      = "Prospect"
-    DUE_DILIGENCE = "Due Diligence"
-    ACTIVE        = "Active"
-    CLOSED        = "Closed"
-    CANCELLED     = "Cancelled"
+class TaskFields:
+    NAME        = "Name"
+    STATUS      = "Status"        # Open | In Progress | Done | Cancelled
+    PRIORITY    = "Priority"      # Urgent | High | Normal | Low
+    DEADLINE    = "Deadline"
+    DEAL        = "Deal"          # Link → Deals (optional)
+    NOTES       = "Notes"
+    CREATED     = "Created"
 
 
-class RiskLevel:
-    LOW    = "Low"
-    MEDIUM = "Medium"
-    HIGH   = "High"
+class ExpenseFields:
+    NAME        = "Name"
+    AMOUNT      = "Amount"        # ₪
+    DATE        = "Date"
+    CATEGORY    = "Category"      # Import | Real Estate | Operations | Legal | Other
+    DEAL        = "Deal"          # Link → Deals (optional)
+    RECEIPT     = "Receipt"       # Attachment
+    NOTES       = "Notes"
+
+
+class ImportFields:
+    PRODUCT     = "Product"
+    SUPPLIER    = "Supplier"      # Link → Contacts
+    STATUS      = "Status"        # Sample | Approval | Production | QC | Shipping | Done
+    ADVANCE_PCT = "Advance %"     # אמור להיות 30
+    BALANCE_PCT = "Balance %"     # אמור להיות 70
+    TOTAL_USD   = "Total USD"
+    SHIP_DATE   = "Ship Date"
+    QC_PASSED   = "QC Passed"     # Checkbox
+    NOTES       = "Notes"
 
 
 class PaymentFields:
-    NAME     = "Name"
-    AMOUNT   = "Amount"
-    DUE_DATE = "Due Date"
-    STATUS   = "Status"
-    DEAL     = "Deal"
-    CONTACT  = "Contact"
-    NOTES    = "Notes"
+    NAME        = "Name"
+    AMOUNT      = "Amount"        # ₪
+    DUE_DATE    = "Due Date"
+    STATUS      = "Status"        # Pending | Paid | Overdue
+    DEAL        = "Deal"          # Link → Deals (optional)
+    CONTACT     = "Contact"       # Link → Contacts (optional)
+    NOTES       = "Notes"
 
+
+# ══════════════════════════════════════════════════
+# ערכים חוקיים לשדות Enum
+# ══════════════════════════════════════════════════
+
+class ContactType:
+    CLIENT      = "Client"
+    SUPPLIER    = "Supplier"
+    PARTNER     = "Partner"
+    LAWYER      = "Lawyer"
+    ACCOUNTANT  = "Accountant"
+
+class ContactStatus:
+    ACTIVE      = "Active"
+    INACTIVE    = "Inactive"
+
+class DealStatus:
+    PROSPECT       = "Prospect"
+    DUE_DILIGENCE  = "Due Diligence"
+    ACTIVE         = "Active"
+    CLOSED         = "Closed"
+    CANCELLED      = "Cancelled"
+
+class RiskLevel:
+    LOW         = "Low"
+    MEDIUM      = "Medium"
+    HIGH        = "High"
+
+class TaskStatus:
+    OPEN        = "Open"
+    IN_PROGRESS = "In Progress"
+    DONE        = "Done"
+    CANCELLED   = "Cancelled"
+
+class Priority:
+    URGENT      = "Urgent"
+    HIGH        = "High"
+    NORMAL      = "Normal"
+    LOW         = "Low"
+
+class ExpenseCategory:
+    IMPORT       = "Import"
+    REAL_ESTATE  = "Real Estate"
+    OPERATIONS   = "Operations"
+    LEGAL        = "Legal"
+    OTHER        = "Other"
+
+class ImportStatus:
+    SAMPLE      = "Sample"
+    APPROVAL    = "Approval"
+    PRODUCTION  = "Production"
+    QC          = "QC"
+    SHIPPING    = "Shipping"
+    DONE        = "Done"
 
 class PaymentStatus:
-    PENDING  = "Pending"
-    PAID     = "Paid"
-    OVERDUE  = "Overdue"
+    PENDING     = "Pending"
+    PAID        = "Paid"
+    OVERDUE     = "Overdue"
 
+
+# ══════════════════════════════════════════════════
+# כלל ה-9% — ולידציה
+# ══════════════════════════════════════════════════
+
+MAX_FUNDING_COST_PCT = 9.0  # חוק ברזל מספר 1
 
 def validate_funding_cost(pct: float) -> tuple[bool, str]:
     """
-    חוק ברזל: מימון מעל 9% — חסום אוטומטית.
-    מחזיר (ok, warning_message).
+    מחזיר (True, "") אם עלות המימון בגבולות.
+    מחזיר (False, הודעת שגיאה) אם חורג.
     """
-    if pct > 9:
+    if pct > MAX_FUNDING_COST_PCT:
         return False, (
-            f"⚠️ עלות מימון {pct}% חורגת מהמותר (9%).\n"
-            "🔴 חוק ברזל: עסקאות עם מימון >9% — חסומות אוטומטית."
+            f"⚠️ הפרת חוק ברזל #1: עלות מימון {pct}% > {MAX_FUNDING_COST_PCT}%!\n"
+            f"העסקה לא מאושרת אוטומטית. נדרש אישור מפורש של אליהו."
         )
+    return True, ""
+
+
+# ══════════════════════════════════════════════════
+# Import Protocol — ולידציה (חוק ברזל #3)
+# ══════════════════════════════════════════════════
+
+REQUIRED_ADVANCE_PCT = 30
+REQUIRED_BALANCE_PCT = 70
+
+def validate_import_payment(advance_pct: float, balance_pct: float) -> tuple[bool, str]:
+    """
+    בודק שהתשלום עומד בפרוטוקול הייבוא: 30% מקדמה, 70% אחרי QC.
+    """
+    errors = []
+    if advance_pct != REQUIRED_ADVANCE_PCT:
+        errors.append(f"מקדמה {advance_pct}% ≠ {REQUIRED_ADVANCE_PCT}% הנדרש")
+    if balance_pct != REQUIRED_BALANCE_PCT:
+        errors.append(f"יתרה {balance_pct}% ≠ {REQUIRED_BALANCE_PCT}% הנדרש")
+    if errors:
+        return False, "🚨 חריגה מפרוטוקול ייבוא (חוק #3):\n" + "\n".join(errors)
     return True, ""
