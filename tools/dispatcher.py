@@ -1,13 +1,12 @@
-# dispatcher.py — v2.0
+# dispatcher.py — v2.2
 # נקודת כניסה יחידה לכל הכלים.
+# v2.2 — תיקון contact_type parameter + identity None guard.
 #
-# שינוי קריטי מ-v1:
-# dispatch_tool(name, inputs, identity) — identity חובה.
 # ─── שכבת אבטחה ───────────────────────────────────────
 # 1. tool_registry.enforce()                        → הרשאת role (ב-app.py)
 # 2. airtable_security.enforce_tenant_scope()       → tenant filter (כאן)
 # 3. airtable_security.audit_log_airtable()         → לוג לכל פעולה (כאן)
-# 4. gmail_read — owner בלבד (כאן)
+# 4. gmail_read — owner בלבד (כאן + registry)
 
 from __future__ import annotations
 import os
@@ -22,7 +21,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# כלים שדורשים tenant enforcement לפני קריאה
 _TENANT_SCOPED_TOOLS = {"airtable_get", "airtable_add", "airtable_update"}
 
 
@@ -69,10 +67,12 @@ def _airtable_check_response(r, table: str) -> str | None:
 def dispatch_tool(name: str, inputs: dict, identity: "Identity") -> str:
     """
     מקבל שם כלי + inputs + identity ומחזיר תוצאה כטקסט.
-
-    identity הוא חובה — לא optional.
-    כל כלי tenant_scoped עובר דרך enforce_tenant_scope לפני ביצוע.
+    identity חובה — לא optional.
     """
+    if identity is None:
+        logger.error(f"dispatch_tool called without identity: {name}")
+        raise RuntimeError("identity required for all tool execution")
+
     try:
         # ── Tenant Scope Enforcement ────────────────────────────────
         if name in _TENANT_SCOPED_TOOLS:
@@ -131,7 +131,6 @@ def dispatch_tool(name: str, inputs: dict, identity: "Identity") -> str:
                     return creds_err
                 table  = inputs["table"]
                 fields = dict(inputs.get("fields", {}))
-                # הוסף tenant_id אוטומטית לרשומות של external users
                 if not identity.is_internal:
                     fields.setdefault("tenant_id", identity.tenant_id)
                 try:
@@ -179,7 +178,6 @@ def dispatch_tool(name: str, inputs: dict, identity: "Identity") -> str:
                 return gmail_send_draft(inputs["draft_id"])
 
             case "gmail_read":
-                # owner בלבד — staff לא יכול לקרוא מיילים
                 if not identity.is_owner:
                     logger.warning(f"gmail_read blocked for role={identity.role}")
                     return "❌ gmail_read — מורשה לבעלים בלבד."
@@ -215,6 +213,79 @@ def dispatch_tool(name: str, inputs: dict, identity: "Identity") -> str:
             case "sheets_append":
                 from tools.google_tools import sheets_append
                 return sheets_append(inputs["sheet_name"], inputs["row_data"])
+
+            # ─── CRM — Contacts ────────────────────────────────────
+            case "crm_add_contact":
+                from crm import crm_add_contact
+                return crm_add_contact(
+                    inputs["name"],
+                    inputs.get("phone", ""),
+                    inputs.get("email", ""),
+                    inputs.get("contact_type", "Client"),   # ← contact_type (לא "type")
+                    inputs.get("company", ""),
+                    inputs.get("notes", ""),
+                )
+
+            case "crm_find_contact":
+                from crm import crm_find_contact
+                return crm_find_contact(inputs["query"], identity=identity)
+
+            case "crm_list_contacts":
+                from crm import crm_list_contacts
+                return crm_list_contacts(inputs.get("contact_type", ""), identity=identity)
+
+            case "crm_update_last_contact":
+                from crm import crm_update_last_contact
+                return crm_update_last_contact(inputs["record_id"])
+
+            # ─── CRM — Deals ───────────────────────────────────────
+            case "crm_add_deal":
+                from crm import crm_add_deal
+                return crm_add_deal(
+                    inputs["name"],
+                    inputs["address"],
+                    float(inputs["price"]),
+                    float(inputs["funding_cost_pct"]),
+                    inputs.get("contact_id", ""),
+                    inputs.get("deadline", ""),
+                    inputs.get("notes", ""),
+                )
+
+            case "crm_update_deal_status":
+                from crm import crm_update_deal_status
+                return crm_update_deal_status(
+                    inputs["record_id"],
+                    inputs["status"],
+                    inputs.get("notes", ""),
+                )
+
+            case "crm_list_deals":
+                from crm import crm_list_deals
+                return crm_list_deals(inputs.get("status", ""), identity=identity)
+
+            # ─── CRM — Payments ────────────────────────────────────
+            case "crm_add_payment":
+                from crm import crm_add_payment
+                return crm_add_payment(
+                    inputs["name"],
+                    float(inputs["amount"]),
+                    inputs["due_date"],
+                    inputs.get("deal_id", ""),
+                    inputs.get("contact_id", ""),
+                    inputs.get("notes", ""),
+                )
+
+            case "crm_upcoming_payments":
+                from crm import crm_upcoming_payments
+                return crm_upcoming_payments(inputs.get("days_ahead", 7), identity=identity)
+
+            case "crm_mark_payment_paid":
+                from crm import crm_mark_payment_paid
+                return crm_mark_payment_paid(inputs["record_id"])
+
+            case "crm_overdue_payments":
+                from crm import crm_overdue_payments
+                return crm_overdue_payments(identity=identity)
 
             case _:
                 logger.error(f"Unknown tool called: {name}")
