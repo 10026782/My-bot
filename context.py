@@ -1,5 +1,10 @@
 # context.py — Context Builder (Tier-1 Module)
+# הלב של המערכת — בונה context שלם לפי Identity.
+#
 # Pipeline: Identity → Policy+Truth+Tool+Interp+Interaction+UX → Context Layer → Assembly
+#
+# אותו Agent. אותם Tools. אותו LLM.
+# Context אחר = תוצאה אחרת לחלוטין.
 
 from __future__ import annotations
 import logging
@@ -28,29 +33,34 @@ logger = logging.getLogger(__name__)
 @dataclass
 class AgentContext:
     system_prompt:  str
-    allowed_tools:  list
-    memory_key:     str
+    allowed_tools:  list       # schemas מסוננים לפי role
+    memory_key:     str        # מפתח לשליפת היסטוריה
     max_tokens:     int
     model:          str
-    identity_label: str
+    identity_label: str        # לlog בלבד
 
 
 # ══════════════════════════════════════════════════
 # Tool Permission Map
 # ══════════════════════════════════════════════════
 
-_ROLE_TOOLS: dict = {
+_CRM_TOOLS = {
+    "crm_add_contact", "crm_find_contact",
+    "crm_list_contacts", "crm_update_last_contact",
+    "crm_add_deal", "crm_update_deal_status", "crm_list_deals",
+    "crm_add_payment", "crm_upcoming_payments",
+    "crm_mark_payment_paid", "crm_overdue_payments",
+}
+
+_ROLE_TOOLS: dict[str, set[str]] = {
     Role.OWNER: {
-        "add_knowledge",
         "search_drive", "read_drive_file",
         "calendar_get_events", "calendar_create_event",
         "gmail_draft", "gmail_send_draft", "gmail_read",
         "sheets_append",
         "airtable_get", "airtable_add", "airtable_update",
-        # CRM — גישה מלאה
-        "crm_add_contact", "crm_find_contact", "crm_list_contacts", "crm_update_last_contact",
-        "crm_add_deal", "crm_list_deals", "crm_update_deal_status",
-        "crm_add_payment", "crm_upcoming_payments", "crm_overdue_payments", "crm_mark_payment_paid",
+        "add_knowledge",
+        *_CRM_TOOLS,
     },
     Role.STAFF: {
         "search_drive", "read_drive_file",
@@ -58,13 +68,14 @@ _ROLE_TOOLS: dict = {
         "gmail_draft", "gmail_read",
         "sheets_append",
         "airtable_get", "airtable_add", "airtable_update",
-        # CRM — גישה מלאה (crm_mark_payment_paid דורש אישור — נשלט ע"י registry)
-        "crm_add_contact", "crm_find_contact", "crm_list_contacts", "crm_update_last_contact",
-        "crm_add_deal", "crm_list_deals", "crm_update_deal_status",
-        "crm_add_payment", "crm_upcoming_payments", "crm_overdue_payments", "crm_mark_payment_paid",
+        # CRM — קריאה + עדכון בסיסי בלבד (לא יצירה/מחיקה)
+        "crm_find_contact", "crm_list_contacts",
+        "crm_update_last_contact", "crm_list_deals",
+        "crm_upcoming_payments", "crm_overdue_payments",
     },
     Role.CLIENT: {
         "airtable_get",
+        "crm_find_contact",
     },
     Role.SUPPLIER: {
         "airtable_get",
@@ -73,37 +84,28 @@ _ROLE_TOOLS: dict = {
 }
 
 
-def _filter_tools(role) -> list:
+def _filter_tools(role: str) -> list:
     allowed = _ROLE_TOOLS.get(role, set())
     return [t for t in TOOL_SCHEMAS if t["name"] in allowed]
 
 
 # ══════════════════════════════════════════════════
-# Airtable Schema Injection (Layer 8 supplement)
-# ══════════════════════════════════════════════════
-
-def _airtable_schema_block() -> str:
-    try:
-        from airtable_schema import format_schema_for_prompt
-        schema = format_schema_for_prompt()
-        if schema:
-            return f"\n{schema}"
-    except Exception:
-        pass
-    return ""
-
-
-# ══════════════════════════════════════════════════
-# System Prompt Assembly
+# System Prompt Assembly — Layer 8
+# STATIC (1-6) + CONTEXT (7) + DYNAMIC (8) + ROLE
 # ══════════════════════════════════════════════════
 
 def _assemble_prompt_owner(research_mode: bool) -> str:
+    """
+    OWNER — גישה מלאה.
+    Assembly: Layers 1-6 (static) + Layer 7 (datetime) + Layer 8 (dynamic data) + role addendum
+    """
     prompt = (
-        STATIC_MANIFEST
-        + build_context_layer()
-        + dynamic_context.get()
-        + _airtable_schema_block()
+        STATIC_MANIFEST          # Layers 1-6
+        + build_context_layer()  # Layer 7 — זמן אמת (לא cached)
+        + dynamic_context.get()  # Layer 8 — נתונים דינמיים
     )
+
+    # Role addendum
     prompt += (
         "\n═══════════════════════════════════════\n"
         "ROLE — Owner (אליהו חזן)\n"
@@ -111,8 +113,10 @@ def _assemble_prompt_owner(research_mode: bool) -> str:
         "גישה מלאה לכל הכלים והנתונים.\n"
         "תמיד סיים ב: ➡️ הצעד הבא המומלץ\n"
     )
+
     if research_mode:
         prompt += "\n🔬 מצב מחקר — נתח לעומק, ענה בהרחבה אסטרטגית."
+
     return prompt
 
 
@@ -130,6 +134,7 @@ def _assemble_prompt_staff(identity: "Identity") -> str:
 
 def _assemble_prompt_client(identity: "Identity") -> str:
     return (
+        # לקוח — חלק מהשכבות בלבד (UX + Truth)
         "אתה נציג שירות מקצועי ומנומס של Boss HQ.\n"
         f"לקוח: {identity.display_name or identity.user_id} | "
         f"tenant: {identity.tenant_id}\n"
@@ -154,6 +159,10 @@ def _assemble_prompt_readonly(_: "Identity") -> str:
     return "אתה יכול לקרוא מידע כללי בלבד. לא ניתן לבצע פעולות."
 
 
+# ══════════════════════════════════════════════════
+# Model / Token Selection
+# ══════════════════════════════════════════════════
+
 def _select_model(identity: "Identity", text: str) -> tuple[str, int]:
     if identity.is_owner:
         if text.startswith("#"):
@@ -162,7 +171,16 @@ def _select_model(identity: "Identity", text: str) -> tuple[str, int]:
     return "claude-haiku-4-5-20251001", 700
 
 
+# ══════════════════════════════════════════════════
+# Main Entry Point
+# ══════════════════════════════════════════════════
+
 def build_context(identity: "Identity", user_text: str = "") -> AgentContext:
+    """
+    בונה AgentContext מלא לפי Identity.
+    מממש את ה-8 שכבות:
+    1-6 (STATIC_MANIFEST) + 7 (datetime) + 8 (dynamic+role)
+    """
     research_mode = user_text.startswith("#") and identity.is_owner
     model, max_tokens = _select_model(identity, user_text)
 
@@ -194,5 +212,9 @@ def build_context(identity: "Identity", user_text: str = "") -> AgentContext:
         identity_label = f"{identity.tenant_id}/{identity.user_id}/{identity.role}",
     )
 
+
+# ══════════════════════════════════════════════════
+# Re-export Grounding Validator לשימוש ב-app.py
+# ══════════════════════════════════════════════════
 
 __all__ = ["AgentContext", "build_context", "check_tool_results"]
