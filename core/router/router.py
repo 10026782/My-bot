@@ -60,8 +60,10 @@ def route_request(
 
     # 6. Edge cases
     if intent == Intent.UNKNOWN and handler != Handler.BLOCK:
-        handler           = Handler.CLARIFY
-        response_override = "לא הצלחתי להבין בדיוק מה תרצה. תוכל לנסח אחרת?"
+        # שיחה כללית / שאלה שלא מוכרת → Agent יטפל בה טבעי.
+        # CLARIFY רק כשהמשתמש מנסה פעולה ולא ברור איזו — לא לשיחה רגילה.
+        handler           = Handler.AGENT
+        response_override = ""
     elif risk == Risk.NEEDS_APPROVAL and confidence < 0.85:
         handler           = Handler.CLARIFY
         response_override = f"רוצה לבצע פעולה רגישה — לא בטוח שהבנתי נכון. כוונתך: {intent}?"
