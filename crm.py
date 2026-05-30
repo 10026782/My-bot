@@ -58,11 +58,11 @@ def _get(table: str, formula: str = "", fields: list = None, identity=None) -> l
 
     r = httpx.get(_base_url(table), headers=_headers(), params=params, timeout=10)
     if r.status_code == 401:
-        raise RuntimeError("AIRTABLE_API_KEY לא תקין או פג — עדכן ב-Render")
+        raise RuntimeError(f"401 AIRTABLE_API_KEY לא תקין | body: {r.text[:200]}")
     if r.status_code == 403:
-        raise RuntimeError(f"אין הרשאה לטבלה '{table}' — בדוק שהטבלה קיימת ושה-token מורשה")
+        raise RuntimeError(f"403 אין הרשאה לטבלה '{table}' | body: {r.text[:200]}")
     if r.status_code == 404:
-        raise RuntimeError(f"טבלה '{table}' לא נמצאה ב-Airtable Base")
+        raise RuntimeError(f"404 טבלה '{table}' לא נמצאה | body: {r.text[:200]}")
     r.raise_for_status()
     return r.json().get("records", [])
 
