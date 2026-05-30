@@ -23,6 +23,29 @@ logger = logging.getLogger(__name__)
 
 _TENANT_SCOPED_TOOLS = {"airtable_get", "airtable_add", "airtable_update"}
 
+# מיפוי שמות קצרים → שמות מדויקים ב-Airtable
+_TABLE_NAME_MAP: dict[str, str] = {
+    "משימות":                      "משימות (Tasks)",
+    "tasks":                        "משימות (Tasks)",
+    "אנשי קשר":                    "אנשי קשר (Contacts)",
+    "contacts":                     "אנשי קשר (Contacts)",
+    "עסקאות":                      "עסקאות (Deals)",
+    "deals":                        "עסקאות (Deals)",
+    "תשלומים":                     "תשלומים (Payments)",
+    "payments":                     "תשלומים (Payments)",
+    "הוצאות":                      "הוצאות (Expenses)",
+    "expenses":                     "הוצאות (Expenses)",
+    "למידות":                      "למידות ותובנות (Learnings & Insights)",
+    "learnings":                    "למידות ותובנות (Learnings & Insights)",
+    "insights":                     "למידות ותובנות (Learnings & Insights)",
+    "משימות ודד ליינים":           "משימות ודד ליינים",
+    "deadlines":                    "משימות ודד ליינים",
+}
+
+def _resolve_table(name: str) -> str:
+    """ממפה שם קצר/חלקי לשם המדויק ב-Airtable."""
+    return _TABLE_NAME_MAP.get(name.strip(), name.strip())
+
 
 # ──────────────────────────────────────────────────────────────────
 # Airtable helpers
@@ -97,7 +120,7 @@ def dispatch_tool(name: str, inputs: dict, identity: "Identity") -> str:
                 creds_err = _airtable_creds_ok()
                 if creds_err:
                     return creds_err
-                table = inputs["table"]
+                table = _resolve_table(inputs["table"])
                 params: dict = {"maxRecords": inputs.get("max_records", 10)}
                 if inputs.get("filterByFormula"):
                     params["filterByFormula"] = inputs["filterByFormula"]
