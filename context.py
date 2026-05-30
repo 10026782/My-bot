@@ -95,6 +95,22 @@ def _filter_tools(role: str) -> list:
 # STATIC (1-6) + CONTEXT (7) + DYNAMIC (8) + ROLE
 # ══════════════════════════════════════════════════
 
+def _airtable_schema_hint() -> str:
+    """שמות טבלאות מדויקים להזרקה לsystem prompt."""
+    from airtable_schema import Tables
+    return (
+        "\n═══════════════════════════════════════\n"
+        "שמות טבלאות Airtable (השתמש בשמות המדויקים האלה בלבד):\n"
+        f"• אנשי קשר → \"{Tables.CONTACTS}\"\n"
+        f"• עסקאות   → \"{Tables.DEALS}\"\n"
+        f"• תשלומים  → \"{Tables.PAYMENTS}\"\n"
+        f"• משימות   → \"{Tables.TASKS}\"\n"
+        f"• הוצאות   → \"{Tables.EXPENSES}\"\n"
+        f"• למידות   → \"{Tables.LEARNINGS}\"\n"
+        "═══════════════════════════════════════\n"
+    )
+
+
 def _assemble_prompt_owner(research_mode: bool) -> str:
     """
     OWNER — גישה מלאה.
@@ -104,6 +120,7 @@ def _assemble_prompt_owner(research_mode: bool) -> str:
         STATIC_MANIFEST          # Layers 1-6
         + build_context_layer()  # Layer 7 — זמן אמת (לא cached)
         + dynamic_context.get()  # Layer 8 — נתונים דינמיים
+        + _airtable_schema_hint()  # שמות טבלאות מדויקים
     )
 
     # Role addendum
@@ -125,6 +142,7 @@ def _assemble_prompt_staff(identity: "Identity") -> str:
     return (
         STATIC_MANIFEST
         + build_context_layer()
+        + _airtable_schema_hint()
         + f"\n═══════════════════════════════════════\n"
         f"ROLE — Staff: {identity.display_name or identity.user_id}\n"
         f"═══════════════════════════════════════\n"
