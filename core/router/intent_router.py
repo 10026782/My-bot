@@ -1,0 +1,103 @@
+# intent_router.py — CORE_02_ROUTER
+# זיהוי כוונת המשתמש.
+#
+# עקרון: Rule-based קודם. LLM רק כשאין ודאות.
+# אף פעם לא מנחשים על פעולה רגישה.
+
+from __future__ import annotations
+import re
+import logging
+from .route_decision import Intent
+
+logger = logging.getLogger(__name__)
+
+
+# ══════════════════════════════════════════════════
+# Rule Tables — עברית + אנגלית
+# ══════════════════════════════════════════════════
+
+# (pattern, intent, confidence)
+# סדר חשוב — ספציפי לפני כללי
+
+_RULES: list[tuple[str, str, float]] = [
+
+    # ── Tasks ────────────────────────────────────
+    (r"(פתח|צור|הוסף|תוסיף).*(משימ|טאסק|task)", Intent.CREATE_TASK, 0.95),
+    (r"(עדכן|שנה|תעדכן).*(משימ|טאסק|task)", Intent.UPDATE_TASK, 0.95),
+    (r"(סגור|סיים|סמן.*סיים|complete).*(משימ|טאסק|task)", Intent.COMPLETE_TASK, 0.95),
+    (r"(מחק|הסר).*(משימ|טאסק|task)", Intent.DELETE_TASK, 0.90),
+    (r"(רשימ|הצג|תראה|מה).*משימ|list.*task", Intent.LIST_TASKS, 0.90),
+
+    # ── Calendar ─────────────────────────────────
+    (r"(קבע|תקבע|צור|תצור|פתח|תפתח|הוסף|תוסיף).*(פגיש|אירוע|ישיב|פגישה|event|meeting)", Intent.CREATE_EVENT, 0.95),
+    (r"(בטל|ביטול|cancel).*(פגיש|אירוע|event)", Intent.CANCEL_EVENT, 0.95),
+    (r"(עדכן|שנה).*(פגיש|אירוע|event)", Intent.UPDATE_EVENT, 0.90),
+    (r"(מה יש|מה.*יומן|אירועים|לוח זמנים|פגישות.*היום|calendar|events)", Intent.LIST_EVENTS, 0.90),
+    (r"(קבע.*פגיש|schedule.*meeting|잡아|잡다)", Intent.SCHEDULE_MEETING, 0.90),
+
+    # ── Leads / CRM ──────────────────────────────
+    (r"(הוסף|תוסיף|צור|תצור|פתח|תפתח|רשום).*(ליד|lead|לקוח פוטנציאלי)", Intent.CREATE_LEAD, 0.95),
+    (r"(עדכן|שנה).*(ליד|lead)", Intent.UPDATE_LEAD, 0.90),
+    (r"(חפש|מצא|תמצא).*(ליד|lead)", Intent.FIND_LEAD, 0.90),
+    (r"(כשיר|qualify|דרג).*(ליד|lead)", Intent.QUALIFY_LEAD, 0.90),
+    (r"(סגור|סגירת).*(עסק|עסקה|deal)", Intent.CLOSE_DEAL, 0.90),
+    (r"(עדכן|שנה).*(שלב|סטטוס|stage).*(עסק|עסקה|deal)", Intent.UPDATE_DEAL_STAGE, 0.90),
+
+    # ── Contacts ─────────────────────────────────
+    (r"(הוסף|צור|פתח).*(איש קשר|contact|לקוח|ספק)", Intent.CREATE_CONTACT, 0.90),
+    (r"(עדכן|שנה).*(איש קשר|contact)", Intent.UPDATE_CONTACT, 0.90),
+    (r"(חפש|מצא).*(איש קשר|contact|לקוח|ספק)", Intent.FIND_CONTACT, 0.90),
+    (r"(רשימ|הצג).*(אנשי קשר|contacts|לקוחות|ספקים)", Intent.LIST_CONTACTS, 0.85),
+
+    # ── Email ────────────────────────────────────
+    (r"(כתוב|נסח|הכן|draft).*(מייל|אימייל|email)", Intent.DRAFT_EMAIL, 0.95),
+    (r"(שלח).*(מייל|אימייל|email)", Intent.SEND_EMAIL, 0.95),
+
+    # ── Reporting ────────────────────────────────
+    (r"(דוח|דו.ח|report|סיכום).*(כספ|פיננס|finance|financial)|(תזרים|cash.flow|מאזן)", Intent.FINANCIAL_REPORT, 0.95),
+    (r"(דוח|דו.ח|report|סיכום).*(מכיר|מכירות|sales)", Intent.SALES_REPORT, 0.90),
+    (r"(דוח|דו.ח|report|סיכום|generate)", Intent.GENERATE_REPORT, 0.80),
+
+    # ── Knowledge / Documents ────────────────────
+    (r"(חפש|מצא|search).*(מסמך|קובץ|drive|document|file)", Intent.READ_DOCUMENT, 0.90),
+    (r"(קרא|פתח|תראה).*(מסמך|קובץ|file|document)", Intent.READ_DOCUMENT, 0.90),
+    (r"(חפש|מצא|search).*(מידע|נתון|knowledge|info)", Intent.SEARCH_KNOWLEDGE, 0.85),
+    (r"(זכור|שמור|store).*(זיכרון|memory|מידע)", Intent.STORE_MEMORY, 0.90),
+
+    # ── Research ─────────────────────────────────
+    (r"(חקור|מחקר|research).*(חברה|company|ארגון)", Intent.RESEARCH_COMPANY, 0.90),
+    (r"(חקור|מחקר|research|בדוק)", Intent.RESEARCH_TOPIC, 0.80),
+
+    # ── System ───────────────────────────────────
+    (r"(סטטוס|status|מצב).*(מערכת|system|בוט|bot)", Intent.SYSTEM_STATUS, 0.95),
+    (r"(הגדרות|settings|ניהול|admin|manage)", Intent.ADMIN_ACTION, 0.85),
+
+    # ── Communication — כלליים בסוף ──────────────
+    (r"(תרגם|translate)", Intent.TRANSLATE, 0.95),
+    (r"(סכם|תסכם|summarize|סיכום)", Intent.SUMMARIZE, 0.90),
+    (r"(הסבר|explain|מה זה|מה הכוונה)", Intent.EXPLAIN, 0.85),
+    (r"(מידע|פרטים|תגיד לי|tell me|information about)", Intent.REQUEST_INFO, 0.75),
+]
+
+# Compile פעם אחת
+_COMPILED: list[tuple[re.Pattern, str, float]] = [
+    (re.compile(pattern, re.IGNORECASE | re.UNICODE), intent, conf)
+    for pattern, intent, conf in _RULES
+]
+
+
+def detect_intent(text: str, confidence_threshold: float = 0.75) -> tuple[str, float, str]:
+    """
+    מחזיר (intent, confidence, matched_rule).
+    אם אין התאמה מעל הסף — מחזיר (UNKNOWN, 0.0, "").
+    """
+    text_clean = text.strip()
+
+    for pattern, intent, confidence in _COMPILED:
+        if pattern.search(text_clean):
+            logger.debug(f"[Intent] '{text_clean[:40]}' → {intent} ({confidence:.2f}) via {pattern.pattern[:30]}")
+            return intent, confidence, pattern.pattern
+
+    # אין התאמה
+    logger.debug(f"[Intent] No rule match for: '{text_clean[:40]}'")
+    return Intent.UNKNOWN, 0.0, ""

@@ -1,7 +1,8 @@
-# app.py — The Boss Bot v3.4
-# Multi-Tenant Architecture: Identity → Context → Agent
-# v3.4: dispatch_tool(name, input, identity), WORKER_SECRET, identity None guard,
-#        action_validator, check_tool_results, tool memory, "typing..." UX
+# app.py — The Boss Bot v3.0
+# Architecture: Identity → Router → Context → Agent
+#
+# כל בקשה עוברת:
+#   resolve_identity → route_request → build_context → run_agent
 
 import os
 import logging
@@ -11,37 +12,33 @@ import anthropic
 import telebot
 from twilio.twiml.messaging_response import MessagingResponse
 
-from memory_store        import memory
-from identity            import resolve_identity, Role
-from context             import build_context, check_tool_results
-from action_validator    import validate_action, ActionBlocked
-from tool_registry       import enforce, ToolDenied
-from scheduler           import start_scheduler
-from tools               import dispatch_tool
-from guards              import idempotency, rate_limiter, validate_tool_output
+from memory_store    import memory
+from identity        import resolve_identity
+from context         import build_context
+from tool_registry   import enforce, ToolDenied
+from scheduler       import start_scheduler
+from tools           import dispatch_tool
+from guards          import idempotency, rate_limiter, validate_tool_output
+from config          import get_domain as _channel_domain
+from core.router     import route_request, RouteDecision, Handler
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 # ─── קבועים ────────────────────────────────────────
-MAX_TOOL_TURNS = 4
+MAX_TOOL_TURNS = 2
 AGENT_TIMEOUT  = 25
 
-# ─── env vars ──────────────────────────────────────
+# ─── קליינטים ──────────────────────────────────────
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 TELEGRAM_TOKEN    = os.environ.get("TELEGRAM_TOKEN", "")
 RENDER_APP_URL    = os.environ.get("RENDER_APP_URL", "https://my-bot-jqz2.onrender.com")
-WORKER_SECRET     = os.environ.get("WORKER_SECRET", "")
-
-if not TELEGRAM_TOKEN:
-    raise RuntimeError("TELEGRAM_TOKEN לא מוגדר — הוסף env var ב-Render")
-if not ANTHROPIC_API_KEY:
-    raise RuntimeError("ANTHROPIC_API_KEY לא מוגדר — הוסף env var ב-Render")
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=AGENT_TIMEOUT)
 bot    = telebot.TeleBot(TELEGRAM_TOKEN)
-app    = Flask(__name__)
+
+app = Flask(__name__)
 
 try:
     _scheduler = start_scheduler()
@@ -59,77 +56,103 @@ if os.environ.get("SETUP_WEBHOOK") == "1":
 
 
 # ══════════════════════════════════════════════════
-# Tool memory — תמצות context כלים בין תורות
+# Integration Layer — CORE_02.6
 # ══════════════════════════════════════════════════
 
-def _summarize_tool_context(tool_results: list[dict], max_chars: int = 800) -> str:
-    """מקצר את תוצאות הכלים להקשר בין iterations."""
-    lines = []
-    for r in tool_results:
-        content = r.get("content", "")
-        if isinstance(content, str) and content:
-            lines.append(content[:200])
-    summary = "\n".join(lines)
-    return summary[:max_chars] if len(summary) > max_chars else summary
+def _safe_route(text: str, channel: str, identity, domain_from_channel: str = "") -> RouteDecision:
+    """
+    עוטף את route_request עם fallback.
+    כלל ברזל #9: אם Router נכשל — ממשיכים עם intent=unknown, risk=review.
+    לא נופלים.
+    """
+    try:
+        return route_request(
+            text                = text,
+            channel_raw         = channel,
+            identity            = identity,
+            domain_from_channel = domain_from_channel,
+        )
+    except Exception as e:
+        logger.error(f"[Router] FAILED — fallback to safe defaults: {e}", exc_info=True)
+        from core.router.route_decision import RouteDecision, Intent, RouterDomain, Risk, Handler
+        return RouteDecision(
+            channel           = channel,
+            intent            = Intent.UNKNOWN,
+            domain            = RouterDomain.GENERAL,
+            risk              = Risk.NORMAL,
+            handler           = Handler.AGENT,   # ממשיכים — Agent יטפל
+            needs_approval    = False,
+            confidence        = 0.0,
+            matched_rule      = "fallback",
+            response_override = "",
+        )
 
 
 # ══════════════════════════════════════════════════
-# run_agent — Identity-Aware Agent Loop v3.4
+# run_agent — Identity + Router + Agent Loop
 # ══════════════════════════════════════════════════
 
-def run_agent(user_text: str, chat_id: str, channel: str = "telegram") -> str:
+def run_agent(
+    user_text:          str,
+    chat_id:            str,
+    channel:            str = "telegram",
+    domain_from_channel: str = "",
+) -> str:
 
-    # ─── Identity ──────────────────────────────────
+    # ── 1. Identity ───────────────────────────────
     identity = resolve_identity(channel, chat_id)
+    logger.info(f"[Identity] {identity}")
 
-    # ─── Identity None guard ───────────────────────
-    if identity is None:
-        logger.error(f"resolve_identity returned None for {channel}:{chat_id}")
-        return "❌ שגיאת זיהוי פנימית."
-
-    # ─── Rate Limit ────────────────────────────────
+    # ── 2. Rate Limit ─────────────────────────────
     if not rate_limiter.is_allowed(identity.memory_key):
         return "⚠️ יותר מדי בקשות. המתן דקה ונסה שוב."
 
-    # ─── Readonly block ────────────────────────────
-    if identity.role == Role.READONLY:
-        return "⚠️ אין לך גישה למערכת. פנה למנהל."
+    # ── 3. Router — CORE_02.6 Integration ────────
+    route = _safe_route(user_text, channel, identity, domain_from_channel)
+    logger.info(route.to_log())
 
+    # ── 4. Route Decision ─────────────────────────
+    if route.handler == Handler.BLOCK:
+        logger.warning(f"[Router] BLOCKED: {identity} intent={route.intent}")
+        return route.response_override or "⛔ אין לך הרשאה לבצע פעולה זו."
+
+    if route.handler == Handler.CLARIFY:
+        logger.info(f"[Router] CLARIFY: intent={route.intent} confidence={route.confidence:.2f}")
+        return route.response_override or "לא הצלחתי להבין — תוכל לנסח אחרת?"
+
+    if route.handler == Handler.APPROVAL:
+        logger.info(f"[Router] APPROVAL NEEDED: intent={route.intent} domain={route.domain}")
+        return (
+            route.response_override or
+            f"⏳ הפעולה *{route.intent}* דורשת אישור לפני ביצוע.\n"
+            f"אשר עם: ✅ כן / ❌ לא"
+        )
+
+    # ── 5. Agent Loop ─────────────────────────────
     try:
         research_mode = user_text.startswith("#") and identity.is_owner
         clean_msg     = user_text[1:].strip() if research_mode else user_text
 
-        # ─── typing... UX ──────────────────────────
-        if channel == "telegram":
-            try:
-                bot.send_chat_action(chat_id, "typing")
-            except Exception:
-                pass
-
-        # ─── Context Builder ───────────────────────
-        ctx      = build_context(identity, user_text)
+        # Context מקבל את ה-domain מה-RouteDecision
+        ctx      = build_context(identity, user_text, domain=route.domain)
         history  = memory.get_for_claude(ctx.memory_key)
-        messages = history + [{"role": "user", "content":
-                                f"{ctx.user_context_hint}\n{clean_msg}" if ctx.user_context_hint
-                                else clean_msg}]
+        messages = history + [{"role": "user", "content": clean_msg}]
 
-        logger.info(f"run_agent | {ctx.identity_label} | {ctx.model} | {ctx.max_tokens}tok")
+        logger.info(
+            f"[Agent] {ctx.identity_label} | "
+            f"intent={route.intent} domain={route.domain} | "
+            f"model={ctx.model} tools={len(ctx.allowed_tools)}"
+        )
 
         final_reply     = "⚠️ לא התקבלה תשובה."
         tool_calls_made = 0
-        tool_context    = ""   # זיכרון תוצאות כלים בין iterations
 
         while True:
-            # הוסף tool context אם יש
-            sys_prompt = ctx.system_prompt
-            if tool_context:
-                sys_prompt += f"\n\n[תוצאות כלים קודמות]\n{tool_context}"
-
             response = client.messages.create(
                 model       = ctx.model,
                 max_tokens  = ctx.max_tokens,
                 temperature = 0.2,
-                system      = sys_prompt,
+                system      = ctx.system_prompt,
                 tools       = ctx.allowed_tools,
                 messages    = messages,
             )
@@ -146,65 +169,42 @@ def run_agent(user_text: str, chat_id: str, channel: str = "telegram") -> str:
                                else "⚠️ הגעתי לגבול הכלים. נסה לפרק לשלבים.")
                 break
 
-            # ─── Tool Loop ─────────────────────────
+            # ── Tool Loop ────────────────────────
             tool_results = []
             for tu in tool_uses:
-
-                # 1. Registry permission check
                 try:
                     enforce(tu.name, identity)
                 except ToolDenied as e:
-                    logger.warning(f"Tool denied: {tu.name} for {identity.role}")
+                    logger.warning(f"[Tool] Denied: {tu.name} for {identity.role}")
                     tool_results.append({
-                        "type": "tool_result", "tool_use_id": tu.id,
-                        "content": str(e)
+                        "type": "tool_result", "tool_use_id": tu.id, "content": str(e)
                     })
                     continue
 
-                # 2. action_validator — presence + structure + חוק 9%
-                validation = validate_action(tu.name, dict(tu.input))
-                if isinstance(validation, ActionBlocked):
-                    logger.info(f"ActionBlocked: {tu.name} — {validation.reason[:60]}")
-                    tool_results.append({
-                        "type": "tool_result", "tool_use_id": tu.id,
-                        "content": f"⛔ {validation.reason}"
-                    })
-                    continue
-
-                # 3. Dispatch
-                logger.info(f"Tool: {tu.name} | {str(tu.input)[:80]}")
-                raw    = dispatch_tool(tu.name, tu.input, identity=identity)
+                logger.info(f"[Tool] {tu.name} | {str(tu.input)[:80]}")
+                raw    = dispatch_tool(tu.name, tu.input, identity)
                 result = validate_tool_output(tu.name, raw)
-                logger.info(f"  -> {result[:80]}")
+                logger.info(f"[Tool] → {result[:80]}")
 
                 tool_results.append({
-                    "type": "tool_result", "tool_use_id": tu.id,
-                    "content": result
+                    "type": "tool_result", "tool_use_id": tu.id, "content": result
                 })
-
-            # 4. Grounding check
-            grounded, err = check_tool_results(tool_results)
-            if not grounded:
-                logger.warning(f"Grounding failed: {err}")
-
-            # 5. עדכון tool context לאיטרציה הבאה
-            tool_context = _summarize_tool_context(tool_results)
 
             tool_calls_made += 1
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user",      "content": tool_results})
 
-        # ─── שמור זיכרון ───────────────────────────
+        # ── שמירת זיכרון ─────────────────────────
         memory.add(ctx.memory_key, "user",      clean_msg)
         memory.add(ctx.memory_key, "assistant", final_reply)
 
         return final_reply
 
     except anthropic.APIStatusError as e:
-        logger.error(f"Anthropic {e.status_code}: {e.message}")
+        logger.error(f"[Agent] Anthropic {e.status_code}: {e.message}")
         return f"❌ שגיאת API ({e.status_code}). נסה שוב."
     except Exception as e:
-        logger.error(f"run_agent error: {e}", exc_info=True)
+        logger.error(f"[Agent] error: {e}", exc_info=True)
         return f"❌ שגיאה פנימית: {e}"
 
 
@@ -216,9 +216,9 @@ def run_agent(user_text: str, chat_id: str, channel: str = "telegram") -> str:
 def health():
     return jsonify({
         "status":         "ok",
-        "version":        "3.4",
+        "version":        "3.0",
         "max_tool_turns": MAX_TOOL_TURNS,
-        "security":       "tenant-enforced",
+        "router":         "CORE_02.6",
     }), 200
 
 
@@ -234,40 +234,40 @@ def webhook_telegram():
             return "", 200
         reply = run_agent(text, chat_id, channel="telegram")
         try:
-            bot.send_message(chat_id, reply, parse_mode="Markdown")
+            bot.send_message(chat_id, reply)
         except Exception as e:
-            logger.error(f"Telegram send error: {e}")
-            try:
-                bot.send_message(chat_id, reply)   # fallback ללא Markdown
-            except Exception:
-                pass
+            logger.error(f"[Telegram] send error: {e}")
     return "", 200
 
 
 @app.route("/webhook/whatsapp", methods=["POST"])
 def webhook_whatsapp():
-    incoming = request.values.get("Body", "").strip()
-    sender   = request.values.get("From", "whatsapp:unknown")
-    msg_sid  = request.values.get("MessageSid", "")
+    incoming  = request.values.get("Body", "").strip()
+    sender    = request.values.get("From", "whatsapp:unknown")
+    to_number = request.values.get("To",   "whatsapp:unknown")
+    msg_sid   = request.values.get("MessageSid", "")
+
     if not incoming:
         return Response(str(MessagingResponse()), mimetype="application/xml")
+
+    # domain לפי מספר היעד — Layer 1 של domain_router
+    domain_from_channel = _channel_domain(to_number)
+
     dedup_key = msg_sid if msg_sid else incoming
     if idempotency.is_duplicate("whatsapp", sender, dedup_key):
         return Response(str(MessagingResponse()), mimetype="application/xml")
+
     resp = MessagingResponse()
-    resp.message(run_agent(incoming, sender, channel="whatsapp"))
+    resp.message(run_agent(
+        incoming, sender,
+        channel             = "whatsapp",
+        domain_from_channel = domain_from_channel,
+    ))
     return Response(str(resp), mimetype="application/xml")
 
 
 @app.route("/worker/trigger", methods=["POST"])
 def worker_trigger():
-    # ─── WORKER_SECRET auth ────────────────────────
-    if WORKER_SECRET:
-        auth = request.headers.get("X-Worker-Secret", "")
-        if auth != WORKER_SECRET:
-            logger.warning("worker_trigger: unauthorized attempt")
-            abort(403)
-
     try:
         payload = request.get_json(force=True) or {}
         chat_id = payload.get("chat_id", "")
@@ -276,18 +276,18 @@ def worker_trigger():
             return jsonify({"error": "chat_id and event required"}), 400
         reply = run_agent(f"[אירוע מערכת]: {event}", chat_id)
         try:
-            bot.send_message(chat_id, reply, parse_mode="Markdown")
+            bot.send_message(chat_id, reply)
         except Exception as e:
-            logger.error(f"worker telegram: {e}")
+            logger.error(f"[Worker] telegram: {e}")
         return jsonify({"status": "ok", "reply": reply[:200]}), 200
     except Exception as e:
-        logger.error(f"worker_trigger: {e}", exc_info=True)
+        logger.error(f"[Worker] trigger error: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
 @app.route("/")
 def home():
-    return "The Boss is Live v3.4 — Multi-Tenant ✅"
+    return "The Boss is Live v3.0 — CORE_02.6 Router ✅"
 
 
 if __name__ == "__main__":

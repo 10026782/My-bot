@@ -1,32 +1,37 @@
 """
-config.py — MADS CORE Configuration
-מיפוי ערוצים לדומיינים + הגדרות גלובליות.
-להוסיף מספרי וואטסאפ כאן בלבד — שאר הקוד לא נוגעים.
+config.py — Channel → Domain Mapping
+מיפוי מספרי WhatsApp לדומיינים עסקיים.
+להוסיף מספרים כאן בלבד — שאר הקוד לא נוגעים.
 """
 
-# ─── Channel → Domain Mapping ─────────────────────────────────────────────────
-# מפתח: "whatsapp:+972XXXXXXXXX"
-# ערך:   שם הדומיין (חייב להתאים למפתח ב-DOMAIN_CONFIG ב-domain_prompts.py)
+import logging
+
+logger = logging.getLogger(__name__)
+
+# ─── Channel → Domain Mapping ────────────────────────────────────────────────
+# מפתח: "whatsapp:+972XXXXXXXXX" (המספר שהבוט מקבל הודעות אליו)
+# ערך:   שם הדומיין (real_estate | import | media | saas | finance | general)
 
 CHANNEL_DOMAINS: dict[str, str] = {
     # דוגמה — להחליף במספרים האמיתיים:
-    # "whatsapp:+972501234567": "realestate",
-    # "whatsapp:+972507654321": "recruitment",
+    # "whatsapp:+972501234567": "real_estate",
+    # "whatsapp:+972507654321": "import",
 }
 
 # דומיין ברירת מחדל כשאין מיפוי מוגדר
-DEFAULT_DOMAIN = "realestate"
+DEFAULT_DOMAIN = "general"
 
-# Feature flags: נשלטות דרך env vars — ראה feature_flags.py
-# LEAD_QUALIFIER=true, CREATIVE_GENERATOR=true (ב-Render)
 
-# ─── Helper ───────────────────────────────────────────────────────────────────
+# ─── Helper ──────────────────────────────────────────────────────────────────
 
-def get_domain(channel: str, sender: str) -> str:
+def get_domain(to_number: str) -> str:
     """
-    מחזיר את הדומיין לפי ערוץ ושולח.
-    channel: "whatsapp" / "telegram" / "web"
-    sender:  מספר טלפון או chat_id
+    מחזיר את הדומיין לפי מספר היעד של WhatsApp.
+    to_number: "whatsapp:+972XXXXXXXXX"
     """
-    key = f"{channel}:{sender}"
-    return CHANNEL_DOMAINS.get(key, DEFAULT_DOMAIN)
+    domain = CHANNEL_DOMAINS.get(to_number, DEFAULT_DOMAIN)
+    if domain != DEFAULT_DOMAIN:
+        logger.debug(f"[Config] Domain mapped: {to_number} → {domain}")
+    else:
+        logger.debug(f"[Config] No domain mapping for {to_number!r} — using {DEFAULT_DOMAIN}")
+    return domain

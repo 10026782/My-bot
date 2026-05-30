@@ -2,39 +2,18 @@
 # קבועי סכמה לכל טבלאות Airtable של אליהו חזן
 # שנה כאן → משתנה בכל המערכת. אין magic strings.
 
-def format_schema_for_prompt() -> str:
-    """בונה תיאור סכמה מהקבועים הסטטיים להזרקה לsystem prompt."""
-    return (
-        "שמות טבלאות Airtable (השתמש בשמות המדויקים האלה בלבד):\n"
-        f"• \"{Tables.CONTACTS}\" | שדות: {ContactFields.NAME}, {ContactFields.PHONE}, {ContactFields.EMAIL}, {ContactFields.TYPE}, {ContactFields.COMPANY}, {ContactFields.LAST_CONTACT}\n"
-        f"• \"{Tables.DEALS}\"    | שדות: {DealFields.NAME}, {DealFields.ADDRESS}, {DealFields.STATUS}, {DealFields.PRICE}, {DealFields.FUNDING_COST}, {DealFields.DEADLINE}\n"
-        f"• \"{Tables.PAYMENTS}\" | שדות: {PaymentFields.NAME}, {PaymentFields.AMOUNT}, {PaymentFields.DUE_DATE}, {PaymentFields.STATUS}, {PaymentFields.DEAL}\n"
-        f"• \"{Tables.TASKS}\"    | שדות: {TaskFields.NAME}, {TaskFields.STATUS}, {TaskFields.PRIORITY}, {TaskFields.DEADLINE}\n"
-        f"• \"{Tables.EXPENSES}\" | שדות: {ExpenseFields.NAME}, {ExpenseFields.AMOUNT}, {ExpenseFields.DATE}, {ExpenseFields.CATEGORY}\n"
-        f"• \"{Tables.LEARNINGS}\"| שדות: Name, Notes\n"
-    )
-
 # ══════════════════════════════════════════════════
 # שמות טבלאות
 # ══════════════════════════════════════════════════
 
 class Tables:
-    # ── שמות מדויקים כפי שמופיעים ב-Airtable ──
-    CONTACTS   = "אנשי קשר (Contacts)"
-    DEALS      = "עסקאות (Deals)"
-    TASKS      = "משימות (Tasks)"
-    EXPENSES   = "הוצאות (Expenses)"
-    PAYMENTS   = "תשלומים (Payments)"
-    LEARNINGS  = "למידות ותובנות (Learnings & Insights)"
-    PROFILE    = "Profile"
-    CASHFLOW   = "Weekly Cash Flow Reports"
-    SALES_DEBT = "Unit Sales & Debt Distribution"
-    DEADLINES  = "משימות ודד ליינים"
-    PROJECTS   = "Projects"
-    UNITS      = "Units"
-    LOANS      = "Loans"
-    DEBT_MGMT  = "Company A - Debt Management"
-    # IMPORTS — אין טבלה תואמת עדיין ב-Airtable
+    CONTACTS   = "Contacts"      # אנשי קשר / לקוחות / ספקים
+    DEALS      = "Deals"         # עסקאות נדל"ן
+    TASKS      = "Tasks"         # משימות
+    EXPENSES   = "Expenses"      # הוצאות
+    IMPORTS    = "Imports"       # יבוא מסין
+    PAYMENTS   = "Payments"      # תשלומים ותזרים
+    LEADS      = "Leads"         # לידים מכל הערוצים והדומיינים
 
 
 # ══════════════════════════════════════════════════
@@ -167,6 +146,41 @@ class PaymentStatus:
     OVERDUE     = "Overdue"
 
 
+class LeadFields:
+    NAME       = "Name"           # שם הליד
+    PHONE      = "phone"          # טלפון (אותיות קטנות — כך נוצר ב-Airtable)
+    DOMAIN     = "domain"         # realestate | import | investors | recruitment
+    STATUS     = "status"         # NEW | QUALIFIED | HOT | COLD
+    SCORE      = "score"          # 0–100
+    SUMMARY    = "summary"        # סיכום השיחה
+    ANSWERS    = "answers"        # JSON של תשובות הליד
+    SOURCE     = "source"         # whatsapp_realestate | whatsapp_import | whatsapp_investors | telegram | manual
+    CHANNEL    = "channel"        # whatsapp | telegram | web
+    CREATED_AT = "created at"     # תאריך יצירה (עם רווח — כך נוצר ב-Airtable)
+
+
+class LeadStatus:
+    NEW        = "NEW"
+    QUALIFIED  = "QUALIFIED"
+    HOT        = "HOT"
+    COLD       = "COLD"
+
+
+class LeadDomain:
+    REALESTATE  = "realestate"
+    IMPORT      = "import"
+    INVESTORS   = "investors"
+    RECRUITMENT = "recruitment"
+
+
+class LeadSource:
+    WA_REALESTATE  = "whatsapp_realestate"
+    WA_IMPORT      = "whatsapp_import"
+    WA_INVESTORS   = "whatsapp_investors"
+    TELEGRAM       = "telegram"
+    MANUAL         = "manual"
+
+
 # ══════════════════════════════════════════════════
 # כלל ה-9% — ולידציה
 # ══════════════════════════════════════════════════
@@ -174,10 +188,6 @@ class PaymentStatus:
 MAX_FUNDING_COST_PCT = 9.0  # חוק ברזל מספר 1
 
 def validate_funding_cost(pct: float) -> tuple[bool, str]:
-    """
-    מחזיר (True, "") אם עלות המימון בגבולות.
-    מחזיר (False, הודעת שגיאה) אם חורג.
-    """
     if pct > MAX_FUNDING_COST_PCT:
         return False, (
             f"⚠️ הפרת חוק ברזל #1: עלות מימון {pct}% > {MAX_FUNDING_COST_PCT}%!\n"
@@ -194,9 +204,6 @@ REQUIRED_ADVANCE_PCT = 30
 REQUIRED_BALANCE_PCT = 70
 
 def validate_import_payment(advance_pct: float, balance_pct: float) -> tuple[bool, str]:
-    """
-    בודק שהתשלום עומד בפרוטוקול הייבוא: 30% מקדמה, 70% אחרי QC.
-    """
     errors = []
     if advance_pct != REQUIRED_ADVANCE_PCT:
         errors.append(f"מקדמה {advance_pct}% ≠ {REQUIRED_ADVANCE_PCT}% הנדרש")

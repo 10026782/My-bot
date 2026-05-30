@@ -1,10 +1,10 @@
-# context.py — Context Builder (Tier-1 Module)
-# הלב של המערכת — בונה context שלם לפי Identity.
-#
-# Pipeline: Identity → Policy+Truth+Tool+Interp+Interaction+UX → Context Layer → Assembly
+# context.py — Context Builder v2
+# הלב של המערכת — בונה AgentContext מלא לפי Identity.
 #
 # אותו Agent. אותם Tools. אותו LLM.
 # Context אחר = תוצאה אחרת לחלוטין.
+#
+# זרימה: Identity → build_context() → AgentContext → run_agent
 
 from __future__ import annotations
 import logging
@@ -14,44 +14,30 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from identity import Identity
 
-from identity import Role
-from core_knowledge import (
-    STATIC_MANIFEST,
-    build_context_layer,
-    dynamic_context,
-    check_tool_results,
-)
+from identity import Role, Domain
+from core_knowledge import STATIC_MANIFEST, dynamic_context
 from tools.schemas import TOOL_SCHEMAS
 
 logger = logging.getLogger(__name__)
 
 
 # ══════════════════════════════════════════════════
-# Context Output
+# AgentContext — פלט build_context
 # ══════════════════════════════════════════════════
 
 @dataclass
 class AgentContext:
-    system_prompt:      str
-    allowed_tools:      list       # schemas מסוננים לפי role
-    memory_key:         str        # מפתח לשליפת היסטוריה
-    max_tokens:         int
-    model:              str
-    identity_label:     str        # לlog בלבד
-    user_context_hint:  str = ""   # שורת הקשר דינמי לתחילת הודעת המשתמש
+    system_prompt:  str
+    allowed_tools:  list
+    memory_key:     str
+    max_tokens:     int
+    model:          str
+    identity_label: str
 
 
 # ══════════════════════════════════════════════════
-# Tool Permission Map
+# Tool Filter — לפי role
 # ══════════════════════════════════════════════════
-
-_CRM_TOOLS = {
-    "crm_add_contact", "crm_find_contact",
-    "crm_list_contacts", "crm_update_last_contact",
-    "crm_add_deal", "crm_update_deal_status", "crm_list_deals",
-    "crm_add_payment", "crm_upcoming_payments",
-    "crm_mark_payment_paid", "crm_overdue_payments",
-}
 
 _ROLE_TOOLS: dict[str, set[str]] = {
     Role.OWNER: {
@@ -59,28 +45,29 @@ _ROLE_TOOLS: dict[str, set[str]] = {
         "calendar_get_events", "calendar_create_event",
         "gmail_draft", "gmail_send_draft", "gmail_read",
         "sheets_append",
-        "airtable_get", "airtable_add", "airtable_update",
-        "add_knowledge",
-        *_CRM_TOOLS,
+        "airtable_get", "airtable_add", "airtable_update", "airtable_get_schema",
     },
-    Role.STAFF: {
+    Role.PARTNER: {
         "search_drive", "read_drive_file",
         "calendar_get_events", "calendar_create_event",
         "gmail_draft", "gmail_read",
         "sheets_append",
         "airtable_get", "airtable_add", "airtable_update",
-        # CRM — קריאה + עדכון בסיסי בלבד (לא יצירה/מחיקה)
-        "crm_find_contact", "crm_list_contacts",
-        "crm_update_last_contact", "crm_list_deals",
-        "crm_upcoming_payments", "crm_overdue_payments",
     },
-    Role.CLIENT: {
-        "airtable_get",
-        "crm_find_contact",
+    Role.MANAGER: {
+        "search_drive", "read_drive_file",
+        "calendar_get_events", "calendar_create_event",
+        "gmail_draft", "gmail_read",
+        "airtable_get", "airtable_add", "airtable_update",
     },
-    Role.SUPPLIER: {
-        "airtable_get",
+    Role.EMPLOYEE: {
+        "calendar_get_events",
+        "airtable_get",        # קריאה בלבד
     },
+    Role.LEAD: {
+        "airtable_get",        # רק נתוני עצמו — filter ב-dispatcher
+    },
+    Role.GUEST:    set(),
     Role.READONLY: set(),
 }
 
@@ -91,87 +78,68 @@ def _filter_tools(role: str) -> list:
 
 
 # ══════════════════════════════════════════════════
-# System Prompt Assembly — Layer 8
-# STATIC (1-6) + CONTEXT (7) + DYNAMIC (8) + ROLE
+# System Prompts — אחד לכל role
 # ══════════════════════════════════════════════════
 
-def _airtable_schema_hint() -> str:
-    """שמות טבלאות מדויקים מה-API להזרקה לsystem prompt (cached 10 דקות)."""
-    try:
-        from airtable_schema import format_schema_for_prompt
-        schema = format_schema_for_prompt()
-        if schema:
-            return "\n═══════════════════════════════════════\n" + schema + "═══════════════════════════════════════\n"
-    except Exception:
-        pass
-    return ""
-
-
-def _assemble_prompt_owner(research_mode: bool) -> str:
-    """
-    OWNER — גישה מלאה.
-    Assembly: Layers 1-6 (static) + Layer 7 (datetime) + Layer 8 (dynamic data) + role addendum
-    """
-    prompt = (
-        STATIC_MANIFEST          # Layers 1-6
-        + build_context_layer()  # Layer 7 — זמן אמת (לא cached)
-        + dynamic_context.get()  # Layer 8 — נתונים דינמיים
-        + _airtable_schema_hint()  # שמות טבלאות מדויקים
+def _prompt_owner(identity: "Identity", research_mode: bool) -> str:
+    base = STATIC_MANIFEST + dynamic_context.get()
+    base += (
+        "\n\nאתה עוזר אסטרטגי חד ומדויק של אליהו חזן. "
+        "גישה מלאה לכל הכלים והנתונים. "
+        f"דומיין פעיל: {identity.domain_id}.\n"
+        "📧 מיילים: תמיד gmail_draft — לעולם אל תשלח ישירות. "
+        "📅 פגישות: calendar_get_events לפני calendar_create_event. "
+        "תמיד סכם ב'הצעד הבא המומלץ'.\n"
+        "⚠️=הפרת חוק | 💡=הזדמנות | 🚨=סיכון מיידי"
     )
-
-    # Role addendum
-    prompt += (
-        "\n═══════════════════════════════════════\n"
-        "ROLE — Owner (אליהו חזן)\n"
-        "═══════════════════════════════════════\n"
-        "גישה מלאה לכל הכלים והנתונים.\n"
-        "תמיד סיים ב: ➡️ הצעד הבא המומלץ\n"
-    )
-
     if research_mode:
-        prompt += "\n🔬 מצב מחקר — נתח לעומק, ענה בהרחבה אסטרטגית."
+        base += "\n\n🔬 מצב מחקר — נתח לעומק, ענה בהרחבה אסטרטגית."
+    return base
 
-    return prompt
 
-
-def _assemble_prompt_staff(identity: "Identity") -> str:
+def _prompt_partner(identity: "Identity") -> str:
+    domains_str = ", ".join(identity.allowed_domains) or identity.domain_id
     return (
-        STATIC_MANIFEST
-        + build_context_layer()
-        + _airtable_schema_hint()
-        + f"\n═══════════════════════════════════════\n"
-        f"ROLE — Staff: {identity.display_name or identity.user_id}\n"
-        f"═══════════════════════════════════════\n"
-        f"גישה לכלים תפעוליים. אין גישה לנתונים פיננסיים.\n"
-        f"כל פעולה בלתי הפיכה — בקש אישור תחילה.\n"
+        f"אתה עוזר לשותף עסקי: {identity.display_name or identity.user_id}\n"
+        f"tenant: {identity.tenant_id} | דומיינים: {domains_str}\n"
+        f"גישה לכלים תפעוליים בדומיינים המורשים בלבד.\n"
+        f"אין גישה להגדרות מערכת או נתונים פיננסיים רגישים.\n"
+        f"פעולה בלתי הפיכה — בקש אישור תחילה."
     )
 
 
-def _assemble_prompt_client(identity: "Identity") -> str:
+def _prompt_manager(identity: "Identity") -> str:
     return (
-        # לקוח — חלק מהשכבות בלבד (UX + Truth)
-        "אתה נציג שירות מקצועי ומנומס של Boss HQ.\n"
-        f"לקוח: {identity.display_name or identity.user_id} | "
-        f"tenant: {identity.tenant_id}\n"
-        "הצג רק מידע הרלוונטי ללקוח זה בלבד. "
-        "אל תחשוף מידע על לקוחות אחרים.\n"
-        "ענה בעברית, בצורה עניינית וחיובית. "
-        "אל תמציא נתונים — אם אין מידע, אמור זאת.\n"
-        + build_context_layer()
+        f"אתה עוזר למנהל תפעולי: {identity.display_name or identity.user_id}\n"
+        f"tenant: {identity.tenant_id} | דומיין: {identity.domain_id}\n"
+        f"גישה ל-CRM, Tasks, Calendar, Drive.\n"
+        f"אין גישה לנתונים פיננסיים רגישים או הגדרות מערכת.\n"
+        f"כל פעולה בלתי הפיכה — בקש אישור תחילה."
     )
 
 
-def _assemble_prompt_supplier(identity: "Identity") -> str:
+def _prompt_employee(identity: "Identity") -> str:
     return (
-        f"אתה ממשק תפעולי מול ספק: {identity.display_name or identity.user_id}\n"
-        f"הצג רק הזמנות ו-PO הרלוונטיים לספק זה.\n"
-        "אל תמציא נתונים — אם אין מידע, אמור זאת.\n"
-        + build_context_layer()
+        f"אתה עוזר לעובד: {identity.display_name or identity.user_id}\n"
+        f"גישה מוגבלת: Tasks + עדכון סטטוס + קריאת יומן.\n"
+        f"אין גישה למיילים, קבצים, או נתונים פיננסיים."
     )
 
 
-def _assemble_prompt_readonly(_: "Identity") -> str:
-    return "אתה יכול לקרוא מידע כללי בלבד. לא ניתן לבצע פעולות."
+def _prompt_lead(identity: "Identity") -> str:
+    return (
+        f"אתה נציג שירות מקצועי ומנומס.\n"
+        f"אתה מדבר עם ליד: {identity.display_name or identity.user_id}\n"
+        f"ענה על שאלות כלליות בלבד. אל תחשוף מידע פנימי."
+    )
+
+
+def _prompt_guest(_identity: "Identity") -> str:
+    return "אתה עונה לאורח. תשובות כלליות בלבד. אין גישה למידע פנימי."
+
+
+def _prompt_readonly(_identity: "Identity") -> str:
+    return "מצב קריאה בלבד. לא ניתן לבצע פעולות."
 
 
 # ══════════════════════════════════════════════════
@@ -183,65 +151,63 @@ def _select_model(identity: "Identity", text: str) -> tuple[str, int]:
         if text.startswith("#"):
             return "claude-sonnet-4-6", 2000
         return "claude-haiku-4-5-20251001", 1000
-    return "claude-haiku-4-5-20251001", 700
+    if identity.role in (Role.PARTNER, Role.MANAGER):
+        return "claude-haiku-4-5-20251001", 800
+    # employee / lead / guest / readonly
+    return "claude-haiku-4-5-20251001", 500
 
 
 # ══════════════════════════════════════════════════
 # Main Entry Point
 # ══════════════════════════════════════════════════
 
-def build_context(identity: "Identity", user_text: str = "") -> AgentContext:
+def build_context(
+    identity: "Identity",
+    user_text: str = "",
+    domain: str = ""
+) -> AgentContext:
     """
     בונה AgentContext מלא לפי Identity.
-    מממש את ה-8 שכבות:
-    1-6 (STATIC_MANIFEST) + 7 (datetime) + 8 (dynamic+role)
+
+    domain: אם מועבר (מהראוטר) — מעדכן את identity.domain_id בהתאם.
     """
+    # עדכון domain מהראוטר אם הגיע
+    if domain and domain != identity.domain_id:
+        identity.domain_id = domain
+        logger.info(f"[Context] Domain override: {domain} for {identity}")
+
     research_mode = user_text.startswith("#") and identity.is_owner
     model, max_tokens = _select_model(identity, user_text)
 
     match identity.role:
         case Role.OWNER:
-            system = _assemble_prompt_owner(research_mode)
-        case Role.STAFF:
-            system = _assemble_prompt_staff(identity)
-        case Role.CLIENT:
-            system = _assemble_prompt_client(identity)
-        case Role.SUPPLIER:
-            system = _assemble_prompt_supplier(identity)
+            system = _prompt_owner(identity, research_mode)
+        case Role.PARTNER:
+            system = _prompt_partner(identity)
+        case Role.MANAGER:
+            system = _prompt_manager(identity)
+        case Role.EMPLOYEE:
+            system = _prompt_employee(identity)
+        case Role.LEAD:
+            system = _prompt_lead(identity)
+        case Role.GUEST:
+            system = _prompt_guest(identity)
         case _:
-            system = _assemble_prompt_readonly(identity)
+            system = _prompt_readonly(identity)
 
     allowed_tools = _filter_tools(identity.role)
 
-    # build dynamic hint from core_knowledge (injected as user message prefix)
-    hint_parts = []
-    try:
-        from core_knowledge import build_context_layer, dynamic_context
-        ctx_line  = build_context_layer()
-        data_line = dynamic_context.get()
-        hint_parts = [p for p in [ctx_line, data_line] if p]
-    except Exception:
-        pass
-    user_context_hint = "\n".join(hint_parts)
-
     logger.info(
-        f"Context built | {identity.tenant_id}/{identity.user_id}/{identity.role} "
-        f"| {model} | {max_tokens}tok | tools={len(allowed_tools)}"
+        f"[Context] tenant={identity.tenant_id} user={identity.user_id} "
+        f"role={identity.role} domain={identity.domain_id} "
+        f"model={model} tools={len(allowed_tools)}"
     )
 
     return AgentContext(
-        system_prompt     = system,
-        allowed_tools     = allowed_tools,
-        memory_key        = identity.memory_key,
-        max_tokens        = max_tokens,
-        model             = model,
-        identity_label    = f"{identity.tenant_id}/{identity.user_id}/{identity.role}",
-        user_context_hint = user_context_hint,
+        system_prompt  = system,
+        allowed_tools  = allowed_tools,
+        memory_key     = identity.memory_key,
+        max_tokens     = max_tokens,
+        model          = model,
+        identity_label = str(identity),
     )
-
-
-# ══════════════════════════════════════════════════
-# Re-export Grounding Validator לשימוש ב-app.py
-# ══════════════════════════════════════════════════
-
-__all__ = ["AgentContext", "build_context", "check_tool_results"]

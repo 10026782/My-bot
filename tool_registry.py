@@ -1,8 +1,8 @@
-# tool_registry.py — Tool Registry Layer
+# tool_registry.py — Tool Registry Layer v2
 # מטא-דאטה ומדיניות לכל כלי: הרשאות, אישור, סיכון.
 #
-# לא מחליף את dispatcher — רק מוסיף שכבת policy מעליו.
-# dispatcher.py עדיין מבצע. registry.py מחליט אם מותר.
+# כלל ברזל: אין Tool בלי בדיקת הרשאה.
+# dispatcher מבצע. registry מחליט אם מותר.
 
 from __future__ import annotations
 from dataclasses import dataclass, field
@@ -19,12 +19,20 @@ if TYPE_CHECKING:
 @dataclass
 class ToolMeta:
     name:              str
-    roles_allowed:     set[str]
-    tenant_scoped:     bool = False
-    requires_approval: bool = False
-    high_risk:         bool = False
-    read_only:         bool = False
+    roles_allowed:     set[str]       # roles שמורשים
+    tenant_scoped:     bool = False   # מסנן לפי tenant אוטומטית
+    requires_approval: bool = False   # דורש אישור אנושי לפני ביצוע
+    high_risk:         bool = False   # פעולה בלתי הפיכה
+    read_only:         bool = False   # לא משנה נתונים
     description_he:    str  = ""
+
+
+# ── Shortcuts לקבוצות roles ──────────────────────
+_INTERNAL      = {"owner", "partner", "manager", "employee"}
+_MANAGEMENT    = {"owner", "partner", "manager"}
+_SENIOR        = {"owner", "partner"}
+_OWNER_ONLY    = {"owner"}
+_ALL_EXTERNAL  = {"owner", "partner", "manager", "employee", "lead"}
 
 
 # ══════════════════════════════════════════════════
@@ -33,23 +41,16 @@ class ToolMeta:
 
 _REGISTRY: dict[str, ToolMeta] = {
 
-    # ── Knowledge ────────────────────────────────
-    "add_knowledge": ToolMeta(
-        name="add_knowledge",
-        roles_allowed={"owner", "staff"},
-        description_he="הוספת עובדה לזיכרון הבוט"
-    ),
-
     # ── Google Drive ─────────────────────────────
     "search_drive": ToolMeta(
         name="search_drive",
-        roles_allowed={"owner", "staff"},
+        roles_allowed=_MANAGEMENT,
         read_only=True,
         description_he="חיפוש קבצים ב-Drive"
     ),
     "read_drive_file": ToolMeta(
         name="read_drive_file",
-        roles_allowed={"owner", "staff"},
+        roles_allowed=_MANAGEMENT,
         read_only=True,
         description_he="קריאת תוכן קובץ מ-Drive"
     ),
@@ -57,32 +58,32 @@ _REGISTRY: dict[str, ToolMeta] = {
     # ── Calendar ─────────────────────────────────
     "calendar_get_events": ToolMeta(
         name="calendar_get_events",
-        roles_allowed={"owner", "staff"},
+        roles_allowed=_INTERNAL,
         read_only=True,
         description_he="קריאת אירועים מהיומן"
     ),
     "calendar_create_event": ToolMeta(
         name="calendar_create_event",
-        roles_allowed={"owner", "staff"},
+        roles_allowed=_MANAGEMENT,
         description_he="יצירת אירוע ביומן"
     ),
 
     # ── Gmail ────────────────────────────────────
     "gmail_draft": ToolMeta(
         name="gmail_draft",
-        roles_allowed={"owner", "staff"},
+        roles_allowed=_MANAGEMENT,
         description_he="יצירת טיוטת מייל (לא שולח)"
     ),
     "gmail_send_draft": ToolMeta(
         name="gmail_send_draft",
-        roles_allowed={"owner", "staff"},
+        roles_allowed=_SENIOR,
         requires_approval=True,
         high_risk=True,
-        description_he="שליחת טיוטה לאחר אישור"
+        description_he="שליחת טיוטה — דורש אישור owner/partner"
     ),
     "gmail_read": ToolMeta(
         name="gmail_read",
-        roles_allowed={"owner"},          # owner בלבד — dispatcher מאכף גם
+        roles_allowed=_MANAGEMENT,
         read_only=True,
         description_he="קריאת מיילים אחרונים"
     ),
@@ -90,103 +91,35 @@ _REGISTRY: dict[str, ToolMeta] = {
     # ── Sheets ───────────────────────────────────
     "sheets_append": ToolMeta(
         name="sheets_append",
-        roles_allowed={"owner", "staff"},
+        roles_allowed=_MANAGEMENT,
         description_he="הוספת שורה לגיליון"
     ),
 
     # ── Airtable ─────────────────────────────────
     "airtable_get": ToolMeta(
         name="airtable_get",
-        roles_allowed={"owner", "staff", "client", "supplier"},
+        roles_allowed=_ALL_EXTERNAL,   # lead רואה רק נתוני עצמו (filter ב-tool)
         tenant_scoped=True,
         read_only=True,
         description_he="שליפת רשומות מ-Airtable"
     ),
     "airtable_add": ToolMeta(
         name="airtable_add",
-        roles_allowed={"owner", "staff"},
+        roles_allowed=_INTERNAL,
         tenant_scoped=True,
         description_he="הוספת רשומה ל-Airtable"
     ),
     "airtable_update": ToolMeta(
         name="airtable_update",
-        roles_allowed={"owner", "staff"},
+        roles_allowed=_MANAGEMENT,
         tenant_scoped=True,
         description_he="עדכון רשומה ב-Airtable"
     ),
     "airtable_get_schema": ToolMeta(
         name="airtable_get_schema",
-        roles_allowed={"owner", "staff"},
-        tenant_scoped=False,
+        roles_allowed=_SENIOR,
         read_only=True,
-        description_he="קריאת כל הטבלאות והשדות מ-Airtable בזמן אמת — לפני כל פעולה על טבלה לא מוכרת"
-    ),
-
-    # ── CRM — אנשי קשר ───────────────────────────
-    "crm_add_contact": ToolMeta(
-        name="crm_add_contact",
-        roles_allowed={"owner", "staff"},
-        description_he="הוספת איש קשר חדש"
-    ),
-    "crm_find_contact": ToolMeta(
-        name="crm_find_contact",
-        roles_allowed={"owner", "staff"},
-        read_only=True,
-        description_he="חיפוש איש קשר"
-    ),
-    "crm_list_contacts": ToolMeta(
-        name="crm_list_contacts",
-        roles_allowed={"owner", "staff"},
-        read_only=True,
-        description_he="רשימת אנשי קשר"
-    ),
-    "crm_update_last_contact": ToolMeta(
-        name="crm_update_last_contact",
-        roles_allowed={"owner", "staff"},
-        description_he="עדכון תאריך יצירת קשר"
-    ),
-
-    # ── CRM — עסקאות ─────────────────────────────
-    "crm_add_deal": ToolMeta(
-        name="crm_add_deal",
-        roles_allowed={"owner", "staff"},
-        description_he="הוספת עסקה חדשה"
-    ),
-    "crm_list_deals": ToolMeta(
-        name="crm_list_deals",
-        roles_allowed={"owner", "staff"},
-        read_only=True,
-        description_he="רשימת עסקאות"
-    ),
-    "crm_update_deal_status": ToolMeta(
-        name="crm_update_deal_status",
-        roles_allowed={"owner", "staff"},
-        description_he="עדכון סטטוס עסקה"
-    ),
-
-    # ── CRM — תשלומים ────────────────────────────
-    "crm_add_payment": ToolMeta(
-        name="crm_add_payment",
-        roles_allowed={"owner", "staff"},
-        description_he="הוספת תשלום צפוי"
-    ),
-    "crm_upcoming_payments": ToolMeta(
-        name="crm_upcoming_payments",
-        roles_allowed={"owner", "staff"},
-        read_only=True,
-        description_he="תשלומים קרובים"
-    ),
-    "crm_overdue_payments": ToolMeta(
-        name="crm_overdue_payments",
-        roles_allowed={"owner", "staff"},
-        read_only=True,
-        description_he="תשלומים באיחור"
-    ),
-    "crm_mark_payment_paid": ToolMeta(
-        name="crm_mark_payment_paid",
-        roles_allowed={"owner", "staff"},
-        requires_approval=True,
-        description_he="סימון תשלום כשולם"
+        description_he="קריאת כל הטבלאות והשדות מ-Airtable בזמן אמת"
     ),
 }
 
@@ -211,12 +144,21 @@ def check_allowed(tool_name: str, identity: "Identity") -> bool:
 
 
 def enforce(tool_name: str, identity: "Identity") -> ToolMeta:
-    """זורק ToolDenied אם identity לא מורשה."""
+    """
+    זורק ToolDenied אם לא מורשה.
+    כלל ברזל: נקרא לפני כל dispatch.
+    """
     meta = _REGISTRY.get(tool_name)
     if not meta:
         raise ToolDenied(f"כלי לא קיים ב-Registry: {tool_name}")
     if identity.role not in meta.roles_allowed:
-        raise ToolDenied(f"❌ {identity.role} אינו מורשה להפעיל '{tool_name}'")
+        raise ToolDenied(
+            f"❌ {identity.role} אינו מורשה להפעיל '{tool_name}'"
+        )
+    if meta.requires_approval and not identity.is_owner:
+        raise ToolDenied(
+            f"⏳ '{tool_name}' דורש אישור owner לפני ביצוע."
+        )
     return meta
 
 
