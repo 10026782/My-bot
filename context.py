@@ -96,19 +96,15 @@ def _filter_tools(role: str) -> list:
 # ══════════════════════════════════════════════════
 
 def _airtable_schema_hint() -> str:
-    """שמות טבלאות מדויקים להזרקה לsystem prompt."""
-    from airtable_schema import Tables
-    return (
-        "\n═══════════════════════════════════════\n"
-        "שמות טבלאות Airtable (השתמש בשמות המדויקים האלה בלבד):\n"
-        f"• אנשי קשר → \"{Tables.CONTACTS}\"\n"
-        f"• עסקאות   → \"{Tables.DEALS}\"\n"
-        f"• תשלומים  → \"{Tables.PAYMENTS}\"\n"
-        f"• משימות   → \"{Tables.TASKS}\"\n"
-        f"• הוצאות   → \"{Tables.EXPENSES}\"\n"
-        f"• למידות   → \"{Tables.LEARNINGS}\"\n"
-        "═══════════════════════════════════════\n"
-    )
+    """שמות טבלאות מדויקים מה-API להזרקה לsystem prompt (cached 10 דקות)."""
+    try:
+        from airtable_schema import format_schema_for_prompt
+        schema = format_schema_for_prompt()
+        if schema:
+            return "\n═══════════════════════════════════════\n" + schema + "═══════════════════════════════════════\n"
+    except Exception:
+        pass
+    return ""
 
 
 def _assemble_prompt_owner(research_mode: bool) -> str:

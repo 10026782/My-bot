@@ -2,6 +2,60 @@
 # קבועי סכמה לכל טבלאות Airtable של אליהו חזן
 # שנה כאן → משתנה בכל המערכת. אין magic strings.
 
+import os
+import time
+import logging
+import requests
+
+_logger = logging.getLogger(__name__)
+_cache: dict = {"schema": None, "ts": 0}
+_CACHE_TTL = 600  # 10 דקות
+
+
+def fetch_schema() -> list[dict]:
+    """שולף את כל הטבלאות והשדות מה-base דרך Airtable Metadata API (schema.bases:read)."""
+    if _cache["schema"] and (time.time() - _cache["ts"]) < _CACHE_TTL:
+        return _cache["schema"]
+    token   = os.environ.get("AIRTABLE_API_KEY", "")
+    base_id = os.environ.get("AIRTABLE_BASE_ID", "")
+    if not token or not base_id:
+        return []
+    try:
+        r = requests.get(
+            f"https://api.airtable.com/v0/meta/bases/{base_id}/tables",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10,
+        )
+        if r.status_code != 200:
+            _logger.warning(f"Airtable schema fetch: {r.status_code}")
+            return []
+        tables = r.json().get("tables", [])
+        _cache["schema"] = tables
+        _cache["ts"] = time.time()
+        _logger.info(f"Airtable schema loaded: {len(tables)} tables")
+        return tables
+    except Exception as e:
+        _logger.error(f"fetch_schema error: {e}")
+        return []
+
+
+def format_schema_for_prompt() -> str:
+    """מחזיר מחרוזת שמות טבלאות מדויקים להזרקה לsystem prompt."""
+    tables = fetch_schema()
+    if not tables:
+        return ""
+    lines = ["שמות טבלאות Airtable (השתמש בשמות המדויקים האלה בלבד):"]
+    for t in tables:
+        name   = t.get("name", "")
+        fields = [f.get("name", "") for f in t.get("fields", [])][:6]
+        lines.append(f"• \"{name}\" | שדות: {', '.join(fields)}")
+    return "\n".join(lines) + "\n"
+
+
+def invalidate_cache() -> None:
+    _cache["schema"] = None
+    _cache["ts"] = 0
+
 # ══════════════════════════════════════════════════
 # שמות טבלאות
 # ══════════════════════════════════════════════════
