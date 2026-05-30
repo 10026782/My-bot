@@ -130,6 +130,14 @@ TOOL_SCHEMAS = [
             "required": ["table", "record_id", "fields"]
         }
     },
+    {
+        "name": "airtable_get_schema",
+        "description": "קריאת כל הטבלאות והשדות מ-Airtable בזמן אמת. השתמש בכלי זה לפני כל פעולה על טבלה שאינך בטוח בשמה המדויק.",
+        "input_schema": {
+            "type": "object",
+            "properties": {}
+        }
+    },
 ]
 
 # ══════════════════════════════════════════════════

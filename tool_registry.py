@@ -114,6 +114,13 @@ _REGISTRY: dict[str, ToolMeta] = {
         tenant_scoped=True,
         description_he="עדכון רשומה ב-Airtable"
     ),
+    "airtable_get_schema": ToolMeta(
+        name="airtable_get_schema",
+        roles_allowed={"owner", "staff"},
+        tenant_scoped=False,
+        read_only=True,
+        description_he="קריאת כל הטבלאות והשדות מ-Airtable בזמן אמת — לפני כל פעולה על טבלה לא מוכרת"
+    ),
 
     # ── CRM — אנשי קשר ───────────────────────────
     "crm_add_contact": ToolMeta(

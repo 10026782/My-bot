@@ -192,6 +192,31 @@ def dispatch_tool(name: str, inputs: dict, identity: "Identity") -> str:
                     logger.error(f"airtable_update error: {e}")
                     return f"❌ שגיאה: {e}"
 
+            case "airtable_get_schema":
+                creds_err = _airtable_creds_ok()
+                if creds_err:
+                    return creds_err
+                base = os.environ.get("AIRTABLE_BASE_ID", "")
+                try:
+                    r = requests.get(
+                        f"https://api.airtable.com/v0/meta/bases/{base}/tables",
+                        headers=_airtable_headers(),
+                        timeout=10,
+                    )
+                    if r.status_code != 200:
+                        return f"❌ Meta API error {r.status_code}: {r.text[:150]}"
+                    tables = r.json().get("tables", [])
+                    if not tables:
+                        return "📭 לא נמצאו טבלאות בבסיס הנתונים."
+                    result = f"📊 נמצאו {len(tables)} טבלאות:\n\n"
+                    for t in tables:
+                        fields = [f["name"] for f in t.get("fields", [])]
+                        result += f"• {t['name']}\n  שדות: {', '.join(fields)}\n\n"
+                    return result.strip()
+                except Exception as e:
+                    logger.error(f"airtable_get_schema error: {e}")
+                    return f"❌ שגיאה בקריאת סכמה: {e}"
+
             # ─── Gmail ─────────────────────────────────────────────
             case "gmail_draft":
                 from tools.google_tools import gmail_send

@@ -24,6 +24,7 @@ _REQUIRED: dict[str, list[str]] = {
     "airtable_get":              ["table"],
     "airtable_add":              ["table", "fields"],
     "airtable_update":           ["table", "record_id", "fields"],
+    "airtable_get_schema":       [],
     # CRM - Contacts
     "crm_add_contact":           ["name"],
     "crm_find_contact":          ["query"],
