@@ -240,7 +240,7 @@ def webhook_telegram():
     return "", 200
 
 
-@app.route("/webhook/whatsapp", methods=["POST"])
+@app.route("/whatsapp", methods=["POST"])
 def webhook_whatsapp():
     incoming  = request.values.get("Body", "").strip()
     sender    = request.values.get("From", "whatsapp:unknown")
