@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 # ══════════════════════════════════════════════════
 
 _READ_ONLY_INTENTS = {
+    Intent.GREETING, Intent.SMALLTALK, Intent.BOT_STATUS_CHECK,
     Intent.ASK_QUESTION, Intent.REQUEST_INFO, Intent.SUMMARIZE,
     Intent.TRANSLATE, Intent.EXPLAIN,
     Intent.LIST_TASKS, Intent.LIST_EVENTS, Intent.LIST_CONTACTS,

@@ -12,6 +12,11 @@ from typing import Literal
 # ══════════════════════════════════════════════════
 
 class Intent:
+    # Tier 0 — Conversational
+    GREETING         = "greeting"
+    SMALLTALK        = "smalltalk"
+    BOT_STATUS_CHECK = "bot_status_check"
+
     # Tier 1 — Communication
     ASK_QUESTION      = "ask_question"
     REQUEST_INFO      = "request_information"
@@ -76,6 +81,7 @@ class Intent:
     UNKNOWN           = "unknown"
 
     ALL = {
+        GREETING, SMALLTALK, BOT_STATUS_CHECK,
         ASK_QUESTION, REQUEST_INFO, SUMMARIZE, TRANSLATE, EXPLAIN,
         CREATE_TASK, UPDATE_TASK, COMPLETE_TASK, DELETE_TASK, LIST_TASKS,
         CREATE_EVENT, UPDATE_EVENT, CANCEL_EVENT, LIST_EVENTS, SCHEDULE_MEETING,

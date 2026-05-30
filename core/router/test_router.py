@@ -19,6 +19,13 @@ class MockIdentity:
 
 TESTS = [
     # תיאור, טקסט, channel, role, domain_from_channel, exp_intent, exp_domain, exp_handler
+    # ── Greeting / Smalltalk / Bot Status ───────────────────────────────────
+    ("שלום",                  "שלום",              "telegram", "owner",   "", Intent.GREETING,         RouterDomain.GENERAL, Handler.AGENT),
+    ("היי",                   "היי",               "telegram", "owner",   "", Intent.GREETING,         RouterDomain.GENERAL, Handler.AGENT),
+    ("מה נשמע",               "מה נשמע",           "telegram", "owner",   "", Intent.SMALLTALK,        RouterDomain.GENERAL, Handler.AGENT),
+    ("בדיקה",                 "בדיקה",             "telegram", "owner",   "", Intent.BOT_STATUS_CHECK, RouterDomain.GENERAL, Handler.AGENT),
+    ("אתה עובד",              "אתה עובד?",         "telegram", "owner",   "", Intent.BOT_STATUS_CHECK, RouterDomain.GENERAL, Handler.AGENT),
+
     # ── Intent routing ──────────────────────────────────────────────────────
     ("משימה חדשה",            "פתח משימה להתקשר לספק",   "telegram",  "owner",    "",             Intent.CREATE_TASK,      RouterDomain.IMPORT,      Handler.AGENT),
     ("ליד נדלן",              "תוסיף ליד חדש על דירה",   "whatsapp",  "owner",    "real_estate",  Intent.CREATE_LEAD,      RouterDomain.REAL_ESTATE, Handler.AGENT),
@@ -38,8 +45,8 @@ TESTS = [
     ("lead + delete → block",   "תמחק את המשימה",          "whatsapp",  "lead",     "",             Intent.DELETE_TASK,      RouterDomain.GENERAL,     Handler.BLOCK),
 
     # ── Channel detection ────────────────────────────────────────────────────
-    ("channel whatsapp",        "שלום",                    "whatsapp",  "owner",    "import",       Intent.UNKNOWN,          RouterDomain.IMPORT,      Handler.CLARIFY),
-    ("channel telegram",        "שלום",                    "telegram",  "owner",    "",             Intent.UNKNOWN,          RouterDomain.GENERAL,     Handler.CLARIFY),
+    ("channel whatsapp",        "שלום",                    "whatsapp",  "owner",    "import",       Intent.GREETING,         RouterDomain.IMPORT,      Handler.AGENT),
+    ("channel telegram",        "שלום",                    "telegram",  "owner",    "",             Intent.GREETING,         RouterDomain.GENERAL,     Handler.AGENT),
 ]
 
 
