@@ -65,10 +65,13 @@ def gmail_send(to: str, subject: str, body: str) -> str:
             timeout=15,
         )
         if r.status_code in (200, 201):
+            draft_id = r.json().get("id", "")
             return (
                 f"📝 טיוטה נשמרה ב-Gmail ל-{to}\n"
                 f"נושא: {subject}\n"
-                f"⚠️ הטיוטה ממתינה לאישורך — לא נשלחה עדיין."
+                f"draft_id: `{draft_id}`\n"
+                f"⚠️ הטיוטה ממתינה לאישורך — לא נשלחה עדיין.\n"
+                f"לשליחה: gmail_send_draft(draft_id=\"{draft_id}\")"
             )
         return f"❌ שגיאת Gmail {r.status_code}: {r.text[:200]}"
     except Exception as e:
