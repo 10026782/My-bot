@@ -307,8 +307,14 @@ def webhook_whatsapp():
     return Response(str(resp), mimetype="application/xml")
 
 
+WORKER_SECRET = os.environ.get("WORKER_SECRET", "")
+
 @app.route("/worker/trigger", methods=["POST"])
 def worker_trigger():
+    auth_header = request.headers.get("Authorization", "")
+    if not WORKER_SECRET or auth_header != f"Bearer {WORKER_SECRET}":
+        logger.warning(f"[Worker] unauthorized attempt from {request.remote_addr}")
+        return jsonify({"error": "unauthorized"}), 401
     try:
         payload = request.get_json(force=True) or {}
         chat_id = payload.get("chat_id", "")
