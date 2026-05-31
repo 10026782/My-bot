@@ -267,6 +267,34 @@ def _job_security_reminder():
 
 
 # ══════════════════════════════════════════════════
+# F06 — Email Inbound
+# ══════════════════════════════════════════════════
+
+def _job_email_inbound():
+    try:
+        from feature_flags import is_enabled
+        if not is_enabled("EMAIL_INBOUND"):
+            return
+
+        from email_inbound import run_email_poll
+        owner_chat_id = os.environ.get("DIGEST_CHAT_ID", "")
+        result = run_email_poll(owner_chat_id=owner_chat_id)
+
+        if result.routed:
+            logger.info(
+                f"[Email] scanned={result.scanned} "
+                f"routed={result.routed} skipped={result.skipped}"
+            )
+        for err in result.errors:
+            logger.error(f"[Email] {err}")
+
+    except ImportError as e:
+        logger.warning(f"[Email] not available: {e}")
+    except Exception as e:
+        logger.error(f"[Email] job error: {e}")
+
+
+# ══════════════════════════════════════════════════
 # Runner
 # ══════════════════════════════════════════════════
 
@@ -290,6 +318,7 @@ def start_scheduler() -> threading.Thread:
     recovery_time         = os.environ.get("RECOVERY_TIME",            "10:00")
     learning_day          = os.environ.get("LEARNING_DAY",             "sunday")
     learning_time         = os.environ.get("LEARNING_TIME",            "06:00")
+    email_interval        = int(os.environ.get("EMAIL_POLL_INTERVAL_MIN", "15"))
     security_day          = os.environ.get("SECURITY_REMINDER_DAY",    "sunday")
     security_time         = os.environ.get("SECURITY_REMINDER_TIME",   "09:00")
 
@@ -302,6 +331,7 @@ def start_scheduler() -> threading.Thread:
     schedule.every().day.at(payment_reminder_time).do(_job_payment_reminders) # N04
     schedule.every().day.at(recovery_time).do(_job_lead_recovery)             # F01
     getattr(schedule.every(), learning_day).at(learning_time).do(_job_learning_cycle)  # F02
+    schedule.every(email_interval).minutes.do(_job_email_inbound)                    # F06
     getattr(schedule.every(), security_day).at(security_time).do(_job_security_reminder)
 
     logger.info(
@@ -309,6 +339,7 @@ def start_scheduler() -> threading.Thread:
         f"cleanup=every {cleanup_interval}min | followup=every {followup_interval}min | "
         f"payment={payment_reminder_time} | recovery={recovery_time} | "
         f"learning={learning_day} {learning_time} | "
+        f"email=every {email_interval}min | "
         f"security={security_day} {security_time}"
     )
 
