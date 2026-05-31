@@ -6,7 +6,64 @@ from guards.circuit_breaker import with_airtable_breaker
 
 logger = logging.getLogger(__name__)
 
-_AIRTABLE_FORBIDDEN_FIELDS = {"tenant_id", "tenant", "owner_id"}
+# ══════════════════════════════════════════════════
+# סכמה — שדות חוקיים לכל טבלה
+# Claude לא ישלח שדות שלא קיימים ב-Airtable
+# ══════════════════════════════════════════════════
+
+_TABLE_FIELDS: dict[str, set[str]] = {
+    "Tasks": {
+        "Name", "Status", "Priority", "Deadline", "Deal", "Notes",
+        "Assignee",
+        "Created",
+    },
+    "Contacts": {
+        "Name", "Phone", "Email", "Type", "Company",
+        "Notes", "Last Contact", "Status",
+    },
+    "Deals": {
+        "Name", "Address", "Status", "Price", "Funding Cost %",
+        "ROI %", "Contact", "Deadline", "Notes", "Risk Level",
+    },
+    "Expenses": {
+        "Name", "Amount", "Date", "Category", "Deal", "Receipt", "Notes",
+    },
+    "Payments": {
+        "Name", "Amount", "Due Date", "Status", "Deal", "Contact", "Notes",
+    },
+    "Imports": {
+        "Product", "Supplier", "Status", "Advance %", "Balance %",
+        "Total USD", "Ship Date", "QC Passed", "Notes",
+    },
+}
+
+# שדות שClaude ממציא ולא קיימים בשום טבלה
+_ALWAYS_FORBIDDEN = {"tenant_id", "tenant", "owner_id", "user_id", "chat_id"}
+
+
+def _sanitize_fields(table: str, fields: dict) -> dict:
+    """
+    מסנן שדות:
+    1. הסרת שדות אסורים תמיד (tenant_id וכו')
+    2. אם הטבלה ידועה — מסנן רק לשדות בסכמה
+    מחזיר dict נקי + מוגיש לוג על מה הוסר.
+    """
+    # שלב 1 — הסרת forbidden
+    cleaned = {k: v for k, v in fields.items() if k not in _ALWAYS_FORBIDDEN}
+    removed_forbidden = set(fields) - set(cleaned)
+    if removed_forbidden:
+        logger.warning(f"airtable: הוסרו שדות אסורים: {removed_forbidden}")
+
+    # שלב 2 — סינון לפי סכמה אם קיימת
+    allowed = _TABLE_FIELDS.get(table)
+    if allowed:
+        valid   = {k: v for k, v in cleaned.items() if k in allowed}
+        invalid = set(cleaned) - set(valid)
+        if invalid:
+            logger.warning(f"airtable[{table}]: שדות לא מוכרים הוסרו: {invalid}")
+        return valid
+
+    return cleaned
 
 
 def _headers() -> dict:
@@ -42,7 +99,9 @@ def airtable_get(table: str, filter_formula: str = "") -> str:
 
 
 def airtable_add(table: str, fields: dict) -> str:
-    fields = {k: v for k, v in fields.items() if k not in _AIRTABLE_FORBIDDEN_FIELDS}
+    fields = _sanitize_fields(table, fields)
+    if not fields:
+        return "❌ לא נשארו שדות תקינים לשמירה — בדוק שמות השדות."
     with with_airtable_breaker():
         r = httpx.post(f"https://api.airtable.com/v0/{_base()}/{table}",
                        headers=_headers(), json={"fields": fields}, timeout=10)
@@ -62,22 +121,21 @@ def airtable_get_schema() -> str:
         )
         if r.status_code != 200:
             return f"❌ Meta API error {r.status_code}: {r.text[:150]}"
-
         tables = r.json().get("tables", [])
         if not tables:
             return "📭 לא נמצאו טבלאות בבסיס הנתונים."
-
         result = f"📊 נמצאו {len(tables)} טבלאות:\n\n"
         for t in tables:
             fields = [f["name"] for f in t.get("fields", [])]
             result += f"• {t['name']}\n"
             result += f"  שדות: {', '.join(fields)}\n\n"
-
         return result.strip()
 
 
 def airtable_update(table: str, record_id: str, fields: dict) -> str:
-    fields = {k: v for k, v in fields.items() if k not in _AIRTABLE_FORBIDDEN_FIELDS}
+    fields = _sanitize_fields(table, fields)
+    if not fields:
+        return "❌ לא נשארו שדות תקינים לעדכון — בדוק שמות השדות."
     with with_airtable_breaker():
         r = httpx.patch(f"https://api.airtable.com/v0/{_base()}/{table}/{record_id}",
                         headers=_headers(), json={"fields": fields}, timeout=10)
