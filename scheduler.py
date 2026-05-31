@@ -131,6 +131,65 @@ def _job_payment_reminders():
 
 
 # ══════════════════════════════════════════════════
+# F01 — Lead Recovery
+# ══════════════════════════════════════════════════
+
+def _job_lead_recovery():
+    try:
+        from feature_flags import is_enabled
+        if not is_enabled("LEAD_RECOVERY"):
+            return
+
+        from core.lead_recovery import run_recovery_scan
+        owner_chat_id = os.environ.get("DIGEST_CHAT_ID", "")
+        result = run_recovery_scan(owner_chat_id=owner_chat_id)
+
+        if result.candidates:
+            logger.info(
+                f"[Recovery] scanned={result.scanned} "
+                f"candidates={len(result.candidates)} queued={result.queued}"
+            )
+        for err in result.errors:
+            logger.error(f"[Recovery] {err}")
+
+    except ImportError as e:
+        logger.warning(f"[Recovery] not available: {e}")
+    except Exception as e:
+        logger.error(f"[Recovery] job error: {e}")
+
+
+# ══════════════════════════════════════════════════
+# F02 — Learning Cycle
+# ══════════════════════════════════════════════════
+
+def _job_learning_cycle():
+    try:
+        from feature_flags import is_enabled
+        if not is_enabled("LEARNING_ENGINE"):
+            return
+
+        from core.learning_engine import run_learning_cycle, get_domain_insights
+        import telebot
+
+        result = run_learning_cycle(["realestate", "import"])
+        logger.info(f"[Learning] cycle done: {list(result.keys())}")
+
+        token   = os.environ.get("TELEGRAM_TOKEN", "")
+        chat_id = os.environ.get("DIGEST_CHAT_ID", "")
+        if token and chat_id and result:
+            bot     = telebot.TeleBot(token)
+            summary = get_domain_insights()
+            if summary:
+                bot.send_message(chat_id, summary, parse_mode="Markdown")
+                logger.info("[Learning] ✅ Insights sent to owner")
+
+    except ImportError as e:
+        logger.warning(f"[Learning] not available: {e}")
+    except Exception as e:
+        logger.error(f"[Learning] job error: {e}")
+
+
+# ══════════════════════════════════════════════════
 # Security Review Reminder
 # ══════════════════════════════════════════════════
 
@@ -227,6 +286,9 @@ def start_scheduler() -> threading.Thread:
     cleanup_interval      = int(os.environ.get("CLEANUP_INTERVAL_MIN",  "60"))
     followup_interval     = int(os.environ.get("FOLLOWUP_INTERVAL_MIN", "60"))
     payment_reminder_time = os.environ.get("PAYMENT_REMINDER_TIME",    "09:00")
+    recovery_time         = os.environ.get("RECOVERY_TIME",            "10:00")
+    learning_day          = os.environ.get("LEARNING_DAY",             "sunday")
+    learning_time         = os.environ.get("LEARNING_TIME",            "06:00")
     security_day          = os.environ.get("SECURITY_REMINDER_DAY",    "sunday")
     security_time         = os.environ.get("SECURITY_REMINDER_TIME",   "09:00")
 
@@ -234,16 +296,18 @@ def start_scheduler() -> threading.Thread:
     schedule.every().day.at(collector_time).do(_job_daily_collector)
     schedule.every(cleanup_interval).minutes.do(_job_cleanup_pending)
     schedule.every().day.at("00:05").do(_job_overdue_payments)
-    schedule.every(followup_interval).minutes.do(_job_followup_scan)
-    schedule.every().day.at(payment_reminder_time).do(_job_payment_reminders)
+    schedule.every(followup_interval).minutes.do(_job_followup_scan)         # N02
+    schedule.every().day.at(payment_reminder_time).do(_job_payment_reminders) # N04
+    schedule.every().day.at(recovery_time).do(_job_lead_recovery)             # F01
+    getattr(schedule.every(), learning_day).at(learning_time).do(_job_learning_cycle)  # F02
     getattr(schedule.every(), security_day).at(security_time).do(_job_security_reminder)
 
     logger.info(
         f"📅 Scheduler | digest={digest_time} | collector={collector_time} | "
-        f"cleanup=every {cleanup_interval}min | "
-        f"followup=every {followup_interval}min | "
-        f"payment={payment_reminder_time} | "
-        f"security-check=every {security_day} {security_time}"
+        f"cleanup=every {cleanup_interval}min | followup=every {followup_interval}min | "
+        f"payment={payment_reminder_time} | recovery={recovery_time} | "
+        f"learning={learning_day} {learning_time} | "
+        f"security={security_day} {security_time}"
     )
 
     t = threading.Thread(target=_run_scheduler, daemon=True, name="scheduler")
