@@ -59,6 +59,20 @@ if os.environ.get("SETUP_WEBHOOK") == "1":
 # Integration Layer — CORE_02.6
 # ══════════════════════════════════════════════════
 
+def clarify_response(route: RouteDecision) -> str:
+    logger.info(f"[CLARIFY] intent={route.intent} conf={route.confidence:.2f}")
+    return route.response_override or "לא הצלחתי להבין — תוכל לנסח אחרת?"
+
+
+def approval_response(route: RouteDecision) -> str:
+    logger.info(f"[APPROVAL] intent={route.intent} domain={route.domain}")
+    return (
+        route.response_override or
+        f"הפעולה '{route.intent}' דורשת אישור לפני ביצוע.\n"
+        f"אשר עם: ✅ כן / ❌ לא"
+    )
+
+
 def _safe_route(text: str, channel: str, identity, domain_from_channel: str = "") -> RouteDecision:
     """
     עוטף את route_request עם fallback.
@@ -111,24 +125,19 @@ def run_agent(
     route = _safe_route(user_text, channel, identity, domain_from_channel)
     logger.info(route.to_log())
 
-    # ── 4. Route hooks (router is silent to the user) ────
-    if route.notify_owner:
-        logger.warning(
-            f"[NOTIFY_OWNER] restricted action | "
-            f"user={identity.user_id} role={identity.role} "
-            f"intent={route.intent} domain={route.domain}"
-        )
-
+    # ── 4. Dispatch ───────────────────────────────
     if route.handler == Handler.CLARIFY:
-        logger.info(f"[Router] CLARIFY: intent={route.intent} conf={route.confidence:.2f}")
-        return route.response_override or "לא הצלחתי להבין — תוכל לנסח אחרת?"
+        return clarify_response(route)
 
     if route.handler == Handler.APPROVAL:
-        logger.info(f"[Router] APPROVAL: intent={route.intent} domain={route.domain}")
-        return (
-            route.response_override or
-            f"הפעולה '{route.intent}' דורשת אישור לפני ביצוע.\n"
-            f"אשר עם: ✅ כן / ❌ לא"
+        return approval_response(route)
+
+    # לא עושים BLOCK רגיל ללקוח — restricted ממשיך לסוכן
+    if route.restricted:
+        logger.warning(
+            f"[Restricted] external request: "
+            f"user={identity.user_id} role={identity.role} "
+            f"intent={route.intent} notify_owner=True tool_allowed=False"
         )
 
     # ── 5. Agent Loop ─────────────────────────────
