@@ -6,6 +6,8 @@ from guards.circuit_breaker import with_airtable_breaker
 
 logger = logging.getLogger(__name__)
 
+_AIRTABLE_FORBIDDEN_FIELDS = {"tenant_id", "tenant", "owner_id"}
+
 
 def _headers() -> dict:
     return {
@@ -40,6 +42,7 @@ def airtable_get(table: str, filter_formula: str = "") -> str:
 
 
 def airtable_add(table: str, fields: dict) -> str:
+    fields = {k: v for k, v in fields.items() if k not in _AIRTABLE_FORBIDDEN_FIELDS}
     with with_airtable_breaker():
         r = httpx.post(f"https://api.airtable.com/v0/{_base()}/{table}",
                        headers=_headers(), json={"fields": fields}, timeout=10)
@@ -74,6 +77,7 @@ def airtable_get_schema() -> str:
 
 
 def airtable_update(table: str, record_id: str, fields: dict) -> str:
+    fields = {k: v for k, v in fields.items() if k not in _AIRTABLE_FORBIDDEN_FIELDS}
     with with_airtable_breaker():
         r = httpx.patch(f"https://api.airtable.com/v0/{_base()}/{table}/{record_id}",
                         headers=_headers(), json={"fields": fields}, timeout=10)
