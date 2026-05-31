@@ -337,6 +337,30 @@ def home():
     return "The Boss is Live v3.0 — CORE_02.6 Router ✅"
 
 
+# ══════════════════════════════════════════════════
+# F07 — Voice IVR (Twilio)
+# ══════════════════════════════════════════════════
+
+@app.route("/voice/incoming", methods=["POST"])
+def voice_incoming():
+    from feature_flags import is_enabled
+    from voice_adapter import build_twiml, _say, _hangup, process_voice_step
+    if not is_enabled("VOICE_IVR"):
+        return Response(build_twiml(_say("השירות לא פעיל.") + _hangup()), mimetype="text/xml")
+    call_sid = request.form.get("CallSid", "")
+    from_num = request.form.get("From", "").replace("whatsapp:", "")
+    return Response(process_voice_step(call_sid, from_num), mimetype="text/xml")
+
+
+@app.route("/voice/step", methods=["POST"])
+def voice_step():
+    from voice_adapter import process_voice_step
+    call_sid = request.form.get("CallSid", "")
+    from_num = request.form.get("From", "").replace("whatsapp:", "")
+    digits   = request.form.get("Digits", "")
+    return Response(process_voice_step(call_sid, from_num, digits), mimetype="text/xml")
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
