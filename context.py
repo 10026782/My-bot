@@ -176,12 +176,17 @@ def _select_model(identity: "Identity", text: str) -> tuple[str, int]:
 def build_context(
     identity: "Identity",
     user_text: str = "",
-    domain: str = ""
+    domain: str = "",
+    handler: str = "",
+    intent: str = "",
 ) -> AgentContext:
     """
     בונה AgentContext מלא לפי Identity.
 
-    domain: אם מועבר (מהראוטר) — מעדכן את identity.domain_id בהתאם.
+    domain:  אם מועבר (מהראוטר) — מעדכן את identity.domain_id.
+    handler: החלטת הראוטר — מוזרקת כהוראת הקשר לפרומפט.
+             הAgent תמיד עונה; הוא זה שמנסח את התגובה לאדם.
+    intent:  intent שזוהה (לשימוש בהוראת ה-BLOCK/APPROVAL).
     """
     # עדכון domain מהראוטר אם הגיע
     if domain and domain != identity.domain_id:
@@ -206,6 +211,26 @@ def build_context(
             system = _prompt_guest(identity)
         case _:
             system = _prompt_readonly(identity)
+
+    # ── Router hint injection (invisible to user) ──
+    from core.router.route_decision import Handler as H
+    if handler == H.BLOCK:
+        system += (
+            f"\n\n[הוראת מערכת: הפעולה '{intent}' אינה זמינה למשתמש זה. "
+            "ענה בנימוס וקצרה שלא ניתן לבצע את הבקשה, "
+            "ללא ⛔ ובלי מינוח טכני. הצע חלופה או להעביר לאליהו.]"
+        )
+    elif handler == H.APPROVAL:
+        system += (
+            f"\n\n[הוראת מערכת: הפעולה '{intent}' דורשת אישור לפני ביצוע. "
+            "הסבר למשתמש מה עומד לקרות ובקש אישור: ✅ כן / ❌ לא. "
+            "אל תבצע את הפעולה עד לאישור.]"
+        )
+    elif handler == H.CLARIFY:
+        system += (
+            "\n\n[הוראת מערכת: הכוונה לא ברורה לחלוטין. "
+            "בקש הבהרה קצרה ואחת בלבד.]"
+        )
 
     allowed_tools = _filter_tools(identity.role)
 
