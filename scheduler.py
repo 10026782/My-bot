@@ -68,6 +68,69 @@ def _job_daily_collector():
 
 
 # ══════════════════════════════════════════════════
+# N02 — Followup Scan
+# ══════════════════════════════════════════════════
+
+def _job_followup_scan():
+    try:
+        from feature_flags import is_enabled
+        if not is_enabled("FOLLOWUP_AUTOMATION"):
+            return
+
+        from core.followup_engine import run_followup_scan
+        owner_chat_id = os.environ.get("DIGEST_CHAT_ID", "")
+        result = run_followup_scan(owner_chat_id=owner_chat_id)
+
+        if result.candidates:
+            logger.info(
+                f"[Followup] scanned={result.scanned} "
+                f"candidates={len(result.candidates)} queued={result.approved}"
+            )
+        for err in result.errors:
+            logger.error(f"[Followup] {err}")
+
+    except ImportError as e:
+        logger.warning(f"[Followup] not available: {e}")
+    except Exception as e:
+        logger.error(f"[Followup] job error: {e}")
+
+
+# ══════════════════════════════════════════════════
+# N04 — Payment Reminders
+# ══════════════════════════════════════════════════
+
+def _job_payment_reminders():
+    try:
+        from feature_flags import is_enabled
+        if not is_enabled("PAYMENT_REMINDERS"):
+            return
+
+        from payment_reminder import run_payment_scan
+        import telebot
+        token   = os.environ.get("TELEGRAM_TOKEN", "")
+        chat_id = os.environ.get("DIGEST_CHAT_ID", "")
+        if not token or not chat_id:
+            logger.warning("[PaymentReminder] TELEGRAM_TOKEN / DIGEST_CHAT_ID חסרים")
+            return
+
+        bot    = telebot.TeleBot(token)
+        result = run_payment_scan(bot=bot, chat_id=chat_id)
+
+        if result.has_alerts:
+            logger.info(
+                f"[PaymentReminder] done | "
+                f"upcoming={len(result.upcoming)} overdue={len(result.overdue)}"
+            )
+        for err in result.errors:
+            logger.error(f"[PaymentReminder] {err}")
+
+    except ImportError as e:
+        logger.warning(f"[PaymentReminder] not available: {e}")
+    except Exception as e:
+        logger.error(f"[PaymentReminder] job error: {e}")
+
+
+# ══════════════════════════════════════════════════
 # Security Review Reminder
 # ══════════════════════════════════════════════════
 
@@ -159,23 +222,27 @@ def _run_scheduler():
 
 
 def start_scheduler() -> threading.Thread:
-    digest_time      = os.environ.get("DIGEST_TIME",             "07:30")
-    collector_time   = os.environ.get("COLLECTOR_TIME",          "23:00")
-    cleanup_interval = int(os.environ.get("CLEANUP_INTERVAL_MIN", "60"))
-    security_day     = os.environ.get("SECURITY_REMINDER_DAY",   "sunday")
-    security_time    = os.environ.get("SECURITY_REMINDER_TIME",  "09:00")
+    digest_time           = os.environ.get("DIGEST_TIME",               "07:30")
+    collector_time        = os.environ.get("COLLECTOR_TIME",            "23:00")
+    cleanup_interval      = int(os.environ.get("CLEANUP_INTERVAL_MIN",  "60"))
+    followup_interval     = int(os.environ.get("FOLLOWUP_INTERVAL_MIN", "60"))
+    payment_reminder_time = os.environ.get("PAYMENT_REMINDER_TIME",    "09:00")
+    security_day          = os.environ.get("SECURITY_REMINDER_DAY",    "sunday")
+    security_time         = os.environ.get("SECURITY_REMINDER_TIME",   "09:00")
 
     schedule.every().day.at(digest_time).do(_job_daily_digest)
     schedule.every().day.at(collector_time).do(_job_daily_collector)
     schedule.every(cleanup_interval).minutes.do(_job_cleanup_pending)
     schedule.every().day.at("00:05").do(_job_overdue_payments)
-
-    # תזכורת אבטחה — פעם בשבוע, שולחת רק אם עברו 28+ ימים
+    schedule.every(followup_interval).minutes.do(_job_followup_scan)
+    schedule.every().day.at(payment_reminder_time).do(_job_payment_reminders)
     getattr(schedule.every(), security_day).at(security_time).do(_job_security_reminder)
 
     logger.info(
         f"📅 Scheduler | digest={digest_time} | collector={collector_time} | "
         f"cleanup=every {cleanup_interval}min | "
+        f"followup=every {followup_interval}min | "
+        f"payment={payment_reminder_time} | "
         f"security-check=every {security_day} {security_time}"
     )
 
