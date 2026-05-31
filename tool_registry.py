@@ -121,6 +121,14 @@ _REGISTRY: dict[str, ToolMeta] = {
         read_only=True,
         description_he="קריאת כל הטבלאות והשדות מ-Airtable בזמן אמת"
     ),
+
+    # ── Contact Resolver (N03) ────────────────────
+    "resolve_contact": ToolMeta(
+        name             = "resolve_contact",
+        roles_allowed    = _MANAGEMENT,
+        read_only        = True,
+        description_he   = "חיפוש fuzzy של איש קשר לפי שם — מחזיר פרטים או רשימה לבחירה",
+    ),
 }
 
 

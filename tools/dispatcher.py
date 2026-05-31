@@ -11,7 +11,8 @@ from .drive_tools    import search_drive, read_drive_file
 from .calendar_tools import calendar_get_events, calendar_create_event
 from .gmail_tools    import gmail_draft, gmail_send_draft, gmail_read
 from .sheets_tools   import sheets_append
-from .airtable_tools import airtable_get, airtable_add, airtable_update, airtable_get_schema
+from .airtable_tools    import airtable_get, airtable_add, airtable_update, airtable_get_schema
+from .contact_resolver  import resolve_contact
 
 if TYPE_CHECKING:
     from identity import Identity
@@ -90,6 +91,10 @@ def dispatch_tool(name: str, inputs: dict, identity: "Identity | None" = None) -
 
             case "airtable_get_schema":
                 return airtable_get_schema()
+
+            # ── Contact Resolver (N03) ────────────────
+            case "resolve_contact":
+                return resolve_contact(inputs["name_query"], identity)
 
             # ── Unknown ───────────────────────────────
             case _:
