@@ -42,7 +42,7 @@ TESTS = [
 
     # ── Role blocks ──────────────────────────────────────────────────────────
     ("employee + send → block", "שלח מייל לעורך הדין",   "telegram",  "employee", "",             Intent.SEND_EMAIL,       RouterDomain.GENERAL,     Handler.BLOCK),
-    ("lead + delete → block",   "תמחק את המשימה",          "whatsapp",  "lead",     "",             Intent.DELETE_TASK,      RouterDomain.GENERAL,     Handler.BLOCK),
+    ("lead + delete → agent",   "תמחק את המשימה",          "whatsapp",  "lead",     "",             Intent.DELETE_TASK,      RouterDomain.GENERAL,     Handler.AGENT),
 
     # ── Channel detection ────────────────────────────────────────────────────
     ("channel whatsapp",        "שלום",                    "whatsapp",  "owner",    "import",       Intent.GREETING,         RouterDomain.IMPORT,      Handler.AGENT),

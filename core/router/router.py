@@ -59,16 +59,16 @@ def route_request(
     tool_override = resolve_tool_for_channel(intent, channel)
 
     # 6. Edge cases
-    if intent == Intent.UNKNOWN and handler != Handler.BLOCK:
-        # שיחה כללית / שאלה שלא מוכרת → Agent יטפל בה טבעי.
-        # CLARIFY רק כשהמשתמש מנסה פעולה ולא ברור איזו — לא לשיחה רגילה.
+    if intent == Intent.UNKNOWN:
+        # שיחה כללית — Agent יטפל לכולם, ⛔ לא נשלח ללקוח
         handler           = Handler.AGENT
         response_override = ""
     elif risk == Risk.NEEDS_APPROVAL and confidence < 0.85:
         handler           = Handler.CLARIFY
         response_override = f"רוצה לבצע פעולה רגישה — לא בטוח שהבנתי נכון. כוונתך: {intent}?"
     elif handler == Handler.BLOCK:
-        response_override = "⛔ אין לך הרשאה לבצע פעולה זו."
+        # BLOCK רלוונטי רק למשתמשים פנימיים שמנסים HIGH_RISK מעל לרמתם
+        response_override = "פעולה זו דורשת הרשאות גבוהות יותר. פנה לבעלים."
     else:
         response_override = ""
 

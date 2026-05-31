@@ -74,10 +74,11 @@ def detect_risk(
     מחזיר (risk_level, handler, needs_approval).
     מטריצה: role × intent × domain
     """
-    # ── חסום מוחלט ────────────────────────────────
+    # ── חיצוניים (lead/guest/readonly) → Agent תמיד ──
+    # הלקוח לא רואה ⛔. המגבלות מיושמות דרך system_prompt.
     if role in _BLOCKED_ROLES and intent not in _READ_ONLY_INTENTS:
-        logger.warning(f"[Risk] BLOCK: role={role} intent={intent} domain={domain}")
-        return Risk.BLOCK, Handler.BLOCK, False
+        logger.warning(f"[Risk] external role, routing to agent: role={role} intent={intent}")
+        return Risk.NORMAL, Handler.AGENT, False
 
     # ── Read Only — תמיד מותר לכולם ───────────────
     if intent in _READ_ONLY_INTENTS:
