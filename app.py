@@ -243,8 +243,9 @@ def webhook_telegram():
 @app.route("/whatsapp", methods=["POST"])
 def webhook_whatsapp():
     incoming  = request.values.get("Body", "").strip()
-    sender    = request.values.get("From", "whatsapp:unknown")
-    to_number = request.values.get("To",   "whatsapp:unknown")
+    sender_raw = request.values.get("From", "whatsapp:unknown")
+    sender     = sender_raw.removeprefix("whatsapp:")   # "+972XXXXXXXXX"
+    to_number  = request.values.get("To",   "whatsapp:unknown")
     msg_sid   = request.values.get("MessageSid", "")
 
     if not incoming:

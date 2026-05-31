@@ -190,16 +190,22 @@ def _load_registry() -> dict:
         logger.error(f"identity_map.json error: {e}")
 
     # Option 3: default — Owner בלבד
-    owner_chat = os.environ.get("ELIYAHU_CHAT_ID", "")
+    owner_chat      = os.environ.get("ELIYAHU_CHAT_ID", "")
+    owner_whatsapp  = os.environ.get("ELIYAHU_WHATSAPP", "")
     default: dict = {}
+    _owner_entry = {
+        "tenant":  "boss_hq",
+        "user":    "eliyahu",
+        "role":    Role.OWNER,
+        "name":    "אליהו חזן",
+        "domains": list(Domain.ALL),
+    }
     if owner_chat:
-        default[f"telegram:{owner_chat}"] = {
-            "tenant": "boss_hq",
-            "user":   "eliyahu",
-            "role":   Role.OWNER,
-            "name":   "אליהו חזן",
-            "domains": list(Domain.ALL),
-        }
+        default[f"telegram:{owner_chat}"] = _owner_entry
+    if owner_whatsapp:
+        # normalize: strip prefix if user added it
+        phone = owner_whatsapp.removeprefix("whatsapp:")
+        default[f"whatsapp:{phone}"] = _owner_entry
     return default
 
 
