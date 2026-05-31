@@ -254,13 +254,14 @@ def resolve_identity(channel: str, external_id: str) -> Identity:
         logger.info(f"[Identity] Resolved: {identity}")
         return identity
 
-    # לא מוכר
-    logger.warning(f"[Identity] Unknown: {key} — READONLY fallback")
+    # מספר לא מוכר = ליד פוטנציאלי
+    is_whatsapp = channel == "whatsapp"
     return Identity(
-        tenant_id    = "unknown",
+        tenant_id    = "boss_hq",
         user_id      = external_id,
-        role         = Role.READONLY,
-        display_name = "Unknown",
+        role         = Role.LEAD if is_whatsapp else Role.READONLY,
+        display_name = "ליד חדש",
         channel      = channel,
         external_id  = external_id,
+        domain_id    = Domain.GENERAL,
     )
