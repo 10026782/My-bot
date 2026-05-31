@@ -147,16 +147,23 @@ class PaymentStatus:
 
 
 class LeadFields:
-    NAME       = "Name"           # שם הליד
-    PHONE      = "phone"          # טלפון (אותיות קטנות — כך נוצר ב-Airtable)
-    DOMAIN     = "domain"         # realestate | import | investors | recruitment
-    STATUS     = "status"         # NEW | QUALIFIED | HOT | COLD
-    SCORE      = "score"          # 0–100
-    SUMMARY    = "summary"        # סיכום השיחה
-    ANSWERS    = "answers"        # JSON של תשובות הליד
-    SOURCE     = "source"         # whatsapp_realestate | whatsapp_import | whatsapp_investors | telegram | manual
-    CHANNEL    = "channel"        # whatsapp | telegram | web
-    CREATED_AT = "created at"     # תאריך יצירה (עם רווח — כך נוצר ב-Airtable)
+    NAME           = "Name"           # שם הליד
+    PHONE          = "phone"          # טלפון (אותיות קטנות — כך נוצר ב-Airtable)
+    DOMAIN         = "domain"         # realestate | import | investors | recruitment
+    STATUS         = "status"         # NEW | QUALIFIED | HOT | COLD
+    SCORE          = "score"          # 0–100
+    SUMMARY        = "summary"        # סיכום השיחה
+    ANSWERS        = "answers"        # JSON של תשובות הליד
+    SOURCE         = "source"         # whatsapp_realestate | whatsapp_import | whatsapp_investors | telegram | manual
+    CHANNEL        = "channel"        # whatsapp | telegram | web
+    CREATED_AT     = "created at"     # תאריך יצירה (עם רווח — כך נוצר ב-Airtable)
+    # N01 lead_memory fields
+    MEMORY_KEY     = "memory_key"     # מפתח זיכרון ייחודי לליד
+    TIER           = "Tier"           # HOT | WARM | COLD (כך נוצר ב-Airtable)
+    LAST_MESSAGE   = "last_message"   # הודעה אחרונה מהליד
+    LAST_ACTIVE    = "last_active"    # ISO timestamp של פעילות אחרונה
+    FOLLOWUP_COUNT = "followup_count" # מספר פולואפים שנשלחו
+    RECOVERY_COUNT = "recovery_count" # מספר recovery attempts
 
 
 class LeadStatus:
