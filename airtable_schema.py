@@ -147,23 +147,20 @@ class PaymentStatus:
 
 
 class LeadFields:
-    NAME           = "Name"           # שם הליד
-    PHONE          = "phone"          # טלפון (אותיות קטנות — כך נוצר ב-Airtable)
-    DOMAIN         = "domain"         # realestate | import | investors | recruitment
-    STATUS         = "status"         # NEW | QUALIFIED | HOT | COLD
-    SCORE          = "score"          # 0–100
-    SUMMARY        = "summary"        # סיכום השיחה
-    ANSWERS        = "answers"        # JSON של תשובות הליד
-    SOURCE         = "source"         # whatsapp_realestate | whatsapp_import | whatsapp_investors | telegram | manual
-    CHANNEL        = "channel"        # whatsapp | telegram | web
-    CREATED_AT     = "created at"     # תאריך יצירה (עם רווח — כך נוצר ב-Airtable)
-    # N01 lead_memory fields
-    MEMORY_KEY     = "memory_key"     # מפתח זיכרון ייחודי לליד
-    TIER           = "Tier"           # HOT | WARM | COLD (כך נוצר ב-Airtable)
-    LAST_MESSAGE   = "last_message"   # הודעה אחרונה מהליד
-    LAST_ACTIVE    = "last_active"    # ISO timestamp של פעילות אחרונה
-    FOLLOWUP_COUNT = "followup_count" # מספר פולואפים שנשלחו
-    RECOVERY_COUNT = "recovery_count" # מספר recovery attempts
+    NAME       = "Name"
+    PHONE      = "phone"          # אותיות קטנות — כך נוצר ב-Airtable
+    DOMAIN     = "domain"         # realestate | import | investors | recruitment
+    STATUS     = "status"         # new | active | qualified | closed
+    TIER       = "tier"           # HOT | WARM | COLD (lowercase — כך נוצר ב-Airtable)
+    SCORE      = "score"          # 0–100
+    SUMMARY    = "summary"        # סיכום השיחה
+    NEXT_STEP  = "next_step"      # צעד הבא
+    NOTES      = "notes"          # הערות חופשיות
+    CHANNEL    = "channel"        # whatsapp | telegram | web
+    SOURCE     = "source"         # whatsapp_realestate | whatsapp_import | telegram | manual
+    MEMORY_KEY = "memory_key"     # מפתח ייחודי: tenant:phone
+    CREATED_AT = "created_at"     # underscore — כך נוצר ב-Airtable (לא "created at")
+    UPDATED_AT = "updated_at"     # עדכון אחרון
 
 
 class LeadStatus:

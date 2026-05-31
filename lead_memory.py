@@ -137,16 +137,13 @@ class LeadMemory:
             from airtable_schema import Tables                          # type: ignore
 
             fields = {
-                "memory_key":     state.memory_key,
-                "Tier":           state.tier,
-                "Score":          state.score,
-                "Domain":         state.domain,
-                "Channel":        state.channel,
-                "Name":           state.contact_name,
-                "last_message":   state.last_message,
-                "last_active":    state.last_active,
-                "followup_count": state.followup_count,
-                "recovery_count": state.recovery_count,
+                "memory_key": state.memory_key,
+                "tier":       state.tier,           # lowercase — כך נוצר ב-Airtable
+                "score":      state.score,
+                "domain":     state.domain,
+                "channel":    state.channel,
+                "Name":       state.contact_name,
+                "updated_at": state.last_active,
             }
 
             if state.record_id:

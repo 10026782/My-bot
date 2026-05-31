@@ -35,13 +35,12 @@ _TABLE_FIELDS: dict[str, set[str]] = {
         "Product", "Supplier", "Status", "Advance %", "Balance %",
         "Total USD", "Ship Date", "QC Passed", "Notes",
     },
+    # ── N01/N02 — Lead Memory ─────────────────────
     "Leads": {
-        # core fields (match LeadFields in airtable_schema.py)
-        "Name", "phone", "domain", "status", "score",
-        "summary", "answers", "source", "channel", "created at",
-        # N01 lead_memory fields
-        "memory_key", "Tier", "last_message", "last_active",
-        "followup_count", "recovery_count",
+        "memory_key", "Name",       "phone",      "status",
+        "tier",       "score",      "summary",    "next_step",
+        "notes",      "domain",     "source",     "channel",
+        "created_at", "updated_at",
     },
 }
 
