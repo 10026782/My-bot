@@ -174,39 +174,58 @@ class Identity:
 def _load_registry() -> dict:
     # Option 1: env var (Render)
     env_map = os.environ.get("IDENTITY_MAP", "")
+    registry: dict = {}
     if env_map:
         try:
-            return json.loads(env_map)
+            registry = json.loads(env_map)
         except json.JSONDecodeError as e:
             logger.error(f"IDENTITY_MAP parse error: {e}")
 
     # Option 2: קובץ מקומי (פיתוח)
-    try:
-        with open("identity_map.json", encoding="utf-8") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        pass
-    except Exception as e:
-        logger.error(f"identity_map.json error: {e}")
+    if not registry:
+        try:
+            with open("identity_map.json", encoding="utf-8") as f:
+                registry = json.load(f)
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            logger.error(f"identity_map.json error: {e}")
 
-    # Option 3: default — Owner בלבד
-    owner_chat      = os.environ.get("ELIYAHU_CHAT_ID", "")
-    owner_whatsapp  = os.environ.get("ELIYAHU_WHATSAPP", "")
-    default: dict = {}
-    _owner_entry = {
-        "tenant":  "boss_hq",
-        "user":    "eliyahu",
-        "role":    Role.OWNER,
-        "name":    "אליהו חזן",
-        "domains": list(Domain.ALL),
-    }
-    if owner_chat:
-        default[f"telegram:{owner_chat}"] = _owner_entry
-    if owner_whatsapp:
-        # normalize: strip prefix if user added it
-        phone = owner_whatsapp.removeprefix("whatsapp:")
-        default[f"whatsapp:{phone}"] = _owner_entry
-    return default
+    # Option 3: default telegram fallback
+    if not registry:
+        owner_chat = os.environ.get("ELIYAHU_CHAT_ID", "")
+        if owner_chat:
+            registry[f"telegram:{owner_chat}"] = {
+                "tenant":  "boss_hq",
+                "user":    "eliyahu",
+                "role":    Role.OWNER,
+                "name":    "אליהו חזן",
+                "domains": list(Domain.ALL),
+            }
+
+    # תמיד: הוסף WhatsApp owner אם יש OWNER_PHONES / ELIYAHU_WHATSAPP
+    # ומפתח whatsapp:... עדיין לא קיים ב-registry
+    wa_phone = (
+        os.environ.get("OWNER_PHONES", "") or
+        os.environ.get("ELIYAHU_WHATSAPP", "")
+    ).strip().removeprefix("whatsapp:")
+
+    if wa_phone and not any(k.startswith(f"whatsapp:{wa_phone}") for k in registry):
+        # מצא את ה-owner entry הקיים מ-telegram כדי לשכפל אותו
+        owner_entry = next(
+            (v for k, v in registry.items() if v.get("role") == Role.OWNER),
+            {
+                "tenant":  "boss_hq",
+                "user":    "eliyahu",
+                "role":    Role.OWNER,
+                "name":    "אליהו חזן",
+                "domains": list(Domain.ALL),
+            },
+        )
+        registry[f"whatsapp:{wa_phone}"] = owner_entry
+        logger.info(f"[Identity] Auto-added WhatsApp owner entry for {wa_phone}")
+
+    return registry
 
 
 _REGISTRY: dict = _load_registry()
