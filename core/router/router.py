@@ -1,8 +1,6 @@
-# core/router/router.py — CORE_02_ROUTER
-# Orchestrator בלבד. ~50 שורות.
-#
-# קורא ל-4 routers → מחזיר RouteDecision אחד נקי.
-# לא מכיל לוגיקה עסקית. לא כותב ל-DB. לא קורא ל-Agent.
+# core/router/router.py — CORE_02 Soft Router
+# Orchestrator only. Calls 4 sub-routers → returns one RouteDecision.
+# No business logic. No DB writes. No agent calls.
 
 from __future__ import annotations
 import logging
@@ -31,7 +29,7 @@ def route_request(
     """
     text + channel + identity → RouteDecision
 
-    domain_from_channel: מגיע מ-config.get_domain(to_number) ב-webhook.
+    domain_from_channel: comes from config.get_domain(to_number) in webhook.
     """
     # 1. Channel
     channel = detect_channel(channel_raw)
@@ -58,17 +56,22 @@ def route_request(
     # 5. Channel-specific tool override
     tool_override = resolve_tool_for_channel(intent, channel)
 
-    # 6. Edge cases
+    # 6. Edge cases / response overrides
     if intent == Intent.UNKNOWN:
-        # שיחה כללית — Agent יטפל לכולם, ⛔ לא נשלח ללקוח
+        # Safety net: unknown text always reaches the agent, never blocked
         handler           = Handler.AGENT
         response_override = ""
-    elif risk == Risk.NEEDS_APPROVAL and confidence < 0.85:
-        handler           = Handler.CLARIFY
-        response_override = f"רוצה לבצע פעולה רגישה — לא בטוח שהבנתי נכון. כוונתך: {intent}?"
+
     elif handler == Handler.BLOCK:
-        # BLOCK רלוונטי רק למשתמשים פנימיים שמנסים HIGH_RISK מעל לרמתם
-        response_override = "פעולה זו דורשת הרשאות גבוהות יותר. פנה לבעלים."
+        # Only explicit protected actions reach here (HIGH_RISK intents).
+        # Message is informative, not a raw ⛔.
+        response_override = "פעולה זו אינה זמינה עבורך. לסיוע, פנה לאליהו."
+
+    elif risk == Risk.NEEDS_APPROVAL and confidence < 0.85:
+        # Low-confidence sensitive intent → ask for clarification
+        handler           = Handler.CLARIFY
+        response_override = f"לא בטוח שהבנתי — כוונתך: {intent}?"
+
     else:
         response_override = ""
 
@@ -84,7 +87,6 @@ def route_request(
         llm_classified    = False,
         response_override = response_override,
     )
-    # tool_override שמור ב-metadata לשימוש dispatcher
     if tool_override:
         decision.matched_rule = f"{matched_rule} [tool:{tool_override}]"
 

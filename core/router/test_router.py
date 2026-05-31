@@ -42,11 +42,17 @@ TESTS = [
 
     # ── Role blocks ──────────────────────────────────────────────────────────
     ("employee + send → block", "שלח מייל לעורך הדין",   "telegram",  "employee", "",             Intent.SEND_EMAIL,       RouterDomain.GENERAL,     Handler.BLOCK),
-    ("lead + delete → agent",   "תמחק את המשימה",          "whatsapp",  "lead",     "",             Intent.DELETE_TASK,      RouterDomain.GENERAL,     Handler.AGENT),
+    ("lead + delete → block",   "תמחק את המשימה",          "whatsapp",  "lead",     "",             Intent.DELETE_TASK,      RouterDomain.GENERAL,     Handler.BLOCK),
 
     # ── Channel detection ────────────────────────────────────────────────────
     ("channel whatsapp",        "שלום",                    "whatsapp",  "owner",    "import",       Intent.GREETING,         RouterDomain.IMPORT,      Handler.AGENT),
     ("channel telegram",        "שלום",                    "telegram",  "owner",    "",             Intent.GREETING,         RouterDomain.GENERAL,     Handler.AGENT),
+
+    # ── Soft Router — CORE_02 rules 1-8 ─────────────────────────────────────
+    ("wa readonly שלום → agent",    "שלום",                 "whatsapp", "readonly", "", Intent.GREETING,   RouterDomain.GENERAL, Handler.AGENT),
+    ("wa readonly unknown → agent", "ספר לי משהו מעניין",  "whatsapp", "readonly", "", Intent.UNKNOWN,    RouterDomain.GENERAL, Handler.AGENT),
+    ("readonly send_email → block", "שלח מייל לעורך הדין", "telegram", "readonly", "", Intent.SEND_EMAIL, RouterDomain.GENERAL, Handler.BLOCK),
+    ("owner unknown → agent",       "ספר לי משהו מעניין",  "telegram", "owner",    "", Intent.UNKNOWN,    RouterDomain.GENERAL, Handler.AGENT),
 ]
 
 
