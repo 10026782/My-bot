@@ -21,6 +21,7 @@ from tools           import dispatch_tool
 from guards          import idempotency, rate_limiter, validate_tool_output
 from config          import get_domain as _channel_domain
 from core.router     import route_request, RouteDecision, Handler
+from core.anti_hallucination import verify_execution, sanitize_agent_response
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -164,6 +165,7 @@ def run_agent(
 
         final_reply     = "⚠️ לא התקבלה תשובה."
         tool_calls_made = 0
+        tool_results_log: list[dict] = []   # A32: accumulates all tool results
 
         while True:
             response = client.messages.create(
@@ -213,13 +215,24 @@ def run_agent(
                 result = validate_tool_output(tu.name, raw)
                 logger.info(f"[Tool] → {result[:80]}")
 
-                tool_results.append({
-                    "type": "tool_result", "tool_use_id": tu.id, "content": result
-                })
+                # A32 — verify tool actually succeeded
+                exec_check = verify_execution(tu.name, result)
+                if exec_check.status == "failed":
+                    logger.error(f"[A32] Execution failed: {tu.name} — {exec_check.reason}")
+                    result = f"❌ הפעולה לא הושלמה: {exec_check.reason}"
+                elif exec_check.status == "warn":
+                    logger.warning(f"[A32] Execution warn: {tu.name} — {exec_check.reason}")
+
+                entry = {"type": "tool_result", "tool_use_id": tu.id, "content": result}
+                tool_results.append(entry)
+                tool_results_log.append(entry)   # A32: accumulate for final check
 
             tool_calls_made += 1
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user",      "content": tool_results})
+
+        # A32 — final hallucination check before reply reaches user
+        final_reply = sanitize_agent_response(final_reply, tool_results_log)
 
         # ── שמירת זיכרון ─────────────────────────
         memory.add(ctx.memory_key, "user",      clean_msg)
