@@ -130,7 +130,8 @@ class Handler:
     TOOL        = "tool"          # כלי ישיר ללא Agent
     CLARIFY     = "clarify"       # בקש הבהרה מהמשתמש
     APPROVAL    = "approval"      # המתן לאישור אנושי
-    BLOCK       = "block"         # חסום — אין הרשאה
+    BLOCK       = "block"         # חסום — שמור לשימוש פנימי קיצוני
+    RESTRICTED  = "restricted"    # agent מדבר, tools חסומים, owner מקבל לוג
 
 
 # ══════════════════════════════════════════════════
@@ -150,6 +151,11 @@ class RouteDecision:
     # החלטת ביצוע
     handler:         str = Handler.AGENT
     needs_approval:  bool = False
+
+    # Restricted flow — agent מדבר, tools לא רצים
+    restricted:    bool = False   # פעולה מוגבלת
+    notify_owner:  bool = False   # שלח לוג/התראה לowner
+    tool_allowed:  bool = True    # האם מותר להפעיל tools
 
     # ביטחון בסיווג (0.0–1.0)
     # מתחת ל-0.5 → intent=unknown, handler=clarify

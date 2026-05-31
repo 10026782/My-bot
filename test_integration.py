@@ -71,7 +71,8 @@ def test_01_whatsapp_domain_routing():
     return "✅ Test 01: WhatsApp domain routing"
 
 
-def test_02_lead_blocked():
+def test_02_lead_restricted():
+    """lead מנסה לשלוח מייל → restricted flow: agent מדבר, tools חסומים."""
     identity = MockIdentity(role="lead")
     route = _safe_route(
         text    = "שלח מייל לעורך הדין",
@@ -79,10 +80,11 @@ def test_02_lead_blocked():
         identity = identity,
     )
 
-    assert route.handler == Handler.BLOCK,  f"handler={route.handler}"
-    assert route.response_override != "",   "response_override ריק — חייב להכיל הודעה"
-    assert route.risk    == Risk.BLOCK,     f"risk={route.risk}"
-    return "✅ Test 02: Lead blocked"
+    assert route.handler      == Handler.AGENT, f"handler={route.handler} (expected agent)"
+    assert route.restricted   == True,          "restricted must be True"
+    assert route.tool_allowed == False,         "tool_allowed must be False"
+    assert route.notify_owner == True,          "notify_owner must be True"
+    return "✅ Test 02: Lead restricted — agent talks, tools blocked"
 
 
 def test_03_router_fallback():
@@ -101,12 +103,29 @@ def test_03_router_fallback():
     return "✅ Test 03: Router fallback — no crash"
 
 
+def test_04_restricted_flow():
+    """lead מנסה לשלוח מייל → handler=agent, restricted=True, tool_allowed=False."""
+    identity = MockIdentity(role="lead")
+    route = _safe_route("שלח מייל לחברה", "whatsapp", identity)
+
+    assert route.handler      == Handler.AGENT, f"handler={route.handler}"
+    assert route.restricted   == True,          "restricted must be True"
+    assert route.tool_allowed == False,         "tool_allowed must be False"
+    assert route.notify_owner == True,          "notify_owner must be True"
+    return "✅ Test 04: Restricted flow — agent talks, tools blocked"
+
+
 # ══════════════════════════════════════════════════
 # Runner
 # ══════════════════════════════════════════════════
 
 def run():
-    tests = [test_01_whatsapp_domain_routing, test_02_lead_blocked, test_03_router_fallback]
+    tests = [
+        test_01_whatsapp_domain_routing,
+        test_02_lead_restricted,
+        test_03_router_fallback,
+        test_04_restricted_flow,
+    ]
     passed = failed = 0
 
     print("\nCORE_02.6 Integration Tests")

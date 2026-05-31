@@ -87,15 +87,15 @@ def detect_risk(
         return Risk.READ_ONLY, Handler.AGENT, False
 
     # ── Rule 4 & 5: Explicit protected actions ─────────
-    # Only senior roles can trigger approval; everyone else is blocked.
-    # External roles (lead/guest/readonly) are blocked here too —
-    # this is an explicit restricted action, not casual chat.
+    # Senior roles → approval flow.
+    # Everyone else → RESTRICTED: agent talks, tools silently blocked,
+    # owner gets a log notification. No ⛔ to the user.
     if intent in _HIGH_RISK_INTENTS:
         if role in _SENIOR_ROLES:
             logger.info(f"[Risk] HIGH_RISK approval: role={role} intent={intent}")
             return Risk.NEEDS_APPROVAL, Handler.APPROVAL, True
-        logger.warning(f"[Risk] BLOCK explicit protected action: role={role} intent={intent}")
-        return Risk.BLOCK, Handler.BLOCK, False
+        logger.warning(f"[Risk] RESTRICTED explicit protected action: role={role} intent={intent}")
+        return Risk.NEEDS_APPROVAL, Handler.RESTRICTED, False
 
     # ── Normal Intents ─────────────────────────────────
     if intent in _NORMAL_INTENTS:

@@ -56,21 +56,33 @@ def route_request(
     # 5. Channel-specific tool override
     tool_override = resolve_tool_for_channel(intent, channel)
 
-    # 6. Edge cases / response overrides
+    # 6. Restricted flow resolution
+    restricted   = False
+    notify_owner = False
+    tool_allowed = True
+
+    if handler == Handler.RESTRICTED:
+        # Agent talks naturally; tools are silently blocked; owner gets a log.
+        restricted   = True
+        notify_owner = True
+        tool_allowed = False
+        handler      = Handler.AGENT
+
+    if handler == Handler.BLOCK:
+        # Hard block (rate-limit / extreme case) — no tools.
+        tool_allowed = False
+
+    # 7. Edge cases / response overrides
     if intent == Intent.UNKNOWN:
-        # Safety net: unknown text always reaches the agent, never blocked
-        handler           = Handler.AGENT
+        handler           = Handler.AGENT   # safety net
         response_override = ""
 
-    elif handler == Handler.BLOCK:
-        # Only explicit protected actions reach here (HIGH_RISK intents).
-        # Message is informative, not a raw ⛔.
-        response_override = "פעולה זו אינה זמינה עבורך. לסיוע, פנה לאליהו."
-
-    elif risk == Risk.NEEDS_APPROVAL and confidence < 0.85:
-        # Low-confidence sensitive intent → ask for clarification
+    elif risk == Risk.NEEDS_APPROVAL and confidence < 0.85 and not restricted:
         handler           = Handler.CLARIFY
         response_override = f"לא בטוח שהבנתי — כוונתך: {intent}?"
+
+    elif handler == Handler.BLOCK:
+        response_override = "פעולה זו אינה זמינה. לסיוע, פנה לאליהו."
 
     else:
         response_override = ""
@@ -86,6 +98,9 @@ def route_request(
         matched_rule      = matched_rule,
         llm_classified    = False,
         response_override = response_override,
+        restricted        = restricted,
+        notify_owner      = notify_owner,
+        tool_allowed      = tool_allowed,
     )
     if tool_override:
         decision.matched_rule = f"{matched_rule} [tool:{tool_override}]"

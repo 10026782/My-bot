@@ -111,20 +111,23 @@ def run_agent(
     route = _safe_route(user_text, channel, identity, domain_from_channel)
     logger.info(route.to_log())
 
-    # ── 4. Route Decision ─────────────────────────
-    if route.handler == Handler.BLOCK:
-        logger.warning(f"[Router] BLOCKED: {identity} intent={route.intent}")
-        return route.response_override or "⛔ אין לך הרשאה לבצע פעולה זו."
+    # ── 4. Route hooks (router is silent to the user) ────
+    if route.notify_owner:
+        logger.warning(
+            f"[NOTIFY_OWNER] restricted action | "
+            f"user={identity.user_id} role={identity.role} "
+            f"intent={route.intent} domain={route.domain}"
+        )
 
     if route.handler == Handler.CLARIFY:
-        logger.info(f"[Router] CLARIFY: intent={route.intent} confidence={route.confidence:.2f}")
+        logger.info(f"[Router] CLARIFY: intent={route.intent} conf={route.confidence:.2f}")
         return route.response_override or "לא הצלחתי להבין — תוכל לנסח אחרת?"
 
     if route.handler == Handler.APPROVAL:
-        logger.info(f"[Router] APPROVAL NEEDED: intent={route.intent} domain={route.domain}")
+        logger.info(f"[Router] APPROVAL: intent={route.intent} domain={route.domain}")
         return (
             route.response_override or
-            f"⏳ הפעולה *{route.intent}* דורשת אישור לפני ביצוע.\n"
+            f"הפעולה '{route.intent}' דורשת אישור לפני ביצוע.\n"
             f"אשר עם: ✅ כן / ❌ לא"
         )
 
@@ -133,8 +136,14 @@ def run_agent(
         research_mode = user_text.startswith("#") and identity.is_owner
         clean_msg     = user_text[1:].strip() if research_mode else user_text
 
-        # Context מקבל את ה-domain מה-RouteDecision
-        ctx      = build_context(identity, user_text, domain=route.domain)
+        # Context מקבל domain + handler מהראוטר
+        ctx = build_context(
+            identity,
+            user_text,
+            domain  = route.domain,
+            handler = route.handler,
+            intent  = route.intent,
+        )
         history  = memory.get_for_claude(ctx.memory_key)
         messages = history + [{"role": "user", "content": clean_msg}]
 
@@ -172,6 +181,15 @@ def run_agent(
             # ── Tool Loop ────────────────────────
             tool_results = []
             for tu in tool_uses:
+                if not route.tool_allowed:
+                    logger.info(f"[Tool] Silently blocked by route (restricted): {tu.name}")
+                    tool_results.append({
+                        "type":        "tool_result",
+                        "tool_use_id": tu.id,
+                        "content":     "הבקשה התקבלה ותועבר לטיפול.",
+                    })
+                    continue
+
                 try:
                     enforce(tu.name, identity)
                 except ToolDenied as e:

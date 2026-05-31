@@ -41,8 +41,8 @@ TESTS = [
     ("finance + employee → approval", "תוסיף ליד",         "whatsapp",  "employee", "finance",      Intent.CREATE_LEAD,      RouterDomain.FINANCE,     Handler.APPROVAL),
 
     # ── Role blocks ──────────────────────────────────────────────────────────
-    ("employee + send → block", "שלח מייל לעורך הדין",   "telegram",  "employee", "",             Intent.SEND_EMAIL,       RouterDomain.GENERAL,     Handler.BLOCK),
-    ("lead + delete → block",   "תמחק את המשימה",          "whatsapp",  "lead",     "",             Intent.DELETE_TASK,      RouterDomain.GENERAL,     Handler.BLOCK),
+    ("employee + send → agent", "שלח מייל לעורך הדין",   "telegram",  "employee", "",             Intent.SEND_EMAIL,       RouterDomain.GENERAL,     Handler.AGENT),
+    ("lead + delete → agent",   "תמחק את המשימה",          "whatsapp",  "lead",     "",             Intent.DELETE_TASK,      RouterDomain.GENERAL,     Handler.AGENT),
 
     # ── Channel detection ────────────────────────────────────────────────────
     ("channel whatsapp",        "שלום",                    "whatsapp",  "owner",    "import",       Intent.GREETING,         RouterDomain.IMPORT,      Handler.AGENT),
@@ -51,8 +51,16 @@ TESTS = [
     # ── Soft Router — CORE_02 rules 1-8 ─────────────────────────────────────
     ("wa readonly שלום → agent",    "שלום",                 "whatsapp", "readonly", "", Intent.GREETING,   RouterDomain.GENERAL, Handler.AGENT),
     ("wa readonly unknown → agent", "ספר לי משהו מעניין",  "whatsapp", "readonly", "", Intent.UNKNOWN,    RouterDomain.GENERAL, Handler.AGENT),
-    ("readonly send_email → block", "שלח מייל לעורך הדין", "telegram", "readonly", "", Intent.SEND_EMAIL, RouterDomain.GENERAL, Handler.BLOCK),
+    ("readonly send_email → agent", "שלח מייל לעורך הדין", "telegram", "readonly", "", Intent.SEND_EMAIL, RouterDomain.GENERAL, Handler.AGENT),
     ("owner unknown → agent",       "ספר לי משהו מעניין",  "telegram", "owner",    "", Intent.UNKNOWN,    RouterDomain.GENERAL, Handler.AGENT),
+
+    # ── CORE_02.10 — Restricted External Request ─────────────────────────────
+    ("guest + greeting",   "שלום",                "whatsapp", "guest",    "", Intent.GREETING,   RouterDomain.GENERAL, Handler.AGENT),
+    ("guest + unknown",    "בלה בלה",             "whatsapp", "guest",    "", Intent.UNKNOWN,    RouterDomain.GENERAL, Handler.AGENT),
+    ("guest + send_email", "שלח מייל לחברה",      "whatsapp", "guest",    "", Intent.SEND_EMAIL, RouterDomain.GENERAL, Handler.AGENT),
+    ("lead + delete",      "תמחק את כל המשימות",  "whatsapp", "lead",     "", Intent.DELETE_TASK,RouterDomain.GENERAL, Handler.AGENT),
+    ("owner + delete",     "תמחק את כל המשימות",  "telegram", "owner",    "", Intent.DELETE_TASK,RouterDomain.GENERAL, Handler.APPROVAL),
+    ("owner + greeting",   "שלום",                "telegram", "owner",    "", Intent.GREETING,   RouterDomain.GENERAL, Handler.AGENT),
 ]
 
 
