@@ -22,6 +22,10 @@ from guards          import idempotency, rate_limiter, validate_tool_output
 from config          import get_domain as _channel_domain
 from core.router     import route_request, RouteDecision, Handler
 from core.anti_hallucination import verify_execution, sanitize_agent_response
+try:
+    from ad_attribution import inject_source_to_incoming_lead as _inject_utm
+except ImportError:
+    _inject_utm = None
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -459,6 +463,16 @@ def webhook_whatsapp():
     dedup_key = msg_sid if msg_sid else incoming
     if idempotency.is_duplicate("whatsapp", sender, dedup_key):
         return Response(str(MessagingResponse()), mimetype="application/xml")
+
+    if _inject_utm:
+        try:
+            _inject_utm(
+                memory_key   = f"whatsapp:{sender}",
+                request_args = request.values.to_dict(),
+                channel      = "whatsapp",
+            )
+        except Exception as _utm_err:
+            logger.debug(f"[UTM] whatsapp inject skipped: {_utm_err}")
 
     resp = MessagingResponse()
     resp.message(run_agent(
