@@ -6,6 +6,16 @@
 
 import os
 import logging
+
+logging.basicConfig(
+    level   = logging.INFO,
+    format  = "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt = "%Y-%m-%d %H:%M:%S",
+)
+
+from startup_validator import validate_startup, format_startup_message
+validate_startup()   # Fail Fast — SystemExit if CRITICAL env var missing
+
 from flask import Flask, request, Response, abort, jsonify
 
 import anthropic
@@ -23,8 +33,6 @@ from config          import get_domain as _channel_domain
 from core.router     import route_request, RouteDecision, Handler
 from core.anti_hallucination import verify_execution, sanitize_agent_response
 
-logging.basicConfig(level=logging.INFO,
-                    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 # ─── קבועים ────────────────────────────────────────
@@ -41,6 +49,15 @@ client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=AGENT_TIMEOUT)
 bot    = telebot.TeleBot(TELEGRAM_TOKEN)
 
 app = Flask(__name__)
+
+
+@bot.message_handler(commands=["status"])
+def cmd_status(msg):
+    """Owner בלבד — מצב env vars."""
+    identity = resolve_identity("telegram", str(msg.from_user.id))
+    if not identity or identity.role not in ("owner", "admin"):
+        return
+    bot.send_message(msg.chat.id, format_startup_message(), parse_mode="Markdown")
 
 try:
     _scheduler = start_scheduler()
