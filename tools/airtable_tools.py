@@ -40,7 +40,7 @@ _TABLE_FIELDS: dict[str, set[str]] = {
         "memory_key", "Name",       "phone",      "status",
         "tier",       "score",      "summary",    "next_step",
         "notes",      "domain",     "source",     "channel",
-        "created_at", "updated_at",
+        "created_at", "updated_at", "Temperature",
     },
     # ── F08 — SaaS Multi-Tenant ───────────────────
     "Tenants": {
