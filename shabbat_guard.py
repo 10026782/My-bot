@@ -102,16 +102,30 @@ def is_shabbat_now(city: Optional[str] = None) -> bool:
 
 def is_holiday_now() -> bool:
     """
-    האם עכשיו חג?
-    נקרא מ-HOLIDAY_DATES בenv (ISO dates, comma-separated).
+    האם עכשיו יום טוב?
+    משתמש ב-pyluach (לוח עברי) — מדויק לנצח, ללא עדכון ידני.
+    HOLIDAY_DATES בenv: override ידני לתוספות/ביטולים.
     """
-    raw = os.environ.get("HOLIDAY_DATES", "")
-    if not raw.strip():
-        return False
+    today_pydate = _israel_now().date()
 
-    today_str = _israel_now().strftime("%Y-%m-%d")
-    holiday_dates = [d.strip() for d in raw.split(",") if d.strip()]
-    return today_str in holiday_dates
+    # ── pyluach — לוח עברי אוטומטי ────────────────
+    try:
+        from pyluach import hebrewcal  # type: ignore
+        h = hebrewcal.HebrewDate.from_pydate(today_pydate)
+        if h.festival(israel=True):
+            return True
+    except Exception:
+        pass  # fallback לenv var בלבד
+
+    # ── HOLIDAY_DATES — override ידני (אופציונלי) ──
+    raw = os.environ.get("HOLIDAY_DATES", "")
+    if raw.strip():
+        today_str     = today_pydate.strftime("%Y-%m-%d")
+        holiday_dates = [d.strip() for d in raw.split(",") if d.strip()]
+        if today_str in holiday_dates:
+            return True
+
+    return False
 
 
 def should_send_now(channel: str = "default") -> bool:
@@ -211,22 +225,34 @@ def _run_tests() -> bool:
     chk("Jerusalem winter start = 16", _shabbat_start_hour("jerusalem", january) == 16)
     chk("Tel Aviv summer start = 19",  _shabbat_start_hour("tel_aviv",  july)    == 19)
 
-    # ── is_holiday_now ────────────────────────────
-    import os
+    # ── is_holiday_now — לוח עברי אמיתי ─────────────
+    import os, datetime as _dt
+    from pyluach import hebrewcal
+
+    # יום כיפור תשפ"ז = 21 ספטמבר 2026 (ז' תשרי)
+    h_yk = hebrewcal.HebrewDate.from_pydate(_dt.date(2026, 9, 21))
+    chk("Yom Kippur 5787 = holiday",  bool(h_yk.festival(israel=True)))
+
+    # ר"ה תשפ"ז = 12 ספטמבר 2026 (א' תשרי)
+    h_rh = hebrewcal.HebrewDate.from_pydate(_dt.date(2026, 9, 12))
+    chk("Rosh Hashana 5787 = holiday", bool(h_rh.festival(israel=True)))
+
+    # יום רגיל — ב' בסיוון תשפ"ו
+    h_wd = hebrewcal.HebrewDate.from_pydate(_dt.date(2026, 6, 1))
+    chk("June 1 2026 = not holiday",   h_wd.festival(israel=True) is None)
+
+    # פסח תשפ"ז — ט"ו בניסן = 22 אפריל 2027
+    h_p = hebrewcal.HebrewDate.from_pydate(_dt.date(2027, 4, 22))
+    chk("Pesach 5787 = holiday",       bool(h_p.festival(israel=True)))
+
+    # HOLIDAY_DATES override עדיין עובד
     today_str = _israel_now().strftime("%Y-%m-%d")
     os.environ["HOLIDAY_DATES"] = today_str
-    chk("today is holiday",      is_holiday_now() is True)
-
-    os.environ["HOLIDAY_DATES"] = "2099-01-01"
-    chk("far future not holiday", is_holiday_now() is False)
-
-    os.environ.pop("HOLIDAY_DATES", None)
-    chk("no env → not holiday",   is_holiday_now() is False)
+    chk("env override blocks today", is_holiday_now() is True)
 
     # ── should_send_now ───────────────────────────
     chk("email always ok",        should_send_now("email") is True)
 
-    os.environ["HOLIDAY_DATES"] = today_str
     chk("holiday blocks voice",   should_send_now("voice")   is False)
     chk("holiday blocks default", should_send_now("default") is False)
     chk("holiday email ok",       should_send_now("email")   is True)
