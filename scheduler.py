@@ -357,6 +357,33 @@ def _job_audience_report():
 
 
 # ══════════════════════════════════════════════════
+# D06 — Interaction Intelligence
+# ══════════════════════════════════════════════════
+
+def _job_interaction_scan():
+    """D06: ניתוח פגישות + זיכרון עסקי — כל 15 דקות."""
+    try:
+        from feature_flags import is_enabled
+        if not is_enabled("INTERACTION_INTELLIGENCE"):
+            return
+        from interaction_engine import run_interaction_scan, send_upcoming_reminders
+        owner_chat_id = os.environ.get("DIGEST_CHAT_ID", "")
+        send_upcoming_reminders(owner_chat_id)
+        result = run_interaction_scan(owner_chat_id=owner_chat_id)
+        if result.processed:
+            logger.info(
+                f"[D06] processed={len(result.processed)} "
+                f"skipped={result.skipped} errors={len(result.errors)}"
+            )
+        for err in result.errors:
+            logger.error(f"[D06] {err}")
+    except ImportError as e:
+        logger.warning(f"[D06] not available: {e}")
+    except Exception as e:
+        logger.error(f"[D06] {e}")
+
+
+# ══════════════════════════════════════════════════
 # Runner
 # ══════════════════════════════════════════════════
 
@@ -399,6 +426,7 @@ def start_scheduler() -> threading.Thread:
     schedule.every(abandoned_interval).minutes.do(shabbat_safe(_job_abandoned_scan))             # D02
     getattr(schedule.every(), "sunday").at("08:00").do(shabbat_safe(_job_audience_report))       # D04
     getattr(schedule.every(), "sunday").at("08:30").do(_job_attribution_report)                  # D05
+    schedule.every(15).minutes.do(shabbat_safe(_job_interaction_scan))                           # D06
     getattr(schedule.every(), security_day).at(security_time).do(_job_security_reminder)
 
     logger.info(

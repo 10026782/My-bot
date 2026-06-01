@@ -131,6 +131,14 @@ _REGISTRY: dict[str, ToolMeta] = {
         read_only        = True,
         description_he   = "חיפוש fuzzy של איש קשר לפי שם — מחזיר פרטים או רשימה לבחירה",
     ),
+
+    # ── D06 — Business Memory ─────────────────────
+    "search_business_memory": ToolMeta(
+        name             = "search_business_memory",
+        roles_allowed    = _MANAGEMENT,
+        read_only        = True,
+        description_he   = "חיפוש בזיכרון עסקי — 'מה סיכמנו עם ספק X?' / 'החלטות מהפגישה עם Y'",
+    ),
 }
 
 

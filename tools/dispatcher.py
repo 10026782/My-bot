@@ -101,6 +101,14 @@ def dispatch_tool(name: str, inputs: dict, identity: "Identity | None" = None) -
             case "resolve_contact":
                 return resolve_contact(inputs["name_query"], identity)
 
+            # ── D06 — Business Memory ─────────────────
+            case "search_business_memory":
+                from interaction_engine import search_business_memory  # type: ignore
+                return search_business_memory(
+                    inputs.get("query", ""),
+                    domain=inputs.get("domain", ""),
+                )
+
             # ── Unknown ───────────────────────────────
             case _:
                 logger.warning(f"[Dispatch] Unknown tool: {name}")
