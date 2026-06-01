@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 MAX_MESSAGES     = 50
 AVG_TOKENS       = 150
 TOKEN_LIMIT      = 80_000
-MEMORY_TTL_HOURS = 4   # שיחה פגה אחרי 4 שעות חוסר פעילות
+MEMORY_TTL_HOURS = 12  # שיחה פגה אחרי 12 שעות חוסר פעילות
 
 
 class MemoryStore:
