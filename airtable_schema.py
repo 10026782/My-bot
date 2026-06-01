@@ -14,6 +14,7 @@ class Tables:
     IMPORTS    = "Imports"       # יבוא מסין
     PAYMENTS   = "Payments"      # תשלומים ותזרים
     LEADS      = "Leads"         # לידים מכל הערוצים והדומיינים
+    TENANTS    = "Tenants"       # F08 — SaaS Multi-Tenant registry
 
 
 # ══════════════════════════════════════════════════
@@ -183,6 +184,36 @@ class LeadSource:
     WA_INVESTORS   = "whatsapp_investors"
     TELEGRAM       = "telegram"
     MANUAL         = "manual"
+
+
+# ══════════════════════════════════════════════════
+# F08 — SaaS Multi-Tenant
+# ══════════════════════════════════════════════════
+
+class TenantFields:
+    TENANT_ID     = "tenant_id"
+    NAME          = "Name"
+    TEMPLATE      = "template"
+    OWNER_NAME    = "owner_name"
+    OWNER_PHONE   = "owner_phone"
+    PLAN          = "plan"          # basic / pro / enterprise
+    STATUS        = "status"        # active / suspended / trial
+    CREATED_AT    = "created_at"
+    AIRTABLE_BASE = "airtable_base"
+    DOMAINS       = "domains"       # comma-separated
+    FEATURES      = "features"      # comma-separated
+
+
+class TenantStatus:
+    ACTIVE    = "active"
+    SUSPENDED = "suspended"
+    TRIAL     = "trial"
+
+
+class TenantPlan:
+    BASIC      = "basic"
+    PRO        = "pro"
+    ENTERPRISE = "enterprise"
 
 
 # ══════════════════════════════════════════════════

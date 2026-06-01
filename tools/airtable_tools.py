@@ -42,6 +42,12 @@ _TABLE_FIELDS: dict[str, set[str]] = {
         "notes",      "domain",     "source",     "channel",
         "created_at", "updated_at",
     },
+    # ── F08 — SaaS Multi-Tenant ───────────────────
+    "Tenants": {
+        "tenant_id", "Name",          "template",      "owner_name",
+        "owner_phone", "plan",        "status",        "created_at",
+        "airtable_base", "domains",   "features",
+    },
 }
 
 # שדות שClaude ממציא ולא קיימים בשום טבלה
