@@ -295,6 +295,24 @@ def _job_email_inbound():
 
 
 # ══════════════════════════════════════════════════
+# D05 — Ad Attribution Report
+# ══════════════════════════════════════════════════
+
+def _job_attribution_report():
+    """D05: Attribution Report שבועי — כל ראשון."""
+    try:
+        from feature_flags import is_enabled
+        if not is_enabled("AD_ATTRIBUTION"):
+            return
+        from ad_attribution import run_attribution_report
+        run_attribution_report(os.environ.get("DIGEST_CHAT_ID", ""))
+    except ImportError as e:
+        logger.warning(f"[Attribution] not available: {e}")
+    except Exception as e:
+        logger.error(f"[Attribution] {e}")
+
+
+# ══════════════════════════════════════════════════
 # D02 — Abandoned Lead Scan
 # ══════════════════════════════════════════════════
 
@@ -380,6 +398,7 @@ def start_scheduler() -> threading.Thread:
     schedule.every(email_interval).minutes.do(_job_email_inbound)                                # F06 (email always ok)
     schedule.every(abandoned_interval).minutes.do(shabbat_safe(_job_abandoned_scan))             # D02
     getattr(schedule.every(), "sunday").at("08:00").do(shabbat_safe(_job_audience_report))       # D04
+    getattr(schedule.every(), "sunday").at("08:30").do(_job_attribution_report)                  # D05
     getattr(schedule.every(), security_day).at(security_time).do(_job_security_reminder)
 
     logger.info(

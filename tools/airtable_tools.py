@@ -41,6 +41,9 @@ _TABLE_FIELDS: dict[str, set[str]] = {
         "tier",       "score",      "summary",    "next_step",
         "notes",      "domain",     "source",     "channel",
         "created_at", "updated_at", "Temperature",
+        # ── D05 — Ad Attribution ──────────────────
+        "utm_source", "utm_medium", "utm_campaign", "platform",
+        "deal_value", "converted_at", "campaign_source",
     },
     # ── F08 — SaaS Multi-Tenant ───────────────────
     "Tenants": {
