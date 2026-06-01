@@ -57,6 +57,13 @@ _TABLE_FIELDS: dict[str, set[str]] = {
         "done", "drop_off_step", "updated_at", "created_at",
         "score", "tier",
     },
+    # ── D06 — Business Memory ─────────────────────
+    "Business_Memory": {
+        "channel", "external_id", "title", "timestamp",
+        "participants", "domain", "summary", "decisions",
+        "tasks_json", "risks", "next_steps", "sentiment",
+        "keywords", "raw_snapshot",
+    },
 }
 
 # שדות שClaude ממציא ולא קיימים בשום טבלה
