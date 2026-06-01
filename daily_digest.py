@@ -15,75 +15,33 @@ from datetime import date
 logger = logging.getLogger(__name__)
 
 
-def _get_hot_leads_today() -> str:
-    """שולף לידים HOT מ-Airtable שטרם טופלו היום. מחזיר string מפורמט, או "" אם אין."""
+def _get_leads_summary() -> str:
+    """שולף את כל הלידים מ-Airtable ומחזיר תצוגה עם score_display."""
     try:
         from airtable_tools import airtable_get  # type: ignore
         from airtable_schema import Tables       # type: ignore
-
-        records = airtable_get(Tables.LEADS, "{Tier}='HOT'")
-        if not records or not isinstance(records, list):
-            return ""
-
-        lines = []
-        for r in records[:5]:
-            f    = r.get("fields", {}) if isinstance(r, dict) else {}
-            name = f.get("Name") or f.get("contact_name") or "ליד"
-            last = f.get("last_message") or f.get("Last Message") or ""
-            if last:
-                last = f' | "{last[:40]}"'
-            lines.append(f"• *{name}* | HOT{last}")
-
-        if not lines:
-            return ""
-
-        suffix = f"\n  _(ועוד {len(records)-5} נוספים)_" if len(records) > 5 else ""
-        return "\n".join(lines) + suffix
-
-    except ImportError:
-        logger.debug("daily_digest: airtable_tools not available — skip hot leads")
-        return ""
-    except Exception as e:
-        logger.warning(f"daily_digest _get_hot_leads_today: {e}")
-        return ""
-
-
-def _get_leads_scoring_summary() -> str:
-    """סיכום HOT/WARM/COLD counts מ-Airtable Leads. מחזיר string קצר, או "" אם אין."""
-    try:
-        from airtable_tools import airtable_get  # type: ignore
-        from airtable_schema import Tables       # type: ignore
+        from score_display import format_leads_summary  # type: ignore
 
         records = airtable_get(Tables.LEADS, "")
         if not records or not isinstance(records, list):
             return ""
 
-        hot = warm = cold = 0
-        for r in records:
-            tier = ""
-            if isinstance(r, dict):
-                tier = r.get("fields", {}).get("Tier") or r.get("fields", {}).get("tier") or ""
-            tier = tier.upper()
-            if tier == "HOT":    hot  += 1
-            elif tier == "WARM": warm += 1
-            elif tier == "COLD": cold += 1
-
-        total = hot + warm + cold
-        if not total:
-            return ""
-
-        parts = []
-        if hot:  parts.append(f"🔥 {hot} HOT")
-        if warm: parts.append(f"🟡 {warm} WARM")
-        if cold: parts.append(f"🧊 {cold} COLD")
-        parts.append(f"סה\"כ {total}")
-        return " | ".join(parts)
+        leads = [
+            {
+                "name":      r.get("fields", {}).get("Name", "ליד"),
+                "score":     int(r.get("fields", {}).get("score", 0) or 0),
+                "tier":      r.get("fields", {}).get("tier", "COLD"),
+                "next_step": r.get("fields", {}).get("next_step", ""),
+            }
+            for r in records if isinstance(r, dict)
+        ]
+        return format_leads_summary(leads)
 
     except ImportError:
-        logger.debug("daily_digest: airtable_tools not available — skip scoring")
+        logger.debug("daily_digest: score_display/airtable not available — skip leads")
         return ""
     except Exception as e:
-        logger.warning(f"daily_digest _get_leads_scoring_summary: {e}")
+        logger.warning(f"daily_digest _get_leads_summary: {e}")
         return ""
 
 
@@ -150,24 +108,14 @@ def build_digest() -> str:
         except Exception as e:
             logger.error(f"daily_digest deals: {e}")
 
-    # ── N05: לידים חמים היום ─────────────────────
+    # ── N05: לידים — score_display v2 ───────────────
     try:
-        hot_leads = _get_hot_leads_today()
-        if hot_leads:
-            lines.append("🔥 *לידים חמים — מחייבים מעקב היום:*")
-            lines.append(hot_leads)
+        leads_block = _get_leads_summary()
+        if leads_block:
+            lines.append(leads_block)
             lines.append("")
     except Exception as e:
-        logger.warning(f"daily_digest hot_leads: {e}")
-
-    # ── N05: סיכום scoring ───────────────────────
-    try:
-        scoring = _get_leads_scoring_summary()
-        if scoring:
-            lines.append(f"📊 *מצב לידים:* {scoring}")
-            lines.append("")
-    except Exception as e:
-        logger.warning(f"daily_digest scoring: {e}")
+        logger.warning(f"daily_digest leads: {e}")
 
     # ── ProjectTimeline ───────────────────────────
     try:

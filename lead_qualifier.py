@@ -14,6 +14,7 @@ from feature_flags import is_enabled
 from domain_prompts import get_qualification_prompt, get_flow, get_domain_config
 from config import get_domain
 from session_store import lead_sessions
+from score_display import format_lead_report
 
 logger = logging.getLogger(__name__)
 
@@ -55,16 +56,6 @@ def batch_qualify(leads: list[str], domain: str = "realestate") -> list[dict]:
     results.sort(key=lambda x: x.get("score", 0), reverse=True)
     return results
 
-
-def format_lead_report(qualification: dict) -> str:
-    tier_emoji = {"HOT": "🔥", "WARM": "🟡", "COLD": "🧊"}.get(qualification.get("tier", ""), "❓")
-    score = qualification.get("score", 0)
-    return (
-        f"{tier_emoji} *ציון ליד: {score}/100*\n"
-        f"📋 {qualification.get('summary', '')}\n"
-        f"⚠️ סיכון: {qualification.get('risk', '')}\n"
-        f"➡️ צעד הבא: {qualification.get('next_step', '')}"
-    )
 
 
 def _parse_response(text: str) -> dict:
