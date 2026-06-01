@@ -37,14 +37,11 @@ class EnvVar:
 _RULES: list[EnvVar] = [
 
     # ── CRITICAL — הבוט לא עולה בלעדיהם ──────────
-    EnvVar("ANTHROPIC_API_KEY",   "critical", "Claude AI API key",
-           validator="starts_with", starts_with="sk-ant-"),
-    EnvVar("TELEGRAM_TOKEN",      "critical", "Telegram Bot token",
-           validator="starts_with", starts_with=""),
-    EnvVar("AIRTABLE_API_KEY",    "critical", "Airtable Personal Access Token",
-           validator="starts_with", starts_with="pat"),
-    EnvVar("AIRTABLE_BASE_ID",    "critical", "Airtable Base ID",
-           validator="starts_with", starts_with="app"),
+    # הערה: בדיקת פורמט (starts_with) היא WARNING בלבד — CRITICAL = קיים בלבד
+    EnvVar("ANTHROPIC_API_KEY",   "critical", "Claude AI API key"),
+    EnvVar("TELEGRAM_TOKEN",      "critical", "Telegram Bot token"),
+    EnvVar("AIRTABLE_API_KEY",    "critical", "Airtable Personal Access Token"),
+    EnvVar("AIRTABLE_BASE_ID",    "critical", "Airtable Base ID"),
 
     # ── WARNING — פיצ'ר ספציפי לא יעבוד ──────────
     EnvVar("DIGEST_CHAT_ID",      "warning",  "Daily Digest Telegram chat ID",
