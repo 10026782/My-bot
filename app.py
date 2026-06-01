@@ -6,17 +6,17 @@
 
 import os
 import logging
+import threading
+from flask import Flask, request, Response, abort, jsonify
 
 logging.basicConfig(
-    level   = logging.INFO,
-    format  = "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt = "%Y-%m-%d %H:%M:%S",
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
 )
 
 from startup_validator import validate_startup, format_startup_message
-validate_startup()   # Fail Fast — SystemExit if CRITICAL env var missing
-
-from flask import Flask, request, Response, abort, jsonify
+validate_startup()
 
 import anthropic
 import telebot
@@ -40,7 +40,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 # ─── קבועים ────────────────────────────────────────
-MAX_TOOL_TURNS = 2
+MAX_TOOL_TURNS = 3
 AGENT_TIMEOUT  = 25
 
 # ─── קליינטים ──────────────────────────────────────
@@ -235,6 +235,19 @@ def _handle_approval_callback(cq) -> None:
         bot.answer_callback_query(cq.id, "⚠️ פעולה לא מוכרת")
 
 
+def _typing_indicator(chat_id: str, channel: str, stop_event: threading.Event, interval: float = 2.5) -> None:
+    """Send a periodic typing indicator while the Agent processes the request."""
+    while not stop_event.wait(interval):
+        if channel == "telegram":
+            try:
+                bot.send_chat_action(chat_id, "typing")
+            except Exception as e:
+                logger.debug(f"[Typing] failed for {chat_id}: {e}")
+        else:
+            # Future platforms can be added here if they support typing indicators.
+            pass
+
+
 def _safe_route(text: str, channel: str, identity, domain_from_channel: str = "") -> RouteDecision:
     """
     עוטף את route_request עם fallback.
@@ -346,8 +359,12 @@ def run_agent(
                 break
 
             if tool_calls_made >= MAX_TOOL_TURNS:
+                logger.warning(
+                    f"[Agent] reached max tool turns ({tool_calls_made}/{MAX_TOOL_TURNS}) "
+                    f"for user={identity.user_id} role={identity.role} intent={route.intent}"
+                )
                 final_reply = (text_blocks[0].text if text_blocks
-                               else "⚠️ הגעתי לגבול הכלים. נסה לפרק לשלבים.")
+                               else "⚠️ הגעתי למגבלת הפעולות לריצה זו. נסה לפרק את הבקשה לשלבים.")
                 break
 
             # ── Tool Loop ────────────────────────
@@ -455,7 +472,21 @@ def webhook_telegram():
         text    = update.message.text
         if idempotency.is_duplicate("telegram", chat_id, text):
             return "", 200
-        reply = run_agent(text, chat_id, channel="telegram")
+
+        typing_stop = threading.Event()
+        typing_thread = threading.Thread(
+            target=_typing_indicator,
+            args=(chat_id, "telegram", typing_stop),
+            daemon=True,
+        )
+        typing_thread.start()
+
+        try:
+            reply = run_agent(text, chat_id, channel="telegram")
+        finally:
+            typing_stop.set()
+            typing_thread.join(timeout=1.0)
+
         try:
             bot.send_message(chat_id, reply)
         except Exception as e:
