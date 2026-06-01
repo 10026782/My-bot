@@ -51,7 +51,7 @@ _TABLE_FIELDS: dict[str, set[str]] = {
 }
 
 # שדות שClaude ממציא ולא קיימים בשום טבלה
-_ALWAYS_FORBIDDEN = {"tenant_id", "tenant", "owner_id", "user_id", "chat_id"}
+_ALWAYS_FORBIDDEN = {"tenant", "owner_id", "user_id", "chat_id"}
 
 
 def _sanitize_fields(table: str, fields: dict) -> dict:
