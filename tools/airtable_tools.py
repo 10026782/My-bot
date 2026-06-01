@@ -48,6 +48,12 @@ _TABLE_FIELDS: dict[str, set[str]] = {
         "owner_phone", "plan",        "status",        "created_at",
         "airtable_base", "domains",   "features",
     },
+    # ── D02 — Lead Sessions ───────────────────────
+    "LeadSessions": {
+        "sender", "domain", "channel", "step", "answers",
+        "done", "drop_off_step", "updated_at", "created_at",
+        "score", "tier",
+    },
 }
 
 # שדות שClaude ממציא ולא קיימים בשום טבלה

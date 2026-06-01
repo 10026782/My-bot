@@ -295,6 +295,30 @@ def _job_email_inbound():
 
 
 # ══════════════════════════════════════════════════
+# D02 — Abandoned Lead Scan
+# ══════════════════════════════════════════════════
+
+def _job_abandoned_scan():
+    """D02: סריקת לידים נטושים כל 15 דקות."""
+    try:
+        from feature_flags import is_enabled
+        if not is_enabled("ABANDONED_LEADS"):
+            return
+        from abandoned_lead_worker import run_abandoned_scan
+        owner_chat_id = os.environ.get("DIGEST_CHAT_ID", "")
+        result = run_abandoned_scan(owner_chat_id)
+        if result.abandoned:
+            logger.info(
+                f"[D02] abandoned={result.abandoned} "
+                f"bounced={result.bounced} pipeline={result.human_pipeline}"
+            )
+    except ImportError as e:
+        logger.warning(f"[D02] not available: {e}")
+    except Exception as e:
+        logger.error(f"[D02] {e}")
+
+
+# ══════════════════════════════════════════════════
 # Runner
 # ══════════════════════════════════════════════════
 
@@ -311,7 +335,6 @@ def _run_scheduler():
 def start_scheduler() -> threading.Thread:
     from lead_memory import job_flush_lead_memory
     from shabbat_guard import shabbat_safe
-
     digest_time           = os.environ.get("DIGEST_TIME",               "07:30")
     collector_time        = os.environ.get("COLLECTOR_TIME",            "23:00")
     cleanup_interval      = int(os.environ.get("CLEANUP_INTERVAL_MIN",  "60"))
@@ -323,6 +346,7 @@ def start_scheduler() -> threading.Thread:
     email_interval        = int(os.environ.get("EMAIL_POLL_INTERVAL_MIN", "15"))
     security_day          = os.environ.get("SECURITY_REMINDER_DAY",    "sunday")
     security_time         = os.environ.get("SECURITY_REMINDER_TIME",   "09:00")
+    abandoned_interval    = int(os.environ.get("ABANDONED_INTERVAL_MIN", "15"))
 
     schedule.every().day.at(digest_time).do(_job_daily_digest)
     schedule.every().day.at(collector_time).do(_job_daily_collector)
@@ -334,6 +358,7 @@ def start_scheduler() -> threading.Thread:
     schedule.every().day.at(recovery_time).do(shabbat_safe(_job_lead_recovery))                  # F01
     getattr(schedule.every(), learning_day).at(learning_time).do(_job_learning_cycle)            # F02
     schedule.every(email_interval).minutes.do(_job_email_inbound)                                # F06 (email always ok)
+    schedule.every(abandoned_interval).minutes.do(shabbat_safe(_job_abandoned_scan))             # D02
     getattr(schedule.every(), security_day).at(security_time).do(_job_security_reminder)
 
     logger.info(
@@ -342,6 +367,7 @@ def start_scheduler() -> threading.Thread:
         f"payment={payment_reminder_time} | recovery={recovery_time} | "
         f"learning={learning_day} {learning_time} | "
         f"email=every {email_interval}min | "
+        f"abandoned=every {abandoned_interval}min | "
         f"security={security_day} {security_time}"
     )
 

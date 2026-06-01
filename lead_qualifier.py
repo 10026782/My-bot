@@ -9,11 +9,11 @@ lead_qualifier.py — Lead Qualification Engine (MADS CORE)
 import os
 import logging
 from enum import Enum
-from collections import OrderedDict
 from anthropic import Anthropic
 from feature_flags import is_enabled
 from domain_prompts import get_qualification_prompt, get_flow, get_domain_config
 from config import get_domain
+from session_store import lead_sessions
 
 logger = logging.getLogger(__name__)
 
@@ -105,33 +105,6 @@ class LeadState(Enum):
 
 
 _RESET_KEYWORDS = {"איפוס", "reset", "restart", "התחל מחדש"}
-_MAX_SESSIONS = 1000
-
-
-class _LRUSessionStore:
-    """מאגר sessions עם פינוי LRU — מגביל זיכרון ל-1000 משתמשים."""
-
-    def __init__(self, maxsize: int = _MAX_SESSIONS):
-        self._store: OrderedDict = OrderedDict()
-        self._maxsize = maxsize
-
-    def __getitem__(self, key: str) -> dict:
-        if key not in self._store:
-            self._store[key] = _new_session()
-            if len(self._store) > self._maxsize:
-                self._store.popitem(last=False)
-        else:
-            self._store.move_to_end(key)
-        return self._store[key]
-
-    def get(self, key: str, default=None):
-        return self._store.get(key, default)
-
-    def delete(self, key: str) -> None:
-        self._store.pop(key, None)
-
-
-lead_sessions = _LRUSessionStore()
 
 
 def _new_session(domain: str = "realestate") -> dict:
@@ -156,14 +129,11 @@ def handle_lead_message(sender: str, message: str, channel: str = "whatsapp") ->
         flow = get_flow(domain)
         return flow[0][1]
 
-    # get existing or create new session with correct domain
+    # get existing or create new session with correct domain + channel
     session = lead_sessions.get(sender)
     if session is None:
         domain = get_domain(channel, sender)
-        session = _new_session(domain)
-        lead_sessions._store[sender] = session
-        if len(lead_sessions._store) > lead_sessions._maxsize:
-            lead_sessions._store.popitem(last=False)
+        session = lead_sessions.get_or_create(sender, domain, channel)
 
     # שיחה הסתיימה
     if session["done"]:
@@ -175,19 +145,17 @@ def handle_lead_message(sender: str, message: str, channel: str = "whatsapp") ->
 
     # שמור תשובה לשלב הנוכחי
     field_name = flow[step][0]
-    session["answers"][field_name] = message.strip()
-
     next_step = step + 1
+    lead_sessions.update_step(sender, next_step, field_name, message.strip())
 
     # יש עוד שאלות
     if next_step < len(flow):
-        session["step"] = next_step
         return flow[next_step][1]
 
     # סיימנו — מנתחים
-    session["done"] = True
     lead_info = "\n".join(f"{k}: {v}" for k, v in session["answers"].items())
     result = qualify_lead(lead_info, domain)
+    lead_sessions.mark_done(sender, score=result.get("score", 0), tier=result.get("tier", "COLD"))
     return format_lead_report(result)
 
 
@@ -196,8 +164,8 @@ def init_lead_session(sender: str, channel: str = "whatsapp") -> str:
     יוצר session חדש לליד ומחזיר את שאלת הפתיחה.
     קורא לזה מ-app.py כשליד חדש נכנס.
     """
+    lead_sessions.delete(sender)  # איפוס session קיים אם יש
     domain = get_domain(channel, sender)
-    session = _new_session(domain)
-    lead_sessions._store[sender] = session
+    lead_sessions.get_or_create(sender, domain, channel)
     flow = get_flow(domain)
     return flow[0][1]
