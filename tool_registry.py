@@ -65,7 +65,8 @@ _REGISTRY: dict[str, ToolMeta] = {
     "calendar_create_event": ToolMeta(
         name="calendar_create_event",
         roles_allowed=_MANAGEMENT,
-        description_he="יצירת אירוע ביומן"
+        requires_approval=True,
+        description_he="יצירת אירוע ביומן — דורש אישור"
     ),
 
     # ── Gmail ────────────────────────────────────
@@ -92,7 +93,8 @@ _REGISTRY: dict[str, ToolMeta] = {
     "sheets_append": ToolMeta(
         name="sheets_append",
         roles_allowed=_MANAGEMENT,
-        description_he="הוספת שורה לגיליון"
+        requires_approval=True,
+        description_he="הוספת שורה לגיליון — דורש אישור"
     ),
 
     # ── Airtable ─────────────────────────────────
@@ -162,10 +164,6 @@ def enforce(tool_name: str, identity: "Identity") -> ToolMeta:
     if identity.role not in meta.roles_allowed:
         raise ToolDenied(
             f"❌ {identity.role} אינו מורשה להפעיל '{tool_name}'"
-        )
-    if meta.requires_approval and not identity.is_owner:
-        raise ToolDenied(
-            f"⏳ '{tool_name}' דורש אישור owner לפני ביצוע."
         )
     return meta
 

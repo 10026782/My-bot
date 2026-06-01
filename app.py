@@ -74,6 +74,142 @@ def approval_response(route: RouteDecision) -> str:
     )
 
 
+# ══════════════════════════════════════════════════
+# Approval Gate Helpers
+# ══════════════════════════════════════════════════
+
+def _describe_tool_call(tool_name: str, inputs: dict) -> str:
+    """תיאור קריא של קריאת כלי לכפתורי אישור."""
+    if tool_name == "gmail_send_draft":
+        return f"📧 שלח מייל (draft: {inputs.get('draft_id', '?')})"
+    if tool_name == "calendar_create_event":
+        start = str(inputs.get("start_time", "?"))[:16]
+        return f"📅 קבע: {inputs.get('summary', '?')} ב-{start}"
+    if tool_name == "airtable_add":
+        fields_str = str(inputs.get("fields", {}))[:50]
+        return f"➕ הוסף ל-{inputs.get('table', '?')}: {fields_str}"
+    if tool_name == "airtable_update":
+        return f"✏️ עדכן {inputs.get('record_id', '?')} ב-{inputs.get('table', '?')}"
+    if tool_name == "sheets_append":
+        return f"📊 כתוב ל-{inputs.get('sheet_name', '?')}"
+    return f"⚡ {tool_name}: {str(inputs)[:60]}"
+
+
+def _queue_approval(tool_name: str, tool_inputs: dict,
+                    user_chat_id: str, channel: str) -> str:
+    """
+    שומר פעולה ממתינה ושולח בקשת אישור לowner.
+    מחזיר string לmodel: "⏳ ממתין לאישור..."
+    """
+    from event_bus import bus
+    label     = _describe_tool_call(tool_name, tool_inputs)
+    action_id, _ = bus.request_approval(
+        action  = tool_name,
+        payload = {
+            "tool_name":    tool_name,
+            "tool_inputs":  tool_inputs,
+            "user_chat_id": user_chat_id,
+            "channel":      channel,
+        },
+        chat_id = user_chat_id,
+        label   = label,
+    )
+
+    owner_chat_id = os.environ.get("DIGEST_CHAT_ID", "")
+    if owner_chat_id:
+        kb = telebot.types.InlineKeyboardMarkup()
+        kb.add(
+            telebot.types.InlineKeyboardButton("✅ אשר", callback_data=f"approve:{action_id}"),
+            telebot.types.InlineKeyboardButton("❌ בטל",  callback_data=f"reject:{action_id}"),
+        )
+        try:
+            bot.send_message(
+                owner_chat_id,
+                f"⏳ *בקשת אישור*\n\n{label}\n\n_ID: {action_id} | פג תוקף בעוד 10 דקות_",
+                parse_mode="Markdown",
+                reply_markup=kb,
+            )
+        except Exception as e:
+            logger.error(f"[Approval] notify owner failed: {e}")
+
+    logger.info(f"[Approval] queued {action_id} | {tool_name} | user={user_chat_id}")
+    return f"⏳ הפעולה ממתינה לאישור הבעלים: {label}"
+
+
+def _handle_approval_callback(cq) -> None:
+    """מטפל בלחיצה על ✅/❌ של בקשת אישור."""
+    from event_bus import bus
+
+    data = cq.data or ""
+    if ":" not in data:
+        bot.answer_callback_query(cq.id, "⚠️ נתוני callback לא תקינים")
+        return
+
+    action, action_id = data.split(":", 1)
+
+    if action == "approve":
+        item = bus._pending.pop(action_id)
+        if not item:
+            bot.answer_callback_query(cq.id, "⏰ פג תוקף — הפעולה לא קיימת יותר")
+            try:
+                bot.edit_message_reply_markup(cq.message.chat.id, cq.message.message_id,
+                                              reply_markup=None)
+            except Exception:
+                pass
+            return
+
+        payload       = item["payload"]
+        tool_name     = payload["tool_name"]
+        tool_inputs   = payload["tool_inputs"]
+        user_chat_id  = payload["user_chat_id"]
+        channel       = payload.get("channel", "telegram")
+
+        identity = resolve_identity(channel, user_chat_id)
+        raw      = dispatch_tool(tool_name, tool_inputs, identity)
+        result   = validate_tool_output(tool_name, raw)
+        logger.info(f"[Approval] ✅ confirmed {action_id} | {tool_name}")
+
+        try:
+            bot.send_message(user_chat_id, f"✅ הפעולה בוצעה:\n{result}")
+        except Exception as e:
+            logger.error(f"[Approval] notify user failed: {e}")
+
+        try:
+            bot.edit_message_text(
+                f"✅ *אושר ובוצע*\n{item['label']}\n\n`{result[:200]}`",
+                cq.message.chat.id, cq.message.message_id,
+                parse_mode="Markdown",
+            )
+        except Exception:
+            pass
+        bot.answer_callback_query(cq.id, "✅ בוצע!")
+
+    elif action == "reject":
+        item = bus._pending.get(action_id)
+        bus.reject(action_id)
+
+        if item:
+            user_chat_id = item["payload"].get("user_chat_id", "")
+            if user_chat_id:
+                try:
+                    bot.send_message(user_chat_id, f"🚫 הפעולה בוטלה: {item['label']}")
+                except Exception:
+                    pass
+
+        try:
+            bot.edit_message_text(
+                "🚫 *בוטל*",
+                cq.message.chat.id, cq.message.message_id,
+                parse_mode="Markdown",
+            )
+        except Exception:
+            pass
+        bot.answer_callback_query(cq.id, "🚫 בוטל")
+
+    else:
+        bot.answer_callback_query(cq.id, "⚠️ פעולה לא מוכרת")
+
+
 def _safe_route(text: str, channel: str, identity, domain_from_channel: str = "") -> RouteDecision:
     """
     עוטף את route_request עם fallback.
@@ -202,11 +338,21 @@ def run_agent(
                     continue
 
                 try:
-                    enforce(tu.name, identity)
+                    meta = enforce(tu.name, identity)
                 except ToolDenied as e:
                     logger.warning(f"[Tool] Denied: {tu.name} for {identity.role}")
                     tool_results.append({
                         "type": "tool_result", "tool_use_id": tu.id, "content": str(e)
+                    })
+                    continue
+
+                # ── Approval Gate ─────────────────────
+                if meta.requires_approval:
+                    result = _queue_approval(
+                        tu.name, dict(tu.input), chat_id, channel
+                    )
+                    tool_results.append({
+                        "type": "tool_result", "tool_use_id": tu.id, "content": result
                     })
                     continue
 
@@ -267,6 +413,14 @@ def webhook_telegram():
     if request.headers.get("content-type") != "application/json":
         abort(403)
     update = telebot.types.Update.de_json(request.get_data().decode("utf-8"))
+
+    if update.callback_query:
+        try:
+            _handle_approval_callback(update.callback_query)
+        except Exception as e:
+            logger.error(f"[Telegram] callback error: {e}", exc_info=True)
+        return "", 200
+
     if update.message and update.message.text:
         chat_id = str(update.message.chat.id)
         text    = update.message.text
