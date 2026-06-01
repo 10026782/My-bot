@@ -32,9 +32,10 @@ MAX_TOOL_TURNS = 2
 AGENT_TIMEOUT  = 25
 
 # ─── קליינטים ──────────────────────────────────────
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-TELEGRAM_TOKEN    = os.environ.get("TELEGRAM_TOKEN", "")
-RENDER_APP_URL    = os.environ.get("RENDER_APP_URL", "https://my-bot-jqz2.onrender.com")
+ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
+TELEGRAM_TOKEN     = os.environ.get("TELEGRAM_TOKEN", "")
+RENDER_APP_URL     = os.environ.get("RENDER_APP_URL", "https://my-bot-jqz2.onrender.com")
+WEBHOOK_SECRET     = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=AGENT_TIMEOUT)
 bot    = telebot.TeleBot(TELEGRAM_TOKEN)
@@ -50,8 +51,11 @@ except Exception as e:
 if os.environ.get("SETUP_WEBHOOK") == "1":
     try:
         bot.remove_webhook()
-        bot.set_webhook(url=f"{RENDER_APP_URL}/{TELEGRAM_TOKEN}")
-        logger.info("Telegram Webhook set")
+        kwargs = {"url": f"{RENDER_APP_URL}/{TELEGRAM_TOKEN}"}
+        if WEBHOOK_SECRET:
+            kwargs["secret_token"] = WEBHOOK_SECRET
+        bot.set_webhook(**kwargs)
+        logger.info(f"Telegram Webhook set (secret={'yes' if WEBHOOK_SECRET else 'no'})")
     except Exception as e:
         logger.error(f"Webhook failed: {e}")
 
@@ -412,6 +416,10 @@ def health():
 def webhook_telegram():
     if request.headers.get("content-type") != "application/json":
         abort(403)
+    if WEBHOOK_SECRET:
+        if request.headers.get("X-Telegram-Bot-Api-Secret-Token", "") != WEBHOOK_SECRET:
+            logger.warning(f"[Webhook] bad secret from {request.remote_addr}")
+            abort(403)
     update = telebot.types.Update.de_json(request.get_data().decode("utf-8"))
 
     if update.callback_query:

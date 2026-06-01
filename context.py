@@ -9,6 +9,7 @@
 from __future__ import annotations
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone, timedelta
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -231,6 +232,12 @@ def build_context(
             "\n\n[הוראת מערכת: הכוונה לא ברורה לחלוטין. "
             "בקש הבהרה קצרה ואחת בלבד.]"
         )
+
+    # ── Israel date/time injection ────────────────────
+    _il_offset = 3 if 4 <= datetime.utcnow().month <= 10 else 2  # DST approximation
+    _now_il    = datetime.now(tz=timezone(timedelta(hours=_il_offset)))
+    _date_line = _now_il.strftime("📅 היום: %A %d/%m/%Y | שעה: %H:%M (ישראל)")
+    system     = _date_line + "\n\n" + system
 
     allowed_tools = _filter_tools(identity.role)
 
