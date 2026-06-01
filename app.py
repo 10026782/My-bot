@@ -32,6 +32,7 @@ from guards          import idempotency, rate_limiter, validate_tool_output
 from config          import get_domain as _channel_domain
 from core.router     import route_request, RouteDecision, Handler
 from core.anti_hallucination import verify_execution, sanitize_agent_response
+from health_monitor import get_health_status
 try:
     from ad_attribution import inject_source_to_incoming_lead as _inject_utm
 except ImportError:
@@ -442,11 +443,13 @@ def run_agent(
 
 @app.route("/health", methods=["GET"])
 def health():
+    health_status = get_health_status(globals().get("_scheduler"))
     return jsonify({
-        "status":         "ok",
+        "status":         health_status["status"],
         "version":        "3.0",
         "max_tool_turns": MAX_TOOL_TURNS,
         "router":         "CORE_02.6",
+        "checks":         health_status["checks"],
     }), 200
 
 
