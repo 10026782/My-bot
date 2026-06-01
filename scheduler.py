@@ -310,6 +310,8 @@ def _run_scheduler():
 
 def start_scheduler() -> threading.Thread:
     from lead_memory import job_flush_lead_memory
+    from shabbat_guard import shabbat_safe
+
     digest_time           = os.environ.get("DIGEST_TIME",               "07:30")
     collector_time        = os.environ.get("COLLECTOR_TIME",            "23:00")
     cleanup_interval      = int(os.environ.get("CLEANUP_INTERVAL_MIN",  "60"))
@@ -326,12 +328,12 @@ def start_scheduler() -> threading.Thread:
     schedule.every().day.at(collector_time).do(_job_daily_collector)
     schedule.every(cleanup_interval).minutes.do(_job_cleanup_pending)
     schedule.every().day.at("00:05").do(_job_overdue_payments)
-    schedule.every(10).minutes.do(job_flush_lead_memory)                       # N01
-    schedule.every(followup_interval).minutes.do(_job_followup_scan)          # N02
-    schedule.every().day.at(payment_reminder_time).do(_job_payment_reminders) # N04
-    schedule.every().day.at(recovery_time).do(_job_lead_recovery)             # F01
-    getattr(schedule.every(), learning_day).at(learning_time).do(_job_learning_cycle)  # F02
-    schedule.every(email_interval).minutes.do(_job_email_inbound)                    # F06
+    schedule.every(10).minutes.do(job_flush_lead_memory)                                          # N01
+    schedule.every(followup_interval).minutes.do(shabbat_safe(_job_followup_scan))               # N02
+    schedule.every().day.at(payment_reminder_time).do(shabbat_safe(_job_payment_reminders))      # N04
+    schedule.every().day.at(recovery_time).do(shabbat_safe(_job_lead_recovery))                  # F01
+    getattr(schedule.every(), learning_day).at(learning_time).do(_job_learning_cycle)            # F02
+    schedule.every(email_interval).minutes.do(_job_email_inbound)                                # F06 (email always ok)
     getattr(schedule.every(), security_day).at(security_time).do(_job_security_reminder)
 
     logger.info(

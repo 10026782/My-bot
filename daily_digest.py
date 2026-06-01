@@ -102,6 +102,16 @@ def build_digest() -> str:
     today = date.today().strftime("%d/%m/%Y")
     lines = [f"☀️ *בוקר טוב — דוח יומי {today}*\n"]
 
+    # שבת/חג — הודעה בראש הדוח
+    try:
+        from shabbat_guard import shabbat_status_message  # type: ignore
+        shabbat_msg = shabbat_status_message()
+        if shabbat_msg:
+            lines.append(shabbat_msg)
+            lines.append("")
+    except ImportError:
+        pass
+
     crm_upcoming, crm_overdue, crm_deals = _safe_import_crm()
 
     # ── תשלומים קרובים ──────────────────────────

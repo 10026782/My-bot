@@ -331,6 +331,18 @@ def process_voice_step(
     except ImportError:
         pass  # dev mode
 
+    # שבת/חג guard — IVR לא עובד בשבת
+    try:
+        from shabbat_guard import should_send_now, next_allowed_time  # type: ignore
+        if not should_send_now("voice"):
+            next_t = next_allowed_time()
+            return build_twiml(
+                _say(f"הקו אינו פעיל בשבת ובחגים. ניתן להתקשר לאחר {next_t}.") +
+                _hangup()
+            )
+    except ImportError:
+        pass
+
     session = get_or_create_session(call_sid, from_num)
     session.digits = digits
 
