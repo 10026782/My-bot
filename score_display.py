@@ -210,7 +210,7 @@ def _run_tests() -> bool:
 
     # format_score_inline
     inline = format_score_inline(82)
-    chk("inline BOILING at 82",   "BOILING" in inline)
+    chk("inline BOILING at 82",       "BOILING" in inline)
     chk("inline 82",              "82" in inline)
 
     # format_airtable_temperature
