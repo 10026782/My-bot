@@ -117,6 +117,22 @@ def build_digest() -> str:
     except Exception as e:
         logger.warning(f"daily_digest leads: {e}")
 
+    # ── D04: Churn Risk ───────────────────────────
+    try:
+        from feature_flags import is_enabled  # type: ignore
+        if is_enabled("AUDIENCE_INTELLIGENCE"):
+            from audience_intelligence import detect_churn_risk, load_all_leads  # type: ignore
+            churn = detect_churn_risk(load_all_leads())
+            if churn:
+                lines.append("🚨 *Churn Risk — פנה מהר:*")
+                for l in churn[:3]:
+                    lines.append(f"  • *{l.name}* score={l.score} | {l.days_silent}d שתיקה")
+                lines.append("")
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.warning(f"daily_digest churn: {e}")
+
     # ── ProjectTimeline ───────────────────────────
     try:
         from project_timeline import get_timeline_summary, format_timeline_digest_block

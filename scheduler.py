@@ -319,6 +319,26 @@ def _job_abandoned_scan():
 
 
 # ══════════════════════════════════════════════════
+# D04 — Audience Intelligence
+# ══════════════════════════════════════════════════
+
+def _job_audience_report():
+    """D04: דוח audience שבועי — כל ראשון."""
+    try:
+        from feature_flags import is_enabled
+        if not is_enabled("AUDIENCE_INTELLIGENCE"):
+            return
+        from audience_intelligence import run_audience_scan
+        result = run_audience_scan(os.environ.get("DIGEST_CHAT_ID", ""))
+        if result.total:
+            logger.info(f"[Audience] total={result.total} segments={len(result.segments)}")
+    except ImportError as e:
+        logger.warning(f"[Audience] not available: {e}")
+    except Exception as e:
+        logger.error(f"[Audience] {e}")
+
+
+# ══════════════════════════════════════════════════
 # Runner
 # ══════════════════════════════════════════════════
 
@@ -359,6 +379,7 @@ def start_scheduler() -> threading.Thread:
     getattr(schedule.every(), learning_day).at(learning_time).do(_job_learning_cycle)            # F02
     schedule.every(email_interval).minutes.do(_job_email_inbound)                                # F06 (email always ok)
     schedule.every(abandoned_interval).minutes.do(shabbat_safe(_job_abandoned_scan))             # D02
+    getattr(schedule.every(), "sunday").at("08:00").do(shabbat_safe(_job_audience_report))       # D04
     getattr(schedule.every(), security_day).at(security_time).do(_job_security_reminder)
 
     logger.info(
