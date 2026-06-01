@@ -37,7 +37,7 @@ _TABLE_FIELDS: dict[str, set[str]] = {
     },
     # ── N01/N02 — Lead Memory ─────────────────────
     "Leads": {
-        "memory_key", "Name",       "phone",      "status",
+        "tenant_id",  "memory_key", "Name",       "phone",      "status",
         "tier",       "score",      "summary",    "next_step",
         "notes",      "domain",     "source",     "channel",
         "created_at", "updated_at", "Temperature",

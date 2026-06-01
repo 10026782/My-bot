@@ -79,9 +79,14 @@ def dispatch_tool(name: str, inputs: dict, identity: "Identity | None" = None) -
                 fields = dict(inputs["fields"])
                 # הזרקת tenant_id ו-domain_id אוטומטית לכל רשומה חדשה
                 if identity:
-                    fields.setdefault("tenant_id", tenant_id)
-                    fields.setdefault("domain_id", identity.domain_id)
-                    fields.setdefault("owner_user_id", user_id)
+                    if inputs["table"] == "Leads":
+                        fields.setdefault("tenant_id", tenant_id)
+                        if identity.domain_id:
+                            fields.setdefault("domain", identity.domain_id)
+                    else:
+                        fields.setdefault("tenant_id", tenant_id)
+                        fields.setdefault("domain_id", identity.domain_id)
+                        fields.setdefault("owner_user_id", user_id)
                 return airtable_add(inputs["table"], fields)
 
             case "airtable_update":
