@@ -13,61 +13,55 @@ logger = logging.getLogger(__name__)
 # ══════════════════════════════════════════════════
 
 _TABLE_FIELDS: dict[str, set[str]] = {
+    # ── alias keys (what Claude sends) ────────────
     "Tasks": {
-        "Name", "Status", "Priority", "Deadline", "Deal", "Notes",
-        "Assignee",
-        "Created",
+        "כותרת המשימה", "תיאור", "תאריך יעד", "סטטוס",
+        "מקושר לאנשי קשר", "מקושר לעסקאות",
     },
     "Contacts": {
-        "Name", "Phone", "Email", "Type", "Company",
-        "Notes", "Last Contact", "Status",
+        "שם", "חברה", "אימייל", "טלפון", "תאריך פולו אפ",
+        "סטטוס", "עסקאות (Deals)", "משימות (Tasks)",
     },
     "Deals": {
-        "Name", "Address", "Status", "Price", "Funding Cost %",
-        "ROI %", "Contact", "Deadline", "Notes", "Risk Level",
+        "שם העסקה", "סכום", "שלב", "תאריך סגירה",
+        "מקושר לאנשי קשר", "משימות (Tasks)", "תשלומים (Payments)",
     },
     "Expenses": {
-        "Name", "Amount", "Date", "Category", "Deal", "Receipt", "Notes",
+        "שם ההוצאה", "סכום", "קטגוריה", "תאריך",
     },
     "Payments": {
-        "Name", "Amount", "Due Date", "Status", "Deal", "Contact", "Notes",
+        "אסמכתא", "סכום", "תאריך", "סטטוס", "מקושר לעסקאות",
     },
-    "Imports": {
-        "Product", "Supplier", "Status", "Advance %", "Balance %",
-        "Total USD", "Ship Date", "QC Passed", "Notes",
+    "Deadlines": {
+        "שם המשימה", "סטטוס", "תאריך דדליין", "אחראי",
+        "תיאור המשימה", "עדיפות", "קישור לרשומת מכירה/יחידה", "הערות",
     },
-    # ── N01/N02 — Lead Memory ─────────────────────
+    # ── Leads — lowercase keys כפי שנוצרו ב-Airtable ──
     "Leads": {
-        "tenant_id",  "memory_key", "Name",       "phone",      "status",
-        "tier",       "score",      "summary",    "next_step",
-        "notes",      "domain",     "source",     "channel",
-        "created_at", "updated_at", "Temperature",
-        # ── D05 — Ad Attribution ──────────────────
+        "Name", "phone", "status", "score ציון",
+        "summary", "answers", "source", "channel",
+        "created_at", "memory_key", "tenant_id", "domain",
+        "notes", "next_step", "tier", "Temperature",
         "utm_source", "utm_medium", "utm_campaign", "platform",
         "deal_value", "converted_at", "campaign_source",
     },
-    # ── F08 — SaaS Multi-Tenant ───────────────────
-    "Tenants": {
-        "tenant_id", "Name",          "template",      "owner_name",
-        "owner_phone", "plan",        "status",        "created_at",
-        "airtable_base", "domains",   "features",
+    # ── Projects / Units ──────────────────────────
+    "Projects": {
+        "Project Name", "Location", "Status", "Total Units",
+        "Project Type", "Start Date", "End Date",
+        "Total Cost", "Total Revenue", "Project Manager",
+        "Primary Lender", "Notes",
     },
-    # ── D02 — Lead Sessions ───────────────────────
-    "LeadSessions": {
-        "sender", "domain", "channel", "step", "answers",
-        "done", "drop_off_step", "updated_at", "created_at",
-        "score", "tier",
+    "Units": {
+        "Unit Number", "Project", "Type", "Size (sqft)", "Price",
+        "Status", "Floor", "Bedrooms", "Bathrooms", "Features",
+        "Owner/Tenant", "Availability Date", "Notes", "Sale Price (NIS)",
     },
-    # ── D06 — Business Memory ─────────────────────
-    "Business_Memory": {
-        "channel", "external_id", "title", "timestamp",
-        "participants", "domain", "summary", "decisions",
-        "tasks_json", "risks", "next_steps", "sentiment",
-        "keywords", "raw_snapshot",
-    },
-    # ── ProjectTimeline ───────────────────────────
-    "ProjectTimeline": {
-        "Task", "Phase", "Status", "Due", "Priority", "Notes",
+    "Loans": {
+        "Loan Name/ID", "Project", "Lender", "Loan Amount",
+        "Interest Rate (%)", "Term (months)", "Start Date", "End Date",
+        "Payment Schedule", "Outstanding Balance",
+        "Next Payment Due", "Payment Status", "Notes",
     },
 }
 
