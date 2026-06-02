@@ -450,6 +450,9 @@ def health():
         "max_tool_turns": MAX_TOOL_TURNS,
         "router":         "CORE_02.6",
         "checks":         health_status["checks"],
+        "digest_chat_id": bool(os.environ.get("DIGEST_CHAT_ID")),
+        "airtable":       bool(os.environ.get("AIRTABLE_API_KEY")),
+        "memory_entries": len(memory._store),
     }), 200
 
 
@@ -471,27 +474,30 @@ def webhook_telegram():
         return "", 200
 
     if update.message and update.message.text:
-        chat_id = str(update.message.chat.id)
-        text    = update.message.text
-        if idempotency.is_duplicate("telegram", chat_id, text):
+        reply_chat_id  = str(update.message.chat.id)       # לאן לשלוח (group או private)
+        sender_user_id = str(update.message.from_user.id)  # מי שלח (תמיד USER_ID)
+        text           = update.message.text
+        if idempotency.is_duplicate("telegram", sender_user_id, text):
             return "", 200
 
-        typing_stop = threading.Event()
+        typing_stop   = threading.Event()
         typing_thread = threading.Thread(
             target=_typing_indicator,
-            args=(chat_id, "telegram", typing_stop),
+            args=(reply_chat_id, "telegram", typing_stop),
             daemon=True,
         )
+        bot.send_chat_action(reply_chat_id, "typing")  # מיידי — לפני wait ראשון
         typing_thread.start()
 
         try:
-            reply = run_agent(text, chat_id, channel="telegram")
+            reply = run_agent(text, sender_user_id, channel="telegram")
         finally:
             typing_stop.set()
             typing_thread.join(timeout=1.0)
 
+
         try:
-            bot.send_message(chat_id, reply)
+            bot.send_message(reply_chat_id, reply)
         except Exception as e:
             logger.error(f"[Telegram] send error: {e}")
     return "", 200

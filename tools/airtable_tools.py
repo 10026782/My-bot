@@ -64,6 +64,10 @@ _TABLE_FIELDS: dict[str, set[str]] = {
         "tasks_json", "risks", "next_steps", "sentiment",
         "keywords", "raw_snapshot",
     },
+    # ── ProjectTimeline ───────────────────────────
+    "ProjectTimeline": {
+        "Task", "Phase", "Status", "Due", "Priority", "Notes",
+    },
 }
 
 # שדות שClaude ממציא ולא קיימים בשום טבלה
