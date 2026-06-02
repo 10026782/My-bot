@@ -7,14 +7,23 @@
 # ══════════════════════════════════════════════════
 
 class Tables:
-    CONTACTS   = "אנשי קשר (Contacts)"          # אנשי קשר / לקוחות / ספקים
-    DEALS      = "עסקאות (Deals)"               # עסקאות נדל"ן
-    TASKS      = "משימות (Tasks)"               # משימות
-    EXPENSES   = "הוצאות (Expenses)"            # הוצאות
-    IMPORTS    = "Imports"                       # יבוא מסין (שם ללא עברית)
-    PAYMENTS   = "תשלומים (Payments)"           # תשלומים ותזרים
-    LEADS      = "Leads"                         # לידים מכל הערוצים והדומיינים
-    TENANTS    = "Tenants"                       # F08 — SaaS Multi-Tenant registry
+    CONTACTS        = "אנשי קשר (Contacts)"          # אנשי קשר / לקוחות / ספקים
+    DEALS           = "עסקאות (Deals)"               # עסקאות נדל"ן
+    TASKS           = "משימות (Tasks)"               # משימות
+    DEADLINES       = "משימות ודד ליינים"             # משימות עם דד-ליין (טבלה נפרדת)
+    EXPENSES        = "הוצאות (Expenses)"            # הוצאות
+    IMPORTS         = "Imports"                       # יבוא מסין
+    PAYMENTS        = "תשלומים (Payments)"           # תשלומים ותזרים
+    LEADS           = "Leads"                         # לידים מכל הערוצים והדומיינים
+    TENANTS         = "Tenants"                       # F08 — SaaS Multi-Tenant registry
+    PROJECTS        = "Projects"                      # פרויקטים
+    UNITS           = "Units"                         # יחידות דיור
+    UNIT_SALES      = "Unit Sales & Debt Distribution" # מכירות + חוב יחידות
+    LOANS           = "Loans"                         # הלוואות
+    DEBT_MANAGEMENT = "Company A - Debt Management"   # ניהול חוב חברה A
+    CASH_FLOW       = "Weekly Cash Flow Reports"      # דוחות תזרים שבועיים
+    PROFILE         = "Profile"                       # פרופיל עסקי
+    LEARNINGS       = "למידות ותובנות"               # למידות ותובנות
 
 
 # ══════════════════════════════════════════════════
