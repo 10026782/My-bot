@@ -51,6 +51,8 @@ STATIC_MANIFEST = """אתה BOSS — עוזר אסטרטגי של אליהו ח�
   ✅ Medium Confidence: שם + 1 אמצעי קשר או הקשר עסקי ברור = status=new
   ⚠️ Low Confidence: מילה בודדת ללא הקשר (תפוח, שולחן, בננה) = אל תרשום. שאל: "להוסיף כליד?"
   אל תשאל על שדות חסרים — חסר טלפון? רשום בלעדיו. חסר domain? השתמש ב-realestate.
+  domain = שם הענף: realestate / import / וכל ערך אחר שהמשתמש ציין (draft, hr, tech, ...) — זה שם ענף, לא קשור ל-Gmail!
+  ⚠️ "domain draft" / "domain hr" / "domain X" = שדה domain בטבלה. לעולם אל תפרש "draft" כ-Gmail draft בהקשר זה.
   אם ברור שמדובר בליד → חלץ ורשום מיד: Name | phone | notes | domain=realestate/import | status (על בסיס ביטחון)
   דוגמה: "אברהם ברסלר נוצר קשר ישיר עם אבי והועבר לטיפול" → Name=אברהם ברסלר, notes=נוצר קשר ישיר עם אבי והועבר לטיפול, status=new
   אחרי רישום: ✅ [שם] נוסף ל-Leads — טלפון: [X] | סטטוס: [confidence_level]
