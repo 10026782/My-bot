@@ -7,14 +7,14 @@
 # ══════════════════════════════════════════════════
 
 class Tables:
-    CONTACTS   = "Contacts"      # אנשי קשר / לקוחות / ספקים
-    DEALS      = "Deals"         # עסקאות נדל"ן
-    TASKS      = "Tasks"         # משימות
-    EXPENSES   = "Expenses"      # הוצאות
-    IMPORTS    = "Imports"       # יבוא מסין
-    PAYMENTS   = "Payments"      # תשלומים ותזרים
-    LEADS      = "Leads"         # לידים מכל הערוצים והדומיינים
-    TENANTS    = "Tenants"       # F08 — SaaS Multi-Tenant registry
+    CONTACTS   = "אנשי קשר (Contacts)"          # אנשי קשר / לקוחות / ספקים
+    DEALS      = "עסקאות (Deals)"               # עסקאות נדל"ן
+    TASKS      = "משימות (Tasks)"               # משימות
+    EXPENSES   = "הוצאות (Expenses)"            # הוצאות
+    IMPORTS    = "Imports"                       # יבוא מסין (שם ללא עברית)
+    PAYMENTS   = "תשלומים (Payments)"           # תשלומים ותזרים
+    LEADS      = "Leads"                         # לידים מכל הערוצים והדומיינים
+    TENANTS    = "Tenants"                       # F08 — SaaS Multi-Tenant registry
 
 
 # ══════════════════════════════════════════════════
