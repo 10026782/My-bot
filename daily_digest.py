@@ -161,7 +161,7 @@ def send_daily_digest(bot, chat_id: str) -> None:
 
     try:
         text = build_digest()
-        bot.send_message(chat_id, text, parse_mode="Markdown")
+        bot.send_message(chat_id, text)
         logger.info(f"✅ Daily digest נשלח ל-{chat_id}")
     except Exception as e:
         logger.error(f"send_daily_digest failed: {e}")
