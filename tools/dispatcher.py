@@ -7,11 +7,14 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from action_validator import ActionBlocked, validate_action
+
 from .drive_tools    import search_drive, read_drive_file
 from .calendar_tools import calendar_get_events, calendar_create_event
 from .gmail_tools    import gmail_draft, gmail_send_draft, gmail_read
 from .sheets_tools   import sheets_append
-from .airtable_tools    import airtable_get, airtable_add, airtable_update, airtable_get_schema
+from .airtable_tools    import airtable_get, airtable_add, airtable_update, airtable_get_schema, search_lead
+from .airtable_security import TenantScopeViolation, audit_log_airtable, enforce_tenant_scope
 from .contact_resolver  import resolve_contact
 
 if TYPE_CHECKING:
@@ -31,6 +34,14 @@ def dispatch_tool(name: str, inputs: dict, identity: "Identity | None" = None) -
     user_id   = identity.user_id   if identity else "unknown"
 
     logger.info(f"[Dispatch] {name} | tenant={tenant_id} user={user_id} | inputs={str(inputs)[:80]}")
+
+    validation = validate_action(name, inputs)
+    if isinstance(validation, ActionBlocked):
+        logger.warning(
+            f"[Dispatch] blocked by action_validator | "
+            f"tool={name} tenant={tenant_id} user={user_id} reason={validation.reason}"
+        )
+        return validation.reason
 
     try:
         match name:
@@ -69,11 +80,34 @@ def dispatch_tool(name: str, inputs: dict, identity: "Identity | None" = None) -
 
             # ── Airtable ─────────────────────────────
             case "airtable_get":
-                filter_formula = inputs.get("filter", "")
-                if identity and identity.is_external and not filter_formula:
-                    # lead/guest רואה רק נתוני עצמו
-                    filter_formula = f"{{user_id}}='{user_id}'"
-                return airtable_get(inputs["table"], filter_formula)
+                if not identity:
+                    logger.warning("[Dispatch] blocked airtable_get: missing identity")
+                    return "❌ גישה נחסמה: אין זהות תקינה לקריאת Airtable."
+
+                table = inputs["table"]
+                filter_formula = inputs.get("filter", "").strip()
+                params = {"table": table}
+
+                if identity.is_external:
+                    user_filter = f"{{user_id}}='{identity.user_id}'"
+                    filter_formula = (
+                        f"AND({filter_formula}, {user_filter})"
+                        if filter_formula else user_filter
+                    )
+
+                if filter_formula:
+                    params["filterByFormula"] = filter_formula
+
+                try:
+                    secured_params = enforce_tenant_scope("airtable_get", identity, params)
+                except TenantScopeViolation as e:
+                    audit_log_airtable("airtable_get", identity, params, f"blocked: {e}")
+                    return str(e)
+
+                secured_filter = secured_params.get("filterByFormula", "")
+                result = airtable_get(table, secured_filter)
+                audit_log_airtable("airtable_get", identity, secured_params, result)
+                return result
 
             case "airtable_add":
                 fields = dict(inputs["fields"])
@@ -96,6 +130,9 @@ def dispatch_tool(name: str, inputs: dict, identity: "Identity | None" = None) -
 
             case "airtable_get_schema":
                 return airtable_get_schema()
+
+            case "search_lead":
+                return search_lead(inputs["name"])
 
             # ── Contact Resolver (N03) ────────────────
             case "resolve_contact":
