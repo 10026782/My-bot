@@ -110,23 +110,49 @@ def dispatch_tool(name: str, inputs: dict, identity: "Identity | None" = None) -
                 return result
 
             case "airtable_add":
+                table  = inputs["table"]
                 fields = dict(inputs["fields"])
-                # הזרקת tenant_id ו-domain_id אוטומטית לכל רשומה חדשה
+
+                # בלוק external users מכתיבה לטבלאות שאינן Leads
+                if identity and identity.is_external and table != "Leads":
+                    audit_log_airtable("airtable_add", identity, {"table": table}, "blocked: external write to non-lead table")
+                    return f"❌ גישה נחסמה: אין הרשאה לכתוב לטבלה '{table}'."
+
+                # הזרקת tenant_id ו-domain אוטומטית לכל רשומה חדשה
                 if identity:
-                    if inputs["table"] == "Leads":
-                        fields.setdefault("tenant_id", tenant_id)
-                        if identity.domain_id:
-                            fields.setdefault("domain", identity.domain_id)
-                    else:
-                        fields.setdefault("tenant_id", tenant_id)
-                        fields.setdefault("domain_id", identity.domain_id)
-                        fields.setdefault("owner_user_id", user_id)
-                return airtable_add(inputs["table"], fields)
+                    fields.setdefault("tenant_id", tenant_id)
+                    if table == "Leads" and identity.domain_id:
+                        fields.setdefault("domain", identity.domain_id)
+
+                try:
+                    enforce_tenant_scope("airtable_add", identity, {"table": table})
+                except TenantScopeViolation as e:
+                    audit_log_airtable("airtable_add", identity, {"table": table}, f"blocked: {e}")
+                    return str(e)
+
+                result = airtable_add(table, fields)
+                audit_log_airtable("airtable_add", identity, {"table": table, "fields_keys": list(fields.keys())}, result)
+                return result
 
             case "airtable_update":
-                return airtable_update(
-                    inputs["table"], inputs["record_id"], inputs["fields"]
-                )
+                table     = inputs["table"]
+                record_id = inputs["record_id"]
+                fields    = dict(inputs["fields"])
+
+                # בלוק external users מעדכון רשומות
+                if identity and identity.is_external:
+                    audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, "blocked: external update")
+                    return "❌ גישה נחסמה: אין הרשאה לעדכן רשומות."
+
+                try:
+                    enforce_tenant_scope("airtable_update", identity, {"table": table, "record_id": record_id})
+                except TenantScopeViolation as e:
+                    audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, f"blocked: {e}")
+                    return str(e)
+
+                result = airtable_update(table, record_id, fields)
+                audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
+                return result
 
             case "airtable_get_schema":
                 return airtable_get_schema()
