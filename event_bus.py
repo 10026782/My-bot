@@ -54,10 +54,15 @@ class PendingActionsStore:
         return item
 
     def pop(self, action_id: str) -> dict | None:
-        """שולף ומוחק — לאחר אישור או ביטול"""
-        item = self.get(action_id)
-        if item:
+        """שולף ומוחק — לאחר אישור או ביטול. בודק TTL באופן עצמאי."""
+        item = self._store.get(action_id)
+        if not item:
+            return None
+        if datetime.now() > datetime.fromisoformat(item["expires"]):
             del self._store[action_id]
+            logger.info(f"⏰ Pending action expired at pop: {action_id}")
+            return None
+        del self._store[action_id]
         return item
 
     def cancel(self, action_id: str) -> bool:

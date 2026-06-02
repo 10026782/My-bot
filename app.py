@@ -141,7 +141,10 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
         label   = label,
     )
 
-    owner_chat_id = os.environ.get("DIGEST_CHAT_ID", "")
+    owner_chat_id = (
+        os.environ.get("ELIYAHU_CHAT_ID", "") or
+        os.environ.get("DIGEST_CHAT_ID", "")
+    )
     if owner_chat_id:
         kb = telebot.types.InlineKeyboardMarkup()
         kb.add(
