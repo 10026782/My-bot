@@ -173,8 +173,19 @@ def _handle_approval_callback(cq) -> None:
 
     action, action_id = data.split(":", 1)
 
+    if action in ("approve", "reject"):
+        approver_chat_id = str(getattr(cq.from_user, "id", "") or "")
+        approver_identity = resolve_identity("telegram", approver_chat_id)
+        if not (approver_identity.is_owner or approver_identity.can("actions.approve")):
+            logger.warning(
+                f"[Approval] unauthorized {action} attempt {action_id} "
+                f"by {approver_identity.user_id} role={approver_identity.role}"
+            )
+            bot.answer_callback_query(cq.id, "⛔ אין לך הרשאה לאשר פעולה זו")
+            return
+
     if action == "approve":
-        item = bus._pending.pop(action_id)
+        item = bus._pending.get(action_id)
         if not item:
             bot.answer_callback_query(cq.id, "⏰ פג תוקף — הפעולה לא קיימת יותר")
             try:
@@ -191,6 +202,22 @@ def _handle_approval_callback(cq) -> None:
         channel       = payload.get("channel", "telegram")
 
         identity = resolve_identity(channel, user_chat_id)
+
+        try:
+            enforce(tool_name, identity)
+        except ToolDenied as e:
+            logger.warning(
+                f"[Approval] denied approved action {action_id} | "
+                f"{tool_name} | user={identity.user_id} role={identity.role}: {e}"
+            )
+            bot.answer_callback_query(cq.id, "⛔ הפעולה כבר אינה מורשית")
+            return
+
+        item = bus._pending.pop(action_id)
+        if not item:
+            bot.answer_callback_query(cq.id, "⏰ פג תוקף — הפעולה לא קיימת יותר")
+            return
+
         raw      = dispatch_tool(tool_name, tool_inputs, identity)
         result   = validate_tool_output(tool_name, raw)
         logger.info(f"[Approval] ✅ confirmed {action_id} | {tool_name}")
@@ -238,6 +265,12 @@ def _handle_approval_callback(cq) -> None:
 
 def _typing_indicator(chat_id: str, channel: str, stop_event: threading.Event, interval: float = 2.5) -> None:
     """Send a periodic typing indicator while the Agent processes the request."""
+    if channel == "telegram":
+        try:
+            bot.send_chat_action(chat_id, "typing")
+        except Exception as e:
+            logger.debug(f"[Typing] failed for {chat_id}: {e}")
+
     while not stop_event.wait(interval):
         if channel == "telegram":
             try:
@@ -443,7 +476,7 @@ def run_agent(
 
 @app.route("/health", methods=["GET"])
 def health():
-    health_status = get_health_status(globals().get("_scheduler"))
+    health_status = get_health_status(globals().get("_scheduler"), memory)
     return jsonify({
         "status":         health_status["status"],
         "version":        "3.0",
