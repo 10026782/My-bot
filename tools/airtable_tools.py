@@ -175,3 +175,9 @@ def airtable_update(table: str, record_id: str, fields: dict) -> str:
         if r.status_code == 200:
             return f"✅ רשומה {record_id} עודכנה."
         return f"❌ Airtable error {r.status_code}: {r.text[:150]}"
+
+
+def search_lead(name: str) -> str:
+    """חיפוש ליד לפי שם חלקי — SEARCH formula של Airtable."""
+    safe = name.replace("'", "\\'")
+    return airtable_get("Leads", f"SEARCH('{safe}', {{Name}})")
