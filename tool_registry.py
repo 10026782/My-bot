@@ -65,8 +65,7 @@ _REGISTRY: dict[str, ToolMeta] = {
     "calendar_create_event": ToolMeta(
         name="calendar_create_event",
         roles_allowed=_MANAGEMENT,
-        requires_approval=True,
-        description_he="יצירת אירוע ביומן — דורש אישור"
+        description_he="יצירת אירוע ביומן — בודק חפיפות, force=true לקבוע בכל זאת"
     ),
 
     # ── Gmail ────────────────────────────────────

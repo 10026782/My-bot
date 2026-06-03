@@ -104,7 +104,8 @@ def dispatch_tool(name: str, inputs: dict, identity: "Identity | None" = None) -
                 return calendar_create_event(
                     inputs["summary"],
                     inputs["start_time"],
-                    inputs.get("duration_minutes", 60)
+                    inputs.get("duration_minutes", 60),
+                    inputs.get("force", False),
                 )
 
             # ── Gmail ─────────────────────────────────
