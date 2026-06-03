@@ -144,6 +144,15 @@ def airtable_get(table: str, filter_formula: str = "") -> str:
 
 
 def airtable_add(table: str, fields: dict) -> str:
+    # A38 — אמת שדות לפני כתיבה
+    try:
+        from schema_intelligence import validate_before_write
+        ok, err = validate_before_write(table, fields)
+        if not ok:
+            return f"❌ שגיאת סכמה: {err}"
+    except ImportError:
+        pass
+
     fields = _sanitize_fields(table, fields)
     if not fields:
         return "❌ לא נשארו שדות תקינים לשמירה — בדוק שמות השדות."
@@ -180,6 +189,15 @@ def airtable_get_schema() -> str:
 
 
 def airtable_update(table: str, record_id: str, fields: dict) -> str:
+    # A38 — אמת שדות לפני עדכון
+    try:
+        from schema_intelligence import validate_before_write
+        ok, err = validate_before_write(table, fields)
+        if not ok:
+            return f"❌ שגיאת סכמה: {err}"
+    except ImportError:
+        pass
+
     fields = _sanitize_fields(table, fields)
     if not fields:
         return "❌ לא נשארו שדות תקינים לעדכון — בדוק שמות השדות."
