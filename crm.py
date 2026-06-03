@@ -167,7 +167,7 @@ def crm_list_contacts(contact_type: str = "", identity=None) -> str:
     if not _creds_ok():
         return "❌ חסרים מפתחות Airtable"
     try:
-        formula = f"{{Status}} = '{ContactStatus.ACTIVE}'"
+        formula = f"{{סטטוס}} = '{ContactStatus.ACTIVE}'"
         if contact_type:
             formula = f"AND({formula}, {{Type}} = '{contact_type}')"
         records = _get(Tables.CONTACTS, formula, identity=identity)
@@ -247,7 +247,12 @@ def crm_list_deals(status: str = "", identity=None) -> str:
     if not _creds_ok():
         return "❌ חסרים מפתחות Airtable"
     try:
-        formula = f"{{Status}} = '{status}'" if status else ""
+        if status == "Active":
+            formula = "NOT(OR({שלב}='סגור-ניצחון', {שלב}='סגור-הפסד'))"
+        elif status:
+            formula = f"{{שלב}} = '{status}'"
+        else:
+            formula = ""
         records = _get(Tables.DEALS, formula, identity=identity)
         if not records:
             return "📭 אין עסקאות" + (f" בסטטוס '{status}'" if status else "")
@@ -311,9 +316,9 @@ def crm_upcoming_payments(days_ahead: int = 7, identity=None) -> str:
         deadline = today + timedelta(days=days_ahead)
         formula  = (
             f"AND("
-            f"{{Status}} = '{PaymentStatus.PENDING}', "
-            f"IS_BEFORE({{Due Date}}, '{deadline.isoformat()}'), "
-            f"IS_AFTER({{Due Date}}, '{today.isoformat()}')"
+            f"{{סטטוס}} = '{PaymentStatus.PENDING}', "
+            f"IS_BEFORE({{תאריך}}, '{deadline.isoformat()}'), "
+            f"IS_AFTER({{תאריך}}, '{today.isoformat()}')"
             f")"
         )
         records = _get(Tables.PAYMENTS, formula, identity=identity)
@@ -354,8 +359,8 @@ def crm_overdue_payments(identity=None) -> str:
         today   = date.today().isoformat()
         formula = (
             f"AND("
-            f"{{Status}} = '{PaymentStatus.PENDING}', "
-            f"IS_BEFORE({{Due Date}}, '{today}')"
+            f"{{סטטוס}} = '{PaymentStatus.PENDING}', "
+            f"IS_BEFORE({{תאריך}}, '{today}')"
             f")"
         )
         records = _get(Tables.PAYMENTS, formula, identity=identity)

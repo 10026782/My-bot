@@ -112,6 +112,12 @@ class PaymentFields:
     DATE            = "תאריך"
     STATUS          = "סטטוס"           # התקבל|בתהליך|בוטל
     DEAL_LINK       = "מקושר לעסקאות"
+    # backwards compat — crm.py uses these
+    NAME            = "אסמכתא"
+    DUE_DATE        = "תאריך"
+    DEAL            = "מקושר לעסקאות"
+    CONTACT         = "מקושר לאנשי קשר"
+    NOTES           = "הערות"
 
 
 class ContactFields:
@@ -133,6 +139,16 @@ class DealFields:
     CONTACTS_LINK   = "מקושר לאנשי קשר"
     TASKS_LINK      = "משימות (Tasks)"
     PAYMENTS_LINK   = "תשלומים (Payments)"
+    # backwards compat — crm.py uses these
+    STATUS          = "שלב"
+    PRICE           = "סכום"
+    ADDRESS         = "Address"
+    FUNDING_COST    = "Funding Cost %"
+    ROI             = "ROI %"
+    RISK_LEVEL      = "Risk Level"
+    CONTACT         = "מקושר לאנשי קשר"
+    DEADLINE        = "תאריך סגירה"
+    NOTES           = "Notes"
 
 
 class TaskFields:
@@ -202,6 +218,8 @@ class ContactStatus:
     IN_PROGRESS     = "בתהליכים"
     FOLLOWUP        = "פולו-אפ"
     NOT_RELEVANT    = "לא רלוונטי"
+    # backwards compat — crm.py
+    ACTIVE          = "בתהליכים"
 
 class DealStage:
     OPPORTUNITY     = "הזדמנות"
@@ -213,6 +231,10 @@ class PaymentStatus:
     RECEIVED        = "התקבל"
     IN_PROGRESS     = "בתהליך"
     CANCELLED       = "בוטל"
+    # backwards compat — crm.py
+    PENDING         = "בתהליך"
+    PAID            = "התקבל"
+    OVERDUE         = "בתהליך"
 
 class ExpenseCategory:
     MARKETING       = "שיווק"

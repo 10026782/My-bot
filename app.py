@@ -42,6 +42,12 @@ logger = logging.getLogger(__name__)
 
 # ─── קבועים ────────────────────────────────────────
 MAX_TOOL_TURNS = 3
+
+# כלים שתוצאתם נשמרת בזיכרון לרציפות בין תורות
+_MEMORABLE_TOOLS = frozenset({
+    "airtable_add", "airtable_update",
+    "calendar_create_event", "gmail_send_draft",
+})
 AGENT_TIMEOUT  = 25
 
 # ─── קליינטים ──────────────────────────────────────
@@ -375,7 +381,17 @@ def run_agent(
             handler = route.handler,
             intent  = route.intent,
         )
-        history  = memory.get_for_claude(ctx.memory_key)
+        history = memory.get_for_claude(ctx.memory_key)
+
+        # C4.1: trim history if too large — prevents silent context overflow
+        MAX_HISTORY_CHARS = 60_000
+        if len(str(history)) > MAX_HISTORY_CHARS:
+            logger.warning(
+                f"[Agent] history too large ({len(str(history))} chars) "
+                f"for {ctx.memory_key} — trimming to last 6 messages"
+            )
+            history = history[-6:]
+
         messages = history + [{"role": "user", "content": clean_msg}]
 
         logger.info(
@@ -458,11 +474,27 @@ def run_agent(
                 elif exec_check.status == "warn":
                     logger.warning(f"[A32] Execution warn: {tu.name} — {exec_check.reason}")
 
+                # Fix 2: persist successful write results for next-turn memory
+                if tu.name in _MEMORABLE_TOOLS and "❌" not in result:
+                    memory.add(
+                        ctx.memory_key,
+                        "user",   # only "user"/"assistant" valid in Claude messages[]
+                        f"[🔧 {tu.name}]: {str(tu.input)[:60]} → {result[:60]}"
+                    )
+
                 entry = {"type": "tool_result", "tool_use_id": tu.id, "content": result}
                 tool_results.append(entry)
                 tool_results_log.append(entry)   # A32: accumulate for final check
 
             tool_calls_made += 1
+
+            # ⏳ keep typing indicator alive between tool calls
+            if channel == "telegram":
+                try:
+                    bot.send_chat_action(chat_id, "typing")
+                except Exception:
+                    pass
+
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user",      "content": tool_results})
 
@@ -477,10 +509,17 @@ def run_agent(
 
     except anthropic.APIStatusError as e:
         logger.error(f"[Agent] Anthropic {e.status_code}: {e.message}")
+        if e.status_code == 529:
+            return "⚠️ השרת עמוס כרגע. נסה שוב בעוד דקה."
+        if e.status_code == 413:
+            return "⚠️ ההודעה ארוכה מדי. נסה לשלח קצר יותר."
         return f"❌ שגיאת API ({e.status_code}). נסה שוב."
+    except anthropic.APITimeoutError:
+        logger.error(f"[Agent] Timeout for {chat_id}")
+        return "⚠️ הבקשה לקחה יותר מדי זמן. נסה שוב או שלח הודעה קצרה יותר."
     except Exception as e:
         logger.error(f"[Agent] error: {e}", exc_info=True)
-        return f"❌ שגיאה פנימית: {e}"
+        return "⚠️ משהו השתבש. נסה שוב."
 
 
 # ══════════════════════════════════════════════════
@@ -524,6 +563,14 @@ def webhook_telegram():
         sender_user_id = str(update.message.from_user.id)  # מי שלח (תמיד USER_ID)
         text           = update.message.text
         if idempotency.is_duplicate("telegram", sender_user_id, text):
+            try:
+                bot.send_message(
+                    reply_chat_id,
+                    "♻️ ההודעה הזו כבר טופלה.\n"
+                    "אם זו בקשה חדשה — נסח אותה אחרת."
+                )
+            except Exception as e:
+                logger.debug(f"[Idempotency] notify failed: {e}")
             return "", 200
 
         # ── Thinking Indicator ────────────────────────────────────

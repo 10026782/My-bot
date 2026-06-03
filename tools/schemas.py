@@ -36,13 +36,14 @@ TOOL_SCHEMAS = [
     },
     {
         "name": "calendar_create_event",
-        "description": "יצירת אירוע ב-Google Calendar — בדוק זמינות קודם",
+        "description": "יצירת אירוע ב-Google Calendar. בודק חפיפות אוטומטית — אם יש, מחזיר ⚠️ ושואל. לקבוע בכל זאת → force=true.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "summary":          {"type": "string",  "description": "כותרת הפגישה"},
                 "start_time":       {"type": "string",  "description": "ISO 8601: YYYY-MM-DDTHH:MM:SS"},
-                "duration_minutes": {"type": "integer", "description": "משך בדקות (ברירת מחדל: 60)"}
+                "duration_minutes": {"type": "integer", "description": "משך בדקות (ברירת מחדל: 60)"},
+                "force":            {"type": "boolean", "description": "true = קבע גם אם יש חפיפה ביומן"}
             },
             "required": ["summary", "start_time"]
         }
