@@ -64,6 +64,19 @@ def cmd_status(msg):
         return
     bot.send_message(msg.chat.id, format_startup_message(), parse_mode="Markdown")
 
+
+@bot.message_handler(commands=["schema"])
+def cmd_schema(msg):
+    """/schema [טבלה] — הצג סכמה. ללא טבלה = כל הטבלאות."""
+    try:
+        from schema_intelligence import handle_schema_command
+        args = msg.text.replace("/schema", "", 1).replace(f"@{bot.get_me().username}", "").strip()
+        reply = handle_schema_command(args)
+        bot.send_message(msg.chat.id, reply, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"cmd_schema error: {e}")
+        bot.send_message(msg.chat.id, f"❌ שגיאה בטעינת סכמה: {e}")
+
 try:
     _scheduler = start_scheduler()
     logger.info("Scheduler OK")
