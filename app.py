@@ -142,6 +142,7 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
     )
 
     owner_chat_id = (
+        os.environ.get("OWNER_TELEGRAM_ID", "") or
         os.environ.get("ELIYAHU_CHAT_ID", "") or
         os.environ.get("DIGEST_CHAT_ID", "")
     )
@@ -188,7 +189,8 @@ def _handle_approval_callback(cq) -> None:
             return
 
     if action == "approve":
-        item = bus._pending.get(action_id)
+        # atomic pop — בדיקת TTL ומחיקה בצעד אחד
+        item = bus._pending.pop(action_id)
         if not item:
             bot.answer_callback_query(cq.id, "⏰ פג תוקף — הפעולה לא קיימת יותר")
             try:
@@ -214,11 +216,6 @@ def _handle_approval_callback(cq) -> None:
                 f"{tool_name} | user={identity.user_id} role={identity.role}: {e}"
             )
             bot.answer_callback_query(cq.id, "⛔ הפעולה כבר אינה מורשית")
-            return
-
-        item = bus._pending.pop(action_id)
-        if not item:
-            bot.answer_callback_query(cq.id, "⏰ פג תוקף — הפעולה לא קיימת יותר")
             return
 
         raw      = dispatch_tool(tool_name, tool_inputs, identity)
