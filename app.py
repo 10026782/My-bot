@@ -526,13 +526,21 @@ def webhook_telegram():
         if idempotency.is_duplicate("telegram", sender_user_id, text):
             return "", 200
 
+        # ── Thinking Indicator ────────────────────────────────────
+        thinking_msg_id = None
+        try:
+            thinking_msg    = bot.send_message(reply_chat_id, "⏳")
+            thinking_msg_id = thinking_msg.message_id
+        except Exception:
+            pass
+
+        # typing thread כגיבוי (למקרה ש-⏳ לא נשלח)
         typing_stop   = threading.Event()
         typing_thread = threading.Thread(
             target=_typing_indicator,
             args=(reply_chat_id, "telegram", typing_stop),
             daemon=True,
         )
-        bot.send_chat_action(reply_chat_id, "typing")  # מיידי — לפני wait ראשון
         typing_thread.start()
 
         try:
@@ -540,7 +548,11 @@ def webhook_telegram():
         finally:
             typing_stop.set()
             typing_thread.join(timeout=1.0)
-
+            if thinking_msg_id:
+                try:
+                    bot.delete_message(reply_chat_id, thinking_msg_id)
+                except Exception:
+                    pass
 
         try:
             bot.send_message(reply_chat_id, reply)
