@@ -375,7 +375,17 @@ def run_agent(
             handler = route.handler,
             intent  = route.intent,
         )
-        history  = memory.get_for_claude(ctx.memory_key)
+        history = memory.get_for_claude(ctx.memory_key)
+
+        # C4.1: trim history if too large — prevents silent context overflow
+        MAX_HISTORY_CHARS = 60_000
+        if len(str(history)) > MAX_HISTORY_CHARS:
+            logger.warning(
+                f"[Agent] history too large ({len(str(history))} chars) "
+                f"for {ctx.memory_key} — trimming to last 6 messages"
+            )
+            history = history[-6:]
+
         messages = history + [{"role": "user", "content": clean_msg}]
 
         logger.info(
@@ -463,6 +473,14 @@ def run_agent(
                 tool_results_log.append(entry)   # A32: accumulate for final check
 
             tool_calls_made += 1
+
+            # ⏳ keep typing indicator alive between tool calls
+            if channel == "telegram":
+                try:
+                    bot.send_chat_action(chat_id, "typing")
+                except Exception:
+                    pass
+
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user",      "content": tool_results})
 
@@ -477,10 +495,17 @@ def run_agent(
 
     except anthropic.APIStatusError as e:
         logger.error(f"[Agent] Anthropic {e.status_code}: {e.message}")
+        if e.status_code == 529:
+            return "⚠️ השרת עמוס כרגע. נסה שוב בעוד דקה."
+        if e.status_code == 413:
+            return "⚠️ ההודעה ארוכה מדי. נסה לשלח קצר יותר."
         return f"❌ שגיאת API ({e.status_code}). נסה שוב."
+    except anthropic.APITimeoutError:
+        logger.error(f"[Agent] Timeout for {chat_id}")
+        return "⚠️ הבקשה לקחה יותר מדי זמן. נסה שוב או שלח הודעה קצרה יותר."
     except Exception as e:
         logger.error(f"[Agent] error: {e}", exc_info=True)
-        return f"❌ שגיאה פנימית: {e}"
+        return "⚠️ משהו השתבש. נסה שוב."
 
 
 # ══════════════════════════════════════════════════
