@@ -112,10 +112,10 @@ def clarify_response(route: RouteDecision) -> str:
 
 def approval_response(route: RouteDecision) -> str:
     logger.info(f"[APPROVAL] intent={route.intent} domain={route.domain}")
+    # BOSS NEVER FAKES CONTROL: כפתורים אמיתיים נשלחים ב-_queue_approval בנפרד
     return (
         route.response_override or
-        f"הפעולה '{route.intent}' דורשת אישור לפני ביצוע.\n"
-        f"אשר עם: ✅ כן / ❌ לא"
+        f"הפעולה '{route.intent}' דורשת אישור. מעביר לבעלים..."
     )
 
 
@@ -178,8 +178,14 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
                 parse_mode="Markdown",
                 reply_markup=kb,
             )
+            logger.info(f"[Approval] ✅ sent to owner {owner_chat_id} | {action_id}")
         except Exception as e:
-            logger.error(f"[Approval] notify owner failed: {e}")
+            logger.error(f"[Approval] ❌ failed to notify owner: {e}")
+            # BOSS NEVER FAKES: לא מחזירים "ממתין לאישור" כשהשליחה נכשלה
+            return (
+                f"❌ לא הצלחתי לשלוח בקשת אישור לבעלים.\n"
+                f"הפעולה לא בוצעה: {label}"
+            )
 
     logger.info(f"[Approval] queued {action_id} | {tool_name} | user={user_chat_id}")
     return f"⏳ הפעולה ממתינה לאישור הבעלים: {label}"
