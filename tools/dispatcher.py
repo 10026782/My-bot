@@ -5,7 +5,11 @@
 
 from __future__ import annotations
 import logging
+import os
+import urllib.parse
 from typing import TYPE_CHECKING
+
+import httpx
 
 from action_validator import ActionBlocked, validate_action
 
@@ -21,6 +25,47 @@ if TYPE_CHECKING:
     from identity import Identity
 
 logger = logging.getLogger(__name__)
+
+
+# שדות dedup לפי טבלה — מונע כתיבה כפולה
+_DEDUP_FIELDS: dict[str, str] = {
+    "משימות (Tasks)":    "כותרת המשימה",
+    "Tasks":             "כותרת המשימה",
+    "משימות ודד ליינים": "שם המשימה",
+    "Deadlines":         "שם המשימה",
+    "Leads":             "phone",
+}
+
+# מיפוי alias → שם אמיתי (mirrors airtable_tools._TABLE_ALIAS_MAP)
+_ALIAS_MAP: dict[str, str] = {
+    "Tasks":    "משימות (Tasks)",
+    "Contacts": "אנשי קשר (Contacts)",
+    "Deals":    "עסקאות (Deals)",
+    "Expenses": "הוצאות (Expenses)",
+    "Payments": "תשלומים (Payments)",
+}
+
+
+def _check_duplicate(real_table: str, field: str, value: str) -> dict | None:
+    """מחזיר רשומה קיימת אם יש כפילות, אחרת None."""
+    base = os.environ.get("AIRTABLE_BASE_ID", "")
+    key  = os.environ.get("AIRTABLE_API_KEY", "")
+    if not base or not key:
+        return None
+    safe = str(value).replace("'", "\\'")
+    try:
+        r = httpx.get(
+            f"https://api.airtable.com/v0/{base}/{urllib.parse.quote(real_table, safe='')}",
+            headers={"Authorization": f"Bearer {key}"},
+            params={"filterByFormula": f"{{{field}}}='{safe}'", "maxRecords": 1},
+            timeout=5,
+        )
+        if r.status_code == 200:
+            recs = r.json().get("records", [])
+            return recs[0] if recs else None
+    except Exception as e:
+        logger.warning(f"[Dedup] {real_table}/{field}: {e}")
+    return None
 
 
 def dispatch_tool(name: str, inputs: dict, identity: "Identity | None" = None) -> str:
@@ -112,6 +157,22 @@ def dispatch_tool(name: str, inputs: dict, identity: "Identity | None" = None) -
             case "airtable_add":
                 table  = inputs["table"]
                 fields = dict(inputs["fields"])
+
+                # Fix 1: dedup — מניעת רשומות כפולות
+                real_t      = _ALIAS_MAP.get(table, table)
+                dedup_field = _DEDUP_FIELDS.get(real_t) or _DEDUP_FIELDS.get(table)
+                if dedup_field:
+                    dedup_val = fields.get(dedup_field, "")
+                    if dedup_val:
+                        existing = _check_duplicate(real_t, dedup_field, str(dedup_val))
+                        if existing:
+                            f_data = existing.get("fields", {})
+                            status = f_data.get("סטטוס", f_data.get("status", "?"))
+                            return (
+                                f"✋ כבר קיים: {dedup_field}='{dedup_val}' ב-{table}.\n"
+                                f"סטטוס: {status} | ID: {existing.get('id','?')}\n"
+                                f"לא נוצרה רשומה כפולה."
+                            )
 
                 # בלוק external users מכתיבה לטבלאות שאינן Leads
                 if identity and identity.is_external and table != "Leads":

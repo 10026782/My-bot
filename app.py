@@ -42,6 +42,12 @@ logger = logging.getLogger(__name__)
 
 # ─── קבועים ────────────────────────────────────────
 MAX_TOOL_TURNS = 3
+
+# כלים שתוצאתם נשמרת בזיכרון לרציפות בין תורות
+_MEMORABLE_TOOLS = frozenset({
+    "airtable_add", "airtable_update",
+    "calendar_create_event", "gmail_send_draft",
+})
 AGENT_TIMEOUT  = 25
 
 # ─── קליינטים ──────────────────────────────────────
@@ -468,6 +474,14 @@ def run_agent(
                 elif exec_check.status == "warn":
                     logger.warning(f"[A32] Execution warn: {tu.name} — {exec_check.reason}")
 
+                # Fix 2: persist successful write results for next-turn memory
+                if tu.name in _MEMORABLE_TOOLS and "❌" not in result:
+                    memory.add(
+                        ctx.memory_key,
+                        "user",   # only "user"/"assistant" valid in Claude messages[]
+                        f"[🔧 {tu.name}]: {str(tu.input)[:60]} → {result[:60]}"
+                    )
+
                 entry = {"type": "tool_result", "tool_use_id": tu.id, "content": result}
                 tool_results.append(entry)
                 tool_results_log.append(entry)   # A32: accumulate for final check
@@ -549,6 +563,14 @@ def webhook_telegram():
         sender_user_id = str(update.message.from_user.id)  # מי שלח (תמיד USER_ID)
         text           = update.message.text
         if idempotency.is_duplicate("telegram", sender_user_id, text):
+            try:
+                bot.send_message(
+                    reply_chat_id,
+                    "♻️ ההודעה הזו כבר טופלה.\n"
+                    "אם זו בקשה חדשה — נסח אותה אחרת."
+                )
+            except Exception as e:
+                logger.debug(f"[Idempotency] notify failed: {e}")
             return "", 200
 
         # ── Thinking Indicator ────────────────────────────────────
