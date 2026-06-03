@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 # שמירת פעולות שממתינות לאישור המשתמש
 # ══════════════════════════════════════════════════
 
-PENDING_TTL_MINUTES = 10  # פעולה ממתינה פגה אחרי 10 דקות
+PENDING_TTL_MINUTES = 30  # פעולה ממתינה פגה אחרי 30 דקות
 
 class PendingActionsStore:
     """
@@ -110,9 +110,9 @@ class PendingActionsStore:
 ACTIONS_REQUIRING_APPROVAL = {
     "send_email",
     "create_calendar",
-    "airtable_add",
-    "airtable_update",
     "append_sheet",
+    "airtable_delete",   # מחיקה — בלתי הפיכה
+    "gmail_send_draft",  # שליחת מייל — בלתי הפיכה
 }
 
 class EventBus:
