@@ -179,8 +179,14 @@ def dispatch_tool(name: str, inputs: dict, identity: "Identity | None" = None) -
                     audit_log_airtable("airtable_add", identity, {"table": table}, "blocked: external write to non-lead table")
                     return f"❌ גישה נחסמה: אין הרשאה לכתוב לטבלה '{table}'."
 
-                # הזרקת tenant_id ו-domain אוטומטית לכל רשומה חדשה
-                if identity:
+                # הזרקת tenant_id רק לטבלאות שמכירות את השדה
+                _TENANT_AWARE = {
+                    "Leads",
+                    "אנשי קשר (Contacts)", "Contacts",
+                    "עסקאות (Deals)",       "Deals",
+                    "תשלומים (Payments)",   "Payments",
+                }
+                if identity and table in _TENANT_AWARE:
                     fields.setdefault("tenant_id", tenant_id)
                     if table == "Leads" and identity.domain_id:
                         fields.setdefault("domain", identity.domain_id)
