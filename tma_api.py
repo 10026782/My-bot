@@ -47,7 +47,7 @@ def _cors(response):
     ):
         response.headers["Access-Control-Allow-Origin"]  = origin
         response.headers["Access-Control-Allow-Headers"] = (
-            "Content-Type, X-Telegram-Init-Data, Authorization"
+            "Content-Type, X-Telegram-Init-Data, X-Dev-Telegram-Id, Authorization"
         )
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, OPTIONS"
     return response
