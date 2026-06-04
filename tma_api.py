@@ -923,3 +923,63 @@ def dev_schema_audit(identity):
         }
 
     return jsonify(result)
+
+
+@tma_api.route("/api/dev/kpis", methods=["GET"])
+@require_tma_auth
+def dev_kpis_debug(identity):
+    """Debug: runs each global KPI query and returns raw results. Owner + DEV_MODE only."""
+    if not _DEV_MODE:
+        return jsonify({"error": "only available in DEV_MODE"}), 403
+    if not identity.is_owner:
+        return jsonify({"error": "forbidden"}), 403
+
+    today       = date.today()
+    month_start = today.replace(day=1).isoformat()
+    week_ahead  = (today + timedelta(days=7)).isoformat()
+    tomorrow    = (today + timedelta(days=1)).isoformat()
+
+    def _run(label, table, formula, max_rec=20):
+        recs = _at_list(table, formula, max_records=max_rec)
+        return {
+            "count":   len(recs),
+            "formula": formula,
+            "table":   table,
+            "sample":  [r.get("fields", {}) for r in recs[:3]],
+        }
+
+    return jsonify({
+        "today": today.isoformat(),
+        "income_this_month": _run(
+            "income",
+            "תשלומים (Payments)",
+            f"AND({{סטטוס}}='התקבל', IS_AFTER({{תאריך}}, '{month_start}'))",
+        ),
+        "pending_payments": _run(
+            "pending",
+            "תשלומים (Payments)",
+            f"AND({{סטטוס}}!='התקבל', IS_BEFORE({{תאריך}}, '{week_ahead}'), IS_AFTER({{תאריך}}, '{today.isoformat()}'))",
+        ),
+        "overdue_tasks": _run(
+            "tasks",
+            "משימות (Tasks)",
+            f"AND(IS_BEFORE({{תאריך יעד}}, '{tomorrow}'), {{סטטוס}}!='בוצע')",
+        ),
+        "hot_leads": _run(
+            "hot_leads",
+            "Leads",
+            "OR({status}='hot', {score ציון}>=70, {tier}='HOT')",
+        ),
+        "all_leads_sample": _run(
+            "leads_raw",
+            "Leads",
+            "",
+            max_rec=3,
+        ),
+        "all_payments_sample": _run(
+            "payments_raw",
+            "תשלומים (Payments)",
+            "",
+            max_rec=3,
+        ),
+    })
