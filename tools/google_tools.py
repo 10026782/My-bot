@@ -14,8 +14,52 @@ import logging
 import httpx
 from datetime import datetime, timedelta
 from email.mime.text import MIMEText
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
+
+_TZ_IL = ZoneInfo("Asia/Jerusalem")
+
+
+def _check_calendar_conflict(token: str, start_time: str, duration_minutes: int) -> str:
+    """שולף אירועים חופפים ומחזיר string תיאורי, או '' אם אין חפיפה."""
+    try:
+        start_dt = datetime.fromisoformat(start_time)
+        if start_dt.tzinfo is None:
+            start_dt = start_dt.replace(tzinfo=_TZ_IL)
+        end_dt = start_dt + timedelta(minutes=duration_minutes)
+
+        r = httpx.get(
+            "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+            headers={"Authorization": f"Bearer {token}"},
+            params={
+                "timeMin":      start_dt.isoformat(),
+                "timeMax":      end_dt.isoformat(),
+                "singleEvents": "true",
+                "orderBy":      "startTime",
+                "maxResults":   5,
+            },
+            timeout=8,
+        )
+        if r.status_code != 200:
+            return ""  # לא ניתן לבדוק — ממשיך ביצירה
+        items = r.json().get("items", [])
+        if not items:
+            return ""
+
+        parts = []
+        for ev in items:
+            ev_start = ev.get("start", {}).get("dateTime", "")
+            ev_name  = ev.get("summary", "(ללא שם)")
+            try:
+                ev_dt = datetime.fromisoformat(ev_start)
+                parts.append(f"'{ev_name}' ({ev_dt.strftime('%H:%M')})")
+            except Exception:
+                parts.append(f"'{ev_name}'")
+        return f"⚠️ כבר קיים ביומן: {', '.join(parts)}"
+    except Exception as e:
+        logger.warning(f"[CalendarConflict] {e}")
+        return ""  # בדיקה נכשלה — ממשיך ביצירה
 
 
 def get_google_token() -> str | None:
@@ -189,22 +233,35 @@ def drive_read_file(file_name: str) -> str:
 
 # ─── Google Calendar ──────────────────────────────────────────────────────────
 
-def calendar_create_event(summary: str, start_time: str, duration_minutes: int = 60) -> str:
-    """start_time: ISO format — '2025-06-01T14:00:00'"""
+def calendar_create_event(summary: str, start_time: str,
+                          duration_minutes: int = 60, force: bool = False) -> str:
+    """
+    start_time: ISO format — '2025-06-01T14:00:00'
+    force=True  — קבע גם אם יש חפיפה ביומן
+    """
     token = get_google_token()
     if not token:
         return "❌ חסרים פרטי Google OAuth"
 
     try:
         start_dt = datetime.fromisoformat(start_time)
-        end_dt = start_dt + timedelta(minutes=duration_minutes)
+        end_dt   = start_dt + timedelta(minutes=duration_minutes)
+
+        # בדיקת חפיפה — אלא אם force=True
+        if not force:
+            conflict = _check_calendar_conflict(token, start_time, duration_minutes)
+            if conflict:
+                return (
+                    f"{conflict}\n"
+                    f"לקבוע '{summary}' ב-{start_dt.strftime('%H:%M')} בכל זאת? "
+                    f"(אם כן — שלח שוב עם force=true)"
+                )
 
         event = {
             "summary": summary,
             "start": {"dateTime": start_dt.isoformat(), "timeZone": "Asia/Jerusalem"},
-            "end": {"dateTime": end_dt.isoformat(), "timeZone": "Asia/Jerusalem"},
+            "end":   {"dateTime": end_dt.isoformat(),   "timeZone": "Asia/Jerusalem"},
         }
-
         r = httpx.post(
             "https://www.googleapis.com/calendar/v3/calendars/primary/events",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
@@ -215,7 +272,7 @@ def calendar_create_event(summary: str, start_time: str, duration_minutes: int =
             return f"✅ אירוע '{summary}' נוצר ביומן ל-{start_dt.strftime('%d/%m/%Y %H:%M')}."
         return f"❌ שגיאת Calendar {r.status_code}: {r.text[:200]}"
     except ValueError:
-        return f"❌ פורמט תאריך שגוי. השתמש ב-ISO: 2025-06-01T14:00:00"
+        return "❌ פורמט תאריך שגוי. השתמש ב-ISO: 2025-06-01T14:00:00"
     except Exception as e:
         return f"❌ שגיאה ביצירת אירוע: {e}"
 

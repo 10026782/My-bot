@@ -65,7 +65,7 @@ _REGISTRY: dict[str, ToolMeta] = {
     "calendar_create_event": ToolMeta(
         name="calendar_create_event",
         roles_allowed=_MANAGEMENT,
-        description_he="יצירת אירוע ביומן"
+        description_he="יצירת אירוע ביומן — בודק חפיפות, force=true לקבוע בכל זאת"
     ),
 
     # ── Gmail ────────────────────────────────────
@@ -92,7 +92,8 @@ _REGISTRY: dict[str, ToolMeta] = {
     "sheets_append": ToolMeta(
         name="sheets_append",
         roles_allowed=_MANAGEMENT,
-        description_he="הוספת שורה לגיליון"
+        requires_approval=True,
+        description_he="הוספת שורה לגיליון — דורש אישור"
     ),
 
     # ── Airtable ─────────────────────────────────
@@ -120,6 +121,22 @@ _REGISTRY: dict[str, ToolMeta] = {
         roles_allowed=_SENIOR,
         read_only=True,
         description_he="קריאת כל הטבלאות והשדות מ-Airtable בזמן אמת"
+    ),
+
+    # ── Contact Resolver (N03) ────────────────────
+    "resolve_contact": ToolMeta(
+        name             = "resolve_contact",
+        roles_allowed    = _MANAGEMENT,
+        read_only        = True,
+        description_he   = "חיפוש fuzzy של איש קשר לפי שם — מחזיר פרטים או רשימה לבחירה",
+    ),
+
+    # ── D06 — Business Memory ─────────────────────
+    "search_business_memory": ToolMeta(
+        name             = "search_business_memory",
+        roles_allowed    = _MANAGEMENT,
+        read_only        = True,
+        description_he   = "חיפוש בזיכרון עסקי — 'מה סיכמנו עם ספק X?' / 'החלטות מהפגישה עם Y'",
     ),
 }
 
@@ -154,10 +171,6 @@ def enforce(tool_name: str, identity: "Identity") -> ToolMeta:
     if identity.role not in meta.roles_allowed:
         raise ToolDenied(
             f"❌ {identity.role} אינו מורשה להפעיל '{tool_name}'"
-        )
-    if meta.requires_approval and not identity.is_owner:
-        raise ToolDenied(
-            f"⏳ '{tool_name}' דורש אישור owner לפני ביצוע."
         )
     return meta
 

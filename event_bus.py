@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 # שמירת פעולות שממתינות לאישור המשתמש
 # ══════════════════════════════════════════════════
 
-PENDING_TTL_MINUTES = 10  # פעולה ממתינה פגה אחרי 10 דקות
+PENDING_TTL_MINUTES = 30  # פעולה ממתינה פגה אחרי 30 דקות
 
 class PendingActionsStore:
     """
@@ -54,10 +54,15 @@ class PendingActionsStore:
         return item
 
     def pop(self, action_id: str) -> dict | None:
-        """שולף ומוחק — לאחר אישור או ביטול"""
-        item = self.get(action_id)
-        if item:
+        """שולף ומוחק — לאחר אישור או ביטול. בודק TTL באופן עצמאי."""
+        item = self._store.get(action_id)
+        if not item:
+            return None
+        if datetime.now() > datetime.fromisoformat(item["expires"]):
             del self._store[action_id]
+            logger.info(f"⏰ Pending action expired at pop: {action_id}")
+            return None
+        del self._store[action_id]
         return item
 
     def cancel(self, action_id: str) -> bool:
@@ -105,9 +110,9 @@ class PendingActionsStore:
 ACTIONS_REQUIRING_APPROVAL = {
     "send_email",
     "create_calendar",
-    "airtable_add",
-    "airtable_update",
     "append_sheet",
+    "airtable_delete",   # מחיקה — בלתי הפיכה
+    "gmail_send_draft",  # שליחת מייל — בלתי הפיכה
 }
 
 class EventBus:

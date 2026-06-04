@@ -6,7 +6,17 @@
 
 import os
 import logging
+import threading
 from flask import Flask, request, Response, abort, jsonify
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+
+from startup_validator import validate_startup, format_startup_message
+validate_startup()
 
 import anthropic
 import telebot
@@ -22,24 +32,59 @@ from guards          import idempotency, rate_limiter, validate_tool_output
 from config          import get_domain as _channel_domain
 from core.router     import route_request, RouteDecision, Handler
 from core.anti_hallucination import verify_execution, sanitize_agent_response
+from health_monitor import get_health_status
+try:
+    from ad_attribution import inject_source_to_incoming_lead as _inject_utm
+except ImportError:
+    _inject_utm = None
 
-logging.basicConfig(level=logging.INFO,
-                    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 # ─── קבועים ────────────────────────────────────────
-MAX_TOOL_TURNS = 2
+MAX_TOOL_TURNS = 3
+
+# כלים שתוצאתם נשמרת בזיכרון לרציפות בין תורות
+_MEMORABLE_TOOLS = frozenset({
+    "airtable_add", "airtable_update",
+    "calendar_create_event", "gmail_send_draft",
+})
 AGENT_TIMEOUT  = 25
 
 # ─── קליינטים ──────────────────────────────────────
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-TELEGRAM_TOKEN    = os.environ.get("TELEGRAM_TOKEN", "")
-RENDER_APP_URL    = os.environ.get("RENDER_APP_URL", "https://my-bot-jqz2.onrender.com")
+ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
+TELEGRAM_TOKEN     = os.environ.get("TELEGRAM_TOKEN", "")
+RENDER_APP_URL     = os.environ.get("RENDER_APP_URL", "https://my-bot-jqz2.onrender.com")
+WEBHOOK_SECRET     = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=AGENT_TIMEOUT)
 bot    = telebot.TeleBot(TELEGRAM_TOKEN)
 
 app = Flask(__name__)
+
+from tma_api import tma_api as _tma_blueprint
+app.register_blueprint(_tma_blueprint)
+
+
+@bot.message_handler(commands=["status"])
+def cmd_status(msg):
+    """Owner בלבד — מצב env vars."""
+    identity = resolve_identity("telegram", str(msg.from_user.id))
+    if not identity or identity.role not in ("owner", "admin"):
+        return
+    bot.send_message(msg.chat.id, format_startup_message(), parse_mode="Markdown")
+
+
+@bot.message_handler(commands=["schema"])
+def cmd_schema(msg):
+    """/schema [טבלה] — הצג סכמה. ללא טבלה = כל הטבלאות."""
+    try:
+        from schema_intelligence import handle_schema_command
+        args = msg.text.replace("/schema", "", 1).replace(f"@{bot.get_me().username}", "").strip()
+        reply = handle_schema_command(args)
+        bot.send_message(msg.chat.id, reply, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"cmd_schema error: {e}")
+        bot.send_message(msg.chat.id, f"❌ שגיאה בטעינת סכמה: {e}")
 
 try:
     _scheduler = start_scheduler()
@@ -50,8 +95,11 @@ except Exception as e:
 if os.environ.get("SETUP_WEBHOOK") == "1":
     try:
         bot.remove_webhook()
-        bot.set_webhook(url=f"{RENDER_APP_URL}/{TELEGRAM_TOKEN}")
-        logger.info("Telegram Webhook set")
+        kwargs = {"url": f"{RENDER_APP_URL}/{TELEGRAM_TOKEN}"}
+        if WEBHOOK_SECRET:
+            kwargs["secret_token"] = WEBHOOK_SECRET
+        bot.set_webhook(**kwargs)
+        logger.info(f"Telegram Webhook set (secret={'yes' if WEBHOOK_SECRET else 'no'})")
     except Exception as e:
         logger.error(f"Webhook failed: {e}")
 
@@ -72,6 +120,188 @@ def approval_response(route: RouteDecision) -> str:
         f"הפעולה '{route.intent}' דורשת אישור לפני ביצוע.\n"
         f"אשר עם: ✅ כן / ❌ לא"
     )
+
+
+# ══════════════════════════════════════════════════
+# Approval Gate Helpers
+# ══════════════════════════════════════════════════
+
+def _describe_tool_call(tool_name: str, inputs: dict) -> str:
+    """תיאור קריא של קריאת כלי לכפתורי אישור."""
+    if tool_name == "gmail_send_draft":
+        return f"📧 שלח מייל (draft: {inputs.get('draft_id', '?')})"
+    if tool_name == "calendar_create_event":
+        start = str(inputs.get("start_time", "?"))[:16]
+        return f"📅 קבע: {inputs.get('summary', '?')} ב-{start}"
+    if tool_name == "airtable_add":
+        fields_str = str(inputs.get("fields", {}))[:50]
+        return f"➕ הוסף ל-{inputs.get('table', '?')}: {fields_str}"
+    if tool_name == "airtable_update":
+        return f"✏️ עדכן {inputs.get('record_id', '?')} ב-{inputs.get('table', '?')}"
+    if tool_name == "sheets_append":
+        return f"📊 כתוב ל-{inputs.get('sheet_name', '?')}"
+    return f"⚡ {tool_name}: {str(inputs)[:60]}"
+
+
+def _queue_approval(tool_name: str, tool_inputs: dict,
+                    user_chat_id: str, channel: str) -> str:
+    """
+    שומר פעולה ממתינה ושולח בקשת אישור לowner.
+    מחזיר string לmodel: "⏳ ממתין לאישור..."
+    """
+    from event_bus import bus
+    label     = _describe_tool_call(tool_name, tool_inputs)
+    action_id, _ = bus.request_approval(
+        action  = tool_name,
+        payload = {
+            "tool_name":    tool_name,
+            "tool_inputs":  tool_inputs,
+            "user_chat_id": user_chat_id,
+            "channel":      channel,
+        },
+        chat_id = user_chat_id,
+        label   = label,
+    )
+
+    owner_chat_id = (
+        os.environ.get("OWNER_TELEGRAM_ID", "") or
+        os.environ.get("ELIYAHU_CHAT_ID", "") or
+        os.environ.get("DIGEST_CHAT_ID", "")
+    )
+    if owner_chat_id:
+        kb = telebot.types.InlineKeyboardMarkup()
+        kb.add(
+            telebot.types.InlineKeyboardButton("✅ אשר", callback_data=f"approve:{action_id}"),
+            telebot.types.InlineKeyboardButton("❌ בטל",  callback_data=f"reject:{action_id}"),
+        )
+        try:
+            bot.send_message(
+                owner_chat_id,
+                f"⏳ *בקשת אישור*\n\n{label}\n\n_ID: {action_id} | פג תוקף בעוד 10 דקות_",
+                parse_mode="Markdown",
+                reply_markup=kb,
+            )
+        except Exception as e:
+            logger.error(f"[Approval] notify owner failed: {e}")
+
+    logger.info(f"[Approval] queued {action_id} | {tool_name} | user={user_chat_id}")
+    return f"⏳ הפעולה ממתינה לאישור הבעלים: {label}"
+
+
+def _handle_approval_callback(cq) -> None:
+    """מטפל בלחיצה על ✅/❌ של בקשת אישור."""
+    from event_bus import bus
+
+    data = cq.data or ""
+    if ":" not in data:
+        bot.answer_callback_query(cq.id, "⚠️ נתוני callback לא תקינים")
+        return
+
+    action, action_id = data.split(":", 1)
+
+    if action in ("approve", "reject"):
+        approver_chat_id = str(getattr(cq.from_user, "id", "") or "")
+        approver_identity = resolve_identity("telegram", approver_chat_id)
+        if not (approver_identity.is_owner or approver_identity.can("actions.approve")):
+            logger.warning(
+                f"[Approval] unauthorized {action} attempt {action_id} "
+                f"by {approver_identity.user_id} role={approver_identity.role}"
+            )
+            bot.answer_callback_query(cq.id, "⛔ אין לך הרשאה לאשר פעולה זו")
+            return
+
+    if action == "approve":
+        # atomic pop — בדיקת TTL ומחיקה בצעד אחד
+        item = bus._pending.pop(action_id)
+        if not item:
+            bot.answer_callback_query(cq.id, "⏰ פג תוקף — הפעולה לא קיימת יותר")
+            try:
+                bot.edit_message_reply_markup(cq.message.chat.id, cq.message.message_id,
+                                              reply_markup=None)
+            except Exception:
+                pass
+            return
+
+        payload       = item["payload"]
+        tool_name     = payload["tool_name"]
+        tool_inputs   = payload["tool_inputs"]
+        user_chat_id  = payload["user_chat_id"]
+        channel       = payload.get("channel", "telegram")
+
+        identity = resolve_identity(channel, user_chat_id)
+
+        try:
+            enforce(tool_name, identity)
+        except ToolDenied as e:
+            logger.warning(
+                f"[Approval] denied approved action {action_id} | "
+                f"{tool_name} | user={identity.user_id} role={identity.role}: {e}"
+            )
+            bot.answer_callback_query(cq.id, "⛔ הפעולה כבר אינה מורשית")
+            return
+
+        raw      = dispatch_tool(tool_name, tool_inputs, identity)
+        result   = validate_tool_output(tool_name, raw)
+        logger.info(f"[Approval] ✅ confirmed {action_id} | {tool_name}")
+
+        try:
+            bot.send_message(user_chat_id, f"✅ הפעולה בוצעה:\n{result}")
+        except Exception as e:
+            logger.error(f"[Approval] notify user failed: {e}")
+
+        try:
+            bot.edit_message_text(
+                f"✅ *אושר ובוצע*\n{item['label']}\n\n`{result[:200]}`",
+                cq.message.chat.id, cq.message.message_id,
+                parse_mode="Markdown",
+            )
+        except Exception:
+            pass
+        bot.answer_callback_query(cq.id, "✅ בוצע!")
+
+    elif action == "reject":
+        item = bus._pending.get(action_id)
+        bus.reject(action_id)
+
+        if item:
+            user_chat_id = item["payload"].get("user_chat_id", "")
+            if user_chat_id:
+                try:
+                    bot.send_message(user_chat_id, f"🚫 הפעולה בוטלה: {item['label']}")
+                except Exception:
+                    pass
+
+        try:
+            bot.edit_message_text(
+                "🚫 *בוטל*",
+                cq.message.chat.id, cq.message.message_id,
+                parse_mode="Markdown",
+            )
+        except Exception:
+            pass
+        bot.answer_callback_query(cq.id, "🚫 בוטל")
+
+    else:
+        bot.answer_callback_query(cq.id, "⚠️ פעולה לא מוכרת")
+
+
+def _typing_indicator(chat_id: str, channel: str, stop_event: threading.Event, interval: float = 2.5) -> None:
+    """Send a periodic typing indicator while the Agent processes the request."""
+    if channel == "telegram":
+        try:
+            bot.send_chat_action(chat_id, "typing")
+        except Exception as e:
+            logger.debug(f"[Typing] failed for {chat_id}: {e}")
+
+    while not stop_event.wait(interval):
+        if channel == "telegram":
+            try:
+                bot.send_chat_action(chat_id, "typing")
+            except Exception as e:
+                logger.debug(f"[Typing] failed for {chat_id}: {e}")
+        else:
+            # Future platforms can be added here if they support typing indicators.
+            pass
 
 
 def _safe_route(text: str, channel: str, identity, domain_from_channel: str = "") -> RouteDecision:
@@ -154,7 +384,17 @@ def run_agent(
             handler = route.handler,
             intent  = route.intent,
         )
-        history  = memory.get_for_claude(ctx.memory_key)
+        history = memory.get_for_claude(ctx.memory_key)
+
+        # C4.1: trim history if too large — prevents silent context overflow
+        MAX_HISTORY_CHARS = 60_000
+        if len(str(history)) > MAX_HISTORY_CHARS:
+            logger.warning(
+                f"[Agent] history too large ({len(str(history))} chars) "
+                f"for {ctx.memory_key} — trimming to last 6 messages"
+            )
+            history = history[-6:]
+
         messages = history + [{"role": "user", "content": clean_msg}]
 
         logger.info(
@@ -185,8 +425,12 @@ def run_agent(
                 break
 
             if tool_calls_made >= MAX_TOOL_TURNS:
+                logger.warning(
+                    f"[Agent] reached max tool turns ({tool_calls_made}/{MAX_TOOL_TURNS}) "
+                    f"for user={identity.user_id} role={identity.role} intent={route.intent}"
+                )
                 final_reply = (text_blocks[0].text if text_blocks
-                               else "⚠️ הגעתי לגבול הכלים. נסה לפרק לשלבים.")
+                               else "⚠️ הגעתי למגבלת הפעולות לריצה זו. נסה לפרק את הבקשה לשלבים.")
                 break
 
             # ── Tool Loop ────────────────────────
@@ -202,11 +446,21 @@ def run_agent(
                     continue
 
                 try:
-                    enforce(tu.name, identity)
+                    meta = enforce(tu.name, identity)
                 except ToolDenied as e:
                     logger.warning(f"[Tool] Denied: {tu.name} for {identity.role}")
                     tool_results.append({
                         "type": "tool_result", "tool_use_id": tu.id, "content": str(e)
+                    })
+                    continue
+
+                # ── Approval Gate ─────────────────────
+                if meta.requires_approval:
+                    result = _queue_approval(
+                        tu.name, dict(tu.input), chat_id, channel
+                    )
+                    tool_results.append({
+                        "type": "tool_result", "tool_use_id": tu.id, "content": result
                     })
                     continue
 
@@ -223,11 +477,27 @@ def run_agent(
                 elif exec_check.status == "warn":
                     logger.warning(f"[A32] Execution warn: {tu.name} — {exec_check.reason}")
 
+                # Fix 2: persist successful write results for next-turn memory
+                if tu.name in _MEMORABLE_TOOLS and "❌" not in result:
+                    memory.add(
+                        ctx.memory_key,
+                        "user",   # only "user"/"assistant" valid in Claude messages[]
+                        f"[🔧 {tu.name}]: {str(tu.input)[:60]} → {result[:60]}"
+                    )
+
                 entry = {"type": "tool_result", "tool_use_id": tu.id, "content": result}
                 tool_results.append(entry)
                 tool_results_log.append(entry)   # A32: accumulate for final check
 
             tool_calls_made += 1
+
+            # ⏳ keep typing indicator alive between tool calls
+            if channel == "telegram":
+                try:
+                    bot.send_chat_action(chat_id, "typing")
+                except Exception:
+                    pass
+
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user",      "content": tool_results})
 
@@ -242,10 +512,17 @@ def run_agent(
 
     except anthropic.APIStatusError as e:
         logger.error(f"[Agent] Anthropic {e.status_code}: {e.message}")
+        if e.status_code == 529:
+            return "⚠️ השרת עמוס כרגע. נסה שוב בעוד דקה."
+        if e.status_code == 413:
+            return "⚠️ ההודעה ארוכה מדי. נסה לשלח קצר יותר."
         return f"❌ שגיאת API ({e.status_code}). נסה שוב."
+    except anthropic.APITimeoutError:
+        logger.error(f"[Agent] Timeout for {chat_id}")
+        return "⚠️ הבקשה לקחה יותר מדי זמן. נסה שוב או שלח הודעה קצרה יותר."
     except Exception as e:
         logger.error(f"[Agent] error: {e}", exc_info=True)
-        return f"❌ שגיאה פנימית: {e}"
+        return "⚠️ משהו השתבש. נסה שוב."
 
 
 # ══════════════════════════════════════════════════
@@ -254,11 +531,16 @@ def run_agent(
 
 @app.route("/health", methods=["GET"])
 def health():
+    health_status = get_health_status(globals().get("_scheduler"), memory)
     return jsonify({
-        "status":         "ok",
+        "status":         health_status["status"],
         "version":        "3.0",
         "max_tool_turns": MAX_TOOL_TURNS,
         "router":         "CORE_02.6",
+        "checks":         health_status["checks"],
+        "digest_chat_id": bool(os.environ.get("DIGEST_CHAT_ID")),
+        "airtable":       bool(os.environ.get("AIRTABLE_API_KEY")),
+        "memory_entries": len(memory._store),
     }), 200
 
 
@@ -266,15 +548,64 @@ def health():
 def webhook_telegram():
     if request.headers.get("content-type") != "application/json":
         abort(403)
+    if WEBHOOK_SECRET:
+        if request.headers.get("X-Telegram-Bot-Api-Secret-Token", "") != WEBHOOK_SECRET:
+            logger.warning(f"[Webhook] bad secret from {request.remote_addr}")
+            abort(403)
     update = telebot.types.Update.de_json(request.get_data().decode("utf-8"))
-    if update.message and update.message.text:
-        chat_id = str(update.message.chat.id)
-        text    = update.message.text
-        if idempotency.is_duplicate("telegram", chat_id, text):
-            return "", 200
-        reply = run_agent(text, chat_id, channel="telegram")
+
+    if update.callback_query:
         try:
-            bot.send_message(chat_id, reply)
+            _handle_approval_callback(update.callback_query)
+        except Exception as e:
+            logger.error(f"[Telegram] callback error: {e}", exc_info=True)
+        return "", 200
+
+    if update.message and update.message.text:
+        reply_chat_id  = str(update.message.chat.id)       # לאן לשלוח (group או private)
+        sender_user_id = str(update.message.from_user.id)  # מי שלח (תמיד USER_ID)
+        text           = update.message.text
+        if idempotency.is_duplicate("telegram", sender_user_id, text):
+            try:
+                bot.send_message(
+                    reply_chat_id,
+                    "♻️ ההודעה הזו כבר טופלה.\n"
+                    "אם זו בקשה חדשה — נסח אותה אחרת."
+                )
+            except Exception as e:
+                logger.debug(f"[Idempotency] notify failed: {e}")
+            return "", 200
+
+        # ── Thinking Indicator ────────────────────────────────────
+        thinking_msg_id = None
+        try:
+            thinking_msg    = bot.send_message(reply_chat_id, "⏳")
+            thinking_msg_id = thinking_msg.message_id
+        except Exception:
+            pass
+
+        # typing thread כגיבוי (למקרה ש-⏳ לא נשלח)
+        typing_stop   = threading.Event()
+        typing_thread = threading.Thread(
+            target=_typing_indicator,
+            args=(reply_chat_id, "telegram", typing_stop),
+            daemon=True,
+        )
+        typing_thread.start()
+
+        try:
+            reply = run_agent(text, sender_user_id, channel="telegram")
+        finally:
+            typing_stop.set()
+            typing_thread.join(timeout=1.0)
+            if thinking_msg_id:
+                try:
+                    bot.delete_message(reply_chat_id, thinking_msg_id)
+                except Exception:
+                    pass
+
+        try:
+            bot.send_message(reply_chat_id, reply)
         except Exception as e:
             logger.error(f"[Telegram] send error: {e}")
     return "", 200
@@ -297,6 +628,16 @@ def webhook_whatsapp():
     dedup_key = msg_sid if msg_sid else incoming
     if idempotency.is_duplicate("whatsapp", sender, dedup_key):
         return Response(str(MessagingResponse()), mimetype="application/xml")
+
+    if _inject_utm:
+        try:
+            _inject_utm(
+                memory_key   = f"whatsapp:{sender}",
+                request_args = request.values.to_dict(),
+                channel      = "whatsapp",
+            )
+        except Exception as _utm_err:
+            logger.debug(f"[UTM] whatsapp inject skipped: {_utm_err}")
 
     resp = MessagingResponse()
     resp.message(run_agent(
@@ -335,6 +676,30 @@ def worker_trigger():
 @app.route("/")
 def home():
     return "The Boss is Live v3.0 — CORE_02.6 Router ✅"
+
+
+# ══════════════════════════════════════════════════
+# F07 — Voice IVR (Twilio)
+# ══════════════════════════════════════════════════
+
+@app.route("/voice/incoming", methods=["POST"])
+def voice_incoming():
+    from feature_flags import is_enabled
+    from voice_adapter import build_twiml, _say, _hangup, process_voice_step
+    if not is_enabled("VOICE_IVR"):
+        return Response(build_twiml(_say("השירות לא פעיל.") + _hangup()), mimetype="text/xml")
+    call_sid = request.form.get("CallSid", "")
+    from_num = request.form.get("From", "").replace("whatsapp:", "")
+    return Response(process_voice_step(call_sid, from_num), mimetype="text/xml")
+
+
+@app.route("/voice/step", methods=["POST"])
+def voice_step():
+    from voice_adapter import process_voice_step
+    call_sid = request.form.get("CallSid", "")
+    from_num = request.form.get("From", "").replace("whatsapp:", "")
+    digits   = request.form.get("Digits", "")
+    return Response(process_voice_step(call_sid, from_num, digits), mimetype="text/xml")
 
 
 if __name__ == "__main__":

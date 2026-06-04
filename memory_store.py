@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 MAX_MESSAGES     = 50
 AVG_TOKENS       = 150
 TOKEN_LIMIT      = 80_000
-MEMORY_TTL_HOURS = 4   # שיחה פגה אחרי 4 שעות חוסר פעילות
+MEMORY_TTL_HOURS = 12  # שיחה פגה אחרי 12 שעות חוסר פעילות
 
 
 class MemoryStore:
@@ -60,13 +60,8 @@ class MemoryStore:
         today = date.today()
         s     = self._store[key]
 
-        # איפוס ביום חדש
-        if s["date"] != today:
-            if s["date"] is not None:
-                logger.info(f"🔄 יום חדש — מאפס זיכרון: {key}")
-            s["date"]        = today
-            s["messages"]    = []
-            s["last_active"] = None
+        if s["date"] is None:
+            s["date"] = today
 
         # איפוס TTL — שיחה ישנה
         # הערה: אם _read כבר אפסה, last_active=None, _check_ttl_raw מחזיר True — בטוח
@@ -90,10 +85,6 @@ class MemoryStore:
     def _read(self, key: str) -> list[dict]:
         now = datetime.now()
         s   = self._store[key]
-
-        # יום שעבר — היסטוריה ריקה
-        if s["date"] != date.today():
-            return []
 
         # ── תיקון באג #1 ────────────────────────────────
         # TTL פג: חייבים לאפס state לפני return [].

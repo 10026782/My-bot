@@ -68,6 +68,128 @@ def _job_daily_collector():
 
 
 # ══════════════════════════════════════════════════
+# N02 — Followup Scan
+# ══════════════════════════════════════════════════
+
+def _job_followup_scan():
+    try:
+        from feature_flags import is_enabled
+        if not is_enabled("FOLLOWUP_AUTOMATION"):
+            return
+
+        from followup_engine import run_followup_scan
+        owner_chat_id = os.environ.get("DIGEST_CHAT_ID", "")
+        result = run_followup_scan(owner_chat_id=owner_chat_id)
+
+        if result.candidates:
+            logger.info(
+                f"[Followup] scanned={result.scanned} "
+                f"candidates={len(result.candidates)} queued={result.approved}"
+            )
+        for err in result.errors:
+            logger.error(f"[Followup] {err}")
+
+    except ImportError as e:
+        logger.warning(f"[Followup] not available: {e}")
+    except Exception as e:
+        logger.error(f"[Followup] job error: {e}")
+
+
+# ══════════════════════════════════════════════════
+# N04 — Payment Reminders
+# ══════════════════════════════════════════════════
+
+def _job_payment_reminders():
+    try:
+        from feature_flags import is_enabled
+        if not is_enabled("PAYMENT_REMINDERS"):
+            return
+
+        from payment_reminder import run_payment_scan
+        import telebot
+        token   = os.environ.get("TELEGRAM_TOKEN", "")
+        chat_id = os.environ.get("DIGEST_CHAT_ID", "")
+        if not token or not chat_id:
+            logger.warning("[PaymentReminder] TELEGRAM_TOKEN / DIGEST_CHAT_ID חסרים")
+            return
+
+        bot    = telebot.TeleBot(token)
+        result = run_payment_scan(bot=bot, chat_id=chat_id)
+
+        if result.has_alerts:
+            logger.info(
+                f"[PaymentReminder] done | "
+                f"upcoming={len(result.upcoming)} overdue={len(result.overdue)}"
+            )
+        for err in result.errors:
+            logger.error(f"[PaymentReminder] {err}")
+
+    except ImportError as e:
+        logger.warning(f"[PaymentReminder] not available: {e}")
+    except Exception as e:
+        logger.error(f"[PaymentReminder] job error: {e}")
+
+
+# ══════════════════════════════════════════════════
+# F01 — Lead Recovery
+# ══════════════════════════════════════════════════
+
+def _job_lead_recovery():
+    try:
+        from feature_flags import is_enabled
+        if not is_enabled("LEAD_RECOVERY"):
+            return
+
+        from core.lead_recovery import run_recovery_scan
+        owner_chat_id = os.environ.get("DIGEST_CHAT_ID", "")
+        result = run_recovery_scan(owner_chat_id=owner_chat_id)
+
+        if result.candidates:
+            logger.info(
+                f"[Recovery] scanned={result.scanned} "
+                f"candidates={len(result.candidates)} queued={result.queued}"
+            )
+        for err in result.errors:
+            logger.error(f"[Recovery] {err}")
+
+    except ImportError as e:
+        logger.warning(f"[Recovery] not available: {e}")
+    except Exception as e:
+        logger.error(f"[Recovery] job error: {e}")
+
+
+# ══════════════════════════════════════════════════
+# F02 — Learning Cycle
+# ══════════════════════════════════════════════════
+
+def _job_learning_cycle():
+    try:
+        from feature_flags import is_enabled
+        if not is_enabled("LEARNING_ENGINE"):
+            return
+
+        from core.learning_engine import run_learning_cycle, get_domain_insights
+        import telebot
+
+        result = run_learning_cycle(["realestate", "import"])
+        logger.info(f"[Learning] cycle done: {list(result.keys())}")
+
+        token   = os.environ.get("TELEGRAM_TOKEN", "")
+        chat_id = os.environ.get("DIGEST_CHAT_ID", "")
+        if token and chat_id and result:
+            bot     = telebot.TeleBot(token)
+            summary = get_domain_insights()
+            if summary:
+                bot.send_message(chat_id, summary, parse_mode="Markdown")
+                logger.info("[Learning] ✅ Insights sent to owner")
+
+    except ImportError as e:
+        logger.warning(f"[Learning] not available: {e}")
+    except Exception as e:
+        logger.error(f"[Learning] job error: {e}")
+
+
+# ══════════════════════════════════════════════════
 # Security Review Reminder
 # ══════════════════════════════════════════════════
 
@@ -145,6 +267,123 @@ def _job_security_reminder():
 
 
 # ══════════════════════════════════════════════════
+# F06 — Email Inbound
+# ══════════════════════════════════════════════════
+
+def _job_email_inbound():
+    try:
+        from feature_flags import is_enabled
+        if not is_enabled("EMAIL_INBOUND"):
+            return
+
+        from email_inbound import run_email_poll
+        owner_chat_id = os.environ.get("DIGEST_CHAT_ID", "")
+        result = run_email_poll(owner_chat_id=owner_chat_id)
+
+        if result.routed:
+            logger.info(
+                f"[Email] scanned={result.scanned} "
+                f"routed={result.routed} skipped={result.skipped}"
+            )
+        for err in result.errors:
+            logger.error(f"[Email] {err}")
+
+    except ImportError as e:
+        logger.warning(f"[Email] not available: {e}")
+    except Exception as e:
+        logger.error(f"[Email] job error: {e}")
+
+
+# ══════════════════════════════════════════════════
+# D05 — Ad Attribution Report
+# ══════════════════════════════════════════════════
+
+def _job_attribution_report():
+    """D05: Attribution Report שבועי — כל ראשון."""
+    try:
+        from feature_flags import is_enabled
+        if not is_enabled("AD_ATTRIBUTION"):
+            return
+        from ad_attribution import run_attribution_report
+        run_attribution_report(os.environ.get("DIGEST_CHAT_ID", ""))
+    except ImportError as e:
+        logger.warning(f"[Attribution] not available: {e}")
+    except Exception as e:
+        logger.error(f"[Attribution] {e}")
+
+
+# ══════════════════════════════════════════════════
+# D02 — Abandoned Lead Scan
+# ══════════════════════════════════════════════════
+
+def _job_abandoned_scan():
+    """D02: סריקת לידים נטושים כל 15 דקות."""
+    try:
+        from feature_flags import is_enabled
+        if not is_enabled("ABANDONED_LEADS"):
+            return
+        from abandoned_lead_worker import run_abandoned_scan
+        owner_chat_id = os.environ.get("DIGEST_CHAT_ID", "")
+        result = run_abandoned_scan(owner_chat_id)
+        if result.abandoned:
+            logger.info(
+                f"[D02] abandoned={result.abandoned} "
+                f"bounced={result.bounced} pipeline={result.human_pipeline}"
+            )
+    except ImportError as e:
+        logger.warning(f"[D02] not available: {e}")
+    except Exception as e:
+        logger.error(f"[D02] {e}")
+
+
+# ══════════════════════════════════════════════════
+# D04 — Audience Intelligence
+# ══════════════════════════════════════════════════
+
+def _job_audience_report():
+    """D04: דוח audience שבועי — כל ראשון."""
+    try:
+        from feature_flags import is_enabled
+        if not is_enabled("AUDIENCE_INTELLIGENCE"):
+            return
+        from audience_intelligence import run_audience_scan
+        result = run_audience_scan(os.environ.get("DIGEST_CHAT_ID", ""))
+        if result.total:
+            logger.info(f"[Audience] total={result.total} segments={len(result.segments)}")
+    except ImportError as e:
+        logger.warning(f"[Audience] not available: {e}")
+    except Exception as e:
+        logger.error(f"[Audience] {e}")
+
+
+# ══════════════════════════════════════════════════
+# D06 — Interaction Intelligence
+# ══════════════════════════════════════════════════
+
+def _job_interaction_scan():
+    """D06: ניתוח פגישות + זיכרון עסקי — כל 15 דקות."""
+    try:
+        from feature_flags import is_enabled
+        if not is_enabled("INTERACTION_INTELLIGENCE"):
+            return
+        from interaction_engine import run_interaction_scan, send_upcoming_reminders
+        owner_chat_id = os.environ.get("DIGEST_CHAT_ID", "")
+        send_upcoming_reminders(owner_chat_id)
+        result = run_interaction_scan(owner_chat_id=owner_chat_id)
+        if result.processed:
+            logger.info(
+                f"[D06] processed={len(result.processed)} "
+                f"skipped={result.skipped} errors={len(result.errors)}"
+            )
+        for err in result.errors:
+            logger.error(f"[D06] {err}")
+    except ImportError as e:
+        logger.warning(f"[D06] not available: {e}")
+    except Exception as e:
+        logger.error(f"[D06] {e}")
+
+
+# ══════════════════════════════════════════════════
 # Runner
 # ══════════════════════════════════════════════════
 
@@ -159,24 +398,45 @@ def _run_scheduler():
 
 
 def start_scheduler() -> threading.Thread:
-    digest_time      = os.environ.get("DIGEST_TIME",             "07:30")
-    collector_time   = os.environ.get("COLLECTOR_TIME",          "23:00")
-    cleanup_interval = int(os.environ.get("CLEANUP_INTERVAL_MIN", "60"))
-    security_day     = os.environ.get("SECURITY_REMINDER_DAY",   "sunday")
-    security_time    = os.environ.get("SECURITY_REMINDER_TIME",  "09:00")
+    from lead_memory import job_flush_lead_memory
+    from shabbat_guard import shabbat_safe
+    digest_time           = os.environ.get("DIGEST_TIME",               "07:30")
+    collector_time        = os.environ.get("COLLECTOR_TIME",            "23:00")
+    cleanup_interval      = int(os.environ.get("CLEANUP_INTERVAL_MIN",  "60"))
+    followup_interval     = int(os.environ.get("FOLLOWUP_INTERVAL_MIN", "60"))
+    payment_reminder_time = os.environ.get("PAYMENT_REMINDER_TIME",    "09:00")
+    recovery_time         = os.environ.get("RECOVERY_TIME",            "10:00")
+    learning_day          = os.environ.get("LEARNING_DAY",             "sunday")
+    learning_time         = os.environ.get("LEARNING_TIME",            "06:00")
+    email_interval        = int(os.environ.get("EMAIL_POLL_INTERVAL_MIN", "15"))
+    security_day          = os.environ.get("SECURITY_REMINDER_DAY",    "sunday")
+    security_time         = os.environ.get("SECURITY_REMINDER_TIME",   "09:00")
+    abandoned_interval    = int(os.environ.get("ABANDONED_INTERVAL_MIN", "15"))
 
     schedule.every().day.at(digest_time).do(_job_daily_digest)
     schedule.every().day.at(collector_time).do(_job_daily_collector)
     schedule.every(cleanup_interval).minutes.do(_job_cleanup_pending)
     schedule.every().day.at("00:05").do(_job_overdue_payments)
-
-    # תזכורת אבטחה — פעם בשבוע, שולחת רק אם עברו 28+ ימים
+    schedule.every(10).minutes.do(job_flush_lead_memory)                                          # N01
+    schedule.every(followup_interval).minutes.do(shabbat_safe(_job_followup_scan))               # N02
+    schedule.every().day.at(payment_reminder_time).do(shabbat_safe(_job_payment_reminders))      # N04
+    schedule.every().day.at(recovery_time).do(shabbat_safe(_job_lead_recovery))                  # F01
+    getattr(schedule.every(), learning_day).at(learning_time).do(_job_learning_cycle)            # F02
+    schedule.every(email_interval).minutes.do(_job_email_inbound)                                # F06 (email always ok)
+    schedule.every(abandoned_interval).minutes.do(shabbat_safe(_job_abandoned_scan))             # D02
+    getattr(schedule.every(), "sunday").at("08:00").do(shabbat_safe(_job_audience_report))       # D04
+    getattr(schedule.every(), "sunday").at("08:30").do(_job_attribution_report)                  # D05
+    schedule.every(15).minutes.do(shabbat_safe(_job_interaction_scan))                           # D06
     getattr(schedule.every(), security_day).at(security_time).do(_job_security_reminder)
 
     logger.info(
         f"📅 Scheduler | digest={digest_time} | collector={collector_time} | "
-        f"cleanup=every {cleanup_interval}min | "
-        f"security-check=every {security_day} {security_time}"
+        f"cleanup=every {cleanup_interval}min | followup=every {followup_interval}min | "
+        f"payment={payment_reminder_time} | recovery={recovery_time} | "
+        f"learning={learning_day} {learning_time} | "
+        f"email=every {email_interval}min | "
+        f"abandoned=every {abandoned_interval}min | "
+        f"security={security_day} {security_time}"
     )
 
     t = threading.Thread(target=_run_scheduler, daemon=True, name="scheduler")
