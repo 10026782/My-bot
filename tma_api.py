@@ -877,3 +877,49 @@ def emergency_stop(identity):
     except Exception as e:
         logger.error(f"[Emergency] set_flag failed: {e}")
         return jsonify({"error": "failed to set emergency flag"}), 500
+
+
+# ══════════════════════════════════════════════════════════════════
+# DEV ONLY — Schema audit endpoint (TMA_DEV_MODE=1 required)
+# Remove before production launch.
+# ══════════════════════════════════════════════════════════════════
+
+@tma_api.route("/api/dev/schema", methods=["GET"])
+@require_tma_auth
+def dev_schema_audit(identity):
+    """Returns field names + sample values from each business table. Owner only."""
+    if not _DEV_MODE:
+        return jsonify({"error": "only available in DEV_MODE"}), 403
+    if not identity.is_owner:
+        return jsonify({"error": "forbidden"}), 403
+
+    _CLOSED_STATUSES = {"Closed", "Won", "Lost", "Cancelled", "Done",
+                        "Completed", "הושלם", "נסגר", "בוטל"}
+
+    tables = ["Leads", "Deals", "משימות (Tasks)", "תשלומים (Payments)"]
+    result = {}
+
+    for table in tables:
+        records = _at_list(table, "", max_records=3)
+        if not records:
+            result[table] = {"error": "empty or missing", "fields": []}
+            continue
+
+        all_fields: dict[str, set] = {}
+        for rec in records:
+            for k, v in rec.get("fields", {}).items():
+                all_fields.setdefault(k, set()).add(str(v)[:80])
+
+        domain_keys = [k for k in all_fields if any(
+            x in k.lower() for x in ["domain", "project", "פרויקט", "דומיין", "tenant"]
+        )]
+        status_keys = [k for k in all_fields if "status" in k.lower() or "סטטוס" in k]
+
+        result[table] = {
+            "record_count_sample": len(records),
+            "fields": {k: list(v) for k, v in all_fields.items()},
+            "domain_project_candidates": domain_keys,
+            "status_candidates": {k: list(all_fields[k]) for k in status_keys},
+        }
+
+    return jsonify(result)
