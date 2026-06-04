@@ -25,9 +25,13 @@ logger = logging.getLogger(__name__)
 tma_api = Blueprint("tma_api", __name__)
 
 # ── env ────────────────────────────────────────────────────────────
-_BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
-_AT_KEY    = os.environ.get("AIRTABLE_API_KEY", "")
-_AT_BASE   = os.environ.get("AIRTABLE_BASE_ID", "")
+_BOT_TOKEN  = os.environ.get("TELEGRAM_TOKEN", "")
+_AT_KEY     = os.environ.get("AIRTABLE_API_KEY", "")
+_AT_BASE    = os.environ.get("AIRTABLE_BASE_ID", "")
+# TMA_DEV_MODE=1 skips Telegram HMAC — for local/staging testing only.
+# Set X-Dev-Telegram-Id header to the owner's Telegram numeric ID.
+# NEVER enable on production.
+_DEV_MODE   = os.environ.get("TMA_DEV_MODE", "").strip().lower() in ("1", "true", "yes")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -207,9 +211,22 @@ def require_tma_auth(f):
     """
     Decorator: reads X-Telegram-Init-Data header, validates HMAC on every request.
     Injects keyword arg `identity` into the wrapped handler.
+
+    DEV MODE (TMA_DEV_MODE=1): skips HMAC; reads telegram_id from X-Dev-Telegram-Id.
     """
     @wraps(f)
     def wrapper(*args, **kwargs):
+        if _DEV_MODE:
+            dev_id = request.headers.get("X-Dev-Telegram-Id", "").strip()
+            if not dev_id:
+                return jsonify({
+                    "error": "DEV_MODE active — send X-Dev-Telegram-Id: <telegram_id>",
+                    "hint": "Set TMA_DEV_MODE=1 in Render env vars, then pass your Telegram numeric ID",
+                }), 401
+            identity = resolve_identity("telegram", dev_id)
+            logger.warning(f"[TMA DEV_MODE] bypassing HMAC for telegram_id={dev_id} role={identity.role}")
+            return f(*args, identity=identity, **kwargs)
+
         init_data = request.headers.get("X-Telegram-Init-Data", "")
         if not init_data:
             return jsonify({"error": "missing X-Telegram-Init-Data header"}), 401
