@@ -341,20 +341,33 @@ def _get_project_cards(identity) -> list:
             if identity.user_id not in str(f.get("owner_ids", "") or ""):
                 continue
 
-        # Live KPI: active leads, filtered by domain stored on the record
+        # Live KPI: active leads filtered by Leads.domain field.
+        # "Open" = any status that is NOT a known closed state (case-insensitive).
+        # Returns 0 + kpi_note when Leads.domain field is missing in Airtable.
+        kpi_note = None
         if domain:
+            _closed = (
+                "LOWER({status})='closed',"
+                "LOWER({status})='lost',"
+                "LOWER({status})='won',"
+                "LOWER({status})='cancelled',"
+                "LOWER({status})='done',"
+                "LOWER({status})='completed',"
+                "LOWER({status})='הושלם',"
+                "LOWER({status})='נסגר',"
+                "LOWER({status})='בוטל'"
+            )
             leads = _at_list(
                 "Leads",
-                (
-                    f"AND({{domain}}='{domain}', "
-                    f"OR({{status}}='new', {{status}}='hot', {{status}}='warm', {{status}}='qualified'))"
-                ),
+                f"AND({{domain}}='{domain}', NOT(OR({_closed})))",
                 max_records=50,
             )
+            if not leads and domain:
+                kpi_note = "domain field not set in Leads — add field to enable per-project counts"
             hot = [
                 l for l in leads
                 if (l.get("fields", {}).get("score ציון") or 0) >= 70
-                or l.get("fields", {}).get("status") == "hot"
+                or (l.get("fields", {}).get("status") or "").lower() == "hot"
             ]
         else:
             leads, hot = [], []
@@ -372,6 +385,7 @@ def _get_project_cards(identity) -> list:
             "status_color": "red" if hot else ("yellow" if leads else "green"),
             "kpi":          {"label": "לידים פעילים", "value": len(leads)},
             "exception":    f"{len(hot)} לידים חמים" if hot else None,
+            "kpi_note":     kpi_note,
         })
     return cards
 
