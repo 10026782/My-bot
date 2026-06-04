@@ -59,7 +59,7 @@ def _hot_leads(errors: list) -> str:
     try:
         records = _fetch(
             "Leads",
-            "OR({status}='hot', {score ציון}>=70, {tier}='HOT')",
+            "OR({status}='hot',{status}='Hot',{status}='HOT')",
             max_rec=8,
         )
         if not records:
