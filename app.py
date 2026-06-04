@@ -61,6 +61,9 @@ bot    = telebot.TeleBot(TELEGRAM_TOKEN)
 
 app = Flask(__name__)
 
+from tma_api import tma_api as _tma_blueprint
+app.register_blueprint(_tma_blueprint)
+
 
 @bot.message_handler(commands=["status"])
 def cmd_status(msg):

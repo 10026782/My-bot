@@ -251,6 +251,62 @@ class ProjectStatus:
     CANCELLED       = "Cancelled"
     IN_PROGRESS     = "In Progress"
 
+
+# ══════════════════════════════════════════════════
+# TMA Tables — create these in Airtable before using
+# ══════════════════════════════════════════════════
+
+class ProjectsHubFields:
+    """
+    Dynamic project registry for TMA O0 Projects Hub.
+    Table name: ProjectsHub
+    Must be created manually in Airtable.
+    """
+    NAME          = "Name"
+    EMOJI         = "emoji"
+    MODE          = "mode"           # business | personal
+    PROJECT_TYPE  = "project_type"  # real_estate|recruitment|import|saas|custom
+    KPI_FIELDS    = "kpi_fields"    # JSON string — which KPIs to show
+    QUICK_ACTIONS = "quick_actions" # JSON string — per-project quick actions
+    STATUS        = "status"        # active|paused|archived
+    OWNER_IDS     = "owner_ids"     # comma-separated telegram user_ids
+
+
+class AssetsFields:
+    """
+    Personal assets table for TMA Personal Mode (PN1/PN2).
+    Table name: Assets (Personal)
+    Must be created manually in Airtable.
+    Owner + Co-Owner access only (allowed_domains includes 'personal').
+    """
+    NAME          = "שם הנכס"
+    TYPE          = "סוג"           # דירה|קרקע|מסחרי|אחר
+    COST          = "עלות רכישה"
+    VALUE         = "שווי נוכחי"
+    MORTGAGE      = "משכנתא"
+    RENTAL_INCOME = "הכנסה חודשית"
+    STATUS        = "סטטוס"         # מושכר|פנוי|בבנייה
+    NOTES         = "הערות"
+    DOCUMENTS     = "מסמכים"
+
+
+class ApprovalsFields:
+    """
+    Approval queue for TMA O6 Approvals screen.
+    Table name: Approvals
+    Must be created manually in Airtable.
+    Owner only.
+    """
+    ACTION         = "פעולה"
+    REQUESTED_BY   = "מבוקש על ידי"
+    REQUESTED_AT   = "בוקש בתאריך"
+    RISK_LEVEL     = "רמת סיכון"       # גבוה|בינוני|נמוך
+    CONTEXT_TYPE   = "סוג הקשר"       # lead|deal|asset|general
+    CONTEXT_ID     = "מזהה הקשר"
+    CONTEXT_DATA   = "נתוני הקשר"     # JSON string
+    STATUS         = "סטטוס"           # ממתין|אושר|נדחה
+    REJECTION_NOTE = "הערת דחייה"
+
 class UnitStatus:
     AVAILABLE       = "Available"
     RESERVED        = "Reserved"
