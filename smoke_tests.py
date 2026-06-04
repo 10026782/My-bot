@@ -66,7 +66,7 @@ class Result:
 
 def _prepare_env() -> None:
     for key, value in CRITICAL_IMPORT_ENV.items():
-        os.environ.setdefault(key, value)
+        os.environ[key] = value
 
 
 def _module_files() -> list[Path]:
@@ -106,7 +106,7 @@ def _iter_strings(node: ast.AST) -> list[ast.Constant]:
 
 
 def _parse(path: Path) -> ast.Module:
-    return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
 
 
 def run_check(name: str, fn: Callable[[], str | None]) -> Result:
