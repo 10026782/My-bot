@@ -3,6 +3,7 @@ import os
 import urllib.parse
 import httpx
 import logging
+from airtable_schema import Tables
 from guards.circuit_breaker import with_airtable_breaker
 
 logger = logging.getLogger(__name__)
@@ -13,26 +14,25 @@ logger = logging.getLogger(__name__)
 # ══════════════════════════════════════════════════
 
 _TABLE_FIELDS: dict[str, set[str]] = {
-    # ── alias keys (what Claude sends) ────────────
-    "Tasks": {
+    Tables.TASKS: {
         "כותרת המשימה", "תיאור", "תאריך יעד", "סטטוס",
         "מקושר לאנשי קשר", "מקושר לעסקאות",
     },
-    "Contacts": {
+    Tables.CONTACTS: {
         "שם", "חברה", "אימייל", "טלפון", "תאריך פולו אפ",
         "סטטוס", "עסקאות (Deals)", "משימות (Tasks)",
     },
-    "Deals": {
+    Tables.DEALS: {
         "שם העסקה", "סכום", "שלב", "תאריך סגירה",
         "מקושר לאנשי קשר", "משימות (Tasks)", "תשלומים (Payments)",
     },
-    "Expenses": {
+    Tables.EXPENSES: {
         "שם ההוצאה", "סכום", "קטגוריה", "תאריך",
     },
-    "Payments": {
+    Tables.PAYMENTS: {
         "אסמכתא", "סכום", "תאריך", "סטטוס", "מקושר לעסקאות",
     },
-    "Deadlines": {
+    Tables.DEADLINES: {
         "שם המשימה", "סטטוס", "תאריך דדליין", "אחראי",
         "תיאור המשימה", "עדיפות", "קישור לרשומת מכירה/יחידה", "הערות",
     },
@@ -68,14 +68,14 @@ _TABLE_FIELDS: dict[str, set[str]] = {
 # שדות שClaude ממציא ולא קיימים בשום טבלה
 _ALWAYS_FORBIDDEN = {"tenant", "owner_id", "user_id", "chat_id"}
 
-# מיפוי שמות ידידותיים → שמות אמיתיים ב-Airtable
-# מאפשר ל-Claude להשתמש בשמות אנגליים קצרים
+# מיפוי aliases ידידותיים בלבד → שמות production מ-Tables.
+# מאפשר ל-Claude להשתמש בשמות אנגליים קצרים בלי לכתוב לטבלאות הישנות.
 _TABLE_ALIAS_MAP: dict[str, str] = {
-    "Tasks":    "משימות (Tasks)",
-    "Contacts": "אנשי קשר (Contacts)",
-    "Deals":    "עסקאות (Deals)",
-    "Expenses": "הוצאות (Expenses)",
-    "Payments": "תשלומים (Payments)",
+    "Tasks":    Tables.TASKS,
+    "Contacts": Tables.CONTACTS,
+    "Deals":    Tables.DEALS,
+    "Expenses": Tables.EXPENSES,
+    "Payments": Tables.PAYMENTS,
 }
 
 
@@ -98,7 +98,7 @@ def _sanitize_fields(table: str, fields: dict) -> dict:
         logger.warning(f"airtable: הוסרו שדות אסורים: {removed_forbidden}")
 
     # שלב 2 — סינון לפי סכמה אם קיימת
-    allowed = _TABLE_FIELDS.get(table)
+    allowed = _TABLE_FIELDS.get(_resolve_table(table))
     if allowed:
         valid   = {k: v for k, v in cleaned.items() if k in allowed}
         invalid = set(cleaned) - set(valid)
