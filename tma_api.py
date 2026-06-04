@@ -303,62 +303,58 @@ def _parse_json_field(value) -> dict | list:
 
 def _get_project_cards(identity) -> list:
     """
-    Returns project status cards.
-    Tries ProjectsHub table first; falls back to static domain list with live KPIs.
+    Returns project status cards from ProjectsHub table.
+    Fields: Name, emoji, slug, mode, project_type, status,
+            kpi_fields, quick_actions, owner_ids, tenant_id, domain.
+    slug and domain are independent — domain drives lead filtering.
+    Returns [] if the table is empty or does not exist yet.
     """
-    dynamic = _at_list("ProjectsHub", "", max_records=20)
-    if dynamic:
-        cards = []
-        for r in dynamic:
-            f = r.get("fields", {})
-            if not identity.is_owner:
-                if identity.user_id not in str(f.get("owner_ids", "")):
-                    continue
-            cards.append({
-                "id":           r["id"],
-                "name":         f.get("Name", ""),
-                "emoji":        f.get("emoji", "📁"),
-                "mode":         f.get("mode", "business"),
-                "project_type": f.get("project_type", "custom"),
-                "status":       f.get("status", "active"),
-                "kpi_fields":   _parse_json_field(f.get("kpi_fields")),
-                "quick_actions": _parse_json_field(f.get("quick_actions")),
-            })
-        return cards
-
-    # Fallback: static project definitions with live lead-count KPIs
-    if not identity.is_owner:
+    records = _at_list("ProjectsHub", "", max_records=20)
+    if not records:
         return []
 
-    static_projects = [
-        {"id": "real_estate", "name": "נדל\"ן",  "emoji": "🏠"},
-        {"id": "import",      "name": "ייבוא",   "emoji": "🪑"},
-        {"id": "media",       "name": "מדיה",    "emoji": "📱"},
-        {"id": "saas",        "name": "BOSS",    "emoji": "🤖"},
-    ]
-
     cards = []
-    for p in static_projects:
-        domain = p["id"]
-        leads = _at_list(
-            "Leads",
-            f"AND({{domain}}='{domain}', "
-            f"OR({{status}}='new', {{status}}='hot', {{status}}='qualified', {{status}}='warm'))",
-            max_records=50,
-        )
-        hot = [
-            r for r in leads
-            if (r.get("fields", {}).get("score ציון") or 0) >= 70
-            or r.get("fields", {}).get("status") == "hot"
-        ]
+    for r in records:
+        f      = r.get("fields", {})
+        slug   = f.get("slug", "")
+        domain = f.get("domain", "")
+
+        # Non-owners: filter to projects where their user_id appears in owner_ids
+        if not identity.is_owner:
+            if identity.user_id not in str(f.get("owner_ids", "") or ""):
+                continue
+
+        # Live KPI: active leads, filtered by domain stored on the record
+        if domain:
+            leads = _at_list(
+                "Leads",
+                (
+                    f"AND({{domain}}='{domain}', "
+                    f"OR({{status}}='new', {{status}}='hot', {{status}}='warm', {{status}}='qualified'))"
+                ),
+                max_records=50,
+            )
+            hot = [
+                l for l in leads
+                if (l.get("fields", {}).get("score ציון") or 0) >= 70
+                or l.get("fields", {}).get("status") == "hot"
+            ]
+        else:
+            leads, hot = [], []
+
         cards.append({
-            "id":            domain,
-            "name":          p["name"],
-            "emoji":         p["emoji"],
-            "mode":          "business",
-            "status_color":  "red" if hot else ("yellow" if leads else "green"),
-            "kpi":           {"label": "לידים פעילים", "value": len(leads)},
-            "exception":     f"{len(hot)} לידים חמים" if hot else None,
+            "id":           r["id"],           # Airtable record_id — internal key
+            "slug":         slug,              # URL-safe identifier for dashboard routes
+            "name":         f.get("Name", ""),
+            "emoji":        f.get("emoji", "📁"),
+            "mode":         f.get("mode", "business"),
+            "project_type": f.get("project_type", "custom"),
+            "domain":       domain,
+            "status":       f.get("status", "active"),
+            "tenant_id":    f.get("tenant_id", ""),
+            "status_color": "red" if hot else ("yellow" if leads else "green"),
+            "kpi":          {"label": "לידים פעילים", "value": len(leads)},
+            "exception":    f"{len(hot)} לידים חמים" if hot else None,
         })
     return cards
 
@@ -441,30 +437,56 @@ def create_project(identity):
 
     fields = {
         "Name":          data["name"],
+        "slug":          data.get("slug", ""),
         "emoji":         data.get("emoji", "📁"),
         "mode":          data["mode"],
         "project_type":  data.get("project_type", "custom"),
+        "domain":        data.get("domain", "general"),
         "kpi_fields":    json.dumps(data.get("kpi_fields", {})),
         "quick_actions": json.dumps(data.get("quick_actions", {})),
         "status":        "active",
         "owner_ids":     identity.user_id,
+        "tenant_id":     identity.tenant_id,
     }
     rec = _at_post("ProjectsHub", fields)
     if not rec:
         return jsonify({"error": "failed to create project — ProjectsHub table may not exist yet"}), 500
 
-    _audit(f"create_project", identity, details=data["name"])
+    _audit("create_project", identity, details=data["name"])
     return jsonify({"ok": True, "id": rec["id"], "name": data["name"]}), 201
 
 
-@tma_api.route("/api/projects/<project_id>/dashboard", methods=["GET"])
+@tma_api.route("/api/projects/<project_slug>/dashboard", methods=["GET"])
 @require_tma_auth
-def get_project_dashboard(project_id, identity):
-    """Project Dashboard — owner + partner with domain access."""
-    if not (identity.is_owner or identity.can_access_domain(project_id)):
+def get_project_dashboard(project_slug, identity):
+    """
+    Project Dashboard — owner + partner with domain access.
+    project_slug is the slug field value (e.g. 'blueview', 'boss-saas').
+    Looks up the ProjectsHub record to get the canonical domain for filtering.
+    """
+    # Step 1: resolve slug → ProjectsHub record to get domain
+    hub_records = _at_list(
+        "ProjectsHub",
+        f"{{slug}}='{project_slug}'",
+        max_records=1,
+    )
+    if not hub_records:
+        return jsonify({"error": f"project '{project_slug}' not found in ProjectsHub"}), 404
+
+    hub_fields = hub_records[0].get("fields", {})
+    domain = hub_fields.get("domain", "")
+    if not domain:
+        return jsonify({
+            "error":   f"project '{project_slug}' has no domain configured",
+            "fix":     "Set the 'domain' field in ProjectsHub for this project",
+        }), 422
+
+    # Step 2: permission check using the resolved domain
+    if not (identity.is_owner or identity.can_access_domain(domain)):
         return jsonify({"error": "forbidden"}), 403
 
-    leads = _at_list("Leads", f"{{domain}}='{project_id}'", max_records=20)
+    # Step 3: fetch data filtered by domain
+    leads = _at_list("Leads", f"{{domain}}='{domain}'", max_records=20)
     deals = _at_list(
         "עסקאות (Deals)",
         "NOT(OR({שלב}='סגור-ניצחון', {שלב}='סגור-הפסד'))",
@@ -472,16 +494,18 @@ def get_project_dashboard(project_id, identity):
     )
     tasks = _at_list(
         "משימות (Tasks)",
-        f"{{סטטוס}}!='בוצע'",
+        "{סטטוס}!='בוצע'",
         max_records=10,
     )
 
     return jsonify({
-        "project_id":  project_id,
-        "leads_count": len(leads),
-        "open_deals":  len(deals),
-        "open_tasks":  len(tasks),
-        "leads":       [_fmt_lead_summary(r) for r in leads[:10]],
+        "project_slug": project_slug,
+        "domain":       domain,
+        "name":         hub_fields.get("Name", ""),
+        "leads_count":  len(leads),
+        "open_deals":   len(deals),
+        "open_tasks":   len(tasks),
+        "leads":        [_fmt_lead_summary(r) for r in leads[:10]],
     })
 
 

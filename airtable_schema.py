@@ -264,12 +264,15 @@ class ProjectsHubFields:
     """
     NAME          = "Name"
     EMOJI         = "emoji"
+    SLUG          = "slug"          # kebab-case identifier, used in API URLs
     MODE          = "mode"           # business | personal
     PROJECT_TYPE  = "project_type"  # real_estate|recruitment|import|saas|custom
+    DOMAIN        = "domain"        # saas|real_estate|import|recruitment|finance|general
     KPI_FIELDS    = "kpi_fields"    # JSON string — which KPIs to show
     QUICK_ACTIONS = "quick_actions" # JSON string — per-project quick actions
     STATUS        = "status"        # active|paused|archived
     OWNER_IDS     = "owner_ids"     # comma-separated telegram user_ids
+    TENANT_ID     = "tenant_id"
 
 
 class AssetsFields:
