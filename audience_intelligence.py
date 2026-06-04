@@ -133,7 +133,7 @@ class AudienceReport:
 def load_all_leads() -> list[LeadProfile]:
     """טוען לידים מAirtable דרך crm. Read-only."""
     try:
-        from airtable_tools import airtable_get  # type: ignore
+        from tools.airtable_tools import airtable_get  # type: ignore
         from airtable_schema import Tables        # type: ignore
 
         records = airtable_get(Tables.LEADS, "")

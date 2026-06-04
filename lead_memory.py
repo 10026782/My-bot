@@ -133,7 +133,7 @@ class LeadMemory:
     def _write(self, state: LeadState) -> bool:
         """כותב לAirtable דרך airtable_tools בלבד."""
         try:
-            from airtable_tools import airtable_add, airtable_update  # type: ignore
+            from tools.airtable_tools import airtable_add, airtable_update  # type: ignore
             from airtable_schema import Tables                          # type: ignore
 
             fields = {

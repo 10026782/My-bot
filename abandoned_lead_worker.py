@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from airtable_schema import Tables
+from airtable_schema import Tables, TaskFields, TaskStatus
 
 logger = logging.getLogger(__name__)
 
@@ -98,18 +98,18 @@ def scan_abandoned() -> list[AbandonedLead]:
     מקור: Airtable LeadSessions (שמסונכרן ע"י session_store).
     """
     try:
-        from airtable_tools import airtable_get  # type: ignore
+        from tools.airtable_tools import airtable_get  # type: ignore
         raw = airtable_get(
             "LeadSessions",
             "AND({done}=0, {drop_off_step}!='')"
         )
         result = _parse_sessions(raw)
         if not result:
-            return _mock_abandoned()
+            return []
         return result
     except ImportError:
-        logger.warning("[D02] airtable not available — mock mode")
-        return _mock_abandoned()
+        logger.warning("[D02] airtable not available — scan skipped")
+        return []
     except Exception as e:
         logger.error(f"[D02] scan error: {e}")
         return []
@@ -243,14 +243,15 @@ def create_human_pipeline_task(lead: AbandonedLead, owner_chat_id: str) -> bool:
     לשימוש כשערוץ = voice (IVR).
     """
     try:
-        from airtable_tools import airtable_add  # type: ignore
+        from tools.airtable_tools import airtable_add  # type: ignore
         answers_str = " | ".join(f"{k}={v}" for k, v in lead.answers.items())
+        priority = "high" if lead.step >= 3 else "medium"
         fields = {
-            "Name":     f"📞 ליד נטוש — {lead.sender}",
-            "Status":   "open",
-            "Priority": "high" if lead.step >= 3 else "medium",
-            "Notes":    (
+            TaskFields.NAME:   f"📞 ליד נטוש — {lead.sender}",
+            TaskFields.STATUS: TaskStatus.PENDING,
+            TaskFields.DESCRIPTION: (
                 f"ערוץ: {lead.channel} | דומיין: {lead.domain}\n"
+                f"עדיפות: {priority}\n"
                 f"שלב נטישה: {lead.step}/{lead.total_steps}\n"
                 f"זמן שתיקה: {lead.minutes_silent:.0f} דקות\n"
                 f"תשובות: {answers_str}"

@@ -79,7 +79,7 @@ def get_domain_insights(domain: str = "") -> str:
 def _check_learning_readiness() -> dict:
     """האם יש מספיק lead_events ללמידה?"""
     try:
-        from airtable_tools import airtable_get  # type: ignore
+        from tools.airtable_tools import airtable_get  # type: ignore
         raw = airtable_get("LeadEvents", "")
         count = raw.count("•") if raw else 0
         if count < _MIN_EVENTS_FOR_LEARNING:
@@ -115,7 +115,7 @@ def get_campaign_attribution(campaign_source: str = "") -> dict:
         return {"status": "waiting", "reason": readiness["reason"]}
 
     # TODO: לוגיקת attribution אמיתית
-    # from airtable_tools import airtable_get
+    # from tools.airtable_tools import airtable_get
     # leads = airtable_get("Leads", f"{{campaign_source}}='{campaign_source}'")
     # ... חשב ROI per campaign
     return {"status": "stub — activate when data ready"}
@@ -141,7 +141,7 @@ def get_attribution_report() -> str:
 def _check_attribution_readiness() -> dict:
     """האם יש לידים עם campaign_source?"""
     try:
-        from airtable_tools import airtable_get  # type: ignore
+        from tools.airtable_tools import airtable_get  # type: ignore
         raw = airtable_get("Leads", "NOT({campaign_source}='')")
         count = raw.count("•") if raw else 0
         if count < _MIN_LEADS_FOR_ATTRIBUTION:
@@ -200,7 +200,7 @@ def _basic_kpi() -> dict:
     """
     kpi: dict = {}
     try:
-        from airtable_tools import airtable_get  # type: ignore
+        from tools.airtable_tools import airtable_get  # type: ignore
 
         leads_hot  = airtable_get("Leads", "{tier}='HOT'")
         leads_warm = airtable_get("Leads", "{tier}='WARM'")
