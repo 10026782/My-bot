@@ -230,7 +230,7 @@ def step_callback(session: VoiceSession, digits: str) -> str:
 def _save_voice_lead(session: VoiceSession) -> bool:
     """שומר ליד קולי לAirtable + מודיע לowner."""
     try:
-        from airtable_tools import airtable_add  # type: ignore
+        from tools.airtable_tools import airtable_add  # type: ignore
         from airtable_schema import Tables        # type: ignore
 
         fields = {

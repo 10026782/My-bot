@@ -22,6 +22,8 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+from airtable_schema import Tables
+
 logger = logging.getLogger(__name__)
 
 # ── מינימום דאטה נדרש לפני הפעלה ──────────────────
@@ -77,7 +79,7 @@ def get_domain_insights(domain: str = "") -> str:
 def _check_learning_readiness() -> dict:
     """האם יש מספיק lead_events ללמידה?"""
     try:
-        from airtable_tools import airtable_get  # type: ignore
+        from tools.airtable_tools import airtable_get  # type: ignore
         raw = airtable_get("LeadEvents", "")
         count = raw.count("•") if raw else 0
         if count < _MIN_EVENTS_FOR_LEARNING:
@@ -113,7 +115,7 @@ def get_campaign_attribution(campaign_source: str = "") -> dict:
         return {"status": "waiting", "reason": readiness["reason"]}
 
     # TODO: לוגיקת attribution אמיתית
-    # from airtable_tools import airtable_get
+    # from tools.airtable_tools import airtable_get
     # leads = airtable_get("Leads", f"{{campaign_source}}='{campaign_source}'")
     # ... חשב ROI per campaign
     return {"status": "stub — activate when data ready"}
@@ -139,7 +141,7 @@ def get_attribution_report() -> str:
 def _check_attribution_readiness() -> dict:
     """האם יש לידים עם campaign_source?"""
     try:
-        from airtable_tools import airtable_get  # type: ignore
+        from tools.airtable_tools import airtable_get  # type: ignore
         raw = airtable_get("Leads", "NOT({campaign_source}='')")
         count = raw.count("•") if raw else 0
         if count < _MIN_LEADS_FOR_ATTRIBUTION:
@@ -198,17 +200,17 @@ def _basic_kpi() -> dict:
     """
     kpi: dict = {}
     try:
-        from airtable_tools import airtable_get  # type: ignore
+        from tools.airtable_tools import airtable_get  # type: ignore
 
         leads_hot  = airtable_get("Leads", "{tier}='HOT'")
         leads_warm = airtable_get("Leads", "{tier}='WARM'")
         kpi["leads_hot"]  = leads_hot.count("•")  if leads_hot  else 0
         kpi["leads_warm"] = leads_warm.count("•") if leads_warm else 0
 
-        deals = airtable_get("Deals", "{Status}='Active'")
+        deals = airtable_get(Tables.DEALS, "{Status}='Active'")
         kpi["deals_active"] = deals.count("•") if deals else 0
 
-        overdue = airtable_get("Payments", "{Status}='Overdue'")
+        overdue = airtable_get(Tables.PAYMENTS, "{Status}='Overdue'")
         kpi["payments_overdue"] = overdue.count("•") if overdue else 0
 
         kpi["status"] = "basic"

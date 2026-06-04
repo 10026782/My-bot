@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 from threading import Thread
 from time import sleep
 
+from airtable_schema import Tables, TaskFields, TaskStatus
+
 logger = logging.getLogger(__name__)
 
 AIRTABLE_TOKEN = os.environ.get("AIRTABLE_API_KEY", "")
@@ -17,10 +19,10 @@ AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")  # same var as app.py
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
-DEADLINE_FIELD = "Deadline"
-STATUS_FIELD = "Status"
-NAME_FIELD = "Name"
-TASKS_TABLE = os.environ.get("AIRTABLE_TASKS_TABLE", "Tasks")
+DEADLINE_FIELD = TaskFields.DUE_DATE
+STATUS_FIELD = TaskFields.STATUS
+NAME_FIELD = TaskFields.NAME
+TASKS_TABLE = os.environ.get("AIRTABLE_TASKS_TABLE", Tables.TASKS)
 
 NUDGE_AFTER_HOURS = 3  # שעות המתנה לפני "נודניק" חוזר
 
@@ -50,7 +52,7 @@ def run_proactive_check() -> str:
 # ─── Airtable Scan ────────────────────────────────────────────────────────────
 def _scan_airtable_deadlines(days_ahead: int = 3) -> list:
     """
-    שולף משימות שהדד-ליין שלהן בטווח הקרוב ושסטטוסן אינו 'Done'.
+    שולף משימות שהדד-ליין שלהן בטווח הקרוב ושסטטוסן אינו 'בוצע'.
     מחזיר רשימה רזה — שם, דד-ליין, מספר ימים שנותרו.
     """
     headers = {
@@ -61,7 +63,7 @@ def _scan_airtable_deadlines(days_ahead: int = 3) -> list:
     cutoff = today + timedelta(days=days_ahead)
 
     params = {
-        "filterByFormula": f"AND({{Status}} != 'Done', IS_BEFORE({{{DEADLINE_FIELD}}}, '{cutoff.strftime('%Y-%m-%d')}'))",
+        "filterByFormula": f"AND({{{STATUS_FIELD}}} != '{TaskStatus.DONE}', IS_BEFORE({{{DEADLINE_FIELD}}}, '{cutoff.strftime('%Y-%m-%d')}'))",
         "fields[]": [NAME_FIELD, DEADLINE_FIELD, STATUS_FIELD],
         "maxRecords": 20,  # הגבלה קשיחה — לא סורקים הכל
     }

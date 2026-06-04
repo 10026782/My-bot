@@ -149,7 +149,7 @@ class PersistentSessionStore:
     def _sync_to_db(self, sender: str, session: dict, is_new: bool = False) -> bool:
         """כותב/מעדכן session ב-Airtable LeadSessions."""
         try:
-            from airtable_tools import airtable_add, airtable_update  # type: ignore
+            from tools.airtable_tools import airtable_add, airtable_update  # type: ignore
 
             fields = {
                 "sender":        sender,
@@ -187,7 +187,7 @@ class PersistentSessionStore:
     def _load_from_db(self, sender: str) -> Optional[dict]:
         """טוען session מAirtable לפי sender."""
         try:
-            from airtable_tools import airtable_get  # type: ignore
+            from tools.airtable_tools import airtable_get  # type: ignore
             raw = airtable_get("LeadSessions", f"{{sender}}='{sender}'")
             if not raw or "אין רשומות" in raw or "❌" in raw:
                 return None
@@ -214,7 +214,7 @@ class PersistentSessionStore:
 
     def _delete_from_db(self, record_id: str) -> None:
         try:
-            from airtable_tools import airtable_update  # type: ignore
+            from tools.airtable_tools import airtable_update  # type: ignore
             airtable_update("LeadSessions", record_id, {"done": True, "deleted": True})
         except Exception:
             pass

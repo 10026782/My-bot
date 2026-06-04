@@ -108,13 +108,10 @@ def crm_add_contact(name: str, phone: str = "", email: str = "",
         fields = {
             ContactFields.NAME:         name,
             ContactFields.STATUS:       ContactStatus.ACTIVE,
-            ContactFields.TYPE:         contact_type,
-            ContactFields.LAST_CONTACT: date.today().isoformat(),
         }
         if phone:   fields[ContactFields.PHONE]   = phone
         if email:   fields[ContactFields.EMAIL]   = email
         if company: fields[ContactFields.COMPANY] = company
-        if notes:   fields[ContactFields.NOTES]   = notes
 
         rec = _post(Tables.CONTACTS, fields)
         return f"✅ איש קשר נוסף: *{name}* | ID: `{rec['id']}`"
@@ -141,7 +138,7 @@ def crm_find_contact(query: str, identity=None) -> str:
             f = r.get("fields", {})
             lines.append(
                 f"• *{f.get(ContactFields.NAME, '?')}*"
-                f" | {f.get(ContactFields.TYPE, '?')}"
+                f" | {f.get(ContactFields.STATUS, '?')}"
                 f" | 📞 {f.get(ContactFields.PHONE, '—')}"
                 f" | 🏢 {f.get(ContactFields.COMPANY, '—')}"
                 f"\n  ID: `{r['id']}`"
@@ -157,7 +154,7 @@ def crm_update_last_contact(record_id: str) -> str:
         return "❌ חסר record_id"
     try:
         _patch(Tables.CONTACTS, record_id,
-               {ContactFields.LAST_CONTACT: date.today().isoformat()})
+               {ContactFields.FOLLOWUP_DATE: date.today().isoformat()})
         return f"✅ תאריך קשר אחרון עודכן ל-{date.today().strftime('%d/%m/%y')}"
     except Exception as e:
         return f"❌ שגיאה בעדכון: {e}"
@@ -177,11 +174,11 @@ def crm_list_contacts(contact_type: str = "", identity=None) -> str:
         lines = [f"👥 *אנשי קשר פעילים ({len(records)}):*\n"]
         for r in records:
             f = r.get("fields", {})
-            last = _fmt_date(f.get(ContactFields.LAST_CONTACT, ""))
+            followup = _fmt_date(f.get(ContactFields.FOLLOWUP_DATE, ""))
             lines.append(
                 f"• *{f.get(ContactFields.NAME, '?')}*"
-                f" [{f.get(ContactFields.TYPE, '?')}]"
-                f" | קשר אחרון: {last}"
+                f" [{f.get(ContactFields.STATUS, '?')}]"
+                f" | פולו אפ: {followup}"
             )
         return "\n".join(lines)
     except Exception as e:

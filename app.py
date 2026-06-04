@@ -117,8 +117,7 @@ def approval_response(route: RouteDecision) -> str:
     logger.info(f"[APPROVAL] intent={route.intent} domain={route.domain}")
     return (
         route.response_override or
-        f"הפעולה '{route.intent}' דורשת אישור לפני ביצוע.\n"
-        f"אשר עם: ✅ כן / ❌ לא"
+        f"הפעולה '{route.intent}' דורשת אישור לפני ביצוע."
     )
 
 

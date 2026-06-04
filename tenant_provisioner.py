@@ -157,7 +157,7 @@ def provision_tenant(config: TenantConfig) -> ProvisionResult:
 def _save_tenant_to_airtable(config: TenantConfig) -> bool:
     """שומר tenant ל-Airtable Tenants table."""
     try:
-        from airtable_tools import airtable_add  # type: ignore
+        from tools.airtable_tools import airtable_add  # type: ignore
 
         fields = {
             "tenant_id":     config.tenant_id,
@@ -222,7 +222,7 @@ def _build_env_snippet(
 def list_tenants() -> str:
     """מחזיר string מפורמט של כל הtenants."""
     try:
-        from airtable_tools import airtable_get  # type: ignore
+        from tools.airtable_tools import airtable_get  # type: ignore
         raw = airtable_get("Tenants", "")
         if "אין רשומות" in raw or "error" in raw.lower():
             return "📭 אין tenants רשומים."
@@ -249,7 +249,7 @@ def _mock_list_tenants() -> str:
 def suspend_tenant(tenant_id: str) -> str:
     """משעה tenant — מונע גישה."""
     try:
-        from airtable_tools import airtable_get, airtable_update  # type: ignore
+        from tools.airtable_tools import airtable_get, airtable_update  # type: ignore
 
         records = airtable_get("Tenants", f"{{tenant_id}}='{tenant_id}'")
         if "אין רשומות" in records:
@@ -277,7 +277,7 @@ def suspend_tenant(tenant_id: str) -> str:
 def get_tenant_config(tenant_id: str) -> Optional[dict]:
     """קורא config של tenant ספציפי מAirtable."""
     try:
-        from airtable_tools import airtable_get  # type: ignore
+        from tools.airtable_tools import airtable_get  # type: ignore
         records = airtable_get("Tenants", f"{{tenant_id}}='{tenant_id}'")
         if "אין רשומות" in records or "❌" in records:
             return None
