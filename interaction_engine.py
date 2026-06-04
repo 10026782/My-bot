@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from airtable_schema import Tables
+
 logger = logging.getLogger(__name__)
 
 
@@ -373,7 +375,7 @@ def create_tasks_from_analysis(
                 ),
                 "Deadline":  task.get("due",""),
             }
-            result = airtable_add("Tasks", fields)
+            result = airtable_add(Tables.TASKS, fields)
             if "✅" in result:
                 created += 1
     except ImportError:

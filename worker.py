@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 from threading import Thread
 from time import sleep
 
+from airtable_schema import Tables
+
 logger = logging.getLogger(__name__)
 
 AIRTABLE_TOKEN = os.environ.get("AIRTABLE_API_KEY", "")
@@ -20,7 +22,7 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 DEADLINE_FIELD = "Deadline"
 STATUS_FIELD = "Status"
 NAME_FIELD = "Name"
-TASKS_TABLE = os.environ.get("AIRTABLE_TASKS_TABLE", "Tasks")
+TASKS_TABLE = os.environ.get("AIRTABLE_TASKS_TABLE", Tables.TASKS)
 
 NUDGE_AFTER_HOURS = 3  # שעות המתנה לפני "נודניק" חוזר
 

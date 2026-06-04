@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from airtable_schema import Tables
+
 logger = logging.getLogger(__name__)
 
 # ── Timeout לפי ערוץ (דקות) ───────────────────────
@@ -254,7 +256,7 @@ def create_human_pipeline_task(lead: AbandonedLead, owner_chat_id: str) -> bool:
                 f"תשובות: {answers_str}"
             ),
         }
-        airtable_add("Tasks", fields)
+        airtable_add(Tables.TASKS, fields)
         _notify_human_pipeline(lead, owner_chat_id)
         return True
 
