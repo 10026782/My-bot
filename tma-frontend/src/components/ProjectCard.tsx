@@ -12,10 +12,11 @@ const DOT_CLASS: Record<string, string> = {
   green:  "bg-green-500",
 };
 
-export function ProjectCard({ card }: { card: TProjectCard }) {
+export function ProjectCard({ card, onClick }: { card: TProjectCard; onClick: () => void }) {
   return (
     <div
-      className={`rounded-2xl border-r-4 bg-white shadow-sm p-4 flex flex-col gap-1 ${COLOR_CLASS[card.status_color] ?? "border-gray-300"}`}
+      onClick={onClick}
+      className={`rounded-2xl border-r-4 bg-white shadow-sm p-4 flex flex-col gap-1 cursor-pointer active:opacity-70 ${COLOR_CLASS[card.status_color] ?? "border-gray-300"}`}
     >
       <div className="flex items-center justify-between">
         <span className="text-2xl">{card.emoji}</span>

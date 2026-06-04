@@ -2,29 +2,42 @@ import { useEffect, useState } from "react";
 import { fetchProjects } from "./api";
 import { GlobalKpis } from "./components/GlobalKpis";
 import { ProjectCard } from "./components/ProjectCard";
-import type { ProjectsResponse } from "./types";
+import { LeadPipeline } from "./components/LeadPipeline";
+import type { ProjectsResponse, ProjectCard as TProjectCard } from "./types";
 
-type State =
+type HubState =
   | { status: "loading" }
   | { status: "ok"; data: ProjectsResponse }
   | { status: "error"; message: string };
 
 export default function App() {
-  const [state, setState] = useState<State>({ status: "loading" });
+  const [hub, setHub] = useState<HubState>({ status: "loading" });
+  const [selected, setSelected] = useState<TProjectCard | null>(null);
 
-  function load() {
-    setState({ status: "loading" });
+  function loadHub() {
+    setHub({ status: "loading" });
     window.Telegram?.WebApp?.ready?.();
     fetchProjects()
-      .then((data) => setState({ status: "ok", data }))
+      .then((data) => setHub({ status: "ok", data }))
       .catch((e: unknown) =>
-        setState({ status: "error", message: String(e) })
+        setHub({ status: "error", message: String(e) })
       );
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { loadHub(); }, []);
 
-  if (state.status === "loading") {
+  // ── Lead Pipeline view ──────────────────────────────────────────
+  if (selected) {
+    return (
+      <LeadPipeline
+        project={selected}
+        onBack={() => setSelected(null)}
+      />
+    );
+  }
+
+  // ── Hub loading / error ─────────────────────────────────────────
+  if (hub.status === "loading") {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
@@ -32,13 +45,13 @@ export default function App() {
     );
   }
 
-  if (state.status === "error") {
+  if (hub.status === "error") {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen gap-4 p-6 text-center">
         <p className="text-gray-600">טעינה נכשלה</p>
-        <p className="text-xs text-gray-400">{state.message}</p>
+        <p className="text-xs text-gray-400">{hub.message}</p>
         <button
-          onClick={load}
+          onClick={loadHub}
           className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium"
         >
           נסה שוב
@@ -47,7 +60,8 @@ export default function App() {
     );
   }
 
-  const { data } = state;
+  // ── Projects Hub ────────────────────────────────────────────────
+  const { data } = hub;
 
   return (
     <div className="min-h-screen bg-gray-100 pb-8">
@@ -70,7 +84,11 @@ export default function App() {
 
       <div className="grid grid-cols-2 gap-3 px-4">
         {data.projects.map((card) => (
-          <ProjectCard key={card.id} card={card} />
+          <ProjectCard
+            key={card.id}
+            card={card}
+            onClick={() => setSelected(card)}
+          />
         ))}
       </div>
     </div>

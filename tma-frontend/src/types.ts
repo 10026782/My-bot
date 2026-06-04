@@ -34,3 +34,24 @@ export interface AuthResponse {
   allowed_domains: string[];
   modes_available: string[];
 }
+
+export interface LeadSummary {
+  id: string;
+  name: string;
+  phone: string;
+  status: string;
+  score: number;
+  domain: string;
+  source: string;
+}
+
+export interface DashboardResponse {
+  project_slug: string;
+  domain: string;
+  name: string;
+  leads_count: number;
+  open_deals: number;
+  open_tasks: number;
+  leads: LeadSummary[];
+}
+
