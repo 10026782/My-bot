@@ -1073,7 +1073,7 @@ def get_assets(identity):
     if not _can_assets(identity):
         return jsonify({"error": "forbidden"}), 403
 
-    recs   = _at_list("Assets (Personal)", "", max_records=100)
+    recs   = _at_list("Assets", "", max_records=100)
     assets = [_fmt_asset(r) for r in recs]
 
     return jsonify({
@@ -1093,7 +1093,7 @@ def get_asset(asset_id, identity):
     if not _can_assets(identity):
         return jsonify({"error": "forbidden"}), 403
 
-    rec = _at_get_record("Assets (Personal)", asset_id)
+    rec = _at_get_record("Assets", asset_id)
     if not rec:
         return jsonify({"error": "asset not found"}), 404
 
@@ -1115,7 +1115,7 @@ def update_asset(asset_id, identity):
     if not fields:
         return jsonify({"error": "no editable fields provided"}), 400
 
-    ok = _at_patch("Assets (Personal)", asset_id, fields)
+    ok = _at_patch("Assets", asset_id, fields)
     if not ok:
         return jsonify({"error": "update failed"}), 500
 
