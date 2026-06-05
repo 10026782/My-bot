@@ -131,6 +131,14 @@ _REGISTRY: dict[str, ToolMeta] = {
         description_he   = "חיפוש fuzzy של איש קשר לפי שם — מחזיר פרטים או רשימה לבחירה",
     ),
 
+    # ── Daily Digest on-demand ────────────────────
+    "get_daily_report": ToolMeta(
+        name           = "get_daily_report",
+        roles_allowed  = _MANAGEMENT,
+        read_only      = True,
+        description_he = "דוח יומי מלא — לידים חמים, פולו-אפ, משימות, עסקאות, תשלומים",
+    ),
+
     # ── D06 — Business Memory ─────────────────────
     "search_business_memory": ToolMeta(
         name             = "search_business_memory",

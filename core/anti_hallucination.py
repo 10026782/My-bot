@@ -15,6 +15,46 @@ logger = logging.getLogger(__name__)
 
 
 # ══════════════════════════════════════════════════
+# Evidence Markers — expected substrings in tool output
+# when a tool succeeds (beyond the ❌ / empty checks).
+# ══════════════════════════════════════════════════
+
+_EVIDENCE_MARKERS: dict[str, list[str]] = {
+    # calendar_create_event returns "✅ אירוע '…' נוצר ביומן" or "⚠️ כבר קיים ביומן"
+    "calendar_create_event": ["נוצר ביומן", "⚠️ כבר קיים ביומן"],
+    # gmail_send_draft returns "📧 טיוטה … נשלחה בהצלחה!"
+    "gmail_send_draft":      ["נשלחה בהצלחה"],
+    # gmail_read returns either email content or "✅ אין הודעות"
+    "gmail_read":            ["הודעה מ-", "מ:", "אין הודעות"],
+}
+
+# ══════════════════════════════════════════════════
+# "No tool was called" detection patterns.
+# If agent text matches AND no tool result contains expected evidence
+# → agent hallucinated a live check / action.
+# ══════════════════════════════════════════════════
+
+_NO_TOOL_CLAIMS: list[tuple[re.Pattern, list[str]]] = [
+    # Agent claims it checked / created a calendar event
+    (
+        re.compile(
+            r"(בדקתי.*ביומן|אין חפיפות|הפגישה קבועה|קבעתי|נוצר ביומן|הוסף לקלנדר)",
+            re.UNICODE,
+        ),
+        ["נוצר ביומן", "⚠️ כבר קיים ביומן", "אירועים קרובים", "אין אירועים"],
+    ),
+    # Agent claims it read / sent email
+    (
+        re.compile(
+            r"(בדקתי.*מייל|קראתי.*הודעות|לא.*מצאתי.*מייל|המייל.*נשלח|שלחתי.*מייל)",
+            re.UNICODE,
+        ),
+        ["הודעה מ-", "נשלחה בהצלחה", "אין הודעות", "draft"],
+    ),
+]
+
+
+# ══════════════════════════════════════════════════
 # Result Type
 # ══════════════════════════════════════════════════
 
@@ -49,6 +89,15 @@ def verify_execution(tool_name: str, raw_output: str | None) -> VerifyResult:
         return VerifyResult(
             "warn",
             "gmail_draft: 'draft' not found in output — verify draft was created"
+        )
+
+    # Evidence markers: tool-specific expected substrings in success output.
+    # Only checked when no ❌ was detected above (i.e., tool didn't explicitly error).
+    markers = _EVIDENCE_MARKERS.get(tool_name)
+    if markers and not any(m in raw_output for m in markers):
+        return VerifyResult(
+            "failed",
+            f"{tool_name}: output contains no expected evidence markers — possible silent failure",
         )
 
     return VerifyResult("ok")
@@ -110,6 +159,15 @@ _SAFE_FALLBACK  = "לא הצלחתי לבצע את הפעולה. אנא נסה �
 _MISMATCH_PREFIX = "⚠️ שים לב — ייתכן שהתוצאה אינה מדויקת.\n"
 
 
+def _tool_results_contain(tool_results: list[dict], keywords: list[str]) -> bool:
+    """True if any tool result content contains at least one keyword."""
+    return any(
+        kw in r.get("content", "")
+        for r in tool_results
+        for kw in keywords
+    )
+
+
 def sanitize_agent_response(agent_text: str, tool_results: list[dict]) -> str:
     """
     Final gate before the reply reaches the user.
@@ -124,6 +182,16 @@ def sanitize_agent_response(agent_text: str, tool_results: list[dict]) -> str:
     if check.status == "mismatch":
         logger.warning(f"[A32] MISMATCH detected: {check.reason}")
         return _MISMATCH_PREFIX + agent_text
+
+    # "No tool called" gate: agent claims a live check/action but
+    # no tool result contains the expected evidence.
+    for claim_pattern, evidence_keywords in _NO_TOOL_CLAIMS:
+        if claim_pattern.search(agent_text) and not _tool_results_contain(tool_results, evidence_keywords):
+            logger.error(
+                f"[A32] NO-TOOL-EVIDENCE hallucination: "
+                f"agent claims '{claim_pattern.pattern[:40]}' but no supporting tool result found"
+            )
+            return _SAFE_FALLBACK
 
     return agent_text
 
@@ -170,6 +238,34 @@ def _run_tests() -> bool:
           verify_execution("gmail_draft", "Email queued"),
           "warn")
 
+    check("calendar_create_event success marker present",
+          verify_execution("calendar_create_event", "✅ אירוע 'פגישה' נוצר ביומן ל-01/06/2025 14:00."),
+          "ok")
+
+    check("calendar_create_event conflict marker present",
+          verify_execution("calendar_create_event", "⚠️ כבר קיים ביומן: 'אירוע אחר' (14:00). לקבוע בכל זאת?"),
+          "ok")
+
+    check("calendar_create_event no evidence → failed",
+          verify_execution("calendar_create_event", "Done."),
+          "failed")
+
+    check("gmail_send_draft success marker",
+          verify_execution("gmail_send_draft", "📧 טיוטה draft_abc נשלחה בהצלחה!"),
+          "ok")
+
+    check("gmail_send_draft no evidence → failed",
+          verify_execution("gmail_send_draft", "Sent."),
+          "failed")
+
+    check("gmail_read has content → ok",
+          verify_execution("gmail_read", "הודעה מ-: test@example.com | נושא: test"),
+          "ok")
+
+    check("gmail_read no evidence → failed",
+          verify_execution("gmail_read", "OK"),
+          "failed")
+
     # ── verify_result_claim ──────────────────────
     failed_results = [{"content": "❌ connection error"}]
     ok_results     = [{"content": "rec1234 created"}]
@@ -210,6 +306,42 @@ def _run_tests() -> bool:
     print(f"{'✅' if ok2 else '❌'} agent says 'לא מצאתי' correctly → returned as-is")
     if not ok2:
         print(f"     got: {normal!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    # ── "no tool called" gate ────────────────────
+    calendar_results = [{"content": "✅ אירוע 'פגישה' נוצר ביומן ל-01/06/2025 14:00."}]
+
+    no_tool_calendar = sanitize_agent_response(
+        "בדקתי את הביומן שלך — אין חפיפות. הפגישה קבועה.", []
+    )
+    ok3 = no_tool_calendar == _SAFE_FALLBACK
+    print(f"{'✅' if ok3 else '❌'} agent claims calendar check with no tool result → sanitized")
+    if not ok3:
+        print(f"     got: {no_tool_calendar!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    with_tool_calendar = sanitize_agent_response(
+        "בדקתי את הביומן שלך — אין חפיפות. הפגישה קבועה.", calendar_results
+    )
+    ok4 = with_tool_calendar != _SAFE_FALLBACK
+    print(f"{'✅' if ok4 else '❌'} agent claims calendar but tool result present → passed through")
+    if not ok4:
+        print(f"     got: {with_tool_calendar!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    no_tool_gmail = sanitize_agent_response(
+        "בדקתי את המיילים שלך — לא מצאתי הודעות חדשות.", []
+    )
+    ok5 = no_tool_gmail == _SAFE_FALLBACK
+    print(f"{'✅' if ok5 else '❌'} agent claims gmail read with no tool result → sanitized")
+    if not ok5:
+        print(f"     got: {no_tool_gmail!r}")
         failed += 1
     else:
         passed += 1

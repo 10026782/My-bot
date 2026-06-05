@@ -159,6 +159,43 @@ TOOL_SCHEMAS = [
         }
     },
     {
+        "name": "get_daily_report",
+        "description": (
+            "דוח יומי מלא — לידים חמים, פולו-אפ להיום, משימות דחופות, "
+            "עסקאות פתוחות, תשלומים קרובים, שינויים מאתמול. "
+            "קרא כלי זה כשהמשתמש מבקש 'דוח יומי' / 'תן לי סיכום' / 'מה יש היום'."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {}
+        }
+    },
+    {
+        "name": "search_business_memory",
+        "description": (
+            "חיפוש בזיכרון עסקי — 'מה סיכמנו עם ספק X?' / 'החלטות מהפגישה עם Y'. "
+            "מחזיר תוצאות רלוונטיות מהיסטוריית השיחות."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query":  {"type": "string", "description": "שאלת חיפוש"},
+                "domain": {"type": "string", "description": "דומיין (אופציונלי)"}
+            },
+            "required": ["query"]
+        }
+    },
+]
+
+# ══════════════════════════════════════════════════
+# CRM Tools — not yet fully implemented in dispatcher/registry.
+# Hidden from Claude (not in TOOL_SCHEMAS) until ready.
+# Kept in action_validator for defense-in-depth validation.
+# ══════════════════════════════════════════════════
+
+_CRM_SCHEMAS_HIDDEN = [
+    # ── Contacts ──────────────────────────────────
+    {
         "name": "search_business_memory",
         "description": (
             "חיפוש בזיכרון העסקי. "
