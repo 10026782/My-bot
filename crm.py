@@ -109,9 +109,10 @@ def crm_add_contact(name: str, phone: str = "", email: str = "",
             ContactFields.NAME:         name,
             ContactFields.STATUS:       ContactStatus.ACTIVE,
         }
-        if phone:   fields[ContactFields.PHONE]   = phone
-        if email:   fields[ContactFields.EMAIL]   = email
-        if company: fields[ContactFields.COMPANY] = company
+        if phone:        fields[ContactFields.PHONE]   = phone
+        if email:        fields[ContactFields.EMAIL]   = email
+        if company:      fields[ContactFields.COMPANY] = company
+        if contact_type: fields[ContactFields.TYPE]    = contact_type
 
         rec = _post(Tables.CONTACTS, fields)
         return f"✅ איש קשר נוסף: *{name}* | ID: `{rec['id']}`"
@@ -166,7 +167,7 @@ def crm_list_contacts(contact_type: str = "", identity=None) -> str:
     try:
         formula = f"{{סטטוס}} = '{ContactStatus.ACTIVE}'"
         if contact_type:
-            formula = f"AND({formula}, {{Type}} = '{contact_type}')"
+            formula = f"AND({formula}, {{{ContactFields.TYPE}}} = '{contact_type}')"
         records = _get(Tables.CONTACTS, formula, identity=identity)
         if not records:
             return "📭 אין אנשי קשר פעילים"

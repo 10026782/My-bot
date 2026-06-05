@@ -125,6 +125,7 @@ class ContactFields:
     COMPANY         = "חברה"
     EMAIL           = "אימייל"
     PHONE           = "טלפון"
+    TYPE            = "Type"            # Client | Supplier | Partner | Lawyer | Accountant
     FOLLOWUP_DATE   = "תאריך פולו אפ"
     STATUS          = "סטטוס"           # חדש|בתהליכים|פולו-אפ|לא רלוונטי
     DEALS_LINK      = "עסקאות (Deals)"
