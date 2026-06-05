@@ -112,10 +112,13 @@ def clarify_response(route: RouteDecision) -> str:
 
 def approval_response(route: RouteDecision) -> str:
     logger.info(f"[APPROVAL] intent={route.intent} domain={route.domain}")
-    # BOSS NEVER FAKES CONTROL: כפתורים אמיתיים נשלחים ב-_queue_approval בנפרד
+    # BOSS NEVER FAKES CONTROL: אין queue אמיתי כאן — הagent לא הגיע לtool call עדיין.
+    # מחזירים הודעה כנה שמבקשת פרטים נוספים. האישור האמיתי ייווצר ב-_queue_approval
+    # כאשר הagent יקרא לכלי בפועל.
     return (
         route.response_override or
-        f"הפעולה '{route.intent}' דורשת אישור. מעביר לבעלים..."
+        f"פעולה מסוג '{route.intent}' דורשת אישור מפורש. "
+        "בבקשה פרט במדויק מה לבצע — ואז אעביר לאישור הבעלים."
     )
 
 
