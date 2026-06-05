@@ -170,13 +170,30 @@ TOOL_SCHEMAS = [
             "properties": {}
         }
     },
+    {
+        "name": "search_business_memory",
+        "description": (
+            "חיפוש בזיכרון עסקי — 'מה סיכמנו עם ספק X?' / 'החלטות מהפגישה עם Y'. "
+            "מחזיר תוצאות רלוונטיות מהיסטוריית השיחות."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query":  {"type": "string", "description": "שאלת חיפוש"},
+                "domain": {"type": "string", "description": "דומיין (אופציונלי)"}
+            },
+            "required": ["query"]
+        }
+    },
 ]
 
 # ══════════════════════════════════════════════════
-# CRM Tools — Contacts, Deals, Payments
+# CRM Tools — not yet fully implemented in dispatcher/registry.
+# Hidden from Claude (not in TOOL_SCHEMAS) until ready.
+# Kept in action_validator for defense-in-depth validation.
 # ══════════════════════════════════════════════════
 
-TOOL_SCHEMAS += [
+_CRM_SCHEMAS_HIDDEN = [
     # ── Contacts ──────────────────────────────────
     {
         "name": "crm_add_contact",

@@ -41,6 +41,10 @@ _REQUIRED: dict[str, list[str]] = {
     "crm_overdue_payments":      [],
     # Knowledge
     "add_knowledge":             ["key", "value"],
+    # Contact Resolver / Business Memory / Daily Report
+    "resolve_contact":           ["name_query"],
+    "search_business_memory":    ["query"],
+    "get_daily_report":          [],
 }
 
 _FIELD_QUESTIONS: dict[str, str] = {
