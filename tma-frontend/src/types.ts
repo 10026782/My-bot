@@ -55,6 +55,22 @@ export interface TimelineEntry {
   channel: string;
 }
 
+export interface Approval {
+  id: string;
+  action: string;
+  requested_by: string;
+  requested_at: string;
+  risk_level: string;
+  context_type: string;
+  context_id: string;
+  status: string;
+}
+
+export interface ApprovalsResponse {
+  count: number;
+  approvals: Approval[];
+}
+
 export interface ActivityEntry {
   id: string;
   title: string;

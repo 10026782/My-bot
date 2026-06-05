@@ -59,7 +59,14 @@ def _cors(response):
 @tma_api.route("/api/ai/ask", methods=["OPTIONS"])
 @tma_api.route("/api/followup", methods=["OPTIONS"])
 @tma_api.route("/api/activity", methods=["OPTIONS"])
+@tma_api.route("/api/approvals", methods=["OPTIONS"])
+@tma_api.route("/api/approvals/bulk", methods=["OPTIONS"])
 def _preflight():
+    return "", 204
+
+
+@tma_api.route("/api/approvals/<approval_id>", methods=["OPTIONS"])
+def _preflight_approval(_approval_id=None):
     return "", 204
 
 
@@ -155,6 +162,36 @@ def _audit(action: str, identity, details: str = "") -> None:
         })
     except Exception as e:
         logger.warning(f"[Audit] failed for '{action}': {e}")
+
+
+def _notify_owner(text: str) -> None:
+    """Send Telegram message to owner. Fails silently."""
+    owner_chat = os.environ.get("ELIYAHU_CHAT_ID", "")
+    if not owner_chat or not _BOT_TOKEN:
+        return
+    try:
+        import httpx
+        httpx.post(
+            f"https://api.telegram.org/bot{_BOT_TOKEN}/sendMessage",
+            json={"chat_id": owner_chat, "text": text},
+            timeout=5,
+        )
+    except Exception as e:
+        logger.warning(f"[notify_owner] {e}")
+
+
+def _try_bus_action(context_id: str, decision: str) -> None:
+    """Try to confirm/reject a matching in-memory event_bus pending action. Silent on miss."""
+    if not context_id:
+        return
+    try:
+        from event_bus import bus  # noqa: PLC0415
+        if decision == "approve":
+            bus.confirm(context_id)
+        else:
+            bus.reject(context_id)
+    except Exception as e:
+        logger.debug(f"[event_bus] no matching action for {context_id}: {e}")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -788,28 +825,117 @@ def finance_pulse(identity):
     return _todo("O4 Finance Pulse")
 
 
+_RISK_HIGH = {"גבוה", "high"}
+_RISK_LOW  = {"נמוך", "low"}
+
+
+def _fmt_approval(rec: dict) -> dict:
+    f = rec.get("fields", {})
+    return {
+        "id":           rec["id"],
+        "action":       f.get("פעולה", ""),
+        "requested_by": f.get("מבוקש על ידי", ""),
+        "requested_at": f.get("בוקש בתאריך", ""),
+        "risk_level":   f.get("רמת סיכון", ""),
+        "context_type": f.get("סוג הקשר", ""),
+        "context_id":   f.get("מזהה הקשר", ""),
+        "status":       f.get("סטטוס", "ממתין"),
+    }
+
+
 @tma_api.route("/api/approvals", methods=["GET"])
 @require_tma_auth
 def get_approvals(identity):
     if not identity.is_owner:
         return jsonify({"error": "forbidden"}), 403
-    return _todo("O6 Approvals")
+
+    recs = _at_list("Approvals", "{סטטוס}='ממתין'", max_records=50)
+    approvals = [_fmt_approval(r) for r in recs]
+    return jsonify({"count": len(approvals), "approvals": approvals})
 
 
 @tma_api.route("/api/approvals/bulk", methods=["POST"])
 @require_tma_auth
 def bulk_approve(identity):
+    """Approve ALL low-risk pending approvals. High/medium risk are NEVER bulk-approved."""
     if not identity.is_owner:
         return jsonify({"error": "forbidden"}), 403
-    return _todo("O6 Approvals — bulk")
+
+    recs     = _at_list("Approvals", "{סטטוס}='ממתין'", max_records=100)
+    approved = []
+    skipped  = []
+
+    for rec in recs:
+        risk = (rec.get("fields", {}).get("רמת סיכון", "") or "").strip()
+        # Hard rule: NEVER bulk-approve high risk
+        if risk.lower() not in _RISK_LOW:
+            skipped.append(rec["id"])
+            continue
+        ok = _at_patch("Approvals", rec["id"], {"סטטוס": "אושר"})
+        if ok:
+            approved.append(rec["id"])
+            ctx_id = rec.get("fields", {}).get("מזהה הקשר", "")
+            _try_bus_action(ctx_id, "approve")
+        else:
+            skipped.append(rec["id"])
+
+    if approved:
+        _audit("bulk_approve", identity, details=f"{len(approved)} low-risk approvals")
+        _notify_owner(
+            f"✅ TMA: {len(approved)} פעולות Low Risk אושרו\n"
+            f"על ידי: {identity.display_name or identity.user_id}\n"
+            f"דחויות (לא low-risk): {len(skipped)}"
+        )
+
+    return jsonify({"ok": True, "approved": len(approved), "skipped": len(skipped)})
 
 
 @tma_api.route("/api/approvals/<approval_id>", methods=["POST"])
 @require_tma_auth
 def act_on_approval(approval_id, identity):
+    """Approve or reject a single pending approval."""
     if not identity.is_owner:
         return jsonify({"error": "forbidden"}), 403
-    return _todo(f"O6 Approvals — single {approval_id}")
+
+    data     = request.get_json(force=True) or {}
+    decision = data.get("action", "").strip().lower()   # "approve" | "reject"
+    note     = data.get("note", "").strip()
+
+    if decision not in ("approve", "reject"):
+        return jsonify({"error": "action must be 'approve' or 'reject'"}), 400
+
+    rec = _at_get_record("Approvals", approval_id)
+    if not rec:
+        return jsonify({"error": "approval not found"}), 404
+
+    f      = rec.get("fields", {})
+    status = f.get("סטטוס", "")
+    if status != "ממתין":
+        return jsonify({"error": f"approval already {status}"}), 409
+
+    new_status = "אושר" if decision == "approve" else "נדחה"
+    patch_fields: dict = {"סטטוס": new_status}
+    if decision == "reject" and note:
+        patch_fields["הערת דחייה"] = note
+
+    ok = _at_patch("Approvals", approval_id, patch_fields)
+    if not ok:
+        return jsonify({"error": "update failed"}), 500
+
+    action_label = f.get("פעולה", approval_id)
+    ctx_id       = f.get("מזהה הקשר", "")
+
+    _try_bus_action(ctx_id, decision)
+    _audit(f"approval_{decision}", identity, details=f"{action_label[:100]} | note: {note[:80]}")
+
+    icon = "✅" if decision == "approve" else "❌"
+    _notify_owner(
+        f"{icon} TMA: {new_status} — {action_label}\n"
+        f"על ידי: {identity.display_name or identity.user_id}"
+        + (f"\nהערה: {note}" if note else "")
+    )
+
+    return jsonify({"ok": True, "approval_id": approval_id, "new_status": new_status})
 
 
 @tma_api.route("/api/activity", methods=["GET"])

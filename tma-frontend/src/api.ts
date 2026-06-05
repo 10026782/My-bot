@@ -1,4 +1,4 @@
-import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse } from "./types";
+import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse } from "./types";
 
 const BASE = (import.meta.env.VITE_API_URL as string) ?? "";
 const DEV_ID = (import.meta.env.VITE_DEV_TELEGRAM_ID as string) ?? "";
@@ -58,6 +58,35 @@ export async function createFollowup(leadId: string, note: string): Promise<void
     body: JSON.stringify({ lead_id: leadId, note }),
   });
   if (!r.ok) throw new Error(`API ${r.status}`);
+}
+
+export async function fetchApprovals(): Promise<ApprovalsResponse> {
+  const r = await fetch(`${BASE}/api/approvals`, { headers: authHeaders() });
+  if (!r.ok) throw new Error(`API ${r.status}`);
+  return r.json() as Promise<ApprovalsResponse>;
+}
+
+export async function actOnApproval(
+  approvalId: string,
+  action: "approve" | "reject",
+  note?: string,
+): Promise<void> {
+  const r = await fetch(`${BASE}/api/approvals/${encodeURIComponent(approvalId)}`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ action, note: note ?? "" }),
+  });
+  if (!r.ok) throw new Error(`API ${r.status}`);
+}
+
+export async function bulkApprove(): Promise<{ approved: number; skipped: number }> {
+  const r = await fetch(`${BASE}/api/approvals/bulk`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  if (!r.ok) throw new Error(`API ${r.status}`);
+  return r.json() as Promise<{ approved: number; skipped: number }>;
 }
 
 export async function fetchActivity(domain?: string): Promise<ActivityResponse> {

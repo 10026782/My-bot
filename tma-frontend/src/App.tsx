@@ -4,6 +4,7 @@ import { GlobalKpis } from "./components/GlobalKpis";
 import { ProjectCard } from "./components/ProjectCard";
 import { LeadPipeline } from "./components/LeadPipeline";
 import { ActivityFeed } from "./components/ActivityFeed";
+import { Approvals } from "./components/Approvals";
 import type { ProjectsResponse, ProjectCard as TProjectCard } from "./types";
 
 type HubState =
@@ -15,6 +16,7 @@ export default function App() {
   const [hub, setHub] = useState<HubState>({ status: "loading" });
   const [selected, setSelected] = useState<TProjectCard | null>(null);
   const [activityOpen, setActivityOpen] = useState(false);
+  const [approvalsOpen, setApprovalsOpen] = useState(false);
 
   function loadHub() {
     setHub({ status: "loading" });
@@ -27,6 +29,11 @@ export default function App() {
   }
 
   useEffect(() => { loadHub(); }, []);
+
+  // ── Approvals view ──────────────────────────────────────────────
+  if (approvalsOpen) {
+    return <Approvals onBack={() => setApprovalsOpen(false)} />;
+  }
 
   // ── Activity Feed view ──────────────────────────────────────────
   if (activityOpen) {
@@ -77,13 +84,22 @@ export default function App() {
           <h1 className="text-xl font-black text-gray-900">BOSS</h1>
           <p className="text-xs text-gray-400 mt-0.5">Projects Hub</p>
         </div>
-        <button
-          onClick={() => setActivityOpen(true)}
-          className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg"
-          aria-label="פעילות"
-        >
-          📋
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setApprovalsOpen(true)}
+            className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg"
+            aria-label="אישורים"
+          >
+            ✅
+          </button>
+          <button
+            onClick={() => setActivityOpen(true)}
+            className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg"
+            aria-label="פעילות"
+          >
+            📋
+          </button>
+        </div>
       </div>
 
       <div className="mb-4">
