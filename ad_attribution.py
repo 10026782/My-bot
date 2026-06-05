@@ -165,7 +165,7 @@ def parse_campaign_source(
 def record_lead_source(memory_key: str, utm: UTMParams) -> bool:
     """רושם 3 שדות UTM לAirtable Leads."""
     try:
-        from airtable_tools import airtable_get, airtable_update  # type: ignore
+        from tools.airtable_tools import airtable_get, airtable_update  # type: ignore
         raw = airtable_get("Leads", f"{{memory_key}}='{memory_key}'")
         if "אין רשומות" in (raw or "") or not raw:
             return False
@@ -185,7 +185,7 @@ def record_lead_source(memory_key: str, utm: UTMParams) -> bool:
 def mark_converted(memory_key: str, deal_value: float = 0) -> bool:
     """מסמן ליד כסגור + שווי עסקה."""
     try:
-        from airtable_tools import airtable_get, airtable_update  # type: ignore
+        from tools.airtable_tools import airtable_get, airtable_update  # type: ignore
         raw = airtable_get("Leads", f"{{memory_key}}='{memory_key}'")
         if "אין רשומות" in (raw or ""):
             return False
@@ -352,7 +352,7 @@ def _load_leads_with_timeframe(days_back: int) -> list[dict]:
     Pagination aware: מושך עמודים עד שנגמרים.
     """
     try:
-        from airtable_tools import airtable_get  # type: ignore
+        from tools.airtable_tools import airtable_get  # type: ignore
         from airtable_schema import Tables        # type: ignore
 
         cutoff = (datetime.now(tz=timezone.utc) - timedelta(days=days_back)).strftime("%Y-%m-%d")

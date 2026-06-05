@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 # ══════════════════════════════════════════════════
 
 TENANT_TEMPLATES = {
-    "realestate": {
+    "real_estate": {
         "label":       "נדל\"ן",
         "domains":     ["real_estate", "finance"],
         "description": "ניהול לידים, עסקאות, תשלומים ונכסים",
@@ -74,7 +74,7 @@ TENANT_TEMPLATES = {
 class TenantConfig:
     tenant_id:     str
     business_name: str
-    template:      str          # realestate / import / services / recruitment
+    template:      str          # real_estate / import / services / recruitment
     owner_name:    str
     owner_phone:   str          # מספר טלגרם chat_id של owner
     owner_channel: str = "telegram"
@@ -157,7 +157,7 @@ def provision_tenant(config: TenantConfig) -> ProvisionResult:
 def _save_tenant_to_airtable(config: TenantConfig) -> bool:
     """שומר tenant ל-Airtable Tenants table."""
     try:
-        from airtable_tools import airtable_add  # type: ignore
+        from tools.airtable_tools import airtable_add  # type: ignore
 
         fields = {
             "tenant_id":     config.tenant_id,
@@ -222,7 +222,7 @@ def _build_env_snippet(
 def list_tenants() -> str:
     """מחזיר string מפורמט של כל הtenants."""
     try:
-        from airtable_tools import airtable_get  # type: ignore
+        from tools.airtable_tools import airtable_get  # type: ignore
         raw = airtable_get("Tenants", "")
         if "אין רשומות" in raw or "error" in raw.lower():
             return "📭 אין tenants רשומים."
@@ -249,7 +249,7 @@ def _mock_list_tenants() -> str:
 def suspend_tenant(tenant_id: str) -> str:
     """משעה tenant — מונע גישה."""
     try:
-        from airtable_tools import airtable_get, airtable_update  # type: ignore
+        from tools.airtable_tools import airtable_get, airtable_update  # type: ignore
 
         records = airtable_get("Tenants", f"{{tenant_id}}='{tenant_id}'")
         if "אין רשומות" in records:
@@ -277,7 +277,7 @@ def suspend_tenant(tenant_id: str) -> str:
 def get_tenant_config(tenant_id: str) -> Optional[dict]:
     """קורא config של tenant ספציפי מAirtable."""
     try:
-        from airtable_tools import airtable_get  # type: ignore
+        from tools.airtable_tools import airtable_get  # type: ignore
         records = airtable_get("Tenants", f"{{tenant_id}}='{tenant_id}'")
         if "אין רשומות" in records or "❌" in records:
             return None
@@ -332,7 +332,7 @@ def _run_tests() -> bool:
     tc = TenantConfig(
         tenant_id     = "client_test",
         business_name = "דני כהן נדל\"ן",
-        template      = "realestate",
+        template      = "real_estate",
         owner_name    = "דני כהן",
         owner_phone   = "123456789",
     )
@@ -344,7 +344,7 @@ def _run_tests() -> bool:
 
     # ── TENANT_TEMPLATES ──────────────────────────
     chk("4 templates defined",          len(TENANT_TEMPLATES) == 4)
-    chk("realestate template exists",   "realestate" in TENANT_TEMPLATES)
+    chk("real_estate template exists",   "real_estate" in TENANT_TEMPLATES)
     chk("import template has domains",  "import" in TENANT_TEMPLATES["import"]["domains"])
 
     # ── _build_env_snippet ───────────────────────
@@ -383,7 +383,7 @@ def _run_tests() -> bool:
     ff.is_enabled = lambda x: True
     r2 = tp.provision_tenant(tp.TenantConfig(
         tenant_id="client_001", business_name="דני כהן נדל\"ן",
-        template="realestate", owner_name="דני", owner_phone="987654321",
+        template="real_estate", owner_name="דני", owner_phone="987654321",
     ))
     chk("flag=ON → ok=True",            r2.ok is True)
     chk("flag=ON → tenant_id",          r2.tenant_id == "client_001")

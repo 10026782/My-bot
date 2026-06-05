@@ -90,14 +90,14 @@ calendar_create_event בודק חפיפות אוטומטית. אם מחזיר �
 
 סכמת Leads (table="Leads") — Quick Entry + Confidence:
   ליד תקין חייב לכלול שם אדם/חברה + לפחות אחד: טלפון/מייל/הקשר עסקי.
-  שם+הקשר עסקי ברור = רשום מיד ללא שאלות. Name=שם מלא | phone=מספר (אם הוזכר) | status=new | notes=מה נאמר בדיוק | domain=realestate/import
+  שם+הקשר עסקי ברור = רשום מיד ללא שאלות. Name=שם מלא | phone=מספר (אם הוזכר) | status=new | notes=מה נאמר בדיוק | domain=real_estate/import
   ✅ High Confidence: שם מלא + 2+ אמצעי קשר (טלפון + מייל) = status=high_confidence
   ✅ Medium Confidence: שם + 1 אמצעי קשר או הקשר עסקי ברור = status=new
   ⚠️ Low Confidence: מילה בודדת ללא הקשר (תפוח, שולחן, בננה) = אל תרשום. שאל: "להוסיף כליד?"
-  אל תשאל על שדות חסרים — חסר טלפון? רשום בלעדיו. חסר domain? השתמש ב-realestate.
-  domain = שם הענף: realestate / import / וכל ערך אחר שהמשתמש ציין (draft, hr, tech, ...) — זה שם ענף, לא קשור ל-Gmail!
+  אל תשאל על שדות חסרים — חסר טלפון? רשום בלעדיו. חסר domain? השתמש ב-real_estate.
+  domain = שם הענף: real_estate / import / וכל ערך אחר שהמשתמש ציין (draft, hr, tech, ...) — זה שם ענף, לא קשור ל-Gmail!
   ⚠️ "domain draft" / "domain hr" / "domain X" = שדה domain בטבלה. לעולם אל תפרש "draft" כ-Gmail draft בהקשר זה.
-  אם ברור שמדובר בליד → חלץ ורשום מיד: Name | phone | notes | domain=realestate/import | status (על בסיס ביטחון)
+  אם ברור שמדובר בליד → חלץ ורשום מיד: Name | phone | notes | domain=real_estate/import | status (על בסיס ביטחון)
   דוגמה: "אברהם ברסלר נוצר קשר ישיר עם אבי והועבר לטיפול" → Name=אברהם ברסלר, notes=נוצר קשר ישיר עם אבי והועבר לטיפול, status=new
   אחרי רישום: ✅ [שם] נוסף ל-Leads — טלפון: [X] | סטטוס: [confidence_level]
 

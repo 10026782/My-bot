@@ -7,7 +7,7 @@ domain_prompts.py — MADS CORE Domain Layer
 DOMAIN_CONFIG: dict[str, dict] = {
 
     # ─── נדל"ן ────────────────────────────────────────────────────────────────
-    "realestate": {
+    "real_estate": {
         "name": 'נדל"ן',
         "tone": "professional",
         "priority": "high",
@@ -89,8 +89,8 @@ DOMAIN_CONFIG: dict[str, dict] = {
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def get_domain_config(domain: str) -> dict:
-    """מחזיר את הקונפיג לדומיין, עם fallback ל-realestate."""
-    return DOMAIN_CONFIG.get(domain, DOMAIN_CONFIG["realestate"])
+    """מחזיר את הקונפיג לדומיין, עם fallback ל-real_estate."""
+    return DOMAIN_CONFIG.get(domain, DOMAIN_CONFIG["real_estate"])
 
 
 def get_qualification_prompt(domain: str) -> str:

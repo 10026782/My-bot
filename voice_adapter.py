@@ -142,13 +142,13 @@ def step_welcome(session: VoiceSession) -> str:
 
 def step_domain(session: VoiceSession, digits: str) -> str:
     """שלב 2: קלט דומיין → שם."""
-    domain_map = {"1": "realestate", "2": "import", "3": "general"}
+    domain_map = {"1": "real_estate", "2": "import", "3": "general"}
     session.domain = domain_map.get(digits, "general")
     session.answers["domain"] = session.domain
     session.state  = VoiceState.NAME
 
     domain_confirm = {
-        "realestate": "נדל\"ן",
+        "real_estate": "נדל\"ן",
         "import":     "ייבוא סחורה",
         "general":    "כללי",
     }.get(session.domain, "כללי")
@@ -170,7 +170,7 @@ def step_interest(session: VoiceSession, digits: str) -> str:
 
     g_open, g_close = _gather(VOICE_WEBHOOK, num_digits=1)
     budget_prompt = {
-        "realestate": "מה טווח התקציב? עד מיליון לחצו 1, מיליון עד שלושה לחצו 2, מעל שלושה מיליון לחצו 3.",
+        "real_estate": "מה טווח התקציב? עד מיליון לחצו 1, מיליון עד שלושה לחצו 2, מעל שלושה מיליון לחצו 3.",
         "import":     "מה היקף ההזמנה? עד עשרת אלפים דולר לחצו 1, עד חמישים אלף לחצו 2, מעל חמישים אלף לחצו 3.",
         "general":    "מה דחיפות הפנייה? דחוף לחצו 1, בשבוע הקרוב לחצו 2, לא דחוף לחצו 3.",
     }.get(session.domain, "לחצו 1 להמשך.")
@@ -187,7 +187,7 @@ def step_interest(session: VoiceSession, digits: str) -> str:
 def step_budget(session: VoiceSession, digits: str) -> str:
     """שלב 4: תקציב → callback."""
     budget_map = {
-        "realestate": {"1": "עד מיליון", "2": "1-3 מיליון", "3": "מעל 3 מיליון"},
+        "real_estate": {"1": "עד מיליון", "2": "1-3 מיליון", "3": "מעל 3 מיליון"},
         "import":     {"1": "עד $10K",   "2": "עד $50K",    "3": "מעל $50K"},
         "general":    {"1": "דחוף",      "2": "שבוע",       "3": "לא דחוף"},
     }
@@ -230,7 +230,7 @@ def step_callback(session: VoiceSession, digits: str) -> str:
 def _save_voice_lead(session: VoiceSession) -> bool:
     """שומר ליד קולי לAirtable + מודיע לowner."""
     try:
-        from airtable_tools import airtable_add  # type: ignore
+        from tools.airtable_tools import airtable_add  # type: ignore
         from airtable_schema import Tables        # type: ignore
 
         fields = {
@@ -286,7 +286,7 @@ def _notify_owner(session: VoiceSession):
 
         bot  = telebot.TeleBot(token)
         name = session.answers.get("name", session.from_num)
-        domain_he = {"realestate": "נדל\"ן", "import": "ייבוא", "general": "כללי"}.get(session.domain, session.domain)
+        domain_he = {"real_estate": "נדל\"ן", "import": "ייבוא", "general": "כללי"}.get(session.domain, session.domain)
         budget = session.answers.get("budget", "לא צוין")
         callback = "✅ כן" if session.answers.get("wants_callback") else "❌ לא"
 
@@ -460,7 +460,7 @@ def _run_tests() -> bool:
     chk("welcome has Gather",        "<Gather" in twiml_w)
 
     twiml_d = step_domain(sess, "1")
-    chk("domain '1' → realestate",   sess.domain == "realestate")
+    chk("domain '1' → real_estate",   sess.domain == "real_estate")
     chk("domain transitions NAME",   sess.state == VoiceState.NAME)
 
     twiml_i = step_interest(sess, "אשמח לדירה בתל אביב")
@@ -496,7 +496,7 @@ def _run_tests() -> bool:
     chk("flag=ON → welcome TwiML",   "<Gather" in result_on)
 
     # _format_answers
-    answers = {"domain": "realestate", "budget": "1-3 מיליון", "wants_callback": True}
+    answers = {"domain": "real_estate", "budget": "1-3 מיליון", "wants_callback": True}
     fmt = _format_answers(answers)
     chk("_format_answers not empty",  len(fmt) > 10)
     chk("_format_answers has IVR",    "IVR" in fmt)

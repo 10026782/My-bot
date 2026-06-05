@@ -133,7 +133,7 @@ class AudienceReport:
 def load_all_leads() -> list[LeadProfile]:
     """טוען לידים מAirtable דרך crm. Read-only."""
     try:
-        from airtable_tools import airtable_get  # type: ignore
+        from tools.airtable_tools import airtable_get  # type: ignore
         from airtable_schema import Tables        # type: ignore
 
         records = airtable_get(Tables.LEADS, "")
@@ -185,16 +185,16 @@ def _parse_records(records: list) -> list[LeadProfile]:
 def _mock_leads() -> list[LeadProfile]:
     """מוק לdev."""
     return [
-        LeadProfile("w:001","יהודה כהן",   94,"HOT","realestate","whatsapp",45,2,  False,1),
-        LeadProfile("w:002","צבי לוי",     82,"HOT","realestate","whatsapp",30,5,  False,2),
+        LeadProfile("w:001","יהודה כהן",   94,"HOT","real_estate","whatsapp",45,2,  False,1),
+        LeadProfile("w:002","צבי לוי",     82,"HOT","real_estate","whatsapp",30,5,  False,2),
         LeadProfile("t:003","שרה מזרחי",   67,"HOT","import",    "telegram",20,3,  False,0),
-        LeadProfile("w:004","אוריאל גרין",  55,"HOT","realestate","whatsapp",60,15, False,3),
-        LeadProfile("w:005","ראובן שמיר",   88,"HOT","realestate","whatsapp",10,1,  True, 0),
+        LeadProfile("w:004","אוריאל גרין",  55,"HOT","real_estate","whatsapp",60,15, False,3),
+        LeadProfile("w:005","ראובן שמיר",   88,"HOT","real_estate","whatsapp",10,1,  True, 0),
         LeadProfile("t:006","דינה אברהם",   35,"WARM","import",   "telegram",90,40, False,2),
-        LeadProfile("w:007","משה כץ",       20,"COLD","realestate","whatsapp",120,65,False,1),
-        LeadProfile("w:008","נעמי פרץ",     72,"HOT","realestate","whatsapp",5,2,  False,0),
+        LeadProfile("w:007","משה כץ",       20,"COLD","real_estate","whatsapp",120,65,False,1),
+        LeadProfile("w:008","נעמי פרץ",     72,"HOT","real_estate","whatsapp",5,2,  False,0),
         LeadProfile("e:009","דוד ישראלי",   45,"HOT","import",    "email",   3, 1,  False,0),
-        LeadProfile("w:010","חנה שפירא",    91,"HOT","realestate","whatsapp",2, 0,  False,0),
+        LeadProfile("w:010","חנה שפירא",    91,"HOT","real_estate","whatsapp",2, 0,  False,0),
     ]
 
 
@@ -465,16 +465,16 @@ def _run_tests() -> bool:
     leads = _mock_leads()
 
     # ── classify_segment ──────────────────────────
-    new_lead  = LeadProfile("x","חדש",50,"HOT","realestate","whatsapp",2,1,False,0)
+    new_lead  = LeadProfile("x","חדש",50,"HOT","real_estate","whatsapp",2,1,False,0)
     chk("new lead → new",           classify_segment(new_lead) == "new")
 
-    hot_lead  = LeadProfile("x","חם",85,"HOT","realestate","whatsapp",20,3,False,0)
+    hot_lead  = LeadProfile("x","חם",85,"HOT","real_estate","whatsapp",20,3,False,0)
     chk("hot 85 3d → hot_prospect", classify_segment(hot_lead) == "hot_prospect")
 
-    champ     = LeadProfile("x","אלוף",88,"HOT","realestate","whatsapp",40,10,True,0)
+    champ     = LeadProfile("x","אלוף",88,"HOT","real_estate","whatsapp",40,10,True,0)
     chk("converted → champion",     classify_segment(champ) == "champion")
 
-    cold_old  = LeadProfile("x","קר",15,"COLD","realestate","whatsapp",90,70,False,0)
+    cold_old  = LeadProfile("x","קר",15,"COLD","real_estate","whatsapp",90,70,False,0)
     chk("cold 70d → lost",          classify_segment(cold_old) == "lost")
 
     # ── run_segmentation ──────────────────────────

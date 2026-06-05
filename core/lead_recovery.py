@@ -28,12 +28,12 @@ _MAX_RECOVERY_ATTEMPTS = 1  # פעם אחת בלבד
 # ── Templates ────────────────────────────────────
 _TEMPLATES: dict[str, dict[str, str]] = {
     "WARM": {
-        "realestate": "שלום {name} 😊\nהיינו בקשר לפני כמה זמן בנוגע לנכס.\nעדיין רלוונטי? נשמח לעדכן אותך בהזדמנויות חדשות.",
+        "real_estate": "שלום {name} 😊\nהיינו בקשר לפני כמה זמן בנוגע לנכס.\nעדיין רלוונטי? נשמח לעדכן אותך בהזדמנויות חדשות.",
         "import":     "שלום {name} 😊\nדיברנו בעבר על ייבוא סחורה מסין.\nאם יש עניין מחודש — אשמח לשלוח עדכון מחירים עדכני.",
         "default":    "שלום {name} 😊\nרציתי לבדוק אם יש עניין לחדש את השיחה שלנו.",
     },
     "COLD": {
-        "realestate": "שלום {name},\nאנחנו כאן אם תחליט להתקדם בחיפוש הנכס. אין לחץ 🙂",
+        "real_estate": "שלום {name},\nאנחנו כאן אם תחליט להתקדם בחיפוש הנכס. אין לחץ 🙂",
         "import":     "שלום {name},\nאם ייבוא הפך לרלוונטי שוב — נשמח לשמוע ממך.",
         "default":    "שלום {name},\nאנחנו כאן אם תרצה לחזור לשיחה.",
     },
@@ -106,7 +106,7 @@ def _parse_leads(raw: str) -> list[dict]:
                 "memory_key":     parts[4] if len(parts) > 4 else "",
                 "recovery_count": int(parts[5]) if len(parts) > 5 else 0,
                 "last_message":   parts[6] if len(parts) > 6 else "",
-                "domain":         parts[7] if len(parts) > 7 else "realestate",
+                "domain":         parts[7] if len(parts) > 7 else "real_estate",
             })
         except Exception:
             continue
@@ -121,7 +121,7 @@ def _mock_leads() -> list[dict]:
             "last_active": (now - timedelta(days=8)).isoformat(),
             "channel": "whatsapp", "memory_key": "whatsapp:972501111111",
             "recovery_count": 0, "last_message": "צריך לחשוב על זה",
-            "domain": "realestate",
+            "domain": "real_estate",
         },
         {   # COLD 15 ימים — ראוי ל-recovery
             "name": "רחל לוי", "tier": "COLD",
@@ -135,14 +135,14 @@ def _mock_leads() -> list[dict]:
             "last_active": (now - timedelta(hours=6)).isoformat(),
             "channel": "whatsapp", "memory_key": "whatsapp:972502222222",
             "recovery_count": 0, "last_message": "מה המחיר?",
-            "domain": "realestate",
+            "domain": "real_estate",
         },
         {   # WARM 8 ימים אבל כבר נשלח — maxed
             "name": "יוסי אברהם", "tier": "WARM",
             "last_active": (now - timedelta(days=10)).isoformat(),
             "channel": "whatsapp", "memory_key": "whatsapp:972503333333",
             "recovery_count": 1, "last_message": "נחזור אליך",
-            "domain": "realestate",
+            "domain": "real_estate",
         },
     ]
 
@@ -284,7 +284,7 @@ def run_recovery_scan(owner_chat_id: str = "") -> RecoveryResult:
                 tier           = lead.get("tier", "COLD"),
                 days_silent    = _days_since(lead.get("last_active", "")) or 0,
                 last_message   = lead.get("last_message", ""),
-                domain         = lead.get("domain", "realestate"),
+                domain         = lead.get("domain", "real_estate"),
                 channel        = lead.get("channel", "whatsapp"),
                 recovery_count = int(lead.get("recovery_count", 0)),
             )
@@ -355,10 +355,10 @@ def _run_tests() -> bool:
     # ── build_recovery_draft ──────────────────────
     c = RecoveryCandidate(
         memory_key="w:1", name="דני", tier="WARM", days_silent=8,
-        last_message="", domain="realestate", channel="whatsapp",
+        last_message="", domain="real_estate", channel="whatsapp",
     )
     draft = build_recovery_draft(c)
-    chk("WARM/realestate draft not empty", len(draft) > 10)
+    chk("WARM/real_estate draft not empty", len(draft) > 10)
     chk("WARM draft contains 'עדיין רלוונטי'", "עדיין רלוונטי" in draft)
     chk("WARM draft contains name 'דני'", "דני" in draft)
 

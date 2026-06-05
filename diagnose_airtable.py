@@ -4,6 +4,8 @@
 
 import os, sys, urllib.parse, requests
 from dotenv import load_dotenv
+from airtable_schema import Tables
+
 load_dotenv()
 
 API_KEY = os.environ.get("AIRTABLE_API_KEY", "")
@@ -55,29 +57,26 @@ else:
 
 # ── 4. בדיקת כל טבלה ממפת השמות ─────────────────────────
 print("\n[4] בדיקת גישה לטבלאות CRM:")
-TABLE_NAMES = {
-    "אנשי קשר (Contacts)": "Contacts",
-    "עסקאות (Deals)":      "Deals",
-    "תשלומים (Payments)":  "Payments",
-    "משימות (Tasks)":      "Tasks",
-}
+TABLE_NAMES = (
+    Tables.CONTACTS,
+    Tables.DEALS,
+    Tables.PAYMENTS,
+    Tables.TASKS,
+)
 
-for heb_name, eng_fallback in TABLE_NAMES.items():
-    for name in [heb_name, eng_fallback]:
-        encoded = urllib.parse.quote(name, safe="")
-        url = f"https://api.airtable.com/v0/{BASE_ID}/{encoded}"
-        r = requests.get(url, headers=HEADERS, params={"maxRecords": 1}, timeout=10)
-        if r.status_code == 200:
-            count = len(r.json().get("records", []))
-            print(f"  ✅ '{name}' — {count} רשומות")
-            break
-        elif r.status_code == 404:
-            print(f"  ❌ '{name}' — 404 לא נמצאה")
-        elif r.status_code == 403:
-            print(f"  ⚠️ '{name}' — 403 אין הרשאה לטבלה זו")
-            break
-        else:
-            print(f"  ❌ '{name}' — {r.status_code}: {r.text[:80]}")
+for name in TABLE_NAMES:
+    encoded = urllib.parse.quote(name, safe="")
+    url = f"https://api.airtable.com/v0/{BASE_ID}/{encoded}"
+    r = requests.get(url, headers=HEADERS, params={"maxRecords": 1}, timeout=10)
+    if r.status_code == 200:
+        count = len(r.json().get("records", []))
+        print(f"  ✅ '{name}' — {count} רשומות")
+    elif r.status_code == 404:
+        print(f"  ❌ '{name}' — 404 לא נמצאה")
+    elif r.status_code == 403:
+        print(f"  ⚠️ '{name}' — 403 אין הרשאה לטבלה זו")
+    else:
+        print(f"  ❌ '{name}' — {r.status_code}: {r.text[:80]}")
 
 print("\n" + "=" * 60)
 print("סיום בדיקה — אם יש ❌ שלח את הפלט הזה לאיתור הבעיה")

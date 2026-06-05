@@ -21,17 +21,17 @@ _MAX_FOLLOWUPS  = {"HOT": 3, "WARM": 2,  "COLD": 1}
 
 _TEMPLATES = {
     "HOT": {
-        "realestate": "שלום {name} 👋\nרציתי לוודא שקיבלת את כל המידע שצריך לגבי הנכס.\nמה אתה חושב?",
+        "real_estate": "שלום {name} 👋\nרציתי לוודא שקיבלת את כל המידע שצריך לגבי הנכס.\nמה אתה חושב?",
         "import":     "שלום {name} 👋\nיש לי עדכון לגבי ההזמנה מסין. מתי נוח לדבר?",
         "default":    "שלום {name} 👋\nרציתי להמשיך את השיחה שלנו — יש שאלות?",
     },
     "WARM": {
-        "realestate": "שלום {name},\nהייתי שמח לשמוע אם הגעת להחלטה 🙂",
+        "real_estate": "שלום {name},\nהייתי שמח לשמוע אם הגעת להחלטה 🙂",
         "import":     "שלום {name},\nרציתי לבדוק מה השתנה מאז שדיברנו.",
         "default":    "שלום {name},\nרק לוודא שהכל בסדר מצידך.",
     },
     "COLD": {
-        "realestate": "שלום {name},\nאנחנו עדיין זמינים לעזור בחיפוש הנכס שלך.",
+        "real_estate": "שלום {name},\nאנחנו עדיין זמינים לעזור בחיפוש הנכס שלך.",
         "import":     "שלום {name},\nאם יש עניין בייבוא בעתיד — נשמח לשמוע.",
         "default":    "שלום {name},\nנשמח לשמוע ממך אם יש עניין.",
     },
@@ -47,7 +47,7 @@ class FollowupCandidate:
     last_message:    str
     contact_name:    str = ""
     contact_channel: str = ""
-    domain:          str = "realestate"
+    domain:          str = "real_estate"
     draft:           str = ""
 
 
@@ -91,7 +91,7 @@ def scan_active_leads() -> list[dict]:
                     "followup_count": state.followup_count,
                     "last_message":   state.last_message,
                     "name":           state.contact_name,
-                    "domain":         state.domain or "realestate",
+                    "domain":         state.domain or "real_estate",
                 })
         return leads
     except ImportError:
@@ -108,7 +108,7 @@ def _mock_leads() -> list[dict]:
         {"memory_key": "w:111", "tier": "HOT",  "name": "דני כהן",
          "last_active": (now - timedelta(hours=5)).isoformat(),
          "channel": "whatsapp", "followup_count": 0,
-         "last_message": "אשמח לשמוע עוד", "domain": "realestate"},
+         "last_message": "אשמח לשמוע עוד", "domain": "real_estate"},
         {"memory_key": "t:222", "tier": "WARM", "name": "רחל לוי",
          "last_active": (now - timedelta(hours=30)).isoformat(),
          "channel": "telegram", "followup_count": 0,
@@ -116,7 +116,7 @@ def _mock_leads() -> list[dict]:
         {"memory_key": "w:333", "tier": "COLD", "name": "משה גרין",
          "last_active": (now - timedelta(hours=10)).isoformat(),
          "channel": "whatsapp", "followup_count": 0,
-         "last_message": "מה המחיר?", "domain": "realestate"},
+         "last_message": "מה המחיר?", "domain": "real_estate"},
     ]
 
 
@@ -206,7 +206,7 @@ def run_followup_scan(owner_chat_id: str = "") -> FollowupResult:
                 last_message    = lead.get("last_message", ""),
                 contact_name    = lead.get("name", "לקוח"),
                 contact_channel = lead.get("channel", "whatsapp"),
-                domain          = lead.get("domain", "realestate"),
+                domain          = lead.get("domain", "real_estate"),
             )
             candidate.draft = build_followup_draft(candidate)
             result.candidates.append(candidate)
@@ -249,7 +249,7 @@ def _run_tests() -> bool:
     ok, r = determine_followup_needed(lead("COLD", 10))
     chk(f"COLD 10h → skip ({r})", ok is False)
 
-    c = FollowupCandidate("w:1","HOT",5,0,"","דני","whatsapp","realestate")
+    c = FollowupCandidate("w:1","HOT",5,0,"","דני","whatsapp","real_estate")
     d = build_followup_draft(c)
     chk("draft not empty",         len(d) > 10)
     chk("draft contains 'דני'",    "דני" in d)

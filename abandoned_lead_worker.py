@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from airtable_schema import Tables, TaskFields, TaskStatus
+
 logger = logging.getLogger(__name__)
 
 # ── Timeout לפי ערוץ (דקות) ───────────────────────
@@ -96,18 +98,18 @@ def scan_abandoned() -> list[AbandonedLead]:
     מקור: Airtable LeadSessions (שמסונכרן ע"י session_store).
     """
     try:
-        from airtable_tools import airtable_get  # type: ignore
+        from tools.airtable_tools import airtable_get  # type: ignore
         raw = airtable_get(
             "LeadSessions",
             "AND({done}=0, {drop_off_step}!='')"
         )
         result = _parse_sessions(raw)
         if not result:
-            return _mock_abandoned()
+            return []
         return result
     except ImportError:
-        logger.warning("[D02] airtable not available — mock mode")
-        return _mock_abandoned()
+        logger.warning("[D02] airtable not available — scan skipped")
+        return []
     except Exception as e:
         logger.error(f"[D02] scan error: {e}")
         return []
@@ -175,7 +177,7 @@ def _mock_abandoned() -> list[AbandonedLead]:
     """מוק לסביבת dev."""
     return [
         AbandonedLead(
-            sender="w:972501111111", channel="whatsapp", domain="realestate",
+            sender="w:972501111111", channel="whatsapp", domain="real_estate",
             step=2, total_steps=5, minutes_silent=45.0,
             answers={"domain": "נדל\"ן", "budget": "2 מיליון"},
         ),
@@ -185,7 +187,7 @@ def _mock_abandoned() -> list[AbandonedLead]:
             answers={"domain": "ייבוא"},
         ),
         AbandonedLead(
-            sender="voice:972509999999", channel="voice", domain="realestate",
+            sender="voice:972509999999", channel="voice", domain="real_estate",
             step=3, total_steps=5, minutes_silent=8.0,
             answers={"domain": "נדל\"ן", "budget": "1 מיליון", "timeline": "דחוף"},
         ),
@@ -213,7 +215,7 @@ def decide_action(lead: AbandonedLead) -> str:
 # ══════════════════════════════════════════════════
 
 _BOUNCE_TEMPLATES: dict[str, str] = {
-    "realestate": "שלום! ראינו שהתחלת לחפש נכס אבל לא סיימת.\nכדי שנוכל לעזור לך — באיזה שלב נתקעת? 🏠",
+    "real_estate": "שלום! ראינו שהתחלת לחפש נכס אבל לא סיימת.\nכדי שנוכל לעזור לך — באיזה שלב נתקעת? 🏠",
     "import":     "שלום! התחלת לחקור ייבוא סחורה אבל נשארת באמצע.\nאשמח לעזור לך להמשיך — מה עצר אותך? 📦",
     "general":    "שלום! ראינו שהתחלת תהליך אצלנו.\nנשמח לעזור לך להמשיך — פשוט ענה כאן. 😊",
 }
@@ -241,20 +243,21 @@ def create_human_pipeline_task(lead: AbandonedLead, owner_chat_id: str) -> bool:
     לשימוש כשערוץ = voice (IVR).
     """
     try:
-        from airtable_tools import airtable_add  # type: ignore
+        from tools.airtable_tools import airtable_add  # type: ignore
         answers_str = " | ".join(f"{k}={v}" for k, v in lead.answers.items())
+        priority = "high" if lead.step >= 3 else "medium"
         fields = {
-            "Name":     f"📞 ליד נטוש — {lead.sender}",
-            "Status":   "open",
-            "Priority": "high" if lead.step >= 3 else "medium",
-            "Notes":    (
+            TaskFields.NAME:   f"📞 ליד נטוש — {lead.sender}",
+            TaskFields.STATUS: TaskStatus.PENDING,
+            TaskFields.DESCRIPTION: (
                 f"ערוץ: {lead.channel} | דומיין: {lead.domain}\n"
+                f"עדיפות: {priority}\n"
                 f"שלב נטישה: {lead.step}/{lead.total_steps}\n"
                 f"זמן שתיקה: {lead.minutes_silent:.0f} דקות\n"
                 f"תשובות: {answers_str}"
             ),
         }
-        airtable_add("Tasks", fields)
+        airtable_add(Tables.TASKS, fields)
         _notify_human_pipeline(lead, owner_chat_id)
         return True
 
@@ -413,7 +416,7 @@ def _run_tests() -> bool:
 
     # ── decide_action ─────────────────────────────
     def make(channel, step=2):
-        return AbandonedLead("x", channel, "realestate", step, 5, 45.0)
+        return AbandonedLead("x", channel, "real_estate", step, 5, 45.0)
 
     chk("whatsapp → bounce",       decide_action(make("whatsapp")) == "bounce")
     chk("telegram → bounce",       decide_action(make("telegram")) == "bounce")
@@ -421,7 +424,7 @@ def _run_tests() -> bool:
     chk("voice → human_pipeline",  decide_action(make("voice"))    == "human_pipeline")
 
     # ── build_bounce_message ──────────────────────
-    lead_re = make("whatsapp"); lead_re.domain = "realestate"
+    lead_re = make("whatsapp"); lead_re.domain = "real_estate"
     lead_re.answers = {"domain": "נדל\"ן"}
     msg = build_bounce_message(lead_re)
     chk("bounce msg not empty",   len(msg) > 10)
@@ -433,10 +436,10 @@ def _run_tests() -> bool:
 
     # ── build_dropoff_report ──────────────────────
     abandoned = [
-        AbandonedLead("w:1","whatsapp","realestate",2,5,30.0),
-        AbandonedLead("w:2","whatsapp","realestate",2,5,45.0),
+        AbandonedLead("w:1","whatsapp","real_estate",2,5,30.0),
+        AbandonedLead("w:2","whatsapp","real_estate",2,5,45.0),
         AbandonedLead("t:1","telegram","import",    1,5,60.0),
-        AbandonedLead("v:1","voice",   "realestate",3,5,8.0),
+        AbandonedLead("v:1","voice",   "real_estate",3,5,8.0),
     ]
     report = build_dropoff_report(abandoned)
     chk("total = 4",               report.total == 4)

@@ -69,7 +69,7 @@ SCHEMA: dict[str, dict] = {
         "score ציון":    {"type": "number", "required": False},
         "summary":       {"type": "long",   "required": False},
         "domain":        {"type": "text",   "required": False,
-                          "options": ["realestate", "import", "general"]},
+                          "options": ["real_estate", "import", "general"]},
         "channel":       {"type": "text",   "required": False},
         "source":        {"type": "text",   "required": False},
         "memory_key":    {"type": "text",   "required": False},

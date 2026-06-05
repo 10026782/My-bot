@@ -63,7 +63,7 @@ TIMELINE_TASKS = [
     # ═══ שלב ב — Multi-Domain Router (ימים 4-7) ═══
     {
         "Phase": "ב — Multi-Domain", "Task": "בניית domain_router.py",
-        "Description": "מיפוי מספר וואטסאפ/ערוץ → domain. realestate / import / recruitment / investors",
+        "Description": "מיפוי מספר וואטסאפ/ערוץ → domain. real_estate / import / recruitment / investors",
         "Owner": "מפתח", "Status": "open", "Priority": "high",
         "Start": _d(4), "Due": _d(5), "Phase_Order": 2,
     },

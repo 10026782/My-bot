@@ -107,12 +107,12 @@ class PendingActionsStore:
 # ══════════════════════════════════════════════════
 
 # פעולות שדורשות אישור לפני ביצוע
+# שמות חייבים להתאים בדיוק לשמות בtool_registry.py ובdispatcher.py
 ACTIONS_REQUIRING_APPROVAL = {
-    "send_email",
-    "create_calendar",
-    "append_sheet",
-    "airtable_delete",   # מחיקה — בלתי הפיכה
-    "gmail_send_draft",  # שליחת מייל — בלתי הפיכה
+    "calendar_create_event",  # קביעת אירוע — ייצור בלתי הפיך
+    "sheets_append",          # כתיבה לשיט — ייצור בלתי הפיך
+    "airtable_delete",        # מחיקה — בלתי הפיכה
+    "gmail_send_draft",       # שליחת מייל — בלתי הפיכה
 }
 
 class EventBus:
@@ -190,14 +190,10 @@ class EventBus:
         payload = item["payload"]
         chat_id = item["chat_id"]
         logger.info(f"✅ Confirmed: {action_id} | {action}")
-        event_name = f"{action}.confirmed"
-        if not self._handlers.get(event_name):
-            logger.error(f"[EventBus] No handler for {event_name} — failing closed")
-            return f"❌ לא נמצא handler לפעולה '{action}' — הפעולה לא בוצעה."
-        result = self.emit(event_name, payload, chat_id)
-        if not result or str(result).lstrip().startswith("❌"):
-            logger.error(f"[EventBus] Handler returned failure for {event_name}: {result}")
-            return result or f"❌ הפעולה '{action}' לא הושלמה."
+        result = self.emit(f"{action}.confirmed", payload, chat_id)
+        if result is None:
+            logger.error(f"[EventBus] confirm: no handler for {action}.confirmed — action NOT executed")
+            return f"⚠️ אין handler ל-{action} — הפעולה לא בוצעה."
         return result
 
     def reject(self, action_id: str) -> str:
@@ -219,11 +215,12 @@ class EventBus:
 def _default_label(action: str, payload: dict) -> str:
     """תווית ברירת מחדל לכפתורי אישור"""
     labels = {
-        "send_email":      f"📧 שלח מייל ל-{payload.get('to', '?')}",
-        "create_calendar": f"📅 קבע: {payload.get('summary', '?')}",
-        "airtable_add":    f"➕ הוסף ל-{payload.get('table', '?')}",
-        "airtable_update": f"✏️ עדכן ב-{payload.get('table', '?')}",
-        "append_sheet":    f"📊 כתוב ל-{payload.get('sheet_name', '?')}",
+        "gmail_send_draft":       f"📧 שלח מייל ל-{payload.get('to', '?')}",
+        "calendar_create_event":  f"📅 קבע: {payload.get('summary', '?')}",
+        "airtable_add":           f"➕ הוסף ל-{payload.get('table', '?')}",
+        "airtable_update":        f"✏️ עדכן ב-{payload.get('table', '?')}",
+        "airtable_delete":        f"🗑️ מחק מ-{payload.get('table', '?')}",
+        "sheets_append":          f"📊 כתוב ל-{payload.get('sheet_name', '?')}",
     }
     return labels.get(action, f"⚡ {action}")
 

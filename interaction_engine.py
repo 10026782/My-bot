@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from airtable_schema import Tables, TaskFields, TaskStatus
+
 logger = logging.getLogger(__name__)
 
 
@@ -279,7 +281,7 @@ def save_to_business_memory(
     """
     import json
     try:
-        from airtable_tools import airtable_add  # type: ignore
+        from tools.airtable_tools import airtable_add  # type: ignore
 
         fields = {
             "channel":      interaction.source_channel,
@@ -320,7 +322,7 @@ def is_duplicate(raw_id: str) -> bool:
     if not raw_id or raw_id.startswith("mock_"):
         return False
     try:
-        from airtable_tools import airtable_get  # type: ignore
+        from tools.airtable_tools import airtable_get  # type: ignore
         raw = airtable_get("Business_Memory", f"{{external_id}}='{raw_id}'")
         return raw and "אין רשומות" not in raw and "❌" not in raw
     except Exception:
@@ -332,7 +334,7 @@ def search_business_memory(query: str, domain: str = "") -> str:
     חיפוש בזיכרון העסקי — לשימוש Agent כשנשאלים "מה סיכמנו ב..."
     """
     try:
-        from airtable_tools import airtable_get  # type: ignore
+        from tools.airtable_tools import airtable_get  # type: ignore
         formula = f"SEARCH('{query}',{{summary}})"
         if domain:
             formula = f"AND(SEARCH('{query}',{{summary}}),{{domain}}='{domain}')"
@@ -360,20 +362,22 @@ def create_tasks_from_analysis(
         return 0
     created = 0
     try:
-        from airtable_tools import airtable_add  # type: ignore
+        from tools.airtable_tools import airtable_add  # type: ignore
         for task in analysis.tasks:
+            priority = "high" if analysis.sentiment == "negative" else "medium"
             fields = {
-                "Name":      task.get("title",""),
-                "Status":    "open",
-                "Priority":  "high" if analysis.sentiment == "negative" else "medium",
-                "Notes":     (
+                TaskFields.NAME:        task.get("title", ""),
+                TaskFields.STATUS:      TaskStatus.PENDING,
+                TaskFields.DESCRIPTION: (
                     f"מקור: {interaction.source_channel} — {interaction.title}\n"
                     f"בעלים: {task.get('owner','')}\n"
+                    f"עדיפות: {priority}\n"
                     f"Memory ID: {memory_id}"
                 ),
-                "Deadline":  task.get("due",""),
             }
-            result = airtable_add("Tasks", fields)
+            if task.get("due"):
+                fields[TaskFields.DUE_DATE] = task.get("due", "")
+            result = airtable_add(Tables.TASKS, fields)
             if "✅" in result:
                 created += 1
     except ImportError:
@@ -589,7 +593,7 @@ def _parse_json(text: str) -> dict:
 def _detect_domain(text: str) -> str:
     text = text.lower()
     if any(k in text for k in ["נכס","דירה","שכירות","נדל","property"]):
-        return "realestate"
+        return "real_estate"
     if any(k in text for k in ["ספק","ייבוא","סחורה","import","supplier"]):
         return "import"
     return "general"
@@ -627,7 +631,7 @@ def _run_tests() -> bool:
 
     # ── _detect_domain ────────────────────────────
     chk("detect import domain",     _detect_domain("פגישת ספק ייבוא Q3") == "import")
-    chk("detect realestate domain", _detect_domain("נכס ברחוב הרצל") == "realestate")
+    chk("detect real_estate domain", _detect_domain("נכס ברחוב הרצל") == "real_estate")
     chk("detect general domain",    _detect_domain("שיחת יעוץ") == "general")
 
     # ── save_to_business_memory — dry-run ────────
