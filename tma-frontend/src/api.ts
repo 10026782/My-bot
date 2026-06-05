@@ -1,4 +1,4 @@
-import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset } from "./types";
+import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth } from "./types";
 
 const BASE = (import.meta.env.VITE_API_URL as string) ?? "";
 const DEV_ID = (import.meta.env.VITE_DEV_TELEGRAM_ID as string) ?? "";
@@ -141,4 +141,19 @@ export async function fetchActivity(domain?: string): Promise<ActivityResponse> 
   const r = await fetch(`${BASE}/api/activity${params}`, { headers: authHeaders() });
   if (!r.ok) throw new Error(`API ${r.status}`);
   return r.json() as Promise<ActivityResponse>;
+}
+
+export async function fetchHealth(): Promise<SystemHealth> {
+  const r = await fetch(`${BASE}/api/health`, { headers: authHeaders() });
+  if (!r.ok) throw new Error(`API ${r.status}`);
+  return r.json() as Promise<SystemHealth>;
+}
+
+export async function emergencyStop(action: string): Promise<void> {
+  const r = await fetch(`${BASE}/api/health/emergency`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ action }),
+  });
+  if (!r.ok) throw new Error(`API ${r.status}`);
 }

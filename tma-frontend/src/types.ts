@@ -104,6 +104,18 @@ export interface FinancePulse {
   recent: { ref: string; amount: number; date: string; status: string }[];
 }
 
+export interface SystemHealth {
+  status: "ok" | "degraded" | "emergency";
+  services: {
+    airtable:  string;
+    telegram:  string;
+    anthropic: string;
+  };
+  emergency_flags:  Record<string, boolean>;
+  active_emergency: string[];
+  checked_at: string;
+}
+
 export interface ActivityEntry {
   id: string;
   title: string;
