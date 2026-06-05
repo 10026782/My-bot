@@ -71,6 +71,28 @@ export interface ApprovalsResponse {
   approvals: Approval[];
 }
 
+export interface Asset {
+  id: string;
+  name: string;
+  type: string;
+  cost: number;
+  value: number;
+  mortgage: number;
+  equity: number;
+  rental_income: number;
+  status: string;
+  notes: string;
+}
+
+export interface AssetsResponse {
+  count: number;
+  total_value: number;
+  total_mortgage: number;
+  net_equity: number;
+  monthly_income: number;
+  assets: Asset[];
+}
+
 export interface FinancePulse {
   period: string;
   income:   { amount: number; count: number };

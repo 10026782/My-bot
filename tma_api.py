@@ -71,6 +71,16 @@ def _preflight_approval(_approval_id=None):
     return "", 204
 
 
+@tma_api.route("/api/assets", methods=["OPTIONS"])
+def _preflight_assets():
+    return "", 204
+
+
+@tma_api.route("/api/assets/<asset_id>", methods=["OPTIONS"])
+def _preflight_asset(_asset_id=None):
+    return "", 204
+
+
 # ══════════════════════════════════════════════════════════════════
 # Raw Airtable JSON helpers — TMA only, do NOT touch airtable_tools.py
 # ══════════════════════════════════════════════════════════════════
@@ -1039,12 +1049,45 @@ def _can_assets(identity) -> bool:
     return identity.is_owner or "personal" in (identity.allowed_domains or [])
 
 
+def _fmt_asset(rec: dict) -> dict:
+    f      = rec.get("fields", {})
+    value    = float(f.get("שווי נוכחי", 0) or 0)
+    mortgage = float(f.get("משכנתא", 0) or 0)
+    return {
+        "id":           rec["id"],
+        "name":         f.get("שם הנכס", ""),
+        "type":         f.get("סוג", ""),
+        "cost":         float(f.get("עלות רכישה", 0) or 0),
+        "value":        value,
+        "mortgage":     mortgage,
+        "equity":       value - mortgage,
+        "rental_income": float(f.get("הכנסה חודשית", 0) or 0),
+        "status":       f.get("סטטוס", ""),
+        "notes":        f.get("הערות", ""),
+    }
+
+
 @tma_api.route("/api/assets", methods=["GET"])
 @require_tma_auth
 def get_assets(identity):
     if not _can_assets(identity):
         return jsonify({"error": "forbidden"}), 403
-    return _todo("PN1 Assets Overview")
+
+    recs   = _at_list("Assets (Personal)", "", max_records=100)
+    assets = [_fmt_asset(r) for r in recs]
+
+    total_value    = sum(a["value"]        for a in assets)
+    total_mortgage = sum(a["mortgage"]     for a in assets)
+    monthly_income = sum(a["rental_income"] for a in assets)
+
+    return jsonify({
+        "count":          len(assets),
+        "total_value":    total_value,
+        "total_mortgage": total_mortgage,
+        "net_equity":     total_value - total_mortgage,
+        "monthly_income": monthly_income,
+        "assets":         assets,
+    })
 
 
 @tma_api.route("/api/assets/<asset_id>", methods=["GET"])
@@ -1052,7 +1095,16 @@ def get_assets(identity):
 def get_asset(asset_id, identity):
     if not _can_assets(identity):
         return jsonify({"error": "forbidden"}), 403
-    return _todo(f"PN2 Asset Card {asset_id}")
+
+    rec = _at_get_record("Assets (Personal)", asset_id)
+    if not rec:
+        return jsonify({"error": "asset not found"}), 404
+
+    return jsonify(_fmt_asset(rec))
+
+
+# Allowed editable fields — purchase cost is historical and locked
+_ASSET_EDITABLE = {"שווי נוכחי", "הכנסה חודשית", "סטטוס", "הערות"}
 
 
 @tma_api.route("/api/assets/<asset_id>", methods=["PATCH"])
@@ -1060,7 +1112,18 @@ def get_asset(asset_id, identity):
 def update_asset(asset_id, identity):
     if not _can_assets(identity):
         return jsonify({"error": "forbidden"}), 403
-    return _todo(f"PN2 Asset Update {asset_id}")
+
+    data   = request.get_json(force=True) or {}
+    fields = {k: v for k, v in data.items() if k in _ASSET_EDITABLE}
+    if not fields:
+        return jsonify({"error": "no editable fields provided"}), 400
+
+    ok = _at_patch("Assets (Personal)", asset_id, fields)
+    if not ok:
+        return jsonify({"error": "update failed"}), 500
+
+    _audit("asset_update", identity, details=f"{asset_id}: {list(fields.keys())}")
+    return jsonify({"ok": True, "asset_id": asset_id, "updated": list(fields.keys())})
 
 
 # ══════════════════════════════════════════════════════════════════

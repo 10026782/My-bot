@@ -6,6 +6,7 @@ import { LeadPipeline } from "./components/LeadPipeline";
 import { ActivityFeed } from "./components/ActivityFeed";
 import { Approvals } from "./components/Approvals";
 import { FinancePulse } from "./components/FinancePulse";
+import { PersonalMode } from "./components/PersonalMode";
 import type { ProjectsResponse, ProjectCard as TProjectCard } from "./types";
 
 type HubState =
@@ -19,6 +20,7 @@ export default function App() {
   const [activityOpen, setActivityOpen] = useState(false);
   const [approvalsOpen, setApprovalsOpen] = useState(false);
   const [financeOpen, setFinanceOpen] = useState(false);
+  const [personalOpen, setPersonalOpen] = useState(false);
 
   function loadHub() {
     setHub({ status: "loading" });
@@ -31,6 +33,11 @@ export default function App() {
   }
 
   useEffect(() => { loadHub(); }, []);
+
+  // ── Personal Mode view ──────────────────────────────────────────
+  if (personalOpen) {
+    return <PersonalMode onBack={() => setPersonalOpen(false)} />;
+  }
 
   // ── Finance Pulse view ──────────────────────────────────────────
   if (financeOpen) {
@@ -92,27 +99,10 @@ export default function App() {
           <p className="text-xs text-gray-400 mt-0.5">Projects Hub</p>
         </div>
         <div className="flex gap-2">
-          <button
-            onClick={() => setApprovalsOpen(true)}
-            className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg"
-            aria-label="אישורים"
-          >
-            ✅
-          </button>
-          <button
-            onClick={() => setFinanceOpen(true)}
-            className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg"
-            aria-label="פינאנס"
-          >
-            💰
-          </button>
-          <button
-            onClick={() => setActivityOpen(true)}
-            className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg"
-            aria-label="פעילות"
-          >
-            📋
-          </button>
+          <button onClick={() => setApprovalsOpen(true)}  className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="אישורים">✅</button>
+          <button onClick={() => setFinanceOpen(true)}    className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="פינאנס">💰</button>
+          <button onClick={() => setPersonalOpen(true)}   className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="נכסים">🏠</button>
+          <button onClick={() => setActivityOpen(true)}   className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="פעילות">📋</button>
         </div>
       </div>
 

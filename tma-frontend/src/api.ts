@@ -1,4 +1,4 @@
-import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse } from "./types";
+import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset } from "./types";
 
 const BASE = (import.meta.env.VITE_API_URL as string) ?? "";
 const DEV_ID = (import.meta.env.VITE_DEV_TELEGRAM_ID as string) ?? "";
@@ -87,6 +87,30 @@ export async function bulkApprove(): Promise<{ approved: number; skipped: number
   });
   if (!r.ok) throw new Error(`API ${r.status}`);
   return r.json() as Promise<{ approved: number; skipped: number }>;
+}
+
+export async function fetchAssets(): Promise<AssetsResponse> {
+  const r = await fetch(`${BASE}/api/assets`, { headers: authHeaders() });
+  if (!r.ok) throw new Error(`API ${r.status}`);
+  return r.json() as Promise<AssetsResponse>;
+}
+
+export async function fetchAsset(assetId: string): Promise<Asset> {
+  const r = await fetch(`${BASE}/api/assets/${encodeURIComponent(assetId)}`, { headers: authHeaders() });
+  if (!r.ok) throw new Error(`API ${r.status}`);
+  return r.json() as Promise<Asset>;
+}
+
+export async function updateAsset(
+  assetId: string,
+  fields: Partial<{ "שווי נוכחי": number; "הכנסה חודשית": number; "סטטוס": string; "הערות": string }>,
+): Promise<void> {
+  const r = await fetch(`${BASE}/api/assets/${encodeURIComponent(assetId)}`, {
+    method: "PATCH",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(fields),
+  });
+  if (!r.ok) throw new Error(`API ${r.status}`);
 }
 
 export async function fetchFinancePulse(): Promise<FinancePulse> {
