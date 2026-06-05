@@ -361,7 +361,7 @@ FIELD_MAP = {
         "Name":          "שם הליד",
         "phone":         "טלפון",
         "status":        "new | qualified | hot | cold",
-        "domain":        "realestate | import | general",
+        "domain":        "real_estate | import | general",
     },
 }
 

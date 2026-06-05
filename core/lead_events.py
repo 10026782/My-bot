@@ -29,7 +29,7 @@ class LeadEventStore:
         """
         מחזיר events (dicts) מ-Business Memory.
         domain=None → כל ה-events.
-        domain='realestate' → מסנן לפי domain.
+        domain='real_estate' → מסנן לפי domain.
         """
         if not _AT_KEY or not _AT_BASE:
             logger.warning("[LeadEventStore] Airtable env vars not set — returning []")

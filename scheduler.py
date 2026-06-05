@@ -171,7 +171,7 @@ def _job_learning_cycle():
         from core.learning_engine import run_learning_cycle, get_domain_insights
         import telebot
 
-        result = run_learning_cycle(["realestate", "import"])
+        result = run_learning_cycle(["real_estate", "import"])
         logger.info(f"[Learning] cycle done: {list(result.keys())}")
 
         token   = os.environ.get("TELEGRAM_TOKEN", "")

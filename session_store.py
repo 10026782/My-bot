@@ -30,7 +30,7 @@ _MAX_SESSIONS = 1000
 # Session Schema
 # ══════════════════════════════════════════════════
 
-def _new_session(domain: str = "realestate", channel: str = "whatsapp") -> dict:
+def _new_session(domain: str = "real_estate", channel: str = "whatsapp") -> dict:
     """session dict — מה ששמור ב-RAM וב-Airtable."""
     return {
         "domain":       domain,
@@ -86,7 +86,7 @@ class PersistentSessionStore:
     def get_or_create(
         self,
         sender: str,
-        domain: str = "realestate",
+        domain: str = "real_estate",
         channel: str = "whatsapp",
     ) -> dict:
         """מחזיר קיים או יוצר חדש."""
@@ -200,7 +200,7 @@ class PersistentSessionStore:
             channel_m = re.search(r'channel[:\s]+(\w+)', raw, re.IGNORECASE)
 
             session = _new_session(
-                domain  = domain_m.group(1)  if domain_m  else "realestate",
+                domain  = domain_m.group(1)  if domain_m  else "real_estate",
                 channel = channel_m.group(1) if channel_m else "whatsapp",
             )
             if step_m:   session["step"]      = int(step_m.group(1))
@@ -265,15 +265,15 @@ def _run_tests() -> bool:
     store = PersistentSessionStore(maxsize=5)
 
     # ── get_or_create ─────────────────────────────
-    s1 = store.get_or_create("w:001", "realestate", "whatsapp")
+    s1 = store.get_or_create("w:001", "real_estate", "whatsapp")
     chk("session created",           isinstance(s1, dict))
     chk("channel saved",             s1["channel"] == "whatsapp")
-    chk("domain saved",              s1["domain"] == "realestate")
+    chk("domain saved",              s1["domain"] == "real_estate")
     chk("step = 0",                  s1["step"] == 0)
     chk("airtable_add called",       len(saves) >= 1)
 
     # ── same session on 2nd call ──────────────────
-    s1b = store.get_or_create("w:001", "realestate", "whatsapp")
+    s1b = store.get_or_create("w:001", "real_estate", "whatsapp")
     chk("same session returned",     s1b is s1)
 
     # ── update_step ───────────────────────────────
@@ -299,14 +299,14 @@ def _run_tests() -> bool:
     chk("email channel",             s3["channel"] == "email")
 
     # ── delete ────────────────────────────────────
-    store.get_or_create("w:del", "realestate", "whatsapp")
+    store.get_or_create("w:del", "real_estate", "whatsapp")
     store.delete("w:del")
     chk("deleted from store",        store.get("w:del") is None)
 
     # ── LRU eviction ─────────────────────────────
     store2 = PersistentSessionStore(maxsize=3)
     for i in range(4):
-        store2.get_or_create(f"w:{i}", "realestate", "whatsapp")
+        store2.get_or_create(f"w:{i}", "real_estate", "whatsapp")
     chk("newest still there",        "w:3" in store2._store)
 
     # ── get_all_active ────────────────────────────

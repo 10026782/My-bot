@@ -593,7 +593,7 @@ def _parse_json(text: str) -> dict:
 def _detect_domain(text: str) -> str:
     text = text.lower()
     if any(k in text for k in ["נכס","דירה","שכירות","נדל","property"]):
-        return "realestate"
+        return "real_estate"
     if any(k in text for k in ["ספק","ייבוא","סחורה","import","supplier"]):
         return "import"
     return "general"
@@ -631,7 +631,7 @@ def _run_tests() -> bool:
 
     # ── _detect_domain ────────────────────────────
     chk("detect import domain",     _detect_domain("פגישת ספק ייבוא Q3") == "import")
-    chk("detect realestate domain", _detect_domain("נכס ברחוב הרצל") == "realestate")
+    chk("detect real_estate domain", _detect_domain("נכס ברחוב הרצל") == "real_estate")
     chk("detect general domain",    _detect_domain("שיחת יעוץ") == "general")
 
     # ── save_to_business_memory — dry-run ────────

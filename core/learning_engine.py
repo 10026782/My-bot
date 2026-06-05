@@ -89,13 +89,13 @@ def _load_events(domain: str = "") -> list[dict]:
 def _mock_events(domain: str = "") -> list[dict]:
     """מוק לסביבת dev."""
     base = [
-        {"type": "tier_change", "from": "WARM", "to": "HOT",    "domain": "realestate", "memory_key": "w:1", "days_ago": 10},
-        {"type": "tier_change", "from": "HOT",  "to": "CLOSED", "domain": "realestate", "memory_key": "w:1", "days_ago": 5},
-        {"type": "message",     "content": "אשמח לשמוע עוד פרטים",   "domain": "realestate", "memory_key": "w:1"},
-        {"type": "tier_change", "from": "WARM", "to": "HOT",    "domain": "realestate", "memory_key": "w:2", "days_ago": 20},
-        {"type": "tier_change", "from": "HOT",  "to": "COLD",   "domain": "realestate", "memory_key": "w:2", "days_ago": 15},
-        {"type": "message",     "content": "יקר לי מדי",             "domain": "realestate", "memory_key": "w:2"},
-        {"type": "message",     "content": "צריך לחשוב על זה",       "domain": "realestate", "memory_key": "w:2"},
+        {"type": "tier_change", "from": "WARM", "to": "HOT",    "domain": "real_estate", "memory_key": "w:1", "days_ago": 10},
+        {"type": "tier_change", "from": "HOT",  "to": "CLOSED", "domain": "real_estate", "memory_key": "w:1", "days_ago": 5},
+        {"type": "message",     "content": "אשמח לשמוע עוד פרטים",   "domain": "real_estate", "memory_key": "w:1"},
+        {"type": "tier_change", "from": "WARM", "to": "HOT",    "domain": "real_estate", "memory_key": "w:2", "days_ago": 20},
+        {"type": "tier_change", "from": "HOT",  "to": "COLD",   "domain": "real_estate", "memory_key": "w:2", "days_ago": 15},
+        {"type": "message",     "content": "יקר לי מדי",             "domain": "real_estate", "memory_key": "w:2"},
+        {"type": "message",     "content": "צריך לחשוב על זה",       "domain": "real_estate", "memory_key": "w:2"},
         {"type": "tier_change", "from": "WARM", "to": "HOT",    "domain": "import",      "memory_key": "t:1", "days_ago": 8},
         {"type": "tier_change", "from": "HOT",  "to": "CLOSED", "domain": "import",      "memory_key": "t:1", "days_ago": 3},
         {"type": "message",     "content": "בוא נסגור את העסקה",     "domain": "import",      "memory_key": "t:1"},
@@ -290,7 +290,7 @@ def run_learning_cycle(domains: Optional[list[str]] = None) -> dict:
     except ImportError:
         logger.warning("[Learning] feature_flags not available — dev mode")
 
-    domains = domains or ["realestate", "import", ""]
+    domains = domains or ["real_estate", "import", ""]
     report  = {}
 
     for domain in domains:
@@ -337,18 +337,18 @@ def _run_tests() -> bool:
     # ── mock events loaded ────────────────────────
     events = _mock_events()
     chk("mock events not empty",          len(events) > 0)
-    chk("mock events has realestate",     any(e.get("domain") == "realestate" for e in events))
+    chk("mock events has real_estate",     any(e.get("domain") == "real_estate" for e in events))
     chk("mock events has import",         any(e.get("domain") == "import" for e in events))
 
     # ── analyze_conversion_patterns ──────────────
-    conv = analyze_conversion_patterns("realestate")
+    conv = analyze_conversion_patterns("real_estate")
     chk("conversion patterns list",       isinstance(conv, list))
     chk("found HOT_to_CLOSED pattern",    any(i.pattern == "HOT_to_CLOSED" for i in conv))
     hot_closed = next((i for i in conv if i.pattern == "HOT_to_CLOSED"), None)
     chk("conversion frequency >= 1",      hot_closed is not None and hot_closed.frequency >= 1)
 
     # ── analyze_objection_patterns ────────────────
-    obj = analyze_objection_patterns("realestate")
+    obj = analyze_objection_patterns("real_estate")
     chk("objection patterns list",        isinstance(obj, list))
     chk("found at least 1 objection",     len(obj) >= 1)
     keywords = [i.pattern.replace("objection_","") for i in obj]
@@ -361,7 +361,7 @@ def _run_tests() -> bool:
     chk("avg_days_to_close is float",     isinstance(avg, float))
 
     # ── get_domain_insights ───────────────────────
-    ins = get_domain_insights("realestate")
+    ins = get_domain_insights("real_estate")
     chk("insights string not empty",      len(ins) > 20)
     chk("insights has 🧠",               "🧠" in ins)
     chk("insights has המרות section",     "המרות" in ins)
@@ -386,11 +386,11 @@ def _run_tests() -> bool:
 
     # flag ON
     ff.is_enabled = lambda x: True
-    result2 = le.run_learning_cycle(["realestate", "import"])
+    result2 = le.run_learning_cycle(["real_estate", "import"])
     chk("flag=ON → dict with domains", isinstance(result2, dict) and len(result2) > 0)
-    chk("result has 'realestate' key",  "realestate" in result2)
+    chk("result has 'real_estate' key",  "real_estate" in result2)
     chk("result has 'import' key",      "import" in result2)
-    chk("realestate has total_events",  "total_events" in result2.get("realestate", {}))
+    chk("real_estate has total_events",  "total_events" in result2.get("real_estate", {}))
 
     print(f"\n{'='*40}")
     print(f"F02 Tests: {passed} passed, {failed} failed")

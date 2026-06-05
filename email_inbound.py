@@ -179,7 +179,7 @@ def should_skip(email: InboundEmail) -> tuple[bool, str]:
 # ══════════════════════════════════════════════════
 
 _DOMAIN_KEYWORDS: dict[str, list[str]] = {
-    "realestate": ["נכס", "דירה", "שכירות", "קרקע", "נדל", "הרצל", "property", "rental", "apartment"],
+    "real_estate": ["נכס", "דירה", "שכירות", "קרקע", "נדל", "הרצל", "property", "rental", "apartment"],
     "import":     ["invoice", "order", "supplier", "shipping", "china", "ייבוא", "ספק", "חשבונית"],
     "finance":    ["תשלום", "payment", "transfer", "bank", "חשבון", "מס", "tax"],
 }
@@ -221,7 +221,7 @@ def route_email(email: InboundEmail) -> tuple[str, str, str]:
 # ══════════════════════════════════════════════════
 
 _DRAFT_TEMPLATES: dict[str, dict[str, str]] = {
-    "realestate": {
+    "real_estate": {
         "ask_question":  "שלום,\n\nתודה על פנייתך לגבי הנכס.\nנשמח לענות על שאלותיך ולקבוע פגישה.\n\nבברכה,\nBoss HQ",
         "default":       "שלום,\n\nקיבלנו את פנייתך ונחזור אליך בהקדם.\n\nבברכה,\nBoss HQ",
     },
@@ -383,8 +383,8 @@ def _run_tests() -> bool:
     # ── route_email ──────────────────────────────
     re_email = InboundEmail("1","x@y.com","שאלה לגבי נכס","האם הדירה זמינה?")
     d, i, p = route_email(re_email)
-    chk("realestate email → domain=realestate", d == "realestate")
-    chk("realestate email → intent=ask_question", i == "ask_question")
+    chk("real_estate email → domain=real_estate", d == "real_estate")
+    chk("real_estate email → intent=ask_question", i == "ask_question")
 
     inv_email = InboundEmail("2","supplier@china.com","Invoice Q2","Please pay invoice 4521")
     d2, i2, _ = route_email(inv_email)
@@ -396,7 +396,7 @@ def _run_tests() -> bool:
     chk("urgent keyword → priority=urgent",        p3 == "urgent")
 
     # ── build_draft_reply ─────────────────────────
-    draft = build_draft_reply(re_email, "realestate", "ask_question")
+    draft = build_draft_reply(re_email, "real_estate", "ask_question")
     chk("draft not empty",           len(draft) > 10)
     chk("draft contains Boss HQ",    "Boss HQ" in draft)
 

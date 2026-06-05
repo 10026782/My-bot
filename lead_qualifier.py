@@ -30,7 +30,7 @@ def _get_client() -> Anthropic:
 
 # ─── Lead Qualification ───────────────────────────────────────────────────────
 
-def qualify_lead(lead_info: str, domain: str = "realestate") -> dict:
+def qualify_lead(lead_info: str, domain: str = "real_estate") -> dict:
     if not is_enabled("LEAD_QUALIFIER"):
         return _mock_qualify(lead_info)
     system_prompt = get_qualification_prompt(domain)
@@ -47,7 +47,7 @@ def qualify_lead(lead_info: str, domain: str = "realestate") -> dict:
         return {"score": 0, "tier": "COLD", "summary": "שגיאה בניתוח הליד.", "risk": str(e), "next_step": "נסה שנית"}
 
 
-def batch_qualify(leads: list[str], domain: str = "realestate") -> list[dict]:
+def batch_qualify(leads: list[str], domain: str = "real_estate") -> list[dict]:
     results = []
     for lead in leads:
         result = qualify_lead(lead, domain)
@@ -98,7 +98,7 @@ class LeadState(Enum):
 _RESET_KEYWORDS = {"איפוס", "reset", "restart", "התחל מחדש"}
 
 
-def _new_session(domain: str = "realestate") -> dict:
+def _new_session(domain: str = "real_estate") -> dict:
     get_flow(domain)  # validate domain exists
     return {
         "domain": domain,
