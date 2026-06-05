@@ -158,160 +158,20 @@ TOOL_SCHEMAS = [
             "required": ["name_query"]
         }
     },
-]
-
-# ══════════════════════════════════════════════════
-# CRM Tools — Contacts, Deals, Payments
-# ══════════════════════════════════════════════════
-
-TOOL_SCHEMAS += [
-    # ── Contacts ──────────────────────────────────
     {
-        "name": "crm_add_contact",
-        "description": "הוספת איש קשר חדש ל-CRM",
+        "name": "search_business_memory",
+        "description": (
+            "חיפוש בזיכרון העסקי. "
+            "השתמש כשנשאלים 'מה סיכמנו עם X?' / 'מה הוחלט בפגישה עם Y?'. "
+            "מחפש בשדה summary של טבלת Business Memory."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "name":         {"type": "string", "description": "שם מלא (חובה)"},
-                "phone":        {"type": "string", "description": "מספר טלפון"},
-                "email":        {"type": "string", "description": "כתובת מייל"},
-                "contact_type": {"type": "string", "description": "Client | Supplier | Partner | Lawyer | Accountant"},
-                "company":      {"type": "string", "description": "שם חברה"},
-                "notes":        {"type": "string", "description": "הערות"}
-            },
-            "required": ["name"]
-        }
-    },
-    {
-        "name": "crm_find_contact",
-        "description": "חיפוש איש קשר לפי שם או חברה",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "שם או חברה לחיפוש"}
+                "query":  {"type": "string", "description": "מילות חיפוש"},
+                "domain": {"type": "string", "description": "סינון לפי תחום (אופציונלי)"}
             },
             "required": ["query"]
-        }
-    },
-    {
-        "name": "crm_list_contacts",
-        "description": "רשימת אנשי קשר פעילים, אופציונלי לפי סוג",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "contact_type": {"type": "string", "description": "Client | Supplier | Partner (אופציונלי)"}
-            }
-        }
-    },
-    {
-        "name": "crm_update_last_contact",
-        "description": "עדכון תאריך קשר אחרון לאיש קשר",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "record_id": {"type": "string", "description": "מזהה הרשומה (rec...)"}
-            },
-            "required": ["record_id"]
-        }
-    },
-    # ── Deals ─────────────────────────────────────
-    {
-        "name": "crm_add_deal",
-        "description": "הוספת עסקת נדל\"ן חדשה — בודק חוק 9% אוטומטית",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "name":              {"type": "string",  "description": "שם הנכס / העסקה"},
-                "address":           {"type": "string",  "description": "כתובת הנכס"},
-                "price":             {"type": "number",  "description": "מחיר ₪"},
-                "funding_cost_pct":  {"type": "number",  "description": "עלות מימון % (חוק ברזל: מקסימום 9%)"},
-                "contact_id":        {"type": "string",  "description": "record_id של איש קשר (אופציונלי)"},
-                "deadline":          {"type": "string",  "description": "תאריך סגירה YYYY-MM-DD (אופציונלי)"},
-                "notes":             {"type": "string",  "description": "הערות"}
-            },
-            "required": ["name", "address", "price", "funding_cost_pct"]
-        }
-    },
-    {
-        "name": "crm_update_deal_status",
-        "description": "עדכון סטטוס עסקה",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "record_id": {"type": "string", "description": "מזהה העסקה (rec...)"},
-                "status":    {"type": "string", "description": "Prospect | Due Diligence | Active | Closed | Cancelled"},
-                "notes":     {"type": "string", "description": "הערות לשינוי (אופציונלי)"}
-            },
-            "required": ["record_id", "status"]
-        }
-    },
-    {
-        "name": "crm_list_deals",
-        "description": "רשימת עסקאות, אופציונלי לפי סטטוס",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "status": {"type": "string", "description": "Prospect | Active | Closed | Cancelled (אופציונלי)"}
-            }
-        }
-    },
-    # ── Payments ──────────────────────────────────
-    {
-        "name": "crm_add_payment",
-        "description": "רישום תשלום עתידי עם תזכורת אוטומטית 3 ימים מראש",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "name":       {"type": "string", "description": "שם / תיאור התשלום"},
-                "amount":     {"type": "number", "description": "סכום ₪"},
-                "due_date":   {"type": "string", "description": "תאריך לתשלום YYYY-MM-DD"},
-                "deal_id":    {"type": "string", "description": "record_id עסקה (אופציונלי)"},
-                "contact_id": {"type": "string", "description": "record_id איש קשר (אופציונלי)"},
-                "notes":      {"type": "string", "description": "הערות"}
-            },
-            "required": ["name", "amount", "due_date"]
-        }
-    },
-    {
-        "name": "crm_upcoming_payments",
-        "description": "תשלומים קרובים בX ימים הבאים",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "days_ahead": {"type": "integer", "description": "כמה ימים קדימה (ברירת מחדל: 7)"}
-            }
-        }
-    },
-    {
-        "name": "crm_mark_payment_paid",
-        "description": "סימון תשלום כשולם",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "record_id": {"type": "string", "description": "מזהה התשלום (rec...)"}
-            },
-            "required": ["record_id"]
-        }
-    },
-    {
-        "name": "crm_overdue_payments",
-        "description": "בדיקת תשלומים שעברו מועד ועדכונם ל-Overdue",
-        "input_schema": {
-            "type": "object",
-            "properties": {}
-        }
-    },
-    # ── Knowledge ─────────────────────────────────
-    {
-        "name": "add_knowledge",
-        "description": "שמירת מידע עסקי חשוב לזיכרון ארוך-טווח",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "key":   {"type": "string", "description": "מפתח / נושא"},
-                "value": {"type": "string", "description": "המידע לשמירה"}
-            },
-            "required": ["key", "value"]
         }
     },
 ]
