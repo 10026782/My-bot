@@ -42,6 +42,17 @@ export async function fetchLead(leadId: string): Promise<LeadDetail> {
   return r.json() as Promise<LeadDetail>;
 }
 
+export async function askAI(contextId: string, question: string): Promise<string> {
+  const r = await fetch(`${BASE}/api/ai/ask`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ context: "lead_card", context_id: contextId, question }),
+  });
+  if (!r.ok) throw new Error(`API ${r.status}`);
+  const data = await r.json() as { answer: string };
+  return data.answer;
+}
+
 export async function updateLeadStatus(leadId: string, status: string): Promise<void> {
   const r = await fetch(`${BASE}/api/leads/${encodeURIComponent(leadId)}/status`, {
     method: "PATCH",

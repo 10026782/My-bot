@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { fetchLead, updateLeadStatus, createFollowup } from "../api";
+import { fetchLead, updateLeadStatus, createFollowup, askAI } from "../api";
 import type { LeadDetail as TLeadDetail, LeadSummary } from "../types";
 
 interface Props {
@@ -50,6 +50,13 @@ export function LeadDetail({ lead, onBack }: Props) {
   const [toast, setToast] = useState<Toast | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // AI state
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiQuestion, setAiQuestion] = useState("");
+  const [aiAnswer, setAiAnswer] = useState<string | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const aiInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     fetchLead(lead.id)
       .then((data) => {
@@ -58,6 +65,11 @@ export function LeadDetail({ lead, onBack }: Props) {
       })
       .catch((e: unknown) => setState({ status: "error", message: String(e) }));
   }, [lead.id]);
+
+  // Focus AI input when it opens
+  useEffect(() => {
+    if (aiOpen) setTimeout(() => aiInputRef.current?.focus(), 100);
+  }, [aiOpen]);
 
   function showToast(type: "ok" | "err", text: string) {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -93,19 +105,31 @@ export function LeadDetail({ lead, onBack }: Props) {
     }
   }
 
+  async function handleAskAI() {
+    if (aiBusy || !aiQuestion.trim()) return;
+    setAiBusy(true);
+    setAiAnswer(null);
+    try {
+      const answer = await askAI(lead.id, aiQuestion.trim());
+      setAiAnswer(answer);
+      setAiQuestion("");
+    } catch {
+      setAiAnswer("⚠️ שגיאה בשירות ה-AI");
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
   const data = state.status === "ok" ? state.data : null;
 
+  // Action bar height: ~48px base + 44px followup + 44px AI (if open) + pb
+  const pbClass = aiOpen ? "pb-52" : "pb-40";
+
   return (
-    <div className="min-h-screen bg-gray-100 pb-32">
+    <div className={`min-h-screen bg-gray-100 ${pbClass}`}>
       {/* Header */}
       <div className="bg-white px-4 pt-5 pb-4 mb-3 shadow-sm flex items-center gap-3">
-        <button
-          onClick={onBack}
-          className="text-blue-500 text-xl font-medium leading-none"
-          aria-label="חזרה"
-        >
-          ←
-        </button>
+        <button onClick={onBack} className="text-blue-500 text-xl font-medium leading-none" aria-label="חזרה">←</button>
         <div className="flex-1 min-w-0">
           <h1 className="text-lg font-black text-gray-900 truncate">{lead.name || "—"}</h1>
           <p className="text-xs text-gray-400">Lead Card</p>
@@ -114,7 +138,7 @@ export function LeadDetail({ lead, onBack }: Props) {
 
       {/* Toast */}
       {toast && (
-        <div className={`fixed top-4 left-4 right-4 z-50 rounded-xl px-4 py-3 text-sm font-medium shadow-lg text-center transition-all
+        <div className={`fixed top-4 left-4 right-4 z-50 rounded-xl px-4 py-3 text-sm font-medium shadow-lg text-center
           ${toast.type === "ok" ? "bg-green-500 text-white" : "bg-red-500 text-white"}`}>
           {toast.text}
         </div>
@@ -180,20 +204,26 @@ export function LeadDetail({ lead, onBack }: Props) {
               <div className="flex flex-col gap-2">
                 {data.timeline.map((entry, i) => (
                   <div key={i} className="flex gap-2 text-sm">
-                    {entry.channel && (
-                      <span className="text-gray-400 flex-shrink-0">[{entry.channel}]</span>
-                    )}
+                    {entry.channel && <span className="text-gray-400 flex-shrink-0">[{entry.channel}]</span>}
                     <span className="text-gray-700">{entry.summary}</span>
                   </div>
                 ))}
               </div>
             </div>
           )}
+
+          {/* AI Answer bubble */}
+          {aiAnswer && (
+            <div className="bg-purple-50 border border-purple-100 rounded-xl p-4">
+              <p className="text-xs text-purple-400 mb-1">🤖 BOSS AI</p>
+              <p className="text-sm text-purple-900 leading-relaxed whitespace-pre-wrap">{aiAnswer}</p>
+            </div>
+          )}
         </div>
       )}
 
-      {/* ── Action bar (fixed bottom) ── */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 pt-3 pb-safe pb-4 flex flex-col gap-3 shadow-xl">
+      {/* ── Fixed action bar ── */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 pt-3 pb-4 flex flex-col gap-2.5 shadow-xl">
         {/* Status chips */}
         <div className="flex gap-2 overflow-x-auto no-scrollbar">
           {STATUS_CHIPS.map((chip) => {
@@ -204,10 +234,8 @@ export function LeadDetail({ lead, onBack }: Props) {
                 onClick={() => handleStatusChange(chip.key)}
                 disabled={statusBusy}
                 className={`flex-shrink-0 text-xs px-3 py-1.5 rounded-full font-medium transition-all
-                  ${active
-                    ? "bg-blue-500 text-white shadow"
-                    : "bg-gray-100 text-gray-600 active:bg-gray-200"
-                  } ${statusBusy ? "opacity-50" : ""}`}
+                  ${active ? "bg-blue-500 text-white shadow" : "bg-gray-100 text-gray-600 active:bg-gray-200"}
+                  ${statusBusy ? "opacity-50" : ""}`}
               >
                 {chip.label}
               </button>
@@ -233,7 +261,39 @@ export function LeadDetail({ lead, onBack }: Props) {
           >
             {noteBusy ? "…" : "שלח"}
           </button>
+          <button
+            onClick={() => { setAiOpen((o) => !o); setAiAnswer(null); }}
+            className={`rounded-xl px-3 py-2 text-sm font-medium transition-colors
+              ${aiOpen ? "bg-purple-500 text-white" : "bg-gray-100 text-gray-600 active:bg-gray-200"}`}
+            aria-label="Ask AI"
+          >
+            🤖
+          </button>
         </div>
+
+        {/* AI input row — shown when aiOpen */}
+        {aiOpen && (
+          <div className="flex gap-2">
+            <input
+              ref={aiInputRef}
+              type="text"
+              value={aiQuestion}
+              onChange={(e) => setAiQuestion(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleAskAI()}
+              placeholder="שאל שאלה על הליד..."
+              className="flex-1 bg-purple-50 border border-purple-200 rounded-xl px-3 py-2 text-sm outline-none placeholder-purple-300"
+              dir="rtl"
+              disabled={aiBusy}
+            />
+            <button
+              onClick={handleAskAI}
+              disabled={aiBusy || !aiQuestion.trim()}
+              className="bg-purple-500 text-white rounded-xl px-4 py-2 text-sm font-medium disabled:opacity-40 active:opacity-70 min-w-[52px]"
+            >
+              {aiBusy ? "…" : "שאל"}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
