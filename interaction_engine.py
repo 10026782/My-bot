@@ -287,14 +287,13 @@ def save_to_interaction_log(
         from tools.airtable_tools import airtable_add  # type: ignore
 
         fields = {
-            InteractionLogFields.TITLE:     interaction.title,
-            InteractionLogFields.SUMMARY:   analysis.summary,
-            InteractionLogFields.CHANNEL:   interaction.source_channel,
-            InteractionLogFields.DOMAIN:    interaction.domain,
-            InteractionLogFields.TIMESTAMP: interaction.timestamp or datetime.now(tz=timezone.utc).isoformat(),
-            InteractionLogFields.SENTIMENT: analysis.sentiment,
-            InteractionLogFields.SOURCE:    interaction.raw_id,
-            InteractionLogFields.RELATED_RECORD_ID: "",
+            InteractionLogFields.TITLE:            interaction.title,
+            InteractionLogFields.SUMMARY:          analysis.summary,
+            InteractionLogFields.CHANNEL:          interaction.source_channel,
+            InteractionLogFields.TIMESTAMP:        interaction.timestamp or datetime.now(tz=timezone.utc).isoformat(),
+            InteractionLogFields.PARTICIPANTS:     ", ".join(interaction.participants) if interaction.participants else interaction.raw_id,
+            InteractionLogFields.KEY_INSIGHTS:     analysis.next_steps or analysis.sentiment,
+            InteractionLogFields.FOLLOWUP_ACTIONS: ", ".join(str(t) for t in analysis.tasks) if analysis.tasks else "",
         }
 
         result = airtable_add(Tables.INTERACTION_LOG, fields)
@@ -320,13 +319,15 @@ save_to_business_memory = save_to_interaction_log
 
 
 def is_duplicate(raw_id: str) -> bool:
-    """בודק אם אינטראקציה כבר נשמרה ב-Interaction Log (לפי source field)."""
+    """בודק אם אינטראקציה כבר נשמרה ב-Interaction Log (חיפוש ב-Participants)."""
     if not raw_id or raw_id.startswith("mock_"):
         return False
     from airtable_schema import Tables, InteractionLogFields
     try:
         from tools.airtable_tools import airtable_get  # type: ignore
-        raw = airtable_get(Tables.INTERACTION_LOG, f"{{{InteractionLogFields.SOURCE}}}='{raw_id}'")
+        safe = raw_id.replace("'", "\\'")
+        raw = airtable_get(Tables.INTERACTION_LOG,
+                           f"SEARCH('{safe}',{{{InteractionLogFields.PARTICIPANTS}}})")
         return raw and "אין רשומות" not in raw and "❌" not in raw
     except Exception:
         return False
@@ -341,7 +342,7 @@ def search_business_memory(query: str, domain: str = "") -> str:
         from tools.airtable_tools import airtable_get  # type: ignore
         formula = f"SEARCH('{query}',{{{InteractionLogFields.SUMMARY}}})"
         if domain:
-            formula = f"AND(SEARCH('{query}',{{{InteractionLogFields.SUMMARY}}}),{{{InteractionLogFields.DOMAIN}}}='{domain}')"
+            formula = f"AND(SEARCH('{query}',{{{InteractionLogFields.SUMMARY}}}),SEARCH('{domain}',{{{InteractionLogFields.PARTICIPANTS}}}))"
         raw = airtable_get(Tables.INTERACTION_LOG, formula)
         if not raw or "אין רשומות" in raw:
             return f"לא נמצאו רשומות עבור: {query}"

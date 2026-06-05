@@ -205,24 +205,16 @@ class BusinessMemoryFields:
 
 class InteractionLogFields:
     """Automated agent/system interaction log — table: Tables.INTERACTION_LOG.
-    Create this table in Airtable with the following fields:
-      title             (Single line text, Primary)
-      summary           (Long text)
-      channel           (Single line text) — whatsapp|telegram|email|voice|tma
-      domain            (Single line text) — e.g. real_estate|recruitment
-      timestamp         (Date, include time)
-      sentiment         (Single select) — positive|neutral|negative
-      source            (Single line text) — telegram_id|phone|email address
-      related_record_id (Single line text) — Airtable record ID of related Lead/Deal
+    Maps to the existing Airtable 'Interaction Log' table.
     """
-    TITLE             = "title"
-    SUMMARY           = "summary"
-    CHANNEL           = "channel"
-    DOMAIN            = "domain"
-    TIMESTAMP         = "timestamp"
-    SENTIMENT         = "sentiment"
-    SOURCE            = "source"
-    RELATED_RECORD_ID = "related_record_id"
+    TITLE            = "Interaction Subject"   # primary title (was: title)
+    SUMMARY          = "Details"               # summary/details (was: summary)
+    TIMESTAMP        = "Interaction Date"      # date+time (was: timestamp)
+    PARTICIPANTS     = "Participants"           # people/entities involved (was: source)
+    CHANNEL          = "Interaction Type"      # channel/type (was: channel)
+    BUSINESS_MEMORY  = "Business Memory"       # linked Business Memory record (was: related_record_id)
+    KEY_INSIGHTS     = "Key Insights"          # insights (was: sentiment)
+    FOLLOWUP_ACTIONS = "Follow-up Actions"     # follow-up actions (no prior equivalent)
 
 
 class LearningFields:

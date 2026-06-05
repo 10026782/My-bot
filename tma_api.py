@@ -167,14 +167,10 @@ def _audit(action: str, identity, details: str = "") -> None:
     """Write audit record to Interaction Log. Fails silently."""
     try:
         _at_post(Tables.INTERACTION_LOG, {
-            "title":     f"[TMA] {action}",
-            "summary":   f"{details[:200]}" if details else action,
-            "channel":   "tma",
-            "domain":    "",
-            "timestamp": "",
-            "sentiment": "",
-            "source":    identity.display_name or identity.user_id,
-            "related_record_id": "",
+            InteractionLogFields.TITLE:        f"[TMA] {action}",
+            InteractionLogFields.SUMMARY:      details[:200] if details else action,
+            InteractionLogFields.CHANNEL:      "tma",
+            InteractionLogFields.PARTICIPANTS: identity.display_name or identity.user_id,
         })
     except Exception as e:
         logger.warning(f"[Audit] failed for '{action}': {e}")
@@ -657,7 +653,7 @@ def get_lead(lead_id, identity):
     # Timeline from Interaction Log — automated interactions related to this lead
     timeline_recs = _at_list(
         Tables.INTERACTION_LOG,
-        f"OR(SEARCH('{lead_id}',{{{InteractionLogFields.RELATED_RECORD_ID}}}),SEARCH('{lead_id}',{{{InteractionLogFields.SUMMARY}}}))",
+        f"SEARCH('{lead_id}',{{{InteractionLogFields.SUMMARY}}})",
         max_records=20,
     )
     timeline = [
