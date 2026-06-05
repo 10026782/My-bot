@@ -19,7 +19,7 @@ from functools import wraps
 
 from flask import Blueprint, jsonify, request
 from identity import resolve_identity, Role
-from airtable_schema import LeadFields
+from airtable_schema import LeadFields, PaymentStatus
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +166,7 @@ def _at_post(table: str, fields: dict) -> dict | None:
 def _audit(action: str, identity, details: str = "") -> None:
     """Write audit record to Business Memory table. Fails silently."""
     try:
-        _at_post("Business Memory", {
+        _at_post("Business_Memory", {
             "channel":     "tma",
             "participant": identity.display_name or identity.user_id,
             "summary":     f"[TMA] {action}: {details[:200]}",
@@ -652,7 +652,7 @@ def get_lead(lead_id, identity):
 
     # Timeline from Business Memory — interactions logged for this lead
     timeline_recs = _at_list(
-        "Business Memory",
+        "Business_Memory",
         f"SEARCH('{lead_id}', {{summary}})",
         max_records=20,
     )
@@ -856,7 +856,10 @@ def finance_pulse(identity):
         status = (f.get("סטטוס", "") or "").strip()
         d_str  = (f.get("תאריך", "") or "")[:10]
 
-        if status == "התקבל":
+        if status == PaymentStatus.CANCELLED:
+            continue  # בוטל — לא נספר בשום קטגוריה
+
+        if status == PaymentStatus.RECEIVED:
             if d_str >= month_start:
                 income_amount += amount
                 income_count  += 1
@@ -1025,7 +1028,7 @@ def activity_feed(identity):
     limit    = min(int(request.args.get("limit", 50) or 50), 100)
 
     formula  = f"{{domain}}='{domain_q}'" if domain_q else ""
-    recs     = _at_list("Business Memory", formula, max_records=limit)
+    recs     = _at_list("Business_Memory", formula, max_records=limit)
 
     entries = []
     for rec in recs:
