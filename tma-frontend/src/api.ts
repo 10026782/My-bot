@@ -1,4 +1,4 @@
-import type { ProjectsResponse, DashboardResponse } from "./types";
+import type { ProjectsResponse, DashboardResponse, LeadsResponse } from "./types";
 
 const BASE = (import.meta.env.VITE_API_URL as string) ?? "";
 const DEV_ID = (import.meta.env.VITE_DEV_TELEGRAM_ID as string) ?? "";
@@ -28,4 +28,10 @@ export async function fetchDashboard(slug: string): Promise<DashboardResponse> {
   const r = await fetch(`${BASE}/api/projects/${slug}/dashboard`, { headers: authHeaders() });
   if (!r.ok) throw new Error(`API ${r.status}`);
   return r.json() as Promise<DashboardResponse>;
+}
+
+export async function fetchLeads(slug: string): Promise<LeadsResponse> {
+  const r = await fetch(`${BASE}/api/leads?project_slug=${encodeURIComponent(slug)}`, { headers: authHeaders() });
+  if (!r.ok) throw new Error(`API ${r.status}`);
+  return r.json() as Promise<LeadsResponse>;
 }

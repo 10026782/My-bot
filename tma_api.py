@@ -548,13 +548,22 @@ def _fmt_lead_summary(rec: dict) -> dict:
 @tma_api.route("/api/leads", methods=["GET"])
 @require_tma_auth
 def get_leads(identity):
-    """O2 — Lead Pipeline. Owner + Manager (all) + Partner (own domains)."""
+    """O2 — Lead Pipeline. Owner + Manager (all) + Partner (own domains).
+    Accepts: ?domain=real_estate OR ?project_slug=blueview (resolves via ProjectsHub)
+    """
     allowed = {Role.OWNER, Role.MANAGER, Role.PARTNER}
     if identity.role not in allowed:
         return jsonify({"error": "forbidden"}), 403
 
     domain_q = request.args.get("domain", "")
     status_q = request.args.get("status", "")
+
+    # Resolve project_slug → domain via ProjectsHub
+    slug_q = request.args.get("project_slug", "")
+    if slug_q and not domain_q:
+        hub = _at_list("ProjectsHub", f"{{slug}}='{slug_q}'", max_records=1)
+        if hub:
+            domain_q = hub[0].get("fields", {}).get("domain", "")
 
     parts = []
     if domain_q:

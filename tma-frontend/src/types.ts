@@ -45,6 +45,11 @@ export interface LeadSummary {
   source: string;
 }
 
+export interface LeadsResponse {
+  count: number;
+  leads: LeadSummary[];
+}
+
 export interface DashboardResponse {
   project_slug: string;
   domain: string;
