@@ -5,6 +5,7 @@ import { ProjectCard } from "./components/ProjectCard";
 import { LeadPipeline } from "./components/LeadPipeline";
 import { ActivityFeed } from "./components/ActivityFeed";
 import { Approvals } from "./components/Approvals";
+import { FinancePulse } from "./components/FinancePulse";
 import type { ProjectsResponse, ProjectCard as TProjectCard } from "./types";
 
 type HubState =
@@ -17,6 +18,7 @@ export default function App() {
   const [selected, setSelected] = useState<TProjectCard | null>(null);
   const [activityOpen, setActivityOpen] = useState(false);
   const [approvalsOpen, setApprovalsOpen] = useState(false);
+  const [financeOpen, setFinanceOpen] = useState(false);
 
   function loadHub() {
     setHub({ status: "loading" });
@@ -29,6 +31,11 @@ export default function App() {
   }
 
   useEffect(() => { loadHub(); }, []);
+
+  // ── Finance Pulse view ──────────────────────────────────────────
+  if (financeOpen) {
+    return <FinancePulse onBack={() => setFinanceOpen(false)} />;
+  }
 
   // ── Approvals view ──────────────────────────────────────────────
   if (approvalsOpen) {
@@ -91,6 +98,13 @@ export default function App() {
             aria-label="אישורים"
           >
             ✅
+          </button>
+          <button
+            onClick={() => setFinanceOpen(true)}
+            className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg"
+            aria-label="פינאנס"
+          >
+            💰
           </button>
           <button
             onClick={() => setActivityOpen(true)}

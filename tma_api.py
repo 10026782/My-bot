@@ -61,6 +61,7 @@ def _cors(response):
 @tma_api.route("/api/activity", methods=["OPTIONS"])
 @tma_api.route("/api/approvals", methods=["OPTIONS"])
 @tma_api.route("/api/approvals/bulk", methods=["OPTIONS"])
+@tma_api.route("/api/finance/pulse", methods=["OPTIONS"])
 def _preflight():
     return "", 204
 
@@ -822,7 +823,72 @@ def _todo(screen: str):
 def finance_pulse(identity):
     if not identity.is_owner:
         return jsonify({"error": "forbidden"}), 403
-    return _todo("O4 Finance Pulse")
+
+    today      = date.today()
+    month_start = today.replace(day=1).isoformat()
+    today_str   = today.isoformat()
+
+    # ── Payments ──────────────────────────────────────────────────
+    all_payments = _at_list("תשלומים (Payments)", "", max_records=200)
+
+    income_amount  = 0
+    income_count   = 0
+    pending_amount = 0
+    pending_count  = 0
+    overdue_amount = 0
+    overdue_count  = 0
+    recent: list   = []
+
+    for rec in all_payments:
+        f      = rec.get("fields", {})
+        amount = float(f.get("סכום", 0) or 0)
+        status = (f.get("סטטוס", "") or "").strip()
+        d_str  = (f.get("תאריך", "") or "")[:10]
+
+        if status == "התקבל":
+            if d_str >= month_start:
+                income_amount += amount
+                income_count  += 1
+                recent.append({
+                    "ref":    f.get("אסמכתא", "—"),
+                    "amount": amount,
+                    "date":   d_str,
+                    "status": status,
+                })
+        else:
+            if d_str and d_str < today_str:
+                overdue_amount += amount
+                overdue_count  += 1
+            else:
+                pending_amount += amount
+                pending_count  += 1
+
+    recent.sort(key=lambda x: x["date"], reverse=True)
+    recent = recent[:5]
+
+    # ── Expenses ──────────────────────────────────────────────────
+    expense_amount = 0
+    expense_count  = 0
+    all_expenses   = _at_list("הוצאות (Expenses)", "", max_records=200)
+    for rec in all_expenses:
+        f     = rec.get("fields", {})
+        amt   = float(f.get("סכום", 0) or 0)
+        d_str = (f.get("תאריך", "") or "")[:10]
+        if d_str >= month_start:
+            expense_amount += amt
+            expense_count  += 1
+
+    net = income_amount - expense_amount
+
+    return jsonify({
+        "period":   f"{today.year}-{today.month:02d}",
+        "income":   {"amount": income_amount,  "count": income_count},
+        "pending":  {"amount": pending_amount, "count": pending_count},
+        "overdue":  {"amount": overdue_amount, "count": overdue_count},
+        "expenses": {"amount": expense_amount, "count": expense_count},
+        "net":      net,
+        "recent":   recent,
+    })
 
 
 _RISK_HIGH = {"גבוה", "high"}

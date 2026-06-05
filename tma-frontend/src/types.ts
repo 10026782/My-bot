@@ -71,6 +71,16 @@ export interface ApprovalsResponse {
   approvals: Approval[];
 }
 
+export interface FinancePulse {
+  period: string;
+  income:   { amount: number; count: number };
+  pending:  { amount: number; count: number };
+  overdue:  { amount: number; count: number };
+  expenses: { amount: number; count: number };
+  net: number;
+  recent: { ref: string; amount: number; date: string; status: string }[];
+}
+
 export interface ActivityEntry {
   id: string;
   title: string;

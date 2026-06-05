@@ -1,4 +1,4 @@
-import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse } from "./types";
+import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse } from "./types";
 
 const BASE = (import.meta.env.VITE_API_URL as string) ?? "";
 const DEV_ID = (import.meta.env.VITE_DEV_TELEGRAM_ID as string) ?? "";
@@ -87,6 +87,12 @@ export async function bulkApprove(): Promise<{ approved: number; skipped: number
   });
   if (!r.ok) throw new Error(`API ${r.status}`);
   return r.json() as Promise<{ approved: number; skipped: number }>;
+}
+
+export async function fetchFinancePulse(): Promise<FinancePulse> {
+  const r = await fetch(`${BASE}/api/finance/pulse`, { headers: authHeaders() });
+  if (!r.ok) throw new Error(`API ${r.status}`);
+  return r.json() as Promise<FinancePulse>;
 }
 
 export async function fetchActivity(domain?: string): Promise<ActivityResponse> {
