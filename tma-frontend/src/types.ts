@@ -55,6 +55,21 @@ export interface TimelineEntry {
   channel: string;
 }
 
+export interface ActivityEntry {
+  id: string;
+  title: string;
+  summary: string;
+  channel: string;
+  domain: string;
+  timestamp: string;
+  sentiment: string;
+}
+
+export interface ActivityResponse {
+  count: number;
+  entries: ActivityEntry[];
+}
+
 export interface LeadDetail {
   id: string;
   name: string;

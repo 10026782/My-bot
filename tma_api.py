@@ -58,6 +58,7 @@ def _cors(response):
 @tma_api.route("/api/leads", methods=["OPTIONS"])
 @tma_api.route("/api/ai/ask", methods=["OPTIONS"])
 @tma_api.route("/api/followup", methods=["OPTIONS"])
+@tma_api.route("/api/activity", methods=["OPTIONS"])
 def _preflight():
     return "", 204
 
@@ -816,7 +817,28 @@ def act_on_approval(approval_id, identity):
 def activity_feed(identity):
     if identity.role not in {Role.OWNER, Role.MANAGER}:
         return jsonify({"error": "forbidden"}), 403
-    return _todo("O7 Activity Feed")
+
+    domain_q = request.args.get("domain", "").strip()
+    limit    = min(int(request.args.get("limit", 50) or 50), 100)
+
+    formula  = f"{{domain}}='{domain_q}'" if domain_q else ""
+    recs     = _at_list("Business Memory", formula, max_records=limit)
+
+    entries = []
+    for rec in recs:
+        f = rec.get("fields", {})
+        entries.append({
+            "id":        rec["id"],
+            "title":     f.get("title", "") or (f.get("summary", "")[:60]),
+            "summary":   f.get("summary", ""),
+            "channel":   f.get("channel", ""),
+            "domain":    f.get("domain", ""),
+            "timestamp": f.get("timestamp", ""),
+            "sentiment": f.get("sentiment", ""),
+        })
+
+    entries.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+    return jsonify({"count": len(entries), "entries": entries})
 
 
 # ── Assets (Personal Mode) ─────────────────────────────────────

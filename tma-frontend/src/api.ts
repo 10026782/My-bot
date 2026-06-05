@@ -1,4 +1,4 @@
-import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail } from "./types";
+import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse } from "./types";
 
 const BASE = (import.meta.env.VITE_API_URL as string) ?? "";
 const DEV_ID = (import.meta.env.VITE_DEV_TELEGRAM_ID as string) ?? "";
@@ -58,4 +58,11 @@ export async function createFollowup(leadId: string, note: string): Promise<void
     body: JSON.stringify({ lead_id: leadId, note }),
   });
   if (!r.ok) throw new Error(`API ${r.status}`);
+}
+
+export async function fetchActivity(domain?: string): Promise<ActivityResponse> {
+  const params = domain ? `?domain=${encodeURIComponent(domain)}` : "";
+  const r = await fetch(`${BASE}/api/activity${params}`, { headers: authHeaders() });
+  if (!r.ok) throw new Error(`API ${r.status}`);
+  return r.json() as Promise<ActivityResponse>;
 }

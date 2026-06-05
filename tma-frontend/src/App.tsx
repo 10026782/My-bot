@@ -3,6 +3,7 @@ import { fetchProjects } from "./api";
 import { GlobalKpis } from "./components/GlobalKpis";
 import { ProjectCard } from "./components/ProjectCard";
 import { LeadPipeline } from "./components/LeadPipeline";
+import { ActivityFeed } from "./components/ActivityFeed";
 import type { ProjectsResponse, ProjectCard as TProjectCard } from "./types";
 
 type HubState =
@@ -13,6 +14,7 @@ type HubState =
 export default function App() {
   const [hub, setHub] = useState<HubState>({ status: "loading" });
   const [selected, setSelected] = useState<TProjectCard | null>(null);
+  const [activityOpen, setActivityOpen] = useState(false);
 
   function loadHub() {
     setHub({ status: "loading" });
@@ -25,6 +27,11 @@ export default function App() {
   }
 
   useEffect(() => { loadHub(); }, []);
+
+  // ── Activity Feed view ──────────────────────────────────────────
+  if (activityOpen) {
+    return <ActivityFeed onBack={() => setActivityOpen(false)} />;
+  }
 
   // ── Lead Pipeline view ──────────────────────────────────────────
   if (selected) {
@@ -65,9 +72,18 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-100 pb-8">
-      <div className="bg-white px-4 pt-5 pb-4 mb-3 shadow-sm">
-        <h1 className="text-xl font-black text-gray-900">BOSS</h1>
-        <p className="text-xs text-gray-400 mt-0.5">Projects Hub</p>
+      <div className="bg-white px-4 pt-5 pb-4 mb-3 shadow-sm flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-black text-gray-900">BOSS</h1>
+          <p className="text-xs text-gray-400 mt-0.5">Projects Hub</p>
+        </div>
+        <button
+          onClick={() => setActivityOpen(true)}
+          className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg"
+          aria-label="פעילות"
+        >
+          📋
+        </button>
       </div>
 
       <div className="mb-4">
