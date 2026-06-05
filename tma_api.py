@@ -1050,20 +1050,19 @@ def _can_assets(identity) -> bool:
 
 
 def _fmt_asset(rec: dict) -> dict:
-    f      = rec.get("fields", {})
-    value    = float(f.get("שווי נוכחי", 0) or 0)
-    mortgage = float(f.get("משכנתא", 0) or 0)
+    f = rec.get("fields", {})
     return {
-        "id":           rec["id"],
-        "name":         f.get("שם הנכס", ""),
-        "type":         f.get("סוג", ""),
-        "cost":         float(f.get("עלות רכישה", 0) or 0),
-        "value":        value,
-        "mortgage":     mortgage,
-        "equity":       value - mortgage,
-        "rental_income": float(f.get("הכנסה חודשית", 0) or 0),
-        "status":       f.get("סטטוס", ""),
-        "notes":        f.get("הערות", ""),
+        "id":               rec["id"],
+        "name":             f.get("Name", ""),
+        "type":             f.get("Asset Type", ""),
+        "current_value":    float(f.get("Current Value", 0) or 0),
+        "mortgage_balance": float(f.get("Mortgage Balance", 0) or 0),
+        # Equity and My Equity are Airtable formula fields — read directly, never compute
+        "equity":           float(f.get("Equity", 0) or 0),
+        "ownership_pct":    float(f.get("Ownership %", 100) or 100),
+        "my_equity":        float(f.get("My Equity", 0) or 0),
+        "monthly_income":   float(f.get("Monthly Income", 0) or 0),
+        "status":           f.get("Status", ""),
     }
 
 
@@ -1076,16 +1075,13 @@ def get_assets(identity):
     recs   = _at_list("Assets (Personal)", "", max_records=100)
     assets = [_fmt_asset(r) for r in recs]
 
-    total_value    = sum(a["value"]        for a in assets)
-    total_mortgage = sum(a["mortgage"]     for a in assets)
-    monthly_income = sum(a["rental_income"] for a in assets)
-
     return jsonify({
         "count":          len(assets),
-        "total_value":    total_value,
-        "total_mortgage": total_mortgage,
-        "net_equity":     total_value - total_mortgage,
-        "monthly_income": monthly_income,
+        "total_value":    sum(a["current_value"]    for a in assets),
+        "total_debt":     sum(a["mortgage_balance"] for a in assets),
+        "total_equity":   sum(a["equity"]           for a in assets),
+        "my_equity":      sum(a["my_equity"]        for a in assets),
+        "monthly_income": sum(a["monthly_income"]   for a in assets),
         "assets":         assets,
     })
 
@@ -1103,8 +1099,8 @@ def get_asset(asset_id, identity):
     return jsonify(_fmt_asset(rec))
 
 
-# Allowed editable fields — purchase cost is historical and locked
-_ASSET_EDITABLE = {"שווי נוכחי", "הכנסה חודשית", "סטטוס", "הערות"}
+# Equity and My Equity are Airtable formula fields — never PATCH them
+_ASSET_EDITABLE = {"Current Value", "Mortgage Balance", "Monthly Income", "Status", "Ownership %"}
 
 
 @tma_api.route("/api/assets/<asset_id>", methods=["PATCH"])

@@ -75,20 +75,21 @@ export interface Asset {
   id: string;
   name: string;
   type: string;
-  cost: number;
-  value: number;
-  mortgage: number;
-  equity: number;
-  rental_income: number;
+  current_value: number;
+  mortgage_balance: number;
+  equity: number;          // Airtable formula: Current Value - Mortgage Balance
+  ownership_pct: number;
+  my_equity: number;       // Airtable formula: Equity * (Ownership % / 100)
+  monthly_income: number;  // Gross only — no personal income calculations
   status: string;
-  notes: string;
 }
 
 export interface AssetsResponse {
   count: number;
   total_value: number;
-  total_mortgage: number;
-  net_equity: number;
+  total_debt: number;
+  total_equity: number;
+  my_equity: number;
   monthly_income: number;
   assets: Asset[];
 }

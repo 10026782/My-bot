@@ -19,10 +19,13 @@ type DetailState =
 type Toast = { type: "ok" | "err"; text: string };
 
 const TYPE_ICON: Record<string, string> = {
-  דירה:    "🏠",
-  קרקע:   "🌿",
-  מסחרי:  "🏢",
-  אחר:    "📦",
+  // Hebrew originals
+  "דירה":   "🏠", "קרקע":  "🌿", "מסחרי": "🏢", "אחר":   "📦",
+  // English
+  "Apartment":  "🏠", "Residential": "🏠",
+  "Land":       "🌿",
+  "Commercial": "🏢", "Industrial": "🏭", "Office": "🏢",
+  "Other":      "📦",
 };
 
 const STATUS_CHIPS = [
@@ -32,8 +35,9 @@ const STATUS_CHIPS = [
 ];
 
 function fmt(n: number): string {
-  if (n >= 1_000_000) return `₪${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000)     return `₪${Math.round(n / 1_000)}K`;
+  if (!n && n !== 0) return "—";
+  if (n >= 1_000_000) return `₪${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000)     return `₪${Math.round(n / 1_000).toLocaleString("he-IL")}K`;
   return `₪${n.toLocaleString("he-IL")}`;
 }
 
@@ -41,38 +45,31 @@ function typeIcon(t: string) {
   return TYPE_ICON[t] ?? "🏘️";
 }
 
-function statusColor(s: string) {
+function statusBadge(s: string) {
   return STATUS_CHIPS.find((c) => c.key === s)?.color ?? "bg-gray-100 text-gray-600";
 }
 
 // ── Asset Detail ────────────────────────────────────────────────
 
-function AssetDetail({
-  assetId,
-  onBack,
-}: {
-  assetId: string;
-  onBack: () => void;
-}) {
+function AssetDetail({ assetId, onBack }: { assetId: string; onBack: () => void }) {
   const [state, setState] = useState<DetailState>({ status: "loading" });
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<Toast | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Local editable state — synced from loaded data
-  const [editValue, setEditValue]    = useState("");
-  const [editIncome, setEditIncome]  = useState("");
-  const [editStatus, setEditStatus]  = useState("");
-  const [editNotes, setEditNotes]    = useState("");
+  const [editValue,    setEditValue]    = useState("");
+  const [editMortgage, setEditMortgage] = useState("");
+  const [editIncome,   setEditIncome]   = useState("");
+  const [editStatus,   setEditStatus]   = useState("");
 
   useEffect(() => {
     fetchAsset(assetId)
       .then((data) => {
         setState({ status: "ok", data });
-        setEditValue(data.value > 0 ? String(data.value) : "");
-        setEditIncome(data.rental_income > 0 ? String(data.rental_income) : "");
+        setEditValue(data.current_value > 0 ? String(data.current_value) : "");
+        setEditMortgage(data.mortgage_balance > 0 ? String(data.mortgage_balance) : "");
+        setEditIncome(data.monthly_income > 0 ? String(data.monthly_income) : "");
         setEditStatus(data.status);
-        setEditNotes(data.notes);
       })
       .catch((e: unknown) => setState({ status: "error", message: String(e) }));
   }, [assetId]);
@@ -87,35 +84,22 @@ function AssetDetail({
     if (state.status !== "ok" || saving) return;
     setSaving(true);
     try {
-      const fields: Record<string, string | number> = {};
+      const d = state.data;
+      const fields: Parameters<typeof updateAsset>[1] = {};
       const v = parseFloat(editValue);
+      const m = parseFloat(editMortgage);
       const i = parseFloat(editIncome);
-      if (!isNaN(v) && v !== state.data.value)        fields["שווי נוכחי"]    = v;
-      if (!isNaN(i) && i !== state.data.rental_income) fields["הכנסה חודשית"] = i;
-      if (editStatus && editStatus !== state.data.status) fields["סטטוס"] = editStatus;
-      if (editNotes !== state.data.notes)               fields["הערות"]  = editNotes;
+      if (!isNaN(v) && v !== d.current_value)    fields["Current Value"]    = v;
+      if (!isNaN(m) && m !== d.mortgage_balance) fields["Mortgage Balance"] = m;
+      if (!isNaN(i) && i !== d.monthly_income)   fields["Monthly Income"]   = i;
+      if (editStatus && editStatus !== d.status) fields["Status"]           = editStatus;
 
-      if (Object.keys(fields).length === 0) {
-        showToast("ok", "אין שינויים לשמור");
-        return;
-      }
-      await updateAsset(assetId, fields as Parameters<typeof updateAsset>[1]);
-      setState((prev) =>
-        prev.status === "ok"
-          ? {
-              status: "ok",
-              data: {
-                ...prev.data,
-                value:         !isNaN(v) ? v : prev.data.value,
-                rental_income: !isNaN(i) ? i : prev.data.rental_income,
-                equity:        (!isNaN(v) ? v : prev.data.value) - prev.data.mortgage,
-                status:        editStatus || prev.data.status,
-                notes:         editNotes,
-              },
-            }
-          : prev,
-      );
+      if (Object.keys(fields).length === 0) { showToast("ok", "אין שינויים"); return; }
+      await updateAsset(assetId, fields);
       showToast("ok", "נשמר ✓");
+      // Re-fetch to get updated Airtable formula fields (Equity / My Equity)
+      const updated = await fetchAsset(assetId);
+      setState({ status: "ok", data: updated });
     } catch {
       showToast("err", "שמירה נכשלה");
     } finally {
@@ -126,15 +110,20 @@ function AssetDetail({
   const d = state.status === "ok" ? state.data : null;
 
   return (
-    <div className="min-h-screen bg-gray-100 pb-32">
+    <div className="min-h-screen bg-gray-100 pb-48">
       <div className="bg-white px-4 pt-5 pb-4 mb-3 shadow-sm flex items-center gap-3">
         <button onClick={onBack} className="text-blue-500 text-xl font-medium leading-none">←</button>
         <div className="flex-1 min-w-0">
           <h1 className="text-lg font-black text-gray-900 truncate">
             {d ? `${typeIcon(d.type)} ${d.name}` : "נכס"}
           </h1>
-          <p className="text-xs text-gray-400">Asset Card</p>
+          <p className="text-xs text-gray-400">{d?.type || "Asset Card"}</p>
         </div>
+        {d?.status && (
+          <span className={`text-xs px-2 py-1 rounded-full font-medium ${statusBadge(d.status)}`}>
+            {d.status}
+          </span>
+        )}
       </div>
 
       {toast && (
@@ -149,43 +138,46 @@ function AssetDetail({
           <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
         </div>
       )}
-
       {state.status === "error" && (
-        <div className="mx-4 bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
-          {state.message}
-        </div>
+        <div className="mx-4 bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">{state.message}</div>
       )}
 
       {d && (
         <div className="flex flex-col gap-3 px-4">
-          {/* KPIs */}
-          <div className="grid grid-cols-2 gap-3">
-            {[
-              { label: "שווי נוכחי",   value: fmt(d.value),        color: "text-gray-900" },
-              { label: "הון עצמי",     value: fmt(d.equity),       color: d.equity >= 0 ? "text-green-600" : "text-red-600" },
-              { label: "משכנתא",       value: fmt(d.mortgage),     color: "text-gray-700" },
-              { label: "הכנסה/חודש",  value: fmt(d.rental_income), color: "text-blue-600" },
-            ].map((k) => (
-              <div key={k.label} className="bg-white rounded-xl shadow-sm p-3">
-                <p className="text-[11px] text-gray-400 mb-0.5">{k.label}</p>
-                <p className={`text-lg font-black ${k.color}`}>{k.value}</p>
-              </div>
-            ))}
+          {/* Balance Sheet grid */}
+          <div className="bg-white rounded-xl shadow-sm p-4">
+            <p className="text-xs text-gray-400 mb-3">Balance Sheet</p>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+              {[
+                { label: "שווי נכס",         value: fmt(d.current_value),    color: "text-gray-900" },
+                { label: "חוב (משכנתא)",     value: fmt(d.mortgage_balance), color: "text-red-600" },
+                { label: "Equity (כולל)",    value: fmt(d.equity),           color: d.equity >= 0 ? "text-green-600" : "text-red-600" },
+                { label: `My Equity (${d.ownership_pct}%)`, value: fmt(d.my_equity), color: d.my_equity >= 0 ? "text-blue-600" : "text-red-600" },
+              ].map((row) => (
+                <div key={row.label}>
+                  <p className="text-[10px] text-gray-400">{row.label}</p>
+                  <p className={`text-base font-bold ${row.color}`}>{row.value}</p>
+                </div>
+              ))}
+            </div>
           </div>
 
-          {/* עלות רכישה — read-only */}
-          {d.cost > 0 && (
-            <div className="bg-white rounded-xl shadow-sm p-4 flex justify-between items-center">
-              <p className="text-sm text-gray-500">עלות רכישה</p>
-              <p className="text-sm font-semibold text-gray-700">{fmt(d.cost)}</p>
+          {/* Monthly Income — gross only, no derivations */}
+          <div className="bg-white rounded-xl shadow-sm p-4 flex justify-between items-center">
+            <div>
+              <p className="text-xs text-gray-400">הכנסה גולמית / חודש</p>
+              <p className="text-xl font-black text-blue-600">{fmt(d.monthly_income)}</p>
             </div>
-          )}
+            <p className="text-[10px] text-gray-400 max-w-[120px] text-right leading-tight">
+              גולמי בלבד — לא כולל הוצאות, מס, שותפים
+            </p>
+          </div>
         </div>
       )}
 
       {/* ── Fixed action bar ── */}
       {d && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 pt-3 pb-4 flex flex-col gap-3 shadow-xl">
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 pt-3 pb-4 flex flex-col gap-2.5 shadow-xl">
           {/* Status chips */}
           <div className="flex gap-2">
             {STATUS_CHIPS.map((chip) => (
@@ -193,48 +185,25 @@ function AssetDetail({
                 key={chip.key}
                 onClick={() => setEditStatus(chip.key)}
                 className={`flex-1 text-xs py-1.5 rounded-full font-medium transition-all
-                  ${editStatus === chip.key ? "bg-blue-500 text-white shadow" : `${chip.color}`}`}
+                  ${editStatus === chip.key ? "bg-blue-500 text-white shadow" : chip.color}`}
               >
                 {chip.label}
               </button>
             ))}
           </div>
-
-          {/* Value + income inputs */}
+          {/* Value + Mortgage */}
           <div className="flex gap-2">
-            <input
-              type="number"
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-              placeholder="שווי נוכחי"
-              className="flex-1 bg-gray-100 rounded-xl px-3 py-2 text-sm outline-none placeholder-gray-400"
-              dir="ltr"
-            />
-            <input
-              type="number"
-              value={editIncome}
-              onChange={(e) => setEditIncome(e.target.value)}
-              placeholder="הכנסה/חודש"
-              className="flex-1 bg-gray-100 rounded-xl px-3 py-2 text-sm outline-none placeholder-gray-400"
-              dir="ltr"
-            />
+            <input type="number" value={editValue} onChange={(e) => setEditValue(e.target.value)}
+              placeholder="שווי נוכחי" className="flex-1 bg-gray-100 rounded-xl px-3 py-2 text-sm outline-none placeholder-gray-400" dir="ltr" />
+            <input type="number" value={editMortgage} onChange={(e) => setEditMortgage(e.target.value)}
+              placeholder="יתרת משכנתא" className="flex-1 bg-gray-100 rounded-xl px-3 py-2 text-sm outline-none placeholder-gray-400" dir="ltr" />
           </div>
-
-          {/* Notes + save */}
+          {/* Income + Save */}
           <div className="flex gap-2">
-            <input
-              type="text"
-              value={editNotes}
-              onChange={(e) => setEditNotes(e.target.value)}
-              placeholder="הערות..."
-              className="flex-1 bg-gray-100 rounded-xl px-3 py-2 text-sm outline-none placeholder-gray-400"
-              dir="rtl"
-            />
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="bg-blue-500 text-white rounded-xl px-4 py-2 text-sm font-medium disabled:opacity-40 active:opacity-70"
-            >
+            <input type="number" value={editIncome} onChange={(e) => setEditIncome(e.target.value)}
+              placeholder="הכנסה גולמית" className="flex-1 bg-gray-100 rounded-xl px-3 py-2 text-sm outline-none placeholder-gray-400" dir="ltr" />
+            <button onClick={handleSave} disabled={saving}
+              className="bg-blue-500 text-white rounded-xl px-5 py-2 text-sm font-medium disabled:opacity-40 active:opacity-70">
               {saving ? "…" : "שמור"}
             </button>
           </div>
@@ -269,7 +238,7 @@ export function PersonalMode({ onBack }: Props) {
         <div>
           <h1 className="text-lg font-black text-gray-900">Personal Mode</h1>
           <p className="text-xs text-gray-400">
-            {d ? `${d.count} נכסים` : "Assets"}
+            {d ? `${d.count} נכסים` : "Assets Portfolio"}
           </p>
         </div>
       </div>
@@ -279,33 +248,44 @@ export function PersonalMode({ onBack }: Props) {
           <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
         </div>
       )}
-
       {state.status === "error" && (
-        <div className="mx-4 bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
-          {state.message}
-        </div>
+        <div className="mx-4 bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">{state.message}</div>
       )}
 
       {d && (
         <div className="flex flex-col gap-3 px-4">
-          {/* Portfolio summary */}
+          {/* Portfolio Header KPIs */}
           <div className="bg-white rounded-xl shadow-sm p-4">
-            <p className="text-xs text-gray-400 mb-3">תיק נכסים</p>
-            <div className="grid grid-cols-3 gap-2 text-center">
-              <div>
-                <p className="text-lg font-black text-gray-900">{fmt(d.total_value)}</p>
-                <p className="text-[10px] text-gray-400">שווי כולל</p>
-              </div>
-              <div>
-                <p className={`text-lg font-black ${d.net_equity >= 0 ? "text-green-600" : "text-red-600"}`}>
-                  {fmt(d.net_equity)}
-                </p>
-                <p className="text-[10px] text-gray-400">הון עצמי</p>
-              </div>
-              <div>
-                <p className="text-lg font-black text-blue-600">{fmt(d.monthly_income)}</p>
-                <p className="text-[10px] text-gray-400">הכנסה/חודש</p>
-              </div>
+            <p className="text-xs text-gray-400 mb-3">Balance Sheet — {d.count} נכסים</p>
+
+            {/* Row 1: 3 tiles */}
+            <div className="grid grid-cols-3 gap-2 mb-3">
+              {[
+                { label: "שווי כולל",  value: fmt(d.total_value),  color: "text-gray-900" },
+                { label: "חוב כולל",   value: fmt(d.total_debt),   color: "text-red-600" },
+                { label: "Total Equity", value: fmt(d.total_equity), color: d.total_equity >= 0 ? "text-green-600" : "text-red-600" },
+              ].map((k) => (
+                <div key={k.label} className="text-center">
+                  <p className={`text-base font-black ${k.color}`}>{k.value}</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">{k.label}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Divider */}
+            <div className="border-t border-gray-100 mb-3" />
+
+            {/* Row 2: 2 tiles */}
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { label: "My Equity",  value: fmt(d.my_equity),      color: d.my_equity >= 0 ? "text-blue-600" : "text-red-600" },
+                { label: "הכנסה גולמית/חודש", value: fmt(d.monthly_income), color: "text-purple-600" },
+              ].map((k) => (
+                <div key={k.label} className="text-center">
+                  <p className={`text-lg font-black ${k.color}`}>{k.value}</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">{k.label}</p>
+                </div>
+              ))}
             </div>
           </div>
 
@@ -316,28 +296,50 @@ export function PersonalMode({ onBack }: Props) {
             d.assets.map((asset) => (
               <div
                 key={asset.id}
-                className="bg-white rounded-xl shadow-sm p-4 flex items-center gap-3 active:opacity-70 cursor-pointer"
+                className="bg-white rounded-xl shadow-sm p-4 active:opacity-70 cursor-pointer"
                 onClick={() => setSelectedId(asset.id)}
               >
-                <div className="text-3xl flex-shrink-0">{typeIcon(asset.type)}</div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-gray-900 truncate">{asset.name || "—"}</p>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    {asset.status && (
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${statusColor(asset.status)}`}>
-                        {asset.status}
-                      </span>
-                    )}
-                    {asset.rental_income > 0 && (
-                      <span className="text-[10px] text-blue-500">{fmt(asset.rental_income)}/חודש</span>
-                    )}
+                <div className="flex items-start gap-3">
+                  <div className="text-2xl flex-shrink-0 mt-0.5">{typeIcon(asset.type)}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-semibold text-gray-900 truncate">{asset.name || "—"}</p>
+                      <p className="text-sm font-bold text-gray-900 flex-shrink-0">{fmt(asset.current_value)}</p>
+                    </div>
+                    <div className="flex items-center gap-2 mt-1">
+                      {asset.type && <span className="text-[10px] text-gray-400">{asset.type}</span>}
+                      {asset.status && (
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${statusBadge(asset.status)}`}>
+                          {asset.status}
+                        </span>
+                      )}
+                      {asset.ownership_pct < 100 && (
+                        <span className="text-[10px] text-gray-400">{asset.ownership_pct}%</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3 mt-1.5">
+                      <div>
+                        <span className="text-[10px] text-gray-400">Equity </span>
+                        <span className={`text-xs font-bold ${asset.equity >= 0 ? "text-green-600" : "text-red-600"}`}>
+                          {fmt(asset.equity)}
+                        </span>
+                      </div>
+                      {asset.ownership_pct < 100 && (
+                        <div>
+                          <span className="text-[10px] text-gray-400">My Equity </span>
+                          <span className={`text-xs font-bold ${asset.my_equity >= 0 ? "text-blue-600" : "text-red-600"}`}>
+                            {fmt(asset.my_equity)}
+                          </span>
+                        </div>
+                      )}
+                      {asset.monthly_income > 0 && (
+                        <div>
+                          <span className="text-[10px] text-gray-400">הכנסה </span>
+                          <span className="text-xs font-bold text-purple-600">{fmt(asset.monthly_income)}</span>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-                <div className="text-right flex-shrink-0">
-                  <p className={`text-sm font-bold ${asset.equity >= 0 ? "text-green-600" : "text-red-600"}`}>
-                    {fmt(asset.equity)}
-                  </p>
-                  <p className="text-[10px] text-gray-400">הון עצמי</p>
                 </div>
               </div>
             ))

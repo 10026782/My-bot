@@ -114,7 +114,13 @@ export async function fetchAsset(assetId: string): Promise<Asset> {
 
 export async function updateAsset(
   assetId: string,
-  fields: Partial<{ "שווי נוכחי": number; "הכנסה חודשית": number; "סטטוס": string; "הערות": string }>,
+  fields: Partial<{
+    "Current Value": number;
+    "Mortgage Balance": number;
+    "Monthly Income": number;
+    "Status": string;
+    "Ownership %": number;
+  }>,
 ): Promise<void> {
   const r = await fetch(`${BASE}/api/assets/${encodeURIComponent(assetId)}`, {
     method: "PATCH",
