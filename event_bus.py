@@ -190,8 +190,15 @@ class EventBus:
         payload = item["payload"]
         chat_id = item["chat_id"]
         logger.info(f"✅ Confirmed: {action_id} | {action}")
-        result = self.emit(f"{action}.confirmed", payload, chat_id)
-        return result or f"✅ פעולה {action} בוצעה."
+        event_name = f"{action}.confirmed"
+        if not self._handlers.get(event_name):
+            logger.error(f"[EventBus] No handler for {event_name} — failing closed")
+            return f"❌ לא נמצא handler לפעולה '{action}' — הפעולה לא בוצעה."
+        result = self.emit(event_name, payload, chat_id)
+        if not result or str(result).lstrip().startswith("❌"):
+            logger.error(f"[EventBus] Handler returned failure for {event_name}: {result}")
+            return result or f"❌ הפעולה '{action}' לא הושלמה."
+        return result
 
     def reject(self, action_id: str) -> str:
         """ביטול פעולה ממתינה"""
