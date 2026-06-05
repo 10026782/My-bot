@@ -29,7 +29,8 @@ class Tables:
     PROFILE         = "Profile"
     LEARNINGS       = "למידות ותובנות"
     # זיכרון עסקי
-    BUSINESS_MEMORY = "Business Memory"   # אירועים אסטרטגיים — הזנה ידנית
+    BUSINESS_MEMORY  = "Business Memory"   # אירועים אסטרטגיים — הזנה ידנית
+    INTERACTION_LOG  = "Interaction Log"   # לוג אוטומטי — agent/system interactions
     # שמורים לשימוש פנימי
     IMPORTS         = "Imports"
     TENANTS         = "Tenants"
@@ -200,6 +201,28 @@ class BusinessMemoryFields:
     EVENT_TYPE      = "Event Type"      # Milestone|Decision|Crisis|Announcement|Learning|Other
     LEARNINGS_LINK  = "Related Learnings & Insights"
     TAGS            = "Tags"            # multi-select list field
+
+
+class InteractionLogFields:
+    """Automated agent/system interaction log — table: Tables.INTERACTION_LOG.
+    Create this table in Airtable with the following fields:
+      title             (Single line text, Primary)
+      summary           (Long text)
+      channel           (Single line text) — whatsapp|telegram|email|voice|tma
+      domain            (Single line text) — e.g. real_estate|recruitment
+      timestamp         (Date, include time)
+      sentiment         (Single select) — positive|neutral|negative
+      source            (Single line text) — telegram_id|phone|email address
+      related_record_id (Single line text) — Airtable record ID of related Lead/Deal
+    """
+    TITLE             = "title"
+    SUMMARY           = "summary"
+    CHANNEL           = "channel"
+    DOMAIN            = "domain"
+    TIMESTAMP         = "timestamp"
+    SENTIMENT         = "sentiment"
+    SOURCE            = "source"
+    RELATED_RECORD_ID = "related_record_id"
 
 
 class LearningFields:

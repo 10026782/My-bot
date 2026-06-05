@@ -19,7 +19,7 @@ from functools import wraps
 
 from flask import Blueprint, jsonify, request
 from identity import resolve_identity, Role
-from airtable_schema import LeadFields, PaymentStatus, BusinessMemoryFields, Tables
+from airtable_schema import LeadFields, PaymentStatus, BusinessMemoryFields, InteractionLogFields, Tables
 
 logger = logging.getLogger(__name__)
 
@@ -164,13 +164,17 @@ def _at_post(table: str, fields: dict) -> dict | None:
 # ══════════════════════════════════════════════════════════════════
 
 def _audit(action: str, identity, details: str = "") -> None:
-    """Write audit record to Business Memory table. Fails silently."""
+    """Write audit record to Interaction Log. Fails silently."""
     try:
-        _at_post("Business_Memory", {
-            "channel":     "tma",
-            "participant": identity.display_name or identity.user_id,
-            "summary":     f"[TMA] {action}: {details[:200]}",
-            "keywords":    json.dumps(["tma", action.split(":")[0]]),
+        _at_post(Tables.INTERACTION_LOG, {
+            "title":     f"[TMA] {action}",
+            "summary":   f"{details[:200]}" if details else action,
+            "channel":   "tma",
+            "domain":    "",
+            "timestamp": "",
+            "sentiment": "",
+            "source":    identity.display_name or identity.user_id,
+            "related_record_id": "",
         })
     except Exception as e:
         logger.warning(f"[Audit] failed for '{action}': {e}")
@@ -650,16 +654,16 @@ def get_lead(lead_id, identity):
     if identity.role == Role.PARTNER and not identity.can_access_domain(f.get("domain", "")):
         return jsonify({"error": "forbidden"}), 403
 
-    # Timeline from Business Memory — interactions logged for this lead
+    # Timeline from Interaction Log — automated interactions related to this lead
     timeline_recs = _at_list(
-        "Business_Memory",
-        f"SEARCH('{lead_id}', {{summary}})",
+        Tables.INTERACTION_LOG,
+        f"OR(SEARCH('{lead_id}',{{{InteractionLogFields.RELATED_RECORD_ID}}}),SEARCH('{lead_id}',{{{InteractionLogFields.SUMMARY}}}))",
         max_records=20,
     )
     timeline = [
         {
-            "summary": t.get("fields", {}).get("summary", ""),
-            "channel": t.get("fields", {}).get("channel", ""),
+            "summary": t.get("fields", {}).get(InteractionLogFields.SUMMARY, ""),
+            "channel": t.get("fields", {}).get(InteractionLogFields.CHANNEL, ""),
         }
         for t in timeline_recs
     ]

@@ -6,7 +6,8 @@
 #   [Calendar/WhatsApp/Email/Voice]
 #       → Adapter → InteractionSchema (אחיד)
 #       → LLM Analysis
-#       → Business Memory (Airtable Business_Memory)  ← הדבר החדש
+#       → Interaction Log (Airtable "Interaction Log")  ← automated log
+#         Business Memory ("Business Memory") = strategic manual events only
 #       → Tasks + Telegram
 #
 # עיקרון: Stateful, לא Stateless.
@@ -267,63 +268,65 @@ def _rule_based_analysis(interaction: InteractionSchema) -> InteractionAnalysis:
 
 
 # ══════════════════════════════════════════════════
-# Business Memory — Persist to Airtable
+# Interaction Log — Persist to Airtable
 # ══════════════════════════════════════════════════
+# Business Memory ("Business Memory") = strategic manual events — do NOT write here.
+# Interaction Log ("Interaction Log") = automated agent/system log — write here.
 
-def save_to_business_memory(
+def save_to_interaction_log(
     interaction: InteractionSchema,
     analysis:    InteractionAnalysis,
 ) -> str:
     """
-    שומר רשומת זיכרון עסקי ל-Airtable Business_Memory.
+    שומר רשומת אינטראקציה ל-Airtable Interaction Log.
     מחזיר record_id, או "" אם נכשל.
-    זה ה-Single Source of Truth — נשמר לפני Telegram.
+    Single Source of Truth לאינטראקציות אוטומטיות — נשמר לפני Telegram.
     """
-    import json
+    from airtable_schema import Tables, InteractionLogFields
     try:
         from tools.airtable_tools import airtable_add  # type: ignore
 
         fields = {
-            "channel":      interaction.source_channel,
-            "external_id":  interaction.raw_id,
-            "title":        interaction.title,
-            "timestamp":    interaction.timestamp or datetime.now(tz=timezone.utc).isoformat(),
-            "participants": ", ".join(interaction.participants),
-            "domain":       interaction.domain,
-            "summary":      analysis.summary,
-            "decisions":    json.dumps(analysis.decisions, ensure_ascii=False),
-            "tasks_json":   json.dumps(analysis.tasks, ensure_ascii=False),
-            "risks":        ", ".join(analysis.risks),
-            "next_steps":   analysis.next_steps,
-            "sentiment":    analysis.sentiment,
-            "keywords":     ", ".join(analysis.keywords),
-            "raw_snapshot": interaction.raw_content[:2000],
+            InteractionLogFields.TITLE:     interaction.title,
+            InteractionLogFields.SUMMARY:   analysis.summary,
+            InteractionLogFields.CHANNEL:   interaction.source_channel,
+            InteractionLogFields.DOMAIN:    interaction.domain,
+            InteractionLogFields.TIMESTAMP: interaction.timestamp or datetime.now(tz=timezone.utc).isoformat(),
+            InteractionLogFields.SENTIMENT: analysis.sentiment,
+            InteractionLogFields.SOURCE:    interaction.raw_id,
+            InteractionLogFields.RELATED_RECORD_ID: "",
         }
 
-        result = airtable_add("Business_Memory", fields)
+        result = airtable_add(Tables.INTERACTION_LOG, fields)
         if "✅" in result:
             import re
             m = re.search(r'rec\w+', result)
             record_id = m.group(0) if m else "saved"
-            logger.info(f"[Memory] saved: {interaction.title} → {record_id}")
+            logger.info(f"[InteractionLog] saved: {interaction.title} → {record_id}")
             return record_id
+        logger.warning(f"[InteractionLog] write failed: {result[:120]}")
         return ""
 
     except ImportError:
-        logger.debug(f"[Memory] dry-run: {interaction.title}")
+        logger.debug(f"[InteractionLog] dry-run: {interaction.title}")
         return "dry-run"
     except Exception as e:
-        logger.error(f"[Memory] save error: {e}")
+        logger.error(f"[InteractionLog] save error: {e}")
         return ""
 
 
+# Keep old name as alias so existing callers don't break during migration
+save_to_business_memory = save_to_interaction_log
+
+
 def is_duplicate(raw_id: str) -> bool:
-    """בודק אם אינטראקציה כבר נשמרה (לפי external_id)."""
+    """בודק אם אינטראקציה כבר נשמרה ב-Interaction Log (לפי source field)."""
     if not raw_id or raw_id.startswith("mock_"):
         return False
+    from airtable_schema import Tables, InteractionLogFields
     try:
         from tools.airtable_tools import airtable_get  # type: ignore
-        raw = airtable_get("Business_Memory", f"{{external_id}}='{raw_id}'")
+        raw = airtable_get(Tables.INTERACTION_LOG, f"{{{InteractionLogFields.SOURCE}}}='{raw_id}'")
         return raw and "אין רשומות" not in raw and "❌" not in raw
     except Exception:
         return False
@@ -331,14 +334,15 @@ def is_duplicate(raw_id: str) -> bool:
 
 def search_business_memory(query: str, domain: str = "") -> str:
     """
-    חיפוש בזיכרון העסקי — לשימוש Agent כשנשאלים "מה סיכמנו ב..."
+    חיפוש בלוג האינטראקציות — לשימוש Agent כשנשאלים "מה סיכמנו ב..."
     """
+    from airtable_schema import Tables, InteractionLogFields
     try:
         from tools.airtable_tools import airtable_get  # type: ignore
-        formula = f"SEARCH('{query}',{{summary}})"
+        formula = f"SEARCH('{query}',{{{InteractionLogFields.SUMMARY}}})"
         if domain:
-            formula = f"AND(SEARCH('{query}',{{summary}}),{{domain}}='{domain}')"
-        raw = airtable_get("Business_Memory", formula)
+            formula = f"AND(SEARCH('{query}',{{{InteractionLogFields.SUMMARY}}}),{{{InteractionLogFields.DOMAIN}}}='{domain}')"
+        raw = airtable_get(Tables.INTERACTION_LOG, formula)
         if not raw or "אין רשומות" in raw:
             return f"לא נמצאו רשומות עבור: {query}"
         return raw
