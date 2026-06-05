@@ -19,7 +19,7 @@ from functools import wraps
 
 from flask import Blueprint, jsonify, request
 from identity import resolve_identity, Role
-from airtable_schema import LeadFields, PaymentStatus
+from airtable_schema import LeadFields, PaymentStatus, BusinessMemoryFields, Tables
 
 logger = logging.getLogger(__name__)
 
@@ -1024,23 +1024,24 @@ def activity_feed(identity):
     if identity.role not in {Role.OWNER, Role.MANAGER}:
         return jsonify({"error": "forbidden"}), 403
 
-    domain_q = request.args.get("domain", "").strip()
-    limit    = min(int(request.args.get("limit", 50) or 50), 100)
+    limit = min(int(request.args.get("limit", 50) or 50), 100)
 
-    formula  = f"{{domain}}='{domain_q}'" if domain_q else ""
-    recs     = _at_list("Business_Memory", formula, max_records=limit)
+    # Business Memory = strategic manual events; no domain filter (table has no domain field).
+    # ?domain= param reserved for future Interaction Log endpoint.
+    recs = _at_list(Tables.BUSINESS_MEMORY, "", max_records=limit)
 
     entries = []
     for rec in recs:
-        f = rec.get("fields", {})
+        f    = rec.get("fields", {})
+        tags = f.get(BusinessMemoryFields.TAGS) or []
         entries.append({
             "id":        rec["id"],
-            "title":     f.get("title", "") or (f.get("summary", "")[:60]),
-            "summary":   f.get("summary", ""),
-            "channel":   f.get("channel", ""),
-            "domain":    f.get("domain", ""),
-            "timestamp": f.get("timestamp", ""),
-            "sentiment": f.get("sentiment", ""),
+            "title":     f.get(BusinessMemoryFields.TITLE, ""),
+            "summary":   f.get(BusinessMemoryFields.DESCRIPTION, ""),
+            "channel":   f.get(BusinessMemoryFields.EVENT_TYPE, ""),
+            "domain":    ", ".join(tags) if isinstance(tags, list) else str(tags),
+            "timestamp": f.get(BusinessMemoryFields.DATE, ""),
+            "sentiment": f.get(BusinessMemoryFields.IMPACT, "")[:120] if f.get(BusinessMemoryFields.IMPACT) else "",
         })
 
     entries.sort(key=lambda x: x.get("timestamp", ""), reverse=True)

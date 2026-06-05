@@ -28,6 +28,8 @@ class Tables:
     # אחר
     PROFILE         = "Profile"
     LEARNINGS       = "למידות ותובנות"
+    # זיכרון עסקי
+    BUSINESS_MEMORY = "Business Memory"   # אירועים אסטרטגיים — הזנה ידנית
     # שמורים לשימוש פנימי
     IMPORTS         = "Imports"
     TENANTS         = "Tenants"
@@ -187,6 +189,17 @@ class LeadFields:
     MEMORY_KEY      = "memory_key"
     TENANT_ID       = "tenant_id"
     DOMAIN          = "domain"
+
+
+class BusinessMemoryFields:
+    """Strategic/manual business event log — table: Tables.BUSINESS_MEMORY."""
+    TITLE           = "Event Title"
+    DESCRIPTION     = "Event Description"
+    DATE            = "Event Date"
+    IMPACT          = "Business Impact"
+    EVENT_TYPE      = "Event Type"      # Milestone|Decision|Crisis|Announcement|Learning|Other
+    LEARNINGS_LINK  = "Related Learnings & Insights"
+    TAGS            = "Tags"            # multi-select list field
 
 
 class LearningFields:
