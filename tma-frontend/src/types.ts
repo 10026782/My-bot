@@ -50,6 +50,26 @@ export interface LeadsResponse {
   leads: LeadSummary[];
 }
 
+export interface TimelineEntry {
+  summary: string;
+  channel: string;
+}
+
+export interface LeadDetail {
+  id: string;
+  name: string;
+  phone: string;
+  domain: string;
+  status: string;
+  score: number;
+  score_color: "red" | "yellow" | "blue";
+  source: string;
+  summary: string;
+  next_step: string;
+  created_at: string;
+  timeline: TimelineEntry[];
+}
+
 export interface DashboardResponse {
   project_slug: string;
   domain: string;

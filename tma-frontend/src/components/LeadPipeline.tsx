@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { fetchLeads } from "../api";
-import type { LeadsResponse, ProjectCard } from "../types";
+import type { LeadsResponse, ProjectCard, LeadSummary } from "../types";
 import { LeadCard } from "./LeadCard";
+import { LeadDetail } from "./LeadDetail";
 
 interface Props {
   project: ProjectCard;
@@ -15,12 +16,22 @@ type State =
 
 export function LeadPipeline({ project, onBack }: Props) {
   const [state, setState] = useState<State>({ status: "loading" });
+  const [selectedLead, setSelectedLead] = useState<LeadSummary | null>(null);
 
   useEffect(() => {
     fetchLeads(project.slug)
       .then((data) => setState({ status: "ok", data }))
       .catch((e: unknown) => setState({ status: "error", message: String(e) }));
   }, [project.slug]);
+
+  if (selectedLead) {
+    return (
+      <LeadDetail
+        lead={selectedLead}
+        onBack={() => setSelectedLead(null)}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-100 pb-8">
@@ -61,7 +72,11 @@ export function LeadPipeline({ project, onBack }: Props) {
             <p className="text-center text-gray-400 text-sm pt-8">אין לידים לפרויקט זה</p>
           ) : (
             state.data.leads.map((lead) => (
-              <LeadCard key={lead.id} lead={lead} />
+              <LeadCard
+                key={lead.id}
+                lead={lead}
+                onClick={() => setSelectedLead(lead)}
+              />
             ))
           )}
         </div>

@@ -14,9 +14,12 @@ function badgeClass(status: string) {
   return STATUS_BADGE[status.toLowerCase()] ?? "bg-gray-100 text-gray-600";
 }
 
-export function LeadCard({ lead }: { lead: LeadSummary }) {
+export function LeadCard({ lead, onClick }: { lead: LeadSummary; onClick?: () => void }) {
   return (
-    <div className="bg-white rounded-xl shadow-sm p-4 flex items-center justify-between gap-3">
+    <div
+      className="bg-white rounded-xl shadow-sm p-4 flex items-center justify-between gap-3 active:opacity-70 cursor-pointer"
+      onClick={onClick}
+    >
       <div className="flex-1 min-w-0">
         <p className="font-semibold text-gray-900 truncate">{lead.name || "—"}</p>
         <span className={`mt-1 inline-block text-xs px-2 py-0.5 rounded-full font-medium ${badgeClass(lead.status)}`}>
