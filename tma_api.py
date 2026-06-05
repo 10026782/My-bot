@@ -19,6 +19,7 @@ from functools import wraps
 
 from flask import Blueprint, jsonify, request
 from identity import resolve_identity, Role
+from airtable_schema import LeadFields
 
 logger = logging.getLogger(__name__)
 
@@ -344,7 +345,7 @@ def _get_global_kpis() -> dict:
     # score>=70 OR status='hot' is sufficient.
     hot_leads = _at_list(
         "Leads",
-        "OR({status}='hot', {score ציון}>=70)",
+        f"OR({{status}}='hot', {{{LeadFields.SCORE}}}>=70)",
         max_records=20,
     )
 
@@ -403,7 +404,7 @@ def _get_project_cards(identity) -> list:
             ]
             hot = [
                 l for l in leads
-                if (l.get("fields", {}).get("score ציון") or 0) >= 70
+                if (l.get("fields", {}).get(LeadFields.SCORE) or 0) >= 70
                 or (l.get("fields", {}).get("status") or "").lower() == "hot"
             ]
         else:
@@ -582,7 +583,7 @@ def get_project_dashboard(project_slug, identity):
 
 def _fmt_lead_summary(rec: dict) -> dict:
     f     = rec.get("fields", {})
-    score = int(f.get("score ציון", 0) or 0)
+    score = int(f.get(LeadFields.SCORE, 0) or 0)
     return {
         "id":     rec["id"],
         "name":   f.get("Name", ""),
@@ -663,7 +664,7 @@ def get_lead(lead_id, identity):
         for t in timeline_recs
     ]
 
-    score       = int(f.get("score ציון", 0) or 0)
+    score       = int(f.get(LeadFields.SCORE, 0) or 0)
     score_color = "red" if score >= 70 else ("yellow" if score >= 40 else "blue")
 
     return jsonify({
@@ -772,7 +773,7 @@ def ask_ai(identity):
                 f"ליד: {f.get('Name', '')} | "
                 f"טלפון: {f.get('phone', '')} | "
                 f"סטטוס: {f.get('status', '')} | "
-                f"ציון: {f.get('score ציון', '')} | "
+                f"ציון: {f.get(LeadFields.SCORE, '')} | "
                 f"תקציר: {f.get('summary', '')}"
             )
     elif context_type == "projects_hub":
