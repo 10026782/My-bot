@@ -1203,8 +1203,10 @@ def system_health(identity):
 @require_tma_auth
 def emergency_stop(identity):
     """
-    Emergency stop — sets a feature flag only, does not kill processes.
-    Checks feature_flags.is_enabled("EMERGENCY_<ACTION>") before executing actions.
+    Emergency stop — sets a runtime feature flag in feature_flags.py.
+    The bot checks these flags before executing guarded actions.
+    NOTE: flags are in-process only — reset on Render dyno restart.
+    For permanent stop, also disable the relevant env var / bot token.
     """
     if not identity.is_owner:
         return jsonify({"error": "forbidden"}), 403
@@ -1216,13 +1218,29 @@ def emergency_stop(identity):
     if action not in valid:
         return jsonify({"error": f"unknown action — must be one of {sorted(valid)}"}), 400
 
+    import feature_flags as ff
+    flag = f"EMERGENCY_{action.upper()}"
     try:
-        from feature_flags import set_flag
-        flag = f"EMERGENCY_{action.upper()}"
-        set_flag(flag, True)
-        _audit("emergency_stop", identity, details=action)
-        return jsonify({"ok": True, "action": action, "flag": flag})
+        ff.set_flag(flag, True)
     except Exception as e:
         logger.error(f"[Emergency] set_flag failed: {e}")
         return jsonify({"error": "failed to set emergency flag"}), 500
+
+    _audit("emergency_stop", identity, details=action)
+
+    action_labels = {
+        "stop_all":        "🛑 STOP ALL — כל הפעולות האוטומטיות הופסקו",
+        "stop_whatsapp":   "🛑 STOP WhatsApp — הודעות WhatsApp הופסקו",
+        "stop_email":      "🛑 STOP Email — שליחת מיילים הופסקה",
+        "stop_automation": "🛑 STOP Automation — אוטומציות הופסקו",
+    }
+    _notify_owner(
+        f"🚨 EMERGENCY STOP\n"
+        f"{action_labels.get(action, action)}\n"
+        f"על ידי: {identity.display_name or identity.user_id}\n"
+        f"Flag: {flag}=True\n"
+        f"⚠️ לביטול: הפעל מחדש את השרת או אפס ידנית."
+    )
+
+    return jsonify({"ok": True, "action": action, "flag": flag})
 
