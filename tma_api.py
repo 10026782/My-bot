@@ -1135,7 +1135,68 @@ def update_asset(asset_id, identity):
 def system_health(identity):
     if not identity.is_owner:
         return jsonify({"error": "forbidden"}), 403
-    return _todo("O8 System Health")
+
+    import httpx as _httpx
+    import feature_flags as ff
+
+    checks: dict[str, str] = {}
+
+    # ── Airtable — real list call ──────────────────────────────────
+    try:
+        r = _httpx.get(
+            f"https://api.airtable.com/v0/{_AT_BASE}/Leads",
+            headers={"Authorization": f"Bearer {_AT_KEY}"},
+            params={"maxRecords": 1},
+            timeout=5,
+        )
+        checks["airtable"] = "ok" if r.status_code == 200 else f"error:{r.status_code}"
+    except Exception as e:
+        checks["airtable"] = f"error:{e}"
+
+    # ── Telegram — getMe ──────────────────────────────────────────
+    if _BOT_TOKEN:
+        try:
+            r = _httpx.get(
+                f"https://api.telegram.org/bot{_BOT_TOKEN}/getMe",
+                timeout=5,
+            )
+            if r.status_code == 200 and r.json().get("ok"):
+                bot_username = r.json().get("result", {}).get("username", "?")
+                checks["telegram"] = f"ok:@{bot_username}"
+            else:
+                checks["telegram"] = f"error:{r.status_code}"
+        except Exception as e:
+            checks["telegram"] = f"error:{e}"
+    else:
+        checks["telegram"] = "error:TELEGRAM_TOKEN not set"
+
+    # ── Anthropic — key presence only (no paid API call) ──────────
+    checks["anthropic"] = "ok" if os.environ.get("ANTHROPIC_API_KEY") else "error:key_missing"
+
+    # ── Active emergency flags ─────────────────────────────────────
+    emergency_flags = {
+        flag: ff.is_enabled(flag)
+        for flag in (
+            "EMERGENCY_STOP_ALL",
+            "EMERGENCY_STOP_WHATSAPP",
+            "EMERGENCY_STOP_EMAIL",
+            "EMERGENCY_STOP_AUTOMATION",
+        )
+    }
+    active_emergencies = [k for k, v in emergency_flags.items() if v]
+
+    all_ok = all(v.startswith("ok") for v in checks.values())
+    status = "ok" if all_ok else "degraded"
+    if active_emergencies:
+        status = "emergency"
+
+    return jsonify({
+        "status":           status,
+        "services":         checks,
+        "emergency_flags":  emergency_flags,
+        "active_emergency": active_emergencies,
+        "checked_at":       date.today().isoformat(),
+    })
 
 
 @tma_api.route("/api/health/emergency", methods=["POST"])
