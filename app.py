@@ -238,11 +238,19 @@ def cmd_coins(msg):
         bot.send_message(msg.chat.id, f"❌ שגיאה: {e}")
 
 
-try:
-    _scheduler = start_scheduler()
-    logger.info("Scheduler OK")
-except Exception as e:
-    logger.error(f"Scheduler failed: {e}")
+_scheduler_thread = next(
+    (t for t in threading.enumerate() if t.name == "scheduler" and t.is_alive()),
+    None,
+)
+if _scheduler_thread:
+    logger.info("[Scheduler] Already running — skipping init")
+    _scheduler = _scheduler_thread
+else:
+    try:
+        _scheduler = start_scheduler()
+        logger.info("Scheduler OK")
+    except Exception as e:
+        logger.error(f"Scheduler failed: {e}")
 
 if os.environ.get("SETUP_WEBHOOK") == "1":
     try:
