@@ -393,8 +393,11 @@ def _game_bot_send(token: str, chat_id: str, text: str) -> None:
     telebot.TeleBot(token).send_message(chat_id, text, parse_mode="Markdown")
 
 
+_HE_DAY = ["ב׳", "ג׳", "ד׳", "ה׳", "ו׳", "ש׳", "א׳"]  # Mon=0 … Sun=6
+
+
 def _job_daily_game_digest():
-    """Game: כל יום 07:00 — מטבעות אתמול + Quests פתוחים + Boss reminder בשישי."""
+    """Game: כל יום 07:00 — פורמט מלא: World progress + Quest log ממוספר + ספירה לBoss Battle."""
     try:
         from feature_flags import is_enabled
         if not is_enabled("GAME_SCHEDULER"):
@@ -403,7 +406,7 @@ def _job_daily_game_digest():
         from datetime import date, timedelta
         from tma_api import _at_list
         from airtable_schema import (
-            Tables, QuestsFields, CoinsLogFields, WorldsFields, QuestStatus,
+            Tables, QuestsFields, CoinsLogFields, WorldsFields, WorldStatus, QuestStatus,
         )
 
         token   = os.environ.get("TELEGRAM_TOKEN", "")
@@ -412,18 +415,23 @@ def _job_daily_game_digest():
             logger.warning("[Game] DIGEST_CHAT_ID חסר")
             return
 
-        today     = date.today()
-        yesterday = (today - timedelta(days=1)).isoformat()
-        week_str  = (today - timedelta(days=today.weekday())).isoformat()
+        today    = date.today()
+        week_str = (today - timedelta(days=today.weekday())).isoformat()
 
-        # ── Coins ────────────────────────────────────────────────────
-        log_recs        = _at_list(Tables.COINS_LOG, "", max_records=500)
-        yesterday_coins = sum(
-            int(r.get("fields", {}).get(CoinsLogFields.COINS, 0) or 0)
-            for r in log_recs
-            if (r.get("fields", {}).get(CoinsLogFields.DATE, "") or "")[:10] == yesterday
-        )
-        total_coins = sum(int(r.get("fields", {}).get(CoinsLogFields.COINS, 0) or 0) for r in log_recs)
+        # ── Active World ──────────────────────────────────────────────
+        worlds = _at_list(Tables.WORLDS, f"{{{WorldsFields.STATUS}}}='{WorldStatus.ACTIVE}'", max_records=1)
+        world_section = ""
+        if worlds:
+            wf     = worlds[0].get("fields", {})
+            target = int(wf.get(WorldsFields.TOTAL_COINS_TARGET, 0) or 0)
+            earned = int(wf.get(WorldsFields.COINS_EARNED, 0) or 0)
+            pct    = round(100 * earned / target) if target > 0 else 0
+            filled = round(pct / 10)
+            bar    = "█" * filled + "░" * (10 - filled)
+            world_section = (
+                f"\n🌍 *World {wf.get(WorldsFields.NUMBER, '')} — {wf.get(WorldsFields.NAME, '')}*\n"
+                f"`{bar}` {pct}% | {earned}🪙 מתוך {target}"
+            )
 
         # ── This week's quests ────────────────────────────────────────
         all_quests  = _at_list(Tables.QUESTS, "", max_records=200)
@@ -432,43 +440,58 @@ def _job_daily_game_digest():
             if (r.get("fields", {}).get(QuestsFields.WEEK_START, "") or "")[:10] == week_str
         ] or [
             r for r in all_quests
-            if r.get("fields", {}).get(QuestsFields.STATUS, "") in {QuestStatus.TODO, QuestStatus.IN_PROGRESS}
+            if r.get("fields", {}).get(QuestsFields.STATUS, "") != QuestStatus.SKIPPED
         ]
 
-        status_icons = {QuestStatus.DONE: "✅", QuestStatus.IN_PROGRESS: "🔄", QuestStatus.TODO: "⬜", QuestStatus.SKIPPED: "⏭️"}
-        open_quests  = [r for r in week_quests if r.get("fields", {}).get(QuestsFields.STATUS, "") != QuestStatus.DONE]
+        quest_lines = []
+        for i, r in enumerate(week_quests, start=1):
+            qf     = r.get("fields", {})
+            status = qf.get(QuestsFields.STATUS, "")
+            coins  = int(qf.get(QuestsFields.COINS, 0) or 0)
+            name   = qf.get(QuestsFields.NAME, "?")
+            if status == QuestStatus.DONE:
+                quest_lines.append(f"{i}\\. ☑ {name} \\[{coins}🪙\\] ✅")
+            elif status == QuestStatus.IN_PROGRESS:
+                quest_lines.append(f"{i}\\. 🔄 {name} \\[{coins}🪙\\]")
+            elif status == QuestStatus.SKIPPED:
+                quest_lines.append(f"{i}\\. ⏭️ {name} \\[{coins}🪙\\]")
+            else:
+                quest_lines.append(f"{i}\\. ☐ {name} \\[{coins}🪙\\]")
 
-        lines = [f"🎮 *Game Digest — {today.strftime('%d/%m/%Y')}*\n"]
-        if yesterday_coins:
-            lines.append(f"⚡ אתמול: +{yesterday_coins}🪙  |  סה\"כ: {total_coins}🪙\n")
+        # ── Total coins ───────────────────────────────────────────────
+        log_recs    = _at_list(Tables.COINS_LOG, "", max_records=500)
+        total_coins = sum(int(r.get("fields", {}).get(CoinsLogFields.COINS, 0) or 0) for r in log_recs)
+
+        # ── Days until Friday ─────────────────────────────────────────
+        days_to_friday = (4 - today.weekday()) % 7
+        if days_to_friday == 0:
+            battle_line = "⏰ *Boss Battle: היום\\! ⚔️*"
+        elif days_to_friday == 1:
+            battle_line = "⏰ Boss Battle: מחר — 1 יום"
         else:
-            lines.append(f"🪙 סה\"כ: {total_coins}🪙\n")
+            battle_line = f"⏰ Boss Battle: יום שישי — {days_to_friday} ימים"
 
-        if open_quests:
-            lines.append(f"📋 *פתוח ({len(open_quests)}/{len(week_quests)}):*")
-            for r in open_quests:
-                qf     = r.get("fields", {})
-                icon   = status_icons.get(qf.get(QuestsFields.STATUS, ""), "❓")
-                coins  = int(qf.get(QuestsFields.COINS, 0) or 0)
-                impact = " ⚡" if qf.get(QuestsFields.IMPACT) else ""
-                lines.append(f"{icon} {qf.get(QuestsFields.NAME, '?')} — {coins}🪙{impact}")
-        elif week_quests:
-            lines.append(f"✅ כל {len(week_quests)} Quests הושלמו השבוע!")
-
-        # Friday → Boss Battle reminder
-        if today.weekday() == 4:
-            done_coins = sum(
-                int(r.get("fields", {}).get(QuestsFields.COINS, 0) or 0)
-                for r in week_quests if r.get("fields", {}).get(QuestsFields.STATUS, "") == QuestStatus.DONE
-            )
-            total_possible = sum(int(r.get("fields", {}).get(QuestsFields.COINS, 0) or 0) for r in week_quests)
-            lines.append(f"\n⚔️ *היום Boss Battle! 18:00*")
-            lines.append(f"הושלם {done_coins}/{total_possible}🪙")
-            if open_quests:
-                lines.append(f"נותרו {len(open_quests)} Quests לפני הקרב 🏆")
+        # ── Build message ─────────────────────────────────────────────
+        day_label = f"יום {_HE_DAY[today.weekday()]} {today.day}\\.{today.month}"
+        open_count = sum(
+            1 for r in week_quests
+            if r.get("fields", {}).get(QuestsFields.STATUS, "") not in {QuestStatus.DONE, QuestStatus.SKIPPED}
+        )
+        lines = [
+            f"🎮 *BOSS Daily Quest — {day_label}*",
+            world_section,
+            "",
+            f"📋 *Quest Log היום:*",
+            *quest_lines,
+            "",
+            battle_line,
+            f"💰 סה\"כ מטבעות: {total_coins}🪙",
+        ]
+        if open_count:
+            lines.append(f"\nלסמן Quest כהושלם: /done \\[מספר\\]")
 
         _game_bot_send(token, chat_id, "\n".join(lines))
-        logger.info(f"[Game] daily digest | yesterday={yesterday_coins}🪙 open={len(open_quests)}")
+        logger.info(f"[Game] daily digest sent | total={total_coins}🪙 open={open_count}")
 
     except ImportError as e:
         logger.warning(f"[Game] not available: {e}")

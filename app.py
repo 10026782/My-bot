@@ -86,6 +86,74 @@ def cmd_schema(msg):
         logger.error(f"cmd_schema error: {e}")
         bot.send_message(msg.chat.id, f"❌ שגיאה בטעינת סכמה: {e}")
 
+@bot.message_handler(commands=["done"])
+def cmd_done(msg):
+    """/done [n] — מסמן Quest מספר n כ-Done + כותב Coins_Log אוטומטית."""
+    identity = resolve_identity("telegram", str(msg.from_user.id))
+    if not identity or identity.role not in ("owner", "admin"):
+        return
+    try:
+        from tma_api import _at_list, _at_patch, _at_post
+        from datetime import date, timedelta
+        from airtable_schema import Tables, QuestsFields, CoinsLogFields, QuestStatus
+
+        args = msg.text.split(maxsplit=1)[1].strip() if len(msg.text.split()) > 1 else ""
+        if not args.isdigit():
+            bot.send_message(msg.chat.id, "שימוש: /done [מספר]  —  לדוגמה: /done 2")
+            return
+
+        quest_num = int(args)
+        today     = date.today()
+        week_str  = (today - timedelta(days=today.weekday())).isoformat()
+
+        all_quests  = _at_list(Tables.QUESTS, "", max_records=200)
+        week_quests = [
+            r for r in all_quests
+            if (r.get("fields", {}).get(QuestsFields.WEEK_START, "") or "")[:10] == week_str
+        ] or [
+            r for r in all_quests
+            if r.get("fields", {}).get(QuestsFields.STATUS, "") != QuestStatus.SKIPPED
+        ]
+
+        if quest_num < 1 or quest_num > len(week_quests):
+            bot.send_message(msg.chat.id, f"מספר לא תקין. יש {len(week_quests)} Quests השבוע.")
+            return
+
+        quest      = week_quests[quest_num - 1]
+        qf         = quest.get("fields", {})
+        old_status = qf.get(QuestsFields.STATUS, "")
+        name       = qf.get(QuestsFields.NAME, "?")
+
+        if old_status == QuestStatus.DONE:
+            bot.send_message(msg.chat.id, f"✅ {name} כבר מסומן כהושלם.")
+            return
+
+        _at_patch(Tables.QUESTS, quest["id"], {
+            QuestsFields.STATUS:  QuestStatus.DONE,
+            QuestsFields.DONE_BY: identity.display_name or identity.user_id,
+        })
+
+        coins = int(qf.get(QuestsFields.COINS, 0) or 0)
+        if coins > 0:
+            _at_post(Tables.COINS_LOG, {
+                CoinsLogFields.ACTION: name,
+                CoinsLogFields.COINS:  coins,
+                CoinsLogFields.DATE:   today.isoformat(),
+                CoinsLogFields.QUEST:  [quest["id"]],
+                CoinsLogFields.NOTE:   "Quest completed via /done",
+            })
+
+        bot.send_message(
+            msg.chat.id,
+            f"✅ *{name}* — הושלם\\!\n\\+{coins}🪙",
+            parse_mode="MarkdownV2",
+        )
+        logger.info(f"[Game] /done {quest_num} → {name} +{coins}🪙 by {identity.display_name}")
+    except Exception as e:
+        logger.error(f"cmd_done error: {e}")
+        bot.send_message(msg.chat.id, f"❌ שגיאה: {e}")
+
+
 @bot.message_handler(commands=["quest"])
 def cmd_quest(msg):
     """/quest — Quest Log השבוע."""
