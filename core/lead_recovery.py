@@ -77,8 +77,8 @@ def scan_dormant_leads() -> list[dict]:
         raw = crm_list_deals()
         return _parse_leads(raw)
     except ImportError:
-        logger.warning("[Recovery] crm not available — mock mode")
-        return _mock_leads()
+        logger.warning("[Recovery] crm not available — returning empty, no mock data")
+        return []
     except Exception as e:
         logger.error(f"[Recovery] scan_dormant_leads error: {e}")
         return []
