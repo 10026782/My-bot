@@ -15,31 +15,27 @@ logger = logging.getLogger(__name__)
 # ══════════════════════════════════════════════════
 
 def _fetch(table_real: str, formula: str = "", max_rec: int = 20) -> list:
-    """HTTP call ישיר ל-Airtable. מחזיר list[record] או []."""
-    try:
-        import httpx
-        base = os.environ.get("AIRTABLE_BASE_ID", "")
-        key  = os.environ.get("AIRTABLE_API_KEY", "")
-        if not base or not key:
-            return []
-        params: dict = {}
-        if formula:
-            params["filterByFormula"] = formula
-        if max_rec:
-            params["maxRecords"] = max_rec
-        encoded = urllib.parse.quote(table_real, safe="")
-        r = httpx.get(
-            f"https://api.airtable.com/v0/{base}/{encoded}",
-            headers={"Authorization": f"Bearer {key}"},
-            params=params,
-            timeout=10,
-        )
-        if r.status_code == 200:
-            return r.json().get("records", [])
-        logger.warning(f"_fetch({table_real}) → {r.status_code}: {r.text[:100]}")
-    except Exception as e:
-        logger.warning(f"_fetch({table_real}) error: {e}")
-    return []
+    """HTTP call ישיר ל-Airtable. מחזיר list[record] או raise RuntimeError."""
+    import httpx
+    base = os.environ.get("AIRTABLE_BASE_ID", "")
+    key  = os.environ.get("AIRTABLE_API_KEY", "")
+    if not base or not key:
+        raise RuntimeError("Airtable credentials missing (AIRTABLE_BASE_ID / AIRTABLE_API_KEY)")
+    params: dict = {}
+    if formula:
+        params["filterByFormula"] = formula
+    if max_rec:
+        params["maxRecords"] = max_rec
+    encoded = urllib.parse.quote(table_real, safe="")
+    r = httpx.get(
+        f"https://api.airtable.com/v0/{base}/{encoded}",
+        headers={"Authorization": f"Bearer {key}"},
+        params=params,
+        timeout=10,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"Airtable {r.status_code}: {r.text[:120]}")
+    return r.json().get("records", [])
 
 
 def _fmt(iso: str) -> str:
@@ -275,21 +271,29 @@ def build_digest() -> str:
     except ImportError:
         pass
 
-    parts = [
-        f"☀️ *דוח יומי — {today_str}*",
-        shabbat,
-        "",
+    sections = [
         _hot_leads(errors),
-        "",
         _followups_today(errors),
-        "",
         _urgent_tasks(errors),
-        "",
         _open_deals(errors),
-        "",
         _upcoming_payments(errors),
-        "",
+        _yesterday_changes(errors),
     ]
+
+    # log every section error so it reaches the server logs
+    for err in errors:
+        logger.warning(f"[Digest] section error: {err}")
+
+    header = [f"☀️ *דוח יומי — {today_str}*"]
+    if shabbat:
+        header.append(shabbat)
+    if errors:
+        header.append(f"🔴 *יש {len(errors)} שגיאות בדוח — בדוק פרטים בתחתית*")
+
+    parts = header + [""]
+    for section in sections:
+        parts.append(section)
+        parts.append("")
 
     if errors:
         parts.append("⚠️ *בעיות מערכת:*")
@@ -297,8 +301,6 @@ def build_digest() -> str:
             parts.append(f"• {e}")
         parts.append("")
 
-    parts.append(_yesterday_changes(errors))
-    parts.append("")
     parts.append("_Boss HQ — יום מוצלח!_ 💪")
 
     return "\n".join(p for p in parts if p is not None)
