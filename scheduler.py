@@ -666,6 +666,16 @@ def _run_scheduler():
 
 
 def start_scheduler() -> threading.Thread:
+    # Guard: if jobs are already registered the module was imported twice.
+    # Return the existing scheduler thread rather than doubling all jobs.
+    if schedule.jobs:
+        logger.info("[Scheduler] Already running — skipping init")
+        for t in threading.enumerate():
+            if t.name == "scheduler":
+                return t
+        # Thread not found but jobs exist — create a placeholder
+        return threading.Thread(name="scheduler-placeholder", daemon=True)
+
     from lead_memory import job_flush_lead_memory
     from shabbat_guard import shabbat_safe
     digest_time           = os.environ.get("DIGEST_TIME",               "07:30")
