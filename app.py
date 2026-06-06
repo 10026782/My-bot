@@ -50,6 +50,13 @@ _MEMORABLE_TOOLS = frozenset({
 })
 AGENT_TIMEOUT  = 25
 
+# ─── Pending Approvals (router-level) ──────────────────────────
+# Saves messages routed to Handler.APPROVAL until the user confirms.
+# key: chat_id (telegram user_id / whatsapp number)
+_pending_approvals: dict[str, dict] = {}
+_CONFIRM_WORDS = frozenset({"כן", "אשר", "✅", "yes", "y", "ok", "אוקי", "בצע", "קדימה"})
+_CANCEL_WORDS  = frozenset({"לא", "בטל", "❌", "no", "n", "ביטול", "עצור", "cancel"})
+
 # ─── קליינטים ──────────────────────────────────────
 ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
 TELEGRAM_TOKEN     = os.environ.get("TELEGRAM_TOKEN", "")
@@ -258,15 +265,20 @@ def clarify_response(route: RouteDecision) -> str:
     return route.response_override or "לא הצלחתי להבין — תוכל לנסח אחרת?"
 
 
-def approval_response(route: RouteDecision) -> str:
-    logger.info(f"[APPROVAL] intent={route.intent} domain={route.domain}")
-    # BOSS NEVER FAKES CONTROL: אין queue אמיתי כאן — הagent לא הגיע לtool call עדיין.
-    # מחזירים הודעה כנה שמבקשת פרטים נוספים. האישור האמיתי ייווצר ב-_queue_approval
-    # כאשר הagent יקרא לכלי בפועל.
+def approval_response(route: RouteDecision, original_text: str, chat_id: str,
+                       channel: str, domain: str) -> str:
+    """Saves original action and asks owner to confirm with כן/לא."""
+    logger.info(f"[APPROVAL] intent={route.intent} domain={route.domain} | saved for {chat_id}")
+    _pending_approvals[chat_id] = {
+        "text":    original_text,
+        "channel": channel,
+        "domain":  domain,
+    }
+    preview = original_text[:120] + ("…" if len(original_text) > 120 else "")
     return (
-        route.response_override or
-        f"פעולה מסוג '{route.intent}' דורשת אישור מפורש. "
-        "בבקשה פרט במדויק מה לבצע — ואז אעביר לאישור הבעלים."
+        f"⏳ *אישור נדרש*\n\n"
+        f"פעולה: `{preview}`\n\n"
+        f"ענה *כן* לביצוע או *לא* לביטול."
     )
 
 
@@ -492,10 +504,11 @@ def _safe_route(text: str, channel: str, identity, domain_from_channel: str = ""
 # ══════════════════════════════════════════════════
 
 def run_agent(
-    user_text:          str,
-    chat_id:            str,
-    channel:            str = "telegram",
+    user_text:           str,
+    chat_id:             str,
+    channel:             str = "telegram",
     domain_from_channel: str = "",
+    _skip_approval:      bool = False,
 ) -> str:
 
     # ── 1. Identity ───────────────────────────────
@@ -512,6 +525,29 @@ def run_agent(
     if not rate_limiter.is_allowed(identity.memory_key):
         return "⚠️ יותר מדי בקשות. המתן דקה ונסה שוב."
 
+    # ── 2.5. Pending Approval Gate ────────────────
+    pending = _pending_approvals.get(chat_id)
+    if pending:
+        lower = user_text.strip().lower()
+        if lower in _CONFIRM_WORDS:
+            _pending_approvals.pop(chat_id, None)
+            logger.info(
+                f"[PendingApproval] ✅ confirmed by {chat_id} → "
+                f"executing: {pending['text'][:60]}"
+            )
+            return run_agent(
+                pending["text"], chat_id, channel,
+                domain_from_channel=pending.get("domain", domain_from_channel),
+                _skip_approval=True,
+            )
+        elif lower in _CANCEL_WORDS:
+            _pending_approvals.pop(chat_id, None)
+            logger.info(f"[PendingApproval] 🚫 cancelled by {chat_id}")
+            return "🚫 הפעולה בוטלה."
+        else:
+            # New unrelated message — clear stale pending, treat normally
+            _pending_approvals.pop(chat_id, None)
+
     # ── 3. Router — CORE_02.6 Integration ────────
     route = _safe_route(user_text, channel, identity, domain_from_channel)
     logger.info(route.to_log())
@@ -520,8 +556,8 @@ def run_agent(
     if route.handler == Handler.CLARIFY:
         return clarify_response(route)
 
-    if route.handler == Handler.APPROVAL:
-        return approval_response(route)
+    if route.handler == Handler.APPROVAL and not _skip_approval:
+        return approval_response(route, user_text, chat_id, channel, domain_from_channel)
 
     # לא עושים BLOCK רגיל ללקוח — restricted ממשיך לסוכן
     if route.restricted:
