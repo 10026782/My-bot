@@ -146,6 +146,32 @@ export interface LeadDetail {
   timeline: TimelineEntry[];
 }
 
+export interface DailyTask {
+  id: string;
+  task: string;
+  coins: number;
+  status: "Todo" | "Done" | "Skipped";
+  who: string;
+}
+
+export interface GameWorld {
+  id: string;
+  name: string;
+  number: number;
+  boss: string;
+  prize: string;
+  coins_earned: number;
+  coins_target: number;
+  progress_pct: number;
+}
+
+export interface GameToday {
+  today: string;
+  tasks: DailyTask[];
+  world: GameWorld | null;
+  total_coins: number;
+}
+
 export interface DashboardResponse {
   project_slug: string;
   domain: string;

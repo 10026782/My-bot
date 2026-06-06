@@ -1,4 +1,4 @@
-import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth } from "./types";
+import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday } from "./types";
 
 const BASE = (import.meta.env.VITE_API_URL as string) ?? "";
 const DEV_ID = (import.meta.env.VITE_DEV_TELEGRAM_ID as string) ?? "";
@@ -156,4 +156,19 @@ export async function emergencyStop(action: string): Promise<void> {
     body: JSON.stringify({ action }),
   });
   if (!r.ok) throw new Error(`API ${r.status}`);
+}
+
+export async function fetchGameToday(): Promise<GameToday> {
+  const r = await fetch(`${BASE}/api/game/today`, { headers: authHeaders() });
+  if (!r.ok) throw new Error(`API ${r.status}`);
+  return r.json() as Promise<GameToday>;
+}
+
+export async function completeTask(taskId: string): Promise<{ ok: boolean; coins_awarded: number }> {
+  const r = await fetch(`${BASE}/api/game/tasks/${encodeURIComponent(taskId)}/done`, {
+    method: "PATCH",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+  });
+  if (!r.ok) throw new Error(`API ${r.status}`);
+  return r.json() as Promise<{ ok: boolean; coins_awarded: number }>;
 }
