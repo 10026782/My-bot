@@ -3,9 +3,6 @@
 # Stateless Telegram Mini App backend.
 # Every request carries X-Telegram-Init-Data — HMAC validated on each call.
 # No session tokens. No state.
-#
-# Week 1  → full implementation
-# Week 2+ → stubbed with {"status": "TODO"} responses
 
 import hashlib
 import hmac
@@ -835,13 +832,6 @@ def ask_ai(identity):
 
 
 # ══════════════════════════════════════════════════════════════════
-# WEEK 2 stubs — Finance, Approvals, Activity, Assets
-# ══════════════════════════════════════════════════════════════════
-
-def _todo(screen: str):
-    return jsonify({"status": "TODO", "screen": screen, "week": 2}), 200
-
-
 @tma_api.route("/api/finance/pulse", methods=["GET"])
 @require_tma_auth
 def finance_pulse(identity):
