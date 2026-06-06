@@ -360,7 +360,8 @@ def _load_leads_with_timeframe(days_back: int) -> list[dict]:
         raw = airtable_get(Tables.LEADS, formula)
 
         if not raw or "אין רשומות" in str(raw) or not isinstance(raw, list):
-            return _mock_leads()
+            logger.warning("[Attribution] airtable returned no leads — returning empty")
+            return []
 
         return [{
             "utm_source":   _norm(r.get("fields",{}).get("utm_source",  "")),
@@ -373,10 +374,11 @@ def _load_leads_with_timeframe(days_back: int) -> list[dict]:
         } for r in raw if isinstance(r, dict)]
 
     except (ImportError, TypeError):
-        return _mock_leads()
+        logger.warning("[Attribution] airtable tools not available — returning empty, no mock data")
+        return []
     except Exception as e:
         logger.error(f"[Attribution] load: {e}")
-        return _mock_leads()
+        return []
 
 
 def _mock_leads() -> list[dict]:
