@@ -79,11 +79,11 @@ def _load_events(domain: str = "") -> list[dict]:
         logger.info(f"[Learning] loaded {len(events)} events (domain={domain or 'all'})")
         return events
     except ImportError:
-        logger.warning("[Learning] lead_events not available — mock mode")
-        return _mock_events(domain)
+        logger.warning("[Learning] lead_events not available — returning empty, no mock data")
+        return []
     except Exception as e:
         logger.error(f"[Learning] _load_events error: {e}")
-        return _mock_events(domain)
+        return []
 
 
 def _mock_events(domain: str = "") -> list[dict]:
