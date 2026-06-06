@@ -262,7 +262,7 @@ def create_human_pipeline_task(lead: AbandonedLead, owner_chat_id: str) -> bool:
         return True
 
     except ImportError:
-        logger.debug(f"[D02] dry-run human pipeline for {lead.sender}")
+        logger.warning(f"[D02] [DRY RUN] airtable not available — human pipeline task NOT created for {lead.sender}")
         return False
     except Exception as e:
         logger.error(f"[D02] create_human_pipeline_task error: {e}")
@@ -323,6 +323,7 @@ def request_bounce_approval(lead: AbandonedLead, owner_chat_id: str) -> tuple[st
         )
         return action_id, btn
     except ImportError:
+        logger.warning(f"[D02] [DRY RUN] event_bus not available — bounce approval NOT sent for {lead.sender}")
         return "dry-run", f"[DRY-RUN] {lead.bounce_draft[:50]}"
     except Exception as e:
         return "", str(e)
