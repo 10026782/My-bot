@@ -254,6 +254,13 @@ def resolve_identity(channel: str, external_id: str) -> Identity:
         logger.info(f"[Identity] Resolved: {identity}")
         return identity
 
+    # Unknown ID — log at WARNING so it's easy to spot in Render logs
+    logger.warning(
+        f"[Identity] UNKNOWN — key='{key}' not in registry "
+        f"(channel={channel}, external_id={external_id}). "
+        f"Registry has {len(_REGISTRY)} entries: {list(_REGISTRY.keys())[:5]}"
+    )
+
     # מספר לא מוכר = ליד פוטנציאלי
     is_whatsapp = channel == "whatsapp"
     return Identity(

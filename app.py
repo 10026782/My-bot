@@ -23,7 +23,7 @@ import telebot
 from twilio.twiml.messaging_response import MessagingResponse
 
 from memory_store    import memory
-from identity        import resolve_identity
+from identity        import resolve_identity, Role
 from context         import build_context
 from tool_registry   import enforce, ToolDenied
 from scheduler       import start_scheduler
@@ -433,6 +433,12 @@ def run_agent(
     # ── 1. Identity ───────────────────────────────
     identity = resolve_identity(channel, chat_id)
     logger.info(f"[Identity] {identity}")
+    if identity.role in (Role.READONLY, Role.GUEST):
+        logger.warning(
+            f"[Identity] LOW-PRIVILEGE request — "
+            f"channel={channel} id={chat_id} role={identity.role} "
+            f"msg='{user_text[:60]}'"
+        )
 
     # ── 2. Rate Limit ─────────────────────────────
     if not rate_limiter.is_allowed(identity.memory_key):
@@ -651,6 +657,16 @@ def webhook_telegram():
         reply_chat_id  = str(update.message.chat.id)       # לאן לשלוח (group או private)
         sender_user_id = str(update.message.from_user.id)  # מי שלח (תמיד USER_ID)
         text           = update.message.text
+
+        # Slash commands → registered @bot.message_handler(commands=[...]) handlers.
+        # They authenticate via resolve_identity internally; we don't go through run_agent.
+        if text.startswith("/"):
+            try:
+                bot.process_new_updates([update])
+            except Exception as e:
+                logger.error(f"[Telegram] command dispatch error: {e}", exc_info=True)
+            return "", 200
+
         if idempotency.is_duplicate("telegram", sender_user_id, text):
             try:
                 bot.send_message(
