@@ -397,26 +397,37 @@ def _handle_approval_callback(cq) -> None:
             return
 
         payload       = item["payload"]
-        tool_name     = payload["tool_name"]
-        tool_inputs   = payload["tool_inputs"]
-        user_chat_id  = payload["user_chat_id"]
+        tool_name     = payload.get("tool_name")   # absent on non-tool approvals
+        user_chat_id  = payload.get("user_chat_id", item.get("chat_id", ""))
         channel       = payload.get("channel", "telegram")
 
-        identity = resolve_identity(channel, user_chat_id)
+        if not tool_name:
+            # Non-tool approval — emit {action}.confirmed event
+            bus_action = item.get("action", "")
+            logger.info(f"[Approval] non-tool confirm {action_id} | action={bus_action}")
+            from event_bus import bus as _bus
+            result = _bus.emit(f"{bus_action}.confirmed", payload, user_chat_id)
+            if result is None:
+                result = f"⚠️ אין handler ל-{bus_action} — הפעולה לא בוצעה."
+                logger.error(f"[Approval] no handler for {bus_action}.confirmed")
+        else:
+            tool_inputs = payload.get("tool_inputs", {})
+            identity    = resolve_identity(channel, user_chat_id)
 
-        try:
-            enforce(tool_name, identity)
-        except ToolDenied as e:
-            logger.warning(
-                f"[Approval] denied approved action {action_id} | "
-                f"{tool_name} | user={identity.user_id} role={identity.role}: {e}"
-            )
-            bot.answer_callback_query(cq.id, "⛔ הפעולה כבר אינה מורשית")
-            return
+            try:
+                enforce(tool_name, identity)
+            except ToolDenied as e:
+                logger.warning(
+                    f"[Approval] denied approved action {action_id} | "
+                    f"{tool_name} | user={identity.user_id} role={identity.role}: {e}"
+                )
+                bot.answer_callback_query(cq.id, "⛔ הפעולה כבר אינה מורשית")
+                return
 
-        raw      = dispatch_tool(tool_name, tool_inputs, identity)
-        result   = validate_tool_output(tool_name, raw)
-        logger.info(f"[Approval] ✅ confirmed {action_id} | {tool_name}")
+            raw    = dispatch_tool(tool_name, tool_inputs, identity)
+            result = validate_tool_output(tool_name, raw)
+
+        logger.info(f"[Approval] ✅ confirmed {action_id} | {tool_name or item.get('action')}")
 
         try:
             bot.send_message(user_chat_id, f"✅ הפעולה בוצעה:\n{result}")
