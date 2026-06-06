@@ -67,7 +67,7 @@ def _hot_leads(errors: list) -> str:
         lines = ["🔥 *לידים חמים:*"]
         for r in records:
             f         = r.get("fields", {})
-            score     = f.get("score ציון", 0) or 0
+            score     = f.get("ציון", 0) or 0
             next_step = f.get("next_step", "—") or "—"
             lines.append(
                 f"• {f.get('Name','?')} | {f.get('phone','—')} | ⭐{score} | {next_step}"
