@@ -401,13 +401,13 @@ def _run_tests() -> bool:
     chk("empty upcoming → empty string", build_upcoming_message([]) == "")
     chk("empty overdue → empty string",  build_overdue_message([])  == "")
 
-    # ── mock scan (no crm) ────────────────────────
-    upcoming = scan_due_soon()
+    # ── mock helpers (unit test — bypass live crm) ───
+    upcoming = _mock_upcoming()
     chk("mock upcoming returns list",  isinstance(upcoming, list))
     chk("mock upcoming has 1 item",    len(upcoming) == 1)
     chk("mock upcoming alert type",    upcoming[0].alert_type == "upcoming")
 
-    overdue = scan_overdue()
+    overdue = _mock_overdue()
     chk("mock overdue returns list",   isinstance(overdue, list))
 
     # ── ScanResult ────────────────────────────────
