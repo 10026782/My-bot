@@ -116,14 +116,14 @@ def handle_lead_message(sender: str, message: str, channel: str = "whatsapp") ->
     # איפוס
     if message.strip() in _RESET_KEYWORDS:
         lead_sessions.delete(sender)
-        domain = get_domain(channel, sender)
+        domain = get_domain(sender)
         flow = get_flow(domain)
         return flow[0][1]
 
     # get existing or create new session with correct domain + channel
     session = lead_sessions.get(sender)
     if session is None:
-        domain = get_domain(channel, sender)
+        domain = get_domain(sender)
         session = lead_sessions.get_or_create(sender, domain, channel)
 
     # שיחה הסתיימה
@@ -156,7 +156,7 @@ def init_lead_session(sender: str, channel: str = "whatsapp") -> str:
     קורא לזה מ-app.py כשליד חדש נכנס.
     """
     lead_sessions.delete(sender)  # איפוס session קיים אם יש
-    domain = get_domain(channel, sender)
+    domain = get_domain(sender)
     lead_sessions.get_or_create(sender, domain, channel)
     flow = get_flow(domain)
     return flow[0][1]
