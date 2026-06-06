@@ -19,7 +19,10 @@ from functools import wraps
 
 from flask import Blueprint, jsonify, request
 from identity import resolve_identity, Role
-from airtable_schema import LeadFields, PaymentStatus, BusinessMemoryFields, InteractionLogFields, Tables
+from airtable_schema import (
+    LeadFields, PaymentStatus, BusinessMemoryFields, InteractionLogFields, Tables,
+    QuestsFields, CoinsLogFields, WorldsFields, QuestStatus, WorldStatus,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +82,16 @@ def _preflight_assets():
 
 @tma_api.route("/api/assets/<asset_id>", methods=["OPTIONS"])
 def _preflight_asset(_asset_id=None):
+    return "", 204
+
+
+@tma_api.route("/api/game/status", methods=["OPTIONS"])
+def _preflight_game_status():
+    return "", 204
+
+
+@tma_api.route("/api/game/quests/<quest_id>", methods=["OPTIONS"])
+def _preflight_game_quest(_quest_id=None):
     return "", 204
 
 
@@ -1244,4 +1257,128 @@ def emergency_stop(identity):
     )
 
     return jsonify({"ok": True, "action": action, "flag": flag})
+
+
+# ══════════════════════════════════════════════════════════════════
+# Game — Worlds / Quests / Coins
+# ══════════════════════════════════════════════════════════════════
+
+@tma_api.route("/api/game/status", methods=["GET"])
+@require_tma_auth
+def game_status(identity):
+    """Active world + this week's quests + total coins. Owner only."""
+    if not identity.is_owner:
+        return jsonify({"error": "forbidden"}), 403
+
+    today  = date.today()
+    monday = today - timedelta(days=today.weekday())
+    week_start_str = monday.isoformat()
+
+    # ── Active world ───────────────────────────────────────────────
+    worlds = _at_list(Tables.WORLDS, f"{{{WorldsFields.STATUS}}}='{WorldStatus.ACTIVE}'", max_records=1)
+    active_world = None
+    if worlds:
+        w  = worlds[0]
+        wf = w.get("fields", {})
+        coins_target = int(wf.get(WorldsFields.TOTAL_COINS_TARGET, 0) or 0)
+        coins_earned = int(wf.get(WorldsFields.COINS_EARNED, 0) or 0)
+        pct = round(100 * coins_earned / coins_target, 1) if coins_target > 0 else 0.0
+        active_world = {
+            "id":           w["id"],
+            "name":         wf.get(WorldsFields.NAME, ""),
+            "number":       wf.get(WorldsFields.NUMBER, 1),
+            "boss":         wf.get(WorldsFields.BOSS, ""),
+            "prize":        wf.get(WorldsFields.PRIZE, ""),
+            "coins_earned": coins_earned,
+            "coins_target": coins_target,
+            "progress_pct": pct,
+            "start_date":   wf.get(WorldsFields.START_DATE, ""),
+        }
+
+    # ── This week's quests (filter in Python for date-field reliability) ──
+    all_quests = _at_list(Tables.QUESTS, "", max_records=200)
+    quests_this_week = [
+        r for r in all_quests
+        if (r.get("fields", {}).get(QuestsFields.WEEK_START, "") or "")[:10] == week_start_str
+    ]
+    if not quests_this_week:
+        quests_this_week = [
+            r for r in all_quests
+            if r.get("fields", {}).get(QuestsFields.STATUS, "") in {QuestStatus.TODO, QuestStatus.IN_PROGRESS}
+        ]
+
+    quest_list = []
+    for r in quests_this_week:
+        qf = r.get("fields", {})
+        quest_list.append({
+            "id":     r["id"],
+            "name":   qf.get(QuestsFields.NAME, ""),
+            "status": qf.get(QuestsFields.STATUS, ""),
+            "coins":  int(qf.get(QuestsFields.COINS, 0) or 0),
+            "impact": bool(qf.get(QuestsFields.IMPACT, False)),
+        })
+
+    # ── Total coins from Coins_Log ─────────────────────────────────
+    log_recs    = _at_list(Tables.COINS_LOG, "", max_records=500)
+    total_coins = sum(int(r.get("fields", {}).get(CoinsLogFields.COINS, 0) or 0) for r in log_recs)
+
+    return jsonify({
+        "active_world":     active_world,
+        "quests_this_week": quest_list,
+        "total_coins":      total_coins,
+        "week_start":       week_start_str,
+    })
+
+
+_QUEST_VALID_STATUSES = {QuestStatus.TODO, QuestStatus.IN_PROGRESS, QuestStatus.DONE, QuestStatus.SKIPPED}
+
+
+@tma_api.route("/api/game/quests/<quest_id>", methods=["PATCH"])
+@require_tma_auth
+def update_quest(quest_id, identity):
+    """Update quest status. Completing a quest auto-writes a Coins_Log entry. Owner only."""
+    if not identity.is_owner:
+        return jsonify({"error": "forbidden"}), 403
+
+    data       = request.get_json(force=True) or {}
+    new_status = data.get("status", "").strip()
+    if new_status not in _QUEST_VALID_STATUSES:
+        return jsonify({"error": f"status must be one of {sorted(_QUEST_VALID_STATUSES)}"}), 400
+
+    rec = _at_get_record(Tables.QUESTS, quest_id)
+    if not rec:
+        return jsonify({"error": "quest not found"}), 404
+
+    qf         = rec.get("fields", {})
+    old_status = qf.get(QuestsFields.STATUS, "")
+    quest_name = qf.get(QuestsFields.NAME, quest_id)
+
+    patch_fields: dict = {QuestsFields.STATUS: new_status}
+    if new_status == QuestStatus.DONE:
+        patch_fields[QuestsFields.DONE_BY] = identity.display_name or identity.user_id
+
+    ok = _at_patch(Tables.QUESTS, quest_id, patch_fields)
+    if not ok:
+        return jsonify({"error": "update failed"}), 500
+
+    # Auto-write Coins_Log only on first completion
+    coins_awarded = 0
+    if new_status == QuestStatus.DONE and old_status != QuestStatus.DONE:
+        coins = int(qf.get(QuestsFields.COINS, 0) or 0)
+        if coins > 0:
+            _at_post(Tables.COINS_LOG, {
+                CoinsLogFields.ACTION: quest_name,
+                CoinsLogFields.COINS:  coins,
+                CoinsLogFields.DATE:   date.today().isoformat(),
+                CoinsLogFields.QUEST:  [quest_id],
+                CoinsLogFields.NOTE:   "Quest completed via TMA",
+            })
+            coins_awarded = coins
+
+    _audit(
+        "quest_done" if new_status == QuestStatus.DONE else "quest_update",
+        identity,
+        details=f"{quest_name} → {new_status}",
+    )
+    return jsonify({"ok": True, "quest_id": quest_id, "status": new_status, "coins_awarded": coins_awarded})
 

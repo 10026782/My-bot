@@ -86,6 +86,83 @@ def cmd_schema(msg):
         logger.error(f"cmd_schema error: {e}")
         bot.send_message(msg.chat.id, f"❌ שגיאה בטעינת סכמה: {e}")
 
+@bot.message_handler(commands=["quest"])
+def cmd_quest(msg):
+    """/quest — Quest Log השבוע."""
+    identity = resolve_identity("telegram", str(msg.from_user.id))
+    if not identity or identity.role not in ("owner", "admin"):
+        return
+    try:
+        from tma_api import _at_list
+        from datetime import date, timedelta
+        from airtable_schema import Tables, QuestsFields, QuestStatus
+        today  = date.today()
+        monday = today - timedelta(days=today.weekday())
+        week_str = monday.isoformat()
+
+        all_q = _at_list(Tables.QUESTS, "", max_records=200)
+        quests = [r for r in all_q if (r.get("fields", {}).get(QuestsFields.WEEK_START, "") or "")[:10] == week_str]
+        if not quests:
+            quests = [r for r in all_q if r.get("fields", {}).get(QuestsFields.STATUS, "") in {QuestStatus.TODO, QuestStatus.IN_PROGRESS}]
+        if not quests:
+            bot.send_message(msg.chat.id, "🎮 אין Quests השבוע.")
+            return
+
+        icons = {QuestStatus.DONE: "✅", QuestStatus.IN_PROGRESS: "🔄", QuestStatus.TODO: "⬜", QuestStatus.SKIPPED: "⏭️"}
+        lines = [f"🎮 *Quest Log — {week_str}*\n"]
+        total_possible = 0
+        total_earned   = 0
+        for r in quests:
+            f       = r.get("fields", {})
+            status  = f.get(QuestsFields.STATUS, "")
+            coins   = int(f.get(QuestsFields.COINS, 0) or 0)
+            impact  = " ⚡" if f.get(QuestsFields.IMPACT) else ""
+            total_possible += coins
+            if status == QuestStatus.DONE:
+                total_earned += coins
+            lines.append(f"{icons.get(status, '❓')} {f.get(QuestsFields.NAME, '?')} — {coins}🪙{impact}")
+
+        lines.append(f"\n💰 {total_earned}/{total_possible}🪙 הושלם")
+        bot.send_message(msg.chat.id, "\n".join(lines), parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"cmd_quest error: {e}")
+        bot.send_message(msg.chat.id, f"❌ שגיאה: {e}")
+
+
+@bot.message_handler(commands=["coins"])
+def cmd_coins(msg):
+    """/coins — סה״כ מטבעות + World progress."""
+    identity = resolve_identity("telegram", str(msg.from_user.id))
+    if not identity or identity.role not in ("owner", "admin"):
+        return
+    try:
+        from tma_api import _at_list
+        from airtable_schema import Tables, CoinsLogFields, WorldsFields, WorldStatus
+
+        log_recs    = _at_list(Tables.COINS_LOG, "", max_records=500)
+        total_coins = sum(int(r.get("fields", {}).get(CoinsLogFields.COINS, 0) or 0) for r in log_recs)
+
+        worlds = _at_list(Tables.WORLDS, f"{{{WorldsFields.STATUS}}}='{WorldStatus.ACTIVE}'", max_records=1)
+        world_section = ""
+        if worlds:
+            wf     = worlds[0].get("fields", {})
+            target = int(wf.get(WorldsFields.TOTAL_COINS_TARGET, 0) or 0)
+            earned = int(wf.get(WorldsFields.COINS_EARNED, 0) or 0)
+            pct    = round(100 * earned / target, 1) if target > 0 else 0.0
+            filled = int(pct / 10)
+            bar    = "█" * filled + "░" * (10 - filled)
+            world_section = (
+                f"\n\n🌍 *{wf.get(WorldsFields.NAME, 'World')}*\n"
+                f"`{bar}` {pct}%\n"
+                f"{earned}/{target}🪙 | פרס: {wf.get(WorldsFields.PRIZE, '?')}"
+            )
+
+        bot.send_message(msg.chat.id, f"🪙 *סה״כ מטבעות: {total_coins}*{world_section}", parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"cmd_coins error: {e}")
+        bot.send_message(msg.chat.id, f"❌ שגיאה: {e}")
+
+
 try:
     _scheduler = start_scheduler()
     logger.info("Scheduler OK")

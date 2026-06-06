@@ -34,6 +34,10 @@ class Tables:
     # שמורים לשימוש פנימי
     IMPORTS         = "Imports"
     TENANTS         = "Tenants"
+    # Game / Gamification
+    WORLDS          = "Worlds"
+    QUESTS          = "Quests"
+    COINS_LOG       = "Coins_Log"
 
 
 # ══════════════════════════════════════════════════
@@ -215,6 +219,55 @@ class InteractionLogFields:
     BUSINESS_MEMORY  = "Business Memory"       # linked Business Memory record (was: related_record_id)
     KEY_INSIGHTS     = "Key Insights"          # insights (was: sentiment)
     FOLLOWUP_ACTIONS = "Follow-up Actions"     # follow-up actions (no prior equivalent)
+
+
+class WorldsFields:
+    """Game Worlds table. Table name: Tables.WORLDS."""
+    NAME               = "Name"
+    NUMBER             = "Number"
+    STATUS             = "Status"             # Active | Completed | Locked
+    BOSS               = "Boss"
+    PRIZE              = "Prize"
+    TOTAL_COINS_TARGET = "Total_Coins_Target"
+    COINS_EARNED       = "Coins_Earned"
+    START_DATE         = "Start_Date"
+    END_DATE           = "End_Date"
+    NOTES              = "Notes"
+
+
+class QuestsFields:
+    """Game Quests table. Table name: Tables.QUESTS."""
+    NAME       = "Name"
+    WORLD      = "World"          # linked record → Worlds
+    STATUS     = "Status"         # Todo | In Progress | Done | Skipped
+    COINS      = "Coins"
+    WEEK_START = "Week_Start"
+    IMPACT     = "Impact"         # checkbox — high-impact quest
+    DONE_BY    = "Done_By"
+    NOTES      = "Notes"
+
+
+class CoinsLogFields:
+    """Game Coins_Log table. Table name: Tables.COINS_LOG."""
+    ACTION        = "Action"
+    COINS         = "Coins"
+    DATE          = "Date"
+    QUEST         = "Quest"          # linked record → Quests
+    NOTE          = "Note"
+    TOTAL_RUNNING = "Total_Running"  # formula — read-only, never PATCH
+
+
+class QuestStatus:
+    TODO        = "Todo"
+    IN_PROGRESS = "In Progress"
+    DONE        = "Done"
+    SKIPPED     = "Skipped"
+
+
+class WorldStatus:
+    ACTIVE    = "Active"
+    COMPLETED = "Completed"
+    LOCKED    = "Locked"
 
 
 class LearningFields:
