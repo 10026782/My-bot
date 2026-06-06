@@ -185,7 +185,7 @@ class LeadFields:
     NAME            = "Name"
     PHONE           = "phone"
     STATUS          = "status"
-    SCORE           = "score ציון"      # ← לא "score"
+    SCORE           = "ציון"
     SUMMARY         = "summary"
     ANSWERS         = "answers"
     SOURCE          = "source"
