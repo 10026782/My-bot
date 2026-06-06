@@ -138,15 +138,16 @@ def load_all_leads() -> list[LeadProfile]:
 
         records = airtable_get(Tables.LEADS, "")
         if not records or not isinstance(records, list):
-            return _mock_leads()
+            logger.warning("[Audience] airtable returned no records — returning empty")
+            return []
         return _parse_records(records)
 
     except ImportError:
-        logger.warning("[Audience] airtable not available — mock mode")
-        return _mock_leads()
+        logger.warning("[Audience] airtable not available — returning empty, no mock data")
+        return []
     except Exception as e:
         logger.error(f"[Audience] load error: {e}")
-        return _mock_leads()
+        return []
 
 
 def _parse_records(records: list) -> list[LeadProfile]:
