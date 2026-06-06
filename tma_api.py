@@ -50,13 +50,29 @@ if _DEV_MODE:
 # CORS — allow TMA frontend (Vercel + Telegram webview)
 # ══════════════════════════════════════════════════════════════════
 
+def _build_allowed_origins() -> set[str]:
+    base = {"https://web.telegram.org"}
+    if _ENV != "production":
+        # Development/staging: also allow localhost and broad Vercel previews
+        base |= {"http://localhost:5173", "http://localhost:3000"}
+        base.add(".vercel.app")   # sentinel value checked with endswith below
+    # Production (and optionally staging): exact origins from env var
+    raw = os.environ.get("TMA_ALLOWED_ORIGINS", "").strip()
+    if raw:
+        base |= {o.strip() for o in raw.split(",") if o.strip()}
+    return base
+
+_ALLOWED_ORIGINS = _build_allowed_origins()
+
+
 @tma_api.after_request
 def _cors(response):
     origin = request.headers.get("Origin", "")
-    if (
-        origin in {"https://web.telegram.org", "http://localhost:5173", "http://localhost:3000"}
-        or origin.endswith(".vercel.app")
-    ):
+    allow = (
+        origin in _ALLOWED_ORIGINS
+        or (".vercel.app" in _ALLOWED_ORIGINS and origin.endswith(".vercel.app"))
+    )
+    if allow:
         response.headers["Access-Control-Allow-Origin"]  = origin
         response.headers["Access-Control-Allow-Headers"] = (
             "Content-Type, X-Telegram-Init-Data, X-Dev-Telegram-Id, Authorization"
