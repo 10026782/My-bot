@@ -83,6 +83,30 @@ DOMAIN_CONFIG: dict[str, dict] = {
 
         "tags": ["candidate", "job", "hiring"],
     },
+
+    # ─── ייבוא — מיטות עץ מלא ─────────────────────────────────────────────────
+    "import": {
+        "name": "ייבוא — מיטות עץ מלא",
+        "tone": "professional",
+        "priority": "medium",
+
+        "flow": [
+            ("intro",    "שלום! 👋 מתעניינים במיטות עץ מלא?\nמה השם שלך?"),
+            ("phone",    "מה מספר הטלפון שלך ליצירת קשר?"),
+            ("quantity", "כמה יחידות אתה מעוניין להזמין?"),
+        ],
+
+        "qualification_prompt": """
+מוצר: מיטות עץ מלא. יחידות: 50/100.
+תשלום: 30% מקדמה + 70% נאמנות עו"ד.
+תהליך: שיחה→קטלוג→פגישה→הצעה→תשלום→משלוח.
+כשמגיע ליד: שאל שם, טלפון, כמות. רשום ל-Leads עם domain=import.
+""",
+
+        "required_fields": ["intro", "phone", "quantity"],
+
+        "tags": ["furniture", "import", "wholesale"],
+    },
 }
 
 
