@@ -38,6 +38,11 @@ class Tables:
     WORLDS          = "Worlds"
     QUESTS          = "Quests"
     COINS_LOG       = "Coins_Log"
+    DAILY_TASKS     = "Daily_Tasks"
+    # Roadmap
+    ROADMAP_TASKS   = "Roadmap_Tasks"
+    WEEKLY_GOALS    = "Weekly_Goals"
+    BOSS_BATTLES    = "Boss_Battles"
 
 
 # ══════════════════════════════════════════════════
@@ -507,3 +512,49 @@ class RiskLevel:
     LOW    = "Low"
     MEDIUM = "Medium"
     HIGH   = "High"
+
+
+# ══════════════════════════════════════════════════
+# Roadmap / Boss-Game Tables
+# ══════════════════════════════════════════════════
+
+class RoadmapTaskFields:
+    TASK             = "Task"
+    WORLD            = "World"           # Link → Worlds
+    QUEST            = "Quest"           # Link → Quests
+    OWNER            = "Owner"           # אליהו | קלוד קוד | אורי | אהרן | אח
+    PRIORITY         = "Priority"        # P0 | P1 | P2 | P3
+    STATUS           = "Status"          # Todo | In Progress | Done | Blocked
+    DUE_DATE         = "Due_Date"
+    ESTIMATED_HOURS  = "Estimated_Hours"
+    COINS            = "Coins"
+    BLOCKER          = "Blocker"         # Checkbox
+    NOTES            = "Notes"
+
+class RoadmapTaskStatus:
+    TODO        = "Todo"
+    IN_PROGRESS = "In Progress"
+    DONE        = "Done"
+    BLOCKED     = "Blocked"
+
+class RoadmapTaskPriority:
+    P0 = "P0"
+    P1 = "P1"
+    P2 = "P2"
+    P3 = "P3"
+
+
+class WeeklyGoalsFields:
+    GOAL        = "Goal"
+    WORLD       = "World"        # Link → Worlds
+    TARGET_DATE = "Target_Date"
+    STATUS      = "Status"       # Todo | Done | Missed
+
+
+class BossBattlesFields:
+    WEEK         = "Week"
+    WEEK_START   = "Week_Start"
+    QUESTION     = "Question"
+    ANSWER       = "Answer"
+    STATUS       = "Status"       # Boss Defeated | Boss Won
+    COINS_EARNED = "Coins_Earned"
