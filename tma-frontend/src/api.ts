@@ -5,7 +5,7 @@ const DEV_ID = (import.meta.env.VITE_DEV_TELEGRAM_ID as string) ?? "";
 
 declare global {
   interface Window {
-    Telegram?: { WebApp?: { initData?: string; ready?: () => void } };
+    Telegram?: { WebApp?: { initData?: string; ready?: () => void; platform?: string; version?: string } };
   }
 }
 

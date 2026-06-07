@@ -92,6 +92,13 @@ export default function App() {
       <div className="flex flex-col items-center justify-center min-h-screen gap-4 p-6 text-center">
         <p className="text-gray-600">טעינה נכשלה</p>
         <p className="text-xs text-gray-400">{hub.message}</p>
+        {/* TEMP DEBUG — remove once initData issue is resolved */}
+        <p className="text-[10px] text-gray-400 font-mono" dir="ltr">
+          tg={String(!!window.Telegram)} webApp={String(!!window.Telegram?.WebApp)}{" "}
+          initDataLen={window.Telegram?.WebApp?.initData?.length ?? -1}{" "}
+          platform={window.Telegram?.WebApp?.platform ?? "?"}{" "}
+          version={window.Telegram?.WebApp?.version ?? "?"}
+        </p>
         <button
           onClick={loadHub}
           className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium"
