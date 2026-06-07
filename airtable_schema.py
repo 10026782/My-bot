@@ -259,7 +259,7 @@ class CoinsLogFields:
     DATE          = "Date"
     QUEST         = "Quest"          # linked record → Quests
     NOTE          = "Note"
-    TOTAL_RUNNING = "Total_Running"  # formula — read-only, never PATCH
+    TOTAL_RUNNING = "Total_Running"  # Number field — written app-side on each Coins_Log insert (see _coins_running_total)
 
 
 class QuestStatus:

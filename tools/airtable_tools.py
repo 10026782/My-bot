@@ -85,7 +85,7 @@ _TABLE_FIELDS: dict[str, set[str]] = {
         "Name", "World", "Status", "Coins", "Week_Start", "Impact", "Done_By", "Notes",
     },
     "Coins_Log": {
-        "Action", "Coins", "Date", "Quest", "Note",
+        "Action", "Coins", "Date", "Quest", "Note", "Total_Running",
     },
 }
 
