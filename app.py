@@ -562,6 +562,14 @@ def run_agent(
             f"msg='{user_text[:60]}'"
         )
 
+    # ── 1.5. WhatsApp Lead Capture (W0) ───────────
+    if identity.role == Role.LEAD:
+        try:
+            from lead_capture import capture_inbound_lead
+            capture_inbound_lead(identity, user_text)
+        except Exception as e:
+            logger.error(f"[LeadCapture] failed for {identity.memory_key}: {e}")
+
     # ── 2. Rate Limit ─────────────────────────────
     if not rate_limiter.is_allowed(identity.memory_key):
         return "⚠️ יותר מדי בקשות. המתן דקה ונסה שוב."
