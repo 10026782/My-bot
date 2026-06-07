@@ -284,7 +284,7 @@ def crm_add_payment(name: str, amount: float, due_date: str,
             PaymentFields.NAME:     name,
             PaymentFields.AMOUNT:   amount,
             PaymentFields.DUE_DATE: due_date,
-            PaymentFields.STATUS:   PaymentStatus.PENDING,
+            PaymentFields.STATUS:   PaymentStatus.IN_PROGRESS,
         }
         if deal_id:    fields[PaymentFields.DEAL]    = [deal_id]
         if contact_id: fields[PaymentFields.CONTACT] = [contact_id]
@@ -314,7 +314,7 @@ def crm_upcoming_payments(days_ahead: int = 7, identity=None) -> str:
         deadline = today + timedelta(days=days_ahead)
         formula  = (
             f"AND("
-            f"{{סטטוס}} = '{PaymentStatus.PENDING}', "
+            f"{{סטטוס}} = '{PaymentStatus.IN_PROGRESS}', "
             f"IS_BEFORE({{תאריך}}, '{deadline.isoformat()}'), "
             f"IS_AFTER({{תאריך}}, '{today.isoformat()}')"
             f")"
@@ -357,7 +357,7 @@ def crm_overdue_payments(identity=None) -> str:
         today   = date.today().isoformat()
         formula = (
             f"AND("
-            f"{{סטטוס}} = '{PaymentStatus.PENDING}', "
+            f"{{סטטוס}} = '{PaymentStatus.IN_PROGRESS}', "
             f"IS_BEFORE({{תאריך}}, '{today}')"
             f")"
         )

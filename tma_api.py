@@ -30,23 +30,50 @@ tma_api = Blueprint("tma_api", __name__)
 _BOT_TOKEN  = os.environ.get("TELEGRAM_TOKEN", "")
 _AT_KEY     = os.environ.get("AIRTABLE_API_KEY", "")
 _AT_BASE    = os.environ.get("AIRTABLE_BASE_ID", "")
+_ENV        = os.environ.get("ENV", "production").strip().lower()
+
 # TMA_DEV_MODE=1 skips Telegram HMAC — for local/staging testing only.
-# Set X-Dev-Telegram-Id header to the owner's Telegram numeric ID.
-# NEVER enable on production.
-_DEV_MODE   = os.environ.get("TMA_DEV_MODE", "").strip().lower() in ("1", "true", "yes")
+# NEVER enable in production. Requires ALLOW_TMA_DEV_MODE=true to be set
+# alongside TMA_DEV_MODE=1 in non-production environments as explicit opt-in.
+_DEV_MODE_REQUESTED = os.environ.get("TMA_DEV_MODE", "").strip().lower() in ("1", "true", "yes")
+_DEV_ALLOWED        = os.environ.get("ALLOW_TMA_DEV_MODE", "").strip().lower() == "true"
+if _DEV_MODE_REQUESTED and _ENV == "production" and not _DEV_ALLOWED:
+    logger.critical(
+        "🚨 TMA_DEV_MODE=1 requested in production but ALLOW_TMA_DEV_MODE not set — "
+        "DEV_MODE DISABLED. Set ALLOW_TMA_DEV_MODE=true only on non-production environments."
+    )
+_DEV_MODE = _DEV_MODE_REQUESTED and (_ENV != "production" or _DEV_ALLOWED)
+if _DEV_MODE:
+    logger.warning("⚠️ TMA DEV_MODE active — Telegram HMAC bypassed (development only)")
 
 
 # ══════════════════════════════════════════════════════════════════
 # CORS — allow TMA frontend (Vercel + Telegram webview)
 # ══════════════════════════════════════════════════════════════════
 
+def _build_allowed_origins() -> set[str]:
+    base = {"https://web.telegram.org"}
+    if _ENV != "production":
+        # Development/staging: also allow localhost and broad Vercel previews
+        base |= {"http://localhost:5173", "http://localhost:3000"}
+        base.add(".vercel.app")   # sentinel value checked with endswith below
+    # Production (and optionally staging): exact origins from env var
+    raw = os.environ.get("TMA_ALLOWED_ORIGINS", "").strip()
+    if raw:
+        base |= {o.strip() for o in raw.split(",") if o.strip()}
+    return base
+
+_ALLOWED_ORIGINS = _build_allowed_origins()
+
+
 @tma_api.after_request
 def _cors(response):
     origin = request.headers.get("Origin", "")
-    if (
-        origin in {"https://web.telegram.org", "http://localhost:5173", "http://localhost:3000"}
-        or origin.endswith(".vercel.app")
-    ):
+    allow = (
+        origin in _ALLOWED_ORIGINS
+        or (".vercel.app" in _ALLOWED_ORIGINS and origin.endswith(".vercel.app"))
+    )
+    if allow:
         response.headers["Access-Control-Allow-Origin"]  = origin
         response.headers["Access-Control-Allow-Headers"] = (
             "Content-Type, X-Telegram-Init-Data, X-Dev-Telegram-Id, Authorization"
@@ -115,8 +142,23 @@ def _at_headers() -> dict:
     return {"Authorization": f"Bearer {_AT_KEY}"}
 
 
-def _at_list(table: str, formula: str = "", max_records: int = 50) -> list:
-    """Direct Airtable REST call → list[{id, fields}]. Returns [] on error."""
+class AirtableError(Exception):
+    """Raised by _at_list(strict=True) on non-200 Airtable responses."""
+    def __init__(self, table: str, http_status: int, body: str = ""):
+        self.table       = table
+        self.http_status = http_status
+        self.safe_body   = body[:120]   # never expose auth headers
+        super().__init__(f"Airtable {table} → HTTP {http_status}")
+
+
+def _at_list(table: str, formula: str = "", max_records: int = 50,
+             strict: bool = False) -> list:
+    """
+    Direct Airtable REST call → list[{id, fields}].
+    strict=False (default): returns [] on any error (legacy behavior).
+    strict=True:  raises AirtableError on non-200 so callers can return
+                  a proper error response instead of silently showing zero.
+    """
     try:
         import httpx
         params: dict = {}
@@ -128,8 +170,14 @@ def _at_list(table: str, formula: str = "", max_records: int = 50) -> list:
         if r.status_code == 200:
             return r.json().get("records", [])
         logger.warning(f"_at_list({table}) → {r.status_code}: {r.text[:120]}")
+        if strict:
+            raise AirtableError(table, r.status_code, r.text)
+    except AirtableError:
+        raise
     except Exception as e:
         logger.warning(f"_at_list({table}) error: {e}")
+        if strict:
+            raise AirtableError(table, 0, str(e))
     return []
 
 
@@ -575,26 +623,38 @@ def get_project_dashboard(project_slug, identity):
         return jsonify({"error": "forbidden"}), 403
 
     # Step 3: fetch data filtered by domain
-    leads = _at_list("Leads", f"{{domain}}='{domain}'", max_records=20)
-    deals = _at_list(
-        "עסקאות (Deals)",
-        "NOT(OR({שלב}='סגור-ניצחון', {שלב}='סגור-הפסד'))",
-        max_records=20,
-    )
-    tasks = _at_list(
-        "משימות (Tasks)",
-        "{סטטוס}!='בוצע'",
-        max_records=10,
-    )
+    try:
+        leads = _at_list("Leads", f"{{domain}}='{domain}'", max_records=20, strict=True)
+        deals = _at_list(
+            "עסקאות (Deals)",
+            f"AND({{domain}}='{domain}', NOT(OR({{שלב}}='סגור-ניצחון', {{שלב}}='סגור-הפסד')))",
+            max_records=20,
+            strict=True,
+        )
+        tasks = _at_list(
+            "משימות (Tasks)",
+            "{סטטוס}!='בוצע'",
+            max_records=10,
+            strict=True,
+        )
+    except AirtableError as e:
+        logger.error(f"[dashboard/{project_slug}] Airtable error: {e}")
+        return jsonify({
+            "error":       "data_unavailable",
+            "table":       e.table,
+            "http_status": e.http_status,
+            "detail":      f"Airtable returned HTTP {e.http_status} for table '{e.table}'",
+        }), 502
 
     return jsonify({
-        "project_slug": project_slug,
-        "domain":       domain,
-        "name":         hub_fields.get("Name", ""),
-        "leads_count":  len(leads),
-        "open_deals":   len(deals),
-        "open_tasks":   len(tasks),
-        "leads":        [_fmt_lead_summary(r) for r in leads[:10]],
+        "project_slug":  project_slug,
+        "domain":        domain,
+        "name":          hub_fields.get("Name", ""),
+        "leads_count":   len(leads),
+        "open_deals":    len(deals),
+        "open_tasks":    len(tasks),
+        "tasks_note":    "tasks table has no domain field — showing global open tasks",
+        "leads":         [_fmt_lead_summary(r) for r in leads[:10]],
     })
 
 
@@ -854,7 +914,16 @@ def finance_pulse(identity):
     today_str   = today.isoformat()
 
     # ── Payments ──────────────────────────────────────────────────
-    all_payments = _at_list("תשלומים (Payments)", "", max_records=200)
+    try:
+        all_payments = _at_list("תשלומים (Payments)", "", max_records=200, strict=True)
+    except AirtableError as e:
+        logger.error(f"[finance_pulse] Airtable error: {e}")
+        return jsonify({
+            "error":       "data_unavailable",
+            "table":       e.table,
+            "http_status": e.http_status,
+            "detail":      f"Airtable returned HTTP {e.http_status} for '{e.table}'",
+        }), 502
 
     income_amount  = 0
     income_count   = 0
