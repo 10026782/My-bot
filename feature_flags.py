@@ -17,6 +17,12 @@ _PERSIST_PATH = "/tmp/emergency_flags.json"
 # Runtime overrides — in-memory, checked first.
 _RUNTIME: dict[str, bool] = {}
 
+# Flags that default to ON when the env var is unset (unlike the standard
+# default-OFF behavior). Each entry mirrors os.environ.get(NAME, default).
+_DEFAULTS: dict[str, str] = {
+    "IMPORT_DOMAIN": os.environ.get("IMPORT_DOMAIN", "true"),
+}
+
 
 def _load_persistent() -> None:
     """Restore persistent flags from disk on startup."""
@@ -48,7 +54,7 @@ def _save_persistent() -> None:
 def is_enabled(name: str) -> bool:
     if name in _RUNTIME:
         return _RUNTIME[name]
-    value = os.environ.get(name, "").strip().lower()
+    value = os.environ.get(name, _DEFAULTS.get(name, "")).strip().lower()
     return value in ("1", "true", "yes", "on", "enabled")
 
 
