@@ -89,6 +89,38 @@ SCHEMA: dict[str, dict] = {
         "תיאור":         {"type": "long",   "required": False},
         "תאריך יצירה":   {"type": "date",   "required": False},
     },
+    "Roadmap_Tasks": {
+        "Task":             {"type": "text",   "required": True},
+        "World":            {"type": "link",   "required": False, "linked_table": "Worlds"},
+        "Quest":            {"type": "link",   "required": False, "linked_table": "Quests"},
+        "Owner":            {"type": "select", "required": False,
+                             "options": ["אליהו", "קלוד קוד", "אורי", "אהרן", "אח"]},
+        "Priority":         {"type": "select", "required": False,
+                             "options": ["P0", "P1", "P2", "P3"]},
+        "Status":           {"type": "select", "required": False,
+                             "options": ["Todo", "In Progress", "Done", "Blocked"]},
+        "Due_Date":         {"type": "date",   "required": False, "format": "YYYY-MM-DD"},
+        "Estimated_Hours":  {"type": "number", "required": False},
+        "Coins":            {"type": "number", "required": False},
+        "Blocker":          {"type": "bool",   "required": False},
+        "Notes":            {"type": "long",   "required": False},
+    },
+    "Weekly_Goals": {
+        "Goal":        {"type": "text",   "required": True},
+        "World":       {"type": "link",   "required": False, "linked_table": "Worlds"},
+        "Target_Date": {"type": "date",   "required": False, "format": "YYYY-MM-DD"},
+        "Status":      {"type": "select", "required": False,
+                        "options": ["Todo", "Done", "Missed"]},
+    },
+    "Boss_Battles": {
+        "Week":         {"type": "text",   "required": False},
+        "Week_Start":   {"type": "date",   "required": False, "format": "YYYY-MM-DD"},
+        "Question":     {"type": "long",   "required": False},
+        "Answer":       {"type": "long",   "required": False},
+        "Status":       {"type": "select", "required": False,
+                         "options": ["Boss Defeated", "Boss Won"]},
+        "Coins_Earned": {"type": "number", "required": False},
+    },
 }
 
 # שמות קצרים → שמות מלאים (לחיפוש חכם)
@@ -113,6 +145,10 @@ TABLE_ALIASES: dict[str, str] = {
     "פרויקטים":     "Projects",
     "learnings":    "למידות ותובנות",
     "תובנות":       "למידות ותובנות",
+    "roadmap":      "Roadmap_Tasks",
+    "roadmap_tasks":"Roadmap_Tasks",
+    "weekly_goals": "Weekly_Goals",
+    "boss_battles": "Boss_Battles",
 }
 
 
@@ -197,7 +233,7 @@ def format_table_schema(table: str) -> str:
 
 def format_all_tables() -> str:
     """רשימת כל הטבלאות — לפקודת /tables."""
-    lines = ["📊 *טבלאות Airtable — 15 טבלאות*\n"]
+    lines = [f"📊 *טבלאות Airtable — {len(SCHEMA)} טבלאות*\n"]
     for table in SCHEMA:
         fields = list(SCHEMA[table].keys())
         lines.append(f"*{table}*")
@@ -319,7 +355,7 @@ def _run_tests() -> bool:
 
     # format_all_tables
     all_t = format_all_tables()
-    chk("all tables has 15",       all_t.count("*") >= 15)
+    chk("all tables has tables",   "Roadmap_Tasks" in all_t and "Boss_Battles" in all_t)
 
     # handle_schema_command
     r1 = handle_schema_command("")
