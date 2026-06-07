@@ -63,6 +63,30 @@ _TABLE_FIELDS: dict[str, set[str]] = {
         "Payment Schedule", "Outstanding Balance",
         "Next Payment Due", "Payment Status", "Notes",
     },
+    # ── Roadmap / Boss-Game ───────────────────────
+    "Roadmap_Tasks": {
+        "Task", "World", "Quest", "Owner", "Priority",
+        "Status", "Due_Date", "Estimated_Hours", "Coins", "Blocker", "Notes",
+    },
+    "Weekly_Goals": {
+        "Goal", "World", "Target_Date", "Status",
+    },
+    "Boss_Battles": {
+        "Week", "Week_Start", "Question", "Answer", "Status", "Coins_Earned",
+    },
+    "Daily_Tasks": {
+        "Date", "Task", "Quest", "Coins", "Status", "Who",
+    },
+    "Worlds": {
+        "Name", "Number", "Status", "Boss", "Prize",
+        "Total_Coins_Target", "Coins_Earned", "Start_Date", "End_Date", "Notes",
+    },
+    "Quests": {
+        "Name", "World", "Status", "Coins", "Week_Start", "Impact", "Done_By", "Notes",
+    },
+    "Coins_Log": {
+        "Action", "Coins", "Date", "Quest", "Note",
+    },
 }
 
 # שדות שClaude ממציא ולא קיימים בשום טבלה
@@ -82,6 +106,85 @@ _TABLE_ALIAS_MAP: dict[str, str] = {
 def _resolve_table(table: str) -> str:
     """מתרגם alias אנגלי לשם הטבלה האמיתי ב-Airtable."""
     return _TABLE_ALIAS_MAP.get(table, table)
+
+
+# שדות linked-record לפי טבלה: field_name → linked_table_name
+_LINKED_RECORD_FIELDS: dict[str, dict[str, str]] = {
+    "Roadmap_Tasks": {
+        "World": "Worlds",
+        "Quest": "Quests",
+    },
+    "Weekly_Goals": {
+        "World": "Worlds",
+    },
+    "Daily_Tasks": {
+        "Quest": "Quests",
+    },
+    "Quests": {
+        "World": "Worlds",
+    },
+    "Coins_Log": {
+        "Quest": "Quests",
+    },
+}
+
+
+def _lookup_record_id(linked_table: str, name: str) -> str | None:
+    """
+    מחפש רשומה לפי שם ב-linked_table.
+    מחזיר record_id ("recXXX") אם נמצא, אחרת None.
+    """
+    try:
+        safe = name.replace("'", "\\'")
+        encoded = urllib.parse.quote(linked_table, safe="")
+        r = httpx.get(
+            f"https://api.airtable.com/v0/{_base()}/{encoded}",
+            headers=_headers(),
+            params={"filterByFormula": f"{{Name}}='{safe}'", "maxRecords": 1},
+            timeout=10,
+        )
+        if r.status_code != 200:
+            logger.warning(f"airtable: lookup failed [{linked_table}] {r.status_code}")
+            return None
+        records = r.json().get("records", [])
+        if records:
+            return records[0]["id"]
+        return None
+    except Exception as e:
+        logger.warning(f"airtable: lookup exception [{linked_table}/{name}]: {e}")
+        return None
+
+
+def _resolve_linked_fields(table: str, fields: dict) -> dict:
+    """
+    עבור טבלאות עם שדות linked-record:
+    אם הערך הוא string (שם תצוגה) במקום ["recXXX"] — מבצע חיפוש ומחליף.
+    שדות שלא נמצאו מוסרים כדי למנוע INVALID_RECORD_ID.
+    """
+    link_map = _LINKED_RECORD_FIELDS.get(table)
+    if not link_map:
+        return fields
+
+    result = dict(fields)
+    for field, linked_table in link_map.items():
+        val = result.get(field)
+        if val is None:
+            continue
+        # כבר בפורמט נכון — list של IDs
+        if isinstance(val, list):
+            continue
+        # ערך string — צריך לחפש
+        if isinstance(val, str):
+            rec_id = _lookup_record_id(linked_table, val)
+            if rec_id:
+                result[field] = [rec_id]
+                logger.info(f"airtable: resolved {field}='{val}' → {rec_id}")
+            else:
+                logger.warning(
+                    f"airtable: '{val}' לא נמצא ב-{linked_table} — שדה {field} הוסר"
+                )
+                del result[field]
+    return result
 
 
 def _sanitize_fields(table: str, fields: dict) -> dict:
@@ -156,6 +259,7 @@ def airtable_add(table: str, fields: dict) -> str:
     fields = _sanitize_fields(table, fields)
     if not fields:
         return "❌ לא נשארו שדות תקינים לשמירה — בדוק שמות השדות."
+    fields = _resolve_linked_fields(table, fields)
     real_table = _resolve_table(table)
     encoded = urllib.parse.quote(real_table, safe="")
     with with_airtable_breaker():
@@ -201,6 +305,7 @@ def airtable_update(table: str, record_id: str, fields: dict) -> str:
     fields = _sanitize_fields(table, fields)
     if not fields:
         return "❌ לא נשארו שדות תקינים לעדכון — בדוק שמות השדות."
+    fields = _resolve_linked_fields(table, fields)
     real_table = _resolve_table(table)
     encoded = urllib.parse.quote(real_table, safe="")
     with with_airtable_breaker():
