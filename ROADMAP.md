@@ -1,6 +1,6 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 31/05/2026
+עודכן: 07/06/2026
 
 ---
 
@@ -60,20 +60,45 @@
 | C23 | config — תיעוד input provider בלבד | מנע מקור אמת כפול עם domain_router |
 | C24 | lead_qualifier — detect_domain() | get_domain(channel,sender) לא קיים |
 
+### Stabilization Sprint — 07/06/2026
+| ID | שם | מה תוקן | קבצים |
+|----|----|---------| ------|
+| C25 | Google Tools merge conflict | SyntaxError שורה 21 — נפתר | tools/google_tools.py |
+| C26 | lead_qualifier TypeError | get_domain signature mismatch — תוקן | lead_qualifier.py |
+| C27 | Event Bus fail-closed | confirm() מחזיר הצלחה רק אם handler רץ בפועל | event_bus.py |
+| C28 | email_inbound honest stub | ImportError → mock הוסר; stub כנה | email_inbound.py |
+| C29 | TMA approval stubs | TODO הוחלף ב-coming_soon / רשימה ריקה | tma_api.py |
+| C30 | tool_registry sync | כלים מיושרים: schemas / validator / registry / dispatcher | tool_registry.py, schemas.py |
+| C31 | Airtable shim | תיקון imports עקביים לכל מודולי עזר | airtable_tools.py |
+| C32 | Twilio signature validation | WhatsApp webhook מאמת חתימה | app.py |
+| C33 | Emergency Stop persistence | flag נשמר ב-restart | feature_flags.py |
+| C34 | Mock data removed | דוחות מציגים כשלים אמיתיים | daily_digest.py, workers |
+| C35 | Approval subscribers x4 | send_email_reply, send_followup, send_recovery, send_bounce | event_bus.py |
+| C36 | Approval UX honest | הצלחה מוצגת רק אחרי פעולה אמיתית | app.py |
+| C37 | Payment Reminder fix | self-test עובר (commit 0744ce9) | payment_reminder.py |
+| C38 | WhatsApp outbound honest stub | לא מעמיד פנים — מחזיר stub כנה | app.py / whatsapp tools |
+| C39 | TMA CORS + auth 401 | CORS origin נוסף ל-Render env; 401 נפתר | tma_api.py, Render env |
+
 ---
 
 ## N — הבא בתור
 
 **סדר ביצוע קשיח — כל N תלוי ב-N שלפניו.**
 
-### N01 — Airtable Save Debounce
+### N01 — Airtable Schema Formula Mismatch
+**למה קודם:** field name mismatch גורם לקריאות שבורות ב-Lead Pipeline ו-Lead Card.
+**מה:** יישור שמות שדות בין airtable_schema.py לטבלאות האמיתיות.
+**קבצים:** airtable_schema.py + tma_api.py.
+**flag:** אין flag — תיקון schema בלבד.
+
+### N02 — Airtable Save Debounce
 **למה קודם:** scoring רץ על כל הודעה → כותב ל-Airtable על כל הודעה → rate-limit.
 **מה:** counter per memory_key ב-LeadMemory. שמירה רק כל N=3 הודעות, או כש-tier השתנה.
 **קבצים:** core/lead_memory.py בלבד.
 **flag:** קיים (LEAD_MEMORY). אין flag חדש.
 
-### N02 — Followup Activation
-**תלוי ב:** N01 (אחרת scan → update → rate-limit מיד).
+### N03 — Followup Activation
+**תלוי ב:** N02 (אחרת scan → update → rate-limit מיד).
 **מה:**
 - scan אמיתי בscheduler: טוען לידים פעילים, מריץ determine_followup_needed
 - יוצר טיוטה / תזכורת
@@ -82,20 +107,14 @@
 **קבצים:** core/followup_engine.py, scheduler.py (job קיים ← מחבר).
 **flag:** FOLLOWUP_AUTOMATION (קיים, כבוי).
 
-### N03 — Contact Resolver
+### N04 — Contact Resolver
 **תלוי ב:** ללא תלות, עצמאי.
 **מה:** "שלח מייל לדניאל" → חיפוש fuzzy ב-Contacts → אם יש כפילות, מבקש אישור → מבצע.
 **קבצים:** כלי חדש contact_resolver.py + רישום ב-tool_registry + schemas.
 **flag:** חדש — CONTACT_RESOLVER (כבוי ברירת מחדל).
 
-### N04 — Payment Reminder
-**תלוי ב:** ללא תלות, עצמאי.
-**מה:** rule-based. תזכורת 3 ימים לפני תשלום, התראה אם עבר.
-**קבצים:** scheduler.py (job חדש) + אין קובץ חדש — לוגיקה פשוטה.
-**flag:** חדש — PAYMENT_REMINDERS (כבוי ברירת מחדל).
-
 ### N05 — Daily Digest שדרוג
-**תלוי ב:** N02 (כדי שלידים חדשים + scoring יופיעו בדוח).
+**תלוי ב:** N03 (כדי שלידים חדשים + scoring יופיעו בדוח).
 **מה:** חיבור scoring + לידים חדשים לדוח הבוקר הקיים.
 **קבצים:** daily_digest.py בלבד.
 
@@ -105,12 +124,12 @@
 
 ### F01 — Lead Recovery
 מה: לידים שדעכו → זיהוי אוטומטי → הצעת פנייה מחדש לowner.
-תלוי ב: N02 Followup.
+תלוי ב: N03 Followup.
 Spec מפורט: ראה ARCHIVE_additions_log.md → A14.
 
 ### F02 — Learning Engine
 מה: מעל lead_events (כבר נצבר מ-C12). לומד מדפוסים, התנגדויות, מה סגר עסקאות.
-תלוי ב: N02, כמה חודשי דאטה.
+תלוי ב: N03, כמה חודשי דאטה.
 Spec: ARCHIVE_additions_log.md → A33.
 
 ### F03 — Revenue Attribution
@@ -123,14 +142,14 @@ Spec: ARCHIVE_additions_log.md → A10.
 תלוי ב: C21 Daily Digest + F03.
 Spec: ARCHIVE_additions_log.md → A26.
 
-### F05 — Multi-Number WhatsApp (3 מספרים → 3 דומיינים)
-מה: C02 כבר תומך — חסר רק מספרי Twilio אמיתיים ב-CHANNEL_DOMAINS.
-חסם: מספר Twilio production (לא sandbox).
+### F05 — WhatsApp Production (Meta Cloud API)
+מה: WhatsApp outbound אמיתי. כרגע honest stub — תלוי Meta Cloud API.
+חסם: אישור Meta Cloud API + מספרים ייעודיים.
 Spec: ARCHIVE_additions_log.md → A17.
 
 ### F06 — Email Channel (Inbound)
 מה: לקוח שולח מייל → gmail_read → Router → Agent → draft → אישור → שליחה.
-תלוי ב: C02 Router (קיים).
+תלוי ב: Google Tools הפשרה (מוקפאים כרגע).
 Spec: ARCHIVE_additions_log.md → A42.
 
 ### F07 — Voice / IVR (מגזר חרדי)
@@ -149,7 +168,7 @@ Spec: ARCHIVE_additions_log.md → A20.
 
 1. **Feature flag = כבוי ברירת מחדל.** מדליקים במודע.
 2. **app.py — 4 hooks בלבד (H1–H4).** לא נוגעים שוב בלי סיבה ארכיטקטונית.
-3. **Agent לא גונע ב-Airtable ישירות.** תמיד דרך crm.py.
+3. **Agent לא נוגע ב-Airtable ישירות.** תמיד דרך crm.py.
 4. **זיכרון ליד = identity.memory_key בלבד.** לא phone, לא email.
 5. **מקור אמת לדומיין = detect_domain() בלבד.** config.py = input provider.
 6. **לא בונים batch לפי פיצ'ר — בונים לפי קובץ.**
