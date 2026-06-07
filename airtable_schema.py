@@ -199,6 +199,7 @@ class LeadFields:
     MEMORY_KEY      = "memory_key"
     TENANT_ID       = "tenant_id"
     DOMAIN          = "domain"
+    CONVERTED_AT    = "converted_at"  # written by ad_attribution.mark_converted + lead_conversion
 
 
 class BusinessMemoryFields:

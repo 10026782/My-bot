@@ -162,6 +162,27 @@ def cmd_done(msg):
         bot.send_message(msg.chat.id, f"❌ שגיאה: {e}")
 
 
+@bot.message_handler(commands=["convert"])
+def cmd_convert(msg):
+    """/convert [שם/טלפון] — הופך ליד לאיש קשר ב-CRM (owner בלבד, דורש LEAD_AUTO_CONVERT)."""
+    identity = resolve_identity("telegram", str(msg.from_user.id))
+    if not identity or identity.role not in ("owner", "admin"):
+        return
+    try:
+        from lead_conversion import convert_lead_to_contact
+        query = msg.text.split(maxsplit=1)[1].strip() if len(msg.text.split()) > 1 else ""
+        if not query:
+            bot.send_message(msg.chat.id, "שימוש: /convert [שם או טלפון של ליד]")
+            return
+
+        ok, reply = convert_lead_to_contact(query)
+        bot.send_message(msg.chat.id, reply, parse_mode="Markdown")
+        logger.info(f"[LeadConvert] /convert '{query}' → {'OK' if ok else 'skip'} by {identity.display_name}")
+    except Exception as e:
+        logger.error(f"cmd_convert error: {e}")
+        bot.send_message(msg.chat.id, f"❌ שגיאה: {e}")
+
+
 @bot.message_handler(commands=["quest"])
 def cmd_quest(msg):
     """/quest — Quest Log השבוע."""
