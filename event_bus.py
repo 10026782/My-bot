@@ -189,11 +189,14 @@ class EventBus:
         action  = item["action"]
         payload = item["payload"]
         chat_id = item["chat_id"]
-        logger.info(f"✅ Confirmed: {action_id} | {action}")
         result = self.emit(f"{action}.confirmed", payload, chat_id)
         if result is None:
-            logger.error(f"[EventBus] confirm: no handler for {action}.confirmed — action NOT executed")
-            return f"⚠️ אין handler ל-{action} — הפעולה לא בוצעה."
+            logger.error(
+                f"[EventBus] confirm: no handler for '{action}.confirmed' — "
+                f"action NOT executed (action_id={action_id})"
+            )
+            return f"⚠️ אין handler לפעולה זו — הפעולה לא בוצעה."
+        logger.info(f"✅ Confirmed and executed: {action_id} | {action}")
         return result
 
     def reject(self, action_id: str) -> str:
