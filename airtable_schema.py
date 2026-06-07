@@ -558,3 +558,17 @@ class BossBattlesFields:
     ANSWER       = "Answer"
     STATUS       = "Status"       # Boss Defeated | Boss Won
     COINS_EARNED = "Coins_Earned"
+
+
+class DailyTaskFields:
+    DATE   = "Date"
+    TASK   = "Task"
+    QUEST  = "Quest"    # linked record → Quests
+    COINS  = "Coins"
+    STATUS = "Status"   # Todo | Done | Skipped
+    WHO    = "Who"      # אליהו | קלוד קוד | אורי
+
+class DailyTaskStatus:
+    TODO    = "Todo"
+    DONE    = "Done"
+    SKIPPED = "Skipped"

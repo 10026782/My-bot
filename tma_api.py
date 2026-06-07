@@ -19,6 +19,7 @@ from identity import resolve_identity, Role
 from airtable_schema import (
     LeadFields, PaymentStatus, BusinessMemoryFields, InteractionLogFields, Tables,
     QuestsFields, CoinsLogFields, WorldsFields, QuestStatus, WorldStatus,
+    DailyTaskFields, DailyTaskStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -89,6 +90,16 @@ def _preflight_game_status():
 
 @tma_api.route("/api/game/quests/<quest_id>", methods=["OPTIONS"])
 def _preflight_game_quest(_quest_id=None):
+    return "", 204
+
+
+@tma_api.route("/api/game/today", methods=["OPTIONS"])
+def _preflight_game_today():
+    return "", 204
+
+
+@tma_api.route("/api/game/tasks/<task_id>/done", methods=["OPTIONS"])
+def _preflight_game_task_done(_task_id=None):
     return "", 204
 
 
@@ -1371,4 +1382,107 @@ def update_quest(quest_id, identity):
         details=f"{quest_name} → {new_status}",
     )
     return jsonify({"ok": True, "quest_id": quest_id, "status": new_status, "coins_awarded": coins_awarded})
+
+
+# ══════════════════════════════════════════════════════════════════
+# Game — Daily Tasks screen
+# ══════════════════════════════════════════════════════════════════
+
+@tma_api.route("/api/game/today", methods=["GET"])
+@require_tma_auth
+def game_today(identity):
+    """Today's Daily_Tasks + active world + total coins. Owner only."""
+    if not identity.is_owner:
+        return jsonify({"error": "forbidden"}), 403
+
+    today_str = date.today().isoformat()
+
+    # ── Daily Tasks (filter by date in Python — more reliable than AT formula) ──
+    all_tasks = _at_list(Tables.DAILY_TASKS, "", max_records=200)
+    today_tasks = [
+        r for r in all_tasks
+        if (r.get("fields", {}).get(DailyTaskFields.DATE, "") or "")[:10] == today_str
+    ]
+
+    tasks = []
+    for r in today_tasks:
+        f = r.get("fields", {})
+        tasks.append({
+            "id":     r["id"],
+            "task":   f.get(DailyTaskFields.TASK, ""),
+            "coins":  int(f.get(DailyTaskFields.COINS, 0) or 0),
+            "status": f.get(DailyTaskFields.STATUS, DailyTaskStatus.TODO),
+            "who":    f.get(DailyTaskFields.WHO, ""),
+        })
+
+    # ── Active World ─────────────────────────────────────────────
+    active_world = None
+    worlds = _at_list(Tables.WORLDS, f"{{{WorldsFields.STATUS}}}='{WorldStatus.ACTIVE}'", max_records=1)
+    if worlds:
+        wf = worlds[0].get("fields", {})
+        target = int(wf.get(WorldsFields.TOTAL_COINS_TARGET, 0) or 0)
+        earned = int(wf.get(WorldsFields.COINS_EARNED, 0) or 0)
+        pct    = round(100 * earned / target, 1) if target > 0 else 0.0
+        active_world = {
+            "id":           worlds[0]["id"],
+            "name":         wf.get(WorldsFields.NAME, ""),
+            "number":       int(wf.get(WorldsFields.NUMBER, 0) or 0),
+            "boss":         wf.get(WorldsFields.BOSS, ""),
+            "prize":        wf.get(WorldsFields.PRIZE, ""),
+            "coins_earned": earned,
+            "coins_target": target,
+            "progress_pct": pct,
+        }
+
+    # ── Total Coins ───────────────────────────────────────────────
+    log_recs    = _at_list(Tables.COINS_LOG, "", max_records=500)
+    total_coins = sum(int(r.get("fields", {}).get(CoinsLogFields.COINS, 0) or 0) for r in log_recs)
+
+    return jsonify({
+        "today":       today_str,
+        "tasks":       tasks,
+        "world":       active_world,
+        "total_coins": total_coins,
+    })
+
+
+@tma_api.route("/api/game/tasks/<task_id>/done", methods=["PATCH"])
+@require_tma_auth
+def complete_daily_task(task_id, identity):
+    """Mark a Daily_Task as Done and auto-write a Coins_Log entry. Owner only."""
+    if not identity.is_owner:
+        return jsonify({"error": "forbidden"}), 403
+
+    rec = _at_get_record(Tables.DAILY_TASKS, task_id)
+    if not rec:
+        return jsonify({"error": "task not found"}), 404
+
+    f          = rec.get("fields", {})
+    old_status = f.get(DailyTaskFields.STATUS, "")
+    task_name  = f.get(DailyTaskFields.TASK, task_id)
+
+    if old_status == DailyTaskStatus.DONE:
+        return jsonify({"ok": True, "coins_awarded": 0, "already_done": True})
+
+    ok = _at_patch(Tables.DAILY_TASKS, task_id, {DailyTaskFields.STATUS: DailyTaskStatus.DONE})
+    if not ok:
+        return jsonify({"error": "update failed"}), 500
+
+    coins = int(f.get(DailyTaskFields.COINS, 0) or 0)
+    coins_awarded = 0
+    if coins > 0:
+        quest_ids = f.get(DailyTaskFields.QUEST, []) or []
+        log_fields: dict = {
+            CoinsLogFields.ACTION: task_name,
+            CoinsLogFields.COINS:  coins,
+            CoinsLogFields.DATE:   date.today().isoformat(),
+            CoinsLogFields.NOTE:   "Daily task completed via TMA",
+        }
+        if quest_ids:
+            log_fields[CoinsLogFields.QUEST] = quest_ids
+        _at_post(Tables.COINS_LOG, log_fields)
+        coins_awarded = coins
+
+    _audit("daily_task_done", identity, details=f"{task_name} +{coins}🪙")
+    return jsonify({"ok": True, "coins_awarded": coins_awarded})
 
