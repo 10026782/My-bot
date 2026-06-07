@@ -321,15 +321,34 @@ def _validate_initdata(init_data_str: str) -> dict | None:
         digestmod=hashlib.sha256,
     ).hexdigest()
 
-    if not hmac.compare_digest(received_hash, expected_hash):
-        return None
+    hmac_ok = hmac.compare_digest(received_hash, expected_hash)
 
     # Reject data older than 24 hours
+    auth_date = None
+    age_seconds = None
     try:
         auth_date = int(params.get("auth_date", 0))
-        if time.time() - auth_date > 86_400:
-            return None
+        age_seconds = int(time.time() - auth_date)
     except (TypeError, ValueError):
+        pass
+
+    logger.info(
+        "[TMA initData debug] keys=%s hmac_ok=%s received_hash_prefix=%s expected_hash_prefix=%s "
+        "auth_date=%s age_seconds=%s bot_token_set=%s bot_token_len=%s",
+        sorted(params.keys()),
+        hmac_ok,
+        (received_hash or "")[:8],
+        expected_hash[:8],
+        auth_date,
+        age_seconds,
+        bool(_BOT_TOKEN),
+        len(_BOT_TOKEN),
+    )
+
+    if not hmac_ok:
+        return None
+
+    if auth_date is None or age_seconds is None or age_seconds > 86_400:
         return None
 
     try:
