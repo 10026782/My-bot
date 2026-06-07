@@ -466,11 +466,9 @@ def _get_global_kpis() -> dict:
         max_records=50,
     )
 
-    # Hot leads — {tier} field name unknown, removed to avoid 422.
-    # score>=70 OR status='hot' is sufficient.
     hot_leads = _at_list(
         "Leads",
-        f"OR({{status}}='hot', {{{LeadFields.SCORE}}}>=70)",
+        f"OR({{status}}='hot', {{{LeadFields.TIER}}}='HOT', {{{LeadFields.SCORE}}}>=70)",
         max_records=20,
     )
 
