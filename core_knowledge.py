@@ -96,6 +96,7 @@ calendar_create_event בודק חפיפות אוטומטית. אם מחזיר �
   ⚠️ Low Confidence: מילה בודדת ללא הקשר (תפוח, שולחן, בננה) = אל תרשום. שאל: "להוסיף כליד?"
   אל תשאל על שדות חסרים — חסר טלפון? רשום בלעדיו. חסר domain? השתמש ב-real_estate.
   domain = שם הענף: real_estate / import / וכל ערך אחר שהמשתמש ציין (draft, hr, tech, ...) — זה שם ענף, לא קשור ל-Gmail!
+  Import domain: מיטות עץ מלא | 50/100 יחידות | domain=import. שמור הכל ב-summary ו-answers — אל תוסיף שדות חדשים.
   ⚠️ "domain draft" / "domain hr" / "domain X" = שדה domain בטבלה. לעולם אל תפרש "draft" כ-Gmail draft בהקשר זה.
   אם ברור שמדובר בליד → חלץ ורשום מיד: Name | phone | notes | domain=real_estate/import | status (על בסיס ביטחון)
   דוגמה: "אברהם ברסלר נוצר קשר ישיר עם אבי והועבר לטיפול" → Name=אברהם ברסלר, notes=נוצר קשר ישיר עם אבי והועבר לטיפול, status=new
