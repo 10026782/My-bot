@@ -98,45 +98,59 @@ def _followups_today(errors: list) -> str:
         return "📞 *מעקבים להיום:* שגיאה"
 
 
-def _urgent_tasks(errors: list) -> str:
-    """✅ משימות דחופות — due <= מחר ולא בוצע; deadlines גבוהה ולא הושלם"""
+def _roadmap_tasks_today(errors: list) -> str:
+    """📅 משימות היום — Roadmap_Tasks של אליהו, Due_Date <= היום, לא Done, ממוין P0→P3"""
     try:
-        tomorrow = (date.today() + timedelta(days=1)).isoformat()
-
-        task_recs = _fetch(
-            "משימות (Tasks)",
-            f"AND(IS_BEFORE({{תאריך יעד}}, '{tomorrow}'), {{סטטוס}} != 'בוצע')",
-            max_rec=10,
-        )
-        dl_recs = _fetch(
-            "משימות ודד ליינים",
-            "AND({עדיפות}='גבוהה', {סטטוס}!='הושלם')",
-            max_rec=5,
+        today_str = date.today().isoformat()
+        records   = _fetch(
+            "Roadmap_Tasks",
+            f"AND("
+            f"{{Owner}}='אליהו', "
+            f"{{Status}}!='Done', "
+            f"IS_BEFORE({{Due_Date}}, DATEADD('{today_str}', 1, 'days'))"
+            f")",
+            max_rec=30,
         )
 
-        lines = ["✅ *משימות דחופות:*"]
-        count = 0
+        if not records:
+            return "📅 *משימות היום:* אין"
 
-        for r in task_recs:
-            f = r.get("fields", {})
-            lines.append(
-                f"• {f.get('כותרת המשימה','?')} | {_fmt(f.get('תאריך יעד',''))} | {f.get('סטטוס','—')}"
-            )
-            count += 1
+        # Sort by priority order
+        _PRIO_ORDER = {"P0": 0, "P1": 1, "P2": 2, "P3": 3, "": 4}
+        records.sort(key=lambda r: _PRIO_ORDER.get(
+            r.get("fields", {}).get("Priority", ""), 4
+        ))
 
-        for r in dl_recs:
-            f = r.get("fields", {})
-            lines.append(
-                f"• ⚡ {f.get('שם המשימה','?')} | {_fmt(f.get('תאריך דדליין',''))} | {f.get('אחראי','—')}"
-            )
-            count += 1
+        buckets: dict[str, list[str]] = {"P0": [], "P1": [], "P2": [], "P3": []}
+        for r in records:
+            f       = r.get("fields", {})
+            task    = f.get("Task", "?")
+            prio    = f.get("Priority", "P3")
+            status  = f.get("Status", "")
+            blocker = " 🚧" if f.get("Blocker") else ""
+            due     = _fmt(f.get("Due_Date", ""))
+            status_icon = "🔄" if status == "In Progress" else "☐"
+            line    = f"{status_icon} {task} | {due}{blocker}"
+            buckets.setdefault(prio, []).append(line)
 
-        if not count:
-            return "✅ *משימות דחופות:* אין"
+        lines = ["📅 *משימות היום*"]
+        if buckets.get("P0"):
+            lines.append("🔥 *P0 — חובה:*")
+            lines.extend(f"  • {t}" for t in buckets["P0"])
+        if buckets.get("P1"):
+            lines.append("🟡 *P1 — חשוב:*")
+            lines.extend(f"  • {t}" for t in buckets["P1"])
+        if buckets.get("P2"):
+            lines.append("🟢 *P2 — אם נשאר זמן:*")
+            lines.extend(f"  • {t}" for t in buckets["P2"])
+        if buckets.get("P3"):
+            lines.append("⚪ *P3:*")
+            lines.extend(f"  • {t}" for t in buckets["P3"])
+
         return "\n".join(lines)
     except Exception as e:
-        errors.append(f"משימות: {e}")
-        return "✅ *משימות דחופות:* שגיאה"
+        errors.append(f"Roadmap Tasks: {e}")
+        return "📅 *משימות היום:* שגיאה"
 
 
 def _open_deals(errors: list) -> str:
@@ -274,7 +288,7 @@ def build_digest() -> str:
     sections = [
         _hot_leads(errors),
         _followups_today(errors),
-        _urgent_tasks(errors),
+        _roadmap_tasks_today(errors),
         _open_deals(errors),
         _upcoming_payments(errors),
         _yesterday_changes(errors),
