@@ -190,7 +190,8 @@ class LeadFields:
     NAME            = "Name"
     PHONE           = "phone"
     STATUS          = "status"
-    SCORE           = "ציון"
+    SCORE           = "score"        # raw numeric — written by lead_memory; "ציון"/"score ציון" don't exist on the live table
+    TIER            = "tier"         # HOT | WARM | COLD — written by lead_memory
     SUMMARY         = "summary"
     ANSWERS         = "answers"
     SOURCE          = "source"
