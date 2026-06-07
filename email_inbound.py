@@ -78,7 +78,7 @@ def poll_inbox(max_results: int = POLL_MAX) -> list[InboundEmail]:
     מחזיר list[InboundEmail].
     """
     try:
-        from google_tools import get_google_token  # type: ignore
+        from tools.google_tools import get_google_token
         import httpx
 
         token = get_google_token()

@@ -99,7 +99,7 @@ class ScanResult:
 def _adapter_calendar(lookback_minutes: int = 10) -> list[InteractionSchema]:
     """פגישות שהסתיימו לפני lookback_minutes דקות."""
     try:
-        from calendar_tools import calendar_get_events  # type: ignore
+        from tools.calendar_tools import calendar_get_events
         raw = calendar_get_events(days_ahead=0)
         if not raw or not isinstance(raw, list):
             return _mock_calendar()
@@ -547,7 +547,7 @@ def run_interaction_scan(
 def send_upcoming_reminders(owner_chat_id: str, minutes_ahead: int = 15):
     """תזכורות לפגישות קרובות — נשמר מD06."""
     try:
-        from calendar_tools import calendar_get_events  # type: ignore
+        from tools.calendar_tools import calendar_get_events
         raw = calendar_get_events(days_ahead=1)
         if not raw or not isinstance(raw, list):
             return
