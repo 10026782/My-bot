@@ -31,6 +31,7 @@ class LeadState:
     channel:        str = ""
     contact_name:   str = ""
     last_message:   str = ""
+    summary:        str = ""
     msg_count:      int = 0
     followup_count: int = 0
     recovery_count: int = 0
@@ -61,7 +62,8 @@ class LeadMemory:
 
     def update(self, memory_key: str, *, tier="", score=-1,
                domain="", channel="", contact_name="",
-               last_message="", followup_count=-1, recovery_count=-1) -> bool:
+               last_message="", summary="",
+               followup_count=-1, recovery_count=-1) -> bool:
         with self._lock:
             state        = self._get_unlocked(memory_key)
             tier_changed = False
@@ -81,6 +83,10 @@ class LeadMemory:
             if last_message:
                 state.last_message = last_message[:200]
                 state.dirty        = True
+
+            if summary and summary != state.summary:
+                state.summary = summary
+                state.dirty   = True
 
             if followup_count >= 0: state.followup_count = followup_count
             if recovery_count >= 0: state.recovery_count = recovery_count
@@ -131,10 +137,12 @@ class LeadMemory:
             return list(self._store.values())
 
     def _write(self, state: LeadState) -> bool:
-        """כותב לAirtable דרך airtable_tools בלבד."""
+        """כותב לAirtable דרך airtable_tools בלבד.
+        מחפש לפי memory_key לפני יצירה — מונע רשומות כפולות עם W0/N02
+        שכבר עשויים ליצור/לעדכן את אותה רשומת Lead."""
         try:
-            from tools.airtable_tools import airtable_add, airtable_update  # type: ignore
-            from airtable_schema import Tables                          # type: ignore
+            from tools.airtable_tools import airtable_get, airtable_add, airtable_update  # type: ignore
+            from airtable_schema import Tables, LeadFields               # type: ignore
 
             fields = {
                 "memory_key": state.memory_key,
@@ -145,6 +153,14 @@ class LeadMemory:
                 "Name":       state.contact_name,
                 "updated_at": state.last_active,
             }
+            if state.summary:
+                fields[LeadFields.SUMMARY] = state.summary
+
+            if not state.record_id:
+                raw = airtable_get(Tables.LEADS, f"{{{LeadFields.MEMORY_KEY}}}='{state.memory_key}'")
+                m   = re.search(r'rec\w+', raw or "")
+                if m:
+                    state.record_id = m.group(0)
 
             if state.record_id:
                 result = airtable_update(Tables.LEADS, state.record_id, fields)
