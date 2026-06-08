@@ -9,23 +9,15 @@ lead_qualifier.py — Lead Qualification Engine (MADS CORE)
 import os
 import logging
 from enum import Enum
-from anthropic import Anthropic
 from feature_flags import is_enabled
 from domain_prompts import get_qualification_prompt, get_flow, get_domain_config
 from config import get_domain
+from llm_fallback import call_anthropic_text
 from session_store import lead_sessions
 from score_display import format_lead_report
 
 logger = logging.getLogger(__name__)
 
-_client = None
-
-
-def _get_client() -> Anthropic:
-    global _client
-    if _client is None:
-        _client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
-    return _client
 
 
 # ─── Lead Qualification ───────────────────────────────────────────────────────
@@ -35,13 +27,15 @@ def qualify_lead(lead_info: str, domain: str = "real_estate") -> dict:
         return _mock_qualify(lead_info)
     system_prompt = get_qualification_prompt(domain)
     try:
-        response = _get_client().messages.create(
+        text = call_anthropic_text(
+            source="lead_qualifier.qualify_lead",
             model="claude-haiku-4-5-20251001",
             max_tokens=512,
             system=system_prompt,
-            messages=[{"role": "user", "content": f"נתח את הליד הבא:\n{lead_info}"}],
+            messages=[{"role": "user", "content": f"\u05e0\u05ea\u05d7 \u05d0\u05ea \u05d4\u05dc\u05d9\u05d3 \u05d4\u05d1\u05d0:\n{lead_info}"}],
         )
-        return _parse_response(response.content[0].text)
+        return _parse_response(text)
+
     except Exception as e:
         logger.error(f"qualify_lead error: {e}")
         return {"score": 0, "tier": "COLD", "summary": "שגיאה בניתוח הליד.", "risk": str(e), "next_step": "נסה שנית"}

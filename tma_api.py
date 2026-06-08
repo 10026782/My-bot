@@ -1047,26 +1047,26 @@ def ask_ai(identity):
     try:
         # Route through existing BOSS context layer — build_context applies
         # role-based system prompt, model selection, and memory from memory_store.
-        import anthropic
         from context import build_context
+        from llm_fallback import call_anthropic_text
         from memory_store import memory
 
         ctx      = build_context(identity, full_question)
         history  = memory.get_for_claude(ctx.memory_key)
         messages = history + [{"role": "user", "content": full_question}]
 
-        _client  = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
-        response = _client.messages.create(
-            model       = ctx.model,
-            max_tokens  = ctx.max_tokens,
-            temperature = 0.2,
-            system      = ctx.system_prompt,
-            messages    = messages,
-            # No tools — TMA Ask AI is a single-turn contextual answer
+        answer = call_anthropic_text(
+            source="tma_api.ask_ai",
+            model=ctx.model,
+            max_tokens=ctx.max_tokens,
+            temperature=0.2,
+            system=ctx.system_prompt,
+            messages=messages,
         )
+        if not answer:
+            answer = "AI service returned no text."
+        return jsonify({"answer": answer, "context": context_type})
 
-        text_blocks = [b for b in response.content if b.type == "text"]
-        answer = text_blocks[0].text if text_blocks else "⚠️ לא התקבלה תשובה."
 
     except Exception as e:
         logger.error(f"[AskAI] error: {e}", exc_info=True)

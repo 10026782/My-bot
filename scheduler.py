@@ -363,8 +363,8 @@ def _job_audience_report():
 def _job_interaction_scan():
     """D06: ניתוח פגישות + זיכרון עסקי — כל 15 דקות."""
     try:
-        from feature_flags import is_enabled
-        if not is_enabled("INTERACTION_INTELLIGENCE"):
+        if os.getenv("INTERACTION_INTELLIGENCE", "false").lower() != "true":
+            logger.info("[D06] interaction intelligence disabled by env")
             return
         from interaction_engine import run_interaction_scan, send_upcoming_reminders
         owner_chat_id = os.environ.get("DIGEST_CHAT_ID", "")

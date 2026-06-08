@@ -1,7 +1,6 @@
-import os
 import logging
-from anthropic import Anthropic
 from feature_flags import is_enabled
+from llm_fallback import call_anthropic_text
 
 logger = logging.getLogger(__name__)
 
@@ -33,16 +32,6 @@ TEMPLATES: dict[str, str] = {
     ),
 }
 
-_client = None
-
-
-def _get_client() -> Anthropic:
-    global _client
-    if _client is None:
-        _client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
-    return _client
-
-
 def generate(template_name: str, context: str, tone: str = "professional") -> str:
     """מייצר תוכן שיווקי לפי תבנית נבחרת והקשר עסקי."""
     if template_name not in TEMPLATES:
@@ -58,13 +47,14 @@ def generate(template_name: str, context: str, tone: str = "professional") -> st
     prompt = f"{instruction}\n{tone_note}\n\nפרטי ההקשר:\n{context}"
 
     try:
-        response = _get_client().messages.create(
+        return call_anthropic_text(
+            source="creative_generator.generate",
             model="claude-sonnet-4-6",
             max_tokens=512,
             system=_PERSONA,
             messages=[{"role": "user", "content": prompt}],
-        )
-        return response.content[0].text.strip()
+        ).strip()
+
     except Exception as e:
         logger.error(f"generate error: {e}")
         return f"❌ שגיאה בייצור תוכן: {e}"

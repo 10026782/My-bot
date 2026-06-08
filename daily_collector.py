@@ -7,7 +7,7 @@
 
 import os
 import logging
-import anthropic
+from llm_fallback import call_anthropic_text
 
 logger = logging.getLogger(__name__)
 
@@ -74,28 +74,26 @@ def collect_daily(memory_key: str) -> dict:
         return {"items": [], "all_clear": True}
 
     try:
-        client = anthropic.Anthropic(
-            api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
-            timeout=30,
-        )
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",   # זול ומהיר — מספיק לסריקה
+        raw = call_anthropic_text(
+            source="daily_collector.collect_daily",
+            model="claude-haiku-4-5-20251001",
             max_tokens=800,
             temperature=0.1,
+            timeout=30,
             messages=[{
                 "role": "user",
                 "content": _COLLECTOR_PROMPT + convo_text
             }]
-        )
+        ).strip()
 
-        raw = response.content[0].text.strip()
-        # נקה ```json אם יש
+        # ׳ ׳§׳” ```json ׳׳ ׳™׳©
         raw = raw.replace("```json", "").replace("```", "").strip()
 
         import json
         result = json.loads(raw)
-        logger.info(f"collect_daily: {len(result.get('items',[]))} פריטים זוהו")
+        logger.info(f"collect_daily: {len(result.get('items',[]))} ׳₪׳¨׳™׳˜׳™׳ ׳–׳•׳”׳•")
         return result
+
 
     except Exception as e:
         logger.error(f"collect_daily error: {e}")
