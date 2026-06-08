@@ -11,7 +11,7 @@ import logging
 import os
 import time
 import urllib.parse
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from functools import wraps
 
 from flask import Blueprint, jsonify, request
@@ -19,7 +19,7 @@ from identity import resolve_identity, Role
 from airtable_schema import (
     LeadFields, PaymentStatus, BusinessMemoryFields, InteractionLogFields, Tables,
     QuestsFields, CoinsLogFields, WorldsFields, QuestStatus, WorldStatus,
-    DailyTaskFields, DailyTaskStatus,
+    DailyTaskFields, DailyTaskStatus, ApprovalsFields,
 )
 
 logger = logging.getLogger(__name__)
@@ -291,6 +291,74 @@ def _try_bus_action(context_id: str, decision: str) -> None:
 # Stateless Telegram initData validation
 # https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
 # ══════════════════════════════════════════════════════════════════
+
+def _identity_ref(identity) -> str:
+    return str(getattr(identity, "user_id", "") or getattr(identity, "display_name", "") or "unknown")
+
+
+def _queue_tma_write_approval(action: str, payload: dict, identity, label: str) -> tuple[str, dict]:
+    approval_payload = {
+        "type": "tma_write",
+        "action": action,
+        "requested_by": _identity_ref(identity),
+        **payload,
+    }
+    rec = _at_post("Approvals", {
+        ApprovalsFields.ACTION: label,
+        ApprovalsFields.REQUESTED_BY: _identity_ref(identity),
+        ApprovalsFields.REQUESTED_AT: datetime.now(timezone.utc).isoformat(),
+        ApprovalsFields.RISK_LEVEL: "high",
+        ApprovalsFields.CONTEXT_TYPE: "tma_write",
+        ApprovalsFields.CONTEXT_ID: action,
+        ApprovalsFields.CONTEXT_DATA: json.dumps(approval_payload, ensure_ascii=False),
+        ApprovalsFields.STATUS: "\u05de\u05de\u05ea\u05d9\u05df",
+    })
+    approval_id = rec.get("id", "") if rec else ""
+    return approval_id, {
+        "status": "pending_approval",
+        "approval_id": approval_id,
+        "message": "Approval required",
+    }
+
+
+def _receipt(action: str, table: str, record_id: str, requested_by: str, approved_by: str) -> dict:
+    return {
+        "action": action,
+        "table": table,
+        "record_id": record_id,
+        "requested_by": requested_by,
+        "approved_by": approved_by,
+        "status": "executed",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _execute_tma_write(payload: dict, approved_by_identity) -> dict:
+    action = payload.get("action", "")
+    table = payload.get("table", "")
+    requested_by = payload.get("requested_by", "unknown")
+    approved_by = _identity_ref(approved_by_identity)
+
+    if payload.get("op") == "post":
+        rec = _at_post(table, payload.get("fields", {}))
+        if not rec:
+            return {"ok": False, "error": f"failed to create record in {table}"}
+        record_id = rec.get("id", "")
+    elif payload.get("op") == "patch":
+        record_id = payload.get("record_id", "")
+        ok = _at_patch(table, record_id, payload.get("fields", {}))
+        if not ok:
+            return {"ok": False, "error": f"failed to update record in {table}", "record_id": record_id}
+    else:
+        return {"ok": False, "error": "unsupported TMA write operation"}
+
+    _audit(payload.get("audit_action", action), approved_by_identity, details=payload.get("audit_details", ""))
+    return {
+        "ok": True,
+        "action": "approve",
+        "receipt": _receipt(action, table, record_id, requested_by, approved_by),
+    }
+
 
 def _validate_initdata(init_data_str: str) -> dict | None:
     """
@@ -639,12 +707,19 @@ def create_project(identity):
         "owner_ids":     identity.user_id,
         "tenant_id":     identity.tenant_id,
     }
-    rec = _at_post("ProjectsHub", fields)
-    if not rec:
-        return jsonify({"error": "failed to create project — ProjectsHub table may not exist yet"}), 500
-
-    _audit("create_project", identity, details=data["name"])
-    return jsonify({"ok": True, "id": rec["id"], "name": data["name"]}), 201
+    _, response = _queue_tma_write_approval(
+        "tma_create_project",
+        {
+            "op": "post",
+            "table": "ProjectsHub",
+            "fields": fields,
+            "audit_action": "create_project",
+            "audit_details": data["name"],
+        },
+        identity,
+        f"Create project: {data['name']}",
+    )
+    return jsonify(response), 202
 
 
 @tma_api.route("/api/projects/<project_slug>/dashboard", methods=["GET"])
@@ -830,15 +905,22 @@ def update_lead_status(lead_id, identity):
     if not new_status:
         return jsonify({"error": "missing field: status"}), 400
 
-    ok = _at_patch("Leads", lead_id, {"status": new_status})
-    if not ok:
-        return jsonify({"error": "update failed"}), 500
+    _, response = _queue_tma_write_approval(
+        "tma_update_lead_status",
+        {
+            "op": "patch",
+            "table": "Leads",
+            "record_id": lead_id,
+            "fields": {"status": new_status},
+            "audit_action": "lead_status_update",
+            "audit_details": f"{lead_id} -> {new_status}",
+        },
+        identity,
+        f"Update lead status: {lead_id} -> {new_status}",
+    )
+    return jsonify(response), 202
 
-    _audit("lead_status_update", identity, details=f"{lead_id} → {new_status}")
-    return jsonify({"ok": True, "lead_id": lead_id, "status": new_status})
 
-
-# ══════════════════════════════════════════════════════════════════
 # WEEK 1 — Follow-Up (O3 Action)
 # ══════════════════════════════════════════════════════════════════
 
@@ -862,20 +944,26 @@ def create_followup(identity):
 
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
 
-    rec = _at_post("משימות (Tasks)", {
-        "כותרת המשימה": f"מעקב: {lead_name}",
-        "תיאור":         note,
-        "תאריך יעד":    tomorrow,
-        "סטטוס":         "ממתין",
-    })
-    if not rec:
-        return jsonify({"error": "failed to create task"}), 500
+    task_fields = {
+        "\u05db\u05d5\u05ea\u05e8\u05ea \u05d4\u05de\u05e9\u05d9\u05de\u05d4": f"\u05de\u05e2\u05e7\u05d1: {lead_name}",
+        "\u05ea\u05d9\u05d0\u05d5\u05e8": note,
+        "\u05ea\u05d0\u05e8\u05d9\u05da \u05d9\u05e2\u05d3": tomorrow,
+        "\u05e1\u05d8\u05d8\u05d5\u05e1": "\u05de\u05de\u05ea\u05d9\u05df",
+    }
+    _, response = _queue_tma_write_approval(
+        "tma_create_followup",
+        {
+            "op": "post",
+            "table": "\u05de\u05e9\u05d9\u05de\u05d5\u05ea (Tasks)",
+            "fields": task_fields,
+            "audit_action": "followup_created",
+            "audit_details": f"{lead_name}: {note[:80]}",
+        },
+        identity,
+        f"Create follow-up: {lead_name}",
+    )
+    return jsonify(response), 202
 
-    _audit("followup_created", identity, details=f"{lead_name}: {note[:80]}")
-    return jsonify({"ok": True, "task_id": rec["id"], "lead_name": lead_name}), 201
-
-
-# ══════════════════════════════════════════════════════════════════
 # WEEK 1 — Ask AI (routes through existing BOSS context layer)
 # ══════════════════════════════════════════════════════════════════
 
@@ -1114,9 +1202,9 @@ def act_on_approval(approval_id, identity):
     if not identity.is_owner:
         return jsonify({"error": "forbidden"}), 403
 
-    data     = request.get_json(force=True) or {}
+    data = request.get_json(force=True) or {}
     decision = data.get("action", "").strip().lower()   # "approve" | "reject"
-    note     = data.get("note", "").strip()
+    note = data.get("note", "").strip()
 
     if decision not in ("approve", "reject"):
         return jsonify({"error": "action must be 'approve' or 'reject'"}), 400
@@ -1125,34 +1213,52 @@ def act_on_approval(approval_id, identity):
     if not rec:
         return jsonify({"error": "approval not found"}), 404
 
-    f      = rec.get("fields", {})
-    status = f.get("סטטוס", "")
-    if status != "ממתין":
+    f = rec.get("fields", {})
+    status = f.get(ApprovalsFields.STATUS, "")
+    if status != "\u05de\u05de\u05ea\u05d9\u05df":
         return jsonify({"error": f"approval already {status}"}), 409
 
-    new_status = "אושר" if decision == "approve" else "נדחה"
-    patch_fields: dict = {"סטטוס": new_status}
+    new_status = "\u05d0\u05d5\u05e9\u05e8" if decision == "approve" else "\u05e0\u05d3\u05d7\u05d4"
+    patch_fields: dict = {ApprovalsFields.STATUS: new_status}
     if decision == "reject" and note:
-        patch_fields["הערת דחייה"] = note
+        patch_fields[ApprovalsFields.REJECTION_NOTE] = note
+
+    action_label = f.get(ApprovalsFields.ACTION, approval_id)
+    ctx_id = f.get(ApprovalsFields.CONTEXT_ID, "")
+    execution_result = None
+    context_data = f.get(ApprovalsFields.CONTEXT_DATA, "")
+    if decision == "approve" and context_data:
+        try:
+            payload = json.loads(context_data)
+        except (TypeError, ValueError):
+            payload = {}
+        if isinstance(payload, dict) and payload.get("type") == "tma_write":
+            execution_result = _execute_tma_write(payload, identity)
+            if not execution_result.get("ok"):
+                return jsonify({
+                    "error": "approval execution failed",
+                    "detail": execution_result,
+                }), 500
 
     ok = _at_patch("Approvals", approval_id, patch_fields)
     if not ok:
         return jsonify({"error": "update failed"}), 500
 
-    action_label = f.get("פעולה", approval_id)
-    ctx_id       = f.get("מזהה הקשר", "")
-
-    _try_bus_action(ctx_id, decision)
+    if execution_result is None:
+        _try_bus_action(ctx_id, decision)
     _audit(f"approval_{decision}", identity, details=f"{action_label[:100]} | note: {note[:80]}")
 
-    icon = "✅" if decision == "approve" else "❌"
+    icon = "OK" if decision == "approve" else "REJECTED"
     _notify_owner(
-        f"{icon} TMA: {new_status} — {action_label}\n"
-        f"על ידי: {identity.display_name or identity.user_id}"
-        + (f"\nהערה: {note}" if note else "")
+        f"{icon} TMA: {new_status} - {action_label}\n"
+        f"approved_by: {identity.display_name or identity.user_id}"
+        + (f"\nnote: {note}" if note else "")
     )
 
-    return jsonify({"ok": True, "approval_id": approval_id, "new_status": new_status})
+    response = {"ok": True, "approval_id": approval_id, "new_status": new_status}
+    if execution_result is not None:
+        response.update(execution_result)
+    return jsonify(response)
 
 
 @tma_api.route("/api/activity", methods=["GET"])
