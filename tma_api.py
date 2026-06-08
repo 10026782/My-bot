@@ -13,6 +13,7 @@ import time
 import urllib.parse
 from datetime import date, datetime, timedelta, timezone
 from functools import wraps
+from pathlib import Path
 
 from flask import Blueprint, jsonify, request
 from identity import resolve_identity, Role
@@ -91,6 +92,7 @@ def _cors(response):
 @tma_api.route("/api/approvals", methods=["OPTIONS"])
 @tma_api.route("/api/approvals/bulk", methods=["OPTIONS"])
 @tma_api.route("/api/finance/pulse", methods=["OPTIONS"])
+@tma_api.route("/api/owner/control-center", methods=["OPTIONS"])
 def _preflight():
     return "", 204
 
@@ -1175,6 +1177,243 @@ def _fmt_approval(rec: dict) -> dict:
         "context_id":   f.get("מזהה הקשר", ""),
         "status":       f.get("סטטוס", "ממתין"),
     }
+
+
+_CAPABILITY_MAP_PATH = Path(__file__).resolve().parent / "reports" / "capability_map.json"
+
+_DEFAULT_SYSTEM_HEALTH = {
+    "health_percent": 0,
+    "working_count": 0,
+    "partial_count": 0,
+    "broken_count": 0,
+}
+
+_DEFAULT_CRITICAL_SYSTEMS = [
+    {"name": "Leads", "status": "UNKNOWN", "color": "yellow"},
+    {"name": "Tasks", "status": "UNKNOWN", "color": "yellow"},
+    {"name": "Payments", "status": "UNKNOWN", "color": "yellow"},
+    {"name": "Projects", "status": "UNKNOWN", "color": "yellow"},
+    {"name": "Approvals", "status": "UNKNOWN", "color": "yellow"},
+]
+
+_PERMISSIONS_MATRIX = [
+    {"role": "Owner", "read": "All", "write": "All / risk-gated", "approve": "Yes"},
+    {"role": "Partner", "read": "Own domains", "write": "Limited / domain scoped", "approve": "No"},
+    {"role": "Manager", "read": "Operations + CRM", "write": "Approval required", "approve": "No"},
+    {"role": "Employee", "read": "Tasks", "write": "Status only", "approve": "No"},
+]
+
+_BUSINESS_LANGUAGE = {
+    "lead_status": [
+        {"value": "new", "label": "New lead"},
+        {"value": "qualified", "label": "Qualified lead"},
+        {"value": "hot", "label": "Hot lead"},
+        {"value": "cold", "label": "Cold lead"},
+        {"value": "converted", "label": "Converted lead"},
+        {"value": "lost", "label": "Lost lead"},
+    ],
+    "lead_outcome": [
+        {"value": "open", "label": "Still active"},
+        {"value": "followup_needed", "label": "Needs follow-up"},
+        {"value": "meeting_booked", "label": "Meeting booked"},
+        {"value": "converted", "label": "Converted to business result"},
+        {"value": "not_relevant", "label": "Not relevant"},
+    ],
+    "lead_tier": [
+        {"value": "HOT", "label": "High intent / urgent"},
+        {"value": "WARM", "label": "Potential but not urgent"},
+        {"value": "COLD", "label": "Low intent / nurture"},
+    ],
+}
+
+_DEFAULT_BLOCKERS = [
+    "Lead Scoring not active",
+    "Lead Memory not wired",
+    "Followup automation not active",
+    "WhatsApp outbound not active",
+    "Receipt display needs frontend surface",
+]
+
+
+def _status_color(status: str) -> str:
+    normalized = (status or "").upper()
+    if normalized == "WORKING":
+        return "green"
+    if normalized == "BROKEN":
+        return "red"
+    return "yellow"
+
+
+def _load_capability_map() -> tuple[dict, list[str]]:
+    try:
+        if not _CAPABILITY_MAP_PATH.exists():
+            return {}, [f"capability_map missing: {_CAPABILITY_MAP_PATH}"]
+        return json.loads(_CAPABILITY_MAP_PATH.read_text(encoding="utf-8")), []
+    except Exception as e:
+        logger.warning(f"[OwnerControlCenter] capability_map load failed: {e}")
+        return {}, [f"capability_map load failed: {type(e).__name__}"]
+
+
+def _owner_system_health(capability_map: dict) -> dict:
+    summary = capability_map.get("summary") or {}
+    if not summary:
+        return dict(_DEFAULT_SYSTEM_HEALTH)
+    return {
+        "health_percent": summary.get("system_health_percent", 0),
+        "working_count": summary.get("working_count", 0),
+        "partial_count": summary.get("partial_count", 0),
+        "broken_count": summary.get("broken_count", 0),
+    }
+
+
+def _owner_critical_systems(capability_map: dict) -> list[dict]:
+    systems = capability_map.get("critical_systems") or []
+    if not systems:
+        return list(_DEFAULT_CRITICAL_SYSTEMS)
+
+    wanted = {
+        "Leads": "Leads",
+        "Tasks": "Tasks",
+        "Payments": "Payments",
+        "ProjectsHub": "Projects",
+        "Projects": "Projects",
+        "Approvals": "Approvals",
+    }
+    by_display: dict[str, dict] = {}
+    for item in systems:
+        display_name = wanted.get(item.get("name", ""))
+        if not display_name:
+            continue
+        status = item.get("status", "UNKNOWN")
+        by_display[display_name] = {
+            "name": display_name,
+            "status": status,
+            "color": _status_color(status),
+            "owner": item.get("owner", ""),
+            "next_blocker": item.get("next_blocker", ""),
+        }
+
+    return [by_display.get(item["name"], item) for item in _DEFAULT_CRITICAL_SYSTEMS]
+
+
+def _owner_blockers_and_actions(capability_map: dict) -> tuple[list[str], list[str]]:
+    blockers: list[str] = []
+    for item in capability_map.get("critical_systems") or []:
+        blocker = item.get("next_blocker", "")
+        status = (item.get("status", "") or "").upper()
+        if blocker and status != "WORKING":
+            blockers.append(blocker)
+
+    for capabilities in (capability_map.get("domains") or {}).values():
+        for item in capabilities:
+            blocker = item.get("next_blocker", "")
+            status = (item.get("status", "") or "").upper()
+            if blocker and status in {"PARTIAL", "STUB", "BROKEN"}:
+                blockers.append(blocker)
+
+    deduped = []
+    for blocker in blockers:
+        if blocker not in deduped:
+            deduped.append(blocker)
+
+    if not deduped:
+        deduped = list(_DEFAULT_BLOCKERS)
+
+    return deduped[:5], [
+        "Activate Lead Scoring",
+        "Wire Lead Memory after scoring",
+        "Turn on Followup automation for HOT leads",
+    ]
+
+
+def _owner_approvals_snapshot() -> tuple[dict, list[str]]:
+    warnings: list[str] = []
+    pending: list[dict] = []
+    executed: list[dict] = []
+
+    try:
+        pending_formula = f"{{{ApprovalsFields.STATUS}}}='\u05de\u05de\u05ea\u05d9\u05df'"
+        pending = [_fmt_approval(r) for r in _at_list("Approvals", pending_formula, max_records=50)]
+    except Exception as e:
+        logger.warning(f"[OwnerControlCenter] pending approvals read failed: {e}")
+        warnings.append(f"pending approvals read failed: {type(e).__name__}")
+
+    try:
+        recs = _at_list("Approvals", "", max_records=25)
+        for rec in recs:
+            item = _fmt_approval(rec)
+            if item.get("status") != "\u05de\u05de\u05ea\u05d9\u05df":
+                executed.append(item)
+        executed.sort(key=lambda x: x.get("requested_at", ""), reverse=True)
+    except Exception as e:
+        logger.warning(f"[OwnerControlCenter] executed approvals read failed: {e}")
+        warnings.append(f"executed approvals read failed: {type(e).__name__}")
+
+    return {
+        "pending_count": len(pending),
+        "pending": pending[:10],
+        "recent_executed": executed[:10],
+    }, warnings
+
+
+def _owner_recent_receipts() -> tuple[list[dict], list[str]]:
+    warnings: list[str] = []
+    receipts: list[dict] = []
+    try:
+        formula = f"{{{InteractionLogFields.CHANNEL}}}='receipt'"
+        recs = _at_list(Tables.INTERACTION_LOG, formula, max_records=10)
+        for rec in recs:
+            f = rec.get("fields", {})
+            summary = f.get(InteractionLogFields.SUMMARY, "")
+            try:
+                receipt_data = json.loads(summary) if summary else {}
+            except (TypeError, ValueError):
+                receipt_data = {}
+            receipts.append({
+                "id": rec.get("id", ""),
+                "title": f.get(InteractionLogFields.TITLE, ""),
+                "timestamp": f.get(InteractionLogFields.TIMESTAMP, receipt_data.get("timestamp", "")),
+                "receipt": receipt_data,
+            })
+        receipts.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+    except Exception as e:
+        logger.warning(f"[OwnerControlCenter] receipts read failed: {e}")
+        warnings.append(f"receipts read failed: {type(e).__name__}")
+    return receipts, warnings
+
+
+@tma_api.route("/api/owner/control-center", methods=["GET"])
+@require_tma_auth
+def owner_control_center(identity):
+    if not identity.is_owner:
+        return jsonify({"error": "forbidden"}), 403
+
+    warnings: list[str] = []
+    capability_map, map_warnings = _load_capability_map()
+    warnings.extend(map_warnings)
+
+    approvals, approval_warnings = _owner_approvals_snapshot()
+    warnings.extend(approval_warnings)
+
+    receipts, receipt_warnings = _owner_recent_receipts()
+    warnings.extend(receipt_warnings)
+
+    blockers, next_actions = _owner_blockers_and_actions(capability_map)
+
+    return jsonify({
+        "ok": True,
+        "system_health": _owner_system_health(capability_map),
+        "critical_systems": _owner_critical_systems(capability_map),
+        "approvals": {
+            **approvals,
+            "recent_receipts": receipts,
+        },
+        "permissions": _PERMISSIONS_MATRIX,
+        "business_language": _BUSINESS_LANGUAGE,
+        "blockers": blockers,
+        "next_actions": next_actions,
+        "warnings": warnings,
+    })
 
 
 @tma_api.route("/api/approvals", methods=["GET"])
