@@ -18,14 +18,24 @@ logger = logging.getLogger(__name__)
 
 SCORE_EVERY = 3
 
-# memory_key -> {"messages": [...], "count": int}
+# ביטויים מובהקים של כוונת קנייה — טריגר מוקדם, לפני שהגענו ל-SCORE_EVERY הודעות
+_BUYING_INTENT = re.compile(
+    r"(מעוניין|מעוניינת|רוצה לקנות|רוצה לראות|רוצה לתאם|אפשר לתאם|"
+    r"מתי אפשר לבוא|מתי אפשר לראות|כמה עולה|מה המחיר|מוכן לסגור|"
+    r"מוכנה לסגור|רוצה לסגור|בוא נסגור|אני רציני|אני רצינית|"
+    r"price|interested|schedule a viewing|ready to buy|ready to sign)",
+    re.IGNORECASE,
+)
+
+# memory_key -> {"messages": [...], "count": int, "early_fired": bool}
 _buffers: dict[str, dict] = {}
 
 
 def score_inbound_lead(identity, message: str) -> None:
     """
     קורא לזה מ-run_agent מיד אחרי capture_inbound_lead, כש-identity.role == Role.LEAD.
-    צובר הודעות, וכל SCORE_EVERY הודעות מריץ qualify_lead וכותב score/tier/summary.
+    צובר הודעות; מריץ qualify_lead וכותב score/tier/summary כל SCORE_EVERY הודעות,
+    או מוקדם יותר אם ההודעה מכילה כוונת קנייה מובהקת (פעם אחת לכל מחזור).
     לעולם לא זורק — כשל כאן לא יפגע בתשובת השיחה.
     """
     if not is_enabled("LEAD_SCORING_LIVE"):
@@ -33,11 +43,18 @@ def score_inbound_lead(identity, message: str) -> None:
 
     memory_key = identity.memory_key
     try:
-        buf = _buffers.setdefault(memory_key, {"messages": [], "count": 0})
+        buf = _buffers.setdefault(memory_key, {"messages": [], "count": 0, "early_fired": False})
         buf["messages"].append(message)
         buf["count"] += 1
 
-        if buf["count"] % SCORE_EVERY != 0:
+        on_cadence  = buf["count"] % SCORE_EVERY == 0
+        early_fire  = not buf["early_fired"] and bool(_BUYING_INTENT.search(message))
+
+        if on_cadence:
+            buf["early_fired"] = False  # מחזור חדש — מאפס לטריגר מוקדם הבא
+        elif early_fire:
+            buf["early_fired"] = True
+        else:
             return
 
         lead_info = "\n".join(buf["messages"][-10:])
