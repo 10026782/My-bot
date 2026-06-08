@@ -333,6 +333,30 @@ def _receipt(action: str, table: str, record_id: str, requested_by: str, approve
     }
 
 
+def _persist_receipt(receipt: dict) -> str | None:
+    """Persist approval execution receipt to Interaction Log; never rolls back writes."""
+    try:
+        rec = _at_post(Tables.INTERACTION_LOG, {
+            InteractionLogFields.TITLE: f"[TMA receipt] {receipt.get('action', '')}",
+            InteractionLogFields.SUMMARY: json.dumps(receipt, ensure_ascii=False),
+            InteractionLogFields.TIMESTAMP: receipt.get("timestamp", ""),
+            InteractionLogFields.PARTICIPANTS: receipt.get("approved_by", ""),
+            InteractionLogFields.CHANNEL: "receipt",
+            InteractionLogFields.KEY_INSIGHTS: (
+                f"{receipt.get('status', '')} {receipt.get('table', '')}/{receipt.get('record_id', '')}"
+            ).strip(),
+        })
+        if rec:
+            return None
+        warning = "receipt persistence failed: Interaction Log write returned no record"
+        logger.warning(f"[Receipt] {warning}")
+        return warning
+    except Exception as e:
+        warning = f"receipt persistence failed: {type(e).__name__}"
+        logger.warning(f"[Receipt] {warning}: {e}")
+        return warning
+
+
 def _execute_tma_write(payload: dict, approved_by_identity) -> dict:
     action = payload.get("action", "")
     table = payload.get("table", "")
@@ -353,11 +377,16 @@ def _execute_tma_write(payload: dict, approved_by_identity) -> dict:
         return {"ok": False, "error": "unsupported TMA write operation"}
 
     _audit(payload.get("audit_action", action), approved_by_identity, details=payload.get("audit_details", ""))
-    return {
+    receipt = _receipt(action, table, record_id, requested_by, approved_by)
+    receipt_warning = _persist_receipt(receipt)
+    result = {
         "ok": True,
         "action": "approve",
-        "receipt": _receipt(action, table, record_id, requested_by, approved_by),
+        "receipt": receipt,
     }
+    if receipt_warning:
+        result["warning"] = receipt_warning
+    return result
 
 
 def _validate_initdata(init_data_str: str) -> dict | None:
@@ -1269,22 +1298,43 @@ def activity_feed(identity):
 
     limit = min(int(request.args.get("limit", 50) or 50), 100)
 
+    entries = []
     # Business Memory = strategic manual events; no domain filter (table has no domain field).
     # ?domain= param reserved for future Interaction Log endpoint.
-    recs = _at_list(Tables.BUSINESS_MEMORY, "", max_records=limit)
-
-    entries = []
-    for rec in recs:
+    business_recs = _at_list(Tables.BUSINESS_MEMORY, "", max_records=limit)
+    for rec in business_recs:
         f    = rec.get("fields", {})
         tags = f.get(BusinessMemoryFields.TAGS) or []
         entries.append({
             "id":        rec["id"],
+            "source":    "business_memory",
             "title":     f.get(BusinessMemoryFields.TITLE, ""),
             "summary":   f.get(BusinessMemoryFields.DESCRIPTION, ""),
             "channel":   f.get(BusinessMemoryFields.EVENT_TYPE, ""),
             "domain":    ", ".join(tags) if isinstance(tags, list) else str(tags),
             "timestamp": f.get(BusinessMemoryFields.DATE, ""),
             "sentiment": f.get(BusinessMemoryFields.IMPACT, "")[:120] if f.get(BusinessMemoryFields.IMPACT) else "",
+        })
+
+    receipt_formula = f"{{{InteractionLogFields.CHANNEL}}}='receipt'"
+    receipt_recs = _at_list(Tables.INTERACTION_LOG, receipt_formula, max_records=limit)
+    for rec in receipt_recs:
+        f = rec.get("fields", {})
+        summary = f.get(InteractionLogFields.SUMMARY, "")
+        try:
+            receipt_data = json.loads(summary) if summary else {}
+        except (TypeError, ValueError):
+            receipt_data = {}
+        entries.append({
+            "id":        rec["id"],
+            "source":    "receipt",
+            "title":     f.get(InteractionLogFields.TITLE, ""),
+            "summary":   summary,
+            "channel":   f.get(InteractionLogFields.CHANNEL, "receipt"),
+            "domain":    receipt_data.get("table", ""),
+            "timestamp": f.get(InteractionLogFields.TIMESTAMP, receipt_data.get("timestamp", "")),
+            "sentiment": f.get(InteractionLogFields.KEY_INSIGHTS, ""),
+            "receipt":   receipt_data,
         })
 
     entries.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
