@@ -59,13 +59,13 @@ def score_inbound_lead(identity, message: str) -> None:
 
         lead_info = "\n".join(buf["messages"][-10:])
         result = qualify_lead(lead_info, identity.domain_id)
-        _write_score(memory_key, result)
+        _write_score(memory_key, result, identity, message)
 
     except Exception as e:
         logger.error(f"[LeadScoring] score_inbound_lead error for {memory_key}: {e}")
 
 
-def _write_score(memory_key: str, result: dict) -> None:
+def _write_score(memory_key: str, result: dict, identity, message: str) -> None:
     from tools.airtable_tools import airtable_get, airtable_update
 
     raw = airtable_get(Tables.LEADS, f"{{{LeadFields.MEMORY_KEY}}}='{memory_key}'")
@@ -82,5 +82,29 @@ def _write_score(memory_key: str, result: dict) -> None:
     update_result = airtable_update(Tables.LEADS, rec_m.group(0), fields)
     if "✅" in update_result:
         logger.info(f"[LeadScoring] scored lead {memory_key}: {fields[LeadFields.TIER]} ({fields[LeadFields.SCORE]})")
+        _sync_lead_memory(memory_key, fields, identity, message)
     else:
         logger.warning(f"[LeadScoring] write failed for {memory_key}: {update_result}")
+
+
+def _sync_lead_memory(memory_key: str, fields: dict, identity, message: str) -> None:
+    """N03B — מעדכן lead_memory אחרי כתיבת ניקוד מוצלחת לרשומה קיימת.
+    לעולם לא חוסם וללא יצירת רשומה נפרדת (N03A דואג ל-search-before-create)."""
+    if not is_enabled("LEAD_MEMORY"):
+        return
+    try:
+        from lead_memory import lead_memory
+
+        save_due = lead_memory.update(
+            memory_key,
+            score=fields[LeadFields.SCORE],
+            tier=fields[LeadFields.TIER],
+            summary=fields[LeadFields.SUMMARY],
+            last_message=message,
+            domain=identity.domain_id,
+            channel="whatsapp",
+        )
+        if save_due:
+            lead_memory.save(memory_key)
+    except Exception as e:
+        logger.error(f"[LeadScoring] lead_memory sync error for {memory_key}: {e}")
