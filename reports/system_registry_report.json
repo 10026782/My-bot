@@ -1,0 +1,138 @@
+{
+  "status": "MISSING",
+  "generated_at": "2026-06-08T10:25:11.487596+00:00",
+  "registry_path": "C:\\Users\\MaayanHa\\Downloads\\My-bot-main.worktrees\\system_registry.yaml",
+  "sections": {
+    "registry": "OK",
+    "environment": "MISSING",
+    "airtable": "MISSING",
+    "tables": "MISSING"
+  },
+  "airtable_detail": "AIRTABLE_API_KEY or AIRTABLE_BASE_ID missing",
+  "env_checks": [
+    {
+      "id": "backend",
+      "name": "Render Backend",
+      "status": "MISSING",
+      "missing_env": [
+        "RENDER_APP_URL",
+        "TELEGRAM_TOKEN",
+        "AIRTABLE_API_KEY",
+        "AIRTABLE_BASE_ID",
+        "TMA_ALLOWED_ORIGINS"
+      ]
+    },
+    {
+      "id": "frontend",
+      "name": "Vercel Mini App",
+      "status": "MISSING",
+      "missing_env": [
+        "VITE_API_URL"
+      ]
+    },
+    {
+      "id": "telegram",
+      "name": "Telegram Bot API",
+      "status": "MISSING",
+      "missing_env": [
+        "TELEGRAM_TOKEN"
+      ]
+    },
+    {
+      "id": "airtable",
+      "name": "Airtable Base",
+      "status": "MISSING",
+      "missing_env": [
+        "AIRTABLE_API_KEY",
+        "AIRTABLE_BASE_ID"
+      ]
+    }
+  ],
+  "table_checks": [
+    {
+      "id": "projects",
+      "name": "Projects",
+      "status": "MISSING",
+      "missing_fields": [
+        "Project Name",
+        "Status"
+      ],
+      "detail": "AIRTABLE_API_KEY or AIRTABLE_BASE_ID missing"
+    },
+    {
+      "id": "leads",
+      "name": "Leads",
+      "status": "MISSING",
+      "missing_fields": [
+        "Name",
+        "phone",
+        "status",
+        "score ציון",
+        "tenant_id",
+        "domain"
+      ],
+      "detail": "AIRTABLE_API_KEY or AIRTABLE_BASE_ID missing"
+    },
+    {
+      "id": "tasks",
+      "name": "משימות (Tasks)",
+      "status": "MISSING",
+      "missing_fields": [
+        "כותרת המשימה",
+        "סטטוס",
+        "תאריך יעד"
+      ],
+      "detail": "AIRTABLE_API_KEY or AIRTABLE_BASE_ID missing"
+    },
+    {
+      "id": "deals",
+      "name": "עסקאות (Deals)",
+      "status": "MISSING",
+      "missing_fields": [
+        "שם העסקה",
+        "שלב",
+        "סכום"
+      ],
+      "detail": "AIRTABLE_API_KEY or AIRTABLE_BASE_ID missing"
+    },
+    {
+      "id": "payments",
+      "name": "תשלומים (Payments)",
+      "status": "MISSING",
+      "missing_fields": [
+        "אסמכתא",
+        "סכום",
+        "תאריך",
+        "סטטוס"
+      ],
+      "detail": "AIRTABLE_API_KEY or AIRTABLE_BASE_ID missing"
+    },
+    {
+      "id": "contacts",
+      "name": "אנשי קשר (Contacts)",
+      "status": "MISSING",
+      "missing_fields": [
+        "שם",
+        "טלפון",
+        "סטטוס"
+      ],
+      "detail": "AIRTABLE_API_KEY or AIRTABLE_BASE_ID missing"
+    },
+    {
+      "id": "tenants",
+      "name": "Tenants",
+      "status": "MISSING",
+      "missing_fields": [
+        "tenant_id"
+      ],
+      "detail": "AIRTABLE_API_KEY or AIRTABLE_BASE_ID missing"
+    },
+    {
+      "id": "imports",
+      "name": "Imports",
+      "status": "MISSING",
+      "missing_fields": [],
+      "detail": "AIRTABLE_API_KEY or AIRTABLE_BASE_ID missing"
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+version: CORE_03_GOVERNANCE_PHASE_1
+generated_by: system_registry_audit.py
+description: Read-only first system registry for BOSS production shape.
+
+services:
+  - id: backend
+    name: Render Backend
+    env:
+      - RENDER_APP_URL
+      - TELEGRAM_TOKEN
+      - AIRTABLE_API_KEY
+      - AIRTABLE_BASE_ID
+      - TMA_ALLOWED_ORIGINS
+  - id: frontend
+    name: Vercel Mini App
+    env:
+      - VITE_API_URL
+  - id: telegram
+    name: Telegram Bot API
+    env:
+      - TELEGRAM_TOKEN
+  - id: airtable
+    name: Airtable Base
+    env:
+      - AIRTABLE_API_KEY
+      - AIRTABLE_BASE_ID
+
+airtable_tables:
+  - id: projects
+    name: Projects
+    critical_fields:
+      - Project Name
+      - Status
+  - id: leads
+    name: Leads
+    critical_fields:
+      - Name
+      - phone
+      - status
+      - score ציון
+      - tenant_id
+      - domain
+  - id: tasks
+    name: משימות (Tasks)
+    critical_fields:
+      - כותרת המשימה
+      - סטטוס
+      - תאריך יעד
+  - id: deals
+    name: עסקאות (Deals)
+    critical_fields:
+      - שם העסקה
+      - שלב
+      - סכום
+  - id: payments
+    name: תשלומים (Payments)
+    critical_fields:
+      - אסמכתא
+      - סכום
+      - תאריך
+      - סטטוס
+  - id: contacts
+    name: אנשי קשר (Contacts)
+    critical_fields:
+      - שם
+      - טלפון
+      - סטטוס
+  - id: tenants
+    name: Tenants
+    critical_fields:
+      - tenant_id
+  - id: imports
+    name: Imports
+    critical_fields: []
