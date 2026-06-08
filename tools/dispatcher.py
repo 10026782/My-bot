@@ -21,6 +21,8 @@ from .airtable_tools    import airtable_get, airtable_add, airtable_update, airt
 from .airtable_security import TenantScopeViolation, audit_log_airtable, enforce_tenant_scope
 from .contact_resolver  import resolve_contact
 
+from tool_registry import enforce, ToolDenied
+
 if TYPE_CHECKING:
     from identity import Identity
 
@@ -79,6 +81,18 @@ def dispatch_tool(name: str, inputs: dict, identity: "Identity | None" = None) -
     user_id   = identity.user_id   if identity else "unknown"
 
     logger.info(f"[Dispatch] {name} | tenant={tenant_id} user={user_id} | inputs={str(inputs)[:80]}")
+
+    # ── Central Permission Enforcement (CORE_04 Fix 1) ────────────
+    # כלל ברזל: אין Tool בלי בדיקת הרשאה — גם אם הקריאה עוקפת את app.py
+    # ומגיעה ישירות ל-dispatch_tool, ה-registry עדיין נאכף כאן. Deny by default.
+    if identity is None:
+        logger.warning(f"[Dispatch] denied — missing identity | tool={name}")
+        return f"❌ גישה נחסמה: נדרשת זהות מאומתת להפעלת '{name}'."
+    try:
+        enforce(name, identity)
+    except ToolDenied as e:
+        logger.warning(f"[Dispatch] denied | tool={name} user={user_id} role={identity.role} | {e}")
+        return f"❌ גישה נחסמה: {e}"
 
     # Emergency Stop — blocks all write/send tools when EMERGENCY_STOP_ALL=1
     _RISKY_TOOLS = {
