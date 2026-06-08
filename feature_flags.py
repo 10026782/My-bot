@@ -11,6 +11,7 @@ _PERSISTENT_FLAG_NAMES = frozenset({
     "EMERGENCY_STOP_WHATSAPP",
     "EMERGENCY_STOP_EMAIL",
     "EMERGENCY_STOP_AUTOMATION",
+    "EMERGENCY_STOP_AI",          # CORE_05: Cost Watchdog — חוסם קריאות Claude API
 })
 _PERSIST_PATH = "/tmp/emergency_flags.json"
 

@@ -33,6 +33,8 @@ from config          import get_domain as _channel_domain
 from core.router     import route_request, RouteDecision, Handler
 from core.anti_hallucination import verify_execution, sanitize_agent_response
 from health_monitor import get_health_status
+from feature_flags import is_enabled as _flag_enabled
+import cost_monitor
 try:
     from ad_attribution import inject_source_to_incoming_lead as _inject_utm
 except ImportError:
@@ -624,6 +626,12 @@ def run_agent(
         )
 
     # ── 5. Agent Loop ─────────────────────────────
+    if _flag_enabled("EMERGENCY_STOP_AI"):
+        logger.warning(
+            f"[CostWatchdog] EMERGENCY_STOP_AI active — blocking agent for {identity.user_id}"
+        )
+        return "⛔ מערכת ה-AI בעצירת חירום עקב עלות גבוהה. נסה שוב מאוחר יותר."
+
     try:
         research_mode = user_text.startswith("#") and identity.is_owner
         clean_msg     = user_text[1:].strip() if research_mode else user_text
@@ -667,6 +675,13 @@ def run_agent(
                 system      = ctx.system_prompt,
                 tools       = ctx.allowed_tools,
                 messages    = messages,
+            )
+
+            cost_monitor.record_call(
+                model      = ctx.model,
+                tokens_in  = getattr(response.usage, "input_tokens",  0),
+                tokens_out = getattr(response.usage, "output_tokens", 0),
+                caller     = ctx.memory_key,
             )
 
             tool_uses   = [b for b in response.content if b.type == "tool_use"]
