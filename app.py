@@ -820,7 +820,8 @@ def run_agent(
 
     except anthropic.APIStatusError as e:
         logger.error(f"[Agent] Anthropic {e.status_code}: {e.message}")
-        _no_credit = "credit balance" in (e.message or "").lower()
+        _credit_str = ((e.message or "") + str(e.body or "")).lower()
+        _no_credit = "credit balance" in _credit_str or "insufficient" in _credit_str
         if e.status_code == 529 or _no_credit:
             reason = "no credit" if _no_credit else "overloaded"
             logger.warning(f"[Agent] Claude {reason} — trying OpenAI fallback for {chat_id}")
