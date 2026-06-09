@@ -35,6 +35,7 @@ from core.anti_hallucination import verify_execution, sanitize_agent_response
 from health_monitor import get_health_status
 from feature_flags import is_enabled as _flag_enabled
 import cost_monitor
+import llm_fallback
 try:
     from ad_attribution import inject_source_to_incoming_lead as _inject_utm
 except ImportError:
@@ -543,47 +544,6 @@ def _safe_route(text: str, channel: str, identity, domain_from_channel: str = ""
 
 
 # ══════════════════════════════════════════════════
-# OpenAI Fallback — כשClaude עמוס/timeout
-# ══════════════════════════════════════════════════
-
-def _openai_fallback(system_prompt: str, user_message: str, max_tokens: int, caller: str = "") -> str:
-    """
-    Fallback ל-GPT-4o כאשר Claude אינו זמין (529 / timeout).
-    מחזיר תשובת טקסט בלבד — ללא tool use.
-    לעולם לא זורק.
-    """
-    try:
-        import openai as _openai  # lazy — חבילה אופציונלית
-        openai_key = os.environ.get("OPENAI_API_KEY", "")
-        if not openai_key:
-            logger.warning("[OpenAI-Fallback] OPENAI_API_KEY חסר — אין fallback")
-            return "⚠️ השרת עמוס כרגע. נסה שוב בעוד דקה."
-
-        oa = _openai.OpenAI(api_key=openai_key, timeout=20)
-        resp = oa.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user",   "content": user_message},
-            ],
-            max_tokens=max_tokens,
-            temperature=0.2,
-        )
-        text = (resp.choices[0].message.content or "").strip()
-        if not text:
-            return "⚠️ לא התקבלה תשובה."
-        logger.info(f"[OpenAI-Fallback] ✅ responded for {caller}")
-        return text
-
-    except ImportError:
-        logger.error("[OpenAI-Fallback] openai package לא מותקן")
-        return "⚠️ השרת עמוס כרגע. נסה שוב בעוד דקה."
-    except Exception as e:
-        logger.error(f"[OpenAI-Fallback] error: {e}")
-        return "⚠️ השרת עמוס כרגע. נסה שוב בעוד דקה."
-
-
-# ══════════════════════════════════════════════════
 # run_agent — Identity + Router + Agent Loop
 # ══════════════════════════════════════════════════
 
@@ -820,19 +780,15 @@ def run_agent(
 
     except anthropic.APIStatusError as e:
         logger.error(f"[Agent] Anthropic {e.status_code}: {e.message}")
-        _credit_str = ((e.message or "") + str(e.body or "")).lower()
-        _no_credit = "credit balance" in _credit_str or "insufficient" in _credit_str
-        if e.status_code == 529 or _no_credit:
-            reason = "no credit" if _no_credit else "overloaded"
-            logger.warning(f"[Agent] Claude {reason} — trying OpenAI fallback for {chat_id}")
-            return _openai_fallback(ctx.system_prompt, clean_msg, ctx.max_tokens, caller=ctx.memory_key)
+        if llm_fallback._is_transient(e):
+            logger.warning(f"[Agent] Claude transient error {e.status_code} — OpenAI fallback for {chat_id}")
+            return llm_fallback.agent_fallback_text(ctx.system_prompt, clean_msg, ctx.max_tokens, caller=ctx.memory_key)
         if e.status_code == 413:
             return "⚠️ ההודעה ארוכה מדי. נסה לשלח קצר יותר."
         return f"❌ שגיאת API ({e.status_code}). נסה שוב."
     except anthropic.APITimeoutError:
         logger.error(f"[Agent] Timeout for {chat_id}")
-        logger.warning(f"[Agent] Claude timeout — trying OpenAI fallback for {chat_id}")
-        return _openai_fallback(ctx.system_prompt, clean_msg, ctx.max_tokens, caller=ctx.memory_key)
+        return llm_fallback.agent_fallback_text(ctx.system_prompt, clean_msg, ctx.max_tokens, caller=ctx.memory_key)
     except Exception as e:
         logger.error(f"[Agent] error: {e}", exc_info=True)
         return "⚠️ משהו השתבש. נסה שוב."
