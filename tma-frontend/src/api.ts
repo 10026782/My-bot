@@ -1,4 +1,4 @@
-import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday } from "./types";
+import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, OwnerControlCenter, AuthResponse } from "./types";
 
 const BASE = (import.meta.env.VITE_API_URL as string) ?? "";
 const DEV_ID = (import.meta.env.VITE_DEV_TELEGRAM_ID as string) ?? "";
@@ -22,6 +22,18 @@ export async function fetchProjects(): Promise<ProjectsResponse> {
   const r = await fetch(`${BASE}/api/projects`, { headers: authHeaders() });
   if (!r.ok) throw new Error(`API ${r.status}`);
   return r.json() as Promise<ProjectsResponse>;
+}
+
+export async function fetchTmaAuth(): Promise<AuthResponse | null> {
+  const initData = window.Telegram?.WebApp?.initData ?? "";
+  if (!initData) return null;
+  const r = await fetch(`${BASE}/api/tma/auth`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ initData }),
+  });
+  if (!r.ok) throw new Error(`API ${r.status}`);
+  return r.json() as Promise<AuthResponse>;
 }
 
 export async function fetchDashboard(slug: string): Promise<DashboardResponse> {
@@ -147,6 +159,12 @@ export async function fetchHealth(): Promise<SystemHealth> {
   const r = await fetch(`${BASE}/api/health`, { headers: authHeaders() });
   if (!r.ok) throw new Error(`API ${r.status}`);
   return r.json() as Promise<SystemHealth>;
+}
+
+export async function fetchOwnerControlCenter(): Promise<OwnerControlCenter> {
+  const r = await fetch(`${BASE}/api/owner/control-center`, { headers: authHeaders() });
+  if (!r.ok) throw new Error(`API ${r.status}`);
+  return r.json() as Promise<OwnerControlCenter>;
 }
 
 export async function emergencyStop(action: string): Promise<void> {

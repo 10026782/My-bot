@@ -11,15 +11,16 @@ import logging
 import os
 import time
 import urllib.parse
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from functools import wraps
+from pathlib import Path
 
 from flask import Blueprint, jsonify, request
 from identity import resolve_identity, Role
 from airtable_schema import (
     LeadFields, PaymentStatus, BusinessMemoryFields, InteractionLogFields, Tables,
     QuestsFields, CoinsLogFields, WorldsFields, QuestStatus, WorldStatus,
-    DailyTaskFields, DailyTaskStatus,
+    DailyTaskFields, DailyTaskStatus, ApprovalsFields,
 )
 
 logger = logging.getLogger(__name__)
@@ -91,6 +92,7 @@ def _cors(response):
 @tma_api.route("/api/approvals", methods=["OPTIONS"])
 @tma_api.route("/api/approvals/bulk", methods=["OPTIONS"])
 @tma_api.route("/api/finance/pulse", methods=["OPTIONS"])
+@tma_api.route("/api/owner/control-center", methods=["OPTIONS"])
 def _preflight():
     return "", 204
 
@@ -291,6 +293,103 @@ def _try_bus_action(context_id: str, decision: str) -> None:
 # Stateless Telegram initData validation
 # https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
 # ══════════════════════════════════════════════════════════════════
+
+def _identity_ref(identity) -> str:
+    return str(getattr(identity, "user_id", "") or getattr(identity, "display_name", "") or "unknown")
+
+
+def _queue_tma_write_approval(action: str, payload: dict, identity, label: str) -> tuple[str, dict]:
+    approval_payload = {
+        "type": "tma_write",
+        "action": action,
+        "requested_by": _identity_ref(identity),
+        **payload,
+    }
+    rec = _at_post("Approvals", {
+        ApprovalsFields.ACTION: label,
+        ApprovalsFields.REQUESTED_BY: _identity_ref(identity),
+        ApprovalsFields.REQUESTED_AT: datetime.now(timezone.utc).isoformat(),
+        ApprovalsFields.RISK_LEVEL: "high",
+        ApprovalsFields.CONTEXT_TYPE: "tma_write",
+        ApprovalsFields.CONTEXT_ID: action,
+        ApprovalsFields.CONTEXT_DATA: json.dumps(approval_payload, ensure_ascii=False),
+        ApprovalsFields.STATUS: "\u05de\u05de\u05ea\u05d9\u05df",
+    })
+    approval_id = rec.get("id", "") if rec else ""
+    return approval_id, {
+        "status": "pending_approval",
+        "approval_id": approval_id,
+        "message": "Approval required",
+    }
+
+
+def _receipt(action: str, table: str, record_id: str, requested_by: str, approved_by: str) -> dict:
+    return {
+        "action": action,
+        "table": table,
+        "record_id": record_id,
+        "requested_by": requested_by,
+        "approved_by": approved_by,
+        "status": "executed",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _persist_receipt(receipt: dict) -> str | None:
+    """Persist approval execution receipt to Interaction Log; never rolls back writes."""
+    try:
+        rec = _at_post(Tables.INTERACTION_LOG, {
+            InteractionLogFields.TITLE: f"[TMA receipt] {receipt.get('action', '')}",
+            InteractionLogFields.SUMMARY: json.dumps(receipt, ensure_ascii=False),
+            InteractionLogFields.TIMESTAMP: receipt.get("timestamp", ""),
+            InteractionLogFields.PARTICIPANTS: receipt.get("approved_by", ""),
+            InteractionLogFields.CHANNEL: "receipt",
+            InteractionLogFields.KEY_INSIGHTS: (
+                f"{receipt.get('status', '')} {receipt.get('table', '')}/{receipt.get('record_id', '')}"
+            ).strip(),
+        })
+        if rec:
+            return None
+        warning = "receipt persistence failed: Interaction Log write returned no record"
+        logger.warning(f"[Receipt] {warning}")
+        return warning
+    except Exception as e:
+        warning = f"receipt persistence failed: {type(e).__name__}"
+        logger.warning(f"[Receipt] {warning}: {e}")
+        return warning
+
+
+def _execute_tma_write(payload: dict, approved_by_identity) -> dict:
+    action = payload.get("action", "")
+    table = payload.get("table", "")
+    requested_by = payload.get("requested_by", "unknown")
+    approved_by = _identity_ref(approved_by_identity)
+
+    if payload.get("op") == "post":
+        rec = _at_post(table, payload.get("fields", {}))
+        if not rec:
+            return {"ok": False, "error": f"failed to create record in {table}"}
+        record_id = rec.get("id", "")
+    elif payload.get("op") == "patch":
+        record_id = payload.get("record_id", "")
+        ok = _at_patch(table, record_id, payload.get("fields", {}))
+        if not ok:
+            return {"ok": False, "error": f"failed to update record in {table}", "record_id": record_id}
+    else:
+        return {"ok": False, "error": "unsupported TMA write operation"}
+
+    _audit(payload.get("audit_action", action), approved_by_identity, details=payload.get("audit_details", ""))
+    receipt = _receipt(action, table, record_id, requested_by, approved_by)
+    receipt_warning = _persist_receipt(receipt)
+    result = {
+        "ok": True,
+        "action": "approve",
+        "receipt": receipt,
+    }
+    if receipt_warning:
+        result["warning"] = receipt_warning
+    return result
+
 
 def _validate_initdata(init_data_str: str) -> dict | None:
     """
@@ -639,12 +738,19 @@ def create_project(identity):
         "owner_ids":     identity.user_id,
         "tenant_id":     identity.tenant_id,
     }
-    rec = _at_post("ProjectsHub", fields)
-    if not rec:
-        return jsonify({"error": "failed to create project — ProjectsHub table may not exist yet"}), 500
-
-    _audit("create_project", identity, details=data["name"])
-    return jsonify({"ok": True, "id": rec["id"], "name": data["name"]}), 201
+    _, response = _queue_tma_write_approval(
+        "tma_create_project",
+        {
+            "op": "post",
+            "table": "ProjectsHub",
+            "fields": fields,
+            "audit_action": "create_project",
+            "audit_details": data["name"],
+        },
+        identity,
+        f"Create project: {data['name']}",
+    )
+    return jsonify(response), 202
 
 
 @tma_api.route("/api/projects/<project_slug>/dashboard", methods=["GET"])
@@ -830,15 +936,22 @@ def update_lead_status(lead_id, identity):
     if not new_status:
         return jsonify({"error": "missing field: status"}), 400
 
-    ok = _at_patch("Leads", lead_id, {"status": new_status})
-    if not ok:
-        return jsonify({"error": "update failed"}), 500
+    _, response = _queue_tma_write_approval(
+        "tma_update_lead_status",
+        {
+            "op": "patch",
+            "table": "Leads",
+            "record_id": lead_id,
+            "fields": {"status": new_status},
+            "audit_action": "lead_status_update",
+            "audit_details": f"{lead_id} -> {new_status}",
+        },
+        identity,
+        f"Update lead status: {lead_id} -> {new_status}",
+    )
+    return jsonify(response), 202
 
-    _audit("lead_status_update", identity, details=f"{lead_id} → {new_status}")
-    return jsonify({"ok": True, "lead_id": lead_id, "status": new_status})
 
-
-# ══════════════════════════════════════════════════════════════════
 # WEEK 1 — Follow-Up (O3 Action)
 # ══════════════════════════════════════════════════════════════════
 
@@ -862,20 +975,26 @@ def create_followup(identity):
 
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
 
-    rec = _at_post("משימות (Tasks)", {
-        "כותרת המשימה": f"מעקב: {lead_name}",
-        "תיאור":         note,
-        "תאריך יעד":    tomorrow,
-        "סטטוס":         "ממתין",
-    })
-    if not rec:
-        return jsonify({"error": "failed to create task"}), 500
+    task_fields = {
+        "\u05db\u05d5\u05ea\u05e8\u05ea \u05d4\u05de\u05e9\u05d9\u05de\u05d4": f"\u05de\u05e2\u05e7\u05d1: {lead_name}",
+        "\u05ea\u05d9\u05d0\u05d5\u05e8": note,
+        "\u05ea\u05d0\u05e8\u05d9\u05da \u05d9\u05e2\u05d3": tomorrow,
+        "\u05e1\u05d8\u05d8\u05d5\u05e1": "\u05de\u05de\u05ea\u05d9\u05df",
+    }
+    _, response = _queue_tma_write_approval(
+        "tma_create_followup",
+        {
+            "op": "post",
+            "table": "\u05de\u05e9\u05d9\u05de\u05d5\u05ea (Tasks)",
+            "fields": task_fields,
+            "audit_action": "followup_created",
+            "audit_details": f"{lead_name}: {note[:80]}",
+        },
+        identity,
+        f"Create follow-up: {lead_name}",
+    )
+    return jsonify(response), 202
 
-    _audit("followup_created", identity, details=f"{lead_name}: {note[:80]}")
-    return jsonify({"ok": True, "task_id": rec["id"], "lead_name": lead_name}), 201
-
-
-# ══════════════════════════════════════════════════════════════════
 # WEEK 1 — Ask AI (routes through existing BOSS context layer)
 # ══════════════════════════════════════════════════════════════════
 
@@ -928,26 +1047,26 @@ def ask_ai(identity):
     try:
         # Route through existing BOSS context layer — build_context applies
         # role-based system prompt, model selection, and memory from memory_store.
-        import anthropic
         from context import build_context
+        from llm_fallback import call_anthropic_text
         from memory_store import memory
 
         ctx      = build_context(identity, full_question)
         history  = memory.get_for_claude(ctx.memory_key)
         messages = history + [{"role": "user", "content": full_question}]
 
-        _client  = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
-        response = _client.messages.create(
-            model       = ctx.model,
-            max_tokens  = ctx.max_tokens,
-            temperature = 0.2,
-            system      = ctx.system_prompt,
-            messages    = messages,
-            # No tools — TMA Ask AI is a single-turn contextual answer
+        answer = call_anthropic_text(
+            source="tma_api.ask_ai",
+            model=ctx.model,
+            max_tokens=ctx.max_tokens,
+            temperature=0.2,
+            system=ctx.system_prompt,
+            messages=messages,
         )
+        if not answer:
+            answer = "AI service returned no text."
+        return jsonify({"answer": answer, "context": context_type})
 
-        text_blocks = [b for b in response.content if b.type == "text"]
-        answer = text_blocks[0].text if text_blocks else "⚠️ לא התקבלה תשובה."
 
     except Exception as e:
         logger.error(f"[AskAI] error: {e}", exc_info=True)
@@ -1060,6 +1179,243 @@ def _fmt_approval(rec: dict) -> dict:
     }
 
 
+_CAPABILITY_MAP_PATH = Path(__file__).resolve().parent / "reports" / "capability_map.json"
+
+_DEFAULT_SYSTEM_HEALTH = {
+    "health_percent": 0,
+    "working_count": 0,
+    "partial_count": 0,
+    "broken_count": 0,
+}
+
+_DEFAULT_CRITICAL_SYSTEMS = [
+    {"name": "Leads", "status": "UNKNOWN", "color": "yellow"},
+    {"name": "Tasks", "status": "UNKNOWN", "color": "yellow"},
+    {"name": "Payments", "status": "UNKNOWN", "color": "yellow"},
+    {"name": "Projects", "status": "UNKNOWN", "color": "yellow"},
+    {"name": "Approvals", "status": "UNKNOWN", "color": "yellow"},
+]
+
+_PERMISSIONS_MATRIX = [
+    {"role": "Owner", "read": "All", "write": "All / risk-gated", "approve": "Yes"},
+    {"role": "Partner", "read": "Own domains", "write": "Limited / domain scoped", "approve": "No"},
+    {"role": "Manager", "read": "Operations + CRM", "write": "Approval required", "approve": "No"},
+    {"role": "Employee", "read": "Tasks", "write": "Status only", "approve": "No"},
+]
+
+_BUSINESS_LANGUAGE = {
+    "lead_status": [
+        {"value": "new", "label": "New lead"},
+        {"value": "qualified", "label": "Qualified lead"},
+        {"value": "hot", "label": "Hot lead"},
+        {"value": "cold", "label": "Cold lead"},
+        {"value": "converted", "label": "Converted lead"},
+        {"value": "lost", "label": "Lost lead"},
+    ],
+    "lead_outcome": [
+        {"value": "open", "label": "Still active"},
+        {"value": "followup_needed", "label": "Needs follow-up"},
+        {"value": "meeting_booked", "label": "Meeting booked"},
+        {"value": "converted", "label": "Converted to business result"},
+        {"value": "not_relevant", "label": "Not relevant"},
+    ],
+    "lead_tier": [
+        {"value": "HOT", "label": "High intent / urgent"},
+        {"value": "WARM", "label": "Potential but not urgent"},
+        {"value": "COLD", "label": "Low intent / nurture"},
+    ],
+}
+
+_DEFAULT_BLOCKERS = [
+    "Lead Scoring not active",
+    "Lead Memory not wired",
+    "Followup automation not active",
+    "WhatsApp outbound not active",
+    "Receipt display needs frontend surface",
+]
+
+
+def _status_color(status: str) -> str:
+    normalized = (status or "").upper()
+    if normalized == "WORKING":
+        return "green"
+    if normalized == "BROKEN":
+        return "red"
+    return "yellow"
+
+
+def _load_capability_map() -> tuple[dict, list[str]]:
+    try:
+        if not _CAPABILITY_MAP_PATH.exists():
+            return {}, [f"capability_map missing: {_CAPABILITY_MAP_PATH}"]
+        return json.loads(_CAPABILITY_MAP_PATH.read_text(encoding="utf-8")), []
+    except Exception as e:
+        logger.warning(f"[OwnerControlCenter] capability_map load failed: {e}")
+        return {}, [f"capability_map load failed: {type(e).__name__}"]
+
+
+def _owner_system_health(capability_map: dict) -> dict:
+    summary = capability_map.get("summary") or {}
+    if not summary:
+        return dict(_DEFAULT_SYSTEM_HEALTH)
+    return {
+        "health_percent": summary.get("system_health_percent", 0),
+        "working_count": summary.get("working_count", 0),
+        "partial_count": summary.get("partial_count", 0),
+        "broken_count": summary.get("broken_count", 0),
+    }
+
+
+def _owner_critical_systems(capability_map: dict) -> list[dict]:
+    systems = capability_map.get("critical_systems") or []
+    if not systems:
+        return list(_DEFAULT_CRITICAL_SYSTEMS)
+
+    wanted = {
+        "Leads": "Leads",
+        "Tasks": "Tasks",
+        "Payments": "Payments",
+        "ProjectsHub": "Projects",
+        "Projects": "Projects",
+        "Approvals": "Approvals",
+    }
+    by_display: dict[str, dict] = {}
+    for item in systems:
+        display_name = wanted.get(item.get("name", ""))
+        if not display_name:
+            continue
+        status = item.get("status", "UNKNOWN")
+        by_display[display_name] = {
+            "name": display_name,
+            "status": status,
+            "color": _status_color(status),
+            "owner": item.get("owner", ""),
+            "next_blocker": item.get("next_blocker", ""),
+        }
+
+    return [by_display.get(item["name"], item) for item in _DEFAULT_CRITICAL_SYSTEMS]
+
+
+def _owner_blockers_and_actions(capability_map: dict) -> tuple[list[str], list[str]]:
+    blockers: list[str] = []
+    for item in capability_map.get("critical_systems") or []:
+        blocker = item.get("next_blocker", "")
+        status = (item.get("status", "") or "").upper()
+        if blocker and status != "WORKING":
+            blockers.append(blocker)
+
+    for capabilities in (capability_map.get("domains") or {}).values():
+        for item in capabilities:
+            blocker = item.get("next_blocker", "")
+            status = (item.get("status", "") or "").upper()
+            if blocker and status in {"PARTIAL", "STUB", "BROKEN"}:
+                blockers.append(blocker)
+
+    deduped = []
+    for blocker in blockers:
+        if blocker not in deduped:
+            deduped.append(blocker)
+
+    if not deduped:
+        deduped = list(_DEFAULT_BLOCKERS)
+
+    return deduped[:5], [
+        "Activate Lead Scoring",
+        "Wire Lead Memory after scoring",
+        "Turn on Followup automation for HOT leads",
+    ]
+
+
+def _owner_approvals_snapshot() -> tuple[dict, list[str]]:
+    warnings: list[str] = []
+    pending: list[dict] = []
+    executed: list[dict] = []
+
+    try:
+        pending_formula = f"{{{ApprovalsFields.STATUS}}}='\u05de\u05de\u05ea\u05d9\u05df'"
+        pending = [_fmt_approval(r) for r in _at_list("Approvals", pending_formula, max_records=50)]
+    except Exception as e:
+        logger.warning(f"[OwnerControlCenter] pending approvals read failed: {e}")
+        warnings.append(f"pending approvals read failed: {type(e).__name__}")
+
+    try:
+        recs = _at_list("Approvals", "", max_records=25)
+        for rec in recs:
+            item = _fmt_approval(rec)
+            if item.get("status") != "\u05de\u05de\u05ea\u05d9\u05df":
+                executed.append(item)
+        executed.sort(key=lambda x: x.get("requested_at", ""), reverse=True)
+    except Exception as e:
+        logger.warning(f"[OwnerControlCenter] executed approvals read failed: {e}")
+        warnings.append(f"executed approvals read failed: {type(e).__name__}")
+
+    return {
+        "pending_count": len(pending),
+        "pending": pending[:10],
+        "recent_executed": executed[:10],
+    }, warnings
+
+
+def _owner_recent_receipts() -> tuple[list[dict], list[str]]:
+    warnings: list[str] = []
+    receipts: list[dict] = []
+    try:
+        formula = f"{{{InteractionLogFields.CHANNEL}}}='receipt'"
+        recs = _at_list(Tables.INTERACTION_LOG, formula, max_records=10)
+        for rec in recs:
+            f = rec.get("fields", {})
+            summary = f.get(InteractionLogFields.SUMMARY, "")
+            try:
+                receipt_data = json.loads(summary) if summary else {}
+            except (TypeError, ValueError):
+                receipt_data = {}
+            receipts.append({
+                "id": rec.get("id", ""),
+                "title": f.get(InteractionLogFields.TITLE, ""),
+                "timestamp": f.get(InteractionLogFields.TIMESTAMP, receipt_data.get("timestamp", "")),
+                "receipt": receipt_data,
+            })
+        receipts.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+    except Exception as e:
+        logger.warning(f"[OwnerControlCenter] receipts read failed: {e}")
+        warnings.append(f"receipts read failed: {type(e).__name__}")
+    return receipts, warnings
+
+
+@tma_api.route("/api/owner/control-center", methods=["GET"])
+@require_tma_auth
+def owner_control_center(identity):
+    if not identity.is_owner:
+        return jsonify({"error": "forbidden"}), 403
+
+    warnings: list[str] = []
+    capability_map, map_warnings = _load_capability_map()
+    warnings.extend(map_warnings)
+
+    approvals, approval_warnings = _owner_approvals_snapshot()
+    warnings.extend(approval_warnings)
+
+    receipts, receipt_warnings = _owner_recent_receipts()
+    warnings.extend(receipt_warnings)
+
+    blockers, next_actions = _owner_blockers_and_actions(capability_map)
+
+    return jsonify({
+        "ok": True,
+        "system_health": _owner_system_health(capability_map),
+        "critical_systems": _owner_critical_systems(capability_map),
+        "approvals": {
+            **approvals,
+            "recent_receipts": receipts,
+        },
+        "permissions": _PERMISSIONS_MATRIX,
+        "business_language": _BUSINESS_LANGUAGE,
+        "blockers": blockers,
+        "next_actions": next_actions,
+        "warnings": warnings,
+    })
+
+
 @tma_api.route("/api/approvals", methods=["GET"])
 @require_tma_auth
 def get_approvals(identity):
@@ -1114,9 +1470,9 @@ def act_on_approval(approval_id, identity):
     if not identity.is_owner:
         return jsonify({"error": "forbidden"}), 403
 
-    data     = request.get_json(force=True) or {}
+    data = request.get_json(force=True) or {}
     decision = data.get("action", "").strip().lower()   # "approve" | "reject"
-    note     = data.get("note", "").strip()
+    note = data.get("note", "").strip()
 
     if decision not in ("approve", "reject"):
         return jsonify({"error": "action must be 'approve' or 'reject'"}), 400
@@ -1125,34 +1481,52 @@ def act_on_approval(approval_id, identity):
     if not rec:
         return jsonify({"error": "approval not found"}), 404
 
-    f      = rec.get("fields", {})
-    status = f.get("סטטוס", "")
-    if status != "ממתין":
+    f = rec.get("fields", {})
+    status = f.get(ApprovalsFields.STATUS, "")
+    if status != "\u05de\u05de\u05ea\u05d9\u05df":
         return jsonify({"error": f"approval already {status}"}), 409
 
-    new_status = "אושר" if decision == "approve" else "נדחה"
-    patch_fields: dict = {"סטטוס": new_status}
+    new_status = "\u05d0\u05d5\u05e9\u05e8" if decision == "approve" else "\u05e0\u05d3\u05d7\u05d4"
+    patch_fields: dict = {ApprovalsFields.STATUS: new_status}
     if decision == "reject" and note:
-        patch_fields["הערת דחייה"] = note
+        patch_fields[ApprovalsFields.REJECTION_NOTE] = note
+
+    action_label = f.get(ApprovalsFields.ACTION, approval_id)
+    ctx_id = f.get(ApprovalsFields.CONTEXT_ID, "")
+    execution_result = None
+    context_data = f.get(ApprovalsFields.CONTEXT_DATA, "")
+    if decision == "approve" and context_data:
+        try:
+            payload = json.loads(context_data)
+        except (TypeError, ValueError):
+            payload = {}
+        if isinstance(payload, dict) and payload.get("type") == "tma_write":
+            execution_result = _execute_tma_write(payload, identity)
+            if not execution_result.get("ok"):
+                return jsonify({
+                    "error": "approval execution failed",
+                    "detail": execution_result,
+                }), 500
 
     ok = _at_patch("Approvals", approval_id, patch_fields)
     if not ok:
         return jsonify({"error": "update failed"}), 500
 
-    action_label = f.get("פעולה", approval_id)
-    ctx_id       = f.get("מזהה הקשר", "")
-
-    _try_bus_action(ctx_id, decision)
+    if execution_result is None:
+        _try_bus_action(ctx_id, decision)
     _audit(f"approval_{decision}", identity, details=f"{action_label[:100]} | note: {note[:80]}")
 
-    icon = "✅" if decision == "approve" else "❌"
+    icon = "OK" if decision == "approve" else "REJECTED"
     _notify_owner(
-        f"{icon} TMA: {new_status} — {action_label}\n"
-        f"על ידי: {identity.display_name or identity.user_id}"
-        + (f"\nהערה: {note}" if note else "")
+        f"{icon} TMA: {new_status} - {action_label}\n"
+        f"approved_by: {identity.display_name or identity.user_id}"
+        + (f"\nnote: {note}" if note else "")
     )
 
-    return jsonify({"ok": True, "approval_id": approval_id, "new_status": new_status})
+    response = {"ok": True, "approval_id": approval_id, "new_status": new_status}
+    if execution_result is not None:
+        response.update(execution_result)
+    return jsonify(response)
 
 
 @tma_api.route("/api/activity", methods=["GET"])
@@ -1163,22 +1537,43 @@ def activity_feed(identity):
 
     limit = min(int(request.args.get("limit", 50) or 50), 100)
 
+    entries = []
     # Business Memory = strategic manual events; no domain filter (table has no domain field).
     # ?domain= param reserved for future Interaction Log endpoint.
-    recs = _at_list(Tables.BUSINESS_MEMORY, "", max_records=limit)
-
-    entries = []
-    for rec in recs:
+    business_recs = _at_list(Tables.BUSINESS_MEMORY, "", max_records=limit)
+    for rec in business_recs:
         f    = rec.get("fields", {})
         tags = f.get(BusinessMemoryFields.TAGS) or []
         entries.append({
             "id":        rec["id"],
+            "source":    "business_memory",
             "title":     f.get(BusinessMemoryFields.TITLE, ""),
             "summary":   f.get(BusinessMemoryFields.DESCRIPTION, ""),
             "channel":   f.get(BusinessMemoryFields.EVENT_TYPE, ""),
             "domain":    ", ".join(tags) if isinstance(tags, list) else str(tags),
             "timestamp": f.get(BusinessMemoryFields.DATE, ""),
             "sentiment": f.get(BusinessMemoryFields.IMPACT, "")[:120] if f.get(BusinessMemoryFields.IMPACT) else "",
+        })
+
+    receipt_formula = f"{{{InteractionLogFields.CHANNEL}}}='receipt'"
+    receipt_recs = _at_list(Tables.INTERACTION_LOG, receipt_formula, max_records=limit)
+    for rec in receipt_recs:
+        f = rec.get("fields", {})
+        summary = f.get(InteractionLogFields.SUMMARY, "")
+        try:
+            receipt_data = json.loads(summary) if summary else {}
+        except (TypeError, ValueError):
+            receipt_data = {}
+        entries.append({
+            "id":        rec["id"],
+            "source":    "receipt",
+            "title":     f.get(InteractionLogFields.TITLE, ""),
+            "summary":   summary,
+            "channel":   f.get(InteractionLogFields.CHANNEL, "receipt"),
+            "domain":    receipt_data.get("table", ""),
+            "timestamp": f.get(InteractionLogFields.TIMESTAMP, receipt_data.get("timestamp", "")),
+            "sentiment": f.get(InteractionLogFields.KEY_INSIGHTS, ""),
+            "receipt":   receipt_data,
         })
 
     entries.sort(key=lambda x: x.get("timestamp", ""), reverse=True)

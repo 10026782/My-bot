@@ -1,0 +1,537 @@
+version: CORE_03_GOVERNANCE_PHASE_2_1
+generated_by: registry_calibration
+description: Read-only calibrated system registry for current BOSS production shape.
+last_audit: 2026-06-08
+
+services:
+  - id: backend
+    name: Render Backend
+    owner: owner
+    status: VERIFIED
+    criticality: CRITICAL
+    dependencies:
+      - airtable
+      - telegram
+      - frontend
+    env:
+      - RENDER_APP_URL
+      - TELEGRAM_TOKEN
+      - AIRTABLE_API_KEY
+      - AIRTABLE_BASE_ID
+      - TMA_ALLOWED_ORIGINS
+    last_audit: 2026-06-08
+  - id: frontend
+    name: Vercel Mini App
+    owner: owner
+    status: VERIFIED
+    criticality: HIGH
+    dependencies:
+      - backend
+      - telegram
+    env:
+      - VITE_API_URL
+    last_audit: 2026-06-08
+  - id: telegram
+    name: Telegram Bot API
+    owner: owner
+    status: VERIFIED
+    criticality: CRITICAL
+    dependencies:
+      - backend
+    env:
+      - TELEGRAM_TOKEN
+    last_audit: 2026-06-08
+  - id: airtable
+    name: Airtable Base
+    owner: owner
+    status: VERIFIED
+    criticality: CRITICAL
+    dependencies: []
+    env:
+      - AIRTABLE_API_KEY
+      - AIRTABLE_BASE_ID
+    last_audit: 2026-06-08
+
+airtable_tables:
+  - id: projects
+    name: Projects
+    owner: business
+    status: VERIFIED
+    criticality: HIGH
+    dependencies:
+      - airtable_tools
+      - schema_intelligence
+    critical_fields:
+      - Project Name
+      - Location
+      - Status
+      - Total Units
+      - Notes
+    last_audit: 2026-06-08
+  - id: units
+    name: Units
+    owner: business
+    status: UNUSED
+    criticality: MEDIUM
+    dependencies:
+      - airtable_schema
+      - airtable_tools
+    critical_fields:
+      - Unit Number
+      - Project
+      - Status
+    last_audit: 2026-06-08
+  - id: unit_sales
+    name: Unit Sales & Debt Distribution
+    owner: business
+    status: UNUSED
+    criticality: MEDIUM
+    dependencies:
+      - airtable_schema
+    critical_fields: []
+    last_audit: 2026-06-08
+  - id: loans
+    name: Loans
+    owner: finance
+    status: UNUSED
+    criticality: MEDIUM
+    dependencies:
+      - airtable_schema
+      - airtable_tools
+    critical_fields:
+      - Loan Name/ID
+      - Project
+      - Loan Amount
+      - Payment Status
+    last_audit: 2026-06-08
+  - id: debt_mgmt
+    name: Company A - Debt Management
+    owner: finance
+    status: UNUSED
+    criticality: MEDIUM
+    dependencies:
+      - airtable_schema
+    critical_fields:
+      - Invoice Number
+      - Payment Date
+      - Gross Payment (NIS)
+    last_audit: 2026-06-08
+  - id: cash_flow
+    name: Weekly Cash Flow Reports
+    owner: finance
+    status: UNUSED
+    criticality: MEDIUM
+    dependencies:
+      - airtable_schema
+    critical_fields:
+      - Id
+      - Week End Date
+      - Week Start Date
+    last_audit: 2026-06-08
+  - id: expenses
+    name: הוצאות (Expenses)
+    owner: finance
+    status: VERIFIED
+    criticality: HIGH
+    dependencies:
+      - tma_api
+      - airtable_tools
+      - schema_intelligence
+    critical_fields:
+      - שם ההוצאה
+      - סכום
+      - קטגוריה
+      - תאריך
+    last_audit: 2026-06-08
+  - id: payments
+    name: תשלומים (Payments)
+    owner: finance
+    status: VERIFIED
+    criticality: CRITICAL
+    dependencies:
+      - tma_api
+      - airtable_tools
+      - schema_intelligence
+    critical_fields:
+      - אסמכתא
+      - סכום
+      - תאריך
+      - סטטוס
+    last_audit: 2026-06-08
+  - id: contacts
+    name: אנשי קשר (Contacts)
+    owner: crm
+    status: VERIFIED
+    criticality: HIGH
+    dependencies:
+      - airtable_tools
+      - schema_intelligence
+    critical_fields:
+      - שם
+      - טלפון
+      - סטטוס
+    last_audit: 2026-06-08
+  - id: deals
+    name: עסקאות (Deals)
+    owner: crm
+    status: VERIFIED
+    criticality: HIGH
+    dependencies:
+      - tma_api
+      - airtable_tools
+      - schema_intelligence
+    critical_fields:
+      - שם העסקה
+      - סכום
+      - שלב
+    last_audit: 2026-06-08
+  - id: leads
+    name: Leads
+    owner: growth
+    status: VERIFIED
+    criticality: CRITICAL
+    dependencies:
+      - tma_api
+      - lead_capture
+      - lead_memory
+      - schema_intelligence
+    critical_fields:
+      - Name
+      - phone
+      - status
+      - score
+      - tier
+      - summary
+      - source
+      - channel
+      - created_at
+      - memory_key
+      - tenant_id
+      - domain
+    last_audit: 2026-06-08
+  - id: deadlines
+    name: משימות ודד ליינים
+    owner: operations
+    status: VERIFIED
+    criticality: MEDIUM
+    dependencies:
+      - airtable_tools
+      - schema_intelligence
+    critical_fields:
+      - שם המשימה
+      - סטטוס
+      - תאריך דדליין
+      - אחראי
+    last_audit: 2026-06-08
+  - id: tasks
+    name: משימות (Tasks)
+    owner: operations
+    status: VERIFIED
+    criticality: CRITICAL
+    dependencies:
+      - tma_api
+      - airtable_tools
+      - schema_intelligence
+    critical_fields:
+      - כותרת המשימה
+      - תיאור
+      - תאריך יעד
+      - סטטוס
+    last_audit: 2026-06-08
+  - id: profile
+    name: Profile
+    owner: owner
+    status: UNUSED
+    criticality: LOW
+    dependencies:
+      - airtable_schema
+    critical_fields: []
+    last_audit: 2026-06-08
+  - id: learnings
+    name: למידות ותובנות
+    owner: intelligence
+    status: VERIFIED
+    criticality: MEDIUM
+    dependencies:
+      - schema_intelligence
+      - learning_engine
+    critical_fields:
+      - כותרת התובנה
+      - תיאור
+      - תאריך יצירה
+    last_audit: 2026-06-08
+  - id: business_memory
+    name: Business Memory
+    owner: intelligence
+    status: VERIFIED
+    criticality: HIGH
+    dependencies:
+      - tma_api
+      - core.lead_events
+    critical_fields:
+      - Event Title
+      - Event Description
+      - Event Date
+    last_audit: 2026-06-08
+  - id: interaction_log
+    name: Interaction Log
+    owner: intelligence
+    status: VERIFIED
+    criticality: HIGH
+    dependencies:
+      - tma_api
+      - audit
+      - lead_timeline
+    critical_fields:
+      - Interaction Subject
+      - Details
+      - Interaction Date
+      - Interaction Type
+    last_audit: 2026-06-08
+  - id: imports
+    name: Imports
+    owner: operations
+    status: UNUSED
+    criticality: LOW
+    dependencies:
+      - airtable_schema
+    critical_fields: []
+    last_audit: 2026-06-08
+  - id: tenants
+    name: Tenants
+    owner: security
+    status: UNUSED
+    criticality: HIGH
+    dependencies:
+      - airtable_schema
+    critical_fields:
+      - tenant_id
+    last_audit: 2026-06-08
+  - id: projects_hub
+    name: ProjectsHub
+    owner: tma
+    status: VERIFIED
+    criticality: CRITICAL
+    dependencies:
+      - tma_api
+      - frontend
+    critical_fields:
+      - Name
+      - emoji
+      - slug
+      - mode
+      - project_type
+      - domain
+      - kpi_fields
+      - quick_actions
+      - status
+      - owner_ids
+      - tenant_id
+    last_audit: 2026-06-08
+  - id: approvals
+    name: Approvals
+    owner: security
+    status: VERIFIED
+    criticality: CRITICAL
+    dependencies:
+      - tma_api
+      - event_bus
+    critical_fields:
+      - פעולה
+      - מבוקש על ידי
+      - בוקש בתאריך
+      - רמת סיכון
+      - סוג הקשר
+      - מזהה הקשר
+      - נתוני הקשר
+      - סטטוס
+      - הערת דחייה
+    last_audit: 2026-06-08
+  - id: assets
+    name: Assets
+    owner: personal
+    status: STALE
+    criticality: HIGH
+    dependencies:
+      - tma_api
+      - airtable_schema
+    critical_fields:
+      - שם הנכס
+      - סוג
+      - עלות רכישה
+      - שווי נוכחי
+      - סטטוס
+    last_audit: 2026-06-08
+  - id: worlds
+    name: Worlds
+    owner: game
+    status: VERIFIED
+    criticality: HIGH
+    dependencies:
+      - tma_api
+      - scheduler
+      - app_commands
+    critical_fields:
+      - Name
+      - Number
+      - Status
+      - Boss
+      - Prize
+      - Total_Coins_Target
+      - Coins_Earned
+    last_audit: 2026-06-08
+  - id: quests
+    name: Quests
+    owner: game
+    status: VERIFIED
+    criticality: HIGH
+    dependencies:
+      - tma_api
+      - scheduler
+      - app_commands
+    critical_fields:
+      - Name
+      - World
+      - Status
+      - Coins
+      - Week_Start
+      - Impact
+      - Done_By
+    last_audit: 2026-06-08
+  - id: coins_log
+    name: Coins_Log
+    owner: game
+    status: VERIFIED
+    criticality: HIGH
+    dependencies:
+      - tma_api
+      - scheduler
+      - app_commands
+    critical_fields:
+      - Action
+      - Coins
+      - Date
+      - Quest
+      - Note
+      - Total_Running
+    last_audit: 2026-06-08
+  - id: daily_tasks
+    name: Daily_Tasks
+    owner: game
+    status: VERIFIED
+    criticality: HIGH
+    dependencies:
+      - tma_api
+      - airtable_tools
+    critical_fields:
+      - Date
+      - Task
+      - Quest
+      - Coins
+      - Status
+      - Who
+    last_audit: 2026-06-08
+  - id: roadmap_tasks
+    name: Roadmap_Tasks
+    owner: game
+    status: VERIFIED
+    criticality: HIGH
+    dependencies:
+      - schema_intelligence
+      - airtable_tools
+    critical_fields:
+      - Task
+      - World
+      - Quest
+      - Owner
+      - Priority
+      - Status
+      - Due_Date
+      - Coins
+    last_audit: 2026-06-08
+  - id: weekly_goals
+    name: Weekly_Goals
+    owner: game
+    status: VERIFIED
+    criticality: MEDIUM
+    dependencies:
+      - schema_intelligence
+      - airtable_tools
+    critical_fields:
+      - Goal
+      - World
+      - Target_Date
+      - Status
+    last_audit: 2026-06-08
+  - id: boss_battles
+    name: Boss_Battles
+    owner: game
+    status: VERIFIED
+    criticality: MEDIUM
+    dependencies:
+      - schema_intelligence
+      - airtable_tools
+    critical_fields:
+      - Week
+      - Week_Start
+      - Question
+      - Answer
+      - Status
+      - Coins_Earned
+    last_audit: 2026-06-08
+
+data_flows:
+  - id: lead_flow
+    name: Lead Flow
+    owner: growth
+    status: PARTIAL
+    criticality: CRITICAL
+    last_audit: 2026-06-08
+    steps:
+      - WhatsApp
+      - Lead Capture
+      - Leads
+      - Approval
+      - Followup
+    dependencies:
+      - app.py
+      - lead_capture.py
+      - Leads
+      - Approvals
+      - משימות (Tasks)
+  - id: tma_flow
+    name: TMA Flow
+    owner: tma
+    status: VERIFIED
+    criticality: CRITICAL
+    last_audit: 2026-06-08
+    steps:
+      - Mini App
+      - Auth
+      - Airtable
+      - Approval
+      - Write
+      - Receipt
+    dependencies:
+      - tma_api.py
+      - ProjectsHub
+      - Leads
+      - Approvals
+      - Interaction Log
+  - id: game_flow
+    name: Game Flow
+    owner: game
+    status: PARTIAL
+    criticality: HIGH
+    last_audit: 2026-06-08
+    steps:
+      - Roadmap_Tasks
+      - Quests
+      - Coins_Log
+      - Dashboard
+    dependencies:
+      - tma_api.py
+      - scheduler.py
+      - Roadmap_Tasks
+      - Quests
+      - Coins_Log

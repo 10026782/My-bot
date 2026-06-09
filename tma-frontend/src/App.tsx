@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchProjects } from "./api";
+import { fetchProjects, fetchTmaAuth } from "./api";
 import { GlobalKpis } from "./components/GlobalKpis";
 import { ProjectCard } from "./components/ProjectCard";
 import { LeadPipeline } from "./components/LeadPipeline";
@@ -9,6 +9,7 @@ import { FinancePulse } from "./components/FinancePulse";
 import { PersonalMode } from "./components/PersonalMode";
 import { SystemHealth } from "./components/SystemHealth";
 import { GameScreen } from "./components/GameScreen";
+import { OwnerControlCenter } from "./components/OwnerControlCenter";
 import type { ProjectsResponse, ProjectCard as TProjectCard } from "./types";
 
 type HubState =
@@ -25,6 +26,8 @@ export default function App() {
   const [personalOpen, setPersonalOpen] = useState(false);
   const [healthOpen, setHealthOpen] = useState(false);
   const [gameOpen, setGameOpen] = useState(false);
+  const [ownerControlOpen, setOwnerControlOpen] = useState(false);
+  const [authRole, setAuthRole] = useState<string | null>(null);
 
   function loadHub() {
     setHub({ status: "loading" });
@@ -36,11 +39,22 @@ export default function App() {
       );
   }
 
-  useEffect(() => { loadHub(); }, []);
+  useEffect(() => {
+    loadHub();
+    fetchTmaAuth()
+      .then((auth) => {
+        if (auth?.role) setAuthRole(auth.role);
+      })
+      .catch(() => setAuthRole(null));
+  }, []);
 
   // ── Game view ───────────────────────────────────────────────────
   if (gameOpen) {
     return <GameScreen onBack={() => setGameOpen(false)} />;
+  }
+
+  if (ownerControlOpen) {
+    return <OwnerControlCenter onBack={() => setOwnerControlOpen(false)} />;
   }
 
   // ── System Health view ──────────────────────────────────────────
@@ -111,6 +125,7 @@ export default function App() {
 
   // ── Projects Hub ────────────────────────────────────────────────
   const { data } = hub;
+  const canShowOwnerControl = authRole ? authRole === "owner" : true;
 
   return (
     <div className="min-h-screen bg-gray-100 pb-8">
@@ -125,6 +140,9 @@ export default function App() {
           <button onClick={() => setPersonalOpen(true)}   className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="נכסים">🏠</button>
           <button onClick={() => setActivityOpen(true)}   className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="פעילות">📋</button>
           <button onClick={() => setGameOpen(true)}      className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="גיים">🎮</button>
+          {canShowOwnerControl && (
+            <button onClick={() => setOwnerControlOpen(true)} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-900 text-white active:bg-gray-700 text-xs font-black" aria-label="Owner Control Center">OC</button>
+          )}
           <button onClick={() => setHealthOpen(true)}    className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="בריאות מערכת">⚙️</button>
         </div>
       </div>

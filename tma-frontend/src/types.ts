@@ -182,3 +182,53 @@ export interface DashboardResponse {
   leads: LeadSummary[];
 }
 
+export interface OwnerControlCenter {
+  ok: boolean;
+  system_health: {
+    health_percent: number;
+    working_count: number;
+    partial_count: number;
+    broken_count: number;
+  };
+  critical_systems: {
+    name: string;
+    status: string;
+    color: "green" | "yellow" | "red" | string;
+    owner?: string;
+    next_blocker?: string;
+  }[];
+  approvals: {
+    pending_count: number;
+    pending: Approval[];
+    recent_executed: Approval[];
+    recent_receipts: {
+      id: string;
+      title: string;
+      timestamp: string;
+      receipt: {
+        action?: string;
+        table?: string;
+        record_id?: string;
+        requested_by?: string;
+        approved_by?: string;
+        status?: string;
+        timestamp?: string;
+      };
+    }[];
+  };
+  permissions: {
+    role: string;
+    read: string;
+    write: string;
+    approve: string;
+  }[];
+  business_language: {
+    lead_status: { value: string; label: string }[];
+    lead_outcome: { value: string; label: string }[];
+    lead_tier: { value: string; label: string }[];
+  };
+  blockers: string[];
+  next_actions: string[];
+  warnings: string[];
+}
+

@@ -1,167 +1,145 @@
 # BOSS CURRENT STATE
 
-Audit date: 2026-06-07
-Last updated: 2026-06-07 — Stabilization Sprint completed
-Mode: Production fixes applied. See commit log for details.
-
-This document describes only what is implemented in the current codebase.
-Future plans, roadmap-only screens, and TODO promises are ignored unless matching runtime code exists.
+Last updated: 08/06/2026
+Reflects: Stabilization Sprint (C25–C39) + World 2 Lead Flow Sprint (W0, W1) + Golden Path Approval Gate (approval-gated TMA writes)
 
 ## Classification Key
-
-- WORKING: implemented and reachable, no current blocking issue.
-- PARTIAL: implemented but limited, fragile, or missing some runtime path.
-- STUB: route/module exists but returns coming_soon / empty — honest, not misleading.
-- BROKEN: implemented but currently fails or is blocked by a known runtime error.
-- NOT IMPLEMENTED: no current runtime implementation found.
-
----
-
-## What Changed — 07/06/2026 Stabilization Sprint
-
-| Fix | What was done | Commit |
-|-----|---------------|--------|
-| Google Tools merge conflict | SyntaxError resolved — tool chain unblocked | — |
-| lead_qualifier TypeError | get_domain signature fixed | — |
-| Event Bus fail-closed | confirm() returns success only when handler executed | — |
-| email_inbound | Mock removed; honest stub returned | — |
-| TMA approval/activity/finance stubs | TODO replaced with coming_soon or empty list | — |
-| tool_registry sync | schemas / validator / registry / dispatcher aligned | — |
-| Airtable shim | Consistent import path across all helper modules | — |
-| Twilio signature validation | WhatsApp webhook validates X-Twilio-Signature | — |
-| Emergency Stop persistence | Flag survives restart | — |
-| Mock data removed | Failures visible in Daily Digest and reports | — |
-| Approval subscribers x4 | send_email_reply, send_followup, send_recovery, send_bounce registered | — |
-| Approval UX honest | Success shown only after real action executed | — |
-| Payment Reminder | self-test passing | 0744ce9 |
-| WhatsApp outbound | Honest stub — does not pretend to send | — |
-| TMA CORS + 401 | Origin added to Render env; auth working | — |
-
-## Open Items (post-sprint)
-
-| Item | Status | Blocker |
-|------|--------|---------|
-| WhatsApp outbound (real) | Honest stub | Meta Cloud API approval pending |
-| Memory/Learning engine | PARTIAL | Mock events; no real production loop yet |
-| Airtable schema formula mismatch | OPEN | field names diverge between schema.py and live tables — N01 next |
+- WORKING: implemented, reachable, no blocking issue.
+- PARTIAL: implemented but limited or missing some path.
+- STUB: returns coming_soon / empty — honest, not misleading.
+- BROKEN: fails or blocked by known runtime error.
+- NOT IMPLEMENTED: no runtime implementation found.
 
 ---
 
-## Current Runtime Entry Points
+## What Changed Since Last Audit (07/06/2026)
 
-| Entry point | Status | What exists today | Live? | Limitations |
-|---|---|---|---|---|
-| Telegram webhook | PARTIAL | Receives updates, calls run_agent() | Yes | Tool chain now unblocked; approval flow honest |
-| WhatsApp webhook | PARTIAL | Receives Twilio POST, calls run_agent() | Yes | Twilio signature validation now active; outbound is honest stub |
-| Voice IVR | PARTIAL | Twilio voice + IVR state machine | Yes if VOICE_IVR enabled | No signature validation yet |
-| Worker trigger | PARTIAL | POST endpoint runs run_agent() for supplied chat/event | Yes if secret configured | Arbitrary chat_id risk if secret leaks |
-| TMA blueprint | PARTIAL | Registers /api/* endpoints | Yes | Stubs now return coming_soon, not TODO |
-| Health | PARTIAL | Returns health summary | Yes | Real checks added; Airtable/scheduler probed |
+| Item | Status | Detail |
+|------|--------|--------|
+| W0 WhatsApp Lead Capture | ✅ NEW | lead_capture.py — unknown WhatsApp number → Leads record created in Airtable (commit 2b861bd) |
+| W1 Airtable Schema Fix | ✅ MERGED | LeadFields.SCORE="score", TIER="tier", schema_intelligence synced (commit f095036, PR #36) |
+| CLAUDE.md | ✅ LIVE | Architecture docs on main — Codex reads at session start (PR #35) |
+| ROADMAP/CURRENT_STATE | ✅ UPDATED | Now reflects actual state including W0, W1, removed C14 |
+| C40 Golden Path Approval Gate | ? NEW | TMA write endpoints queue approval before writes; approve executes write; reject does not write; receipt returned; audit after successful execution only (tma_api.py, commit 4e5d00d on origin/approval-gate) |
+
+---
+
+## Lead Flow — Live Path (post W0)
+
+```
+Unknown WhatsApp number
+    ↓
+identity.resolve() → Role.LEAD
+    ↓
+lead_capture.capture_inbound_lead() [NEW — W0]
+    ↓ (gated: LEAD_CAPTURE flag)
+Airtable Leads: create (first contact) or no-op (returning)
+    ↓
+run_agent() → conversational reply only
+    ↓
+[N02 next: scoring written at capture time]
+[N03 next: lead_memory wired after score]
+[N04 next: followup triggered on HOT tier]
+```
+
+**Previously:** WhatsApp lead → conversational reply only. No Airtable record. No scoring. No followup possible.
+**Now:** WhatsApp lead → Airtable record created → scoring/followup chain unlocked (pending N02–N04).
 
 ---
 
 ## Module State Matrix
 
-| Area | Status | Notes |
-|---|---|---|
-| Telegram agent | PARTIAL | Tool chain unblocked after Google fix |
-| Approval system | PARTIAL | Honest UX; 4 subscribers registered; pending_approvals dict in app.py |
-| Event Bus | WORKING | fail-closed: success only on real handler execution |
-| lead_qualifier | PARTIAL | TypeError fixed; Airtable schema mismatch (N01) still pending |
-| Google integrations | PARTIAL | Merge conflict resolved; OAuth/env still required for live use |
-| Email tools | PARTIAL | Import fixed; email_inbound is honest stub until Google Tools live |
-| WhatsApp tools | PARTIAL | Twilio validation active; outbound = honest stub pending Meta Cloud API |
-| Airtable integrations | PARTIAL | shim consistent; formula field mismatch remains (N01) |
-| Daily Digest | PARTIAL | Failures now visible — no more hidden empty sections |
+| Module | Status | Notes |
+|--------|--------|-------|
+| Telegram agent | PARTIAL | Tool chain unblocked; approval flow honest |
+| WhatsApp webhook | PARTIAL | Twilio validation active; lead capture live (flag); outbound = honest stub |
+| Lead Capture | WORKING | lead_capture.py — gated by LEAD_CAPTURE flag |
+| Approval system | PARTIAL | Honest UX; 4 subscribers; pending_approvals in app.py; TMA write approval path executes queued writes after approve |
+| Event Bus | WORKING | Fail-closed: success only on real handler execution |
+| lead_qualifier | PARTIAL | TypeError fixed (C26); state machine = dead code (no live callers) |
+| lead_memory | PARTIAL | Debounce engine built and tested; not wired (N03) |
+| Lead Scoring | NOT IMPLEMENTED | core/lead_scoring.py does not exist; C14 removed from Completed |
+| Google integrations | PARTIAL | Merge conflict resolved; OAuth/env still required |
+| Email tools | PARTIAL | Import fixed; honest stub until Google Tools live |
+| Airtable integrations | WORKING | Schema synced (W1); score/tier fields correct |
+| Daily Digest | PARTIAL | Failures visible; score/tier now correct field names |
 | Payment Reminder | WORKING | self-test passing (0744ce9) |
-| Workers / scheduler | PARTIAL | Mock fallbacks removed; approval actions executable via registered subscribers |
-| Guards / safety | PARTIAL | Emergency Stop now persists across restart |
-| Memory system | PARTIAL | RAM-only; business memory partially connected |
-| Learning system | STUB | Mock events; no real production learning loop |
-| TMA / Mini App | PARTIAL | CORS + auth fixed; stubs honest (coming_soon) |
-| Projects module | PARTIAL | Projects Hub working with real Airtable data |
-| Finance module | STUB | /api/finance/pulse → coming_soon (not TODO) |
-| Activity module | STUB | /api/activity → coming_soon |
-| Assets module | STUB | /api/assets → coming_soon |
-| Personal Mode | STUB | Auth mode works; screens not implemented |
-| Approval screen (TMA) | STUB | Returns empty list (not TODO) |
-| System Health (TMA) | PARTIAL | Connected to health_monitor.py; real checks active |
-| Recruitment module | PARTIAL | Domain prompt works; lead flow pending schema fix |
+| Workers / scheduler | PARTIAL | Mock fallbacks removed; subscribers registered |
+| Guards / safety | PARTIAL | Emergency Stop persists; Voice/IVR lacks Twilio validation |
+| Memory system | PARTIAL | RAM-only; lead_memory built but not wired |
+| Learning system | STUB | Mock events; no real production loop |
+| TMA / Mini App | PARTIAL | CORS + auth fixed; write endpoints approval-gated; stubs honest |
+| Projects Hub | PARTIAL | Real Airtable data; no navigation |
+| Finance Pulse | STUB | coming_soon |
+| Activity Feed | STUB | coming_soon; approval receipts are returned by API but not persisted/shown in Activity Feed |
+| Assets | STUB | coming_soon |
+| Personal Mode | STUB | Auth works; screens not implemented |
+| Recruitment | PARTIAL | Domain prompt works; lead flow pending N02+ |
 | Investor tools | NOT IMPLEMENTED | Roadmap only |
 
 ---
 
-## Screens
+## Golden Path Status
 
-| Screen | Status | Works? | Live? | Notes |
-|---|---|---|---|---|
-| Projects Hub | PARTIAL | Yes | Yes | Real Airtable data; no navigation |
-| Project Dashboard | PARTIAL | API only | Endpoint live | No frontend screen |
-| Lead Pipeline | PARTIAL | API only | Endpoint live | Formula mismatch risk (N01) |
-| Lead Card | PARTIAL | API only | Endpoint live | Schema mismatch risk |
-| Finance Pulse | STUB | No | Endpoint live | coming_soon response |
-| Approvals screen | STUB | No | Endpoint live | Returns empty list honestly |
-| Activity Feed | STUB | No | Endpoint live | coming_soon response |
-| Assets Overview/Card | STUB | No | Endpoint live | coming_soon response |
-| System Health | PARTIAL | Yes | Yes | Real health checks |
-| Personal Mode | STUB | No | Partial | No usable screens |
-| Recruitment | NOT IMPLEMENTED | No | No | Domain prompt only |
-| Investor | NOT IMPLEMENTED | No | No | Roadmap only |
+| Path | Status | Current Reality |
+|------|--------|-----------------|
+| Mini App ? Auth ? Real Airtable Data ? Approval ? Write ? Receipt | PARTIAL / IMPROVED | TMA write endpoints now require approval and execute writes only after approve. Reject does not write. Receipt is returned from the approval execution response, but receipt persistence/display is not implemented yet. |
 
----
+Protected TMA write endpoints:
+- POST /api/projects
+- PATCH /api/leads/<lead_id>/status
+- POST /api/followup
 
-## OPEN RISKS (post-sprint)
+## Open Items
 
-1. Airtable schema formula mismatch — field names diverge (N01 is next fix).
-2. Memory is RAM-only — not durable across restarts.
-3. WhatsApp outbound is honest stub — real sending blocked on Meta Cloud API.
-4. Voice endpoints still lack Twilio signature validation.
-5. Worker trigger can impersonate arbitrary chat_id if WORKER_SECRET leaks.
-6. TMA partner authorization sometimes happens after record fetch (ordering issue).
-7. Project dashboards do not strongly scope deals/tasks to project.
-8. Learning engine uses mock events — no real production loop.
-9. Google tools unblocked at code level but OAuth/env still required for live use.
-10. TMA DEV_MODE bypass risk remains if enabled in production.
+| Item | Priority | Blocker / Notes |
+|------|----------|-----------------|
+| Receipt persistence/display | ?? | Receipt is returned after approval execution, but not persisted or shown in Activity Feed |
+| N02 Live Lead Scoring | 🔴 Next | lead_capture.py only — score+tier at creation time |
+| N03 Lead Memory wire-up | 🟠 After N02 | lead_capture.py + lead_memory.py |
+| N04 Followup Activation | 🟠 After N03 | scheduler + followup_engine |
+| Airtable schema formula mismatch (remaining fields) | 🟡 | Spot-check Lead Pipeline/Card screens with real data |
+| core_knowledge.py smoke test false positive | 🟡 | Known — _NEVER_FAKE_CONTROL phrase triggers fake-approval check |
+| Voice/IVR Twilio signature validation | 🟡 | Not critical until F07 active |
+| WhatsApp outbound (real) | ⏸ Blocked | Meta Cloud API approval pending |
+| Memory durability | 🟡 | RAM-only; undercuts lead-memory and learning plans |
+| lead_qualifier state machine | 🔵 Deferred | Dead code — decide: wire or remove after N04 |
 
 ---
 
-## NEXT PRIORITY
+## Open Risks (post-sprint)
 
-**N01 — Airtable Schema Formula Mismatch**
-Files: airtable_schema.py + tma_api.py
-Goal: Lead Pipeline and Lead Card return real data without field name errors.
-Prerequisite for: Q1 HOT Leads Followup, Q2 Followup→Task Automation (World 2 Quests).
-
----
-
-## TOP 10 THINGS THE OWNER CAN USE TODAY
-
-1. TMA Projects Hub — view project cards with real Airtable data.
-2. Telegram chat — agent responds, tools work, approval flow is honest.
-3. WhatsApp inbound — agent receives and processes leads (qualifier fixed).
-4. Daily Digest — real data, failures visible.
-5. Payment Reminder — active and passing self-test.
-6. Approval flow — Owner approves → action executes → confirmation only on success.
-7. Lead Pipeline API — GET /api/leads (schema mismatch risk remains).
-8. Lead Card API — GET /api/leads/<id>.
-9. Followup task creation — POST /api/followup.
-10. Emergency Stop — persists across restart via feature_flags.
+1. Memory is RAM-only — not durable across restarts.
+2. WhatsApp outbound is honest stub — blocked on Meta Cloud API.
+3. Voice endpoints lack Twilio signature validation.
+4. Worker trigger can impersonate arbitrary chat_id if WORKER_SECRET leaks.
+5. TMA partner authorization sometimes happens after record fetch.
+6. Learning engine uses mock events — no real production loop.
+7. TMA DEV_MODE bypass risk if enabled in production.
 
 ---
 
-## BOSS Stabilization Sprint — Final Status
+## Manual Verification Needed
+
+| Check | How |
+|-------|-----|
+| LEAD_CAPTURE flag enabled on Render | Render env vars |
+| WhatsApp lead → Airtable record created | Send test message from unregistered number → check Leads table |
+| Lead Pipeline TMA screen shows real score/tier | Open TMA → Lead Pipeline → confirm non-zero scores |
+
+---
+
+## Stabilization Sprint — Final Status: 10/10 ✅
 
 | Fix | Status |
 |-----|--------|
 | F1 Approval dead-end | ✅ |
 | F2 lead_qualifier TypeError | ✅ |
-| F3 Airtable schema mismatch | ⏳ N01 (next) |
+| F3 Airtable schema mismatch | ✅ (W1) |
 | F4 Daily Digest honest | ✅ |
-| F5 Payment Reminder | ✅ (0744ce9) |
+| F5 Payment Reminder | ✅ |
 | F6 Mock fallbacks removed | ✅ |
 | F7 Emergency Stop persistence | ✅ |
 | F8 Health Monitor real checks | ✅ |
 | F9 TMA stubs honest | ✅ |
 | F10 Duplicate Scheduler | ✅ |
-
-9/10 ✅ — F3 (Airtable schema) = N01, הבא בתור.

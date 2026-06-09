@@ -1,0 +1,261 @@
+{
+  "generated_at": "2026-06-08",
+  "scope": [
+    "system_registry.yaml",
+    "reports/registry_calibration_report.md",
+    "Discovery Audit",
+    "ROADMAP.md",
+    "BOSS_CURRENT_STATE.md"
+  ],
+  "summary": {
+    "system_health_percent": 61,
+    "total_capabilities": 23,
+    "working_count": 7,
+    "partial_count": 12,
+    "stub_count": 4,
+    "broken_count": 0,
+    "unused_count": 0,
+    "health_formula": {
+      "WORKING": 100,
+      "PARTIAL": 50,
+      "STUB": 20,
+      "BROKEN": 0,
+      "UNUSED": 10
+    }
+  },
+  "critical_systems": [
+    {
+      "name": "Leads",
+      "status": "PARTIAL",
+      "owner": "growth",
+      "evidence_files": ["tma_api.py:838", "airtable_schema.py:189", "ROADMAP.md W0/W1"],
+      "next_blocker": "Live scoring and lead_memory wire-up are next."
+    },
+    {
+      "name": "Tasks",
+      "status": "WORKING",
+      "owner": "operations",
+      "evidence_files": ["tma_api.py:929", "tools/airtable_tools.py:17"],
+      "next_blocker": "TMA follow-up task writes are approval-gated, but broader task UX is not mapped here."
+    },
+    {
+      "name": "Payments",
+      "status": "WORKING",
+      "owner": "finance",
+      "evidence_files": ["tma_api.py:503", "tma_api.py:1060", "airtable_schema.py:121"],
+      "next_blocker": "Needs live production Airtable spot check for finance formulas."
+    },
+    {
+      "name": "ProjectsHub",
+      "status": "PARTIAL",
+      "owner": "tma",
+      "evidence_files": ["tma_api.py:571", "tma_api.py:688", "airtable_schema.py:348"],
+      "next_blocker": "Project hub reads/writes exist, navigation and partner UX remain limited."
+    },
+    {
+      "name": "Approvals",
+      "status": "WORKING",
+      "owner": "security",
+      "evidence_files": ["tma_api.py:1151", "tma_api.py:1200", "airtable_schema.py:385"],
+      "next_blocker": "Receipt persistence/display is still missing."
+    }
+  ],
+  "domains": {
+    "CRM": [
+      {
+        "capability": "Leads",
+        "status": "PARTIAL",
+        "owner": "growth",
+        "dependencies": ["Leads", "tma_api", "lead_capture", "schema_intelligence"],
+        "evidence_files": ["tma_api.py:808", "tma_api.py:838", "airtable_schema.py:189", "BOSS_CURRENT_STATE.md Lead Flow"],
+        "next_blocker": "N02 live scoring, N03 memory wire-up, N04 followup activation."
+      },
+      {
+        "capability": "Contacts",
+        "status": "PARTIAL",
+        "owner": "crm",
+        "dependencies": ["Contacts", "airtable_tools", "schema_intelligence"],
+        "evidence_files": ["airtable_schema.py:135", "tools/airtable_tools.py:21", "schema_intelligence.py:34"],
+        "next_blocker": "No owner-facing TMA contacts screen confirmed in current discovery."
+      },
+      {
+        "capability": "Deals",
+        "status": "PARTIAL",
+        "owner": "crm",
+        "dependencies": ["Deals", "tma_api", "airtable_tools"],
+        "evidence_files": ["tma_api.py:757", "airtable_schema.py:147", "tools/airtable_tools.py:25"],
+        "next_blocker": "Deals are read for dashboards, but not a complete owner workflow."
+      },
+      {
+        "capability": "Followups",
+        "status": "PARTIAL",
+        "owner": "operations",
+        "dependencies": ["Leads", "Tasks", "Approvals", "tma_api"],
+        "evidence_files": ["tma_api.py:929", "tma_api.py:953", "ROADMAP.md N04"],
+        "next_blocker": "TMA follow-up creates approval request, but automated followup activation is still next."
+      }
+    ],
+    "TMA": [
+      {
+        "capability": "Auth",
+        "status": "WORKING",
+        "owner": "security",
+        "dependencies": ["Telegram initData", "identity", "TMA_ALLOWED_ORIGINS"],
+        "evidence_files": ["tma_api.py:625", "BOSS_CURRENT_STATE.md C39"],
+        "next_blocker": "Keep Render/Vercel env drift monitored."
+      },
+      {
+        "capability": "Projects Hub",
+        "status": "PARTIAL",
+        "owner": "tma",
+        "dependencies": ["ProjectsHub", "Leads", "Payments", "Tasks"],
+        "evidence_files": ["tma_api.py:661", "tma_api.py:686", "reports/registry_calibration_report.md"],
+        "next_blocker": "Navigation/project detail UX remains limited."
+      },
+      {
+        "capability": "Finance Pulse",
+        "status": "STUB",
+        "owner": "finance",
+        "dependencies": ["Payments", "Expenses"],
+        "evidence_files": ["BOSS_CURRENT_STATE.md Module State Matrix", "tma_api.py:1060", "tma_api.py:1111"],
+        "next_blocker": "Current state marks it stub/limited despite partial data reads."
+      },
+      {
+        "capability": "Activity Feed",
+        "status": "PARTIAL",
+        "owner": "intelligence",
+        "dependencies": ["Business Memory", "Interaction Log"],
+        "evidence_files": ["tma_api.py:1264", "BOSS_CURRENT_STATE.md Activity Feed"],
+        "next_blocker": "Receipts are returned by approval response but not persisted/shown."
+      },
+      {
+        "capability": "Assets",
+        "status": "PARTIAL",
+        "owner": "personal",
+        "dependencies": ["Assets", "tma_api", "Airtable metadata"],
+        "evidence_files": ["tma_api.py:1323", "tma_api.py:1365", "reports/registry_calibration_report.md Stale Tables"],
+        "next_blocker": "Runtime uses Assets, schema comment says Assets (Personal)."
+      }
+    ],
+    "Approvals": [
+      {
+        "capability": "Approval Queue",
+        "status": "WORKING",
+        "owner": "security",
+        "dependencies": ["Approvals", "event_bus", "tma_api"],
+        "evidence_files": ["tma_api.py:1151", "tma_api.py:1200", "ROADMAP.md C40"],
+        "next_blocker": "Bulk approval path should stay low-risk only."
+      },
+      {
+        "capability": "Receipts",
+        "status": "PARTIAL",
+        "owner": "security",
+        "dependencies": ["Approvals", "Interaction Log", "Activity Feed"],
+        "evidence_files": ["tma_api.py:324", "tma_api.py:1258", "BOSS_CURRENT_STATE.md Golden Path"],
+        "next_blocker": "Receipt persistence and Activity Feed display not implemented."
+      }
+    ],
+    "Game": [
+      {
+        "capability": "Worlds",
+        "status": "WORKING",
+        "owner": "game",
+        "dependencies": ["Worlds", "tma_api", "scheduler"],
+        "evidence_files": ["tma_api.py:1508", "scheduler.py:422"],
+        "next_blocker": "Needs live Airtable data quality check."
+      },
+      {
+        "capability": "Quests",
+        "status": "WORKING",
+        "owner": "game",
+        "dependencies": ["Quests", "Coins_Log", "tma_api"],
+        "evidence_files": ["tma_api.py:1529", "tma_api.py:1590", "app.py:116"],
+        "next_blocker": "Quest write paths are direct owner-only writes, not approval-gated."
+      },
+      {
+        "capability": "Coins",
+        "status": "WORKING",
+        "owner": "game",
+        "dependencies": ["Coins_Log", "Quests", "Daily_Tasks"],
+        "evidence_files": ["tma_api.py:1552", "tma_api.py:1599", "tma_api.py:1714"],
+        "next_blocker": "Running total is app-side and depends on existing log consistency."
+      },
+      {
+        "capability": "Daily Tasks",
+        "status": "WORKING",
+        "owner": "game",
+        "dependencies": ["Daily_Tasks", "Coins_Log"],
+        "evidence_files": ["tma_api.py:1631", "tma_api.py:1697"],
+        "next_blocker": "Owner-only direct completion writes."
+      }
+    ],
+    "Communications": [
+      {
+        "capability": "Telegram",
+        "status": "PARTIAL",
+        "owner": "owner",
+        "dependencies": ["app.py", "Telegram Bot API", "router", "tools"],
+        "evidence_files": ["app.py routes", "ROADMAP.md C19", "BOSS_CURRENT_STATE.md Telegram agent"],
+        "next_blocker": "Tool/approval chain is improved but overall agent path remains partial."
+      },
+      {
+        "capability": "WhatsApp",
+        "status": "PARTIAL",
+        "owner": "growth",
+        "dependencies": ["Twilio", "app.py", "lead_capture", "Leads"],
+        "evidence_files": ["ROADMAP.md C32/W0", "BOSS_CURRENT_STATE.md WhatsApp webhook"],
+        "next_blocker": "Outbound remains honest stub; Meta Cloud API blocks production outbound."
+      },
+      {
+        "capability": "Voice",
+        "status": "STUB",
+        "owner": "operations",
+        "dependencies": ["Twilio voice endpoints"],
+        "evidence_files": ["BOSS_CURRENT_STATE.md Open Risks", "ROADMAP.md F07"],
+        "next_blocker": "Voice/IVR is future/white-glove and lacks full validation path."
+      },
+      {
+        "capability": "Email",
+        "status": "STUB",
+        "owner": "communications",
+        "dependencies": ["Google OAuth", "email_inbound"],
+        "evidence_files": ["ROADMAP.md C28/F06", "BOSS_CURRENT_STATE.md Email tools"],
+        "next_blocker": "Honest stub until Google tools/channel are fully live."
+      }
+    ],
+    "Operations": [
+      {
+        "capability": "Scheduler",
+        "status": "PARTIAL",
+        "owner": "operations",
+        "dependencies": ["scheduler.py", "feature flags", "Airtable", "Telegram"],
+        "evidence_files": ["scheduler.py:679", "BOSS_CURRENT_STATE.md Workers / scheduler"],
+        "next_blocker": "Some jobs active, some gated or dependent on env/imported engines."
+      },
+      {
+        "capability": "Learning",
+        "status": "STUB",
+        "owner": "intelligence",
+        "dependencies": ["core/learning_engine.py", "core/lead_events.py"],
+        "evidence_files": ["ROADMAP.md F02", "BOSS_CURRENT_STATE.md Learning system"],
+        "next_blocker": "No real production learning loop yet."
+      },
+      {
+        "capability": "Memory",
+        "status": "PARTIAL",
+        "owner": "intelligence",
+        "dependencies": ["memory_store", "lead_memory", "context"],
+        "evidence_files": ["ROADMAP.md C08/F10", "BOSS_CURRENT_STATE.md Memory system"],
+        "next_blocker": "RAM-only and lead_memory not wired into lead capture yet."
+      },
+      {
+        "capability": "Governance",
+        "status": "WORKING",
+        "owner": "owner",
+        "dependencies": ["system_registry.yaml", "system_registry_audit.py", "reports"],
+        "evidence_files": ["system_registry.yaml", "reports/registry_calibration_report.md"],
+        "next_blocker": "Needs Airtable metadata confirmation for stale Assets naming."
+      }
+    ]
+  }
+}

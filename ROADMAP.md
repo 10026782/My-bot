@@ -1,11 +1,12 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 07/06/2026
+עודכן: 08/06/2026
 
 ---
 
 ## עיקרון ניהול
 - **C** = Completed — הושלם ובפרודקשן
+- **W** = Completed (World 2 sprint) — נוסף במהלך Lead Flow Audit
 - **N** = Next — הבא בתור, מסודר לפי תלויות
 - **F** = Future — מתוכנן, אין תאריך
 
@@ -30,14 +31,11 @@
 | C09 | Circuit Breaker + Rate Limiter | circuit_breaker.py, rate_limiter.py |
 
 ### Lead System
-| ID | שם | קבצים |
-|----|----|--------|
-| C10 | Lead Qualifier (State Machine) | lead_qualifier.py |
-| C11 | Lead Memory (ארוך-טווח) | core/lead_memory.py |
-| C12 | Lead Events (audit log) | core/lead_events.py |
-| C13 | Shared Memory (תובנות עסקיות לפי דומיין) | core/shared_memory.py |
-| C14 | Lead Scoring (rule-based, זמן אמת) | core/lead_scoring.py |
-| C15 | Followup Engine (תשתית, כבוי) | core/followup_engine.py |
+| ID | שם | קבצים | הערה |
+|----|----|----|------|
+| C12 | Lead Events (audit log) | core/lead_events.py | |
+| C13 | Shared Memory (תובנות עסקיות לפי דומיין) | core/shared_memory.py | |
+| ~~C14~~ | ~~Lead Scoring~~ | ~~core/lead_scoring.py~~ | **קובץ לא קיים — הוסר מ-Completed** |
 
 ### CRM + Storage
 | ID | שם | קבצים |
@@ -78,6 +76,13 @@
 | C37 | Payment Reminder fix | self-test עובר (commit 0744ce9) | payment_reminder.py |
 | C38 | WhatsApp outbound honest stub | לא מעמיד פנים — מחזיר stub כנה | app.py / whatsapp tools |
 | C39 | TMA CORS + auth 401 | CORS origin נוסף ל-Render env; 401 נפתר | tma_api.py, Render env |
+| C40 | Golden Path Approval Gate | TMA write endpoints now require approval before Airtable writes: POST /api/projects, PATCH /api/leads/<lead_id>/status, POST /api/followup. Writes execute only after approve; reject does not write; receipt returned after execution; audit runs only after successful execution. | tma_api.py (commit 4e5d00d on origin/approval-gate; supersedes local f3172ba) |
+
+### World 2 — Lead Flow Sprint (08/06/2026)
+| ID | שם | מה נעשה | קבצים | commit |
+|----|----|---------|--------|--------|
+| W0 | WhatsApp Lead Capture | ליד נכנס ← נוצר/מתעדכן Leads ב-Airtable | lead_capture.py, app.py | 2b861bd |
+| W1 | Airtable Schema Fix (N01) | LeadFields.SCORE/TIER + schema_intelligence sync | airtable_schema.py, schema_intelligence.py, tma_api.py, daily_digest.py | f095036 |
 
 ---
 
@@ -85,37 +90,33 @@
 
 **סדר ביצוע קשיח — כל N תלוי ב-N שלפניו.**
 
-### N01 — Airtable Schema Formula Mismatch
-**למה קודם:** field name mismatch גורם לקריאות שבורות ב-Lead Pipeline ו-Lead Card.
-**מה:** יישור שמות שדות בין airtable_schema.py לטבלאות האמיתיות.
-**קבצים:** airtable_schema.py + tma_api.py.
-**flag:** אין flag — תיקון schema בלבד.
+### N01 — ✅ הושלם (W1 לעיל)
 
-### N02 — Airtable Save Debounce
-**למה קודם:** scoring רץ על כל הודעה → כותב ל-Airtable על כל הודעה → rate-limit.
-**מה:** counter per memory_key ב-LeadMemory. שמירה רק כל N=3 הודעות, או כש-tier השתנה.
-**קבצים:** core/lead_memory.py בלבד.
-**flag:** קיים (LEAD_MEMORY). אין flag חדש.
+### N02 — Live Lead Scoring
+**למה עכשיו:** W0 יוצר ליד ב-Airtable. עכשיו צריך לתת לו ציון בזמן יצירה.
+**מה:** scoring בסיסי בתוך lead_capture.py — לא מודול נפרד.
+- ציין פרויקט ספציפי? +20
+- שאל על מחיר? +15
+- ציין תקציב? +25
+- כותב score + tier לאותה שורת Airtable של W0
+**קבצים:** lead_capture.py בלבד.
+**flag:** LEAD_SCORING (כבוי ברירת מחדל).
 
-### N03 — Followup Activation
-**תלוי ב:** N02 (אחרת scan → update → rate-limit מיד).
-**מה:**
-- scan אמיתי בscheduler: טוען לידים פעילים, מריץ determine_followup_needed
-- יוצר טיוטה / תזכורת
-- שולח לאישור owner דרך event_bus הקיים
-- לא שולח ללקוח בלי אישור
-**קבצים:** core/followup_engine.py, scheduler.py (job קיים ← מחבר).
+### N03 — Lead Memory Wire-up
+**תלוי ב:** N02 (צריך score אמיתי לפני זיכרון).
+**מה:** חיבור lead_memory.update() לתוך lead_capture — אחרי create/score.
+**קבצים:** lead_capture.py + core/lead_memory.py.
+**flag:** LEAD_MEMORY (קיים, כבוי).
+
+### N04 — Followup Activation
+**תלוי ב:** N03.
+**מה:** scheduler scan → לידים עם tier=HOT ללא מגע 24 שעות → שולח לאישור owner.
+**קבצים:** core/followup_engine.py, scheduler.py.
 **flag:** FOLLOWUP_AUTOMATION (קיים, כבוי).
 
-### N04 — Contact Resolver
-**תלוי ב:** ללא תלות, עצמאי.
-**מה:** "שלח מייל לדניאל" → חיפוש fuzzy ב-Contacts → אם יש כפילות, מבקש אישור → מבצע.
-**קבצים:** כלי חדש contact_resolver.py + רישום ב-tool_registry + schemas.
-**flag:** חדש — CONTACT_RESOLVER (כבוי ברירת מחדל).
-
 ### N05 — Daily Digest שדרוג
-**תלוי ב:** N03 (כדי שלידים חדשים + scoring יופיעו בדוח).
-**מה:** חיבור scoring + לידים חדשים לדוח הבוקר הקיים.
+**תלוי ב:** N02 (כדי שציונים אמיתיים יופיעו בדוח).
+**מה:** חיבור score + tier לדוח הבוקר.
 **קבצים:** daily_digest.py בלבד.
 
 ---
@@ -124,54 +125,71 @@
 
 ### F01 — Lead Recovery
 מה: לידים שדעכו → זיהוי אוטומטי → הצעת פנייה מחדש לowner.
-תלוי ב: N03 Followup.
-Spec מפורט: ראה ARCHIVE_additions_log.md → A14.
+תלוי ב: N04 Followup.
 
 ### F02 — Learning Engine
-מה: מעל lead_events (כבר נצבר מ-C12). לומד מדפוסים, התנגדויות, מה סגר עסקאות.
-תלוי ב: N03, כמה חודשי דאטה.
-Spec: ARCHIVE_additions_log.md → A33.
+מה: מעל lead_events (C12). לומד מדפוסים, התנגדויות, מה סגר עסקאות.
+תלוי ב: N04, כמה חודשי דאטה.
 
 ### F03 — Revenue Attribution
-מה: קמפיין → ליד → עסקה → כסף. מאיזה פרסום הגיע הכסף.
 תלוי ב: F02.
-Spec: ARCHIVE_additions_log.md → A10.
 
 ### F04 — KPI Engine
-מה: מצב עסק בזמן אמת — המרות, תזרים, לידים פעילים, חובות.
 תלוי ב: C21 Daily Digest + F03.
-Spec: ARCHIVE_additions_log.md → A26.
 
 ### F05 — WhatsApp Production (Meta Cloud API)
-מה: WhatsApp outbound אמיתי. כרגע honest stub — תלוי Meta Cloud API.
-חסם: אישור Meta Cloud API + מספרים ייעודיים.
-Spec: ARCHIVE_additions_log.md → A17.
+חסם: אישור Meta Cloud API. כרגע honest stub.
 
 ### F06 — Email Channel (Inbound)
-מה: לקוח שולח מייל → gmail_read → Router → Agent → draft → אישור → שליחה.
-תלוי ב: Google Tools הפשרה (מוקפאים כרגע).
-Spec: ARCHIVE_additions_log.md → A42.
+תלוי ב: Google Tools הפשרה.
 
-### F07 — Voice / IVR (מגזר חרדי)
-מה: STT → Router → Agent → TTS. ימות המשיח / Twilio Voice.
-מודל עסקי: White-Glove, ריטיינר גבוה.
-Spec מפורט: ARCHIVE_additions_log.md → A41.
+### F07 — Voice / IVR
+מודל עסקי: White-Glove.
 
 ### F08 — SaaS Multi-Tenant
-מה: BOSS כמוצר לעסקים אחרים. tenant_id כבר קיים (C01).
 תלוי ב: הכל לפניו.
-Spec: ARCHIVE_additions_log.md → A20.
+
+### F09 — Lead Qualifier Wire-up
+מה: חיבור lead_qualifier.handle_lead_message() לתוך run_agent — state machine שאלון לכל ליד WhatsApp.
+מצב: **בנוי ובדוק** — lead_qualifier.py קיים ומלא. לא מחובר לפרודקשן.
+תלוי ב: N04 (קודם צריך scoring + followup פשוטים). אחר כך להחליט: לחבר או להחליף ב-Claude-native scoring.
+קבצים: lead_qualifier.py (קיים), app.py (hook).
+
+### F10 — Lead Memory Wire-up
+מה: חיבור lead_memory.update() לתוך lead_capture — זיכרון ארוך-טווח per lead.
+מצב: **בנוי ובדוק** — core/lead_memory.py קיים כולל debounce, flush, TTL, feature flag.
+תלוי ב: N02 (scoring קודם — אין טעם לזכור ליד ללא ציון).
+קבצים: core/lead_memory.py (קיים), lead_capture.py.
+
+### F11 — Followup Engine Full Activation
+מה: הפעלת core/followup_engine.py המלא — determine_followup_needed, יצירת טיוטות, שליחה לאישור.
+מצב: **תשתית קיימת** — followup_engine.py בנוי. scheduler job קיים (כבוי).
+תלוי ב: N04 (N04 הוא גרסת MVP — F11 הוא הגרסה המלאה עם טיוטות וזיכרון).
+קבצים: core/followup_engine.py (קיים), scheduler.py.
+
+---
+
+## פערים ידועים (לא באגים — החלטות מודעות)
+
+| פער | סיבה | מתי נטפל |
+|-----|-------|----------|
+| F09 lead_qualifier — לא מחובר | state machine בנוי, מחכה ל-N04 | F09 |
+| F10 lead_memory — לא מחובר | debounce בנוי, מחכה ל-N02 | F10 |
+| F11 followup_engine — חלקי | תשתית בנויה, מחכה ל-N04 MVP | F11 |
+| core_knowledge.py smoke test false positive | _NEVER_FAKE_CONTROL מכיל פראזה שהtest מזהה בטעות | לתעד כ-known false positive |
+| Voice/IVR Twilio signature validation | לא קריטי עד שF07 פעיל | לפני F07 |
 
 ---
 
 ## כללי ברזל — לא לגעת בלי אישור
 
-1. **Feature flag = כבוי ברירת מחדל.** מדליקים במודע.
-2. **app.py — 4 hooks בלבד (H1–H4).** לא נוגעים שוב בלי סיבה ארכיטקטונית.
+1. **Feature flag = כבוי ברירת מחדל.**
+2. **app.py — 4 hooks בלבד (H1–H4).**
 3. **Agent לא נוגע ב-Airtable ישירות.** תמיד דרך crm.py.
-4. **זיכרון ליד = identity.memory_key בלבד.** לא phone, לא email.
-5. **מקור אמת לדומיין = detect_domain() בלבד.** config.py = input provider.
+4. **זיכרון ליד = identity.memory_key בלבד.**
+5. **מקור אמת לדומיין = detect_domain() בלבד.**
 6. **לא בונים batch לפי פיצ'ר — בונים לפי קובץ.**
+7. **schema_intelligence.SCHEMA["Leads"] חייב להיות מסונכרן לפני כל כתיבה.**
 
 ---
 
@@ -180,5 +198,7 @@ Spec: ARCHIVE_additions_log.md → A20.
 | קובץ | תפקיד |
 |------|--------|
 | ROADMAP.md | **זה. מקור האמת היחיד.** |
+| BOSS_CURRENT_STATE.md | מצב מודולים בפועל |
+| CLAUDE.md | הוראות לקלוד קוד — קרא ראשון |
 | ARCHIVE_additions_log.md | specs מפורטים A01–A43, היסטוריה |
 | SETUP.md | env vars, טבלאות Airtable, הפעלה ראשונה |
