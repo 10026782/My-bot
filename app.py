@@ -820,8 +820,10 @@ def run_agent(
 
     except anthropic.APIStatusError as e:
         logger.error(f"[Agent] Anthropic {e.status_code}: {e.message}")
-        if e.status_code == 529:
-            logger.warning(f"[Agent] Claude overloaded — trying OpenAI fallback for {chat_id}")
+        _no_credit = "credit balance" in (e.message or "").lower()
+        if e.status_code == 529 or _no_credit:
+            reason = "no credit" if _no_credit else "overloaded"
+            logger.warning(f"[Agent] Claude {reason} — trying OpenAI fallback for {chat_id}")
             return _openai_fallback(ctx.system_prompt, clean_msg, ctx.max_tokens, caller=ctx.memory_key)
         if e.status_code == 413:
             return "⚠️ ההודעה ארוכה מדי. נסה לשלח קצר יותר."
