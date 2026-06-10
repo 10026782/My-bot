@@ -33,6 +33,9 @@ from config          import get_domain as _channel_domain
 from core.router     import route_request, RouteDecision, Handler
 from core.anti_hallucination import verify_execution, sanitize_agent_response
 from health_monitor import get_health_status
+from feature_flags import is_enabled as _flag_enabled
+import cost_monitor
+import llm_fallback
 try:
     from ad_attribution import inject_source_to_incoming_lead as _inject_utm
 except ImportError:
@@ -562,6 +565,7 @@ def run_agent(
             f"msg='{user_text[:60]}'"
         )
 
+    # ── 1.5. WhatsApp Lead Capture (W0) ───────────
     # W0/N02: capture inbound WhatsApp leads and optionally score them.
     if identity.role == Role.LEAD:
         try:
@@ -569,6 +573,13 @@ def run_agent(
             capture_inbound_lead(identity, user_text)
         except Exception as e:
             logger.error(f"[LeadCapture] failed for {identity.memory_key}: {e}")
+
+        # ── 1.6. Live Lead Scoring (N02) ──────────
+        try:
+            from lead_scoring import score_inbound_lead
+            score_inbound_lead(identity, user_text)
+        except Exception as e:
+            logger.error(f"[LeadScoring] failed for {identity.memory_key}: {e}")
 
     # ── 2. Rate Limit ─────────────────────────────
     if not rate_limiter.is_allowed(identity.memory_key):
@@ -617,6 +628,12 @@ def run_agent(
         )
 
     # ── 5. Agent Loop ─────────────────────────────
+    if _flag_enabled("EMERGENCY_STOP_AI"):
+        logger.warning(
+            f"[CostWatchdog] EMERGENCY_STOP_AI active — blocking agent for {identity.user_id}"
+        )
+        return "⛔ מערכת ה-AI בעצירת חירום עקב עלות גבוהה. נסה שוב מאוחר יותר."
+
     try:
         research_mode = user_text.startswith("#") and identity.is_owner
         clean_msg     = user_text[1:].strip() if research_mode else user_text
@@ -660,6 +677,13 @@ def run_agent(
                 system      = ctx.system_prompt,
                 tools       = ctx.allowed_tools,
                 messages    = messages,
+            )
+
+            cost_monitor.record_call(
+                model      = ctx.model,
+                tokens_in  = getattr(response.usage, "input_tokens",  0),
+                tokens_out = getattr(response.usage, "output_tokens", 0),
+                caller     = ctx.memory_key,
             )
 
             tool_uses   = [b for b in response.content if b.type == "tool_use"]
@@ -757,14 +781,15 @@ def run_agent(
 
     except anthropic.APIStatusError as e:
         logger.error(f"[Agent] Anthropic {e.status_code}: {e.message}")
-        if e.status_code == 529:
-            return "⚠️ השרת עמוס כרגע. נסה שוב בעוד דקה."
+        if llm_fallback._is_transient(e):
+            logger.warning(f"[Agent] Claude transient error {e.status_code} — OpenAI fallback for {chat_id}")
+            return llm_fallback.agent_fallback_text(ctx.system_prompt, clean_msg, ctx.max_tokens, caller=ctx.memory_key)
         if e.status_code == 413:
             return "⚠️ ההודעה ארוכה מדי. נסה לשלח קצר יותר."
         return f"❌ שגיאת API ({e.status_code}). נסה שוב."
     except anthropic.APITimeoutError:
         logger.error(f"[Agent] Timeout for {chat_id}")
-        return "⚠️ הבקשה לקחה יותר מדי זמן. נסה שוב או שלח הודעה קצרה יותר."
+        return llm_fallback.agent_fallback_text(ctx.system_prompt, clean_msg, ctx.max_tokens, caller=ctx.memory_key)
     except Exception as e:
         logger.error(f"[Agent] error: {e}", exc_info=True)
         return "⚠️ משהו השתבש. נסה שוב."
@@ -868,6 +893,10 @@ def webhook_telegram():
 
 @app.route("/whatsapp", methods=["POST"])
 def webhook_whatsapp():
+    if _flag_enabled("EMERGENCY_STOP_WHATSAPP") or _flag_enabled("EMERGENCY_STOP_ALL"):
+        logger.critical("[EmergencyStop] WHATSAPP blocked — returning empty TwiML")
+        return Response(str(MessagingResponse()), mimetype="application/xml")
+
     incoming  = request.values.get("Body", "").strip()
     sender_raw = request.values.get("From", "whatsapp:unknown")
     sender     = sender_raw.removeprefix("whatsapp:")   # "+972XXXXXXXXX"
