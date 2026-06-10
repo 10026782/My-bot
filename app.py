@@ -942,10 +942,6 @@ def webhook_telegram():
 
 @app.route("/whatsapp", methods=["POST"])
 def webhook_whatsapp():
-    if _flag_enabled("EMERGENCY_STOP_WHATSAPP") or _flag_enabled("EMERGENCY_STOP_ALL"):
-        logger.critical("[EmergencyStop] WHATSAPP blocked - returning empty TwiML")
-        return _empty_twiml()
-
     if not _validate_twilio_signature():
         return Response("Forbidden", status=403)
 
