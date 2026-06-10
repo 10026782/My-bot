@@ -781,15 +781,33 @@ def run_agent(
 
     except anthropic.APIStatusError as e:
         logger.error(f"[Agent] Anthropic {e.status_code}: {e.message}")
-        if llm_fallback._is_transient(e):
+        if llm_fallback.should_fallback(e):
             logger.warning(f"[Agent] Claude transient error {e.status_code} — OpenAI fallback for {chat_id}")
-            return llm_fallback.agent_fallback_text(ctx.system_prompt, clean_msg, ctx.max_tokens, caller=ctx.memory_key)
+            try:
+                return llm_fallback.call_openai_text(
+                    source="run_agent",
+                    messages=[{"role": "user", "content": clean_msg}],
+                    system=ctx.system_prompt,
+                    max_tokens=ctx.max_tokens,
+                )
+            except Exception as fe:
+                logger.error(f"[Agent] OpenAI fallback also failed: {fe}")
+                return "⚠️ השירות אינו זמין כרגע. נסה שוב מאוחר יותר."
         if e.status_code == 413:
             return "⚠️ ההודעה ארוכה מדי. נסה לשלח קצר יותר."
         return f"❌ שגיאת API ({e.status_code}). נסה שוב."
     except anthropic.APITimeoutError:
         logger.error(f"[Agent] Timeout for {chat_id}")
-        return llm_fallback.agent_fallback_text(ctx.system_prompt, clean_msg, ctx.max_tokens, caller=ctx.memory_key)
+        try:
+            return llm_fallback.call_openai_text(
+                source="run_agent.timeout",
+                messages=[{"role": "user", "content": clean_msg}],
+                system=ctx.system_prompt,
+                max_tokens=ctx.max_tokens,
+            )
+        except Exception as fe:
+            logger.error(f"[Agent] OpenAI fallback also failed: {fe}")
+            return "⚠️ הבוט עמוס כרגע. נסה שוב בעוד דקה."
     except Exception as e:
         logger.error(f"[Agent] error: {e}", exc_info=True)
         return "⚠️ משהו השתבש. נסה שוב."
