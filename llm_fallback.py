@@ -67,18 +67,23 @@ def call_openai_text(
     )
 
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
+
+    # Build Chat Completions messages (stable API, supported in all openai package versions)
+    chat_messages: list[dict[str, Any]] = []
+    if system:
+        chat_messages.append({"role": "system", "content": system})
+    chat_messages.extend(messages)
+
     kwargs: dict[str, Any] = {
         "model": selected_model,
-        "input": _messages_to_text(messages),
-        "max_output_tokens": max_tokens,
+        "messages": chat_messages,
+        "max_tokens": max_tokens,
     }
-    if system:
-        kwargs["instructions"] = system
     if temperature is not None:
         kwargs["temperature"] = temperature
 
-    response = client.responses.create(**kwargs)
-    return getattr(response, "output_text", "") or ""
+    response = client.chat.completions.create(**kwargs)
+    return (response.choices[0].message.content or "").strip()
 
 
 def call_anthropic_text(
