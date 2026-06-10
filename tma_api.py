@@ -18,7 +18,7 @@ from pathlib import Path
 from flask import Blueprint, jsonify, request
 from identity import resolve_identity, Role
 from airtable_schema import (
-    LeadFields, PaymentStatus, BusinessMemoryFields, InteractionLogFields, Tables,
+    LeadFields, DealFields, PaymentStatus, BusinessMemoryFields, InteractionLogFields, Tables,
     QuestsFields, CoinsLogFields, WorldsFields, QuestStatus, WorldStatus,
     DailyTaskFields, DailyTaskStatus, ApprovalsFields,
 )
@@ -787,7 +787,7 @@ def get_project_dashboard(project_slug, identity):
         leads = _at_list("Leads", f"{{domain}}='{domain}'", max_records=20, strict=True)
         deals = _at_list(
             "עסקאות (Deals)",
-            f"AND({{domain}}='{domain}', NOT(OR({{שלב}}='סגור-ניצחון', {{שלב}}='סגור-הפסד')))",
+            f"AND({{domain}}='{domain}', NOT(OR({{{DealFields.STAGE}}}='סגור-ניצחון', {{{DealFields.STAGE}}}='סגור-הפסד')))",
             max_records=20,
             strict=True,
         )
