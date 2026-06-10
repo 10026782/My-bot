@@ -20,6 +20,7 @@ validate_startup()
 
 import anthropic
 import telebot
+from twilio.request_validator import RequestValidator
 from twilio.twiml.messaging_response import MessagingResponse
 
 from memory_store    import memory
@@ -67,6 +68,54 @@ client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=AGENT_TIMEOUT)
 bot    = telebot.TeleBot(TELEGRAM_TOKEN)
 
 app = Flask(__name__)
+
+
+def _empty_twiml() -> Response:
+    return Response(str(MessagingResponse()), mimetype="application/xml")
+
+
+def _is_junk_inbound_text(text: str) -> bool:
+    stripped = (text or "").strip()
+    if not stripped:
+        return True
+    meaningful = [ch for ch in stripped if ch.isalnum()]
+    if not meaningful:
+        return True
+    if len(meaningful) < 2:
+        return True
+    return False
+
+
+def _twilio_signature_validation_enabled() -> bool:
+    return os.environ.get("TWILIO_SIGNATURE_VALIDATION", "true").strip().lower() != "false"
+
+
+def _public_request_url() -> str:
+    proto = request.headers.get("X-Forwarded-Proto")
+    host = request.headers.get("X-Forwarded-Host")
+    if proto and host:
+        return f"{proto}://{host}{request.full_path}".rstrip("?")
+    if proto:
+        return request.url.replace("http://", f"{proto}://", 1)
+    return request.url
+
+
+def _validate_twilio_signature() -> bool:
+    if not _twilio_signature_validation_enabled():
+        logger.warning("[WhatsApp] Twilio signature validation bypassed by env")
+        return True
+
+    token = os.environ.get("TWILIO_AUTH_TOKEN", "")
+    signature = request.headers.get("X-Twilio-Signature", "")
+    if not token or not signature:
+        logger.warning("[WhatsApp] missing Twilio auth token or signature")
+        return False
+
+    return RequestValidator(token).validate(
+        _public_request_url(),
+        request.form.to_dict(flat=True),
+        signature,
+    )
 
 from tma_api import tma_api as _tma_blueprint
 app.register_blueprint(_tma_blueprint)
@@ -868,21 +917,25 @@ def webhook_telegram():
 
 @app.route("/whatsapp", methods=["POST"])
 def webhook_whatsapp():
+    if not _validate_twilio_signature():
+        return Response("Forbidden", status=403)
+
     incoming  = request.values.get("Body", "").strip()
     sender_raw = request.values.get("From", "whatsapp:unknown")
     sender     = sender_raw.removeprefix("whatsapp:")   # "+972XXXXXXXXX"
     to_number  = request.values.get("To",   "whatsapp:unknown")
     msg_sid   = request.values.get("MessageSid", "")
 
-    if not incoming:
-        return Response(str(MessagingResponse()), mimetype="application/xml")
+    if _is_junk_inbound_text(incoming):
+        logger.info("[WhatsApp] junk inbound ignored before LLM")
+        return _empty_twiml()
 
     # domain לפי מספר היעד — Layer 1 של domain_router
     domain_from_channel = _channel_domain(to_number)
 
     dedup_key = msg_sid if msg_sid else incoming
     if idempotency.is_duplicate("whatsapp", sender, dedup_key):
-        return Response(str(MessagingResponse()), mimetype="application/xml")
+        return _empty_twiml()
 
     if _inject_utm:
         try:

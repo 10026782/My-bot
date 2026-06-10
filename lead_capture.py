@@ -18,6 +18,18 @@ def _now_iso() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
 
 
+def _is_junk_inbound_text(text: str) -> bool:
+    stripped = (text or "").strip()
+    if not stripped:
+        return True
+    meaningful = [ch for ch in stripped if ch.isalnum()]
+    if not meaningful:
+        return True
+    if len(meaningful) < 2:
+        return True
+    return False
+
+
 def _score_inbound_message(message: str, identity=None) -> tuple[int, str, list[str]]:
     text = (message or "").lower()
     score = 0
@@ -81,6 +93,9 @@ def capture_inbound_lead(identity, message: str) -> None:
     Never raises: failures here must not break the conversational reply.
     """
     if not is_enabled("LEAD_CAPTURE"):
+        return
+    if _is_junk_inbound_text(message):
+        logger.info("[LeadCapture] junk inbound ignored before Airtable write")
         return
 
     memory_key = identity.memory_key
