@@ -1,5 +1,4 @@
 # lead_capture.py - W0/N03: WhatsApp Lead Capture + optional live scoring
-# Captures inbound WhatsApp leads from unknown numbers (Role.LEAD).
 # Flags:
 # - LEAD_CAPTURE: enables capture, default off
 # - LEAD_SCORING: scores first captured message after create, default off
@@ -38,6 +37,7 @@ def _score_inbound_message(message: str, identity=None) -> tuple[int, str, list[
     project_terms = (
         "פרויקט", "דירה", "נכס", "מגרש", "פנטהאוז", "משרד",
         "ייבוא", "משלוח", "ספק", "project", "apartment", "property",
+        "מיטה", "מיטת", "קומותיים", "product",
     )
     price_terms = (
         "מחיר", "כמה עולה", "עלות", "הצעת מחיר", "תמחור",
@@ -106,13 +106,7 @@ def capture_inbound_lead(identity, message: str) -> None:
         rec_m = re.search(r"rec\w+", raw or "")
 
         if rec_m:
-            # Existing leads are not overwritten: name/phone/source remain untouched.
-            # last_seen / interaction append are skipped until those fields are verified.
-            logger.info(
-                "[LeadCapture] existing lead no-op: lead_id=%s memory_key=%s",
-                rec_m.group(0),
-                memory_key,
-            )
+            logger.debug("[LeadCapture] lead already exists, skipping: %s", memory_key)
             return
 
         fields = {

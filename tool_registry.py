@@ -123,6 +123,14 @@ _REGISTRY: dict[str, ToolMeta] = {
         description_he="קריאת כל הטבלאות והשדות מ-Airtable בזמן אמת"
     ),
 
+    # ── Lead Search ───────────────────────────────
+    "search_lead": ToolMeta(
+        name             = "search_lead",
+        roles_allowed    = _MANAGEMENT,
+        read_only        = True,
+        description_he   = "חיפוש ליד לפי שם חלקי בטבלת Leads",
+    ),
+
     # ── Contact Resolver (N03) ────────────────────
     "resolve_contact": ToolMeta(
         name             = "resolve_contact",

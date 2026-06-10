@@ -13,3 +13,4 @@ gunicorn
 pyTelegramBotAPI
 python-dotenv
 pyluach
+openai

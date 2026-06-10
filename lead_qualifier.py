@@ -13,6 +13,7 @@ from feature_flags import is_enabled
 from domain_prompts import get_qualification_prompt, get_flow, get_domain_config
 from config import get_domain
 from llm_fallback import call_anthropic_text
+from lead_capture import tier_from_score
 from session_store import lead_sessions
 from score_display import format_lead_report
 
@@ -61,15 +62,14 @@ def _parse_response(text: str) -> dict:
                 result["score"] = int("".join(filter(str.isdigit, line.split(":", 1)[1])))
             except ValueError:
                 pass
-        elif line.startswith("סיווג:"):
-            raw = line.split(":", 1)[1].strip().upper()
-            result["tier"] = raw if raw in ("HOT", "WARM", "COLD") else "COLD"
         elif line.startswith("סיכום:"):
             result["summary"] = line.split(":", 1)[1].strip()
         elif line.startswith("סיכון עיקרי:"):
             result["risk"] = line.split(":", 1)[1].strip()
         elif line.startswith("צעד הבא:"):
             result["next_step"] = line.split(":", 1)[1].strip()
+    # tier נקבע בקוד לפי score — לא לפי ה-LLM (N03 thresholds: HOT≥60, WARM≥25)
+    result["tier"] = tier_from_score(result["score"])
     return result
 
 

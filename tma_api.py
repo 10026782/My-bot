@@ -1643,7 +1643,9 @@ _ASSET_EDITABLE = {"Current Value", "Mortgage Balance", "Monthly Income", "Statu
 @tma_api.route("/api/assets/<asset_id>", methods=["PATCH"])
 @require_tma_auth
 def update_asset(asset_id, identity):
-    if not _can_assets(identity):
+    # CORE_04 Fix 2 — write access requires owner; personal-domain read access
+    # (_can_assets) is not sufficient for mutating Assets.
+    if not identity.is_owner:
         return jsonify({"error": "forbidden"}), 403
 
     data   = request.get_json(force=True) or {}
