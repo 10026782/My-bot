@@ -1,28 +1,17 @@
-# lead_capture.py — W0: WhatsApp Lead Capture
-# יוצר/מעדכן רשומת Leads עבור פניות נכנסות מ-WhatsApp ממספרים לא מוכרים (Role.LEAD).
-# כתיבה ישירה ל-airtable_tools (לא דרך dispatcher) — אותו דפוס כמו voice_adapter / ad_attribution / lead_memory.
-# flag: LEAD_CAPTURE (env: LEAD_CAPTURE=true), כבוי כברירת מחדל.
+# lead_capture.py - W0/N03: WhatsApp Lead Capture + optional live scoring
+# Captures inbound WhatsApp leads from unknown numbers (Role.LEAD).
+# Flags:
+# - LEAD_CAPTURE: enables capture, default off
+# - LEAD_SCORING: scores first captured message after create, default off
 
-import re
 import logging
+import re
 from datetime import datetime, timezone
 
+from airtable_schema import LeadFields, Tables
 from feature_flags import is_enabled
-from airtable_schema import Tables, LeadFields
 
 logger = logging.getLogger(__name__)
-
-# הודעות שלא מצדיקות יצירת ליד
-_SKIP_MESSAGES = {"", "👍", "😊", "👋", "✅", "❌"}
-
-
-def tier_from_score(score: int) -> str:
-    """N03 — canonical score → tier. HOT≥60, WARM≥25, else COLD."""
-    if score >= 60:
-        return "HOT"
-    if score >= 25:
-        return "WARM"
-    return "COLD"
 
 
 def _now_iso() -> str:

@@ -566,6 +566,7 @@ def run_agent(
         )
 
     # ── 1.5. WhatsApp Lead Capture (W0) ───────────
+    # W0/N02: capture inbound WhatsApp leads and optionally score them.
     if identity.role == Role.LEAD:
         try:
             from lead_capture import capture_inbound_lead
