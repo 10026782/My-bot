@@ -838,7 +838,16 @@ def run_agent(
         return f"ג ׳©׳’׳™׳׳× API ({e.status_code}). ׳ ׳¡׳” ׳©׳•׳‘."
     except anthropic.APITimeoutError:
         logger.error(f"[Agent] Timeout for {chat_id}")
-        return llm_fallback.agent_fallback_text(ctx.system_prompt, clean_msg, ctx.max_tokens, caller=ctx.memory_key)
+        try:
+            return llm_fallback.call_openai_text(
+                source="run_agent.timeout",
+                messages=[{"role": "user", "content": clean_msg}],
+                system=ctx.system_prompt,
+                max_tokens=ctx.max_tokens,
+            )
+        except Exception as fe:
+            logger.error(f"[Agent] OpenAI fallback also failed: {fe}")
+            return "⚠️ הבוט עמוס כרגע. נסה שוב בעוד דקה."
     except Exception as e:
         logger.error(f"[Agent] error: {e}", exc_info=True)
         return "ג ן¸ ׳׳©׳”׳• ׳”׳©׳×׳‘׳©. ׳ ׳¡׳” ׳©׳•׳‘."
