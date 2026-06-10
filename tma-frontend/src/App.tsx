@@ -9,6 +9,7 @@ import { FinancePulse } from "./components/FinancePulse";
 import { PersonalMode } from "./components/PersonalMode";
 import { SystemHealth } from "./components/SystemHealth";
 import { GameScreen } from "./components/GameScreen";
+import { BossCheckin } from "./components/BossCheckin";
 import { OwnerControlCenter } from "./components/OwnerControlCenter";
 import type { ProjectsResponse, ProjectCard as TProjectCard } from "./types";
 
@@ -26,6 +27,7 @@ export default function App() {
   const [personalOpen, setPersonalOpen] = useState(false);
   const [healthOpen, setHealthOpen] = useState(false);
   const [gameOpen, setGameOpen] = useState(false);
+  const [checkinOpen, setCheckinOpen] = useState(false);
   const [ownerControlOpen, setOwnerControlOpen] = useState(false);
   const [authRole, setAuthRole] = useState<string | null>(null);
 
@@ -47,6 +49,11 @@ export default function App() {
       })
       .catch(() => setAuthRole(null));
   }, []);
+
+  // ── Boss Daily Check-in ─────────────────────────────────────────
+  if (checkinOpen) {
+    return <BossCheckin onBack={() => setCheckinOpen(false)} />;
+  }
 
   // ── Game view ───────────────────────────────────────────────────
   if (gameOpen) {
@@ -139,6 +146,7 @@ export default function App() {
           <button onClick={() => setFinanceOpen(true)}    className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="פינאנס">💰</button>
           <button onClick={() => setPersonalOpen(true)}   className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="נכסים">🏠</button>
           <button onClick={() => setActivityOpen(true)}   className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="פעילות">📋</button>
+          <button onClick={() => setCheckinOpen(true)}   className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="צ'ק-אין יומי">✅</button>
           <button onClick={() => setGameOpen(true)}      className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="גיים">🎮</button>
           {canShowOwnerControl && (
             <button onClick={() => setOwnerControlOpen(true)} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-900 text-white active:bg-gray-700 text-xs font-black" aria-label="Owner Control Center">OC</button>
