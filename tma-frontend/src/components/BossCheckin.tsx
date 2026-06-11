@@ -3,6 +3,8 @@
 // Visual style intentionally unchanged from prototype — only data layer upgraded.
 
 import { useState, useEffect } from "react";
+import { fetchGameToday, completeTask } from "../api";
+import type { GameWorld } from "../types";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -81,30 +83,39 @@ function calculateXP(task: Pick<Task, "required" | "urgency" | "source">): numbe
   return Math.min(xp, 200);
 }
 
-// ─── Integration-Ready Data Layer (mock — wire to Airtable when ready) ────────
+// ─── Data Layer ───────────────────────────────────────────────────────────────
 
-async function loadTodayTasks(): Promise<Task[]> {
-  // TODO: GET /api/tasks?date=today&status=todo&limit=3
-  // Returns up to 3 tasks sorted by priority.
-  // If Tasks table is empty for today, create 3 blank stubs.
-  return [makeEmptyTask(), makeEmptyTask(), makeEmptyTask()];
+async function loadGameData(): Promise<{ tasks: Task[]; world: GameWorld | null }> {
+  const data = await fetchGameToday();
+  const tasks: Task[] = (data.tasks ?? []).map(dt => ({
+    id:                   dt.id,
+    title:                dt.task,
+    topic:                null,
+    urgency:              null,
+    source:               null,
+    required:             false,
+    xp:                   dt.coins,
+    status:               dt.status === "Done" ? "done" : "todo",
+    due_date:             null,
+    completed_at:         null,
+    carry_over_candidate: false,
+  }));
+  // Pad to 3 blank slots when fewer than 3 tasks returned
+  while (tasks.length < 3) tasks.push(makeEmptyTask());
+  return { tasks: tasks.slice(0, 3), world: data.world ?? null };
 }
 
 async function saveTaskUpdate(task: Task): Promise<void> {
-  // TODO: PATCH /api/tasks/{task.id}
-  // Fields: title, topic, urgency, source, required, xp
+  // TODO: PATCH /api/game/tasks/{task.id} — topic, urgency, source, required
   void task;
 }
 
 async function markTaskDone(task: Task): Promise<void> {
-  // TODO: PATCH /api/tasks/{task.id} with { status: "Done", completed_at, xp }
-  // TODO: POST /api/coins_log { action: task.title, coins: task.xp, date: today, quest: [task.id] }
-  void task;
+  if (task.id) await completeTask(task.id);
 }
 
 async function resetDay(incompleteTasks: Task[]): Promise<void> {
-  // TODO: for each incompleteTask — PATCH /api/tasks/{id} with { carry_over_candidate: true }
-  // TODO: POST /api/daily_checkins with { date: today, summary, total_xp, carry_over_count }
+  // TODO: mark carry-over candidates + POST daily summary
   void incompleteTasks;
 }
 
@@ -323,14 +334,17 @@ interface Props {
 
 export function BossCheckin({ onBack, streak = 0 }: Props) {
   const [tasks,   setTasks]   = useState<Task[]>([]);
+  const [world,   setWorld]   = useState<GameWorld | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  function load() {
     setLoading(true);
-    loadTodayTasks()
-      .then(setTasks)
+    loadGameData()
+      .then(({ tasks, world }) => { setTasks(tasks); setWorld(world); })
       .finally(() => setLoading(false));
-  }, []);
+  }
+
+  useEffect(() => { load(); }, []);
 
   const doneTasks      = tasks.filter(t => t.status === "done");
   const totalXP        = doneTasks.reduce((s, t) => s + t.xp, 0);
@@ -361,10 +375,9 @@ export function BossCheckin({ onBack, streak = 0 }: Props) {
 
   function handleReset() {
     const incomplete = tasks.filter(t => t.status === "todo");
-    // Mark incomplete tasks as carry-over candidates before resetting
     const withCarryOver = incomplete.map(t => ({ ...t, carry_over_candidate: true }));
     resetDay(withCarryOver);
-    loadTodayTasks().then(setTasks);
+    load();
   }
 
   if (loading) {
@@ -401,16 +414,33 @@ export function BossCheckin({ onBack, streak = 0 }: Props) {
           )}
         </div>
 
-        {/* Boss Battle — no fake progress */}
+        {/* Boss Battle */}
         <div style={{ background: "#0d0d1f", border: "1.5px solid #312e81", borderRadius: 14, padding: "14px 16px", marginBottom: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <div style={{ fontSize: 10, color: "#6366f1", fontWeight: 700, letterSpacing: 1 }}>🎯 BOSS השבוע</div>
-              {/* TODO: fetch from Airtable Worlds table — show active world boss */}
-              <div style={{ fontSize: 12, color: "#4b5563", marginTop: 4 }}>לא מחובר עדיין</div>
+          {world ? (
+            <>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <div>
+                  <div style={{ fontSize: 10, color: "#6366f1", fontWeight: 700, letterSpacing: 1 }}>🎯 BOSS השבוע · World {world.number}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#e0e7ff", marginTop: 2 }}>{world.boss}</div>
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 900, color: "#818cf8", fontVariantNumeric: "tabular-nums" }}>{Math.round(world.progress_pct)}%</div>
+              </div>
+              <div style={{ height: 6, background: "#1e1b4b", borderRadius: 3, overflow: "hidden" }}>
+                <div style={{ width: `${world.progress_pct}%`, height: "100%", background: "linear-gradient(90deg, #6366f1, #818cf8)", borderRadius: 3, transition: "width 0.6s ease" }} />
+              </div>
+              <div style={{ fontSize: 10, color: "#4b5563", marginTop: 6, fontVariantNumeric: "tabular-nums" }}>
+                {world.coins_earned} / {world.coins_target} 🪙 · פרס: {world.prize}
+              </div>
+            </>
+          ) : (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontSize: 10, color: "#6366f1", fontWeight: 700, letterSpacing: 1 }}>🎯 BOSS השבוע</div>
+                <div style={{ fontSize: 12, color: "#4b5563", marginTop: 4 }}>אין World פעיל</div>
+              </div>
+              <div style={{ fontSize: 11, color: "#312e81", fontWeight: 700 }}>—</div>
             </div>
-            <div style={{ fontSize: 11, color: "#312e81", fontWeight: 700 }}>—</div>
-          </div>
+          )}
         </div>
 
         {/* XP Bar */}

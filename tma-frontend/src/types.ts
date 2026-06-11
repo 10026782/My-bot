@@ -144,6 +144,10 @@ export interface LeadDetail {
   next_step: string;
   created_at: string;
   timeline: TimelineEntry[];
+  tier?: string;
+  outcome?: string;
+  next_followup?: string;
+  owner?: string;
 }
 
 export interface DailyTask {

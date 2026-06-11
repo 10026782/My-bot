@@ -172,6 +172,9 @@ class TaskFields:
     STATUS          = "סטטוס"           # ממתין|בביצוע|בוצע
     CONTACTS_LINK   = "מקושר לאנשי קשר"
     DEALS_LINK      = "מקושר לעסקאות"
+    DOMAIN          = "domain"          # domain copied from lead on create-from-lead
+    OWNER           = "owner"           # owner copied from lead on create-from-lead
+    LEAD_LINK       = "Leads"           # linked record to Leads table (Airtable linked field name)
 
 
 class DeadlineFields:
@@ -202,6 +205,10 @@ class LeadFields:
     TENANT_ID       = "tenant_id"
     DOMAIN          = "domain"
     CONVERTED_AT    = "converted_at"  # written by ad_attribution.mark_converted + lead_conversion
+    OUTCOME         = "outcome"       # business outcome: OPEN|FOLLOWUP_NEEDED|MEETING_BOOKED|CONVERTED|NOT_RELEVANT|LOST|DUPLICATE|ARCHIVED
+    NEXT_FOLLOWUP   = "next_followup" # ISO date of next scheduled followup
+    OWNER           = "owner"         # assigned owner / responsible person
+    NEXT_STEP       = "next_step"     # free-text next action
 
 
 class BusinessMemoryFields:
