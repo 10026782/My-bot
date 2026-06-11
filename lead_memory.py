@@ -146,8 +146,7 @@ class LeadMemory:
 
             fields = {
                 "memory_key": state.memory_key,
-                "tier":       state.tier,           # lowercase — כך נוצר ב-Airtable
-                "score":      state.score,
+                "score":      state.score,           # tier הוא formula field — לא כותבים אליו
                 "domain":     state.domain,
                 "channel":    state.channel,
                 "Name":       state.contact_name,

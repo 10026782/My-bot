@@ -132,8 +132,7 @@ def capture_inbound_lead(identity, message: str) -> None:
                         raise ValueError("missing Airtable record id after create")
                     score, tier, why_score = _score_inbound_message(message, identity)
                     airtable_update(Tables.LEADS, lead_id, {
-                        LeadFields.SCORE: score,
-                        LeadFields.TIER: tier,
+                        LeadFields.SCORE: score,  # tier הוא formula — מחושב אוטומטית
                     })
                     logger.info(
                         "lead_scored: score=%s tier=%s reasons=%s lead_id=%s",

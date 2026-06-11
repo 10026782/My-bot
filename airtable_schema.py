@@ -193,8 +193,8 @@ class LeadFields:
     NAME            = "Name"
     PHONE           = "phone"
     STATUS          = "status"
-    SCORE           = "Score"        # raw numeric — live Airtable field
-    TIER            = "tier"         # HOT | WARM | COLD — written by lead_memory
+    SCORE           = "score"        # raw numeric — written by lead_memory; "ציון"/"score ציון" don't exist on the live table
+    TIER            = "tier"         # formula field — read-only, auto-calculated from score. Values: קר/חם/לוהט/רותח
     SUMMARY         = "summary"
     ANSWERS         = "answers"
     SOURCE          = "source"
