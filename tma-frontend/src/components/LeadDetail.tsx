@@ -30,6 +30,7 @@ const SCORE_BG: Record<string, string> = {
   blue:   "bg-blue-400",
 };
 
+// סטטוס עבודה — מצב הטיפול הנוכחי
 const STATUS_CHIPS = [
   { key: "new",          label: "חדש" },
   { key: "active",       label: "פעיל" },
@@ -38,12 +39,14 @@ const STATUS_CHIPS = [
   { key: "done",         label: "סגור" },
 ];
 
+// חום ליד — Tier
 const TIER_OPTIONS = [
-  { key: "COLD", label: "קר ❄️" },
-  { key: "WARM", label: "חמים 🌤" },
-  { key: "HOT",  label: "חם 🔥" },
+  { key: "COLD", label: "❄️ קר"   },
+  { key: "WARM", label: "🌤 חמים" },
+  { key: "HOT",  label: "🔥 חם"   },
 ];
 
+// תוצאה עסקית — Business Outcome
 interface OutcomeOption {
   key: string;
   label: string;
@@ -51,48 +54,72 @@ interface OutcomeOption {
   bg: string;
   terminal: boolean;
 }
-
 const OUTCOME_OPTIONS: OutcomeOption[] = [
-  { key: "OPEN",             label: "פתוח",           color: "#3b82f6", bg: "#eff6ff", terminal: false },
-  { key: "FOLLOWUP_NEEDED",  label: "צריך פולואפ",    color: "#f59e0b", bg: "#fffbeb", terminal: false },
-  { key: "MEETING_BOOKED",   label: "פגישה נקבעה",    color: "#8b5cf6", bg: "#f5f3ff", terminal: false },
-  { key: "CONVERTED",        label: "הומר ✓",          color: "#16a34a", bg: "#f0fdf4", terminal: true  },
-  { key: "NOT_RELEVANT",     label: "לא רלוונטי",      color: "#6b7280", bg: "#f9fafb", terminal: true  },
-  { key: "LOST",             label: "אבוד",            color: "#ef4444", bg: "#fef2f2", terminal: true  },
-  { key: "DUPLICATE",        label: "כפיל",            color: "#9ca3af", bg: "#f9fafb", terminal: true  },
-  { key: "ARCHIVED",         label: "בארכיון",         color: "#6b7280", bg: "#f9fafb", terminal: true  },
+  { key: "OPEN",            label: "פתוח",        color: "#3b82f6", bg: "#eff6ff", terminal: false },
+  { key: "FOLLOWUP_NEEDED", label: "צריך פולואפ", color: "#f59e0b", bg: "#fffbeb", terminal: false },
+  { key: "MEETING_BOOKED",  label: "פגישה נקבעה", color: "#8b5cf6", bg: "#f5f3ff", terminal: false },
+  { key: "CONVERTED",       label: "הומר ✓",       color: "#16a34a", bg: "#f0fdf4", terminal: true  },
+  { key: "NOT_RELEVANT",    label: "לא רלוונטי",   color: "#6b7280", bg: "#f9fafb", terminal: true  },
+  { key: "LOST",            label: "אבוד",         color: "#ef4444", bg: "#fef2f2", terminal: true  },
+  { key: "DUPLICATE",       label: "כפיל",         color: "#9ca3af", bg: "#f9fafb", terminal: true  },
+  { key: "ARCHIVED",        label: "בארכיון",      color: "#6b7280", bg: "#f9fafb", terminal: true  },
 ];
+
+// פעולה הבאה — Next Action (saves to next_step field)
+const NEXT_ACTION_OPTIONS = [
+  { key: "call_now",           label: "📞 התקשר עכשיו" },
+  { key: "call_today",         label: "📞 התקשר היום"  },
+  { key: "schedule_this_week", label: "📅 תאם השבוע"   },
+  { key: "send_details",       label: "📤 שלח פרטים"   },
+  { key: "follow_up",          label: "🔄 פולואפ"       },
+  { key: "waiting_response",   label: "⏳ ממתין לתגובה" },
+  { key: "create_deal",        label: "🤝 צור עסקה"     },
+  { key: "archive",            label: "📦 ארכב"          },
+  { key: "none",               label: "— ללא"            },
+];
+
+// ─── Section header helper ────────────────────────────────────────────────────
+
+function SectionHeader({ title, sub }: { title: string; sub?: string }) {
+  return (
+    <div className="mb-3">
+      <p className="text-xs font-bold text-gray-700 uppercase tracking-wide">{title}</p>
+      {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
+    </div>
+  );
+}
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function LeadDetail({ lead, onBack, authRole }: Props) {
   const isOwner = authRole === "owner";
 
-  const [state,        setState]        = useState<LoadState>({ status: "loading" });
-  const [toast,        setToast]        = useState<Toast | null>(null);
-  const [saving,       setSaving]       = useState(false);
+  const [state,    setState]    = useState<LoadState>({ status: "loading" });
+  const [toast,    setToast]    = useState<Toast | null>(null);
+  const [saving,   setSaving]   = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Live editable fields (optimistic)
-  const [currentStatus,   setCurrentStatus]   = useState(lead.status);
-  const [currentOutcome,  setCurrentOutcome]  = useState("");
-  const [currentTier,     setCurrentTier]     = useState("");
-  const [scoreInput,      setScoreInput]      = useState("");
-  const [nextStep,        setNextStep]        = useState("");
-  const [nextFollowup,    setNextFollowup]    = useState("");
-  const [owner,           setOwner]           = useState("");
-  const [fieldsDirty,     setFieldsDirty]     = useState(false);
+  // Optimistic state for each editable dimension
+  const [currentStatus,    setCurrentStatus]    = useState(lead.status);
+  const [currentOutcome,   setCurrentOutcome]   = useState("");
+  const [currentTier,      setCurrentTier]      = useState("");
+  const [currentAction,    setCurrentAction]    = useState("");  // next_step
+  const [scoreInput,       setScoreInput]       = useState("");
+  const [scoreDirty,       setScoreDirty]       = useState(false);
+  const [nextFollowup,     setNextFollowup]     = useState("");
+  const [owner,            setOwner]            = useState("");
+  const [scheduleDirty,    setScheduleDirty]    = useState(false);
 
   // Create task form
-  const [taskOpen,    setTaskOpen]    = useState(false);
-  const [taskTitle,   setTaskTitle]   = useState("");
-  const [taskDue,     setTaskDue]     = useState("");
-  const [taskNotes,   setTaskNotes]   = useState("");
-  const [taskBusy,    setTaskBusy]    = useState(false);
+  const [taskOpen,  setTaskOpen]  = useState(false);
+  const [taskTitle, setTaskTitle] = useState("");
+  const [taskDue,   setTaskDue]   = useState("");
+  const [taskNotes, setTaskNotes] = useState("");
+  const [taskBusy,  setTaskBusy]  = useState(false);
 
-  // Follow-up note
-  const [note,       setNote]       = useState("");
-  const [noteBusy,   setNoteBusy]   = useState(false);
+  // Follow-up note (log only)
+  const [note,     setNote]     = useState("");
+  const [noteBusy, setNoteBusy] = useState(false);
 
   // AI
   const [aiOpen,     setAiOpen]     = useState(false);
@@ -109,7 +136,7 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
         setCurrentOutcome(data.outcome ?? "");
         setCurrentTier(data.tier ?? "");
         setScoreInput(String(data.score));
-        setNextStep(data.next_step ?? "");
+        setCurrentAction(data.next_step ?? "");
         setNextFollowup(data.next_followup ?? "");
         setOwner(data.owner ?? "");
       })
@@ -126,7 +153,7 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
     toastTimer.current = setTimeout(() => setToast(null), 2800);
   }
 
-  // ── Status chip ──────────────────────────────────────────────────
+  // ── סטטוס עבודה (autosave) ──────────────────────────────────────
   async function handleStatusChange(status: string) {
     if (saving || status === currentStatus) return;
     const prev = currentStatus;
@@ -143,7 +170,7 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
     }
   }
 
-  // ── Outcome button ───────────────────────────────────────────────
+  // ── תוצאה עסקית (autosave) ──────────────────────────────────────
   async function handleOutcome(outcome: string) {
     if (saving || outcome === currentOutcome) return;
     const prevOutcome = currentOutcome;
@@ -164,30 +191,81 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
     }
   }
 
-  // ── Score/Tier/Fields save ────────────────────────────────────────
-  async function handleSaveFields() {
-    if (saving) return;
+  // ── חום ליד — Tier (autosave) ───────────────────────────────────
+  async function handleTierChange(tier: string) {
+    if (saving || tier === currentTier) return;
+    const prev = currentTier;
+    setCurrentTier(tier);
     setSaving(true);
     try {
-      const fields: Parameters<typeof patchLead>[1] = {};
-      const parsed = parseInt(scoreInput, 10);
-      if (!isNaN(parsed) && parsed >= 0 && parsed <= 100) fields.score = parsed;
-      if (currentTier)    fields.tier          = currentTier;
-      if (nextStep   !== undefined) fields.next_step     = nextStep;
-      if (nextFollowup)   fields.next_followup = nextFollowup;
-      if (owner)          fields.owner         = owner;
-      if (Object.keys(fields).length === 0) { setSaving(false); return; }
-      await patchLead(lead.id, fields);
-      setFieldsDirty(false);
-      showToast("ok", "שדות נשמרו ✓");
+      await patchLead(lead.id, { tier });
+      showToast("ok", `טייר: ${TIER_OPTIONS.find((t) => t.key === tier)?.label ?? tier}`);
     } catch {
-      showToast("err", "שמירת שדות נכשלה");
+      setCurrentTier(prev);
+      showToast("err", "עדכון טייר נכשל");
     } finally {
       setSaving(false);
     }
   }
 
-  // ── Create task ───────────────────────────────────────────────────
+  // ── פעולה הבאה — Next Action (autosave) ─────────────────────────
+  async function handleNextAction(key: string) {
+    if (saving || key === currentAction) return;
+    const prev = currentAction;
+    setCurrentAction(key);
+    setSaving(true);
+    try {
+      await patchLead(lead.id, { next_step: key });
+      const label = NEXT_ACTION_OPTIONS.find((a) => a.key === key)?.label ?? key;
+      showToast("ok", `פעולה: ${label}`);
+    } catch {
+      setCurrentAction(prev);
+      showToast("err", "עדכון פעולה נכשל");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // ── ציון (owner, explicit save) ─────────────────────────────────
+  async function handleSaveScore() {
+    if (saving || !scoreDirty) return;
+    const parsed = parseInt(scoreInput, 10);
+    if (isNaN(parsed) || parsed < 0 || parsed > 100) {
+      showToast("err", "ציון חייב להיות 0–100");
+      return;
+    }
+    setSaving(true);
+    try {
+      await patchLead(lead.id, { score: parsed });
+      setScoreDirty(false);
+      showToast("ok", `ציון עודכן: ${parsed}`);
+    } catch {
+      showToast("err", "עדכון ציון נכשל");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // ── תזמון ואחראי (explicit save) ────────────────────────────────
+  async function handleSaveSchedule() {
+    if (saving || !scheduleDirty) return;
+    setSaving(true);
+    try {
+      const fields: Parameters<typeof patchLead>[1] = {};
+      if (nextFollowup) fields.next_followup = nextFollowup;
+      if (owner)        fields.owner         = owner;
+      if (Object.keys(fields).length === 0) { setSaving(false); return; }
+      await patchLead(lead.id, fields);
+      setScheduleDirty(false);
+      showToast("ok", "נשמר ✓");
+    } catch {
+      showToast("err", "שמירה נכשלה");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // ── Create Task ──────────────────────────────────────────────────
   async function handleCreateTask() {
     if (taskBusy || !taskTitle.trim()) return;
     setTaskBusy(true);
@@ -197,9 +275,7 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
         due_date: taskDue || undefined,
         notes:    taskNotes.trim() || undefined,
       });
-      setTaskTitle("");
-      setTaskDue("");
-      setTaskNotes("");
+      setTaskTitle(""); setTaskDue(""); setTaskNotes("");
       setTaskOpen(false);
       showToast("ok", "משימה נוצרה ✓");
     } catch {
@@ -209,16 +285,16 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
     }
   }
 
-  // ── Follow-up note ────────────────────────────────────────────────
+  // ── הוסף הערה (log only) ─────────────────────────────────────────
   async function handleFollowup() {
     if (noteBusy || !note.trim()) return;
     setNoteBusy(true);
     try {
       await createFollowup(lead.id, note.trim());
       setNote("");
-      showToast("ok", "משימת מעקב נוצרה ✓");
+      showToast("ok", "הערה נרשמה ✓");
     } catch {
-      showToast("err", "יצירת מעקב נכשלה");
+      showToast("err", "רישום הערה נכשל");
     } finally {
       setNoteBusy(false);
     }
@@ -243,8 +319,7 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
   const data = state.status === "ok" ? state.data : null;
   const activeOutcome = OUTCOME_OPTIONS.find((o) => o.key === currentOutcome);
 
-  // extra bottom padding for fixed action bar (grows with task form open)
-  const pbClass = taskOpen ? "pb-72" : aiOpen ? "pb-56" : "pb-40";
+  const pbClass = taskOpen ? "pb-80" : aiOpen ? "pb-60" : "pb-44";
 
   return (
     <div className={`min-h-screen bg-gray-100 ${pbClass}`} dir="rtl">
@@ -276,7 +351,6 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
           <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
         </div>
       )}
-
       {state.status === "error" && (
         <div className="mx-4 mt-4 bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
           {state.message}
@@ -287,13 +361,18 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
         <div className="flex flex-col gap-3 px-4">
 
           {/* Meta row */}
-          <div className="bg-white rounded-xl shadow-sm p-4 flex flex-wrap gap-2 items-center">
+          <div className="bg-white rounded-xl shadow-sm p-3 flex flex-wrap gap-2 items-center">
             {data.domain && (
               <span className="text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded-full font-medium">{data.domain}</span>
             )}
             {currentTier && (
               <span className="text-xs px-2 py-1 bg-orange-50 text-orange-600 rounded-full font-medium">
                 {TIER_OPTIONS.find((t) => t.key === currentTier)?.label ?? currentTier}
+              </span>
+            )}
+            {activeOutcome && (
+              <span className="text-xs px-2 py-1 rounded-full font-medium" style={{ background: activeOutcome.bg, color: activeOutcome.color }}>
+                {activeOutcome.label}
               </span>
             )}
             {data.source && (
@@ -309,9 +388,9 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
             )}
           </div>
 
-          {/* Outcome section */}
+          {/* ── תוצאה עסקית ──────────────────────────────────────── */}
           <div className="bg-white rounded-xl shadow-sm p-4">
-            <p className="text-xs text-gray-400 mb-3 font-semibold uppercase tracking-wide">תוצאה עסקית</p>
+            <SectionHeader title="תוצאה עסקית" sub="מה הסטטוס של הליד? — משנה את ה-outcome" />
             <div className="grid grid-cols-2 gap-2">
               {OUTCOME_OPTIONS.map((opt) => {
                 const active = opt.key === currentOutcome;
@@ -322,9 +401,9 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
                     disabled={saving}
                     className="text-xs py-2 px-3 rounded-lg font-medium text-right transition-all active:scale-95 disabled:opacity-50"
                     style={{
-                      background:   active ? opt.color : opt.bg,
-                      color:        active ? "#fff"    : opt.color,
-                      border:       `1.5px solid ${active ? opt.color : "transparent"}`,
+                      background: active ? opt.color : opt.bg,
+                      color:      active ? "#fff"    : opt.color,
+                      border:     `1.5px solid ${active ? opt.color : "transparent"}`,
                     }}
                   >
                     {opt.label}
@@ -333,70 +412,89 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
               })}
             </div>
             {activeOutcome?.terminal && (
-              <p className="text-xs text-gray-400 mt-2 text-center">סטטוס עודכן ל-סגור אוטומטית</p>
+              <p className="text-xs text-gray-400 mt-2 text-center">סטטוס עבודה עודכן ל-סגור אוטומטית</p>
             )}
           </div>
 
-          {/* Score + Tier editor (owner only) */}
-          {isOwner && (
-            <div className="bg-white rounded-xl shadow-sm p-4">
-              <p className="text-xs text-gray-400 mb-3 font-semibold uppercase tracking-wide">ציון וטייר</p>
-              <div className="flex gap-3 items-end">
+          {/* ── חום ליד ──────────────────────────────────────────── */}
+          <div className="bg-white rounded-xl shadow-sm p-4">
+            <SectionHeader title="חום ליד" sub="עד כמה הליד חם — משנה את ה-tier" />
+            <div className="flex gap-2 mb-3">
+              {TIER_OPTIONS.map((t) => (
+                <button
+                  key={t.key}
+                  onClick={() => handleTierChange(t.key)}
+                  disabled={saving}
+                  className={`flex-1 text-sm py-2.5 rounded-xl font-semibold transition-all disabled:opacity-50 active:scale-95 ${
+                    currentTier === t.key
+                      ? "bg-orange-400 text-white shadow"
+                      : "bg-gray-100 text-gray-600 active:bg-gray-200"
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            {isOwner && (
+              <div className="flex gap-2 items-end">
                 <div className="flex-1">
-                  <label className="text-xs text-gray-400 block mb-1">ציון (0–100)</label>
+                  <label className="text-xs text-gray-400 block mb-1">ציון AI (0–100)</label>
                   <input
                     type="number"
                     min={0}
                     max={100}
                     value={scoreInput}
-                    onChange={(e) => { setScoreInput(e.target.value); setFieldsDirty(true); }}
+                    onChange={(e) => { setScoreInput(e.target.value); setScoreDirty(true); }}
                     className="w-full bg-gray-100 rounded-xl px-3 py-2 text-sm outline-none"
                   />
                 </div>
-                <div className="flex-1">
-                  <label className="text-xs text-gray-400 block mb-1">טייר</label>
-                  <div className="flex gap-1">
-                    {TIER_OPTIONS.map((t) => (
-                      <button
-                        key={t.key}
-                        onClick={() => { setCurrentTier(t.key); setFieldsDirty(true); }}
-                        className={`flex-1 text-xs py-2 rounded-lg font-medium transition-all ${
-                          currentTier === t.key
-                            ? "bg-orange-400 text-white"
-                            : "bg-gray-100 text-gray-600 active:bg-gray-200"
-                        }`}
-                      >
-                        {t.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                {scoreDirty && (
+                  <button
+                    onClick={handleSaveScore}
+                    disabled={saving}
+                    className="bg-blue-500 text-white rounded-xl px-4 py-2 text-sm font-medium disabled:opacity-40 active:opacity-80 whitespace-nowrap"
+                  >
+                    {saving ? "…" : "שמור ציון"}
+                  </button>
+                )}
               </div>
+            )}
+          </div>
+
+          {/* ── פעולה הבאה ───────────────────────────────────────── */}
+          <div className="bg-white rounded-xl shadow-sm p-4">
+            <SectionHeader title="פעולה הבאה" sub="מה עושים עכשיו? — משנה את next_step" />
+            <div className="flex flex-wrap gap-2">
+              {NEXT_ACTION_OPTIONS.map((a) => {
+                const active = a.key === currentAction;
+                return (
+                  <button
+                    key={a.key}
+                    onClick={() => handleNextAction(a.key)}
+                    disabled={saving}
+                    className={`text-xs px-3 py-1.5 rounded-full font-medium transition-all active:scale-95 disabled:opacity-50 ${
+                      active
+                        ? "bg-blue-500 text-white shadow"
+                        : "bg-gray-100 text-gray-600 active:bg-gray-200"
+                    }`}
+                  >
+                    {a.label}
+                  </button>
+                );
+              })}
             </div>
-          )}
+          </div>
 
-          {/* Field editors */}
-          <div className="bg-white rounded-xl shadow-sm p-4 flex flex-col gap-3">
-            <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide">שדות ניהוליים</p>
-
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">צעד הבא</label>
-              <textarea
-                value={nextStep}
-                onChange={(e) => { setNextStep(e.target.value); setFieldsDirty(true); }}
-                rows={2}
-                placeholder="מה הצעד הבא?"
-                className="w-full bg-gray-100 rounded-xl px-3 py-2 text-sm outline-none resize-none"
-              />
-            </div>
-
-            <div className="flex gap-3">
+          {/* ── תזמון ואחראי ─────────────────────────────────────── */}
+          <div className="bg-white rounded-xl shadow-sm p-4">
+            <SectionHeader title="תזמון ואחראי" sub="מתי ומי — לא משנה outcome" />
+            <div className="flex gap-3 mb-3">
               <div className="flex-1">
                 <label className="text-xs text-gray-400 block mb-1">פולואפ הבא</label>
                 <input
                   type="date"
                   value={nextFollowup}
-                  onChange={(e) => { setNextFollowup(e.target.value); setFieldsDirty(true); }}
+                  onChange={(e) => { setNextFollowup(e.target.value); setScheduleDirty(true); }}
                   className="w-full bg-gray-100 rounded-xl px-3 py-2 text-sm outline-none"
                 />
               </div>
@@ -405,20 +503,19 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
                 <input
                   type="text"
                   value={owner}
-                  onChange={(e) => { setOwner(e.target.value); setFieldsDirty(true); }}
+                  onChange={(e) => { setOwner(e.target.value); setScheduleDirty(true); }}
                   placeholder="שם אחראי"
                   className="w-full bg-gray-100 rounded-xl px-3 py-2 text-sm outline-none"
                 />
               </div>
             </div>
-
-            {fieldsDirty && (
+            {scheduleDirty && (
               <button
-                onClick={handleSaveFields}
+                onClick={handleSaveSchedule}
                 disabled={saving}
                 className="w-full bg-blue-500 text-white rounded-xl py-2.5 text-sm font-semibold disabled:opacity-40 active:opacity-80"
               >
-                {saving ? "שומר…" : "שמור שדות"}
+                {saving ? "שומר…" : "שמור"}
               </button>
             )}
           </div>
@@ -439,7 +536,7 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
             </div>
           )}
 
-          {/* Timeline */}
+          {/* Timeline (read-only) */}
           {data.timeline.length > 0 && (
             <div className="bg-white rounded-xl shadow-sm p-4">
               <p className="text-xs text-gray-400 mb-3">היסטוריה</p>
@@ -458,9 +555,16 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
       )}
 
       {/* ── Fixed action bar ── */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 pt-3 pb-4 flex flex-col gap-2.5 shadow-xl" dir="rtl">
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 pt-2.5 pb-4 flex flex-col gap-2 shadow-xl" dir="rtl">
 
-        {/* Status chips */}
+        {/* Row 1 label */}
+        <p className="text-xs text-gray-400">
+          <span className="font-semibold text-gray-500">סטטוס עבודה</span>
+          <span className="text-gray-300 mx-1">·</span>
+          משנה את מצב הטיפול
+        </p>
+
+        {/* Status chips + task toggle */}
         <div className="flex gap-2 overflow-x-auto no-scrollbar">
           {STATUS_CHIPS.map((chip) => {
             const active = chip.key === currentStatus;
@@ -522,20 +626,27 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
           </div>
         )}
 
-        {/* Follow-up + AI row */}
+        {/* Row 2 label */}
+        <p className="text-xs text-gray-400">
+          <span className="font-semibold text-gray-500">📝 הוסף הערה</span>
+          <span className="text-gray-300 mx-1">·</span>
+          נרשמת ב-Interaction Log בלבד — לא משנה סטטוס
+        </p>
+
+        {/* Note + AI row */}
         <div className="flex gap-2">
           <input
             type="text"
             value={note}
             onChange={(e) => setNote(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleFollowup()}
-            placeholder="הוסף מעקב..."
+            placeholder="כתוב הערה..."
             className="flex-1 bg-gray-100 rounded-xl px-3 py-2 text-sm outline-none placeholder-gray-400"
           />
           <button
             onClick={handleFollowup}
             disabled={noteBusy || !note.trim()}
-            className="bg-blue-500 text-white rounded-xl px-4 py-2 text-sm font-medium disabled:opacity-40 active:opacity-70"
+            className="bg-gray-700 text-white rounded-xl px-4 py-2 text-sm font-medium disabled:opacity-40 active:opacity-70"
           >
             {noteBusy ? "…" : "שלח"}
           </button>
