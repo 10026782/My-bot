@@ -1001,9 +1001,31 @@ def update_lead_status(lead_id, identity):
 
 # שדות עריכה מורשים ב-PATCH /api/leads/<id>
 _LEAD_EDITABLE = {
-    LeadFields.STATUS, LeadFields.SCORE, LeadFields.OUTCOME,
-    LeadFields.NEXT_FOLLOWUP,  # "Next Followup" — confirmed field name
+    LeadFields.STATUS, LeadFields.SCORE,  # TIER הוא formula field — לא ניתן לכתיבה
+    "Score", LeadFields.OUTCOME, "Next Followup", LeadFields.OWNER, LeadFields.NEXT_STEP,
 }
+_LEAD_FIELD_ALIASES = {
+    "score": "Score",
+    "next_step": LeadFields.NEXT_STEP,
+    "next_followup": "Next Followup",
+    "owner": LeadFields.OWNER,
+}
+_LEAD_IGNORED_PATCH_FIELDS = {"tier", "טמפרטורה"}
+
+
+def _normalize_lead_patch_fields(data: dict) -> dict:
+    """Map frontend aliases to Airtable field names before PATCH."""
+    normalized = {}
+    for key, value in data.items():
+        if key in _LEAD_IGNORED_PATCH_FIELDS:
+            continue
+        airtable_key = _LEAD_FIELD_ALIASES.get(key, key)
+        if airtable_key not in _LEAD_EDITABLE:
+            continue
+        if airtable_key != key and airtable_key in data:
+            continue
+        normalized[airtable_key] = value
+    return normalized
 
 # Single-select fields that must arrive as raw strings (no embedded quotes).
 _LEAD_SELECT_FIELDS = {LeadFields.STATUS, LeadFields.OUTCOME, LeadFields.NEXT_STEP}
@@ -1047,6 +1069,8 @@ def patch_lead(lead_id, identity):
         return jsonify({"error": "forbidden"}), 403
 
     data = request.get_json(force=True) or {}
+    fields = _normalize_lead_patch_fields(data)
+    if not fields:
     fields = {k: v for k, v in data.items() if k in _LEAD_EDITABLE}
     # Unwrap any embedded quotes from select fields (frontend may send '"value"')
     for k in _LEAD_SELECT_FIELDS:
