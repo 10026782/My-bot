@@ -562,7 +562,7 @@ def _get_global_kpis() -> dict:
 
     hot_leads = _at_list(
         "Leads",
-        f"OR({{status}}='hot', {{{LeadFields.TIER}}}='HOT', {{{LeadFields.SCORE}}}>=70)",
+        f"{{{LeadFields.SCORE}}}>=70",  # tier הוא formula — מסנן לפי ציון בלבד
         max_records=20,
     )
 
@@ -953,7 +953,7 @@ def update_lead_status(lead_id, identity):
 
 # שדות עריכה מורשים ב-PATCH /api/leads/<id>
 _LEAD_EDITABLE = {
-    LeadFields.STATUS, LeadFields.SCORE, LeadFields.TIER,
+    LeadFields.STATUS, LeadFields.SCORE,  # TIER הוא formula field — לא ניתן לכתיבה
     LeadFields.OUTCOME, LeadFields.NEXT_FOLLOWUP, LeadFields.OWNER, LeadFields.NEXT_STEP,
 }
 
@@ -1349,9 +1349,10 @@ _BUSINESS_LANGUAGE = {
         {"value": "not_relevant", "label": "Not relevant"},
     ],
     "lead_tier": [
-        {"value": "HOT", "label": "High intent / urgent"},
-        {"value": "WARM", "label": "Potential but not urgent"},
-        {"value": "COLD", "label": "Low intent / nurture"},
+        {"value": "cold",      "label": "קר (Cold)"},
+        {"value": "warm",      "label": "חם (Warm)"},
+        {"value": "hot",       "label": "לוהט (Hot)"},
+        {"value": "ultra_hot", "label": "רותח (Ultra Hot)"},
     ],
 }
 

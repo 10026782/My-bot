@@ -30,20 +30,14 @@ const SCORE_BG: Record<string, string> = {
   blue:   "bg-blue-400",
 };
 
-// סטטוס עבודה — מצב הטיפול הנוכחי
+// סטטוס עבודה — מצב הטיפול הנוכחי (חוקי ב-Airtable)
 const STATUS_CHIPS = [
-  { key: "new",          label: "חדש" },
-  { key: "active",       label: "פעיל" },
-  { key: "waiting_call", label: "ממתין" },
-  { key: "hot",          label: "🔥 חם" },
-  { key: "done",         label: "סגור" },
-];
-
-// חום ליד — Tier
-const TIER_OPTIONS = [
-  { key: "COLD", label: "❄️ קר"   },
-  { key: "WARM", label: "🌤 חמים" },
-  { key: "HOT",  label: "🔥 חם"   },
+  { key: "new",              label: "חדש" },
+  { key: "active",           label: "פעיל" },
+  { key: "waiting_call",     label: "ממתין" },
+  { key: "high_confidence",  label: "בטוח" },
+  { key: "waiting_response", label: "ממתין לתגובה" },
+  { key: "done",             label: "סגור" },
 ];
 
 // תוצאה עסקית — Business Outcome
@@ -102,7 +96,6 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
   // Optimistic state for each editable dimension
   const [currentStatus,    setCurrentStatus]    = useState(lead.status);
   const [currentOutcome,   setCurrentOutcome]   = useState("");
-  const [currentTier,      setCurrentTier]      = useState("");
   const [currentAction,    setCurrentAction]    = useState("");  // next_step
   const [scoreInput,       setScoreInput]       = useState("");
   const [scoreDirty,       setScoreDirty]       = useState(false);
@@ -134,7 +127,6 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
         setState({ status: "ok", data });
         setCurrentStatus(data.status);
         setCurrentOutcome(data.outcome ?? "");
-        setCurrentTier(data.tier ?? "");
         setScoreInput(String(data.score));
         setCurrentAction(data.next_step ?? "");
         setNextFollowup(data.next_followup ?? "");
@@ -186,23 +178,6 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
       setCurrentOutcome(prevOutcome);
       setCurrentStatus(prevStatus);
       showToast("err", "עדכון תוצאה נכשל");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  // ── חום ליד — Tier (autosave) ───────────────────────────────────
-  async function handleTierChange(tier: string) {
-    if (saving || tier === currentTier) return;
-    const prev = currentTier;
-    setCurrentTier(tier);
-    setSaving(true);
-    try {
-      await patchLead(lead.id, { tier });
-      showToast("ok", `טייר: ${TIER_OPTIONS.find((t) => t.key === tier)?.label ?? tier}`);
-    } catch {
-      setCurrentTier(prev);
-      showToast("err", "עדכון טייר נכשל");
     } finally {
       setSaving(false);
     }
@@ -365,9 +340,9 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
             {data.domain && (
               <span className="text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded-full font-medium">{data.domain}</span>
             )}
-            {currentTier && (
+            {data.tier && (
               <span className="text-xs px-2 py-1 bg-orange-50 text-orange-600 rounded-full font-medium">
-                {TIER_OPTIONS.find((t) => t.key === currentTier)?.label ?? currentTier}
+                🌡 {data.tier}
               </span>
             )}
             {activeOutcome && (
@@ -418,27 +393,22 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
 
           {/* ── חום ליד ──────────────────────────────────────────── */}
           <div className="bg-white rounded-xl shadow-sm p-4">
-            <SectionHeader title="חום ליד" sub="עד כמה הליד חם — משנה את ה-tier" />
-            <div className="flex gap-2 mb-3">
-              {TIER_OPTIONS.map((t) => (
-                <button
-                  key={t.key}
-                  onClick={() => handleTierChange(t.key)}
-                  disabled={saving}
-                  className={`flex-1 text-sm py-2.5 rounded-xl font-semibold transition-all disabled:opacity-50 active:scale-95 ${
-                    currentTier === t.key
-                      ? "bg-orange-400 text-white shadow"
-                      : "bg-gray-100 text-gray-600 active:bg-gray-200"
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
+            <SectionHeader title="חום ליד" sub="טמפרטורה מחושבת אוטומטית מהציון — לשינוי, עדכן את הציון" />
+            <div className="flex items-center gap-3 mb-3">
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-black text-lg flex-shrink-0 ${SCORE_BG[data.score_color] ?? "bg-gray-400"}`}>
+                {data.score}
+              </div>
+              {data.tier && (
+                <div>
+                  <p className="text-sm font-bold text-gray-700">🌡 {data.tier}</p>
+                  <p className="text-xs text-gray-400">טמפרטורה (formula)</p>
+                </div>
+              )}
             </div>
             {isOwner && (
               <div className="flex gap-2 items-end">
                 <div className="flex-1">
-                  <label className="text-xs text-gray-400 block mb-1">ציון AI (0–100)</label>
+                  <label className="text-xs text-gray-400 block mb-1">ציון (0–100) — Tier יתעדכן אוטומטית</label>
                   <input
                     type="number"
                     min={0}
