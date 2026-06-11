@@ -89,10 +89,6 @@ def _is_junk_inbound_text(text: str) -> bool:
     return False
 
 
-def _twilio_signature_validation_enabled() -> bool:
-    return os.environ.get("TWILIO_SIGNATURE_VALIDATION", "true").strip().lower() != "false"
-
-
 def _public_request_url() -> str:
     proto = request.headers.get("X-Forwarded-Proto")
     host = request.headers.get("X-Forwarded-Host")
@@ -104,10 +100,6 @@ def _public_request_url() -> str:
 
 
 def _validate_twilio_signature() -> bool:
-    if not _twilio_signature_validation_enabled():
-        logger.warning("[WhatsApp] Twilio signature validation bypassed by env")
-        return True
-
     token = os.environ.get("TWILIO_AUTH_TOKEN", "")
     signature = request.headers.get("X-Twilio-Signature", "")
     if not token or not signature:
@@ -861,14 +853,10 @@ def run_agent(
 def health():
     health_status = get_health_status(globals().get("_scheduler"), memory)
     return jsonify({
-        "status":         health_status["status"],
-        "version":        "3.0",
-        "max_tool_turns": MAX_TOOL_TURNS,
-        "router":         "CORE_02.6",
-        "checks":         health_status["checks"],
-        "digest_chat_id": bool(os.environ.get("DIGEST_CHAT_ID")),
-        "airtable":       bool(os.environ.get("AIRTABLE_API_KEY")),
-        "memory_entries": len(memory._store),
+        "status":  health_status["status"],
+        "version": "3.0",
+        "router":  "CORE_02.6",
+        "checks":  health_status["checks"],
     }), 200
 
 

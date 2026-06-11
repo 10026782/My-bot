@@ -41,7 +41,7 @@ _TABLE_FIELDS: dict[str, set[str]] = {
         "score",
         "Name", "phone", "status", "score ציון",
         "summary", "answers", "source", "channel",
-        "created_at", "memory_key", "tenant_id", "domain",
+        "created_at", "updated_at", "memory_key", "tenant_id", "domain",
         "notes", "next_step", "tier", "Temperature",
         "utm_source", "utm_medium", "utm_campaign", "platform",
         "deal_value", "converted_at", "campaign_source",
