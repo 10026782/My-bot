@@ -369,6 +369,17 @@ def _persist_receipt(receipt: dict) -> str | None:
         return warning
 
 
+def _clean_fields_select_values(table: str, fields: dict) -> dict:
+    """Unwrap embedded quotes from select field values before writing to Airtable."""
+    if table not in ("Leads",):
+        return fields
+    cleaned = dict(fields)
+    for k in _LEAD_SELECT_FIELDS:
+        if k in cleaned:
+            cleaned[k] = _clean_select_value(cleaned[k])
+    return cleaned
+
+
 def _execute_tma_write(payload: dict, approved_by_identity) -> dict:
     action = payload.get("action", "")
     table = payload.get("table", "")
@@ -382,7 +393,8 @@ def _execute_tma_write(payload: dict, approved_by_identity) -> dict:
         record_id = rec.get("id", "")
     elif payload.get("op") == "patch":
         record_id = payload.get("record_id", "")
-        ok = _at_patch(table, record_id, payload.get("fields", {}))
+        fields = _clean_fields_select_values(table, payload.get("fields", {}))
+        ok = _at_patch(table, record_id, fields)
         if not ok:
             return {"ok": False, "error": f"failed to update record in {table}", "record_id": record_id}
     else:
