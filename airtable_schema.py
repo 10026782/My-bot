@@ -172,8 +172,8 @@ class TaskFields:
     STATUS          = "סטטוס"           # ממתין|בביצוע|בוצע
     CONTACTS_LINK   = "מקושר לאנשי קשר"
     DEALS_LINK      = "מקושר לעסקאות"
-    DOMAIN          = "domain"          # domain copied from lead on create-from-lead
-    OWNER           = "owner"           # owner copied from lead on create-from-lead
+    DOMAIN          = "Domain"          # domain copied from lead on create-from-lead
+    OWNER           = "Owner"           # owner copied from lead on create-from-lead
     LEAD_LINK       = "Leads"           # linked record to Leads table (Airtable linked field name)
 
 
@@ -193,7 +193,7 @@ class LeadFields:
     NAME            = "Name"
     PHONE           = "phone"
     STATUS          = "status"
-    SCORE           = "score"        # raw numeric — written by lead_memory; "ציון"/"score ציון" don't exist on the live table
+    SCORE           = "Score"        # raw numeric — live Airtable field
     TIER            = "tier"         # HOT | WARM | COLD — written by lead_memory
     SUMMARY         = "summary"
     ANSWERS         = "answers"
@@ -205,10 +205,10 @@ class LeadFields:
     TENANT_ID       = "tenant_id"
     DOMAIN          = "domain"
     CONVERTED_AT    = "converted_at"  # written by ad_attribution.mark_converted + lead_conversion
-    OUTCOME         = "outcome"       # business outcome: OPEN|FOLLOWUP_NEEDED|MEETING_BOOKED|CONVERTED|NOT_RELEVANT|LOST|DUPLICATE|ARCHIVED
+    OUTCOME         = "Business Outcome"  # open|needs_followup|meeting_scheduled|converted|not_relevant|lost|duplicate|archived
     NEXT_FOLLOWUP   = "next_followup" # ISO date of next scheduled followup
-    OWNER           = "owner"         # assigned owner / responsible person
-    NEXT_STEP       = "next_step"     # free-text next action
+    OWNER           = "Owner"         # assigned owner / responsible person
+    NEXT_STEP       = "Next Action"   # call_now|call_today|schedule_this_week|send_details|follow_up|waiting_response|create_deal|archive|none
 
 
 class BusinessMemoryFields:
@@ -458,7 +458,7 @@ FIELD_MAP = {
         "Name":          "שם הליד",
         "phone":         "טלפון",
         "status":        "new | qualified | hot | cold",
-        "score":         "ציון מספרי",
+        "Score":         "ציון מספרי",
         "tier":          "HOT | WARM | COLD",
         "summary":       "תקציר",
         "answers":       "תשובות/פרטים",
@@ -470,6 +470,10 @@ FIELD_MAP = {
         "tenant_id":     "מזהה tenant",
         "domain":        "real_estate | import | recruitment | saas | finance | general",
         "converted_at":  "תאריך המרה",
+        "Business Outcome": "open | needs_followup | meeting_scheduled | converted | not_relevant | lost | duplicate | archived",
+        "next_followup": "תאריך פולואפ הבא",
+        "Owner":         "אחראי",
+        "Next Action":   "call_now | call_today | schedule_this_week | send_details | follow_up | waiting_response | create_deal | archive | none",
     },
 }
 
