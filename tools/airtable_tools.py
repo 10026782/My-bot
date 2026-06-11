@@ -17,6 +17,7 @@ _TABLE_FIELDS: dict[str, set[str]] = {
     Tables.TASKS: {
         "כותרת המשימה", "תיאור", "תאריך יעד", "סטטוס",
         "מקושר לאנשי קשר", "מקושר לעסקאות",
+        "Domain", "Owner", "Leads",
     },
     Tables.CONTACTS: {
         "שם", "חברה", "אימייל", "טלפון", "תאריך פולו אפ",
@@ -38,13 +39,14 @@ _TABLE_FIELDS: dict[str, set[str]] = {
     },
     # ── Leads — lowercase keys כפי שנוצרו ב-Airtable ──
     "Leads": {
-        "score",
+        "score", "Score",
         "Name", "phone", "status", "score ציון",
         "summary", "answers", "source", "channel",
         "created_at", "updated_at", "memory_key", "tenant_id", "domain",
-        "notes", "next_step", "tier", "Temperature",
+        "notes", "next_step", "Next Action", "tier", "Temperature",
         "utm_source", "utm_medium", "utm_campaign", "platform",
         "deal_value", "converted_at", "campaign_source",
+        "Business Outcome", "next_followup", "Owner",
     },
     # ── Projects / Units ──────────────────────────
     "Projects": {
