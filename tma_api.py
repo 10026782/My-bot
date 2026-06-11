@@ -191,11 +191,29 @@ def _at_get_record(table: str, record_id: str) -> dict | None:
     return None
 
 
+def _sanitize_field_keys(table: str, fields: dict) -> dict:
+    """Drop malformed field keys before sending to Airtable."""
+    clean = {}
+    for k, v in fields.items():
+        stripped = _clean_select_value(k) if isinstance(k, str) else ""
+        if not isinstance(k, str) or not stripped:
+            logger.warning(f"_at_patch({table}): dropping invalid field key={repr(k)} value={repr(v)}")
+            continue
+        if k != stripped:
+            logger.warning(f"_at_patch({table}): key had surrounding quotes, using stripped={repr(stripped)}")
+        clean[stripped] = v
+    return clean
+
+
 def _at_patch(table: str, record_id: str, fields: dict) -> bool:
     """PATCH single record. Returns True on success."""
     try:
         import httpx
-        logger.debug(f"_at_patch({table}/{record_id}) fields={list(fields.items())}")
+        fields = _sanitize_field_keys(table, fields)
+        if not fields:
+            logger.warning(f"_at_patch({table}/{record_id}): no valid fields after sanitization")
+            return False
+        logger.debug(f"_at_patch({table}/{record_id}) keys={list(fields.keys())}")
         r = httpx.patch(
             f"{_at_url(table)}/{record_id}",
             headers={**_at_headers(), "Content-Type": "application/json"},
@@ -203,13 +221,15 @@ def _at_patch(table: str, record_id: str, fields: dict) -> bool:
             timeout=10,
         )
         if r.status_code != 200:
-            body = r.text[:300]
+            body = r.text[:500]
             if r.status_code == 422:
                 try:
-                    body = json.dumps(r.json(), ensure_ascii=False)[:400]
+                    body = json.dumps(r.json(), ensure_ascii=False)[:500]
                 except Exception:
                     pass
-            logger.warning(f"_at_patch({table}/{record_id}) → {r.status_code}: {body}")
+            logger.warning(
+                f"_at_patch({table}/{record_id}) → {r.status_code}: keys={list(fields.keys())} body={body}"
+            )
         return r.status_code == 200
     except Exception as e:
         logger.warning(f"_at_patch error: {e}")
