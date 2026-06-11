@@ -22,6 +22,7 @@ from .airtable_security import TenantScopeViolation, audit_log_airtable, enforce
 from .contact_resolver  import resolve_contact
 
 from tool_registry import enforce, ToolDenied
+import feature_flags as _ff
 
 if TYPE_CHECKING:
     from identity import Identity
@@ -94,13 +95,14 @@ def dispatch_tool(name: str, inputs: dict, identity: "Identity | None" = None) -
         logger.warning(f"[Dispatch] denied | tool={name} user={user_id} role={identity.role} | {e}")
         return f"❌ גישה נחסמה: {e}"
 
-    # Emergency Stop — blocks all write/send tools when EMERGENCY_STOP_ALL=1
+    # Emergency Stop — blocks all write/send tools; checks persistent flag store
+    # so the in-app owner control (/api/health/emergency) takes effect immediately.
     _RISKY_TOOLS = {
         "airtable_add", "airtable_update",
         "gmail_draft", "gmail_send_draft",
         "calendar_create_event", "sheets_append",
     }
-    if os.environ.get("EMERGENCY_STOP_ALL") == "1" and name in _RISKY_TOOLS:
+    if _ff.is_enabled("EMERGENCY_STOP_ALL") and name in _RISKY_TOOLS:
         logger.critical(f"[EmergencyStop] BLOCKED {name} | tenant={tenant_id} user={user_id}")
         return "🚨 מצב חירום פעיל — כל פעולות הכתיבה חסומות. פנה לבעלים."
 

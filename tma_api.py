@@ -33,19 +33,14 @@ _AT_KEY     = os.environ.get("AIRTABLE_API_KEY", "")
 _AT_BASE    = os.environ.get("AIRTABLE_BASE_ID", "")
 _ENV        = os.environ.get("ENV", "production").strip().lower()
 
-# TMA_DEV_MODE=1 skips Telegram HMAC — for local/staging testing only.
-# NEVER enable in production. Requires ALLOW_TMA_DEV_MODE=true to be set
-# alongside TMA_DEV_MODE=1 in non-production environments as explicit opt-in.
-_DEV_MODE_REQUESTED = os.environ.get("TMA_DEV_MODE", "").strip().lower() in ("1", "true", "yes")
-_DEV_ALLOWED        = os.environ.get("ALLOW_TMA_DEV_MODE", "").strip().lower() == "true"
-if _DEV_MODE_REQUESTED and _ENV == "production" and not _DEV_ALLOWED:
+# TMA_DEV_MODE is permanently disabled — HMAC validation is always required.
+# Remove TMA_DEV_MODE / ALLOW_TMA_DEV_MODE from env vars; they have no effect.
+_DEV_MODE = False
+if os.environ.get("TMA_DEV_MODE", "").strip().lower() in ("1", "true", "yes"):
     logger.critical(
-        "🚨 TMA_DEV_MODE=1 requested in production but ALLOW_TMA_DEV_MODE not set — "
-        "DEV_MODE DISABLED. Set ALLOW_TMA_DEV_MODE=true only on non-production environments."
+        "🚨 TMA_DEV_MODE is set but the bypass is permanently disabled. "
+        "Telegram HMAC validation is always enforced. Remove TMA_DEV_MODE from env vars."
     )
-_DEV_MODE = _DEV_MODE_REQUESTED and (_ENV != "production" or _DEV_ALLOWED)
-if _DEV_MODE:
-    logger.warning("⚠️ TMA DEV_MODE active — Telegram HMAC bypassed (development only)")
 
 
 # ══════════════════════════════════════════════════════════════════
