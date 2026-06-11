@@ -191,10 +191,29 @@ def _at_get_record(table: str, record_id: str) -> dict | None:
     return None
 
 
+def _sanitize_field_keys(table: str, fields: dict) -> dict:
+    """Drop malformed field keys before sending to Airtable."""
+    clean = {}
+    for k, v in fields.items():
+        stripped = _clean_select_value(k) if isinstance(k, str) else ""
+        if not isinstance(k, str) or not stripped:
+            logger.warning(f"_at_patch({table}): dropping invalid field key={repr(k)} value={repr(v)}")
+            continue
+        if k != stripped:
+            logger.warning(f"_at_patch({table}): key had surrounding quotes, using stripped={repr(stripped)}")
+        clean[stripped] = v
+    return clean
+
+
 def _at_patch(table: str, record_id: str, fields: dict) -> bool:
     """PATCH single record. Returns True on success."""
     try:
         import httpx
+        fields = _sanitize_field_keys(table, fields)
+        if not fields:
+            logger.warning(f"_at_patch({table}/{record_id}): no valid fields after sanitization")
+            return False
+        logger.debug(f"_at_patch({table}/{record_id}) keys={list(fields.keys())}")
         r = httpx.patch(
             f"{_at_url(table)}/{record_id}",
             headers={**_at_headers(), "Content-Type": "application/json"},
@@ -202,13 +221,15 @@ def _at_patch(table: str, record_id: str, fields: dict) -> bool:
             timeout=10,
         )
         if r.status_code != 200:
-            body = r.text[:300]
+            body = r.text[:500]
             if r.status_code == 422:
                 try:
-                    body = json.dumps(r.json(), ensure_ascii=False)[:400]
+                    body = json.dumps(r.json(), ensure_ascii=False)[:500]
                 except Exception:
                     pass
-            logger.warning(f"_at_patch({table}/{record_id}) → {r.status_code}: {body}")
+            logger.warning(
+                f"_at_patch({table}/{record_id}) → {r.status_code}: keys={list(fields.keys())} body={body}"
+            )
         return r.status_code == 200
     except Exception as e:
         logger.warning(f"_at_patch error: {e}")
@@ -369,6 +390,17 @@ def _persist_receipt(receipt: dict) -> str | None:
         return warning
 
 
+def _clean_fields_select_values(table: str, fields: dict) -> dict:
+    """Unwrap embedded quotes from select field values before writing to Airtable."""
+    if table not in ("Leads",):
+        return fields
+    cleaned = dict(fields)
+    for k in _LEAD_SELECT_FIELDS:
+        if k in cleaned:
+            cleaned[k] = _clean_select_value(cleaned[k])
+    return cleaned
+
+
 def _execute_tma_write(payload: dict, approved_by_identity) -> dict:
     action = payload.get("action", "")
     table = payload.get("table", "")
@@ -382,7 +414,8 @@ def _execute_tma_write(payload: dict, approved_by_identity) -> dict:
         record_id = rec.get("id", "")
     elif payload.get("op") == "patch":
         record_id = payload.get("record_id", "")
-        ok = _at_patch(table, record_id, payload.get("fields", {}))
+        fields = _clean_fields_select_values(table, payload.get("fields", {}))
+        ok = _at_patch(table, record_id, fields)
         if not ok:
             return {"ok": False, "error": f"failed to update record in {table}", "record_id": record_id}
     else:
@@ -994,6 +1027,20 @@ def _normalize_lead_patch_fields(data: dict) -> dict:
         normalized[airtable_key] = value
     return normalized
 
+# Single-select fields that must arrive as raw strings (no embedded quotes).
+_LEAD_SELECT_FIELDS = {LeadFields.STATUS, LeadFields.OUTCOME, LeadFields.NEXT_STEP}
+
+
+def _clean_select_value(value) -> str:
+    """Strip whitespace and unwrap any surrounding quote chars from a select value."""
+    if value is None:
+        return ""
+    value = str(value).strip()
+    while len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        value = value[1:-1].strip()
+    return value
+
+
 # Lead outcomes/statuses must match Airtable single-select options exactly.
 _VALID_LEAD_OUTCOMES = {
     "open",
@@ -1024,6 +1071,12 @@ def patch_lead(lead_id, identity):
     data = request.get_json(force=True) or {}
     fields = _normalize_lead_patch_fields(data)
     if not fields:
+    fields = {k: v for k, v in data.items() if k in _LEAD_EDITABLE}
+    # Unwrap any embedded quotes from select fields (frontend may send '"value"')
+    for k in _LEAD_SELECT_FIELDS:
+        if k in fields:
+            fields[k] = _clean_select_value(fields[k])
+    if not fields or all(v == "" for v in fields.values()):
         return jsonify({"error": "no editable fields provided"}), 400
 
     if identity.is_owner:
@@ -1057,7 +1110,7 @@ def set_lead_outcome(lead_id, identity):
         return jsonify({"error": "forbidden"}), 403
 
     data = request.get_json(force=True) or {}
-    outcome = (data.get("outcome") or "").strip().lower()
+    outcome = _clean_select_value(data.get("outcome")).lower()
     if not outcome:
         return jsonify({"error": "missing field: outcome"}), 400
     outcome = {
