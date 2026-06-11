@@ -972,6 +972,20 @@ _LEAD_EDITABLE = {
     LeadFields.OUTCOME, LeadFields.NEXT_FOLLOWUP, LeadFields.OWNER, LeadFields.NEXT_STEP,
 }
 
+# Single-select fields that must arrive as raw strings (no embedded quotes).
+_LEAD_SELECT_FIELDS = {LeadFields.STATUS, LeadFields.OUTCOME, LeadFields.NEXT_STEP}
+
+
+def _clean_select_value(value) -> str:
+    """Strip whitespace and unwrap any surrounding quote chars from a select value."""
+    if value is None:
+        return ""
+    value = str(value).strip()
+    while len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        value = value[1:-1].strip()
+    return value
+
+
 # Lead outcomes/statuses must match Airtable single-select options exactly.
 _VALID_LEAD_OUTCOMES = {
     "open",
@@ -1001,7 +1015,11 @@ def patch_lead(lead_id, identity):
 
     data = request.get_json(force=True) or {}
     fields = {k: v for k, v in data.items() if k in _LEAD_EDITABLE}
-    if not fields:
+    # Unwrap any embedded quotes from select fields (frontend may send '"value"')
+    for k in _LEAD_SELECT_FIELDS:
+        if k in fields:
+            fields[k] = _clean_select_value(fields[k])
+    if not fields or all(v == "" for v in fields.values()):
         return jsonify({"error": "no editable fields provided"}), 400
 
     if identity.is_owner:
@@ -1035,7 +1053,7 @@ def set_lead_outcome(lead_id, identity):
         return jsonify({"error": "forbidden"}), 403
 
     data = request.get_json(force=True) or {}
-    outcome = (data.get("outcome") or "").strip().lower()
+    outcome = _clean_select_value(data.get("outcome")).lower()
     if not outcome:
         return jsonify({"error": "missing field: outcome"}), 400
     outcome = {
