@@ -247,7 +247,6 @@ def _audit(action: str, identity, details: str = "") -> None:
         _at_post(Tables.INTERACTION_LOG, {
             InteractionLogFields.TITLE:        f"[TMA] {action}",
             InteractionLogFields.SUMMARY:      details[:200] if details else action,
-            InteractionLogFields.CHANNEL:      "tma",
             InteractionLogFields.PARTICIPANTS: identity.display_name or identity.user_id,
         })
     except Exception as e:
@@ -1517,7 +1516,7 @@ def _owner_recent_receipts() -> tuple[list[dict], list[str]]:
     warnings: list[str] = []
     receipts: list[dict] = []
     try:
-        formula = f"{{{InteractionLogFields.CHANNEL}}}='receipt'"
+        formula = f"SEARCH('[TMA receipt]', {{{InteractionLogFields.TITLE}}})"
         recs = _at_list(Tables.INTERACTION_LOG, formula, max_records=10)
         for rec in recs:
             f = rec.get("fields", {})
@@ -1712,7 +1711,7 @@ def activity_feed(identity):
             "sentiment": f.get(BusinessMemoryFields.IMPACT, "")[:120] if f.get(BusinessMemoryFields.IMPACT) else "",
         })
 
-    receipt_formula = f"{{{InteractionLogFields.CHANNEL}}}='receipt'"
+    receipt_formula = f"SEARCH('[TMA receipt]', {{{InteractionLogFields.TITLE}}})"
     receipt_recs = _at_list(Tables.INTERACTION_LOG, receipt_formula, max_records=limit)
     for rec in receipt_recs:
         f = rec.get("fields", {})
