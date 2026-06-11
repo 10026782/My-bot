@@ -206,7 +206,7 @@ class LeadFields:
     DOMAIN          = "domain"
     CONVERTED_AT    = "converted_at"  # written by ad_attribution.mark_converted + lead_conversion
     OUTCOME         = "Business Outcome"  # open|needs_followup|meeting_scheduled|converted|not_relevant|lost|duplicate|archived
-    NEXT_FOLLOWUP   = "next_followup" # ISO date of next scheduled followup
+    NEXT_FOLLOWUP   = "Next Followup" # ISO date of next scheduled followup
     OWNER           = "Owner"         # assigned owner / responsible person
     NEXT_STEP       = "Next Action"   # call_now|call_today|schedule_this_week|send_details|follow_up|waiting_response|create_deal|archive|none
 
