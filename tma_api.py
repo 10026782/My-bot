@@ -195,6 +195,7 @@ def _at_patch(table: str, record_id: str, fields: dict) -> bool:
     """PATCH single record. Returns True on success."""
     try:
         import httpx
+        logger.debug(f"_at_patch({table}/{record_id}) fields={list(fields.items())}")
         r = httpx.patch(
             f"{_at_url(table)}/{record_id}",
             headers={**_at_headers(), "Content-Type": "application/json"},
