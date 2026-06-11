@@ -338,7 +338,6 @@ def _persist_receipt(receipt: dict) -> str | None:
             InteractionLogFields.SUMMARY: json.dumps(receipt, ensure_ascii=False),
             InteractionLogFields.TIMESTAMP: receipt.get("timestamp", ""),
             InteractionLogFields.PARTICIPANTS: receipt.get("approved_by", ""),
-            InteractionLogFields.CHANNEL: "receipt",
             InteractionLogFields.KEY_INSIGHTS: (
                 f"{receipt.get('status', '')} {receipt.get('table', '')}/{receipt.get('record_id', '')}"
             ).strip(),
