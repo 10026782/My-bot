@@ -957,8 +957,24 @@ _LEAD_EDITABLE = {
     LeadFields.OUTCOME, LeadFields.NEXT_FOLLOWUP, LeadFields.OWNER, LeadFields.NEXT_STEP,
 }
 
-# Outcomes שסוגרים את הליד — מעדכנים status=done אוטומטית
-_TERMINAL_OUTCOMES = {"CONVERTED", "LOST", "NOT_RELEVANT", "DUPLICATE", "ARCHIVED"}
+# Lead outcomes/statuses must match Airtable single-select options exactly.
+_VALID_LEAD_OUTCOMES = {
+    "open",
+    "needs_followup",
+    "meeting_scheduled",
+    "converted",
+    "not_relevant",
+    "lost",
+    "duplicate",
+    "archived",
+}
+_OUTCOME_STATUS_MAP = {
+    "converted": "done",
+    "archived": "archived",
+    "lost": "lost",
+    "duplicate": "duplicate",
+    "not_relevant": "not_relevant",
+}
 
 
 @tma_api.route("/api/leads/<lead_id>", methods=["PATCH"])
@@ -1004,13 +1020,19 @@ def set_lead_outcome(lead_id, identity):
         return jsonify({"error": "forbidden"}), 403
 
     data = request.get_json(force=True) or {}
-    outcome = (data.get("outcome") or "").strip().upper()
+    outcome = (data.get("outcome") or "").strip().lower()
     if not outcome:
         return jsonify({"error": "missing field: outcome"}), 400
+    outcome = {
+        "followup_needed": "needs_followup",
+        "meeting_booked": "meeting_scheduled",
+    }.get(outcome, outcome)
+    if outcome not in _VALID_LEAD_OUTCOMES:
+        return jsonify({"error": "invalid outcome", "valid": sorted(_VALID_LEAD_OUTCOMES)}), 400
 
     fields: dict = {LeadFields.OUTCOME: outcome}
-    if outcome in _TERMINAL_OUTCOMES:
-        fields[LeadFields.STATUS] = "done"
+    if outcome in _OUTCOME_STATUS_MAP:
+        fields[LeadFields.STATUS] = _OUTCOME_STATUS_MAP[outcome]
 
     if identity.is_owner:
         ok = _at_patch("Leads", lead_id, fields)
@@ -1335,18 +1357,24 @@ _PERMISSIONS_MATRIX = [
 _BUSINESS_LANGUAGE = {
     "lead_status": [
         {"value": "new", "label": "New lead"},
-        {"value": "qualified", "label": "Qualified lead"},
-        {"value": "hot", "label": "Hot lead"},
-        {"value": "cold", "label": "Cold lead"},
-        {"value": "converted", "label": "Converted lead"},
+        {"value": "active", "label": "Active lead"},
+        {"value": "waiting_call", "label": "Waiting for call"},
+        {"value": "waiting_response", "label": "Waiting for response"},
+        {"value": "done", "label": "Done"},
+        {"value": "archived", "label": "Archived"},
         {"value": "lost", "label": "Lost lead"},
+        {"value": "duplicate", "label": "Duplicate"},
+        {"value": "not_relevant", "label": "Not relevant"},
     ],
     "lead_outcome": [
         {"value": "open", "label": "Still active"},
-        {"value": "followup_needed", "label": "Needs follow-up"},
-        {"value": "meeting_booked", "label": "Meeting booked"},
+        {"value": "needs_followup", "label": "Needs follow-up"},
+        {"value": "meeting_scheduled", "label": "Meeting scheduled"},
         {"value": "converted", "label": "Converted to business result"},
         {"value": "not_relevant", "label": "Not relevant"},
+        {"value": "lost", "label": "Lost"},
+        {"value": "duplicate", "label": "Duplicate"},
+        {"value": "archived", "label": "Archived"},
     ],
     "lead_tier": [
         {"value": "HOT", "label": "High intent / urgent"},
