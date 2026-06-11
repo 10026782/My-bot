@@ -981,8 +981,8 @@ def update_lead_status(lead_id, identity):
 
 # שדות עריכה מורשים ב-PATCH /api/leads/<id>
 _LEAD_EDITABLE = {
-    LeadFields.STATUS, LeadFields.SCORE,  # TIER הוא formula field — לא ניתן לכתיבה
-    LeadFields.OUTCOME, LeadFields.NEXT_FOLLOWUP, LeadFields.OWNER, LeadFields.NEXT_STEP,
+    LeadFields.STATUS, LeadFields.SCORE, LeadFields.OUTCOME,
+    # NEXT_FOLLOWUP, OWNER, NEXT_STEP — fields not yet created in Airtable
 }
 
 # Single-select fields that must arrive as raw strings (no embedded quotes).
