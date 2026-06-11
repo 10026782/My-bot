@@ -1071,7 +1071,7 @@ def patch_lead(lead_id, identity):
     data = request.get_json(force=True) or {}
     fields = _normalize_lead_patch_fields(data)
     if not fields:
-    fields = {k: v for k, v in data.items() if k in _LEAD_EDITABLE}
+        fields = {k: v for k, v in data.items() if k in _LEAD_EDITABLE}
     # Unwrap any embedded quotes from select fields (frontend may send '"value"')
     for k in _LEAD_SELECT_FIELDS:
         if k in fields:
