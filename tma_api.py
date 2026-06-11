@@ -201,6 +201,14 @@ def _at_patch(table: str, record_id: str, fields: dict) -> bool:
             json={"fields": fields},
             timeout=10,
         )
+        if r.status_code != 200:
+            body = r.text[:300]
+            if r.status_code == 422:
+                try:
+                    body = json.dumps(r.json(), ensure_ascii=False)[:400]
+                except Exception:
+                    pass
+            logger.warning(f"_at_patch({table}/{record_id}) → {r.status_code}: {body}")
         return r.status_code == 200
     except Exception as e:
         logger.warning(f"_at_patch error: {e}")
@@ -219,7 +227,13 @@ def _at_post(table: str, fields: dict) -> dict | None:
         )
         if r.status_code in (200, 201):
             return r.json()
-        logger.warning(f"_at_post({table}) → {r.status_code}: {r.text[:120]}")
+        body = r.text[:300]
+        if r.status_code == 422:
+            try:
+                body = json.dumps(r.json(), ensure_ascii=False)[:400]
+            except Exception:
+                pass
+        logger.warning(f"_at_post({table}) → {r.status_code}: {body}")
     except Exception as e:
         logger.warning(f"_at_post error: {e}")
     return None
@@ -309,7 +323,10 @@ def _queue_tma_write_approval(action: str, payload: dict, identity, label: str) 
         ApprovalsFields.CONTEXT_DATA: json.dumps(approval_payload, ensure_ascii=False),
         ApprovalsFields.STATUS: "\u05de\u05de\u05ea\u05d9\u05df",
     })
-    approval_id = rec.get("id", "") if rec else ""
+    if not rec:
+        logger.error(f"_queue_tma_write_approval: Approvals POST failed for action={action}")
+        raise RuntimeError(f"approval_queue_failed: {action}")
+    approval_id = rec["id"]
     return approval_id, {
         "status": "pending_approval",
         "approval_id": approval_id,
