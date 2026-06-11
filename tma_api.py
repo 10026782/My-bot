@@ -18,7 +18,7 @@ from pathlib import Path
 from flask import Blueprint, jsonify, request
 from identity import resolve_identity, Role
 from airtable_schema import (
-    LeadFields, PaymentStatus, BusinessMemoryFields, InteractionLogFields, Tables,
+    LeadFields, TaskFields, PaymentStatus, BusinessMemoryFields, InteractionLogFields, Tables,
     QuestsFields, CoinsLogFields, WorldsFields, QuestStatus, WorldStatus,
     DailyTaskFields, DailyTaskStatus, ApprovalsFields,
 )
@@ -909,18 +909,22 @@ def get_lead(lead_id, identity):
     score_color = "red" if score >= 70 else ("yellow" if score >= 40 else "blue")
 
     return jsonify({
-        "id":          rec["id"],
-        "name":        f.get("Name", ""),
-        "phone":       f.get("phone", ""),
-        "domain":      f.get("domain", ""),
-        "status":      f.get("status", ""),
-        "score":       score,
-        "score_color": score_color,
-        "source":      f.get("source", ""),
-        "summary":     f.get("summary", ""),
-        "next_step":   f.get("next_step", ""),
-        "created_at":  f.get("created_at", ""),
-        "timeline":    timeline,
+        "id":            rec["id"],
+        "name":          f.get(LeadFields.NAME, ""),
+        "phone":         f.get(LeadFields.PHONE, ""),
+        "domain":        f.get(LeadFields.DOMAIN, ""),
+        "status":        f.get(LeadFields.STATUS, ""),
+        "score":         score,
+        "score_color":   score_color,
+        "source":        f.get(LeadFields.SOURCE, ""),
+        "summary":       f.get(LeadFields.SUMMARY, ""),
+        "next_step":     f.get(LeadFields.NEXT_STEP, ""),
+        "created_at":    f.get(LeadFields.CREATED_AT, ""),
+        "timeline":      timeline,
+        "tier":          f.get(LeadFields.TIER, ""),
+        "outcome":       f.get(LeadFields.OUTCOME, ""),
+        "next_followup": f.get(LeadFields.NEXT_FOLLOWUP, ""),
+        "owner":         f.get(LeadFields.OWNER, ""),
     })
 
 
@@ -950,6 +954,136 @@ def update_lead_status(lead_id, identity):
         f"Update lead status: {lead_id} -> {new_status}",
     )
     return jsonify(response), 202
+
+
+# שדות עריכה מורשים ב-PATCH /api/leads/<id>
+_LEAD_EDITABLE = {
+    LeadFields.STATUS, LeadFields.SCORE, LeadFields.TIER,
+    LeadFields.OUTCOME, LeadFields.NEXT_FOLLOWUP, LeadFields.OWNER, LeadFields.NEXT_STEP,
+}
+
+# Outcomes שסוגרים את הליד — מעדכנים status=done אוטומטית
+_TERMINAL_OUTCOMES = {"CONVERTED", "LOST", "NOT_RELEVANT", "DUPLICATE", "ARCHIVED"}
+
+
+@tma_api.route("/api/leads/<lead_id>", methods=["PATCH"])
+@require_tma_auth
+def patch_lead(lead_id, identity):
+    """עדכון שדות ליד. Owner — מיידי; Manager — דרך approval."""
+    if identity.role not in {Role.OWNER, Role.MANAGER}:
+        return jsonify({"error": "forbidden"}), 403
+
+    data = request.get_json(force=True) or {}
+    fields = {k: v for k, v in data.items() if k in _LEAD_EDITABLE}
+    if not fields:
+        return jsonify({"error": "no editable fields provided"}), 400
+
+    if identity.is_owner:
+        ok = _at_patch("Leads", lead_id, fields)
+        if not ok:
+            return jsonify({"error": "update failed"}), 500
+        _audit("lead_patch", identity, details=f"{lead_id}: {list(fields.keys())}")
+        return jsonify({"ok": True, "lead_id": lead_id, "updated": list(fields.keys())})
+
+    _, response = _queue_tma_write_approval(
+        "tma_patch_lead",
+        {
+            "op": "patch",
+            "table": "Leads",
+            "record_id": lead_id,
+            "fields": fields,
+            "audit_action": "lead_patch",
+            "audit_details": f"{lead_id}: {list(fields.keys())}",
+        },
+        identity,
+        f"Update lead fields: {list(fields.keys())}",
+    )
+    return jsonify(response), 202
+
+
+@tma_api.route("/api/leads/<lead_id>/outcome", methods=["POST"])
+@require_tma_auth
+def set_lead_outcome(lead_id, identity):
+    """קביעת תוצאה עסקית. Outcomes סופיים מעדכנים status=done. Owner — מיידי; Manager — approval."""
+    if identity.role not in {Role.OWNER, Role.MANAGER}:
+        return jsonify({"error": "forbidden"}), 403
+
+    data = request.get_json(force=True) or {}
+    outcome = (data.get("outcome") or "").strip().upper()
+    if not outcome:
+        return jsonify({"error": "missing field: outcome"}), 400
+
+    fields: dict = {LeadFields.OUTCOME: outcome}
+    if outcome in _TERMINAL_OUTCOMES:
+        fields[LeadFields.STATUS] = "done"
+
+    if identity.is_owner:
+        ok = _at_patch("Leads", lead_id, fields)
+        if not ok:
+            return jsonify({"error": "update failed"}), 500
+        _audit("lead_outcome", identity, details=f"{lead_id}: {outcome}")
+        return jsonify({"ok": True, "lead_id": lead_id, "outcome": outcome})
+
+    _, response = _queue_tma_write_approval(
+        "tma_set_lead_outcome",
+        {
+            "op": "patch",
+            "table": "Leads",
+            "record_id": lead_id,
+            "fields": fields,
+            "audit_action": "lead_outcome",
+            "audit_details": f"{lead_id}: {outcome}",
+        },
+        identity,
+        f"Set lead outcome: {outcome}",
+    )
+    return jsonify(response), 202
+
+
+@tma_api.route("/api/leads/<lead_id>/task", methods=["POST"])
+@require_tma_auth
+def create_lead_task(lead_id, identity):
+    """יצירת משימה מליד — מעתיק אוטומטית domain, owner, lead link."""
+    if identity.role not in {Role.OWNER, Role.MANAGER}:
+        return jsonify({"error": "forbidden"}), 403
+
+    data = request.get_json(force=True) or {}
+    title = (data.get("title") or "").strip()
+    if not title:
+        return jsonify({"error": "missing field: title"}), 400
+
+    due_date = data.get("due_date") or (date.today() + timedelta(days=1)).isoformat()
+    notes    = (data.get("notes") or "").strip()
+
+    # קריאת נתוני הליד להעתקת domain, owner
+    lead_rec = _at_get_record("Leads", lead_id)
+    if not lead_rec:
+        return jsonify({"error": "lead not found"}), 404
+    lf = lead_rec.get("fields", {})
+    lead_name   = lf.get(LeadFields.NAME, lead_id)
+    lead_domain = lf.get(LeadFields.DOMAIN, "")
+    lead_owner  = lf.get(LeadFields.OWNER, "")
+
+    task_fields: dict = {
+        TaskFields.NAME:     title,
+        TaskFields.STATUS:   "ממתין",
+        TaskFields.DUE_DATE: due_date,
+    }
+    if notes:
+        task_fields[TaskFields.DESCRIPTION] = notes
+    if lead_domain:
+        task_fields[TaskFields.DOMAIN] = lead_domain
+    if lead_owner:
+        task_fields[TaskFields.OWNER] = lead_owner
+    # קישור ליד — linked record array
+    task_fields[TaskFields.LEAD_LINK] = [lead_id]
+
+    rec = _at_post(Tables.TASKS, task_fields)
+    if not rec:
+        return jsonify({"error": "task creation failed"}), 500
+
+    _audit("lead_task_created", identity, details=f"lead={lead_name} task={title}")
+    return jsonify({"ok": True, "id": rec.get("id", ""), "lead_id": lead_id}), 201
 
 
 # WEEK 1 — Follow-Up (O3 Action)

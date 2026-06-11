@@ -102,6 +102,7 @@ export default function App() {
       <LeadPipeline
         project={selected}
         onBack={() => setSelected(null)}
+        authRole={authRole}
       />
     );
   }

@@ -7,6 +7,7 @@ import { LeadDetail } from "./LeadDetail";
 interface Props {
   project: ProjectCard;
   onBack: () => void;
+  authRole?: string | null;
 }
 
 type State =
@@ -14,7 +15,7 @@ type State =
   | { status: "ok"; data: LeadsResponse }
   | { status: "error"; message: string };
 
-export function LeadPipeline({ project, onBack }: Props) {
+export function LeadPipeline({ project, onBack, authRole }: Props) {
   const [state, setState] = useState<State>({ status: "loading" });
   const [selectedLead, setSelectedLead] = useState<LeadSummary | null>(null);
 
@@ -29,6 +30,7 @@ export function LeadPipeline({ project, onBack }: Props) {
       <LeadDetail
         lead={selectedLead}
         onBack={() => setSelectedLead(null)}
+        authRole={authRole}
       />
     );
   }

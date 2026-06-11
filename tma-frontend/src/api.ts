@@ -190,3 +190,45 @@ export async function completeTask(taskId: string): Promise<{ ok: boolean; coins
   if (!r.ok) throw new Error(`API ${r.status}`);
   return r.json() as Promise<{ ok: boolean; coins_awarded: number }>;
 }
+
+export async function patchLead(
+  leadId: string,
+  fields: Partial<{
+    status: string;
+    score: number;
+    tier: string;
+    outcome: string;
+    next_followup: string;
+    owner: string;
+    next_step: string;
+  }>,
+): Promise<void> {
+  const r = await fetch(`${BASE}/api/leads/${encodeURIComponent(leadId)}`, {
+    method: "PATCH",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(fields),
+  });
+  if (!r.ok) throw new Error(`API ${r.status}`);
+}
+
+export async function setLeadOutcome(leadId: string, outcome: string): Promise<void> {
+  const r = await fetch(`${BASE}/api/leads/${encodeURIComponent(leadId)}/outcome`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ outcome }),
+  });
+  if (!r.ok) throw new Error(`API ${r.status}`);
+}
+
+export async function createLeadTask(
+  leadId: string,
+  task: { title: string; due_date?: string; notes?: string },
+): Promise<{ id: string }> {
+  const r = await fetch(`${BASE}/api/leads/${encodeURIComponent(leadId)}/task`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(task),
+  });
+  if (!r.ok) throw new Error(`API ${r.status}`);
+  return r.json() as Promise<{ id: string }>;
+}
