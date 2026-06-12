@@ -8,6 +8,17 @@ from guards.circuit_breaker import with_airtable_breaker
 
 logger = logging.getLogger(__name__)
 
+
+def _audit(tool_name: str, table: str, record_id: str = "", result: str = "") -> None:
+    """לוג audit לכל פעולת Airtable — לא חוסם אם נכשל."""
+    try:
+        logger.info(
+            "[AUDIT:airtable] tool=%s table=%s record=%s result=%s",
+            tool_name, table, record_id or "-", (result or "")[:80],
+        )
+    except Exception:
+        pass
+
 # ══════════════════════════════════════════════════
 # סכמה — שדות חוקיים לכל טבלה
 # Claude לא ישלח שדות שלא קיימים ב-Airtable
@@ -241,11 +252,13 @@ def airtable_get(table: str, filter_formula: str = "") -> str:
             return f"❌ Airtable error {r.status_code}: {r.text[:150]}"
         records = r.json().get("records", [])
         if not records:
+            _audit("airtable_get", table, result=f"0 records | filter={filter_formula[:40]}")
             return f"📭 אין רשומות בטבלה '{table}'."
         result = f"📊 {table} — {len(records)} רשומות:\n"
         for rec in records[:15]:
             fields = " | ".join(f"{k}: {v}" for k, v in rec.get("fields", {}).items())
             result += f"• [{rec['id']}] {fields}\n"
+        _audit("airtable_get", table, result=f"{len(records)} records | filter={filter_formula[:40]}")
         return result
 
 
@@ -269,7 +282,10 @@ def airtable_add(table: str, fields: dict) -> str:
         r = httpx.post(f"https://api.airtable.com/v0/{_base()}/{encoded}",
                        headers=_headers(), json={"fields": fields}, timeout=10)
         if r.status_code in [200, 201]:
-            return f"✅ רשומה נוספה | ID: {r.json().get('id','?')}"
+            rec_id = r.json().get("id", "?")
+            _audit("airtable_add", table, record_id=rec_id, result="created")
+            return f"✅ רשומה נוספה | ID: {rec_id}"
+        _audit("airtable_add", table, result=f"error {r.status_code}")
         return f"❌ Airtable error {r.status_code}: {r.text[:150]}"
 
 
@@ -283,6 +299,7 @@ def airtable_get_schema() -> str:
             timeout=10
         )
         if r.status_code != 200:
+            _audit("airtable_get_schema", "meta", result=f"error {r.status_code}")
             return f"❌ Meta API error {r.status_code}: {r.text[:150]}"
         tables = r.json().get("tables", [])
         if not tables:
@@ -292,6 +309,7 @@ def airtable_get_schema() -> str:
             fields = [f["name"] for f in t.get("fields", [])]
             result += f"• {t['name']}\n"
             result += f"  שדות: {', '.join(fields)}\n\n"
+        _audit("airtable_get_schema", "meta", result=f"{len(tables)} tables fetched")
         return result.strip()
 
 
@@ -315,7 +333,9 @@ def airtable_update(table: str, record_id: str, fields: dict) -> str:
         r = httpx.patch(f"https://api.airtable.com/v0/{_base()}/{encoded}/{record_id}",
                         headers=_headers(), json={"fields": fields}, timeout=10)
         if r.status_code == 200:
+            _audit("airtable_update", table, record_id=record_id, result="updated")
             return f"✅ רשומה {record_id} עודכנה."
+        _audit("airtable_update", table, record_id=record_id, result=f"error {r.status_code}")
         return f"❌ Airtable error {r.status_code}: {r.text[:150]}"
 
 
