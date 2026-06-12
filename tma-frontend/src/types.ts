@@ -147,7 +147,7 @@ export interface LeadDetail {
   tier?: string;
   outcome?: string;
   next_followup?: string;
-  owner?: string;
+  owner?: string | string[];  // Airtable multipleRecordLinks returns string[]
 }
 
 export interface DailyTask {

@@ -204,6 +204,11 @@ def _sanitize_field_keys(table: str, fields: dict) -> dict:
             continue
         if k != stripped:
             logger.warning(f"_at_patch({table}): key had surrounding quotes, using stripped={repr(stripped)}")
+        # Strip "none" sentinel — UI placeholder, not a valid Airtable select option.
+        # Sending it causes Airtable to attempt creating a new option (fails on token permissions).
+        if isinstance(v, str) and v.strip() == "none":
+            logger.warning(f"_at_patch({table}): dropping 'none' sentinel for field={repr(stripped)}")
+            continue
         clean[stripped] = v
 
     # schema guard — validate against schema_cache.json
@@ -1066,6 +1071,9 @@ def _normalize_lead_patch_fields(data: dict) -> dict:
 # Single-select fields that must arrive as raw strings (no embedded quotes).
 _LEAD_SELECT_FIELDS = {LeadFields.STATUS, LeadFields.OUTCOME, LeadFields.NEXT_STEP}
 
+# Linked Record fields in Leads — Airtable requires a list of record IDs, never a bare string.
+_LEAD_LINKED_RECORD_FIELDS = {"Owner"}
+
 
 def _clean_select_value(value) -> str:
     """Strip whitespace and unwrap any surrounding quote chars from a select value."""
@@ -1112,6 +1120,22 @@ def patch_lead(lead_id, identity):
     for k in _LEAD_SELECT_FIELDS:
         if k in fields:
             fields[k] = _clean_select_value(fields[k])
+
+    # Coerce Linked Record fields — Airtable requires a list of record IDs, not a bare string.
+    # Wrap a single rec ID ("recXXX") in a list; reject anything else (plain names cause 422).
+    for lrf in _LEAD_LINKED_RECORD_FIELDS:
+        if lrf not in fields:
+            continue
+        val = fields[lrf]
+        if isinstance(val, list):
+            pass  # already correct
+        elif isinstance(val, str) and re.match(r"^rec\w+$", val):
+            fields[lrf] = [val]
+            logger.debug("patch_lead: coerced %s string→list", lrf)
+        else:
+            logger.warning("patch_lead: dropping %s=%r — not a rec ID or list, would cause 422", lrf, val)
+            fields.pop(lrf)
+
     if not fields or all(v == "" for v in fields.values()):
         return jsonify({"error": "no editable fields provided"}), 400
 

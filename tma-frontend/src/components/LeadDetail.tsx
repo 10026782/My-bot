@@ -100,7 +100,8 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
   const [scoreInput,       setScoreInput]       = useState("");
   const [scoreDirty,       setScoreDirty]       = useState(false);
   const [nextFollowup,     setNextFollowup]     = useState("");
-  const [owner,            setOwner]            = useState("");
+  // owner may be a string[] from Airtable (multipleRecordLinks) stored as string state at runtime
+  const [owner,            setOwner]            = useState<string | string[]>("");
   const [scheduleDirty,    setScheduleDirty]    = useState(false);
 
   // Create task form
@@ -188,6 +189,9 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
     if (saving || key === currentAction) return;
     const prev = currentAction;
     setCurrentAction(key);
+    // "none" is a UI-only sentinel meaning "no action" — omit from PATCH payload.
+    // Sending it causes Airtable to attempt creating a new select option (fails on token perms).
+    if (key === "none") return;
     setSaving(true);
     try {
       await patchLead(lead.id, { next_step: key });
@@ -228,7 +232,16 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
     try {
       const fields: Parameters<typeof patchLead>[1] = {};
       if (nextFollowup) fields.next_followup = nextFollowup;
-      if (owner)        fields.owner         = owner;
+      // Owner is a multipleRecordLinks field in Airtable — must be sent as string[].
+      // Coerce: array passthrough, wrap single rec ID, skip plain text (can't resolve to rec ID).
+      if (owner) {
+        if (Array.isArray(owner)) {
+          if (owner.length > 0) fields.owner = owner;
+        } else if (typeof owner === "string" && /^rec\w+$/.test(owner)) {
+          fields.owner = [owner];
+        }
+        // If user typed a plain name (not a rec ID), omit — backend cannot resolve it
+      }
       if (Object.keys(fields).length === 0) { setSaving(false); return; }
       await patchLead(lead.id, fields);
       setScheduleDirty(false);
@@ -472,7 +485,7 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
                 <label className="text-xs text-gray-400 block mb-1">אחראי</label>
                 <input
                   type="text"
-                  value={owner}
+                  value={Array.isArray(owner) ? owner[0] ?? "" : owner}
                   onChange={(e) => { setOwner(e.target.value); setScheduleDirty(true); }}
                   placeholder="שם אחראי"
                   className="w-full bg-gray-100 rounded-xl px-3 py-2 text-sm outline-none"

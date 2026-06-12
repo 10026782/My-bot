@@ -196,10 +196,9 @@ export async function patchLead(
   fields: Partial<{
     status: string;
     score: number;
-    tier: string;
     outcome: string;
     next_followup: string;
-    owner: string;
+    owner: string[];      // Airtable multipleRecordLinks — must be array of record IDs
     next_step: string;
   }>,
 ): Promise<void> {
