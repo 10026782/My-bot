@@ -24,7 +24,7 @@ from airtable_schema import (
     DailyTaskFields, DailyTaskStatus, ApprovalsFields,
     RoadmapTaskFields, RoadmapTaskStatus,
 )
-import schema_validator as _sv
+from tools.airtable_gateway import airtable_patch as _gw_patch, airtable_create as _gw_create
 
 logger = logging.getLogger(__name__)
 
@@ -194,85 +194,14 @@ def _at_get_record(table: str, record_id: str) -> dict | None:
     return None
 
 
-def _sanitize_field_keys(table: str, fields: dict) -> dict:
-    """Drop malformed or unknown field keys before sending to Airtable."""
-    clean = {}
-    for k, v in fields.items():
-        stripped = _clean_select_value(k) if isinstance(k, str) else ""
-        if not isinstance(k, str) or not stripped:
-            logger.warning(f"_at_patch({table}): dropping invalid field key={repr(k)} value={repr(v)}")
-            continue
-        if k != stripped:
-            logger.warning(f"_at_patch({table}): key had surrounding quotes, using stripped={repr(stripped)}")
-        # Strip "none" sentinel — UI placeholder, not a valid Airtable select option.
-        # Sending it causes Airtable to attempt creating a new option (fails on token permissions).
-        if isinstance(v, str) and v.strip() == "none":
-            logger.warning(f"_at_patch({table}): dropping 'none' sentinel for field={repr(stripped)}")
-            continue
-        clean[stripped] = v
-
-    # schema guard — validate against schema_cache.json
-    unknown = _sv.validate_fields(table, clean)
-    for u in unknown:
-        logger.warning(f"_at_patch({table}): dropping UNKNOWN_FIELD_NAME='{u}' (not in schema cache)")
-        del clean[u]
-
-    return clean
-
-
 def _at_patch(table: str, record_id: str, fields: dict) -> bool:
-    """PATCH single record. Returns True on success."""
-    try:
-        import httpx
-        fields = _sanitize_field_keys(table, fields)
-        if not fields:
-            logger.warning(f"_at_patch({table}/{record_id}): no valid fields after sanitization")
-            return False
-        logger.debug(f"_at_patch({table}/{record_id}) keys={list(fields.keys())}")
-        r = httpx.patch(
-            f"{_at_url(table)}/{record_id}",
-            headers={**_at_headers(), "Content-Type": "application/json"},
-            json={"fields": fields},
-            timeout=10,
-        )
-        if r.status_code != 200:
-            body = r.text[:500]
-            if r.status_code == 422:
-                try:
-                    body = json.dumps(r.json(), ensure_ascii=False)[:500]
-                except Exception:
-                    pass
-            logger.warning(
-                f"_at_patch({table}/{record_id}) → {r.status_code}: keys={list(fields.keys())} body={body}"
-            )
-        return r.status_code == 200
-    except Exception as e:
-        logger.warning(f"_at_patch error: {e}")
-    return False
+    """PATCH single record via gateway (normalize → validate → audit → httpx)."""
+    return _gw_patch(table, record_id, fields, source="tma")
 
 
 def _at_post(table: str, fields: dict) -> dict | None:
-    """POST new record → created record dict or None."""
-    try:
-        import httpx
-        r = httpx.post(
-            _at_url(table),
-            headers={**_at_headers(), "Content-Type": "application/json"},
-            json={"fields": fields},
-            timeout=10,
-        )
-        if r.status_code in (200, 201):
-            return r.json()
-        body = r.text[:300]
-        if r.status_code == 422:
-            try:
-                body = json.dumps(r.json(), ensure_ascii=False)[:400]
-            except Exception:
-                pass
-        logger.warning(f"_at_post({table}) → {r.status_code}: {body}")
-    except Exception as e:
-        logger.warning(f"_at_post error: {e}")
-    return None
+    """POST new record via gateway → created record dict or None."""
+    return _gw_create(table, fields, source="tma")
 
 
 def _coins_running_total(new_coins: int) -> int:

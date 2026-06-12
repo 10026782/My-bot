@@ -263,30 +263,15 @@ def airtable_get(table: str, filter_formula: str = "") -> str:
 
 
 def airtable_add(table: str, fields: dict) -> str:
-    # A38 — אמת שדות לפני כתיבה
-    try:
-        from schema_intelligence import validate_before_write
-        ok, err = validate_before_write(table, fields)
-        if not ok:
-            return f"❌ שגיאת סכמה: {err}"
-    except ImportError:
-        pass
-
-    fields = _sanitize_fields(table, fields)
-    if not fields:
-        return "❌ לא נשארו שדות תקינים לשמירה — בדוק שמות השדות."
-    fields = _resolve_linked_fields(table, fields)
-    real_table = _resolve_table(table)
-    encoded = urllib.parse.quote(real_table, safe="")
-    with with_airtable_breaker():
-        r = httpx.post(f"https://api.airtable.com/v0/{_base()}/{encoded}",
-                       headers=_headers(), json={"fields": fields}, timeout=10)
-        if r.status_code in [200, 201]:
-            rec_id = r.json().get("id", "?")
-            _audit("airtable_add", table, record_id=rec_id, result="created")
-            return f"✅ רשומה נוספה | ID: {rec_id}"
-        _audit("airtable_add", table, result=f"error {r.status_code}")
-        return f"❌ Airtable error {r.status_code}: {r.text[:150]}"
+    fields = _resolve_linked_fields(_resolve_table(table), fields)
+    from tools.airtable_gateway import airtable_create
+    rec = airtable_create(_resolve_table(table), fields, source="agent")
+    if rec:
+        rec_id = rec.get("id", "?")
+        _audit("airtable_add", table, record_id=rec_id, result="created")
+        return f"✅ רשומה נוספה | ID: {rec_id}"
+    _audit("airtable_add", table, result="error")
+    return "❌ לא נשארו שדות תקינים לשמירה — בדוק שמות השדות."
 
 
 def airtable_get_schema() -> str:
@@ -314,29 +299,14 @@ def airtable_get_schema() -> str:
 
 
 def airtable_update(table: str, record_id: str, fields: dict) -> str:
-    # A38 — אמת שדות לפני עדכון
-    try:
-        from schema_intelligence import validate_before_write
-        ok, err = validate_before_write(table, fields)
-        if not ok:
-            return f"❌ שגיאת סכמה: {err}"
-    except ImportError:
-        pass
-
-    fields = _sanitize_fields(table, fields)
-    if not fields:
-        return "❌ לא נשארו שדות תקינים לעדכון — בדוק שמות השדות."
-    fields = _resolve_linked_fields(table, fields)
-    real_table = _resolve_table(table)
-    encoded = urllib.parse.quote(real_table, safe="")
-    with with_airtable_breaker():
-        r = httpx.patch(f"https://api.airtable.com/v0/{_base()}/{encoded}/{record_id}",
-                        headers=_headers(), json={"fields": fields}, timeout=10)
-        if r.status_code == 200:
-            _audit("airtable_update", table, record_id=record_id, result="updated")
-            return f"✅ רשומה {record_id} עודכנה."
-        _audit("airtable_update", table, record_id=record_id, result=f"error {r.status_code}")
-        return f"❌ Airtable error {r.status_code}: {r.text[:150]}"
+    fields = _resolve_linked_fields(_resolve_table(table), fields)
+    from tools.airtable_gateway import airtable_patch
+    ok = airtable_patch(_resolve_table(table), record_id, fields, source="agent")
+    if ok:
+        _audit("airtable_update", table, record_id=record_id, result="updated")
+        return f"✅ רשומה {record_id} עודכנה."
+    _audit("airtable_update", table, record_id=record_id, result="error")
+    return "❌ שגיאה בעדכון — בדוק שמות השדות."
 
 
 def search_lead(name: str) -> str:

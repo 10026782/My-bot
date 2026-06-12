@@ -18,6 +18,24 @@ logging.basicConfig(
 from startup_validator import validate_startup, format_startup_message
 validate_startup()
 
+# Step 5 — gateway alias consistency check (WARN only, does not block startup)
+try:
+    from tools.airtable_gateway import check_alias_consistency as _gw_check
+    _gw_mismatches = _gw_check()
+    if _gw_mismatches:
+        import os as _os
+        _owner = _os.environ.get("ELIYAHU_CHAT_ID", "")
+        _token = _os.environ.get("TELEGRAM_TOKEN", "")
+        if _owner and _token:
+            import httpx as _httpx
+            _httpx.post(
+                f"https://api.telegram.org/bot{_token}/sendMessage",
+                json={"chat_id": _owner, "text": "⚠️ Gateway alias mismatch:\n" + "\n".join(_gw_mismatches)},
+                timeout=5,
+            )
+except Exception as _gw_e:
+    logging.warning("gateway startup check failed: %s", _gw_e)
+
 import anthropic
 import telebot
 from twilio.request_validator import RequestValidator
