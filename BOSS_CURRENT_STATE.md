@@ -1,7 +1,7 @@
 # BOSS CURRENT STATE
 
 Last updated: 12/06/2026
-Reflects: Stabilization Sprint + W0/W1 + Security Audit Fixes (H1-H3) + TIER read-only fix + Game Dashboard fix + Ghost Button Audit
+Reflects: Stabilization Sprint + W0/W1 + Security Audit Fixes (H1-H3) + TIER read-only fix + Game Dashboard fix + Ghost Button Audit + Airtable Gateway (W2)
 
 ## Classification Key
 - WORKING: implemented, reachable, no blocking issue.
@@ -39,6 +39,43 @@ Reflects: Stabilization Sprint + W0/W1 + Security Audit Fixes (H1-H3) + TIER rea
 | audit_log_airtable wiring | ✅ FIXED | Wired into `airtable_get`/`add`/`update`/`get_schema` |
 | .env.example | ✅ UPDATED | `TWILIO_AUTH_TOKEN`, `GOOGLE_*`, `DIGEST_CHAT_ID`, `OWNER_TELEGRAM_ID`, `TMA_ALLOWED_ORIGINS` added |
 | N03 scoring threshold | ✅ FIXED | "כמה עולה?" and price-intent questions now score WARM+ (was COLD) |
+| Airtable Gateway | ✅ FIXED | Single write-path (f964070) — resolves recurring Score/Tier field-name drift class of bugs |
+
+---
+
+## Airtable Gateway — 12/06/2026 (commit f964070)
+
+### Problem (recurring for ~1 month)
+5 competing sources of truth for Airtable field names: `airtable_schema.py`, `schema_intelligence.py`, `schema_validator.py`+`schema_cache.json`, `tools/airtable_tools.py` (`_TABLE_FIELDS`), `tma_api.py` (`_LEAD_FIELD_ALIASES`). Result: Score/score mismatch returned 3 times under different names (W1 → today's fix → still broken → root-caused). Every fix in one layer left the other layers stale.
+
+### Solution
+`tools/airtable_gateway.py` — single write path. Every Airtable PATCH/POST goes through:
+```
+normalize aliases → filter read-only → validate vs schema_cache.json
+  → coerce linked records → audit_log(source=) → HTTP write
+```
+- `validate_before_write` (airtable_tools.py) removed — 0 references
+- `_sv.validate_fields` (tma_api.py) removed — 0 references
+- Gateway is the sole consumer of `schema_validator.py`
+
+### Architectural decisions (for future reference)
+- ❌ **NOT done:** full auto-generation of `airtable_schema.py` from `schema_cache.json` — `airtable_schema.py` contains business logic (table names, statuses, comments) that a generator would overwrite. Deferred to Phase 2.
+- ❌ **NOT done:** startup fail-on-schema-mismatch — risk of taking down production on a minor Airtable UI rename. If/when added: WARN only + Telegram to `OWNER_TELEGRAM_ID`, never refuse-to-start. (Startup consistency check already emits CRITICAL log + Telegram notification, but does not block.)
+- ✅ `schema_cache.json` is fallback/cache. Airtable live schema (Metadata API) is the principled source of truth — live schema load at runtime not yet implemented (Phase 2).
+
+### Validated edge cases (test_airtable_gateway.py — 26/26)
+| Input | Outcome |
+|-------|---------|
+| `{"score":80}` | → `{"Score":80}` — all 3 paths (TMA/lead_capture/agent) |
+| `{"Tier":"HOT"}` | → rejected (read-only formula field) |
+| `{"Next Action":"none"}` | → stripped (UI sentinel, not a valid select option) |
+| `{"Owner":"recABC123"}` | → `["recABC123"]` (multipleRecordLinks coercion) |
+| `{"Owner":"John Doe"}` | → rejected (plain name, would cause 422) |
+| audit source= | → correct per-caller tag (tma/lead_capture/agent) |
+
+### Open follow-up (non-blocking)
+- **Fable 5 architecture review** (race/staleness conditions, generic linked-record coverage beyond Leads, audit failure mode, JS-side null variants beyond "none", tenant-scope ordering) — not run yet. Recommended as post-merge sanity check.
+- **Phase 2** (later, not now): live Airtable Metadata API sync at startup; cautious constant generation to `airtable_generated_schema.py` (not overwriting `airtable_schema.py`).
 
 ---
 
@@ -79,7 +116,7 @@ run_agent() → conversational reply only
 | Lead Scoring | NOT IMPLEMENTED | core/lead_scoring.py does not exist; C14 removed from Completed |
 | Google integrations | PARTIAL | Merge conflict resolved; OAuth/env still required |
 | Email tools | PARTIAL | Import fixed; honest stub until Google Tools live |
-| Airtable integrations | WORKING | Schema synced (W1); score/tier fields correct |
+| Airtable integrations | WORKING | Single write-path (W2 gateway); schema/alias/read-only/linked-record all centralized |
 | Daily Digest | PARTIAL | Failures visible; score/tier now correct field names |
 | Payment Reminder | WORKING | self-test passing (0744ce9) |
 | Workers / scheduler | PARTIAL | Mock fallbacks removed; subscribers registered |
@@ -154,7 +191,7 @@ Full audit: 54 onClick handlers across 12 components. Results:
 | N02 Live Lead Scoring | ✅ RESOLVED | lead_capture.py — score+tier at creation time + audit trail |
 | N03 Lead Memory wire-up | 🟠 After N02 | lead_capture.py + lead_memory.py |
 | N04 Followup Activation | 🟠 After N03 | scheduler + followup_engine |
-| Airtable schema formula mismatch (remaining fields) | 🟡 | schema_cache.json + schema_audit.py now guard against UNKNOWN_FIELD_NAME |
+| Airtable schema formula mismatch (remaining fields) | ✅ RESOLVED | airtable_gateway.py is now the single write path — all normalization/validation/coercion centralized (W2, f964070) |
 | core_knowledge.py smoke test false positive | 🟡 | Known — _NEVER_FAKE_CONTROL phrase triggers fake-approval check |
 | WhatsApp outbound (real) | ⏸ Blocked | Meta Cloud API approval pending |
 | Memory durability | 🟡 | RAM-only; undercuts lead-memory and learning plans |
