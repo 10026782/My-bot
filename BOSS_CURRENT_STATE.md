@@ -1,7 +1,7 @@
 # BOSS CURRENT STATE
 
 Last updated: 12/06/2026
-Reflects: Stabilization Sprint (C25–C39) + World 2 Lead Flow Sprint (W0, W1) + Golden Path Approval Gate + Audit Fix Pack 2026-06-12 + Ghost Button Sweep
+Reflects: Stabilization Sprint + W0/W1 + Security Audit Fixes (H1-H3) + TIER read-only fix + Game Dashboard fix + Ghost Button Audit
 
 ## Classification Key
 - WORKING: implemented, reachable, no blocking issue.
@@ -21,6 +21,24 @@ Reflects: Stabilization Sprint (C25–C39) + World 2 Lead Flow Sprint (W0, W1) +
 | CLAUDE.md | ✅ LIVE | Architecture docs on main — Codex reads at session start (PR #35) |
 | ROADMAP/CURRENT_STATE | ✅ UPDATED | Now reflects actual state including W0, W1, removed C14 |
 | C40 Golden Path Approval Gate | ? NEW | TMA write endpoints queue approval before writes; approve executes write; reject does not write; receipt returned; audit after successful execution only (tma_api.py, commit 4e5d00d on origin/approval-gate) |
+
+---
+
+## What Changed — 12/06/2026
+
+| Item | Status | Detail |
+|------|--------|--------|
+| H1 Voice/IVR Twilio validation | ✅ FIXED | `_validate_twilio_signature()` added to `/voice/incoming`, `/voice/step` (commit c1913f5) |
+| H2 /schema owner-only | ✅ FIXED | `identity.role` check added; non-owner gets generic block (commit 7b8cc0a) |
+| H3 TMA formula injection | ✅ FIXED | `_safe_formula_param()` allowlist regex (Hebrew+ASCII); 400 on invalid (commit b66ca64) |
+| TIER write isolation | ✅ FIXED | `lead_memory.py`, `lead_capture.py`, `tma_api.py`, `airtable_schema.py`, `LeadDetail.tsx` — TIER is read-only formula field everywhere |
+| Game Dashboard "בוצע" button | ✅ FIXED | `game_today` now reads `Roadmap_Tasks` (was empty `Daily_Tasks`); PATCH writes `Status=Done` + `Coins_Log` |
+| GameScreen error toast | ✅ FIXED | Failed task completion shows "⚠️ שגיאה בשמירה — נסה שוב" (3.5s), no silent revert |
+| scan_ghost_buttons.py | ✅ NEW | 24/24 api.ts functions mapped — 0 broken endpoints found |
+| search_lead schema | ✅ FIXED | Added to `tools/schemas.py` — Claude can now call it |
+| audit_log_airtable wiring | ✅ FIXED | Wired into `airtable_get`/`add`/`update`/`get_schema` |
+| .env.example | ✅ UPDATED | `TWILIO_AUTH_TOKEN`, `GOOGLE_*`, `DIGEST_CHAT_ID`, `OWNER_TELEGRAM_ID`, `TMA_ALLOWED_ORIGINS` added |
+| N03 scoring threshold | ✅ FIXED | "כמה עולה?" and price-intent questions now score WARM+ (was COLD) |
 
 ---
 
@@ -65,7 +83,7 @@ run_agent() → conversational reply only
 | Daily Digest | PARTIAL | Failures visible; score/tier now correct field names |
 | Payment Reminder | WORKING | self-test passing (0744ce9) |
 | Workers / scheduler | PARTIAL | Mock fallbacks removed; subscribers registered |
-| Guards / safety | PARTIAL | Emergency Stop persists; Voice/IVR lacks Twilio validation |
+| Guards / safety | PARTIAL | Emergency Stop persists; Voice/IVR Twilio validation added (H1) |
 | Memory system | PARTIAL | RAM-only; lead_memory built but not wired |
 | Learning system | STUB | Mock events; no real production loop |
 | TMA / Mini App | PARTIAL | CORS + auth fixed; write endpoints approval-gated; stubs honest |
@@ -138,7 +156,6 @@ Full audit: 54 onClick handlers across 12 components. Results:
 | N04 Followup Activation | 🟠 After N03 | scheduler + followup_engine |
 | Airtable schema formula mismatch (remaining fields) | 🟡 | schema_cache.json + schema_audit.py now guard against UNKNOWN_FIELD_NAME |
 | core_knowledge.py smoke test false positive | 🟡 | Known — _NEVER_FAKE_CONTROL phrase triggers fake-approval check |
-| Voice/IVR Twilio signature validation | 🟡 | Not critical until F07 active |
 | WhatsApp outbound (real) | ⏸ Blocked | Meta Cloud API approval pending |
 | Memory durability | 🟡 | RAM-only; undercuts lead-memory and learning plans |
 | lead_qualifier state machine | 🔵 Deferred | Dead code — decide: wire or remove after N04 |
@@ -150,11 +167,12 @@ Full audit: 54 onClick handlers across 12 components. Results:
 
 1. Memory is RAM-only — not durable across restarts.
 2. WhatsApp outbound is honest stub — blocked on Meta Cloud API.
-3. Voice endpoints lack Twilio signature validation.
-4. Worker trigger can impersonate arbitrary chat_id if WORKER_SECRET leaks.
-5. TMA partner authorization sometimes happens after record fetch.
-6. Learning engine uses mock events — no real production loop.
-7. TMA DEV_MODE bypass risk if enabled in production.
+3. Worker trigger can impersonate arbitrary chat_id if WORKER_SECRET leaks.
+4. TMA partner authorization sometimes happens after record fetch.
+5. Learning engine uses mock events — no real production loop.
+6. TMA DEV_MODE bypass risk if enabled in production.
+
+**MEDIUM findings #4–7 from audit 12/06 — separate batch planned** (see Open MEDIUM Security Findings below).
 
 ---
 
@@ -165,6 +183,17 @@ Full audit: 54 onClick handlers across 12 components. Results:
 | LEAD_CAPTURE flag enabled on Render | Render env vars |
 | WhatsApp lead → Airtable record created | Send test message from unregistered number → check Leads table |
 | Lead Pipeline TMA screen shows real score/tier | Open TMA → Lead Pipeline → confirm non-zero scores |
+
+---
+
+## Open MEDIUM Security Findings (12/06 audit — pending)
+
+| # | Finding | Severity |
+|---|---------|----------|
+| 4 | `_safe_route()` drops approval gate on router exception | MEDIUM |
+| 5 | DEV_MODE HMAC bypass still wired in `require_tma_auth` + advertised in CORS | MEDIUM |
+| 6 | `/worker/trigger` accepts caller-controlled `chat_id` (impersonation risk) | MEDIUM |
+| 7 | `/health` endpoint public — exposes version + internal check state | MEDIUM |
 
 ---
 
