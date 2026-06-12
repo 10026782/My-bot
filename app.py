@@ -1017,6 +1017,10 @@ def home():
 
 @app.route("/voice/incoming", methods=["POST"])
 def voice_incoming():
+    if not _validate_twilio_signature():
+        from_num = request.form.get("From", "unknown")
+        logger.warning("[Voice] invalid Twilio signature from %s — possible spoofing", from_num)
+        return Response("Forbidden", status=403)
     from feature_flags import is_enabled
     from voice_adapter import build_twiml, _say, _hangup, process_voice_step
     if not is_enabled("VOICE_IVR"):
@@ -1028,6 +1032,10 @@ def voice_incoming():
 
 @app.route("/voice/step", methods=["POST"])
 def voice_step():
+    if not _validate_twilio_signature():
+        from_num = request.form.get("From", "unknown")
+        logger.warning("[Voice] invalid Twilio signature from %s — possible spoofing", from_num)
+        return Response("Forbidden", status=403)
     from voice_adapter import process_voice_step
     call_sid = request.form.get("CallSid", "")
     from_num = request.form.get("From", "").replace("whatsapp:", "")
