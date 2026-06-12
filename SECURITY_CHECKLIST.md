@@ -84,6 +84,7 @@ grep -rn "from crm import\|from airtable_tools import" --include="*.py" \
 | תאריך | סוג | ממצאים עיקריים | סטטוס |
 |-------|-----|----------------|-------|
 | 2026-05-29 | review מלא | dispatch ללא identity, crm httpx ישיר, /worker/trigger ללא auth, Drive query injection | ✅ תוקן |
+| 2026-06-12 | HIGH findings | /voice/incoming + /voice/step ללא Twilio auth; /schema ללא identity check; TMA query params → formula injection | ✅ תוקן |
 
 ---
 
