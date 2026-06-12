@@ -113,7 +113,7 @@ run_agent() → conversational reply only
 | Event Bus | WORKING | Fail-closed: success only on real handler execution |
 | lead_qualifier | PARTIAL | TypeError fixed (C26); state machine = dead code (no live callers) |
 | lead_memory | PARTIAL | Debounce engine built and tested; not wired (N03) |
-| Lead Scoring | NOT IMPLEMENTED | core/lead_scoring.py does not exist; C14 removed from Completed |
+| Lead Scoring | PARTIAL | `lead_capture.py` — קוד ו-write path תקינים; LEAD_SCORING flag כבוי ברירת מחדל, לא אומת בפרודקשן |
 | Google integrations | PARTIAL | Merge conflict resolved; OAuth/env still required |
 | Email tools | PARTIAL | Import fixed; honest stub until Google Tools live |
 | Airtable integrations | WORKING | Single write-path (W2 gateway); schema/alias/read-only/linked-record all centralized |
@@ -188,7 +188,7 @@ Full audit: 54 onClick handlers across 12 components. Results:
 | Item | Priority | Blocker / Notes |
 |------|----------|-----------------|
 | Receipt persistence/display | ?? | Receipt is returned after approval execution, but not persisted or shown in Activity Feed |
-| N02 Live Lead Scoring | ✅ RESOLVED | lead_capture.py — score+tier at creation time + audit trail |
+| N02 Live Lead Scoring | 🟡 PARTIAL | קוד תקין ו-write path תוקן (gateway, f964070). Score נכתב רק כש-LEAD_CAPTURE=True **וגם** LEAD_SCORING=True — שניהם כבויים ברירת מחדל. לא אומת בפועל עם הודעת WhatsApp אמיתית. |
 | N03 Lead Memory wire-up | 🟠 After N02 | lead_capture.py + lead_memory.py |
 | N04 Followup Activation | 🟠 After N03 | scheduler + followup_engine |
 | Airtable schema formula mismatch (remaining fields) | ✅ RESOLVED | airtable_gateway.py is now the single write path — all normalization/validation/coercion centralized (W2, f964070) |
