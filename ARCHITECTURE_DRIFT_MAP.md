@@ -40,11 +40,14 @@
 ### 1. Emergency Stop Coverage (P0)
 **הבעיה**: `EMERGENCY_STOP_ALL` נבדק ב-dispatcher, אבל scheduler/worker/interaction_engine שולחים הודעות ללא בדיקה. `EMERGENCY_STOP_AI` לא מופיע ב-health response.
 
+**הבעיה הנוספת (קריטית)**: emergency flags נשמרים ב-`/tmp`, שהוא ephemeral ב-Render — נמחק בכל deploy/restart. אם הבעלים מפעיל `EMERGENCY_STOP_ALL` ואז קורה restart (deploy, crash, sleep), הדגל מתאפס בשקט והמערכת חוזרת לפעול כאילו הכל תקין, בלי שהבעלים יודע. זו הפרת SoA קריטית: ה-storage layer של flag כל-כך חשוב חייב להיות persistent ולא תלוי-תהליך.
+
 **Minimal step (כשמגיעים)**:
+- העבר persistent emergency flags מ-`/tmp` ל-Airtable (טבלה קטנה `SystemFlags`, או שדה ב-`system_registry`). **שינוי storage layer בלבד** — `is_enabled`/`set_flag` API נשאר אותו דבר, רק המימוש הפנימי קורא/כותב ל-Airtable במקום קובץ. בלי שינוי בלוגיקת ה-checks שקוראים לפונקציות האלה.
 - הוסף `EMERGENCY_STOP_AI` ל-health endpoint (`tma_api.py`).
 - בכל אחד מ-4 ה-workers שמזכיר ה-audit (`scheduler`, `daily_digest`, `payment_reminder`, `cost_monitor`): הוסף guard clause `if not feature_flags.is_enabled('EMERGENCY_STOP_AUTOMATION'): return` בתחילת פונקציית השליחה. **לא לגעת בלוגיקה אחרת.**
 
-**Definition of done לשלב 1**: כל worker אחד מתועד + נבדק (לוג מראה "blocked by emergency flag" כשהדגל פעיל).
+**Definition of done לשלב 1**: flags שורדים restart (נבדק ע"י הפעלת flag, redeploy, ובדיקה שהוא עדיין דלוק), + worker אחד מתועד ונבדק (לוג מראה "blocked by emergency flag" כשהדגל פעיל).
 
 ---
 
