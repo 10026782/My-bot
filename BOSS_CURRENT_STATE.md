@@ -1,7 +1,7 @@
 # BOSS CURRENT STATE
 
 Last updated: 12/06/2026
-Reflects: Stabilization Sprint (C25–C39) + World 2 Lead Flow Sprint (W0, W1) + Golden Path Approval Gate + Audit Fix Pack 2026-06-12
+Reflects: Stabilization Sprint (C25–C39) + World 2 Lead Flow Sprint (W0, W1) + Golden Path Approval Gate + Audit Fix Pack 2026-06-12 + Ghost Button Sweep
 
 ## Classification Key
 - WORKING: implemented, reachable, no blocking issue.
@@ -89,6 +89,32 @@ Protected TMA write endpoints:
 - POST /api/projects
 - PATCH /api/leads/<lead_id>/status
 - POST /api/followup
+
+## Ghost Buttons Inventory — Sweep 2026-06-12
+
+Full audit: 54 onClick handlers across 12 components. Results:
+
+| Class | Count | Meaning |
+|-------|-------|---------|
+| A ✅ | 52 | Connected to working backend endpoint |
+| B ❌ | 2 | Ghost — does nothing (TODO stub) |
+| C ❌ | 0 | Calls non-existent endpoint |
+| D ⚠️ | 0 | Silent success/failure (no feedback) |
+
+### Ghost Button Detail (B — requires fix)
+
+| Component | Button | Issue | Priority |
+|-----------|--------|-------|----------|
+| `BossCheckin.tsx:363` | Urgency / Source / Topic / Required tags | `saveTaskUpdate()` = `void task` — selections not persisted to Airtable between sessions. UX works locally (XP calc, canComplete gate), but state lost on close. | 🟡 Medium — not blocking critical flow |
+| `BossCheckin.tsx:530` | "יום חדש →" | `resetDay()` = `void incompleteTasks` — carry-over candidates never written. Button effectively just calls `load()`. | 🟡 Medium — not blocking critical flow |
+
+**Critical flows (Approvals, Lead actions, Game completion) — all A ✅. No blocking ghosts.**
+
+### Fix plan (deferred — scheduled as separate batch)
+1. `saveTaskUpdate` → add `PATCH /api/game/checkin/tasks/{id}` or persist metadata as part of `completeTask` payload
+2. `resetDay` → add `POST /api/game/checkin/summary` that logs incomplete + carry-over candidates
+
+---
 
 ## Active Issues — Audit 2026-06-12
 
