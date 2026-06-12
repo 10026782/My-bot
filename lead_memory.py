@@ -146,7 +146,7 @@ class LeadMemory:
 
             fields = {
                 "memory_key": state.memory_key,
-                "score":      state.score,           # tier הוא formula field — לא כותבים אליו
+                LeadFields.SCORE: state.score,        # tier הוא formula field — לא כותבים אליו
                 "domain":     state.domain,
                 "channel":    state.channel,
                 "Name":       state.contact_name,

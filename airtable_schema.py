@@ -193,7 +193,7 @@ class LeadFields:
     NAME            = "Name"
     PHONE           = "phone"
     STATUS          = "status"
-    SCORE           = "score"        # raw numeric — written by lead_memory; "ציון"/"score ציון" don't exist on the live table
+    SCORE           = "Score"        # raw numeric — Airtable field "Score" (capital S); written by lead_memory/lead_capture
     TIER            = "tier"         # formula field — read-only, auto-calculated from score. Values: קר/חם/לוהט/רותח
     SUMMARY         = "summary"
     ANSWERS         = "answers"
@@ -471,7 +471,7 @@ FIELD_MAP = {
         "domain":        "real_estate | import | recruitment | saas | finance | general",
         "converted_at":  "תאריך המרה",
         "Business Outcome": "open | needs_followup | meeting_scheduled | converted | not_relevant | lost | duplicate | archived",
-        "next_followup": "תאריך פולואפ הבא",
+        "Next Followup": "תאריך פולואפ הבא",
         "Owner":         "אחראי",
         "Next Action":   "call_now | call_today | schedule_this_week | send_details | follow_up | waiting_response | create_deal | archive | none",
     },

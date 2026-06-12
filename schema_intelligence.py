@@ -89,7 +89,7 @@ SCHEMA: dict[str, dict] = {
                              "options": ["open", "needs_followup", "meeting_scheduled",
                                          "converted", "not_relevant", "lost", "duplicate",
                                          "archived"]},
-        "next_followup": {"type": "text",   "required": False},
+        "Next Followup": {"type": "text",   "required": False},
         "Owner":         {"type": "text",   "required": False},
         "Next Action":   {"type": "text",   "required": False,
                           "options": ["call_now", "call_today", "schedule_this_week",

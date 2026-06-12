@@ -50,14 +50,14 @@ _TABLE_FIELDS: dict[str, set[str]] = {
     },
     # ── Leads — lowercase keys כפי שנוצרו ב-Airtable ──
     "Leads": {
-        "score", "Score",
-        "Name", "phone", "status", "score ציון",
+        "Score",
+        "Name", "phone", "status",
         "summary", "answers", "source", "channel",
         "created_at", "updated_at", "memory_key", "tenant_id", "domain",
         "notes", "next_step", "Next Action", "tier", "Temperature",
         "utm_source", "utm_medium", "utm_campaign", "platform",
         "deal_value", "converted_at", "campaign_source",
-        "Business Outcome", "next_followup", "Owner",
+        "Business Outcome", "Next Followup", "Owner",
     },
     # ── Projects / Units ──────────────────────────
     "Projects": {
