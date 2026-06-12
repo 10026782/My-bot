@@ -163,6 +163,12 @@ Full audit: 54 onClick handlers across 12 components. Results:
 
 ---
 
+## Known Architectural Drift
+
+See `ARCHITECTURE_DRIFT_MAP.md` for the full list of 8 deferred drift items, their Piggyback Triggers, and migration steps. Items are not to be executed autonomously — only when their trigger sprint is active.
+
+---
+
 ## Open Risks (post-sprint)
 
 1. Memory is RAM-only — not durable across restarts.
