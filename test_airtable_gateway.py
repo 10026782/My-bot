@@ -104,6 +104,25 @@ chk('unknown field dropped', "nonexistent_xyz" not in clean)
 clean, errs = validate_airtable_fields("Leads", {"Next Followup": "2026-06-20"})
 chk('"Next Followup" passes validate', "Next Followup" in clean)
 
+# ── linked-record / Owner coercion ────────────────────────────────
+print("\n── linked-record (Owner) coercion ───")
+
+# Bare rec ID → wrapped in list
+clean, errs = validate_airtable_fields("Leads", {"Owner": "recABC123"})
+chk('Owner "recABC123" → ["recABC123"]', clean.get("Owner") == ["recABC123"])
+
+# Already a list → unchanged
+clean, errs = validate_airtable_fields("Leads", {"Owner": ["recABC123"]})
+chk('Owner already list → unchanged', clean.get("Owner") == ["recABC123"])
+
+# Plain name (not a rec ID) → dropped
+clean, errs = validate_airtable_fields("Leads", {"Owner": "John Doe"})
+chk('Owner plain name → dropped (would cause 422)', "Owner" not in clean)
+
+# Empty list → passes through (Airtable accepts [] to clear a link field)
+clean, errs = validate_airtable_fields("Leads", {"Owner": []})
+chk('Owner [] → passes through', clean.get("Owner") == [])
+
 # ══════════════════════════════════════════════════════════════════
 # 3. airtable_patch — full flow with mock httpx
 # ══════════════════════════════════════════════════════════════════

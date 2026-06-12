@@ -38,6 +38,12 @@ READ_ONLY_FIELDS: dict[str, set[str]] = {
     "Leads": {"tier", "Tier", "טמפרטורה"},
 }
 
+# Airtable multipleRecordLinks fields — value must be a list of rec IDs, never a bare string.
+# Gateway coerces a bare "recXXX" string → ["recXXX"] and drops anything else (prevents 422).
+LINKED_RECORD_FIELDS: dict[str, set[str]] = {
+    "Leads": {"Owner"},
+}
+
 # Fields the agent should never write — security layer
 _ALWAYS_FORBIDDEN: frozenset[str] = frozenset({"tenant", "owner_id", "user_id", "chat_id"})
 
@@ -89,9 +95,24 @@ def validate_airtable_fields(table: str, fields: dict) -> tuple[dict, list[str]]
             errors.append(f"read-only field '{k}' in {table}")
             continue
 
+        # 5. multipleRecordLinks coercion — Airtable requires a list of rec IDs.
+        #    Wrap a bare "recXXX" string; drop anything else (plain names → 422).
+        lr_fields = LINKED_RECORD_FIELDS.get(table, set())
+        if k in lr_fields:
+            if isinstance(v, list):
+                pass  # already correct format
+            elif isinstance(v, str) and __import__("re").match(r"^rec\w+$", v):
+                v = [v]
+                errors.append(f"linked-record field '{k}' coerced string→list")
+            else:
+                errors.append(
+                    f"linked-record field '{k}'={repr(v)} is not a rec ID or list — dropped"
+                )
+                continue
+
         clean[k] = v
 
-    # 5. schema_cache.json guard — drop fields Airtable doesn't know about
+    # (final) schema_cache.json guard — drop fields Airtable doesn't know about
     unknown = _sv.validate_fields(table, clean)
     for u in unknown:
         errors.append(f"unknown field '{u}' in {table} (not in schema_cache)")
