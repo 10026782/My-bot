@@ -18,6 +18,24 @@ function authHeaders(): Record<string, string> {
   return {};
 }
 
+async function throwApiError(r: Response, fallback: string): Promise<never> {
+  let message = fallback || `API ${r.status}`;
+  try {
+    const data = await r.json() as { error?: string; message?: string; valid?: string[] };
+    const detail = data.error || data.message;
+    message = detail ? `${detail}` : message;
+    if (data.valid?.length) message += ` (${data.valid.join(", ")})`;
+  } catch {
+    try {
+      const text = await r.text();
+      if (text) message = text;
+    } catch {
+      // Keep the fallback.
+    }
+  }
+  throw new Error(message);
+}
+
 export async function fetchProjects(): Promise<ProjectsResponse> {
   const r = await fetch(`${BASE}/api/projects`, { headers: authHeaders() });
   if (!r.ok) throw new Error(`API ${r.status}`);
@@ -207,7 +225,7 @@ export async function patchLead(
     headers: { ...authHeaders(), "Content-Type": "application/json" },
     body: JSON.stringify(fields),
   });
-  if (!r.ok) throw new Error(`API ${r.status}`);
+  if (!r.ok) await throwApiError(r, `Lead update failed (${r.status})`);
 }
 
 export async function setLeadOutcome(leadId: string, outcome: string): Promise<void> {
@@ -216,7 +234,7 @@ export async function setLeadOutcome(leadId: string, outcome: string): Promise<v
     headers: { ...authHeaders(), "Content-Type": "application/json" },
     body: JSON.stringify({ outcome }),
   });
-  if (!r.ok) throw new Error(`API ${r.status}`);
+  if (!r.ok) await throwApiError(r, `Outcome update failed (${r.status})`);
 }
 
 export async function createLeadTask(
@@ -228,6 +246,6 @@ export async function createLeadTask(
     headers: { ...authHeaders(), "Content-Type": "application/json" },
     body: JSON.stringify(task),
   });
-  if (!r.ok) throw new Error(`API ${r.status}`);
+  if (!r.ok) await throwApiError(r, `Task creation failed (${r.status})`);
   return r.json() as Promise<{ id: string }>;
 }

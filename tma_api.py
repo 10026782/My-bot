@@ -910,13 +910,24 @@ def get_lead(lead_id, identity):
         f"SEARCH('{lead_id}',{{{InteractionLogFields.SUMMARY}}})",
         max_records=20,
     )
-    timeline = [
-        {
-            "summary": t.get("fields", {}).get(InteractionLogFields.SUMMARY, ""),
-            "channel": t.get("fields", {}).get(InteractionLogFields.CHANNEL, ""),
-        }
-        for t in timeline_recs
-    ]
+    def _readable_timeline_value(value: str) -> str:
+        value = re.sub(r"\brec\w+\b", "רשומה", str(value or ""))
+        return value.strip()
+
+    timeline = []
+    for t in timeline_recs:
+        tf = t.get("fields", {})
+        title = _readable_timeline_value(tf.get(InteractionLogFields.TITLE, ""))
+        summary = _readable_timeline_value(tf.get(InteractionLogFields.SUMMARY, ""))
+        timestamp = tf.get(InteractionLogFields.TIMESTAMP, "")
+        readable = summary
+        if title and title not in readable:
+            readable = f"{title}: {readable}" if readable else title
+        timeline.append({
+            "summary": readable,
+            "channel": _readable_timeline_value(tf.get(InteractionLogFields.CHANNEL, "")),
+            "timestamp": timestamp,
+        })
 
     score       = int(f.get(LeadFields.SCORE, 0) or 0)
     score_color = "red" if score >= 70 else ("yellow" if score >= 40 else "blue")
@@ -1025,6 +1036,9 @@ _VALID_LEAD_OUTCOMES = {
     "archived",
 }
 _OUTCOME_STATUS_MAP = {
+    "open": "active",
+    "needs_followup": "waiting_response",
+    "meeting_scheduled": "active",
     "converted": "done",
     "archived": "archived",
     "lost": "lost",
