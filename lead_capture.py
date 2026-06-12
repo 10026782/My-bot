@@ -137,11 +137,19 @@ def capture_inbound_lead(identity, message: str) -> None:
                     })
                     logger.info(
                         "lead_scored: score=%s tier=%s reasons=%s lead_id=%s",
-                        score,
-                        tier,
-                        why_score,
-                        lead_id,
+                        score, tier, why_score, lead_id,
                     )
+                    # audit trail — data לדשבורד ROI עתידי
+                    try:
+                        from tools.airtable_security import audit_log_airtable
+                        audit_log_airtable(
+                            "lead_scoring",
+                            identity,
+                            {"table": "Leads", "lead_id": lead_id, "score": score, "tier": tier},
+                            f"score={score} tier={tier} signals={why_score}",
+                        )
+                    except Exception:
+                        pass  # אסור שה-audit ישבור את ה-flow
                 except Exception as e:
                     logger.warning("[LeadCapture] scoring failed for %s: %s", lead_id, e)
         else:
