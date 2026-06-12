@@ -21,6 +21,7 @@ from airtable_schema import (
     LeadFields, TaskFields, PaymentStatus, BusinessMemoryFields, InteractionLogFields, Tables,
     QuestsFields, CoinsLogFields, WorldsFields, QuestStatus, WorldStatus,
     DailyTaskFields, DailyTaskStatus, ApprovalsFields,
+    RoadmapTaskFields, RoadmapTaskStatus,
 )
 import schema_validator as _sv
 
@@ -2168,28 +2169,50 @@ def update_quest(quest_id, identity):
 @tma_api.route("/api/game/today", methods=["GET"])
 @require_tma_auth
 def game_today(identity):
-    """Today's Daily_Tasks + active world + total coins. Owner only."""
+    """Today's Roadmap_Tasks (filtered by owner + due date) + active world + total coins. Owner only."""
     if not identity.is_owner:
         return jsonify({"error": "forbidden"}), 403
 
-    today_str = date.today().isoformat()
+    today_str  = date.today().isoformat()
+    owner_name = (identity.display_name or "").strip().lower()
 
-    # ── Daily Tasks (filter by date in Python — more reliable than AT formula) ──
-    all_tasks = _at_list(Tables.DAILY_TASKS, "", max_records=200)
-    today_tasks = [
-        r for r in all_tasks
-        if (r.get("fields", {}).get(DailyTaskFields.DATE, "") or "")[:10] == today_str
-    ]
+    # ── Roadmap Tasks — fetch all, filter in Python by owner + due ≤ today ──
+    all_rt = _at_list(Tables.ROADMAP_TASKS, "", max_records=200)
+
+    def _due_today_or_earlier(r: dict) -> bool:
+        f   = r.get("fields", {})
+        due = (f.get(RoadmapTaskFields.DUE_DATE, "") or "")[:10]
+        return not due or due <= today_str
+
+    def _owner_matches(r: dict) -> bool:
+        if not owner_name:
+            return True
+        owner = (r.get("fields", {}).get(RoadmapTaskFields.OWNER, "") or "").lower()
+        return owner_name in owner or owner in owner_name
+
+    def _map_rt_status(s: str) -> str:
+        if s == RoadmapTaskStatus.DONE:
+            return "Done"
+        if s == RoadmapTaskStatus.BLOCKED:
+            return "Skipped"
+        return "Todo"
 
     tasks = []
-    for r in today_tasks:
+    for r in all_rt:
         f = r.get("fields", {})
+        status = f.get(RoadmapTaskFields.STATUS, RoadmapTaskStatus.TODO)
+        if status == RoadmapTaskStatus.DONE:
+            continue  # בוצע — לא מציג בכרטיסיה היומית
+        if not _owner_matches(r):
+            continue
+        if not _due_today_or_earlier(r):
+            continue
         tasks.append({
             "id":     r["id"],
-            "task":   f.get(DailyTaskFields.TASK, ""),
-            "coins":  int(f.get(DailyTaskFields.COINS, 0) or 0),
-            "status": f.get(DailyTaskFields.STATUS, DailyTaskStatus.TODO),
-            "who":    f.get(DailyTaskFields.WHO, ""),
+            "task":   f.get(RoadmapTaskFields.TASK, ""),
+            "coins":  int(f.get(RoadmapTaskFields.COINS, 0) or 0),
+            "status": _map_rt_status(status),
+            "who":    f.get(RoadmapTaskFields.OWNER, ""),
         })
 
     # ── Active World ─────────────────────────────────────────────
@@ -2226,34 +2249,34 @@ def game_today(identity):
 @tma_api.route("/api/game/tasks/<task_id>/done", methods=["PATCH"])
 @require_tma_auth
 def complete_daily_task(task_id, identity):
-    """Mark a Daily_Task as Done and auto-write a Coins_Log entry. Owner only."""
+    """Mark a Roadmap_Task as Done and auto-write a Coins_Log entry. Owner only."""
     if not identity.is_owner:
         return jsonify({"error": "forbidden"}), 403
 
-    rec = _at_get_record(Tables.DAILY_TASKS, task_id)
+    rec = _at_get_record(Tables.ROADMAP_TASKS, task_id)
     if not rec:
         return jsonify({"error": "task not found"}), 404
 
     f          = rec.get("fields", {})
-    old_status = f.get(DailyTaskFields.STATUS, "")
-    task_name  = f.get(DailyTaskFields.TASK, task_id)
+    old_status = f.get(RoadmapTaskFields.STATUS, "")
+    task_name  = f.get(RoadmapTaskFields.TASK, task_id)
 
-    if old_status == DailyTaskStatus.DONE:
+    if old_status == RoadmapTaskStatus.DONE:
         return jsonify({"ok": True, "coins_awarded": 0, "already_done": True})
 
-    ok = _at_patch(Tables.DAILY_TASKS, task_id, {DailyTaskFields.STATUS: DailyTaskStatus.DONE})
+    ok = _at_patch(Tables.ROADMAP_TASKS, task_id, {RoadmapTaskFields.STATUS: RoadmapTaskStatus.DONE})
     if not ok:
         return jsonify({"error": "update failed"}), 500
 
-    coins = int(f.get(DailyTaskFields.COINS, 0) or 0)
+    coins = int(f.get(RoadmapTaskFields.COINS, 0) or 0)
     coins_awarded = 0
     if coins > 0:
-        quest_ids = f.get(DailyTaskFields.QUEST, []) or []
+        quest_ids = f.get(RoadmapTaskFields.QUEST, []) or []
         log_fields: dict = {
             CoinsLogFields.ACTION:        task_name,
             CoinsLogFields.COINS:         coins,
             CoinsLogFields.DATE:          date.today().isoformat(),
-            CoinsLogFields.NOTE:          "Daily task completed via TMA",
+            CoinsLogFields.NOTE:          "Roadmap task completed via TMA",
             CoinsLogFields.TOTAL_RUNNING: _coins_running_total(coins),
         }
         if quest_ids:
@@ -2261,6 +2284,6 @@ def complete_daily_task(task_id, identity):
         _at_post(Tables.COINS_LOG, log_fields)
         coins_awarded = coins
 
-    _audit("daily_task_done", identity, details=f"{task_name} +{coins}🪙")
+    _audit("roadmap_task_done", identity, details=f"{task_name} +{coins}🪙")
     return jsonify({"ok": True, "coins_awarded": coins_awarded})
 
