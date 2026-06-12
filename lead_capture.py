@@ -41,7 +41,8 @@ def _score_inbound_message(message: str, identity=None) -> tuple[int, str, list[
     )
     price_terms = (
         "מחיר", "כמה עולה", "עלות", "הצעת מחיר", "תמחור",
-        "price", "cost", "quote", "pricing",
+        "תשלומים", "מקדמה", "תשלום חודשי", "כמה זה עולה", "מה המחיר",
+        "price", "cost", "quote", "pricing", "payment", "installment",
     )
     budget_terms = (
         "תקציב", "budget", "₪", "שח", "ש\"ח", "nis", "usd", "$",
@@ -55,8 +56,8 @@ def _score_inbound_message(message: str, identity=None) -> tuple[int, str, list[
         score += 20
         why_score.append("project:+20")
     if any(term in text for term in price_terms):
-        score += 15
-        why_score.append("price:+15")
+        score += 30  # כוונת רכישה ברורה — WARM מהרגע הראשון
+        why_score.append("price_intent:+30")
     if any(term in text for term in budget_terms) or re.search(r"\b\d{4,}\b", text):
         score += 25
         why_score.append("budget:+25")
