@@ -127,7 +127,10 @@ def cmd_status(msg):
 
 @bot.message_handler(commands=["schema"])
 def cmd_schema(msg):
-    """/schema [׳˜׳‘׳׳”] ג€” ׳”׳¦׳’ ׳¡׳›׳׳”. ׳׳׳ ׳˜׳‘׳׳” = ׳›׳ ׳”׳˜׳‘׳׳׳•׳×."""
+    identity = resolve_identity("telegram", str(msg.from_user.id))
+    if not identity or identity.role != "owner":
+        bot.send_message(msg.chat.id, "פקודה זו זמינה לבעלים בלבד.")
+        return
     try:
         from schema_intelligence import handle_schema_command
         args = msg.text.replace("/schema", "", 1).replace(f"@{bot.get_me().username}", "").strip()
@@ -135,7 +138,7 @@ def cmd_schema(msg):
         bot.send_message(msg.chat.id, reply, parse_mode="Markdown")
     except Exception as e:
         logger.error(f"cmd_schema error: {e}")
-        bot.send_message(msg.chat.id, f"ג ׳©׳’׳™׳׳” ׳‘׳˜׳¢׳™׳ ׳× ׳¡׳›׳׳”: {e}")
+        bot.send_message(msg.chat.id, f"שגיאה בטעינת סכמה: {e}")
 
 @bot.message_handler(commands=["done"])
 def cmd_done(msg):
