@@ -9,6 +9,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import time
 import urllib.parse
 from datetime import date, datetime, timedelta, timezone
@@ -888,6 +889,25 @@ def _fmt_lead_summary(rec: dict) -> dict:
     }
 
 
+# ══════════════════════════════════════════════════════════════════
+# Formula-injection guard — all query params embedded in Airtable
+# filterByFormula strings MUST pass through this allowlist first.
+# ══════════════════════════════════════════════════════════════════
+_SAFE_FORMULA_PARAM_RE = re.compile(
+    r'^[\wא-׺\- \.]+$',   # ASCII word chars + Hebrew + hyphen/space/dot
+    re.UNICODE,
+)
+
+def _safe_formula_param(value: str, name: str) -> tuple[str | None, object | None]:
+    """Return (value, None) if safe, or (None, 400 response) if injection attempt."""
+    if not value:
+        return value, None
+    if not _SAFE_FORMULA_PARAM_RE.match(value):
+        logger.warning("[FormulaInjection] rejected %s=%r", name, value)
+        return None, (jsonify({"error": f"invalid {name}"}), 400)
+    return value, None
+
+
 @tma_api.route("/api/leads", methods=["GET"])
 @require_tma_auth
 def get_leads(identity):
@@ -899,10 +919,17 @@ def get_leads(identity):
         return jsonify({"error": "forbidden"}), 403
 
     domain_q = request.args.get("domain", "")
+    domain_q, err = _safe_formula_param(domain_q, "domain")
+    if err: return err
+
     status_q = request.args.get("status", "")
+    status_q, err = _safe_formula_param(status_q, "status")
+    if err: return err
 
     # Resolve project_slug → domain via ProjectsHub
     slug_q = request.args.get("project_slug", "")
+    slug_q, err = _safe_formula_param(slug_q, "project_slug")
+    if err: return err
     if slug_q and not domain_q:
         hub = _at_list("ProjectsHub", f"{{slug}}='{slug_q}'", max_records=1)
         if hub:
