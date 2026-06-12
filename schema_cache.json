@@ -1,0 +1,161 @@
+{
+  "tables": {
+    "Leads": [
+      "Business Outcome",
+      "Name",
+      "Next Action",
+      "Next Followup",
+      "Owner",
+      "answers",
+      "channel",
+      "converted_at",
+      "created_at",
+      "domain",
+      "memory_key",
+      "phone",
+      "score",
+      "source",
+      "status",
+      "summary",
+      "tenant_id",
+      "tier",
+      "updated_at"
+    ],
+    "משימות (Tasks)": [
+      "Domain",
+      "Leads",
+      "Owner",
+      "כותרת המשימה",
+      "מקושר לאנשי קשר",
+      "מקושר לעסקאות",
+      "סטטוס",
+      "תאריך יעד",
+      "תיאור"
+    ],
+    "Assets": [
+      "הכנסה חודשית",
+      "הערות",
+      "מסמכים",
+      "משכנתא",
+      "סוג",
+      "סטטוס",
+      "עלות רכישה",
+      "שווי נוכחי",
+      "שם הנכס"
+    ],
+    "עסקאות (Deals)": [
+      "Address",
+      "Funding Cost %",
+      "Notes",
+      "ROI %",
+      "Risk Level",
+      "מקושר לאנשי קשר",
+      "משימות (Tasks)",
+      "סכום",
+      "שלב",
+      "שם העסקה",
+      "תאריך סגירה",
+      "תשלומים (Payments)"
+    ],
+    "Approvals": [
+      "בוקש בתאריך",
+      "הערת דחייה",
+      "מבוקש על ידי",
+      "מזהה הקשר",
+      "נתוני הקשר",
+      "סוג הקשר",
+      "סטטוס",
+      "פעולה",
+      "רמת סיכון"
+    ],
+    "Interaction Log": [
+      "Business Memory",
+      "Details",
+      "Follow-up Actions",
+      "Interaction Date",
+      "Interaction Subject",
+      "Interaction Type",
+      "Key Insights",
+      "Participants"
+    ],
+    "תשלומים (Payments)": [
+      "אסמכתא",
+      "הערות",
+      "מקושר לאנשי קשר",
+      "מקושר לעסקאות",
+      "סטטוס",
+      "סכום",
+      "תאריך"
+    ],
+    "אנשי קשר (Contacts)": [
+      "Type",
+      "אימייל",
+      "חברה",
+      "טלפון",
+      "משימות (Tasks)",
+      "סטטוס",
+      "עסקאות (Deals)",
+      "שם",
+      "תאריך פולו אפ"
+    ],
+    "Projects": [
+      "End Date",
+      "Location",
+      "Notes",
+      "Primary Lender",
+      "Project Manager",
+      "Project Name",
+      "Project Type",
+      "Start Date",
+      "Status",
+      "Total Cost",
+      "Total Revenue",
+      "Total Units"
+    ],
+    "Worlds": [
+      "Boss",
+      "Coins_Earned",
+      "End_Date",
+      "Name",
+      "Notes",
+      "Number",
+      "Prize",
+      "Start_Date",
+      "Status",
+      "Total_Coins_Target"
+    ],
+    "Quests": [
+      "Coins",
+      "Done_By",
+      "Impact",
+      "Name",
+      "Notes",
+      "Status",
+      "Week_Start",
+      "World"
+    ],
+    "Coins_Log": [
+      "Action",
+      "Coins",
+      "Date",
+      "Note",
+      "Quest",
+      "Total_Running"
+    ],
+    "Roadmap_Tasks": [
+      "Blocker",
+      "Coins",
+      "Due_Date",
+      "Estimated_Hours",
+      "Notes",
+      "Owner",
+      "Priority",
+      "Quest",
+      "Status",
+      "Task",
+      "World"
+    ]
+  },
+  "fetched_at": "seed-from-schema-py",
+  "note": "seed — run schema_audit.py to refresh from live Airtable"
+}

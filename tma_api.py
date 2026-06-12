@@ -22,6 +22,7 @@ from airtable_schema import (
     QuestsFields, CoinsLogFields, WorldsFields, QuestStatus, WorldStatus,
     DailyTaskFields, DailyTaskStatus, ApprovalsFields,
 )
+import schema_validator as _sv
 
 logger = logging.getLogger(__name__)
 
@@ -192,7 +193,7 @@ def _at_get_record(table: str, record_id: str) -> dict | None:
 
 
 def _sanitize_field_keys(table: str, fields: dict) -> dict:
-    """Drop malformed field keys before sending to Airtable."""
+    """Drop malformed or unknown field keys before sending to Airtable."""
     clean = {}
     for k, v in fields.items():
         stripped = _clean_select_value(k) if isinstance(k, str) else ""
@@ -202,6 +203,13 @@ def _sanitize_field_keys(table: str, fields: dict) -> dict:
         if k != stripped:
             logger.warning(f"_at_patch({table}): key had surrounding quotes, using stripped={repr(stripped)}")
         clean[stripped] = v
+
+    # schema guard — validate against schema_cache.json
+    unknown = _sv.validate_fields(table, clean)
+    for u in unknown:
+        logger.warning(f"_at_patch({table}): dropping UNKNOWN_FIELD_NAME='{u}' (not in schema cache)")
+        del clean[u]
+
     return clean
 
 
