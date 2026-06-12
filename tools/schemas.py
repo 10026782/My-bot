@@ -159,6 +159,24 @@ TOOL_SCHEMAS = [
         }
     },
     {
+        "name": "search_lead",
+        "description": (
+            "חיפוש ליד לפי שם חלקי בטבלת Leads. "
+            "השתמש כשהמשתמש מבקש 'תחפש את הליד X' / 'מה הסטטוס של X' / 'תראה לי את הפרטים של X'. "
+            "מחזיר שם, טלפון, סטטוס, ציון (score), ערוץ ומזהה הרשומה."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "שם הליד לחיפוש (חלקי או מלא)"
+                }
+            },
+            "required": ["name"]
+        }
+    },
+    {
         "name": "get_daily_report",
         "description": (
             "דוח יומי מלא — לידים חמים, פולו-אפ להיום, משימות דחופות, "
