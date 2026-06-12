@@ -1,7 +1,7 @@
 # BOSS CURRENT STATE
 
-Last updated: 08/06/2026
-Reflects: Stabilization Sprint (C25–C39) + World 2 Lead Flow Sprint (W0, W1) + Golden Path Approval Gate (approval-gated TMA writes)
+Last updated: 12/06/2026
+Reflects: Stabilization Sprint (C25–C39) + World 2 Lead Flow Sprint (W0, W1) + Golden Path Approval Gate + Audit Fix Pack 2026-06-12
 
 ## Classification Key
 - WORKING: implemented, reachable, no blocking issue.
@@ -90,20 +90,33 @@ Protected TMA write endpoints:
 - PATCH /api/leads/<lead_id>/status
 - POST /api/followup
 
+## Active Issues — Audit 2026-06-12
+
+| Fix | Status | Detail |
+|-----|--------|--------|
+| 1. search_lead schema missing | ✅ RESOLVED | tools/schemas.py — schema added; Claude can now call search_lead |
+| 2. Audit logging on Airtable ops | ✅ RESOLVED | tools/airtable_tools.py — _audit() wired into get/add/update/get_schema |
+| 3. .env.example incomplete | ✅ RESOLVED | Added Twilio, Google, DIGEST_CHAT_ID, TMA CORS, LEAD_CAPTURE flags |
+| 4. Price questions scored COLD | ✅ RESOLVED | lead_capture.py — price_intent weight 15→30; "כמה עולה?" = WARM |
+| 5. Score reasoning in audit log | 🔄 IN PROGRESS | audit_log_airtable writes score+tier+signals; dashboard not yet built |
+
+---
+
 ## Open Items
 
 | Item | Priority | Blocker / Notes |
 |------|----------|-----------------|
 | Receipt persistence/display | ?? | Receipt is returned after approval execution, but not persisted or shown in Activity Feed |
-| N02 Live Lead Scoring | 🔴 Next | lead_capture.py only — score+tier at creation time |
+| N02 Live Lead Scoring | ✅ RESOLVED | lead_capture.py — score+tier at creation time + audit trail |
 | N03 Lead Memory wire-up | 🟠 After N02 | lead_capture.py + lead_memory.py |
 | N04 Followup Activation | 🟠 After N03 | scheduler + followup_engine |
-| Airtable schema formula mismatch (remaining fields) | 🟡 | Spot-check Lead Pipeline/Card screens with real data |
+| Airtable schema formula mismatch (remaining fields) | 🟡 | schema_cache.json + schema_audit.py now guard against UNKNOWN_FIELD_NAME |
 | core_knowledge.py smoke test false positive | 🟡 | Known — _NEVER_FAKE_CONTROL phrase triggers fake-approval check |
 | Voice/IVR Twilio signature validation | 🟡 | Not critical until F07 active |
 | WhatsApp outbound (real) | ⏸ Blocked | Meta Cloud API approval pending |
 | Memory durability | 🟡 | RAM-only; undercuts lead-memory and learning plans |
 | lead_qualifier state machine | 🔵 Deferred | Dead code — decide: wire or remove after N04 |
+| ROI Dashboard | 🔵 Future | Score reasoning logged (Fix 5); dashboard build pending |
 
 ---
 
