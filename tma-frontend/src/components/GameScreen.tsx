@@ -88,6 +88,12 @@ function TaskRow({
 export function GameScreen({ onBack }: Props) {
   const [state, setState] = useState<State>({ status: "loading" });
   const [completing, setCompleting] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  function showToast(msg: string) {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3500);
+  }
 
   function load() {
     setState({ status: "loading" });
@@ -120,7 +126,8 @@ export function GameScreen({ onBack }: Props) {
     try {
       await completeTask(task.id);
     } catch {
-      load(); // revert on error
+      load(); // revert optimistic update
+      showToast("⚠️ שגיאה בשמירה — נסה שוב");
     } finally {
       setCompleting(null);
     }
@@ -140,6 +147,13 @@ export function GameScreen({ onBack }: Props) {
         </div>
         <button onClick={load} className="mr-auto text-gray-400 text-sm active:text-gray-600">רענן</button>
       </div>
+
+      {/* Error toast */}
+      {toast && (
+        <div className="mx-4 mt-2 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700 font-medium shadow-sm">
+          {toast}
+        </div>
+      )}
 
       {state.status === "loading" && (
         <div className="flex justify-center pt-16">
