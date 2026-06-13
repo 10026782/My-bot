@@ -20,6 +20,7 @@ from flask import Blueprint, jsonify, request
 from identity import resolve_identity, Role
 from airtable_schema import (
     LeadFields, TaskFields, PaymentStatus, BusinessMemoryFields, InteractionLogFields, Tables,
+    DealFields, DealStatus,
     QuestsFields, CoinsLogFields, WorldsFields, QuestStatus, WorldStatus,
     DailyTaskFields, DailyTaskStatus, ApprovalsFields, ApprovalStatus,
     RoadmapTaskFields, RoadmapTaskStatus,
@@ -1617,6 +1618,27 @@ def _owner_recent_receipts() -> tuple[list[dict], list[str]]:
     return receipts, warnings
 
 
+def _owner_strategic_pipeline() -> dict:
+    """Strategic Layer — מספר עסקאות לפי שלב הערכה (לפני קבלת החלטה)."""
+    try:
+        stage = DealFields.STAGE
+        ideas   = _at_list(Tables.DEALS, f"{{{stage}}}='{DealStatus.IDEA}'", max_records=50)
+        in_eval = _at_list(
+            Tables.DEALS,
+            f"OR({{{stage}}}='{DealStatus.FEASIBILITY}', {{{stage}}}='{DealStatus.LEGAL_REVIEW}')",
+            max_records=50,
+        )
+        pending = _at_list(Tables.DEALS, f"{{{stage}}}='{DealStatus.PENDING_DECISION}'", max_records=50)
+        return {
+            "new_opportunities": len(ideas),
+            "in_evaluation":     len(in_eval),
+            "pending_decision":  len(pending),
+        }
+    except Exception as e:
+        logger.warning(f"[StrategicPipeline] {e}")
+        return {"new_opportunities": 0, "in_evaluation": 0, "pending_decision": 0}
+
+
 @tma_api.route("/api/owner/control-center", methods=["GET"])
 @require_tma_auth
 def owner_control_center(identity):
@@ -1643,6 +1665,7 @@ def owner_control_center(identity):
             **approvals,
             "recent_receipts": receipts,
         },
+        "strategic_pipeline": _owner_strategic_pipeline(),
         "permissions": _PERMISSIONS_MATRIX,
         "business_language": _BUSINESS_LANGUAGE,
         "blockers": blockers,

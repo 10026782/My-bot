@@ -56,8 +56,8 @@ def _score_inbound_message(message: str, identity=None) -> tuple[int, str, list[
         score += 20
         why_score.append("project:+20")
     if any(term in text for term in price_terms):
-        score += 30  # כוונת רכישה ברורה — WARM מהרגע הראשון
-        why_score.append("price_intent:+30")
+        score += 15  # כוונת רכישה — WARM signal (לפי spec N02)
+        why_score.append("price_intent:+15")
     if any(term in text for term in budget_terms) or re.search(r"\b\d{4,}\b", text):
         score += 25
         why_score.append("budget:+25")
@@ -77,12 +77,14 @@ def _score_inbound_message(message: str, identity=None) -> tuple[int, str, list[
 
     score = min(score, 100)
 
-    if score >= 50:
-        tier = "HOT"
+    if score >= 70:
+        tier = "ULTRA_HOT"   # רותח — מיושר עם formula field (4 טיירים)
+    elif score >= 50:
+        tier = "HOT"         # לוהט
     elif score >= 25:
-        tier = "WARM"
+        tier = "WARM"        # חם
     else:
-        tier = "COLD"
+        tier = "COLD"        # קר
 
     return score, tier, why_score
 

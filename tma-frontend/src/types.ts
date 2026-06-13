@@ -231,6 +231,11 @@ export interface OwnerControlCenter {
     lead_outcome: { value: string; label: string }[];
     lead_tier: { value: string; label: string }[];
   };
+  strategic_pipeline?: {
+    new_opportunities: number;
+    in_evaluation: number;
+    pending_decision: number;
+  };
   blockers: string[];
   next_actions: string[];
   warnings: string[];

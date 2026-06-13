@@ -123,6 +123,25 @@ export function OwnerControlCenter({ onBack }: Props) {
               </div>
             </Section>
 
+            {data.strategic_pipeline && (
+              <Section title="Strategic Pipeline">
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="rounded-lg bg-purple-50 p-3">
+                    <p className="text-[10px] text-purple-500">New Ideas</p>
+                    <p className="text-xl font-black text-purple-700">{data.strategic_pipeline.new_opportunities}</p>
+                  </div>
+                  <div className="rounded-lg bg-blue-50 p-3">
+                    <p className="text-[10px] text-blue-500">In Evaluation</p>
+                    <p className="text-xl font-black text-blue-700">{data.strategic_pipeline.in_evaluation}</p>
+                  </div>
+                  <div className="rounded-lg bg-orange-50 p-3">
+                    <p className="text-[10px] text-orange-500">Pending Decision</p>
+                    <p className="text-xl font-black text-orange-700">{data.strategic_pipeline.pending_decision}</p>
+                  </div>
+                </div>
+              </Section>
+            )}
+
             <Section title="Approvals">
               <div className="grid grid-cols-3 gap-2 mb-3">
                 <div className="rounded-lg bg-yellow-50 p-3">
