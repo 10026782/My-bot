@@ -135,16 +135,17 @@ class PaymentFields:
 
 
 class ContactFields:
-    NAME              = "שם"
-    COMPANY           = "חברה"
-    EMAIL             = "אימייל"
-    PHONE             = "טלפון"
-    TYPE              = "Type"            # Client | Supplier | Partner | Lawyer | Accountant
-    FOLLOWUP_DATE     = "תאריך פולו אפ"
-    STATUS            = "סטטוס"           # חדש|בתהליכים|פולו-אפ|לא רלוונטי
-    PROFESSIONAL_ROLE = "תפקיד מקצועי"   # single select — ראה ContactProfessionalRole
-    DEALS_LINK        = "עסקאות (Deals)"
-    TASKS_LINK        = "משימות (Tasks)"
+    NAME          = "שם"
+    COMPANY       = "חברה"
+    EMAIL         = "אימייל"
+    PHONE         = "טלפון"
+    TYPE          = "Type"            # Client | Supplier | Partner | Lawyer | Accountant
+    FOLLOWUP_DATE = "תאריך פולו אפ"
+    STATUS        = "סטטוס"           # חדש|בתהליכים|פולו-אפ|לא רלוונטי
+    ROLE_CATEGORY = "Role Category"   # single select — ראה ContactRoleCategory
+    SPECIALTY     = "Specialty"       # text — התמחות ספציפית (שמאי מקרקעין / רו"ח מיסוי / ...)
+    DEALS_LINK    = "עסקאות (Deals)"
+    TASKS_LINK    = "משימות (Tasks)"
 
 
 class DealFields:
@@ -530,16 +531,19 @@ class ContactType:
     ACCOUNTANT  = "Accountant"
 
 
-class ContactProfessionalRole:
-    """Single select — שדה `תפקיד מקצועי` ב-Contacts (Strategic Layer)."""
-    APPRAISER  = "שמאי"
-    LAWYER     = "עו\"ד"
-    ACCOUNTANT = "רו\"ח"
-    SUPPLIER   = "ספק"
-    PARTNER    = "שותף"
-    INVESTOR   = "משקיע"
-    BROKER     = "מתווך"
-    CLIENT     = "לקוח / מתעניין"   # ברירת מחדל — אחידות מול לידים קיימים
+class ContactRoleCategory:
+    """Single select — שדה `Role Category` ב-Contacts (Strategic Layer).
+    קטגוריות עסקיות כלליות; פירוט ספציפי → ContactFields.SPECIALTY (text).
+    """
+    LEAD     = "lead"      # לקוח / מתעניין
+    BROKER   = "broker"    # מביא הזדמנות / מתווך
+    EXPERT   = "expert"    # איש מקצוע בודק (עו"ד / רו"ח / שמאי / יועץ)
+    SUPPLIER = "supplier"  # ספק / יבואן / נותן שירות
+    OPERATOR = "operator"  # מבצע בפועל (קבלן / מתקין / צוות)
+    PARTNER  = "partner"   # שותף עסקי
+    INVESTOR = "investor"  # משקיע
+    CLIENT   = "client"    # לקוח קיים
+    OTHER    = "other"     # אחר
 
 
 class DealStatus:

@@ -233,9 +233,9 @@ See `ARCHITECTURE_DRIFT_MAP.md` for the full list of 8 deferred drift items, the
 | שינוי | סטטוס | פרטים |
 |-------|--------|--------|
 | `DealStatus` — ערכים חדשים | ✅ ב-schema | `"Idea" / "Feasibility Check" / "Legal/Tax Review" / "Pending Decision" / "Rejected"` |
-| `ContactFields.PROFESSIONAL_ROLE` | ✅ ב-schema | שדה `"תפקיד מקצועי"` + `ContactProfessionalRole` class |
-| ⚠️ Airtable Deals.Status | **דרוש** | להוסיף את 5 הערכים החדשים ידנית ב-Airtable UI |
-| ⚠️ Airtable Contacts | **דרוש** | להוסיף שדה `"תפקיד מקצועי"` (single select) ידנית ב-Airtable UI |
+| `ContactFields.ROLE_CATEGORY` + `SPECIALTY` | ✅ ב-schema | `"Role Category"` (single-select) + `"Specialty"` (text) + `ContactRoleCategory` class |
+| ⚠️ Airtable Deals.Status | **דרוש** | להוסיף 5 ערכים ידנית: `Idea / Feasibility Check / Legal/Tax Review / Pending Decision / Rejected` |
+| ⚠️ Airtable Contacts | **דרוש** | להוסיף שדה `"Role Category"` (single-select, 9 ערכים lowercase) + שדה `"Specialty"` (text) |
 | שלבים 3-4 (OCC + TMA card) | 🔲 ממתין | לא התחלנו — ממתין לאישור |
 
 ---

@@ -157,8 +157,8 @@
 - `DealStatus` ב-`airtable_schema.py` — 4 ערכים חדשים לפני ה-execution stages:
   `"Idea" → "Feasibility Check" → "Legal/Tax Review" → "Pending Decision"`
   + `"Rejected"` (שונה מ-Cancelled — נדחה לפני שהיה Active)
-- `ContactFields.PROFESSIONAL_ROLE = "תפקיד מקצועי"` (single select חדש)
-- `ContactProfessionalRole` class: שמאי / עו"ד / רו"ח / ספק / שותף / משקיע / מתווך / לקוח
+- `ContactFields.ROLE_CATEGORY = "Role Category"` (single-select) + `ContactFields.SPECIALTY = "Specialty"` (text)
+- `ContactRoleCategory`: `lead / broker / expert / supplier / operator / partner / investor / client / other`
 - **לא נגענו** ב-Lead Capture / Scoring / Approval Gate / Routing
 
 ### 🔲 שלב 3 — OCC Endpoint Extension (ממתין לאישור)
