@@ -135,15 +135,16 @@ class PaymentFields:
 
 
 class ContactFields:
-    NAME            = "שם"
-    COMPANY         = "חברה"
-    EMAIL           = "אימייל"
-    PHONE           = "טלפון"
-    TYPE            = "Type"            # Client | Supplier | Partner | Lawyer | Accountant
-    FOLLOWUP_DATE   = "תאריך פולו אפ"
-    STATUS          = "סטטוס"           # חדש|בתהליכים|פולו-אפ|לא רלוונטי
-    DEALS_LINK      = "עסקאות (Deals)"
-    TASKS_LINK      = "משימות (Tasks)"
+    NAME              = "שם"
+    COMPANY           = "חברה"
+    EMAIL             = "אימייל"
+    PHONE             = "טלפון"
+    TYPE              = "Type"            # Client | Supplier | Partner | Lawyer | Accountant
+    FOLLOWUP_DATE     = "תאריך פולו אפ"
+    STATUS            = "סטטוס"           # חדש|בתהליכים|פולו-אפ|לא רלוונטי
+    PROFESSIONAL_ROLE = "תפקיד מקצועי"   # single select — ראה ContactProfessionalRole
+    DEALS_LINK        = "עסקאות (Deals)"
+    TASKS_LINK        = "משימות (Tasks)"
 
 
 class DealFields:
@@ -528,12 +529,33 @@ class ContactType:
     LAWYER      = "Lawyer"
     ACCOUNTANT  = "Accountant"
 
+
+class ContactProfessionalRole:
+    """Single select — שדה `תפקיד מקצועי` ב-Contacts (Strategic Layer)."""
+    APPRAISER  = "שמאי"
+    LAWYER     = "עו\"ד"
+    ACCOUNTANT = "רו\"ח"
+    SUPPLIER   = "ספק"
+    PARTNER    = "שותף"
+    INVESTOR   = "משקיע"
+    BROKER     = "מתווך"
+    CLIENT     = "לקוח / מתעניין"   # ברירת מחדל — אחידות מול לידים קיימים
+
+
 class DealStatus:
-    PROSPECT       = "Prospect"
-    DUE_DILIGENCE  = "Due Diligence"
-    ACTIVE         = "Active"
-    CLOSED         = "Closed"
-    CANCELLED      = "Cancelled"
+    # ── שלבי הערכה (לפני החלטה) — Strategic Layer ──────────────────
+    IDEA            = "רעיון"               # דיל בתחילת חיים
+    FEASIBILITY     = "בדיקת כדאיות"        # מספרים, שמאות, מתחרים, ביקוש
+    LEGAL_REVIEW    = "ייעוץ משפטי/מיסוי"  # עו\"ד/רו\"ח בודקים
+    PENDING_DECISION = "ממתין להחלטה"      # כל המידע נאסף, מחכה לאישור
+    # ── שלבי ביצוע (קיימים — לא נגענו) ─────────────────────────────
+    PROSPECT        = "Prospect"
+    DUE_DILIGENCE   = "Due Diligence"
+    ACTIVE          = "Active"
+    CLOSED          = "Closed"
+    CANCELLED       = "Cancelled"
+    # ── נדחה — שונה מ-Cancelled: נדחה לפני שהיה Active כלל ─────────
+    REJECTED        = "נדחה"               # לניתוח יחס הזדמנויות→ביצוע
 
 class RiskLevel:
     LOW    = "Low"

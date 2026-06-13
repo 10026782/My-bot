@@ -147,6 +147,35 @@
 
 ---
 
+## 📌 Strategic Layer — Minimal Adaptation (2026-06-13)
+
+**עקרון**: לא Opportunities table נפרדת. הרחבת `Deals.Status` כך שה-Deal
+"נולד" משלב הרעיון, לפני שיווק. Dashboard/Cards הם views על הסטטוסים
+החדשים — לא טבלאות חדשות.
+
+### ✅ שלב 1-2 — Schema (מיושם)
+- `DealStatus` ב-`airtable_schema.py` — 4 ערכים חדשים לפני ה-execution stages:
+  `רעיון → בדיקת כדאיות → ייעוץ משפטי/מיסוי → ממתין להחלטה`
+  + `נדחה` (שונה מ-Cancelled — נדחה לפני שהיה Active)
+- `ContactFields.PROFESSIONAL_ROLE = "תפקיד מקצועי"` (single select חדש)
+- `ContactProfessionalRole` class: שמאי / עו"ד / רו"ח / ספק / שותף / משקיע / מתווך / לקוח
+- **לא נגענו** ב-Lead Capture / Scoring / Approval Gate / Routing
+
+### 🔲 שלב 3 — OCC Endpoint Extension (ממתין לאישור)
+הרחבת OCC endpoint קיים עם 3 ספירות חדשות (לא endpoint חדש — תוספת ל-response):
+```
+הזדמנויות חדשות  = COUNT(Deals WHERE Status = "רעיון")
+בבדיקת כדאיות   = COUNT(Deals WHERE Status IN ("בדיקת כדאיות","ייעוץ משפטי/מיסוי"))
+ממתין להחלטה    = COUNT(Deals WHERE Status = "ממתין להחלטה")
+```
+
+### 🔲 שלב 4 — TMA Strategic Card (ממתין לאישור)
+כרטיס "Strategic" נוסף ב-Owner Control Center, נשען על endpoint המורחב.
+
+**מה לא משתנה לעולם בשלבים 3-4**: Lead Capture, Scoring, Approval Gate, Routing, Activity Feed.
+
+---
+
 ## 📌 CORE_05 Cost Watchdog — Spec v2 (גנרי, multi-source)
 
 ### תיקון תיעוד חשוב

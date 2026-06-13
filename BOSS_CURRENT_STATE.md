@@ -228,6 +228,18 @@ See `ARCHITECTURE_DRIFT_MAP.md` for the full list of 8 deferred drift items, the
 
 ---
 
+## עדכון: Strategic Layer — Schema (2026-06-13)
+
+| שינוי | סטטוס | פרטים |
+|-------|--------|--------|
+| `DealStatus` — ערכים חדשים | ✅ ב-schema | `רעיון / בדיקת כדאיות / ייעוץ משפטי-מיסוי / ממתין להחלטה / נדחה` |
+| `ContactFields.PROFESSIONAL_ROLE` | ✅ ב-schema | שדה `"תפקיד מקצועי"` + `ContactProfessionalRole` class |
+| ⚠️ Airtable Deals.Status | **דרוש** | להוסיף את 5 הערכים החדשים ידנית ב-Airtable UI |
+| ⚠️ Airtable Contacts | **דרוש** | להוסיף שדה `"תפקיד מקצועי"` (single select) ידנית ב-Airtable UI |
+| שלבים 3-4 (OCC + TMA card) | 🔲 ממתין | לא התחלנו — ממתין לאישור |
+
+---
+
 ## עדכון: Business Lifecycle Gap (2026-06-13)
 
 זוהה פער בין ה-"Operating Layer" הקיים (CRM/Leads/Tasks/Approvals — מכסה ~20-25% ממחזור החיים העסקי) לבין שכבת "Business Management" המלאה (8 שלבים — ראה `ROADMAP.md`). לא משנה תעדוף נוכחי — שלבים 1-4, 7-8 עוברים ל-Future לתיעוד בלבד. המסקנה המעשית: להמשיך ולחזק את שכבת התפעול לפני הרחבה ל"חצי העליון" של העסק.
