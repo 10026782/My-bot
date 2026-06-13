@@ -652,12 +652,21 @@ def _job_boss_battle_check():
 
 
 def _job_cost_watchdog():
-    """CORE_05: כל 60 דקות — בודק עלות שעתית/יומית, שולח התראה/עצירת חירום."""
+    """CORE_05 legacy: כל 60 דקות — בודק עלות שעתית/יומית בדולרים, שולח התראה/עצירת חירום."""
     try:
         from cost_monitor import job_cost_watchdog
         job_cost_watchdog()
     except Exception as e:
         logger.error(f"cost_watchdog error: {e}")
+
+
+def _job_daily_usage_report():
+    """CORE_05 v2: כל יום 08:00 — מסכם usage.jsonl, בודק ספי Sonnet, כותב ל-AI_Usage_Daily."""
+    try:
+        from core.cost_watchdog import daily_watchdog
+        daily_watchdog()
+    except Exception as e:
+        logger.error(f"daily_usage_report error: {e}")
 
 
 # ══════════════════════════════════════════════════
@@ -718,7 +727,8 @@ def start_scheduler() -> threading.Thread:
     schedule.every().day.at("07:00").do(_job_daily_game_digest)                            # Game digest (flag: GAME_SCHEDULER)
     getattr(schedule.every(), "sunday").at("08:00").do(_job_weekly_quest_reset)            # Game weekly reset
     getattr(schedule.every(), "friday").at("18:00").do(_job_boss_battle_check)             # Boss battle check
-    schedule.every(60).minutes.do(_job_cost_watchdog)                                       # CORE_05: Cost Watchdog
+    schedule.every(60).minutes.do(_job_cost_watchdog)                                       # CORE_05 legacy: dollar-based emergency stop
+    schedule.every().day.at("08:00").do(_job_daily_usage_report)                             # CORE_05 v2: count-based JSONL watchdog
 
     logger.info(
         f"📅 Scheduler | digest={digest_time} | collector={collector_time} | "

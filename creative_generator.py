@@ -47,13 +47,19 @@ def generate(template_name: str, context: str, tone: str = "professional") -> st
     prompt = f"{instruction}\n{tone_note}\n\nפרטי ההקשר:\n{context}"
 
     try:
-        return call_anthropic_text(
+        result = call_anthropic_text(
             source="creative_generator.generate",
-            model="claude-sonnet-4-6",
+            model="claude-haiku-4-5-20251001",
             max_tokens=512,
             system=_PERSONA,
             messages=[{"role": "user", "content": prompt}],
         ).strip()
+        try:
+            from core.cost_watchdog import log_usage
+            log_usage("claude_haiku", 512, {"caller": "creative_generator"})
+        except Exception:
+            pass
+        return result
 
     except Exception as e:
         logger.error(f"generate error: {e}")

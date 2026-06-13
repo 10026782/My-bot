@@ -729,6 +729,14 @@ def run_agent(
                 tokens_out = getattr(response.usage, "output_tokens", 0),
                 caller     = ctx.memory_key,
             )
+            try:
+                from core.cost_watchdog import log_usage as _cw_log
+                _src_type = "claude_sonnet" if "sonnet" in ctx.model else "claude_haiku"
+                _cw_log(_src_type,
+                        getattr(response.usage, "input_tokens", 0) + getattr(response.usage, "output_tokens", 0),
+                        {"caller": ctx.memory_key})
+            except Exception:
+                pass
 
             tool_uses   = [b for b in response.content if b.type == "tool_use"]
             text_blocks = [b for b in response.content if b.type == "text"]

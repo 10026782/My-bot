@@ -43,6 +43,8 @@ class Tables:
     ROADMAP_TASKS   = "Roadmap_Tasks"
     WEEKLY_GOALS    = "Weekly_Goals"
     BOSS_BATTLES    = "Boss_Battles"
+    # System / Monitoring
+    AI_USAGE_DAILY  = "AI_Usage_Daily"   # שורה יומית לכל source_type — 1 רשומה/יום
 
 
 # ══════════════════════════════════════════════════

@@ -121,6 +121,58 @@
 
 ---
 
+## 📌 Business Lifecycle Gap Analysis (נוסף 2026-06-13)
+
+ה-CRM/Workflow הקיים מכסה כ-20-25% ממחזור החיים העסקי המלא.
+מיפוי 8 השלבים:
+
+| שלב | תיאור | סטטוס |
+|---|---|---|
+| 1. Opportunity Pipeline | איתור הזדמנויות (מתווך/שמאי/ספק/שותף/משקיע) | ❌ לא קיים → **Future** |
+| 2. Deal Evaluation | בדיקת כדאיות (שמאי/עו"ד/רו"ח/מיסוי/סיכונים) | ❌ לא קיים → **Future** |
+| 3. Demand Research | מחקר שוק (לקוחות/מתחרים/תמחור) | ❌ לא קיים → **Future** |
+| 4. Deal Structuring | בניית עסקה (מימון/שותפים/מבנה רווחים) | ❌ לא קיים → **Future** |
+| 5. Marketing & Sales | קמפיינים/לידים/פולואפים | ✅ הכי מפותח - הליבה הקיימת |
+| 6. Execution | חוזים/גבייה/תשלומים/מסירה | 🟡 חלקי (Payments table קיים) |
+| 7. Profit Distribution | חלוקת רווחים לשותפים/משקיעים | ❌ לא קיים → **Future** |
+| 8. Capital Management | מעקב הון - כמה נשאר/מושקע/חוזר/יוצא | ❌ לא קיים → **Future** |
+
+**החלטה (2026-06-13)**: לא בונים שלבים חדשים כרגע. ממשיכים ברודמאפ הקיים
+(Cost Watchdog → Meta WhatsApp → N04/N05 → Digest). שלבים 1-4, 7-8
+מתועדים כ-Future items, יישקלו לאחר השלמת השכבה התפעולית.
+
+**עקרון מנחה**: המערכת היום היא "Operating Layer" (תפעול). שכבת
+"Business Management" (ניהול העסק - הזדמנויות, כדאיות, הון) היא
+השכבה הבאה, אחרי שהתפעול מבוסס לחלוטין.
+
+---
+
+## 📌 CORE_05 Cost Watchdog — Spec v2 (גנרי, multi-source)
+
+### תיקון תיעוד חשוב
+`interaction_engine.py` (שהוזכר כקורא Sonnet כל 15 דקות) **לא קיים בקודבייס**.
+הארכיטקטורה התפתחה ל-`context.py` שכולל `_select_model()` חכם:
+- Owner + הודעה מתחילה ב-`#` → Sonnet (מצב מחקר)
+- כל שאר המקרים → Haiku
+
+**נקודת הדליפה האמיתית**: `creative_generator.py` קרא ל-Sonnet תמיד — **תוקן** (Haiku עכשיו).
+
+### מרכיבי הפתרון (מיושם 2026-06-13)
+- `core/cost_watchdog.py` (חדש) — `log_usage(source_type, units, meta, user_id)` → `logs/usage.jsonl`
+- `creative_generator.py` — עבר ל-Haiku + log_usage אחרי כל קריאה
+- `app.py` — `log_usage()` אחרי כל `client.messages.create` (source_type לפי model name)
+- `scheduler.py` — `_job_daily_usage_report` כל יום 08:00 → aggregation + Airtable + alert
+- `airtable_schema.py` → `Tables.AI_USAGE_DAILY = "AI_Usage_Daily"` (טבלה חדשה, 1 שורה/יום)
+- Feature flag: `COST_WATCHDOG_ENABLED=true` (default on)
+- ספים: `SONNET_DAILY_LIMIT=50` (configurable), `WHATSAPP_CONV_DAILY_LIMIT` (להגדיר עם Meta)
+
+### עלויות נסתרות (לא בקוד — מעקב ידני)
+- Meta WhatsApp Cloud API: per-conversation pricing (utility/marketing/auth) — לבדוק לפני חיבור
+- Render: per-plan-tier (compute/RAM), לא per-call — רלוונטי לסקלביליות 1000 משתמשים
+- Airtable: rate limit 5 req/sec/base — סיכון 429 errors בעומס גבוה
+
+---
+
 ## F — עתיד (אין תאריך, יש spec)
 
 ### F01 — Lead Recovery
