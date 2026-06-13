@@ -166,9 +166,9 @@
 ### 🔲 שלב 3 — OCC Endpoint Extension (ממתין לאישור)
 הרחבת OCC endpoint קיים עם 3 ספירות חדשות (לא endpoint חדש — תוספת ל-response):
 ```
-הזדמנויות חדשות  = COUNT(Deals WHERE Status = "רעיון")
-בבדיקת כדאיות   = COUNT(Deals WHERE Status IN ("בדיקת כדאיות","ייעוץ משפטי/מיסוי"))
-ממתין להחלטה    = COUNT(Deals WHERE Status = "ממתין להחלטה")
+New Opportunities  = COUNT(Deals WHERE Status = "Idea")
+In Evaluation      = COUNT(Deals WHERE Status IN ("Feasibility Check", "Legal/Tax Review"))
+Pending Decision   = COUNT(Deals WHERE Status = "Pending Decision")
 ```
 
 ### 🔲 שלב 4 — TMA Strategic Card (ממתין לאישור)
