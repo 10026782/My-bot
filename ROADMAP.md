@@ -155,8 +155,8 @@
 
 ### ✅ שלב 1-2 — Schema (מיושם)
 - `DealStatus` ב-`airtable_schema.py` — 4 ערכים חדשים לפני ה-execution stages:
-  `רעיון → בדיקת כדאיות → ייעוץ משפטי/מיסוי → ממתין להחלטה`
-  + `נדחה` (שונה מ-Cancelled — נדחה לפני שהיה Active)
+  `"Idea" → "Feasibility Check" → "Legal/Tax Review" → "Pending Decision"`
+  + `"Rejected"` (שונה מ-Cancelled — נדחה לפני שהיה Active)
 - `ContactFields.PROFESSIONAL_ROLE = "תפקיד מקצועי"` (single select חדש)
 - `ContactProfessionalRole` class: שמאי / עו"ד / רו"ח / ספק / שותף / משקיע / מתווך / לקוח
 - **לא נגענו** ב-Lead Capture / Scoring / Approval Gate / Routing

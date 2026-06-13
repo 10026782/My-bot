@@ -232,7 +232,7 @@ See `ARCHITECTURE_DRIFT_MAP.md` for the full list of 8 deferred drift items, the
 
 | שינוי | סטטוס | פרטים |
 |-------|--------|--------|
-| `DealStatus` — ערכים חדשים | ✅ ב-schema | `רעיון / בדיקת כדאיות / ייעוץ משפטי-מיסוי / ממתין להחלטה / נדחה` |
+| `DealStatus` — ערכים חדשים | ✅ ב-schema | `"Idea" / "Feasibility Check" / "Legal/Tax Review" / "Pending Decision" / "Rejected"` |
 | `ContactFields.PROFESSIONAL_ROLE` | ✅ ב-schema | שדה `"תפקיד מקצועי"` + `ContactProfessionalRole` class |
 | ⚠️ Airtable Deals.Status | **דרוש** | להוסיף את 5 הערכים החדשים ידנית ב-Airtable UI |
 | ⚠️ Airtable Contacts | **דרוש** | להוסיף שדה `"תפקיד מקצועי"` (single select) ידנית ב-Airtable UI |

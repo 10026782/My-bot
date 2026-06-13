@@ -544,18 +544,18 @@ class ContactProfessionalRole:
 
 class DealStatus:
     # ── שלבי הערכה (לפני החלטה) — Strategic Layer ──────────────────
-    IDEA            = "רעיון"               # דיל בתחילת חיים
-    FEASIBILITY     = "בדיקת כדאיות"        # מספרים, שמאות, מתחרים, ביקוש
-    LEGAL_REVIEW    = "ייעוץ משפטי/מיסוי"  # עו\"ד/רו\"ח בודקים
-    PENDING_DECISION = "ממתין להחלטה"      # כל המידע נאסף, מחכה לאישור
+    IDEA             = "Idea"               # דיל בתחילת חיים
+    FEASIBILITY      = "Feasibility Check"  # מספרים, שמאות, מתחרים, ביקוש
+    LEGAL_REVIEW     = "Legal/Tax Review"   # עו"ד/רו"ח בודקים
+    PENDING_DECISION = "Pending Decision"   # כל המידע נאסף, מחכה לאישור
     # ── שלבי ביצוע (קיימים — לא נגענו) ─────────────────────────────
-    PROSPECT        = "Prospect"
-    DUE_DILIGENCE   = "Due Diligence"
-    ACTIVE          = "Active"
-    CLOSED          = "Closed"
-    CANCELLED       = "Cancelled"
+    PROSPECT         = "Prospect"
+    DUE_DILIGENCE    = "Due Diligence"
+    ACTIVE           = "Active"
+    CLOSED           = "Closed"
+    CANCELLED        = "Cancelled"
     # ── נדחה — שונה מ-Cancelled: נדחה לפני שהיה Active כלל ─────────
-    REJECTED        = "נדחה"               # לניתוח יחס הזדמנויות→ביצוע
+    REJECTED         = "Rejected"           # לניתוח יחס הזדמנויות→ביצוע
 
 class RiskLevel:
     LOW    = "Low"
