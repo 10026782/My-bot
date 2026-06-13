@@ -411,6 +411,11 @@ class ApprovalsFields:
     STATUS         = "סטטוס"           # ממתין|אושר|נדחה
     REJECTION_NOTE = "הערת דחייה"
 
+class ApprovalStatus:
+    PENDING  = "ממתין"
+    APPROVED = "אושר"
+    REJECTED = "נדחה"
+
 class UnitStatus:
     AVAILABLE       = "Available"
     RESERVED        = "Reserved"

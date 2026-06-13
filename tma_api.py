@@ -21,7 +21,7 @@ from identity import resolve_identity, Role
 from airtable_schema import (
     LeadFields, TaskFields, PaymentStatus, BusinessMemoryFields, InteractionLogFields, Tables,
     QuestsFields, CoinsLogFields, WorldsFields, QuestStatus, WorldStatus,
-    DailyTaskFields, DailyTaskStatus, ApprovalsFields,
+    DailyTaskFields, DailyTaskStatus, ApprovalsFields, ApprovalStatus,
     RoadmapTaskFields, RoadmapTaskStatus,
 )
 from tools.airtable_gateway import airtable_patch as _gw_patch, airtable_create as _gw_create
@@ -286,7 +286,7 @@ def _queue_tma_write_approval(action: str, payload: dict, identity, label: str) 
         ApprovalsFields.CONTEXT_TYPE: "tma_write",
         ApprovalsFields.CONTEXT_ID: action,
         ApprovalsFields.CONTEXT_DATA: json.dumps(approval_payload, ensure_ascii=False),
-        ApprovalsFields.STATUS: "\u05de\u05de\u05ea\u05d9\u05df",
+        ApprovalsFields.STATUS: ApprovalStatus.PENDING,
     })
     if not rec:
         logger.error(f"_queue_tma_write_approval: Approvals POST failed for action={action}")

@@ -11,7 +11,7 @@ from datetime import datetime, date, timedelta
 from airtable_schema import (
     Tables,
     ContactFields, ContactType, ContactStatus,
-    DealFields, DealStatus, RiskLevel,
+    DealFields, DealStage, DealStatus, RiskLevel,
     PaymentFields, PaymentStatus,
     validate_funding_cost,
 )
@@ -246,7 +246,7 @@ def crm_list_deals(status: str = "", identity=None) -> str:
         return "❌ חסרים מפתחות Airtable"
     try:
         if status == "Active":
-            formula = "NOT(OR({שלב}='סגור-ניצחון', {שלב}='סגור-הפסד'))"
+            formula = f"NOT(OR({{{DealFields.STAGE}}}='{DealStage.CLOSED_WIN}', {{{DealFields.STAGE}}}='{DealStage.CLOSED_LOSS}'))"
         elif status:
             formula = f"{{שלב}} = '{status}'"
         else:
