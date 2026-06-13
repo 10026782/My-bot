@@ -200,6 +200,12 @@ Full audit: 54 onClick handlers across 12 components. Results:
 
 ---
 
+## Known Architectural Drift
+
+See `ARCHITECTURE_DRIFT_MAP.md` for the full list of 8 deferred drift items, their Piggyback Triggers, and migration steps. Items are not to be executed autonomously — only when their trigger sprint is active.
+
+---
+
 ## Open Risks (post-sprint)
 
 1. Memory is RAM-only — not durable across restarts.
@@ -231,6 +237,49 @@ Full audit: 54 onClick handlers across 12 components. Results:
 | 5 | DEV_MODE HMAC bypass still wired in `require_tma_auth` + advertised in CORS | MEDIUM |
 | 6 | `/worker/trigger` accepts caller-controlled `chat_id` (impersonation risk) | MEDIUM |
 | 7 | `/health` endpoint public — exposes version + internal check state | MEDIUM |
+
+---
+
+## עדכון: CORE_05 Cost Watchdog — מיושם (2026-06-13)
+
+**תיקון תיעוד**: `interaction_engine.py` לא קיים בקודבייס הנוכחי. `context.py` כולל `_select_model()` שעושה Haiku/Sonnet routing נכון לפי role+research-mode.
+
+**דליפת עלות שתוקנה**: `creative_generator.py` תמיד קרא ל-Sonnet — עבר ל-Haiku (חסכון מיידי).
+
+| מרכיב | סטטוס | פרטים |
+|--------|--------|--------|
+| `core/cost_watchdog.py` | ✅ חדש | `log_usage()` → `logs/usage.jsonl` (append-only, ephemeral) |
+| `creative_generator.py` | ✅ תוקן | claude-sonnet → claude-haiku + log_usage אחרי קריאה |
+| `app.py` run_agent | ✅ מחובר | log_usage אחרי כל client.messages.create |
+| `scheduler.py` | ✅ נוסף | `_job_daily_usage_report` כל יום 08:00 |
+| `AI_Usage_Daily` Airtable | ⏳ טבלה חדשה | יש ליצור ב-Airtable לפני שה-daily job כותב לה |
+| `COST_WATCHDOG_ENABLED` | default on | Pipes first |
+| `SONNET_DAILY_LIMIT` | default 50 | configurable via env |
+
+**החלטות ארכיטקטורה**:
+- Usage log: JSONL מקומי (ephemeral, ל-watchdog יומי בלבד)
+- Aggregation ארוך-טווח: שורה יומית ל-Airtable `AI_Usage_Daily`
+- התראה: טלגרם לאליהו, סף 50 קריאות Sonnet/יום
+- `cost_monitor.py` (dollar-based emergency stop) — נשאר ולא שונה
+- ארכיטקטורה גנרית: להוסיף `whatsapp_conversation` כ-source_type ללא שינוי מבני
+
+---
+
+## עדכון: Strategic Layer — Schema (2026-06-13)
+
+| שינוי | סטטוס | פרטים |
+|-------|--------|--------|
+| `DealStatus` — ערכים חדשים | ✅ ב-schema | `"Idea" / "Feasibility Check" / "Legal/Tax Review" / "Pending Decision" / "Rejected"` |
+| `ContactFields.ROLE_CATEGORY` + `SPECIALTY` | ✅ ב-schema | `"Role Category"` (single-select) + `"Specialty"` (text) + `ContactRoleCategory` class |
+| ⚠️ Airtable Deals.Status | **דרוש** | להוסיף 5 ערכים ידנית: `Idea / Feasibility Check / Legal/Tax Review / Pending Decision / Rejected` |
+| ⚠️ Airtable Contacts | **דרוש** | להוסיף שדה `"Role Category"` (single-select, 9 ערכים lowercase) + שדה `"Specialty"` (text) |
+| שלבים 3-4 (OCC + TMA card) | 🔲 ממתין | לא התחלנו — ממתין לאישור |
+
+---
+
+## עדכון: Business Lifecycle Gap (2026-06-13)
+
+זוהה פער בין ה-"Operating Layer" הקיים (CRM/Leads/Tasks/Approvals — מכסה ~20-25% ממחזור החיים העסקי) לבין שכבת "Business Management" המלאה (8 שלבים — ראה `ROADMAP.md`). לא משנה תעדוף נוכחי — שלבים 1-4, 7-8 עוברים ל-Future לתיעוד בלבד. המסקנה המעשית: להמשיך ולחזק את שכבת התפעול לפני הרחבה ל"חצי העליון" של העסק.
 
 ---
 

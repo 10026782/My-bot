@@ -43,6 +43,8 @@ class Tables:
     ROADMAP_TASKS   = "Roadmap_Tasks"
     WEEKLY_GOALS    = "Weekly_Goals"
     BOSS_BATTLES    = "Boss_Battles"
+    # System / Monitoring
+    AI_USAGE_DAILY  = "AI_Usage_Daily"   # שורה יומית לכל source_type — 1 רשומה/יום
 
 
 # ══════════════════════════════════════════════════
@@ -133,15 +135,17 @@ class PaymentFields:
 
 
 class ContactFields:
-    NAME            = "שם"
-    COMPANY         = "חברה"
-    EMAIL           = "אימייל"
-    PHONE           = "טלפון"
-    TYPE            = "Type"            # Client | Supplier | Partner | Lawyer | Accountant
-    FOLLOWUP_DATE   = "תאריך פולו אפ"
-    STATUS          = "סטטוס"           # חדש|בתהליכים|פולו-אפ|לא רלוונטי
-    DEALS_LINK      = "עסקאות (Deals)"
-    TASKS_LINK      = "משימות (Tasks)"
+    NAME          = "שם"
+    COMPANY       = "חברה"
+    EMAIL         = "אימייל"
+    PHONE         = "טלפון"
+    TYPE          = "Type"            # Client | Supplier | Partner | Lawyer | Accountant
+    FOLLOWUP_DATE = "תאריך פולו אפ"
+    STATUS        = "סטטוס"           # חדש|בתהליכים|פולו-אפ|לא רלוונטי
+    ROLE_CATEGORY = "Role Category"   # single select — ראה ContactRoleCategory
+    SPECIALTY     = "Specialty"       # text — התמחות ספציפית (שמאי מקרקעין / רו"ח מיסוי / ...)
+    DEALS_LINK    = "עסקאות (Deals)"
+    TASKS_LINK    = "משימות (Tasks)"
 
 
 class DealFields:
@@ -526,12 +530,36 @@ class ContactType:
     LAWYER      = "Lawyer"
     ACCOUNTANT  = "Accountant"
 
+
+class ContactRoleCategory:
+    """Single select — שדה `Role Category` ב-Contacts (Strategic Layer).
+    קטגוריות עסקיות כלליות; פירוט ספציפי → ContactFields.SPECIALTY (text).
+    """
+    LEAD     = "lead"      # לקוח / מתעניין
+    BROKER   = "broker"    # מביא הזדמנות / מתווך
+    EXPERT   = "expert"    # איש מקצוע בודק (עו"ד / רו"ח / שמאי / יועץ)
+    SUPPLIER = "supplier"  # ספק / יבואן / נותן שירות
+    OPERATOR = "operator"  # מבצע בפועל (קבלן / מתקין / צוות)
+    PARTNER  = "partner"   # שותף עסקי
+    INVESTOR = "investor"  # משקיע
+    CLIENT   = "client"    # לקוח קיים
+    OTHER    = "other"     # אחר
+
+
 class DealStatus:
-    PROSPECT       = "Prospect"
-    DUE_DILIGENCE  = "Due Diligence"
-    ACTIVE         = "Active"
-    CLOSED         = "Closed"
-    CANCELLED      = "Cancelled"
+    # ── שלבי הערכה (לפני החלטה) — Strategic Layer ──────────────────
+    IDEA             = "Idea"               # דיל בתחילת חיים
+    FEASIBILITY      = "Feasibility Check"  # מספרים, שמאות, מתחרים, ביקוש
+    LEGAL_REVIEW     = "Legal/Tax Review"   # עו"ד/רו"ח בודקים
+    PENDING_DECISION = "Pending Decision"   # כל המידע נאסף, מחכה לאישור
+    # ── שלבי ביצוע (קיימים — לא נגענו) ─────────────────────────────
+    PROSPECT         = "Prospect"
+    DUE_DILIGENCE    = "Due Diligence"
+    ACTIVE           = "Active"
+    CLOSED           = "Closed"
+    CANCELLED        = "Cancelled"
+    # ── נדחה — שונה מ-Cancelled: נדחה לפני שהיה Active כלל ─────────
+    REJECTED         = "Rejected"           # לניתוח יחס הזדמנויות→ביצוע
 
 class RiskLevel:
     LOW    = "Low"
