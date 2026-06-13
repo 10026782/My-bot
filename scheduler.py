@@ -361,7 +361,8 @@ def _job_audience_report():
 # ══════════════════════════════════════════════════
 
 def _job_interaction_scan():
-    """D06: ניתוח פגישות + זיכרון עסקי — כל 15 דקות."""
+    """D06: ניתוח פגישות + זיכרון עסקי — כל 15 דקות.
+    TODO: כשמפעילים INTERACTION_INTELLIGENCE=true בפרודקשן — שקול להגדיל ל-30 דק' (INTERACTION_INTERVAL_MIN) לחסוך 50% Google Calendar API calls."""
     try:
         if os.getenv("INTERACTION_INTELLIGENCE", "false").lower() != "true":
             logger.info("[D06] interaction intelligence disabled by env")
@@ -698,7 +699,7 @@ def start_scheduler() -> threading.Thread:
     from shabbat_guard import shabbat_safe
     digest_time           = os.environ.get("DIGEST_TIME",               "07:30")
     collector_time        = os.environ.get("COLLECTOR_TIME",            "23:00")
-    cleanup_interval      = int(os.environ.get("CLEANUP_INTERVAL_MIN",  "60"))
+    cleanup_interval      = int(os.environ.get("CLEANUP_INTERVAL_MIN",  "360"))
     followup_interval     = int(os.environ.get("FOLLOWUP_INTERVAL_MIN", "60"))
     payment_reminder_time = os.environ.get("PAYMENT_REMINDER_TIME",    "09:00")
     recovery_time         = os.environ.get("RECOVERY_TIME",            "10:00")
@@ -707,7 +708,7 @@ def start_scheduler() -> threading.Thread:
     email_interval        = int(os.environ.get("EMAIL_POLL_INTERVAL_MIN", "15"))
     security_day          = os.environ.get("SECURITY_REMINDER_DAY",    "sunday")
     security_time         = os.environ.get("SECURITY_REMINDER_TIME",   "09:00")
-    abandoned_interval    = int(os.environ.get("ABANDONED_INTERVAL_MIN", "15"))
+    abandoned_interval    = int(os.environ.get("ABANDONED_INTERVAL_MIN", "45"))
 
     schedule.every().day.at(digest_time).do(_job_daily_digest)
     schedule.every().day.at(collector_time).do(_job_daily_collector)
@@ -728,7 +729,7 @@ def start_scheduler() -> threading.Thread:
     getattr(schedule.every(), "sunday").at("08:00").do(_job_weekly_quest_reset)            # Game weekly reset
     getattr(schedule.every(), "friday").at("18:00").do(_job_boss_battle_check)             # Boss battle check
     schedule.every(60).minutes.do(_job_cost_watchdog)                                       # CORE_05 legacy: dollar-based emergency stop
-    schedule.every().day.at("08:00").do(_job_daily_usage_report)                             # CORE_05 v2: count-based JSONL watchdog
+    schedule.every().day.at("08:15").do(_job_daily_usage_report)                             # CORE_05 v2: count-based JSONL watchdog (08:15 — מניעת cluster עם D04+Game ב-Sunday 08:00)
 
     logger.info(
         f"📅 Scheduler | digest={digest_time} | collector={collector_time} | "
