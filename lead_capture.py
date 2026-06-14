@@ -56,8 +56,8 @@ def _score_inbound_message(message: str, identity=None) -> tuple[int, str, list[
         score += 20
         why_score.append("project:+20")
     if any(term in text for term in price_terms):
-        score += 15  # כוונת רכישה — WARM signal (לפי spec N02)
-        why_score.append("price_intent:+15")
+        score += 25  # הועלה מ-15 ל-25 כדי שביטוי מחיר בודד יספיק לסף WARM (25) — תיקון לבאג: "כמה עולה?" → score=15 → COLD
+        why_score.append("price_intent:+25")
     if any(term in text for term in budget_terms) or re.search(r"\b\d{4,}\b", text):
         score += 25
         why_score.append("budget:+25")
