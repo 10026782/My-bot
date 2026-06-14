@@ -2,6 +2,55 @@ import os
 import json
 import logging
 
+"""
+══════════════════════════════════════════════════════════════════════
+FEATURE FLAGS REGISTRY — מקור אמת יחיד
+כל flag שנבדק בקוד חייב להופיע כאן. ברירת מחדל = כבוי אלא אם צוין אחרת.
+══════════════════════════════════════════════════════════════════════
+
+EMERGENCY (persistent — שורדים restart, נשמרים ב-/tmp/emergency_flags.json):
+  EMERGENCY_STOP_ALL          - חוסם כל ביצוע tool מסוכן
+  EMERGENCY_STOP_WHATSAPP     - חוסם שליחה יוצאת WhatsApp
+  EMERGENCY_STOP_EMAIL        - חוסם שליחה יוצאת email
+  EMERGENCY_STOP_AUTOMATION   - חוסם jobs אוטומטיים של scheduler
+  EMERGENCY_STOP_AI           - חוסם קריאות Claude API (Cost Watchdog)
+
+LEAD PIPELINE:
+  LEAD_CAPTURE                - WhatsApp מספר לא מוכר → רשומת Leads
+  LEAD_SCORING                - score+tier נכתב בעת יצירת lead
+  LEAD_MEMORY                 - lead_memory.update() מחובר ל-lead_capture
+  FOLLOWUP_AUTOMATION         - scheduler סורק לידים HOT, מעלה לאישור
+  LEAD_QUALIFIER              - מנוע שאלון lead_qualifier (F09, לא פעיל)
+  LEAD_RECOVERY               - זיהוי לידים דועכים + שליחה מחדש
+  ABANDONED_LEADS             - מעקב לידים שנטשו
+
+INFRA / DATA:
+  KNOWLEDGE_ENGINE            - בניית context דינמי (Supabase-backed)
+  SUPABASE                    - מאפשר קריאה/כתיבה ל-Supabase
+  COST_WATCHDOG_LIVE          - לוג שימוש + daily Sonnet limit (CORE_05)
+  IMPORT_DOMAIN               - ברירת מחדל ON; פיצ'רים יבוא/עץ
+  MULTITENANT                 - מצב multi-tenant (כבוי, F08)
+
+INTEGRATIONS:
+  VOICE_IVR                   - קו טלפוני Twilio IVR (F07)
+  EMAIL_INBOUND               - ערוץ email נכנס (F06)
+  CREATIVE_GENERATOR          - יצירת תוכן שיווקי אוטומטי
+  AD_ATTRIBUTION              - ייחוס UTM מפרסום → ליד
+  CONTACT_RESOLVER            - פתרון אנשי קשר אוטומטי
+
+GAME / SCHEDULER:
+  GAME_SCHEDULER              - scheduler jobs של מערכת הגיימיפיקציה
+  PAYMENT_REMINDERS           - תזכורות תשלום אוטומטיות
+
+FUTURE (לא פעיל):
+  AUDIENCE_INTELLIGENCE       - ניתוח קהל יעד (Future)
+  INTERACTION_INTELLIGENCE    - ניתוח דפוסי שיחה (Future)
+  KPI_ENGINE                  - מנוע KPI (F04)
+  LEARNING_ENGINE             - מנוע למידה מדפוסים (F02)
+  REVENUE_ATTRIBUTION         - ייחוס הכנסות (F03)
+══════════════════════════════════════════════════════════════════════
+"""
+
 logger = logging.getLogger(__name__)
 
 # Flags that must survive a restart (e.g. EMERGENCY_STOP_ALL).

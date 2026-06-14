@@ -7,6 +7,21 @@
 # שמות טבלאות — מדויקים
 # ══════════════════════════════════════════════════
 
+# ══════════════════════════════════════════════════
+# FIELD ALIASES — מקור אמת יחיד
+# variant (English/lowercase/legacy) → שם שדה קנוני ב-Airtable
+# צרכנים: airtable_gateway.normalize_airtable_fields(),
+#          airtable_tools._resolve_table()
+# ══════════════════════════════════════════════════
+
+FIELD_ALIASES: dict[str, dict[str, str]] = {
+    "Leads": {
+        "score":         "Score",
+        "next_followup": "Next Followup",
+        "טמפרטורה":     "tier",   # read-only alias — מנורמל כדי שיתפס ע"י READ_ONLY_FIELDS
+    },
+}
+
 class Tables:
     # פרויקטים ונכסים
     PROJECTS        = "Projects"
@@ -45,6 +60,20 @@ class Tables:
     BOSS_BATTLES    = "Boss_Battles"
     # System / Monitoring
     AI_USAGE_DAILY  = "AI_Usage_Daily"   # שורה יומית לכל source_type — 1 רשומה/יום
+
+
+# ══════════════════════════════════════════════════
+# TABLE ALIASES — מיפוי שמות קצרים (אנגלית) לשמות production
+# צרכן: airtable_tools._resolve_table()
+# ══════════════════════════════════════════════════
+
+TABLE_ALIASES: dict[str, str] = {
+    "Tasks":    Tables.TASKS,
+    "Contacts": Tables.CONTACTS,
+    "Deals":    Tables.DEALS,
+    "Expenses": Tables.EXPENSES,
+    "Payments": Tables.PAYMENTS,
+}
 
 
 # ══════════════════════════════════════════════════

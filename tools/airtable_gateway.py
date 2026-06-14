@@ -15,6 +15,7 @@ import urllib.parse
 import httpx
 
 import schema_validator as _sv
+from airtable_schema import FIELD_ALIASES
 
 logger = logging.getLogger(__name__)
 
@@ -23,14 +24,7 @@ logger = logging.getLogger(__name__)
 # Configuration — per-table aliases and read-only fields
 # ══════════════════════════════════════════════════════════════════
 
-# variant → canonical Airtable field name (as returned by Metadata API / schema_cache.json)
-FIELD_ALIASES: dict[str, dict[str, str]] = {
-    "Leads": {
-        "score":         "Score",
-        "next_followup": "Next Followup",
-        "טמפרטורה":     "tier",   # read-only alias — normalized so it hits the RO filter below
-    },
-}
+# FIELD_ALIASES imported from airtable_schema — single source of truth
 
 # Formula / computed fields that Airtable will reject if we try to write them.
 # Writing a formula field causes a 422 from Airtable.

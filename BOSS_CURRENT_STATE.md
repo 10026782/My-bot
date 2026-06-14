@@ -109,6 +109,8 @@ run_agent() → conversational reply only
 | Telegram agent | PARTIAL | Tool chain unblocked; approval flow honest |
 | WhatsApp webhook (Twilio) | PARTIAL | Twilio validation active; lead capture live (flag); outbound = honest stub |
 | Meta WhatsApp (Phase 1) | PARTIAL | Inbound webhook only; GET verify + POST receive → run_agent; outbound stub; EMERGENCY_STOP_WHATSAPP gated |
+| Strategic Pipeline TMA card | WORKING | קורא `occData.strategic_pipeline` מ-`/api/owner/control-center` (כבר קיים בresponse); 3 ספירות מוצגות |
+| Strategic Pipeline counts | ⚠️ ZERO | `_owner_strategic_pipeline()` מסנן לפי ערכי `DealStatus` אנגליים; `Deals.שלב` ב-Airtable מכיל ערכים עבריים → 0 תמיד עד שאליהו יוסיף 4 ערכי select ידנית ב-Airtable |
 | Lead Capture | WORKING | lead_capture.py — gated by LEAD_CAPTURE flag |
 | Approval system | PARTIAL | Honest UX; 4 subscribers; pending_approvals in app.py; TMA write approval path executes queued writes after approve |
 | Event Bus | WORKING | Fail-closed: success only on real handler execution |

@@ -209,6 +209,15 @@ export async function completeTask(taskId: string): Promise<{ ok: boolean; coins
   return r.json() as Promise<{ ok: boolean; coins_awarded: number }>;
 }
 
+export async function updateCheckinTaskStatus(taskId: string, status: string): Promise<void> {
+  const r = await fetch(`${BASE}/api/game/checkin/tasks/${encodeURIComponent(taskId)}`, {
+    method: "PATCH",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+  if (!r.ok) throw new Error(`API ${r.status}`);
+}
+
 export async function patchLead(
   leadId: string,
   fields: Partial<{
