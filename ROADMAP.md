@@ -35,7 +35,7 @@
 |----|----|----|------|
 | C12 | Lead Events (audit log) | core/lead_events.py | |
 | C13 | Shared Memory (תובנות עסקיות לפי דומיין) | core/shared_memory.py | |
-| ~~C14~~ | ~~Lead Scoring~~ | ~~core/lead_scoring.py~~ | **קובץ לא קיים — הוסר מ-Completed** |
+| ~~C14~~ | ~~Lead Scoring~~ | ~~lead_scoring.py~~ | **הוסר — zombie file; scoring consolidated ל-lead_capture.py (N02/N03)** |
 
 ### CRM + Storage
 | ID | שם | קבצים |
@@ -94,21 +94,14 @@
 
 ### N01 — ✅ הושלם (W1 לעיל)
 
-### N02 — Live Lead Scoring
-**למה עכשיו:** W0 יוצר ליד ב-Airtable. עכשיו צריך לתת לו ציון בזמן יצירה.
-**מה:** scoring בסיסי בתוך lead_capture.py — לא מודול נפרד.
-- ציין פרויקט ספציפי? +20
-- שאל על מחיר? +15
-- ציין תקציב? +25
-- כותב score + tier לאותה שורת Airtable של W0
-**קבצים:** lead_capture.py בלבד.
-**flag:** LEAD_SCORING (כבוי ברירת מחדל).
-
-### N03 — Lead Memory Wire-up
-**תלוי ב:** N02 (צריך score אמיתי לפני זיכרון).
-**מה:** חיבור lead_memory.update() לתוך lead_capture — אחרי create/score.
-**קבצים:** lead_capture.py + core/lead_memory.py.
-**flag:** LEAD_MEMORY (קיים, כבוי).
+### N02 / N03 — Lead Scoring + Lead Memory Wire-up ✅ מיושם
+**lead_capture.py בלבד** — single path:
+1. יצירת Lead ב-Airtable (`LEAD_CAPTURE=true`)
+2. `_score_inbound_message()` → `airtable_patch(Score)` (`LEAD_SCORING=true`)
+3. `lead_memory.update()` אחרי ניקוד מוצלח (`LEAD_MEMORY=true`)
+**lead_scoring.py** הוסר — היה zombie code שכפל scoring ל-qualify_lead (buffered/cadence),
+כתב ל-TIER formula field ישירות (bypass gateway), ולא שוחרר מעולם (`LEAD_SCORING_LIVE` לא היה מוגדר).
+**flags:** LEAD_SCORING, LEAD_MEMORY (שניהם כבויים ברירת מחדל).
 
 ### N04 — Followup Activation
 **תלוי ב:** N03.
@@ -120,6 +113,14 @@
 **תלוי ב:** N02 (כדי שציונים אמיתיים יופיעו בדוח).
 **מה:** חיבור score + tier לדוח הבוקר.
 **קבצים:** daily_digest.py בלבד.
+
+### F05a — Meta WhatsApp Phase 1 (Inbound, ללא תעבורת פרודקשן)
+**מה:** `/webhooks/meta/whatsapp` (GET verify + POST inbound) — נתיב נפרד מ-Twilio.
+מנרמל payload → אותו pipeline של `run_agent()` כמו Twilio. Outbound נשאר stub כנה.
+**קבצים:** `app.py` (2 helpers + 1 route, additive בלבד).
+**guard:** `EMERGENCY_STOP_WHATSAPP` נבדק לפני כל processing.
+**env:** `META_VERIFY_TOKEN`, `META_APP_SECRET`, `META_PHONE_NUMBER_ID`, `META_ACCESS_TOKEN`.
+**סטטוס:** test-only — אין תעבורת לידים אמיתית עד F05 (חיבור Meta מלא).
 
 ---
 
@@ -249,6 +250,15 @@ Pending Decision   = COUNT(Deals WHERE Status = "Pending Decision")
 מצב: **תשתית קיימת** — followup_engine.py בנוי. scheduler job קיים (כבוי).
 תלוי ב: N04 (N04 הוא גרסת MVP — F11 הוא הגרסה המלאה עם טיוטות וזיכרון).
 קבצים: core/followup_engine.py (קיים), scheduler.py.
+
+---
+
+## Known Issues / Tech Debt (מתועד, לא קריטי)
+
+| פריט | תיאור | מתי לטפל |
+|------|--------|----------|
+| `_ALIAS_MAP` כפול | מיפוי English→Hebrew זהה קיים גם ב-`tools/dispatcher.py:43` וגם ב-`tools/airtable_tools.py:111`. סנכרוני כרגע, אבל עדכון ב-אחד לא יתפשט לשני — סיכון drift שקט. | בפעם הבאה שנוגעים באחד |
+| `crm_mark_payment_paid` — approval חובה | כאשר כלי זה יוממש, **חייב** להירשם עם `requires_approval=True` לפי `SECURITY_CHECKLIST.md:62`. פעולות סימון תשלום דורשות Golden Path Approval Gate. | לפני מימוש הכלי |
 
 ---
 

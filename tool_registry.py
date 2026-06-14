@@ -83,7 +83,7 @@ _REGISTRY: dict[str, ToolMeta] = {
     ),
     "gmail_read": ToolMeta(
         name="gmail_read",
-        roles_allowed=_MANAGEMENT,
+        roles_allowed=_OWNER_ONLY,
         read_only=True,
         description_he="קריאת מיילים אחרונים"
     ),

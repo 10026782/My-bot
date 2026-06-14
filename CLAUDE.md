@@ -103,3 +103,20 @@ npm run preview
 
 - `ROADMAP.md` is **the single source of truth** for planned work — "every batch starts by reading the ROADMAP, not from memory." Other planning docs (`BOSS_MASTER_PLAN_*.md`, `BOSS_CURRENT_STATE.md`, `boss_bot_summary.md`) are archives/snapshots, not authoritative.
 - `docs/governance/SECURITY_CHECKLIST.md` defines when a security review is required (new file touching `dispatcher`/`crm`/`identity`/`auth`, new tool, new role, new endpoint) and the manual checklist to run before merging to main — consult it whenever touching identity, tenancy, registry, or endpoint auth.
+
+## כלל ברזל — "סיימתי" = מאומת, לא מוצהר
+
+לפני שמדווחים "✅ הושלם" / מסמנים ✅ בכל מסמך, חובה להריץ ולהציג בפלט:
+
+1. `git log -1 --oneline` — commit קיים מקומית
+2. `git push` בוצע בפועל (לא רק `git commit`) — הצג את הפלט
+3. אם הפיצ'ר תלוי ב-Render deploy: commit hash ב-Render dashboard מול origin/main
+4. אם רלוונטי — ציין מצב flag נוכחי ב-Render env (LEAD_SCORING, LEAD_MEMORY וכו')
+
+עדכון מסמך ל-✅ מותר **רק אחרי** ש-1-2 עברו ומוצגים. **חוסר אימות = ✅ FALSE.**
+
+תבנית חובה לסוף כל task:
+```
+STATUS: [✅ VERIFIED IN PROD | 🟡 CODE DONE, NOT VERIFIED | ❌ FAILED]
+EVIDENCE: <commit hash, push output>
+```

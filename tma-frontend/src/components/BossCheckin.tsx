@@ -3,7 +3,7 @@
 // Visual style intentionally unchanged from prototype — only data layer upgraded.
 
 import { useState, useEffect } from "react";
-import { fetchGameToday, completeTask } from "../api";
+import { fetchGameToday, completeTask, updateCheckinTaskStatus } from "../api";
 import type { GameWorld } from "../types";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -105,18 +105,8 @@ async function loadGameData(): Promise<{ tasks: Task[]; world: GameWorld | null 
   return { tasks: tasks.slice(0, 3), world: data.world ?? null };
 }
 
-async function saveTaskUpdate(task: Task): Promise<void> {
-  // TODO: PATCH /api/game/tasks/{task.id} — topic, urgency, source, required
-  void task;
-}
-
 async function markTaskDone(task: Task): Promise<void> {
   if (task.id) await completeTask(task.id);
-}
-
-async function resetDay(incompleteTasks: Task[]): Promise<void> {
-  // TODO: mark carry-over candidates + POST daily summary
-  void incompleteTasks;
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -336,6 +326,12 @@ export function BossCheckin({ onBack, streak = 0 }: Props) {
   const [tasks,   setTasks]   = useState<Task[]>([]);
   const [world,   setWorld]   = useState<GameWorld | null>(null);
   const [loading, setLoading] = useState(true);
+  const [toast,   setToast]   = useState<string | null>(null);
+
+  function showToast(msg: string) {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3500);
+  }
 
   function load() {
     setLoading(true);
@@ -345,6 +341,15 @@ export function BossCheckin({ onBack, streak = 0 }: Props) {
   }
 
   useEffect(() => { load(); }, []);
+
+  async function saveTaskUpdate(task: Task) {
+    if (!task.id) return;
+    try {
+      await updateCheckinTaskStatus(task.id, task.status);
+    } catch {
+      showToast("⚠️ שגיאה בשמירה — נסה שוב");
+    }
+  }
 
   const doneTasks      = tasks.filter(t => t.status === "done");
   const totalXP        = doneTasks.reduce((s, t) => s + t.xp, 0);
@@ -374,9 +379,7 @@ export function BossCheckin({ onBack, streak = 0 }: Props) {
   }
 
   function handleReset() {
-    const incomplete = tasks.filter(t => t.status === "todo");
-    const withCarryOver = incomplete.map(t => ({ ...t, carry_over_candidate: true }));
-    resetDay(withCarryOver);
+    // Carry-over (coins/points/hours) intentionally NOT implemented — future item, see ROADMAP.md
     load();
   }
 
@@ -390,6 +393,11 @@ export function BossCheckin({ onBack, streak = 0 }: Props) {
 
   return (
     <div style={{ minHeight: "100vh", background: "#030712", fontFamily: "'Segoe UI', Arial, sans-serif", direction: "rtl", padding: "20px 16px" }}>
+      {toast && (
+        <div style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", background: "#1f2937", color: "#f9fafb", padding: "10px 20px", borderRadius: 8, fontSize: 13, zIndex: 1000 }}>
+          {toast}
+        </div>
+      )}
       <div style={{ maxWidth: 480, margin: "0 auto" }}>
 
         {/* Header */}

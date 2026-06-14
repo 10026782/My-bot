@@ -5,6 +5,8 @@
 #   resolve_identity ג†’ route_request ג†’ build_context ג†’ run_agent
 
 import os
+import hmac
+import hashlib
 import logging
 import threading
 from flask import Flask, request, Response, abort, jsonify
@@ -129,6 +131,44 @@ def _validate_twilio_signature() -> bool:
         request.form.to_dict(flat=True),
         signature,
     )
+
+def _validate_meta_signature() -> bool:
+    """X-Hub-Signature-256 מול META_APP_SECRET (HMAC-SHA256)."""
+    app_secret = os.environ.get("META_APP_SECRET", "")
+    sig_header = request.headers.get("X-Hub-Signature-256", "")
+    if not app_secret or not sig_header:
+        logger.warning("[Meta WhatsApp] חסר app secret או חתימה")
+        return False
+    if not sig_header.startswith("sha256="):
+        return False
+    expected = "sha256=" + hmac.new(
+        app_secret.encode("utf-8"),
+        request.get_data(),
+        hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(expected, sig_header)
+
+
+def _normalize_meta_payload(payload: dict) -> dict | None:
+    """
+    מחזיר dict עם: text, from, to, msg_id.
+    מחזיר None אם אין הודעה נכנסת (למשל קריאת status/read/delivery).
+    """
+    try:
+        entry = payload["entry"][0]["changes"][0]["value"]
+        messages = entry.get("messages")
+        if not messages:
+            return None
+        msg = messages[0]
+        return {
+            "text":   msg.get("text", {}).get("body", ""),
+            "from":   msg.get("from", "unknown"),
+            "to":     entry.get("metadata", {}).get("display_phone_number", "unknown"),
+            "msg_id": msg.get("id", ""),
+        }
+    except (KeyError, IndexError, TypeError):
+        return None
+
 
 from tma_api import tma_api as _tma_blueprint
 app.register_blueprint(_tma_blueprint)
@@ -636,12 +676,6 @@ def run_agent(
         except Exception as e:
             logger.error(f"[LeadCapture] failed for {identity.memory_key}: {e}")
 
-        # ג”€ג”€ 1.6. Live Lead Scoring (N02) ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
-        try:
-            from lead_scoring import score_inbound_lead
-            score_inbound_lead(identity, user_text)
-        except Exception as e:
-            logger.error(f"[LeadScoring] failed for {identity.memory_key}: {e}")
 
     # ג”€ג”€ 2. Rate Limit ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
     if not rate_limiter.is_allowed(identity.memory_key):
@@ -1000,6 +1034,60 @@ def webhook_whatsapp():
         domain_from_channel = domain_from_channel,
     ))
     return Response(str(resp), mimetype="application/xml")
+
+
+# ════════════════════════════════════════════════════════════════
+# F05a — Meta WhatsApp Cloud API (Phase 1 — inbound only)
+# ════════════════════════════════════════════════════════════════
+
+@app.route("/webhooks/meta/whatsapp", methods=["GET", "POST"])
+def webhook_meta_whatsapp():
+    if request.method == "GET":
+        mode      = request.args.get("hub.mode")
+        token     = request.args.get("hub.verify_token")
+        challenge = request.args.get("hub.challenge", "")
+        expected_token = os.environ.get("META_VERIFY_TOKEN", "")
+        if mode == "subscribe" and expected_token and token == expected_token:
+            return challenge, 200
+        logger.warning("[Meta WhatsApp] אימות GET נכשל")
+        return "Forbidden", 403
+
+    # ── POST ──────────────────────────────────────────────────────
+    if _flag_enabled("EMERGENCY_STOP_WHATSAPP"):
+        logger.warning("[Meta WhatsApp] EMERGENCY_STOP_WHATSAPP פעיל — מתעלם")
+        return jsonify({"status": "stopped"}), 200
+
+    if not _validate_meta_signature():
+        return Response("Forbidden", status=403)
+
+    payload    = request.get_json(silent=True) or {}
+    normalized = _normalize_meta_payload(payload)
+    if normalized is None:
+        return jsonify({"status": "ignored"}), 200
+
+    incoming      = normalized["text"]
+    sender        = normalized["from"]
+    to_number     = normalized["to"]
+    msg_id        = normalized["msg_id"]
+
+    if _is_junk_inbound_text(incoming):
+        logger.info("[Meta WhatsApp] junk inbound — מתעלם לפני LLM")
+        return jsonify({"status": "ignored"}), 200
+
+    if idempotency.is_duplicate("whatsapp_meta", sender, msg_id):
+        return jsonify({"status": "duplicate"}), 200
+
+    domain_from_channel = _channel_domain(to_number)
+
+    reply = run_agent(
+        incoming, sender,
+        channel             = "whatsapp",
+        domain_from_channel = domain_from_channel,
+    )
+
+    # Outbound — stub כנה: מחשב תשובה, לא שולח (Phase 1)
+    logger.info("[Meta WhatsApp] תשובה נוצרה (stub — לא נשלחה): %s", reply[:100])
+    return jsonify({"status": "received"}), 200
 
 
 WORKER_SECRET = os.environ.get("WORKER_SECRET", "")
