@@ -173,3 +173,6 @@ Reason: Quests, Coins_Log, Worlds, and Daily_Tasks runtime paths exist. Roadmap_
 - Assets table name needs runtime Airtable metadata confirmation.
 - Registry statuses are governance statuses, while system_registry_audit.py still reports operational statuses OK/EMPTY/MISSING/BROKEN.
 - Some tables are schema-backed but not active in current runtime routes; these are marked UNUSED rather than deleted.
+# ARCHIVED - historical registry report
+
+This file is no longer an active source of truth as of 2026-06-14. Use `ROADMAP.md` for active priorities and `BOSS_CURRENT_STATE.md` for implementation reality, decisions, and known risks.

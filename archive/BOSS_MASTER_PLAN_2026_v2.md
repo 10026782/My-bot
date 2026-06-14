@@ -70,3 +70,6 @@ Backend audit, Airtable audit, screen audit, roadmap audit, production readiness
 > `BOSS_MASTER_PLAN_GAP_ANALYSIS.md` in this repo, which compare these "Completed" claims
 > against actual runtime status (many items listed as Completed here are PARTIAL/STUB/BROKEN
 > in practice as of the 2026-06-07 audit).
+# ARCHIVED - historical planning note
+
+This file is no longer an active source of truth as of 2026-06-14. Use `ROADMAP.md` for active priorities and `BOSS_CURRENT_STATE.md` for implementation reality, decisions, and known risks.
