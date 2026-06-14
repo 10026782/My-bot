@@ -114,7 +114,8 @@ run_agent() → conversational reply only
 | Event Bus | WORKING | Fail-closed: success only on real handler execution |
 | lead_qualifier | PARTIAL | TypeError fixed (C26); state machine = dead code (no live callers) |
 | lead_memory | PARTIAL | Debounce engine built and tested; not wired (N03) |
-| Lead Scoring | PARTIAL | `lead_capture.py` — קוד ו-write path תקינים; LEAD_SCORING flag כבוי ברירת מחדל, לא אומת בפרודקשן |
+| Lead Scoring (N02) | PARTIAL | `lead_capture.py` — scoring + gateway write; `lead_scoring.py` הוסר (zombie); LEAD_SCORING כבוי ברירת מחדל |
+| Lead Memory (N03) | PARTIAL | `lead_memory.update()` מחובר ל-`lead_capture.py` אחרי scoring; LEAD_MEMORY כבוי ברירת מחדל |
 | Google integrations | PARTIAL | Merge conflict resolved; OAuth/env still required |
 | Email tools | PARTIAL | Import fixed; honest stub until Google Tools live |
 | Airtable integrations | WORKING | Single write-path (W2 gateway); schema/alias/read-only/linked-record all centralized |

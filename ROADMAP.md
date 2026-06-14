@@ -35,7 +35,7 @@
 |----|----|----|------|
 | C12 | Lead Events (audit log) | core/lead_events.py | |
 | C13 | Shared Memory (תובנות עסקיות לפי דומיין) | core/shared_memory.py | |
-| ~~C14~~ | ~~Lead Scoring~~ | ~~core/lead_scoring.py~~ | **קובץ לא קיים — הוסר מ-Completed** |
+| ~~C14~~ | ~~Lead Scoring~~ | ~~lead_scoring.py~~ | **הוסר — zombie file; scoring consolidated ל-lead_capture.py (N02/N03)** |
 
 ### CRM + Storage
 | ID | שם | קבצים |
@@ -94,21 +94,14 @@
 
 ### N01 — ✅ הושלם (W1 לעיל)
 
-### N02 — Live Lead Scoring
-**למה עכשיו:** W0 יוצר ליד ב-Airtable. עכשיו צריך לתת לו ציון בזמן יצירה.
-**מה:** scoring בסיסי בתוך lead_capture.py — לא מודול נפרד.
-- ציין פרויקט ספציפי? +20
-- שאל על מחיר? +15
-- ציין תקציב? +25
-- כותב score + tier לאותה שורת Airtable של W0
-**קבצים:** lead_capture.py בלבד.
-**flag:** LEAD_SCORING (כבוי ברירת מחדל).
-
-### N03 — Lead Memory Wire-up
-**תלוי ב:** N02 (צריך score אמיתי לפני זיכרון).
-**מה:** חיבור lead_memory.update() לתוך lead_capture — אחרי create/score.
-**קבצים:** lead_capture.py + core/lead_memory.py.
-**flag:** LEAD_MEMORY (קיים, כבוי).
+### N02 / N03 — Lead Scoring + Lead Memory Wire-up ✅ מיושם
+**lead_capture.py בלבד** — single path:
+1. יצירת Lead ב-Airtable (`LEAD_CAPTURE=true`)
+2. `_score_inbound_message()` → `airtable_patch(Score)` (`LEAD_SCORING=true`)
+3. `lead_memory.update()` אחרי ניקוד מוצלח (`LEAD_MEMORY=true`)
+**lead_scoring.py** הוסר — היה zombie code שכפל scoring ל-qualify_lead (buffered/cadence),
+כתב ל-TIER formula field ישירות (bypass gateway), ולא שוחרר מעולם (`LEAD_SCORING_LIVE` לא היה מוגדר).
+**flags:** LEAD_SCORING, LEAD_MEMORY (שניהם כבויים ברירת מחדל).
 
 ### N04 — Followup Activation
 **תלוי ב:** N03.

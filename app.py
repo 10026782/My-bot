@@ -676,12 +676,6 @@ def run_agent(
         except Exception as e:
             logger.error(f"[LeadCapture] failed for {identity.memory_key}: {e}")
 
-        # ג”€ג”€ 1.6. Live Lead Scoring (N02) ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
-        try:
-            from lead_scoring import score_inbound_lead
-            score_inbound_lead(identity, user_text)
-        except Exception as e:
-            logger.error(f"[LeadScoring] failed for {identity.memory_key}: {e}")
 
     # ג”€ג”€ 2. Rate Limit ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
     if not rate_limiter.is_allowed(identity.memory_key):
