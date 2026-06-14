@@ -98,16 +98,18 @@
 **lead_capture.py בלבד** — single path:
 1. יצירת Lead ב-Airtable (`LEAD_CAPTURE=true`)
 2. `_score_inbound_message()` → `airtable_patch(Score)` (`LEAD_SCORING=true`)
-3. `lead_memory.update()` אחרי ניקוד מוצלח (`LEAD_MEMORY=true`)
-**lead_scoring.py** הוסר — היה zombie code שכפל scoring ל-qualify_lead (buffered/cadence),
-כתב ל-TIER formula field ישירות (bypass gateway), ולא שוחרר מעולם (`LEAD_SCORING_LIVE` לא היה מוגדר).
+3. `lead_memory.update()` עם `domain/channel/contact_name/summary/last_message` — **תמיד** בעת create, גייטד ב-`LEAD_MEMORY` בלבד (N04-A)
+4. `lead_memory.update()` עם `tier/score/record_id` אחרי scoring (N04-B)
+**lead_scoring.py** הוסר — היה zombie code.
 **flags:** LEAD_SCORING, LEAD_MEMORY (שניהם כבויים ברירת מחדל).
+**commits:** 4d1130a (consolidation), 02f7e75 (N04-A/B wiring)
 
-### N04 — Followup Activation
-**תלוי ב:** N03.
-**מה:** scheduler scan → לידים עם tier=HOT ללא מגע 24 שעות → שולח לאישור owner.
-**קבצים:** core/followup_engine.py, scheduler.py.
-**flag:** FOLLOWUP_AUTOMATION (קיים, כבוי).
+### N04 — Followup Activation ✅ scheduler מחובר (flag כבוי)
+`scheduler._job_followup_scan()` רץ כל 60 דקות, קורא ל-`followup_engine.run_followup_scan()`.
+גייטד ב-`FOLLOWUP_AUTOMATION=true` — כבוי ברירת מחדל.
+`lead_memory.all_active()` מחזיר כעת entries אמיתיים (N04-A/B — commit 02f7e75).
+**המתנה לפני הפעלה**: לאמת ב-Render env עם הודעת WhatsApp אמיתית + `LEAD_CAPTURE=true`.
+**קבצים:** `scheduler.py` (קיים), `followup_engine.py` (קיים).
 
 ### N05 — Daily Digest שדרוג
 **תלוי ב:** N02 (כדי שציונים אמיתיים יופיעו בדוח).

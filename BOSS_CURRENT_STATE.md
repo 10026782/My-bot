@@ -115,9 +115,10 @@ run_agent() → conversational reply only
 | Approval system | PARTIAL | Honest UX; 4 subscribers; pending_approvals in app.py; TMA write approval path executes queued writes after approve |
 | Event Bus | WORKING | Fail-closed: success only on real handler execution |
 | lead_qualifier | PARTIAL | TypeError fixed (C26); state machine = dead code (no live callers) |
-| lead_memory | PARTIAL | Debounce engine built and tested; not wired (N03) |
-| Lead Scoring (N02) | PARTIAL | `lead_capture.py` — scoring + gateway write; `lead_scoring.py` הוסר (zombie); LEAD_SCORING כבוי ברירת מחדל |
-| Lead Memory (N03) | PARTIAL | `lead_memory.update()` מחובר ל-`lead_capture.py` אחרי scoring; LEAD_MEMORY כבוי ברירת מחדל |
+| lead_memory | PARTIAL | מחובר ל-`lead_capture.py` (N04-A/B, commit 02f7e75); stores domain/channel/contact_name/score/tier/record_id; LEAD_MEMORY כבוי ברירת מחדל |
+| Lead Scoring (N02) | PARTIAL | `lead_capture.py` — scoring + gateway write; LEAD_SCORING כבוי ברירת מחדל; לא אומת בפרודקשן |
+| Lead Memory (N03/N04-A/B) | PARTIAL | `lead_memory.update()`: basic info בכל create (N04-A) + tier/score/record_id אחרי scoring (N04-B); LEAD_MEMORY כבוי ברירת מחדל |
+| Followup Automation (N04) | PARTIAL | scheduler `_job_followup_scan()` → `run_followup_scan()` קיים ומחובר; `FOLLOWUP_AUTOMATION=false` ברירת מחדל; `all_active()` מחזיר data אמיתי אחרי N04-A/B |
 | Google integrations | PARTIAL | Merge conflict resolved; OAuth/env still required |
 | Email tools | PARTIAL | Import fixed; honest stub until Google Tools live |
 | Airtable integrations | WORKING | Single write-path (W2 gateway); schema/alias/read-only/linked-record all centralized |
@@ -193,8 +194,8 @@ Full audit: 54 onClick handlers across 12 components. Results:
 |------|----------|-----------------|
 | Receipt persistence/display | ?? | Receipt is returned after approval execution, but not persisted or shown in Activity Feed |
 | N02 Live Lead Scoring | 🟡 PARTIAL | קוד תקין ו-write path תוקן (gateway, f964070). Score נכתב רק כש-LEAD_CAPTURE=True **וגם** LEAD_SCORING=True — שניהם כבויים ברירת מחדל. לא אומת בפועל עם הודעת WhatsApp אמיתית. |
-| N03 Lead Memory wire-up | 🟠 After N02 | lead_capture.py + lead_memory.py |
-| N04 Followup Activation | 🟠 After N03 | scheduler + followup_engine |
+| N03/N04-A/B Lead Memory wire-up | ✅ CODE DONE | lead_capture.py + lead_memory.py — commit 02f7e75; לא אומת בפרודקשן |
+| N04 Followup Activation (scheduler) | ✅ CODE DONE | scheduler._job_followup_scan() מחובר; FOLLOWUP_AUTOMATION=false; ממתין לאמות ב-Render |
 | Airtable schema formula mismatch (remaining fields) | ✅ RESOLVED | airtable_gateway.py is now the single write path — all normalization/validation/coercion centralized (W2, f964070) |
 | core_knowledge.py smoke test false positive | 🟡 | Known — _NEVER_FAKE_CONTROL phrase triggers fake-approval check |
 | WhatsApp outbound (real) | ⏸ Blocked | Meta Cloud API approval pending |
