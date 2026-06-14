@@ -111,6 +111,12 @@
 **המתנה לפני הפעלה**: לאמת ב-Render env עם הודעת WhatsApp אמיתית + `LEAD_CAPTURE=true`.
 **קבצים:** `scheduler.py` (קיים), `followup_engine.py` (קיים).
 
+### N05-B — send_followup.confirmed handler ✅ מיושם (commit 643f929)
+Owner מאשר followup → טיוטה מגיעה ב-Telegram לשליחה ידנית.
+`lead_memory.followup_count` מתעדכן אחרי כל אישור.
+**אין שליחה יוצאת לליד** — Meta outbound blocked עד N05-C.
+**flag:** `FOLLOWUP_AUTOMATION` (אותו gate כמו N04).
+
 ### N05 — Daily Digest שדרוג
 **תלוי ב:** N02 (כדי שציונים אמיתיים יופיעו בדוח).
 **מה:** חיבור score + tier לדוח הבוקר.
