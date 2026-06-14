@@ -348,11 +348,25 @@ def _clean_fields_select_values(table: str, fields: dict) -> dict:
     return cleaned
 
 
+# Allowlist of tables that TMA write-through-approval is permitted to touch.
+_TMA_WRITE_ALLOWED_TABLES = {
+    "Leads",
+    "משימות (Tasks)", "Tasks",
+    "ProjectsHub",
+    "Approvals",
+    "אנשי קשר (Contacts)", "Contacts",
+}
+
+
 def _execute_tma_write(payload: dict, approved_by_identity) -> dict:
     action = payload.get("action", "")
     table = payload.get("table", "")
     requested_by = payload.get("requested_by", "unknown")
     approved_by = _identity_ref(approved_by_identity)
+
+    if table not in _TMA_WRITE_ALLOWED_TABLES:
+        logger.error(f"_execute_tma_write: table '{table}' not in allowlist — rejected")
+        return {"ok": False, "error": f"table '{table}' is not permitted for TMA writes"}
 
     if payload.get("op") == "post":
         rec = _at_post(table, payload.get("fields", {}))
@@ -1157,12 +1171,27 @@ def create_lead_task(lead_id, identity):
     # קישור ליד — linked record array
     task_fields[TaskFields.LEAD_LINK] = [lead_id]
 
-    rec = _at_post(Tables.TASKS, task_fields)
-    if not rec:
-        return jsonify({"error": "task creation failed"}), 500
+    if identity.is_owner:
+        rec = _at_post(Tables.TASKS, task_fields)
+        if not rec:
+            return jsonify({"error": "task creation failed"}), 500
+        _audit("lead_task_created", identity, details=f"lead={lead_name} task={title}")
+        return jsonify({"ok": True, "id": rec.get("id", ""), "lead_id": lead_id}), 201
 
-    _audit("lead_task_created", identity, details=f"lead={lead_name} task={title}")
-    return jsonify({"ok": True, "id": rec.get("id", ""), "lead_id": lead_id}), 201
+    # Manager: queue for owner approval (consistent with patch_lead / set_lead_outcome)
+    _, response = _queue_tma_write_approval(
+        "tma_create_lead_task",
+        {
+            "op":            "post",
+            "table":         Tables.TASKS,
+            "fields":        task_fields,
+            "audit_action":  "lead_task_created",
+            "audit_details": f"lead={lead_name} task={title}",
+        },
+        identity,
+        f"Create task for lead: {lead_name} — {title}",
+    )
+    return jsonify(response), 202
 
 
 # WEEK 1 — Follow-Up (O3 Action)
