@@ -305,8 +305,8 @@ This file is one of the two active planning sources of truth. The other is `ROAD
 
 | Item | Status | Runtime evidence |
 |---|---|---|
-| N02 Live Lead Scoring | PARTIAL | `lead_capture.py` has inline first-message scoring behind `LEAD_SCORING`; `lead_scoring.py` has a separate buffered scorer behind `LEAD_SCORING_LIVE`; `app.py` calls both paths for `Role.LEAD`. Both flags default off. |
-| N03 Lead Memory Wire-up | PARTIAL | `lead_memory.py` exists and `lead_scoring.py` can sync memory behind `LEAD_MEMORY`; `lead_capture.py` does not call `lead_memory.update()` after create/score. |
+| N02 Live Lead Scoring | PARTIAL | `lead_capture.py` has inline first-message scoring behind `LEAD_SCORING`; the old `lead_scoring.py` zombie path was removed. `LEAD_CAPTURE` and `LEAD_SCORING` default off. |
+| N03 Lead Memory Wire-up | PARTIAL | `lead_memory.update()` is wired from `lead_capture.py` after successful scoring when `LEAD_MEMORY` is enabled; `LEAD_MEMORY` defaults off. |
 | N04 Followup Activation | PARTIAL | `scheduler.py` registers `_job_followup_scan`; `followup_engine.py` queues approval requests behind `FOLLOWUP_AUTOMATION`; depends on populated `lead_memory`. |
 | N05 Daily Digest upgrade | PARTIAL | `daily_digest.py` displays score, but `_hot_leads()` filters only by `status=hot/Hot/HOT`, not by score/tier. |
 | Meta WhatsApp work | BLOCKED | Inbound Twilio webhook exists with signature validation; outbound remains an honest stub / not active pending Meta Cloud API. |
@@ -323,13 +323,10 @@ Lead Scoring is partially implemented and flag-gated, not missing and not proven
 - `lead_capture.py:96` exits unless `LEAD_CAPTURE` is enabled.
 - `lead_capture.py:130` runs inline scoring only when `LEAD_SCORING` is enabled.
 - `lead_capture.py:134-138` computes score/tier but writes only `LeadFields.SCORE` via `tools.airtable_gateway.airtable_patch()`.
-- `lead_scoring.py:34` defines a separate `score_inbound_lead()` flow.
-- `lead_scoring.py:41` exits unless `LEAD_SCORING_LIVE` is enabled.
-- `lead_scoring.py:68-82` searches the existing Lead and writes score/tier/summary via `airtable_update()`.
-- `lead_scoring.py:90-108` syncs `lead_memory` only if `LEAD_MEMORY` is enabled.
-- `app.py:632-642` calls `capture_inbound_lead()` and then `score_inbound_lead()` for `Role.LEAD`.
+- `lead_capture.py` syncs `lead_memory` after successful scoring only if `LEAD_MEMORY` is enabled.
+- `app.py` calls `capture_inbound_lead()` for `Role.LEAD`; there is no separate scoring module import.
 
-Open mismatch: the current roadmap says N02 should be scoring inside `lead_capture.py` only with flag `LEAD_SCORING`, but the code also has `lead_scoring.py` with `LEAD_SCORING_LIVE`. The older `lead_scoring.py` path writes `LeadFields.TIER` even though newer docs/code treat tier as a read-only formula field.
+Resolved mismatch: scoring is consolidated into `lead_capture.py`; the old separate scoring path was removed.
 
 ## Security checklist consolidation
 

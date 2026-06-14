@@ -304,8 +304,8 @@ Active planning source of truth is now limited to:
 All other planning/report Markdown files are archived historical evidence unless a future batch explicitly promotes content back into one of these two files.
 
 Current verified status for N02-N05:
-- N02 Live Lead Scoring: PARTIAL. Code exists in both `lead_capture.py` (`LEAD_SCORING`) and `lead_scoring.py` (`LEAD_SCORING_LIVE`), both default off. Not verified active in production.
-- N03 Lead Memory Wire-up: PARTIAL. `lead_memory.py` exists and `lead_scoring.py` can sync it behind `LEAD_MEMORY`, but `lead_capture.py` does not wire memory after create/score.
+- N02 Live Lead Scoring: PARTIAL. Code exists in `lead_capture.py` behind `LEAD_SCORING`; default off and not verified active in production.
+- N03 Lead Memory Wire-up: PARTIAL. `lead_memory.update()` is wired from `lead_capture.py` after successful scoring behind `LEAD_MEMORY`; default off and not verified active in production.
 - N04 Followup Activation: PARTIAL. Scheduler job and approval queuing exist behind `FOLLOWUP_AUTOMATION`, but the flow depends on populated `lead_memory` and is not active end-to-end.
 - N05 Daily Digest upgrade: PARTIAL. Digest reads `Score`, but hot-lead filtering still uses status only and does not filter by score/tier as documented.
 
