@@ -63,7 +63,8 @@ class LeadMemory:
     def update(self, memory_key: str, *, tier="", score=-1,
                domain="", channel="", contact_name="",
                last_message="", summary="",
-               followup_count=-1, recovery_count=-1) -> bool:
+               followup_count=-1, recovery_count=-1,
+               record_id="") -> bool:
         with self._lock:
             state        = self._get_unlocked(memory_key)
             tier_changed = False
@@ -80,6 +81,7 @@ class LeadMemory:
             if domain:        state.domain        = domain
             if channel:       state.channel       = channel
             if contact_name:  state.contact_name  = contact_name
+            if record_id:     state.record_id     = record_id
             if last_message:
                 state.last_message = last_message[:200]
                 state.dirty        = True
