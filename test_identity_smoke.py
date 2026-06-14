@@ -1,5 +1,5 @@
 """
-Smoke test — Identity normalization (ARCHITECTURE_DRIFT_MAP.md #6)
+Smoke test — Identity normalization (docs/governance/ARCHITECTURE_DRIFT_MAP.md #6)
 Piggyback trigger: לפני חיבור Meta WhatsApp Cloud API.
 
 4 מקרים:
@@ -60,7 +60,7 @@ def run():
     finally:
         _id_mod._REGISTRY = original
 
-    print("\n=== Identity Smoke Test (ARCHITECTURE_DRIFT_MAP.md #6) ===")
+    print("\n=== Identity Smoke Test (docs/governance/ARCHITECTURE_DRIFT_MAP.md #6) ===")
     blockers = []
     for name, expected, actual, passed in results:
         status = "PASS" if passed else "FAIL ← BLOCKER"

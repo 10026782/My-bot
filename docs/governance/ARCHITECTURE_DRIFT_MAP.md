@@ -125,8 +125,8 @@
 ## עדכון מסמכי Governance
 
 מסמך זה צריך:
-1. להיכנס לריפו כ-`ARCHITECTURE_DRIFT_MAP.md` (root, ליד `ROADMAP.md`).
-2. אזכור קצר ב-`BOSS_CURRENT_STATE.md` תחת section חדש: "Known Architectural Drift — see ARCHITECTURE_DRIFT_MAP.md".
-3. אזכור ב-`MODULE_RULES.md`: "לפני הוספת writer/sender/notifier חדש — בדוק ARCHITECTURE_DRIFT_MAP.md אם הקובץ הזה כבר מסומן לdrift".
+1. קובץ זה נמצא ב-`docs/governance/ARCHITECTURE_DRIFT_MAP.md`.
+2. אזכור קצר ב-`BOSS_CURRENT_STATE.md` תחת section "Known Architectural Drift — see docs/governance/ARCHITECTURE_DRIFT_MAP.md".
+3. אזכור ב-`docs/governance/MODULE_RULES.md`: "לפני הוספת writer/sender/notifier חדש — בדוק ARCHITECTURE_DRIFT_MAP.md אם הקובץ הזה כבר מסומן לdrift".
 
 **לא לעדכן** `ROADMAP.md` הראשי עם 8 השורות — זה ייצור רעש. הקישור ל-roadmap הוא רק דרך ה-"Piggyback Trigger" column, שמופעל כשמגיעים לאיטם המתאים באופן אורגני.

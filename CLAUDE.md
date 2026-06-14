@@ -59,7 +59,7 @@ This is the security-critical core — **"Iron rule: no Tool without a permissio
 - `tools/dispatcher.py`: the **single entry point** for all tool execution — `dispatch_tool(name, inputs, identity)`. It performs dedup checks (`_DEDUP_FIELDS`), table-name aliasing (`_ALIAS_MAP`), and routes to the concrete tool implementations in `tools/` (drive, calendar, gmail, sheets, airtable, contact_resolver).
 - `tools/airtable_security.py`: `enforce_tenant_scope()` must be called before any raw Airtable read/write to prevent cross-tenant data leaks; `audit_log_airtable()` logs all access.
 - `_MEMORABLE_TOOLS` in `app.py` lists tools whose results get persisted to memory across agent turns (e.g. `airtable_add`, `calendar_create_event`).
-- **Never** import tool functions (e.g. from `crm` or `airtable_tools`) directly outside of the dispatcher/digest/scheduler/collector modules — this bypasses identity and tenant enforcement (see the grep check in `SECURITY_CHECKLIST.md`).
+- **Never** import tool functions (e.g. from `crm` or `airtable_tools`) directly outside of the dispatcher/digest/scheduler/collector modules — this bypasses identity and tenant enforcement (see the grep check in `docs/governance/SECURITY_CHECKLIST.md`).
 
 ### Approval flow
 
@@ -69,12 +69,12 @@ High-risk/irreversible actions (`requires_approval=True` in the registry, e.g. `
 
 ## Adding a new tool — checklist
 
-(from `SECURITY_CHECKLIST.md`, required before merging)
+(from `docs/governance/SECURITY_CHECKLIST.md`, required before merging)
 1. Implement it in the relevant `tools/*.py` module.
 2. Add its JSON schema to `tools/schemas.py`.
 3. Register it in `tool_registry.py` with correct `roles_allowed` (and `requires_approval`/`high_risk`/`tenant_scoped` as needed).
 4. Wire it into `tools/dispatcher.py`'s dispatch switch.
-5. Run the grep checks in `SECURITY_CHECKLIST.md` (e.g. confirm every `case "..."` in the dispatcher has a matching registry entry).
+5. Run the grep checks in `docs/governance/SECURITY_CHECKLIST.md` (e.g. confirm every `case "..."` in the dispatcher has a matching registry entry).
 
 ## Other key modules
 
@@ -102,4 +102,4 @@ npm run preview
 ## Planning & docs conventions
 
 - `ROADMAP.md` is **the single source of truth** for planned work — "every batch starts by reading the ROADMAP, not from memory." Other planning docs (`BOSS_MASTER_PLAN_*.md`, `BOSS_CURRENT_STATE.md`, `boss_bot_summary.md`) are archives/snapshots, not authoritative.
-- `SECURITY_CHECKLIST.md` defines when a security review is required (new file touching `dispatcher`/`crm`/`identity`/`auth`, new tool, new role, new endpoint) and the manual checklist to run before merging to main — consult it whenever touching identity, tenancy, registry, or endpoint auth.
+- `docs/governance/SECURITY_CHECKLIST.md` defines when a security review is required (new file touching `dispatcher`/`crm`/`identity`/`auth`, new tool, new role, new endpoint) and the manual checklist to run before merging to main — consult it whenever touching identity, tenancy, registry, or endpoint auth.
