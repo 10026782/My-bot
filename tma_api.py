@@ -26,6 +26,7 @@ from airtable_schema import (
     RoadmapTaskFields, RoadmapTaskStatus,
 )
 from tools.airtable_gateway import airtable_patch as _gw_patch, airtable_create as _gw_create
+from health_monitor import get_health_status
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,7 @@ def _cors(response):
 @tma_api.route("/api/approvals/bulk", methods=["OPTIONS"])
 @tma_api.route("/api/finance/pulse", methods=["OPTIONS"])
 @tma_api.route("/api/owner/control-center", methods=["OPTIONS"])
+@tma_api.route("/api/owner/health", methods=["OPTIONS"])
 def _preflight():
     return "", 204
 
@@ -1637,6 +1639,20 @@ def _owner_strategic_pipeline() -> dict:
     except Exception as e:
         logger.warning(f"[StrategicPipeline] {e}")
         return {"new_opportunities": 0, "in_evaluation": 0, "pending_decision": 0}
+
+
+@tma_api.route("/api/owner/health", methods=["GET"])
+@require_tma_auth
+def owner_health(identity):
+    if not identity.is_owner:
+        return jsonify({"error": "owner only"}), 403
+    health_status = get_health_status(scheduler=None, memory=None)
+    return jsonify({
+        "status":  health_status["status"],
+        "version": "3.0",
+        "router":  "CORE_02.6",
+        "checks":  health_status["checks"],
+    }), 200
 
 
 @tma_api.route("/api/owner/control-center", methods=["GET"])

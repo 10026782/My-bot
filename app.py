@@ -590,15 +590,15 @@ def _safe_route(text: str, channel: str, identity, domain_from_channel: str = ""
             domain_from_channel = domain_from_channel,
         )
     except Exception as e:
-        logger.error(f"[Router] FAILED ג€” fallback to safe defaults: {e}", exc_info=True)
+        logger.error(f"[Router] FAILED — fallback fail-closed: {e}", exc_info=True)
         from core.router.route_decision import RouteDecision, Intent, RouterDomain, Risk, Handler
         return RouteDecision(
             channel           = channel,
             intent            = Intent.UNKNOWN,
             domain            = RouterDomain.GENERAL,
-            risk              = Risk.NORMAL,
-            handler           = Handler.AGENT,   # ׳׳׳©׳™׳›׳™׳ ג€” Agent ׳™׳˜׳₪׳
-            needs_approval    = False,
+            risk              = Risk.NEEDS_APPROVAL,  # fail-closed: router error → require approval
+            handler           = Handler.APPROVAL,
+            needs_approval    = True,
             confidence        = 0.0,
             matched_rule      = "fallback",
             response_override = "",
@@ -881,12 +881,7 @@ def run_agent(
 @app.route("/health", methods=["GET"])
 def health():
     health_status = get_health_status(globals().get("_scheduler"), memory)
-    return jsonify({
-        "status":  health_status["status"],
-        "version": "3.0",
-        "router":  "CORE_02.6",
-        "checks":  health_status["checks"],
-    }), 200
+    return jsonify({"status": health_status["status"]}), 200
 
 
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
