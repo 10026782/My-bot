@@ -106,15 +106,8 @@ _TABLE_FIELDS: dict[str, set[str]] = {
 # שדות שClaude ממציא ולא קיימים בשום טבלה
 _ALWAYS_FORBIDDEN = {"tenant", "owner_id", "user_id", "chat_id"}
 
-# מיפוי aliases ידידותיים בלבד → שמות production מ-Tables.
-# מאפשר ל-Claude להשתמש בשמות אנגליים קצרים בלי לכתוב לטבלאות הישנות.
-_TABLE_ALIAS_MAP: dict[str, str] = {
-    "Tasks":    Tables.TASKS,
-    "Contacts": Tables.CONTACTS,
-    "Deals":    Tables.DEALS,
-    "Expenses": Tables.EXPENSES,
-    "Payments": Tables.PAYMENTS,
-}
+# _TABLE_ALIAS_MAP מיובא מ-airtable_schema — מקור אמת יחיד
+from airtable_schema import TABLE_ALIASES as _TABLE_ALIAS_MAP
 
 
 def _resolve_table(table: str) -> str:

@@ -2315,3 +2315,36 @@ def complete_daily_task(task_id, identity):
     _audit("roadmap_task_done", identity, details=f"{task_name} +{coins}🪙")
     return jsonify({"ok": True, "coins_awarded": coins_awarded})
 
+
+@tma_api.route("/api/game/checkin/tasks/<task_id>", methods=["PATCH"])
+@require_tma_auth
+def update_checkin_task_status(task_id, identity):
+    """שמירת Status לרשומת Roadmap_Task מתוך BossCheckin. Owner בלבד."""
+    if not identity.is_owner:
+        return jsonify({"error": "forbidden"}), 403
+
+    data = request.get_json(force=True) or {}
+    new_status = _clean_select_value(data.get("status", ""))
+    if not new_status:
+        return jsonify({"error": "missing field: status"}), 400
+
+    valid_statuses = {
+        RoadmapTaskStatus.TODO,
+        RoadmapTaskStatus.IN_PROGRESS,
+        RoadmapTaskStatus.DONE,
+        RoadmapTaskStatus.BLOCKED,
+    }
+    if new_status not in valid_statuses:
+        return jsonify({"error": "invalid status", "valid": sorted(valid_statuses)}), 400
+
+    rec = _at_get_record(Tables.ROADMAP_TASKS, task_id)
+    if not rec:
+        return jsonify({"error": "task not found"}), 404
+
+    ok = _at_patch(Tables.ROADMAP_TASKS, task_id, {RoadmapTaskFields.STATUS: new_status})
+    if not ok:
+        return jsonify({"error": "update failed"}), 500
+
+    _audit("roadmap_task_status_update", identity, details=f"{task_id} -> {new_status}")
+    return jsonify({"ok": True, "task_id": task_id, "status": new_status})
+

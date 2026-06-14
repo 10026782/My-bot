@@ -153,6 +153,23 @@ def capture_inbound_lead(identity, message: str) -> None:
                         )
                     except Exception:
                         pass  # אסור שה-audit ישבור את ה-flow
+                    # N03 — sync to lead_memory (durable cross-restart state)
+                    if is_enabled("LEAD_MEMORY"):
+                        try:
+                            from lead_memory import lead_memory
+                            save_due = lead_memory.update(
+                                memory_key,
+                                score=score,
+                                tier=tier,
+                                summary=(message or "")[:500],
+                                last_message=message,
+                                domain=getattr(identity, "domain_id", ""),
+                                channel="whatsapp",
+                            )
+                            if save_due:
+                                lead_memory.save(memory_key)
+                        except Exception as e:
+                            logger.warning("[LeadCapture] lead_memory sync failed for %s: %s", lead_id, e)
                 except Exception as e:
                     logger.warning("[LeadCapture] scoring failed for %s: %s", lead_id, e)
         else:
