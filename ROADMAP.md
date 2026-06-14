@@ -260,6 +260,15 @@ Pending Decision   = COUNT(Deals WHERE Status = "Pending Decision")
 
 ---
 
+## Known Issues / Tech Debt (מתועד, לא קריטי)
+
+| פריט | תיאור | מתי לטפל |
+|------|--------|----------|
+| `_ALIAS_MAP` כפול | מיפוי English→Hebrew זהה קיים גם ב-`tools/dispatcher.py:43` וגם ב-`tools/airtable_tools.py:111`. סנכרוני כרגע, אבל עדכון ב-אחד לא יתפשט לשני — סיכון drift שקט. | בפעם הבאה שנוגעים באחד |
+| `crm_mark_payment_paid` — approval חובה | כאשר כלי זה יוממש, **חייב** להירשם עם `requires_approval=True` לפי `SECURITY_CHECKLIST.md:62`. פעולות סימון תשלום דורשות Golden Path Approval Gate. | לפני מימוש הכלי |
+
+---
+
 ## פערים ידועים (לא באגים — החלטות מודעות)
 
 | פער | סיבה | מתי נטפל |
