@@ -310,3 +310,6 @@ Do not present as production-ready yet:
 BOSS today is a strong prototype and internal operating shell. It has enough working pieces to continue development and demo the direction.
 
 It is not yet the completed BOSS OS described by the master plan. The gap is not just missing screens; it is reliability: Google tools, approvals, Airtable schema correctness, memory durability, and removal of mock fallbacks must be fixed before sharing with partners as a dependable product.
+# ARCHIVED - historical audit note
+
+This file is no longer an active source of truth as of 2026-06-14. Use `ROADMAP.md` for active priorities and `BOSS_CURRENT_STATE.md` for implementation reality, decisions, and known risks.

@@ -295,3 +295,33 @@ Pending Decision   = COUNT(Deals WHERE Status = "Pending Decision")
 | CLAUDE.md | הוראות לקלוד קוד — קרא ראשון |
 | ARCHIVE_additions_log.md | specs מפורטים A01–A43, היסטוריה |
 | SETUP.md | env vars, טבלאות Airtable, הפעלה ראשונה |
+## Audit note - 2026-06-14
+
+Active planning source of truth is now limited to:
+- `ROADMAP.md`: priorities, blockers, next actions.
+- `BOSS_CURRENT_STATE.md`: current architecture, implemented features, decisions, known risks.
+
+All other planning/report Markdown files are archived historical evidence unless a future batch explicitly promotes content back into one of these two files.
+
+Current verified status for N02-N05:
+- N02 Live Lead Scoring: PARTIAL. Code exists in both `lead_capture.py` (`LEAD_SCORING`) and `lead_scoring.py` (`LEAD_SCORING_LIVE`), both default off. Not verified active in production.
+- N03 Lead Memory Wire-up: PARTIAL. `lead_memory.py` exists and `lead_scoring.py` can sync it behind `LEAD_MEMORY`, but `lead_capture.py` does not wire memory after create/score.
+- N04 Followup Activation: PARTIAL. Scheduler job and approval queuing exist behind `FOLLOWUP_AUTOMATION`, but the flow depends on populated `lead_memory` and is not active end-to-end.
+- N05 Daily Digest upgrade: PARTIAL. Digest reads `Score`, but hot-lead filtering still uses status only and does not filter by score/tier as documented.
+
+Recommended next action: Fix docs first, then choose whether to activate/ship the intended single N02 path.
+
+Archived / historical Markdown disposition:
+
+| File | Disposition | Destination / section |
+|---|---|---|
+| `BOSS_MASTER_PLAN_2026_v2.md` | ARCHIVE | Historical strategy notes; active priorities live in `ROADMAP.md`. |
+| `BOSS_MASTER_PLAN_GAP_ANALYSIS.md` | ARCHIVE | Historical audit notes; superseded by `BOSS_CURRENT_STATE.md`. |
+| `boss_bot_summary.md` | ARCHIVE | Early generated implementation summary; superseded by current code and `BOSS_CURRENT_STATE.md`. |
+| `PATCH_REPORT.md` | ARCHIVE | Historical patch log; keep as evidence, not active plan. |
+| `SECURITY_CHECKLIST.md` | MERGE / ARCHIVE | Security triggers and open findings summarized in `BOSS_CURRENT_STATE.md`. |
+| `reports/capability_map.md` | ARCHIVE | Historical generated report; high-signal blockers reflected in `BOSS_CURRENT_STATE.md`. |
+| `reports/governance_mapping_report.md` | ARCHIVE | Historical governance map; table decisions reflected in `BOSS_CURRENT_STATE.md`. |
+| `reports/registry_calibration_report.md` | ARCHIVE | Historical registry calibration; keep as evidence. |
+| `reports/system_registry_report.md` | ARCHIVE | Generated environment snapshot; not an active plan. |
+| `reports/airtable_structure_governance_audit.md` | ARCHIVE | Historical Airtable governance audit; keep as evidence. |

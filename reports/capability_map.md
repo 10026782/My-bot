@@ -86,3 +86,6 @@ Health formula: WORKING=100, PARTIAL=50, STUB=20, BROKEN=0, UNUSED=10.
 - The owner can rely most on: Auth, Approvals, core TMA write gate, Payments data reads, Game tables, Governance registry.
 - The system is improving but not fully partner-ready because Leads/Followups/Memory/Receipts are still partial.
 - The most important visible blocker is receipt persistence/display after approval execution.
+# ARCHIVED - historical generated report
+
+This file is no longer an active source of truth as of 2026-06-14. Use `ROADMAP.md` for active priorities and `BOSS_CURRENT_STATE.md` for implementation reality, decisions, and known risks.

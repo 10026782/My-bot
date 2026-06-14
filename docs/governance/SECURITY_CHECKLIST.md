@@ -90,3 +90,6 @@ grep -rn "from crm import\|from airtable_tools import" --include="*.py" \
 
 *עדכן את הטבלה אחרי כל review.*
 *עדכן `LAST_SECURITY_REVIEW` ב-Render אחרי כל review.*
+# ARCHIVED - historical security checklist
+
+This file is no longer an active planning source of truth as of 2026-06-14. Active security risks are summarized in `BOSS_CURRENT_STATE.md`; active priorities live in `ROADMAP.md`.
