@@ -107,7 +107,8 @@ run_agent() → conversational reply only
 | Module | Status | Notes |
 |--------|--------|-------|
 | Telegram agent | PARTIAL | Tool chain unblocked; approval flow honest |
-| WhatsApp webhook | PARTIAL | Twilio validation active; lead capture live (flag); outbound = honest stub |
+| WhatsApp webhook (Twilio) | PARTIAL | Twilio validation active; lead capture live (flag); outbound = honest stub |
+| Meta WhatsApp (Phase 1) | PARTIAL | Inbound webhook only; GET verify + POST receive → run_agent; outbound stub; EMERGENCY_STOP_WHATSAPP gated |
 | Lead Capture | WORKING | lead_capture.py — gated by LEAD_CAPTURE flag |
 | Approval system | PARTIAL | Honest UX; 4 subscribers; pending_approvals in app.py; TMA write approval path executes queued writes after approve |
 | Event Bus | WORKING | Fail-closed: success only on real handler execution |

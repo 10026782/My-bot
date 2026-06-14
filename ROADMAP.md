@@ -121,6 +121,14 @@
 **מה:** חיבור score + tier לדוח הבוקר.
 **קבצים:** daily_digest.py בלבד.
 
+### F05a — Meta WhatsApp Phase 1 (Inbound, ללא תעבורת פרודקשן)
+**מה:** `/webhooks/meta/whatsapp` (GET verify + POST inbound) — נתיב נפרד מ-Twilio.
+מנרמל payload → אותו pipeline של `run_agent()` כמו Twilio. Outbound נשאר stub כנה.
+**קבצים:** `app.py` (2 helpers + 1 route, additive בלבד).
+**guard:** `EMERGENCY_STOP_WHATSAPP` נבדק לפני כל processing.
+**env:** `META_VERIFY_TOKEN`, `META_APP_SECRET`, `META_PHONE_NUMBER_ID`, `META_ACCESS_TOKEN`.
+**סטטוס:** test-only — אין תעבורת לידים אמיתית עד F05 (חיבור Meta מלא).
+
 ---
 
 ## 📌 Business Lifecycle Gap Analysis (נוסף 2026-06-13)
