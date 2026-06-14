@@ -344,8 +344,10 @@ export function BossCheckin({ onBack, streak = 0 }: Props) {
 
   async function saveTaskUpdate(task: Task) {
     if (!task.id) return;
+    // Map local lowercase status → canonical Airtable single-select value
+    const STATUS_MAP: Record<Task["status"], string> = { todo: "Todo", done: "Done" };
     try {
-      await updateCheckinTaskStatus(task.id, task.status);
+      await updateCheckinTaskStatus(task.id, STATUS_MAP[task.status] ?? task.status);
     } catch {
       showToast("⚠️ שגיאה בשמירה — נסה שוב");
     }
