@@ -77,7 +77,7 @@ def _cors(response):
     if allow:
         response.headers["Access-Control-Allow-Origin"]  = origin
         response.headers["Access-Control-Allow-Headers"] = (
-            "Content-Type, X-Telegram-Init-Data, X-Dev-Telegram-Id, Authorization"
+            "Content-Type, X-Telegram-Init-Data, Authorization"
         )
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, OPTIONS"
     return response
@@ -452,11 +452,9 @@ def _log_projects_auth_debug(stage: str) -> None:
         return
 
     logger.info(
-        "[TMA auth debug] path=/api/projects stage=%s dev_mode=%s "
-        "has_x_dev_telegram_id=%s has_x_telegram_init_data=%s has_origin=%s",
+        "[TMA auth debug] path=/api/projects stage=%s "
+        "has_x_telegram_init_data=%s has_origin=%s",
         stage,
-        _DEV_MODE,
-        bool(request.headers.get("X-Dev-Telegram-Id", "").strip()),
         bool(request.headers.get("X-Telegram-Init-Data", "").strip()),
         bool(request.headers.get("Origin", "").strip()),
     )
@@ -466,27 +464,11 @@ def require_tma_auth(f):
     """
     Decorator: reads X-Telegram-Init-Data header, validates HMAC on every request.
     Injects keyword arg `identity` into the wrapped handler.
-
-    DEV MODE (TMA_DEV_MODE=1): skips HMAC; reads telegram_id from X-Dev-Telegram-Id.
+    HMAC validation is always required — there is no dev bypass.
     """
     @wraps(f)
     def wrapper(*args, **kwargs):
         _log_projects_auth_debug("start")
-
-        if _DEV_MODE:
-            _log_projects_auth_debug("dev_branch")
-            dev_id = request.headers.get("X-Dev-Telegram-Id", "").strip()
-            if not dev_id:
-                _log_projects_auth_debug("401_dev_missing_x_dev_telegram_id")
-                return jsonify({
-                    "error": "DEV_MODE active — send X-Dev-Telegram-Id: <telegram_id>",
-                    "hint": "Set TMA_DEV_MODE=1 in Render env vars, then pass your Telegram numeric ID",
-                }), 401
-            identity = resolve_identity("telegram", dev_id)
-            logger.warning("[TMA DEV_MODE] bypassing HMAC for role=%s", identity.role)
-            _log_projects_auth_debug("dev_success")
-            return f(*args, identity=identity, **kwargs)
-
         _log_projects_auth_debug("telegram_branch")
         init_data = request.headers.get("X-Telegram-Init-Data", "")
         if not init_data:

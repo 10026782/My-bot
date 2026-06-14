@@ -1011,21 +1011,25 @@ def worker_trigger():
         logger.warning(f"[Worker] unauthorized attempt from {request.remote_addr}")
         return jsonify({"error": "unauthorized"}), 401
     try:
+        # chat_id is never accepted from the caller — always derived from server config
+        # to prevent impersonation even if WORKER_SECRET leaks.
+        owner_chat_id = os.environ.get("ELIYAHU_CHAT_ID", "").strip()
+        if not owner_chat_id:
+            logger.error("[Worker] ELIYAHU_CHAT_ID not configured")
+            return jsonify({"error": "server misconfiguration"}), 503
         payload = request.get_json(force=True) or {}
-        chat_id = payload.get("chat_id", "")
         event   = payload.get("event", "")
-        if not chat_id or not event:
-            return jsonify({"error": "chat_id and event required"}), 400
-        reply = run_agent(f"[׳׳™׳¨׳•׳¢ ׳׳¢׳¨׳›׳×]: {event}", chat_id)
+        if not event:
+            return jsonify({"error": "event required"}), 400
+        reply = run_agent(f"[system event]: {event}", owner_chat_id)
         try:
-            bot.send_message(chat_id, reply)
+            bot.send_message(owner_chat_id, reply)
         except Exception as e:
             logger.error(f"[Worker] telegram: {e}")
         return jsonify({"status": "ok", "reply": reply[:200]}), 200
     except Exception as e:
         logger.error(f"[Worker] trigger error: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
-
 
 @app.route("/")
 def home():

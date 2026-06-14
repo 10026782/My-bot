@@ -210,12 +210,8 @@ See `ARCHITECTURE_DRIFT_MAP.md` for the full list of 8 deferred drift items, the
 
 1. Memory is RAM-only — not durable across restarts.
 2. WhatsApp outbound is honest stub — blocked on Meta Cloud API.
-3. Worker trigger can impersonate arbitrary chat_id if WORKER_SECRET leaks.
 4. TMA partner authorization sometimes happens after record fetch.
 5. Learning engine uses mock events — no real production loop.
-6. TMA DEV_MODE bypass risk if enabled in production.
-
-**MEDIUM findings #4–7 from audit 12/06 — separate batch planned** (see Open MEDIUM Security Findings below).
 
 ---
 
@@ -229,14 +225,14 @@ See `ARCHITECTURE_DRIFT_MAP.md` for the full list of 8 deferred drift items, the
 
 ---
 
-## Open MEDIUM Security Findings (12/06 audit — pending)
+## Resolved Security Findings (audit 12/06)
 
-| # | Finding | Severity |
-|---|---------|----------|
-| 4 | `_safe_route()` drops approval gate on router exception | MEDIUM |
-| 5 | DEV_MODE HMAC bypass still wired in `require_tma_auth` + advertised in CORS | MEDIUM |
-| 6 | `/worker/trigger` accepts caller-controlled `chat_id` (impersonation risk) | MEDIUM |
-| 7 | `/health` endpoint public — exposes version + internal check state | MEDIUM |
+| # | Finding | Severity | Fix | Commit |
+|---|---------|----------|-----|--------|
+| 4 | `_safe_route()` drops approval gate on router exception | MEDIUM | Fail-closed: `Risk.NEEDS_APPROVAL, Handler.APPROVAL, needs_approval=True` | aca037b |
+| 5 | DEV_MODE HMAC bypass wired in `require_tma_auth` + CORS | MEDIUM | Removed dead `if _DEV_MODE:` block; stripped `X-Dev-Telegram-Id` from CORS headers | (Batch 2) |
+| 6 | `/worker/trigger` accepts caller-controlled `chat_id` | MEDIUM | `chat_id` removed from payload; derived server-side from `ELIYAHU_CHAT_ID` | (Batch 2) |
+| 7 | `/health` exposes version + internal check state publicly | MEDIUM | Public `/health` → `{"status"}` only; full detail moved to `/api/owner/health` (owner-auth) | aca037b |
 
 ---
 
