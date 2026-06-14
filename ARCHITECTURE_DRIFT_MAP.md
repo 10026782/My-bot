@@ -16,7 +16,7 @@
 | 3 | Approvals canonicalization | P0 | Airtable `Approvals` = source of truth | בזמן עבודה הבאה על Approval Gate / TMA Approvals screen | TODO |
 | 4 | Task taxonomy freeze | P1 | `task_gateway` (עתידי) | בזמן N04 Lead Memory (נוגע ב-task creation) | TODO |
 | 5 | Audit event schema unification | P1 | `audit_gateway` (עתידי) | בזמן עבודה על Activity Feed v2 | TODO |
-| 6 | Identity normalization (TMA↔Telegram↔WhatsApp) | P1 | `identity.py` (helpers) | לפני חיבור Meta WhatsApp בפועל (סעיף 1 ברודמאפ) | TODO |
+| 6 | Identity normalization (TMA↔Telegram↔WhatsApp) | P1 | `identity.py` (helpers) | לפני חיבור Meta WhatsApp בפועל (סעיף 1 ברודמאפ) | smoke test added — PASS (2026-06-14) |
 | 7 | Google action risk metadata centralization | P1 | `tool_registry.py` | כשהקפאת Google Tools מבוטלת | DEFERRED (Google frozen) |
 | 8 | Airtable read gateway | P2 | extend `airtable_gateway.py` | אופורטוניסטי — כל פעם שנוגעים בקובץ עם raw read | TODO |
 
