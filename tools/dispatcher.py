@@ -6,6 +6,7 @@
 from __future__ import annotations
 import logging
 import os
+import re
 import urllib.parse
 from typing import TYPE_CHECKING
 
@@ -49,13 +50,32 @@ _ALIAS_MAP: dict[str, str] = {
 }
 
 
+def _sanitize_formula_value(value: str) -> str:
+    """Strip characters that could inject into an Airtable filterByFormula string."""
+    return re.sub(r"""[\\'"``{}\[\]()]""", "", str(value))
+
+
+def _assert_balanced_parens(formula: str) -> None:
+    """Raise ValueError if formula contains unbalanced parentheses."""
+    depth = 0
+    for ch in formula:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        if depth < 0:
+            raise ValueError("unbalanced parentheses in formula")
+    if depth != 0:
+        raise ValueError("unbalanced parentheses in formula")
+
+
 def _check_duplicate(real_table: str, field: str, value: str) -> dict | None:
     """מחזיר רשומה קיימת אם יש כפילות, אחרת None."""
     base = os.environ.get("AIRTABLE_BASE_ID", "")
     key  = os.environ.get("AIRTABLE_API_KEY", "")
     if not base or not key:
         return None
-    safe = str(value).replace("'", "\\'")
+    safe = _sanitize_formula_value(value)
     try:
         r = httpx.get(
             f"https://api.airtable.com/v0/{base}/{urllib.parse.quote(real_table, safe='')}",
@@ -159,6 +179,16 @@ def dispatch_tool(name: str, inputs: dict, identity: "Identity | None" = None) -
                 table = inputs["table"]
                 filter_formula = inputs.get("filter", "").strip()
                 params = {"table": table}
+
+                if filter_formula:
+                    try:
+                        _assert_balanced_parens(filter_formula)
+                    except ValueError:
+                        logger.warning(
+                            "[Dispatch] airtable_get: rejected unbalanced filter formula "
+                            "for user=%s | formula=%s", user_id, filter_formula[:80]
+                        )
+                        return "❌ פרמטר סינון לא תקין."
 
                 if identity.is_external:
                     user_filter = f"{{user_id}}='{identity.user_id}'"

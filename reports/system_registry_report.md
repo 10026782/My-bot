@@ -27,3 +27,6 @@ Generated: 2026-06-08T10:25:11.487596+00:00
 - MISSING אנשי קשר (Contacts): AIRTABLE_API_KEY or AIRTABLE_BASE_ID missing; missing_fields=שם, טלפון, סטטוס
 - MISSING Tenants: AIRTABLE_API_KEY or AIRTABLE_BASE_ID missing; missing_fields=tenant_id
 - MISSING Imports: AIRTABLE_API_KEY or AIRTABLE_BASE_ID missing; missing_fields=none
+# ARCHIVED - generated environment snapshot
+
+This file is no longer an active source of truth as of 2026-06-14. Use `ROADMAP.md` for active priorities and `BOSS_CURRENT_STATE.md` for implementation reality, decisions, and known risks.

@@ -5,6 +5,7 @@
 #   resolve_identity ג†’ route_request ג†’ build_context ג†’ run_agent
 
 import os
+import time
 import hmac
 import hashlib
 import logging
@@ -87,6 +88,15 @@ TELEGRAM_TOKEN     = os.environ.get("TELEGRAM_TOKEN", "")
 RENDER_APP_URL     = os.environ.get("RENDER_APP_URL", "https://my-bot-jqz2.onrender.com")
 WEBHOOK_SECRET     = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
 
+if not WEBHOOK_SECRET:
+    logging.getLogger(__name__).warning(
+        "[Security] TELEGRAM_WEBHOOK_SECRET not set -- webhook URL is the only "
+        "protection. Set this env var to enable header-based secret validation."
+    )
+
+# Router-level pending approvals expire after this many seconds.
+_PENDING_APPROVAL_TTL = 600
+
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=AGENT_TIMEOUT)
 bot    = telebot.TeleBot(TELEGRAM_TOKEN)
 
@@ -110,10 +120,11 @@ def _is_junk_inbound_text(text: str) -> bool:
 
 
 def _public_request_url() -> str:
+    # Prefer configured public URL to avoid trusting attacker-supplied X-Forwarded-Host.
+    base = os.environ.get("RENDER_APP_URL", "").rstrip("/")
+    if base:
+        return f"{base}{request.full_path}".rstrip("?")
     proto = request.headers.get("X-Forwarded-Proto")
-    host = request.headers.get("X-Forwarded-Host")
-    if proto and host:
-        return f"{proto}://{host}{request.full_path}".rstrip("?")
     if proto:
         return request.url.replace("http://", f"{proto}://", 1)
     return request.url
@@ -176,7 +187,7 @@ app.register_blueprint(_tma_blueprint)
 
 # ── N05-B: send_followup.confirmed handler ────────────────────────────────────
 # Sends the approved followup draft to the owner via Telegram for manual
-# forwarding. Does NOT send outbound WhatsApp to lead (blocked on Meta, N05-C).
+# forwarding.9 Does NOT send outbound WhatsApp to lead (blocked on Meta, N05-C).
 
 def _handle_send_followup_confirmed(payload: dict, chat_id: str) -> str:
     draft        = payload.get("draft", "")
@@ -439,9 +450,10 @@ def approval_response(route: RouteDecision, original_text: str, chat_id: str,
     """Saves original action and asks owner to confirm with ׳›׳/׳׳."""
     logger.info(f"[APPROVAL] intent={route.intent} domain={route.domain} | saved for {chat_id}")
     _pending_approvals[chat_id] = {
-        "text":    original_text,
-        "channel": channel,
-        "domain":  domain,
+        "text":       original_text,
+        "channel":    channel,
+        "domain":     domain,
+        "created_at": time.time(),
     }
     preview = original_text[:120] + ("ג€¦" if len(original_text) > 120 else "")
     return (
@@ -547,7 +559,7 @@ def _handle_approval_callback(cq) -> None:
 
     if action == "approve":
         # atomic pop ג€” ׳‘׳“׳™׳§׳× TTL ׳•׳׳—׳™׳§׳” ׳‘׳¦׳¢׳“ ׳׳—׳“
-        item = bus._pending.pop(action_id)
+        item = bus.pop(action_id)
         if not item:
             bot.answer_callback_query(cq.id, "ג° ׳₪׳’ ׳×׳•׳§׳£ ג€” ׳”׳₪׳¢׳•׳׳” ׳׳ ׳§׳™׳™׳׳× ׳™׳•׳×׳¨")
             try:
@@ -606,6 +618,7 @@ def _handle_approval_callback(cq) -> None:
         bot.answer_callback_query(cq.id, "ג… ׳‘׳•׳¦׳¢!")
 
     elif action == "reject":
+        item = bus.pop(action_id)
         item = bus._pending.pop(action_id, None)  # atomic: remove + return in one step
         if item:
             logger.info("🚫 Rejected: %s | %s", action_id, item.get("label", item.get("action", "")))
@@ -718,6 +731,12 @@ def run_agent(
 
     # ג”€ג”€ 2.5. Pending Approval Gate ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
     pending = _pending_approvals.get(chat_id)
+    if pending:
+        if time.time() - pending.get("created_at", 0) > _PENDING_APPROVAL_TTL:
+            _pending_approvals.pop(chat_id, None)
+            logger.info("[PendingApproval] expired (>%ss) for %s",
+                        _PENDING_APPROVAL_TTL, chat_id)
+            pending = None
     if pending:
         lower = user_text.strip().lower()
         if lower in _CONFIRM_WORDS:
@@ -958,6 +977,7 @@ def webhook_telegram():
     if request.headers.get("content-type") != "application/json":
         abort(403)
     if not WEBHOOK_SECRET:
+        logger.error("[Webhook] TELEGRAM_WEBHOOK_SECRET not set — rejecting (fail-closed)")
         logger.error("[Webhook] WEBHOOK_SECRET not set — rejecting request (fail-closed)")
         abort(403)
     if request.headers.get("X-Telegram-Bot-Api-Secret-Token", "") != WEBHOOK_SECRET:

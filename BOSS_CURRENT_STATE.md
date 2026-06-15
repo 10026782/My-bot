@@ -298,3 +298,42 @@ See `docs/governance/ARCHITECTURE_DRIFT_MAP.md` for the full list of 8 deferred 
 | F8 Health Monitor real checks | ✅ |
 | F9 TMA stubs honest | ✅ |
 | F10 Duplicate Scheduler | ✅ |
+# Audit addendum - 2026-06-14
+
+This file is one of the two active planning sources of truth. The other is `ROADMAP.md`.
+
+## Code reality summary
+
+| Item | Status | Runtime evidence |
+|---|---|---|
+| N02 Live Lead Scoring | PARTIAL | `lead_capture.py` has inline first-message scoring behind `LEAD_SCORING`; the old `lead_scoring.py` zombie path was removed. `LEAD_CAPTURE` and `LEAD_SCORING` default off. |
+| N03 Lead Memory Wire-up | PARTIAL | `lead_memory.update()` is wired from `lead_capture.py` after successful scoring when `LEAD_MEMORY` is enabled; `LEAD_MEMORY` defaults off. |
+| N04 Followup Activation | PARTIAL | `scheduler.py` registers `_job_followup_scan`; `followup_engine.py` queues approval requests behind `FOLLOWUP_AUTOMATION`; depends on populated `lead_memory`. |
+| N05 Daily Digest upgrade | PARTIAL | `daily_digest.py` displays score, but `_hot_leads()` filters only by `status=hot/Hot/HOT`, not by score/tier. |
+| Meta WhatsApp work | BLOCKED | Inbound Twilio webhook exists with signature validation; outbound remains an honest stub / not active pending Meta Cloud API. |
+| Approval flow | PARTIAL | Event bus approvals and TMA approval execution exist; receipts are returned/persisted to Interaction Log in code, but Activity Feed display remains incomplete. |
+| Feature flags | DONE | `feature_flags.py` supports env/runtime flags and persistent emergency flags. Product flags default off unless env-enabled. |
+| Scheduler jobs | PARTIAL | Jobs are registered for digest, collector, cleanup, lead memory flush, followup scan, payments, recovery, learning, email, abandoned scan; several are gated by flags/env or depend on incomplete flows. |
+
+## N02 exact audit
+
+Lead Scoring is partially implemented and flag-gated, not missing and not proven active:
+
+- `lead_capture.py:32` defines `_score_inbound_message()`.
+- `lead_capture.py:90` defines `capture_inbound_lead()`.
+- `lead_capture.py:96` exits unless `LEAD_CAPTURE` is enabled.
+- `lead_capture.py:130` runs inline scoring only when `LEAD_SCORING` is enabled.
+- `lead_capture.py:134-138` computes score/tier but writes only `LeadFields.SCORE` via `tools.airtable_gateway.airtable_patch()`.
+- `lead_capture.py` syncs `lead_memory` after successful scoring only if `LEAD_MEMORY` is enabled.
+- `app.py` calls `capture_inbound_lead()` for `Role.LEAD`; there is no separate scoring module import.
+
+Resolved mismatch: scoring is consolidated into `lead_capture.py`; the old separate scoring path was removed.
+
+## Security checklist consolidation
+
+`SECURITY_CHECKLIST.md` is archived as a historical checklist. Active security risks to carry forward here:
+
+- `_safe_route()` can drop the approval gate on router exception.
+- `DEV_MODE` HMAC bypass remains a production risk if enabled.
+- `/worker/trigger` accepts caller-controlled `chat_id` if `WORKER_SECRET` leaks.
+- `/health` is public and exposes internal check state/version-style data.

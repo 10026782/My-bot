@@ -27,3 +27,6 @@
 - Remaining C3 work:
   - `airtable_add`
   - `airtable_update`
+# ARCHIVED - historical patch report
+
+This file is no longer an active source of truth as of 2026-06-14. Use `ROADMAP.md` for active priorities and `BOSS_CURRENT_STATE.md` for implementation reality, decisions, and known risks.

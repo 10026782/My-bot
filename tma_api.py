@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import urllib.parse
 from datetime import date, datetime, timedelta, timezone
@@ -348,11 +349,25 @@ def _clean_fields_select_values(table: str, fields: dict) -> dict:
     return cleaned
 
 
+# Allowlist of tables that TMA write-through-approval is permitted to touch.
+_TMA_WRITE_ALLOWED_TABLES = {
+    "Leads",
+    "משימות (Tasks)", "Tasks",
+    "ProjectsHub",
+    "Approvals",
+    "אנשי קשר (Contacts)", "Contacts",
+}
+
+
 def _execute_tma_write(payload: dict, approved_by_identity) -> dict:
     action = payload.get("action", "")
     table = payload.get("table", "")
     requested_by = payload.get("requested_by", "unknown")
     approved_by = _identity_ref(approved_by_identity)
+
+    if table not in _TMA_WRITE_ALLOWED_TABLES:
+        logger.error(f"_execute_tma_write: table '{table}' not in allowlist — rejected")
+        return {"ok": False, "error": f"table '{table}' is not permitted for TMA writes"}
 
     if payload.get("op") == "post":
         rec = _at_post(table, payload.get("fields", {}))
@@ -735,6 +750,9 @@ def get_project_dashboard(project_slug, identity):
     Looks up the ProjectsHub record to get the canonical domain for filtering.
     """
     # Step 1: resolve slug → ProjectsHub record to get domain
+    project_slug, err = _safe_formula_param(project_slug, "project_slug")
+    if err:
+        return err
     hub_records = _at_list(
         "ProjectsHub",
         f"{{slug}}='{project_slug}'",
@@ -1163,12 +1181,27 @@ def create_lead_task(lead_id, identity):
     # קישור ליד — linked record array
     task_fields[TaskFields.LEAD_LINK] = [lead_id]
 
-    rec = _at_post(Tables.TASKS, task_fields)
-    if not rec:
-        return jsonify({"error": "task creation failed"}), 500
+    if identity.is_owner:
+        rec = _at_post(Tables.TASKS, task_fields)
+        if not rec:
+            return jsonify({"error": "task creation failed"}), 500
+        _audit("lead_task_created", identity, details=f"lead={lead_name} task={title}")
+        return jsonify({"ok": True, "id": rec.get("id", ""), "lead_id": lead_id}), 201
 
-    _audit("lead_task_created", identity, details=f"lead={lead_name} task={title}")
-    return jsonify({"ok": True, "id": rec.get("id", ""), "lead_id": lead_id}), 201
+    # Manager: queue for owner approval (consistent with patch_lead / set_lead_outcome)
+    _, response = _queue_tma_write_approval(
+        "tma_create_lead_task",
+        {
+            "op":            "post",
+            "table":         Tables.TASKS,
+            "fields":        task_fields,
+            "audit_action":  "lead_task_created",
+            "audit_details": f"lead={lead_name} task={title}",
+        },
+        identity,
+        f"Create task for lead: {lead_name} — {title}",
+    )
+    return jsonify(response), 202
 
 
 # WEEK 1 — Follow-Up (O3 Action)
@@ -1725,6 +1758,19 @@ def bulk_approve(identity):
     return jsonify({"ok": True, "approved": len(approved), "skipped": len(skipped)})
 
 
+# Per-approval in-process locks — prevent concurrent double-claim within a single worker.
+# Airtable מעבד status is the durable claim; this lock closes the in-process race window.
+_APPROVAL_LOCKS: dict[str, threading.Lock] = {}
+_APPROVAL_LOCKS_GUARD = threading.Lock()
+
+
+def _get_approval_lock(approval_id: str) -> threading.Lock:
+    with _APPROVAL_LOCKS_GUARD:
+        if approval_id not in _APPROVAL_LOCKS:
+            _APPROVAL_LOCKS[approval_id] = threading.Lock()
+        return _APPROVAL_LOCKS[approval_id]
+
+
 @tma_api.route("/api/approvals/<approval_id>", methods=["POST"])
 @require_tma_auth
 def act_on_approval(approval_id, identity):
@@ -1744,20 +1790,49 @@ def act_on_approval(approval_id, identity):
         return jsonify({"error": "approval not found"}), 404
 
     f = rec.get("fields", {})
-    status = f.get(ApprovalsFields.STATUS, "")
-    if status != "\u05de\u05de\u05ea\u05d9\u05df":
-        return jsonify({"error": f"approval already {status}"}), 409
-
-    new_status = "\u05d0\u05d5\u05e9\u05e8" if decision == "approve" else "\u05e0\u05d3\u05d7\u05d4"
-    patch_fields: dict = {ApprovalsFields.STATUS: new_status}
-    if decision == "reject" and note:
-        patch_fields[ApprovalsFields.REJECTION_NOTE] = note
-
     action_label = f.get(ApprovalsFields.ACTION, approval_id)
     ctx_id = f.get(ApprovalsFields.CONTEXT_ID, "")
-    execution_result = None
     context_data = f.get(ApprovalsFields.CONTEXT_DATA, "")
-    if decision == "approve" and context_data:
+
+    if decision == "reject":
+        status = f.get(ApprovalsFields.STATUS, "")
+        if status != ApprovalStatus.PENDING:
+            return jsonify({"error": f"approval already {status}"}), 409
+        patch_fields: dict = {ApprovalsFields.STATUS: ApprovalStatus.REJECTED}
+        if note:
+            patch_fields[ApprovalsFields.REJECTION_NOTE] = note
+        ok = _at_patch("Approvals", approval_id, patch_fields)
+        if not ok:
+            return jsonify({"error": "update failed"}), 500
+        _try_bus_action(ctx_id, decision)
+        _audit("approval_reject", identity, details=f"{action_label[:100]} | note: {note[:80]}")
+        _notify_owner(
+            f"REJECTED TMA: נדחה - {action_label}\n"
+            f"approved_by: {identity.display_name or identity.user_id}"
+            + (f"\nnote: {note}" if note else "")
+        )
+        return jsonify({"ok": True, "approval_id": approval_id, "new_status": ApprovalStatus.REJECTED})
+
+    # ── approve path: 3-state claim (ממתין → מעבד → אושר / נכשל) ──────────────────
+    lock = _get_approval_lock(approval_id)
+    with lock:
+        # Re-read inside lock to close the concurrent race window.
+        fresh = _at_get_record("Approvals", approval_id)
+        if not fresh:
+            return jsonify({"error": "approval not found"}), 404
+        fresh_status = fresh.get("fields", {}).get(ApprovalsFields.STATUS, "")
+        if fresh_status != ApprovalStatus.PENDING:
+            return jsonify({"error": f"approval already {fresh_status}"}), 409
+
+        # Claim: mark as "מעבד" — durable lock in Airtable.
+        # A second concurrent request will see "מעבד" on its re-read → 409.
+        claimed = _at_patch("Approvals", approval_id, {ApprovalsFields.STATUS: ApprovalStatus.PROCESSING})
+        if not claimed:
+            return jsonify({"error": "claim failed — could not set מעבד"}), 500
+    # Lock released here — "מעבד" in Airtable is now the single source of truth.
+
+    execution_result = None
+    if context_data:
         try:
             payload = json.loads(context_data)
         except (TypeError, ValueError):
@@ -1765,27 +1840,30 @@ def act_on_approval(approval_id, identity):
         if isinstance(payload, dict) and payload.get("type") == "tma_write":
             execution_result = _execute_tma_write(payload, identity)
             if not execution_result.get("ok"):
+                logger.error(
+                    "[Approval] write failed after claim for %s: %s",
+                    approval_id, execution_result,
+                )
+                # Mark נכשל so the record reflects the real outcome.
+                _at_patch("Approvals", approval_id, {ApprovalsFields.STATUS: ApprovalStatus.FAILED})
                 return jsonify({
                     "error": "approval execution failed",
                     "detail": execution_result,
                 }), 500
 
-    ok = _at_patch("Approvals", approval_id, patch_fields)
-    if not ok:
-        return jsonify({"error": "update failed"}), 500
+    # Execution succeeded (or no tma_write payload) — finalize to אושר.
+    _at_patch("Approvals", approval_id, {ApprovalsFields.STATUS: ApprovalStatus.APPROVED})
 
     if execution_result is None:
         _try_bus_action(ctx_id, decision)
-    _audit(f"approval_{decision}", identity, details=f"{action_label[:100]} | note: {note[:80]}")
-
-    icon = "OK" if decision == "approve" else "REJECTED"
+    _audit("approval_approve", identity, details=f"{action_label[:100]} | note: {note[:80]}")
     _notify_owner(
-        f"{icon} TMA: {new_status} - {action_label}\n"
+        f"OK TMA: אושר - {action_label}\n"
         f"approved_by: {identity.display_name or identity.user_id}"
         + (f"\nnote: {note}" if note else "")
     )
 
-    response = {"ok": True, "approval_id": approval_id, "new_status": new_status}
+    response = {"ok": True, "approval_id": approval_id, "new_status": ApprovalStatus.APPROVED}
     if execution_result is not None:
         response.update(execution_result)
     return jsonify(response)
