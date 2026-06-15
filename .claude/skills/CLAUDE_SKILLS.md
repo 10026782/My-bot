@@ -88,7 +88,7 @@ def main_function(param: str) -> dict:
 ```yaml
 name: boss-airtable-schema
 trigger: "שדה חדש | טבלה חדשה | schema | Airtable write | _at_patch | _at_post"
-base_id: appefldVZAKnrge36
+base_id: app4bcgoX7t0HUVnm   # PRODUCTION BASE — אומת 2026-06-15 (appefldVZAKnrge36 = base ישן/snapshot, לא בשימוש)
 ```
 
 **כללי כתיבה:**
