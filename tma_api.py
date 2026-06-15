@@ -748,6 +748,9 @@ def get_project_dashboard(project_slug, identity):
     Looks up the ProjectsHub record to get the canonical domain for filtering.
     """
     # Step 1: resolve slug → ProjectsHub record to get domain
+    project_slug, err = _safe_formula_param(project_slug, "project_slug")
+    if err:
+        return err
     hub_records = _at_list(
         "ProjectsHub",
         f"{{slug}}='{project_slug}'",
@@ -1778,8 +1781,16 @@ def act_on_approval(approval_id, identity):
 
     action_label = f.get(ApprovalsFields.ACTION, approval_id)
     ctx_id = f.get(ApprovalsFields.CONTEXT_ID, "")
-    execution_result = None
     context_data = f.get(ApprovalsFields.CONTEXT_DATA, "")
+
+    # Mark approval status FIRST — prevents TOCTOU replay if the write
+    # succeeds but this patch later fails (double-click, network retry).
+    # Any subsequent call hits the status != "ממתין" check → 409.
+    ok = _at_patch("Approvals", approval_id, patch_fields)
+    if not ok:
+        return jsonify({"error": "update failed"}), 500
+
+    execution_result = None
     if decision == "approve" and context_data:
         try:
             payload = json.loads(context_data)
@@ -1788,14 +1799,14 @@ def act_on_approval(approval_id, identity):
         if isinstance(payload, dict) and payload.get("type") == "tma_write":
             execution_result = _execute_tma_write(payload, identity)
             if not execution_result.get("ok"):
+                logger.error(
+                    "[Approval] write failed after status update for %s: %s",
+                    approval_id, execution_result,
+                )
                 return jsonify({
                     "error": "approval execution failed",
                     "detail": execution_result,
                 }), 500
-
-    ok = _at_patch("Approvals", approval_id, patch_fields)
-    if not ok:
-        return jsonify({"error": "update failed"}), 500
 
     if execution_result is None:
         _try_bus_action(ctx_id, decision)
