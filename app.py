@@ -427,7 +427,7 @@ else:
 if os.environ.get("SETUP_WEBHOOK") == "1":
     try:
         bot.remove_webhook()
-        kwargs = {"url": f"{RENDER_APP_URL}/{TELEGRAM_TOKEN}"}
+        kwargs = {"url": f"{RENDER_APP_URL}/telegram"}
         if WEBHOOK_SECRET:
             kwargs["secret_token"] = WEBHOOK_SECRET
         bot.set_webhook(**kwargs)
@@ -972,7 +972,7 @@ def health():
     return jsonify({"status": health_status["status"]}), 200
 
 
-@app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
+@app.route("/telegram", methods=["POST"])
 def webhook_telegram():
     if request.headers.get("content-type") != "application/json":
         abort(403)
