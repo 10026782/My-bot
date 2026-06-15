@@ -34,6 +34,7 @@ READ_ONLY_FIELDS: dict[str, set[str]] = {
         "אימוג'י טמפרטורה", "מד ציון", "עדיפות",          # formula: display helpers
         "תצוגת ליד", "המלצת מעקב",                        # formula: computed display
         "updated_at", "Updated At",                        # non-existent in schema — no-op safe
+        "created_at", "Created At",                        # createdTime — Airtable fills automatically
     },
 }
 
