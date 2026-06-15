@@ -427,7 +427,7 @@ else:
 if os.environ.get("SETUP_WEBHOOK") == "1":
     try:
         bot.remove_webhook()
-        kwargs = {"url": f"{RENDER_APP_URL}/{TELEGRAM_TOKEN}"}
+        kwargs = {"url": f"{RENDER_APP_URL}/telegram"}
         if WEBHOOK_SECRET:
             kwargs["secret_token"] = WEBHOOK_SECRET
         bot.set_webhook(**kwargs)
@@ -939,27 +939,39 @@ def run_agent(
 
     except anthropic.APIStatusError as e:
         logger.error(f"[Agent] Anthropic {e.status_code}: {e.message}")
-        if llm_fallback._is_transient(e):
-            logger.warning(f"[Agent] Claude transient error {e.status_code} ג€” OpenAI fallback for {chat_id}")
-            return llm_fallback.agent_fallback_text(ctx.system_prompt, clean_msg, ctx.max_tokens, caller=ctx.memory_key)
+        _transient = e.status_code in (429, 529) or e.status_code >= 500
+        if _transient and _flag_enabled("LLM_FALLBACK"):
+            logger.warning(f"[Agent] Claude transient error {e.status_code} — OpenAI fallback for {chat_id}")
+            try:
+                fallback = llm_fallback.call_openai_text(
+                    source="run_agent.status_error",
+                    messages=[{"role": "user", "content": clean_msg}],
+                    system=ctx.system_prompt,
+                    max_tokens=ctx.max_tokens,
+                )
+                return sanitize_agent_response(fallback, [])
+            except Exception as fe:
+                logger.error(f"[Agent] OpenAI fallback failed: {fe}")
         if e.status_code == 413:
-            return "ג ן¸ ׳”׳”׳•׳“׳¢׳” ׳׳¨׳•׳›׳” ׳׳“׳™. ׳ ׳¡׳” ׳׳©׳׳— ׳§׳¦׳¨ ׳™׳•׳×׳¨."
-        return f"ג ׳©׳’׳™׳׳× API ({e.status_code}). ׳ ׳¡׳” ׳©׳•׳‘."
+            return "❗ ההודעה ארוכה מדי. נסה לשלוח קצר יותר."
+        return f"מצטערים, יש תקלה זמנית ({e.status_code}). ננסה שוב בקרוב."
     except anthropic.APITimeoutError:
         logger.error(f"[Agent] Timeout for {chat_id}")
-        try:
-            return llm_fallback.call_openai_text(
-                source="run_agent.timeout",
-                messages=[{"role": "user", "content": clean_msg}],
-                system=ctx.system_prompt,
-                max_tokens=ctx.max_tokens,
-            )
-        except Exception as fe:
-            logger.error(f"[Agent] OpenAI fallback also failed: {fe}")
-            return "⚠️ הבוט עמוס כרגע. נסה שוב בעוד דקה."
+        if _flag_enabled("LLM_FALLBACK"):
+            try:
+                fallback = llm_fallback.call_openai_text(
+                    source="run_agent.timeout",
+                    messages=[{"role": "user", "content": clean_msg}],
+                    system=ctx.system_prompt,
+                    max_tokens=ctx.max_tokens,
+                )
+                return sanitize_agent_response(fallback, [])
+            except Exception as fe:
+                logger.error(f"[Agent] OpenAI fallback also failed: {fe}")
+        return "מצטערים, יש תקלה זמנית. ננסה שוב בקרוב."
     except Exception as e:
         logger.error(f"[Agent] error: {e}", exc_info=True)
-        return "ג ן¸ ׳׳©׳”׳• ׳”׳©׳×׳‘׳©. ׳ ׳¡׳” ׳©׳•׳‘."
+        return "משהו השתבש. נסה שוב."
 
 
 # ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•
@@ -972,7 +984,7 @@ def health():
     return jsonify({"status": health_status["status"]}), 200
 
 
-@app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
+@app.route("/telegram", methods=["POST"])
 def webhook_telegram():
     if request.headers.get("content-type") != "application/json":
         abort(403)

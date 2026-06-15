@@ -259,6 +259,18 @@ Pending Decision   = COUNT(Deals WHERE Status = "Pending Decision")
 תלוי ב: N04 (N04 הוא גרסת MVP — F11 הוא הגרסה המלאה עם טיוטות וזיכרון).
 קבצים: core/followup_engine.py (קיים), scheduler.py.
 
+### F12 — Model Provider Adapter
+מה: abstraction layer אחיד ל-LLM providers — interface יחיד `generate(prompt, context, model_tier) → text` שמאחד Anthropic, OpenAI, ו-providers עתידיים.
+מטרה: שינוי provider = שינוי config בלבד, לא קוד. כולל sanitization עקבי (A32) בכל provider.
+פרטים:
+- interface: `LLMProvider.generate(prompt, context, model_tier) → text`
+- כל implementation עוטף API ספציפי + sanitize_agent_response
+- selection: env config / cost watchdog / health-based fallback אוטומטי
+- כל domain יכול לבחור model tier שונה (domain skill documents)
+מצב: **לא קיים** — Fix #1/#3 + `FEATURE_LLM_FALLBACK` מטפלים בעכשיו. זהו ה-design הנכון לטווח ארוך.
+תלוי ב: domain skill documents (F-future), `FEATURE_LLM_FALLBACK` יציב בפרודקשן.
+קבצים לעתיד: `providers/` (חדש), `llm_fallback.py` (migrate/replace).
+
 ---
 
 ## Known Issues / Tech Debt (מתועד, לא קריטי)
