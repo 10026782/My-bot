@@ -441,9 +441,11 @@ class ApprovalsFields:
     REJECTION_NOTE = "הערת דחייה"
 
 class ApprovalStatus:
-    PENDING  = "ממתין"
-    APPROVED = "אושר"
-    REJECTED = "נדחה"
+    PENDING    = "ממתין"
+    PROCESSING = "מעבד"   # transient claim state — execution in progress
+    APPROVED   = "אושר"
+    REJECTED   = "נדחה"
+    FAILED     = "נכשל"   # execution was attempted but failed
 
 class UnitStatus:
     AVAILABLE       = "Available"
