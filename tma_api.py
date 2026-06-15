@@ -590,8 +590,9 @@ def _get_project_cards(identity) -> list:
         # Status filtering done in Python (case-insensitive) to avoid Airtable formula issues.
         _CLOSED = {"closed", "lost", "won", "cancelled", "done",
                    "completed", "הושלם", "נסגר", "בוטל"}
-        if domain:
-            all_leads = _at_list("Leads", f"{{domain}}='{domain}'", max_records=50)
+        safe_domain, _ = _safe_formula_param(domain, "domain")
+        if safe_domain:
+            all_leads = _at_list("Leads", f"{{domain}}='{safe_domain}'", max_records=50)
             leads = [
                 l for l in all_leads
                 if (l.get("fields", {}).get("status") or "").lower() not in _CLOSED
@@ -750,16 +751,21 @@ def get_project_dashboard(project_slug, identity):
             "fix":     "Set the 'domain' field in ProjectsHub for this project",
         }), 422
 
+    safe_domain, domain_err = _safe_formula_param(domain, "domain")
+    if domain_err:
+        logger.warning("[dashboard/%s] unsafe domain value from Airtable: %r", project_slug, domain)
+        return jsonify({"error": "invalid domain configuration"}), 422
+
     # Step 2: permission check using the resolved domain
-    if not (identity.is_owner or identity.can_access_domain(domain)):
+    if not (identity.is_owner or identity.can_access_domain(safe_domain)):
         return jsonify({"error": "forbidden"}), 403
 
     # Step 3: fetch data filtered by domain
     try:
-        leads = _at_list("Leads", f"{{domain}}='{domain}'", max_records=20, strict=True)
+        leads = _at_list("Leads", f"{{domain}}='{safe_domain}'", max_records=20, strict=True)
         deals = _at_list(
             "עסקאות (Deals)",
-            f"AND({{domain}}='{domain}', NOT(OR({{{DealFields.STAGE}}}='סגור-ניצחון', {{{DealFields.STAGE}}}='סגור-הפסד')))",
+            f"AND({{domain}}='{safe_domain}', NOT(OR({{{DealFields.STAGE}}}='סגור-ניצחון', {{{DealFields.STAGE}}}='סגור-הפסד')))",
             max_records=20,
             strict=True,
         )

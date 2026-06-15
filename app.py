@@ -606,8 +606,9 @@ def _handle_approval_callback(cq) -> None:
         bot.answer_callback_query(cq.id, "ג… ׳‘׳•׳¦׳¢!")
 
     elif action == "reject":
-        item = bus._pending.get(action_id)
-        bus.reject(action_id)
+        item = bus._pending.pop(action_id, None)  # atomic: remove + return in one step
+        if item:
+            logger.info("🚫 Rejected: %s | %s", action_id, item.get("label", item.get("action", "")))
 
         if item:
             user_chat_id = item["payload"].get("user_chat_id", "")
@@ -956,10 +957,12 @@ def health():
 def webhook_telegram():
     if request.headers.get("content-type") != "application/json":
         abort(403)
-    if WEBHOOK_SECRET:
-        if request.headers.get("X-Telegram-Bot-Api-Secret-Token", "") != WEBHOOK_SECRET:
-            logger.warning(f"[Webhook] bad secret from {request.remote_addr}")
-            abort(403)
+    if not WEBHOOK_SECRET:
+        logger.error("[Webhook] WEBHOOK_SECRET not set — rejecting request (fail-closed)")
+        abort(403)
+    if request.headers.get("X-Telegram-Bot-Api-Secret-Token", "") != WEBHOOK_SECRET:
+        logger.warning(f"[Webhook] bad secret from {request.remote_addr}")
+        abort(403)
     update = telebot.types.Update.de_json(request.get_data().decode("utf-8"))
 
     if update.callback_query:
