@@ -185,7 +185,41 @@ from tma_api import tma_api as _tma_blueprint
 app.register_blueprint(_tma_blueprint)
 
 
-@bot.message_handler(commands=["status"])
+# ── N05-B: send_followup.confirmed handler ────────────────────────────────────
+# Sends the approved followup draft to the owner via Telegram for manual
+# forwarding. Does NOT send outbound WhatsApp to lead (blocked on Meta, N05-C).
+
+def _handle_send_followup_confirmed(payload: dict, chat_id: str) -> str:
+    draft        = payload.get("draft", "")
+    contact_name = payload.get("contact_name", "")
+    channel      = payload.get("channel", "")
+    memory_key   = payload.get("memory_key", "")
+
+    msg = (f"📋 פולואפ מאושר — לשליחה ידנית ({channel}):\n"
+           f"אל: {contact_name}\n\n{draft}")
+
+    try:
+        bot.send_message(chat_id, msg)
+    except Exception as e:
+        logger.error(f"[Followup] notify owner failed: {e}")
+        return f"⚠️ שגיאה בהצגת הטיוטה: {e}"
+
+    if memory_key:
+        try:
+            from lead_memory import lead_memory
+            state = lead_memory.get(memory_key)
+            lead_memory.update(memory_key, followup_count=state.followup_count + 1)
+        except Exception as e:
+            logger.warning(f"[Followup] followup_count update failed: {e}")
+
+    return "✅ הטיוטה נשלחה אליך להעברה ידנית"
+
+
+from event_bus import bus as _event_bus
+_event_bus.subscribe("send_followup.confirmed", _handle_send_followup_confirmed)
+
+
+
 def cmd_status(msg):
     """Owner ׳‘׳׳‘׳“ ג€” ׳׳¦׳‘ env vars."""
     identity = resolve_identity("telegram", str(msg.from_user.id))
@@ -584,8 +618,9 @@ def _handle_approval_callback(cq) -> None:
         bot.answer_callback_query(cq.id, "ג… ׳‘׳•׳¦׳¢!")
 
     elif action == "reject":
-        item = bus._pending.get(action_id)
-        bus.reject(action_id)
+        item = bus._pending.pop(action_id, None)  # atomic: remove + return in one step
+        if item:
+            logger.info("🚫 Rejected: %s | %s", action_id, item.get("label", item.get("action", "")))
 
         if item:
             user_chat_id = item["payload"].get("user_chat_id", "")
@@ -940,10 +975,12 @@ def health():
 def webhook_telegram():
     if request.headers.get("content-type") != "application/json":
         abort(403)
-    if WEBHOOK_SECRET:
-        if request.headers.get("X-Telegram-Bot-Api-Secret-Token", "") != WEBHOOK_SECRET:
-            logger.warning(f"[Webhook] bad secret from {request.remote_addr}")
-            abort(403)
+    if not WEBHOOK_SECRET:
+        logger.error("[Webhook] WEBHOOK_SECRET not set — rejecting request (fail-closed)")
+        abort(403)
+    if request.headers.get("X-Telegram-Bot-Api-Secret-Token", "") != WEBHOOK_SECRET:
+        logger.warning(f"[Webhook] bad secret from {request.remote_addr}")
+        abort(403)
     update = telebot.types.Update.de_json(request.get_data().decode("utf-8"))
 
     if update.callback_query:
