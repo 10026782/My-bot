@@ -208,6 +208,10 @@ class EventBus:
         logger.info(f"🚫 Rejected: {action_id} | {label}")
         return f"🚫 הפעולה בוטלה: {label}"
 
+    def pop(self, action_id: str) -> dict | None:
+        """שולף ומוחק פעולה ממתינה — ממשק ציבורי ל-PendingActionsStore.pop."""
+        return self._pending.pop(action_id)
+
     def needs_approval(self, action: str) -> bool:
         """האם הפעולה דורשת אישור?"""
         return action in ACTIONS_REQUIRING_APPROVAL
