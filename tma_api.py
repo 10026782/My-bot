@@ -2252,24 +2252,19 @@ def update_quest(quest_id, identity):
 @tma_api.route("/api/game/today", methods=["GET"])
 @require_tma_auth
 def game_today(identity):
-    """Today's Roadmap_Tasks (filtered by owner + due date) + active world + total coins. Owner only."""
+    """Today's Roadmap_Tasks (filtered by due date) + active world + total coins. Owner only."""
     if not identity.is_owner:
         return jsonify({"error": "forbidden"}), 403
 
     today_str = date.today().isoformat()
 
-    # ── Roadmap Tasks — filter pushed to Airtable: owner + due ≤ today + not Done ──
+    # ── Roadmap Tasks — filter pushed to Airtable: due ≤ today + not Done ──
     # Empty Due_Date treated as due (OR(NOT({Due_Date}), ...)).
-    # _safe_formula_param guards against injection via display_name.
+    # This is a private owner-only app, so Owner filtering is intentionally omitted.
     rt_formula_parts = [
         f"NOT({{{RoadmapTaskFields.STATUS}}}='{RoadmapTaskStatus.DONE}')",
         f"OR(NOT({{{RoadmapTaskFields.DUE_DATE}}}), NOT(IS_AFTER({{{RoadmapTaskFields.DUE_DATE}}}, '{today_str}')))",
     ]
-    _owner_raw = (identity.display_name or "").strip()
-    if _owner_raw:
-        _safe_owner, _ = _safe_formula_param(_owner_raw, "owner")
-        if _safe_owner:
-            rt_formula_parts.append(f"{{{RoadmapTaskFields.OWNER}}}='{_safe_owner}'")
     rt_formula = "AND(" + ", ".join(rt_formula_parts) + ")"
     filtered_rt = _at_list(Tables.ROADMAP_TASKS, rt_formula, max_records=50)
 
