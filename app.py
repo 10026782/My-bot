@@ -584,8 +584,7 @@ def _handle_approval_callback(cq) -> None:
         bot.answer_callback_query(cq.id, "ג… ׳‘׳•׳¦׳¢!")
 
     elif action == "reject":
-        item = bus._pending.get(action_id)
-        bus.reject(action_id)
+        item = bus._pending.pop(action_id)
 
         if item:
             user_chat_id = item["payload"].get("user_chat_id", "")

@@ -605,8 +605,14 @@ def _get_project_cards(identity) -> list:
         # Status filtering done in Python (case-insensitive) to avoid Airtable formula issues.
         _CLOSED = {"closed", "lost", "won", "cancelled", "done",
                    "completed", "הושלם", "נסגר", "בוטל"}
-        if domain:
-            all_leads = _at_list("Leads", f"{{domain}}='{domain}'", max_records=50)
+        safe_domain, _ = _safe_formula_param(domain, "domain")
+        if not safe_domain and domain:
+            logger.warning(
+                "[ProjectCards] unsafe domain value from Airtable record %s (%s): %r — skipping leads",
+                r["id"], f.get("Name", ""), domain,
+            )
+        if safe_domain:
+            all_leads = _at_list("Leads", f"{{domain}}='{safe_domain}'", max_records=50)
             leads = [
                 l for l in all_leads
                 if (l.get("fields", {}).get("status") or "").lower() not in _CLOSED
