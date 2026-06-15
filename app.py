@@ -187,7 +187,7 @@ app.register_blueprint(_tma_blueprint)
 
 # ── N05-B: send_followup.confirmed handler ────────────────────────────────────
 # Sends the approved followup draft to the owner via Telegram for manual
-# forwarding. Does NOT send outbound WhatsApp to lead (blocked on Meta, N05-C).
+# forwarding.9 Does NOT send outbound WhatsApp to lead (blocked on Meta, N05-C).
 
 def _handle_send_followup_confirmed(payload: dict, chat_id: str) -> str:
     draft        = payload.get("draft", "")
@@ -559,7 +559,7 @@ def _handle_approval_callback(cq) -> None:
 
     if action == "approve":
         # atomic pop ג€” ׳‘׳“׳™׳§׳× TTL ׳•׳׳—׳™׳§׳” ׳‘׳¦׳¢׳“ ׳׳—׳“
-        item = bus._pending.pop(action_id)
+        item = bus.pop(action_id)
         if not item:
             bot.answer_callback_query(cq.id, "ג° ׳₪׳’ ׳×׳•׳§׳£ ג€” ׳”׳₪׳¢׳•׳׳” ׳׳ ׳§׳™׳™׳׳× ׳™׳•׳×׳¨")
             try:
@@ -618,6 +618,7 @@ def _handle_approval_callback(cq) -> None:
         bot.answer_callback_query(cq.id, "ג… ׳‘׳•׳¦׳¢!")
 
     elif action == "reject":
+        item = bus.pop(action_id)
         item = bus._pending.pop(action_id, None)  # atomic: remove + return in one step
         if item:
             logger.info("🚫 Rejected: %s | %s", action_id, item.get("label", item.get("action", "")))
@@ -976,6 +977,7 @@ def webhook_telegram():
     if request.headers.get("content-type") != "application/json":
         abort(403)
     if not WEBHOOK_SECRET:
+        logger.error("[Webhook] TELEGRAM_WEBHOOK_SECRET not set — rejecting (fail-closed)")
         logger.error("[Webhook] WEBHOOK_SECRET not set — rejecting request (fail-closed)")
         abort(403)
     if request.headers.get("X-Telegram-Bot-Api-Secret-Token", "") != WEBHOOK_SECRET:

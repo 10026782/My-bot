@@ -29,7 +29,10 @@ logger = logging.getLogger(__name__)
 # Formula / computed fields that Airtable will reject if we try to write them.
 # Writing a formula field causes a 422 from Airtable.
 READ_ONLY_FIELDS: dict[str, set[str]] = {
-    "Leads": {"tier", "Tier", "טמפרטורה"},
+    "Leads": {
+        "tier", "Tier", "טמפרטורה",          # existing
+        "אימוג'י טמפרטורה", "מד ציון", "עדיפות", "תצוגת ליד", "המלצת מעקב",  # formula fields confirmed in schema
+    },
 }
 
 # Airtable multipleRecordLinks fields — value must be a list of rec IDs, never a bare string.

@@ -267,6 +267,7 @@ Pending Decision   = COUNT(Deals WHERE Status = "Pending Decision")
 |------|--------|----------|
 | `_ALIAS_MAP` כפול | מיפוי English→Hebrew זהה קיים גם ב-`tools/dispatcher.py:43` וגם ב-`tools/airtable_tools.py:111`. סנכרוני כרגע, אבל עדכון ב-אחד לא יתפשט לשני — סיכון drift שקט. | בפעם הבאה שנוגעים באחד |
 | `crm_mark_payment_paid` — approval חובה | כאשר כלי זה יוממש, **חייב** להירשם עם `requires_approval=True` לפי `SECURITY_CHECKLIST.md:62`. פעולות סימון תשלום דורשות Golden Path Approval Gate. | לפני מימוש הכלי |
+| `lead_memory.py:155` dead write `updated_at` | `lead_memory._write()` שולח `"updated_at": state.last_active` לAirtable אך שדה `updated_at` **לא קיים** בטבלת Leads (אומת ב-schema: `tblersBI4EZoOBTdU`). Airtable מתעלם בשקט. אפשרויות: (1) להסיר את השורה; (2) להוסיף שדה `updated_at` לסכמה אם רוצים לעקוב אחרי last_active. | לפני שמוסיפים מעקב last_active |
 
 ---
 
