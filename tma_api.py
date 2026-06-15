@@ -2178,40 +2178,32 @@ def game_today(identity):
     if not identity.is_owner:
         return jsonify({"error": "forbidden"}), 403
 
-    today_str  = date.today().isoformat()
-    owner_name = (identity.display_name or "").strip().lower()
+    today_str = date.today().isoformat()
 
-    # ── Roadmap Tasks — fetch all, filter in Python by owner + due ≤ today ──
-    all_rt = _at_list(Tables.ROADMAP_TASKS, "", max_records=200)
-
-    def _due_today_or_earlier(r: dict) -> bool:
-        f   = r.get("fields", {})
-        due = (f.get(RoadmapTaskFields.DUE_DATE, "") or "")[:10]
-        return not due or due <= today_str
-
-    def _owner_matches(r: dict) -> bool:
-        if not owner_name:
-            return True
-        owner = (r.get("fields", {}).get(RoadmapTaskFields.OWNER, "") or "").lower()
-        return owner_name in owner or owner in owner_name
+    # ── Roadmap Tasks — filter pushed to Airtable: owner + due ≤ today + not Done ──
+    # Empty Due_Date treated as due (OR(NOT({Due_Date}), ...)).
+    # _safe_formula_param guards against injection via display_name.
+    rt_formula_parts = [
+        f"NOT({{{RoadmapTaskFields.STATUS}}}='{RoadmapTaskStatus.DONE}')",
+        f"OR(NOT({{{RoadmapTaskFields.DUE_DATE}}}), NOT(IS_AFTER({{{RoadmapTaskFields.DUE_DATE}}}, '{today_str}')))",
+    ]
+    _owner_raw = (identity.display_name or "").strip()
+    if _owner_raw:
+        _safe_owner, _ = _safe_formula_param(_owner_raw, "owner")
+        if _safe_owner:
+            rt_formula_parts.append(f"{{{RoadmapTaskFields.OWNER}}}='{_safe_owner}'")
+    rt_formula = "AND(" + ", ".join(rt_formula_parts) + ")"
+    filtered_rt = _at_list(Tables.ROADMAP_TASKS, rt_formula, max_records=50)
 
     def _map_rt_status(s: str) -> str:
-        if s == RoadmapTaskStatus.DONE:
-            return "Done"
         if s == RoadmapTaskStatus.BLOCKED:
             return "Skipped"
         return "Todo"
 
     tasks = []
-    for r in all_rt:
+    for r in filtered_rt:
         f = r.get("fields", {})
         status = f.get(RoadmapTaskFields.STATUS, RoadmapTaskStatus.TODO)
-        if status == RoadmapTaskStatus.DONE:
-            continue  # בוצע — לא מציג בכרטיסיה היומית
-        if not _owner_matches(r):
-            continue
-        if not _due_today_or_earlier(r):
-            continue
         tasks.append({
             "id":     r["id"],
             "task":   f.get(RoadmapTaskFields.TASK, ""),
