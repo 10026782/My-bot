@@ -30,10 +30,21 @@ logger = logging.getLogger(__name__)
 # Writing a formula field causes a 422 from Airtable.
 READ_ONLY_FIELDS: dict[str, set[str]] = {
     "Leads": {
-        "tier", "Tier", "טמפרטורה",                       # formula: lead temperature
+        "טמפרטורה",                                        # formula: lead temperature (Hebrew)
         "אימוג'י טמפרטורה", "מד ציון", "עדיפות",          # formula: display helpers
         "תצוגת ליד", "המלצת מעקב",                        # formula: computed display
         "updated_at", "Updated At",                        # non-existent in schema — no-op safe
+        "created_at", "Created At",                        # createdTime — Airtable fills automatically
+        "Suggested Follwup", "Suggested Followup",         # formula (typo fixed 2026-06-15, keep both)
+    },
+    "Assets": {
+        "Equity", "My Equity",                             # formula fields — Airtable auto-calculates
+    },
+    "משימות ודד ליינים": {
+        "תאריך יצירה", "תאריך עדכון אחרון",               # createdTime + lastModifiedTime
+    },
+    "Blue View Buyers": {
+        "Created At", "Last Updated",                      # createdTime + lastModifiedTime
     },
 }
 

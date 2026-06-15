@@ -5,16 +5,11 @@
 
 import logging
 import re
-from datetime import datetime, timezone
 
 from airtable_schema import LeadFields, Tables
 from feature_flags import is_enabled
 
 logger = logging.getLogger(__name__)
-
-
-def _now_iso() -> str:
-    return datetime.now(tz=timezone.utc).isoformat()
 
 
 def _is_junk_inbound_text(text: str) -> bool:
@@ -120,7 +115,6 @@ def capture_inbound_lead(identity, message: str) -> None:
             LeadFields.SOURCE: "whatsapp_inbound",
             LeadFields.STATUS: "new",
             LeadFields.SUMMARY: (message or "")[:500],
-            LeadFields.CREATED_AT: _now_iso(),
         }
 
         result = airtable_add(Tables.LEADS, fields)
