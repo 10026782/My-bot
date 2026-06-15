@@ -35,6 +35,18 @@ READ_ONLY_FIELDS: dict[str, set[str]] = {
         "תצוגת ליד", "המלצת מעקב",                        # formula: computed display
         "updated_at", "Updated At",                        # non-existent in schema — no-op safe
         "created_at", "Created At",                        # createdTime — Airtable fills automatically
+        "converted_at",                                    # non-existent in live schema (app4bcgoX7t0HUVnm)
+        "notes",                                           # non-existent in Leads (voice_adapter writes it)
+        "Suggested Follwup", "Suggested Followup",         # formula (typo in Airtable name) — both spellings
+    },
+    "Assets": {
+        "Equity", "My Equity",                             # formula fields — Airtable auto-calculates
+    },
+    "משימות ודד ליינים": {
+        "תאריך יצירה", "תאריך עדכון אחרון",               # createdTime + lastModifiedTime
+    },
+    "Blue View Buyers": {
+        "Created At", "Last Updated",                      # createdTime + lastModifiedTime
     },
 }
 
