@@ -42,6 +42,7 @@ type SourceId  = typeof SOURCE[number]["id"];
 
 interface Task {
   id:                   string;
+  persisted:            boolean;
   title:                string;
   topic:                TopicId | null;
   urgency:              UrgencyId | null;
@@ -56,7 +57,8 @@ interface Task {
 
 function makeEmptyTask(): Task {
   return {
-    id:                   crypto.randomUUID(),
+    id:                   `local-${crypto.randomUUID()}`,
+    persisted:            false,
     title:                "",
     topic:                null,
     urgency:              null,
@@ -89,6 +91,7 @@ async function loadGameData(): Promise<{ tasks: Task[]; world: GameWorld | null 
   const data = await fetchGameToday();
   const tasks: Task[] = (data.tasks ?? []).map(dt => ({
     id:                   dt.id,
+    persisted:            true,
     title:                dt.task,
     topic:                null,
     urgency:              null,
@@ -106,7 +109,7 @@ async function loadGameData(): Promise<{ tasks: Task[]; world: GameWorld | null 
 }
 
 async function markTaskDone(task: Task): Promise<void> {
-  if (task.id) await completeTask(task.id);
+  if (task.persisted) await completeTask(task.id);
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -343,6 +346,32 @@ export function BossCheckin({ onBack, streak = 0 }: Props) {
   useEffect(() => { load(); }, []);
 
   async function saveTaskUpdate(task: Task) {
+    if (!task.persisted) return;
+    try {
+      await updateCheckinTaskStatus(task.id, task.status);
+    } catch {
+      showToast("⚠️ שגיאה בשמירה — נסה שוב");
+    }
+  }
+
+  const doneTasks      = tasks.filter(t => t.status === "done");
+  const totalXP        = doneTasks.reduce((s, t) => s + t.xp, 0);
+  const allDone        = tasks.length > 0 && tasks.every(t => t.status === "done");
+  const burningCount   = doneTasks.filter(t => t.urgency === "burning").length;
+  const roadmapCount   = doneTasks.filter(t => t.urgency === "roadmap").length;
+  const requiredCount  = doneTasks.filter(t => t.required).length;
+  const optionalCount  = doneTasks.filter(t => !t.required).length;
+
+  const today = new Date().toLocaleDateString("he-IL", {
+    weekday: "long", day: "numeric", month: "long",
+  });
+
+  function handleChange(index: number, updated: Task) {
+    setTasks(prev => prev.map((t, i) => i === index ? updated : t));
+    saveTaskUpdate(updated);
+  }
+
+  async function handleDone(index: number) {
     if (!task.id) return;
     // Map local lowercase status → canonical Airtable single-select value
     const STATUS_MAP: Record<Task["status"], string> = { todo: "Todo", done: "Done" };
@@ -377,7 +406,12 @@ export function BossCheckin({ onBack, streak = 0 }: Props) {
     const finalXP     = calculateXP(task);
     const updated: Task = { ...task, status: "done", completed_at: completedAt, xp: finalXP };
     setTasks(prev => prev.map((t, i) => i === index ? updated : t));
-    markTaskDone(updated);
+    try {
+      await markTaskDone(updated);
+    } catch {
+      setTasks(prev => prev.map((t, i) => i === index ? task : t));
+      showToast("ג ן¸ ׳©׳’׳™׳׳” ׳‘׳©׳׳™׳¨׳” ג€” ׳ ׳¡׳” ׳©׳•׳‘");
+    }
   }
 
   function handleReset() {
