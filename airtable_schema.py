@@ -20,6 +20,11 @@ FIELD_ALIASES: dict[str, dict[str, str]] = {
         "next_followup": "Next Followup",
         "טמפרטורה":     "tier",   # read-only alias — מנורמל כדי שיתפס ע"י READ_ONLY_FIELDS
     },
+    "Coins_Log": {
+        "Note":  "Notes",
+        "note":  "Notes",
+        "notes": "Notes",
+    },
 }
 
 class Tables:
@@ -301,7 +306,7 @@ class CoinsLogFields:
     COINS         = "Coins"
     DATE          = "Date"
     QUEST         = "Quest"          # linked record → Quests
-    NOTE          = "Note"
+    NOTE          = "Notes"
     TOTAL_RUNNING = "Total_Running"  # Number field — written app-side on each Coins_Log insert (see _coins_running_total)
 
 

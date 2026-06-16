@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import urllib.parse
 from datetime import date, datetime, timedelta, timezone
@@ -217,6 +218,17 @@ def _coins_running_total(new_coins: int) -> int:
     log_recs = _at_list(Tables.COINS_LOG, "", max_records=1000)
     existing_total = sum(int(r.get("fields", {}).get(CoinsLogFields.COINS, 0) or 0) for r in log_recs)
     return existing_total + new_coins
+
+
+def _linked_record_ids(value) -> list[str]:
+    """Return only Airtable linked-record ids, never display text."""
+    if isinstance(value, list):
+        candidates = value
+    elif isinstance(value, str):
+        candidates = [value]
+    else:
+        return []
+    return [v for v in candidates if isinstance(v, str) and re.match(r"^rec\w+$", v)]
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -604,8 +616,9 @@ def _get_project_cards(identity) -> list:
         # Status filtering done in Python (case-insensitive) to avoid Airtable formula issues.
         _CLOSED = {"closed", "lost", "won", "cancelled", "done",
                    "completed", "הושלם", "נסגר", "בוטל"}
-        if domain:
-            all_leads = _at_list("Leads", f"{{domain}}='{domain}'", max_records=50)
+        safe_domain, _ = _safe_formula_param(domain, "domain")
+        if safe_domain:
+            all_leads = _at_list("Leads", f"{{domain}}='{safe_domain}'", max_records=50)
             leads = [
                 l for l in all_leads
                 if (l.get("fields", {}).get("status") or "").lower() not in _CLOSED
@@ -748,6 +761,9 @@ def get_project_dashboard(project_slug, identity):
     Looks up the ProjectsHub record to get the canonical domain for filtering.
     """
     # Step 1: resolve slug → ProjectsHub record to get domain
+    project_slug, err = _safe_formula_param(project_slug, "project_slug")
+    if err:
+        return err
     hub_records = _at_list(
         "ProjectsHub",
         f"{{slug}}='{project_slug}'",
@@ -764,16 +780,21 @@ def get_project_dashboard(project_slug, identity):
             "fix":     "Set the 'domain' field in ProjectsHub for this project",
         }), 422
 
+    safe_domain, domain_err = _safe_formula_param(domain, "domain")
+    if domain_err:
+        logger.warning("[dashboard/%s] unsafe domain value from Airtable: %r", project_slug, domain)
+        return jsonify({"error": "invalid domain configuration"}), 422
+
     # Step 2: permission check using the resolved domain
-    if not (identity.is_owner or identity.can_access_domain(domain)):
+    if not (identity.is_owner or identity.can_access_domain(safe_domain)):
         return jsonify({"error": "forbidden"}), 403
 
     # Step 3: fetch data filtered by domain
     try:
-        leads = _at_list("Leads", f"{{domain}}='{domain}'", max_records=20, strict=True)
+        leads = _at_list("Leads", f"{{domain}}='{safe_domain}'", max_records=20, strict=True)
         deals = _at_list(
             "עסקאות (Deals)",
-            f"AND({{domain}}='{domain}', NOT(OR({{{DealFields.STAGE}}}='סגור-ניצחון', {{{DealFields.STAGE}}}='סגור-הפסד')))",
+            f"AND({{domain}}='{safe_domain}', NOT(OR({{{DealFields.STAGE}}}='סגור-ניצחון', {{{DealFields.STAGE}}}='סגור-הפסד')))",
             max_records=20,
             strict=True,
         )
@@ -1748,6 +1769,19 @@ def bulk_approve(identity):
     return jsonify({"ok": True, "approved": len(approved), "skipped": len(skipped)})
 
 
+# Per-approval in-process locks — prevent concurrent double-claim within a single worker.
+# Airtable מעבד status is the durable claim; this lock closes the in-process race window.
+_APPROVAL_LOCKS: dict[str, threading.Lock] = {}
+_APPROVAL_LOCKS_GUARD = threading.Lock()
+
+
+def _get_approval_lock(approval_id: str) -> threading.Lock:
+    with _APPROVAL_LOCKS_GUARD:
+        if approval_id not in _APPROVAL_LOCKS:
+            _APPROVAL_LOCKS[approval_id] = threading.Lock()
+        return _APPROVAL_LOCKS[approval_id]
+
+
 @tma_api.route("/api/approvals/<approval_id>", methods=["POST"])
 @require_tma_auth
 def act_on_approval(approval_id, identity):
@@ -1767,20 +1801,49 @@ def act_on_approval(approval_id, identity):
         return jsonify({"error": "approval not found"}), 404
 
     f = rec.get("fields", {})
-    status = f.get(ApprovalsFields.STATUS, "")
-    if status != "\u05de\u05de\u05ea\u05d9\u05df":
-        return jsonify({"error": f"approval already {status}"}), 409
-
-    new_status = "\u05d0\u05d5\u05e9\u05e8" if decision == "approve" else "\u05e0\u05d3\u05d7\u05d4"
-    patch_fields: dict = {ApprovalsFields.STATUS: new_status}
-    if decision == "reject" and note:
-        patch_fields[ApprovalsFields.REJECTION_NOTE] = note
-
     action_label = f.get(ApprovalsFields.ACTION, approval_id)
     ctx_id = f.get(ApprovalsFields.CONTEXT_ID, "")
-    execution_result = None
     context_data = f.get(ApprovalsFields.CONTEXT_DATA, "")
-    if decision == "approve" and context_data:
+
+    if decision == "reject":
+        status = f.get(ApprovalsFields.STATUS, "")
+        if status != ApprovalStatus.PENDING:
+            return jsonify({"error": f"approval already {status}"}), 409
+        patch_fields: dict = {ApprovalsFields.STATUS: ApprovalStatus.REJECTED}
+        if note:
+            patch_fields[ApprovalsFields.REJECTION_NOTE] = note
+        ok = _at_patch("Approvals", approval_id, patch_fields)
+        if not ok:
+            return jsonify({"error": "update failed"}), 500
+        _try_bus_action(ctx_id, decision)
+        _audit("approval_reject", identity, details=f"{action_label[:100]} | note: {note[:80]}")
+        _notify_owner(
+            f"REJECTED TMA: נדחה - {action_label}\n"
+            f"approved_by: {identity.display_name or identity.user_id}"
+            + (f"\nnote: {note}" if note else "")
+        )
+        return jsonify({"ok": True, "approval_id": approval_id, "new_status": ApprovalStatus.REJECTED})
+
+    # ── approve path: 3-state claim (ממתין → מעבד → אושר / נכשל) ──────────────────
+    lock = _get_approval_lock(approval_id)
+    with lock:
+        # Re-read inside lock to close the concurrent race window.
+        fresh = _at_get_record("Approvals", approval_id)
+        if not fresh:
+            return jsonify({"error": "approval not found"}), 404
+        fresh_status = fresh.get("fields", {}).get(ApprovalsFields.STATUS, "")
+        if fresh_status != ApprovalStatus.PENDING:
+            return jsonify({"error": f"approval already {fresh_status}"}), 409
+
+        # Claim: mark as "מעבד" — durable lock in Airtable.
+        # A second concurrent request will see "מעבד" on its re-read → 409.
+        claimed = _at_patch("Approvals", approval_id, {ApprovalsFields.STATUS: ApprovalStatus.PROCESSING})
+        if not claimed:
+            return jsonify({"error": "claim failed — could not set מעבד"}), 500
+    # Lock released here — "מעבד" in Airtable is now the single source of truth.
+
+    execution_result = None
+    if context_data:
         try:
             payload = json.loads(context_data)
         except (TypeError, ValueError):
@@ -1788,27 +1851,30 @@ def act_on_approval(approval_id, identity):
         if isinstance(payload, dict) and payload.get("type") == "tma_write":
             execution_result = _execute_tma_write(payload, identity)
             if not execution_result.get("ok"):
+                logger.error(
+                    "[Approval] write failed after claim for %s: %s",
+                    approval_id, execution_result,
+                )
+                # Mark נכשל so the record reflects the real outcome.
+                _at_patch("Approvals", approval_id, {ApprovalsFields.STATUS: ApprovalStatus.FAILED})
                 return jsonify({
                     "error": "approval execution failed",
                     "detail": execution_result,
                 }), 500
 
-    ok = _at_patch("Approvals", approval_id, patch_fields)
-    if not ok:
-        return jsonify({"error": "update failed"}), 500
+    # Execution succeeded (or no tma_write payload) — finalize to אושר.
+    _at_patch("Approvals", approval_id, {ApprovalsFields.STATUS: ApprovalStatus.APPROVED})
 
     if execution_result is None:
         _try_bus_action(ctx_id, decision)
-    _audit(f"approval_{decision}", identity, details=f"{action_label[:100]} | note: {note[:80]}")
-
-    icon = "OK" if decision == "approve" else "REJECTED"
+    _audit("approval_approve", identity, details=f"{action_label[:100]} | note: {note[:80]}")
     _notify_owner(
-        f"{icon} TMA: {new_status} - {action_label}\n"
+        f"OK TMA: אושר - {action_label}\n"
         f"approved_by: {identity.display_name or identity.user_id}"
         + (f"\nnote: {note}" if note else "")
     )
 
-    response = {"ok": True, "approval_id": approval_id, "new_status": new_status}
+    response = {"ok": True, "approval_id": approval_id, "new_status": ApprovalStatus.APPROVED}
     if execution_result is not None:
         response.update(execution_result)
     return jsonify(response)
@@ -2173,11 +2239,11 @@ def update_quest(quest_id, identity):
         coins = int(qf.get(QuestsFields.COINS, 0) or 0)
         if coins > 0:
             _at_post(Tables.COINS_LOG, {
-                CoinsLogFields.ACTION:        quest_name,
+                CoinsLogFields.ACTION:        "Quest Completed",
                 CoinsLogFields.COINS:         coins,
                 CoinsLogFields.DATE:          date.today().isoformat(),
                 CoinsLogFields.QUEST:         [quest_id],
-                CoinsLogFields.NOTE:          "Quest completed via TMA",
+                CoinsLogFields.NOTE:          f"Quest completed via TMA: {quest_name}",
                 CoinsLogFields.TOTAL_RUNNING: _coins_running_total(coins),
             })
             coins_awarded = coins
@@ -2220,7 +2286,6 @@ def game_today(identity):
     today_str  = date.today().isoformat()
     owner_name = (identity.display_name or "").strip().lower()
 
-    # ── Roadmap Tasks — fetch all, filter in Python by owner + due ≤ today ──
     all_rt = _at_list(Tables.ROADMAP_TASKS, "", max_records=200)
 
     def _due_today_or_earlier(r: dict) -> bool:
@@ -2311,12 +2376,12 @@ def complete_daily_task(task_id, identity):
     coins = int(f.get(RoadmapTaskFields.COINS, 0) or 0)
     coins_awarded = 0
     if coins > 0:
-        quest_ids = f.get(RoadmapTaskFields.QUEST, []) or []
+        quest_ids = _linked_record_ids(f.get(RoadmapTaskFields.QUEST, []) or [])
         log_fields: dict = {
-            CoinsLogFields.ACTION:        task_name,
+            CoinsLogFields.ACTION:        "Task Completed",
             CoinsLogFields.COINS:         coins,
             CoinsLogFields.DATE:          date.today().isoformat(),
-            CoinsLogFields.NOTE:          "Roadmap task completed via TMA",
+            CoinsLogFields.NOTE:          f"Roadmap task completed via TMA: {task_name}",
             CoinsLogFields.TOTAL_RUNNING: _coins_running_total(coins),
         }
         if quest_ids:
