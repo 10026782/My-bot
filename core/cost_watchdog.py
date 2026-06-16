@@ -116,10 +116,11 @@ def _write_airtable_row(date_str: str, counts: dict[str, int]) -> None:
         from airtable_schema import Tables
         table = getattr(Tables, "AI_USAGE_DAILY", "AI_Usage_Daily")
         fields: dict = {
-            "Date":         date_str,
-            "claude_sonnet": counts.get("claude_sonnet", 0),
-            "claude_haiku":  counts.get("claude_haiku",  0),
-            "total_units":   sum(counts.values()),
+            "Date":                   date_str,
+            "claude_sonnet":           counts.get("claude_sonnet",          0),
+            "claude_haiku":            counts.get("claude_haiku",           0),
+            "whatsapp_conversation":   counts.get("whatsapp_conversation",  0),
+            "total_units":             sum(counts.values()),
         }
         from tools.airtable_gateway import airtable_create
         result = airtable_create(table, fields, source="cost_watchdog")
