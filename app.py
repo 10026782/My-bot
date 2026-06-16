@@ -1032,7 +1032,7 @@ def webhook_telegram():
         # ג”€ג”€ Thinking Indicator ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
         thinking_msg_id = None
         try:
-            thinking_msg    = bot.send_message(reply_chat_id, "ג³")
+            thinking_msg    = bot.send_message(reply_chat_id, "⏳")
             thinking_msg_id = thinking_msg.message_id
         except Exception:
             pass
