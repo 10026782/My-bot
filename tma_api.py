@@ -2194,6 +2194,22 @@ def update_quest(quest_id, identity):
 # Game — Daily Tasks screen
 # ══════════════════════════════════════════════════════════════════
 
+_ROADMAP_COMPLETE_STATUSES = {RoadmapTaskStatus.DONE, "Completed"}
+
+
+def _is_roadmap_complete(status) -> bool:
+    return _clean_select_value(status) in _ROADMAP_COMPLETE_STATUSES
+
+
+def _map_roadmap_task_status(status) -> str:
+    clean_status = _clean_select_value(status)
+    if clean_status in _ROADMAP_COMPLETE_STATUSES:
+        return "Done"
+    if clean_status == RoadmapTaskStatus.BLOCKED:
+        return "Skipped"
+    return "Todo"
+
+
 @tma_api.route("/api/game/today", methods=["GET"])
 @require_tma_auth
 def game_today(identity):
@@ -2218,28 +2234,24 @@ def game_today(identity):
         owner = (r.get("fields", {}).get(RoadmapTaskFields.OWNER, "") or "").lower()
         return owner_name in owner or owner in owner_name
 
-    def _map_rt_status(s: str) -> str:
-        if s == RoadmapTaskStatus.DONE:
-            return "Done"
-        if s == RoadmapTaskStatus.BLOCKED:
-            return "Skipped"
-        return "Todo"
-
     tasks = []
     for r in all_rt:
         f = r.get("fields", {})
         status = f.get(RoadmapTaskFields.STATUS, RoadmapTaskStatus.TODO)
-        if status == RoadmapTaskStatus.DONE:
+        if _is_roadmap_complete(status):
             continue  # בוצע — לא מציג בכרטיסיה היומית
+        task_name = str(f.get(RoadmapTaskFields.TASK, "") or "").strip()
+        if not task_name:
+            continue
         if not _owner_matches(r):
             continue
         if not _due_today_or_earlier(r):
             continue
         tasks.append({
             "id":     r["id"],
-            "task":   f.get(RoadmapTaskFields.TASK, ""),
+            "task":   task_name,
             "coins":  int(f.get(RoadmapTaskFields.COINS, 0) or 0),
-            "status": _map_rt_status(status),
+            "status": _map_roadmap_task_status(status),
             "who":    f.get(RoadmapTaskFields.OWNER, ""),
         })
 
@@ -2286,10 +2298,10 @@ def complete_daily_task(task_id, identity):
         return jsonify({"error": "task not found"}), 404
 
     f          = rec.get("fields", {})
-    old_status = f.get(RoadmapTaskFields.STATUS, "")
+    old_status = _clean_select_value(f.get(RoadmapTaskFields.STATUS, ""))
     task_name  = f.get(RoadmapTaskFields.TASK, task_id)
 
-    if old_status == RoadmapTaskStatus.DONE:
+    if _is_roadmap_complete(old_status):
         return jsonify({"ok": True, "coins_awarded": 0, "already_done": True})
 
     ok = _at_patch(Tables.ROADMAP_TASKS, task_id, {RoadmapTaskFields.STATUS: RoadmapTaskStatus.DONE})
@@ -2309,7 +2321,14 @@ def complete_daily_task(task_id, identity):
         }
         if quest_ids:
             log_fields[CoinsLogFields.QUEST] = quest_ids
-        _at_post(Tables.COINS_LOG, log_fields)
+        log_rec = _at_post(Tables.COINS_LOG, log_fields)
+        if not log_rec:
+            return jsonify({
+                "error": "coins log failed",
+                "task_id": task_id,
+                "status": RoadmapTaskStatus.DONE,
+                "coins_awarded": 0,
+            }), 500
         coins_awarded = coins
 
     _audit("roadmap_task_done", identity, details=f"{task_name} +{coins}🪙")
