@@ -86,18 +86,20 @@
 | W1b | W1 Completion — Score/Next Followup case fix | LeadFields.SCORE "score"→"Score"; FIELD_ALIASES aligned; schema_cache.json updated | airtable_schema.py, schema_cache.json, schema_intelligence.py, lead_memory.py, tools/airtable_tools.py | a6b471c |
 | W2 | Airtable Gateway — single write path | tools/airtable_gateway.py: normalize→validate→audit→httpx; tma/agent/lead_capture migrated; 22-test regression suite | tools/airtable_gateway.py, tma_api.py, airtable_tools.py, lead_capture.py, app.py | b43357e |
 
-### Game + Ops Sprint (16/06/2026)
+### Sprint 16/06/2026
 | ID | שם | מה נעשה | קבצים | PR |
-|----|----|---------|--------|----|
-| G1 | LLM Fallback + Encoding Fix | `FEATURE_LLM_FALLBACK` flag (default=OFF); Claude error/timeout → OpenAI רק כש-flag ON; כל Hebrew error copy תוקן (Mojibake); ⏳ thinking indicator שוחזר | `app.py`, `feature_flags.py` | #58 |
-| G2 | Furniture WhatsApp Funnel | פאנל 7 שלבים (Twilio) למיטה מעץ אלון; scoring; upsert ל-Airtable; `FURNITURE_TWILIO_WHATSAPP_NUMBER` מפעיל routing; 22/22 tests | `furniture_lead_funnel.py`, `config.py`, `app.py` | #61 |
-| G3 | Coins Log Schema Fix | `Note → Notes` rename; alias map לתאימות אחורה; Action values: `"Quest Completed"` / `"Task Completed"` | `airtable_schema.py`, `schema_cache.json`, `airtable_tools.py` | #63 |
-| G4 | Approval Hardening | per-id thread lock; claim state `מעבד`; re-read status לפני execute; sets `אושר`/`נכשל`; concurrency test | `tma_api.py` | #63 |
-| G5 | Game Today Filtering | `/api/game/today` טוען 200 records; Python-side filtering לפי owner + due-date; משימות ריקות מסוננות | `tma_api.py` | #62 |
-| G6 | GameScreen button "Done" → "סמן" | כפתור "Done" על משימה פתוחה נראה כמו מצב הושלם; שונה לפועל "סמן" | `GameScreen.tsx` | ddb9b79 |
-| G7 | BossCheckin duplicate block | merge artifact מ-PR #59 גרם TS2451 ב-Vercel build; הוסר + `handleDone` הפך async | `BossCheckin.tsx` | #60 |
-| G8 | TMA task persisted guard | `saveTaskUpdate` / `markTaskDone` מוגנים ב-`if (!task.persisted) return` — אין כתיבה ל-Airtable עבור tasks שלא נשמרו | `BossCheckin.tsx` | #59 |
-| G9 | Ops Documentation | `README.md`, `CHANGELOG.md` (root); `docs/operations/RUNBOOK.md`, `DEPLOYMENT.md`; `AGENTS.md` DoD rule | `docs/operations/`, root | #58, #60 |
+|----|----|---------|--------|-----|
+| C41 | LLM Fallback Handlers | APIStatusError + APITimeoutError → flag-gated OpenAI fallback או Hebrew error נקי | app.py | — |
+| C42 | FEATURE_LLM_FALLBACK flag | default=False, registry comment | feature_flags.py | — |
+| C43 | Hebrew Mojibake fix | כל Hebrew error strings תוקנו ב-byte level | app.py | — |
+| C44 | ⏳ thinking indicator restored | C1 control char → ⏳ תקין | app.py | — |
+| C45 | BossCheckin duplicate block removed | TS2451/TS1308 Vercel build errors נפתרו | tma-frontend/ | PR #59 + UX follow-up |
+| C46 | Furniture WhatsApp Funnel | Deterministic flow + app.py intercept — rebased on main | app.py | PR #61 |
+| C47 | Game today task filtering | Roadmap_Tasks filtered by Due_Date ≤ Today + Owner | tma_api.py | PR #62 |
+| C48 | Coins Log schema fix + approval concurrency hardening | Note→Notes תוקן; approval 3-state atomic hardened | tma_api.py | PR #63 |
+| C49 | Ops Docs | README, CHANGELOG, RUNBOOK, DEPLOYMENT נוצרו | docs/, root | PR #60 |
+| C50 | F12 Model Provider Adapter | תועד כ-Future item ב-ROADMAP | ROADMAP.md | — |
+| C51 | Approval Concurrency Regression Test | test ל-3-state approval flow: pending→processing→approved/failed + double approve guard | test_approval_concurrency.py | branch furniture-funnel-clean |
 
 ---
 
@@ -311,6 +313,8 @@ Pending Decision   = COUNT(Deals WHERE Status = "Pending Decision")
 | F11 followup_engine — חלקי | תשתית בנויה, מחכה ל-N04 MVP | F11 |
 | core_knowledge.py smoke test false positive | _NEVER_FAKE_CONTROL מכיל פראזה שהtest מזהה בטעות | לתעד כ-known false positive |
 | Voice/IVR Twilio signature validation | לא קריטי עד שF07 פעיל | לפני F07 |
+| /status handler חסר decorator | @bot.message_handler הוסר בשלב לא ידוע | מחר — תיקון שורה אחת |
+| schema_cache.json stale | Coins_Log, Roadmap_Tasks, Leads מציגים [] | רענון בסשן הבא |
 
 ---
 
