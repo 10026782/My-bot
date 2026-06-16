@@ -130,7 +130,7 @@ def _preflight_game_today():
 
 
 @tma_api.route("/api/game/tasks/<task_id>/done", methods=["OPTIONS"])
-def _preflight_game_task_done(_task_id=None):
+def _preflight_game_task_done(task_id):
     return "", 204
 
 
@@ -207,17 +207,6 @@ def _at_post(table: str, fields: dict) -> dict | None:
     """POST new record via gateway → created record dict or None."""
     return _gw_create(table, fields, source="tma")
 
-
-def _coins_running_total(new_coins: int) -> int:
-    """
-    Application-side running total for Coins_Log.Total_Running.
-    Total_Running must be a Number field (not a Formula) — Airtable formulas
-    cannot reliably compute a running total across records, so we compute it
-    here: sum of all existing Coins_Log.Coins + the coins being awarded now.
-    """
-    log_recs = _at_list(Tables.COINS_LOG, "", max_records=1000)
-    existing_total = sum(int(r.get("fields", {}).get(CoinsLogFields.COINS, 0) or 0) for r in log_recs)
-    return existing_total + new_coins
 
 
 def _linked_record_ids(value) -> list[str]:
@@ -2244,7 +2233,6 @@ def update_quest(quest_id, identity):
                 CoinsLogFields.DATE:          date.today().isoformat(),
                 CoinsLogFields.QUEST:         [quest_id],
                 CoinsLogFields.NOTE:          f"Quest completed via TMA: {quest_name}",
-                CoinsLogFields.TOTAL_RUNNING: _coins_running_total(coins),
             })
             coins_awarded = coins
 
@@ -2382,7 +2370,6 @@ def complete_daily_task(task_id, identity):
             CoinsLogFields.COINS:         coins,
             CoinsLogFields.DATE:          date.today().isoformat(),
             CoinsLogFields.NOTE:          f"Roadmap task completed via TMA: {task_name}",
-            CoinsLogFields.TOTAL_RUNNING: _coins_running_total(coins),
         }
         if quest_ids:
             log_fields[CoinsLogFields.QUEST] = quest_ids
