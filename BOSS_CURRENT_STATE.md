@@ -1,7 +1,7 @@
 # BOSS CURRENT STATE
 
-Last updated: 12/06/2026
-Reflects: Stabilization Sprint + W0/W1 + Security Audit Fixes (H1-H3) + TIER read-only fix + Game Dashboard fix + Ghost Button Audit + Airtable Gateway (W2)
+Last updated: 16/06/2026
+Reflects: Stabilization Sprint + W0/W1 + Security Audit Fixes (H1-H3) + TIER read-only fix + Game Dashboard fix + Ghost Button Audit + Airtable Gateway (W2) + GameScreen Fix + Daily Digest Live + Repo Docs
 
 ## Classification Key
 - WORKING: implemented, reachable, no blocking issue.
@@ -21,6 +21,17 @@ Reflects: Stabilization Sprint + W0/W1 + Security Audit Fixes (H1-H3) + TIER rea
 | CLAUDE.md | ✅ LIVE | Architecture docs on main — Codex reads at session start (PR #35) |
 | ROADMAP/CURRENT_STATE | ✅ UPDATED | Now reflects actual state including W0, W1, removed C14 |
 | C40 Golden Path Approval Gate | ? NEW | TMA write endpoints queue approval before writes; approve executes write; reject does not write; receipt returned; audit after successful execution only (tma_api.py, commit 4e5d00d on origin/approval-gate) |
+
+---
+
+## What Changed — 16/06/2026
+
+| Item | Status | Detail |
+|------|--------|--------|
+| GameScreen task completion | ✅ FIXED | `completed` computed only when Status=Done/Completed (not Todo); empty rows (blank title + 0 coins) hidden; open task button is blue "Done" instead of green ✓ — commit 7ccd833 |
+| BossCheckin | ✅ UNTOUCHED | No changes |
+| Daily Digest | ✅ WORKING | Real data confirmed live: hot leads, tasks by priority (P0–P3), open deals, recent leads, completed tasks — running in production |
+| Repo documentation | ✅ NEW | Added docs/operations/DEPLOYMENT.md + RUNBOOK.md; updated README.md (WhatsApp, Twilio env vars, full docs map); CHANGELOG.md updated |
 
 ---
 
