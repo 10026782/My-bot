@@ -20,9 +20,9 @@ FIELD_ALIASES: dict[str, dict[str, str]] = {
         "next_followup": "Next Followup",
     },
     "Coins_Log": {
-        "Note":  "Notes",
-        "note":  "Notes",
-        "notes": "Notes",
+        "note":  "Note",
+        "Notes": "Note",
+        "notes": "Note",
     },
 }
 
@@ -305,7 +305,7 @@ class CoinsLogFields:
     COINS         = "Coins"
     DATE          = "Date"
     QUEST         = "Quest"          # linked record → Quests
-    NOTE          = "Notes"
+    NOTE          = "Note"
 
 
 class QuestStatus:
