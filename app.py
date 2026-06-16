@@ -1045,6 +1045,16 @@ def webhook_whatsapp():
         except Exception as _utm_err:
             logger.debug(f"[UTM] whatsapp inject skipped: {_utm_err}")
 
+    try:
+        from furniture_lead_funnel import handle_furniture_lead_message
+        funnel_reply = handle_furniture_lead_message(sender, incoming, domain_from_channel)
+        if funnel_reply:
+            resp = MessagingResponse()
+            resp.message(funnel_reply)
+            return Response(str(resp), mimetype="application/xml")
+    except Exception as e:
+        logger.warning("[FurnitureFunnel] fallback to agent: %s", e)
+
     resp = MessagingResponse()
     resp.message(run_agent(
         incoming, sender,
