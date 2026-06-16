@@ -1,5 +1,11 @@
 ## Cursor Cloud specific instructions
 
+### Definition of Done — ROADMAP.md
+
+A ROADMAP.md change is not complete until **both** of the following are done:
+1. Content is updated
+2. `עודכן:` date at the top of the file is updated to today's date (DD/MM/YYYY)
+
 ### Overview
 
 This is a single-file Python/Flask application ("The Boss Bot") — a Hebrew-language Telegram chatbot powered by Anthropic Claude, with optional Google Workspace and Twilio/WhatsApp integrations.
