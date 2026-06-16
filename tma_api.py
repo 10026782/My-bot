@@ -220,6 +220,17 @@ def _coins_running_total(new_coins: int) -> int:
     return existing_total + new_coins
 
 
+def _linked_record_ids(value) -> list[str]:
+    """Return only Airtable linked-record ids, never display text."""
+    if isinstance(value, list):
+        candidates = value
+    elif isinstance(value, str):
+        candidates = [value]
+    else:
+        return []
+    return [v for v in candidates if isinstance(v, str) and re.match(r"^rec\w+$", v)]
+
+
 # ══════════════════════════════════════════════════════════════════
 # Audit Trail — every write action creates an activity record
 # ══════════════════════════════════════════════════════════════════
@@ -2228,11 +2239,11 @@ def update_quest(quest_id, identity):
         coins = int(qf.get(QuestsFields.COINS, 0) or 0)
         if coins > 0:
             _at_post(Tables.COINS_LOG, {
-                CoinsLogFields.ACTION:        quest_name,
+                CoinsLogFields.ACTION:        "Quest Completed",
                 CoinsLogFields.COINS:         coins,
                 CoinsLogFields.DATE:          date.today().isoformat(),
                 CoinsLogFields.QUEST:         [quest_id],
-                CoinsLogFields.NOTE:          "Quest completed via TMA",
+                CoinsLogFields.NOTE:          f"Quest completed via TMA: {quest_name}",
                 CoinsLogFields.TOTAL_RUNNING: _coins_running_total(coins),
             })
             coins_awarded = coins
@@ -2365,12 +2376,12 @@ def complete_daily_task(task_id, identity):
     coins = int(f.get(RoadmapTaskFields.COINS, 0) or 0)
     coins_awarded = 0
     if coins > 0:
-        quest_ids = f.get(RoadmapTaskFields.QUEST, []) or []
+        quest_ids = _linked_record_ids(f.get(RoadmapTaskFields.QUEST, []) or [])
         log_fields: dict = {
-            CoinsLogFields.ACTION:        task_name,
+            CoinsLogFields.ACTION:        "Task Completed",
             CoinsLogFields.COINS:         coins,
             CoinsLogFields.DATE:          date.today().isoformat(),
-            CoinsLogFields.NOTE:          "Roadmap task completed via TMA",
+            CoinsLogFields.NOTE:          f"Roadmap task completed via TMA: {task_name}",
             CoinsLogFields.TOTAL_RUNNING: _coins_running_total(coins),
         }
         if quest_ids:

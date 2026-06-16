@@ -19,6 +19,11 @@ FIELD_ALIASES: dict[str, dict[str, str]] = {
         "score":         "Score",
         "next_followup": "Next Followup",
     },
+    "Coins_Log": {
+        "Note":  "Notes",
+        "note":  "Notes",
+        "notes": "Notes",
+    },
 }
 
 class Tables:
@@ -300,7 +305,7 @@ class CoinsLogFields:
     COINS         = "Coins"
     DATE          = "Date"
     QUEST         = "Quest"          # linked record → Quests
-    NOTE          = "Note"
+    NOTE          = "Notes"
     TOTAL_RUNNING = "Total_Running"  # Number field — written app-side on each Coins_Log insert (see _coins_running_total)
 
 
