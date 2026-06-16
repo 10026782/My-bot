@@ -91,7 +91,7 @@ function TaskRow({
           className="flex-shrink-0 px-3 h-9 flex items-center justify-center rounded-full bg-blue-50 text-blue-700 active:bg-blue-100 disabled:opacity-40 text-xs font-bold"
           aria-label="סמן כהושלם"
         >
-          {completing ? "…" : "Done"}
+          {completing ? "…" : "סמן"}
         </button>
       )}
     </div>
