@@ -2268,29 +2268,28 @@ def _map_rt_status(status) -> str:
 @tma_api.route("/api/game/today", methods=["GET"])
 @require_tma_auth
 def game_today(identity):
-    """Today's Roadmap_Tasks (filtered by due date) + active world + total coins. Owner only."""
+    """Today's Roadmap_Tasks (filtered by owner + due date) + active world + total coins. Owner only."""
     if not identity.is_owner:
         return jsonify({"error": "forbidden"}), 403
 
-    today_str = date.today().isoformat()
+    today_str  = date.today().isoformat()
+    owner_name = (identity.display_name or "").strip().lower()
 
-    # ── Roadmap Tasks — filter pushed to Airtable: due ≤ today + not Done ──
-    # Empty Due_Date treated as due (OR(NOT({Due_Date}), ...)).
-    # This is a private owner-only app, so Owner filtering is intentionally omitted.
-    rt_formula_parts = [
-        f"NOT({{{RoadmapTaskFields.STATUS}}}='{RoadmapTaskStatus.DONE}')",
-        f"OR(NOT({{{RoadmapTaskFields.DUE_DATE}}}), NOT(IS_AFTER({{{RoadmapTaskFields.DUE_DATE}}}, '{today_str}')))",
-    ]
-    rt_formula = "AND(" + ", ".join(rt_formula_parts) + ")"
-    filtered_rt = _at_list(Tables.ROADMAP_TASKS, rt_formula, max_records=50)
+    all_rt = _at_list(Tables.ROADMAP_TASKS, "", max_records=200)
 
-    def _map_rt_status(s: str) -> str:
-        if s == RoadmapTaskStatus.BLOCKED:
-            return "Skipped"
-        return "Todo"
+    def _due_today_or_earlier(r: dict) -> bool:
+        f   = r.get("fields", {})
+        due = (f.get(RoadmapTaskFields.DUE_DATE, "") or "")[:10]
+        return not due or due <= today_str
+
+    def _owner_matches(r: dict) -> bool:
+        if not owner_name:
+            return True
+        owner = (r.get("fields", {}).get(RoadmapTaskFields.OWNER, "") or "").lower()
+        return owner_name in owner or owner in owner_name
 
     tasks = []
-    for r in filtered_rt:
+    for r in all_rt:
         f = r.get("fields", {})
         status = f.get(RoadmapTaskFields.STATUS, RoadmapTaskStatus.TODO)
         if _is_roadmap_complete(status):
