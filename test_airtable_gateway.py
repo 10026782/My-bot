@@ -83,10 +83,13 @@ print("\n── validate ──────────────────�
 clean, errs = validate_airtable_fields("Leads", {"Score": 80})
 chk("Score=80 passes validate", "Score" in clean and not errs)
 
-# Read-only: tier, Tier, טמפרטורה — all rejected
-for ro_field in ("tier", "Tier", "טמפרטורה"):
-    clean, errs = validate_airtable_fields("Leads", {ro_field: "HOT"})
-    chk(f'read-only "{ro_field}" rejected', ro_field not in clean and any("read-only" in e for e in errs))
+# Read-only: טמפרטורה (formula) — rejected; tier is now singleSelect (writable)
+clean, errs = validate_airtable_fields("Leads", {"טמפרטורה": "HOT"})
+chk('read-only "טמפרטורה" rejected', "טמפרטורה" not in clean and any("read-only" in e for e in errs))
+
+# tier is now a real writable singleSelect field (created 2026-06-15)
+clean, errs = validate_airtable_fields("Leads", {"tier": "חם"})
+chk('writable "tier" passes validate', "tier" in clean)
 
 # Sentinel "none" rejected
 clean, errs = validate_airtable_fields("Leads", {"status": "none"})
@@ -148,10 +151,10 @@ with patch("tools.airtable_gateway.httpx.patch", side_effect=fake_patch), \
     chk("audit ok=True", audit_calls[0]["kw"].get("ok", audit_calls[0]["args"][-1] if audit_calls[0]["args"] else None) is True
         or (audit_calls and True))  # flexible check
 
-    # Read-only field — should fail with empty fields after validate
+    # Formula field — should fail with empty fields after validate
     audit_calls.clear()
-    ok = airtable_patch("Leads", "recABC123", {"tier": "HOT"}, source="tma")
-    chk("airtable_patch tier=HOT → False (read-only)", not ok)
+    ok = airtable_patch("Leads", "recABC123", {"טמפרטורה": "HOT"}, source="tma")
+    chk("airtable_patch טמפרטורה=HOT → False (read-only formula)", not ok)
 
     # TMA alias flow — frontend sends "score", should normalize to "Score"
     captured_json: list[dict] = []

@@ -37,6 +37,7 @@ INTEGRATIONS:
   CREATIVE_GENERATOR          - יצירת תוכן שיווקי אוטומטי
   AD_ATTRIBUTION              - ייחוס UTM מפרסום → ליד
   CONTACT_RESOLVER            - פתרון אנשי קשר אוטומטי
+  LLM_FALLBACK                - fallback ל-OpenAI כש-Anthropic מחזיר שגיאה/timeout (ברירת מחדל: כבוי)
 
 GAME / SCHEDULER:
   GAME_SCHEDULER              - scheduler jobs של מערכת הגיימיפיקציה

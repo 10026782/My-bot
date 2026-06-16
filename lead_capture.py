@@ -5,16 +5,11 @@
 
 import logging
 import re
-from datetime import datetime, timezone
 
 from airtable_schema import LeadFields, Tables
 from feature_flags import is_enabled
 
 logger = logging.getLogger(__name__)
-
-
-def _now_iso() -> str:
-    return datetime.now(tz=timezone.utc).isoformat()
 
 
 def _is_junk_inbound_text(text: str) -> bool:
@@ -120,7 +115,6 @@ def capture_inbound_lead(identity, message: str) -> None:
             LeadFields.SOURCE: "whatsapp_inbound",
             LeadFields.STATUS: "new",
             LeadFields.SUMMARY: (message or "")[:500],
-            LeadFields.CREATED_AT: _now_iso(),
         }
 
         result = airtable_add(Tables.LEADS, fields)
@@ -129,6 +123,20 @@ def capture_inbound_lead(identity, message: str) -> None:
 
         if "✅" in result:
             logger.info("[LeadCapture] created new lead: %s", memory_key)
+            # N04-A — sync basic contact info to lead_memory regardless of scoring flag
+            if is_enabled("LEAD_MEMORY"):
+                try:
+                    from lead_memory import lead_memory
+                    lead_memory.update(
+                        memory_key,
+                        domain=getattr(identity, "domain_id", "") or "",
+                        channel=identity.channel,
+                        contact_name=identity.display_name or identity.external_id or "",
+                        last_message=message or "",
+                        summary=(message or "")[:500],
+                    )
+                except Exception as e:
+                    logger.warning("[LeadCapture] lead_memory.update failed for %s: %s", memory_key, e)
             if is_enabled("LEAD_SCORING"):
                 try:
                     if lead_id == "unknown":
@@ -153,7 +161,7 @@ def capture_inbound_lead(identity, message: str) -> None:
                         )
                     except Exception:
                         pass  # אסור שה-audit ישבור את ה-flow
-                    # N03 — sync to lead_memory (durable cross-restart state)
+                    # N04-B — sync tier/score/record_id to lead_memory after scoring
                     if is_enabled("LEAD_MEMORY"):
                         try:
                             from lead_memory import lead_memory
@@ -161,10 +169,7 @@ def capture_inbound_lead(identity, message: str) -> None:
                                 memory_key,
                                 score=score,
                                 tier=tier,
-                                summary=(message or "")[:500],
-                                last_message=message,
-                                domain=getattr(identity, "domain_id", ""),
-                                channel="whatsapp",
+                                record_id=lead_id,
                             )
                             if save_due:
                                 lead_memory.save(memory_key)

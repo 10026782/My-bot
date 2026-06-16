@@ -18,7 +18,6 @@ FIELD_ALIASES: dict[str, dict[str, str]] = {
     "Leads": {
         "score":         "Score",
         "next_followup": "Next Followup",
-        "טמפרטורה":     "tier",   # read-only alias — מנורמל כדי שיתפס ע"י READ_ONLY_FIELDS
     },
 }
 
@@ -227,7 +226,7 @@ class LeadFields:
     PHONE           = "phone"
     STATUS          = "status"
     SCORE           = "Score"        # raw numeric — Airtable field "Score" (capital S); written by lead_memory/lead_capture
-    TIER            = "tier"         # formula field — read-only, auto-calculated from score. Values: קר/חם/לוהט/רותח
+    TIER            = "tier"         # singleSelect — writable. Values: קר/חם/לוהט/רותח (set by scoring logic)
     SUMMARY         = "summary"
     ANSWERS         = "answers"
     SOURCE          = "source"
@@ -441,9 +440,11 @@ class ApprovalsFields:
     REJECTION_NOTE = "הערת דחייה"
 
 class ApprovalStatus:
-    PENDING  = "ממתין"
-    APPROVED = "אושר"
-    REJECTED = "נדחה"
+    PENDING    = "ממתין"
+    PROCESSING = "מעבד"   # transient claim state — execution in progress
+    APPROVED   = "אושר"
+    REJECTED   = "נדחה"
+    FAILED     = "נכשל"   # execution was attempted but failed
 
 class UnitStatus:
     AVAILABLE       = "Available"

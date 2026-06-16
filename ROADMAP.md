@@ -98,16 +98,24 @@
 **lead_capture.py בלבד** — single path:
 1. יצירת Lead ב-Airtable (`LEAD_CAPTURE=true`)
 2. `_score_inbound_message()` → `airtable_patch(Score)` (`LEAD_SCORING=true`)
-3. `lead_memory.update()` אחרי ניקוד מוצלח (`LEAD_MEMORY=true`)
-**lead_scoring.py** הוסר — היה zombie code שכפל scoring ל-qualify_lead (buffered/cadence),
-כתב ל-TIER formula field ישירות (bypass gateway), ולא שוחרר מעולם (`LEAD_SCORING_LIVE` לא היה מוגדר).
+3. `lead_memory.update()` עם `domain/channel/contact_name/summary/last_message` — **תמיד** בעת create, גייטד ב-`LEAD_MEMORY` בלבד (N04-A)
+4. `lead_memory.update()` עם `tier/score/record_id` אחרי scoring (N04-B)
+**lead_scoring.py** הוסר — היה zombie code.
 **flags:** LEAD_SCORING, LEAD_MEMORY (שניהם כבויים ברירת מחדל).
+**commits:** 4d1130a (consolidation), 02f7e75 (N04-A/B wiring)
 
-### N04 — Followup Activation
-**תלוי ב:** N03.
-**מה:** scheduler scan → לידים עם tier=HOT ללא מגע 24 שעות → שולח לאישור owner.
-**קבצים:** core/followup_engine.py, scheduler.py.
-**flag:** FOLLOWUP_AUTOMATION (קיים, כבוי).
+### N04 — Followup Activation ✅ scheduler מחובר (flag כבוי)
+`scheduler._job_followup_scan()` רץ כל 60 דקות, קורא ל-`followup_engine.run_followup_scan()`.
+גייטד ב-`FOLLOWUP_AUTOMATION=true` — כבוי ברירת מחדל.
+`lead_memory.all_active()` מחזיר כעת entries אמיתיים (N04-A/B — commit 02f7e75).
+**המתנה לפני הפעלה**: לאמת ב-Render env עם הודעת WhatsApp אמיתית + `LEAD_CAPTURE=true`.
+**קבצים:** `scheduler.py` (קיים), `followup_engine.py` (קיים).
+
+### N05-B — send_followup.confirmed handler ✅ מיושם (commit 643f929)
+Owner מאשר followup → טיוטה מגיעה ב-Telegram לשליחה ידנית.
+`lead_memory.followup_count` מתעדכן אחרי כל אישור.
+**אין שליחה יוצאת לליד** — Meta outbound blocked עד N05-C.
+**flag:** `FOLLOWUP_AUTOMATION` (אותו gate כמו N04).
 
 ### N05 — Daily Digest שדרוג
 **תלוי ב:** N02 (כדי שציונים אמיתיים יופיעו בדוח).
@@ -251,6 +259,18 @@ Pending Decision   = COUNT(Deals WHERE Status = "Pending Decision")
 תלוי ב: N04 (N04 הוא גרסת MVP — F11 הוא הגרסה המלאה עם טיוטות וזיכרון).
 קבצים: core/followup_engine.py (קיים), scheduler.py.
 
+### F12 — Model Provider Adapter
+מה: abstraction layer אחיד ל-LLM providers — interface יחיד `generate(prompt, context, model_tier) → text` שמאחד Anthropic, OpenAI, ו-providers עתידיים.
+מטרה: שינוי provider = שינוי config בלבד, לא קוד. כולל sanitization עקבי (A32) בכל provider.
+פרטים:
+- interface: `LLMProvider.generate(prompt, context, model_tier) → text`
+- כל implementation עוטף API ספציפי + sanitize_agent_response
+- selection: env config / cost watchdog / health-based fallback אוטומטי
+- כל domain יכול לבחור model tier שונה (domain skill documents)
+מצב: **לא קיים** — Fix #1/#3 + `FEATURE_LLM_FALLBACK` מטפלים בעכשיו. זהו ה-design הנכון לטווח ארוך.
+תלוי ב: domain skill documents (F-future), `FEATURE_LLM_FALLBACK` יציב בפרודקשן.
+קבצים לעתיד: `providers/` (חדש), `llm_fallback.py` (migrate/replace).
+
 ---
 
 ## Known Issues / Tech Debt (מתועד, לא קריטי)
@@ -259,6 +279,12 @@ Pending Decision   = COUNT(Deals WHERE Status = "Pending Decision")
 |------|--------|----------|
 | `_ALIAS_MAP` כפול | מיפוי English→Hebrew זהה קיים גם ב-`tools/dispatcher.py:43` וגם ב-`tools/airtable_tools.py:111`. סנכרוני כרגע, אבל עדכון ב-אחד לא יתפשט לשני — סיכון drift שקט. | בפעם הבאה שנוגעים באחד |
 | `crm_mark_payment_paid` — approval חובה | כאשר כלי זה יוממש, **חייב** להירשם עם `requires_approval=True` לפי `SECURITY_CHECKLIST.md:62`. פעולות סימון תשלום דורשות Golden Path Approval Gate. | לפני מימוש הכלי |
+| `lead_memory.py:155` — dead write | שדה `"updated_at"` נכתב ל-Leads אך אינו קיים בסכמת Airtable — הכתיבה נדחית בשקט ע"י gateway. | ניקוי בפגישת Tech Debt הבאה |
+| Worlds table — constraint חסר | `game_today()` מחפש `Status=Active` עם `max_records=1`. אם שני Worlds מסומנים Active, התוצאה לא צפויה. אין constraint ב-Airtable. | לפני F12 / aggregator |
+| `/api/game/today` — shared endpoint | גם `BossCheckin.tsx` (Screen #1) וגם `GameScreen.tsx` (Screen #2) משתמשים באותו endpoint. aggregator F12 חייב לשמור על filter הנוכחי (NOT Done + Due_Date≤today + Owner) כדי לא לשבור את Screen #2. | לפני פיתוח F12 |
+| `LeadFields.TIER = "tier"` — שדה לא קיים ב-Airtable | schema dump 2026-06-15 אימת: אין שדה `tier` / `Tier` בטבלת Leads ב-`app4bcgoX7t0HUVnm`. gateway חוסם כתיבה. **החלטה נדרשת:** (1) ליצור שדה `Tier` ב-Airtable (singleSelect), (2) להסיר `LeadFields.TIER` מהקוד, (3) להשאיר כ-no-op. | לפני פעילות scoring בפרודקשן |
+| Assets schema drift | שמות שדות ב-live שונים מ-MIGRATION doc: `"Mortgage Balance"` (לא `"Mortgage"`), אין `"Purchase Cost"`, אין `"Documents"`. `AssetFields` בקוד עשוי להשתמש בשמות לא נכונים. | לפני פיתוח Assets tools |
+| `Table 16` ב-Airtable | טבלת placeholder ריקה (`tblXeDnLTAvpej3cC`) — לא בשימוש. למחוק ידנית מ-Airtable UI. | Housekeeping הבא |
 
 ---
 
