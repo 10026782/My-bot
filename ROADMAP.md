@@ -86,6 +86,19 @@
 | W1b | W1 Completion — Score/Next Followup case fix | LeadFields.SCORE "score"→"Score"; FIELD_ALIASES aligned; schema_cache.json updated | airtable_schema.py, schema_cache.json, schema_intelligence.py, lead_memory.py, tools/airtable_tools.py | a6b471c |
 | W2 | Airtable Gateway — single write path | tools/airtable_gateway.py: normalize→validate→audit→httpx; tma/agent/lead_capture migrated; 22-test regression suite | tools/airtable_gateway.py, tma_api.py, airtable_tools.py, lead_capture.py, app.py | b43357e |
 
+### Game + Ops Sprint (16/06/2026)
+| ID | שם | מה נעשה | קבצים | PR |
+|----|----|---------|--------|----|
+| G1 | LLM Fallback + Encoding Fix | `FEATURE_LLM_FALLBACK` flag (default=OFF); Claude error/timeout → OpenAI רק כש-flag ON; כל Hebrew error copy תוקן (Mojibake); ⏳ thinking indicator שוחזר | `app.py`, `feature_flags.py` | #58 |
+| G2 | Furniture WhatsApp Funnel | פאנל 7 שלבים (Twilio) למיטה מעץ אלון; scoring; upsert ל-Airtable; `FURNITURE_TWILIO_WHATSAPP_NUMBER` מפעיל routing; 22/22 tests | `furniture_lead_funnel.py`, `config.py`, `app.py` | #61 |
+| G3 | Coins Log Schema Fix | `Note → Notes` rename; alias map לתאימות אחורה; Action values: `"Quest Completed"` / `"Task Completed"` | `airtable_schema.py`, `schema_cache.json`, `airtable_tools.py` | #63 |
+| G4 | Approval Hardening | per-id thread lock; claim state `מעבד`; re-read status לפני execute; sets `אושר`/`נכשל`; concurrency test | `tma_api.py` | #63 |
+| G5 | Game Today Filtering | `/api/game/today` טוען 200 records; Python-side filtering לפי owner + due-date; משימות ריקות מסוננות | `tma_api.py` | #62 |
+| G6 | GameScreen button "Done" → "סמן" | כפתור "Done" על משימה פתוחה נראה כמו מצב הושלם; שונה לפועל "סמן" | `GameScreen.tsx` | ddb9b79 |
+| G7 | BossCheckin duplicate block | merge artifact מ-PR #59 גרם TS2451 ב-Vercel build; הוסר + `handleDone` הפך async | `BossCheckin.tsx` | #60 |
+| G8 | TMA task persisted guard | `saveTaskUpdate` / `markTaskDone` מוגנים ב-`if (!task.persisted) return` — אין כתיבה ל-Airtable עבור tasks שלא נשמרו | `BossCheckin.tsx` | #59 |
+| G9 | Ops Documentation | `README.md`, `CHANGELOG.md` (root); `docs/operations/RUNBOOK.md`, `DEPLOYMENT.md`; `AGENTS.md` DoD rule | `docs/operations/`, root | #58, #60 |
+
 ---
 
 ## N — הבא בתור
@@ -285,6 +298,7 @@ Pending Decision   = COUNT(Deals WHERE Status = "Pending Decision")
 | `LeadFields.TIER = "tier"` — שדה לא קיים ב-Airtable | schema dump 2026-06-15 אימת: אין שדה `tier` / `Tier` בטבלת Leads ב-`app4bcgoX7t0HUVnm`. gateway חוסם כתיבה. **החלטה נדרשת:** (1) ליצור שדה `Tier` ב-Airtable (singleSelect), (2) להסיר `LeadFields.TIER` מהקוד, (3) להשאיר כ-no-op. | לפני פעילות scoring בפרודקשן |
 | Assets schema drift | שמות שדות ב-live שונים מ-MIGRATION doc: `"Mortgage Balance"` (לא `"Mortgage"`), אין `"Purchase Cost"`, אין `"Documents"`. `AssetFields` בקוד עשוי להשתמש בשמות לא נכונים. | לפני פיתוח Assets tools |
 | `Table 16` ב-Airtable | טבלת placeholder ריקה (`tblXeDnLTAvpej3cC`) — לא בשימוש. למחוק ידנית מ-Airtable UI. | Housekeeping הבא |
+| `/status` Telegram handler חסר | `@bot.message_handler(commands=["status"])` decorator הוסר ב-PR #55; `cmd_status` קיים אבל לא מרשם. הפקודה שקטה לowner. | N הבא שנוגע ב-app.py |
 
 ---
 
