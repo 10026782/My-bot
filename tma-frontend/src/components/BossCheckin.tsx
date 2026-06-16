@@ -42,6 +42,7 @@ type SourceId  = typeof SOURCE[number]["id"];
 
 interface Task {
   id:                   string;
+  persisted:            boolean;
   title:                string;
   topic:                TopicId | null;
   urgency:              UrgencyId | null;
@@ -56,7 +57,8 @@ interface Task {
 
 function makeEmptyTask(): Task {
   return {
-    id:                   crypto.randomUUID(),
+    id:                   `local-${crypto.randomUUID()}`,
+    persisted:            false,
     title:                "",
     topic:                null,
     urgency:              null,
@@ -89,6 +91,7 @@ async function loadGameData(): Promise<{ tasks: Task[]; world: GameWorld | null 
   const data = await fetchGameToday();
   const tasks: Task[] = (data.tasks ?? []).map(dt => ({
     id:                   dt.id,
+    persisted:            true,
     title:                dt.task,
     topic:                null,
     urgency:              null,
@@ -106,7 +109,7 @@ async function loadGameData(): Promise<{ tasks: Task[]; world: GameWorld | null 
 }
 
 async function markTaskDone(task: Task): Promise<void> {
-  if (task.id) await completeTask(task.id);
+  if (task.persisted) await completeTask(task.id);
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -343,7 +346,7 @@ export function BossCheckin({ onBack, streak = 0 }: Props) {
   useEffect(() => { load(); }, []);
 
   async function saveTaskUpdate(task: Task) {
-    if (!task.id) return;
+    if (!task.persisted) return;
     try {
       await updateCheckinTaskStatus(task.id, task.status);
     } catch {
@@ -368,14 +371,19 @@ export function BossCheckin({ onBack, streak = 0 }: Props) {
     saveTaskUpdate(updated);
   }
 
-  function handleDone(index: number) {
+  async function handleDone(index: number) {
     const task = tasks[index];
     if (!task.title || !task.topic || !task.urgency || !task.source) return;
     const completedAt = new Date().toISOString();
     const finalXP     = calculateXP(task);
     const updated: Task = { ...task, status: "done", completed_at: completedAt, xp: finalXP };
     setTasks(prev => prev.map((t, i) => i === index ? updated : t));
-    markTaskDone(updated);
+    try {
+      await markTaskDone(updated);
+    } catch {
+      setTasks(prev => prev.map((t, i) => i === index ? task : t));
+      showToast("ג ן¸ ׳©׳’׳™׳׳” ׳‘׳©׳׳™׳¨׳” ג€” ׳ ׳¡׳” ׳©׳•׳‘");
+    }
   }
 
   function handleReset() {
