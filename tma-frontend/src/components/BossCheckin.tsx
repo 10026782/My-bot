@@ -372,34 +372,6 @@ export function BossCheckin({ onBack, streak = 0 }: Props) {
   }
 
   async function handleDone(index: number) {
-    if (!task.id) return;
-    // Map local lowercase status → canonical Airtable single-select value
-    const STATUS_MAP: Record<Task["status"], string> = { todo: "Todo", done: "Done" };
-    try {
-      await updateCheckinTaskStatus(task.id, STATUS_MAP[task.status] ?? task.status);
-    } catch {
-      showToast("⚠️ שגיאה בשמירה — נסה שוב");
-    }
-  }
-
-  const doneTasks      = tasks.filter(t => t.status === "done");
-  const totalXP        = doneTasks.reduce((s, t) => s + t.xp, 0);
-  const allDone        = tasks.length > 0 && tasks.every(t => t.status === "done");
-  const burningCount   = doneTasks.filter(t => t.urgency === "burning").length;
-  const roadmapCount   = doneTasks.filter(t => t.urgency === "roadmap").length;
-  const requiredCount  = doneTasks.filter(t => t.required).length;
-  const optionalCount  = doneTasks.filter(t => !t.required).length;
-
-  const today = new Date().toLocaleDateString("he-IL", {
-    weekday: "long", day: "numeric", month: "long",
-  });
-
-  function handleChange(index: number, updated: Task) {
-    setTasks(prev => prev.map((t, i) => i === index ? updated : t));
-    saveTaskUpdate(updated);
-  }
-
-  function handleDone(index: number) {
     const task = tasks[index];
     if (!task.title || !task.topic || !task.urgency || !task.source) return;
     const completedAt = new Date().toISOString();
