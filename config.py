@@ -5,12 +5,13 @@ config.py — Channel → Domain Mapping
 """
 
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
 # ─── Channel → Domain Mapping ────────────────────────────────────────────────
 # מפתח: "whatsapp:+972XXXXXXXXX" (המספר שהבוט מקבל הודעות אליו)
-# ערך:   שם הדומיין (real_estate | import | media | saas | finance | general)
+# ערך:   שם הדומיין (real_estate | furniture_import | import | media | saas | finance | general)
 
 CHANNEL_DOMAINS: dict[str, str] = {
     # דוגמה — להחליף במספרים האמיתיים:
@@ -29,6 +30,10 @@ def get_domain(to_number: str) -> str:
     מחזיר את הדומיין לפי מספר היעד של WhatsApp.
     to_number: "whatsapp:+972XXXXXXXXX"
     """
+    furniture_number = os.environ.get("FURNITURE_TWILIO_WHATSAPP_NUMBER", "").strip()
+    if furniture_number and to_number == f"whatsapp:{furniture_number.removeprefix('whatsapp:')}":
+        return "furniture_import"
+
     domain = CHANNEL_DOMAINS.get(to_number, DEFAULT_DOMAIN)
     if domain != DEFAULT_DOMAIN:
         logger.debug(f"[Config] Domain mapped: {to_number} → {domain}")
