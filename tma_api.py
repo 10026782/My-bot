@@ -2201,7 +2201,7 @@ def _is_roadmap_complete(status) -> bool:
     return _clean_select_value(status) in _ROADMAP_COMPLETE_STATUSES
 
 
-def _map_roadmap_task_status(status) -> str:
+def _map_rt_status(status) -> str:
     clean_status = _clean_select_value(status)
     if clean_status in _ROADMAP_COMPLETE_STATUSES:
         return "Done"
@@ -2251,7 +2251,7 @@ def game_today(identity):
             "id":     r["id"],
             "task":   task_name,
             "coins":  int(f.get(RoadmapTaskFields.COINS, 0) or 0),
-            "status": _map_roadmap_task_status(status),
+            "status": _map_rt_status(status),
             "who":    f.get(RoadmapTaskFields.OWNER, ""),
         })
 
