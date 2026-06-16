@@ -2,9 +2,9 @@
 // Work Creates Game. Game Never Creates Work.
 // Visual style intentionally unchanged from prototype — only data layer upgraded.
 
-import { useState, useEffect } from "react";
-import { fetchGameToday, completeTask, updateCheckinTaskStatus } from "../api";
-import type { GameWorld } from "../types";
+import { useState, useEffect, useRef } from "react";
+import { fetchGameCheckin, saveGameCheckin } from "../api";
+import type { GameWorld, CheckinTask } from "../types";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -42,7 +42,6 @@ type SourceId  = typeof SOURCE[number]["id"];
 
 interface Task {
   id:                   string;
-  persisted:            boolean;
   title:                string;
   topic:                TopicId | null;
   urgency:              UrgencyId | null;
@@ -58,7 +57,6 @@ interface Task {
 function makeEmptyTask(): Task {
   return {
     id:                   `local-${crypto.randomUUID()}`,
-    persisted:            false,
     title:                "",
     topic:                null,
     urgency:              null,
@@ -87,29 +85,24 @@ function calculateXP(task: Pick<Task, "required" | "urgency" | "source">): numbe
 
 // ─── Data Layer ───────────────────────────────────────────────────────────────
 
-async function loadGameData(): Promise<{ tasks: Task[]; world: GameWorld | null }> {
-  const data = await fetchGameToday();
-  const tasks: Task[] = (data.tasks ?? []).map(dt => ({
-    id:                   dt.id,
-    persisted:            true,
-    title:                dt.task,
-    topic:                null,
-    urgency:              null,
-    source:               null,
-    required:             false,
-    xp:                   dt.coins,
-    status:               dt.status === "Done" ? "done" : "todo",
-    due_date:             null,
-    completed_at:         null,
-    carry_over_candidate: false,
+async function loadCheckinData(): Promise<{ tasks: Task[]; world: GameWorld | null }> {
+  const data = await fetchGameCheckin();
+  const tasks: Task[] = (data.tasks ?? []).map(t => ({
+    id:                   t.id,
+    title:                t.title,
+    topic:                t.topic as TopicId | null,
+    urgency:              t.urgency as UrgencyId | null,
+    source:               t.source as SourceId | null,
+    required:             t.required,
+    xp:                   t.xp,
+    status:               t.status,
+    due_date:             t.due_date,
+    completed_at:         t.completed_at,
+    carry_over_candidate: t.carry_over_candidate,
   }));
   // Pad to 3 blank slots when fewer than 3 tasks returned
   while (tasks.length < 3) tasks.push(makeEmptyTask());
   return { tasks: tasks.slice(0, 3), world: data.world ?? null };
-}
-
-async function markTaskDone(task: Task): Promise<void> {
-  if (task.persisted) await completeTask(task.id);
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -326,10 +319,12 @@ interface Props {
 }
 
 export function BossCheckin({ onBack, streak = 0 }: Props) {
-  const [tasks,   setTasks]   = useState<Task[]>([]);
-  const [world,   setWorld]   = useState<GameWorld | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [toast,   setToast]   = useState<string | null>(null);
+  const [tasks,     setTasks]     = useState<Task[]>([]);
+  const [world,     setWorld]     = useState<GameWorld | null>(null);
+  const [loading,   setLoading]   = useState(true);
+  const [toast,     setToast]     = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const saveTimer = useRef<number | null>(null);
 
   function showToast(msg: string) {
     setToast(msg);
@@ -338,19 +333,38 @@ export function BossCheckin({ onBack, streak = 0 }: Props) {
 
   function load() {
     setLoading(true);
-    loadGameData()
+    loadCheckinData()
       .then(({ tasks, world }) => { setTasks(tasks); setWorld(world); })
       .finally(() => setLoading(false));
   }
 
   useEffect(() => { load(); }, []);
 
-  async function saveTaskUpdate(task: Task) {
-    if (!task.persisted) return;
-    try {
-      await updateCheckinTaskStatus(task.id, task.status);
-    } catch {
-      showToast("⚠️ שגיאה בשמירה — נסה שוב");
+  // Every change writes through to Airtable immediately — no local-only
+  // "persisted" flag (BOSS_Refactor_Plan.md Stage 0 #4 decision). Text/option
+  // edits are debounced to avoid hammering the API on every keystroke; the
+  // "done" action always saves immediately.
+  async function persistTasks(nextTasks: Task[], immediate: boolean) {
+    if (saveTimer.current !== null) {
+      window.clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const doSave = async () => {
+      setSaveState("saving");
+      try {
+        await saveGameCheckin(nextTasks);
+        setSaveState("saved");
+        window.setTimeout(() => setSaveState(s => s === "saved" ? "idle" : s), 2500);
+      } catch (e) {
+        setSaveState("error");
+        showToast("⚠️ לא נשמר — נסה שוב");
+        if (immediate) throw e;
+      }
+    };
+    if (immediate) {
+      await doSave();
+    } else {
+      saveTimer.current = window.setTimeout(doSave, 600);
     }
   }
 
@@ -367,8 +381,9 @@ export function BossCheckin({ onBack, streak = 0 }: Props) {
   });
 
   function handleChange(index: number, updated: Task) {
-    setTasks(prev => prev.map((t, i) => i === index ? updated : t));
-    saveTaskUpdate(updated);
+    const next = tasks.map((t, i) => i === index ? updated : t);
+    setTasks(next);
+    persistTasks(next, false);
   }
 
   async function handleDone(index: number) {
@@ -377,12 +392,13 @@ export function BossCheckin({ onBack, streak = 0 }: Props) {
     const completedAt = new Date().toISOString();
     const finalXP     = calculateXP(task);
     const updated: Task = { ...task, status: "done", completed_at: completedAt, xp: finalXP };
-    setTasks(prev => prev.map((t, i) => i === index ? updated : t));
+    const next = tasks.map((t, i) => i === index ? updated : t);
+    setTasks(next);
     try {
-      await markTaskDone(updated);
+      await persistTasks(next, true);
     } catch {
-      setTasks(prev => prev.map((t, i) => i === index ? task : t));
-      showToast("ג ן¸ ׳©׳’׳™׳׳” ׳‘׳©׳׳™׳¨׳” ג€” ׳ ׳¡׳” ׳©׳•׳‘");
+      setTasks(tasks);
+      showToast("⚠️ שגיאה בשמירה — נסה שוב");
     }
   }
 
@@ -480,6 +496,19 @@ export function BossCheckin({ onBack, streak = 0 }: Props) {
             }}>+{totalXP} XP</span>
           </div>
         </div>
+
+        {/* Save state indicator */}
+        {saveState !== "idle" && (
+          <div style={{
+            fontSize: 11, textAlign: "center", marginTop: -8, marginBottom: 16,
+            color: saveState === "error" ? "#ef4444" : saveState === "saving" ? "#4b5563" : "#22c55e",
+            fontWeight: 600,
+          }}>
+            {saveState === "saving" && "שומר..."}
+            {saveState === "saved"  && "✓ נשמר"}
+            {saveState === "error"  && "✗ לא נשמר — נסה שוב"}
+          </div>
+        )}
 
         {/* Three Things Rule: show note if more than 3 tasks pending */}
         {tasks.filter(t => t.status === "todo").length > 3 && (

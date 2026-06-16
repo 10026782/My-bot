@@ -1,4 +1,4 @@
-import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, OwnerControlCenter, AuthResponse } from "./types";
+import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse } from "./types";
 
 const BASE = (import.meta.env.VITE_API_URL as string) ?? "";
 const DEV_ID = (import.meta.env.VITE_DEV_TELEGRAM_ID as string) ?? "";
@@ -216,6 +216,24 @@ export async function updateCheckinTaskStatus(taskId: string, status: string): P
     body: JSON.stringify({ status }),
   });
   if (!r.ok) throw new Error(`API ${r.status}`);
+}
+
+export async function fetchGameCheckin(): Promise<GameCheckin> {
+  const r = await fetch(`${BASE}/api/game/checkin`, { headers: authHeaders() });
+  if (!r.ok) throw new Error(`API ${r.status}`);
+  return r.json() as Promise<GameCheckin>;
+}
+
+export async function saveGameCheckin(
+  tasks: CheckinTask[]
+): Promise<{ ok: boolean; total_xp: number; updated_at: string; updated_by: string }> {
+  const r = await fetch(`${BASE}/api/game/checkin`, {
+    method: "PUT",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ tasks }),
+  });
+  if (!r.ok) throw new Error(`API ${r.status}`);
+  return r.json();
 }
 
 export async function patchLead(

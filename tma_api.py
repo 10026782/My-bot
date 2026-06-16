@@ -24,7 +24,7 @@ from airtable_schema import (
     DealFields, DealStatus,
     QuestsFields, CoinsLogFields, WorldsFields, QuestStatus, WorldStatus,
     DailyTaskFields, DailyTaskStatus, ApprovalsFields, ApprovalStatus,
-    RoadmapTaskFields, RoadmapTaskStatus,
+    RoadmapTaskFields, RoadmapTaskStatus, DailyCheckinFields,
 )
 from tools.airtable_gateway import airtable_patch as _gw_patch, airtable_create as _gw_create
 from health_monitor import get_health_status
@@ -126,6 +126,11 @@ def _preflight_game_quest(_quest_id=None):
 
 @tma_api.route("/api/game/today", methods=["OPTIONS"])
 def _preflight_game_today():
+    return "", 204
+
+
+@tma_api.route("/api/game/checkin", methods=["OPTIONS"])
+def _preflight_game_checkin():
     return "", 204
 
 
@@ -2124,6 +2129,45 @@ def emergency_stop(identity):
 # Game — Worlds / Quests / Coins
 # ══════════════════════════════════════════════════════════════════
 
+def _get_active_world_dict() -> dict | None:
+    """
+    Active World row → dict for API responses.
+    Shared by game_status / game_today / game_checkin so World-lookup logic
+    lives in exactly one place (BOSS_Refactor_Plan.md Stage 0 #2).
+
+    Only one World should ever be Status=Active at a time. There is no
+    write path in this codebase that sets World status (done manually in
+    Airtable), so this can't be a hard constraint here — instead, if more
+    than one Active World is found, it's logged loudly and the lowest
+    Number is used deterministically rather than whichever Airtable
+    happens to return first (Stage 0 #3).
+    """
+    worlds = _at_list(Tables.WORLDS, f"{{{WorldsFields.STATUS}}}='{WorldStatus.ACTIVE}'", max_records=5)
+    if not worlds:
+        return None
+    if len(worlds) > 1:
+        names = [w.get("fields", {}).get(WorldsFields.NAME, w["id"]) for w in worlds]
+        logger.error(f"[Worlds] {len(worlds)} worlds are Status=Active simultaneously: {names} — using lowest Number")
+        worlds.sort(key=lambda w: int(w.get("fields", {}).get(WorldsFields.NUMBER, 0) or 0))
+
+    w  = worlds[0]
+    wf = w.get("fields", {})
+    coins_target = int(wf.get(WorldsFields.TOTAL_COINS_TARGET, 0) or 0)
+    coins_earned = int(wf.get(WorldsFields.COINS_EARNED, 0) or 0)
+    pct = round(100 * coins_earned / coins_target, 1) if coins_target > 0 else 0.0
+    return {
+        "id":           w["id"],
+        "name":         wf.get(WorldsFields.NAME, ""),
+        "number":       int(wf.get(WorldsFields.NUMBER, 0) or 0),
+        "boss":         wf.get(WorldsFields.BOSS, ""),
+        "prize":        wf.get(WorldsFields.PRIZE, ""),
+        "coins_earned": coins_earned,
+        "coins_target": coins_target,
+        "progress_pct": pct,
+        "start_date":   wf.get(WorldsFields.START_DATE, ""),
+    }
+
+
 @tma_api.route("/api/game/status", methods=["GET"])
 @require_tma_auth
 def game_status(identity):
@@ -2135,26 +2179,7 @@ def game_status(identity):
     monday = today - timedelta(days=today.weekday())
     week_start_str = monday.isoformat()
 
-    # ── Active world ───────────────────────────────────────────────
-    worlds = _at_list(Tables.WORLDS, f"{{{WorldsFields.STATUS}}}='{WorldStatus.ACTIVE}'", max_records=1)
-    active_world = None
-    if worlds:
-        w  = worlds[0]
-        wf = w.get("fields", {})
-        coins_target = int(wf.get(WorldsFields.TOTAL_COINS_TARGET, 0) or 0)
-        coins_earned = int(wf.get(WorldsFields.COINS_EARNED, 0) or 0)
-        pct = round(100 * coins_earned / coins_target, 1) if coins_target > 0 else 0.0
-        active_world = {
-            "id":           w["id"],
-            "name":         wf.get(WorldsFields.NAME, ""),
-            "number":       wf.get(WorldsFields.NUMBER, 1),
-            "boss":         wf.get(WorldsFields.BOSS, ""),
-            "prize":        wf.get(WorldsFields.PRIZE, ""),
-            "coins_earned": coins_earned,
-            "coins_target": coins_target,
-            "progress_pct": pct,
-            "start_date":   wf.get(WorldsFields.START_DATE, ""),
-        }
+    active_world = _get_active_world_dict()
 
     # ── This week's quests (filter in Python for date-field reliability) ──
     all_quests = _at_list(Tables.QUESTS, "", max_records=200)
@@ -2309,23 +2334,7 @@ def game_today(identity):
         })
 
     # ── Active World ─────────────────────────────────────────────
-    active_world = None
-    worlds = _at_list(Tables.WORLDS, f"{{{WorldsFields.STATUS}}}='{WorldStatus.ACTIVE}'", max_records=1)
-    if worlds:
-        wf = worlds[0].get("fields", {})
-        target = int(wf.get(WorldsFields.TOTAL_COINS_TARGET, 0) or 0)
-        earned = int(wf.get(WorldsFields.COINS_EARNED, 0) or 0)
-        pct    = round(100 * earned / target, 1) if target > 0 else 0.0
-        active_world = {
-            "id":           worlds[0]["id"],
-            "name":         wf.get(WorldsFields.NAME, ""),
-            "number":       int(wf.get(WorldsFields.NUMBER, 0) or 0),
-            "boss":         wf.get(WorldsFields.BOSS, ""),
-            "prize":        wf.get(WorldsFields.PRIZE, ""),
-            "coins_earned": earned,
-            "coins_target": target,
-            "progress_pct": pct,
-        }
+    active_world = _get_active_world_dict()
 
     # ── Total Coins ───────────────────────────────────────────────
     log_recs    = _at_list(Tables.COINS_LOG, "", max_records=500)
@@ -2418,4 +2427,97 @@ def update_checkin_task_status(task_id, identity):
 
     _audit("roadmap_task_status_update", identity, details=f"{task_id} -> {new_status}")
     return jsonify({"ok": True, "task_id": task_id, "status": new_status})
+
+
+# ══════════════════════════════════════════════════════════════════
+# Game — Daily Check-in (freeform 3-things ritual, separate from
+# Roadmap_Tasks — see BOSS_Refactor_Plan.md Stage 0 #4)
+# ══════════════════════════════════════════════════════════════════
+
+def _get_checkin_record(date_str: str) -> dict | None:
+    """One Daily_Checkin record per calendar day — find today's, or None."""
+    recs = _at_list(Tables.DAILY_CHECKIN, f"{{{DailyCheckinFields.DATE}}}='{date_str}'", max_records=1)
+    return recs[0] if recs else None
+
+
+@tma_api.route("/api/game/checkin", methods=["GET"])
+@require_tma_auth
+def game_checkin_get(identity):
+    """Today's Daily_Checkin record (if any) + active world. Owner only."""
+    if not identity.is_owner:
+        return jsonify({"error": "forbidden"}), 403
+
+    today_str = date.today().isoformat()
+    rec = _get_checkin_record(today_str)
+    cf  = rec.get("fields", {}) if rec else {}
+
+    try:
+        tasks = json.loads(cf.get(DailyCheckinFields.TASKS_JSON, "") or "[]")
+    except (TypeError, ValueError):
+        tasks = []
+
+    return jsonify({
+        "date":        today_str,
+        "tasks":       tasks,
+        "total_xp":    int(cf.get(DailyCheckinFields.TOTAL_XP, 0) or 0),
+        "updated_at":  cf.get(DailyCheckinFields.UPDATED_AT, ""),
+        "updated_by":  cf.get(DailyCheckinFields.UPDATED_BY, ""),
+        "world":       _get_active_world_dict(),
+    })
+
+
+@tma_api.route("/api/game/checkin", methods=["PUT"])
+@require_tma_auth
+def game_checkin_put(identity):
+    """
+    Upsert today's Daily_Checkin record — write-through immediately on every
+    change (no local-only/persisted distinction; BOSS_Refactor_Plan.md Stage
+    0 #4 decision: immediate write, not a flag). One record per day — edits
+    PATCH the same record in place, never delete+recreate.
+    """
+    if not identity.is_owner:
+        return jsonify({"error": "forbidden"}), 403
+
+    data  = request.get_json(force=True) or {}
+    tasks = data.get("tasks", [])
+    if not isinstance(tasks, list):
+        return jsonify({"error": "tasks must be a list"}), 400
+
+    today_str  = date.today().isoformat()
+    total_xp   = sum(int(t.get("xp", 0) or 0) for t in tasks if isinstance(t, dict) and t.get("status") == "done")
+    actor      = identity.display_name or identity.user_id
+    now_iso    = datetime.now(timezone.utc).isoformat()
+
+    fields = {
+        DailyCheckinFields.TASKS_JSON: json.dumps(tasks, ensure_ascii=False),
+        DailyCheckinFields.TOTAL_XP:   total_xp,
+        DailyCheckinFields.UPDATED_AT: now_iso,
+        DailyCheckinFields.UPDATED_BY: actor,
+    }
+
+    existing = _get_checkin_record(today_str)
+    if existing:
+        ok = _at_patch(Tables.DAILY_CHECKIN, existing["id"], fields)
+        if not ok:
+            return jsonify({"error": "update failed"}), 500
+        record_id = existing["id"]
+    else:
+        rec = _at_post(Tables.DAILY_CHECKIN, {
+            DailyCheckinFields.DATE:  today_str,
+            DailyCheckinFields.OWNER: actor,
+            **fields,
+        })
+        if not rec:
+            return jsonify({"error": "create failed"}), 500
+        record_id = rec["id"]
+
+    _audit("daily_checkin_save", identity, details=f"{today_str} total_xp={total_xp}")
+    return jsonify({
+        "ok":          True,
+        "record_id":   record_id,
+        "date":        today_str,
+        "total_xp":    total_xp,
+        "updated_at":  now_iso,
+        "updated_by":  actor,
+    })
 

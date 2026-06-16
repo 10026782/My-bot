@@ -220,6 +220,7 @@ _event_bus.subscribe("send_followup.confirmed", _handle_send_followup_confirmed)
 
 
 
+@bot.message_handler(commands=["status"])
 def cmd_status(msg):
     """Owner ׳‘׳׳‘׳“ ג€” ׳׳¦׳‘ env vars."""
     identity = resolve_identity("telegram", str(msg.from_user.id))

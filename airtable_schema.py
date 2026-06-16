@@ -20,9 +20,9 @@ FIELD_ALIASES: dict[str, dict[str, str]] = {
         "next_followup": "Next Followup",
     },
     "Coins_Log": {
-        "Note":  "Notes",
-        "note":  "Notes",
-        "notes": "Notes",
+        "note":  "Note",
+        "Notes": "Note",
+        "notes": "Note",
     },
 }
 
@@ -58,6 +58,7 @@ class Tables:
     QUESTS          = "Quests"
     COINS_LOG       = "Coins_Log"
     DAILY_TASKS     = "Daily_Tasks"
+    DAILY_CHECKIN   = "Daily_Checkin"
     # Roadmap
     ROADMAP_TASKS   = "Roadmap_Tasks"
     WEEKLY_GOALS    = "Weekly_Goals"
@@ -305,7 +306,17 @@ class CoinsLogFields:
     COINS         = "Coins"
     DATE          = "Date"
     QUEST         = "Quest"          # linked record → Quests
-    NOTE          = "Notes"
+    NOTE          = "Note"
+
+
+class DailyCheckinFields:
+    """BOSS Daily Check-in table. One record per owner per day. Table name: Tables.DAILY_CHECKIN."""
+    DATE        = "Date"          # ISO YYYY-MM-DD — natural key, one record per day
+    OWNER       = "Owner"
+    TASKS_JSON  = "Tasks_JSON"     # serialized array of today's freeform tasks
+    TOTAL_XP    = "Total_XP"
+    UPDATED_AT  = "Updated_At"
+    UPDATED_BY  = "Updated_By"
 
 
 class QuestStatus:

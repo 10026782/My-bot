@@ -138,7 +138,7 @@
       "Action",
       "Coins",
       "Date",
-      "Notes",
+      "Note",
       "Quest"
     ],
     "Roadmap_Tasks": [
@@ -153,6 +153,14 @@
       "Status",
       "Task",
       "World"
+    ],
+    "Daily_Checkin": [
+      "Date",
+      "Owner",
+      "Tasks_JSON",
+      "Total_XP",
+      "Updated_At",
+      "Updated_By"
     ]
   },
   "fetched_at": "seed-from-schema-py",

@@ -176,6 +176,29 @@ export interface GameToday {
   total_coins: number;
 }
 
+export interface CheckinTask {
+  id: string;
+  title: string;
+  topic: string | null;
+  urgency: string | null;
+  source: string | null;
+  required: boolean;
+  xp: number;
+  status: "todo" | "done";
+  due_date: string | null;
+  completed_at: string | null;
+  carry_over_candidate: boolean;
+}
+
+export interface GameCheckin {
+  date: string;
+  tasks: CheckinTask[];
+  total_xp: number;
+  updated_at: string;
+  updated_by: string;
+  world: GameWorld | null;
+}
+
 export interface DashboardResponse {
   project_slug: string;
   domain: string;
