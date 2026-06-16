@@ -354,6 +354,7 @@ export function BossCheckin({ onBack, streak = 0 }: Props) {
       try {
         await saveGameCheckin(nextTasks);
         setSaveState("saved");
+        window.setTimeout(() => setSaveState(s => s === "saved" ? "idle" : s), 2500);
       } catch (e) {
         setSaveState("error");
         showToast("⚠️ לא נשמר — נסה שוב");
