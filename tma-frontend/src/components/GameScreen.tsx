@@ -11,6 +11,19 @@ type State =
   | { status: "ok"; data: GameToday }
   | { status: "error"; message: string };
 
+function isCompletedStatus(status: DailyTask["status"] | string): boolean {
+  const normalized = String(status || "").trim().toLowerCase();
+  return normalized === "done" || normalized === "completed";
+}
+
+function isSkippedStatus(status: DailyTask["status"] | string): boolean {
+  return String(status || "").trim().toLowerCase() === "skipped";
+}
+
+function hasDisplayableTask(task: DailyTask): boolean {
+  return Boolean((task.task || "").trim()) || Number(task.coins || 0) > 0;
+}
+
 function WorldBar({ world }: { world: NonNullable<GameToday["world"]> }) {
   const pct    = Math.round(world.progress_pct);
   const filled = Math.round(pct / 10);
@@ -47,8 +60,8 @@ function TaskRow({
   completing: boolean;
   onComplete: () => void;
 }) {
-  const isDone    = task.status === "Done";
-  const isSkipped = task.status === "Skipped";
+  const isDone    = isCompletedStatus(task.status);
+  const isSkipped = isSkippedStatus(task.status);
 
   return (
     <div className={`bg-white rounded-xl shadow-sm p-4 flex items-center gap-3 ${isDone ? "opacity-70" : ""}`}>
@@ -75,10 +88,10 @@ function TaskRow({
         <button
           onClick={onComplete}
           disabled={completing}
-          className="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-full bg-green-50 text-green-600 active:bg-green-100 disabled:opacity-40 text-lg font-bold"
+          className="flex-shrink-0 px-3 h-9 flex items-center justify-center rounded-full bg-blue-50 text-blue-700 active:bg-blue-100 disabled:opacity-40 text-xs font-bold"
           aria-label="סמן כהושלם"
         >
-          {completing ? "…" : "✓"}
+          {completing ? "…" : "Done"}
         </button>
       )}
     </div>
@@ -105,7 +118,7 @@ export function GameScreen({ onBack }: Props) {
   useEffect(() => { load(); }, []);
 
   async function handleComplete(task: DailyTask) {
-    if (task.status === "Done" || completing) return;
+    if (isCompletedStatus(task.status) || completing) return;
 
     // Optimistic update
     if (state.status === "ok") {
@@ -168,9 +181,12 @@ export function GameScreen({ onBack }: Props) {
       )}
 
       {state.status === "ok" && (() => {
-        const { data } = state;
-        const openCount = data.tasks.filter((t) => t.status !== "Done" && t.status !== "Skipped").length;
-        const doneCount = data.tasks.filter((t) => t.status === "Done").length;
+        const data = {
+          ...state.data,
+          tasks: state.data.tasks.filter(hasDisplayableTask),
+        };
+        const openCount = data.tasks.filter((t) => !isCompletedStatus(t.status) && !isSkippedStatus(t.status)).length;
+        const doneCount = data.tasks.filter((t) => isCompletedStatus(t.status)).length;
 
         return (
           <div className="flex flex-col gap-3 px-4">
