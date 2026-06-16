@@ -18,7 +18,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_LOG_PATH = Path(os.environ.get("USAGE_LOG_PATH", "logs/usage.jsonl"))
+_LOG_PATH = Path(os.environ.get("USAGE_LOG_PATH", "/tmp/usage.jsonl"))
 
 # ── ספים (configurable via env) ──────────────────────────────────────
 _SONNET_DAILY_LIMIT = int(os.environ.get("SONNET_DAILY_LIMIT", "50"))
@@ -115,14 +115,18 @@ def _write_airtable_row(date_str: str, counts: dict[str, int]) -> None:
     try:
         from airtable_schema import Tables
         table = getattr(Tables, "AI_USAGE_DAILY", "AI_Usage_Daily")
-        fields: dict = {"Date": date_str}
-        fields.update({k: v for k, v in counts.items()})
-        fields["total_units"] = sum(counts.values())
+        fields: dict = {
+            "Date":         date_str,
+            "claude_sonnet": counts.get("claude_sonnet", 0),
+            "claude_haiku":  counts.get("claude_haiku",  0),
+            "total_units":   sum(counts.values()),
+        }
         from tools.airtable_gateway import airtable_create
-        airtable_create(table, fields, source="cost_watchdog")
-        logger.info("[CostWatchdogV2] שורה יומית נכתבה ל-Airtable: %s", date_str)
+        result = airtable_create(table, fields, source="cost_watchdog")
+        logger.info("[CostWatchdogV2] שורה יומית נכתבה ל-Airtable: %s — %s", date_str, fields)
+        return result
     except Exception as e:
-        logger.warning("[CostWatchdogV2] _write_airtable_row error (non-fatal): %s", e)
+        logger.error("[CostWatchdogV2] _write_airtable_row FAILED: %s", e, exc_info=True)
 
 
 def daily_watchdog() -> None:
@@ -140,8 +144,7 @@ def daily_watchdog() -> None:
         date_str = datetime.now(tz=timezone.utc).date().isoformat()
 
         if not counts:
-            logger.info("[CostWatchdogV2] אין שימוש ב-24 שעות האחרונות")
-            return
+            logger.info("[CostWatchdogV2] אין שימוש ב-24 שעות האחרונות — כותב שורת אפסים")
 
         logger.info("[CostWatchdogV2] daily: %s", counts)
 
