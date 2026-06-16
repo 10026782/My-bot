@@ -130,7 +130,7 @@ def _preflight_game_today():
 
 
 @tma_api.route("/api/game/tasks/<task_id>/done", methods=["OPTIONS"])
-def _preflight_game_task_done(_task_id=None):
+def _preflight_game_task_done(task_id):
     return "", 204
 
 
