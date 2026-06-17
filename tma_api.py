@@ -26,6 +26,7 @@ from airtable_schema import (
     DailyTaskFields, DailyTaskStatus, ApprovalsFields, ApprovalStatus,
     RoadmapTaskFields, RoadmapTaskStatus, DailyCheckinFields,
     VentureFields, VentureStage,
+    LeadStatus, LeadOutcome,
 )
 from tools.airtable_gateway import airtable_patch as _gw_patch, airtable_create as _gw_create
 from health_monitor import get_health_status
@@ -101,7 +102,7 @@ def _preflight():
 
 
 @tma_api.route("/api/approvals/<approval_id>", methods=["OPTIONS"])
-def _preflight_approval(_approval_id=None):
+def _preflight_approval(approval_id=None):
     return "", 204
 
 
@@ -111,7 +112,7 @@ def _preflight_assets():
 
 
 @tma_api.route("/api/assets/<asset_id>", methods=["OPTIONS"])
-def _preflight_asset(_asset_id=None):
+def _preflight_asset(asset_id=None):
     return "", 204
 
 
@@ -121,7 +122,7 @@ def _preflight_ventures():
 
 
 @tma_api.route("/api/ventures/<venture_id>", methods=["OPTIONS"])
-def _preflight_venture(_venture_id=None):
+def _preflight_venture(venture_id=None):
     return "", 204
 
 
@@ -131,7 +132,7 @@ def _preflight_game_status():
 
 
 @tma_api.route("/api/game/quests/<quest_id>", methods=["OPTIONS"])
-def _preflight_game_quest(_quest_id=None):
+def _preflight_game_quest(quest_id=None):
     return "", 204
 
 
@@ -985,9 +986,11 @@ def update_lead_status(lead_id, identity):
         return jsonify({"error": "forbidden"}), 403
 
     data       = request.get_json(force=True) or {}
-    new_status = data.get("status", "")
+    new_status = _clean_select_value(data.get("status"))
     if not new_status:
         return jsonify({"error": "missing field: status"}), 400
+    if new_status not in LeadStatus.ALL:
+        return jsonify({"error": "invalid status", "valid": sorted(LeadStatus.ALL)}), 400
 
     _, response = _queue_tma_write_approval(
         "tma_update_lead_status",
@@ -1050,25 +1053,16 @@ def _clean_select_value(value) -> str:
 
 
 # Lead outcomes/statuses must match Airtable single-select options exactly.
-_VALID_LEAD_OUTCOMES = {
-    "open",
-    "needs_followup",
-    "meeting_scheduled",
-    "converted",
-    "not_relevant",
-    "lost",
-    "duplicate",
-    "archived",
-}
+# Canonical (no-trailing-space) outcome keys -> Leads.status value to set alongside the outcome.
 _OUTCOME_STATUS_MAP = {
-    "open": "active",
-    "needs_followup": "waiting_response",
-    "meeting_scheduled": "active",
-    "converted": "done",
-    "archived": "archived",
-    "lost": "lost",
-    "duplicate": "duplicate",
-    "not_relevant": "not_relevant",
+    "open": LeadStatus.ACTIVE,
+    "needs_followup": LeadStatus.WAITING_RESPONSE,
+    "meeting_scheduled": LeadStatus.ACTIVE,
+    "converted": LeadStatus.DONE,
+    "archived": LeadStatus.ARCHIVED,
+    "lost": LeadStatus.LOST,
+    "duplicate": LeadStatus.DUPLICATE,
+    "not_relevant": LeadStatus.NOT_RELEVANT,
 }
 
 
@@ -1087,6 +1081,15 @@ def patch_lead(lead_id, identity):
     for k in _LEAD_SELECT_FIELDS:
         if k in fields:
             fields[k] = _clean_select_value(fields[k])
+
+    if LeadFields.STATUS in fields:
+        if fields[LeadFields.STATUS] not in LeadStatus.ALL:
+            return jsonify({"error": "invalid status", "valid": sorted(LeadStatus.ALL)}), 400
+    if LeadFields.OUTCOME in fields:
+        outcome_value = LeadOutcome.BY_KEY.get(fields[LeadFields.OUTCOME].lower())
+        if outcome_value is None:
+            return jsonify({"error": "invalid outcome", "valid": sorted(LeadOutcome.BY_KEY)}), 400
+        fields[LeadFields.OUTCOME] = outcome_value
 
     if not fields or all(v == "" for v in fields.values()):
         return jsonify({"error": "no editable fields provided"}), 400
@@ -1122,26 +1125,27 @@ def set_lead_outcome(lead_id, identity):
         return jsonify({"error": "forbidden"}), 403
 
     data = request.get_json(force=True) or {}
-    outcome = _clean_select_value(data.get("outcome")).lower()
-    if not outcome:
+    outcome_key = _clean_select_value(data.get("outcome")).lower()
+    if not outcome_key:
         return jsonify({"error": "missing field: outcome"}), 400
-    outcome = {
+    outcome_key = {
         "followup_needed": "needs_followup",
         "meeting_booked": "meeting_scheduled",
-    }.get(outcome, outcome)
-    if outcome not in _VALID_LEAD_OUTCOMES:
-        return jsonify({"error": "invalid outcome", "valid": sorted(_VALID_LEAD_OUTCOMES)}), 400
+    }.get(outcome_key, outcome_key)
+    outcome_value = LeadOutcome.BY_KEY.get(outcome_key)
+    if outcome_value is None:
+        return jsonify({"error": "invalid outcome", "valid": sorted(LeadOutcome.BY_KEY)}), 400
 
-    fields: dict = {LeadFields.OUTCOME: outcome}
-    if outcome in _OUTCOME_STATUS_MAP:
-        fields[LeadFields.STATUS] = _OUTCOME_STATUS_MAP[outcome]
+    fields: dict = {LeadFields.OUTCOME: outcome_value}
+    if outcome_key in _OUTCOME_STATUS_MAP:
+        fields[LeadFields.STATUS] = _OUTCOME_STATUS_MAP[outcome_key]
 
     if identity.is_owner:
         ok = _at_patch("Leads", lead_id, fields)
         if not ok:
             return jsonify({"error": "update failed"}), 500
-        _audit("lead_outcome", identity, details=f"{lead_id}: {outcome}")
-        return jsonify({"ok": True, "lead_id": lead_id, "outcome": outcome})
+        _audit("lead_outcome", identity, details=f"{lead_id}: {outcome_key}")
+        return jsonify({"ok": True, "lead_id": lead_id, "outcome": outcome_key})
 
     _, response = _queue_tma_write_approval(
         "tma_set_lead_outcome",
@@ -1151,10 +1155,10 @@ def set_lead_outcome(lead_id, identity):
             "record_id": lead_id,
             "fields": fields,
             "audit_action": "lead_outcome",
-            "audit_details": f"{lead_id}: {outcome}",
+            "audit_details": f"{lead_id}: {outcome_key}",
         },
         identity,
-        f"Set lead outcome: {outcome}",
+        f"Set lead outcome: {outcome_key}",
     )
     return jsonify(response), 202
 

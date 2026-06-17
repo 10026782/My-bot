@@ -288,10 +288,61 @@ class LeadFields:
     TENANT_ID       = "tenant_id"
     DOMAIN          = "domain"
     CONVERTED_AT    = "converted_at"  # written by ad_attribution.mark_converted + lead_conversion
-    OUTCOME         = "Business Outcome"  # open|needs_followup|meeting_scheduled|converted|not_relevant|lost|duplicate|archived
+    OUTCOME         = "Business Outcome"  # singleSelect — see LeadOutcome below for exact option strings (some have a trailing space baked into the Airtable config)
     NEXT_FOLLOWUP   = "Next Followup" # ISO date of next scheduled followup
     OWNER           = "Owner"         # assigned owner / responsible person
-    NEXT_STEP       = "Next Action"   # call_now|call_today|schedule_this_week|send_details|follow_up|waiting_response|create_deal|archive|none
+    NEXT_STEP       = "Next Action"   # call_now|call_today|schedule_this_week|send_details|follow_up|waiting_response|create_deal|archive|none — NOTE: live Airtable options are actually "Call Back/Send Details/Follow Up/Waiting Response/Create Deal/Convert Contact/Schedule Meeting /Closed Won/Closed Lost" (verified via Airtable MCP 2026-06-17) — this field is not currently written from the TMA, so the mismatch is latent, not active
+
+
+class LeadStatus:
+    """Leads.status singleSelect — exact live Airtable option values (verified via Airtable MCP get_table_schema, 2026-06-17, field fldvTgONHx7D8JFw0)."""
+    WAITING_CALL     = "waiting_call"
+    ACTIVE           = "active"
+    HIGH_CONFIDENCE  = "high_confidence"
+    NEW              = "new"
+    WAITING_RESPONSE = "waiting_response"
+    ARCHIVED         = "archived"
+    LOST             = "lost"
+    DUPLICATE        = "duplicate"
+    NOT_RELEVANT     = "not_relevant"
+    DONE             = "done"
+
+    ALL = {
+        WAITING_CALL, ACTIVE, HIGH_CONFIDENCE, NEW, WAITING_RESPONSE,
+        ARCHIVED, LOST, DUPLICATE, NOT_RELEVANT, DONE,
+    }
+
+
+class LeadOutcome:
+    """Leads.'Business Outcome' singleSelect — canonical (clean) key -> exact live
+    Airtable option string. Verified via Airtable MCP get_table_schema, 2026-06-17,
+    field fldVa5wSmAqcKLi86. Airtable's typecast is OFF for this base, so a write
+    that doesn't match an existing option byte-for-byte fails with 422
+    INVALID_MULTIPLE_CHOICE_OPTIONS ("Insufficient permissions to create new
+    select option") instead of creating it. Every option except ARCHIVED has a
+    trailing space baked into the Airtable field config itself — do not "fix" it
+    by stripping the space in code; that would just recreate this bug.
+    """
+    OPEN               = "open "
+    NEEDS_FOLLOWUP      = "needs_followup "
+    MEETING_SCHEDULED  = "meeting_scheduled "
+    CONVERTED          = "converted "
+    NOT_RELEVANT       = "not_relevant "
+    LOST               = "lost "
+    DUPLICATE          = "duplicate "
+    ARCHIVED           = "archived"
+
+    # canonical (frontend/internal, no trailing space) key -> exact Airtable value
+    BY_KEY = {
+        "open": OPEN,
+        "needs_followup": NEEDS_FOLLOWUP,
+        "meeting_scheduled": MEETING_SCHEDULED,
+        "converted": CONVERTED,
+        "not_relevant": NOT_RELEVANT,
+        "lost": LOST,
+        "duplicate": DUPLICATE,
+        "archived": ARCHIVED,
+    }
 
 
 class BusinessMemoryFields:
