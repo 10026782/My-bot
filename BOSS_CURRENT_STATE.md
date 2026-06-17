@@ -1,7 +1,7 @@
 # BOSS CURRENT STATE
 
-Last updated: 16/06/2026
-Reflects: Stabilization Sprint + W0/W1 + Security Audit Fixes (H1-H3) + TIER read-only fix + Game Dashboard fix + Ghost Button Audit + Airtable Gateway (W2) + GameScreen Fix + Daily Digest Live + Repo Docs
+Last updated: 17/06/2026
+Reflects: Stabilization Sprint + W0/W1 + Security Audit Fixes (H1-H3) + TIER read-only fix + Game Dashboard fix + Ghost Button Audit + Airtable Gateway (W2) + GameScreen Fix + Daily Digest Live + Repo Docs + C52 Customer Output Gateway
 
 ## Classification Key
 - WORKING: implemented, reachable, no blocking issue.
@@ -9,6 +9,14 @@ Reflects: Stabilization Sprint + W0/W1 + Security Audit Fixes (H1-H3) + TIER rea
 - STUB: returns coming_soon / empty — honest, not misleading.
 - BROKEN: fails or blocked by known runtime error.
 - NOT IMPLEMENTED: no runtime implementation found.
+
+---
+
+## What Changed — 17/06/2026
+
+| Item | Status | Detail |
+|------|--------|--------|
+| C52 Customer Output Gateway | ✅ NEW | Single outbound path (ESCALATE not BLOCK). FINANCIAL_COMMITMENT_GATE=false (shadow mode — prod flag off by design). draft=True → forces CUSTOMER. approved_by+approval_id+approved_at required for override. Regex: 8 patterns + medium-severity additions. All suites pass (commit 8a9820a, PR #70). |
 
 ---
 
@@ -213,6 +221,7 @@ Full audit: 54 onClick handlers across 12 components. Results:
 | Memory durability | 🟡 | RAM-only; undercuts lead-memory and learning plans |
 | lead_qualifier state machine | 🔵 Deferred | Dead code — decide: wire or remove after N04 |
 | ROI Dashboard | 🔵 Future | Score reasoning logged (Fix 5); dashboard build pending |
+| FINANCIAL_COMMITMENT_GATE=true activation | ⏸ Hold | Shadow mode (flag=false) for 7-14 days; flip to true only after confirming zero false positives on real traffic via shadow logs |
 
 ---
 
