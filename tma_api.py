@@ -80,7 +80,7 @@ def _cors(response):
         response.headers["Access-Control-Allow-Headers"] = (
             "Content-Type, X-Telegram-Init-Data, Authorization"
         )
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, OPTIONS"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, PUT, OPTIONS"
     return response
 
 
