@@ -30,6 +30,7 @@ TABLE_CLASS_MAP = {
     schema.Tables.WORLDS:          schema.WorldsFields,
     schema.Tables.QUESTS:          schema.QuestsFields,
     schema.Tables.COINS_LOG:       schema.CoinsLogFields,
+    schema.Tables.EMERGENCY_WINDOW: schema.EmergencyWindowFields,
 }
 
 
