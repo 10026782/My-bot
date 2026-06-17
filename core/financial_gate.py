@@ -46,6 +46,11 @@ _TRIGGER_PATTERNS: list[tuple[str, str]] = [
     (r"תשלום ראשון ב-|payment schedule",                    "payment_schedule"),
     (r"ללא עמלה|fee waived|עמלה אפס",                       "fee_waiver"),
     (r"המחיר עודכן|price changed|מחיר חדש",                 "price_change"),
+    (r"התשלום נקלט|payment received",                       "payment_received"),
+    (r"החזר אושר|refund approved",                          "refund_approved"),
+    (r"קיבלת זיכוי|received a credit",                       "credit_received"),
+    (r"היתרה (שלך )?0\b|balance is 0|balance is zero",       "zero_balance"),
+    (r"אישרנו לך\s*\d|approved you for\s*[₪$€£]?\s*\d",      "amount_approved"),
     # כסף + מחויבות (סכום + פועל מחייב)
     (r"[₪$€£]\s*\d[\d,\.]+\s*(ישולם|מגיע לך|תקבל|יוחזר|נחזיר)", "amount_commitment"),
     (r"\d[\d,\.]+\s*₪\s*(ישולם|מגיע לך|תקבל|יוחזר|נחזיר)",           "amount_commitment_ils"),
@@ -80,14 +85,21 @@ def check(envelope) -> FinancialGateResult:
     if not matched:
         return FinancialGateResult(escalated=False)
 
-    # בדוק source
-    source_type = (envelope.meta or {}).get("source_type", "")
+    # בדוק source — override תקף רק עם הוכחת אישור מלאה (approved_by + approval_id + approved_at)
+    meta = envelope.meta or {}
+    source_type = meta.get("source_type", "")
     if source_type in APPROVED_SOURCES:
-        logger.info(
-            "[FinGate] approved source override | source=%s | triggers=%s",
+        if meta.get("approved_by") and meta.get("approval_id") and meta.get("approved_at"):
+            logger.info(
+                "[FinGate] approved source override | source=%s | approved_by=%s | "
+                "approval_id=%s | triggers=%s",
+                source_type, meta.get("approved_by"), meta.get("approval_id"), matched
+            )
+            return FinancialGateResult(escalated=False)
+        logger.warning(
+            "[FinGate] override rejected — missing approval proof | source=%s | triggers=%s",
             source_type, matched
         )
-        return FinancialGateResult(escalated=False)
 
     # מקור לא מאושר + יש triggers
     reason = f"financial_trigger:{','.join(matched)} | rule_v{RULE_VERSION}"

@@ -49,7 +49,9 @@ class OutboundEnvelope:
     source_ref:     str            # lead_id / action_id / job_name
     domain:         str            # "real_estate" / "import" / "recruitment"
     draft:          bool = False   # draft = treated as CUSTOMER even if not sent yet
-    meta: dict      = field(default_factory=dict)  # source_type, approved_by, וכו'
+    # source_type (ל-APPROVED_SOURCES override), ובמקרה override — חייב גם
+    # approved_by + approval_id + approved_at, אחרת ה-override נדחה (core/financial_gate.py)
+    meta: dict      = field(default_factory=dict)
 
 
 @dataclass
@@ -125,9 +127,15 @@ def send_outbound(envelope: OutboundEnvelope) -> GatewayResult:
 
 
 def _classify_audience(envelope: OutboundEnvelope) -> AudienceClass:
-    """TELEGRAM_OWNER תמיד INTERNAL — גם אם בטעות סומן CUSTOMER."""
+    """
+    TELEGRAM_OWNER תמיד INTERNAL — גם אם בטעות סומן CUSTOMER.
+    draft=True בערוץ customer-capable נחשב CUSTOMER — גם אם audience סומן INTERNAL בטעות
+    (טיוטה שעוד עלולה להישלח ללקוח, חייבת לעבור Financial Gate).
+    """
     if envelope.channel in _ALWAYS_INTERNAL_CHANNELS:
         return AudienceClass.INTERNAL
+    if envelope.draft and envelope.channel in _CUSTOMER_CAPABLE_CHANNELS:
+        return AudienceClass.CUSTOMER
     return envelope.audience
 
 
