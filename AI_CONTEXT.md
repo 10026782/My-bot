@@ -25,6 +25,7 @@
 | `python3 smoke_tests.py` | 2026-06-17 | 5 PASS, 1 FAIL (`anthropic` import — תלוי-סביבה, ידוע מראש, לא קשור לקוד) | Claude Code Audit |
 | BUG-005/006 (`/status` decorator, Hub debug block) | 2026-06-16 | commit `628d2bb` | git log (לא אומת בפרודקשן בפועל) |
 | תיקון tier ל-writable singleSelect | לא ידוע תאריך מדויק | commit `3d8ab50` + סכמה חיה מאשרת `tier` קיים כ-`singleSelect` (`fld4eC2mEYrviL3oP`) | Claude Code Audit (השוואת קוד מול סכמה חיה) |
+| PR #69 (Approval Policy Gate) מוזג ל-`main` | 2026-06-17 | GitHub API `pull_request_read` → `merged: true`, `merged_by: 10026782`, `merged_at: 2026-06-17T18:56:00Z`; `git fetch origin main` → `origin/main` ב-`4e933b0` ("Merge pull request #69") | Claude Code (אומת דרך GitHub API + git, לא רק commit message) |
 
 ## 3. KNOWN GAPS — קיים בקוד, לא בפרודקשן
 | Item | סטטוס | Feature Flag | מה חסר |
@@ -34,7 +35,7 @@
 | N04 Followup | PARTIAL | `FOLLOWUP_AUTOMATION=off` | תלוי ב-N03 |
 | F05a Meta WhatsApp | CODE DONE | — | ממתין ל-Render deploy + verify |
 | N06 Ventures Screen (TMA) | CODE DONE, מאוחד ל-main | — | PR #67 ממוזג ל-main (`7313b2e3`); ✅ verified בפרודקשן — לא ידוע, דרוש בדיקה ידנית ב-TMA החי |
-| Approval Policy — Emergency Window + OTP + Policy Gate | CODE COMPLETE, flag off | `EMERGENCY_WINDOW=off` | 3 פאזות (`core/emergency_window.py`, `core/otp.py`, gate ב-`_queue_tma_write_approval`) + טבלת `Emergency_Window` ב-Airtable. דגל כבוי = התנהגות זהה 100% להיום (202 קשיח). ממתין לאימות פרודקשן לפני הדלקת הדגל. ראו `Approval_Policy_Spec.md` |
+| Approval Policy — Emergency Window + OTP + Policy Gate | CODE COMPLETE, **מוזג ל-main** (PR #69, commit `4e933b0`), flag off | `EMERGENCY_WINDOW=off` | 3 פאזות (`core/emergency_window.py`, `core/otp.py`, gate ב-`_queue_tma_write_approval`) + טבלת `Emergency_Window` ב-Airtable, כולל תיקון CORS (`X-TMA-Platform` ב-`Access-Control-Allow-Headers`) ו-RISK_LEVEL נגזר בפועל (לא hardcoded "high"). דגל כבוי = התנהגות זהה 100% להיום (202 קשיח). Render Auto-Deploy מוגדר על `main` — **לא אומת ידנית** שה-deploy בפועל הסתיים. ממתין לאימות פרודקשן לפני הדלקת הדגל. ראו `Approval_Policy_Spec.md` |
 | LEAD_QUALIFIER | לא פעיל (F09) | `LEAD_QUALIFIER=off` | פיצ'ר לא הופעל מעולם |
 | MULTITENANT | כבוי (F08) | `MULTITENANT=off` | לא בשימוש |
 | VOICE_IVR | לא פעיל (F07) | `VOICE_IVR=off` | קו Twilio IVR לא מומש/לא מופעל |
@@ -76,7 +77,8 @@
 - 🔲 N04 Followup Activation — הבא בתור (תלוי ב-`FOLLOWUP_AUTOMATION` flag כבוי כיום)
 - 🔲 N05 Daily Digest שדרוג — קוד קיים (commit `5490943`, "wire real Score + computed tier into daily digest"), verify בפרודקשן לא ידוע
 - 🔲 F05a Meta WhatsApp — code done, לא verified
-- 🟡 Approval Policy (Emergency Window + OTP + Policy Gate) — code-complete בכל 3 הפאזות, `EMERGENCY_WINDOW` flag כבוי, ממתין לאימות פרודקשן לפני הדלקה
+- ✅ Approval Policy (Emergency Window + OTP + Policy Gate) — code-complete בכל 3 הפאזות, **מוזג ל-`main` דרך PR #69 (`4e933b0`)**; `EMERGENCY_WINDOW` flag כבוי, ממתין לאימות פרודקשן לפני הדלקה
+- 🔲 הבא בתור — שכבת אבטחה מסומנת (ROADMAP C53): Financial Commitment Gate — לא מומש עדיין
 
 ## 8. OPEN RISKS
 | סיכון | חומרה | מה נדרש |

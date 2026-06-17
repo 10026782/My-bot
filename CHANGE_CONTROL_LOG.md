@@ -218,3 +218,17 @@
 - **Docs עודכנו:** **לא** — ROADMAP.md "Known Issues" עדיין מתאר את `tier` כ"לא קיים... החלטה נדרשת" (drift מתועד)
 - **Feature Flag:** N/A
 - **Rollback plan:** N/A
+
+### C52 — Approval Policy: Emergency Window + OTP + Policy Gate
+- **תאריך:** 17/06/2026
+- **סוג:** Security
+- **Requirement:** ROADMAP.md C52 (Sprint 16/06/2026); `Approval_Policy_Spec.md`
+- **Commit:** `8209d36` (phase 1 — Emergency_Window table + `core/emergency_window.py`), `a57fd7f` (phase 2 — `core/otp.py`), `44457dd` (phase 3 — policy gate ב-`_queue_tma_write_approval`), `ce111bb` (`web`→mobile fail-closed fix + doc updates), `92e4b2b` (CORS `X-TMA-Platform` header + derived RISK_LEVEL write) — **merge commit `4e933b0`**
+- **PR:** #69 — https://github.com/10026782/My-bot/pull/69
+- **Review על ידי:** 10026782 (owner — `merged_by` ב-GitHub API)
+- **Deploy תאריך:** לא ידוע — Render Auto-Deploy מוגדר על `main`, לא אומת ידנית מול Render Dashboard
+- **Verified בפרודקשן:** לא
+- **Verification ראיה:** `py_compile` נקי; `npm run build` עבר; `smoke_tests.py` 5/6 PASS (כשל `anthropic` import תלוי-סביבה); מטריצת 12 תרחישים (Low/Medium/High/Critical × mobile/desktop/web × window/OTP) אומתה מול קוד הגייט האמיתי; CORS preflight מאומת מחזיר `X-TMA-Platform`; כתיבת RISK_LEVEL מאומתת מול live Airtable choices. GitHub API `pull_request_read` מאשר `merged: true`, `merged_at: 2026-06-17T18:56:00Z`; `git fetch origin main` מאשר `origin/main` על `4e933b0`. אין אימות פרודקשן חי.
+- **Docs עודכנו:** ROADMAP / AI_CONTEXT / BUG_AUDIT_LOG / RELEASE_CHECKLIST
+- **Feature Flag:** `EMERGENCY_WINDOW` — כבוי כברירת מחדל; מיזוג ל-`main` אינו משנה התנהגות בפרודקשן כל עוד הדגל כבוי
+- **Rollback plan:** revert ל-merge commit `4e933b0` על `main`; אין סיכון פונקציונלי מיידי כי הדגל כבוי

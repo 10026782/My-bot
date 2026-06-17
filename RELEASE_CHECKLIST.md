@@ -93,3 +93,16 @@
 | CI/CD GitHub Actions | 🔲 PLANNED | N08 | pytest + build על כל PR + Render hook |
 | Monitoring / Alerting | 🔲 PLANNED | N09 | Render alerts + Sentry |
 | Rollback אוטומטי | 🔲 PLANNED | N10 | תלוי ב-N08 |
+
+## דוגמה אחרונה — PR #69 (C52, Approval Policy Gate, 17/06/2026)
+> Security Fix checklist כפי שיושם בפועל — לתיעוד, לא לשינוי התבנית למעלה.
+- [x] תיעוד מלא של השינוי — `Approval_Policy_Spec.md`, `BUG_AUDIT_LOG.md` (FEATURE entry), `CHANGE_CONTROL_LOG.md` C52
+- [x] Fix בענף נפרד — `claude/meta-whatsapp-phase-1-q6pp3e`
+- [x] Review על ידי owner — מאומת ב-GitHub API (`merged_by: 10026782`)
+- [ ] Deploy לפרודקשן בהקדם — Render Auto-Deploy מוגדר על `main`, **לא אומת ידנית**
+- [ ] אימות שהשינוי נכון בפרודקשן — ממתין
+- [x] AI_CONTEXT עודכן
+- [x] Schema sync: RISK_LEVEL נבדק מול live Airtable choices (`low`/`medium`/`high`)
+- [x] Tests: py_compile + npm build + smoke_tests.py 5/6 + מטריצת 12 תרחישים
+- [ ] Deploy אומת ב-Render — לא
+- [x] Rollback plan מוגדר — revert ל-merge commit `4e933b0` על `main`; `EMERGENCY_WINDOW` כבוי כך שאין סיכון פונקציונלי מיידי

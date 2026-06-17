@@ -100,6 +100,8 @@
 | C49 | Ops Docs | README, CHANGELOG, RUNBOOK, DEPLOYMENT נוצרו | docs/, root | PR #60 |
 | C50 | F12 Model Provider Adapter | תועד כ-Future item ב-ROADMAP | ROADMAP.md | — |
 | C51 | Approval Concurrency Regression Test | test ל-3-state approval flow: pending→processing→approved/failed + double approve guard | test_approval_concurrency.py | branch furniture-funnel-clean |
+| C52 | Approval Policy: Emergency Window + OTP + Policy Gate | שכבת אישור מדורגת לפי סיכון (Low/Medium/High/Critical) × פלטפורמה (mobile/desktop); Emergency Window (חריג מבוקר ל-High, 24/48/72h, לעולם לא Critical) + OTP; `web` מסווג כ-mobile (fail-closed); תיקון CORS `X-TMA-Platform`; RISK_LEVEL נגזר בפועל ב-Approvals (לא hardcoded). **`EMERGENCY_WINDOW` flag כבוי — ללא שינוי התנהגות בפרודקשן.** ממתין לאימות פרודקשן לפני הדלקה. | core/emergency_window.py, core/otp.py, tma_api.py, tma-frontend/src/api.ts | PR #69 (merged → main@`4e933b0`) |
+| C53 🔲 PLANNED | Financial Commitment Gate | שכבת אבטחה הבאה המתוכננת (pinned) — לא מומש עדיין. ⚠️ צוין במקור כ-"C41" בהנחיה, אך C41 תפוס כבר ע"י "LLM Fallback Handlers" באותה טבלה — מוספר כ-C53 כדי למנוע התנגשות ID, ראו דיון ב-PR #69 follow-up. | — | — |
 
 ---
 

@@ -126,11 +126,11 @@
 - **דווח/תוכנן:** 17/06/2026 — לפי `Approval_Policy_Spec.md`
 - **מסך / מודול:** `core/emergency_window.py` (phase 1), `core/otp.py` (phase 2), `tma_api.py` — `_queue_tma_write_approval` policy gate (phase 3); טבלת Airtable `Emergency_Window` (`tblyC9hb6INMUCOkR`); `tma-frontend/src/api.ts` — header `X-TMA-Platform`
 - **תיאור:** שכבת אישור מדורגת לפי סיכון (Low/Medium/High/Critical) × פלטפורמה (mobile/desktop). Low תמיד מותר; Medium מהטלפון דורש אישור כפול (`confirmed`); High מהטלפון דורש Emergency Window פעיל + OTP; Critical לעולם לא מהטלפון, ודורש OTP בכל מצב — כולל desktop. `web` מסווג כ-mobile (fail-closed — Telegram Web עשוי לרוץ בדפדפן בטלפון). חסר platform header = mobile (fail-closed). Emergency **Window** (חריג מבוקר ל-High) ≠ Emergency **Stop** (C33, מקפיא הכל).
-- **תוקן/מומש ב-commits:** `8209d36` (phase 1: טבלה + `emergency_window.py`), `a57fd7f` (phase 2: `otp.py`), `44457dd` (phase 3: policy gate + 3-tuple status + frontend header), + commit נוכחי (`web`→mobile fix)
+- **תוקן/מומש ב-commits:** `8209d36` (phase 1: טבלה + `emergency_window.py`), `a57fd7f` (phase 2: `otp.py`), `44457dd` (phase 3: policy gate + 3-tuple status + frontend header), `ce111bb` (`web`→mobile fix + doc updates), `92e4b2b` (CORS `X-TMA-Platform` header + derived RISK_LEVEL write) — **merge commit `4e933b0`** ("Merge pull request #69")
 - **תוקן ב-branch:** `claude/meta-whatsapp-phase-1-q6pp3e`
 - **Feature Flag:** `EMERGENCY_WINDOW` — **כבוי כברירת מחדל.** דגל כבוי = התנהגות זהה 100% להיום (כולל 202 קשיח).
-- **Merged:** לא — ממתין לאימות פרודקשן לפני merge/הדלקת דגל (לפי הנחיית המשתמש)
-- **Deployed:** לא — Render deploy הוא צעד נפרד שדורש אישור מפורש
-- **Verified בפרודקשן:** לא
-- **Verification ראיה:** `py_compile` עבר על `tma_api.py`; `npm run build` עבר; `smoke_tests.py` 5/6 PASS (כשל `anthropic` import תלוי-סביבה, ידוע מראש); מטריצת 12 תרחישים (Low/Medium/High/Critical × mobile/desktop/web + window on/off + OTP) אומתה מול קוד הגייט האמיתי — כולל אימות חוזר ש-`web` נחסם כ-mobile וש-flag off מחזיר 202 זהה. אין עדיין אימות בפרודקשן החיה.
-- **סטטוס:** 🟡 CODE COMPLETE — flag off, ממתין לאימות פרודקשן
+- **Merged:** **כן — PR #69, מוזג ל-`main` ב-commit `4e933b0`.** אומת ישירות: GitHub API `pull_request_read` → `merged: true`, `merged_by: 10026782`, `merged_at: 2026-06-17T18:56:00Z`; `git fetch origin main` → `origin/main` על `4e933b0`.
+- **Deployed:** לא ידוע — Render Auto-Deploy מוגדר על `main` (`docs/operations/DEPLOYMENT.md`), כך שמיזוג ל-`main` ככל הנראה הפעיל deploy אוטומטי, אך **לא אומת ידנית** מול Render Dashboard מהסביבה הזו. `EMERGENCY_WINDOW` נשאר כבוי כך שגם אם ה-deploy רץ, אין שינוי התנהגות בפרודקשן.
+- **Verified בפרודקשן:** לא — ממתין לאימות ידני
+- **Verification ראיה:** `py_compile` עבר על `tma_api.py`; `npm run build` עבר; `smoke_tests.py` 5/6 PASS (כשל `anthropic` import תלוי-סביבה, ידוע מראש); מטריצת 12 תרחישים (Low/Medium/High/Critical × mobile/desktop/web + window on/off + OTP) אומתה מול קוד הגייט האמיתי — כולל אימות חוזר ש-`web` נחסם כ-mobile וש-flag off מחזיר 202 זהה; CORS preflight מאומת מחזיר `X-TMA-Platform`; כתיבת RISK_LEVEL מאומתת מול live Airtable choices (`low`/`medium`/`high`). אין עדיין אימות בפרודקשן החיה.
+- **סטטוס:** 🟡 MERGED TO MAIN (PR #69, `4e933b0`) — flag off, ממתין לאימות פרודקשן לפני הדלקת `EMERGENCY_WINDOW`
