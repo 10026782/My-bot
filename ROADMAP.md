@@ -137,6 +137,66 @@ Owner מאשר followup → טיוטה מגיעה ב-Telegram לשליחה יד�
 **מה:** חיבור score + tier לדוח הבוקר.
 **קבצים:** daily_digest.py בלבד.
 
+### N06 — Ventures Screen (TMA)
+**תלוי ב:** N05 (Daily Digest שדרוג).
+**מה:** מסך TMA חדש — 🔭 Ventures. חילוץ Strategic Pipeline מ-OCC + 
+חיבור לטבלת Ventures הקיימת ב-Airtable.
+
+**החלטה ארכיטקטונית (17/06/2026 — סופית):**
+- Ventures = טבלה נפרדת (קיימת: tblsXFq5AwxUkdAJ7)
+- לא הרחבת Deals.Status (גישה ישנה מ-13/06 — בוטלה)
+- Deals = כסף שכבר על השולחן
+- Ventures = האם בכלל כדאי לפתוח שולחן (לפני ליד, לפני עסקה)
+
+**Airtable — כבר מוכן לחלוטין:**
+- טבלת Ventures קיימת ומחוברת ל: Profile, Contacts, Deals, 
+  Business Memory, Interaction Log
+- שדות מרכזיים: Venture Name, Stage, Domain, Conviction, 
+  Estimated Potential (NIS), Target Decision Date, Decision Log,
+  Next Action, Linked Contacts, Interaction Log, Business Memory,
+  Converted To Deal (multipleRecordLinks), Owner, Created At
+
+**שלבי ה-Venture (דומיין-אגנוסטי):**
+Research → Supplier/Source → Due Diligence → Smoke Test → GO/NO-GO → [Convert]
+
+**קבצים לכתוב:**
+- `src/screens/Ventures.tsx` (חדש)
+- `tma_api.py` — endpoints: GET /api/ventures, GET /api/ventures/<id>,
+  POST /api/ventures, PATCH /api/ventures/<id>
+- `airtable_schema.py` — הוסף Tables.VENTURES = "Ventures"
+- `_TMA_WRITE_ALLOWED_TABLES` — הוסף "Ventures"
+
+**קבצים לשנות:**
+- `OwnerControlCenter.tsx` — חלץ את Strategic Pipeline לקומפוננטה
+  נפרדת; ה-OCC יציג רק summary (count by stage), קישור ל-Ventures
+
+**מה לא לגעת בו:**
+- Approval Gate — כל PATCH/POST עובר דרכו כרגיל
+- Lead Capture, Scoring, Routing — לא נוגעים
+
+**UX — מסך Ventures:**
+```
+┌─────────────────────────────────┐
+│ 🔭 Ventures                     │
+│ [Research] [DD] [Smoke] [GO/NO] │ ← פילטר לפי Stage
+├─────────────────────────────────┤
+│ 🏗️ ייבוא ריהוט עץ              │
+│ Stage: Due Diligence            │
+│ Conviction: גבוה                │
+│ ₪ 2.4M פוטנציאל | 30/07 deadline│
+│ Next: פגישה עם עמיל מכס        │
+├─────────────────────────────────┤
+│ 🏠 פרויקט יבניאל 2              │
+│ Stage: Smoke Test               │
+│ ...                             │
+├─────────────────────────────────┤
+│ [+ Venture חדש]                 │
+└─────────────────────────────────┘
+```
+
+**כלל ברזל לפי ROADMAP #6:** N06 = קובץ אחד ראשי (Ventures.tsx) + 
+endpoints ב-tma_api.py + שורה ב-airtable_schema.py. לא יותר.
+
 ### F05a — Meta WhatsApp Phase 1 (Inbound, ללא תעבורת פרודקשן)
 **מה:** `/webhooks/meta/whatsapp` (GET verify + POST inbound) — נתיב נפרד מ-Twilio.
 מנרמל payload → אותו pipeline של `run_agent()` כמו Twilio. Outbound נשאר stub כנה.
@@ -154,7 +214,7 @@ Owner מאשר followup → טיוטה מגיעה ב-Telegram לשליחה יד�
 
 | שלב | תיאור | סטטוס |
 |---|---|---|
-| 1. Opportunity Pipeline | איתור הזדמנויות (מתווך/שמאי/ספק/שותף/משקיע) | ❌ לא קיים → **Future** |
+| 1. Opportunity Pipeline | איתור הזדמנויות (Ventures) | ✅ טבלה קיימת → N06 TMA screen |
 | 2. Deal Evaluation | בדיקת כדאיות (שמאי/עו"ד/רו"ח/מיסוי/סיכונים) | ❌ לא קיים → **Future** |
 | 3. Demand Research | מחקר שוק (לקוחות/מתחרים/תמחור) | ❌ לא קיים → **Future** |
 | 4. Deal Structuring | בניית עסקה (מימון/שותפים/מבנה רווחים) | ❌ לא קיים → **Future** |
@@ -170,35 +230,6 @@ Owner מאשר followup → טיוטה מגיעה ב-Telegram לשליחה יד�
 **עקרון מנחה**: המערכת היום היא "Operating Layer" (תפעול). שכבת
 "Business Management" (ניהול העסק - הזדמנויות, כדאיות, הון) היא
 השכבה הבאה, אחרי שהתפעול מבוסס לחלוטין.
-
----
-
-## 📌 Strategic Layer — Minimal Adaptation (2026-06-13)
-
-**עקרון**: לא Opportunities table נפרדת. הרחבת `Deals.Status` כך שה-Deal
-"נולד" משלב הרעיון, לפני שיווק. Dashboard/Cards הם views על הסטטוסים
-החדשים — לא טבלאות חדשות.
-
-### ✅ שלב 1-2 — Schema (מיושם)
-- `DealStatus` ב-`airtable_schema.py` — 4 ערכים חדשים לפני ה-execution stages:
-  `"Idea" → "Feasibility Check" → "Legal/Tax Review" → "Pending Decision"`
-  + `"Rejected"` (שונה מ-Cancelled — נדחה לפני שהיה Active)
-- `ContactFields.ROLE_CATEGORY = "Role Category"` (single-select) + `ContactFields.SPECIALTY = "Specialty"` (text)
-- `ContactRoleCategory`: `lead / broker / expert / supplier / operator / partner / investor / client / other`
-- **לא נגענו** ב-Lead Capture / Scoring / Approval Gate / Routing
-
-### 🔲 שלב 3 — OCC Endpoint Extension (ממתין לאישור)
-הרחבת OCC endpoint קיים עם 3 ספירות חדשות (לא endpoint חדש — תוספת ל-response):
-```
-New Opportunities  = COUNT(Deals WHERE Status = "Idea")
-In Evaluation      = COUNT(Deals WHERE Status IN ("Feasibility Check", "Legal/Tax Review"))
-Pending Decision   = COUNT(Deals WHERE Status = "Pending Decision")
-```
-
-### 🔲 שלב 4 — TMA Strategic Card (ממתין לאישור)
-כרטיס "Strategic" נוסף ב-Owner Control Center, נשען על endpoint המורחב.
-
-**מה לא משתנה לעולם בשלבים 3-4**: Lead Capture, Scoring, Approval Gate, Routing, Activity Feed.
 
 ---
 
@@ -369,3 +400,4 @@ Archived / historical Markdown disposition:
 | `reports/registry_calibration_report.md` | ARCHIVE | Historical registry calibration; keep as evidence. |
 | `reports/system_registry_report.md` | ARCHIVE | Generated environment snapshot; not an active plan. |
 | `reports/airtable_structure_governance_audit.md` | ARCHIVE | Historical Airtable governance audit; keep as evidence. |
+| `BOSS_Refactor_Plan.md` | ACTIVE REFERENCE | תוכנית 8 מסכים + BOSS Layer — Stage 0 הושלם, N06 = Stage 1 |
