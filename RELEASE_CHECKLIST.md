@@ -41,6 +41,9 @@
 - [ ] schema_intelligence sync נבדק
 - [ ] כל קבצים שמשתמשים בשם השדה עודכנו
 - [ ] AI_CONTEXT עודכן (WHERE TO FIND TRUTH)
+- [ ] כל singleSelect options — וודא exact match כולל trailing spaces
+- [ ] typecast=off → כל ערך חייב להתאים בדיוק ל-live Airtable
+- [ ] OPTIONS preflight parameters — וודא שם משתנה תואם URL rule (ללא _ prefix)
 
 ## Hotfix
 - [ ] Emergency Stop פעיל אם נדרש

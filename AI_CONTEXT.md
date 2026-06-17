@@ -38,6 +38,7 @@
 | MULTITENANT | כבוי (F08) | `MULTITENANT=off` | לא בשימוש |
 | VOICE_IVR | לא פעיל (F07) | `VOICE_IVR=off` | קו Twilio IVR לא מומש/לא מופעל |
 | EMAIL_INBOUND | לא פעיל (F06) | `EMAIL_INBOUND=off` | ערוץ email נכנס לא מופעל |
+| `Next Action` field (Leads) | CODE DONE, לא תוקן | — | trailing space + mismatch מלא בין live Airtable לקוד (`airtable_schema.py:LeadFields.NEXT_STEP`); אינו נכתב בפועל מ-`LeadDetail.tsx` כיום, אך דורש follow-up ticket לפני שמחברים כתיבה אמיתית — ראו BUG_AUDIT_LOG.md "FLAGGED (not fixed)" |
 | AUDIENCE_INTELLIGENCE / INTERACTION_INTELLIGENCE / KPI_ENGINE / LEARNING_ENGINE / REVENUE_ATTRIBUTION | FUTURE — לא פעיל | כבויים | לא מומשו (FUTURE per `feature_flags.py:46-51`) |
 
 ## 4. ACTIVE DECISIONS — החלטות ארכיטקטוניות שחייבים לכבד
@@ -88,3 +89,4 @@
 | `docs/governance/SECURITY_CHECKLIST.md` מסומן ARCHIVED (2026-06-14) — לא ידוע אם קיים מסמך מחליף תקף, או שזהו עדיין מקור האמת בפועל | Medium | לאשר עם הבעלים אם יש מסמך security עדכני יותר, ולעדכן את AI_CONTEXT §6 בהתאם |
 | **Traceability Matrix (Mission 1) — 12 commits של תיקוני אבטחה (07–16/06/2026: `9384f89`,`aca037b`,`63966dd`,`e76c247`,`eb1f42b`,`2bae2e6`,`126e34c`,`f6281a5`,`badfb84`,`3a4dbc5`,`ef05dcf`,`9e609cb`) ללא PR מספור, ללא ראיית review, וללא קישור ל-ROADMAP item — לא ניתן לשחזר מי אישר, מתי נפרס, או אם אומת בפרודקשן** | Critical | לקבוע מנגנון: כל commit עם prefix `security:`/`fix(security)` חייב PR עם reviewer רשום + רשומת `CHANGE_CONTROL_LOG.md` בזמן ה-merge (לא retroactively) |
 | **Traceability Matrix — אצוות C25-C40 (16 פריטים, Stabilization Sprint 07/06) מתועדות ב-ROADMAP רק בשם קובץ, לא ב-commit hash ייחודי per-item (חוץ מ-C37, C40)** | High | לאכוף ש-ROADMAP entry חדש יצוטט עם commit hash ספציפי מהיום שנכתב, לא retroactively משוחזר |
+| Airtable live options vs קוד — drift מתגלה ad-hoc per-bug (כך התגלה BUG-008: trailing space ב-`Business Outcome`) ולא דרך audit שיטתי; ייתכנו שדות singleSelect/multipleSelects נוספים עם drift דומה שלא התגלו עדיין | Medium | audit שיטתי של כל שדה singleSelect/multipleSelects בכל הטבלאות מול הקוד בסיום (לא רק כשבא מ-bug report) |
