@@ -132,9 +132,13 @@ Owner מאשר followup → טיוטה מגיעה ב-Telegram לשליחה יד�
 **אין שליחה יוצאת לליד** — Meta outbound blocked עד N05-C.
 **flag:** `FOLLOWUP_AUTOMATION` (אותו gate כמו N04).
 
-### N05 — Daily Digest שדרוג
+### N05 — Daily Digest שדרוג ✅ מיושם
 **תלוי ב:** N02 (כדי שציונים אמיתיים יופיעו בדוח).
-**מה:** חיבור score + tier לדוח הבוקר.
+**מה:** חיבור score + tier לדוח הבוקר. `_hot_leads()` עבר מפילטר
+status='hot' מת (לא נכתב לעולם בקוד) לפילטר `Score>=50` עם fallback
+ל-status הישן. tier מחושב בזיכרון מ-Score (אותם ספים כמו
+`lead_capture._score_inbound_message`) — לא נקרא משדה Airtable, כי
+`LeadFields.TIER` לא קיים בסכמת הפרודקשן (ראה Known Issues).
 **קבצים:** daily_digest.py בלבד.
 
 ### N06 — Ventures Screen (TMA)
