@@ -35,6 +35,13 @@ logger = logging.getLogger(__name__)
 
 tma_api = Blueprint("tma_api", __name__)
 
+
+@tma_api.errorhandler(RuntimeError)
+def _handle_runtime_error(e):
+    logger.error(f"[tma_api] unhandled RuntimeError: {e}")
+    return jsonify({"error": "internal_error", "detail": str(e)}), 500
+
+
 # ── env ────────────────────────────────────────────────────────────
 _BOT_TOKEN  = os.environ.get("TELEGRAM_TOKEN", "")
 _AT_KEY     = os.environ.get("AIRTABLE_API_KEY", "")
