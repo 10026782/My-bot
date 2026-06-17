@@ -52,12 +52,27 @@ def _fmt(iso: str) -> str:
 # Sections
 # ══════════════════════════════════════════════════
 
+def _tier_label(score: int) -> str:
+    """
+    Score → tier label, באותם ספים כמו lead_capture._score_inbound_message.
+    אין שדה tier ב-Airtable (ROADMAP Known Issues: LeadFields.TIER לא קיים
+    בסכמה) — ה-tier מחושב כאן בזיכרון מתוך Score בלבד, לא נקרא משדה.
+    """
+    if score >= 70:
+        return "🔥 רותח"
+    if score >= 50:
+        return "🌶️ לוהט"
+    if score >= 25:
+        return "🌤️ חם"
+    return "❄️ קר"
+
+
 def _hot_leads(errors: list) -> str:
-    """🔥 לידים חמים — score>=70 או tier=HOT / status=hot"""
+    """🔥 לידים חמים — Score>=50 (סף HOT/ULTRA_HOT) או status legacy='hot'"""
     try:
         records = _fetch(
             "Leads",
-            "OR({status}='hot',{status}='Hot',{status}='HOT')",
+            "OR({Score}>=50, {status}='hot', {status}='Hot', {status}='HOT')",
             max_rec=8,
         )
         if not records:
@@ -65,10 +80,11 @@ def _hot_leads(errors: list) -> str:
         lines = ["🔥 *לידים חמים:*"]
         for r in records:
             f         = r.get("fields", {})
-            score     = f.get(LeadFields.SCORE, 0) or 0
+            score     = int(f.get(LeadFields.SCORE, 0) or 0)
+            tier      = _tier_label(score)
             next_step = f.get("next_step", "—") or "—"
             lines.append(
-                f"• {f.get('Name','?')} | {f.get('phone','—')} | ⭐{score} | {next_step}"
+                f"• {f.get('Name','?')} | {f.get('phone','—')} | ⭐{score} {tier} | {next_step}"
             )
         return "\n".join(lines)
     except Exception as e:
