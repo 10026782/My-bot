@@ -5,6 +5,7 @@ import type { OwnerControlCenter as TOwnerControlCenter } from "../types";
 
 interface Props {
   onBack: () => void;
+  onOpenVentures?: () => void;
 }
 
 type State =
@@ -39,7 +40,7 @@ function EmptyLine({ text }: { text: string }) {
   return <p className="text-xs text-gray-400">{text}</p>;
 }
 
-export function OwnerControlCenter({ onBack }: Props) {
+export function OwnerControlCenter({ onBack, onOpenVentures }: Props) {
   const [state, setState] = useState<State>({ status: "loading" });
 
   function load() {
@@ -125,20 +126,33 @@ export function OwnerControlCenter({ onBack }: Props) {
 
             {data.strategic_pipeline && (
               <Section title="Strategic Pipeline">
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="rounded-lg bg-purple-50 p-3">
-                    <p className="text-[10px] text-purple-500">New Ideas</p>
-                    <p className="text-xl font-black text-purple-700">{data.strategic_pipeline.new_opportunities}</p>
-                  </div>
+                <div className="grid grid-cols-2 gap-2 mb-3">
                   <div className="rounded-lg bg-blue-50 p-3">
-                    <p className="text-[10px] text-blue-500">In Evaluation</p>
-                    <p className="text-xl font-black text-blue-700">{data.strategic_pipeline.in_evaluation}</p>
+                    <p className="text-[10px] text-blue-500">Total Ventures</p>
+                    <p className="text-xl font-black text-blue-700">{data.strategic_pipeline.total}</p>
                   </div>
-                  <div className="rounded-lg bg-orange-50 p-3">
-                    <p className="text-[10px] text-orange-500">Pending Decision</p>
-                    <p className="text-xl font-black text-orange-700">{data.strategic_pipeline.pending_decision}</p>
+                  <div className="rounded-lg bg-green-50 p-3">
+                    <p className="text-[10px] text-green-600">Active</p>
+                    <p className="text-xl font-black text-green-700">{data.strategic_pipeline.active}</p>
                   </div>
                 </div>
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {Object.entries(data.strategic_pipeline.stage_counts)
+                    .filter(([, count]) => count > 0)
+                    .map(([stage, count]) => (
+                      <span key={stage} className="rounded-full bg-gray-100 px-2 py-1 text-[11px] text-gray-700">
+                        {stage}: <span className="font-bold">{count}</span>
+                      </span>
+                    ))}
+                </div>
+                {onOpenVentures && (
+                  <button
+                    onClick={onOpenVentures}
+                    className="w-full rounded-lg bg-gray-900 text-white text-xs font-semibold py-2 active:bg-gray-700"
+                  >
+                    🔭 Open Ventures
+                  </button>
+                )}
               </Section>
             )}
 

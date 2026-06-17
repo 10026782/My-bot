@@ -12,6 +12,7 @@ import { GameScreen } from "./components/GameScreen";
 import { BossCheckin } from "./components/BossCheckin";
 import { BossDigest } from "./components/BossDigest";
 import { OwnerControlCenter } from "./components/OwnerControlCenter";
+import { Ventures } from "./components/Ventures";
 import type { ProjectsResponse, ProjectCard as TProjectCard } from "./types";
 
 type HubState =
@@ -31,6 +32,7 @@ export default function App() {
   const [checkinOpen, setCheckinOpen] = useState(false);
   const [digestOpen,  setDigestOpen]  = useState(false);
   const [ownerControlOpen, setOwnerControlOpen] = useState(false);
+  const [venturesOpen, setVenturesOpen] = useState(false);
   const [authRole, setAuthRole] = useState<string | null>(null);
 
   function loadHub() {
@@ -68,7 +70,17 @@ export default function App() {
   }
 
   if (ownerControlOpen) {
-    return <OwnerControlCenter onBack={() => setOwnerControlOpen(false)} />;
+    return (
+      <OwnerControlCenter
+        onBack={() => setOwnerControlOpen(false)}
+        onOpenVentures={() => { setOwnerControlOpen(false); setVenturesOpen(true); }}
+      />
+    );
+  }
+
+  // ── Ventures view (Strategic Layer) ──────────────────────────────
+  if (venturesOpen) {
+    return <Ventures onBack={() => setVenturesOpen(false)} />;
   }
 
   // ── System Health view ──────────────────────────────────────────
@@ -152,6 +164,9 @@ export default function App() {
           <button onClick={() => setGameOpen(true)}      className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="גיים">🎮</button>
           {canShowOwnerControl && (
             <button onClick={() => setOwnerControlOpen(true)} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-900 text-white active:bg-gray-700 text-xs font-black" aria-label="Owner Control Center">OC</button>
+          )}
+          {canShowOwnerControl && (
+            <button onClick={() => setVenturesOpen(true)} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="Ventures">🔭</button>
           )}
           <button onClick={() => setHealthOpen(true)}    className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="בריאות מערכת">⚙️</button>
         </div>

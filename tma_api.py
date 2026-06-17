@@ -21,10 +21,11 @@ from flask import Blueprint, jsonify, request
 from identity import resolve_identity, Role
 from airtable_schema import (
     LeadFields, TaskFields, PaymentStatus, BusinessMemoryFields, InteractionLogFields, Tables,
-    DealFields, DealStatus,
+    DealFields,
     QuestsFields, CoinsLogFields, WorldsFields, QuestStatus, WorldStatus,
     DailyTaskFields, DailyTaskStatus, ApprovalsFields, ApprovalStatus,
     RoadmapTaskFields, RoadmapTaskStatus, DailyCheckinFields,
+    VentureFields, VentureStage,
 )
 from tools.airtable_gateway import airtable_patch as _gw_patch, airtable_create as _gw_create
 from health_monitor import get_health_status
@@ -111,6 +112,16 @@ def _preflight_assets():
 
 @tma_api.route("/api/assets/<asset_id>", methods=["OPTIONS"])
 def _preflight_asset(_asset_id=None):
+    return "", 204
+
+
+@tma_api.route("/api/ventures", methods=["OPTIONS"])
+def _preflight_ventures():
+    return "", 204
+
+
+@tma_api.route("/api/ventures/<venture_id>", methods=["OPTIONS"])
+def _preflight_venture(_venture_id=None):
     return "", 204
 
 
@@ -1646,25 +1657,30 @@ def _owner_recent_receipts() -> tuple[list[dict], list[str]]:
     return receipts, warnings
 
 
+_VENTURE_STAGES = (
+    VentureStage.RESEARCH, VentureStage.SUPPLIER_SOURCE, VentureStage.DUE_DILIGENCE,
+    VentureStage.LEGAL_TAX_REVIEW, VentureStage.SMOKE_TEST, VentureStage.GO,
+    VentureStage.NO_GO, VentureStage.CONVERTED,
+)
+
+
 def _owner_strategic_pipeline() -> dict:
-    """Strategic Layer — מספר עסקאות לפי שלב הערכה (לפני קבלת החלטה)."""
+    """Strategic Layer — ventures לפי שלב (count by stage). מקור: טבלת Ventures, לא Deals."""
     try:
-        stage = DealFields.STAGE
-        ideas   = _at_list(Tables.DEALS, f"{{{stage}}}='{DealStatus.IDEA}'", max_records=50)
-        in_eval = _at_list(
-            Tables.DEALS,
-            f"OR({{{stage}}}='{DealStatus.FEASIBILITY}', {{{stage}}}='{DealStatus.LEGAL_REVIEW}')",
-            max_records=50,
+        records = _at_list(Tables.VENTURES, "", max_records=200)
+        counts = {stage: 0 for stage in _VENTURE_STAGES}
+        for r in records:
+            stage = r.get("fields", {}).get(VentureFields.STAGE, "")
+            if stage in counts:
+                counts[stage] += 1
+        active = sum(
+            v for k, v in counts.items()
+            if k not in (VentureStage.NO_GO, VentureStage.CONVERTED)
         )
-        pending = _at_list(Tables.DEALS, f"{{{stage}}}='{DealStatus.PENDING_DECISION}'", max_records=50)
-        return {
-            "new_opportunities": len(ideas),
-            "in_evaluation":     len(in_eval),
-            "pending_decision":  len(pending),
-        }
+        return {"stage_counts": counts, "total": len(records), "active": active}
     except Exception as e:
         logger.warning(f"[StrategicPipeline] {e}")
-        return {"new_opportunities": 0, "in_evaluation": 0, "pending_decision": 0}
+        return {"stage_counts": {}, "total": 0, "active": 0}
 
 
 @tma_api.route("/api/owner/health", methods=["GET"])
@@ -2004,6 +2020,111 @@ def update_asset(asset_id, identity):
 
     _audit("asset_update", identity, details=f"{asset_id}: {list(fields.keys())}")
     return jsonify({"ok": True, "asset_id": asset_id, "updated": list(fields.keys())})
+
+
+# ══════════════════════════════════════════════════════════════════
+# Ventures — Strategic Layer (pre-lead/pre-deal evaluation). Owner only.
+# ══════════════════════════════════════════════════════════════════
+
+def _fmt_venture(r: dict) -> dict:
+    f = r.get("fields", {})
+    return {
+        "id":                    r.get("id", ""),
+        "name":                  f.get(VentureFields.NAME, ""),
+        "stage":                 f.get(VentureFields.STAGE, ""),
+        "domain":                f.get(VentureFields.DOMAIN, ""),
+        "conviction":            f.get(VentureFields.CONVICTION, ""),
+        "estimated_potential":   f.get(VentureFields.ESTIMATED_POTENTIAL, 0) or 0,
+        "target_decision_date":  f.get(VentureFields.TARGET_DECISION_DATE, ""),
+        "decision_log":          f.get(VentureFields.DECISION_LOG, ""),
+        "next_action":           f.get(VentureFields.NEXT_ACTION, ""),
+        "notes":                 f.get(VentureFields.NOTES, ""),
+        "linked_contacts":       f.get(VentureFields.LINKED_CONTACTS, []) or [],
+        "owner":                 f.get(VentureFields.OWNER, []) or [],
+        "converted_to_deal":     f.get(VentureFields.CONVERTED_TO_DEAL, []) or [],
+        "created_at":            f.get(VentureFields.CREATED_AT, ""),
+    }
+
+
+_VENTURE_FIELD_MAP = {
+    "name":                 VentureFields.NAME,
+    "stage":                VentureFields.STAGE,
+    "domain":               VentureFields.DOMAIN,
+    "conviction":           VentureFields.CONVICTION,
+    "estimated_potential":  VentureFields.ESTIMATED_POTENTIAL,
+    "target_decision_date": VentureFields.TARGET_DECISION_DATE,
+    "decision_log":         VentureFields.DECISION_LOG,
+    "next_action":          VentureFields.NEXT_ACTION,
+    "notes":                VentureFields.NOTES,
+    "linked_contacts":      VentureFields.LINKED_CONTACTS,
+    "owner":                VentureFields.OWNER,
+}
+
+
+@tma_api.route("/api/ventures", methods=["GET"])
+@require_tma_auth
+def get_ventures(identity):
+    if not identity.is_owner:
+        return jsonify({"error": "forbidden"}), 403
+
+    stage = (request.args.get("stage", "") or "").strip()
+    formula = f"{{{VentureFields.STAGE}}}='{stage}'" if stage else ""
+    recs = _at_list(Tables.VENTURES, formula, max_records=100)
+    ventures = [_fmt_venture(r) for r in recs]
+    return jsonify({"count": len(ventures), "ventures": ventures})
+
+
+@tma_api.route("/api/ventures/<venture_id>", methods=["GET"])
+@require_tma_auth
+def get_venture(venture_id, identity):
+    if not identity.is_owner:
+        return jsonify({"error": "forbidden"}), 403
+
+    rec = _at_get_record(Tables.VENTURES, venture_id)
+    if not rec:
+        return jsonify({"error": "venture not found"}), 404
+    return jsonify(_fmt_venture(rec))
+
+
+@tma_api.route("/api/ventures", methods=["POST"])
+@require_tma_auth
+def create_venture(identity):
+    if not identity.is_owner:
+        return jsonify({"error": "forbidden"}), 403
+
+    data = request.get_json(force=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "missing required field: name"}), 400
+
+    fields = {_VENTURE_FIELD_MAP[k]: v for k, v in data.items() if k in _VENTURE_FIELD_MAP}
+    fields.setdefault(VentureFields.STAGE, VentureStage.RESEARCH)
+
+    rec = _at_post(Tables.VENTURES, fields)
+    if not rec:
+        return jsonify({"error": "create failed"}), 500
+
+    _audit("venture_create", identity, details=name)
+    return jsonify(_fmt_venture(rec)), 201
+
+
+@tma_api.route("/api/ventures/<venture_id>", methods=["PATCH"])
+@require_tma_auth
+def update_venture(venture_id, identity):
+    if not identity.is_owner:
+        return jsonify({"error": "forbidden"}), 403
+
+    data = request.get_json(force=True) or {}
+    fields = {_VENTURE_FIELD_MAP[k]: v for k, v in data.items() if k in _VENTURE_FIELD_MAP}
+    if not fields:
+        return jsonify({"error": "no editable fields provided"}), 400
+
+    ok = _at_patch(Tables.VENTURES, venture_id, fields)
+    if not ok:
+        return jsonify({"error": "update failed"}), 500
+
+    _audit("venture_update", identity, details=f"{venture_id}: {list(fields.keys())}")
+    return jsonify({"ok": True, "venture_id": venture_id, "updated": list(fields.keys())})
 
 
 # ══════════════════════════════════════════════════════════════════
