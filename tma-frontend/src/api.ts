@@ -10,12 +10,15 @@ declare global {
 }
 
 function authHeaders(): Record<string, string> {
+  const platform = window.Telegram?.WebApp?.platform;
+  const platformHeader: Record<string, string> = platform ? { "X-TMA-Platform": platform } : {};
+
   if (DEV_ID) {
-    return { "X-Dev-Telegram-Id": DEV_ID };
+    return { "X-Dev-Telegram-Id": DEV_ID, ...platformHeader };
   }
   const raw = window.Telegram?.WebApp?.initData ?? "";
-  if (raw) return { "X-Telegram-Init-Data": raw };
-  return {};
+  if (raw) return { "X-Telegram-Init-Data": raw, ...platformHeader };
+  return { ...platformHeader };
 }
 
 async function throwApiError(r: Response, fallback: string): Promise<never> {
