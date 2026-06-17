@@ -213,6 +213,31 @@ endpoints ב-tma_api.py + שורה ב-airtable_schema.py. לא יותר.
   `in_evaluation`/`pending_decision`) לפורמט `{stage_counts, total, active}` —
   count-by-stage אמיתי לפי 8 השלבים בטבלת Ventures, כפי שהמסמך דרש.
 
+### N07 — Schema Governance script 🔲 PLANNED
+**עדיפות:** גבוהה.
+**מה:** סקריפט שמשווה live Airtable schema (דרך Airtable MCP/API) מול
+`airtable_schema.py` באופן שיטתי, ומדגיש drift (כולל trailing spaces
+ב-singleSelect/multipleSelects, שדות חדשים/חסרים, סוגי שדה שהשתנו).
+**מניע:** BUG-008 (`Leads."Business Outcome"` trailing space) התגלה
+ad-hoc תוך כדי חקירת באג, לא דרך audit שיטתי — ראו `AI_CONTEXT.md` §8.
+**עד שמיושם:** manual gate בלבד (ראו `RELEASE_CHECKLIST.md`).
+
+### N08 — CI/CD GitHub Actions 🔲 PLANNED
+**מה:** הרצת `pytest`/`smoke_tests.py`/`test_integration.py` + `npm run build`
+על כל PR, ו-hook ל-Render לאימות שה-deploy תואם את ה-commit שעבר CI.
+**עד שמיושם:** manual gate בלבד (ראו `RELEASE_CHECKLIST.md`).
+
+### N09 — Monitoring / Alerting 🔲 PLANNED
+**מה:** Render alerts + Sentry (או שווה-ערך) לזיהוי שגיאות בפרודקשן
+בלי תלות בדיווח ידני של המשתמש.
+**עד שמיושם:** manual gate בלבד (ראו `RELEASE_CHECKLIST.md`).
+
+### N10 — Rollback אוטומטי 🔲 PLANNED
+**תלוי ב:** N08 (CI/CD).
+**מה:** rollback אוטומטי ל-commit יציב אחרון כש-health check/monitoring
+מזהה כשל אחרי deploy.
+**עד שמיושם:** manual gate בלבד (ראו `RELEASE_CHECKLIST.md`).
+
 ### F05a — Meta WhatsApp Phase 1 (Inbound, ללא תעבורת פרודקשן)
 **מה:** `/webhooks/meta/whatsapp` (GET verify + POST inbound) — נתיב נפרד מ-Twilio.
 מנרמל payload → אותו pipeline של `run_agent()` כמו Twilio. Outbound נשאר stub כנה.

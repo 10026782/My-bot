@@ -14,6 +14,10 @@
 - [ ] AI_CONTEXT.md עודכן
 - [ ] Render deploy הצליח
 - [ ] אומת ידנית בפרודקשן (מה נבדק + תוצאה)
+- [ ] Schema sync: השווה live Airtable vs airtable_schema.py (manual עד N07)
+- [ ] Tests: py_compile + npm build (manual עד N08)
+- [ ] Deploy אומת ב-Render (manual עד N09)
+- [ ] Rollback plan מוגדר (manual עד N10)
 
 ## Bug Fix
 - [ ] הבאג מתועד (ROADMAP / issue / audit log)
@@ -24,6 +28,10 @@
 - [ ] Deploy + verify בפרודקשן
 - [ ] ROADMAP עודכן
 - [ ] AI_CONTEXT KNOWN_GAPS עודכן אם רלוונטי
+- [ ] Schema sync: השווה live Airtable vs airtable_schema.py (manual עד N07)
+- [ ] Tests: py_compile + npm build (manual עד N08)
+- [ ] Deploy אומת ב-Render (manual עד N09)
+- [ ] Rollback plan מוגדר (manual עד N10)
 
 ## Security Fix
 - [ ] תיעוד מלא של הפגיעות
@@ -33,6 +41,10 @@
 - [ ] אימות שהפגיעות נסגרה בפרודקשן
 - [ ] SECURITY_CHECKLIST.md עודכן
 - [ ] AI_CONTEXT עודכן
+- [ ] Schema sync: השווה live Airtable vs airtable_schema.py (manual עד N07)
+- [ ] Tests: py_compile + npm build (manual עד N08)
+- [ ] Deploy אומת ב-Render (manual עד N09)
+- [ ] Rollback plan מוגדר (manual עד N10)
 
 ## Airtable Schema Change
 - [ ] שינוי מתועד לפני שנוגעים ב-Airtable
@@ -44,6 +56,10 @@
 - [ ] כל singleSelect options — וודא exact match כולל trailing spaces
 - [ ] typecast=off → כל ערך חייב להתאים בדיוק ל-live Airtable
 - [ ] OPTIONS preflight parameters — וודא שם משתנה תואם URL rule (ללא _ prefix)
+- [ ] Schema sync: השווה live Airtable vs airtable_schema.py (manual עד N07)
+- [ ] Tests: py_compile + npm build (manual עד N08)
+- [ ] Deploy אומת ב-Render (manual עד N09)
+- [ ] Rollback plan מוגדר (manual עד N10)
 
 ## Hotfix
 - [ ] Emergency Stop פעיל אם נדרש
@@ -51,6 +67,10 @@
 - [ ] Deploy מיידי
 - [ ] CHANGE_CONTROL_LOG עודכן
 - [ ] Post-mortem קצר תועד
+- [ ] Schema sync: השווה live Airtable vs airtable_schema.py (manual עד N07)
+- [ ] Tests: py_compile + npm build (manual עד N08)
+- [ ] Deploy אומת ב-Render (manual עד N09)
+- [ ] Rollback plan מוגדר (manual עד N10)
 
 ## Rollback
 - [ ] זוהה commit יציב אחרון
@@ -58,3 +78,18 @@
 - [ ] אומת שהמערכת יציבה
 - [ ] Root cause תועד
 - [ ] CHANGE_CONTROL_LOG עודכן עם "ROLLBACK" entry
+- [ ] Schema sync: השווה live Airtable vs airtable_schema.py (manual עד N07)
+- [ ] Tests: py_compile + npm build (manual עד N08)
+- [ ] Deploy אומת ב-Render (manual עד N09)
+- [ ] Rollback plan מוגדר (manual עד N10)
+
+## GOVERNANCE ROADMAP
+> מה מתוכנן אבל לא פעיל עדיין.
+> עד שמיושם — manual gate בלבד.
+
+| כלי | סטטוס | עדיפות | מה נדרש |
+|-----|-------|--------|---------|
+| Schema Governance script | 🔲 PLANNED | N07 — גבוהה | השוואת live Airtable vs airtable_schema.py |
+| CI/CD GitHub Actions | 🔲 PLANNED | N08 | pytest + build על כל PR + Render hook |
+| Monitoring / Alerting | 🔲 PLANNED | N09 | Render alerts + Sentry |
+| Rollback אוטומטי | 🔲 PLANNED | N10 | תלוי ב-N08 |
