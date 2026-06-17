@@ -285,10 +285,10 @@ def build_overdue_message(alerts: list[PaymentAlert]) -> str:
 # 4. Main Entry — run_payment_scan()
 # ══════════════════════════════════════════════════
 
-def run_payment_scan(bot=None, chat_id: str = "") -> ScanResult:
+def run_payment_scan(chat_id: str = "") -> ScanResult:
     """
     Entry point לscheduler.
-    סורק → בונה הודעות → שולח לowner בטלגרם.
+    סורק → בונה הודעות → שולח לowner בטלגרם (דרך C52 Customer Output Gateway).
     """
     try:
         from feature_flags import is_enabled  # type: ignore
@@ -321,25 +321,39 @@ def run_payment_scan(bot=None, chat_id: str = "") -> ScanResult:
         result.errors.append(msg)
 
     # ── Send ──────────────────────────────────────
-    if bot and chat_id and result.has_alerts:
-        _send_alerts(bot, chat_id, result)
+    if chat_id and result.has_alerts:
+        _send_alerts(chat_id, result)
 
     return result
 
 
-def _send_alerts(bot, chat_id: str, result: ScanResult):
-    """שולח הודעות טלגרם לפי סדר: overdue קודם (דחוף יותר), אחר כך upcoming."""
+def _send_alerts(chat_id: str, result: ScanResult):
+    """שולח הודעות לowner דרך C52 Customer Output Gateway, לפי סדר: overdue קודם (דחוף יותר), אחר כך upcoming."""
+    from core.output_gateway import send_outbound, OutboundEnvelope, AudienceClass, OutputChannel
+
+    def _send(body: str, ref: str):
+        envelope = OutboundEnvelope(
+            channel=OutputChannel.TELEGRAM_OWNER,
+            recipient=chat_id,
+            body=body,
+            audience=AudienceClass.INTERNAL,
+            source_module="payment_reminder",
+            source_ref=ref,
+            domain="finance",
+        )
+        send_outbound(envelope)
+
     try:
         if result.overdue:
             msg = build_overdue_message(result.overdue)
             if msg:
-                bot.send_message(chat_id, msg, parse_mode="Markdown")
+                _send(msg, "overdue")
                 logger.info(f"[PaymentReminder] ✅ overdue message sent")
 
         if result.upcoming:
             msg = build_upcoming_message(result.upcoming)
             if msg:
-                bot.send_message(chat_id, msg, parse_mode="Markdown")
+                _send(msg, "upcoming")
                 logger.info(f"[PaymentReminder] ✅ upcoming message sent")
 
     except Exception as e:

@@ -107,6 +107,31 @@ def _empty_twiml() -> Response:
     return Response(str(MessagingResponse()), mimetype="application/xml")
 
 
+def _gateway_whatsapp_reply(sender: str, body: str, domain: str, source_ref: str) -> str | None:
+    """
+    מעביר את תשובת ה-WhatsApp ללקוח דרך C52 Customer Output Gateway לפני TwiML reply.
+    Gateway קובע APPROVED/ESCALATED (Financial Gate) על הגוף בפועל; השליחה הסינכרונית
+    עדיין נעשית ע"י Twilio מתוך ה-TwiML response (whatsapp_adapter הוא honest stub —
+    ראה C38/C52). מחזיר את הגוף לשליחה, או None אם EMERGENCY_STOP (אין תשובה כלל).
+    """
+    from core.output_gateway import send_outbound, OutboundEnvelope, AudienceClass, OutputChannel
+    result = send_outbound(OutboundEnvelope(
+        channel=OutputChannel.TWILIO_WHATSAPP,
+        recipient=sender,
+        body=body,
+        audience=AudienceClass.CUSTOMER,
+        source_module="app.webhook_whatsapp",
+        source_ref=source_ref,
+        domain=domain,
+        meta={"source_type": "llm_response"},
+    ))
+    if result.status == "EMERGENCY_STOP":
+        return None
+    if result.status == "ESCALATED":
+        return "אני מעביר את זה לבדיקה ידנית, ויחזרו אליך עם תשובה מדויקת."
+    return body
+
+
 def _is_junk_inbound_text(text: str) -> bool:
     stripped = (text or "").strip()
     if not stripped:
@@ -188,6 +213,8 @@ app.register_blueprint(_tma_blueprint)
 # ── N05-B: send_followup.confirmed handler ────────────────────────────────────
 # Sends the approved followup draft to the owner via Telegram for manual
 # forwarding.9 Does NOT send outbound WhatsApp to lead (blocked on Meta, N05-C).
+# C52: owner notification routed through core.output_gateway (TELEGRAM_OWNER is
+# always INTERNAL — no Financial Gate, no behavior change vs. direct bot.send_message).
 
 def _handle_send_followup_confirmed(payload: dict, chat_id: str) -> str:
     draft        = payload.get("draft", "")
@@ -199,7 +226,16 @@ def _handle_send_followup_confirmed(payload: dict, chat_id: str) -> str:
            f"אל: {contact_name}\n\n{draft}")
 
     try:
-        bot.send_message(chat_id, msg)
+        from core.output_gateway import send_outbound, OutboundEnvelope, AudienceClass, OutputChannel
+        send_outbound(OutboundEnvelope(
+            channel=OutputChannel.TELEGRAM_OWNER,
+            recipient=chat_id,
+            body=msg,
+            audience=AudienceClass.INTERNAL,
+            source_module="app.send_followup_confirmed",
+            source_ref=memory_key,
+            domain="followup",
+        ))
     except Exception as e:
         logger.error(f"[Followup] notify owner failed: {e}")
         return f"⚠️ שגיאה בהצגת הטיוטה: {e}"
@@ -1102,18 +1138,23 @@ def webhook_whatsapp():
         from furniture_lead_funnel import handle_furniture_lead_message
         funnel_reply = handle_furniture_lead_message(sender, incoming, domain_from_channel)
         if funnel_reply:
+            gated_reply = _gateway_whatsapp_reply(sender, funnel_reply, domain_from_channel, msg_sid or sender)
             resp = MessagingResponse()
-            resp.message(funnel_reply)
+            if gated_reply is not None:
+                resp.message(gated_reply)
             return Response(str(resp), mimetype="application/xml")
     except Exception as e:
         logger.warning("[FurnitureFunnel] fallback to agent: %s", e)
 
-    resp = MessagingResponse()
-    resp.message(run_agent(
+    agent_reply = run_agent(
         incoming, sender,
         channel             = "whatsapp",
         domain_from_channel = domain_from_channel,
-    ))
+    )
+    gated_reply = _gateway_whatsapp_reply(sender, agent_reply, domain_from_channel, msg_sid or sender)
+    resp = MessagingResponse()
+    if gated_reply is not None:
+        resp.message(gated_reply)
     return Response(str(resp), mimetype="application/xml")
 
 

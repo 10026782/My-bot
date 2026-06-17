@@ -106,15 +106,13 @@ def _job_payment_reminders():
             return
 
         from payment_reminder import run_payment_scan
-        import telebot
         token   = os.environ.get("TELEGRAM_TOKEN", "")
         chat_id = os.environ.get("DIGEST_CHAT_ID", "")
         if not token or not chat_id:
             logger.warning("[PaymentReminder] TELEGRAM_TOKEN / DIGEST_CHAT_ID חסרים")
             return
 
-        bot    = telebot.TeleBot(token)
-        result = run_payment_scan(bot=bot, chat_id=chat_id)
+        result = run_payment_scan(chat_id=chat_id)
 
         if result.has_alerts:
             logger.info(

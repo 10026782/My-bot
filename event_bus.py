@@ -1,6 +1,10 @@
 # event_bus.py
 # מנתב אירועים מרכזי — Event Bus + Pending Actions Store
 # כל פעולה שדורשת אישור עוברת דרך כאן לפני ביצוע
+#
+# C52: handlers הרשומים ל-"{action}.confirmed" (למשל send_followup.confirmed
+# ב-app.py) ששולחים ללקוח חייבים לעבור core.output_gateway.send_outbound() —
+# לא לקרוא ל-Send Adapter ישירות. event_bus עצמו לא שולח דבר — הוא רק מנתב.
 
 import uuid
 import logging

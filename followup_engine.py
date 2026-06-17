@@ -150,6 +150,28 @@ def build_followup_draft(candidate: FollowupCandidate) -> str:
     return template.format(name=candidate.contact_name or "לקוח")
 
 
+# ── C52: Gateway send (currently unwired — approval flow stays manual) ──
+#
+# הערה: run_followup_scan() עדיין שולח רק approval request ל-owner (התנהגות
+# קיימת, לא שונתה). _send_whatsapp() כאן מוכן לחיווט עתידי של שליחה אוטומטית
+# אחרי אישור owner, דרך core.output_gateway (ולא ישירות ל-adapter).
+
+def _send_whatsapp(candidate: FollowupCandidate, draft: str) -> bool:
+    from core.output_gateway import send_outbound, OutboundEnvelope, AudienceClass, OutputChannel
+    envelope = OutboundEnvelope(
+        channel=OutputChannel.TWILIO_WHATSAPP,
+        recipient=candidate.contact_channel,
+        body=draft,
+        audience=AudienceClass.CUSTOMER,
+        source_module="followup_engine",
+        source_ref=candidate.memory_key,
+        domain=candidate.domain,
+        draft=False,
+    )
+    result = send_outbound(envelope)
+    return result.status in ("APPROVED", "ESCALATED")  # ESCALATED = fallback נשלח, ליד חי
+
+
 # ── 4. Approval ───────────────────────────────────
 
 def request_followup_approval(candidate: FollowupCandidate, owner_chat_id: str) -> tuple[str, str]:
