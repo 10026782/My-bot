@@ -41,6 +41,7 @@ class Tables:
     CONTACTS        = "אנשי קשר (Contacts)"
     DEALS           = "עסקאות (Deals)"
     LEADS           = "Leads"
+    VENTURES        = "Ventures"           # Strategic Layer — הזדמנויות לפני שהן עסקאות
     # משימות
     DEADLINES       = "משימות ודד ליינים"
     TASKS           = "משימות (Tasks)"
@@ -200,6 +201,50 @@ class DealFields:
     CONTACT         = "מקושר לאנשי קשר"
     DEADLINE        = "תאריך סגירה"
     NOTES           = "Notes"
+
+
+class VentureFields:
+    """Ventures — Strategic Layer. הזדמנות לפני שהיא עסקה (pre-lead/pre-deal evaluation)."""
+    NAME                  = "Venture Name"
+    STAGE                 = "Stage"
+    DOMAIN                = "Domain"
+    CONVICTION            = "Conviction"
+    ESTIMATED_POTENTIAL   = "Estimated Potential (NIS)"
+    TARGET_DECISION_DATE  = "Target Decision Date"
+    DECISION_LOG          = "Decision Log"
+    NEXT_ACTION           = "Next Action"
+    NOTES                 = "Notes"
+    LINKED_CONTACTS       = "Linked Contacts"
+    INTERACTION_LOG       = "Interaction Log"
+    BUSINESS_MEMORY       = "Business Memory"
+    OWNER                 = "Owner"
+    CONVERTED_TO_DEAL     = "Converted To Deal"
+    CREATED_AT            = "Created At"
+
+
+class VentureStage:
+    RESEARCH          = "Research"
+    SUPPLIER_SOURCE   = "Supplier/Source Contact"
+    DUE_DILIGENCE     = "Due Diligence"
+    LEGAL_TAX_REVIEW  = "Legal/Tax Review"
+    SMOKE_TEST        = "Smoke Test"
+    GO                = "GO"
+    NO_GO             = "NO-GO"
+    CONVERTED         = "Converted"
+
+
+class VentureDomain:
+    REAL_ESTATE  = "Real Estate"
+    IMPORT       = "Import"
+    SAAS         = "SaaS"
+    RECRUITMENT  = "Recruitment"
+    GENERAL      = "General"
+
+
+class VentureConviction:
+    LOW    = "Low"
+    MEDIUM = "Medium"
+    HIGH   = "High"
 
 
 class TaskFields:

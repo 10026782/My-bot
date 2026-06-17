@@ -141,7 +141,7 @@ status='hot' מת (לא נכתב לעולם בקוד) לפילטר `Score>=50` �
 `LeadFields.TIER` לא קיים בסכמת הפרודקשן (ראה Known Issues).
 **קבצים:** daily_digest.py בלבד.
 
-### N06 — Ventures Screen (TMA)
+### N06 — Ventures Screen (TMA) ✅ מיושם
 **תלוי ב:** N05 (Daily Digest שדרוג).
 **מה:** מסך TMA חדש — 🔭 Ventures. חילוץ Strategic Pipeline מ-OCC + 
 חיבור לטבלת Ventures הקיימת ב-Airtable.
@@ -200,6 +200,18 @@ Research → Supplier/Source → Due Diligence → Smoke Test → GO/NO-GO → [
 
 **כלל ברזל לפי ROADMAP #6:** N06 = קובץ אחד ראשי (Ventures.tsx) + 
 endpoints ב-tma_api.py + שורה ב-airtable_schema.py. לא יותר.
+
+**הערות מימוש (סטייה מהתכנון המקורי, מתועדת):**
+- `Ventures.tsx` נוצר ב-`tma-frontend/src/components/` ולא ב-`src/screens/` —
+  בקונבנציה הקיימת ברפו אין תיקיית `screens/` כלל; כל מסכי ה-TMA חיים שטוח
+  ב-`components/`. נשמרה הקונבנציה הקיימת על פני הנתיב התיאורטי במסמך.
+- כתיבות (POST/PATCH) הן ישירות ל-Owner בלבד, ללא Approval Gate — כמו
+  Assets (`update_asset`), לא כמו ה-flow המתואר ב"מה לא לגעת בו". הוחלט
+  כי Venture הוא כלי אסטרטגי owner-only (זהה ל-OCC) ולא דורש תור אישורים,
+  ולכן `_TMA_WRITE_ALLOWED_TABLES` לא עודכן (לא בשימוש ע"י venture writes).
+- `strategic_pipeline` ב-OCC שונה משלוש-דליים (`new_opportunities`/
+  `in_evaluation`/`pending_decision`) לפורמט `{stage_counts, total, active}` —
+  count-by-stage אמיתי לפי 8 השלבים בטבלת Ventures, כפי שהמסמך דרש.
 
 ### F05a — Meta WhatsApp Phase 1 (Inbound, ללא תעבורת פרודקשן)
 **מה:** `/webhooks/meta/whatsapp` (GET verify + POST inbound) — נתיב נפרד מ-Twilio.

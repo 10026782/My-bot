@@ -1,4 +1,4 @@
-import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse } from "./types";
+import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse } from "./types";
 
 const BASE = (import.meta.env.VITE_API_URL as string) ?? "";
 const DEV_ID = (import.meta.env.VITE_DEV_TELEGRAM_ID as string) ?? "";
@@ -275,4 +275,61 @@ export async function createLeadTask(
   });
   if (!r.ok) await throwApiError(r, `Task creation failed (${r.status})`);
   return r.json() as Promise<{ id: string }>;
+}
+
+export async function fetchVentures(stage?: string): Promise<VenturesResponse> {
+  const params = stage ? `?stage=${encodeURIComponent(stage)}` : "";
+  const r = await fetch(`${BASE}/api/ventures${params}`, { headers: authHeaders() });
+  if (!r.ok) await throwApiError(r, `API ${r.status}`);
+  return r.json() as Promise<VenturesResponse>;
+}
+
+export async function fetchVenture(ventureId: string): Promise<Venture> {
+  const r = await fetch(`${BASE}/api/ventures/${encodeURIComponent(ventureId)}`, { headers: authHeaders() });
+  if (!r.ok) await throwApiError(r, `API ${r.status}`);
+  return r.json() as Promise<Venture>;
+}
+
+export async function createVenture(
+  fields: Partial<{
+    name: string;
+    stage: string;
+    domain: string;
+    conviction: string;
+    estimated_potential: number;
+    target_decision_date: string;
+    decision_log: string;
+    next_action: string;
+    notes: string;
+  }>,
+): Promise<Venture> {
+  const r = await fetch(`${BASE}/api/ventures`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(fields),
+  });
+  if (!r.ok) await throwApiError(r, `Venture creation failed (${r.status})`);
+  return r.json() as Promise<Venture>;
+}
+
+export async function updateVenture(
+  ventureId: string,
+  fields: Partial<{
+    name: string;
+    stage: string;
+    domain: string;
+    conviction: string;
+    estimated_potential: number;
+    target_decision_date: string;
+    decision_log: string;
+    next_action: string;
+    notes: string;
+  }>,
+): Promise<void> {
+  const r = await fetch(`${BASE}/api/ventures/${encodeURIComponent(ventureId)}`, {
+    method: "PATCH",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(fields),
+  });
+  if (!r.ok) await throwApiError(r, `Venture update failed (${r.status})`);
 }

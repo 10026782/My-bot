@@ -255,12 +255,44 @@ export interface OwnerControlCenter {
     lead_tier: { value: string; label: string }[];
   };
   strategic_pipeline?: {
-    new_opportunities: number;
-    in_evaluation: number;
-    pending_decision: number;
+    stage_counts: Record<string, number>;
+    total: number;
+    active: number;
   };
   blockers: string[];
   next_actions: string[];
   warnings: string[];
+}
+
+export type VentureStage =
+  | "Research"
+  | "Supplier/Source Contact"
+  | "Due Diligence"
+  | "Legal/Tax Review"
+  | "Smoke Test"
+  | "GO"
+  | "NO-GO"
+  | "Converted";
+
+export interface Venture {
+  id: string;
+  name: string;
+  stage: string;
+  domain: string;
+  conviction: string;
+  estimated_potential: number;
+  target_decision_date: string;
+  decision_log: string;
+  next_action: string;
+  notes: string;
+  linked_contacts: string[];
+  owner: string[];
+  converted_to_deal: string[];
+  created_at: string;
+}
+
+export interface VenturesResponse {
+  count: number;
+  ventures: Venture[];
 }
 
