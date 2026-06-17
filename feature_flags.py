@@ -42,6 +42,11 @@ INTEGRATIONS:
 APPROVAL POLICY:
   EMERGENCY_WINDOW             - מאפשר הפעלת חריג זמני ל-High מהטלפון (core/emergency_window.py, כבוי כברירת מחדל)
 
+OUTPUT GATEWAY (C52):
+  FINANCIAL_COMMITMENT_GATE   - core/financial_gate.py escalation על הודעות עם התחייבות פיננסית
+                                 false (default) → shadow mode (log בלי לעצור)
+                                 true            → production escalation (ESCALATE, לא BLOCK)
+
 GAME / SCHEDULER:
   GAME_SCHEDULER              - scheduler jobs של מערכת הגיימיפיקציה
   PAYMENT_REMINDERS           - תזכורות תשלום אוטומטיות
