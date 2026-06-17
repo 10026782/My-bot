@@ -34,6 +34,7 @@
 | N04 Followup | PARTIAL | `FOLLOWUP_AUTOMATION=off` | תלוי ב-N03 |
 | F05a Meta WhatsApp | CODE DONE | — | ממתין ל-Render deploy + verify |
 | N06 Ventures Screen (TMA) | CODE DONE, מאוחד ל-main | — | PR #67 ממוזג ל-main (`7313b2e3`); ✅ verified בפרודקשן — לא ידוע, דרוש בדיקה ידנית ב-TMA החי |
+| Approval Policy — Emergency Window + OTP + Policy Gate | CODE COMPLETE, flag off | `EMERGENCY_WINDOW=off` | 3 פאזות (`core/emergency_window.py`, `core/otp.py`, gate ב-`_queue_tma_write_approval`) + טבלת `Emergency_Window` ב-Airtable. דגל כבוי = התנהגות זהה 100% להיום (202 קשיח). ממתין לאימות פרודקשן לפני הדלקת הדגל. ראו `Approval_Policy_Spec.md` |
 | LEAD_QUALIFIER | לא פעיל (F09) | `LEAD_QUALIFIER=off` | פיצ'ר לא הופעל מעולם |
 | MULTITENANT | כבוי (F08) | `MULTITENANT=off` | לא בשימוש |
 | VOICE_IVR | לא פעיל (F07) | `VOICE_IVR=off` | קו Twilio IVR לא מומש/לא מופעל |
@@ -75,6 +76,7 @@
 - 🔲 N04 Followup Activation — הבא בתור (תלוי ב-`FOLLOWUP_AUTOMATION` flag כבוי כיום)
 - 🔲 N05 Daily Digest שדרוג — קוד קיים (commit `5490943`, "wire real Score + computed tier into daily digest"), verify בפרודקשן לא ידוע
 - 🔲 F05a Meta WhatsApp — code done, לא verified
+- 🟡 Approval Policy (Emergency Window + OTP + Policy Gate) — code-complete בכל 3 הפאזות, `EMERGENCY_WINDOW` flag כבוי, ממתין לאימות פרודקשן לפני הדלקה
 
 ## 8. OPEN RISKS
 | סיכון | חומרה | מה נדרש |

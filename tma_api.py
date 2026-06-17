@@ -320,9 +320,11 @@ ACTION_RISK = {
 }
 _DEFAULT_RISK = "High"
 
-# Telegram.WebApp.platform values treated as desktop. Anything else
-# (including a missing/unknown header) is treated as mobile — fail-closed.
-_DESKTOP_PLATFORMS = {"tdesktop", "macos", "web"}
+# Telegram.WebApp.platform values treated as desktop. Only native desktop
+# clients qualify — "web" is excluded because Telegram Web can run inside a
+# phone browser, which would hand a mobile user desktop-level permissions.
+# Anything else (web / missing / unknown) is treated as mobile — fail-closed.
+_DESKTOP_PLATFORMS = {"tdesktop", "macos"}
 
 
 def _is_mobile_request() -> bool:
