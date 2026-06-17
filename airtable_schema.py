@@ -282,10 +282,11 @@ class WorldsFields:
     BOSS               = "Boss"
     PRIZE              = "Prize"
     TOTAL_COINS_TARGET = "Total_Coins_Target"
-    COINS_EARNED       = "Coins_Earned"
+    COINS_EARNED       = "Coins_Earned"      # legacy static field — no longer the source of truth, see tma_api._get_active_world_dict
     START_DATE         = "Start_Date"
     END_DATE           = "End_Date"
     NOTES              = "Notes"
+    QUESTS             = "Quests"          # linked records → Quests
 
 
 class QuestsFields:

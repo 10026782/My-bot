@@ -2141,6 +2141,11 @@ def _get_active_world_dict() -> dict | None:
     than one Active World is found, it's logged loudly and the lowest
     Number is used deterministically rather than whichever Airtable
     happens to return first (Stage 0 #3).
+
+    coins_earned is computed live from Coins_Log (sum of entries whose
+    Quest belongs to this World's Quests), never read from the static
+    Worlds.Coins_Earned field — Coins_Log is the single source of truth,
+    so there's no write-through counter that can drift out of sync.
     """
     worlds = _at_list(Tables.WORLDS, f"{{{WorldsFields.STATUS}}}='{WorldStatus.ACTIVE}'", max_records=5)
     if not worlds:
@@ -2153,7 +2158,16 @@ def _get_active_world_dict() -> dict | None:
     w  = worlds[0]
     wf = w.get("fields", {})
     coins_target = int(wf.get(WorldsFields.TOTAL_COINS_TARGET, 0) or 0)
-    coins_earned = int(wf.get(WorldsFields.COINS_EARNED, 0) or 0)
+
+    quest_ids = set(_linked_record_ids(wf.get(WorldsFields.QUESTS, []) or []))
+    coins_earned = 0
+    if quest_ids:
+        log_recs = _at_list(Tables.COINS_LOG, "", max_records=500)
+        for log in log_recs:
+            log_quest_ids = _linked_record_ids(log.get("fields", {}).get(CoinsLogFields.QUEST, []) or [])
+            if quest_ids.intersection(log_quest_ids):
+                coins_earned += int(log.get("fields", {}).get(CoinsLogFields.COINS, 0) or 0)
+
     pct = round(100 * coins_earned / coins_target, 1) if coins_target > 0 else 0.0
     return {
         "id":           w["id"],
