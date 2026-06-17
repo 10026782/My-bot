@@ -87,7 +87,7 @@ def _cors(response):
     if allow:
         response.headers["Access-Control-Allow-Origin"]  = origin
         response.headers["Access-Control-Allow-Headers"] = (
-            "Content-Type, X-Telegram-Init-Data, Authorization"
+            "Content-Type, X-Telegram-Init-Data, Authorization, X-TMA-Platform"
         )
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, PUT, OPTIONS"
     return response
@@ -320,6 +320,11 @@ ACTION_RISK = {
 }
 _DEFAULT_RISK = "High"
 
+# Approvals."רמת סיכון" (fldHzJehlQ6EDctKn) live choices are lowercase
+# English (high/medium/low) — no dedicated "Critical" choice exists, so it
+# is recorded as the highest existing tier.
+_RISK_LEVEL_AIRTABLE = {"Low": "low", "Medium": "medium", "High": "high", "Critical": "high"}
+
 # Telegram.WebApp.platform values treated as desktop. Only native desktop
 # clients qualify — "web" is excluded because Telegram Web can run inside a
 # phone browser, which would hand a mobile user desktop-level permissions.
@@ -360,10 +365,11 @@ def _confirmation_required_response() -> tuple[str, dict, int]:
 def _queue_tma_write_approval(action: str, payload: dict, identity, label: str) -> tuple[str, dict, int]:
     import feature_flags  # noqa: PLC0415
 
+    risk = ACTION_RISK.get(action, _DEFAULT_RISK)
+
     if feature_flags.is_enabled("EMERGENCY_WINDOW"):
         from core import emergency_window, otp  # noqa: PLC0415
 
-        risk = ACTION_RISK.get(action, _DEFAULT_RISK)
         mobile = _is_mobile_request()
         body = request.get_json(silent=True) or {}
 
@@ -409,7 +415,7 @@ def _queue_tma_write_approval(action: str, payload: dict, identity, label: str) 
         ApprovalsFields.ACTION: label,
         ApprovalsFields.REQUESTED_BY: _identity_ref(identity),
         ApprovalsFields.REQUESTED_AT: datetime.now(timezone.utc).isoformat(),
-        ApprovalsFields.RISK_LEVEL: "high",
+        ApprovalsFields.RISK_LEVEL: _RISK_LEVEL_AIRTABLE.get(risk, "high"),
         ApprovalsFields.CONTEXT_TYPE: "tma_write",
         ApprovalsFields.CONTEXT_ID: action,
         ApprovalsFields.CONTEXT_DATA: json.dumps(approval_payload, ensure_ascii=False),
