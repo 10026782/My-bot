@@ -161,6 +161,17 @@
       "Total_XP",
       "Updated_At",
       "Updated_By"
+    ],
+    "Emergency_Window": [
+      "Actions Approved",
+      "Activated At",
+      "Activated By",
+      "Expires At",
+      "Max Risk Allowed",
+      "Reason",
+      "Revoked At",
+      "Status",
+      "Window ID"
     ]
   },
   "fetched_at": "seed-from-schema-py",

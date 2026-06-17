@@ -35,6 +35,13 @@ logger = logging.getLogger(__name__)
 
 tma_api = Blueprint("tma_api", __name__)
 
+
+@tma_api.errorhandler(RuntimeError)
+def _handle_runtime_error(e):
+    logger.error(f"[tma_api] unhandled RuntimeError: {e}")
+    return jsonify({"error": "internal_error", "detail": str(e)}), 500
+
+
 # ── env ────────────────────────────────────────────────────────────
 _BOT_TOKEN  = os.environ.get("TELEGRAM_TOKEN", "")
 _AT_KEY     = os.environ.get("AIRTABLE_API_KEY", "")
@@ -80,7 +87,7 @@ def _cors(response):
     if allow:
         response.headers["Access-Control-Allow-Origin"]  = origin
         response.headers["Access-Control-Allow-Headers"] = (
-            "Content-Type, X-Telegram-Init-Data, Authorization"
+            "Content-Type, X-Telegram-Init-Data, Authorization, X-TMA-Platform"
         )
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, PUT, OPTIONS"
     return response
@@ -292,7 +299,112 @@ def _identity_ref(identity) -> str:
     return str(getattr(identity, "user_id", "") or getattr(identity, "display_name", "") or "unknown")
 
 
-def _queue_tma_write_approval(action: str, payload: dict, identity, label: str) -> tuple[str, dict]:
+# ══════════════════════════════════════════════════════════════════
+# Approval Policy gate — risk-tiered mobile/desktop enforcement
+# See Approval_Policy_Spec.md. Gated behind EMERGENCY_WINDOW flag —
+# flag off ⇒ this block is fully skipped, behavior identical to before.
+# Emergency WINDOW (controlled High-risk exception) ≠ Emergency STOP
+# (C33, freezes everything) — do not confuse the two.
+# ══════════════════════════════════════════════════════════════════
+
+# Risk tier per action — keyed off the existing `action` identifier already
+# passed by every call site. Unmapped/future actions default to "High"
+# (fail-closed) rather than "Low".
+ACTION_RISK = {
+    "tma_create_project":     "Medium",
+    "tma_update_lead_status": "Low",
+    "tma_patch_lead":         "Low",
+    "tma_set_lead_outcome":   "Medium",
+    "tma_create_lead_task":   "Low",
+    "tma_create_followup":    "Low",
+}
+_DEFAULT_RISK = "High"
+
+# Approvals."רמת סיכון" (fldHzJehlQ6EDctKn) live choices are lowercase
+# English (high/medium/low) — no dedicated "Critical" choice exists, so it
+# is recorded as the highest existing tier.
+_RISK_LEVEL_AIRTABLE = {"Low": "low", "Medium": "medium", "High": "high", "Critical": "high"}
+
+# Telegram.WebApp.platform values treated as desktop. Only native desktop
+# clients qualify — "web" is excluded because Telegram Web can run inside a
+# phone browser, which would hand a mobile user desktop-level permissions.
+# Anything else (web / missing / unknown) is treated as mobile — fail-closed.
+_DESKTOP_PLATFORMS = {"tdesktop", "macos"}
+
+
+def _is_mobile_request() -> bool:
+    platform = (request.headers.get("X-TMA-Platform") or "").strip().lower()
+    if not platform:
+        return True
+    return platform not in _DESKTOP_PLATFORMS
+
+
+def _reject(message: str, code: int = 403) -> tuple[str, dict, int]:
+    return "", {"status": "rejected", "error": message}, code
+
+
+def _otp_required_response(action: str, identity) -> tuple[str, dict, int]:
+    from core import otp as _otp  # noqa: PLC0415
+    request_id = _otp.request_otp(action, _identity_ref(identity))
+    if not request_id:
+        return _reject("failed to send OTP — contact owner", code=500)
+    return "", {
+        "status": "otp_required",
+        "otp_request_id": request_id,
+        "message": "OTP sent to owner — resend with otp_request_id + otp_code",
+    }, 401
+
+
+def _confirmation_required_response() -> tuple[str, dict, int]:
+    return "", {
+        "status": "confirmation_required",
+        "message": "Action requires confirmation — resend with confirmed=true",
+    }, 409
+
+
+def _queue_tma_write_approval(action: str, payload: dict, identity, label: str) -> tuple[str, dict, int]:
+    import feature_flags  # noqa: PLC0415
+
+    risk = ACTION_RISK.get(action, _DEFAULT_RISK)
+
+    if feature_flags.is_enabled("EMERGENCY_WINDOW"):
+        from core import emergency_window, otp  # noqa: PLC0415
+
+        mobile = _is_mobile_request()
+        body = request.get_json(silent=True) or {}
+
+        if risk == "Critical":
+            # Critical NEVER allowed from mobile — Emergency Window cannot raise
+            # the ceiling above High. OTP required in every case, even desktop.
+            if mobile:
+                return _reject("critical actions are never allowed from a mobile device")
+            otp_request_id = body.get("otp_request_id")
+            otp_code = body.get("otp_code")
+            if not otp_request_id or not otp_code:
+                return _otp_required_response(action, identity)
+            if not otp.verify_otp(otp_request_id, otp_code):
+                return _reject("invalid or expired OTP", code=401)
+
+        elif risk == "High":
+            if mobile:
+                if not emergency_window.get_active_window():
+                    return _reject(
+                        "High-risk actions from mobile require an active Emergency Window", code=403
+                    )
+                otp_request_id = body.get("otp_request_id")
+                otp_code = body.get("otp_code")
+                if not otp_request_id or not otp_code:
+                    return _otp_required_response(action, identity)
+                if not otp.verify_otp(otp_request_id, otp_code):
+                    return _reject("invalid or expired OTP", code=401)
+                emergency_window.record_action(f"{action} by {_identity_ref(identity)}")
+
+        elif risk == "Medium":
+            if mobile and not body.get("confirmed"):
+                return _confirmation_required_response()
+
+        # Low — no gate.
+
     approval_payload = {
         "type": "tma_write",
         "action": action,
@@ -303,7 +415,7 @@ def _queue_tma_write_approval(action: str, payload: dict, identity, label: str) 
         ApprovalsFields.ACTION: label,
         ApprovalsFields.REQUESTED_BY: _identity_ref(identity),
         ApprovalsFields.REQUESTED_AT: datetime.now(timezone.utc).isoformat(),
-        ApprovalsFields.RISK_LEVEL: "high",
+        ApprovalsFields.RISK_LEVEL: _RISK_LEVEL_AIRTABLE.get(risk, "high"),
         ApprovalsFields.CONTEXT_TYPE: "tma_write",
         ApprovalsFields.CONTEXT_ID: action,
         ApprovalsFields.CONTEXT_DATA: json.dumps(approval_payload, ensure_ascii=False),
@@ -317,7 +429,7 @@ def _queue_tma_write_approval(action: str, payload: dict, identity, label: str) 
         "status": "pending_approval",
         "approval_id": approval_id,
         "message": "Approval required",
-    }
+    }, 202
 
 
 def _receipt(action: str, table: str, record_id: str, requested_by: str, approved_by: str) -> dict:
@@ -743,7 +855,7 @@ def create_project(identity):
         "owner_ids":     identity.user_id,
         "tenant_id":     identity.tenant_id,
     }
-    _, response = _queue_tma_write_approval(
+    _, response, status = _queue_tma_write_approval(
         "tma_create_project",
         {
             "op": "post",
@@ -755,7 +867,7 @@ def create_project(identity):
         identity,
         f"Create project: {data['name']}",
     )
-    return jsonify(response), 202
+    return jsonify(response), status
 
 
 @tma_api.route("/api/projects/<project_slug>/dashboard", methods=["GET"])
@@ -992,7 +1104,7 @@ def update_lead_status(lead_id, identity):
     if new_status not in LeadStatus.ALL:
         return jsonify({"error": "invalid status", "valid": sorted(LeadStatus.ALL)}), 400
 
-    _, response = _queue_tma_write_approval(
+    _, response, status = _queue_tma_write_approval(
         "tma_update_lead_status",
         {
             "op": "patch",
@@ -1005,7 +1117,7 @@ def update_lead_status(lead_id, identity):
         identity,
         f"Update lead status: {lead_id} -> {new_status}",
     )
-    return jsonify(response), 202
+    return jsonify(response), status
 
 
 # שדות עריכה מורשים ב-PATCH /api/leads/<id>
@@ -1101,7 +1213,7 @@ def patch_lead(lead_id, identity):
         _audit("lead_patch", identity, details=f"{lead_id}: {list(fields.keys())}")
         return jsonify({"ok": True, "lead_id": lead_id, "updated": list(fields.keys())})
 
-    _, response = _queue_tma_write_approval(
+    _, response, status = _queue_tma_write_approval(
         "tma_patch_lead",
         {
             "op": "patch",
@@ -1114,7 +1226,7 @@ def patch_lead(lead_id, identity):
         identity,
         f"Update lead fields: {list(fields.keys())}",
     )
-    return jsonify(response), 202
+    return jsonify(response), status
 
 
 @tma_api.route("/api/leads/<lead_id>/outcome", methods=["POST"])
@@ -1147,7 +1259,7 @@ def set_lead_outcome(lead_id, identity):
         _audit("lead_outcome", identity, details=f"{lead_id}: {outcome_key}")
         return jsonify({"ok": True, "lead_id": lead_id, "outcome": outcome_key})
 
-    _, response = _queue_tma_write_approval(
+    _, response, status = _queue_tma_write_approval(
         "tma_set_lead_outcome",
         {
             "op": "patch",
@@ -1160,7 +1272,7 @@ def set_lead_outcome(lead_id, identity):
         identity,
         f"Set lead outcome: {outcome_key}",
     )
-    return jsonify(response), 202
+    return jsonify(response), status
 
 
 @tma_api.route("/api/leads/<lead_id>/task", methods=["POST"])
@@ -1209,7 +1321,7 @@ def create_lead_task(lead_id, identity):
         return jsonify({"ok": True, "id": rec.get("id", ""), "lead_id": lead_id}), 201
 
     # Manager: queue for owner approval (consistent with patch_lead / set_lead_outcome)
-    _, response = _queue_tma_write_approval(
+    _, response, status = _queue_tma_write_approval(
         "tma_create_lead_task",
         {
             "op":            "post",
@@ -1221,7 +1333,7 @@ def create_lead_task(lead_id, identity):
         identity,
         f"Create task for lead: {lead_name} — {title}",
     )
-    return jsonify(response), 202
+    return jsonify(response), status
 
 
 # WEEK 1 — Follow-Up (O3 Action)
@@ -1253,7 +1365,7 @@ def create_followup(identity):
         "\u05ea\u05d0\u05e8\u05d9\u05da \u05d9\u05e2\u05d3": tomorrow,
         "\u05e1\u05d8\u05d8\u05d5\u05e1": "\u05de\u05de\u05ea\u05d9\u05df",
     }
-    _, response = _queue_tma_write_approval(
+    _, response, status = _queue_tma_write_approval(
         "tma_create_followup",
         {
             "op": "post",
@@ -1265,7 +1377,7 @@ def create_followup(identity):
         identity,
         f"Create follow-up: {lead_name}",
     )
-    return jsonify(response), 202
+    return jsonify(response), status
 
 # WEEK 1 — Ask AI (routes through existing BOSS context layer)
 # ══════════════════════════════════════════════════════════════════

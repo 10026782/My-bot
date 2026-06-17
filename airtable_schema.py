@@ -66,6 +66,7 @@ class Tables:
     BOSS_BATTLES    = "Boss_Battles"
     # System / Monitoring
     AI_USAGE_DAILY  = "AI_Usage_Daily"   # שורה יומית לכל source_type — 1 רשומה/יום
+    EMERGENCY_WINDOW = "Emergency_Window"  # חריג מבוקר ל-High מהטלפון — ראה Approval_Policy_Spec.md
 
 
 # ══════════════════════════════════════════════════
@@ -557,6 +558,35 @@ class ApprovalStatus:
     APPROVED   = "אושר"
     REJECTED   = "נדחה"
     FAILED     = "נכשל"   # execution was attempted but failed
+
+
+class EmergencyWindowFields:
+    """
+    Controlled exception mechanism — Owner-only. Allows High-risk actions from
+    mobile for a bounded period (24/48/72h) with per-action OTP. Never raises
+    the ceiling to Critical. Table name: Tables.EMERGENCY_WINDOW.
+    See Approval_Policy_Spec.md.
+    """
+    WINDOW_ID         = "Window ID"
+    ACTIVATED_BY      = "Activated By"
+    ACTIVATED_AT      = "Activated At"
+    EXPIRES_AT        = "Expires At"
+    REASON            = "Reason"
+    STATUS            = "Status"
+    MAX_RISK_ALLOWED  = "Max Risk Allowed"
+    ACTIONS_APPROVED  = "Actions Approved"
+    REVOKED_AT        = "Revoked At"
+
+
+class EmergencyWindowStatus:
+    ACTIVE   = "Active"
+    EXPIRED  = "Expired"
+    REVOKED  = "Revoked"
+
+
+class EmergencyWindowMaxRisk:
+    # קבוע — לעולם לא Critical, גם לא ב-Emergency Window.
+    HIGH = "High"
 
 class UnitStatus:
     AVAILABLE       = "Available"

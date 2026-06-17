@@ -39,6 +39,9 @@ INTEGRATIONS:
   CONTACT_RESOLVER            - פתרון אנשי קשר אוטומטי
   LLM_FALLBACK                - fallback ל-OpenAI כש-Anthropic מחזיר שגיאה/timeout (ברירת מחדל: כבוי)
 
+APPROVAL POLICY:
+  EMERGENCY_WINDOW             - מאפשר הפעלת חריג זמני ל-High מהטלפון (core/emergency_window.py, כבוי כברירת מחדל)
+
 GAME / SCHEDULER:
   GAME_SCHEDULER              - scheduler jobs של מערכת הגיימיפיקציה
   PAYMENT_REMINDERS           - תזכורות תשלום אוטומטיות
