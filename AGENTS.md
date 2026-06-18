@@ -16,6 +16,29 @@ bash pre_session_gate.sh "<תיאור המשימה>"
 ברירת מחדל: פתח PR לפני סיום. אין צורך באישור.
 חריג יחיד: המשתמש אמר במפורש "אל תפתח PR" באותו סשן.
 
+## POST-MERGE VERIFICATION (חובה)
+
+לאחר כל merge ל-main — לפני כל דיווח "done" או "deployed":
+
+**שלב 1 — sync:**
+```bash
+git checkout main && git pull origin main
+```
+
+**שלב 2 — grep לכל שינוי מהותי בסשן:**
+לכל פונקציה / קלאס / קבוע שנוסף או שונה — בדוק שהוא קיים פיזית:
+```bash
+grep -n "FUNCTION_NAME\|CLASS_NAME\|CONSTANT_NAME" path/to/file.py
+```
+
+**שלב 3 — כלל עצירה:**
+אם grep מחזיר 0 תוצאות על שינוי שאמור להיות ב-main → **STOP**.
+דווח: "⚠️ merge conflict silent failure — [שם השינוי] לא קיים ב-main".
+אל תדווח "done". אל תפתח PR נוסף לפני דיווח.
+
+**כלל הזהב:**
+> "Merged" מוכח ב-grep על main, לא ב-git log ולא ב-PR status.
+
 ## Cursor Cloud specific instructions
 
 ### Definition of Done — ROADMAP.md
