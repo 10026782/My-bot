@@ -3,10 +3,29 @@ import os
 import urllib.parse
 import httpx
 import logging
+from typing import Any
 from airtable_schema import Tables
 from guards.circuit_breaker import with_airtable_breaker
 
 logger = logging.getLogger(__name__)
+
+
+def _tool_result(
+    *,
+    ok: bool,
+    tool: str,
+    external_id: str = "",
+    evidence: dict[str, Any] | None = None,
+    user_message: str = "",
+) -> dict:
+    """Structured C53-A result contract for Airtable write tools."""
+    return {
+        "ok": ok,
+        "tool": tool,
+        "external_id": external_id or "",
+        "evidence": evidence or {},
+        "user_message": user_message,
+    }
 
 
 def _audit(tool_name: str, table: str, record_id: str = "", result: str = "") -> None:
@@ -255,16 +274,27 @@ def airtable_get(table: str, filter_formula: str = "") -> str:
         return result
 
 
-def airtable_add(table: str, fields: dict) -> str:
+def airtable_add(table: str, fields: dict) -> dict:
     fields = _resolve_linked_fields(_resolve_table(table), fields)
     from tools.airtable_gateway import airtable_create
     rec = airtable_create(_resolve_table(table), fields, source="agent")
     if rec:
         rec_id = rec.get("id", "?")
         _audit("airtable_add", table, record_id=rec_id, result="created")
-        return f"✅ רשומה נוספה | ID: {rec_id}"
+        return _tool_result(
+            ok=bool(rec_id and rec_id != "?"),
+            tool="airtable_add",
+            external_id=rec_id if rec_id != "?" else "",
+            evidence={"record_id": rec_id, "table": table, "fields": rec.get("fields", {})},
+            user_message=f"✅ רשומה נוספה | ID: {rec_id}" if rec_id != "?" else "❌ Airtable לא החזיר record_id.",
+        )
     _audit("airtable_add", table, result="error")
-    return "❌ לא נשארו שדות תקינים לשמירה — בדוק שמות השדות."
+    return _tool_result(
+        ok=False,
+        tool="airtable_add",
+        evidence={"table": table},
+        user_message="❌ לא נשארו שדות תקינים לשמירה — בדוק שמות השדות.",
+    )
 
 
 def airtable_get_schema() -> str:
@@ -291,15 +321,27 @@ def airtable_get_schema() -> str:
         return result.strip()
 
 
-def airtable_update(table: str, record_id: str, fields: dict) -> str:
+def airtable_update(table: str, record_id: str, fields: dict) -> dict:
     fields = _resolve_linked_fields(_resolve_table(table), fields)
     from tools.airtable_gateway import airtable_patch
     ok = airtable_patch(_resolve_table(table), record_id, fields, source="agent")
     if ok:
         _audit("airtable_update", table, record_id=record_id, result="updated")
-        return f"✅ רשומה {record_id} עודכנה."
+        return _tool_result(
+            ok=bool(record_id),
+            tool="airtable_update",
+            external_id=record_id,
+            evidence={"record_id": record_id, "table": table, "fields": fields},
+            user_message=f"✅ רשומה {record_id} עודכנה.",
+        )
     _audit("airtable_update", table, record_id=record_id, result="error")
-    return "❌ שגיאה בעדכון — בדוק שמות השדות."
+    return _tool_result(
+        ok=False,
+        tool="airtable_update",
+        external_id=record_id,
+        evidence={"record_id": record_id, "table": table},
+        user_message="❌ שגיאה בעדכון — בדוק שמות השדות.",
+    )
 
 
 def search_lead(name: str) -> str:
