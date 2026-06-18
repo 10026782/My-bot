@@ -12,6 +12,10 @@ bash pre_session_gate.sh "<תיאור המשימה>"
 
 כלל: ענף שלא ממוזג = סשן לא הסתיים. לא שותקים — מדווחים.
 
+## סיום סשן
+ברירת מחדל: פתח PR לפני סיום. אין צורך באישור.
+חריג יחיד: המשתמש אמר במפורש "אל תפתח PR" באותו סשן.
+
 ## Cursor Cloud specific instructions
 
 ### Definition of Done — ROADMAP.md
