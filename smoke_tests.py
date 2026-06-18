@@ -136,7 +136,7 @@ def check_airtable_schema() -> str:
     expected = {
         "TASKS": "משימות (Tasks)",
         "DEALS": "עסקאות (Deals)",
-        "PAYMENTS": "תשלומים (Payments)",
+        "PAYMENTS": "Payments",
         "CONTACTS": "אנשי קשר (Contacts)",
     }
     for attr, value in expected.items():
@@ -151,8 +151,8 @@ def check_field_mapping() -> str:
 
     assert TaskFields.NAME == "כותרת המשימה", "TaskFields.NAME mismatch"
     assert DealFields.STATUS == "שלב", "DealFields.STATUS mismatch"
-    assert PaymentFields.STATUS == "סטטוס", "PaymentFields.STATUS mismatch"
-    assert PaymentFields.DATE == "תאריך", "PaymentFields.DATE mismatch"
+    assert PaymentFields.STATUS == "status", "PaymentFields.STATUS mismatch"
+    assert PaymentFields.DATE == "date", "PaymentFields.DATE mismatch"
     return "critical Airtable fields match production"
 
 

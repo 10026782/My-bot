@@ -20,7 +20,8 @@ from pathlib import Path
 from flask import Blueprint, jsonify, request
 from identity import resolve_identity, Role
 from airtable_schema import (
-    LeadFields, TaskFields, PaymentStatus, BusinessMemoryFields, InteractionLogFields, Tables,
+    LeadFields, TaskFields, PaymentStatus, PaymentFields, ExpenseFields,
+    BusinessMemoryFields, InteractionLogFields, Tables,
     DealFields,
     QuestsFields, CoinsLogFields, WorldsFields, QuestStatus, WorldStatus,
     DailyTaskFields, DailyTaskStatus, ApprovalsFields, ApprovalStatus,
@@ -994,25 +995,25 @@ SCREEN_CONFIGS: dict[str, dict] = {
         "default_max_records": 50,
     },
 
-    # O4 Finance Pulse — placeholder, ייבנה שבוע 2
+    # O4 Finance Pulse
     "finance_pulse": {
         "entity": "Payment",
         "default_view": "active",
         "views": {
             "active": {
-                # raw_formula עם תאריך דינמי ייוסף בשבוע 2
-                "exclude_statuses": [],
+                # הצג הכל חוץ מבוטל — חישוב Python מחלק לקטגוריות
+                "exclude_statuses": ["cancelled"],
                 "label": "פעילים",
             },
             "overdue": {
-                "include_statuses": ["overdue", "missed"],
+                "include_statuses": ["overdue"],
                 "label": "באיחור",
             },
             "all": {
                 "label": "הכל",
             },
         },
-        "default_max_records": 100,
+        "default_max_records": 200,
     },
 
     # PN1 Assets Overview — Personal Mode
@@ -1647,13 +1648,36 @@ def finance_pulse(identity):
     if not identity.is_owner:
         return jsonify({"error": "forbidden"}), 403
 
-    today      = date.today()
+    today       = date.today()
     month_start = today.replace(day=1).isoformat()
     today_str   = today.isoformat()
 
-    # ── Payments ──────────────────────────────────────────────────
+    # ── Screen config ──────────────────────────────────────────────
+    screen   = SCREEN_CONFIGS["finance_pulse"]
+    view_q   = request.args.get("view", screen["default_view"])
+    if view_q not in screen["views"]:
+        view_q = screen["default_view"]
+    view_cfg = screen["views"][view_q]
+
+    domain_q = request.args.get("domain", "")
+
+    formula = _build_formula(
+        entity           = "Payment",
+        domain           = domain_q,
+        include_statuses = view_cfg.get("include_statuses"),
+        exclude_statuses = view_cfg.get("exclude_statuses"),
+        raw_formula      = view_cfg.get("raw_formula", ""),
+        status_field     = PaymentFields.STATUS,
+    )
+
+    # ── Payments ───────────────────────────────────────────────────
     try:
-        all_payments = _at_list("תשלומים (Payments)", "", max_records=200, strict=True)
+        all_payments = _at_list(
+            Tables.PAYMENTS,
+            formula,
+            max_records = screen["default_max_records"],
+            strict      = True,
+        )
     except AirtableError as e:
         logger.error(f"[finance_pulse] Airtable error: {e}")
         return jsonify({
@@ -1673,24 +1697,29 @@ def finance_pulse(identity):
 
     for rec in all_payments:
         f      = rec.get("fields", {})
-        amount = float(f.get("סכום", 0) or 0)
-        status = (f.get("סטטוס", "") or "").strip()
-        d_str  = (f.get("תאריך", "") or "")[:10]
+        amount = float(f.get(PaymentFields.AMOUNT, 0) or 0)
+        status = (f.get(PaymentFields.STATUS, "") or "").strip()
+        d_str  = (f.get(PaymentFields.DATE, "") or "")[:10]
 
+        # cancelled כבר סונן ב-formula (view=active) — double-check בטיחות
         if status == PaymentStatus.CANCELLED:
-            continue  # בוטל — לא נספר בשום קטגוריה
+            continue
 
         if status == PaymentStatus.RECEIVED:
             if d_str >= month_start:
                 income_amount += amount
                 income_count  += 1
                 recent.append({
-                    "ref":    f.get("אסמכתא", "—"),
+                    "ref":    f.get(PaymentFields.REF, "—"),
                     "amount": amount,
                     "date":   d_str,
                     "status": status,
                 })
+        elif status == PaymentStatus.OVERDUE:
+            overdue_amount += amount
+            overdue_count  += 1
         else:
+            # pending + כל status אחר שאינו received/cancelled/overdue
             if d_str and d_str < today_str:
                 overdue_amount += amount
                 overdue_count  += 1
@@ -1701,14 +1730,18 @@ def finance_pulse(identity):
     recent.sort(key=lambda x: x["date"], reverse=True)
     recent = recent[:5]
 
-    # ── Expenses ──────────────────────────────────────────────────
+    # ── Expenses ───────────────────────────────────────────────────
     expense_amount = 0
     expense_count  = 0
-    all_expenses   = _at_list("הוצאות (Expenses)", "", max_records=200)
+    exp_formula    = _build_formula(
+        entity = "Expense",
+        domain = domain_q,
+    )
+    all_expenses = _at_list(Tables.EXPENSES, exp_formula, max_records=200)
     for rec in all_expenses:
         f     = rec.get("fields", {})
-        amt   = float(f.get("סכום", 0) or 0)
-        d_str = (f.get("תאריך", "") or "")[:10]
+        amt   = float(f.get(ExpenseFields.AMOUNT, 0) or 0)
+        d_str = (f.get(ExpenseFields.DATE, "") or "")[:10]
         if d_str >= month_start:
             expense_amount += amt
             expense_count  += 1
@@ -1716,6 +1749,11 @@ def finance_pulse(identity):
     net = income_amount - expense_amount
 
     return jsonify({
+        "view":     view_q,
+        "available_views": {
+            k: v.get("label", k)
+            for k, v in screen["views"].items()
+        },
         "period":   f"{today.year}-{today.month:02d}",
         "income":   {"amount": income_amount,  "count": income_count},
         "pending":  {"amount": pending_amount, "count": pending_count},
