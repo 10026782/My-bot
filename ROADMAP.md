@@ -1,6 +1,6 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 16/06/2026
+עודכן: 18/06/2026
 
 ---
 
@@ -101,6 +101,11 @@
 | C50 | F12 Model Provider Adapter | תועד כ-Future item ב-ROADMAP | ROADMAP.md | — |
 | C51 | Approval Concurrency Regression Test | test ל-3-state approval flow: pending→processing→approved/failed + double approve guard | test_approval_concurrency.py | branch furniture-funnel-clean |
 | C52 | Customer Output Gateway (COG) | נקודת כניסה יחידה לכל שליחה ללקוח — Financial Gate (shadow mode), ESCALATE לא BLOCK, Secondary Guard ב-Send Adapters | core/output_gateway.py, core/financial_gate.py, tools/whatsapp_adapter.py | PR #70 |
+
+### Sprint 18/06/2026
+| ID | שם | מה נעשה | קבצים | PR |
+|----|----|---------|--------|-----|
+| C53 | Screen Filter Gateway | `SCREEN_CONFIGS` + `_build_formula()` — Gateway מבצע, Screen מחליט. `get_leads()` (`GET /api/leads`) תומך ב-`?view=active\|monitoring\|all` + `available_views` בתשובה; view לא חוקי → fallback ל-`active` (לא 400). `_get_project_cards()` ו-`get_project_dashboard()` חוברו ל-`project_hub_kpi` config לספירת לידים אחידה. תשתית additive ל-multi-tenant עתידי (`finance_pulse`, `assets_overview`, `activity_feed` configs מוכנים, לא מחוברים עדיין) | tma_api.py בלבד (commit `5b07088`) | PR #75 (open, CI green, ממתין ל-merge) |
 
 ---
 
@@ -238,6 +243,16 @@ ad-hoc תוך כדי חקירת באג, לא דרך audit שיטתי — ראו 
 **מה:** rollback אוטומטי ל-commit יציב אחרון כש-health check/monitoring
 מזהה כשל אחרי deploy.
 **עד שמיושם:** manual gate בלבד (ראו `RELEASE_CHECKLIST.md`).
+
+### N11 — Screen Filter Gateway: Finance Pulse wiring 🔲 PLANNED
+**תלוי ב:** C53 (Screen Filter Gateway — מיושם, PR #75).
+**מה:** שלב 2 של ה-Gateway — `SCREEN_CONFIGS["finance_pulse"].views.active.raw_formula`
+ייעודכן עם formula דינמית לתאריך (תשלומים overdue/קרובים), ו-`GET /api/finance/pulse`
+יחובר ל-`_build_formula()` עם `entity="Payment"`. אפס שינוי ל-`_build_formula()` עצמה —
+ה-config-driven design מאפשר זאת בלי לגעת ב-Gateway.
+**עתידי (multi-tenant):** override per-tenant מ-`ProjectsHub.screen_overrides`
+(JSON, נדרש שדה חדש בסכמה) — ראו הערה ב-`tma_api.py` ליד `SCREEN_CONFIGS`.
+**קבצים:** `tma_api.py` בלבד (לפי העיקרון של C53 — additive, לא נוגע ב-Gateway).
 
 ### F05a — Meta WhatsApp Phase 1 (Inbound, ללא תעבורת פרודקשן)
 **מה:** `/webhooks/meta/whatsapp` (GET verify + POST inbound) — נתיב נפרד מ-Twilio.

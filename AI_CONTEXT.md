@@ -1,8 +1,8 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-06-17
-**עודכן על ידי:** Claude Code Audit — session 7f9f89d8-d8dd-578a-8430-a9fedea6c089
+**עודכן:** 2026-06-18
+**עודכן על ידי:** Claude Code — session a627531c-4e25-5e9a-9403-f78e0b64ecf4 (Screen Filter Gateway, PR #75)
 
 ---
 
@@ -23,6 +23,7 @@
 | `py_compile` על מודולי ליבה (`app.py`, `tma_api.py`, `airtable_schema.py`, `crm.py`, `tool_registry.py`, `tools/dispatcher.py`) | 2026-06-17 | exit code 0 | Claude Code Audit |
 | `python3 test_integration.py` | 2026-06-17 | 4/4 PASS | Claude Code Audit |
 | `python3 smoke_tests.py` | 2026-06-17 | 5 PASS, 1 FAIL (`anthropic` import — תלוי-סביבה, ידוע מראש, לא קשור לקוד) | Claude Code Audit |
+| C53 Screen Filter Gateway — `py_compile`/`smoke_tests.py`/`test_integration.py` | 2026-06-18 | `py_compile` exit 0; `smoke_tests.py` 6/6 PASS (תלויות הותקנו ב-session); `test_integration.py` 4/4 PASS; תרחישי A–F מה-SPEC (`SCREEN_CONFIGS`/`_build_formula` ישירות) — כל ה-assertions עברו | Claude Code, PR #75 (commit `5b07088`, **לא ממוזג ל-main עדיין**) |
 | BUG-005/006 (`/status` decorator, Hub debug block) | 2026-06-16 | commit `628d2bb` | git log (לא אומת בפרודקשן בפועל) |
 | תיקון tier ל-writable singleSelect | לא ידוע תאריך מדויק | commit `3d8ab50` + סכמה חיה מאשרת `tier` קיים כ-`singleSelect` (`fld4eC2mEYrviL3oP`) | Claude Code Audit (השוואת קוד מול סכמה חיה) |
 
@@ -41,6 +42,7 @@
 | EMAIL_INBOUND | לא פעיל (F06) | `EMAIL_INBOUND=off` | ערוץ email נכנס לא מופעל |
 | `Next Action` field (Leads) | CODE DONE, לא תוקן | — | trailing space + mismatch מלא בין live Airtable לקוד (`airtable_schema.py:LeadFields.NEXT_STEP`); אינו נכתב בפועל מ-`LeadDetail.tsx` כיום, אך דורש follow-up ticket לפני שמחברים כתיבה אמיתית — ראו BUG_AUDIT_LOG.md "FLAGGED (not fixed)" |
 | AUDIENCE_INTELLIGENCE / INTERACTION_INTELLIGENCE / KPI_ENGINE / LEARNING_ENGINE / REVENUE_ATTRIBUTION | FUTURE — לא פעיל | כבויים | לא מומשו (FUTURE per `feature_flags.py:46-51`) |
+| `SCREEN_CONFIGS["finance_pulse"/"assets_overview"/"activity_feed"]` (`tma_api.py`, PR #75) | מוגדר, לא מחובר | — | configs קיימים אך אין endpoint שקורא להם עדיין; `finance_pulse` ממתין ל-raw_formula דינמית לתאריך (ראו ROADMAP N11) |
 
 ## 4. ACTIVE DECISIONS — החלטות ארכיטקטוניות שחייבים לכבד
 1. Ventures = טבלה נפרדת (לא הרחבת Deals.Status) — החלטה 17/06/2026
@@ -77,6 +79,7 @@
 - 🔲 N05 Daily Digest שדרוג — קוד קיים (commit `5490943`, "wire real Score + computed tier into daily digest"), verify בפרודקשן לא ידוע
 - 🔲 F05a Meta WhatsApp — code done, לא verified
 - 🟡 Approval Policy (Emergency Window + OTP + Policy Gate) — code-complete בכל 3 הפאזות, `EMERGENCY_WINDOW` flag כבוי, ממתין לאימות פרודקשן לפני הדלקה
+- 🟡 C53 Screen Filter Gateway — `SCREEN_CONFIGS`/`_build_formula()` ב-`tma_api.py` (PR #75, commit `5b07088`, CI/Vercel preview ירוק). **לא ממוזג ל-main** — ממתין ל-review/merge. תשתית config-driven ל-multi-tenant עתידי; `finance_pulse`/`assets_overview`/`activity_feed` configs מוגדרים ב-`SCREEN_CONFIGS` אך לא מחוברים לאף endpoint עדיין (ראו ROADMAP N11)
 
 ## 8. OPEN RISKS
 | סיכון | חומרה | מה נדרש |
