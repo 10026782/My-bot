@@ -45,6 +45,7 @@ class InboundEmail:
     snippet:  str       # תקציר מהGmail API
     body:     str = ""  # גוף מלא (אם נשלף)
     thread_id: str = ""
+    to:        str = ""  # כתובת To — לקביעת domain לפי alias (F06)
 
 
 @dataclass
@@ -107,7 +108,7 @@ def poll_inbox(max_results: int = POLL_MAX) -> list[InboundEmail]:
                 info = httpx.get(
                     f"https://www.googleapis.com/gmail/v1/users/me/messages/{msg['id']}",
                     headers=headers,
-                    params={"format": "metadata", "metadataHeaders": ["From", "Subject"]},
+                    params={"format": "metadata", "metadataHeaders": ["From", "Subject", "To"]},
                     timeout=10,
                 ).json()
 
@@ -120,6 +121,7 @@ def poll_inbox(max_results: int = POLL_MAX) -> list[InboundEmail]:
                     subject   = hmap.get("Subject", "(ללא נושא)"),
                     snippet   = info.get("snippet", ""),
                     thread_id = info.get("threadId", ""),
+                    to        = hmap.get("To", ""),
                 ))
             except Exception as e:
                 logger.warning(f"[EmailInbound] parse msg {msg.get('id','?')}: {e}")
@@ -298,14 +300,38 @@ def _extract_email(sender_str: str) -> str:
 
 
 # ══════════════════════════════════════════════════
-# 6. Main Entry — run_email_poll()
+# 6. Domain alias resolution (F06)
+# ══════════════════════════════════════════════════
+
+def _alias_to_domain(to_address: str) -> str:
+    """
+    כתובת To → domain.
+    נובע מ-DOMAIN_CONFIG אוטומטית — דומיין חדש = עובד אוטומטית.
+    ללא alias מוכר → 'general'.
+    """
+    try:
+        from domain_prompts import DOMAIN_CONFIG
+        mapping = {f"{d}@boss.co.il": d for d in DOMAIN_CONFIG}
+        addr = (to_address or "").lower().strip()
+        if addr in mapping:
+            return mapping[addr]
+        local = addr.split("@")[0] if "@" in addr else addr
+        for key, dom in mapping.items():
+            if key.split("@")[0] == local:
+                return dom
+    except Exception as e:
+        logger.warning("[EmailInbound] alias_to_domain error: %s", e)
+    return "general"
+
+
+# ══════════════════════════════════════════════════
+# 7. Main Entry — run_email_poll()
 # ══════════════════════════════════════════════════
 
 def run_email_poll(owner_chat_id: str = "") -> PollResult:
     """
-    Entry point לscheduler.
-    סורק inbox → route → draft → אישור owner.
-    לא שולח ללקוח!
+    Entry point לscheduler — סורק inbox → gate → find_or_update ב-Airtable.
+    לא שולח תשובה ללקוח.
     """
     try:
         from feature_flags import is_enabled  # type: ignore
@@ -315,44 +341,42 @@ def run_email_poll(owner_chat_id: str = "") -> PollResult:
     except ImportError:
         logger.warning("[EmailInbound] feature_flags not available — dev mode")
 
-    result  = PollResult()
-    emails  = poll_inbox()
+    from inbound_handler import handle_inbound
+
+    result = PollResult()
+    emails = poll_inbox()
     result.scanned = len(emails)
 
     for email in emails:
         try:
-            # skip?
             skip, reason = should_skip(email)
             if skip:
-                logger.debug(f"[EmailInbound] Skip {email.msg_id}: {reason}")
+                logger.debug(f"[EmailInbound] skip {email.msg_id}: {reason}")
                 result.skipped += 1
                 continue
 
-            # route
-            domain, intent, priority = route_email(email)
+            sender_email = _extract_email(email.sender)
+            external_id  = f"gmail:{email.msg_id}"
+            domain       = _alias_to_domain(email.to)
+            text         = f"{email.subject}\n{email.snippet or email.body}"
 
-            # draft
-            draft = build_draft_reply(email, domain, intent)
-
+            handle_inbound(
+                sender_id    = sender_email,
+                message      = text,
+                channel      = "email",
+                domain       = domain,
+                external_id  = external_id,
+                display_name = email.sender,
+            )
             result.routed += 1
-            logger.info(f"[EmailInbound] Routed: {email.sender} → domain={domain} intent={intent} priority={priority}")
-
-            # approval
-            if owner_chat_id:
-                action_id, _ = request_email_approval(email, draft, domain, owner_chat_id)
-                if action_id:
-                    result.approved += 1
 
         except Exception as e:
-            msg = f"error for {email.msg_id}: {e}"
+            msg = f"error {email.msg_id}: {e}"
             logger.error(f"[EmailInbound] {msg}")
             result.errors.append(msg)
 
-    logger.info(
-        f"[EmailInbound] Done | scanned={result.scanned} "
-        f"routed={result.routed} skipped={result.skipped} "
-        f"approved={result.approved} errors={len(result.errors)}"
-    )
+    logger.info("[EmailInbound] done | scanned=%d routed=%d skipped=%d errors=%d",
+                result.scanned, result.routed, result.skipped, len(result.errors))
     return result
 
 
