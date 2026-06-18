@@ -730,21 +730,23 @@ def _get_project_cards(identity) -> list:
             if identity.user_id not in str(f.get("owner_ids", "") or ""):
                 continue
 
-        # Live KPI: same query as get_project_dashboard leads_count.
-        # Status filtering done in Python (case-insensitive) to avoid Airtable formula issues.
-        _CLOSED = {"closed", "lost", "won", "cancelled", "done",
-                   "completed", "הושלם", "נסגר", "בוטל"}
+        # Live KPI — uses screen filter gateway (project_hub_kpi config)
+        hub_screen = SCREEN_CONFIGS["project_hub_kpi"]
+        hub_cfg    = hub_screen["views"][hub_screen["default_view"]]
         safe_domain, _ = _safe_formula_param(domain, "domain")
         if safe_domain:
-            all_leads = _at_list("Leads", f"{{domain}}='{safe_domain}'", max_records=50)
-            leads = [
-                l for l in all_leads
-                if (l.get("fields", {}).get("status") or "").lower() not in _CLOSED
-            ]
+            hub_formula = _build_formula(
+                entity="Lead",
+                domain=safe_domain,
+                include_statuses=hub_cfg.get("include_statuses"),
+                exclude_statuses=hub_cfg.get("exclude_statuses"),
+                raw_formula=hub_cfg.get("raw_formula", ""),
+            )
+            leads = _at_list("Leads", hub_formula,
+                             max_records=hub_screen["default_max_records"])
             hot = [
                 l for l in leads
                 if (l.get("fields", {}).get(LeadFields.SCORE) or 0) >= 70
-                or (l.get("fields", {}).get("status") or "").lower() == "hot"
             ]
         else:
             leads, hot = [], []
@@ -909,7 +911,13 @@ def get_project_dashboard(project_slug, identity):
 
     # Step 3: fetch data filtered by domain
     try:
-        leads = _at_list("Leads", f"{{domain}}='{safe_domain}'", max_records=20, strict=True)
+        _hub_cfg = SCREEN_CONFIGS["project_hub_kpi"]["views"]["active"]
+        _hub_formula = _build_formula(
+            entity="Lead",
+            domain=safe_domain,
+            exclude_statuses=_hub_cfg.get("exclude_statuses"),
+        )
+        leads = _at_list("Leads", _hub_formula, max_records=50, strict=True)
         deals = _at_list(
             "עסקאות (Deals)",
             f"AND({{domain}}='{safe_domain}', NOT(OR({{{DealFields.STAGE}}}='סגור-ניצחון', {{{DealFields.STAGE}}}='סגור-הפסד')))",
@@ -941,6 +949,169 @@ def get_project_dashboard(project_slug, identity):
         "tasks_note":    "tasks table has no domain field — showing global open tasks",
         "leads":         [_fmt_lead_summary(r) for r in leads[:10]],
     })
+
+
+# ══════════════════════════════════════════════════════════════════
+# SCREEN FILTER GATEWAY
+# ──────────────────────────────────────────────────────────────────
+# עיקרון: Gateway מבצע. Screen מחליט.
+# _build_formula() לא יודע מה "dead". SCREEN_CONFIGS יודע.
+# עתידי: ProjectsHub.screen_overrides יוכל לדרוס per-tenant.
+# ══════════════════════════════════════════════════════════════════
+
+SCREEN_CONFIGS: dict[str, dict] = {
+
+    # O2 Lead Pipeline + P1 My Leads + M1 CRM Dashboard
+    "lead_pipeline": {
+        "entity": "Lead",
+        "default_view": "active",
+        "views": {
+            "active": {
+                "exclude_statuses": ["archived", "duplicate", "not_relevant", "lost"],
+                "label": "פעילים",
+            },
+            "monitoring": {
+                "include_statuses": ["waiting_response", "waiting_call"],
+                "label": "ממתינים",
+            },
+            "all": {
+                "label": "הכל",
+            },
+        },
+        "default_max_records": 100,
+    },
+
+    # O0 Projects Hub — ספירת לידים פעילים לכרטיס פרויקט
+    "project_hub_kpi": {
+        "entity": "Lead",
+        "default_view": "active",
+        "views": {
+            "active": {
+                "exclude_statuses": ["archived", "duplicate", "not_relevant", "lost"],
+                "label": "פעילים",
+            },
+        },
+        "default_max_records": 50,
+    },
+
+    # O4 Finance Pulse — placeholder, ייבנה שבוע 2
+    "finance_pulse": {
+        "entity": "Payment",
+        "default_view": "active",
+        "views": {
+            "active": {
+                # raw_formula עם תאריך דינמי ייוסף בשבוע 2
+                "exclude_statuses": [],
+                "label": "פעילים",
+            },
+            "overdue": {
+                "include_statuses": ["overdue", "missed"],
+                "label": "באיחור",
+            },
+            "all": {
+                "label": "הכל",
+            },
+        },
+        "default_max_records": 100,
+    },
+
+    # PN1 Assets Overview — Personal Mode
+    "assets_overview": {
+        "entity": "Asset",
+        "default_view": "active",
+        "views": {
+            "active": {
+                "exclude_statuses": ["archived"],
+                "label": "פעיל",
+            },
+            "all": {
+                "label": "הכל",
+            },
+        },
+        "default_max_records": 50,
+    },
+
+    # O7 Activity Feed — pagination בזמן, לא סטטוסים
+    "activity_feed": {
+        "entity": "Activity",
+        "default_view": "recent",
+        "views": {
+            "recent": {
+                "days_back": 30,
+                "label": "אחרונים",
+            },
+            "all": {
+                "label": "הכל",
+            },
+        },
+        "default_max_records": 50,
+    },
+}
+
+
+def _build_formula(
+    *,
+    entity: str,
+    domain: str = "",
+    identity=None,
+    include_statuses: list | None = None,
+    exclude_statuses: list | None = None,
+    raw_formula: str = "",
+    score_min: int = 0,
+    status_field: str = "status",
+) -> str:
+    """
+    Filter Gateway — מבצע בלבד, לא מחליט.
+    הלוגיקה העסקית (מה להסתיר) מגיעה מ-SCREEN_CONFIGS בלבד.
+
+    עדיפות:
+      1. raw_formula — מחזיר כמו שהוא (המסך שולט הכל)
+      2. include_statuses — רק הסטטוסים האלה
+      3. exclude_statuses — כולם חוץ מאלה
+      domain + identity מוסיפים תמיד מעל לכל config.
+
+    עתידי:
+      score_min — לסינון Hot leads
+      status_field — לטבלאות עם שם שדה שונה (Assets.סטטוס)
+    """
+    # 0. raw_formula — escape hatch מלא
+    if raw_formula:
+        if domain:
+            return f"AND({{domain}}='{domain}', {raw_formula})"
+        return raw_formula
+
+    parts: list[str] = []
+
+    # 1. domain מפורש
+    if domain:
+        parts.append(f"{{domain}}='{domain}'")
+
+    # 2. Partner: domain restriction מ-identity (אוטומטי)
+    if identity is not None and getattr(identity, "role", None) == Role.PARTNER:
+        allowed = getattr(identity, "allowed_domains", None) or []
+        if allowed:
+            d_conds = ", ".join(f"{{domain}}='{d}'" for d in allowed)
+            parts.append(f"OR({d_conds})")
+
+    # 3. include_statuses — OR של סטטוסים מותרים
+    if include_statuses:
+        s_conds = ", ".join(f"{{{status_field}}}='{s}'" for s in include_statuses)
+        parts.append(f"OR({s_conds})" if len(include_statuses) > 1 else s_conds)
+
+    # 4. exclude_statuses — AND של שלילות
+    elif exclude_statuses:
+        for s in exclude_statuses:
+            parts.append(f"{{{status_field}}}!='{s}'")
+
+    # 5. score_min (עתידי — Hot leads KPI)
+    if score_min > 0:
+        parts.append(f"{{{LeadFields.SCORE}}}>={score_min}")
+
+    if not parts:
+        return ""
+    if len(parts) == 1:
+        return parts[0]
+    return f"AND({', '.join(parts)})"
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -985,6 +1156,7 @@ def _safe_formula_param(value: str, name: str) -> tuple[str | None, object | Non
 def get_leads(identity):
     """O2 — Lead Pipeline. Owner + Manager (all) + Partner (own domains).
     Accepts: ?domain=real_estate OR ?project_slug=blueview (resolves via ProjectsHub)
+             ?view=active|monitoring|all  (default: active)
     """
     allowed = {Role.OWNER, Role.MANAGER, Role.PARTNER}
     if identity.role not in allowed:
@@ -992,34 +1164,43 @@ def get_leads(identity):
 
     domain_q = request.args.get("domain", "")
     domain_q, err = _safe_formula_param(domain_q, "domain")
-    if err: return err
-
-    status_q = request.args.get("status", "")
-    status_q, err = _safe_formula_param(status_q, "status")
-    if err: return err
+    if err:
+        return err
 
     # Resolve project_slug → domain via ProjectsHub
     slug_q = request.args.get("project_slug", "")
     slug_q, err = _safe_formula_param(slug_q, "project_slug")
-    if err: return err
+    if err:
+        return err
     if slug_q and not domain_q:
         hub = _at_list("ProjectsHub", f"{{slug}}='{slug_q}'", max_records=1)
         if hub:
             domain_q = hub[0].get("fields", {}).get("domain", "")
 
-    parts = []
-    if domain_q:
-        parts.append(f"{{domain}}='{domain_q}'")
-    if status_q:
-        parts.append(f"{{status}}='{status_q}'")
-    if identity.role == Role.PARTNER and identity.allowed_domains:
-        d_conds = ", ".join(f"{{domain}}='{d}'" for d in identity.allowed_domains)
-        parts.append(f"OR({d_conds})")
+    # Screen config — lead_pipeline
+    screen = SCREEN_CONFIGS["lead_pipeline"]
+    view_q = request.args.get("view", screen["default_view"])
+    if view_q not in screen["views"]:
+        view_q = screen["default_view"]
+    view_cfg = screen["views"][view_q]
 
-    formula  = f"AND({', '.join(parts)})" if parts else ""
-    records  = _at_list("Leads", formula, max_records=100)
+    formula = _build_formula(
+        entity="Lead",
+        domain=domain_q,
+        identity=identity,
+        include_statuses=view_cfg.get("include_statuses"),
+        exclude_statuses=view_cfg.get("exclude_statuses"),
+        raw_formula=view_cfg.get("raw_formula", ""),
+    )
+
+    records = _at_list("Leads", formula, max_records=screen["default_max_records"])
 
     return jsonify({
+        "view": view_q,
+        "available_views": {
+            k: v.get("label", k)
+            for k, v in screen["views"].items()
+        },
         "count": len(records),
         "leads": [_fmt_lead_summary(r) for r in records],
     })

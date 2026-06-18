@@ -1,7 +1,7 @@
 # BOSS CURRENT STATE
 
-Last updated: 17/06/2026
-Reflects: Stabilization Sprint + W0/W1 + Security Audit Fixes (H1-H3) + TIER read-only fix + Game Dashboard fix + Ghost Button Audit + Airtable Gateway (W2) + GameScreen Fix + Daily Digest Live + Repo Docs + C52 Customer Output Gateway
+Last updated: 18/06/2026
+Reflects: Stabilization Sprint + W0/W1 + Security Audit Fixes (H1-H3) + TIER read-only fix + Game Dashboard fix + Ghost Button Audit + Airtable Gateway (W2) + GameScreen Fix + Daily Digest Live + Repo Docs + C52 Customer Output Gateway + C53 Screen Filter Gateway
 
 ## Classification Key
 - WORKING: implemented, reachable, no blocking issue.
@@ -9,6 +9,14 @@ Reflects: Stabilization Sprint + W0/W1 + Security Audit Fixes (H1-H3) + TIER rea
 - STUB: returns coming_soon / empty — honest, not misleading.
 - BROKEN: fails or blocked by known runtime error.
 - NOT IMPLEMENTED: no runtime implementation found.
+
+---
+
+## What Changed — 18/06/2026
+
+| Item | Status | Detail |
+|------|--------|--------|
+| C53 Screen Filter Gateway | 🟡 CODE DONE, NOT MERGED | `SCREEN_CONFIGS` + `_build_formula()` added to `tma_api.py` — screens declare which lead statuses to show/hide instead of the gateway hardcoding business rules ("Gateway מבצע. Screen מחליט."). `get_leads()` now supports `?view=active\|monitoring\|all` with `available_views` in the response; invalid `view` falls back to `active` (no 400). `_get_project_cards()` and `get_project_dashboard()` now use the same `project_hub_kpi` config for consistent active-lead counts. `finance_pulse`/`assets_overview`/`activity_feed` configs are defined for future screens but not wired to any endpoint yet. No changes to `airtable_gateway.py`, `lead_capture.py`, `airtable_schema.py`, or `feature_flags.py`. `py_compile`/`smoke_tests.py`/`test_integration.py` all pass; SPEC test-plan scenarios A–F verified directly against `_build_formula`. PR #75 (commit `5b07088`), CI/Vercel preview green, **not yet merged to main**. |
 
 ---
 
