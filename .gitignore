@@ -3,3 +3,4 @@ __pycache__/
 *.pyo
 .env
 data.json
+audit_gate_state.json
