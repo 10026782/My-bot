@@ -155,6 +155,8 @@ run_agent() → conversational reply only
 | Personal Mode | STUB | Auth works; screens not implemented |
 | Recruitment | PARTIAL | Domain prompt works; lead flow pending N02+ |
 | Investor tools | NOT IMPLEMENTED | Roadmap only |
+| GOV-01 Branch Merge Gate | LIVE | pre_session_gate.sh — PR #71 |
+| GOV-02 Audit Truth Gate  | LIVE | audit_truth_gate.py — PR #72 |
 
 ---
 
