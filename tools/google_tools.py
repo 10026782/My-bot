@@ -15,10 +15,29 @@ import httpx
 from datetime import datetime, timedelta
 from email.mime.text import MIMEText
 from zoneinfo import ZoneInfo
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 _TZ_IL = ZoneInfo("Asia/Jerusalem")
+
+
+def _tool_result(
+    *,
+    ok: bool,
+    tool: str,
+    external_id: str = "",
+    evidence: dict[str, Any] | None = None,
+    user_message: str = "",
+) -> dict:
+    """Structured C53-A result contract for external write/send tools."""
+    return {
+        "ok": ok,
+        "tool": tool,
+        "external_id": external_id or "",
+        "evidence": evidence or {},
+        "user_message": user_message,
+    }
 
 
 def _check_calendar_conflict(token: str, start_time: str, duration_minutes: int) -> str:
@@ -90,11 +109,15 @@ def get_google_token() -> str | None:
 
 # ─── Gmail ────────────────────────────────────────────────────────────────────
 
-def gmail_send(to: str, subject: str, body: str) -> str:
+def gmail_send(to: str, subject: str, body: str) -> dict:
     """יוצר טיוטה ב-Gmail — לא שולח ישירות. תמיד טיוטה קודם."""
     token = get_google_token()
     if not token:
-        return "❌ חסרים GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REFRESH_TOKEN"
+        return _tool_result(
+            ok=False,
+            tool="gmail_draft",
+            user_message="❌ חסרים GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REFRESH_TOKEN",
+        )
 
     try:
         msg = MIMEText(body)
@@ -109,17 +132,36 @@ def gmail_send(to: str, subject: str, body: str) -> str:
             timeout=15,
         )
         if r.status_code in (200, 201):
-            draft_id = r.json().get("id", "")
-            return (
-                f"📝 טיוטה נשמרה ב-Gmail ל-{to}\n"
-                f"נושא: {subject}\n"
-                f"draft_id: `{draft_id}`\n"
-                f"⚠️ הטיוטה ממתינה לאישורך — לא נשלחה עדיין.\n"
-                f"לשליחה: gmail_send_draft(draft_id=\"{draft_id}\")"
+            data = r.json()
+            draft_id = data.get("id", "")
+            return _tool_result(
+                ok=bool(draft_id),
+                tool="gmail_draft",
+                external_id=draft_id,
+                evidence={
+                    "draft_id": draft_id,
+                    "to": to,
+                    "subject": subject,
+                    "response": data,
+                },
+                user_message=(
+                    f"📝 טיוטה נשמרה ב-Gmail ל-{to}\n"
+                    f"נושא: {subject}\n"
+                    f"draft_id: `{draft_id}`\n"
+                    f"⚠️ הטיוטה ממתינה לאישורך — לא נשלחה עדיין.\n"
+                    f"לשליחה: gmail_send_draft(draft_id=\"{draft_id}\")"
+                    if draft_id
+                    else "❌ Gmail דיווח על יצירת טיוטה אבל לא החזיר draft_id."
+                ),
             )
-        return f"❌ שגיאת Gmail {r.status_code}: {r.text[:200]}"
+        return _tool_result(
+            ok=False,
+            tool="gmail_draft",
+            evidence={"status_code": r.status_code, "body": r.text[:500]},
+            user_message=f"❌ שגיאת Gmail {r.status_code}: {r.text[:200]}",
+        )
     except Exception as e:
-        return f"❌ שגיאה ביצירת טיוטה: {e}"
+        return _tool_result(ok=False, tool="gmail_draft", user_message=f"❌ שגיאה ביצירת טיוטה: {e}")
 
 
 def gmail_read(max_results: int = 5) -> str:
@@ -234,14 +276,14 @@ def drive_read_file(file_name: str) -> str:
 # ─── Google Calendar ──────────────────────────────────────────────────────────
 
 def calendar_create_event(summary: str, start_time: str,
-                          duration_minutes: int = 60, force: bool = False) -> str:
+                          duration_minutes: int = 60, force: bool = False) -> dict:
     """
     start_time: ISO format — '2025-06-01T14:00:00'
     force=True  — קבע גם אם יש חפיפה ביומן
     """
     token = get_google_token()
     if not token:
-        return "❌ חסרים פרטי Google OAuth"
+        return _tool_result(ok=False, tool="calendar_create_event", user_message="❌ חסרים פרטי Google OAuth")
 
     try:
         start_dt = datetime.fromisoformat(start_time)
@@ -251,10 +293,15 @@ def calendar_create_event(summary: str, start_time: str,
         if not force:
             conflict = _check_calendar_conflict(token, start_time, duration_minutes)
             if conflict:
-                return (
-                    f"{conflict}\n"
-                    f"לקבוע '{summary}' ב-{start_dt.strftime('%H:%M')} בכל זאת? "
-                    f"(אם כן — שלח שוב עם force=true)"
+                return _tool_result(
+                    ok=False,
+                    tool="calendar_create_event",
+                    evidence={"conflict": conflict, "start_time": start_dt.isoformat()},
+                    user_message=(
+                        f"{conflict}\n"
+                        f"לקבוע '{summary}' ב-{start_dt.strftime('%H:%M')} בכל זאת? "
+                        f"(אם כן — שלח שוב עם force=true)"
+                    ),
                 )
 
         event = {
@@ -269,12 +316,44 @@ def calendar_create_event(summary: str, start_time: str,
             timeout=15,
         )
         if r.status_code in (200, 201):
-            return f"✅ אירוע '{summary}' נוצר ביומן ל-{start_dt.strftime('%d/%m/%Y %H:%M')}."
-        return f"❌ שגיאת Calendar {r.status_code}: {r.text[:200]}"
+            data = r.json()
+            event_id = data.get("id", "")
+            html_link = data.get("htmlLink", "")
+            ok = bool(event_id and html_link)
+            return _tool_result(
+                ok=ok,
+                tool="calendar_create_event",
+                external_id=event_id,
+                evidence={
+                    "event_id": event_id,
+                    "htmlLink": html_link,
+                    "summary": data.get("summary", summary),
+                    "start": data.get("start", {}),
+                    "end": data.get("end", {}),
+                    "response": data,
+                },
+                user_message=(
+                    f"✅ אירוע '{summary}' נוצר ביומן ל-{start_dt.strftime('%d/%m/%Y %H:%M')}.\n"
+                    f"event_id: `{event_id}`\n"
+                    f"🔗 {html_link}"
+                    if ok
+                    else "❌ Calendar דיווח על יצירה אבל לא החזיר event_id ו-htmlLink."
+                ),
+            )
+        return _tool_result(
+            ok=False,
+            tool="calendar_create_event",
+            evidence={"status_code": r.status_code, "body": r.text[:500]},
+            user_message=f"❌ שגיאת Calendar {r.status_code}: {r.text[:200]}",
+        )
     except ValueError:
-        return "❌ פורמט תאריך שגוי. השתמש ב-ISO: 2025-06-01T14:00:00"
+        return _tool_result(
+            ok=False,
+            tool="calendar_create_event",
+            user_message="❌ פורמט תאריך שגוי. השתמש ב-ISO: 2025-06-01T14:00:00",
+        )
     except Exception as e:
-        return f"❌ שגיאה ביצירת אירוע: {e}"
+        return _tool_result(ok=False, tool="calendar_create_event", user_message=f"❌ שגיאה ביצירת אירוע: {e}")
 
 
 def calendar_get_events(max_results: int = 5, days_ahead: int = 7) -> str:
@@ -316,11 +395,11 @@ def calendar_get_events(max_results: int = 5, days_ahead: int = 7) -> str:
         return f"❌ שגיאה בשליפת אירועים: {e}"
 
 
-def gmail_send_draft(draft_id: str) -> str:
+def gmail_send_draft(draft_id: str) -> dict:
     """שליחת טיוטה קיימת לפי draft ID."""
     token = get_google_token()
     if not token:
-        return "❌ חסרים פרטי Google OAuth"
+        return _tool_result(ok=False, tool="gmail_send_draft", user_message="❌ חסרים פרטי Google OAuth")
 
     try:
         r = httpx.post(
@@ -330,10 +409,32 @@ def gmail_send_draft(draft_id: str) -> str:
             timeout=15,
         )
         if r.status_code == 200:
-            return f"📧 טיוטה {draft_id} נשלחה בהצלחה!"
-        return f"❌ שגיאת Gmail {r.status_code}: {r.text[:200]}"
+            data = r.json()
+            message_id = data.get("id", "")
+            return _tool_result(
+                ok=bool(message_id),
+                tool="gmail_send_draft",
+                external_id=message_id,
+                evidence={
+                    "message_id": message_id,
+                    "draft_id": draft_id,
+                    "thread_id": data.get("threadId", ""),
+                    "response": data,
+                },
+                user_message=(
+                    f"📧 טיוטה {draft_id} נשלחה בהצלחה.\nmessage_id: `{message_id}`"
+                    if message_id
+                    else "❌ Gmail דיווח על שליחה אבל לא החזיר message_id."
+                ),
+            )
+        return _tool_result(
+            ok=False,
+            tool="gmail_send_draft",
+            evidence={"status_code": r.status_code, "body": r.text[:500], "draft_id": draft_id},
+            user_message=f"❌ שגיאת Gmail {r.status_code}: {r.text[:200]}",
+        )
     except Exception as e:
-        return f"❌ שגיאה בשליחת טיוטה: {e}"
+        return _tool_result(ok=False, tool="gmail_send_draft", user_message=f"❌ שגיאה בשליחת טיוטה: {e}")
 
 
 def sheets_append(spreadsheet_name: str, row_data: list) -> str:

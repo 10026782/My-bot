@@ -9,23 +9,18 @@
 from __future__ import annotations
 import re
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-# ══════════════════════════════════════════════════
-# Evidence Markers — expected substrings in tool output
-# when a tool succeeds (beyond the ❌ / empty checks).
-# ══════════════════════════════════════════════════
-
-_EVIDENCE_MARKERS: dict[str, list[str]] = {
-    # calendar_create_event returns "✅ אירוע '…' נוצר ביומן" or "⚠️ כבר קיים ביומן"
-    "calendar_create_event": ["נוצר ביומן", "⚠️ כבר קיים ביומן"],
-    # gmail_send_draft returns "📧 טיוטה … נשלחה בהצלחה!"
-    "gmail_send_draft":      ["נשלחה בהצלחה"],
-    # gmail_read returns either email content or "✅ אין הודעות"
-    "gmail_read":            ["הודעה מ-", "מ:", "אין הודעות"],
+_STRUCTURED_ID_TOOLS = {
+    "calendar_create_event": "event_id",
+    "gmail_draft":          "draft_id",
+    "gmail_send_draft":     "message_id",
+    "airtable_add":         "record_id",
+    "airtable_update":      "record_id",
 }
 
 # ══════════════════════════════════════════════════
@@ -68,7 +63,23 @@ class VerifyResult:
 # 1. verify_execution
 # ══════════════════════════════════════════════════
 
-def verify_execution(tool_name: str, raw_output: str | None) -> VerifyResult:
+def _content_text(content: Any) -> str:
+    if isinstance(content, dict):
+        return str(content.get("user_message") or content.get("external_id") or content)
+    return str(content or "")
+
+
+def _structured_result_id(raw_output: dict, id_key: str) -> str:
+    external_id = str(raw_output.get("external_id", "") or "")
+    evidence = raw_output.get("evidence", {})
+    if external_id:
+        return external_id
+    if isinstance(evidence, dict):
+        return str(evidence.get(id_key, "") or "")
+    return ""
+
+
+def verify_execution(tool_name: str, raw_output: Any) -> VerifyResult:
     """
     Checks whether a tool call actually succeeded.
     Called immediately after validate_tool_output().
@@ -76,28 +87,41 @@ def verify_execution(tool_name: str, raw_output: str | None) -> VerifyResult:
     if not raw_output:
         return VerifyResult("failed", "output is empty or None")
 
-    if raw_output.lstrip().startswith("❌"):
-        return VerifyResult("failed", raw_output[:120])
+    if isinstance(raw_output, dict):
+        if not raw_output.get("ok"):
+            return VerifyResult("failed", _content_text(raw_output)[:160])
 
-    if tool_name == "airtable_add" and "rec" not in raw_output:
+        id_key = _STRUCTURED_ID_TOOLS.get(tool_name)
+        if id_key:
+            external_id = _structured_result_id(raw_output, id_key)
+            if not external_id:
+                return VerifyResult(
+                    "failed",
+                    f"{tool_name}: missing external_id/{id_key} in structured result"
+                )
+            if tool_name == "calendar_create_event":
+                evidence = raw_output.get("evidence", {})
+                html_link = evidence.get("htmlLink", "") if isinstance(evidence, dict) else ""
+                if not html_link:
+                    return VerifyResult(
+                        "failed",
+                        "calendar_create_event: missing evidence.htmlLink"
+                    )
+            if tool_name.startswith("airtable_") and not external_id.startswith("rec"):
+                return VerifyResult(
+                    "failed",
+                    f"{tool_name}: external_id '{external_id}' is not an Airtable record_id"
+                )
+        return VerifyResult("ok")
+
+    raw_text = _content_text(raw_output)
+    if raw_text.lstrip().startswith("❌"):
+        return VerifyResult("failed", raw_text[:120])
+
+    if tool_name in _STRUCTURED_ID_TOOLS:
         return VerifyResult(
             "failed",
-            f"airtable_add: no record ID ('rec...') in output — record may not have been created"
-        )
-
-    if tool_name == "gmail_draft" and "draft" not in raw_output.lower():
-        return VerifyResult(
-            "warn",
-            "gmail_draft: 'draft' not found in output — verify draft was created"
-        )
-
-    # Evidence markers: tool-specific expected substrings in success output.
-    # Only checked when no ❌ was detected above (i.e., tool didn't explicitly error).
-    markers = _EVIDENCE_MARKERS.get(tool_name)
-    if markers and not any(m in raw_output for m in markers):
-        return VerifyResult(
-            "failed",
-            f"{tool_name}: output contains no expected evidence markers — possible silent failure",
+            f"{tool_name}: expected structured result with ok=true and external_id"
         )
 
     return VerifyResult("ok")
@@ -112,19 +136,28 @@ _NEGATIVE_CLAIMS = re.compile(r"לא מצאתי|אין תוצאות|לא נמצ�
 
 
 def _all_failed(tool_results: list[dict]) -> bool:
-    """True if every tool result content starts with ❌."""
+    """True if every tool result content is a failed structured result or starts with ❌."""
     if not tool_results:
         return False
-    return all(
-        isinstance(r.get("content"), str) and r["content"].lstrip().startswith("❌")
-        for r in tool_results
-    )
+    for r in tool_results:
+        content = r.get("content")
+        if isinstance(content, dict):
+            if content.get("ok"):
+                return False
+            continue
+        if not (isinstance(content, str) and content.lstrip().startswith("❌")):
+            return False
+    return True
 
 
 def _has_data(tool_results: list[dict]) -> bool:
     """True if any tool result contains non-error, non-empty content."""
     for r in tool_results:
         content = r.get("content", "")
+        if isinstance(content, dict):
+            if content.get("ok") or content.get("external_id"):
+                return True
+            continue
         if (isinstance(content, str)
                 and content.strip()
                 and not content.lstrip().startswith("❌")):
@@ -162,7 +195,7 @@ _MISMATCH_PREFIX = "⚠️ שים לב — ייתכן שהתוצאה אינה מ
 def _tool_results_contain(tool_results: list[dict], keywords: list[str]) -> bool:
     """True if any tool result content contains at least one keyword."""
     return any(
-        kw in r.get("content", "")
+        kw in _content_text(r.get("content", ""))
         for r in tool_results
         for kw in keywords
     )
@@ -200,6 +233,22 @@ def sanitize_agent_response(agent_text: str, tool_results: list[dict]) -> str:
 # Self-tests
 # ══════════════════════════════════════════════════
 
+def _make_result(
+    tool: str,
+    external_id: str = "",
+    ok: bool = True,
+    evidence: dict | None = None,
+    user_message: str = "ok",
+) -> dict:
+    return {
+        "ok": ok,
+        "tool": tool,
+        "external_id": external_id,
+        "evidence": evidence or {},
+        "user_message": user_message,
+    }
+
+
 def _run_tests() -> bool:
     passed = failed = 0
 
@@ -213,62 +262,85 @@ def _run_tests() -> bool:
         else:
             passed += 1
 
-    # ── verify_execution ─────────────────────────
-    check("airtable_add success (has rec...)",
-          verify_execution("airtable_add", "Created: rec1234abc"),
+    # ── verify_execution — structured dict contract ──────────
+    check("airtable_add success (structured dict, rec-id)",
+          verify_execution("airtable_add", _make_result("airtable_add", "rec1234abc")),
           "ok")
 
-    check("airtable_add returns ❌",
-          verify_execution("airtable_add", "❌ Airtable error 422: field missing"),
+    check("airtable_add ok=False → failed",
+          verify_execution("airtable_add", _make_result("airtable_add", ok=False, user_message="❌ Airtable error 422")),
           "failed")
 
-    check("airtable_add empty output",
+    check("airtable_add empty output → failed",
           verify_execution("airtable_add", ""),
           "failed")
 
-    check("airtable_add no rec ID",
-          verify_execution("airtable_add", "Created successfully"),
+    check("airtable_add non-rec external_id → failed",
+          verify_execution("airtable_add", _make_result("airtable_add", "not_a_rec")),
           "failed")
 
-    check("gmail_draft ok",
+    check("airtable_add plain string (old format) → failed",
+          verify_execution("airtable_add", "Created: rec1234abc"),
+          "failed")
+
+    check("gmail_draft success (structured dict)",
+          verify_execution("gmail_draft", _make_result("gmail_draft", "draft_xyz")),
+          "ok")
+
+    check("gmail_draft ok=False → failed",
+          verify_execution("gmail_draft", _make_result("gmail_draft", ok=False, user_message="❌ Gmail 403")),
+          "failed")
+
+    check("gmail_draft plain string (old format) → failed",
           verify_execution("gmail_draft", "Draft created (id=draft_xyz)"),
+          "failed")
+
+    check("calendar_create_event success (structured dict with htmlLink)",
+          verify_execution("calendar_create_event", _make_result(
+              "calendar_create_event", "evt_abc123",
+              evidence={"htmlLink": "https://calendar.google.com/event?eid=abc"},
+          )),
           "ok")
 
-    check("gmail_draft missing 'draft' in output",
-          verify_execution("gmail_draft", "Email queued"),
-          "warn")
+    check("calendar_create_event ok=True but missing htmlLink → failed",
+          verify_execution("calendar_create_event", _make_result("calendar_create_event", "evt_abc123")),
+          "failed")
 
-    check("calendar_create_event success marker present",
+    check("calendar_create_event conflict (ok=False) → failed",
+          verify_execution("calendar_create_event", _make_result(
+              "calendar_create_event", ok=False,
+              evidence={"conflict": "⚠️ כבר קיים ביומן: 'אירוע' (14:00)"},
+              user_message="⚠️ כבר קיים ביומן: 'אירוע' (14:00). לקבוע בכל זאת?",
+          )),
+          "failed")
+
+    check("calendar_create_event plain string (old format) → failed",
           verify_execution("calendar_create_event", "✅ אירוע 'פגישה' נוצר ביומן ל-01/06/2025 14:00."),
-          "ok")
-
-    check("calendar_create_event conflict marker present",
-          verify_execution("calendar_create_event", "⚠️ כבר קיים ביומן: 'אירוע אחר' (14:00). לקבוע בכל זאת?"),
-          "ok")
-
-    check("calendar_create_event no evidence → failed",
-          verify_execution("calendar_create_event", "Done."),
           "failed")
 
-    check("gmail_send_draft success marker",
+    check("gmail_send_draft success (structured dict)",
+          verify_execution("gmail_send_draft", _make_result("gmail_send_draft", "msg_abc123")),
+          "ok")
+
+    check("gmail_send_draft ok=False → failed",
+          verify_execution("gmail_send_draft", _make_result("gmail_send_draft", ok=False, user_message="❌ Gmail 500")),
+          "failed")
+
+    check("gmail_send_draft plain string (old format) → failed",
           verify_execution("gmail_send_draft", "📧 טיוטה draft_abc נשלחה בהצלחה!"),
-          "ok")
-
-    check("gmail_send_draft no evidence → failed",
-          verify_execution("gmail_send_draft", "Sent."),
           "failed")
 
-    check("gmail_read has content → ok",
-          verify_execution("gmail_read", "הודעה מ-: test@example.com | נושא: test"),
+    check("non-structured tool, plain string → ok",
+          verify_execution("calendar_get_events", "📅 3 אירועים קרובים:"),
           "ok")
 
-    check("gmail_read no evidence → failed",
-          verify_execution("gmail_read", "OK"),
+    check("non-structured tool, empty string → failed",
+          verify_execution("calendar_get_events", ""),
           "failed")
 
     # ── verify_result_claim ──────────────────────
-    failed_results = [{"content": "❌ connection error"}]
-    ok_results     = [{"content": "rec1234 created"}]
+    failed_results = [{"content": _make_result("airtable_add", ok=False, user_message="❌ connection error")}]
+    ok_results     = [{"content": _make_result("airtable_add", "rec1234")}]
     empty_results  = []
 
     check("agent says 'נשלח' but tool failed → hallucination",
@@ -310,8 +382,12 @@ def _run_tests() -> bool:
     else:
         passed += 1
 
-    # ── "no tool called" gate ────────────────────
-    calendar_results = [{"content": "✅ אירוע 'פגישה' נוצר ביומן ל-01/06/2025 14:00."}]
+    # ── "no tool called" gate with structured dict content ──
+    calendar_results = [{"content": _make_result(
+        "calendar_create_event", "evt_123",
+        evidence={"htmlLink": "https://calendar.google.com/event?eid=123"},
+        user_message="✅ אירוע 'פגישה' נוצר ביומן ל-01/06/2025 14:00.",
+    )}]
 
     no_tool_calendar = sanitize_agent_response(
         "בדקתי את הביומן שלך — אין חפיפות. הפגישה קבועה.", []

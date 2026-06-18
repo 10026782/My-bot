@@ -28,8 +28,14 @@ class RateLimiter:
             return True
 
 
-def validate_tool_output(tool_name: str, raw) -> str:
-    """מוודא שפלט כלי הוא string תקין ומוגבל באורך."""
+def validate_tool_output(tool_name: str, raw):
+    """מוודא שפלט כלי תקין ומוגבל באורך; משמר תוצאות structured (C53-A)."""
+    if isinstance(raw, dict):
+        msg = raw.get("user_message")
+        if isinstance(msg, str) and len(msg) > 4000:
+            raw = dict(raw)
+            raw["user_message"] = msg[:4000] + "\n...[נחתך]"
+        return raw
     if not isinstance(raw, str):
         raw = str(raw)
     if len(raw) > 4000:
