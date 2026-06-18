@@ -8,6 +8,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Most comments, log messages, and docstrings in this codebase are in **Hebrew** — match that convention when editing existing files.
 
+**Before doing anything else**, read `AI_CONTEXT.md` — it's the live "what's actually true in production right now" doc (system state, last-verified features, known gaps, open risks). It's updated per-session and is not duplicated here. If it's stale (>7 days per its own header), refresh it as part of your session rather than trusting memory.
+
+**Before opening a new branch**, run `bash pre_session_gate.sh "<task description>"` (see `AGENTS.md`). It blocks (`exit 1`) if there are unmerged `claude/*` branches against `origin/main`, to stop work from fragmenting across abandoned branches. Only pass `--force` if the user has explicitly approved opening a new branch anyway.
+
 ## Running locally
 
 ```bash
@@ -35,6 +39,14 @@ python3 -m py_compile app.py  # quick syntax check (no linter config exists in t
 ```
 
 `core/router/test_router.py` similarly exercises the router in isolation — run it directly with `python3 core/router/test_router.py`.
+
+Other standalone test scripts, run the same way (`python3 <file>.py`):
+- `test_airtable_gateway.py` — field normalization, validation, audit logging in `tools/airtable_gateway.py`.
+- `test_approval_concurrency.py` — 3-state approval flow (pending → processing → approved/rejected) and double-approve race conditions.
+- `test_furniture_lead_funnel.py` — the deterministic state machine in `furniture_lead_funnel.py`.
+- `test_identity_smoke.py` — basic identity resolution sanity check.
+
+There is no CI/CD config in this repo (no `.github/workflows/`, `Makefile`, or `Procfile`) — all of the above are run manually before merging.
 
 When verifying behavioral changes to the webhook flow, start the server and POST simulated Telegram/WhatsApp webhook payloads with `curl` — there's no automated end-to-end suite.
 
@@ -88,6 +100,44 @@ High-risk/irreversible actions (`requires_approval=True` in the registry, e.g. `
 - `config.py`: WhatsApp number → business domain mapping (`CHANNEL_DOMAINS`) — add new channel mappings only here.
 - `guards/`: `idempotency`, `rate_limiter`, `circuit_breaker` — cross-cutting reliability wrappers re-exported from `guards/__init__.py`.
 
+### `tools/` — concrete tool implementations behind the dispatcher
+
+`tools/dispatcher.py` is the entry point (see above); the actual integrations it calls into live alongside it: `airtable_tools.py`/`airtable_gateway.py`/`airtable_security.py` (Airtable reads/writes + tenant enforcement + audit logging), `contact_resolver.py` (lead/contact dedup matching), `google_tools.py` (shared OAuth flow) with per-service files `gmail_tools.py`, `calendar_tools.py`, `drive_tools.py`, `sheets_tools.py`, and the outbound channel adapters `telegram_adapter.py` / `whatsapp_adapter.py`. `tools/schemas.py` holds the JSON tool schemas required by step 2 of the "Adding a new tool" checklist.
+
+### `core/` — cross-cutting gates beyond the router
+
+- `core/cost_watchdog.py`: tracks hourly/daily Claude token spend (persisted to JSONL + Airtable) and auto-triggers `EMERGENCY_STOP_AI` if a cost threshold is exceeded; `cost_monitor.py` at the repo root logs the per-call token counts it consumes.
+- `core/emergency_window.py`, `core/otp.py`, `core/financial_gate.py`: the (currently flag-gated, `EMERGENCY_WINDOW`) Approval Policy stack — a temporary override window for high-risk approvals, an OTP request/verify flow, and an escalate-not-block gate for detected financial commitments. `Approval_Policy_Spec.md` is referenced from `AI_CONTEXT.md`/`BUG_AUDIT_LOG.md` but doesn't currently exist in the repo; check `AI_CONTEXT.md` for current activation status before assuming this is live.
+- `core/learning_engine.py`: read-only pattern extraction from `lead_events` (F02) — intentionally inert until ~2-3 months of lead-event data accumulates.
+- `core/output_gateway.py`: second-layer outbound guard distinguishing INTERNAL vs CUSTOMER-facing audiences before a message is sent.
+- `health_monitor.py`: checks Airtable connectivity, scheduler thread liveness, and emergency-flag state; backs the `/status` endpoint.
+
+### Schema validation & governance pipeline
+
+Airtable field/table drift is a recurring failure mode in this repo, so there's a dedicated pipeline: `airtable_schema.py` is the canonical source of table/field names in code; `schema_audit.py` diffs that against the live Airtable schema and refreshes `schema_cache.json`; `schema_validator.py` and `schema_intelligence.py` use that cache to validate fields before writes; `audit_truth_gate.py` (GOV-02) is the higher-level gate comparing main's commit hash, the canonical schema, and the live Airtable base, blocking or downgrading to read-only if any of those are unverifiable. `system_registry.yaml` + `system_registry_audit.py` audit overall service status into `reports/` (auto-generated — don't hand-edit). `daily_git_audit.py` and `branch_cemetery_cleanup.py` report/clean up stale unmerged `claude/*` branches (the same condition `pre_session_gate.sh` checks at session start).
+
+### Lead lifecycle & growth features (mostly feature-flag gated)
+
+Several modules are code-complete but disabled by default via `feature_flags.py` — check `AI_CONTEXT.md`'s "Known gaps" table for current on/off state before assuming any of these are active in production:
+
+- `lead_capture.py` (`LEAD_CAPTURE`/`LEAD_SCORING`): inbound WhatsApp/Telegram lead creation with optional live scoring.
+- `lead_conversion.py` (`LEAD_AUTO_CONVERT`): owner-only `/convert` command promoting qualified leads to contacts.
+- `abandoned_lead_worker.py` (`ABANDONED_LEADS`): detects leads stuck mid-qualification and auto-bounces or escalates them.
+- `followup_engine.py` (`FOLLOWUP_AUTOMATION`): identifies "ripe" leads, drafts follow-ups, and routes them through approval.
+- `furniture_lead_funnel.py`: a separate, deterministic WhatsApp funnel for a specific product line (not the general agent flow) — see `test_furniture_lead_funnel.py`.
+- `voice_adapter.py` (`FEATURE_VOICE_IVR`/F07): Twilio Voice IVR state machine for lead qualification.
+- `email_inbound.py` (`FEATURE_EMAIL_INBOUND`/F06): polls Gmail and routes inbound mail through identity → approval → reply.
+- `interaction_engine.py` (`FEATURE_INTERACTION_INTELLIGENCE`/D06.1): unified interaction log across calendar/email/WhatsApp.
+- `audience_intelligence.py` (`FEATURE_AUDIENCE_INTELLIGENCE`/D04): segmentation, high-value/churn detection, lookalike matching.
+- `ad_attribution.py` (D05): UTM/campaign source tracking, consumed at lead-intake time via `app.py`'s `_inject_utm`.
+- `data_engines.py`: stubs for F02/F03/F04 (learning, attribution, KPI) intentionally blocked pending more historical data.
+
+### Background workers
+
+- `worker.py`: the proactive background worker hit by Render's Cron trigger (`POST /worker/trigger`, scheduled ~08:00/18:00) for routine async tasks.
+- `workers/survey_worker.py`: post-deal-close survey ("what won the deal?") sent via Telegram, feeding into the TMA quests/game system.
+- This is distinct from `scheduler.py`'s in-process `schedule`-library jobs (digest, overdue payments, cleanup) started from `app.py`.
+
 ## Frontend (`tma-frontend/`)
 
 React + TypeScript + Vite + Tailwind Telegram Mini App.
@@ -101,8 +151,13 @@ npm run preview
 
 ## Planning & docs conventions
 
-- `ROADMAP.md` is **the single source of truth** for planned work — "every batch starts by reading the ROADMAP, not from memory." Other planning docs (`BOSS_MASTER_PLAN_*.md`, `BOSS_CURRENT_STATE.md`, `boss_bot_summary.md`) are archives/snapshots, not authoritative.
-- `docs/governance/SECURITY_CHECKLIST.md` defines when a security review is required (new file touching `dispatcher`/`crm`/`identity`/`auth`, new tool, new role, new endpoint) and the manual checklist to run before merging to main — consult it whenever touching identity, tenancy, registry, or endpoint auth.
+- `ROADMAP.md` is **the single source of truth** for planned work — "every batch starts by reading the ROADMAP, not from memory." Other planning docs (`BOSS_MASTER_PLAN_*.md` in `archive/`, `BOSS_CURRENT_STATE.md`, `boss_bot_summary.md`) are archives/snapshots, not authoritative. A `ROADMAP.md` change isn't done until the `עודכן:` date at the top of the file is also bumped (see `AGENTS.md`).
+- `AI_CONTEXT.md` is the live production-state doc (see top of this file) — read it before trusting any "is X live/active" assumption.
+- `docs/governance/SECURITY_CHECKLIST.md` defines when a security review is required (new file touching `dispatcher`/`crm`/`identity`/`auth`, new tool, new role, new endpoint) and the manual checklist + grep patterns to run before merging to main — consult it whenever touching identity, tenancy, registry, or endpoint auth.
+- `docs/governance/MODULE_RULES.md` and `docs/governance/ARCHITECTURE_DRIFT_MAP.md`: module-interaction rules and known drift between code intent and the live Airtable schema.
+- `docs/governance/MIGRATION_AIRTABLE_ENGLISH_SCHEMA.md`: background on the Hebrew→English Airtable field/table migration referenced by the `_ALIAS_MAP` aliasing layer.
+- `docs/operations/DEPLOYMENT.md` and `docs/operations/RUNBOOK.md`: Render deploy/rollback process and the production runbook (health checks, emergency stop, scaling) — consult before claiming a change is "deployed."
+- `AGENTS.md` covers the pre-session branch gate and the ROADMAP "definition of done"; treat its older "Cursor Cloud specific instructions" section (single-file app, no tests, no `/` route) as stale/historical — the rest of this file describes the current state.
 
 ## כלל ברזל — "סיימתי" = מאומת, לא מוצהר
 
