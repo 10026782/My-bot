@@ -1,3 +1,17 @@
+## PRE-SESSION GATE — חובה לפני כל ענף חדש
+
+לפני `git checkout -b` בכל סשן:
+
+```bash
+bash pre_session_gate.sh "<תיאור המשימה>"
+```
+
+- **exit 0** → ממשיכים
+- **exit 1** → STOP. דווח למשתמש מה הענפות הפתוחות ובקש הנחיה.
+- **--force** → רק אם המשתמש אישר במפורש בשיחה הנוכחית.
+
+כלל: ענף שלא ממוזג = סשן לא הסתיים. לא שותקים — מדווחים.
+
 ## Cursor Cloud specific instructions
 
 ### Definition of Done — ROADMAP.md
