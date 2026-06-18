@@ -154,7 +154,7 @@ class ExpenseFields:
     AMOUNT          = "amount"
     CATEGORY        = "category"
     DATE            = "date"
-    STATUS          = "Status"    # כבר אנגלית ב-Airtable — שים לב: capital S
+    STATUS          = "status"
     DOMAIN          = "domain"
 
 
