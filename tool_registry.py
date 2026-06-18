@@ -154,6 +154,16 @@ _REGISTRY: dict[str, ToolMeta] = {
         read_only        = True,
         description_he   = "חיפוש בזיכרון עסקי — 'מה סיכמנו עם ספק X?' / 'החלטות מהפגישה עם Y'",
     ),
+
+    # ── CRM — Payments ─────────────────────────────
+    "crm_mark_payment_paid": ToolMeta(
+        name             = "crm_mark_payment_paid",
+        roles_allowed    = _SENIOR,
+        tenant_scoped    = True,
+        requires_approval= True,
+        high_risk        = True,
+        description_he   = "סימון תשלום כ-שולם — דורש אישור owner/partner",
+    ),
 }
 
 

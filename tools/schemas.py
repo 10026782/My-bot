@@ -146,6 +146,23 @@ TOOL_SCHEMAS = [
             "required": ["query"]
         }
     },
+    {
+        "name": "crm_mark_payment_paid",
+        "description": (
+            "סימון תשלום כ-'שולם' בטבלת התשלומים. "
+            "השתמש כשהמשתמש מאשר שתשלום התקבל/בוצע — 'שלמו לי על X' / 'תשלום Y בוצע'."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "record_id": {
+                    "type": "string",
+                    "description": "מזהה הרשומה בטבלת תשלומים (rec...)"
+                }
+            },
+            "required": ["record_id"]
+        }
+    },
 ]
 
 # ══════════════════════════════════════════════════
