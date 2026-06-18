@@ -35,8 +35,8 @@ class Tables:
     LOANS           = "Loans"
     DEBT_MGMT       = "Company A - Debt Management"
     CASH_FLOW       = "Weekly Cash Flow Reports"
-    EXPENSES        = "הוצאות (Expenses)"
-    PAYMENTS        = "תשלומים (Payments)"
+    EXPENSES        = "Expenses"
+    PAYMENTS        = "Payments"
     # קשרים ועסקאות
     CONTACTS        = "אנשי קשר (Contacts)"
     DEALS           = "עסקאות (Deals)"
@@ -150,24 +150,27 @@ class CashFlowFields:
 
 
 class ExpenseFields:
-    NAME            = "שם ההוצאה"
-    AMOUNT          = "סכום"
-    CATEGORY        = "קטגוריה"         # שיווק|משרד|נסיעות|תפעול|אחר
-    DATE            = "תאריך"
+    NAME            = "name"
+    AMOUNT          = "amount"
+    CATEGORY        = "category"
+    DATE            = "date"
+    STATUS          = "status"
+    DOMAIN          = "domain"
 
 
 class PaymentFields:
-    REF             = "אסמכתא"
-    AMOUNT          = "סכום"
-    DATE            = "תאריך"
-    STATUS          = "סטטוס"           # התקבל|בתהליך|בוטל
-    DEAL_LINK       = "מקושר לעסקאות"
+    REF             = "reference"
+    AMOUNT          = "amount"
+    DATE            = "date"
+    STATUS          = "status"          # pending | received | overdue | cancelled
+    DEAL_LINK       = "deal_id"
+    DOMAIN          = "domain"
     # backwards compat — crm.py uses these
-    NAME            = "אסמכתא"
-    DUE_DATE        = "תאריך"
-    DEAL            = "מקושר לעסקאות"
-    CONTACT         = "מקושר לאנשי קשר"
-    NOTES           = "הערות"
+    NAME            = "reference"
+    DUE_DATE        = "date"
+    DEAL            = "deal_id"
+    CONTACT         = "contact_id"
+    NOTES           = "notes"
 
 
 class ContactFields:
@@ -514,13 +517,13 @@ class DealStage:
     CLOSED_LOSS     = "סגור-הפסד"
 
 class PaymentStatus:
-    RECEIVED        = "התקבל"
-    IN_PROGRESS     = "בתהליך"
-    CANCELLED       = "בוטל"
+    PENDING         = "pending"
+    RECEIVED        = "received"
+    OVERDUE         = "overdue"
+    CANCELLED       = "cancelled"
     # backwards compat — crm.py
-    PENDING         = "בתהליך"
-    PAID            = "התקבל"
-    OVERDUE         = "בתהליך"
+    IN_PROGRESS     = "pending"
+    PAID            = "received"
 
 class ExpenseCategory:
     MARKETING       = "שיווק"
