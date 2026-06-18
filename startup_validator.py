@@ -62,14 +62,14 @@ _RULES: list[EnvVar] = [
            feature="google_tools"),
     EnvVar("RENDER_APP_URL",       "warning",  "Public URL for Telegram/Twilio webhooks",
            validator="url", feature="webhooks"),
+    EnvVar("WORKER_SECRET",        "warning",  "Secret for /worker endpoint — missing means scheduler jobs run unauthenticated",
+           feature="scheduler"),
 
     # ── INFO — אופציונלי, מוצג בlog ───────────────
     EnvVar("TWILIO_ACCOUNT_SID",  "info", "Twilio for WhatsApp/Voice",
            feature="voice_ivr"),
     EnvVar("TWILIO_AUTH_TOKEN",   "info", "Twilio auth",
            feature="voice_ivr"),
-    EnvVar("WORKER_SECRET",       "info", "Secret for /worker endpoint",
-           feature="scheduler"),
     EnvVar("DIGEST_TIME",         "info", "Daily digest send time (default 07:30)",
            feature="daily_digest"),
     EnvVar("SHABBAT_CITY",        "info", "City for Shabbat times (default tel_aviv)",

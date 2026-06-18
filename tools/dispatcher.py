@@ -301,6 +301,20 @@ def dispatch_tool(name: str, inputs: dict, identity: "Identity | None" = None) -
                     domain=inputs.get("domain", ""),
                 )
 
+            # ── CRM — Payments ────────────────────────
+            case "crm_mark_payment_paid":
+                record_id = inputs["record_id"]
+                try:
+                    enforce_tenant_scope("crm_mark_payment_paid", identity, {"record_id": record_id})
+                except TenantScopeViolation as e:
+                    audit_log_airtable("crm_mark_payment_paid", identity, {"record_id": record_id}, f"blocked: {e}")
+                    return str(e)
+
+                from crm import crm_mark_payment_paid
+                result = crm_mark_payment_paid(record_id)
+                audit_log_airtable("crm_mark_payment_paid", identity, {"record_id": record_id}, result)
+                return result
+
             # ── Unknown ───────────────────────────────
             case _:
                 logger.warning(f"[Dispatch] Unknown tool: {name}")
