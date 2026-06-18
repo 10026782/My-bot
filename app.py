@@ -655,7 +655,6 @@ def _handle_approval_callback(cq) -> None:
 
     elif action == "reject":
         item = bus.pop(action_id)
-        item = bus._pending.pop(action_id, None)  # atomic: remove + return in one step
         if item:
             logger.info("🚫 Rejected: %s | %s", action_id, item.get("label", item.get("action", "")))
 
