@@ -293,6 +293,8 @@ class LeadFields:
     NEXT_FOLLOWUP   = "Next Followup" # ISO date of next scheduled followup
     OWNER           = "Owner"         # assigned owner / responsible person
     NEXT_STEP       = "Next Action"   # call_now|call_today|schedule_this_week|send_details|follow_up|waiting_response|create_deal|archive|none — NOTE: live Airtable options are actually "Call Back/Send Details/Follow Up/Waiting Response/Create Deal/Convert Contact/Schedule Meeting /Closed Won/Closed Lost" (verified via Airtable MCP 2026-06-17) — this field is not currently written from the TMA, so the mismatch is latent, not active
+    EXTERNAL_ID     = "external_id"   # gmail:<msg_id> — idempotency key מדויק (F06)
+    SENDER_ID       = "sender_id"     # email address / phone — dedup by sender (F06)
 
 
 class LeadStatus:
