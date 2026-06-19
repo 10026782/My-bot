@@ -61,7 +61,8 @@ def convert_lead_to_contact(query: str) -> tuple[bool, str]:
         notes_parts.append(f"מקור: {lf[LeadFields.SOURCE]}")
     notes = "\n".join(notes_parts)
 
-    contact_result = crm_add_contact(name=name, phone=phone, notes=notes)
+    contact_result = crm_add_contact(name=name, phone=phone, notes=notes,
+                                      lead_source_id=lead["id"])
     if "❌" in contact_result:
         return False, f"❌ יצירת איש קשר נכשלה: {contact_result}"
 
