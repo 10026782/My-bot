@@ -99,7 +99,8 @@ def _fmt_date(iso: str) -> str:
 
 def crm_add_contact(name: str, phone: str = "", email: str = "",
                     contact_type: str = ContactType.CLIENT,
-                    company: str = "", notes: str = "") -> str:
+                    company: str = "", notes: str = "",
+                    lead_source_id: str = "") -> str:
     if not _creds_ok():
         return "❌ חסרים מפתחות Airtable"
     if not name:
@@ -109,10 +110,11 @@ def crm_add_contact(name: str, phone: str = "", email: str = "",
             ContactFields.NAME:         name,
             ContactFields.STATUS:       ContactStatus.ACTIVE,
         }
-        if phone:        fields[ContactFields.PHONE]   = phone
-        if email:        fields[ContactFields.EMAIL]   = email
-        if company:      fields[ContactFields.COMPANY] = company
-        if contact_type: fields[ContactFields.TYPE]    = contact_type
+        if phone:           fields[ContactFields.PHONE]       = phone
+        if email:           fields[ContactFields.EMAIL]       = email
+        if company:         fields[ContactFields.COMPANY]     = company
+        if contact_type:    fields[ContactFields.TYPE]        = contact_type
+        if lead_source_id:  fields[ContactFields.ORIGIN_LEAD] = [lead_source_id]
 
         rec = _post(Tables.CONTACTS, fields)
         return f"✅ איש קשר נוסף: *{name}* | ID: `{rec['id']}`"

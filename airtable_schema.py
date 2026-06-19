@@ -185,6 +185,7 @@ class ContactFields:
     SPECIALTY     = "Specialty"       # text — התמחות ספציפית (שמאי מקרקעין / רו"ח מיסוי / ...)
     DEALS_LINK    = "עסקאות (Deals)"
     TASKS_LINK    = "משימות (Tasks)"
+    ORIGIN_LEAD   = "Origin Lead"     # linked record — fldGE1seCyCdWJGCO
 
 
 class DealFields:
@@ -195,6 +196,7 @@ class DealFields:
     CONTACTS_LINK   = "מקושר לאנשי קשר"
     TASKS_LINK      = "משימות (Tasks)"
     PAYMENTS_LINK   = "תשלומים (Payments)"
+    ORIGIN_LEAD     = "Origin Lead"     # linked record — fldoobGq4PS78C0Em
     # backwards compat — crm.py uses these
     STATUS          = "שלב"
     PRICE           = "סכום"
