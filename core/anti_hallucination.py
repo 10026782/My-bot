@@ -34,7 +34,8 @@ _NO_TOOL_CLAIMS: list[tuple[re.Pattern, frozenset[str]]] = [
     # Agent claims it checked / created a calendar event
     (
         re.compile(
-            r"(בדקתי.*ביומן|אין חפיפות|הפגישה קבועה|קבעתי|נוצר ביומן|הוסף לקלנדר)",
+            r"(בדקתי.*(ביומן|קלנדר)|אין חפיפות|הפגישה קבועה|קבעתי|נוצר ביומן|הוסף לקלנדר|"
+            r"יוצר (את ה)?(פגיש|אירוע)|קובע (את ה)?(פגיש|אירוע)|פגישה חדשה)",
             re.UNICODE,
         ),
         frozenset({"calendar_get_events", "calendar_create_event"}),
@@ -54,6 +55,34 @@ _NO_TOOL_CLAIMS: list[tuple[re.Pattern, frozenset[str]]] = [
             re.UNICODE,
         ),
         frozenset({"airtable_add", "airtable_update", "airtable_get", "search_lead"}),
+    ),
+]
+
+# ══════════════════════════════════════════════════
+# "No tool was called" detection — NEGATIVE claims.
+# Mirror image of _NO_TOOL_CLAIMS: the agent can fabricate a *failure*
+# diagnosis just as easily as a fake success. Evidence here means "a tool
+# was actually attempted" (ok True or False) — unlike _has_required_tool,
+# a real ok=False result IS valid evidence for a failure claim.
+# ══════════════════════════════════════════════════
+
+_NEGATIVE_NO_TOOL_CLAIMS: list[tuple[re.Pattern, frozenset[str] | None]] = [
+    # Agent claims the calendar action specifically failed / wasn't saved
+    (
+        re.compile(
+            r"(הפגישה לא נשמרה|בעיה בתזמון)",
+            re.UNICODE,
+        ),
+        frozenset({"calendar_get_events", "calendar_create_event"}),
+    ),
+    # Generic failure/error diagnosis — scoped to "no tool call at all this
+    # turn", not a specific category, since this phrasing isn't calendar-only
+    (
+        re.compile(
+            r"(לא הצלחתי לבדוק|לא ניתן לגשת|המערכת לא מגיבה|השגיאה היא)",
+            re.UNICODE,
+        ),
+        None,  # None = evidence is "any tool result present", any category
     ),
 ]
 
@@ -214,6 +243,20 @@ def _has_required_tool(tool_results: list[dict], required_tools: frozenset[str])
     )
 
 
+def _has_negative_evidence(tool_results: list[dict], required_tools: frozenset[str] | None) -> bool:
+    """
+    True if a real tool attempt grounds a *failure* claim. Unlike
+    _has_required_tool, ok=False counts — a genuine failed call is exactly
+    what would justify reporting a failure. required_tools=None means "any
+    tool result at all" (used for category-agnostic failure phrasing).
+    """
+    if not tool_results:
+        return False
+    if required_tools is None:
+        return True
+    return any(r.get("tool") in required_tools for r in tool_results)
+
+
 def sanitize_agent_response(agent_text: str, tool_results: list[dict]) -> str:
     """
     Final gate before the reply reaches the user.
@@ -236,6 +279,17 @@ def sanitize_agent_response(agent_text: str, tool_results: list[dict]) -> str:
             logger.error(
                 f"[A32] NO-TOOL-EVIDENCE hallucination: "
                 f"agent claims '{claim_pattern.pattern[:40]}' but no {sorted(required_tools)} tool result found"
+            )
+            return _NO_TOOL_EVIDENCE_FALLBACK
+
+    # Mirror gate: agent claims a live check/action *failed* with no tool
+    # attempt at all to back that diagnosis up — a fabricated failure is
+    # just as much a hallucination as a fabricated success.
+    for claim_pattern, required_tools in _NEGATIVE_NO_TOOL_CLAIMS:
+        if claim_pattern.search(agent_text) and not _has_negative_evidence(tool_results, required_tools):
+            logger.error(
+                f"[A32] NO-TOOL-EVIDENCE negative-claim hallucination: "
+                f"agent claims failure '{claim_pattern.pattern[:40]}' but no tool attempt found"
             )
             return _NO_TOOL_EVIDENCE_FALLBACK
 
