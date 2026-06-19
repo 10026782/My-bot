@@ -25,26 +25,35 @@ _STRUCTURED_ID_TOOLS = {
 
 # ══════════════════════════════════════════════════
 # "No tool was called" detection patterns.
-# If agent text matches AND no tool result contains expected evidence
-# → agent hallucinated a live check / action.
+# If agent text matches a claim AND no result from one of the required
+# tools is present in tool_results (by tool name, not text-guessing)
+# → agent hallucinated a live check / action on an external system.
 # ══════════════════════════════════════════════════
 
-_NO_TOOL_CLAIMS: list[tuple[re.Pattern, list[str]]] = [
+_NO_TOOL_CLAIMS: list[tuple[re.Pattern, frozenset[str]]] = [
     # Agent claims it checked / created a calendar event
     (
         re.compile(
             r"(בדקתי.*ביומן|אין חפיפות|הפגישה קבועה|קבעתי|נוצר ביומן|הוסף לקלנדר)",
             re.UNICODE,
         ),
-        ["נוצר ביומן", "⚠️ כבר קיים ביומן", "אירועים קרובים", "אין אירועים"],
+        frozenset({"calendar_get_events", "calendar_create_event"}),
     ),
-    # Agent claims it read / sent email
+    # Agent claims it read / drafted / sent email
     (
         re.compile(
-            r"(בדקתי.*מייל|קראתי.*הודעות|לא.*מצאתי.*מייל|המייל.*נשלח|שלחתי.*מייל)",
+            r"(בדקתי.*מייל|קראתי.*הודעות|לא.*מצאתי.*מייל|המייל.*נשלח|שלחתי.*מייל|טיוטה.*נשמר)",
             re.UNICODE,
         ),
-        ["הודעה מ-", "נשלחה בהצלחה", "אין הודעות", "draft"],
+        frozenset({"gmail_read", "gmail_draft", "gmail_send_draft"}),
+    ),
+    # Agent claims it created / updated a CRM (Airtable) record
+    (
+        re.compile(
+            r"(הרשומה נוצרה|נוצר ליד|הליד נוצר|נוסף ל-?Airtable|עודכן ב-?Airtable|הליד עודכן|נוספה רשומה|נשמר ב-?Airtable)",
+            re.UNICODE,
+        ),
+        frozenset({"airtable_add", "airtable_update", "airtable_get", "search_lead"}),
     ),
 ]
 
@@ -188,16 +197,20 @@ def verify_result_claim(agent_text: str, tool_results: list[dict]) -> VerifyResu
 # 3. sanitize_agent_response
 # ══════════════════════════════════════════════════
 
-_SAFE_FALLBACK  = "לא הצלחתי לבצע את הפעולה. אנא נסה שוב."
+_SAFE_FALLBACK   = "לא הצלחתי לבצע את הפעולה. אנא נסה שוב."
 _MISMATCH_PREFIX = "⚠️ שים לב — ייתכן שהתוצאה אינה מדויקת.\n"
+_NO_TOOL_EVIDENCE_FALLBACK = "לא הצלחתי לאמת את הפעולה מול הכלי. לא ביצעתי שינוי. אפשר לנסות שוב?"
 
 
-def _tool_results_contain(tool_results: list[dict], keywords: list[str]) -> bool:
-    """True if any tool result content contains at least one keyword."""
+def _has_required_tool(tool_results: list[dict], required_tools: frozenset[str]) -> bool:
+    """
+    True if a non-failed result from one of required_tools is present.
+    Identity-based (by tool name), not text-guessing — a tool call that
+    itself failed does not count as evidence for the agent's claim.
+    """
     return any(
-        kw in _content_text(r.get("content", ""))
+        r.get("tool") in required_tools and r.get("ok", True)
         for r in tool_results
-        for kw in keywords
     )
 
 
@@ -216,15 +229,15 @@ def sanitize_agent_response(agent_text: str, tool_results: list[dict]) -> str:
         logger.warning(f"[A32] MISMATCH detected: {check.reason}")
         return _MISMATCH_PREFIX + agent_text
 
-    # "No tool called" gate: agent claims a live check/action but
-    # no tool result contains the expected evidence.
-    for claim_pattern, evidence_keywords in _NO_TOOL_CLAIMS:
-        if claim_pattern.search(agent_text) and not _tool_results_contain(tool_results, evidence_keywords):
+    # "No tool called" gate: agent claims a live check/action on an
+    # external system but no result from a required tool is present.
+    for claim_pattern, required_tools in _NO_TOOL_CLAIMS:
+        if claim_pattern.search(agent_text) and not _has_required_tool(tool_results, required_tools):
             logger.error(
                 f"[A32] NO-TOOL-EVIDENCE hallucination: "
-                f"agent claims '{claim_pattern.pattern[:40]}' but no supporting tool result found"
+                f"agent claims '{claim_pattern.pattern[:40]}' but no {sorted(required_tools)} tool result found"
             )
-            return _SAFE_FALLBACK
+            return _NO_TOOL_EVIDENCE_FALLBACK
 
     return agent_text
 
@@ -382,18 +395,23 @@ def _run_tests() -> bool:
     else:
         passed += 1
 
-    # ── "no tool called" gate with structured dict content ──
-    calendar_results = [{"content": _make_result(
-        "calendar_create_event", "evt_123",
-        evidence={"htmlLink": "https://calendar.google.com/event?eid=123"},
-        user_message="✅ אירוע 'פגישה' נוצר ביומן ל-01/06/2025 14:00.",
-    )}]
+    # ── "no tool called" gate — identity-based (by tool name), production format ──
+    calendar_results = [{
+        "tool": "calendar_create_event",
+        "content": "✅ אירוע 'פגישה' נוצר ביומן ל-01/06/2025 14:00.",
+        "ok": True,
+    }]
+    failed_calendar_results = [{
+        "tool": "calendar_create_event",
+        "content": "❌ הפעולה לא הושלמה: calendar_create_event: missing evidence.htmlLink",
+        "ok": False,
+    }]
 
     no_tool_calendar = sanitize_agent_response(
         "בדקתי את הביומן שלך — אין חפיפות. הפגישה קבועה.", []
     )
-    ok3 = no_tool_calendar == _SAFE_FALLBACK
-    print(f"{'✅' if ok3 else '❌'} agent claims calendar check with no tool result → sanitized")
+    ok3 = no_tool_calendar == _NO_TOOL_EVIDENCE_FALLBACK
+    print(f"{'✅' if ok3 else '❌'} agent claims calendar check with no tool result → blocked")
     if not ok3:
         print(f"     got: {no_tool_calendar!r}")
         failed += 1
@@ -403,10 +421,21 @@ def _run_tests() -> bool:
     with_tool_calendar = sanitize_agent_response(
         "בדקתי את הביומן שלך — אין חפיפות. הפגישה קבועה.", calendar_results
     )
-    ok4 = with_tool_calendar != _SAFE_FALLBACK
-    print(f"{'✅' if ok4 else '❌'} agent claims calendar but tool result present → passed through")
+    ok4 = with_tool_calendar not in (_NO_TOOL_EVIDENCE_FALLBACK, _SAFE_FALLBACK)
+    print(f"{'✅' if ok4 else '❌'} agent claims calendar, real tool result present → passed through")
     if not ok4:
         print(f"     got: {with_tool_calendar!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    failed_tool_calendar = sanitize_agent_response(
+        "בדקתי את הביומן שלך — אין חפיפות. הפגישה קבועה.", failed_calendar_results
+    )
+    ok4b = failed_tool_calendar == _NO_TOOL_EVIDENCE_FALLBACK
+    print(f"{'✅' if ok4b else '❌'} agent claims calendar but the tool call itself failed → blocked")
+    if not ok4b:
+        print(f"     got: {failed_tool_calendar!r}")
         failed += 1
     else:
         passed += 1
@@ -414,10 +443,40 @@ def _run_tests() -> bool:
     no_tool_gmail = sanitize_agent_response(
         "בדקתי את המיילים שלך — לא מצאתי הודעות חדשות.", []
     )
-    ok5 = no_tool_gmail == _SAFE_FALLBACK
-    print(f"{'✅' if ok5 else '❌'} agent claims gmail read with no tool result → sanitized")
+    ok5 = no_tool_gmail == _NO_TOOL_EVIDENCE_FALLBACK
+    print(f"{'✅' if ok5 else '❌'} agent claims gmail read with no tool result → blocked")
     if not ok5:
         print(f"     got: {no_tool_gmail!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    no_tool_gmail_draft = sanitize_agent_response("טיוטה נשמרה.", [])
+    ok6 = no_tool_gmail_draft == _NO_TOOL_EVIDENCE_FALLBACK
+    print(f"{'✅' if ok6 else '❌'} agent claims 'טיוטה נשמרה' with no gmail_draft result → blocked")
+    if not ok6:
+        print(f"     got: {no_tool_gmail_draft!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    no_tool_airtable = sanitize_agent_response("הרשומה נוצרה בהצלחה.", [])
+    ok7 = no_tool_airtable == _NO_TOOL_EVIDENCE_FALLBACK
+    print(f"{'✅' if ok7 else '❌'} agent claims Airtable record created with no airtable tool result → blocked")
+    if not ok7:
+        print(f"     got: {no_tool_airtable!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    with_tool_airtable = sanitize_agent_response(
+        "הרשומה נוצרה בהצלחה.",
+        [{"tool": "airtable_add", "content": "✅ רשומה נוספה | ID: rec123", "ok": True}],
+    )
+    ok8 = with_tool_airtable not in (_NO_TOOL_EVIDENCE_FALLBACK, _SAFE_FALLBACK)
+    print(f"{'✅' if ok8 else '❌'} agent claims Airtable record created, real tool result present → passed through")
+    if not ok8:
+        print(f"     got: {with_tool_airtable!r}")
         failed += 1
     else:
         passed += 1
