@@ -3,6 +3,28 @@
 
 TOOL_SCHEMAS = [
     {
+        "name": "search_drive",
+        "description": "חיפוש קבצים ב-Google Drive לפי שם",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "שם הקובץ או מילת חיפוש"}
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "read_drive_file",
+        "description": "קריאת תוכן קובץ מ-Google Drive",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "file_name": {"type": "string", "description": "שם הקובץ לקריאה"}
+            },
+            "required": ["file_name"]
+        }
+    },
+    {
         "name": "calendar_get_events",
         "description": "קריאת אירועים מ-Google Calendar",
         "input_schema": {
@@ -10,6 +32,20 @@ TOOL_SCHEMAS = [
             "properties": {
                 "days_ahead": {"type": "integer", "description": "כמה ימים קדימה (ברירת מחדל: 7)"}
             }
+        }
+    },
+    {
+        "name": "calendar_create_event",
+        "description": "יצירת אירוע ב-Google Calendar. בודק חפיפות אוטומטית — אם יש, מחזיר ⚠️ ושואל. לקבוע בכל זאת → force=true.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "summary":          {"type": "string",  "description": "כותרת הפגישה"},
+                "start_time":       {"type": "string",  "description": "ISO 8601: YYYY-MM-DDTHH:MM:SS"},
+                "duration_minutes": {"type": "integer", "description": "משך בדקות (ברירת מחדל: 60)"},
+                "force":            {"type": "boolean", "description": "true = קבע גם אם יש חפיפה ביומן"}
+            },
+            "required": ["summary", "start_time"]
         }
     },
     {
@@ -23,6 +59,27 @@ TOOL_SCHEMAS = [
                 "body":    {"type": "string", "description": "גוף המייל"}
             },
             "required": ["to", "subject", "body"]
+        }
+    },
+    {
+        "name": "gmail_send_draft",
+        "description": "שליחת טיוטה קיימת לאחר אישור המשתמש",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "draft_id": {"type": "string", "description": "מזהה הטיוטה לשליחה"}
+            },
+            "required": ["draft_id"]
+        }
+    },
+    {
+        "name": "gmail_read",
+        "description": "קריאת מיילים אחרונים מהתיבה",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "max_results": {"type": "integer", "description": "מספר מיילים (ברירת מחדל: 3)"}
+            }
         }
     },
     {
