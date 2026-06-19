@@ -215,6 +215,9 @@ def drive_search(query: str) -> str:
             },
             timeout=10,
         )
+        if r.status_code != 200:
+            logger.error(f"[DriveSearch] HTTP {r.status_code}: {r.text[:200]}")
+            return f"❌ שגיאת גישה לדרייב (HTTP {r.status_code}) — לא ניתן היה לבדוק את התוכן."
         files = r.json().get("files", [])
         if not files:
             return f"לא נמצא כלום בדרייב עבור '{query}'."
@@ -245,6 +248,9 @@ def drive_read_file(file_name: str) -> str:
             },
             timeout=10,
         )
+        if search.status_code != 200:
+            logger.error(f"[DriveReadFile] HTTP {search.status_code}: {search.text[:200]}")
+            return f"❌ שגיאת גישה לדרייב (HTTP {search.status_code}) — לא ניתן היה לבדוק את התוכן."
         files = search.json().get("files", [])
         if not files:
             return f"לא נמצא קובץ בשם '{file_name}' בדרייב."
@@ -266,6 +272,10 @@ def drive_read_file(file_name: str) -> str:
                 params={"alt": "media"},
                 timeout=15,
             )
+
+        if r.status_code != 200:
+            logger.error(f"[DriveReadFile] HTTP {r.status_code}: {r.text[:200]}")
+            return f"❌ שגיאת גישה לדרייב (HTTP {r.status_code}) — לא ניתן היה לקרוא את הקובץ."
 
         content = r.text[:3000]
         return f"📄 תוכן '{files[0]['name']}':\n{content}"
