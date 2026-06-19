@@ -1,0 +1,304 @@
+# cmd_update.py — C20 Business Context Command
+# /update | /עדכון  — שמירת הקשר עסקי ידני ל-Business Memory
+# Feature flag: FEATURE_BUSINESS_UPDATE (כבוי ברירת מחדל)
+
+import logging
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+logger = logging.getLogger(__name__)
+
+# ── קבועים ──────────────────────────────────────────────────────
+# מפתחות domain תואמים ל-Domain.ALL ב-identity.py — כדי שתגי
+# Business Memory יתאמו בפועל ל-identity.domain_id בעת context injection.
+
+DOMAINS = [
+    ("נדל\"ן", "real_estate"),
+    ("ייבוא",   "import"),
+    ("מדיה",    "media"),
+    ("SaaS",    "saas"),
+    ("כספים",  "finance"),
+    ("כללי",   "general"),
+]
+
+# ממופה לערכים חוקיים ב-Airtable EVENT_TYPE
+ENTRY_TYPES = [
+    ("פגישה",      "Milestone"),
+    ("שיחה",       "Announcement"),
+    ("החלטה",      "Decision"),
+    ("סיכון",      "Crisis"),
+    ("הצעת מחיר", "Other"),
+    ("רעיון",      "Learning"),
+    ("אחר",        "Other"),
+]
+
+_STATE_TTL_SECONDS = 30 * 60  # 30 דקות
+_ALLOWED_ROLES = ("owner", "manager", "partner")
+
+# ── State store — key: telegram user_id (str) ───────────────────
+# האובייקט identity המלא נשמר בתוך state["identity"] (נקבע פעם אחת ב-/update).
+_pending: dict[str, dict] = {}
+
+
+# ── Registration ─────────────────────────────────────────────────
+
+def register_update_command(bot, get_identity):
+    """נקרא מ-app.py פעם אחת ב-startup."""
+    try:
+        from feature_flags import is_enabled
+        if not is_enabled("FEATURE_BUSINESS_UPDATE"):
+            logger.info("[C20] FEATURE_BUSINESS_UPDATE=off — /update not registered")
+            return
+    except ImportError:
+        pass  # dev mode
+
+    # ── /update ─────────────────────────────────────────────────
+    @bot.message_handler(commands=["update", "עדכון"])
+    def cmd_update(msg):
+        identity = get_identity("telegram", str(msg.from_user.id))
+        if not identity or identity.role not in _ALLOWED_ROLES:
+            bot.send_message(msg.chat.id, "אין הרשאה לפקודה זו.")
+            return
+
+        uid = str(msg.from_user.id)
+        _pending[uid] = {
+            "step":       "domain",
+            "identity":   identity,
+            "created_at": _now_ts(),
+        }
+
+        bot.send_message(
+            msg.chat.id,
+            "📋 *עדכון עסקי חדש*\n\nבחר תחום:",
+            reply_markup=_domain_keyboard(),
+            parse_mode="Markdown",
+        )
+
+    # ── /cancel ──────────────────────────────────────────────────
+    @bot.message_handler(commands=["cancel", "בטל"])
+    def cmd_cancel(msg):
+        uid = str(msg.from_user.id)
+        if _pending.pop(uid, None):
+            bot.send_message(msg.chat.id, "✅ העדכון בוטל.")
+        else:
+            bot.send_message(msg.chat.id, "אין עדכון פתוח לביטול.")
+
+    # ── inline: בחירת תחום ───────────────────────────────────────
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("upd_domain:"))
+    def cb_domain(call):
+        uid   = str(call.from_user.id)
+        state = _get_valid_state(uid)
+
+        if not state or state.get("step") != "domain":
+            bot.answer_callback_query(call.id, "פג תוקף — נסה /update מחדש.")
+            return
+
+        state["domain"] = call.data.split(":")[1]
+        state["step"]   = "type"
+        _pending[uid]   = state
+
+        bot.edit_message_text(
+            f"✅ תחום: *{_domain_label(state['domain'])}*\n\nסוג עדכון:",
+            call.message.chat.id,
+            call.message.message_id,
+            reply_markup=_type_keyboard(),
+            parse_mode="Markdown",
+        )
+        bot.answer_callback_query(call.id)
+
+    # ── inline: בחירת סוג ───────────────────────────────────────
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("upd_type:"))
+    def cb_type(call):
+        uid   = str(call.from_user.id)
+        state = _get_valid_state(uid)
+
+        if not state or state.get("step") != "type":
+            bot.answer_callback_query(call.id, "פג תוקף — נסה /update מחדש.")
+            return
+
+        state["entry_type"] = call.data.split(":")[1]
+        state["step"]       = "text"
+        _pending[uid]       = state
+
+        bot.edit_message_text(
+            f"✅ {_domain_label(state['domain'])} → {state['entry_type']}\n\n"
+            "✍️ מה קרה? כתוב בחופשיות:",
+            call.message.chat.id,
+            call.message.message_id,
+            parse_mode="Markdown",
+        )
+        bot.answer_callback_query(call.id)
+
+    # ── לכידת טקסט חופשי ────────────────────────────────────────
+    # סינון כפול: step==text AND לא פקודה.
+    # הסינון נשען רק על ה-dict המקומי — אסור לקרוא resolve_identity כאן.
+    @bot.message_handler(
+        func=lambda m: (
+            _pending.get(str(m.from_user.id), {}).get("step") == "text"
+            and not m.text.startswith("/")
+        )
+    )
+    def capture_text(msg):
+        uid   = str(msg.from_user.id)
+        state = _pending.pop(uid, None)
+
+        if not state:
+            return
+
+        # TTL check פעם נוספת — הגנה כפולה
+        if _is_expired(state):
+            bot.send_message(msg.chat.id, "⏱ פג תוקף — נסה /update מחדש.")
+            return
+
+        # re-check הרשאה לפני כתיבה בפועל — לעולם לא לסמוך על state ישן בלבד
+        identity = get_identity("telegram", uid)
+        if not identity or identity.role not in _ALLOWED_ROLES:
+            bot.send_message(msg.chat.id, "אין הרשאה לפקודה זו.")
+            return
+
+        record = _save_to_business_memory(
+            identity   = identity,
+            title      = f"{state['entry_type']}: {msg.text[:60]}",
+            raw_text   = msg.text,
+            domain     = state.get("domain", "general"),
+            entry_type = state.get("entry_type", "Other"),
+        )
+
+        if record:
+            bot.send_message(
+                msg.chat.id,
+                f"✅ *נשמר בזיכרון עסקי*\n\n"
+                f"📌 {state['entry_type']} | {_domain_label(state['domain'])}\n"
+                f"_{msg.text[:80]}{'...' if len(msg.text) > 80 else ''}_",
+                parse_mode="Markdown",
+            )
+        else:
+            bot.send_message(
+                msg.chat.id,
+                "⚠️ הטקסט התקבל אבל לא נשמר. בדוק logs.",
+            )
+
+
+# ── שמירה — דרך gateway בלבד ────────────────────────────────────
+
+def _save_to_business_memory(
+    identity,
+    title: str,
+    raw_text: str,
+    domain: str,
+    entry_type: str,
+) -> dict | None:
+    source_tag = f"cmd_update:{identity.tenant_id}:{identity.user_id}"
+    try:
+        from tools.airtable_gateway import airtable_create
+        from airtable_schema import Tables, BusinessMemoryFields as BMF
+
+        fields = {
+            BMF.TITLE:       title,
+            BMF.DESCRIPTION: raw_text,
+            BMF.DATE:        datetime.now(ZoneInfo("Asia/Jerusalem")).isoformat(),
+            BMF.EVENT_TYPE:  entry_type,   # ערך חוקי: Decision|Milestone|Crisis|Announcement|Learning|Other
+            BMF.TAGS:        [domain],     # multi-select — חייב להיות list
+            BMF.IMPACT:      "Manual Entry",
+        }
+
+        record = airtable_create(
+            Tables.BUSINESS_MEMORY,
+            fields,
+            source=source_tag,
+        )
+
+        if record:
+            logger.info(f"[C20] saved id={record.get('id','?')} domain={domain} type={entry_type}")
+            try:
+                from tools.airtable_security import audit_log_airtable
+                audit_log_airtable(
+                    "cmd_update",
+                    identity,
+                    {"table": Tables.BUSINESS_MEMORY, "domain": domain, "entry_type": entry_type},
+                    f"created id={record.get('id', '?')}",
+                )
+            except Exception:
+                pass  # audit לעולם לא שובר את ה-flow
+        else:
+            logger.warning(f"[C20] airtable_create returned None source={source_tag}")
+
+        return record
+
+    except Exception as e:
+        logger.error(f"[C20] _save_to_business_memory failed: {e}")
+        return None
+
+
+# ── Context injection — נקרא מ-context.py ───────────────────────
+
+def get_recent_business_context(domain: str = "general", limit: int = 5) -> str:
+    """
+    קריאה בלבד — לא דרך gateway.
+    מחזיר מחרוזת ריקה אם אין נתונים או כשל — לא חוסם.
+    מוגבל ל-600 תווים כדי לא להכביד על prompt.
+    """
+    try:
+        from tools.airtable_tools import airtable_get
+        from airtable_schema import Tables, BusinessMemoryFields as BMF
+
+        if domain and domain != "general":
+            formula = (
+                f"OR("
+                f"FIND('{domain}',ARRAYJOIN({{{BMF.TAGS}}})),"
+                f"FIND('general',ARRAYJOIN({{{BMF.TAGS}}}))"
+                f")"
+            )
+        else:
+            formula = ""
+
+        raw = airtable_get(Tables.BUSINESS_MEMORY, formula)
+
+        if not raw or "אין רשומות" in raw or "❌" in raw:
+            return ""
+
+        text = f"[זיכרון עסקי]\n{raw}"
+        return text[:600]   # תקרה קשיחה
+
+    except Exception as e:
+        logger.debug(f"[C20] get_recent_business_context failed (non-blocking): {e}")
+        return ""
+
+
+# ── פונקציות עזר ────────────────────────────────────────────────
+
+def _now_ts() -> float:
+    return datetime.now(timezone.utc).timestamp()
+
+def _is_expired(state: dict) -> bool:
+    return (_now_ts() - state.get("created_at", 0)) > _STATE_TTL_SECONDS
+
+def _get_valid_state(uid: str) -> dict | None:
+    state = _pending.get(uid)
+    if not state:
+        return None
+    if _is_expired(state):
+        _pending.pop(uid, None)
+        return None
+    return state
+
+def _domain_keyboard():
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    markup = InlineKeyboardMarkup(row_width=3)
+    markup.add(*[
+        InlineKeyboardButton(label, callback_data=f"upd_domain:{key}")
+        for label, key in DOMAINS
+    ])
+    return markup
+
+def _type_keyboard():
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    markup = InlineKeyboardMarkup(row_width=3)
+    markup.add(*[
+        InlineKeyboardButton(label, callback_data=f"upd_type:{val}")
+        for label, val in ENTRY_TYPES
+    ])
+    return markup
+
+def _domain_label(key: str) -> str:
+    return next((l for l, k in DOMAINS if k == key), key)

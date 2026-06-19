@@ -446,6 +446,14 @@ def cmd_coins(msg):
         bot.send_message(msg.chat.id, f"ג ׳©׳’׳™׳׳”: {e}")
 
 
+# ── C20: /update command ─────────────────────────────────────────
+try:
+    from cmd_update import register_update_command
+    register_update_command(bot, resolve_identity)
+    logger.info("[C20] /update command registered")
+except Exception as _e:
+    logger.warning(f"[C20] /update registration failed: {_e}")
+
 _scheduler_thread = next(
     (t for t in threading.enumerate() if t.name == "scheduler" and t.is_alive()),
     None,

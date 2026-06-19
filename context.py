@@ -239,6 +239,16 @@ def build_context(
     _date_line = _now_il.strftime("📅 היום: %A %d/%m/%Y | שעה: %H:%M (ישראל)")
     system     = _date_line + "\n\n" + system
 
+    # ── C20: Business Memory injection ──────────────────────────────
+    if identity.domain_id and identity.domain_id != "unknown":
+        try:
+            from cmd_update import get_recent_business_context
+            _bm = get_recent_business_context(domain=identity.domain_id, limit=5)
+            if _bm:
+                system += f"\n\n{_bm}"
+        except Exception:
+            pass  # non-blocking
+
     allowed_tools = _filter_tools(identity.role)
 
     logger.info(
