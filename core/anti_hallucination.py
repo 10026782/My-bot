@@ -34,7 +34,7 @@ _NO_TOOL_CLAIMS: list[tuple[re.Pattern, frozenset[str]]] = [
     # Agent claims it checked / created a calendar event
     (
         re.compile(
-            r"(בדקתי.*ביומן|אין חפיפות|הפגישה קבועה|קבעתי|נוצר ביומן|הוסף לקלנדר|"
+            r"(בדקתי.*(ביומן|קלנדר)|אין חפיפות|הפגישה קבועה|קבעתי|נוצר ביומן|הוסף לקלנדר|"
             r"יוצר (את ה)?(פגיש|אירוע)|קובע (את ה)?(פגיש|אירוע)|פגישה חדשה)",
             re.UNICODE,
         ),
