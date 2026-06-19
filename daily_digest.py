@@ -7,7 +7,7 @@ import os
 import urllib.parse
 from datetime import date, timedelta
 
-from airtable_schema import LeadFields
+from airtable_schema import LeadFields, Tables, PaymentFields, PaymentStatus
 
 logger = logging.getLogger(__name__)
 
@@ -201,11 +201,11 @@ def _upcoming_payments(errors: list) -> str:
         today    = date.today()
         deadline = today + timedelta(days=7)
         records  = _fetch(
-            "תשלומים (Payments)",
+            Tables.PAYMENTS,
             f"AND("
-            f"{{סטטוס}} != 'התקבל', "
-            f"IS_BEFORE({{תאריך}}, '{deadline.isoformat()}'), "
-            f"IS_AFTER({{תאריך}}, '{today.isoformat()}')"
+            f"{{{PaymentFields.STATUS}}} != '{PaymentStatus.RECEIVED}', "
+            f"IS_BEFORE({{{PaymentFields.DATE}}}, '{deadline.isoformat()}'), "
+            f"IS_AFTER({{{PaymentFields.DATE}}}, '{today.isoformat()}')"
             f")",
             max_rec=10,
         )
@@ -215,11 +215,11 @@ def _upcoming_payments(errors: list) -> str:
         total = 0
         for r in records:
             f      = r.get("fields", {})
-            amount = f.get("סכום", 0)
+            amount = f.get(PaymentFields.AMOUNT, 0)
             total += amount if isinstance(amount, (int, float)) else 0
             amt    = f"₪{amount:,.0f}" if isinstance(amount, (int, float)) else "—"
             lines.append(
-                f"• {f.get('אסמכתא','?')} | {amt} | {_fmt(f.get('תאריך',''))} | {f.get('סטטוס','—')}"
+                f"• {f.get(PaymentFields.REF,'?')} | {amt} | {_fmt(f.get(PaymentFields.DATE,''))} | {f.get(PaymentFields.STATUS,'—')}"
             )
         lines.append(f"💰 *סה\"כ: ₪{total:,.0f}*")
         return "\n".join(lines)
