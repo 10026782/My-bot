@@ -39,6 +39,12 @@ grep -n "FUNCTION_NAME\|CLASS_NAME\|CONSTANT_NAME" path/to/file.py
 **כלל הזהב:**
 > "Merged" מוכח ב-grep על main, לא ב-git log ולא ב-PR status.
 
+**RULE 15 — אין טענה בלי אימות:**
+המילים "fixed" / "resolved" / "deployed" / "completed" / "working" (ובעברית: "תוקן" / "נפתר" / "הופעל" / "הושלם" / "עובד") מחייבות הוכחה: merge ל-main + deployment שהושלם + אימות בפרודקשן (שלבים 1-3 לעיל). בלי שלושת אלה, הסטטוס המדווח הוא:
+> "Implemented but not yet verified" — מומש אך לא אומת.
+
+ראה גם `GOVERNANCE_RULES.md` — Rules 13-18.
+
 ## Cursor Cloud specific instructions
 
 ### Definition of Done — ROADMAP.md
