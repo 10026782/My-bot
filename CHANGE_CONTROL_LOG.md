@@ -292,3 +292,36 @@
 - **Docs עודכנו:** AI_CONTEXT.md (PR #81, `56f3ce9`), CHANGE_CONTROL_LOG.md (זה), ROADMAP.md — 19/06/2026, retroactively (drift תוקן)
 - **Feature Flag:** N/A
 - **Rollback plan:** revert PR #80 מ-`main` אם מתגלה רגרסיה בפרודקשן (שינוי מבודד ב-`app.py`/`core/anti_hallucination.py`)
+
+### Calendar schema restoration + A32 negative-claim gate
+- **תאריך:** 19/06/2026 (מוזג)
+- **סוג:** Bug Fix (P0 — production regression) + Hardening
+- **Requirement:** התגלה מתוך transcript פרודקשן (הבעלים) שהראה את הסוכן "ממציא" בדיקת קלנדר ודרישת אימייל לא קיימת
+- **תיאור הבאג:** commit `9384f89` (14/06/2026, "permission/schema hardening") הסיר 5 schemas מ-`tools/schemas.py` — בהן `calendar_create_event` — מכיוון ש-`GOOGLE_REFRESH_TOKEN` לא היה מוגדר בזמנו. ה-OAuth כבר חי בפרודקשן (אומת מלוגים אמיתיים — `gmail_draft` הצליח), אבל ה-schema לא הוחזר. תוצאה: הסוכן לא יכול היה לקרוא ל-`calendar_create_event` בכלל (לא משנה role/registry/dispatcher), ופיצה על זה ב"המצאת" צ'קים/דרישות לא קיימות (כמו "אני צריך את האימייל שלך" — לפונקציה אין בכלל פרמטר email). בנוסף, A32 (`core/anti_hallucination.py`) הגן רק על הצלחות מומצאות, לא כשלים מומצאים — הסוכן יכל לדווח "הפגישה לא נשמרה" בלי שום קריאת tool בפועל.
+- **תיקון:** (1) הוחזרו 5 schemas ל-`tools/schemas.py` (`search_drive`, `read_drive_file`, `calendar_create_event`, `gmail_send_draft`, `gmail_read`). (2) הורחב `_NO_TOOL_CLAIMS` הקיים ב-A32 לתפוס ניסוח עתיד-קרוב ("יוצר את הפגישה"/"קובע את האירוע") וגם וריאנט "קלנדר" (לא רק "ביומן"). (3) נוסף gate סימטרי חדש — `_NEGATIVE_NO_TOOL_CLAIMS` + `_has_negative_evidence()` — שתופס דיווחי כשל מומצאים. שונה מ-gate ההצלחה: `ok=False` *כן* נחשב evidence תקין (קריאה אמיתית שנכשלה מצדיקה דיווח כשל), בניגוד ל-gate ההצלחה שדורש `ok=True`.
+- **Commit:** `aa06c4c`, `4712416`, `ab7c1b4`, `870d874`
+- **PR:** #82 — **ממוזג ל-`main`**
+- **Review על ידי:** הבעלים (אישור מפורש "yes" להחזרת schemas, ואישור מפורש לבניית negative-claim gate)
+- **Deploy תאריך:** לא ידוע — דרוש בדיקה ידנית מול Render
+- **Verified בפרודקשן:** לא — נבדק מקומית בלבד; ראו PR #83 למטה לאימות חלקי בפרודקשן (calendar+gmail_read אומתו דרך לוגים אחרי deploy)
+- **Verification ראיה:** `py_compile` exit 0; `smoke_tests.py` PASS; `test_integration.py` 4/4; `core/router/test_router.py` 29/29; `test_a32_enforcement.py` 6/6; `test_c53a.py` 50/50; טסט inline ייעודי אימת שכשל אמיתי (`ok=False`) ממשיך לעבור דרך ה-gate החדש בלי לדרוס אותו ב-fallback
+- **Docs עודכנו:** CHANGE_CONTROL_LOG.md (זה), ROADMAP.md — 19/06/2026
+- **Feature Flag:** N/A
+- **Rollback plan:** revert PR #82 מ-`main` אם מתגלה רגרסיה — שינוי מבודד ב-`tools/schemas.py`/`core/anti_hallucination.py`
+
+### Drive error reporting fix + daily_digest Payments English-schema fix
+- **תאריך:** 19/06/2026 (מוזג)
+- **סוג:** Bug Fix
+- **Requirement:** התגלה מבדיקת פרודקשן ידנית של הבעלים אחרי deploy של PR #82 (לוגים: calendar ✅, gmail_read ✅, drive ❌)
+- **תיאור הבאג (1 — Drive):** `drive_search()`/`drive_read_file()` ב-`tools/google_tools.py` קראו ל-`r.json().get("files", [])` בלי לבדוק `r.status_code`. לוג פרודקשן הציג `403 Forbidden` מ-Drive API, אבל הקוד דיווח "לא נמצא כלום בדרייב" — כישלון הרשאות דיווח כ"לא קיים". הסיבה הסבירה ביותר ל-403: ל-`GOOGLE_REFRESH_TOKEN` אין Drive scope (תיקון credential, לא קוד — מחוץ לטווח PR זה).
+- **תיאור הבאג (2 — Daily Digest):** `daily_digest.py`'s `_upcoming_payments()` חיפש טבלה `"תשלומים (Payments)"` עם שדות עבריים (`סכום`/`תאריך`/`סטטוס`/`אסמכתא`, ערך `'התקבל'`). אומת מול ה-Airtable **החי** (base `app4bcgoX7t0HUVnm`, table `tbl027IEVotG1cy46`) שהטבלה/השדות כבר `Payments`/`reference`/`amount`/`date`/`status` (ערך `'received'`) — `airtable_schema.py`'s `PaymentFields`/`PaymentStatus` כבר תיקנו את זה, אבל `daily_digest.py` מעולם לא עבר לקבועים החדשים. תוצאה: סקציית התשלומים בדוח הבוקר החזירה אפס רשומות תמיד.
+- **תיקון:** (1) שלושת קריאות ה-Drive API ב-`google_tools.py` בודקות `status_code` ומחזירות שגיאה מפורשת. (2) `daily_digest.py` עבר לייבא ולהשתמש ב-`Tables.PAYMENTS`/`PaymentFields`/`PaymentStatus` מ-`airtable_schema.py` במקום literals עבריים.
+- **Commit:** `86087e6` (Drive), `acf676f` (Daily Digest)
+- **PR:** #83 — **ממוזג ל-`main`** (merge commit `7df22c3`)
+- **Review על ידי:** הבעלים
+- **Deploy תאריך:** לא ידוע — דרוש בדיקה ידנית מול Render
+- **Verified בפרודקשן:** לא — נבדק מקומית בלבד
+- **Verification ראיה:** `py_compile` exit 0; `smoke_tests.py` PASS; `test_integration.py` 4/4; `core/router/test_router.py` 29/29; שדות/ערכים אומתו ישירות מול live schema דרך Airtable MCP (`get_table_schema`)
+- **Docs עודכנו:** CHANGE_CONTROL_LOG.md (זה), ROADMAP.md — 19/06/2026; PR #83 comment תיעד 8 קבצים נוספים עם drift דומה (`tma_api.py`, `tools/airtable_tools.py`, `schema_intelligence.py` ועוד) — **לא תוקנו**, מחוץ לטווח הסשן
+- **Feature Flag:** N/A
+- **Rollback plan:** revert PR #83 מ-`main` אם מתגלה רגרסיה — שינוי מבודד ב-`tools/google_tools.py`/`daily_digest.py`
