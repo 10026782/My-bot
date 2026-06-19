@@ -275,20 +275,20 @@
 - **Feature Flag:** N/A (משנה contract פנימי של tool results; אין flag — כל tools שהשתנו פעילים תמיד)
 - **Rollback plan:** לא תועד — revert PR #79 מ-`main` אם מתגלה רגרסיה בפרודקשן
 
-### C53-A — Hotfix: app.py לא טופל בזמן ה-PR (KeyError + false-success)
-- **תאריך:** 19/06/2026 — **קוד מקומי, לא commit, לא merge עדיין**
-- **סוג:** Bug Fix (P0 — production regression)
+### A32 / C53-A Hotfix — identity-based NO-TOOL-EVIDENCE enforcement + app.py crash fix
+- **תאריך:** 19/06/2026 (מוזג)
+- **סוג:** Bug Fix (P0 — production regression) + Hardening
 - **Requirement:** התגלה ב-audit ממוקד על "C53 approval/action truth" (מבוקש על ידי הבעלים, 19/06/2026)
 - **תיאור הבאג:** PR #79 שינה 5 tools (`airtable_add`/`airtable_update`/`gmail_draft`/`gmail_send_draft`/`calendar_create_event`) להחזיר `dict` structured במקום `str`, אבל **לא נגע ב-`app.py`** (לפי commit message `3a34529` — "Complete the C53-A contract on tools missing from cherry-pick" מצטט רק `google_tools.py`/`airtable_tools.py`/`rate_limiter.py`). שני מקומות ב-`app.py` עדיין הניחו `str`:
-  1. Main tool loop (שורה ~964 לפני התיקון) — `result[:80]` על dict → `KeyError: slice(...)` בכל קריאה ישירה (לא דרך approval) ל-4 מתוך 5 הכלים. נתפס ע"י ה-`except Exception` הגלובלי ב-`run_agent()` (שורה ~1007) → המשתמש מקבל "משהו השתבש" גנרי, אבל אין כתיבה מאומתת ל-Airtable/Calendar/Gmail בפועל בתגובה למודל.
-  2. Approval callback (`_handle_approval_callback`, שורה ~636) — לא קרא ל-`verify_execution()` בכלל; דיווח "✅ הפעולה בוצעה" למשתמש ללא תלות ב-`result["ok"]` — בדיוק כשל "approval truth" שה-audit חיפש.
-- **תיקון:** נוסף helper `_tool_user_message()` ב-`app.py`; שני המקומות עכשיו קוראים ל-`verify_execution()`/מחלצים `user_message` לפני logging/slicing/שליחה למשתמש. אם `ok=False` — מדווח כשל בפועל, לא הצלחה כוזבת.
-- **Commit:** אין עדיין — שינוי מקומי ב-worktree
-- **PR:** אין עדיין
-- **Review על ידי:** לא בוצע
-- **Deploy תאריך:** N/A — לא נדחף
-- **Verified בפרודקשן:** לא — לא נדחף לכלל
-- **Verification ראיה:** שכפול מדויק של ה-crash (`KeyError: slice(None, 80, None)`) על dict לפני התיקון; `py_compile` exit 0, `smoke_tests.py` 6/6 PASS, `test_integration.py` 4/4 PASS אחרי התיקון
-- **Docs עודכנו:** CHANGE_CONTROL_LOG.md (זה)
+  1. Main tool loop — `result[:80]` על dict → `KeyError: slice(...)` בכל קריאה ישירה (לא דרך approval) ל-4 מתוך 5 הכלים. נתפס ע"י ה-`except Exception` הגלובלי ב-`run_agent()` → המשתמש מקבל "משהו השתבש" גנרי, אבל אין כתיבה מאומתת ל-Airtable/Calendar/Gmail בפועל בתגובה למודל.
+  2. Approval callback (`_handle_approval_callback`) — לא קרא ל-`verify_execution()` בכלל; דיווח "✅ הפעולה בוצעה" למשתמש ללא תלות ב-`result["ok"]` — בדיוק כשל "approval truth" שה-audit חיפש.
+- **תיקון:** נוסף helper `_tool_user_message()` ב-`app.py`; שני המקומות עכשיו קוראים ל-`verify_execution()`/מחלצים `user_message` לפני logging/slicing/שליחה למשתמש. אם `ok=False` — מדווח כשל בפועל, לא הצלחה כוזבת. בנוסף, חוּזק A32's NO-TOOL-EVIDENCE gate (`core/anti_hallucination.py`): קודם התאמת evidence הייתה מבוססת ניחוש keywords בטקסט התגובה (פספסה קטגוריית Airtable כליל וניסוח "טיוטה נשמרה" ב-Gmail); עכשיו evidence נבדק לפי tool identity (`tool_results_log` נושא שם tool אמיתי + סטטוס `ok` מ-`app.py`) מול סט כלים נדרשים מפורש per-claim-category. כלי שנכשל בעצמו לא נחשב evidence. `_SAFE_FALLBACK` הוחלף ב-`_NO_TOOL_EVIDENCE_FALLBACK` ספציפי יותר. נוסף `test_a32_enforcement.py` שמריץ את `app.run_agent()` קצה-לקצה (Identity/Router/Context/Anthropic מדומים).
+- **Commit:** `42dd137` (תוכן), `b34c59f` (docs drift fix)
+- **PR:** #80 — **ממוזג ל-`main`** (merge commit `7496628`)
+- **Review על ידי:** לא ידוע
+- **Deploy תאריך:** לא ידוע — דרוש בדיקה ידנית
+- **Verified בפרודקשן:** לא ידוע — נבדק מקומית בלבד
+- **Verification ראיה:** שכפול מדויק של ה-crash (`KeyError: slice(None, 80, None)`) על dict לפני התיקון; `py_compile` exit 0; `core/anti_hallucination.py` self-tests 31/31; `test_c53a.py` 50/50; `test_integration.py` 4/4; `smoke_tests.py` 6/6; `test_a32_enforcement.py` 6/6 — כל הריצות מקומיות
+- **Docs עודכנו:** AI_CONTEXT.md (PR #81, `56f3ce9`), CHANGE_CONTROL_LOG.md (זה), ROADMAP.md — 19/06/2026, retroactively (drift תוקן)
 - **Feature Flag:** N/A
-- **Rollback plan:** N/A — לא נדחף; אם נדחף בעתיד, revert קל (שינוי מבודד ב-2 בלוקים ב-`app.py`)
+- **Rollback plan:** revert PR #80 מ-`main` אם מתגלה רגרסיה בפרודקשן (שינוי מבודד ב-`app.py`/`core/anti_hallucination.py`)
