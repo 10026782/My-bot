@@ -1,14 +1,14 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-06-18
-**עודכן על ידי:** Claude Code — session a627531c-4e25-5e9a-9403-f78e0b64ecf4 (Screen Filter Gateway, PR #75)
+**עודכן:** 2026-06-19
+**עודכן על ידי:** Claude Code — docs-drift fix session (main aligned to `be65801`; PR #75/#76/#77/#79 merged)
 
 ---
 
 ## 1. SYSTEM STATE — מה רץ עכשיו בפרודקשן
 - **Branch בפרודקשן:** `main` (לפי `docs/operations/DEPLOYMENT.md:87` — Auto-Deploy: Yes, main branch). לא אומת ישירות מול Render Dashboard.
-- **Commit אחרון בפרודקשן:** לא ידוע — דרוש בדיקה ידנית. `origin/main` ב-GitHub עומד על `7313b2e3da6801196aaab88d1528af36b6c17aec` ("Merge pull request #67: N06 — Ventures Screen (TMA)", 2026-06-17 11:41 +0300), אבל אין גישה ל-Render Dashboard מהסביבה הזו כדי לאשר ש-Render בפועל פרוס על commit זה (DEPLOYMENT.md מזהיר במפורש: "Render על commit ישן" הוא תרחיש ידוע, ויש לבדוק עם `git ls-remote origin main` מול Render Events).
+- **Commit אחרון בפרודקשן:** לא ידוע — דרוש בדיקה ידנית. `origin/main` ב-GitHub עומד על `be65801` ("Merge pull request #79 from feat/c53a-on-main", אומת ישירות עם `git log origin/main -1`, 2026-06-19). מאז `4e933b0` (PR #69, ה-baseline הקודם) מוזגו ל-`main`: PR #70–#75, #77, #79 (merge commits מאומתים ב-git log); PR #76 מוזג כ-squash (ראה הערה ב-commit `f7d7e4f`) — ancestry לא ניתן לאימות ישיר דרך merge-base, מתבסס על commit message בלבד. **PR #78 — לא נמצא בהיסטוריית git בכלל; לא לסמוך על קיומו עד שיאומת.** אין גישה ל-Render Dashboard מהסביבה הזו כדי לאשר ש-Render בפועל פרוס על commit זה (DEPLOYMENT.md מזהיר במפורש: "Render על commit ישן" הוא תרחיש ידוע, ויש לבדוק עם `git ls-remote origin main` מול Render Events).
 - **תאריך deploy אחרון:** לא ידוע — דרוש בדיקה ידנית (Render Dashboard → Events).
 - **סטטוס `/health` endpoint:** לא ידוע — דרוש בדיקה ידנית. נסיון `curl https://my-bot-jqz2.onrender.com/health` מסביבת האודיט הזו נחסם ב-egress (`403 Host not in allowlist`) — לא ניתן לאמת מכאן.
 - **סטטוס Telegram bot:** לא ידוע — דרוש בדיקה ידנית (`getWebhookInfo` לא נגיש מסביבה זו).
@@ -23,7 +23,9 @@
 | `py_compile` על מודולי ליבה (`app.py`, `tma_api.py`, `airtable_schema.py`, `crm.py`, `tool_registry.py`, `tools/dispatcher.py`) | 2026-06-17 | exit code 0 | Claude Code Audit |
 | `python3 test_integration.py` | 2026-06-17 | 4/4 PASS | Claude Code Audit |
 | `python3 smoke_tests.py` | 2026-06-17 | 5 PASS, 1 FAIL (`anthropic` import — תלוי-סביבה, ידוע מראש, לא קשור לקוד) | Claude Code Audit |
-| C53 Screen Filter Gateway — `py_compile`/`smoke_tests.py`/`test_integration.py` | 2026-06-18 | `py_compile` exit 0; `smoke_tests.py` 6/6 PASS (תלויות הותקנו ב-session); `test_integration.py` 4/4 PASS; תרחישי A–F מה-SPEC (`SCREEN_CONFIGS`/`_build_formula` ישירות) — כל ה-assertions עברו | Claude Code, PR #75 (commit `5b07088`, **לא ממוזג ל-main עדיין**) |
+| C53 Screen Filter Gateway — `py_compile`/`smoke_tests.py`/`test_integration.py` | 2026-06-18 | `py_compile` exit 0; `smoke_tests.py` 6/6 PASS (תלויות הותקנו ב-session); `test_integration.py` 4/4 PASS; תרחישי A–F מה-SPEC (`SCREEN_CONFIGS`/`_build_formula` ישירות) — כל ה-assertions עברו | Claude Code, PR #75 (commit `5b07088`), **ממוזג ל-main** ב-`6218155` (18/06/2026) |
+| O4 Finance Pulse — English schema + Gateway wiring | 2026-06-18 | code-complete + merged; production verification לא בוצע מהסביבה הזו | PR #77, merge commit `0608798` |
+| C53-A — structured tool results + `verify_execution` dict contract | 2026-06-19 | `py_compile` exit 0 על 6 הקבצים שהשתנו; `smoke_tests.py` 6/6 PASS; `python3 test_integration.py` (עם `PYTHONIOENCODING=utf-8`, ראו known console-encoding quirk) 4/4 PASS | Claude Code, PR #79, merge commit `be65801` |
 | BUG-005/006 (`/status` decorator, Hub debug block) | 2026-06-16 | commit `628d2bb` | git log (לא אומת בפרודקשן בפועל) |
 | תיקון tier ל-writable singleSelect | לא ידוע תאריך מדויק | commit `3d8ab50` + סכמה חיה מאשרת `tier` קיים כ-`singleSelect` (`fld4eC2mEYrviL3oP`) | Claude Code Audit (השוואת קוד מול סכמה חיה) |
 
@@ -39,10 +41,11 @@
 | LEAD_QUALIFIER | לא פעיל (F09) | `LEAD_QUALIFIER=off` | פיצ'ר לא הופעל מעולם |
 | MULTITENANT | כבוי (F08) | `MULTITENANT=off` | לא בשימוש |
 | VOICE_IVR | לא פעיל (F07) | `VOICE_IVR=off` | קו Twilio IVR לא מומש/לא מופעל |
-| EMAIL_INBOUND | לא פעיל (F06) | `EMAIL_INBOUND=off` | ערוץ email נכנס לא מופעל |
+| EMAIL_INBOUND | לא פעיל (F06) | `EMAIL_INBOUND=off` | ערוץ email נכנס לא מופעל. **תלות נוספת (אומת בקוד, 19/06/2026):** גם אם `EMAIL_INBOUND=true`, `inbound_handler.handle_inbound()` עושה early-return אם `LEAD_CAPTURE=false` — לא נוצר/מתעדכן ליד. שני הדגלים נדרשים יחד. נשאר כבוי עד החלטה מודעת (ראו ROADMAP.md F06) |
 | `Next Action` field (Leads) | CODE DONE, לא תוקן | — | trailing space + mismatch מלא בין live Airtable לקוד (`airtable_schema.py:LeadFields.NEXT_STEP`); אינו נכתב בפועל מ-`LeadDetail.tsx` כיום, אך דורש follow-up ticket לפני שמחברים כתיבה אמיתית — ראו BUG_AUDIT_LOG.md "FLAGGED (not fixed)" |
 | AUDIENCE_INTELLIGENCE / INTERACTION_INTELLIGENCE / KPI_ENGINE / LEARNING_ENGINE / REVENUE_ATTRIBUTION | FUTURE — לא פעיל | כבויים | לא מומשו (FUTURE per `feature_flags.py:46-51`) |
-| `SCREEN_CONFIGS["finance_pulse"/"assets_overview"/"activity_feed"]` (`tma_api.py`, PR #75) | מוגדר, לא מחובר | — | configs קיימים אך אין endpoint שקורא להם עדיין; `finance_pulse` ממתין ל-raw_formula דינמית לתאריך (ראו ROADMAP N11) |
+| `SCREEN_CONFIGS["assets_overview"/"activity_feed"]` (`tma_api.py`, PR #75) | מוגדר, לא מחובר | — | configs קיימים אך אין endpoint שקורא להם עדיין |
+| `SCREEN_CONFIGS["finance_pulse"]` (`tma_api.py`, PR #77) | מחובר ל-`finance_pulse()` endpoint | — | `raw_formula` עדיין סטטי (לא דינמי לפי תאריך overdue/קרוב) — ראו ROADMAP N11; שני gaps ידועים: `crm.py PaymentFields.CONTACT/NOTES` מצביעים על שדות שלא קיימים בטבלת Payments החיה, case-mismatch ב-`_build_formula()` לדומיין Payments/Expenses |
 
 ## 4. ACTIVE DECISIONS — החלטות ארכיטקטוניות שחייבים לכבד
 1. Ventures = טבלה נפרדת (לא הרחבת Deals.Status) — החלטה 17/06/2026
@@ -79,7 +82,9 @@
 - 🔲 N05 Daily Digest שדרוג — קוד קיים (commit `5490943`, "wire real Score + computed tier into daily digest"), verify בפרודקשן לא ידוע
 - 🔲 F05a Meta WhatsApp — code done, לא verified
 - 🟡 Approval Policy (Emergency Window + OTP + Policy Gate) — code-complete בכל 3 הפאזות, `EMERGENCY_WINDOW` flag כבוי, ממתין לאימות פרודקשן לפני הדלקה
-- 🟡 C53 Screen Filter Gateway — `SCREEN_CONFIGS`/`_build_formula()` ב-`tma_api.py` (PR #75, commit `5b07088`, CI/Vercel preview ירוק). **לא ממוזג ל-main** — ממתין ל-review/merge. תשתית config-driven ל-multi-tenant עתידי; `finance_pulse`/`assets_overview`/`activity_feed` configs מוגדרים ב-`SCREEN_CONFIGS` אך לא מחוברים לאף endpoint עדיין (ראו ROADMAP N11)
+- ✅ C53 Screen Filter Gateway — `SCREEN_CONFIGS`/`_build_formula()` ב-`tma_api.py`. **מוזג ל-`main`** דרך PR #75 (commit `5b07088`, merge `6218155`). תשתית config-driven ל-multi-tenant עתידי; `assets_overview`/`activity_feed` configs מוגדרים אך לא מחוברים לאף endpoint עדיין (ראו ROADMAP N11)
+- ✅ O4 Finance Pulse — `finance_pulse()` חובר ל-`SCREEN_CONFIGS["finance_pulse"]` + English schema migration. **מוזג ל-`main`** דרך PR #77 (merge `0608798`). Production verification לא בוצע.
+- ✅ C53-A — structured tool results (`{ok, tool, external_id, evidence, user_message}`) + `verify_execution` dict contract. **מוזג ל-`main`** דרך PR #79 (merge `be65801`). Production verification לא בוצע.
 
 ## 8. OPEN RISKS
 | סיכון | חומרה | מה נדרש |

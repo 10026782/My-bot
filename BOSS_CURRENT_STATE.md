@@ -1,7 +1,7 @@
 # BOSS CURRENT STATE
 
-Last updated: 18/06/2026
-Reflects: Stabilization Sprint + W0/W1 + Security Audit Fixes (H1-H3) + TIER read-only fix + Game Dashboard fix + Ghost Button Audit + Airtable Gateway (W2) + GameScreen Fix + Daily Digest Live + Repo Docs + C52 Customer Output Gateway + C53 Screen Filter Gateway
+Last updated: 19/06/2026
+Reflects: Stabilization Sprint + W0/W1 + Security Audit Fixes (H1-H3) + TIER read-only fix + Game Dashboard fix + Ghost Button Audit + Airtable Gateway (W2) + GameScreen Fix + Daily Digest Live + Repo Docs + C52 Customer Output Gateway + C53 Screen Filter Gateway + O4 Finance Pulse + C53-A structured tool returns
 
 ## Classification Key
 - WORKING: implemented, reachable, no blocking issue.
@@ -12,11 +12,21 @@ Reflects: Stabilization Sprint + W0/W1 + Security Audit Fixes (H1-H3) + TIER rea
 
 ---
 
+## Git-Verified State — 19/06/2026
+
+| Item | Status | Detail |
+|------|--------|--------|
+| main | ✅ VERIFIED | Current verified main head: `be65801`. |
+| PR #79 / C53-A | ✅ MERGED | C53-A structured tool returns merged to main. |
+| PR #77 / O4 Finance Pulse | ✅ MERGED | Finance Pulse code is merged; it is no longer an honest `coming_soon` stub. |
+
+---
+
 ## What Changed — 18/06/2026
 
 | Item | Status | Detail |
 |------|--------|--------|
-| C53 Screen Filter Gateway | 🟡 CODE DONE, NOT MERGED | `SCREEN_CONFIGS` + `_build_formula()` added to `tma_api.py` — screens declare which lead statuses to show/hide instead of the gateway hardcoding business rules ("Gateway מבצע. Screen מחליט."). `get_leads()` now supports `?view=active\|monitoring\|all` with `available_views` in the response; invalid `view` falls back to `active` (no 400). `_get_project_cards()` and `get_project_dashboard()` now use the same `project_hub_kpi` config for consistent active-lead counts. `finance_pulse`/`assets_overview`/`activity_feed` configs are defined for future screens but not wired to any endpoint yet. No changes to `airtable_gateway.py`, `lead_capture.py`, `airtable_schema.py`, or `feature_flags.py`. `py_compile`/`smoke_tests.py`/`test_integration.py` all pass; SPEC test-plan scenarios A–F verified directly against `_build_formula`. PR #75 (commit `5b07088`), CI/Vercel preview green, **not yet merged to main**. |
+| C53 Screen Filter Gateway | ✅ MERGED | `SCREEN_CONFIGS` + `_build_formula()` added to `tma_api.py` — screens declare which lead statuses to show/hide instead of the gateway hardcoding business rules ("Gateway מבצע. Screen מחליט."). `get_leads()` supports `?view=active\|monitoring\|all` with `available_views` in the response; invalid `view` falls back to `active` (no 400). `_get_project_cards()` and `get_project_dashboard()` use the same `project_hub_kpi` config for consistent active-lead counts. `finance_pulse` was subsequently wired by PR #77; `assets_overview`/`activity_feed` configs remain future-screen config only. PR #75 merged to main. |
 
 ---
 
@@ -157,7 +167,7 @@ run_agent() → conversational reply only
 | Learning system | STUB | Mock events; no real production loop |
 | TMA / Mini App | PARTIAL | CORS + auth fixed; write endpoints approval-gated; stubs honest |
 | Projects Hub | PARTIAL | Real Airtable data; no navigation |
-| Finance Pulse | STUB | coming_soon |
+| Finance Pulse | PARTIAL | `/api/finance/pulse` is wired by PR #77/O4: reads Payments/Expenses via Airtable schema fields and returns real finance pulse data. Not marked WORKING until production data/UI verification is recorded. |
 | Activity Feed | STUB | coming_soon; approval receipts are returned by API but not persisted/shown in Activity Feed |
 | Assets | STUB | coming_soon |
 | Personal Mode | STUB | Auth works; screens not implemented |

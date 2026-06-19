@@ -218,3 +218,77 @@
 - **Docs עודכנו:** **לא** — ROADMAP.md "Known Issues" עדיין מתאר את `tier` כ"לא קיים... החלטה נדרשת" (drift מתועד)
 - **Feature Flag:** N/A
 - **Rollback plan:** N/A
+
+### C52 — Customer Output Gateway (COG)
+- **תאריך:** 18/06/2026 (מוזג)
+- **סוג:** Feature
+- **Requirement:** ROADMAP.md "Sprint 16/06/2026" → C52
+- **Commit:** ראו ROADMAP.md C52 row
+- **PR:** #70
+- **Review על ידי:** לא ידוע
+- **Deploy תאריך:** לא ידוע — דרוש בדיקה ידנית
+- **Verified בפרודקשן:** לא ידוע
+- **Verification ראיה:** אין
+- **Docs עודכנו:** ROADMAP.md (בזמן ה-PR); תיעוד זה (CHANGE_CONTROL_LOG) — retroactively, 19/06/2026
+- **Feature Flag:** Financial Gate ב-shadow mode (לא חוסם, ESCALATE בלבד)
+- **Rollback plan:** לא תועד
+
+### C53 — Screen Filter Gateway
+- **תאריך:** 18/06/2026 (מוזג)
+- **סוג:** Feature
+- **Requirement:** ROADMAP.md "Sprint 18/06/2026" → C53
+- **Commit:** `5b07088` (תוכן), `96559d2` (docs)
+- **PR:** #75
+- **Review על ידי:** לא ידוע
+- **Deploy תאריך:** לא ידוע — דרוש בדיקה ידנית
+- **Verified בפרודקשן:** לא — `py_compile`/`smoke_tests.py`/`test_integration.py` עברו לפני merge, אך production לא אומת
+- **Verification ראיה:** ראו AI_CONTEXT.md §2 LAST VERIFIED
+- **Docs עודכנו:** ROADMAP.md, AI_CONTEXT.md (תוקן 19/06/2026 — היה מתועד כ-"לא ממוזג", drift תוקן)
+- **Feature Flag:** N/A (additive, default behavior נשמר)
+- **Rollback plan:** לא תועד
+
+### O4 — Finance Pulse: English schema + Screen Filter Gateway wiring
+- **תאריך:** 18/06/2026 (מוזג)
+- **סוג:** Feature / Schema Change
+- **Requirement:** לא ידוע — אין רשומת ROADMAP מקורית מצוטטת; נוסף ל-ROADMAP.md retroactively ב-19/06/2026
+- **Commit:** `f7d7e4f` (migration + wiring), `daab73e` (ExpenseFields.STATUS lowercase fix)
+- **PR:** #77
+- **Review על ידי:** לא ידוע
+- **Deploy תאריך:** לא ידוע — דרוש בדיקה ידנית
+- **Verified בפרודקשן:** לא ידוע
+- **Verification ראיה:** "Verified against the live Airtable base via MCP" (commit message `f7d7e4f`) — סכמה אומתה, התנהגות בפרודקשן לא
+- **Docs עודכנו:** CHANGELOG.md (בזמן ה-PR); ROADMAP.md/AI_CONTEXT.md — retroactively, 19/06/2026 (drift)
+- **Feature Flag:** N/A
+- **Rollback plan:** לא תועד
+
+### C53-A — Structured tool results + verify_execution dict contract
+- **תאריך:** 19/06/2026 (מוזג)
+- **סוג:** Feature / Hardening
+- **Requirement:** ROADMAP.md "Sprint 19/06/2026" → C53-A; קשור ל-audit item "C53 approval/action truth"
+- **Commit:** `ffa3afc`, `3a34529`
+- **PR:** #79
+- **Review על ידי:** לא ידוע
+- **Deploy תאריך:** לא ידוע — דרוש בדיקה ידנית
+- **Verified בפרודקשן:** לא
+- **Verification ראיה:** `py_compile` exit 0 (6 קבצים), `smoke_tests.py` 6/6 PASS, `test_integration.py` 4/4 PASS — כל הריצות מקומיות, לא בפרודקשן
+- **Docs עודכנו:** ROADMAP.md, AI_CONTEXT.md, CHANGE_CONTROL_LOG.md (זה) — 19/06/2026
+- **Feature Flag:** N/A (משנה contract פנימי של tool results; אין flag — כל tools שהשתנו פעילים תמיד)
+- **Rollback plan:** לא תועד — revert PR #79 מ-`main` אם מתגלה רגרסיה בפרודקשן
+
+### C53-A — Hotfix: app.py לא טופל בזמן ה-PR (KeyError + false-success)
+- **תאריך:** 19/06/2026 — **קוד מקומי, לא commit, לא merge עדיין**
+- **סוג:** Bug Fix (P0 — production regression)
+- **Requirement:** התגלה ב-audit ממוקד על "C53 approval/action truth" (מבוקש על ידי הבעלים, 19/06/2026)
+- **תיאור הבאג:** PR #79 שינה 5 tools (`airtable_add`/`airtable_update`/`gmail_draft`/`gmail_send_draft`/`calendar_create_event`) להחזיר `dict` structured במקום `str`, אבל **לא נגע ב-`app.py`** (לפי commit message `3a34529` — "Complete the C53-A contract on tools missing from cherry-pick" מצטט רק `google_tools.py`/`airtable_tools.py`/`rate_limiter.py`). שני מקומות ב-`app.py` עדיין הניחו `str`:
+  1. Main tool loop (שורה ~964 לפני התיקון) — `result[:80]` על dict → `KeyError: slice(...)` בכל קריאה ישירה (לא דרך approval) ל-4 מתוך 5 הכלים. נתפס ע"י ה-`except Exception` הגלובלי ב-`run_agent()` (שורה ~1007) → המשתמש מקבל "משהו השתבש" גנרי, אבל אין כתיבה מאומתת ל-Airtable/Calendar/Gmail בפועל בתגובה למודל.
+  2. Approval callback (`_handle_approval_callback`, שורה ~636) — לא קרא ל-`verify_execution()` בכלל; דיווח "✅ הפעולה בוצעה" למשתמש ללא תלות ב-`result["ok"]` — בדיוק כשל "approval truth" שה-audit חיפש.
+- **תיקון:** נוסף helper `_tool_user_message()` ב-`app.py`; שני המקומות עכשיו קוראים ל-`verify_execution()`/מחלצים `user_message` לפני logging/slicing/שליחה למשתמש. אם `ok=False` — מדווח כשל בפועל, לא הצלחה כוזבת.
+- **Commit:** אין עדיין — שינוי מקומי ב-worktree
+- **PR:** אין עדיין
+- **Review על ידי:** לא בוצע
+- **Deploy תאריך:** N/A — לא נדחף
+- **Verified בפרודקשן:** לא — לא נדחף לכלל
+- **Verification ראיה:** שכפול מדויק של ה-crash (`KeyError: slice(None, 80, None)`) על dict לפני התיקון; `py_compile` exit 0, `smoke_tests.py` 6/6 PASS, `test_integration.py` 4/4 PASS אחרי התיקון
+- **Docs עודכנו:** CHANGE_CONTROL_LOG.md (זה)
+- **Feature Flag:** N/A
+- **Rollback plan:** N/A — לא נדחף; אם נדחף בעתיד, revert קל (שינוי מבודד ב-2 בלוקים ב-`app.py`)

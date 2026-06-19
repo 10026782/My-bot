@@ -571,6 +571,16 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
     return f"ג³ ׳”׳₪׳¢׳•׳׳” ׳׳׳×׳™׳ ׳” ׳׳׳™׳©׳•׳¨ ׳”׳‘׳¢׳׳™׳: {label}"
 
 
+def _tool_user_message(result) -> str:
+    """Extract display text from a C53-A structured tool result (dict) or pass through a plain string."""
+    if isinstance(result, dict):
+        msg = result.get("user_message")
+        if isinstance(msg, str) and msg:
+            return msg
+        return str(result)
+    return str(result or "")
+
+
 def _handle_approval_callback(cq) -> None:
     """׳׳˜׳₪׳ ׳‘׳׳—׳™׳¦׳” ׳¢׳ ג…/ג ׳©׳ ׳‘׳§׳©׳× ׳׳™׳©׳•׳¨."""
     from event_bus import bus
@@ -635,6 +645,28 @@ def _handle_approval_callback(cq) -> None:
 
             raw    = dispatch_tool(tool_name, tool_inputs, identity)
             result = validate_tool_output(tool_name, raw)
+
+            exec_check = verify_execution(tool_name, result)
+            if exec_check.status == "failed":
+                logger.error(f"[Approval:A32] Execution failed: {tool_name} -- {exec_check.reason}")
+                fail_text = f"❌ הפעולה לא הושלמה: {exec_check.reason}"
+                try:
+                    bot.send_message(user_chat_id, fail_text)
+                except Exception as e:
+                    logger.error(f"[Approval] notify user failed: {e}")
+                try:
+                    bot.edit_message_text(
+                        f"❌ *אושר אך נכשל בביצוע*\n{item['label']}\n\n`{fail_text[:200]}`",
+                        cq.message.chat.id, cq.message.message_id,
+                        parse_mode="Markdown",
+                    )
+                except Exception:
+                    pass
+                bot.answer_callback_query(cq.id, "❌ הביצוע נכשל")
+                return
+            if exec_check.status == "warn":
+                logger.warning(f"[Approval:A32] Execution warn: {tool_name} -- {exec_check.reason}")
+            result = _tool_user_message(result)
 
         logger.info(f"[Approval] ג… confirmed {action_id} | {tool_name or item.get('action')}")
 
@@ -929,27 +961,35 @@ def run_agent(
                 logger.info(f"[Tool] {tu.name} | {str(tu.input)[:80]}")
                 raw    = dispatch_tool(tu.name, tu.input, identity)
                 result = validate_tool_output(tu.name, raw)
-                logger.info(f"[Tool] ג†’ {result[:80]}")
+                result_text = _tool_user_message(result)
+                logger.info(f"[Tool] → {result_text[:80]}")
 
-                # A32 ג€” verify tool actually succeeded
+                # A32 — verify tool actually succeeded
                 exec_check = verify_execution(tu.name, result)
                 if exec_check.status == "failed":
-                    logger.error(f"[A32] Execution failed: {tu.name} ג€” {exec_check.reason}")
-                    result = f"ג ׳”׳₪׳¢׳•׳׳” ׳׳ ׳”׳•׳©׳׳׳”: {exec_check.reason}"
+                    logger.error(f"[A32] Execution failed: {tu.name} — {exec_check.reason}")
+                    result_text = f"❌ הפעולה לא הושלמה: {exec_check.reason}"
                 elif exec_check.status == "warn":
-                    logger.warning(f"[A32] Execution warn: {tu.name} ג€” {exec_check.reason}")
+                    logger.warning(f"[A32] Execution warn: {tu.name} — {exec_check.reason}")
 
                 # Fix 2: persist successful write results for next-turn memory
-                if tu.name in _MEMORABLE_TOOLS and "ג" not in result:
+                if tu.name in _MEMORABLE_TOOLS and "❌" not in result_text:
                     memory.add(
                         ctx.memory_key,
                         "user",   # only "user"/"assistant" valid in Claude messages[]
-                        f"[נ”§ {tu.name}]: {str(tu.input)[:60]} ג†’ {result[:60]}"
+                        f"[🔧 {tu.name}]: {str(tu.input)[:60]} → {result_text[:60]}"
                     )
 
-                entry = {"type": "tool_result", "tool_use_id": tu.id, "content": result}
+                entry = {"type": "tool_result", "tool_use_id": tu.id, "content": result_text}
                 tool_results.append(entry)
-                tool_results_log.append(entry)   # A32: accumulate for final check
+                # A32: separate record (not sent to the API) — carries the real
+                # tool name + ok status so sanitize_agent_response can verify
+                # claims by tool identity, not by guessing from response text.
+                tool_results_log.append({
+                    "tool":    tu.name,
+                    "content": result_text,
+                    "ok":      exec_check.status != "failed",
+                })
 
             tool_calls_made += 1
 
