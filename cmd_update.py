@@ -24,7 +24,7 @@ DOMAINS = [
 # ממופה לערכים חוקיים ב-Airtable EVENT_TYPE
 ENTRY_TYPES = [
     ("פגישה",      "Milestone"),
-    ("שיחה",       "Announcement"),
+    ("שיחה",       "Other"),
     ("החלטה",      "Decision"),
     ("סיכון",      "Crisis"),
     ("הצעת מחיר", "Other"),
@@ -56,7 +56,7 @@ def register_update_command(bot, get_identity):
     @bot.message_handler(commands=["update", "עדכון"])
     def cmd_update(msg):
         identity = get_identity("telegram", str(msg.from_user.id))
-        if not identity or identity.role not in _ALLOWED_ROLES:
+        if not identity or not (identity.is_owner or identity.role in _ALLOWED_ROLES):
             bot.send_message(msg.chat.id, "אין הרשאה לפקודה זו.")
             return
 
@@ -135,6 +135,7 @@ def register_update_command(bot, get_identity):
     @bot.message_handler(
         func=lambda m: (
             _pending.get(str(m.from_user.id), {}).get("step") == "text"
+            and bool(getattr(m, "text", None))
             and not m.text.startswith("/")
         )
     )
@@ -152,7 +153,7 @@ def register_update_command(bot, get_identity):
 
         # re-check הרשאה לפני כתיבה בפועל — לעולם לא לסמוך על state ישן בלבד
         identity = get_identity("telegram", uid)
-        if not identity or identity.role not in _ALLOWED_ROLES:
+        if not identity or not (identity.is_owner or identity.role in _ALLOWED_ROLES):
             bot.send_message(msg.chat.id, "אין הרשאה לפקודה זו.")
             return
 

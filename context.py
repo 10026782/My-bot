@@ -240,10 +240,11 @@ def build_context(
     system     = _date_line + "\n\n" + system
 
     # ── C20: Business Memory injection ──────────────────────────────
-    if identity.domain_id and identity.domain_id != "unknown":
+    _bm_domain = getattr(identity, "domain_id", "") or domain
+    if _bm_domain and _bm_domain != "unknown":
         try:
             from cmd_update import get_recent_business_context
-            _bm = get_recent_business_context(domain=identity.domain_id, limit=5)
+            _bm = get_recent_business_context(domain=_bm_domain, limit=5)
             if _bm:
                 system += f"\n\n{_bm}"
         except Exception:
