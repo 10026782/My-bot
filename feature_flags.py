@@ -38,6 +38,7 @@ INTEGRATIONS:
   AD_ATTRIBUTION              - ייחוס UTM מפרסום → ליד
   CONTACT_RESOLVER            - פתרון אנשי קשר אוטומטי
   LLM_FALLBACK                - fallback ל-OpenAI כש-Anthropic מחזיר שגיאה/timeout (ברירת מחדל: כבוי)
+  FEATURE_BUSINESS_UPDATE     - /update command (Business Memory log); default OFF
 
 APPROVAL POLICY:
   EMERGENCY_WINDOW             - מאפשר הפעלת חריג זמני ל-High מהטלפון (core/emergency_window.py, כבוי כברירת מחדל)
