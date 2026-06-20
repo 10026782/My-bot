@@ -728,7 +728,8 @@ def _get_project_cards(identity) -> list:
 
         # Non-owners: filter to projects where their user_id appears in owner_ids
         if not identity.is_owner:
-            if identity.user_id not in str(f.get("owner_ids", "") or ""):
+            _owner_ids = [x.strip() for x in str(f.get("owner_ids", "") or "").split(",")]
+            if identity.user_id not in _owner_ids:
                 continue
 
         # Live KPI — uses screen filter gateway (project_hub_kpi config)
