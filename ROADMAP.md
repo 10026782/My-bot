@@ -1,6 +1,6 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 20/06/2026 — main = `ee72d4e` (אומת). PR #85/#86 ממוזגים (ראה C54/C55 למטה + CHANGE_CONTROL_LOG.md). F13 (TenantConfig + Provider Interfaces) נרשם כ-spec-only — ⚠️ חפיפה עם F12, לא לממש לפני הכרעה.
+עודכן: 20/06/2026 — main = `797ccf9` (אומת). PR #85/#86/#87/#88 ממוזגים (ראה C54/C55 למטה + CHANGE_CONTROL_LOG.md). F13 (TenantConfig + Provider Interfaces) — קוד נכתב ומוזג (PR #87), **לא מחובר ל-pipeline**; ⚠️ חפיפה עם F12 עדיין לא הוכרעה, אל תחבר ל-pipeline לפני הכרעה. `contact_merge.py` (PR #88) — כלי CLI עצמאי למיזוג אנשי קשר, לא ב-ROADMAP (admin utility, לא feature).
 
 ---
 
@@ -391,8 +391,8 @@ scope: **infrastructure only — אפס שינוי runtime behavior** בשלב �
 תלוי ב: C01 (Identity), W2 (`airtable_gateway`), C52 (COG / `core/output_gateway.py`).
 חוסם: F08 (SaaS Multi-Tenant) — F08 לא יכול להיבנות בלי החוזה הזה קודם.
 ⚠️ **חפיפה עם F12** — שני הספקים מציעים `providers/` כתיקייה חדשה ל-LLM abstraction (F12: `LLMProvider.generate(prompt, context, model_tier)`; F13: `LLMProvider.generate(messages, system, model, max_tokens, tools)` + עוד שני providers ל-storage/channel). **לא להתחיל מימוש של אף אחד מהשניים לפני שמחליטים אם F13 סופג את F12 או שהם משלימים זה את זה** — אחרת ניצור שתי תיקיות `providers/` עם interfaces סותרים, כמו התנגשות ה-ID של C20/C21 שתועדה ב-`AI_CONTEXT.md`.
-מצב: **SPEC ONLY** — לא קיים קוד. ה-spec המלא (כל 6 הקבצים + הוראות מימוש) קיים מחוץ ל-ROADMAP; אל תממש לפני הנחיה מפורשת.
-קבצים לעתיד: `core/tenant_config.py`, `providers/__init__.py`, `providers/interfaces.py`, `providers/airtable_shim.py`, `providers/anthropic_shim.py`, `providers/twilio_shim.py` — כולם קבצים חדשים, אפס שינוי בקיימים.
+מצב: **CODE COMPLETE, לא מחובר ל-pipeline** — כל 6 הקבצים קיימים (PR #87, מוזג ל-`main`). אפס import מקוד קיים אליהם — `app.py`/`tools/dispatcher.py` לא משתמשים בהם, `get_tenant_config()` תמיד מחזיר את `boss_hq` הקשיח. ⚠️ ה-spec המקורי הניח חתימות פונקציות שלא קיימות בקוד (`gateway_add`/`gateway_update`/`gateway_delete`, `send_via_cog`, `airtable_get(max_records=...)` כ-`list[dict]`, `_validate_twilio_signature(headers, body)`) — תוקן מול הקוד האמיתי, מתועד ב-`BUG_AUDIT_LOG.md` כ-SPEC-001. הכרעת F12-מול-F13 (השורה הקודמת) **עדיין לא בוצעה** — הקבצים קיימים אך לא נבחרו כפתרון הסופי.
+קבצים שנוצרו: `core/tenant_config.py`, `providers/__init__.py`, `providers/interfaces.py`, `providers/airtable_shim.py`, `providers/anthropic_shim.py`, `providers/twilio_shim.py`.
 
 ---
 
