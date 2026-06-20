@@ -7,6 +7,10 @@
 # ה-event_bus approval flow קיים אך לא תמיד מחווט עד הסוף (ראה lead_recovery).
 # פקודת /done קיימת כבר כתבנית: owner מקליד פקודה מפורשת = האישור עצמו.
 # אותה תבנית כאן — בטוחה, פשוטה, ועובדת היום.
+#
+# NOTE: crm_add_contact עוקף את airtable_gateway write-path (אין tenant scope / gateway validation).
+# Mitigated: owner-only + LEAD_AUTO_CONVERT=false default + audit log added here.
+# TODO (future): migrate to gateway when crm.py is refactored.
 
 import logging
 import re
@@ -65,6 +69,23 @@ def convert_lead_to_contact(query: str) -> tuple[bool, str]:
                                       lead_source_id=lead["id"])
     if "❌" in contact_result:
         return False, f"❌ יצירת איש קשר נכשלה: {contact_result}"
+
+    try:
+        from tools.airtable_security import audit_log_airtable
+
+        class _SystemIdentity:
+            tenant_id = "system"
+            user_id   = "lead_conversion"
+            role      = "system"
+
+        audit_log_airtable(
+            "create_contact_from_lead",
+            _SystemIdentity(),
+            {"table": Tables.CONTACTS},
+            f"lead→contact: {name} | lead_id={lead['id']}",
+        )
+    except Exception as _audit_err:
+        logger.warning(f"[LeadConversion] audit log failed (non-fatal): {_audit_err}")
 
     rec_m      = re.search(r'rec\w+', contact_result)
     contact_id = rec_m.group(0) if rec_m else ""
