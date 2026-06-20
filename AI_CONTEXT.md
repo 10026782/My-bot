@@ -1,8 +1,8 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-06-19
-**עודכן על ידי:** Claude Code — daily briefing regen (git-verified against `origin/main` HEAD `7496628`, PR #80)
+**עודכן:** 2026-06-20
+**עודכן על ידי:** Claude Code — session update (git-verified against `origin/main` HEAD `59adff7`)
 
 > מקור אמת לתוכן הזה: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו — לא נסמכתי עליו.
 
@@ -28,7 +28,19 @@ Lead Scoring (`LEAD_SCORING=off`), Lead Memory (`LEAD_MEMORY=off`), Followup Aut
 F05 WhatsApp Production — מחכה לאישור Meta. N08 CI/CD, N09 Monitoring, N07 Schema Governance script — מתוכננים, לא מומשו. TMA: Activity Feed / Assets / Personal Mode — stub כן (`coming_soon`).
 
 ## 3. Completed Since Last Update
-**PR #80 (commit `42dd137`, merged ל-main כ-`7496628`) — לא תועד עדיין באף מסמך מקור עד הרגע הזה:**
+
+**Security Fix Session (20/06/2026) — commits ישירים ל-`main`, ללא branch/PR (לפי הנחיית סשן מפורשת):**
+- `6e30d37` — Audit log ל-`lead_conversion.py`'s `crm_add_contact()` bypass (MEDIUM, ראו `BUG_AUDIT_LOG.md` BUG-009). תוקן ע"י Claude לעומת הספק: import path ל-`tools.airtable_security` (לא `tools.airtable_tools`) + חתימת קריאה אמיתית, לא המשוערת.
+- `59adff7` — תיקון substring match על `owner_ids` ב-`tma_api.py` `_get_project_cards()` (LOW, ראו BUG-010). באג אומת בקוד אמיתי — שם הפונקציה בספק (`get_projects()`) היה שגוי.
+- שני התיקונים: `py_compile` נקי, `smoke_tests.py`/`test_integration.py`/`core/router/test_router.py`/`test_airtable_gateway.py`/`test_identity_smoke.py` עברו, אומתו ב-grep על `origin/main` (לא רק git log), ו-Render deploy hash אומת תואם ל-`59adff7` ע"י המשתמש. **Verified בפרודקשן.**
+
+**PR #85/#86 (19-20/06/2026) — `claude/c20-business-update-command-sp7h2i` ו-`claude/c21-lead-source-linking`, מוזגו ל-`main`:**
+- `/update` Business Memory command (`cmd_update.py`) — owner/manager/partner מתעדים אירוע עסקי דרך Telegram inline keyboard, נכתב ל-Airtable, מוזרק חזרה כקונטקסט per-domain ב-`context.py`. דגל `FEATURE_BUSINESS_UPDATE` כבוי כברירת מחדל. ⚠️ ה-spec ID החיצוני "C20" מתנגש עם ROADMAP.md's C20 הקיים (Scheduler) — ראו פירוט מלא ב-`BUG_AUDIT_LOG.md`.
+- Origin Lead linking — `/convert` כותב כעת קישור ל-ליד המקור (`ContactFields.ORIGIN_LEAD`/`DealFields.ORIGIN_LEAD`, שדות שאומתו בפרודקשן Airtable). ⚠️ spec ID "C21" מתנגש עם ROADMAP.md's C21 הקיים (Daily Digest) — אותה הערה.
+- `GOVERNANCE_RULES.md` נוסף (Rules 13-18) + הפניה מ-`AGENTS.md`.
+- שניהם code-complete, לא מאומתים בפרודקשן עדיין (ראו `BUG_AUDIT_LOG.md` לפרטי verification).
+
+**PR #80 (commit `42dd137`, merged ל-main כ-`7496628`):**
 - **תיקון crash**: PR #79 הכניס תשובות tool כ-dict מבני (`{ok, tool, external_id, evidence, user_message}`), אבל שני הצרכנים ב-`app.py` לא עודכנו — קריאה ישירה (לא דרך approval) ל-`airtable_add`/`update`, `gmail_draft`, או `calendar_create_event` קרסה עם `KeyError` על `result[:80]` (string slicing על dict), נבלעה ע"י `except Exception` גנרי, והמשתמש קיבל "קרה משהו לא צפוי" בלי שום אישור שהפעולה בוצעה.
 - **Approval callback**: לא קרא ל-`verify_execution()` בכלל — `gmail_send_draft` דרך אישור דיווח "אושר וביצע" גם כשהכלי בפועל נכשל. תוקן.
 - **A32 hardening**: שער NO-TOOL-EVIDENCE עבר מ-keyword guessing בטקסט התשובה לבדיקה לפי tool identity + `ok` status מ-`tool_results_log`. נוסף `test_a32_enforcement.py` — מריץ `run_agent()` end-to-end (Identity/Router/Context/Anthropic מדומים), 6/6 עובר.
