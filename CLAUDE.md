@@ -45,6 +45,9 @@ Other standalone test scripts, run the same way (`python3 <file>.py`):
 - `test_approval_concurrency.py` — 3-state approval flow (pending → processing → approved/rejected) and double-approve race conditions.
 - `test_furniture_lead_funnel.py` — the deterministic state machine in `furniture_lead_funnel.py`.
 - `test_identity_smoke.py` — basic identity resolution sanity check.
+- `test_a32_enforcement.py` — end-to-end `run_agent()` (Identity/Router/Context/Anthropic mocked) verifying the NO-TOOL-EVIDENCE gate blocks unverified "success" claims.
+- `test_c53a.py` — the structured tool-result contract (`{ok, tool, external_id, evidence, user_message}`) introduced for the Screen Filter Gateway/Finance Pulse work.
+- `test_inbound_handler.py` — dedup/update/create logic in `inbound_handler.py` (F06).
 
 There is no CI/CD config in this repo (no `.github/workflows/`, `Makefile`, or `Procfile`) — all of the above are run manually before merging.
 
@@ -68,7 +71,8 @@ resolve_identity → route_request → build_context → run_agent
 This is the security-critical core — **"Iron rule: no Tool without a permission check."**
 
 - `tool_registry.py`: declarative metadata per tool (`ToolMeta`): `roles_allowed`, `tenant_scoped`, `requires_approval`, `high_risk`, `read_only`. `enforce(tool, identity)` from this module is the gate — it raises `ToolDenied` if the role isn't permitted.
-- `tools/dispatcher.py`: the **single entry point** for all tool execution — `dispatch_tool(name, inputs, identity)`. It performs dedup checks (`_DEDUP_FIELDS`), table-name aliasing (`_ALIAS_MAP`), and routes to the concrete tool implementations in `tools/` (drive, calendar, gmail, sheets, airtable, contact_resolver).
+- `tools/dispatcher.py`: the **single entry point** for all tool execution — `dispatch_tool(name, inputs, identity)`. Before routing to a concrete implementation it calls `action_validator.validate_action(tool, inputs)` (unknown-tool block → required-param presence check → structure/"9% rule" check) as a defense-in-depth gate independent of `tool_registry.enforce()`. It also performs dedup checks (`_DEDUP_FIELDS`), table-name aliasing (`_ALIAS_MAP`), and routes to the concrete tool implementations in `tools/` (drive, calendar, gmail, sheets, airtable, contact_resolver).
+- `action_validator.py`: the param-shape gate described above — separate from, and in addition to, the role-based `tool_registry.enforce()` check.
 - `tools/airtable_security.py`: `enforce_tenant_scope()` must be called before any raw Airtable read/write to prevent cross-tenant data leaks; `audit_log_airtable()` logs all access.
 - `_MEMORABLE_TOOLS` in `app.py` lists tools whose results get persisted to memory across agent turns (e.g. `airtable_add`, `calendar_create_event`).
 - **Never** import tool functions (e.g. from `crm` or `airtable_tools`) directly outside of the dispatcher/digest/scheduler/collector modules — this bypasses identity and tenant enforcement (see the grep check in `docs/governance/SECURITY_CHECKLIST.md`).
@@ -99,6 +103,15 @@ High-risk/irreversible actions (`requires_approval=True` in the registry, e.g. `
 - `tma_api.py`: Flask blueprint registered onto the main app, serving the Telegram Mini App's REST API (projects, leads, approvals, game/quests, finance pulse). Auth is via `require_tma_auth` decorator validating Telegram `initData`.
 - `config.py`: WhatsApp number → business domain mapping (`CHANNEL_DOMAINS`) — add new channel mappings only here.
 - `guards/`: `idempotency`, `rate_limiter`, `circuit_breaker` — cross-cutting reliability wrappers re-exported from `guards/__init__.py`.
+- `core_knowledge.py`: the system prompt's static manifest + dynamic per-call context (`STATIC_MANIFEST`, `dynamic_context`), consumed by `context.py`.
+- `llm_fallback.py`: `call_anthropic_text()` wraps direct (non-tool-loop) Anthropic text calls used by `daily_collector.py`, `creative_generator.py`, `lead_qualifier.py`, `tma_api.py`; optional OpenAI fallback behind the `LLM_FALLBACK` flag (off by default).
+- `session_store.py`: `PersistentSessionStore`/`lead_sessions` — DB-backed (Airtable) lead qualifier session state, replacing an in-memory LRU store; always-on infra, not flag-gated. Consumed by `lead_qualifier.py`, `furniture_lead_funnel.py`, `interaction_engine.py`.
+- `score_display.py`: lead temperature scoring → 5-tier display (COLD → BOILING); `format_lead_report`/`format_score_inline` consumed by `lead_qualifier.py` and `audience_intelligence.py`.
+- `shabbat_guard.py`: always-on (no flag) Shabbat/holiday quiet-hours guard — `should_send_now`/`next_allowed_time`/`shabbat_safe` consumed by `scheduler.py`, `voice_adapter.py`, `daily_digest.py`, `abandoned_lead_worker.py` to suppress outbound sends.
+- `cmd_update.py`: `/update`/`/עדכון` Telegram command (`FEATURE_BUSINESS_UPDATE` flag — **not currently listed in `feature_flags.py`'s own registry docstring, a known doc/code drift**) for manually logging business context to Airtable; read back by `context.py` as injected per-domain context.
+- `inbound_handler.py`: F06 inbound-lead gate in front of `lead_capture.py` — dedups by `external_id`, updates existing leads by `sender_id`, else creates a new lead; used by `email_inbound.py`. See `test_inbound_handler.py`.
+- `daily_collector.py` / `daily_digest.py` / `payment_reminder.py`: scheduled jobs invoked (via lazy import) from `scheduler.py` — end-of-day business-data collector w/ Telegram approval buttons, the 08:00 morning digest, and the `PAYMENT_REMINDERS`-gated due-soon payment scanner, respectively.
+- A few modules are code-complete but **not currently imported by anything in the live pipeline** (verify with grep before assuming they're wired in): `profile.py` (Airtable-backed long-term user profile), `project_timeline.py` (Airtable timeline table generator, has its own CLI), `tenant_provisioner.py` (F08 `MULTITENANT` provisioning), `creative_generator.py` (`CREATIVE_GENERATOR` flag), `knowledge_engine.py`/root-level `router.py` (Supabase-backed dynamic context, `KNOWLEDGE_ENGINE` flag).
 
 ### `tools/` — concrete tool implementations behind the dispatcher
 
@@ -118,7 +131,7 @@ Airtable field/table drift is a recurring failure mode in this repo, so there's 
 
 ### Lead lifecycle & growth features (mostly feature-flag gated)
 
-Several modules are code-complete but disabled by default via `feature_flags.py` — check `AI_CONTEXT.md`'s "Known gaps" table for current on/off state before assuming any of these are active in production:
+Several modules are code-complete but disabled by default via `feature_flags.py` — check `AI_CONTEXT.md`'s "Known gaps" table for current on/off state before assuming any of these are active in production. `feature_flags.py`'s own module docstring is meant to be the single registry of every flag checked in code ("every flag must appear here") — treat it as the first place to check for a flag's default/purpose, but verify against an actual `is_enabled("X")` grep since it has drifted before (e.g. `FEATURE_BUSINESS_UPDATE`, used by `cmd_update.py`, is currently missing from the docstring list).
 
 - `lead_capture.py` (`LEAD_CAPTURE`/`LEAD_SCORING`): inbound WhatsApp/Telegram lead creation with optional live scoring.
 - `lead_conversion.py` (`LEAD_AUTO_CONVERT`): owner-only `/convert` command promoting qualified leads to contacts.
@@ -157,7 +170,11 @@ npm run preview
 - `docs/governance/MODULE_RULES.md` and `docs/governance/ARCHITECTURE_DRIFT_MAP.md`: module-interaction rules and known drift between code intent and the live Airtable schema.
 - `docs/governance/MIGRATION_AIRTABLE_ENGLISH_SCHEMA.md`: background on the Hebrew→English Airtable field/table migration referenced by the `_ALIAS_MAP` aliasing layer.
 - `docs/operations/DEPLOYMENT.md` and `docs/operations/RUNBOOK.md`: Render deploy/rollback process and the production runbook (health checks, emergency stop, scaling) — consult before claiming a change is "deployed."
-- `AGENTS.md` covers the pre-session branch gate and the ROADMAP "definition of done"; treat its older "Cursor Cloud specific instructions" section (single-file app, no tests, no `/` route) as stale/historical — the rest of this file describes the current state.
+- `AGENTS.md` covers the pre-session branch gate and the ROADMAP "definition of done"; treat its older "Cursor Cloud specific instructions" section (single-file app, no tests, no `/` route) as stale/historical — the rest of this file describes the current state. It also defines the **post-merge verification protocol** (sync `main`, grep every changed symbol, "merged" must be proven by grep on `main`, not by `git log`/PR status) and **Rule 15** (no "fixed"/"deployed"/"completed" claim without merge+deploy+production verification).
+- `GOVERNANCE_RULES.md` (Rules 13-18, referenced from `AGENTS.md`): audits must be based on `main`/production state, audits can't modify code, no claim without verification, root-cause-before-fix, one authoritative status source, and fix-the-process-not-just-the-incident for repeat incidents.
+- `CHANGE_CONTROL_LOG.md` and `BUG_AUDIT_LOG.md`: append-only, auto/manually-updated logs of merged changes and bugs from report through production verification — don't hand-edit history, append new entries.
+- `RELEASE_CHECKLIST.md` and `CHANGELOG.md`: the pre-merge PR checklist (ROADMAP ID, single main file per feature, flag default-off, writes go through `airtable_gateway.py`) and the running unreleased-changes log.
+- `.claude/skills/CLAUDE_SKILLS.md` describes a Developer/Operator Claude Skills architecture with `dev/` and `operator/` subdirectories under `.claude/skills/` — as of this writing those subdirectories **don't exist on disk**, only the index file does; treat the skills system as aspirational/documented-but-not-built rather than live.
 
 ## כלל ברזל — "סיימתי" = מאומת, לא מוצהר
 
