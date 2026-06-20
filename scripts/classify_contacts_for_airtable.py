@@ -120,7 +120,6 @@ RULES = [
     Rule("עורך דין", "expert", "Lawyer"),
     Rule("עורכת דין", "expert", "Lawyer"),
     Rule("משרד עורכי דין", "expert", "Lawyer"),
-    Rule("עוד", "expert", "Lawyer", "medium"),
     # Buyers / clients
     Rule("רוכש", "client", "Buyer / Client"),
     Rule("קונה", "client", "Buyer / Client"),
@@ -169,6 +168,9 @@ RULES = [
     Rule("צוות", "operator", "Team", "medium"),
 ]
 
+AMBIGUOUS_OD_LEGAL_CONTEXT = ["משפטי", "משרד", "נדלן", 'נדל"ן', "מקרקעין", "חוזים"]
+AMBIGUOUS_OD_TRADE_CONTEXT = ["מתקין", "דלתות", "חשמל", "אינסטלציה", "נגר", "הובלות"]
+
 UNCERTAIN_BUSINESS_TERMS = [
     "בעמ",
     "חברה",
@@ -185,6 +187,9 @@ UNCERTAIN_BUSINESS_TERMS = [
     "יועץ",
     "סוכנות",
     "תחזוקה",
+    "דלתות",
+    "חשמל",
+    "אינסטלציה",
 ]
 
 CSV_ALIASES = {
@@ -239,6 +244,28 @@ def term_matches(text: str, rule: Rule) -> bool:
     return re.search(rf"(?<!\w){re.escape(term)}(?!\w)", text, flags=re.UNICODE) is not None
 
 
+def ambiguous_od_context(name: str) -> tuple[str, list[str]]:
+    """Classify the ambiguous unpunctuated token עוד without treating it as exact עו"ד."""
+    text = normalize_match_text(name)
+    if not term_matches(text, Rule("עוד", "expert", "Lawyer")):
+        return "absent", []
+    trade_terms = [
+        term
+        for term in AMBIGUOUS_OD_TRADE_CONTEXT
+        if term_matches(text, Rule(term, "other", ""))
+    ]
+    if trade_terms:
+        return "trade", trade_terms
+    legal_terms = [
+        term
+        for term in AMBIGUOUS_OD_LEGAL_CONTEXT
+        if term_matches(text, Rule(term, "other", ""))
+    ]
+    if legal_terms:
+        return "legal", legal_terms
+    return "standalone", []
+
+
 def find_matches(name: str) -> list[Match]:
     text = normalize_match_text(name)
     found: list[Match] = []
@@ -258,6 +285,19 @@ def find_matches(name: str) -> list[Match]:
                 term=rule.term,
                 name=name,
                 supplier_like=rule.supplier_like,
+            )
+        )
+    od_context, context_terms = ambiguous_od_context(name)
+    if od_context in {"legal", "standalone"}:
+        context_suffix = f" + {context_terms[0]}" if context_terms else ""
+        found.append(
+            Match(
+                role="expert",
+                specialty="Lawyer",
+                confidence="medium",
+                term=f"עוד{context_suffix}",
+                name=name,
+                supplier_like=False,
             )
         )
     return found
@@ -492,6 +532,12 @@ def classify_group(records: list[InputRecord], batch: str) -> ClassifiedRecord:
     normalized_phone, phone_issue = normalize_phone(first.phone)
     matches = [match for record in records for match in find_matches(record.name)]
     business_terms = sorted({term for record in records for term in uncertain_business_terms(record.name)})
+    suppressed_od_trade_contexts = [
+        (record.name, context_terms)
+        for record in records
+        for context_type, context_terms in [ambiguous_od_context(record.name)]
+        if context_type == "trade"
+    ]
     detected_roles = sorted({match.role for match in matches}, key=lambda role: ROLE_PRIORITY[role])
     chosen = pick_match(matches)
 
@@ -546,6 +592,12 @@ def classify_group(records: list[InputRecord], batch: str) -> ClassifiedRecord:
         )
     else:
         reasons.append("No reliable role keyword found; defaulted to other.")
+
+    for matched_name, context_terms in suppressed_od_trade_contexts:
+        reasons.append(
+            f"Ignored ambiguous token 'עוד' in '{matched_name}' because trade context was detected: "
+            f"{', '.join(context_terms)}."
+        )
 
     if len(detected_roles) > 1:
         review = True
