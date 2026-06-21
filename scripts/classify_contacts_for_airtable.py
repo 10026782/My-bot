@@ -135,8 +135,9 @@ CLIENT_KEYWORDS = [
 # Root prefixes for conjugated forms not explicitly listed above (e.g. typos,
 # unlisted gender/plural variants). These match as partial/root matches, so
 # they carry medium confidence rather than the high confidence of an exact
-# CLIENT_KEYWORDS match.
-CLIENT_ROOT_KEYWORDS = ["רוכש", "קונ", "מתעניי", "מעוניי", "מחפש"]
+# CLIENT_KEYWORDS match. "קונ" is deliberately excluded - it's too short and
+# false-positives on unrelated words like "קונדטוריה" (confectionery).
+CLIENT_ROOT_KEYWORDS = ["רוכש", "מתעניי", "מעוניי", "מחפש"]
 
 PROJECT_RULES = {
     "טבריה": "Project Tiberias",
