@@ -30,6 +30,9 @@ REQUIRED_COLUMNS = [
     "Normalized Phone",
     "Role Category",
     "Specialty",
+    "Possible Project",
+    "Project Confidence",
+    "Project Match Reason",
     "Source",
     "Status",
     "Import Batch",
@@ -105,6 +108,42 @@ class ClassifiedRecord:
     matches: list[Match] = field(default_factory=list)
 
 
+CLIENT_KEYWORDS = [
+    "רוכש",
+    "רוכשים",
+    "רוכשת",
+    "רוכשות",
+    "קונה",
+    "קונים",
+    "קונות",
+    "מתעניין",
+    "מתעניינת",
+    "מתעניינים",
+    "מתעניינות",
+    "מעוניין",
+    "מעוניינת",
+    "מעוניינים",
+    "מעוניינות",
+    "מחפש",
+    "מחפשת",
+    "מחפשים",
+    "מחפשות",
+    "בירור",
+    "התעניינות",
+]
+
+# Root prefixes for conjugated forms not explicitly listed above (e.g. typos,
+# unlisted gender/plural variants). These match as partial/root matches, so
+# they carry medium confidence rather than the high confidence of an exact
+# CLIENT_KEYWORDS match.
+CLIENT_ROOT_KEYWORDS = ["רוכש", "קונ", "מתעניי", "מעוניי", "מחפש"]
+
+PROJECT_RULES = {
+    "טבריה": "Project Tiberias",
+    "בלו ויו": "Blue View",
+    "blue view": "Blue View",
+}
+
 RULES = [
     # Brokers
     Rule("מתווך", "broker", "Real Estate Broker"),
@@ -124,6 +163,11 @@ RULES = [
     Rule("רוכש", "client", "Buyer / Client"),
     Rule("קונה", "client", "Buyer / Client"),
     Rule("לקוח", "client", "Buyer / Client"),
+    *[Rule(term, "client", "Buyer / Client", "high") for term in CLIENT_KEYWORDS],
+    *[
+        Rule(term, "client", "Buyer / Client", "medium", prefix=True)
+        for term in CLIENT_ROOT_KEYWORDS
+    ],
     Rule("buyer", "client", "Buyer / Client"),
     # Investors
     Rule("משקיע", "investor", "Investor"),
@@ -306,6 +350,23 @@ def find_matches(name: str) -> list[Match]:
 def uncertain_business_terms(name: str) -> list[str]:
     text = normalize_match_text(name)
     return [term for term in UNCERTAIN_BUSINESS_TERMS if term_matches(text, Rule(term, "other", ""))]
+
+
+def find_project(name: str) -> tuple[str, str, str] | None:
+    """Return (project, confidence, reason) if a PROJECT_RULES keyword appears in name.
+
+    Project detection is metadata only - it never influences Role Category.
+    """
+    text = normalize_match_text(name)
+    if not text:
+        return None
+    for keyword, project in PROJECT_RULES.items():
+        normalized_keyword = normalize_match_text(keyword)
+        if not normalized_keyword:
+            continue
+        if re.search(rf"(?<!\w){re.escape(normalized_keyword)}(?!\w)", text, flags=re.UNICODE):
+            return project, "medium", "keyword match"
+    return None
 
 
 def normalize_phone(phone: str) -> tuple[str, str]:
@@ -647,12 +708,36 @@ def classify_group(records: list[InputRecord], batch: str) -> ClassifiedRecord:
             detail += f" Duplicate role evidence: {' | '.join(role_evidence)}."
         reasons.append(f"Merged {len(records) - 1} duplicate row(s) by Normalized Phone.{detail}")
 
+    # Project detection is metadata only - scan every name in the duplicate
+    # group so evidence on a merged-away duplicate (e.g. "ישראל כהן טבריה")
+    # is not lost when the kept record's own name has no project keyword.
+    possible_project = ""
+    project_confidence = ""
+    project_match_reason = ""
+    for record in records:
+        project_hit = find_project(record.name)
+        if project_hit is None:
+            continue
+        possible_project, project_confidence, project_match_reason = project_hit
+        review = True
+        if record.name == first.name:
+            reasons.append(f"Possible project '{possible_project}' detected via {project_match_reason}.")
+        else:
+            reasons.append(
+                f"Possible project '{possible_project}' detected via {project_match_reason} "
+                f"in duplicate name '{record.name}'."
+            )
+        break
+
     values = {
         "Name": first.name,
         "Phone": first.phone,
         "Normalized Phone": normalized_phone,
         "Role Category": role,
         "Specialty": specialty,
+        "Possible Project": possible_project,
+        "Project Confidence": project_confidence,
+        "Project Match Reason": project_match_reason,
         "Source": first.source,
         "Status": first.status,
         "Import Batch": batch,
@@ -748,6 +833,9 @@ def build_summary(
     review_count = sum(row["Review Required"] == "true" for row in rows)
     supplier_count = sum(item.supplier_like for item in classified)
     ready_count = len(rows) - review_count
+    project_rows = [row for row in rows if row.get("Possible Project")]
+    project_counts = Counter(row["Possible Project"] for row in project_rows)
+    project_review_count = sum(1 for row in project_rows if row["Review Required"] == "true")
     return {
         "input_path": str(input_path.resolve()),
         "source_type": source_type,
@@ -764,6 +852,9 @@ def build_summary(
         },
         "import_batch": batch,
         "suspicious_names": suspicious_names(classified),
+        "project_detected_count": len(project_rows),
+        "project_counts": dict(sorted(project_counts.items())),
+        "project_review_count": project_review_count,
     }
 
 
@@ -929,6 +1020,8 @@ def summary_sheet_rows(summary: dict[str, object]) -> list[dict[str, object]]:
         {"Metric": "Review required", "Value": summary["review_required_count"]},
         {"Metric": "Supplier review", "Value": summary["supplier_review_count"]},
         {"Metric": "Import batch", "Value": summary["import_batch"]},
+        {"Metric": "Projects detected", "Value": summary["project_detected_count"]},
+        {"Metric": "Project review", "Value": summary["project_review_count"]},
     ]
     rows.extend(
         {"Metric": f"Role: {role}", "Value": count}
@@ -937,6 +1030,10 @@ def summary_sheet_rows(summary: dict[str, object]) -> list[dict[str, object]]:
     rows.extend(
         {"Metric": f"Confidence: {confidence}", "Value": count}
         for confidence, count in summary["confidence_counts"].items()
+    )
+    rows.extend(
+        {"Metric": f"Project: {project}", "Value": count}
+        for project, count in summary["project_counts"].items()
     )
     rows.append({"Metric": "Top suspicious/ambiguous names", "Value": ""})
     rows.extend(
@@ -960,6 +1057,9 @@ def markdown_summary(summary: dict[str, object]) -> str:
         f"(`{row['Original Phone'] or 'no phone'}`): {row['Classification Reason']}"
         for index, row in enumerate(suspicious, start=1)
     ) or "No suspicious or ambiguous names were found."
+    project_lines = "\n".join(
+        f"| `{project}` | {count} |" for project, count in summary["project_counts"].items()
+    ) or "| _(none)_ | 0 |"
     return f"""# Contacts Classification Summary
 
 ## Run Summary
@@ -986,6 +1086,15 @@ def markdown_summary(summary: dict[str, object]) -> str:
 | Confidence | Count |
 |---|---:|
 {confidence_lines}
+
+## Project Detection
+
+- Contacts with detected project: {summary['project_detected_count']}
+- Project review count: {summary['project_review_count']}
+
+| Possible Project | Count |
+|---|---:|
+{project_lines}
 
 ## Top 30 Suspicious Or Ambiguous Names
 
