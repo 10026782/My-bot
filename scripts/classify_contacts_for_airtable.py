@@ -34,6 +34,8 @@ REQUIRED_COLUMNS = [
     "Project Confidence",
     "Project Match Reason",
     "Source",
+    "Owner",
+    "Referred By",
     "Status",
     "Import Batch",
     "Classification Confidence",
@@ -266,6 +268,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--dry-run",
         action="store_true",
         help="Parse, classify, and print the summary without writing files.",
+    )
+    parser.add_argument(
+        "--owner",
+        required=True,
+        help="שם הבעלים/המפעיל המקשר את הרשומה למערכת (לדוגמה: אליהו)",
+    )
+    parser.add_argument(
+        "--referred-by",
+        required=True,
+        help="שם מי שהמליץ/הביא את הקשר לרשת BOSS (לדוגמה: אליהו)",
     )
     return parser.parse_args(argv)
 
@@ -517,7 +529,7 @@ def read_vcf(path: Path) -> tuple[list[InputRecord], int]:
                 InputRecord(
                     name=full_name,
                     phone=phone,
-                    source="VCF Export",
+                    source="רשת קשרים",
                     source_index=card_index,
                 )
             )
@@ -553,7 +565,7 @@ def read_csv(path: Path) -> tuple[list[InputRecord], int]:
             InputRecord(
                 name=name,
                 phone=phone,
-                source=find_csv_value(row, CSV_ALIASES["source"]) or "CSV Export",
+                source=find_csv_value(row, CSV_ALIASES["source"]) or "רשת קשרים",
                 status=find_csv_value(row, CSV_ALIASES["status"]) or "חדש",
                 existing_role=find_csv_value(row, CSV_ALIASES["role"]).strip().lower(),
                 existing_specialty=find_csv_value(row, CSV_ALIASES["specialty"]),
@@ -589,7 +601,9 @@ def pick_match(matches: list[Match]) -> Match | None:
     )[0]
 
 
-def classify_group(records: list[InputRecord], batch: str) -> ClassifiedRecord:
+def classify_group(
+    records: list[InputRecord], batch: str, owner: str = "", referred_by: str = ""
+) -> ClassifiedRecord:
     first = records[0]
     normalized_phone, phone_issue = normalize_phone(first.phone)
     matches = [match for record in records for match in find_matches(record.name)]
@@ -740,6 +754,8 @@ def classify_group(records: list[InputRecord], batch: str) -> ClassifiedRecord:
         "Project Confidence": project_confidence,
         "Project Match Reason": project_match_reason,
         "Source": first.source,
+        "Owner": owner,
+        "Referred By": referred_by,
         "Status": first.status,
         "Import Batch": batch,
         "Classification Confidence": confidence,
@@ -757,7 +773,7 @@ def classify_group(records: list[InputRecord], batch: str) -> ClassifiedRecord:
 
 
 def deduplicate_and_classify(
-    records: list[InputRecord], batch: str
+    records: list[InputRecord], batch: str, owner: str = "", referred_by: str = ""
 ) -> tuple[list[ClassifiedRecord], list[dict[str, str]]]:
     groups: list[list[InputRecord]] = []
     by_phone: dict[str, list[InputRecord]] = {}
@@ -771,7 +787,7 @@ def deduplicate_and_classify(
         else:
             groups.append([record])
 
-    classified = [classify_group(group, batch) for group in groups]
+    classified = [classify_group(group, batch, owner, referred_by) for group in groups]
     duplicates: list[dict[str, str]] = []
     for group in groups:
         if len(group) <= 1:
@@ -779,7 +795,7 @@ def deduplicate_and_classify(
         normalized, _ = normalize_phone(group[0].phone)
         kept = group[0]
         for duplicate in group[1:]:
-            duplicate_classified = classify_group([duplicate], batch).values
+            duplicate_classified = classify_group([duplicate], batch, owner, referred_by).values
             duplicates.append(
                 {
                     **duplicate_classified,
@@ -1160,7 +1176,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     if not records:
         raise ValueError("Input contains no usable contact rows")
     batch = args.batch or deterministic_batch(input_path)
-    classified, duplicates = deduplicate_and_classify(records, batch)
+    classified, duplicates = deduplicate_and_classify(records, batch, args.owner, args.referred_by)
     summary = build_summary(
         input_path=input_path,
         source_type=source_type,
