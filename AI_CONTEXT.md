@@ -1,18 +1,18 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-06-20
-**עודכן על ידי:** Claude Code — session update (git-verified against `origin/main` HEAD `59adff7`)
+**עודכן:** 2026-06-22
+**עודכן על ידי:** Claude Code — session update (git-verified against `origin/main` HEAD `d91a9df`)
 
 > מקור אמת לתוכן הזה: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו — לא נסמכתי עליו.
 
 ---
 
 ## 1. Executive Summary
-- `main` עומד על `7496628` (PR #80) — **מתקדם מעבר ל-`be65801`** שאליו כל שלושת מסמכי המקור (ROADMAP/CURRENT_STATE/AI_CONTEXT הקודם) עדיין הפנו. PR #80 כולל תיקון **crash אמיתי** ב-`app.py` (ראו §3).
+- `main` עומד על `d91a9df` (PR #94) — **מתקדם מעבר ל-`7496628`** שאליו AI_CONTEXT הקודם הפנה. PR #94 הוסיף C22 Weekly Business Summary (ראו §3).
 - Pipeline הליבה (Identity → Router → Context → Agent) ושער ה-Approval תקינים ופעילים.
 - כל פיצ'רי הצמיחה (Lead Scoring/Memory/Followup/Email Inbound) — **קוד מוכן, דגלים כבויים כברירת מחדל**, לא אומתו בתעבורה אמיתית בפרודקשן.
-- מצב Render בפרודקשן (deploy hash, `/health`, webhook) **לא ניתן לאימות מהסביבה הזו** — אין גישת Dashboard/egress.
+- מצב Render בפרודקשן: המשתמש אישר שדיפלוי בוצע ל-`d91a9df` (Render dashboard) — **לא אומת באופן עצמאי מהסביבה הזו** (אין גישת Dashboard/egress ל-Claude).
 - Screen Filter Gateway (C53) ו-Finance Pulse (O4) מוזגו ל-main ופעילים בקוד; `raw_formula` של Finance Pulse עדיין סטטי (לא דינמי לפי תאריך).
 - אין CI/CD ואין Monitoring אוטומטי — כל verification היום הוא ידני.
 
@@ -28,6 +28,13 @@ Lead Scoring (`LEAD_SCORING=off`), Lead Memory (`LEAD_MEMORY=off`), Followup Aut
 F05 WhatsApp Production — מחכה לאישור Meta. N08 CI/CD, N09 Monitoring, N07 Schema Governance script — מתוכננים, לא מומשו. TMA: Activity Feed / Assets / Personal Mode — stub כן (`coming_soon`).
 
 ## 3. Completed Since Last Update
+
+**PR #94 (22/06/2026) — `claude/weekly-business-summary-4crnek`, מוזג ל-`main` כ-`d91a9df`:**
+- C22 Weekly Business Summary (`weekly_summary.py`) — שולף Business Memory מ-7 ימים אחרונים, מקבץ לפי domain, שולח סיכום שבועי לטלגרם (ראשון 08:30 דרך `scheduler.py`) + כפתור להעברת רשומות `Event Type=Learning` ("רעיון") ל-ROADMAP. Read-only לחלוטין. דגל `FEATURE_WEEKLY_SUMMARY` כבוי כברירת מחדל — נוסף לרשימת `feature_flags.py`.
+- תוקנו שני באגים בספק המקורי לעומת הסכמה האמיתית: `_DOMAIN_LABELS` כלל domain לא קיים ("recruitment") וחיסר `media`/`saas` (תוקן להתאים ל-`real_estate/import/media/saas/finance/general` מ-`cmd_update.py`); `_IDEA_TYPES` כלל ערך `"Idea"` שלא קיים ב-`BusinessMemoryFields.EVENT_TYPE` — תוקן ל-`"Learning"` (הערך האמיתי היחיד למיפוי "רעיון").
+- **תיקון נוסף ב-`app.py` (webhook):** לפני התיקון, *כל* `callback_query` נוטה ל-`_handle_approval_callback` ללא תנאי — כל `callback_data` שלא מתחיל ב-`approve:`/`reject:` נפל ל-`else` שמחזיר "פעולה לא מוכרת" ולא עשה דבר. זה הפך את `register_weekly_callbacks` (וגם את `cmd_update.py`'s `upd_domain:`/`upd_type:` הקיימים מ-PR #85/86!) ל-dead code בפועל — הכפתורים מעולם לא עבדו דרך ה-webhook. תוקן: `callback_query` עם `data` שלא מתחיל ב-`approve:`/`reject:` מנותב כעת דרך `bot.process_new_updates([update])` (כמו slash commands), כדי שה-`@bot.callback_query_handler` הרשומים בפועל יופעלו.
+- ⚠️ ID collision: ה-spec החיצוני קרא לפיצ'ר "C22", אך ROADMAP.md's C22 הקיים הוא "feature_flags — is_enabled() alias" (Contract Fix, לא קשור) — אותו דפוס שתועד כבר עבור C20/C21 (PR #85/86). אין שינוי ב-ROADMAP.md בסשן הזה; ה-ID `C22` בהקשר הזה (Weekly Summary) מתייחס רק ל-spec החיצוני/למסמכי השינוי הזה, לא ל-ROADMAP.
+- Verified: `py_compile` נקי; `smoke_tests.py`/`test_integration.py`/`core/router/test_router.py` עוברים; תרחישי A/B/C/D מהספק (flag off, Business Memory ריק, רשומות מקובצות, כפתורי Idea) נבדקו ידנית עם mock data. דיפלוי ל-Render על `d91a9df` אושר ע"י המשתמש — לא אומת עצמאית מהסביבה הזו.
 
 **Security Fix Session (20/06/2026) — commits ישירים ל-`main`, ללא branch/PR (לפי הנחיית סשן מפורשת):**
 - `6e30d37` — Audit log ל-`lead_conversion.py`'s `crm_add_contact()` bypass (MEDIUM, ראו `BUG_AUDIT_LOG.md` BUG-009). תוקן ע"י Claude לעומת הספק: import path ל-`tools.airtable_security` (לא `tools.airtable_tools`) + חתימת קריאה אמיתית, לא המשוערת.
