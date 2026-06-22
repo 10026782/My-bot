@@ -433,3 +433,17 @@
 - **Docs עודכנו:** ROADMAP.md (N07 → ✅ הושלם), CHANGELOG.md, CHANGE_CONTROL_LOG.md (זה), AI_CONTEXT.md — 22/06/2026
 - **Feature Flag:** ללא — כלי CLI עצמאי, לא flag-gated
 - **Rollback plan:** revert PR #101 — קובץ יחיד חדש + שורה אחת ב-`.gitignore`, אפס import מקוד פעיל אחר, אפס סיכון
+
+### C56 — Approval Policy: Emergency Window + OTP + Policy Gate (docs correction)
+- **תאריך:** 23/06/2026 (תיקון תיעוד; הקוד עצמו מוזג כבר ב-17/06/2026)
+- **סוג:** Docs correction
+- **Requirement:** לא היה ב-ROADMAP.md בכלל לפני תיקון זה; `BUG_AUDIT_LOG.md` תיעד "Merged: לא" בזמן שהקוד היה כבר מוזג. התגלה בעת בדיקת ענפי `claude/*` לא ממוזגים לקראת ניקוי — `claude/meta-whatsapp-phase-1-q6pp3e` (הענף שממנו עלה PR #69) המשיך להצטבר commits **אחרי** שה-PR שלו עצמו מוזג, כולל ניסיון תיקון תיעוד דומה שעצמו לא הגיע ל-`main`.
+- **Commit (קוד, לא docs):** `8209d36`, `a57fd7f`, `44457dd`, `92e4b2b` — **merge commit `4e933b0`**
+- **PR:** #69 — https://github.com/10026782/My-bot/pull/69
+- **Review על ידי:** 10026782 (owner — `mergedBy` ב-GitHub API)
+- **Deploy תאריך:** לא ידוע — Render Auto-Deploy מוגדר על `main`, לא אומת ידנית מול Render Dashboard
+- **Verified בפרודקשן:** לא
+- **Verification ראיה:** `gh pr view 69 --json state,mergedAt,mergedBy,mergeCommit` → `{"state":"MERGED","mergedAt":"2026-06-17T18:56:00Z","mergedBy":"10026782","mergeCommit":"4e933b0536c03e270f7e4547e7c1d6a0a232b09e"}`; `git merge-base --is-ancestor 4e933b0 main` → exit 0 (אב-קדמון בפועל, לא רק PR API). מטריצת 12 התרחישים (Low/Medium/High/Critical × mobile/desktop/web × window/OTP) שאומתה בזמן הבנייה המקורית (17/06/2026) לא הורצה חזרה בתיקון תיעוד זה — אין שינוי קוד.
+- **Docs עודכנו:** ROADMAP.md (נוסף C56, לא היה קיים), AI_CONTEXT.md, BUG_AUDIT_LOG.md, RELEASE_CHECKLIST.md
+- **Feature Flag:** `EMERGENCY_WINDOW` — כבוי כברירת מחדל; ללא שינוי בתיקון תיעוד זה
+- **Rollback plan:** revert — docs-only, אפס סיכון פונקציונלי
