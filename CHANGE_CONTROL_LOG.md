@@ -387,3 +387,34 @@
 - **Docs עודכנו:** ROADMAP.md, CHANGELOG.md, CHANGE_CONTROL_LOG.md (זה), AI_CONTEXT.md — 22/06/2026
 - **Feature Flag:** `FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD` — כבויים כברירת מחדל (לא השתנה). **F16 Media Layer הושלם במלואו (כל 7 batches) — כבוי בפרודקשן עד הדלקה מפורשת + יצירת טבלת "Media Files" ב-Airtable.**
 - **Rollback plan:** revert PR #99 מ-`main` — שינוי מבודד בשלושה קבצים, 17 שורות בלבד
+
+### F16 Media Layer — Docs correction (ROADMAP/AI_CONTEXT/CHANGELOG/CHANGE_CONTROL_LOG)
+- **תאריך:** 22/06/2026 (מוזג)
+- **סוג:** Docs-only correction, אפס שינוי קוד
+- **Requirement:** בקשת הבעלים — אחרי שאומת ש-PR #99 כבר מוזג ל-`main` (`pull_request_read`, merged_by=10026782, לא ע"י Claude), עדכון `ROADMAP.md`/`AI_CONTEXT.md` לשקף ש-F16 הושלם במלואו, כולל commit hash + תאריך, ב-PR נפרד קטן.
+- **תיאור:** `ROADMAP.md` — header (שורה 3) + סעיף F16 (שורות 412-424) עודכנו לשקף סטטוס אמיתי per-batch (לא "תכנון", אלא "✅ מוזג"/"✅ קיים מהבנייה המקורית" לפי המקרה), כולל תיקון הטענה השגויה על feature flags (הם קיימים ב-`feature_flags.py`, כבויים כברירת מחדל — אומת ב-grep). `AI_CONTEXT.md` — header, Executive Summary, סעיף "חלקי", שתי רשומות חדשות ב-"Completed Since Last Update" (PR #98/#99), "Next Priorities" item 0. `CHANGELOG.md` — תוקן ה-Unreleased entry הקיים. `CHANGE_CONTROL_LOG.md` — שתי רשומות חדשות נוספו (append-only, היסטוריה לא נערכה).
+- **Commit:** `1ad9919`
+- **PR:** #100 — **מוזג ל-`main`** (merge commit `de5765b`)
+- **Review על ידי:** הבעלים
+- **Deploy תאריך:** N/A — docs-only, אין קוד רץ
+- **Verified בפרודקשן:** N/A
+- **Verification ראיה:** `git fetch origin main` + grep אחרי כל הטענות המתוקנות ב-4 הקבצים על `origin/main` — אומת שאין יותר טענות "לא מומש"/"עדיין לא בנוי" שמתייחסות ל-F16/Batch ד/ה/ו/ז. `git diff --stat` אומת diff מוגבל ל-4 קבצי docs בלבד (61 insertions/18 deletions).
+- **Docs עודכנו:** זה עצמו הוא ה-docs update
+- **Feature Flag:** ללא שינוי
+- **Rollback plan:** revert PR #100 — docs-only, אפס סיכון
+
+### N07 — Schema Governance script (`tools/schema_governance.py`)
+- **תאריך:** 22/06/2026 (מוזג)
+- **סוג:** New feature, קובץ יחיד חדש (קוד שלם מאפס)
+- **Requirement:** ROADMAP.md N07 (עדיפות גבוהה), מבוקש ע"י הבעלים. מניע: BUG-008 (`Leads."Business Outcome"` trailing space שהתגלה ad-hoc).
+- **תיאור:** `tools/schema_governance.py` — סקריפט standalone, READ ONLY לחלוטין. שולף live schema מ-Airtable Metadata API (`GET /meta/bases/{baseId}/tables`, httpx, Bearer auth מ-env). משווה מול `airtable_schema.py` (import, לא parse) דרך `TABLE_CLASS_MAP`/`_class_values` **קיימים** מ-`schema_audit.py` (יובאו, לא שוכפלו — נמנע מיפוי כפול שיכול לסחוף). מזהה 5 סוגי drift: שדה בקוד חסר ב-live (whitespace-tolerant match, נמנע double-report) → ERROR; שדה ב-live שלא בקוד → WARNING; trailing/leading spaces בשם שדה → WARNING; trailing/leading spaces ב-`singleSelect`/`multipleSelects` choice names → WARNING; שינוי סוג שדה → ERROR (מול ריצה קודמת שנשמרה ב-`schema_drift_report.json` בעצמו — baseline זמני, כי `airtable_schema.py` לא מכיל מטא-דאטה של סוגים בכלל). מדפיס דוח עברית ל-console, שומר `schema_drift_report.json` (נוסף ל-`.gitignore` — לא מתווסף ל-git), exit 1 אם יש ERROR ≥1 אחרת 0. self-test (`--self-test`) עם mock schema, אפס קריאות רשת. אינו נוגע ב-`schema_cache.json` (בבעלות `schema_validator.py`).
+- **החלטות תכנון שתועדו במפורש (לא הוסתרו):** (1) baseline זמני לבדיקת סוג שדה (לא קוד) — כי אין מטא-דאטה של סוג ב-`airtable_schema.py`. (2) הוצא מהיקף: "select options חסרות/כפולות" — הופיע רק בטיוטה לא-פורמלית, לא ברשימה הממוספרת הסופית. (3) נמצא ניגוד בין הדוגמה החזותית בספק (`Assets."Purchase Cost"` כ-WARNING) לכלל הסיווג המספרי המפורש (שדה חסר מ-live=ERROR) — הוכרע ללכת לפי הכלל המספרי כסמכותי, הדוגמה החזותית רק עיצובית.
+- **Commit:** `cbe9363`
+- **PR:** #101 — **מוזג ל-`main`** (merge commit `e465eff`)
+- **Review על ידי:** הבעלים
+- **Deploy תאריך:** N/A — כלי CLI עצמאי, לא חלק מה-pipeline החי, אין deploy
+- **Verified בפרודקשן:** N/A — לא נקרא מאף קוד pipeline; טרם הורץ פעם ראשונה מול live Airtable אמיתי (אין credentials בסביבת ה-sandbox)
+- **Verification ראיה:** `git fetch origin main` + grep על תוכן `tools/schema_governance.py` ו-`.gitignore` ב-`origin/main` ישירות — תואם. `python3 -m py_compile` עבר. `--self-test`: 6/6 assertions עברו. `smoke_tests.py` עבר במלואו.
+- **Docs עודכנו:** ROADMAP.md (N07 → ✅ הושלם), CHANGELOG.md, CHANGE_CONTROL_LOG.md (זה), AI_CONTEXT.md — 22/06/2026
+- **Feature Flag:** ללא — כלי CLI עצמאי, לא flag-gated
+- **Rollback plan:** revert PR #101 — קובץ יחיד חדש + שורה אחת ב-`.gitignore`, אפס import מקוד פעיל אחר, אפס סיכון
