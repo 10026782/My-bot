@@ -355,3 +355,35 @@
 - **Docs עודכנו:** ROADMAP.md (נוסף F16, עודכן header), CHANGELOG.md, CHANGE_CONTROL_LOG.md (זה), AI_CONTEXT.md — 22/06/2026
 - **Feature Flag:** `FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD` — עדיין לא קיימים ב-`feature_flags.py`; יתווספו ב-Batch ה כשה-hooks ל-`app.py` נבנים
 - **Rollback plan:** revert PR #96/#97 מ-`main` אם נדרש — שינוי מבודד בשלושה קבצים עצמאיים (`voice_stt_adapter.py`, `drive_adapter.py`, `media_gateway.py` ללא שינוי), אפס import מקוד פעיל אחר
+
+### F16 Media Layer — Batch ד (`media_handler.py` bug fix)
+- **תאריך:** 22/06/2026 (מוזג)
+- **סוג:** Bug fix (קוד היה כבר קיים ב-`main` מ-commit `ee4d2ed` קודם, לא נכתב מאפס)
+- **Requirement:** F16_MEDIA_LAYER_SPEC.md סעיף 4, מבוקש ע"י הבעלים. בתחילת המימוש התגלה ש-`media_handler.py` **כבר קיים** ב-`main` (מ-`ee4d2ed`, לפני מאמץ הבאצ'ים), עם שמות פונקציות שונים מהספק (`handle_voice_note()`/`handle_file_upload()`/`handle_tma_upload()` במקום `handle_telegram_media()`) וכבר מחובר ל-`app.py`/`tma_api.py`. הוצג למשתמש כקונפליקט (`AskUserQuestion`) — הוכרע: לשמור שמות קיימים, לתקן internals בלבד, לא לגעת ב-`app.py`/`tma_api.py`.
+- **תיאור הבאג:** (1) `upload_file()` נקרא עם `domain=domain` — kwarg שלא קיים בחתימה האמיתית של `drive_adapter.upload_file(file_bytes, filename, mime_type, parent_folder_id)` (תוקנה ב-Batch ב) — `TypeError` מובטח בכל הפעלה אמיתית, לא התגלה ע"י `test_media_layer.py` הקיים כי 33 ה-assertions שלו בודקים רק short-circuits (oversized/duplicate), לא את ה-success path. (2) כשל כתיבה ל-Airtable לאחר Drive upload מוצלח הוחזר כ-`MediaResult(ok=True, asset_id="")` בשקט — ללא דרך לצרכן לזהות כשל.
+- **תיקון:** נוסף `_resolve_drive_folder(domain)` המשתמש ב-`drive_adapter._get_upload_folder(domain)` לפני קריאה ל-`upload_file()`. נוסף בדיקת `if not asset_id` עם קוד שגיאה `ASSET_SAVE_FAILED`; כשל resolve מחזיר `DRIVE_FAILED`. הודעות שגיאה תורגמו לעברית. נוספו 4 self-test scenarios חדשים (`media_handler.py`'s `__main__`) שמכסים את ה-success path שחשף את הבאג. שמות פונקציות/`_idem_store`/קודי שגיאה קיימים (`FILE_TOO_LARGE`/`DUPLICATE`) לא שונו — `test_media_layer.py` תלוי בהם במדויק.
+- **Commit:** `0fcf81b`
+- **PR:** #98 — **מוזג ל-`main`** (merge commit `8dd3bca`)
+- **Review על ידי:** הבעלים
+- **Deploy תאריך:** לא ידוע — דרוש בדיקה ידנית מול Render (flag כבוי — אין סיכון production)
+- **Verified בפרודקשן:** N/A — `FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD` כבויים
+- **Verification ראיה:** `git fetch origin main` + grep על `_get_upload_folder`/`DRIVE_FAILED`/`ASSET_SAVE_FAILED` ב-`origin/main:media_handler.py` — תואם. `test_media_layer.py` 33/33 עוברים גם לפני וגם אחרי התיקון.
+- **Docs עודכנו:** ROADMAP.md, CHANGELOG.md, CHANGE_CONTROL_LOG.md (זה), AI_CONTEXT.md — 22/06/2026
+- **Feature Flag:** `FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD` — כבויים כברירת מחדל (לא השתנה)
+- **Rollback plan:** revert PR #98 מ-`main` — שינוי מבודד ל-`media_handler.py` בלבד
+
+### F16 Media Layer — Batches ה/ו/ז (app.py hooks, tma_api.py endpoint, airtable_schema.py — gap-fill)
+- **תאריך:** 22/06/2026 (מוזג)
+- **סוג:** Feature gap-fill (רוב הקוד כבר היה קיים ומחובר; לא מימוש מאפס)
+- **Requirement:** F16_MEDIA_LAYER_SPEC.md, מבוקש ע"י הבעלים לפתוח `claude/f16-final` ולממש שלושה batches.
+- **תיאור הממצא:** לפני מימוש, אומת ש-Batch ה (`_handle_telegram_media()` ב-`app.py`) ו-Batch ו (`/api/tma/upload` ב-`tma_api.py`) **כבר מחוברים** ל-pipeline החי מאז `ee4d2ed` — לא רק קוד עומד, אלא בפועל נקראים מה-webhook/route. Batch ז (`Tables.MEDIA_FILES`/`MediaFileFields` ב-`airtable_schema.py`) כבר קיים ומלא, מכסה את כל השדות ש-`media_gateway.py` כותב. נמצאו 2 gaps אמיתיים בלבד.
+- **תיקון:** `app.py` — נוסף `bot.send_chat_action()` (typing/upload_document) לפני עיבוד voice/photo/document ב-`_handle_telegram_media()`. `tma_api.py`/`media_handler.py` — נוסף קליטת `linked_lead_id` מה-multipart form ב-`/api/tma/upload`, מועבר ל-`handle_tma_upload()` → `handle_file_upload()`. `domain` נשאר נגזר מה-identity המאומת בכוונה (לא משדה form של הלקוח) — מנע tenant scope הנקבע ע"י הלקוח. `airtable_schema.py` — אפס שינוי (כבר שלם).
+- **Commit:** `32c6629`
+- **PR:** #99 — **מוזג ל-`main`** (merge commit `4924030`)
+- **Review על ידי:** הבעלים
+- **Deploy תאריך:** לא ידוע — דרוש בדיקה ידנית מול Render (flag כבוי — אין סיכון production)
+- **Verified בפרודקשן:** N/A — `FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD` כבויים
+- **Verification ראיה:** `git fetch origin main` + grep על `send_chat_action.*upload_document`, `linked_lead_id` ב-`origin/main:app.py`/`tma_api.py`/`media_handler.py` — תואם. `test_media_layer.py` 33/33, `media_handler.py` self-test 4/4, `smoke_tests.py` עובר.
+- **Docs עודכנו:** ROADMAP.md, CHANGELOG.md, CHANGE_CONTROL_LOG.md (זה), AI_CONTEXT.md — 22/06/2026
+- **Feature Flag:** `FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD` — כבויים כברירת מחדל (לא השתנה). **F16 Media Layer הושלם במלואו (כל 7 batches) — כבוי בפרודקשן עד הדלקה מפורשת + יצירת טבלת "Media Files" ב-Airtable.**
+- **Rollback plan:** revert PR #99 מ-`main` — שינוי מבודד בשלושה קבצים, 17 שורות בלבד
