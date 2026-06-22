@@ -2,14 +2,14 @@
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
 **עודכן:** 2026-06-22
-**עודכן על ידי:** Claude Code — session update (git-verified against `origin/main` HEAD `d91a9df`)
+**עודכן על ידי:** Claude Code — session update (git-verified against `origin/main` HEAD `8f9c648`)
 
 > מקור אמת לתוכן הזה: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו — לא נסמכתי עליו.
 
 ---
 
 ## 1. Executive Summary
-- `main` עומד על `d91a9df` (PR #94) — **מתקדם מעבר ל-`7496628`** שאליו AI_CONTEXT הקודם הפנה. PR #94 הוסיף C22 Weekly Business Summary (ראו §3).
+- `main` עומד על `8f9c648` (PR #96+#97) — **מתקדם מעבר ל-`d91a9df`** שאליו AI_CONTEXT הקודם הפנה. PR #96/#97 הוסיפו F16 Media Layer Batches א/ב/ג (STT, Drive upload, Airtable metadata gateway — ראו §3). קוד חדש, **לא מחובר ל-pipeline החי** (Batches ד-ז עדיין לא בנויים — אין hooks ב-`app.py`/`tma_api.py`, אין feature flag).
 - Pipeline הליבה (Identity → Router → Context → Agent) ושער ה-Approval תקינים ופעילים.
 - כל פיצ'רי הצמיחה (Lead Scoring/Memory/Followup/Email Inbound) — **קוד מוכן, דגלים כבויים כברירת מחדל**, לא אומתו בתעבורה אמיתית בפרודקשן.
 - מצב Render בפרודקשן: המשתמש אישר שדיפלוי בוצע ל-`d91a9df` (Render dashboard) — **לא אומת באופן עצמאי מהסביבה הזו** (אין גישת Dashboard/egress ל-Claude).
@@ -22,12 +22,22 @@
 Identity/Router/Context/Agent core; `tool_registry`+`dispatcher` enforcement; Approval flow (3-state, fail-closed, `verify_execution()` נבדק לפני דיווח הצלחה — תוקן ב-PR #80); Airtable single-write-path gateway (`tools/airtable_gateway.py`); Daily Digest; Payment Reminder; Twilio signature validation; TMA auth+CORS; Screen Filter Gateway (`SCREEN_CONFIGS`); Finance Pulse (קורא Payments/Expenses חיים); A32 anti-hallucination evidence gate (חוזק ב-PR #80 — בודק tool identity+ok, לא keyword guessing).
 
 **חלקי (Partial — קוד קיים, לא מאומת/לא פעיל):**
-Lead Scoring (`LEAD_SCORING=off`), Lead Memory (`LEAD_MEMORY=off`), Followup Automation (`FOLLOWUP_AUTOMATION=off`) — שרשרת תלויה אחת בשנייה, כולן code-complete. WhatsApp outbound = honest stub (חסום ב-Meta Cloud API). Google integrations (OAuth נדרש). Approval Policy Emergency Window/OTP — code-complete, `EMERGENCY_WINDOW=off`.
+Lead Scoring (`LEAD_SCORING=off`), Lead Memory (`LEAD_MEMORY=off`), Followup Automation (`FOLLOWUP_AUTOMATION=off`) — שרשרת תלויה אחת בשנייה, כולן code-complete. WhatsApp outbound = honest stub (חסום ב-Meta Cloud API). Google integrations (OAuth נדרש). Approval Policy Emergency Window/OTP — code-complete, `EMERGENCY_WINDOW=off`. F16 Media Layer Batches א/ב/ג (`voice_stt_adapter.py`/`drive_adapter.py`/`media_gateway.py`) — code-complete, **אפס import מקוד חי** (אין עדיין `media_handler.py`/`app.py` hooks/`tma_api.py` endpoint — Batch ד-ז).
 
 **חסום (Blocked):**
 F05 WhatsApp Production — מחכה לאישור Meta. N08 CI/CD, N09 Monitoring, N07 Schema Governance script — מתוכננים, לא מומשו. TMA: Activity Feed / Assets / Personal Mode — stub כן (`coming_soon`).
 
 ## 3. Completed Since Last Update
+
+**PR #96/#97 (22/06/2026) — `claude/f16-media-layer`, מוזגים ל-`main` כ-`8f9c648`:**
+- F16 Media Layer, Batches א/ב/ג. ⚠️ ID collision כפול: הספק החיצוני קרא לפיצ'ר "F12" (תפוס — Model Provider Adapter) ואז "F09" (תפוס — Lead Qualifier Wire-up); תוקן ל-F16 ב-ROADMAP.md, באותו דפוס שתועד עבור C20/C21/F14/F15.
+- **Batch א — `voice_stt_adapter.py` (PR #96):** STT provider תוקן ל-OpenAI Whisper כ-PRIMARY חי (`OPENAI_API_KEY` קיים בסביבה) — הספק המקורי הניח Groq, תוקן מול הסביבה האמיתית; Groq נשאר רק כ-stub מוער ("Phase 2"), לא מחובר ל-`transcribe()`. קודי שגיאה תוקנו ל-`OVERSIZED`/`STT_FAILED` (`EMPTY_AUDIO` הוסר — לא קיים בספק).
+- **Batch ב — `drive_adapter.py` (PR #97):** `upload_file(file_bytes, filename, mime_type, parent_folder_id)` — `parent_folder_id` חובה ללא default; temp file מנוקה תמיד ב-`finally`; `_safe_filename` מנקה רק תווים אסורים ל-Drive (עברית native, אין נורמליזציה נוספת).
+- **Batch ג — `media_gateway.py` (PR #97):** נמצא תואם 100% לספק כבר מהבנייה המקורית — אפס שינוי קוד, רק וידוא.
+- **באג self-test חוזר (תוקן פעמיים, שורש זהה):** `voice_stt_adapter.py` ו-`drive_adapter.py` השתמשו ב-`unittest.mock.patch("module.fn", ...)` בתוך ה-self-test שלהם; הרצה ישירה (`python3 module.py`) יוצרת `__main__` נפרד מ-`sys.modules["module"]` — ה-patch פוגע בעותק הלא-רץ, אז קריאות רשת אמיתיות יצאו בפועל בזמן בדיקה. תוקן: `patch.object(sys.modules[__name__], "fn", ...)` בשני הקבצים.
+- `test_media_layer.py` עודכן בשני סבבים נפרדים (אחרי כל batch, לפי הוראה מפורשת) — שמות error code, פרמטר `parent_folder_id` חדש, assertions שהוסרו. 33/33 עוברים.
+- Verified: PR #96/#97 אומתו ממוזגים בפועל דרך `git fetch origin main` + grep על תוכן הקבצים ב-`origin/main` (לא git log/PR status בלבד, לפי AGENTS.md POST-MERGE VERIFICATION) — `OVERSIZED`/`STT_FAILED` נמצאו ב-`voice_stt_adapter.py`, `parent_folder_id` נמצא בחתימת `upload_file`/`_upload_to_drive` ב-`drive_adapter.py`. **קוד מוזג, לא מחובר ל-pipeline החי, לא אומת בפרודקשן** (אין feature flag, אין caller חי).
+- Batches ד (`media_handler.py`), ה (`app.py` hooks), ו (`tma_api.py` endpoint), ז (`airtable_schema.py` verification) — עדיין לא מומשו.
 
 **PR #94 (22/06/2026) — `claude/weekly-business-summary-4crnek`, מוזג ל-`main` כ-`d91a9df`:**
 - C22 Weekly Business Summary (`weekly_summary.py`) — שולף Business Memory מ-7 ימים אחרונים, מקבץ לפי domain, שולח סיכום שבועי לטלגרם (ראשון 08:30 דרך `scheduler.py`) + כפתור להעברת רשומות `Event Type=Learning` ("רעיון") ל-ROADMAP. Read-only לחלוטין. דגל `FEATURE_WEEKLY_SUMMARY` כבוי כברירת מחדל — נוסף לרשימת `feature_flags.py`.
@@ -56,6 +66,7 @@ F05 WhatsApp Production — מחכה לאישור Meta. N08 CI/CD, N09 Monitorin
 **מהסשן הקודם (PR #75/#77/#79, מוזגים ל-`be65801`):** Screen Filter Gateway (C53), Finance Pulse English-schema migration + wiring (O4), structured tool-result contract (C53-A — שהרגרסיה שלו תוקנה כרגע ב-PR #80 לעיל).
 
 ## 4. Next Priorities
+0. **F16 Media Layer Batches ד-ז** (`media_handler.py`, `app.py` hooks, `tma_api.py` endpoint, `airtable_schema.py` verification) — Batches א/ב/ג מוזגים אבל הקוד "תלוי באוויר" עד שה-handler/hooks מחברים אותו ל-pipeline החי; ללא flag פעיל אין שום סיכון production מהמיזוג הנוכחי.
 1. **לתעד את PR #80 / A32 fix** ב-`CHANGE_CONTROL_LOG.md` + `ROADMAP.md` עם commit hash — אותו דפוס drift שכבר תועד עבור C25-C40 חוזר על עצמו (תיעוד מפגר אחרי main).
 2. **N07 — Schema Governance script**: עדיפות גבוהה ברודמאפ; drift בסכמת Airtable מתגלה כרגע ad-hoc per-bug, לא שיטתי.
 3. **N11 — Finance Pulse dynamic formula**: `raw_formula` עדיין סטטי; + לסגור 2 הפערים הידועים (`PaymentFields.CONTACT/NOTES` מצביעים על שדות שלא קיימים; case-mismatch ב-`_build_formula()`).

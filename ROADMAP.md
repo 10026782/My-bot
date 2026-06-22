@@ -1,6 +1,8 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 20/06/2026 — main = `62eddda` (אומת). PR #85/#86/#87/#88/#89 ממוזגים (ראה C54/C55 למטה + CHANGE_CONTROL_LOG.md). F13 (TenantConfig + Provider Interfaces) — קוד נכתב ומוזג (PR #87), **לא מחובר ל-pipeline**; ⚠️ חפיפה עם F12 עדיין לא הוכרעה, אל תחבר ל-pipeline לפני הכרעה. `contact_merge.py` (PR #88) — כלי CLI עצמאי למיזוג אנשי קשר, לא ב-ROADMAP (admin utility, לא feature). נוספו F14 (Contact Gate: find_or_create_contact) ו-F15 (crm.py → airtable_gateway write path migration) — ⚠️ הספק ביקש F12/F13, אך שני ה-IDs האלה תפוסים (F12=Model Provider Adapter, F13=TenantConfig); הוקצו F14/F15 כדי למנוע התנגשות בסטייל C20/C21.
+עודכן: 22/06/2026 — main = `8f9c648` (אומת, PR #96+#97 ממוזגים). נוסף F16 (Media Layer) — Batch א (`voice_stt_adapter.py`, PR #96) ו-Batch ב/ג (`drive_adapter.py`, `media_gateway.py`, PR #97) מוזגים; Batch ד-ז עדיין לא מומשו. ⚠️ ה-spec החיצוני קרא לפיצ'ר "F12" ואז "F09" — שני ה-IDs תפוסים (F12=Model Provider Adapter, F09=Lead Qualifier Wire-up); הוקצה F16 כדי למנוע התנגשות בסטייל C20/C21/F14/F15.
+
+עודכן (קודם): 20/06/2026 — main = `62eddda` (אומת). PR #85/#86/#87/#88/#89 ממוזגים (ראה C54/C55 למטה + CHANGE_CONTROL_LOG.md). F13 (TenantConfig + Provider Interfaces) — קוד נכתב ומוזג (PR #87), **לא מחובר ל-pipeline**; ⚠️ חפיפה עם F12 עדיין לא הוכרעה, אל תחבר ל-pipeline לפני הכרעה. `contact_merge.py` (PR #88) — כלי CLI עצמאי למיזוג אנשי קשר, לא ב-ROADMAP (admin utility, לא feature). נוספו F14 (Contact Gate: find_or_create_contact) ו-F15 (crm.py → airtable_gateway write path migration) — ⚠️ הספק ביקש F12/F13, אך שני ה-IDs האלה תפוסים (F12=Model Provider Adapter, F13=TenantConfig); הוקצו F14/F15 כדי למנוע התנגשות בסטייל C20/C21.
 
 ---
 
@@ -406,6 +408,20 @@ scope: **infrastructure only — אפס שינוי runtime behavior** בשלב �
 ⚠️ **חפיפה עם F12** — שני הספקים מציעים `providers/` כתיקייה חדשה ל-LLM abstraction (F12: `LLMProvider.generate(prompt, context, model_tier)`; F13: `LLMProvider.generate(messages, system, model, max_tokens, tools)` + עוד שני providers ל-storage/channel). **לא להתחיל מימוש של אף אחד מהשניים לפני שמחליטים אם F13 סופג את F12 או שהם משלימים זה את זה** — אחרת ניצור שתי תיקיות `providers/` עם interfaces סותרים, כמו התנגשות ה-ID של C20/C21 שתועדה ב-`AI_CONTEXT.md`.
 מצב: **CODE COMPLETE, לא מחובר ל-pipeline** — כל 6 הקבצים קיימים (PR #87, מוזג ל-`main`). אפס import מקוד קיים אליהם — `app.py`/`tools/dispatcher.py` לא משתמשים בהם, `get_tenant_config()` תמיד מחזיר את `boss_hq` הקשיח. ⚠️ ה-spec המקורי הניח חתימות פונקציות שלא קיימות בקוד (`gateway_add`/`gateway_update`/`gateway_delete`, `send_via_cog`, `airtable_get(max_records=...)` כ-`list[dict]`, `_validate_twilio_signature(headers, body)`) — תוקן מול הקוד האמיתי, מתועד ב-`BUG_AUDIT_LOG.md` כ-SPEC-001. הכרעת F12-מול-F13 (השורה הקודמת) **עדיין לא בוצעה** — הקבצים קיימים אך לא נבחרו כפתרון הסופי.
 קבצים שנוצרו: `core/tenant_config.py`, `providers/__init__.py`, `providers/interfaces.py`, `providers/airtable_shim.py`, `providers/anthropic_shim.py`, `providers/twilio_shim.py`.
+
+### F16 — Media Layer (voice notes + file uploads → Drive + Airtable)
+מה: שכבת מדיה מלאה — קליטת קובץ/הקלטה מ-Telegram או TMA, העלאה ל-Google Drive, תמלול (STT), ושמירת metadata בטבלת Airtable "Media Files". מחולק לשבעה batches בסדר קבוע (א-ז), כל אחד ב-commit/PR נפרד על ענף `claude/f16-media-layer`.
+⚠️ היסטוריית ID: הספק החיצוני קרא לפיצ'ר "F12" בהתחלה (תפוס — Model Provider Adapter, ראה מעלה) ואז "F09" (תפוס — Lead Qualifier Wire-up, ראה מעלה). הוקצה F16 כדי למנוע התנגשות, באותו דפוס שתועד עבור C20/C21 (`AI_CONTEXT.md`) ו-F14/F15 (מעלה).
+מצב Batches:
+- **Batch א — `voice_stt_adapter.py`** (PR #96, מוזג): STT provider = OpenAI Whisper (PRIMARY, חי — `OPENAI_API_KEY` קיים בסביבה). Groq רשום כ-stub מוער ("Phase 2") — לא מחובר ל-`transcribe()`. קודי שגיאה: `OVERSIZED`/`STT_FAILED` (אין `EMPTY_AUDIO` בספק הנוכחי). `_normalize_hebrew()` — הסרת ניקוד + כיווץ רווחים. **אומת מוזג ל-`main` (`8f9c648`) — grep על `OVERSIZED`/`STT_FAILED` תואם.**
+- **Batch ב — `drive_adapter.py`** (PR #97, מוזג): `upload_file(file_bytes, filename, mime_type, parent_folder_id)` — `parent_folder_id` חובה, אין default. Temp file נמחק תמיד ב-`finally`. `_safe_filename` מנקה רק תווים אסורים ל-Drive (עברית נתמכת native). `GOOGLE_DRIVE_FOLDER_ID` (BOSS root, מאומת) הוא ה-parent, לא תיקייה ליצירה. **אומת מוזג ל-`main` (`8f9c648`) — grep על `parent_folder_id` בחתימת `upload_file`/`_upload_to_drive` תואם.**
+- **Batch ג — `media_gateway.py`** (PR #97, מוזג): טבלה `"Media Files"` (לא "Assets" — collision עם נדל"ן), `MediaFileFields`, כתיבה דרך `tools/airtable_gateway.airtable_create` בלבד (אין `httpx` ישיר), `linked_lead_id` → `[record_id]` (array), `raw_transcript`+`normalized_transcript` שניהם נשמרים, `save_asset()` מחזיר `record_id: str | None`. הקובץ נמצא **תואם 100% לספק כבר מהבנייה המקורית — אפס שינויי קוד בסשן הזה**.
+- **Batch ד — `media_handler.py`**: 🔲 לא מומש. כניסה יחידה `handle_telegram_media()`/`handle_tma_upload()`; שכבות גודל (normal/large/oversized); idempotency; approval רק ל-AI processing/Memory.
+- **Batch ה — `app.py` hooks**: 🔲 לא מומש.
+- **Batch ו — `tma_api.py` endpoint**: 🔲 לא מומש.
+- **Batch ז — `airtable_schema.py` grep/רישום**: 🔲 לא מומש (`MediaFileFields`/`Tables.MEDIA_FILES` כבר קיימים בקובץ מבנייה קודמת — Batch ז צריך לאמת/לסגור gaps, לא לבנות מאפס).
+תלוי ב: כלום (עומד בפני עצמו). דגלים `FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD` — לא קיימים עדיין ב-`feature_flags.py` (ייווספו ב-Batch ה כשה-hooks מתחברים ל-pipeline החי; עד אז הקוד קיים אך לא מורץ מאף מקום).
+קבצים: `voice_stt_adapter.py`, `drive_adapter.py`, `media_gateway.py` (קיימים), `media_handler.py`, `app.py`, `tma_api.py`, `airtable_schema.py` (Batch ד-ז).
 
 ---
 

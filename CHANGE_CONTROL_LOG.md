@@ -339,3 +339,19 @@
 - **Docs עודכנו:** CHANGE_CONTROL_LOG.md (זה), ROADMAP.md — 19/06/2026; PR #83 comment תיעד 8 קבצים נוספים עם drift דומה (`tma_api.py`, `tools/airtable_tools.py`, `schema_intelligence.py` ועוד) — **לא תוקנו**, מחוץ לטווח הסשן
 - **Feature Flag:** N/A
 - **Rollback plan:** revert PR #83 מ-`main` אם מתגלה רגרסיה — שינוי מבודד ב-`tools/google_tools.py`/`daily_digest.py`
+
+### F16 Media Layer — Batch א/ב/ג (STT provider fix, Drive upload contract, Airtable metadata gateway)
+- **תאריך:** 22/06/2026 (מוזג)
+- **סוג:** Feature (new, flag-gated — קוד לא מחובר ל-pipeline החי עדיין)
+- **Requirement:** F16_MEDIA_LAYER_SPEC.md (ספק חיצוני), batches א/ב/ג, מבוקש ע"י הבעלים בסדר קפדני
+- **תיאור הבאג:** הספק המקורי כינה את הפיצ'ר "F12" ואז "F09" — שניהם תפוסים ב-ROADMAP.md (F12=Model Provider Adapter, F09=Lead Qualifier Wire-up). תוקן ל-F16. בנוסף, `voice_stt_adapter.py`'s self-test ו-`drive_adapter.py`'s self-test שניהם השתמשו ב-`unittest.mock.patch("module_name.fn", ...)` כדי למנוע קריאות רשת אמיתיות בזמן `python3 module_name.py` — דפוס שנכשל בשתיקה: הרצה ישירה של סקריפט יוצרת `__main__` כ-namespace הרץ, אבל `patch("module_name.fn")` מבצע `import module_name` טרי שיוצר עותק מודול שני, נפרד, ב-`sys.modules` — ה-patch פוגע בעותק הלא-רץ. תוצאה: `voice_stt_adapter.py` ביצע קריאת רשת אמיתית ל-`api.openai.com` (נחסם ע"י sandbox allowlist), ו-`drive_adapter.py` החזיר תוצאות שגויות/None כי לא היה OAuth מוגדר בסביבת הבדיקה.
+- **תיקון:** Batch א — `voice_stt_adapter.py` נכתב מחדש: OpenAI Whisper כ-PRIMARY חי (`OPENAI_API_KEY` קיים), Groq כ-stub מוער לא מחובר; קודי שגיאה `OVERSIZED`/`STT_FAILED` (הוסר `EMPTY_AUDIO` — לא בספק). Batch ב — `drive_adapter.py` נכתב מחדש: `upload_file(file_bytes, filename, mime_type, parent_folder_id)` עם `parent_folder_id` חובה (אין default), ניקוי temp file תמיד ב-`finally`, `_safe_filename` מנקה רק תווים אסורים ל-Drive (עברית native). Batch ג — `media_gateway.py` נמצא תואם 100% לספק כבר מהבנייה המקורית, אפס שינוי קוד. שני באגי ה-self-test תוקנו ע"י החלפת `patch("module.fn")` ב-`patch.object(sys.modules[__name__], "fn")` בשני הקבצים. `test_media_layer.py` עודכן בשני סבבים נפרדים (לפי הוראה מפורשת לאחר כל batch) להתאים לקונטרקט החדש — 33/33 עוברים.
+- **Commit:** `9485431` (Batch א + test round 1), `33a560c`/`d073b1f` (Batch ב + test round 2), Batch ג (media_gateway.py ללא שינוי קוד, נכלל ב-PR #97)
+- **PR:** #96 (Batch א), #97 (Batch ב+ג) — **שניהם ממוזגים ל-`main`** (merge commit `8f9c648`)
+- **Review על ידי:** הבעלים (אישר כל batch בנפרד, כולל שני amend+force-push מפורשים ל-`test_media_layer.py`)
+- **Deploy תאריך:** לא ידוע — דרוש בדיקה ידנית מול Render (קוד לא מחובר ל-pipeline החי — אין סיכון production מעצם המיזוג)
+- **Verified בפרודקשן:** N/A — אין feature flag פעיל, הקוד לא נקרא מאף מקום חי עדיין (Batch ד-ז עדיין לא בנו את ה-hooks)
+- **Verification ראיה:** מוזג אומת בפועל דרך `git fetch origin main` + grep על תוכן הקבצים שמוזגו ב-`origin/main` (`OVERSIZED`/`STT_FAILED` ב-`voice_stt_adapter.py`, `parent_folder_id` בחתימת `upload_file`/`_upload_to_drive` ב-`drive_adapter.py`) — לא הסתמכות על git log/PR status בלבד, לפי AGENTS.md POST-MERGE VERIFICATION. self-tests עברו (34/34 → 33/33 לאחר הסרת assertion אחת, צפוי).
+- **Docs עודכנו:** ROADMAP.md (נוסף F16, עודכן header), CHANGELOG.md, CHANGE_CONTROL_LOG.md (זה), AI_CONTEXT.md — 22/06/2026
+- **Feature Flag:** `FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD` — עדיין לא קיימים ב-`feature_flags.py`; יתווספו ב-Batch ה כשה-hooks ל-`app.py` נבנים
+- **Rollback plan:** revert PR #96/#97 מ-`main` אם נדרש — שינוי מבודד בשלושה קבצים עצמאיים (`voice_stt_adapter.py`, `drive_adapter.py`, `media_gateway.py` ללא שינוי), אפס import מקוד פעיל אחר
