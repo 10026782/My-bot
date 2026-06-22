@@ -23,6 +23,21 @@
 
 > נבנה מ-`git log --since="30 days ago"` (~172 commits, `f935c53`→`eebf73b`) + טבלאות ROADMAP.md (Stabilization Sprint, World 2, Sprint 16/06). כל commit hash צוטט ישירות מ-git או מ-ROADMAP — שורות שלא נמצאה להן ראיה ישירה מסומנות "לא ידוע".
 
+### N08 / N09 / N11 — ROADMAP status drift correction (docs-only)
+- **תאריך:** 22/06/2026
+- **סוג:** Docs-only correction, אפס שינוי קוד
+- **Requirement:** התגלה בתחילת מימוש N11 (`pre_session_gate.sh` + `git checkout -b claude/n11-finance-pulse`) — לפני כתיבת קוד, נקרא `tma_api.py`/`airtable_schema.py` כדי לאמת שמות שדות לפי הנחיית המשתמש ("שמות שדות חייבים להתאים ל-live Airtable"), ונמצא ש-`finance_pulse()` כבר עובר דרך `SCREEN_CONFIGS["finance_pulse"]` + `_build_formula(entity="Payment")` — כל היקף N11 כבר ממומש ומאוחד. בדיקה נוספת (grep על `main`) חשפה שגם N08 ו-N09 — שהושלמו ומוזגו **בתוך הסשן הזה עצמו** (PR #103/#104) — נשארו מתויגים `🔲 PLANNED` ב-`ROADMAP.md`.
+- **תיאור:** `ROADMAP.md` — שלוש רשומות (N08/N09/N11) עודכנו מ-`🔲 PLANNED` ל-`✅ הושלם` עם commit hash + PR, header (שורה 3) עודכן ל-`main` HEAD נכון (`24237e6`). `AI_CONTEXT.md` — Executive Summary, "חסום", "Next Priorities" item 3, ושלוש רשומות חדשות ב-"Completed Since Last Update" (PR #103/#104 + הערת התיקון עצמו). `CHANGELOG.md` — רשומת Unreleased חדשה. אפס שינוי ב-`tma_api.py`/`core/error_reporter.py`/`.github/workflows/ci.yml` עצמם — כולם נכונים כבר.
+- **Commit:** (ראו commit log על `claude/n11-finance-pulse`)
+- **PR:** טרם נפתח
+- **Review על ידי:** —
+- **Deploy תאריך:** N/A — docs-only
+- **Verified בפרודקשן:** N/A
+- **Verification ראיה:** `git log --oneline --merges main | grep -i "n08\|n09"` אישר PR #103 (`abf4835`)/PR #104 (`24237e6`) על `main`; `grep -n "report_error\|error_reporter" app.py` אישר 3 קריאות חיות; `ls .github/workflows/ci.yml` אישר קיום; `grep -n "_build_formula\|entity.*Payment" tma_api.py` אישר wiring N11 (PR #77, `f7d7e4f`/`daab73e`, מאומת `git merge-base --is-ancestor f7d7e4f main`).
+- **Docs עודכנו:** ROADMAP.md, AI_CONTEXT.md, CHANGELOG.md, CHANGE_CONTROL_LOG.md (זה)
+- **Feature Flag:** ללא שינוי
+- **Rollback plan:** revert — docs-only, אפס סיכון
+
 ### C22 (spec ID, לא ROADMAP) — Weekly Business Summary
 - **תאריך:** 22/06/2026
 - **סוג:** Feature

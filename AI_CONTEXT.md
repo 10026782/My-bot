@@ -2,7 +2,7 @@
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
 **עודכן:** 2026-06-22
-**עודכן על ידי:** Claude Code — session update (git-verified against `origin/main` HEAD `e465eff`)
+**עודכן על ידי:** Claude Code — session update (git-verified against `origin/main` HEAD `24237e6`)
 
 > מקור אמת לתוכן הזה: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו — לא נסמכתי עליו.
 
@@ -13,9 +13,9 @@
 - Pipeline הליבה (Identity → Router → Context → Agent) ושער ה-Approval תקינים ופעילים.
 - כל פיצ'רי הצמיחה (Lead Scoring/Memory/Followup/Email Inbound) — **קוד מוכן, דגלים כבויים כברירת מחדל**, לא אומתו בתעבורה אמיתית בפרודקשן.
 - מצב Render בפרודקשן: המשתמש אישר שדיפלוי בוצע ל-`d91a9df` (Render dashboard) — **לא אומת באופן עצמאי מהסביבה הזו** (אין גישת Dashboard/egress ל-Claude).
-- Screen Filter Gateway (C53) ו-Finance Pulse (O4) מוזגו ל-main ופעילים בקוד; `raw_formula` של Finance Pulse עדיין סטטי (לא דינמי לפי תאריך).
+- Screen Filter Gateway (C53) ו-Finance Pulse (O4) מוזגו ל-main ופעילים בקוד; `GET /api/finance/pulse` מחובר ל-`_build_formula()` עם `entity="Payment"` (`N11`, PR #77 — תועד כ-PLANNED ב-ROADMAP בטעות עד הסשן הזה, תוקן). סיווג overdue/pending לפי תאריך נשאר ב-Python (לא ב-`raw_formula`) — החלטת עיצוב, לא bug.
 - **N07 (Schema Governance) הושלם** — `tools/schema_governance.py` (PR #101) קיים ב-main, standalone read-only drift detector מול Airtable Metadata API; עדיין לא רץ אוטומטית (אין CI בריפו), הרצה היא manual.
-- אין CI/CD ואין Monitoring אוטומטי — כל verification היום הוא ידני.
+- **N08 (CI/CD) הושלם** (PR #103, `abf4835`) — `.github/workflows/ci.yml` רץ על כל PR. **N09 (Monitoring/Alerting) הושלם** (PR #104, `4ac6d24`) — `core/error_reporter.py` שולח התראות Telegram על שגיאות פרודקשן.
 
 ## 2. Current System State
 
@@ -26,7 +26,7 @@ Identity/Router/Context/Agent core; `tool_registry`+`dispatcher` enforcement; Ap
 Lead Scoring (`LEAD_SCORING=off`), Lead Memory (`LEAD_MEMORY=off`), Followup Automation (`FOLLOWUP_AUTOMATION=off`) — שרשרת תלויה אחת בשנייה, כולן code-complete. WhatsApp outbound = honest stub (חסום ב-Meta Cloud API). Google integrations (OAuth נדרש). Approval Policy Emergency Window/OTP — code-complete, `EMERGENCY_WINDOW=off`. F16 Media Layer (כל 7 batches, `voice_stt_adapter.py`/`drive_adapter.py`/`media_gateway.py`/`media_handler.py`/`app.py` hooks/`tma_api.py` endpoint/`airtable_schema.py`) — code-complete **ומחובר ל-pipeline החי**, אך `FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD` כבויים כברירת מחדל — לא אומת בתעבורה אמיתית בפרודקשן.
 
 **חסום (Blocked):**
-F05 WhatsApp Production — מחכה לאישור Meta. N08 CI/CD, N09 Monitoring — מתוכננים, לא מומשו. TMA: Activity Feed / Assets / Personal Mode — stub כן (`coming_soon`).
+F05 WhatsApp Production — מחכה לאישור Meta. TMA: Activity Feed / Assets / Personal Mode — stub כן (`coming_soon`).
 
 ## 3. Completed Since Last Update
 
@@ -80,10 +80,16 @@ F05 WhatsApp Production — מחכה לאישור Meta. N08 CI/CD, N09 Monitorin
 
 **PR #101 (22/06/2026) — `claude/n07-schema-governance`, מוזג ל-`main` כ-`e465eff`:** N07 — `tools/schema_governance.py`. סקריפט standalone, קובץ יחיד, READ ONLY לחלוטין: שולף live schema מ-Airtable Metadata API, משווה ל-`airtable_schema.py` (import, לא parse) דרך `TABLE_CLASS_MAP`/`_class_values` הקיימים מ-`schema_audit.py` (לא שוכפל מיפוי שני). מזהה 5 סוגי drift: שדה חסר ב-live (whitespace-tolerant match) → ERROR; שדה ב-live שלא בקוד → WARNING; trailing/leading spaces בשם שדה → WARNING; trailing/leading spaces ב-select options → WARNING; שינוי סוג שדה → ERROR (מול ריצה קודמת שנשמרה, כי `airtable_schema.py` לא מכיל מטא-דאטה של סוגים — baseline זמני, לא קוד). מדפיס דוח עברית, שומר `schema_drift_report.json` (ב-`.gitignore`, לא ב-git), exit 1 אם יש ERROR. self-test (`--self-test`, ללא רשת) כלול. מניע: BUG-008 (`Leads."Business Outcome"` trailing space שהתגלה ad-hoc).
 
+**PR #103 (22/06/2026) — `claude/n08-ci-cd`, מוזג ל-`main` כ-`abf4835`:** N08 — `.github/workflows/ci.yml`. מריץ `smoke_tests.py`/`test_integration.py` + `npm run build` (frontend, skip חינני אם `tma-frontend/package.json` חסר) על כל PR. Secrets ממופים נכון (`TELEGRAM_TOKEN` וכו').
+
+**PR #104 (22/06/2026) — `claude/n09-monitoring`, מוזג ל-`main` כ-`24237e6`:** N09 — `core/error_reporter.py`. `report_error(error, context, level)` שולח התראת Telegram על שגיאות פרודקשן בלבד (`RENDER=="true"` + `ERROR_REPORTING`), rate-limited (10/שעה), בלי payload/תוכן הודעות (context = שם פונקציה בלבד, traceback גולמי). מחובר ב-3 נקודות ב-`app.py`: `_handle_approval_callback`, `webhook_telegram`, `webhook_whatsapp`.
+
+**Docs correction (סשן זה) — N08/N09/N11:** שלושתם תועדו כ-`🔲 PLANNED` ב-`ROADMAP.md` אף שהיו ממוזגים ל-`main` (N08/N09 מהסשן הזה עצמו; N11 מ-PR #77, סשן קודם). תוקן ב-`ROADMAP.md`/`AI_CONTEXT.md` (זה) אחרי grep ישיר על `main` שאישר את הקוד החי בכל שלושתם (לא הוסתמך על git log/PR status בלבד — POST-MERGE VERIFICATION לפי `AGENTS.md`).
+
 ## 4. Next Priorities
 0. **F16 Media Layer — הדלקת flags** (`FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD`) — קוד שלם ומחובר (כל 7 batches), אך טבלת "Media Files" חייבת להיווצר ידנית ב-Airtable לפני כל הדלקה; אפס תעבורת ייצור אומתה עד כה.
 1. **לתעד את PR #80 / A32 fix** ב-`CHANGE_CONTROL_LOG.md` + `ROADMAP.md` עם commit hash — אותו דפוס drift שכבר תועד עבור C25-C40 חוזר על עצמו (תיעוד מפגר אחרי main).
 2. **להריץ את N07 (`tools/schema_governance.py`) מול live Airtable** — קוד הושלם ומוזג, עדיין לא הורץ פעם ראשונה מול הסכמה האמיתית (אין credentials בסביבת sandbox זו); כל עוד לא רץ, BUG-008-style drift עדיין לא מתגלה בפועל.
-3. **N11 — Finance Pulse dynamic formula**: `raw_formula` עדיין סטטי; + לסגור 2 הפערים הידועים (`PaymentFields.CONTACT/NOTES` מצביעים על שדות שלא קיימים; case-mismatch ב-`_build_formula()`).
+3. **N11 — הושלם** (raw_formula נשאר סטטי בכוונה, ראו §1). פער שנותר פתוח, **מחוץ להיקף N11** (`crm.py`, לא `tma_api.py`): `PaymentFields.CONTACT`/`NOTES` (`contact_id`/`notes`) מצביעים על שדות שלא קיימים ב-`Payments` החי — `crm.py`'s `create_payment()` יכשל אם יקרא עם `contact_id`/`notes` (ראו `CHANGELOG.md` Unreleased).
 4. **לאמת מצב Render בפועל מול `main` HEAD (`7496628`)** — לא ניתן מהסביבה הזו (egress חסום); סיכון High שתועד כבר ב-גרסה קודמת.
 5. **החלטה על הדלקת N02-N04** (Lead Scoring/Memory/Followup) — קוד מוכן ושלם, אך אפס תעבורת ייצור אמיתית אומתה עד כה.
