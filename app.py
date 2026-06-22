@@ -1069,6 +1069,96 @@ def run_agent(
 # Endpoints
 # ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•ג•
 
+# F16 — Media Layer: Telegram voice/photo/document intake
+def _handle_telegram_media(message) -> None:
+    chat_id = str(message.chat.id)
+    user_id = str(message.from_user.id)
+    owner_chat_id = (
+        os.environ.get("OWNER_TELEGRAM_ID", "") or
+        os.environ.get("ELIYAHU_CHAT_ID", "") or
+        os.environ.get("DIGEST_CHAT_ID", "")
+    )
+
+    try:
+        identity = resolve_identity("telegram", user_id)
+    except Exception as e:
+        logger.error(f"[Media] identity resolution failed: {e}")
+        return
+    domain = identity.domain_id
+
+    if message.content_type == "voice":
+        if not _flag_enabled("FEATURE_VOICE_NOTES"):
+            try:
+                bot.send_message(chat_id, "🎤 בקרוב — תמלול הודעות קוליות")
+            except Exception:
+                pass
+            return
+        try:
+            from media_handler import handle_voice_note, _format_media_result
+
+            file_info = bot.get_file(message.voice.file_id)
+            audio_bytes = bot.download_file(file_info.file_path)
+            result = handle_voice_note(
+                audio_bytes=audio_bytes,
+                mime_type=message.voice.mime_type or "audio/ogg",
+                telegram_file_id=message.voice.file_id,
+                user_id=user_id,
+                domain=domain,
+                owner_chat_id=owner_chat_id,
+            )
+            bot.send_message(chat_id, _format_media_result(result))
+        except Exception as e:
+            logger.error(f"[Media] voice handling error: {e}", exc_info=True)
+            try:
+                bot.send_message(chat_id, "❌ שגיאה בעיבוד ההודעה הקולית")
+            except Exception:
+                pass
+        return
+
+    # photo / document
+    if not _flag_enabled("FEATURE_MEDIA_UPLOAD"):
+        try:
+            bot.send_message(chat_id, "📎 בקרוב — שמירת קבצים ל-Drive")
+        except Exception:
+            pass
+        return
+
+    try:
+        from media_handler import handle_file_upload, _format_media_result
+
+        if message.content_type == "photo":
+            photo = message.photo[-1]
+            file_id = photo.file_id
+            filename = f"{file_id}.jpg"
+            mime_type = "image/jpeg"
+            file_type = "image"
+        else:
+            doc = message.document
+            file_id = doc.file_id
+            filename = doc.file_name or f"{file_id}"
+            mime_type = doc.mime_type or "application/octet-stream"
+            file_type = "document"
+
+        file_info = bot.get_file(file_id)
+        file_bytes = bot.download_file(file_info.file_path)
+        result = handle_file_upload(
+            file_bytes=file_bytes,
+            filename=filename,
+            mime_type=mime_type,
+            file_type=file_type,
+            file_id=file_id,
+            user_id=user_id,
+            domain=domain,
+        )
+        bot.send_message(chat_id, _format_media_result(result))
+    except Exception as e:
+        logger.error(f"[Media] file handling error: {e}", exc_info=True)
+        try:
+            bot.send_message(chat_id, "❌ שגיאה בשמירת הקובץ")
+        except Exception:
+            pass
+
+
 @app.route("/health", methods=["GET"])
 def health():
     health_status = get_health_status(globals().get("_scheduler"), memory)
@@ -1158,6 +1248,13 @@ def webhook_telegram():
             bot.send_message(reply_chat_id, reply)
         except Exception as e:
             logger.error(f"[Telegram] send error: {e}")
+        return "", 200
+
+    # F16 — Media Layer: voice notes / photo / document uploads
+    if update.message and update.message.content_type in ("voice", "photo", "document"):
+        _handle_telegram_media(update.message)
+        return "", 200
+
     return "", 200
 
 

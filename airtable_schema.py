@@ -67,6 +67,8 @@ class Tables:
     # System / Monitoring
     AI_USAGE_DAILY  = "AI_Usage_Daily"   # שורה יומית לכל source_type — 1 רשומה/יום
     EMERGENCY_WINDOW = "Emergency_Window"  # חריג מבוקר ל-High מהטלפון — ראה Approval_Policy_Spec.md
+    # F16 — Media Layer
+    MEDIA_FILES      = "Media Files"       # F16 — voice notes + file uploads (drive_url + metadata). Must be created manually in Airtable.
 
 
 # ══════════════════════════════════════════════════
@@ -582,6 +584,29 @@ class AssetsFields:
     STATUS        = "סטטוס"         # מושכר|פנוי|בבנייה
     NOTES         = "הערות"
     DOCUMENTS     = "מסמכים"
+
+
+class MediaFileFields:
+    """
+    F16 — Media Layer: voice notes + file uploads.
+    Table name: Tables.MEDIA_FILES ("Media Files").
+    Must be created manually in Airtable before FEATURE_VOICE_NOTES/FEATURE_MEDIA_UPLOAD are enabled.
+    Distinct from the existing "Assets" table (real estate) — no field/name overlap.
+    Drive is the storage primary; this table holds metadata + drive_url only, never the file bytes.
+    """
+    NAME                  = "Name"
+    FILE_TYPE             = "File Type"          # single select: image/document/audio/video
+    MIME_TYPE             = "Mime Type"
+    DRIVE_URL             = "Drive URL"
+    DRIVE_FILE_ID         = "Drive File ID"
+    DOMAIN                = "domain"
+    SOURCE                = "Source"             # telegram/tma/whatsapp
+    RAW_TRANSCRIPT        = "Raw Transcript"      # long text — גולמי, לא לשנות
+    NORMALIZED_TRANSCRIPT = "Transcript"          # long text — אחרי ניקוי ניקוד
+    SIZE_BYTES            = "Size Bytes"
+    CREATED_BY            = "Created By"
+    TELEGRAM_FILE_ID      = "Telegram File ID"
+    LINKED_LEAD           = "Linked Lead"         # multipleRecordLinks → Leads, always written as [rec_id]
 
 
 class ApprovalsFields:
