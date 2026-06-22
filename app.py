@@ -1096,6 +1096,11 @@ def _handle_telegram_media(message) -> None:
         try:
             from media_handler import handle_voice_note, _format_media_result
 
+            try:
+                bot.send_chat_action(chat_id, "typing")
+            except Exception:
+                pass
+
             file_info = bot.get_file(message.voice.file_id)
             audio_bytes = bot.download_file(file_info.file_path)
             result = handle_voice_note(
@@ -1125,6 +1130,11 @@ def _handle_telegram_media(message) -> None:
 
     try:
         from media_handler import handle_file_upload, _format_media_result
+
+        try:
+            bot.send_chat_action(chat_id, "upload_document")
+        except Exception:
+            pass
 
         if message.content_type == "photo":
             photo = message.photo[-1]

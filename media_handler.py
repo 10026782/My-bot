@@ -329,6 +329,7 @@ def handle_tma_upload(
     user_id: str,
     domain: str,
     source: str = "tma",
+    linked_lead_id: str = "",
 ) -> MediaResult:
     """TMA upload route entry point — treated as a generic document/image upload."""
     file_type = "image" if mime_type.startswith("image/") else "document"
@@ -342,6 +343,7 @@ def handle_tma_upload(
         user_id=user_id,
         domain=domain,
         source=source,
+        linked_lead_id=linked_lead_id,
     )
 
 
