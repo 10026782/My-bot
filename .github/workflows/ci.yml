@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  backend-ci:
+    runs-on: ubuntu-latest
+    env:
+      AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
+      AIRTABLE_BASE_ID: ${{ secrets.AIRTABLE_BASE_ID }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Syntax check (compileall)
+        run: python -m compileall -q .
+
+      - name: Smoke tests
+        run: python smoke_tests.py
+
+      - name: Core import check
+        run: python -c "import app; import tma_api; import tools.dispatcher"
+
+      - name: Run test_*.py scripts
+        run: |
+          set -e
+          for f in test_*.py; do
+            echo "::group::$f"
+            python "$f"
+            echo "::endgroup::"
+          done
+
+      - name: Schema governance (warning only, never blocks)
+        run: python tools/schema_governance.py || true
+
+  frontend-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build frontend (skipped if tma-frontend/package.json is absent)
+        run: |
+          if [ ! -f tma-frontend/package.json ]; then
+            echo "frontend skipped — no package.json"
+            exit 0
+          fi
+          cd tma-frontend
+          npm ci
+          npm run build
