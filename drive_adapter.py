@@ -1,8 +1,8 @@
 # drive_adapter.py — F16 Media Layer: Google Drive file storage
 #
-# Uploads file bytes to Drive and maintains a /BOSS/<domain>/<YYYY-MM>/
-# folder structure. Raw httpx REST calls, consistent with
-# tools/google_tools.py's existing style — no Google SDK dependency.
+# Uploads file bytes to a caller-supplied Drive folder. Raw httpx REST
+# calls, consistent with tools/google_tools.py's existing style — no
+# Google SDK dependency.
 
 from __future__ import annotations
 
@@ -23,9 +23,17 @@ logger = logging.getLogger(__name__)
 _DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files"
 _DRIVE_UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files"
 
-# Drive supports UTF-8 filenames natively — only strip characters that break
-# filesystem/URL handling downstream, not Hebrew/non-ASCII text.
+# Drive supports UTF-8 filenames natively (Hebrew included) — only strip
+# characters that are illegal in a Drive file name.
 _UNSAFE_FILENAME_RE = re.compile(r'[\\/:*?"<>|]')
+
+_MIME_EXT = {
+    "audio/ogg": ".ogg",
+    "audio/mpeg": ".mp3",
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "application/pdf": ".pdf",
+}
 
 
 @dataclass
@@ -49,14 +57,24 @@ class DriveFile:
         return self.error is None
 
 
-def _safe_filename(name: str) -> str:
-    cleaned = _UNSAFE_FILENAME_RE.sub("_", name).strip()
-    return cleaned or "file"
+def _safe_filename(filename: str) -> str:
+    """Drive API accepts UTF-8 names (Hebrew included) — only forbidden chars are cleaned."""
+    return _UNSAFE_FILENAME_RE.sub("_", filename)
 
 
-def _root_folder_id() -> str:
-    """BOSS root folder — falls back to Drive's literal 'root' if unset."""
-    return os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "").strip() or "root"
+def _mime_to_ext(mime_type: str) -> str:
+    return _MIME_EXT.get(mime_type, ".bin")
+
+
+def _bytes_to_tempfile(file_bytes: bytes, suffix: str) -> str:
+    fd, path = tempfile.mkstemp(suffix=suffix)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(file_bytes)
+        return path
+    except Exception:
+        os.close(fd)
+        raise
 
 
 def get_or_create_folder(name: str, parent_id: str) -> str | None:
@@ -110,43 +128,28 @@ def get_or_create_folder(name: str, parent_id: str) -> str | None:
 
 
 def _get_upload_folder(domain: str) -> str | None:
-    """Resolves /BOSS/<domain>/<YYYY-MM>/ under the configured root, creating as needed."""
-    root = _root_folder_id()
+    """Resolves the BOSS root's <domain>/<YYYY-MM>/ folder, creating it as needed.
+
+    GOOGLE_DRIVE_FOLDER_ID already points at the pre-created BOSS root folder
+    in Drive (see .env.example) — it is the parent, not a folder to create.
+    """
+    root = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "").strip() or "root"
     domain_folder = get_or_create_folder(domain or "general", root)
     if not domain_folder:
         return None
-    month_name = datetime.now().strftime("%Y-%m")
-    return get_or_create_folder(month_name, domain_folder)
+    month = datetime.now().strftime("%Y-%m")
+    return get_or_create_folder(month, domain_folder)
 
 
-def upload_file(
-    file_bytes: bytes,
-    filename: str,
-    mime_type: str,
-    domain: str = "general",
-) -> DriveFile:
-    """
-    Uploads file_bytes to Drive under /BOSS/<domain>/<YYYY-MM>/.
-    Never raises — returns DriveFile with .error set on failure.
-    """
-    if not file_bytes:
-        return DriveFile(error=MediaError("EMPTY_FILE", "no file bytes provided", False))
-
+def _upload_to_drive(tmp_path: str, filename: str, mime_type: str, parent_folder_id: str) -> DriveFile:
     token = get_google_token()
     if not token:
-        return DriveFile(
-            error=MediaError("GOOGLE_AUTH_MISSING", "Google OAuth env vars missing", True)
-        )
+        return DriveFile(error=MediaError("GOOGLE_AUTH_MISSING", "Google OAuth env vars missing", True))
 
-    parent_id = _get_upload_folder(domain)
-    if not parent_id:
-        return DriveFile(
-            error=MediaError("FOLDER_RESOLVE_FAILED", "could not resolve/create Drive folder", True)
-        )
+    with open(tmp_path, "rb") as f:
+        file_bytes = f.read()
 
-    safe_name = _safe_filename(filename)
-    metadata = {"name": safe_name, "parents": [parent_id]}
-
+    metadata = {"name": filename, "parents": [parent_folder_id]}
     boundary = "boss_drive_upload_boundary"
     body = (
         f"--{boundary}\r\n"
@@ -169,16 +172,14 @@ def upload_file(
         )
         if r.status_code not in (200, 201):
             logger.warning("[drive_adapter] upload HTTP %d: %s", r.status_code, r.text[:300])
-            return DriveFile(
-                error=MediaError("UPLOAD_FAILED", f"Drive upload HTTP {r.status_code}", True)
-            )
+            return DriveFile(error=MediaError("UPLOAD_FAILED", f"Drive upload HTTP {r.status_code}", True))
 
         data = r.json()
         return DriveFile(
             file_id=data.get("id", ""),
             web_url=data.get("webViewLink", ""),
             download_url=f"https://drive.google.com/uc?id={data.get('id', '')}",
-            name=data.get("name", safe_name),
+            name=data.get("name", filename),
             size_bytes=len(file_bytes),
         )
     except Exception as e:
@@ -186,26 +187,90 @@ def upload_file(
         return DriveFile(error=MediaError("UPLOAD_EXCEPTION", str(e), True))
 
 
-if __name__ == "__main__":
-    assert _safe_filename("שלום/עולם:test?.mp3") == "שלום_עולם_test_.mp3"
-    assert _safe_filename("normal_file.pdf") == "normal_file.pdf"
-    assert _safe_filename("") == "file"
+def upload_file(file_bytes: bytes, filename: str, mime_type: str, parent_folder_id: str) -> DriveFile:
+    """
+    Uploads file_bytes to Drive under parent_folder_id (caller resolves the
+    target folder, e.g. via _get_upload_folder/get_or_create_folder).
+    Never raises — returns DriveFile with .error set on failure.
+    """
+    if not file_bytes:
+        return DriveFile(error=MediaError("EMPTY_FILE", "no file bytes provided", False))
 
-    empty = upload_file(b"", "x.mp3", "audio/mpeg")
-    assert not empty.ok and empty.error.error_code == "EMPTY_FILE"
-
-    saved = os.environ.pop("GOOGLE_CLIENT_ID", None)
-    no_auth = upload_file(b"fake-bytes", "x.mp3", "audio/mpeg")
-    assert not no_auth.ok and no_auth.error.error_code == "GOOGLE_AUTH_MISSING"
-    if saved is not None:
-        os.environ["GOOGLE_CLIENT_ID"] = saved
-
-    fd, path = tempfile.mkstemp()
-    os.close(fd)
+    safe_name = _safe_filename(filename)
+    tmp_path = _bytes_to_tempfile(file_bytes, suffix=_mime_to_ext(mime_type))
     try:
-        assert os.path.exists(path)
+        return _upload_to_drive(tmp_path, safe_name, mime_type, parent_folder_id)
     finally:
-        os.unlink(path)
-    assert not os.path.exists(path)
+        os.remove(tmp_path)
+
+
+if __name__ == "__main__":
+    assert _safe_filename('שלום/עולם:test?.mp3') == "שלום_עולם_test_.mp3"
+    assert _safe_filename("normal_file.pdf") == "normal_file.pdf"
+    print("✅ _safe_filename cleans forbidden chars only, preserves Hebrew")
+
+    try:
+        upload_file(b"data", "f.txt", "text/plain")  # type: ignore[call-arg]
+        raise AssertionError("upload_file must require parent_folder_id explicitly")
+    except TypeError:
+        pass
+    print("✅ upload_file requires explicit parent_folder_id (no default)")
+
+    empty = upload_file(b"", "x.mp3", "audio/mpeg", "fakeParent")
+    assert not empty.ok and empty.error.error_code == "EMPTY_FILE"
+    print("✅ empty file bytes → EMPTY_FILE")
+
+    import sys
+    from unittest.mock import patch
+
+    _this = sys.modules[__name__]
+
+    with patch.object(_this, "get_google_token", return_value=None):
+        no_auth_folder = get_or_create_folder("general", "root")
+        assert no_auth_folder is None
+        no_auth_upload = upload_file(b"fake-bytes", "x.mp3", "audio/mpeg", "fakeParent")
+        assert not no_auth_upload.ok and no_auth_upload.error.error_code == "GOOGLE_AUTH_MISSING"
+    print("✅ missing Google OAuth → GOOGLE_AUTH_MISSING (folder + upload)")
+
+    _tmp_paths: list[str] = []
+    _orig_mkstemp = tempfile.mkstemp
+
+    def _spy_mkstemp(*a, **kw):
+        fd, path = _orig_mkstemp(*a, **kw)
+        _tmp_paths.append(path)
+        return fd, path
+
+    class _FakeResp:
+        def __init__(self, status_code: int, payload: dict):
+            self.status_code = status_code
+            self._payload = payload
+            self.text = json.dumps(payload)
+
+        def json(self):
+            return self._payload
+
+    with patch.object(_this, "get_google_token", return_value="fake-token"), \
+         patch("tempfile.mkstemp", side_effect=_spy_mkstemp), \
+         patch("httpx.get", return_value=_FakeResp(200, {"files": []})), \
+         patch("httpx.post") as mock_post:
+        mock_post.side_effect = [
+            _FakeResp(200, {"id": "folder123"}),
+            _FakeResp(200, {"id": "file123", "name": "x.mp3", "webViewLink": "https://drive/x"}),
+        ]
+        folder_id = get_or_create_folder("general", "root")
+        assert folder_id == "folder123"
+        result = upload_file(b"audio-bytes", "x.mp3", "audio/mpeg", folder_id)
+        assert result.ok and result.file_id == "file123"
+    assert _tmp_paths and not os.path.exists(_tmp_paths[-1])
+    print("✅ folder creation + upload succeed; temp file cleaned up after")
+
+    _tmp_paths.clear()
+    with patch.object(_this, "get_google_token", return_value="fake-token"), \
+         patch("tempfile.mkstemp", side_effect=_spy_mkstemp), \
+         patch("httpx.post", side_effect=RuntimeError("network down")):
+        failed = upload_file(b"audio-bytes", "x.mp3", "audio/mpeg", "folder123")
+        assert not failed.ok and failed.error.error_code == "UPLOAD_EXCEPTION"
+    assert _tmp_paths and not os.path.exists(_tmp_paths[-1])
+    print("✅ temp file removed even when upload raises (finally)")
 
     print("drive_adapter.py self-test OK")
