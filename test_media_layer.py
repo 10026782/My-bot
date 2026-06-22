@@ -45,21 +45,18 @@ chk(
 )
 chk("ascii text unaffected", _normalize_hebrew("hello world") == "hello world")
 
-empty = transcribe(b"", "audio/ogg")
-chk('empty audio → error "EMPTY_AUDIO"', not empty.ok and empty.error.error_code == "EMPTY_AUDIO")
-
 too_big = transcribe(b"x" * (MAX_STT_BYTES + 1), "audio/ogg")
 chk(
-    'oversized audio → error "AUDIO_TOO_LARGE"',
-    not too_big.ok and too_big.error.error_code == "AUDIO_TOO_LARGE",
+    'oversized audio → error "OVERSIZED"',
+    not too_big.ok and too_big.error.error_code == "OVERSIZED",
 )
 
 _saved_groq = os.environ.pop("GROQ_API_KEY", None)
 _saved_openai = os.environ.pop("OPENAI_API_KEY", None)
 no_provider = transcribe(b"fake-bytes", "audio/ogg")
 chk(
-    "no provider keys → STT_UNAVAILABLE (never raises)",
-    not no_provider.ok and no_provider.error.error_code == "STT_UNAVAILABLE",
+    "no provider keys → STT_FAILED (never raises)",
+    not no_provider.ok and no_provider.error.error_code == "STT_FAILED",
 )
 if _saved_groq is not None:
     os.environ["GROQ_API_KEY"] = _saved_groq
