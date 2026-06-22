@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 
 from guards import idempotency as _idem_store
 from media_gateway import AssetRecord, save_asset
-from drive_adapter import upload_file
+import drive_adapter
 from voice_stt_adapter import transcribe
 
 logger = logging.getLogger(__name__)
@@ -64,6 +64,18 @@ def _should_save_to_memory(text: str) -> bool:
 
 def _idem_key(source: str, file_id: str, user_id: str) -> str:
     return hashlib.sha256(f"{source}:{file_id}:{user_id}".encode("utf-8")).hexdigest()[:16]
+
+
+def _resolve_drive_folder(domain: str) -> tuple[str | None, MediaError | None]:
+    """Resolves the domain/month Drive folder. drive_adapter.upload_file()
+    requires parent_folder_id explicitly (no default) — caller always
+    resolves it first via _get_upload_folder()."""
+    parent_folder_id = drive_adapter._get_upload_folder(domain)
+    if not parent_folder_id:
+        return None, MediaError(
+            "DRIVE_FAILED", "לא ניתן לגשת לתיקיית Drive (אימות Google חסר או שגיאת תיקייה).", True
+        )
+    return parent_folder_id, None
 
 
 def _format_media_result(result: MediaResult) -> str:
@@ -166,7 +178,7 @@ def handle_voice_note(
         return MediaResult(
             ok=False,
             file_size_tier=tier,
-            error=MediaError("FILE_TOO_LARGE", f"{size_bytes} bytes exceeds {TIER_LARGE}", False),
+            error=MediaError("FILE_TOO_LARGE", "הקובץ גדול מ-50MB. הגודל המרבי הוא 50MB.", False),
         )
 
     idem_key = _idem_key(source, telegram_file_id, user_id)
@@ -174,10 +186,14 @@ def handle_voice_note(
         return MediaResult(
             ok=False,
             file_size_tier=tier,
-            error=MediaError("DUPLICATE", "this file was already processed", False),
+            error=MediaError("DUPLICATE", "הקובץ הזה כבר התקבל.", False),
         )
 
-    drive_result = upload_file(audio_bytes, f"{telegram_file_id}.ogg", mime_type, domain=domain)
+    parent_folder_id, folder_err = _resolve_drive_folder(domain)
+    if folder_err:
+        return MediaResult(ok=False, file_size_tier=tier, error=folder_err)
+
+    drive_result = drive_adapter.upload_file(audio_bytes, f"{telegram_file_id}.ogg", mime_type, parent_folder_id)
     if not drive_result.ok:
         return MediaResult(
             ok=False,
@@ -211,6 +227,13 @@ def handle_voice_note(
         normalized_transcript=normalized_transcript,
     )
     asset_id = save_asset(asset)
+    if not asset_id:
+        return MediaResult(
+            ok=False,
+            file_size_tier=tier,
+            drive_url=drive_result.web_url,
+            error=MediaError("ASSET_SAVE_FAILED", "הקובץ הועלה ל-Drive אך לא נשמר ב-Airtable.", True),
+        )
 
     saved_to_memory = False
     if normalized_transcript and _should_save_to_memory(normalized_transcript):
@@ -219,7 +242,7 @@ def handle_voice_note(
 
     return MediaResult(
         ok=True,
-        asset_id=asset_id or "",
+        asset_id=asset_id,
         drive_url=drive_result.web_url,
         raw_transcript=raw_transcript,
         normalized_transcript=normalized_transcript,
@@ -246,7 +269,7 @@ def handle_file_upload(
         return MediaResult(
             ok=False,
             file_size_tier=tier,
-            error=MediaError("FILE_TOO_LARGE", f"{size_bytes} bytes exceeds {TIER_LARGE}", False),
+            error=MediaError("FILE_TOO_LARGE", "הקובץ גדול מ-50MB. הגודל המרבי הוא 50MB.", False),
         )
 
     idem_key = _idem_key(source, file_id, user_id)
@@ -254,10 +277,14 @@ def handle_file_upload(
         return MediaResult(
             ok=False,
             file_size_tier=tier,
-            error=MediaError("DUPLICATE", "this file was already processed", False),
+            error=MediaError("DUPLICATE", "הקובץ הזה כבר הועלה.", False),
         )
 
-    drive_result = upload_file(file_bytes, filename, mime_type, domain=domain)
+    parent_folder_id, folder_err = _resolve_drive_folder(domain)
+    if folder_err:
+        return MediaResult(ok=False, file_size_tier=tier, error=folder_err)
+
+    drive_result = drive_adapter.upload_file(file_bytes, filename, mime_type, parent_folder_id)
     if not drive_result.ok:
         return MediaResult(
             ok=False,
@@ -279,10 +306,17 @@ def handle_file_upload(
         linked_lead_id=linked_lead_id,
     )
     asset_id = save_asset(asset)
+    if not asset_id:
+        return MediaResult(
+            ok=False,
+            file_size_tier=tier,
+            drive_url=drive_result.web_url,
+            error=MediaError("ASSET_SAVE_FAILED", "הקובץ הועלה ל-Drive אך לא נשמר ב-Airtable.", True),
+        )
 
     return MediaResult(
         ok=True,
-        asset_id=asset_id or "",
+        asset_id=asset_id,
         drive_url=drive_result.web_url,
         file_size_tier=tier,
     )
@@ -351,5 +385,91 @@ if __name__ == "__main__":
     assert "✅" in ok_text
     err_text = _format_media_result(MediaResult(ok=False, error=MediaError("X", "boom", False)))
     assert "❌" in err_text
+
+    # ── Success-path coverage: drive_adapter.upload_file() requires an
+    # explicit parent_folder_id (no default) — this exercises the real call
+    # shape (_get_upload_folder -> upload_file), not just the oversized
+    # short-circuit the asserts above already cover.
+    import sys
+    from unittest.mock import patch
+
+    _this = sys.modules[__name__]
+
+    with patch.object(drive_adapter, "_get_upload_folder", return_value="folder123"), \
+         patch.object(drive_adapter, "upload_file") as mock_upload, \
+         patch.object(_this, "save_asset", return_value="rec_large"), \
+         patch.object(_this, "transcribe") as mock_stt:
+        mock_upload.return_value = drive_adapter.DriveFile(
+            file_id="f1", web_url="https://drive/large", name="large.ogg", size_bytes=20 * 1024 * 1024
+        )
+        large = handle_voice_note(
+            audio_bytes=b"x" * (TIER_NORMAL + 1),
+            mime_type="audio/ogg",
+            telegram_file_id="f9",
+            user_id="u1",
+            domain="general",
+            owner_chat_id="123",
+        )
+        assert large.ok and large.file_size_tier == "large" and large.asset_id == "rec_large"
+        assert not large.saved_to_memory
+        assert not mock_stt.called
+        mock_upload.assert_called_with(b"x" * (TIER_NORMAL + 1), "f9.ogg", "audio/ogg", "folder123")
+    print("✅ large tier → resolves Drive folder, uploads, skips STT, no memory approval")
+
+    with patch.object(drive_adapter, "_get_upload_folder", return_value="folder123"), \
+         patch.object(drive_adapter, "upload_file") as mock_upload, \
+         patch.object(_this, "save_asset", return_value="rec_voice"), \
+         patch.object(_this, "transcribe") as mock_stt:
+        mock_upload.return_value = drive_adapter.DriveFile(
+            file_id="f2", web_url="https://drive/voice", name="note.ogg", size_bytes=1024
+        )
+        from voice_stt_adapter import TranscriptResult
+        mock_stt.return_value = TranscriptResult(
+            raw_transcript="סיכמנו על המחיר הסופי",
+            normalized_transcript="סיכמנו על המחיר הסופי",
+            provider_used="openai",
+        )
+        voice = handle_voice_note(
+            audio_bytes=b"audio-bytes",
+            mime_type="audio/ogg",
+            telegram_file_id="f10",
+            user_id="u1",
+            domain="general",
+            owner_chat_id="123",
+        )
+        assert voice.ok and voice.asset_id == "rec_voice"
+        assert voice.saved_to_memory  # approval queued, not yet written
+    print("✅ normal-tier voice + memory keyword → Drive save succeeds, approval queued")
+
+    with patch.object(drive_adapter, "_get_upload_folder", return_value=None):
+        no_folder = handle_file_upload(
+            file_bytes=b"x" * 1024,
+            filename="x.pdf",
+            mime_type="application/pdf",
+            file_type="document",
+            file_id="f11",
+            user_id="u1",
+            domain="general",
+        )
+        assert not no_folder.ok and no_folder.error.error_code == "DRIVE_FAILED"
+    print("✅ missing/unresolvable Drive folder → DRIVE_FAILED, no crash")
+
+    with patch.object(drive_adapter, "_get_upload_folder", return_value="folder123"), \
+         patch.object(drive_adapter, "upload_file") as mock_upload, \
+         patch.object(_this, "save_asset", return_value=None):
+        mock_upload.return_value = drive_adapter.DriveFile(
+            file_id="f3", web_url="https://drive/x", name="x.pdf", size_bytes=1024
+        )
+        save_failed = handle_file_upload(
+            file_bytes=b"x" * 1024,
+            filename="x.pdf",
+            mime_type="application/pdf",
+            file_type="document",
+            file_id="f12",
+            user_id="u1",
+            domain="general",
+        )
+        assert not save_failed.ok and save_failed.error.error_code == "ASSET_SAVE_FAILED"
+    print("✅ Drive upload succeeds but Airtable save fails → ASSET_SAVE_FAILED (not silently ok=True)")
 
     print("media_handler.py self-test OK")
