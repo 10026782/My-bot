@@ -54,6 +54,7 @@ OUTPUT GATEWAY (C52):
 GAME / SCHEDULER:
   GAME_SCHEDULER              - scheduler jobs של מערכת הגיימיפיקציה
   PAYMENT_REMINDERS           - תזכורות תשלום אוטומטיות
+  GIT_AUDIT_SCHEDULER         - הרצה יומית אוטומטית של daily_git_audit.py; default OFF (נשאר manual-only)
 
 FUTURE (לא פעיל):
   AUDIENCE_INTELLIGENCE       - ניתוח קהל יעד (Future)
