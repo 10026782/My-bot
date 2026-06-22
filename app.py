@@ -454,6 +454,14 @@ try:
 except Exception as _e:
     logger.warning(f"[C20] /update registration failed: {_e}")
 
+# ── C22: weekly summary callbacks ────────────────────────────────
+try:
+    from weekly_summary import register_weekly_callbacks
+    register_weekly_callbacks(bot)
+    logger.info("[C22] weekly summary callbacks registered")
+except Exception as _e:
+    logger.warning(f"[C22] weekly summary registration failed: {_e}")
+
 _scheduler_thread = next(
     (t for t in threading.enumerate() if t.name == "scheduler" and t.is_alive()),
     None,
@@ -1081,8 +1089,14 @@ def webhook_telegram():
     update = telebot.types.Update.de_json(request.get_data().decode("utf-8"))
 
     if update.callback_query:
+        call = update.callback_query
+        data = call.data or ""
         try:
-            _handle_approval_callback(update.callback_query)
+            if data.startswith(("approve:", "reject:")):
+                _handle_approval_callback(call)
+            else:
+                # כל callback אחר — דרך ה-bot handlers הרשומים (@bot.callback_query_handler)
+                bot.process_new_updates([update])
         except Exception as e:
             logger.error(f"[Telegram] callback error: {e}", exc_info=True)
         return "", 200

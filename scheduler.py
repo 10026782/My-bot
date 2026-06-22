@@ -264,6 +264,24 @@ def _job_security_reminder():
         logger.error(f"security_reminder error: {e}")
 
 
+def _job_weekly_summary():
+    """כל ראשון 08:30 — סיכום Business Memory שבועי."""
+    try:
+        import telebot
+        token   = os.environ.get("TELEGRAM_TOKEN", "")
+        chat_id = os.environ.get("DIGEST_CHAT_ID", "")
+        if not token or not chat_id:
+            logger.warning("[C22] DIGEST_CHAT_ID לא מוגדר — weekly summary דולג")
+            return
+        from weekly_summary import send_weekly_summary
+        bot = telebot.TeleBot(token)
+        send_weekly_summary(bot=bot, chat_id=chat_id)
+    except ImportError:
+        logger.info("[C22] weekly_summary לא קיים — דולג")
+    except Exception as e:
+        logger.error(f"[C22] weekly_summary error: {e}")
+
+
 # ══════════════════════════════════════════════════
 # F06 — Email Inbound
 # ══════════════════════════════════════════════════
@@ -707,6 +725,8 @@ def start_scheduler() -> threading.Thread:
     security_day          = os.environ.get("SECURITY_REMINDER_DAY",    "sunday")
     security_time         = os.environ.get("SECURITY_REMINDER_TIME",   "09:00")
     abandoned_interval    = int(os.environ.get("ABANDONED_INTERVAL_MIN", "45"))
+    weekly_summary_day    = os.environ.get("WEEKLY_SUMMARY_DAY",       "sunday")
+    weekly_summary_time   = os.environ.get("WEEKLY_SUMMARY_TIME",      "08:30")
 
     schedule.every().day.at(digest_time).do(_job_daily_digest)
     schedule.every().day.at(collector_time).do(_job_daily_collector)
@@ -723,6 +743,7 @@ def start_scheduler() -> threading.Thread:
     getattr(schedule.every(), "sunday").at("08:30").do(_job_attribution_report)                  # D05
     schedule.every(15).minutes.do(shabbat_safe(_job_interaction_scan))                           # D06
     getattr(schedule.every(), security_day).at(security_time).do(_job_security_reminder)
+    getattr(schedule.every(), weekly_summary_day).at(weekly_summary_time).do(_job_weekly_summary)  # C22
     schedule.every().day.at("07:00").do(_job_daily_game_digest)                            # Game digest (flag: GAME_SCHEDULER)
     getattr(schedule.every(), "sunday").at("08:00").do(_job_weekly_quest_reset)            # Game weekly reset
     getattr(schedule.every(), "friday").at("18:00").do(_job_boss_battle_check)             # Boss battle check
@@ -736,7 +757,8 @@ def start_scheduler() -> threading.Thread:
         f"learning={learning_day} {learning_time} | "
         f"email=every {email_interval}min | "
         f"abandoned=every {abandoned_interval}min | "
-        f"security={security_day} {security_time}"
+        f"security={security_day} {security_time} | "
+        f"weekly-summary=every {weekly_summary_day} {weekly_summary_time}"
     )
 
     t = threading.Thread(target=_run_scheduler, daemon=True, name="scheduler")
