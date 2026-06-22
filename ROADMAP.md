@@ -1,6 +1,6 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 22/06/2026 — main = `4924030` (אומת, PR #96/#97/#98/#99 ממוזגים). **F16 (Media Layer) הושלם** — כל שבעת ה-batches (א-ז) קיימים ומחוברים ל-pipeline החי, מאחורי דגלים כבויים כברירת מחדל (`FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD`). ⚠️ ה-spec החיצוני קרא לפיצ'ר "F12" ואז "F09" — שני ה-IDs תפוסים (F12=Model Provider Adapter, F09=Lead Qualifier Wire-up); הוקצה F16 כדי למנוע התנגשות בסטייל C20/C21/F14/F15.
+עודכן: 22/06/2026 — main = `e465eff` (אומת, PR #96/#97/#98/#99/#100/#101 ממוזגים). **F16 (Media Layer) הושלם** — כל שבעת ה-batches (א-ז) קיימים ומחוברים ל-pipeline החי, מאחורי דגלים כבויים כברירת מחדל (`FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD`). ⚠️ ה-spec החיצוני קרא לפיצ'ר "F12" ואז "F09" — שני ה-IDs תפוסים (F12=Model Provider Adapter, F09=Lead Qualifier Wire-up); הוקצה F16 כדי למנוע התנגשות בסטייל C20/C21/F14/F15. **N07 (Schema Governance) הושלם** — `tools/schema_governance.py` (PR #101), standalone read-only drift detector, ראו פירוט למטה.
 
 עודכן (קודם): 20/06/2026 — main = `62eddda` (אומת). PR #85/#86/#87/#88/#89 ממוזגים (ראה C54/C55 למטה + CHANGE_CONTROL_LOG.md). F13 (TenantConfig + Provider Interfaces) — קוד נכתב ומוזג (PR #87), **לא מחובר ל-pipeline**; ⚠️ חפיפה עם F12 עדיין לא הוכרעה, אל תחבר ל-pipeline לפני הכרעה. `contact_merge.py` (PR #88) — כלי CLI עצמאי למיזוג אנשי קשר, לא ב-ROADMAP (admin utility, לא feature). נוספו F14 (Contact Gate: find_or_create_contact) ו-F15 (crm.py → airtable_gateway write path migration) — ⚠️ הספק ביקש F12/F13, אך שני ה-IDs האלה תפוסים (F12=Model Provider Adapter, F13=TenantConfig); הוקצו F14/F15 כדי למנוע התנגשות בסטייל C20/C21.
 
@@ -230,14 +230,22 @@ endpoints ב-tma_api.py + שורה ב-airtable_schema.py. לא יותר.
   `in_evaluation`/`pending_decision`) לפורמט `{stage_counts, total, active}` —
   count-by-stage אמיתי לפי 8 השלבים בטבלת Ventures, כפי שהמסמך דרש.
 
-### N07 — Schema Governance script 🔲 PLANNED
-**עדיפות:** גבוהה.
-**מה:** סקריפט שמשווה live Airtable schema (דרך Airtable MCP/API) מול
-`airtable_schema.py` באופן שיטתי, ומדגיש drift (כולל trailing spaces
-ב-singleSelect/multipleSelects, שדות חדשים/חסרים, סוגי שדה שהשתנו).
+### N07 — Schema Governance script ✅ הושלם (PR #101, `e465eff`)
+**מה:** `tools/schema_governance.py` — סקריפט standalone שמשווה live Airtable
+schema (Metadata API, `GET /meta/bases/{baseId}/tables`) מול `airtable_schema.py`
+(import, לא parse), בעזרת `TABLE_CLASS_MAP`/`_class_values` הקיימים מ-`schema_audit.py`.
+מזהה: שדה בקוד שחסר ב-live (התאמה whitespace-tolerant) → ERROR; שדה ב-live
+שלא בקוד → WARNING; trailing/leading spaces בשמות שדות → WARNING (ממוזג עם
+ה-whitespace-tolerant match, לא משוכפל); trailing/leading spaces ב-select
+options → WARNING; שינוי סוג שדה → ERROR (מול ריצה קודמת שנשמרה ב-
+`schema_drift_report.json`, כי `airtable_schema.py` לא מכיל מטא-דאטה של סוגים).
+מדפיס דוח עברית ל-console, exit code 1 אם יש ERROR. READ ONLY לחלוטין — אפס
+כתיבה ל-Airtable, לא נוגע ב-`schema_cache.json`. self-test (`--self-test`,
+ללא רשת) כלול בקובץ.
 **מניע:** BUG-008 (`Leads."Business Outcome"` trailing space) התגלה
 ad-hoc תוך כדי חקירת באג, לא דרך audit שיטתי — ראו `AI_CONTEXT.md` §8.
-**עד שמיושם:** manual gate בלבד (ראו `RELEASE_CHECKLIST.md`).
+**מצב נוכחי:** קוד הושלם ומוזג ל-main, עדיין לא רץ ב-CI (אין CI בריפו —
+ראו N08 למטה) — הרצה היא manual לעת עתה (ראו `RELEASE_CHECKLIST.md`).
 
 ### N08 — CI/CD GitHub Actions 🔲 PLANNED
 **מה:** הרצת `pytest`/`smoke_tests.py`/`test_integration.py` + `npm run build`

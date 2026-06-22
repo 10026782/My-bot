@@ -2,18 +2,19 @@
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
 **עודכן:** 2026-06-22
-**עודכן על ידי:** Claude Code — session update (git-verified against `origin/main` HEAD `4924030`)
+**עודכן על ידי:** Claude Code — session update (git-verified against `origin/main` HEAD `e465eff`)
 
 > מקור אמת לתוכן הזה: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו — לא נסמכתי עליו.
 
 ---
 
 ## 1. Executive Summary
-- `main` עומד על `4924030` (PR #96/#97/#98/#99) — **F16 Media Layer הושלם במלואו** (כל 7 batches, א-ז). PR #96/#97 הוסיפו Batches א/ב/ג (STT, Drive upload, Airtable metadata gateway); PR #98 תיקן באג חוסם ב-Batch ד (`media_handler.py` — חתימת `upload_file()` שגויה + כשל Airtable מוחזר כ-`ok=True` בשקט); PR #99 גילה וסגר שני gaps קטנים ב-Batches ה/ו (`app.py`/`tma_api.py` היו **כבר מחוברים** ל-pipeline החי מאז commit `ee4d2ed` המקורי, לפני כל מאמץ הבאצ'ים — `send_chat_action` חסר ו-`linked_lead_id` לא עבר ב-TMA upload). Batch ז (`airtable_schema.py`) היה קיים ומלא מהבנייה המקורית. הקוד רץ במלואו, **אך כבוי בפרודקשן** מאחורי `FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD` (שני דגלים כבויים כברירת מחדל) — ⚠️ טבלת "Media Files" עצמה חייבת להיווצר ידנית ב-Airtable לפני כל הדלקה.
+- `main` עומד על `e465eff` (PR #96/#97/#98/#99/#100/#101) — **F16 Media Layer הושלם במלואו** (כל 7 batches, א-ז). PR #96/#97 הוסיפו Batches א/ב/ג (STT, Drive upload, Airtable metadata gateway); PR #98 תיקן באג חוסם ב-Batch ד (`media_handler.py` — חתימת `upload_file()` שגויה + כשל Airtable מוחזר כ-`ok=True` בשקט); PR #99 גילה וסגר שני gaps קטנים ב-Batches ה/ו (`app.py`/`tma_api.py` היו **כבר מחוברים** ל-pipeline החי מאז commit `ee4d2ed` המקורי, לפני כל מאמץ הבאצ'ים — `send_chat_action` חסר ו-`linked_lead_id` לא עבר ב-TMA upload). Batch ז (`airtable_schema.py`) היה קיים ומלא מהבנייה המקורית. הקוד רץ במלואו, **אך כבוי בפרודקשן** מאחורי `FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD` (שני דגלים כבויים כברירת מחדל) — ⚠️ טבלת "Media Files" עצמה חייבת להיווצר ידנית ב-Airtable לפני כל הדלקה.
 - Pipeline הליבה (Identity → Router → Context → Agent) ושער ה-Approval תקינים ופעילים.
 - כל פיצ'רי הצמיחה (Lead Scoring/Memory/Followup/Email Inbound) — **קוד מוכן, דגלים כבויים כברירת מחדל**, לא אומתו בתעבורה אמיתית בפרודקשן.
 - מצב Render בפרודקשן: המשתמש אישר שדיפלוי בוצע ל-`d91a9df` (Render dashboard) — **לא אומת באופן עצמאי מהסביבה הזו** (אין גישת Dashboard/egress ל-Claude).
 - Screen Filter Gateway (C53) ו-Finance Pulse (O4) מוזגו ל-main ופעילים בקוד; `raw_formula` של Finance Pulse עדיין סטטי (לא דינמי לפי תאריך).
+- **N07 (Schema Governance) הושלם** — `tools/schema_governance.py` (PR #101) קיים ב-main, standalone read-only drift detector מול Airtable Metadata API; עדיין לא רץ אוטומטית (אין CI בריפו), הרצה היא manual.
 - אין CI/CD ואין Monitoring אוטומטי — כל verification היום הוא ידני.
 
 ## 2. Current System State
@@ -25,7 +26,7 @@ Identity/Router/Context/Agent core; `tool_registry`+`dispatcher` enforcement; Ap
 Lead Scoring (`LEAD_SCORING=off`), Lead Memory (`LEAD_MEMORY=off`), Followup Automation (`FOLLOWUP_AUTOMATION=off`) — שרשרת תלויה אחת בשנייה, כולן code-complete. WhatsApp outbound = honest stub (חסום ב-Meta Cloud API). Google integrations (OAuth נדרש). Approval Policy Emergency Window/OTP — code-complete, `EMERGENCY_WINDOW=off`. F16 Media Layer (כל 7 batches, `voice_stt_adapter.py`/`drive_adapter.py`/`media_gateway.py`/`media_handler.py`/`app.py` hooks/`tma_api.py` endpoint/`airtable_schema.py`) — code-complete **ומחובר ל-pipeline החי**, אך `FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD` כבויים כברירת מחדל — לא אומת בתעבורה אמיתית בפרודקשן.
 
 **חסום (Blocked):**
-F05 WhatsApp Production — מחכה לאישור Meta. N08 CI/CD, N09 Monitoring, N07 Schema Governance script — מתוכננים, לא מומשו. TMA: Activity Feed / Assets / Personal Mode — stub כן (`coming_soon`).
+F05 WhatsApp Production — מחכה לאישור Meta. N08 CI/CD, N09 Monitoring — מתוכננים, לא מומשו. TMA: Activity Feed / Assets / Personal Mode — stub כן (`coming_soon`).
 
 ## 3. Completed Since Last Update
 
@@ -75,10 +76,14 @@ F05 WhatsApp Production — מחכה לאישור Meta. N08 CI/CD, N09 Monitorin
 
 **מהסשן הקודם (PR #75/#77/#79, מוזגים ל-`be65801`):** Screen Filter Gateway (C53), Finance Pulse English-schema migration + wiring (O4), structured tool-result contract (C53-A — שהרגרסיה שלו תוקנה כרגע ב-PR #80 לעיל).
 
+**PR #100 (22/06/2026) — `claude/f16-docs-final`, מוזג ל-`main` כ-`de5765b`:** עדכון docs-only — תיקון `ROADMAP.md`/`AI_CONTEXT.md`/`CHANGELOG.md`/`CHANGE_CONTROL_LOG.md` לשקף ש-F16 הושלם במלואו (PR #99 כבר מוזג בפועל ע"י בעל הריפו לפני שניסיתי למזג בעצמי — אומת דרך `pull_request_read`, לא דרך הצהרה).
+
+**PR #101 (22/06/2026) — `claude/n07-schema-governance`, מוזג ל-`main` כ-`e465eff`:** N07 — `tools/schema_governance.py`. סקריפט standalone, קובץ יחיד, READ ONLY לחלוטין: שולף live schema מ-Airtable Metadata API, משווה ל-`airtable_schema.py` (import, לא parse) דרך `TABLE_CLASS_MAP`/`_class_values` הקיימים מ-`schema_audit.py` (לא שוכפל מיפוי שני). מזהה 5 סוגי drift: שדה חסר ב-live (whitespace-tolerant match) → ERROR; שדה ב-live שלא בקוד → WARNING; trailing/leading spaces בשם שדה → WARNING; trailing/leading spaces ב-select options → WARNING; שינוי סוג שדה → ERROR (מול ריצה קודמת שנשמרה, כי `airtable_schema.py` לא מכיל מטא-דאטה של סוגים — baseline זמני, לא קוד). מדפיס דוח עברית, שומר `schema_drift_report.json` (ב-`.gitignore`, לא ב-git), exit 1 אם יש ERROR. self-test (`--self-test`, ללא רשת) כלול. מניע: BUG-008 (`Leads."Business Outcome"` trailing space שהתגלה ad-hoc).
+
 ## 4. Next Priorities
 0. **F16 Media Layer — הדלקת flags** (`FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD`) — קוד שלם ומחובר (כל 7 batches), אך טבלת "Media Files" חייבת להיווצר ידנית ב-Airtable לפני כל הדלקה; אפס תעבורת ייצור אומתה עד כה.
 1. **לתעד את PR #80 / A32 fix** ב-`CHANGE_CONTROL_LOG.md` + `ROADMAP.md` עם commit hash — אותו דפוס drift שכבר תועד עבור C25-C40 חוזר על עצמו (תיעוד מפגר אחרי main).
-2. **N07 — Schema Governance script**: עדיפות גבוהה ברודמאפ; drift בסכמת Airtable מתגלה כרגע ad-hoc per-bug, לא שיטתי.
+2. **להריץ את N07 (`tools/schema_governance.py`) מול live Airtable** — קוד הושלם ומוזג, עדיין לא הורץ פעם ראשונה מול הסכמה האמיתית (אין credentials בסביבת sandbox זו); כל עוד לא רץ, BUG-008-style drift עדיין לא מתגלה בפועל.
 3. **N11 — Finance Pulse dynamic formula**: `raw_formula` עדיין סטטי; + לסגור 2 הפערים הידועים (`PaymentFields.CONTACT/NOTES` מצביעים על שדות שלא קיימים; case-mismatch ב-`_build_formula()`).
 4. **לאמת מצב Render בפועל מול `main` HEAD (`7496628`)** — לא ניתן מהסביבה הזו (egress חסום); סיכון High שתועד כבר ב-גרסה קודמת.
 5. **החלטה על הדלקת N02-N04** (Lead Scoring/Memory/Followup) — קוד מוכן ושלם, אך אפס תעבורת ייצור אמיתית אומתה עד כה.
