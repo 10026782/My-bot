@@ -1232,7 +1232,9 @@ def _webhook_telegram_impl():
             try:
                 bot.process_new_updates([update])
             except Exception as e:
-                logger.error(f"[Telegram] command dispatch error: {e}", exc_info=True)
+                logger.error(f"[Command] dispatch error: {e}", exc_info=True)
+                from core.error_reporter import report_error
+                report_error(e, context=f"command: {text[:20]}")
             return "", 200
 
         if idempotency.is_duplicate("telegram", sender_user_id, text):

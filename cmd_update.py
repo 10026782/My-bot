@@ -55,7 +55,12 @@ def register_update_command(bot, get_identity):
     # ── /update ─────────────────────────────────────────────────
     @bot.message_handler(commands=["update", "עדכון"])
     def cmd_update(msg):
-        identity = get_identity("telegram", str(msg.from_user.id))
+        try:
+            identity = get_identity("telegram", str(msg.from_user.id))
+        except Exception as e:
+            logger.error(f"[/update] identity error: {e}", exc_info=True)
+            bot.send_message(msg.chat.id, "❌ שגיאה בזיהוי משתמש.")
+            return
         if not identity or not (identity.is_owner or identity.role in _ALLOWED_ROLES):
             bot.send_message(msg.chat.id, "אין הרשאה לפקודה זו.")
             return
