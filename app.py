@@ -1265,6 +1265,10 @@ def _webhook_telegram_impl():
 
         try:
             reply = run_agent(text, sender_user_id, channel="telegram")
+        except Exception as e:
+            from core.error_reporter import report_error
+            report_error(e, context="run_agent (telegram)")
+            reply = "⚠️ קרתה שגיאה בעיבוד ההודעה. נסה שוב בעוד רגע."
         finally:
             typing_stop.set()
             typing_thread.join(timeout=1.0)
