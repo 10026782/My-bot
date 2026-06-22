@@ -23,6 +23,20 @@
 
 > נבנה מ-`git log --since="30 days ago"` (~172 commits, `f935c53`→`eebf73b`) + טבלאות ROADMAP.md (Stabilization Sprint, World 2, Sprint 16/06). כל commit hash צוטט ישירות מ-git או מ-ROADMAP — שורות שלא נמצאה להן ראיה ישירה מסומנות "לא ידוע".
 
+### C22 (spec ID, לא ROADMAP) — Weekly Business Summary
+- **תאריך:** 22/06/2026
+- **סוג:** Feature
+- **Requirement:** spec חיצוני "C22 — Weekly Business Summary" (⚠️ ID זה מתנגש עם ROADMAP.md's C22 הקיים — "feature_flags is_enabled() alias", לא קשור; אותו דפוס תועד עבור C20/C21)
+- **Commit:** `c4527b7`
+- **PR:** #94 (`claude/weekly-business-summary-4crnek`)
+- **Review על ידי:** Claude Code (session), אושר ע"י המשתמש
+- **Deploy תאריך:** 22/06/2026 — Render (אישור משתמש)
+- **Verified בפרודקשן:** לא ידוע — המשתמש אישר deploy ל-`d91a9df`, לא אומת עצמאית מסביבת Claude (אין גישת Dashboard/egress)
+- **Verification ראיה:** `py_compile` נקי; `smoke_tests.py`/`test_integration.py`/`core/router/test_router.py` עוברים; תרחישי A/B/C/D מהספק נבדקו ידנית עם mock data
+- **Docs עודכנו:** AI_CONTEXT.md, CHANGELOG.md, feature_flags.py (רישום הדגל), CHANGE_CONTROL_LOG.md (זה)
+- **Feature Flag:** `FEATURE_WEEKLY_SUMMARY` — כבוי כברירת מחדל
+- **Rollback plan:** `FEATURE_WEEKLY_SUMMARY=false` (ברירת מחדל); try/except ב-scheduler בולע כל כשל; המערכת עולה רגיל גם בלי `weekly_summary.py`
+
 ### C25–C40 — Stabilization Sprint (07/06/2026)
 - **תאריך:** 07/06/2026
 - **סוג:** Bug Fix (batch — 16 פריטים, C25–C40)
