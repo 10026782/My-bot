@@ -114,11 +114,11 @@
       },
       {
         "capability": "Finance Pulse",
-        "status": "STUB",
+        "status": "WORKING",
         "owner": "finance",
         "dependencies": ["Payments", "Expenses"],
-        "evidence_files": ["BOSS_CURRENT_STATE.md Module State Matrix", "tma_api.py:1060", "tma_api.py:1111"],
-        "next_blocker": "Current state marks it stub/limited despite partial data reads."
+        "evidence_files": ["BOSS_CURRENT_STATE.md Module State Matrix", "tma_api.py:1647", "tma_api.py:1666"],
+        "next_blocker": "Overdue view now date-driven (N11 fix) rather than status-field-driven; still no live-production spot check from this sandbox."
       },
       {
         "capability": "Activity Feed",
