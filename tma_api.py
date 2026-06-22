@@ -1008,7 +1008,8 @@ SCREEN_CONFIGS: dict[str, dict] = {
                 "label": "פעילים",
             },
             "overdue": {
-                "include_statuses": ["overdue"],
+                # N11 fix: לפי תאריך בלבד (status field לא אמין ל"באיחור" —
+                # תלוי בעדכון ידני). raw_formula דינמי נבנה ב-finance_pulse().
                 "label": "באיחור",
             },
             "all": {
@@ -1663,12 +1664,21 @@ def finance_pulse(identity):
 
     domain_q = request.args.get("domain", "")
 
+    # N11 fix: overdue = לא שולם + תאריך עבר — לפי תאריך בלבד, לא לפי
+    # status="overdue" (שדה שדורש עדכון ידני ולא אמין).
+    raw_formula = view_cfg.get("raw_formula", "")
+    if view_q == "overdue":
+        raw_formula = (
+            f"AND(NOT({{{PaymentFields.STATUS}}}='{PaymentStatus.RECEIVED}'), "
+            f"IS_BEFORE({{{PaymentFields.DATE}}}, '{today_str}'))"
+        )
+
     formula = _build_formula(
         entity           = "Payment",
         domain           = domain_q,
         include_statuses = view_cfg.get("include_statuses"),
         exclude_statuses = view_cfg.get("exclude_statuses"),
-        raw_formula      = view_cfg.get("raw_formula", ""),
+        raw_formula      = raw_formula,
         status_field     = PaymentFields.STATUS,
     )
 

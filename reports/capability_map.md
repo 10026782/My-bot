@@ -43,7 +43,7 @@ Health formula: WORKING=100, PARTIAL=50, STUB=20, BROKEN=0, UNUSED=10.
 |---|---|---|---|---|---|
 | Auth | WORKING | security | Telegram initData, identity, TMA_ALLOWED_ORIGINS | tma_api.py:625; BOSS_CURRENT_STATE.md C39 | Keep Render/Vercel env drift monitored. |
 | Projects Hub | PARTIAL | tma | ProjectsHub, Leads, Payments, Tasks | tma_api.py:661; tma_api.py:686; reports/registry_calibration_report.md | Navigation/project detail UX remains limited. |
-| Finance Pulse | STUB | finance | Payments, Expenses | BOSS_CURRENT_STATE.md Module State Matrix; tma_api.py:1060; tma_api.py:1111 | Current state marks it stub/limited despite partial data reads. |
+| Finance Pulse | WORKING | finance | Payments, Expenses | BOSS_CURRENT_STATE.md Module State Matrix; tma_api.py:1647; tma_api.py:1666 | Overdue view now date-driven (N11 fix) rather than status-field-driven; still no live-production spot check from this sandbox. |
 | Activity Feed | PARTIAL | intelligence | Business Memory, Interaction Log | tma_api.py:1264; BOSS_CURRENT_STATE.md Activity Feed | Receipts are returned by approval response but not persisted/shown. |
 | Assets | PARTIAL | personal | Assets, tma_api, Airtable metadata | tma_api.py:1323; tma_api.py:1365; reports/registry_calibration_report.md Stale Tables | Runtime uses Assets, schema comment says Assets (Personal). |
 

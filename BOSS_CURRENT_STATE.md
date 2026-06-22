@@ -167,7 +167,7 @@ run_agent() → conversational reply only
 | Learning system | STUB | Mock events; no real production loop |
 | TMA / Mini App | PARTIAL | CORS + auth fixed; write endpoints approval-gated; stubs honest |
 | Projects Hub | PARTIAL | Real Airtable data; no navigation |
-| Finance Pulse | PARTIAL | `/api/finance/pulse` is wired by PR #77/O4: reads Payments/Expenses via Airtable schema fields and returns real finance pulse data. Not marked WORKING until production data/UI verification is recorded. |
+| Finance Pulse | WORKING | `/api/finance/pulse` reads Payments/Expenses via Airtable schema fields (PR #77/O4) and returns real finance pulse data; `?view=overdue` now filters by date (`IS_BEFORE({date}, today)` + not-received) instead of a manually-set status field (N11 fix, this session) — no longer depends on someone remembering to flip a payment's status to "overdue". |
 | Activity Feed | STUB | coming_soon; approval receipts are returned by API but not persisted/shown in Activity Feed |
 | Assets | STUB | coming_soon |
 | Personal Mode | STUB | Auth works; screens not implemented |
