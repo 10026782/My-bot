@@ -599,7 +599,7 @@ class MediaFileFields:
     MIME_TYPE             = "Mime Type"
     DRIVE_URL             = "Drive URL"
     DRIVE_FILE_ID         = "Drive File ID"
-    DOMAIN                = "domain"
+    DOMAIN                = "Domain"
     SOURCE                = "Source"             # telegram/tma/whatsapp
     RAW_TRANSCRIPT        = "Raw Transcript"      # long text — גולמי, לא לשנות
     NORMALIZED_TRANSCRIPT = "Transcript"          # long text — אחרי ניקוי ניקוד
