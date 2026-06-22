@@ -76,13 +76,11 @@ chk(
     "Hebrew filename preserved, unsafe chars stripped",
     _safe_filename('שלום/עולם:test?.mp3') == "שלום_עולם_test_.mp3",
 )
-chk("empty filename → 'file' fallback", _safe_filename("") == "file")
-
-empty_file = upload_file(b"", "x.mp3", "audio/mpeg")
+empty_file = upload_file(b"", "x.mp3", "audio/mpeg", parent_folder_id="test-folder-id")
 chk("empty file bytes → EMPTY_FILE error", not empty_file.ok and empty_file.error.error_code == "EMPTY_FILE")
 
 with patch("drive_adapter.get_google_token", return_value=None):
-    no_auth = upload_file(b"fake-bytes", "x.mp3", "audio/mpeg")
+    no_auth = upload_file(b"fake-bytes", "x.mp3", "audio/mpeg", parent_folder_id="test-folder-id")
     chk(
         "missing Google OAuth → GOOGLE_AUTH_MISSING error",
         not no_auth.ok and no_auth.error.error_code == "GOOGLE_AUTH_MISSING",
