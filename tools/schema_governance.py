@@ -8,6 +8,11 @@
 #   - trailing/leading spaces בשמות שדות ב-Airtable                  → WARNING
 #   - trailing/leading spaces ב-singleSelect/multipleSelects options → WARNING
 #   - סוג שדה שהשתנה מהריצה הקודמת (text → singleSelect וכו')        → ERROR
+#   - *Fields class קיים ב-airtable_schema.py בלי רישום ב-TABLE_CLASS_MAP
+#     (schema_audit.py) → ERROR. זה הפער שאיפשר ל-MediaFileFields (F16)
+#     להיכנס לקוד עם שדה שלא תואם ל-live בלי שה-CI יתפוס את זה: ה-loop
+#     הראשי רץ רק על טבלאות שכבר רשומות ב-TABLE_CLASS_MAP, אז טבלה חדשה
+#     שלא נרשמה דולגת בשתיקה — לא ERROR, לא WARNING, שום דבר.
 #
 # שימוש: python3 tools/schema_governance.py
 # פלט: דוח עברית ל-console + schema_drift_report.json (לא ב-git, ב-.gitignore)
@@ -18,6 +23,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import sys
@@ -26,6 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import airtable_schema  # noqa: E402
 from schema_audit import TABLE_CLASS_MAP, _class_values  # noqa: E402
 
 _REPORT_PATH = Path(__file__).resolve().parent.parent / "schema_drift_report.json"
@@ -208,6 +215,34 @@ def run_governance(live_schema: dict, previous_report: dict | None = None) -> di
     }
 
 
+def find_unregistered_field_classes() -> list[dict]:
+    """
+    מוצא *Fields classes שמוגדרים ב-airtable_schema.py אך לא רשומים ב-TABLE_CLASS_MAP
+    (schema_audit.py). אלה לא נבדקים כלל מול live Airtable — לא בלולאה הראשית של
+    run_governance, כיוון שהיא מבוססת רק על TABLE_CLASS_MAP.items(). זה הפער שאיפשר
+    ל-MediaFileFields (F16) לעבור בשתיקה: הטבלה נוצרה ב-Airtable עם שדה "Domain" אבל
+    הקוד כתב "domain" — ה-CI לא תפס את זה כי הטבלה לא היתה רשומה ב-TABLE_CLASS_MAP.
+    """
+    registered = set(TABLE_CLASS_MAP.values())
+    findings: list[dict] = []
+    for name, cls in inspect.getmembers(airtable_schema, inspect.isclass):
+        if cls.__module__ != airtable_schema.__name__:
+            continue
+        if not name.endswith("Fields"):
+            continue
+        if cls in registered:
+            continue
+        findings.append(
+            {
+                "table": name,
+                "field": None,
+                "severity": SEVERITY_ERROR,
+                "message": "מוגדר ב-airtable_schema.py אך לא רשום ב-TABLE_CLASS_MAP (schema_audit.py) — לא נבדק מול live Airtable",
+            }
+        )
+    return findings
+
+
 def print_report(report: dict) -> None:
     today_str = date.fromisoformat(report["generated_at"]).strftime("%d/%m/%Y")
     print("🔍 BOSS Schema Governance Report — " + today_str)
@@ -217,6 +252,8 @@ def print_report(report: dict) -> None:
     for f in report["findings"]:
         findings_by_table.setdefault(f["table"], []).append(f)
 
+    known_tables = {summary["table"] for summary in report["table_summaries"]}
+
     for summary in report["table_summaries"]:
         table_name = summary["table"]
         print(f"✅ {table_name} — {summary['ok']}/{summary['total']} שדות תקינים")
@@ -224,6 +261,13 @@ def print_report(report: dict) -> None:
             icon = _ICONS[f["severity"]]
             field_part = f'."{f["field"]}"' if f["field"] else ""
             print(f'{icon} {table_name}{field_part} — {f["message"]}')
+
+    for table_name, findings in findings_by_table.items():
+        if table_name in known_tables:
+            continue
+        for f in findings:
+            icon = _ICONS[f["severity"]]
+            print(f'{icon} {table_name} — {f["message"]}')
 
     print("━" * 43)
     s = report["summary"]
@@ -241,6 +285,13 @@ def main() -> int:
     previous_report = _load_previous_report()
     live_schema = fetch_live_schema(base_id, api_key)
     report = run_governance(live_schema, previous_report)
+
+    report["findings"].extend(find_unregistered_field_classes())
+    report["summary"] = {
+        "total": len(report["findings"]),
+        "errors": sum(1 for f in report["findings"] if f["severity"] == SEVERITY_ERROR),
+        "warnings": sum(1 for f in report["findings"] if f["severity"] == SEVERITY_WARNING),
+    }
 
     print_report(report)
     _REPORT_PATH.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
