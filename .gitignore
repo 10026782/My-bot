@@ -7,3 +7,4 @@ audit_gate_state.json
 output/
 contacts_merged.csv
 *.vcf
+schema_drift_report.json
