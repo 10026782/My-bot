@@ -2,14 +2,14 @@
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
 **עודכן:** 2026-06-22
-**עודכן על ידי:** Claude Code — session update (git-verified against `origin/main` HEAD `8f9c648`)
+**עודכן על ידי:** Claude Code — session update (git-verified against `origin/main` HEAD `4924030`)
 
 > מקור אמת לתוכן הזה: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו — לא נסמכתי עליו.
 
 ---
 
 ## 1. Executive Summary
-- `main` עומד על `8f9c648` (PR #96+#97) — **מתקדם מעבר ל-`d91a9df`** שאליו AI_CONTEXT הקודם הפנה. PR #96/#97 הוסיפו F16 Media Layer Batches א/ב/ג (STT, Drive upload, Airtable metadata gateway — ראו §3). קוד חדש, **לא מחובר ל-pipeline החי** (Batches ד-ז עדיין לא בנויים — אין hooks ב-`app.py`/`tma_api.py`, אין feature flag).
+- `main` עומד על `4924030` (PR #96/#97/#98/#99) — **F16 Media Layer הושלם במלואו** (כל 7 batches, א-ז). PR #96/#97 הוסיפו Batches א/ב/ג (STT, Drive upload, Airtable metadata gateway); PR #98 תיקן באג חוסם ב-Batch ד (`media_handler.py` — חתימת `upload_file()` שגויה + כשל Airtable מוחזר כ-`ok=True` בשקט); PR #99 גילה וסגר שני gaps קטנים ב-Batches ה/ו (`app.py`/`tma_api.py` היו **כבר מחוברים** ל-pipeline החי מאז commit `ee4d2ed` המקורי, לפני כל מאמץ הבאצ'ים — `send_chat_action` חסר ו-`linked_lead_id` לא עבר ב-TMA upload). Batch ז (`airtable_schema.py`) היה קיים ומלא מהבנייה המקורית. הקוד רץ במלואו, **אך כבוי בפרודקשן** מאחורי `FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD` (שני דגלים כבויים כברירת מחדל) — ⚠️ טבלת "Media Files" עצמה חייבת להיווצר ידנית ב-Airtable לפני כל הדלקה.
 - Pipeline הליבה (Identity → Router → Context → Agent) ושער ה-Approval תקינים ופעילים.
 - כל פיצ'רי הצמיחה (Lead Scoring/Memory/Followup/Email Inbound) — **קוד מוכן, דגלים כבויים כברירת מחדל**, לא אומתו בתעבורה אמיתית בפרודקשן.
 - מצב Render בפרודקשן: המשתמש אישר שדיפלוי בוצע ל-`d91a9df` (Render dashboard) — **לא אומת באופן עצמאי מהסביבה הזו** (אין גישת Dashboard/egress ל-Claude).
@@ -22,7 +22,7 @@
 Identity/Router/Context/Agent core; `tool_registry`+`dispatcher` enforcement; Approval flow (3-state, fail-closed, `verify_execution()` נבדק לפני דיווח הצלחה — תוקן ב-PR #80); Airtable single-write-path gateway (`tools/airtable_gateway.py`); Daily Digest; Payment Reminder; Twilio signature validation; TMA auth+CORS; Screen Filter Gateway (`SCREEN_CONFIGS`); Finance Pulse (קורא Payments/Expenses חיים); A32 anti-hallucination evidence gate (חוזק ב-PR #80 — בודק tool identity+ok, לא keyword guessing).
 
 **חלקי (Partial — קוד קיים, לא מאומת/לא פעיל):**
-Lead Scoring (`LEAD_SCORING=off`), Lead Memory (`LEAD_MEMORY=off`), Followup Automation (`FOLLOWUP_AUTOMATION=off`) — שרשרת תלויה אחת בשנייה, כולן code-complete. WhatsApp outbound = honest stub (חסום ב-Meta Cloud API). Google integrations (OAuth נדרש). Approval Policy Emergency Window/OTP — code-complete, `EMERGENCY_WINDOW=off`. F16 Media Layer Batches א/ב/ג (`voice_stt_adapter.py`/`drive_adapter.py`/`media_gateway.py`) — code-complete, **אפס import מקוד חי** (אין עדיין `media_handler.py`/`app.py` hooks/`tma_api.py` endpoint — Batch ד-ז).
+Lead Scoring (`LEAD_SCORING=off`), Lead Memory (`LEAD_MEMORY=off`), Followup Automation (`FOLLOWUP_AUTOMATION=off`) — שרשרת תלויה אחת בשנייה, כולן code-complete. WhatsApp outbound = honest stub (חסום ב-Meta Cloud API). Google integrations (OAuth נדרש). Approval Policy Emergency Window/OTP — code-complete, `EMERGENCY_WINDOW=off`. F16 Media Layer (כל 7 batches, `voice_stt_adapter.py`/`drive_adapter.py`/`media_gateway.py`/`media_handler.py`/`app.py` hooks/`tma_api.py` endpoint/`airtable_schema.py`) — code-complete **ומחובר ל-pipeline החי**, אך `FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD` כבויים כברירת מחדל — לא אומת בתעבורה אמיתית בפרודקשן.
 
 **חסום (Blocked):**
 F05 WhatsApp Production — מחכה לאישור Meta. N08 CI/CD, N09 Monitoring, N07 Schema Governance script — מתוכננים, לא מומשו. TMA: Activity Feed / Assets / Personal Mode — stub כן (`coming_soon`).
@@ -36,8 +36,18 @@ F05 WhatsApp Production — מחכה לאישור Meta. N08 CI/CD, N09 Monitorin
 - **Batch ג — `media_gateway.py` (PR #97):** נמצא תואם 100% לספק כבר מהבנייה המקורית — אפס שינוי קוד, רק וידוא.
 - **באג self-test חוזר (תוקן פעמיים, שורש זהה):** `voice_stt_adapter.py` ו-`drive_adapter.py` השתמשו ב-`unittest.mock.patch("module.fn", ...)` בתוך ה-self-test שלהם; הרצה ישירה (`python3 module.py`) יוצרת `__main__` נפרד מ-`sys.modules["module"]` — ה-patch פוגע בעותק הלא-רץ, אז קריאות רשת אמיתיות יצאו בפועל בזמן בדיקה. תוקן: `patch.object(sys.modules[__name__], "fn", ...)` בשני הקבצים.
 - `test_media_layer.py` עודכן בשני סבבים נפרדים (אחרי כל batch, לפי הוראה מפורשת) — שמות error code, פרמטר `parent_folder_id` חדש, assertions שהוסרו. 33/33 עוברים.
-- Verified: PR #96/#97 אומתו ממוזגים בפועל דרך `git fetch origin main` + grep על תוכן הקבצים ב-`origin/main` (לא git log/PR status בלבד, לפי AGENTS.md POST-MERGE VERIFICATION) — `OVERSIZED`/`STT_FAILED` נמצאו ב-`voice_stt_adapter.py`, `parent_folder_id` נמצא בחתימת `upload_file`/`_upload_to_drive` ב-`drive_adapter.py`. **קוד מוזג, לא מחובר ל-pipeline החי, לא אומת בפרודקשן** (אין feature flag, אין caller חי).
-- Batches ד (`media_handler.py`), ה (`app.py` hooks), ו (`tma_api.py` endpoint), ז (`airtable_schema.py` verification) — עדיין לא מומשו.
+- Verified: PR #96/#97 אומתו ממוזגים בפועל דרך `git fetch origin main` + grep על תוכן הקבצים ב-`origin/main` (לא git log/PR status בלבד, לפי AGENTS.md POST-MERGE VERIFICATION) — `OVERSIZED`/`STT_FAILED` נמצאו ב-`voice_stt_adapter.py`, `parent_folder_id` נמצא בחתימת `upload_file`/`_upload_to_drive` ב-`drive_adapter.py`.
+
+**PR #98 (22/06/2026) — `claude/f16-batch-d`, מוזג ל-`main` כ-`8dd3bca`:**
+- F16 Batch ד — `media_handler.py`. במהלך המימוש התגלה שהקובץ **כבר קיים על `main`** מ-commit `ee4d2ed` קודם (לפני כל מאמץ הבאצ'ים), עם שמות פונקציות שונים מהספק (`handle_voice_note()`/`handle_file_upload()`/`handle_tma_upload()` במקום `handle_telegram_media()`) ו-2 באגים אמיתיים. המשתמש הכריע: לשמור שמות קיימים, לתקן רק internals, לא לגעת ב-`app.py`/`tma_api.py`.
+- תוקן: (1) `upload_file()` נקרא עם `domain=domain` — kwarg שלא קיים בחתימה האמיתית של `drive_adapter.upload_file()` (`parent_folder_id` חובה) — `TypeError` מובטח עם flag דלוק; נוסף `_resolve_drive_folder()` שמשתמש ב-`drive_adapter._get_upload_folder(domain)`. (2) כשל כתיבה ל-Airtable לאחר Drive upload מוצלח הוחזר כ-`ok=True` בשקט — נוסף בדיקה + קוד שגיאה `ASSET_SAVE_FAILED`. קוד שגיאה חדש נוסף גם ל-resolve כשל: `DRIVE_FAILED`.
+- הודעות שגיאה תורגמו לעברית; הוספו 4 self-test scenarios חדשים ב-`media_handler.py`'s `__main__` (large-tier success, voice+memory-keyword approval, `DRIVE_FAILED`, `ASSET_SAVE_FAILED`) — התרחיש שחשף את הבאג המקורי לא היה מכוסה ב-`test_media_layer.py` הקיים. 33/33 עוברים גם לפני וגם אחרי התיקון (regression-safe).
+- Verified: `git fetch origin main` + grep על `_get_upload_folder`/`DRIVE_FAILED`/`ASSET_SAVE_FAILED` ב-`origin/main:media_handler.py` — תואם.
+
+**PR #99 (22/06/2026) — `claude/f16-final`, מוזג ל-`main` כ-`4924030`:**
+- F16 Batches ה/ו/ז — לפני מימוש, אומת ש-Batches ה (`app.py` hooks) ו-ו (`tma_api.py` `/api/tma/upload`) **כבר מחוברים** ל-pipeline החי מאז `ee4d2ed` (לא רק קוד עומד — `_handle_telegram_media()` כבר נקרא מ-webhook על voice/photo/document, ה-endpoint כבר קורא ל-`handle_tma_upload()`), ו-Batch ז (`Tables.MEDIA_FILES`/`MediaFileFields` ב-`airtable_schema.py`) כבר קיים ומלא. תוקנו רק 2 gaps אמיתיים: `send_chat_action` חסר לפני עיבוד ב-`app.py` (typing/upload_document); `linked_lead_id` לא התקבל מה-multipart form ב-`tma_api.py` ולא עבר ל-`handle_tma_upload()`/`handle_file_upload()`. `domain` נשאר נגזר מה-identity המאומת בכוונה (לא משדה form) — מנע client-controlled tenant scope.
+- Verified: `git fetch origin main` + grep על `send_chat_action.*upload_document`, `linked_lead_id` ב-`origin/main:app.py`/`tma_api.py`/`media_handler.py` — תואם. `test_media_layer.py` 33/33, `media_handler.py` self-test 4/4, `smoke_tests.py` עובר.
+- **F16 Media Layer — הושלם במלואו (כל 7 batches), כבוי בפרודקשן מאחורי flags.**
 
 **PR #94 (22/06/2026) — `claude/weekly-business-summary-4crnek`, מוזג ל-`main` כ-`d91a9df`:**
 - C22 Weekly Business Summary (`weekly_summary.py`) — שולף Business Memory מ-7 ימים אחרונים, מקבץ לפי domain, שולח סיכום שבועי לטלגרם (ראשון 08:30 דרך `scheduler.py`) + כפתור להעברת רשומות `Event Type=Learning` ("רעיון") ל-ROADMAP. Read-only לחלוטין. דגל `FEATURE_WEEKLY_SUMMARY` כבוי כברירת מחדל — נוסף לרשימת `feature_flags.py`.
@@ -66,7 +76,7 @@ F05 WhatsApp Production — מחכה לאישור Meta. N08 CI/CD, N09 Monitorin
 **מהסשן הקודם (PR #75/#77/#79, מוזגים ל-`be65801`):** Screen Filter Gateway (C53), Finance Pulse English-schema migration + wiring (O4), structured tool-result contract (C53-A — שהרגרסיה שלו תוקנה כרגע ב-PR #80 לעיל).
 
 ## 4. Next Priorities
-0. **F16 Media Layer Batches ד-ז** (`media_handler.py`, `app.py` hooks, `tma_api.py` endpoint, `airtable_schema.py` verification) — Batches א/ב/ג מוזגים אבל הקוד "תלוי באוויר" עד שה-handler/hooks מחברים אותו ל-pipeline החי; ללא flag פעיל אין שום סיכון production מהמיזוג הנוכחי.
+0. **F16 Media Layer — הדלקת flags** (`FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD`) — קוד שלם ומחובר (כל 7 batches), אך טבלת "Media Files" חייבת להיווצר ידנית ב-Airtable לפני כל הדלקה; אפס תעבורת ייצור אומתה עד כה.
 1. **לתעד את PR #80 / A32 fix** ב-`CHANGE_CONTROL_LOG.md` + `ROADMAP.md` עם commit hash — אותו דפוס drift שכבר תועד עבור C25-C40 חוזר על עצמו (תיעוד מפגר אחרי main).
 2. **N07 — Schema Governance script**: עדיפות גבוהה ברודמאפ; drift בסכמת Airtable מתגלה כרגע ad-hoc per-bug, לא שיטתי.
 3. **N11 — Finance Pulse dynamic formula**: `raw_formula` עדיין סטטי; + לסגור 2 הפערים הידועים (`PaymentFields.CONTACT/NOTES` מצביעים על שדות שלא קיימים; case-mismatch ב-`_build_formula()`).
