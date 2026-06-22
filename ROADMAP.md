@@ -1,6 +1,6 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 22/06/2026 — main = `e465eff` (אומת, PR #96/#97/#98/#99/#100/#101 ממוזגים). **F16 (Media Layer) הושלם** — כל שבעת ה-batches (א-ז) קיימים ומחוברים ל-pipeline החי, מאחורי דגלים כבויים כברירת מחדל (`FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD`). ⚠️ ה-spec החיצוני קרא לפיצ'ר "F12" ואז "F09" — שני ה-IDs תפוסים (F12=Model Provider Adapter, F09=Lead Qualifier Wire-up); הוקצה F16 כדי למנוע התנגשות בסטייל C20/C21/F14/F15. **N07 (Schema Governance) הושלם** — `tools/schema_governance.py` (PR #101), standalone read-only drift detector, ראו פירוט למטה.
+עודכן: 22/06/2026 — main = `24237e6` (אומת, PR #96/#97/#98/#99/#100/#101/#103/#104 ממוזגים). **F16 (Media Layer) הושלם** — כל שבעת ה-batches (א-ז) קיימים ומחוברים ל-pipeline החי, מאחורי דגלים כבויים כברירת מחדל (`FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD`). ⚠️ ה-spec החיצוני קרא לפיצ'ר "F12" ואז "F09" — שני ה-IDs תפוסים (F12=Model Provider Adapter, F09=Lead Qualifier Wire-up); הוקצה F16 כדי למנוע התנגשות בסטייל C20/C21/F14/F15. **N07 (Schema Governance) הושלם** — `tools/schema_governance.py` (PR #101), standalone read-only drift detector, ראו פירוט למטה. **N08 (CI/CD) ו-N09 (Monitoring/Alerting) הושלמו** (PR #103/#104) — תוקנו כ-PLANNED בטעות, ראו פירוט למטה. **N11 (Finance Pulse wiring) התגלה כממוזג מ-PR #77 קודם** — תועד כ-PLANNED בטעות, תוקן.
 
 עודכן (קודם): 20/06/2026 — main = `62eddda` (אומת). PR #85/#86/#87/#88/#89 ממוזגים (ראה C54/C55 למטה + CHANGE_CONTROL_LOG.md). F13 (TenantConfig + Provider Interfaces) — קוד נכתב ומוזג (PR #87), **לא מחובר ל-pipeline**; ⚠️ חפיפה עם F12 עדיין לא הוכרעה, אל תחבר ל-pipeline לפני הכרעה. `contact_merge.py` (PR #88) — כלי CLI עצמאי למיזוג אנשי קשר, לא ב-ROADMAP (admin utility, לא feature). נוספו F14 (Contact Gate: find_or_create_contact) ו-F15 (crm.py → airtable_gateway write path migration) — ⚠️ הספק ביקש F12/F13, אך שני ה-IDs האלה תפוסים (F12=Model Provider Adapter, F13=TenantConfig); הוקצו F14/F15 כדי למנוע התנגשות בסטייל C20/C21.
 
@@ -247,31 +247,39 @@ ad-hoc תוך כדי חקירת באג, לא דרך audit שיטתי — ראו 
 **מצב נוכחי:** קוד הושלם ומוזג ל-main, עדיין לא רץ ב-CI (אין CI בריפו —
 ראו N08 למטה) — הרצה היא manual לעת עתה (ראו `RELEASE_CHECKLIST.md`).
 
-### N08 — CI/CD GitHub Actions 🔲 PLANNED
-**מה:** הרצת `pytest`/`smoke_tests.py`/`test_integration.py` + `npm run build`
-על כל PR, ו-hook ל-Render לאימות שה-deploy תואם את ה-commit שעבר CI.
-**עד שמיושם:** manual gate בלבד (ראו `RELEASE_CHECKLIST.md`).
+### N08 — CI/CD GitHub Actions ✅ הושלם (PR #103, `abf4835`)
+**מה:** `.github/workflows/ci.yml` — מריץ `smoke_tests.py`/`test_integration.py` +
+`npm run build` (frontend, skip חינני אם `tma-frontend/package.json` חסר) על כל PR.
+Secrets נכונים (`TELEGRAM_TOKEN` וכו') ממופים מ-GitHub secrets.
+**מצב נוכחי:** ממוזג ל-main, פעיל על כל PR.
 
-### N09 — Monitoring / Alerting 🔲 PLANNED
-**מה:** Render alerts + Sentry (או שווה-ערך) לזיהוי שגיאות בפרודקשן
-בלי תלות בדיווח ידני של המשתמש.
-**עד שמיושם:** manual gate בלבד (ראו `RELEASE_CHECKLIST.md`).
+### N09 — Monitoring / Alerting ✅ הושלם (PR #104, `4ac6d24`)
+**מה:** `core/error_reporter.py` — `report_error(error, context, level)` שולח
+התראת Telegram על שגיאות פרודקשן בלבד (`RENDER=="true"` + `ERROR_REPORTING` flag),
+rate-limited (10/שעה), בלי payload/תוכן הודעות/מידע לקוח (context = שם פונקציה בלבד,
+traceback גולמי). מחובר ב-`app.py` ב-3 נקודות: `_handle_approval_callback`,
+`webhook_telegram`, `webhook_whatsapp`.
+**מצב נוכחי:** ממוזג ל-main, פעיל בפרודקשן (תלוי ב-`ERROR_REPORTING`/`ELIYAHU_CHAT_ID`).
 
 ### N10 — Rollback אוטומטי 🔲 PLANNED
-**תלוי ב:** N08 (CI/CD).
+**תלוי ב:** N08 (CI/CD — הושלם).
 **מה:** rollback אוטומטי ל-commit יציב אחרון כש-health check/monitoring
 מזהה כשל אחרי deploy.
 **עד שמיושם:** manual gate בלבד (ראו `RELEASE_CHECKLIST.md`).
 
-### N11 — Screen Filter Gateway: Finance Pulse wiring 🔲 PLANNED
+### N11 — Screen Filter Gateway: Finance Pulse wiring ✅ הושלם (PR #77, `f7d7e4f`/`daab73e`)
 **תלוי ב:** C53 (Screen Filter Gateway — מיושם, PR #75).
-**מה:** שלב 2 של ה-Gateway — `SCREEN_CONFIGS["finance_pulse"].views.active.raw_formula`
-ייעודכן עם formula דינמית לתאריך (תשלומים overdue/קרובים), ו-`GET /api/finance/pulse`
-יחובר ל-`_build_formula()` עם `entity="Payment"`. אפס שינוי ל-`_build_formula()` עצמה —
-ה-config-driven design מאפשר זאת בלי לגעת ב-Gateway.
+**מה:** `GET /api/finance/pulse` מחובר ל-`SCREEN_CONFIGS["finance_pulse"]` +
+`_build_formula()` עם `entity="Payment"` (`status_field=PaymentFields.STATUS`),
+תומך ב-`?view=active|overdue|all` ומחזיר `available_views`. סיווג overdue/pending/
+income לפי תאריך מתבצע ב-Python על תוצאת ה-formula (status-based, לא raw_formula
+דינמי לתאריך — נמצא מספיק כש-`exclude_statuses`/`include_statuses` עושים את הסינון
+העיקרי והקטגוריזציה לפי תאריך נשארת בקוד האפליקציה, לא ב-Airtable formula).
+אפס שינוי ל-`_build_formula()` עצמה.
 **עתידי (multi-tenant):** override per-tenant מ-`ProjectsHub.screen_overrides`
 (JSON, נדרש שדה חדש בסכמה) — ראו הערה ב-`tma_api.py` ליד `SCREEN_CONFIGS`.
-**קבצים:** `tma_api.py` בלבד (לפי העיקרון של C53 — additive, לא נוגע ב-Gateway).
+**מצב נוכחי:** ממוזג ל-main (`tma_api.py`/`airtable_schema.py`), לפני הסשן הנוכחי —
+תועד כ-PLANNED ב-ROADMAP בטעות; תוקן כאן.
 
 ### F05a — Meta WhatsApp Phase 1 (Inbound, ללא תעבורת פרודקשן)
 **מה:** `/webhooks/meta/whatsapp` (GET verify + POST inbound) — נתיב נפרד מ-Twilio.
