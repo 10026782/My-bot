@@ -3015,6 +3015,10 @@ def tma_upload(identity):
     if not file_bytes:
         return jsonify({"error": "empty file"}), 400
 
+    # domain is always taken from the authenticated identity, never from the
+    # client-supplied form field — tenant scope must not be client-controlled.
+    linked_lead_id = request.form.get("linked_lead_id", "")
+
     from media_handler import handle_tma_upload
 
     result = handle_tma_upload(
@@ -3023,6 +3027,7 @@ def tma_upload(identity):
         mime_type=uploaded.mimetype or "application/octet-stream",
         user_id=identity.user_id,
         domain=identity.domain_id,
+        linked_lead_id=linked_lead_id,
     )
 
     if not result.ok:
