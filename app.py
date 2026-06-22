@@ -598,6 +598,16 @@ def _tool_user_message(result) -> str:
 
 
 def _handle_approval_callback(cq) -> None:
+    """H3 top-level handler — דק, מעביר ל-impl ומדווח שגיאות לא-מטופלות."""
+    try:
+        _handle_approval_callback_impl(cq)
+    except Exception as e:
+        from core.error_reporter import report_error
+        report_error(e, context="_handle_approval_callback")
+        raise
+
+
+def _handle_approval_callback_impl(cq) -> None:
     """׳׳˜׳₪׳ ׳‘׳׳—׳™׳¦׳” ׳¢׳ ג…/ג ׳©׳ ׳‘׳§׳©׳× ׳׳™׳©׳•׳¨."""
     from event_bus import bus
 
@@ -1177,6 +1187,16 @@ def health():
 
 @app.route("/telegram", methods=["POST"])
 def webhook_telegram():
+    """H1 top-level handler — דק, מעביר ל-impl ומדווח שגיאות לא-מטופלות."""
+    try:
+        return _webhook_telegram_impl()
+    except Exception as e:
+        from core.error_reporter import report_error
+        report_error(e, context="webhook_telegram")
+        raise
+
+
+def _webhook_telegram_impl():
     if request.headers.get("content-type") != "application/json":
         abort(403)
     if not WEBHOOK_SECRET:
@@ -1270,6 +1290,16 @@ def webhook_telegram():
 
 @app.route("/whatsapp", methods=["POST"])
 def webhook_whatsapp():
+    """H2 top-level handler — דק, מעביר ל-impl ומדווח שגיאות לא-מטופלות."""
+    try:
+        return _webhook_whatsapp_impl()
+    except Exception as e:
+        from core.error_reporter import report_error
+        report_error(e, context="webhook_whatsapp")
+        raise
+
+
+def _webhook_whatsapp_impl():
     if not _validate_twilio_signature():
         return Response("Forbidden", status=403)
 

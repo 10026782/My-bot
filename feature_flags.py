@@ -131,3 +131,5 @@ def set_flag(name: str, value: bool) -> None:
 
 # Restore on import so flags survive Render restarts.
 _load_persistent()
+
+ERROR_REPORTING = os.environ.get("ERROR_REPORTING", "true")
