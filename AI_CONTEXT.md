@@ -16,6 +16,7 @@
 - Screen Filter Gateway (C53) ו-Finance Pulse (O4) מוזגו ל-main ופעילים בקוד; `GET /api/finance/pulse` מחובר ל-`_build_formula()` עם `entity="Payment"` (`N11`, PR #77 — תועד כ-PLANNED ב-ROADMAP בטעות עד הסשן הזה, תוקן). סיווג overdue/pending לפי תאריך נשאר ב-Python (לא ב-`raw_formula`) — החלטת עיצוב, לא bug.
 - **N07 (Schema Governance) הושלם** — `tools/schema_governance.py` (PR #101) קיים ב-main, standalone read-only drift detector מול Airtable Metadata API; עדיין לא רץ אוטומטית (אין CI בריפו), הרצה היא manual.
 - **N08 (CI/CD) הושלם** (PR #103, `abf4835`) — `.github/workflows/ci.yml` רץ על כל PR. **N09 (Monitoring/Alerting) הושלם** (PR #104, `4ac6d24`) — `core/error_reporter.py` שולח התראות Telegram על שגיאות פרודקשן.
+- **C56 (Approval Policy: Emergency Window + OTP + Policy Gate) מוזג ל-`main`** — `BUG_AUDIT_LOG.md`/`CHANGE_CONTROL_LOG.md` תיעדו "Merged: לא" וה-ROADMAP לא הזכיר את הפיצ'ר בכלל, אבל `gh pr view 69` מאשר `state: MERGED`, `mergedAt: 2026-06-17T18:56:00Z`, `mergeCommit: 4e933b0`; `git merge-base --is-ancestor 4e933b0 main` מאשר שזה אב-קדמון של `main` בפועל. תוקן בשלושת המסמכים. `EMERGENCY_WINDOW` flag נשאר כבוי — אין שינוי התנהגות בפרודקשן.
 
 ## 2. Current System State
 
