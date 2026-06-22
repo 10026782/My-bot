@@ -105,6 +105,7 @@ def _cors(response):
 @tma_api.route("/api/finance/pulse", methods=["OPTIONS"])
 @tma_api.route("/api/owner/control-center", methods=["OPTIONS"])
 @tma_api.route("/api/owner/health", methods=["OPTIONS"])
+@tma_api.route("/api/tma/upload", methods=["OPTIONS"])
 def _preflight():
     return "", 204
 
@@ -2990,5 +2991,47 @@ def game_checkin_put(identity):
         "total_xp":    total_xp,
         "updated_at":  now_iso,
         "updated_by":  actor,
+    })
+
+
+# ══════════════════════════════════════════════════════════════════
+# F16 — Media Layer: TMA file upload
+# ══════════════════════════════════════════════════════════════════
+
+@tma_api.route("/api/tma/upload", methods=["POST"])
+@require_tma_auth
+def tma_upload(identity):
+    """Photo/document upload from the TMA — Drive storage + Media Files metadata."""
+    import feature_flags as ff
+
+    if not ff.is_enabled("FEATURE_MEDIA_UPLOAD"):
+        return jsonify({"coming_soon": True, "message": "Media upload not yet enabled"}), 200
+
+    uploaded = request.files.get("file")
+    if not uploaded:
+        return jsonify({"error": "missing 'file' in multipart form data"}), 400
+
+    file_bytes = uploaded.read()
+    if not file_bytes:
+        return jsonify({"error": "empty file"}), 400
+
+    from media_handler import handle_tma_upload
+
+    result = handle_tma_upload(
+        file_bytes=file_bytes,
+        filename=uploaded.filename or "upload",
+        mime_type=uploaded.mimetype or "application/octet-stream",
+        user_id=identity.user_id,
+        domain=identity.domain_id,
+    )
+
+    if not result.ok:
+        return jsonify({"ok": False, "error": result.error.error_message}), 400
+
+    return jsonify({
+        "ok":         True,
+        "asset_id":   result.asset_id,
+        "drive_url":  result.drive_url,
+        "file_size_tier": result.file_size_tier,
     })
 

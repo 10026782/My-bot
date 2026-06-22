@@ -52,6 +52,7 @@ READ_ONLY_FIELDS: dict[str, set[str]] = {
 # Gateway coerces a bare "recXXX" string → ["recXXX"] and drops anything else (prevents 422).
 LINKED_RECORD_FIELDS: dict[str, set[str]] = {
     "Leads": {"Owner"},
+    "Media Files": {"Linked Lead"},
 }
 
 # Fields the agent should never write — security layer

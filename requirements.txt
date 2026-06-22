@@ -16,3 +16,4 @@ pyluach
 openai
 pytest
 tzdata
+groq
