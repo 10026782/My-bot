@@ -1273,7 +1273,7 @@ def _webhook_telegram_impl():
             except Exception as e:
                 logger.error(f"[Command] dispatch error: {e}", exc_info=True)
                 from core.error_reporter import report_error
-                report_error(e, context=f"command: {text[:20]}")
+                report_error(e, context="command_dispatch")
             return "", 200
 
         if idempotency.is_duplicate("telegram", sender_user_id, text):
