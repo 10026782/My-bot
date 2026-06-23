@@ -1117,7 +1117,16 @@ def _handle_telegram_media(message) -> None:
                 pass
             return
         try:
-            from media_handler import handle_voice_note, _format_media_result
+            from media_handler import handle_voice_note, _format_media_result, _classify_size, MediaResult, MediaError
+
+            voice_size = message.voice.file_size or 0
+            if _classify_size(voice_size) == "oversized":
+                logger.info(f"[Media] oversized voice note ({voice_size} bytes) from user={user_id} — skipping download")
+                bot.send_message(chat_id, _format_media_result(MediaResult(
+                    ok=False, file_size_tier="oversized",
+                    error=MediaError("FILE_TOO_LARGE", "הקובץ גדול מ-50MB. הגודל המרבי הוא 50MB.", False),
+                )))
+                return
 
             try:
                 bot.send_chat_action(chat_id, "typing")
@@ -1152,12 +1161,7 @@ def _handle_telegram_media(message) -> None:
         return
 
     try:
-        from media_handler import handle_file_upload, _format_media_result
-
-        try:
-            bot.send_chat_action(chat_id, "upload_document")
-        except Exception:
-            pass
+        from media_handler import handle_file_upload, _format_media_result, _classify_size, MediaResult, MediaError
 
         if message.content_type == "photo":
             photo = message.photo[-1]
@@ -1165,12 +1169,27 @@ def _handle_telegram_media(message) -> None:
             filename = f"{file_id}.jpg"
             mime_type = "image/jpeg"
             file_type = "image"
+            file_size = photo.file_size or 0
         else:
             doc = message.document
             file_id = doc.file_id
             filename = doc.file_name or f"{file_id}"
             mime_type = doc.mime_type or "application/octet-stream"
             file_type = "document"
+            file_size = doc.file_size or 0
+
+        if _classify_size(file_size) == "oversized":
+            logger.info(f"[Media] oversized {file_type} ({file_size} bytes) from user={user_id} — skipping download")
+            bot.send_message(chat_id, _format_media_result(MediaResult(
+                ok=False, file_size_tier="oversized",
+                error=MediaError("FILE_TOO_LARGE", "הקובץ גדול מ-50MB. הגודל המרבי הוא 50MB.", False),
+            )))
+            return
+
+        try:
+            bot.send_chat_action(chat_id, "upload_document")
+        except Exception:
+            pass
 
         file_info = bot.get_file(file_id)
         file_bytes = bot.download_file(file_info.file_path)
