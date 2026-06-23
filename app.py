@@ -98,7 +98,20 @@ if not WEBHOOK_SECRET:
 _PENDING_APPROVAL_TTL = 600
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=AGENT_TIMEOUT)
+telebot.apihelper.ENABLE_MIDDLEWARE = True  # נדרש לפני TeleBot() — אחרת middleware_handler לא נרשם
 bot    = telebot.TeleBot(TELEGRAM_TOKEN)
+
+
+@bot.middleware_handler(update_types=['message'])
+def log_all_exceptions(bot_instance, update):
+    pass
+
+
+def handle_telebot_error(exception):
+    logger.error(f"[Telebot] unhandled: {exception}", exc_info=True)
+
+
+bot.exception_handler = handle_telebot_error
 
 app = Flask(__name__)
 
