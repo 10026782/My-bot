@@ -447,3 +447,33 @@
 - **Docs עודכנו:** ROADMAP.md (נוסף C56, לא היה קיים), AI_CONTEXT.md, BUG_AUDIT_LOG.md, RELEASE_CHECKLIST.md
 - **Feature Flag:** `EMERGENCY_WINDOW` — כבוי כברירת מחדל; ללא שינוי בתיקון תיעוד זה
 - **Rollback plan:** revert — docs-only, אפס סיכון פונקציונלי
+
+### N12 — Daily Git Audit scheduler wiring
+- **תאריך:** 23/06/2026
+- **סוג:** New feature (flag off) + docs salvage
+- **Requirement:** ROADMAP.md N12; חולץ מ-2 ענפים לא ממוזגים לפני מחיקתם במהלך ניקוי ענפי `claude/*`
+- **תיאור:** `daily_git_audit.py` חובר ל-`scheduler.py` (`_job_daily_git_audit`, `GIT_AUDIT_TIME` env var, ברירת מחדל `06:45`). נוספו ל-`daily_git_audit.py`: `check_unmerged_vs_roadmap()`, `check_duplicate_schemas()`, `check_recent_commits()`, `check_cors_env_drift()`. תוקן bug ב-precedence שהיה בענף המקורי: בדק `BOSS_CURRENT_STATE.md` לפני `ROADMAP.md` — הפוך מהכרזת `ROADMAP.md` כ"מקור האמת היחיד, כל מסמך תכנון אחר הוא ARCHIVE". `_CANONICAL_DOC_PRIORITY` סודר מחדש: `ROADMAP.md` ראשון.
+- **Commit:** `c26c5e1`
+- **PR:** #108 — **מוזג ל-`main`**
+- **Review על ידי:** הבעלים
+- **Deploy תאריך:** N/A — דגל כבוי, אין שינוי התנהגות בפרודקשן
+- **Verified בפרודקשן:** N/A — `GIT_AUDIT_SCHEDULER=off`
+- **Verification ראיה:** `py_compile` נקי; פונקציות הבדיקה הורצו ידנית מול הריפו והחזירו ממצאים תקינים (כולל גילוי אמיתי של ענף תקוע אחד); `smoke_tests.py` ללא רגרסיה (אותם 2 כשלים תלויי-סביבה כמו על `main`)
+- **Docs עודכנו:** ROADMAP.md (N12 חדש), AI_CONTEXT.md, CHANGELOG.md
+- **Feature Flag:** `GIT_AUDIT_SCHEDULER` — כבוי כברירת מחדל
+- **Rollback plan:** revert PR #108 — דגל כבוי, אפס סיכון פונקציונלי מיידי
+
+### Docs salvage — `APPROVAL_SYSTEM_AUDIT_AND_C53_SPEC.md`
+- **תאריך:** 23/06/2026
+- **סוג:** Docs-only, commit ישיר ל-`main` (לא PR — אישור משתמש מפורש)
+- **Requirement:** נמצא תוך כדי ניקוי ענפי `claude/*` — מסמך audit ארכיטקטוני (257 שורות, ללא קוד) שהתקיים רק בענף `claude/spec-c52-implementation-uqmu1g`, שלא מוזג מעולם
+- **תיאור:** מסמך audit מלא של 4 מנגנוני approval + 2 kill switches, risk matrix, gap analysis, ומפרט test harness ל-C53 (test categories A-J). נכתב 17/06/2026 מול הקוד של אותו יום. נוסף הערת provenance בראש המסמך + הערה ב-`CLAUDE.md` (מבדיל מ-`Approval_Policy_Spec.md` החסר — מסמך אחר)
+- **Commit:** `783a680`
+- **PR:** ללא — commit ישיר ל-`main`
+- **Review על ידי:** הבעלים (אישר במפורש "לשמור כקובץ ב-main, לא PR")
+- **Deploy תאריך:** N/A — docs-only
+- **Verified בפרודקשן:** N/A
+- **Verification ראיה:** תוכן הקובץ זהה ל-blob המקורי בענף שנמחק (`git show <branch>:<path>` לפני המחיקה); `git diff --stat` אומת diff מוגבל ל-2 קבצים (`APPROVAL_SYSTEM_AUDIT_AND_C53_SPEC.md` חדש + שורה אחת ב-`CLAUDE.md`)
+- **Docs עודכנו:** זה עצמו + `CLAUDE.md`
+- **Feature Flag:** אין — docs-only
+- **Rollback plan:** revert commit `783a680` — docs-only, אפס סיכון
