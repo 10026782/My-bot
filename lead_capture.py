@@ -84,6 +84,21 @@ def _score_inbound_message(message: str, identity=None) -> tuple[int, str, list[
     return score, tier, why_score
 
 
+def tier_from_score(score: int) -> str:
+    """
+    Public export — imported by lead_qualifier.py.
+    Thresholds: ULTRA_HOT≥70, HOT≥50, WARM≥25, COLD<25.
+    Aligned with _score_inbound_message tier logic above.
+    """
+    if score >= 70:
+        return "ULTRA_HOT"
+    if score >= 50:
+        return "HOT"
+    if score >= 25:
+        return "WARM"
+    return "COLD"
+
+
 def capture_inbound_lead(identity, message: str) -> None:
     """
     Called from run_agent after resolve_identity, only for identity.role == Role.LEAD.
