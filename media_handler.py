@@ -89,7 +89,7 @@ def _normalize_for_prefix(text: str) -> str:
     text = re.sub(f"[{_BIDI_CONTROL_CHARS}]", "", text)
     PREFIX_WORDS = ["זיכרון", "משימה", "ליד", "רעיון", "עסקה"]
     for word in PREFIX_WORDS:
-        text = re.sub(rf'^{word}[,،]\s*', f'{word}: ', text)
+        text = re.sub(rf'^{word}[,،.。:\s]\s*', f'{word}: ', text)
     return text.strip()
 
 
