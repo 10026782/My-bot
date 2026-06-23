@@ -184,6 +184,8 @@ def register_update_command(bot, get_identity):
                 "⚠️ הטקסט התקבל אבל לא נשמר. בדוק logs.",
             )
 
+    logger.info("[/update] handler registered successfully")
+
 
 # ── שמירה — דרך gateway בלבד ────────────────────────────────────
 

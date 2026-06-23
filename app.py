@@ -462,8 +462,9 @@ def cmd_coins(msg):
 # ── C20: /update command ─────────────────────────────────────────
 try:
     from cmd_update import register_update_command
-    register_update_command(bot, resolve_identity)
+    result = register_update_command(bot, resolve_identity)
     logger.info("[C20] /update command registered")
+    logger.info(f"[app] register_update_command returned: {result}")
 except Exception as _e:
     logger.warning(f"[C20] /update registration failed: {_e}")
 
