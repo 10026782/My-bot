@@ -56,6 +56,16 @@ _NO_TOOL_CLAIMS: list[tuple[re.Pattern, frozenset[str]]] = [
         ),
         frozenset({"airtable_add", "airtable_update", "airtable_get", "search_lead"}),
     ),
+    # Agent claims it can/did search or read a file in Drive (BUG-014: "אני
+    # יכול לחפש בDrive" was said with no tool call at all)
+    (
+        re.compile(
+            r"(אני יכול לחפש (ב-?)?Drive|חיפשתי (ב-?)?Drive|מצאתי (את ה)?קובץ|הקובץ נמצא|"
+            r"קראתי (את ה)?קובץ|פתחתי (את ה)?קובץ)",
+            re.UNICODE,
+        ),
+        frozenset({"search_drive", "read_drive_file"}),
+    ),
 ]
 
 # ══════════════════════════════════════════════════
@@ -531,6 +541,27 @@ def _run_tests() -> bool:
     print(f"{'✅' if ok8 else '❌'} agent claims Airtable record created, real tool result present → passed through")
     if not ok8:
         print(f"     got: {with_tool_airtable!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    no_tool_drive = sanitize_agent_response("אני יכול לחפש בDrive ולמצוא את הקובץ.", [])
+    ok9 = no_tool_drive == _NO_TOOL_EVIDENCE_FALLBACK
+    print(f"{'✅' if ok9 else '❌'} agent claims Drive search (BUG-014) with no search_drive result → blocked")
+    if not ok9:
+        print(f"     got: {no_tool_drive!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    with_tool_drive = sanitize_agent_response(
+        "מצאתי את הקובץ ב-Drive.",
+        [{"tool": "search_drive", "content": "✅ נמצאו 1 קבצים | חוזה.pdf", "ok": True}],
+    )
+    ok10 = with_tool_drive not in (_NO_TOOL_EVIDENCE_FALLBACK, _SAFE_FALLBACK)
+    print(f"{'✅' if ok10 else '❌'} agent claims Drive file found, real search_drive result present → passed through")
+    if not ok10:
+        print(f"     got: {with_tool_drive!r}")
         failed += 1
     else:
         passed += 1
