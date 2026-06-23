@@ -347,7 +347,7 @@ def handle_voice_note(
         _log_unhandled_voice_note(transcript, user_id, source)
         return MediaResult(
             ok=True, raw_transcript=raw_transcript, normalized_transcript=transcript,
-            message="📝 תומלל. לא בוצעה פעולה.",
+            message=f"📝 תומלל:\n{transcript}\n\nלא בוצעה פעולה.",
         )
 
     word_count = len(transcript.split())
@@ -517,9 +517,9 @@ if __name__ == "__main__":
             audio_bytes=b"audio-bytes", mime_type="audio/ogg", telegram_file_id="v1",
             user_id="u1", domain="general", owner_chat_id="123",
         )
-        assert no_action.ok and no_action.message == "📝 תומלל. לא בוצעה פעולה."
+        assert no_action.ok and no_action.message == "📝 תומלל:\nשיחה רגילה בלי שום הוראה\n\nלא בוצעה פעולה."
         mock_log.assert_called_once()
-    print("✅ no action prefix → transcript only, logged for review, no memory/approval")
+    print("✅ no action prefix → transcript shown in message, logged for review, no memory/approval")
 
     with patch.object(_this, "transcribe", return_value=_stt("משימה: להתקשר ללקוח מחר")), \
          patch.object(_this, "_save_transcript_to_memory", return_value=True) as mock_save:
@@ -567,7 +567,7 @@ if __name__ == "__main__":
             audio_bytes=b"audio-bytes", mime_type="audio/ogg", telegram_file_id="v5",
             user_id="u1", domain="general", owner_chat_id="123",
         )
-        assert soft_verb_only.ok and soft_verb_only.message == "📝 תומלל. לא בוצעה פעולה."
+        assert soft_verb_only.ok and soft_verb_only.message == "📝 תומלל:\nתזכיר לי לקבוע פגישה מחר\n\nלא בוצעה פעולה."
         mock_log.assert_called_once()
         assert not mock_save.called and not mock_approve.called
     print("✅ soft verb alone (no PREFIX_HARD, no risk word) → no action, not saved to memory")
