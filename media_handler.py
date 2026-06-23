@@ -316,8 +316,14 @@ def handle_voice_note(
     raw_transcript = stt_result.raw_transcript
     transcript = stt_result.normalized_transcript
 
+    action_requested = _has_action(transcript)
+    logger.info(f"[voice] transcript repr: {repr(transcript[:50])}")
+    logger.info(f"[voice] action_requested: {action_requested}")
+    logger.info(f"[voice] PREFIX_HARD matches: {[p for p in PREFIX_HARD if transcript.startswith(p)]}")
+    logger.info(f"[voice] PREFIX_SOFT matches: {[p for p in PREFIX_SOFT if p in transcript]}")
+
     # שלב 3 — אין פעולה: רק תמלול, ללא Drive, ללא זיכרון.
-    if not _has_action(transcript):
+    if not action_requested:
         _log_unhandled_voice_note(transcript, user_id, source)
         return MediaResult(
             ok=True, raw_transcript=raw_transcript, normalized_transcript=transcript,
