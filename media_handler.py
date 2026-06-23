@@ -43,7 +43,6 @@ PREFIX_HARD = ("משימה:", "ליד:", "זיכרון:", "רעיון:", "עסק
 RISK_WORDS = (
     "כסף", "חוזה", "התחייבות", "מחיקה", "שינוי סטטוס", "שלח ללקוח",
 )
-SHORT_TRANSCRIPT_WORD_LIMIT = 30
 
 
 @dataclass
@@ -159,6 +158,33 @@ def _save_transcript_to_memory(transcript: str, domain: str, source: str) -> boo
         logger.info("[media_handler] saved transcript to Business Memory id=%s", record.get("id"))
         return True
     logger.warning("[media_handler] failed to save transcript to Business Memory")
+    return False
+
+
+# שדה "Status" בטבלת Media Files נוסף ידנית ב-Airtable (כמו שאר השדות בטבלה הזו —
+# ראה הערת MediaFileFields). אין ניתוב לפי סוג ה-prefix שתאם (משימה/ליד/זיכרון/...) —
+# זה F17, לא כאן: כל action_requested נשמר כ-pending גנרי ל-Voice Inbox.
+_MEDIA_FILES_STATUS_FIELD = "Status"
+
+
+def _save_transcript_to_media_files(transcript: str, domain: str, source: str, status: str = "pending") -> bool:
+    """שומר תמלול קולי ל-Voice Inbox (טבלת Media Files, סטטוס pending) — בלי ניתוב לפי prefix."""
+    from tools.airtable_gateway import airtable_create
+    from airtable_schema import Tables, MediaFileFields as MFF
+
+    fields = {
+        MFF.NAME: f"הודעה קולית — {datetime.now(ZoneInfo('Asia/Jerusalem')).strftime('%d/%m/%Y')}",
+        MFF.FILE_TYPE: "audio",
+        MFF.DOMAIN: domain,
+        MFF.SOURCE: source,
+        MFF.NORMALIZED_TRANSCRIPT: transcript,
+        _MEDIA_FILES_STATUS_FIELD: status,
+    }
+    record = airtable_create(Tables.MEDIA_FILES, fields, source=f"media_handler:{source}")
+    if record:
+        logger.info("[media_handler] saved transcript to Voice Inbox (Media Files) id=%s status=%s", record.get("id"), status)
+        return True
+    logger.warning("[media_handler] failed to save transcript to Voice Inbox (Media Files)")
     return False
 
 
@@ -350,16 +376,13 @@ def handle_voice_note(
             message=f"📝 תומלל:\n{transcript}\n\nלא בוצעה פעולה.",
         )
 
-    word_count = len(transcript.split())
-    if word_count <= SHORT_TRANSCRIPT_WORD_LIMIT:
-        saved = _save_transcript_to_memory(transcript, domain, source)
-        return MediaResult(
-            ok=saved, raw_transcript=raw_transcript, normalized_transcript=transcript, saved_to_memory=saved,
-            message=f"🧠 נשמר בזיכרון:\n{transcript}" if saved else "❌ שמירה ל-Business Memory נכשלה",
-        )
-
-    ack = _send_voice_approval_request(transcript, domain, source, owner_chat_id, reason="טקסט ארוך")
-    return MediaResult(ok=True, raw_transcript=raw_transcript, normalized_transcript=transcript, message=ack)
+    # שלב 4 — action_requested=True, ללא מילת סיכון: Voice Inbox (pending) בלבד.
+    # אין ניתוב לפי איזה prefix תאם (משימה/ליד/זיכרון/...) — זה F17, לא כאן.
+    saved = _save_transcript_to_media_files(transcript, domain, source, status="pending")
+    return MediaResult(
+        ok=saved, raw_transcript=raw_transcript, normalized_transcript=transcript, saved_to_memory=saved,
+        message=f"📥 נשמר ל-Voice Inbox:\n{transcript}" if saved else "❌ שמירה ל-Voice Inbox נכשלה",
+    )
 
 
 def handle_file_upload(
@@ -522,19 +545,19 @@ if __name__ == "__main__":
     print("✅ no action prefix → transcript shown in message, logged for review, no memory/approval")
 
     with patch.object(_this, "transcribe", return_value=_stt("משימה: להתקשר ללקוח מחר")), \
-         patch.object(_this, "_save_transcript_to_memory", return_value=True) as mock_save:
+         patch.object(_this, "_save_transcript_to_media_files", return_value=True) as mock_save:
         short_action = handle_voice_note(
             audio_bytes=b"audio-bytes", mime_type="audio/ogg", telegram_file_id="v2",
             user_id="u1", domain="general", owner_chat_id="123",
         )
         assert short_action.ok and short_action.saved_to_memory
-        assert "נשמר בזיכרון" in short_action.message
-        mock_save.assert_called_once_with("משימה: להתקשר ללקוח מחר", "general", "telegram")
-    print("✅ hard prefix + ≤30 words, no risk word → saved to Business Memory directly")
+        assert "נשמר ל-Voice Inbox" in short_action.message
+        mock_save.assert_called_once_with("משימה: להתקשר ללקוח מחר", "general", "telegram", status="pending")
+    print("✅ hard prefix, no risk word → saved to Voice Inbox (pending), not Business Memory directly")
 
     with patch.object(_this, "transcribe", return_value=_stt("תשלח לו את החוזה החדש")), \
          patch.object(_this, "_send_voice_approval_request", return_value="📨 ack") as mock_approve, \
-         patch.object(_this, "_save_transcript_to_memory") as mock_save:
+         patch.object(_this, "_save_transcript_to_media_files") as mock_save:
         risky = handle_voice_note(
             audio_bytes=b"audio-bytes", mime_type="audio/ogg", telegram_file_id="v3",
             user_id="u1", domain="general", owner_chat_id="123",
@@ -546,16 +569,16 @@ if __name__ == "__main__":
 
     long_text = "משימה: " + " ".join(["דבר"] * 35)
     with patch.object(_this, "transcribe", return_value=_stt(long_text)), \
-         patch.object(_this, "_send_voice_approval_request", return_value="📨 ack") as mock_approve, \
-         patch.object(_this, "_save_transcript_to_memory") as mock_save:
+         patch.object(_this, "_send_voice_approval_request") as mock_approve, \
+         patch.object(_this, "_save_transcript_to_media_files", return_value=True) as mock_save:
         long_action = handle_voice_note(
             audio_bytes=b"audio-bytes", mime_type="audio/ogg", telegram_file_id="v4",
             user_id="u1", domain="general", owner_chat_id="123",
         )
-        assert long_action.ok and long_action.message == "📨 ack"
-        mock_approve.assert_called_once_with(long_text, "general", "telegram", "123", reason="טקסט ארוך")
-        assert not mock_save.called
-    print("✅ action + >30 words, no risk word → approval gate (preview), no direct save")
+        assert long_action.ok and "נשמר ל-Voice Inbox" in long_action.message
+        mock_save.assert_called_once_with(long_text, "general", "telegram", status="pending")
+        assert not mock_approve.called
+    print("✅ action + >30 words, no risk word → Voice Inbox (pending) too, no approval gate, no length branching")
 
     # PREFIX_HARD בלבד — פעלי פעולה רכים ("תזכיר"/"תפתח"/"תשלח"/"תקבע") לא מפעילים
     # action_requested בהיעדר prefix מפורש וללא מילת סיכון.
