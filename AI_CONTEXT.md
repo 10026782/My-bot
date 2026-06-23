@@ -1,8 +1,8 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-06-22
-**עודכן על ידי:** Claude Code — session update (git-verified against `origin/main` HEAD `24237e6`)
+**עודכן:** 2026-06-23
+**עודכן על ידי:** Claude Code — session update (git-verified against `origin/main` HEAD `d1c48a1`)
 
 > מקור אמת לתוכן הזה: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו — לא נסמכתי עליו.
 
@@ -16,7 +16,11 @@
 - Screen Filter Gateway (C53) ו-Finance Pulse (O4) מוזגו ל-main ופעילים בקוד; `GET /api/finance/pulse` מחובר ל-`_build_formula()` עם `entity="Payment"` (`N11`, PR #77 — תועד כ-PLANNED ב-ROADMAP בטעות עד הסשן הזה, תוקן). סיווג overdue/pending לפי תאריך נשאר ב-Python (לא ב-`raw_formula`) — החלטת עיצוב, לא bug.
 - **N07 (Schema Governance) הושלם** — `tools/schema_governance.py` (PR #101) קיים ב-main, standalone read-only drift detector מול Airtable Metadata API; עדיין לא רץ אוטומטית (אין CI בריפו), הרצה היא manual.
 - **N08 (CI/CD) הושלם** (PR #103, `abf4835`) — `.github/workflows/ci.yml` רץ על כל PR. **N09 (Monitoring/Alerting) הושלם** (PR #104, `4ac6d24`) — `core/error_reporter.py` שולח התראות Telegram על שגיאות פרודקשן.
-- **C56 (Approval Policy: Emergency Window + OTP + Policy Gate) מוזג ל-`main`** — `BUG_AUDIT_LOG.md`/`CHANGE_CONTROL_LOG.md` תיעדו "Merged: לא" וה-ROADMAP לא הזכיר את הפיצ'ר בכלל, אבל `gh pr view 69` מאשר `state: MERGED`, `mergedAt: 2026-06-17T18:56:00Z`, `mergeCommit: 4e933b0`; `git merge-base --is-ancestor 4e933b0 main` מאשר שזה אב-קדמון של `main` בפועל. תוקן בשלושת המסמכים. `EMERGENCY_WINDOW` flag נשאר כבוי — אין שינוי התנהגות בפרודקשן.
+- **C56 (Approval Policy: Emergency Window + OTP + Policy Gate) מוזג ל-`main`** — `BUG_AUDIT_LOG.md`/`CHANGE_CONTROL_LOG.md` תיעדו "Merged: לא" וה-ROADMAP לא הזכיר את הפיצ'ר בכלל, אבל `gh pr view 69` מאשר `state: MERGED`, `mergedAt: 2026-06-17T18:56:00Z`, `mergeCommit: 4e933b0`; `git merge-base --is-ancestor 4e933b0 main` מאשר שזה אב-קדמון של `main` בפועל. תוקן בשלושת המסמכים (PR #112). `EMERGENCY_WINDOW` flag נשאר כבוי — אין שינוי התנהגות בפרודקשן.
+- **ניקוי ענפי `claude/*` ישנים (סשן 23/06/2026)** — audit מלא של 37 ענפים (29+8) לא ממוזגים מול `main`, לפי ancestry+diff+content (לא תאריך/שם בלבד). **34 נמחקו**: ממוזגים בפועל (אב-קדמון של `main`), זהים-תוכן (אפס diff מהותי), orphan history, או collision שנפתר כבר בעבר לטובת גרסה אחרת (למשל `claude/claude-md-docs-u8kbsc` — קונפליקט classifier שנפתר כבר לטובת `codex/contact-import-classifier`). שני ענפים הכילו עבודה אמיתית שחולצה לפני המחיקה: **N12** למטה (`claude/lucid-franklin-0os9ma`+`claude/tender-hypatia-h5n0d3`, PR #108) ותיקון C56 לעיל (`claude/meta-whatsapp-phase-1-q6pp3e`, PR #112).
+- **`APPROVAL_SYSTEM_AUDIT_AND_C53_SPEC.md` שוחזר** — מסמך audit ארכיטקטוני של מערכת ה-approval (4 מנגנונים + 2 kill switches, risk matrix, מפרט test harness ל-C53), 257 שורות, ללא קוד, מענף `claude/spec-c52-implementation-uqmu1g` שלא מוזג מעולם. נכתב 17/06/2026, נשמר ישירות ל-`main` (commit `783a680`, ללא PR — אישור משתמש מפורש) לפני שהענף נמחק. **טענות ה-file:line בו לא אומתו מחדש** מול הקוד הנוכחי.
+- **BUG-014 תוקן** (PR #115) — `core/anti_hallucination.py`'s `_NO_TOOL_CLAIMS` (שער A32) לא כלל Drive בכלל; BOSS יכול היה להגיד "אני יכול לחפש ב-Drive"/"מצאתי קובץ" בלי שום קריאת `search_drive`/`read_drive_file`. נוספה קטגוריה רביעית ל-gate; 33/33 self-tests עוברים (היה 31/31).
+- **תיקון תיעוד ל-BUG-011** (PR #116) — `BUG_AUDIT_LOG.md` תיעד "Merged: לא עדיין" עבור PR #110, אבל `gh pr view 110` מאשר `MERGED`, `mergeCommit: a4c8f27`, ו-`git merge-base --is-ancestor` מאשר אב-קדמון בפועל. תוקן, ללא שינוי קוד.
 
 ## 2. Current System State
 
@@ -24,12 +28,20 @@
 Identity/Router/Context/Agent core; `tool_registry`+`dispatcher` enforcement; Approval flow (3-state, fail-closed, `verify_execution()` נבדק לפני דיווח הצלחה — תוקן ב-PR #80); Airtable single-write-path gateway (`tools/airtable_gateway.py`); Daily Digest; Payment Reminder; Twilio signature validation; TMA auth+CORS; Screen Filter Gateway (`SCREEN_CONFIGS`); Finance Pulse (קורא Payments/Expenses חיים); A32 anti-hallucination evidence gate (חוזק ב-PR #80 — בודק tool identity+ok, לא keyword guessing).
 
 **חלקי (Partial — קוד קיים, לא מאומת/לא פעיל):**
-Lead Scoring (`LEAD_SCORING=off`), Lead Memory (`LEAD_MEMORY=off`), Followup Automation (`FOLLOWUP_AUTOMATION=off`) — שרשרת תלויה אחת בשנייה, כולן code-complete. WhatsApp outbound = honest stub (חסום ב-Meta Cloud API). Google integrations (OAuth נדרש). Approval Policy Emergency Window/OTP — code-complete, `EMERGENCY_WINDOW=off`. F16 Media Layer (כל 7 batches, `voice_stt_adapter.py`/`drive_adapter.py`/`media_gateway.py`/`media_handler.py`/`app.py` hooks/`tma_api.py` endpoint/`airtable_schema.py`) — code-complete **ומחובר ל-pipeline החי**, אך `FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD` כבויים כברירת מחדל — לא אומת בתעבורה אמיתית בפרודקשן.
+Lead Scoring (`LEAD_SCORING=off`), Lead Memory (`LEAD_MEMORY=off`), Followup Automation (`FOLLOWUP_AUTOMATION=off`) — שרשרת תלויה אחת בשנייה, כולן code-complete. WhatsApp outbound = honest stub (חסום ב-Meta Cloud API). Google integrations (OAuth נדרש). Approval Policy Emergency Window/OTP — code-complete, `EMERGENCY_WINDOW=off`. F16 Media Layer (כל 7 batches, `voice_stt_adapter.py`/`drive_adapter.py`/`media_gateway.py`/`media_handler.py`/`app.py` hooks/`tma_api.py` endpoint/`airtable_schema.py`) — code-complete **ומחובר ל-pipeline החי**, אך `FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD` כבויים כברירת מחדל — לא אומת בתעבורה אמיתית בפרודקשן. N12 Daily Git Audit scheduler job — code-complete ומחובר ל-`scheduler.py`, `GIT_AUDIT_SCHEDULER=off` (נשאר manual-only).
 
 **חסום (Blocked):**
 F05 WhatsApp Production — מחכה לאישור Meta. TMA: Activity Feed / Assets / Personal Mode — stub כן (`coming_soon`).
 
 ## 3. Completed Since Last Update
+
+**סשן 23/06/2026 — ניקוי ענפי `claude/*` + 4 PRs:**
+- **PR #108 (`claude/git-audit-roadmap-drift`, merge `c26c5e1`):** N12 — `daily_git_audit.py` חובר ל-`scheduler.py` (flag `GIT_AUDIT_SCHEDULER`, כבוי כברירת מחדל), נוספו `check_unmerged_vs_roadmap()`/`check_duplicate_schemas()`/`check_recent_commits()`/`check_cors_env_drift()`. חולץ מ-2 ענפים לא ממוזגים (`claude/lucid-franklin-0os9ma`, `claude/tender-hypatia-h5n0d3`) לפני מחיקתם; תוקן בדרך גם bug ב-precedence (הקוד המקורי בדק `BOSS_CURRENT_STATE.md` לפני `ROADMAP.md` — הפוך מהכרזת `ROADMAP.md` כמקור האמת היחיד).
+- **PR #112 (`claude/approval-policy-docs-correction`, merge `a226e9d`):** ראו C56 לעיל — תיקון תיעוד PR #69.
+- **commit `783a680` (ישיר ל-`main`, ללא PR — אישור משתמש מפורש):** שחזור `APPROVAL_SYSTEM_AUDIT_AND_C53_SPEC.md` מענף `claude/spec-c52-implementation-uqmu1g` לפני מחיקתו.
+- **PR #115 (`claude/bug-014-drive-evidence-gate`, merge `cf0ded7`):** BUG-014 — Drive נוסף ל-NO-TOOL-EVIDENCE gate (`core/anti_hallucination.py`).
+- **PR #116 (`claude/bug-011-docs-correction`, merge `d1c48a1`):** תיקון תיעוד BUG-011 (PR #110 תועד "לא ממוזג" בטעות).
+- **ניקוי ענפים:** 34 ענפי `claude/*` נמחקו (מתוך audit של 37) — ראו `ROADMAP.md` ל-summary, ללא קוד שאבד שלא חולץ קודם.
 
 **PR #96/#97 (22/06/2026) — `claude/f16-media-layer`, מוזגים ל-`main` כ-`8f9c648`:**
 - F16 Media Layer, Batches א/ב/ג. ⚠️ ID collision כפול: הספק החיצוני קרא לפיצ'ר "F12" (תפוס — Model Provider Adapter) ואז "F09" (תפוס — Lead Qualifier Wire-up); תוקן ל-F16 ב-ROADMAP.md, באותו דפוס שתועד עבור C20/C21/F14/F15.

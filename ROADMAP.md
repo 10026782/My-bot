@@ -1,6 +1,16 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 23/06/2026 — main = `29b009e` (אומת). **C56 (Approval Policy: Emergency Window + OTP + Policy Gate) — תועד כ"לא ממוזג" ב-`BUG_AUDIT_LOG.md`/`CHANGE_CONTROL_LOG.md` ולא היה ב-ROADMAP בכלל, אבל בפועל מוזג ל-`main` כבר ב-17/06/2026** (PR #69, merge commit `4e933b0`, מאומת דרך `gh pr view 69` + `git merge-base --is-ancestor`) — נוסף ל-ROADMAP, תוקן בשני המסמכים האחרים. דגל `EMERGENCY_WINDOW` נשאר כבוי — אין שינוי התנהגות בפרודקשן.
+עודכן: 23/06/2026 (מאוחר) — main = `d1c48a1` (אומת). **ניקוי ענפי `claude/*` ישנים** —
+בוצע audit מלא של 29+8 ענפים לא ממוזגים מול `main` (ancestry/diff/content, לא רק
+תאריך/שם): 34 ענפים נמחקו בפועל (ממוזגים בפועל / זהים תוכן ל-main / orphan history /
+היסטוריית collision שנפתרה כבר בעבר לטובת גרסה אחרת). שני ענפים הכילו עבודה אמיתית
+שחולצה לפני המחיקה — **N12** (למטה) ותיקון תיעוד C56 (PR #112). מסמך audit ארכיטקטוני
+(`APPROVAL_SYSTEM_AUDIT_AND_C53_SPEC.md`, 257 שורות, ללא קוד) שוחזר ונשמר ישירות ל-main
+(commit `783a680`) לפני שהענף המקורי נמחק. בנוסף: **BUG-014** (`core/anti_hallucination.py`
+— Drive נוסף ל-NO-TOOL-EVIDENCE gate, PR #115) ו-**תיקון תיעוד ל-BUG-011** (תועד "לא
+ממוזג" בטעות, PR #110 מוזג בפועל ב-`a4c8f27`, PR #116).
+
+עודכן (קודם): 23/06/2026 — main = `29b009e` (אומת). **C56 (Approval Policy: Emergency Window + OTP + Policy Gate) — תועד כ"לא ממוזג" ב-`BUG_AUDIT_LOG.md`/`CHANGE_CONTROL_LOG.md` ולא היה ב-ROADMAP בכלל, אבל בפועל מוזג ל-`main` כבר ב-17/06/2026** (PR #69, merge commit `4e933b0`, מאומת דרך `gh pr view 69` + `git merge-base --is-ancestor`) — נוסף ל-ROADMAP, תוקן בשני המסמכים האחרים. דגל `EMERGENCY_WINDOW` נשאר כבוי — אין שינוי התנהגות בפרודקשן.
 
 עודכן (קודם): 22/06/2026 — main = `24237e6` (אומת, PR #96/#97/#98/#99/#100/#101/#103/#104 ממוזגים). **F16 (Media Layer) הושלם** — כל שבעת ה-batches (א-ז) קיימים ומחוברים ל-pipeline החי, מאחורי דגלים כבויים כברירת מחדל (`FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD`). ⚠️ ה-spec החיצוני קרא לפיצ'ר "F12" ואז "F09" — שני ה-IDs תפוסים (F12=Model Provider Adapter, F09=Lead Qualifier Wire-up); הוקצה F16 כדי למנוע התנגשות בסטייל C20/C21/F14/F15. **N07 (Schema Governance) הושלם** — `tools/schema_governance.py` (PR #101), standalone read-only drift detector, ראו פירוט למטה. **N08 (CI/CD) ו-N09 (Monitoring/Alerting) הושלמו** (PR #103/#104) — תוקנו כ-PLANNED בטעות, ראו פירוט למטה. **N11 (Finance Pulse wiring) התגלה כממוזג מ-PR #77 קודם** — תועד כ-PLANNED בטעות, תוקן.
 
@@ -283,6 +293,22 @@ income לפי תאריך מתבצע ב-Python על תוצאת ה-formula (status
 (JSON, נדרש שדה חדש בסכמה) — ראו הערה ב-`tma_api.py` ליד `SCREEN_CONFIGS`.
 **מצב נוכחי:** ממוזג ל-main (`tma_api.py`/`airtable_schema.py`), לפני הסשן הנוכחי —
 תועד כ-PLANNED ב-ROADMAP בטעות; תוקן כאן.
+
+### N12 — Daily Git Audit scheduler wiring ✅ הושלם, דגל כבוי (PR #108, `c26c5e1`)
+**מה:** `daily_git_audit.py` (קיים מ-GOV-02) חוּבר ל-`scheduler.py` (`_job_daily_git_audit`,
+`schedule.every().day.at(git_audit_time)`, `GIT_AUDIT_TIME` env var, ברירת מחדל `06:45`
+כדי לא להתנגש עם digest ה-game ב-07:00/digest רגיל ב-07:30). נוספו ל-`daily_git_audit.py`
+עצמו: `check_unmerged_vs_roadmap()` (משווה ענפים לא ממוזגים מול טענות ✅/DONE ב-ROADMAP.md —
+**ROADMAP.md ראשון בעדיפות**, לא BOSS_CURRENT_STATE.md, כדי לא לסתור את הכרזת הקובץ
+עצמו כ"מקור האמת היחיד"), `check_duplicate_schemas()` (שמות tool כפולים ב-
+`tools/schemas.py`/`tool_registry.py`), `check_recent_commits()`, `check_cors_env_drift()`
+(`tma_api.py` מול `.env.example`).
+**Feature Flag:** `GIT_AUDIT_SCHEDULER` — כבוי כברירת מחדל (נשאר manual-only, תואם
+ל-docstring הקיים של `daily_git_audit.py`).
+**מניע:** נמצא תוך כדי ניקוי ענפי `claude/*` ישנים — `claude/lucid-franklin-0os9ma`
+ו-`claude/tender-hypatia-h5n0d3` הכילו את המימוש הזה אבל לא מוזגו מעולם; חולץ ותוקן
+(ה-bug ב-precedence) לפני שהענפים נמחקו.
+**מצב נוכחי:** ממוזג ל-main, דגל כבוי — אין שינוי התנהגות בפרודקשן.
 
 ### F05a — Meta WhatsApp Phase 1 (Inbound, ללא תעבורת פרודקשן)
 **מה:** `/webhooks/meta/whatsapp` (GET verify + POST inbound) — נתיב נפרד מ-Twilio.
