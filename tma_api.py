@@ -1663,6 +1663,9 @@ def finance_pulse(identity):
     view_cfg = screen["views"][view_q]
 
     domain_q = request.args.get("domain", "")
+    domain_q, err = _safe_formula_param(domain_q, "domain")
+    if err:
+        return err
 
     # N11 fix: overdue = לא שולם + תאריך עבר — לפי תאריך בלבד, לא לפי
     # status="overdue" (שדה שדורש עדכון ידני ולא אמין).
@@ -1714,7 +1717,7 @@ def finance_pulse(identity):
         d_str  = (f.get(PaymentFields.DATE, "") or "")[:10]
 
         # cancelled כבר סונן ב-formula (view=active) — double-check בטיחות
-        if status == PaymentStatus.CANCELLED:
+        if view_q != "all" and status == PaymentStatus.CANCELLED:
             continue
 
         if status == PaymentStatus.RECEIVED:
