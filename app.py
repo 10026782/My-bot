@@ -1248,8 +1248,7 @@ def _webhook_telegram_impl():
             if data.startswith(("approve:", "reject:")):
                 _handle_approval_callback(call)
             else:
-                # כל callback אחר — דרך ה-bot handlers הרשומים (@bot.callback_query_handler)
-                bot.process_new_updates([update])
+                bot.answer_callback_query(call.id, "לא מזוהה")
         except Exception as e:
             logger.error(f"[Telegram] callback error: {e}", exc_info=True)
         return "", 200
