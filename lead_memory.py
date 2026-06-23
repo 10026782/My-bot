@@ -19,6 +19,27 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
+
+def _write_success(result) -> bool:
+    """airtable_add/airtable_update return the C53-A structured dict
+    ({ok, tool, external_id, evidence, user_message}) now, not a "✅"-prefixed
+    string — keep both shapes working."""
+    if isinstance(result, dict):
+        return bool(result.get("ok") or result.get("id") or result.get("external_id"))
+    return "✅" in (result or "")
+
+
+def _extract_record_id(result) -> str:
+    if isinstance(result, dict):
+        return (
+            result.get("id")
+            or result.get("external_id")
+            or (result.get("evidence") or {}).get("record_id", "")
+            or ""
+        )
+    m = re.search(r'rec\w+', result or "")
+    return m.group(0) if m else ""
+
 SAVE_EVERY = 3
 
 
@@ -165,13 +186,13 @@ class LeadMemory:
 
             if state.record_id:
                 result = airtable_update(Tables.LEADS, state.record_id, fields)
-                return "✅" in result
+                return _write_success(result)
             else:
                 result = airtable_add(Tables.LEADS, fields)
-                if "✅" in result:
-                    m = re.search(r'rec\w+', result)
-                    if m:
-                        state.record_id = m.group(0)
+                if _write_success(result):
+                    rec_id = _extract_record_id(result)
+                    if rec_id:
+                        state.record_id = rec_id
                     return True
                 return False
         except ImportError:
