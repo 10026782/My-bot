@@ -1,6 +1,8 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 23/06/2026 (מאוחר) — main = `d1c48a1` (אומת). **ניקוי ענפי `claude/*` ישנים** —
+עודכן: 23/06/2026 (מאוחר יותר) — main = `f737f61` (אומת). **F13 (TenantConfig + Provider Interfaces) סומן במפורש כ-DEAD CODE** — אזהרת "אין לחבר" הוספה מיד אחרי כותרת הסעיף (קוד קיים, אפס imports מקוד חי, כפילות עם `TenantConfig` ב-`tenant_provisioner.py`, הכרעת F12-מול-F13 עדיין לא בוצעה). ראו SPEC-C / PR בענף `claude/fix-f13-status-docs`.
+
+עודכן (קודם): 23/06/2026 (מאוחר) — main = `d1c48a1` (אומת). **ניקוי ענפי `claude/*` ישנים** —
 בוצע audit מלא של 29+8 ענפים לא ממוזגים מול `main` (ancestry/diff/content, לא רק
 תאריך/שם): 34 ענפים נמחקו בפועל (ממוזגים בפועל / זהים תוכן ל-main / orphan history /
 היסטוריית collision שנפתרה כבר בעבר לטובת גרסה אחרת). שני ענפים הכילו עבודה אמיתית
@@ -446,6 +448,13 @@ Piggyback trigger: כשנוגעים ב-`crm.py` לסיבה אחרת (F14 או le
 קבצים לעתיד: `providers/` (חדש), `llm_fallback.py` (migrate/replace).
 
 ### F13 — TenantConfig + Provider Interfaces
+⚠️ **STATUS: DEAD CODE — DO NOT WIRE**
+- קיים: `core/tenant_config.py` + `providers/` (5 קבצים)
+- לא מחובר: אפס imports מקוד חי
+- כפילות: `TenantConfig` קיים גם ב-`tenant_provisioner.py`
+- הכרעה נדרשת: F12 vs F13 overlap ב-`providers/` — אין לחבר לפני הכרעה
+- Piggyback Trigger: sprint multi-tenancy בלבד
+
 מה: שכבת תשתית SaaS — `TenantConfig` (dataclass: storage/LLM/memory/channel/features/allowed_tools per tenant) + `Protocol`-based interfaces (`StorageProvider`, `LLMProvider`, `ChannelAdapter`) + שלושה shims שעוטפים את האינטגרציות הקיימות (`AirtableStorageProvider`, `AnthropicLLMProvider`, `TwilioChannelAdapter`) בלי לשנות אותן.
 scope: **infrastructure only — אפס שינוי runtime behavior** בשלב זה. שלב 1 = hardcoded default tenant (`boss_hq`) + env override; `get_tenant_config()` תמיד מחזיר singleton. שלב 3 (חלק מ-F08) = loader מטבלת Tenants ב-Airtable.
 תלוי ב: C01 (Identity), W2 (`airtable_gateway`), C52 (COG / `core/output_gateway.py`).
