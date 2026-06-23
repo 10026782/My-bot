@@ -1248,7 +1248,8 @@ def _webhook_telegram_impl():
             if data.startswith(("approve:", "reject:")):
                 _handle_approval_callback(call)
             else:
-                bot.answer_callback_query(call.id, "לא מזוהה")
+                # העבר ל-pyTeleBot handlers (upd_domain:, upd_type:, weekly summary וכו')
+                bot.process_new_updates([update])
         except Exception as e:
             logger.error(f"[Telegram] callback error: {e}", exc_info=True)
         return "", 200
