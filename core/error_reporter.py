@@ -5,7 +5,8 @@
 # מודול עזר טהור, נטו requests.post ישיר ל-Telegram Bot API.
 #
 # אסור לכלול payload/תוכן הודעות/מידע לקוח: context הוא שם הפונקציה בלבד,
-# error message מוגבל ל-150 תווים, וה-traceback הוא format_exc() גולמי
+# error message עובר _sanitize (החלפת טלפון/email/strings ארוכים ב-[REDACTED])
+# ומוגבל ל-200 תווים, וה-traceback הוא format_exc() גולמי
 # (לא format_exception עם locals) — מקוצר ל-600 תווים אחרונים, אחרי הסרת
 # שורות שעלולות לכלול PII (phone/שם/name/digits ארוכים).
 
@@ -26,6 +27,21 @@ _sent_timestamps: list[float] = []
 
 # שורות traceback שעלולות לכלול PII (טלפון/שם משתנה) — מוסרות לפני שליחה.
 _PII_LINE_RE = re.compile(r"phone|שם|name|\d{6,}", re.IGNORECASE)
+
+_PII_PATTERNS = [
+    re.compile(r'\+?9725\d{7,8}'),           # מספר ישראלי
+    re.compile(r'\b\d{9,15}\b'),              # טלפון כללי
+    re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'),  # email
+    re.compile(r"'[^']{25,}'"),               # strings ארוכים (שמות/תוכן)
+]
+
+
+def _sanitize(text: str) -> str:
+    """Remove potential PII before sending to Telegram."""
+    result = str(text)
+    for pattern in _PII_PATTERNS:
+        result = pattern.sub("[REDACTED]", result)
+    return result[:200]
 
 
 def _sanitize_traceback(tb: str) -> str:
@@ -65,7 +81,7 @@ def report_error(error: Exception, context: str = "", level: str = "ERROR") -> N
         logger.error(f"[error_reporter] rate limit ({_RATE_LIMIT_PER_HOUR}/h) — alert dropped, context={context}")
         return
 
-    error_str = str(error)[:150]
+    error_str = _sanitize(error)
     tb = _sanitize_traceback(traceback.format_exc())
     now_str = datetime.now().strftime("%d/%m/%Y %H:%M")
     text = (
