@@ -113,7 +113,7 @@ def crm_add_contact(name: str, phone: str = "", email: str = "",
         if phone:           fields[ContactFields.PHONE]       = phone
         if email:           fields[ContactFields.EMAIL]       = email
         if company:         fields[ContactFields.COMPANY]     = company
-        if contact_type:    fields[ContactFields.TYPE]        = contact_type
+        if contact_type:    fields[ContactFields.ROLE_CATEGORY] = contact_type
         if lead_source_id:  fields[ContactFields.ORIGIN_LEAD] = [lead_source_id]
 
         rec = _post(Tables.CONTACTS, fields)
@@ -129,8 +129,8 @@ def crm_find_contact(query: str, identity=None) -> str:
     try:
         safe = str(query).replace("'", "\\'")
         formula = (
-            f"OR(FIND(LOWER('{safe}'), LOWER({{Name}})), "
-            f"FIND(LOWER('{safe}'), LOWER({{Company}})))"
+            f"OR(FIND(LOWER('{safe}'), LOWER({{{ContactFields.NAME}}})), "
+            f"FIND(LOWER('{safe}'), LOWER({{{ContactFields.COMPANY}}})))"
         )
         records = _get(Tables.CONTACTS, formula, identity=identity)
         if not records:
@@ -169,7 +169,7 @@ def crm_list_contacts(contact_type: str = "", identity=None) -> str:
     try:
         formula = f"{{סטטוס}} = '{ContactStatus.ACTIVE}'"
         if contact_type:
-            formula = f"AND({formula}, {{{ContactFields.TYPE}}} = '{contact_type}')"
+            formula = f"AND({formula}, {{{ContactFields.ROLE_CATEGORY}}} = '{contact_type}')"
         records = _get(Tables.CONTACTS, formula, identity=identity)
         if not records:
             return "📭 אין אנשי קשר פעילים"
@@ -289,8 +289,6 @@ def crm_add_payment(name: str, amount: float, due_date: str,
             PaymentFields.STATUS:   PaymentStatus.IN_PROGRESS,
         }
         if deal_id:    fields[PaymentFields.DEAL]    = [deal_id]
-        if contact_id: fields[PaymentFields.CONTACT] = [contact_id]
-        if notes:      fields[PaymentFields.NOTES]   = notes
 
         rec = _post(Tables.PAYMENTS, fields)
 
@@ -316,9 +314,9 @@ def crm_upcoming_payments(days_ahead: int = 7, identity=None) -> str:
         deadline = today + timedelta(days=days_ahead)
         formula  = (
             f"AND("
-            f"{{סטטוס}} = '{PaymentStatus.IN_PROGRESS}', "
-            f"IS_BEFORE({{תאריך}}, '{deadline.isoformat()}'), "
-            f"IS_AFTER({{תאריך}}, '{today.isoformat()}')"
+            f"{{{PaymentFields.STATUS}}} = '{PaymentStatus.IN_PROGRESS}', "
+            f"IS_BEFORE({{{PaymentFields.DUE_DATE}}}, '{deadline.isoformat()}'), "
+            f"IS_AFTER({{{PaymentFields.DUE_DATE}}}, '{today.isoformat()}')"
             f")"
         )
         records = _get(Tables.PAYMENTS, formula, identity=identity)
@@ -359,8 +357,8 @@ def crm_overdue_payments(identity=None) -> str:
         today   = date.today().isoformat()
         formula = (
             f"AND("
-            f"{{סטטוס}} = '{PaymentStatus.IN_PROGRESS}', "
-            f"IS_BEFORE({{תאריך}}, '{today}')"
+            f"{{{PaymentFields.STATUS}}} = '{PaymentStatus.IN_PROGRESS}', "
+            f"IS_BEFORE({{{PaymentFields.DUE_DATE}}}, '{today}')"
             f")"
         )
         records = _get(Tables.PAYMENTS, formula, identity=identity)
