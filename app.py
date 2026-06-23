@@ -1261,13 +1261,6 @@ def _webhook_telegram_impl():
         # Slash commands ג†’ registered @bot.message_handler(commands=[...]) handlers.
         # They authenticate via resolve_identity internally; we don't go through run_agent.
         if text.startswith("/"):
-            logger.info(f"[Command] received: {text[:30]}")
-            # הוסף זמנית:
-            logger.info(f"[Command] registered handlers: {[h['filters'] for h in bot.message_handlers]}")
-            logger.info(f"[Command] update type: {type(update)}")
-            logger.info(f"[Command] update.message: {update.message}")
-            logger.info(f"[Command] update.message.text: {getattr(update.message, 'text', 'NONE')}")
-            logger.info(f"[Command] entities: {getattr(update.message, 'entities', 'NONE')}")
             try:
                 bot.process_new_updates([update])
             except Exception as e:
