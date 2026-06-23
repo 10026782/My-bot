@@ -99,7 +99,7 @@ _PENDING_APPROVAL_TTL = 600
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=AGENT_TIMEOUT)
 telebot.apihelper.ENABLE_MIDDLEWARE = True  # נדרש לפני TeleBot() — אחרת middleware_handler לא נרשם
-bot    = telebot.TeleBot(TELEGRAM_TOKEN)
+bot    = telebot.TeleBot(TELEGRAM_TOKEN, threaded=False)  # webhook mode — handlers ירוצו סינכרונית, לפני שה-response חוזר
 
 
 @bot.middleware_handler(update_types=['message'])
