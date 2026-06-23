@@ -2,6 +2,7 @@
 # משימות רקע: דוח בוקר + מאסף יומי + ניקוי + תשלומים + תזכורת אבטחה
 
 import os
+import json
 import logging
 import threading
 import schedule
@@ -9,6 +10,11 @@ import time
 from datetime import date
 
 logger = logging.getLogger(__name__)
+
+# נכתב ע"י record_security_review() אחרי review מוצלח, נקרא ב-_get_last_review_date().
+# בלי זה, התאריך תלוי לחלוטין בעדכון ידני של LAST_SECURITY_REVIEW ב-Render — שלא קרה בפועל
+# (BUG-016: התזכורת הציגה 999 ימים תמיד כי אף קוד לא כתב תאריך).
+_REVIEW_PERSIST_PATH = "/tmp/security_review.json"
 
 
 def _job_cleanup_pending():
@@ -35,6 +41,20 @@ def _job_daily_digest():
         logger.info("daily_digest לא קיים — דולג")
     except Exception as e:
         logger.error(f"daily_digest error: {e}")
+
+
+def _job_daily_git_audit():
+    """Feature flag: GIT_AUDIT_SCHEDULER (default off) — daily_git_audit.py נשאר manual-only עד שמופעל."""
+    try:
+        from feature_flags import is_enabled
+        if not is_enabled("GIT_AUDIT_SCHEDULER"):
+            return
+        from daily_git_audit import main as run_daily_git_audit
+        run_daily_git_audit()
+    except ImportError:
+        logger.info("daily_git_audit לא קיים — דולג")
+    except Exception as e:
+        logger.error(f"daily_git_audit error: {e}")
 
 
 def _job_overdue_payments():
@@ -191,8 +211,29 @@ def _job_learning_cycle():
 # Security Review Reminder
 # ══════════════════════════════════════════════════
 
+def record_security_review(d: date | None = None) -> None:
+    """כותב תאריך review מוצלח לקובץ persistent. קרא לפונקציה הזו אחרי כל review."""
+    d = d or date.today()
+    try:
+        with open(_REVIEW_PERSIST_PATH, "w") as f:
+            json.dump({"last_review": d.isoformat()}, f)
+        logger.warning(f"[SecurityReview] last_review_date נכתב: {d.isoformat()}")
+    except Exception as e:
+        logger.error(f"[SecurityReview] כתיבת {_REVIEW_PERSIST_PATH} נכשלה: {e}")
+
+
 def _get_last_review_date() -> date | None:
-    """קורא תאריך review אחרון מenv var."""
+    """קורא תאריך review אחרון: קודם מהקובץ ה-persistent, אחרת מ-env var (תאימות לאחור)."""
+    try:
+        with open(_REVIEW_PERSIST_PATH) as f:
+            raw = json.load(f).get("last_review", "")
+        if raw:
+            return date.fromisoformat(raw)
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        logger.error(f"[SecurityReview] קריאת {_REVIEW_PERSIST_PATH} נכשלה: {e}")
+
     raw = os.environ.get("LAST_SECURITY_REVIEW", "")
     if not raw:
         return None
@@ -233,7 +274,7 @@ def _build_security_reminder(days: int) -> str:
         f"• כלים חדשים עברו דרך registry?\n"
         f"• endpoint חדש — יש auth?\n"
         f"• crm._get מסנן לפי tenant?\n\n"
-        f"לאחר הבדיקה: עדכן `LAST_SECURITY_REVIEW={date.today().isoformat()}` ב-Render."
+        f"לאחר הבדיקה: `python3 -c \"from scheduler import record_security_review; record_security_review()\"`"
     )
 
 
@@ -714,6 +755,7 @@ def start_scheduler() -> threading.Thread:
     from lead_memory import job_flush_lead_memory
     from shabbat_guard import shabbat_safe
     digest_time           = os.environ.get("DIGEST_TIME",               "07:30")
+    git_audit_time        = os.environ.get("GIT_AUDIT_TIME",            "06:45")
     collector_time        = os.environ.get("COLLECTOR_TIME",            "23:00")
     cleanup_interval      = int(os.environ.get("CLEANUP_INTERVAL_MIN",  "360"))
     followup_interval     = int(os.environ.get("FOLLOWUP_INTERVAL_MIN", "60"))
@@ -729,6 +771,7 @@ def start_scheduler() -> threading.Thread:
     weekly_summary_time   = os.environ.get("WEEKLY_SUMMARY_TIME",      "08:30")
 
     schedule.every().day.at(digest_time).do(_job_daily_digest)
+    schedule.every().day.at(git_audit_time).do(_job_daily_git_audit)            # Daily Git/config integrity audit (GOV-02)
     schedule.every().day.at(collector_time).do(_job_daily_collector)
     schedule.every(cleanup_interval).minutes.do(_job_cleanup_pending)
     schedule.every().day.at("00:05").do(_job_overdue_payments)
@@ -751,7 +794,7 @@ def start_scheduler() -> threading.Thread:
     schedule.every().day.at("08:15").do(_job_daily_usage_report)                             # CORE_05 v2: count-based JSONL watchdog (08:15 — מניעת cluster עם D04+Game ב-Sunday 08:00)
 
     logger.info(
-        f"📅 Scheduler | digest={digest_time} | collector={collector_time} | "
+        f"📅 Scheduler | digest={digest_time} | git_audit={git_audit_time} | collector={collector_time} | "
         f"cleanup=every {cleanup_interval}min | followup=every {followup_interval}min | "
         f"payment={payment_reminder_time} | recovery={recovery_time} | "
         f"learning={learning_day} {learning_time} | "
