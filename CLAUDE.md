@@ -49,7 +49,7 @@ Other standalone test scripts, run the same way (`python3 <file>.py`):
 - `test_c53a.py` — the structured tool-result contract (`{ok, tool, external_id, evidence, user_message}`) introduced for the Screen Filter Gateway/Finance Pulse work.
 - `test_inbound_handler.py` — dedup/update/create logic in `inbound_handler.py` (F06).
 
-There is no CI/CD config in this repo (no `.github/workflows/`, `Makefile`, or `Procfile`) — all of the above are run manually before merging.
+CI פעיל: `.github/workflows/ci.yml` runs on every PR and push to `main` — `backend-ci` (compileall syntax check, `smoke_tests.py`, core import check, every `test_*.py` script, schema governance as warning-only) and `frontend-ci` (builds `tma-frontend/` if present). No `Makefile`/`Procfile`.
 
 When verifying behavioral changes to the webhook flow, start the server and POST simulated Telegram/WhatsApp webhook payloads with `curl` — there's no automated end-to-end suite.
 
