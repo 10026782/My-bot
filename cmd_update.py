@@ -55,6 +55,7 @@ def register_update_command(bot, get_identity):
     # ── /update ─────────────────────────────────────────────────
     @bot.message_handler(commands=["update", "עדכון"])
     def cmd_update(msg):
+        logger.info(f"[/update] handler fired for user {msg.from_user.id}")
         try:
             identity = get_identity("telegram", str(msg.from_user.id))
         except Exception as e:
