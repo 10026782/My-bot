@@ -2,6 +2,7 @@
 # משימות רקע: דוח בוקר + מאסף יומי + ניקוי + תשלומים + תזכורת אבטחה
 
 import os
+import json
 import logging
 import threading
 import schedule
@@ -9,6 +10,11 @@ import time
 from datetime import date
 
 logger = logging.getLogger(__name__)
+
+# נכתב ע"י record_security_review() אחרי review מוצלח, נקרא ב-_get_last_review_date().
+# בלי זה, התאריך תלוי לחלוטין בעדכון ידני של LAST_SECURITY_REVIEW ב-Render — שלא קרה בפועל
+# (BUG-016: התזכורת הציגה 999 ימים תמיד כי אף קוד לא כתב תאריך).
+_REVIEW_PERSIST_PATH = "/tmp/security_review.json"
 
 
 def _job_cleanup_pending():
@@ -205,8 +211,29 @@ def _job_learning_cycle():
 # Security Review Reminder
 # ══════════════════════════════════════════════════
 
+def record_security_review(d: date | None = None) -> None:
+    """כותב תאריך review מוצלח לקובץ persistent. קרא לפונקציה הזו אחרי כל review."""
+    d = d or date.today()
+    try:
+        with open(_REVIEW_PERSIST_PATH, "w") as f:
+            json.dump({"last_review": d.isoformat()}, f)
+        logger.warning(f"[SecurityReview] last_review_date נכתב: {d.isoformat()}")
+    except Exception as e:
+        logger.error(f"[SecurityReview] כתיבת {_REVIEW_PERSIST_PATH} נכשלה: {e}")
+
+
 def _get_last_review_date() -> date | None:
-    """קורא תאריך review אחרון מenv var."""
+    """קורא תאריך review אחרון: קודם מהקובץ ה-persistent, אחרת מ-env var (תאימות לאחור)."""
+    try:
+        with open(_REVIEW_PERSIST_PATH) as f:
+            raw = json.load(f).get("last_review", "")
+        if raw:
+            return date.fromisoformat(raw)
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        logger.error(f"[SecurityReview] קריאת {_REVIEW_PERSIST_PATH} נכשלה: {e}")
+
     raw = os.environ.get("LAST_SECURITY_REVIEW", "")
     if not raw:
         return None
@@ -247,7 +274,7 @@ def _build_security_reminder(days: int) -> str:
         f"• כלים חדשים עברו דרך registry?\n"
         f"• endpoint חדש — יש auth?\n"
         f"• crm._get מסנן לפי tenant?\n\n"
-        f"לאחר הבדיקה: עדכן `LAST_SECURITY_REVIEW={date.today().isoformat()}` ב-Render."
+        f"לאחר הבדיקה: `python3 -c \"from scheduler import record_security_review; record_security_review()\"`"
     )
 
 

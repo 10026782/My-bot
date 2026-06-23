@@ -31,6 +31,7 @@ TABLE_CLASS_MAP = {
     schema.Tables.QUESTS:          schema.QuestsFields,
     schema.Tables.COINS_LOG:       schema.CoinsLogFields,
     schema.Tables.EMERGENCY_WINDOW: schema.EmergencyWindowFields,
+    schema.Tables.MEDIA_FILES:     schema.MediaFileFields,
 }
 
 
@@ -39,7 +40,7 @@ def _class_values(cls) -> set[str]:
             if not k.startswith("_") and isinstance(v, str)}
 
 
-def run_audit(live: bool = True) -> None:
+def run_audit(live: bool = True) -> bool:
     print("=" * 60)
     print("BOSS Bot — Airtable Schema Audit")
     print("=" * 60)
@@ -64,7 +65,7 @@ def run_audit(live: bool = True) -> None:
         live_fields   = set(tables.get(table_name, []))
 
         if not live_fields:
-            print(f"⚠️  {table_name}: לא נמצאה בטבלאות Airtable (table missing or name mismatch)")
+            print(f"❌  {table_name}: הטבלה לא קיימת ב-Airtable (live) — קוד מגדיר טבלה שלא נוצרה")
             all_ok = False
             continue
 
@@ -93,8 +94,10 @@ def run_audit(live: bool = True) -> None:
         print("⚠️  נמצאו mismatches — עדכן airtable_schema.py בהתאם")
     print("=" * 60)
 
+    return all_ok
+
 
 if __name__ == "__main__":
     # --offline = השתמש ב-cache קיים ללא fetch
     live = "--offline" not in sys.argv
-    run_audit(live=live)
+    sys.exit(0 if run_audit(live=live) else 1)
