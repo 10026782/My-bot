@@ -24,7 +24,7 @@ from airtable_schema import (
     BusinessMemoryFields, InteractionLogFields, Tables,
     DealFields,
     QuestsFields, CoinsLogFields, WorldsFields, QuestStatus, WorldStatus,
-    DailyTaskFields, DailyTaskStatus, ApprovalsFields, ApprovalStatus,
+    ApprovalsFields, ApprovalStatus,
     RoadmapTaskFields, RoadmapTaskStatus, DailyCheckinFields,
     VentureFields, VentureStage,
     LeadStatus, LeadOutcome,

@@ -77,7 +77,6 @@ def _update_existing(record_id: str, message: str, external_id: str) -> None:
     try:
         _gw_patch(Tables.LEADS, record_id, {
             LeadFields.SUMMARY:     (message or "")[:500],
-            LeadFields.UPDATED_AT:  _now_iso(),
             LeadFields.EXTERNAL_ID: external_id,
         })
         _log_interaction(record_id, message)

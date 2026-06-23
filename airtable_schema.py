@@ -291,7 +291,6 @@ class LeadFields:
     SOURCE          = "source"
     CHANNEL         = "channel"
     CREATED_AT      = "created_at"
-    UPDATED_AT      = "updated_at"
     MEMORY_KEY      = "memory_key"
     TENANT_ID       = "tenant_id"
     DOMAIN          = "domain"
@@ -720,7 +719,6 @@ FIELD_MAP = {
         "source":        "מקור",
         "channel":       "ערוץ",
         "created_at":    "תאריך יצירה",
-        "updated_at":    "תאריך עדכון",
         "memory_key":    "מפתח זיכרון",
         "tenant_id":     "מזהה tenant",
         "domain":        "real_estate | import | recruitment | saas | finance | general",
