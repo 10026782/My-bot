@@ -293,3 +293,18 @@
 - **Verified בפרודקשן:** לא — אין צורך, אין caller חי
 - **Verification ראיה:** `py_compile` על 6 הקבצים החדשים; `smoke_tests.py` ו-`test_integration.py` עברו ללא רגרסיה; שלוש בדיקות import (`core.tenant_config`, `providers.interfaces`+שלושת ה-shims, `isinstance(...)` מול כל Protocol) עברו.
 - **סטטוס:** 🟡 CODE COMPLETE — קבצים חדשים בלבד, לא מחוברים ל-pipeline
+
+## TEST-GAP-001 — error_reporter.py
+**תאריך:** 23/06/2026
+**מה חסר:** אין בדיקות ל-`core/error_reporter.py` — PII sanitization, rate limit, Telegram send.
+**Piggyback Trigger:** כל שינוי ב-`core/error_reporter.py`
+
+## TEST-GAP-002 — finance_pulse endpoint
+**תאריך:** 23/06/2026
+**מה חסר:** אין בדיקות ל-`GET /api/finance/pulse` — view=all/active/overdue, domain injection guard.
+**Piggyback Trigger:** כל שינוי ב-`finance_pulse()` ב-`tma_api.py`
+
+## TEST-GAP-003 — contact_merge.py
+**תאריך:** 23/06/2026
+**מה חסר:** אין בדיקות ל-`contact_merge.py` — merge logic, dedup, vCard parsing.
+**Piggyback Trigger:** לפני wire לפרודקשן
