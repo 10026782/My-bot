@@ -1444,6 +1444,13 @@ def webhook_meta_whatsapp():
 
     domain_from_channel = _channel_domain(to_number)
 
+    if not _flag_enabled("META_OUTBOUND_ENABLED"):
+        logger.info(
+            "[Meta WhatsApp] inbound received — outbound stub, skipping run_agent. "
+            "Set META_OUTBOUND_ENABLED=true to activate."
+        )
+        return jsonify({"status": "received_no_outbound"}), 200
+
     reply = run_agent(
         incoming, sender,
         channel             = "whatsapp",
