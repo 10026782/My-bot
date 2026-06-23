@@ -156,7 +156,7 @@ def _save_lead(sender: str, session: dict) -> None:
         name = (answers.get("name") or "").strip()
         beds = (answers.get("bed_count") or "").strip()
         memory_key = f"boss_hq:{sender}"
-        status = "QUALIFIED_BASIC" if name else "INCOMPLETE"
+        status = "waiting_call" if name else "new"
         summary = f"Furniture lead: triple solid oak bed{f' | מיטות: {beds}' if beds else ''}"
 
         fields = {
