@@ -59,6 +59,7 @@ def _transcribe_openai(path: str) -> tuple[str, str]:
             file=f,
             model=os.getenv("OPENAI_STT_MODEL", "whisper-1"),
             language="he",
+            prompt="משימה, ליד, זיכרון, רעיון, עסקה, תקבע, פגישה, תשלח, תזכיר, תעדכן, שלום, נדלן, ייבוא, כספים",
         )
     return (resp.text or "").strip(), "he"
 
