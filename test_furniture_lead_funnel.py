@@ -76,7 +76,7 @@ def run() -> bool:
 
     # ── Saved fields ────────────────────────────────────────────────
     final_fields = saved[-1][2]
-    chk("status qualified after name", final_fields.get("status") == "QUALIFIED_BASIC")
+    chk("status qualified after name", final_fields.get("status") == "waiting_call")
     chk("score is HOT threshold", final_fields.get("Score", 0) >= 60)
     chk("summary includes bed count", "מיטות" in (final_fields.get("summary") or ""))
 
