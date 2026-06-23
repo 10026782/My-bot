@@ -37,8 +37,9 @@ _MEMORY_KEYWORDS = (
 )
 
 # ── Voice action-prefix detection ───────────────────────────────────
+# PREFIX_HARD בלבד — prefix מפורש בתחילת התמלול (אחרי נרמול) מפעיל routing.
+# פעלי פעולה רכים ("תזכיר"/"תפתח"/"תשלח"/"תקבע") לא מפעילים Business Memory.
 PREFIX_HARD = ("משימה:", "ליד:", "זיכרון:", "רעיון:", "עסקה:")  # exact startswith
-PREFIX_SOFT = ("תשמור", "תזכיר", "תפתח", "תעדכן", "תשלח")          # anywhere in text
 RISK_WORDS = (
     "כסף", "חוזה", "התחייבות", "מחיקה", "שינוי סטטוס", "שלח ללקוח",
 )
@@ -77,12 +78,25 @@ def _should_save_to_memory(text: str) -> bool:
     return any(kw in text for kw in _MEMORY_KEYWORDS)
 
 
+_BIDI_CONTROL_CHARS = "".join(
+    chr(c) for c in (0x200E, 0x200F, 0x202A, 0x202B, 0x202C, 0x202D, 0x202E)
+)
+
+
+def _normalize_for_prefix(text: str) -> str:
+    """מנרמל תמלול לפני זיהוי prefix."""
+    import re
+    text = re.sub(f"[{_BIDI_CONTROL_CHARS}]", "", text)
+    PREFIX_WORDS = ["זיכרון", "משימה", "ליד", "רעיון", "עסקה"]
+    for word in PREFIX_WORDS:
+        text = re.sub(rf'^{word}[,،]\s*', f'{word}: ', text)
+    return text.strip()
+
+
 def _has_action(transcript: str) -> bool:
-    """PREFIX_HARD must match exactly at the start; PREFIX_SOFT anywhere in the text."""
-    return (
-        any(transcript.startswith(p) for p in PREFIX_HARD)
-        or any(p in transcript for p in PREFIX_SOFT)
-    )
+    """רק PREFIX_HARD בתחילת התמלול (אחרי נרמול) מפעיל פעולה."""
+    normalized = _normalize_for_prefix(transcript)
+    return any(normalized.startswith(p) for p in PREFIX_HARD)
 
 
 def _has_risk_words(transcript: str) -> bool:
@@ -316,11 +330,17 @@ def handle_voice_note(
     raw_transcript = stt_result.raw_transcript
     transcript = stt_result.normalized_transcript
 
+    normalized_for_prefix = _normalize_for_prefix(transcript)
     action_requested = _has_action(transcript)
     logger.info(f"[voice] transcript repr: {repr(transcript[:50])}")
+    logger.info(f"[voice] normalized for prefix: {repr(normalized_for_prefix[:50])}")
     logger.info(f"[voice] action_requested: {action_requested}")
-    logger.info(f"[voice] PREFIX_HARD matches: {[p for p in PREFIX_HARD if transcript.startswith(p)]}")
-    logger.info(f"[voice] PREFIX_SOFT matches: {[p for p in PREFIX_SOFT if p in transcript]}")
+    logger.info(f"[voice] PREFIX_HARD matches: {[p for p in PREFIX_HARD if normalized_for_prefix.startswith(p)]}")
+
+    # אישור חובה תמיד עבור מילות סיכון, ללא קשר לאיתור action_requested או לאורך הטקסט.
+    if _has_risk_words(transcript):
+        ack = _send_voice_approval_request(transcript, domain, source, owner_chat_id, reason="מילת סיכון")
+        return MediaResult(ok=True, raw_transcript=raw_transcript, normalized_transcript=transcript, message=ack)
 
     # שלב 3 — אין פעולה: רק תמלול, ללא Drive, ללא זיכרון.
     if not action_requested:
@@ -329,11 +349,6 @@ def handle_voice_note(
             ok=True, raw_transcript=raw_transcript, normalized_transcript=transcript,
             message="📝 תומלל. לא בוצעה פעולה.",
         )
-
-    # אישור חובה תמיד עבור מילות סיכון, לא משנה אורך הטקסט.
-    if _has_risk_words(transcript):
-        ack = _send_voice_approval_request(transcript, domain, source, owner_chat_id, reason="מילת סיכון")
-        return MediaResult(ok=True, raw_transcript=raw_transcript, normalized_transcript=transcript, message=ack)
 
     word_count = len(transcript.split())
     if word_count <= SHORT_TRANSCRIPT_WORD_LIMIT:
@@ -529,7 +544,7 @@ if __name__ == "__main__":
         assert not mock_save.called
     print("✅ risk word present → approval gate even for short text, no direct save")
 
-    long_text = "תזכיר לי " + " ".join(["דבר"] * 35)
+    long_text = "משימה: " + " ".join(["דבר"] * 35)
     with patch.object(_this, "transcribe", return_value=_stt(long_text)), \
          patch.object(_this, "_send_voice_approval_request", return_value="📨 ack") as mock_approve, \
          patch.object(_this, "_save_transcript_to_memory") as mock_save:
@@ -541,6 +556,25 @@ if __name__ == "__main__":
         mock_approve.assert_called_once_with(long_text, "general", "telegram", "123", reason="טקסט ארוך")
         assert not mock_save.called
     print("✅ action + >30 words, no risk word → approval gate (preview), no direct save")
+
+    # PREFIX_HARD בלבד — פעלי פעולה רכים ("תזכיר"/"תפתח"/"תשלח"/"תקבע") לא מפעילים
+    # action_requested בהיעדר prefix מפורש וללא מילת סיכון.
+    with patch.object(_this, "transcribe", return_value=_stt("תזכיר לי לקבוע פגישה מחר")), \
+         patch.object(_this, "_log_unhandled_voice_note") as mock_log, \
+         patch.object(_this, "_save_transcript_to_memory") as mock_save, \
+         patch.object(_this, "_send_voice_approval_request") as mock_approve:
+        soft_verb_only = handle_voice_note(
+            audio_bytes=b"audio-bytes", mime_type="audio/ogg", telegram_file_id="v5",
+            user_id="u1", domain="general", owner_chat_id="123",
+        )
+        assert soft_verb_only.ok and soft_verb_only.message == "📝 תומלל. לא בוצעה פעולה."
+        mock_log.assert_called_once()
+        assert not mock_save.called and not mock_approve.called
+    print("✅ soft verb alone (no PREFIX_HARD, no risk word) → no action, not saved to memory")
+
+    chk_comma = _has_action("זיכרון, לקבוע פגישה עם הלקוח")
+    assert chk_comma is True
+    print("✅ comma-normalized prefix (\"זיכרון, ...\") → still recognized as PREFIX_HARD")
 
     with patch.object(drive_adapter, "_get_upload_folder", return_value=None):
         no_folder = handle_file_upload(
