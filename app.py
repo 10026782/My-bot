@@ -468,6 +468,15 @@ try:
 except Exception as _e:
     logger.warning(f"[C20] /update registration failed: {_e}")
 
+# ── Decision Hub (Stage 0): /decision command ────────────────────
+try:
+    from cmd_decision import register_decision_command
+    result = register_decision_command(bot, resolve_identity)
+    logger.info("[DecisionHub] /decision command registered")
+    logger.info(f"[app] register_decision_command returned: {result}")
+except Exception as _e:
+    logger.warning(f"[DecisionHub] /decision registration failed: {_e}")
+
 # ── C22: weekly summary callbacks ────────────────────────────────
 try:
     from weekly_summary import register_weekly_callbacks
