@@ -20,7 +20,7 @@ Other modules may request, read, or display this data — but must not independe
 
 ---
 
-## כתיב שמות שדות ב-airtable_schema.py
+## חוק 11 — כתיב שמות שדות ב-airtable_schema.py
 
 **העיקרון:** הקוד מחקה את Airtable. לא ההיפך.
 מה שרשום ב-Airtable — זה המחרוזת בקוד. בלי יצירתיות.
