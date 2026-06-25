@@ -654,3 +654,14 @@ Archived / historical Markdown disposition:
 | `reports/system_registry_report.md` | ARCHIVE | Generated environment snapshot; not an active plan. |
 | `reports/airtable_structure_governance_audit.md` | ARCHIVE | Historical Airtable governance audit; keep as evidence. |
 | `BOSS_Refactor_Plan.md` | ACTIVE REFERENCE | תוכנית 8 מסכים + BOSS Layer — Stage 0 הושלם, N06 = Stage 1 |
+### F52 — Tool Architecture Audit Maps
+
+Status: Implemented but not yet verified.
+
+What: audit-only documentation before F52 implementation. The current branch adds:
+
+- `docs/f52/F52_CURRENT_TOOL_MAP.md`
+- `docs/f52/F52_CONTRACT_COVERAGE_MAP.md`
+- `docs/f52/F52_BYPASS_MAP.md`
+
+Scope guard: no production behavior changes, no `app.py` changes, no refactor, and no Airtable schema changes. The audit maps current tool architecture, contract coverage, bypass categories, high-risk bypasses, safe audit tests, and design-review items.
