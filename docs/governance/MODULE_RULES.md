@@ -89,3 +89,25 @@ handler דיפולטי ממשיך כרגיל כשאין context.
 מקסימום שאלה אחת, ורק אחרי שהגולמי נשמר.
 ```
 עיקרון-על: BOSS never deletes signal — only down-ranks. גולמי תמיד נשמר.
+
+## חוק 12 — Domain-Agnostic Core (כביש אחד, יציאות רבות)
+
+> **הערת מספור:** במקור הוצע מסמך חוץ (`MODULE_RULES_additions.md`, יוני 2026) כ"חוק 11" —
+> מתנגש עם חוק 11 הקיים מעלה (כתיב שמות שדות ב-airtable_schema.py, e06dc3d). מוספר כאן
+> מחדש כחוק 12 כדי לשמר רצף יחיד בקובץ זה.
+
+ישות הליבה זהה לכל דומיין וכל ייעוד.
+```
+כביש אחד:   Input → Memory → Understanding → 5 שערים → Decision/Action
+יציאות:     דומיין (נדל"ן/רפואה/נישואין) = שדה + vocabulary.
+            כלי (Drive/voice/email)       = port adapter.
+            ייעוד (עו"ד/רופא/יזם/זוג)     = tenant config.
+❌ אסור:  ישות חדשה לדומיין (MedicalDecision/MarriageDecision).
+✅ נכון:  Decision אחד. domain = ערך ב-select. אפס קוד חדש לדומיין.
+```
+מבחן: "האם זה עובד גם לרופא וגם לחתונה?" — אם לא, בנית feature במקום core.
+זה שאלה 2 ("נפתר במקום אחר?") בקנה מידה של דומיינים שלמים.
+תואם V4: אותו קוד לכל tenant. ה-tenant בוחר vocabulary + providers בלבד.
+
+**מקור:** התגלה תוך כדי בניית Decision Hub (יוני 2026) — היה משתמע, עכשיו מפורש.
+**דוגמה קיימת:** `Decision` (decision_pipeline.py) — ישות אחת, ללא תת-מחלקות לדומיין.

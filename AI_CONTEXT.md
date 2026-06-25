@@ -1,15 +1,16 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-06-23
-**עודכן על ידי:** Claude Code — daily briefing regen (git-verified `main` HEAD `01558a0`)
+**עודכן:** 2026-06-25
+**עודכן על ידי:** Claude Code — Decision Hub Stage 0.5/0.6 + governance docs (git-verified `main` HEAD `483851f`, PR #147)
 
 > מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (מיושן, 19/06) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
 
 ---
 
 ## 1. Executive Summary
-- `main` = `01558a0`. Identity → Router → Context → Agent + Approval flow (3-state, fail-closed) — **תקינים ופעילים בפרודקשן**.
+- `main` = `483851f` (PR #147 מוזג, אומת `git merge-base --is-ancestor`). Identity → Router → Context → Agent + Approval flow (3-state, fail-closed) — **תקינים ופעילים בפרודקשן**.
+- **Decision Hub Stage 0.5/0.6 הושלמו** (File/Voice Precedence Routing + File Context Reference "זה הנספח") — code-complete ומחובר, **כבוי בפרודקשן** מאחורי `FEATURE_DECISION_HUB`. נוסף ל-ROADMAP.md לראשונה כ-N13 (לא היה מתועד קודם). MODULE_RULES.md קיבל חוקים 7-10+12; נוסף `docs/governance/PLANNING_GATE.md`; BUG-017 (`session_store._sync_to_db` dict-vs-string) נסגר.
 - **F16 Media Layer הושלם (7/7 batches)** — code-complete ומחובר ל-pipeline החי, אך **כבוי בפרודקשן** מאחורי `FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD` (off by default). דורש יצירת טבלת "Media Files" ידנית ב-Airtable לפני הדלקה.
 - **N07/N08/N09/N11/N12 הושלמו** (Schema Governance, CI/CD, Monitoring, Finance Pulse wiring, Daily Git Audit scheduler) — כולם code-complete ומוזגים; N12 ו-N10 (Rollback) נשארים flag-off/planned בהתאמה.
 - כל פיצ'רי הצמיחה (Lead Scoring/Memory/Followup, N02-N04) — **קוד מוכן, דגלים כבויים כברירת מחדל**, אפס תעבורת ייצור אמיתית אומתה עד כה.
@@ -27,6 +28,17 @@
 
 ## 3. Completed Since Last Update
 
+**Decision Hub Stage 0.5/0.6 + governance docs (25/06/2026, PR #147, `main` = `483851f`):**
+- **Stage 0.5 — File/Voice Precedence Routing** (`4ac2a05`): `cmd_decision.decision_context_active()`/`route_file_to_decision_inbox()` מוטמע ב-`app.py::_handle_telegram_media`, גרור ל-Decision Inbox כש-context פעיל, fail-safe לדרך הדיפולט (Drive/Voice) אם משהו נכשל. מימוש חוק 9 (Input Precedence) בקוד חי לראשונה.
+- **Stage 0.6 — File Context Reference** (`e0f0111`): `FileUploadResult`/`set_last_file()`/`get_last_file()` ב-`session_store.py` (RAM-only, לא נכתב ל-Airtable — אין עמודה `last_uploaded_file` ב-LeadSessions, ראו `SPEC_BUG_B_LeadSessions_Schema.md` §8); `is_attachment_reference()`/`handle_attachment_reference()` ב-`cmd_decision.py` לזיהוי "זה הנספח" וכו'. **הוטמע ב-`_webhook_telegram_impl` (טלגרם-ספציפי), לא ב-`run_agent()` (משותף לכל הערוצים)** — תוקן תוך כדי בנייה לאחר שזוהה ש-`run_agent()` נקרא גם מ-WhatsApp שאין לו אובייקט `bot` טלגרם.
+- **BUG-017** (`fdeb039`) — `session_store._sync_to_db` קרא את חוזה ה-dict של `airtable_add`/`airtable_update` (C53-A) כ-string; תוקן רק ב-`_sync_to_db`, לא ב-`_load_from_db` (שמשתמש בפונקציה אחרת, `airtable_get`, שמחזירה string).
+- **BUG-B** — LeadSessions הובאה תחת schema governance (additive, אפס שינוי התנהגות).
+- **MODULE_RULES.md** (`a6483c8` + תיקון מספור 25/06) — חוקים 7 (Ports), 8 (Tool↔Gate registry), 9 (Input Precedence), 10 (Raw-First), 12 (Domain-Agnostic Core — ממוספר 12 לא 11, כדי לא להתנגש עם חוק 11 הקיים: כתיב שמות שדות ב-airtable_schema.py).
+- **נוסף `docs/governance/PLANNING_GATE.md`** — שער תכנון של 5 שערים ארכיטקטוניים + 3 השאלות הקיימות, עובר תמיד לפני קוד (להבדיל מ-MODULE_RULES, רפרנס לפי דרישה).
+- **נוסף `archive/BOSS_MASTER_PLAN_One_Road.md`** — תיעוד ARCHIVE של עקרון "כביש אחד, יציאות רבות"; הקובץ המקורי הכריז על עצמו "ACTIVE REFERENCE" — תוקן ב-provenance note בראש הקובץ, כי זה מתנגש עם הצהרת `ROADMAP.md`/`CLAUDE.md` שROADMAP הוא מקור האמת היחיד.
+- **N13 נוסף ל-ROADMAP.md** — Decision Hub לא היה מתועד שם בכלל לפני תיקון זה.
+- **Verification:** `git fetch origin main` + `git merge-base --is-ancestor origin/claude/new-session-be1ckb origin/main` → exit 0; `py_compile` נקי על `app.py`/`cmd_decision.py`/`session_store.py`.
+
 **BUG_AUDIT_LOG.md תוקן (commit `881b41e`/`01558a0`):**
 - **BUG-013** (PR #117, `aae59c4`) — קובץ Telegram oversized (voice/photo/document >50MB) הוריד את כל הקובץ *לפני* בדיקת גודל; כעת `_classify_size(file_size)` נבדק מול `message.voice/photo/document.file_size` **לפני** `bot.get_file()`/`download_file()` — דוחה מיידית עם `FILE_TOO_LARGE`, ללא הורדה כושלת/תקועה.
 - **BUG-014 תיעוד תוקן** — סטטוס "Merged: לא עדיין" היה שגוי; PR #115 מוזג בפועל (`cf0ded7`, אומת מול GitHub API).
@@ -42,7 +54,8 @@
 **שאר ה-PRs האחרונים (לפירוט מלא ראו `CHANGELOG.md`/`CHANGE_CONTROL_LOG.md`):** C22 Weekly Business Summary (PR #94, off by default), C53/O4 Screen Filter Gateway + Finance Pulse, C53-A structured tool-result contract + A32 hardening (PR #80), C54/C55 Business Update command + Origin Lead linking (PR #85/#86), C56 Approval Policy stack (PR #69, off by default).
 
 ## 4. Next Priorities
-1. **לאמת BUG-013/014/015/016 בפרודקשן בפועל** — כולם מוזגים ל-`main`, אפס אימות ידני עד כה (קובץ >50MB אמיתי / Drive evidence gate / N07 מול live Airtable / security-review persistence).
+0. **Decision Hub Stage 1 (Trust Layer / שער 3)** — Stage 0/0.5/0.6 הושלמו, דגל כבוי; Stage 1-4 (ליבה) לפני יציאות (דומיינים/ערוצים/ייעודים נוספים), לפי `archive/BOSS_MASTER_PLAN_One_Road.md` (ARCHIVE, לא מקור אמת).
+1. **לאמת BUG-013/014/015/016/017 בפרודקשן בפועל** — כולם מוזגים ל-`main`, אפס אימות ידני עד כה (קובץ >50MB אמיתי / Drive evidence gate / N07 מול live Airtable / security-review persistence).
 2. **F16 — הדלקת flags** (`FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD`) — אך ורק אחרי יצירת טבלת "Media Files" ידנית ב-Airtable.
 3. **להריץ N07 (`tools/schema_governance.py`) מול live Airtable** — עדיין לא רץ פעם ראשונה (אין credentials בסביבת sandbox).
 4. **לאמת מצב Render בפועל מול `main` HEAD (`01558a0`)** — לא ניתן מהסביבה הזו (egress חסום); סיכון פתוח שתועד כבר בגרסאות קודמות.

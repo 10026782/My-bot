@@ -23,6 +23,21 @@
 
 > נבנה מ-`git log --since="30 days ago"` (~172 commits, `f935c53`→`eebf73b`) + טבלאות ROADMAP.md (Stabilization Sprint, World 2, Sprint 16/06). כל commit hash צוטט ישירות מ-git או מ-ROADMAP — שורות שלא נמצאה להן ראיה ישירה מסומנות "לא ידוע".
 
+### N13 — Decision Hub Stage 0.5/0.6 + BUG-017/BUG-B + MODULE_RULES 7-10/12 (PR #147)
+- **תאריך:** 25/06/2026
+- **סוג:** Feature (flag off) + Bug Fix + Docs
+- **Requirement:** ROADMAP.md N13 (נוסף באותו commit — Decision Hub לא היה מתועד ב-ROADMAP לפני כן)
+- **תיאור:** `cmd_decision.py`/`app.py` — Stage 0.5 (File/Voice Precedence Routing: `decision_context_active()`, `route_file_to_decision_inbox()`, מוטמע ב-`_handle_telegram_media` עם fail-safe exception handling) ו-Stage 0.6 (File Context Reference: `FileUploadResult`/`set_last_file`/`get_last_file` ב-`session_store.py`, וזיהוי "זה הנספח" דרך `is_attachment_reference()`/`handle_attachment_reference()`, ממוקם ב-`_webhook_telegram_impl` הטלגרם-ספציפי ולא ב-`run_agent()` המשותף-לכל-הערוצים — תיקון ארכיטקטוני שנעשה תוך כדי הבנייה). תוקנו: BUG-017 (`session_store._sync_to_db` קרא חוזה dict כ-string) ו-BUG-B (LeadSessions תחת schema governance, additive). `docs/governance/MODULE_RULES.md` קיבל חוקים 7 (Ports), 8 (Tool↔Gate), 9 (Input Precedence), 10 (Raw-First), 12 (Domain-Agnostic Core — ממוספר 12 לא 11 כדי לא להתנגש עם חוק 11 הקיים, כתיב שמות שדות). נוסף `docs/governance/PLANNING_GATE.md`. נוסף `archive/BOSS_MASTER_PLAN_One_Road.md` (ARCHIVE, לא מקור אמת — ראו הערת מקור בראש הקובץ).
+- **Commit:** `a6483c8` (MODULE_RULES 7-10 + BUG-B), `fdeb039` (BUG-017), `4ac2a05` (Stage 0.5), `e0f0111` (Stage 0.6)
+- **PR:** #147 — https://github.com/10026782/My-bot/pull/147 — **מוזג ל-`main` ב-commit `483851f`**
+- **Review על ידי:** הבעלים (אישר מיזוג מפורשות אחרי שאי-מיזוג קודם זוהה ותוקן)
+- **Deploy תאריך:** לא ידוע — Render Auto-Deploy מוגדר על `main`, לא אומת ידנית מול Render Dashboard
+- **Verified בפרודקשן:** לא — `FEATURE_DECISION_HUB` כבוי כברירת מחדל, אפס שינוי התנהגות בפרודקשן
+- **Verification ראיה:** `git fetch origin main` + `git merge-base --is-ancestor origin/claude/new-session-be1ckb origin/main` → exit 0 (מאומת PR ממוזג בפועל, לא רק לפי הצהרה); `py_compile` נקי על `app.py`/`cmd_decision.py`/`session_store.py`; `session_store.py` self-test 18/20 (2 כשלים קיימים מראש, מתועדים, לא קשורים לשינוי)
+- **Docs עודכנו:** ROADMAP.md (N13 חדש), AI_CONTEXT.md, BUG_AUDIT_LOG.md (BUG-017), MODULE_RULES.md, PLANNING_GATE.md (חדש), archive/BOSS_MASTER_PLAN_One_Road.md (חדש)
+- **Feature Flag:** `FEATURE_DECISION_HUB` — כבוי כברירת מחדל
+- **Rollback plan:** revert PR #147 — דגל כבוי, אפס סיכון פונקציונלי מיידי בפרודקשן
+
 ### N08 / N09 / N11 — ROADMAP status drift correction (docs-only)
 - **תאריך:** 22/06/2026
 - **סוג:** Docs-only correction, אפס שינוי קוד
