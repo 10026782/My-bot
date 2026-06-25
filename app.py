@@ -620,6 +620,108 @@ def _tool_user_message(result) -> str:
     return str(result or "")
 
 
+# ══════════════════════════════════════════════════
+# C60 — Tool Context Awareness (SPEC_C59_Tool_Context_Awareness.md;
+# tracked as C60 in docs — "C59" collides with the already-merged
+# Decision Hub Stage 1 Trust Layer).
+# ══════════════════════════════════════════════════
+
+def _capture_last_tool_result(chat_id: str, tool_name: str, result, tool_input: dict, ok: bool) -> None:
+    """שומר את תוצאת הכלי האחרונה ב-session — תיקון 'עיוורון כלים' בין סבבי agent.
+    result הוא חוזה C53-A {ok, tool, external_id, evidence, user_message} — לא
+    {id/record_id/url/drive_url} כמו שהספק הניח; הותאם לחוזה האמיתי בקוד."""
+    try:
+        from session_store import lead_sessions
+        from datetime import datetime, timezone
+
+        evidence = result.get("evidence", {}) if isinstance(result, dict) else {}
+        record_id = result.get("external_id", "") if isinstance(result, dict) else ""
+        url = evidence.get("htmlLink") or evidence.get("url") or "" if isinstance(evidence, dict) else ""
+
+        lead_sessions.set_last_tool_result(chat_id, {
+            "tool":      tool_name,
+            "status":    "success" if ok else "failed",
+            "summary":   _tool_user_message(result)[:120],
+            "record_id": record_id,
+            "url":       url,
+            "input":     str(tool_input)[:80],
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as e:
+        logger.warning(f"[C60] set_last_tool_result failed for {chat_id}: {e}")
+
+
+def _build_tool_context(chat_id: str) -> str:
+    """מזריק תקציר 'מה הכלים עשו לאחרונה' ל-system prompt (TTL 5 דקות).
+    הספק קורא ל-_seconds_ago() ב-§5 בלי להגדיר אותה — ממומש כאן inline."""
+    try:
+        from session_store import lead_sessions
+        from datetime import datetime, timezone
+    except Exception:
+        return ""
+
+    ltr = lead_sessions.get_last_tool_result(chat_id)
+    luf = lead_sessions.get_last_file(chat_id)
+    parts = []
+
+    if ltr and ltr.get("timestamp"):
+        try:
+            age = (datetime.now(timezone.utc) - datetime.fromisoformat(ltr["timestamp"])).total_seconds()
+        except Exception:
+            age = None
+        if age is not None and age < 300:
+            status_emoji = "✅" if ltr.get("status") == "success" else "❌"
+            line = (f"כלי אחרון שרץ ({int(age)}ש' לפני): {ltr.get('tool')} "
+                    f"{status_emoji} {ltr.get('summary', '')}")
+            if ltr.get("record_id"):
+                line += f" | רשומה: {ltr['record_id']}"
+            if ltr.get("url"):
+                line += f" | קישור: {ltr['url']}"
+            parts.append(line)
+
+    if luf:
+        parts.append(
+            f"קובץ אחרון שהועלה: {luf.get('original_filename', '')} "
+            f"({luf.get('type', '')}) | {luf.get('url', '')}"
+        )
+
+    if not parts:
+        return ""
+    return "\n🔧 הקשר כלים:\n" + "\n".join(f"• {p}" for p in parts)
+
+
+CONTEXT_PRONOUNS = {
+    "זה":          "last_tool_result",
+    "הנספח":       "last_file",
+    "הקובץ האחרון": "last_file",
+    "הקובץ":       "last_file",
+    "הקודם":       "last_tool_result",
+    "ההוא":        "last_tool_result",
+    "אותו":        "last_tool_result",
+}
+
+
+def resolve_context_pronouns(text: str, chat_id: str) -> str:
+    """מחליף כינויי הצבעה ('זה'/'הנספח'/'הקודם' וכו') בהקשר אמיתי מה-session,
+    כדי שה-Router וה-LLM יראו התייחסות מפורשת במקום לנחש. נקרא לפני intent detection."""
+    try:
+        from session_store import lead_sessions
+    except Exception:
+        return text
+
+    ltr = lead_sessions.get_last_tool_result(chat_id)
+    luf = lead_sessions.get_last_file(chat_id)
+    resolved = text
+
+    for pronoun, ref_type in CONTEXT_PRONOUNS.items():
+        if pronoun in resolved:
+            if ref_type == "last_file" and luf:
+                resolved = resolved.replace(pronoun, f"הקובץ «{luf.get('original_filename', '')}»")
+            elif ref_type == "last_tool_result" and ltr:
+                resolved = resolved.replace(pronoun, f"הפעולה «{ltr.get('summary', '')}»")
+    return resolved
+
+
 def _handle_approval_callback(cq) -> None:
     """H3 top-level handler — דק, מעביר ל-impl ומדווח שגיאות לא-מטופלות."""
     try:
@@ -874,6 +976,11 @@ def run_agent(
             # New unrelated message ג€” clear stale pending, treat normally
             _pending_approvals.pop(chat_id, None)
 
+    # ג”€ג”€ 2.6. Context Pronoun Resolution (C60) ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
+    # "תעלה לדסישנס"/"זה הנספח" וכד' — לפני intent detection, כדי שה-Router
+    # וה-LLM יראו התייחסות מפורשת במקום לנחש מהקשר חלקי.
+    user_text = resolve_context_pronouns(user_text, chat_id)
+
     # ג”€ג”€ 3. Router ג€” CORE_02.6 Integration ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
     route = _safe_route(user_text, channel, identity, domain_from_channel)
     logger.info(route.to_log())
@@ -912,6 +1019,8 @@ def run_agent(
             handler = route.handler,
             intent  = route.intent,
         )
+        # C60: הזרקת "הקשר כלים" — מה רץ בסבב הקודם — ל-system prompt
+        ctx.system_prompt += _build_tool_context(chat_id)
         history = memory.get_for_claude(ctx.memory_key)
 
         # C4.1: trim history if too large ג€” prevents silent context overflow
@@ -1047,6 +1156,8 @@ def run_agent(
                     "content": result_text,
                     "ok":      exec_check.status != "failed",
                 })
+                # C60: זיכרון בין סבבים — "תעלה לדסישנס" אחרי כלי קודם יזהה שהוא רץ
+                _capture_last_tool_result(chat_id, tu.name, result, tu.input, exec_check.status != "failed")
 
             tool_calls_made += 1
 
