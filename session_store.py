@@ -21,6 +21,8 @@ from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Optional
 
+from airtable_schema import LeadSessionsFields as LSF, Tables
+
 logger = logging.getLogger(__name__)
 
 _MAX_SESSIONS = 1000
@@ -152,24 +154,24 @@ class PersistentSessionStore:
             from tools.airtable_tools import airtable_add, airtable_update  # type: ignore
 
             fields = {
-                "sender":        sender,
-                "domain":        session.get("domain", ""),
-                "channel":       session.get("channel", ""),
-                "step":          session.get("step", 0),
-                "answers":       json.dumps(session.get("answers", {}), ensure_ascii=False),
-                "done":          session.get("done", False),
-                "drop_off_step": session.get("drop_off_step"),
-                "updated_at":    session.get("updated_at", _now_iso()),
-                "created_at":    session.get("created_at", _now_iso()),
-                "score":         session.get("score", 0),
-                "tier":          session.get("tier", ""),
+                LSF.SENDER:        sender,
+                LSF.DOMAIN:        session.get("domain", ""),
+                LSF.CHANNEL:       session.get("channel", ""),
+                LSF.STEP:          session.get("step", 0),
+                LSF.ANSWERS:       json.dumps(session.get("answers", {}), ensure_ascii=False),
+                LSF.DONE:          session.get("done", False),
+                LSF.DROP_OFF_STEP: session.get("drop_off_step"),
+                LSF.UPDATED_AT:    session.get("updated_at", _now_iso()),
+                LSF.CREATED_AT:    session.get("created_at", _now_iso()),
+                LSF.SCORE:         session.get("score", 0),
+                LSF.TIER:          session.get("tier", ""),
             }
 
             if session.get("record_id"):
-                result = airtable_update("LeadSessions", session["record_id"], fields)
+                result = airtable_update(Tables.LEAD_SESSIONS, session["record_id"], fields)
                 return "✅" in result
             else:
-                result = airtable_add("LeadSessions", fields)
+                result = airtable_add(Tables.LEAD_SESSIONS, fields)
                 if "✅" in result:
                     import re
                     m = re.search(r'rec\w+', result)
@@ -188,7 +190,7 @@ class PersistentSessionStore:
         """טוען session מAirtable לפי sender."""
         try:
             from tools.airtable_tools import airtable_get  # type: ignore
-            raw = airtable_get("LeadSessions", f"{{sender}}='{sender}'")
+            raw = airtable_get(Tables.LEAD_SESSIONS, f"{{{LSF.SENDER}}}='{sender}'")
             if not raw or "אין רשומות" in raw or "❌" in raw:
                 return None
 
@@ -215,7 +217,7 @@ class PersistentSessionStore:
     def _delete_from_db(self, record_id: str) -> None:
         try:
             from tools.airtable_tools import airtable_update  # type: ignore
-            airtable_update("LeadSessions", record_id, {"done": True, "deleted": True})
+            airtable_update(Tables.LEAD_SESSIONS, record_id, {LSF.DONE: True, "deleted": True})
         except Exception:
             pass
 

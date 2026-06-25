@@ -70,6 +70,8 @@ class Tables:
     DECISION_EVENTS         = "Decision Events"
     DECISION_STAKEHOLDERS   = "Decision Stakeholders"
     DECISION_INBOX          = "Decision Inbox"
+    # BUG-B — LeadSessions schema governance. ראה SPEC_BUG_B_LeadSessions_Schema.md.
+    LEAD_SESSIONS           = "LeadSessions"
 
 
 # ══════════════════════════════════════════════════
@@ -627,6 +629,21 @@ class EmergencyWindowStatus:
 class EmergencyWindowMaxRisk:
     # קבוע — לעולם לא Critical, גם לא ב-Emergency Window.
     HIGH = "High"
+
+# BUG-B — LeadSessions schema governance. ראה SPEC_BUG_B_LeadSessions_Schema.md.
+class LeadSessionsFields:
+    SENDER        = "sender"
+    DOMAIN        = "domain"
+    CHANNEL       = "channel"
+    STEP          = "step"
+    ANSWERS       = "answers"
+    DONE          = "done"
+    DROP_OFF_STEP = "drop_off_step"
+    UPDATED_AT    = "updated_at"
+    CREATED_AT    = "created_at"
+    SCORE         = "score"
+    TIER          = "tier"
+    # future: LAST_UPLOADED_FILE = "last_uploaded_file" (אחרי שנוצרת עמודה ב-Airtable)
 
 class UnitStatus:
     AVAILABLE       = "Available"

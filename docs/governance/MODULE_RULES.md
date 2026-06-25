@@ -38,3 +38,54 @@ Other modules may request, read, or display this data — but must not independe
 - ספק לגבי כתיב? → פתח את Airtable ובדוק. אסור לנחש.
 - שדה חדש נוצר ב-Airtable → אחר כך מגדירים ב-schema. לא הפוך.
 - אין "נרמול" של שמות ישנים בלי PR מפורש שמתקן גם את Airtable וגם את הקוד באותו commit.
+
+---
+
+## חוק 7 — הפרדת ליבה↔פלאגאין (Ports)
+
+פיצ'ר חדש לא מייבא תשתית ישירות.
+```
+❌ אסור:  import airtable_gateway / memory / llm  בתוך לוגיקת הפיצ'ר.
+✅ נכון:  הפיצ'ר מדבר דרך Port/Interface. נקודת הזרקה אחת
+          (build_*_ports) היא היחידה שמכירה את התשתית הקונקרטית.
+```
+זה מרחיב את חוק 3 (כיוון תלויות): לא רק "עסקי→טכני", אלא "דרך interface".
+תואם F08/F13. הפרה = חוב טכני ש-V4 ידרוש לפרק.
+בדיקה: `grep -c "import <infra>" <feature>.py` = 0 בליבה.
+
+**מקור:** התגלה תוך כדי בניית Decision Hub (יוני 2026) — היה משתמע, עכשיו מפורש.
+**דוגמה קיימת:** `decision_ports.py` (`DecisionPorts`, `build_default_ports`).
+
+## חוק 8 — הפרדת כלי↔גייט
+
+שער (gate) ≠ כלי (tool).
+```
+כלי:   מקבל קלט, מבצע פעולה, מחזיר פלט. (חוק 4)
+שער:   מחליט אם להמשיך. מחזיר חוזה אחיד (GateResult/VerifyResult).
+       שערים מאחורי registry דקלרטיבי (_GATE_REGISTRY / register_gate),
+       מראה את _REGISTRY ב-tool_registry.
+```
+פונקציה אחת לא גם מחליטה וגם מבצעת. ב-multi-tenant, שערים = plugins.
+
+**מקור:** התגלה תוך כדי בניית Decision Hub (יוני 2026).
+**דוגמה קיימת:** `decision_pipeline.py` (`GateResult`, `_GATE_REGISTRY`, `register_gate`).
+
+## חוק 9 — Input Precedence
+
+כל ערוץ קלט (קובץ/הודעה/קולי/אימייל) יש לו handler דיפולטי.
+```
+לפני הוספת יעד שני לקלט → מפה את ה-handler הקיים.
+הגדר precedence מפורש: context ייעודי פעיל מנצח את הדיפולט.
+handler דיפולטי ממשיך כרגיל כשאין context.
+```
+מקור: התנגשות Drive↔Decision Inbox — קובץ נחטף ל-Drive לפני שה-Inbox ראה.
+
+## חוק 10 — Raw-First, Never Interrogate
+
+```
+כל קלט נשמר גולמי מיד, לפני פרסור.
+ניחוש קורה אחרי — על רשומה קיימת.
+המערכת: מנחשת + יוצרת טיוטה + נותנת לתקן. לא חוקרת.
+מקסימום שאלה אחת, ורק אחרי שהגולמי נשמר.
+```
+עיקרון-על: BOSS never deletes signal — only down-ranks. גולמי תמיד נשמר.
