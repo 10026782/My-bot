@@ -23,6 +23,27 @@
 
 > נבנה מ-`git log --since="30 days ago"` (~172 commits, `f935c53`→`eebf73b`) + טבלאות ROADMAP.md (Stabilization Sprint, World 2, Sprint 16/06). כל commit hash צוטט ישירות מ-git או מ-ROADMAP — שורות שלא נמצאה להן ראיה ישירה מסומנות "לא ידוע".
 
+### C58 — Universal Sessions: Sessions table replaces non-existent LeadSessions
+- **תאריך:** 25/06/2026
+- **סוג:** Bug Fix (latent 403 on every session write) + Schema Change — לא flag-gated
+- **Requirement:** `SPEC_C58_Universal_Sessions.md` (הועלה ע"י הבעלים עם הוראה מפורשת "implement" — מהווה את אישור "אליהו" שהספק דרש ב-header שלו)
+- **תיאור:** `Tables.LEAD_SESSIONS` ("LeadSessions") **לא קיימת בפועל ב-Airtable** — כל כתיבה אליה הייתה מחזירה 403 (באג latent, לא תועד קודם ב-`BUG_AUDIT_LOG.md`). הוחלפה ב-`Tables.SESSIONS` (טבלה אמיתית, `tblHLfE24lTkVUhz0`) עם schema גנרי משותף: `class SessionsFields` (`airtable_schema.py`) — `Context Type` (select, ברירת מחדל `"lead"` לתאימות לאחור), `State JSON` (כל ה-state הקיים — domain/step/answers/done/drop_off_step/score/tier/last_uploaded_file — בשדה טקסט יחיד), `Sender ID`/`Channel`/`Created At`/`Updated At`, ו-10 שדות `Linked *` אופציונליים (Lead/Contact/Decision/Deal/Task/Payment/Venture/Media File/Business Memory/Decision Event). `session_store.py`'s `_sync_to_db`/`_load_from_db`/`_delete_from_db` נכתבו מחדש מלא לשימוש ב-Sessions; `_extract_balanced_json()` חדש (brace-depth counting, לא regex naive) מחלץ את ה-JSON המקונן מתוך הפורמט הטקסטואלי שמ-`airtable_get()` מחזיר.
+- ⚠️ **4 סטיות מהטקסט המילולי של הספק, כולן מכוונות ומתועדות:**
+  1. **`external_id` extraction** — הספק הציע `result.get("id") or result.get("record_id") or result.get("external_id")`; מומש כ-`result.get("external_id", "")` ישירות, לפי חוזה C53-A האמיתי שאומת ב-`tools/airtable_tools.py` (`_tool_result()` מחזיר מפתח `external_id` בלבד).
+  2. **`last_uploaded_file` חסר ב-State JSON** — הספק השמיט אותו מה-snippet המוצע, בסתירה לעקרון "State JSON = כל ה-state הקיים. אפס אובדן מידע" שהוא עצמו מצהיר ב-§4. נוסף ל-State JSON וגם `set_last_file()` עודכן לקרוא בפועל ל-`_sync_to_db()` (לפני כן לא היה מסונכרן ל-DB בכלל).
+  3. **`LINKED_MEDIA_FILE` table-identity mismatch** — הספק הציע לקשר את `last_uploaded_file.file_id` תמיד; אומת ב-`cmd_decision.py`/`app.py` ש-`type="inbox_file"` שומר record ID מטבלת **Decision Inbox**, ו-`type="drive_file"` שומר record ID מטבלת **Media Files** — שני סוגי record ID שונים. קישור ה-inbox_file record ל-`LINKED_MEDIA_FILE` (שמייעד ל-Media Files) היה גורם ל-`INVALID_RECORD_ID` באירטייבל. תוקן: הקישור מתבצע רק כש-`type == "drive_file"`.
+  4. **`_delete_from_db` מאבד state** — הספק הציע להחליף את כל ה-`State JSON` ב-`{"done": True, "deleted": True}` בלבד, מוחק domain/step/answers/score/tier. תוקן: `_delete_from_db` מקבל גם את `session` המלא ובונה tombstone ששומר את כל השדות הקיימים + `done`/`deleted=True`.
+  - בנוסף תוקן באג קדם-קיים (לא קשור ל-C58, התגלה תוך כדי הוספת בדיקות): ה-mock ב-`_run_tests()` רשם `sys.modules["airtable_tools"]` במקום `sys.modules["tools.airtable_tools"]` (הנתיב האמיתי שממנו `session_store.py` מייבא) — `ImportError` נתפס בשקט ב-`_sync_to_db`/`_load_from_db`, כך שכל בדיקות ה-DB-sync "עברו" מבלי לבדוק דבר (כפי שתועד גם ב-N13 לעיל: "18/20, 2 כשלים קיימים מראש" — אלה היו אותם 2 כשלים, לא קשורים-בטעות לתיקון).
+- **Commit:** עדיין לא בוצע commit נפרד — ייכלל ב-commit הבא על `claude/new-session-be1ckb`
+- **PR:** אין — לא התבקש, ולא מבוצע ללא אישור מפורש לפי הנחיית הסשן
+- **Review על ידי:** הבעלים (הוראת "implement" על הספק שהיה מסומן SPEC ONLY)
+- **Deploy תאריך:** לא רלוונטי — לא מוזג ל-`main`
+- **Verified בפרודקשן:** לא — סעיף 7 בספק עצמו (item 5, "session חדש → רשומה נוצרת ב-Sessions ב-Airtable") עדיין לא אומת מול Airtable חי
+- **Verification ראיה:** `python3 -m py_compile session_store.py airtable_schema.py app.py cmd_decision.py` נקי; `python3 session_store.py` → 36/36 self-tests עוברים (כולל 11 בדיקות חדשות ל-C58: `_extract_balanced_json` עם JSON מקונן, `context_type` ברירת מחדל, מבנה `State JSON` ב-`_sync_to_db`, gating נכון בין drive_file/inbox_file, round-trip מלא של `_load_from_db` מול מחרוזת מזויפת בפורמט האמיתי של `airtable_get()`); spec §6 greps כולם תקינים (`grep -c "LeadSessions" session_store*.py` → 0, `class SessionsFields`/`Tables.SESSIONS`/`State JSON`/`context_type` כולם נמצאים)
+- **Docs עודכנו:** ROADMAP.md (C58 חדש + header), CHANGE_CONTROL_LOG.md (רשומה זו), AI_CONTEXT.md
+- **Feature Flag:** אין — תשתית sessions תמיד-פעילה (לא אופציונלית), כמו `session_store.py` הקודם
+- **Rollback plan:** revert ה-commit הבא — `Tables.LEAD_SESSIONS` עדיין קיים בקוד (deprecated, לא נמחק) כך שאין breaking change בממשק; הסיכון העיקרי הוא ש-`Tables.SESSIONS`/שדות `SessionsFields` לא תואמים 1:1 לשמות השדות האמיתיים ב-Airtable (לא אומת ישירות מול ה-base, רק לפי הספק) — אם כתיבה ראשונה בפרודקשן תיכשל, יש לבדוק שמות שדות מול schema חי לפני כל דבר אחר
+
 ### C57 — Agent Tool Awareness: suppress premature text_block alongside tool_use (PR #149)
 - **תאריך:** 25/06/2026
 - **סוג:** Bug Fix (UX-level, behavior change — לא flag-gated)
