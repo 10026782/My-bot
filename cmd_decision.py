@@ -407,21 +407,26 @@ def _handle_forward(bot, msg, identity) -> None:
         return
 
     inbox_id = inbox_record["id"]
+    _suggest_decision_link(bot, msg.chat.id, inbox_id, text)
+
+
+def _suggest_decision_link(bot, chat_id, inbox_id: str, text: str) -> None:
+    """התאמה + הצעת שיוך — tail משותף בין _handle_forward ו-route_file_to_decision_inbox."""
     match, score = _find_matching_decision(text)
 
     if match and score > 60:
         title = match["fields"].get(DecisionFields.TITLE, "")
         markup = _inbox_suggestion_keyboard(inbox_id, match["id"])
-        bot.send_message(msg.chat.id, f"נראה כמו «{title}» — לשייך?", reply_markup=markup)
+        bot.send_message(chat_id, f"נראה כמו «{title}» — לשייך?", reply_markup=markup)
         return
 
     open_decisions = _list_open_decisions()
     if not open_decisions:
-        bot.send_message(msg.chat.id, "📥 נשמר ב-Decision Inbox. אין החלטות פתוחות לשיוך כרגע.")
+        bot.send_message(chat_id, "📥 נשמר ב-Decision Inbox. אין החלטות פתוחות לשיוך כרגע.")
         return
 
     markup = _decision_pick_keyboard(inbox_id, open_decisions)
-    bot.send_message(msg.chat.id, "לאיזו החלטה זה שייך?", reply_markup=markup)
+    bot.send_message(chat_id, "לאיזו החלטה זה שייך?", reply_markup=markup)
 
 
 def _link_inbox_to_decision(bot, call, inbox_id: str, decision_id: str) -> None:
@@ -462,6 +467,188 @@ def _link_inbox_to_decision(bot, call, inbox_id: str, decision_id: str) -> None:
     text = _format_pipeline_outcome(title, outcome, event)
     bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode="Markdown")
     bot.answer_callback_query(call.id)
+
+
+# ── Stage 0.5 — File/Voice Precedence Routing ──────────────────
+# SPEC_File_Precedence_Fix.md — תיקון Drive↔Decision Inbox collision.
+# Rule 9 (MODULE_RULES.md, Input Precedence): context ייעודי פעיל מנצח דיפולט;
+# handler דיפולטי (Drive/Voice) ממשיך כרגיל כשאין context.
+
+_DECISION_PREFIXES = ("החלטה:", "decision:")
+_DECISION_KEYWORDS = ("inbox", "decision inbox", "אינבוקס", "decision table", "טבלת החלטות")
+
+
+def session_has_active_decision(user_id: str) -> bool:
+    """True אם למשתמש יש /decision session פעיל (לא expired)."""
+    return _get_valid_state(str(user_id)) is not None
+
+
+def decision_context_active(msg) -> bool:
+    """
+    קובע אם קובץ/הודעה שייכים ל-Decision Inbox ולא לזרימת ה-Drive/Voice
+    הדיפולטית. 3 טריגרים (OR), לפי SPEC_File_Precedence_Fix.md:
+      1. prefix מפורש: "החלטה:" / "decision:"
+      2. /decision session פעיל למשתמש
+      3. אזכור מפורש של inbox/decision table במילות מפתח
+    """
+    text = (getattr(msg, "text", None) or getattr(msg, "caption", None) or "").strip()
+    text_lower = text.lower()
+
+    if text_lower.startswith(tuple(p.lower() for p in _DECISION_PREFIXES)):
+        return True
+
+    user = getattr(msg, "from_user", None)
+    user_id = str(getattr(user, "id", "")) if user else ""
+    if user_id and session_has_active_decision(user_id):
+        return True
+
+    if any(kw in text_lower for kw in _DECISION_KEYWORDS):
+        return True
+
+    return False
+
+
+def route_file_to_decision_inbox(
+    bot, identity, chat_id,
+    *,
+    text: str = "",
+    file_bytes: bytes | None = None,
+    filename: str = "",
+    mime_type: str = "",
+    channel: str = DecisionInboxChannel.TELEGRAM,
+) -> dict:
+    """
+    נקודת כניסה חדשה ל-Decision Inbox — קבצים/הודעות שנתפסו ע"י
+    decision_context_active() לפני שהגיעו ל-Drive/Voice handler (Rule 9/10).
+    Raw-first: שומר מיד, מאשר, רק אז מציע שיוך (_suggest_decision_link).
+    Drive משמש כאן רק כ-URL backend — לא נכתב Media Files/AssetRecord.
+    """
+    from tools.airtable_gateway import airtable_create
+
+    attachment = []
+    if file_bytes:
+        try:
+            from drive_adapter import upload_file, _get_upload_folder
+            folder_id = _get_upload_folder(identity.domain_id)
+            drive_file = upload_file(file_bytes, filename, mime_type, folder_id)
+            if drive_file.ok:
+                attachment = [{"url": drive_file.web_url, "filename": filename}]
+        except Exception as e:
+            logger.warning(f"[DecisionHub] route_file_to_decision_inbox drive upload failed: {e}")
+
+    source_tag = f"cmd_decision:{identity.tenant_id}:{identity.user_id}"
+    inbox_fields = {
+        DecisionInboxFields.RAW_INPUT: text,
+        DecisionInboxFields.CHANNEL: channel,
+        DecisionInboxFields.RECEIVED: datetime.now(ZoneInfo("Asia/Jerusalem")).isoformat(),
+        DecisionInboxFields.STATUS: DecisionInboxStatus.PENDING,
+        DecisionInboxFields.TENANT_ID: identity.tenant_id,
+    }
+    if attachment:
+        inbox_fields[DecisionInboxFields.ATTACHMENT] = attachment
+
+    inbox_record = airtable_create(Tables.DECISION_INBOX, inbox_fields, source=source_tag)
+    if not inbox_record:
+        bot.send_message(chat_id, "⚠️ הקובץ לא נשמר ב-Decision Inbox. בדוק logs.")
+        return {"ok": False}
+
+    inbox_id = inbox_record["id"]
+    bot.send_message(chat_id, "📥 נשמר ב-Decision Inbox.")
+
+    if attachment:
+        try:
+            from session_store import lead_sessions, FileUploadResult
+            lead_sessions.set_last_file(
+                identity.user_id,
+                FileUploadResult(
+                    type="inbox_file",
+                    url=attachment[0]["url"],
+                    file_id=inbox_id,
+                    original_filename=filename,
+                    timestamp=datetime.now(ZoneInfo("Asia/Jerusalem")).isoformat(),
+                    conversation_id=str(chat_id),
+                ),
+                domain=identity.domain_id,
+                channel="telegram",
+            )
+        except Exception as e:
+            logger.warning(f"[DecisionHub] set_last_file failed: {e}")
+
+    _suggest_decision_link(bot, chat_id, inbox_id, text)
+
+    return {
+        "ok": True,
+        "inbox_id": inbox_id,
+        "attachment_url": attachment[0]["url"] if attachment else "",
+    }
+
+
+# ── Stage 0.6 — "זה הנספח" attachment reference ────────────────
+# SPEC_File_Context_Reference.md — מקשר את הקובץ האחרון שהועלה
+# (FileUploadResult, session_store.lead_sessions) להחלטה.
+# Rule 10 (MODULE_RULES.md): שאלת שיוך אחת בלבד, לא חקירה.
+
+_ATTACHMENT_REFERENCE_PHRASES = ("זה הנספח", "זה הקובץ", "this is the attachment", "this is the file")
+
+
+def is_attachment_reference(text: str) -> bool:
+    t = (text or "").strip().lower()
+    return any(p.lower() in t for p in _ATTACHMENT_REFERENCE_PHRASES)
+
+
+def handle_attachment_reference(bot, identity, chat_id, text: str) -> bool:
+    """
+    מטפל ב"זה הנספח" — שולף את FileUploadResult האחרון (set_last_file)
+    ומציע שיוך להחלטה. אם הקובץ עדיין לא ב-Decision Inbox (העלה ל-Drive
+    ישירות) — נוצרת רשומה raw-first מה-URL הקיים, בלי להעלות שוב.
+    מחזיר True אם הטופל (כולל "לא נמצא קובץ"), False אם לא רלוונטי.
+    """
+    from session_store import lead_sessions, FileUploadResult
+
+    last_file = lead_sessions.get_last_file(identity.user_id)
+    if not last_file:
+        bot.send_message(chat_id, "לא מצאתי קובץ שהועלה לאחרונה.")
+        return True
+
+    if last_file.get("type") == "inbox_file" and last_file.get("file_id"):
+        _suggest_decision_link(bot, chat_id, last_file["file_id"], text)
+        return True
+
+    from tools.airtable_gateway import airtable_create
+
+    source_tag = f"cmd_decision:{identity.tenant_id}:{identity.user_id}"
+    filename = last_file.get("original_filename", "")
+    inbox_fields = {
+        DecisionInboxFields.RAW_INPUT: filename,
+        DecisionInboxFields.CHANNEL: DecisionInboxChannel.TELEGRAM,
+        DecisionInboxFields.RECEIVED: datetime.now(ZoneInfo("Asia/Jerusalem")).isoformat(),
+        DecisionInboxFields.STATUS: DecisionInboxStatus.PENDING,
+        DecisionInboxFields.TENANT_ID: identity.tenant_id,
+    }
+    if last_file.get("url"):
+        inbox_fields[DecisionInboxFields.ATTACHMENT] = [{"url": last_file["url"], "filename": filename}]
+
+    inbox_record = airtable_create(Tables.DECISION_INBOX, inbox_fields, source=source_tag)
+    if not inbox_record:
+        bot.send_message(chat_id, "⚠️ לא הצלחתי לשמור את הקובץ ל-Decision Inbox.")
+        return True
+
+    inbox_id = inbox_record["id"]
+    lead_sessions.set_last_file(
+        identity.user_id,
+        FileUploadResult(
+            type="inbox_file",
+            url=last_file.get("url", ""),
+            file_id=inbox_id,
+            original_filename=filename,
+            timestamp=datetime.now(ZoneInfo("Asia/Jerusalem")).isoformat(),
+            conversation_id=str(chat_id),
+        ),
+        domain=identity.domain_id,
+        channel="telegram",
+    )
+    _suggest_decision_link(bot, chat_id, inbox_id, filename)
+    return True
 
 
 # ── Matching helpers ──────────────────────────────────────────

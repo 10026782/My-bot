@@ -18,8 +18,11 @@ from __future__ import annotations
 import json
 import logging
 from collections import OrderedDict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Optional
+
+from airtable_schema import LeadSessionsFields as LSF, Tables
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +45,26 @@ def _new_session(domain: str = "real_estate", channel: str = "whatsapp") -> dict
         "updated_at":   _now_iso(),
         "drop_off_step": None,     # ← באיזה שלב נטש (None = לא נטש)
         "record_id":    "",        # Airtable record ID
+        "last_uploaded_file": None,  # ← FileUploadResult dict, ראה Stage 0.6
     }
+
+
+# ══════════════════════════════════════════════════
+# FileUploadResult — Stage 0.6 (SPEC_File_Context_Reference.md)
+# ══════════════════════════════════════════════════
+
+@dataclass
+class FileUploadResult:
+    """תוצאת העלאת קובץ גנרית — מקור Drive או Decision Inbox.
+    RAM-only כרגע: אין עמודת last_uploaded_file ב-Airtable LeadSessions
+    (ראה SPEC_BUG_B_LeadSessions_Schema.md §8) — לא נשלח ל-_sync_to_db.
+    """
+    type: str               # "drive_file" | "inbox_file"
+    url: str = ""
+    file_id: str = ""
+    original_filename: str = ""
+    timestamp: str = ""
+    conversation_id: str = ""
 
 
 def _now_iso() -> str:
@@ -138,6 +160,29 @@ class PersistentSessionStore:
         self._sync_to_db(sender, session)
         logger.info(f"[SessionStore] Session done: {sender} | tier={tier} score={score}")
 
+    def set_last_file(
+        self,
+        sender: str,
+        result: FileUploadResult,
+        domain: str = "real_estate",
+        channel: str = "whatsapp",
+    ) -> None:
+        """
+        שומר את הקובץ האחרון שהועלה — לשימוש ע"י "זה הנספח" וכד'.
+        RAM-only (ראה FileUploadResult docstring) — לא נכתב ל-Airtable עד
+        שתיווסף עמודת last_uploaded_file, כדי לא לסכן 422 על שאר השדות.
+        """
+        session = self.get_or_create(sender, domain, channel)
+        session["last_uploaded_file"] = asdict(result)
+        session["updated_at"]         = _now_iso()
+
+    def get_last_file(self, sender: str) -> Optional[dict]:
+        """מחזיר את ה-FileUploadResult (כdict) האחרון, אם קיים."""
+        session = self.get(sender)
+        if not session:
+            return None
+        return session.get("last_uploaded_file")
+
     def delete(self, sender: str) -> None:
         """מוחק session (איפוס)."""
         session = self._store.pop(sender, None)
@@ -152,29 +197,26 @@ class PersistentSessionStore:
             from tools.airtable_tools import airtable_add, airtable_update  # type: ignore
 
             fields = {
-                "sender":        sender,
-                "domain":        session.get("domain", ""),
-                "channel":       session.get("channel", ""),
-                "step":          session.get("step", 0),
-                "answers":       json.dumps(session.get("answers", {}), ensure_ascii=False),
-                "done":          session.get("done", False),
-                "drop_off_step": session.get("drop_off_step"),
-                "updated_at":    session.get("updated_at", _now_iso()),
-                "created_at":    session.get("created_at", _now_iso()),
-                "score":         session.get("score", 0),
-                "tier":          session.get("tier", ""),
+                LSF.SENDER:        sender,
+                LSF.DOMAIN:        session.get("domain", ""),
+                LSF.CHANNEL:       session.get("channel", ""),
+                LSF.STEP:          session.get("step", 0),
+                LSF.ANSWERS:       json.dumps(session.get("answers", {}), ensure_ascii=False),
+                LSF.DONE:          session.get("done", False),
+                LSF.DROP_OFF_STEP: session.get("drop_off_step"),
+                LSF.UPDATED_AT:    session.get("updated_at", _now_iso()),
+                LSF.CREATED_AT:    session.get("created_at", _now_iso()),
+                LSF.SCORE:         session.get("score", 0),
+                LSF.TIER:          session.get("tier", ""),
             }
 
             if session.get("record_id"):
-                result = airtable_update("LeadSessions", session["record_id"], fields)
-                return "✅" in result
+                result = airtable_update(Tables.LEAD_SESSIONS, session["record_id"], fields)
+                return bool(result.get("ok"))
             else:
-                result = airtable_add("LeadSessions", fields)
-                if "✅" in result:
-                    import re
-                    m = re.search(r'rec\w+', result)
-                    if m:
-                        session["record_id"] = m.group(0)
+                result = airtable_add(Tables.LEAD_SESSIONS, fields)
+                if result.get("ok"):
+                    session["record_id"] = result.get("external_id", "")
                     return True
                 return False
 
@@ -188,7 +230,7 @@ class PersistentSessionStore:
         """טוען session מAirtable לפי sender."""
         try:
             from tools.airtable_tools import airtable_get  # type: ignore
-            raw = airtable_get("LeadSessions", f"{{sender}}='{sender}'")
+            raw = airtable_get(Tables.LEAD_SESSIONS, f"{{{LSF.SENDER}}}='{sender}'")
             if not raw or "אין רשומות" in raw or "❌" in raw:
                 return None
 
@@ -215,7 +257,7 @@ class PersistentSessionStore:
     def _delete_from_db(self, record_id: str) -> None:
         try:
             from tools.airtable_tools import airtable_update  # type: ignore
-            airtable_update("LeadSessions", record_id, {"done": True, "deleted": True})
+            airtable_update(Tables.LEAD_SESSIONS, record_id, {LSF.DONE: True, "deleted": True})
         except Exception:
             pass
 
@@ -257,8 +299,8 @@ def _run_tests() -> bool:
     # mock airtable
     at = types.ModuleType("airtable_tools")
     saves = []
-    at.airtable_add    = lambda t, f: (saves.append(f), "✅ rec001")[1]
-    at.airtable_update = lambda t, r, f: (saves.append(f), "✅")[1]
+    at.airtable_add    = lambda t, f: (saves.append(f), {"ok": True, "external_id": "rec001"})[1]
+    at.airtable_update = lambda t, r, f: (saves.append(f), {"ok": True, "external_id": r})[1]
     at.airtable_get    = lambda t, formula: "אין רשומות"
     sys.modules["airtable_tools"] = at
 
