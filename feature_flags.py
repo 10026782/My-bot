@@ -42,9 +42,13 @@ INTEGRATIONS:
   FEATURE_WEEKLY_SUMMARY      - Weekly Business Memory digest (C22, scheduler.py); default OFF
   FEATURE_VOICE_NOTES         - Telegram voice note -> STT -> Drive + Media Files (F16); default OFF
   FEATURE_MEDIA_UPLOAD        - Telegram/TMA photo/document -> Drive + Media Files (F16); default OFF
+  META_OUTBOUND_ENABLED       - Meta WhatsApp Cloud API (F05a): true מריץ run_agent על inbound; false (default) מדלג כל עוד outbound הוא stub
 
 APPROVAL POLICY:
   EMERGENCY_WINDOW             - מאפשר הפעלת חריג זמני ל-High מהטלפון (core/emergency_window.py, כבוי כברירת מחדל)
+
+DECISION HUB (Stage 0):
+  FEATURE_DECISION_HUB         - /decision new|update|status + forward→Inbox (decision_pipeline.py, cmd_decision.py); default OFF
 
 OUTPUT GATEWAY (C52):
   FINANCIAL_COMMITMENT_GATE   - core/financial_gate.py escalation על הודעות עם התחייבות פיננסית

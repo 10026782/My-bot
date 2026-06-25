@@ -21,12 +21,15 @@ logger = logging.getLogger(__name__)
 _LOG_PATH = Path(os.environ.get("USAGE_LOG_PATH", "/tmp/usage.jsonl"))
 
 # ── ספים (configurable via env) ──────────────────────────────────────
-_SONNET_DAILY_LIMIT = int(os.environ.get("SONNET_DAILY_LIMIT", "50"))
+_SONNET_DAILY_LIMIT = int(os.environ.get("SONNET_DAILY_LIMIT", "100000"))
 
 
 def _enabled() -> bool:
-    val = os.environ.get("COST_WATCHDOG_ENABLED", "true")
-    return val.lower() not in ("false", "0", "no")
+    val = os.environ.get("COST_WATCHDOG_ENABLED", "").strip().lower()
+    if val:
+        return val not in ("false", "0", "no")
+    live = os.environ.get("COST_WATCHDOG_LIVE", "true").strip().lower()
+    return live not in ("false", "0", "no")
 
 
 def log_usage(

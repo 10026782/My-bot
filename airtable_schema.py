@@ -51,14 +51,10 @@ class Tables:
     # זיכרון עסקי
     BUSINESS_MEMORY  = "Business Memory"   # אירועים אסטרטגיים — הזנה ידנית
     INTERACTION_LOG  = "Interaction Log"   # לוג אוטומטי — agent/system interactions
-    # שמורים לשימוש פנימי
-    IMPORTS         = "Imports"
-    TENANTS         = "Tenants"
     # Game / Gamification
     WORLDS          = "Worlds"
     QUESTS          = "Quests"
     COINS_LOG       = "Coins_Log"
-    DAILY_TASKS     = "Daily_Tasks"
     DAILY_CHECKIN   = "Daily_Checkin"
     # Roadmap
     ROADMAP_TASKS   = "Roadmap_Tasks"
@@ -69,6 +65,19 @@ class Tables:
     EMERGENCY_WINDOW = "Emergency_Window"  # חריג מבוקר ל-High מהטלפון — ראה Approval_Policy_Spec.md
     # F16 — Media Layer
     MEDIA_FILES      = "Media Files"       # F16 — voice notes + file uploads (drive_url + metadata). Must be created manually in Airtable.
+    # Decision Hub (Stage 0) — created manually in Airtable base app4bcgoX7t0HUVnm. See SPEC_Decision_Hub_Stage0.md.
+    DECISIONS              = "Decisions"
+    DECISION_EVENTS         = "Decision Events"
+    DECISION_STAKEHOLDERS   = "Decision Stakeholders"
+    DECISION_INBOX          = "Decision Inbox"
+    # BUG-B — LeadSessions schema governance. ראה SPEC_BUG_B_LeadSessions_Schema.md.
+    # ⚠️ DEPRECATED (C58, SPEC_C58_Universal_Sessions.md): טבלה זו מעולם לא נוצרה ב-Airtable
+    # בפועל (403/לא קיימת) — session_store.py הוחלף לכתוב ל-Tables.SESSIONS. לא נמחק כאן
+    # כדי לא לשבור קוד היסטורי/דוחות שמתייחסים לקבוע הזה; אין שימוש חי בו.
+    LEAD_SESSIONS           = "LeadSessions"
+    # C58 — Universal Sessions. טבלה קיימת ב-Airtable (tblHLfE24lTkVUhz0), משותפת לכל
+    # context_type (lead/decision/task/...), ראה SPEC_C58_Universal_Sessions.md.
+    SESSIONS                 = "Sessions"
 
 
 # ══════════════════════════════════════════════════
@@ -291,7 +300,6 @@ class LeadFields:
     SOURCE          = "source"
     CHANNEL         = "channel"
     CREATED_AT      = "created_at"
-    UPDATED_AT      = "updated_at"
     MEMORY_KEY      = "memory_key"
     TENANT_ID       = "tenant_id"
     DOMAIN          = "domain"
@@ -386,40 +394,6 @@ class ProfileFields:
     """
     NAME            = "Name"          # always "main" — single profile row
     PROFILE_DATA    = "ProfileData"   # full profile dict, stored as JSON (Long text)
-
-
-class ImportsFields:
-    """Import shipment records — table: Tables.IMPORTS.
-    Not yet wired to any live read/write path (see registry_calibration_report.md
-    — table is currently UNUSED); fields below match the import business domain
-    but have no production Airtable confirmation yet.
-    """
-    NAME            = "Name"
-    SUPPLIER        = "Supplier"
-    STATUS          = "Status"        # Pending | In Transit | Customs | Delivered | Cancelled
-    ORDER_DATE      = "Order Date"
-    ETA             = "ETA"
-    TOTAL_COST      = "Total Cost"
-    ADVANCE_PCT     = "Advance %"
-    BALANCE_PCT     = "Balance %"
-    NOTES           = "Notes"
-
-
-class TenantsFields:
-    """Multi-tenant registry — table: Tables.TENANTS.
-    Mirrors tenant_provisioner._save_tenant_to_airtable()'s actual field dict.
-    """
-    TENANT_ID       = "tenant_id"
-    NAME            = "Name"
-    TEMPLATE        = "template"
-    OWNER_NAME      = "owner_name"
-    OWNER_PHONE     = "owner_phone"
-    PLAN            = "plan"
-    STATUS          = "status"
-    CREATED_AT      = "created_at"
-    AIRTABLE_BASE   = "airtable_base"
-    DOMAINS         = "domains"
-    FEATURES        = "features"
 
 
 class WorldsFields:
@@ -662,6 +636,47 @@ class EmergencyWindowMaxRisk:
     # קבוע — לעולם לא Critical, גם לא ב-Emergency Window.
     HIGH = "High"
 
+# BUG-B — LeadSessions schema governance. ראה SPEC_BUG_B_LeadSessions_Schema.md.
+class LeadSessionsFields:
+    SENDER        = "sender"
+    DOMAIN        = "domain"
+    CHANNEL       = "channel"
+    STEP          = "step"
+    ANSWERS       = "answers"
+    DONE          = "done"
+    DROP_OFF_STEP = "drop_off_step"
+    UPDATED_AT    = "updated_at"
+    CREATED_AT    = "created_at"
+    SCORE         = "score"
+    TIER          = "tier"
+    # future: LAST_UPLOADED_FILE = "last_uploaded_file" (אחרי שנוצרת עמודה ב-Airtable)
+
+
+# C58 — Universal Sessions. ראה SPEC_C58_Universal_Sessions.md.
+# Session = מצב עבודה זמני סביב ישות קיימת (lead/decision/task/...) — לא דאטה עסקי.
+# טבלה אחת משותפת (Tables.SESSIONS), context_type מבדיל בין סוגי השימוש.
+class SessionsFields:
+    SESSION_ID       = "Session ID"
+    CONTEXT_TYPE     = "Context Type"      # select: lead/decision/task/payment/deal/contact/media/general
+    STATE_JSON       = "State JSON"
+    LAST_TOOL_RESULT = "Last Tool Result"
+    CHANNEL          = "Channel"
+    SENDER_ID        = "Sender ID"
+    CREATED_AT       = "Created At"
+    UPDATED_AT       = "Updated At"
+    # Links (כולם אופציונליים):
+    LINKED_LEAD            = "Linked Lead"
+    LINKED_CONTACT         = "Linked Contact"
+    LINKED_DECISION        = "Linked Decision"
+    LINKED_DECISION_EVENT  = "Linked Decision Event"
+    LINKED_DEAL            = "Linked Deal"
+    LINKED_TASK            = "Linked Task"
+    LINKED_PAYMENT         = "Linked Payment"
+    LINKED_VENTURE         = "Linked Venture"
+    LINKED_MEDIA_FILE      = "Linked Media File"
+    LINKED_BUSINESS_MEMORY = "Linked Business Memory"
+
+
 class UnitStatus:
     AVAILABLE       = "Available"
     RESERVED        = "Reserved"
@@ -720,7 +735,6 @@ FIELD_MAP = {
         "source":        "מקור",
         "channel":       "ערוץ",
         "created_at":    "תאריך יצירה",
-        "updated_at":    "תאריך עדכון",
         "memory_key":    "מפתח זיכרון",
         "tenant_id":     "מזהה tenant",
         "domain":        "real_estate | import | recruitment | saas | finance | general",
@@ -861,18 +875,224 @@ class BossBattlesFields:
     QUESTION     = "Question"
     ANSWER       = "Answer"
     STATUS       = "Status"       # Boss Defeated | Boss Won
+
+
+# ══════════════════════════════════════════════════
+# Decision Hub (Stage 0) — verified live via Airtable MCP get_table_schema,
+# base app4bcgoX7t0HUVnm, 2026-06-24. See SPEC_Decision_Hub_Stage0.md.
+# ══════════════════════════════════════════════════
+
+class DecisionFields:
+    """Table: Tables.DECISIONS."""
+    TITLE               = "Title"
+    DOMAIN               = "Domain"             # singleSelect — see DecisionDomain
+    ESTIMATED_EXPOSURE   = "Estimated Exposure"  # currency
+    EXPOSURE_TYPE        = "Exposure Type"       # singleSelect — see DecisionExposureType
+    STATUS               = "Status"              # singleSelect — see DecisionStatus
+    READINESS            = "Readiness"           # singleSelect — see DecisionReadiness; Stage 3 fills, default empty
+    URGENCY              = "Urgency"              # singleSelect — see DecisionUrgency
+    CURRENT_DRAFT        = "Current Draft #"      # number (integer)
+    RISK_IF_YES          = "Risk If Yes"          # long text
+    RISK_IF_NO           = "Risk If No"           # long text
+    MISSING_INFO         = "Missing Info"         # long text
+    FINAL_DECISION       = "Final Decision"       # long text
+    LESSONS_LEARNED      = "Lessons Learned"      # long text
+    LINKED_CONTACTS      = "Linked Contacts"      # Link → Tables.CONTACTS
+    LINKED_DEAL          = "Linked Deal"          # Link → Tables.DEALS
+    LINKED_TASKS         = "Linked Tasks"         # Link → Tables.TASKS
+    LINKED_MEMORY        = "Linked Memory"        # Link → Tables.BUSINESS_MEMORY
+    TENANT_ID            = "tenant_id"
+    CREATED              = "Created"              # createdTime
+    LAST_UPDATED         = "Last Updated"         # lastModifiedTime
+    # NOTE: live schema has a duplicate-name artifact — two distinct link fields
+    # both named "Decision Events" (fldZ4cKSmuvx8vBJY, fldNYIC3D6FTfaOFW). Not
+    # referenced by field name here since Airtable would reject an ambiguous
+    # write target; leave both alone until Eliyahu resolves the duplication.
+
+
+class DecisionDomain:
+    REAL_ESTATE  = "נדל\"ן"
+    IMPORT       = "ייבוא"
+    RECRUITMENT  = "גיוס"
+    PARTNERSHIP  = "שותפות"
+    GENERAL      = "כללי"
+
+
+class DecisionExposureType:
+    FINANCIAL  = "כספי"
+    LEGAL      = "משפטי"
+    OPERATIONAL = "תפעולי"
+    REPUTATION = "מוניטין"
+
+
+class DecisionStatus:
+    OPEN           = "Open"
+    PENDING_INPUT  = "Pending Input"
+    DECIDED_YES    = "Decided Yes"
+    DECIDED_NO     = "Decided No"
+    CANCELLED      = "Cancelled"
+
+
+class DecisionReadiness:
+    READY      = "READY"
+    NOT_READY  = "NOT_READY"
+
+
+class DecisionUrgency:
+    NONE       = "אין"
+    WEEK       = "שבוע"
+    H48        = "48 שעות"
+    NOW        = "עכשיו"
+
+
+class DecisionEventFields:
+    """Table: Tables.DECISION_EVENTS — timeline + evidence."""
+    DECISION             = "Decision"             # Link → Tables.DECISIONS
+    EVENT_DATE           = "Event Date"           # dateTime
+    EVENT_TYPE           = "Event Type"           # singleSelect — see DecisionEventType
+    CHANNEL              = "Channel"              # singleSelect — see DecisionEventChannel
+    STAKEHOLDER          = "Stakeholder"           # Link → Tables.CONTACTS
+    RAW_CONTENT          = "Raw Content"           # long text — raw evidence, never deleted
+    ATTACHMENT           = "Attachment"
+    TRUST_LEVEL          = "Trust Level"           # singleSelect — see DecisionTrustLevel; Stage 1 fills, default empty
+    SOURCE_RELIABILITY   = "Source Reliability"    # singleSelect — see DecisionSourceReliability
+    CONFIDENCE           = "Confidence"            # number 0-100
+    TAGS                 = "Tags"                  # multipleSelects — see DecisionEventTag
+    DELTA_TYPE           = "Delta Type"             # singleSelect — see DecisionDeltaType
+    STATUS               = "Status"                 # singleSelect — see DecisionEventStatus; default Active
+    SUPERSEDES           = "Supersedes"             # self-link — NOT "Supersedes Decision (ignore)" (legacy setup field, do not use)
+    AI_SUMMARY           = "AI Summary"             # long text
+    TENANT_ID            = "tenant_id"
+    CLAIM_TOPIC           = "Claim Topic"            # single line text — Stage 1
+    CLAIM_TOPIC_SOURCE    = "Claim Topic Source"     # singleSelect — see DecisionClaimTopicSource
+    CLAIM_TOPIC_CONFIDENCE = "Claim Topic Confidence" # number 0-100
+
+
+class DecisionEventType:
+    MESSAGE   = "הודעה"
+    DOCUMENT  = "מסמך"
+    MEETING   = "פגישה"
+    DRAFT     = "טיוטה"
+    PRESSURE  = "לחץ"
+    POSITION  = "עמדה"
+    DECISION  = "החלטה"
+
+
+class DecisionEventChannel:
+    WHATSAPP  = "וואטסאפ"
+    TELEGRAM  = "טלגרם"
+    EMAIL     = "אימייל"
+    DOCUMENT  = "מסמך"
+    VOICE     = "קולי"
+    MANUAL    = "ידני"
+
+
+class DecisionTrustLevel:
+    T0 = "T0"
+    T1 = "T1"
+    T2 = "T2"
+    T3 = "T3"
+
+
+class DecisionSourceReliability:
+    CONTRACT   = "חוזה"
+    LAWYER     = "עו\"ד"
+    ACCOUNTANT = "רו\"ח"
+    DOCUMENT   = "מסמך"
+    PARTNER    = "שותף"
+    CLIENT     = "לקוח"
+    MANUAL     = "ידני"
+    EMPLOYEE   = "עובד"
+    RUMOR      = "שמועה"
+    UNKNOWN    = "לא_ידוע"
+
+
+class DecisionClaimTopicSource:
+    """singleSelect options on Decision Events.Claim Topic Source (Airtable-confirmed)."""
+    AUTO       = "Auto"
+    FILENAME   = "Filename"
+    KEYWORD    = "Keyword"
+    EVENT_TYPE = "Event Type"
+    MANUAL     = "Manual"
+
+
+class DecisionEventTag:
+    PARTIAL_TRANSCRIPT = "תמלול_חלקי"
+    VAGUE              = "עמום"
+    CONFLICT           = "קונפליקט"
+    PRESSURE_ONLY       = "לחץ_בלבד"
+    MISSING_CONTEXT     = "חסר_הקשר"
+    # NOT CONFIRMED against live Airtable Tags multipleSelects options — added for Stage 1,
+    # may need to be created in Airtable before first real write reaches these branches.
+    LOW_CONFIDENCE      = "אמינות_נמוכה"
+    PRESSURE_HIGH_RISK  = "לחץ_סיכון_גבוה"
+
+
+class DecisionDeltaType:
+    FACT          = "עובדה"
+    DOCUMENT      = "מסמך"
+    POSITION_SHIFT = "שינוי_עמדה"
+    PRESSURE      = "לחץ"
+    NO_CHANGE     = "ללא_שינוי"
+
+
+class DecisionEventStatus:
+    LOGGED      = "Logged"
+    ACTIVE      = "Active"
+    SUPERSEDED  = "Superseded"
+
+
+class DecisionStakeholderFields:
+    """Table: Tables.DECISION_STAKEHOLDERS."""
+    DECISION          = "Decision"           # Link → Tables.DECISIONS
+    CONTACT           = "Contact"            # Link → Tables.CONTACTS
+    ROLE              = "Role"               # singleSelect — see DecisionStakeholderRole
+    POSITION          = "Position"           # singleSelect — see DecisionStakeholderPosition
+    POSITION_DETAILS  = "Position Details"   # long text
+    LAST_UPDATED      = "Last Updated"       # lastModifiedTime
+    TENANT_ID         = "tenant_id"
+
+
+class DecisionStakeholderRole:
+    DECIDER     = "מחליט"
+    ADVISOR     = "מייעץ"
+    AFFECTED    = "מושפע"
+    OPPONENT    = "מתנגד"
+    PENDING     = "ממתין"
+
+
+class DecisionStakeholderPosition:
+    FOR        = "בעד"
+    AGAINST    = "נגד"
+    PENDING    = "ממתין"
+    UNKNOWN    = "לא ידוע"
+
+
+class DecisionInboxFields:
+    """Table: Tables.DECISION_INBOX — entry door for forwarded/raw input."""
+    RAW_INPUT           = "Raw Input"           # long text — exactly as received
+    CHANNEL             = "Channel"             # singleSelect — see DecisionInboxChannel (NOTE: live options are English, unlike Decision Events' Hebrew Channel field)
+    RECEIVED            = "Received"            # dateTime
+    ATTACHMENT          = "Attachment"          # multipleAttachments — write as [{"url": ..., "filename": ...}], verified via Airtable MCP
+    SUGGESTED_DECISION  = "Suggested Decision"  # Link → Tables.DECISIONS
+    MATCH_CONFIDENCE    = "Match Confidence"    # number 0-100
+    STATUS              = "Status"              # singleSelect — see DecisionInboxStatus; default Pending
+    LINKED_EVENT        = "Linked Event"        # Link → Tables.DECISION_EVENTS
+    TENANT_ID           = "tenant_id"
+
+
+class DecisionInboxChannel:
+    """Live options verified via Airtable MCP — English, unlike Decision Events.Channel (Hebrew)."""
+    TELEGRAM  = "Telegram"
+    WHATSAPP  = "WhatsApp"
+    EMAIL     = "Email"
+    DOCUMENT  = "Document"
+    VOICE     = "Voice"
+    MANUAL    = "Manual"
+
+
+class DecisionInboxStatus:
+    PENDING   = "Pending"
+    LINKED    = "Linked"
+    REJECTED  = "Rejected"
     COINS_EARNED = "Coins_Earned"
-
-
-class DailyTaskFields:
-    DATE   = "Date"
-    TASK   = "Task"
-    QUEST  = "Quest"    # linked record → Quests
-    COINS  = "Coins"
-    STATUS = "Status"   # Todo | Done | Skipped
-    WHO    = "Who"      # אליהו | קלוד קוד | אורי
-
-class DailyTaskStatus:
-    TODO    = "Todo"
-    DONE    = "Done"
-    SKIPPED = "Skipped"

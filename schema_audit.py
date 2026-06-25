@@ -53,6 +53,12 @@ def run_audit(live: bool = True) -> bool:
         except Exception as e:
             print(f"⚠️  לא ניתן לשלוף schema: {e}")
             print("   ממשיך עם cache קיים (אם יש)\n")
+            cache_path = Path(__file__).parent / "schema_cache.json"
+            try:
+                tables = json.loads(cache_path.read_text(encoding="utf-8")).get("tables", {})
+            except FileNotFoundError:
+                print("❌ אין cache קיים — לא ניתן להריץ audit")
+                return False
     else:
         tables = json.loads((Path(__file__).parent / "schema_cache.json")
                             .read_text(encoding="utf-8")).get("tables", {})

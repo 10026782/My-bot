@@ -24,7 +24,7 @@ from airtable_schema import (
     BusinessMemoryFields, InteractionLogFields, Tables,
     DealFields,
     QuestsFields, CoinsLogFields, WorldsFields, QuestStatus, WorldStatus,
-    DailyTaskFields, DailyTaskStatus, ApprovalsFields, ApprovalStatus,
+    ApprovalsFields, ApprovalStatus,
     RoadmapTaskFields, RoadmapTaskStatus, DailyCheckinFields,
     VentureFields, VentureStage,
     LeadStatus, LeadOutcome,
@@ -2728,23 +2728,29 @@ def update_quest(quest_id, identity):
     if new_status == QuestStatus.DONE:
         patch_fields[QuestsFields.DONE_BY] = identity.display_name or identity.user_id
 
-    ok = _at_patch(Tables.QUESTS, quest_id, patch_fields)
-    if not ok:
-        return jsonify({"error": "update failed"}), 500
-
-    # Auto-write Coins_Log only on first completion
+    # Auto-write Coins_Log before the status patch, only on first completion —
+    # so a log failure doesn't leave a quest marked done with no coins recorded.
     coins_awarded = 0
     if new_status == QuestStatus.DONE and old_status != QuestStatus.DONE:
         coins = int(qf.get(QuestsFields.COINS, 0) or 0)
         if coins > 0:
-            _at_post(Tables.COINS_LOG, {
+            log_ok = _at_post(Tables.COINS_LOG, {
                 CoinsLogFields.ACTION:        "Quest Completed",
                 CoinsLogFields.COINS:         coins,
                 CoinsLogFields.DATE:          date.today().isoformat(),
                 CoinsLogFields.QUEST:         [quest_id],
                 CoinsLogFields.NOTE:          f"Quest completed via TMA: {quest_name}",
             })
+            if not log_ok:
+                return jsonify({"error": "coins log failed — quest not marked done"}), 500
             coins_awarded = coins
+
+    ok = _at_patch(Tables.QUESTS, quest_id, patch_fields)
+    if not ok:
+        if coins_awarded:
+            logger.warning(f"[Coins] quest {quest_id} coins logged but status patch failed")
+            return jsonify({"ok": True, "coins_awarded": coins_awarded, "warning": "status not updated"})
+        return jsonify({"error": "update failed"}), 500
 
     _audit(
         "quest_done" if new_status == QuestStatus.DONE else "quest_update",
@@ -2851,10 +2857,6 @@ def complete_daily_task(task_id, identity):
     if _is_roadmap_complete(old_status):
         return jsonify({"ok": True, "coins_awarded": 0, "already_done": True})
 
-    ok = _at_patch(Tables.ROADMAP_TASKS, task_id, {RoadmapTaskFields.STATUS: RoadmapTaskStatus.DONE})
-    if not ok:
-        return jsonify({"error": "update failed"}), 500
-
     coins = int(f.get(RoadmapTaskFields.COINS, 0) or 0)
     coins_awarded = 0
     if coins > 0:
@@ -2867,15 +2869,15 @@ def complete_daily_task(task_id, identity):
         }
         if quest_ids:
             log_fields[CoinsLogFields.QUEST] = quest_ids
-        log_rec = _at_post(Tables.COINS_LOG, log_fields)
-        if not log_rec:
-            return jsonify({
-                "error": "coins log failed",
-                "task_id": task_id,
-                "status": RoadmapTaskStatus.DONE,
-                "coins_awarded": 0,
-            }), 500
+        log_ok = _at_post(Tables.COINS_LOG, log_fields)
+        if not log_ok:
+            return jsonify({"error": "coins log failed — task not marked done"}), 500
         coins_awarded = coins
+
+    ok = _at_patch(Tables.ROADMAP_TASKS, task_id, {RoadmapTaskFields.STATUS: RoadmapTaskStatus.DONE})
+    if not ok:
+        logger.warning(f"[Coins] task {task_id} coins logged but DONE patch failed")
+        return jsonify({"ok": True, "coins_awarded": coins_awarded, "warning": "status not updated"})
 
     _audit("roadmap_task_done", identity, details=f"{task_name} +{coins}🪙")
     return jsonify({"ok": True, "coins_awarded": coins_awarded})

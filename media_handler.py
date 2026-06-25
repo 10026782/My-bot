@@ -4,8 +4,14 @@
 # upload route) — not registered as agent tools, no dispatcher/registry
 # wiring (matches cmd_update.py's pattern for direct, non-agent actions).
 #
-# Pipeline: classify size -> Drive upload -> (audio only) STT -> Airtable
-# metadata -> optional Business Memory approval for the transcript.
+# Photo/document pipeline (handle_file_upload / handle_tma_upload): classify
+# size -> Drive upload -> Airtable metadata. Unchanged.
+#
+# Voice pipeline (handle_voice_note, F16 voice-logic rewrite): transcribe
+# always -> detect action prefix -> no action: log to daily memory for
+# review; action + short + no risk word: save to Business Memory directly;
+# action + long OR risk word: owner approval gate (✅ שמור / ✏️ ערוך / ❌ בטל)
+# before saving. No Drive, no Media Files record, for voice.
 
 from __future__ import annotations
 
@@ -30,6 +36,14 @@ _MEMORY_KEYWORDS = (
     "לזכור", "הסכמנו", "התחייבנו", "עסקה", "מחיר סופי",
 )
 
+# ── Voice action-prefix detection ───────────────────────────────────
+# PREFIX_HARD בלבד — prefix מפורש בתחילת התמלול (אחרי נרמול) מפעיל routing.
+# פעלי פעולה רכים ("תזכיר"/"תפתח"/"תשלח"/"תקבע") לא מפעילים Business Memory.
+PREFIX_HARD = ("משימה:", "ליד:", "זיכרון:", "רעיון:", "עסקה:")  # exact startswith
+RISK_WORDS = (
+    "כסף", "חוזה", "התחייבות", "מחיקה", "שינוי סטטוס", "שלח ללקוח",
+)
+
 
 @dataclass
 class MediaError:
@@ -47,6 +61,7 @@ class MediaResult:
     normalized_transcript: str = ""
     saved_to_memory: bool = False
     file_size_tier: str = ""
+    message: str = ""
     error: MediaError | None = None
 
 
@@ -60,6 +75,31 @@ def _classify_size(size_bytes: int) -> str:
 
 def _should_save_to_memory(text: str) -> bool:
     return any(kw in text for kw in _MEMORY_KEYWORDS)
+
+
+_BIDI_CONTROL_CHARS = "".join(
+    chr(c) for c in (0x200E, 0x200F, 0x202A, 0x202B, 0x202C, 0x202D, 0x202E)
+)
+
+
+def _normalize_for_prefix(text: str) -> str:
+    """מנרמל תמלול לפני זיהוי prefix."""
+    import re
+    text = re.sub(f"[{_BIDI_CONTROL_CHARS}]", "", text)
+    PREFIX_WORDS = ["זיכרון", "משימה", "ליד", "רעיון", "עסקה"]
+    for word in PREFIX_WORDS:
+        text = re.sub(rf'^{word}[,،.。:\s]\s*', f'{word}: ', text)
+    return text.strip()
+
+
+def _has_action(transcript: str) -> bool:
+    """רק PREFIX_HARD בתחילת התמלול (אחרי נרמול) מפעיל פעולה."""
+    normalized = _normalize_for_prefix(transcript)
+    return any(normalized.startswith(p) for p in PREFIX_HARD)
+
+
+def _has_risk_words(transcript: str) -> bool:
+    return any(w in transcript for w in RISK_WORDS)
 
 
 def _idem_key(source: str, file_id: str, user_id: str) -> str:
@@ -79,6 +119,8 @@ def _resolve_drive_folder(domain: str) -> tuple[str | None, MediaError | None]:
 
 
 def _format_media_result(result: MediaResult) -> str:
+    if result.message:
+        return result.message
     if not result.ok:
         return f"❌ שגיאה בעיבוד הקובץ: {result.error.error_message}"
 
@@ -95,42 +137,13 @@ def _format_media_result(result: MediaResult) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════
-# Business Memory approval sub-flow
+# Business Memory save + approval gate (voice)
 # ══════════════════════════════════════════════════════════════════
 
-def _request_memory_approval(
-    transcript: str,
-    domain: str,
-    source: str,
-    owner_chat_id: str,
-) -> tuple[str, str]:
-    """Queues an owner-approval request to save a voice transcript to Business Memory."""
-    from event_bus import bus
-
-    label = f"🧠 שמירה ב-Business Memory: {transcript[:60]}"
-    payload = {
-        "action_type": "media_save_to_memory",
-        "transcript": transcript,
-        "domain": domain,
-        "source": source,
-    }
-    action_id, btn_label = bus.request_approval(
-        action="media_save_to_memory",
-        payload=payload,
-        chat_id=owner_chat_id,
-        label=label,
-    )
-    return action_id, btn_label
-
-
-def _handle_memory_confirmed(payload: dict, chat_id: str) -> str:
-    """Subscribed to media_save_to_memory.confirmed — executes the Business Memory write."""
+def _save_transcript_to_memory(transcript: str, domain: str, source: str) -> bool:
+    """Writes a voice transcript to Business Memory via the Airtable gateway."""
     from tools.airtable_gateway import airtable_create
     from airtable_schema import Tables, BusinessMemoryFields as BMF
-
-    transcript = payload.get("transcript", "")
-    domain = payload.get("domain", "general")
-    source = payload.get("source", "media_handler")
 
     fields = {
         BMF.TITLE: f"הודעה קולית — {datetime.now(ZoneInfo('Asia/Jerusalem')).strftime('%d/%m/%Y')}",
@@ -143,9 +156,45 @@ def _handle_memory_confirmed(payload: dict, chat_id: str) -> str:
     record = airtable_create(Tables.BUSINESS_MEMORY, fields, source=f"media_handler:{source}")
     if record:
         logger.info("[media_handler] saved transcript to Business Memory id=%s", record.get("id"))
-        return "✅ נשמר ב-Business Memory"
+        return True
     logger.warning("[media_handler] failed to save transcript to Business Memory")
-    return "❌ שמירה ל-Business Memory נכשלה"
+    return False
+
+
+# שדה "Status" בטבלת Media Files נוסף ידנית ב-Airtable (כמו שאר השדות בטבלה הזו —
+# ראה הערת MediaFileFields). אין ניתוב לפי סוג ה-prefix שתאם (משימה/ליד/זיכרון/...) —
+# זה F17, לא כאן: כל action_requested נשמר כ-pending גנרי ל-Voice Inbox.
+_MEDIA_FILES_STATUS_FIELD = "Status"
+
+
+def _save_transcript_to_media_files(transcript: str, domain: str, source: str, status: str = "pending") -> bool:
+    """שומר תמלול קולי ל-Voice Inbox (טבלת Media Files, סטטוס pending) — בלי ניתוב לפי prefix."""
+    from tools.airtable_gateway import airtable_create
+    from airtable_schema import Tables, MediaFileFields as MFF
+
+    fields = {
+        MFF.NAME: f"הודעה קולית — {datetime.now(ZoneInfo('Asia/Jerusalem')).strftime('%d/%m/%Y')}",
+        MFF.FILE_TYPE: "audio",
+        MFF.DOMAIN: domain,
+        MFF.SOURCE: source,
+        MFF.NORMALIZED_TRANSCRIPT: transcript,
+        _MEDIA_FILES_STATUS_FIELD: status,
+    }
+    record = airtable_create(Tables.MEDIA_FILES, fields, source=f"media_handler:{source}")
+    if record:
+        logger.info("[media_handler] saved transcript to Voice Inbox (Media Files) id=%s status=%s", record.get("id"), status)
+        return True
+    logger.warning("[media_handler] failed to save transcript to Voice Inbox (Media Files)")
+    return False
+
+
+def _handle_memory_confirmed(payload: dict, chat_id: str) -> str:
+    """Subscribed to media_save_to_memory.confirmed — fires after the owner taps ✅ שמור."""
+    transcript = payload.get("transcript", "")
+    domain = payload.get("domain", "general")
+    source = payload.get("source", "media_handler")
+    saved = _save_transcript_to_memory(transcript, domain, source)
+    return "✅ נשמר ב-Business Memory" if saved else "❌ שמירה ל-Business Memory נכשלה"
 
 
 def _register_subscriptions() -> None:
@@ -155,6 +204,116 @@ def _register_subscriptions() -> None:
 
 
 _register_subscriptions()
+
+
+# Owner chat_id -> {"domain": ..., "source": ...} while awaiting a follow-up
+# text message after tapping ✏️ ערוך.
+_pending_voice_edits: dict[str, dict] = {}
+_voice_callbacks_registered = False
+
+
+def _register_voice_callbacks(bot) -> None:
+    """Registers the ✏️ ערוך callback + follow-up text capture on the live bot instance.
+    Idempotent — safe to call on every approval request."""
+    global _voice_callbacks_registered
+    if _voice_callbacks_registered:
+        return
+
+    @bot.callback_query_handler(func=lambda c: (c.data or "").startswith("voice_edit:"))
+    def _cb_voice_edit(call):
+        from event_bus import bus
+
+        action_id = call.data.split(":", 1)[1]
+        item = bus.pop(action_id)
+        if not item:
+            bot.answer_callback_query(call.id, "⏰ פג תוקף — ההקלטה לא קיימת יותר.")
+            return
+
+        owner_id = str(call.from_user.id)
+        _pending_voice_edits[owner_id] = {
+            "domain": item["payload"].get("domain", "general"),
+            "source": item["payload"].get("source", "media_handler"),
+        }
+        try:
+            bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        except Exception:
+            pass
+        bot.send_message(call.message.chat.id, "✍️ שלח את הטקסט המעודכן לשמירה בזיכרון:")
+        bot.answer_callback_query(call.id)
+
+    @bot.message_handler(
+        func=lambda m: (
+            str(getattr(m.from_user, "id", "")) in _pending_voice_edits
+            and bool(getattr(m, "text", None))
+            and not m.text.startswith("/")
+        )
+    )
+    def _capture_voice_edit(msg):
+        owner_id = str(msg.from_user.id)
+        state = _pending_voice_edits.pop(owner_id, None)
+        if not state:
+            return
+        saved = _save_transcript_to_memory(msg.text, state["domain"], state["source"])
+        bot.send_message(
+            msg.chat.id,
+            f"🧠 נשמר בזיכרון:\n{msg.text}" if saved else "❌ שמירה ל-Business Memory נכשלה",
+        )
+
+    _voice_callbacks_registered = True
+
+
+def _send_voice_approval_request(
+    transcript: str, domain: str, source: str, owner_chat_id: str, reason: str,
+) -> str:
+    """Queues an owner-approval request and sends the ✅ שמור / ✏️ ערוך / ❌ בטל buttons.
+    Approve/reject are handled by app.py's existing generic approval-callback routing
+    (callback_data prefixes "approve:"/"reject:"); ✏️ ערוך is registered here."""
+    from event_bus import bus
+
+    action_id, _ = bus.request_approval(
+        action="media_save_to_memory",
+        payload={"transcript": transcript, "domain": domain, "source": source},
+        chat_id=owner_chat_id,
+        label=f"🧠 שמירה ב-Business Memory ({reason}): {transcript[:60]}",
+    )
+
+    if not owner_chat_id:
+        return "⚠️ לא הוגדר chat owner — האישור נשמר אך לא נשלחה הודעה."
+
+    try:
+        import telebot
+        from app import bot
+
+        _register_voice_callbacks(bot)
+        kb = telebot.types.InlineKeyboardMarkup()
+        kb.add(
+            telebot.types.InlineKeyboardButton("✅ שמור", callback_data=f"approve:{action_id}"),
+            telebot.types.InlineKeyboardButton("✏️ ערוך", callback_data=f"voice_edit:{action_id}"),
+            telebot.types.InlineKeyboardButton("❌ בטל", callback_data=f"reject:{action_id}"),
+        )
+        bot.send_message(
+            owner_chat_id,
+            f"🎙️ *תמלול הודעה קולית* ({reason})\n\n{transcript[:500]}",
+            reply_markup=kb,
+            parse_mode="Markdown",
+        )
+    except Exception as e:
+        logger.error("[media_handler] failed to send voice approval buttons: %s", e)
+        return "⚠️ התמלול הושלם אך לא ניתן היה לשלוח בקשת אישור."
+
+    return "📨 התמלול ממתין לאישורך למעלה ⬆️"
+
+
+def _log_unhandled_voice_note(transcript: str, user_id: str, source: str) -> None:
+    """No action detected — log into the day's memory so daily_collector can flag it for review."""
+    try:
+        from identity import resolve_identity
+        from memory_store import memory
+
+        identity = resolve_identity(source, user_id)
+        memory.add(identity.memory_key, "user", f"[הודעה קולית, ללא פעולה]: {transcript}", channel=source)
+    except Exception as e:
+        logger.warning("[media_handler] failed to log unhandled voice note: %s", e)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -169,15 +328,14 @@ def handle_voice_note(
     domain: str,
     owner_chat_id: str,
     source: str = "telegram",
-    linked_lead_id: str = "",
 ) -> MediaResult:
-    """Full voice-note pipeline: idempotency -> Drive -> STT -> Airtable -> memory approval."""
+    """Voice-note pipeline: transcribe always -> detect action prefix -> route.
+    No Drive, no Media Files record — see module header for the full decision tree."""
     size_bytes = len(audio_bytes)
-    tier = _classify_size(size_bytes)
-    if tier == "oversized":
+    if _classify_size(size_bytes) == "oversized":
         return MediaResult(
             ok=False,
-            file_size_tier=tier,
+            file_size_tier="oversized",
             error=MediaError("FILE_TOO_LARGE", "הקובץ גדול מ-50MB. הגודל המרבי הוא 50MB.", False),
         )
 
@@ -185,69 +343,45 @@ def handle_voice_note(
     if _idem_store.is_duplicate("media", idem_key, ""):
         return MediaResult(
             ok=False,
-            file_size_tier=tier,
             error=MediaError("DUPLICATE", "הקובץ הזה כבר התקבל.", False),
         )
 
-    parent_folder_id, folder_err = _resolve_drive_folder(domain)
-    if folder_err:
-        return MediaResult(ok=False, file_size_tier=tier, error=folder_err)
-
-    drive_result = drive_adapter.upload_file(audio_bytes, f"{telegram_file_id}.ogg", mime_type, parent_folder_id)
-    if not drive_result.ok:
+    stt_result = transcribe(audio_bytes, mime_type)
+    if not stt_result.ok:
         return MediaResult(
             ok=False,
-            file_size_tier=tier,
-            error=MediaError(drive_result.error.error_code, drive_result.error.error_message, drive_result.error.retryable),
+            error=MediaError(stt_result.error.error_code, stt_result.error.error_message, stt_result.error.retryable),
         )
 
-    raw_transcript = ""
-    normalized_transcript = ""
-    if tier == "normal":
-        stt_result = transcribe(audio_bytes, mime_type)
-        if stt_result.ok:
-            raw_transcript = stt_result.raw_transcript
-            normalized_transcript = stt_result.normalized_transcript
-        else:
-            logger.warning("[media_handler] STT failed: %s", stt_result.error.error_message)
+    raw_transcript = stt_result.raw_transcript
+    transcript = stt_result.normalized_transcript
 
-    asset = AssetRecord(
-        name=drive_result.name,
-        file_type="audio",
-        mime_type=mime_type,
-        drive_url=drive_result.web_url,
-        drive_file_id=drive_result.file_id,
-        domain=domain,
-        source=source,
-        size_bytes=size_bytes,
-        created_by=user_id,
-        telegram_file_id=telegram_file_id,
-        linked_lead_id=linked_lead_id,
-        raw_transcript=raw_transcript,
-        normalized_transcript=normalized_transcript,
-    )
-    asset_id = save_asset(asset)
-    if not asset_id:
+    normalized_for_prefix = _normalize_for_prefix(transcript)
+    action_requested = _has_action(transcript)
+    logger.info(f"[voice] transcript repr: {repr(transcript[:50])}")
+    logger.info(f"[voice] normalized for prefix: {repr(normalized_for_prefix[:50])}")
+    logger.info(f"[voice] action_requested: {action_requested}")
+    logger.info(f"[voice] PREFIX_HARD matches: {[p for p in PREFIX_HARD if normalized_for_prefix.startswith(p)]}")
+
+    # אישור חובה תמיד עבור מילות סיכון, ללא קשר לאיתור action_requested או לאורך הטקסט.
+    if _has_risk_words(transcript):
+        ack = _send_voice_approval_request(transcript, domain, source, owner_chat_id, reason="מילת סיכון")
+        return MediaResult(ok=True, raw_transcript=raw_transcript, normalized_transcript=transcript, message=ack)
+
+    # שלב 3 — אין פעולה: רק תמלול, ללא Drive, ללא זיכרון.
+    if not action_requested:
+        _log_unhandled_voice_note(transcript, user_id, source)
         return MediaResult(
-            ok=False,
-            file_size_tier=tier,
-            drive_url=drive_result.web_url,
-            error=MediaError("ASSET_SAVE_FAILED", "הקובץ הועלה ל-Drive אך לא נשמר ב-Airtable.", True),
+            ok=True, raw_transcript=raw_transcript, normalized_transcript=transcript,
+            message=f"📝 תומלל:\n{transcript}\n\nלא בוצעה פעולה.",
         )
 
-    saved_to_memory = False
-    if normalized_transcript and _should_save_to_memory(normalized_transcript):
-        action_id, _ = _request_memory_approval(normalized_transcript, domain, source, owner_chat_id)
-        saved_to_memory = bool(action_id)
-
+    # שלב 4 — action_requested=True, ללא מילת סיכון: Voice Inbox (pending) בלבד.
+    # אין ניתוב לפי איזה prefix תאם (משימה/ליד/זיכרון/...) — זה F17, לא כאן.
+    saved = _save_transcript_to_media_files(transcript, domain, source, status="pending")
     return MediaResult(
-        ok=True,
-        asset_id=asset_id,
-        drive_url=drive_result.web_url,
-        raw_transcript=raw_transcript,
-        normalized_transcript=normalized_transcript,
-        saved_to_memory=saved_to_memory,
-        file_size_tier=tier,
+        ok=saved, raw_transcript=raw_transcript, normalized_transcript=transcript, saved_to_memory=saved,
+        message=f"📥 נשמר ל-Voice Inbox:\n{transcript}" if saved else "❌ שמירה ל-Voice Inbox נכשלה",
     )
 
 
@@ -388,60 +522,82 @@ if __name__ == "__main__":
     err_text = _format_media_result(MediaResult(ok=False, error=MediaError("X", "boom", False)))
     assert "❌" in err_text
 
-    # ── Success-path coverage: drive_adapter.upload_file() requires an
-    # explicit parent_folder_id (no default) — this exercises the real call
-    # shape (_get_upload_folder -> upload_file), not just the oversized
-    # short-circuit the asserts above already cover.
+    # ── Voice-logic coverage (F16 rewrite): transcribe -> prefix/risk detection -> route.
+    # No Drive involved for voice anymore — only transcribe()/_save_transcript_to_memory()/
+    # _send_voice_approval_request()/_log_unhandled_voice_note() are mocked.
     import sys
     from unittest.mock import patch
+    from voice_stt_adapter import TranscriptResult
 
     _this = sys.modules[__name__]
 
-    with patch.object(drive_adapter, "_get_upload_folder", return_value="folder123"), \
-         patch.object(drive_adapter, "upload_file") as mock_upload, \
-         patch.object(_this, "save_asset", return_value="rec_large"), \
-         patch.object(_this, "transcribe") as mock_stt:
-        mock_upload.return_value = drive_adapter.DriveFile(
-            file_id="f1", web_url="https://drive/large", name="large.ogg", size_bytes=20 * 1024 * 1024
-        )
-        large = handle_voice_note(
-            audio_bytes=b"x" * (TIER_NORMAL + 1),
-            mime_type="audio/ogg",
-            telegram_file_id="f9",
-            user_id="u1",
-            domain="general",
-            owner_chat_id="123",
-        )
-        assert large.ok and large.file_size_tier == "large" and large.asset_id == "rec_large"
-        assert not large.saved_to_memory
-        assert not mock_stt.called
-        mock_upload.assert_called_with(b"x" * (TIER_NORMAL + 1), "f9.ogg", "audio/ogg", "folder123")
-    print("✅ large tier → resolves Drive folder, uploads, skips STT, no memory approval")
+    def _stt(text: str) -> TranscriptResult:
+        return TranscriptResult(raw_transcript=text, normalized_transcript=text, provider_used="openai")
 
-    with patch.object(drive_adapter, "_get_upload_folder", return_value="folder123"), \
-         patch.object(drive_adapter, "upload_file") as mock_upload, \
-         patch.object(_this, "save_asset", return_value="rec_voice"), \
-         patch.object(_this, "transcribe") as mock_stt:
-        mock_upload.return_value = drive_adapter.DriveFile(
-            file_id="f2", web_url="https://drive/voice", name="note.ogg", size_bytes=1024
+    with patch.object(_this, "transcribe", return_value=_stt("שיחה רגילה בלי שום הוראה")), \
+         patch.object(_this, "_log_unhandled_voice_note") as mock_log:
+        no_action = handle_voice_note(
+            audio_bytes=b"audio-bytes", mime_type="audio/ogg", telegram_file_id="v1",
+            user_id="u1", domain="general", owner_chat_id="123",
         )
-        from voice_stt_adapter import TranscriptResult
-        mock_stt.return_value = TranscriptResult(
-            raw_transcript="סיכמנו על המחיר הסופי",
-            normalized_transcript="סיכמנו על המחיר הסופי",
-            provider_used="openai",
+        assert no_action.ok and no_action.message == "📝 תומלל:\nשיחה רגילה בלי שום הוראה\n\nלא בוצעה פעולה."
+        mock_log.assert_called_once()
+    print("✅ no action prefix → transcript shown in message, logged for review, no memory/approval")
+
+    with patch.object(_this, "transcribe", return_value=_stt("משימה: להתקשר ללקוח מחר")), \
+         patch.object(_this, "_save_transcript_to_media_files", return_value=True) as mock_save:
+        short_action = handle_voice_note(
+            audio_bytes=b"audio-bytes", mime_type="audio/ogg", telegram_file_id="v2",
+            user_id="u1", domain="general", owner_chat_id="123",
         )
-        voice = handle_voice_note(
-            audio_bytes=b"audio-bytes",
-            mime_type="audio/ogg",
-            telegram_file_id="f10",
-            user_id="u1",
-            domain="general",
-            owner_chat_id="123",
+        assert short_action.ok and short_action.saved_to_memory
+        assert "נשמר ל-Voice Inbox" in short_action.message
+        mock_save.assert_called_once_with("משימה: להתקשר ללקוח מחר", "general", "telegram", status="pending")
+    print("✅ hard prefix, no risk word → saved to Voice Inbox (pending), not Business Memory directly")
+
+    with patch.object(_this, "transcribe", return_value=_stt("תשלח לו את החוזה החדש")), \
+         patch.object(_this, "_send_voice_approval_request", return_value="📨 ack") as mock_approve, \
+         patch.object(_this, "_save_transcript_to_media_files") as mock_save:
+        risky = handle_voice_note(
+            audio_bytes=b"audio-bytes", mime_type="audio/ogg", telegram_file_id="v3",
+            user_id="u1", domain="general", owner_chat_id="123",
         )
-        assert voice.ok and voice.asset_id == "rec_voice"
-        assert voice.saved_to_memory  # approval queued, not yet written
-    print("✅ normal-tier voice + memory keyword → Drive save succeeds, approval queued")
+        assert risky.ok and risky.message == "📨 ack"
+        mock_approve.assert_called_once_with("תשלח לו את החוזה החדש", "general", "telegram", "123", reason="מילת סיכון")
+        assert not mock_save.called
+    print("✅ risk word present → approval gate even for short text, no direct save")
+
+    long_text = "משימה: " + " ".join(["דבר"] * 35)
+    with patch.object(_this, "transcribe", return_value=_stt(long_text)), \
+         patch.object(_this, "_send_voice_approval_request") as mock_approve, \
+         patch.object(_this, "_save_transcript_to_media_files", return_value=True) as mock_save:
+        long_action = handle_voice_note(
+            audio_bytes=b"audio-bytes", mime_type="audio/ogg", telegram_file_id="v4",
+            user_id="u1", domain="general", owner_chat_id="123",
+        )
+        assert long_action.ok and "נשמר ל-Voice Inbox" in long_action.message
+        mock_save.assert_called_once_with(long_text, "general", "telegram", status="pending")
+        assert not mock_approve.called
+    print("✅ action + >30 words, no risk word → Voice Inbox (pending) too, no approval gate, no length branching")
+
+    # PREFIX_HARD בלבד — פעלי פעולה רכים ("תזכיר"/"תפתח"/"תשלח"/"תקבע") לא מפעילים
+    # action_requested בהיעדר prefix מפורש וללא מילת סיכון.
+    with patch.object(_this, "transcribe", return_value=_stt("תזכיר לי לקבוע פגישה מחר")), \
+         patch.object(_this, "_log_unhandled_voice_note") as mock_log, \
+         patch.object(_this, "_save_transcript_to_memory") as mock_save, \
+         patch.object(_this, "_send_voice_approval_request") as mock_approve:
+        soft_verb_only = handle_voice_note(
+            audio_bytes=b"audio-bytes", mime_type="audio/ogg", telegram_file_id="v5",
+            user_id="u1", domain="general", owner_chat_id="123",
+        )
+        assert soft_verb_only.ok and soft_verb_only.message == "📝 תומלל:\nתזכיר לי לקבוע פגישה מחר\n\nלא בוצעה פעולה."
+        mock_log.assert_called_once()
+        assert not mock_save.called and not mock_approve.called
+    print("✅ soft verb alone (no PREFIX_HARD, no risk word) → no action, not saved to memory")
+
+    chk_comma = _has_action("זיכרון, לקבוע פגישה עם הלקוח")
+    assert chk_comma is True
+    print("✅ comma-normalized prefix (\"זיכרון, ...\") → still recognized as PREFIX_HARD")
 
     with patch.object(drive_adapter, "_get_upload_folder", return_value=None):
         no_folder = handle_file_upload(

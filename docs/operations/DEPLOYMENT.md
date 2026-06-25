@@ -17,7 +17,7 @@ https://my-bot-jqz2.onrender.com       https://[tma].vercel.app
     ├── /whatsapp  ← Twilio WhatsApp webhook
     ├── /voice     ← Twilio Voice webhook
     ├── /api/*     ← TMA API endpoints
-    └── /health    ← בדיקת חיות (owner only)
+    └── /health    ← בדיקת חיות (public endpoint, returns limited status)
 ```
 
 ---

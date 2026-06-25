@@ -23,6 +23,103 @@
 
 > נבנה מ-`git log --since="30 days ago"` (~172 commits, `f935c53`→`eebf73b`) + טבלאות ROADMAP.md (Stabilization Sprint, World 2, Sprint 16/06). כל commit hash צוטט ישירות מ-git או מ-ROADMAP — שורות שלא נמצאה להן ראיה ישירה מסומנות "לא ידוע".
 
+### C60 — Tool Context Awareness (last_tool_result + system-prompt injection + pronoun resolution)
+- **תאריך:** 25/06/2026
+- **סוג:** Feature — לא flag-gated (additive, לא נוגע בלולאה הקיימת)
+- **Requirement:** `SPEC_C59_Tool_Context_Awareness.md` (הועלה ע"י הבעלים, ללא טקסט מלווה; אישור התקבל דרך `AskUserQuestion`: "Yes, implement now")
+- ⚠️ **ID collision מתועד (כמו C54→C57):** הספק החיצוני תייג את עצמו "C59" — מתנגש עם C59 הקיים (Decision Hub Stage 1 Trust Layer, PR #151, ראו למעלה). תויג מחדש **C60** בכל מסמכי התיעוד; כותרת הספק עצמו ("SPEC_C59_...") וכל מחרוזות הקוד/log לא שונו.
+- **תיאור:** פותר "עיוורון כלים" — הסוכן לא ידע מה כלי קודם עשה בסבב הקודם, מה שגרם ל-intent שגוי (למשל "תעלה לדסישנס" אחרי שקובץ כבר נמצא ב-context). שלושה חלקים: (1) **`session_store.py`** — `last_tool_result` נוסף ל-`_new_session()` + `set_last_tool_result`/`get_last_tool_result` חדשים ב-`PersistentSessionStore`, מסונכרנים ל-`State JSON` (sync/load/delete) בדיוק כמו `last_uploaded_file` הקיים מ-C58. (2) **`app.py`** — `_capture_last_tool_result()` נקרא אחרי כל dispatch אמיתי בלולאת ה-agent (לא על branches חסומים/ממתינים לאישור); `_build_tool_context()` מזריק "🔧 הקשר כלים" ל-`ctx.system_prompt` (TTL 5 דקות לפי timestamp); `resolve_context_pronouns()` מחליף כינויי הצבעה עבריים ("זה"/"הנספח"/"הקודם"/"ההוא"/"אותו") בהתייחסות מפורשת לפני ה-Router (שלב חדש "2.6").
+- ⚠️ **3 סטיות מהטקסט המילולי של הספק, כולן מתועדות:**
+  1. **חוזה tool_result שגוי בספק** — הספק מניח `tool_result.get("id")`/`("record_id")`/`("url")`/`("drive_url")`; החוזה האמיתי בקוד (C53-A, אומת ב-`test_c53a.py` — `set(r) == {"ok","tool","external_id","evidence","user_message"}`, ללא מפתחות נוספים) הוא `{ok, tool, external_id, evidence, user_message}`. תוקן: `record_id` נשלף מ-`external_id`, `url` נשלף מ-`evidence.get("htmlLink") or evidence.get("url")`.
+  2. **`_seconds_ago()` מוזכר ב-§5 אך לא מוגדר בספק** (כמו `_has_keyword_conflict` ב-C59) — מומש inline ב-`_build_tool_context()` כ-diff בין `datetime.now(timezone.utc)` ל-`datetime.fromisoformat(timestamp)`, עטוף ב-try/except ל-timestamps פגומים.
+  3. **§6 "Table Registry fix" (4 קבועי Decision Tables)** — אומת מראש דרך §8 PRE-SESSION GATE grep שכל 4 הקבועים (`DECISIONS`/`DECISION_EVENTS`/`DECISION_STAKEHOLDERS`/`DECISION_INBOX`) כבר קיימים ב-`airtable_schema.py` מ-C59 — no-op, לא נוצר שינוי מיותר.
+- **Commit:** ייכלל ב-commit הקרוב על `claude/new-session-be1ckb`
+- **PR:** אין — לא התבקש, ולא מבוצע ללא אישור מפורש לפי הנחיית הסשן
+- **Review על ידי:** הבעלים (אישור "Yes, implement now" דרך `AskUserQuestion`)
+- **Deploy תאריך:** לא רלוונטי — לא מוזג ל-`main`
+- **Verified בפרודקשן:** לא — §10 פריט 7 בספק עצמו ("העלה קובץ → 'תעלה לדסישנס' → BOSS זוכר ומנתב נכון") עדיין לא אומת בלייב
+- **Verification ראיה:** `python3 -m py_compile app.py session_store.py airtable_schema.py` נקי; `python3 session_store.py` → 40/40 self-tests עוברים (4 חדשים ל-C60: set/get round-trip, sync includes field, missing-session→None); `python3 test_c53a.py` → 50/50 (ללא רגרסיה בחוזה C53-A); `python3 test_integration.py` → 4/4; `python3 smoke_tests.py` — 2 כשלים קיימים-מראש (`flask`/`httpx` לא מותקנים בסביבת dev זו), אומת עם `git stash` שהם זהים על main, לא קשור לשינוי; §9 greps כולם תקינים (`set_last_tool_result`/`get_last_tool_result`/`_build_tool_context`/`הקשר כלים`/`resolve_context_pronouns`/4 קבועי Decision tables כולם נמצאים).
+- **Docs עודכנו:** ROADMAP.md (C60 חדש + header, תיקון סטטוס מיזוג ל-C58/C59), CHANGE_CONTROL_LOG.md (רשומה זו + תיקון PR/Deploy ל-C58/C59), AI_CONTEXT.md
+- **Feature Flag:** אין — תמיד-פעיל (additive, כמו `last_uploaded_file` ב-C58)
+- **Rollback plan:** revert ה-commit הקרוב — שדה `last_tool_result` חדש ב-State JSON, אין breaking change לצרכנים קיימים; אם injection ל-system prompt גורם לבעיה (גודל/רעש), ניתן להסיר את שורת `ctx.system_prompt += _build_tool_context(chat_id)` בלבד בלי לגעת בשאר הקוד
+
+### C59 — Decision Hub Stage 1: Trust Layer (Authority × Medium × Verify)
+- **תאריך:** 25/06/2026
+- **סוג:** Feature — flag-gated (`FEATURE_DECISION_HUB`, כבוי כברירת מחדל)
+- **Requirement:** `SPEC_Decision_Hub_Stage1_Trust_Rev2.md` (הועלה ע"י הבעלים עם אישור מפורש: "ניתן ליישם ספק" — מהווה את אישור "אליהו" שהספק דרש ב-header שלו; הבעלים גם דיווח על יצירת 3 שדות Airtable: `Claim Topic`/`Claim Topic Source`/`Claim Topic Confidence`)
+- **תיאור:** `gate_trust()` ב-`decision_pipeline.py` (היה stub) מומש במלואו — מודל Trust דו-מימדי: `AUTHORITY_SCORE`(מי אמר)×`MEDIUM_SCORE`(איך הגיע), עם medium ceiling (`compute_trust`/`score_to_level`); `extract_claim_topic()` גוזר נושא אוטומטית מ-4 מקורות לפי עדיפות (filename→Event Type→Delta Type→Raw Content keywords) עם ידני כ-fallback, מורחב להחזיר `(topic, source, confidence)` סביב 2 השדות שהבעלים הוסיף מעבר לטקסט המילולי של הספק; `maybe_supersede()` — supersede בטוח (רק אותו Claim Topic + Trust גבוה יותר). Verify-fail על מקור עם authority≥65 → T0 ישיר (לא T1 רך). T1 שקט (`user_flag=None`), T0 עם אזהרה.
+- ⚠️ **9 סטיות מהטקסט המילולי של הספק, כולן מכוונות ומתועדות:**
+  1. `VerifierPort.verify()` (`decision_ports.py`) מחזיר `dict` (`{"verified": bool, ...}`) — לא object עם `.status` כפי שהספק מניח. שונה ל-`{"status": "ok"/"warn"/"failed"/"hallucination", "reason": ...}`; `gate_trust` קורא עם `.get("status", "ok")`.
+  2. `decision["id"]` — `maybe_supersede` בספק קורא ID ישירות מ-`decision`, אבל שתי נקודות הקריאה האמיתיות ב-`cmd_decision.py` מעבירות ל-`run_pipeline` רק את `decision["fields"]`/`decision_record["fields"]` (sub-dict בלי `"id"`) — היה גורם ל-`KeyError`. תוקן: ה-ID מוזרק כ-`event["_decision_id"]` בנקודות הקריאה (`_handle_update_step`/`_link_inbox_to_decision`), ו-`maybe_supersede` קורא משם.
+  3. Tags: הספק כותב מחרוזות אנגלית ("potential_conflict"/"low_confidence"/"pressure_high_risk") — אלה לא קיימות כאופציות Multi-Select חיות ב-Airtable (סיכון `INVALID_MULTIPLE_CHOICE_OPTIONS`). נעשה שימוש ב-`DecisionEventTag.CONFLICT`("קונפליקט") הקיים; נוספו 2 קבועים עבריים חדשים (`LOW_CONFIDENCE`="אמינות_נמוכה", `PRESSURE_HIGH_RISK`="לחץ_סיכון_גבוה") **שלא אומתו מול Airtable חי** — בניגוד ל-`Claim Topic Source` שהבעלים אישר במפורש.
+  4. `_has_keyword_conflict()` — הספק מפנה לפונקציה זו ב-§5 שלב ו' אך **לא הגדיר את גוף הלוגיקה בכלל** בטקסט הספק. מומשה כ-stub שמחזיר `False` עם תיעוד inline; נתיב ה-"conflict tag" לא פעיל בפועל עד שתוגדר לוגיקה (Stage 1.x/Stage 2 — מתאים ל-§11 "AI Conflict Detection — Stage 2" שכבר מוחרג בספק).
+  5. `DecisionSourceReliability` (`airtable_schema.py`) היו חסרים 4 מתוך 10 מפתחות `AUTHORITY_SCORE` — נוספו `DOCUMENT`("מסמך")/`MANUAL`("ידני")/`EMPLOYEE`("עובד")/`UNKNOWN`("לא_ידוע").
+  6. `event["Channel"]` לא היה מועבר כלל ל-`gate_trust` לפני התיקון (היה נכתב רק ב-write-time, אחרי שהשער כבר רץ) — תוקן בשתי נקודות הקריאה. `event["Source Reliability"]` **עדיין לא מוזן ע"י שום UI קיים** ב-`/decision update` — `gate_trust` יחזיר תמיד authority=55(ידני) default עד שתיווסף שאלה ייעודית; מחוץ לטקסט המילולי של הספק, לא תוקן בסבב הזה (דגול ל-Stage 1.x).
+  7. פלטי ה-Trust Layer (Trust Level/Confidence/Tags/Claim Topic+Source+Confidence/Source Reliability/Supersedes) לא נכתבו ל-Airtable כלל — נוספה `_add_trust_fields()` ב-`cmd_decision.py`, מחוברת לשני נתיבי הכתיבה (`_create_decision_event`/`event_fields` ב-`_link_inbox_to_decision`).
+  8. `run_pipeline()` היה מזניח את `user_flag` של שערים שעברו בהצלחה (בנה `GateResult` סינתטי חדש עם `user_flag=None` בסוף) — נוסף `collected_flag` שעוקב על ה-flag האחרון שאינו `None` בכל איטרציה, ומועבר ל-`GateResult` הסינתטי הסופי. בלי התיקון, הודעת "📝 לא זיהיתי נושא" (T2/T3 בלי Claim Topic) לא הייתה מוצגת למשתמש אף פעם.
+  9. `_format_pipeline_outcome()` לא טיפל ב-`halted_at == "trust"` (T0/T1) ולא בדק `result.user_flag` בנתיב ההצלחה — נוסף branch מפורש ל-trust + הצמדת `user_flag` (אם קיים) להודעת ההצלחה הגנרית.
+- **Commit:** `73f6fe8`
+- **PR:** #151 — **מוזג ל-`main`** (`merged: true`, אומת ע"י GitHub MCP `pull_request_read`, לא רק לפי דיווח המשתמש); branch מרוחק `claude/new-session-be1ckb` נמחק בהתאם
+- **Review על ידי:** הבעלים (אישור "ניתן ליישם ספק" על ספק שהיה מסומן SPEC ONLY)
+- **Deploy תאריך:** לא ידוע — מיזוג ל-`main` אומת, אך פריסה בפועל ל-Render **לא ניתנת לאימות מתוך sandbox זה** (אין גישת dashboard/egress)
+- **Verified בפרודקשן:** לא — §10 פריט 11 בספק עצמו ("אירוע T0 אמיתי → user_flag בטלגרם") עדיין לא אומת מול פרודקשן חי
+- **Verification ראיה:** `python3 -m py_compile airtable_schema.py decision_ports.py decision_pipeline.py cmd_decision.py test_decision_trust.py` נקי; `python3 test_decision_trust.py` → 33/33 self-tests עוברים (compute_trust edge cases, extract_claim_topic priority order, maybe_supersede same-topic-only, gate_trust T0/T1/T2/T3 branches, run_pipeline user_flag propagation); §9 greps כולם תקינים (`AUTHORITY_SCORE`/`MEDIUM_SCORE`/`compute_trust`/`extract_claim_topic`/`maybe_supersede`/`Claim Topic` נמצאים, `grep -n "trust stub"`→0 matches, `grep -c "SOURCE_TRUST"`→0); `python3 smoke_tests.py`/`python3 test_integration.py` — אין רגרסיה (2 כשלי smoke_tests קיימים-מראש, נבדק עם `git stash` שהם זהים על main, סיבה: `flask`/`httpx` לא מותקנים בסביבת dev זו, לא קשור לשינוי).
+- **Docs עודכנו:** ROADMAP.md (N13 הורחב + header), CHANGE_CONTROL_LOG.md (רשומה זו), AI_CONTEXT.md
+- **Feature Flag:** `FEATURE_DECISION_HUB` — כבוי כברירת מחדל, אפס שינוי התנהגות בפרודקשן
+- **Rollback plan:** revert ה-commit הבא — דגל כבוי כך שאין breaking change בפרודקשן בכל מקרה; אם נדרש rollback חלקי, `gate_trust` חוזר ל-stub הישן (`GateResult(True, "trust stub — stage 1", next_gate="readiness")`)
+
+### C58 — Universal Sessions: Sessions table replaces non-existent LeadSessions
+- **תאריך:** 25/06/2026
+- **סוג:** Bug Fix (latent 403 on every session write) + Schema Change — לא flag-gated
+- **Requirement:** `SPEC_C58_Universal_Sessions.md` (הועלה ע"י הבעלים עם הוראה מפורשת "implement" — מהווה את אישור "אליהו" שהספק דרש ב-header שלו)
+- **תיאור:** `Tables.LEAD_SESSIONS` ("LeadSessions") **לא קיימת בפועל ב-Airtable** — כל כתיבה אליה הייתה מחזירה 403 (באג latent, לא תועד קודם ב-`BUG_AUDIT_LOG.md`). הוחלפה ב-`Tables.SESSIONS` (טבלה אמיתית, `tblHLfE24lTkVUhz0`) עם schema גנרי משותף: `class SessionsFields` (`airtable_schema.py`) — `Context Type` (select, ברירת מחדל `"lead"` לתאימות לאחור), `State JSON` (כל ה-state הקיים — domain/step/answers/done/drop_off_step/score/tier/last_uploaded_file — בשדה טקסט יחיד), `Sender ID`/`Channel`/`Created At`/`Updated At`, ו-10 שדות `Linked *` אופציונליים (Lead/Contact/Decision/Deal/Task/Payment/Venture/Media File/Business Memory/Decision Event). `session_store.py`'s `_sync_to_db`/`_load_from_db`/`_delete_from_db` נכתבו מחדש מלא לשימוש ב-Sessions; `_extract_balanced_json()` חדש (brace-depth counting, לא regex naive) מחלץ את ה-JSON המקונן מתוך הפורמט הטקסטואלי שמ-`airtable_get()` מחזיר.
+- ⚠️ **4 סטיות מהטקסט המילולי של הספק, כולן מכוונות ומתועדות:**
+  1. **`external_id` extraction** — הספק הציע `result.get("id") or result.get("record_id") or result.get("external_id")`; מומש כ-`result.get("external_id", "")` ישירות, לפי חוזה C53-A האמיתי שאומת ב-`tools/airtable_tools.py` (`_tool_result()` מחזיר מפתח `external_id` בלבד).
+  2. **`last_uploaded_file` חסר ב-State JSON** — הספק השמיט אותו מה-snippet המוצע, בסתירה לעקרון "State JSON = כל ה-state הקיים. אפס אובדן מידע" שהוא עצמו מצהיר ב-§4. נוסף ל-State JSON וגם `set_last_file()` עודכן לקרוא בפועל ל-`_sync_to_db()` (לפני כן לא היה מסונכרן ל-DB בכלל).
+  3. **`LINKED_MEDIA_FILE` table-identity mismatch** — הספק הציע לקשר את `last_uploaded_file.file_id` תמיד; אומת ב-`cmd_decision.py`/`app.py` ש-`type="inbox_file"` שומר record ID מטבלת **Decision Inbox**, ו-`type="drive_file"` שומר record ID מטבלת **Media Files** — שני סוגי record ID שונים. קישור ה-inbox_file record ל-`LINKED_MEDIA_FILE` (שמייעד ל-Media Files) היה גורם ל-`INVALID_RECORD_ID` באירטייבל. תוקן: הקישור מתבצע רק כש-`type == "drive_file"`.
+  4. **`_delete_from_db` מאבד state** — הספק הציע להחליף את כל ה-`State JSON` ב-`{"done": True, "deleted": True}` בלבד, מוחק domain/step/answers/score/tier. תוקן: `_delete_from_db` מקבל גם את `session` המלא ובונה tombstone ששומר את כל השדות הקיימים + `done`/`deleted=True`.
+  - בנוסף תוקן באג קדם-קיים (לא קשור ל-C58, התגלה תוך כדי הוספת בדיקות): ה-mock ב-`_run_tests()` רשם `sys.modules["airtable_tools"]` במקום `sys.modules["tools.airtable_tools"]` (הנתיב האמיתי שממנו `session_store.py` מייבא) — `ImportError` נתפס בשקט ב-`_sync_to_db`/`_load_from_db`, כך שכל בדיקות ה-DB-sync "עברו" מבלי לבדוק דבר (כפי שתועד גם ב-N13 לעיל: "18/20, 2 כשלים קיימים מראש" — אלה היו אותם 2 כשלים, לא קשורים-בטעות לתיקון).
+- **Commit:** `84f2ef3`
+- **PR:** #150 — **מוזג ל-`main`** (`merged: true`, אומת ע"י GitHub MCP `pull_request_read`, לא רק לפי דיווח המשתמש); branch מרוחק `claude/new-session-be1ckb` נמחק בהתאם
+- **Review על ידי:** הבעלים (הוראת "implement" על הספק שהיה מסומן SPEC ONLY)
+- **Deploy תאריך:** לא ידוע — מיזוג ל-`main` אומת, אך פריסה בפועל ל-Render **לא ניתנת לאימות מתוך sandbox זה** (אין גישת dashboard/egress)
+- **Verified בפרודקשן:** לא — סעיף 7 בספק עצמו (item 5, "session חדש → רשומה נוצרת ב-Sessions ב-Airtable") עדיין לא אומת מול Airtable חי
+- **Verification ראיה:** `python3 -m py_compile session_store.py airtable_schema.py app.py cmd_decision.py` נקי; `python3 session_store.py` → 36/36 self-tests עוברים (כולל 11 בדיקות חדשות ל-C58: `_extract_balanced_json` עם JSON מקונן, `context_type` ברירת מחדל, מבנה `State JSON` ב-`_sync_to_db`, gating נכון בין drive_file/inbox_file, round-trip מלא של `_load_from_db` מול מחרוזת מזויפת בפורמט האמיתי של `airtable_get()`); spec §6 greps כולם תקינים (`grep -c "LeadSessions" session_store*.py` → 0, `class SessionsFields`/`Tables.SESSIONS`/`State JSON`/`context_type` כולם נמצאים)
+- **Docs עודכנו:** ROADMAP.md (C58 חדש + header), CHANGE_CONTROL_LOG.md (רשומה זו), AI_CONTEXT.md
+- **Feature Flag:** אין — תשתית sessions תמיד-פעילה (לא אופציונלית), כמו `session_store.py` הקודם
+- **Rollback plan:** revert ה-commit הבא — `Tables.LEAD_SESSIONS` עדיין קיים בקוד (deprecated, לא נמחק) כך שאין breaking change בממשק; הסיכון העיקרי הוא ש-`Tables.SESSIONS`/שדות `SessionsFields` לא תואמים 1:1 לשמות השדות האמיתיים ב-Airtable (לא אומת ישירות מול ה-base, רק לפי הספק) — אם כתיבה ראשונה בפרודקשן תיכשל, יש לבדוק שמות שדות מול schema חי לפני כל דבר אחר
+
+### C57 — Agent Tool Awareness: suppress premature text_block alongside tool_use (PR #149)
+- **תאריך:** 25/06/2026
+- **סוג:** Bug Fix (UX-level, behavior change — לא flag-gated)
+- **Requirement:** `SPEC_C54_Agent_Tool_Awareness.md` (הועלה ע"י הבעלים, אושר במלואו: "Yes, both changes")
+- **תיאור:** Claude מחזיר לעיתים `text_block` ו-`tool_use` באותה API response. ה-text נכתב לפני שהמודל ראה את תוצאת הכלי — אם הוא נשלח למשתמש (כמו "לא הבנתי מה לעלות") לפני שהכלי רץ בפועל, נוצרת תשובה סותרת/מבלבלת ב-turn אחד בלבד, גם כשהכלי בפועל הצליח. תיקון בשתי שכבות: (1) **`app.py`** (אחרי חילוץ `tool_uses`/`text_blocks` בלולאת ה-agent) — אם שניהם קיימים באותה תשובה, `text_blocks` מאופס ל-`[]` ונכתב `logger.info("[C54] Suppressed premature text_block alongside tool_use: ...")`; הלולאה ממשיכה, הכלי רץ, והתשובה האמיתית מגיעה ב-turn הבא עם תוצאת הכלי. (2) **`core_knowledge.py`** — כלל 7 חדש בבלוק `_NEVER_FAKE_CONTROL`: "כשאתה מפעיל כלי, אל תכלול טקסט הסבר או שאלת הבהרה באותה תשובה. הפעל את הכלי. קבל את התוצאה. ענה למשתמש רק אחרי שיש לך תוצאה." השכבה הראשונה (קוד) מגנה על מה שהשנייה (prompt) לא תפסה.
+- ⚠️ **ID collision מתועד:** הספק החיצוני תייג את התיקון "C54" — מתנגש עם C54 הקיים ב-`ROADMAP.md` (Business Memory /update command, PR #85). תויג מחדש **C57** בכל מסמכי התיעוד (ROADMAP/CHANGE_CONTROL); `logger.info` בקוד עצמו וה-docstring ב-`core_knowledge.py` נשארו עם תג `[C54]`/הערת "C54" כפי שנכתבו, כדי לא לגעת בלוג production string ללא צורך תפעולי — ה-mapping מתועד כאן.
+- **Commit:** `cc6142b`
+- **PR:** #149 — https://github.com/10026782/My-bot/pull/149 — **מוזג ל-`main` ב-commit `1d08402`**
+- **Review על ידי:** הבעלים (אישר את שני השינויים במפורש לפני כתיבת קוד, per SPEC ONLY gate)
+- **Deploy תאריך:** לא ידוע — Render Auto-Deploy מוגדר על `main`, לא אומת ידנית מול Render Dashboard
+- **Verified בפרודקשן:** לא — ממתין לראות `[C54] Suppressed premature text_block` ב-Render logs (ראו §8 של הספק המקורי); אם לא מופיע תוך שבוע מה-deploy, סימן ש-prompt rule בלבד הספיק.
+- **Verification ראיה:** `git fetch origin main` + `git merge-base --is-ancestor cc6142b origin/main` → exit 0; `python3 -m py_compile app.py core_knowledge.py` נקי.
+- **Docs עודכנו:** ROADMAP.md (C57 חדש + header), CHANGE_CONTROL_LOG.md (רשומה זו)
+- **Feature Flag:** אין — שינוי קוד תמיד-פעיל בלולאת ה-agent, לא flag-gated (תיקון התנהגות בסיסי, לא פיצ'ר)
+- **Rollback plan:** revert PR #149 — מחזיר התנהגות קודמת (text+tool_use לעיתים נשלחים יחד); אין סיכון דאטה, רק UX
+
+### N13 — Decision Hub Stage 0.5/0.6 + BUG-017/BUG-B + MODULE_RULES 7-10/12 (PR #147)
+- **תאריך:** 25/06/2026
+- **סוג:** Feature (flag off) + Bug Fix + Docs
+- **Requirement:** ROADMAP.md N13 (נוסף באותו commit — Decision Hub לא היה מתועד ב-ROADMAP לפני כן)
+- **תיאור:** `cmd_decision.py`/`app.py` — Stage 0.5 (File/Voice Precedence Routing: `decision_context_active()`, `route_file_to_decision_inbox()`, מוטמע ב-`_handle_telegram_media` עם fail-safe exception handling) ו-Stage 0.6 (File Context Reference: `FileUploadResult`/`set_last_file`/`get_last_file` ב-`session_store.py`, וזיהוי "זה הנספח" דרך `is_attachment_reference()`/`handle_attachment_reference()`, ממוקם ב-`_webhook_telegram_impl` הטלגרם-ספציפי ולא ב-`run_agent()` המשותף-לכל-הערוצים — תיקון ארכיטקטוני שנעשה תוך כדי הבנייה). תוקנו: BUG-017 (`session_store._sync_to_db` קרא חוזה dict כ-string) ו-BUG-B (LeadSessions תחת schema governance, additive). `docs/governance/MODULE_RULES.md` קיבל חוקים 7 (Ports), 8 (Tool↔Gate), 9 (Input Precedence), 10 (Raw-First), 12 (Domain-Agnostic Core — ממוספר 12 לא 11 כדי לא להתנגש עם חוק 11 הקיים, כתיב שמות שדות). נוסף `docs/governance/PLANNING_GATE.md`. נוסף `archive/BOSS_MASTER_PLAN_One_Road.md` (ARCHIVE, לא מקור אמת — ראו הערת מקור בראש הקובץ).
+- **Commit:** `a6483c8` (MODULE_RULES 7-10 + BUG-B), `fdeb039` (BUG-017), `4ac2a05` (Stage 0.5), `e0f0111` (Stage 0.6)
+- **PR:** #147 — https://github.com/10026782/My-bot/pull/147 — **מוזג ל-`main` ב-commit `483851f`**
+- **Review על ידי:** הבעלים (אישר מיזוג מפורשות אחרי שאי-מיזוג קודם זוהה ותוקן)
+- **Deploy תאריך:** לא ידוע — Render Auto-Deploy מוגדר על `main`, לא אומת ידנית מול Render Dashboard
+- **Verified בפרודקשן:** לא — `FEATURE_DECISION_HUB` כבוי כברירת מחדל, אפס שינוי התנהגות בפרודקשן
+- **Verification ראיה:** `git fetch origin main` + `git merge-base --is-ancestor origin/claude/new-session-be1ckb origin/main` → exit 0 (מאומת PR ממוזג בפועל, לא רק לפי הצהרה); `py_compile` נקי על `app.py`/`cmd_decision.py`/`session_store.py`; `session_store.py` self-test 18/20 (2 כשלים קיימים מראש, מתועדים, לא קשורים לשינוי)
+- **Docs עודכנו:** ROADMAP.md (N13 חדש), AI_CONTEXT.md, BUG_AUDIT_LOG.md (BUG-017), MODULE_RULES.md, PLANNING_GATE.md (חדש), archive/BOSS_MASTER_PLAN_One_Road.md (חדש)
+- **Feature Flag:** `FEATURE_DECISION_HUB` — כבוי כברירת מחדל
+- **Rollback plan:** revert PR #147 — דגל כבוי, אפס סיכון פונקציונלי מיידי בפרודקשן
+
 ### N08 / N09 / N11 — ROADMAP status drift correction (docs-only)
 - **תאריך:** 22/06/2026
 - **סוג:** Docs-only correction, אפס שינוי קוד
@@ -477,3 +574,18 @@
 - **Docs עודכנו:** זה עצמו + `CLAUDE.md`
 - **Feature Flag:** אין — docs-only
 - **Rollback plan:** revert commit `783a680` — docs-only, אפס סיכון
+
+### BUG-018 — Mojibake/encoding corruption ב-`app.py` (132 שורות)
+- **תאריך:** 25/06/2026
+- **סוג:** Bug fix, קובץ קיים (`app.py` בלבד)
+- **Requirement:** דווח ע"י המשתמש (לא ב-ROADMAP.md) — ג'יבריש בהודעות בוט בעברית. ראה `BUG_AUDIT_LOG.md` BUG-018 לפירוט מלא.
+- **תיאור:** טקסט עברי וסימבולים ב-`app.py` עברו בעבר decode שגוי דרך codepage `cp1255` (Windows Hebrew) במקום UTF-8, ונשמרו בחזרה כ-UTF-8 — corruption קבוע בקובץ עצמו (לא בעיית runtime/parse_mode). אותר ותוקן באמצעות hybrid codec (cp1255 + raw-byte fallback ל-12 בתי-קוד שלא מוגדרים ב-cp1255, שעברו דרך identity passthrough בקורפציה המקורית): round-trip `hybrid_encode(line).decode('utf-8')` משמש כגלאי corruption גנרי בטוח (false-positive נמוך מאוד על טקסט תקין). אותרו ותוקנו 132 שורות (78 עם אותיות עבריות + 54 נוספות symbols/emoji/box-drawing ללא עברית, שנמצאו רק בסקאן הגנרי השני). UTF-8 BOM של הקובץ נשמר. בנוסף נבדקה טענת המשתמש על ערבוב `Markdown`/`MarkdownV2` (parse_mode) כגורם — **נשללה**: נקודת ה-`MarkdownV2` היחידה בקובץ (שורה ~356, `cmd_done`) מבצעת escape נכון (`\!`, `\+`); הג'יבריש שהמשתמש ראה היה ה-mojibake, לא בעיית escaping. הצעת המשתמש למעבר גורף ל-`parse_mode="HTML"` בכל קריאות `send_message` **לא בוצעה** — הוחלט שהיא out-of-scope (לא נדרשת לתיקון הבאג בפועל, ותדרוש המרת כל עיצוב `*bold*`/`_italic_` הקיים ל-HTML tags ב-~10 call sites) — לא הוסתר, מתועד גם ב-`BUG_AUDIT_LOG.md`.
+- **Commit:** `b5717da`
+- **PR:** ללא — דחיפה ישירה ל-`claude/new-session-be1ckb` (טרם התבקש PR)
+- **Review על ידי:** טרם — ממתין לבדיקת המשתמש
+- **Deploy תאריך:** N/A — טרם מוזג ל-`main`
+- **Verified בפרודקשן:** לא
+- **Verification ראיה:** `python3 -m py_compile app.py` עבר; `python3 smoke_tests.py` — 2 כשלים תלויי-סביבה קיימים מראש (`flask`/`httpx` חסרים בסביבת sandbox, לא קשור לשינוי); `python3 test_integration.py` 4/4; `python3 session_store.py` 40/40; `python3 test_c53a.py` 50/50; `git diff --stat app.py` → `1 file changed, 132 insertions(+), 132 deletions(-)`; כל 132 השינויים נסקרו ידנית שורה-שורה ב-diff המלא; סקאן חזרה (round-trip) על הקובץ המתוקן אישר 0 שורות corruption שיוריות; `file app.py` אישר פורמט UTF-8 with BOM ללא שינוי.
+- **Docs עודכנו:** `BUG_AUDIT_LOG.md` (BUG-018), `CHANGE_CONTROL_LOG.md` (זה)
+- **Feature Flag:** N/A — תיקון טקסט סטטי, ללא flag
+- **Rollback plan:** revert commit — שינוי טקסט בלבד ב-קובץ קיים, ללא שינוי לוגיקה, סיכון נמוך
