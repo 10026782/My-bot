@@ -1,6 +1,8 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 25/06/2026 (מאוחר ביותר) — branch `claude/new-session-be1ckb` (לא ממוזג עדיין, אין PR). **C58 Universal Sessions — קוד הושלם** לפי `SPEC_C58_Universal_Sessions.md` (אישור אליהו: "implement"): `session_store.py` כותב/קורא מ-`Tables.SESSIONS` (טבלה אמיתית, `tblHLfE24lTkVUhz0`) במקום `Tables.LEAD_SESSIONS` (טבלה שלא קיימת בפועל — הייתה 403 בכל כתיבה). 4 סטיות מהספק תועדו ומומשו במקום הטקסט המילולי (ראו C58 למטה). 36/36 self-tests עוברים (כולל תיקון באג קדם-קיים ב-mock שהיה מסתיר כשלי DB-sync). **🟡 CODE DONE — לא מאומת בפרודקשן** (סעיף 7 בספק: רשומה אמיתית ב-Sessions עדיין לא אומתה ב-Airtable חי). ראו פירוט: C58 למטה (Sprint 19/06/2026), `CHANGE_CONTROL_LOG.md`.
+עודכן: 25/06/2026 (מאוחר ביותר) — branch `claude/new-session-be1ckb` (לא ממוזג עדיין, אין PR). **Decision Hub Stage 1 (Trust Layer) — קוד הושלם** לפי `SPEC_Decision_Hub_Stage1_Trust_Rev2.md` (אישור אליהו: "ניתן ליישם ספק"): `gate_trust` ב-`decision_pipeline.py` ממומש במלואו (Authority×Medium×Verify, Claim Topic אוטומטי, Supersedes בטוח). 9 סטיות מהטקסט המילולי של הספק תועדו ומומשו (ראו N13 למטה) — בעיקר: `VerifierPort` dict-לא-object, `decision["id"]` חסר (הוזרק כ-`event["_decision_id"]`), tags אנגלית-לא-קיימת (נעשה שימוש בקבוע עברי קיים + 2 קבועים חדשים **לא מאומתים מול Airtable חי**), `_has_keyword_conflict` מוגדר ב-spec אך לא יושם (stub). 33/33 self-tests עוברים (`test_decision_trust.py`). **🟡 CODE DONE — לא מאומת בפרודקשן** (דגל `FEATURE_DECISION_HUB` כבוי; §10 פריט 11 בספק — T0 אמיתי→user_flag בטלגרם — פתוח עד מיזוג+פריסה). ראו פירוט: N13 למטה, `CHANGE_CONTROL_LOG.md`.
+
+עודכן (קודם): 25/06/2026 (מאוחר ביותר) — branch `claude/new-session-be1ckb` (לא ממוזג עדיין, אין PR). **C58 Universal Sessions — קוד הושלם** לפי `SPEC_C58_Universal_Sessions.md` (אישור אליהו: "implement"): `session_store.py` כותב/קורא מ-`Tables.SESSIONS` (טבלה אמיתית, `tblHLfE24lTkVUhz0`) במקום `Tables.LEAD_SESSIONS` (טבלה שלא קיימת בפועל — הייתה 403 בכל כתיבה). 4 סטיות מהספק תועדו ומומשו במקום הטקסט המילולי (ראו C58 למטה). 36/36 self-tests עוברים (כולל תיקון באג קדם-קיים ב-mock שהיה מסתיר כשלי DB-sync). **🟡 CODE DONE — לא מאומת בפרודקשן** (סעיף 7 בספק: רשומה אמיתית ב-Sessions עדיין לא אומתה ב-Airtable חי). ראו פירוט: C58 למטה (Sprint 19/06/2026), `CHANGE_CONTROL_LOG.md`.
 
 עודכן (קודם): 25/06/2026 — main = `1d08402` (אומת, `git fetch origin main` + `git merge-base --is-ancestor`). **PR #149 מוזג** — C57 Agent Tool Awareness (commit `cc6142b`): דיכוי `text_block` מוקדם שנוצר באותה תשובה עם `tool_use` (`app.py`) + כלל 7 ב-`core_knowledge.py`. ⚠️ הספק החיצוני (`SPEC_C54_Agent_Tool_Awareness.md`) קרא לזה "C54" — מתנגש עם C54 הקיים (Business Memory /update, PR #85); תויג מחדש **C57** בתיעוד (הלוג בקוד עצמו עדיין `[C54]`, לא שונה). ראו פירוט: C57 למעלה (Sprint 19/06/2026), `CHANGE_CONTROL_LOG.md`.
 
@@ -332,12 +334,50 @@ gate + Drive-upload `set_last_file` hook + `_webhook_telegram_impl` "זה הנס
 `session_store.py` (`FileUploadResult`, `set_last_file`/`get_last_file`), `airtable_schema.py`
 (Decision Hub tables/fields).
 **Feature Flag:** `FEATURE_DECISION_HUB` — כבוי כברירת מחדל, אפס שינוי התנהגות בפרודקשן.
-**מצב נוכחי:** Stage 0/0.5/0.6 ממוזגים ל-`main` (PR #147). Stage 1-4 (Trust Layer/AI Delta
-Classifier/Readiness Engine/Attention Engine) — ○ לא התחילו. ראו `archive/BOSS_MASTER_PLAN_One_Road.md`
-לעקרון "כביש אחד, יציאות רבות" (ARCHIVE — לא מקור אמת, ראו הערת מקור בראש אותו קובץ).
+**מצב נוכחי:** Stage 0/0.5/0.6 ממוזגים ל-`main` (PR #147). **Stage 1 (Trust Layer) — 🟡 CODE DONE,
+לא מאומת בפרודקשן** (`claude/new-session-be1ckb`, לא ממוזג עדיין) — לפי `SPEC_Decision_Hub_Stage1_Trust_Rev2.md`
+(אישור אליהו: "ניתן ליישם ספק"). Stage 2-4 (AI Conflict Detection/Readiness Engine/Attention Engine) —
+○ לא התחילו. ראו `archive/BOSS_MASTER_PLAN_One_Road.md` לעקרון "כביש אחד, יציאות רבות"
+(ARCHIVE — לא מקור אמת, ראו הערת מקור בראש אותו קובץ).
 **Verification ראיה:** `py_compile` נקי על שלושת הקבצים; `session_store.py` self-test
 18/20 עברו (2 כשלים קיימים מראש, mock-import-path בלתי תלוי בשינוי זה); אין אימות
 בפרודקשן עדיין — דגל כבוי.
+
+**Stage 1 — Trust Layer (Rev 2):** `gate_trust` מחושב לפי `AUTHORITY_SCORE`×`MEDIUM_SCORE`
+(`compute_trust`/`score_to_level`), `extract_claim_topic` אוטומטי (4 מקורות + ידני כ-fallback,
+מורחב ל-(topic, source, confidence) סביב 2 השדות שאליהו הוסיף מעבר לספק — `Claim Topic Source`/
+`Claim Topic Confidence`), `maybe_supersede` בטוח (אותו Claim Topic בלבד + Trust גבוה יותר בלבד).
+**9 סטיות מהטקסט המילולי של הספק, מתועדות (לא הוסתרו):**
+1. `VerifierPort.verify()` מחזיר `dict` לא object — שונה ל-`{"status": ..., "reason": ...}`.
+2. `decision` שמועבר ל-`run_pipeline` הוא `decision["fields"]` בלבד (אין `"id"`) — `maybe_supersede`
+   קורא את ה-ID מ-`event["_decision_id"]` שמוזרק ב-`cmd_decision.py` לפני הקריאה, לא מ-`decision["id"]`.
+3. Tags: "potential_conflict"/"low_confidence"/"pressure_high_risk" (אנגלית, בספק) לא קיימים
+   כאופציות Multi-Select חיות — נעשה שימוש ב-`DecisionEventTag.CONFLICT`("קונפליקט") הקיים,
+   ונוספו 2 קבועים עבריים חדשים (`LOW_CONFIDENCE`="אמינות_נמוכה", `PRESSURE_HIGH_RISK`="לחץ_סיכון_גבוה")
+   **שלא אומתו מול Airtable חי** — ייתכן שיידרש ליצור אותם כאופציות לפני כתיבה ראשונה בפרודקשן.
+4. `_has_keyword_conflict()` — הספק מפנה לפונקציה זו (§5 שלב ו') אך לא הגדיר את גוף הלוגיקה כלל.
+   מומשה כ-stub שמחזיר `False` — נתיב ה-"potential_conflict"/`DecisionEventTag.CONFLICT` לא ייושם
+   בפועל עד שתוגדר לוגיקת ה-keyword-conflict (Stage 1.x/Stage 2).
+5. `DecisionSourceReliability` היו חסרים 4 מתוך 10 מפתחות `AUTHORITY_SCORE` — נוספו
+   `DOCUMENT`/`MANUAL`/`EMPLOYEE`/`UNKNOWN`.
+6. `event["Channel"]`/`event["Source Reliability"]` לא היו מועברים ל-`gate_trust` כלל לפני התיקון —
+   Channel תוקן ב-2 נקודות הקריאה ב-`cmd_decision.py` (`_handle_update_step`/`_link_inbox_to_decision`).
+   **Source Reliability עדיין לא מוזן ע"י שום UI קיים** — `gate_trust` ייפול תמיד ל-default "ידני"
+   (ציון authority=55) עד שתיווסף שאלת "מי אמר/כמה אמין" לדיאלוג `/decision update` — מחוץ לטקסט
+   המילולי של הספק, לא תוקן בסבב הזה.
+7. פלטי ה-Trust Layer לא נכתבו ל-Airtable כלל — `_create_decision_event`/`event_fields`
+   (`_link_inbox_to_decision`) הורחבו עם `_add_trust_fields()` חדשה (Trust Level/Confidence/Tags/
+   Claim Topic+Source+Confidence/Source Reliability/Supersedes).
+8. `run_pipeline()` היה מזניח את `user_flag` של שערים שעברו (fabricate `GateResult` חדש) —
+   נוסף `collected_flag` שעוקב ומועבר ל-`GateResult` הסינתטי בסוף, כדי שההודעה "לא זיהיתי נושא"
+   (T2/T3) תוצג בפועל.
+9. `_format_pipeline_outcome` לא טיפל ב-`halted_at == "trust"` ולא בדק `result.user_flag` בנתיב
+   ההצלחה — נוסף branch מפורש + הצמדת `user_flag` להודעת ההצלחה.
+
+**§10 פריט 11 (אימות פרודקשן — T0 אמיתי → user_flag בטלגרם) נשאר פתוח עד מיזוג+פריסה.**
+**קבצים שנוספו/שונו:** `airtable_schema.py` (קבועים), `decision_ports.py` (verifier stub),
+`decision_pipeline.py` (Trust Model מלא), `cmd_decision.py` (חיווט), `test_decision_trust.py`
+(33 self-tests, כולם עוברים).
 
 ### F05a — Meta WhatsApp Phase 1 (Inbound, ללא תעבורת פרודקשן)
 **מה:** `/webhooks/meta/whatsapp` (GET verify + POST inbound) — נתיב נפרד מ-Twilio.

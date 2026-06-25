@@ -297,6 +297,8 @@ def _handle_update_step(bot, msg, state, get_identity):
     event = {
         "raw_content": msg.text or "",
         "attachment": has_attachment,
+        "Channel": DecisionEventChannel.TELEGRAM,
+        "_decision_id": decision["id"],
     }
 
     from decision_pipeline import run_pipeline
@@ -316,14 +318,35 @@ def _create_decision_event(identity, decision_id: str, event: dict) -> str | Non
     fields = {
         DecisionEventFields.DECISION: [decision_id],
         DecisionEventFields.EVENT_DATE: datetime.now(ZoneInfo("Asia/Jerusalem")).isoformat(),
-        DecisionEventFields.CHANNEL: DecisionEventChannel.TELEGRAM,
+        DecisionEventFields.CHANNEL: event.get("Channel", DecisionEventChannel.TELEGRAM),
         DecisionEventFields.RAW_CONTENT: event.get("raw_content", ""),
         DecisionEventFields.DELTA_TYPE: event.get("Delta Type", ""),
         DecisionEventFields.STATUS: event.get("Status", DecisionEventStatus.LOGGED),
         DecisionEventFields.TENANT_ID: identity.tenant_id,
     }
+    _add_trust_fields(fields, event)
     record = airtable_create(Tables.DECISION_EVENTS, fields, source=source_tag)
     return record.get("id") if record else None
+
+
+def _add_trust_fields(fields: dict, event: dict) -> None:
+    """Stage 1 — מעביר את פלט gate_trust מ-event ל-fields שנכתבים ל-Airtable."""
+    if "Trust Level" in event:
+        fields[DecisionEventFields.TRUST_LEVEL] = event["Trust Level"]
+    if "Confidence" in event:
+        fields[DecisionEventFields.CONFIDENCE] = event["Confidence"]
+    if event.get("Tags"):
+        fields[DecisionEventFields.TAGS] = event["Tags"]
+    if event.get("Claim Topic"):
+        fields[DecisionEventFields.CLAIM_TOPIC] = event["Claim Topic"]
+    if event.get("Claim Topic Source"):
+        fields[DecisionEventFields.CLAIM_TOPIC_SOURCE] = event["Claim Topic Source"]
+    if "Claim Topic Confidence" in event:
+        fields[DecisionEventFields.CLAIM_TOPIC_CONFIDENCE] = event["Claim Topic Confidence"]
+    if event.get("Source Reliability"):
+        fields[DecisionEventFields.SOURCE_RELIABILITY] = event["Source Reliability"]
+    if event.get("Supersedes"):
+        fields[DecisionEventFields.SUPERSEDES] = event["Supersedes"]
 
 
 def _format_pipeline_outcome(title: str, outcome: dict, event: dict) -> str:
@@ -337,7 +360,12 @@ def _format_pipeline_outcome(title: str, outcome: dict, event: dict) -> str:
         return f"📋 «{title}» — אותו מידע, ניסוח אחר. נרשם בלבד."
     if halted_at == "entity":
         return f"⚠️ «{title}» — {result.user_flag or result.reason}"
-    return f"✅ «{title}» — Event חדש נשמר ({delta_type})."
+    if halted_at == "trust":
+        return f"⚠️ «{title}» — {result.user_flag or result.reason}"
+    base = f"✅ «{title}» — Event חדש נשמר ({delta_type})."
+    if result.user_flag:
+        base += f"\n{result.user_flag}"
+    return base
 
 
 # ── /decision status — כרטיס מלא ────────────────────────────────
@@ -441,17 +469,23 @@ def _link_inbox_to_decision(bot, call, inbox_id: str, decision_id: str) -> None:
     inbox_record = _at_get_record(Tables.DECISION_INBOX, inbox_id)
     raw_text = inbox_record["fields"].get(DecisionInboxFields.RAW_INPUT, "") if inbox_record else ""
 
-    event = {"raw_content": raw_text, "attachment": False}
+    event = {
+        "raw_content": raw_text,
+        "attachment": False,
+        "Channel": DecisionEventChannel.TELEGRAM,
+        "_decision_id": decision_id,
+    }
     outcome = run_pipeline(event, decision_record["fields"])
 
     event_fields = {
         DecisionEventFields.DECISION: [decision_id],
         DecisionEventFields.EVENT_DATE: datetime.now(ZoneInfo("Asia/Jerusalem")).isoformat(),
-        DecisionEventFields.CHANNEL: DecisionEventChannel.TELEGRAM,
+        DecisionEventFields.CHANNEL: event.get("Channel", DecisionEventChannel.TELEGRAM),
         DecisionEventFields.RAW_CONTENT: raw_text,
         DecisionEventFields.DELTA_TYPE: event.get("Delta Type", ""),
         DecisionEventFields.STATUS: event.get("Status", DecisionEventStatus.LOGGED),
     }
+    _add_trust_fields(event_fields, event)
     event_record = airtable_create(Tables.DECISION_EVENTS, event_fields, source="cmd_decision:inbox_link")
     event_id = event_record.get("id") if event_record else None
 

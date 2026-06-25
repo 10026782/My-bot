@@ -23,6 +23,31 @@
 
 > נבנה מ-`git log --since="30 days ago"` (~172 commits, `f935c53`→`eebf73b`) + טבלאות ROADMAP.md (Stabilization Sprint, World 2, Sprint 16/06). כל commit hash צוטט ישירות מ-git או מ-ROADMAP — שורות שלא נמצאה להן ראיה ישירה מסומנות "לא ידוע".
 
+### C59 — Decision Hub Stage 1: Trust Layer (Authority × Medium × Verify)
+- **תאריך:** 25/06/2026
+- **סוג:** Feature — flag-gated (`FEATURE_DECISION_HUB`, כבוי כברירת מחדל)
+- **Requirement:** `SPEC_Decision_Hub_Stage1_Trust_Rev2.md` (הועלה ע"י הבעלים עם אישור מפורש: "ניתן ליישם ספק" — מהווה את אישור "אליהו" שהספק דרש ב-header שלו; הבעלים גם דיווח על יצירת 3 שדות Airtable: `Claim Topic`/`Claim Topic Source`/`Claim Topic Confidence`)
+- **תיאור:** `gate_trust()` ב-`decision_pipeline.py` (היה stub) מומש במלואו — מודל Trust דו-מימדי: `AUTHORITY_SCORE`(מי אמר)×`MEDIUM_SCORE`(איך הגיע), עם medium ceiling (`compute_trust`/`score_to_level`); `extract_claim_topic()` גוזר נושא אוטומטית מ-4 מקורות לפי עדיפות (filename→Event Type→Delta Type→Raw Content keywords) עם ידני כ-fallback, מורחב להחזיר `(topic, source, confidence)` סביב 2 השדות שהבעלים הוסיף מעבר לטקסט המילולי של הספק; `maybe_supersede()` — supersede בטוח (רק אותו Claim Topic + Trust גבוה יותר). Verify-fail על מקור עם authority≥65 → T0 ישיר (לא T1 רך). T1 שקט (`user_flag=None`), T0 עם אזהרה.
+- ⚠️ **9 סטיות מהטקסט המילולי של הספק, כולן מכוונות ומתועדות:**
+  1. `VerifierPort.verify()` (`decision_ports.py`) מחזיר `dict` (`{"verified": bool, ...}`) — לא object עם `.status` כפי שהספק מניח. שונה ל-`{"status": "ok"/"warn"/"failed"/"hallucination", "reason": ...}`; `gate_trust` קורא עם `.get("status", "ok")`.
+  2. `decision["id"]` — `maybe_supersede` בספק קורא ID ישירות מ-`decision`, אבל שתי נקודות הקריאה האמיתיות ב-`cmd_decision.py` מעבירות ל-`run_pipeline` רק את `decision["fields"]`/`decision_record["fields"]` (sub-dict בלי `"id"`) — היה גורם ל-`KeyError`. תוקן: ה-ID מוזרק כ-`event["_decision_id"]` בנקודות הקריאה (`_handle_update_step`/`_link_inbox_to_decision`), ו-`maybe_supersede` קורא משם.
+  3. Tags: הספק כותב מחרוזות אנגלית ("potential_conflict"/"low_confidence"/"pressure_high_risk") — אלה לא קיימות כאופציות Multi-Select חיות ב-Airtable (סיכון `INVALID_MULTIPLE_CHOICE_OPTIONS`). נעשה שימוש ב-`DecisionEventTag.CONFLICT`("קונפליקט") הקיים; נוספו 2 קבועים עבריים חדשים (`LOW_CONFIDENCE`="אמינות_נמוכה", `PRESSURE_HIGH_RISK`="לחץ_סיכון_גבוה") **שלא אומתו מול Airtable חי** — בניגוד ל-`Claim Topic Source` שהבעלים אישר במפורש.
+  4. `_has_keyword_conflict()` — הספק מפנה לפונקציה זו ב-§5 שלב ו' אך **לא הגדיר את גוף הלוגיקה בכלל** בטקסט הספק. מומשה כ-stub שמחזיר `False` עם תיעוד inline; נתיב ה-"conflict tag" לא פעיל בפועל עד שתוגדר לוגיקה (Stage 1.x/Stage 2 — מתאים ל-§11 "AI Conflict Detection — Stage 2" שכבר מוחרג בספק).
+  5. `DecisionSourceReliability` (`airtable_schema.py`) היו חסרים 4 מתוך 10 מפתחות `AUTHORITY_SCORE` — נוספו `DOCUMENT`("מסמך")/`MANUAL`("ידני")/`EMPLOYEE`("עובד")/`UNKNOWN`("לא_ידוע").
+  6. `event["Channel"]` לא היה מועבר כלל ל-`gate_trust` לפני התיקון (היה נכתב רק ב-write-time, אחרי שהשער כבר רץ) — תוקן בשתי נקודות הקריאה. `event["Source Reliability"]` **עדיין לא מוזן ע"י שום UI קיים** ב-`/decision update` — `gate_trust` יחזיר תמיד authority=55(ידני) default עד שתיווסף שאלה ייעודית; מחוץ לטקסט המילולי של הספק, לא תוקן בסבב הזה (דגול ל-Stage 1.x).
+  7. פלטי ה-Trust Layer (Trust Level/Confidence/Tags/Claim Topic+Source+Confidence/Source Reliability/Supersedes) לא נכתבו ל-Airtable כלל — נוספה `_add_trust_fields()` ב-`cmd_decision.py`, מחוברת לשני נתיבי הכתיבה (`_create_decision_event`/`event_fields` ב-`_link_inbox_to_decision`).
+  8. `run_pipeline()` היה מזניח את `user_flag` של שערים שעברו בהצלחה (בנה `GateResult` סינתטי חדש עם `user_flag=None` בסוף) — נוסף `collected_flag` שעוקב על ה-flag האחרון שאינו `None` בכל איטרציה, ומועבר ל-`GateResult` הסינתטי הסופי. בלי התיקון, הודעת "📝 לא זיהיתי נושא" (T2/T3 בלי Claim Topic) לא הייתה מוצגת למשתמש אף פעם.
+  9. `_format_pipeline_outcome()` לא טיפל ב-`halted_at == "trust"` (T0/T1) ולא בדק `result.user_flag` בנתיב ההצלחה — נוסף branch מפורש ל-trust + הצמדת `user_flag` (אם קיים) להודעת ההצלחה הגנרית.
+- **Commit:** עדיין לא בוצע commit נפרד — ייכלל ב-commit הבא על `claude/new-session-be1ckb`
+- **PR:** אין — לא התבקש, ולא מבוצע ללא אישור מפורש לפי הנחיית הסשן
+- **Review על ידי:** הבעלים (אישור "ניתן ליישם ספק" על ספק שהיה מסומן SPEC ONLY)
+- **Deploy תאריך:** לא רלוונטי — לא מוזג ל-`main`
+- **Verified בפרודקשן:** לא — §10 פריט 11 בספק עצמו ("אירוע T0 אמיתי → user_flag בטלגרם") עדיין לא אומת מול פרודקשן חי
+- **Verification ראיה:** `python3 -m py_compile airtable_schema.py decision_ports.py decision_pipeline.py cmd_decision.py test_decision_trust.py` נקי; `python3 test_decision_trust.py` → 33/33 self-tests עוברים (compute_trust edge cases, extract_claim_topic priority order, maybe_supersede same-topic-only, gate_trust T0/T1/T2/T3 branches, run_pipeline user_flag propagation); §9 greps כולם תקינים (`AUTHORITY_SCORE`/`MEDIUM_SCORE`/`compute_trust`/`extract_claim_topic`/`maybe_supersede`/`Claim Topic` נמצאים, `grep -n "trust stub"`→0 matches, `grep -c "SOURCE_TRUST"`→0); `python3 smoke_tests.py`/`python3 test_integration.py` — אין רגרסיה (2 כשלי smoke_tests קיימים-מראש, נבדק עם `git stash` שהם זהים על main, סיבה: `flask`/`httpx` לא מותקנים בסביבת dev זו, לא קשור לשינוי).
+- **Docs עודכנו:** ROADMAP.md (N13 הורחב + header), CHANGE_CONTROL_LOG.md (רשומה זו), AI_CONTEXT.md
+- **Feature Flag:** `FEATURE_DECISION_HUB` — כבוי כברירת מחדל, אפס שינוי התנהגות בפרודקשן
+- **Rollback plan:** revert ה-commit הבא — דגל כבוי כך שאין breaking change בפרודקשן בכל מקרה; אם נדרש rollback חלקי, `gate_trust` חוזר ל-stub הישן (`GateResult(True, "trust stub — stage 1", next_gate="readiness")`)
+
 ### C58 — Universal Sessions: Sessions table replaces non-existent LeadSessions
 - **תאריך:** 25/06/2026
 - **סוג:** Bug Fix (latent 403 on every session write) + Schema Change — לא flag-gated

@@ -14,6 +14,15 @@ from dataclasses import dataclass
 from typing import Callable
 
 from decision_ports import DecisionPorts, build_default_ports
+from airtable_schema import (
+    DecisionSourceReliability as SRC,
+    DecisionEventChannel as CH,
+    DecisionTrustLevel as TL,
+    DecisionEventTag as TAG,
+    DecisionClaimTopicSource as TOPIC_SRC,
+    DecisionExposureType as EXPOSURE,
+    DecisionFields as DF,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -119,10 +128,195 @@ def gate_entity(event: dict, decision: dict | None, ports: DecisionPorts) -> Gat
     return GateResult(True, f"stakeholder '{name}' זוהה (status={result['status']})", next_gate="trust")
 
 
+# ══════════════════════════════════════════════════
+# 3.4 — Trust Model (Stage 1, Rev 2) — Authority × Medium × Verify
+# ══════════════════════════════════════════════════
+
+AUTHORITY_SCORE: dict[str, int] = {
+    SRC.CONTRACT:   90,
+    SRC.LAWYER:     88,
+    SRC.ACCOUNTANT: 85,
+    SRC.DOCUMENT:   80,
+    SRC.PARTNER:    65,
+    SRC.CLIENT:     60,
+    SRC.MANUAL:     55,
+    SRC.EMPLOYEE:   50,
+    SRC.RUMOR:      15,
+    SRC.UNKNOWN:    25,
+}
+
+MEDIUM_SCORE: dict[str, int] = {
+    CH.DOCUMENT:  90,
+    CH.EMAIL:     70,
+    "טקסט":       65,   # spec value — no matching DecisionEventChannel option
+    CH.WHATSAPP:  60,
+    CH.TELEGRAM:  60,
+    CH.VOICE:     45,
+    "forward":    40,   # spec value — no matching DecisionEventChannel option
+    CH.MANUAL:    55,
+}
+
+TOPIC_FROM_EVENT_TYPE = {
+    "טיוטה":  "draft",
+    "עמדה":   "position",
+    "החלטה":  "decision",
+    "לחץ":    "pressure",
+    "מסמך":   "document",
+    "פגישה":  "meeting",
+}
+
+TOPIC_KEYWORDS = {
+    "מחיר":     "price",   "תמחור":     "price",
+    "תאריך":    "date",    "לוח זמנים": "date",
+    "תנאים":    "terms",   "סעיף":      "terms",
+    "ערבות":    "guarantee", "אחריות":  "liability",
+    "אספקה":    "delivery",
+}
+
+
+def compute_trust(authority: str, medium: str, verify_status: str) -> tuple[str, int]:
+    """Authority מוביל (60%), Medium מגביל (40%). Medium ceiling: מקור חזק לא מציל ערוץ חלש."""
+    a = AUTHORITY_SCORE.get(authority, 55)
+    m = MEDIUM_SCORE.get(medium, 55)
+
+    if verify_status in ("hallucination", "failed") and a >= 65:
+        return TL.T0, 10   # אנומליה חמורה — מקור אמין שנכשל
+
+    combined = int(a * 0.6 + m * 0.4)
+    combined = min(combined, m + 15)   # medium ceiling
+
+    if verify_status == "warn":
+        combined = int(combined * 0.85)
+
+    return score_to_level(combined), combined
+
+
+def score_to_level(score: int) -> str:
+    if score >= 80: return TL.T3
+    if score >= 55: return TL.T2
+    if score >= 30: return TL.T1
+    return TL.T0
+
+
+def extract_claim_topic(event: dict) -> tuple[str | None, str | None, int]:
+    """גוזר Claim Topic אוטומטי לפי עדיפות: filename → Event Type → Delta Type → keywords → None.
+    מחזיר (topic, source, confidence) — source/confidence ל-Claim Topic Source/Confidence."""
+    attachment = event.get("Attachment") if event.get("Attachment") else event.get("attachment")
+    filename = attachment.get("filename", "") if isinstance(attachment, dict) else ""
+    if filename:
+        for kw, topic in TOPIC_KEYWORDS.items():
+            if kw in filename:
+                return topic, TOPIC_SRC.FILENAME, 90
+
+    event_type = event.get("Event Type", "")
+    if event_type in TOPIC_FROM_EVENT_TYPE:
+        return TOPIC_FROM_EVENT_TYPE[event_type], TOPIC_SRC.EVENT_TYPE, 80
+
+    delta = event.get("Delta Type", "")
+    if delta in ("מסמך", "טיוטה"):
+        return "document", TOPIC_SRC.AUTO, 70
+
+    raw = event.get("Raw Content") or event.get("raw_content", "") or ""
+    for kw, topic in TOPIC_KEYWORDS.items():
+        if kw in raw:
+            return topic, TOPIC_SRC.KEYWORD, 60
+
+    return None, None, 0
+
+
+def _trust_rank(level: str) -> int:
+    return {TL.T0: 0, TL.T1: 1, TL.T2: 2, TL.T3: 3}.get(level, 0)
+
+
+def maybe_supersede(new_event: dict, decision: dict | None, ports: DecisionPorts) -> None:
+    """Supersede רק אם: אותו Claim Topic + Trust החדש גבוה יותר. אסור לדרוס Events על נושאים שונים."""
+    decision_id = new_event.get("_decision_id")
+    if not decision or not decision_id or not new_event.get("Claim Topic"):
+        return
+
+    prior_events = ports.storage.get(
+        "Decision Events",
+        f"AND({{Decision}}='{decision_id}', "
+        f"{{Claim Topic}}='{new_event['Claim Topic']}', "
+        f"{{Status}}='Active')",
+    )
+    for prior in prior_events:
+        prior_fields = prior.get("fields", prior)
+        prior_level = prior_fields.get("Trust Level", TL.T0)
+        if _trust_rank(new_event["Trust Level"]) > _trust_rank(prior_level):
+            ports.storage.update("Decision Events", prior["id"], {"Status": "Superseded"}, source="gate_trust")
+            new_event["Supersedes"] = [prior["id"]]
+
+
+def _has_keyword_conflict(raw: str, decision: dict | None, ports: DecisionPorts) -> bool:
+    """Spec Rev 2 §5 שלב ו' מפנה לפונקציה זו אך לא הגדיר את גוף הלוגיקה.
+    מחזיר False (no-op) — 'potential_conflict' tag לא ייוצר בפועל עד שלוגיקת
+    ה-keyword-conflict תוגדר במפרט (Stage 1.x / Stage 2)."""
+    return False
+
+
+def _compute_tags(event: dict, level: str, conf: int, verify_status: str) -> list[str]:
+    tags = []
+    if level == TL.T0:                            tags.append(TAG.LOW_CONFIDENCE)
+    if level == TL.T1:                            tags.append(TAG.PARTIAL_TRANSCRIPT)
+    if conf < 40:                                 tags.append(TAG.VAGUE)
+    if "לחץ" in event.get("Delta Type", ""):      tags.append(TAG.PRESSURE_ONLY)
+    if verify_status == "warn":                   tags.append(TAG.MISSING_CONTEXT)
+    if event.get("Channel") == CH.VOICE:          tags.append(TAG.PARTIAL_TRANSCRIPT)
+    return list(dict.fromkeys(tags))   # dedupe, preserve order
+
+
 @register_gate("trust", order=3)
 def gate_trust(event: dict, decision: dict | None, ports: DecisionPorts) -> GateResult:
-    """stub — Stage 1 יעטוף anti_hallucination.VerifyResult דרך ports.verifier."""
-    return GateResult(True, "trust stub — stage 1", next_gate="readiness")
+    authority = event.get("Source Reliability") or event.get("source_reliability") or SRC.MANUAL
+    medium    = event.get("Channel") or event.get("channel") or CH.MANUAL
+    raw       = event.get("Raw Content") or event.get("raw_content", "") or ""
+
+    verify = ports.verifier.verify(raw, authority)
+    verify_status = verify.get("status", "ok")
+
+    level, conf = compute_trust(authority, medium, verify_status)
+
+    claim_topic, topic_source, topic_conf = extract_claim_topic(event)
+    event["Claim Topic"] = claim_topic or ""
+    if topic_source:
+        event["Claim Topic Source"] = topic_source
+        event["Claim Topic Confidence"] = topic_conf
+
+    tags = _compute_tags(event, level, conf, verify_status)
+
+    if _has_keyword_conflict(raw, decision, ports):
+        tags.append(TAG.CONFLICT)
+        # Stage 2 יחליט אם להוריד Trust
+
+    if (TAG.PRESSURE_ONLY in tags and decision and
+            decision.get(DF.EXPOSURE_TYPE) in (EXPOSURE.FINANCIAL, EXPOSURE.LEGAL)):
+        level, conf = TL.T0, min(conf, 25)
+        tags.append(TAG.PRESSURE_HIGH_RISK)
+
+    event["Trust Level"] = level
+    event["Confidence"]  = conf
+    event["Tags"]        = list(dict.fromkeys(tags))
+
+    maybe_supersede(event, decision, ports)
+
+    if level == TL.T0:
+        flag = "⚠️ מידע עם אמינות נמוכה — דורש בדיקה אנושית."
+        if verify_status in ("hallucination", "failed") and AUTHORITY_SCORE.get(authority, 0) >= 65:
+            flag = "⚠️ מקור אמין שנכשל באימות — חריג חמור. נדרשת בדיקה."
+        return GateResult(False, f"T0: {verify_status}, conf={conf}",
+                           halt_status="Review", user_flag=flag)
+
+    if level == TL.T1:
+        return GateResult(False, f"T1: conf={conf}",
+                           halt_status="Draft", user_flag=None)
+
+    topic_flag = None
+    if not claim_topic:
+        topic_flag = "📝 לא זיהיתי נושא — באיזה נושא מדובר? (אופציונלי)"
+
+    return GateResult(True, f"{level}: conf={conf}",
+                       halt_status=None, user_flag=topic_flag, next_gate="readiness")
 
 
 @register_gate("readiness", order=4)
@@ -150,13 +344,16 @@ def run_pipeline(
     ports מוזרק — אין importים ישירים לליבה."""
     ports = ports or build_default_ports()
 
+    collected_flag = None
     for name in gate_order():
         _, fn = _GATE_REGISTRY[name]
         result = fn(event, decision, ports)
+        if result.user_flag:
+            collected_flag = result.user_flag
         if not result.passed:
             # BOSS never deletes signal — only down-ranks.
             event["Status"] = result.halt_status or "Logged"
             return {"halted_at": name, "result": result, "event": event}
 
     event["Status"] = "Active"
-    return {"halted_at": None, "result": GateResult(True, "passed all gates"), "event": event}
+    return {"halted_at": None, "result": GateResult(True, "passed all gates", user_flag=collected_flag), "event": event}
