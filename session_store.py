@@ -1,4 +1,4 @@
-# session_store.py — DB-backed Lead Session Store
+# session_store.py — DB-backed Universal Session Store
 # מחליף את _LRUSessionStore הקיים ב-lead_qualifier.py
 # flag: תמיד פעיל — תשתית קריטית, לא אופציונלית
 #
@@ -7,22 +7,27 @@
 #   + אין נראות לנציג אנושי אם ליד נטש
 #
 # מה מוסיפים:
-#   1. sync לAirtable LeadSessions בכל שלב (step-by-step)
+#   1. sync לAirtable Sessions בכל שלב (step-by-step) — C58, ראה SPEC_C58_Universal_Sessions.md
 #   2. updated_at timestamp בכל עדכון
 #   3. channel consistency — שמירת ערוץ המקור
 #   4. drop-off tracking — באיזה שלב נטשו
 #   5. restore מDB בrestart — אפס אובדן sessions
+#
+# C58 — Universal Sessions: כתיבה ל-Tables.SESSIONS (טבלה קיימת, tblHLfE24lTkVUhz0),
+# לא ל-Tables.LEAD_SESSIONS (לא קיימה בפועל ב-Airtable — 403). State JSON מחזיק את כל
+# ה-state הקיים בשדה יחיד; context_type="lead" כברירת מחדל לתאימות לאחור.
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 from collections import OrderedDict
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
-from airtable_schema import LeadSessionsFields as LSF, Tables
+from airtable_schema import SessionsFields as SF, Tables
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +39,9 @@ _MAX_SESSIONS = 1000
 # ══════════════════════════════════════════════════
 
 def _new_session(domain: str = "real_estate", channel: str = "whatsapp") -> dict:
-    """session dict — מה ששמור ב-RAM וב-Airtable."""
+    """session dict — מה ששמור ב-RAM וב-Airtable (Tables.SESSIONS, ראה C58)."""
     return {
+        "context_type": "lead",    # C58: Sessions היא טבלה גנרית; "lead" = תאימות לאחור
         "domain":       domain,
         "channel":      channel,   # ← channel consistency
         "step":         0,
@@ -56,8 +62,11 @@ def _new_session(domain: str = "real_estate", channel: str = "whatsapp") -> dict
 @dataclass
 class FileUploadResult:
     """תוצאת העלאת קובץ גנרית — מקור Drive או Decision Inbox.
-    RAM-only כרגע: אין עמודת last_uploaded_file ב-Airtable LeadSessions
-    (ראה SPEC_BUG_B_LeadSessions_Schema.md §8) — לא נשלח ל-_sync_to_db.
+    מ-C58 ואילך: נשמר בתוך State JSON (Tables.SESSIONS) — לא עוד RAM-only.
+    type="drive_file" → file_id הוא record ID בטבלת Media Files, מקושר גם
+    דרך SF.LINKED_MEDIA_FILE. type="inbox_file" → file_id הוא record ID
+    ב-Decision Inbox (טבלה אחרת) — לא מקושר דרך LINKED_MEDIA_FILE כדי לא
+    לכתוב record ID מטבלה לא נכונה לשדה linked-record (INVALID_RECORD_ID).
     """
     type: str               # "drive_file" | "inbox_file"
     url: str = ""
@@ -69,6 +78,31 @@ class FileUploadResult:
 
 def _now_iso() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
+
+
+def _extract_balanced_json(raw: str, field_label: str) -> Optional[dict]:
+    """
+    מחלץ אובייקט JSON מתוך airtable_get()'s formatted string output, לפי שם שדה.
+    סופר עומק סוגריים (לא regex naive) כי State JSON מכיל אובייקטים מקוננים
+    (answers) ואין הבטחה לסדר שדות עקבי בפלט של Airtable.
+    """
+    marker = f"{field_label}: {{"
+    idx = raw.find(marker)
+    if idx == -1:
+        return None
+    start = idx + len(marker) - 1  # מיקום ה-{ הפותח
+    depth = 0
+    for i in range(start, len(raw)):
+        if raw[i] == "{":
+            depth += 1
+        elif raw[i] == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(raw[start:i + 1])
+                except json.JSONDecodeError:
+                    return None
+    return None
 
 
 # ══════════════════════════════════════════════════
@@ -169,12 +203,12 @@ class PersistentSessionStore:
     ) -> None:
         """
         שומר את הקובץ האחרון שהועלה — לשימוש ע"י "זה הנספח" וכד'.
-        RAM-only (ראה FileUploadResult docstring) — לא נכתב ל-Airtable עד
-        שתיווסף עמודת last_uploaded_file, כדי לא לסכן 422 על שאר השדות.
+        מ-C58 ואילך נכתב גם ל-Airtable (תוך State JSON, ראה FileUploadResult docstring).
         """
         session = self.get_or_create(sender, domain, channel)
         session["last_uploaded_file"] = asdict(result)
         session["updated_at"]         = _now_iso()
+        self._sync_to_db(sender, session)
 
     def get_last_file(self, sender: str) -> Optional[dict]:
         """מחזיר את ה-FileUploadResult (כdict) האחרון, אם קיים."""
@@ -187,34 +221,50 @@ class PersistentSessionStore:
         """מוחק session (איפוס)."""
         session = self._store.pop(sender, None)
         if session and session.get("record_id"):
-            self._delete_from_db(session["record_id"])
+            self._delete_from_db(session["record_id"], session)
 
-    # ── Airtable Sync ─────────────────────────────
+    # ── Airtable Sync (C58 — Tables.SESSIONS) ─────
 
     def _sync_to_db(self, sender: str, session: dict, is_new: bool = False) -> bool:
-        """כותב/מעדכן session ב-Airtable LeadSessions."""
+        """כותב/מעדכן session ב-Airtable Sessions (State JSON + linked fields, ראה C58)."""
         try:
             from tools.airtable_tools import airtable_add, airtable_update  # type: ignore
 
+            state = {
+                "domain":             session.get("domain", ""),
+                "step":               session.get("step", 0),
+                "answers":            session.get("answers", {}),
+                "done":               session.get("done", False),
+                "drop_off_step":      session.get("drop_off_step"),
+                "score":              session.get("score", 0),
+                "tier":               session.get("tier", ""),
+                "last_uploaded_file": session.get("last_uploaded_file"),
+            }
             fields = {
-                LSF.SENDER:        sender,
-                LSF.DOMAIN:        session.get("domain", ""),
-                LSF.CHANNEL:       session.get("channel", ""),
-                LSF.STEP:          session.get("step", 0),
-                LSF.ANSWERS:       json.dumps(session.get("answers", {}), ensure_ascii=False),
-                LSF.DONE:          session.get("done", False),
-                LSF.DROP_OFF_STEP: session.get("drop_off_step"),
-                LSF.UPDATED_AT:    session.get("updated_at", _now_iso()),
-                LSF.CREATED_AT:    session.get("created_at", _now_iso()),
-                LSF.SCORE:         session.get("score", 0),
-                LSF.TIER:          session.get("tier", ""),
+                SF.SENDER_ID:    sender,
+                SF.CONTEXT_TYPE: session.get("context_type", "lead"),
+                SF.CHANNEL:      session.get("channel", ""),
+                SF.STATE_JSON:   json.dumps(state, ensure_ascii=False),
+                SF.UPDATED_AT:   session.get("updated_at", _now_iso()),
+                SF.CREATED_AT:   session.get("created_at", _now_iso()),
             }
 
+            # קישורים אופציונליים — רק אם קיימים ב-session:
+            if session.get("lead_record_id"):
+                fields[SF.LINKED_LEAD] = [session["lead_record_id"]]
+            if session.get("decision_record_id"):
+                fields[SF.LINKED_DECISION] = [session["decision_record_id"]]
+            last_file = session.get("last_uploaded_file") or {}
+            # רק drive_file → Media Files record; inbox_file → Decision Inbox record
+            # (טבלה אחרת — קישור דרך LINKED_MEDIA_FILE היה גורם ל-INVALID_RECORD_ID).
+            if last_file.get("type") == "drive_file" and last_file.get("file_id"):
+                fields[SF.LINKED_MEDIA_FILE] = [last_file["file_id"]]
+
             if session.get("record_id"):
-                result = airtable_update(Tables.LEAD_SESSIONS, session["record_id"], fields)
+                result = airtable_update(Tables.SESSIONS, session["record_id"], fields)
                 return bool(result.get("ok"))
             else:
-                result = airtable_add(Tables.LEAD_SESSIONS, fields)
+                result = airtable_add(Tables.SESSIONS, fields)
                 if result.get("ok"):
                     session["record_id"] = result.get("external_id", "")
                     return True
@@ -227,37 +277,55 @@ class PersistentSessionStore:
             return False
 
     def _load_from_db(self, sender: str) -> Optional[dict]:
-        """טוען session מAirtable לפי sender."""
+        """טוען session מ-Airtable Sessions לפי Sender ID."""
         try:
             from tools.airtable_tools import airtable_get  # type: ignore
-            raw = airtable_get(Tables.LEAD_SESSIONS, f"{{{LSF.SENDER}}}='{sender}'")
+            raw = airtable_get(Tables.SESSIONS, f"{{{SF.SENDER_ID}}}='{sender}'")
             if not raw or "אין רשומות" in raw or "❌" in raw:
                 return None
 
-            import re
-            record_m  = re.search(r'rec\w+', raw)
-            step_m    = re.search(r'step[:\s]+(\d+)', raw, re.IGNORECASE)
-            done_m    = re.search(r'done[:\s]+(true|false)', raw, re.IGNORECASE)
-            domain_m  = re.search(r'domain[:\s]+(\w+)', raw, re.IGNORECASE)
-            channel_m = re.search(r'channel[:\s]+(\w+)', raw, re.IGNORECASE)
+            record_m  = re.search(r'\[(rec\w+)\]', raw)
+            context_m = re.search(rf'{re.escape(SF.CONTEXT_TYPE)}:\s*([^|]+)', raw)
+            channel_m = re.search(rf'{re.escape(SF.CHANNEL)}:\s*([^|]+)', raw)
+            state     = _extract_balanced_json(raw, SF.STATE_JSON) or {}
 
             session = _new_session(
-                domain  = domain_m.group(1)  if domain_m  else "real_estate",
-                channel = channel_m.group(1) if channel_m else "whatsapp",
+                domain  = state.get("domain") or "real_estate",
+                channel = (channel_m.group(1).strip() if channel_m else "whatsapp"),
             )
-            if step_m:   session["step"]      = int(step_m.group(1))
-            if done_m:   session["done"]       = done_m.group(1).lower() == "true"
-            if record_m: session["record_id"]  = record_m.group(0)
+            session["context_type"]     = context_m.group(1).strip() if context_m else "lead"
+            session["step"]             = state.get("step", 0)
+            session["answers"]          = state.get("answers", {})
+            session["done"]             = state.get("done", False)
+            session["drop_off_step"]    = state.get("drop_off_step")
+            session["score"]            = state.get("score", 0)
+            session["tier"]             = state.get("tier", "")
+            session["last_uploaded_file"] = state.get("last_uploaded_file")
+            if record_m:
+                session["record_id"] = record_m.group(1)
             return session
 
         except Exception as e:
             logger.warning(f"[SessionStore] load from DB failed for {sender}: {e}")
             return None
 
-    def _delete_from_db(self, record_id: str) -> None:
+    def _delete_from_db(self, record_id: str, session: Optional[dict] = None) -> None:
+        """מסמן session כ-done+deleted ב-State JSON (אין שדות done/deleted נפרדים ב-Sessions)."""
         try:
             from tools.airtable_tools import airtable_update  # type: ignore
-            airtable_update(Tables.LEAD_SESSIONS, record_id, {LSF.DONE: True, "deleted": True})
+            session = session or {}
+            state = {
+                "domain":             session.get("domain", ""),
+                "step":               session.get("step", 0),
+                "answers":            session.get("answers", {}),
+                "done":               True,
+                "deleted":            True,
+                "drop_off_step":      session.get("drop_off_step"),
+                "score":              session.get("score", 0),
+                "tier":               session.get("tier", ""),
+                "last_uploaded_file": session.get("last_uploaded_file"),
+            }
+            airtable_update(Tables.SESSIONS, record_id, {SF.STATE_JSON: json.dumps(state, ensure_ascii=False)})
         except Exception:
             pass
 
@@ -296,13 +364,17 @@ def _run_tests() -> bool:
         if cond: print(f"✅ {desc}"); passed += 1
         else:    print(f"❌ {desc}"); failed += 1
 
-    # mock airtable
-    at = types.ModuleType("airtable_tools")
+    # mock tools.airtable_tools — must match the real import path
+    # (`from tools.airtable_tools import ...`), not the bare module name.
+    tools_pkg = types.ModuleType("tools")
+    at = types.ModuleType("tools.airtable_tools")
     saves = []
     at.airtable_add    = lambda t, f: (saves.append(f), {"ok": True, "external_id": "rec001"})[1]
     at.airtable_update = lambda t, r, f: (saves.append(f), {"ok": True, "external_id": r})[1]
     at.airtable_get    = lambda t, formula: "אין רשומות"
-    sys.modules["airtable_tools"] = at
+    tools_pkg.airtable_tools = at
+    sys.modules["tools"] = tools_pkg
+    sys.modules["tools.airtable_tools"] = at
 
     store = PersistentSessionStore(maxsize=5)
 
@@ -354,6 +426,69 @@ def _run_tests() -> bool:
     # ── get_all_active ────────────────────────────
     active = store.get_all_active()
     chk("active list excludes done", all(not v.get("done") for _, v in active))
+
+    # ── C58: context_type default ─────────────────
+    chk("context_type defaults to 'lead'", s1["context_type"] == "lead")
+
+    # ── C58: _extract_balanced_json (nested objects) ──
+    nested_raw = (
+        'State JSON: {"domain": "real_estate", "answers": {"city": "תל אביב", '
+        '"budget": {"min": 100, "max": 200}}, "step": 2} | Other Field: x'
+    )
+    parsed = _extract_balanced_json(nested_raw, SF.STATE_JSON)
+    chk("balanced-json: parses nested object",      parsed is not None)
+    chk("balanced-json: nested answers preserved",   parsed.get("answers", {}).get("budget") == {"min": 100, "max": 200})
+    chk("balanced-json: missing field returns None", _extract_balanced_json(nested_raw, "No Such Field") is None)
+
+    # ── C58: _sync_to_db State JSON structure (no info loss) ──
+    saves.clear()
+    store.mark_done("w:001", score=80, tier="HOT")
+    last_fields = saves[-1]
+    chk("sync: Context Type field present",  last_fields.get(SF.CONTEXT_TYPE) == "lead")
+    synced_state = json.loads(last_fields[SF.STATE_JSON])
+    chk("sync: State JSON carries score",            synced_state.get("score") == 80)
+    chk("sync: State JSON carries last_uploaded_file key", "last_uploaded_file" in synced_state)
+
+    # ── C58: drive_file vs inbox_file → LINKED_MEDIA_FILE gating ──
+    saves.clear()
+    store.set_last_file(
+        "w:001",
+        FileUploadResult(type="drive_file", url="https://x/y", file_id="recMEDIA1",
+                          original_filename="a.pdf", timestamp=_now_iso()),
+    )
+    chk("drive_file: LINKED_MEDIA_FILE set", saves[-1].get(SF.LINKED_MEDIA_FILE) == ["recMEDIA1"])
+
+    saves.clear()
+    store.set_last_file(
+        "w:001",
+        FileUploadResult(type="inbox_file", url="", file_id="recINBOX1",
+                          original_filename="b.pdf", timestamp=_now_iso()),
+    )
+    chk("inbox_file: LINKED_MEDIA_FILE NOT set", SF.LINKED_MEDIA_FILE not in saves[-1])
+
+    # ── C58: _load_from_db round-trip (realistic airtable_get format) ──
+    fabricated_state = {
+        "domain": "real_estate", "step": 3,
+        "answers": {"city": "ירושלים", "budget": {"min": 1, "max": 2}},
+        "done": False, "drop_off_step": 3, "score": 55, "tier": "WARM",
+        "last_uploaded_file": {"type": "drive_file", "file_id": "recMEDIA9"},
+    }
+    fabricated_raw = (
+        f"📊 Sessions — 1 רשומות:\n"
+        f"• [recRESTORE1] {SF.SENDER_ID}: w:restore | {SF.CONTEXT_TYPE}: lead | "
+        f"{SF.CHANNEL}: telegram | {SF.STATE_JSON}: {json.dumps(fabricated_state, ensure_ascii=False)} | "
+        f"{SF.UPDATED_AT}: 2026-01-01T00:00:00+00:00 | {SF.CREATED_AT}: 2026-01-01T00:00:00+00:00\n"
+    )
+    at.airtable_get = lambda t, formula: fabricated_raw
+    restored = store.get("w:restore")
+    chk("restore: session found",            restored is not None)
+    chk("restore: record_id parsed",          restored.get("record_id") == "recRESTORE1")
+    chk("restore: channel parsed",            restored.get("channel") == "telegram")
+    chk("restore: context_type parsed",       restored.get("context_type") == "lead")
+    chk("restore: nested answers preserved",  restored.get("answers", {}).get("budget") == {"min": 1, "max": 2})
+    chk("restore: score/tier preserved",      restored.get("score") == 55 and restored.get("tier") == "WARM")
+    chk("restore: last_uploaded_file preserved", restored.get("last_uploaded_file", {}).get("file_id") == "recMEDIA9")
+    at.airtable_get = lambda t, formula: "אין רשומות"
 
     print(f"\n{'='*40}")
     print(f"SessionStore Tests: {passed} passed, {failed} failed")

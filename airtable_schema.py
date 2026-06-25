@@ -71,7 +71,13 @@ class Tables:
     DECISION_STAKEHOLDERS   = "Decision Stakeholders"
     DECISION_INBOX          = "Decision Inbox"
     # BUG-B — LeadSessions schema governance. ראה SPEC_BUG_B_LeadSessions_Schema.md.
+    # ⚠️ DEPRECATED (C58, SPEC_C58_Universal_Sessions.md): טבלה זו מעולם לא נוצרה ב-Airtable
+    # בפועל (403/לא קיימת) — session_store.py הוחלף לכתוב ל-Tables.SESSIONS. לא נמחק כאן
+    # כדי לא לשבור קוד היסטורי/דוחות שמתייחסים לקבוע הזה; אין שימוש חי בו.
     LEAD_SESSIONS           = "LeadSessions"
+    # C58 — Universal Sessions. טבלה קיימת ב-Airtable (tblHLfE24lTkVUhz0), משותפת לכל
+    # context_type (lead/decision/task/...), ראה SPEC_C58_Universal_Sessions.md.
+    SESSIONS                 = "Sessions"
 
 
 # ══════════════════════════════════════════════════
@@ -644,6 +650,32 @@ class LeadSessionsFields:
     SCORE         = "score"
     TIER          = "tier"
     # future: LAST_UPLOADED_FILE = "last_uploaded_file" (אחרי שנוצרת עמודה ב-Airtable)
+
+
+# C58 — Universal Sessions. ראה SPEC_C58_Universal_Sessions.md.
+# Session = מצב עבודה זמני סביב ישות קיימת (lead/decision/task/...) — לא דאטה עסקי.
+# טבלה אחת משותפת (Tables.SESSIONS), context_type מבדיל בין סוגי השימוש.
+class SessionsFields:
+    SESSION_ID       = "Session ID"
+    CONTEXT_TYPE     = "Context Type"      # select: lead/decision/task/payment/deal/contact/media/general
+    STATE_JSON       = "State JSON"
+    LAST_TOOL_RESULT = "Last Tool Result"
+    CHANNEL          = "Channel"
+    SENDER_ID        = "Sender ID"
+    CREATED_AT       = "Created At"
+    UPDATED_AT       = "Updated At"
+    # Links (כולם אופציונליים):
+    LINKED_LEAD            = "Linked Lead"
+    LINKED_CONTACT         = "Linked Contact"
+    LINKED_DECISION        = "Linked Decision"
+    LINKED_DECISION_EVENT  = "Linked Decision Event"
+    LINKED_DEAL            = "Linked Deal"
+    LINKED_TASK            = "Linked Task"
+    LINKED_PAYMENT         = "Linked Payment"
+    LINKED_VENTURE         = "Linked Venture"
+    LINKED_MEDIA_FILE      = "Linked Media File"
+    LINKED_BUSINESS_MEMORY = "Linked Business Memory"
+
 
 class UnitStatus:
     AVAILABLE       = "Available"

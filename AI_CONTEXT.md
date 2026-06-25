@@ -1,15 +1,17 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-06-25
-**עודכן על ידי:** Claude Code — Decision Hub Stage 0.5/0.6 + governance docs (git-verified `main` HEAD `483851f`, PR #147)
+**עודכן:** 2026-06-25 (מאוחר ביותר)
+**עודכן על ידי:** Claude Code — C58 Universal Sessions (branch `claude/new-session-be1ckb`, 🟡 CODE DONE, לא ממוזג, לא מאומת בפרודקשן)
 
 > מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (מיושן, 19/06) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
 
 ---
 
 ## 1. Executive Summary
-- `main` = `483851f` (PR #147 מוזג, אומת `git merge-base --is-ancestor`). Identity → Router → Context → Agent + Approval flow (3-state, fail-closed) — **תקינים ופעילים בפרודקשן**.
+- `main` = `1d08402` (PR #149 מוזג, אומת `git fetch origin main` + `git merge-base --is-ancestor`). Identity → Router → Context → Agent + Approval flow (3-state, fail-closed) — **תקינים ופעילים בפרודקשן**.
+- **C58 Universal Sessions — 🟡 CODE DONE, על branch בלבד, לא מוזג** — `session_store.py` עבר מ-`Tables.LEAD_SESSIONS` (טבלה שלא קיימת בפועל ב-Airtable — כל כתיבה הייתה 403, באג latent לא-מתועד) ל-`Tables.SESSIONS` (טבלה אמיתית, `tblHLfE24lTkVUhz0`) עם schema גנרי (`Context Type`+`State JSON`+`Linked *`). 36/36 self-tests עוברים; **לא אומת מול Airtable חי** — סעיף 5 בספק המקורי ("רשומה אמיתית נוצרת ב-Sessions בייצור") עדיין פתוח. ראו פירוט: ROADMAP.md/CHANGE_CONTROL_LOG.md.
+- **C57 Agent Tool Awareness הושלם ומוזג** (לא flag-gated, תיקון התנהגות בסיסי) — `app.py` מדכא `text_block` שנוצר באותה תשובה עם `tool_use` (Claude כותב טקסט לפני שראה תוצאת כלי); `core_knowledge.py` קיבל כלל 7 (אל תכלול הסבר/שאלה לצד הפעלת כלי). ⚠️ הספק תייג זאת "C54" — מתנגש עם C54 הקיים (Business Memory /update); תויג מחדש C57 בתיעוד, ראו ROADMAP.md/CHANGE_CONTROL_LOG.md.
 - **Decision Hub Stage 0.5/0.6 הושלמו** (File/Voice Precedence Routing + File Context Reference "זה הנספח") — code-complete ומחובר, **כבוי בפרודקשן** מאחורי `FEATURE_DECISION_HUB`. נוסף ל-ROADMAP.md לראשונה כ-N13 (לא היה מתועד קודם). MODULE_RULES.md קיבל חוקים 7-10+12; נוסף `docs/governance/PLANNING_GATE.md`; BUG-017 (`session_store._sync_to_db` dict-vs-string) נסגר.
 - **F16 Media Layer הושלם (7/7 batches)** — code-complete ומחובר ל-pipeline החי, אך **כבוי בפרודקשן** מאחורי `FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD` (off by default). דורש יצירת טבלת "Media Files" ידנית ב-Airtable לפני הדלקה.
 - **N07/N08/N09/N11/N12 הושלמו** (Schema Governance, CI/CD, Monitoring, Finance Pulse wiring, Daily Git Audit scheduler) — כולם code-complete ומוזגים; N12 ו-N10 (Rollback) נשארים flag-off/planned בהתאמה.
@@ -27,6 +29,25 @@
 **חסום:** F05 WhatsApp Production (Meta approval). TMA Activity Feed / Assets / Personal Mode (`coming_soon` stubs, כנים).
 
 ## 3. Completed Since Last Update
+
+**C58 Universal Sessions (25/06/2026, branch `claude/new-session-be1ckb`, 🟡 CODE DONE — לא ממוזג, לא מאומת בפרודקשן):**
+- **מקור:** `SPEC_C58_Universal_Sessions.md` (הועלה ע"י הבעלים עם הוראה מפורשת "implement" — אישור ה-"SPEC ONLY עד אישור אליהו" gate שבכותרת הספק).
+- **הבעיה שנפתרה:** `Tables.LEAD_SESSIONS` ("LeadSessions") **לא קיימת בפועל ב-Airtable** — כל כתיבה הייתה מחזירה 403. זה היה באג latent שלא תועד קודם ב-`BUG_AUDIT_LOG.md` (BUG-017/BUG-B הקודמים תיקנו רק את חוזה ה-dict/schema-governance, לא את עצם אי-קיום הטבלה).
+- **`airtable_schema.py`** — `Tables.SESSIONS = "Sessions"` (`tblHLfE24lTkVUhz0`) נוסף; `class SessionsFields` חדש (Context Type/State JSON/Sender ID/Channel/Created At/Updated At + 10 שדות Linked * אופציונליים). `Tables.LEAD_SESSIONS` סומן deprecated בהערה, לא נמחק.
+- **`session_store.py`** — `_sync_to_db`/`_load_from_db`/`_delete_from_db` נכתבו מחדש לכתוב/לקרוא מ-`Tables.SESSIONS`; כל ה-state (domain/step/answers/done/drop_off_step/score/tier/**last_uploaded_file**) נשמר במאוחד בשדה `State JSON` יחיד. **משנה את הערת C58 הקודמת ב-§Stage 0.6 למטה: `last_uploaded_file`/`FileUploadResult` כבר לא RAM-only — נכתב ל-Airtable מ-C58 ואילך** (ראה תיקון 2 למטה). `_extract_balanced_json()` חדש מחלץ JSON מקונן מתוך הפלט הטקסטואלי של `airtable_get()` בספירת עומק סוגריים (לא regex naive).
+- ⚠️ **4 סטיות מכוונות ומתועדות מהטקסט המילולי של הספק** (מלא ב-`CHANGE_CONTROL_LOG.md`): (1) `external_id` נקרא לפי חוזה C53-A האמיתי, לא שרשרת fallback שגויה; (2) `last_uploaded_file` נוסף ל-State JSON (הספק השמיט, בסתירה לעקרון "אפס אובדן מידע" שהוא עצמו הצהיר); (3) `LINKED_MEDIA_FILE` מקושר רק כש-`type=="drive_file"` (Media Files record) ולא `"inbox_file"` (Decision Inbox record — טבלה אחרת, היה גורם ל-`INVALID_RECORD_ID`); (4) `_delete_from_db` משמר state קודם ב-tombstone, לא מוחק אותו.
+- **תיקון נלווה (לא קשור ל-C58):** mock ה-self-tests רשם `sys.modules["airtable_tools"]` במקום `sys.modules["tools.airtable_tools"]` — היה מסתיר בשקט כל כשל DB-sync (ImportError נתפס). זה ה-2 כשלים שתועדו ב-N13 כ"קיימים מראש, לא קשורים" — כעת מתוקנים.
+- **Verification:** `python3 -m py_compile session_store.py airtable_schema.py app.py cmd_decision.py` נקי; `python3 session_store.py` → **36/36** self-tests עוברים. spec §6 greps כולם תקינים, כולל `grep -c "LeadSessions" session_store*.py` → 0.
+- **ממתין:** ספק §7 item 5 — אימות שרשומה אמיתית נוצרת ב-Sessions ב-Airtable בפרודקשן (לא בוצע, אין PR/merge עדיין). שמות השדות ב-`SessionsFields` הותאמו לטקסט הספק בלבד — לא אומתו ישירות מול schema חי ב-Airtable.
+
+**C57 Agent Tool Awareness (25/06/2026, PR #149, `main` = `1d08402`):**
+- **`app.py`** — בלולאת ה-agent, אחרי חילוץ `tool_uses`/`text_blocks` מ-`response.content`: אם שניהם קיימים באותה תשובה (Claude מחזיר text+tool_use יחד — ה-text נכתב לפני שראה תוצאת כלי), `text_blocks` מאופס ל-`[]` ונכתב `logger.info("[C54] Suppressed premature text_block alongside tool_use: ...")`. הלולאה ממשיכה כרגיל, הכלי רץ, התשובה האמיתית מגיעה ב-turn הבא עם תוצאת הכלי בפועל — מונע תשובה סותרת/מבלבלת למשתמש (למשל "לא הבנתי מה לעלות" לצד כלי upload שרץ בהצלחה).
+- **`core_knowledge.py`** — כלל 7 חדש בבלוק `_NEVER_FAKE_CONTROL`: לא לכלול טקסט הסבר/שאלת הבהרה באותה תשובה עם הפעלת כלי; להפעיל את הכלי, לקבל תוצאה, ואז לענות.
+- **מקור:** `SPEC_C54_Agent_Tool_Awareness.md` (הועלה ע"י הבעלים, אושר במלואו לפני כתיבת קוד — "SPEC ONLY" gate).
+- ⚠️ **ID collision:** הספק תייג זאת "C54" — מתנגש עם C54 הקיים ב-ROADMAP.md (Business Memory /update command, PR #85). תויג מחדש **C57** בכל מסמכי התיעוד; `logger.info`/docstring בקוד עצמו נשארו `[C54]` כפי שנכתבו (לא נגענו בלוג production string ללא צורך).
+- **לא flag-gated** — שינוי התנהגות תמיד-פעיל בלולאת ה-agent, לא פיצ'ר ניתן-לכיבוי.
+- **Verification:** `git fetch origin main` + `git merge-base --is-ancestor cc6142b origin/main` → exit 0; `py_compile` נקי על `app.py`/`core_knowledge.py`.
+- **ממתין:** אימות לייב — לחפש `[C54] Suppressed premature text_block` ב-Render logs אחרי deploy; אם לא מופיע תוך שבוע, ה-prompt rule (כלל 7) הספיק לבד.
 
 **Decision Hub Stage 0.5/0.6 + governance docs (25/06/2026, PR #147, `main` = `483851f`):**
 - **Stage 0.5 — File/Voice Precedence Routing** (`4ac2a05`): `cmd_decision.decision_context_active()`/`route_file_to_decision_inbox()` מוטמע ב-`app.py::_handle_telegram_media`, גרור ל-Decision Inbox כש-context פעיל, fail-safe לדרך הדיפולט (Drive/Voice) אם משהו נכשל. מימוש חוק 9 (Input Precedence) בקוד חי לראשונה.
