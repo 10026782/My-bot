@@ -1,15 +1,16 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-06-25
-**עודכן על ידי:** Claude Code — Decision Hub Stage 0.5/0.6 + governance docs (git-verified `main` HEAD `483851f`, PR #147)
+**עודכן:** 2026-06-25 (מאוחר ביותר)
+**עודכן על ידי:** Claude Code — C57 Agent Tool Awareness (git-verified `main` HEAD `1d08402`, PR #149)
 
 > מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (מיושן, 19/06) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
 
 ---
 
 ## 1. Executive Summary
-- `main` = `483851f` (PR #147 מוזג, אומת `git merge-base --is-ancestor`). Identity → Router → Context → Agent + Approval flow (3-state, fail-closed) — **תקינים ופעילים בפרודקשן**.
+- `main` = `1d08402` (PR #149 מוזג, אומת `git fetch origin main` + `git merge-base --is-ancestor`). Identity → Router → Context → Agent + Approval flow (3-state, fail-closed) — **תקינים ופעילים בפרודקשן**.
+- **C57 Agent Tool Awareness הושלם ומוזג** (לא flag-gated, תיקון התנהגות בסיסי) — `app.py` מדכא `text_block` שנוצר באותה תשובה עם `tool_use` (Claude כותב טקסט לפני שראה תוצאת כלי); `core_knowledge.py` קיבל כלל 7 (אל תכלול הסבר/שאלה לצד הפעלת כלי). ⚠️ הספק תייג זאת "C54" — מתנגש עם C54 הקיים (Business Memory /update); תויג מחדש C57 בתיעוד, ראו ROADMAP.md/CHANGE_CONTROL_LOG.md.
 - **Decision Hub Stage 0.5/0.6 הושלמו** (File/Voice Precedence Routing + File Context Reference "זה הנספח") — code-complete ומחובר, **כבוי בפרודקשן** מאחורי `FEATURE_DECISION_HUB`. נוסף ל-ROADMAP.md לראשונה כ-N13 (לא היה מתועד קודם). MODULE_RULES.md קיבל חוקים 7-10+12; נוסף `docs/governance/PLANNING_GATE.md`; BUG-017 (`session_store._sync_to_db` dict-vs-string) נסגר.
 - **F16 Media Layer הושלם (7/7 batches)** — code-complete ומחובר ל-pipeline החי, אך **כבוי בפרודקשן** מאחורי `FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD` (off by default). דורש יצירת טבלת "Media Files" ידנית ב-Airtable לפני הדלקה.
 - **N07/N08/N09/N11/N12 הושלמו** (Schema Governance, CI/CD, Monitoring, Finance Pulse wiring, Daily Git Audit scheduler) — כולם code-complete ומוזגים; N12 ו-N10 (Rollback) נשארים flag-off/planned בהתאמה.
@@ -27,6 +28,15 @@
 **חסום:** F05 WhatsApp Production (Meta approval). TMA Activity Feed / Assets / Personal Mode (`coming_soon` stubs, כנים).
 
 ## 3. Completed Since Last Update
+
+**C57 Agent Tool Awareness (25/06/2026, PR #149, `main` = `1d08402`):**
+- **`app.py`** — בלולאת ה-agent, אחרי חילוץ `tool_uses`/`text_blocks` מ-`response.content`: אם שניהם קיימים באותה תשובה (Claude מחזיר text+tool_use יחד — ה-text נכתב לפני שראה תוצאת כלי), `text_blocks` מאופס ל-`[]` ונכתב `logger.info("[C54] Suppressed premature text_block alongside tool_use: ...")`. הלולאה ממשיכה כרגיל, הכלי רץ, התשובה האמיתית מגיעה ב-turn הבא עם תוצאת הכלי בפועל — מונע תשובה סותרת/מבלבלת למשתמש (למשל "לא הבנתי מה לעלות" לצד כלי upload שרץ בהצלחה).
+- **`core_knowledge.py`** — כלל 7 חדש בבלוק `_NEVER_FAKE_CONTROL`: לא לכלול טקסט הסבר/שאלת הבהרה באותה תשובה עם הפעלת כלי; להפעיל את הכלי, לקבל תוצאה, ואז לענות.
+- **מקור:** `SPEC_C54_Agent_Tool_Awareness.md` (הועלה ע"י הבעלים, אושר במלואו לפני כתיבת קוד — "SPEC ONLY" gate).
+- ⚠️ **ID collision:** הספק תייג זאת "C54" — מתנגש עם C54 הקיים ב-ROADMAP.md (Business Memory /update command, PR #85). תויג מחדש **C57** בכל מסמכי התיעוד; `logger.info`/docstring בקוד עצמו נשארו `[C54]` כפי שנכתבו (לא נגענו בלוג production string ללא צורך).
+- **לא flag-gated** — שינוי התנהגות תמיד-פעיל בלולאת ה-agent, לא פיצ'ר ניתן-לכיבוי.
+- **Verification:** `git fetch origin main` + `git merge-base --is-ancestor cc6142b origin/main` → exit 0; `py_compile` נקי על `app.py`/`core_knowledge.py`.
+- **ממתין:** אימות לייב — לחפש `[C54] Suppressed premature text_block` ב-Render logs אחרי deploy; אם לא מופיע תוך שבוע, ה-prompt rule (כלל 7) הספיק לבד.
 
 **Decision Hub Stage 0.5/0.6 + governance docs (25/06/2026, PR #147, `main` = `483851f`):**
 - **Stage 0.5 — File/Voice Precedence Routing** (`4ac2a05`): `cmd_decision.decision_context_active()`/`route_file_to_decision_inbox()` מוטמע ב-`app.py::_handle_telegram_media`, גרור ל-Decision Inbox כש-context פעיל, fail-safe לדרך הדיפולט (Drive/Voice) אם משהו נכשל. מימוש חוק 9 (Input Precedence) בקוד חי לראשונה.

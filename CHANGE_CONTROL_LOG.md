@@ -23,6 +23,22 @@
 
 > נבנה מ-`git log --since="30 days ago"` (~172 commits, `f935c53`→`eebf73b`) + טבלאות ROADMAP.md (Stabilization Sprint, World 2, Sprint 16/06). כל commit hash צוטט ישירות מ-git או מ-ROADMAP — שורות שלא נמצאה להן ראיה ישירה מסומנות "לא ידוע".
 
+### C57 — Agent Tool Awareness: suppress premature text_block alongside tool_use (PR #149)
+- **תאריך:** 25/06/2026
+- **סוג:** Bug Fix (UX-level, behavior change — לא flag-gated)
+- **Requirement:** `SPEC_C54_Agent_Tool_Awareness.md` (הועלה ע"י הבעלים, אושר במלואו: "Yes, both changes")
+- **תיאור:** Claude מחזיר לעיתים `text_block` ו-`tool_use` באותה API response. ה-text נכתב לפני שהמודל ראה את תוצאת הכלי — אם הוא נשלח למשתמש (כמו "לא הבנתי מה לעלות") לפני שהכלי רץ בפועל, נוצרת תשובה סותרת/מבלבלת ב-turn אחד בלבד, גם כשהכלי בפועל הצליח. תיקון בשתי שכבות: (1) **`app.py`** (אחרי חילוץ `tool_uses`/`text_blocks` בלולאת ה-agent) — אם שניהם קיימים באותה תשובה, `text_blocks` מאופס ל-`[]` ונכתב `logger.info("[C54] Suppressed premature text_block alongside tool_use: ...")`; הלולאה ממשיכה, הכלי רץ, והתשובה האמיתית מגיעה ב-turn הבא עם תוצאת הכלי. (2) **`core_knowledge.py`** — כלל 7 חדש בבלוק `_NEVER_FAKE_CONTROL`: "כשאתה מפעיל כלי, אל תכלול טקסט הסבר או שאלת הבהרה באותה תשובה. הפעל את הכלי. קבל את התוצאה. ענה למשתמש רק אחרי שיש לך תוצאה." השכבה הראשונה (קוד) מגנה על מה שהשנייה (prompt) לא תפסה.
+- ⚠️ **ID collision מתועד:** הספק החיצוני תייג את התיקון "C54" — מתנגש עם C54 הקיים ב-`ROADMAP.md` (Business Memory /update command, PR #85). תויג מחדש **C57** בכל מסמכי התיעוד (ROADMAP/CHANGE_CONTROL); `logger.info` בקוד עצמו וה-docstring ב-`core_knowledge.py` נשארו עם תג `[C54]`/הערת "C54" כפי שנכתבו, כדי לא לגעת בלוג production string ללא צורך תפעולי — ה-mapping מתועד כאן.
+- **Commit:** `cc6142b`
+- **PR:** #149 — https://github.com/10026782/My-bot/pull/149 — **מוזג ל-`main` ב-commit `1d08402`**
+- **Review על ידי:** הבעלים (אישר את שני השינויים במפורש לפני כתיבת קוד, per SPEC ONLY gate)
+- **Deploy תאריך:** לא ידוע — Render Auto-Deploy מוגדר על `main`, לא אומת ידנית מול Render Dashboard
+- **Verified בפרודקשן:** לא — ממתין לראות `[C54] Suppressed premature text_block` ב-Render logs (ראו §8 של הספק המקורי); אם לא מופיע תוך שבוע מה-deploy, סימן ש-prompt rule בלבד הספיק.
+- **Verification ראיה:** `git fetch origin main` + `git merge-base --is-ancestor cc6142b origin/main` → exit 0; `python3 -m py_compile app.py core_knowledge.py` נקי.
+- **Docs עודכנו:** ROADMAP.md (C57 חדש + header), CHANGE_CONTROL_LOG.md (רשומה זו)
+- **Feature Flag:** אין — שינוי קוד תמיד-פעיל בלולאת ה-agent, לא flag-gated (תיקון התנהגות בסיסי, לא פיצ'ר)
+- **Rollback plan:** revert PR #149 — מחזיר התנהגות קודמת (text+tool_use לעיתים נשלחים יחד); אין סיכון דאטה, רק UX
+
 ### N13 — Decision Hub Stage 0.5/0.6 + BUG-017/BUG-B + MODULE_RULES 7-10/12 (PR #147)
 - **תאריך:** 25/06/2026
 - **סוג:** Feature (flag off) + Bug Fix + Docs
