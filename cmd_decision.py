@@ -388,8 +388,11 @@ def _format_decision_card(decision: dict) -> str:
         for s in stakeholders
     ) or "  (אין)"
 
-    latest = _latest_event(decision["id"])
+    events = _list_decision_events(decision["id"])
+    latest = max(events, key=lambda e: e["fields"].get(DecisionEventFields.EVENT_DATE, "")) if events else None
     latest_summary = latest["fields"].get(DecisionEventFields.AI_SUMMARY, "") if latest else "(אין)"
+
+    confidence_block = _format_confidence_block(decision, events)
 
     return (
         f"📋 {title} | טיוטה {draft}\n"
@@ -400,8 +403,49 @@ def _format_decision_card(decision: dict) -> str:
         f"⚠️ בחתימה: {risk_yes}\n"
         f"⚠️ באי-חתימה: {risk_no}\n\n"
         f"❓ חסר: {missing}\n\n"
+        f"{confidence_block}\n"
         f"🔄 אחרון: {latest_summary}"
     )
+
+
+def _format_confidence_block(decision: dict, events: list) -> str:
+    """Stage 2 (F17) — Smart Trust Layer: confidence/evidence/missing-evidence
+    על ההחלטה כולה, מחושב מ-Events מקושרים. AI Conflict Detection רץ כאן בלבד
+    (פתיחת כרטיס /decision status) — lazy + cached, לעולם לא ב-ingest."""
+    from decision_confidence import calc_confidence, detect_missing_evidence, build_evidence_summary
+
+    domain = decision["fields"].get(DecisionFields.DOMAIN, "")
+    result = calc_confidence(events)
+    missing_evidence = detect_missing_evidence(domain, events)
+    evidence_summary = build_evidence_summary(events)
+
+    _persist_confidence(decision["id"], result, missing_evidence, evidence_summary)
+
+    pct = int(result.score * 100)
+    lines = [f"📊 ביטחון בהחלטה: {pct}%", f"📎 ראיות: {evidence_summary}"]
+    if result.conflicting:
+        lines.append(f"⚡ קונפליקטים פתוחים: {len(result.conflicting)}")
+    if missing_evidence:
+        lines.append("⚠️ חסר לפני החלטה:\n" + "\n".join(f"  • {item}" for item in missing_evidence))
+    return "\n".join(lines)
+
+
+def _persist_confidence(decision_id: str, result, missing_evidence: list, evidence_summary: str) -> None:
+    """כתיבה best-effort — לא חוסם את הצגת הכרטיס. עד שהשדות נוצרים ידנית
+    ב-Airtable (Stage 2 SPEC §Schema), airtable_patch ישמיט אותם בשקט."""
+    import json
+    from tools.airtable_gateway import airtable_patch
+
+    fields = {
+        DecisionFields.CONFIDENCE_SCORE: result.score,
+        DecisionFields.EVIDENCE_SUMMARY: evidence_summary,
+        DecisionFields.EVIDENCE_IDS: json.dumps(result.supporting + result.conflicting),
+        DecisionFields.MISSING_EVIDENCE: json.dumps(missing_evidence),
+    }
+    try:
+        airtable_patch(Tables.DECISIONS, decision_id, fields, source="decision_confidence:stage2")
+    except Exception as e:
+        logger.warning(f"[DecisionHub] _persist_confidence failed: {e}")
 
 
 def _position_emoji(position: str) -> str:
@@ -770,12 +814,16 @@ def _list_stakeholders(decision_id: str) -> list:
 
 
 def _latest_event(decision_id: str) -> dict | None:
-    formula = f"FIND('{decision_id}', ARRAYJOIN({{{DecisionEventFields.DECISION}}}))"
-    events = _at_list(Tables.DECISION_EVENTS, formula)
+    events = _list_decision_events(decision_id)
     if not events:
         return None
     events.sort(key=lambda e: e["fields"].get(DecisionEventFields.EVENT_DATE, ""), reverse=True)
     return events[0]
+
+
+def _list_decision_events(decision_id: str) -> list:
+    formula = f"FIND('{decision_id}', ARRAYJOIN({{{DecisionEventFields.DECISION}}}))"
+    return _at_list(Tables.DECISION_EVENTS, formula)
 
 
 # ── פונקציות עזר כלליות ──────────────────────────────────────────

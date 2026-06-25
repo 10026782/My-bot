@@ -43,6 +43,27 @@
 - **Feature Flag:** אין — תמיד-פעיל (additive, כמו `last_uploaded_file` ב-C58)
 - **Rollback plan:** revert ה-commit הקרוב — שדה `last_tool_result` חדש ב-State JSON, אין breaking change לצרכנים קיימים; אם injection ל-system prompt גורם לבעיה (גודל/רעש), ניתן להסיר את שורת `ctx.system_prompt += _build_tool_context(chat_id)` בלבד בלי לגעת בשאר הקוד
 
+### F17 — Decision Hub Stage 2: Smart Trust Layer (AI Conflict Detection, Confidence Score, Evidence Graph, Missing Evidence)
+- **תאריך:** 25/06/2026
+- **סוג:** Feature — flag-gated (`FEATURE_DECISION_HUB`, כבוי כברירת מחדל)
+- **Requirement:** SPEC F17 (הועלה ע"י הבעלים, "SPEC ONLY — אין מימוש לפני אישורך"), אושר בכפוף לתנאי מפורש אחד: *"AI Conflict Detection יהיה Lazy + Cached, לא Eager. קליטת Event לא תלויה ב-Claude. בזמן פתיחת Decision או Refresh יבוצע סריקת קונפליקטים מוגבלת, רק לאירועים באותו Claim Topic וברמת Trust של T1 ומעלה"*.
+- **תיאור:** שכבת ביטחון על גבי Stage 1 — מסתכלת על Decision שלם (לא Event בודד): האם האירועים התומכים מסכימים, מה חסר, כמה ביטחון לפני חתימה. קובץ חדש `decision_confidence.py`: (1) **AI Conflict Detection** — `detect_conflict_ai(event_a, event_b)` קריאת Claude בודדת (`call_anthropic_text`, prompt JSON-only בעברית) עם `detect_conflicts_ai_lazy(events)` שעוטף אותה במלוא תנאי האישור — מסנן ל-Trust>=T1 + Claim Topic קיים, מקבץ לפי Claim Topic, dedup לפי `_event_pair_hash` (sha256 על זוג IDs ממוין) ב-`_conflict_cache` (process-local), מוגבל ל-`_MAX_AI_COMPARISONS_PER_RUN=5` קריאות Claude חדשות לריצה (פגיעות ב-cache לא נספרות במגבלה). (2) **Evidence Graph** — `evidence_ids`/`evidence_summary` (`build_evidence_summary()` סופר Events לפי Event Type). (3) **Decision Confidence Score** — `calc_confidence(events, conflicts=None)`: ממוצע משוקלל של ציוני Trust (`_TRUST_SCORE`: T0=0.1/T1=0.4/T2=0.7/T3=0.95) מינוס `0.15×len(conflicts)`, clamped [0,1]; `conflicts=None`→מריץ את הסריקה ה-Lazy, `conflicts=[]`→מדלג עליה במפורש (לבדיקות/refresh בלי תקציב Claude). (4) **Missing Evidence Detector** — `detect_missing_evidence(domain, events)`: בדיקת מילת-מפתח פשוטה (לא LLM) מול `REQUIRED_EVIDENCE[domain]`. **מומלא בפועל** את ה-stub `_has_keyword_conflict()` שStage 1 (C59) השאיר פתוח — כאיתות AI מקביל (`DecisionEventTag.CONFLICT`), לא תחליף לבדיקת מילות-המפתח עצמה. מוזרק ל-`_format_decision_card()` ב-`cmd_decision.py` (נקרא מ-`/decision status`, מאחורי הדגל) — חולצה `_list_decision_events()` חדשה מ-`_latest_event()` הקיים כדי לשתף את רשימת ה-Events בין חישוב הכרטיס הישן לחישוב הביטחון החדש; `_persist_confidence()` כותבת best-effort ל-4 שדות חדשים ב-Decisions דרך `airtable_patch()`.
+- ⚠️ **3 סטיות מהטקסט המילולי של הספק, כולן מתועדות:**
+  1. הספק כתב `core/decision_confidence.py` — נכתב ב-root, לצד `decision_pipeline.py`/`decision_ports.py`/`cmd_decision.py` (שאר מודולי Decision Hub), לעקביות ארכיטקטונית — אין תיקיית `core/` בשימוש לאף מודול Decision Hub קיים.
+  2. הספק הגדיר `REQUIRED_EVIDENCE` לפי "decision_type" — קונספט שלא קיים בסכמה בכלל (ל-Decisions יש רק `Domain`, ראו `DecisionDomain`). נמופה על `DecisionDomain` הקיים (`REAL_ESTATE`/`IMPORT`/`PARTNERSHIP`/`RECRUITMENT`/`GENERAL`); `IMPORT` ו-`PARTNERSHIP` משתפים את אותה רשימת ראיות בהיעדר הבחנה ספציפית יותר בספק.
+  3. הספק הניח קיומה של פונקציה `get_decision()` — אינה קיימת בקוד. החיווט נעשה ב-`_format_decision_card()` (הנקודה הקיימת היחידה שמרכיבה כרטיס Decision מלא, כבר מאחורי `FEATURE_DECISION_HUB`, נקראת רק מ-`/decision status`).
+- **תיקון רגרסיה תוך-כדי-עבודה (לא הגיע ל-commit):** בעת חילוץ `_list_decision_events()`, השלב הביניים הפך בטעות את בדיקת ה-empty-list (`events[0] if not events else max(...)` — היה זורק `IndexError` על Decision בלי Events מקושרים, במקום להחזיר `None`) — אותר ותוקן (`max(events, ...) if events else None`) לפני כתיבת הבדיקות.
+- **שדות Airtable חדשים (לא נוצרו עדיין ביד ב-Airtable חי):** `Evidence Ids` (Long text, JSON array), `Evidence Summary` (Long text), `Confidence Score` (Number 0.0-1.0), `Missing Evidence` (Long text, JSON array). `airtable_patch()` משמיט שדות לא-מוכרים בשקט (`schema_cache.json` עדיין לא מכיר אותם) — תצוגת הטלגרם תקינה בכל מקרה (חישוב in-memory ב-`_format_confidence_block()`), הפרסיסטנס הוא best-effort עד שהשדות ייוצרו ו-`schema_audit.py` ירוץ מחדש.
+- **Commit:** ייכלל ב-commit הקרוב על `claude/new-session-be1ckb`
+- **PR:** אין — לא התבקש, ולא מבוצע ללא אישור מפורש לפי הנחיית הסשן
+- **Review על ידי:** הבעלים (אישור מפורש בכפוף לתנאי Lazy+Cached, מצוטט לעיל)
+- **Deploy תאריך:** לא רלוונטי — לא מוזג ל-`main`
+- **Verified בפרודקשן:** לא
+- **Verification ראיה:** `python3 -m py_compile decision_confidence.py cmd_decision.py airtable_schema.py app.py test_decision_confidence.py` נקי; `python3 test_decision_confidence.py` → 25/25 self-tests עוברים (`detect_conflict_ai` מ-monkeypatch, אפס קריאות רשת/עלות Claude) — מכסה: ממוצע משוקלל/קנס קונפליקטים/clamp/empty-events ב-`calc_confidence`, ספירת Event Type ב-`build_evidence_summary`, תבניות `REQUIRED_EVIDENCE` לכל Domain ב-`detect_missing_evidence`, וכל תנאי השער ב-`detect_conflicts_ai_lazy` (סינון Trust<T1, סינון Claim Topic חסר/שונה, cache hit לא קורא ל-Claude שוב, מגבלת 5 קריאות לריצה, החרגת Events superseded); `python3 test_decision_trust.py` → 33/33 ללא רגרסיה ב-Stage 1; `python3 smoke_tests.py` — אותם 2 כשלים תלויי-סביבה קיימים מראש (`flask`/`httpx` חסרים בסביבת sandbox), אין כשלים חדשים.
+- **Docs עודכנו:** ROADMAP.md (F17 חדש + header), CHANGE_CONTROL_LOG.md (רשומה זו)
+- **Feature Flag:** `FEATURE_DECISION_HUB` — כבוי כברירת מחדל, אפס שינוי התנהגות בפרודקשן
+- **Rollback plan:** revert ה-commit הקרוב — דגל כבוי, קובץ חדש + תוספות בלבד לקבצים קיימים (אין מחיקת/שינוי לוגיקה קיימת מעבר לחילוץ `_list_decision_events()` ותיקון ה-`IndexError`), אפס סיכון פונקציונלי מיידי
+
 ### C59 — Decision Hub Stage 1: Trust Layer (Authority × Medium × Verify)
 - **תאריך:** 25/06/2026
 - **סוג:** Feature — flag-gated (`FEATURE_DECISION_HUB`, כבוי כברירת מחדל)
@@ -580,10 +601,10 @@
 - **סוג:** Bug fix, קובץ קיים (`app.py` בלבד)
 - **Requirement:** דווח ע"י המשתמש (לא ב-ROADMAP.md) — ג'יבריש בהודעות בוט בעברית. ראה `BUG_AUDIT_LOG.md` BUG-018 לפירוט מלא.
 - **תיאור:** טקסט עברי וסימבולים ב-`app.py` עברו בעבר decode שגוי דרך codepage `cp1255` (Windows Hebrew) במקום UTF-8, ונשמרו בחזרה כ-UTF-8 — corruption קבוע בקובץ עצמו (לא בעיית runtime/parse_mode). אותר ותוקן באמצעות hybrid codec (cp1255 + raw-byte fallback ל-12 בתי-קוד שלא מוגדרים ב-cp1255, שעברו דרך identity passthrough בקורפציה המקורית): round-trip `hybrid_encode(line).decode('utf-8')` משמש כגלאי corruption גנרי בטוח (false-positive נמוך מאוד על טקסט תקין). אותרו ותוקנו 132 שורות (78 עם אותיות עבריות + 54 נוספות symbols/emoji/box-drawing ללא עברית, שנמצאו רק בסקאן הגנרי השני). UTF-8 BOM של הקובץ נשמר. בנוסף נבדקה טענת המשתמש על ערבוב `Markdown`/`MarkdownV2` (parse_mode) כגורם — **נשללה**: נקודת ה-`MarkdownV2` היחידה בקובץ (שורה ~356, `cmd_done`) מבצעת escape נכון (`\!`, `\+`); הג'יבריש שהמשתמש ראה היה ה-mojibake, לא בעיית escaping. הצעת המשתמש למעבר גורף ל-`parse_mode="HTML"` בכל קריאות `send_message` **לא בוצעה** — הוחלט שהיא out-of-scope (לא נדרשת לתיקון הבאג בפועל, ותדרוש המרת כל עיצוב `*bold*`/`_italic_` הקיים ל-HTML tags ב-~10 call sites) — לא הוסתר, מתועד גם ב-`BUG_AUDIT_LOG.md`.
-- **Commit:** `b5717da`
-- **PR:** ללא — דחיפה ישירה ל-`claude/new-session-be1ckb` (טרם התבקש PR)
-- **Review על ידי:** טרם — ממתין לבדיקת המשתמש
-- **Deploy תאריך:** N/A — טרם מוזג ל-`main`
+- **Commit:** `b5717da` (+ `80ae008` תיקון תיעוד) — **merge commit `9f408e7`**
+- **PR:** #154 — **מוזג ל-`main`**, מאומת עצמאית דרך `mcp__github__pull_request_read` (`merged: true`) וגם `git fetch origin main` (`9f408e7` הוא tip של `origin/main`, ה-branch `claude/new-session-be1ckb` נמחק מה-remote לאחר המיזוג)
+- **Review על ידי:** 10026782 (owner — `merged_by` ב-GitHub API)
+- **Deploy תאריך:** לא אומת מול Render Dashboard
 - **Verified בפרודקשן:** לא
 - **Verification ראיה:** `python3 -m py_compile app.py` עבר; `python3 smoke_tests.py` — 2 כשלים תלויי-סביבה קיימים מראש (`flask`/`httpx` חסרים בסביבת sandbox, לא קשור לשינוי); `python3 test_integration.py` 4/4; `python3 session_store.py` 40/40; `python3 test_c53a.py` 50/50; `git diff --stat app.py` → `1 file changed, 132 insertions(+), 132 deletions(-)`; כל 132 השינויים נסקרו ידנית שורה-שורה ב-diff המלא; סקאן חזרה (round-trip) על הקובץ המתוקן אישר 0 שורות corruption שיוריות; `file app.py` אישר פורמט UTF-8 with BOM ללא שינוי.
 - **Docs עודכנו:** `BUG_AUDIT_LOG.md` (BUG-018), `CHANGE_CONTROL_LOG.md` (זה)
