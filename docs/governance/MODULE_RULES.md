@@ -111,3 +111,25 @@ handler דיפולטי ממשיך כרגיל כשאין context.
 
 **מקור:** התגלה תוך כדי בניית Decision Hub (יוני 2026) — היה משתמע, עכשיו מפורש.
 **דוגמה קיימת:** `Decision` (decision_pipeline.py) — ישות אחת, ללא תת-מחלקות לדומיין.
+
+## חוק 13 — קריאות AI הן Lazy + Cached, לעולם לא Eager על ingest
+
+```
+❌ אסור:  קריאת LLM שרצה אוטומטית בכל כתיבת/קליטת רשומה (event/lead/message).
+✅ נכון:  קריאת LLM רצה רק בפעולת קריאה/refresh מפורשת, מוגבלת בסקופ
+          (אותו topic/cluster, סף trust/quality), deduped לפי hash של הזוג/הקלט,
+          ומוגבלת במספר קריאות לריצה (cap).
+```
+קליטת מידע (ingest) לא תלויה אף פעם בזמינות/תקציב/latency של ה-LLM — רשומה חדשה
+נכתבת תמיד, גם אם ה-AI איטי/נכשל/חסום. ה-AI הוא שכבת אינטליגנציה *מעל* הדאטה
+הקיים, לא שער שהדאטה צריך לעבור כדי להיכתב.
+
+מבחן: "אם Claude למטה לגמרי, האם ingest עדיין עובד?" — אם לא, יש הפרה של החוק.
+
+**מקור:** תנאי האישור המפורש של הבעלים ל-Decision Hub Stage 2 / F17 (Smart Trust
+Layer, יוני 2026) — "AI Conflict Detection יהיה Lazy + Cached, לא Eager. קליטת
+Event לא תלויה ב-Claude." הועלה לחוק כללי כי העיקרון רלוונטי לכל מודול שמשלב LLM
+על דאטה שכבר נכתב (לא רק Decision Hub).
+**דוגמה קיימת:** `detect_conflicts_ai_lazy()` (`decision_confidence.py`) — רץ רק
+מ-`/decision status`, מסונן ל-Claim Topic זהה + Trust>=T1, cache לפי
+`event_pair_hash`, מוגבל ל-5 קריאות Claude חדשות לריצה.
