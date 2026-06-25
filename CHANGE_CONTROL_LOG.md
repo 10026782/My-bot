@@ -574,3 +574,18 @@
 - **Docs עודכנו:** זה עצמו + `CLAUDE.md`
 - **Feature Flag:** אין — docs-only
 - **Rollback plan:** revert commit `783a680` — docs-only, אפס סיכון
+
+### BUG-018 — Mojibake/encoding corruption ב-`app.py` (132 שורות)
+- **תאריך:** 25/06/2026
+- **סוג:** Bug fix, קובץ קיים (`app.py` בלבד)
+- **Requirement:** דווח ע"י המשתמש (לא ב-ROADMAP.md) — ג'יבריש בהודעות בוט בעברית. ראה `BUG_AUDIT_LOG.md` BUG-018 לפירוט מלא.
+- **תיאור:** טקסט עברי וסימבולים ב-`app.py` עברו בעבר decode שגוי דרך codepage `cp1255` (Windows Hebrew) במקום UTF-8, ונשמרו בחזרה כ-UTF-8 — corruption קבוע בקובץ עצמו (לא בעיית runtime/parse_mode). אותר ותוקן באמצעות hybrid codec (cp1255 + raw-byte fallback ל-12 בתי-קוד שלא מוגדרים ב-cp1255, שעברו דרך identity passthrough בקורפציה המקורית): round-trip `hybrid_encode(line).decode('utf-8')` משמש כגלאי corruption גנרי בטוח (false-positive נמוך מאוד על טקסט תקין). אותרו ותוקנו 132 שורות (78 עם אותיות עבריות + 54 נוספות symbols/emoji/box-drawing ללא עברית, שנמצאו רק בסקאן הגנרי השני). UTF-8 BOM של הקובץ נשמר. בנוסף נבדקה טענת המשתמש על ערבוב `Markdown`/`MarkdownV2` (parse_mode) כגורם — **נשללה**: נקודת ה-`MarkdownV2` היחידה בקובץ (שורה ~356, `cmd_done`) מבצעת escape נכון (`\!`, `\+`); הג'יבריש שהמשתמש ראה היה ה-mojibake, לא בעיית escaping. הצעת המשתמש למעבר גורף ל-`parse_mode="HTML"` בכל קריאות `send_message` **לא בוצעה** — הוחלט שהיא out-of-scope (לא נדרשת לתיקון הבאג בפועל, ותדרוש המרת כל עיצוב `*bold*`/`_italic_` הקיים ל-HTML tags ב-~10 call sites) — לא הוסתר, מתועד גם ב-`BUG_AUDIT_LOG.md`.
+- **Commit:** [למלא לאחר commit]
+- **PR:** ללא — דחיפה ישירה ל-`claude/new-session-be1ckb` (טרם התבקש PR)
+- **Review על ידי:** טרם — ממתין לבדיקת המשתמש
+- **Deploy תאריך:** N/A — טרם מוזג ל-`main`
+- **Verified בפרודקשן:** לא
+- **Verification ראיה:** `python3 -m py_compile app.py` עבר; `python3 smoke_tests.py` — 2 כשלים תלויי-סביבה קיימים מראש (`flask`/`httpx` חסרים בסביבת sandbox, לא קשור לשינוי); `python3 test_integration.py` 4/4; `python3 session_store.py` 40/40; `python3 test_c53a.py` 50/50; `git diff --stat app.py` → `1 file changed, 132 insertions(+), 132 deletions(-)`; כל 132 השינויים נסקרו ידנית שורה-שורה ב-diff המלא; סקאן חזרה (round-trip) על הקובץ המתוקן אישר 0 שורות corruption שיוריות; `file app.py` אישר פורמט UTF-8 with BOM ללא שינוי.
+- **Docs עודכנו:** `BUG_AUDIT_LOG.md` (BUG-018), `CHANGE_CONTROL_LOG.md` (זה)
+- **Feature Flag:** N/A — תיקון טקסט סטטי, ללא flag
+- **Rollback plan:** revert commit — שינוי טקסט בלבד ב-קובץ קיים, ללא שינוי לוגיקה, סיכון נמוך
