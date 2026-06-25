@@ -1,7 +1,7 @@
 # BOSS CURRENT STATE
 
-Last updated: 19/06/2026
-Reflects: Stabilization Sprint + W0/W1 + Security Audit Fixes (H1-H3) + TIER read-only fix + Game Dashboard fix + Ghost Button Audit + Airtable Gateway (W2) + GameScreen Fix + Daily Digest Live + Repo Docs + C52 Customer Output Gateway + C53 Screen Filter Gateway + O4 Finance Pulse + C53-A structured tool returns
+Last updated: 25/06/2026
+Reflects: Stabilization Sprint + W0/W1 + Security Audit Fixes (H1-H3) + TIER read-only fix + Game Dashboard fix + Ghost Button Audit + Airtable Gateway (W2) + GameScreen Fix + Daily Digest Live + Repo Docs + C52 Customer Output Gateway + C53 Screen Filter Gateway + O4 Finance Pulse + C53-A structured tool returns + F52 current tool map audit branch
 
 ## Classification Key
 - WORKING: implemented, reachable, no blocking issue.
@@ -19,6 +19,16 @@ Reflects: Stabilization Sprint + W0/W1 + Security Audit Fixes (H1-H3) + TIER rea
 | main | ✅ VERIFIED | Current verified main head: `be65801`. |
 | PR #79 / C53-A | ✅ MERGED | C53-A structured tool returns merged to main. |
 | PR #77 / O4 Finance Pulse | ✅ MERGED | Finance Pulse code is merged; it is no longer an honest `coming_soon` stub. |
+
+---
+
+## What Changed — 25/06/2026
+
+| Item | Status | Detail |
+|------|--------|--------|
+| F52 Current Tool Map | Implemented but not yet verified | Audit-only doc added at `docs/f52/F52_CURRENT_TOOL_MAP.md` on branch `f52-current-tool-map-audit` commit `6afc393`. No production code changes, no `app.py` changes, no Airtable schema changes. Not merged to `main`, not deployed, not production-verified. |
+| Tool architecture risk map | DOCUMENTED | The audit maps current agent tool path, schemas/registry/validator/dispatcher layers, Airtable gateway and bypasses, Google/Drive/Sheets result shapes, media/TMA/direct command side paths, Last Tool Result persistence gap, approval-policy drift, and hardcoded Airtable literals outside schema governance. |
+| PR status | BLOCKED BY INTEGRATION | Branch pushed to `origin/f52-current-tool-map-audit`; GitHub connector returned 403 `Resource not accessible by integration` while creating PR. |
 
 ---
 

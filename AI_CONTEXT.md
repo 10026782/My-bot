@@ -1,15 +1,16 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-06-23
-**עודכן על ידי:** Claude Code — daily briefing regen (git-verified `main` HEAD `01558a0`)
+**עודכן:** 2026-06-25
+**עודכן על ידי:** Codex — F52 planning/audit branch documentation update (`f52-current-tool-map-audit`, commit `6afc393`)
 
-> מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (מיושן, 19/06) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
+> מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סותרים זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md. הערת ענף: F52 audit נמצא על `f52-current-tool-map-audit`; הוא Implemented but not yet verified עד merge/deploy/production verification.
 
 ---
 
 ## 1. Executive Summary
 - `main` = `01558a0`. Identity → Router → Context → Agent + Approval flow (3-state, fail-closed) — **תקינים ופעילים בפרודקשן**.
+- `f52-current-tool-map-audit` = `6afc393`. F52 Current Tool Map נוצר כתיעוד audit-only ב-`docs/f52/F52_CURRENT_TOOL_MAP.md`; אין שינוי production behavior, אין שינוי `app.py`, אין שינוי Airtable schema. סטטוס: **Implemented but not yet verified**. GitHub connector חסם PR creation עם 403, אבל הענף נדחף ל-origin.
 - **F16 Media Layer הושלם (7/7 batches)** — code-complete ומחובר ל-pipeline החי, אך **כבוי בפרודקשן** מאחורי `FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD` (off by default). דורש יצירת טבלת "Media Files" ידנית ב-Airtable לפני הדלקה.
 - **N07/N08/N09/N11/N12 הושלמו** (Schema Governance, CI/CD, Monitoring, Finance Pulse wiring, Daily Git Audit scheduler) — כולם code-complete ומוזגים; N12 ו-N10 (Rollback) נשארים flag-off/planned בהתאמה.
 - כל פיצ'רי הצמיחה (Lead Scoring/Memory/Followup, N02-N04) — **קוד מוכן, דגלים כבויים כברירת מחדל**, אפס תעבורת ייצור אמיתית אומתה עד כה.
@@ -42,8 +43,9 @@
 **שאר ה-PRs האחרונים (לפירוט מלא ראו `CHANGELOG.md`/`CHANGE_CONTROL_LOG.md`):** C22 Weekly Business Summary (PR #94, off by default), C53/O4 Screen Filter Gateway + Finance Pulse, C53-A structured tool-result contract + A32 hardening (PR #80), C54/C55 Business Update command + Origin Lead linking (PR #85/#86), C56 Approval Policy stack (PR #69, off by default).
 
 ## 4. Next Priorities
-1. **לאמת BUG-013/014/015/016 בפרודקשן בפועל** — כולם מוזגים ל-`main`, אפס אימות ידני עד כה (קובץ >50MB אמיתי / Drive evidence gate / N07 מול live Airtable / security-review persistence).
-2. **F16 — הדלקת flags** (`FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD`) — אך ורק אחרי יצירת טבלת "Media Files" ידנית ב-Airtable.
-3. **להריץ N07 (`tools/schema_governance.py`) מול live Airtable** — עדיין לא רץ פעם ראשונה (אין credentials בסביבת sandbox).
-4. **לאמת מצב Render בפועל מול `main` HEAD (`01558a0`)** — לא ניתן מהסביבה הזו (egress חסום); סיכון פתוח שתועד כבר בגרסאות קודמות.
-5. **החלטה על הדלקת N02-N04** (Lead Scoring/Memory/Followup) — קוד מוכן ושלם, אפס תעבורת ייצור אמיתית אומתה עד כה.
+1. **לפתוח PR ל-F52 audit branch** — הענף `f52-current-tool-map-audit` נדחף, אבל GitHub connector החזיר 403. קישור ידני: `https://github.com/10026782/My-bot/pull/new/f52-current-tool-map-audit`.
+2. **לאמת BUG-013/014/015/016 בפרודקשן בפועל** — כולם מוזגים ל-`main`, אפס אימות ידני עד כה (קובץ >50MB אמיתי / Drive evidence gate / N07 מול live Airtable / security-review persistence).
+3. **F16 — הדלקת flags** (`FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD`) — אך ורק אחרי יצירת טבלת "Media Files" ידנית ב-Airtable.
+4. **להריץ N07 (`tools/schema_governance.py`) מול live Airtable** — עדיין לא רץ פעם ראשונה (אין credentials בסביבת sandbox).
+5. **לאמת מצב Render בפועל מול `main` HEAD (`01558a0`)** — לא ניתן מהסביבה הזו (egress חסום); סיכון פתוח שתועד כבר בגרסאות קודמות.
+6. **החלטה על הדלקת N02-N04** (Lead Scoring/Memory/Followup) — קוד מוכן ושלם, אפס תעבורת ייצור אמיתית אומתה עד כה.

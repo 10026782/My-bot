@@ -1,6 +1,8 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 23/06/2026 (מאוחר יותר) — main = `f737f61` (אומת). **F13 (TenantConfig + Provider Interfaces) סומן במפורש כ-DEAD CODE** — אזהרת "אין לחבר" הוספה מיד אחרי כותרת הסעיף (קוד קיים, אפס imports מקוד חי, כפילות עם `TenantConfig` ב-`tenant_provisioner.py`, הכרעת F12-מול-F13 עדיין לא בוצעה). ראו SPEC-C / PR בענף `claude/fix-f13-status-docs`.
+עודכן: 25/06/2026 — branch = `f52-current-tool-map-audit`, commit `6afc393`. **F52 Current Tool Map audit — Implemented but not yet verified**: נוצר מסמך planning/audit בלבד ב-`docs/f52/F52_CURRENT_TOOL_MAP.md`; אין שינוי קוד ייצור, אין שינוי `app.py`, אין שינוי סכמת Airtable, ואין טענת merge/deploy/production verification. PR creation נחסם ע"י GitHub integration 403; הענף נדחף ל-origin.
+
+עודכן (קודם): 23/06/2026 (מאוחר יותר) — main = `f737f61` (אומת). **F13 (TenantConfig + Provider Interfaces) סומן במפורש כ-DEAD CODE** — אזהרת "אין לחבר" הוספה מיד אחרי כותרת הסעיף (קוד קיים, אפס imports מקוד חי, כפילות עם `TenantConfig` ב-`tenant_provisioner.py`, הכרעת F12-מול-F13 עדיין לא בוצעה). ראו SPEC-C / PR בענף `claude/fix-f13-status-docs`.
 
 עודכן (קודם): 23/06/2026 (מאוחר) — main = `d1c48a1` (אומת). **ניקוי ענפי `claude/*` ישנים** —
 בוצע audit מלא של 29+8 ענפים לא ממוזגים מול `main` (ancestry/diff/content, לא רק
@@ -462,6 +464,22 @@ scope: **infrastructure only — אפס שינוי runtime behavior** בשלב �
 ⚠️ **חפיפה עם F12** — שני הספקים מציעים `providers/` כתיקייה חדשה ל-LLM abstraction (F12: `LLMProvider.generate(prompt, context, model_tier)`; F13: `LLMProvider.generate(messages, system, model, max_tokens, tools)` + עוד שני providers ל-storage/channel). **לא להתחיל מימוש של אף אחד מהשניים לפני שמחליטים אם F13 סופג את F12 או שהם משלימים זה את זה** — אחרת ניצור שתי תיקיות `providers/` עם interfaces סותרים, כמו התנגשות ה-ID של C20/C21 שתועדה ב-`AI_CONTEXT.md`.
 מצב: **CODE COMPLETE, לא מחובר ל-pipeline** — כל 6 הקבצים קיימים (PR #87, מוזג ל-`main`). אפס import מקוד קיים אליהם — `app.py`/`tools/dispatcher.py` לא משתמשים בהם, `get_tenant_config()` תמיד מחזיר את `boss_hq` הקשיח. ⚠️ ה-spec המקורי הניח חתימות פונקציות שלא קיימות בקוד (`gateway_add`/`gateway_update`/`gateway_delete`, `send_via_cog`, `airtable_get(max_records=...)` כ-`list[dict]`, `_validate_twilio_signature(headers, body)`) — תוקן מול הקוד האמיתי, מתועד ב-`BUG_AUDIT_LOG.md` כ-SPEC-001. הכרעת F12-מול-F13 (השורה הקודמת) **עדיין לא בוצעה** — הקבצים קיימים אך לא נבחרו כפתרון הסופי.
 קבצים שנוצרו: `core/tenant_config.py`, `providers/__init__.py`, `providers/interfaces.py`, `providers/airtable_shim.py`, `providers/anthropic_shim.py`, `providers/twilio_shim.py`.
+
+### F52 — Current Tool Map / Tool Architecture Audit
+מה: planning/audit branch לפני מימוש F52. המסמך `docs/f52/F52_CURRENT_TOOL_MAP.md` ממפה את ציר הכלים הנוכחי: `app.py` agent loop, `tools/schemas.py`, `tool_registry.py`, `action_validator.py`, `tools/dispatcher.py`, `guards.rate_limiter.validate_tool_output`, `core/anti_hallucination.py`, Airtable gateway, Google tools, media flows, TMA/direct command paths, session stores, approval/event bus, וסיכוני provider leakage.
+
+מצב: **Implemented but not yet verified** — תיעוד בלבד בענף `f52-current-tool-map-audit`, commit `6afc393`. לא מוזג ל-main, לא נפרס, ולא אומת בפרודקשן.
+
+ממצאי audit עיקריים:
+- Result normalization חלקית: חלק מכלי write/send מחזירים dict מובנה, אבל reads/Drive/Sheets/CRM/direct flows עדיין מחזירים strings.
+- אין Last Tool Result מתמיד כישות proof; יש `tool_results_log` זמני בתוך turn, `memory_store` RAM TTL, ו-`event_bus` pending approvals ב-RAM.
+- provider-specific code דולף ל-core/orchestration: `app.py`, `tools/dispatcher.py`, `crm.py`, `tma_api.py`, `daily_digest.py`, `drive_adapter.py`, `tools/google_tools.py`.
+- Airtable schema governance מפוצל בין `airtable_schema.py`, `schema_cache.json`, `schema_validator.py`, `tools/airtable_gateway.py`, `tools/airtable_tools.py`, `tools/dispatcher.py`, `tma_api.py`, ו-literals במודולים.
+- Approval/risk policy מפוצל בין registry, event bus, action validator, dispatcher emergency stop, ו-app callback flow.
+
+גבולות: audit בלבד. אין refactor. אין architecture implementation. כל fix שנמצא תועד בלבד.
+
+קבצים: `docs/f52/F52_CURRENT_TOOL_MAP.md`.
 
 ### F16 — Media Layer (voice notes + file uploads → Drive + Airtable) — ✅ הושלם
 מה: שכבת מדיה מלאה — קליטת קובץ/הקלטה מ-Telegram או TMA, העלאה ל-Google Drive, תמלול (STT), ושמירת metadata בטבלת Airtable "Media Files". מחולק לשבעה batches (א-ז).
