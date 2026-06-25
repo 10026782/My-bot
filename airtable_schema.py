@@ -1021,7 +1021,7 @@ class DecisionInboxFields:
     RAW_INPUT           = "Raw Input"           # long text — exactly as received
     CHANNEL             = "Channel"             # singleSelect — see DecisionInboxChannel (NOTE: live options are English, unlike Decision Events' Hebrew Channel field)
     RECEIVED            = "Received"            # dateTime
-    ATTACHMENT          = "Attachment"
+    ATTACHMENT          = "Attachment"          # multipleAttachments — write as [{"url": ..., "filename": ...}], verified via Airtable MCP
     SUGGESTED_DECISION  = "Suggested Decision"  # Link → Tables.DECISIONS
     MATCH_CONFIDENCE    = "Match Confidence"    # number 0-100
     STATUS              = "Status"              # singleSelect — see DecisionInboxStatus; default Pending

@@ -1119,6 +1119,51 @@ def _handle_telegram_media(message) -> None:
         return
     domain = identity.domain_id
 
+    # ── Decision Hub Stage 0.5 — File/Voice Precedence Routing ───────
+    # SPEC_File_Precedence_Fix.md, Rule 9 (MODULE_RULES.md): an active
+    # Decision Inbox context wins over the default Drive/Voice flow below.
+    # Flag-gated + fully additive — zero behavior change when off/inactive.
+    try:
+        from feature_flags import is_enabled
+        if is_enabled("FEATURE_DECISION_HUB"):
+            from cmd_decision import decision_context_active, route_file_to_decision_inbox
+            if decision_context_active(message):
+                text = message.caption or getattr(message, "text", None) or ""
+                file_bytes, filename, mime_type = b"", "", ""
+                try:
+                    if message.content_type == "voice":
+                        file_info = bot.get_file(message.voice.file_id)
+                        file_bytes = bot.download_file(file_info.file_path)
+                        filename = f"{message.voice.file_id}.ogg"
+                        mime_type = message.voice.mime_type or "audio/ogg"
+                    elif message.content_type == "photo":
+                        photo = message.photo[-1]
+                        file_info = bot.get_file(photo.file_id)
+                        file_bytes = bot.download_file(file_info.file_path)
+                        filename = f"{photo.file_id}.jpg"
+                        mime_type = "image/jpeg"
+                    elif message.content_type == "document":
+                        doc = message.document
+                        file_info = bot.get_file(doc.file_id)
+                        file_bytes = bot.download_file(file_info.file_path)
+                        filename = doc.file_name or f"{doc.file_id}"
+                        mime_type = doc.mime_type or "application/octet-stream"
+
+                    route_file_to_decision_inbox(
+                        bot, identity, chat_id,
+                        text=text, file_bytes=file_bytes, filename=filename, mime_type=mime_type,
+                    )
+                except Exception as e:
+                    logger.error(f"[DecisionHub] precedence routing failed: {e}", exc_info=True)
+                    try:
+                        bot.send_message(chat_id, "❌ שגיאה בשמירה ל-Decision Inbox")
+                    except Exception:
+                        pass
+                return
+    except Exception as e:
+        logger.error(f"[DecisionHub] precedence gate error: {e}", exc_info=True)
+        # fall through to default Drive/Voice handling — fail-safe, not fail-closed
+
     if message.content_type == "voice":
         if not _flag_enabled("FEATURE_VOICE_NOTES"):
             try:
