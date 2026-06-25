@@ -963,6 +963,14 @@ def run_agent(
             tool_uses   = [b for b in response.content if b.type == "tool_use"]
             text_blocks = [b for b in response.content if b.type == "text"]
 
+            # C54: אם Claude ייצר text ו-tool_use באותה תשובה —
+            # ה-text נוצר לפני שראה תוצאה. מבטלים אותו.
+            # התשובה האמיתית תגיע ב-turn הבא עם ה-ToolResult.
+            if tool_uses and text_blocks:
+                logger.info(f"[C54] Suppressed premature text_block alongside tool_use: "
+                            f"{[b.text[:40] for b in text_blocks]}")
+                text_blocks = []
+
             if not tool_uses:
                 final_reply = text_blocks[0].text if text_blocks else "ג… ׳₪׳¢׳•׳׳” ׳”׳•׳©׳׳׳”."
                 break
