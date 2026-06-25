@@ -554,6 +554,26 @@ def route_file_to_decision_inbox(
 
     inbox_id = inbox_record["id"]
     bot.send_message(chat_id, "📥 נשמר ב-Decision Inbox.")
+
+    if attachment:
+        try:
+            from session_store import lead_sessions, FileUploadResult
+            lead_sessions.set_last_file(
+                identity.user_id,
+                FileUploadResult(
+                    type="inbox_file",
+                    url=attachment[0]["url"],
+                    file_id=inbox_id,
+                    original_filename=filename,
+                    timestamp=datetime.now(ZoneInfo("Asia/Jerusalem")).isoformat(),
+                    conversation_id=str(chat_id),
+                ),
+                domain=identity.domain_id,
+                channel="telegram",
+            )
+        except Exception as e:
+            logger.warning(f"[DecisionHub] set_last_file failed: {e}")
+
     _suggest_decision_link(bot, chat_id, inbox_id, text)
 
     return {
@@ -561,6 +581,74 @@ def route_file_to_decision_inbox(
         "inbox_id": inbox_id,
         "attachment_url": attachment[0]["url"] if attachment else "",
     }
+
+
+# ── Stage 0.6 — "זה הנספח" attachment reference ────────────────
+# SPEC_File_Context_Reference.md — מקשר את הקובץ האחרון שהועלה
+# (FileUploadResult, session_store.lead_sessions) להחלטה.
+# Rule 10 (MODULE_RULES.md): שאלת שיוך אחת בלבד, לא חקירה.
+
+_ATTACHMENT_REFERENCE_PHRASES = ("זה הנספח", "זה הקובץ", "this is the attachment", "this is the file")
+
+
+def is_attachment_reference(text: str) -> bool:
+    t = (text or "").strip().lower()
+    return any(p.lower() in t for p in _ATTACHMENT_REFERENCE_PHRASES)
+
+
+def handle_attachment_reference(bot, identity, chat_id, text: str) -> bool:
+    """
+    מטפל ב"זה הנספח" — שולף את FileUploadResult האחרון (set_last_file)
+    ומציע שיוך להחלטה. אם הקובץ עדיין לא ב-Decision Inbox (העלה ל-Drive
+    ישירות) — נוצרת רשומה raw-first מה-URL הקיים, בלי להעלות שוב.
+    מחזיר True אם הטופל (כולל "לא נמצא קובץ"), False אם לא רלוונטי.
+    """
+    from session_store import lead_sessions, FileUploadResult
+
+    last_file = lead_sessions.get_last_file(identity.user_id)
+    if not last_file:
+        bot.send_message(chat_id, "לא מצאתי קובץ שהועלה לאחרונה.")
+        return True
+
+    if last_file.get("type") == "inbox_file" and last_file.get("file_id"):
+        _suggest_decision_link(bot, chat_id, last_file["file_id"], text)
+        return True
+
+    from tools.airtable_gateway import airtable_create
+
+    source_tag = f"cmd_decision:{identity.tenant_id}:{identity.user_id}"
+    filename = last_file.get("original_filename", "")
+    inbox_fields = {
+        DecisionInboxFields.RAW_INPUT: filename,
+        DecisionInboxFields.CHANNEL: DecisionInboxChannel.TELEGRAM,
+        DecisionInboxFields.RECEIVED: datetime.now(ZoneInfo("Asia/Jerusalem")).isoformat(),
+        DecisionInboxFields.STATUS: DecisionInboxStatus.PENDING,
+        DecisionInboxFields.TENANT_ID: identity.tenant_id,
+    }
+    if last_file.get("url"):
+        inbox_fields[DecisionInboxFields.ATTACHMENT] = [{"url": last_file["url"], "filename": filename}]
+
+    inbox_record = airtable_create(Tables.DECISION_INBOX, inbox_fields, source=source_tag)
+    if not inbox_record:
+        bot.send_message(chat_id, "⚠️ לא הצלחתי לשמור את הקובץ ל-Decision Inbox.")
+        return True
+
+    inbox_id = inbox_record["id"]
+    lead_sessions.set_last_file(
+        identity.user_id,
+        FileUploadResult(
+            type="inbox_file",
+            url=last_file.get("url", ""),
+            file_id=inbox_id,
+            original_filename=filename,
+            timestamp=datetime.now(ZoneInfo("Asia/Jerusalem")).isoformat(),
+            conversation_id=str(chat_id),
+        ),
+        domain=identity.domain_id,
+        channel="telegram",
+    )
+    _suggest_decision_link(bot, chat_id, inbox_id, filename)
+    return True
 
 
 # ── Matching helpers ──────────────────────────────────────────

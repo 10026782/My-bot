@@ -1257,6 +1257,25 @@ def _handle_telegram_media(message) -> None:
             user_id=user_id,
             domain=domain,
         )
+        if result.ok:
+            try:
+                from datetime import datetime, timezone
+                from session_store import lead_sessions, FileUploadResult
+                lead_sessions.set_last_file(
+                    user_id,
+                    FileUploadResult(
+                        type="drive_file",
+                        url=result.drive_url,
+                        file_id=result.asset_id,
+                        original_filename=filename,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        conversation_id=chat_id,
+                    ),
+                    domain=domain,
+                    channel="telegram",
+                )
+            except Exception as e:
+                logger.warning(f"[Media] set_last_file failed: {e}")
         bot.send_message(chat_id, _format_media_result(result))
     except Exception as e:
         logger.error(f"[Media] file handling error: {e}", exc_info=True)
@@ -1334,6 +1353,20 @@ def _webhook_telegram_impl():
             except Exception as e:
                 logger.debug(f"[Idempotency] notify failed: {e}")
             return "", 200
+
+        # ── Decision Hub Stage 0.6 — "זה הנספח" attachment reference ──
+        # SPEC_File_Context_Reference.md, Rule 10: max one linking question.
+        # Telegram-specific (inline keyboards) — handled here, not in the
+        # channel-agnostic run_agent. Flag-gated + additive.
+        if _flag_enabled("FEATURE_DECISION_HUB"):
+            try:
+                from cmd_decision import is_attachment_reference, handle_attachment_reference
+                if is_attachment_reference(text):
+                    identity_for_ref = resolve_identity("telegram", sender_user_id)
+                    if handle_attachment_reference(bot, identity_for_ref, reply_chat_id, text):
+                        return "", 200
+            except Exception as e:
+                logger.error(f"[DecisionHub] attachment reference handling failed: {e}", exc_info=True)
 
         # ג”€ג”€ Thinking Indicator ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
         thinking_msg_id = None

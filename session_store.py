@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 from collections import OrderedDict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -44,7 +45,26 @@ def _new_session(domain: str = "real_estate", channel: str = "whatsapp") -> dict
         "updated_at":   _now_iso(),
         "drop_off_step": None,     # ← באיזה שלב נטש (None = לא נטש)
         "record_id":    "",        # Airtable record ID
+        "last_uploaded_file": None,  # ← FileUploadResult dict, ראה Stage 0.6
     }
+
+
+# ══════════════════════════════════════════════════
+# FileUploadResult — Stage 0.6 (SPEC_File_Context_Reference.md)
+# ══════════════════════════════════════════════════
+
+@dataclass
+class FileUploadResult:
+    """תוצאת העלאת קובץ גנרית — מקור Drive או Decision Inbox.
+    RAM-only כרגע: אין עמודת last_uploaded_file ב-Airtable LeadSessions
+    (ראה SPEC_BUG_B_LeadSessions_Schema.md §8) — לא נשלח ל-_sync_to_db.
+    """
+    type: str               # "drive_file" | "inbox_file"
+    url: str = ""
+    file_id: str = ""
+    original_filename: str = ""
+    timestamp: str = ""
+    conversation_id: str = ""
 
 
 def _now_iso() -> str:
@@ -139,6 +159,29 @@ class PersistentSessionStore:
 
         self._sync_to_db(sender, session)
         logger.info(f"[SessionStore] Session done: {sender} | tier={tier} score={score}")
+
+    def set_last_file(
+        self,
+        sender: str,
+        result: FileUploadResult,
+        domain: str = "real_estate",
+        channel: str = "whatsapp",
+    ) -> None:
+        """
+        שומר את הקובץ האחרון שהועלה — לשימוש ע"י "זה הנספח" וכד'.
+        RAM-only (ראה FileUploadResult docstring) — לא נכתב ל-Airtable עד
+        שתיווסף עמודת last_uploaded_file, כדי לא לסכן 422 על שאר השדות.
+        """
+        session = self.get_or_create(sender, domain, channel)
+        session["last_uploaded_file"] = asdict(result)
+        session["updated_at"]         = _now_iso()
+
+    def get_last_file(self, sender: str) -> Optional[dict]:
+        """מחזיר את ה-FileUploadResult (כdict) האחרון, אם קיים."""
+        session = self.get(sender)
+        if not session:
+            return None
+        return session.get("last_uploaded_file")
 
     def delete(self, sender: str) -> None:
         """מוחק session (איפוס)."""
