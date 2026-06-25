@@ -963,6 +963,9 @@ class DecisionEventFields:
     SUPERSEDES           = "Supersedes"             # self-link — NOT "Supersedes Decision (ignore)" (legacy setup field, do not use)
     AI_SUMMARY           = "AI Summary"             # long text
     TENANT_ID            = "tenant_id"
+    CLAIM_TOPIC           = "Claim Topic"            # single line text — Stage 1
+    CLAIM_TOPIC_SOURCE    = "Claim Topic Source"     # singleSelect — see DecisionClaimTopicSource
+    CLAIM_TOPIC_CONFIDENCE = "Claim Topic Confidence" # number 0-100
 
 
 class DecisionEventType:
@@ -995,9 +998,22 @@ class DecisionSourceReliability:
     CONTRACT   = "חוזה"
     LAWYER     = "עו\"ד"
     ACCOUNTANT = "רו\"ח"
-    CLIENT     = "לקוח"
+    DOCUMENT   = "מסמך"
     PARTNER    = "שותף"
+    CLIENT     = "לקוח"
+    MANUAL     = "ידני"
+    EMPLOYEE   = "עובד"
     RUMOR      = "שמועה"
+    UNKNOWN    = "לא_ידוע"
+
+
+class DecisionClaimTopicSource:
+    """singleSelect options on Decision Events.Claim Topic Source (Airtable-confirmed)."""
+    AUTO       = "Auto"
+    FILENAME   = "Filename"
+    KEYWORD    = "Keyword"
+    EVENT_TYPE = "Event Type"
+    MANUAL     = "Manual"
 
 
 class DecisionEventTag:
@@ -1006,6 +1022,10 @@ class DecisionEventTag:
     CONFLICT           = "קונפליקט"
     PRESSURE_ONLY       = "לחץ_בלבד"
     MISSING_CONTEXT     = "חסר_הקשר"
+    # NOT CONFIRMED against live Airtable Tags multipleSelects options — added for Stage 1,
+    # may need to be created in Airtable before first real write reaches these branches.
+    LOW_CONFIDENCE      = "אמינות_נמוכה"
+    PRESSURE_HIGH_RISK  = "לחץ_סיכון_גבוה"
 
 
 class DecisionDeltaType:

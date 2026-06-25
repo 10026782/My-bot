@@ -97,10 +97,16 @@ class _ContactResolverAdapter:
 
 
 class _AntiHallucinationVerifierAdapter:
-    """VerifierPort over core/anti_hallucination.py — Stage 0 stub, not yet wired to a real claim check."""
+    """VerifierPort over core/anti_hallucination.py — Stage 1 stub.
+
+    No real claim-content verification exists yet (core/anti_hallucination.py only
+    verifies tool-execution claims, a different domain). status="ok" so gate_trust's
+    compute_trust() treats every event as unverified-but-not-failed until a real
+    checker lands.
+    """
 
     def verify(self, content: str, source: str) -> dict:
-        return {"verified": True, "reason": "Stage 0 stub — no claim verification yet"}
+        return {"status": "ok", "reason": "Stage 1 stub — no claim-content verification yet"}
 
 
 class _ApprovalGateAdapter:
