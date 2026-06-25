@@ -52,6 +52,7 @@ def _new_session(domain: str = "real_estate", channel: str = "whatsapp") -> dict
         "drop_off_step": None,     # ← באיזה שלב נטש (None = לא נטש)
         "record_id":    "",        # Airtable record ID
         "last_uploaded_file": None,  # ← FileUploadResult dict, ראה Stage 0.6
+        "last_tool_result":   None,  # ← dict, ראה C60 (Tool Context Awareness)
     }
 
 
@@ -217,6 +218,21 @@ class PersistentSessionStore:
             return None
         return session.get("last_uploaded_file")
 
+    def set_last_tool_result(self, sender: str, result: dict) -> None:
+        """שומר את תוצאת הכלי האחרונה — לתיקון 'עיוורון כלים' בין סבבי agent (C60).
+        מבנה result: {tool, status, summary, record_id, url, input, timestamp}."""
+        session = self.get_or_create(sender)
+        session["last_tool_result"] = result
+        session["updated_at"]       = _now_iso()
+        self._sync_to_db(sender, session)
+
+    def get_last_tool_result(self, sender: str) -> Optional[dict]:
+        """מחזיר את תוצאת הכלי האחרונה, אם קיימת (C60)."""
+        session = self.get(sender)
+        if not session:
+            return None
+        return session.get("last_tool_result")
+
     def delete(self, sender: str) -> None:
         """מוחק session (איפוס)."""
         session = self._store.pop(sender, None)
@@ -239,6 +255,7 @@ class PersistentSessionStore:
                 "score":              session.get("score", 0),
                 "tier":               session.get("tier", ""),
                 "last_uploaded_file": session.get("last_uploaded_file"),
+                "last_tool_result":   session.get("last_tool_result"),
             }
             fields = {
                 SF.SENDER_ID:    sender,
@@ -301,6 +318,7 @@ class PersistentSessionStore:
             session["score"]            = state.get("score", 0)
             session["tier"]             = state.get("tier", "")
             session["last_uploaded_file"] = state.get("last_uploaded_file")
+            session["last_tool_result"]   = state.get("last_tool_result")
             if record_m:
                 session["record_id"] = record_m.group(1)
             return session
@@ -324,6 +342,7 @@ class PersistentSessionStore:
                 "score":              session.get("score", 0),
                 "tier":               session.get("tier", ""),
                 "last_uploaded_file": session.get("last_uploaded_file"),
+                "last_tool_result":   session.get("last_tool_result"),
             }
             airtable_update(Tables.SESSIONS, record_id, {SF.STATE_JSON: json.dumps(state, ensure_ascii=False)})
         except Exception:
@@ -489,6 +508,23 @@ def _run_tests() -> bool:
     chk("restore: score/tier preserved",      restored.get("score") == 55 and restored.get("tier") == "WARM")
     chk("restore: last_uploaded_file preserved", restored.get("last_uploaded_file", {}).get("file_id") == "recMEDIA9")
     at.airtable_get = lambda t, formula: "אין רשומות"
+
+    # ── C60: set_last_tool_result / get_last_tool_result ──
+    saves.clear()
+    store.set_last_tool_result("w:001", {
+        "tool": "save_to_decision_inbox", "status": "success",
+        "summary": "נשמר ב-Decision Inbox", "record_id": "rec123",
+        "url": "", "input": "forward מעורך דין", "timestamp": _now_iso(),
+    })
+    chk("last_tool_result saved in RAM",
+        store.get("w:001").get("last_tool_result", {}).get("tool") == "save_to_decision_inbox")
+    chk("get_last_tool_result returns it",
+        store.get_last_tool_result("w:001").get("record_id") == "rec123")
+    chk("sync includes last_tool_result",
+        json.loads(saves[-1][SF.STATE_JSON]).get("last_tool_result", {}).get("status") == "success")
+
+    chk("get_last_tool_result: no session → None",
+        store.get_last_tool_result("w:never-existed") is None)
 
     print(f"\n{'='*40}")
     print(f"SessionStore Tests: {passed} passed, {failed} failed")
