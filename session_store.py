@@ -169,14 +169,11 @@ class PersistentSessionStore:
 
             if session.get("record_id"):
                 result = airtable_update(Tables.LEAD_SESSIONS, session["record_id"], fields)
-                return "✅" in result
+                return bool(result.get("ok"))
             else:
                 result = airtable_add(Tables.LEAD_SESSIONS, fields)
-                if "✅" in result:
-                    import re
-                    m = re.search(r'rec\w+', result)
-                    if m:
-                        session["record_id"] = m.group(0)
+                if result.get("ok"):
+                    session["record_id"] = result.get("external_id", "")
                     return True
                 return False
 
@@ -259,8 +256,8 @@ def _run_tests() -> bool:
     # mock airtable
     at = types.ModuleType("airtable_tools")
     saves = []
-    at.airtable_add    = lambda t, f: (saves.append(f), "✅ rec001")[1]
-    at.airtable_update = lambda t, r, f: (saves.append(f), "✅")[1]
+    at.airtable_add    = lambda t, f: (saves.append(f), {"ok": True, "external_id": "rec001"})[1]
+    at.airtable_update = lambda t, r, f: (saves.append(f), {"ok": True, "external_id": r})[1]
     at.airtable_get    = lambda t, formula: "אין רשומות"
     sys.modules["airtable_tools"] = at
 
