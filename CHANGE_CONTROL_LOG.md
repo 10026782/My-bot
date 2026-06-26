@@ -54,15 +54,15 @@
   3. הספק הניח קיומה של פונקציה `get_decision()` — אינה קיימת בקוד. החיווט נעשה ב-`_format_decision_card()` (הנקודה הקיימת היחידה שמרכיבה כרטיס Decision מלא, כבר מאחורי `FEATURE_DECISION_HUB`, נקראת רק מ-`/decision status`).
 - **תיקון רגרסיה תוך-כדי-עבודה (לא הגיע ל-commit):** בעת חילוץ `_list_decision_events()`, השלב הביניים הפך בטעות את בדיקת ה-empty-list (`events[0] if not events else max(...)` — היה זורק `IndexError` על Decision בלי Events מקושרים, במקום להחזיר `None`) — אותר ותוקן (`max(events, ...) if events else None`) לפני כתיבת הבדיקות.
 - **שדות Airtable חדשים (לא נוצרו עדיין ביד ב-Airtable חי):** `Evidence Ids` (Long text, JSON array), `Evidence Summary` (Long text), `Confidence Score` (Number 0.0-1.0), `Missing Evidence` (Long text, JSON array). `airtable_patch()` משמיט שדות לא-מוכרים בשקט (`schema_cache.json` עדיין לא מכיר אותם) — תצוגת הטלגרם תקינה בכל מקרה (חישוב in-memory ב-`_format_confidence_block()`), הפרסיסטנס הוא best-effort עד שהשדות ייוצרו ו-`schema_audit.py` ירוץ מחדש.
-- **Commit:** ייכלל ב-commit הקרוב על `claude/new-session-be1ckb`
-- **PR:** אין — לא התבקש, ולא מבוצע ללא אישור מפורש לפי הנחיית הסשן
+- **Commit:** `9252b1e`
+- **PR:** #157 — **מוזג ל-`main`** (merge commit `78f9bae`, `merged: true`, אומת ע"י GitHub MCP `pull_request_read` + `git merge-base --is-ancestor 9252b1e origin/main`, לא רק לפי דיווח המשתמש)
 - **Review על ידי:** הבעלים (אישור מפורש בכפוף לתנאי Lazy+Cached, מצוטט לעיל)
-- **Deploy תאריך:** לא רלוונטי — לא מוזג ל-`main`
-- **Verified בפרודקשן:** לא
+- **Deploy תאריך:** לא ידוע — מיזוג ל-`main` אומת, אך פריסה בפועל ל-Render **לא ניתנת לאימות מתוך sandbox זה** (אין גישת dashboard/egress)
+- **Verified בפרודקשן:** לא — דגל `FEATURE_DECISION_HUB` כבוי, אפס בדיקה חיה מול Airtable/Render
 - **Verification ראיה:** `python3 -m py_compile decision_confidence.py cmd_decision.py airtable_schema.py app.py test_decision_confidence.py` נקי; `python3 test_decision_confidence.py` → 25/25 self-tests עוברים (`detect_conflict_ai` מ-monkeypatch, אפס קריאות רשת/עלות Claude) — מכסה: ממוצע משוקלל/קנס קונפליקטים/clamp/empty-events ב-`calc_confidence`, ספירת Event Type ב-`build_evidence_summary`, תבניות `REQUIRED_EVIDENCE` לכל Domain ב-`detect_missing_evidence`, וכל תנאי השער ב-`detect_conflicts_ai_lazy` (סינון Trust<T1, סינון Claim Topic חסר/שונה, cache hit לא קורא ל-Claude שוב, מגבלת 5 קריאות לריצה, החרגת Events superseded); `python3 test_decision_trust.py` → 33/33 ללא רגרסיה ב-Stage 1; `python3 smoke_tests.py` — אותם 2 כשלים תלויי-סביבה קיימים מראש (`flask`/`httpx` חסרים בסביבת sandbox), אין כשלים חדשים.
-- **Docs עודכנו:** ROADMAP.md (F17 חדש + header), CHANGE_CONTROL_LOG.md (רשומה זו)
+- **Docs עודכנו:** ROADMAP.md (F17 חדש + header, עודכן שוב לאחר המיזוג), CHANGE_CONTROL_LOG.md (רשומה זו, שדות Commit/PR/Deploy עודכנו לאחר המיזוג)
 - **Feature Flag:** `FEATURE_DECISION_HUB` — כבוי כברירת מחדל, אפס שינוי התנהגות בפרודקשן
-- **Rollback plan:** revert ה-commit הקרוב — דגל כבוי, קובץ חדש + תוספות בלבד לקבצים קיימים (אין מחיקת/שינוי לוגיקה קיימת מעבר לחילוץ `_list_decision_events()` ותיקון ה-`IndexError`), אפס סיכון פונקציונלי מיידי
+- **Rollback plan:** revert commit `9252b1e` (או ה-merge commit `78f9bae`) — דגל כבוי, קובץ חדש + תוספות בלבד לקבצים קיימים (אין מחיקת/שינוי לוגיקה קיימת מעבר לחילוץ `_list_decision_events()` ותיקון ה-`IndexError`), אפס סיכון פונקציונלי מיידי
 
 ### C59 — Decision Hub Stage 1: Trust Layer (Authority × Medium × Verify)
 - **תאריך:** 25/06/2026
