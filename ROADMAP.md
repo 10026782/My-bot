@@ -1,6 +1,8 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 25/06/2026 (מאוחר ביותר) — main = `78f9bae` (אומת, GitHub MCP `pull_request_read` + `git merge-base --is-ancestor`). **PR #157 מוזג** — Decision Hub Stage 2 (F17, Smart Trust Layer): AI Conflict Detection Lazy+Cached (לא Eager — לא רץ ב-ingest, רק בפתיחת/Refresh של `/decision status`, מוגבל ל-Claim Topic זהה + Trust>=T1, deduped לפי `event_pair_hash`, מוגבל ל-5 קריאות Claude חדשות לריצה), Decision Confidence Score, Evidence Graph, Missing Evidence Detector (template-based, לא LLM). 3 סטיות מהטקסט המילולי של הספק תועדו ומומשו (ראו F17 למטה). 25/25 self-tests עוברים (`test_decision_confidence.py`); 33/33 Stage 1 ללא רגרסיה. דגל `FEATURE_DECISION_HUB` כבוי כברירת מחדל — אפס שינוי התנהגות בפרודקשן. 4 שדות Airtable חדשים עדיין לא נוצרו ביד; פריסה בפועל ל-Render **לא אומתה** (אין גישת dashboard/egress מה-sandbox). ראו פירוט: F17 למטה, `CHANGE_CONTROL_LOG.md`.
+עודכן: 26/06/2026 (מאוחר ביותר) — branch `claude/new-session-be1ckb`, main = `78f9bae`. **תיקון doc-drift** שאותר ע"י audit יומי (סשן `claude/gifted-clarke-ajyjsa`, AI_CONTEXT.md refresh): שני פיצ'רים תועדו כאן כ"קוד הושלם, לא ממוזג" בזמן שהם **מוזגו בפועל ל-`main`** — אומת עצמאית דרך `git merge-base --is-ancestor` על שני המקרים: (1) **C60 Tool Context Awareness** — PR #152, commit `2d85b84`, merge `3e0094b`; (2) **F17 Decision Hub Stage 2** — PR #157, commit `9252b1e`, merge `78f9bae` (תוקן כבר בסבב קודם של סשן זה). גם תוקן: סעיף F52 כאן רשם רק 3 מ-4 קבצי audit שנוצרו בפועל (`F52_STATE_FLOW_MAP.md` היה חסר מהרשימה, מוזג ב-PR #156) ופרט סטטוס "branch" שגוי (F52 מוזג במלואו ל-`main`). פריסה בפועל ל-Render לכל הפיצ'רים האלה **לא אומתה** (אין גישת dashboard/egress מה-sandbox) — ראו פירוט בכל סעיף בנפרד, `CHANGE_CONTROL_LOG.md`.
+
+עודכן (קודם): 25/06/2026 (מאוחר ביותר) — main = `78f9bae` (אומת, GitHub MCP `pull_request_read` + `git merge-base --is-ancestor`). **PR #157 מוזג** — Decision Hub Stage 2 (F17, Smart Trust Layer): AI Conflict Detection Lazy+Cached (לא Eager — לא רץ ב-ingest, רק בפתיחת/Refresh של `/decision status`, מוגבל ל-Claim Topic זהה + Trust>=T1, deduped לפי `event_pair_hash`, מוגבל ל-5 קריאות Claude חדשות לריצה), Decision Confidence Score, Evidence Graph, Missing Evidence Detector (template-based, לא LLM). 3 סטיות מהטקסט המילולי של הספק תועדו ומומשו (ראו F17 למטה). 25/25 self-tests עוברים (`test_decision_confidence.py`); 33/33 Stage 1 ללא רגרסיה. דגל `FEATURE_DECISION_HUB` כבוי כברירת מחדל — אפס שינוי התנהגות בפרודקשן. 4 שדות Airtable חדשים עדיין לא נוצרו ביד; פריסה בפועל ל-Render **לא אומתה** (אין גישת dashboard/egress מה-sandbox). ראו פירוט: F17 למטה, `CHANGE_CONTROL_LOG.md`.
 
 עודכן (קודם): 25/06/2026 — branch `claude/new-session-be1ckb`. **F17 Decision Hub Stage 2 (Smart Trust Layer) — קוד הושלם**, אישור הבעלים בכפוף לתנאי: AI Conflict Detection הוא Lazy+Cached, לא Eager — לא רץ ב-ingest, רק בפתיחת/Refresh של `/decision status`, מוגבל ל-Claim Topic זהה + Trust>=T1, deduped לפי `event_pair_hash`, מוגבל ל-5 קריאות Claude חדשות לריצה. קובץ חדש `decision_confidence.py`: `calc_confidence()` (ממוצע משוקלל של Trust מינוס קנס קונפליקטים/חסר, clamped 0-1), `detect_conflicts_ai_lazy()`, `detect_missing_evidence()` (template-based, לא LLM), `build_evidence_summary()`. מוזרק ל-`_format_decision_card()` ב-`cmd_decision.py` (אין `get_decision()` במערכת — נקודת החיווט הקיימת). 3 סטיות מהטקסט המילולי של הספק תועדו (ראו F17 למטה) — בעיקר: מיקום הקובץ (root, לא `core/`), `REQUIRED_EVIDENCE` ממופה על `DecisionDomain` הקיים במקום "decision_type" לא-מוגדר, ונקודת החיווט (`_format_decision_card` במקום `get_decision()`). 25/25 self-tests עוברים (`test_decision_confidence.py`); 33/33 Stage 1 ללא רגרסיה. 4 שדות Airtable חדשים (`Evidence Ids`/`Evidence Summary`/`Confidence Score`/`Missing Evidence`) **לא נוצרו עדיין ביד ב-Airtable חי** — `airtable_patch()` משמיט אותם בשקט עד אז; תצוגת הטלגרם תקינה בכל מקרה (חישוב in-memory). דגל `FEATURE_DECISION_HUB` כבוי כברירת מחדל. **🟡 CODE DONE — לא מאומת בפרודקשן.** ראו פירוט: F17 למטה, `CHANGE_CONTROL_LOG.md`.
 
@@ -426,7 +428,7 @@ JSON) — `airtable_patch()` משמיט שדות לא-מוכרים בשקט (`sc
 `FEATURE_DECISION_HUB` כבוי כברירת מחדל. Stage 3-4 (Readiness Engine/Attention Engine) —
 לא התחילו.
 
-**C60 — Tool Context Awareness (`claude/new-session-be1ckb`, 🟡 CODE DONE, לא ממוזג):**
+**C60 — Tool Context Awareness (PR #152, מוזג ל-`main`, commit `2d85b84`/merge `3e0094b`):**
 לפי `SPEC_C59_Tool_Context_Awareness.md` (הועלה ע"י הבעלים בלי טקסט מלווה; אישור דרך
 `AskUserQuestion`: "Yes, implement now"). ⚠️ **ID collision מתועד** — הספק תייג עצמו "C59",
 מתנגש עם C59 הקיים (Trust Layer שלעיל, PR #151) — תויג מחדש **C60** בתיעוד בלבד; כותרת
@@ -449,6 +451,10 @@ agent: `last_tool_result` נשמר ב-session אחרי כל tool dispatch אמי
 **קבצים שנוספו/שונו:** `session_store.py` (`last_tool_result` + 2 מתודות + 4 self-tests),
 `app.py` (`_capture_last_tool_result`/`_build_tool_context`/`resolve_context_pronouns`/`CONTEXT_PRONOUNS`
 + 3 נקודות חיווט).
+**מצב נוכחי:** מוזג ל-`main` (PR #152, commit `2d85b84`, merge commit `3e0094b`) — אומת
+עצמאית דרך `git merge-base --is-ancestor 2d85b84 origin/main`. **לא flag-gated** (additive),
+כך שהקוד פעיל בפרודקשן אם נפרס; פריסה בפועל ל-Render **לא אומתה** (אין גישת dashboard/egress
+מה-sandbox). §10 פריט 7 בספק (בדיקת לייב) עדיין פתוח.
 
 ### F05a — Meta WhatsApp Phase 1 (Inbound, ללא תעבורת פרודקשן)
 **מה:** `/webhooks/meta/whatsapp` (GET verify + POST inbound) — נתיב נפרד מ-Twilio.
@@ -701,12 +707,13 @@ Archived / historical Markdown disposition:
 | `BOSS_Refactor_Plan.md` | ACTIVE REFERENCE | תוכנית 8 מסכים + BOSS Layer — Stage 0 הושלם, N06 = Stage 1 |
 ### F52 — Tool Architecture Audit Maps
 
-Status: Implemented but not yet verified.
+Status: Merged to `main` across 3 PRs (#153, #155, #156), branch `f52-current-tool-map-audit`. Production deploy not verified from this sandbox (no Render dashboard/egress access).
 
-What: audit-only documentation before F52 implementation. The current branch adds:
+What: audit-only documentation before F52 implementation — 4 docs (not 3; `F52_STATE_FLOW_MAP.md` landed in the third PR and was previously missing from this list):
 
-- `docs/f52/F52_CURRENT_TOOL_MAP.md`
-- `docs/f52/F52_CONTRACT_COVERAGE_MAP.md`
-- `docs/f52/F52_BYPASS_MAP.md`
+- `docs/f52/F52_CURRENT_TOOL_MAP.md` — PR #153, commit `6afc393`, merge `0ffdc7c`
+- `docs/f52/F52_CONTRACT_COVERAGE_MAP.md` — PR #155, commit `84762f0`, merge `d57f405`
+- `docs/f52/F52_BYPASS_MAP.md` — PR #155, commit `84762f0`, merge `d57f405`
+- `docs/f52/F52_STATE_FLOW_MAP.md` — PR #156, commit `4b0f5d3`, merge `64a018b`
 
 Scope guard: no production behavior changes, no `app.py` changes, no refactor, and no Airtable schema changes. The audit maps current tool architecture, contract coverage, bypass categories, high-risk bypasses, safe audit tests, and design-review items.

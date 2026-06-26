@@ -23,6 +23,22 @@
 
 > נבנה מ-`git log --since="30 days ago"` (~172 commits, `f935c53`→`eebf73b`) + טבלאות ROADMAP.md (Stabilization Sprint, World 2, Sprint 16/06). כל commit hash צוטט ישירות מ-git או מ-ROADMAP — שורות שלא נמצאה להן ראיה ישירה מסומנות "לא ידוע".
 
+### F52 — Tool Architecture Audit Maps (docs-only, 4 קבצי audit)
+- **תאריך:** 26/06/2026
+- **סוג:** Documentation — audit-only, אין שינוי קוד/התנהגות
+- **Requirement:** audit מקדים לפני מימוש F52 (לא תועד בקובץ ROADMAP item נפרד מעבר לסעיף F52 עצמו)
+- **תיאור:** 4 מסמכי audit ב-`docs/f52/` שמתעדים את ארכיטקטורת הכלים הקיימת לפני כל refactor: `F52_CURRENT_TOOL_MAP.md` (מפת כלים נוכחית), `F52_CONTRACT_COVERAGE_MAP.md` (כיסוי חוזה C53-A), `F52_BYPASS_MAP.md` (קטגוריות bypass + bypasses בסיכון גבוה), `F52_STATE_FLOW_MAP.md` (מפת זרימת state). Scope guard מפורש בכל 3 ה-PRs: אין שינוי `app.py`, אין refactor, אין שינוי סכמת Airtable.
+- ⚠️ **רשומה זו נוספה בדיעבד** — F52 מוזג כבר ב-3 PRs נפרדים בלי שנפתחה רשומת CHANGE_CONTROL_LOG ייעודית בזמן המיזוג (רק עדכון ROADMAP.md חלקי, שגם הוא היה חסר את הקובץ הרביעי — תוקן באותו commit כמו רשומה זו). אותר ע"י audit יומי (סשן `claude/gifted-clarke-ajyjsa`, 26/06/2026).
+- **Commit:** `6afc393` (PR #153) / `84762f0` (PR #155) / `4b0f5d3` (PR #156)
+- **PR:** #153 (merge `0ffdc7c`), #155 (merge `d57f405`), #156 (merge `64a018b`) — **כל השלושה מוזגו ל-`main`**, אומת עצמאית דרך `git merge-base --is-ancestor` על כל אחד מ-3 ה-commits
+- **Review על ידי:** הבעלים
+- **Deploy תאריך:** לא רלוונטי — מסמכי תיעוד בלבד, אין קוד לפרוס
+- **Verified בפרודקשן:** לא רלוונטי — אין קוד/התנהגות לאמת
+- **Verification ראיה:** `ls docs/f52/` מאשר קיום 4 הקבצים בפועל על דיסק; `git merge-base --is-ancestor` אישר שלושת ה-commits כ-ancestors של `origin/main`
+- **Docs עודכנו:** ROADMAP.md (סעיף F52 תוקן — נוסף הקובץ הרביעי החסר + תוקן סטטוס "branch" ל-"מוזג"), CHANGE_CONTROL_LOG.md (רשומה זו, נוספה בדיעבד)
+- **Feature Flag:** N/A — תיעוד בלבד
+- **Rollback plan:** לא רלוונטי — מחיקת קבצי Markdown בלבד, אפס סיכון קוד
+
 ### C60 — Tool Context Awareness (last_tool_result + system-prompt injection + pronoun resolution)
 - **תאריך:** 25/06/2026
 - **סוג:** Feature — לא flag-gated (additive, לא נוגע בלולאה הקיימת)
@@ -33,15 +49,15 @@
   1. **חוזה tool_result שגוי בספק** — הספק מניח `tool_result.get("id")`/`("record_id")`/`("url")`/`("drive_url")`; החוזה האמיתי בקוד (C53-A, אומת ב-`test_c53a.py` — `set(r) == {"ok","tool","external_id","evidence","user_message"}`, ללא מפתחות נוספים) הוא `{ok, tool, external_id, evidence, user_message}`. תוקן: `record_id` נשלף מ-`external_id`, `url` נשלף מ-`evidence.get("htmlLink") or evidence.get("url")`.
   2. **`_seconds_ago()` מוזכר ב-§5 אך לא מוגדר בספק** (כמו `_has_keyword_conflict` ב-C59) — מומש inline ב-`_build_tool_context()` כ-diff בין `datetime.now(timezone.utc)` ל-`datetime.fromisoformat(timestamp)`, עטוף ב-try/except ל-timestamps פגומים.
   3. **§6 "Table Registry fix" (4 קבועי Decision Tables)** — אומת מראש דרך §8 PRE-SESSION GATE grep שכל 4 הקבועים (`DECISIONS`/`DECISION_EVENTS`/`DECISION_STAKEHOLDERS`/`DECISION_INBOX`) כבר קיימים ב-`airtable_schema.py` מ-C59 — no-op, לא נוצר שינוי מיותר.
-- **Commit:** ייכלל ב-commit הקרוב על `claude/new-session-be1ckb`
-- **PR:** אין — לא התבקש, ולא מבוצע ללא אישור מפורש לפי הנחיית הסשן
+- **Commit:** `2d85b84`
+- **PR:** #152 — **מוזג ל-`main`** (merge commit `3e0094b`, אומת עצמאית דרך `git merge-base --is-ancestor 2d85b84 origin/main`; **תיקון post-merge** — תועד בעבר בטעות כ"לא ממוזג", אותר ע"י audit יומי ב-26/06/2026)
 - **Review על ידי:** הבעלים (אישור "Yes, implement now" דרך `AskUserQuestion`)
-- **Deploy תאריך:** לא רלוונטי — לא מוזג ל-`main`
+- **Deploy תאריך:** לא ידוע — מיזוג ל-`main` אומת, אך פריסה בפועל ל-Render **לא ניתנת לאימות מתוך sandbox זה** (אין גישת dashboard/egress)
 - **Verified בפרודקשן:** לא — §10 פריט 7 בספק עצמו ("העלה קובץ → 'תעלה לדסישנס' → BOSS זוכר ומנתב נכון") עדיין לא אומת בלייב
 - **Verification ראיה:** `python3 -m py_compile app.py session_store.py airtable_schema.py` נקי; `python3 session_store.py` → 40/40 self-tests עוברים (4 חדשים ל-C60: set/get round-trip, sync includes field, missing-session→None); `python3 test_c53a.py` → 50/50 (ללא רגרסיה בחוזה C53-A); `python3 test_integration.py` → 4/4; `python3 smoke_tests.py` — 2 כשלים קיימים-מראש (`flask`/`httpx` לא מותקנים בסביבת dev זו), אומת עם `git stash` שהם זהים על main, לא קשור לשינוי; §9 greps כולם תקינים (`set_last_tool_result`/`get_last_tool_result`/`_build_tool_context`/`הקשר כלים`/`resolve_context_pronouns`/4 קבועי Decision tables כולם נמצאים).
-- **Docs עודכנו:** ROADMAP.md (C60 חדש + header, תיקון סטטוס מיזוג ל-C58/C59), CHANGE_CONTROL_LOG.md (רשומה זו + תיקון PR/Deploy ל-C58/C59), AI_CONTEXT.md
+- **Docs עודכנו:** ROADMAP.md (C60 חדש + header, תיקון סטטוס מיזוג ל-C58/C59; **תוקן שוב 26/06/2026** לאחר שנמצא ש-PR #152 כבר מוזג), CHANGE_CONTROL_LOG.md (רשומה זו + תיקון PR/Deploy ל-C58/C59; **תוקן שוב 26/06/2026**), AI_CONTEXT.md
 - **Feature Flag:** אין — תמיד-פעיל (additive, כמו `last_uploaded_file` ב-C58)
-- **Rollback plan:** revert ה-commit הקרוב — שדה `last_tool_result` חדש ב-State JSON, אין breaking change לצרכנים קיימים; אם injection ל-system prompt גורם לבעיה (גודל/רעש), ניתן להסיר את שורת `ctx.system_prompt += _build_tool_context(chat_id)` בלבד בלי לגעת בשאר הקוד
+- **Rollback plan:** revert commit `2d85b84` (או ה-merge commit `3e0094b`) — שדה `last_tool_result` חדש ב-State JSON, אין breaking change לצרכנים קיימים; אם injection ל-system prompt גורם לבעיה (גודל/רעש), ניתן להסיר את שורת `ctx.system_prompt += _build_tool_context(chat_id)` בלבד בלי לגעת בשאר הקוד
 
 ### F17 — Decision Hub Stage 2: Smart Trust Layer (AI Conflict Detection, Confidence Score, Evidence Graph, Missing Evidence)
 - **תאריך:** 25/06/2026
