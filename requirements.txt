@@ -17,3 +17,7 @@ openai
 pytest
 tzdata
 groq
+beautifulsoup4
+markdown
+openpyxl
+python-docx

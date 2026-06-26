@@ -23,6 +23,40 @@
 
 > נבנה מ-`git log --since="30 days ago"` (~172 commits, `f935c53`→`eebf73b`) + טבלאות ROADMAP.md (Stabilization Sprint, World 2, Sprint 16/06). כל commit hash צוטט ישירות מ-git או מ-ROADMAP — שורות שלא נמצאה להן ראיה ישירה מסומנות "לא ידוע".
 
+### F18 — Decision Hub Stage 3: Readiness Engine
+- **תאריך:** 26/06/2026
+- **סוג:** Feature — אחורה כבוי דגל (`FEATURE_DECISION_HUB`), אפס שינוי התנהגות בפרודקשן
+- **Requirement:** SPEC "Decision Hub Stage 3: Readiness Engine" (PLANNING_GATE + SPEC מלא, הועלה ע"י הבעלים) — ROADMAP.md §F18
+- **תיאור:** קובץ חדש `decision_readiness.py` — `calc_readiness(decision, events, confidence_result) -> ReadinessResult`, `build_readiness_message(result) -> str`, `detect_escalation(decision, result) -> list[str]`. `ReadinessResult.status` ∈ {READY, NOT_READY, REVIEW}; READY הוא איתות בלבד להכרעה אנושית — אינו מבצע פעולה. מקבל את `ConfidenceResult` המחושב כבר ב-Stage 2 (אין חישוב כפול/קריאת AI Conflict Detection כפולה). 8 חוקי הספק + 3 הספים + 4 תבניות escalation (עו"ד/רו"ח-יועץ פיננסי/עמדת שותף/מסמך תומך) מיושמים כלשונם.
+- **SoA (MODULE_RULES):** `DecisionFields.READINESS` ו-`class DecisionReadiness` (READY/NOT_READY) **היו קיימים מראש** ב-`airtable_schema.py` — נבדק לפני כתיבת קוד חדש. הורחב (לא שוכפל) עם ערך `REVIEW` חדש (לא מאומת כאופציית singleSelect חיה ב-Airtable). `detect_missing_evidence()` הקיים מ-Stage 2 נקרא ישירות.
+- ⚠️ **1 סטייה מהטקסט המילולי של הספק:** "Stakeholders if available" מופיע ב-Inputs של הספק, אך חתימת `detect_escalation(decision, result)` כפי שהוגדרה במפורש בספק לא מקבלת `events`/stakeholders. escalation של "עמדת שותף" (partner-disagreement) מזוהה לכן רק דרך אות עקיף — קונפליקט פתוח שמופיע ב-`result.blockers` — לא דרך ניתוח Stakeholder records ישיר.
+- **Daily Digest hook (ספק §4):** נבדק `daily_digest.py` — אין אזכור Decision Hub, אין נקודת חיבור קיימת. דולג, לפי האופציונליות המפורשת של הספק.
+- **Commit:** `84cfcff`
+- **PR:** #159 — מוזג ל-`main` (merge commit `50f6351`), אומת עצמאית דרך `mcp__github__pull_request_read` (`merged:true`, `merged_at: 2026-06-26T11:51:28Z`) + `git fetch origin main` + `git merge-base --is-ancestor 84cfcff origin/main`. ענף המקור `claude/new-session-be1ckb` נמחק מה-remote אחרי המיזוג.
+- **Review על ידי:** הבעלים (אישור "Yes, implement now" דרך `AskUserQuestion` על ספק מלא; מיזוג בוצע ע"י הבעלים)
+- **Deploy תאריך:** לא אומת — אין גישת Render dashboard/egress מה-sandbox; מוזג ל-`main` אך פריסה בפועל ל-Render לא אומתה
+- **Verified בפרודקשן:** לא — מוזג ל-`main`, אך דגל `FEATURE_DECISION_HUB` כבוי כברירת מחדל ופריסה לא אומתה מה-sandbox
+- **Verification ראיה:** `py_compile` נקי על `decision_readiness.py`/`cmd_decision.py`/`airtable_schema.py`/`test_decision_readiness.py`; `test_decision_readiness.py` 25/25 (6 ה-cases מהספק + מקרי גבול); `test_decision_confidence.py` 25/25 ו-`test_decision_trust.py` 33/33 ללא רגרסיה; `smoke_tests.py` — אותם 2 כשלים קיימים מראש (`flask`/`httpx` חסרים בסביבה), אין כשלים חדשים
+- **Docs עודכנו:** ROADMAP.md (סעיף F18 חדש + header עודכן + top-of-file entry), CHANGE_CONTROL_LOG.md (רשומה זו, עודכנה בדיעבד עם נתוני המיזוג המאומתים)
+- **Feature Flag:** `FEATURE_DECISION_HUB` (כבוי כברירת מחדל)
+- **Rollback plan:** מחיקת `decision_readiness.py` + revert ל-3 השינויים ב-`cmd_decision.py`/`airtable_schema.py` — אין כתיבה לשדות Airtable חדשים (רק `Readiness` הקיים), אפס סיכון לנתונים קיימים
+
+### F52 — Tool Architecture Audit Maps (docs-only, 4 קבצי audit)
+- **תאריך:** 26/06/2026
+- **סוג:** Documentation — audit-only, אין שינוי קוד/התנהגות
+- **Requirement:** audit מקדים לפני מימוש F52 (לא תועד בקובץ ROADMAP item נפרד מעבר לסעיף F52 עצמו)
+- **תיאור:** 4 מסמכי audit ב-`docs/f52/` שמתעדים את ארכיטקטורת הכלים הקיימת לפני כל refactor: `F52_CURRENT_TOOL_MAP.md` (מפת כלים נוכחית), `F52_CONTRACT_COVERAGE_MAP.md` (כיסוי חוזה C53-A), `F52_BYPASS_MAP.md` (קטגוריות bypass + bypasses בסיכון גבוה), `F52_STATE_FLOW_MAP.md` (מפת זרימת state). Scope guard מפורש בכל 3 ה-PRs: אין שינוי `app.py`, אין refactor, אין שינוי סכמת Airtable.
+- ⚠️ **רשומה זו נוספה בדיעבד** — F52 מוזג כבר ב-3 PRs נפרדים בלי שנפתחה רשומת CHANGE_CONTROL_LOG ייעודית בזמן המיזוג (רק עדכון ROADMAP.md חלקי, שגם הוא היה חסר את הקובץ הרביעי — תוקן באותו commit כמו רשומה זו). אותר ע"י audit יומי (סשן `claude/gifted-clarke-ajyjsa`, 26/06/2026).
+- **Commit:** `6afc393` (PR #153) / `84762f0` (PR #155) / `4b0f5d3` (PR #156)
+- **PR:** #153 (merge `0ffdc7c`), #155 (merge `d57f405`), #156 (merge `64a018b`) — **כל השלושה מוזגו ל-`main`**, אומת עצמאית דרך `git merge-base --is-ancestor` על כל אחד מ-3 ה-commits
+- **Review על ידי:** הבעלים
+- **Deploy תאריך:** לא רלוונטי — מסמכי תיעוד בלבד, אין קוד לפרוס
+- **Verified בפרודקשן:** לא רלוונטי — אין קוד/התנהגות לאמת
+- **Verification ראיה:** `ls docs/f52/` מאשר קיום 4 הקבצים בפועל על דיסק; `git merge-base --is-ancestor` אישר שלושת ה-commits כ-ancestors של `origin/main`
+- **Docs עודכנו:** ROADMAP.md (סעיף F52 תוקן — נוסף הקובץ הרביעי החסר + תוקן סטטוס "branch" ל-"מוזג"), CHANGE_CONTROL_LOG.md (רשומה זו, נוספה בדיעבד)
+- **Feature Flag:** N/A — תיעוד בלבד
+- **Rollback plan:** לא רלוונטי — מחיקת קבצי Markdown בלבד, אפס סיכון קוד
+
 ### C60 — Tool Context Awareness (last_tool_result + system-prompt injection + pronoun resolution)
 - **תאריך:** 25/06/2026
 - **סוג:** Feature — לא flag-gated (additive, לא נוגע בלולאה הקיימת)
@@ -33,15 +67,36 @@
   1. **חוזה tool_result שגוי בספק** — הספק מניח `tool_result.get("id")`/`("record_id")`/`("url")`/`("drive_url")`; החוזה האמיתי בקוד (C53-A, אומת ב-`test_c53a.py` — `set(r) == {"ok","tool","external_id","evidence","user_message"}`, ללא מפתחות נוספים) הוא `{ok, tool, external_id, evidence, user_message}`. תוקן: `record_id` נשלף מ-`external_id`, `url` נשלף מ-`evidence.get("htmlLink") or evidence.get("url")`.
   2. **`_seconds_ago()` מוזכר ב-§5 אך לא מוגדר בספק** (כמו `_has_keyword_conflict` ב-C59) — מומש inline ב-`_build_tool_context()` כ-diff בין `datetime.now(timezone.utc)` ל-`datetime.fromisoformat(timestamp)`, עטוף ב-try/except ל-timestamps פגומים.
   3. **§6 "Table Registry fix" (4 קבועי Decision Tables)** — אומת מראש דרך §8 PRE-SESSION GATE grep שכל 4 הקבועים (`DECISIONS`/`DECISION_EVENTS`/`DECISION_STAKEHOLDERS`/`DECISION_INBOX`) כבר קיימים ב-`airtable_schema.py` מ-C59 — no-op, לא נוצר שינוי מיותר.
-- **Commit:** ייכלל ב-commit הקרוב על `claude/new-session-be1ckb`
-- **PR:** אין — לא התבקש, ולא מבוצע ללא אישור מפורש לפי הנחיית הסשן
+- **Commit:** `2d85b84`
+- **PR:** #152 — **מוזג ל-`main`** (merge commit `3e0094b`, אומת עצמאית דרך `git merge-base --is-ancestor 2d85b84 origin/main`; **תיקון post-merge** — תועד בעבר בטעות כ"לא ממוזג", אותר ע"י audit יומי ב-26/06/2026)
 - **Review על ידי:** הבעלים (אישור "Yes, implement now" דרך `AskUserQuestion`)
-- **Deploy תאריך:** לא רלוונטי — לא מוזג ל-`main`
+- **Deploy תאריך:** לא ידוע — מיזוג ל-`main` אומת, אך פריסה בפועל ל-Render **לא ניתנת לאימות מתוך sandbox זה** (אין גישת dashboard/egress)
 - **Verified בפרודקשן:** לא — §10 פריט 7 בספק עצמו ("העלה קובץ → 'תעלה לדסישנס' → BOSS זוכר ומנתב נכון") עדיין לא אומת בלייב
 - **Verification ראיה:** `python3 -m py_compile app.py session_store.py airtable_schema.py` נקי; `python3 session_store.py` → 40/40 self-tests עוברים (4 חדשים ל-C60: set/get round-trip, sync includes field, missing-session→None); `python3 test_c53a.py` → 50/50 (ללא רגרסיה בחוזה C53-A); `python3 test_integration.py` → 4/4; `python3 smoke_tests.py` — 2 כשלים קיימים-מראש (`flask`/`httpx` לא מותקנים בסביבת dev זו), אומת עם `git stash` שהם זהים על main, לא קשור לשינוי; §9 greps כולם תקינים (`set_last_tool_result`/`get_last_tool_result`/`_build_tool_context`/`הקשר כלים`/`resolve_context_pronouns`/4 קבועי Decision tables כולם נמצאים).
-- **Docs עודכנו:** ROADMAP.md (C60 חדש + header, תיקון סטטוס מיזוג ל-C58/C59), CHANGE_CONTROL_LOG.md (רשומה זו + תיקון PR/Deploy ל-C58/C59), AI_CONTEXT.md
+- **Docs עודכנו:** ROADMAP.md (C60 חדש + header, תיקון סטטוס מיזוג ל-C58/C59; **תוקן שוב 26/06/2026** לאחר שנמצא ש-PR #152 כבר מוזג), CHANGE_CONTROL_LOG.md (רשומה זו + תיקון PR/Deploy ל-C58/C59; **תוקן שוב 26/06/2026**), AI_CONTEXT.md
 - **Feature Flag:** אין — תמיד-פעיל (additive, כמו `last_uploaded_file` ב-C58)
-- **Rollback plan:** revert ה-commit הקרוב — שדה `last_tool_result` חדש ב-State JSON, אין breaking change לצרכנים קיימים; אם injection ל-system prompt גורם לבעיה (גודל/רעש), ניתן להסיר את שורת `ctx.system_prompt += _build_tool_context(chat_id)` בלבד בלי לגעת בשאר הקוד
+- **Rollback plan:** revert commit `2d85b84` (או ה-merge commit `3e0094b`) — שדה `last_tool_result` חדש ב-State JSON, אין breaking change לצרכנים קיימים; אם injection ל-system prompt גורם לבעיה (גודל/רעש), ניתן להסיר את שורת `ctx.system_prompt += _build_tool_context(chat_id)` בלבד בלי לגעת בשאר הקוד
+
+### F17 — Decision Hub Stage 2: Smart Trust Layer (AI Conflict Detection, Confidence Score, Evidence Graph, Missing Evidence)
+- **תאריך:** 25/06/2026
+- **סוג:** Feature — flag-gated (`FEATURE_DECISION_HUB`, כבוי כברירת מחדל)
+- **Requirement:** SPEC F17 (הועלה ע"י הבעלים, "SPEC ONLY — אין מימוש לפני אישורך"), אושר בכפוף לתנאי מפורש אחד: *"AI Conflict Detection יהיה Lazy + Cached, לא Eager. קליטת Event לא תלויה ב-Claude. בזמן פתיחת Decision או Refresh יבוצע סריקת קונפליקטים מוגבלת, רק לאירועים באותו Claim Topic וברמת Trust של T1 ומעלה"*.
+- **תיאור:** שכבת ביטחון על גבי Stage 1 — מסתכלת על Decision שלם (לא Event בודד): האם האירועים התומכים מסכימים, מה חסר, כמה ביטחון לפני חתימה. קובץ חדש `decision_confidence.py`: (1) **AI Conflict Detection** — `detect_conflict_ai(event_a, event_b)` קריאת Claude בודדת (`call_anthropic_text`, prompt JSON-only בעברית) עם `detect_conflicts_ai_lazy(events)` שעוטף אותה במלוא תנאי האישור — מסנן ל-Trust>=T1 + Claim Topic קיים, מקבץ לפי Claim Topic, dedup לפי `_event_pair_hash` (sha256 על זוג IDs ממוין) ב-`_conflict_cache` (process-local), מוגבל ל-`_MAX_AI_COMPARISONS_PER_RUN=5` קריאות Claude חדשות לריצה (פגיעות ב-cache לא נספרות במגבלה). (2) **Evidence Graph** — `evidence_ids`/`evidence_summary` (`build_evidence_summary()` סופר Events לפי Event Type). (3) **Decision Confidence Score** — `calc_confidence(events, conflicts=None)`: ממוצע משוקלל של ציוני Trust (`_TRUST_SCORE`: T0=0.1/T1=0.4/T2=0.7/T3=0.95) מינוס `0.15×len(conflicts)`, clamped [0,1]; `conflicts=None`→מריץ את הסריקה ה-Lazy, `conflicts=[]`→מדלג עליה במפורש (לבדיקות/refresh בלי תקציב Claude). (4) **Missing Evidence Detector** — `detect_missing_evidence(domain, events)`: בדיקת מילת-מפתח פשוטה (לא LLM) מול `REQUIRED_EVIDENCE[domain]`. **מומלא בפועל** את ה-stub `_has_keyword_conflict()` שStage 1 (C59) השאיר פתוח — כאיתות AI מקביל (`DecisionEventTag.CONFLICT`), לא תחליף לבדיקת מילות-המפתח עצמה. מוזרק ל-`_format_decision_card()` ב-`cmd_decision.py` (נקרא מ-`/decision status`, מאחורי הדגל) — חולצה `_list_decision_events()` חדשה מ-`_latest_event()` הקיים כדי לשתף את רשימת ה-Events בין חישוב הכרטיס הישן לחישוב הביטחון החדש; `_persist_confidence()` כותבת best-effort ל-4 שדות חדשים ב-Decisions דרך `airtable_patch()`.
+- ⚠️ **3 סטיות מהטקסט המילולי של הספק, כולן מתועדות:**
+  1. הספק כתב `core/decision_confidence.py` — נכתב ב-root, לצד `decision_pipeline.py`/`decision_ports.py`/`cmd_decision.py` (שאר מודולי Decision Hub), לעקביות ארכיטקטונית — אין תיקיית `core/` בשימוש לאף מודול Decision Hub קיים.
+  2. הספק הגדיר `REQUIRED_EVIDENCE` לפי "decision_type" — קונספט שלא קיים בסכמה בכלל (ל-Decisions יש רק `Domain`, ראו `DecisionDomain`). נמופה על `DecisionDomain` הקיים (`REAL_ESTATE`/`IMPORT`/`PARTNERSHIP`/`RECRUITMENT`/`GENERAL`); `IMPORT` ו-`PARTNERSHIP` משתפים את אותה רשימת ראיות בהיעדר הבחנה ספציפית יותר בספק.
+  3. הספק הניח קיומה של פונקציה `get_decision()` — אינה קיימת בקוד. החיווט נעשה ב-`_format_decision_card()` (הנקודה הקיימת היחידה שמרכיבה כרטיס Decision מלא, כבר מאחורי `FEATURE_DECISION_HUB`, נקראת רק מ-`/decision status`).
+- **תיקון רגרסיה תוך-כדי-עבודה (לא הגיע ל-commit):** בעת חילוץ `_list_decision_events()`, השלב הביניים הפך בטעות את בדיקת ה-empty-list (`events[0] if not events else max(...)` — היה זורק `IndexError` על Decision בלי Events מקושרים, במקום להחזיר `None`) — אותר ותוקן (`max(events, ...) if events else None`) לפני כתיבת הבדיקות.
+- **שדות Airtable חדשים (לא נוצרו עדיין ביד ב-Airtable חי):** `Evidence Ids` (Long text, JSON array), `Evidence Summary` (Long text), `Confidence Score` (Number 0.0-1.0), `Missing Evidence` (Long text, JSON array). `airtable_patch()` משמיט שדות לא-מוכרים בשקט (`schema_cache.json` עדיין לא מכיר אותם) — תצוגת הטלגרם תקינה בכל מקרה (חישוב in-memory ב-`_format_confidence_block()`), הפרסיסטנס הוא best-effort עד שהשדות ייוצרו ו-`schema_audit.py` ירוץ מחדש.
+- **Commit:** `9252b1e`
+- **PR:** #157 — **מוזג ל-`main`** (merge commit `78f9bae`, `merged: true`, אומת ע"י GitHub MCP `pull_request_read` + `git merge-base --is-ancestor 9252b1e origin/main`, לא רק לפי דיווח המשתמש)
+- **Review על ידי:** הבעלים (אישור מפורש בכפוף לתנאי Lazy+Cached, מצוטט לעיל)
+- **Deploy תאריך:** לא ידוע — מיזוג ל-`main` אומת, אך פריסה בפועל ל-Render **לא ניתנת לאימות מתוך sandbox זה** (אין גישת dashboard/egress)
+- **Verified בפרודקשן:** לא — דגל `FEATURE_DECISION_HUB` כבוי, אפס בדיקה חיה מול Airtable/Render
+- **Verification ראיה:** `python3 -m py_compile decision_confidence.py cmd_decision.py airtable_schema.py app.py test_decision_confidence.py` נקי; `python3 test_decision_confidence.py` → 25/25 self-tests עוברים (`detect_conflict_ai` מ-monkeypatch, אפס קריאות רשת/עלות Claude) — מכסה: ממוצע משוקלל/קנס קונפליקטים/clamp/empty-events ב-`calc_confidence`, ספירת Event Type ב-`build_evidence_summary`, תבניות `REQUIRED_EVIDENCE` לכל Domain ב-`detect_missing_evidence`, וכל תנאי השער ב-`detect_conflicts_ai_lazy` (סינון Trust<T1, סינון Claim Topic חסר/שונה, cache hit לא קורא ל-Claude שוב, מגבלת 5 קריאות לריצה, החרגת Events superseded); `python3 test_decision_trust.py` → 33/33 ללא רגרסיה ב-Stage 1; `python3 smoke_tests.py` — אותם 2 כשלים תלויי-סביבה קיימים מראש (`flask`/`httpx` חסרים בסביבת sandbox), אין כשלים חדשים.
+- **Docs עודכנו:** ROADMAP.md (F17 חדש + header, עודכן שוב לאחר המיזוג), CHANGE_CONTROL_LOG.md (רשומה זו, שדות Commit/PR/Deploy עודכנו לאחר המיזוג)
+- **Feature Flag:** `FEATURE_DECISION_HUB` — כבוי כברירת מחדל, אפס שינוי התנהגות בפרודקשן
+- **Rollback plan:** revert commit `9252b1e` (או ה-merge commit `78f9bae`) — דגל כבוי, קובץ חדש + תוספות בלבד לקבצים קיימים (אין מחיקת/שינוי לוגיקה קיימת מעבר לחילוץ `_list_decision_events()` ותיקון ה-`IndexError`), אפס סיכון פונקציונלי מיידי
 
 ### C59 — Decision Hub Stage 1: Trust Layer (Authority × Medium × Verify)
 - **תאריך:** 25/06/2026
@@ -580,10 +635,10 @@
 - **סוג:** Bug fix, קובץ קיים (`app.py` בלבד)
 - **Requirement:** דווח ע"י המשתמש (לא ב-ROADMAP.md) — ג'יבריש בהודעות בוט בעברית. ראה `BUG_AUDIT_LOG.md` BUG-018 לפירוט מלא.
 - **תיאור:** טקסט עברי וסימבולים ב-`app.py` עברו בעבר decode שגוי דרך codepage `cp1255` (Windows Hebrew) במקום UTF-8, ונשמרו בחזרה כ-UTF-8 — corruption קבוע בקובץ עצמו (לא בעיית runtime/parse_mode). אותר ותוקן באמצעות hybrid codec (cp1255 + raw-byte fallback ל-12 בתי-קוד שלא מוגדרים ב-cp1255, שעברו דרך identity passthrough בקורפציה המקורית): round-trip `hybrid_encode(line).decode('utf-8')` משמש כגלאי corruption גנרי בטוח (false-positive נמוך מאוד על טקסט תקין). אותרו ותוקנו 132 שורות (78 עם אותיות עבריות + 54 נוספות symbols/emoji/box-drawing ללא עברית, שנמצאו רק בסקאן הגנרי השני). UTF-8 BOM של הקובץ נשמר. בנוסף נבדקה טענת המשתמש על ערבוב `Markdown`/`MarkdownV2` (parse_mode) כגורם — **נשללה**: נקודת ה-`MarkdownV2` היחידה בקובץ (שורה ~356, `cmd_done`) מבצעת escape נכון (`\!`, `\+`); הג'יבריש שהמשתמש ראה היה ה-mojibake, לא בעיית escaping. הצעת המשתמש למעבר גורף ל-`parse_mode="HTML"` בכל קריאות `send_message` **לא בוצעה** — הוחלט שהיא out-of-scope (לא נדרשת לתיקון הבאג בפועל, ותדרוש המרת כל עיצוב `*bold*`/`_italic_` הקיים ל-HTML tags ב-~10 call sites) — לא הוסתר, מתועד גם ב-`BUG_AUDIT_LOG.md`.
-- **Commit:** `b5717da`
-- **PR:** ללא — דחיפה ישירה ל-`claude/new-session-be1ckb` (טרם התבקש PR)
-- **Review על ידי:** טרם — ממתין לבדיקת המשתמש
-- **Deploy תאריך:** N/A — טרם מוזג ל-`main`
+- **Commit:** `b5717da` (+ `80ae008` תיקון תיעוד) — **merge commit `9f408e7`**
+- **PR:** #154 — **מוזג ל-`main`**, מאומת עצמאית דרך `mcp__github__pull_request_read` (`merged: true`) וגם `git fetch origin main` (`9f408e7` הוא tip של `origin/main`, ה-branch `claude/new-session-be1ckb` נמחק מה-remote לאחר המיזוג)
+- **Review על ידי:** 10026782 (owner — `merged_by` ב-GitHub API)
+- **Deploy תאריך:** לא אומת מול Render Dashboard
 - **Verified בפרודקשן:** לא
 - **Verification ראיה:** `python3 -m py_compile app.py` עבר; `python3 smoke_tests.py` — 2 כשלים תלויי-סביבה קיימים מראש (`flask`/`httpx` חסרים בסביבת sandbox, לא קשור לשינוי); `python3 test_integration.py` 4/4; `python3 session_store.py` 40/40; `python3 test_c53a.py` 50/50; `git diff --stat app.py` → `1 file changed, 132 insertions(+), 132 deletions(-)`; כל 132 השינויים נסקרו ידנית שורה-שורה ב-diff המלא; סקאן חזרה (round-trip) על הקובץ המתוקן אישר 0 שורות corruption שיוריות; `file app.py` אישר פורמט UTF-8 with BOM ללא שינוי.
 - **Docs עודכנו:** `BUG_AUDIT_LOG.md` (BUG-018), `CHANGE_CONTROL_LOG.md` (זה)

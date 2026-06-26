@@ -402,6 +402,9 @@ def _format_decision_card(decision: dict) -> str:
 
     attention_block = f"\n\nAttention:\n{attention_summary}" if attention_summary else ""
 
+    confidence_block, confidence_result = _format_confidence_block(decision, events)
+    readiness_block = _format_readiness_block(decision, events, confidence_result)
+
     return (
         f"📋 {title} | טיוטה {draft}\n"
         f"────────────────────\n"
@@ -411,9 +414,79 @@ def _format_decision_card(decision: dict) -> str:
         f"⚠️ בחתימה: {risk_yes}\n"
         f"⚠️ באי-חתימה: {risk_no}\n\n"
         f"❓ חסר: {missing}\n\n"
+        f"{confidence_block}\n\n"
+        f"{readiness_block}\n"
         f"🔄 אחרון: {latest_summary}"
         f"{attention_block}"
     )
+
+
+def _format_confidence_block(decision: dict, events: list) -> tuple:
+    """Stage 2 (F17) — Smart Trust Layer: confidence/evidence/missing-evidence
+    על ההחלטה כולה, מחושב מ-Events מקושרים. AI Conflict Detection רץ כאן בלבד
+    (פתיחת כרטיס /decision status) — lazy + cached, לעולם לא ב-ingest.
+    מחזיר (טקסט_להצגה, ConfidenceResult) — ה-ConfidenceResult נדרש ל-Stage 3
+    (decision_readiness.py) כדי שלא יחושב פעמיים (כולל AI Conflict Detection)."""
+    from decision_confidence import calc_confidence, detect_missing_evidence, build_evidence_summary
+
+    domain = decision["fields"].get(DecisionFields.DOMAIN, "")
+    result = calc_confidence(events)
+    missing_evidence = detect_missing_evidence(domain, events)
+    evidence_summary = build_evidence_summary(events)
+
+    _persist_confidence(decision["id"], result, missing_evidence, evidence_summary)
+
+    pct = int(result.score * 100)
+    lines = [f"📊 ביטחון בהחלטה: {pct}%", f"📎 ראיות: {evidence_summary}"]
+    if result.conflicting:
+        lines.append(f"⚡ קונפליקטים פתוחים: {len(result.conflicting)}")
+    if missing_evidence:
+        lines.append("⚠️ חסר לפני החלטה:\n" + "\n".join(f"  • {item}" for item in missing_evidence))
+    return "\n".join(lines), result
+
+
+def _format_readiness_block(decision: dict, events: list, confidence_result) -> str:
+    """Stage 3 — Readiness Engine: האם ההחלטה מוכנה להכרעה אנושית. READY הוא
+    איתות בלבד — לא מבצע שום פעולה."""
+    from decision_readiness import calc_readiness, build_readiness_message
+
+    result = calc_readiness(decision, events, confidence_result)
+    _persist_readiness(decision["id"], result)
+    return build_readiness_message(result)
+
+
+def _persist_confidence(decision_id: str, result, missing_evidence: list, evidence_summary: str) -> None:
+    """כתיבה best-effort — לא חוסם את הצגת הכרטיס. עד שהשדות נוצרים ידנית
+    ב-Airtable (Stage 2 SPEC §Schema), airtable_patch ישמיט אותם בשקט."""
+    import json
+    from tools.airtable_gateway import airtable_patch
+
+    fields = {
+        DecisionFields.CONFIDENCE_SCORE: result.score,
+        DecisionFields.EVIDENCE_SUMMARY: evidence_summary,
+        DecisionFields.EVIDENCE_IDS: json.dumps(result.supporting + result.conflicting),
+        DecisionFields.MISSING_EVIDENCE: json.dumps(missing_evidence),
+    }
+    try:
+        airtable_patch(Tables.DECISIONS, decision_id, fields, source="decision_confidence:stage2")
+    except Exception as e:
+        logger.warning(f"[DecisionHub] _persist_confidence failed: {e}")
+
+
+def _persist_readiness(decision_id: str, result) -> None:
+    """כתיבה best-effort — לא חוסם את הצגת הכרטיס. כותב רק לשדה Readiness
+    הקיים כבר ב-DecisionFields (Stage 3 SPEC: אין שינוי סכמה ל-MVP — Score/
+    Message/Escalation מוצגים רק ב-Telegram, לא נשמרים, עד אישור נפרד)."""
+    from tools.airtable_gateway import airtable_patch
+
+    try:
+        airtable_patch(
+            Tables.DECISIONS, decision_id,
+            {DecisionFields.READINESS: result.status},
+            source="decision_readiness:stage3",
+        )
+    except Exception as e:
+        logger.warning(f"[DecisionHub] _persist_readiness failed: {e}")
 
 
 def _position_emoji(position: str) -> str:

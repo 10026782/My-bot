@@ -961,6 +961,15 @@ class DecisionFields:
     TENANT_ID            = "tenant_id"
     CREATED              = "Created"              # createdTime
     LAST_UPDATED         = "Last Updated"         # lastModifiedTime
+    # Stage 2 (F17, Smart Trust Layer) — NOT YET created in live Airtable.
+    # airtable_patch() will silently drop these (schema_cache.json doesn't know
+    # them yet) until Eliyahu adds the 4 fields manually and schema_audit.py
+    # refreshes the cache. Telegram display of computed values works regardless
+    # (decision_confidence.py computes in-memory; persistence is best-effort).
+    EVIDENCE_IDS         = "Evidence Ids"          # long text (JSON array of Decision Event record IDs)
+    EVIDENCE_SUMMARY     = "Evidence Summary"      # long text — human-readable
+    CONFIDENCE_SCORE     = "Confidence Score"      # number 0.0-1.0
+    MISSING_EVIDENCE     = "Missing Evidence"      # long text (JSON array)
     # NOTE: live schema has a duplicate-name artifact — two distinct link fields
     # both named "Decision Events" (fldZ4cKSmuvx8vBJY, fldNYIC3D6FTfaOFW). Not
     # referenced by field name here since Airtable would reject an ambiguous
@@ -993,6 +1002,12 @@ class DecisionStatus:
 class DecisionReadiness:
     READY      = "READY"
     NOT_READY  = "NOT_READY"
+    # REVIEW added for Stage 3 (Readiness Engine) — not in original two-value
+    # enum. NOT confirmed as a live Airtable singleSelect option yet; same
+    # best-effort-write pattern as Stage 2's not-yet-created fields applies
+    # (airtable_patch silently drops unknown option values until Eliyahu adds
+    # it in Airtable). Disclosed deviation, see CHANGE_CONTROL_LOG.md.
+    REVIEW     = "REVIEW"
 
 
 class DecisionUrgency:

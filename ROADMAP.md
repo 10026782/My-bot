@@ -1,6 +1,30 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 25/06/2026 (מאוחר ביותר) — branch `claude/new-session-be1ckb`. **C60 Tool Context Awareness — קוד הושלם** לפי `SPEC_C59_Tool_Context_Awareness.md` (אישור הבעלים דרך `AskUserQuestion`: "Yes, implement now"; ⚠️ הספק תייג עצמו "C59" — מתנגש עם C59 הקיים (Trust Layer, PR #151) — תויג מחדש **C60**): `last_tool_result` נשמר ב-session אחרי כל tool dispatch אמיתי, מוזרק ל-system prompt כ-"🔧 הקשר כלים" (TTL 5 דקות), ו-`resolve_context_pronouns()` מחליף כינויי הצבעה עבריים בהתייחסות מפורשת לפני ה-Router. 3 סטיות מהספק תועדו ומומשו (ראו C60 ב-`CHANGE_CONTROL_LOG.md`) — בעיקר: חוזה tool_result האמיתי (C53-A: `{ok,tool,external_id,evidence,user_message}`) שונה מהשדות שהספק הניח (`id`/`record_id`/`url`/`drive_url`). 40/40 self-tests עוברים. **🟡 CODE DONE — לא מאומת בפרודקשן** (§10 פריט 7 בספק — "העלה קובץ → 'תעלה לדסישנס' → BOSS זוכר" — פתוח עד בדיקת לייב). ראו פירוט: `CHANGE_CONTROL_LOG.md`.
+עודכן: 26/06/2026 (מאוחר ביותר) — main = `50f6351` (אומת עצמאית, GitHub MCP `pull_request_read`
+(`merged:true`) + `git fetch origin main` + `git merge-base --is-ancestor`). **PR #159 מוזג** —
+Decision Hub Stage 3 (Readiness Engine, F18): `decision_readiness.py` (`calc_readiness()`/
+`build_readiness_message()`/`detect_escalation()`), מקבל את `ConfidenceResult` של Stage 2 כפרמטר
+(לא מחשב AI Conflict Detection בשנית). READY/NOT_READY/REVIEW — `REVIEW` הורחב לתוך
+`class DecisionReadiness` הקיים ב-`airtable_schema.py` (SoA — נבדק לפני כתיבת קוד). 8 חוקי הספק +
+3 הספים + 4 תבניות escalation מיושמים כלשונם; READY מאותת בלבד, לא מבצע פעולה. 1 סטייה מהספק
+מתועדת (partner-disagreement escalation מזוהה רק דרך אות עקיף ב-blockers). Daily Digest hook —
+דולג (אופציונלי במפורש בספק). 25/25 self-tests עוברים; 25/25 Stage 2 + 33/33 Stage 1 ללא
+רגרסיה. דגל `FEATURE_DECISION_HUB` כבוי כברירת מחדל. ענף המקור `claude/new-session-be1ckb` נמחק
+מה-remote אחרי המיזוג. **פריסה בפועל ל-Render לא אומתה** (אין גישת dashboard/egress מה-sandbox).
+ראו פירוט: F18 למטה, `CHANGE_CONTROL_LOG.md`.
+
+עודכן (קודם): 26/06/2026 — branch `claude/new-session-be1ckb`. **F18 Decision Hub Stage 3
+(Readiness Engine) — קוד הושלם**, אישור הבעלים "Yes, implement now" דרך `AskUserQuestion` על ספק
+מלא (PLANNING_GATE + SPEC). דגל `FEATURE_DECISION_HUB` כבוי כברירת מחדל — אפס שינוי התנהגות
+בפרודקשן. (היסטורי — ראו עדכון מאוחר יותר למעלה: מוזג ב-PR #159.)
+
+עודכן (קודם): 26/06/2026 — branch `claude/new-session-be1ckb`, main = `78f9bae`. **תיקון doc-drift** שאותר ע"י audit יומי (סשן `claude/gifted-clarke-ajyjsa`, AI_CONTEXT.md refresh): שני פיצ'רים תועדו כאן כ"קוד הושלם, לא ממוזג" בזמן שהם **מוזגו בפועל ל-`main`** — אומת עצמאית דרך `git merge-base --is-ancestor` על שני המקרים: (1) **C60 Tool Context Awareness** — PR #152, commit `2d85b84`, merge `3e0094b`; (2) **F17 Decision Hub Stage 2** — PR #157, commit `9252b1e`, merge `78f9bae` (תוקן כבר בסבב קודם של סשן זה). גם תוקן: סעיף F52 כאן רשם רק 3 מ-4 קבצי audit שנוצרו בפועל (`F52_STATE_FLOW_MAP.md` היה חסר מהרשימה, מוזג ב-PR #156) ופרט סטטוס "branch" שגוי (F52 מוזג במלואו ל-`main`). פריסה בפועל ל-Render לכל הפיצ'רים האלה **לא אומתה** (אין גישת dashboard/egress מה-sandbox) — ראו פירוט בכל סעיף בנפרד, `CHANGE_CONTROL_LOG.md`.
+
+עודכן (קודם): 25/06/2026 (מאוחר ביותר) — main = `78f9bae` (אומת, GitHub MCP `pull_request_read` + `git merge-base --is-ancestor`). **PR #157 מוזג** — Decision Hub Stage 2 (F17, Smart Trust Layer): AI Conflict Detection Lazy+Cached (לא Eager — לא רץ ב-ingest, רק בפתיחת/Refresh של `/decision status`, מוגבל ל-Claim Topic זהה + Trust>=T1, deduped לפי `event_pair_hash`, מוגבל ל-5 קריאות Claude חדשות לריצה), Decision Confidence Score, Evidence Graph, Missing Evidence Detector (template-based, לא LLM). 3 סטיות מהטקסט המילולי של הספק תועדו ומומשו (ראו F17 למטה). 25/25 self-tests עוברים (`test_decision_confidence.py`); 33/33 Stage 1 ללא רגרסיה. דגל `FEATURE_DECISION_HUB` כבוי כברירת מחדל — אפס שינוי התנהגות בפרודקשן. 4 שדות Airtable חדשים עדיין לא נוצרו ביד; פריסה בפועל ל-Render **לא אומתה** (אין גישת dashboard/egress מה-sandbox). ראו פירוט: F17 למטה, `CHANGE_CONTROL_LOG.md`.
+
+עודכן (קודם): 25/06/2026 — branch `claude/new-session-be1ckb`. **F17 Decision Hub Stage 2 (Smart Trust Layer) — קוד הושלם**, אישור הבעלים בכפוף לתנאי: AI Conflict Detection הוא Lazy+Cached, לא Eager — לא רץ ב-ingest, רק בפתיחת/Refresh של `/decision status`, מוגבל ל-Claim Topic זהה + Trust>=T1, deduped לפי `event_pair_hash`, מוגבל ל-5 קריאות Claude חדשות לריצה. קובץ חדש `decision_confidence.py`: `calc_confidence()` (ממוצע משוקלל של Trust מינוס קנס קונפליקטים/חסר, clamped 0-1), `detect_conflicts_ai_lazy()`, `detect_missing_evidence()` (template-based, לא LLM), `build_evidence_summary()`. מוזרק ל-`_format_decision_card()` ב-`cmd_decision.py` (אין `get_decision()` במערכת — נקודת החיווט הקיימת). 3 סטיות מהטקסט המילולי של הספק תועדו (ראו F17 למטה) — בעיקר: מיקום הקובץ (root, לא `core/`), `REQUIRED_EVIDENCE` ממופה על `DecisionDomain` הקיים במקום "decision_type" לא-מוגדר, ונקודת החיווט (`_format_decision_card` במקום `get_decision()`). 25/25 self-tests עוברים (`test_decision_confidence.py`); 33/33 Stage 1 ללא רגרסיה. 4 שדות Airtable חדשים (`Evidence Ids`/`Evidence Summary`/`Confidence Score`/`Missing Evidence`) **לא נוצרו עדיין ביד ב-Airtable חי** — `airtable_patch()` משמיט אותם בשקט עד אז; תצוגת הטלגרם תקינה בכל מקרה (חישוב in-memory). דגל `FEATURE_DECISION_HUB` כבוי כברירת מחדל. **🟡 CODE DONE — לא מאומת בפרודקשן.** ראו פירוט: F17 למטה, `CHANGE_CONTROL_LOG.md`.
+
+עודכן (קודם): 25/06/2026 — branch `claude/new-session-be1ckb`. **C60 Tool Context Awareness — קוד הושלם** לפי `SPEC_C59_Tool_Context_Awareness.md` (אישור הבעלים דרך `AskUserQuestion`: "Yes, implement now"; ⚠️ הספק תייג עצמו "C59" — מתנגש עם C59 הקיים (Trust Layer, PR #151) — תויג מחדש **C60**): `last_tool_result` נשמר ב-session אחרי כל tool dispatch אמיתי, מוזרק ל-system prompt כ-"🔧 הקשר כלים" (TTL 5 דקות), ו-`resolve_context_pronouns()` מחליף כינויי הצבעה עבריים בהתייחסות מפורשת לפני ה-Router. 3 סטיות מהספק תועדו ומומשו (ראו C60 ב-`CHANGE_CONTROL_LOG.md`) — בעיקר: חוזה tool_result האמיתי (C53-A: `{ok,tool,external_id,evidence,user_message}`) שונה מהשדות שהספק הניח (`id`/`record_id`/`url`/`drive_url`). 40/40 self-tests עוברים. **🟡 CODE DONE — לא מאומת בפרודקשן** (§10 פריט 7 בספק — "העלה קובץ → 'תעלה לדסישנס' → BOSS זוכר" — פתוח עד בדיקת לייב). ראו פירוט: `CHANGE_CONTROL_LOG.md`.
 
 עודכן (קודם): 25/06/2026 — main = `b289ab6` (אומת, GitHub MCP `pull_request_read` + `git log`). **PR #151 מוזג** — Decision Hub Stage 1 (Trust Layer): `gate_trust` ב-`decision_pipeline.py` ממומש במלואו (Authority×Medium×Verify, Claim Topic אוטומטי, Supersedes בטוח) לפי `SPEC_Decision_Hub_Stage1_Trust_Rev2.md`. 9 סטיות מהטקסט המילולי של הספק תועדו ומומשו (ראו N13 למטה) — בעיקר: `VerifierPort` dict-לא-object, `decision["id"]` חסר (הוזרק כ-`event["_decision_id"]`), tags אנגלית-לא-קיימת (נעשה שימוש בקבוע עברי קיים + 2 קבועים חדשים **לא מאומתים מול Airtable חי**), `_has_keyword_conflict` מוגדר ב-spec אך לא יושם (stub). 33/33 self-tests עוברים (`test_decision_trust.py`). דגל `FEATURE_DECISION_HUB` כבוי כברירת מחדל; §10 פריט 11 בספק (T0 אמיתי→user_flag בטלגרם) עדיין לא אומת בפרודקשן. ראו פירוט: N13 למטה, `CHANGE_CONTROL_LOG.md`.
 
@@ -381,7 +405,99 @@ gate + Drive-upload `set_last_file` hook + `_webhook_telegram_impl` "זה הנס
 `decision_pipeline.py` (Trust Model מלא), `cmd_decision.py` (חיווט), `test_decision_trust.py`
 (33 self-tests, כולם עוברים).
 
-**C60 — Tool Context Awareness (`claude/new-session-be1ckb`, 🟡 CODE DONE, לא ממוזג):**
+### F17 — Decision Hub Stage 2: Smart Trust Layer (PR #157, מוזג ל-`main`, commit `9252b1e`/merge `78f9bae`)
+**מה:** שכבת ביטחון על גבי Stage 1 — מסתכלת על ה-Decision כולו (לא Event בודד): האם
+האירועים התומכים מסכימים, מה חסר, כמה ביטחון לפני חתימה. 4 יכולות: (1) AI Conflict
+Detection — Lazy+Cached (תנאי אישור אליהו, לא Eager): רץ רק בפתיחת/Refresh של Decision,
+לא ב-ingest, מוגבל ל-Claim Topic זהה + Trust>=T1, dedup לפי `event_pair_hash`, מוגבל
+ל-`_MAX_AI_COMPARISONS_PER_RUN=5` קריאות Claude חדשות לריצה (זוגות ב-cache לא נספרים).
+(2) Evidence Graph — `evidence_ids`/`evidence_summary` על ה-Decision. (3) Decision
+Confidence Score — ממוצע משוקלל של Trust מינוס 0.15×קונפליקטים, clamped [0,1]. (4)
+Missing Evidence Detector — בדיקת מילת-מפתח (לא LLM) מול תבנית `REQUIRED_EVIDENCE` לפי
+Domain.
+**זה ממלא בפועל** את ה-stub `_has_keyword_conflict()` שStage 1 השאיר פתוח (ראו N13 סטייה
+4 למעלה) — לא כתחליף, אלא כאיתות AI מקביל (`DecisionEventTag.CONFLICT`).
+**3 סטיות מהטקסט המילולי של הספק, מתועדות:**
+1. הספק כתב `core/decision_confidence.py` — נכתב ב-root, לצד `decision_pipeline.py`/
+   `decision_ports.py`/`cmd_decision.py` (שאר מודולי Decision Hub), לעקביות ארכיטקטונית.
+2. הספק הגדיר `REQUIRED_EVIDENCE` לפי "decision_type" — קונספט שלא קיים בסכמה (ל-Decisions
+   יש רק Domain). נמופה על `DecisionDomain` הקיים (`REAL_ESTATE`/`IMPORT`/`PARTNERSHIP`/
+   `RECRUITMENT`/`GENERAL`); `IMPORT` ו-`PARTNERSHIP` משתפים את אותה רשימת ראיות (אין
+   ל-spec רשימה ספציפית יותר לאף אחד מהם).
+3. הספק הניח `get_decision()` — פונקציה כזו לא קיימת. החיווט נעשה ב-`_format_decision_card()`
+   (הנקודה הקיימת היחידה שמרכיבה כרטיס Decision מלא, נקראת מ-`/decision status`, כבר
+   מאחורי `FEATURE_DECISION_HUB`).
+**שדות Airtable חדשים (לא נוצרו עדיין ביד):** `Evidence Ids` (Long text JSON), `Evidence
+Summary` (Long text), `Confidence Score` (Number 0.0-1.0), `Missing Evidence` (Long text
+JSON) — `airtable_patch()` משמיט שדות לא-מוכרים בשקט (`schema_cache.json` עדיין לא מכיר
+אותם), כך שתצוגת הטלגרם תקינה בלי תלות בהשלמת השדות; הפרסיסטנס הוא best-effort עד שהם
+ייוצרו ו-`schema_audit.py` ירוץ מחדש.
+**Verification ראיה:** `py_compile` נקי על `decision_confidence.py`/`cmd_decision.py`/
+`airtable_schema.py`/`app.py`; `test_decision_confidence.py` 25/25 עוברים (`detect_conflict_ai`
+מ-mock — אפס קריאות רשת); `test_decision_trust.py` 33/33 ללא רגרסיה; `smoke_tests.py` —
+אותם 2 כשלים קיימים מראש (`flask`/`httpx` חסרים בסביבה), אין כשלים חדשים.
+**קבצים שנוספו/שונו:** `decision_confidence.py` (חדש), `cmd_decision.py`
+(`_format_confidence_block`/`_persist_confidence`/`_list_decision_events` + תיקון רגרסיה
+ב-`_latest_event` inline שבדק `not events` הפוך), `airtable_schema.py` (4 קבועי שדה חדשים),
+`test_decision_confidence.py` (חדש, 25 self-tests).
+**מצב נוכחי:** מוזג ל-`main` (PR #157, commit `9252b1e`, merge commit `78f9bae`) —
+אומת עצמאית דרך `mcp__github__pull_request_read` (`merged:true`) + `git merge-base
+--is-ancestor`. **פריסה ל-Render לא אומתה** (אין גישת dashboard/egress מה-sandbox), דגל
+`FEATURE_DECISION_HUB` כבוי כברירת מחדל. Stage 3-4 (Readiness Engine/Attention Engine) —
+לא התחילו.
+
+### F18 — Decision Hub Stage 3: Readiness Engine (PR #159, מוזג ל-`main`, commit `84cfcff`/merge `50f6351`)
+**מה:** שכבה מעל Stage 1+2 שעונה: האם ה-Decision מוכנה להכרעה אנושית? `calc_readiness()`
+מקבל `decision`/`events`/`confidence_result` (Stage 2's `ConfidenceResult` — לא מחושב
+פעמיים, אין קריאת AI Conflict Detection כפולה) ומחזיר `ReadinessResult`
+(`status`∈{READY,NOT_READY,REVIEW}, `score`, `blockers`, `missing_info`, `escalation`,
+`user_message`, `can_decide`). **READY הוא איתות בלבד — לא מבצע שום פעולה** (לא Gateway,
+לא app.py, לא טבלה חדשה, לא auto-action). 8 חוקי הספק + 3 הספים יושמו כלשונם: T0 פעיל
+חוסם READY; חשיפה משפטית/כספית עם ראיות חסרות → REVIEW (anomaly) ולא יכול ל-READY בכל
+מקרה (חוסם); Confidence Score<0.75 → לא READY; קונפליקטים פתוחים → REVIEW; Missing
+Evidence לא ריק → חוסם; אירועי "לחץ בלבד" מסוננים לפני בדיקת "ראיות T2/T3 מספיקות" ולכן
+לעולם לא משדרגים מוכנות (גם אם Trust שלהם T3) — נבדק ישירות ב-test (`pressure-only` case).
+4 תבניות escalation מיושמות כלשונן (עו"ד/רו"ח-יועץ פיננסי/עמדת שותף/מסמך תומך).
+**Single Source of Authority (MODULE_RULES):** `DecisionFields.READINESS` ו-
+`class DecisionReadiness` (READY/NOT_READY) **היו קיימים מראש** ב-`airtable_schema.py`
+(עם הערה "Stage 3 fills, default empty") — נבדק לפני כתיבת קוד חדש, לפי כלל ה-SoA.
+הורחב (לא הוחלף) עם `REVIEW` — ערך חדש, **לא מאומת** כאופציית singleSelect חיה ב-Airtable
+(אותה תבנית best-effort-write כמו שדות Stage 2 שלא נוצרו עדיין). `detect_missing_evidence()`
+מ-Stage 2 נקרא ישירות (לא משוכפל) — Stage 3 לא קורא לשדה `Missing Evidence` המאוחסן
+ב-Decision כדי למנוע race עם נתון לא-טרי מאותה בקשת תצוגה.
+**1 סטייה מהטקסט המילולי של הספק, מתועדת:** הספק מציין "Stakeholders if available" ב-
+Inputs, אבל חתימת `detect_escalation(decision, result)` (כפי שהוגדרה במפורש בספק) אינה
+מקבלת `events`/stakeholders בנפרד. "עמדת שותף" (partner-disagreement) מזוהה לכן רק
+דרך אות עקיף — קונפליקט פתוח שמופיע ב-`blockers` — ולא דרך ניתוח ישיר של Stakeholder
+records. אם בעתיד תידרש הבחנה מדויקת יותר (איזה שותפים בדיוק חלוקים), יידרש שינוי חתימה
+ואישור נפרד.
+**Daily Digest hook (ספק §4, "אופציונלי, רק אם קיימת נקודת חיבור נקייה"):** נבדק –
+`daily_digest.py` לא מזכיר Decision Hub בכלל, אין נקודת חיבור קיימת. **דולג** לפי
+האופציונליות המפורשת של הספק עצמו — לא נוסף קוד חדש ל-`daily_digest.py`.
+**חיווט:** `cmd_decision.py`'s `_format_confidence_block()` שונה להחזיר `(text,
+ConfidenceResult)` במקום `text` בלבד (כדי שלא יחושב Stage 2 פעמיים); `_format_readiness_block()`
+ו-`_persist_readiness()` נוספו במקביל ל-`_format_confidence_block`/`_persist_confidence`
+הקיימים, נקראים מ-`_format_decision_card()` (אותה נקודת תצוגה קיימת — `get_decision()`
+לא הומצאה, כמו ב-F17).
+**פרסיסטנס:** רק `DecisionFields.READINESS` (שדה שכבר היה מוגדר) נכתב, best-effort, דרך
+`airtable_patch`. Score/Message/Escalation **לא נשמרים** — תצוגת Telegram בלבד, לפי הנחיית
+הספק "Prefer no schema change for MVP… add only after approval".
+**Verification ראיה:** `py_compile` נקי על `decision_readiness.py`/`cmd_decision.py`/
+`airtable_schema.py`/`test_decision_readiness.py`; `test_decision_readiness.py` 25/25
+עוברים (6 ה-cases מהספק + מקרי גבול נוספים); `test_decision_confidence.py` 25/25 ו-
+`test_decision_trust.py` 33/33 ללא רגרסיה; `smoke_tests.py` — אותם 2 כשלים קיימים מראש
+(`flask`/`httpx` חסרים בסביבה), אין כשלים חדשים.
+**קבצים שנוספו/שונו:** `decision_readiness.py` (חדש), `cmd_decision.py`
+(`_format_confidence_block` שונה להחזיר tuple, `_format_readiness_block`/`_persist_readiness`
+נוספו), `airtable_schema.py` (`DecisionReadiness.REVIEW` נוסף), `test_decision_readiness.py`
+(חדש, 25 self-tests).
+**מצב נוכחי:** מוזג ל-`main` (PR #159, commit `84cfcff`, merge commit `50f6351`) —
+אומת עצמאית דרך `mcp__github__pull_request_read` (`merged:true`) + `git merge-base
+--is-ancestor`. ענף המקור `claude/new-session-be1ckb` נמחק מה-remote אחרי המיזוג. **פריסה
+ל-Render לא אומתה** (אין גישת dashboard/egress מה-sandbox), דגל `FEATURE_DECISION_HUB`
+כבוי כברירת מחדל. Stage 4 (Attention Engine) — לא התחיל.
+
+**C60 — Tool Context Awareness (PR #152, מוזג ל-`main`, commit `2d85b84`/merge `3e0094b`):**
 לפי `SPEC_C59_Tool_Context_Awareness.md` (הועלה ע"י הבעלים בלי טקסט מלווה; אישור דרך
 `AskUserQuestion`: "Yes, implement now"). ⚠️ **ID collision מתועד** — הספק תייג עצמו "C59",
 מתנגש עם C59 הקיים (Trust Layer שלעיל, PR #151) — תויג מחדש **C60** בתיעוד בלבד; כותרת
@@ -404,6 +520,10 @@ agent: `last_tool_result` נשמר ב-session אחרי כל tool dispatch אמי
 **קבצים שנוספו/שונו:** `session_store.py` (`last_tool_result` + 2 מתודות + 4 self-tests),
 `app.py` (`_capture_last_tool_result`/`_build_tool_context`/`resolve_context_pronouns`/`CONTEXT_PRONOUNS`
 + 3 נקודות חיווט).
+**מצב נוכחי:** מוזג ל-`main` (PR #152, commit `2d85b84`, merge commit `3e0094b`) — אומת
+עצמאית דרך `git merge-base --is-ancestor 2d85b84 origin/main`. **לא flag-gated** (additive),
+כך שהקוד פעיל בפרודקשן אם נפרס; פריסה בפועל ל-Render **לא אומתה** (אין גישת dashboard/egress
+מה-sandbox). §10 פריט 7 בספק (בדיקת לייב) עדיין פתוח.
 
 ### F05a — Meta WhatsApp Phase 1 (Inbound, ללא תעבורת פרודקשן)
 **מה:** `/webhooks/meta/whatsapp` (GET verify + POST inbound) — נתיב נפרד מ-Twilio.
@@ -656,12 +776,23 @@ Archived / historical Markdown disposition:
 | `BOSS_Refactor_Plan.md` | ACTIVE REFERENCE | תוכנית 8 מסכים + BOSS Layer — Stage 0 הושלם, N06 = Stage 1 |
 ### F52 — Tool Architecture Audit Maps
 
-Status: Implemented but not yet verified.
+Status: Merged to `main` across 3 PRs (#153, #155, #156), branch `f52-current-tool-map-audit`. Production deploy not verified from this sandbox (no Render dashboard/egress access).
 
-What: audit-only documentation before F52 implementation. The current branch adds:
+What: audit-only documentation before F52 implementation — 4 docs (not 3; `F52_STATE_FLOW_MAP.md` landed in the third PR and was previously missing from this list):
 
-- `docs/f52/F52_CURRENT_TOOL_MAP.md`
-- `docs/f52/F52_CONTRACT_COVERAGE_MAP.md`
-- `docs/f52/F52_BYPASS_MAP.md`
+- `docs/f52/F52_CURRENT_TOOL_MAP.md` — PR #153, commit `6afc393`, merge `0ffdc7c`
+- `docs/f52/F52_CONTRACT_COVERAGE_MAP.md` — PR #155, commit `84762f0`, merge `d57f405`
+- `docs/f52/F52_BYPASS_MAP.md` — PR #155, commit `84762f0`, merge `d57f405`
+- `docs/f52/F52_STATE_FLOW_MAP.md` — PR #156, commit `4b0f5d3`, merge `64a018b`
 
 Scope guard: no production behavior changes, no `app.py` changes, no refactor, and no Airtable schema changes. The audit maps current tool architecture, contract coverage, bypass categories, high-risk bypasses, safe audit tests, and design-review items.
+
+### Fxx — Safe Document Converter
+
+Status: Implemented but not yet verified on branch `fxx-safe-document-converter`. Local converter tests pass (6/6). Not merged to `main`; production deploy not verified.
+
+What: standalone deterministic conversion package `document_converter` with public API `convert_document(input_file, input_type, output_type)`. Supported MVP conversions: Markdown<->HTML, Markdown<->TXT, HTML<->TXT, Markdown/HTML/TXT->DOCX, DOCX->Markdown/TXT, CSV<->XLSX.
+
+Governance: no AI for format conversion, no OCR, no PDF reconstruction, no guessed layout recovery. Unsupported or uncertain conversions fail closed with `confidence="low"` and `output_file=None`. Pandoc is preferred when installed; deterministic Python libraries are used as fallback for simple formats.
+
+Files: `document_converter/`, `test_document_converter.py`, `docs/document_converter/SAFE_DOCUMENT_CONVERTER.md`, `docs/governance/DOCUMENT_CONVERSION_RULES.md`.
