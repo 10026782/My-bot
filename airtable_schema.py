@@ -945,6 +945,12 @@ class DecisionStatus:
 class DecisionReadiness:
     READY      = "READY"
     NOT_READY  = "NOT_READY"
+    # REVIEW added for Stage 3 (Readiness Engine) — not in original two-value
+    # enum. NOT confirmed as a live Airtable singleSelect option yet; same
+    # best-effort-write pattern as Stage 2's not-yet-created fields applies
+    # (airtable_patch silently drops unknown option values until Eliyahu adds
+    # it in Airtable). Disclosed deviation, see CHANGE_CONTROL_LOG.md.
+    REVIEW     = "REVIEW"
 
 
 class DecisionUrgency:

@@ -23,6 +23,24 @@
 
 > נבנה מ-`git log --since="30 days ago"` (~172 commits, `f935c53`→`eebf73b`) + טבלאות ROADMAP.md (Stabilization Sprint, World 2, Sprint 16/06). כל commit hash צוטט ישירות מ-git או מ-ROADMAP — שורות שלא נמצאה להן ראיה ישירה מסומנות "לא ידוע".
 
+### F18 — Decision Hub Stage 3: Readiness Engine
+- **תאריך:** 26/06/2026
+- **סוג:** Feature — אחורה כבוי דגל (`FEATURE_DECISION_HUB`), אפס שינוי התנהגות בפרודקשן
+- **Requirement:** SPEC "Decision Hub Stage 3: Readiness Engine" (PLANNING_GATE + SPEC מלא, הועלה ע"י הבעלים) — ROADMAP.md §F18
+- **תיאור:** קובץ חדש `decision_readiness.py` — `calc_readiness(decision, events, confidence_result) -> ReadinessResult`, `build_readiness_message(result) -> str`, `detect_escalation(decision, result) -> list[str]`. `ReadinessResult.status` ∈ {READY, NOT_READY, REVIEW}; READY הוא איתות בלבד להכרעה אנושית — אינו מבצע פעולה. מקבל את `ConfidenceResult` המחושב כבר ב-Stage 2 (אין חישוב כפול/קריאת AI Conflict Detection כפולה). 8 חוקי הספק + 3 הספים + 4 תבניות escalation (עו"ד/רו"ח-יועץ פיננסי/עמדת שותף/מסמך תומך) מיושמים כלשונם.
+- **SoA (MODULE_RULES):** `DecisionFields.READINESS` ו-`class DecisionReadiness` (READY/NOT_READY) **היו קיימים מראש** ב-`airtable_schema.py` — נבדק לפני כתיבת קוד חדש. הורחב (לא שוכפל) עם ערך `REVIEW` חדש (לא מאומת כאופציית singleSelect חיה ב-Airtable). `detect_missing_evidence()` הקיים מ-Stage 2 נקרא ישירות.
+- ⚠️ **1 סטייה מהטקסט המילולי של הספק:** "Stakeholders if available" מופיע ב-Inputs של הספק, אך חתימת `detect_escalation(decision, result)` כפי שהוגדרה במפורש בספק לא מקבלת `events`/stakeholders. escalation של "עמדת שותף" (partner-disagreement) מזוהה לכן רק דרך אות עקיף — קונפליקט פתוח שמופיע ב-`result.blockers` — לא דרך ניתוח Stakeholder records ישיר.
+- **Daily Digest hook (ספק §4):** נבדק `daily_digest.py` — אין אזכור Decision Hub, אין נקודת חיבור קיימת. דולג, לפי האופציונליות המפורשת של הספק.
+- **Commit:** ייכלל ב-commit הקרוב על `claude/new-session-be1ckb`
+- **PR:** אין — לא התבקש, ולא מבוצע ללא אישור מפורש לפי הנחיית הסשן
+- **Review על ידי:** הבעלים (אישור "Yes, implement now" דרך `AskUserQuestion` על ספק מלא)
+- **Deploy תאריך:** לא רלוונטי — לא מוזג ל-`main`
+- **Verified בפרודקשן:** לא — לא מוזג, דגל כבוי כברירת מחדל
+- **Verification ראיה:** `py_compile` נקי על `decision_readiness.py`/`cmd_decision.py`/`airtable_schema.py`/`test_decision_readiness.py`; `test_decision_readiness.py` 25/25 (6 ה-cases מהספק + מקרי גבול); `test_decision_confidence.py` 25/25 ו-`test_decision_trust.py` 33/33 ללא רגרסיה; `smoke_tests.py` — אותם 2 כשלים קיימים מראש (`flask`/`httpx` חסרים בסביבה), אין כשלים חדשים
+- **Docs עודכנו:** ROADMAP.md (סעיף F18 חדש + header עודכן), CHANGE_CONTROL_LOG.md (רשומה זו)
+- **Feature Flag:** `FEATURE_DECISION_HUB` (כבוי כברירת מחדל)
+- **Rollback plan:** מחיקת `decision_readiness.py` + revert ל-3 השינויים ב-`cmd_decision.py`/`airtable_schema.py` — אין כתיבה לשדות Airtable חדשים (רק `Readiness` הקיים), אפס סיכון לנתונים קיימים
+
 ### F52 — Tool Architecture Audit Maps (docs-only, 4 קבצי audit)
 - **תאריך:** 26/06/2026
 - **סוג:** Documentation — audit-only, אין שינוי קוד/התנהגות
