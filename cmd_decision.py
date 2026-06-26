@@ -389,8 +389,18 @@ def _format_decision_card(decision: dict) -> str:
     ) or "  (אין)"
 
     events = _list_decision_events(decision["id"])
-    latest = max(events, key=lambda e: e["fields"].get(DecisionEventFields.EVENT_DATE, "")) if events else None
+    latest = _latest_event(decision["id"], events)
     latest_summary = latest["fields"].get(DecisionEventFields.AI_SUMMARY, "") if latest else "(אין)"
+    attention_summary = ""
+    try:
+        from decision_attention import build_attention_summary, calc_priority
+
+        attention = calc_priority(decision, events)
+        attention_summary = build_attention_summary(attention)
+    except Exception as e:
+        logger.warning(f"[DecisionHub] attention summary failed: {e}")
+
+    attention_block = f"\n\nAttention:\n{attention_summary}" if attention_summary else ""
 
     confidence_block, confidence_result = _format_confidence_block(decision, events)
     readiness_block = _format_readiness_block(decision, events, confidence_result)
@@ -407,6 +417,7 @@ def _format_decision_card(decision: dict) -> str:
         f"{confidence_block}\n\n"
         f"{readiness_block}\n"
         f"🔄 אחרון: {latest_summary}"
+        f"{attention_block}"
     )
 
 
@@ -843,8 +854,8 @@ def _list_stakeholders(decision_id: str) -> list:
     return _at_list(Tables.DECISION_STAKEHOLDERS, formula)
 
 
-def _latest_event(decision_id: str) -> dict | None:
-    events = _list_decision_events(decision_id)
+def _latest_event(decision_id: str, events: list | None = None) -> dict | None:
+    events = events if events is not None else _list_decision_events(decision_id)
     if not events:
         return None
     events.sort(key=lambda e: e["fields"].get(DecisionEventFields.EVENT_DATE, ""), reverse=True)

@@ -243,6 +243,91 @@
 - **Verified בפרודקשן:** לא
 - **Verification ראיה:** `py_compile session_store.py` עבר; `python3 session_store.py` self-test 18/20 עברו (2 כשלים קיימים מראש, mock-import-path bug בלתי תלוי בתיקון זה — `sys.modules["airtable_tools"]` ממוקֶה בעוד הקוד האמיתי עושה `from tools.airtable_tools import ...`); בדיקה ידנית נוספת עם mock נכון על `tools.airtable_tools` אישרה את הלוגיקה המתוקנת.
 - **סטטוס:** 🟡 MERGED TO MAIN (PR #147, `483851f`) — ממתין לאימות פרודקשן
+### BUG-020 — airtable_schema.py: כמה קבועי טבלה/שדה לא תאמו ל-base החי (מומש חלקית, לא אומת)
+- **דווח:** 24/06/2026 — אודיט ידני מול "בסיס עיקרי" (`app4bcgoX7t0HUVnm`) דרך Airtable MCP (`list_tables_for_base`), אחרי שהתברר ש-`schema_cache.json` הקיים הוא seed שנוצר מהקוד עצמו ולא snapshot אמיתי מ-Airtable (ראה BUG-021).
+- **דווח על ידי:** המשתמש
+- **מסך / מודול:** `airtable_schema.py`
+- **תיאור:** השוואה שדה-שדה בין `class Tables` / `*Fields` ל-schema החי גילתה: `Tables.LEARNINGS = "למידות ותובנות"` בזמן שהטבלה החיה נקראת `"למידות ותובנות (Learnings & Insights)"`; `class AssetsFields` הגדיר 9 שדות עבריים ("שם הנכס", "סוג"...) לטבלת "Assets (Personal)" שלא קיימת — הטבלה החיה בשם "Assets" נבנתה לנדל"ן עם שדות אנגליים שונים בתכלית (Asset Type, Current Value, Equity, Asset Potential/Risks...); `ProfileFields.NAME = "Name"` בזמן שהשדה החי הוא `"name"` (אות קטנה), ו-`ProfileFields.PROFILE_DATA = "ProfileData"` לא קיים בכלל; `Tables.IMPORTS`/`Tables.TENANTS`/`Tables.DAILY_TASKS` מצביעים לטבלאות שלא קיימות ב-base בכלל. גם התגלתה טבלה חיה חדשה — `TRAFFIC_SOURCES` (BOSS Growth P0) — שלא הייתה מתועדת בקוד בכלל.
+- **Severity:** Medium — `Tables.LEARNINGS`/`AssetsFields`/`ProfileFields`/`Tables.IMPORTS`/`Tables.TENANTS`/`Tables.DAILY_TASKS` אומתו כ-**לא נקראים משום קוד חי** (`grep` ברחבי הריפו) — drift תיעודי בלבד, לא באג פעיל. (לעומת BUG-017/018/019 למטה — אלה כן נקראים מקוד חי ונכשלים בפועל.)
+- **Root Cause:** `airtable_schema.py` תיעד כוונה/תכנון שלא עודכן אחרי שהטבלאות נבנו/שונו בפועל ב-Airtable.
+- **שינוי שבוצע:** עודכן ישירות ב-`airtable_schema.py` (ללא commit בזמן התיעוד המקורי): שם `Tables.LEARNINGS` עודכן; `AssetsFields` הוחלף לחלוטין לשדות האמיתיים; `ProfileFields.NAME` עודכן ל-`"name"` + הערה ש-`PROFILE_DATA` עדיין לא קיים חי; `Tables.IMPORTS`/`Tables.TENANTS`/`Tables.DAILY_TASKS`/`DailyTaskFields`/`DailyTaskStatus` סומנו במפורש כ-DEAD CODE (בדומה לסימון F13); נוסף `class TrafficSourcesFields` לתיעוד הטבלה החדשה.
+- **תועד ב-commit:** commit הענף שמוסיף את BUG-020 ואת עדכון `airtable_schema.py`
+- **Merged:** לא
+- **Deployed:** לא
+- **Verified בפרודקשן:** לא — `py_compile airtable_schema.py` ו-`smoke_tests.py` (6/6 PASS) הורצו מקומית בלבד
+- **Verification ראיה:** השוואה ישירה ל-`list_tables_for_base`/`get_table_schema` החי דרך Airtable MCP, 24/06/2026; `py_compile` עבר; `smoke_tests.py` 6/6 PASS
+- **סטטוס:** 🟡 Implemented but not yet verified — ממתין ל-merge + אימות
+
+### BUG-017 — inbound_handler.py כותב ל-LeadFields.UPDATED_AT שלא קיים ב-Leads החי
+- **דווח:** 24/06/2026 — באותו אודיט כמו BUG-020
+- **דווח על ידי:** המשתמש
+- **מסך / מודול:** `inbound_handler.py` — `_update_existing()`, שורות 75-86 (F06, נקרא בפועל ע"י `email_inbound.py`)
+- **תיאור:** `_update_existing()` עושה PATCH יחיד ל-Leads עם 3 שדות: `SUMMARY`, `UPDATED_AT`, `EXTERNAL_ID`. `LeadFields.UPDATED_AT = "updated_at"` — שדה שלא קיים בטבלת Leads החיה (אומת דרך Airtable MCP: אין `updated_at`, יש רק `created_at`). Airtable דוחה PATCH עם שדה לא קיים (422) — **כל הבקשה נכשלת**, לא רק השדה החסר, כך שגם `SUMMARY` וגם `EXTERNAL_ID` לא מתעדכנים בפועל כשליד קיים שולח הודעה נכנסת חדשה. ה-`except` הסוגר רק כותב ל-log, אז זה נכשל בשקט.
+- **Severity:** High — F06 inbound-lead gate בשימוש בפועל; כל "ליד קיים עונה שוב" לא מתעדכן בכלל ב-production.
+- **Root Cause:** הקוד הניח קיומו של שדה `updated_at` שלא נוצר בפועל ב-Airtable.
+- **תוקן:** לא תוקן עדיין — ממתין להחלטת המשתמש בין: (א) להוסיף שדה Airtable מטיפוס "Last Modified Time" בשם "Updated At" (לא דורש כתיבה מהקוד בכלל) (ב) להוסיף שדה רגיל "updated_at" ולהשאיר את הקוד (ג) להוריד את השורה `LeadFields.UPDATED_AT: _now_iso()` ואת `LeadFields.UPDATED_AT` מ-`airtable_schema.py` לגמרי.
+- **Merged:** לא
+- **Deployed:** לא
+- **Verified בפרודקשן:** לא
+- **Verification ראיה:** אומת רק דרך השוואה ל-schema החי ב-Airtable MCP — לא אומת דרך webhook אמיתי
+- **סטטוס:** Open — דורש החלטת המשתמש לפני תיקון
+
+### BUG-018 — tma_api.py כותב ל-TaskFields.LEAD_LINK שלא קיים ב-Tasks החי → "צור משימה מליד" נכשל
+- **דווח:** 24/06/2026 — באותו אודיט כמו BUG-020
+- **דווח על ידי:** המשתמש
+- **מסך / מודול:** `tma_api.py` — POST ל-`Tables.TASKS` ב-flow של "צור משימה מליד" ב-TMA, שורה 1499 (וגם 1513 ב-queue-for-approval path)
+- **תיאור:** `task_fields[TaskFields.LEAD_LINK] = [lead_id]` — `TaskFields.LEAD_LINK = "Leads"`, אבל אין שדה linked-record כזה בטבלת "משימות (Tasks)" החיה (אומת דרך Airtable MCP). ה-POST השלם נכשל (500) כי Airtable דוחה שדה לא קיים — "צור משימה מליד" נכשל **בכל קריאה**, גם ל-owner וגם ב-approval flow למנהל.
+- **Severity:** High — חוסם תכונה שלמה ב-TMA (יצירת משימה מתוך מסך ליד).
+- **Root Cause:** הקוד הניח קיומו של שדה linked-record "Leads" על Tasks שלא נוצר בפועל.
+- **תוקן:** לא תוקן עדיין — ממתין להחלטת המשתמש בין: (א) להוסיף שדה Linked Record בשם "Leads" לטבלת "משימות (Tasks)" ב-Airtable (ב) להוריד את השורה `task_fields[TaskFields.LEAD_LINK] = [lead_id]` ואת `TaskFields.LEAD_LINK` מ-`airtable_schema.py`.
+- **Merged:** לא
+- **Deployed:** לא
+- **Verified בפרודקשן:** לא
+- **Verification ראיה:** אומת רק דרך השוואה ל-schema החי ב-Airtable MCP — לא אומת דרך קריאה אמיתית ל-endpoint
+- **סטטוס:** Open — דורש החלטת המשתמש לפני תיקון
+
+### BUG-019 — crm.py: כמה פונקציות כותבות/מסננות לפי שדות ש-Contacts/Deals/Payments החיים לא מכילים
+- **דווח:** 24/06/2026 — באותו אודיט כמו BUG-020
+- **דווח על ידי:** המשתמש
+- **מסך / מודול:** `crm.py` — בשימוש בפועל ע"י `scheduler.py`, `payment_reminder.py`, `lead_conversion.py`, `tools/contact_resolver.py`, ו-`tools/dispatcher.py` (`crm_mark_payment_paid`)
+- **תיאור (5 תת-בעיות, כולן מאומתות מול schema חי דרך Airtable MCP):**
+  - **(a) `crm_find_contact`** (שורות ~126-152): ה-formula משתמש ב-`{Name}`/`{Company}` (אנגלית) אבל השדות החיים הם `שם`/`חברה` (עברית) — החיפוש **לעולם לא מוצא תוצאה**, באף קריאה.
+  - **(b) `crm_add_contact` + `crm_list_contacts`** (שורות 116, 172): משתמשים ב-`ContactFields.TYPE = "Type"` — שדה שלא קיים ב-Contacts החי (הקטגוריזציה האמיתית היום היא `Role Category`/`Specialty`).
+  - **(c) `crm_add_deal` + `crm_update_deal_status` + `crm_list_deals`** (שורות ~195-273): כותבים/קוראים `DealFields.ADDRESS`/`FUNDING_COST`/`ROI`/`RISK_LEVEL`/`NOTES` — אף אחד מהם לא קיים ב-"עסקאות (Deals)" החי. `crm_add_deal` נכשל ב-422 בכתיבה הראשונה.
+  - **(d) `crm_add_payment`** (שורות ~280-308): כותב ל-`PaymentFields.CONTACT="contact_id"` ו-`NOTES="notes"` — שניהם לא קיימים ב-Payments החי.
+  - **(e) `crm_upcoming_payments` + `crm_overdue_payments`** (שורות ~311-380): ה-formula משתמש ב-`{סטטוס}`/`{תאריך}` (עברית) על טבלת Payments, אבל השדות החיים הם `status`/`date` (אנגלית) — תוצאה ריקה לתמיד, בלי שגיאה (תזכורות תשלום שלא שולחות כלום).
+- **Severity:** High — פוגע בפונקציונליות CRM ליבתית (חיפוש אנשי קשר, יצירת עסקאות, תזכורות תשלום) שבשימוש בפועל.
+- **Root Cause:** `crm.py` נכתב מול גרסה ישנה/אנגלית של הסכמה ולא עודכן אחרי שהטבלאות "אנשי קשר (Contacts)"/"עסקאות (Deals)" עברו ל-Hebrew naming ו-Payments צומצם לשדות הנוכחיים.
+- **תוקן:** לא תוקן עדיין — ממתין להחלטת המשתמש לכל תת-סעיף (להוסיף שדות חסרים ל-Airtable מול להוריד/להחליף לוגיקה בקוד). מומלץ לתקן את כל הסעיף כמקבץ אחד ולהריץ טסט אינטגרציה ידני לפני merge.
+- **Merged:** לא
+- **Deployed:** לא
+- **Verified בפרודקשן:** לא
+- **Verification ראיה:** אומת רק דרך השוואה ל-schema החי ב-Airtable MCP — לא אומת דרך הרצת הפונקציות בפועל
+- **סטטוס:** Open — דורש החלטת המשתמש לפני תיקון
+
+### BUG-021 — schema_audit.py: UnboundLocalError במקום fallback ל-cache כשה-live fetch נכשל
+- **דווח:** 24/06/2026 — תוך כדי ניסיון להריץ `schema_audit.py` בלי `AIRTABLE_API_KEY`/`AIRTABLE_BASE_ID` ב-env
+- **דווח על ידי:** המשתמש (זוהה ע"י קלוד תוך כדי ביצוע)
+- **מסך / מודול:** `schema_audit.py` — `run_audit()`, שורות 48-65
+- **תיאור:** אם `sv.refresh_cache()` זורק exception (חסרי credentials), הענף `except` (שורות 53-55) רק מדפיס אזהרה "ממשיך עם cache קיים" אבל **לא בפועל טוען cache** — המשתנה `tables` נשאר לא מוגדר, והקריאה הבאה ל-`tables.get(...)` (שורה 65) קורסת עם `UnboundLocalError`. ה-fallback ל-cache עובד רק אם מריצים עם `--offline` במפורש (`sys.argv`), לא אוטומטית כמו שההודעה מבטיחה.
+- **Severity:** Low — הסקריפט עצמו לא בשימוש production, אבל ההודעה המוטעה ("ממשיך עם cache קיים") מטעה את מי שמריץ אותו.
+- **Root Cause:** ה-except branch לא קורא בפועל את לוגיקת ה-fallback הקיימת בענף `else` (שורות 56-59) של `live=False`.
+- **תוקן:** לא — מוצע: בענף ה-`except`, להוסיף את אותה לוגיקת טעינת cache מהדיסק שכבר קיימת בענף `else`.
+- **Merged:** לא
+- **Deployed:** לא
+- **Verified בפרודקשן:** N/A — סקריפט פיתוח, לא production
+- **Verification ראיה:** שוחזר ידנית: הרצת `python3 schema_audit.py` בלי env vars מתאימים קורסת עם `UnboundLocalError: tables`
+- **סטטוס:** Open
+
+### FLAGGED (cleanup candidates, not bugs) — קוד מת ב-airtable_schema.py / קובץ cache מטעה
+- **דווח:** 24/06/2026 — באותו אודיט כמו BUG-020
+- **תיאור:** אומת ב-`grep` (0 שימושים מעבר להגדרה עצמה):
+  - `class ImportsFields` + `Tables.IMPORTS` — הטבלה "Imports" לא קיימת ב-Airtable החי, ואין קובץ אחר שמשתמש בקבועים האלה. בטוח למחיקה מלאה.
+  - `class TenantsFields` + `Tables.TENANTS` — הטבלה "Tenants" לא קיימת חי; `tenant_provisioner.py` (F08) לא מייבא מ-`airtable_schema` בכלל, אז אין תלות. בטוח למחיקה מלאה.
+  - `class DailyTaskFields` + `class DailyTaskStatus` + `Tables.DAILY_TASKS` — הטבלה "Daily_Tasks" לא קיימת חי (`Daily_Checkin` היא הטבלה החיה הנפרדת בשימוש בפועל). תלות אחת: `tma_api.py:27` מייבא `DailyTaskFields, DailyTaskStatus` בלי להשתמש בהם בשום מקום אחר — import מת. מחיקה דורשת גם הסרת שני השמות האלה משורת ה-import ב-`tma_api.py:27`.
+  - `schema_cache.json` (root) — מכיל `"fetched_at": "seed-from-schema-py"`, כלומר זה לא snapshot אמיתי מ-Airtable אלא seed שנוצר מתוך הקוד עצמו, ומכיל רק 15 מתוך כל הטבלאות החיות. מטעה כל הרצה של `schema_audit.py --offline`. אפשר למחוק (יחודש בהרצה חיה תקינה) או לרענן עם credentials אמיתיים.
+- **למה לא נמחק:** ממתין לאישור מפורש של המשתמש למחיקה (לא בוצעה מחיקה יזומה ללא בקשה).
+- **סטטוס:** Open — ממתין להחלטה
 
 ---
 
@@ -260,7 +345,6 @@
 - **Verified בפרודקשן:** לא — ממתין לאימות ידני לפני הדלקת `EMERGENCY_WINDOW`
 - **Verification ראיה:** `py_compile` עבר על `tma_api.py`; `npm run build` עבר; `smoke_tests.py` 5/6 PASS (כשל `anthropic` import תלוי-סביבה, ידוע מראש); מטריצת 12 תרחישים (Low/Medium/High/Critical × mobile/desktop/web + window on/off + OTP) אומתה מול קוד הגייט האמיתי — כולל אימות חוזר ש-`web` נחסם כ-mobile וש-flag off מחזיר 202 זהה. אין עדיין אימות בפרודקשן החיה.
 - **סטטוס:** 🟡 MERGED TO MAIN (PR #69, `4e933b0`) — flag off, ממתין לאימות פרודקשן לפני הדלקת `EMERGENCY_WINDOW`
-
 ### FEATURE — "/update" Business Memory command (ספק שכינה אותו "C20")
 > ⚠️ **שם מתנגש:** ROADMAP.md מיועד ל-C20 = "Scheduler" (קיים, לא קשור). הפיצ'ר הזה תועד כאן בלי ה-ID כדי לא להחריף את הבלבול — לא להשתמש ב-"C20" כהפניה ל-ROADMAP בהקשר הזה.
 - **דווח/תוכנן:** 19/06/2026
