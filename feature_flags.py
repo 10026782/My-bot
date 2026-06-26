@@ -50,6 +50,8 @@ APPROVAL POLICY:
 DECISION HUB (Stage 0):
   FEATURE_DECISION_HUB         - /decision new|update|status + forward→Inbox (decision_pipeline.py, cmd_decision.py); default OFF
 
+  FEATURE_DECISION_AUTO_INGESTION - auto route WhatsApp/email/document/voice input to Decision Inbox only; default OFF
+
 OUTPUT GATEWAY (C52):
   FINANCIAL_COMMITMENT_GATE   - core/financial_gate.py escalation על הודעות עם התחייבות פיננסית
                                  false (default) → shadow mode (log בלי לעצור)
