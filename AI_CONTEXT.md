@@ -1,14 +1,15 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-06-25 (מאוחר ביותר)
-**עודכן על ידי:** Codex — F52 audit maps conflict resolution on top of C60/main docs (`f52-current-tool-map-audit`)
+**עודכן:** 2026-06-26 (מאוחר ביותר)
+**עודכן על ידי:** Codex — Fxx Safe Document Converter branch (`fxx-safe-document-converter`)
 
 > מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (מיושן, 19/06) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
 
 ---
 
 ## 1. Executive Summary
+- **Fxx Safe Document Converter — Implemented but not yet verified** — standalone `document_converter` package exposes `convert_document(input_file, input_type, output_type)` and supports deterministic Markdown/HTML/TXT/DOCX/CSV/XLSX MVP conversions. It is not wired into `app.py`, Telegram, TMA, Airtable, or agent tools. It explicitly rejects PDF/OCR/scanned/complex layout reconstruction and returns no output file unless confidence is high.
 - **F52 tool architecture audit maps — Implemented but not yet verified** — audit-only docs exist under `docs/f52/`: `F52_CURRENT_TOOL_MAP.md`, `F52_CONTRACT_COVERAGE_MAP.md`, and `F52_BYPASS_MAP.md`. No production behavior changes, no `app.py` changes, and no Airtable schema changes.
 - **C60 Tool Context Awareness — 🟡 CODE DONE, על branch בלבד, לא מוזג** — `last_tool_result` נשמר ב-session אחרי כל tool dispatch אמיתי ומוזרק ל-system prompt כ-"🔧 הקשר כלים" (TTL 5 דקות); `resolve_context_pronouns()` מחליף כינויי הצבעה עבריים ("זה"/"הנספח"/"הקודם") בהתייחסות מפורשת לפני ה-Router. 40/40 self-tests עוברים, **3 סטיות מתועדות מהספק** (העיקרית: הספק הניח חוזה `tool_result` שגוי — `id`/`record_id`/`url`/`drive_url` — מול החוזה האמיתי C53-A `{ok,tool,external_id,evidence,user_message}`). ⚠️ הספק תייג עצמו "C59" — מתנגש עם C59 הקיים (Trust Layer, מוזג, ראו למטה) — תויג מחדש **C60**. ראו פירוט מלא: ROADMAP.md/CHANGE_CONTROL_LOG.md (C60).
 - **C59 Decision Hub Stage 1 Trust Layer — מוזג ל-`main` (PR #151, commit `73f6fe8`), לא מאומת בפרודקשן** — `gate_trust` ב-`decision_pipeline.py` עבר ממ-stub למודל אמינות אמיתי (Authority×Medium, מתואם ע"י Verify status) שמייצר Trust Level (T0-T3)+Confidence מספרי+Claim Topic אוטומטי לכל Decision Event, עם Supersedes בטוח (אותו נושא + Trust גבוה יותר בלבד). 33/33 self-tests עוברים, **9 סטיות מתועדות מהספק** (כולל `_has_keyword_conflict` שהספק קורא לו ב-§5 אך לא מגדיר את גופו בשום מקום — מומש כ-stub). ראו פירוט מלא: ROADMAP.md/CHANGE_CONTROL_LOG.md (C59).
@@ -99,6 +100,7 @@
 **שאר ה-PRs האחרונים (לפירוט מלא ראו `CHANGELOG.md`/`CHANGE_CONTROL_LOG.md`):** C22 Weekly Business Summary (PR #94, off by default), C53/O4 Screen Filter Gateway + Finance Pulse, C53-A structured tool-result contract + A32 hardening (PR #80), C54/C55 Business Update command + Origin Lead linking (PR #85/#86), C56 Approval Policy stack (PR #69, off by default).
 
 ## 4. Next Priorities
+0. **Fxx Safe Document Converter** — tests pass locally (`test_document_converter.py`, 6/6) after installing `beautifulsoup4`/`markdown`/`python-docx`/`openpyxl` into Python 3.14. Next: open PR, merge, and verify on `main`. Pandoc remains optional but preferred when installed.
 0. **F52 audit branch** — open/refresh PR for `f52-current-tool-map-audit`; docs only, no production code changes.
 0. **C60 Tool Context Awareness — 🟡 CODE DONE, לא ממוזג** — לבצע commit+push ל-`claude/new-session-be1ckb`, ואז PR (רק אם יתבקש)+merge+deploy; לאחר deploy, לאמת §10 פריט 7 של הספק (העלה קובץ → "תעלה לדסישנס" → BOSS זוכר ומנתב נכון). **Decision Hub Stage 1 (Trust Layer) — מוזג** (PR #151); לאחר deploy יש לאמת §10 פריט 11 (T0 event אמיתי מציג flag בטלגרם). Stage 2-4 (ליבה) ממשיכים לפני יציאות נוספות (דומיינים/ערוצים/ייעודים), לפי `archive/BOSS_MASTER_PLAN_One_Road.md` (ARCHIVE, לא מקור אמת).
 1. **לאמת BUG-013/014/015/016/017 בפרודקשן בפועל** — כולם מוזגים ל-`main`, אפס אימות ידני עד כה (קובץ >50MB אמיתי / Drive evidence gate / N07 מול live Airtable / security-review persistence).

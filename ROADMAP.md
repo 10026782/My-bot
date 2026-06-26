@@ -717,3 +717,13 @@ What: audit-only documentation before F52 implementation — 4 docs (not 3; `F52
 - `docs/f52/F52_STATE_FLOW_MAP.md` — PR #156, commit `4b0f5d3`, merge `64a018b`
 
 Scope guard: no production behavior changes, no `app.py` changes, no refactor, and no Airtable schema changes. The audit maps current tool architecture, contract coverage, bypass categories, high-risk bypasses, safe audit tests, and design-review items.
+
+### Fxx — Safe Document Converter
+
+Status: Implemented but not yet verified on branch `fxx-safe-document-converter`. Local converter tests pass (6/6). Not merged to `main`; production deploy not verified.
+
+What: standalone deterministic conversion package `document_converter` with public API `convert_document(input_file, input_type, output_type)`. Supported MVP conversions: Markdown<->HTML, Markdown<->TXT, HTML<->TXT, Markdown/HTML/TXT->DOCX, DOCX->Markdown/TXT, CSV<->XLSX.
+
+Governance: no AI for format conversion, no OCR, no PDF reconstruction, no guessed layout recovery. Unsupported or uncertain conversions fail closed with `confidence="low"` and `output_file=None`. Pandoc is preferred when installed; deterministic Python libraries are used as fallback for simple formats.
+
+Files: `document_converter/`, `test_document_converter.py`, `docs/document_converter/SAFE_DOCUMENT_CONVERTER.md`, `docs/governance/DOCUMENT_CONVERSION_RULES.md`.

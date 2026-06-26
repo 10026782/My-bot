@@ -4,6 +4,8 @@ All notable repository-level changes should be recorded here.
 
 ## Unreleased
 
+- Added Fxx Safe Document Converter: deterministic `convert_document(input_file, input_type, output_type)` API with independent converter modules, fail-closed unsupported/uncertain conversions, Pandoc-first execution where available, Python-library fallbacks for simple Markdown/HTML/TXT/DOCX/CSV/XLSX conversions, usage docs, governance rule, and pytest coverage.
+
 - Branch cleanup: audited 37 unmerged `claude/*` branches against `main` (ancestry, diff content — not just date/name) and deleted 34 (already merged, content-identical to `main`, orphan history, or a past design collision already resolved in favor of a different branch). Two branches contained real unmerged work and were extracted before deletion: N12 (below, PR #108) and the PR #69 docs correction (see C56 in `CHANGE_CONTROL_LOG.md`).
 - Added N12 — wired `daily_git_audit.py` into `scheduler.py` behind a new `GIT_AUDIT_SCHEDULER` flag (default off), plus `check_unmerged_vs_roadmap()`, `check_duplicate_schemas()`, `check_recent_commits()`, `check_cors_env_drift()` (PR #108). Extracted from two abandoned branches; fixed a doc-precedence bug found in the original (`BOSS_CURRENT_STATE.md` was checked before `ROADMAP.md`, contradicting `ROADMAP.md`'s own "single source of truth" declaration).
 - Recovered `APPROVAL_SYSTEM_AUDIT_AND_C53_SPEC.md` (257-line, code-free architecture audit of the 4 approval/guard mechanisms + C53 test-harness design) from a deleted branch (`claude/spec-c52-implementation-uqmu1g`) directly to `main` (commit `783a680`) — flagged inline as dated 17/06/2026 and not re-verified against current code.
