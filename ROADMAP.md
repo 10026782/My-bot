@@ -1,19 +1,22 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 26/06/2026 (מאוחר ביותר) — branch `claude/new-session-be1ckb`. **F18 Decision Hub Stage 3
-(Readiness Engine) — קוד הושלם**, אישור הבעלים "Yes, implement now" דרך `AskUserQuestion` על ספק
-מלא (PLANNING_GATE + SPEC). קובץ חדש `decision_readiness.py`: `calc_readiness()`/
-`build_readiness_message()`/`detect_escalation()`, מקבל את `ConfidenceResult` של Stage 2 כפרמטר
+עודכן: 26/06/2026 (מאוחר ביותר) — main = `50f6351` (אומת עצמאית, GitHub MCP `pull_request_read`
+(`merged:true`) + `git fetch origin main` + `git merge-base --is-ancestor`). **PR #159 מוזג** —
+Decision Hub Stage 3 (Readiness Engine, F18): `decision_readiness.py` (`calc_readiness()`/
+`build_readiness_message()`/`detect_escalation()`), מקבל את `ConfidenceResult` של Stage 2 כפרמטר
 (לא מחשב AI Conflict Detection בשנית). READY/NOT_READY/REVIEW — `REVIEW` הורחב לתוך
-`class DecisionReadiness` הקיים ב-`airtable_schema.py` (היה כבר READY/NOT_READY + שדה
-`DecisionFields.READINESS` מוכן, SoA — נבדק לפני כתיבת קוד). 8 חוקי הספק + 3 הספים + 4 תבניות
-escalation מיושמים כלשונם; READY מאותת בלבד, לא מבצע פעולה. 1 סטייה מהספק מתועדת (partner-
-disagreement escalation מזוהה רק דרך אות עקיף ב-blockers, כי `detect_escalation(decision, result)`
-לא מקבל events/stakeholders לפי חתימת הספק). Daily Digest hook — דולג, אין נקודת חיבור קיימת
-(אופציונלי במפורש בספק). 25/25 self-tests עוברים (`test_decision_readiness.py`); 25/25 Stage 2 +
-33/33 Stage 1 ללא רגרסיה. דגל `FEATURE_DECISION_HUB` כבוי כברירת מחדל — אפס שינוי התנהגות
-בפרודקשן. **🟡 CODE DONE — לא ממוזג ל-`main`, לא מאומת בפרודקשן.** ראו פירוט: F18 למטה,
-`CHANGE_CONTROL_LOG.md`.
+`class DecisionReadiness` הקיים ב-`airtable_schema.py` (SoA — נבדק לפני כתיבת קוד). 8 חוקי הספק +
+3 הספים + 4 תבניות escalation מיושמים כלשונם; READY מאותת בלבד, לא מבצע פעולה. 1 סטייה מהספק
+מתועדת (partner-disagreement escalation מזוהה רק דרך אות עקיף ב-blockers). Daily Digest hook —
+דולג (אופציונלי במפורש בספק). 25/25 self-tests עוברים; 25/25 Stage 2 + 33/33 Stage 1 ללא
+רגרסיה. דגל `FEATURE_DECISION_HUB` כבוי כברירת מחדל. ענף המקור `claude/new-session-be1ckb` נמחק
+מה-remote אחרי המיזוג. **פריסה בפועל ל-Render לא אומתה** (אין גישת dashboard/egress מה-sandbox).
+ראו פירוט: F18 למטה, `CHANGE_CONTROL_LOG.md`.
+
+עודכן (קודם): 26/06/2026 — branch `claude/new-session-be1ckb`. **F18 Decision Hub Stage 3
+(Readiness Engine) — קוד הושלם**, אישור הבעלים "Yes, implement now" דרך `AskUserQuestion` על ספק
+מלא (PLANNING_GATE + SPEC). דגל `FEATURE_DECISION_HUB` כבוי כברירת מחדל — אפס שינוי התנהגות
+בפרודקשן. (היסטורי — ראו עדכון מאוחר יותר למעלה: מוזג ב-PR #159.)
 
 עודכן (קודם): 26/06/2026 — branch `claude/new-session-be1ckb`, main = `78f9bae`. **תיקון doc-drift** שאותר ע"י audit יומי (סשן `claude/gifted-clarke-ajyjsa`, AI_CONTEXT.md refresh): שני פיצ'רים תועדו כאן כ"קוד הושלם, לא ממוזג" בזמן שהם **מוזגו בפועל ל-`main`** — אומת עצמאית דרך `git merge-base --is-ancestor` על שני המקרים: (1) **C60 Tool Context Awareness** — PR #152, commit `2d85b84`, merge `3e0094b`; (2) **F17 Decision Hub Stage 2** — PR #157, commit `9252b1e`, merge `78f9bae` (תוקן כבר בסבב קודם של סשן זה). גם תוקן: סעיף F52 כאן רשם רק 3 מ-4 קבצי audit שנוצרו בפועל (`F52_STATE_FLOW_MAP.md` היה חסר מהרשימה, מוזג ב-PR #156) ופרט סטטוס "branch" שגוי (F52 מוזג במלואו ל-`main`). פריסה בפועל ל-Render לכל הפיצ'רים האלה **לא אומתה** (אין גישת dashboard/egress מה-sandbox) — ראו פירוט בכל סעיף בנפרד, `CHANGE_CONTROL_LOG.md`.
 
@@ -443,7 +446,7 @@ JSON) — `airtable_patch()` משמיט שדות לא-מוכרים בשקט (`sc
 `FEATURE_DECISION_HUB` כבוי כברירת מחדל. Stage 3-4 (Readiness Engine/Attention Engine) —
 לא התחילו.
 
-### F18 — Decision Hub Stage 3: Readiness Engine (`claude/new-session-be1ckb`, 🟡 CODE DONE, לא ממוזג)
+### F18 — Decision Hub Stage 3: Readiness Engine (PR #159, מוזג ל-`main`, commit `84cfcff`/merge `50f6351`)
 **מה:** שכבה מעל Stage 1+2 שעונה: האם ה-Decision מוכנה להכרעה אנושית? `calc_readiness()`
 מקבל `decision`/`events`/`confidence_result` (Stage 2's `ConfidenceResult` — לא מחושב
 פעמיים, אין קריאת AI Conflict Detection כפולה) ומחזיר `ReadinessResult`
@@ -488,8 +491,11 @@ ConfidenceResult)` במקום `text` בלבד (כדי שלא יחושב Stage 2 
 (`_format_confidence_block` שונה להחזיר tuple, `_format_readiness_block`/`_persist_readiness`
 נוספו), `airtable_schema.py` (`DecisionReadiness.REVIEW` נוסף), `test_decision_readiness.py`
 (חדש, 25 self-tests).
-**מצב נוכחי:** קוד הושלם על `claude/new-session-be1ckb`, **לא ממוזג ל-`main`**. דגל
-`FEATURE_DECISION_HUB` כבוי כברירת מחדל. Stage 4 (Attention Engine) — לא התחיל.
+**מצב נוכחי:** מוזג ל-`main` (PR #159, commit `84cfcff`, merge commit `50f6351`) —
+אומת עצמאית דרך `mcp__github__pull_request_read` (`merged:true`) + `git merge-base
+--is-ancestor`. ענף המקור `claude/new-session-be1ckb` נמחק מה-remote אחרי המיזוג. **פריסה
+ל-Render לא אומתה** (אין גישת dashboard/egress מה-sandbox), דגל `FEATURE_DECISION_HUB`
+כבוי כברירת מחדל. Stage 4 (Attention Engine) — לא התחיל.
 
 **C60 — Tool Context Awareness (PR #152, מוזג ל-`main`, commit `2d85b84`/merge `3e0094b`):**
 לפי `SPEC_C59_Tool_Context_Awareness.md` (הועלה ע"י הבעלים בלי טקסט מלווה; אישור דרך
