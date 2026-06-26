@@ -31,13 +31,13 @@
 - **SoA (MODULE_RULES):** `DecisionFields.READINESS` ו-`class DecisionReadiness` (READY/NOT_READY) **היו קיימים מראש** ב-`airtable_schema.py` — נבדק לפני כתיבת קוד חדש. הורחב (לא שוכפל) עם ערך `REVIEW` חדש (לא מאומת כאופציית singleSelect חיה ב-Airtable). `detect_missing_evidence()` הקיים מ-Stage 2 נקרא ישירות.
 - ⚠️ **1 סטייה מהטקסט המילולי של הספק:** "Stakeholders if available" מופיע ב-Inputs של הספק, אך חתימת `detect_escalation(decision, result)` כפי שהוגדרה במפורש בספק לא מקבלת `events`/stakeholders. escalation של "עמדת שותף" (partner-disagreement) מזוהה לכן רק דרך אות עקיף — קונפליקט פתוח שמופיע ב-`result.blockers` — לא דרך ניתוח Stakeholder records ישיר.
 - **Daily Digest hook (ספק §4):** נבדק `daily_digest.py` — אין אזכור Decision Hub, אין נקודת חיבור קיימת. דולג, לפי האופציונליות המפורשת של הספק.
-- **Commit:** ייכלל ב-commit הקרוב על `claude/new-session-be1ckb`
-- **PR:** אין — לא התבקש, ולא מבוצע ללא אישור מפורש לפי הנחיית הסשן
-- **Review על ידי:** הבעלים (אישור "Yes, implement now" דרך `AskUserQuestion` על ספק מלא)
-- **Deploy תאריך:** לא רלוונטי — לא מוזג ל-`main`
-- **Verified בפרודקשן:** לא — לא מוזג, דגל כבוי כברירת מחדל
+- **Commit:** `84cfcff`
+- **PR:** #159 — מוזג ל-`main` (merge commit `50f6351`), אומת עצמאית דרך `mcp__github__pull_request_read` (`merged:true`, `merged_at: 2026-06-26T11:51:28Z`) + `git fetch origin main` + `git merge-base --is-ancestor 84cfcff origin/main`. ענף המקור `claude/new-session-be1ckb` נמחק מה-remote אחרי המיזוג.
+- **Review על ידי:** הבעלים (אישור "Yes, implement now" דרך `AskUserQuestion` על ספק מלא; מיזוג בוצע ע"י הבעלים)
+- **Deploy תאריך:** לא אומת — אין גישת Render dashboard/egress מה-sandbox; מוזג ל-`main` אך פריסה בפועל ל-Render לא אומתה
+- **Verified בפרודקשן:** לא — מוזג ל-`main`, אך דגל `FEATURE_DECISION_HUB` כבוי כברירת מחדל ופריסה לא אומתה מה-sandbox
 - **Verification ראיה:** `py_compile` נקי על `decision_readiness.py`/`cmd_decision.py`/`airtable_schema.py`/`test_decision_readiness.py`; `test_decision_readiness.py` 25/25 (6 ה-cases מהספק + מקרי גבול); `test_decision_confidence.py` 25/25 ו-`test_decision_trust.py` 33/33 ללא רגרסיה; `smoke_tests.py` — אותם 2 כשלים קיימים מראש (`flask`/`httpx` חסרים בסביבה), אין כשלים חדשים
-- **Docs עודכנו:** ROADMAP.md (סעיף F18 חדש + header עודכן), CHANGE_CONTROL_LOG.md (רשומה זו)
+- **Docs עודכנו:** ROADMAP.md (סעיף F18 חדש + header עודכן + top-of-file entry), CHANGE_CONTROL_LOG.md (רשומה זו, עודכנה בדיעבד עם נתוני המיזוג המאומתים)
 - **Feature Flag:** `FEATURE_DECISION_HUB` (כבוי כברירת מחדל)
 - **Rollback plan:** מחיקת `decision_readiness.py` + revert ל-3 השינויים ב-`cmd_decision.py`/`airtable_schema.py` — אין כתיבה לשדות Airtable חדשים (רק `Readiness` הקיים), אפס סיכון לנתונים קיימים
 
