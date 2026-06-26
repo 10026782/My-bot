@@ -1,7 +1,7 @@
 # BOSS CURRENT STATE
 
-Last updated: 25/06/2026
-Reflects: Stabilization Sprint + W0/W1 + Security Audit Fixes (H1-H3) + TIER read-only fix + Game Dashboard fix + Ghost Button Audit + Airtable Gateway (W2) + GameScreen Fix + Daily Digest Live + Repo Docs + C52 Customer Output Gateway + C53 Screen Filter Gateway + O4 Finance Pulse + C53-A structured tool returns + F52 audit maps
+Last updated: 26/06/2026
+Reflects: Stabilization Sprint + W0/W1 + Security Audit Fixes (H1-H3) + TIER read-only fix + Game Dashboard fix + Daily Digest Live + Repo Docs + C52 Customer Output Gateway + C53 Screen Filter Gateway + O4 Finance Pulse + C53-A structured tool returns + F52 audit maps + Fxx Safe Document Converter
 
 ## Classification Key
 - WORKING: implemented, reachable, no blocking issue.
@@ -20,6 +20,7 @@ Reflects: Stabilization Sprint + W0/W1 + Security Audit Fixes (H1-H3) + TIER rea
 | PR #79 / C53-A | ✅ MERGED | C53-A structured tool returns merged to main. |
 | PR #77 / O4 Finance Pulse | ✅ MERGED | Finance Pulse code is merged; it is no longer an honest `coming_soon` stub. |
 | F52 audit maps | Implemented but not yet verified | Audit-only docs added under `docs/f52/`: current tool map, contract coverage map, and bypass map. No production code changes, no `app.py` changes, no Airtable schema changes. |
+| Fxx Safe Document Converter | Implemented but not yet verified | Standalone `document_converter` package exposes `convert_document(input_file, input_type, output_type)` for deterministic Markdown/HTML/TXT/DOCX/CSV/XLSX conversions. No AI, OCR, PDF, or layout reconstruction. Not wired into `app.py`, Telegram, TMA, Airtable, or the agent. |
 
 ---
 
@@ -169,6 +170,7 @@ run_agent() → conversational reply only
 | TMA / Mini App | PARTIAL | CORS + auth fixed; write endpoints approval-gated; stubs honest |
 | Projects Hub | PARTIAL | Real Airtable data; no navigation |
 | Finance Pulse | WORKING | `/api/finance/pulse` reads Payments/Expenses via Airtable schema fields (PR #77/O4) and returns real finance pulse data; `?view=overdue` now filters by date (`IS_BEFORE({date}, today)` + not-received) instead of a manually-set status field (N11 fix, this session) — no longer depends on someone remembering to flip a payment's status to "overdue". |
+| Safe Document Converter | Implemented but not yet verified | Standalone deterministic conversion library. Supported MVP: Markdown<->HTML, Markdown<->TXT, HTML<->TXT, Markdown/HTML/TXT->DOCX, DOCX->Markdown/TXT, CSV<->XLSX. Fails closed for PDF/OCR/scanned/complex layout. |
 | Activity Feed | STUB | coming_soon; approval receipts are returned by API but not persisted/shown in Activity Feed |
 | Assets | STUB | coming_soon |
 | Personal Mode | STUB | Auth works; screens not implemented |
