@@ -11,55 +11,19 @@ from datetime import datetime, timezone
 from typing import Iterable
 
 from airtable_schema import (
-    DecisionDeltaType,
     DecisionEventFields,
-    DecisionEventTag,
     DecisionFields,
-    DecisionStatus,
+)
+from decision_attention_policy import (
+    DEFAULT_ATTENTION_POLICY,
+    PRIORITY_HIGH,
+    PRIORITY_LOW,
+    PRIORITY_MEDIUM,
+    PRIORITY_NONE,
+    AttentionPolicy,
 )
 
 FEATURE_FLAG = "FEATURE_DECISION_HUB"
-
-PRIORITY_HIGH = "HIGH"
-PRIORITY_MEDIUM = "MEDIUM"
-PRIORITY_LOW = "LOW"
-PRIORITY_NONE = "NONE"
-
-NOT_READY_DAYS = 3
-REVIEW_DAYS = 2
-DEADLINE_SOON_DAYS = 7
-DEADLINE_URGENT_DAYS = 3
-INACTIVE_DAYS = 14
-PRESSURE_REPEAT_COUNT = 4
-POSITION_SHIFT_COUNT = 2
-
-_CLOSED_STATUSES = {
-    DecisionStatus.DECIDED_YES,
-    DecisionStatus.DECIDED_NO,
-    DecisionStatus.CANCELLED,
-    "Closed",
-    "Done",
-}
-
-_NOT_READY_VALUES = {"NOT_READY", "Not Ready", "NotReady"}
-_REVIEW_VALUES = {"REVIEW", "Review", "Needs Review", "NeedsReview"}
-
-_PRESSURE_VALUES = {
-    DecisionDeltaType.PRESSURE,
-    DecisionEventTag.PRESSURE_ONLY,
-    "Pressure",
-    "pressure",
-    "לחץ",
-}
-
-_POSITION_SHIFT_VALUES = {
-    DecisionDeltaType.POSITION_SHIFT,
-    "Position Shift",
-    "position_shift",
-    "שינוי_עמדה",
-}
-
-_DEADLINE_FIELDS = ("Deadline", "Due Date", "Target Date", "deadline", "due_date")
 
 
 @dataclass(frozen=True)
@@ -80,11 +44,29 @@ class AttentionItem:
         }
 
 
+@dataclass(frozen=True)
+class AttentionSignals:
+    fields: dict
+    events: tuple[dict, ...]
+    now: datetime
+    readiness: str
+    age_days: int | None
+    deadline: datetime | None
+    pressure_count: int
+    position_shift_count: int
+    has_real_change: bool
+    inactive_days: int | None
+    has_missing_info: bool
+    confidence_score: float | None = None
+    evidence: tuple[dict, ...] = ()
+
+
 def detect_attention(
     decisions: Iterable[dict],
     events_by_decision: dict[str, list[dict]] | None = None,
     now: datetime | None = None,
     require_feature_flag: bool = True,
+    policy: AttentionPolicy = DEFAULT_ATTENTION_POLICY,
 ) -> list[dict]:
     """Return attention items for open decisions, highest priority first."""
     if require_feature_flag and not _feature_enabled():
@@ -101,6 +83,7 @@ def detect_attention(
             events_by_decision.get(decision_id, []),
             now=now,
             require_feature_flag=False,
+            policy=policy,
         )
         if item.priority != PRIORITY_NONE:
             items.append(item)
@@ -114,68 +97,78 @@ def calc_priority(
     events: Iterable[dict] | None = None,
     now: datetime | None = None,
     require_feature_flag: bool = True,
+    policy: AttentionPolicy = DEFAULT_ATTENTION_POLICY,
+    confidence_score: float | None = None,
+    evidence: Iterable[dict] | None = None,
 ) -> AttentionItem:
     """Calculate deterministic attention priority for one decision."""
     if require_feature_flag and not _feature_enabled():
         return _none_item(decision)
 
     fields = _fields(decision)
-    if fields.get(DecisionFields.STATUS) in _CLOSED_STATUSES:
+    if fields.get(DecisionFields.STATUS) in policy.closed_statuses:
         return _none_item(decision)
 
-    now = _as_aware(now or datetime.now(timezone.utc))
-    events = list(events or [])
+    signals = _build_signals(
+        decision,
+        events or [],
+        now=now,
+        policy=policy,
+        confidence_score=confidence_score,
+        evidence=evidence or [],
+    )
     reasons: list[str] = []
     score = 0
 
-    readiness = fields.get(DecisionFields.READINESS, "")
-    age_days = _decision_age_days(fields, now)
-    if readiness in _NOT_READY_VALUES and age_days is not None and age_days >= NOT_READY_DAYS:
-        score += 35
-        reasons.append(f"Readiness = NOT_READY for {age_days} days")
-    elif readiness in _REVIEW_VALUES and age_days is not None and age_days >= REVIEW_DAYS:
-        score += 30
-        reasons.append(f"Readiness = REVIEW for {age_days} days")
+    if (
+        signals.readiness in policy.not_ready_values
+        and signals.age_days is not None
+        and signals.age_days >= policy.not_ready_days
+    ):
+        score += policy.score_not_ready_old
+        reasons.append(f"Readiness = NOT_READY for {signals.age_days} days")
+    elif (
+        signals.readiness in policy.review_values
+        and signals.age_days is not None
+        and signals.age_days >= policy.review_days
+    ):
+        score += policy.score_review_old
+        reasons.append(f"Readiness = REVIEW for {signals.age_days} days")
 
-    deadline = _deadline(fields)
-    if deadline:
-        days_left = _days_between(now, deadline)
+    if signals.deadline:
+        days_left = _days_between(signals.now, signals.deadline)
         if days_left < 0:
-            score += 45
+            score += policy.score_deadline_overdue
             reasons.append(f"Deadline overdue by {abs(days_left)} days")
-        elif days_left <= DEADLINE_URGENT_DAYS:
-            score += 40
+        elif days_left <= policy.deadline_urgent_days:
+            score += policy.score_deadline_urgent
             reasons.append(f"Deadline in {days_left} days")
-        elif days_left <= DEADLINE_SOON_DAYS:
-            score += 20
+        elif days_left <= policy.deadline_soon_days:
+            score += policy.score_deadline_soon
             reasons.append(f"Deadline in {days_left} days")
 
-    pressure_count = _count_pressure(events)
-    position_shift_count = _count_position_shifts(events)
-    has_real_change = position_shift_count > 0 or _has_non_pressure_event(events)
-    if pressure_count >= PRESSURE_REPEAT_COUNT and has_real_change:
-        score += 15
-        reasons.append(f"{pressure_count} pressure messages")
+    if signals.pressure_count >= policy.pressure_repeat_count and signals.has_real_change:
+        score += policy.score_repeated_pressure_with_change
+        reasons.append(f"{signals.pressure_count} pressure messages")
 
-    if position_shift_count >= POSITION_SHIFT_COUNT:
-        score += 25
-        reasons.append(f"{position_shift_count} position changes")
+    if signals.position_shift_count >= policy.position_shift_count:
+        score += policy.score_position_shifts
+        reasons.append(f"{signals.position_shift_count} position changes")
 
-    inactive_days = _inactive_days(fields, events, now)
-    if inactive_days is not None and inactive_days >= INACTIVE_DAYS:
-        score += 15
-        reasons.append(f"No activity for {inactive_days} days")
+    if signals.inactive_days is not None and signals.inactive_days >= policy.inactive_days:
+        score += policy.score_inactive
+        reasons.append(f"No activity for {signals.inactive_days} days")
 
-    if str(fields.get(DecisionFields.MISSING_INFO, "")).strip():
-        score += 10
+    if signals.has_missing_info:
+        score += policy.score_missing_info
         reasons.append("Missing information remains")
 
     if not reasons:
         return _none_item(decision)
 
-    if score >= 40:
+    if score >= policy.high_priority_score:
         priority = PRIORITY_HIGH
-    elif score >= 30:
+    elif score >= policy.medium_priority_score:
         priority = PRIORITY_MEDIUM
     else:
         priority = PRIORITY_LOW
@@ -232,6 +225,38 @@ def _fields(record: dict) -> dict:
     return record.get("fields", record)
 
 
+def _build_signals(
+    decision: dict,
+    events: Iterable[dict],
+    now: datetime | None,
+    policy: AttentionPolicy,
+    confidence_score: float | None = None,
+    evidence: Iterable[dict] | None = None,
+) -> AttentionSignals:
+    fields = _fields(decision)
+    now = _as_aware(now or datetime.now(timezone.utc))
+    event_list = tuple(events or ())
+    pressure_count = _count_pressure(event_list, policy)
+    position_shift_count = _count_position_shifts(event_list, policy)
+    has_real_change = position_shift_count > 0 or _has_non_pressure_event(event_list, policy)
+
+    return AttentionSignals(
+        fields=fields,
+        events=event_list,
+        now=now,
+        readiness=fields.get(DecisionFields.READINESS, ""),
+        age_days=_decision_age_days(fields, now),
+        deadline=_deadline(fields, policy),
+        pressure_count=pressure_count,
+        position_shift_count=position_shift_count,
+        has_real_change=has_real_change,
+        inactive_days=_inactive_days(fields, list(event_list), now),
+        has_missing_info=bool(str(fields.get(DecisionFields.MISSING_INFO, "")).strip()),
+        confidence_score=confidence_score,
+        evidence=tuple(evidence or ()),
+    )
+
+
 def _decision_age_days(fields: dict, now: datetime) -> int | None:
     start = _first_datetime(
         fields.get(DecisionFields.LAST_UPDATED),
@@ -252,8 +277,8 @@ def _inactive_days(fields: dict, events: list[dict], now: datetime) -> int | Non
     return max(0, _days_between(latest, now))
 
 
-def _deadline(fields: dict) -> datetime | None:
-    return _first_datetime(*(fields.get(name) for name in _DEADLINE_FIELDS))
+def _deadline(fields: dict, policy: AttentionPolicy) -> datetime | None:
+    return _first_datetime(*(fields.get(name) for name in policy.deadline_fields))
 
 
 def _latest_event_date(events: list[dict]) -> datetime | None:
@@ -308,29 +333,29 @@ def _days_between(start: datetime, end: datetime) -> int:
     return (end.date() - start.date()).days
 
 
-def _count_pressure(events: list[dict]) -> int:
-    return sum(1 for event in events if _event_has_any(event, _PRESSURE_VALUES))
+def _count_pressure(events: Iterable[dict], policy: AttentionPolicy) -> int:
+    return sum(1 for event in events if _event_has_any(event, policy.pressure_values))
 
 
-def _count_position_shifts(events: list[dict]) -> int:
-    return sum(1 for event in events if _event_has_any(event, _POSITION_SHIFT_VALUES))
+def _count_position_shifts(events: Iterable[dict], policy: AttentionPolicy) -> int:
+    return sum(1 for event in events if _event_has_any(event, policy.position_shift_values))
 
 
-def _has_non_pressure_event(events: list[dict]) -> bool:
+def _has_non_pressure_event(events: Iterable[dict], policy: AttentionPolicy) -> bool:
     for event in events:
         fields = _fields(event)
         delta_type = fields.get(DecisionEventFields.DELTA_TYPE)
         tags = fields.get(DecisionEventFields.TAGS) or []
-        if delta_type and delta_type not in _PRESSURE_VALUES:
+        if delta_type and delta_type not in policy.pressure_values:
             return True
         if isinstance(tags, str):
             tags = [tags]
-        if any(tag not in _PRESSURE_VALUES for tag in tags):
+        if any(tag not in policy.pressure_values for tag in tags):
             return True
     return False
 
 
-def _event_has_any(event: dict, values: set[str]) -> bool:
+def _event_has_any(event: dict, values: frozenset[str]) -> bool:
     fields = _fields(event)
     delta_type = fields.get(DecisionEventFields.DELTA_TYPE)
     tags = fields.get(DecisionEventFields.TAGS) or []

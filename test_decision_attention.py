@@ -17,6 +17,7 @@ from decision_attention import (
     calc_priority,
     detect_attention,
 )
+from decision_attention_policy import AttentionPolicy
 
 NOW = datetime(2026, 6, 26, tzinfo=timezone.utc)
 
@@ -109,6 +110,24 @@ check("empty list returns empty attention list", detect_attention([], now=NOW, r
 
 summary = build_attention_summary(close_deadline)
 check("summary includes title and priority", "Blue View" in summary and "Priority:" in summary)
+
+custom_policy = AttentionPolicy(deadline_urgent_days=1, deadline_soon_days=1)
+custom_deadline = calc_priority(
+    decision(Deadline="2026-06-28"),
+    now=NOW,
+    require_feature_flag=False,
+    policy=custom_policy,
+)
+check("custom policy can tune deadline urgency", custom_deadline.priority == PRIORITY_NONE)
+
+future_inputs = calc_priority(
+    decision(**{DecisionFields.READINESS: "REVIEW", DecisionFields.LAST_UPDATED: "2026-06-20"}),
+    now=NOW,
+    require_feature_flag=False,
+    confidence_score=0.42,
+    evidence=[{"source": "future"}],
+)
+check("future confidence/evidence inputs are accepted", future_inputs.priority in {PRIORITY_MEDIUM, PRIORITY_HIGH})
 
 print(f"Decision Attention: {_passed}/{_passed + _failed} passed")
 sys.exit(1 if _failed else 0)
