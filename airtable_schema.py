@@ -47,14 +47,18 @@ class Tables:
     TASKS           = "משימות (Tasks)"
     # אחר
     PROFILE         = "Profile"
-    LEARNINGS       = "למידות ותובנות"
+    LEARNINGS       = "למידות ותובנות (Learnings & Insights)"  # שם חי מאומת ב-Airtable MCP 2026-06-24 — לא "למידות ותובנות" בלבד
     # זיכרון עסקי
     BUSINESS_MEMORY  = "Business Memory"   # אירועים אסטרטגיים — הזנה ידנית
     INTERACTION_LOG  = "Interaction Log"   # לוג אוטומטי — agent/system interactions
+    # שמורים לשימוש פנימי — מאומת ב-Airtable MCP 2026-06-24: שתי הטבלאות לא קיימות ב-base החי כלל
+    IMPORTS         = "Imports"
+    TENANTS         = "Tenants"
     # Game / Gamification
     WORLDS          = "Worlds"
     QUESTS          = "Quests"
     COINS_LOG       = "Coins_Log"
+    DAILY_TASKS     = "Daily_Tasks"   # DEAD CODE — לא קיימת ב-Airtable החי (מאומת 2026-06-24); ראה DailyTaskFields
     DAILY_CHECKIN   = "Daily_Checkin"
     # Roadmap
     ROADMAP_TASKS   = "Roadmap_Tasks"
@@ -78,6 +82,8 @@ class Tables:
     # C58 — Universal Sessions. טבלה קיימת ב-Airtable (tblHLfE24lTkVUhz0), משותפת לכל
     # context_type (lead/decision/task/...), ראה SPEC_C58_Universal_Sessions.md.
     SESSIONS                 = "Sessions"
+    # Growth — קיימת חיה, עדיין לא מחוברת לאף מודול קוד (מאומת 2026-06-24)
+    TRAFFIC_SOURCES  = "TRAFFIC_SOURCES"   # BOSS Growth P0 — attribution במפלס ערוץ (לא wall/synagogue-level)
 
 
 # ══════════════════════════════════════════════════
@@ -390,10 +396,50 @@ class InteractionLogFields:
 
 class ProfileFields:
     """Owner/business profile config — table: Tables.PROFILE.
-    Single-row table; mirrors profile.py's actual read/write fields.
+    Single-row table. profile.py talks to this table via raw httpx calls (does not
+    import this class) and is not wired into the live pipeline (see CLAUDE.md).
+    Verified via Airtable MCP 2026-06-24: live field is lowercase "name", and no
+    "ProfileData" field exists yet — both profile.py's docstring and this class
+    describe the intended/aspirational shape, not the current live table.
     """
-    NAME            = "Name"          # always "main" — single profile row
-    PROFILE_DATA    = "ProfileData"   # full profile dict, stored as JSON (Long text)
+    NAME            = "name"          # always "main" — single profile row. Live field is lowercase.
+    PROFILE_DATA    = "ProfileData"   # NOT YET CREATED LIVE — must be added to Airtable before profile.py can be wired in
+
+
+class ImportsFields:
+    """Import shipment records — table: Tables.IMPORTS.
+    Not yet wired to any live read/write path (see registry_calibration_report.md
+    — table is currently UNUSED). Confirmed via Airtable MCP 2026-06-24: this table
+    does not exist in the live base at all — fields below are aspirational only.
+    """
+    NAME            = "Name"
+    SUPPLIER        = "Supplier"
+    STATUS          = "Status"        # Pending | In Transit | Customs | Delivered | Cancelled
+    ORDER_DATE      = "Order Date"
+    ETA             = "ETA"
+    TOTAL_COST      = "Total Cost"
+    ADVANCE_PCT     = "Advance %"
+    BALANCE_PCT     = "Balance %"
+    NOTES           = "Notes"
+
+
+class TenantsFields:
+    """Multi-tenant registry — table: Tables.TENANTS.
+    Mirrors tenant_provisioner._save_tenant_to_airtable()'s actual field dict.
+    Confirmed via Airtable MCP 2026-06-24: this table does not exist in the live
+    base — consistent with F08/MULTITENANT being code-complete but unwired.
+    """
+    TENANT_ID       = "tenant_id"
+    NAME            = "Name"
+    TEMPLATE        = "template"
+    OWNER_NAME      = "owner_name"
+    OWNER_PHONE     = "owner_phone"
+    PLAN            = "plan"
+    STATUS          = "status"
+    CREATED_AT      = "created_at"
+    AIRTABLE_BASE   = "airtable_base"
+    DOMAINS         = "domains"
+    FEATURES        = "features"
 
 
 class WorldsFields:
@@ -544,20 +590,30 @@ class ProjectsHubFields:
 
 class AssetsFields:
     """
-    Personal assets table for TMA Personal Mode (PN1/PN2).
-    Table name: Assets (Personal)
-    Must be created manually in Airtable.
-    Owner + Co-Owner access only (allowed_domains includes 'personal').
+    Real-estate assets table. Table name: "Assets" (already exists live).
+    NOTE: this is NOT the originally-planned TMA Personal Mode (PN1/PN2) Hebrew
+    schema described in earlier docs/comments — the live table was built for
+    real-estate asset tracking with English fields. Verified via Airtable MCP
+    2026-06-24; the old Hebrew field set (שם הנכס/סוג/עלות רכישה/...) does not
+    exist on this table at all.
     """
-    NAME          = "שם הנכס"
-    TYPE          = "סוג"           # דירה|קרקע|מסחרי|אחר
-    COST          = "עלות רכישה"
-    VALUE         = "שווי נוכחי"
-    MORTGAGE      = "משכנתא"
-    RENTAL_INCOME = "הכנסה חודשית"
-    STATUS        = "סטטוס"         # מושכר|פנוי|בבנייה
-    NOTES         = "הערות"
-    DOCUMENTS     = "מסמכים"
+    NAME              = "Name"
+    ASSET_TYPE        = "Asset Type"
+    CURRENT_VALUE     = "Current Value"
+    MONTHLY_INCOME    = "Monthly Income"
+    MORTGAGE_BALANCE  = "Mortgage Balance"
+    STATUS            = "Status"
+    NOTES             = "Notes"
+    RELATED_PROJECT   = "Related Project"   # linked record → Projects
+    ASSET_POTENTIAL   = "Asset Potential"   # AI text field
+    ASSET_RISKS       = "Asset Risks"       # AI text field
+    EQUITY            = "Equity"            # formula
+    OWNERSHIP_PCT     = "Ownership %"
+    MY_EQUITY         = "My Equity"         # formula
+    OWNER             = "Owner"             # linked record
+    DOMAIN            = "Domain"
+    NEXT_STEP         = "Next Step"
+    NEXT_STEP_OWNER   = "Next Step Owner"
 
 
 class MediaFileFields:
@@ -875,6 +931,7 @@ class BossBattlesFields:
     QUESTION     = "Question"
     ANSWER       = "Answer"
     STATUS       = "Status"       # Boss Defeated | Boss Won
+    COINS_EARNED = "Coins_Earned"
 
 
 # ══════════════════════════════════════════════════
@@ -1095,4 +1152,43 @@ class DecisionInboxStatus:
     PENDING   = "Pending"
     LINKED    = "Linked"
     REJECTED  = "Rejected"
-    COINS_EARNED = "Coins_Earned"
+
+
+class DailyTaskFields:
+    """DEAD CODE — Tables.DAILY_TASKS ("Daily_Tasks") does not exist in the live
+    Airtable base (confirmed via Airtable MCP 2026-06-24). Imported but unused in
+    tma_api.py (DailyCheckinFields/Tables.DAILY_CHECKIN is the live equivalent
+    actually in use). Do not wire this in without creating the table first.
+    """
+    DATE   = "Date"
+    TASK   = "Task"
+    QUEST  = "Quest"    # linked record → Quests
+    COINS  = "Coins"
+    STATUS = "Status"   # Todo | Done | Skipped
+    WHO    = "Who"      # אליהו | קלוד קוד | אורי
+
+class DailyTaskStatus:
+    TODO    = "Todo"
+    DONE    = "Done"
+    SKIPPED = "Skipped"
+
+
+class TrafficSourcesFields:
+    """BOSS Growth P0 — channel-level traffic source attribution.
+    Table name: Tables.TRAFFIC_SOURCES ("TRAFFIC_SOURCES"), already live.
+    Discovered via Airtable MCP 2026-06-24 — not yet referenced by any code
+    module (no read/write path wired in; documented here for future use,
+    e.g. ad_attribution.py).
+    """
+    SOURCE_NAME  = "Source Name"
+    SOURCE_TYPE  = "Source Type"
+    AUDIENCE     = "Audience"
+    CONTACT      = "Contact"
+    REACH        = "Reach"
+    LEADS        = "Leads"
+    DEALS        = "Deals"
+    REVENUE      = "Revenue"
+    COST         = "Cost"
+    STATUS       = "Status"
+    NOTES        = "Notes"
+    ROI          = "ROI"          # formula — (Revenue - Cost) / Cost
