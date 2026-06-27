@@ -167,12 +167,17 @@ def detect_conflicts_ai_lazy(events: list[dict]) -> list[ConflictResult]:
     return results
 
 
-def calc_confidence(events: list[dict], conflicts: list[ConflictResult] | None = None) -> ConfidenceResult:
+def calc_confidence(
+    events: list[dict],
+    conflicts: list[ConflictResult] | None = None,
+    domain: str | None = None,
+) -> ConfidenceResult:
     """
     ציון confidence להחלטה לפי האירועים התומכים בה.
     score = weighted_avg(trust) - 0.15*conflicts - 0.10*missing, clamped [0,1].
     conflicts=None -> מריץ detect_conflicts_ai_lazy() (קורא ל-Claude, מוגבל וזמין-cache).
     conflicts=[] (במפורש) -> מדלג על AI, שימושי לבדיקות/refresh ללא תקציב Claude.
+    domain=None -> שומר תאימות לאחור ללא missing-evidence penalty.
     """
     active = _active_events(events)
     if not active:
@@ -185,7 +190,10 @@ def calc_confidence(events: list[dict], conflicts: list[ConflictResult] | None =
         conflicts = detect_conflicts_ai_lazy(events)
     conflict_penalty = _CONFLICT_PENALTY * len(conflicts)
 
-    score = max(0.0, min(1.0, base_score - conflict_penalty))
+    missing = detect_missing_evidence(domain, events) if domain else []
+    missing_penalty = _MISSING_PENALTY * len(missing)
+
+    score = max(0.0, min(1.0, base_score - conflict_penalty - missing_penalty))
 
     conflicting_ids = {eid for c in conflicts for eid in c.event_ids if eid}
     supporting = [e["id"] for e in active if e.get("id") not in conflicting_ids]
@@ -194,7 +202,7 @@ def calc_confidence(events: list[dict], conflicts: list[ConflictResult] | None =
         score=round(score, 2),
         supporting=supporting,
         conflicting=sorted(conflicting_ids),
-        missing=[],
+        missing=missing,
     )
 
 

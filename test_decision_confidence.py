@@ -94,6 +94,21 @@ check("calc_confidence: superseded events excluded from scoring", result.score =
 check("calc_confidence: conflicts=None triggers lazy AI path (no crash, no Claim Topic -> no comparisons)",
       calc_confidence([ev("rec1", trust=TL.T2), ev("rec2", trust=TL.T2)]).score is not None)
 
+domain_result = calc_confidence([ev("rec1", trust=TL.T3)], conflicts=[], domain=DOMAIN.GENERAL)
+check("calc_confidence: domain applies missing-evidence penalty",
+      domain_result.score == 0.85)
+check("calc_confidence: domain returns missing evidence",
+      domain_result.missing == dc.REQUIRED_EVIDENCE[DOMAIN.GENERAL])
+
+required_general = dc.REQUIRED_EVIDENCE[DOMAIN.GENERAL][0]
+complete_result = calc_confidence(
+    [ev("rec1", trust=TL.T3, summary=required_general)],
+    conflicts=[],
+    domain=DOMAIN.GENERAL,
+)
+check("calc_confidence: present domain evidence avoids missing penalty",
+      complete_result.score == 0.95 and complete_result.missing == [])
+
 
 # ═════════════════════════════════════════════════════════════════
 # build_evidence_summary

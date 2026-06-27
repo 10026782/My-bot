@@ -427,11 +427,11 @@ def _format_confidence_block(decision: dict, events: list) -> tuple:
     (פתיחת כרטיס /decision status) — lazy + cached, לעולם לא ב-ingest.
     מחזיר (טקסט_להצגה, ConfidenceResult) — ה-ConfidenceResult נדרש ל-Stage 3
     (decision_readiness.py) כדי שלא יחושב פעמיים (כולל AI Conflict Detection)."""
-    from decision_confidence import calc_confidence, detect_missing_evidence, build_evidence_summary
+    from decision_confidence import calc_confidence, build_evidence_summary
 
     domain = decision["fields"].get(DecisionFields.DOMAIN, "")
-    result = calc_confidence(events)
-    missing_evidence = detect_missing_evidence(domain, events)
+    result = calc_confidence(events, domain=domain)
+    missing_evidence = result.missing
     evidence_summary = build_evidence_summary(events)
 
     _persist_confidence(decision["id"], result, missing_evidence, evidence_summary)
