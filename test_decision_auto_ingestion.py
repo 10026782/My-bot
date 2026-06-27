@@ -8,11 +8,19 @@ from __future__ import annotations
 import sys
 
 import decision_auto_ingestion as dai
-from airtable_schema import DecisionInboxChannel, DecisionInboxFields, DecisionInboxStatus, Tables
+import decision_matching as dm
+from airtable_schema import (
+    DecisionFields,
+    DecisionInboxChannel,
+    DecisionInboxFields,
+    DecisionInboxStatus,
+    Tables,
+)
 from feature_flags import set_flag
 
 _passed = 0
 _failed = 0
+_real_suggest_decision_link = dai.suggest_decision_link
 
 
 def check(desc: str, condition: bool) -> None:
@@ -129,6 +137,26 @@ check("Duplicate idempotency key does not create duplicate", first.ok and second
 fake = reset()
 invalid = dai.ingest_message("email", "   ", {"tenant_id": "t1"})
 check("Empty/invalid input fails safely", not invalid.ok and fake.created == [])
+
+candidates = [
+    {"id": "recBLUE", "fields": {DecisionFields.TITLE: "Blue View"}},
+    {"id": "recGREEN", "fields": {DecisionFields.TITLE: "Green Field Contract"}},
+]
+exact_match, exact_score = dm.find_matching_decision("Update for Blue View", candidates)
+check("Shared matcher returns exact title match", exact_match["id"] == "recBLUE" and exact_score == 100.0)
+
+partial_match, partial_score = dm.find_matching_decision("Green contract update", candidates)
+check("Shared matcher returns deterministic partial match", partial_match["id"] == "recGREEN" and partial_score > 60)
+
+original_loader = dm.list_open_decisions
+dm.list_open_decisions = lambda limit=5: candidates[:limit]
+dai.suggest_decision_link = _real_suggest_decision_link
+channel_suggestion = dai.suggest_decision_link("Blue View from another channel")
+check(
+    "Auto ingestion uses shared matcher without command layer",
+    channel_suggestion == {"decision_id": "recBLUE", "match_confidence": 100.0},
+)
+dm.list_open_decisions = original_loader
 
 disable_flags()
 print(f"Decision Auto Ingestion: {_passed}/{_passed + _failed} passed")

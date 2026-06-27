@@ -23,6 +23,7 @@ from airtable_schema import (
     DecisionInboxStatus,
     Tables,
 )
+from decision_matching import find_matching_decision
 
 logger = logging.getLogger(__name__)
 
@@ -213,12 +214,10 @@ def create_decision_inbox_item(
 
 
 def suggest_decision_link(raw_content: str, metadata: dict | None = None) -> dict:
-    """Suggest a Decision link using the existing cmd_decision matching logic."""
+    """Suggest a Decision link using the shared channel-independent matcher."""
     del metadata
     try:
-        from cmd_decision import _find_matching_decision
-
-        match, score = _find_matching_decision(raw_content or "")
+        match, score = find_matching_decision(raw_content or "")
     except Exception as e:
         logger.warning("[DecisionAutoIngestion] suggest_decision_link failed: %s", e)
         return {"decision_id": "", "match_confidence": 0.0}
