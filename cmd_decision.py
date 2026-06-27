@@ -17,12 +17,12 @@ from airtable_schema import (
     DecisionStakeholderFields, DecisionStakeholderRole, DecisionStakeholderPosition,
     DecisionInboxFields, DecisionInboxChannel, DecisionInboxStatus,
 )
+from decision_matching import find_matching_decision, list_open_decisions
 
 logger = logging.getLogger(__name__)
 
 _STATE_TTL_SECONDS = 30 * 60  # 30 דקות
 _ALLOWED_ROLES = ("owner", "manager", "partner")
-_OPEN_STATUSES = (DecisionStatus.OPEN, DecisionStatus.PENDING_INPUT)
 
 # ── State store — key: telegram user_id (str) ───────────────────
 _pending: dict[str, dict] = {}
@@ -773,30 +773,8 @@ def handle_attachment_reference(bot, identity, chat_id, text: str) -> bool:
 # ── Matching helpers ──────────────────────────────────────────
 
 def _find_matching_decision(text: str) -> tuple[dict | None, float]:
-    decisions = _list_open_decisions()
-    if not decisions or not text:
-        return None, 0.0
-
-    text_words = set(_normalize(text).split())
-    best, best_score = None, 0.0
-    for d in decisions:
-        title = d["fields"].get(DecisionFields.TITLE, "")
-        if not title:
-            continue
-        if _normalize(title) in _normalize(text):
-            return d, 100.0
-        title_words = set(_normalize(title).split())
-        if not title_words:
-            continue
-        overlap = len(text_words & title_words) / len(title_words) * 100
-        if overlap > best_score:
-            best, best_score = d, overlap
-
-    return best, best_score
-
-
-def _normalize(text: str) -> str:
-    return re.sub(r"[^\w\s]", "", text or "").strip().lower()
+    """Compatibility wrapper for existing command-layer callers."""
+    return find_matching_decision(text)
 
 
 # ── Airtable read helpers (cmd layer — direct, not through ports) ──
@@ -845,8 +823,8 @@ def _resolve_decision_ref(ref: str) -> dict | None:
 
 
 def _list_open_decisions(limit: int = 5) -> list:
-    formula = "OR(" + ",".join(f"{{{DecisionFields.STATUS}}}='{s}'" for s in _OPEN_STATUSES) + ")"
-    return _at_list(Tables.DECISIONS, formula)[:limit]
+    """Compatibility wrapper for existing command-layer callers."""
+    return list_open_decisions(limit)
 
 
 def _list_stakeholders(decision_id: str) -> list:
