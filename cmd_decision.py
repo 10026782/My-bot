@@ -403,7 +403,27 @@ def _format_decision_card(decision: dict) -> str:
     attention_block = f"\n\nAttention:\n{attention_summary}" if attention_summary else ""
 
     confidence_block, confidence_result = _format_confidence_block(decision, events)
-    readiness_block = _format_readiness_block(decision, events, confidence_result)
+    readiness_block, readiness_result = _format_readiness_block(decision, events, confidence_result)
+
+    # Use the readiness calculated for this exact card render. Airtable
+    # persistence is best-effort and the fetched record may still contain the
+    # previous value, so pass a shallow snapshot instead of routing on stale
+    # state or mutating the canonical record.
+    orchestrator_decision = {
+        **decision,
+        "fields": {
+            **decision["fields"],
+            DecisionFields.READINESS: readiness_result.status,
+        },
+    }
+    from decision_orchestrator import append_orchestrator_to_card
+
+    orchestrator_block = append_orchestrator_to_card(
+        orchestrator_decision,
+        events,
+        stakeholders,
+        precomputed_confidence=confidence_result,
+    )
 
     return (
         f"📋 {title} | טיוטה {draft}\n"
@@ -418,6 +438,7 @@ def _format_decision_card(decision: dict) -> str:
         f"{readiness_block}\n"
         f"🔄 אחרון: {latest_summary}"
         f"{attention_block}"
+        f"{orchestrator_block}"
     )
 
 
@@ -445,14 +466,14 @@ def _format_confidence_block(decision: dict, events: list) -> tuple:
     return "\n".join(lines), result
 
 
-def _format_readiness_block(decision: dict, events: list, confidence_result) -> str:
+def _format_readiness_block(decision: dict, events: list, confidence_result) -> tuple[str, object]:
     """Stage 3 — Readiness Engine: האם ההחלטה מוכנה להכרעה אנושית. READY הוא
     איתות בלבד — לא מבצע שום פעולה."""
     from decision_readiness import calc_readiness, build_readiness_message
 
     result = calc_readiness(decision, events, confidence_result)
     _persist_readiness(decision["id"], result)
-    return build_readiness_message(result)
+    return build_readiness_message(result), result
 
 
 def _persist_confidence(decision_id: str, result, missing_evidence: list, evidence_summary: str) -> None:
