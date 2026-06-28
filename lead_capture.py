@@ -120,12 +120,24 @@ def capture_inbound_lead(identity, message: str) -> "ActionResult":
 
         # airtable_get מחזיר str — re.search תקין כאן
         raw = airtable_get(Tables.LEADS, f"{{{LeadFields.MEMORY_KEY}}}='{memory_key}'")
-        if isinstance(raw, str) and re.search(r"rec\w+", raw):
-            logger.debug("[LeadCapture] lead already exists, skipping: %s", memory_key)
-            return ActionResult(
-                business_success=True, record_id="existing",
-                claim_type=ClaimType.CREATED, source="lead_capture"
-            )
+        if isinstance(raw, str):
+            existing_m = re.search(r"rec\w+", raw)
+            if existing_m:
+                logger.debug("[LeadCapture] lead already exists, skipping: %s", memory_key)
+                # תיקון: claim_type=FOUND, לא CREATED — שום דבר לא נוצר כאן, רק
+                # חיפוש שמצא רשומה קיימת. record_id האמיתי (לא placeholder
+                # "existing") כדי שכל קוד עתידי שיכתוב Lead Event/Note יקבל ID
+                # תקין. tool_called/tool_http_ok=True כדי ש-ClaimGate._check_found
+                # (tool_called and tool_http_ok) יאשר את הclaim הזה כראוי —
+                # ה-airtable_get באמת רץ ובאמת הצליח.
+                return ActionResult(
+                    tool_called=True,
+                    tool_http_ok=True,
+                    business_success=True,
+                    record_id=existing_m.group(0),
+                    claim_type=ClaimType.FOUND,
+                    source="lead_capture",
+                )
 
         # ALLOWLIST — רק שדות מוגדרים מפורשות.
         # display_name="" (identity.py) → טלפון כ-Name (Primary Field), לא "ליד חדש"
