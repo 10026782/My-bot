@@ -111,10 +111,12 @@ def capture_inbound_lead(identity, message: str) -> None:
         logger.info("[LeadCapture] junk inbound ignored before Airtable write")
         return
 
-    memory_key = identity.memory_key
+    memory_key = identity.memory_key  # תמיד boss_hq:+972... — canonical key
     try:
         from tools.airtable_tools import airtable_add, airtable_get, airtable_update
 
+        # BUG-NEW-02: חיפוש לפי memory_key בלבד (boss_hq:+972...) — לא whatsapp:+972...
+        # memory_key = identity.memory_key = f"{tenant_id}:{user_id}" = "boss_hq:+972..."
         raw = airtable_get(Tables.LEADS, f"{{{LeadFields.MEMORY_KEY}}}='{memory_key}'")
         rec_m = re.search(r"rec\w+", raw or "")
 
@@ -130,6 +132,7 @@ def capture_inbound_lead(identity, message: str) -> None:
             LeadFields.SOURCE: "whatsapp_inbound",
             LeadFields.STATUS: "new",
             LeadFields.SUMMARY: (message or "")[:500],
+            LeadFields.SCORE: 0,  # BUG-NEW-01: default 0, לא ריק — נוסחאות Tier נשענות על מספר
         }
 
         result = airtable_add(Tables.LEADS, fields)

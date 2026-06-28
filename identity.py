@@ -262,6 +262,8 @@ def resolve_identity(channel: str, external_id: str) -> Identity:
     )
 
     # מספר לא מוכר = ליד פוטנציאלי
+    # memory_key יהיה boss_hq:{external_id} — canonical key לכל הטבלאות
+    # (לא whatsapp:{external_id} — זה רק ה-registry lookup key)
     is_whatsapp = channel == "whatsapp"
     return Identity(
         tenant_id    = "boss_hq",
