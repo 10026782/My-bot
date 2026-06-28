@@ -1,6 +1,15 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 26/06/2026 (מאוחר ביותר) — main = `50f6351` (אומת עצמאית, GitHub MCP `pull_request_read`
+עודכן: 28/06/2026 (מאוחר ביותר) — main = `2c55c59` (אומת ב-`git pull origin main` + grep
+פיזי לפי AGENTS.md). **PR #166 מוזג** — Decision Hub Stage 6 (F21): orchestrator read-only עם
+ששת מצבי ה-lifecycle (`COLLECTING`/`BLOCKED`/`REVIEW`/`AWAITING`/`DECIDED`/`CLOSED`),
+ניתוב first-match, שימוש ב-`ConfidenceResult` שכבר חושב Stage 2, fallback דטרמיניסטי ללא
+AI conflict detection, וחיבור fail-open ל-`/decision status`. commit `9011923`, merge
+`2c55c59`; Stage 6 ‏13/13 וכל Decision Hub ‏128/128. Stages 4–5 מוזגו קודם ב-PRs #161–#164
+(F19/F20; פירוט למטה). `FEATURE_DECISION_HUB` ו-`FEATURE_DECISION_AUTO_INGESTION` נשארו
+כבויים כברירת מחדל. **Production Verified: לא — נדרש אימות ידני לאחר פריסה.**
+
+עודכן (קודם): 26/06/2026 (מאוחר ביותר) — main = `50f6351` (אומת עצמאית, GitHub MCP `pull_request_read`
 (`merged:true`) + `git fetch origin main` + `git merge-base --is-ancestor`). **PR #159 מוזג** —
 Decision Hub Stage 3 (Readiness Engine, F18): `decision_readiness.py` (`calc_readiness()`/
 `build_readiness_message()`/`detect_escalation()`), מקבל את `ConfidenceResult` של Stage 2 כפרמטר
@@ -360,11 +369,10 @@ gate + Drive-upload `set_last_file` hook + `_webhook_telegram_impl` "זה הנס
 `session_store.py` (`FileUploadResult`, `set_last_file`/`get_last_file`), `airtable_schema.py`
 (Decision Hub tables/fields).
 **Feature Flag:** `FEATURE_DECISION_HUB` — כבוי כברירת מחדל, אפס שינוי התנהגות בפרודקשן.
-**מצב נוכחי:** Stage 0/0.5/0.6 ממוזגים ל-`main` (PR #147). **Stage 1 (Trust Layer) — מוזג ל-`main`
-(PR #151, commit `73f6fe8`), עדיין לא מאומת בפרודקשן** — לפי `SPEC_Decision_Hub_Stage1_Trust_Rev2.md`
-(אישור אליהו: "ניתן ליישם ספק"). Stage 2-4 (AI Conflict Detection/Readiness Engine/Attention Engine) —
-○ לא התחילו. ראו `archive/BOSS_MASTER_PLAN_One_Road.md` לעקרון "כביש אחד, יציאות רבות"
-(ARCHIVE — לא מקור אמת, ראו הערת מקור בראש אותו קובץ).
+**מצב נוכחי:** Stages 0–6 ממוזגים ל-`main`: Stage 0/0.5/0.6 ב-PR #147; Stage 1 ב-PR #151;
+Stage 2 ב-PR #157; Stage 3 ב-PR #159; Stage 4 ב-PR #161; Stage 5 ב-PRs #162–#164;
+Stage 6 ב-PR #166. דגלי Decision Hub כבויים כברירת מחדל. המיזוגים אומתו ב-main, אך
+**Production Verified נשאר לא** עד אימות ידני לאחר פריסה. ראו F17–F21 למטה.
 **Verification ראיה:** `py_compile` נקי על שלושת הקבצים; `session_store.py` self-test
 18/20 עברו (2 כשלים קיימים מראש, mock-import-path בלתי תלוי בשינוי זה); אין אימות
 בפרודקשן עדיין — דגל כבוי.
@@ -443,8 +451,7 @@ JSON) — `airtable_patch()` משמיט שדות לא-מוכרים בשקט (`sc
 **מצב נוכחי:** מוזג ל-`main` (PR #157, commit `9252b1e`, merge commit `78f9bae`) —
 אומת עצמאית דרך `mcp__github__pull_request_read` (`merged:true`) + `git merge-base
 --is-ancestor`. **פריסה ל-Render לא אומתה** (אין גישת dashboard/egress מה-sandbox), דגל
-`FEATURE_DECISION_HUB` כבוי כברירת מחדל. Stage 3-4 (Readiness Engine/Attention Engine) —
-לא התחילו.
+`FEATURE_DECISION_HUB` כבוי כברירת מחדל. Stages 3–6 מוזגו לאחר מכן; ראו F18–F21.
 
 ### F18 — Decision Hub Stage 3: Readiness Engine (PR #159, מוזג ל-`main`, commit `84cfcff`/merge `50f6351`)
 **מה:** שכבה מעל Stage 1+2 שעונה: האם ה-Decision מוכנה להכרעה אנושית? `calc_readiness()`
@@ -495,7 +502,38 @@ ConfidenceResult)` במקום `text` בלבד (כדי שלא יחושב Stage 2 
 אומת עצמאית דרך `mcp__github__pull_request_read` (`merged:true`) + `git merge-base
 --is-ancestor`. ענף המקור `claude/new-session-be1ckb` נמחק מה-remote אחרי המיזוג. **פריסה
 ל-Render לא אומתה** (אין גישת dashboard/egress מה-sandbox), דגל `FEATURE_DECISION_HUB`
-כבוי כברירת מחדל. Stage 4 (Attention Engine) — לא התחיל.
+כבוי כברירת מחדל. Stages 4–6 מוזגו לאחר מכן; ראו F19–F21.
+
+### F19 — Decision Hub Stage 4: Attention Engine (PR #161, מוזג ל-`main`, commits `3e79a03`/`1281dda`, merge `fb4d041`)
+**מה:** מנוע read-only ודטרמיניסטי לדירוג החלטות הדורשות תשומת לב. `calc_priority()` מחשב
+עדיפות מסיגנלים קיימים (readiness ישן, deadline, לחץ עם שינוי אמיתי, שינויי עמדה, חוסר
+פעילות ומידע חסר); `detect_attention()` מדרג רשימה; `build_attention_summary()` מציג בכרטיס.
+ה-policy מבודד ב-`decision_attention_policy.py`; אין sender/writer חדש ואין פעולה אוטומטית.
+**Verification ראיה:** `test_decision_attention.py` ‏11/11. המיזוג קיים ב-main.
+**מצב נוכחי:** מוזג; `FEATURE_DECISION_HUB` כבוי; Production Verified לא אומת ידנית.
+
+### F20 — Decision Hub Stage 5: Auto Ingestion (PRs #162–#164, מוזג ל-`main`)
+**מה:** ניתוב אוטומטי של WhatsApp/email/document/voice ל-Decision Inbox בלבד, raw-first,
+ללא כתיבה ל-Decision canonical. PR #162 הוסיף את `decision_auto_ingestion.py` (commit
+`9b97319`, merge `8f58634`); PR #163 חילץ matcher משותף (commit `bbea097`, merge
+`ebf0261`); PR #164 הוסיף missing-evidence penalty ל-confidence (commit `22eae2e`, merge
+`076fb0c`). `FEATURE_DECISION_AUTO_INGESTION` כבוי כברירת מחדל.
+**Verification ראיה:** ancestry של שלושת ה-commits מול main + grep פיזי; Auto Ingestion
+18/18 ו-Confidence 28/28.
+**מצב נוכחי:** מוזג; Production Verified לא אומת ידנית.
+
+### F21 — Decision Hub Stage 6: Lifecycle Orchestrator (PR #166, מוזג ל-`main`, commit `9011923`/merge `2c55c59`)
+**מה:** orchestrator pull-only/read-only שמחזיר `OrchestratorResult` עם phase, מצב נוכחי,
+צעד הבא, אחראי וחסמים. הניתוב הוא first-match בין `NOT_READY`, stakeholder פתוח,
+confidence נמוך, readiness REVIEW, READY/high-confidence ומצבים סופיים. Stage 6 משתמש
+ב-`precomputed_confidence` של Stage 2; fallback מפעיל `calc_confidence(..., conflicts=[])`
+בלבד ולכן אינו יוזם AI conflict detection. החיבור ל-`_format_decision_card()` משתמש ב-readiness
+שחושב באותה בקשה וב-snapshot שאינו משנה את הרשומה המקורית; כל כשל משמיט רק את בלוק Stage 6.
+**קבצים:** `decision_orchestrator.py`, `cmd_decision.py`, `test_decision_orchestrator.py`.
+**Verification ראיה:** Stage 6 ‏13/13; Decision Hub ‏128/128; post-merge `git pull origin main`
++ grep פיזי על `OrchestratorResult`/`orchestrate`/`append_orchestrator_to_card` והחיווט בכרטיס.
+**מצב נוכחי:** מוזג ל-main. Vercel preview היה ירוק; **Production Verified: לא** — נדרש
+אימות ידני של הפריסה והזרימה החיה לפני שינוי הסטטוס.
 
 **C60 — Tool Context Awareness (PR #152, מוזג ל-`main`, commit `2d85b84`/merge `3e0094b`):**
 לפי `SPEC_C59_Tool_Context_Awareness.md` (הועלה ע"י הבעלים בלי טקסט מלווה; אישור דרך
