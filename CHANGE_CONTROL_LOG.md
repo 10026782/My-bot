@@ -23,6 +23,51 @@
 
 > נבנה מ-`git log --since="30 days ago"` (~172 commits, `f935c53`→`eebf73b`) + טבלאות ROADMAP.md (Stabilization Sprint, World 2, Sprint 16/06). כל commit hash צוטט ישירות מ-git או מ-ROADMAP — שורות שלא נמצאה להן ראיה ישירה מסומנות "לא ידוע".
 
+### F21 — Decision Hub Stage 6: Lifecycle Orchestrator
+- **תאריך:** 28/06/2026
+- **סוג:** Feature — read-only, מאחורי `FEATURE_DECISION_HUB` הכבוי כברירת מחדל
+- **Requirement:** Decision Hub Stage 6 lifecycle: `COLLECTING`→`BLOCKED`→`REVIEW`→`AWAITING`→`DECIDED`→`CLOSED`
+- **תיאור:** נוסף `decision_orchestrator.py` עם `OrchestratorResult`, ניתוב first-match ו-render ל-Telegram. Stage 6 משתמש ב-`ConfidenceResult` המחושב ב-Stage 2; fallback דטרמיניסטי עם `conflicts=[]`, ללא AI conflict detection חדש. `cmd_decision.py` מעביר readiness עדכני ב-snapshot לא-מוטטיבי ו-fail-open שומר על הכרטיס הבסיסי.
+- **Commit:** `9011923`
+- **PR:** #166 — מוזג ל-`main` (merge commit `2c55c59`)
+- **Review על ידי:** הבעלים; PR נבדק כ-commit אחד/3 קבצים/ללא Markdown לפני המיזוג
+- **Deploy תאריך:** לא אומת ידנית
+- **Verified בפרודקשן:** לא
+- **Verification ראיה:** Stage 6 ‏13/13; Decision Hub ‏128/128; post-merge sync + grep פיזי על `OrchestratorResult`, `orchestrate`, `append_orchestrator_to_card` והחיווט ב-`cmd_decision.py`
+- **Docs עודכנו:** ROADMAP.md, CHANGE_CONTROL_LOG.md (ב-PR תיעוד נפרד לאחר המיזוג)
+- **Feature Flag:** `FEATURE_DECISION_HUB` — כבוי כברירת מחדל
+- **Rollback plan:** revert merge commit `2c55c59`; השינוי מבודד ל-3 קבצים ואינו כותב state חדש
+
+### F20 — Decision Hub Stage 5: Auto Ingestion
+- **תאריך:** 27/06/2026
+- **סוג:** Feature — raw-first Inbox ingestion, מאחורי דגל כבוי
+- **Requirement:** Decision Hub Stage 5 Auto Ingestion
+- **תיאור:** ניתוב WhatsApp/email/document/voice ל-Decision Inbox בלבד; matcher משותף; missing-evidence penalty ל-confidence. אין כתיבה אוטומטית ל-Decision canonical.
+- **Commit:** `9b97319` / `bbea097` / `22eae2e`
+- **PR:** #162 (merge `8f58634`) / #163 (merge `ebf0261`) / #164 (merge `076fb0c`)
+- **Review על ידי:** הבעלים
+- **Deploy תאריך:** לא אומת ידנית
+- **Verified בפרודקשן:** לא
+- **Verification ראיה:** שלושת ה-commits ancestors של main; grep פיזי; Auto Ingestion ‏18/18 ו-Confidence ‏28/28
+- **Docs עודכנו:** ROADMAP.md, CHANGE_CONTROL_LOG.md (נוסף בדיעבד לאחר אימות המיזוגים)
+- **Feature Flag:** `FEATURE_DECISION_AUTO_INGESTION` — כבוי כברירת מחדל
+- **Rollback plan:** revert merges #162–#164 לפי הסדר ההפוך
+
+### F19 — Decision Hub Stage 4: Attention Engine
+- **תאריך:** 27/06/2026
+- **סוג:** Feature — read-only priority calculation, מאחורי דגל כבוי
+- **Requirement:** Decision Hub Stage 4 Attention Engine
+- **תיאור:** `decision_attention.py` + policy נפרד; דירוג דטרמיניסטי של החלטות לפי readiness, deadline, לחץ עם שינוי, שינויי עמדה, חוסר פעילות ומידע חסר. אין sender/writer או פעולה אוטומטית.
+- **Commit:** `3e79a03` / `1281dda`
+- **PR:** #161 — מוזג ל-`main` (merge commit `fb4d041`)
+- **Review על ידי:** הבעלים
+- **Deploy תאריך:** לא אומת ידנית
+- **Verified בפרודקשן:** לא
+- **Verification ראיה:** `test_decision_attention.py` ‏11/11; הקבצים והפונקציות קיימים ב-main
+- **Docs עודכנו:** ROADMAP.md, CHANGE_CONTROL_LOG.md (נוסף בדיעבד לאחר אימות המיזוג)
+- **Feature Flag:** `FEATURE_DECISION_HUB` — כבוי כברירת מחדל
+- **Rollback plan:** revert PR #161
+
 ### F18 — Decision Hub Stage 3: Readiness Engine
 - **תאריך:** 26/06/2026
 - **סוג:** Feature — אחורה כבוי דגל (`FEATURE_DECISION_HUB`), אפס שינוי התנהגות בפרודקשן
