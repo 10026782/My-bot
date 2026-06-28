@@ -27,11 +27,11 @@
 - **תאריך:** 29/06/2026
 - **סוג:** Bug Fix / File Hygiene / Contract Wiring
 - **Requirement:** reconcile `DOC-20260628-WA*.py`, restore the adapters package, and add minimal CXX regression coverage
-- **Commit:** pending
-- **PR:** pending
+- **Commit:** `46d470b`
+- **PR:** #169 — draft, לא מוזג
 - **Deploy תאריך:** לא בוצע
 - **Verified בפרודקשן:** לא
-- **Verification ראיה:** branch מבוסס `origin/main@ca1f5a0`; mirror מקומי של backend CI עבר: compileall, smoke tests, core imports וכל 19 קובצי `test_*.py`, כולל CXX ‏6/6. GitHub CI ממתין ל-push/PR.
+- **Verification ראיה:** branch מבוסס `origin/main@ca1f5a0`; mirror מקומי של backend CI עבר: compileall, smoke tests, core imports וכל 19 קובצי `test_*.py`, כולל CXX ‏6/6. GitHub Actions run `28337822793` עבר: backend-ci ו-frontend-ci ירוקים; Vercel preview עבר.
 - **Docs עודכנו:** ROADMAP.md, CHANGE_CONTROL_LOG.md
 - **Feature Flag:** ללא שינוי
 - **Rollback plan:** revert commit/PR; אין שינוי schema או נתונים

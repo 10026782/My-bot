@@ -6,8 +6,9 @@ verified:** `core/adapters/__init__.py` תוקן; ששת קובצי `DOC-2026062
 השוואה וחילוץ; WhatsApp stub מחזיר `ActionResult` בלי לטעון לשליחה; Output Gateway משמר
 את ראיית ה-adapter; `RequestContext` חובר ל-identity/lead/session/domain ב-`run_agent` בלי
 לדרוס את תיקוני session-cache/resolved-domain שכבר ב-main; נוספו 6 בדיקות CXX. רצף
-ה־backend CI המלא עבר מקומית עם dependencies מבודדים; GitHub CI, merge, deploy ואימות
-פרודקשן עדיין לא בוצעו.
+ה־backend CI המלא עבר מקומית עם dependencies מבודדים; GitHub CI עבר ב-PR #169 על commit
+`46d470b` (run `28337822793`, backend+frontend ירוקים). Merge, deploy ואימות פרודקשן עדיין
+לא בוצעו.
 
 עודכן (קודם): 28/06/2026 — main = `2c55c59` (אומת ב-`git pull origin main` + grep
 פיזי לפי AGENTS.md). **PR #166 מוזג** — Decision Hub Stage 6 (F21): orchestrator read-only עם
