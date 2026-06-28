@@ -1608,8 +1608,13 @@ def _webhook_whatsapp_impl():
 
     if _inject_utm:
         try:
+            # תיקון: memory_key קנוני — boss_hq:+972... (כמו ש-identity.memory_key
+            # מחזיר), לא whatsapp:+972... — אחרת _inject_utm מחפש/כותב ב-Airtable
+            # עם key שלעולם לא תואם את הרשומה האמיתית שנוצרת ע"י lead_capture,
+            # וגורם לחיפוש כפול (whatsapp:... נכשל, אח"כ boss_hq:... מצליח).
+            _early_identity = resolve_identity("whatsapp", sender)
             _inject_utm(
-                memory_key   = f"whatsapp:{sender}",
+                memory_key   = _early_identity.memory_key,
                 request_args = request.values.to_dict(),
                 channel      = "whatsapp",
             )
