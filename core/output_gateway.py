@@ -6,7 +6,10 @@ import threading
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from core.action_result import ActionResult
 
 logger = logging.getLogger(__name__)
 
@@ -62,14 +65,15 @@ class GatewayResult:
     fallback_sent: bool = False
     block_reason:  str = ""
     shadow_log:    bool = False
+    action_result: Optional["ActionResult"] = None
 
     @classmethod
-    def approved(cls, audit_id: str) -> "GatewayResult":
-        return cls(status="APPROVED", audit_id=audit_id)
+    def approved(cls, audit_id: str, action_result=None) -> "GatewayResult":
+        return cls(status="APPROVED", audit_id=audit_id, action_result=action_result)
 
     @classmethod
-    def internal_pass(cls, audit_id: str) -> "GatewayResult":
-        return cls(status="INTERNAL_PASS", audit_id=audit_id)
+    def internal_pass(cls, audit_id: str, action_result=None) -> "GatewayResult":
+        return cls(status="INTERNAL_PASS", audit_id=audit_id, action_result=action_result)
 
     @classmethod
     def escalated_result(cls, audit_id: str, fallback_sent: bool, reason: str) -> "GatewayResult":
@@ -153,8 +157,10 @@ def _handle_escalation(envelope: OutboundEnvelope, fin_result, audit_id: str) ->
     # שלח fallback ללקוח — הליד נשאר חי
     fallback_body = "אני מעביר את זה לבדיקה ידנית, ויחזרו אליך עם תשובה מדויקת."
     try:
-        _send_fallback_to_customer(envelope, fallback_body)
-        fallback_sent = True
+        fallback_result = _send_fallback_to_customer(envelope, fallback_body)
+        fallback_sent = bool(
+            fallback_result is not None and fallback_result.delivery_success
+        )
     except Exception as e:
         logger.error("[COG] fallback send failed: %s | audit_id=%s", e, audit_id)
 
@@ -184,32 +190,37 @@ def _is_emergency_stopped(channel: OutputChannel) -> bool:
 
 
 def _execute_send(envelope: OutboundEnvelope, audit_id: str, internal: bool) -> GatewayResult:
-    """מגדיר thread-local context ואז קורא ל-Adapter."""
+    """מגדיר thread-local context, קורא ל-Adapter ושומר את ראיית הביצוע."""
     _gateway_context.approved = True
     _gateway_context.audit_id = audit_id
     try:
-        _dispatch_to_adapter(envelope)
+        action_result = _dispatch_to_adapter(envelope)
     finally:
         _gateway_context.approved = False
         _gateway_context.audit_id = ""
 
+    if action_result is not None:
+        action_result.output_approved = True
+        action_result.audit_success = True
+        action_result.audit_id = audit_id
+
     if internal:
-        return GatewayResult.internal_pass(audit_id)
-    return GatewayResult.approved(audit_id)
+        return GatewayResult.internal_pass(audit_id, action_result)
+    return GatewayResult.approved(audit_id, action_result)
 
 
-def _dispatch_to_adapter(envelope: OutboundEnvelope) -> None:
+def _dispatch_to_adapter(envelope: OutboundEnvelope):
     """
     מנתב לפי ערוץ.
     כל ערוץ עתידי חייב להיות מוסף כאן — אחרת NotImplementedError.
     """
     if envelope.channel == OutputChannel.TWILIO_WHATSAPP:
         from tools.whatsapp_adapter import send_whatsapp
-        send_whatsapp(to=envelope.recipient, body=envelope.body)
+        return send_whatsapp(to=envelope.recipient, body=envelope.body)
 
     elif envelope.channel == OutputChannel.TELEGRAM_OWNER:
         from tools.telegram_adapter import send_telegram
-        send_telegram(chat_id=envelope.recipient, text=envelope.body)
+        return send_telegram(chat_id=envelope.recipient, text=envelope.body)
 
     elif envelope.channel in (OutputChannel.META_WHATSAPP, OutputChannel.EMAIL, OutputChannel.SMS):
         raise NotImplementedError(
@@ -232,7 +243,7 @@ def _audit_log(audit_id: str, envelope: OutboundEnvelope, event: str, reason: st
     )
 
 
-def _send_fallback_to_customer(envelope: OutboundEnvelope, body: str) -> None:
+def _send_fallback_to_customer(envelope: OutboundEnvelope, body: str):
     """שולח fallback — אותו ערוץ, אותו recipient, גוף קבוע."""
     fallback = OutboundEnvelope(
         channel=envelope.channel,
@@ -247,7 +258,7 @@ def _send_fallback_to_customer(envelope: OutboundEnvelope, body: str) -> None:
     # שולחים ישיר ל-Adapter — fallback לא עובר Financial Gate שנית
     _gateway_context.approved = True
     try:
-        _dispatch_to_adapter(fallback)
+        return _dispatch_to_adapter(fallback)
     finally:
         _gateway_context.approved = False
 

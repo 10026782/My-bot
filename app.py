@@ -951,12 +951,27 @@ def run_agent(
             f"msg='{user_text[:60]}'"
         )
 
+    # CXX: one request-scoped identity/domain/session container. This is
+    # additive to the current session snapshot and resolved-domain fixes.
+    try:
+        from core.request_context import RequestContext
+        _req_ctx = RequestContext.from_identity(
+            identity,
+            domain=domain_from_channel or "general",
+        )
+    except Exception as e:
+        logger.warning("[RequestContext] init failed: %s", e)
+        _req_ctx = None
+
     # ── 1.5. WhatsApp Lead Capture (W0) ───────────
     # W0/N02: capture inbound WhatsApp leads and optionally score them.
     if identity.role == Role.LEAD:
         try:
             from lead_capture import capture_inbound_lead
-            capture_inbound_lead(identity, user_text)
+            _lead_result = capture_inbound_lead(identity, user_text)
+            lead_record_id = getattr(_lead_result, "record_id", "")
+            if _req_ctx and lead_record_id:
+                _req_ctx.lead_record_id = lead_record_id
         except Exception as e:
             logger.error(f"[LeadCapture] failed for {identity.memory_key}: {e}")
 
@@ -970,6 +985,8 @@ def run_agent(
         _session_snapshot = _ls.get(chat_id)
     except Exception:
         _session_snapshot = None
+    if _req_ctx is not None:
+        _req_ctx.mark_session_loaded(_session_snapshot or {})
 
 
     # ── 2. Rate Limit ─────────────────────────────
@@ -1020,6 +1037,8 @@ def run_agent(
     # domain_from_channel הישן (לפני Router) במקום הדומיין הסופי שה-Router
     # קבע. מחושב פעם אחת ומשמש גם ל-out-param וגם ל-approval flow.
     resolved_route_domain = getattr(route.domain, "value", str(route.domain))
+    if _req_ctx is not None:
+        _req_ctx.update_domain(resolved_route_domain)
     if _resolved_domain is not None:
         _resolved_domain["domain"] = resolved_route_domain
 

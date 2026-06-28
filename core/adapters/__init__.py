@@ -1,1 +1,1 @@
-# core.adapters package
+"""Domain adapters for the shared reasoning core."""
