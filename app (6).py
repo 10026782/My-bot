@@ -1,0 +1,1780 @@
+﻿# app.py — The Boss Bot v3.0
+# Architecture: Identity → Router → Context → Agent
+#
+# כל בקשה עוברת:
+#   resolve_identity → route_request → build_context → run_agent
+
+import os
+import time
+import hmac
+import hashlib
+import logging
+import threading
+from flask import Flask, request, Response, abort, jsonify
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+
+from startup_validator import validate_startup, format_startup_message
+validate_startup()
+
+# Step 5 — gateway alias consistency check (WARN only, does not block startup)
+try:
+    from tools.airtable_gateway import check_alias_consistency as _gw_check
+    _gw_mismatches = _gw_check()
+    if _gw_mismatches:
+        import os as _os
+        _owner = _os.environ.get("ELIYAHU_CHAT_ID", "")
+        _token = _os.environ.get("TELEGRAM_TOKEN", "")
+        if _owner and _token:
+            import httpx as _httpx
+            _httpx.post(
+                f"https://api.telegram.org/bot{_token}/sendMessage",
+                json={"chat_id": _owner, "text": "⚠️ Gateway alias mismatch:\n" + "\n".join(_gw_mismatches)},
+                timeout=5,
+            )
+except Exception as _gw_e:
+    logging.warning("gateway startup check failed: %s", _gw_e)
+
+import anthropic
+import telebot
+from twilio.request_validator import RequestValidator
+from twilio.twiml.messaging_response import MessagingResponse
+
+from memory_store    import memory
+from identity        import resolve_identity, Role
+from context         import build_context
+from tool_registry   import enforce, ToolDenied
+from scheduler       import start_scheduler
+from tools           import dispatch_tool
+from guards          import idempotency, rate_limiter, validate_tool_output
+from config          import get_domain as _channel_domain
+from core.router     import route_request, RouteDecision, Handler
+from core.anti_hallucination import verify_execution, sanitize_agent_response
+from health_monitor import get_health_status
+from feature_flags import is_enabled as _flag_enabled
+import cost_monitor
+import llm_fallback
+try:
+    from ad_attribution import inject_source_to_incoming_lead as _inject_utm
+except ImportError:
+    _inject_utm = None
+
+logger = logging.getLogger(__name__)
+
+# ─── קבועים ────────────────────────────────────────
+MAX_TOOL_TURNS = 3
+
+# כלים שתוצאתם נשמרת בזיכרון לרציפות בין תורות
+_MEMORABLE_TOOLS = frozenset({
+    "airtable_add", "airtable_update",
+    "calendar_create_event", "gmail_send_draft",
+})
+AGENT_TIMEOUT  = 25
+
+# ─── Pending Approvals (router-level) ──────────────────────────
+# Saves messages routed to Handler.APPROVAL until the user confirms.
+# key: chat_id (telegram user_id / whatsapp number)
+_pending_approvals: dict[str, dict] = {}
+_CONFIRM_WORDS = frozenset({"כן", "אשר", "✅", "yes", "y", "ok", "אוקי", "בצע", "קדימה"})
+_CANCEL_WORDS  = frozenset({"לא", "בטל", "❌", "no", "n", "ביטול", "עצור", "cancel"})
+
+# ─── קליינטים ──────────────────────────────────────
+ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
+TELEGRAM_TOKEN     = os.environ.get("TELEGRAM_TOKEN", "")
+RENDER_APP_URL     = os.environ.get("RENDER_APP_URL", "https://my-bot-jqz2.onrender.com")
+WEBHOOK_SECRET     = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
+
+if not WEBHOOK_SECRET:
+    logging.getLogger(__name__).warning(
+        "[Security] TELEGRAM_WEBHOOK_SECRET not set -- webhook URL is the only "
+        "protection. Set this env var to enable header-based secret validation."
+    )
+
+# Router-level pending approvals expire after this many seconds.
+_PENDING_APPROVAL_TTL = 600
+
+client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=AGENT_TIMEOUT)
+telebot.apihelper.ENABLE_MIDDLEWARE = True  # נדרש לפני TeleBot() — אחרת middleware_handler לא נרשם
+bot    = telebot.TeleBot(TELEGRAM_TOKEN, threaded=False)  # webhook mode — handlers ירוצו סינכרונית, לפני שה-response חוזר
+
+
+@bot.middleware_handler(update_types=['message'])
+def log_all_exceptions(bot_instance, update):
+    pass
+
+
+def handle_telebot_error(exception):
+    logger.error(f"[Telebot] unhandled: {exception}", exc_info=True)
+
+
+bot.exception_handler = handle_telebot_error
+
+app = Flask(__name__)
+
+
+def _empty_twiml() -> Response:
+    return Response(str(MessagingResponse()), mimetype="application/xml")
+
+
+def _gateway_whatsapp_reply(sender: str, body: str, domain: str, source_ref: str) -> str | None:
+    """
+    מעביר את תשובת ה-WhatsApp ללקוח דרך C52 Customer Output Gateway לפני TwiML reply.
+    Gateway קובע APPROVED/ESCALATED (Financial Gate) על הגוף בפועל; השליחה הסינכרונית
+    עדיין נעשית ע"י Twilio מתוך ה-TwiML response (whatsapp_adapter הוא honest stub —
+    ראה C38/C52). מחזיר את הגוף לשליחה, או None אם EMERGENCY_STOP (אין תשובה כלל).
+    """
+    from core.output_gateway import send_outbound, OutboundEnvelope, AudienceClass, OutputChannel
+    result = send_outbound(OutboundEnvelope(
+        channel=OutputChannel.TWILIO_WHATSAPP,
+        recipient=sender,
+        body=body,
+        audience=AudienceClass.CUSTOMER,
+        source_module="app.webhook_whatsapp",
+        source_ref=source_ref,
+        domain=domain,
+        meta={"source_type": "llm_response"},
+    ))
+    if result.status == "EMERGENCY_STOP":
+        return None
+    if result.status == "ESCALATED":
+        return "אני מעביר את זה לבדיקה ידנית, ויחזרו אליך עם תשובה מדויקת."
+    return body
+
+
+def _is_junk_inbound_text(text: str) -> bool:
+    stripped = (text or "").strip()
+    if not stripped:
+        return True
+    meaningful = [ch for ch in stripped if ch.isalnum()]
+    if not meaningful:
+        return True
+    if len(meaningful) < 2:
+        return True
+    return False
+
+
+def _public_request_url() -> str:
+    # Prefer configured public URL to avoid trusting attacker-supplied X-Forwarded-Host.
+    base = os.environ.get("RENDER_APP_URL", "").rstrip("/")
+    if base:
+        return f"{base}{request.full_path}".rstrip("?")
+    proto = request.headers.get("X-Forwarded-Proto")
+    if proto:
+        return request.url.replace("http://", f"{proto}://", 1)
+    return request.url
+
+
+def _validate_twilio_signature() -> bool:
+    token = os.environ.get("TWILIO_AUTH_TOKEN", "")
+    signature = request.headers.get("X-Twilio-Signature", "")
+    if not token or not signature:
+        logger.warning("[WhatsApp] missing Twilio auth token or signature")
+        return False
+
+    return RequestValidator(token).validate(
+        _public_request_url(),
+        request.form.to_dict(flat=True),
+        signature,
+    )
+
+def _validate_meta_signature() -> bool:
+    """X-Hub-Signature-256 מול META_APP_SECRET (HMAC-SHA256)."""
+    app_secret = os.environ.get("META_APP_SECRET", "")
+    sig_header = request.headers.get("X-Hub-Signature-256", "")
+    if not app_secret or not sig_header:
+        logger.warning("[Meta WhatsApp] חסר app secret או חתימה")
+        return False
+    if not sig_header.startswith("sha256="):
+        return False
+    expected = "sha256=" + hmac.new(
+        app_secret.encode("utf-8"),
+        request.get_data(),
+        hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(expected, sig_header)
+
+
+def _normalize_meta_payload(payload: dict) -> dict | None:
+    """
+    מחזיר dict עם: text, from, to, msg_id.
+    מחזיר None אם אין הודעה נכנסת (למשל קריאת status/read/delivery).
+    """
+    try:
+        entry = payload["entry"][0]["changes"][0]["value"]
+        messages = entry.get("messages")
+        if not messages:
+            return None
+        msg = messages[0]
+        return {
+            "text":   msg.get("text", {}).get("body", ""),
+            "from":   msg.get("from", "unknown"),
+            "to":     entry.get("metadata", {}).get("display_phone_number", "unknown"),
+            "msg_id": msg.get("id", ""),
+        }
+    except (KeyError, IndexError, TypeError):
+        return None
+
+
+from tma_api import tma_api as _tma_blueprint
+app.register_blueprint(_tma_blueprint)
+
+
+# ── N05-B: send_followup.confirmed handler ────────────────────────────────────
+# Sends the approved followup draft to the owner via Telegram for manual
+# forwarding.9 Does NOT send outbound WhatsApp to lead (blocked on Meta, N05-C).
+# C52: owner notification routed through core.output_gateway (TELEGRAM_OWNER is
+# always INTERNAL — no Financial Gate, no behavior change vs. direct bot.send_message).
+
+def _handle_send_followup_confirmed(payload: dict, chat_id: str) -> str:
+    draft        = payload.get("draft", "")
+    contact_name = payload.get("contact_name", "")
+    channel      = payload.get("channel", "")
+    memory_key   = payload.get("memory_key", "")
+
+    msg = (f"📋 פולואפ מאושר — לשליחה ידנית ({channel}):\n"
+           f"אל: {contact_name}\n\n{draft}")
+
+    try:
+        from core.output_gateway import send_outbound, OutboundEnvelope, AudienceClass, OutputChannel
+        send_outbound(OutboundEnvelope(
+            channel=OutputChannel.TELEGRAM_OWNER,
+            recipient=chat_id,
+            body=msg,
+            audience=AudienceClass.INTERNAL,
+            source_module="app.send_followup_confirmed",
+            source_ref=memory_key,
+            domain="followup",
+        ))
+    except Exception as e:
+        logger.error(f"[Followup] notify owner failed: {e}")
+        return f"⚠️ שגיאה בהצגת הטיוטה: {e}"
+
+    if memory_key:
+        try:
+            from lead_memory import lead_memory
+            state = lead_memory.get(memory_key)
+            lead_memory.update(memory_key, followup_count=state.followup_count + 1)
+        except Exception as e:
+            logger.warning(f"[Followup] followup_count update failed: {e}")
+
+    return "✅ הטיוטה נשלחה אליך להעברה ידנית"
+
+
+from event_bus import bus as _event_bus
+_event_bus.subscribe("send_followup.confirmed", _handle_send_followup_confirmed)
+
+
+
+@bot.message_handler(commands=["status"])
+def cmd_status(msg):
+    """Owner בלבד — מצב env vars."""
+    identity = resolve_identity("telegram", str(msg.from_user.id))
+    if not identity or identity.role not in ("owner", "admin"):
+        return
+    bot.send_message(msg.chat.id, format_startup_message(), parse_mode="Markdown")
+
+
+@bot.message_handler(commands=["schema"])
+def cmd_schema(msg):
+    identity = resolve_identity("telegram", str(msg.from_user.id))
+    if not identity or identity.role != "owner":
+        bot.send_message(msg.chat.id, "פקודה זו זמינה לבעלים בלבד.")
+        return
+    try:
+        from schema_intelligence import handle_schema_command
+        args = msg.text.replace("/schema", "", 1).replace(f"@{bot.get_me().username}", "").strip()
+        reply = handle_schema_command(args)
+        bot.send_message(msg.chat.id, reply, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"cmd_schema error: {e}")
+        bot.send_message(msg.chat.id, f"שגיאה בטעינת סכמה: {e}")
+
+@bot.message_handler(commands=["done"])
+def cmd_done(msg):
+    """/done [n] — מסמן Quest מספר n כ-Done + כותב Coins_Log אוטומטית."""
+    identity = resolve_identity("telegram", str(msg.from_user.id))
+    if not identity or identity.role not in ("owner", "admin"):
+        return
+    try:
+        from tma_api import _at_list, _at_patch, _at_post
+        from datetime import date, timedelta
+        from airtable_schema import Tables, QuestsFields, CoinsLogFields, QuestStatus
+
+        args = msg.text.split(maxsplit=1)[1].strip() if len(msg.text.split()) > 1 else ""
+        if not args.isdigit():
+            bot.send_message(msg.chat.id, "שימוש: /done [מספר]  —  לדוגמה: /done 2")
+            return
+
+        quest_num = int(args)
+        today     = date.today()
+        week_str  = (today - timedelta(days=today.weekday())).isoformat()
+
+        all_quests  = _at_list(Tables.QUESTS, "", max_records=200)
+        week_quests = [
+            r for r in all_quests
+            if (r.get("fields", {}).get(QuestsFields.WEEK_START, "") or "")[:10] == week_str
+        ] or [
+            r for r in all_quests
+            if r.get("fields", {}).get(QuestsFields.STATUS, "") != QuestStatus.SKIPPED
+        ]
+
+        if quest_num < 1 or quest_num > len(week_quests):
+            bot.send_message(msg.chat.id, f"מספר לא תקין. יש {len(week_quests)} Quests השבוע.")
+            return
+
+        quest      = week_quests[quest_num - 1]
+        qf         = quest.get("fields", {})
+        old_status = qf.get(QuestsFields.STATUS, "")
+        name       = qf.get(QuestsFields.NAME, "?")
+
+        if old_status == QuestStatus.DONE:
+            bot.send_message(msg.chat.id, f"✅ {name} כבר מסומן כהושלם.")
+            return
+
+        _at_patch(Tables.QUESTS, quest["id"], {
+            QuestsFields.STATUS:  QuestStatus.DONE,
+            QuestsFields.DONE_BY: identity.display_name or identity.user_id,
+        })
+
+        coins = int(qf.get(QuestsFields.COINS, 0) or 0)
+        if coins > 0:
+            _at_post(Tables.COINS_LOG, {
+                CoinsLogFields.ACTION:        name,
+                CoinsLogFields.COINS:         coins,
+                CoinsLogFields.DATE:          today.isoformat(),
+                CoinsLogFields.QUEST:         [quest["id"]],
+                CoinsLogFields.NOTE:          "Quest completed via /done",
+            })
+
+        bot.send_message(
+            msg.chat.id,
+            f"✅ *{name}* — הושלם\\!\n\\+{coins}🪙",
+            parse_mode="MarkdownV2",
+        )
+        logger.info(f"[Game] /done {quest_num} → {name} +{coins}🪙 by {identity.display_name}")
+    except Exception as e:
+        logger.error(f"cmd_done error: {e}")
+        bot.send_message(msg.chat.id, f"❌ שגיאה: {e}")
+
+
+@bot.message_handler(commands=["convert"])
+def cmd_convert(msg):
+    """/convert [שם/טלפון] — הופך ליד לאיש קשר ב-CRM (owner בלבד, דורש LEAD_AUTO_CONVERT)."""
+    identity = resolve_identity("telegram", str(msg.from_user.id))
+    if not identity or identity.role not in ("owner", "admin"):
+        return
+    try:
+        from lead_conversion import convert_lead_to_contact
+        query = msg.text.split(maxsplit=1)[1].strip() if len(msg.text.split()) > 1 else ""
+        if not query:
+            bot.send_message(msg.chat.id, "שימוש: /convert [שם או טלפון של ליד]")
+            return
+
+        ok, reply = convert_lead_to_contact(query)
+        bot.send_message(msg.chat.id, reply, parse_mode="Markdown")
+        logger.info(f"[LeadConvert] /convert '{query}' → {'OK' if ok else 'skip'} by {identity.display_name}")
+    except Exception as e:
+        logger.error(f"cmd_convert error: {e}")
+        bot.send_message(msg.chat.id, f"❌ שגיאה: {e}")
+
+
+@bot.message_handler(commands=["quest"])
+def cmd_quest(msg):
+    """/quest — Quest Log השבוע."""
+    identity = resolve_identity("telegram", str(msg.from_user.id))
+    if not identity or identity.role not in ("owner", "admin"):
+        return
+    try:
+        from tma_api import _at_list
+        from datetime import date, timedelta
+        from airtable_schema import Tables, QuestsFields, QuestStatus
+        today  = date.today()
+        monday = today - timedelta(days=today.weekday())
+        week_str = monday.isoformat()
+
+        all_q = _at_list(Tables.QUESTS, "", max_records=200)
+        quests = [r for r in all_q if (r.get("fields", {}).get(QuestsFields.WEEK_START, "") or "")[:10] == week_str]
+        if not quests:
+            quests = [r for r in all_q if r.get("fields", {}).get(QuestsFields.STATUS, "") in {QuestStatus.TODO, QuestStatus.IN_PROGRESS}]
+        if not quests:
+            bot.send_message(msg.chat.id, "🎮 אין Quests השבוע.")
+            return
+
+        icons = {QuestStatus.DONE: "✅", QuestStatus.IN_PROGRESS: "🔄", QuestStatus.TODO: "⬜", QuestStatus.SKIPPED: "⏭️"}
+        lines = [f"🎮 *Quest Log — {week_str}*\n"]
+        total_possible = 0
+        total_earned   = 0
+        for r in quests:
+            f       = r.get("fields", {})
+            status  = f.get(QuestsFields.STATUS, "")
+            coins   = int(f.get(QuestsFields.COINS, 0) or 0)
+            impact  = " ⚡" if f.get(QuestsFields.IMPACT) else ""
+            total_possible += coins
+            if status == QuestStatus.DONE:
+                total_earned += coins
+            lines.append(f"{icons.get(status, '❓')} {f.get(QuestsFields.NAME, '?')} — {coins}🪙{impact}")
+
+        lines.append(f"\n💰 {total_earned}/{total_possible}🪙 הושלם")
+        bot.send_message(msg.chat.id, "\n".join(lines), parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"cmd_quest error: {e}")
+        bot.send_message(msg.chat.id, f"❌ שגיאה: {e}")
+
+
+@bot.message_handler(commands=["coins"])
+def cmd_coins(msg):
+    """/coins — סה״כ מטבעות + World progress."""
+    identity = resolve_identity("telegram", str(msg.from_user.id))
+    if not identity or identity.role not in ("owner", "admin"):
+        return
+    try:
+        from tma_api import _at_list
+        from airtable_schema import Tables, CoinsLogFields, WorldsFields, WorldStatus
+
+        log_recs    = _at_list(Tables.COINS_LOG, "", max_records=500)
+        total_coins = sum(int(r.get("fields", {}).get(CoinsLogFields.COINS, 0) or 0) for r in log_recs)
+
+        worlds = _at_list(Tables.WORLDS, f"{{{WorldsFields.STATUS}}}='{WorldStatus.ACTIVE}'", max_records=1)
+        world_section = ""
+        if worlds:
+            wf     = worlds[0].get("fields", {})
+            target = int(wf.get(WorldsFields.TOTAL_COINS_TARGET, 0) or 0)
+            earned = int(wf.get(WorldsFields.COINS_EARNED, 0) or 0)
+            pct    = round(100 * earned / target, 1) if target > 0 else 0.0
+            filled = int(pct / 10)
+            bar    = "█" * filled + "░" * (10 - filled)
+            world_section = (
+                f"\n\n🌍 *{wf.get(WorldsFields.NAME, 'World')}*\n"
+                f"`{bar}` {pct}%\n"
+                f"{earned}/{target}🪙 | פרס: {wf.get(WorldsFields.PRIZE, '?')}"
+            )
+
+        bot.send_message(msg.chat.id, f"🪙 *סה״כ מטבעות: {total_coins}*{world_section}", parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"cmd_coins error: {e}")
+        bot.send_message(msg.chat.id, f"❌ שגיאה: {e}")
+
+
+# ── C20: /update command ─────────────────────────────────────────
+try:
+    from cmd_update import register_update_command
+    result = register_update_command(bot, resolve_identity)
+    logger.info("[C20] /update command registered")
+    logger.info(f"[app] register_update_command returned: {result}")
+except Exception as _e:
+    logger.warning(f"[C20] /update registration failed: {_e}")
+
+# ── Decision Hub (Stage 0): /decision command ────────────────────
+try:
+    from cmd_decision import register_decision_command
+    result = register_decision_command(bot, resolve_identity)
+    logger.info("[DecisionHub] /decision command registered")
+    logger.info(f"[app] register_decision_command returned: {result}")
+except Exception as _e:
+    logger.warning(f"[DecisionHub] /decision registration failed: {_e}")
+
+# ── C22: weekly summary callbacks ────────────────────────────────
+try:
+    from weekly_summary import register_weekly_callbacks
+    register_weekly_callbacks(bot)
+    logger.info("[C22] weekly summary callbacks registered")
+except Exception as _e:
+    logger.warning(f"[C22] weekly summary registration failed: {_e}")
+
+_scheduler_thread = next(
+    (t for t in threading.enumerate() if t.name == "scheduler" and t.is_alive()),
+    None,
+)
+if _scheduler_thread:
+    logger.info("[Scheduler] Already running — skipping init")
+    _scheduler = _scheduler_thread
+else:
+    try:
+        _scheduler = start_scheduler()
+        logger.info("Scheduler OK")
+    except Exception as e:
+        logger.error(f"Scheduler failed: {e}")
+
+if os.environ.get("SETUP_WEBHOOK") == "1":
+    try:
+        bot.remove_webhook()
+        kwargs = {"url": f"{RENDER_APP_URL}/telegram"}
+        if WEBHOOK_SECRET:
+            kwargs["secret_token"] = WEBHOOK_SECRET
+        bot.set_webhook(**kwargs)
+        logger.info(f"Telegram Webhook set (secret={'yes' if WEBHOOK_SECRET else 'no'})")
+    except Exception as e:
+        logger.error(f"Webhook failed: {e}")
+
+
+# ══════════════════════════════════════════════════
+# Integration Layer — CORE_02.6
+# ══════════════════════════════════════════════════
+
+def clarify_response(route: RouteDecision) -> str:
+    logger.info(f"[CLARIFY] intent={route.intent} conf={route.confidence:.2f}")
+    return route.response_override or "לא הצלחתי להבין — תוכל לנסח אחרת?"
+
+
+def approval_response(route: RouteDecision, original_text: str, chat_id: str,
+                       channel: str, domain: str) -> str:
+    """Saves original action and asks owner to confirm with כן/לא."""
+    logger.info(f"[APPROVAL] intent={route.intent} domain={route.domain} | saved for {chat_id}")
+    _pending_approvals[chat_id] = {
+        "text":       original_text,
+        "channel":    channel,
+        "domain":     domain,
+        "created_at": time.time(),
+    }
+    preview = original_text[:120] + ("…" if len(original_text) > 120 else "")
+    return (
+        f"⏳ *אישור נדרש*\n\n"
+        f"פעולה: `{preview}`\n\n"
+        f"ענה *כן* לביצוע או *לא* לביטול."
+    )
+
+
+# ══════════════════════════════════════════════════
+# Approval Gate Helpers
+# ══════════════════════════════════════════════════
+
+def _describe_tool_call(tool_name: str, inputs: dict) -> str:
+    """תיאור קריא של קריאת כלי לכפתורי אישור."""
+    if tool_name == "gmail_send_draft":
+        return f"📧 שלח מייל (draft: {inputs.get('draft_id', '?')})"
+    if tool_name == "calendar_create_event":
+        start = str(inputs.get("start_time", "?"))[:16]
+        return f"📅 קבע: {inputs.get('summary', '?')} ב-{start}"
+    if tool_name == "airtable_add":
+        fields_str = str(inputs.get("fields", {}))[:50]
+        return f"➕ הוסף ל-{inputs.get('table', '?')}: {fields_str}"
+    if tool_name == "airtable_update":
+        return f"✏️ עדכן {inputs.get('record_id', '?')} ב-{inputs.get('table', '?')}"
+    if tool_name == "sheets_append":
+        return f"📊 כתוב ל-{inputs.get('sheet_name', '?')}"
+    return f"⚡ {tool_name}: {str(inputs)[:60]}"
+
+
+def _queue_approval(tool_name: str, tool_inputs: dict,
+                    user_chat_id: str, channel: str) -> str:
+    """
+    שומר פעולה ממתינה ושולח בקשת אישור לowner.
+    מחזיר string לmodel: "⏳ ממתין לאישור..."
+    """
+    from event_bus import bus
+    label     = _describe_tool_call(tool_name, tool_inputs)
+    action_id, _ = bus.request_approval(
+        action  = tool_name,
+        payload = {
+            "tool_name":    tool_name,
+            "tool_inputs":  tool_inputs,
+            "user_chat_id": user_chat_id,
+            "channel":      channel,
+        },
+        chat_id = user_chat_id,
+        label   = label,
+    )
+
+    owner_chat_id = (
+        os.environ.get("OWNER_TELEGRAM_ID", "") or
+        os.environ.get("ELIYAHU_CHAT_ID", "") or
+        os.environ.get("DIGEST_CHAT_ID", "")
+    )
+    if owner_chat_id:
+        kb = telebot.types.InlineKeyboardMarkup()
+        kb.add(
+            telebot.types.InlineKeyboardButton("✅ אשר", callback_data=f"approve:{action_id}"),
+            telebot.types.InlineKeyboardButton("❌ בטל",  callback_data=f"reject:{action_id}"),
+        )
+        try:
+            bot.send_message(
+                owner_chat_id,
+                f"⏳ *בקשת אישור*\n\n{label}\n\n_ID: {action_id} | פג תוקף בעוד 10 דקות_",
+                parse_mode="Markdown",
+                reply_markup=kb,
+            )
+            logger.info(f"[Approval] ✅ sent to owner {owner_chat_id} | {action_id}")
+        except Exception as e:
+            logger.error(f"[Approval] ❌ failed to notify owner: {e}")
+            # BOSS NEVER FAKES: לא מחזירים "ממתין לאישור" כשהשליחה נכשלה
+            return (
+                f"❌ לא הצלחתי לשלוח בקשת אישור לבעלים.\n"
+                f"הפעולה לא בוצעה: {label}"
+            )
+
+    logger.info(f"[Approval] queued {action_id} | {tool_name} | user={user_chat_id}")
+    return f"⏳ הפעולה ממתינה לאישור הבעלים: {label}"
+
+
+def _tool_user_message(result) -> str:
+    """Extract display text from a C53-A structured tool result (dict) or pass through a plain string."""
+    if isinstance(result, dict):
+        msg = result.get("user_message")
+        if isinstance(msg, str) and msg:
+            return msg
+        return str(result)
+    return str(result or "")
+
+
+# ══════════════════════════════════════════════════
+# C60 — Tool Context Awareness (SPEC_C59_Tool_Context_Awareness.md;
+# tracked as C60 in docs — "C59" collides with the already-merged
+# Decision Hub Stage 1 Trust Layer).
+# ══════════════════════════════════════════════════
+
+def _capture_last_tool_result(chat_id: str, tool_name: str, result, tool_input: dict, ok: bool) -> None:
+    """שומר את תוצאת הכלי האחרונה ב-session — תיקון 'עיוורון כלים' בין סבבי agent.
+    result הוא חוזה C53-A {ok, tool, external_id, evidence, user_message} — לא
+    {id/record_id/url/drive_url} כמו שהספק הניח; הותאם לחוזה האמיתי בקוד."""
+    try:
+        from session_store import lead_sessions
+        from datetime import datetime, timezone
+
+        evidence = result.get("evidence", {}) if isinstance(result, dict) else {}
+        record_id = result.get("external_id", "") if isinstance(result, dict) else ""
+        url = evidence.get("htmlLink") or evidence.get("url") or "" if isinstance(evidence, dict) else ""
+
+        lead_sessions.set_last_tool_result(chat_id, {
+            "tool":      tool_name,
+            "status":    "success" if ok else "failed",
+            "summary":   _tool_user_message(result)[:120],
+            "record_id": record_id,
+            "url":       url,
+            "input":     str(tool_input)[:80],
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as e:
+        logger.warning(f"[C60] set_last_tool_result failed for {chat_id}: {e}")
+
+
+def _build_tool_context(chat_id: str, session: dict | None = None) -> str:
+    """מזריק תקציר 'מה הכלים עשו לאחרונה' ל-system prompt (TTL 5 דקות).
+    הספק קורא ל-_seconds_ago() ב-§5 בלי להגדיר אותה — ממומש כאן inline.
+
+    `session`: snapshot שכבר נטען ע"י הקורא (run_agent) — נמנע מקריאה כפולה
+    ל-lead_sessions באותה בקשה. אם לא הועבר, נטען כאן כ-fallback."""
+    from datetime import datetime, timezone
+
+    if session is None:
+        try:
+            from session_store import lead_sessions
+            session = lead_sessions.get(chat_id)
+        except Exception:
+            return ""
+
+    if not session:
+        return ""
+
+    ltr = session.get("last_tool_result")
+    luf = session.get("last_uploaded_file")
+    parts = []
+
+    if ltr and ltr.get("timestamp"):
+        try:
+            age = (datetime.now(timezone.utc) - datetime.fromisoformat(ltr["timestamp"])).total_seconds()
+        except Exception:
+            age = None
+        if age is not None and age < 300:
+            status_emoji = "✅" if ltr.get("status") == "success" else "❌"
+            line = (f"כלי אחרון שרץ ({int(age)}ש' לפני): {ltr.get('tool')} "
+                    f"{status_emoji} {ltr.get('summary', '')}")
+            if ltr.get("record_id"):
+                line += f" | רשומה: {ltr['record_id']}"
+            if ltr.get("url"):
+                line += f" | קישור: {ltr['url']}"
+            parts.append(line)
+
+    if luf:
+        parts.append(
+            f"קובץ אחרון שהועלה: {luf.get('original_filename', '')} "
+            f"({luf.get('type', '')}) | {luf.get('url', '')}"
+        )
+
+    if not parts:
+        return ""
+    return "\n🔧 הקשר כלים:\n" + "\n".join(f"• {p}" for p in parts)
+
+
+CONTEXT_PRONOUNS = {
+    "זה":          "last_tool_result",
+    "הנספח":       "last_file",
+    "הקובץ האחרון": "last_file",
+    "הקובץ":       "last_file",
+    "הקודם":       "last_tool_result",
+    "ההוא":        "last_tool_result",
+    "אותו":        "last_tool_result",
+}
+
+
+def resolve_context_pronouns(text: str, chat_id: str, session: dict | None = None) -> str:
+    """מחליף כינויי הצבעה ('זה'/'הנספח'/'הקודם' וכו') בהקשר אמיתי מה-session,
+    כדי שה-Router וה-LLM יראו התייחסות מפורשת במקום לנחש. נקרא לפני intent detection.
+
+    `session`: snapshot שכבר נטען ע"י הקורא (run_agent) — נמנע מקריאה כפולה
+    ל-lead_sessions באותה בקשה. אם לא הועבר, נטען כאן כ-fallback."""
+    if session is None:
+        try:
+            from session_store import lead_sessions
+            session = lead_sessions.get(chat_id)
+        except Exception:
+            return text
+
+    if not session:
+        return text
+
+    ltr = session.get("last_tool_result")
+    luf = session.get("last_uploaded_file")
+    resolved = text
+
+    for pronoun, ref_type in CONTEXT_PRONOUNS.items():
+        if pronoun in resolved:
+            if ref_type == "last_file" and luf:
+                resolved = resolved.replace(pronoun, f"הקובץ «{luf.get('original_filename', '')}»")
+            elif ref_type == "last_tool_result" and ltr:
+                resolved = resolved.replace(pronoun, f"הפעולה «{ltr.get('summary', '')}»")
+    return resolved
+
+
+def _handle_approval_callback(cq) -> None:
+    """H3 top-level handler — דק, מעביר ל-impl ומדווח שגיאות לא-מטופלות."""
+    try:
+        _handle_approval_callback_impl(cq)
+    except Exception as e:
+        from core.error_reporter import report_error
+        report_error(e, context="_handle_approval_callback")
+        raise
+
+
+def _handle_approval_callback_impl(cq) -> None:
+    """מטפל בלחיצה על ✅/❌ של בקשת אישור."""
+    from event_bus import bus
+
+    data = cq.data or ""
+    if ":" not in data:
+        bot.answer_callback_query(cq.id, "⚠️ נתוני callback לא תקינים")
+        return
+
+    action, action_id = data.split(":", 1)
+
+    if action in ("approve", "reject"):
+        approver_chat_id = str(getattr(cq.from_user, "id", "") or "")
+        approver_identity = resolve_identity("telegram", approver_chat_id)
+        if not (approver_identity.is_owner or approver_identity.can("actions.approve")):
+            logger.warning(
+                f"[Approval] unauthorized {action} attempt {action_id} "
+                f"by {approver_identity.user_id} role={approver_identity.role}"
+            )
+            bot.answer_callback_query(cq.id, "⛔ אין לך הרשאה לאשר פעולה זו")
+            return
+
+    if action == "approve":
+        # atomic pop — בדיקת TTL ומחיקה בצעד אחד
+        item = bus.pop(action_id)
+        if not item:
+            bot.answer_callback_query(cq.id, "⏰ פג תוקף — הפעולה לא קיימת יותר")
+            try:
+                bot.edit_message_reply_markup(cq.message.chat.id, cq.message.message_id,
+                                              reply_markup=None)
+            except Exception:
+                pass
+            return
+
+        payload       = item["payload"]
+        tool_name     = payload.get("tool_name")   # absent on non-tool approvals
+        user_chat_id  = payload.get("user_chat_id", item.get("chat_id", ""))
+        channel       = payload.get("channel", "telegram")
+
+        if not tool_name:
+            # Non-tool approval — emit {action}.confirmed event
+            bus_action = item.get("action", "")
+            logger.info(f"[Approval] non-tool confirm {action_id} | action={bus_action}")
+            from event_bus import bus as _bus
+            result = _bus.emit(f"{bus_action}.confirmed", payload, user_chat_id)
+            if result is None:
+                result = f"⚠️ אין handler ל-{bus_action} — הפעולה לא בוצעה."
+                logger.error(f"[Approval] no handler for {bus_action}.confirmed")
+        else:
+            tool_inputs = payload.get("tool_inputs", {})
+            identity    = resolve_identity(channel, user_chat_id)
+
+            try:
+                enforce(tool_name, identity)
+            except ToolDenied as e:
+                logger.warning(
+                    f"[Approval] denied approved action {action_id} | "
+                    f"{tool_name} | user={identity.user_id} role={identity.role}: {e}"
+                )
+                bot.answer_callback_query(cq.id, "⛔ הפעולה כבר אינה מורשית")
+                return
+
+            raw    = dispatch_tool(tool_name, tool_inputs, identity)
+            result = validate_tool_output(tool_name, raw)
+
+            exec_check = verify_execution(tool_name, result)
+            if exec_check.status == "failed":
+                logger.error(f"[Approval:A32] Execution failed: {tool_name} -- {exec_check.reason}")
+                fail_text = f"❌ הפעולה לא הושלמה: {exec_check.reason}"
+                try:
+                    bot.send_message(user_chat_id, fail_text)
+                except Exception as e:
+                    logger.error(f"[Approval] notify user failed: {e}")
+                try:
+                    bot.edit_message_text(
+                        f"❌ *אושר אך נכשל בביצוע*\n{item['label']}\n\n`{fail_text[:200]}`",
+                        cq.message.chat.id, cq.message.message_id,
+                        parse_mode="Markdown",
+                    )
+                except Exception:
+                    pass
+                bot.answer_callback_query(cq.id, "❌ הביצוע נכשל")
+                return
+            if exec_check.status == "warn":
+                logger.warning(f"[Approval:A32] Execution warn: {tool_name} -- {exec_check.reason}")
+            result = _tool_user_message(result)
+
+        logger.info(f"[Approval] ✅ confirmed {action_id} | {tool_name or item.get('action')}")
+
+        try:
+            bot.send_message(user_chat_id, f"✅ הפעולה בוצעה:\n{result}")
+        except Exception as e:
+            logger.error(f"[Approval] notify user failed: {e}")
+
+        try:
+            bot.edit_message_text(
+                f"✅ *אושר ובוצע*\n{item['label']}\n\n`{result[:200]}`",
+                cq.message.chat.id, cq.message.message_id,
+                parse_mode="Markdown",
+            )
+        except Exception:
+            pass
+        bot.answer_callback_query(cq.id, "✅ בוצע!")
+
+    elif action == "reject":
+        item = bus.pop(action_id)
+        if item:
+            logger.info("🚫 Rejected: %s | %s", action_id, item.get("label", item.get("action", "")))
+
+        if item:
+            user_chat_id = item["payload"].get("user_chat_id", "")
+            if user_chat_id:
+                try:
+                    bot.send_message(user_chat_id, f"🚫 הפעולה בוטלה: {item['label']}")
+                except Exception:
+                    pass
+
+        try:
+            bot.edit_message_text(
+                "🚫 *בוטל*",
+                cq.message.chat.id, cq.message.message_id,
+                parse_mode="Markdown",
+            )
+        except Exception:
+            pass
+        bot.answer_callback_query(cq.id, "🚫 בוטל")
+
+    else:
+        bot.answer_callback_query(cq.id, "⚠️ פעולה לא מוכרת")
+
+
+def _typing_indicator(chat_id: str, channel: str, stop_event: threading.Event, interval: float = 2.5) -> None:
+    """Send a periodic typing indicator while the Agent processes the request."""
+    if channel == "telegram":
+        try:
+            bot.send_chat_action(chat_id, "typing")
+        except Exception as e:
+            logger.debug(f"[Typing] failed for {chat_id}: {e}")
+
+    while not stop_event.wait(interval):
+        if channel == "telegram":
+            try:
+                bot.send_chat_action(chat_id, "typing")
+            except Exception as e:
+                logger.debug(f"[Typing] failed for {chat_id}: {e}")
+        else:
+            # Future platforms can be added here if they support typing indicators.
+            pass
+
+
+def _safe_route(text: str, channel: str, identity, domain_from_channel: str = "") -> RouteDecision:
+    """
+    עוטף את route_request עם fallback.
+    כלל ברזל #9: אם Router נכשל — ממשיכים עם intent=unknown, risk=review.
+    לא נופלים.
+    """
+    try:
+        return route_request(
+            text                = text,
+            channel_raw         = channel,
+            identity            = identity,
+            domain_from_channel = domain_from_channel,
+        )
+    except Exception as e:
+        logger.error(f"[Router] FAILED — fallback fail-closed: {e}", exc_info=True)
+        from core.router.route_decision import RouteDecision, Intent, RouterDomain, Risk, Handler
+        return RouteDecision(
+            channel           = channel,
+            intent            = Intent.UNKNOWN,
+            domain            = RouterDomain.GENERAL,
+            risk              = Risk.NEEDS_APPROVAL,  # fail-closed: router error → require approval
+            handler           = Handler.APPROVAL,
+            needs_approval    = True,
+            confidence        = 0.0,
+            matched_rule      = "fallback",
+            response_override = "",
+        )
+
+
+# ══════════════════════════════════════════════════
+# run_agent — Identity + Router + Agent Loop
+# ══════════════════════════════════════════════════
+
+def run_agent(
+    user_text:           str,
+    chat_id:             str,
+    channel:             str = "telegram",
+    domain_from_channel: str = "",
+    _skip_approval:      bool = False,
+    _resolved_domain:    dict | None = None,
+) -> str:
+
+    # ── 1. Identity ───────────────────────────────
+    identity = resolve_identity(channel, chat_id)
+    logger.info(f"[Identity] {identity}")
+    if identity.role in (Role.READONLY, Role.GUEST):
+        logger.warning(
+            f"[Identity] LOW-PRIVILEGE request — "
+            f"channel={channel} id={chat_id} role={identity.role} "
+            f"msg='{user_text[:60]}'"
+        )
+
+    # ── 1.5. WhatsApp Lead Capture (W0) ───────────
+    # W0/N02: capture inbound WhatsApp leads and optionally score them.
+    if identity.role == Role.LEAD:
+        try:
+            from lead_capture import capture_inbound_lead
+            capture_inbound_lead(identity, user_text)
+        except Exception as e:
+            logger.error(f"[LeadCapture] failed for {identity.memory_key}: {e}")
+
+    # ── 1.6. Session snapshot (request-scoped cache) ─────────────
+    # נטען פעם אחת ומועבר ל-resolve_context_pronouns / _build_tool_context,
+    # כדי שלא יקראו ל-lead_sessions בנפרד באותה בקשה (תיקון: Sessions נשאל
+    # פעמים רבות לאותה הודעה). חובה לטעון *אחרי* capture_inbound_lead —
+    # אם הוא יוצר/מעדכן session, snapshot שנטען לפניו יהיה ישן.
+    try:
+        from session_store import lead_sessions as _ls
+        _session_snapshot = _ls.get(chat_id)
+    except Exception:
+        _session_snapshot = None
+
+
+    # ── 2. Rate Limit ─────────────────────────────
+    if not rate_limiter.is_allowed(identity.memory_key):
+        return "⚠️ יותר מדי בקשות. המתן דקה ונסה שוב."
+
+    # ── 2.5. Pending Approval Gate ────────────────
+    pending = _pending_approvals.get(chat_id)
+    if pending:
+        if time.time() - pending.get("created_at", 0) > _PENDING_APPROVAL_TTL:
+            _pending_approvals.pop(chat_id, None)
+            logger.info("[PendingApproval] expired (>%ss) for %s",
+                        _PENDING_APPROVAL_TTL, chat_id)
+            pending = None
+    if pending:
+        lower = user_text.strip().lower()
+        if lower in _CONFIRM_WORDS:
+            _pending_approvals.pop(chat_id, None)
+            logger.info(
+                f"[PendingApproval] ✅ confirmed by {chat_id} → "
+                f"executing: {pending['text'][:60]}"
+            )
+            return run_agent(
+                pending["text"], chat_id, channel,
+                domain_from_channel=pending.get("domain", domain_from_channel),
+                _skip_approval=True,
+                _resolved_domain=_resolved_domain,
+            )
+        elif lower in _CANCEL_WORDS:
+            _pending_approvals.pop(chat_id, None)
+            logger.info(f"[PendingApproval] 🚫 cancelled by {chat_id}")
+            return "🚫 הפעולה בוטלה."
+        else:
+            # New unrelated message — clear stale pending, treat normally
+            _pending_approvals.pop(chat_id, None)
+
+    # ── 2.6. Context Pronoun Resolution (C60) ────────
+    # "תעלה לדסישנס"/"זה הנספח" וכד' — לפני intent detection, כדי שה-Router
+    # וה-LLM יראו התייחסות מפורשת במקום לנחש מהקשר חלקי.
+    user_text = resolve_context_pronouns(user_text, chat_id, session=_session_snapshot)
+
+    # ── 3. Router — CORE_02.6 Integration ────────
+    route = _safe_route(user_text, channel, identity, domain_from_channel)
+    logger.info(route.to_log())
+
+    # ── 3.5. Resolved-domain — single source of truth ──────────────
+    # תיקון: COG (_gateway_whatsapp_reply) ו-approval_response קיבלו את
+    # domain_from_channel הישן (לפני Router) במקום הדומיין הסופי שה-Router
+    # קבע. מחושב פעם אחת ומשמש גם ל-out-param וגם ל-approval flow.
+    resolved_route_domain = getattr(route.domain, "value", str(route.domain))
+    if _resolved_domain is not None:
+        _resolved_domain["domain"] = resolved_route_domain
+
+    # ── 4. Dispatch ───────────────────────────────
+    if route.handler == Handler.CLARIFY:
+        return clarify_response(route)
+
+    if route.handler == Handler.APPROVAL and not _skip_approval:
+        # שומרים את הדומיין שה-Router פתר בפועל, לא domain_from_channel הישן
+        # — אחרת pending approval ישמור domain שגוי (למשל "general") ויחזיר
+        # אותו ב-recursive call לאחר אישור.
+        return approval_response(route, user_text, chat_id, channel, resolved_route_domain)
+
+    # לא עושים BLOCK רגיל ללקוח — restricted ממשיך לסוכן
+    if route.restricted:
+        logger.warning(
+            f"[Restricted] external request: "
+            f"user={identity.user_id} role={identity.role} "
+            f"intent={route.intent} notify_owner=True tool_allowed=False"
+        )
+
+    # ── 5. Agent Loop ─────────────────────────────
+    if _flag_enabled("EMERGENCY_STOP_AI"):
+        logger.warning(
+            f"[CostWatchdog] EMERGENCY_STOP_AI active — blocking agent for {identity.user_id}"
+        )
+        return "⛔ מערכת ה-AI בעצירת חירום עקב עלות גבוהה. נסה שוב מאוחר יותר."
+
+    try:
+        research_mode = user_text.startswith("#") and identity.is_owner
+        clean_msg     = user_text[1:].strip() if research_mode else user_text
+
+        # Context מקבל domain + handler מהראוטר
+        ctx = build_context(
+            identity,
+            user_text,
+            domain  = route.domain,
+            handler = route.handler,
+            intent  = route.intent,
+        )
+        # C60: הזרקת "הקשר כלים" — מה רץ בסבב הקודם — ל-system prompt
+        ctx.system_prompt += _build_tool_context(chat_id, session=_session_snapshot)
+        history = memory.get_for_claude(ctx.memory_key)
+
+        # C4.1: trim history if too large — prevents silent context overflow
+        MAX_HISTORY_CHARS = 60_000
+        if len(str(history)) > MAX_HISTORY_CHARS:
+            logger.warning(
+                f"[Agent] history too large ({len(str(history))} chars) "
+                f"for {ctx.memory_key} — trimming to last 6 messages"
+            )
+            history = history[-6:]
+
+        messages = history + [{"role": "user", "content": clean_msg}]
+
+        logger.info(
+            f"[Agent] {ctx.identity_label} | "
+            f"intent={route.intent} domain={route.domain} | "
+            f"model={ctx.model} tools={len(ctx.allowed_tools)}"
+        )
+
+        final_reply     = "⚠️ לא התקבלה תשובה."
+        tool_calls_made = 0
+        tool_results_log: list[dict] = []   # A32: accumulates all tool results
+
+        while True:
+            response = client.messages.create(
+                model       = ctx.model,
+                max_tokens  = ctx.max_tokens,
+                temperature = 0.2,
+                system      = ctx.system_prompt,
+                tools       = ctx.allowed_tools,
+                messages    = messages,
+            )
+
+            cost_monitor.record_call(
+                model      = ctx.model,
+                tokens_in  = getattr(response.usage, "input_tokens",  0),
+                tokens_out = getattr(response.usage, "output_tokens", 0),
+                caller     = ctx.memory_key,
+            )
+            try:
+                from core.cost_watchdog import log_usage as _cw_log
+                _src_type = "claude_sonnet" if "sonnet" in ctx.model else "claude_haiku"
+                _cw_log(_src_type,
+                        getattr(response.usage, "input_tokens", 0) + getattr(response.usage, "output_tokens", 0),
+                        {"caller": ctx.memory_key})
+            except Exception:
+                pass
+
+            tool_uses   = [b for b in response.content if b.type == "tool_use"]
+            text_blocks = [b for b in response.content if b.type == "text"]
+
+            # C54: אם Claude ייצר text ו-tool_use באותה תשובה —
+            # ה-text נוצר לפני שראה תוצאה. מבטלים אותו.
+            # התשובה האמיתית תגיע ב-turn הבא עם ה-ToolResult.
+            if tool_uses and text_blocks:
+                logger.info(f"[C54] Suppressed premature text_block alongside tool_use: "
+                            f"{[b.text[:40] for b in text_blocks]}")
+                text_blocks = []
+
+            if not tool_uses:
+                final_reply = text_blocks[0].text if text_blocks else "✅ פעולה הושלמה."
+                break
+
+            if tool_calls_made >= MAX_TOOL_TURNS:
+                logger.warning(
+                    f"[Agent] reached max tool turns ({tool_calls_made}/{MAX_TOOL_TURNS}) "
+                    f"for user={identity.user_id} role={identity.role} intent={route.intent}"
+                )
+                final_reply = (text_blocks[0].text if text_blocks
+                               else "⚠️ הגעתי למגבלת הפעולות לריצה זו. נסה לפרק את הבקשה לשלבים.")
+                break
+
+            # ── Tool Loop ────────────────────────
+            tool_results = []
+            for tu in tool_uses:
+                if not route.tool_allowed:
+                    logger.info(f"[Tool] Silently blocked by route (restricted): {tu.name}")
+                    tool_results.append({
+                        "type":        "tool_result",
+                        "tool_use_id": tu.id,
+                        "content":     "הבקשה התקבלה ותועבר לטיפול.",
+                    })
+                    continue
+
+                try:
+                    meta = enforce(tu.name, identity)
+                except ToolDenied as e:
+                    logger.warning(f"[Tool] Denied: {tu.name} for {identity.role}")
+                    tool_results.append({
+                        "type": "tool_result", "tool_use_id": tu.id, "content": str(e)
+                    })
+                    continue
+
+                # ── Approval Gate ─────────────────────
+                if meta.requires_approval:
+                    result = _queue_approval(
+                        tu.name, dict(tu.input), chat_id, channel
+                    )
+                    tool_results.append({
+                        "type": "tool_result", "tool_use_id": tu.id, "content": result
+                    })
+                    continue
+
+                logger.info(f"[Tool] {tu.name} | {str(tu.input)[:80]}")
+                raw    = dispatch_tool(tu.name, tu.input, identity)
+                result = validate_tool_output(tu.name, raw)
+                result_text = _tool_user_message(result)
+                logger.info(f"[Tool] → {result_text[:80]}")
+
+                # A32 — verify tool actually succeeded
+                exec_check = verify_execution(tu.name, result)
+                if exec_check.status == "failed":
+                    logger.error(f"[A32] Execution failed: {tu.name} — {exec_check.reason}")
+                    result_text = f"❌ הפעולה לא הושלמה: {exec_check.reason}"
+                elif exec_check.status == "warn":
+                    logger.warning(f"[A32] Execution warn: {tu.name} — {exec_check.reason}")
+
+                # Fix 2: persist successful write results for next-turn memory
+                if tu.name in _MEMORABLE_TOOLS and "❌" not in result_text:
+                    memory.add(
+                        ctx.memory_key,
+                        "user",   # only "user"/"assistant" valid in Claude messages[]
+                        f"[🔧 {tu.name}]: {str(tu.input)[:60]} → {result_text[:60]}"
+                    )
+
+                entry = {"type": "tool_result", "tool_use_id": tu.id, "content": result_text}
+                tool_results.append(entry)
+                # A32: separate record (not sent to the API) — carries the real
+                # tool name + ok status so sanitize_agent_response can verify
+                # claims by tool identity, not by guessing from response text.
+                tool_results_log.append({
+                    "tool":    tu.name,
+                    "content": result_text,
+                    "ok":      exec_check.status != "failed",
+                })
+                # C60: זיכרון בין סבבים — "תעלה לדסישנס" אחרי כלי קודם יזהה שהוא רץ
+                _capture_last_tool_result(chat_id, tu.name, result, tu.input, exec_check.status != "failed")
+
+            tool_calls_made += 1
+
+            # ⏳ keep typing indicator alive between tool calls
+            if channel == "telegram":
+                try:
+                    bot.send_chat_action(chat_id, "typing")
+                except Exception:
+                    pass
+
+            messages.append({"role": "assistant", "content": response.content})
+            messages.append({"role": "user",      "content": tool_results})
+
+        # A32 — final hallucination check before reply reaches user
+        final_reply = sanitize_agent_response(final_reply, tool_results_log)
+
+        # ── שמירת זיכרון ─────────────────────────
+        memory.add(ctx.memory_key, "user",      clean_msg)
+        memory.add(ctx.memory_key, "assistant", final_reply)
+
+        return final_reply
+
+    except anthropic.APIStatusError as e:
+        logger.error(f"[Agent] Anthropic {e.status_code}: {e.message}")
+        _transient = e.status_code in (429, 529) or e.status_code >= 500
+        if _transient and _flag_enabled("LLM_FALLBACK"):
+            logger.warning(f"[Agent] Claude transient error {e.status_code} — OpenAI fallback for {chat_id}")
+            try:
+                fallback = llm_fallback.call_openai_text(
+                    source="run_agent.status_error",
+                    messages=[{"role": "user", "content": clean_msg}],
+                    system=ctx.system_prompt,
+                    max_tokens=ctx.max_tokens,
+                )
+                return sanitize_agent_response(fallback, [])
+            except Exception as fe:
+                logger.error(f"[Agent] OpenAI fallback failed: {fe}")
+        if e.status_code == 413:
+            return "❗ ההודעה ארוכה מדי. נסה לשלוח קצר יותר."
+        return f"מצטערים, יש תקלה זמנית ({e.status_code}). ננסה שוב בקרוב."
+    except anthropic.APITimeoutError:
+        logger.error(f"[Agent] Timeout for {chat_id}")
+        if _flag_enabled("LLM_FALLBACK"):
+            try:
+                fallback = llm_fallback.call_openai_text(
+                    source="run_agent.timeout",
+                    messages=[{"role": "user", "content": clean_msg}],
+                    system=ctx.system_prompt,
+                    max_tokens=ctx.max_tokens,
+                )
+                return sanitize_agent_response(fallback, [])
+            except Exception as fe:
+                logger.error(f"[Agent] OpenAI fallback also failed: {fe}")
+        return "מצטערים, יש תקלה זמנית. ננסה שוב בקרוב."
+    except Exception as e:
+        logger.error(f"[Agent] error: {e}", exc_info=True)
+        return "משהו השתבש. נסה שוב."
+
+
+# ══════════════════════════════════════════════════
+# Endpoints
+# ══════════════════════════════════════════════════
+
+# F16 — Media Layer: Telegram voice/photo/document intake
+def _handle_telegram_media(message) -> None:
+    chat_id = str(message.chat.id)
+    user_id = str(message.from_user.id)
+    owner_chat_id = (
+        os.environ.get("OWNER_TELEGRAM_ID", "") or
+        os.environ.get("ELIYAHU_CHAT_ID", "") or
+        os.environ.get("DIGEST_CHAT_ID", "")
+    )
+
+    try:
+        identity = resolve_identity("telegram", user_id)
+    except Exception as e:
+        logger.error(f"[Media] identity resolution failed: {e}")
+        return
+    domain = identity.domain_id
+
+    # ── Decision Hub Stage 0.5 — File/Voice Precedence Routing ───────
+    # SPEC_File_Precedence_Fix.md, Rule 9 (MODULE_RULES.md): an active
+    # Decision Inbox context wins over the default Drive/Voice flow below.
+    # Flag-gated + fully additive — zero behavior change when off/inactive.
+    try:
+        from feature_flags import is_enabled
+        if is_enabled("FEATURE_DECISION_HUB"):
+            from cmd_decision import decision_context_active, route_file_to_decision_inbox
+            if decision_context_active(message):
+                text = message.caption or getattr(message, "text", None) or ""
+                file_bytes, filename, mime_type = b"", "", ""
+                try:
+                    if message.content_type == "voice":
+                        file_info = bot.get_file(message.voice.file_id)
+                        file_bytes = bot.download_file(file_info.file_path)
+                        filename = f"{message.voice.file_id}.ogg"
+                        mime_type = message.voice.mime_type or "audio/ogg"
+                    elif message.content_type == "photo":
+                        photo = message.photo[-1]
+                        file_info = bot.get_file(photo.file_id)
+                        file_bytes = bot.download_file(file_info.file_path)
+                        filename = f"{photo.file_id}.jpg"
+                        mime_type = "image/jpeg"
+                    elif message.content_type == "document":
+                        doc = message.document
+                        file_info = bot.get_file(doc.file_id)
+                        file_bytes = bot.download_file(file_info.file_path)
+                        filename = doc.file_name or f"{doc.file_id}"
+                        mime_type = doc.mime_type or "application/octet-stream"
+
+                    route_file_to_decision_inbox(
+                        bot, identity, chat_id,
+                        text=text, file_bytes=file_bytes, filename=filename, mime_type=mime_type,
+                    )
+                except Exception as e:
+                    logger.error(f"[DecisionHub] precedence routing failed: {e}", exc_info=True)
+                    try:
+                        bot.send_message(chat_id, "❌ שגיאה בשמירה ל-Decision Inbox")
+                    except Exception:
+                        pass
+                return
+    except Exception as e:
+        logger.error(f"[DecisionHub] precedence gate error: {e}", exc_info=True)
+        # fall through to default Drive/Voice handling — fail-safe, not fail-closed
+
+    if message.content_type == "voice":
+        if not _flag_enabled("FEATURE_VOICE_NOTES"):
+            try:
+                bot.send_message(chat_id, "🎤 בקרוב — תמלול הודעות קוליות")
+            except Exception:
+                pass
+            return
+        try:
+            from media_handler import handle_voice_note, _format_media_result, _classify_size, MediaResult, MediaError
+
+            voice_size = message.voice.file_size or 0
+            if _classify_size(voice_size) == "oversized":
+                logger.info(f"[Media] oversized voice note ({voice_size} bytes) from user={user_id} — skipping download")
+                bot.send_message(chat_id, _format_media_result(MediaResult(
+                    ok=False, file_size_tier="oversized",
+                    error=MediaError("FILE_TOO_LARGE", "הקובץ גדול מ-50MB. הגודל המרבי הוא 50MB.", False),
+                )))
+                return
+
+            try:
+                bot.send_chat_action(chat_id, "typing")
+            except Exception:
+                pass
+
+            file_info = bot.get_file(message.voice.file_id)
+            audio_bytes = bot.download_file(file_info.file_path)
+            result = handle_voice_note(
+                audio_bytes=audio_bytes,
+                mime_type=message.voice.mime_type or "audio/ogg",
+                telegram_file_id=message.voice.file_id,
+                user_id=user_id,
+                domain=domain,
+                owner_chat_id=owner_chat_id,
+            )
+            bot.send_message(chat_id, _format_media_result(result))
+        except Exception as e:
+            logger.error(f"[Media] voice handling error: {e}", exc_info=True)
+            try:
+                bot.send_message(chat_id, "❌ שגיאה בעיבוד ההודעה הקולית")
+            except Exception:
+                pass
+        return
+
+    # photo / document
+    if not _flag_enabled("FEATURE_MEDIA_UPLOAD"):
+        try:
+            bot.send_message(chat_id, "📎 בקרוב — שמירת קבצים ל-Drive")
+        except Exception:
+            pass
+        return
+
+    try:
+        from media_handler import handle_file_upload, _format_media_result, _classify_size, MediaResult, MediaError
+
+        if message.content_type == "photo":
+            photo = message.photo[-1]
+            file_id = photo.file_id
+            filename = f"{file_id}.jpg"
+            mime_type = "image/jpeg"
+            file_type = "image"
+            file_size = photo.file_size or 0
+        else:
+            doc = message.document
+            file_id = doc.file_id
+            filename = doc.file_name or f"{file_id}"
+            mime_type = doc.mime_type or "application/octet-stream"
+            file_type = "document"
+            file_size = doc.file_size or 0
+
+        if _classify_size(file_size) == "oversized":
+            logger.info(f"[Media] oversized {file_type} ({file_size} bytes) from user={user_id} — skipping download")
+            bot.send_message(chat_id, _format_media_result(MediaResult(
+                ok=False, file_size_tier="oversized",
+                error=MediaError("FILE_TOO_LARGE", "הקובץ גדול מ-50MB. הגודל המרבי הוא 50MB.", False),
+            )))
+            return
+
+        try:
+            bot.send_chat_action(chat_id, "upload_document")
+        except Exception:
+            pass
+
+        file_info = bot.get_file(file_id)
+        file_bytes = bot.download_file(file_info.file_path)
+        result = handle_file_upload(
+            file_bytes=file_bytes,
+            filename=filename,
+            mime_type=mime_type,
+            file_type=file_type,
+            file_id=file_id,
+            user_id=user_id,
+            domain=domain,
+        )
+        if result.ok:
+            try:
+                from datetime import datetime, timezone
+                from session_store import lead_sessions, FileUploadResult
+                lead_sessions.set_last_file(
+                    user_id,
+                    FileUploadResult(
+                        type="drive_file",
+                        url=result.drive_url,
+                        file_id=result.asset_id,
+                        original_filename=filename,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        conversation_id=chat_id,
+                    ),
+                    domain=domain,
+                    channel="telegram",
+                )
+            except Exception as e:
+                logger.warning(f"[Media] set_last_file failed: {e}")
+        bot.send_message(chat_id, _format_media_result(result))
+    except Exception as e:
+        logger.error(f"[Media] file handling error: {e}", exc_info=True)
+        try:
+            bot.send_message(chat_id, "❌ שגיאה בשמירת הקובץ")
+        except Exception:
+            pass
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    health_status = get_health_status(globals().get("_scheduler"), memory)
+    return jsonify({"status": health_status["status"]}), 200
+
+
+@app.route("/telegram", methods=["POST"])
+def webhook_telegram():
+    """H1 top-level handler — דק, מעביר ל-impl ומדווח שגיאות לא-מטופלות."""
+    try:
+        return _webhook_telegram_impl()
+    except Exception as e:
+        from core.error_reporter import report_error
+        report_error(e, context="webhook_telegram")
+        raise
+
+
+def _webhook_telegram_impl():
+    if request.headers.get("content-type") != "application/json":
+        abort(403)
+    if not WEBHOOK_SECRET:
+        logger.error("[Webhook] TELEGRAM_WEBHOOK_SECRET not set — rejecting (fail-closed)")
+        logger.error("[Webhook] WEBHOOK_SECRET not set — rejecting request (fail-closed)")
+        abort(403)
+    if request.headers.get("X-Telegram-Bot-Api-Secret-Token", "") != WEBHOOK_SECRET:
+        logger.warning(f"[Webhook] bad secret from {request.remote_addr}")
+        abort(403)
+    update = telebot.types.Update.de_json(request.get_data().decode("utf-8"))
+
+    if update.callback_query:
+        call = update.callback_query
+        data = call.data or ""
+        try:
+            if data.startswith(("approve:", "reject:")):
+                _handle_approval_callback(call)
+            else:
+                # העבר ל-pyTeleBot handlers (upd_domain:, upd_type:, weekly summary וכו')
+                bot.process_new_updates([update])
+        except Exception as e:
+            logger.error(f"[Telegram] callback error: {e}", exc_info=True)
+        return "", 200
+
+    if update.message and update.message.text:
+        reply_chat_id  = str(update.message.chat.id)       # לאן לשלוח (group או private)
+        sender_user_id = str(update.message.from_user.id)  # מי שלח (תמיד USER_ID)
+        text           = update.message.text
+
+        # Slash commands → registered @bot.message_handler(commands=[...]) handlers.
+        # They authenticate via resolve_identity internally; we don't go through run_agent.
+        if text.startswith("/"):
+            try:
+                bot.process_new_updates([update])
+            except Exception as e:
+                logger.error(f"[Command] dispatch error: {e}", exc_info=True)
+                from core.error_reporter import report_error
+                report_error(e, context="command_dispatch")
+            return "", 200
+
+        if idempotency.is_duplicate("telegram", sender_user_id, text):
+            try:
+                bot.send_message(
+                    reply_chat_id,
+                    "♻️ ההודעה הזו כבר טופלה.\n"
+                    "אם זו בקשה חדשה — נסח אותה אחרת."
+                )
+            except Exception as e:
+                logger.debug(f"[Idempotency] notify failed: {e}")
+            return "", 200
+
+        # ── Decision Hub Stage 0.6 — "זה הנספח" attachment reference ──
+        # SPEC_File_Context_Reference.md, Rule 10: max one linking question.
+        # Telegram-specific (inline keyboards) — handled here, not in the
+        # channel-agnostic run_agent. Flag-gated + additive.
+        if _flag_enabled("FEATURE_DECISION_HUB"):
+            try:
+                from cmd_decision import is_attachment_reference, handle_attachment_reference
+                if is_attachment_reference(text):
+                    identity_for_ref = resolve_identity("telegram", sender_user_id)
+                    if handle_attachment_reference(bot, identity_for_ref, reply_chat_id, text):
+                        return "", 200
+            except Exception as e:
+                logger.error(f"[DecisionHub] attachment reference handling failed: {e}", exc_info=True)
+
+        # ── Thinking Indicator ────────────────────────────────────
+        thinking_msg_id = None
+        try:
+            thinking_msg    = bot.send_message(reply_chat_id, "⏳")
+            thinking_msg_id = thinking_msg.message_id
+        except Exception:
+            pass
+
+        # typing thread כגיבוי (למקרה ש-⏳ לא נשלח)
+        typing_stop   = threading.Event()
+        typing_thread = threading.Thread(
+            target=_typing_indicator,
+            args=(reply_chat_id, "telegram", typing_stop),
+            daemon=True,
+        )
+        typing_thread.start()
+
+        try:
+            reply = run_agent(text, sender_user_id, channel="telegram")
+        except Exception as e:
+            from core.error_reporter import report_error
+            report_error(e, context="run_agent (telegram)")
+            reply = "⚠️ קרתה שגיאה בעיבוד ההודעה. נסה שוב בעוד רגע."
+        finally:
+            typing_stop.set()
+            typing_thread.join(timeout=1.0)
+            if thinking_msg_id:
+                try:
+                    bot.delete_message(reply_chat_id, thinking_msg_id)
+                except Exception:
+                    pass
+
+        try:
+            bot.send_message(reply_chat_id, reply)
+        except Exception as e:
+            logger.error(f"[Telegram] send error: {e}")
+        return "", 200
+
+    # F16 — Media Layer: voice notes / photo / document uploads
+    if update.message and update.message.content_type in ("voice", "photo", "document"):
+        _handle_telegram_media(update.message)
+        return "", 200
+
+    return "", 200
+
+
+@app.route("/whatsapp", methods=["POST"])
+def webhook_whatsapp():
+    """H2 top-level handler — דק, מעביר ל-impl ומדווח שגיאות לא-מטופלות."""
+    try:
+        return _webhook_whatsapp_impl()
+    except Exception as e:
+        from core.error_reporter import report_error
+        report_error(e, context="webhook_whatsapp")
+        raise
+
+
+def _webhook_whatsapp_impl():
+    if not _validate_twilio_signature():
+        return Response("Forbidden", status=403)
+
+    incoming  = request.values.get("Body", "").strip()
+    sender_raw = request.values.get("From", "whatsapp:unknown")
+    sender     = sender_raw.removeprefix("whatsapp:")   # "+972XXXXXXXXX"
+    to_number  = request.values.get("To",   "whatsapp:unknown")
+    msg_sid   = request.values.get("MessageSid", "")
+
+    if _is_junk_inbound_text(incoming):
+        logger.info("[WhatsApp] junk inbound ignored before LLM")
+        return _empty_twiml()
+
+    # domain לפי מספר היעד — Layer 1 של domain_router
+    domain_from_channel = _channel_domain(to_number)
+
+    dedup_key = msg_sid if msg_sid else incoming
+    if idempotency.is_duplicate("whatsapp", sender, dedup_key):
+        return _empty_twiml()
+
+    if _inject_utm:
+        try:
+            _inject_utm(
+                memory_key   = f"whatsapp:{sender}",
+                request_args = request.values.to_dict(),
+                channel      = "whatsapp",
+            )
+        except Exception as _utm_err:
+            logger.debug(f"[UTM] whatsapp inject skipped: {_utm_err}")
+
+    # furniture funnel pre-agent intercept — only when domain == "furniture_import"
+    # if FURNITURE_TWILIO_WHATSAPP_NUMBER is unset, get_domain() returns "general" → skipped
+    try:
+        from furniture_lead_funnel import handle_furniture_lead_message
+        funnel_reply = handle_furniture_lead_message(sender, incoming, domain_from_channel)
+        if funnel_reply:
+            gated_reply = _gateway_whatsapp_reply(sender, funnel_reply, domain_from_channel, msg_sid or sender)
+            resp = MessagingResponse()
+            if gated_reply is not None:
+                resp.message(gated_reply)
+            return Response(str(resp), mimetype="application/xml")
+    except Exception as e:
+        logger.warning("[FurnitureFunnel] fallback to agent: %s", e)
+
+    _resolved = {}
+    agent_reply = run_agent(
+        incoming, sender,
+        channel             = "whatsapp",
+        domain_from_channel = domain_from_channel,
+        _resolved_domain    = _resolved,
+    )
+    # תיקון: COG מקבל את הדומיין הסופי (אחרי Router), לא domain_from_channel
+    # הישן שנקבע לפני שה-Router רץ — אחרת domain=general נרשם ב-COG גם
+    # כששה-Router/Context זיהו דומיין אחר (למשל real_estate).
+    final_domain = _resolved.get("domain") or domain_from_channel
+    gated_reply = _gateway_whatsapp_reply(sender, agent_reply, final_domain, msg_sid or sender)
+    resp = MessagingResponse()
+    if gated_reply is not None:
+        resp.message(gated_reply)
+    return Response(str(resp), mimetype="application/xml")
+
+
+# ════════════════════════════════════════════════════════════════
+# F05a — Meta WhatsApp Cloud API (Phase 1 — inbound only)
+# ════════════════════════════════════════════════════════════════
+
+@app.route("/webhooks/meta/whatsapp", methods=["GET", "POST"])
+def webhook_meta_whatsapp():
+    if request.method == "GET":
+        mode      = request.args.get("hub.mode")
+        token     = request.args.get("hub.verify_token")
+        challenge = request.args.get("hub.challenge", "")
+        expected_token = os.environ.get("META_VERIFY_TOKEN", "")
+        if mode == "subscribe" and expected_token and token == expected_token:
+            return challenge, 200
+        logger.warning("[Meta WhatsApp] אימות GET נכשל")
+        return "Forbidden", 403
+
+    # ── POST ──────────────────────────────────────────────────────
+    if _flag_enabled("EMERGENCY_STOP_WHATSAPP"):
+        logger.warning("[Meta WhatsApp] EMERGENCY_STOP_WHATSAPP פעיל — מתעלם")
+        return jsonify({"status": "stopped"}), 200
+
+    if not _validate_meta_signature():
+        return Response("Forbidden", status=403)
+
+    payload    = request.get_json(silent=True) or {}
+    normalized = _normalize_meta_payload(payload)
+    if normalized is None:
+        return jsonify({"status": "ignored"}), 200
+
+    incoming      = normalized["text"]
+    sender        = normalized["from"]
+    to_number     = normalized["to"]
+    msg_id        = normalized["msg_id"]
+
+    if _is_junk_inbound_text(incoming):
+        logger.info("[Meta WhatsApp] junk inbound — מתעלם לפני LLM")
+        return jsonify({"status": "ignored"}), 200
+
+    if idempotency.is_duplicate("whatsapp_meta", sender, msg_id):
+        return jsonify({"status": "duplicate"}), 200
+
+    domain_from_channel = _channel_domain(to_number)
+
+    if not _flag_enabled("META_OUTBOUND_ENABLED"):
+        logger.info(
+            "[Meta WhatsApp] inbound received — outbound stub, skipping run_agent. "
+            "Set META_OUTBOUND_ENABLED=true to activate."
+        )
+        return jsonify({"status": "received_no_outbound"}), 200
+
+    reply = run_agent(
+        incoming, sender,
+        channel             = "whatsapp",
+        domain_from_channel = domain_from_channel,
+    )
+
+    # Outbound — stub כנה: מחשב תשובה, לא שולח (Phase 1)
+    logger.info("[Meta WhatsApp] תשובה נוצרה (stub — לא נשלחה): %s", reply[:100])
+    return jsonify({"status": "received"}), 200
+
+
+WORKER_SECRET = os.environ.get("WORKER_SECRET", "")
+
+@app.route("/worker/trigger", methods=["POST"])
+def worker_trigger():
+    auth_header = request.headers.get("Authorization", "")
+    if not WORKER_SECRET or auth_header != f"Bearer {WORKER_SECRET}":
+        logger.warning(f"[Worker] unauthorized attempt from {request.remote_addr}")
+        return jsonify({"error": "unauthorized"}), 401
+    try:
+        # chat_id is never accepted from the caller — always derived from server config
+        # to prevent impersonation even if WORKER_SECRET leaks.
+        owner_chat_id = os.environ.get("ELIYAHU_CHAT_ID", "").strip()
+        if not owner_chat_id:
+            logger.error("[Worker] ELIYAHU_CHAT_ID not configured")
+            return jsonify({"error": "server misconfiguration"}), 503
+        payload = request.get_json(force=True) or {}
+        event   = payload.get("event", "")
+        if not event:
+            return jsonify({"error": "event required"}), 400
+        reply = run_agent(f"[system event]: {event}", owner_chat_id)
+        try:
+            bot.send_message(owner_chat_id, reply)
+        except Exception as e:
+            logger.error(f"[Worker] telegram: {e}")
+        return jsonify({"status": "ok", "reply": reply[:200]}), 200
+    except Exception as e:
+        logger.error(f"[Worker] trigger error: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/")
+def home():
+    return "The Boss is Live v3.0 — CORE_02.6 Router ✅"
+
+
+# ══════════════════════════════════════════════════
+# F07 — Voice IVR (Twilio)
+# ══════════════════════════════════════════════════
+
+@app.route("/voice/incoming", methods=["POST"])
+def voice_incoming():
+    if not _validate_twilio_signature():
+        from_num = request.form.get("From", "unknown")
+        logger.warning("[Voice] invalid Twilio signature from %s — possible spoofing", from_num)
+        return Response("Forbidden", status=403)
+    from feature_flags import is_enabled
+    from voice_adapter import build_twiml, _say, _hangup, process_voice_step
+    if not is_enabled("VOICE_IVR"):
+        return Response(build_twiml(_say("השירות לא פעיל.") + _hangup()), mimetype="text/xml")
+    call_sid = request.form.get("CallSid", "")
+    from_num = request.form.get("From", "").replace("whatsapp:", "")
+    return Response(process_voice_step(call_sid, from_num), mimetype="text/xml")
+
+
+@app.route("/voice/step", methods=["POST"])
+def voice_step():
+    if not _validate_twilio_signature():
+        from_num = request.form.get("From", "unknown")
+        logger.warning("[Voice] invalid Twilio signature from %s — possible spoofing", from_num)
+        return Response("Forbidden", status=403)
+    from voice_adapter import process_voice_step
+    call_sid = request.form.get("CallSid", "")
+    from_num = request.form.get("From", "").replace("whatsapp:", "")
+    digits   = request.form.get("Digits", "")
+    return Response(process_voice_step(call_sid, from_num, digits), mimetype="text/xml")
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
