@@ -373,6 +373,22 @@ gate + Drive-upload `set_last_file` hook + `_webhook_telegram_impl` "זה הנס
 Stage 2 ב-PR #157; Stage 3 ב-PR #159; Stage 4 ב-PR #161; Stage 5 ב-PRs #162–#164;
 Stage 6 ב-PR #166. דגלי Decision Hub כבויים כברירת מחדל. המיזוגים אומתו ב-main, אך
 **Production Verified נשאר לא** עד אימות ידני לאחר פריסה. ראו F17–F21 למטה.
+
+#### Decision Hub — ledger מאוחד ל-Stages 1–6
+
+| Stage | ROADMAP | יכולת שמומשה | PR | Commit / Merge | בדיקות | סטטוס מאומת |
+|---|---|---|---|---|---|---|
+| 1 | C59 / N13 | Trust Layer — Authority × Medium × Verify | #151 | `73f6fe8` / `b289ab6` | 33/33 | מוזג ל-`main`; Production Verified: לא |
+| 2 | F17 | Smart Trust — conflicts, confidence, evidence graph, missing evidence | #157 | `9252b1e` / `78f9bae` | 28/28 | מוזג ל-`main`; Production Verified: לא |
+| 3 | F18 | Readiness Engine — READY / NOT_READY / REVIEW | #159 | `84cfcff` / `50f6351` | 25/25 | מוזג ל-`main`; Production Verified: לא |
+| 4 | F19 | Attention Engine — תעדוף דטרמיניסטי read-only | #161 | `3e79a03`, `1281dda` / `fb4d041` | 11/11 | מוזג ל-`main`; Production Verified: לא |
+| 5 | F20 | Auto Ingestion — WhatsApp/email/document/voice ל-Inbox בלבד | #162–#164 | `9b97319` / `8f58634`; `bbea097` / `ebf0261`; `22eae2e` / `076fb0c` | 18/18; Confidence 28/28 | מוזג ל-`main`; Production Verified: לא |
+| 6 | F21 | Lifecycle Orchestrator — COLLECTING עד CLOSED | #166 | `9011923` / `2c55c59` | 13/13 | מוזג ל-`main`; Production Verified: לא |
+
+**סיכום בדיקות Decision Hub:** ‏128/128 (33 + 28 + 25 + 11 + 18 + 13). כל השלבים
+1–6 קיימים ב-`main`; דגלי הפיצ'ר נשארים כבויים כברירת מחדל, ואין כאן טענת פריסה או אימות
+ידני בפרודקשן.
+
 **Verification ראיה:** `py_compile` נקי על שלושת הקבצים; `session_store.py` self-test
 18/20 עברו (2 כשלים קיימים מראש, mock-import-path בלתי תלוי בשינוי זה); אין אימות
 בפרודקשן עדיין — דגל כבוי.

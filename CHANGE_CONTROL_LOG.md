@@ -23,6 +23,28 @@
 
 > נבנה מ-`git log --since="30 days ago"` (~172 commits, `f935c53`→`eebf73b`) + טבלאות ROADMAP.md (Stabilization Sprint, World 2, Sprint 16/06). כל commit hash צוטט ישירות מ-git או מ-ROADMAP — שורות שלא נמצאה להן ראיה ישירה מסומנות "לא ידוע".
 
+### Decision Hub Stages 1–6 — consolidated merge ledger
+- **תאריך עדכון:** 28/06/2026
+- **סוג:** Documentation / status reconciliation בלבד — ללא שינוי קוד או התנהגות
+- **Requirement:** ROADMAP.md §N13, §F17–§F21
+
+| Stage | יכולת | PR | Commit / Merge | בדיקות | מצב |
+|---|---|---|---|---|---|
+| 1 | Trust Layer | #151 | `73f6fe8` / `b289ab6` | 33/33 | מוזג ל-`main`; Production Verified: לא |
+| 2 | Smart Trust / Confidence | #157 | `9252b1e` / `78f9bae` | 28/28 | מוזג ל-`main`; Production Verified: לא |
+| 3 | Readiness Engine | #159 | `84cfcff` / `50f6351` | 25/25 | מוזג ל-`main`; Production Verified: לא |
+| 4 | Attention Engine | #161 | `3e79a03`, `1281dda` / `fb4d041` | 11/11 | מוזג ל-`main`; Production Verified: לא |
+| 5 | Auto Ingestion | #162–#164 | `9b97319` / `8f58634`; `bbea097` / `ebf0261`; `22eae2e` / `076fb0c` | 18/18; Confidence 28/28 | מוזג ל-`main`; Production Verified: לא |
+| 6 | Lifecycle Orchestrator | #166 | `9011923` / `2c55c59` | 13/13 | מוזג ל-`main`; Production Verified: לא |
+
+- **Verification ראיה:** כל מזהי ה-commit/merge לעיל קיימים בהיסטוריית git; סך בדיקות Decision Hub ‏128/128. עבור Stage 6 בוצעו גם post-merge sync ו-grep פיזי ב-`main` לפי AGENTS.md.
+- **Deploy תאריך:** לא אומת ידנית
+- **Verified בפרודקשן:** לא — הרשומה מאמתת merge ובדיקות בלבד
+- **Feature Flags:** `FEATURE_DECISION_HUB` ו-`FEATURE_DECISION_AUTO_INGESTION` כבויים כברירת מחדל
+- **Docs עודכנו:** ROADMAP.md, CHANGE_CONTROL_LOG.md
+
+---
+
 ### F21 — Decision Hub Stage 6: Lifecycle Orchestrator
 - **תאריך:** 28/06/2026
 - **סוג:** Feature — read-only, מאחורי `FEATURE_DECISION_HUB` הכבוי כברירת מחדל
