@@ -263,13 +263,20 @@ def resolve_identity(channel: str, external_id: str) -> Identity:
 
     # מספר לא מוכר = ליד פוטנציאלי
     # memory_key יהיה boss_hq:{external_id} — canonical key לכל הטבלאות
-    # (לא whatsapp:{external_id} — זה רק ה-registry lookup key)
+    #
+    # BUG-NEW-01 ROOT CAUSE FIX:
+    # display_name חייב להיות ריק — לא "ליד חדש".
+    # lead_capture.py כותב: LeadFields.NAME = identity.display_name or identity.external_id
+    # כאשר display_name = "ליד חדש", הערך "ליד חדש" נכתב לשדה Name של כל ליד.
+    # שדה Name הוא ה-Primary Field של Airtable — הוא מופיע בכל Linked Record בכל טבלה.
+    # לכן "ליד חדש" התפשט ונראה כאילו כל השדות מכילים אותו.
+    # הפתרון: display_name="" → lead_capture כותב את הטלפון (external_id) כ-Name.
     is_whatsapp = channel == "whatsapp"
     return Identity(
         tenant_id    = "boss_hq",
         user_id      = external_id,
         role         = Role.LEAD if is_whatsapp else Role.READONLY,
-        display_name = "ליד חדש",
+        display_name = "",          # ← ריק בכוונה — ראה הסבר מעל
         channel      = channel,
         external_id  = external_id,
         domain_id    = Domain.GENERAL,

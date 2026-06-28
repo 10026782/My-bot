@@ -3,11 +3,14 @@
 # - LEAD_CAPTURE: enables capture, default off
 # - LEAD_SCORING: scores first captured message after create, default off
 
+from __future__ import annotations
 import logging
 import re
+from typing import TYPE_CHECKING
 
 from airtable_schema import LeadFields, Tables
 from feature_flags import is_enabled
+from core.action_result import ActionResult, ClaimType
 
 logger = logging.getLogger(__name__)
 
@@ -99,48 +102,54 @@ def tier_from_score(score: int) -> str:
     return "COLD"
 
 
-def capture_inbound_lead(identity, message: str) -> None:
+def capture_inbound_lead(identity, message: str) -> "ActionResult":
     """
     Called from run_agent after resolve_identity, only for identity.role == Role.LEAD.
     Idempotent by memory_key. Existing Leads are not overwritten.
     Never raises: failures here must not break the conversational reply.
     """
     if not is_enabled("LEAD_CAPTURE"):
-        return
+        return ActionResult.failure("LEAD_CAPTURE disabled", source="lead_capture")
     if _is_junk_inbound_text(message):
         logger.info("[LeadCapture] junk inbound ignored before Airtable write")
-        return
+        return ActionResult.failure("junk_inbound", source="lead_capture")
 
-    memory_key = identity.memory_key  # תמיד boss_hq:+972... — canonical key
+    memory_key = identity.memory_key
     try:
-        from tools.airtable_tools import airtable_add, airtable_get, airtable_update
+        from tools.airtable_tools import airtable_add, airtable_get
 
-        # BUG-NEW-02: חיפוש לפי memory_key בלבד (boss_hq:+972...) — לא whatsapp:+972...
-        # memory_key = identity.memory_key = f"{tenant_id}:{user_id}" = "boss_hq:+972..."
+        # airtable_get מחזיר str — re.search תקין כאן
         raw = airtable_get(Tables.LEADS, f"{{{LeadFields.MEMORY_KEY}}}='{memory_key}'")
-        rec_m = re.search(r"rec\w+", raw or "")
-
-        if rec_m:
+        if isinstance(raw, str) and re.search(r"rec\w+", raw):
             logger.debug("[LeadCapture] lead already exists, skipping: %s", memory_key)
-            return
+            return ActionResult(
+                business_success=True, record_id="existing",
+                claim_type=ClaimType.CREATED, source="lead_capture"
+            )
 
+        # ALLOWLIST — רק שדות מוגדרים מפורשות.
+        # display_name="" (identity.py) → טלפון כ-Name (Primary Field), לא "ליד חדש"
+        _lead_name = identity.display_name or identity.external_id or "unknown"
         fields = {
-            LeadFields.NAME: identity.display_name or identity.external_id,
-            LeadFields.PHONE: identity.external_id,
-            LeadFields.CHANNEL: identity.channel,
+            LeadFields.NAME:       _lead_name,
+            LeadFields.PHONE:      identity.external_id,
+            LeadFields.CHANNEL:    identity.channel,
             LeadFields.MEMORY_KEY: memory_key,
-            LeadFields.SOURCE: "whatsapp_inbound",
-            LeadFields.STATUS: "new",
-            LeadFields.SUMMARY: (message or "")[:500],
-            LeadFields.SCORE: 0,  # BUG-NEW-01: default 0, לא ריק — נוסחאות Tier נשענות על מספר
+            LeadFields.SOURCE:     "whatsapp_inbound",
+            LeadFields.STATUS:     "new",
+            LeadFields.SUMMARY:    (message or "")[:500],
+            LeadFields.SCORE:      0,   # default 0 — נוסחאות Tier נשענות על מספר
         }
 
-        result = airtable_add(Tables.LEADS, fields)
-        lead_id_m = re.search(r"rec\w+", result or "")
-        lead_id = lead_id_m.group(0) if lead_id_m else "unknown"
+        # BUG FIX: airtable_add מחזיר dict (C53-A), לא string.
+        # ActionResult.from_airtable_add מטפל בחוזה נכון ולא יכול לקבל TypeError.
+        raw_result = airtable_add(Tables.LEADS, fields)
+        ar = ActionResult.from_airtable_add(raw_result, source="lead_capture")
+        ar.claim_type = ClaimType.CREATED
+        lead_id = ar.record_id
 
-        if "✅" in result:
-            logger.info("[LeadCapture] created new lead: %s", memory_key)
+        if ar.business_success:
+            logger.info("[LeadCapture] created new lead: %s rec=%s", memory_key, lead_id)
             # N04-A — sync basic contact info to lead_memory regardless of scoring flag
             if is_enabled("LEAD_MEMORY"):
                 try:
@@ -196,7 +205,10 @@ def capture_inbound_lead(identity, message: str) -> None:
                 except Exception as e:
                     logger.warning("[LeadCapture] scoring failed for %s: %s", lead_id, e)
         else:
-            logger.warning("[LeadCapture] create failed for %s: %s", memory_key, result)
+            logger.warning("[LeadCapture] create failed for %s: %s", memory_key, raw_result)
+            return ar
 
     except Exception as e:
         logger.error("[LeadCapture] capture_inbound_lead error for %s: %s", memory_key, e)
+        return ActionResult.failure(str(e), source="lead_capture")
+    return ar
