@@ -1,6 +1,15 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 28/06/2026 (מאוחר ביותר) — main = `2c55c59` (אומת ב-`git pull origin main` + grep
+עודכן: 29/06/2026 (מאוחר ביותר) — branch `fix/cxx-action-integrity-cleanup`, מבוסס על
+`origin/main` ב-`ca1f5a0`. **CXX Action Integrity cleanup — Implemented but not yet
+verified:** `core/adapters/__init__.py` תוקן; ששת קובצי `DOC-20260628-WA*.py` הוסרו לאחר
+השוואה וחילוץ; WhatsApp stub מחזיר `ActionResult` בלי לטעון לשליחה; Output Gateway משמר
+את ראיית ה-adapter; `RequestContext` חובר ל-identity/lead/session/domain ב-`run_agent` בלי
+לדרוס את תיקוני session-cache/resolved-domain שכבר ב-main; נוספו 6 בדיקות CXX. רצף
+ה־backend CI המלא עבר מקומית עם dependencies מבודדים; GitHub CI, merge, deploy ואימות
+פרודקשן עדיין לא בוצעו.
+
+עודכן (קודם): 28/06/2026 — main = `2c55c59` (אומת ב-`git pull origin main` + grep
 פיזי לפי AGENTS.md). **PR #166 מוזג** — Decision Hub Stage 6 (F21): orchestrator read-only עם
 ששת מצבי ה-lifecycle (`COLLECTING`/`BLOCKED`/`REVIEW`/`AWAITING`/`DECIDED`/`CLOSED`),
 ניתוב first-match, שימוש ב-`ConfidenceResult` שכבר חושב Stage 2, fallback דטרמיניסטי ללא

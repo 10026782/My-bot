@@ -23,6 +23,21 @@
 
 > נבנה מ-`git log --since="30 days ago"` (~172 commits, `f935c53`→`eebf73b`) + טבלאות ROADMAP.md (Stabilization Sprint, World 2, Sprint 16/06). כל commit hash צוטט ישירות מ-git או מ-ROADMAP — שורות שלא נמצאה להן ראיה ישירה מסומנות "לא ידוע".
 
+### CXX — Action Integrity cleanup and DOC upload reconciliation
+- **תאריך:** 29/06/2026
+- **סוג:** Bug Fix / File Hygiene / Contract Wiring
+- **Requirement:** reconcile `DOC-20260628-WA*.py`, restore the adapters package, and add minimal CXX regression coverage
+- **Commit:** pending
+- **PR:** pending
+- **Deploy תאריך:** לא בוצע
+- **Verified בפרודקשן:** לא
+- **Verification ראיה:** branch מבוסס `origin/main@ca1f5a0`; mirror מקומי של backend CI עבר: compileall, smoke tests, core imports וכל 19 קובצי `test_*.py`, כולל CXX ‏6/6. GitHub CI ממתין ל-push/PR.
+- **Docs עודכנו:** ROADMAP.md, CHANGE_CONTROL_LOG.md
+- **Feature Flag:** ללא שינוי
+- **Rollback plan:** revert commit/PR; אין שינוי schema או נתונים
+
+---
+
 ### Decision Hub Stages 1–6 — consolidated merge ledger
 - **תאריך עדכון:** 28/06/2026
 - **סוג:** Documentation / status reconciliation בלבד — ללא שינוי קוד או התנהגות

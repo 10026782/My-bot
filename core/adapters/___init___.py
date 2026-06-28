@@ -1,1 +1,0 @@
-# core.adapters package
