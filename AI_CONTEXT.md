@@ -1,12 +1,23 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-06-26 (מאוחר ביותר)
-**עודכן על ידי:** Codex — Fxx Safe Document Converter branch (`fxx-safe-document-converter`)
+**עודכן:** 2026-06-29 (מאוחר ביותר) — Governance Repair session
+**עודכן על ידי:** Claude Code — `claude/new-session-be1ckb`, תיקון סטיית governance ממצא 27/06/2026
 
 > מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (מיושן, 19/06) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
 
 ---
+
+## 0. Governance Repair — 2026-06-29 (קרא לפני סעיף 1, שלא עודכן בסשן הזה)
+
+**`main` = `6b20028`** (אומת ב-`git fetch origin main` + `git merge --ff-only`; השורה `main = b289ab6` בסעיף 1 למטה מיושנת — מ-`b289ab6` ל-`6b20028` יש עשרות commits כולל F17–F22 שלא תועדו כשהשורה ההיא נכתבה).
+
+- **F20 (Decision Hub Stage 5, Auto Ingestion) — מוזג, לא מחובר.** `decision_auto_ingestion.py`/`ingest_message()` אין קורא חי באף אחד מ-`app.py`/`inbound_handler.py`/`email_inbound.py`/`voice_adapter.py`/נתיב מדיה (grep מלא על הריפו). `decision_matching.py` (matcher משותף) **כן** מחובר, בנפרד, דרך `cmd_decision.py`. לא חובר כחלק מהתיקון הזה (חיווט לתוך נתיבי inbound חיים = שינוי ארכיטקטוני, לא תיקון תיעוד). ראו ROADMAP.md §F20 לפירוט מלא.
+- **F22 (Core Reasoning Layer) — לא היה מתועד בכלל, נמצא קיים ב-`main` ולא מחובר.** `core/reasoning_engines.py`+`core/reasoning_entity.py`+`core/reasoning_ports.py`+`core/adapters/decision_adapter.py`+`core/adapters/leads_adapter.py` — 59/59 בדיקות (`test_core_reasoning.py`) עוברות, אך אפס קריאה חיה (`append_reasoning_block()`/`run()` נקראים רק מתוך הבדיקות של עצמם). הועלו ישירות ל-`main` ב-28/06/2026 23:06–23:09 דרך "Add files via upload" — לא דרך PR/CI. ראו ROADMAP.md §F22.
+- **נוסף guard:** `smoke_tests.py::check_decision_hub_call_sites` — משווה מצב חיווט מוצהר (manifest בקוד) מול גרף import אמיתי מתוך entrypoints חיים בלבד (`app.py`/`cmd_decision.py`/`inbound_handler.py`/`email_inbound.py`/`voice_adapter.py`/`scheduler.py`/`worker.py`/`daily_digest.py`/`daily_collector.py`/`tools/dispatcher.py`). נכשל אם F19/F21/`decision_matching` יאבדו את הקריאה החיה שלהם, או אם F20/F22 "יתוקנו" ל-wired=True במצהר בלי קריאה אמיתית.
+- **Schema governance — עדיין לא live.** `schema_cache.json.fetched_at == "seed-from-schema-py"` (אומת ישירות). אין credentials של Airtable ב-shell env. שלושת כלי ה-Airtable MCP (`search_bases`/`list_tables_for_base`/`get_table_schema`) החזירו "MCP tool call requires approval" על **כל** קריאה בסשן הזה — לא permission prompt חד-פעמי אלא חסימת-סשן. `schema_cache.json` **לא נערך ולא נמחק** (תקדים מ-BUG_AUDIT_LOG FLAGGED: לא לגעת בלי אישור מפורש).
+- **Decision Hub Airtable readiness (Evidence Ids / Evidence Summary / Confidence Score / Missing Evidence / DecisionReadiness.REVIEW) — לא אומת מול Airtable חי**, מהסיבה לעיל. נשאר **activation blocker** ל-`FEATURE_DECISION_HUB` עד שמישהו עם גישת MCP/credentials מאשר ידנית.
+- **בדיקות שהורצו:** `py_compile` נקי על כל הקבצים הרלוונטיים; `test_core_reasoning.py` 59/59, `test_decision_orchestrator.py` 13/13, `test_decision_auto_ingestion.py` 18/18, `test_decision_attention.py` 11/11, `test_cxx_action_integrity.py` 6/6, `test_decision_confidence.py` 28/28, `test_decision_readiness.py` 25/25, `test_integration.py` 4/4. `smoke_tests.py`: 2 כשלים קיימים-מראש (`flask`/`httpx` חסרים בסביבת ה-sandbox, לא רגרסיה מהתיקון הזה), הבדיקה החדשה (`check_decision_hub_call_sites`) עוברת.
 
 ## 1. Executive Summary
 - **Fxx Safe Document Converter — Implemented but not yet verified** — standalone `document_converter` package exposes `convert_document(input_file, input_type, output_type)` and supports deterministic Markdown/HTML/TXT/DOCX/CSV/XLSX MVP conversions. It is not wired into `app.py`, Telegram, TMA, Airtable, or agent tools. It explicitly rejects PDF/OCR/scanned/complex layout reconstruction and returns no output file unless confidence is high.
