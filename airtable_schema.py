@@ -84,6 +84,9 @@ class Tables:
     SESSIONS                 = "Sessions"
     # Growth — קיימת חיה, עדיין לא מחוברת לאף מודול קוד (מאומת 2026-06-24)
     TRAFFIC_SOURCES  = "TRAFFIC_SOURCES"   # BOSS Growth P0 — attribution במפלס ערוץ (לא wall/synagogue-level)
+    # Lead Events — אירועים על ליד קיים (topic חדש, עדכון domain, interest, note)
+    # יש ליצור ידנית ב-Airtable לפני הפעלה. ראה LeadEventFields.
+    LEAD_EVENTS      = "Lead Events"
 
 
 # ══════════════════════════════════════════════════
@@ -1207,3 +1210,39 @@ class TrafficSourcesFields:
     STATUS       = "Status"
     NOTES        = "Notes"
     ROI          = "ROI"          # formula — (Revenue - Cost) / Cost
+
+
+# ══════════════════════════════════════════════════
+# LeadEventFields — N-LEAD-EVENT: Lead Events table
+# טבלה נפרדת לאירועים על ליד קיים.
+# נוצרת ידנית ב-Airtable. Linked Record ל-Leads.
+#
+# שדות ליצור ב-Airtable:
+#   Name (primary, text) — כותרת האירוע
+#   Lead (linked record → Leads) — מי הליד
+#   Event Type (singleSelect) — interest|note|domain_change|followup_request|other
+#   Domain (singleSelect) — real_estate|import|recruiting|general|...
+#   Message (long text) — ההודעה המלאה
+#   Summary (short text) — תקציר קצר
+#   Channel (singleSelect) — whatsapp|telegram
+#   Created At (dateTime) — auto
+# ══════════════════════════════════════════════════
+
+class LeadEventFields:
+    NAME         = "Name"           # Primary Field — כותרת האירוע
+    LEAD_LINK    = "Lead"           # Linked record → Tables.LEADS
+    EVENT_TYPE   = "Event Type"     # singleSelect — ראה LeadEventType
+    DOMAIN       = "Domain"         # singleSelect — domain שזוהה
+    MESSAGE      = "Message"        # הודעה מלאה (עד 5000 תווים)
+    SUMMARY      = "Summary"        # תקציר קצר (עד 200 תווים)
+    CHANNEL      = "Channel"        # whatsapp | telegram
+    CREATED_AT   = "Created At"     # dateTime — auto
+
+
+class LeadEventType:
+    """Lead Events.Event Type singleSelect — ערכים מדויקים."""
+    INTEREST         = "interest"         # עניין בנושא חדש
+    NOTE             = "note"             # הערה כללית
+    DOMAIN_CHANGE    = "domain_change"    # שינוי domain לאותו ליד
+    FOLLOWUP_REQUEST = "followup_request" # ליד מבקש שיחזרו אליו
+    OTHER            = "other"            # אחר

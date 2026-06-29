@@ -8,7 +8,7 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
-from airtable_schema import LeadFields, Tables
+from airtable_schema import LeadFields, LeadEventFields, LeadEventType, Tables
 from feature_flags import is_enabled
 from core.action_result import ActionResult, ClaimType
 
@@ -102,7 +102,77 @@ def tier_from_score(score: int) -> str:
     return "COLD"
 
 
-def capture_inbound_lead(identity, message: str) -> "ActionResult":
+def capture_lead_event(
+    identity,
+    message: str,
+    lead_record_id: str,
+    domain: str = "general",
+) -> "ActionResult":
+    """
+    כותב Lead Event על ליד קיים.
+    נקרא כש-capture_inbound_lead מוצא ליד קיים (FOUND) והודעה חדשה.
+
+    לא יוצר ליד חדש. לא מדרס את הליד הקיים.
+    כותב רשומה ל-Tables.LEAD_EVENTS עם:
+      - קישור לליד המקורי
+      - event_type לפי תוכן ההודעה
+      - domain שזוהה ע"י Router
+      - המסר המלא + תקציר
+    """
+    if not is_enabled("LEAD_CAPTURE"):
+        return ActionResult.failure("LEAD_CAPTURE disabled", source="lead_event")
+    if _is_junk_inbound_text(message):
+        return ActionResult.failure("junk_inbound", source="lead_event")
+    if not lead_record_id or lead_record_id == "existing":
+        return ActionResult.failure("no_lead_record_id", source="lead_event")
+
+    try:
+        from tools.airtable_tools import airtable_add
+
+        # זיהוי event_type לפי תוכן
+        msg_lower = (message or "").lower()
+        if any(w in msg_lower for w in ("לחזור", "תחזור", "call me", "contact me", "להתקשר", "בדחיפות")):
+            event_type = LeadEventType.FOLLOWUP_REQUEST
+        elif domain and domain != "general":
+            event_type = LeadEventType.INTEREST
+        else:
+            event_type = LeadEventType.NOTE
+
+        summary = (message or "")[:200]
+        title   = f"{event_type} | {domain} | {summary[:60]}"
+
+        fields = {
+            LeadEventFields.NAME:       title,
+            LeadEventFields.LEAD_LINK:  [lead_record_id],  # Linked record — חייב להיות list
+            LeadEventFields.EVENT_TYPE: event_type,
+            LeadEventFields.DOMAIN:     domain,
+            LeadEventFields.MESSAGE:    (message or "")[:5000],
+            LeadEventFields.SUMMARY:    summary,
+            LeadEventFields.CHANNEL:    identity.channel,
+        }
+
+        raw_result = airtable_add(Tables.LEAD_EVENTS, fields)
+        ar = ActionResult.from_airtable_add(raw_result, source="lead_event")
+        ar.claim_type = ClaimType.CREATED
+
+        if ar.business_success:
+            logger.info(
+                "[LeadEvent] created event: lead=%s event_id=%s type=%s domain=%s",
+                lead_record_id, ar.record_id, event_type, domain,
+            )
+        else:
+            logger.warning(
+                "[LeadEvent] create failed: lead=%s raw=%s",
+                lead_record_id, raw_result,
+            )
+        return ar
+
+    except Exception as e:
+        logger.error("[LeadEvent] capture_lead_event error for %s: %s", lead_record_id, e)
+        return ActionResult.failure(str(e), source="lead_event")
+
+
+def capture_inbound_lead(identity, message: str, domain: str = "general") -> "ActionResult":
     """
     Called from run_agent after resolve_identity, only for identity.role == Role.LEAD.
     Idempotent by memory_key. Existing Leads are not overwritten.
@@ -130,14 +200,25 @@ def capture_inbound_lead(identity, message: str) -> "ActionResult":
                 # תקין. tool_called/tool_http_ok=True כדי ש-ClaimGate._check_found
                 # (tool_called and tool_http_ok) יאשר את הclaim הזה כראוי —
                 # ה-airtable_get באמת רץ ובאמת הצליח.
-                return ActionResult(
+                existing_id = existing_m.group(0)
+                found_ar = ActionResult(
                     tool_called=True,
                     tool_http_ok=True,
                     business_success=True,
-                    record_id=existing_m.group(0),
+                    record_id=existing_id,
                     claim_type=ClaimType.FOUND,
                     source="lead_capture",
                 )
+                # N-LEAD-EVENT: ליד קיים + הודעה חדשה → כתוב Lead Event
+                # לא יוצרים ליד שני — רושמים את הנושא החדש כאירוע
+                try:
+                    _ev = capture_lead_event(identity, message, existing_id, domain=domain)
+                    if _ev.business_success:
+                        logger.info("[LeadCapture] lead event written: rec=%s", _ev.record_id)
+                        found_ar.post_success = True
+                except Exception as e:
+                    logger.warning("[LeadCapture] lead event failed for %s: %s", existing_id, e)
+                return found_ar
 
         # ALLOWLIST — רק שדות מוגדרים מפורשות.
         # display_name="" (identity.py) → טלפון כ-Name (Primary Field), לא "ליד חדש"
