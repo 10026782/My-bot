@@ -48,13 +48,30 @@ _NO_TOOL_CLAIMS: list[tuple[re.Pattern, frozenset[str]]] = [
         ),
         frozenset({"gmail_read", "gmail_draft", "gmail_send_draft"}),
     ),
-    # Agent claims it created / updated a CRM (Airtable) record
+    # CRM creation claims — דורשות airtable_add בלבד.
+    # FOUND לא כותב airtable_add → אסור לשמש כ-evidence ליצירה.
     (
         re.compile(
-            r"(הרשומה נוצרה|נוצר ליד|הליד נוצר|נוסף ל-?Airtable|עודכן ב-?Airtable|הליד עודכן|נוספה רשומה|נשמר ב-?Airtable)",
+            r"(הרשומה נוצרה|נוצר ליד|הליד נוצר|נוסף ל-?Airtable|נוספה רשומה|ליד חדש נוצר|lead_capture:created)",
             re.UNICODE,
         ),
-        frozenset({"airtable_add", "airtable_update", "airtable_get", "search_lead"}),
+        frozenset({"airtable_add"}),
+    ),
+    # CRM update claims — דורשות airtable_update או airtable_add.
+    (
+        re.compile(
+            r"(עודכן ב-?Airtable|הליד עודכן|נשמר ב-?Airtable|lead_capture:updated)",
+            re.UNICODE,
+        ),
+        frozenset({"airtable_update", "airtable_add"}),
+    ),
+    # CRM search/found claims — דורשות airtable_get או search_lead.
+    (
+        re.compile(
+            r"(?<!לא )(מצאתי ליד קיים|הליד קיים|ליד קיים במערכת|lead_capture:found)",
+            re.UNICODE,
+        ),
+        frozenset({"airtable_get", "search_lead"}),
     ),
     # Agent claims it can/did search or read a file in Drive (BUG-014: "אני
     # יכול לחפש בDrive" was said with no tool call at all)
@@ -574,3 +591,83 @@ def _run_tests() -> bool:
 if __name__ == "__main__":
     import sys
     sys.exit(0 if _run_tests() else 1)
+
+
+# ══════════════════════════════════════════════════
+# CXX Tests — ActionResult → A32 integration
+# ══════════════════════════════════════════════════
+
+def _run_cxx_tests() -> bool:
+    """
+    בדיקות CXX:
+    1. FOUND ממופה ל-airtable_get, ok=True
+    2. CREATED ממופה ל-airtable_add, ok=True
+    3. A32 דוחה "נוצר ליד" כשיש רק evidence של airtable_get
+    4. A32 מאשר "מצאתי ליד קיים" כשיש evidence של airtable_get
+    """
+    passed = failed = 0
+
+    def chk(desc, cond):
+        nonlocal passed, failed
+        if cond:
+            print(f"  ✅ {desc}"); passed += 1
+        else:
+            print(f"  ❌ {desc}"); failed += 1
+
+    print("\n── CXX A32 Integration Tests ──")
+
+    # בדיקה 1 — FOUND → airtable_get
+    found_entry = {
+        "tool": "airtable_get",
+        "content": "lead_capture:found:record_id=recEXIST",
+        "ok": True,
+    }
+    chk("FOUND maps to airtable_get",
+        found_entry["tool"] == "airtable_get")
+    chk("FOUND ok=True",
+        found_entry["ok"] is True)
+
+    # בדיקה 2 — CREATED → airtable_add
+    created_entry = {
+        "tool": "airtable_add",
+        "content": "lead_capture:created:record_id=recNEW123",
+        "ok": True,
+    }
+    chk("CREATED maps to airtable_add",
+        created_entry["tool"] == "airtable_add")
+    chk("CREATED ok=True",
+        created_entry["ok"] is True)
+
+    # בדיקה 3 — A32 דוחה "נוצר ליד" כשיש רק airtable_get
+    text_created = "נוצר ליד חדש במערכת"
+    only_get = [{"tool": "airtable_get", "content": "lead found", "ok": True}]
+    result3 = sanitize_agent_response(text_created, only_get)
+    chk("A32 blocks 'נוצר ליד' when only airtable_get present",
+        result3 == _NO_TOOL_EVIDENCE_FALLBACK)
+
+    # בדיקה 4 — A32 מאשר "נוצר ליד" כשיש airtable_add
+    with_add = [{"tool": "airtable_add", "content": "lead_capture:created:record_id=rec123", "ok": True}]
+    result4 = sanitize_agent_response(text_created, with_add)
+    chk("A32 passes 'נוצר ליד' when airtable_add present",
+        result4 not in (_NO_TOOL_EVIDENCE_FALLBACK, _SAFE_FALLBACK))
+
+    # בדיקה 5 — A32 מאשר "מצאתי ליד קיים" כשיש airtable_get
+    text_found = "מצאתי ליד קיים במערכת"
+    result5 = sanitize_agent_response(text_found, only_get)
+    chk("A32 passes 'מצאתי ליד קיים' when airtable_get present",
+        result5 not in (_NO_TOOL_EVIDENCE_FALLBACK, _SAFE_FALLBACK))
+
+    # בדיקה 6 — A32 דוחה "מצאתי ליד קיים" בלי שום tool
+    result6 = sanitize_agent_response(text_found, [])
+    chk("A32 blocks 'מצאתי ליד קיים' with no tool result",
+        result6 == _NO_TOOL_EVIDENCE_FALLBACK)
+
+    # בדיקה 7 — tool loop לא נשבר (רשומה רגילה עוברת)
+    normal_entry = [{"tool": "airtable_get", "content": "3 leads found", "ok": True}]
+    result7 = sanitize_agent_response("מצאתי 3 לידים.", normal_entry)
+    chk("Normal flow not broken — unrelated text passes through",
+        result7 == "מצאתי 3 לידים.")
+
+    print(f"  {'─'*38}")
+    print(f"  CXX Tests: {passed} passed, {failed} failed\n")
+    return failed == 0

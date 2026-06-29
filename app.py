@@ -1,4 +1,4 @@
-﻿# app.py — The Boss Bot v3.0
+# app.py — The Boss Bot v3.0
 # Architecture: Identity → Router → Context → Agent
 #
 # כל בקשה עוברת:
@@ -932,6 +932,41 @@ def _safe_route(text: str, channel: str, identity, domain_from_channel: str = ""
 # run_agent — Identity + Router + Agent Loop
 # ══════════════════════════════════════════════════
 
+def _action_result_to_a32_entry(result) -> "dict | None":
+    """
+    ממיר ActionResult לרשומת A32 tool_results_log.
+    ClaimType קובע את שם הכלי — FOUND לא יהיה evidence ל-CREATED.
+    מוחזר None עבור failures טכניים (flag off, junk) שאין להם claim_type.
+    """
+    if result is None:
+        return None
+    try:
+        from core.action_result import ClaimType
+        from core.claim_gate import check_claim
+    except Exception:
+        return None
+    claim_type = getattr(result, "claim_type", None)
+    if claim_type is None:
+        return None
+    gate = check_claim(result)
+    if claim_type == ClaimType.CREATED:
+        tool_name = "airtable_add"
+    elif claim_type == ClaimType.FOUND:
+        tool_name = "airtable_get"
+    elif claim_type == ClaimType.UPDATED:
+        tool_name = "airtable_update"
+    elif claim_type == ClaimType.SCHEDULED:
+        tool_name = "airtable_add"
+    else:
+        tool_name = "lead_capture"
+    record_id = getattr(result, "record_id", "") or "-"
+    return {
+        "tool":    tool_name,
+        "content": f"lead_capture:{claim_type.value}:record_id={record_id}",
+        "ok":      bool(gate.ok),
+    }
+
+
 def run_agent(
     user_text:           str,
     chat_id:             str,
@@ -951,27 +986,13 @@ def run_agent(
             f"msg='{user_text[:60]}'"
         )
 
-    # CXX: one request-scoped identity/domain/session container. This is
-    # additive to the current session snapshot and resolved-domain fixes.
-    try:
-        from core.request_context import RequestContext
-        _req_ctx = RequestContext.from_identity(
-            identity,
-            domain=domain_from_channel or "general",
-        )
-    except Exception as e:
-        logger.warning("[RequestContext] init failed: %s", e)
-        _req_ctx = None
-
     # ── 1.5. WhatsApp Lead Capture (W0) ───────────
     # W0/N02: capture inbound WhatsApp leads and optionally score them.
+    lead_capture_result = None   # CXX/A32: נשמר לשילוב ב-tool_results_log
     if identity.role == Role.LEAD:
         try:
             from lead_capture import capture_inbound_lead
-            _lead_result = capture_inbound_lead(identity, user_text)
-            lead_record_id = getattr(_lead_result, "record_id", "")
-            if _req_ctx and lead_record_id:
-                _req_ctx.lead_record_id = lead_record_id
+            lead_capture_result = capture_inbound_lead(identity, user_text)
         except Exception as e:
             logger.error(f"[LeadCapture] failed for {identity.memory_key}: {e}")
 
@@ -985,8 +1006,6 @@ def run_agent(
         _session_snapshot = _ls.get(chat_id)
     except Exception:
         _session_snapshot = None
-    if _req_ctx is not None:
-        _req_ctx.mark_session_loaded(_session_snapshot or {})
 
 
     # ── 2. Rate Limit ─────────────────────────────
@@ -1037,8 +1056,6 @@ def run_agent(
     # domain_from_channel הישן (לפני Router) במקום הדומיין הסופי שה-Router
     # קבע. מחושב פעם אחת ומשמש גם ל-out-param וגם ל-approval flow.
     resolved_route_domain = getattr(route.domain, "value", str(route.domain))
-    if _req_ctx is not None:
-        _req_ctx.update_domain(resolved_route_domain)
     if _resolved_domain is not None:
         _resolved_domain["domain"] = resolved_route_domain
 
@@ -1103,6 +1120,10 @@ def run_agent(
         final_reply     = "⚠️ לא התקבלה תשובה."
         tool_calls_made = 0
         tool_results_log: list[dict] = []   # A32: accumulates all tool results
+        # CXX/A32: הוסף lead capture evidence — FOUND≠CREATED ב-A32
+        _lc_a32 = _action_result_to_a32_entry(lead_capture_result)
+        if _lc_a32:
+            tool_results_log.append(_lc_a32)
 
         while True:
             response = client.messages.create(
