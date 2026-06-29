@@ -159,5 +159,6 @@ check(
 dm.list_open_decisions = original_loader
 
 disable_flags()
-print(f"Decision Auto Ingestion: {_passed}/{_passed + _failed} passed")
-sys.exit(1 if _failed else 0)
+if __name__ == "__main__":
+    print(f"Decision Auto Ingestion: {_passed}/{_passed + _failed} passed")
+    sys.exit(1 if _failed else 0)

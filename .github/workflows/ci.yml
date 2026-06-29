@@ -46,6 +46,33 @@ jobs:
       - name: Schema governance (warning only, never blocks)
         run: python tools/schema_governance.py || true
 
+      - name: pytest collect
+        run: |
+          python -m pytest --collect-only -q \
+            -m "not airtable and not live and not integration" \
+            test_decision_confidence.py \
+            test_decision_attention.py \
+            test_decision_orchestrator.py \
+            test_decision_trust.py \
+            test_decision_readiness.py \
+            test_decision_auto_ingestion.py \
+            test_core_reasoning.py
+
+      - name: pytest core reasoning
+        run: |
+          python -m pytest \
+            test_decision_confidence.py \
+            test_decision_attention.py \
+            test_decision_orchestrator.py \
+            test_decision_trust.py \
+            test_decision_readiness.py \
+            test_decision_auto_ingestion.py \
+            test_core_reasoning.py \
+            -m "not airtable and not live and not integration" \
+            -x \
+            --tb=short \
+            -q
+
   frontend-ci:
     runs-on: ubuntu-latest
     steps:
