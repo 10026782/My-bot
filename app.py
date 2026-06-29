@@ -1259,6 +1259,31 @@ def run_agent(
         memory.add(ctx.memory_key, "user",      clean_msg)
         memory.add(ctx.memory_key, "assistant", final_reply)
 
+        # Buffer recovery + cleanup:
+        # 1. recover_blocked_lead_payload — צורך buffer ומעדכן ליד
+        # 2. clear_buffer — finally, גם אם recovery נכשל
+        #
+        # סדר חשוב:
+        #   capture_inbound_lead  ← buffer ריק (רץ לפני Agent)
+        #   Agent                 ← נחסם, buffer מתמלא
+        #   recover (כאן)         ← consume + patch
+        #   clear (כאן)           ← finally
+        try:
+            if identity.role == Role.LEAD:
+                from core.lead_buffer import recover_blocked_lead_payload, has_buffer
+                if has_buffer():
+                    # resolved_route_domain — מחושב למעלה (3.5), לא route.domain
+                    # הגולמי (Enum) — אחרת memory_key ב-lead_buffer יקבל ערך שגוי.
+                    recover_blocked_lead_payload(identity, domain=resolved_route_domain)
+        except Exception as _rec_err:
+            logger.debug(f"[LeadBuffer] recovery non-critical: {_rec_err}")
+        finally:
+            try:
+                from core.lead_buffer import clear_buffer
+                clear_buffer()
+            except Exception:
+                pass
+
         return final_reply
 
     except anthropic.APIStatusError as e:
