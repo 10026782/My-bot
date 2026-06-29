@@ -184,7 +184,21 @@ def capture_inbound_lead(identity, message: str, domain: str = "general") -> "Ac
         logger.info("[LeadCapture] junk inbound ignored before Airtable write")
         return ActionResult.failure("junk_inbound", source="lead_capture")
 
-    memory_key = identity.memory_key
+    # CXX: phone + domain = זהות ייחודית לליד עבור דומיינים עסקיים נפרדים.
+    # תיקון תאימות לאחור (BUG-NEW-07): domain="general" (הברירת מחדל — כל
+    # קריאה קיימת מ-app.py היום) חייב להישאר עם memory_key הישן (ללא סיומת),
+    # אחרת:
+    #   1. כל ליד קיים ב-Airtable (memory_key בלי סיומת) הופך ל"לא נמצא" —
+    #      כל הודעה חוזרת מאותו איש קשר יוצרת ליד כפול חדש במקום להידחות.
+    #   2. ad_attribution.py._inject_utm (app.py:1651-1654) מחפש/כותב לפי
+    #      identity.memory_key הטהור — ישבר אם lead_capture כותב מפתח אחר.
+    # רק domain אמיתי שונה מ-general מקבל סיומת — ליד אותו טלפון בדומיין
+    # עסקי שונה (לדוגמה real_estate) הוא ליד נפרד לגמרי, owner/pipeline שונה.
+    _domain_key = domain if (domain and domain != "general") else "general"
+    memory_key = (
+        identity.memory_key if _domain_key == "general"
+        else f"{identity.memory_key}:{_domain_key}"
+    )
     try:
         from tools.airtable_tools import airtable_add, airtable_get
 
@@ -228,6 +242,7 @@ def capture_inbound_lead(identity, message: str, domain: str = "general") -> "Ac
             LeadFields.PHONE:      identity.external_id,
             LeadFields.CHANNEL:    identity.channel,
             LeadFields.MEMORY_KEY: memory_key,
+            LeadFields.DOMAIN:     _domain_key,          # מטא-דאטה — לא חלק מהמפתח כש-general
             LeadFields.SOURCE:     "whatsapp_inbound",
             LeadFields.STATUS:     "new",
             LeadFields.SUMMARY:    (message or "")[:500],
