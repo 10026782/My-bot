@@ -470,3 +470,146 @@
 **תאריך:** 23/06/2026
 **מה חסר:** אין בדיקות ל-`contact_merge.py` — merge logic, dedup, vCard parsing.
 **Piggyback Trigger:** לפני wire לפרודקשן
+
+---
+
+## Session 28-29/06/2026 — Lead Lifecycle Stabilization (BUG-NEW-01 עד BUG-META-01)
+
+### BUG-024 (BUG-NEW-01) — Score ריק בליד חדש
+- **תאריך:** 28/06/2026
+- **קובץ:** `lead_capture.py`
+- **שורש:** `LeadFields.SCORE` לא נכלל ב-`fields` בעת יצירת ליד חדש
+- **תיקון:** הוספת `LeadFields.SCORE: 0` ל-allowlist של שדות יצירה
+- **Evidence:** Airtable screenshot — Score ריק לפני, Score=0 אחרי
+- **Regression:** T02 ב-`anti_hallucination.py`
+- **PR:** #169
+- **סטטוס:** ✅ תוקן ומוזג
+
+### BUG-025 (BUG-NEW-01b) — Primary Field corruption
+- **תאריך:** 28/06/2026
+- **קבצים:** `identity.py`, `lead_capture.py`
+- **שורש:** `display_name="ליד חדש"` → Name=Primary Field מושחת בכל Linked Record
+- **תיקון:** `display_name=""` → `lead_capture` כותב `external_id` (טלפון) כ-Name
+- **Evidence:** Airtable — עמודות מציגות "ליד חדש" לפני תיקון
+- **Regression:** T01 ב-`anti_hallucination.py`
+- **הערה:** ראו גם BUG-023 שתיעד את אותה בעיה מזווית ה-Primary Field. BUG-025 מתמקד ב-display_name fix כחלק מסדרת תיקוני Lead Lifecycle.
+- **PR:** #169
+- **סטטוס:** ✅ תוקן | ⚠️ אימות מלא עם מספר חדש לגמרי — ממתין
+
+### BUG-026 (BUG-NEW-02) — dict error ב-`airtable_add` return value
+- **תאריך:** 28/06/2026
+- **קובץ:** `lead_capture.py`
+- **שורש:** `airtable_add` עודכן לחוזה C53-A (מחזיר `dict`). `lead_capture` המשיך `re.search`/string
+- **Evidence:** `[LeadCapture] capture_inbound_lead error: expected string or bytes-like object, got 'dict'`
+- **תיקון:** `ActionResult.from_airtable_add(raw_result)`
+- **Regression:** T09 ב-`anti_hallucination.py`
+- **PR:** #169
+- **סטטוס:** ✅ תוקן ומוזג
+
+### BUG-027 (BUG-NEW-03) — `airtable_security` audit crash על dict
+- **תאריך:** 29/06/2026
+- **קובץ:** `tools/airtable_security.py` שורה 95
+- **שורש:** `result_snippet[:60]` על `dict` → `TypeError: unhashable type: 'slice'`
+- **תיקון:** `str(result_snippet)[:60]` + `try/except` — audit לא שובר פעולה עסקית
+- **Evidence:** לוג Render: `TypeError: unhashable type: 'slice'`
+- **Evidence לתיקון:** 9/9 self-tests
+- **PR:** #172
+- **סטטוס:** ✅ תוקן ומוזג
+
+### BUG-028 (BUG-NEW-04) — Agent כותב ישירות ל-Leads
+- **תאריך:** 29/06/2026
+- **קבצים:** `tools/airtable_security.py`, `tools/dispatcher.py`
+- **שורש:** אין חסימה — Agent יכול `airtable_add` ישיר ל-Leads, עוקף `capture_inbound_lead`
+- **Evidence:** `[Tool] airtable_add | {'table': 'Leads', 'fields': {'Name': 'משה חביב'}}`
+- **תיקון:** `enforce_leads_write_gate()` + `LeadsDirectWriteBlocked`
+- **מותר:** `lead_capture` | `lead_event` | `lead_scoring` | `crm`
+- **חסום:** `agent`
+- **Evidence לתיקון:** 6/6 gate tests + 9/9 security tests
+- **PR:** #172
+- **סטטוס:** ✅ תוקן ומוזג
+
+### BUG-029 (BUG-NEW-05) — A32: FOUND יכול להצדיק CREATED
+- **תאריך:** 28/06/2026
+- **קובץ:** `core/anti_hallucination.py`
+- **שורש:** CRM pattern אחד קיבל `airtable_add`/`update`/`get`/`search_lead` לכל טענה
+- **תיקון:** פיצול ל-3 patterns: יצירה→`add` בלבד | עדכון→`update/add` | חיפוש→`get/search`
+- **Evidence:** 33/33 + 9 CXX tests
+- **PR:** #171
+- **סטטוס:** ✅ תוקן ומוזג
+
+### BUG-030 (BUG-NEW-06) — ליד קיים + נושא חדש לא נשמר
+- **תאריך:** 28-29/06/2026
+- **קבצים:** `lead_capture.py`, `airtable_schema.py`
+- **שורש:** `capture_inbound_lead` על ליד קיים → return FOUND בלבד, אין כתיבה
+- **תיקון:** `capture_lead_event()` חדשה — Lead Event מקושר לליד
+- **Evidence:** Lead Events table + Link to Lead — אומתו ב-Airtable
+- **PR:** #171
+- **סטטוס:** ✅ תוקן ומוזג
+
+### BUG-031 (BUG-NEW-07) — Lead payload אובד כשAgent נחסם
+- **תאריך:** 29/06/2026
+- **קבצים:** `core/lead_buffer.py` (חדש), `tools/dispatcher.py`, `app.py`
+- **PR:** #176
+- **שורש:** dispatcher חסם ולא שמר. שם/פרטים שAgent חילץ נעלמו.
+- **תיקון:** thread-local buffer → `save_blocked_payload` → `recover_blocked_lead_payload`
+- **זרימה:** `capture_inbound_lead` → Agent נחסם → save → recover → patch lead → clear
+- **Evidence:** 22/22 buffer tests
+- **סטטוס:** ✅ תוקן ומוזג
+
+### BUG-032 (BUG-FOUND-01) — ליד קיים הוחזר כ-CREATED עם record_id מזויף
+- **תאריך:** 29/06/2026
+- **קובץ:** `lead_capture.py`
+- **PR:** #170
+- **שורש:** `capture_inbound_lead` על ליד קיים החזיר `claim_type=CREATED` + `record_id="existing"` → A32/ClaimGate חשבו שנוצר Lead חדש; אי אפשר לכתוב Lead Event בלי record_id אמיתי
+- **תיקון:** ליד קיים → `claim_type=FOUND` + `record_id=rec...` אמיתי + `tool_called=True` + `tool_http_ok=True`
+- **חוק:** FOUND cannot justify CREATED
+- **סטטוס:** ✅ תוקן ומוזג
+
+### BUG-033 (BUG-META-01) — Metadata patch כשל על שדות לא קיימים
+- **תאריך:** 29/06/2026
+- **קבצים:** `lead_capture.py`, `airtable_schema.py`
+- **PR:** #172
+- **שורש:** PATCH ל-`utm_source`/`utm_medium`/`utm_campaign`/`platform` — שדות לא קיימים ב-schema → warning/error צדדי נראה כמו כשל עסקי
+- **תיקון:** metadata patch failure = post/update warning בלבד, לא דורס `business_success`
+- **חוק:** Lead created/found = `business_success`. metadata patch failed = warning בלבד.
+- **סטטוס:** ✅ תוקן ומוזג
+
+---
+
+## Session 30/06/2026 — Decision Hub Quality Gate (BUG-DH-01 עד BUG-DH-05)
+
+### BUG-034 (BUG-DH-01) — `missing_penalty` לא הופחת מה-score
+- **תאריך:** 30/06/2026
+- **קובץ:** `decision_confidence.py`
+- **שורש:** `_MISSING_PENALTY` מוגדר אבל לא חוסר מה-score בפועל
+- **תיקון:** `missing_penalty = _MISSING_PENALTY * len(missing)` → מחוסר מה-score; נוסף פרמטר `domain` ל-`calc_confidence(events, conflicts, domain)`
+- **Evidence:** score גבוה שגויה כשחסרות ראיות — תוקן
+- **סטטוס:** ✅ תוקן ומוזג
+
+### BUG-035 (BUG-DH-02) — `_position_emoji` strings עבריים hard-coded
+- **תאריך:** 30/06/2026
+- **קובץ:** `cmd_decision.py`
+- **שורש:** strings עבריים hard-coded במקום קבועי schema
+- **סטטוס:** 🟡 מתועד ב-drift map, לא קריטי — לא תוקן עדיין
+
+### BUG-036 (BUG-DH-03) — formula injection ב-`_resolve_decision_ref`
+- **תאריך:** 30/06/2026
+- **קובץ:** `cmd_decision.py`
+- **שורש:** `FIND('{ref}', ...)` ללא sanitization על `ref` מגיע מ-user input
+- **תיקון נדרש:** `_safe_formula_param` לפני הכנסה ל-formula
+- **סטטוס:** 🔴 פתוח — עדיפות גבוהה | חסום לפני הפעלת `FEATURE_DECISION_HUB` בפרודקשן
+
+### BUG-037 (BUG-DH-04) — formula injection ב-`maybe_supersede`
+- **תאריך:** 30/06/2026
+- **קובץ:** `decision_pipeline.py`
+- **שורש:** Claim Topic מגיע מ-raw content ויכול לשבור Airtable formula
+- **תיקון נדרש:** `_safe_formula_param` על Claim Topic לפני הכנסה
+- **סטטוס:** 🔴 פתוח — עדיפות גבוהה | חסום לפני הפעלת `FEATURE_DECISION_HUB` בפרודקשן
+
+### BUG-038 (BUG-DH-05) — COG מקבל domain ישן (domain drift)
+- **תאריך:** 30/06/2026
+- **קובץ:** `app.py`
+- **שורש:** `_gateway_whatsapp_reply` קיבל `domain_from_channel` (לפני Router) במקום domain שנקבע אחרי Router
+- **תיקון:** `make_request_state(domain_from_channel)` → `_req_state.domain` מועדכן אחרי `run_agent`
+- **Evidence:** COG לוג הציג `domain=general` במקום domain שזוהה
+- **סטטוס:** ✅ תוקן ומוזג (`core/request_state.py`)

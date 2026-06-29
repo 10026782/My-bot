@@ -1,6 +1,7 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 29/06/2026 (מאוחר ביותר) — Git Diff Gap Report session, main = `debb270` (אומת
+עודכן: 30/06/2026 (מאוחר ביותר) — Lead Lifecycle + Decision Hub Quality Gate session log. N-LEAD-EVENT/N-CXX/N-LEADBUF/N14 נוספו. BUG-DH-03/04 כblocker לפני FEATURE_DECISION_HUB.
+עודכן קודם: 29/06/2026 — Git Diff Gap Report session, main = `debb270` (אומת
 `git fetch origin main` + `git log origin/main --oneline -30`). מבוסס על
 `SPEC_GIT_DIFF_GAP_FINDER.md`. ממצאים: **(1)** סעיף "Fxx — Safe Document Converter" למטה היה
 כתוב "Not merged to main" כשבפועל מוזג מ-26/06/2026 (PR #158, `db719ab`) — תוקן ל"מוזג אך לא
@@ -475,6 +476,37 @@ Stage 6 ב-PR #166. דגלי Decision Hub כבויים כברירת מחדל. ה
 `decision_pipeline.py` (Trust Model מלא), `cmd_decision.py` (חיווט), `test_decision_trust.py`
 (33 self-tests, כולם עוברים).
 
+### N-LEAD-EVENT — Lead Events Layer ✅ הושלם (28-29/06/2026)
+**מה:** `Tables.LEAD_EVENTS`, `capture_lead_event()`, `LeadEventFields`/`LeadEventType`.
+ליד קיים + הודעה חדשה → Event נכתב אוטומטית עם `event_type`, `domain`, `message`.
+**קבצים:** `lead_capture.py`, `airtable_schema.py`
+**Evidence:** Lead Events table + Link to Lead — אומתו ב-Airtable
+**PR:** #171, #172
+
+### N-CXX — Action Integrity Contract ✅ הושלם (28/06/2026)
+**מה:** `core/action_result.py` + `core/request_context.py` + `core/claim_gate.py`.
+`ActionResult` dataclass עם 5 שלבים. `ClaimGate` — FOUND ≠ CREATED.
+**Evidence:** 16/16 claim_gate tests, 33/33 anti_hallucination tests
+**PR:** #169
+
+### N-LEADBUF — Lead Buffer ✅ הושלם (29/06/2026)
+**מה:** `core/lead_buffer.py` — thread-local buffer per-request.
+מונע אובדן payload כשAgent נחסם ע"י Leads Write Gate.
+**Evidence:** 22/22 buffer tests
+**PR:** #176
+
+### N14 — Core Reasoning Layer (F22) ✅ הועלה ל-`main` ישירות (28/06/2026)
+**מה:** `core/reasoning_entity.py` + `core/reasoning_ports.py` + `core/reasoning_engines.py` + `core/adapters/decision_adapter.py` + `core/adapters/leads_adapter.py`.
+Pull-only reasoning engine. `run()` מחבר Stages 1→2→4→6. `RequestState(domain, session)` — per-request mutable context.
+**בדיקות:** `test_core_reasoning.py` 59/59 (A:5, B:5, C:11, D:13, E:15, F:10); `test_core_reasoning_integration.py` 58/58 + 2 xfail מתועדים.
+**ספקים:** `SPEC_Core_Reasoning_Layer.md` + `SPEC_Stakeholder_Pressure_Pattern.md` (v2).
+**מצב:** EXISTS_UNWIRED — `append_reasoning_block()` נקרא רק מ-`cmd_decision.py._format_decision_card()` כ-fallback (F22-WIRE, PR #177), `run()` ו-`core.adapters.leads_adapter` טרם חוברו לpipeline חי.
+
+**Quality Gate 30/06/2026:** 5 בעיות נמצאו. 2 תוקנו (missing_penalty + domain drift).
+2 formula injection פתוחים (BUG-DH-03/04) — עדיפות גבוהה לפני הפעלת `FEATURE_DECISION_HUB`.
+2 xfail מתועדים (`domain_rules`, `lead_score`) — design decisions.
+Stage 6 Orchestrator מוזג. CI ירוק ✅.
+
 ### F17 — Decision Hub Stage 2: Smart Trust Layer (PR #157, מוזג ל-`main`, commit `9252b1e`/merge `78f9bae`)
 **מה:** שכבת ביטחון על גבי Stage 1 — מסתכלת על ה-Decision כולו (לא Event בודד): האם
 האירועים התומכים מסכימים, מה חסר, כמה ביטחון לפני חתימה. 4 יכולות: (1) AI Conflict
@@ -838,6 +870,15 @@ scope: **infrastructure only — אפס שינוי runtime behavior** בשלב �
 - **Batch ז — `airtable_schema.py`**: ✅ קיים מהבנייה המקורית — `Tables.MEDIA_FILES = "Media Files"` ו-`MediaFileFields` (NAME/FILE_TYPE/MIME_TYPE/DRIVE_URL/DRIVE_FILE_ID/DOMAIN/SOURCE/SIZE_BYTES/CREATED_BY/TELEGRAM_FILE_ID/LINKED_LEAD/RAW_TRANSCRIPT/NORMALIZED_TRANSCRIPT) מכסים את כל מה ש-`media_gateway.py` כותב. `AssetsFields` (נדל"ן) לא נגע. ⚠️ הטבלה עצמה חייבת להיווצר ידנית ב-Airtable לפני הדלקת flag — הקוד לא יוצר טבלה.
 תלוי ב: כלום (עומד בפני עצמו). דגלים `FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD` קיימים ב-`feature_flags.py`, **כבויים כברירת מחדל** (`is_enabled()` חוזר `False` ללא env var) — הקוד רץ במלואו אך אינו פעיל בפרודקשן עד הדלקה מפורשת.
 קבצים: `voice_stt_adapter.py`, `drive_adapter.py`, `media_gateway.py`, `media_handler.py`, `app.py`, `tma_api.py`, `airtable_schema.py` — כולם מוזגים ל-`main`. בדיקות: `test_media_layer.py` (33/33).
+
+---
+
+### BUG-DH-03/04 — Formula Injection ב-Decision Hub 🔴 HIGH (פתוח)
+**קבצים:** `cmd_decision.py` (`_resolve_decision_ref`), `decision_pipeline.py` (`maybe_supersede`)
+**מה:** Claim Topic + decision ref מגיעים מ-raw user content ללא sanitization לפני הכנסה ל-formula Airtable
+**חסום:** לפני הפעלת `FEATURE_DECISION_HUB` בפרודקשן
+**תיקון:** `_safe_formula_param()` לפני כל הכנסה לformula Airtable
+**ראו:** BUG_AUDIT_LOG.md BUG-036, BUG-037
 
 ---
 
