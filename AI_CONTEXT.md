@@ -1,12 +1,53 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-06-29 (מאוחר ביותר) — Git Diff Gap Report session
-**עודכן על ידי:** Claude Code — `claude/new-session-be1ckb`, `SPEC_GIT_DIFF_GAP_FINDER.md`
+**עודכן:** 2026-06-29 (מאוחר ביותר) — Manual Verification Checklist session
+**עודכן על ידי:** Claude Code — `claude/new-session-be1ckb`, `BOSS_Manual_Verification_ChecklIST_UPDATED2.docx`
 
 > מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (מיושן, 19/06) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
 
 ---
+
+## 0.2 Manual Verification Checklist — 2026-06-29 (קרא לפני 0.1)
+
+**`main` = `e735bf7`** (אומת `git fetch origin main` + `git rev-parse origin/main`).
+
+**מקור:** `BOSS_Manual_Verification_ChecklIST_UPDATED2.docx` (הועלה ע"י הבעלים, חולץ עם `python-docx`). המסמך מכיל שלושה חלקים נפרדים שטופלו בנפרד: (1) הצ'קליסט הפורמלי המקורי (V0-V5, Lead Flow, Security, Airtable, Cost) עם תאריך יוני 2026; (2) עדכון סטטוס מאוחר יותר (28/06/2026) עם טבלת "מאומת תקין" לא-פורמלית + 10 בדיקות חדשות **LL-01 עד LL-10** (Lead Lifecycle) + טבלת "אומתו מהסשן הקודם"; (3) שרידי שיחת פיתוח (Codex Handoff על תיקוני lead_capture/identity) — **לא צ'קליסט, סומן בנפרד למטה, לא הומר לפריטי בדיקה מזויפים.**
+
+**כלל הסיווג שהופעל (לפי הוראת הבעלים):** PASS+evidence אמיתי → ✅ VERIFIED IN PROD (מצוטט). FAIL/ריק → 🟡 OPEN. evidence מצוטט בתוך בדיקה *אחרת* באותו מסמך נחשב evidence תקף לבדיקה הנושא שלו (כדי לא לאבד מידע) — מתועד בנפרד כ"cross-referenced". PASS בטבלת הסיכום **בלי** evidence בשום מקום במסמך — **לא קודם** ל-VERIFIED, מתועד כ"PASS מוצהר, evidence חסר".
+
+### טבלת סיכום (68 פריטים: V0-V5, LF, SEC, AT, CP, LL)
+
+| קבוצה | ✅ VERIFIED | ⚠️ PARTIAL | 🟡 OPEN | הערות |
+|---|---|---|---|---|
+| V0 Processing (7) | V0-02,03,06,07 | V0-04 | V0-01¹, V0-05² | |
+| V1 Understanding (7) | V1-01,02,03³,04,07³ | — | V1-05 | V1-06 דחוי (Decision Hub) |
+| V2 Memory (6) | — | — | כולן | אפס evidence בקובץ |
+| V3 Conversation (7) | — | — | כולן | אפס evidence בקובץ |
+| V4 Output (6) | — | — | כולן | אפס evidence בקובץ |
+| V5 Five Gates (5) | — | — | כולן | V5-01,02 דחויים (Decision Hub) |
+| Lead Flow (6) | LF-01³ | LF-05³ | LF-02,03,04,06 | |
+| Security (6) | SEC-06⁴ | — | SEC-01..05 | |
+| Airtable (5) | AT-03³ | — | AT-01,02,04⁵,05⁶ | |
+| Cost & Perf (3) | CP-02³ | — | CP-01,03 | |
+| LL Lead Lifecycle (10) | — | — | כולן | חדש, לא נבדק עדיין |
+
+¹ PASS מסומן אך evidence הוא רק `[pass 28/06/26]` — אין השוואת hash בפועל, לא עומד בכלל הראיה של המסמך עצמו.
+² evidence ריק; קיים BUG פתוח מתאים — **BUG-011** (`app.py` run_agent fallback), 🟡 MERGED TO MAIN, ממתין לאימות פרודקשן.
+³ evidence "cross-referenced" — מצוטט בבדיקה אחרת באותו מסמך, לא תחת ה-ID של הבדיקה עצמה: V1-03/V1-07/LF-01/LF-05/AT-03/CP-02 כולם נשענים על הלוגים המצוטטים תחת V0-03/V0-04/V1-01/V1-02/V1-04.
+⁴ אומת ב-grep ישיר על הקוד (השיטה שהצ'קליסט עצמו מציע כתחליף לבדיקה ידנית כש"אין substring collision") — `tma_api.py:732-733`: `_owner_ids = [x.strip() for x in str(f.get("owner_ids","") or "").split(",")]` + `if identity.user_id not in _owner_ids` — list comparison אמיתי, לא `in str()`.
+⁵ הרצתי את ה-grep שהצ'קליסט עצמו מציין (`httpx.post\|requests.post` מחוץ ל-gateway) — מצא תוצאות ב-`crm.py`/`profile.py`/`project_timeline.py`/`worker.py`/`drive_adapter.py`/`tools/google_tools.py` ועוד. רובם לא-Airtable (Drive/Google/Telegram/Supabase) או מודולים מתועדים כ-unwired (`profile.py`/`project_timeline.py`, ראו CLAUDE.md). `crm.py:70` הוא הפניה ל-Airtable ישירה שדורשת בדיקה נפרדת — **לא נפתח BUG** כי לא בוצע root-cause מלא (אין אישור אם crm.py נגיש מנתיב כתיבה חי) — מסומן למעקב, לא קביעה.
+⁶ הקוד הבסיסי (BUG-008, trailing space) אומת קיים (`airtable_schema.py:354` `NEEDS_FOLLOWUP = "needs_followup "`), אך הבדיקה הידנית הספציפית מה-TMA לא בוצעה.
+
+**⚠️ "PASS מוצהר, evidence חסר" — לא קודם ל-VERIFIED, כלל המסמך עצמו לא מתקיים:** טבלת "בדיקות שכבר אומתו" בחלק 2 של המסמך מסמנת `LF-01`, `LF-05 (חלקי)`, `CP-02` כ-✅ PASS בתאריך 28/06/2026 — אבל למעשה יש להן evidence אמיתי (cross-referenced, ראו הערה ³ מעל), כך שהן קודמו כראוי. שאר 9 הבדיקות באותה טבלה (V0-01..07, V1-01..04) נבדקו אחת-אחת מול גוף המסמך ואומתו (V0-01 הוא היחיד שנשאר 🟡 בגלל evidence חלש).
+
+**⏸️ דחוי במפורש (לא 🟡 OPEN, לא באג):** V1-06, V2-02, V5-01, V5-02 + "Decision Hub creation/Event creation/Session↔Decision link/ראוטר Decision לפני Chat Fallback" — מסומנים בקובץ עצמו "לא לבדוק עכשיו" כי `FEATURE_DECISION_HUB=false`. אין צורך בפעולה עד הפעלה מסודרת.
+
+**BUG-023 נפתח** — באג ישן ב-`identity.py`/`lead_capture.py` (כתיבת "ליד חדש" לשדה Name, Primary Field, על כל ליד) שהתגלה תוך קריאת חלק 3 של המסמך (שרידי שיחת פיתוח). **כבר תוקן ומוזג** ב-`ca1f5a0` (28/06/2026, מאומת `merge-base --is-ancestor` מול `origin/main`) — אך הלוג שמצוטט ב-V1-04 מציג רשומות שנוצרו **לפני** התיקון, כך שאין עדיין ראיה על ליד טרי אחרי ה-fix. ראו BUG_AUDIT_LOG.md.
+
+**חלק 3 (שרידי שיחת פיתוח) — דגל מפורש, לא נשמט:** המסמך המקורי הכיל גם דיון פיתוח לא-פורמלי (ActionResult/RequestContext/ClaimGate, "Codex Handoff — Lead Capture Regression", ניתוח `claim_type` FOUND-vs-CREATED) — ללא מבנה PASS/FAIL, לא תואם את כללי הסיווג. לא הומר לפריטי checklist מזויפים; המידע היחיד שחולץ ממנו בפועל הוא BUG-023 מעל (כי הניתן לאימות מול קוד).
+
+**מסקנה מעשית:** 13/68 פריטים ✅ VERIFIED (כולל 6 cross-referenced), 2 ⚠️ PARTIAL, 53 🟡 OPEN (כולל כל 10 ה-LL החדשות וכל V2/V3/V4 — אפס evidence קיים), 4 דחויים במפורש (Decision Hub). ה-"25 בדיקות חובה" שמוגדרות בסוף החלק הפורמלי של המסמך (`Definition of Stage 0-V Complete`) **עדיין לא הושלמו** — מתוכן V0-01, V0-05, V2-01/02/03, V3-01..04, V4-01..04, LF-02/03/04/06, SEC-01/02/04/05, AT-01/04/05 נשארים 🟡 OPEN.
 
 ## 0.1 Git Diff Gap Report — 2026-06-29 (קרא לפני 0, שלא עודכן בסשן זה)
 
