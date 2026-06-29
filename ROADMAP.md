@@ -633,6 +633,19 @@ point: call append_reasoning_block() from ...`).
 ייעודי — מאחורי `FEATURE_DECISION_HUB` דרך `core/reasoning_engines.FEATURE_FLAG` בלבד, אבל זה
 לא רלוונטי כל עוד אין קורא. אין כאן עדיין "פיצ'ר" במובן המוצרי — שכבת תשתית בלי משתמש.
 
+**עדכון 29/06/2026 — `decision_adapter` חובר (`leads_adapter` נשאר לא מחובר):**
+`cmd_decision.py._format_decision_card()` קורא ל-`core.adapters.decision_adapter.append_reasoning_block()`
+כ-fallback block, **רק כש-`FEATURE_DECISION_HUB` כבוי** (`not is_enabled(decision_orchestrator.FEATURE_FLAG)`).
+הסיבה: `append_orchestrator_to_card()` (F21, Stage 4/5) ו-`append_reasoning_block()` (Stage 6)
+מציגים בעיקרם את אותו מידע (state/phase, confidence bar, צעד הבא, אחראי) — הצגת שניהם יחד
+בכרטיס אחת תיצור כפילות ויזואלית, לא ערך מוסף. נבדק ונקבע מול המשתמש דרך `AskUserQuestion`
+לפני המימוש. `core.adapters.leads_adapter` **עדיין לא מחובר** — אין caller חי, נשאר
+`expected_wired=False` ב-`smoke_tests.py::DECISION_HUB_ENTRYPOINTS`.
+`smoke_tests.py::check_decision_hub_call_sites` עודכן בהתאם (`core.adapters.decision_adapter`
+→ `expected_wired=True`) ועובר. `core.reasoning_engines` עצמו נשאר `expected_wired=False` —
+הוא מיובא רק מתוך `decision_adapter.py` (לא ישירות מקובץ entrypoint חי), והבדיקה בודקת ייבוא
+ישיר בלבד, לא טרנזיטיבי.
+
 **C60 — Tool Context Awareness (PR #152, מוזג ל-`main`, commit `2d85b84`/merge `3e0094b`):**
 לפי `SPEC_C59_Tool_Context_Awareness.md` (הועלה ע"י הבעלים בלי טקסט מלווה; אישור דרך
 `AskUserQuestion`: "Yes, implement now"). ⚠️ **ID collision מתועד** — הספק תייג עצמו "C59",

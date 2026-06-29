@@ -432,6 +432,27 @@ def _format_decision_card(decision: dict) -> str:
         logger.warning(f"[DecisionHub] orchestrator block failed: {e}")
         orchestrator_block = ""
 
+    # Stage 6 — Core Reasoning Layer (core/adapters/decision_adapter.py).
+    # orchestrator_block ו-reasoning_block מציגים את אותו מידע בעיקרו
+    # (state, confidence, צעד הבא) — לא מציגים את שניהם יחד. reasoning_block
+    # רץ רק כשFEATURE_DECISION_HUB כבוי, כ-fallback ל-Orchestrator המבוטל.
+    reasoning_block = ""
+    try:
+        from feature_flags import is_enabled
+        from decision_orchestrator import FEATURE_FLAG as _ORCHESTRATOR_FLAG
+
+        if not is_enabled(_ORCHESTRATOR_FLAG):
+            from core.adapters.decision_adapter import append_reasoning_block
+
+            reasoning_block = append_reasoning_block(
+                orchestrator_decision,
+                events,
+                stakeholders,
+                precomputed_confidence=confidence_result,
+            )
+    except Exception as e:
+        logger.warning(f"[DecisionHub] reasoning block failed: {e}")
+
     return (
         f"📋 {title} | טיוטה {draft}\n"
         f"────────────────────\n"

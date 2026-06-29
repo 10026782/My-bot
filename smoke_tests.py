@@ -300,8 +300,10 @@ DECISION_HUB_ENTRYPOINTS = [
      "email_inbound.py/voice_adapter.py. See ROADMAP.md F20 governance note."),
     ("core.reasoning_engines", "core/reasoning_engines.py", False,
      "Core Reasoning Layer — run() has no caller outside its own tests."),
-    ("core.adapters.decision_adapter", "core/adapters/decision_adapter.py", False,
-     "Core Reasoning Layer — append_reasoning_block() has no caller outside its own tests."),
+    ("core.adapters.decision_adapter", "core/adapters/decision_adapter.py", True,
+     "F22 — wired via cmd_decision.py _format_decision_card() as a fallback "
+     "reasoning block, used only when FEATURE_DECISION_HUB is disabled "
+     "(29/06/2026)."),
     ("core.adapters.leads_adapter", "core/adapters/leads_adapter.py", False,
      "Core Reasoning Layer — append_reasoning_block() has no caller outside its own tests."),
 ]
