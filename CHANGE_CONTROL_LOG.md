@@ -23,6 +23,39 @@
 
 > נבנה מ-`git log --since="30 days ago"` (~172 commits, `f935c53`→`eebf73b`) + טבלאות ROADMAP.md (Stabilization Sprint, World 2, Sprint 16/06). כל commit hash צוטט ישירות מ-git או מ-ROADMAP — שורות שלא נמצאה להן ראיה ישירה מסומנות "לא ידוע".
 
+### F22-WIRE-29062026 — Decision Hub Stage 6: wire decision_adapter as orchestrator fallback
+- **תאריך:** 29/06/2026
+- **סוג:** Feature (wiring of already-merged F22 code, no new logic added)
+- **Requirement:** ROADMAP.md F22 — "Core Reasoning Layer" was merged 28/06/2026 with zero live
+  call sites (governance drift documented in GOV-29062026 below). This entry closes that gap for
+  `core.adapters.decision_adapter` specifically (`leads_adapter` remains intentionally unwired).
+- **Commit:** (ייקבע ב-push לענף `claude/new-session-be1ckb`)
+- **PR:** טרם נפתח
+- **Review על ידי:** —
+- **Deploy תאריך:** —
+- **Verified בפרודקשן:** לא
+- **Verification ראיה:** המשתמש העלה `cmd_decision_1.py` בטענה ש"11 שורות diff בלבד, השאר
+  \r\n". אומת ע"י `diff <(tr -d '\r' < upload) cmd_decision.py` שהטענה שגויה — ההעלאה התבססה
+  על גרסה ישנה של `cmd_decision.py`, חסרה Stage 2 (`_format_confidence_block`)/Stage 3
+  (`_format_readiness_block`)/`decision_matching` module — לא הוחל verbatim. במקום זאת בוצע
+  שינוי ממוקד ב-`_format_decision_card()` (cmd_decision.py:434-449 הנוכחי): קריאה ל-
+  `append_reasoning_block()` **רק כש-`FEATURE_DECISION_HUB` כבוי** — `orchestrator_block`
+  (F21, Stage 4/5) ו-`reasoning_block` (Stage 6) מציגים את אותו מידע בעיקרם (state, confidence
+  bar, צעד הבא, אחראי); הצגת שניהם יחד נמצאה ע"י בדיקת `format_orchestrator_card()` מול
+  `DecisionAdapter.from_result()` כיוצרת כפילות ויזואלית, לא ערך מוסף — הוחלט מול המשתמש דרך
+  `AskUserQuestion` (אופציה "reasoning_block רק כש-orchestrator מבוטל"). `python3 -m py_compile
+  cmd_decision.py` נקי; `test_decision_confidence.py` 28/28; `test_decision_readiness.py` 25/25;
+  `smoke_tests.py::check_decision_hub_call_sites` עודכן (`core.adapters.decision_adapter` →
+  `expected_wired=True`) ועובר (7/7 entrypoints תואמים).
+- **Docs עודכנו:** ROADMAP.md (F22 — עדכון מצב חיווט), smoke_tests.py (manifest entry),
+  CHANGE_CONTROL_LOG.md (רשומה זו)
+- **Feature Flag:** `FEATURE_DECISION_HUB` — ללא שינוי בדגל עצמו; ה-fallback רץ **רק כשהדגל כבוי**
+- **Rollback plan:** הסרת בלוק ה-Stage 6 מ-`cmd_decision.py._format_decision_card()` (try/except
+  עצמאי, אין side effect חוץ מהוספת טקסט לכרטיס) + שינוי `expected_wired` בחזרה ל-`False` ב-
+  `smoke_tests.py`
+
+---
+
 ### GAP-29062026 — Git Diff Gap Report: undocumented merges + Safe Document Converter stale status
 - **תאריך:** 29/06/2026
 - **סוג:** Documentation / Governance — תיקון תיעוד בלבד, **ללא שינוי התנהגות בפרודקשן**

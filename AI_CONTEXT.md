@@ -1,12 +1,18 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-06-29 (מאוחר ביותר) — Manual Verification Checklist session
-**עודכן על ידי:** Claude Code — `claude/new-session-be1ckb`, `BOSS_Manual_Verification_ChecklIST_UPDATED2.docx`
+**עודכן:** 2026-06-29 (מאוחר ביותר) — Lead Buffer (PR #176) + Decision Hub F22 wiring session
+**עודכן על ידי:** Claude Code — `claude/new-session-be1ckb`
 
 > מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (מיושן, 19/06) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
 
 ---
+
+## 0.3 Lead Buffer (PR #176) + Decision Hub F22 wiring — 2026-06-29 (קרא לפני 0.2)
+
+**PR #176 (`410c929`, ממתין למיזוג):** `core/lead_buffer.py` (חדש — thread-local per-request buffer, allowlist `Name/notes/summary/domain/interests/email`) + domain-keyed `memory_key` ב-`lead_capture.py`/`app.py` (BUG-NEW-06/07). **באג תאימות-לאחור נמצא ותוקן לפני push:** ההעלאה המקורית (`lead_capture5.py`) הייתה מצמידה סיומת `:general` ל-memory_key גם בדומיין ברירת המחדל — היה שובר כל ליד קיים ב-Airtable + `ad_attribution.py._inject_utm`. תוקן: סיומת רק לדומיין שאינו `general`. `core/lead_buffer.py` כרגע **dormant** — אין producer שקורא ל-`save_blocked_payload()` (ה-`LeadsWriteGate`/`LeadsDirectWriteBlocked` שאמורים לקרוא לו לא קיימים בקוד).
+
+**Decision Hub F22 — `core.adapters.decision_adapter` חובר (`leads_adapter` נשאר לא מחובר):** המשתמש העלה `cmd_decision_1.py` בטענה "11 שורות diff, השאר \r\n" — **הטענה נמצאה שגויה** (`diff <(tr -d '\r' < upload) cmd_decision.py` חשף שההעלאה מבוססת על גרסה ישנה, חסרה Stage 2/3 ו-`decision_matching`). לא הוחל verbatim. בוצע שינוי ממוקד: `cmd_decision.py._format_decision_card()` קורא ל-`append_reasoning_block()` **רק כש-`FEATURE_DECISION_HUB` כבוי** (fallback ל-`orchestrator_block` המבוטל, לא תצוגה כפולה — שני הבלוקים מציגים מידע דומה). `smoke_tests.py::DECISION_HUB_ENTRYPOINTS` עודכן (`core.adapters.decision_adapter` → `expected_wired=True`); `check_decision_hub_call_sites` עובר. ראו ROADMAP.md F22 + CHANGE_CONTROL_LOG.md F22-WIRE-29062026 לפירוט מלא.
 
 ## 0.2 Manual Verification Checklist — 2026-06-29 (קרא לפני 0.1)
 
