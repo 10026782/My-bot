@@ -23,6 +23,40 @@
 
 > נבנה מ-`git log --since="30 days ago"` (~172 commits, `f935c53`→`eebf73b`) + טבלאות ROADMAP.md (Stabilization Sprint, World 2, Sprint 16/06). כל commit hash צוטט ישירות מ-git או מ-ROADMAP — שורות שלא נמצאה להן ראיה ישירה מסומנות "לא ידוע".
 
+### GAP-29062026 — Git Diff Gap Report: undocumented merges + Safe Document Converter stale status
+- **תאריך:** 29/06/2026
+- **סוג:** Documentation / Governance — תיקון תיעוד בלבד, **ללא שינוי התנהגות בפרודקשן**
+- **Requirement:** `SPEC_GIT_DIFF_GAP_FINDER.md` — לגלות מה השתנה ב-`main` שלא תועד ב-ROADMAP/AI_CONTEXT/CHANGE_CONTROL_LOG
+- **Commit:** (ייקבע ב-push לענף `claude/new-session-be1ckb`)
+- **PR:** טרם נפתח
+- **Review על ידי:** —
+- **Deploy תאריך:** לא רלוונטי (תיעוד בלבד)
+- **Verified בפרודקשן:** לא רלוונטי
+- **Verification ראיה:** `git log origin/main --since="5 days ago" --diff-filter=A/M --name-only`
+  השווה מול ROADMAP/AI_CONTEXT/CHANGE_CONTROL_LOG. נמצאו 2 commits מוזגים ל-`main` ב-29/06/2026
+  בלי שום תיעוד:
+  - `4e1d7ed` "Wire lead capture evidence into A32" (PR #171) — `_action_result_to_a32_entry()`
+    ב-`app.py`, ממירה `ActionResult`/`ClaimType` של lead_capture ל-רשומת A32
+    `tool_results_log` (FOUND≠CREATED). קריאה אמיתית מאומתת: `app.py:1124`.
+  - `257a5e4` "Fix safe lead metadata patch" (PR #172) — `capture_lead_event()` ב-`lead_capture.py`,
+    כותבת ל-`Tables.LEAD_EVENTS` כש-ליד קיים (FOUND) שולח הודעה חדשה; לא דורסת/יוצרת ליד.
+    קריאה אמיתית מאומתת: `lead_capture.py:215`.
+  שני אלה **מחוברים בפועל** (caller אמיתי) — MISSING_FROM_DOCS, לא EXISTS_UNWIRED/MISSING קוד.
+  בנוסף נמצא: ROADMAP.md §"Fxx — Safe Document Converter" היה כתוב "Not merged to main" כש
+  בפועל מוזג מ-26/06/2026 (PR #158, `db719ab`) — תוקן ל"מוזג אך לא מחובר" (EXISTS_UNWIRED,
+  pattern F20/F22; אפס caller ל-`convert_document()` מעבר ל-`test_document_converter.py`).
+  ממצא נוסף תוך כדי בדיקה: `test_document_converter.py` (סגנון `pytest`, בלי `__main__` guard)
+  רץ ב-CI דרך `python "$f"` (לא `pytest`) — מבצע 0 assertions בפועל (exit 0) אף שמתועד כ-"6/6
+  passing"; אומת ש-6/6 עובר אמיתי רק דרך `python3 -m pytest test_document_converter.py` ישירות.
+  לא תוקן בקוד — מחוץ ל-scope (אין שינוי קוד לפי כללי הספק); תועד כממצא פתוח.
+  דוח מלא: `reports/gap_report_29jun2026.md`.
+- **Docs עודכנו:** ROADMAP.md (entry חדש + תיקון סטטוס Fxx), CHANGE_CONTROL_LOG.md (רשומה זו),
+  AI_CONTEXT.md (main pointer, אזכור הממצאים)
+- **Feature Flag:** לא רלוונטי — שום flag לא שונה
+- **Rollback plan:** לא רלוונטי — אין שינוי קוד התנהגותי, תיעוד בלבד
+
+---
+
 ### GOV-29062026 — Governance Repair: F20/Core Reasoning Layer call-site drift
 - **תאריך:** 29/06/2026
 - **סוג:** Documentation / Governance — תיקון תיעוד וגארד, **ללא שינוי התנהגות בפרודקשן**

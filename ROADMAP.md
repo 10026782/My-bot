@@ -1,6 +1,19 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 29/06/2026 (מאוחר ביותר) — Governance Repair session, main = `6b20028` (אומת
+עודכן: 29/06/2026 (מאוחר ביותר) — Git Diff Gap Report session, main = `debb270` (אומת
+`git fetch origin main` + `git log origin/main --oneline -30`). מבוסס על
+`SPEC_GIT_DIFF_GAP_FINDER.md`. ממצאים: **(1)** סעיף "Fxx — Safe Document Converter" למטה היה
+כתוב "Not merged to main" כשבפועל מוזג מ-26/06/2026 (PR #158, `db719ab`) — תוקן ל"מוזג אך לא
+מחובר" (EXISTS_UNWIRED, pattern F20/F22) + ממצא CI חדש (test_document_converter.py רץ ב-CI
+בלי לבצע assertion, ראו פירוט בסעיף עצמו). **(2)** שני commits מוזגים ל-`main` ב-29/06/2026
+(`4e1d7ed` "Wire lead capture evidence into A32", PR #171; `257a5e4` "Fix safe lead metadata
+patch", PR #172) לא תועדו בכלל ב-CHANGE_CONTROL_LOG/ROADMAP — שניהם **כן** מחוברים (caller
+אמיתי מאומת: `app.py:1124`, `lead_capture.py:215`), זה לא MISSING/EXISTS_UNWIRED, רק תיעוד
+שהוחמץ — תועד למטה ב-CHANGE_CONTROL_LOG.md. **(3)** `reports/daily_changes/` (BUG-022, סשן
+קודם) — מאומת קיים ב-remote (`debb270` מכיל `AUDIT_SUMMARY.md`). דוח מלא:
+`reports/gap_report_29jun2026.md`. לא בוצע שינוי קוד/wiring — תיעוד בלבד.
+
+עודכן (קודם): 29/06/2026 — Governance Repair session, main = `6b20028` (אומת
 ב-`git fetch origin main` + `git merge --ff-only`). **תיקון סטייה ממצא 27/06/2026:**
 F20 (Decision Hub Stage 5, Auto Ingestion) נמצא **מוזג אך לא מחובר** — `decision_auto_ingestion.py`
 ו-`ingest_message()` אין להם קורא אמיתי באף אחד מ-`app.py`/`inbound_handler.py`/
@@ -912,7 +925,22 @@ Scope guard: no production behavior changes, no `app.py` changes, no refactor, a
 
 ### Fxx — Safe Document Converter
 
-Status: Implemented but not yet verified on branch `fxx-safe-document-converter`. Local converter tests pass (6/6). Not merged to `main`; production deploy not verified.
+Status: ⚠️ **תוקן 29/06/2026 (Gap Report) — היה כתוב "Not merged to main", שגוי.** מוזג בפועל
+ל-`main` ב-PR #158, commit `db719ab`, **26/06/2026** — שלושה ימים לפני שהתיעוד עדכן את עצמו.
+**מוזג אך לא מחובר** (אותו pattern כמו F20/F22): `convert_document()` נקרא רק מתוך
+`test_document_converter.py` — אפס caller ב-`app.py`/`tools/dispatcher.py`/כל מודול חי אחר.
+אין `FEATURE_` flag (אין צורך — אין נתיב הרצה חי שדורש הגנת flag).
+
+**ממצא CI נוסף (29/06/2026):** `test_document_converter.py` כתוב בסגנון `pytest` (פונקציות
+`def test_...(tmp_path)` עם fixtures) **בלי `if __name__ == "__main__":` block**. `ci.yml`
+מריץ כל `test_*.py` דרך `python "$f"` (לא דרך `pytest`) — כלומר ב-CI הקובץ **רץ בלי לבצע אף
+assertion** (`exit 0`, 0 נבדקו בפועל), אף שהוא "ירוק". הרצה ידנית דרך `python3 -m pytest
+test_document_converter.py` (עם `beautifulsoup4`/`markdown`/`python-docx`/`openpyxl` שכבר
+ב-`requirements.txt`) מאשרת 6/6 PASS אמיתי — כך שהקוד תקין, אבל ה-CI לא בודק אותו בפועל.
+לא תוקן בקוד (מחוץ ל-scope של Gap Report; דורש שינוי ל-`ci.yml` או הוספת `__main__` guard).
+
+Status המקורי (לתיעוד היסטורי): Implemented but not yet verified. Local converter tests pass
+(6/6) — תוקן מ-"Not merged" ל-"מוזג אך לא מחובר", per Gap Report 29/06/2026.
 
 What: standalone deterministic conversion package `document_converter` with public API `convert_document(input_file, input_type, output_type)`. Supported MVP conversions: Markdown<->HTML, Markdown<->TXT, HTML<->TXT, Markdown/HTML/TXT->DOCX, DOCX->Markdown/TXT, CSV<->XLSX.
 

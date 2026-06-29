@@ -1,14 +1,23 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-06-29 (מאוחר ביותר) — Governance Repair session
-**עודכן על ידי:** Claude Code — `claude/new-session-be1ckb`, תיקון סטיית governance ממצא 27/06/2026
+**עודכן:** 2026-06-29 (מאוחר ביותר) — Git Diff Gap Report session
+**עודכן על ידי:** Claude Code — `claude/new-session-be1ckb`, `SPEC_GIT_DIFF_GAP_FINDER.md`
 
 > מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (מיושן, 19/06) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
 
 ---
 
-## 0. Governance Repair — 2026-06-29 (קרא לפני סעיף 1, שלא עודכן בסשן הזה)
+## 0.1 Git Diff Gap Report — 2026-06-29 (קרא לפני 0, שלא עודכן בסשן זה)
+
+**`main` = `debb270`** (אומת `git fetch origin main` + `git log origin/main --oneline -30`; ה-`6b20028` בסעיף 0 למטה מיושן — מ-`6b20028` יש 3 commits נוספים: `f48e4a1`/`6fab36c` שלי עצמי + merge `debb270`).
+
+- **Fxx Safe Document Converter — תיקון תיעוד.** ROADMAP.md/סעיף 4 למטה אמרו "Not merged to main" / "Next: open PR, merge" — **שגוי**: מוזג בפועל ב-PR #158 (`db719ab`, 26/06/2026). מצב אמיתי: **מוזג אך לא מחובר** (EXISTS_UNWIRED, pattern F20/F22) — `convert_document()` נקרא רק מתוך `test_document_converter.py`. ראו ROADMAP.md §Fxx לפירוט מלא + ממצא CI (הקובץ רץ ב-CI בלי לבצע assertion — pytest-style קובץ בלי `__main__` guard, ו-`ci.yml` מריץ `python "$f"` ולא `pytest`).
+- **שני commits לא-מתועדים נמצאו ותועדו:** `4e1d7ed` "Wire lead capture evidence into A32" (PR #171) ו-`257a5e4` "Fix safe lead metadata patch" (PR #172), שניהם מוזגים 29/06/2026, שניהם **מחוברים בפועל** (caller אמיתי: `app.py:1124`, `lead_capture.py:215`) — MISSING_FROM_DOCS בלבד, לא EXISTS_UNWIRED. ראו CHANGE_CONTROL_LOG.md GAP-29062026.
+- **`reports/daily_changes/`** — מאומת קיים ב-`debb270` (תוצאה של BUG-022, סשן קודם). אין עוד ממצא local-only.
+- דוח מלא: `reports/gap_report_29jun2026.md`. לא בוצע שינוי קוד/wiring בסשן זה.
+
+## 0. Governance Repair — 2026-06-29
 
 **`main` = `6b20028`** (אומת ב-`git fetch origin main` + `git merge --ff-only`; השורה `main = b289ab6` בסעיף 1 למטה מיושנת — מ-`b289ab6` ל-`6b20028` יש עשרות commits כולל F17–F22 שלא תועדו כשהשורה ההיא נכתבה).
 
@@ -111,7 +120,7 @@
 **שאר ה-PRs האחרונים (לפירוט מלא ראו `CHANGELOG.md`/`CHANGE_CONTROL_LOG.md`):** C22 Weekly Business Summary (PR #94, off by default), C53/O4 Screen Filter Gateway + Finance Pulse, C53-A structured tool-result contract + A32 hardening (PR #80), C54/C55 Business Update command + Origin Lead linking (PR #85/#86), C56 Approval Policy stack (PR #69, off by default).
 
 ## 4. Next Priorities
-0. **Fxx Safe Document Converter** — tests pass locally (`test_document_converter.py`, 6/6) after installing `beautifulsoup4`/`markdown`/`python-docx`/`openpyxl` into Python 3.14. Next: open PR, merge, and verify on `main`. Pandoc remains optional but preferred when installed.
+0. **Fxx Safe Document Converter — כבר מוזג ל-`main`** (PR #158, `db719ab`, 26/06/2026; תוקן 29/06/2026 Gap Report — לא "open PR, merge" כמו שכתוב היה). הבא בתור: לחבר ל-נתיב חי (drive/voice upload) **רק** אחרי PLANNING_GATE, או להחליט במפורש להשאיר merged-but-unreachable. בנפרד: לתקן את `test_document_converter.py` כך שירוץ בפועל ב-CI (אין `__main__` guard, ו-`ci.yml` מריץ `python` ולא `pytest`). 6/6 tests עוברים דרך `pytest` ישירות עם `beautifulsoup4`/`markdown`/`python-docx`/`openpyxl` (כבר ב-`requirements.txt`). Pandoc אופציונלי, מועדף כשמותקן.
 0. **F52 audit branch** — open/refresh PR for `f52-current-tool-map-audit`; docs only, no production code changes.
 0. **C60 Tool Context Awareness — 🟡 CODE DONE, לא ממוזג** — לבצע commit+push ל-`claude/new-session-be1ckb`, ואז PR (רק אם יתבקש)+merge+deploy; לאחר deploy, לאמת §10 פריט 7 של הספק (העלה קובץ → "תעלה לדסישנס" → BOSS זוכר ומנתב נכון). **Decision Hub Stage 1 (Trust Layer) — מוזג** (PR #151); לאחר deploy יש לאמת §10 פריט 11 (T0 event אמיתי מציג flag בטלגרם). Stage 2-4 (ליבה) ממשיכים לפני יציאות נוספות (דומיינים/ערוצים/ייעודים), לפי `archive/BOSS_MASTER_PLAN_One_Road.md` (ARCHIVE, לא מקור אמת).
 1. **לאמת BUG-013/014/015/016/017 בפרודקשן בפועל** — כולם מוזגים ל-`main`, אפס אימות ידני עד כה (קובץ >50MB אמיתי / Drive evidence gate / N07 מול live Airtable / security-review persistence).
