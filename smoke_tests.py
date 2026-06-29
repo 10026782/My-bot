@@ -281,6 +281,84 @@ def check_safety() -> str:
     return "no unsafe legacy table-name calls or fake approval text found"
 
 
+# Decision Hub / Core Reasoning Layer entrypoints whose live-wiring state is
+# declared explicitly here. `expected_wired=True` means some non-test module
+# other than the defining file must import it (a regression guard). The
+# `expected_wired=False` entries are the known governance-drift cases (merged
+# but unreachable, per the 2026-06-29 governance repair) — flipping one to
+# True here is only correct once a real caller exists, which this check
+# enforces both ways.
+DECISION_HUB_ENTRYPOINTS = [
+    ("decision_attention", "decision_attention.py", True,
+     "F19 — wired via cmd_decision.py _format_decision_card()"),
+    ("decision_orchestrator", "decision_orchestrator.py", True,
+     "F21 — wired via cmd_decision.py _format_decision_card()"),
+    ("decision_matching", "decision_matching.py", True,
+     "wired via cmd_decision.py _suggest_decision_link()"),
+    ("decision_auto_ingestion", "decision_auto_ingestion.py", False,
+     "F20 — merged but unreachable; no caller in app.py/inbound_handler.py/"
+     "email_inbound.py/voice_adapter.py. See ROADMAP.md F20 governance note."),
+    ("core.reasoning_engines", "core/reasoning_engines.py", False,
+     "Core Reasoning Layer — run() has no caller outside its own tests."),
+    ("core.adapters.decision_adapter", "core/adapters/decision_adapter.py", False,
+     "Core Reasoning Layer — append_reasoning_block() has no caller outside its own tests."),
+    ("core.adapters.leads_adapter", "core/adapters/leads_adapter.py", False,
+     "Core Reasoning Layer — append_reasoning_block() has no caller outside its own tests."),
+]
+
+
+# Files that are actual live pipeline entrypoints per CLAUDE.md's documented
+# inbound flow + scheduled jobs. A module is "wired" only if one of these
+# imports it directly — being imported only by another unreachable module
+# (transitively dead code) does not count, since that's the exact drift this
+# check exists to catch.
+LIVE_ENTRYPOINT_FILES = {
+    "app.py", "cmd_decision.py", "inbound_handler.py", "email_inbound.py",
+    "voice_adapter.py", "scheduler.py", "worker.py", "daily_digest.py",
+    "daily_collector.py", "tools/dispatcher.py",
+}
+
+
+def _module_referenced(module_name: str, defining_path: Path) -> bool:
+    """True if some live entrypoint file directly imports `module_name`."""
+    short_name = module_name.rsplit(".", 1)[-1]
+    for path in _module_files():
+        if path == defining_path:
+            continue
+        if str(path.relative_to(ROOT)) not in LIVE_ENTRYPOINT_FILES:
+            continue
+        tree = _parse(path)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                if any(alias.name == module_name or alias.name == short_name for alias in node.names):
+                    return True
+            elif isinstance(node, ast.ImportFrom):
+                mod = node.module or ""
+                if mod == module_name or mod == short_name or mod.endswith("." + short_name):
+                    return True
+    return False
+
+
+def check_decision_hub_call_sites() -> str:
+    """Catch 'feature file exists but has zero call sites' drift.
+
+    Compares the declared wiring state of each Decision Hub / Core Reasoning
+    entrypoint against the real import graph, so a feature can't be silently
+    wired in (or silently un-wired) without this check forcing a matching
+    documentation/manifest update.
+    """
+    mismatches: list[str] = []
+    for module_name, defining_rel, expected_wired, note in DECISION_HUB_ENTRYPOINTS:
+        actual_wired = _module_referenced(module_name, ROOT / defining_rel)
+        if actual_wired != expected_wired:
+            mismatches.append(
+                f"{module_name}: expected wired={expected_wired}, actual={actual_wired} ({note})"
+            )
+
+    assert not mismatches, "\n".join(mismatches)
+    return f"{len(DECISION_HUB_ENTRYPOINTS)} Decision Hub entrypoints match their declared wiring state"
+
+
 def main() -> int:
     checks = [
         ("Import test", check_imports),
@@ -289,6 +367,7 @@ def main() -> int:
         ("Tool registry / dispatcher sanity", check_tools),
         ("Daily digest sanity", check_daily_digest),
         ("Safety checks", check_safety),
+        ("Decision Hub call-site governance", check_decision_hub_call_sites),
     ]
 
     print("BOSS automated smoke tests")

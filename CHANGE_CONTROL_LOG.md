@@ -23,6 +23,38 @@
 
 > נבנה מ-`git log --since="30 days ago"` (~172 commits, `f935c53`→`eebf73b`) + טבלאות ROADMAP.md (Stabilization Sprint, World 2, Sprint 16/06). כל commit hash צוטט ישירות מ-git או מ-ROADMAP — שורות שלא נמצאה להן ראיה ישירה מסומנות "לא ידוע".
 
+### GOV-29062026 — Governance Repair: F20/Core Reasoning Layer call-site drift
+- **תאריך:** 29/06/2026
+- **סוג:** Documentation / Governance — תיקון תיעוד וגארד, **ללא שינוי התנהגות בפרודקשן**
+- **Requirement:** תיקון סטיית governance ממצא 27/06/2026 (F20 "feature file exists but has zero call sites")
+- **Commit:** (ייקבע ב-push לענף `claude/new-session-be1ckb`)
+- **PR:** טרם נפתח
+- **Review על ידי:** —
+- **Deploy תאריך:** לא רלוונטי (תיעוד + smoke test בלבד)
+- **Verified בפרודקשן:** לא רלוונטי
+- **Verification ראיה:** grep מלא על הריפו אישר ש-`decision_auto_ingestion.py` (F20) ושכבת
+  Core Reasoning Layer (`core/reasoning_engines.py`, `reasoning_entity.py`, `reasoning_ports.py`,
+  `core/adapters/decision_adapter.py`, `core/adapters/leads_adapter.py` — **לא היו מתועדים
+  בכלל לפני זה**) אין להם קריאה מאף entrypoint חי. `decision_attention.py` (F19),
+  `decision_orchestrator.py` (F21), ו-`decision_matching.py` כן מחוברים (אומת דרך
+  `cmd_decision.py`). נוסף `smoke_tests.py::check_decision_hub_call_sites` (AST-based,
+  משווה manifest מוצהר מול גרף import אמיתי מתוך entrypoints חיים בלבד) — עובר.
+  `py_compile` נקי; כל סוויטות הבדיקה הרלוונטיות (`test_core_reasoning.py` 59/59,
+  `test_decision_orchestrator.py` 13/13, `test_decision_auto_ingestion.py` 18/18,
+  `test_decision_attention.py` 11/11, `test_cxx_action_integrity.py` 6/6,
+  `test_decision_confidence.py` 28/28, `test_decision_readiness.py` 25/25,
+  `test_integration.py` 4/4) עברו, אין רגרסיה. נסיון אימות Airtable חי דרך Airtable MCP
+  (`search_bases`/`list_tables_for_base`/`get_table_schema`) נחסם בסשן הזה ("MCP tool call
+  requires approval" על כל קריאה) — `schema_cache.json` נשאר `seed-from-schema-py`,
+  לא נערך/נמחק (תקדים BUG_AUDIT_LOG FLAGGED).
+- **Docs עודכנו:** ROADMAP.md (F20 downgrade note + F22 חדש), AI_CONTEXT.md (§0 חדש,
+  main pointer `b289ab6`→`6b20028`), CHANGE_CONTROL_LOG.md (רשומה זו)
+- **Feature Flag:** `FEATURE_DECISION_HUB`/`FEATURE_DECISION_AUTO_INGESTION` — נשארים כבויים;
+  לא נשנו ולא הוחלט להדליק
+- **Rollback plan:** לא רלוונטי — אין שינוי קוד התנהגותי, רק תיעוד + smoke test נוסף
+
+---
+
 ### CXX — Action Integrity cleanup and DOC upload reconciliation
 - **תאריך:** 29/06/2026
 - **סוג:** Bug Fix / File Hygiene / Contract Wiring

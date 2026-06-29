@@ -319,6 +319,33 @@
 - **Verification ראיה:** שוחזר ידנית: הרצת `python3 schema_audit.py` בלי env vars מתאימים קורסת עם `UnboundLocalError: tables`
 - **סטטוס:** Open
 
+### BUG-022 — SPEC_DAILY_CHANGES_AUDIT.md מניח קיומה של reports/daily_changes/ — לא קיימת, לא הייתה קיימת
+- **דווח:** 29/06/2026
+- **דווח על ידי:** המשתמש, באמצעות `SPEC_DAILY_CHANGES_AUDIT.md` (סשן audit לתיעוד יומי)
+- **מסך / מודול:** `reports/daily_changes/` (תיקייה שלמה)
+- **תיאור:** ה-SPEC מניח שקיימות תיקיות-תאריך תחת `reports/daily_changes/` עם שינויים מתועדים
+  לאימות מול `main`. בבדיקה: התיקייה לא קיימת ב-`main` (`ls reports/daily_changes/` → No such
+  file or directory), לא קיימת בשום branch אחר (`phase-3-contacts`, `phase-4-knowledge`,
+  `phase-5-marketing`, `test/stale-airtable-gateway`), ולא קיימת אף-פעם בהיסטוריית git
+  (`git log --all --diff-filter=A --name-only -- '*daily_changes*'` החזיר 0 תוצאות). זהו
+  ❌ MISSING שמיושם על קלט ה-audit עצמו, לא על feature בקוד — הוחל הכלל הרלוונטי מה-SPEC
+  באופן רפלקסיבי.
+- **Severity:** Low — אין משתמע נזק לפרודקשן; התוצאה היא ש-audit השינויים היומי לא יכול
+  להתבצע על קלט שלא קיים, ולא יותר מזה.
+- **Root Cause:** ה-SPEC נכתב מול תהליך/מבנה תיקיות מתוכנן או רצוי שלא נוצר בפועל באף סשן קודם —
+  אין רישום שהתיקייה אי-פעם הכילה תוכן.
+- **תוקן:** התיקייה `reports/daily_changes/` נוצרה (ריקה מתוכן היסטורי, מכילה רק את
+  `AUDIT_SUMMARY.md` של audit זה) כדי שסשנים עתידיים יוכלו להתחיל לתעד שינויים יומיים לפיה.
+  לא בוצע שום שינוי קוד/ארכיטקטורה.
+- **Merged:** ראה commit ה-audit (`docs: daily_changes audit 29/06/2026`)
+- **Deployed:** N/A — שינוי תיעוד בלבד
+- **Verified בפרודקשן:** N/A
+- **Verification ראיה:** `ls`, `git log origin/main --oneline -5`, `git branch -a`,
+  `git ls-tree -r <branch> --name-only | grep daily_changes` (לכל branch מרוחק), ו-
+  `git log --all --diff-filter=A --name-only -- '*daily_changes*'` — כולם הוצגו ב-
+  `reports/daily_changes/AUDIT_SUMMARY.md`.
+- **סטטוס:** ✅ נסגר — לא היה באג בקוד, הייתה הנחת-קלט שגויה ב-SPEC; התיקייה נוצרה, אין פעולה נוספת דרושה.
+
 ### FLAGGED (cleanup candidates, not bugs) — קוד מת ב-airtable_schema.py / קובץ cache מטעה
 - **דווח:** 24/06/2026 — באותו אודיט כמו BUG-020
 - **תיאור:** אומת ב-`grep` (0 שימושים מעבר להגדרה עצמה):

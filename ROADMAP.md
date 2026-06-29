@@ -1,6 +1,29 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 29/06/2026 (מאוחר ביותר) — branch `fix/cxx-action-integrity-cleanup`, מבוסס על
+עודכן: 29/06/2026 (מאוחר ביותר) — Governance Repair session, main = `6b20028` (אומת
+ב-`git fetch origin main` + `git merge --ff-only`). **תיקון סטייה ממצא 27/06/2026:**
+F20 (Decision Hub Stage 5, Auto Ingestion) נמצא **מוזג אך לא מחובר** — `decision_auto_ingestion.py`
+ו-`ingest_message()` אין להם קורא אמיתי באף אחד מ-`app.py`/`inbound_handler.py`/
+`email_inbound.py`/`voice_adapter.py`/נתיב מדיה כלשהו (grep מלא על הריפו, לא רק על חמשת
+הקבצים שנבדקו). **נוסף ל-`smoke_tests.py`** check חדש (`check_decision_hub_call_sites`)
+שמשווה את מצב החיווט המוצהר מול גרף ה-import האמיתי מתוך קבצי entrypoint חיים בלבד —
+מונע מצב עתידי שבו פיצ'ר מתועד כ"עבד" בלי נתיב הרצה אמיתי. ראו פירוט מתחת ל-F20 למטה.
+**ממצא נוסף, לא היה מתועד בכלל:** שכבת "Core Reasoning Layer" (`core/reasoning_engines.py`,
+`core/reasoning_entity.py`, `core/reasoning_ports.py`, `core/adapters/decision_adapter.py`,
+`core/adapters/leads_adapter.py`) נמצאת ב-`main` (הועלתה ב-28/06/2026 23:06–23:09 דרך
+"Add files via upload" ישירות ל-`main`, לא דרך PR/session) עם 59/59 בדיקות עוברות
+(`test_core_reasoning.py`) אך **אפס קריאה חיה** — `run()` ו-`append_reasoning_block()`
+נקראים רק מתוך הבדיקות של עצמם. אין תיעוד קודם לזה ב-ROADMAP/AI_CONTEXT/
+CHANGE_CONTROL_LOG. נרשם כ"קיים, נבדק, לא מחובר" — לא "פעיל". **בדיקת Airtable חיה
+(להחלטה ב-#3 למטה) נחסמה בסשן הזה:** שלושת כלי ה-Airtable MCP (`search_bases`,
+`list_tables_for_base`, `get_table_schema`) החזירו "MCP tool call requires approval" על כל
+קריאה — לא permission prompt חד-פעמי אלא חסימה ברמת הסשן; `schema_cache.json` עדיין
+`fetched_at: "seed-from-schema-py"` (לא live) ולא נערך/נמחק בסשן זה (לפי התקדים ב-BUG_AUDIT_LOG
+FLAGGED — לא נמחק/שונה בלי אישור מפורש). מסקנה: שלב Decision Hub Airtable readiness (Evidence
+Ids / Evidence Summary / Confidence Score / Missing Evidence / DecisionReadiness.REVIEW)
+**נשאר לא מאומת מול Airtable חי** — נחסם **activation blocker** ל-`FEATURE_DECISION_HUB`.
+
+עודכן (קודם): 29/06/2026 — branch `fix/cxx-action-integrity-cleanup`, מבוסס על
 `origin/main` ב-`ca1f5a0`. **CXX Action Integrity cleanup — Implemented but not yet
 verified:** `core/adapters/__init__.py` תוקן; ששת קובצי `DOC-20260628-WA*.py` הוסרו לאחר
 השוואה וחילוץ; WhatsApp stub מחזיר `ActionResult` בלי לטעון לשליחה; Output Gateway משמר
@@ -539,14 +562,28 @@ ConfidenceResult)` במקום `text` בלבד (כדי שלא יחושב Stage 2 
 **מצב נוכחי:** מוזג; `FEATURE_DECISION_HUB` כבוי; Production Verified לא אומת ידנית.
 
 ### F20 — Decision Hub Stage 5: Auto Ingestion (PRs #162–#164, מוזג ל-`main`)
-**מה:** ניתוב אוטומטי של WhatsApp/email/document/voice ל-Decision Inbox בלבד, raw-first,
-ללא כתיבה ל-Decision canonical. PR #162 הוסיף את `decision_auto_ingestion.py` (commit
-`9b97319`, merge `8f58634`); PR #163 חילץ matcher משותף (commit `bbea097`, merge
-`ebf0261`); PR #164 הוסיף missing-evidence penalty ל-confidence (commit `22eae2e`, merge
-`076fb0c`). `FEATURE_DECISION_AUTO_INGESTION` כבוי כברירת מחדל.
+**מה:** `decision_auto_ingestion.py`/`ingest_message()` בנוי לנתב WhatsApp/email/document/voice
+ל-Decision Inbox בלבד, raw-first, ללא כתיבה ל-Decision canonical. PR #162 הוסיף את
+`decision_auto_ingestion.py` (commit `9b97319`, merge `8f58634`); PR #163 חילץ matcher משותף
+(commit `bbea097`, merge `ebf0261`); PR #164 הוסיף missing-evidence penalty ל-confidence
+(commit `22eae2e`, merge `076fb0c`). `FEATURE_DECISION_AUTO_INGESTION` כבוי כברירת מחדל.
 **Verification ראיה:** ancestry של שלושת ה-commits מול main + grep פיזי; Auto Ingestion
-18/18 ו-Confidence 28/28.
-**מצב נוכחי:** מוזג; Production Verified לא אומת ידנית.
+18/18 ו-Confidence 28/28 — אבל הבדיקות מריצות את `ingest_message()` ישירות כפונקציה טהורה,
+לא דרך אף נתיב הודעה נכנסת אמיתי.
+**⚠️ ממצא Governance (29/06/2026):** `decision_auto_ingestion.py` **מוזג אך לא מחובר**.
+grep מלא על הריפו (`grep -rln "decision_auto_ingestion"`) מוצא קריאה רק מתוך הקובץ עצמו
+ומתוך `test_decision_auto_ingestion.py` — אין שום קריאה מ-`app.py`, `inbound_handler.py`,
+`email_inbound.py`, `voice_adapter.py`, או נתיב מדיה/document כלשהו. `decision_matching.py`
+(ה-matcher המשותף שחולץ ב-PR #163) **כן מחובר**, אך בנפרד — דרך `cmd_decision.py::_suggest_decision_link()`
+בזרימת Forward-to-Inbox הטלגרמית, לא דרך F20. הוחלט **לא** לחבר את F20 לנתיבי ה-inbound
+החיים כחלק מתיקון governance זה (חיווט לתוך `app.py`/`inbound_handler.py`/`email_inbound.py`/
+`voice_adapter.py` הוא שינוי ארכיטקטוני, לא תיקון תיעוד — מנוגד לדרישת "Do not create new
+architecture" של המשימה). נוסף guard ב-`smoke_tests.py` (`check_decision_hub_call_sites`)
+שיכשל אם מישהו "יתקן" את הדגל הזה ל-wired=True בלי קריאה אמיתית, או יסיר את הקריאות הקיימות
+של F19/F21/decision_matching בלי לעדכן את המסמך הזה.
+**מצב נוכחי:** מוזג ל-`main`; **לא מחובר לאף pipeline חי** (merged-but-unreachable); Production
+Verified לא אומת ידנית; `FEATURE_DECISION_AUTO_INGESTION` חייב להישאר כבוי עד שיוחלט במפורש
+לחבר (אופציה a) או להותיר כקוד מתועד-לא-פעיל (אופציה b — המצב הנוכחי).
 
 ### F21 — Decision Hub Stage 6: Lifecycle Orchestrator (PR #166, מוזג ל-`main`, commit `9011923`/merge `2c55c59`)
 **מה:** orchestrator pull-only/read-only שמחזיר `OrchestratorResult` עם phase, מצב נוכחי,
@@ -560,6 +597,28 @@ confidence נמוך, readiness REVIEW, READY/high-confidence ומצבים סופ
 + grep פיזי על `OrchestratorResult`/`orchestrate`/`append_orchestrator_to_card` והחיווט בכרטיס.
 **מצב נוכחי:** מוזג ל-main. Vercel preview היה ירוק; **Production Verified: לא** — נדרש
 אימות ידני של הפריסה והזרימה החיה לפני שינוי הסטטוס.
+
+### F22 — Core Reasoning Layer (הועלה ישירות ל-`main` ב-28/06/2026 23:06–23:09, לא דרך PR/session)
+**מה:** שכבת "מנוע הרצה" משותפת שמתכננת לאחד Stages 1/2/4/6 (Trust/Confidence/Attention/
+Orchestrator) מאחורי API יחיד (`core/reasoning_engines.run(entity, ports) -> ReasoningResult`),
+עם entity/ports גנריים (`core/reasoning_entity.py`, `core/reasoning_ports.py`) ו-Adapters
+ל-Decision ול-Leads (`core/adapters/decision_adapter.py`, `core/adapters/leads_adapter.py`)
+שכל אחד מהם חושף `append_reasoning_block()` כ"נקודת חיבור" מתועדת בקוד (`# Integration
+point: call append_reasoning_block() from ...`).
+**Verification ראיה:** `test_core_reasoning.py` ‏59/59 עוברות; `py_compile` נקי.
+**⚠️ ממצא Governance (29/06/2026) — לא תועד בכלל לפני זה:** קיים ב-`main`, נבדק, אך
+**אפס נתיב הרצה חי**. grep מלא: `reasoning_engines`/`ReasoningEntity`/`decision_adapter`/
+`leads_adapter`/`append_reasoning_block` מופיעים רק בתוך `core/` עצמו ובקובץ הבדיקות שלו —
+אין קריאה מ-`cmd_decision.py`, `app.py`, או כל entrypoint חי אחר. בנוסף, ה-commits שהציגו
+את הקבצים (`92fb0c3`, `1ee9b6c`, וקבצי `__init__.py` נלווים) הם "Add files via upload" ישירות
+על `main`, לא PR עם CI — לא עברו את שרשרת הבדיקה הרגילה (backend-ci) לפני שהגיעו ל-main.
+נוסף ל-`smoke_tests.py::check_decision_hub_call_sites` כך שאם מישהו יתחבר בעתיד (יוסיף קריאה
+אמיתית מ-`cmd_decision.py` או דומה ל-`append_reasoning_block`) בלי לעדכן את ה-manifest שם
+ל-`expected_wired=True`, ה-check ימשיך "להצליח בטעות" — ה-manifest עצמו הוא מקור האמת
+ועליו לעודכן יחד עם החיווט, לא רק כתגובה לכשל.
+**מצב נוכחי:** קוד קיים, נבדק (unit-level בלבד), **לא מחובר** לאף pipeline חי. אין דגל feature
+ייעודי — מאחורי `FEATURE_DECISION_HUB` דרך `core/reasoning_engines.FEATURE_FLAG` בלבד, אבל זה
+לא רלוונטי כל עוד אין קורא. אין כאן עדיין "פיצ'ר" במובן המוצרי — שכבת תשתית בלי משתמש.
 
 **C60 — Tool Context Awareness (PR #152, מוזג ל-`main`, commit `2d85b84`/merge `3e0094b`):**
 לפי `SPEC_C59_Tool_Context_Awareness.md` (הועלה ע"י הבעלים בלי טקסט מלווה; אישור דרך
