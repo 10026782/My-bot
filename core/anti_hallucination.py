@@ -58,9 +58,14 @@ _NO_TOOL_CLAIMS: list[tuple[re.Pattern, frozenset[str]]] = [
         frozenset({"airtable_add"}),
     ),
     # CRM update claims — דורשות airtable_update או airtable_add.
+    # BUG-NEW-09 (30/06 18:04): "עדכנתי את rec... — שם השתנה ל-..." חמק מה-Gate
+    # כי הregex הקודם תפס רק "עודכן ב-Airtable"/"הליד עודכן" — לא גוף ראשון
+    # ("עדכנתי") ולא ניסוח "X השתנה ל-Y" שמתלווה אליו לעתים קרובות.
     (
         re.compile(
-            r"(עודכן ב-?Airtable|הליד עודכן|נשמר ב-?Airtable|lead_capture:updated)",
+            r"(עודכן ב-?Airtable|הליד עודכן|נשמר ב-?Airtable|lead_capture:updated|"
+            r"עדכנתי את (rec\w+|ה(רשומה|ליד|שם|טלפון|פרטים))|"
+            r"(שם|טלפון|פרט(ים)?) (השתנה|השתנו|עודכן) ל-)",
             re.UNICODE,
         ),
         frozenset({"airtable_update", "airtable_add"}),
