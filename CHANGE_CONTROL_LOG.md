@@ -888,3 +888,22 @@ PR: #189 | באגים: BUG-045, BUG-046
 - **Docs עודכנו:** `BUG_AUDIT_LOG.md` (BUG-018), `CHANGE_CONTROL_LOG.md` (זה)
 - **Feature Flag:** N/A — תיקון טקסט סטטי, ללא flag
 - **Rollback plan:** revert commit — שינוי טקסט בלבד ב-קובץ קיים, ללא שינוי לוגיקה, סיכון נמוך
+
+## 30/06/2026 — ניקוי ענפים לא-ממוזגים — בוצע
+**הקשר:** המשך לרשומת "סקירת ענפים לא-ממוזגים" — לאחר סקירת diff מלאה פר-ענף.
+
+**נמחקו (11):**
+claude/gifted-clarke-qoj3mz, 10026782-patch-1, f21-decision-orchestrator,
+furniture-funnel-clean, test/stale-airtable-gateway, cursor/dev-environment-setup-5fb2,
+bot.boss, phase-5-marketing, phase-4-knowledge, phase-3-contacts,
+cursor/phase-1-stability-5fb2
+
+**הערה:** 9 נמחקו בפועל, 2 (test/stale-airtable-gateway, phase-3-contacts) כבר לא היו קיימים ב-remote בעת הביצוע.
+
+**נשמרו במכוון:**
+- fix/c53-approval-hardening — ממתין לספק מיזוג ממוקד (3 פערים זוהו: recovery subscriber חסר, EMERGENCY_STOP_AUTOMATION לא נאכף ב-scheduler, PendingActionsStore לא thread-safe — טעון אימות מחדש מול main הנוכחי)
+- cursor/guards-file-audit-report-1742 — ממתין להעברת ממצאים תקפים ל-BUG_AUDIT_LOG.md עם אימות מחודש
+
+**אימות:** git ls-remote מול GitHub אישר שכל 11 השמות אינם קיימים ב-remote, אין PR פתוח על אף אחד מהם. main וענפי עבודה פעילים (fix/c53-approval-hardening, cursor/guards-file-audit-report-1742, claude/leads-write-gate-verify-aodpud) נשמרו.
+
+**סטטוס:** ✅ הושלם — ראה משימות המשך פתוחות לעיל
