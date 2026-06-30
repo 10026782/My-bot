@@ -50,9 +50,11 @@ def _new_session(domain: str = "real_estate", channel: str = "whatsapp") -> dict
         "created_at":   _now_iso(),
         "updated_at":   _now_iso(),
         "drop_off_step": None,     # ← באיזה שלב נטש (None = לא נטש)
-        "record_id":    "",        # Airtable record ID
+        "record_id":    "",        # Airtable record ID (של רשומת ה-Session עצמה)
         "last_uploaded_file": None,  # ← FileUploadResult dict, ראה Stage 0.6
         "last_tool_result":   None,  # ← dict, ראה C60 (Tool Context Awareness)
+        "current_lead_record_id": "",  # ← BUG-NEW-09: ה-record_id האמיתי של הליד
+                                        # (לא של רשומת ה-Session) — מונע פברוק record_id בסבבים הבאים
     }
 
 
@@ -233,6 +235,23 @@ class PersistentSessionStore:
             return None
         return session.get("last_tool_result")
 
+    def set_current_lead_record_id(self, sender: str, record_id: str) -> None:
+        """שומר את ה-record_id האמיתי של הליד (Tables.LEADS) על ה-Session (BUG-NEW-09).
+        חובה record_id אמיתי שמתחיל ב-'rec' — אסור לשמור id מפוברק."""
+        if not record_id or not str(record_id).startswith("rec"):
+            return
+        session = self.get_or_create(sender)
+        session["current_lead_record_id"] = record_id
+        session["updated_at"]             = _now_iso()
+        self._sync_to_db(sender, session)
+
+    def get_current_lead_record_id(self, sender: str) -> Optional[str]:
+        """מחזיר את ה-record_id האמיתי של הליד הנוכחי, אם קיים (BUG-NEW-09)."""
+        session = self.get(sender)
+        if not session:
+            return None
+        return session.get("current_lead_record_id") or None
+
     def delete(self, sender: str) -> None:
         """מוחק session (איפוס)."""
         session = self._store.pop(sender, None)
@@ -256,6 +275,7 @@ class PersistentSessionStore:
                 "tier":               session.get("tier", ""),
                 "last_uploaded_file": session.get("last_uploaded_file"),
                 "last_tool_result":   session.get("last_tool_result"),
+                "current_lead_record_id": session.get("current_lead_record_id", ""),
             }
             fields = {
                 SF.SENDER_ID:    sender,
@@ -267,8 +287,9 @@ class PersistentSessionStore:
             }
 
             # קישורים אופציונליים — רק אם קיימים ב-session:
-            if session.get("lead_record_id"):
-                fields[SF.LINKED_LEAD] = [session["lead_record_id"]]
+            _linked_lead = session.get("lead_record_id") or session.get("current_lead_record_id")
+            if _linked_lead:
+                fields[SF.LINKED_LEAD] = [_linked_lead]
             if session.get("decision_record_id"):
                 fields[SF.LINKED_DECISION] = [session["decision_record_id"]]
             last_file = session.get("last_uploaded_file") or {}
@@ -280,18 +301,43 @@ class PersistentSessionStore:
             if session.get("record_id"):
                 result = airtable_update(Tables.SESSIONS, session["record_id"], fields)
                 return bool(result.get("ok"))
-            else:
-                result = airtable_add(Tables.SESSIONS, fields)
-                if result.get("ok"):
-                    session["record_id"] = result.get("external_id", "")
-                    return True
-                return False
+
+            # BUG-NEW-12: record_id ריק לא בהכרח אומר "session חדש" — ייתכן
+            # parse miss ב-_load_from_db (ראה שם) על session שכבר קיים ב-Airtable.
+            # לפני POST, בדיקה חיה אחרונה (mirror של inbound_handler._find_by_sender)
+            # שמונעת רשומה כפולה.
+            existing_id = self._find_record_id_in_db(sender)
+            if existing_id:
+                session["record_id"] = existing_id
+                result = airtable_update(Tables.SESSIONS, existing_id, fields)
+                return bool(result.get("ok"))
+
+            result = airtable_add(Tables.SESSIONS, fields)
+            if result.get("ok"):
+                session["record_id"] = result.get("external_id", "")
+                return True
+            return False
 
         except ImportError:
             return False  # dev — אין Airtable
         except Exception as e:
             logger.error(f"[SessionStore] sync error for {sender}: {e}")
             return False
+
+    def _find_record_id_in_db(self, sender: str) -> Optional[str]:
+        """בדיקה חיה: האם כבר קיימת רשומת Sessions עבור sender זה ב-Airtable?
+        regex סלחני (כמו inbound_handler._find_by_sender) — לא תלוי בסוגריים
+        מרובעים מדויקים, כדי לא להחמיץ רשומה קיימת ולגרום ל-POST כפול (BUG-NEW-12)."""
+        try:
+            from tools.airtable_tools import airtable_get  # type: ignore
+            raw = airtable_get(Tables.SESSIONS, f"{{{SF.SENDER_ID}}}='{sender}'")
+            if not raw or "אין רשומות" in raw or "❌" in raw:
+                return None
+            m = re.search(r"rec\w+", raw)
+            return m.group(0) if m else None
+        except Exception as e:
+            logger.warning(f"[SessionStore] live dedup check failed for {sender}: {e}")
+            return None
 
     def _load_from_db(self, sender: str) -> Optional[dict]:
         """טוען session מ-Airtable Sessions לפי Sender ID."""
@@ -301,7 +347,7 @@ class PersistentSessionStore:
             if not raw or "אין רשומות" in raw or "❌" in raw:
                 return None
 
-            record_m  = re.search(r'\[(rec\w+)\]', raw)
+            record_m  = re.search(r'rec\w+', raw)
             context_m = re.search(rf'{re.escape(SF.CONTEXT_TYPE)}:\s*([^|]+)', raw)
             channel_m = re.search(rf'{re.escape(SF.CHANNEL)}:\s*([^|]+)', raw)
             state     = _extract_balanced_json(raw, SF.STATE_JSON) or {}
@@ -319,8 +365,9 @@ class PersistentSessionStore:
             session["tier"]             = state.get("tier", "")
             session["last_uploaded_file"] = state.get("last_uploaded_file")
             session["last_tool_result"]   = state.get("last_tool_result")
+            session["current_lead_record_id"] = state.get("current_lead_record_id", "")
             if record_m:
-                session["record_id"] = record_m.group(1)
+                session["record_id"] = record_m.group(0)
             return session
 
         except Exception as e:
@@ -525,6 +572,42 @@ def _run_tests() -> bool:
 
     chk("get_last_tool_result: no session → None",
         store.get_last_tool_result("w:never-existed") is None)
+
+    # ── BUG-NEW-09: current_lead_record_id persistence ──
+    saves.clear()
+    at.airtable_get = lambda t, formula: "אין רשומות"
+    store.set_current_lead_record_id("w:001", "recLEAD123")
+    chk("current_lead_record_id saved in RAM",
+        store.get("w:001").get("current_lead_record_id") == "recLEAD123")
+    chk("get_current_lead_record_id returns it",
+        store.get_current_lead_record_id("w:001") == "recLEAD123")
+    chk("sync includes current_lead_record_id",
+        json.loads(saves[-1][SF.STATE_JSON]).get("current_lead_record_id") == "recLEAD123")
+    store.set_current_lead_record_id("w:001", "NOT_A_REAL_ID")
+    chk("non-rec id ignored — previous value kept",
+        store.get_current_lead_record_id("w:001") == "recLEAD123")
+
+    # ── BUG-NEW-12: session duplication — N existing Sessions rows for the
+    # same sender must result in exactly one PATCH, zero POST. ──
+    store3 = PersistentSessionStore(maxsize=5)
+    add_calls = []
+    update_calls = []
+    at.airtable_add    = lambda t, f: (add_calls.append(f), {"ok": True, "external_id": "recNEW999"})[1]
+    at.airtable_update = lambda t, r, f: (update_calls.append((r, f)), {"ok": True, "external_id": r})[1]
+    # simulate: RAM is empty (fresh process), but Airtable already has an
+    # existing Sessions record for this sender (e.g. from a prior call whose
+    # _load_from_db parse silently missed it — record_id stayed "").
+    at.airtable_get = lambda t, formula: "📊 Sessions — 4 רשומות:\n• [recDUP1] ...\n"
+    session_dup = _new_session("real_estate", "whatsapp")  # record_id == "" deliberately
+    store3._store["w:dup"] = session_dup
+    store3._sync_to_db("w:dup", session_dup)
+    chk("dedup: live check found existing record → PATCH used",
+        len(update_calls) == 1 and update_calls[0][0] == "recDUP1")
+    chk("dedup: no duplicate POST issued",
+        len(add_calls) == 0)
+    chk("dedup: session record_id healed after live check",
+        session_dup.get("record_id") == "recDUP1")
+    at.airtable_get = lambda t, formula: "אין רשומות"
 
     print(f"\n{'='*40}")
     print(f"SessionStore Tests: {passed} passed, {failed} failed")

@@ -196,7 +196,15 @@ def verify_execution(tool_name: str, raw_output: Any) -> VerifyResult:
 # 2. verify_result_claim
 # ══════════════════════════════════════════════════
 
-_POSITIVE_CLAIMS = re.compile(r"(נשלח|בוצע|נוצר|נשמר|הוסף|עודכן|נרשם)", re.UNICODE)
+# BUG-NEW-09: כולל גם גוף ראשון/עבר ("שמרתי"/"הוספתי"/"עדכנתי") — אותיות
+# סופיות (ך/ם/ן/ף/ץ) לא תואמות regex substring כנגד צורת גוף-ראשון הרגילה
+# (לדוג' "הוסף" עם ף סופית לא תואם "הוספתי" עם פ רגילה) — זו הייתה הסיבה
+# שתביעת "הוספתי את הטלפון" חמקה מה-Gate בדוגמה החיה של 30/06 14:59.
+_POSITIVE_CLAIMS = re.compile(
+    r"(נשלח|בוצע|נוצר|נשמר|הוסף|עודכן|נרשם|"
+    r"שמרתי|הוספתי|עדכנתי|יצרתי|שלחתי|רשמתי|ביצעתי|קבעתי)",
+    re.UNICODE,
+)
 _NEGATIVE_CLAIMS = re.compile(r"לא מצאתי|אין תוצאות|לא נמצא", re.UNICODE)
 
 
@@ -579,6 +587,24 @@ def _run_tests() -> bool:
     print(f"{'✅' if ok10 else '❌'} agent claims Drive file found, real search_drive result present → passed through")
     if not ok10:
         print(f"     got: {with_tool_drive!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    # ── BUG-NEW-09: first-person success claims ("הוספתי"/"שמרתי") must be
+    # caught the same way as the passive forms — this is the literal wording
+    # from the live example (30/06 14:59) that previously slipped through. ──
+    blocked_update = [{"content": _make_result("airtable_update", ok=False, user_message="❌ record_id 'rec_משה_יצחקוב' לא תקין")}]
+    check_a = verify_result_claim("הוספתי את הטלפון, הפרטים שמורים.", blocked_update)
+    print(f"{'✅' if check_a.status == 'hallucination' else '❌'} 'הוספתי...שמורים' after blocked airtable_update → hallucination")
+    if check_a.status != "hallucination":
+        failed += 1
+    else:
+        passed += 1
+
+    check_b = verify_result_claim("עדכנתי את הרשומה בהצלחה.", blocked_update)
+    print(f"{'✅' if check_b.status == 'hallucination' else '❌'} 'עדכנתי' after blocked airtable_update → hallucination")
+    if check_b.status != "hallucination":
         failed += 1
     else:
         passed += 1
