@@ -80,6 +80,9 @@ class Intent:
     # Fallback — אף פעם לא מנחשים
     UNKNOWN           = "unknown"
 
+    # Tier 11 — Engineering / meta (SPEC-ROUTER-06)
+    ENGINEERING_NOTE  = "engineering_note"
+
     ALL = {
         GREETING, SMALLTALK, BOT_STATUS_CHECK,
         ASK_QUESTION, REQUEST_INFO, SUMMARIZE, TRANSLATE, EXPLAIN,
@@ -92,7 +95,7 @@ class Intent:
         GENERATE_REPORT, FINANCIAL_REPORT, SALES_REPORT,
         RESEARCH_TOPIC, RESEARCH_COMPANY,
         SYSTEM_STATUS, ADMIN_ACTION,
-        UNKNOWN,
+        UNKNOWN, ENGINEERING_NOTE,
     }
 
 
@@ -108,6 +111,7 @@ class RouterDomain:
     FINANCE     = "finance"
     CRM         = "crm"
     GENERAL     = "general"
+    INTERNAL    = "internal"  # הנדסי/מטא — לא דומיין עסקי
 
 
 # ══════════════════════════════════════════════════
@@ -132,6 +136,7 @@ class Handler:
     APPROVAL    = "approval"      # המתן לאישור אנושי
     BLOCK       = "block"         # חסום — שמור לשימוש פנימי קיצוני
     RESTRICTED  = "restricted"    # agent מדבר, tools חסומים, owner מקבל לוג
+    ENGINEERING_NOTE = "engineering_note"  # דיווח באג/הודעה הנדסית — אין כלים, אין claim של תיקון
 
 
 # ══════════════════════════════════════════════════

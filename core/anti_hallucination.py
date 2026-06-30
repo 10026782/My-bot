@@ -115,6 +115,25 @@ _NEGATIVE_NO_TOOL_CLAIMS: list[tuple[re.Pattern, frozenset[str] | None]] = [
 
 
 # ══════════════════════════════════════════════════
+# "Self-reported fix" claims (SPEC-FIX Section 5 / Section 6.6).
+# The agent has no tool that performs a code change, test run, or deploy —
+# so any claim of having fixed/changed the system's behavior is, by
+# definition, never backed by tool evidence within a conversation turn.
+# Unconditional block, unlike _NO_TOOL_CLAIMS which only fires when a
+# specific tool category is missing.
+# ══════════════════════════════════════════════════
+
+_SELF_FIX_CLAIMS = re.compile(
+    r"(?<!לא )(?<!עדיין )"
+    r"(תיקנתי|מעכשיו אני|שיניתי את ה|זה יעבוד מעתה|זה כבר לא יקרה|"
+    r"הבעיה (כבר )?נפתרה|הנושא נפתר|סגור הנושא)",
+    re.UNICODE,
+)
+
+_SELF_FIX_FALLBACK = "קיבלתי דיווח באג. לא שיניתי את המערכת. צריך שינוי קוד, בדיקות ופריסה."
+
+
+# ══════════════════════════════════════════════════
 # Result Type
 # ══════════════════════════════════════════════════
 
@@ -297,6 +316,10 @@ def sanitize_agent_response(agent_text: str, tool_results: list[dict]) -> str:
     Final gate before the reply reaches the user.
     Replaces hallucinated text; adds a warning for mismatches.
     """
+    if _SELF_FIX_CLAIMS.search(agent_text):
+        logger.error("[A32] SELF-REPORTED-FIX claim blocked (no code/deploy tool exists)")
+        return _SELF_FIX_FALLBACK
+
     check = verify_result_claim(agent_text, tool_results)
 
     if check.status == "hallucination":

@@ -92,6 +92,25 @@ _COMPILED: list[tuple[re.Pattern, str, float]] = [
 ]
 
 
+# ══════════════════════════════════════════════════
+# Engineering / meta-content markers (SPEC-ROUTER-06)
+# Evaluated by the caller BEFORE the business rule table — bug reports and
+# debug instructions must never fall into a business intent just because
+# they happen to contain words like "עדכן"/"ליד".
+# ══════════════════════════════════════════════════
+
+_ENGINEERING_MARKERS = [
+    "יש באג", "נדרש תיקון", "Definition of Done", "Root Cause", "Symptom",
+    "record_id", "sender_identity", "subject_identity", "ClaimGate", "approval_id",
+]
+
+
+def count_engineering_markers(text: str) -> int:
+    """כמה מהמילות-מפתח ההנדסיות מופיעות בטקסט (case-insensitive ל-latin)."""
+    text_lower = text.lower()
+    return sum(1 for marker in _ENGINEERING_MARKERS if marker.lower() in text_lower)
+
+
 def detect_intent(text: str, confidence_threshold: float = 0.75) -> tuple[str, float, str]:
     """
     מחזיר (intent, confidence, matched_rule).

@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 from collections import OrderedDict
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -124,6 +125,10 @@ class PersistentSessionStore:
     def __init__(self, maxsize: int = _MAX_SESSIONS):
         self._store: OrderedDict[str, dict] = OrderedDict()
         self._maxsize = maxsize
+        # BUG-NEW-12: get_or_create is GET-then-POST — without a lock, two
+        # concurrent calls for the same sender can both miss RAM+DB and
+        # both create+sync a session, producing duplicate Airtable rows.
+        self._create_lock = threading.Lock()
 
     # ── Read ──────────────────────────────────────
 
@@ -152,11 +157,17 @@ class PersistentSessionStore:
         existing = self.get(sender)
         if existing:
             return existing
-        session = _new_session(domain, channel)
-        self._store[sender] = session
-        self._evict_if_needed()
-        self._sync_to_db(sender, session, is_new=True)
-        return session
+        with self._create_lock:
+            # Re-check under the lock — another thread may have created
+            # (and synced) the session while we were waiting for it.
+            existing = self.get(sender)
+            if existing:
+                return existing
+            session = _new_session(domain, channel)
+            self._store[sender] = session
+            self._evict_if_needed()
+            self._sync_to_db(sender, session, is_new=True)
+            return session
 
     # ── Write ─────────────────────────────────────
 

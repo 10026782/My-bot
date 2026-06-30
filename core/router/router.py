@@ -6,9 +6,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from .route_decision  import RouteDecision, Intent, Handler, Risk
+from .route_decision  import RouteDecision, Intent, Handler, Risk, RouterDomain
 from .channel_router  import detect_channel, resolve_tool_for_channel
-from .intent_router   import detect_intent
+from .intent_router   import detect_intent, count_engineering_markers
 from .domain_router   import detect_domain
 from .risk_router     import detect_risk
 
@@ -39,19 +39,39 @@ def route_request(
     if confidence < INTENT_CONFIDENCE_THRESHOLD:
         intent = Intent.UNKNOWN
 
-    # 3. Domain
-    domain, _ = detect_domain(
-        text                 = text,
-        domain_from_channel  = domain_from_channel,
-        domain_from_identity = identity.domain_id,
+    # 2b. Engineering / meta-safety override (SPEC-ROUTER-06).
+    # Runs AFTER business-intent detection but takes priority over it: a
+    # bug report from staff/owner must never be treated as a business
+    # action just because it incidentally contains words like "עדכן ליד" —
+    # and must not silently fall through to the general Agent via
+    # intent=unknown either (BUG-NEW-11b regression: that path was observed
+    # live querying Leads on an engineering message).
+    marker_count = count_engineering_markers(text)
+    is_staff = identity.role in (
+        "owner", "partner", "manager", "employee",
     )
+    if is_staff and marker_count >= 2:
+        intent = Intent.ENGINEERING_NOTE
+
+    # 3. Domain
+    if intent == Intent.ENGINEERING_NOTE:
+        domain = RouterDomain.INTERNAL
+    else:
+        domain, _ = detect_domain(
+            text                 = text,
+            domain_from_channel  = domain_from_channel,
+            domain_from_identity = identity.domain_id,
+        )
 
     # 4. Risk + Handler
-    risk, handler, needs_approval = detect_risk(
-        intent = intent,
-        role   = identity.role,
-        domain = domain,
-    )
+    if intent == Intent.ENGINEERING_NOTE:
+        risk, handler, needs_approval = Risk.READ_ONLY, Handler.ENGINEERING_NOTE, False
+    else:
+        risk, handler, needs_approval = detect_risk(
+            intent = intent,
+            role   = identity.role,
+            domain = domain,
+        )
 
     # 5. Channel-specific tool override
     tool_override = resolve_tool_for_channel(intent, channel)
@@ -73,7 +93,12 @@ def route_request(
         tool_allowed = False
 
     # 7. Edge cases / response overrides
-    if intent == Intent.UNKNOWN:
+    if intent == Intent.ENGINEERING_NOTE:
+        handler           = Handler.ENGINEERING_NOTE
+        tool_allowed       = False
+        response_override = "קיבלתי דיווח באג. לא שיניתי את המערכת. צריך שינוי קוד, בדיקות ופריסה."
+
+    elif intent == Intent.UNKNOWN:
         handler           = Handler.AGENT   # safety net
         response_override = ""
 
