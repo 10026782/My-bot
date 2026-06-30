@@ -86,3 +86,43 @@ Any incident that occurs more than once must trigger:
 - prevention mechanism
 
 The goal is prevention, not repeated recovery.
+
+---
+
+## Lead Lifecycle System Rules (נוספו 28-29/06/2026 — Lead Lifecycle Stabilization session)
+
+### RULE 19 — BUSINESS SUCCESS CANNOT BE OVERWRITTEN
+Business success cannot be overwritten by audit/logging/post-processing failure.
+Lead created/found = `business_success`. Metadata patch failed = warning בלבד.
+
+### RULE 20 — FOUND ≠ CREATED
+FOUND ≠ CREATED — `airtable_get` evidence cannot justify "created" claims.
+`airtable_get` or `search_lead` = evidence for FOUND, not for CREATED.
+
+### RULE 21 — LEAD CREATION OWNERSHIP
+Lead creation is owned by `capture_inbound_lead` only.
+Agent must not create Leads through raw `airtable_add`.
+
+### RULE 22 — LEAD EVENT OWNERSHIP
+Lead follow-up/event logging is owned by `capture_lead_event` only.
+Existing lead + new message → always write a Lead Event.
+
+### RULE 23 — NO PARTIAL LEADS VIA AGENT
+Agent must not create partial Leads through raw `airtable_add`.
+All Leads must go through `capture_inbound_lead` → identity → domain → score flow.
+
+### RULE 24 — OUTPUT APPROVED ≠ MESSAGE DELIVERED
+Output approved does not mean message delivered.
+WhatsApp stub must remain honest: "not sent" until real delivery confirmed.
+
+### RULE 25 — WHATSAPP STUB HONESTY
+WhatsApp stub must remain honest: "not sent" until real delivery confirmed.
+Do not claim delivery without actual API confirmation.
+
+### RULE 26 — SCHEMA DRIFT = WARNING ONLY
+Schema drift / metadata patch failure is warning unless it breaks core business result.
+Unknown fields in Airtable PATCH = `logger.warning`, not exception.
+
+### RULE 27 — SMALL PRS
+Each fix goes in its own small PR.
+No bundling of unrelated fixes to avoid masking regressions.

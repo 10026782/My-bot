@@ -1,14 +1,14 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-06-30 (מאוחר ביותר) — daily_git_audit.py verification + stale-branch content audit
-**עודכן על ידי:** Claude Code — `claude/determined-fermat-2j0ssg`
+**עודכן:** 2026-06-30 (מאוחר ביותר) — daily_git_audit.py verification + stale-branch content audit, ממוזג עם Decision Hub Quality Gate + Lead Lifecycle session log (PRs #169-172, #176-177)
+**עודכן על ידי:** Claude Code — `claude/new-session-be1ckb` (ממוזג עם `claude/determined-fermat-2j0ssg`)
 
 > מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (מיושן, 19/06) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
 
 ---
 
-## 0.4 daily_git_audit.py verification + stale-branch content audit — 2026-06-30 (קרא לפני 0.3)
+## 0.6 daily_git_audit.py verification + stale-branch content audit — 2026-06-30 (קרא לפני 0.5)
 
 **הרצה ידנית של `daily_git_audit.py`** (N12, `GIT_AUDIT_SCHEDULER` כבוי כברירת מחדל — לא רץ אוטומטית בפרודקשן). `check_unmerged_vs_roadmap()`/`check_duplicate_schemas()` אומתו: `python -c "import daily_git_audit"` עובר, שתי הפונקציות מחזירות `[]` על המצב האמיתי הנוכחי, ובדיקה ידנית (ענף מקומי מדומה + commit עם נושא שתואם שורת ROADMAP ✅, ללא push בפועל ל-origin) אישרה שהלוגיקה מסמנת נכון. שליחת טלגרם נכשלת בחן (fallback להדפסה) כשאין credentials — צפוי בסביבת ה-sandbox הזו (`READ_ONLY` mode, GOV-02: `schema_cache.json` לא `LIVE`-sourced, אין גישת Airtable).
 
@@ -20,6 +20,115 @@
 - **מסקנה: אין קוד חשוב לא ממוזג באף אחד מ-4 הענפים הישנים. מיזוג שלהם יהווה רגרסיה, לא שיפור.** מועמדים בטוחים לניקוי דרך `branch_cemetery_cleanup.py` — לא בוצע ניקוי/מחיקה בסשן זה (פעולה הרסנית, ממתינה לאישור מפורש).
 
 לא בוצע שינוי קוד בסשן זה — verification + ניתוח תוכן בלבד.
+
+---
+
+## 0.5 Decision Hub Quality Gate + Core Reasoning Layer (Stage 6) — 30/06/2026 (קרא לפני 0.4)
+
+**Quality Gate לפני Stage 6 מצא 5 בעיות (BUG-DH-01 עד 05):** תוקנו: BUG-DH-01 (missing_penalty) + BUG-DH-05 (domain drift דרך request_state). פתוח: BUG-DH-03/04 (formula injection — עדיפות גבוהה, חסום לפני הפעלת `FEATURE_DECISION_HUB` בפרודקשן).
+
+**Stage 6 — Orchestrator (`decision_orchestrator.py`):**
+Pull-only. Lifecycle: `COLLECTING→BLOCKED→REVIEW→AWAITING→DECIDED→CLOSED`.
+מקבל `precomputed_confidence` כדי לא להפעיל AI פעמיים.
+ניתוב first-match: `NOT_READY→BLOCKED` | Confidence<60%→`REVIEW` | Confidence≥75%→`AWAITING`.
+
+**Core Reasoning Layer — פרטים מדויקים:**
+- `core/reasoning_entity.py`: `ReasoningEntity` (8 שדות), `ReasoningResult` (14 שדות), `NextStep`
+- `core/reasoning_ports.py`: Storage, Verifier, Contact, LLM — 4 Ports
+- `core/reasoning_engines.py`: `run()` מחבר Stages 1→2→4→6
+- `core/request_state.py`: `RequestState(domain, session)` — per-request mutable context
+- `core/adapters/decision_adapter.py`: `confidence_ready=0.60`, `inactive_days=14`
+- `core/adapters/leads_adapter.py`: `confidence_ready=0.45`, `inactive_days=3`
+
+**טסטים מדויקים:**
+- `test_core_reasoning.py`: 59 בדיקות (A:5, B:5, C:11, D:13, E:15, F:10) ✅
+- `test_core_reasoning_integration.py`: 58 בדיקות + 2 xfail מתועדים ✅
+  - xfail-1: `domain_rules()` מוגדר ב-Adapter אבל `run()` לא צורך — Fix: pass `adapter.domain_rules()` into `run()`
+  - xfail-2: `lead_score` ב-metadata אבל `_run_confidence()` לא קורא — Fix: pass as `base_score` hint
+
+**CI diff (`.github/workflows/ci.yml`):**
+נוספו 2 שלבים אחרי schema governance: "pytest collect" (`--collect-only`) + "pytest core reasoning" (`-x --tb=short -q`). 7 קבצי טסט: `test_core_reasoning` + 6 decision test files. `test_core_reasoning_integration.py` הוסר מה-CI — הקובץ לא בשורש.
+
+**ספקים חדשים:**
+- `SPEC_Core_Reasoning_Layer.md`: Entity Contract + 6 Adapters + PLANNING_GATE + 5 שאלות פתוחות
+- `SPEC_Stakeholder_Pressure_Pattern.md` (v2): 4 שאלות + Trigger Classification + Ask Mode Pull-only
+
+**Sessions ×4 — false positive:** LRU RAM cache מטפל בכפילויות, Airtable נקרא פעם אחת.
+
+**פתוח:**
+1. BUG-DH-03/04 — formula injection (עדיפות גבוהה)
+2. `domain_rules()` injection ל-`run()` (xfail מתועד)
+3. `lead_score` → confidence (xfail מתועד)
+4. Pressure Pattern Engine — SPEC מוכן, ביצוע עתידי
+5. Projects/Finance/Recruitment Adapters — SPEC מוגדר
+
+---
+
+## 0.4 Lead Lifecycle Stabilization (28-29/06/2026) — 10 באגים, 5 רכיבים (קרא לפני 0.3)
+
+**10 באגים תוקנו:** BUG-NEW-01/01b/02/03/04/05/06/07 + BUG-FOUND-01 + BUG-META-01 (ראו BUG_AUDIT_LOG.md BUG-024 עד BUG-033).
+**PRs:** #169 (CXX core) | #170 (FOUND fix) | #171 (A32 split + Lead evidence) | #172 (Lead Events + metadata + buffer)
+
+**5 רכיבי ארכיטקטורה נבנו:**
+
+- **`core/action_result.py`** (חדש) — `ActionResult` dataclass, `ClaimType` enum, `from_airtable_add()`. `business_success` לא נדרס על ידי audit/post failure.
+- **`core/request_context.py`** (חדש) — per-request cache. Identity/Lead/Session/Domain נפתרים פעם אחת. מונע Sessions×4, domain drift, double lookup.
+- **`core/claim_gate.py`** (חדש) — `ClaimGate`. `check_claim()` בודק evidence לפי `claim_type`. FOUND ≠ evidence ל-CREATED. 16/16 בדיקות.
+- **`core/lead_buffer.py`** (חדש) — thread-local per-request buffer. `save_blocked_payload`/`consume_buffer`/`recover_blocked_lead_payload`/`clear_buffer`. Allowlist: Name/summary/notes/domain/interests/email. 22/22 בדיקות.
+- **Domain-keyed memory_key** — `memory_key = "boss_hq:+972...:real_estate"`. phone+domain = זהות ייחודית. 6/6 בדיקות.
+- **Leads Write Gate** — `enforce_leads_write_gate()` ב-`airtable_security.py`. Gate נקרא ב-dispatcher לפני add/update. 6/6 gate tests.
+- **A32 + Lead Capture Integration** — `lead_capture_result` מוזן ל-`tool_results_log`. `_action_result_to_a32_entry()` ממפה ClaimType→tool. A32 מאמת "נוצר ליד" מול `airtable_add` בפועל.
+- **Lead Events** — `Tables.LEAD_EVENTS`, `LeadEventFields`, `LeadEventType`, `capture_lead_event()`. ליד קיים + הודעה חדשה → Event נכתב אוטומטית.
+
+**קבצים (11):** `core/action_result.py` (חדש), `core/request_context.py` (חדש), `core/claim_gate.py` (חדש), `core/lead_buffer.py` (חדש), `identity.py`, `lead_capture.py`, `airtable_schema.py`, `tools/airtable_security.py`, `tools/dispatcher.py`, `core/anti_hallucination.py`, `app.py`.
+
+**בדיקות:** 60+ בדיקות חדשות. כל קובץ חדש עם self-tests.
+
+**פתוח:**
+1. Sessions — עדיין 4 קריאות לrequest (`RequestContext` נבנה, לא חובר ל-`_build_tool_context`)
+2. Domain drift — COG מציג general (תיקון קיים, לא עלה ל-main)
+3. BUG-NEW-01b — אימות Name עם מספר חדש לגמרי (ממתין לבדיקה ידנית)
+4. V0-05 — Fallback API לא אומת (5 דקות)
+5. memory_key ישנות ללא domain — ניקוי ידני ב-Airtable
+
+**Lead Lifecycle Definition of Done:**
+✅ Lead creation | ✅ No duplicate | ✅ Lead Events | ✅ Link to Lead
+✅ Score=0 default | ✅ domain זיהוי | ✅ role זיהוי
+⚠️ Primary name — ממתין לאימות מלא
+
+**app.py — אימות סופי 5 תיקונים (29/06/2026):**
+
+מסמך נפרד אימת ש-5 התיקונים הבאים קיימים ב-main בפועל, עם שיפורים על מה שתוכנן:
+
+1. **Sessions — קריאה אחת לrequest** — `_session_snapshot` (שורות 999-1008),
+   מועבר ל-`resolve_context_pronouns`/`_build_tool_context`. נטען *אחרי*
+   `capture_inbound_lead` (סדר קריטי — אחרת snapshot ישן). OPEN-01 סגור.
+
+2. **Domain drift — `_resolved_domain: dict`** (לא `list` כמתוכנן) — out-param
+   ל-`run_agent`. מכסה גם approval flow (שורה 1067), לא רק webhook.
+   שיפור על התכנון המקורי. OPEN-02 סגור.
+
+3. **UTM injection — memory_key קנוני** (שורות 1673-1685) — תוקן חדש שלא
+   תוכנן בשרשור שלנו: `_inject_utm` השתמש ב-`whatsapp:+972...` במקום
+   `identity.memory_key` (`boss_hq:+972...`) → חיפוש כפול. תוקן.
+
+4. **A32 + Lead Capture Bridge** — `_action_result_to_a32_entry()` ממפה
+   ClaimType→tool name. FOUND לא יכול להיות evidence ל-CREATED. תואם תכנון.
+
+5. **Lead Buffer Recovery — תיקון Enum→str** — `recover_blocked_lead_payload`
+   מקבל `resolved_route_domain` (string מ-`.value`), לא `route.domain` הגולמי
+   (Enum). תיקון באג נסתר שהיה שובר את בניית memory_key ב-lead_buffer.
+
+**שיפורים על התכנון המקורי:** domain drift fix מכסה approval flow;
+Lead Buffer מקבל domain type נכון; UTM injection — באג שלא ידענו עליו, נמצא ותוקן.
+
+**עדיין פתוח (לא ב-app.py):**
+- OPEN-03 — WhatsApp stub (תלוי Meta)
+- OPEN-04 — meeting_scheduled stale value (בדיקה ידנית)
+- OPEN-05 — V0-05 fallback API (בדיקה 5 דקות)
+- BUG-DH-03/04 — formula injection (decision_confidence.py, cmd_decision.py — קבצים נפרדים)
+
+---
 
 ## 0.3 Lead Buffer (PR #176) + Decision Hub F22 wiring — 2026-06-29 (קרא לפני 0.2)
 

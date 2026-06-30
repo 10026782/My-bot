@@ -811,6 +811,53 @@
 - **Feature Flag:** אין — docs-only
 - **Rollback plan:** revert commit `783a680` — docs-only, אפס סיכון
 
+### C68 — BUG-NEW-01/01b/02: Lead Capture Fixes (28/06/2026)
+קבצים: `lead_capture.py`, `identity.py` | Score=0 + display_name fix + dict contract | PR #169
+
+### C69 — CXX Action Integrity (28/06/2026)
+קבצים: `core/action_result.py` (חדש), `core/request_context.py` (חדש), `core/claim_gate.py` (חדש)
+Evidence: 16/16 + 33/33 tests | PR #169
+
+### C70 — BUG-FOUND-01: FOUND fix + real record_id (29/06/2026)
+קובץ: `lead_capture.py` | `claim_type=FOUND` + record_id אמיתי | PR #170
+
+### C71 — A32 CRM pattern split + Lead evidence (29/06/2026)
+קובץ: `core/anti_hallucination.py` | FOUND≠CREATED, 3 patterns + `lead_capture_result`→`tool_results_log` | PR #171
+
+### C72 — BUG-NEW-03: airtable_security audit fix (29/06/2026)
+קובץ: `tools/airtable_security.py` | `str(result)[:60]` + `try/except` | PR #172
+
+### C73 — BUG-NEW-04: Leads Write Gate (29/06/2026)
+קבצים: `tools/airtable_security.py`, `tools/dispatcher.py`
+Evidence: 6/6 gate tests + 9/9 security tests | PR #172
+
+### C74 — N-LEAD-EVENT + domain-keyed memory_key + metadata fix (29/06/2026)
+קבצים: `lead_capture.py`, `airtable_schema.py`
+Lead Events + `capture_lead_event()` + `memory_key=boss_hq:+972:domain` + metadata warning only | PR #172
+
+### C75 — BUG-NEW-07: Lead Buffer (29/06/2026)
+קבצים: `core/lead_buffer.py` (חדש), `tools/dispatcher.py`, `app.py`
+Evidence: 22/22 buffer tests | PR #176
+
+### C76 — BUG-DH-01: missing_penalty fix + domain param (30/06/2026)
+קובץ: `decision_confidence.py` | `missing_penalty` מחוסר בפועל + `calc_confidence(domain=)` פרמטר חדש
+הערה: הוסט מ-C75 (SPEC_DECISION_HUB_SESSION_DOC) למניעת collision עם C75 של Lead Buffer.
+
+### C77 — BUG-DH-05: domain drift fix via request_state (30/06/2026)
+קבצים: `core/request_state.py` (חדש), `app.py` | `RequestState.domain` מועדכן אחרי Router
+
+### C78 — Stage 6: Decision Orchestrator (30/06/2026)
+קובץ: `decision_orchestrator.py` (חדש)
+Lifecycle: `COLLECTING→BLOCKED→REVIEW→AWAITING→DECIDED→CLOSED` | `precomputed_confidence`
+
+### C79 — Core Reasoning Layer (30/06/2026)
+קבצים חדשים: `core/reasoning_entity.py`, `core/reasoning_ports.py`, `core/reasoning_engines.py`, `core/request_state.py`, `core/adapters/decision_adapter.py`, `core/adapters/leads_adapter.py`
+טסטים: `test_core_reasoning.py` (59), `test_core_reasoning_integration.py` (58+2 xfail) | `conftest.py` (חדש)
+ספקים: `SPEC_Core_Reasoning_Layer.md`, `SPEC_Stakeholder_Pressure_Pattern.md` (v2)
+
+### C80 — CI: pytest steps + conftest (30/06/2026)
+קובץ: `.github/workflows/ci.yml` | +2 שלבים (pytest collect + pytest core reasoning), 7 test files
+
 ### BUG-018 — Mojibake/encoding corruption ב-`app.py` (132 שורות)
 - **תאריך:** 25/06/2026
 - **סוג:** Bug fix, קובץ קיים (`app.py` בלבד)

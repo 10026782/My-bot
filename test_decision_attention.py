@@ -129,5 +129,6 @@ future_inputs = calc_priority(
 )
 check("future confidence/evidence inputs are accepted", future_inputs.priority in {PRIORITY_MEDIUM, PRIORITY_HIGH})
 
-print(f"Decision Attention: {_passed}/{_passed + _failed} passed")
-sys.exit(1 if _failed else 0)
+if __name__ == "__main__":
+    print(f"Decision Attention: {_passed}/{_passed + _failed} passed")
+    sys.exit(1 if _failed else 0)

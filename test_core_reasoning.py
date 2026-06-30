@@ -233,9 +233,39 @@ def _install_stubs():
     sys.modules["tools.airtable_gateway"] = ag
 
 
-_install_stubs()
+_STUBBED_MODULE_NAMES = (
+    "airtable_schema", "decision_pipeline", "decision_confidence",
+    "decision_attention", "decision_orchestrator", "feature_flags",
+    "tools", "tools.airtable_gateway",
+)
+_ORIGINAL_MODULES: dict = {}
 
-# ── Now import core (stubs are in place) ─────────────────────────────────────
+
+def setUpModule():
+    """Install the stubs only once this module's own tests are about to run
+    (not at collection time) — core.reasoning_entity/ports/engines/adapters
+    import decision_pipeline/decision_confidence/decision_attention/
+    decision_orchestrator/feature_flags/tools.airtable_gateway lazily inside
+    function bodies, so the stubs aren't needed for the module-level imports
+    below. Deferring keeps this file from permanently clobbering
+    sys.modules["decision_orchestrator"] (etc.) for other test files that
+    share this pytest process, e.g. test_decision_orchestrator.py's
+    unittest.mock.patch("decision_orchestrator....", ...) calls."""
+    for name in _STUBBED_MODULE_NAMES:
+        _ORIGINAL_MODULES[name] = sys.modules.get(name)
+    _install_stubs()
+
+
+def tearDownModule():
+    """Restore the real modules after this file's tests finish."""
+    for name, original in _ORIGINAL_MODULES.items():
+        if original is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = original
+
+
+# ── Now import core (no stubs needed — see setUpModule above) ───────────────
 from core.reasoning_entity import (   # noqa: E402
     ENTITY_DECISION, ENTITY_LEAD,
     PHASE_BLOCKED, PHASE_COLLECTING, PHASE_DECIDED, PHASE_CLOSED, PHASE_REVIEW,

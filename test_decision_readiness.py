@@ -167,8 +167,9 @@ check("build_readiness_message doesn't crash on empty-events result",
 # Summary
 # ═════════════════════════════════════════════════════════════════
 
-print(f"\n{'═'*50}")
-print(f"Decision Hub Stage 3 Readiness Engine: {_passed}/{_passed+_failed} passed")
-if _failed:
-    print(f"FAILED: {_failed} test(s)")
-sys.exit(0 if _failed == 0 else 1)
+if __name__ == "__main__":
+    print(f"\n{'═'*50}")
+    print(f"Decision Hub Stage 3 Readiness Engine: {_passed}/{_passed+_failed} passed")
+    if _failed:
+        print(f"FAILED: {_failed} test(s)")
+    sys.exit(0 if _failed == 0 else 1)

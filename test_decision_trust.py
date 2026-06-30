@@ -220,8 +220,9 @@ check("run_pipeline: fully-passing chain propagates gate_trust's user_flag",
 # Summary
 # ═════════════════════════════════════════════════════════════════
 
-print(f"\n{'═'*50}")
-print(f"Decision Hub Stage 1 Trust Layer: {_passed}/{_passed+_failed} passed")
-if _failed:
-    print(f"FAILED: {_failed} test(s)")
-sys.exit(0 if _failed == 0 else 1)
+if __name__ == "__main__":
+    print(f"\n{'═'*50}")
+    print(f"Decision Hub Stage 1 Trust Layer: {_passed}/{_passed+_failed} passed")
+    if _failed:
+        print(f"FAILED: {_failed} test(s)")
+    sys.exit(0 if _failed == 0 else 1)
