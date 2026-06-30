@@ -421,6 +421,9 @@ Stage 2 ב-PR #157; Stage 3 ב-PR #159; Stage 4 ב-PR #161; Stage 5 ב-PRs #162�
 Stage 6 ב-PR #166. דגלי Decision Hub כבויים כברירת מחדל. המיזוגים אומתו ב-main, אך
 **Production Verified נשאר לא** עד אימות ידני לאחר פריסה. ראו F17–F21 למטה.
 
+**app.py אומת 29/06/2026:** Sessions×1, domain drift דרך _resolved_domain,
+UTM memory_key fix, A32 bridge, Lead Buffer recovery — כולם ב-main.
+
 #### Decision Hub — ledger מאוחד ל-Stages 1–6
 
 | Stage | ROADMAP | יכולת שמומשה | PR | Commit / Merge | בדיקות | סטטוס מאומת |

@@ -81,6 +81,38 @@ Pull-only. Lifecycle: `COLLECTING→BLOCKED→REVIEW→AWAITING→DECIDED→CLOS
 ✅ Score=0 default | ✅ domain זיהוי | ✅ role זיהוי
 ⚠️ Primary name — ממתין לאימות מלא
 
+**app.py — אימות סופי 5 תיקונים (29/06/2026):**
+
+מסמך נפרד אימת ש-5 התיקונים הבאים קיימים ב-main בפועל, עם שיפורים על מה שתוכנן:
+
+1. **Sessions — קריאה אחת לrequest** — `_session_snapshot` (שורות 999-1008),
+   מועבר ל-`resolve_context_pronouns`/`_build_tool_context`. נטען *אחרי*
+   `capture_inbound_lead` (סדר קריטי — אחרת snapshot ישן). OPEN-01 סגור.
+
+2. **Domain drift — `_resolved_domain: dict`** (לא `list` כמתוכנן) — out-param
+   ל-`run_agent`. מכסה גם approval flow (שורה 1067), לא רק webhook.
+   שיפור על התכנון המקורי. OPEN-02 סגור.
+
+3. **UTM injection — memory_key קנוני** (שורות 1673-1685) — תוקן חדש שלא
+   תוכנן בשרשור שלנו: `_inject_utm` השתמש ב-`whatsapp:+972...` במקום
+   `identity.memory_key` (`boss_hq:+972...`) → חיפוש כפול. תוקן.
+
+4. **A32 + Lead Capture Bridge** — `_action_result_to_a32_entry()` ממפה
+   ClaimType→tool name. FOUND לא יכול להיות evidence ל-CREATED. תואם תכנון.
+
+5. **Lead Buffer Recovery — תיקון Enum→str** — `recover_blocked_lead_payload`
+   מקבל `resolved_route_domain` (string מ-`.value`), לא `route.domain` הגולמי
+   (Enum). תיקון באג נסתר שהיה שובר את בניית memory_key ב-lead_buffer.
+
+**שיפורים על התכנון המקורי:** domain drift fix מכסה approval flow;
+Lead Buffer מקבל domain type נכון; UTM injection — באג שלא ידענו עליו, נמצא ותוקן.
+
+**עדיין פתוח (לא ב-app.py):**
+- OPEN-03 — WhatsApp stub (תלוי Meta)
+- OPEN-04 — meeting_scheduled stale value (בדיקה ידנית)
+- OPEN-05 — V0-05 fallback API (בדיקה 5 דקות)
+- BUG-DH-03/04 — formula injection (decision_confidence.py, cmd_decision.py — קבצים נפרדים)
+
 ---
 
 ## 0.3 Lead Buffer (PR #176) + Decision Hub F22 wiring — 2026-06-29 (קרא לפני 0.2)
