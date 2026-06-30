@@ -21,6 +21,63 @@ class TenantScopeViolation(PermissionError):
     """זריקה כשיש ניסיון גישה ללא tenant context תקין."""
 
 
+# ══════════════════════════════════════════════════
+# Leads Write Gate — BUG-B FIX
+# כתיבה ישירה ל-Leads מה-Agent אסורה.
+# Lead inbound נוצר רק דרך capture_inbound_lead().
+# Lead Events נכתבים רק דרך capture_lead_event().
+# ══════════════════════════════════════════════════
+
+_LEADS_WRITE_OPS = {"airtable_add", "airtable_update", "airtable_patch"}
+_LEADS_TABLE_NAMES = {"Leads", "leads"}  # aliases שה-gateway מכיר
+
+
+class LeadsDirectWriteBlocked(PermissionError):
+    """זריקה כשה-Agent מנסה לכתוב ל-Leads ישירות."""
+
+
+def enforce_leads_write_gate(
+    tool_name: str,
+    params: dict,
+    source: str = "agent",
+) -> None:
+    """
+    חוסם כתיבה ישירה ל-Leads מה-Agent.
+
+    מותר:
+      - source="lead_capture"  → capture_inbound_lead
+      - source="lead_event"    → capture_lead_event
+      - source="lead_scoring"  → scoring update
+
+    חסום:
+      - source="agent" + airtable_add/update/patch + table=Leads
+
+    קוראים: dispatcher.py לפני כל write tool.
+    """
+    if tool_name not in _LEADS_WRITE_OPS:
+        return  # לא פעולת כתיבה — לא רלוונטי
+
+    table = params.get("table", "") or params.get("fields", {})
+    table_name = table if isinstance(table, str) else ""
+
+    if table_name not in _LEADS_TABLE_NAMES:
+        return  # לא טבלת Leads
+
+    if source in ("lead_capture", "lead_event", "lead_scoring", "crm"):
+        return  # מקור מורשה
+
+    # source="agent" + Leads write → חסום
+    logger.error(
+        f"[LeadsWriteGate] BLOCKED direct Leads write | "
+        f"tool={tool_name} source={source} table={table_name}"
+    )
+    raise LeadsDirectWriteBlocked(
+        f"❌ כתיבה ישירה ל-Leads חסומה. "
+        f"השתמש ב-capture_inbound_lead() בלבד. "
+        f"(tool={tool_name} source={source})"
+    )
+
+
 def enforce_tenant_scope(
     tool_name: str,
     identity: "Identity",
@@ -81,16 +138,25 @@ def audit_log_airtable(
     tool_name: str,
     identity: "Identity",
     params: dict,
-    result_snippet: str = "",
+    result_snippet: object = "",   # BUG-A FIX: מקבל כל טיפוס — dict, str, None
 ) -> None:
     """
     Audit log לכל פעולת Airtable — read ו-write כאחד.
     לא חוסם, רק מתעד. עתידי: ישלח ל-DB / Sentry.
+
+    BUG-A FIX: result_snippet הוגדר כ-str, אבל dispatcher מעביר
+    את result כמו שהוא (dict). dict[:60] → TypeError: unhashable type: 'slice'.
+    תיקון: המרה ל-str לפני slicing. Audit לעולם לא שובר פעולה עסקית.
     """
-    logger.info(
-        f"[AUDIT] airtable | tool={tool_name} | "
-        f"tenant={identity.tenant_id} | user={identity.user_id} | "
-        f"role={identity.role} | "
-        f"table={params.get('table','?')} | "
-        f"result={result_snippet[:60]}"
-    )
+    try:
+        safe_result = str(result_snippet)[:60]  # בטוח לכל טיפוס
+        logger.info(
+            f"[AUDIT] airtable | tool={tool_name} | "
+            f"tenant={identity.tenant_id} | user={identity.user_id} | "
+            f"role={identity.role} | "
+            f"table={params.get('table','?')} | "
+            f"result={safe_result}"
+        )
+    except Exception as _audit_err:
+        # Audit failure לעולם לא זורק החוצה — רק מתועד
+        logger.warning(f"[AUDIT] log failed for {tool_name}: {_audit_err}")
