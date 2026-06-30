@@ -651,6 +651,11 @@ def _capture_last_tool_result(chat_id: str, tool_name: str, result, tool_input: 
             "input":     str(tool_input)[:80],
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
+
+        # BUG-NEW-09: persist the real Lead record_id on the Session so
+        # follow-up turns reference it instead of fabricating one.
+        if ok and tool_name in ("airtable_add", "airtable_update") and tool_input.get("table") == "Leads":
+            lead_sessions.set_current_lead_record_id(chat_id, record_id)
     except Exception as e:
         logger.warning(f"[C60] set_last_tool_result failed for {chat_id}: {e}")
 
@@ -985,6 +990,16 @@ def run_agent(
         try:
             from lead_capture import capture_inbound_lead
             lead_capture_result = capture_inbound_lead(identity, user_text)
+            # BUG-NEW-09: this path bypasses the dispatcher tool loop, so
+            # _capture_last_tool_result never sees it — persist here instead.
+            if lead_capture_result is not None and getattr(lead_capture_result, "record_id", ""):
+                try:
+                    from core.claim_gate import check_claim
+                    if check_claim(lead_capture_result).ok:
+                        from session_store import lead_sessions as _ls_lc
+                        _ls_lc.set_current_lead_record_id(chat_id, lead_capture_result.record_id)
+                except Exception:
+                    pass
         except Exception as e:
             logger.error(f"[LeadCapture] failed for {identity.memory_key}: {e}")
 
