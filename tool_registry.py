@@ -36,6 +36,20 @@ _ALL_EXTERNAL  = {"owner", "partner", "manager", "employee", "lead"}
 
 
 # ══════════════════════════════════════════════════
+# C53 FIX-3: מקור אחד לכלים שדורשים אישור
+# כל מודול אחר (event_bus, dispatcher) מייבא מכאן.
+# ══════════════════════════════════════════════════
+TOOLS_REQUIRING_APPROVAL: frozenset[str] = frozenset({
+    "airtable_add",
+    "airtable_update",
+    "gmail_draft",
+    "gmail_send_draft",
+    "calendar_create_event",
+    "sheets_append",
+})
+
+
+# ══════════════════════════════════════════════════
 # Registry
 # ══════════════════════════════════════════════════
 

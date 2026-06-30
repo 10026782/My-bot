@@ -94,6 +94,9 @@ def _job_daily_collector():
 def _job_followup_scan():
     try:
         from feature_flags import is_enabled
+        if is_enabled("EMERGENCY_STOP_AUTOMATION"):
+            logger.warning("[Scheduler] EMERGENCY_STOP_AUTOMATION active — followup_scan skipped")
+            return
         if not is_enabled("FOLLOWUP_AUTOMATION"):
             return
 
@@ -122,6 +125,9 @@ def _job_followup_scan():
 def _job_payment_reminders():
     try:
         from feature_flags import is_enabled
+        if is_enabled("EMERGENCY_STOP_AUTOMATION"):
+            logger.warning("[Scheduler] EMERGENCY_STOP_AUTOMATION active — payment_reminders skipped")
+            return
         if not is_enabled("PAYMENT_REMINDERS"):
             return
 

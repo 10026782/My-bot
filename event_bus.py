@@ -117,14 +117,9 @@ class PendingActionsStore:
 # מנתב אירועים — subscribe / emit
 # ══════════════════════════════════════════════════
 
-# פעולות שדורשות אישור לפני ביצוע
-# שמות חייבים להתאים בדיוק לשמות בtool_registry.py ובdispatcher.py
-ACTIONS_REQUIRING_APPROVAL = {
-    "calendar_create_event",  # קביעת אירוע — ייצור בלתי הפיך
-    "sheets_append",          # כתיבה לשיט — ייצור בלתי הפיך
-    "airtable_delete",        # מחיקה — בלתי הפיכה
-    "gmail_send_draft",       # שליחת מייל — בלתי הפיכה
-}
+# C53 FIX-3: מקור אחד ב-tool_registry — אין רשימה מקומית.
+from tool_registry import TOOLS_REQUIRING_APPROVAL
+ACTIONS_REQUIRING_APPROVAL = TOOLS_REQUIRING_APPROVAL
 
 class EventBus:
     """

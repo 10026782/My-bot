@@ -203,6 +203,9 @@ def run_followup_scan(owner_chat_id: str = "") -> FollowupResult:
     """Entry point לscheduler._job_followup_scan()."""
     try:
         from feature_flags import is_enabled  # type: ignore
+        if is_enabled("EMERGENCY_STOP_AUTOMATION"):
+            logger.warning("[Followup] EMERGENCY_STOP_AUTOMATION active — scan skipped")
+            return FollowupResult()
         if not is_enabled("FOLLOWUP_AUTOMATION"):
             logger.info("[Followup] flag OFF — skipping")
             return FollowupResult()
