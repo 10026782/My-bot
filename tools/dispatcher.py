@@ -121,11 +121,8 @@ def dispatch_tool(name: str, inputs: dict, identity: "Identity | None" = None) -
 
     # Emergency Stop — blocks all write/send tools; checks persistent flag store
     # so the in-app owner control (/api/health/emergency) takes effect immediately.
-    _RISKY_TOOLS = {
-        "airtable_add", "airtable_update",
-        "gmail_draft", "gmail_send_draft",
-        "calendar_create_event", "sheets_append",
-    }
+    # C53 FIX-3: מקור אחד — tool_registry.TOOLS_REQUIRING_APPROVAL.
+    from tool_registry import TOOLS_REQUIRING_APPROVAL as _RISKY_TOOLS
     if _ff.is_enabled("EMERGENCY_STOP_ALL") and name in _RISKY_TOOLS:
         logger.critical(f"[EmergencyStop] BLOCKED {name} | tenant={tenant_id} user={user_id}")
         return "🚨 מצב חירום פעיל — כל פעולות הכתיבה חסומות. פנה לבעלים."

@@ -272,6 +272,51 @@ from event_bus import bus as _event_bus
 _event_bus.subscribe("send_followup.confirmed", _handle_send_followup_confirmed)
 
 
+# ── C53 FIX-1: send_recovery.confirmed handler ────────────────────────────
+# lead_recovery.request_recovery_approval() שולח action="send_recovery" —
+# ללא handler זה emit מחזיר None ומדפיס שגיאה שקטה. מבנה הפאיילוד
+# תואם ל-core/lead_recovery.py:227-234.
+# לא שולח WhatsApp ללקוח (Meta blocked, N05-C) — רק מעביר לבעלים.
+
+def _handle_send_recovery_confirmed(payload: dict, chat_id: str) -> str:
+    draft        = payload.get("draft", "")
+    contact_name = payload.get("contact_name", "")
+    channel      = payload.get("channel", "")
+    memory_key   = payload.get("memory_key", "")
+    tier         = payload.get("tier", "")
+
+    msg = (f"♻️ Recovery מאושר — לשליחה ידנית ({channel}, {tier}):\n"
+           f"אל: {contact_name}\n\n{draft}")
+
+    try:
+        from core.output_gateway import send_outbound, OutboundEnvelope, AudienceClass, OutputChannel
+        send_outbound(OutboundEnvelope(
+            channel=OutputChannel.TELEGRAM_OWNER,
+            recipient=chat_id,
+            body=msg,
+            audience=AudienceClass.INTERNAL,
+            source_module="app.send_recovery_confirmed",
+            source_ref=memory_key,
+            domain="recovery",
+        ))
+    except Exception as e:
+        logger.error(f"[Recovery] notify owner failed: {e}")
+        return f"⚠️ שגיאה בהצגת הטיוטה: {e}"
+
+    if memory_key:
+        try:
+            from lead_memory import lead_memory
+            state = lead_memory.get(memory_key)
+            lead_memory.update(memory_key, recovery_count=state.recovery_count + 1)
+        except Exception as e:
+            logger.warning(f"[Recovery] recovery_count update failed: {e}")
+
+    return "✅ הטיוטה נשלחה אליך להעברה ידנית"
+
+
+_event_bus.subscribe("send_recovery.confirmed", _handle_send_recovery_confirmed)
+
+
 
 @bot.message_handler(commands=["status"])
 def cmd_status(msg):
