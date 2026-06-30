@@ -19,7 +19,11 @@ from .calendar_tools import calendar_get_events, calendar_create_event
 from .gmail_tools    import gmail_draft, gmail_send_draft, gmail_read
 from .sheets_tools   import sheets_append
 from .airtable_tools    import airtable_get, airtable_add, airtable_update, airtable_get_schema, search_lead
-from .airtable_security import TenantScopeViolation, audit_log_airtable, enforce_tenant_scope
+from .airtable_security import TenantScopeViolation, LeadsDirectWriteBlocked, audit_log_airtable, enforce_tenant_scope, enforce_leads_write_gate
+try:
+    from core.lead_buffer import save_blocked_payload as _save_lead_buffer
+except ImportError:
+    _save_lead_buffer = None  # fallback — לא שובר אם core חסר
 from .contact_resolver  import resolve_contact
 
 from tool_registry import enforce, ToolDenied
@@ -215,6 +219,22 @@ def dispatch_tool(name: str, inputs: dict, identity: "Identity | None" = None) -
                 table  = inputs["table"]
                 fields = dict(inputs["fields"])
 
+                # BUG-B FIX: חסום כתיבה ישירה ל-Leads מה-Agent.
+                # Lead creation מותרת רק דרך capture_inbound_lead().
+                # source="agent" = ברירת מחדל כשהAgent קורא ישירות.
+                _write_source = inputs.get("_source", "agent")
+                try:
+                    enforce_leads_write_gate("airtable_add", {"table": table}, source=_write_source)
+                except LeadsDirectWriteBlocked as e:
+                    logger.warning(f"[Dispatcher] Leads write blocked | table={table} source={_write_source}")
+                    # Buffer: שמור את ה-payload כדי שcapture_inbound_lead יוכל להעשיר את הליד
+                    if _save_lead_buffer is not None:
+                        try:
+                            _save_lead_buffer(fields, source=_write_source)
+                        except Exception as _buf_err:
+                            logger.debug(f"[LeadBuffer] save failed (non-critical): {_buf_err}")
+                    return str(e)
+
                 # Fix 1: dedup — מניעת רשומות כפולות
                 real_t      = _ALIAS_MAP.get(table, table)
                 dedup_field = _DEDUP_FIELDS.get(real_t) or _DEDUP_FIELDS.get(table)
@@ -262,6 +282,20 @@ def dispatch_tool(name: str, inputs: dict, identity: "Identity | None" = None) -
                 table     = inputs["table"]
                 record_id = inputs["record_id"]
                 fields    = dict(inputs["fields"])
+
+                # BUG-B FIX: חסום עדכון ישיר ל-Leads מה-Agent
+                _write_source = inputs.get("_source", "agent")
+                try:
+                    enforce_leads_write_gate("airtable_update", {"table": table}, source=_write_source)
+                except LeadsDirectWriteBlocked as e:
+                    logger.warning(f"[Dispatcher] Leads update blocked | table={table} source={_write_source}")
+                    # Buffer: שמור גם update payload — יכול להכיל שדות שהAgent חילץ
+                    if _save_lead_buffer is not None:
+                        try:
+                            _save_lead_buffer(fields, source=_write_source)
+                        except Exception as _buf_err:
+                            logger.debug(f"[LeadBuffer] save failed (non-critical): {_buf_err}")
+                    return str(e)
 
                 # בלוק external users מעדכון רשומות
                 if identity and identity.is_external:
