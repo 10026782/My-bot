@@ -568,8 +568,16 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
     """
     שומר פעולה ממתינה ושולח בקשת אישור לowner.
     מחזיר string לmodel: "⏳ ממתין לאישור..."
+    BUG-V1-APPROVAL-REQUEUE-AFTER-CONFIRM: blocks re-queuing an action that
+    was already executed within the last 10 minutes (fingerprint TTL).
     """
-    from event_bus import bus
+    from event_bus import bus, executed_action_cache
+    fp = executed_action_cache.compute(user_chat_id, tool_name, tool_inputs)
+    if executed_action_cache.is_recently_executed(fp):
+        logger.warning(
+            f"[Approval] duplicate fingerprint blocked: {fp[:8]} | {tool_name} | user={user_chat_id}"
+        )
+        return f"⚠️ פעולה זו כבר בוצעה לאחרונה ({tool_name}). כפילות נחסמה."
     label     = _describe_tool_call(tool_name, tool_inputs)
     action_id, _ = bus.request_approval(
         action  = tool_name,
@@ -831,6 +839,12 @@ def _handle_approval_callback_impl(cq) -> None:
                 return
             if exec_check.status == "warn":
                 logger.warning(f"[Approval:A32] Execution warn: {tool_name} -- {exec_check.reason}")
+
+            # BUG-V1-APPROVAL-REQUEUE-AFTER-CONFIRM: record fingerprint after
+            # successful execution so re-queue of the same action is blocked.
+            from event_bus import executed_action_cache as _eac
+            _eac.mark_executed(_eac.compute(user_chat_id, tool_name, tool_inputs))
+
             result = _tool_user_message(result)
 
         logger.info(f"[Approval] ✅ confirmed {action_id} | {tool_name or item.get('action')}")
@@ -1149,6 +1163,9 @@ def run_agent(
         # within this turn — same (tool, inputs) reuses the cached result
         # instead of re-querying Airtable.
         _turn_read_cache: dict[tuple, dict] = {}
+        # BUG-V1-MULTI-PENDING-PAYLOAD-CONTAMINATION: a single agent turn must
+        # not queue more than one mutating (requires_approval) action.
+        _mutating_approvals_this_turn = 0
         # CXX/A32: הוסף lead capture evidence — FOUND≠CREATED ב-A32
         _lc_a32 = _action_result_to_a32_entry(lead_capture_result)
         if _lc_a32:
@@ -1226,11 +1243,35 @@ def run_agent(
 
                 # ── Approval Gate ─────────────────────
                 if meta.requires_approval:
+                    # BUG-V1-MULTI-PENDING-PAYLOAD-CONTAMINATION: one mutating
+                    # approval per agent turn; block the second unconditionally.
+                    if _mutating_approvals_this_turn >= 1:
+                        logger.warning(
+                            f"[Approval] multi-pending blocked: {tu.name} | "
+                            f"turn already has 1 approval queued | user={chat_id}"
+                        )
+                        tool_results.append({
+                            "type": "tool_result", "tool_use_id": tu.id,
+                            "content": (
+                                "⚠️ לא ניתן לבצע מספר פעולות הדורשות אישור בו-זמנית. "
+                                "אנא אשר את הפעולה הנוכחית קודם."
+                            ),
+                        })
+                        continue
                     result = _queue_approval(
                         tu.name, dict(tu.input), chat_id, channel
                     )
+                    _mutating_approvals_this_turn += 1
                     tool_results.append({
                         "type": "tool_result", "tool_use_id": tu.id, "content": result
+                    })
+                    # BUG-V1-FAKE-APPROVAL-STATE: inject A32 sentinel so
+                    # sanitize_agent_response can verify the "⏳ ממתינה לאישור"
+                    # echo came from a real approval, not hallucinated text.
+                    tool_results_log.append({
+                        "tool": "__approval_queued__",
+                        "content": result,
+                        "ok": True,
                     })
                     continue
 

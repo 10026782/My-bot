@@ -25,7 +25,12 @@ _RULES: list[tuple[str, str, float]] = [
     (r"^(שלום|היי|הי|בוקר טוב|ערב טוב|צהריים טובים|hello|hi|hey)[\s!.]*$", Intent.GREETING, 0.99),
     (r"^(שלום|היי|הי)\b",                                                    Intent.GREETING, 0.95),
     (r"(מה נשמע|מה קורה|איך הולך|מה שלומך|what\'s up|how are you)",         Intent.SMALLTALK, 0.95),
-    (r"(בדיקה|אתה עובד|שומע אותי|test|are you (working|there|alive))",       Intent.BOT_STATUS_CHECK, 0.95),
+    # BUG-ROUTER-TEST-WORD-COLLISION: "בדיקה"/"test" must be the ENTIRE message.
+    # Without anchoring, "תוסיף לגליון בשם בדיקה..." was wrongly classified as
+    # BOT_STATUS_CHECK because the word "בדיקה" appeared inside the sheet name.
+    (r"^(בדיקה|test)\s*[\?!.]*$",                                            Intent.BOT_STATUS_CHECK, 0.99),
+    # Contextual phrases that are inherently bot-status-only (safe to match anywhere)
+    (r"(אתה עובד\??|שומע אותי\??|are you (working|there|alive))",            Intent.BOT_STATUS_CHECK, 0.95),
 
     # ── Tasks ────────────────────────────────────
     (r"(פתח|צור|הוסף|תוסיף).*(משימ|טאסק|task)", Intent.CREATE_TASK, 0.95),
