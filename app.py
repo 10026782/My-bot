@@ -1080,6 +1080,11 @@ def run_agent(
         _resolved_domain["domain"] = resolved_route_domain
 
     # ── 4. Dispatch ───────────────────────────────
+    if route.handler == Handler.ENGINEERING_NOTE:
+        # SPEC-ROUTER-06: bug reports / debug instructions never reach the
+        # Agent or tools — no business write, no self-reported-fix claim.
+        return route.response_override or "קיבלתי דיווח באג. לא שיניתי את המערכת. צריך שינוי קוד, בדיקות ופריסה."
+
     if route.handler == Handler.CLARIFY:
         return clarify_response(route)
 
@@ -1140,6 +1145,10 @@ def run_agent(
         final_reply     = "⚠️ לא התקבלה תשובה."
         tool_calls_made = 0
         tool_results_log: list[dict] = []   # A32: accumulates all tool results
+        # LL-11: dedup repeated read-only lookups (e.g. Sessions/Leads GET)
+        # within this turn — same (tool, inputs) reuses the cached result
+        # instead of re-querying Airtable.
+        _turn_read_cache: dict[tuple, dict] = {}
         # CXX/A32: הוסף lead capture evidence — FOUND≠CREATED ב-A32
         _lc_a32 = _action_result_to_a32_entry(lead_capture_result)
         if _lc_a32:
@@ -1225,11 +1234,19 @@ def run_agent(
                     })
                     continue
 
-                logger.info(f"[Tool] {tu.name} | {str(tu.input)[:80]}")
-                raw    = dispatch_tool(tu.name, tu.input, identity)
-                result = validate_tool_output(tu.name, raw)
-                result_text = _tool_user_message(result)
-                logger.info(f"[Tool] → {result_text[:80]}")
+                dedup_key = (tu.name, tuple(sorted(tu.input.items(), key=lambda kv: kv[0])))
+                if meta.read_only and dedup_key in _turn_read_cache:
+                    logger.info(f"[Tool] {tu.name} | dedup hit (LL-11) — reusing this turn's result")
+                    cached = _turn_read_cache[dedup_key]
+                    raw, result, result_text = cached["raw"], cached["result"], cached["result_text"]
+                else:
+                    logger.info(f"[Tool] {tu.name} | {str(tu.input)[:80]}")
+                    raw    = dispatch_tool(tu.name, tu.input, identity)
+                    result = validate_tool_output(tu.name, raw)
+                    result_text = _tool_user_message(result)
+                    logger.info(f"[Tool] → {result_text[:80]}")
+                    if meta.read_only:
+                        _turn_read_cache[dedup_key] = {"raw": raw, "result": result, "result_text": result_text}
 
                 # A32 — verify tool actually succeeded
                 exec_check = verify_execution(tu.name, result)
