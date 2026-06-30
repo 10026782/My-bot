@@ -989,7 +989,10 @@ def run_agent(
     if identity.role == Role.LEAD:
         try:
             from lead_capture import capture_inbound_lead
-            lead_capture_result = capture_inbound_lead(identity, user_text)
+            # BUG-NEW-13: domain תמיד "general" כאן — ה-Router עוד לא רץ
+            # (רץ ב-3. Router למטה). write_event=False כדי שלא ייכתב Lead
+            # Event עם domain שגוי לליד קיים; נכתוב אותו בנפרד אחרי הניתוב.
+            lead_capture_result = capture_inbound_lead(identity, user_text, write_event=False)
             # BUG-NEW-09: this path bypasses the dispatcher tool loop, so
             # _capture_last_tool_result never sees it — persist here instead.
             if lead_capture_result is not None and getattr(lead_capture_result, "record_id", ""):
@@ -1056,6 +1059,17 @@ def run_agent(
     # ── 3. Router — CORE_02.6 Integration ────────
     route = _safe_route(user_text, channel, identity, domain_from_channel)
     logger.info(route.to_log())
+
+    # BUG-NEW-13: כעת ש-domain אמיתי ידוע, כתוב Lead Event (אם דולג למעלה
+    # כי מדובר בליד קיים) עם ה-domain הנכון מה-Router, לא "general".
+    if lead_capture_result is not None and lead_capture_result.record_id:
+        try:
+            from core.action_result import ClaimType as _ClaimType
+            if lead_capture_result.claim_type == _ClaimType.FOUND:
+                from lead_capture import capture_lead_event
+                capture_lead_event(identity, user_text, lead_capture_result.record_id, domain=route.domain)
+        except Exception as e:
+            logger.warning(f"[LeadCapture] deferred lead event failed for {identity.memory_key}: {e}")
 
     # ── 3.5. Resolved-domain — single source of truth ──────────────
     # תיקון: COG (_gateway_whatsapp_reply) ו-approval_response קיבלו את
