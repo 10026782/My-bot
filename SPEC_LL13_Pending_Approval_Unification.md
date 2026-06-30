@@ -14,6 +14,8 @@ C53 כבר תיעד שב-`main` היום יש **ארבעה מנגנוני איש
 2. `event_bus.bus` / `PendingActionsStore` (`event_bus.py:24`) — keyed by `action_id`, מאושר דרך Telegram inline keyboard callback (`approve:{action_id}` / `reject:{action_id}`), נוצר דרך `_queue_approval()` (`app.py:562`).
 3-4. שני מנגנונים נוספים (TMA `Approvals` table, ועוד אחד) — ראה C53 §0 לרשימה המלאה.
 
+> **כלל מפורש:** הספק הזה מגדיר **איחוד/החלפה** של מנגנוני ה-Approval הקיימים (#1 ו-#2 לעיל, ובהמשך גם יחס מול #3/#4 — ראה §5.4). הוא **אינו** מגדיר מנגנון חמישי. כל PR שמיישם את הספק הזה **חייב** לכלול את הסרת/ביטול `_pending_approvals` dict ו-`PendingActionsStore` כחלק מאותו PR — לא להשאיר אותם פעילים לצד `Pending_Approvals` החדש.
+
 הספק הזה (LL-13) **לא** מציע טבלת `Pending_Approvals` כמנגנון חמישי. הוא מציע אותה כ**תחליף ל-#1 ו-#2** — store יחיד, durable, ב-Airtable, במקום שני in-memory stores מקבילים. כל מימוש חייב לכלול plan להחליף/לבטל את `_pending_approvals` ו-`PendingActionsStore`, לא רק להוסיף עוד אחד לערימה. זו ההחלטה הארכיטקטונית המרכזית כאן — **לא להתחיל לממש בלי לאשר את זה קודם**, כי זה משנה את `_handle_approval_callback` וכל מקום שקורא ל-`_queue_approval`.
 
 ---
@@ -85,7 +87,9 @@ else:
 - לפני קריאה ל-Sessions/Leads → בדיקה אם כבר נקרא באותו turn עם אותם פרמטרים → אם כן, משתמשים בתוצאה הקיימת בזיכרון במקום לקרוא שוב.
 - ניתן לממש כ-cache פשוט במשתנה ברמת ה-request handler (לא צריך טבלה נפרדת לזה).
 
-**הערה ליישום:** ראו LL-11 (`SPEC` קודם, ממומש ב-PR #181) — אותו עיקרון בדיוק כבר מומש שם ל-Sessions ספציפית, ע"י snapshot יחיד שנטען פעם אחת ב-`run_agent` ומועבר במפורש לכל קורא (`_session_snapshot`, `app.py` §1.6). אל תבנו מנגנון דה-דופ כללי חדש בלי לבדוק אם להרחיב את אותו snapshot מספיק — ה-hash-cache הכללי דרוש רק אם יש tool calls מחוץ ל-Sessions שצריכים את זה (למשל Leads).
+> **כלל מפורש:** LL-11 כבר נסגר ומוזג ל-`main` ב-**PR #181** (commit `14d2c32`, `fix: LL-11 — eliminate duplicate Sessions reads...`). הפתרון שם הוא snapshot יחיד שנטען פעם אחת ב-`run_agent` (`_session_snapshot`, `app.py` §1.6) ומועבר במפורש ל-`resolve_context_pronouns()`/`_build_tool_context()` — שתי הפונקציות האלה **אסור** להן יותר לבצע fallback-fetch (תוקן באותו PR). **הספק הזה לא מציע, ולא צריך להציע, מנגנון dedup נוסף ל-Sessions — זה כבר פתור.** ה-hash-cache הכללי ב-§3 רלוונטי **רק** לקריאות tool מחוץ ל-Sessions (לדוגמה Leads) שאין להן עדיין snapshot מקביל.
+
+**הערה ליישום:** ראו LL-11 (PR #181 לעיל) — אותו עיקרון בדיוק כבר מומש שם ל-Sessions ספציפית, ע"י snapshot יחיד שנטען פעם אחת ב-`run_agent` ומועבר במפורש לכל קורא (`_session_snapshot`, `app.py` §1.6). אל תבנו מנגנון דה-דופ כללי חדש ל-Sessions — זה כבר פתור ב-PR #181. ה-hash-cache הכללי דרוש רק אם יש tool calls מחוץ ל-Sessions שצריכים את זה (למשל Leads).
 
 ---
 
@@ -95,7 +99,7 @@ else:
 - `pending` שפג תוקף (TTL) → הודעה מתאימה ("אין פעולה הממתינה לאישור" או מקביל).
 - `pending` שבוטל (`status=cancelled`) → לא מבוצע.
 - לכל `session_id` יכול להיות `pending` פעיל אחד בלבד (יצירת חדש מבטלת/מפקיעה את הקודם).
-- אין יותר מקריאת Sessions אחת באותו request (תלוי ב-LL-11, ראה §3 לעיל).
+- אין יותר מקריאת Sessions אחת באותו request — כבר מכוסה ע"י LL-11/PR #181, לא דורש עבודה נוספת כאן (ראה §3 לעיל). הרגרסיה הקיימת ל-זה: `test_session_snapshot.py`.
 
 ---
 
