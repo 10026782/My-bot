@@ -1,10 +1,25 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-06-30 (מאוחר ביותר) — Decision Hub Quality Gate + Lead Lifecycle session log (PRs #169-172, #176-177)
-**עודכן על ידי:** Claude Code — `claude/new-session-be1ckb`
+**עודכן:** 2026-06-30 (מאוחר ביותר) — daily_git_audit.py verification + stale-branch content audit, ממוזג עם Decision Hub Quality Gate + Lead Lifecycle session log (PRs #169-172, #176-177)
+**עודכן על ידי:** Claude Code — `claude/new-session-be1ckb` (ממוזג עם `claude/determined-fermat-2j0ssg`)
 
 > מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (מיושן, 19/06) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
+
+---
+
+## 0.6 daily_git_audit.py verification + stale-branch content audit — 2026-06-30 (קרא לפני 0.5)
+
+**הרצה ידנית של `daily_git_audit.py`** (N12, `GIT_AUDIT_SCHEDULER` כבוי כברירת מחדל — לא רץ אוטומטית בפרודקשן). `check_unmerged_vs_roadmap()`/`check_duplicate_schemas()` אומתו: `python -c "import daily_git_audit"` עובר, שתי הפונקציות מחזירות `[]` על המצב האמיתי הנוכחי, ובדיקה ידנית (ענף מקומי מדומה + commit עם נושא שתואם שורת ROADMAP ✅, ללא push בפועל ל-origin) אישרה שהלוגיקה מסמנת נכון. שליחת טלגרם נכשלת בחן (fallback להדפסה) כשאין credentials — צפוי בסביבת ה-sandbox הזו (`READ_ONLY` mode, GOV-02: `schema_cache.json` לא `LIVE`-sourced, אין גישת Airtable).
+
+**ממצא אמיתי מההרצה המלאה:** 5 ענפי `claude/*` לא ממוזגים מול `origin/main`, 4 ישנים (>3 ימים): `claude/lucid-franklin-06tsel` (7.1י׳), `claude/batch-20-22-specs-tsu7kz` (6.2י׳), `claude/gifted-clarke-ajyjsa` (4.1י׳), `claude/gifted-clarke-feomnz` (3.1י׳). בניגוד להנחה ש"אחרי ניקוי אתמול" המצב אמור להיות נקי — הוא לא.
+
+**נבדק לעומק אם יש קוד חשוב לא ממוזג בארבעת הענפים — לא נמצא.** `git log origin/main..<branch>` מטעה כאן (כל ה-4 ענפים שימשו למספר מחזורי PR חוזרים על אותו שם ענף, אז ה-merge commits הישנים מופיעים כ"לא ממוזגים" למרות שמוזגו כבר בעבר תחת hash אחר) — האימות נעשה ב-`git diff origin/main <branch>` (תוכן קבצים בפועל, לא ancestry):
+- כל 4 הענפים מציגים diff עצום בכיוון ההפוך — חסרים בהם 5,000–13,800+ שורות שקיימות ב-main היום (Decision Hub Stage 1–6, F52, `document_converter/`, `core/lead_buffer.py`, F22 וכו') — כלומר הענפים הם **snapshots ישנים**, לא עבודה חדשה.
+- השורות המעטות הייחודיות לענפים (268/180/139/530 שורות, תלוי בענף) הן **קוד pre-refactor שכבר הוחלף ב-main**, לא תוספות חדשות. דוגמאות מאומתות: ב-`claude/batch-20-22-specs-tsu7kz`, `identity.py` עדיין מכיל `display_name = "ליד חדש"` — הבאג המדויק שתועד כ-BUG-023 ותוקן ב-main (`ca1f5a0`); `session_store.py` עדיין מפנה לטבלת `"LeadSessions"` הישנה (לא קיימת בפועל ב-Airtable) — כבר הוחלפה ב-`Tables.SESSIONS` תחת C58. `media_handler.py`/`voice_stt_adapter.py` בענף `batch-20-22-specs-tsu7kz` זהים ל-100% ל-main (`git diff` ריק) — כלומר גם 2 ה-commits "החדשים ביותר" בענף (23/06) כבר נספגו ל-main דרך נתיב אחר.
+- **מסקנה: אין קוד חשוב לא ממוזג באף אחד מ-4 הענפים הישנים. מיזוג שלהם יהווה רגרסיה, לא שיפור.** מועמדים בטוחים לניקוי דרך `branch_cemetery_cleanup.py` — לא בוצע ניקוי/מחיקה בסשן זה (פעולה הרסנית, ממתינה לאישור מפורש).
+
+לא בוצע שינוי קוד בסשן זה — verification + ניתוח תוכן בלבד.
 
 ---
 
