@@ -8,6 +8,7 @@
 
 import uuid
 import logging
+import threading
 from datetime import datetime, timedelta
 from collections import defaultdict
 from typing import Callable, Any
@@ -28,6 +29,11 @@ class PendingActionsStore:
     """
     def __init__(self):
         self._store: dict[str, dict] = {}
+        # LL-13: guards get-then-delete sequences below — without this,
+        # two near-simultaneous confirm() calls for the same action_id can
+        # both observe a live entry before either removes it, causing the
+        # underlying action to execute twice.
+        self._lock = threading.Lock()
 
     def add(self, chat_id: str, action: str, payload: dict, label: str = "") -> str:
         """
@@ -58,24 +64,25 @@ class PendingActionsStore:
         return item
 
     def pop(self, action_id: str) -> dict | None:
-        """שולף ומוחק — לאחר אישור או ביטול. בודק TTL באופן עצמאי."""
-        item = self._store.get(action_id)
+        """שולף ומוחק — לאחר אישור או ביטול. בודק TTL באופן עצמאי.
+        LL-13: get+delete is a single atomic critical section — a concurrent
+        pop() for the same action_id will see nothing left to take."""
+        with self._lock:
+            item = self._store.pop(action_id, None)
         if not item:
             return None
         if datetime.now() > datetime.fromisoformat(item["expires"]):
-            del self._store[action_id]
             logger.info(f"⏰ Pending action expired at pop: {action_id}")
             return None
-        del self._store[action_id]
         return item
 
     def cancel(self, action_id: str) -> bool:
         """מבטל פעולה ממתינה"""
-        if action_id in self._store:
-            del self._store[action_id]
+        with self._lock:
+            existed = self._store.pop(action_id, None) is not None
+        if existed:
             logger.info(f"🚫 Pending action cancelled: {action_id}")
-            return True
-        return False
+        return existed
 
     def list_for_chat(self, chat_id: str) -> list[dict]:
         """מחזיר כל הפעולות הממתינות לצ'אט מסוים"""

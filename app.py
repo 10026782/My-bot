@@ -79,6 +79,10 @@ AGENT_TIMEOUT  = 25
 # Saves messages routed to Handler.APPROVAL until the user confirms.
 # key: chat_id (telegram user_id / whatsapp number)
 _pending_approvals: dict[str, dict] = {}
+# LL-13: guards _pending_approvals against TOCTOU double-execution — two
+# near-simultaneous requests for the same chat_id (duplicate webhook delivery,
+# fast double "כן") must not both observe-then-act on the same pending entry.
+_pending_approvals_lock = threading.Lock()
 _CONFIRM_WORDS = frozenset({"כן", "אשר", "✅", "yes", "y", "ok", "אוקי", "בצע", "קדימה"})
 _CANCEL_WORDS  = frozenset({"לא", "בטל", "❌", "no", "n", "ביטול", "עצור", "cancel"})
 
@@ -1001,17 +1005,19 @@ def run_agent(
         return "⚠️ יותר מדי בקשות. המתן דקה ונסה שוב."
 
     # ── 2.5. Pending Approval Gate ────────────────
-    pending = _pending_approvals.get(chat_id)
+    # LL-13: a single lock-guarded pop() is the only read site — there is no
+    # separate "check" step, so two concurrent calls for the same chat_id
+    # can never both see the same pending entry (TOCTOU fix).
+    with _pending_approvals_lock:
+        pending = _pending_approvals.pop(chat_id, None)
     if pending:
         if time.time() - pending.get("created_at", 0) > _PENDING_APPROVAL_TTL:
-            _pending_approvals.pop(chat_id, None)
             logger.info("[PendingApproval] expired (>%ss) for %s",
                         _PENDING_APPROVAL_TTL, chat_id)
             pending = None
     if pending:
         lower = user_text.strip().lower()
         if lower in _CONFIRM_WORDS:
-            _pending_approvals.pop(chat_id, None)
             logger.info(
                 f"[PendingApproval] ✅ confirmed by {chat_id} → "
                 f"executing: {pending['text'][:60]}"
@@ -1023,12 +1029,9 @@ def run_agent(
                 _resolved_domain=_resolved_domain,
             )
         elif lower in _CANCEL_WORDS:
-            _pending_approvals.pop(chat_id, None)
             logger.info(f"[PendingApproval] 🚫 cancelled by {chat_id}")
             return "🚫 הפעולה בוטלה."
-        else:
-            # New unrelated message — clear stale pending, treat normally
-            _pending_approvals.pop(chat_id, None)
+        # else: new unrelated message — pending already popped above, treat normally
 
     # ── 2.6. Context Pronoun Resolution (C60) ────────
     # "תעלה לדסישנס"/"זה הנספח" וכד' — לפני intent detection, כדי שה-Router
