@@ -907,3 +907,8 @@ cursor/phase-1-stability-5fb2
 **אימות:** git ls-remote מול GitHub אישר שכל 11 השמות אינם קיימים ב-remote, אין PR פתוח על אף אחד מהם. main וענפי עבודה פעילים (fix/c53-approval-hardening, cursor/guards-file-audit-report-1742, claude/leads-write-gate-verify-aodpud) נשמרו.
 
 **סטטוס:** ✅ הושלם — ראה משימות המשך פתוחות לעיל
+
+## 01/07/2026 — סקירת fix/c53-approval-hardening — הוחלט לא למזג
+סקירת diff מלאה מול `main=d16fc96`.
+אין cherry-pick מהענף. הממצאים הוסבו ל-8 משימות חדשות (`C81-FU`, `C82-FU`, `C83`–`C88`; ראה ROADMAP).
+הענף ימחק לאחר רישום המשימות.

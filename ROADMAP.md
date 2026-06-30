@@ -1,6 +1,7 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 30/06/2026 (מאוחר ביותר) — Lead Lifecycle + Decision Hub Quality Gate session log. N-LEAD-EVENT/N-CXX/N-LEADBUF/N14 נוספו. BUG-DH-03/04 כblocker לפני FEATURE_DECISION_HUB.
+עודכן: 01/07/2026 — סקירת `fix/c53-approval-hardening`: הוחלט לא למזג את הענף. נפתחו שמונה follow-ups בעדיפות ראשונה (`C81-FU`, `C82-FU`, `C83`–`C88`).
+עודכן קודם: 30/06/2026 — Lead Lifecycle + Decision Hub Quality Gate session log. N-LEAD-EVENT/N-CXX/N-LEADBUF/N14 נוספו. BUG-DH-03/04 כblocker לפני FEATURE_DECISION_HUB.
 עודכן קודם: 29/06/2026 — Git Diff Gap Report session, main = `debb270` (אומת
 `git fetch origin main` + `git log origin/main --oneline -30`). מבוסס על
 `SPEC_GIT_DIFF_GAP_FINDER.md`. ממצאים: **(1)** סעיף "Fxx — Safe Document Converter" למטה היה
@@ -230,6 +231,51 @@ Decision Hub Stage 3 (Readiness Engine, F18): `decision_readiness.py` (`calc_rea
 ## N — הבא בתור
 
 **סדר ביצוע קשיח — כל N תלוי ב-N שלפניו.**
+
+### C81-FU — Recovery: אמת משלוח לפני סימון הושלם
+**עדיפות:** 🔴 דחוף
+**בעיה:** `recovery_count` גדל גם כשהלקוח לא קיבל את ההודעה בפועל.
+**פעולה:** אמת תוצאת שליחה; אל תסמן recovery כהושלם בעת הצגת טיוטה לבעלים; הוסף regression test.
+**קובץ ראשי:** scheduler / followup_engine
+
+### C82-FU — EMERGENCY_STOP_AUTOMATION: gate מרכזי לכל עבודות scheduler
+**עדיפות:** 🔴 דחוף
+**בעיה:** ה-flag נאכף רק ב-followup וב-payment reminders; lead recovery ושאר jobs לא נבדקים.
+**פעולה:** gate אחד מרכזי לפני כניסה לכל job, במקום בדיקות נקודתיות.
+**קובץ ראשי:** `scheduler.py`
+
+### C83 — Single Policy Source: הפרדת requires_approval מ-blocked_by_emergency
+**עדיפות:** 🔴 דחוף
+**בעיה:** `TOOLS_REQUIRING_APPROVAL` ו-`ToolMeta.requires_approval` סותרים (`crm_mark_payment_paid` חסר).
+**פעולה:** לגזור רשימות מה-registry; להפריד בין שני המושגים; consistency test ב-CI.
+**קובץ ראשי:** tool_registry / action_validator
+
+### C84 — TMA Approvals: TTL + freshness check
+**עדיפות:** 🟡 גבוה
+**בעיה:** רשומת `PENDING` יכולה להישאר פעילה ללא הגבלת זמן.
+**פעולה:** הוסף `expires_at` לרשומה; בדוק freshness לפני ביצוע.
+**קובץ ראשי:** tma_api / airtable_gateway
+
+### C85 — Structural test: כל request_approval(action=...) מחזיק subscriber
+**עדיפות:** 🟡 גבוה (זול ובעל ערך)
+**פעולה:** test שרץ ב-CI, מוודא שאין action ללא handler.
+**קובץ ראשי:** tests/
+
+### C86 — Emergency Stop: coverage מטריציוני לכל scheduler jobs
+**עדיפות:** 🟡 גבוה
+**פעולה:** בדיקות: followup, recovery, payment וכל job מול flag פעיל.
+**קובץ ראשי:** tests/
+
+### C87 — Unified Approval Store: החלטת ארכיטקטורה לפני מימוש
+**עדיפות:** 🟠 תכנון (חסום על C81-FU–C83)
+**בעיה:** כמה stores עצמאיים בזיכרון וב-Airtable.
+**פעולה:** להכריע אם משתמשים בטבלת `Approvals` הקיימת, ואז לקדם `SPEC_LL13`.
+**הערה:** אין ליצור מנגנון חמישי לפני ההחלטה.
+
+### C88 — Secondary Guard: חסום כברירת מחדל
+**עדיפות:** 🟠 בינוני
+**בעיה:** נכשל פתוח ב-staging.
+**פעולה:** fail-closed כברירת מחדל; override מפורש לטסטים בלבד.
 
 ### N01 — ✅ הושלם (W1 לעיל)
 
