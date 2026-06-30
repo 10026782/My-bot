@@ -172,11 +172,18 @@ def capture_lead_event(
         return ActionResult.failure(str(e), source="lead_event")
 
 
-def capture_inbound_lead(identity, message: str, domain: str = "general") -> "ActionResult":
+def capture_inbound_lead(
+    identity, message: str, domain: str = "general", write_event: bool = True,
+) -> "ActionResult":
     """
     Called from run_agent after resolve_identity, only for identity.role == Role.LEAD.
     Idempotent by memory_key. Existing Leads are not overwritten.
     Never raises: failures here must not break the conversational reply.
+
+    write_event=False (BUG-NEW-13): כשנקרא לפני שה-Router פתר domain אמיתי,
+    הקריאה הזו עדיין רצה ב-"general" (כדי לשמר memory_key תאימות-לאחור —
+    ראה הערה למטה), אבל לא כותבת Lead Event עם domain שגוי. הקורא (app.py)
+    אחראי לכתוב את ה-Lead Event בנפרד אחרי שה-Router פתר domain אמיתי.
     """
     if not is_enabled("LEAD_CAPTURE"):
         return ActionResult.failure("LEAD_CAPTURE disabled", source="lead_capture")
@@ -225,13 +232,16 @@ def capture_inbound_lead(identity, message: str, domain: str = "general") -> "Ac
                 )
                 # N-LEAD-EVENT: ליד קיים + הודעה חדשה → כתוב Lead Event
                 # לא יוצרים ליד שני — רושמים את הנושא החדש כאירוע
-                try:
-                    _ev = capture_lead_event(identity, message, existing_id, domain=domain)
-                    if _ev.business_success:
-                        logger.info("[LeadCapture] lead event written: rec=%s", _ev.record_id)
-                        found_ar.post_success = True
-                except Exception as e:
-                    logger.warning("[LeadCapture] lead event failed for %s: %s", existing_id, e)
+                # BUG-NEW-13: רק אם write_event=True — אחרת הקורא יכתוב את
+                # האירוע בעצמו, אחרי שה-Router פתר domain אמיתי.
+                if write_event:
+                    try:
+                        _ev = capture_lead_event(identity, message, existing_id, domain=domain)
+                        if _ev.business_success:
+                            logger.info("[LeadCapture] lead event written: rec=%s", _ev.record_id)
+                            found_ar.post_success = True
+                    except Exception as e:
+                        logger.warning("[LeadCapture] lead event failed for %s: %s", existing_id, e)
                 return found_ar
 
         # ALLOWLIST — רק שדות מוגדרים מפורשות.
