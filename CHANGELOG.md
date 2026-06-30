@@ -4,6 +4,10 @@ All notable repository-level changes should be recorded here.
 
 ## Unreleased
 
+- **Approval Gateway Safety** (PR #188, C81, BUG-039–044): תיקון סיסטמי ל-6 באגים ב-Section 1 — Pending Approval. (א) Router: `בדיקה`/`test` דורשים anchor מלא — אין עוד collision עם שמות טבלאות. (ב) A32: gate חדש ל-`sheets_append` + gate ל-fake approval state (sentinel `__approval_queued__`). (ג) `ExecutedActionCache`: fingerprint SHA1+TTL-600s מונע re-queue אחרי אישור. (ד) `_mutating_approvals_this_turn`: חוסם שני כלים הדורשים אישור בתור Agent אחד. (ה) `send_recovery.confirmed` handler: P0 — event שנפלט ל-`EventBus` ללא handler ב-`app.py` — תוקן. 25/25 בדיקות חדשות (`test_approval_gateway_safety.py`).
+
+- **C53 Infrastructure** (PR #189, C82, BUG-045–046): (א) `EMERGENCY_STOP_AUTOMATION` נאכף כעת בפועל ב-`run_followup_scan()` ושני scheduler jobs — לפני התיקון הדגל הוצג ב-UI אך לא עצר כלום. (ב) `TOOLS_REQUIRING_APPROVAL` מוגדר כ-`frozenset` יחיד ב-`tool_registry.py`; `event_bus` ו-`dispatcher` מייבאים ממנו — אין עוד שלוש רשימות מנותקות.
+
 - Added Fxx Safe Document Converter: deterministic `convert_document(input_file, input_type, output_type)` API with independent converter modules, fail-closed unsupported/uncertain conversions, Pandoc-first execution where available, Python-library fallbacks for simple Markdown/HTML/TXT/DOCX/CSV/XLSX conversions, usage docs, governance rule, and pytest coverage.
 
 - Branch cleanup: audited 37 unmerged `claude/*` branches against `main` (ancestry, diff content — not just date/name) and deleted 34 (already merged, content-identical to `main`, orphan history, or a past design collision already resolved in favor of a different branch). Two branches contained real unmerged work and were extracted before deletion: N12 (below, PR #108) and the PR #69 docs correction (see C56 in `CHANGE_CONTROL_LOG.md`).

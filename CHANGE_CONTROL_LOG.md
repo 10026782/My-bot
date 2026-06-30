@@ -858,6 +858,22 @@ Lifecycle: `COLLECTING→BLOCKED→REVIEW→AWAITING→DECIDED→CLOSED` | `prec
 ### C80 — CI: pytest steps + conftest (30/06/2026)
 קובץ: `.github/workflows/ci.yml` | +2 שלבים (pytest collect + pytest core reasoning), 7 test files
 
+### C81 — Approval Gateway Safety — Section 1 bugs (30/06/2026)
+קבצים: `core/router/intent_router.py`, `core/anti_hallucination.py`, `event_bus.py`, `app.py`, `test_approval_gateway_safety.py` (חדש)
+PR: #188 | באגים: BUG-039..BUG-044 | 25/25 בדיקות חדשות + 40/40 A32 self-tests
+- **BUG-039** router word-collision: `בדיקה`/`test` כ-anchor בלבד (לא substring)
+- **BUG-040** A32 Sheets: gate חדש ל-`sheets_append` — חוסם false-success claims
+- **BUG-041** A32 fake-approval: `__approval_queued__` sentinel נדרש לביטויי "⏳ ממתינה לאישור"
+- **BUG-042** ExecutedActionCache: fingerprint SHA1 TTL-600s מונע re-queue אחרי אישור
+- **BUG-043** `_mutating_approvals_this_turn`: חוסם כלי שני הדורש אישור באותו תור Agent
+- **BUG-044** `send_recovery.confirmed` handler: subscribe חסר ב-`app.py` — P0 silent data loss
+
+### C82 — C53 Infrastructure: single source of truth + EMERGENCY_STOP_AUTOMATION (30/06/2026)
+קבצים: `tool_registry.py`, `event_bus.py`, `tools/dispatcher.py`, `followup_engine.py`, `scheduler.py`
+PR: #189 | באגים: BUG-045, BUG-046
+- **BUG-045** `EMERGENCY_STOP_AUTOMATION` לא נאכף ב-`run_followup_scan()` ו-scheduler jobs
+- **BUG-046** `TOOLS_REQUIRING_APPROVAL` — מקור אחד ב-`tool_registry` (frozenset), `event_bus`/`dispatcher` מייבאים ממנו
+
 ### BUG-018 — Mojibake/encoding corruption ב-`app.py` (132 שורות)
 - **תאריך:** 25/06/2026
 - **סוג:** Bug fix, קובץ קיים (`app.py` בלבד)
