@@ -88,6 +88,32 @@ _NO_TOOL_CLAIMS: list[tuple[re.Pattern, frozenset[str]]] = [
         ),
         frozenset({"search_drive", "read_drive_file"}),
     ),
+    # BUG-V1-A32-SHEETS-FALSE-SUCCESS: agent claims a row was written to Sheets
+    # without sheets_append evidence. Covers Hebrew variants of "row added",
+    # "I added to sheet", "written to Sheets", etc.
+    (
+        re.compile(
+            r"(השורה נוספה|הוספתי לגל?יון|הוספתי (ל-?Google Sheets|לשיטס|לגיל?יון)|"
+            r"(נוסף|נוספו|נוספה) ל-?Google Sheets|כתוב לגל?יון|שורה נוספה לטבלה|"
+            r"נכתב (ל-?|אל-?)(גיל?יון|גל?יון|שיטס?|Sheets)|"
+            r"הנתונים (נכתבו|נוספו) (ל-?)?גל?יון|כתבתי (ל-?|אל-?)(גל?יון|שיטס))",
+            re.UNICODE,
+        ),
+        frozenset({"sheets_append"}),
+    ),
+    # BUG-V1-FAKE-APPROVAL-STATE: agent emits "⏳ ממתינה לאישור" text without a
+    # real approval having been queued. app.py injects a __approval_queued__
+    # sentinel into tool_results_log whenever _queue_approval() actually runs.
+    # Without that sentinel, this pattern fires → NO_TOOL_EVIDENCE_FALLBACK.
+    (
+        re.compile(
+            r"(⏳.{0,25}(ממתינ[הת] לאישור|אישור הבעלים)|"
+            r"הפעולה ממתינה לאישור|ממתינ[הת] לאישור הבעלים|"
+            r"כשתאשר.{0,40}(תתווסף|יבוצע|תישלח|יישלח))",
+            re.UNICODE,
+        ),
+        frozenset({"__approval_queued__"}),
+    ),
 ]
 
 # ══════════════════════════════════════════════════
@@ -615,6 +641,61 @@ def _run_tests() -> bool:
     print(f"{'✅' if ok10 else '❌'} agent claims Drive file found, real search_drive result present → passed through")
     if not ok10:
         print(f"     got: {with_tool_drive!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    # ── BUG-V1-A32-SHEETS-FALSE-SUCCESS ─────────
+    no_tool_sheets = sanitize_agent_response("השורה נוספה לגליון.", [])
+    ok11 = no_tool_sheets == _NO_TOOL_EVIDENCE_FALLBACK
+    print(f"{'✅' if ok11 else '❌'} BUG-V1-SHEETS: 'השורה נוספה' with no sheets_append → blocked")
+    if not ok11:
+        print(f"     got: {no_tool_sheets!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    with_tool_sheets = sanitize_agent_response(
+        "השורה נוספה לגליון.",
+        [{"tool": "sheets_append", "content": "✅ שורה נוספה", "ok": True}],
+    )
+    ok12 = with_tool_sheets not in (_NO_TOOL_EVIDENCE_FALLBACK, _SAFE_FALLBACK)
+    print(f"{'✅' if ok12 else '❌'} BUG-V1-SHEETS: 'השורה נוספה' with real sheets_append → passed through")
+    if not ok12:
+        print(f"     got: {with_tool_sheets!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    no_tool_sheets2 = sanitize_agent_response("הוספתי לגליון בדיקה.", [])
+    ok13 = no_tool_sheets2 == _NO_TOOL_EVIDENCE_FALLBACK
+    print(f"{'✅' if ok13 else '❌'} BUG-V1-SHEETS: 'הוספתי לגליון' with no sheets_append → blocked")
+    if not ok13:
+        print(f"     got: {no_tool_sheets2!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    # ── BUG-V1-FAKE-APPROVAL-STATE ───────────────
+    no_approval_queued = sanitize_agent_response(
+        "⏳ הפעולה ממתינה לאישור הבעלים. כשתאשר — השורה תתווסף.", []
+    )
+    ok14 = no_approval_queued == _NO_TOOL_EVIDENCE_FALLBACK
+    print(f"{'✅' if ok14 else '❌'} BUG-V1-FAKE-APPROVAL: '⏳ ממתינה לאישור' with no __approval_queued__ → blocked")
+    if not ok14:
+        print(f"     got: {no_approval_queued!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    with_approval_queued = sanitize_agent_response(
+        "⏳ הפעולה ממתינה לאישור הבעלים.",
+        [{"tool": "__approval_queued__", "content": "⏳ ...", "ok": True}],
+    )
+    ok15 = with_approval_queued not in (_NO_TOOL_EVIDENCE_FALLBACK, _SAFE_FALLBACK)
+    print(f"{'✅' if ok15 else '❌'} BUG-V1-FAKE-APPROVAL: '⏳ ממתינה' with real __approval_queued__ sentinel → passed through")
+    if not ok15:
+        print(f"     got: {with_approval_queued!r}")
         failed += 1
     else:
         passed += 1

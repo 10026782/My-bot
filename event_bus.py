@@ -7,6 +7,9 @@
 # לא לקרוא ל-Send Adapter ישירות. event_bus עצמו לא שולח דבר — הוא רק מנתב.
 
 import uuid
+import time
+import hashlib
+import json
 import logging
 import threading
 from datetime import datetime, timedelta
@@ -239,8 +242,45 @@ def _default_label(action: str, payload: dict) -> str:
 
 
 # ══════════════════════════════════════════════════
+# Executed-Action Fingerprint Cache
+# BUG-V1-APPROVAL-REQUEUE-AFTER-CONFIRM
+#
+# Blocks re-queuing an identical write action within a TTL window.
+# Fingerprint = sha1(chat_id | tool_name | sorted_inputs)[:16].
+# Checked BEFORE queuing; recorded AFTER successful execution.
+# ══════════════════════════════════════════════════
+
+_EXECUTED_FINGERPRINT_TTL = 600  # 10 minutes — same as approval button TTL
+
+
+class ExecutedActionCache:
+    """TTL-keyed set of write-action fingerprints."""
+
+    def __init__(self):
+        self._cache: dict[str, float] = {}
+        self._lock  = threading.Lock()
+
+    @staticmethod
+    def compute(chat_id: str, tool_name: str, inputs: dict) -> str:
+        normalized = json.dumps(inputs, sort_keys=True, ensure_ascii=False)
+        raw = f"{chat_id}|{tool_name}|{normalized}"
+        return hashlib.sha1(raw.encode()).hexdigest()[:16]
+
+    def is_recently_executed(self, fingerprint: str) -> bool:
+        now = time.time()
+        with self._lock:
+            self._cache = {k: v for k, v in self._cache.items() if v > now}
+            return fingerprint in self._cache
+
+    def mark_executed(self, fingerprint: str) -> None:
+        with self._lock:
+            self._cache[fingerprint] = time.time() + _EXECUTED_FINGERPRINT_TTL
+
+
+# ══════════════════════════════════════════════════
 # Singletons
 # ══════════════════════════════════════════════════
 
-pending = PendingActionsStore()
-bus     = EventBus(pending)
+pending                = PendingActionsStore()
+bus                    = EventBus(pending)
+executed_action_cache  = ExecutedActionCache()
