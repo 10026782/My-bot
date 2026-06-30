@@ -651,20 +651,14 @@ def _capture_last_tool_result(chat_id: str, tool_name: str, result, tool_input: 
         logger.warning(f"[C60] set_last_tool_result failed for {chat_id}: {e}")
 
 
-def _build_tool_context(chat_id: str, session: dict | None = None) -> str:
+def _build_tool_context(chat_id: str, session: dict | None) -> str:
     """מזריק תקציר 'מה הכלים עשו לאחרונה' ל-system prompt (TTL 5 דקות).
     הספק קורא ל-_seconds_ago() ב-§5 בלי להגדיר אותה — ממומש כאן inline.
 
-    `session`: snapshot שכבר נטען ע"י הקורא (run_agent) — נמנע מקריאה כפולה
-    ל-lead_sessions באותה בקשה. אם לא הועבר, נטען כאן כ-fallback."""
+    `session`: snapshot שכבר נטען ע"י הקורא (run_agent) — חובה להעביר.
+    אסור fallback-fetch כאן: זה נקרא פעם אחת לבקשה והקורא הוא היחיד
+    שיודע אם session==None זה miss אמיתי או עדיין לא נטען (LL-11)."""
     from datetime import datetime, timezone
-
-    if session is None:
-        try:
-            from session_store import lead_sessions
-            session = lead_sessions.get(chat_id)
-        except Exception:
-            return ""
 
     if not session:
         return ""
@@ -710,19 +704,13 @@ CONTEXT_PRONOUNS = {
 }
 
 
-def resolve_context_pronouns(text: str, chat_id: str, session: dict | None = None) -> str:
+def resolve_context_pronouns(text: str, chat_id: str, session: dict | None) -> str:
     """מחליף כינויי הצבעה ('זה'/'הנספח'/'הקודם' וכו') בהקשר אמיתי מה-session,
     כדי שה-Router וה-LLM יראו התייחסות מפורשת במקום לנחש. נקרא לפני intent detection.
 
-    `session`: snapshot שכבר נטען ע"י הקורא (run_agent) — נמנע מקריאה כפולה
-    ל-lead_sessions באותה בקשה. אם לא הועבר, נטען כאן כ-fallback."""
-    if session is None:
-        try:
-            from session_store import lead_sessions
-            session = lead_sessions.get(chat_id)
-        except Exception:
-            return text
-
+    `session`: snapshot שכבר נטען ע"י הקורא (run_agent) — חובה להעביר.
+    אסור fallback-fetch כאן: זה נקרא פעם אחת לבקשה והקורא הוא היחיד
+    שיודע אם session==None זה miss אמיתי או עדיין לא נטען (LL-11)."""
     if not session:
         return text
 
