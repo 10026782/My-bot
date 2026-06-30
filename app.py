@@ -608,13 +608,28 @@ def _describe_tool_call(tool_name: str, inputs: dict) -> str:
     return f"⚡ {tool_name}: {str(inputs)[:60]}"
 
 
+def _write_execution_receipt(
+    canonical_user_id: str, origin_channel: str, origin_chat_id: str,
+    action_id: str, tool_name: str, result: str,
+) -> None:
+    """
+    Stage A: ל-origin_channel שאינו טלגרם — אין נתיב outbound בדוק.
+    מתעד ביצוע ב-log בלבד, ללא ניסיון שליחה.
+    """
+    logger.info(
+        "[Approval] origin_channel=%s no outbound (Stage A) | action_id=%s "
+        "canonical=%s chat=%s tool=%s result=%.80s",
+        origin_channel, action_id, canonical_user_id, origin_chat_id, tool_name, result,
+    )
+
+
 def _queue_approval(tool_name: str, tool_inputs: dict,
                     user_chat_id: str, channel: str) -> str:
     """
     שומר פעולה ממתינה ושולח בקשת אישור לowner.
     מחזיר string לmodel: "⏳ ממתין לאישור..."
-    BUG-V1-APPROVAL-REQUEUE-AFTER-CONFIRM: blocks re-queuing an action that
-    was already executed within the last 10 minutes (fingerprint TTL).
+    PR #188: blocks re-queuing via executed_action_cache (raw chat_id fingerprint).
+    Stage A: also dedupes cross-channel via canonical identity.memory_key.
     """
     from event_bus import bus, executed_action_cache
     fp = executed_action_cache.compute(user_chat_id, tool_name, tool_inputs)
@@ -623,14 +638,33 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
             f"[Approval] duplicate fingerprint blocked: {fp[:8]} | {tool_name} | user={user_chat_id}"
         )
         return f"⚠️ פעולה זו כבר בוצעה לאחרונה ({tool_name}). כפילות נחסמה."
+
+    # Stage A: canonical dedup — אותה זהות עסקית מ-channel שני
+    identity = resolve_identity(channel, user_chat_id)
+    existing = bus.find_pending_by_business_fingerprint(
+        canonical_user_id=identity.memory_key,
+        tool_name=tool_name,
+        normalized_inputs=tool_inputs,
+    )
+    if existing:
+        origin = existing.get("origin_channel") or existing.get("payload", {}).get("origin_channel", "")
+        logger.info(
+            f"[Approval] cross-channel duplicate suppressed | {existing['action_id']} "
+            f"| canonical={identity.memory_key} | tool={tool_name}"
+        )
+        return f"⏳ הפעולה כבר ממתינה לאישור הבעלים{' (מ-' + origin + ')' if origin else ''}."
+
     label     = _describe_tool_call(tool_name, tool_inputs)
     action_id, _ = bus.request_approval(
         action  = tool_name,
         payload = {
-            "tool_name":    tool_name,
-            "tool_inputs":  tool_inputs,
-            "user_chat_id": user_chat_id,
-            "channel":      channel,
+            "tool_name":         tool_name,
+            "tool_inputs":       tool_inputs,
+            "origin_channel":    channel,
+            "origin_chat_id":    user_chat_id,
+            "canonical_user_id": identity.memory_key,
+            "user_chat_id":      user_chat_id,
+            "channel":           channel,
         },
         chat_id = user_chat_id,
         label   = label,
@@ -833,10 +867,14 @@ def _handle_approval_callback_impl(cq) -> None:
                 pass
             return
 
-        payload       = item["payload"]
-        tool_name     = payload.get("tool_name")   # absent on non-tool approvals
-        user_chat_id  = payload.get("user_chat_id", item.get("chat_id", ""))
-        channel       = payload.get("channel", "telegram")
+        payload          = item["payload"]
+        tool_name        = payload.get("tool_name")   # absent on non-tool approvals
+        user_chat_id     = payload.get("user_chat_id", item.get("chat_id", ""))
+        channel          = payload.get("channel", "telegram")
+        # Stage A: route notify to the channel the user actually requested from
+        origin_channel   = payload.get("origin_channel", channel)
+        origin_chat_id   = payload.get("origin_chat_id", user_chat_id)
+        canonical_user_id = payload.get("canonical_user_id", "")
 
         if not tool_name:
             # Non-tool approval — emit {action}.confirmed event
@@ -868,10 +906,14 @@ def _handle_approval_callback_impl(cq) -> None:
             if exec_check.status == "failed":
                 logger.error(f"[Approval:A32] Execution failed: {tool_name} -- {exec_check.reason}")
                 fail_text = f"❌ הפעולה לא הושלמה: {exec_check.reason}"
-                try:
-                    bot.send_message(user_chat_id, fail_text)
-                except Exception as e:
-                    logger.error(f"[Approval] notify user failed: {e}")
+                if origin_channel == "telegram":
+                    try:
+                        bot.send_message(origin_chat_id, fail_text)
+                    except Exception as e:
+                        logger.error(f"[Approval] notify user failed: {e}")
+                else:
+                    _write_execution_receipt(canonical_user_id, origin_channel, origin_chat_id,
+                                             action_id, tool_name, fail_text)
                 try:
                     bot.edit_message_text(
                         f"❌ *אושר אך נכשל בביצוע*\n{item['label']}\n\n`{fail_text[:200]}`",
@@ -885,19 +927,26 @@ def _handle_approval_callback_impl(cq) -> None:
             if exec_check.status == "warn":
                 logger.warning(f"[Approval:A32] Execution warn: {tool_name} -- {exec_check.reason}")
 
-            # BUG-V1-APPROVAL-REQUEUE-AFTER-CONFIRM: record fingerprint after
-            # successful execution so re-queue of the same action is blocked.
+            # PR #188: raw chat_id fingerprint
             from event_bus import executed_action_cache as _eac
             _eac.mark_executed(_eac.compute(user_chat_id, tool_name, tool_inputs))
+            # Stage A: also clear cross-channel duplicate pending
+            if canonical_user_id:
+                bus.mark_equivalent_pending_completed(canonical_user_id, tool_name, tool_inputs)
 
             result = _tool_user_message(result)
 
         logger.info(f"[Approval] ✅ confirmed {action_id} | {tool_name or item.get('action')}")
 
-        try:
-            bot.send_message(user_chat_id, f"✅ הפעולה בוצעה:\n{result}")
-        except Exception as e:
-            logger.error(f"[Approval] notify user failed: {e}")
+        # Stage A: route success notify to origin_channel, not always telegram
+        if origin_channel == "telegram":
+            try:
+                bot.send_message(origin_chat_id, f"✅ הפעולה בוצעה:\n{result}")
+            except Exception as e:
+                logger.error(f"[Approval] notify user failed: {e}")
+        else:
+            _write_execution_receipt(canonical_user_id, origin_channel, origin_chat_id,
+                                     action_id, tool_name or item.get("action", ""), result)
 
         try:
             bot.edit_message_text(
@@ -1109,6 +1158,29 @@ def run_agent(
             logger.info(f"[PendingApproval] 🚫 cancelled by {chat_id}")
             return "🚫 הפעולה בוטלה."
         # else: new unrelated message — pending already popped above, treat normally
+
+    # ── 2.55. Confirm-word + canonical tool-approval intercept ───────
+    # Stage A / SPEC section 3.3: "מאשר" חופשי לעולם לא מאשר tool רגיש.
+    # אם יש pending tool approval לזהות הקנונית → מפנים לכפתור, לא Agent.
+    # אם אין pending כלל → "אין פעולה ממתינה", stop.
+    if not pending:
+        if user_text.strip().lower() in _CONFIRM_WORDS:
+            from event_bus import bus as _bus_cw
+            _canonical_pending = _bus_cw.find_pending_tool_approval(identity.memory_key)
+            if _canonical_pending:
+                logger.info(
+                    f"[PendingApproval] free-text confirm intercepted — tool approval exists "
+                    f"({_canonical_pending['action_id']}) for {identity.memory_key}"
+                )
+                return (
+                    f"יש פעולה שממתינה לאישור: {_canonical_pending['label']}\n"
+                    f"נא לאשר דרך כפתור ✅/❌ בהודעת האישור המקורית."
+                )
+            else:
+                logger.info(
+                    f"[PendingApproval] free-text confirm, no pending for {identity.memory_key}"
+                )
+                return "אין פעולה שממתינה לאישור. אם זו בקשה חדשה — שלח את הנתונים המדויקים."
 
     # ── 2.6. Context Pronoun Resolution (C60) ────────
     # "תעלה לדסישנס"/"זה הנספח" וכד' — לפני intent detection, כדי שה-Router

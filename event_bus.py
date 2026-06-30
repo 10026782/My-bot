@@ -102,6 +102,69 @@ class PendingActionsStore:
             del self._store[aid]
         return result
 
+    # ── BUG-V1-CROSS-CHANNEL-FINGERPRINT-SPLIT (Stage A) — additive methods ──
+    # לא נוגעים ב-pop/emit/confirm הקיימים. רק מוסיפים חיפוש קנוני.
+
+    @staticmethod
+    def _normalize_inputs(tool_inputs: dict) -> tuple:
+        return tuple(sorted((str(k), str(v)) for k, v in (tool_inputs or {}).items()))
+
+    def find_pending_by_business_fingerprint(
+        self, canonical_user_id: str, tool_name: str, normalized_inputs: dict
+    ) -> dict | None:
+        """
+        מחפש pending action חי לפי זהות קנונית + tool_name + normalized_inputs.
+        מפתח dedup: canonical_user_id (identity.memory_key) + tool_name + inputs.
+        לא chat_id גולמי — שני ערוצים לאותו אדם מקבלים fingerprint זהה.
+        """
+        norm = self._normalize_inputs(normalized_inputs)
+        expired = []
+        for aid, item in self._store.items():
+            if datetime.now() > datetime.fromisoformat(item["expires"]):
+                expired.append(aid)
+                continue
+            payload = item.get("payload", {})
+            if (
+                payload.get("canonical_user_id") == canonical_user_id
+                and payload.get("tool_name") == tool_name
+                and self._normalize_inputs(payload.get("tool_inputs", {})) == norm
+            ):
+                for eid in expired:
+                    self._store.pop(eid, None)
+                return {"action_id": aid, "origin_channel": payload.get("origin_channel", ""), **item}
+        for eid in expired:
+            self._store.pop(eid, None)
+        return None
+
+    def find_pending_tool_approval(self, canonical_user_id: str) -> dict | None:
+        """מחפש pending tool approval חי לזהות קנונית — לבדיקת "מאשר" חופשי."""
+        for aid, item in self._store.items():
+            if datetime.now() > datetime.fromisoformat(item["expires"]):
+                continue
+            payload = item.get("payload", {})
+            if payload.get("canonical_user_id") == canonical_user_id and payload.get("tool_name"):
+                return {"action_id": aid, "label": item.get("label", payload.get("tool_name", "")), **item}
+        return None
+
+    def has_pending_for(self, canonical_user_id: str) -> bool:
+        return self.find_pending_tool_approval(canonical_user_id) is not None
+
+    def mark_equivalent_pending_completed(
+        self, canonical_user_id: str, tool_name: str, tool_inputs: dict
+    ) -> None:
+        """מוחק כל pending action עם אותה fingerprint קנונית — למנוע re-queue מ-channel שני."""
+        norm = self._normalize_inputs(tool_inputs)
+        to_remove = [
+            aid for aid, item in self._store.items()
+            if item.get("payload", {}).get("canonical_user_id") == canonical_user_id
+            and item.get("payload", {}).get("tool_name") == tool_name
+            and self._normalize_inputs(item.get("payload", {}).get("tool_inputs", {})) == norm
+        ]
+        for aid in to_remove:
+            with self._lock:
+                self._store.pop(aid, None)
+            logger.info(f"[Approval] mark_equivalent_completed: removed {aid} for {canonical_user_id}")
+
     def cleanup(self):
         """מנקה פעולות פגות — קרא מהשדלר"""
         now = datetime.now()
@@ -224,6 +287,26 @@ class EventBus:
     def needs_approval(self, action: str) -> bool:
         """האם הפעולה דורשת אישור?"""
         return action in ACTIONS_REQUIRING_APPROVAL
+
+    # ── BUG-V1-CROSS-CHANNEL-FINGERPRINT-SPLIT (Stage A) — delegates ──
+
+    def find_pending_by_business_fingerprint(
+        self, canonical_user_id: str, tool_name: str, normalized_inputs: dict
+    ) -> dict | None:
+        return self._pending.find_pending_by_business_fingerprint(
+            canonical_user_id, tool_name, normalized_inputs
+        )
+
+    def find_pending_tool_approval(self, canonical_user_id: str) -> dict | None:
+        return self._pending.find_pending_tool_approval(canonical_user_id)
+
+    def has_pending_for(self, canonical_user_id: str) -> bool:
+        return self._pending.has_pending_for(canonical_user_id)
+
+    def mark_equivalent_pending_completed(
+        self, canonical_user_id: str, tool_name: str, tool_inputs: dict
+    ) -> None:
+        self._pending.mark_equivalent_pending_completed(canonical_user_id, tool_name, tool_inputs)
 
 
 # ── Helper ─────────────────────────────────────────
