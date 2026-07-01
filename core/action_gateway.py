@@ -177,6 +177,11 @@ class ActionGateway:
         self._tool_executor = tool_executor
         self._overrides: dict[str, DuplicateOverrideApproval] = {}
         self._override_lock = threading.Lock()
+        # disambiguation state: user_id → ordered list of pending contracts
+        # set when route_confirmation_word finds >1 pending contracts.
+        # cleared on next route_disambiguation() call regardless of outcome.
+        self._disambiguation: dict[str, list[ActionContract]] = {}
+        self._disambiguation_lock = threading.Lock()
 
     # ── §3.2 — fingerprint ──────────────────────────────────────────
 
@@ -316,11 +321,64 @@ class ActionGateway:
         if len(live) == 1:
             result = self.approve(live[0].contract_id, approver=canonical_user_id)
             return result
-        # יותר מאחת — מציג רשימה
+        # יותר מאחת — מציג רשימה ממוספרת + שומר disambiguation state
+        with self._disambiguation_lock:
+            self._disambiguation[canonical_user_id] = list(live)
         lines = ["יש כמה פעולות הממתינות לאישור — איזו?"]
-        for c in live:
-            lines.append(f"• {c.tool_name} (id: {c.contract_id[:8]})")
+        for i, c in enumerate(live, 1):
+            lines.append(f"• {i}. {c.tool_name} (id: {c.contract_id[:8]})")
+        lines.append("\nשלח את המספר (1, 2, ...) כדי לאשר פעולה ספציפית.")
         return "\n".join(lines)
+
+    # ── disambiguation ordinal resolver ─────────────────────────────
+
+    _ORDINALS_HE: dict[str, int] = {
+        "ראשונה": 1, "ראשון": 1, "הראשונה": 1, "הראשון": 1, "first": 1,
+        "שנייה": 2,  "שני":    2, "השנייה":  2, "השני":    2, "second": 2,
+        "שלישית": 3, "שלישי": 3, "השלישית": 3, "השלישי":  3, "third": 3,
+        "רביעית": 4, "רביעי": 4, "הרביעית": 4, "הרביעי":  4, "fourth": 4,
+    }
+
+    @classmethod
+    def _parse_ordinal(cls, text: str) -> int | None:
+        """מחזיר אינדקס 1-based אם הטקסט הוא סדרתי; אחרת None."""
+        t = text.strip().lower()
+        # digit shorthand: "1", "2", ...
+        if t.isdigit():
+            return int(t)
+        return cls._ORDINALS_HE.get(t)
+
+    def route_disambiguation(self, canonical_user_id: str, text: str) -> str | None:
+        """
+        מיירט בחירת סדרתי ("הראשונה", "2", ...) אחרי שה-Gateway הציג רשימה.
+        מחזיר None אם המשתמש אינו במצב disambiguation — ממשיך ל-Agent.
+        מחזיר תשובה ישירה אם הבחירה חוקית.
+        """
+        with self._disambiguation_lock:
+            pending_list = self._disambiguation.get(canonical_user_id)
+        if not pending_list:
+            return None
+
+        idx = self._parse_ordinal(text)
+        if idx is None:
+            # לא מספר/סדרתי — לא disambiguation; נקה state, המשך ל-Agent
+            with self._disambiguation_lock:
+                self._disambiguation.pop(canonical_user_id, None)
+            return None
+
+        # נקה state בכל מקרה — בחירה נצרכת פעם אחת בלבד
+        with self._disambiguation_lock:
+            self._disambiguation.pop(canonical_user_id, None)
+
+        if not (1 <= idx <= len(pending_list)):
+            return f"⚠️ אין פעולה מספר {idx}. יש {len(pending_list)} פעולות ממתינות."
+
+        contract = pending_list[idx - 1]
+        logger.info(
+            "[ActionGateway] disambiguation: user=%s selected idx=%d contract=%s tool=%s",
+            canonical_user_id, idx, contract.contract_id, contract.tool_name,
+        )
+        return self.approve(contract.contract_id, approver=canonical_user_id)
 
     # ── §10 — route_override_word ────────────────────────────────────
 

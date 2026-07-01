@@ -1242,6 +1242,19 @@ def run_agent(
             from core.action_gateway import action_gateway as _gw_ow
             return _gw_ow.route_override_word(identity.memory_key, _override_code)
 
+        # §4 disambiguation — "הראשונה"/"1"/etc. כשה-Gateway הציג רשימת בחירה.
+        # חייב להיות לפני בדיקת "?" ולפני _CONFIRM_WORDS כדי שלא ייפול ל-Agent.
+        from feature_flags import is_enabled as _flag_disambig
+        if _flag_disambig("FEATURE_ACTION_GATEWAY"):
+            from core.action_gateway import action_gateway as _gw_disambig
+            _disambig_reply = _gw_disambig.route_disambiguation(identity.memory_key, _stripped)
+            if _disambig_reply is not None:
+                logger.info(
+                    "[ActionGateway] route_disambiguation: user=%s text=%.30r reply=%.60s",
+                    identity.memory_key, _stripped, _disambig_reply,
+                )
+                return _disambig_reply
+
         # §8 — שאלות סטטוס ("?", "נכשל?", "אושר?") לא מהוות אישור לעולם.
         # בדיקה לפני confirm-word כדי שלא תיגע ב-Gateway.
         if "?" in _stripped:
