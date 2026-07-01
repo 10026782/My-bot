@@ -101,13 +101,36 @@ def _validate_calendar_evidence(tool_name: str, result: dict) -> "VerifyResult |
             "failed",
             f"{tool_name}: missing external_id/event_id in structured result"
         )
-    html_link = evidence.get("htmlLink", "") if isinstance(evidence, dict) else ""
+    # Google Calendar API returns "htmlLink" (camelCase) — support both forms defensively
+    if isinstance(evidence, dict):
+        html_link = evidence.get("htmlLink") or evidence.get("html_link") or ""
+    else:
+        html_link = ""
     if not html_link:
         return VerifyResult("failed", f"{tool_name}: missing evidence.htmlLink")
     return None
 
 
-# Registry: tool_name → validator function
+def _validate_crm_payment_evidence(tool_name: str, result: dict) -> "VerifyResult | None":
+    external_id = str(result.get("external_id", "") or "")
+    evidence = result.get("evidence", {}) or {}
+    has = (
+        external_id
+        or (isinstance(evidence, dict) and (
+            evidence.get("payment_id") or evidence.get("record_id")
+            or evidence.get("updated_at") or evidence.get("paid_at")
+        ))
+    )
+    if not has:
+        return VerifyResult(
+            "failed",
+            f"{tool_name}: missing payment_id/record_id/paid_at in evidence"
+        )
+    return None
+
+
+# Registry: tool_name → evidence validator function.
+# Only tools with explicit validators here are permitted to produce success claims.
 _EVIDENCE_VALIDATORS: dict[str, Any] = {
     "airtable_add":          _validate_airtable_evidence,
     "airtable_update":       _validate_airtable_evidence,
@@ -117,7 +140,16 @@ _EVIDENCE_VALIDATORS: dict[str, Any] = {
     "gmail_draft":           _validate_gmail_evidence,
     "gmail_send_draft":      _validate_gmail_evidence,
     "calendar_create_event": _validate_calendar_evidence,
+    "crm_mark_payment_paid": _validate_crm_payment_evidence,
 }
+
+# Write/action/sensitive tools that must fail closed if not in _EVIDENCE_VALIDATORS.
+# Derived from tool_registry: requires_approval=True OR high_risk=True.
+# Kept in sync manually — if a new write tool is added to tool_registry it must also
+# get an entry in _EVIDENCE_VALIDATORS (or at minimum appear here to fail closed).
+_WRITE_ACTION_TOOLS: frozenset[str] = frozenset(_EVIDENCE_VALIDATORS) | frozenset({
+    # Future tools: add here until a proper validator is implemented.
+})
 
 # Keep for backward-compat with any code that still imports this name.
 _STRUCTURED_ID_TOOLS = {k: "external_id" for k in _EVIDENCE_VALIDATORS}
@@ -286,14 +318,21 @@ def _content_text(content: Any) -> str:
 def verify_execution(tool_name: str, raw_output: Any) -> VerifyResult:
     """
     Checks whether a tool call actually succeeded.
-    Selects the appropriate evidence validator by tool_name; fails closed
-    for structured tools if evidence is absent or invalid.
+
+    Rules:
+    1. Tool in _EVIDENCE_VALIDATORS → run its validator; must pass explicitly.
+    2. Tool in _WRITE_ACTION_TOOLS but NOT in _EVIDENCE_VALIDATORS →
+       fail closed: no validator means no verified success claim.
+    3. Read-only / listing tools (not in either set) →
+       plain string accepted if non-empty; structured dict accepted.
+
     Called immediately after validate_tool_output().
     """
     if not raw_output:
         return VerifyResult("failed", "output is empty or None")
 
     validator = _EVIDENCE_VALIDATORS.get(tool_name)
+    is_write = tool_name in _WRITE_ACTION_TOOLS
 
     if isinstance(raw_output, dict):
         if not raw_output.get("ok"):
@@ -305,7 +344,15 @@ def verify_execution(tool_name: str, raw_output: Any) -> VerifyResult:
                 return result
             return VerifyResult("ok")
 
-        # Structured dict from an unregistered tool — accepted as-is
+        if is_write:
+            # Write/action tool with no registered validator — fail closed.
+            # The tool must be added to _EVIDENCE_VALIDATORS before success claims are permitted.
+            return VerifyResult(
+                "failed",
+                f"{tool_name}: execution result unverified — no evidence validator registered"
+            )
+
+        # Read-only / listing tool returning a structured dict — accepted.
         return VerifyResult("ok")
 
     # Plain string result
@@ -313,8 +360,8 @@ def verify_execution(tool_name: str, raw_output: Any) -> VerifyResult:
     if raw_text.lstrip().startswith("❌"):
         return VerifyResult("failed", raw_text[:120])
 
-    if validator:
-        # Registered (structured) tool returned a plain string — not acceptable
+    if validator or is_write:
+        # Write/action tool must return a structured dict, not a plain string
         return VerifyResult(
             "failed",
             f"{tool_name}: expected structured result dict with ok=true; got plain string"
@@ -587,11 +634,17 @@ def _run_tests() -> bool:
           verify_execution("gmail_send_draft", "📧 טיוטה draft_abc נשלחה בהצלחה!"),
           "failed")
 
-    # Calendar
-    check("calendar_create_event success (event_id + htmlLink)",
+    # Calendar (htmlLink camelCase — matches Google API actual output)
+    check("calendar_create_event success (event_id + htmlLink camelCase)",
           verify_execution("calendar_create_event", _make_result(
               "calendar_create_event", "evt_abc123",
               evidence={"htmlLink": "https://calendar.google.com/event?eid=abc"},
+          )),
+          "ok")
+    check("calendar_create_event success (html_link snake_case also accepted)",
+          verify_execution("calendar_create_event", _make_result(
+              "calendar_create_event", "evt_abc123",
+              evidence={"html_link": "https://calendar.google.com/event?eid=abc"},
           )),
           "ok")
     check("calendar_create_event ok=True but missing htmlLink → failed",
@@ -607,6 +660,38 @@ def _run_tests() -> bool:
     check("calendar_create_event plain string (old format) → failed",
           verify_execution("calendar_create_event", "✅ אירוע 'פגישה' נוצר ביומן ל-01/06/2025 14:00."),
           "failed")
+
+    # CRM payment
+    check("crm_mark_payment_paid success (paid_at in evidence)",
+          verify_execution("crm_mark_payment_paid", _make_result(
+              "crm_mark_payment_paid", "rec1234abcXYZpqrs",
+              evidence={"paid_at": "2026-07-01T10:00:00", "record_id": "rec1234abcXYZpqrs"},
+          )),
+          "ok")
+    check("crm_mark_payment_paid missing evidence → failed",
+          verify_execution("crm_mark_payment_paid", _make_result("crm_mark_payment_paid", "")),
+          "failed")
+    check("crm_mark_payment_paid plain string → failed",
+          verify_execution("crm_mark_payment_paid", "Payment marked paid"),
+          "failed")
+
+    # Unknown write/sensitive tool without validator — fail closed
+    # (simulate: temporarily inject a tool into _WRITE_ACTION_TOOLS without adding a validator)
+    import sys as _sys
+    _self_mod = _sys.modules[__name__]
+    _orig_write = _self_mod._WRITE_ACTION_TOOLS
+    _self_mod._WRITE_ACTION_TOOLS = _orig_write | frozenset({"future_write_tool"})
+    check("unknown write tool with dict output → fails closed",
+          verify_execution("future_write_tool", {"ok": True, "tool": "future_write_tool",
+                                                  "external_id": "x", "evidence": {}, "user_message": "ok"}),
+          "failed")
+    _self_mod._WRITE_ACTION_TOOLS = _orig_write  # restore
+
+    # Read-only tool returning dict — accepted
+    check("unknown read-only tool returning dict → ok",
+          verify_execution("airtable_get", {"ok": True, "records": [{"id": "rec123"}],
+                                             "tool": "airtable_get", "user_message": "ok"}),
+          "ok")
 
     # Non-structured tools (read-only / listing tools)
     check("calendar_get_events plain string → ok",
