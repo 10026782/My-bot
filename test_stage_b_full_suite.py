@@ -742,7 +742,9 @@ chk("SB-01: run_agent has _out_meta param", "_out_meta" in _run_sig.parameters)
 chk("SB-01: _out_meta defaults to None", _run_sig.parameters["_out_meta"].default is None)
 
 # BUG-SB-02: callback resolves fingerprint via bus.get() peek before dispatch
-_app_src = open("/home/user/My-bot/app.py").read()
+import os as _os
+_app_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "app.py")
+_app_src = open(_app_path).read()
 chk("SB-02: callback peeks bus.get before pop (fingerprint resolution)",
     "bus.get(action_id)" in _app_src or "_peek_item = bus.get" in _app_src)
 chk("SB-02: callback checks contract.status == 'executed'",
@@ -808,8 +810,8 @@ chk("SB-05: A32 fallback contains no action-status verb",
     all(w not in _NO_TOOL_EVIDENCE_FALLBACK for w in ("בוצע", "נוסף", "נשלח", "נשמר", "ביצעתי")))
 
 # Copy: pending message must be channel-neutral
-_gw_copy = open("/home/user/My-bot/core/action_gateway.py").read()
-_app_copy = open("/home/user/My-bot/app.py").read()
+_gw_copy = open(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "core/action_gateway.py")).read()
+_app_copy = _app_src  # already loaded above
 chk("Copy: pending message channel-neutral (no 'בטלגרם' in approval copy)",
     "נא לאשר את הכפתור שנשלח" not in _gw_copy)
 chk("Copy: pending message invites 'מאשר' approval on any channel",
