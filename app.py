@@ -126,12 +126,20 @@ def _empty_twiml() -> Response:
     return Response(str(MessagingResponse()), mimetype="application/xml")
 
 
-def _gateway_whatsapp_reply(sender: str, body: str, domain: str, source_ref: str) -> str | None:
+def _gateway_whatsapp_reply(
+    sender: str,
+    body: str,
+    domain: str,
+    source_ref: str,
+    source_module: str = "app.webhook_whatsapp",
+) -> str | None:
     """
     מעביר את תשובת ה-WhatsApp ללקוח דרך C52 Customer Output Gateway לפני TwiML reply.
     Gateway קובע APPROVED/ESCALATED (Financial Gate) על הגוף בפועל; השליחה הסינכרונית
     עדיין נעשית ע"י Twilio מתוך ה-TwiML response (whatsapp_adapter הוא honest stub —
     ראה C38/C52). מחזיר את הגוף לשליחה, או None אם EMERGENCY_STOP (אין תשובה כלל).
+    BUG-SB-01: source_module="action_gateway" מועבר כשהגוף הגיע מ-ActionGateway —
+    מונע Single Speaker false-block על GatewayReply לגיטימי.
     """
     from core.output_gateway import send_outbound, OutboundEnvelope, AudienceClass, OutputChannel
     result = send_outbound(OutboundEnvelope(
@@ -139,7 +147,7 @@ def _gateway_whatsapp_reply(sender: str, body: str, domain: str, source_ref: str
         recipient=sender,
         body=body,
         audience=AudienceClass.CUSTOMER,
-        source_module="app.webhook_whatsapp",
+        source_module=source_module,
         source_ref=source_ref,
         domain=domain,
         meta={"source_type": "llm_response"},
@@ -898,6 +906,35 @@ def _handle_approval_callback_impl(cq) -> None:
             return
 
     if action == "approve":
+        # BUG-SB-02: check ActionGateway contract status before dispatch —
+        # prevents double execution when user approved via free-text and then clicked the button.
+        try:
+            from feature_flags import is_enabled as _flag_sb02
+            if _flag_sb02("FEATURE_ACTION_GATEWAY"):
+                from core.action_gateway import action_gateway as _gw_sb02
+                _contract_sb02 = _gw_sb02.find_contract(action_id)
+                if _contract_sb02 is None:
+                    # action_id may be a bus key, not a contract_id — also check fingerprint path
+                    pass
+                elif _contract_sb02.status == "executed":
+                    bot.answer_callback_query(cq.id, "✅ פעולה זו כבר בוצעה")
+                    try:
+                        bot.edit_message_reply_markup(cq.message.chat.id, cq.message.message_id,
+                                                      reply_markup=None)
+                    except Exception:
+                        pass
+                    return
+                elif _contract_sb02.status == "rejected":
+                    bot.answer_callback_query(cq.id, "❌ פעולה זו בוטלה")
+                    try:
+                        bot.edit_message_reply_markup(cq.message.chat.id, cq.message.message_id,
+                                                      reply_markup=None)
+                    except Exception:
+                        pass
+                    return
+        except Exception as _sb02_exc:
+            logger.warning("[ActionGateway] SB-02 status pre-check failed (non-blocking): %s", _sb02_exc)
+
         # atomic pop — בדיקת TTL ומחיקה בצעד אחד
         item = bus.pop(action_id)
         if not item:
@@ -1000,7 +1037,28 @@ def _handle_approval_callback_impl(cq) -> None:
             except Exception as _gw_sync_exc:
                 logger.warning("[ActionGateway] Stage-A sync failed (non-blocking): %s", _gw_sync_exc)
 
-            result = _tool_user_message(result)
+            # BUG-SB-04: legacy approval path — wrap tool result via ActionFact + compose_status_reply
+            # when FEATURE_ACTION_GATEWAY is enabled, so the reply text is gated by Single Speaker.
+            try:
+                from feature_flags import is_enabled as _flag_sb04
+                if _flag_sb04("FEATURE_ACTION_GATEWAY") and isinstance(result, dict) and result.get("ok") is not None:
+                    from core.action_gateway import ActionFact, action_gateway as _gw_sb04
+                    _fact_sb04 = ActionFact(
+                        tool_name=tool_name or "unknown",
+                        contract_id=action_id or "legacy",
+                        outcome="executed" if result.get("ok") else "failed",
+                        record_id=result.get("external_id") or None,
+                        error_code=None if result.get("ok") else "tool_failed",
+                        raw_tool_response=result,
+                    )
+                    result = _gw_sb04.compose_status_reply(_fact_sb04)
+                    # mark so _tool_user_message passthrough picks up .text
+                    result = result.text
+                else:
+                    result = _tool_user_message(result)
+            except Exception as _sb04_exc:
+                logger.warning("[ActionGateway] SB-04 ActionFact wrap failed: %s", _sb04_exc)
+                result = _tool_user_message(result)
 
         logger.info(f"[Approval] ✅ confirmed {action_id} | {tool_name or item.get('action')}")
 
@@ -1145,6 +1203,7 @@ def run_agent(
     domain_from_channel: str = "",
     _skip_approval:      bool = False,
     _resolved_domain:    dict | None = None,
+    _out_meta:           dict | None = None,
 ) -> str:
 
     # ── 1. Identity ───────────────────────────────
@@ -1253,6 +1312,8 @@ def run_agent(
                     "[ActionGateway] route_disambiguation: user=%s text=%.30r reply=%.60s",
                     identity.memory_key, _stripped, _disambig_reply,
                 )
+                if _out_meta is not None:
+                    _out_meta["source_module"] = "action_gateway"
                 return _disambig_reply
 
         # §8 — שאלות סטטוס ("?", "נכשל?", "אושר?") לא מהוות אישור לעולם.
@@ -1274,6 +1335,8 @@ def run_agent(
                             "[ActionGateway] status_query: user=%s query=%.40r reply=%.60s",
                             identity.memory_key, _stripped, _ledger_reply,
                         )
+                        if _out_meta is not None:
+                            _out_meta["source_module"] = "action_gateway"
                         return _ledger_reply
             pass  # fall through — route to Agent as status query
         elif _lower in _CONFIRM_WORDS:
@@ -1286,6 +1349,8 @@ def run_agent(
                     "[ActionGateway] route_confirmation_word: user=%s reply=%.60s",
                     identity.memory_key, _gw_reply,
                 )
+                if _out_meta is not None:
+                    _out_meta["source_module"] = "action_gateway"
                 return _gw_reply
             else:
                 # Stage A fallback (flag כבוי)
@@ -2039,17 +2104,22 @@ def _webhook_whatsapp_impl():
         logger.warning("[FurnitureFunnel] fallback to agent: %s", e)
 
     _resolved = {}
+    _run_meta = {}
     agent_reply = run_agent(
         incoming, sender,
         channel             = "whatsapp",
         domain_from_channel = domain_from_channel,
         _resolved_domain    = _resolved,
+        _out_meta           = _run_meta,
     )
     # תיקון: COG מקבל את הדומיין הסופי (אחרי Router), לא domain_from_channel
     # הישן שנקבע לפני שה-Router רץ — אחרת domain=general נרשם ב-COG גם
     # כששה-Router/Context זיהו דומיין אחר (למשל real_estate).
     final_domain = _resolved.get("domain") or domain_from_channel
-    gated_reply = _gateway_whatsapp_reply(sender, agent_reply, final_domain, msg_sid or sender)
+    # BUG-SB-01: propagate source_module from gateway replies to avoid Single Speaker false-block
+    _reply_source = _run_meta.get("source_module", "app.webhook_whatsapp")
+    gated_reply = _gateway_whatsapp_reply(sender, agent_reply, final_domain, msg_sid or sender,
+                                          source_module=_reply_source)
     resp = MessagingResponse()
     if gated_reply is not None:
         resp.message(gated_reply)

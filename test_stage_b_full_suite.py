@@ -567,8 +567,10 @@ chk("DoD23: AgentReply has contract_id field", _ar.contract_id == "c1")
 
 _gw20 = _new_gw(_ok_executor)
 _p20 = _gw20.propose_action(**_BASE_PROPOSE)
-# nothing executed yet → should return None
-chk("DoD20: no execution yet → query returns None", _gw20.query_execution_status("boss_hq:owner_1") is None)
+# nothing executed yet, but pending contract exists → SB-03 returns pending message
+_pre_exec_reply = _gw20.query_execution_status("boss_hq:owner_1")
+chk("DoD20: no execution yet, pending contract → query returns pending message",
+    _pre_exec_reply is not None and "פתוחה" in _pre_exec_reply)
 # approve (executes via _ok_executor)
 _gw20.approve(_p20.contract_id, approver="boss_hq:owner_1")
 _sq_reply = _gw20.query_execution_status("boss_hq:owner_1")
@@ -719,6 +721,79 @@ with _mock.patch("feature_flags.is_enabled", return_value=True), \
     _cog_mod.send_outbound(_env_gw)
 
 chk("DoD18: origin=action_gateway → body passes through unchanged", _body_gw is None or "בוצע" in _body_replaced or _body_replaced == "✅ בוצע: airtable_add | מזהה: `recXOW7FBZQZcNdw1`")
+
+# ══════════════════════════════════════════════════
+# §15.8 — BUG-SB-01 through BUG-SB-04
+# ══════════════════════════════════════════════════
+print("\n── §15.8 BUG-SB fixes ──")
+
+# BUG-SB-01: _gateway_whatsapp_reply accepts source_module param
+import inspect as _inspect
+import app as _app_mod
+_gwr_sig = _inspect.signature(_app_mod._gateway_whatsapp_reply)
+chk("SB-01: _gateway_whatsapp_reply has source_module param",
+    "source_module" in _gwr_sig.parameters)
+chk("SB-01: source_module defaults to 'app.webhook_whatsapp'",
+    _gwr_sig.parameters["source_module"].default == "app.webhook_whatsapp")
+
+# run_agent accepts _out_meta param
+_run_sig = _inspect.signature(_app_mod.run_agent)
+chk("SB-01: run_agent has _out_meta param", "_out_meta" in _run_sig.parameters)
+chk("SB-01: _out_meta defaults to None", _run_sig.parameters["_out_meta"].default is None)
+
+# BUG-SB-02: _handle_approval_callback_impl checks contract.status before dispatch
+import ast as _ast
+_app_src = open("/home/user/My-bot/app.py").read()
+chk("SB-02: callback impl checks contract.status == 'executed'",
+    '_contract_sb02.status == "executed"' in _app_src)
+chk("SB-02: callback impl checks contract.status == 'rejected'",
+    '_contract_sb02.status == "rejected"' in _app_src)
+
+# BUG-SB-03: query_execution_status returns pending message when no executed
+gw_sb03 = ActionGateway(tool_executor=_ok_executor)
+# propose a pending contract
+gw_sb03.propose_action(
+    tenant_id="t1", canonical_user_id="u_sb03",
+    tool_name="airtable_add", tool_inputs={"table": "Leads", "fields": {"Name": "Test"}},
+    origin_channel="whatsapp", origin_chat_id="u_sb03",
+    requires_approval=True,
+)
+_status_reply = gw_sb03.query_execution_status("u_sb03")
+chk("SB-03: query_execution_status returns pending reply when contract is pending",
+    _status_reply is not None and "ממתין" in _status_reply or (_status_reply is not None and "פתוחה" in _status_reply))
+
+# No contract at all → None
+gw_sb03_empty = ActionGateway(tool_executor=_ok_executor)
+chk("SB-03: query_execution_status returns None when no contracts",
+    gw_sb03_empty.query_execution_status("nobody") is None)
+
+# BUG-SB-04: legacy path wraps ActionFact via compose_status_reply when FEATURE_ACTION_GATEWAY=true
+from core.action_gateway import ActionFact, action_gateway as _gw_singleton
+_fact_sb04 = ActionFact(
+    tool_name="airtable_add",
+    contract_id="legacy",
+    outcome="executed",
+    record_id="recXOW7FBZQZcNdw1",
+    error_code=None,
+    raw_tool_response={"ok": True},
+)
+_reply_sb04 = _gw_singleton.compose_status_reply(_fact_sb04)
+chk("SB-04: compose_status_reply wraps ActionFact into GatewayReply",
+    _reply_sb04 is not None and hasattr(_reply_sb04, "text") and "בוצע" in _reply_sb04.text)
+chk("SB-04: GatewayReply.text contains record_id",
+    "recXOW7FBZQZcNdw1" in _reply_sb04.text)
+chk("SB-04: GatewayReply.fact === original ActionFact",
+    _reply_sb04.fact is _fact_sb04)
+
+# SB-04: failed outcome
+_fact_fail = ActionFact(
+    tool_name="airtable_add", contract_id="legacy",
+    outcome="failed", record_id=None,
+    error_code="TIMEOUT", raw_tool_response={},
+)
+_reply_fail = _gw_singleton.compose_status_reply(_fact_fail)
+chk("SB-04: failed ActionFact → GatewayReply contains error_code",
+    "TIMEOUT" in _reply_fail.text)
 
 # ══════════════════════════════════════════════════
 # Summary

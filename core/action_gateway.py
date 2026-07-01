@@ -666,6 +666,7 @@ class ActionGateway:
         """
         מחזיר תשובת סטטוס לשאלה "נוספה?"/"הצליח?" — מה-Ledger בלבד.
         None = אין ביצוע אחרון רלוונטי בחלון הזמן.
+        BUG-SB-03: אם אין executed/failed, מחפש pending contracts ומדווח עליהם.
         """
         candidates = [
             c for c in self._ledger._store.values()
@@ -673,9 +674,19 @@ class ActionGateway:
             and c.status in ("executed", "failed")
         ]
         if not candidates:
+            # BUG-SB-03: check for pending contracts before returning None
+            live = self.find_live_contracts(canonical_user_id)
+            if live:
+                label = live[0].tool_name
+                return f"⏳ יש בקשת אישור פתוחה: {label}"
             return None
         latest = max(candidates, key=lambda c: c.created_at)
         if time.time() - latest.created_at > window_seconds:
+            # still check pending before giving up
+            live = self.find_live_contracts(canonical_user_id)
+            if live:
+                label = live[0].tool_name
+                return f"⏳ יש בקשת אישור פתוחה: {label}"
             return None
         ext_id = None
         if isinstance(latest.agent_observations, list):
