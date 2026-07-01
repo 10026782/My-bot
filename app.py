@@ -1383,9 +1383,28 @@ def run_agent(
             # C54: אם Claude ייצר text ו-tool_use באותה תשובה —
             # ה-text נוצר לפני שראה תוצאה. מבטלים אותו.
             # התשובה האמיתית תגיע ב-turn הבא עם ה-ToolResult.
+            _c54_pending_text = False
             if tool_uses and text_blocks:
+                _c54_pending_text = any(
+                    any(w in b.text for w in ("ממתינ", "אישור", "pending", "⏳"))
+                    for b in text_blocks
+                )
                 logger.info(f"[C54] Suppressed premature text_block alongside tool_use: "
-                            f"{[b.text[:40] for b in text_blocks]}")
+                            f"{[b.text[:40] for b in text_blocks]}"
+                            f"{' [approval-language detected]' if _c54_pending_text else ''}")
+                # Stage B §5: record AgentObservation for C54 contradiction (approval text + tool_use)
+                if _c54_pending_text:
+                    try:
+                        from core.action_gateway import action_gateway as _gw_c54
+                        _gw_c54.record_agent_observation(
+                            contract_id=None,
+                            kind="contradiction",
+                            text=f"C54: Agent produced approval-pending text alongside tool_use "
+                                 f"({[tu.name for tu in tool_uses]}). "
+                                 f"Suppressed text; approval gate will handle routing.",
+                        )
+                    except Exception:
+                        pass
                 text_blocks = []
 
             if not tool_uses:
