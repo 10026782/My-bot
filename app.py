@@ -1078,19 +1078,21 @@ def _handle_approval_callback_impl(cq) -> None:
         logger.info(f"[Approval] ✅ confirmed {action_id} | {tool_name or item.get('action')}")
 
         # Stage A/B: route success notify to origin_channel, not always telegram.
-        # When FEATURE_ACTION_GATEWAY is on, compose_status_reply (SB-04) already
-        # produced the GatewayReply text; send it to the requester only.
+        # When flag=ON: SB-04 compose_status_reply produced the GatewayReply text — send as-is.
+        # When flag=OFF: wrap with legacy "✅ הפעולה בוצעה:" prefix for consistent UX.
+        _gw_on = _flag_enabled("FEATURE_ACTION_GATEWAY")
+        user_notify_text = result if _gw_on else f"✅ הפעולה בוצעה:\n{result}"
         if origin_channel == "telegram":
             try:
-                bot.send_message(origin_chat_id, result)
+                bot.send_message(origin_chat_id, user_notify_text)
             except Exception as e:
                 logger.error(f"[Approval] notify user failed: {e}")
         else:
             _write_execution_receipt(canonical_user_id, origin_channel, origin_chat_id,
-                                     action_id, tool_name or item.get("action", ""), result)
+                                     action_id, tool_name or item.get("action", ""), user_notify_text)
 
         try:
-            # Owner button updated to plain text (no raw tool result) to avoid Markdown failures
+            # Owner button: plain text only — no Markdown, no raw tool result
             bot.edit_message_text(
                 f"✅ אושר ובוצע\n{item['label']}",
                 cq.message.chat.id, cq.message.message_id,
