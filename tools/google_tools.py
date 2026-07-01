@@ -447,11 +447,12 @@ def gmail_send_draft(draft_id: str) -> dict:
         return _tool_result(ok=False, tool="gmail_send_draft", user_message=f"❌ שגיאה בשליחת טיוטה: {e}")
 
 
-def sheets_append(spreadsheet_name: str, row_data: list) -> str:
+def sheets_append(spreadsheet_name: str, row_data: list) -> dict:
     """הוספת שורה לגוגל שיטס לפי שם הקובץ בדרייב."""
     token = get_google_token()
     if not token:
-        return "❌ חסרים פרטי Google OAuth"
+        return _tool_result(ok=False, tool="sheets_append",
+                            user_message="❌ חסרים פרטי Google OAuth")
 
     try:
         headers = {"Authorization": f"Bearer {token}"}
@@ -466,7 +467,8 @@ def sheets_append(spreadsheet_name: str, row_data: list) -> str:
         )
         files = search.json().get("files", [])
         if not files:
-            return f"❌ לא נמצא קובץ שיטס בשם '{spreadsheet_name}' בדרייב."
+            return _tool_result(ok=False, tool="sheets_append",
+                                user_message=f"❌ לא נמצא קובץ שיטס בשם '{spreadsheet_name}' בדרייב.")
 
         sid = files[0]["id"]
         url = f"https://sheets.googleapis.com/v4/spreadsheets/{sid}/values/A1:append"
@@ -474,7 +476,24 @@ def sheets_append(spreadsheet_name: str, row_data: list) -> str:
         r = httpx.post(url, headers=headers, params={"valueInputOption": "USER_ENTERED"},
                        json=body, timeout=10)
         if r.status_code == 200:
-            return f"📊 שורה נוספה לטבלה '{spreadsheet_name}' בהצלחה."
-        return f"❌ שגיאת Sheets {r.status_code}: {r.text[:200]}"
+            resp = r.json()
+            updated_range = resp.get("updates", {}).get("updatedRange", "")
+            rows_appended = resp.get("updates", {}).get("updatedRows", len(row_data))
+            return _tool_result(
+                ok=True,
+                tool="sheets_append",
+                external_id=sid,
+                evidence={
+                    "spreadsheet_id": sid,
+                    "spreadsheet_name": spreadsheet_name,
+                    "updated_range": updated_range,
+                    "rows_appended": rows_appended,
+                },
+                user_message=f"📊 שורה נוספה לטבלה '{spreadsheet_name}' בהצלחה. (range: {updated_range})",
+            )
+        return _tool_result(ok=False, tool="sheets_append",
+                            evidence={"status_code": r.status_code},
+                            user_message=f"❌ שגיאת Sheets {r.status_code}: {r.text[:200]}")
     except Exception as e:
-        return f"❌ שגיאה בכתיבה לשיטס: {e}"
+        return _tool_result(ok=False, tool="sheets_append",
+                            user_message=f"❌ שגיאה בכתיבה לשיטס: {e}")

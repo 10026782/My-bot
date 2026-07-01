@@ -14,6 +14,7 @@ import hashlib
 import json
 import logging
 import random
+import re
 import threading
 import time
 import uuid
@@ -71,6 +72,50 @@ class AgentObservation:
 
 
 # ══════════════════════════════════════════════════
+# §15.1-15.3 — Single Speaker Enforcement
+# ActionFact: structural only, no NL text.
+# GatewayReply: the ONLY type allowed to carry action-status text.
+# AgentReply: free-text/personality, never action-status.
+# ══════════════════════════════════════════════════
+
+@dataclass(frozen=True)
+class ActionFact:
+    """מבני בלבד. אין בו משפט בשפה טבעית. אסור להעביר אותו ישירות לשליחה."""
+    tool_name:         str
+    contract_id:       str
+    outcome:           str    # "executed" | "failed" | "pending" | "rejected"
+    record_id:         str | None
+    error_code:        str | None
+    raw_tool_response: dict
+
+
+@dataclass(frozen=True)
+class GatewayReply:
+    """הטיפוס היחיד שמותר לו להכיל ניסוח סטטוס פעולה.
+    מיוצר אך ורק מתוך ActionFact ע"י compose_status_reply()."""
+    text: str
+    fact: ActionFact
+
+
+@dataclass(frozen=True)
+class AgentReply:
+    """טקסט חופשי, טון, אישיות, שיחה.
+    לעולם לא כולל ניסוח מצב פעולה בהקשר ActionContract."""
+    text: str
+    contract_id: str | None = None
+
+
+# regex לזיהוי טענות סטטוס-פעולה בטקסט Agent — safety belt בלבד (§15.3).
+# דורש שמילת-הסטטוס לא תיסיים ב-? ישירות (שאלה), ולא תופיע אחרי "לא ".
+_ACTION_STATUS_PATTERN = re.compile(
+    r"(?<!\bלא )\b(נוסף|נוספה|נוספו|עודכן|עודכנה|עודכנו|"
+    r"בוצע|בוצעה|נשלח|נשלחה|נשמר|נשמרה|נוצר|נוצרה|הוסף|הוספה|"
+    r"הוספתי|עדכנתי|שלחתי|יצרתי|שמרתי)\b(?!\?)",
+    re.UNICODE,
+)
+
+
+# ══════════════════════════════════════════════════
 # §10 §4 — DuplicateOverrideApproval
 # override חד-פעמי לפעולה שכבר executed.
 # ══════════════════════════════════════════════════
@@ -84,6 +129,52 @@ class DuplicateOverrideApproval:
     issued_at:            float
     ttl_seconds:          int    # קצר — 300 שניות
     consumed:             bool   # False עד שימוש; True אחרי — חד-פעמי
+
+
+# ══════════════════════════════════════════════════
+# §19 / §15.7-ב — canonical tool selection
+# נקרא *לפני* יצירת ActionContract — מחזיר tool_name יחיד ומוכרע.
+# מונע מצב שבו שני contracts מקבילים נוצרים לאותה business action.
+# ══════════════════════════════════════════════════
+
+# מילים שמצביעות על בקשה מפורשת ל-Sheets/Drive
+_SHEETS_KEYWORDS = frozenset({
+    "שיטס", "sheets", "google sheets", "גוגל שיטס",
+    "גיליון", "גליון", "spreadsheet", "טבלה ב-google",
+})
+_DRIVE_KEYWORDS = frozenset({
+    "דרייב", "drive", "google drive", "גוגל דרייב", "קובץ ב-drive",
+})
+
+# ברירת מחדל per tool-category — אפשר להרחיב
+_CANONICAL_TOOL_DEFAULT = "airtable_add"
+
+
+def resolve_canonical_tool(
+    tool_hint: str,
+    tool_inputs: dict,
+    user_text: str = "",
+) -> str:
+    """
+    מחזיר tool_name יחיד ומוכרע לפני יצירת ActionContract.
+    ברירת מחדל: airtable_add.
+    sheets_append/drive_upload מוחזרים רק אם המשתמש ביקש Sheets/Drive במפורש.
+    """
+    if tool_hint in ("sheets_append", "drive_upload", "drive_create"):
+        lower = user_text.lower()
+        if tool_hint == "sheets_append" and any(k in lower for k in _SHEETS_KEYWORDS):
+            return "sheets_append"
+        if tool_hint in ("drive_upload", "drive_create") and any(k in lower for k in _DRIVE_KEYWORDS):
+            return tool_hint
+        # hint was sheets/drive but user didn't explicitly ask — fall back to Airtable
+        logger.info(
+            "[ActionGateway] resolve_canonical_tool: overriding %s → %s "
+            "(no explicit Sheets/Drive request in user_text)",
+            tool_hint, _CANONICAL_TOOL_DEFAULT,
+        )
+        return _CANONICAL_TOOL_DEFAULT
+    # all other tools: trust the caller
+    return tool_hint
 
 
 def _hash_challenge(code: str) -> str:
@@ -177,6 +268,11 @@ class ActionGateway:
         self._tool_executor = tool_executor
         self._overrides: dict[str, DuplicateOverrideApproval] = {}
         self._override_lock = threading.Lock()
+        # disambiguation state: user_id → ordered list of pending contracts
+        # set when route_confirmation_word finds >1 pending contracts.
+        # cleared on next route_disambiguation() call regardless of outcome.
+        self._disambiguation: dict[str, list[ActionContract]] = {}
+        self._disambiguation_lock = threading.Lock()
 
     # ── §3.2 — fingerprint ──────────────────────────────────────────
 
@@ -316,11 +412,73 @@ class ActionGateway:
         if len(live) == 1:
             result = self.approve(live[0].contract_id, approver=canonical_user_id)
             return result
-        # יותר מאחת — מציג רשימה
+        # יותר מאחת — מציג רשימה ממוספרת + שומר disambiguation state
+        with self._disambiguation_lock:
+            self._disambiguation[canonical_user_id] = list(live)
         lines = ["יש כמה פעולות הממתינות לאישור — איזו?"]
-        for c in live:
-            lines.append(f"• {c.tool_name} (id: {c.contract_id[:8]})")
+        for i, c in enumerate(live, 1):
+            lines.append(f"• {i}. {c.tool_name} (id: {c.contract_id[:8]})")
+        lines.append("\nשלח את המספר (1, 2, ...) כדי לאשר פעולה ספציפית.")
         return "\n".join(lines)
+
+    # ── disambiguation ordinal resolver ─────────────────────────────
+
+    _ORDINALS_HE: dict[str, int] = {
+        "ראשונה": 1, "ראשון": 1, "הראשונה": 1, "הראשון": 1, "first": 1,
+        "שנייה": 2,  "שני":    2, "השנייה":  2, "השני":    2, "second": 2,
+        "שלישית": 3, "שלישי": 3, "השלישית": 3, "השלישי":  3, "third": 3,
+        "רביעית": 4, "רביעי": 4, "הרביעית": 4, "הרביעי":  4, "fourth": 4,
+    }
+
+    @classmethod
+    def _parse_ordinal(cls, text: str) -> int | None:
+        """מחזיר אינדקס 1-based אם הטקסט הוא סדרתי; אחרת None."""
+        t = text.strip().lower()
+        # digit shorthand: "1", "2", ...
+        if t.isdigit():
+            return int(t)
+        return cls._ORDINALS_HE.get(t)
+
+    def route_disambiguation(self, canonical_user_id: str, text: str) -> str | None:
+        """
+        מיירט בחירת סדרתי ("הראשונה", "2", ...) אחרי שה-Gateway הציג רשימה.
+        מחזיר None אם המשתמש אינו במצב disambiguation — ממשיך ל-Agent.
+        מחזיר תשובה ישירה אם הבחירה חוקית.
+        """
+        with self._disambiguation_lock:
+            pending_list = self._disambiguation.get(canonical_user_id)
+        if not pending_list:
+            return None
+
+        idx = self._parse_ordinal(text)
+        if idx is None:
+            # לא מספר/סדרתי — לא disambiguation; נקה state, המשך ל-Agent
+            with self._disambiguation_lock:
+                self._disambiguation.pop(canonical_user_id, None)
+            return None
+
+        # נקה state בכל מקרה — בחירה נצרכת פעם אחת בלבד
+        with self._disambiguation_lock:
+            self._disambiguation.pop(canonical_user_id, None)
+
+        if not (1 <= idx <= len(pending_list)):
+            return f"⚠️ אין פעולה מספר {idx}. יש {len(pending_list)} פעולות ממתינות."
+
+        contract = pending_list[idx - 1]
+        # §21: close all other pending contracts from the disambiguation list
+        # so no sibling contracts linger after the user makes a selection.
+        for sibling in pending_list:
+            if sibling.contract_id != contract.contract_id and sibling.status == "pending":
+                self._ledger.update_status(sibling.contract_id, "rejected")
+                logger.info(
+                    "[ActionGateway] disambiguation: closing sibling contract=%s tool=%s",
+                    sibling.contract_id, sibling.tool_name,
+                )
+        logger.info(
+            "[ActionGateway] disambiguation: user=%s selected idx=%d contract=%s tool=%s",
+            canonical_user_id, idx, contract.contract_id, contract.tool_name,
+        )
+        return self.approve(contract.contract_id, approver=canonical_user_id)
 
     # ── §10 — route_override_word ────────────────────────────────────
 
@@ -446,8 +604,15 @@ class ActionGateway:
         except Exception as verify_exc:
             logger.warning("[ActionGateway] verify_execution import failed: %s", verify_exc)
 
-        self._ledger.update_status(contract.contract_id, "executed")
         ext_id = raw.get("external_id", "") if isinstance(raw, dict) else ""
+        self._ledger.update_status(contract.contract_id, "executed")
+        # persist record_id as observation so query_execution_status can retrieve it
+        if ext_id:
+            contract.agent_observations.append({
+                "kind": "execution_fact",
+                "record_id": ext_id,
+                "created_at": time.time(),
+            })
         logger.info(
             "[ActionGateway] executed: contract=%s fingerprint=%.12s tool=%s "
             "external_id=%s payload_keys=%s",
@@ -457,10 +622,76 @@ class ActionGateway:
             ext_id,
             list(contract.normalized_payload.keys()),
         )
-        # extract user-facing message from C53-A structured result
-        if isinstance(raw, dict):
-            return raw.get("user_message") or str(raw)
-        return str(raw)
+        # §15.2 — compose_status_reply is the single source of status text
+        fact = ActionFact(
+            tool_name=contract.tool_name,
+            contract_id=contract.contract_id,
+            outcome="executed",
+            record_id=ext_id or None,
+            error_code=None,
+            raw_tool_response=raw if isinstance(raw, dict) else {"raw": str(raw)},
+        )
+        gateway_reply = self.compose_status_reply(fact)
+        # Append C53-A user_message as conversational context after the fact
+        c53_message = raw.get("user_message") if isinstance(raw, dict) else None
+        if c53_message and c53_message != gateway_reply.text:
+            return f"{gateway_reply.text}\n{c53_message}"
+        return gateway_reply.text
+
+    # ── §15.2 — compose_status_reply ────────────────────────────────
+    # הפונקציה היחידה בכל הקוד שמותר לה לייצר טקסט סטטוס-פעולה.
+
+    def compose_status_reply(self, fact: ActionFact) -> GatewayReply:
+        if fact.outcome == "executed":
+            rid = f" | מזהה: `{fact.record_id}`" if fact.record_id else ""
+            text = f"✅ בוצע: {fact.tool_name}{rid}"
+        elif fact.outcome == "failed":
+            ec = f" ({fact.error_code})" if fact.error_code else ""
+            text = f"❌ נכשל: {fact.tool_name}{ec}"
+        elif fact.outcome == "pending":
+            text = f"⏳ ממתין לאישור: {fact.tool_name}"
+        elif fact.outcome == "rejected":
+            text = f"⚠️ נדחה: {fact.tool_name}"
+        else:
+            text = f"ℹ️ {fact.tool_name}: {fact.outcome}"
+        return GatewayReply(text=text, fact=fact)
+
+    # ── §7 §20 — query_execution_status ─────────────────────────────
+    # עונה לשאלות סטטוס ("נוספה?") אך ורק מה-ExecutionLedger.
+    # לעולם לא מסתמך על טקסט שיחה או קלט Agent.
+
+    def query_execution_status(
+        self, canonical_user_id: str, window_seconds: int = 600
+    ) -> str | None:
+        """
+        מחזיר תשובת סטטוס לשאלה "נוספה?"/"הצליח?" — מה-Ledger בלבד.
+        None = אין ביצוע אחרון רלוונטי בחלון הזמן.
+        """
+        candidates = [
+            c for c in self._ledger._store.values()
+            if c.canonical_user_id == canonical_user_id
+            and c.status in ("executed", "failed")
+        ]
+        if not candidates:
+            return None
+        latest = max(candidates, key=lambda c: c.created_at)
+        if time.time() - latest.created_at > window_seconds:
+            return None
+        ext_id = None
+        if isinstance(latest.agent_observations, list):
+            for obs in reversed(latest.agent_observations):
+                if obs.get("kind") == "execution_fact" and obs.get("record_id"):
+                    ext_id = obs["record_id"]
+                    break
+        fact = ActionFact(
+            tool_name=latest.tool_name,
+            contract_id=latest.contract_id,
+            outcome=latest.status,
+            record_id=ext_id,
+            error_code=None,
+            raw_tool_response={},
+        )
+        return self.compose_status_reply(fact).text
 
     # ── query helpers ────────────────────────────────────────────────
 
