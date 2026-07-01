@@ -1,0 +1,482 @@
+# core/action_gateway.py — Action Gateway (Stage B)
+#
+# ActionContract הוא מקור האמת לכל mutation עסקי.
+# ExecutionReceipt הוא ההוכחה היחידה לביצוע.
+# Agent הוא מקור סיגנלים בלבד — לא מקור סמכות.
+#
+# FEATURE_ACTION_GATEWAY=false כברירת מחדל.
+# כשהדגל כבוי — כל המסלולים הקיימים ממשיכים לפעול ללא שינוי.
+# כשהדגל פעיל — כל mutating tool חייב לעבור דרך Gateway (§6 SPEC).
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import random
+import threading
+import time
+import uuid
+from dataclasses import dataclass, field
+from typing import Callable
+
+logger = logging.getLogger(__name__)
+
+
+# ══════════════════════════════════════════════════
+# 3.1 — ActionContract
+# ══════════════════════════════════════════════════
+
+@dataclass
+class ActionContract:
+    contract_id:                str
+    tenant_id:                  str
+    canonical_user_id:          str    # = identity.memory_key
+    tool_name:                  str
+    normalized_payload:         dict   # אחרי normalize — לא raw input
+    business_action_fingerprint: str   # hash(tenant+user+tool+payload)
+    origin_channel:             str
+    origin_chat_id:             str
+    requires_approval:          bool
+    status:                     str    # draft|pending|approved|rejected|executing|executed|failed
+    created_at:                 float
+    approved_by:                str | None = None
+    approved_at:                float | None = None
+    agent_observations:         list[dict] = field(default_factory=list)  # §5 — לעולם לא סמכות
+
+
+# ══════════════════════════════════════════════════
+# GatewayResult — חוזה אחיד (מקביל ל-GateResult ב-decision_pipeline.py)
+# ══════════════════════════════════════════════════
+
+@dataclass
+class GatewayResult:
+    ok:           bool
+    reason:       str
+    contract_id:  str | None = None
+    user_message: str | None = None   # מה להציג למשתמש (None = שקט)
+
+
+# ══════════════════════════════════════════════════
+# §5 — AgentObservation
+# לא user-facing, לא executable, signal בלבד.
+# ══════════════════════════════════════════════════
+
+@dataclass
+class AgentObservation:
+    contract_id:  str | None
+    kind:         str    # "uncertainty" | "contradiction" | "concern"
+    text:         str
+    created_at:   float
+
+
+# ══════════════════════════════════════════════════
+# §10 §4 — DuplicateOverrideApproval
+# override חד-פעמי לפעולה שכבר executed.
+# ══════════════════════════════════════════════════
+
+@dataclass
+class DuplicateOverrideApproval:
+    contract_id:          str
+    business_fingerprint: str
+    challenge_hash:       str    # hash בלבד — לא נשמר קוד גולמי
+    issued_to:            str    # canonical_user_id של הבעלים המאומת בלבד
+    issued_at:            float
+    ttl_seconds:          int    # קצר — 300 שניות
+    consumed:             bool   # False עד שימוש; True אחרי — חד-פעמי
+
+
+def _hash_challenge(code: str) -> str:
+    return hashlib.sha256(code.encode()).hexdigest()
+
+
+def _gen_challenge_code() -> str:
+    return str(random.randint(100000, 999999))
+
+
+# ══════════════════════════════════════════════════
+# Execution Ledger — ממשק עמיד (§7, §8)
+# ממשק מופרד מ-ActionGateway; backing ראשוני = RAM + Airtable stub.
+# ══════════════════════════════════════════════════
+
+class ExecutionLedger:
+    """
+    שכבת אחסון עמידה ל-ActionContracts.
+    RAM + כתיבה ל-Airtable ייעודי (ActionContracts) כאשר הוא מוגדר.
+    """
+
+    def __init__(self, airtable_writer: Callable | None = None):
+        self._store: dict[str, ActionContract] = {}    # contract_id → contract
+        self._by_fingerprint: dict[str, str] = {}      # fingerprint → contract_id
+        self._lock = threading.Lock()
+        self._airtable_writer = airtable_writer        # callable(contract) → None
+
+    def save(self, contract: ActionContract) -> None:
+        with self._lock:
+            self._store[contract.contract_id] = contract
+            self._by_fingerprint[contract.business_action_fingerprint] = contract.contract_id
+        if self._airtable_writer:
+            try:
+                self._airtable_writer(contract)
+            except Exception as exc:
+                logger.warning("[ActionGateway] Airtable write failed (RAM intact): %s", exc)
+
+    def find_by_id(self, contract_id: str) -> ActionContract | None:
+        return self._store.get(contract_id)
+
+    def find_by_fingerprint(self, fingerprint: str) -> ActionContract | None:
+        cid = self._by_fingerprint.get(fingerprint)
+        return self._store.get(cid) if cid else None
+
+    def find_live_by_user(self, canonical_user_id: str) -> list[ActionContract]:
+        """מחזיר contracts חיים (pending) לזהות קנונית."""
+        now = time.time()
+        result = []
+        for c in self._store.values():
+            if c.canonical_user_id != canonical_user_id:
+                continue
+            if c.status == "pending":
+                result.append(c)
+        return result
+
+    def update_status(self, contract_id: str, status: str, **kwargs) -> None:
+        with self._lock:
+            c = self._store.get(contract_id)
+            if not c:
+                return
+            c.status = status
+            for k, v in kwargs.items():
+                if hasattr(c, k):
+                    setattr(c, k, v)
+        if self._airtable_writer:
+            try:
+                self._airtable_writer(self._store[contract_id])
+            except Exception as exc:
+                logger.warning("[ActionGateway] Airtable status update failed: %s", exc)
+
+
+# ══════════════════════════════════════════════════
+# ActionGateway — Gateway מרכזי
+# ══════════════════════════════════════════════════
+
+class ActionGateway:
+    """
+    Gateway מרכזי לכל פעולה עסקית מוטטת (mutating).
+
+    כשהדגל FEATURE_ACTION_GATEWAY=false, Gateway פועל ב-shadow mode:
+    propose_action() רושם contracts ב-ledger לצרכי מעקב, אבל לא חוסם
+    את המסלולים הקיימים. הקוד הקורא אחראי לבדוק את הדגל.
+    """
+
+    def __init__(
+        self,
+        ledger: ExecutionLedger | None = None,
+        tool_executor: Callable | None = None,
+    ):
+        self._ledger = ledger or ExecutionLedger()
+        self._tool_executor = tool_executor
+        self._overrides: dict[str, DuplicateOverrideApproval] = {}
+        self._override_lock = threading.Lock()
+
+    # ── §3.2 — fingerprint ──────────────────────────────────────────
+
+    @staticmethod
+    def compute_business_fingerprint(
+        tenant_id: str,
+        canonical_user_id: str,
+        tool_name: str,
+        normalized_payload: dict,
+    ) -> str:
+        raw = json.dumps(
+            {
+                "tenant_id":          tenant_id,
+                "canonical_user_id":  canonical_user_id,
+                "tool_name":          tool_name,
+                "normalized_payload": normalized_payload,
+            },
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+        return hashlib.sha1(raw.encode()).hexdigest()[:24]
+
+    @staticmethod
+    def normalize_payload(tool_inputs: dict) -> dict:
+        """אחיד לפי sort_keys — payload קנוני, לא raw input."""
+        return dict(sorted((str(k), v) for k, v in (tool_inputs or {}).items()))
+
+    # ── §3.3 — propose_action ───────────────────────────────────────
+
+    def propose_action(
+        self,
+        *,
+        tenant_id: str,
+        canonical_user_id: str,
+        tool_name: str,
+        tool_inputs: dict,
+        origin_channel: str,
+        origin_chat_id: str,
+        requires_approval: bool,
+    ) -> GatewayResult:
+        """
+        מציע פעולה חדשה ל-Gateway.
+        מחזיר GatewayResult(ok=True, contract_id=...) אם מותרת.
+        מחזיר GatewayResult(ok=False, ...) אם נחסמת (כפילות/pending).
+        """
+        normalized = self.normalize_payload(tool_inputs)
+        fingerprint = self.compute_business_fingerprint(
+            tenant_id, canonical_user_id, tool_name, normalized
+        )
+
+        existing = self._ledger.find_by_fingerprint(fingerprint)
+        if existing:
+            if existing.status == "pending":
+                return GatewayResult(
+                    ok=False,
+                    reason="כבר קיימת בקשת אישור פתוחה לפעולה הזו.",
+                    contract_id=existing.contract_id,
+                    user_message="⏳ כבר יש בקשת אישור פתוחה לפעולה זו. נא לאשר את הכפתור שנשלח.",
+                )
+            if existing.status == "executed":
+                return self._handle_duplicate_executed(existing, canonical_user_id)
+
+        contract = ActionContract(
+            contract_id=str(uuid.uuid4()),
+            tenant_id=tenant_id,
+            canonical_user_id=canonical_user_id,
+            tool_name=tool_name,
+            normalized_payload=normalized,
+            business_action_fingerprint=fingerprint,
+            origin_channel=origin_channel,
+            origin_chat_id=origin_chat_id,
+            requires_approval=requires_approval,
+            status="draft",
+            created_at=time.time(),
+        )
+
+        if requires_approval:
+            contract.status = "pending"
+        else:
+            contract.status = "approved"
+
+        self._ledger.save(contract)
+        logger.info(
+            "[ActionGateway] propose_action: contract=%s tool=%s user=%s status=%s",
+            contract.contract_id, tool_name, canonical_user_id, contract.status,
+        )
+        return GatewayResult(ok=True, reason="contract נרשם", contract_id=contract.contract_id)
+
+    def _handle_duplicate_executed(
+        self, existing: ActionContract, canonical_user_id: str
+    ) -> GatewayResult:
+        """מטפל בכפילות של פעולה executed — מייצר DuplicateOverrideApproval."""
+        code = _gen_challenge_code()
+        override = DuplicateOverrideApproval(
+            contract_id=existing.contract_id,
+            business_fingerprint=existing.business_action_fingerprint,
+            challenge_hash=_hash_challenge(code),
+            issued_to=canonical_user_id,
+            issued_at=time.time(),
+            ttl_seconds=300,
+            consumed=False,
+        )
+        with self._override_lock:
+            self._overrides[existing.business_action_fingerprint] = override
+        logger.info(
+            "[ActionGateway] duplicate_executed: fingerprint=%s, override issued to %s",
+            existing.business_action_fingerprint[:12], canonical_user_id,
+        )
+        return GatewayResult(
+            ok=False,
+            reason="כפילות נחסמה — פעולה זו כבר בוצעה לאחרונה.",
+            contract_id=existing.contract_id,
+            user_message=(
+                f"⚠️ פעולה זו כבר בוצעה לאחרונה.\n"
+                f"אם אתה בטוח שזו חזרה מכוונת — שלח: *בצע שוב {code}*"
+            ),
+        )
+
+    # ── §4 — route_confirmation_word ────────────────────────────────
+
+    def route_confirmation_word(self, canonical_user_id: str) -> str:
+        """
+        מיירט מילת אישור חופשית (כמו "מאשר") לפני שמגיעה ל-Agent.
+        מחזיר תשובה ישירה למשתמש.
+        """
+        live = self.find_live_contracts(canonical_user_id)
+        if len(live) == 0:
+            return "אין פעולה שממתינה לאישור."
+        if len(live) == 1:
+            result = self.approve(live[0].contract_id, approver=canonical_user_id)
+            return result
+        # יותר מאחת — מציג רשימה
+        lines = ["יש כמה פעולות הממתינות לאישור — איזו?"]
+        for c in live:
+            lines.append(f"• {c.tool_name} (id: {c.contract_id[:8]})")
+        return "\n".join(lines)
+
+    # ── §10 — route_override_word ────────────────────────────────────
+
+    def route_override_word(
+        self, canonical_user_id: str, submitted_code: str
+    ) -> str:
+        """
+        מיירט "בצע שוב <קוד>" לפני שמגיע ל-Agent.
+        אינו מקבל מילות אישור כלליות — חייב את הקוד המפורש.
+        consumed=True מוגדר לפני dispatch למניעת race condition.
+        """
+        with self._override_lock:
+            # מחפש override לכל fingerprint ב-ledger של המשתמש
+            override = next(
+                (
+                    o for o in self._overrides.values()
+                    if o.issued_to == canonical_user_id
+                    and not o.consumed
+                ),
+                None,
+            )
+            if not override:
+                return "אין override פתוח עבורך. שלח את הבקשה המקורית מחדש."
+            if time.time() - override.issued_at > override.ttl_seconds:
+                return "קוד האתגר פג. שלח את הבקשה המקורית מחדש."
+            if _hash_challenge(submitted_code) != override.challenge_hash:
+                return "קוד שגוי. נסה שוב או שלח את הבקשה המקורית מחדש."
+            # consumed=True לפני dispatch — מונע race
+            override.consumed = True
+
+        logger.info(
+            "[ActionGateway] override approved: fingerprint=%s user=%s",
+            override.business_fingerprint[:12], canonical_user_id,
+        )
+        if self._tool_executor:
+            existing = self._ledger.find_by_fingerprint(override.business_fingerprint)
+            if existing:
+                return self._execute_contract(existing)
+        return "✅ override אושר — הפעולה תבוצע."
+
+    # ── §3.3 — approve ──────────────────────────────────────────────
+
+    def approve(self, contract_id: str, approver: str) -> str:
+        """מאשר contract ומבצע אותו (אם tool_executor מחובר)."""
+        contract = self._ledger.find_by_id(contract_id)
+        if not contract:
+            return "⚠️ פעולה לא נמצאה."
+        if contract.status != "pending":
+            return f"⚠️ הפעולה אינה במצב המתנה (מצב נוכחי: {contract.status})."
+        if contract.canonical_user_id != approver and not approver.startswith("owner"):
+            logger.warning(
+                "[ActionGateway] approve: approver mismatch contract=%s approver=%s",
+                contract_id, approver,
+            )
+        self._ledger.update_status(
+            contract_id, "approved",
+            approved_by=approver,
+            approved_at=time.time(),
+        )
+        logger.info("[ActionGateway] approved: contract=%s by=%s", contract_id, approver)
+        if self._tool_executor:
+            return self._execute_contract(contract)
+        return f"✅ פעולה אושרה: {contract.tool_name}"
+
+    def _execute_contract(self, contract: ActionContract) -> str:
+        """מבצע tool לאחר אישור — approved_payload == executed_payload (DoD §6)."""
+        self._ledger.update_status(contract.contract_id, "executing")
+        try:
+            result = self._tool_executor(
+                tool_name=contract.tool_name,
+                tool_inputs=contract.normalized_payload,
+                contract_id=contract.contract_id,
+            )
+            self._ledger.update_status(contract.contract_id, "executed")
+            logger.info(
+                "[ActionGateway] executed: contract=%s tool=%s",
+                contract.contract_id, contract.tool_name,
+            )
+            return result if isinstance(result, str) else str(result)
+        except Exception as exc:
+            self._ledger.update_status(contract.contract_id, "failed")
+            logger.error(
+                "[ActionGateway] execution failed: contract=%s error=%s",
+                contract.contract_id, exc,
+            )
+            return f"❌ ביצוע נכשל: {exc}"
+
+    # ── query helpers ────────────────────────────────────────────────
+
+    def find_live_contracts(self, canonical_user_id: str) -> list[ActionContract]:
+        return self._ledger.find_live_by_user(canonical_user_id)
+
+    def find_contract(self, contract_id: str) -> ActionContract | None:
+        return self._ledger.find_by_id(contract_id)
+
+    # ── §5 — AgentObservation ────────────────────────────────────────
+
+    def record_agent_observation(
+        self,
+        contract_id: str | None,
+        kind: str,
+        text: str,
+    ) -> AgentObservation:
+        """שומר signal של Agent — לעולם לא user-facing, לעולם לא executable."""
+        obs = AgentObservation(
+            contract_id=contract_id,
+            kind=kind,
+            text=text,
+            created_at=time.time(),
+        )
+        if contract_id:
+            contract = self._ledger.find_by_id(contract_id)
+            if contract:
+                contract.agent_observations.append(
+                    {"kind": kind, "text": text, "created_at": obs.created_at}
+                )
+        logger.debug(
+            "[ActionGateway] AgentObservation: kind=%s contract=%s text=%.80s",
+            kind, contract_id, text,
+        )
+        return obs
+
+
+# ══════════════════════════════════════════════════
+# Singleton — ייצור עם lazy Airtable writer
+# ══════════════════════════════════════════════════
+
+def _build_airtable_writer():
+    """
+    מחזיר callable שכותב ActionContract ל-Airtable ActionContracts table.
+    נקרא lazy בעת יצוא singleton — לא בזמן import.
+    כאשר Airtable לא מוגדר/לא מחובר, מחזיר None (RAM-only).
+    """
+    try:
+        from airtable_schema import Tables
+        if not hasattr(Tables, "ACTION_CONTRACTS"):
+            return None
+        from tools.airtable_gateway import at_upsert
+
+        def _writer(c: ActionContract) -> None:
+            at_upsert(
+                Tables.ACTION_CONTRACTS,
+                {
+                    "contract_id":                c.contract_id,
+                    "tenant_id":                  c.tenant_id,
+                    "canonical_user_id":          c.canonical_user_id,
+                    "tool_name":                  c.tool_name,
+                    "normalized_payload":         json.dumps(c.normalized_payload, ensure_ascii=False),
+                    "business_action_fingerprint": c.business_action_fingerprint,
+                    "origin_channel":             c.origin_channel,
+                    "origin_chat_id":             c.origin_chat_id,
+                    "requires_approval":          c.requires_approval,
+                    "status":                     c.status,
+                    "created_at":                 c.created_at,
+                    "approved_by":                c.approved_by or "",
+                    "approved_at":                c.approved_at or 0.0,
+                },
+                match_field="contract_id",
+            )
+
+        return _writer
+    except Exception:
+        return None
+
+
+_ledger_singleton = ExecutionLedger(airtable_writer=None)  # RAM-only until Airtable table exists
+action_gateway = ActionGateway(ledger=_ledger_singleton)

@@ -655,6 +655,46 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
         return f"⏳ הפעולה כבר ממתינה לאישור הבעלים{' (מ-' + origin + ')' if origin else ''}."
 
     label     = _describe_tool_call(tool_name, tool_inputs)
+
+    # Stage B (shadow mode): ActionGateway ב-FEATURE_ACTION_GATEWAY=false.
+    # propose_action רושם contract ל-ledger ולמעקב — לא חוסם את המסלול הקיים.
+    # כאשר הדגל פעיל: GatewayResult(ok=False) יחזיר כאן ויפסיק את הזרימה.
+    from feature_flags import is_enabled as _flag
+    if _flag("FEATURE_ACTION_GATEWAY"):
+        from core.action_gateway import action_gateway as _gw
+        tenant_id = getattr(identity, "tenant_id", "boss_hq")
+        _gw_result = _gw.propose_action(
+            tenant_id=tenant_id,
+            canonical_user_id=identity.memory_key,
+            tool_name=tool_name,
+            tool_inputs=tool_inputs,
+            origin_channel=channel,
+            origin_chat_id=user_chat_id,
+            requires_approval=True,
+        )
+        if not _gw_result.ok:
+            logger.info(
+                "[ActionGateway] propose blocked: %s | contract=%s",
+                _gw_result.reason, _gw_result.contract_id,
+            )
+            return _gw_result.user_message or f"⏳ {_gw_result.reason}"
+    else:
+        # shadow mode — log only, do not block
+        try:
+            from core.action_gateway import action_gateway as _gw
+            tenant_id = getattr(identity, "tenant_id", "boss_hq")
+            _gw.propose_action(
+                tenant_id=tenant_id,
+                canonical_user_id=identity.memory_key,
+                tool_name=tool_name,
+                tool_inputs=tool_inputs,
+                origin_channel=channel,
+                origin_chat_id=user_chat_id,
+                requires_approval=True,
+            )
+        except Exception as _gw_exc:
+            logger.debug("[ActionGateway] shadow propose failed (non-blocking): %s", _gw_exc)
+
     action_id, _ = bus.request_approval(
         action  = tool_name,
         payload = {
@@ -1161,26 +1201,50 @@ def run_agent(
 
     # ── 2.55. Confirm-word + canonical tool-approval intercept ───────
     # Stage A / SPEC section 3.3: "מאשר" חופשי לעולם לא מאשר tool רגיש.
-    # אם יש pending tool approval לזהות הקנונית → מפנים לכפתור, לא Agent.
-    # אם אין pending כלל → "אין פעולה ממתינה", stop.
+    # Stage B: "בצע שוב <קוד>" מיורט לפני Agent עבור DuplicateOverrideApproval.
+    # אם FEATURE_ACTION_GATEWAY פעיל → route_confirmation_word מ-Gateway.
+    # אחרת → Stage A bus.find_pending_tool_approval (מסלול הקיים).
     if not pending:
-        if user_text.strip().lower() in _CONFIRM_WORDS:
-            from event_bus import bus as _bus_cw
-            _canonical_pending = _bus_cw.find_pending_tool_approval(identity.memory_key)
-            if _canonical_pending:
+        _stripped = user_text.strip()
+        _lower = _stripped.lower()
+
+        # §10 §17 — "בצע שוב <קוד>" מיורט לפני Agent, בכל מצב flag
+        import re as _re
+        _override_match = _re.match(r"^בצע\s+שוב\s+(\d{4,8})$", _stripped)
+        if _override_match:
+            _override_code = _override_match.group(1)
+            from core.action_gateway import action_gateway as _gw_ow
+            return _gw_ow.route_override_word(identity.memory_key, _override_code)
+
+        if _lower in _CONFIRM_WORDS:
+            from feature_flags import is_enabled as _flag_cw
+            if _flag_cw("FEATURE_ACTION_GATEWAY"):
+                # Stage B: Gateway הוא מקור האמת לאישור
+                from core.action_gateway import action_gateway as _gw_cw
+                _gw_reply = _gw_cw.route_confirmation_word(identity.memory_key)
                 logger.info(
-                    f"[PendingApproval] free-text confirm intercepted — tool approval exists "
-                    f"({_canonical_pending['action_id']}) for {identity.memory_key}"
+                    "[ActionGateway] route_confirmation_word: user=%s reply=%.60s",
+                    identity.memory_key, _gw_reply,
                 )
-                return (
-                    f"יש פעולה שממתינה לאישור: {_canonical_pending['label']}\n"
-                    f"נא לאשר דרך כפתור ✅/❌ בהודעת האישור המקורית."
-                )
+                return _gw_reply
             else:
-                logger.info(
-                    f"[PendingApproval] free-text confirm, no pending for {identity.memory_key}"
-                )
-                return "אין פעולה שממתינה לאישור. אם זו בקשה חדשה — שלח את הנתונים המדויקים."
+                # Stage A fallback (flag כבוי)
+                from event_bus import bus as _bus_cw
+                _canonical_pending = _bus_cw.find_pending_tool_approval(identity.memory_key)
+                if _canonical_pending:
+                    logger.info(
+                        f"[PendingApproval] free-text confirm intercepted — tool approval exists "
+                        f"({_canonical_pending['action_id']}) for {identity.memory_key}"
+                    )
+                    return (
+                        f"יש פעולה שממתינה לאישור: {_canonical_pending['label']}\n"
+                        f"נא לאשר דרך כפתור ✅/❌ בהודעת האישור המקורית."
+                    )
+                else:
+                    logger.info(
+                        f"[PendingApproval] free-text confirm, no pending for {identity.memory_key}"
+                    )
+                    return "אין פעולה שממתינה לאישור. אם זו בקשה חדשה — שלח את הנתונים המדויקים."
 
     # ── 2.6. Context Pronoun Resolution (C60) ────────
     # "תעלה לדסישנס"/"זה הנספח" וכד' — לפני intent detection, כדי שה-Router
