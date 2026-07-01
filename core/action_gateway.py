@@ -14,6 +14,7 @@ import hashlib
 import json
 import logging
 import random
+import re
 import threading
 import time
 import uuid
@@ -68,6 +69,50 @@ class AgentObservation:
     kind:         str    # "uncertainty" | "contradiction" | "concern"
     text:         str
     created_at:   float
+
+
+# ══════════════════════════════════════════════════
+# §15.1-15.3 — Single Speaker Enforcement
+# ActionFact: structural only, no NL text.
+# GatewayReply: the ONLY type allowed to carry action-status text.
+# AgentReply: free-text/personality, never action-status.
+# ══════════════════════════════════════════════════
+
+@dataclass(frozen=True)
+class ActionFact:
+    """מבני בלבד. אין בו משפט בשפה טבעית. אסור להעביר אותו ישירות לשליחה."""
+    tool_name:         str
+    contract_id:       str
+    outcome:           str    # "executed" | "failed" | "pending" | "rejected"
+    record_id:         str | None
+    error_code:        str | None
+    raw_tool_response: dict
+
+
+@dataclass(frozen=True)
+class GatewayReply:
+    """הטיפוס היחיד שמותר לו להכיל ניסוח סטטוס פעולה.
+    מיוצר אך ורק מתוך ActionFact ע"י compose_status_reply()."""
+    text: str
+    fact: ActionFact
+
+
+@dataclass(frozen=True)
+class AgentReply:
+    """טקסט חופשי, טון, אישיות, שיחה.
+    לעולם לא כולל ניסוח מצב פעולה בהקשר ActionContract."""
+    text: str
+    contract_id: str | None = None
+
+
+# regex לזיהוי טענות סטטוס-פעולה בטקסט Agent — safety belt בלבד (§15.3).
+# דורש שמילת-הסטטוס לא תיסיים ב-? ישירות (שאלה), ולא תופיע אחרי "לא ".
+_ACTION_STATUS_PATTERN = re.compile(
+    r"(?<!\bלא )\b(נוסף|נוספה|נוספו|עודכן|עודכנה|עודכנו|"
+    r"בוצע|בוצעה|נשלח|נשלחה|נשמר|נשמרה|נוצר|נוצרה|הוסף|הוספה|"
+    r"הוספתי|עדכנתי|שלחתי|יצרתי|שמרתי)\b(?!\?)",
+    re.UNICODE,
+)
 
 
 # ══════════════════════════════════════════════════
@@ -374,6 +419,15 @@ class ActionGateway:
             return f"⚠️ אין פעולה מספר {idx}. יש {len(pending_list)} פעולות ממתינות."
 
         contract = pending_list[idx - 1]
+        # §21: close all other pending contracts from the disambiguation list
+        # so no sibling contracts linger after the user makes a selection.
+        for sibling in pending_list:
+            if sibling.contract_id != contract.contract_id and sibling.status == "pending":
+                self._ledger.update_status(sibling.contract_id, "rejected")
+                logger.info(
+                    "[ActionGateway] disambiguation: closing sibling contract=%s tool=%s",
+                    sibling.contract_id, sibling.tool_name,
+                )
         logger.info(
             "[ActionGateway] disambiguation: user=%s selected idx=%d contract=%s tool=%s",
             canonical_user_id, idx, contract.contract_id, contract.tool_name,
@@ -504,8 +558,15 @@ class ActionGateway:
         except Exception as verify_exc:
             logger.warning("[ActionGateway] verify_execution import failed: %s", verify_exc)
 
-        self._ledger.update_status(contract.contract_id, "executed")
         ext_id = raw.get("external_id", "") if isinstance(raw, dict) else ""
+        self._ledger.update_status(contract.contract_id, "executed")
+        # persist record_id as observation so query_execution_status can retrieve it
+        if ext_id:
+            contract.agent_observations.append({
+                "kind": "execution_fact",
+                "record_id": ext_id,
+                "created_at": time.time(),
+            })
         logger.info(
             "[ActionGateway] executed: contract=%s fingerprint=%.12s tool=%s "
             "external_id=%s payload_keys=%s",
@@ -515,10 +576,76 @@ class ActionGateway:
             ext_id,
             list(contract.normalized_payload.keys()),
         )
-        # extract user-facing message from C53-A structured result
-        if isinstance(raw, dict):
-            return raw.get("user_message") or str(raw)
-        return str(raw)
+        # §15.2 — compose_status_reply is the single source of status text
+        fact = ActionFact(
+            tool_name=contract.tool_name,
+            contract_id=contract.contract_id,
+            outcome="executed",
+            record_id=ext_id or None,
+            error_code=None,
+            raw_tool_response=raw if isinstance(raw, dict) else {"raw": str(raw)},
+        )
+        gateway_reply = self.compose_status_reply(fact)
+        # Append C53-A user_message as conversational context after the fact
+        c53_message = raw.get("user_message") if isinstance(raw, dict) else None
+        if c53_message and c53_message != gateway_reply.text:
+            return f"{gateway_reply.text}\n{c53_message}"
+        return gateway_reply.text
+
+    # ── §15.2 — compose_status_reply ────────────────────────────────
+    # הפונקציה היחידה בכל הקוד שמותר לה לייצר טקסט סטטוס-פעולה.
+
+    def compose_status_reply(self, fact: ActionFact) -> GatewayReply:
+        if fact.outcome == "executed":
+            rid = f" | מזהה: `{fact.record_id}`" if fact.record_id else ""
+            text = f"✅ בוצע: {fact.tool_name}{rid}"
+        elif fact.outcome == "failed":
+            ec = f" ({fact.error_code})" if fact.error_code else ""
+            text = f"❌ נכשל: {fact.tool_name}{ec}"
+        elif fact.outcome == "pending":
+            text = f"⏳ ממתין לאישור: {fact.tool_name}"
+        elif fact.outcome == "rejected":
+            text = f"⚠️ נדחה: {fact.tool_name}"
+        else:
+            text = f"ℹ️ {fact.tool_name}: {fact.outcome}"
+        return GatewayReply(text=text, fact=fact)
+
+    # ── §7 §20 — query_execution_status ─────────────────────────────
+    # עונה לשאלות סטטוס ("נוספה?") אך ורק מה-ExecutionLedger.
+    # לעולם לא מסתמך על טקסט שיחה או קלט Agent.
+
+    def query_execution_status(
+        self, canonical_user_id: str, window_seconds: int = 600
+    ) -> str | None:
+        """
+        מחזיר תשובת סטטוס לשאלה "נוספה?"/"הצליח?" — מה-Ledger בלבד.
+        None = אין ביצוע אחרון רלוונטי בחלון הזמן.
+        """
+        candidates = [
+            c for c in self._ledger._store.values()
+            if c.canonical_user_id == canonical_user_id
+            and c.status in ("executed", "failed")
+        ]
+        if not candidates:
+            return None
+        latest = max(candidates, key=lambda c: c.created_at)
+        if time.time() - latest.created_at > window_seconds:
+            return None
+        ext_id = None
+        if isinstance(latest.agent_observations, list):
+            for obs in reversed(latest.agent_observations):
+                if obs.get("kind") == "execution_fact" and obs.get("record_id"):
+                    ext_id = obs["record_id"]
+                    break
+        fact = ActionFact(
+            tool_name=latest.tool_name,
+            contract_id=latest.contract_id,
+            outcome=latest.status,
+            record_id=ext_id,
+            error_code=None,
+            raw_tool_response={},
+        )
+        return self.compose_status_reply(fact).text
 
     # ── query helpers ────────────────────────────────────────────────
 

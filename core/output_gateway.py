@@ -99,6 +99,22 @@ def send_outbound(envelope: OutboundEnvelope) -> GatewayResult:
     """
     audit_id = str(uuid.uuid4())[:12]
 
+    # §15.3 §18 — Single Speaker Safety Belt.
+    # GatewayReply (origin=action_gateway) is the only permitted source for action-status text.
+    # If non-gateway source carries status words → warn (safety belt, not hard block at this layer).
+    _source = envelope.source_module or ""
+    if _source != "action_gateway":
+        try:
+            from core.action_gateway import _ACTION_STATUS_PATTERN
+            if _ACTION_STATUS_PATTERN.search(envelope.body):
+                logger.warning(
+                    "[COG] SINGLE_SPEAKER_VIOLATION | source=%s | ref=%s | "
+                    "body_preview=%.80r — action-status text from non-gateway source",
+                    _source, envelope.source_ref, envelope.body,
+                )
+        except Exception:
+            pass
+
     # שלב 1 — Emergency Stop (קיים כבר ב-feature_flags, C33)
     if _is_emergency_stopped(envelope.channel):
         logger.warning(

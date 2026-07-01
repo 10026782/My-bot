@@ -1256,8 +1256,25 @@ def run_agent(
                 return _disambig_reply
 
         # §8 — שאלות סטטוס ("?", "נכשל?", "אושר?") לא מהוות אישור לעולם.
-        # בדיקה לפני confirm-word כדי שלא תיגע ב-Gateway.
+        # §7 §20 — שאלות "נוספה?" / "הצליח?" נענות מה-ExecutionLedger בלבד, לא מטקסט Agent.
         if "?" in _stripped:
+            from feature_flags import is_enabled as _flag_sq
+            if _flag_sq("FEATURE_ACTION_GATEWAY"):
+                _sq_lower = _stripped.lower().rstrip("?")
+                _STATUS_QUERY_PATTERNS = (
+                    "נוספה", "נוסף", "בוצע", "בוצעה", "עודכן", "עודכנה",
+                    "הצליח", "הצליחה", "נשמר", "נשמרה", "נוצר", "נוצרה",
+                    "הוספת", "הוספתי", "עדכנת", "נשלח", "נשלחה",
+                )
+                if any(_sq_lower.endswith(p) or p in _sq_lower for p in _STATUS_QUERY_PATTERNS):
+                    from core.action_gateway import action_gateway as _gw_sq
+                    _ledger_reply = _gw_sq.query_execution_status(identity.memory_key)
+                    if _ledger_reply is not None:
+                        logger.info(
+                            "[ActionGateway] status_query: user=%s query=%.40r reply=%.60s",
+                            identity.memory_key, _stripped, _ledger_reply,
+                        )
+                        return _ledger_reply
             pass  # fall through — route to Agent as status query
         elif _lower in _CONFIRM_WORDS:
             from feature_flags import is_enabled as _flag_cw

@@ -525,6 +525,109 @@ chk("BUG-LIVE-01: מאשר after Stage A execution → no re-dispatch", len(_liv
 chk("BUG-LIVE-01: reply says no pending action", "אין" in reply_live01 or "ממתינ" not in reply_live01)
 
 # ══════════════════════════════════════════════════
+# DoD §15.6 — items 18-23
+# ══════════════════════════════════════════════════
+
+print("\n── DoD §15.6: Single Speaker / status-query / sibling-close ──────────────")
+
+from core.action_gateway import ActionFact, GatewayReply, AgentReply, _ACTION_STATUS_PATTERN
+
+# ── Item 18: _ACTION_STATUS_PATTERN catches status words, not questions ──
+
+chk("DoD18: 'נוסף' matches ACTION_STATUS_PATTERN", bool(_ACTION_STATUS_PATTERN.search("הרשומה נוסף בהצלחה")))
+chk("DoD18: 'בוצע' matches ACTION_STATUS_PATTERN", bool(_ACTION_STATUS_PATTERN.search("✅ הפעולה בוצע")))
+chk("DoD18: 'נוצר' matches ACTION_STATUS_PATTERN", bool(_ACTION_STATUS_PATTERN.search("ליד חדש נוצר")))
+chk("DoD18: plain query 'נוספה?' does NOT match (ends with ?)", not bool(_ACTION_STATUS_PATTERN.search("נוספה?")))
+chk("DoD18: 'לא נוסף' not matched (prefixed with לא)", not bool(_ACTION_STATUS_PATTERN.search("לא נוסף")))
+
+# ── Item 18 + 23: compose_status_reply produces GatewayReply ──
+
+_gw18 = _new_gw(_ok_executor)
+_fact_ex = ActionFact(tool_name="airtable_add", contract_id="c1", outcome="executed",
+                      record_id=VALID_REC_ID, error_code=None, raw_tool_response={})
+_gr = _gw18.compose_status_reply(_fact_ex)
+chk("DoD18/23: compose_status_reply returns GatewayReply", isinstance(_gr, GatewayReply))
+chk("DoD18/23: GatewayReply.text contains ✅", "✅" in _gr.text)
+chk("DoD18/23: GatewayReply.text contains tool_name", "airtable_add" in _gr.text)
+chk("DoD18/23: GatewayReply.fact is the same ActionFact", _gr.fact is _fact_ex)
+chk("DoD18/23: GatewayReply.text contains record_id", VALID_REC_ID in _gr.text)
+
+_fact_fail = ActionFact(tool_name="airtable_add", contract_id="c2", outcome="failed",
+                        record_id=None, error_code="422", raw_tool_response={})
+_gr_fail = _gw18.compose_status_reply(_fact_fail)
+chk("DoD18/23: failed fact → GatewayReply with ❌", "❌" in _gr_fail.text)
+chk("DoD18/23: failed fact → error_code in text", "422" in _gr_fail.text)
+
+# AgentReply has text + optional contract_id, no status
+_ar = AgentReply(text="מעולה, טיפלתי בזה!", contract_id="c1")
+chk("DoD23: AgentReply.text is plain (no status claim)", not bool(_ACTION_STATUS_PATTERN.search(_ar.text)))
+chk("DoD23: AgentReply has contract_id field", _ar.contract_id == "c1")
+
+# ── Item 20: query_execution_status returns from Ledger ──
+
+_gw20 = _new_gw(_ok_executor)
+_p20 = _gw20.propose_action(**_BASE_PROPOSE)
+# nothing executed yet → should return None
+chk("DoD20: no execution yet → query returns None", _gw20.query_execution_status("boss_hq:owner_1") is None)
+# approve (executes via _ok_executor)
+_gw20.approve(_p20.contract_id, approver="boss_hq:owner_1")
+_sq_reply = _gw20.query_execution_status("boss_hq:owner_1")
+chk("DoD20: after execution → query returns non-None", _sq_reply is not None)
+chk("DoD20: query reply contains ✅ (executed)", _sq_reply is not None and "✅" in _sq_reply)
+chk("DoD20: query reply contains tool_name", _sq_reply is not None and "airtable_add" in _sq_reply)
+
+# ── Item 21: sibling contracts closed on disambiguation selection ──
+
+_gw21 = _new_gw(_ok_executor)
+# propose two separate contracts (different tool names → different fingerprints)
+_p21a = _gw21.propose_action(
+    tenant_id="boss_hq", canonical_user_id="boss_hq:owner_21",
+    tool_name="airtable_add", tool_inputs={"table": "Tasks", "fields": {"name": "T1"}},
+    origin_channel="whatsapp", origin_chat_id="972501111111", requires_approval=True,
+)
+_p21b = _gw21.propose_action(
+    tenant_id="boss_hq", canonical_user_id="boss_hq:owner_21",
+    tool_name="sheets_append", tool_inputs={"spreadsheet_name": "Tasks", "row_data": ["T1"]},
+    origin_channel="whatsapp", origin_chat_id="972501111111", requires_approval=True,
+)
+# route_confirmation_word → triggers disambiguation list (>1 pending)
+_dis_reply = _gw21.route_confirmation_word("boss_hq:owner_21")
+chk("DoD21: disambiguation list shown when >1 pending", "איזו" in _dis_reply or "1." in _dis_reply)
+
+# user selects index 1 → sheets_append sibling should be closed
+_sel_reply = _gw21.route_disambiguation("boss_hq:owner_21", "1")
+chk("DoD21: selection reply is non-None", _sel_reply is not None)
+_c21a = _gw21.find_contract(_p21a.contract_id)
+_c21b = _gw21.find_contract(_p21b.contract_id)
+chk("DoD21: selected contract → executed", _c21a is not None and _c21a.status == "executed")
+chk("DoD21: sibling contract → rejected (not still pending)", _c21b is not None and _c21b.status == "rejected")
+_live21_after = _gw21.find_live_contracts("boss_hq:owner_21")
+chk("DoD21: no pending contracts after selection", len(_live21_after) == 0)
+
+# ── Item 22: disambiguation by Gateway only (regression for PR #192 live failure) ──
+
+_gw22 = _new_gw(_ok_executor)
+_p22a = _gw22.propose_action(
+    tenant_id="boss_hq", canonical_user_id="boss_hq:owner_22",
+    tool_name="airtable_add", tool_inputs={"table": "Tasks", "fields": {"name": "T2"}},
+    origin_channel="whatsapp", origin_chat_id="972501111111", requires_approval=True,
+)
+_p22b = _gw22.propose_action(
+    tenant_id="boss_hq", canonical_user_id="boss_hq:owner_22",
+    tool_name="sheets_append", tool_inputs={"spreadsheet_name": "Tasks", "row_data": ["T2"]},
+    origin_channel="whatsapp", origin_chat_id="972501111111", requires_approval=True,
+)
+# trigger disambiguation
+_gw22.route_confirmation_word("boss_hq:owner_22")
+# ordinal "הראשונה" → intercepted by Gateway, not Agent
+_d22 = _gw22.route_disambiguation("boss_hq:owner_22", "הראשונה")
+chk("DoD22: 'הראשונה' intercepted by Gateway (returns non-None)", _d22 is not None)
+chk("DoD22: result is a reply string (not None/empty)", isinstance(_d22, str) and bool(_d22))
+# "השנייה" after state cleared → falls through to Agent (returns None)
+_d22_second = _gw22.route_disambiguation("boss_hq:owner_22", "השנייה")
+chk("DoD22: 'השנייה' after state cleared → returns None (falls to Agent)", _d22_second is None)
+
+# ══════════════════════════════════════════════════
 # Summary
 # ══════════════════════════════════════════════════
 print(f"\n{'═'*50}")
