@@ -148,7 +148,7 @@ check("gmail_send_draft: generic string (old format) → failed", r.status == "f
 # Section 4: airtable_add
 # ═════════════════════════════════════════════════════════════════
 
-r = verify_execution("airtable_add", _make("airtable_add", "rec1234abcXYZ"))
+r = verify_execution("airtable_add", _make("airtable_add", "rec1234abcXYZpqrs"))  # 14 chars after rec
 check("airtable_add: ok=True + rec-id → ok", r.status == "ok")
 
 r = verify_execution("airtable_add", _make("airtable_add", ok=False, user_message="❌ Airtable 422"))
@@ -170,7 +170,7 @@ check("airtable_add: None output → failed", r.status == "failed")
 # Section 5: airtable_update
 # ═════════════════════════════════════════════════════════════════
 
-r = verify_execution("airtable_update", _make("airtable_update", "rec5678defGHI"))
+r = verify_execution("airtable_update", _make("airtable_update", "rec5678defGHIjklm"))
 check("airtable_update: ok=True + rec-id → ok", r.status == "ok")
 
 r = verify_execution("airtable_update", _make("airtable_update", "invalid_id_no_rec"))

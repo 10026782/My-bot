@@ -83,7 +83,9 @@ _pending_approvals: dict[str, dict] = {}
 # near-simultaneous requests for the same chat_id (duplicate webhook delivery,
 # fast double "כן") must not both observe-then-act on the same pending entry.
 _pending_approvals_lock = threading.Lock()
-_CONFIRM_WORDS = frozenset({"כן", "אשר", "✅", "yes", "y", "ok", "אוקי", "בצע", "קדימה"})
+_CONFIRM_WORDS = frozenset({
+    "כן", "אשר", "מאשר", "מאשרת", "✅", "yes", "y", "ok", "אוקי", "בצע", "קדימה",
+})
 _CANCEL_WORDS  = frozenset({"לא", "בטל", "❌", "no", "n", "ביטול", "עצור", "cancel"})
 
 # ─── קליינטים ──────────────────────────────────────
@@ -1216,7 +1218,11 @@ def run_agent(
             from core.action_gateway import action_gateway as _gw_ow
             return _gw_ow.route_override_word(identity.memory_key, _override_code)
 
-        if _lower in _CONFIRM_WORDS:
+        # §8 — שאלות סטטוס ("?", "נכשל?", "אושר?") לא מהוות אישור לעולם.
+        # בדיקה לפני confirm-word כדי שלא תיגע ב-Gateway.
+        if "?" in _stripped:
+            pass  # fall through — route to Agent as status query
+        elif _lower in _CONFIRM_WORDS:
             from feature_flags import is_enabled as _flag_cw
             if _flag_cw("FEATURE_ACTION_GATEWAY"):
                 # Stage B: Gateway הוא מקור האמת לאישור
@@ -1383,9 +1389,28 @@ def run_agent(
             # C54: אם Claude ייצר text ו-tool_use באותה תשובה —
             # ה-text נוצר לפני שראה תוצאה. מבטלים אותו.
             # התשובה האמיתית תגיע ב-turn הבא עם ה-ToolResult.
+            _c54_pending_text = False
             if tool_uses and text_blocks:
+                _c54_pending_text = any(
+                    any(w in b.text for w in ("ממתינ", "אישור", "pending", "⏳"))
+                    for b in text_blocks
+                )
                 logger.info(f"[C54] Suppressed premature text_block alongside tool_use: "
-                            f"{[b.text[:40] for b in text_blocks]}")
+                            f"{[b.text[:40] for b in text_blocks]}"
+                            f"{' [approval-language detected]' if _c54_pending_text else ''}")
+                # Stage B §5: record AgentObservation for C54 contradiction (approval text + tool_use)
+                if _c54_pending_text:
+                    try:
+                        from core.action_gateway import action_gateway as _gw_c54
+                        _gw_c54.record_agent_observation(
+                            contract_id=None,
+                            kind="contradiction",
+                            text=f"C54: Agent produced approval-pending text alongside tool_use "
+                                 f"({[tu.name for tu in tool_uses]}). "
+                                 f"Suppressed text; approval gate will handle routing.",
+                        )
+                    except Exception:
+                        pass
                 text_blocks = []
 
             if not tool_uses:

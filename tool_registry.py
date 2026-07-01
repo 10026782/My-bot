@@ -79,14 +79,16 @@ _REGISTRY: dict[str, ToolMeta] = {
     "calendar_create_event": ToolMeta(
         name="calendar_create_event",
         roles_allowed=_MANAGEMENT,
-        description_he="יצירת אירוע ביומן — בודק חפיפות, force=true לקבוע בכל זאת"
+        requires_approval=True,
+        description_he="יצירת אירוע ביומן — דורש אישור, בודק חפיפות, force=true לקבוע בכל זאת"
     ),
 
     # ── Gmail ────────────────────────────────────
     "gmail_draft": ToolMeta(
         name="gmail_draft",
         roles_allowed=_MANAGEMENT,
-        description_he="יצירת טיוטת מייל (לא שולח)"
+        requires_approval=True,
+        description_he="יצירת טיוטת מייל — דורש אישור (לא שולח)"
     ),
     "gmail_send_draft": ToolMeta(
         name="gmail_send_draft",
@@ -122,13 +124,17 @@ _REGISTRY: dict[str, ToolMeta] = {
         name="airtable_add",
         roles_allowed=_INTERNAL,
         tenant_scoped=True,
-        description_he="הוספת רשומה ל-Airtable"
+        requires_approval=True,
+        high_risk=True,
+        description_he="הוספת רשומה ל-Airtable — דורש אישור"
     ),
     "airtable_update": ToolMeta(
         name="airtable_update",
         roles_allowed=_MANAGEMENT,
         tenant_scoped=True,
-        description_he="עדכון רשומה ב-Airtable"
+        requires_approval=True,
+        high_risk=True,
+        description_he="עדכון רשומה ב-Airtable — דורש אישור"
     ),
     "airtable_get_schema": ToolMeta(
         name="airtable_get_schema",
