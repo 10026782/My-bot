@@ -289,6 +289,60 @@ chk("Req7: dispatched tool is airtable_add (not sheets_append)", _tool7 == ["air
 chk("Req7: dispatched table is Tasks (not substituted)", _inputs7[0].get("table") == "Tasks")
 
 # ══════════════════════════════════════════════════
+# Req #4 extension: other providers don't use Airtable rec ID
+# ══════════════════════════════════════════════════
+print("\n── Req4-ext: Provider-specific evidence (no Airtable bleed) ─")
+
+# Sheets: spreadsheet_id passes, no rec ID required
+v_sheets_ok = verify_execution("sheets_append", {
+    "ok": True, "tool": "sheets_append", "external_id": "",
+    "evidence": {"spreadsheet_id": "1AbCdEfGhI", "updated_range": "Sheet1!A1"},
+    "user_message": "ok",
+})
+chk("Req4-ext/sheets: spreadsheet_id+range passes", v_sheets_ok.status == "ok")
+
+v_sheets_fail = verify_execution("sheets_append", {
+    "ok": True, "tool": "sheets_append", "external_id": "",
+    "evidence": {}, "user_message": "ok",
+})
+chk("Req4-ext/sheets: no evidence → fails", v_sheets_fail.status == "failed")
+
+# Drive: file_id passes, no rec ID required
+v_drive_ok = verify_execution("drive_upload", {
+    "ok": True, "tool": "drive_upload", "external_id": "file_abc123",
+    "evidence": {"file_id": "file_abc123", "drive_url": "https://drive.google.com/file/d/x"},
+    "user_message": "ok",
+})
+chk("Req4-ext/drive: file_id+drive_url passes", v_drive_ok.status == "ok")
+
+v_drive_fail = verify_execution("drive_upload", {
+    "ok": True, "tool": "drive_upload", "external_id": "",
+    "evidence": {}, "user_message": "ok",
+})
+chk("Req4-ext/drive: no file_id/drive_url → fails", v_drive_fail.status == "failed")
+
+# Airtable rec ID must NOT bleed into Sheets/Drive checks
+v_sheets_with_rec = verify_execution("sheets_append", {
+    "ok": True, "tool": "sheets_append", "external_id": VALID_REC_ID,
+    "evidence": {}, "user_message": "ok",
+})
+chk("Req4-ext/sheets: Airtable rec ID in external_id counts as sheets evidence", v_sheets_with_rec.status == "ok")
+
+# Calendar
+v_cal_ok = verify_execution("calendar_create_event", {
+    "ok": True, "tool": "calendar_create_event", "external_id": "evt_abc123",
+    "evidence": {"htmlLink": "https://calendar.google.com/event?eid=abc"},
+    "user_message": "ok",
+})
+chk("Req4-ext/calendar: event_id+htmlLink passes", v_cal_ok.status == "ok")
+
+v_cal_fail = verify_execution("calendar_create_event", {
+    "ok": True, "tool": "calendar_create_event", "external_id": "evt_abc",
+    "evidence": {}, "user_message": "ok",
+})
+chk("Req4-ext/calendar: missing htmlLink → fails", v_cal_fail.status == "failed")
+
+# ══════════════════════════════════════════════════
 # Req #8: Status questions with "?" do NOT trigger execution
 # ══════════════════════════════════════════════════
 print("\n── Req8: Status questions must not trigger execution ────────")
