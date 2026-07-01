@@ -8,3 +8,4 @@ output/
 contacts_merged.csv
 *.vcf
 schema_drift_report.json
+.c8*/

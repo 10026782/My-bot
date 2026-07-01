@@ -747,6 +747,28 @@ def _run_scheduler():
         time.sleep(30)
 
 
+def _automation_guard(func, *, name: str | None = None):
+    """
+    Wrapper for scheduled jobs to centrally enforce the EMERGENCY_STOP_AUTOMATION
+    flag.
+    """
+    def wrapper(*args, **kwargs):
+        try:
+            from feature_flags import is_enabled
+            flag = is_enabled("EMERGENCY_STOP_AUTOMATION")
+        except Exception as e:
+            logger.error(f"[Scheduler] failed to read EMERGENCY_STOP_AUTOMATION: {e}")
+            flag = True
+
+        job_name = name or getattr(func, "__name__", str(func))
+        if flag:
+            logger.warning(f"[Scheduler] EMERGENCY_STOP_AUTOMATION active — {job_name} skipped")
+            return None
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
 def start_scheduler() -> threading.Thread:
     # Guard: if jobs are already registered the module was imported twice.
     # Return the existing scheduler thread rather than doubling all jobs.
@@ -776,28 +798,29 @@ def start_scheduler() -> threading.Thread:
     weekly_summary_day    = os.environ.get("WEEKLY_SUMMARY_DAY",       "sunday")
     weekly_summary_time   = os.environ.get("WEEKLY_SUMMARY_TIME",      "08:30")
 
-    schedule.every().day.at(digest_time).do(_job_daily_digest)
-    schedule.every().day.at(git_audit_time).do(_job_daily_git_audit)            # Daily Git/config integrity audit (GOV-02)
-    schedule.every().day.at(collector_time).do(_job_daily_collector)
-    schedule.every(cleanup_interval).minutes.do(_job_cleanup_pending)
-    schedule.every().day.at("00:05").do(_job_overdue_payments)
-    schedule.every(10).minutes.do(job_flush_lead_memory)                                          # N01
-    schedule.every(followup_interval).minutes.do(shabbat_safe(_job_followup_scan))               # N02
-    schedule.every().day.at(payment_reminder_time).do(shabbat_safe(_job_payment_reminders))      # N04
-    schedule.every().day.at(recovery_time).do(shabbat_safe(_job_lead_recovery))                  # F01
-    getattr(schedule.every(), learning_day).at(learning_time).do(_job_learning_cycle)            # F02
-    schedule.every(email_interval).minutes.do(_job_email_inbound)                                # F06 (email always ok)
-    schedule.every(abandoned_interval).minutes.do(shabbat_safe(_job_abandoned_scan))             # D02
-    getattr(schedule.every(), "sunday").at("08:00").do(shabbat_safe(_job_audience_report))       # D04
-    getattr(schedule.every(), "sunday").at("08:30").do(_job_attribution_report)                  # D05
-    schedule.every(15).minutes.do(shabbat_safe(_job_interaction_scan))                           # D06
-    getattr(schedule.every(), security_day).at(security_time).do(_job_security_reminder)
-    getattr(schedule.every(), weekly_summary_day).at(weekly_summary_time).do(_job_weekly_summary)  # C22
-    schedule.every().day.at("07:00").do(_job_daily_game_digest)                            # Game digest (flag: GAME_SCHEDULER)
-    getattr(schedule.every(), "sunday").at("08:00").do(_job_weekly_quest_reset)            # Game weekly reset
-    getattr(schedule.every(), "friday").at("18:00").do(_job_boss_battle_check)             # Boss battle check
-    schedule.every(60).minutes.do(_job_cost_watchdog)                                       # CORE_05 legacy: dollar-based emergency stop
-    schedule.every().day.at("08:15").do(_job_daily_usage_report)                             # CORE_05 v2: count-based JSONL watchdog (08:15 — מניעת cluster עם D04+Game ב-Sunday 08:00)
+    # Use automation guard wrapper for jobs that should be paused by EMERGENCY_STOP_AUTOMATION.
+    schedule.every().day.at(digest_time).do(_automation_guard(_job_daily_digest, name="daily_digest"))
+    schedule.every().day.at(git_audit_time).do(_automation_guard(_job_daily_git_audit, name="daily_git_audit"))            # Daily Git/config integrity audit (GOV-02)
+    schedule.every().day.at(collector_time).do(_automation_guard(_job_daily_collector, name="daily_collector"))
+    schedule.every(cleanup_interval).minutes.do(_automation_guard(_job_cleanup_pending, name="cleanup_pending"))
+    schedule.every().day.at("00:05").do(_automation_guard(_job_overdue_payments, name="overdue_payments"))
+    schedule.every(10).minutes.do(_automation_guard(job_flush_lead_memory, name="flush_lead_memory"))                                          # N01
+    schedule.every(followup_interval).minutes.do(shabbat_safe(_automation_guard(_job_followup_scan, name="followup_scan")))               # N02
+    schedule.every().day.at(payment_reminder_time).do(shabbat_safe(_automation_guard(_job_payment_reminders, name="payment_reminders")))      # N04
+    schedule.every().day.at(recovery_time).do(shabbat_safe(_automation_guard(_job_lead_recovery, name="lead_recovery")))                  # F01
+    getattr(schedule.every(), learning_day).at(learning_time).do(_automation_guard(_job_learning_cycle, name="learning_cycle"))            # F02
+    schedule.every(email_interval).minutes.do(_automation_guard(_job_email_inbound, name="email_inbound"))
+    schedule.every(abandoned_interval).minutes.do(shabbat_safe(_automation_guard(_job_abandoned_scan, name="abandoned_scan")))             # D02
+    getattr(schedule.every(), "sunday").at("08:00").do(shabbat_safe(_automation_guard(_job_audience_report, name="audience_report")))       # D04
+    getattr(schedule.every(), "sunday").at("08:30").do(_automation_guard(_job_attribution_report, name="attribution_report"))                  # D05
+    schedule.every(15).minutes.do(shabbat_safe(_automation_guard(_job_interaction_scan, name="interaction_scan")))                           # D06
+    getattr(schedule.every(), security_day).at(security_time).do(_automation_guard(_job_security_reminder, name="security_reminder"))
+    getattr(schedule.every(), weekly_summary_day).at(weekly_summary_time).do(_automation_guard(_job_weekly_summary, name="weekly_summary"))  # C22
+    schedule.every().day.at("07:00").do(_automation_guard(_job_daily_game_digest, name="daily_game_digest"))                            # Game digest (flag: GAME_SCHEDULER)
+    getattr(schedule.every(), "sunday").at("08:00").do(_automation_guard(_job_weekly_quest_reset, name="weekly_quest_reset"))            # Game weekly reset
+    getattr(schedule.every(), "friday").at("18:00").do(_automation_guard(_job_boss_battle_check, name="boss_battle_check"))             # Boss battle check
+    schedule.every(60).minutes.do(_automation_guard(_job_cost_watchdog, name="cost_watchdog"))                                       # CORE_05 legacy: dollar-based emergency stop
+    schedule.every().day.at("08:15").do(_automation_guard(_job_daily_usage_report, name="daily_usage_report"))                             # CORE_05 v2: count-based JSONL watchdog (08:15 — מניעת cluster עם D04+Game ב-Sunday 08:00)
 
     logger.info(
         f"📅 Scheduler | digest={digest_time} | git_audit={git_audit_time} | collector={collector_time} | "
