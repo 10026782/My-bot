@@ -444,7 +444,9 @@ def verify_result_claim(agent_text: str, tool_results: list[dict]) -> VerifyResu
 
 _SAFE_FALLBACK   = "לא הצלחתי לבצע את הפעולה. אנא נסה שוב."
 _MISMATCH_PREFIX = "⚠️ שים לב — ייתכן שהתוצאה אינה מדויקת.\n"
-_NO_TOOL_EVIDENCE_FALLBACK = "לא הצלחתי לאמת את הפעולה מול הכלי. לא ביצעתי שינוי. אפשר לנסות שוב?"
+# BUG-SB-05: must NOT state action-status ("לא ביצעתי שינוי") without Ledger evidence.
+# Neutral only — Gateway/Ledger is the single source of action-state truth.
+_NO_TOOL_EVIDENCE_FALLBACK = "לא ניתן לאמת כרגע את מצב הפעולה. פנה למרכז הניהול לבירור."
 
 
 def _has_required_tool(tool_results: list[dict], required_tools: frozenset[str]) -> bool:

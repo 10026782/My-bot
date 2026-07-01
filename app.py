@@ -748,7 +748,7 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
             )
 
     logger.info(f"[Approval] queued {action_id} | {tool_name} | user={user_chat_id}")
-    return f"⏳ הפעולה ממתינה לאישור הבעלים: {label}"
+    return f"⏳ הפעולה ממתינה לאישור: {label}\nשלח *מאשר* כדי לאשר (בכל ערוץ)."
 
 
 def _tool_user_message(result) -> str:
@@ -906,32 +906,48 @@ def _handle_approval_callback_impl(cq) -> None:
             return
 
     if action == "approve":
-        # BUG-SB-02: check ActionGateway contract status before dispatch —
-        # prevents double execution when user approved via free-text and then clicked the button.
+        # BUG-SB-02: peek the bus item (without consuming) to resolve fingerprint →
+        # ActionContract.status. Block if already executed/rejected before dispatching.
+        # action_id is an event_bus key, NOT a contract_id — must go via fingerprint.
         try:
             from feature_flags import is_enabled as _flag_sb02
             if _flag_sb02("FEATURE_ACTION_GATEWAY"):
-                from core.action_gateway import action_gateway as _gw_sb02
-                _contract_sb02 = _gw_sb02.find_contract(action_id)
-                if _contract_sb02 is None:
-                    # action_id may be a bus key, not a contract_id — also check fingerprint path
-                    pass
-                elif _contract_sb02.status == "executed":
-                    bot.answer_callback_query(cq.id, "✅ פעולה זו כבר בוצעה")
-                    try:
-                        bot.edit_message_reply_markup(cq.message.chat.id, cq.message.message_id,
-                                                      reply_markup=None)
-                    except Exception:
-                        pass
-                    return
-                elif _contract_sb02.status == "rejected":
-                    bot.answer_callback_query(cq.id, "❌ פעולה זו בוטלה")
-                    try:
-                        bot.edit_message_reply_markup(cq.message.chat.id, cq.message.message_id,
-                                                      reply_markup=None)
-                    except Exception:
-                        pass
-                    return
+                _peek_item = bus.get(action_id)
+                if _peek_item:
+                    _peek_payload = _peek_item.get("payload", {})
+                    _peek_tool    = _peek_payload.get("tool_name", "")
+                    _peek_inputs  = _peek_payload.get("tool_inputs", {})
+                    _peek_uid     = _peek_payload.get("canonical_user_id", "")
+                    _peek_tid     = _peek_payload.get("tenant_id", "boss_hq")
+                    if _peek_tool and _peek_uid:
+                        from core.action_gateway import action_gateway as _gw_sb02
+                        _fp_sb02 = _gw_sb02.compute_business_fingerprint(
+                            _peek_tid, _peek_uid, _peek_tool,
+                            _gw_sb02.normalize_payload(_peek_inputs),
+                        )
+                        _contract_sb02 = _gw_sb02._ledger.find_by_fingerprint(_fp_sb02)
+                        if _contract_sb02 is not None:
+                            if _contract_sb02.status == "executed":
+                                bot.answer_callback_query(cq.id, "✅ פעולה זו כבר בוצעה")
+                                try:
+                                    bot.edit_message_reply_markup(
+                                        cq.message.chat.id, cq.message.message_id, reply_markup=None)
+                                except Exception:
+                                    pass
+                                logger.info(
+                                    "[ActionGateway] SB-02: blocked duplicate callback "
+                                    "action_id=%s contract=%s tool=%s status=executed",
+                                    action_id, _contract_sb02.contract_id, _peek_tool,
+                                )
+                                return
+                            if _contract_sb02.status == "rejected":
+                                bot.answer_callback_query(cq.id, "❌ פעולה זו בוטלה")
+                                try:
+                                    bot.edit_message_reply_markup(
+                                        cq.message.chat.id, cq.message.message_id, reply_markup=None)
+                                except Exception:
+                                    pass
+                                return
         except Exception as _sb02_exc:
             logger.warning("[ActionGateway] SB-02 status pre-check failed (non-blocking): %s", _sb02_exc)
 
