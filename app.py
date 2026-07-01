@@ -609,8 +609,8 @@ def _describe_tool_call(tool_name: str, inputs: dict) -> str:
         start = str(inputs.get("start_time", "?"))[:16]
         return f"📅 קבע: {inputs.get('summary', '?')} ב-{start}"
     if tool_name == "airtable_add":
-        fields_str = str(inputs.get("fields", {}))[:50]
-        return f"➕ הוסף ל-{inputs.get('table', '?')}: {fields_str}"
+        field_keys = ", ".join(inputs.get("fields", {}).keys()) if isinstance(inputs.get("fields"), dict) else "?"
+        return f"➕ הוסף ל-{inputs.get('table', '?')}: [{field_keys}]"
     if tool_name == "airtable_update":
         return f"✏️ עדכן {inputs.get('record_id', '?')} ב-{inputs.get('table', '?')}"
     if tool_name == "sheets_append":
@@ -734,8 +734,7 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
         try:
             bot.send_message(
                 owner_chat_id,
-                f"⏳ *בקשת אישור*\n\n{label}\n\n_ID: {action_id} | פג תוקף בעוד 10 דקות_",
-                parse_mode="Markdown",
+                f"⏳ בקשת אישור\n\n{label}\n\nID: {action_id} | פג תוקף בעוד 10 דקות",
                 reply_markup=kb,
             )
             logger.info(f"[Approval] ✅ sent to owner {owner_chat_id} | {action_id}")
@@ -1078,10 +1077,12 @@ def _handle_approval_callback_impl(cq) -> None:
 
         logger.info(f"[Approval] ✅ confirmed {action_id} | {tool_name or item.get('action')}")
 
-        # Stage A: route success notify to origin_channel, not always telegram
+        # Stage A/B: route success notify to origin_channel, not always telegram.
+        # When FEATURE_ACTION_GATEWAY is on, compose_status_reply (SB-04) already
+        # produced the GatewayReply text; send it to the requester only.
         if origin_channel == "telegram":
             try:
-                bot.send_message(origin_chat_id, f"✅ הפעולה בוצעה:\n{result}")
+                bot.send_message(origin_chat_id, result)
             except Exception as e:
                 logger.error(f"[Approval] notify user failed: {e}")
         else:
@@ -1089,10 +1090,10 @@ def _handle_approval_callback_impl(cq) -> None:
                                      action_id, tool_name or item.get("action", ""), result)
 
         try:
+            # Owner button updated to plain text (no raw tool result) to avoid Markdown failures
             bot.edit_message_text(
-                f"✅ *אושר ובוצע*\n{item['label']}\n\n`{result[:200]}`",
+                f"✅ אושר ובוצע\n{item['label']}",
                 cq.message.chat.id, cq.message.message_id,
-                parse_mode="Markdown",
             )
         except Exception:
             pass
@@ -1672,7 +1673,10 @@ def run_agent(
             messages.append({"role": "user",      "content": tool_results})
 
         # A32 — final hallucination check before reply reaches user
-        final_reply = sanitize_agent_response(final_reply, tool_results_log)
+        final_reply = sanitize_agent_response(
+            final_reply, tool_results_log,
+            _gateway_active=_flag_enabled("FEATURE_ACTION_GATEWAY"),
+        )
 
         # ── שמירת זיכרון ─────────────────────────
         memory.add(ctx.memory_key, "user",      clean_msg)
