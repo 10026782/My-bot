@@ -222,10 +222,10 @@ def verify_execution(tool_name: str, raw_output: Any) -> VerifyResult:
                         "failed",
                         "calendar_create_event: missing evidence.htmlLink"
                     )
-            if tool_name.startswith("airtable_") and not external_id.startswith("rec"):
+            if tool_name.startswith("airtable_") and not re.match(r'^rec[A-Za-z0-9]{8,17}$', external_id):
                 return VerifyResult(
                     "failed",
-                    f"{tool_name}: external_id '{external_id}' is not an Airtable record_id"
+                    f"{tool_name}: external_id '{external_id[:30]}' is not a valid Airtable record_id"
                 )
         return VerifyResult("ok")
 

@@ -378,20 +378,17 @@ class ActionGateway:
         return f"✅ פעולה אושרה: {contract.tool_name}"
 
     def _execute_contract(self, contract: ActionContract) -> str:
-        """מבצע tool לאחר אישור — approved_payload == executed_payload (DoD §6)."""
+        """
+        מבצע tool לאחר אישור — approved_payload == executed_payload (DoD §6).
+        מריץ verify_execution על התוצאה — success claims require real tool evidence (DoD §3, §6).
+        """
         self._ledger.update_status(contract.contract_id, "executing")
         try:
-            result = self._tool_executor(
+            raw = self._tool_executor(
                 tool_name=contract.tool_name,
                 tool_inputs=contract.normalized_payload,
                 contract_id=contract.contract_id,
             )
-            self._ledger.update_status(contract.contract_id, "executed")
-            logger.info(
-                "[ActionGateway] executed: contract=%s tool=%s",
-                contract.contract_id, contract.tool_name,
-            )
-            return result if isinstance(result, str) else str(result)
         except Exception as exc:
             self._ledger.update_status(contract.contract_id, "failed")
             logger.error(
@@ -399,6 +396,30 @@ class ActionGateway:
                 contract.contract_id, exc,
             )
             return f"❌ ביצוע נכשל: {exc}"
+
+        # §3 / §6: verify before reporting success — no real evidence → failure
+        try:
+            from core.anti_hallucination import verify_execution
+            check = verify_execution(contract.tool_name, raw)
+            if check.status == "failed":
+                self._ledger.update_status(contract.contract_id, "failed")
+                logger.error(
+                    "[ActionGateway] evidence missing: contract=%s tool=%s reason=%s",
+                    contract.contract_id, contract.tool_name, check.reason,
+                )
+                return f"❌ הפעולה לא הושלמה: {check.reason}"
+        except Exception as verify_exc:
+            logger.warning("[ActionGateway] verify_execution import failed: %s", verify_exc)
+
+        self._ledger.update_status(contract.contract_id, "executed")
+        logger.info(
+            "[ActionGateway] executed: contract=%s tool=%s",
+            contract.contract_id, contract.tool_name,
+        )
+        # extract user-facing message from C53-A structured result
+        if isinstance(raw, dict):
+            return raw.get("user_message") or str(raw)
+        return str(raw)
 
     # ── query helpers ────────────────────────────────────────────────
 
@@ -478,5 +499,31 @@ def _build_airtable_writer():
         return None
 
 
+def _make_dispatch_executor(ledger: ExecutionLedger):
+    """
+    מחזיר tool executor שמחובר ל-dispatcher.
+    Closure על ה-ledger — מוצא identity מהחוזה לפי contract_id.
+    לא מייבא dispatcher/identity בזמן module-load (נמנעים מ-circular import).
+    """
+    def _executor(tool_name: str, tool_inputs: dict, contract_id: str):
+        from tools.dispatcher import dispatch_tool
+        from identity import resolve_identity
+
+        identity = None
+        contract = ledger.find_by_id(contract_id)
+        if contract:
+            try:
+                identity = resolve_identity(contract.origin_channel, contract.origin_chat_id)
+            except Exception as exc:
+                logger.warning("[ActionGateway] identity resolve failed: %s", exc)
+
+        return dispatch_tool(tool_name, tool_inputs, identity=identity)
+
+    return _executor
+
+
 _ledger_singleton = ExecutionLedger(airtable_writer=None)  # RAM-only until Airtable table exists
-action_gateway = ActionGateway(ledger=_ledger_singleton)
+action_gateway = ActionGateway(
+    ledger=_ledger_singleton,
+    tool_executor=_make_dispatch_executor(_ledger_singleton),
+)

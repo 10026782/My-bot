@@ -124,7 +124,13 @@ _dispatched = []
 
 def _tracking_executor(tool_name, tool_inputs, contract_id):
     _dispatched.append({"tool": tool_name, "inputs": tool_inputs})
-    return f"created recXOW7TEST"
+    # C53-A structured result with a valid Airtable record ID
+    return {
+        "ok": True, "tool": tool_name,
+        "external_id": "recXOW7FBZQZcNdw1",
+        "evidence": {"record_id": "recXOW7FBZQZcNdw1"},
+        "user_message": "✅ רשומה נוספה | ID: recXOW7FBZQZcNdw1",
+    }
 
 gw = ActionGateway(ledger=ExecutionLedger(), tool_executor=_tracking_executor)
 
