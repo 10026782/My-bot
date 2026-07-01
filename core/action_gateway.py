@@ -131,6 +131,52 @@ class DuplicateOverrideApproval:
     consumed:             bool   # False עד שימוש; True אחרי — חד-פעמי
 
 
+# ══════════════════════════════════════════════════
+# §19 / §15.7-ב — canonical tool selection
+# נקרא *לפני* יצירת ActionContract — מחזיר tool_name יחיד ומוכרע.
+# מונע מצב שבו שני contracts מקבילים נוצרים לאותה business action.
+# ══════════════════════════════════════════════════
+
+# מילים שמצביעות על בקשה מפורשת ל-Sheets/Drive
+_SHEETS_KEYWORDS = frozenset({
+    "שיטס", "sheets", "google sheets", "גוגל שיטס",
+    "גיליון", "גליון", "spreadsheet", "טבלה ב-google",
+})
+_DRIVE_KEYWORDS = frozenset({
+    "דרייב", "drive", "google drive", "גוגל דרייב", "קובץ ב-drive",
+})
+
+# ברירת מחדל per tool-category — אפשר להרחיב
+_CANONICAL_TOOL_DEFAULT = "airtable_add"
+
+
+def resolve_canonical_tool(
+    tool_hint: str,
+    tool_inputs: dict,
+    user_text: str = "",
+) -> str:
+    """
+    מחזיר tool_name יחיד ומוכרע לפני יצירת ActionContract.
+    ברירת מחדל: airtable_add.
+    sheets_append/drive_upload מוחזרים רק אם המשתמש ביקש Sheets/Drive במפורש.
+    """
+    if tool_hint in ("sheets_append", "drive_upload", "drive_create"):
+        lower = user_text.lower()
+        if tool_hint == "sheets_append" and any(k in lower for k in _SHEETS_KEYWORDS):
+            return "sheets_append"
+        if tool_hint in ("drive_upload", "drive_create") and any(k in lower for k in _DRIVE_KEYWORDS):
+            return tool_hint
+        # hint was sheets/drive but user didn't explicitly ask — fall back to Airtable
+        logger.info(
+            "[ActionGateway] resolve_canonical_tool: overriding %s → %s "
+            "(no explicit Sheets/Drive request in user_text)",
+            tool_hint, _CANONICAL_TOOL_DEFAULT,
+        )
+        return _CANONICAL_TOOL_DEFAULT
+    # all other tools: trust the caller
+    return tool_hint
+
+
 def _hash_challenge(code: str) -> str:
     return hashlib.sha256(code.encode()).hexdigest()
 

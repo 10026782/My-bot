@@ -99,19 +99,45 @@ def send_outbound(envelope: OutboundEnvelope) -> GatewayResult:
     """
     audit_id = str(uuid.uuid4())[:12]
 
-    # §15.3 §18 — Single Speaker Safety Belt.
+    # §15.3 §18 — Single Speaker Enforcement.
     # GatewayReply (origin=action_gateway) is the only permitted source for action-status text.
-    # If non-gateway source carries status words → warn (safety belt, not hard block at this layer).
+    # FEATURE_ACTION_GATEWAY=false → warning-only (shadow).
+    # FEATURE_ACTION_GATEWAY=true  → hard block: replace body with safe fallback.
     _source = envelope.source_module or ""
     if _source != "action_gateway":
         try:
             from core.action_gateway import _ACTION_STATUS_PATTERN
             if _ACTION_STATUS_PATTERN.search(envelope.body):
-                logger.warning(
-                    "[COG] SINGLE_SPEAKER_VIOLATION | source=%s | ref=%s | "
-                    "body_preview=%.80r — action-status text from non-gateway source",
-                    _source, envelope.source_ref, envelope.body,
-                )
+                from feature_flags import is_enabled as _flag_ssp
+                _strict = _flag_ssp("FEATURE_ACTION_GATEWAY")
+                if _strict:
+                    logger.error(
+                        "[COG] SINGLE_SPEAKER_VIOLATION BLOCKED | source=%s | ref=%s | "
+                        "body_preview=%.80r",
+                        _source, envelope.source_ref, envelope.body,
+                    )
+                    # replace body with a neutral gateway fallback — never send non-gateway status text
+                    _contract_ref = envelope.meta.get("contract_id", "")
+                    envelope = OutboundEnvelope(
+                        channel=envelope.channel,
+                        recipient=envelope.recipient,
+                        body=(
+                            "⚙️ פרטי הפעולה זמינים דרך מרכז הניהול."
+                            + (f" (ref: {_contract_ref[:8]})" if _contract_ref else "")
+                        ),
+                        audience=envelope.audience,
+                        source_module="action_gateway",
+                        source_ref=envelope.source_ref,
+                        domain=envelope.domain,
+                        draft=envelope.draft,
+                        meta=envelope.meta,
+                    )
+                else:
+                    logger.warning(
+                        "[COG] SINGLE_SPEAKER_VIOLATION (shadow) | source=%s | ref=%s | "
+                        "body_preview=%.80r",
+                        _source, envelope.source_ref, envelope.body,
+                    )
         except Exception:
             pass
 
