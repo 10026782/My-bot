@@ -136,7 +136,7 @@ chk("Req3: success reply not sent for failed tool", "✅" not in reply_fail or "
 print("\n── Req #4: Fake record IDs rejected ─────────────────────────")
 
 # Real Airtable record IDs: "rec" + 14 alphanumeric chars
-VALID_REC_IDS = ["recXOW7FBZQZcNdw1", "rec1234abcdefgh", "recABCDEFGHIJKLMN"]
+VALID_REC_IDS = ["recXOW7FBZQZcNdw1", "rec1234abcdefghij", "recABCDEFGHIJKLMN"]
 FAKE_REC_IDS  = [
     "rec[שמור בהצלחה]",   # the reported fake pattern
     "rec_כן_נשמר",         # underscore + Hebrew

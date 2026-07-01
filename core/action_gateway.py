@@ -260,8 +260,16 @@ class ActionGateway:
 
         self._ledger.save(contract)
         logger.info(
-            "[ActionGateway] propose_action: contract=%s tool=%s user=%s status=%s",
-            contract.contract_id, tool_name, canonical_user_id, contract.status,
+            "[ActionGateway] propose_action: contract=%s fingerprint=%.12s "
+            "tool=%s table=%s provider=%s channel=%s status=%s user=%s",
+            contract.contract_id,
+            fingerprint,
+            tool_name,
+            normalized.get("table", normalized.get("spreadsheet_name", "")),
+            "airtable" if "airtable" in tool_name else tool_name.split("_")[0],
+            origin_channel,
+            contract.status,
+            canonical_user_id,
         )
         return GatewayResult(ok=True, reason="contract נרשם", contract_id=contract.contract_id)
 
@@ -356,26 +364,53 @@ class ActionGateway:
     # ── §3.3 — approve ──────────────────────────────────────────────
 
     def approve(self, contract_id: str, approver: str) -> str:
-        """מאשר contract ומבצע אותו (אם tool_executor מחובר)."""
+        """
+        מאשר contract ומבצע אותו.
+        Fail closed: אם _tool_executor חסר — לא מחזיר success, לא מסמן executed.
+        """
         contract = self._ledger.find_by_id(contract_id)
         if not contract:
+            logger.warning("[ActionGateway] approve: contract not found id=%s", contract_id)
             return "⚠️ פעולה לא נמצאה."
         if contract.status != "pending":
+            logger.info(
+                "[ActionGateway] approve: not-pending contract=%s status=%s",
+                contract_id, contract.status,
+            )
             return f"⚠️ הפעולה אינה במצב המתנה (מצב נוכחי: {contract.status})."
+
+        # §§3/#6 fail-closed: without executor no execution can be verified
+        if not self._tool_executor:
+            logger.error(
+                "[ActionGateway] approve: _tool_executor is None — failing closed. "
+                "contract=%s tool=%s user=%s",
+                contract_id, contract.tool_name, approver,
+            )
+            return (
+                "❌ Gateway executor לא מחובר — הפעולה לא בוצעה. "
+                "פנה לתמיכה טכנית."
+            )
+
         if contract.canonical_user_id != approver and not approver.startswith("owner"):
             logger.warning(
-                "[ActionGateway] approve: approver mismatch contract=%s approver=%s",
-                contract_id, approver,
+                "[ActionGateway] approve: approver mismatch contract=%s approver=%s owner=%s",
+                contract_id, approver, contract.canonical_user_id,
             )
         self._ledger.update_status(
             contract_id, "approved",
             approved_by=approver,
             approved_at=time.time(),
         )
-        logger.info("[ActionGateway] approved: contract=%s by=%s", contract_id, approver)
-        if self._tool_executor:
-            return self._execute_contract(contract)
-        return f"✅ פעולה אושרה: {contract.tool_name}"
+        logger.info(
+            "[ActionGateway] approved: contract=%s fingerprint=%.12s tool=%s "
+            "payload_keys=%s by=%s",
+            contract_id,
+            contract.business_action_fingerprint,
+            contract.tool_name,
+            list(contract.normalized_payload.keys()),
+            approver,
+        )
+        return self._execute_contract(contract)
 
     def _execute_contract(self, contract: ActionContract) -> str:
         """
@@ -412,9 +447,15 @@ class ActionGateway:
             logger.warning("[ActionGateway] verify_execution import failed: %s", verify_exc)
 
         self._ledger.update_status(contract.contract_id, "executed")
+        ext_id = raw.get("external_id", "") if isinstance(raw, dict) else ""
         logger.info(
-            "[ActionGateway] executed: contract=%s tool=%s",
-            contract.contract_id, contract.tool_name,
+            "[ActionGateway] executed: contract=%s fingerprint=%.12s tool=%s "
+            "external_id=%s payload_keys=%s",
+            contract.contract_id,
+            contract.business_action_fingerprint,
+            contract.tool_name,
+            ext_id,
+            list(contract.normalized_payload.keys()),
         )
         # extract user-facing message from C53-A structured result
         if isinstance(raw, dict):

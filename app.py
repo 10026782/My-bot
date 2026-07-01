@@ -83,7 +83,9 @@ _pending_approvals: dict[str, dict] = {}
 # near-simultaneous requests for the same chat_id (duplicate webhook delivery,
 # fast double "כן") must not both observe-then-act on the same pending entry.
 _pending_approvals_lock = threading.Lock()
-_CONFIRM_WORDS = frozenset({"כן", "אשר", "✅", "yes", "y", "ok", "אוקי", "בצע", "קדימה"})
+_CONFIRM_WORDS = frozenset({
+    "כן", "אשר", "מאשר", "מאשרת", "✅", "yes", "y", "ok", "אוקי", "בצע", "קדימה",
+})
 _CANCEL_WORDS  = frozenset({"לא", "בטל", "❌", "no", "n", "ביטול", "עצור", "cancel"})
 
 # ─── קליינטים ──────────────────────────────────────
@@ -1216,7 +1218,11 @@ def run_agent(
             from core.action_gateway import action_gateway as _gw_ow
             return _gw_ow.route_override_word(identity.memory_key, _override_code)
 
-        if _lower in _CONFIRM_WORDS:
+        # §8 — שאלות סטטוס ("?", "נכשל?", "אושר?") לא מהוות אישור לעולם.
+        # בדיקה לפני confirm-word כדי שלא תיגע ב-Gateway.
+        if "?" in _stripped:
+            pass  # fall through — route to Agent as status query
+        elif _lower in _CONFIRM_WORDS:
             from feature_flags import is_enabled as _flag_cw
             if _flag_cw("FEATURE_ACTION_GATEWAY"):
                 # Stage B: Gateway הוא מקור האמת לאישור

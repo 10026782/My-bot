@@ -222,10 +222,10 @@ def verify_execution(tool_name: str, raw_output: Any) -> VerifyResult:
                         "failed",
                         "calendar_create_event: missing evidence.htmlLink"
                     )
-            if tool_name.startswith("airtable_") and not re.match(r'^rec[A-Za-z0-9]{8,17}$', external_id):
+            if tool_name.startswith("airtable_") and not re.match(r'^rec[A-Za-z0-9]{14}$', external_id):
                 return VerifyResult(
                     "failed",
-                    f"{tool_name}: external_id '{external_id[:30]}' is not a valid Airtable record_id"
+                    f"{tool_name}: external_id '{external_id[:30]}' is not a valid Airtable record_id (expected ^rec[A-Za-z0-9]{{14}}$)"
                 )
         return VerifyResult("ok")
 
@@ -420,7 +420,7 @@ def _run_tests() -> bool:
 
     # ── verify_execution — structured dict contract ──────────
     check("airtable_add success (structured dict, rec-id)",
-          verify_execution("airtable_add", _make_result("airtable_add", "rec1234abc")),
+          verify_execution("airtable_add", _make_result("airtable_add", "rec1234abcXYZpq")),
           "ok")
 
     check("airtable_add ok=False → failed",
