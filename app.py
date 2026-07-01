@@ -975,6 +975,30 @@ def _handle_approval_callback_impl(cq) -> None:
             # Stage A: also clear cross-channel duplicate pending
             if canonical_user_id:
                 bus.mark_equivalent_pending_completed(canonical_user_id, tool_name, tool_inputs)
+            # Stage B sync: mark the Gateway contract executed so a subsequent
+            # free-text "מאשר" on another channel doesn't re-dispatch the same tool.
+            try:
+                from feature_flags import is_enabled as _flag_gw
+                if _flag_gw("FEATURE_ACTION_GATEWAY"):
+                    from core.action_gateway import action_gateway as _gw_sync
+                    _fp = _gw_sync.compute_business_fingerprint(
+                        getattr(identity, "tenant_id", "boss_hq"),
+                        canonical_user_id, tool_name,
+                        _gw_sync.normalize_payload(tool_inputs),
+                    )
+                    _existing = _gw_sync._ledger.find_by_fingerprint(_fp)
+                    if _existing and _existing.status == "pending":
+                        _gw_sync._ledger.update_status(
+                            _existing.contract_id, "executed",
+                            approved_by=canonical_user_id,
+                            approved_at=__import__("time").time(),
+                        )
+                        logger.info(
+                            "[ActionGateway] Stage-A callback synced contract=%s tool=%s → executed",
+                            _existing.contract_id, tool_name,
+                        )
+            except Exception as _gw_sync_exc:
+                logger.warning("[ActionGateway] Stage-A sync failed (non-blocking): %s", _gw_sync_exc)
 
             result = _tool_user_message(result)
 

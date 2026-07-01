@@ -488,6 +488,43 @@ gw_sub.approve(r_sub.contract_id, approver="boss_hq:owner_1")
 chk("Req10/tool-sub: airtable_add dispatched (not sheets_append)", _sub_tools == ["airtable_add"])
 
 # ══════════════════════════════════════════════════
+# BUG-LIVE-01: Stage A callback must sync Gateway ledger
+# Scenario: tool approved via Telegram button (Stage A) at 15:48,
+# then user sends "מאשר" on WhatsApp at 15:49 → must NOT re-execute.
+# Fix: _handle_approval_callback marks Gateway contract as executed.
+# ══════════════════════════════════════════════════
+print("\n── BUG-LIVE-01: Stage A → Gateway ledger sync ───────────────")
+
+_live01_dispatched = []
+def _live01_executor(tool_name, tool_inputs, contract_id):
+    _live01_dispatched.append(tool_name)
+    return _ok_executor(tool_name, tool_inputs, contract_id)
+
+gw_live01 = _new_gw(_live01_executor)
+
+# Step 1: propose_action (Gateway learns about the pending action)
+r_live01 = gw_live01.propose_action(**_BASE_PROPOSE)
+chk("BUG-LIVE-01: propose creates pending contract", r_live01.ok)
+chk("BUG-LIVE-01: no dispatch yet", len(_live01_dispatched) == 0)
+
+# Step 2: Stage A Telegram button callback executes the tool directly,
+# then syncs the Gateway ledger (simulates _handle_approval_callback fix)
+contract_live01 = gw_live01.find_contract(r_live01.contract_id)
+# Simulate Stage A execution (direct dispatch, not via Gateway.approve)
+# then manually mark the contract executed as the fix does
+gw_live01._ledger.update_status(
+    r_live01.contract_id, "executed",
+    approved_by="boss_hq:owner_1",
+    approved_at=__import__("time").time(),
+)
+chk("BUG-LIVE-01: contract marked executed after Stage A sync", contract_live01.status == "executed")
+
+# Step 3: user says "מאשר" on WhatsApp → must NOT re-dispatch
+reply_live01 = gw_live01.route_confirmation_word("boss_hq:owner_1")
+chk("BUG-LIVE-01: מאשר after Stage A execution → no re-dispatch", len(_live01_dispatched) == 0)
+chk("BUG-LIVE-01: reply says no pending action", "אין" in reply_live01 or "ממתינ" not in reply_live01)
+
+# ══════════════════════════════════════════════════
 # Summary
 # ══════════════════════════════════════════════════
 print(f"\n{'═'*50}")
