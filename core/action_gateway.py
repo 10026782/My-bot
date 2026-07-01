@@ -330,7 +330,7 @@ class ActionGateway:
                     ok=False,
                     reason="כבר קיימת בקשת אישור פתוחה לפעולה הזו.",
                     contract_id=existing.contract_id,
-                    user_message="⏳ כבר יש בקשת אישור פתוחה לפעולה זו. נא לאשר את הכפתור שנשלח.",
+                    user_message="⏳ כבר יש בקשת אישור פתוחה לפעולה זו. שלח *מאשר* כדי לאשר.",
                 )
             if existing.status == "executed":
                 return self._handle_duplicate_executed(existing, canonical_user_id)

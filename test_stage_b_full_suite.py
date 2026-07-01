@@ -741,13 +741,18 @@ _run_sig = _inspect.signature(_app_mod.run_agent)
 chk("SB-01: run_agent has _out_meta param", "_out_meta" in _run_sig.parameters)
 chk("SB-01: _out_meta defaults to None", _run_sig.parameters["_out_meta"].default is None)
 
-# BUG-SB-02: _handle_approval_callback_impl checks contract.status before dispatch
-import ast as _ast
-_app_src = open("/home/user/My-bot/app.py").read()
-chk("SB-02: callback impl checks contract.status == 'executed'",
+# BUG-SB-02: callback resolves fingerprint via bus.get() peek before dispatch
+import os as _os
+_app_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "app.py")
+_app_src = open(_app_path).read()
+chk("SB-02: callback peeks bus.get before pop (fingerprint resolution)",
+    "bus.get(action_id)" in _app_src or "_peek_item = bus.get" in _app_src)
+chk("SB-02: callback checks contract.status == 'executed'",
     '_contract_sb02.status == "executed"' in _app_src)
-chk("SB-02: callback impl checks contract.status == 'rejected'",
+chk("SB-02: callback checks contract.status == 'rejected'",
     '_contract_sb02.status == "rejected"' in _app_src)
+chk("SB-02: compute_business_fingerprint used in callback",
+    "compute_business_fingerprint" in _app_src)
 
 # BUG-SB-03: query_execution_status returns pending message when no executed
 gw_sb03 = ActionGateway(tool_executor=_ok_executor)
@@ -794,6 +799,23 @@ _fact_fail = ActionFact(
 _reply_fail = _gw_singleton.compose_status_reply(_fact_fail)
 chk("SB-04: failed ActionFact → GatewayReply contains error_code",
     "TIMEOUT" in _reply_fail.text)
+
+# BUG-SB-05: A32 fallback must be neutral — no "לא ביצעתי שינוי"
+from core.anti_hallucination import _NO_TOOL_EVIDENCE_FALLBACK
+chk("SB-05: A32 fallback does not claim action-state ('לא ביצעתי שינוי')",
+    "לא ביצעתי שינוי" not in _NO_TOOL_EVIDENCE_FALLBACK)
+chk("SB-05: A32 fallback is neutral (no 'לא הצלחתי לאמת ... לא ביצעתי')",
+    "ביצעתי" not in _NO_TOOL_EVIDENCE_FALLBACK)
+chk("SB-05: A32 fallback contains no action-status verb",
+    all(w not in _NO_TOOL_EVIDENCE_FALLBACK for w in ("בוצע", "נוסף", "נשלח", "נשמר", "ביצעתי")))
+
+# Copy: pending message must be channel-neutral
+_gw_copy = open(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "core/action_gateway.py")).read()
+_app_copy = _app_src  # already loaded above
+chk("Copy: pending message channel-neutral (no 'בטלגרם' in approval copy)",
+    "נא לאשר את הכפתור שנשלח" not in _gw_copy)
+chk("Copy: pending message invites 'מאשר' approval on any channel",
+    "מאשר" in _gw_copy and ("בכל ערוץ" in _app_copy or "מאשר" in _app_copy))
 
 # ══════════════════════════════════════════════════
 # Summary
