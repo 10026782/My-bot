@@ -1,5 +1,9 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
+עודכן: 02/07/2026 — BUG-051 (SPEC-1-LCH-ROUTER-BYPASS): LeadCandidate Handler רץ לפני route_request() לכל sender פנימי — Router עוקף לגמרי, domain מנוחש ב-regex פנימי. תוקן: capture_tier/capture_reason/raw_ref על RouteDecision (additive), core/router/capture_router.py חדש עוטף classify_ingress() הקיים, LCH הועבר לרוץ אחרי ה-Router עם domain אמיתי. `branch feature/capture-policy-stage-3`, טרם ממוזג. ראה סעיף C89 + BUG_AUDIT_LOG.md.
+עודכן קודם: 02/07/2026 — BUG-049 (BUG-CI-SILENT-PASS-DOCUMENT-CONVERTER): `test_document_converter.py` רץ ב-CI בלי לבצע אף assertion (exit 0 שקרי). `__main__` guard נוסף, מוזג ל-main (PR #204). ראה סעיף "Fxx — Safe Document Converter" + BUG_AUDIT_LOG.md.
+עודכן קודם: 02/07/2026 — PR #203 מוזג: C89 קוד הושלם (flag כבוי, ממתין ל-production verification), BUG-047/BUG-048 (session dedup + ambiguous phrase gate) תוקנו. ראה BUG_AUDIT_LOG.md.
+עודכן קודם: 02/07/2026 — Stage 3 Capture Policy (C89–C93) נוסף. IngressClassification + tiered auto-write. ראה SPEC_Stage_3_Capture_Policy.md.
 עודכן: 01/07/2026 — סקירת `fix/c53-approval-hardening`: הוחלט לא למזג את הענף. נפתחו שמונה follow-ups בעדיפות ראשונה (`C81-FU`, `C82-FU`, `C83`–`C88`).
 עודכן קודם: 30/06/2026 — Lead Lifecycle + Decision Hub Quality Gate session log. N-LEAD-EVENT/N-CXX/N-LEADBUF/N14 נוספו. BUG-DH-03/04 כblocker לפני FEATURE_DECISION_HUB.
 עודכן קודם: 29/06/2026 — Git Diff Gap Report session, main = `debb270` (אומת
@@ -276,6 +280,46 @@ Decision Hub Stage 3 (Readiness Engine, F18): `decision_readiness.py` (`calc_rea
 **עדיפות:** 🟠 בינוני
 **בעיה:** נכשל פתוח ב-staging.
 **פעולה:** fail-closed כברירת מחדל; override מפורש לטסטים בלבד.
+
+---
+
+### C89 — ✅ קוד הושלם ומוזג (PR #203, `bb81e6c`) — Stage 3: Capture Policy — Tiered Auto-Write (טקסט)
+**עדיפות:** 🔴 גבוה — flag כבוי, ממתין להפעלה מפורשת + production verification לפני C90+
+**Branch:** מוזג מ-`claude/session-duplication-claimgate-gnkfiy`, ענף נמחק
+**Feature Flag:** `FEATURE_AUTO_CAPTURE` (כבוי כברירת מחדל — ללא שינוי התנהגות בפרודקשן)
+**תלות:** Action Gateway (Stage B) פעיל + SB-01–SB-04 סגורים. ✅ עברו.
+**בעיה שנפתרה:** LCH batch auto-write לא היה בטוח — parser בלבל שולח/ליד, פלט כלי, ייצוא WhatsApp. ראה live test 02/07/2026.
+**מה נבנה:** `classify_ingress() → IngressClassification` — מדיניות מדורגת:
+- Tier 1 (SIMPLE_CAPTURE): שם+טלפון ברור → כתיבה אוטומטית דרך Gateway, בלי preview (כש-flag דלוק).
+- Tier 2 (CLEAN_BATCH): כמה שורות high-confidence → כתיבה אוטומטית + סיכום.
+- Tier 3 (MIXED_BATCH): ברורים נכתבים, עמומים → needs_review.
+- Tier 4 (EXPORT/TABLE/LOG): אפס writes — תמיד, לא משנה flag.
+- Tier 5 (UNKNOWN_USEFUL): ממשיך ל-agent, לא יוצר Leads/Tasks.
+**עקרונות נעולים:** auto-write = additive-only (create בלבד, לא update/overwrite). כל tier עובר Gateway. Raw נשמר תמיד.
+**קובץ ראשי:** `core/ingress_classifier.py` (חדש), `core/lead_candidate_handler.py`
+**DoD:** ראה SPEC_Stage_3_Capture_Policy.md §7 — **קובץ זה לא קיים בפועל בריפו** (grep מאמת, 02/07/2026); reference תלוי באוויר, לא תוקן — ה-DoD המחייב עכשיו הוא BUG-051 (למטה) + `test_capture_router_wiring.py`.
+**נותר:** production verification (הפעלת `FEATURE_AUTO_CAPTURE` + מעקב AgentObservation) לפני פתיחת C90.
+
+**עדכון 02/07/2026 (BUG-051, `feature/capture-policy-stage-3`, טרם ממוזג) — Router-Integration:**
+`handle_lead_candidate()` (LCH) רץ עד עכשיו ב-`app.py` שלב "1.45", **לפני** `route_request()` — Identity→Router→Context→Agent לא רץ בכלל לכל sender פנימי שנתפס כ-lead candidate; domain נקבע ע"י regex mirror פנימי (`_detect_domain`), לא ה-`domain_router` האמיתי. תוקן: `RouteDecision` קיבל 3 שדות אופציונליים (`capture_tier`/`capture_reason`/`raw_ref`, additive-only — אין טיפוס מקביל חדש), `core/router/capture_router.py` חדש עוטף את `classify_ingress()` הקיים (אין שכתוב, אין import לתשתית), `router.py` קורא לו כשלב חדש. `app.py`'s LCH call הועבר ל-**אחרי** ה-Router, עם `domain=resolved_route_domain` (LCH קיבל פרמטר `domain` אופציונלי חדש, תאימות לאחור מלאה). ראה BUG-051 ב-`BUG_AUDIT_LOG.md` לפירוט מלא כולל 3 סטיות מכוונות מהספק המקורי (capture_tier הוא observability בלבד לא gate; אין intent/confidence filter בשלב 4 — היה שובר capture עם intent בביטחון גבוה; LCH קיבל פרמטר domain חדש למרות שהספק ביקש "חתימה זהה"). 10/10 טסטים חדשים + 29/29 + 4/4 קיימים + כל 30 קבצי `test_*.py` בריפו — ירוק. לא ממוזג, לא נבדק מול Airtable/Gateway חי.
+
+### C90 — Stage 3.1: Capture Policy — קבצים מובנים (xlsx/csv)
+**עדיפות:** 🟠 בינוני (חסום על C89 production-verified)
+**פעולה:** קובץ שמועלה לבוט → לקוח שני של `classify_ingress()`. קובץ = Tier 4 כברירת מחדל (preview).
+
+### C91 — Stage 3.2: Capture Policy — קול (Whisper → טקסט)
+**עדיפות:** 🟠 בינוני (חסום על C89)
+**פעולה:** Whisper תמלול → `classify_ingress(source_type="voice")`. confidence baseline מופחת אוטומטית.
+
+### C92 — Stage 3.3: Capture Policy — מייל נכנס
+**עדיפות:** 🟡 גבוה (חסום על C89)
+**פעולה:** `email_inbound.py` מתחבר לאותו `classify_ingress()` במקום לוגיקה נפרדת — איחוד, לא בנייה.
+
+### C93 — Stage 4: OCR / כרטיסי ביקור
+**עדיפות:** 🟠 בינוני (חסום על C89 + AgentObservation data ≥ 2 שבועות)
+**פעולה:** תמונה → OCR → `classify_ingress(source_type="image")`. נפתח רק אם שיעור needs_review ושיעור תיקונים ידניים ב-Tier 1 נמוכים (נתוני AgentObservation).
+
+---
 
 ### N01 — ✅ הושלם (W1 לעיל)
 
@@ -1034,13 +1078,18 @@ Status: ⚠️ **תוקן 29/06/2026 (Gap Report) — היה כתוב "Not merge
 `test_document_converter.py` — אפס caller ב-`app.py`/`tools/dispatcher.py`/כל מודול חי אחר.
 אין `FEATURE_` flag (אין צורך — אין נתיב הרצה חי שדורש הגנת flag).
 
-**ממצא CI נוסף (29/06/2026):** `test_document_converter.py` כתוב בסגנון `pytest` (פונקציות
-`def test_...(tmp_path)` עם fixtures) **בלי `if __name__ == "__main__":` block**. `ci.yml`
-מריץ כל `test_*.py` דרך `python "$f"` (לא דרך `pytest`) — כלומר ב-CI הקובץ **רץ בלי לבצע אף
-assertion** (`exit 0`, 0 נבדקו בפועל), אף שהוא "ירוק". הרצה ידנית דרך `python3 -m pytest
-test_document_converter.py` (עם `beautifulsoup4`/`markdown`/`python-docx`/`openpyxl` שכבר
-ב-`requirements.txt`) מאשרת 6/6 PASS אמיתי — כך שהקוד תקין, אבל ה-CI לא בודק אותו בפועל.
-לא תוקן בקוד (מחוץ ל-scope של Gap Report; דורש שינוי ל-`ci.yml` או הוספת `__main__` guard).
+**ממצא CI נוסף (29/06/2026), תוקן 02/07/2026 (BUG-049 / BUG-CI-SILENT-PASS-DOCUMENT-CONVERTER):**
+`test_document_converter.py` היה כתוב בסגנון `pytest` (פונקציות `def test_...(tmp_path)` עם
+fixtures) **בלי `if __name__ == "__main__":` block**. `ci.yml` מריץ כל `test_*.py` דרך
+`python "$f"` (לא דרך `pytest`) — כלומר ב-CI הקובץ **רץ בלי לבצע אף assertion** (`exit 0`, 0
+נבדקו בפועל), אף שהוא "ירוק". הרצה ידנית דרך `python3 -m pytest test_document_converter.py`
+(עם `beautifulsoup4`/`markdown`/`python-docx`/`openpyxl` שכבר ב-`requirements.txt`) אישרה 6/6
+PASS אמיתי — כלומר הקוד תקין, הבעיה הייתה רק בהרצה ב-CI. **תיקון (branch
+`fix/ci-silent-pass-document-converter`, טרם ממוזג):** נוסף `__main__` guard לקובץ הבדיקה
+בלבד (קורא לכל 6 הפונקציות במפורש עם temp dir, ללא שינוי ב-`ci.yml` וללא שינוי בלוגיקת
+`document_converter/`) — `python3 test_document_converter.py` מריץ כעת 6/6 assertions אמיתיות
+(אומת גם עם שבירה מכוונת → exit 1). ה-wiring (חיבור לנתיב חי) עדיין **לא** נפתר — ראו הפסקה
+הבאה, EXISTS_UNWIRED נשאר בתוקף לגבי זה.
 
 Status המקורי (לתיעוד היסטורי): Implemented but not yet verified. Local converter tests pass
 (6/6) — תוקן מ-"Not merged" ל-"מוזג אך לא מחובר", per Gap Report 29/06/2026.

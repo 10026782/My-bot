@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from .route_decision  import RouteDecision, Intent, Handler, Risk, RouterDomain
 from .channel_router  import detect_channel, resolve_tool_for_channel
-from .intent_router   import detect_intent, count_engineering_markers
+from .intent_router   import detect_intent, count_engineering_markers, detect_ambiguous_phrase
 from .domain_router   import detect_domain
 from .risk_router     import detect_risk
 
@@ -73,6 +73,20 @@ def route_request(
             domain = domain,
         )
 
+    # 4b. Capture Policy (Stage 3 / C89 integration) — observability only.
+    # Gate is identity.is_internal alone, with NO intent filter — this must
+    # match app.py's real invocation condition for handle_lead_candidate()
+    # exactly, or RouteDecision would show capture_tier=None for messages
+    # LCH still independently auto-writes (e.g. an explicit "תוסיף ליד: ..."
+    # that intent_router already matched as CREATE_LEAD with high confidence
+    # — LCH runs on it regardless of what intent detection decided).
+    capture_tier, capture_reason, raw_ref = None, "", ""
+    if identity.is_internal:
+        from .capture_router import classify_capture
+        capture_tier, capture_reason, raw_ref = classify_capture(
+            text, chat_id=getattr(identity, "memory_key", "")
+        )
+
     # 5. Channel-specific tool override
     tool_override = resolve_tool_for_channel(intent, channel)
 
@@ -99,8 +113,18 @@ def route_request(
         response_override = "קיבלתי דיווח באג. לא שיניתי את המערכת. צריך שינוי קוד, בדיקות ופריסה."
 
     elif intent == Intent.UNKNOWN:
-        handler           = Handler.AGENT   # safety net
-        response_override = ""
+        # BUG-IC-01/C89: before falling through to the general Agent (which
+        # has full tool access and might decide on its own to "check" Gmail/
+        # Calendar/Airtable), check whether this is a known ambiguous short
+        # phrase ("סטטוס", "בדיקות מערכת", "מה המצב", "למלא משימות"). Those
+        # get a clarifying question instead of silent broad-tool guessing.
+        _ambiguous_q = detect_ambiguous_phrase(text)
+        if _ambiguous_q:
+            handler            = Handler.CLARIFY
+            response_override  = _ambiguous_q
+        else:
+            handler            = Handler.AGENT   # safety net
+            response_override  = ""
 
     elif risk == Risk.NEEDS_APPROVAL and confidence < 0.85 and not restricted:
         handler           = Handler.CLARIFY
@@ -126,6 +150,9 @@ def route_request(
         restricted        = restricted,
         notify_owner      = notify_owner,
         tool_allowed      = tool_allowed,
+        capture_tier      = capture_tier,
+        capture_reason    = capture_reason,
+        raw_ref           = raw_ref,
     )
     if tool_override:
         decision.matched_rule = f"{matched_rule} [tool:{tool_override}]"

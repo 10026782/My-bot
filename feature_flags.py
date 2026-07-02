@@ -48,6 +48,13 @@ APPROVAL POLICY:
   EMERGENCY_WINDOW             - מאפשר הפעלת חריג זמני ל-High מהטלפון (core/emergency_window.py, כבוי כברירת מחדל)
   FEATURE_ACTION_GATEWAY       - ActionContract + Action Gateway (Stage B) — מרכז כל mutation תחת חוזה; default OFF
 
+CAPTURE POLICY (C89):
+  FEATURE_AUTO_CAPTURE         - Tiered auto-write via IngressClassification (Stage 3).
+                                 OFF (default): everything shows preview before write.
+                                 ON:  Tier 1 (single clear lead) and Tier 2 (clean batch) auto-write
+                                      through Gateway without preview. Tier 3/4/5 always show preview.
+                                 Branch: feature/capture-policy-stage-3
+
 DECISION HUB (Stage 0):
   FEATURE_DECISION_HUB         - /decision new|update|status + forward→Inbox (decision_pipeline.py, cmd_decision.py); default OFF
 

@@ -93,3 +93,44 @@
 ## פלט השער
 לפני שמתחילים תכנון, תשובה קצרה ל-7 הסעיפים. אם אחד נכשל — מתקנים
 את התכנון לפני קוד, לא אחרי.
+
+---
+
+## Discovery & Execution Integrity Rules
+(נלמד בפועל — 02/07/2026, סשן Router/Capture Policy/Document Converter)
+
+1. Current State Gate = live repo only. git grep --all, branch -a,
+   actual file view — לעולם לא זיכרון, project knowledge cache,
+   או סיכומי שיחה קודמים. אם כלי החיפוש של הסוכן פספס משהו —
+   זו לא הוכחה שהוא לא קיים.
+
+2. Router is the first business decision point. אין פעולה עסקית
+   (write, classify-with-consequence, gate) שרצה *לפני* שהראוטר
+   (Identity → Router → Context → Agent) סיים. אם קיים short-circuit
+   כזה בקוד — הוא BUG, לא feature, גם אם הוא כבר בפרודקשן.
+
+3. Feature flags must define exact scope: classify / route /
+   preview / execute / write. לפני הצגת flag חדש או שימוש חוזר
+   בשם קיים — grep לכל השימושים החיים קודם. flag שכבר שולט
+   בהתנהגות אחת לא יכול לקבל משמעות שנייה בשקט.
+
+4. DoD must prove the execution path, not only the output.
+   "הבדיקות עברו" לא מספיק — צריך הוכחה שהקוד שנבדק הוא הקוד
+   שרץ בפרודקשן (exit code אמיתי, לא script שנבלע בשקט,
+   assertion שרצה בפועל לא רק collected).
+
+5. Any code that calls an existing module must cite the actual
+   function signature (view/grep מהסשן הנוכחי) לפני שנכתב call-site.
+   לעולם לא הנחה מתיאור SPEC או מסיכום קודם.
+
+6. A documented governance rule is not self-enforcing. סיכומי סשן
+   חייבים לציין סטטוס ציות מפורש מול AGENTS.md ("PR נפתח לפי כלל
+   סיום-סשן") — לא רק להשלים את המשימה ולשתוק לגביו.
+
+7. Orphaned-branch audit is routine, not incidental — ראה AGENTS.md
+   PRE-SESSION GATE. לא תלוי בכך שאיזה SPEC אחר יעבור שם במקרה.
+
+8. Test-count claims ("N/N pass") must state what layer they exercise
+   (unit / integration / e2e) — a passing count does not by itself
+   imply the full execution chain was proven, especially where no
+   e2e harness exists for that chain.
