@@ -1,10 +1,14 @@
-# core/lead_candidate_handler.py — Section 4B/4C: Deterministic LeadCandidate Handler
+# core/lead_candidate_handler.py — Section 4B/4C/C89: Deterministic LeadCandidate Handler
 #
 # Short-circuits the agent loop for explicit owner/staff lead-save patterns.
 # Sender identity (אליהו) is immutable; subject (the lead) is resolved separately.
 #
-# 4B: single lead — parse → find/create/update → Gateway → GatewayReply
-# 4C: batch — multiple name+phone blocks → process all → per-lead summary reply
+# Input flow (C89 Stage 3):
+#   classify_ingress() → IngressClassification (tier 1–5)
+#   Tier 4/5 → return None (fall through to agent, never auto-write)
+#   Tier 1/2 + FEATURE_AUTO_CAPTURE=ON  → write through Gateway → GatewayReply
+#   Tier 1/2 + FEATURE_AUTO_CAPTURE=OFF → preview + confirmation required
+#   Tier 3   → clear ones write, ambiguous → needs_review message
 #
 # COG note: reply source_module must be "action_gateway" (set in app.py step 1.45)
 # so COG's Single Speaker guard doesn't block the GatewayReply.
@@ -468,6 +472,10 @@ def handle_lead_candidate(
     מטפל דטרמיניסטית בהכתבת ליד (בודד או batch) של owner/staff.
     מחזיר GatewayReply string אם הפעולה הסתיימה, None אם לא תבנית — ממשיך לאייג'נט.
 
+    C89: כל קלט עובר classify_ingress() לפני כל פרסור.
+    Tier 4/5 → None (אסור לכתוב, מועבר לאייג'נט).
+    Tier 1/2 + FEATURE_AUTO_CAPTURE → auto-write.
+    Tier 3   → ברורים נכתבים, עמומים → needs_review.
     source_module בapp.py מוגדר ל-"action_gateway" כדי שCOG יאשר.
     """
     if not getattr(identity, "is_internal", False):
@@ -481,22 +489,83 @@ def handle_lead_candidate(
     if _follow_up_reply is not None:
         return _follow_up_reply
 
-    # ── Try batch parse first (Section 4C) ───────
-    batch = parse_batch_dictation(text)
-    if batch:
-        return _handle_batch(identity, text, chat_id, channel, domain, batch)
-
-    # ── Single lead (Section 4B) ─────────────────
-    parsed = parse_lead_dictation(text)
-    if parsed is None:
+    # ── C89: Input Source Gate — classify before parse ──
+    try:
+        from core.ingress_classifier import classify_ingress, log_classification
+        ic = classify_ingress(text, source_type="text")
+        log_classification(ic, chat_id=chat_id)
+    except Exception as exc:
+        logger.warning("[LCH] ingress_classifier failed (falling through to agent): %s", exc)
         return None
 
-    name  = parsed["name"]
-    phone = parsed.get("phone", "")
+    # Tier 4 (table/export/bot output) or Tier 5 (no signal) → agent handles it
+    if ic.tier >= 4:
+        logger.info("[LCH] Tier %d — not a lead dictation (reason=%s), skip", ic.tier, ic.reason)
+        return None
 
-    if parsed.get("needs_phone"):
-        logger.info("[LCH] clarification needed: name=%r no phone", name)
+    # ── Tier 1/2/3 routing ───────────────────────
+    from feature_flags import is_enabled as _flag
+    auto_capture = _flag("FEATURE_AUTO_CAPTURE")
+
+    candidates = list(ic.candidates)  # tuple → list for mutability
+
+    if ic.tier == 1:
+        # Single high-confidence lead
+        c = candidates[0]
+        return _handle_single_candidate(
+            identity, c, text, chat_id, channel, domain, auto_write=auto_capture
+        )
+
+    if ic.tier == 2:
+        # All candidates high-confidence batch
+        return _handle_clean_batch(
+            identity, candidates, text, chat_id, channel, domain, auto_write=auto_capture
+        )
+
+    if ic.tier == 3:
+        # Mixed: high-confidence ones write, low ones → needs_review
+        high = [c for c in candidates if c["confidence"] >= 0.75]
+        low  = [c for c in candidates if c["confidence"] <  0.75]
+        return _handle_mixed_batch(
+            identity, high, low, text, chat_id, channel, domain
+        )
+
+    return None
+
+
+# ══════════════════════════════════════════════════
+# Tier-routing handlers (C89)
+# ══════════════════════════════════════════════════
+
+def _handle_single_candidate(
+    identity,
+    candidate: dict,
+    text: str,
+    chat_id: str,
+    channel: str,
+    domain: str,
+    auto_write: bool,
+) -> Optional[str]:
+    """
+    Tier 1: ליד בודד high-confidence.
+    auto_write=True (FEATURE_AUTO_CAPTURE) → כותב מיד.
+    auto_write=False → מחזיר preview ומאחסן ב-pending_lead_preview.
+    """
+    name  = candidate["name"]
+    phone = candidate.get("phone", "")
+    ctx   = candidate.get("context", [])
+
+    if not phone:
         return f"כדי לשמור את {name} כליד — אשמח לקבל גם מספר טלפון. 📞"
+
+    if not auto_write:
+        # Preview mode — store pending and ask for confirmation
+        _store_pending_preview(chat_id, [candidate], text)
+        ctx_str = f" [{', '.join(ctx)}]" if ctx else ""
+        return (
+            f"📋 זיהיתי ליד: *{name}* ({phone}){ctx_str}\n"
+            f"לשמור? ענה *כן* לאישור או *לא* לביטול."
+        )
 
     ok, record_id, action = _write_one_lead(identity, name, phone, text, channel, domain)
 
@@ -511,14 +580,99 @@ def handle_lead_candidate(
     if not ok:
         return f"❌ לא הצלחתי לשמור את {name}. נסה שוב."
 
-    ctx = _context_suffix(parsed.get("context", []), domain)
+    ctx_str = _context_suffix(ctx, domain)
     if action == "update":
-        return f"✅ עדכנתי את {name} ({phone}){ctx} | {record_id}"
-    return f"✅ שמרתי את {name} ({phone}){ctx} כליד חדש | {record_id}"
+        return f"✅ עדכנתי את {name} ({phone}){ctx_str} | {record_id}"
+    return f"✅ שמרתי את {name} ({phone}){ctx_str} כליד חדש | {record_id}"
+
+
+def _handle_clean_batch(
+    identity,
+    candidates: list[dict],
+    text: str,
+    chat_id: str,
+    channel: str,
+    domain: str,
+    auto_write: bool,
+) -> str:
+    """
+    Tier 2: כל הלידים high-confidence.
+    auto_write=True → כותב הכל + סיכום.
+    auto_write=False → preview + confirmation.
+    """
+    if not auto_write:
+        _store_pending_preview(chat_id, candidates, text)
+        lines = [
+            f"• {c['name']} ({c['phone']})" + (f" [{', '.join(c['context'])}]" if c.get("context") else "")
+            for c in candidates
+        ]
+        return (
+            f"📋 זיהיתי {len(candidates)} לידים:\n" +
+            "\n".join(lines) +
+            "\n\nלשמור את כולם? ענה *כן* לאישור."
+        )
+
+    # auto-write
+    return _handle_batch(identity, text, chat_id, channel, domain, candidates)
+
+
+def _handle_mixed_batch(
+    identity,
+    high: list[dict],
+    low: list[dict],
+    text: str,
+    chat_id: str,
+    channel: str,
+    domain: str,
+) -> str:
+    """
+    Tier 3: חלק ברור (high), חלק עמום (low).
+    ברורים → נכתבים. עמומים → needs_review + הודעה.
+    """
+    results = []
+    for c in high:
+        ok, record_id, action = _write_one_lead(
+            identity, c["name"], c["phone"], text, channel, domain
+        )
+        ctx_str = _context_suffix(c.get("context", []), domain)
+        if ok and record_id:
+            verb = "עדכנתי" if action == "update" else "שמרתי"
+            results.append(f"✅ {verb} את {c['name']} ({c['phone']}){ctx_str}")
+        else:
+            results.append(f"❌ {c['name']} ({c['phone']}) — לא נשמר")
+
+    needs_review_lines = [
+        f"⏳ {c['name'] or '?'} ({c['phone']}) — confidence נמוך, ממתין לבדיקה"
+        for c in low
+    ]
+
+    lines = results + needs_review_lines
+    header = f"📋 עובדתי {len(high) + len(low)} לידים:"
+    if needs_review_lines:
+        header += f" {len(high)} נשמרו, {len(low)} ממתינים לבדיקה"
+    return header + "\n" + "\n".join(lines)
+
+
+# ── Pending preview store (FEATURE_AUTO_CAPTURE=OFF) ──────────────────────────
+
+def _store_pending_preview(chat_id: str, candidates: list[dict], raw_text: str) -> None:
+    """שומר preview ממתין לאישור ב-session."""
+    try:
+        from session_store import lead_sessions as _ls
+        session = _ls.get(chat_id)
+        if session is None:
+            return
+        session["pending_lead_preview"] = {
+            "candidates": candidates,
+            "raw_text":   raw_text,
+        }
+        _ls._sync_to_db(chat_id, session)
+    except Exception as exc:
+        logger.warning("[LCH] pending_preview store failed: %s", exc)
 
 
 # ══════════════════════════════════════════════════
-# Batch handler (Section 4C)
+# Batch handler (Section 4C / Tier 2 auto-write)
 # ══════════════════════════════════════════════════
 
 def _handle_batch(
