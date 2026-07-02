@@ -22,6 +22,7 @@ class ToolMeta:
     roles_allowed:     set[str]       # roles שמורשים
     tenant_scoped:     bool = False   # מסנן לפי tenant אוטומטית
     requires_approval: bool = False   # דורש אישור אנושי לפני ביצוע
+    blocked_by_emergency: bool = False  # נחסם על ידי EMERGENCY_STOP_ALL
     high_risk:         bool = False   # פעולה בלתי הפיכה
     read_only:         bool = False   # לא משנה נתונים
     description_he:    str  = ""
@@ -36,17 +37,9 @@ _ALL_EXTERNAL  = {"owner", "partner", "manager", "employee", "lead"}
 
 
 # ══════════════════════════════════════════════════
-# C53 FIX-3: מקור אחד לכלים שדורשים אישור
-# כל מודול אחר (event_bus, dispatcher) מייבא מכאן.
+# C83: approval and emergency blocking are separate policy dimensions.
+# Derived policy sets are defined after _REGISTRY below.
 # ══════════════════════════════════════════════════
-TOOLS_REQUIRING_APPROVAL: frozenset[str] = frozenset({
-    "airtable_add",
-    "airtable_update",
-    "gmail_draft",
-    "gmail_send_draft",
-    "calendar_create_event",
-    "sheets_append",
-})
 
 
 # ══════════════════════════════════════════════════
@@ -80,6 +73,7 @@ _REGISTRY: dict[str, ToolMeta] = {
         name="calendar_create_event",
         roles_allowed=_MANAGEMENT,
         requires_approval=True,
+        blocked_by_emergency=True,
         description_he="יצירת אירוע ביומן — דורש אישור, בודק חפיפות, force=true לקבוע בכל זאת"
     ),
 
@@ -88,12 +82,14 @@ _REGISTRY: dict[str, ToolMeta] = {
         name="gmail_draft",
         roles_allowed=_MANAGEMENT,
         requires_approval=True,
+        blocked_by_emergency=True,
         description_he="יצירת טיוטת מייל — דורש אישור (לא שולח)"
     ),
     "gmail_send_draft": ToolMeta(
         name="gmail_send_draft",
         roles_allowed=_SENIOR,
         requires_approval=True,
+        blocked_by_emergency=True,
         high_risk=True,
         description_he="שליחת טיוטה — דורש אישור owner/partner"
     ),
@@ -109,6 +105,7 @@ _REGISTRY: dict[str, ToolMeta] = {
         name="sheets_append",
         roles_allowed=_MANAGEMENT,
         requires_approval=True,
+        blocked_by_emergency=True,
         description_he="הוספת שורה לגיליון — דורש אישור"
     ),
 
@@ -125,6 +122,7 @@ _REGISTRY: dict[str, ToolMeta] = {
         roles_allowed=_INTERNAL,
         tenant_scoped=True,
         requires_approval=True,
+        blocked_by_emergency=True,
         high_risk=True,
         description_he="הוספת רשומה ל-Airtable — דורש אישור"
     ),
@@ -133,6 +131,7 @@ _REGISTRY: dict[str, ToolMeta] = {
         roles_allowed=_MANAGEMENT,
         tenant_scoped=True,
         requires_approval=True,
+        blocked_by_emergency=True,
         high_risk=True,
         description_he="עדכון רשומה ב-Airtable — דורש אישור"
     ),
@@ -181,10 +180,21 @@ _REGISTRY: dict[str, ToolMeta] = {
         roles_allowed    = _SENIOR,
         tenant_scoped    = True,
         requires_approval= True,
+        blocked_by_emergency=True,
         high_risk        = True,
         description_he   = "סימון תשלום כ-שולם — דורש אישור owner/partner",
     ),
 }
+
+
+# C83: single policy source. Consumers import these derived views instead of
+# maintaining independent tool-name lists.
+TOOLS_REQUIRING_APPROVAL: frozenset[str] = frozenset(
+    name for name, meta in _REGISTRY.items() if meta.requires_approval
+)
+TOOLS_BLOCKED_BY_EMERGENCY: frozenset[str] = frozenset(
+    name for name, meta in _REGISTRY.items() if meta.blocked_by_emergency
+)
 
 
 # ══════════════════════════════════════════════════
@@ -224,6 +234,11 @@ def enforce(tool_name: str, identity: "Identity") -> ToolMeta:
 def needs_approval(tool_name: str) -> bool:
     meta = _REGISTRY.get(tool_name)
     return meta.requires_approval if meta else False
+
+
+def is_blocked_by_emergency(tool_name: str) -> bool:
+    meta = _REGISTRY.get(tool_name)
+    return meta.blocked_by_emergency if meta else False
 
 
 def is_high_risk(tool_name: str) -> bool:
