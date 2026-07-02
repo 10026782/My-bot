@@ -467,6 +467,7 @@ def handle_lead_candidate(
     text: str,
     chat_id: str,
     channel: str,
+    domain: str = "",
 ) -> Optional[str]:
     """
     מטפל דטרמיניסטית בהכתבת ליד (בודד או batch) של owner/staff.
@@ -477,12 +478,18 @@ def handle_lead_candidate(
     Tier 1/2 + FEATURE_AUTO_CAPTURE → auto-write.
     Tier 3   → ברורים נכתבים, עמומים → needs_review.
     source_module בapp.py מוגדר ל-"action_gateway" כדי שCOG יאשר.
+
+    domain: route.domain מ-core/router/router.py (Router רץ עכשיו *לפני*
+    שהandler הזה נקרא — ראה app.py). כשמועבר, גובר על ה-content-regex guess
+    המקומי (_detect_domain) — זו התוצאה האמיתית מ-domain_router, לא ניחוש
+    כפול. ריק כברירת מחדל לכל caller אחר / תאימות לאחור.
     """
     if not getattr(identity, "is_internal", False):
         return None
 
-    # ── domain from message content ───────────────
-    domain = _detect_domain(text, getattr(identity, "domain_id", "general"))
+    # ── domain: Router (route.domain) is the source of truth when passed in;
+    #    _detect_domain() stays as the fallback for any other caller ──────
+    domain = domain or _detect_domain(text, getattr(identity, "domain_id", "general"))
 
     # ── Follow-up on stored batch? ────────────────
     _follow_up_reply = _handle_batch_followup(identity, text, chat_id, channel, domain)

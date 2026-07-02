@@ -1,10 +1,24 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-06-30 (מאוחר ביותר) — daily_git_audit.py verification + stale-branch content audit, ממוזג עם Decision Hub Quality Gate + Lead Lifecycle session log (PRs #169-172, #176-177)
-**עודכן על ידי:** Claude Code — `claude/new-session-be1ckb` (ממוזג עם `claude/determined-fermat-2j0ssg`)
+**עודכן:** 2026-07-02 (מאוחר ביותר) — BUG-051: Capture Policy Router-Integration (`feature/capture-policy-stage-3`, טרם ממוזג)
+**עודכן על ידי:** Claude Code — session ב-`fix/ci-silent-pass-document-converter`/`feature/capture-policy-stage-3`
 
 > מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (מיושן, 19/06) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
+
+---
+
+## 0.7 BUG-051 — Capture Policy Router-Integration — 2026-07-02 (קרא לפני 0.6)
+
+**מה נמצא:** `core.lead_candidate_handler.handle_lead_candidate()` (LCH, C89) רץ ב-`app.py` שלב "1.45" — **לפני** `route_request()` — לכל sender פנימי (owner/staff). אומת ב-grep: `core/ingress_classifier.py` (שה-LCH קורא לו) אפס אזכורים ל-`RouteDecision`/`route_request`/`intent_router` — מסווג עצמאי לגמרי, לא "מרחיב" את ה-Router. domain נקבע ע"י `_detect_domain()` הפנימי (regex mirror ידני של `domain_router._DOMAIN_RULES`), לא ה-domain_router האמיתי — ולכן מפספס למשל `domain_from_channel`.
+
+**מה תוקן (`feature/capture-policy-stage-3`, טרם ממוזג):** `RouteDecision` קיבל 3 שדות אופציונליים חדשים (`capture_tier`/`capture_reason`/`raw_ref`, additive-only). `core/router/capture_router.py` חדש — עטיפה דקה סביב `classify_ingress()` הקיים (אין שכתוב לוגיקה, אין import ל-airtable/drive/gateway). `router.py` קורא לו כשלב חדש, גייט על `identity.is_internal` בלבד. `app.py`'s LCH call הועבר ל-**אחרי** ה-Router, `domain=resolved_route_domain` מועבר ל-LCH דרך פרמטר `domain` אופציונלי חדש (default `""`, נופל חזרה ל-`_detect_domain()` הישן — תאימות מלאה לאחור).
+
+**3 סטיות מכוונות מהספק המקורי, כולן documented ב-`BUG_AUDIT_LOG.md` BUG-051:** (1) `capture_tier` הוא observability-בלבד — gate כפי שהוצע בספק היה שובר `_handle_batch_followup()`. (2) הוסר intent/confidence filter משלב 4 ב-router — היה גורם ל-`RouteDecision` "לשקר" (capture_tier=None בזמן ש-LCH עדיין כותב) עבור הודעות עם intent בביטחון גבוה. (3) `handle_lead_candidate()` קיבל פרמטר `domain` חדש (לא "חתימה זהה" כפי שהספק ביקש) — נדרש כדי שתיקון ה-domain יהיה בר-מימוש בפועל.
+
+**בדיקות:** `test_capture_router_wiring.py` חדש (10/10, כולל regression guards לכל 3 הסטיות למעלה). `core/router/test_router.py` (29/29) ו-`test_integration.py` (4/4) — שני MockIdentity נפרדים קיבלו `is_internal`/`memory_key`; ב-`test_integration.py` זו הייתה תקלה שקטה אמיתית לפני התיקון (`route_request()` זרק `AttributeError` שנבלע ב-`except Exception` הרחב של ה-`_safe_route` המקומי של הבדיקה, מדמה 3/4 כשלים מזויפים). כל 30 קבצי `test_*.py` בריפו ירוקים. אין אימות מול Airtable/Gateway/Render חי (sandbox).
+
+לא בוצע מיזוג בסשן זה.
 
 ---
 

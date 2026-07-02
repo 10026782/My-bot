@@ -73,6 +73,20 @@ def route_request(
             domain = domain,
         )
 
+    # 4b. Capture Policy (Stage 3 / C89 integration) — observability only.
+    # Gate is identity.is_internal alone, with NO intent filter — this must
+    # match app.py's real invocation condition for handle_lead_candidate()
+    # exactly, or RouteDecision would show capture_tier=None for messages
+    # LCH still independently auto-writes (e.g. an explicit "תוסיף ליד: ..."
+    # that intent_router already matched as CREATE_LEAD with high confidence
+    # — LCH runs on it regardless of what intent detection decided).
+    capture_tier, capture_reason, raw_ref = None, "", ""
+    if identity.is_internal:
+        from .capture_router import classify_capture
+        capture_tier, capture_reason, raw_ref = classify_capture(
+            text, chat_id=getattr(identity, "memory_key", "")
+        )
+
     # 5. Channel-specific tool override
     tool_override = resolve_tool_for_channel(intent, channel)
 
@@ -136,6 +150,9 @@ def route_request(
         restricted        = restricted,
         notify_owner      = notify_owner,
         tool_allowed      = tool_allowed,
+        capture_tier      = capture_tier,
+        capture_reason    = capture_reason,
+        raw_ref           = raw_ref,
     )
     if tool_override:
         decision.matched_rule = f"{matched_rule} [tool:{tool_override}]"

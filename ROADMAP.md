@@ -1,6 +1,7 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 02/07/2026 — BUG-049 (BUG-CI-SILENT-PASS-DOCUMENT-CONVERTER): `test_document_converter.py` רץ ב-CI בלי לבצע אף assertion (exit 0 שקרי). `__main__` guard נוסף, `branch fix/ci-silent-pass-document-converter`, טרם ממוזג. ראה סעיף "Fxx — Safe Document Converter" + BUG_AUDIT_LOG.md.
+עודכן: 02/07/2026 — BUG-051 (SPEC-1-LCH-ROUTER-BYPASS): LeadCandidate Handler רץ לפני route_request() לכל sender פנימי — Router עוקף לגמרי, domain מנוחש ב-regex פנימי. תוקן: capture_tier/capture_reason/raw_ref על RouteDecision (additive), core/router/capture_router.py חדש עוטף classify_ingress() הקיים, LCH הועבר לרוץ אחרי ה-Router עם domain אמיתי. `branch feature/capture-policy-stage-3`, טרם ממוזג. ראה סעיף C89 + BUG_AUDIT_LOG.md.
+עודכן קודם: 02/07/2026 — BUG-049 (BUG-CI-SILENT-PASS-DOCUMENT-CONVERTER): `test_document_converter.py` רץ ב-CI בלי לבצע אף assertion (exit 0 שקרי). `__main__` guard נוסף, מוזג ל-main (PR #204). ראה סעיף "Fxx — Safe Document Converter" + BUG_AUDIT_LOG.md.
 עודכן קודם: 02/07/2026 — PR #203 מוזג: C89 קוד הושלם (flag כבוי, ממתין ל-production verification), BUG-047/BUG-048 (session dedup + ambiguous phrase gate) תוקנו. ראה BUG_AUDIT_LOG.md.
 עודכן קודם: 02/07/2026 — Stage 3 Capture Policy (C89–C93) נוסף. IngressClassification + tiered auto-write. ראה SPEC_Stage_3_Capture_Policy.md.
 עודכן: 01/07/2026 — סקירת `fix/c53-approval-hardening`: הוחלט לא למזג את הענף. נפתחו שמונה follow-ups בעדיפות ראשונה (`C81-FU`, `C82-FU`, `C83`–`C88`).
@@ -296,8 +297,11 @@ Decision Hub Stage 3 (Readiness Engine, F18): `decision_readiness.py` (`calc_rea
 - Tier 5 (UNKNOWN_USEFUL): ממשיך ל-agent, לא יוצר Leads/Tasks.
 **עקרונות נעולים:** auto-write = additive-only (create בלבד, לא update/overwrite). כל tier עובר Gateway. Raw נשמר תמיד.
 **קובץ ראשי:** `core/ingress_classifier.py` (חדש), `core/lead_candidate_handler.py`
-**DoD:** ראה SPEC_Stage_3_Capture_Policy.md §7
+**DoD:** ראה SPEC_Stage_3_Capture_Policy.md §7 — **קובץ זה לא קיים בפועל בריפו** (grep מאמת, 02/07/2026); reference תלוי באוויר, לא תוקן — ה-DoD המחייב עכשיו הוא BUG-051 (למטה) + `test_capture_router_wiring.py`.
 **נותר:** production verification (הפעלת `FEATURE_AUTO_CAPTURE` + מעקב AgentObservation) לפני פתיחת C90.
+
+**עדכון 02/07/2026 (BUG-051, `feature/capture-policy-stage-3`, טרם ממוזג) — Router-Integration:**
+`handle_lead_candidate()` (LCH) רץ עד עכשיו ב-`app.py` שלב "1.45", **לפני** `route_request()` — Identity→Router→Context→Agent לא רץ בכלל לכל sender פנימי שנתפס כ-lead candidate; domain נקבע ע"י regex mirror פנימי (`_detect_domain`), לא ה-`domain_router` האמיתי. תוקן: `RouteDecision` קיבל 3 שדות אופציונליים (`capture_tier`/`capture_reason`/`raw_ref`, additive-only — אין טיפוס מקביל חדש), `core/router/capture_router.py` חדש עוטף את `classify_ingress()` הקיים (אין שכתוב, אין import לתשתית), `router.py` קורא לו כשלב חדש. `app.py`'s LCH call הועבר ל-**אחרי** ה-Router, עם `domain=resolved_route_domain` (LCH קיבל פרמטר `domain` אופציונלי חדש, תאימות לאחור מלאה). ראה BUG-051 ב-`BUG_AUDIT_LOG.md` לפירוט מלא כולל 3 סטיות מכוונות מהספק המקורי (capture_tier הוא observability בלבד לא gate; אין intent/confidence filter בשלב 4 — היה שובר capture עם intent בביטחון גבוה; LCH קיבל פרמטר domain חדש למרות שהספק ביקש "חתימה זהה"). 10/10 טסטים חדשים + 29/29 + 4/4 קיימים + כל 30 קבצי `test_*.py` בריפו — ירוק. לא ממוזג, לא נבדק מול Airtable/Gateway חי.
 
 ### C90 — Stage 3.1: Capture Policy — קבצים מובנים (xlsx/csv)
 **עדיפות:** 🟠 בינוני (חסום על C89 production-verified)

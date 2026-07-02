@@ -173,6 +173,15 @@ class RouteDecision:
     # הודעה למשתמש אם handler=clarify/block
     response_override: str = ""
 
+    # Capture Policy (Stage 3 / C89 router integration) — additive, observability
+    # only. Mirrors what core.lead_candidate_handler will independently decide
+    # for identity.is_internal senders (same classify_ingress() call) — does
+    # NOT gate whether LCH runs; see core/router/capture_router.py.
+    capture_tier:    int | None = None   # 1-3 when classify_ingress() sees a
+                                          # write-worthy capture, else None
+    capture_reason:  str = ""            # classify_ingress() reason string
+    raw_ref:         str = ""            # Interaction Log reference (future)
+
     def is_blocked(self) -> bool:
         return self.handler == Handler.BLOCK
 

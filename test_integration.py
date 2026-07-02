@@ -28,6 +28,16 @@ class MockIdentity:
     def __post_init__(self):
         self.is_owner = self.role == "owner"
 
+    # Mirrors identity.Identity.is_internal — router.py's capture_router
+    # step (SPEC 1) reads this directly, same as the real Identity class.
+    @property
+    def is_internal(self) -> bool:
+        return self.role in ("owner", "partner", "manager", "employee")
+
+    @property
+    def memory_key(self) -> str:
+        return f"{self.tenant_id}:{self.user_id}"
+
 
 # ══════════════════════════════════════════════════
 # _safe_route — מדמה את הפונקציה ב-app.py

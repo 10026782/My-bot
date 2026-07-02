@@ -23,6 +23,20 @@
 
 > נבנה מ-`git log --since="30 days ago"` (~172 commits, `f935c53`→`eebf73b`) + טבלאות ROADMAP.md (Stabilization Sprint, World 2, Sprint 16/06). כל commit hash צוטט ישירות מ-git או מ-ROADMAP — שורות שלא נמצאה להן ראיה ישירה מסומנות "לא ידוע".
 
+### BUG-051-CAPTURE-ROUTER — Capture Policy: Router-integrated, LCH moved post-Router
+- **תאריך:** 02/07/2026
+- **סוג:** Bug Fix (RouteDecision extended additively — 3 new optional fields, no breaking change)
+- **Requirement:** ROADMAP.md §C89 update + `BUG_AUDIT_LOG.md` BUG-051. `core.lead_candidate_handler.handle_lead_candidate()` ran before `route_request()` for every internal-sender message (`app.py` old step "1.45") — the Router (Identity→Router→Context→Agent) never executed for those turns, and domain was guessed by an internal regex mirror of `domain_router` instead of the real thing.
+- **Commit:** (ייקבע ב-push)
+- **PR:** טרם נפתח (branch `feature/capture-policy-stage-3`)
+- **Review על ידי:** —
+- **Deploy תאריך:** —
+- **Verified בפרודקשן:** לא
+- **Verification ראיה:** `RouteDecision` gained `capture_tier: int|None`, `capture_reason: str`, `raw_ref: str` (all optional, default None/""). New `core/router/capture_router.py` wraps the existing `core.ingress_classifier.classify_ingress()` (no reimplementation, no airtable/drive/gateway imports — verified by `test_capture_router_wiring.py::test_capture_router_no_infra_imports`). `app.py`'s pre-Router LCH call removed; new call added after `route_request()` returns, passing `domain=resolved_route_domain` into a new optional `domain` param on `handle_lead_candidate()` (default `""`, falls back to the old `_detect_domain()` guess — backward compatible, only 1 line + 1 param changed in an 813-line file). 10/10 new tests, 29/29 `core/router/test_router.py`, 4/4 `test_integration.py`, all 30 repo `test_*.py` scripts green. No live Airtable/Gateway/Render verification (sandbox).
+- **Docs עודכנו:** ROADMAP (§C89), BUG_AUDIT_LOG (BUG-051), AI_CONTEXT
+- **Feature Flag:** `FEATURE_AUTO_CAPTURE` (unchanged, still off by default — this change only affects *when* LCH runs and what domain it receives, not the flag-gated write-vs-preview behavior itself)
+- **Rollback plan:** revert the branch; `RouteDecision`'s 3 new fields and `handle_lead_candidate()`'s new `domain` param are additive/optional, so a partial revert of just `app.py`'s call-site move (restoring the pre-Router short-circuit) would also be safe in isolation if needed.
+
 ### F22-WIRE-29062026 — Decision Hub Stage 6: wire decision_adapter as orchestrator fallback
 - **תאריך:** 29/06/2026
 - **סוג:** Feature (wiring of already-merged F22 code, no new logic added)
