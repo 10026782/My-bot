@@ -1,6 +1,7 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 02/07/2026 — PR #203 מוזג: C89 קוד הושלם (flag כבוי, ממתין ל-production verification), BUG-047/BUG-048 (session dedup + ambiguous phrase gate) תוקנו. ראה BUG_AUDIT_LOG.md.
+עודכן: 02/07/2026 — BUG-049 (BUG-CI-SILENT-PASS-DOCUMENT-CONVERTER): `test_document_converter.py` רץ ב-CI בלי לבצע אף assertion (exit 0 שקרי). `__main__` guard נוסף, `branch fix/ci-silent-pass-document-converter`, טרם ממוזג. ראה סעיף "Fxx — Safe Document Converter" + BUG_AUDIT_LOG.md.
+עודכן קודם: 02/07/2026 — PR #203 מוזג: C89 קוד הושלם (flag כבוי, ממתין ל-production verification), BUG-047/BUG-048 (session dedup + ambiguous phrase gate) תוקנו. ראה BUG_AUDIT_LOG.md.
 עודכן קודם: 02/07/2026 — Stage 3 Capture Policy (C89–C93) נוסף. IngressClassification + tiered auto-write. ראה SPEC_Stage_3_Capture_Policy.md.
 עודכן: 01/07/2026 — סקירת `fix/c53-approval-hardening`: הוחלט לא למזג את הענף. נפתחו שמונה follow-ups בעדיפות ראשונה (`C81-FU`, `C82-FU`, `C83`–`C88`).
 עודכן קודם: 30/06/2026 — Lead Lifecycle + Decision Hub Quality Gate session log. N-LEAD-EVENT/N-CXX/N-LEADBUF/N14 נוספו. BUG-DH-03/04 כblocker לפני FEATURE_DECISION_HUB.
@@ -1073,13 +1074,18 @@ Status: ⚠️ **תוקן 29/06/2026 (Gap Report) — היה כתוב "Not merge
 `test_document_converter.py` — אפס caller ב-`app.py`/`tools/dispatcher.py`/כל מודול חי אחר.
 אין `FEATURE_` flag (אין צורך — אין נתיב הרצה חי שדורש הגנת flag).
 
-**ממצא CI נוסף (29/06/2026):** `test_document_converter.py` כתוב בסגנון `pytest` (פונקציות
-`def test_...(tmp_path)` עם fixtures) **בלי `if __name__ == "__main__":` block**. `ci.yml`
-מריץ כל `test_*.py` דרך `python "$f"` (לא דרך `pytest`) — כלומר ב-CI הקובץ **רץ בלי לבצע אף
-assertion** (`exit 0`, 0 נבדקו בפועל), אף שהוא "ירוק". הרצה ידנית דרך `python3 -m pytest
-test_document_converter.py` (עם `beautifulsoup4`/`markdown`/`python-docx`/`openpyxl` שכבר
-ב-`requirements.txt`) מאשרת 6/6 PASS אמיתי — כך שהקוד תקין, אבל ה-CI לא בודק אותו בפועל.
-לא תוקן בקוד (מחוץ ל-scope של Gap Report; דורש שינוי ל-`ci.yml` או הוספת `__main__` guard).
+**ממצא CI נוסף (29/06/2026), תוקן 02/07/2026 (BUG-049 / BUG-CI-SILENT-PASS-DOCUMENT-CONVERTER):**
+`test_document_converter.py` היה כתוב בסגנון `pytest` (פונקציות `def test_...(tmp_path)` עם
+fixtures) **בלי `if __name__ == "__main__":` block**. `ci.yml` מריץ כל `test_*.py` דרך
+`python "$f"` (לא דרך `pytest`) — כלומר ב-CI הקובץ **רץ בלי לבצע אף assertion** (`exit 0`, 0
+נבדקו בפועל), אף שהוא "ירוק". הרצה ידנית דרך `python3 -m pytest test_document_converter.py`
+(עם `beautifulsoup4`/`markdown`/`python-docx`/`openpyxl` שכבר ב-`requirements.txt`) אישרה 6/6
+PASS אמיתי — כלומר הקוד תקין, הבעיה הייתה רק בהרצה ב-CI. **תיקון (branch
+`fix/ci-silent-pass-document-converter`, טרם ממוזג):** נוסף `__main__` guard לקובץ הבדיקה
+בלבד (קורא לכל 6 הפונקציות במפורש עם temp dir, ללא שינוי ב-`ci.yml` וללא שינוי בלוגיקת
+`document_converter/`) — `python3 test_document_converter.py` מריץ כעת 6/6 assertions אמיתיות
+(אומת גם עם שבירה מכוונת → exit 1). ה-wiring (חיבור לנתיב חי) עדיין **לא** נפתר — ראו הפסקה
+הבאה, EXISTS_UNWIRED נשאר בתוקף לגבי זה.
 
 Status המקורי (לתיעוד היסטורי): Implemented but not yet verified. Local converter tests pass
 (6/6) — תוקן מ-"Not merged" ל-"מוזג אך לא מחובר", per Gap Report 29/06/2026.
