@@ -1232,6 +1232,20 @@ def run_agent(
             f"msg='{user_text[:60]}'"
         )
 
+    # ── 1.45. LeadCandidate Handler (Section 4B / BUG-NEW-10) ──────
+    # בעל הבית מכתיב ליד ("משה יצחקוב 050... תשמור") — short-circuit לפני agent.
+    # sender_identity (אליהו) נשמר קבוע; subject (הליד) מטופל בנפרד.
+    if getattr(identity, "is_internal", False):
+        try:
+            from core.lead_candidate_handler import handle_lead_candidate
+            _lch_reply = handle_lead_candidate(identity, user_text, chat_id, channel)
+            if _lch_reply is not None:
+                if _out_meta is not None:
+                    _out_meta["source_module"] = "lead_candidate_handler"
+                return _lch_reply
+        except Exception as _lch_exc:
+            logger.warning("[LCH] handler failed (falling through to agent): %s", _lch_exc)
+
     # ── 1.5. WhatsApp Lead Capture (W0) ───────────
     # W0/N02: capture inbound WhatsApp leads and optionally score them.
     lead_capture_result = None   # CXX/A32: נשמר לשילוב ב-tool_results_log
