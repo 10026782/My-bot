@@ -1240,8 +1240,11 @@ def run_agent(
             from core.lead_candidate_handler import handle_lead_candidate
             _lch_reply = handle_lead_candidate(identity, user_text, chat_id, channel)
             if _lch_reply is not None:
+                # BUG-SB-01: COG sees "lead_candidate_handler" as a different speaker.
+                # LCH is a deterministic Gateway path — mark as "action_gateway"
+                # so the Single Speaker guard passes, same as other GatewayReply paths.
                 if _out_meta is not None:
-                    _out_meta["source_module"] = "lead_candidate_handler"
+                    _out_meta["source_module"] = "action_gateway"
                 return _lch_reply
         except Exception as _lch_exc:
             logger.warning("[LCH] handler failed (falling through to agent): %s", _lch_exc)
