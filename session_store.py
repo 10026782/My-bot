@@ -56,6 +56,7 @@ def _new_session(domain: str = "real_estate", channel: str = "whatsapp") -> dict
         "last_tool_result":   None,  # ← dict, ראה C60 (Tool Context Awareness)
         "current_lead_record_id": "",  # ← BUG-NEW-09: ה-record_id האמיתי של הליד
                                         # (לא של רשומת ה-Session) — מונע פברוק record_id בסבבים הבאים
+        "active_lead_candidate": None, # ← BUG-NEW-10/Section 4B: ליד שה-owner מכתיב, TTL 30 דקות
     }
 
 
@@ -263,6 +264,34 @@ class PersistentSessionStore:
             return None
         return session.get("current_lead_record_id") or None
 
+    def set_active_lead_candidate(self, sender: str, name: str, record_id: str = "") -> None:
+        """שומר candidate ליד פעיל עם TTL 30 דקות (BUG-NEW-10/Section 4B)."""
+        import time as _time
+        session = self.get(sender)
+        if session is None:
+            return
+        session["active_lead_candidate"] = {
+            "name":      name,
+            "record_id": record_id,
+            "set_at":    _time.time(),
+        }
+        session["updated_at"] = _now_iso()
+        self._sync_to_db(sender, session)
+
+    def get_active_lead_candidate(self, sender: str) -> Optional[dict]:
+        """מחזיר candidate פעיל אם לא פג תוקפו (>1800 שניות), אחרת None."""
+        import time as _time
+        session = self.get(sender)
+        if not session:
+            return None
+        cand = session.get("active_lead_candidate")
+        if not cand:
+            return None
+        if _time.time() - cand.get("set_at", 0) > 1800:
+            session["active_lead_candidate"] = None
+            return None
+        return cand
+
     def delete(self, sender: str) -> None:
         """מוחק session (איפוס)."""
         session = self._store.pop(sender, None)
@@ -287,6 +316,7 @@ class PersistentSessionStore:
                 "last_uploaded_file": session.get("last_uploaded_file"),
                 "last_tool_result":   session.get("last_tool_result"),
                 "current_lead_record_id": session.get("current_lead_record_id", ""),
+                "active_lead_candidate":  session.get("active_lead_candidate"),
             }
             fields = {
                 SF.SENDER_ID:    sender,
@@ -377,6 +407,7 @@ class PersistentSessionStore:
             session["last_uploaded_file"] = state.get("last_uploaded_file")
             session["last_tool_result"]   = state.get("last_tool_result")
             session["current_lead_record_id"] = state.get("current_lead_record_id", "")
+            session["active_lead_candidate"]  = state.get("active_lead_candidate")
             if record_m:
                 session["record_id"] = record_m.group(0)
             return session
