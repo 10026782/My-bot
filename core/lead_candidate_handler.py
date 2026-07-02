@@ -39,7 +39,7 @@ _HEBREW_NAME_RE = re.compile(
 _NAME_STOP = frozenset({
     "טלפון", "מספר", "פלאפון", "נייד", "תשמור", "שמור", "שמרי",
     "תרשום", "רשום", "תוסיף", "הוסף", "save", "add", "כליד",
-    "ליד", "לקוח", "חדש",
+    "ליד", "לקוח", "חדש", "בשם", "השם",
 })
 
 _PREFIXED_NAME_RE = re.compile(
@@ -49,7 +49,7 @@ _PREFIXED_NAME_RE = re.compile(
         | שמה\s+
         | ליד\s+חדש[:\s]+
         | לקוח\s+חדש[:\s]+
-        | תוסיף\s+ל
+        | תוסיף\s+ל(?!יד\b)   # "תוסיף ל[שם]" but NOT "תוסיף ליד"
         | עדכן\s+את\s+
     )
     ([א-ת]{2,}(?:\s+[א-ת]{2,}){1,3})
@@ -93,7 +93,9 @@ def _extract_name(text: str) -> Optional[str]:
     m = _PREFIXED_NAME_RE.search(text)
     if m:
         name = _clean_name(m.group(1))
-        if len(name) >= 4 and " " in name:
+        words = name.split()
+        # reject if any middle word is a known keyword (e.g. "יד חדש בשם")
+        if len(name) >= 4 and " " in name and not any(w in _NAME_STOP for w in words):
             return name
 
     # Fallback: any Hebrew two-word sequence not on a known stop-list
