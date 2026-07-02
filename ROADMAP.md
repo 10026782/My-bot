@@ -1,6 +1,7 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 02/07/2026 — Stage 3 Capture Policy (C89–C93) נוסף. IngressClassification + tiered auto-write. ראה SPEC_Stage_3_Capture_Policy.md.
+עודכן: 02/07/2026 — PR #203 מוזג: C89 קוד הושלם (flag כבוי, ממתין ל-production verification), BUG-047/BUG-048 (session dedup + ambiguous phrase gate) תוקנו. ראה BUG_AUDIT_LOG.md.
+עודכן קודם: 02/07/2026 — Stage 3 Capture Policy (C89–C93) נוסף. IngressClassification + tiered auto-write. ראה SPEC_Stage_3_Capture_Policy.md.
 עודכן: 01/07/2026 — סקירת `fix/c53-approval-hardening`: הוחלט לא למזג את הענף. נפתחו שמונה follow-ups בעדיפות ראשונה (`C81-FU`, `C82-FU`, `C83`–`C88`).
 עודכן קודם: 30/06/2026 — Lead Lifecycle + Decision Hub Quality Gate session log. N-LEAD-EVENT/N-CXX/N-LEADBUF/N14 נוספו. BUG-DH-03/04 כblocker לפני FEATURE_DECISION_HUB.
 עודכן קודם: 29/06/2026 — Git Diff Gap Report session, main = `debb270` (אומת
@@ -280,21 +281,22 @@ Decision Hub Stage 3 (Readiness Engine, F18): `decision_readiness.py` (`calc_rea
 
 ---
 
-### C89 — Stage 3: Capture Policy — Tiered Auto-Write (טקסט)
-**עדיפות:** 🔴 גבוה (חסום על יציבות Stage B / LCH)
-**Branch:** `feature/capture-policy-stage-3`
-**Feature Flag:** `FEATURE_AUTO_CAPTURE` (כבוי כברירת מחדל)
-**תלות:** Action Gateway (Stage B) פעיל + SB-01–SB-04 סגורים.
-**בעיה:** LCH batch auto-write אינו בטוח — parser מבלבל שולח/ליד, פלט כלי, ייצוא WhatsApp. ראה live test 02/07/2026.
-**פתרון:** `classify_ingress() → IngressClassification` — מדיניות מדורגת:
-- Tier 1 (SIMPLE_CAPTURE): שם+טלפון ברור → כתיבה אוטומטית דרך Gateway, בלי preview.
+### C89 — ✅ קוד הושלם ומוזג (PR #203, `bb81e6c`) — Stage 3: Capture Policy — Tiered Auto-Write (טקסט)
+**עדיפות:** 🔴 גבוה — flag כבוי, ממתין להפעלה מפורשת + production verification לפני C90+
+**Branch:** מוזג מ-`claude/session-duplication-claimgate-gnkfiy`, ענף נמחק
+**Feature Flag:** `FEATURE_AUTO_CAPTURE` (כבוי כברירת מחדל — ללא שינוי התנהגות בפרודקשן)
+**תלות:** Action Gateway (Stage B) פעיל + SB-01–SB-04 סגורים. ✅ עברו.
+**בעיה שנפתרה:** LCH batch auto-write לא היה בטוח — parser בלבל שולח/ליד, פלט כלי, ייצוא WhatsApp. ראה live test 02/07/2026.
+**מה נבנה:** `classify_ingress() → IngressClassification` — מדיניות מדורגת:
+- Tier 1 (SIMPLE_CAPTURE): שם+טלפון ברור → כתיבה אוטומטית דרך Gateway, בלי preview (כש-flag דלוק).
 - Tier 2 (CLEAN_BATCH): כמה שורות high-confidence → כתיבה אוטומטית + סיכום.
 - Tier 3 (MIXED_BATCH): ברורים נכתבים, עמומים → needs_review.
-- Tier 4 (EXPORT/TABLE/LOG): אפס writes — preview בלבד.
-- Tier 5 (UNKNOWN_USEFUL): Raw Capture / Inbox. לא יוצר Leads/Tasks.
+- Tier 4 (EXPORT/TABLE/LOG): אפס writes — תמיד, לא משנה flag.
+- Tier 5 (UNKNOWN_USEFUL): ממשיך ל-agent, לא יוצר Leads/Tasks.
 **עקרונות נעולים:** auto-write = additive-only (create בלבד, לא update/overwrite). כל tier עובר Gateway. Raw נשמר תמיד.
 **קובץ ראשי:** `core/ingress_classifier.py` (חדש), `core/lead_candidate_handler.py`
 **DoD:** ראה SPEC_Stage_3_Capture_Policy.md §7
+**נותר:** production verification (הפעלת `FEATURE_AUTO_CAPTURE` + מעקב AgentObservation) לפני פתיחת C90.
 
 ### C90 — Stage 3.1: Capture Policy — קבצים מובנים (xlsx/csv)
 **עדיפות:** 🟠 בינוני (חסום על C89 production-verified)

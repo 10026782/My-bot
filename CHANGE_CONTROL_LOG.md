@@ -912,3 +912,18 @@ cursor/phase-1-stability-5fb2
 סקירת diff מלאה מול `main=d16fc96`.
 אין cherry-pick מהענף. הממצאים הוסבו ל-8 משימות חדשות (`C81-FU`, `C82-FU`, `C83`–`C88`; ראה ROADMAP).
 הענף ימחק לאחר רישום המשימות.
+
+## 02/07/2026 — PR #203 מוזג: C89 Stage 3 Capture Policy + BUG-NEW-12 + BUG-IC-01
+**ענף:** `claude/session-duplication-claimgate-gnkfiy` (נמחק לאחר מיזוג)
+**Merge commit:** `bb81e6c` (לאחר `c9e020d`, PR #202)
+
+**מה נכלל:**
+1. **C89 — Stage 3 Capture Policy:** `core/ingress_classifier.py` (חדש) — `IngressClassification` + `classify_ingress()` כנקודת כניסה יחידה לסיווג קלט טקסט; 5 tiers (SIMPLE_CAPTURE/CLEAN_BATCH/MIXED_BATCH/EXPORT-TABLE/UNKNOWN). `core/lead_candidate_handler.py` מחווט דרך המסווג לפני כל פרסור. `FEATURE_AUTO_CAPTURE` (כבוי כברירת מחדל) — ללא שינוי התנהגות בפרודקשן עד הפעלה מפורשת.
+2. **BUG-NEW-12 (session_store.py):** `_find_record_id_in_db` תוקן — regex גנרי (`rec\w+`) הוחלף ב-`_SESSION_RECORD_RE` הממוקד לבולטי רשומה (`• [recXXX]`) בלבד, מונע POST כפול כשקיימות מספר רשומות Session לאותו sender. ראה BUG-047 ב-BUG_AUDIT_LOG.md.
+3. **BUG-IC-01 (core/router/):** ביטויים חשופים ("סטטוס", "בדיקות מערכת") מנותבים כעת ל-`Handler.CLARIFY` במקום נפילה שקטה ל-Agent עם כלים מלאים. ראה BUG-048 ב-BUG_AUDIT_LOG.md.
+
+**בדיקות:** smoke_tests, test_a32_enforcement (6/6), test_integration (4/4), session_store.py (52/52), core/router/test_router.py (29/29), test_approval_gateway_safety.py (25/25) — כולן ירוקות לפני מיזוג.
+
+**Rollback plan:** revert merge commit `bb81e6c` — שלושת הפיצ'רים עצמאיים זה מזה בקוד (אין תלות הדדית), אך מוזגו יחד ב-PR אחד; revert חוזר את כולם יחד.
+
+**סטטוס:** ✅ מוזג ל-main
