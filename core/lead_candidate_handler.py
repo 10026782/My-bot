@@ -266,28 +266,53 @@ def handle_lead_candidate(
         logger.warning("[LCH] gateway propose failed (continuing): %s", exc)
         contract_id = None
 
-    # ── Execute write ─────────────────────────────
-    lead_fields = {
-        "Name":  name,
-        "phone": phone,
-    }
+    # ── Resolve domain + memory_key for the lead ─
+    # domain: use owner's current domain context; "general" as fallback
+    tenant_id  = getattr(identity, "tenant_id", "default") or "default"
+    domain     = getattr(identity, "domain_id", "") or "general"
+    _domain_key = domain if (domain and domain != "general") else "general"
 
+    # memory_key for the new lead (phone-based, like WhatsApp inbound leads)
+    # so future inbound messages from this phone resolve to the same record
+    _phone_key = re.sub(r"[\s\-\+]", "", phone)
+    memory_key = (
+        f"{tenant_id}/{_phone_key}@lead" if _phone_key
+        else f"{tenant_id}/dict_{re.sub(chr(32), '_', name.lower()[:20])}@lead"
+    )
+
+    # ── Execute write ─────────────────────────────
     record_id = ""
     ok        = False
 
     try:
         from tools.airtable_gateway import airtable_create, airtable_patch
+        from airtable_schema import LeadFields
 
         if action == "update" and existing_id:
-            ok_patch = airtable_patch("Leads", existing_id, {"phone": phone},
+            update_fields = {
+                LeadFields.PHONE:   phone,
+                LeadFields.SUMMARY: text[:500],
+            }
+            if _domain_key and _domain_key != "general":
+                update_fields[LeadFields.DOMAIN] = _domain_key
+            ok_patch = airtable_patch("Leads", existing_id, update_fields,
                                       source="lead_candidate_handler")
             if ok_patch:
                 record_id = existing_id
                 ok = True
         else:
-            # add source + sender info for new leads
-            lead_fields["source"]    = "owner_dictation"
-            lead_fields["tenant_id"] = getattr(identity, "tenant_id", "")
+            lead_fields = {
+                LeadFields.NAME:       name,
+                LeadFields.PHONE:      phone,
+                LeadFields.CHANNEL:    channel,
+                LeadFields.MEMORY_KEY: memory_key,
+                LeadFields.DOMAIN:     _domain_key,
+                LeadFields.SOURCE:     "owner_dictation",
+                LeadFields.STATUS:     "new",
+                LeadFields.SUMMARY:    text[:500],
+                LeadFields.SCORE:      0,
+                LeadFields.SENDER_ID:  phone,
+            }
             rec = airtable_create("Leads", lead_fields,
                                   source="lead_candidate_handler")
             if rec:
@@ -312,6 +337,47 @@ def handle_lead_candidate(
                     })
         except Exception as exc:
             logger.warning("[LCH] ledger update failed: %s", exc)
+
+    # ── Post-write enrichment (non-blocking) ─────
+    if ok and record_id:
+        # Lead Event — logs the dictation message on the lead's timeline
+        try:
+            from lead_capture import capture_lead_event
+            from feature_flags import is_enabled as _flag
+            if _flag("LEAD_CAPTURE"):
+                capture_lead_event(identity, text, record_id, domain=_domain_key)
+        except Exception as exc:
+            logger.warning("[LCH] lead_event write failed: %s", exc)
+
+        # Lead Memory — sync contact info for long-term memory
+        try:
+            from feature_flags import is_enabled as _flagm
+            if _flagm("LEAD_MEMORY"):
+                from lead_memory import lead_memory
+                lead_memory.update(
+                    memory_key,
+                    domain=_domain_key,
+                    channel=channel,
+                    contact_name=name,
+                    last_message=text,
+                    summary=text[:500],
+                )
+        except Exception as exc:
+            logger.warning("[LCH] lead_memory update failed: %s", exc)
+
+        # Lead Scoring — optional, same as canonical lead_capture path
+        if action == "create":
+            try:
+                from feature_flags import is_enabled as _flags
+                if _flags("LEAD_SCORING"):
+                    from lead_capture import _score_inbound_message
+                    from tools.airtable_gateway import airtable_patch as _gw_patch
+                    from airtable_schema import LeadFields as _LF
+                    score, tier, _ = _score_inbound_message(text, identity)
+                    _gw_patch("Leads", record_id, {_LF.SCORE: score},
+                              source="lead_candidate_handler_scoring")
+            except Exception as exc:
+                logger.warning("[LCH] lead_scoring failed: %s", exc)
 
     # ── Persist to session ────────────────────────
     if ok and record_id:
