@@ -1,5 +1,6 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
+עודכן: 02/07/2026 — Stage 3 Capture Policy (C89–C93) נוסף. IngressClassification + tiered auto-write. ראה SPEC_Stage_3_Capture_Policy.md.
 עודכן: 01/07/2026 — סקירת `fix/c53-approval-hardening`: הוחלט לא למזג את הענף. נפתחו שמונה follow-ups בעדיפות ראשונה (`C81-FU`, `C82-FU`, `C83`–`C88`).
 עודכן קודם: 30/06/2026 — Lead Lifecycle + Decision Hub Quality Gate session log. N-LEAD-EVENT/N-CXX/N-LEADBUF/N14 נוספו. BUG-DH-03/04 כblocker לפני FEATURE_DECISION_HUB.
 עודכן קודם: 29/06/2026 — Git Diff Gap Report session, main = `debb270` (אומת
@@ -276,6 +277,42 @@ Decision Hub Stage 3 (Readiness Engine, F18): `decision_readiness.py` (`calc_rea
 **עדיפות:** 🟠 בינוני
 **בעיה:** נכשל פתוח ב-staging.
 **פעולה:** fail-closed כברירת מחדל; override מפורש לטסטים בלבד.
+
+---
+
+### C89 — Stage 3: Capture Policy — Tiered Auto-Write (טקסט)
+**עדיפות:** 🔴 גבוה (חסום על יציבות Stage B / LCH)
+**Branch:** `feature/capture-policy-stage-3`
+**Feature Flag:** `FEATURE_AUTO_CAPTURE` (כבוי כברירת מחדל)
+**תלות:** Action Gateway (Stage B) פעיל + SB-01–SB-04 סגורים.
+**בעיה:** LCH batch auto-write אינו בטוח — parser מבלבל שולח/ליד, פלט כלי, ייצוא WhatsApp. ראה live test 02/07/2026.
+**פתרון:** `classify_ingress() → IngressClassification` — מדיניות מדורגת:
+- Tier 1 (SIMPLE_CAPTURE): שם+טלפון ברור → כתיבה אוטומטית דרך Gateway, בלי preview.
+- Tier 2 (CLEAN_BATCH): כמה שורות high-confidence → כתיבה אוטומטית + סיכום.
+- Tier 3 (MIXED_BATCH): ברורים נכתבים, עמומים → needs_review.
+- Tier 4 (EXPORT/TABLE/LOG): אפס writes — preview בלבד.
+- Tier 5 (UNKNOWN_USEFUL): Raw Capture / Inbox. לא יוצר Leads/Tasks.
+**עקרונות נעולים:** auto-write = additive-only (create בלבד, לא update/overwrite). כל tier עובר Gateway. Raw נשמר תמיד.
+**קובץ ראשי:** `core/ingress_classifier.py` (חדש), `core/lead_candidate_handler.py`
+**DoD:** ראה SPEC_Stage_3_Capture_Policy.md §7
+
+### C90 — Stage 3.1: Capture Policy — קבצים מובנים (xlsx/csv)
+**עדיפות:** 🟠 בינוני (חסום על C89 production-verified)
+**פעולה:** קובץ שמועלה לבוט → לקוח שני של `classify_ingress()`. קובץ = Tier 4 כברירת מחדל (preview).
+
+### C91 — Stage 3.2: Capture Policy — קול (Whisper → טקסט)
+**עדיפות:** 🟠 בינוני (חסום על C89)
+**פעולה:** Whisper תמלול → `classify_ingress(source_type="voice")`. confidence baseline מופחת אוטומטית.
+
+### C92 — Stage 3.3: Capture Policy — מייל נכנס
+**עדיפות:** 🟡 גבוה (חסום על C89)
+**פעולה:** `email_inbound.py` מתחבר לאותו `classify_ingress()` במקום לוגיקה נפרדת — איחוד, לא בנייה.
+
+### C93 — Stage 4: OCR / כרטיסי ביקור
+**עדיפות:** 🟠 בינוני (חסום על C89 + AgentObservation data ≥ 2 שבועות)
+**פעולה:** תמונה → OCR → `classify_ingress(source_type="image")`. נפתח רק אם שיעור needs_review ושיעור תיקונים ידניים ב-Tier 1 נמוכים (נתוני AgentObservation).
+
+---
 
 ### N01 — ✅ הושלם (W1 לעיל)
 
