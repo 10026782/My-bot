@@ -1232,23 +1232,6 @@ def run_agent(
             f"msg='{user_text[:60]}'"
         )
 
-    # ── 1.45. LeadCandidate Handler (Section 4B / BUG-NEW-10) ──────
-    # בעל הבית מכתיב ליד ("משה יצחקוב 050... תשמור") — short-circuit לפני agent.
-    # sender_identity (אליהו) נשמר קבוע; subject (הליד) מטופל בנפרד.
-    if getattr(identity, "is_internal", False):
-        try:
-            from core.lead_candidate_handler import handle_lead_candidate
-            _lch_reply = handle_lead_candidate(identity, user_text, chat_id, channel)
-            if _lch_reply is not None:
-                # BUG-SB-01: COG sees "lead_candidate_handler" as a different speaker.
-                # LCH is a deterministic Gateway path — mark as "action_gateway"
-                # so the Single Speaker guard passes, same as other GatewayReply paths.
-                if _out_meta is not None:
-                    _out_meta["source_module"] = "action_gateway"
-                return _lch_reply
-        except Exception as _lch_exc:
-            logger.warning("[LCH] handler failed (falling through to agent): %s", _lch_exc)
-
     # ── 1.5. WhatsApp Lead Capture (W0) ───────────
     # W0/N02: capture inbound WhatsApp leads and optionally score them.
     lead_capture_result = None   # CXX/A32: נשמר לשילוב ב-tool_results_log
@@ -1431,6 +1414,32 @@ def run_agent(
     resolved_route_domain = getattr(route.domain, "value", str(route.domain))
     if _resolved_domain is not None:
         _resolved_domain["domain"] = resolved_route_domain
+
+    # ── 3.6. LeadCandidate Handler (Section 4B / BUG-NEW-10) ──────
+    # בעל הבית מכתיב ליד ("משה יצחקוב 050... תשמור") — short-circuit לפני agent.
+    # sender_identity (אליהו) נשמר קבוע; subject (הליד) מטופל בנפרד.
+    # SPEC 1 (Capture Policy Router-Integration): הועבר לכאן מ-שלב "1.45"
+    # (היה *לפני* ה-Router — bypass מלא של Identity→Router→Context→Agent).
+    # ה-Router רץ עכשיו תמיד קודם — LCH מקבל domain אמיתי מ-domain_router
+    # (resolved_route_domain) במקום רק את ה-content-regex guess הפנימי שלו.
+    # gate זהה לגמרי לישן (identity.is_internal) — LCH עדיין עושה סיווג/tier
+    # משלו (classify_ingress, ללא שינוי) — route.capture_tier הוא שדה
+    # observability-בלבד על RouteDecision, לא gate כאן.
+    if getattr(identity, "is_internal", False):
+        try:
+            from core.lead_candidate_handler import handle_lead_candidate
+            _lch_reply = handle_lead_candidate(
+                identity, user_text, chat_id, channel, domain=resolved_route_domain,
+            )
+            if _lch_reply is not None:
+                # BUG-SB-01: COG sees "lead_candidate_handler" as a different speaker.
+                # LCH is a deterministic Gateway path — mark as "action_gateway"
+                # so the Single Speaker guard passes, same as other GatewayReply paths.
+                if _out_meta is not None:
+                    _out_meta["source_module"] = "action_gateway"
+                return _lch_reply
+        except Exception as _lch_exc:
+            logger.warning("[LCH] handler failed (falling through to agent): %s", _lch_exc)
 
     # ── 4. Dispatch ───────────────────────────────
     if route.handler == Handler.ENGINEERING_NOTE:
