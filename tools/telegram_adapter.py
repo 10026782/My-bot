@@ -8,6 +8,8 @@ import os
 
 import httpx
 
+from core.action_result import ActionResult, ClaimType
+
 logger = logging.getLogger(__name__)
 
 
@@ -32,14 +34,45 @@ def _assert_gateway_context() -> None:
             )
 
 
-def send_telegram(chat_id: str, text: str) -> None:
+def send_telegram(chat_id: str, text: str) -> ActionResult:
+    """Send to the owner and return explicit delivery evidence."""
     _assert_gateway_context()   # ← Secondary Guard
     token = os.environ.get("TELEGRAM_TOKEN", "")
     if not token:
         logger.warning("[TelegramAdapter] TELEGRAM_TOKEN missing — send skipped")
-        return
-    httpx.post(
-        f"https://api.telegram.org/bot{token}/sendMessage",
-        json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
-        timeout=5,
-    )
+        return ActionResult.failure(
+            "TELEGRAM_TOKEN missing — send skipped",
+            source="telegram_adapter",
+        )
+
+    try:
+        response = httpx.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
+            timeout=5,
+        )
+        payload = response.json()
+        delivered = bool(response.is_success and payload.get("ok") is True)
+        error = "" if delivered else str(payload.get("description", "Telegram send failed"))
+        return ActionResult(
+            tool_called=True,
+            tool_http_ok=response.is_success,
+            business_success=delivered,
+            delivery_attempted=True,
+            delivery_success=delivered,
+            adapter_mode="live",
+            claim_type=ClaimType.SENT,
+            error=error,
+            source="telegram_adapter",
+        )
+    except Exception as exc:
+        logger.error("[TelegramAdapter] send failed: %s", exc)
+        return ActionResult(
+            tool_called=True,
+            delivery_attempted=True,
+            delivery_success=False,
+            adapter_mode="live",
+            claim_type=ClaimType.SENT,
+            fatal_error=str(exc),
+            source="telegram_adapter",
+        )

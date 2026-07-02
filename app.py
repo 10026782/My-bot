@@ -300,7 +300,7 @@ def _handle_send_recovery_confirmed(payload: dict, chat_id: str) -> str:
 
     try:
         from core.output_gateway import send_outbound, OutboundEnvelope, AudienceClass, OutputChannel
-        send_outbound(OutboundEnvelope(
+        result = send_outbound(OutboundEnvelope(
             channel=OutputChannel.TELEGRAM_OWNER,
             recipient=chat_id,
             body=msg,
@@ -313,14 +313,18 @@ def _handle_send_recovery_confirmed(payload: dict, chat_id: str) -> str:
         logger.error(f"[Recovery] notify owner failed: {e}")
         return f"⚠️ שגיאה בהצגת הטיוטה: {e}"
 
-    if memory_key:
-        try:
-            from lead_memory import lead_memory
-            state = lead_memory.get(memory_key)
-            lead_memory.update(memory_key, recovery_count=state.recovery_count + 1)
-        except Exception as e:
-            logger.warning(f"[Recovery] recovery_count update failed: {e}")
+    owner_delivery = getattr(result, "action_result", None)
+    if not owner_delivery or not owner_delivery.delivery_success:
+        logger.error(
+            "[Recovery] owner draft delivery not verified | memory_key=%s audit=%s",
+            memory_key,
+            getattr(result, "audit_id", ""),
+        )
+        return "⚠️ האישור נקלט, אך מסירת הטיוטה אליך לא אומתה. ה-recovery לא סומן כהושלם."
 
+    # Delivery to TELEGRAM_OWNER is only a draft preview. It is not evidence
+    # that the customer received the recovery message, so recovery_count must
+    # remain unchanged until a customer-capable adapter confirms delivery.
     return "✅ הטיוטה נשלחה אליך להעברה ידנית"
 
 
