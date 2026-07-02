@@ -7,6 +7,7 @@
 from __future__ import annotations
 import re
 import logging
+from typing import Optional
 from .route_decision import Intent
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,14 @@ _RULES: list[tuple[str, str, float]] = [
     (r"^(בדיקה|test)\s*[\?!.]*$",                                            Intent.BOT_STATUS_CHECK, 0.99),
     # Contextual phrases that are inherently bot-status-only (safe to match anywhere)
     (r"(אתה עובד\??|שומע אותי\??|are you (working|there|alive))",            Intent.BOT_STATUS_CHECK, 0.95),
+
+    # BUG-IC-01/C89: explicit action verb (בדוק/תבדוק) + integration name is
+    # required for a REAL connectivity check to fire — placed early so it
+    # wins over the generic "calendar"→LIST_EVENTS / "בדוק"→RESEARCH_TOPIC
+    # rules below. Bare "סטטוס"/"מצב" nouns without a verb are NOT matched
+    # here — they fall through to _AMBIGUOUS_PHRASES → CLARIFY instead of a
+    # live check. Plain text must not inherit /status's slash-command power.
+    (r"(בדוק|תבדוק|תבדקי).*(חיבור|gmail|calendar|airtable|מערכת)", Intent.SYSTEM_STATUS, 0.95),
 
     # ── Tasks ────────────────────────────────────
     (r"(פתח|צור|הוסף|תוסיף).*(משימ|טאסק|task)", Intent.CREATE_TASK, 0.95),
@@ -131,3 +140,39 @@ def detect_intent(text: str, confidence_threshold: float = 0.75) -> tuple[str, f
     # אין התאמה
     logger.debug(f"[Intent] No rule match for: '{text_clean[:40]}'")
     return Intent.UNKNOWN, 0.0, ""
+
+
+# ══════════════════════════════════════════════════
+# Ambiguous short-phrase detector (BUG-IC-01 / C89)
+#
+# Slash commands are commands. Natural language is intent input.
+# A bare status/task noun-phrase from the owner ("סטטוס", "בדיקות מערכת",
+# "מה המצב", "למלא משימות") must NOT fall through Intent.UNKNOWN into the
+# general Agent, where it could decide on its own initiative to run a full
+# connectivity check (Gmail/Calendar/Airtable) or guess at a task action.
+# Only a literal /status (or an explicit action verb + target, e.g.
+# "בדוק חיבורי מערכת") is allowed to trigger that. Everything else here
+# routes to Handler.CLARIFY with a specific disambiguating question.
+# ══════════════════════════════════════════════════
+
+_AMBIGUOUS_PHRASES: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"^(סטטוס|status|מה המצב|מצב)\s*[\?!.]*$", re.IGNORECASE),
+     "אתה רוצה שאבדוק חיבורים עכשיו (Gmail/Calendar/Airtable), או משהו אחר?"),
+    (re.compile(r"^בדיקות?\s*מערכת\s*[\?!.]*$", re.IGNORECASE),
+     "אתה רוצה שאבדוק חיבורים עכשיו או שאתה מתכוון לתיעוד בדיקות?"),
+    (re.compile(r"^(תמלא|למלא)\s*משימות\s*[\?!.]*$", re.IGNORECASE),
+     "להוסיף משימה חדשה, לעדכן קיימת, או לראות רשימה?"),
+]
+
+
+def detect_ambiguous_phrase(text: str) -> Optional[str]:
+    """
+    מזהה משפט קצר דו-משמעי (בעיקר owner/staff) שאסור שיפעיל בדיקת מערכת
+    או פעולה רחבה אוטומטית. מחזיר שאלת הבהרה אם נמצאה התאמה, אחרת None.
+    רץ רק כשdetect_intent כבר החזיר UNKNOWN — לא דורס כוונה מפורשת שזוהתה.
+    """
+    stripped = text.strip()
+    for pattern, question in _AMBIGUOUS_PHRASES:
+        if pattern.match(stripped):
+            return question
+    return None
