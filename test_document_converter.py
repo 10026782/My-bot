@@ -99,3 +99,40 @@ def test_fail_closed_for_pdf_and_complex_html(tmp_path):
     result = convert_document(html, "html", "docx")
     assert result["status"].startswith("error:")
     assert result["output_file"] is None
+
+
+if __name__ == "__main__":
+    # BUG-CI-SILENT-PASS-DOCUMENT-CONVERTER: ci.yml runs test_*.py via
+    # `python "$f"`, not pytest, so bare pytest-style test functions never
+    # executed here — CI reported a false green. tmp_path is a pytest
+    # fixture with no plain-Python equivalent, so each test is invoked
+    # explicitly (no auto-collect) against a real temp dir per test.
+    import shutil
+    import tempfile
+    from pathlib import Path
+
+    _tests = [
+        test_markdown_simple_to_html_and_txt,
+        test_markdown_table_to_html_and_txt,
+        test_html_conversions,
+        test_docx_round_trips_to_markdown_and_txt,
+        test_csv_xlsx_round_trip,
+        test_fail_closed_for_pdf_and_complex_html,
+    ]
+
+    passed = 0
+    skipped = 0
+    for fn in _tests:
+        tmp_dir = tempfile.mkdtemp(prefix="document_converter_selftest_")
+        try:
+            fn(Path(tmp_dir))
+        except pytest.skip.Exception as exc:
+            print(f"skipped {fn.__name__}: {exc}")
+            skipped += 1
+            continue
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        print(f"passed {fn.__name__}")
+        passed += 1
+
+    print(f"document_converter self-test OK — {passed} passed, {skipped} skipped")
