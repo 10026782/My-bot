@@ -57,6 +57,7 @@ def _new_session(domain: str = "real_estate", channel: str = "whatsapp") -> dict
         "current_lead_record_id": "",  # ← BUG-NEW-09: ה-record_id האמיתי של הליד
                                         # (לא של רשומת ה-Session) — מונע פברוק record_id בסבבים הבאים
         "active_lead_candidate": None, # ← BUG-NEW-10/Section 4B: ליד שה-owner מכתיב, TTL 30 דקות
+        "last_lead_candidate_batch": None, # ← Section 4C: batch dictation state for follow-up routing
     }
 
 
@@ -317,6 +318,7 @@ class PersistentSessionStore:
                 "last_tool_result":   session.get("last_tool_result"),
                 "current_lead_record_id": session.get("current_lead_record_id", ""),
                 "active_lead_candidate":  session.get("active_lead_candidate"),
+                "last_lead_candidate_batch": session.get("last_lead_candidate_batch"),
             }
             fields = {
                 SF.SENDER_ID:    sender,
@@ -408,6 +410,7 @@ class PersistentSessionStore:
             session["last_tool_result"]   = state.get("last_tool_result")
             session["current_lead_record_id"] = state.get("current_lead_record_id", "")
             session["active_lead_candidate"]  = state.get("active_lead_candidate")
+            session["last_lead_candidate_batch"] = state.get("last_lead_candidate_batch")
             if record_m:
                 session["record_id"] = record_m.group(0)
             return session

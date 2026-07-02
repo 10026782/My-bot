@@ -1,10 +1,13 @@
-# core/lead_candidate_handler.py — Section 4B: Deterministic LeadCandidate Handler
+# core/lead_candidate_handler.py — Section 4B/4C: Deterministic LeadCandidate Handler
 #
 # Short-circuits the agent loop for explicit owner/staff lead-save patterns.
 # Sender identity (אליהו) is immutable; subject (the lead) is resolved separately.
 #
-# זרימה: parse → find/create/update Airtable → Gateway ledger → GatewayReply
-# Agent אינו מעורב בהחלטה — לא "האם לשמור", לא "איזה record_id", לא "הצליח".
+# 4B: single lead — parse → find/create/update → Gateway → GatewayReply
+# 4C: batch — multiple name+phone blocks → process all → per-lead summary reply
+#
+# COG note: reply source_module must be "action_gateway" (set in app.py step 1.45)
+# so COG's Single Speaker guard doesn't block the GatewayReply.
 
 from __future__ import annotations
 
@@ -18,7 +21,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 # ══════════════════════════════════════════════════
-# Pattern extraction
+# Constants
 # ══════════════════════════════════════════════════
 
 _PHONE_RE = re.compile(r"(?:0\d{1,2}[-\s]?\d{7,8}|[\+]?972[-\s]?\d{8,9})")
@@ -29,19 +32,23 @@ _SAVE_WORDS = frozenset({
     "שמור כליד", "הוסף כליד", "כליד",
 })
 
-# Hebrew full name: at least two words, each 2+ chars, Hebrew chars only
-_HEBREW_NAME_RE = re.compile(
-    r"(?<!\w)([א-ת]{2,}(?:\s+[א-ת]{2,})+)(?!\w)"
-)
-
-# Explicit prefixes: "אני", "שמו", "שמה", "ליד חדש:", "לקוח חדש:"
-# מילות עצירה שמסמנות סוף שם וסוגיות נוספות
+# מילות עצירה — לא חלק משם פרטי
 _NAME_STOP = frozenset({
     "טלפון", "מספר", "פלאפון", "נייד", "תשמור", "שמור", "שמרי",
     "תרשום", "רשום", "תוסיף", "הוסף", "save", "add", "כליד",
     "ליד", "לקוח", "חדש", "בשם", "השם",
+    # ערים / מיקומים / פרויקטים — נשמרים כ-context, לא כשם
+    "טבריה", "חיפה", "תלאביב", "ירושלים", "נתניה", "אשדוד", "באר", "שבע",
+    "רמת", "גן", "פתח", "תקווה", "ראשון", "לציון", "רחובות", "בנייה",
+    "פרויקט", "פרוייקט", "דירה", "דירות", "נדלן", "נכס",
 })
 
+# Hebrew full-name pattern — שניים עד ארבעה מילים עבריות
+_HEBREW_NAME_RE = re.compile(
+    r"(?<!\w)([א-ת]{2,}(?:\s+[א-ת]{2,})+)(?!\w)"
+)
+
+# Prefixed patterns — highest confidence
 _PREFIXED_NAME_RE = re.compile(
     r"""(?:
         אני\s+
@@ -57,9 +64,42 @@ _PREFIXED_NAME_RE = re.compile(
     re.VERBOSE | re.UNICODE,
 )
 
+# Domain detection from message content — mirrors domain_router._DOMAIN_RULES
+_DOMAIN_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"נדל.ן|דירה|דירות|קרקע|נכס|נכסים|שכירות|משכנתא|פינוי|בינוי|apartment|property", re.I), "real_estate"),
+    (re.compile(r"יבוא|ייבוא|סין|ספק|מכולה|שילוח|רהיט|import|supplier|china|shipping|furniture", re.I), "import"),
+    (re.compile(r"שיווק|מדיה|קמפיין|פרסום|תוכן|סושיאל|instagram|facebook|youtube|marketing|media", re.I), "media"),
+    (re.compile(r"saas|מנוי|subscription|פיצ.ר|feature|product|api", re.I), "saas"),
+    (re.compile(r"כסף|תזרים|הכנסה|הוצאה|רווח|חשבון|תשלום|חשבונית|finance|revenue|invoice|payment", re.I), "finance"),
+]
+
+# Minimal block separator — blank line, bullet, number+dot, or Hebrew item marker
+_BLOCK_SEP = re.compile(r"\n\s*\n|\n[-•*]\s+|\n\d+[.)]\s+|\n(?=[א-ת])")
+
+
+# ══════════════════════════════════════════════════
+# Domain detection
+# ══════════════════════════════════════════════════
+
+def _detect_domain(text: str, identity_domain: str = "") -> str:
+    """
+    מזהה דומיין מתוכן ההודעה.
+    חוזר ל-identity_domain אם לא נמצא במלל, ולבסוף "general".
+    """
+    for pattern, domain in _DOMAIN_PATTERNS:
+        if pattern.search(text):
+            return domain
+    if identity_domain and identity_domain != "general":
+        return identity_domain
+    return "general"
+
+
+# ══════════════════════════════════════════════════
+# Name / phone extraction
+# ══════════════════════════════════════════════════
 
 def _extract_phone(text: str) -> str:
-    """מחלץ מספר טלפון ראשון מהטקסט — ממיר לפורמט נורמלי."""
+    """מחלץ מספר טלפון ראשון ומנרמל לפורמט ישראלי."""
     m = _PHONE_RE.search(text)
     if not m:
         return ""
@@ -71,13 +111,26 @@ def _extract_phone(text: str) -> str:
     return raw
 
 
+def _extract_all_phones(text: str) -> list[str]:
+    """מחלץ את כל מספרי הטלפון מהטקסט."""
+    results = []
+    for m in _PHONE_RE.finditer(text):
+        raw = re.sub(r"[\s\-]", "", m.group())
+        if raw.startswith("+972"):
+            raw = "0" + raw[4:]
+        elif raw.startswith("972"):
+            raw = "0" + raw[3:]
+        results.append(raw)
+    return results
+
+
 def _has_save_intent(text: str) -> bool:
     lower = text.lower()
     return any(w in lower for w in _SAVE_WORDS)
 
 
 def _clean_name(raw: str) -> str:
-    """מסיר מילות עצירה ידועות מסוף השם."""
+    """מסיר מילות עצירה מסוף השם."""
     words = raw.strip().rstrip(",;:").split()
     while words and words[-1] in _NAME_STOP:
         words.pop()
@@ -86,37 +139,62 @@ def _clean_name(raw: str) -> str:
 
 def _extract_name(text: str) -> Optional[str]:
     """
-    מחלץ שם ליד עברי מלא מהטקסט.
-    מועדף: שם עם prefix מפורש; fallback: שם עברי כפול בלבד.
+    מחלץ שם ליד עברי מלא.
+    מועדף: prefix מפורש. Fallback: שם עברי כפול ללא מילות מיקום/עצירה.
     """
-    # Try prefixed first (highest confidence)
+    # Prefixed (highest confidence)
     m = _PREFIXED_NAME_RE.search(text)
     if m:
         name = _clean_name(m.group(1))
         words = name.split()
-        # reject if any middle word is a known keyword (e.g. "יד חדש בשם")
         if len(name) >= 4 and " " in name and not any(w in _NAME_STOP for w in words):
             return name
 
-    # Fallback: any Hebrew two-word sequence not on a known stop-list
-    _STOP = {"לא", "אני", "כן", "גם", "של", "עם", "על", "את", "הוא", "היא", "הם", "אנחנו"} | _NAME_STOP
+    # Fallback — Hebrew multi-word sequence, filtered
+    _STOP_ALL = _NAME_STOP | {"לא", "אני", "כן", "גם", "של", "עם", "על", "את",
+                               "הוא", "היא", "הם", "אנחנו", "אתם"}
     for m in _HEBREW_NAME_RE.finditer(text):
         raw = m.group(1).strip()
         name = _clean_name(raw)
         words = name.split()
         if len(words) >= 2 and len(name) >= 4:
-            if not any(w in _STOP for w in words):
+            if not any(w in _STOP_ALL for w in words):
                 return name
     return None
 
 
+def _extract_context_keywords(text: str, name: str, phone: str) -> list[str]:
+    """
+    מחלץ מילות הקשר (עיר/פרויקט/נושא) שאינן חלק מהשם.
+    לדוגמה: "גבי אקבשב דרייבר 0539332665 טבריה" → ["טבריה"]
+    """
+    # Remove name and phone from text, then scan for location/project words
+    cleaned = text
+    if name:
+        cleaned = cleaned.replace(name, " ")
+    if phone:
+        cleaned = _PHONE_RE.sub(" ", cleaned)
+    # Location/project stop-words that ARE context keywords (subset of _NAME_STOP)
+    _CONTEXT_WORDS = {
+        "טבריה", "חיפה", "ירושלים", "נתניה", "אשדוד", "רחובות",
+        "פרויקט", "פרוייקט", "דירה", "דירות", "נדלן", "נכס",
+        "בנייה",
+    }
+    found = []
+    for word in re.findall(r"[א-ת]{2,}", cleaned):
+        if word in _CONTEXT_WORDS and word not in found:
+            found.append(word)
+    return found
+
+
+# ══════════════════════════════════════════════════
+# Single-lead parse
+# ══════════════════════════════════════════════════
+
 def parse_lead_dictation(text: str) -> Optional[dict]:
     """
-    מחלץ {name, phone, raw_text} מהודעת הכתבת ליד מפורשת.
-    מחזיר None אם:
-    - אין שם עברי מלא
-    - אין טלפון ואין כוונת שמירה
-    - כוונת שמירה אבל לא ברורה מספיק (ספק)
+    מחלץ {name, phone, context, needs_phone} מהודעת הכתבת ליד בודדת.
+    מחזיר None אם אין תבנית ברורה.
     """
     if not text:
         return None
@@ -125,44 +203,81 @@ def parse_lead_dictation(text: str) -> Optional[dict]:
     if not name:
         return None
 
-    phone = _extract_phone(text)
-    has_phone = bool(phone)
-    has_save = _has_save_intent(text)
+    phone   = _extract_phone(text)
+    context = _extract_context_keywords(text, name, phone)
 
-    # חייב: שם + טלפון + (כוונת שמירה, או prefixed pattern שמספיק לבדו)
-    # בלי טלפון: רק אם יש כוונת שמירה מפורשת
+    has_phone = bool(phone)
+    has_save  = _has_save_intent(text)
+
     if not has_phone and not has_save:
         return None
 
-    # שם בלבד + כוונת שמירה בלי טלפון — דרוש בירור
     if not has_phone and has_save:
-        return {"name": name, "phone": "", "raw_text": text, "needs_phone": True}
+        return {"name": name, "phone": "", "context": context, "raw_text": text, "needs_phone": True}
 
-    return {"name": name, "phone": phone, "raw_text": text, "needs_phone": False}
+    return {"name": name, "phone": phone, "context": context, "raw_text": text, "needs_phone": False}
 
 
 # ══════════════════════════════════════════════════
-# Airtable search — raw GET (reads don't go through airtable_gateway)
+# Batch parse (Section 4C)
 # ══════════════════════════════════════════════════
 
-def _at_find_lead_by_name_phone(name: str, phone: str) -> Optional[str]:
+def parse_batch_dictation(text: str) -> list[dict]:
     """
-    מחפש ליד קיים לפי שם + טלפון.
-    מחזיר record_id ראשון שנמצא, או None.
+    מנסה לחלץ מספר ליד-בלוקים מהודעה אחת.
+    מחזיר רשימה של {name, phone, context} רק אם יש ≥2 בלוקים ברורים.
+    אחרת מחזיר רשימה ריקה (→ fallback ל-parse_lead_dictation).
+
+    בלוק = שם עברי + טלפון בקרבה (עד 60 תווים לפני/אחרי).
     """
+    # אסטרטגיה: מצא את כל מספרי הטלפון, ולכל אחד חפש שם עברי בסביבתו
+    candidates: list[dict] = []
+    seen_phones: set[str] = set()
+
+    for phone_match in _PHONE_RE.finditer(text):
+        raw_phone = re.sub(r"[\s\-]", "", phone_match.group())
+        if raw_phone.startswith("+972"):
+            raw_phone = "0" + raw_phone[4:]
+        elif raw_phone.startswith("972"):
+            raw_phone = "0" + raw_phone[3:]
+
+        if raw_phone in seen_phones:
+            continue
+        seen_phones.add(raw_phone)
+
+        # חלון טקסט סביב הטלפון
+        start  = max(0, phone_match.start() - 60)
+        end    = min(len(text), phone_match.end() + 60)
+        window = text[start:end]
+
+        name = _extract_name(window)
+        if not name:
+            continue
+
+        context = _extract_context_keywords(window, name, raw_phone)
+        candidates.append({"name": name, "phone": raw_phone, "context": context})
+
+    # החזר רק אם ≥2 בלוקים שונים
+    if len(candidates) >= 2:
+        return candidates
+    return []
+
+
+# ══════════════════════════════════════════════════
+# Airtable search
+# ══════════════════════════════════════════════════
+
+def _at_find_lead(name: str, phone: str) -> Optional[str]:
+    """מחפש ליד קיים לפי שם + טלפון. מחזיר record_id או None."""
     import os
     base = os.environ.get("AIRTABLE_BASE_ID", "")
     key  = os.environ.get("AIRTABLE_API_KEY", "")
     if not base or not key:
-        logger.warning("[LCH] Airtable env missing — cannot search lead")
         return None
 
-    table_enc = urllib.parse.quote("Leads", safe="")
-    url = f"https://api.airtable.com/v0/{base}/{table_enc}"
+    url     = f"https://api.airtable.com/v0/{base}/{urllib.parse.quote('Leads', safe='')}"
     headers = {"Authorization": f"Bearer {key}"}
 
-    # נסה חיפוש לפי שם + טלפון תחילה
-    candidates: list[dict] = []
     for formula in _search_formulas(name, phone):
         try:
             r = httpx.get(url, headers=headers,
@@ -171,28 +286,22 @@ def _at_find_lead_by_name_phone(name: str, phone: str) -> Optional[str]:
             if r.status_code == 200:
                 records = r.json().get("records", [])
                 if records:
-                    candidates.extend(records)
-                    break  # ראשון שמצא — מספיק
+                    # prefer exact phone match
+                    if phone:
+                        for rec in records:
+                            rec_phone = re.sub(r"[\s\-]", "", str(rec.get("fields", {}).get("phone", "")))
+                            if rec_phone == phone:
+                                return rec["id"]
+                    return records[0]["id"]
         except Exception as exc:
             logger.warning("[LCH] Airtable search error: %s", exc)
 
-    if not candidates:
-        return None
-
-    # העדף record שהטלפון תואם
-    if phone:
-        for rec in candidates:
-            rec_phone = re.sub(r"[\s\-]", "", str(rec.get("fields", {}).get("phone", "")))
-            if rec_phone == phone:
-                return rec["id"]
-
-    return candidates[0]["id"]
+    return None
 
 
 def _search_formulas(name: str, phone: str) -> list[str]:
-    """מחזיר רשימת formulas לנסות — מהמדויק לפחות מדויק."""
-    safe_name  = name.replace("'", "\\'")
-    formulas = []
+    safe_name = name.replace("'", "\\'")
+    formulas  = []
     if phone:
         safe_phone = phone.replace("'", "\\'")
         formulas.append(f"AND(SEARCH('{safe_name}', {{Name}}), {{phone}}='{safe_phone}')")
@@ -202,105 +311,80 @@ def _search_formulas(name: str, phone: str) -> list[str]:
 
 
 # ══════════════════════════════════════════════════
-# Main handler
+# Single-lead write
 # ══════════════════════════════════════════════════
 
-def handle_lead_candidate(
+def _write_one_lead(
     identity,
+    name: str,
+    phone: str,
     text: str,
-    chat_id: str,
     channel: str,
-) -> Optional[str]:
+    domain: str,
+) -> tuple[bool, str, str]:
     """
-    מטפל דטרמיניסטית בהכתבת ליד של owner/staff.
-    מחזיר מחרוזת תשובה (GatewayReply) אם הפעולה בוצעה/נחסמה/דורשת בירור.
-    מחזיר None אם ההודעה לא תואמת לתבנית — ממשיכים לאייג'נט הרגיל.
-
-    sender (identity) נשמר כפי שהוא לאורך כל הדרך.
-    subject (הליד) מוחלץ ומטופל בנפרד.
+    מוצא (או יוצר/מעדכן) ליד אחד.
+    מחזיר (ok, record_id, action) — action = "create" | "update".
     """
-    # רק owner/staff
-    if not getattr(identity, "is_internal", False):
-        return None
+    tenant_id = getattr(identity, "tenant_id", "default") or "default"
 
-    parsed = parse_lead_dictation(text)
-    if parsed is None:
-        return None  # not a lead-dictation pattern → normal agent
-
-    name  = parsed["name"]
-    phone = parsed.get("phone", "")
-
-    # דרוש בירור: שם ברור אבל חסר טלפון
-    if parsed.get("needs_phone"):
-        logger.info("[LCH] clarification needed: name=%r no phone", name)
-        return (
-            f"כדי לשמור את {name} כליד — אשמח לקבל גם מספר טלפון. 📞"
-        )
-
-    # ── חיפוש ב-Airtable ─────────────────────────
-    existing_id = _at_find_lead_by_name_phone(name, phone)
-    action = "update" if existing_id else "create"
-
-    # ── Gateway dedup check ───────────────────────
-    tool_name   = "airtable_update" if action == "update" else "airtable_add"
-    tool_inputs = {"table": "Leads", "name": name, "phone": phone}
-    if existing_id:
-        tool_inputs["record_id"] = existing_id
-
-    try:
-        from core.action_gateway import action_gateway as _gw, _ledger_singleton
-        gw_result = _gw.propose_action(
-            tenant_id         = getattr(identity, "tenant_id", "default"),
-            canonical_user_id = identity.memory_key,
-            tool_name         = tool_name,
-            tool_inputs       = tool_inputs,
-            origin_channel    = channel,
-            origin_chat_id    = chat_id,
-            requires_approval = False,
-        )
-        if not gw_result.ok:
-            logger.info("[LCH] gateway blocked: %s", gw_result.reason)
-            return gw_result.user_message or "⚠️ פעולה זו כבר בוצעה לאחרונה."
-        contract_id = gw_result.contract_id
-    except Exception as exc:
-        logger.warning("[LCH] gateway propose failed (continuing): %s", exc)
-        contract_id = None
-
-    # ── Resolve domain + memory_key for the lead ─
-    # domain: use owner's current domain context; "general" as fallback
-    tenant_id  = getattr(identity, "tenant_id", "default") or "default"
-    domain     = getattr(identity, "domain_id", "") or "general"
-    _domain_key = domain if (domain and domain != "general") else "general"
-
-    # memory_key for the new lead (phone-based, like WhatsApp inbound leads)
-    # so future inbound messages from this phone resolve to the same record
+    # memory_key — phone-based so future inbound from same phone matches
     _phone_key = re.sub(r"[\s\-\+]", "", phone)
     memory_key = (
-        f"{tenant_id}/{_phone_key}@lead" if _phone_key
+        f"{tenant_id}/{_phone_key}@lead"
+        if _phone_key
         else f"{tenant_id}/dict_{re.sub(chr(32), '_', name.lower()[:20])}@lead"
     )
 
-    # ── Execute write ─────────────────────────────
+    existing_id = _at_find_lead(name, phone)
+    action      = "update" if existing_id else "create"
+
+    # Gateway dedup check
+    contract_id = None
+    try:
+        from core.action_gateway import action_gateway as _gw, _ledger_singleton
+        _tool = "airtable_update" if action == "update" else "airtable_add"
+        _inputs = {"table": "Leads", "name": name, "phone": phone}
+        if existing_id:
+            _inputs["record_id"] = existing_id
+        gw_result = _gw.propose_action(
+            tenant_id         = tenant_id,
+            canonical_user_id = identity.memory_key,
+            tool_name         = _tool,
+            tool_inputs       = _inputs,
+            origin_channel    = channel,
+            origin_chat_id    = identity.memory_key,
+            requires_approval = False,
+        )
+        if not gw_result.ok:
+            logger.info("[LCH] gateway blocked for %r: %s", name, gw_result.reason)
+            return False, "", "duplicate"
+        contract_id = gw_result.contract_id
+    except Exception as exc:
+        logger.warning("[LCH] gateway propose failed: %s", exc)
+
+    # Write
     record_id = ""
     ok        = False
-
     try:
         from tools.airtable_gateway import airtable_create, airtable_patch
         from airtable_schema import LeadFields
+        _domain_key = domain if (domain and domain != "general") else "general"
 
         if action == "update" and existing_id:
-            update_fields = {
+            patch_fields = {
                 LeadFields.PHONE:   phone,
                 LeadFields.SUMMARY: text[:500],
             }
-            if _domain_key and _domain_key != "general":
-                update_fields[LeadFields.DOMAIN] = _domain_key
-            ok_patch = airtable_patch("Leads", existing_id, update_fields,
+            if _domain_key != "general":
+                patch_fields[LeadFields.DOMAIN] = _domain_key
+            ok_patch = airtable_patch("Leads", existing_id, patch_fields,
                                       source="lead_candidate_handler")
             if ok_patch:
                 record_id = existing_id
                 ok = True
         else:
+            _domain_key = domain if (domain and domain != "general") else "general"
             lead_fields = {
                 LeadFields.NAME:       name,
                 LeadFields.PHONE:      phone,
@@ -319,53 +403,41 @@ def handle_lead_candidate(
                 record_id = rec.get("id", "")
                 ok = bool(record_id)
     except Exception as exc:
-        logger.error("[LCH] Airtable write failed: %s", exc)
-        ok = False
+        logger.error("[LCH] write failed for %r: %s", name, exc)
 
-    # ── Update ledger ─────────────────────────────
+    # Update ledger
     if contract_id:
         try:
-            status = "executed" if ok else "failed"
-            _ledger_singleton.update_status(contract_id, status)
+            from core.action_gateway import _ledger_singleton
+            _ledger_singleton.update_status(contract_id, "executed" if ok else "failed")
             if ok and record_id:
-                contract = _ledger_singleton.find_by_id(contract_id)
-                if contract:
-                    contract.agent_observations.append({
-                        "kind": "execution_fact",
-                        "record_id": record_id,
-                        "created_at": __import__("time").time(),
-                    })
+                c = _ledger_singleton.find_by_id(contract_id)
+                if c:
+                    import time as _t
+                    c.agent_observations.append({"kind": "execution_fact", "record_id": record_id, "created_at": _t.time()})
         except Exception as exc:
             logger.warning("[LCH] ledger update failed: %s", exc)
 
-    # ── Post-write enrichment (non-blocking) ─────
+    # Post-write enrichment (non-blocking, flag-gated)
     if ok and record_id:
-        # Lead Event — logs the dictation message on the lead's timeline
+        _domain_key = domain if (domain and domain != "general") else "general"
         try:
             from lead_capture import capture_lead_event
             from feature_flags import is_enabled as _flag
             if _flag("LEAD_CAPTURE"):
                 capture_lead_event(identity, text, record_id, domain=_domain_key)
         except Exception as exc:
-            logger.warning("[LCH] lead_event write failed: %s", exc)
+            logger.warning("[LCH] lead_event failed: %s", exc)
 
-        # Lead Memory — sync contact info for long-term memory
         try:
             from feature_flags import is_enabled as _flagm
             if _flagm("LEAD_MEMORY"):
                 from lead_memory import lead_memory
-                lead_memory.update(
-                    memory_key,
-                    domain=_domain_key,
-                    channel=channel,
-                    contact_name=name,
-                    last_message=text,
-                    summary=text[:500],
-                )
+                lead_memory.update(memory_key, domain=_domain_key, channel=channel,
+                                   contact_name=name, last_message=text, summary=text[:500])
         except Exception as exc:
-            logger.warning("[LCH] lead_memory update failed: %s", exc)
+            logger.warning("[LCH] lead_memory failed: %s", exc)
 
-        # Lead Scoring — optional, same as canonical lead_capture path
         if action == "create":
             try:
                 from feature_flags import is_enabled as _flags
@@ -373,13 +445,61 @@ def handle_lead_candidate(
                     from lead_capture import _score_inbound_message
                     from tools.airtable_gateway import airtable_patch as _gw_patch
                     from airtable_schema import LeadFields as _LF
-                    score, tier, _ = _score_inbound_message(text, identity)
+                    score, _, _ = _score_inbound_message(text, identity)
                     _gw_patch("Leads", record_id, {_LF.SCORE: score},
                               source="lead_candidate_handler_scoring")
             except Exception as exc:
-                logger.warning("[LCH] lead_scoring failed: %s", exc)
+                logger.warning("[LCH] scoring failed: %s", exc)
 
-    # ── Persist to session ────────────────────────
+    return ok, record_id, action
+
+
+# ══════════════════════════════════════════════════
+# Main handler — called from app.py step 1.45
+# ══════════════════════════════════════════════════
+
+def handle_lead_candidate(
+    identity,
+    text: str,
+    chat_id: str,
+    channel: str,
+) -> Optional[str]:
+    """
+    מטפל דטרמיניסטית בהכתבת ליד (בודד או batch) של owner/staff.
+    מחזיר GatewayReply string אם הפעולה הסתיימה, None אם לא תבנית — ממשיך לאייג'נט.
+
+    source_module בapp.py מוגדר ל-"action_gateway" כדי שCOG יאשר.
+    """
+    if not getattr(identity, "is_internal", False):
+        return None
+
+    # ── domain from message content ───────────────
+    domain = _detect_domain(text, getattr(identity, "domain_id", "general"))
+
+    # ── Follow-up on stored batch? ────────────────
+    _follow_up_reply = _handle_batch_followup(identity, text, chat_id, channel, domain)
+    if _follow_up_reply is not None:
+        return _follow_up_reply
+
+    # ── Try batch parse first (Section 4C) ───────
+    batch = parse_batch_dictation(text)
+    if batch:
+        return _handle_batch(identity, text, chat_id, channel, domain, batch)
+
+    # ── Single lead (Section 4B) ─────────────────
+    parsed = parse_lead_dictation(text)
+    if parsed is None:
+        return None
+
+    name  = parsed["name"]
+    phone = parsed.get("phone", "")
+
+    if parsed.get("needs_phone"):
+        logger.info("[LCH] clarification needed: name=%r no phone", name)
+        return f"כדי לשמור את {name} כליד — אשמח לקבל גם מספר טלפון. 📞"
+
+    ok, record_id, action = _write_one_lead(identity, name, phone, text, channel, domain)
+
     if ok and record_id:
         try:
             from session_store import lead_sessions as _ls
@@ -388,15 +508,152 @@ def handle_lead_candidate(
         except Exception as exc:
             logger.warning("[LCH] session persist failed: %s", exc)
 
-    # ── GatewayReply ──────────────────────────────
     if not ok:
-        logger.error("[LCH] write failed: action=%s name=%r", action, name)
-        return f"❌ לא הצלחתי לשמור את {name}. נסה שוב או פנה לתמיכה."
+        return f"❌ לא הצלחתי לשמור את {name}. נסה שוב."
 
+    ctx = _context_suffix(parsed.get("context", []), domain)
     if action == "update":
-        reply = f"✅ עדכנתי את {name} ({phone}) | record: {record_id}"
-    else:
-        reply = f"✅ שמרתי את {name} ({phone}) כליד חדש | record: {record_id}"
+        return f"✅ עדכנתי את {name} ({phone}){ctx} | {record_id}"
+    return f"✅ שמרתי את {name} ({phone}){ctx} כליד חדש | {record_id}"
 
-    logger.info("[LCH] %s: name=%r phone=%s record_id=%s", action, name, phone, record_id)
-    return reply
+
+# ══════════════════════════════════════════════════
+# Batch handler (Section 4C)
+# ══════════════════════════════════════════════════
+
+def _handle_batch(
+    identity,
+    text: str,
+    chat_id: str,
+    channel: str,
+    domain: str,
+    batch: list[dict],
+) -> str:
+    """מעבד batch של לידים ומחזיר סיכום per-lead."""
+    results = []
+    for item in batch:
+        name  = item["name"]
+        phone = item["phone"]
+        ok, record_id, action = _write_one_lead(identity, name, phone, text, channel, domain)
+        ctx = _context_suffix(item.get("context", []), domain)
+        if ok and record_id:
+            verb = "עדכנתי" if action == "update" else "שמרתי"
+            results.append({"name": name, "phone": phone, "ok": True,
+                            "record_id": record_id, "action": action,
+                            "line": f"✅ {verb} את {name} ({phone}){ctx} | {record_id}"})
+        else:
+            results.append({"name": name, "phone": phone, "ok": False,
+                            "record_id": "", "action": "failed",
+                            "line": f"❌ {name} ({phone}) — לא נשמר"})
+
+    # Persist batch state to session for follow-up routing
+    _save_batch_state(chat_id, text, results)
+
+    # Session — first successful lead as current
+    for r in results:
+        if r["ok"] and r["record_id"]:
+            try:
+                from session_store import lead_sessions as _ls
+                _ls.set_active_lead_candidate(chat_id, r["name"], record_id=r["record_id"])
+                _ls.set_current_lead_record_id(chat_id, r["record_id"])
+            except Exception:
+                pass
+            break
+
+    # Summary reply
+    total   = len(results)
+    success = sum(1 for r in results if r["ok"])
+    failed  = total - success
+    lines   = [r["line"] for r in results]
+
+    header = f"📋 עובדתי {total} לידים"
+    if failed:
+        header += f" — {success} נשמרו, {failed} נכשלו"
+    lines_str = "\n".join(lines)
+    return f"{header}:\n{lines_str}"
+
+
+def _context_suffix(context: list[str], domain: str) -> str:
+    if context:
+        return f" [{', '.join(context)}]"
+    return ""
+
+
+# ══════════════════════════════════════════════════
+# Batch session state + follow-up routing (Section 4C)
+# ══════════════════════════════════════════════════
+
+_FOLLOWUP_WORDS = frozenset({
+    "ומה", "השאר", "שאר", "הנותרים", "נותרים", "שאר הלידים",
+    "שאר הרשימה", "מה עם השאר", "מה עם הנותרים",
+})
+
+
+def _save_batch_state(chat_id: str, original_text: str, results: list[dict]) -> None:
+    """שומר מצב ה-batch ל-session לצורך follow-up."""
+    try:
+        from session_store import lead_sessions as _ls
+        session = _ls.get(chat_id)
+        if session is None:
+            return
+        session["last_lead_candidate_batch"] = {
+            "original_message_text": original_text,
+            "detected_count":  len(results),
+            "processed_count": len(results),
+            "per_lead": [
+                {
+                    "name":      r["name"],
+                    "phone":     r["phone"],
+                    "record_id": r.get("record_id", ""),
+                    "action":    r["action"],
+                    "ok":        r["ok"],
+                }
+                for r in results
+            ],
+        }
+        _ls._sync_to_db(chat_id, session)
+    except Exception as exc:
+        logger.warning("[LCH] batch state save failed: %s", exc)
+
+
+def _handle_batch_followup(
+    identity,
+    text: str,
+    chat_id: str,
+    channel: str,
+    domain: str,
+) -> Optional[str]:
+    """
+    אם ההודעה היא follow-up על batch קיים ("ומה עם השאר?") —
+    מחזיר תשובה מבוססת על מצב ה-batch השמור.
+    """
+    lower = text.strip().lower()
+    if not any(w in lower for w in _FOLLOWUP_WORDS):
+        return None
+
+    try:
+        from session_store import lead_sessions as _ls
+        session = _ls.get(chat_id)
+        if not session:
+            return None
+        batch_state = session.get("last_lead_candidate_batch")
+        if not batch_state:
+            return None
+    except Exception:
+        return None
+
+    per_lead   = batch_state.get("per_lead", [])
+    failed     = [l for l in per_lead if not l.get("ok")]
+    succeeded  = [l for l in per_lead if l.get("ok")]
+
+    if not failed:
+        success_names = ", ".join(l["name"] for l in succeeded)
+        return f"✅ כל הלידים מהרשימה נשמרו בהצלחה: {success_names}"
+
+    lines = []
+    for l in failed:
+        lines.append(f"❌ {l['name']} ({l['phone']}) — לא נשמר")
+    for l in succeeded:
+        lines.append(f"✅ {l['name']} ({l['phone']}) — {l['record_id']}")
+
+    return f"מצב הרשימה ({len(per_lead)} לידים):\n" + "\n".join(lines)
