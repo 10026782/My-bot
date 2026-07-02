@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from .route_decision  import RouteDecision, Intent, Handler, Risk, RouterDomain
 from .channel_router  import detect_channel, resolve_tool_for_channel
-from .intent_router   import detect_intent, count_engineering_markers
+from .intent_router   import detect_intent, count_engineering_markers, detect_ambiguous_phrase
 from .domain_router   import detect_domain
 from .risk_router     import detect_risk
 
@@ -99,8 +99,18 @@ def route_request(
         response_override = "קיבלתי דיווח באג. לא שיניתי את המערכת. צריך שינוי קוד, בדיקות ופריסה."
 
     elif intent == Intent.UNKNOWN:
-        handler           = Handler.AGENT   # safety net
-        response_override = ""
+        # BUG-IC-01/C89: before falling through to the general Agent (which
+        # has full tool access and might decide on its own to "check" Gmail/
+        # Calendar/Airtable), check whether this is a known ambiguous short
+        # phrase ("סטטוס", "בדיקות מערכת", "מה המצב", "למלא משימות"). Those
+        # get a clarifying question instead of silent broad-tool guessing.
+        _ambiguous_q = detect_ambiguous_phrase(text)
+        if _ambiguous_q:
+            handler            = Handler.CLARIFY
+            response_override  = _ambiguous_q
+        else:
+            handler            = Handler.AGENT   # safety net
+            response_override  = ""
 
     elif risk == Risk.NEEDS_APPROVAL and confidence < 0.85 and not restricted:
         handler           = Handler.CLARIFY
