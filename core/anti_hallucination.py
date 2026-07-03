@@ -245,6 +245,18 @@ _NO_TOOL_CLAIMS: list[tuple[re.Pattern, frozenset[str]]] = [
         ),
         frozenset({"__approval_queued__"}),
     ),
+    # BUG-V6-UI-STATE: agent speaks about approval UI (buttons/keyboard) — this
+    # is Gateway-owned territory; agent must never mention UI controls.
+    (
+        re.compile(
+            r"(לחץ על (כפתור|הכפתור)|לחץ ✅|לחץ ❌|"
+            r"יש (כפתור|לחצן) (אישור|אשר|ביטול)|"
+            r"נא ל?לחוץ|אשר באמצעות הכפתור|"
+            r"הכפתור (שנשלח|שקיבלת|שמעלה))",
+            re.UNICODE,
+        ),
+        frozenset({"__approval_queued__"}),
+    ),
 ]
 
 # ══════════════════════════════════════════════════
@@ -272,6 +284,25 @@ _NEGATIVE_NO_TOOL_CLAIMS: list[tuple[re.Pattern, frozenset[str] | None]] = [
             re.UNICODE,
         ),
         None,  # None = evidence is "any tool result present", any category
+    ),
+    # BUG-SB-05: agent emits A32-like self-diagnosis ("לא ביצעתי שינוי",
+    # "לא הצלחתי לאמת") with no tool attempt — blocks fabricated failure explanations.
+    (
+        re.compile(
+            r"(לא ביצעתי שינוי|לא הצלחתי לאמת|לא אמת(י|תי) את הפעולה|"
+            r"לא ניתן לאמת כרגע|לא בצעתי שינוי)",
+            re.UNICODE,
+        ),
+        None,
+    ),
+    # BUG-V6-GMAIL: agent claims gmail failed / email wasn't sent without a tool attempt
+    (
+        re.compile(
+            r"(המייל לא נשלח|לא הצלחתי לשלוח (את ה)?מייל|שליחת המייל נכשלה|"
+            r"המייל לא הגיע|הדוא\"?ל לא נשלח)",
+            re.UNICODE,
+        ),
+        frozenset({"gmail_draft", "gmail_send_draft"}),
     ),
 ]
 
@@ -448,6 +479,17 @@ _MISMATCH_PREFIX = "⚠️ שים לב — ייתכן שהתוצאה אינה מ
 # Neutral only — Gateway/Ledger is the single source of action-state truth.
 _NO_TOOL_EVIDENCE_FALLBACK = "לא ניתן לאמת כרגע את מצב הפעולה. פנה למרכז הניהול לבירור."
 
+# Single Speaker: when FEATURE_ACTION_GATEWAY=true, the Agent must NOT emit action-status
+# text (נוסף/בוצע/נשלח etc.) — only the Gateway/compose_status_reply may do so.
+# This pattern is imported by output_gateway.py as well; keep in sync.
+_AGENT_ACTION_STATUS_PATTERN = re.compile(
+    r"(?<!\?)\b(נוסף|נוספה|נוספו|בוצע|בוצעה|נשלח|נשלחה|נשמר|נשמרה|"
+    r"נוצר|נוצרה|עודכן|עודכנה|הושלם|הושלמה|"
+    r"מושלם|המשימה נוספה|הפעולה בוצעה|הרשומה נוצרה)\b",
+    re.UNICODE,
+)
+_SINGLE_SPEAKER_FALLBACK = "הפעולה התקבלה. תוצאה תישלח בנפרד."
+
 
 def _has_required_tool(tool_results: list[dict], required_tools: frozenset[str]) -> bool:
     """
@@ -475,11 +517,18 @@ def _has_negative_evidence(tool_results: list[dict], required_tools: frozenset[s
     return any(r.get("tool") in required_tools for r in tool_results)
 
 
-def sanitize_agent_response(agent_text: str, tool_results: list[dict]) -> str:
+def sanitize_agent_response(agent_text: str, tool_results: list[dict],
+                             _gateway_active: bool = False) -> str:
     """
     Final gate before the reply reaches the user.
     Replaces hallucinated text; adds a warning for mismatches.
+    _gateway_active: pass True when FEATURE_ACTION_GATEWAY is on to enforce Single Speaker.
     """
+    # Single Speaker: when Gateway is active, Agent must not emit action-status text.
+    if _gateway_active and _AGENT_ACTION_STATUS_PATTERN.search(agent_text):
+        logger.warning("[A32] Single-Speaker: agent emitted action-status text, replacing")
+        return _SINGLE_SPEAKER_FALLBACK
+
     if _SELF_FIX_CLAIMS.search(agent_text):
         logger.error("[A32] SELF-REPORTED-FIX claim blocked (no code/deploy tool exists)")
         return _SELF_FIX_FALLBACK
