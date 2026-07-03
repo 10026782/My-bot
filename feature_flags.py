@@ -55,6 +55,11 @@ CAPTURE POLICY (C89):
                                       through Gateway without preview. Tier 3/4/5 always show preview.
                                  Branch: feature/capture-policy-stage-3
 
+F52 STAGE 1 (safe refactors):
+  FEATURE_LAST_TOOL_RESULT_SHADOW - passive Last-Tool-Result recorder (core/last_tool_result_shadow.py).
+                                 RAM-only, TTL-bounded, side-effect-only observation —
+                                 never affects return values or control flow. default OFF.
+
 DECISION HUB (Stage 0):
   FEATURE_DECISION_HUB         - /decision new|update|status + forward→Inbox (decision_pipeline.py, cmd_decision.py); default OFF
 

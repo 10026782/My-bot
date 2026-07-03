@@ -360,3 +360,13 @@ def dispatch_tool(name: str, inputs: dict, identity: "Identity | None" = None) -
     except Exception as e:
         logger.error(f"[Dispatch] {name} error: {e}", exc_info=True)
         return f"❌ שגיאה בכלי {name}: {e}"
+    finally:
+        # F52 #4 — passive, flag-gated shadow record. Runs after the real
+        # dispatch (success or failure) via `finally`; never affects the
+        # return value above. See core/last_tool_result_shadow.py.
+        if _ff.is_enabled("FEATURE_LAST_TOOL_RESULT_SHADOW"):
+            try:
+                from core.last_tool_result_shadow import record as _shadow_record
+                _shadow_record(source="agent_tool", tool_or_action=name)
+            except Exception as _shadow_e:
+                logger.debug(f"[Dispatch] shadow record failed (non-fatal): {_shadow_e}")

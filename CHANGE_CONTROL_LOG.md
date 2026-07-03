@@ -23,6 +23,20 @@
 
 > נבנה מ-`git log --since="30 days ago"` (~172 commits, `f935c53`→`eebf73b`) + טבלאות ROADMAP.md (Stabilization Sprint, World 2, Sprint 16/06). כל commit hash צוטט ישירות מ-git או מ-ROADMAP — שורות שלא נמצאה להן ראיה ישירה מסומנות "לא ידוע".
 
+### F52-STAGE1 — Safe Refactors: static audits (#6/#7) + shadow tool-result recorder (#4)
+- **תאריך:** 03/07/2026
+- **סוג:** Feature (audit tooling, additive-only, zero behavior change)
+- **Requirement:** `docs/f52/F52_CURRENT_TOOL_MAP.md` §"Safe No-Brainer Refactors" #4, #6, #7.
+- **Commit:** (ייקבע ב-push)
+- **PR:** טרם נפתח (branch `claude/f52-stage1-safe-refactors-cors1j`)
+- **Review על ידי:** —
+- **Deploy תאריך:** —
+- **Verified בפרודקשן:** לא
+- **Verification ראיה:** Pre-implementation gate (§0 of the task SPEC) re-ran the F52 audit greps against the live repo and found the SPEC's claimed baseline did not match reality on either #6 or #7: `cmd_decision.py:806` has no `httpx` call at all (goes through `airtable_create`); `tools/telegram_adapter.py`/`app.py`/`google_tools.py`/`email_inbound.py`/`knowledge_engine.py`/`survey_worker.py` contain none of the `"✅" in result`/`rec\w+` anti-pattern (telegram_adapter.py already uses a structured `ActionResult`/`delivery_success` bool). Corrected baselines were derived by actually running the new scanners against the repo and cross-checking against `docs/f52/F52_BYPASS_MAP.md`. `tools/audit_gateway_bypass.py` (24 known Airtable-bypass call-sites, 2 write/22 read) and `tools/audit_result_parsing.py` (21 known false-success text-parsing occurrences across 12 files) both self-test clean and report 0 new / 0 resolved against their baselines on the current repo. `core/last_tool_result_shadow.py` (RAM-only, TTL-bounded dataclass recorder) wired passively into `tools/dispatcher.py`'s existing `finally:` clause (source=`agent_tool`) and `tma_api.py`'s `_at_patch`/`_at_post` (source=`tma_route`) — manually verified with the flag on vs off that `dispatch_tool()`'s return value is byte-identical either way. `FEATURE_LAST_TOOL_RESULT_SHADOW` confirmed default-off (not in `feature_flags._DEFAULTS`). All 30+ `test_*.py` scripts, `smoke_tests.py`, `test_integration.py`, and `core/router/test_router.py` pass unchanged; `python -m compileall -q .` clean. Zero `app.py` changes. Both new audit scripts added to `.github/workflows/ci.yml` as warning-only steps (`|| true`), matching the existing `schema_governance.py` pattern.
+- **Docs עודכנו:** feature_flags.py (registry docstring), CHANGE_CONTROL_LOG (this entry)
+- **Feature Flag:** `FEATURE_LAST_TOOL_RESULT_SHADOW` (new, default OFF)
+- **Rollback plan:** revert the branch; all three additions (2 audit scripts + shadow recorder module) are new files or additive call-sites behind a default-off flag — no existing behavior depends on them.
+
 ### BUG-051-CAPTURE-ROUTER — Capture Policy: Router-integrated, LCH moved post-Router
 - **תאריך:** 02/07/2026
 - **סוג:** Bug Fix (RouteDecision extended additively — 3 new optional fields, no breaking change)
