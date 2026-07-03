@@ -1,6 +1,6 @@
 # F52 Bypass Map
 
-Updated: 25/06/2026
+Updated: 03/07/2026 — added `cmd_decision.py:700` (`route_file_to_decision_inbox`), a Drive-upload bypass in the same Route/Controller family as `_handle_telegram_media`/`tma_upload`/`media_handler.py`, missed in the original scan (see C89/F52 scope-verification thread).
 
 Scope: audit-only map of current places where code bypasses one or more F52 contract layers. This document does not change production behavior, refactor code, modify `app.py`, or change Airtable schema.
 
@@ -129,6 +129,7 @@ Even when a path has structured output or local receipt records, there is no uni
 | `media_handler.py` | `handle_file_upload` | Telegram / Drive / Airtable | Tool Registry, Action Validator, Dispatcher, generic ToolResult, A32, Durable Last Tool Result | write/send | 🟠 | File upload has useful tests and local statuses, but not generic proof persistence. | adapter |
 | `media_handler.py` | `handle_tma_upload` | TMA / Drive / Airtable | Tool Registry, Action Validator, Dispatcher, generic ToolResult, A32, Durable Last Tool Result | write | 🟠 | TMA upload is route-driven and not normalized as a tool result. | adapter |
 | `media_handler.py` | `_handle_memory_confirmed` | Airtable / memory | Tool Registry, Action Validator, Dispatcher, Output Validation, A32, Durable Last Tool Result | write | 🟠 | Memory save success is reported with display text and not durable generic proof. | wrap |
+| `cmd_decision.py` | `route_file_to_decision_inbox` | Telegram / Google Drive / Airtable | Tool Registry, Action Validator, Dispatcher, generic ToolResult, A32, Durable Last Tool Result | write | 🟡 | Calls `drive_adapter.upload_file()` directly (line 700) before creating the Decision Inbox record — same Route/Controller Bypass family as `_handle_telegram_media`/`tma_upload`/`media_handler.py`. Dormant: `FEATURE_DECISION_HUB=off` by default, not reachable in production. | adapter |
 | `lead_capture.py` | `capture_inbound_lead` | Airtable | Tool Registry, Action Validator, Dispatcher, Output Validation, A32, Durable Last Tool Result | write | 🟠 | Captures business leads outside tool contract and parses record ids from strings. | wrap |
 | `lead_qualifier.py` | `handle_lead_message` | Lead/session/Airtable via helpers | Tool Registry, Action Validator, Dispatcher, Output Validation, A32, Durable Last Tool Result | write/send | 🟠 | Lead qualification can trigger persistence and responses outside tool contract. | design review |
 | `furniture_lead_funnel.py` | `handle_furniture_lead_message` / `_save_lead` | Airtable | Tool Registry, Action Validator, Dispatcher, Output Validation, A32, Durable Last Tool Result | write | 🟠 | Funnel persistence uses gateway in places but still infers record ids from formatted responses. | wrap |

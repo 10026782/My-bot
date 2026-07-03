@@ -790,3 +790,16 @@
 - **Deployed:** לא רלוונטי
 - **Verified בפרודקשן:** לא רלוונטי
 - **סטטוס:** 🟡 Documented, no fix — דפוס חוזר, פתוח ל-roadmap אם יקרה פעם שלישית
+
+### BUG-055 (CLAIM-CORRECTION-ACTION-GATEWAY-552) — תיקון claim: "action_gateway.py:552 + 3 נוספים" — 1 מופע מאומת, לא 4
+- **תאריך:** 03/07/2026
+- **קובץ:** `core/action_gateway.py` (תצפית תיעודית — אין שינוי קוד)
+- **Severity:** Low — dormant path, אין השפעת פרודקשן
+- **שורש:** בסבב אימות C89/F52 (grep נגד main + כל הענפים הפתוחים) הועלה claim ל"callback auth — action_gateway.py:552 + 3 נוספים". grep ישיר ל-`approver mismatch`/`canonical_user_id != approver` מצא **מופע אחד בלבד** בכל הריפו — `core/action_gateway.py:552`, בתוך `ActionGateway.approve()` (Stage B, `FEATURE_ACTION_GATEWAY` כבוי כברירת מחדל — לא פעיל בפרודקשן). ה-"3 נוספים" הנטענים לא אומתו ב-grep על מצב הריפו הנוכחי — ייתכן שהתייחסו למשהו מחוץ ל-snapshot הזה, או שהיה אי-דיוק בזיכרון/הנחה. בנוסף: הנתיב החי בפרודקשן (`app.py:_handle_approval_callback_impl`, שורה 909) **כבר חוסם קשיח** על אי-התאמת approver (`bot.answer_callback_query(cq.id, "⛔ אין לך הרשאה לאשר פעולה זו")`) — החולשה קיימת רק בנתיב Stage B הרדום.
+- **תיקון:** לא בוצע — ולא נדרש SPEC. זו תיקון-תיעוד בלבד (claim correction), לא באג פעיל. אם/כשיופעל `FEATURE_ACTION_GATEWAY`, יש לחזק את הבדיקה ב-`action_gateway.py:552` מ-warning-only ל-hard-block לפני production — לציין כ-follow-up אם/כש-Stage B יוצא מ-dormant.
+- **בדיקה:** `grep -rn "approver mismatch\|canonical_user_id != approver" --include="*.py" .` → מופע יחיד, `core/action_gateway.py:552/554`.
+- **PR:** לא רלוונטי — docs-only, ישיר ל-main.
+- **Merged:** כן (docs commit ישיר)
+- **Deployed:** לא רלוונטי
+- **Verified בפרודקשן:** לא רלוונטי (Stage B לא פעיל)
+- **סטטוס:** ✅ Documented — תיקון claim, לא דורש SPEC
