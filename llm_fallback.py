@@ -2,11 +2,13 @@ import logging
 import os
 from typing import Any
 
+from feature_flags import is_enabled
+
 logger = logging.getLogger(__name__)
 
 
 def _fallback_enabled() -> bool:
-    return os.getenv("OPENAI_FALLBACK_ENABLED", "false").lower() == "true"
+    return is_enabled("LLM_FALLBACK")
 
 
 def _extract_text_from_anthropic(response: Any) -> str:
