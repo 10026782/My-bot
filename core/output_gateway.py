@@ -231,6 +231,32 @@ def _is_emergency_stopped(channel: OutputChannel) -> bool:
     return bool(channel_flag and is_enabled(channel_flag))
 
 
+# F52 #4 — maps OutboundEnvelope.source_module to a last_tool_result_shadow
+# Source category. followup_engine/payment_reminder are scheduler.py jobs;
+# twilio_shim is a background channel-adapter (F13); everything else
+# (app.py webhook/callback sends, action_gateway, the Gateway's own
+# fallback-to-customer send) is a live agent/webhook-driven flow.
+_SHADOW_SOURCE_BY_MODULE: dict[str, str] = {
+    "followup_engine":   "scheduler",
+    "payment_reminder":  "scheduler",
+    "twilio_shim":       "worker",
+}
+
+
+def _shadow_record_send(envelope: OutboundEnvelope) -> None:
+    """Passive, flag-gated shadow record — never affects return value or
+    control flow (F52 #4). See core/last_tool_result_shadow.py."""
+    from feature_flags import is_enabled
+    if not is_enabled("FEATURE_LAST_TOOL_RESULT_SHADOW"):
+        return
+    try:
+        from core.last_tool_result_shadow import record as _shadow_record
+        source = _SHADOW_SOURCE_BY_MODULE.get(envelope.source_module, "agent_tool")
+        _shadow_record(source=source, tool_or_action=f"send_outbound:{envelope.channel}")
+    except Exception as e:
+        logger.debug("[COG] shadow record failed (non-fatal): %s", e)
+
+
 def _execute_send(envelope: OutboundEnvelope, audit_id: str, internal: bool) -> GatewayResult:
     """מגדיר thread-local context, קורא ל-Adapter ושומר את ראיית הביצוע."""
     _gateway_context.approved = True
@@ -245,6 +271,8 @@ def _execute_send(envelope: OutboundEnvelope, audit_id: str, internal: bool) -> 
         action_result.output_approved = True
         action_result.audit_success = True
         action_result.audit_id = audit_id
+
+    _shadow_record_send(envelope)
 
     if internal:
         return GatewayResult.internal_pass(audit_id, action_result)
