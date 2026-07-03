@@ -10,6 +10,34 @@
 
 ---
 
+## Rule 00 — Contract Chain Before SPEC
+
+לפני כתיבת SPEC או שינוי קוד, חובה לזהות ולאמת את שרשרת החוזה של השינוי.
+
+יש להציג עד 5 חוליות בלבד:
+
+1. **Entry Point** — מאיפה השינוי מתחיל.
+2. **Public API** — איזו פונקציה/שכבה ציבורית נקראת.
+3. **Data Contract** — אילו arguments נדרשים ומהו return type אמיתי.
+4. **Execution Point** — איפה מתבצע write/send/update בפועל.
+5. **Verification Point** — איך מוכיחים שהפעולה הצליחה.
+
+אם אחת מהחוליות אינה מוכחת באמצעות grep או קוד קיים — אין לכתוב SPEC ואין לבצע שינוי.
+
+אין להסתמך על הנחות, שמות משוערים, או API פנימי עם `_`.
+
+Main is reality.
+
+**מקור:** נלמד בפועל ב-SPEC 2 (Document Converter tool, 03/07/2026) — טיוטה ראשונה
+הניחה `document_converter.engine.convert()` (לא קיים; הפונקציה האמיתית היא
+`convert_document(input_file, input_type, output_type)`), גישה ל-`ConversionResult`
+כ-dataclass attributes (מחזיר בפועל dict רגיל), ותלות ב-download-מ-Drive
+שלא קיים בשום מקום בריפו. 4 סבבי grep נגד main היו נחוצים כדי לתפוס את כל
+זה לפני שהספק הגיע לאישור — Rule 00 קובע את זה כשלב חובה מוקדם, לא כבדיקה
+שקורית במקרה תוך כדי כתיבת הקוד.
+
+---
+
 ## שערי חובה — 8 שאלות (לפני כל SPEC, ובסיכום כל סשן)
 1. יש בעיה אמיתית — ראיה, שחזור, לא רק השערה?
 2. נפתרה כבר במקום אחר — Gateway/Adapter/מנגנון קיים?

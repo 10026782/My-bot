@@ -1,10 +1,27 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-07-02 (מאוחר ביותר) — BUG-051: Capture Policy Router-Integration (`feature/capture-policy-stage-3`, טרם ממוזג)
-**עודכן על ידי:** Claude Code — session ב-`fix/ci-silent-pass-document-converter`/`feature/capture-policy-stage-3`
+**עודכן:** 2026-07-03 (מאוחר ביותר) — F52 Stage 1 + chokepoint gap-fill, C89/F52 scope-verification (BUG-055, F52_BYPASS_MAP gap-fill, LLM_FALLBACK unify, orphaned Drive/Sheets fix merge), PLANNING_GATE consolidation + Rule 00, `document_converter` wired into production for the first time via `drive_read_file`
+**עודכן על ידי:** Claude Code — session ממוזג ל-`main` דרך PR #207–#213 (ראה 0.8 למטה)
 
 > מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (מיושן, 19/06) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
+
+---
+
+## 0.8 F52 Stage 1 + chokepoint/scope-verification session — 2026-07-03 (קרא לפני 0.7)
+
+**7 PR ממוזגים ל-`main` בסשן אחד (#207–#213), כולם additive/flag-off/docs-only — אין שינוי אחד ב-`app.py`:**
+
+- **PR #207/#208 (F52 Stage 1):** `tools/audit_gateway_bypass.py`/`tools/audit_result_parsing.py` — warning-only static audits, baseline נבנה מ-grep אמיתי נגד main (לא מ-SPEC ישן שלא תאם את המצב בפועל — `cmd_decision.py:806` התברר כלא-httpx בכלל, ורוב קבצי ה-SPEC המקוריים לא הכילו את דפוס ה-"✅"/`rec\w+` כלל). `core/last_tool_result_shadow.py` — recorder פסיבי RAM-only, `FEATURE_LAST_TOOL_RESULT_SHADOW` (כבוי כברירת מחדל), חווט ל-`tools/dispatcher.py`/`tma_api.py`. `docs/governance/PLANNING_GATE.md` אוחד ל-שער יחיד "8 שאלות" + Rule 00 (ראה למטה).
+- **PR #209:** מיזוג ענף יתום `claude/fix-drive-sheets-conversion` (BUG-DRIVE-READ-UNSUPPORTED-CONVERSION + BUG-SHEETS-SEARCH-STATUS ב-`tools/google_tools.py`) — קוד היה כתוב ונבדק (3/3), פשוט לא נפתח PR לפניו.
+- **PR #210:** `llm_fallback.py` איחד flag כפול (`OPENAI_FALLBACK_ENABLED` גולמי מול `feature_flags.LLM_FALLBACK`) לדגל יחיד.
+- **PR #212:** `core/output_gateway._execute_send()` קיבל שורת shadow-record פסיבית — סוגר פער שבו `send_outbound()` (הנקרא מ-`app.py`/`followup_engine.py`/`payment_reminder.py`/`providers/twilio_shim.py`) לא עבר דרך `tools/dispatcher.py` ולכן לא נראה ל-recorder של F52 Stage 1.
+- **`ce2ea76` (docs, ישיר ל-main):** `docs/f52/F52_BYPASS_MAP.md` gap-fill (`cmd_decision.py:700` חסר מהמפה המקורית) + BUG-055 — תיקון claim: "action_gateway.py:552 + 3 נוספים" התברר כ-1 מופע מאומת בלבד (dormant, `FEATURE_ACTION_GATEWAY=off`; הנתיב החי `app.py:909` כבר חוסם קשיח).
+- **PR #213:** `document_converter/` (חבילה code-complete מ-29/06, **אפס call sites בפרודקשן עד עכשיו**) חוברה סוף-סוף — `tools/google_tools.py`'s `drive_read_file()` ממיר קבצים לא-native (docx/csv/xlsx וכו') ל-markdown במקום להחזיר בייטים גולמיים מקולקלים. 5 באגים אמיתיים ב-SPEC המקורי נתפסו ותוקנו **לפני** מימוש (לא אחרי) דרך 4+ סבבי grep נגד main: שם/חתימת פונקציה שגויים (`convert()` לא קיים, האמיתי `convert_document(input_file, input_type, output_type)`), `input_type` חסר (אין הסקה אוטומטית בשום מקום), גישה ל-return value כ-dataclass attributes במקום dict, תלות ב-download-מ-Drive שלא קיים (מסלול קודם ננטש בגללה), ו-cleanup חסר ל-`output_file` (ה-engine מנקה רק בכישלון, לא בהצלחה).
+
+**לקח מתועד כ-Rule 00 (`docs/governance/PLANNING_GATE.md`):** SPEC לא נכתב/מבוצע לפני שמוצגת שרשרת חוזה מאומתת (Entry Point → Public API → Data Contract → Execution Point → Verification Point), כל חוליה מוכחת ב-grep נגד main, לא בהנחה או שם משוער.
+
+**לא אומת:** deploy ל-Render / הפעלה חיה של אף flag חדש. כל השינויים flag-off/docs-only — אין שינוי התנהגות בפרודקשן עד הפעלה מפורשת.
 
 ---
 

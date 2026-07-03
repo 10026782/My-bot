@@ -27,8 +27,8 @@
 - **תאריך:** 03/07/2026
 - **סוג:** Feature (audit tooling, additive-only, zero behavior change)
 - **Requirement:** `docs/f52/F52_CURRENT_TOOL_MAP.md` §"Safe No-Brainer Refactors" #4, #6, #7.
-- **Commit:** (ייקבע ב-push)
-- **PR:** טרם נפתח (branch `claude/f52-stage1-safe-refactors-cors1j`)
+- **Commit:** `0695b11`, `2ae6b0c`
+- **PR:** #207 — מוזג (`22b2f74`)
 - **Review על ידי:** —
 - **Deploy תאריך:** —
 - **Verified בפרודקשן:** לא
@@ -36,6 +36,90 @@
 - **Docs עודכנו:** feature_flags.py (registry docstring), CHANGE_CONTROL_LOG (this entry)
 - **Feature Flag:** `FEATURE_LAST_TOOL_RESULT_SHADOW` (new, default OFF)
 - **Rollback plan:** revert the branch; all three additions (2 audit scripts + shadow recorder module) are new files or additive call-sites behind a default-off flag — no existing behavior depends on them.
+
+### GOV-PLANNING-GATE-CONSOLIDATION — PLANNING_GATE.md: single 8-question gate + Rule 00
+- **תאריך:** 03/07/2026
+- **סוג:** Docs (governance, no code)
+- **Requirement:** user-directed consolidation of `docs/governance/PLANNING_GATE.md`.
+- **Commit:** `1cae175` (8-question gate consolidation), plus this session's Rule 00 addition
+- **PR:** #208 — מוזג (`f145fd3`)
+- **Review על ידי:** —
+- **Deploy תאריך:** לא רלוונטי (docs-only)
+- **Verified בפרודקשן:** כן — `grep` על `main` מאשר "שערי חובה — 8 שאלות" קיים, "שלוש השאלות"/"בדיקת התנגשות כלים" הישנים נעלמו.
+- **Verification ראיה:** `git log -1 --format="%H" main` = `f145fd3ab7e010c226ecc027b3f4d34c181fb9ce` בזמן המיזוג; grep ישיר על הקובץ אחרי sync.
+- **Docs עודכנו:** `docs/governance/PLANNING_GATE.md`
+- **Feature Flag:** לא רלוונטי
+- **Rollback plan:** docs-only, revert trivial אם נדרש.
+
+### F52-BYPASS-GAPFILL-BUG055 — F52_BYPASS_MAP.md gap-fill (cmd_decision.py:700) + BUG-055 claim correction
+- **תאריך:** 03/07/2026
+- **סוג:** Docs (governance correction, no code)
+- **Requirement:** C89/F52 scope-verification thread — items ה (missing bypass-map entry) ו-ג (unverified "+3 more" claim).
+- **Commit:** `ce2ea76` — ישיר ל-`main` (docs-only, לפי בקשה מפורשת, ללא PR נפרד)
+- **PR:** לא רלוונטי (direct commit)
+- **Review על ידי:** —
+- **Deploy תאריך:** לא רלוונטי
+- **Verified בפרודקשן:** כן
+- **Verification ראיה:** `main @ ce2ea76` — `F52_BYPASS_MAP.md:132` מכיל את שורת `cmd_decision.py`; `BUG_AUDIT_LOG.md` מכיל BUG-055.
+- **Docs עודכנו:** `docs/f52/F52_BYPASS_MAP.md`, `BUG_AUDIT_LOG.md`
+- **Feature Flag:** לא רלוונטי
+- **Rollback plan:** docs-only.
+
+### FIX-DRIVE-SHEETS-MERGE — orphaned branch merge: BUG-DRIVE-READ-UNSUPPORTED-CONVERSION + BUG-SHEETS-SEARCH-STATUS
+- **תאריך:** 03/07/2026
+- **סוג:** Bug Fix
+- **Requirement:** C89/F52 scope-verification table, item א — orphaned unmerged branch `claude/fix-drive-sheets-conversion` predating this session, rebased cleanly onto current `main` and merged.
+- **Commit:** `7c846c6` (rebased), merge `fe713d8`
+- **PR:** #209 — מוזג
+- **Review על ידי:** —
+- **Deploy תאריך:** לא ידוע
+- **Verified בפרודקשן:** כן (merge-level; אין live Airtable/Drive verification מהסביבה הזו)
+- **Verification ראיה:** `main @ fe713d82a733d9721697c3f8065b9f26c0368abc` — grep מאשר שתי התיקונים ב-`tools/google_tools.py` (שורות 251, 261). `python3 test_drive_sheets_fixes.py` 3/3.
+- **Docs עודכנו:** —
+- **Feature Flag:** לא רלוונטי
+- **Rollback plan:** revert commit, scope מוגבל ל-`tools/google_tools.py`.
+
+### FIX-UNIFY-LLM-FALLBACK-FLAG — llm_fallback.py reads feature_flags.LLM_FALLBACK
+- **תאריך:** 03/07/2026
+- **סוג:** Bug Fix (governance drift — two independent flags for one feature)
+- **Requirement:** C89/F52 scope-verification table, item ד.
+- **Commit:** `f15a435`
+- **PR:** #210 — מוזג (`cec461c`)
+- **Review על ידי:** —
+- **Deploy תאריך:** לא ידוע
+- **Verified בפרודקשן:** כן
+- **Verification ראיה:** `main @ cec461c` — `grep -c "OPENAI_FALLBACK_ENABLED" llm_fallback.py` → 0; `grep -n "is_enabled(\"LLM_FALLBACK\")" llm_fallback.py app.py` → שני sites. Manual check: flag unset → `False`; `set_flag("LLM_FALLBACK", True)` → `True`.
+- **Docs עודכנו:** —
+- **Feature Flag:** `LLM_FALLBACK` (existing, unified — no new flag)
+- **Rollback plan:** revert commit; `call_anthropic_text`'s fallback logic itself untouched.
+
+### FEAT-OUTPUT-GATEWAY-SHADOW-RECORD — passive shadow record in output_gateway._execute_send
+- **תאריך:** 03/07/2026
+- **סוג:** Feature (F52 #4 follow-up, additive, flag-off)
+- **Requirement:** F52 Stage 1 "chokepoint" gap — `send_outbound()` callers (`app.py`, `followup_engine.py`, `payment_reminder.py`, `providers/twilio_shim.py`) never went through `tools/dispatcher.py`, so the shadow recorder had zero visibility into any outbound send.
+- **Commit:** `7bf3bd6`
+- **PR:** #212 — מוזג (`02c03ac`)
+- **Review על ידי:** —
+- **Deploy תאריך:** לא רלוונטי (flag-off)
+- **Verified בפרודקשן:** כן
+- **Verification ראיה:** `main @ 02c03ac` — grep מאשר `_shadow_record_send`/`last_tool_result_shadow` ב-`core/output_gateway.py`. `git diff` על `app.py`/`core/action_gateway.py` בין הbase לbase החדש — ריק (לא נגעו). Manual check: `GatewayResult` זהה bit-for-bit עם/בלי הדגל.
+- **Docs עודכנו:** —
+- **Feature Flag:** `FEATURE_LAST_TOOL_RESULT_SHADOW` (existing, extended — no new flag)
+- **Rollback plan:** revert commit; scope מוגבל ל-`core/output_gateway.py`.
+
+### FEAT-DRIVE-READ-CONVERTER-FALLBACK — drive_read_file falls back to document_converter
+- **תאריך:** 03/07/2026
+- **סוג:** Feature (wires the previously-dormant `document_converter` package into production for the first time)
+- **Requirement:** SPEC 2 (Document Converter) — after 5 rounds of Rule-00-style contract-chain verification against the live repo caught and fixed 5 defects in the original SPEC draft before it reached approval (see `docs/governance/PLANNING_GATE.md` Rule 00 provenance note).
+- **Commit:** `e8570a6`
+- **PR:** #213 — מוזג (`b9de424`)
+- **Review על ידי:** —
+- **Deploy תאריך:** לא ידוע
+- **Verified בפרודקשן:** כן
+- **Verification ראיה:** `main @ b9de424` — grep מאשר `_MIME_TO_TYPE`/`convert_document`/`output_path.unlink` ב-`tools/google_tools.py`. `python3 test_google_tools.py` 5/5 (כולל round-trip אמיתי עם `python-docx`, לא מדומה ברמת ה-conversion). `git diff --stat main` מוגבל ל-`tools/google_tools.py` + `test_google_tools.py` בלבד — `document_converter/*`/`drive_adapter.py`/`media_handler.py`/`cmd_decision.py`/`decision_pipeline.py` לא נגועים.
+- **Docs עודכנו:** —
+- **Feature Flag:** לא רלוונטי (אין flag — תיקון התנהגות תמידי בפונקציה קיימת)
+- **Rollback plan:** revert commit; scope מוגבל ל-`tools/google_tools.py` + test חדש.
 
 ### BUG-051-CAPTURE-ROUTER — Capture Policy: Router-integrated, LCH moved post-Router
 - **תאריך:** 02/07/2026
