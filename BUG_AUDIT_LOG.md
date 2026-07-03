@@ -841,4 +841,18 @@
 - **Merged:** לא עדיין
 - **Deployed:** לא עדיין
 - **Verified בפרודקשן:** לא עדיין
+- **סטטוס:** ✅ מוזג ל-main (`320d0b3`) — ממתין ל-production verification
+
+### BUG-058 (TIER2-SILENT-PREVIEW-NO-READER) — Tier 2 batch preview מבטיח אישור קבוצתי שלא קיים
+- **תאריך:** 03/07/2026
+- **קבצים:** `core/lead_candidate_handler.py`, `test_tier2_silent_preview.py` (חדש)
+- **Severity:** Medium — לא critical כרגע (`FEATURE_AUTO_CAPTURE` כבוי, אין auto-write בפרודקשן), אך הטעיה חיה על לידים אמיתיים ברגע שהדגל ידלק.
+- **שורש:** אותר בסבב Contract Chain audit על PR #215 (BUG-056) — `pending_lead_preview` (Tier 2, `_store_pending_preview` ב-`core/lead_candidate_handler.py`) נכתב אך **לעולם לא נקרא בחזרה** (grep מלא על הריפו: 0 קוראים, רק 2 writers pass-through ב-`session_store.py` + נקודת הכתיבה עצמה). ההודעה למשתמש ("📋 זיהיתי N לידים: ... לשמור את כולם? ענה *כן* לאישור.") נבנית ב-`_handle_clean_batch()` (לא ב-`_store_pending_preview` עצמה — תיקון ל-Contract Chain המקורי שהניח את המיקום הלא-נכון) ומבטיחה במפורש שאישור "כן" יפעל על הקבוצה. בפועל: "כן" נפתר אך ורק דרך `ActionGateway.route_confirmation_word()`/`route_cancellation_word()` (BUG-056), שאין להם שום ידיעה על `pending_lead_preview` — אם יש contract חי מ-Tier 1 הוא "מנצח" בשתיקה, אחרת המשתמש מקבל "אין פעולה שממתינה לאישור" סתמי, בלי הסבר שה-batch שהוא ראה מעולם לא היה בר-אישור.
+- **החלטת עיצוב מפורשת:** לא נבנה resolver ל-Tier 2 בסשן זה (batch-confirm דורש עיצוב נפרד — ActionGateway בנוי סביב contract יחיד, לא batch; ראה BUG-056 "נשאר פתוח"). התיקון היחיד: להפסיק להטעות — אם/כש-resolver ייבנה בעתיד, יש להגדיר precedence מפורש בין Tier-1 contract ל-Tier-2 batch-state *לפני* הבנייה.
+- **תיקון:** `_handle_clean_batch()`'s הודעת ה-preview שונתה לתצפית-בלבד: "📋 זיהיתי N לידים אפשריים בקבוצה: ... לא שמרתי אותם ולא נפתחה פעולת אישור קבוצתית. אישור קבוצתי עדיין לא זמין. כדי לשמור ליד, שלח ליד אחד בכל פעם או בקש ממני להכין רשימה לבדיקה." אין "ענה כן"/"לאישור" יותר. `_store_pending_preview()` מקבל docstring מפורש `INTENTIONAL — no resolver yet`. השדה `pending_lead_preview` **נשאר נכתב** (audit/future-design, לא נמחק).
+- **בדיקה:** `test_tier2_silent_preview.py` (חדש, 4/4) — הודעת Tier 2 נטולת CTA מטעה, `pending_lead_preview` עדיין נכתב, משתמש עם Tier-2 preview בלבד ש-"כן" → "אין פעולה שממתינה לאישור" (לא false positive), הודעת Tier 1 (שיש לה resolver אמיתי) נשארה ללא שינוי. כל 36 קבצי `test_*.py` + `smoke_tests.py` + `core/router/test_router.py` — 0 רגרסיות.
+- **PR:** נפתח מ-`fix/bug058-tier2-silent-preview`.
+- **Merged:** לא עדיין
+- **Deployed:** לא עדיין
+- **Verified בפרודקשן:** לא עדיין
 - **סטטוס:** 🟡 קוד הושלם ונבדק — ממתין ל-merge

@@ -693,7 +693,8 @@ def _handle_clean_batch(
     """
     Tier 2: כל הלידים high-confidence.
     auto_write=True → כותב הכל + סיכום.
-    auto_write=False → preview + confirmation.
+    auto_write=False → BUG-058: תצפית בלבד — אין resolver ל-batch confirm
+    (ראה _store_pending_preview), אז ההודעה לא רומזת שאישור קבוצתי אפשרי.
     """
     if not auto_write:
         _store_pending_preview(chat_id, candidates, text)
@@ -702,9 +703,11 @@ def _handle_clean_batch(
             for c in candidates
         ]
         return (
-            f"📋 זיהיתי {len(candidates)} לידים:\n" +
+            f"📋 זיהיתי {len(candidates)} לידים אפשריים בקבוצה:\n" +
             "\n".join(lines) +
-            "\n\nלשמור את כולם? ענה *כן* לאישור."
+            "\n\nלא שמרתי אותם ולא נפתחה פעולת אישור קבוצתית.\n"
+            "אישור קבוצתי עדיין לא זמין.\n"
+            "כדי לשמור ליד, שלח ליד אחד בכל פעם או בקש ממני להכין רשימה לבדיקה."
         )
 
     # auto-write
@@ -751,7 +754,15 @@ def _handle_mixed_batch(
 # ── Pending preview store (FEATURE_AUTO_CAPTURE=OFF) ──────────────────────────
 
 def _store_pending_preview(chat_id: str, candidates: list[dict], raw_text: str) -> None:
-    """שומר preview ממתין לאישור ב-session.
+    """שומר preview של batch (Tier 2) ב-session — audit/future-design בלבד.
+
+    INTENTIONAL (BUG-058): no resolver yet — batch-confirm design pending.
+    Do not treat this as a live contract like Tier 1's ActionGateway contract
+    (_propose_lead_write). Nothing in the codebase reads pending_lead_preview
+    back; "כן"/"לא" never resolve it. Kept written (not removed) so the field
+    is available for audit and for whatever resolver design eventually lands.
+    The caller (_handle_clean_batch) is responsible for not implying to the
+    user that a confirmation action exists for this state.
 
     BUG-056: היה `_ls.get(chat_id)` — מחזיר None בשקט ב-session חדש (סשן ראשון
     של chat_id), ואז ה-preview לעולם לא נשמר בפועל. `get_or_create()` מבטיח
