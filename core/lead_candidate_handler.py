@@ -459,6 +459,81 @@ def _write_one_lead(
 
 
 # ══════════════════════════════════════════════════
+# BUG-056 — Tier 1 preview confirmation via Action Gateway
+# ══════════════════════════════════════════════════
+
+def _propose_lead_write(
+    identity,
+    name: str,
+    phone: str,
+    text: str,
+    channel: str,
+    domain: str,
+):
+    """
+    Tier 1 preview (auto_write=False): proposes a REAL pending ActionContract
+    via ActionGateway instead of writing directly or storing dead session
+    state. "כן" resolves it through ActionGateway.approve() -> dispatch_tool()
+    (app.py's confirm-word handling checks Gateway live contracts first,
+    regardless of FEATURE_ACTION_GATEWAY) — so the confirmed write goes
+    through the same dispatcher path as any other approved tool call, not a
+    direct one-off airtable_add. "_source": "lead_capture" is required to
+    pass tools/dispatcher.py's enforce_leads_write_gate() for table=Leads.
+
+    Returns the GatewayResult (ok / contract_id / user_message) from
+    propose_action() — dedup (pending/already-executed) is handled entirely
+    by the Gateway's business-fingerprint match, same as _write_one_lead().
+    """
+    from core.action_gateway import action_gateway as _gw
+    from airtable_schema import LeadFields
+
+    tenant_id   = getattr(identity, "tenant_id", "default") or "default"
+    existing_id = _at_find_lead(name, phone)
+    _domain_key = domain if (domain and domain != "general") else "general"
+
+    if existing_id:
+        tool_name = "airtable_update"
+        fields: dict = {LeadFields.PHONE: phone, LeadFields.SUMMARY: text[:500]}
+        if _domain_key != "general":
+            fields[LeadFields.DOMAIN] = _domain_key
+        tool_inputs = {
+            "table": "Leads", "record_id": existing_id,
+            "fields": fields, "_source": "lead_capture",
+        }
+    else:
+        _phone_key = re.sub(r"[\s\-\+]", "", phone)
+        memory_key = (
+            f"{tenant_id}/{_phone_key}@lead"
+            if _phone_key
+            else f"{tenant_id}/dict_{re.sub(chr(32), '_', name.lower()[:20])}@lead"
+        )
+        tool_name = "airtable_add"
+        fields = {
+            LeadFields.NAME:       name,
+            LeadFields.PHONE:      phone,
+            LeadFields.CHANNEL:    channel,
+            LeadFields.MEMORY_KEY: memory_key,
+            LeadFields.DOMAIN:     _domain_key,
+            LeadFields.SOURCE:     "owner_dictation",
+            LeadFields.STATUS:     "new",
+            LeadFields.SUMMARY:    text[:500],
+            LeadFields.SCORE:      0,
+            LeadFields.SENDER_ID:  phone,
+        }
+        tool_inputs = {"table": "Leads", "fields": fields, "_source": "lead_capture"}
+
+    return _gw.propose_action(
+        tenant_id         = tenant_id,
+        canonical_user_id = identity.memory_key,
+        tool_name         = tool_name,
+        tool_inputs       = tool_inputs,
+        origin_channel    = channel,
+        origin_chat_id    = identity.memory_key,
+        requires_approval = True,
+    )
+
+
+# ══════════════════════════════════════════════════
 # Main handler — called from app.py step 1.45
 # ══════════════════════════════════════════════════
 
@@ -468,6 +543,7 @@ def handle_lead_candidate(
     chat_id: str,
     channel: str,
     domain: str = "",
+    ic=None,
 ) -> Optional[str]:
     """
     מטפל דטרמיניסטית בהכתבת ליד (בודד או batch) של owner/staff.
@@ -483,6 +559,10 @@ def handle_lead_candidate(
     שהandler הזה נקרא — ראה app.py). כשמועבר, גובר על ה-content-regex guess
     המקומי (_detect_domain) — זו התוצאה האמיתית מ-domain_router, לא ניחוש
     כפול. ריק כברירת מחדל לכל caller אחר / תאימות לאחור.
+
+    ic: IngressClassification מוכן מראש (route.capture_ic מ-router.py) —
+    כשמועבר, נחסך classify_ingress() כפול על אותו טקסט (BUG-056). ריק
+    כברירת מחדל — מסווג בעצמו, לתאימות לאחור לכל caller אחר / לבדיקות.
     """
     if not getattr(identity, "is_internal", False):
         return None
@@ -497,13 +577,14 @@ def handle_lead_candidate(
         return _follow_up_reply
 
     # ── C89: Input Source Gate — classify before parse ──
-    try:
-        from core.ingress_classifier import classify_ingress, log_classification
-        ic = classify_ingress(text, source_type="text")
-        log_classification(ic, chat_id=chat_id)
-    except Exception as exc:
-        logger.warning("[LCH] ingress_classifier failed (falling through to agent): %s", exc)
-        return None
+    if ic is None:
+        try:
+            from core.ingress_classifier import classify_ingress, log_classification
+            ic = classify_ingress(text, source_type="text")
+            log_classification(ic, chat_id=chat_id)
+        except Exception as exc:
+            logger.warning("[LCH] ingress_classifier failed (falling through to agent): %s", exc)
+            return None
 
     # Tier 4 (table/export/bot output) or Tier 5 (no signal) → agent handles it
     if ic.tier >= 4:
@@ -566,8 +647,15 @@ def _handle_single_candidate(
         return f"כדי לשמור את {name} כליד — אשמח לקבל גם מספר טלפון. 📞"
 
     if not auto_write:
-        # Preview mode — store pending and ask for confirmation
-        _store_pending_preview(chat_id, [candidate], text)
+        # BUG-056: preview mode now proposes a REAL pending ActionContract
+        # (instead of the dead-end session["pending_lead_preview"]) so "כן"
+        # can actually resolve it — see _propose_lead_write() + app.py's
+        # confirm-word handling (checks ActionGateway live contracts first).
+        gw_result = _propose_lead_write(identity, name, phone, text, channel, domain)
+        if not gw_result.ok:
+            # Already-pending or duplicate-executed — Gateway's own message
+            # (dedup by business fingerprint) is the correct user-facing reply.
+            return gw_result.user_message or gw_result.reason
         ctx_str = f" [{', '.join(ctx)}]" if ctx else ""
         return (
             f"📋 זיהיתי ליד: *{name}* ({phone}){ctx_str}\n"
@@ -663,12 +751,15 @@ def _handle_mixed_batch(
 # ── Pending preview store (FEATURE_AUTO_CAPTURE=OFF) ──────────────────────────
 
 def _store_pending_preview(chat_id: str, candidates: list[dict], raw_text: str) -> None:
-    """שומר preview ממתין לאישור ב-session."""
+    """שומר preview ממתין לאישור ב-session.
+
+    BUG-056: היה `_ls.get(chat_id)` — מחזיר None בשקט ב-session חדש (סשן ראשון
+    של chat_id), ואז ה-preview לעולם לא נשמר בפועל. `get_or_create()` מבטיח
+    ש-session תמיד קיים לפני הכתיבה.
+    """
     try:
         from session_store import lead_sessions as _ls
-        session = _ls.get(chat_id)
-        if session is None:
-            return
+        session = _ls.get_or_create(chat_id)
         session["pending_lead_preview"] = {
             "candidates": candidates,
             "raw_text":   raw_text,

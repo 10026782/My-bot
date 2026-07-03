@@ -81,11 +81,13 @@ def route_request(
     # that intent_router already matched as CREATE_LEAD with high confidence
     # — LCH runs on it regardless of what intent detection decided).
     capture_tier, capture_reason, raw_ref = None, "", ""
+    capture_ic = None
     if identity.is_internal:
-        from .capture_router import classify_capture
-        capture_tier, capture_reason, raw_ref = classify_capture(
-            text, chat_id=getattr(identity, "memory_key", "")
-        )
+        from .capture_router import classify_capture_ic, _WRITE_WORTHY_TIERS
+        capture_ic = classify_capture_ic(text, chat_id=getattr(identity, "memory_key", ""))
+        capture_tier = capture_ic.tier if capture_ic.tier in _WRITE_WORTHY_TIERS else None
+        capture_reason = capture_ic.reason
+        raw_ref = capture_ic.raw_ref
 
     # 5. Channel-specific tool override
     tool_override = resolve_tool_for_channel(intent, channel)
@@ -111,6 +113,20 @@ def route_request(
         handler           = Handler.ENGINEERING_NOTE
         tool_allowed       = False
         response_override = "קיבלתי דיווח באג. לא שיניתי את המערכת. צריך שינוי קוד, בדיקות ופריסה."
+
+    elif capture_ic is not None and capture_ic.tier == 4:
+        # BUG-056 (C89 Tier 4 stop-gate): table/export/log/bot-output pasted
+        # in must stop routing HERE — never reach the Agent/tools, regardless
+        # of what keyword (e.g. "הוסף משימה") intent_router happened to match
+        # inside the pasted text. handle_lead_candidate() already refuses to
+        # auto-write for tier>=4, but only this router-level override stops
+        # the message from reaching Handler.AGENT at all.
+        handler            = Handler.CLARIFY
+        tool_allowed       = False
+        response_override  = (
+            "📄 זה נראה כמו טבלה/ייצוא/פלט מודבק — לא ביצעתי שום פעולה אוטומטית. "
+            "אם התכוונת לבקש משהו ספציפי, כתוב את זה במשפט רגיל."
+        )
 
     elif intent == Intent.UNKNOWN:
         # BUG-IC-01/C89: before falling through to the general Agent (which
@@ -153,6 +169,7 @@ def route_request(
         capture_tier      = capture_tier,
         capture_reason    = capture_reason,
         raw_ref           = raw_ref,
+        capture_ic        = capture_ic,
     )
     if tool_override:
         decision.matched_rule = f"{matched_rule} [tool:{tool_override}]"

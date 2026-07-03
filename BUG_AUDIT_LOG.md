@@ -803,3 +803,28 @@
 - **Deployed:** לא רלוונטי
 - **Verified בפרודקשן:** לא רלוונטי (Stage B לא פעיל)
 - **סטטוס:** ✅ Documented — תיקון claim, לא דורש SPEC
+
+### BUG-056 (C89-ROUTER-PREVIEW-HARDENING) — 4 ממצאים מסבב QA ידני על C89/BUG-IC-01
+- **תאריך:** 03/07/2026
+- **קבצים:** `core/router/intent_router.py`, `core/router/router.py`, `core/router/route_decision.py`, `core/router/capture_router.py`, `core/lead_candidate_handler.py`, `core/action_gateway.py`, `app.py`
+- **Severity:** Medium — preview confirmation ואי-חסימת Tier 4 יכולים לגרום ל-user-visible breakage (הבטחת "לשמור?" שלא מתממשת) ול-intent שגוי מתוכן מודבק.
+- **שורש (4 ממצאים נפרדים, מאותו סבב QA):**
+  1. **BUG-IC-01 coverage gap:** `_AMBIGUOUS_PHRASES` regex `r"^בדיקות?\s*מערכת..."` שם את ה-`?` על ה-ת' הסופית במקום על ה-ו' הפנימית — תופס "בדיקות מערכת" (רבים) אך לא "בדיקת מערכת" (יחיד/סמיכות), כי ההבדל בין הצורות הוא ה-ו', לא ה-ת'.
+  2. **C89 preview confirmation dead-end:** `_handle_single_candidate`/`_handle_clean_batch` (Tier 1/2, `FEATURE_AUTO_CAPTURE=false`) שומרים preview ב-`session["pending_lead_preview"]` דרך `_store_pending_preview()` — אבל שום קוד בריפו לא קורא את השדה הזה בחזרה. כש-"כן" מגיע, `app.py`'s confirm-word intercept (שורה ~1362) בודק רק `action_gateway`/`event_bus` — לא `pending_lead_preview` — ומחזיר "אין פעולה שממתינה לאישור". בנוסף, `_store_pending_preview` עושה no-op שקט אם `_ls.get(chat_id)` מחזיר `None` (session חדש).
+  3. **C89 Tier 4 לא עוצר routing:** `handle_lead_candidate()` מחזיר `None` עבור `ic.tier >= 4` — זה מונע רק auto-write מ-LCH עצמו, אבל הטקסט הגולמי ממשיך ל-`intent_router`/Agent כרגיל. `core/ingress_classifier.py`'s התיעוד העצמי אומר "Tier 4: NEVER auto-write, preview only" — הקוד מממש רק את החצי הראשון.
+  4. **פלט מודבק מפעיל intent שגוי:** תוצאה ישירה של #3 — טקסט מודבק שסווג נכון כ-Tier 4 (`_is_tier4`, למשל `bot_output_block`/`table_separator`) עדיין מגיע ל-`intent_router.detect_intent()`, שמזהה מילות מפתח כמו "הוסף משימה" בכל מקום בטקסט ללא קשר למבנה שמסביב.
+  5. **Double classification (cleanup, לא blocker):** `core/router/router.py` קורא ל-`classify_ingress()` (דרך `classify_capture()`) לצורך observability בלבד על `RouteDecision.capture_tier`, ו-`core/lead_candidate_handler.py` קורא לו שוב באופן עצמאי כדי להחליט בפועל — שתי קריאות נפרדות לאותו טקסט, מתועד כ"by design" בשני המקומות אך סותר את התיעוד העצמי של `classify_ingress()` כ"single entry point".
+- **תיקון:**
+  1. `core/router/intent_router.py`: regex תוקן מ-`^בדיקות?\s*מערכת...` ל-`^בדיקו?ת\s*מערכת...` — ה-`?` עבר מה-ת' הסופית לו' הפנימית, כך ש"בדיקת" (יחיד, ללא ו') ו"בדיקות" (רבים, עם ו') תואמים שניהם.
+  2. `core/router/router.py`: תוסף Tier-4 stop-gate ב-step 7 (edge cases) — `capture_ic.tier == 4` → `handler=CLARIFY`, `tool_allowed=False`, הודעה דטרמיניסטית. עוצר Routing *לפני* `Handler.AGENT` ללא קשר לאיזה intent הטקסט המודבק הזעיק (למשל "הוסף משימה" בתוך bot output).
+  3. `core/lead_candidate_handler.py`: פונקציה חדשה `_propose_lead_write()` — Tier 1 preview (`auto_write=False`) קורא ל-`action_gateway.propose_action(requires_approval=True, tool_name="airtable_add"/"airtable_update", _source="lead_capture")` במקום `_store_pending_preview()` המת. `_store_pending_preview` (עדיין בשימוש ע"י Tier 2 batch — לא תוקן מעבר לזה, ראה "נשאר פתוח" למטה) עבר מ-`_ls.get()` ל-`_ls.get_or_create()` לתיקון ה-no-op בsession חדש.
+  4. `core/action_gateway.py`: מתודה חדשה `route_cancellation_word()` — מבטלת (`status="rejected"`) contracts חיים בתגובה ל"לא".
+  5. `app.py`: בלוק `_CONFIRM_WORDS`/`_CANCEL_WORDS` (סעיף 2.55) בודק `action_gateway.find_live_contracts()` **לפני** ה-branch המותנה ב-`FEATURE_ACTION_GATEWAY` — כך ש-contract שנוצר ע"י LCH נפתר תמיד, גם כשהדגל כבוי (ברירת המחדל). "לא" מטופל באותה שכבה עם `route_cancellation_word()` חדש.
+  6. Double classification (#5): `core/router/capture_router.py` מקבל `classify_capture_ic()` (קריאת `classify_ingress()` יחידה); `RouteDecision` מקבל שדה חדש `capture_ic`; `router.py` ו-`app.py` מעבירים אותו ל-`handle_lead_candidate(ic=route.capture_ic)`, שמשתמש בו במקום לסווג שוב — מטפל גם ב-Tier-4 gate וגם ב-double-classification בקריאה משותפת אחת.
+- **בדיקה:** `core/router/test_router.py` 38/38 + 3 בדיקות Tier-4 ידניות (tool_allowed=False, capture_ic.tier==4, LCH→None). `test_c89_preview_confirmation.py` (חדש) 6/6 — preview, אישור-דרך-Gateway, ביטול, מניעת כפילות (pending + executed), grep סטטי על app.py. כל 34 קובצי `test_*.py` בריפו + `smoke_tests.py` + `test_integration.py` + `core/router/test_router.py` — 0 רגרסיות.
+- **נשאר פתוח (לא בסקופ הסשן הזה):** Tier 2 (`_handle_clean_batch`, batch preview) עדיין קורא ל-`_store_pending_preview()` הישן — "לשמור את כולם?" לbatch עדיין לא עובר דרך Gateway; ActionGateway בנוי סביב contract יחיד, לא batch-confirm. דורש עיצוב נפרד (roadmap item עתידי, לא SPEC חדש בסשן זה).
+- **PR:** #215 (`fix/c89-router-preview-hardening`).
+- **Merged:** לא עדיין
+- **Deployed:** לא עדיין
+- **Verified בפרודקשן:** לא עדיין
+- **סטטוס:** ✅ קוד הושלם ונבדק (0 רגרסיות) — ממתין ל-merge + production verification

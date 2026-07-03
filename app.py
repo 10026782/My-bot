@@ -1363,10 +1363,25 @@ def run_agent(
                         return _ledger_reply
             pass  # fall through — route to Agent as status query
         elif _lower in _CONFIRM_WORDS:
+            # BUG-056: check ActionGateway live contracts FIRST, regardless of
+            # FEATURE_ACTION_GATEWAY — LCH's Tier-1 lead-preview confirmation
+            # (core/lead_candidate_handler.py: _propose_lead_write) always
+            # registers a real contract here, even when the flag is off (its
+            # default). Only when Gateway has nothing pending do we fall back
+            # to the flag-gated Stage A/B logic exactly as before.
+            from core.action_gateway import action_gateway as _gw_cw
+            if _gw_cw.find_live_contracts(identity.memory_key):
+                _gw_reply = _gw_cw.route_confirmation_word(identity.memory_key)
+                logger.info(
+                    "[ActionGateway] route_confirmation_word: user=%s reply=%.60s",
+                    identity.memory_key, _gw_reply,
+                )
+                if _out_meta is not None:
+                    _out_meta["source_module"] = "action_gateway"
+                return _gw_reply
             from feature_flags import is_enabled as _flag_cw
             if _flag_cw("FEATURE_ACTION_GATEWAY"):
-                # Stage B: Gateway הוא מקור האמת לאישור
-                from core.action_gateway import action_gateway as _gw_cw
+                # Stage B: Gateway הוא מקור האמת לאישור (אין contract חי -> "אין פעולה...")
                 _gw_reply = _gw_cw.route_confirmation_word(identity.memory_key)
                 logger.info(
                     "[ActionGateway] route_confirmation_word: user=%s reply=%.60s",
@@ -1393,6 +1408,22 @@ def run_agent(
                         f"[PendingApproval] free-text confirm, no pending for {identity.memory_key}"
                     )
                     return "אין פעולה שממתינה לאישור. אם זו בקשה חדשה — שלח את הנתונים המדויקים."
+        elif _lower in _CANCEL_WORDS:
+            # BUG-056: same reasoning as _CONFIRM_WORDS above — LCH's Tier-1
+            # preview may have a live ActionGateway contract regardless of
+            # FEATURE_ACTION_GATEWAY. If none, fall through unchanged (existing
+            # behavior: only the _pending_approvals dict block above handles
+            # cancel words; this elif is a no-op passthrough to Agent otherwise).
+            from core.action_gateway import action_gateway as _gw_cancel
+            _cancel_reply = _gw_cancel.route_cancellation_word(identity.memory_key)
+            if _cancel_reply is not None:
+                logger.info(
+                    "[ActionGateway] route_cancellation_word: user=%s reply=%.60s",
+                    identity.memory_key, _cancel_reply,
+                )
+                if _out_meta is not None:
+                    _out_meta["source_module"] = "action_gateway"
+                return _cancel_reply
 
     # ── 2.6. Context Pronoun Resolution (C60) ────────
     # "תעלה לדסישנס"/"זה הנספח" וכד' — לפני intent detection, כדי שה-Router
@@ -1429,14 +1460,16 @@ def run_agent(
     # (היה *לפני* ה-Router — bypass מלא של Identity→Router→Context→Agent).
     # ה-Router רץ עכשיו תמיד קודם — LCH מקבל domain אמיתי מ-domain_router
     # (resolved_route_domain) במקום רק את ה-content-regex guess הפנימי שלו.
-    # gate זהה לגמרי לישן (identity.is_internal) — LCH עדיין עושה סיווג/tier
-    # משלו (classify_ingress, ללא שינוי) — route.capture_tier הוא שדה
-    # observability-בלבד על RouteDecision, לא gate כאן.
+    # gate זהה לגמרי לישן (identity.is_internal) — לא route.capture_tier.
+    # BUG-056: route.capture_ic (ה-IngressClassification המלא שה-Router כבר
+    # חישב) מועבר ל-LCH במקום שLCH יריץ classify_ingress() שוב על אותו טקסט —
+    # קריאה יחידה במקום שתיים (double-classification fix).
     if getattr(identity, "is_internal", False):
         try:
             from core.lead_candidate_handler import handle_lead_candidate
             _lch_reply = handle_lead_candidate(
                 identity, user_text, chat_id, channel, domain=resolved_route_domain,
+                ic=route.capture_ic,
             )
             if _lch_reply is not None:
                 # BUG-SB-01: COG sees "lead_candidate_handler" as a different speaker.

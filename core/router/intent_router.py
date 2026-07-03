@@ -158,7 +158,10 @@ def detect_intent(text: str, confidence_threshold: float = 0.75) -> tuple[str, f
 _AMBIGUOUS_PHRASES: list[tuple[re.Pattern, str]] = [
     (re.compile(r"^(סטטוס|status|מה המצב|מצב)\s*[\?!.]*$", re.IGNORECASE),
      "אתה רוצה שאבדוק חיבורים עכשיו (Gmail/Calendar/Airtable), או משהו אחר?"),
-    (re.compile(r"^בדיקות?\s*מערכת\s*[\?!.]*$", re.IGNORECASE),
+    # BUG-056: the ? must sit on the ו (בדיקה/בדיקת vs בדיקות), not on the
+    # trailing ת — a ?-on-ת regex never matches the singular/construct form
+    # "בדיקת" (no ו) at all, only "בדיקו"/"בדיקות".
+    (re.compile(r"^בדיקו?ת\s*מערכת\s*[\?!.]*$", re.IGNORECASE),
      "אתה רוצה שאבדוק חיבורים עכשיו או שאתה מתכוון לתיעוד בדיקות?"),
     (re.compile(r"^(תמלא|למלא)\s*משימות\s*[\?!.]*$", re.IGNORECASE),
      "להוסיף משימה חדשה, לעדכן קיימת, או לראות רשימה?"),
