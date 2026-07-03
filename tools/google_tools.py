@@ -258,6 +258,9 @@ def drive_read_file(file_name: str) -> str:
         file_id = files[0]["id"]
         mime = files[0].get("mimeType", "")
 
+        if mime == "application/vnd.google-apps.spreadsheet":
+            return "📊 זה Google Sheet — יש להשתמש בכלי Sheets, לא בקריאת Drive."
+
         if "google-apps" in mime:
             r = httpx.get(
                 f"https://www.googleapis.com/drive/v3/files/{file_id}/export",
@@ -465,6 +468,9 @@ def sheets_append(spreadsheet_name: str, row_data: list) -> dict:
             },
             timeout=10,
         )
+        if search.status_code != 200:
+            logger.error(f"[SheetsAppend] Drive search HTTP {search.status_code}: {search.text[:200]}")
+            return f"❌ שגיאת חיפוש Sheets/Drive (HTTP {search.status_code})"
         files = search.json().get("files", [])
         if not files:
             return _tool_result(ok=False, tool="sheets_append",
