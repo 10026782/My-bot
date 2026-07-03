@@ -46,6 +46,12 @@ jobs:
       - name: Schema governance (warning only, never blocks)
         run: python tools/schema_governance.py || true
 
+      - name: F52 gateway bypass audit (warning only, never blocks)
+        run: python tools/audit_gateway_bypass.py || true
+
+      - name: F52 result-parsing audit (warning only, never blocks)
+        run: python tools/audit_result_parsing.py || true
+
       - name: pytest collect
         run: |
           python -m pytest --collect-only -q \

@@ -224,14 +224,31 @@ def _at_get_record(table: str, record_id: str) -> dict | None:
     return None
 
 
+def _shadow_record_tma(action: str) -> None:
+    """Passive, flag-gated shadow record — never affects return value or
+    control flow (F52 #4). See core/last_tool_result_shadow.py."""
+    import feature_flags as _ff
+    if not _ff.is_enabled("FEATURE_LAST_TOOL_RESULT_SHADOW"):
+        return
+    try:
+        from core.last_tool_result_shadow import record as _shadow_record
+        _shadow_record(source="tma_route", tool_or_action=action)
+    except Exception as e:
+        logger.debug(f"[tma_api] shadow record failed (non-fatal): {e}")
+
+
 def _at_patch(table: str, record_id: str, fields: dict) -> bool:
     """PATCH single record via gateway (normalize → validate → audit → httpx)."""
-    return _gw_patch(table, record_id, fields, source="tma")
+    result = _gw_patch(table, record_id, fields, source="tma")
+    _shadow_record_tma(f"patch:{table}")
+    return result
 
 
 def _at_post(table: str, fields: dict) -> dict | None:
     """POST new record via gateway → created record dict or None."""
-    return _gw_create(table, fields, source="tma")
+    result = _gw_create(table, fields, source="tma")
+    _shadow_record_tma(f"post:{table}")
+    return result
 
 
 
