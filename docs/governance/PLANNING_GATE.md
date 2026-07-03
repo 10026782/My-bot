@@ -10,13 +10,15 @@
 
 ---
 
-## שלוש השאלות (תנאי סף — קיים)
-לפני כל שינוי:
-1. האם באמת יש בעיה?
-2. האם הבעיה כבר נפתרה במקום אחר במערכת?
+## שערי חובה — 8 שאלות (לפני כל SPEC, ובסיכום כל סשן)
+1. יש בעיה אמיתית — ראיה, שחזור, לא רק השערה?
+2. נפתרה כבר במקום אחר — Gateway/Adapter/מנגנון קיים?
 3. מה השינוי הקטן ביותר שפותר אותה?
-
-רק אם שלושתן מצביעות על פער אמיתי — בונים חדש. אחרת משלבים בקיים.
+4. הפתרון יוצר מסלול נוסף (Dual Mechanism)?
+5. יש עקיפה של Gateway/Router/Identity/Dispatcher/Policy?
+6. יש Evidence אמיתי לתוצאה, לא רק "✅"?
+7. מה ההשפעה העסקית אם לא מתקנים — קודם או מחכה?
+8. איך נאכוף קדימה — test/script/rule/audit?
 
 ---
 
@@ -67,14 +69,6 @@
 
 ---
 
-## בדיקת התנגשות כלים (חוזר על חוק MODULE_RULES — מפורש)
-```
-❓ האם שני flows כותבים לאותו כלי / תופסים אותו קלט / מנהלים אותו state?
-אם כן → הגדר precedence מפורש לפני בנייה. אל תבנה על התנגשות סמויה.
-```
-
----
-
 ### שער 6 — F52 Evidence (כתיבה/שליחה/שינוי מצב)
 ```
 ❓ אם הפעולה כותבת, שולחת, או משנה מצב — מי שומר את הראיה ואיפה?
@@ -91,46 +85,55 @@
 ---
 
 ## פלט השער
-לפני שמתחילים תכנון, תשובה קצרה ל-7 הסעיפים. אם אחד נכשל — מתקנים
-את התכנון לפני קוד, לא אחרי.
+תשובה קצרה לכל 8 השאלות למעלה — לא ממשיכים לקוד עד שכולן נענו.
 
 ---
 
 ## Discovery & Execution Integrity Rules
+### הרחבה — למה כל שאלה קיימת
 (נלמד בפועל — 02/07/2026, סשן Router/Capture Policy/Document Converter)
 
 1. Current State Gate = live repo only. git grep --all, branch -a,
    actual file view — לעולם לא זיכרון, project knowledge cache,
    או סיכומי שיחה קודמים. אם כלי החיפוש של הסוכן פספס משהו —
    זו לא הוכחה שהוא לא קיים.
+   (↔ שאלה 1 — "יש בעיה אמיתית" נבדק מול המצב החי, לא מזיכרון/השערה)
 
 2. Router is the first business decision point. אין פעולה עסקית
    (write, classify-with-consequence, gate) שרצה *לפני* שהראוטר
    (Identity → Router → Context → Agent) סיים. אם קיים short-circuit
    כזה בקוד — הוא BUG, לא feature, גם אם הוא כבר בפרודקשן.
+   (↔ שאלה 5 — עקיפה של Router/Gateway/Identity/Dispatcher/Policy)
 
 3. Feature flags must define exact scope: classify / route /
    preview / execute / write. לפני הצגת flag חדש או שימוש חוזר
    בשם קיים — grep לכל השימושים החיים קודם. flag שכבר שולט
    בהתנהגות אחת לא יכול לקבל משמעות שנייה בשקט.
+   (↔ שאלה 3 — scope מדויק = השינוי הקטן ביותר;
+    ↔ שאלה 4 — flag עם משמעות כפולה בשקט = מסלול נוסף מוסווה)
 
 4. DoD must prove the execution path, not only the output.
    "הבדיקות עברו" לא מספיק — צריך הוכחה שהקוד שנבדק הוא הקוד
    שרץ בפרודקשן (exit code אמיתי, לא script שנבלע בשקט,
    assertion שרצה בפועל לא רק collected).
+   (↔ שאלה 6 — Evidence אמיתי לתוצאה, לא רק "✅")
 
 5. Any code that calls an existing module must cite the actual
    function signature (view/grep מהסשן הנוכחי) לפני שנכתב call-site.
    לעולם לא הנחה מתיאור SPEC או מסיכום קודם.
+   (↔ שאלה 2 — מוודאים מה כבר קיים לפני שבונים משהו חדש)
 
 6. A documented governance rule is not self-enforcing. סיכומי סשן
    חייבים לציין סטטוס ציות מפורש מול AGENTS.md ("PR נפתח לפי כלל
    סיום-סשן") — לא רק להשלים את המשימה ולשתוק לגביו.
+   (↔ שאלה 8 — איך נאכוף קדימה: תיעוד בלבד ≠ אכיפה)
 
 7. Orphaned-branch audit is routine, not incidental — ראה AGENTS.md
    PRE-SESSION GATE. לא תלוי בכך שאיזה SPEC אחר יעבור שם במקרה.
+   (↔ שאלה 8 — אכיפה חייבת להיות שגרה קבועה, לא תלויה במקרה)
 
 8. Test-count claims ("N/N pass") must state what layer they exercise
    (unit / integration / e2e) — a passing count does not by itself
    imply the full execution chain was proven, especially where no
    e2e harness exists for that chain.
+   (↔ שאלה 6 — "עבר" חייב לפרט איזו שכבה נבדקה, לא רק תווית ירוקה)
