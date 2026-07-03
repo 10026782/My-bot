@@ -2159,7 +2159,7 @@ def _webhook_whatsapp_impl():
     if idempotency.is_duplicate("whatsapp", sender, dedup_key):
         return _empty_twiml()
 
-    if _inject_utm:
+    if _inject_utm and _flag_enabled("AD_ATTRIBUTION"):
         try:
             # תיקון: memory_key קנוני — boss_hq:+972... (כמו ש-identity.memory_key
             # מחזיר), לא whatsapp:+972... — אחרת _inject_utm מחפש/כותב ב-Airtable
@@ -2172,7 +2172,9 @@ def _webhook_whatsapp_impl():
                 channel      = "whatsapp",
             )
         except Exception as _utm_err:
-            logger.debug(f"[UTM] whatsapp inject skipped: {_utm_err}")
+            # BUG-057 FIX: היה logger.debug — הסתיר כשל שקט בכל הודעה
+            # נכנסת (utm_source/medium/campaign/platform לא קיימים ב-schema_cache.json)
+            logger.warning(f"[UTM] whatsapp inject failed: {_utm_err}")
 
     # furniture funnel pre-agent intercept — only when domain == "furniture_import"
     # if FURNITURE_TWILIO_WHATSAPP_NUMBER is unset, get_domain() returns "general" → skipped

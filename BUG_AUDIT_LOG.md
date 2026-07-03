@@ -824,7 +824,21 @@
 - **בדיקה:** `core/router/test_router.py` 38/38 + 3 בדיקות Tier-4 ידניות (tool_allowed=False, capture_ic.tier==4, LCH→None). `test_c89_preview_confirmation.py` (חדש) 6/6 — preview, אישור-דרך-Gateway, ביטול, מניעת כפילות (pending + executed), grep סטטי על app.py. כל 34 קובצי `test_*.py` בריפו + `smoke_tests.py` + `test_integration.py` + `core/router/test_router.py` — 0 רגרסיות.
 - **נשאר פתוח (לא בסקופ הסשן הזה):** Tier 2 (`_handle_clean_batch`, batch preview) עדיין קורא ל-`_store_pending_preview()` הישן — "לשמור את כולם?" לbatch עדיין לא עובר דרך Gateway; ActionGateway בנוי סביב contract יחיד, לא batch-confirm. דורש עיצוב נפרד (roadmap item עתידי, לא SPEC חדש בסשן זה).
 - **PR:** #215 (`fix/c89-router-preview-hardening`).
+- **Merged:** כן — `bcfbff2` (מאומת `git log origin/main --oneline`)
+- **Deployed:** לא אומת (אין גישת Render dashboard מה-sandbox)
+- **Verified בפרודקשן:** לא עדיין
+- **סטטוס:** ✅ מוזג ל-main — ממתין ל-production verification
+
+### BUG-057 (LL-14 / AD-ATTRIBUTION-UTM-UNGATED) — _inject_utm רץ ללא גייט FEATURE_ACTION_GATEWAY על כל הודעת WhatsApp נכנסת
+- **תאריך:** 03/07/2026
+- **קבצים:** `app.py`, `test_ad_attribution_gate.py` (חדש)
+- **Severity:** Medium — לא critical (הכתיבה נכשלת בכל מקרה כי השדות לא קיימים ב-schema), אבל ריצה מיותרת + לוגים שקטים על כל הודעה.
+- **שורש:** מזוהה בענף `claude/leads-write-gate-verify-aodpud` (PR #184 המקורי, אף פעם לא מוזג בפועל ל-main בתור branch, אותר מחדש בסבב "handle branches one at a time"). `app.py`'s `_webhook_whatsapp_impl()` קרא ל-`ad_attribution._inject_utm()` על **כל** הודעת WhatsApp נכנסת ללא תלות ב-flag `AD_ATTRIBUTION` (רשום ב-`feature_flags.py` אך לא נבדק בקריאה הזו) — כל עוד המודול `ad_attribution` יובא בהצלחה. הכתיבה נכשלת בפועל (שדות `utm_source`/`utm_medium`/`utm_campaign`/`platform` לא קיימים ב-`schema_cache.json`/הטבלה החיה), אך הכשל נבלע ב-`logger.debug` — לא נראה בלוגים בפרודקשן.
+- **הערה (renumbering):** הענף המקורי קרא לזה `BUG-040` — מתנגש עם `BUG-040` הקיים כבר ב-main (`BUG-V1-A32-SHEETS-FALSE-SUCCESS`, A32 Sheets false-success). ID collision זה תועד קודם בענפי `determined-fermat-sdrmx3`/`xuxfwv` (verification logs שמעולם לא מוזגו). ממוספר מחדש ל-`BUG-057` כאן, בסבב שבו הקוד בפועל מוזג.
+- **תיקון:** `if _inject_utm:` → `if _inject_utm and _flag_enabled("AD_ATTRIBUTION"):`. `logger.debug` → `logger.warning` בבלוק ה-`except` כדי שכשל אמיתי (כשהדגל כן דלוק) יהיה גלוי, לא שקט.
+- **בדיקה:** `test_ad_attribution_gate.py` (חדש, 2/2) — מדמה בקשת webhook מלאה (חתימה/idempotency/identity/furniture-funnel/output-gateway מדומים), מוודא ש-`_inject_utm` **לא** נקרא כש-`AD_ATTRIBUTION=False` (ברירת מחדל) ו-**כן** נקרא כש-`AD_ATTRIBUTION=True`.
+- **PR:** נפתח מ-`fix/bug057-ad-attribution-utm-gate`.
 - **Merged:** לא עדיין
 - **Deployed:** לא עדיין
 - **Verified בפרודקשן:** לא עדיין
-- **סטטוס:** ✅ קוד הושלם ונבדק (0 רגרסיות) — ממתין ל-merge + production verification
+- **סטטוס:** 🟡 קוד הושלם ונבדק — ממתין ל-merge
