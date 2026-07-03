@@ -21,6 +21,18 @@ logger = logging.getLogger(__name__)
 
 _TZ_IL = ZoneInfo("Asia/Jerusalem")
 
+# drive_read_file(): MIME types with a deterministic document_converter path
+# to markdown. Anything not in this map falls back to the "unsupported
+# format" message (webViewLink) rather than a garbled raw-bytes dump.
+_MIME_TO_TYPE = {
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "text/csv": "csv",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+    "text/html": "html",
+    "text/plain": "txt",
+    "text/markdown": "markdown",
+}
+
 
 def _tool_result(
     *,
@@ -275,6 +287,36 @@ def drive_read_file(file_name: str) -> str:
                 params={"alt": "media"},
                 timeout=15,
             )
+            if r.status_code != 200:
+                logger.error(f"[DriveReadFile] HTTP {r.status_code}: {r.text[:200]}")
+                return f"❌ שגיאת גישה לדרייב (HTTP {r.status_code}) — לא ניתן היה לקרוא את הקובץ."
+
+            input_type = _MIME_TO_TYPE.get(mime)
+            if input_type is None:
+                return f"📄 '{files[0]['name']}' — פורמט לא נתמך לקריאה ישירה. 🔗 {files[0].get('webViewLink', '')}"
+
+            import tempfile
+            from pathlib import Path
+            from document_converter.engine import convert_document
+
+            with tempfile.NamedTemporaryFile(suffix=f".{input_type}", delete=False) as tmp:
+                tmp.write(r.content)
+                tmp_path = tmp.name
+
+            try:
+                result = convert_document(tmp_path, input_type, "markdown")
+                if result["confidence"] == "high" and result.get("output_file"):
+                    output_path = Path(result["output_file"])
+                    try:
+                        content = output_path.read_text(encoding="utf-8")[:3000]
+                    finally:
+                        output_path.unlink(missing_ok=True)  # engine לא מנקה בהצלחה
+                else:
+                    content = r.content.decode("utf-8", errors="replace")[:3000]
+            finally:
+                os.unlink(tmp_path)
+
+            return f"📄 תוכן '{files[0]['name']}':\n{content}"
 
         if r.status_code != 200:
             logger.error(f"[DriveReadFile] HTTP {r.status_code}: {r.text[:200]}")
