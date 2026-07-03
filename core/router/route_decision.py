@@ -4,7 +4,10 @@
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.ingress_classifier import IngressClassification
 
 
 # ══════════════════════════════════════════════════
@@ -181,6 +184,11 @@ class RouteDecision:
                                           # write-worthy capture, else None
     capture_reason:  str = ""            # classify_ingress() reason string
     raw_ref:         str = ""            # Interaction Log reference (future)
+    capture_ic:      "IngressClassification | None" = None  # BUG-056: full
+                                          # classification (all 5 tiers), so
+                                          # handle_lead_candidate() can reuse
+                                          # it instead of re-classifying, and
+                                          # router.py can stop-gate Tier 4.
 
     def is_blocked(self) -> bool:
         return self.handler == Handler.BLOCK

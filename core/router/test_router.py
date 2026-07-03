@@ -71,6 +71,28 @@ TESTS = [
     ("lead + delete",      "תמחק את כל המשימות",  "whatsapp", "lead",     "", Intent.DELETE_TASK,RouterDomain.GENERAL, Handler.AGENT),
     ("owner + delete",     "תמחק את כל המשימות",  "telegram", "owner",    "", Intent.DELETE_TASK,RouterDomain.GENERAL, Handler.APPROVAL),
     ("owner + greeting",   "שלום",                "telegram", "owner",    "", Intent.GREETING,   RouterDomain.GENERAL, Handler.AGENT),
+
+    # ── BUG-056 / BUG-IC-01 — ambiguous short-phrase regex coverage ─────────
+    # Singular/plural/status variants must all clarify; explicit action-verb
+    # + integration-name phrases must still reach the real system check.
+    ("בדיקת מערכת (יחיד) → clarify",   "בדיקת מערכת",              "telegram", "owner", "", Intent.UNKNOWN,       RouterDomain.GENERAL, Handler.CLARIFY),
+    ("בדיקות מערכת (רבים) → clarify",  "בדיקות מערכת",             "telegram", "owner", "", Intent.UNKNOWN,       RouterDomain.GENERAL, Handler.CLARIFY),
+    ("בדיקת מערכת? → clarify",         "בדיקת מערכת?",             "telegram", "owner", "", Intent.UNKNOWN,       RouterDomain.GENERAL, Handler.CLARIFY),
+    ("סטטוס (בלי פועל) → clarify",     "סטטוס",                    "telegram", "owner", "", Intent.UNKNOWN,       RouterDomain.GENERAL, Handler.CLARIFY),
+    ("מה המצב → clarify",              "מה המצב",                  "telegram", "owner", "", Intent.UNKNOWN,       RouterDomain.GENERAL, Handler.CLARIFY),
+    ("למלא משימות → clarify",          "למלא משימות",              "telegram", "owner", "", Intent.UNKNOWN,       RouterDomain.GENERAL, Handler.CLARIFY),
+    ("תבדוק Airtable מפורש → agent",   "תבדוק עכשיו את Airtable",  "telegram", "owner", "", Intent.SYSTEM_STATUS, RouterDomain.GENERAL, Handler.AGENT),
+    ("בדוק חיבורי מערכת מפורש → agent","בדוק חיבורי מערכת",        "telegram", "owner", "", Intent.SYSTEM_STATUS, RouterDomain.GENERAL, Handler.AGENT),
+
+    # ── BUG-056 — C89 Tier 4 stop-gate ──────────────────────────────────────
+    # Pasted bot output containing "הוסף משימה" still matches CREATE_TASK at
+    # the intent_router layer, but Tier 4 (bot_output_block) must force
+    # handler=CLARIFY / tool_allowed=False so it never reaches the Agent.
+    (
+        "pasted bot output w/ 'הוסף משימה' → clarify, not create_task agent",
+        "✅ בוצע: משימה 1\n✅ בוצע: משימה 2\n❌ נכשל: הוסף משימה חדשה ללקוח\n",
+        "telegram", "owner", "", Intent.CREATE_TASK, RouterDomain.CRM, Handler.CLARIFY,
+    ),
 ]
 
 
@@ -94,7 +116,28 @@ def run_tests():
 
     print(f"\n{'═'*45}")
     print(f"  {passed}/{passed+failed} passed")
-    return failed == 0
+
+    # ── BUG-056 extra assertions: Tier 4 stop-gate must also set
+    # tool_allowed=False (no tools), and handle_lead_candidate() must still
+    # refuse to write given the exact same capture_ic the router computed
+    # (no duplicate classification, no write on Tier 4). ──────────────────
+    import core.lead_candidate_handler as _lch
+    _tier4_text = "✅ בוצע: משימה 1\n✅ בוצע: משימה 2\n❌ נכשל: הוסף משימה חדשה ללקוח\n"
+    _identity = MockIdentity(role="owner")
+    _d = route_request(_tier4_text, "telegram", _identity, domain_from_channel="")
+    ok_tool_allowed = _d.tool_allowed is False
+    print(f"{'✅' if ok_tool_allowed else '❌'} Tier 4 stop-gate: tool_allowed=False")
+    ok_tier4_ic = _d.capture_ic is not None and _d.capture_ic.tier == 4
+    print(f"{'✅' if ok_tier4_ic else '❌'} Tier 4 stop-gate: capture_ic.tier == 4")
+    _lch_reply = _lch.handle_lead_candidate(
+        _identity, _tier4_text, "chat_t4", "telegram",
+        domain=_d.domain, ic=_d.capture_ic,
+    )
+    ok_no_write = _lch_reply is None
+    print(f"{'✅' if ok_no_write else '❌'} Tier 4 stop-gate: handle_lead_candidate() → None (no write)")
+
+    all_ok = failed == 0 and ok_tool_allowed and ok_tier4_ic and ok_no_write
+    return all_ok
 
 
 if __name__ == "__main__":

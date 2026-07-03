@@ -421,6 +421,25 @@ class ActionGateway:
         lines.append("\nשלח את המספר (1, 2, ...) כדי לאשר פעולה ספציפית.")
         return "\n".join(lines)
 
+    # ── BUG-056 — route_cancellation_word ───────────────────────────
+
+    def route_cancellation_word(self, canonical_user_id: str) -> str | None:
+        """
+        מיירט מילת ביטול חופשית ("לא") לפני שמגיעה ל-Agent.
+        מחזיר None אם אין contracts חיים (ממשיך לזרימה הקיימת/ל-Agent),
+        אחרת מבטל את כל ה-contracts החיים ומחזיר תשובת ביטול.
+        """
+        live = self.find_live_contracts(canonical_user_id)
+        if not live:
+            return None
+        for c in live:
+            self._ledger.update_status(c.contract_id, "rejected")
+            logger.info(
+                "[ActionGateway] rejected via cancel word: contract=%s tool=%s user=%s",
+                c.contract_id, c.tool_name, canonical_user_id,
+            )
+        return "🚫 הפעולה בוטלה."
+
     # ── disambiguation ordinal resolver ─────────────────────────────
 
     _ORDINALS_HE: dict[str, int] = {
