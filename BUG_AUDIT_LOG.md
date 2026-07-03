@@ -823,7 +823,7 @@
   6. Double classification (#5): `core/router/capture_router.py` מקבל `classify_capture_ic()` (קריאת `classify_ingress()` יחידה); `RouteDecision` מקבל שדה חדש `capture_ic`; `router.py` ו-`app.py` מעבירים אותו ל-`handle_lead_candidate(ic=route.capture_ic)`, שמשתמש בו במקום לסווג שוב — מטפל גם ב-Tier-4 gate וגם ב-double-classification בקריאה משותפת אחת.
 - **בדיקה:** `core/router/test_router.py` 38/38 + 3 בדיקות Tier-4 ידניות (tool_allowed=False, capture_ic.tier==4, LCH→None). `test_c89_preview_confirmation.py` (חדש) 6/6 — preview, אישור-דרך-Gateway, ביטול, מניעת כפילות (pending + executed), grep סטטי על app.py. כל 34 קובצי `test_*.py` בריפו + `smoke_tests.py` + `test_integration.py` + `core/router/test_router.py` — 0 רגרסיות.
 - **נשאר פתוח (לא בסקופ הסשן הזה):** Tier 2 (`_handle_clean_batch`, batch preview) עדיין קורא ל-`_store_pending_preview()` הישן — "לשמור את כולם?" לbatch עדיין לא עובר דרך Gateway; ActionGateway בנוי סביב contract יחיד, לא batch-confirm. דורש עיצוב נפרד (roadmap item עתידי, לא SPEC חדש בסשן זה).
-- **PR:** נפתח מ-`fix/c89-router-preview-hardening`.
+- **PR:** #215 (`fix/c89-router-preview-hardening`).
 - **Merged:** לא עדיין
 - **Deployed:** לא עדיין
 - **Verified בפרודקשן:** לא עדיין
