@@ -869,7 +869,7 @@
   1. Resolve בין שני המנגנונים (`active_lead_candidate` הקיים ב-main מול `core/lead_candidate.py` בענף) — לא לבנות שניים.
   2. Sanitize את ה-capture, או להעביר אותו כ-user-turn content (לא system-prompt עם ניסוח ציווי).
 - **בדיקה:** לא רלוונטי — תיעוד בלבד, אין קוד שרץ.
-- **PR:** docs-only, `docs/bug059-lead-event-injection-audit`.
+- **PR:** #218 (docs-only, `docs/bug059-lead-event-injection-audit`).
 - **Merged:** לא עדיין
 - **Deployed:** לא רלוונטי
 - **Verified בפרודקשן:** לא רלוונטי (הענף המקורי dormant, לא בפרודקשן)
