@@ -852,7 +852,25 @@
 - **תיקון:** `_handle_clean_batch()`'s הודעת ה-preview שונתה לתצפית-בלבד: "📋 זיהיתי N לידים אפשריים בקבוצה: ... לא שמרתי אותם ולא נפתחה פעולת אישור קבוצתית. אישור קבוצתי עדיין לא זמין. כדי לשמור ליד, שלח ליד אחד בכל פעם או בקש ממני להכין רשימה לבדיקה." אין "ענה כן"/"לאישור" יותר. `_store_pending_preview()` מקבל docstring מפורש `INTENTIONAL — no resolver yet`. השדה `pending_lead_preview` **נשאר נכתב** (audit/future-design, לא נמחק).
 - **בדיקה:** `test_tier2_silent_preview.py` (חדש, 4/4) — הודעת Tier 2 נטולת CTA מטעה, `pending_lead_preview` עדיין נכתב, משתמש עם Tier-2 preview בלבד ש-"כן" → "אין פעולה שממתינה לאישור" (לא false positive), הודעת Tier 1 (שיש לה resolver אמיתי) נשארה ללא שינוי. כל 36 קבצי `test_*.py` + `smoke_tests.py` + `core/router/test_router.py` — 0 רגרסיות.
 - **PR:** #217 (`fix/bug058-tier2-silent-preview`).
-- **Merged:** לא עדיין
-- **Deployed:** לא עדיין
+- **Merged:** כן — `769e171` (מאומת `git log origin/main --oneline`)
+- **Deployed:** לא אומת (אין גישת Render dashboard מה-sandbox)
 - **Verified בפרודקשן:** לא עדיין
-- **סטטוס:** 🟡 קוד הושלם ונבדק — ממתין ל-merge
+- **סטטוס:** ✅ מוזג ל-main — ממתין ל-production verification
+
+### BUG-059 (LEAD-EVENT-DOMAIN-ORDERING-DORMANT-INJECTION) — ענף claude/lead-event-domain-ordering (לא ממוזג) מכיל prompt-injection surface + dual mechanism
+- **תאריך:** 03/07/2026
+- **קבצים:** תצפית על ענף `claude/lead-event-domain-ordering` (commit `4b80602`) — לא נוגע בקוד ב-main, אין שינוי בסשן זה.
+- **Severity:** Medium (לא Critical — הענף לא ממוזג, אין production exposure כרגע).
+- **שורש (2 בעיות שחוסמות merge כמו-שהוא):**
+  1. **Unsanitized injection ל-system prompt:** `core/lead_candidate.py`'s `_INTRO_PATTERN` (בענף) קולט כל טקסט שתואם `[א-תA-Za-z][א-תA-Za-z\s\'\"]{2,40}` אחרי trigger phrase ("אני "/"שמו "/"שמה "/"ליד חדש:"/"לקוח חדש:") — ללא שום ולידציה שזה שם סביר. `app.py`'s step "1.4.5" (בענף) מזריק את זה גולמי ל-`ctx.system_prompt` דרך `{_cand_name!r}` (Python `repr()` — לא sanitization/escaping אמיתי) בתוך ניסוח ציווי ("חובה... כוון תמיד ל-X, לא לאליהו"). הגייט הוא `if identity.is_internal:` — כלומר לא lead חיצוני יכול להפעיל את זה ישירות על ההודעה שלו, אבל כל טקסט שעובר דרך sender פנימי (כולל העתק-הדבק של הודעת לקוח ע"י עובד) הופך להוראת system-prompt ללא סינון.
+  2. **Dual Mechanism:** `session_store.py`'s `active_lead_candidate` (כבר ב-main, מומש עצמאית עם TTL=30 דק') ו-`core/lead_candidate.py` (בענף, אותו רעיון בדיוק) הם שני מימושים נפרדים לאותו קונספט — merge כמו-שהוא ייצור כפילות/סתירה, לא רק redundant code.
+- **תיקון:** לא בוצע — הענף לא מוזג, אין production exposure. תיעוד בלבד לקראת merge עתידי כלשהו.
+- **חובה לפני merge עתידי של הענף הזה (או כל SPEC חדש שמממש את אותו רעיון):**
+  1. Resolve בין שני המנגנונים (`active_lead_candidate` הקיים ב-main מול `core/lead_candidate.py` בענף) — לא לבנות שניים.
+  2. Sanitize את ה-capture, או להעביר אותו כ-user-turn content (לא system-prompt עם ניסוח ציווי).
+- **בדיקה:** לא רלוונטי — תיעוד בלבד, אין קוד שרץ.
+- **PR:** docs-only, `docs/bug059-lead-event-injection-audit`.
+- **Merged:** לא עדיין
+- **Deployed:** לא רלוונטי
+- **Verified בפרודקשן:** לא רלוונטי (הענף המקורי dormant, לא בפרודקשן)
+- **סטטוס:** 🟡 Documented, no fix — dormant, לא דחוף
