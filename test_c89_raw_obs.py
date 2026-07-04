@@ -10,10 +10,11 @@
 #   3. FEATURE_RAW_CAPTURE gates the live Decision Inbox write; raw_ref stays
 #      non-empty (local fallback) regardless of the flag.
 
+import inspect
 import sys
 from unittest.mock import patch
 
-from core.ingress_classifier import classify_ingress
+from core.ingress_classifier import classify_ingress, _classify_ingress_core
 import core.action_gateway as action_gateway_mod
 
 passed = failed = 0
@@ -39,6 +40,16 @@ def _capture_observations():
         return orig(contract_id, kind, text)
 
     return calls, _spy
+
+
+# ══════════════════════════════════════════════════
+# 0. Static audit guard: no code path may literally return raw_ref="" —
+#    the internal _classify_ingress_core() must rely on the dataclass
+#    default (never the empty-string literal) so a plain grep for
+#    raw_ref="" never finds an "active returned value" again.
+# ══════════════════════════════════════════════════
+_source = inspect.getsource(_classify_ingress_core)
+chk("no literal raw_ref=\"\" left in _classify_ingress_core source", 'raw_ref=""' not in _source, _source)
 
 
 # ══════════════════════════════════════════════════
