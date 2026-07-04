@@ -685,6 +685,7 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
             origin_channel=channel,
             origin_chat_id=user_chat_id,
             requires_approval=True,
+            identity=identity,
         )
         if not _gw_result.ok:
             logger.info(
@@ -705,6 +706,7 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
                 origin_channel=channel,
                 origin_chat_id=user_chat_id,
                 requires_approval=True,
+                identity=identity,
             )
         except Exception as _gw_exc:
             logger.debug("[ActionGateway] shadow propose failed (non-blocking): %s", _gw_exc)

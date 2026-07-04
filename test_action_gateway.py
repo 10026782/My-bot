@@ -251,6 +251,78 @@ chk("Singleton: compute_business_fingerprint callable", callable(action_gateway.
 
 
 # ══════════════════════════════════════════════════
+# BUG-C89-APPROVAL-IDENTITY: approval execution must use the actor identity
+# preserved on the contract at propose time, not re-resolve
+# canonical_user_id/origin_chat_id (a memory_key like "boss_hq:eliyahu",
+# not a channel external_id) through resolve_identity() — which silently
+# falls back to readonly and denies the approved tool.
+# ══════════════════════════════════════════════════
+print("\n── BUG-C89-APPROVAL-IDENTITY: preserved actor identity on approve ──")
+
+import tools.dispatcher as _dispatcher_mod
+from identity import Identity, Role
+
+_owner_identity = Identity(
+    user_id="eliyahu", role=Role.OWNER, display_name="אליהו חזן",
+    tenant_id="boss_hq", domain_id="general",
+    channel="telegram", external_id="7228089151",
+)
+
+_captured_identity: dict = {}
+
+
+def _fake_dispatch_tool(name, inputs, identity=None):
+    _captured_identity["role"]        = getattr(identity, "role", None)
+    _captured_identity["external_id"] = getattr(identity, "external_id", None)
+    _captured_identity["tenant_id"]   = getattr(identity, "tenant_id", None)
+    return {"ok": True, "external_id": "rec12345678901234", "tool": name}
+
+
+_orig_dispatch_tool = _dispatcher_mod.dispatch_tool
+_dispatcher_mod.dispatch_tool = _fake_dispatch_tool
+try:
+    r_id = action_gateway.propose_action(
+        tenant_id         = "boss_hq",
+        canonical_user_id = _owner_identity.memory_key,   # "boss_hq:eliyahu"
+        tool_name         = "airtable_update",
+        tool_inputs       = {"table": "Leads", "record_id": "recABCDEFGHIJKLM", "fields": {"Name": "Test"}},
+        origin_channel    = "telegram",
+        # BUG-C89 root cause reproduction: origin_chat_id is the canonical
+        # memory_key, NOT a real Telegram chat_id — this is exactly what
+        # broke resolve_identity() before the fix.
+        origin_chat_id    = _owner_identity.memory_key,
+        requires_approval = True,
+        identity          = _owner_identity,
+    )
+    chk("BUG-C89: propose_action (with identity) ok", r_id.ok)
+
+    logger_output = action_gateway.approve(r_id.contract_id, approver=_owner_identity.memory_key)
+    chk("BUG-C89: approve() executes without denial", "❌" not in logger_output)
+    chk("BUG-C89: dispatcher receives role=owner (not readonly)",
+        _captured_identity.get("role") == Role.OWNER)
+    chk("BUG-C89: dispatcher receives preserved external_id",
+        _captured_identity.get("external_id") == "7228089151")
+    chk("BUG-C89: dispatcher receives correct tenant_id",
+        _captured_identity.get("tenant_id") == "boss_hq")
+finally:
+    _dispatcher_mod.dispatch_tool = _orig_dispatch_tool
+
+# Legacy contract (no identity passed to propose_action) must still fall
+# back to resolve_identity(origin_channel, origin_chat_id) — no regression
+# for callers that haven't been updated yet.
+gw_legacy = _make_gw()
+r_legacy = gw_legacy.propose_action(
+    tenant_id="boss_hq", canonical_user_id="boss_hq:owner_1",
+    tool_name="airtable_update",
+    tool_inputs={"table": "Leads", "record_id": "recABCDEFGHIJKLM"},
+    origin_channel="telegram", origin_chat_id="tg:1",
+    requires_approval=True,
+)
+legacy_contract = gw_legacy.find_contract(r_legacy.contract_id)
+chk("BUG-C89: legacy contract (no identity) has empty actor_role", legacy_contract.actor_role == "")
+
+
+# ══════════════════════════════════════════════════
 print(f"\n{'='*50}")
 print(f"Action Gateway tests: {passed} passed, {failed} failed")
 sys.exit(0 if failed == 0 else 1)

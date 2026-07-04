@@ -1039,3 +1039,19 @@ cursor/phase-1-stability-5fb2
 **Rollback plan:** revert merge commit `bb81e6c` — שלושת הפיצ'רים עצמאיים זה מזה בקוד (אין תלות הדדית), אך מוזגו יחד ב-PR אחד; revert חוזר את כולם יחד.
 
 **סטטוס:** ✅ מוזג ל-main
+
+### C83 — BUG-IC-01B: prefixed ambiguous phrase routing (04/07/2026)
+קבצים: `core/router/intent_router.py`, `core/router/test_router.py` | PR #220 | באג: BUG-061
+`_AMBIGUOUS_PHRASES` מזהה כעת גם ביטויים דו-משמעיים עם prefix טבעי ("אני צריך למלא משימות", "צריך סטטוס" וכו') ולא רק גרסאות חשופות (BUG-048/BUG-IC-01) — מנתב ל-`Handler.CLARIFY` במקום Agent עם כלים מלאים. 44/44 בדיקות.
+**Merged:** כן (`b76e6d5`) | **Verified בפרודקשן:** לא עדיין
+
+### C84 — BUG-SESSIONS-ROOT: fail-closed על Session lookup מובנה (04/07/2026)
+קבצים: `session_store.py`, `tools/airtable_tools.py` (חדש: `airtable_get_records`), `test_session_store_contract.py` (חדש) | PR #221 | באג: BUG-063
+Session lookup עבר מ-regex-parsing על string מפורמט ל-reader מובנה (list[dict], paginated, fail-closed על שגיאות/contract mismatch). POST (יצירת Session חדש) מותר רק אחרי lookup שמאשש בבירור 0 רשומות — כל מצב אחר חוסם POST במקום ליצור כפילות שקטה (המשך ל-BUG-047/BUG-NEW-12). 49 internal + 4 pytest. נבדק ונפתח PR ע"י session נפרד מזה שכתב את הקוד המקורי.
+**Merged:** כן (`eead2cc`) | **Verified בפרודקשן:** לא עדיין
+
+### C85 — BUG-C89-APPROVAL-IDENTITY: actor identity נשמרת דרך אישור (04/07/2026)
+קבצים: `core/action_gateway.py`, `core/lead_candidate_handler.py`, `app.py`, `test_action_gateway.py`, `test_c89_preview_confirmation.py` | PR #222 | באג: BUG-062
+`ActionContract` שומר actor identity (role/external_id/tenant/user/domain) שנפתרה בזמן ה-`propose_action()`; ה-executor ב-`approve()` משתמש בה ישירות במקום `resolve_identity()` מחדש על `origin_chat_id` שיכול להיות `identity.memory_key` ולא channel external_id אמיתי — תיקן owner שאיבד role וחזר ל-`readonly` בביצוע אחרי אישור. גם: preview של עדכון-ליד-קיים אומר "מצאתי ליד קיים. לעדכן אותו?" ולא "לשמור?" הגנרי, ותמיד דורש אישור גם עם `FEATURE_AUTO_CAPTURE=true`. 37+9+44 בדיקות ירוקות.
+**הערה:** ה-commit נדחף במקור לענף של PR #220 *אחרי* שזה כבר מוזג — לא נכלל בו. הענף אותחל מחדש מ-`main` (`git rebase` + `--force-with-lease`) לפני פתיחת PR #222 נפרד.
+**Merged:** לא עדיין — PR פתוח | **Verified בפרודקשן:** לא רלוונטי עדיין

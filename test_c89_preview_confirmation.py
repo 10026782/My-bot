@@ -176,6 +176,59 @@ def test_repeated_tier1_after_execution_needs_override():
     return "OK"
 
 
+def test_existing_lead_preview_says_update_not_generic_save():
+    """C89 UX: when the candidate matches an existing lead (airtable_update),
+    the preview must ask 'לעדכן אותו?' — not the generic new-lead 'לשמור?'."""
+    identity = MockIdentity()
+    gw = _new_gw(executor=_ok_executor)
+    with patch.object(lch, "_at_find_lead", return_value="recEXISTING0000001"), \
+         patch("core.action_gateway.action_gateway", gw), \
+         patch("feature_flags.is_enabled", return_value=False):
+        reply = lch.handle_lead_candidate(identity, LEAD_TEXT, "chat_p6", "telegram")
+    assert reply is not None
+    assert "מצאתי ליד קיים" in reply and "לעדכן אותו" in reply, f"reply={reply!r}"
+    assert "לשמור? ענה" not in reply, f"reply must not use the generic new-lead wording: {reply!r}"
+    live = gw.find_live_contracts(identity.memory_key)
+    assert len(live) == 1 and live[0].tool_name == "airtable_update", \
+        f"expected 1 pending airtable_update contract, got {live}"
+    return "OK"
+
+
+def test_existing_lead_update_requires_approval_even_with_auto_capture():
+    """C89 UX: updates to an existing lead always require approval, even when
+    FEATURE_AUTO_CAPTURE=true — only brand-new leads may auto-write."""
+    identity = MockIdentity()
+    gw = _new_gw(executor=_ok_executor)
+    with patch.object(lch, "_at_find_lead", return_value="recEXISTING0000002"), \
+         patch("core.action_gateway.action_gateway", gw), \
+         patch("feature_flags.is_enabled", return_value=True):
+        reply = lch.handle_lead_candidate(identity, LEAD_TEXT, "chat_p7", "telegram")
+    assert reply is not None
+    assert "מצאתי ליד קיים" in reply and "לעדכן אותו" in reply, \
+        f"auto_capture=true must still preview an update, not silently write: {reply!r}"
+    live = gw.find_live_contracts(identity.memory_key)
+    assert len(live) == 1 and live[0].tool_name == "airtable_update" and live[0].status == "pending", \
+        f"update must stay pending (never auto-executed), got {live}"
+    return "OK"
+
+
+def test_new_lead_still_auto_writes_with_auto_capture():
+    """Control: a brand-new lead (no existing match) still auto-writes
+    immediately when FEATURE_AUTO_CAPTURE=true — only updates are gated."""
+    identity = MockIdentity()
+    gw = _new_gw(executor=_ok_executor)
+    with patch.object(lch, "_at_find_lead", return_value=None), \
+         patch("core.action_gateway.action_gateway", gw), \
+         patch("feature_flags.is_enabled", return_value=True), \
+         patch("tools.airtable_gateway.airtable_create", return_value={"id": "recNEWLEAD00000001"}):
+        reply = lch.handle_lead_candidate(identity, LEAD_TEXT, "chat_p8", "telegram")
+    assert reply is not None
+    assert "לעדכן אותו" not in reply, f"new lead must not use update wording: {reply!r}"
+    live = gw.find_live_contracts(identity.memory_key)
+    assert len(live) == 0, f"new lead with auto_capture=true must not leave a pending contract: {live}"
+    return "OK"
+
+
 def test_app_py_confirm_word_checks_gateway_before_flag_branch():
     """Static check: app.py's confirm-word block checks ActionGateway live
     contracts BEFORE the FEATURE_ACTION_GATEWAY-gated branch, so LCH's
@@ -198,6 +251,9 @@ TESTS = [
     test_cancel_no_clears_pending_no_write,
     test_repeated_tier1_input_no_duplicate_lead,
     test_repeated_tier1_after_execution_needs_override,
+    test_existing_lead_preview_says_update_not_generic_save,
+    test_existing_lead_update_requires_approval_even_with_auto_capture,
+    test_new_lead_still_auto_writes_with_auto_capture,
     test_app_py_confirm_word_checks_gateway_before_flag_branch,
 ]
 
