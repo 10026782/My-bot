@@ -27,6 +27,9 @@ logger = logging.getLogger(__name__)
 # IngressClassification — the generic input contract (§10 of SPEC)
 # ══════════════════════════════════════════════════
 
+_RAW_REF_UNSET = "__unset__"  # never returned to callers — classify_ingress() always overwrites it (C89 RAW-OBS)
+
+
 @dataclass(frozen=True)
 class IngressClassification:
     source_type:   str          # "text" | "file" | "voice" | "email" | "image" (C90+)
@@ -34,8 +37,8 @@ class IngressClassification:
     tier:          int          # 1-5
     confidence:    float        # 0.0 – 1.0
     reason:        str          # for AgentObservation + calibration
-    raw_ref:       str          # Decision Inbox record id, or a local fallback ref — never empty (C89 RAW-OBS)
-    candidates:    tuple        # extracted lead candidates for tier 1-3 (tuple of dicts, frozen)
+    raw_ref:       str = _RAW_REF_UNSET  # Decision Inbox record id or local fallback ref, set by classify_ingress() — never "" (C89 RAW-OBS)
+    candidates:    tuple = ()   # extracted lead candidates for tier 1-3 (tuple of dicts, frozen)
 
 
 # ══════════════════════════════════════════════════
@@ -425,7 +428,6 @@ def _classify_ingress_core(
             tier=5,
             confidence=0.0,
             reason=f"source_type={source_type} not implemented (C90+)",
-            raw_ref="",
             candidates=(),
         )
 
@@ -436,7 +438,6 @@ def _classify_ingress_core(
             tier=5,
             confidence=0.0,
             reason="empty_text",
-            raw_ref="",
             candidates=(),
         )
 
@@ -449,7 +450,6 @@ def _classify_ingress_core(
             tier=4,
             confidence=1.0,
             reason=t4_reason,
-            raw_ref="",
             candidates=(),
         )
 
@@ -463,7 +463,6 @@ def _classify_ingress_core(
             tier=5,
             confidence=0.0,
             reason="no_lead_candidates",
-            raw_ref="",
             candidates=(),
         )
 
@@ -479,7 +478,6 @@ def _classify_ingress_core(
             tier=1,
             confidence=c["confidence"],
             reason="single_high_confidence",
-            raw_ref="",
             candidates=tuple(candidates),
         )
 
@@ -492,7 +490,6 @@ def _classify_ingress_core(
             tier=2,
             confidence=avg_conf,
             reason=f"clean_batch_{len(candidates)}_items",
-            raw_ref="",
             candidates=tuple(candidates),
         )
 
@@ -505,7 +502,6 @@ def _classify_ingress_core(
             tier=3,
             confidence=avg_conf,
             reason=f"mixed_batch_high={len(high)}_low={len(low)}",
-            raw_ref="",
             candidates=tuple(candidates),
         )
 
@@ -516,7 +512,6 @@ def _classify_ingress_core(
         tier=5,
         confidence=max((c["confidence"] for c in candidates), default=0.0),
         reason=f"all_low_confidence_{len(candidates)}_candidates",
-        raw_ref="",
         candidates=tuple(candidates),
     )
 
