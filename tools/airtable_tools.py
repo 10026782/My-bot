@@ -251,27 +251,69 @@ def _base() -> str:
     return base
 
 
-def airtable_get(table: str, filter_formula: str = "") -> str:
+def airtable_get_records(table: str, filter_formula: str = "") -> list[dict]:
+    """Return all matching records using a structured internal contract.
+
+    This read path is for application code. It never formats or truncates the
+    result, and follows Airtable pagination until every record is collected.
+    Contract and HTTP failures raise so callers can fail closed.
+    """
     real_table = _resolve_table(table)
+    records: list[dict] = []
+    offset = ""
+    seen_offsets: set[str] = set()
+
     with with_airtable_breaker():
-        params = {}
-        if filter_formula:
-            params["filterByFormula"] = filter_formula
-        encoded = urllib.parse.quote(real_table, safe="")
-        r = httpx.get(f"https://api.airtable.com/v0/{_base()}/{encoded}",
-                      headers=_headers(), params=params, timeout=10)
-        if r.status_code != 200:
-            return f"❌ Airtable error {r.status_code}: {r.text[:150]}"
-        records = r.json().get("records", [])
-        if not records:
-            _audit("airtable_get", table, result=f"0 records | filter={filter_formula[:40]}")
-            return f"📭 אין רשומות בטבלה '{table}'."
-        result = f"📊 {table} — {len(records)} רשומות:\n"
-        for rec in records[:15]:
-            fields = " | ".join(f"{k}: {v}" for k, v in rec.get("fields", {}).items())
-            result += f"• [{rec['id']}] {fields}\n"
-        _audit("airtable_get", table, result=f"{len(records)} records | filter={filter_formula[:40]}")
-        return result
+        while True:
+            params: dict[str, object] = {"pageSize": 100}
+            if filter_formula:
+                params["filterByFormula"] = filter_formula
+            if offset:
+                params["offset"] = offset
+            encoded = urllib.parse.quote(real_table, safe="")
+            r = httpx.get(
+                f"https://api.airtable.com/v0/{_base()}/{encoded}",
+                headers=_headers(), params=params, timeout=10,
+            )
+            if r.status_code != 200:
+                raise RuntimeError(f"Airtable error {r.status_code}: {r.text[:150]}")
+
+            payload = r.json()
+            page = payload.get("records")
+            if not isinstance(page, list):
+                raise RuntimeError("Airtable records response is not a list")
+            records.extend(page)
+
+            next_offset = payload.get("offset")
+            if not next_offset:
+                break
+            if not isinstance(next_offset, str) or next_offset in seen_offsets:
+                raise RuntimeError("Airtable pagination returned an invalid offset")
+            seen_offsets.add(next_offset)
+            offset = next_offset
+
+    _audit(
+        "airtable_get_records", table,
+        result=f"{len(records)} records | filter={filter_formula[:40]}",
+    )
+    return records
+
+
+def airtable_get(table: str, filter_formula: str = "") -> str:
+    """Return an agent-facing summary; never parse this in application code."""
+    try:
+        records = airtable_get_records(table, filter_formula)
+    except Exception as exc:
+        return f"❌ {exc}"
+    if not records:
+        _audit("airtable_get", table, result=f"0 records | filter={filter_formula[:40]}")
+        return f"📭 אין רשומות בטבלה '{table}'."
+    result = f"📊 {table} — {len(records)} רשומות:\n"
+    for rec in records[:15]:
+        fields = " | ".join(f"{k}: {v}" for k, v in rec.get("fields", {}).items())
+        result += f"• [{rec['id']}] {fields}\n"
+    _audit("airtable_get", table, result=f"{len(records)} records | filter={filter_formula[:40]}")
+    return result
 
 
 def airtable_add(table: str, fields: dict) -> dict:
