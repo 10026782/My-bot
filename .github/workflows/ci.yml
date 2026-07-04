@@ -52,6 +52,9 @@ jobs:
       - name: F52 result-parsing audit (warning only, never blocks)
         run: python tools/audit_result_parsing.py || true
 
+      - name: Dispatcher bypass audit (warning only, never blocks)
+        run: python tools/audit_dispatcher_bypass.py || true
+
       - name: pytest collect
         run: |
           python -m pytest --collect-only -q \
