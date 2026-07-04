@@ -874,3 +874,22 @@
 - **Deployed:** לא רלוונטי
 - **Verified בפרודקשן:** לא רלוונטי (הענף המקורי dormant, לא בפרודקשן)
 - **סטטוס:** 🟡 Documented, no fix — dormant, לא דחוף
+
+### BUG-060 (AD-ATTRIBUTION-ORDERING) — inject_source_to_incoming_lead רץ לפני route_request — נבדק, לא bug
+- **תאריך:** 03/07/2026
+- **Severity:** Low (documented, not a bug).
+- **הקשר:** Audit 1/4, משפחת "Pre-Router Bypasses" — נבדק בהמשך ל-BUG-057/058/059 שהיו bypasses אמיתיים באותה משפחה.
+- **ממצא:** `ad_attribution.py`'s `inject_source_to_incoming_lead()` (קריאה יחידה מ-`app.py:2162`, מאחורי `if _inject_utm and _flag_enabled("AD_ATTRIBUTION")`) רץ **לפני** `route_request()` ב-`_webhook_whatsapp_impl()`. נבדק במלואו:
+  1. **עדכון-בלבד:** `record_lead_source()` (הכתיבה היחידה שהפונקציה מפעילה) קוראת `airtable_get` לפי `memory_key`; אם אין רשומה קיימת — `return False`, **אין `airtable_add`/יצירה בשום מסלול**.
+  2. **שדות:** רק `utm_source`/`utm_medium`/`utm_campaign`/`platform` (`UTMParams.to_airtable_fields()`) — `grep -n domain ad_attribution.py` → 0 hits, אין נגיעה ב-domain.
+  3. **Domain-overlap:** 0 חפיפה עם Router / `capture_router.py` / `lead_candidate_handler.py` — אין race, אין קונפליקט כתיבה.
+  4. **furniture_lead_funnel.py:** נבדק בנפרד — 0 hits על `utm_source`/`utm_medium`/`utm_campaign`/attribution; ה-bypass שנמצא שם ב-Audit 1/4 שייך למשפחה אחרת (funnel state machine), לא ל-attribution.
+  5. **Gate:** מאחורי `AD_ATTRIBUTION` (`_flag_enabled`), כבוי כברירת מחדל — לא ב-`_DEFAULTS` ב-`feature_flags.py`.
+- **החלטה:** אין תיקון — הריצה-לפני-Router היא כוונה מוצהרת (attribution לא אמור להיות תלוי בהחלטת domain/routing), לא bypass. תועד ב-`docs/governance/MODULE_RULES.md` (תוספת לחוק 9 — Input Precedence) כחריג מכוון.
+- **תיקון:** לא נדרש.
+- **בדיקה:** grep מלא (`domain`, `utm_source`/`utm_medium`/`utm_campaign`, `inject_source_to_incoming_lead`/`_inject_utm`) על הריפו — ראה `docs/governance/MODULE_RULES.md` לפירוט.
+- **PR:** אין — עדכון תיעוד בלבד (`docs/governance/MODULE_RULES.md`, `BUG_AUDIT_LOG.md`).
+- **Merged:** N/A (docs-only)
+- **Deployed:** N/A
+- **Verified בפרודקשן:** N/A
+- **סטטוס:** ✅ מתועד כחריג מכוון — לא נכנס לתור תיקונים

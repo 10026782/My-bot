@@ -80,6 +80,18 @@ handler דיפולטי ממשיך כרגיל כשאין context.
 ```
 מקור: התנגשות Drive↔Decision Inbox — קובץ נחטף ל-Drive לפני שה-Inbox ראה.
 
+**תוספת (03/07/2026) — UTM Attribution Injection:**
+`inject_source_to_incoming_lead` (`ad_attribution.py`, קריאה יחידה מ-`app.py:2162`)
+פועל **לפני** `route_request()` בכוונה — זה לא bypass שדורש תיקון. מאומת:
+1. עדכון-בלבד על ליד קיים (`airtable_update`) — לעולם לא יוצר Lead.
+2. נוגע רק בשדות `utm_source`/`utm_medium`/`utm_campaign`/`platform`.
+3. 0 חפיפת שדות עם Router / `capture_router.py` / `lead_candidate_handler.py`.
+4. מאחורי `AD_ATTRIBUTION` (נבדק דרך `_flag_enabled("AD_ATTRIBUTION")`, כבוי כברירת
+   מחדל — לא רשום ב-`_DEFAULTS` ב-`feature_flags.py`).
+
+אם קוד עתידי יגע באותם שדות דרך Router/LCH — grep מחדש נדרש לפני merge, כדי לוודא
+שהיעדר-החפיפה עדיין נכון. ראה `BUG_AUDIT_LOG.md` → BUG-060.
+
 ## חוק 10 — Raw-First, Never Interrogate
 
 ```
