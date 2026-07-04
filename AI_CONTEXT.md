@@ -1,27 +1,32 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-07-04 (מאוחר ביותר) — BUG-IC-01B (prefixed ambiguous phrases), BUG-C89-APPROVAL-IDENTITY (actor identity דרך אישור, PR פתוח), BUG-SESSIONS-ROOT (Session lookup fail-closed) — ראה 0.9 למטה
-**עודכן על ידי:** Claude Code — PR #220/#221 מוזגו ל-`main`, PR #222 פתוח (ראה 0.9 למטה)
+**עודכן:** 2026-07-04 (מאוחר ביותר) — 5 באגים מוזגים ל-`main` בסבב אחד (PR #220–#224): BUG-IC-01B, BUG-C89-APPROVAL-IDENTITY, BUG-SESSIONS-ROOT, BUG-C89-TIER4-PRECEDENCE, C89-RAW-OBS — ראה 0.9 למטה
+**עודכן על ידי:** Claude Code — כל 5 ה-PR מוזגו ל-`main` (ראה 0.9 למטה)
 
 > מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (מיושן, 19/06) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
 
 ---
 
-## 0.9 BUG-IC-01B / BUG-C89-APPROVAL-IDENTITY / BUG-SESSIONS-ROOT — 2026-07-04 (קרא לפני 0.8)
+## 0.9 5 באגים C89-family — PR #220–#224, כולם מוזגים — 2026-07-04 (קרא לפני 0.8)
 
-**3 באגים, 3 PR (2 מוזגים, 1 פתוח):**
+**5 באגים, 5 PR, כולם מוזגו ל-`main` באותו סשן (רצף בודד: כל PR נפתח, נבדק, ומוזג לפני שה-PR הבא נפתח):**
 
 - **BUG-IC-01B (PR #220, מוזג `b76e6d5`):** `core/router/intent_router.py`'s `_AMBIGUOUS_PHRASES` (BUG-048/BUG-IC-01) תפס רק ביטויים דו-משמעיים חשופים ("סטטוס", "למלא משימות"). ביטויים עם prefix טבעי ("אני צריך למלא משימות", "צריך סטטוס", "תעזור לי ...") נפלו ל-`Intent.UNKNOWN` → `Handler.AGENT` עם כלים מלאים במקום שאלת הבהרה — דווח חי: "אני צריך למלא משימות" גרם ל-`airtable_get table=Tasks` בפועל. נוספו 3 patterns עם prefix אופציונלי. 44/44 בדיקות. ראו BUG_AUDIT_LOG.md BUG-061.
 
-- **BUG-C89-APPROVAL-IDENTITY (PR #222, טרם מוזג):** `ActionGateway.propose_action()` נקרא עם `origin_chat_id=identity.memory_key` (לא external_id אמיתי). ב-approve, ה-executor קרא `resolve_identity()` מחדש על ערך זה → נפילה שקטה ל-`Role.READONLY` → owner שאישר "כן" נחסם ע"י ה-dispatcher. תוקן: `ActionContract` שומר actor identity (role/external_id/...) שנפתרה בזמן ה-propose; ה-executor משתמש בה ישירות. גם: preview עדכון-ליד-קיים אומר "מצאתי ליד קיים. לעדכן אותו?" ותמיד דורש אישור (גם עם `FEATURE_AUTO_CAPTURE=true`). 37+9+44 בדיקות. ראו BUG_AUDIT_LOG.md BUG-062.
-  **⚠️ תקלה תפעולית שתועדה:** ה-commit הזה נדחף במקור לאותו ענף כמו BUG-IC-01B *אחרי* ש-PR #220 כבר מוזג ל-`main` — לא נכלל בו, ונשאר "יתום" על ה-branch (ה-PR שהיה פתוח עליו כבר closed/merged ולא יכול לעקוב אחרי commits חדשים). אותר באמצע הסשן כש-`git merge-base --is-ancestor` הראה שה-commit לא ב-`main`; הענף אותחל מחדש מ-`main` העדכני (`git rebase origin/main` + `push --force-with-lease`) ונפתח PR #222 נפרד. **לקח:** לפני push לענף שכבר יש/היה לו PR, יש לוודא שה-PR עדיין open — אם merged/closed, לפתוח ענף+PR חדשים, לא לדחוף על הישן.
-
 - **BUG-SESSIONS-ROOT (PR #221, מוזג `eead2cc`):** קוד נכתב בכלי/סשן נפרד (ענף מקומי `codex/bug-sessions-root` על מכונת Windows של המשתמש) — סשן זה סקר, בדק עצמאית (worktree מבודד: 49 internal + 4 pytest + 4 קבצי רגרסיה קיימים ירוקים, `merge-tree` נקי מול `main`) ופתח את ה-PR (הכלי המקורי נחסם ע"י auth שגוי ב-`gh` CLI). `session_store.py`'s Session lookup עבר מ-regex-parsing על string מפורמט ל-`airtable_get_records()` מובנה (חדש, `tools/airtable_tools.py`) עם pagination + fail-closed על שגיאות; POST מותר רק אחרי lookup שמאשש 0 רשומות בבירור — מונע כפילות שקטה שהייתה קיימת חלקית עוד מ-BUG-047/BUG-NEW-12. ראו BUG_AUDIT_LOG.md BUG-063.
 
-**לא אומת:** deploy ל-Render / production verification לאף אחד מהשלושה (אין גישת Render Dashboard מה-sandbox).
+- **BUG-C89-APPROVAL-IDENTITY (PR #222, מוזג `717465a`):** `ActionGateway.propose_action()` נקרא עם `origin_chat_id=identity.memory_key` (לא external_id אמיתי). ב-approve, ה-executor קרא `resolve_identity()` מחדש על ערך זה → נפילה שקטה ל-`Role.READONLY` → owner שאישר "כן" נחסם ע"י ה-dispatcher. תוקן: `ActionContract` שומר actor identity (role/external_id/...) שנפתרה בזמן ה-propose; ה-executor משתמש בה ישירות. גם: preview עדכון-ליד-קיים אומר "מצאתי ליד קיים. לעדכן אותו?" ותמיד דורש אישור (גם עם `FEATURE_AUTO_CAPTURE=true`). 37+9+44 בדיקות. ראו BUG_AUDIT_LOG.md BUG-062.
 
-**עדכון תיעוד מלא:** `BUG_AUDIT_LOG.md` (BUG-061/062/063), `CHANGE_CONTROL_LOG.md` (C83/C84/C85), `CHANGELOG.md` (Unreleased).
+- **BUG-C89-TIER4-PRECEDENCE (PR #223, מוזג `b7d8445`):** `_is_tier4()` (השער היחיד, נצרך ע"י `router.py` וע"י `lead_candidate_handler.py`) פספס כותרות טבלה ללא separator מפורש, טבלאות fixed-width עבריות, ופלטי סטטוס/ציון Airtable (`Status:`/`Score:`/`View in Airtable`/`memory_key`/`@lead`/`owner_dictation`) — נסחפו כ-Tier 1/2/3 והגיעו ל-Agent/ActionGateway בפועל. הורחב `_is_tier4()` היחיד (לא נוסף שער מקביל); מילת "airtable" בודדת הוגבלה למבנה נוסף כדי לא לשבור פקודת בדיקת-מערכת מפורשת ("תבדוק עכשיו את Airtable") — regression שנתפס ותוקן לפני פתיחת ה-PR. 13/13 בדיקות חדשות. ראו BUG_AUDIT_LOG.md BUG-064.
+
+- **C89-RAW-OBS (PR #224, מוזג `68f8c97`):** `IngressClassification.raw_ref` היה ריק תמיד ("future — empty for now"), ואין AgentObservation על אף החלטת סיווג. `classify_ingress()` הוסבה לעטיפה סביב הלוגיקה המקורית (`_classify_ingress_core`) — לכל קריאה (Tier 1-5) נשמר `raw_ref` לא-ריק (Decision Inbox record id כש-`FEATURE_RAW_CAPTURE` פעיל [חדש, כבוי כברירת מחדל], אחרת fallback מקומי) ונרשם `AgentObservation(kind="capture_classification")` דרך ה-API הקיים בלבד של `ActionGateway.record_agent_observation(contract_id=None, ...)`. 14/14 בדיקות חדשות. ראו BUG_AUDIT_LOG.md BUG-065.
+
+**⚠️ תבנית תפעולית שחזרה 3 פעמים באותו סשן — תועדה כדי שלא תתפוס בהפתעה בפעם הבאה:** הריפו הזה (או ה-workflow שהמשתמש מפעיל) ממזג PR-ים כמעט מיידית אחרי הפתיחה, ומוחק את ה-branch אוטומטית עם המיזוג. שלוש פעמים בסבב הזה (#220→#222, #222→#223, #223→#224) הסשן דחף commit חדש לאותו שם-branch *אחרי* שה-PR שהיה פתוח עליו כבר מוזג ונמחק — מה שיוצר "commit יתום" שאף PR לא עוקב אחריו ולעולם לא ימוזג ל-`main` בלי טיפול ידני. **הזיהוי:** `git fetch origin main && git merge-base --is-ancestor <commit> origin/main` לפני כל push לענף שכבר שימש PR קודם. **הפתרון בכל פעם:** `git fetch origin main && git checkout -B <branch> origin/main` (או `git rebase origin/main` אם יש כמה commits לא-ממוזגים לשמר), `push` (רגיל אם ה-branch המרוחק נמחק, `--force-with-lease` אם עדיין קיים), ואז PR חדש — לא לנסות "לתקן" את ה-PR הישן שכבר closed/merged.
+
+**לא אומת:** deploy ל-Render / production verification לאף אחד מה-5 (אין גישת Render Dashboard מה-sandbox).
+
+**עדכון תיעוד מלא:** `BUG_AUDIT_LOG.md` (BUG-061/062/063/064/065), `CHANGE_CONTROL_LOG.md` (C83/C84/C85/C86/C87), `CHANGELOG.md` (Unreleased).
 
 ---
 

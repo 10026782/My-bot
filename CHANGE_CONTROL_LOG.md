@@ -1054,4 +1054,14 @@ Session lookup עבר מ-regex-parsing על string מפורמט ל-reader מוב
 קבצים: `core/action_gateway.py`, `core/lead_candidate_handler.py`, `app.py`, `test_action_gateway.py`, `test_c89_preview_confirmation.py` | PR #222 | באג: BUG-062
 `ActionContract` שומר actor identity (role/external_id/tenant/user/domain) שנפתרה בזמן ה-`propose_action()`; ה-executor ב-`approve()` משתמש בה ישירות במקום `resolve_identity()` מחדש על `origin_chat_id` שיכול להיות `identity.memory_key` ולא channel external_id אמיתי — תיקן owner שאיבד role וחזר ל-`readonly` בביצוע אחרי אישור. גם: preview של עדכון-ליד-קיים אומר "מצאתי ליד קיים. לעדכן אותו?" ולא "לשמור?" הגנרי, ותמיד דורש אישור גם עם `FEATURE_AUTO_CAPTURE=true`. 37+9+44 בדיקות ירוקות.
 **הערה:** ה-commit נדחף במקור לענף של PR #220 *אחרי* שזה כבר מוזג — לא נכלל בו. הענף אותחל מחדש מ-`main` (`git rebase` + `--force-with-lease`) לפני פתיחת PR #222 נפרד.
-**Merged:** לא עדיין — PR פתוח | **Verified בפרודקשן:** לא רלוונטי עדיין
+**Merged:** כן (`717465a`) | **Verified בפרודקשן:** לא עדיין
+
+### C86 — BUG-C89-TIER4-PRECEDENCE: hard markers מורחבים לגילוי טבלה/ייצוא (04/07/2026)
+קבצים: `core/ingress_classifier.py`, `test_c89_tier4_precedence.py` (חדש) | PR #223 | באג: BUG-064
+`_is_tier4()` (השער היחיד, נצרך ע"י `router.py` וע"י `lead_candidate_handler.py`) הורחב: כותרות טבלה ללא separator מפורש (עברית+אנגלית), טבלאות fixed-width, סמנים מילוליים (`Status:`/`Score:`/`View in Airtable`/`memory_key`/`@lead`/`owner_dictation`), timestamp עם נקודות, ופלט-בוט מורחב (📋/🌤️/█, סף 3→2). מילת "airtable" בודדת מוגבלת למבנה נוסף כדי לא לשבור פקודת בדיקת-מערכת מפורשת ("תבדוק עכשיו את Airtable") — regression שנתפס ותוקן לפני פתיחת ה-PR. 13/13 בדיקות חדשות + אפס רגרסיה (`test_capture_router_wiring.py` 10/10, `core/router/test_router.py` 44/44).
+**Merged:** כן (`b7d8445`) | **Verified בפרודקשן:** לא עדיין
+
+### C87 — C89-RAW-OBS: raw capture + classification observation (04/07/2026)
+קבצים: `core/ingress_classifier.py`, `feature_flags.py` (חדש flag: `FEATURE_RAW_CAPTURE`), `test_c89_raw_obs.py` (חדש) | PR #224 | באג: BUG-065
+`classify_ingress()` הוסבה לעטיפה סביב הלוגיקה המקורית (`_classify_ingress_core`, ללא שינוי): לכל קריאה (Tier 1-5) נשמר `raw_ref` לא-ריק (Decision Inbox record id כש-`FEATURE_RAW_CAPTURE` פעיל, אחרת fallback מקומי) ונרשם `AgentObservation(kind="capture_classification")` דרך ה-API הקיים בלבד של `ActionGateway.record_agent_observation(contract_id=None, ...)` — ללא שינוי בליבת ה-Gateway. 14/14 בדיקות חדשות + אפס רגרסיה.
+**Merged:** כן (`68f8c97`) | **Verified בפרודקשן:** לא עדיין
