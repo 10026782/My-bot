@@ -54,6 +54,11 @@ CAPTURE POLICY (C89):
                                  ON:  Tier 1 (single clear lead) and Tier 2 (clean batch) auto-write
                                       through Gateway without preview. Tier 3/4/5 always show preview.
                                  Branch: feature/capture-policy-stage-3
+  FEATURE_RAW_CAPTURE          - C89 RAW-OBS: classify_ingress() persists the raw text to
+                                 Tables.DECISION_INBOX (Decision Inbox) and stores the record id
+                                 as IngressClassification.raw_ref. OFF (default): raw_ref still
+                                 always populated (local fallback reference), no live Airtable
+                                 write — classification behavior is unchanged either way.
 
 F52 STAGE 1 (safe refactors):
   FEATURE_LAST_TOOL_RESULT_SHADOW - passive Last-Tool-Result recorder (core/last_tool_result_shadow.py).

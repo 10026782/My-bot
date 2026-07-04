@@ -16,8 +16,9 @@
 from __future__ import annotations
 
 import re
+import uuid
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ class IngressClassification:
     tier:          int          # 1-5
     confidence:    float        # 0.0 – 1.0
     reason:        str          # for AgentObservation + calibration
-    raw_ref:       str          # Interaction Log reference (future — empty for now)
+    raw_ref:       str          # Decision Inbox record id, or a local fallback ref — never empty (C89 RAW-OBS)
     candidates:    tuple        # extracted lead candidates for tier 1-3 (tuple of dicts, frozen)
 
 
@@ -326,6 +327,64 @@ _LOW_CONF  = 0.50   # below this → needs_review in Tier 3
 
 
 # ══════════════════════════════════════════════════
+# C89 RAW-OBS — raw capture + classification observation
+# ══════════════════════════════════════════════════
+
+def _save_raw_capture(text: str, source_type: str) -> str:
+    """
+    שומר את הטקסט הגולמי ל-Decision Inbox (Tables.DECISION_INBOX — "entry
+    door for forwarded/raw input", RAW_INPUT field) ומחזיר reference.
+
+    Best-effort ומאחורי FEATURE_RAW_CAPTURE (כבוי כברירת מחדל): כשל
+    בכתיבה/Airtable לא מוגדר/הדגל כבוי — לעולם לא חוסם את הסיווג עצמו, ותמיד
+    מחזיר reference לא-ריק (fallback מקומי אם אין כתיבה חיה).
+    """
+    local_ref = f"local:{uuid.uuid4().hex[:16]}"
+    try:
+        from feature_flags import is_enabled
+        if not is_enabled("FEATURE_RAW_CAPTURE"):
+            return local_ref
+        from tools.airtable_gateway import airtable_create
+        from airtable_schema import Tables, DecisionInboxFields, DecisionInboxChannel, DecisionInboxStatus
+        rec = airtable_create(
+            Tables.DECISION_INBOX,
+            {
+                DecisionInboxFields.RAW_INPUT: text,
+                DecisionInboxFields.CHANNEL:   DecisionInboxChannel.MANUAL,
+                DecisionInboxFields.STATUS:    DecisionInboxStatus.PENDING,
+            },
+            source="ingress_classifier",
+        )
+        if rec and rec.get("id"):
+            return rec["id"]
+        return local_ref
+    except Exception as exc:
+        logger.debug("[IngressClassifier] raw capture write failed (non-blocking): %s", exc)
+        return local_ref
+
+
+def _record_classification_observation(ic: IngressClassification) -> None:
+    """
+    רושם AgentObservation (kind="capture_classification") לכל סיווג — משתמש
+    אך ורק ב-API הקיים של ActionGateway.record_agent_observation()
+    (contract_id=None: אינו קשור לשום ActionContract ספציפי; לא נוגע בליבת
+    ה-Gateway). Best-effort — כשל בייבוא/קריאה לעולם לא חוסם את הסיווג עצמו.
+    """
+    try:
+        from core.action_gateway import action_gateway
+        action_gateway.record_agent_observation(
+            contract_id=None,
+            kind="capture_classification",
+            text=(
+                f"tier={ic.tier} confidence={ic.confidence:.2f} "
+                f"reason={ic.reason} raw_ref={ic.raw_ref}"
+            ),
+        )
+    except Exception as exc:
+        logger.debug("[IngressClassifier] capture_classification observation failed (non-blocking): %s", exc)
+
+
+# ══════════════════════════════════════════════════
 # classify_ingress — the single entry point
 # ══════════════════════════════════════════════════
 
@@ -339,7 +398,25 @@ def classify_ingress(
     השתמש בזה לפני כל החלטת כתיבה. אסור לשום מודול לסווג קלט בעצמו.
 
     source_type: "text" (now), "file"/"voice"/"email"/"image" (C90–C93, fallback Tier5)
+
+    C89 RAW-OBS: לכל קריאה (כל Tier 1-5, כולל empty_text/source_type לא
+    נתמך) נשמר raw_ref לא-ריק (הפניה ל-Decision Inbox כש-FEATURE_RAW_CAPTURE
+    פעיל, אחרת reference מקומי) ונרשם AgentObservation
+    kind="capture_classification" — ראה _save_raw_capture/
+    _record_classification_observation למעלה.
     """
+    ic = _classify_ingress_core(text, source_type)
+    raw_ref = _save_raw_capture(text, source_type)
+    ic = replace(ic, raw_ref=raw_ref)
+    _record_classification_observation(ic)
+    return ic
+
+
+def _classify_ingress_core(
+    text: str,
+    source_type: str,
+) -> IngressClassification:
+    """הלוגיקה המקורית של הסיווג — ללא raw_ref/observation, שמעליהם עוטף classify_ingress()."""
     # ── Source types not yet implemented → Tier 5 ──
     if source_type != "text":
         return IngressClassification(
