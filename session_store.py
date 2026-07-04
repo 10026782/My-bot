@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import threading
 from collections import OrderedDict
 from dataclasses import asdict, dataclass
@@ -87,29 +86,9 @@ def _now_iso() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
 
 
-def _extract_balanced_json(raw: str, field_label: str) -> Optional[dict]:
-    """
-    מחלץ אובייקט JSON מתוך airtable_get()'s formatted string output, לפי שם שדה.
-    סופר עומק סוגריים (לא regex naive) כי State JSON מכיל אובייקטים מקוננים
-    (answers) ואין הבטחה לסדר שדות עקבי בפלט של Airtable.
-    """
-    marker = f"{field_label}: {{"
-    idx = raw.find(marker)
-    if idx == -1:
-        return None
-    start = idx + len(marker) - 1  # מיקום ה-{ הפותח
-    depth = 0
-    for i in range(start, len(raw)):
-        if raw[i] == "{":
-            depth += 1
-        elif raw[i] == "}":
-            depth -= 1
-            if depth == 0:
-                try:
-                    return json.loads(raw[start:i + 1])
-                except json.JSONDecodeError:
-                    return None
-    return None
+def _normalize_sender(sender: object) -> str:
+    """Canonical representation used for cache keys and Airtable Sender ID."""
+    return str(sender).strip()
 
 
 # ══════════════════════════════════════════════════
@@ -137,6 +116,7 @@ class PersistentSessionStore:
 
     def get(self, sender: str) -> Optional[dict]:
         """מחזיר session מRAM. אם לא נמצא — מנסה מDB."""
+        sender = _normalize_sender(sender)
         if sender in self._store:
             self._store.move_to_end(sender)
             return self._store[sender]
@@ -157,6 +137,7 @@ class PersistentSessionStore:
         channel: str = "whatsapp",
     ) -> dict:
         """מחזיר קיים או יוצר חדש."""
+        sender = _normalize_sender(sender)
         existing = self.get(sender)
         if existing:
             return existing
@@ -296,6 +277,7 @@ class PersistentSessionStore:
 
     def delete(self, sender: str) -> None:
         """מוחק session (איפוס)."""
+        sender = _normalize_sender(sender)
         session = self._store.pop(sender, None)
         if session and session.get("record_id"):
             self._delete_from_db(session["record_id"], session)
@@ -304,6 +286,7 @@ class PersistentSessionStore:
 
     def _sync_to_db(self, sender: str, session: dict, is_new: bool = False) -> bool:
         """כותב/מעדכן session ב-Airtable Sessions (State JSON + linked fields, ראה C58)."""
+        sender = _normalize_sender(sender)
         try:
             from tools.airtable_tools import airtable_add, airtable_update  # type: ignore
 
@@ -354,10 +337,19 @@ class PersistentSessionStore:
                 session["record_id"] = existing_id
                 result = airtable_update(Tables.SESSIONS, existing_id, fields)
                 logger.info(
-                    "[SessionStore] sync sender=%s found_count=%d selected=%s action=patch reason=%s",
-                    sender, found_count, existing_id, reason,
+                    "[SessionStore] lookup sender=%s found_count=%d selected=%s action=patch_existing",
+                    sender, found_count, existing_id,
                 )
                 return bool(result.get("ok"))
+
+            # A lookup failure is not proof that a record does not exist.
+            # POST is allowed only after a successful zero-record lookup.
+            if found_count != 0 or reason != "no_records":
+                logger.error(
+                    "[SessionStore] lookup sender=%s found_count=%d selected=None action=abort_create reason=%s",
+                    sender, found_count, reason,
+                )
+                return False
 
             result = airtable_add(Tables.SESSIONS, fields)
             if result.get("ok"):
@@ -375,56 +367,58 @@ class PersistentSessionStore:
             logger.error(f"[SessionStore] sync error for {sender}: {e}")
             return False
 
-    # BUG-NEW-12: regex שמזהה record IDs של Sessions ספציפית —
-    # "• [recXXX]" בתחילת כל רשומה בפלט של airtable_get.
-    # חשוב: לא "rec\w+" כלשהו — זה יכול לתפוס record_id מתוך State JSON
-    # (למשל recLEAD123, recMEDIA456) במקום ה-Session record עצמו.
-    _SESSION_RECORD_RE = re.compile(r"•\s*\[?(rec\w+)\]?")
+    @staticmethod
+    def _validated_records(sender: str, raw_records: object) -> Optional[list[dict]]:
+        """Validate a structured lookup without silently dropping rows."""
+        if not isinstance(raw_records, list):
+            logger.error(
+                "SESSION_LOOKUP_CONTRACT_MISMATCH sender=%s raw_count=unknown parsed_count=0",
+                sender,
+            )
+            return None
+
+        parsed = [
+            record for record in raw_records
+            if isinstance(record, dict)
+            and isinstance(record.get("id"), str)
+            and record["id"].startswith("rec")
+            and isinstance(record.get("fields", {}), dict)
+        ]
+        if len(parsed) != len(raw_records):
+            logger.error(
+                "SESSION_LOOKUP_CONTRACT_MISMATCH sender=%s raw_count=%d parsed_count=%d",
+                sender, len(raw_records), len(parsed),
+            )
+            return None
+        return parsed
 
     def _find_best_session_in_db(
         self, sender: str
     ) -> tuple[Optional[str], int, str]:
-        """
-        מוצא את הSession הטוב ביותר ב-Airtable לפי Sender ID.
-        מחזיר (record_id, found_count, reason).
-
-        BUG-NEW-12: הכלל הקריטי —
-          found_count > 0 → PATCH על הרשומה שנבחרה, אפס POST.
-          found_count == 0 → POST מותר (רשומה חדשה).
-        """
+        """Select an existing Session from the structured Airtable response."""
+        sender = _normalize_sender(sender)
         try:
-            from tools.airtable_tools import airtable_get  # type: ignore
-            raw = airtable_get(Tables.SESSIONS, f"{{{SF.SENDER_ID}}}='{sender}'")
-            if not raw or "אין רשומות" in raw or "❌" in raw:
+            from tools.airtable_tools import airtable_get_records  # type: ignore
+
+            raw_records = airtable_get_records(
+                Tables.SESSIONS, f"{{{SF.SENDER_ID}}}='{sender}'"
+            )
+            records = self._validated_records(sender, raw_records)
+            if records is None:
+                raw_count = len(raw_records) if isinstance(raw_records, list) else -1
+                return None, raw_count, "contract_mismatch"
+            if not records:
                 logger.info(
                     "[SessionStore] lookup sender=%s found_count=0 selected=None action=create_new reason=no_records",
                     sender,
                 )
                 return None, 0, "no_records"
 
-            all_ids = self._SESSION_RECORD_RE.findall(raw)
-            found_count = len(all_ids)
-
-            if found_count == 0:
-                logger.info(
-                    "[SessionStore] lookup sender=%s found_count=0 selected=None action=create_new reason=parse_miss",
-                    sender,
-                )
-                return None, 0, "parse_miss"
-
-            # בחר הראשון — Airtable מחזיר בד"כ הכי עדכני ראשון (Sort by Created desc).
-            # אם כל הרשומות closed/done ← עדיין בוחרים הראשונה (ולא POST)
-            # כי PATCH על רשומה "done" זול יותר מ-duplicate.
-            selected = all_ids[0]
-            logger.info(
-                "[SessionStore] lookup sender=%s found_count=%d selected=%s action=reuse_existing",
-                sender, found_count, selected,
-            )
-            return selected, found_count, "reuse_existing"
-
-        except Exception as e:
-            logger.warning("[SessionStore] live dedup check failed for %s: %s", sender, e)
-            return None, -1, f"error: {e}"
+            selected = records[0]["id"]
+            return selected, len(records), "patch_existing"
+        except Exception as exc:
+            logger.warning("[SessionStore] live dedup check failed for %s: %s", sender, exc)
+            return None, -1, f"error: {exc}"
 
     def _find_record_id_in_db(self, sender: str) -> Optional[str]:
         """Legacy wrapper — מחזיר record_id בלבד (ראה _find_best_session_in_db)."""
@@ -432,60 +426,62 @@ class PersistentSessionStore:
         return record_id
 
     def _load_from_db(self, sender: str) -> Optional[dict]:
-        """
-        טוען session מ-Airtable Sessions לפי Sender ID.
-        BUG-NEW-12: משתמש ב-_SESSION_RECORD_RE (• [recXXX]) במקום rec\w+ גנרי,
-        כדי לא להחמיץ רשומה קיימת בגלל record_id מ-State JSON שנתפס בטעות.
-        כאשר יש מספר רשומות — בוחר את הראשונה (הכי עדכנית) ומוציא אזהרה.
-        """
+        """Restore one Session from the structured Airtable response."""
+        sender = _normalize_sender(sender)
         try:
-            from tools.airtable_tools import airtable_get  # type: ignore
-            raw = airtable_get(Tables.SESSIONS, f"{{{SF.SENDER_ID}}}='{sender}'")
-            if not raw or "אין רשומות" in raw or "❌" in raw:
+            from tools.airtable_tools import airtable_get_records  # type: ignore
+
+            raw_records = airtable_get_records(
+                Tables.SESSIONS, f"{{{SF.SENDER_ID}}}='{sender}'"
+            )
+            records = self._validated_records(sender, raw_records)
+            if records is None or not records:
                 return None
 
-            # BUG-NEW-12: record_id ספציפי לרשומת ה-Session (• [recXXX])
-            all_ids  = self._SESSION_RECORD_RE.findall(raw)
-            found_count = len(all_ids)
-            if not all_ids:
-                return None
-            if found_count > 1:
+            record = records[0]
+            record_id = record["id"]
+            if len(records) > 1:
                 logger.warning(
-                    "[SessionStore] load sender=%s found_count=%d — using first (most recent): %s",
-                    sender, found_count, all_ids[0],
+                    "[SessionStore] load sender=%s found_count=%d -- using first: %s",
+                    sender, len(records), record_id,
                 )
-            record_id = all_ids[0]
-            # הצמד את הפרסור לחלון של הרשומה הראשונה בלבד
-            first_record_start = raw.find(f"[{record_id}]")
-            second_bullet = raw.find("• ", first_record_start + 1) if found_count > 1 else len(raw)
-            record_window = raw[first_record_start:second_bullet]
 
-            context_m = re.search(rf'{re.escape(SF.CONTEXT_TYPE)}:\s*([^|]+)', record_window)
-            channel_m = re.search(rf'{re.escape(SF.CHANNEL)}:\s*([^|]+)', record_window)
-            state     = _extract_balanced_json(record_window, SF.STATE_JSON) or {}
+            fields = record.get("fields", {})
+            state_raw = fields.get(SF.STATE_JSON, {})
+            if isinstance(state_raw, str):
+                try:
+                    state = json.loads(state_raw)
+                except json.JSONDecodeError:
+                    state = {}
+            else:
+                state = state_raw if isinstance(state_raw, dict) else {}
 
             session = _new_session(
-                domain  = state.get("domain") or "real_estate",
-                channel = (channel_m.group(1).strip() if channel_m else "whatsapp"),
+                domain=state.get("domain") or "real_estate",
+                channel=str(fields.get(SF.CHANNEL) or "whatsapp").strip(),
             )
-            session["context_type"]     = context_m.group(1).strip() if context_m else "lead"
-            session["step"]             = state.get("step", 0)
-            session["answers"]          = state.get("answers", {})
-            session["done"]             = state.get("done", False)
-            session["drop_off_step"]    = state.get("drop_off_step")
-            session["score"]            = state.get("score", 0)
-            session["tier"]             = state.get("tier", "")
-            session["last_uploaded_file"] = state.get("last_uploaded_file")
-            session["last_tool_result"]   = state.get("last_tool_result")
-            session["current_lead_record_id"] = state.get("current_lead_record_id", "")
-            session["active_lead_candidate"]  = state.get("active_lead_candidate")
-            session["last_lead_candidate_batch"] = state.get("last_lead_candidate_batch")
-            session["pending_lead_preview"]     = state.get("pending_lead_preview")
+            session["context_type"] = str(
+                fields.get(SF.CONTEXT_TYPE) or "lead"
+            ).strip()
+            for key, default in (
+                ("step", 0),
+                ("answers", {}),
+                ("done", False),
+                ("drop_off_step", None),
+                ("score", 0),
+                ("tier", ""),
+                ("last_uploaded_file", None),
+                ("last_tool_result", None),
+                ("current_lead_record_id", ""),
+                ("active_lead_candidate", None),
+                ("last_lead_candidate_batch", None),
+                ("pending_lead_preview", None),
+            ):
+                session[key] = state.get(key, default)
             session["record_id"] = record_id
             return session
-
-        except Exception as e:
-            logger.warning(f"[SessionStore] load from DB failed for {sender}: {e}")
+        except Exception as exc:
+            logger.warning("[SessionStore] load from DB failed for %s: %s", sender, exc)
             return None
 
     def _delete_from_db(self, record_id: str, session: Optional[dict] = None) -> None:
@@ -552,6 +548,7 @@ def _run_tests() -> bool:
     at.airtable_add    = lambda t, f: (saves.append(f), {"ok": True, "external_id": "rec001"})[1]
     at.airtable_update = lambda t, r, f: (saves.append(f), {"ok": True, "external_id": r})[1]
     at.airtable_get    = lambda t, formula: "אין רשומות"
+    at.airtable_get_records = lambda t, formula: []
     tools_pkg.airtable_tools = at
     sys.modules["tools"] = tools_pkg
     sys.modules["tools.airtable_tools"] = at
@@ -610,16 +607,6 @@ def _run_tests() -> bool:
     # ── C58: context_type default ─────────────────
     chk("context_type defaults to 'lead'", s1["context_type"] == "lead")
 
-    # ── C58: _extract_balanced_json (nested objects) ──
-    nested_raw = (
-        'State JSON: {"domain": "real_estate", "answers": {"city": "תל אביב", '
-        '"budget": {"min": 100, "max": 200}}, "step": 2} | Other Field: x'
-    )
-    parsed = _extract_balanced_json(nested_raw, SF.STATE_JSON)
-    chk("balanced-json: parses nested object",      parsed is not None)
-    chk("balanced-json: nested answers preserved",   parsed.get("answers", {}).get("budget") == {"min": 100, "max": 200})
-    chk("balanced-json: missing field returns None", _extract_balanced_json(nested_raw, "No Such Field") is None)
-
     # ── C58: _sync_to_db State JSON structure (no info loss) ──
     saves.clear()
     store.mark_done("w:001", score=80, tier="HOT")
@@ -660,6 +647,15 @@ def _run_tests() -> bool:
         f"{SF.UPDATED_AT}: 2026-01-01T00:00:00+00:00 | {SF.CREATED_AT}: 2026-01-01T00:00:00+00:00\n"
     )
     at.airtable_get = lambda t, formula: fabricated_raw
+    at.airtable_get_records = lambda t, formula: [{
+        "id": "recRESTORE1",
+        "fields": {
+            SF.SENDER_ID: "w:restore",
+            SF.CONTEXT_TYPE: "lead",
+            SF.CHANNEL: "telegram",
+            SF.STATE_JSON: json.dumps(fabricated_state, ensure_ascii=False),
+        },
+    }]
     restored = store.get("w:restore")
     chk("restore: session found",            restored is not None)
     chk("restore: record_id parsed",          restored.get("record_id") == "recRESTORE1")
@@ -669,6 +665,7 @@ def _run_tests() -> bool:
     chk("restore: score/tier preserved",      restored.get("score") == 55 and restored.get("tier") == "WARM")
     chk("restore: last_uploaded_file preserved", restored.get("last_uploaded_file", {}).get("file_id") == "recMEDIA9")
     at.airtable_get = lambda t, formula: "אין רשומות"
+    at.airtable_get_records = lambda t, formula: []
 
     # ── C60: set_last_tool_result / get_last_tool_result ──
     saves.clear()
@@ -714,6 +711,10 @@ def _run_tests() -> bool:
         + "".join(f"• [recDUP{i}] Sender ID: w:dup | ...\n" for i in range(1, 15))
     )
     at.airtable_get = lambda t, formula: dup14_raw
+    at.airtable_get_records = lambda t, formula: [
+        {"id": f"recDUP{i}", "fields": {SF.SENDER_ID: "w:dup"}}
+        for i in range(1, 15)
+    ]
 
     session_dup = _new_session("real_estate", "whatsapp")  # record_id == "" (parse miss)
     store3._store["w:dup"] = session_dup
@@ -729,10 +730,11 @@ def _run_tests() -> bool:
     best_id, found_count, reason = store3._find_best_session_in_db("w:dup")
     chk("_find_best: found_count=14", found_count == 14)
     chk("_find_best: selected=recDUP1", best_id == "recDUP1")
-    chk("_find_best: action=reuse_existing", reason == "reuse_existing")
+    chk("_find_best: action=patch_existing", reason == "patch_existing")
 
     # no records → create_new
     at.airtable_get = lambda t, formula: "אין רשומות"
+    at.airtable_get_records = lambda t, formula: []
     best_id2, found_count2, reason2 = store3._find_best_session_in_db("w:ghost")
     chk("_find_best: no records → found_count=0", found_count2 == 0)
     chk("_find_best: no records → action=create_new", reason2 == "no_records")
