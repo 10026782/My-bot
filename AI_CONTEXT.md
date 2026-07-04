@@ -1,10 +1,27 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-07-03 (מאוחר ביותר) — F52 Stage 1 + chokepoint gap-fill, C89/F52 scope-verification (BUG-055, F52_BYPASS_MAP gap-fill, LLM_FALLBACK unify, orphaned Drive/Sheets fix merge), PLANNING_GATE consolidation + Rule 00, `document_converter` wired into production for the first time via `drive_read_file`
-**עודכן על ידי:** Claude Code — session ממוזג ל-`main` דרך PR #207–#213 (ראה 0.8 למטה)
+**עודכן:** 2026-07-04 (מאוחר ביותר) — BUG-IC-01B (prefixed ambiguous phrases), BUG-C89-APPROVAL-IDENTITY (actor identity דרך אישור, PR פתוח), BUG-SESSIONS-ROOT (Session lookup fail-closed) — ראה 0.9 למטה
+**עודכן על ידי:** Claude Code — PR #220/#221 מוזגו ל-`main`, PR #222 פתוח (ראה 0.9 למטה)
 
 > מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (מיושן, 19/06) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
+
+---
+
+## 0.9 BUG-IC-01B / BUG-C89-APPROVAL-IDENTITY / BUG-SESSIONS-ROOT — 2026-07-04 (קרא לפני 0.8)
+
+**3 באגים, 3 PR (2 מוזגים, 1 פתוח):**
+
+- **BUG-IC-01B (PR #220, מוזג `b76e6d5`):** `core/router/intent_router.py`'s `_AMBIGUOUS_PHRASES` (BUG-048/BUG-IC-01) תפס רק ביטויים דו-משמעיים חשופים ("סטטוס", "למלא משימות"). ביטויים עם prefix טבעי ("אני צריך למלא משימות", "צריך סטטוס", "תעזור לי ...") נפלו ל-`Intent.UNKNOWN` → `Handler.AGENT` עם כלים מלאים במקום שאלת הבהרה — דווח חי: "אני צריך למלא משימות" גרם ל-`airtable_get table=Tasks` בפועל. נוספו 3 patterns עם prefix אופציונלי. 44/44 בדיקות. ראו BUG_AUDIT_LOG.md BUG-061.
+
+- **BUG-C89-APPROVAL-IDENTITY (PR #222, טרם מוזג):** `ActionGateway.propose_action()` נקרא עם `origin_chat_id=identity.memory_key` (לא external_id אמיתי). ב-approve, ה-executor קרא `resolve_identity()` מחדש על ערך זה → נפילה שקטה ל-`Role.READONLY` → owner שאישר "כן" נחסם ע"י ה-dispatcher. תוקן: `ActionContract` שומר actor identity (role/external_id/...) שנפתרה בזמן ה-propose; ה-executor משתמש בה ישירות. גם: preview עדכון-ליד-קיים אומר "מצאתי ליד קיים. לעדכן אותו?" ותמיד דורש אישור (גם עם `FEATURE_AUTO_CAPTURE=true`). 37+9+44 בדיקות. ראו BUG_AUDIT_LOG.md BUG-062.
+  **⚠️ תקלה תפעולית שתועדה:** ה-commit הזה נדחף במקור לאותו ענף כמו BUG-IC-01B *אחרי* ש-PR #220 כבר מוזג ל-`main` — לא נכלל בו, ונשאר "יתום" על ה-branch (ה-PR שהיה פתוח עליו כבר closed/merged ולא יכול לעקוב אחרי commits חדשים). אותר באמצע הסשן כש-`git merge-base --is-ancestor` הראה שה-commit לא ב-`main`; הענף אותחל מחדש מ-`main` העדכני (`git rebase origin/main` + `push --force-with-lease`) ונפתח PR #222 נפרד. **לקח:** לפני push לענף שכבר יש/היה לו PR, יש לוודא שה-PR עדיין open — אם merged/closed, לפתוח ענף+PR חדשים, לא לדחוף על הישן.
+
+- **BUG-SESSIONS-ROOT (PR #221, מוזג `eead2cc`):** קוד נכתב בכלי/סשן נפרד (ענף מקומי `codex/bug-sessions-root` על מכונת Windows של המשתמש) — סשן זה סקר, בדק עצמאית (worktree מבודד: 49 internal + 4 pytest + 4 קבצי רגרסיה קיימים ירוקים, `merge-tree` נקי מול `main`) ופתח את ה-PR (הכלי המקורי נחסם ע"י auth שגוי ב-`gh` CLI). `session_store.py`'s Session lookup עבר מ-regex-parsing על string מפורמט ל-`airtable_get_records()` מובנה (חדש, `tools/airtable_tools.py`) עם pagination + fail-closed על שגיאות; POST מותר רק אחרי lookup שמאשש 0 רשומות בבירור — מונע כפילות שקטה שהייתה קיימת חלקית עוד מ-BUG-047/BUG-NEW-12. ראו BUG_AUDIT_LOG.md BUG-063.
+
+**לא אומת:** deploy ל-Render / production verification לאף אחד מהשלושה (אין גישת Render Dashboard מה-sandbox).
+
+**עדכון תיעוד מלא:** `BUG_AUDIT_LOG.md` (BUG-061/062/063), `CHANGE_CONTROL_LOG.md` (C83/C84/C85), `CHANGELOG.md` (Unreleased).
 
 ---
 

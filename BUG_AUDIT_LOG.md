@@ -893,3 +893,46 @@
 - **Deployed:** N/A
 - **Verified בפרודקשן:** N/A
 - **סטטוס:** ✅ מתועד כחריג מכוון — לא נכנס לתור תיקונים
+
+### BUG-061 (BUG-IC-01B) — ביטויים דו-משמעיים עם prefix טבעי ("אני צריך למלא משימות") לא נתפסו ע"י BUG-IC-01
+- **תאריך:** 04/07/2026
+- **קבצים:** `core/router/intent_router.py`, `core/router/test_router.py`
+- **Severity:** Medium — המשך ישיר ל-BUG-048/BUG-IC-01; אותה חשיפה (Agent עם כלים מלאים) אך רק על ביטויים עם prefix.
+- **שורש:** `_AMBIGUOUS_PHRASES` (BUG-048) טיפל רק בביטויים חשופים ("סטטוס", "למלא משימות") עם `^...$` anchoring מלא — כל prefix טבעי ("אני צריך ...", "צריך ...", "רוצה ...", "אפשר ...", "תעזור לי ...") לפני הביטוי הדו-משמעי גרם ל-`pattern.match()` להיכשל, והמשפט נפל ל-`Intent.UNKNOWN` → `Handler.AGENT` עם גישה מלאה לכלים (כולל `airtable_get` על Tasks בפועל, לפי הדיווח החי) ללא בקשת הבהרה.
+- **תיקון:** 3 patterns חדשים ב-`_AMBIGUOUS_PHRASES` (status/system-check, system-tests, tasks) שכל אחד תופס prefix אופציונלי `(אני\s+)?(צריך|רוצה|אפשר|תעזור לי)` לפני הביטוי הדו-משמעי המקורי, ומחזיר את אותה שאלת הבהרה כמו הגרסה החשופה.
+- **בדיקה:** `core/router/test_router.py` — 6 מקרים חדשים ("אני צריך למלא משימות", "צריך למלא משימות", "תעזור לי למלא משימות", "אני צריך לראות סטטוס", "צריך סטטוס", "אני צריך בדיקות מערכת") → `Intent.UNKNOWN`/`Handler.CLARIFY`. 44/44 עברו.
+- **PR:** #220 (`claude/ic-01b-ambiguous-prefix-routing-zp109k`)
+- **Merged:** כן — `b76e6d5`, מאומת דרך `mcp__github__pull_request_read` (`merged: true`, `merged_at: 2026-07-04T21:50:30Z`) וגם `git log origin/main`
+- **Deployed:** לא אומת מול Render Dashboard
+- **Verified בפרודקשן:** לא
+- **Verification ראיה:** `python3 core/router/test_router.py` → 44/44 + 3 בדיקות Tier-4; `python3 -m py_compile core/router/intent_router.py`
+- **סטטוס:** ✅ מוזג ל-main — ממתין ל-production verification
+
+### BUG-062 (BUG-C89-APPROVAL-IDENTITY) — פעולה שאושרה ע"י owner מאבדת role וחוזרת ל-readonly ב-dispatch
+- **תאריך:** 04/07/2026
+- **קבצים:** `core/action_gateway.py`, `core/lead_candidate_handler.py`, `app.py`, `test_action_gateway.py`, `test_c89_preview_confirmation.py`
+- **Severity:** High — owner שמאשר פעולה (למשל עדכון ליד) עם "כן" נחסם ע"י ה-dispatcher כאילו היה readonly.
+- **שורש:** `ActionGateway.propose_action()` נקרא עם `origin_chat_id=identity.memory_key` (למשל `"boss_hq:eliyahu"`) ולא external_id אמיתי של הערוץ. ב-`approve()`, ה-executor שנבנה ע"י `_make_dispatch_executor` קרא `resolve_identity(contract.origin_channel, contract.origin_chat_id)` → מפתח `"telegram:boss_hq:eliyahu"` שלא קיים ב-registry → נפילה שקטה ל-`Role.READONLY` (הערוץ אינו whatsapp) → `dispatch_tool` חוסם פעולה שאושרה בפועל ע"י ה-owner (`airtable_update` על Leads).
+- **תיקון:** `ActionContract` שומר כעת actor identity שנפתרה בזמן ה-propose (`actor_role`/`actor_user_id`/`actor_external_id`/`actor_display_name`/`actor_domain_id`/`actor_allowed_domains`) דרך פרמטר `identity=` חדש (אופציונלי) ב-`propose_action()`. ה-executor ב-`_make_dispatch_executor` בונה `Identity` ישירות מהשדות השמורים על ה-contract במקום `resolve_identity()` מחדש; חוזים ישנים ללא actor שמור נופלים חזרה ל-`resolve_identity()` כמו קודם (backward-compatible). עודכנו קריאות ב-`core/lead_candidate_handler.py` (`_write_one_lead`, `_propose_lead_write`) וב-`app.py`'s `_queue_approval` להעביר `identity=identity`.
+- **תוספת UX (C89):** כשמועמד-ליד תואם ליד קיים, ה-preview אומר כעת "מצאתי ליד קיים. לעדכן אותו?" במקום "לשמור?" הגנרי; עדכון ליד קיים תמיד דורש אישור, גם כש-`FEATURE_AUTO_CAPTURE=true` — רק ליד חדש לגמרי נכתב אוטומטית.
+- **בדיקה:** `test_action_gateway.py` (37/37, כולל בדיקת רגרסיה חדשה שמאמתת ש-dispatcher מקבל `role=owner` ולא `readonly`, ואומתה ידנית שנכשלת ללא התיקון), `test_c89_preview_confirmation.py` (9/9, כולל 3 בדיקות חדשות ל-UX העדכון), `core/router/test_router.py` (44/44), `test_tier2_silent_preview.py`/`test_stage_b_verification.py`/`test_approval_gate_registry.py` — כולם ירוקים.
+- **PR:** #222 (`claude/ic-01b-ambiguous-prefix-routing-zp109k`) — **הערה תפעולית:** ה-commit נדחף במקור לאותו ענף כמו BUG-061 *אחרי* ש-PR #220 כבר מוזג, ולכן לא נכלל בו בפועל בטעות. אותר בסבב הזה; הענף אותחל מחדש מ-`main` העדכני (`git rebase origin/main`) ונדחף מחדש (`--force-with-lease`) לפני פתיחת PR #222 נפרד.
+- **Merged:** לא עדיין — PR פתוח
+- **Deployed:** לא
+- **Verified בפרודקשן:** לא
+- **Verification ראיה:** אין עדיין (טרם מוזג)
+- **סטטוס:** 🟡 CODE DONE — PR פתוח, ממתין למיזוג
+
+### BUG-063 (BUG-SESSIONS-ROOT) — Session lookup נכשל בשקט ומאפשר POST כפול במקום PATCH
+- **תאריך:** 04/07/2026 (זוהה ותוקן בענף נפרד `codex/bug-sessions-root` ע"י כלי אחר; נסקר, נבדק עצמאית ומוזג בסבב זה)
+- **קבצים:** `session_store.py`, `tools/airtable_tools.py`, `test_session_store_contract.py` (חדש)
+- **Severity:** Medium/High — המשך ישיר ל-BUG-047/BUG-NEW-12; באג-שורש שהשאיר את הבעיה חלקית פתוחה.
+- **שורש:** `_find_best_session_in_db()` פרסר את הפלט המפורמט-לבני-אדם של `airtable_get()` באמצעות regex (`_SESSION_RECORD_RE`). כל כשל בפרסור/שגיאת רשת/תשובה לא צפויה גרם להחזרת "לא נמצא" (`found_count=0`), ו-`_sync_to_db()` ביצע POST (יצירת רשומה חדשה) גם כשרשומת Session אמיתית כבר קיימת — כפילות שקטה בכל פעם שה-lookup היה flaky, לא רק כשבאמת לא היו רשומות.
+- **תיקון:** `tools/airtable_tools.py` מקבל `airtable_get_records()` חדש — reader מובנה (list[dict], לא string), עם pagination מלא ו-`raise` על כשל HTTP/contract (fail-closed, לא "אין רשומות" שקט). `airtable_get()` הישן נשאר עטיפה תואמת-לאחור מעליו (Agent-facing string בלבד). `_sync_to_db()`/`_find_best_session_in_db()` ב-`session_store.py` הוחלפו לקרוא ל-`airtable_get_records()` ומאמתים כל רשומה במבנה (`_validated_records`); POST מותר **רק** כש-`found_count == 0 and reason == "no_records"` — כל מצב אחר (שגיאה, contract mismatch, תוצאה עמומה) חוסם יצירה ומחזיר `False` (fail-closed) במקום POST שקט. נוסף `_normalize_sender()` לאחידות מפתחות sender בין get/get_or_create/delete/sync/lookup.
+- **בדיקה:** `python3 session_store.py` — 49/49; `python3 -m pytest test_session_store_contract.py` (חדש) — 4/4 (בחירת רשומה מרובה + נירמול sender, 17 כפילויות → PATCH יחיד ואפס POST, contract-mismatch חוסם POST, pagination). נבדק עצמאית ב-worktree מבודד לפני פתיחת PR: `test_airtable_gateway.py` (25/25), `test_inbound_handler.py` (11/11), `test_furniture_lead_funnel.py` (22/22), `test_c53a.py` (50/50), `py_compile` נקי, `git merge-tree` מול `main` העדכני — אפס קונפליקטים.
+- **PR:** #221 (`codex/bug-sessions-root`) — נוצר ונפתח ע"י session זה (הכלי המקורי נחסם ע"י בעיית auth ב-`gh` CLI); הענף/commit זוהו ע"י המשתמש, נבדקו ואומתו עצמאית לפני פתיחת ה-PR.
+- **Merged:** כן — `eead2cc`, מאומת דרך `git log origin/main --oneline` (merge commit `1718ce7`)
+- **Deployed:** לא אומת מול Render Dashboard
+- **Verified בפרודקשן:** לא
+- **Verification ראיה:** ראה בדיקה למעלה; `git merge-base --is-ancestor eead2cc origin/main` → הצלחה
+- **סטטוס:** ✅ מוזג ל-main — ממתין ל-production verification
