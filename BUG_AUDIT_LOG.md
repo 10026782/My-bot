@@ -916,12 +916,12 @@
 - **תיקון:** `ActionContract` שומר כעת actor identity שנפתרה בזמן ה-propose (`actor_role`/`actor_user_id`/`actor_external_id`/`actor_display_name`/`actor_domain_id`/`actor_allowed_domains`) דרך פרמטר `identity=` חדש (אופציונלי) ב-`propose_action()`. ה-executor ב-`_make_dispatch_executor` בונה `Identity` ישירות מהשדות השמורים על ה-contract במקום `resolve_identity()` מחדש; חוזים ישנים ללא actor שמור נופלים חזרה ל-`resolve_identity()` כמו קודם (backward-compatible). עודכנו קריאות ב-`core/lead_candidate_handler.py` (`_write_one_lead`, `_propose_lead_write`) וב-`app.py`'s `_queue_approval` להעביר `identity=identity`.
 - **תוספת UX (C89):** כשמועמד-ליד תואם ליד קיים, ה-preview אומר כעת "מצאתי ליד קיים. לעדכן אותו?" במקום "לשמור?" הגנרי; עדכון ליד קיים תמיד דורש אישור, גם כש-`FEATURE_AUTO_CAPTURE=true` — רק ליד חדש לגמרי נכתב אוטומטית.
 - **בדיקה:** `test_action_gateway.py` (37/37, כולל בדיקת רגרסיה חדשה שמאמתת ש-dispatcher מקבל `role=owner` ולא `readonly`, ואומתה ידנית שנכשלת ללא התיקון), `test_c89_preview_confirmation.py` (9/9, כולל 3 בדיקות חדשות ל-UX העדכון), `core/router/test_router.py` (44/44), `test_tier2_silent_preview.py`/`test_stage_b_verification.py`/`test_approval_gate_registry.py` — כולם ירוקים.
-- **PR:** #222 (`claude/ic-01b-ambiguous-prefix-routing-zp109k`) — **הערה תפעולית:** ה-commit נדחף במקור לאותו ענף כמו BUG-061 *אחרי* ש-PR #220 כבר מוזג, ולכן לא נכלל בו בפועל בטעות. אותר בסבב הזה; הענף אותחל מחדש מ-`main` העדכני (`git rebase origin/main`) ונדחף מחדש (`--force-with-lease`) לפני פתיחת PR #222 נפרד.
-- **Merged:** לא עדיין — PR פתוח
-- **Deployed:** לא
+- **PR:** #222 (`claude/ic-01b-ambiguous-prefix-routing-zp109k`) — **הערה תפעולית:** ה-commit נדחף במקור לאותו ענף כמו BUG-061 *אחרי* ש-PR #220 כבר מוזג, ולכן לא נכלל בו בפועל בטעות. אותר; הענף אותחל מחדש מ-`main` העדכני (`git rebase origin/main`) ונדחף מחדש (`--force-with-lease`) לפני פתיחת PR #222 נפרד.
+- **Merged:** כן — `717465a`, merge commit `57e7cad` (מאומת `git log origin/main --oneline`)
+- **Deployed:** לא אומת מול Render Dashboard
 - **Verified בפרודקשן:** לא
-- **Verification ראיה:** אין עדיין (טרם מוזג)
-- **סטטוס:** 🟡 CODE DONE — PR פתוח, ממתין למיזוג
+- **Verification ראיה:** ראה בדיקה למעלה; `git merge-base --is-ancestor 717465a origin/main` → הצלחה
+- **סטטוס:** ✅ מוזג ל-main — ממתין ל-production verification
 
 ### BUG-063 (BUG-SESSIONS-ROOT) — Session lookup נכשל בשקט ומאפשר POST כפול במקום PATCH
 - **תאריך:** 04/07/2026 (זוהה ותוקן בענף נפרד `codex/bug-sessions-root` ע"י כלי אחר; נסקר, נבדק עצמאית ומוזג בסבב זה)
@@ -935,4 +935,32 @@
 - **Deployed:** לא אומת מול Render Dashboard
 - **Verified בפרודקשן:** לא
 - **Verification ראיה:** ראה בדיקה למעלה; `git merge-base --is-ancestor eead2cc origin/main` → הצלחה
+- **סטטוס:** ✅ מוזג ל-main — ממתין ל-production verification
+
+### BUG-064 (BUG-C89-TIER4-PRECEDENCE) — טבלה/ייצוא/פלט-מערכת לא תמיד גובר על חילוץ ליד
+- **תאריך:** 04/07/2026
+- **קבצים:** `core/ingress_classifier.py`, `test_c89_tier4_precedence.py` (חדש)
+- **Severity:** High — פלט Airtable/CSV/טבלה מודבק סווג כ-Tier 1/2 והגיע ל-Agent/ActionGateway עם `airtable_add`/`airtable_update` בפועל, במקום Tier 4 (preview בלבד, ללא כתיבה).
+- **שורש:** `_is_tier4()` (השער היחיד — נצרך גם ע"י `router.py`'s Tier-4 stop-gate וגם ע"י `core/lead_candidate_handler.py`) כיסה רק תת-קבוצה צרה של סמנים (טבלת pipe/tab, timestamp עם `/`, Airtable rec/fld ID של 8+ תווים, JSON block, CSV של 3+ שורות עם 2+ פסיקים, ≥3 שורות עם אימוג'י בוט). לא כוסו: כותרות טבלה ללא separator מפורש (`Name, Phone, City, Status` / `שם, טלפון, עיר, סטטוס`), טבלאות fixed-width עבריות (עמודות מיושרות ברווחים), ופלטי סטטוס/ציון של Airtable (`Status:`, `Score:`, `View in Airtable`, `memory_key`/`@lead`, `owner_dictation`).
+- **תיקון:** הורחב `_is_tier4()` היחיד (`core/ingress_classifier.py`) — לא נוסף שער מקביל במקום אחר: `_has_table_header()` (כותרת מופרדת בפסיק/טאב/2+ רווחים עם 2+ מילות-כותרת מוכרות, עברית+אנגלית), `_has_fixed_width_table()` (2+ שורות עם 2+ מקטעי "מילה+2 רווחים+"), `_LITERAL_MARKERS` (רשימת מחרוזות מערכתיות), `_MEMORY_KEY_RE` (פורמט `tenant/phone@lead`), `_SCORE_LIKE_RE` (`NN/100`), timestamp עם נקודות (`[DD.MM.YYYY, HH:MM]`), והורחב זיהוי פלט-בוט (נוספו 📋/🌤️/█, סף הורד מ-3 ל-2 שורות). מילת "airtable" בודדת מוגבלת לדרוש מבנה נוסף (נקודתיים/שורה חדשה/rec ID/memory_key) כדי לא לבלוע פקודת בדיקת-מערכת מפורשת קצרה ("תבדוק עכשיו את Airtable") — regression שנתפס ותוקן מול `core/router/test_router.py` הקיים לפני פתיחת ה-PR.
+- **בדיקה:** `test_c89_tier4_precedence.py` (חדש, 13/13) — כל 6 התרחישים הנדרשים (View in Airtable+Status/Score, פלט בוט ✅/📋/🌤️, owner_dictation+memory_key+score, כותרות CSV, טבלה עברית fixed-width, Airtable rec ID) + 3 בקרות שלילה (ליד רגיל, פקודת בדיקת-מערכת מפורשת, batch ליד נקי אמיתי). `test_capture_router_wiring.py` (10/10), `core/router/test_router.py` (44/44) — אפס רגרסיה.
+- **PR:** #223 (`claude/ic-01b-ambiguous-prefix-routing-zp109k`)
+- **Merged:** כן — `b7d8445`, merge commit `84973b9` (מאומת `git log origin/main --oneline`)
+- **Deployed:** לא אומת מול Render Dashboard
+- **Verified בפרודקשן:** לא
+- **Verification ראיה:** ראה בדיקה למעלה; `git merge-base --is-ancestor b7d8445 origin/main` → הצלחה
+- **סטטוס:** ✅ מוזג ל-main — ממתין ל-production verification
+
+### BUG-065 (C89-RAW-OBS) — raw_ref תמיד ריק, אין observation על החלטת סיווג
+- **תאריך:** 04/07/2026
+- **קבצים:** `core/ingress_classifier.py`, `feature_flags.py`, `test_c89_raw_obs.py` (חדש)
+- **Severity:** Low/Medium — פער תיעוד/observability, לא bug פונקציונלי (Tier gating עצמו עבד נכון) — `IngressClassification.raw_ref` היה מסומן "future — empty for now" ומעולם לא מולא, ואין תיעוד AgentObservation לאף החלטת סיווג.
+- **שורש:** `classify_ingress()` (השער היחיד לכל סיווג קלט) בנה `IngressClassification` עם `raw_ref=""` קבוע בכל אחת מ-7 נקודות ה-return שלו, ומעולם לא קרא ל-`ActionGateway.record_agent_observation()` — אין עקבות ניתנות-לביקורת של מה סווג ולמה.
+- **תיקון:** `classify_ingress()` הוסבה לעטיפה דקה סביב הלוגיקה המקורית (שהוזזה, ללא שינוי, ל-`_classify_ingress_core()`); העטיפה מפעילה עבור **כל** קריאה (Tier 1-5, כולל `empty_text`/`source_type` לא נתמך): (1) `_save_raw_capture()` — כותב את הטקסט הגולמי ל-`Tables.DECISION_INBOX` (שדה `RAW_INPUT`) מאחורי flag חדש `FEATURE_RAW_CAPTURE` (כבוי כברירת מחדל, רשום ב-`feature_flags.py`), ותמיד מחזיר reference לא-ריק — ה-record id האמיתי כשה-flag פעיל והכתיבה הצליחה, אחרת fallback מקומי (`local:<uuid>`); כשל בכתיבה/Airtable לעולם לא חוסם את הסיווג. (2) `_record_classification_observation()` — רושם `AgentObservation(kind="capture_classification", text="tier=<n> confidence=<f> reason=<r> raw_ref=<ref>")` דרך ה-API הקיים בלבד של `ActionGateway.record_agent_observation(contract_id=None, ...)` — ללא שום שינוי בליבת ה-Gateway (contract/ledger).
+- **בדיקה:** `test_c89_raw_obs.py` (חדש, 14/14) — `raw_ref` לא-ריק ל-Tier 1/4/5 (וגם `empty_text`/`source_type` לא נתמך), observation נרשם לכל קריאה על פני Tier 1/2/4/5 עם `contract_id=None` וצורת טקסט נכונה, והתנהגות flag on/off/כשל-כתיבה. `test_capture_router_wiring.py` (10/10), `core/router/test_router.py` (44/44), `test_c89_tier4_precedence.py` (13/13) — אפס רגרסיה.
+- **PR:** #224 (`claude/ic-01b-ambiguous-prefix-routing-zp109k`)
+- **Merged:** כן — `68f8c97`, merge commit `cd9576f` (מאומת `git log origin/main --oneline`)
+- **Deployed:** לא אומת מול Render Dashboard
+- **Verified בפרודקשן:** לא
+- **Verification ראיה:** ראה בדיקה למעלה; `git merge-base --is-ancestor 68f8c97 origin/main` → הצלחה
 - **סטטוס:** ✅ מוזג ל-main — ממתין ל-production verification
