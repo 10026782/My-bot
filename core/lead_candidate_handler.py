@@ -359,6 +359,7 @@ def _write_one_lead(
             origin_channel    = channel,
             origin_chat_id    = identity.memory_key,
             requires_approval = False,
+            identity          = identity,
         )
         if not gw_result.ok:
             logger.info("[LCH] gateway blocked for %r: %s", name, gw_result.reason)
@@ -530,6 +531,7 @@ def _propose_lead_write(
         origin_channel    = channel,
         origin_chat_id    = identity.memory_key,
         requires_approval = True,
+        identity          = identity,
     )
 
 
@@ -636,8 +638,10 @@ def _handle_single_candidate(
 ) -> Optional[str]:
     """
     Tier 1: ליד בודד high-confidence.
-    auto_write=True (FEATURE_AUTO_CAPTURE) → כותב מיד.
-    auto_write=False → מחזיר preview ומאחסן ב-pending_lead_preview.
+    auto_write=True (FEATURE_AUTO_CAPTURE) → כותב מיד ליד חדש.
+    עדכון ליד קיים (airtable_update) תמיד עובר דרך אישור — גם כש-auto_write=True
+    (C89 UX: לעולם לא לעדכן ליד קיים בלי אישור מפורש).
+    auto_write=False → מחזיר preview ומאחסן ActionContract ממתין.
     """
     name  = candidate["name"]
     phone = candidate.get("phone", "")
@@ -646,17 +650,27 @@ def _handle_single_candidate(
     if not phone:
         return f"כדי לשמור את {name} כליד — אשמח לקבל גם מספר טלפון. 📞"
 
-    if not auto_write:
+    existing_id = _at_find_lead(name, phone)
+
+    if not auto_write or existing_id:
         # BUG-056: preview mode now proposes a REAL pending ActionContract
         # (instead of the dead-end session["pending_lead_preview"]) so "כן"
         # can actually resolve it — see _propose_lead_write() + app.py's
         # confirm-word handling (checks ActionGateway live contracts first).
+        # C89 UX: an existing lead (airtable_update) always goes through this
+        # approval branch, even when FEATURE_AUTO_CAPTURE=true — only a
+        # brand-new lead (airtable_add) can auto-write below.
         gw_result = _propose_lead_write(identity, name, phone, text, channel, domain)
         if not gw_result.ok:
             # Already-pending or duplicate-executed — Gateway's own message
             # (dedup by business fingerprint) is the correct user-facing reply.
             return gw_result.user_message or gw_result.reason
         ctx_str = f" [{', '.join(ctx)}]" if ctx else ""
+        if existing_id:
+            return (
+                f"📋 מצאתי ליד קיים: *{name}* ({phone}){ctx_str}\n"
+                f"לעדכן אותו? ענה *כן* לאישור או *לא* לביטול."
+            )
         return (
             f"📋 זיהיתי ליד: *{name}* ({phone}){ctx_str}\n"
             f"לשמור? ענה *כן* לאישור או *לא* לביטול."

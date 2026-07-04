@@ -44,6 +44,17 @@ class ActionContract:
     approved_by:                str | None = None
     approved_at:                float | None = None
     agent_observations:         list[dict] = field(default_factory=list)  # §5 — לעולם לא סמכות
+    # BUG-C89-APPROVAL-IDENTITY: the resolved actor identity at propose time —
+    # canonical_user_id/origin_chat_id may be a memory_key (e.g. "boss_hq:eliyahu"),
+    # not a channel external_id, so they must never be fed back into
+    # resolve_identity() at execution time. These fields are the source of
+    # truth for who the dispatcher runs as when the contract is approved.
+    actor_role:                 str = ""
+    actor_user_id:               str = ""
+    actor_display_name:         str = ""
+    actor_domain_id:             str = ""
+    actor_external_id:           str = ""
+    actor_allowed_domains:       list = field(default_factory=list)
 
 
 # ══════════════════════════════════════════════════
@@ -312,11 +323,18 @@ class ActionGateway:
         origin_channel: str,
         origin_chat_id: str,
         requires_approval: bool,
+        identity=None,
     ) -> GatewayResult:
         """
         מציע פעולה חדשה ל-Gateway.
         מחזיר GatewayResult(ok=True, contract_id=...) אם מותרת.
         מחזיר GatewayResult(ok=False, ...) אם נחסמת (כפילות/pending).
+
+        identity: BUG-C89-APPROVAL-IDENTITY — אם מועבר, ה-Identity שנפתרה
+        בפועל (role/external_id/...) נשמרת על ה-contract עצמו, כדי שביצוע
+        לאחר אישור ישתמש בזהות המקורית ולא ינסה resolve_identity() מחדש על
+        canonical_user_id/origin_chat_id (שיכולים להיות memory_key, לא
+        external_id ערוץ אמיתי).
         """
         normalized = self.normalize_payload(tool_inputs)
         fingerprint = self.compute_business_fingerprint(
@@ -347,6 +365,12 @@ class ActionGateway:
             requires_approval=requires_approval,
             status="draft",
             created_at=time.time(),
+            actor_role=getattr(identity, "role", "") or "",
+            actor_user_id=getattr(identity, "user_id", "") or "",
+            actor_display_name=getattr(identity, "display_name", "") or "",
+            actor_domain_id=getattr(identity, "domain_id", "") or "",
+            actor_external_id=getattr(identity, "external_id", "") or "",
+            actor_allowed_domains=list(getattr(identity, "allowed_domains", None) or []),
         )
 
         if requires_approval:
@@ -806,18 +830,42 @@ def _make_dispatch_executor(ledger: ExecutionLedger):
     מחזיר tool executor שמחובר ל-dispatcher.
     Closure על ה-ledger — מוצא identity מהחוזה לפי contract_id.
     לא מייבא dispatcher/identity בזמן module-load (נמנעים מ-circular import).
+
+    BUG-C89-APPROVAL-IDENTITY: כשה-contract נשא actor identity (propose_action
+    קיבל identity=...), הביצוע חייב להשתמש בזהות המקורית שנפתרה בזמן היצירה —
+    לא ב-resolve_identity(origin_channel, origin_chat_id) מחדש, כי origin_chat_id
+    יכול להיות identity.memory_key ("boss_hq:eliyahu") ולא external_id ערוץ
+    אמיתי, מה שגורם ל-role ליפול חזרה ל-readonly. fallback ל-resolve_identity
+    נשאר רק לחוזים ישנים/callers שלא העבירו identity ל-propose_action.
     """
     def _executor(tool_name: str, tool_inputs: dict, contract_id: str):
         from tools.dispatcher import dispatch_tool
-        from identity import resolve_identity
+        from identity import Identity, resolve_identity
 
         identity = None
         contract = ledger.find_by_id(contract_id)
         if contract:
-            try:
-                identity = resolve_identity(contract.origin_channel, contract.origin_chat_id)
-            except Exception as exc:
-                logger.warning("[ActionGateway] identity resolve failed: %s", exc)
+            if contract.actor_role and contract.actor_external_id:
+                identity = Identity(
+                    user_id         = contract.actor_user_id or contract.canonical_user_id,
+                    role            = contract.actor_role,
+                    display_name    = contract.actor_display_name,
+                    tenant_id       = contract.tenant_id,
+                    domain_id       = contract.actor_domain_id or "general",
+                    allowed_domains = list(contract.actor_allowed_domains or []),
+                    channel         = contract.origin_channel,
+                    external_id     = contract.actor_external_id,
+                )
+                logger.info(
+                    "[ActionGateway] approved by=%s/%s@%s external_id=%s | dispatch role=%s",
+                    contract.tenant_id, identity.user_id, contract.actor_role,
+                    contract.actor_external_id, identity.role,
+                )
+            else:
+                try:
+                    identity = resolve_identity(contract.origin_channel, contract.origin_chat_id)
+                except Exception as exc:
+                    logger.warning("[ActionGateway] identity resolve failed: %s", exc)
 
         return dispatch_tool(tool_name, tool_inputs, identity=identity)
 
