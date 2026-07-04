@@ -54,12 +54,16 @@ _TABLE_RE = re.compile(
 # Log/timestamp patterns
 _TIMESTAMP_RE = re.compile(
     r"\[\d{1,2}/\d{1,2}/\d{4},?\s*\d{1,2}:\d{2}"   # [DD/MM/YYYY, HH:MM
+    r"|\[\d{1,2}\.\d{1,2}\.\d{2,4},?\s*\d{1,2}:\d{2}"  # [DD.MM.YYYY, HH:MM] — BUG-C89-TIER4-PRECEDENCE
     r"|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}"               # ISO 8601
     r"|\d{2}:\d{2}:\d{2}\s+[A-Z]{2,5}",             # HH:MM:SS UTC
 )
 
-# Bot output prefix (lines starting with status emoji)
-_BOT_OUTPUT_RE = re.compile(r"^[✅❌⚠️⏳🔴🟡🟢]\s", re.MULTILINE)
+# Bot output prefix (lines starting with status/marker emoji)
+# BUG-C89-TIER4-PRECEDENCE: extended with 📋/🌤️/█ (progress bars/summaries),
+# threshold lowered 3→2 lines — a genuine lead dictation never has even 2
+# lines opening with these emoji, so this stays a safe, high-signal marker.
+_BOT_OUTPUT_RE = re.compile(r"^[✅❌⚠️⏳🔴🟡🟢📋🌤️█]\s", re.MULTILINE)
 
 # Airtable field/record IDs
 _AIRTABLE_ID_RE = re.compile(r"\b(?:fld|rec)[A-Za-z0-9]{8,}\b")
@@ -75,11 +79,57 @@ _WHATSAPP_EXPORT_RE = re.compile(
 # Consecutive CSV-like lines (3+ lines with ≥2 commas each)
 _CSV_RE = re.compile(r"(?:[^\n,]+,[^\n,]+,[^\n]+\n){3,}")
 
+# ── BUG-C89-TIER4-PRECEDENCE additions ──────────────────────────────
+# System/tool-output field labels and literal markers — case-insensitive
+# substring match. Any of these appearing anywhere means the text is a
+# pasted export/log/status readout, never a fresh lead dictation.
+_LITERAL_MARKERS = (
+    "view in airtable", "use airtable",
+    "record_id", "memory_key", "owner_dictation",
+    "schedule follow-up", "status:", "score:",
+    "@lead", "נקלט ליד", "זוהה ליד",
+)
+
+# memory_key literal format used by lead_candidate_handler.py:
+# f"{tenant_id}/{phone_or_slug}@lead" e.g. "boss_hq/0501234567@lead"
+_MEMORY_KEY_RE = re.compile(r"\b[\w.\-]+/[\w+\-]+@lead\b")
+
+# score-like "NN/100" (e.g. "Score: 50/100")
+_SCORE_LIKE_RE = re.compile(r"\b\d{1,3}\s*/\s*100\b")
+
+# Known table-header words (English + Hebrew) — a header row (comma/tab/
+# fixed-width separated) containing ≥2 of these is a table, not a lead line.
+_HEADER_WORDS_EN = frozenset({"name", "phone", "city", "status", "email", "source", "domain", "score"})
+_HEADER_WORDS_HE = frozenset({"שם", "טלפון", "עיר", "סטטוס", "נייד", "כתובת", "מקור", "דומיין", "ציון"})
+
+
+def _looks_like_header_row(line: str) -> bool:
+    parts = [p.strip() for p in re.split(r"\t|,|\s{2,}", line) if p.strip()]
+    if len(parts) < 3:
+        return False
+    hits_en = sum(1 for p in parts if p.lower() in _HEADER_WORDS_EN)
+    hits_he = sum(1 for p in parts if p in _HEADER_WORDS_HE)
+    return (hits_en + hits_he) >= 2
+
+
+def _has_table_header(text: str) -> bool:
+    return any(_looks_like_header_row(line) for line in text.splitlines())
+
+
+# Fixed-width columns: a line with ≥2 "word + 2-or-more-spaces" runs followed
+# by a final word (i.e. ≥3 columns separated by 2+ spaces). Requiring ≥2 such
+# lines (not just 1) keeps this from tripping on a single stray double-space.
+_FIXED_WIDTH_LINE_RE = re.compile(r"^(?:\S+ {2,}){2,}\S+", re.MULTILINE)
+
+
+def _has_fixed_width_table(text: str) -> bool:
+    return len(_FIXED_WIDTH_LINE_RE.findall(text)) >= 2
+
 
 def _is_tier4(text: str) -> tuple[bool, str]:
     """
     מחזיר (True, reason) אם הטקסט הוא פלט כלי / טבלה / לוג / ייצוא.
-    בדיקות אלה רצות לפני כל פרסור — Tier 4 מנצח תמיד.
+    בדיקות אלה רצות לפני כל פרסור (כולל חילוץ מועמדי-ליד) — Tier 4 מנצח תמיד.
     """
     if _TABLE_RE.search(text):
         return True, "table_separator"
@@ -93,10 +143,34 @@ def _is_tier4(text: str) -> tuple[bool, str]:
         return True, "json_block"
     if _CSV_RE.search(text):
         return True, "csv_block"
-    # ≥3 lines starting with bot emoji (bot output pasted in)
-    bot_lines = _BOT_OUTPUT_RE.findall(text)
-    if len(bot_lines) >= 3:
+    # ≥2 lines starting with bot/system-output emoji (bot output pasted in)
+    if len(_BOT_OUTPUT_RE.findall(text)) >= 2:
         return True, "bot_output_block"
+
+    # BUG-C89-TIER4-PRECEDENCE — hard markers below run BEFORE lead
+    # extraction, same as the checks above; any hit short-circuits Tier 4.
+    text_lower = text.lower()
+    for marker in _LITERAL_MARKERS:
+        if marker in text_lower:
+            return True, "system_field_leak"
+    # Bare "airtable" is only a Tier-4 signal combined with other pasted-
+    # content structure (colon field, newline, rec-id, memory_key) — a short
+    # explicit command like "תבדוק עכשיו את Airtable" must still reach the
+    # real SYSTEM_STATUS check (BUG-IC-01/C89), not get swallowed here.
+    if "airtable" in text_lower and (
+        "\n" in text or ":" in text
+        or _AIRTABLE_ID_RE.search(text) or _MEMORY_KEY_RE.search(text)
+    ):
+        return True, "system_field_leak"
+    if _MEMORY_KEY_RE.search(text):
+        return True, "memory_key_leak"
+    if _SCORE_LIKE_RE.search(text):
+        return True, "score_like"
+    if _has_table_header(text):
+        return True, "table_header"
+    if _has_fixed_width_table(text):
+        return True, "fixed_width_table"
+
     return False, ""
 
 
