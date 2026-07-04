@@ -153,17 +153,31 @@ def detect_intent(text: str, confidence_threshold: float = 0.75) -> tuple[str, f
 # Only a literal /status (or an explicit action verb + target, e.g.
 # "בדוק חיבורי מערכת") is allowed to trigger that. Everything else here
 # routes to Handler.CLARIFY with a specific disambiguating question.
+#
+# BUG-IC-01B: Also catches prefixed ambiguous phrases with common natural-language
+# prefixes (אני צריך, צריך, רוצה, אפשר, תעזור לי) before the ambiguous object.
 # ══════════════════════════════════════════════════
 
 _AMBIGUOUS_PHRASES: list[tuple[re.Pattern, str]] = [
+    # Status/System check — bare or prefixed
     (re.compile(r"^(סטטוס|status|מה המצב|מצב)\s*[\?!.]*$", re.IGNORECASE),
      "אתה רוצה שאבדוק חיבורים עכשיו (Gmail/Calendar/Airtable), או משהו אחר?"),
+    (re.compile(r"^(אני\s+)?(צריך|רוצה|אפשר|תעזור לי).*(סטטוס|status|מה המצב|מצב)\s*[\?!.]*$", re.IGNORECASE),
+     "אתה רוצה שאבדוק חיבורים עכשיו (Gmail/Calendar/Airtable), או משהו אחר?"),
+
+    # System tests — bare or prefixed
     # BUG-056: the ? must sit on the ו (בדיקה/בדיקת vs בדיקות), not on the
     # trailing ת — a ?-on-ת regex never matches the singular/construct form
     # "בדיקת" (no ו) at all, only "בדיקו"/"בדיקות".
     (re.compile(r"^בדיקו?ת\s*מערכת\s*[\?!.]*$", re.IGNORECASE),
      "אתה רוצה שאבדוק חיבורים עכשיו או שאתה מתכוון לתיעוד בדיקות?"),
+    (re.compile(r"^(אני\s+)?(צריך|רוצה|אפשר|תעזור לי).*בדיקו?ת\s*מערכת\s*[\?!.]*$", re.IGNORECASE),
+     "אתה רוצה שאבדוק חיבורים עכשיו או שאתה מתכוון לתיעוד בדיקות?"),
+
+    # Tasks — bare or prefixed
     (re.compile(r"^(תמלא|למלא)\s*משימות\s*[\?!.]*$", re.IGNORECASE),
+     "להוסיף משימה חדשה, לעדכן קיימת, או לראות רשימה?"),
+    (re.compile(r"^(אני\s+)?(צריך|רוצה|אפשר|תעזור לי).*(תמלא|למלא|לראות|לעדכן).*משימ", re.IGNORECASE),
      "להוסיף משימה חדשה, לעדכן קיימת, או לראות רשימה?"),
 ]
 
@@ -173,6 +187,7 @@ def detect_ambiguous_phrase(text: str) -> Optional[str]:
     מזהה משפט קצר דו-משמעי (בעיקר owner/staff) שאסור שיפעיל בדיקת מערכת
     או פעולה רחבה אוטומטית. מחזיר שאלת הבהרה אם נמצאה התאמה, אחרת None.
     רץ רק כשdetect_intent כבר החזיר UNKNOWN — לא דורס כוונה מפורשת שזוהתה.
+    Supports both bare phrases ("למלא משימות") and prefixed ones ("אני צריך למלא משימות").
     """
     stripped = text.strip()
     for pattern, question in _AMBIGUOUS_PHRASES:
