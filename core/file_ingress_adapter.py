@@ -16,7 +16,17 @@ import csv
 import io
 import logging
 
+from core.ingress_envelope import IngressEnvelope
+
 logger = logging.getLogger(__name__)
+
+# C94 Stage ב — channel this adapter's files currently arrive on → provider.
+# File upload today only reaches this adapter via Telegram document messages
+# (see app.py's _handle_telegram_media); extend when another channel gains
+# file upload.
+_CHANNEL_TO_PROVIDER = {
+    "telegram": "telegram_bot_api",
+}
 
 
 class FileParseError(Exception):
@@ -64,6 +74,37 @@ def parse_structured_file_rows(file_bytes: bytes, filename: str) -> list[str]:
             row_texts.append(f"[malformed_row] {raw}")
 
     return row_texts
+
+
+# C94 Stage ב — this adapter's ONLY C94 responsibility: turn one already-
+# parsed row into a valid IngressEnvelope. It does not call classify_ingress()
+# itself, does not know about tiers/ActionGateway, and never touches
+# EvidenceTrace (that's a byproduct the caller builds AFTER running the row
+# through the existing, unchanged C89/C90 pipeline — see app.py).
+def build_file_row_envelope(
+    *, identity, channel: str, filename: str, row_index: int, row_text: str,
+) -> IngressEnvelope:
+    """
+    בונה IngressEnvelope לשורת קובץ בודדת, לפני כל כניסה ל-classify_ingress().
+    provider נגזר מה-channel שממנו הועלה הקובץ (_CHANNEL_TO_PROVIDER) — לא
+    מנוחש/הארדקוד בקריאה עצמה, כדי שהחלפת provider עתידית (אם יתווסף ערוץ
+    file upload נוסף) תדרוש רק עדכון המיפוי הזה.
+
+    source_ref (לא raw_ref — ראה C94-A.1) הוא מצביע קבוע-מראש ("file:<שם
+    קובץ>:row<אינדקס>"), זמין תמיד לפני סיווג, ואינו תלוי ב-C89's
+    raw-capture mechanism. envelope_id מזוהה אוטומטית (uuid) על ידי
+    IngressEnvelope עצמו.
+    """
+    provider = _CHANNEL_TO_PROVIDER.get(channel, channel)
+    return IngressEnvelope(
+        source_channel="file_upload",
+        provider=provider,
+        raw_event_id=f"{filename}:row{row_index}",
+        sender_identity=identity.memory_key,
+        normalized_text=row_text,
+        attachments=(filename,),
+        source_ref=f"file:{filename}:row{row_index}",
+    )
 
 
 def _row_to_text(header: list[str], row: tuple) -> str:
