@@ -1,10 +1,36 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-07-05 (מאוחר ביותר) — C94 (Unified Ingress Envelope + Evidence Trace) שלבים א׳-ד׳ כולם מוזגו ל-`main` (PR #236–#239) — ראה 0.12 למטה. קודם: BUG-066/BUG-067 (Daily Tasks fail-safe + Shabbat gate) מוזגו ל-`main` (PR #231, PR #230) — ראה 0.11 למטה.
-**עודכן על ידי:** Claude Code — PR #236/#237/#238/#239 מוזגו (C94 Stage א׳-ד׳), ראה 0.12 למטה
+**עודכן:** 2026-07-05 (מאוחר ביותר) — C94: נוסף `FEATURE_INGRESS_ENVELOPE` כ-kill-switch (default ON) ל-envelope-dispatch ב-`run_agent()` — ראה 0.13 למטה. קודם: כל 4 שלבי C94 מוזגו ל-`main` (PR #236–#239) — ראה 0.12 למטה.
+**עודכן על ידי:** Claude Code — FEATURE_INGRESS_ENVELOPE נוסף, ראה 0.13 למטה
 
 > מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (מיושן, 19/06) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
+
+---
+
+## 0.13 C94 — נוסף `FEATURE_INGRESS_ENVELOPE` kill-switch, default ON — 2026-07-05 (קרא לפני 0.12)
+
+**למה:** 0.12 (למטה) תיעד ש-C94 (4 שלביו) נבנה בלי feature flag בכלל — equivalence-preserving בכל שלב, נחשב "always-on plumbing". זו סטייה מפורשת מ-`RELEASE_CHECKLIST.md`'s "Feature flag הוגדר וכבוי ברירת מחדל", ולא היה קיים kill-switch לחירום אם ה-envelope-building עצמו יתחיל לזרוק שגיאות בפרודקשן.
+
+**התיקון (תוסף מינימלי, לא refactor):** שורה אחת בתנאי ב-`app.py`'s `run_agent()`:
+```python
+# לפני:
+if raw_event_id and channel in ("telegram", "whatsapp"):
+# אחרי:
+if _flag_enabled("FEATURE_INGRESS_ENVELOPE") and raw_event_id and channel in ("telegram", "whatsapp"):
+```
+פלוס entry ב-`feature_flags.py`'s registry docstring + `_DEFAULTS` dict.
+
+**קריטי — ברירת המחדל היא ON, לא OFF (הפוך מכמעט כל דגל אחר במערכת):** C94 כבר ב-`main` (וכנראה בפרוד). נבדק ישירות בקוד לפני push: `is_enabled()` על שם flag שלא מוגדר בכלל (לא ב-Render, לא בקוד) מחזיר `False` — ז"א אם `FEATURE_INGRESS_ENVELOPE` היה מקבל את ברירת המחדל הרגילה (Off), ה-deploy הזה עצמו היה מכבה שקט את כל C94 לפני שמישהו יספיק להגדיר את הדגל ב-Render. נפתר בדיוק כמו `IMPORT_DOMAIN` (הדגל היחיד האחר עם ברירת מחדל הפוכה): `_DEFAULTS["FEATURE_INGRESS_ENVELOPE"] = os.environ.get("FEATURE_INGRESS_ENVELOPE", "true")`.
+
+**אימות לפני push (חובה, בוצע):**
+- 138 הבדיקות (`test_c94_ingress_envelope.py` 57 + `test_c90_structured_file_capture.py` 41 + `test_c94_stage_c_telegram.py` 28 + `test_c94_stage_d_whatsapp.py` 12) הורצו **פעמיים**: פעם עם `FEATURE_INGRESS_ENVELOPE` לא מוגדר בסביבה בכלל (מדמה "עוד לא הוגדר ב-Render"), פעם עם `=true` מפורש — **תוצאה זהה, 138/138 בשתי הריצות**.
+- נבדק גם `=false` במפורש: `build_telegram_envelope()` נקרא **0 פעמים** — ה-kill-switch באמת מדכא את בניית ה-envelope, לא no-op.
+- אפס רגרסיה על `smoke_tests.py` + כל חבילת `test_*.py` הקיימת + `core/router/test_router.py`.
+
+**Render env var אופציונלי חדש:** `FEATURE_INGRESS_ENVELOPE` — לא נדרש (default true, אין שינוי התנהגות אם לא מוגדר), אבל זמין כעת כ-kill-switch חירום (`=false` ב-Render מכבה את ה-envelope-building בלי לגעת בקוד).
+
+**ראה:** ROADMAP.md §C94 (סעיף "נוסף `FEATURE_INGRESS_ENVELOPE`"), `feature_flags.py`'s registry docstring.
 
 ---
 
@@ -14,9 +40,11 @@
 
 **שלבים:** א׳ (schemas, `core/ingress_envelope.py`) → ב׳ (File adapter, `core/file_ingress_adapter.py`, + תיקון gap אמיתי: `classify_ingress()` לא היה עטוף try/except ב-`_process_structured_file_upload`) → ג׳ (Telegram, `core/telegram_ingress_adapter.py` + `core/router/capture_router.py`'s `classify_capture_ic()` עטוף — חריגה כבר לא מפילה את כל ה-router ל-Approval/UNKNOWN) → ד׳ (WhatsApp/Twilio, `core/whatsapp_ingress_adapter.py`; Meta Cloud API נשאר gated/לא נוגע במפורש). 138 בדיקות חדשות סה"כ (57+41+28+12), אפס רגרסיה בכל שלב.
 
-**⚠️ אין Feature Flag ל-C94 עצמו — במכוון, לא נשכח:** כל שלב תוכנן להיות equivalence-preserving (טסט ייעודי לכל שלב מוכיח תוצאה זהה עם/בלי ה-wiring) ולהתדרדר בעדינות (graceful degradation) בכשל, ולכן נחשב "always-on plumbing" ולא feature חדש שדורש flag. **זה סוטה מ-`RELEASE_CHECKLIST.md`'s "Feature flag הוגדר וכבוי ברירת מחדל"** — סעיף זה לא קוים באף אחד מ-4 ה-PR. אם רוצים kill-switch (למשל למקרה חירום שה-envelope-building עצמו מתחיל לזרוק שגיאות ב-prod) — לא קיים כרגע, צריך להוסיף בנפרד.
+**✅ נסגר — `FEATURE_INGRESS_ENVELOPE` נוסף כ-kill-switch (ראה 0.13 למעלה).** במקור C94 לא היה לו flag כלל — סטייה מ-`RELEASE_CHECKLIST.md`'s "Feature flag הוגדר וכבוי ברירת מחדל" שתועדה כפער מודע. עכשיו קיים דגל אמיתי, **default ON** (לא OFF כמו כמעט כל דגל אחר במערכת — כי C94 כבר במיין, ודגל שברירת המחדל שלו False היה מכבה אותו שקט ב-deploy). מתועד גם ב-`feature_flags.py`'s registry docstring.
 
-**דגלים סמוכים (לא C94 עצמו, אלא ה-pipelines שהוא עוטף) — ברירת מחדל בקוד (`feature_flags.py`'s `_DEFAULTS` מכיל רק `IMPORT_DOMAIN`; כל שאר הדגלים = כבוי אלא אם Render env var דורס):**
+**עדכון (ראה 0.13 למעלה): `_DEFAULTS` כבר לא מכיל רק `IMPORT_DOMAIN` — נוסף גם `FEATURE_INGRESS_ENVELOPE` (default true).**
+
+**דגלים סמוכים (לא C94 עצמו, אלא ה-pipelines שהוא עוטף) — ברירת מחדל בקוד:
 - `FEATURE_STRUCTURED_FILE_CAPTURE` (C90) — כבוי בקוד; לפי הסנאפשוט הקודם של קובץ זה (0.10) — עדיין כבוי בפרודקשן.
 - `FEATURE_AUTO_CAPTURE` (C89) — כבוי בקוד; אותו סנאפשוט — עדיין כבוי בפרודקשן.
 - `FEATURE_RAW_CAPTURE` — כבוי בקוד.
