@@ -1,10 +1,25 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-07-05 (מאוחר ביותר) — C94 Telegram+WhatsApp inbound אומת בפרודקשן בפועל ע"י הבעלים (envelope בונה תקין, אין שגיאות `[C94]`); נמצא ותועד BUG-072 (לוגים קיימים חושפים chat_id גולמי — לא C94, לא תוקן) — ראה 0.15 למטה. קודם: C89 סטטוס סגור — ראה 0.14 למטה.
-**עודכן על ידי:** Claude Code — production verification + BUG-072, ראה 0.15 למטה
+**עודכן:** 2026-07-05 (מאוחר ביותר) — C94 production verification הושלם 4/5 (Telegram+WhatsApp+File+Render commit hash, ראה 0.16 למטה). קודם: אימות ראשוני (Telegram+WhatsApp inbound) + BUG-072 — ראה 0.15 למטה.
+**עודכן על ידי:** Claude Code — production verification 4/5 הושלם, ראה 0.16 למטה
 
 > מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (מיושן, 19/06) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
+
+---
+
+## 0.16 C94 — Production verification הושלם 4/5 — 2026-07-05 (קרא לפני 0.15)
+
+**עדכון ל-0.15 (למטה) — כל הפריטים הפתוחים שם נסגרו חוץ מאחד, ע"י הבעלים:**
+1. ✅ Telegram inbound live — verified (ראה 0.15).
+2. ✅ WhatsApp/Twilio inbound live — verified (ראה 0.15).
+3. ✅ File/xlsx/csv live — verified, **לאחר הדלקה זמנית** של `FEATURE_STRUCTURED_FILE_CAPTURE` לצורך הבדיקה בלבד. **אושר במפורש: הוחזר ל-OFF מיד אחרי** — אין שינוי מתמשך למצב הדגל בפרוד; ההתנהגות הקיימת (flag כבוי) ממשיכה כרגיל.
+4. ✅ Render commit hash ל-C94 — verified: `41f3305` חי בפרוד. זה ה-merge commit של PR #241 (kill-switch) — ה-commit האחרון שנוגע בקוד בפועל; PR-ים מאוחרים יותר (#242 ואילך) הם docs-only, אין להם commit hash קוד חדש לאמת.
+5. ➖ מסלול "classify_ingress exception graceful-degradation" — **test-covered only, לא נבדק בפרוד בכוונה.** זה נשאר כך במפורש — הפריט היחיד מתוך 5 שלא ניתן/כדאי לאמת על תעבורה אמיתית בלי לשבור prod בכוונה; ה-138 בדיקות (`test_c94_*.py`) הן ההוכחה היחידה לו, וזה מספיק.
+
+**מסקנה: C94 production verification נחשב הושלם ברמה המעשית (4/5, הפריט ה-5 נשאר test-only בכוונה).**
+
+**ראה:** ROADMAP.md §C94 (checklist מעודכן).
 
 ---
 
