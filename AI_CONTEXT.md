@@ -1,10 +1,26 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-07-04 (מאוחר ביותר) — 5 באגים מוזגים ל-`main` בסבב אחד (PR #220–#224): BUG-IC-01B, BUG-C89-APPROVAL-IDENTITY, BUG-SESSIONS-ROOT, BUG-C89-TIER4-PRECEDENCE, C89-RAW-OBS — ראה 0.9 למטה
-**עודכן על ידי:** Claude Code — כל 5 ה-PR מוזגו ל-`main` (ראה 0.9 למטה)
+**עודכן:** 2026-07-05 (מאוחר ביותר) — C90 Structured File Capture מוזג ל-`main` (PR #228, `004fbf9`) — ראה 0.10 למטה. קודם: 5 באגי C89-family מוזגו (PR #220–#224) — ראה 0.9 למטה
+**עודכן על ידי:** Claude Code — PR #225/#227/#228 מוזגו (docs + hardening + C90), ראה 0.10/0.9 למטה
 
 > מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (מיושן, 19/06) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
+
+---
+
+## 0.10 C90 — Structured File Capture, מוזג ל-main (PR #228) — 2026-07-05 (קרא לפני 0.9)
+
+**החלטה מפורשת של הבעלים:** ROADMAP.md חוסם C90 על "C89 production-verified" (`FEATURE_AUTO_CAPTURE` פעיל בפרוד + נתוני `AgentObservation` אמיתיים) — עדיין לא קרה. הבעלים בחר במפורש לבנות את C90 עכשיו בכל זאת, מהטעם ש-C90 עצמו לא נוגע בנתיב auto-write כלל (ראו למטה) — לא ignored את הגייט, decision מתועד.
+
+**גרסה ראשונה הייתה שגויה, תוקנה באותו PR לפני מיזוג:** commit ראשון (`da49d3e`) כפה Tier 4 גורף על כל source_type="file" — טיפל בקובץ שלם כ-blob אחד עם הודעת preview גנרית יחידה. לאחר שהמשתמש סיפק ספק מפורט יותר, תוקן (`f585d9d`) ל-**ingress source adapter בלבד**: `core/file_ingress_adapter.py` (חדש) מפרסר xlsx/csv לשורות; כל שורה עוברת, ללא special-casing, דרך אותה `_classify_ingress_core()`/`handle_lead_candidate()` שהודעת טקסט הייתה עוברת — שורה עם שם+טלפון ברור יכולה להיות Tier1 לגיטימי (לא Tier4 כפוי). כל שורה: `raw_ref`+`AgentObservation` נפרדים, ו-Tier1-3 יוצר ActionGateway contract נפרד הדורש אישור פרטני (אין bulk auto-approve). מגבלת בטיחות `_MAX_FILE_ROWS_PROCESSED=200` מדווחת במפורש. גייט: `FEATURE_STRUCTURED_FILE_CAPTURE` (כבוי כברירת מחדל) + `identity.is_internal` + סיומת/mime xlsx/csv.
+
+**באג עצמאי שנתפס ותוקן לפני מיזוג:** `_row_to_text()` השתמש במפריד `" | "` שהתנגש עם `_TABLE_RE` הקיים (Tier4 hard marker) — כל שורה עם 3+ עמודות מאוכלסות (Name/Phone/City, מקרה טיפוסי) נכפתה Tier4 בטעות מסיבת formatting, לא תוכן אמיתי. תוקן ל-`", "`, ננעל ב-regression test נגד הפלט האמיתי של הפרסר (לא string מומצא).
+
+**בדיקה:** `test_c90_structured_file_capture.py` (37/37) — פרסור xlsx/csv אמיתי, no-merging/no-dropping, Tier1 אמיתי (לא נכפה) מול Tier4 hard-marker (עדיין עובד), raw_ref+observation נפרדים לכל שורה, אין auto-write ללא אישור, שורה פגומה לא נעלמת, קובץ לא-תקין→שגיאה מפורשת, gating מלא. אפס רגרסיה על `test_media_layer.py`/`test_c89_raw_obs.py`/`test_c89_tier4_precedence.py`/`test_capture_router_wiring.py`/`core/router/test_router.py` + `smoke_tests.py`.
+
+**PR:** #228 (`claude/ic-01b-ambiguous-prefix-routing-zp109k`) — 3 commits (docs + C90-v1-שגוי + C90-v2-מתוקן), מוזג `004fbf9`. ראה CHANGE_CONTROL_LOG.md C88, ROADMAP.md §C90.
+
+**לא אומת:** production/Render. C91-C93 (voice/email/image) נשארים לא-ממומשים (Tier 5) — מחוץ לסקופ הזה.
 
 ---
 
