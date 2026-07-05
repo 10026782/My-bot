@@ -221,8 +221,11 @@ def _validate_meta_signature() -> bool:
 
 def _normalize_meta_payload(payload: dict) -> dict | None:
     """
-    מחזיר dict עם: text, from, to, msg_id.
+    מחזיר dict עם: text, from, to, msg_id, media (optional).
     מחזיר None אם אין הודעה נכנסת (למשל קריאת status/read/delivery).
+
+    BUG-071 FIX: Extracts media metadata (image/video/audio/document).
+    Media handling is async — download URLs fetched on demand via Meta API.
     """
     try:
         entry = payload["entry"][0]["changes"][0]["value"]
@@ -230,12 +233,27 @@ def _normalize_meta_payload(payload: dict) -> dict | None:
         if not messages:
             return None
         msg = messages[0]
-        return {
+
+        result = {
             "text":   msg.get("text", {}).get("body", ""),
             "from":   msg.get("from", "unknown"),
             "to":     entry.get("metadata", {}).get("display_phone_number", "unknown"),
             "msg_id": msg.get("id", ""),
+            "media":  None,  # populated if media present
         }
+
+        # Extract media metadata (type + media_id for URL fetch)
+        msg_type = msg.get("type", "text")
+        if msg_type in ("image", "video", "audio", "document"):
+            try:
+                from meta_whatsapp_media_adapter import extract_meta_whatsapp_media
+                media = extract_meta_whatsapp_media(msg)
+                if media:
+                    result["media"] = media
+            except Exception as e:
+                logger.warning(f"[Meta WhatsApp] media extraction failed: {e}")
+
+        return result
     except (KeyError, IndexError, TypeError):
         return None
 
@@ -2416,6 +2434,56 @@ def _webhook_whatsapp_impl():
     if idempotency.is_duplicate("whatsapp", sender, dedup_key):
         return _empty_twiml()
 
+    # ── BUG-071 FIX: WhatsApp Media Support ─────────────────────────────
+    # Extract and process media (voice/file) from Twilio webhook.
+    # Per F13 architecture: metadata extraction + byte download from signed URL,
+    # routed through unified media_handler pipeline (same as Telegram C90).
+    try:
+        from whatsapp_media_adapter import (
+            extract_whatsapp_media, download_whatsapp_media, infer_file_type, infer_filename
+        )
+        from media_handler import handle_voice_note, handle_file_upload
+        from identity import resolve_identity
+
+        media_meta = extract_whatsapp_media(request.values.to_dict())
+        if media_meta:
+            try:
+                _media_identity = resolve_identity("whatsapp", sender)
+                owner_chat_id = os.environ.get("OWNER_TELEGRAM_ID", "") or \
+                                os.environ.get("ELIYAHU_CHAT_ID", "") or \
+                                os.environ.get("DIGEST_CHAT_ID", "")
+
+                file_bytes = download_whatsapp_media(media_meta["media_url"])
+                if file_bytes:
+                    mime_type = media_meta["mime_type"]
+                    file_type = infer_file_type(mime_type)
+                    filename = infer_filename(media_meta["media_url"], mime_type, media_meta["file_id"])
+
+                    if file_type == "audio":
+                        # Voice note → transcription pipeline
+                        result = handle_voice_note(
+                            file_bytes, mime_type, media_meta["file_id"],
+                            sender, domain_from_channel, owner_chat_id, source="whatsapp"
+                        )
+                        logger.info(f"[WhatsApp] voice note processed: ok={result.ok}, has_transcript={bool(result.normalized_transcript)}")
+                    else:
+                        # File/image/video → Drive upload + Media Files record
+                        result = handle_file_upload(
+                            file_bytes, filename, mime_type, file_type,
+                            media_meta["file_id"], sender, domain_from_channel,
+                            source="whatsapp", linked_lead_id=""
+                        )
+                        logger.info(f"[WhatsApp] file uploaded: ok={result.ok}, file_size_tier={result.file_size_tier}")
+
+                    if not result.ok and result.error and result.error.error_message:
+                        logger.warning(f"[WhatsApp] media processing failed: {result.error.error_message}")
+            except Exception as e:
+                logger.warning(f"[WhatsApp] media handler error: {e}", exc_info=True)
+    except ImportError:
+        logger.debug("[WhatsApp] media adapter not available, skipping media handling")
+    except Exception as e:
+        logger.warning(f"[WhatsApp] media extraction error: {e}", exc_info=True)
+
     if _inject_utm and _flag_enabled("AD_ATTRIBUTION"):
         try:
             # תיקון: memory_key קנוני — boss_hq:+972... (כמו ש-identity.memory_key
@@ -2512,6 +2580,68 @@ def webhook_meta_whatsapp():
         return jsonify({"status": "duplicate"}), 200
 
     domain_from_channel = _channel_domain(to_number)
+
+    # ── BUG-071 FIX: Meta WhatsApp Media Support ───────────────────────────
+    # Extract media (image/video/audio/document), fetch download URL from Meta API,
+    # and route through unified media_handler pipeline.
+    try:
+        media_meta = normalized.get("media")
+        if media_meta:
+            try:
+                from meta_whatsapp_media_adapter import (
+                    get_meta_media_download_url, infer_mime_type_from_meta_type
+                )
+                from media_handler import handle_voice_note, handle_file_upload
+                from identity import resolve_identity
+
+                # Fetch download URL from Meta API
+                access_token = os.environ.get("META_BUSINESS_TOKEN", "")
+                if not access_token:
+                    logger.warning("[Meta WhatsApp] no META_BUSINESS_TOKEN — skipping media download")
+                else:
+                    media_url = get_meta_media_download_url(media_meta["media_id"], access_token)
+                    if media_url:
+                        # Download bytes from Meta-signed URL
+                        try:
+                            import requests
+                            resp = requests.get(media_url, timeout=30)
+                            resp.raise_for_status()
+
+                            file_bytes = resp.content
+                            if len(file_bytes) > 50 * 1024 * 1024:  # 50MB limit
+                                logger.warning("[Meta WhatsApp] media too large: %d bytes", len(file_bytes))
+                            else:
+                                _media_identity = resolve_identity("whatsapp", sender)
+                                owner_chat_id = os.environ.get("OWNER_TELEGRAM_ID", "") or \
+                                                os.environ.get("ELIYAHU_CHAT_ID", "") or \
+                                                os.environ.get("DIGEST_CHAT_ID", "")
+
+                                mime_type = infer_mime_type_from_meta_type(
+                                    media_meta["media_type"], media_meta.get("filename", "")
+                                )
+                                filename = media_meta.get("filename") or f"meta_{media_meta['message_id']}"
+
+                                if media_meta["media_type"] == "audio":
+                                    result = handle_voice_note(
+                                        file_bytes, mime_type, media_meta["message_id"],
+                                        sender, domain_from_channel, owner_chat_id, source="whatsapp_meta"
+                                    )
+                                    logger.info(f"[Meta WhatsApp] voice note processed: ok={result.ok}")
+                                else:
+                                    result = handle_file_upload(
+                                        file_bytes, filename, mime_type, media_meta["media_type"],
+                                        media_meta["message_id"], sender, domain_from_channel,
+                                        source="whatsapp_meta", linked_lead_id=""
+                                    )
+                                    logger.info(f"[Meta WhatsApp] file uploaded: ok={result.ok}")
+                        except Exception as e:
+                            logger.warning(f"[Meta WhatsApp] media download/process failed: {e}")
+            except ImportError:
+                logger.debug("[Meta WhatsApp] media adapter not available")
+            except Exception as e:
+                logger.warning(f"[Meta WhatsApp] media handler error: {e}", exc_info=True)
+    except Exception as e:
+        logger.warning(f"[Meta WhatsApp] media extraction error: {e}", exc_info=True)
 
     if not _flag_enabled("META_OUTBOUND_ENABLED"):
         logger.info(

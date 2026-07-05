@@ -23,6 +23,21 @@
 
 > נבנה מ-`git log --since="30 days ago"` (~172 commits, `f935c53`→`eebf73b`) + טבלאות ROADMAP.md (Stabilization Sprint, World 2, Sprint 16/06). כל commit hash צוטט ישירות מ-git או מ-ROADMAP — שורות שלא נמצאה להן ראיה ישירה מסומנות "לא ידוע".
 
+### BUG-071-LOCATION-MOVE — move WhatsApp media adapters from providers/ to root (structural fix for F12/F13 quarantine)
+- **תאריך:** 05/07/2026
+- **סוג:** Refactoring (structural only, zero behavior change)
+- **Requirement:** BUG-071 (WhatsApp media support) — avoid placing live code under `providers/` folder which is quarantined pending F12/F13 overlap resolution (ROADMAP.md §F13, CLAUDE.md §providers). Root placement aligns with convention of live integrations (`media_handler.py`, `cmd_update.py`).
+- **Commit:** (ייקבע לאחר אישור)
+- **PR:** (תמתין ל-merge של BUG-071 PR)
+- **Review על ידי:** —
+- **Deploy תאריך:** סה"כ עם BUG-071
+- **Verified בפרודקשן:** לא עדיין (ממתין למיזוג)
+- **Verification ראיה:** smoke_tests.py ✅ | test_whatsapp_media.py (6/6) ✅ | test_bug070_pending_approval_multi.py (9/9) ✅
+- **Files רזומנו:** providers/whatsapp_media_adapter.py → whatsapp_media_adapter.py; providers/meta_whatsapp_media_adapter.py → meta_whatsapp_media_adapter.py; app.py (3 imports); test_whatsapp_media.py (6 imports)
+- **Docs עודכנו:** BUG_AUDIT_LOG.md
+- **Feature Flag:** לא רלוונטי
+- **Rollback plan:** `git revert` + revert imports
+
 ### F52-STAGE1 — Safe Refactors: static audits (#6/#7) + shadow tool-result recorder (#4)
 - **תאריך:** 03/07/2026
 - **סוג:** Feature (audit tooling, additive-only, zero behavior change)
