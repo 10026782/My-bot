@@ -60,6 +60,19 @@
 # raw exception message (may embed row text / PII), only a safe summary
 # (e.g. type(exc).__name__).
 #
+# NOT YET DONE — intentional, not forgotten: every current caller (Stage ב's
+# app.py _process_structured_file_upload, Stage ג's
+# core/router/capture_router.py classify_capture_ic()) builds an
+# EvidenceTrace, calls record_classification(), logs it via logger.debug(),
+# and lets it go out of scope — nothing persists it anywhere queryable.
+# EvidenceTrace today is an in-memory schema+validation layer (proves each
+# event's outcome is captured correctly the moment it happens), NOT yet a
+# persisted evidence store. Wiring a real backing store (Airtable/DB) +
+# making latest_trace()/next_attempt() operate over persisted history rather
+# than a caller-supplied in-memory list is future, explicitly out-of-scope
+# work — not part of Stage ד (WhatsApp) or any other currently-planned
+# stage. See ROADMAP.md's C94 section for the same note.
+#
 # "לעולם לא לגלות שוב ש-Telegram יודע לעשות משהו ש-WhatsApp לא" (BUG-071 pattern).
 #
 # This module only defines the schemas + their validation. No adapter wiring,
