@@ -246,7 +246,7 @@ def _normalize_meta_payload(payload: dict) -> dict | None:
         msg_type = msg.get("type", "text")
         if msg_type in ("image", "video", "audio", "document"):
             try:
-                from providers.meta_whatsapp_media_adapter import extract_meta_whatsapp_media
+                from meta_whatsapp_media_adapter import extract_meta_whatsapp_media
                 media = extract_meta_whatsapp_media(msg)
                 if media:
                     result["media"] = media
@@ -2439,7 +2439,7 @@ def _webhook_whatsapp_impl():
     # Per F13 architecture: metadata extraction + byte download from signed URL,
     # routed through unified media_handler pipeline (same as Telegram C90).
     try:
-        from providers.whatsapp_media_adapter import (
+        from whatsapp_media_adapter import (
             extract_whatsapp_media, download_whatsapp_media, infer_file_type, infer_filename
         )
         from media_handler import handle_voice_note, handle_file_upload
@@ -2588,7 +2588,7 @@ def webhook_meta_whatsapp():
         media_meta = normalized.get("media")
         if media_meta:
             try:
-                from providers.meta_whatsapp_media_adapter import (
+                from meta_whatsapp_media_adapter import (
                     get_meta_media_download_url, infer_mime_type_from_meta_type
                 )
                 from media_handler import handle_voice_note, handle_file_upload

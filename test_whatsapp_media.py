@@ -25,7 +25,7 @@ os.environ.setdefault("SETUP_WEBHOOK", "0")
 
 def test_twilio_media_extraction():
     """Test Twilio WhatsApp media extraction."""
-    from providers.whatsapp_media_adapter import extract_whatsapp_media
+    from whatsapp_media_adapter import extract_whatsapp_media
 
     # Media present
     request_values = {
@@ -58,7 +58,7 @@ def test_twilio_media_extraction():
 
 def test_twilio_media_filename_inference():
     """Test filename construction from Twilio media metadata."""
-    from providers.whatsapp_media_adapter import infer_filename
+    from whatsapp_media_adapter import infer_filename
 
     # URL with filename (has extension) — extract it
     url = "https://example.com/path/to/document.pdf"
@@ -78,7 +78,7 @@ def test_twilio_media_filename_inference():
 
 def test_twilio_file_type_inference():
     """Test media type classification."""
-    from providers.whatsapp_media_adapter import infer_file_type
+    from whatsapp_media_adapter import infer_file_type
 
     assert infer_file_type("audio/ogg") == "audio"
     assert infer_file_type("audio/mp3") == "audio"
@@ -89,7 +89,7 @@ def test_twilio_file_type_inference():
 
 def test_meta_media_extraction():
     """Test Meta WhatsApp media extraction."""
-    from providers.meta_whatsapp_media_adapter import extract_meta_whatsapp_media
+    from meta_whatsapp_media_adapter import extract_meta_whatsapp_media
 
     # Image message
     message_image = {
@@ -139,7 +139,7 @@ def test_meta_media_extraction():
 
 def test_meta_mime_type_inference():
     """Test MIME type inference from Meta media types."""
-    from providers.meta_whatsapp_media_adapter import infer_mime_type_from_meta_type
+    from meta_whatsapp_media_adapter import infer_mime_type_from_meta_type
 
     assert infer_mime_type_from_meta_type("image") == "image/jpeg"
     assert infer_mime_type_from_meta_type("video") == "video/mp4"
