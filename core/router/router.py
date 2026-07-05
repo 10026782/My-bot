@@ -25,11 +25,16 @@ def route_request(
     channel_raw:         str,
     identity:            "Identity",
     domain_from_channel: str = "",
+    envelope_id:         str = "",
 ) -> RouteDecision:
     """
     text + channel + identity → RouteDecision
 
     domain_from_channel: comes from config.get_domain(to_number) in webhook.
+    envelope_id: C94 Stage ג — the caller's IngressEnvelope id, if it built
+    one (currently only Telegram, via app.py/core/telegram_ingress_adapter.py).
+    Optional/"" for any other caller — forwarded to capture_router so a
+    classify_ingress() failure's EvidenceTrace can link back to its Envelope.
     """
     # 1. Channel
     channel = detect_channel(channel_raw)
@@ -84,10 +89,16 @@ def route_request(
     capture_ic = None
     if identity.is_internal:
         from .capture_router import classify_capture_ic, _WRITE_WORTHY_TIERS
-        capture_ic = classify_capture_ic(text, chat_id=getattr(identity, "memory_key", ""))
-        capture_tier = capture_ic.tier if capture_ic.tier in _WRITE_WORTHY_TIERS else None
-        capture_reason = capture_ic.reason
-        raw_ref = capture_ic.raw_ref
+        capture_ic = classify_capture_ic(
+            text, chat_id=getattr(identity, "memory_key", ""), envelope_id=envelope_id,
+        )
+        # C94 Stage ג: capture_ic can now legitimately be None (classify_ingress()
+        # itself failed, already logged + traced inside classify_capture_ic) —
+        # same as the identity.is_internal=False case above, handled the same way.
+        if capture_ic is not None:
+            capture_tier = capture_ic.tier if capture_ic.tier in _WRITE_WORTHY_TIERS else None
+            capture_reason = capture_ic.reason
+            raw_ref = capture_ic.raw_ref
 
     # 5. Channel-specific tool override
     tool_override = resolve_tool_for_channel(intent, channel)
