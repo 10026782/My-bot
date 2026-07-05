@@ -1831,6 +1831,78 @@ def _is_structured_file(filename: str, mime_type: str) -> bool:
     return filename.lower().endswith(_STRUCTURED_FILE_EXTENSIONS)
 
 
+# Operational safety cap only — parse_structured_file_rows() itself never
+# drops rows. If a file exceeds this, only the first N are dispatched and
+# the reply explicitly says so (never a silent truncation).
+_MAX_FILE_ROWS_PROCESSED = 200
+
+
+def _process_structured_file_upload(
+    identity, chat_id: str, channel: str, domain: str,
+    file_bytes: bytes, filename: str,
+) -> str:
+    """
+    מפרסר קובץ xlsx/csv לשורות (core/file_ingress_adapter.py) ומעביר כל
+    שורה, אחת בכל פעם, דרך אותו handle_lead_candidate()/classify_ingress()
+    שהודעת טקסט הייתה עוברת — ללא special-casing. כל שורה יוצרת AgentObservation
+    + raw_ref משלה (BUG-065). כל Tier 1-3 דורש אישור פרטני ("כן"/"לא"),
+    בדיוק כמו הודעת טקסט בודדת — אין "אישור קבוצתי" (BUG-058 עדיין פתוח,
+    לא נבנה resolver ל-batch כאן).
+    """
+    from core.file_ingress_adapter import parse_structured_file_rows, FileParseError
+    from core.ingress_classifier import classify_ingress
+    import core.lead_candidate_handler as lch
+
+    try:
+        rows = parse_structured_file_rows(file_bytes, filename)
+    except FileParseError as exc:
+        logger.warning(f"[C90] file parse failed for {filename}: {exc}")
+        return f"❌ לא הצלחתי לקרוא את הקובץ *{filename}*: {exc}"
+
+    if not rows:
+        return f"📊 הקובץ *{filename}* לא הכיל שורות נתונים — לא בוצעה שום פעולה."
+
+    truncated = len(rows) > _MAX_FILE_ROWS_PROCESSED
+    rows_to_process = rows[:_MAX_FILE_ROWS_PROCESSED]
+
+    tier_counts: dict[int, int] = {}
+    pending_count = 0
+    written_count = 0
+    failed_count = 0
+
+    for row_text in rows_to_process:
+        ic = classify_ingress(row_text, source_type="file")
+        tier_counts[ic.tier] = tier_counts.get(ic.tier, 0) + 1
+        try:
+            reply = lch.handle_lead_candidate(identity, row_text, chat_id, channel, domain=domain, ic=ic)
+        except Exception as exc:
+            logger.error(f"[C90] row dispatch error for {filename}: {exc}", exc_info=True)
+            reply = None
+        if reply is None:
+            continue
+        if reply.startswith("📋"):
+            pending_count += 1
+        elif reply.startswith("✅"):
+            written_count += 1
+        elif reply.startswith("❌"):
+            failed_count += 1
+
+    lines = [f"📊 עיבדתי את הקובץ *{filename}* — {len(rows_to_process)} שורות נתונים."]
+    tier_summary = ", ".join(f"Tier {t}: {c}" for t, c in sorted(tier_counts.items()))
+    lines.append(f"פילוח: {tier_summary}")
+    if pending_count:
+        lines.append(f"⏳ {pending_count} שורות ממתינות לאישור פרטני — ענה *כן*/*לא* לכל אחת בנפרד.")
+    if written_count:
+        lines.append(f"✅ {written_count} נכתבו (FEATURE_AUTO_CAPTURE פעיל).")
+    if failed_count:
+        lines.append(f"❌ {failed_count} נכשלו בכתיבה.")
+    lines.append("לא בוצעה כתיבה אוטומטית קבוצתית — כל שורה דורשת אישור נפרד.")
+    if truncated:
+        lines.append(f"⚠️ הקובץ הכיל {len(rows)} שורות — עובדו רק {_MAX_FILE_ROWS_PROCESSED} הראשונות (מגבלת בטיחות תפעולית).")
+
+    return "\n".join(lines)
+
+
 # F16 — Media Layer: Telegram voice/photo/document intake
 def _handle_telegram_media(message) -> None:
     chat_id = str(message.chat.id)
@@ -1894,10 +1966,13 @@ def _handle_telegram_media(message) -> None:
         # fall through to default Drive/Voice handling — fail-safe, not fail-closed
 
     # ── C90 — Structured File Capture (xlsx/csv) ──────────────────────
-    # Routes through the same classify_ingress() single entry point
-    # (source_type="file") instead of the FEATURE_MEDIA_UPLOAD Drive/Media
-    # Files path. Preview-only by design (ROADMAP.md C90): no auto-write,
-    # no content parsing, no Airtable write — every matching file is Tier 4.
+    # File upload is an ingress SOURCE ADAPTER only — not a new capture
+    # pipeline, not a new classifier, not a new write path. Each row is
+    # parsed (core/file_ingress_adapter.py) and dispatched, one at a time,
+    # through the EXACT SAME classify_ingress()/handle_lead_candidate()
+    # pipeline text messages use — no special-casing, no bulk auto-approve
+    # (every Tier 1-3 row still requires individual "כן" approval, same as
+    # FEATURE_AUTO_CAPTURE=false already enforces for text today).
     # Internal senders only, matching LCH's own is_internal gate.
     if (
         message.content_type == "document"
@@ -1909,15 +1984,16 @@ def _handle_telegram_media(message) -> None:
         mime_type = doc.mime_type or ""
         if _is_structured_file(filename, mime_type):
             try:
-                from core.ingress_classifier import classify_ingress
-                classify_ingress(filename, source_type="file")
-                bot.send_message(
-                    chat_id,
-                    f"📊 קיבלתי את הקובץ *{filename}* — תצוגה מקדימה בלבד, לא בוצעה שום פעולה אוטומטית.\n"
-                    "קליטת קבצים מובנים (xlsx/csv) עדיין לא נתמכת. אם יש לידים ברשימה, "
-                    "אפשר להעתיק ולשלוח אותם כטקסט רגיל.",
-                    parse_mode="Markdown",
+                bot.send_chat_action(chat_id, "typing")
+            except Exception:
+                pass
+            try:
+                file_info = bot.get_file(doc.file_id)
+                file_bytes = bot.download_file(file_info.file_path)
+                reply = _process_structured_file_upload(
+                    identity, chat_id, "telegram", domain, file_bytes, filename,
                 )
+                bot.send_message(chat_id, reply, parse_mode="Markdown")
             except Exception as e:
                 logger.error(f"[Media] structured file capture error: {e}", exc_info=True)
                 try:
