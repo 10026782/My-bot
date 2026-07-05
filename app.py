@@ -1494,6 +1494,22 @@ def run_agent(
             from core.action_gateway import action_gateway as _gw_ow
             return _gw_ow.route_override_word(identity.memory_key, _override_code)
 
+        # BUG-070 gap #1 — "כן 1"/"אשר 3"/"לא 2": אישור/דחייה ממוקדת בהודעה
+        # אחת, בלי לדרוש קודם רשימה ממוספרת. חייב לרוץ *לפני* בדיקת
+        # disambiguation הרגילה (§4 למטה) כדי שלא תנקה בטעות state תלוי,
+        # ולפני _CONFIRM_WORDS/_CANCEL_WORDS כדי שלא ייפול ל-Agent.
+        # פועל מול contracts חיים ישירות (כמו BUG-056) — לא תלוי בדגל.
+        from core.action_gateway import action_gateway as _gw_combined
+        _combined_reply = _gw_combined.route_combined_word(identity.memory_key, _stripped)
+        if _combined_reply is not None:
+            logger.info(
+                "[ActionGateway] route_combined_word: user=%s text=%.30r reply=%.60s",
+                identity.memory_key, _stripped, _combined_reply,
+            )
+            if _out_meta is not None:
+                _out_meta["source_module"] = "action_gateway"
+            return _combined_reply
+
         # §4 disambiguation — "הראשונה"/"1"/etc. כשה-Gateway הציג רשימת בחירה.
         # חייב להיות לפני בדיקת "?" ולפני _CONFIRM_WORDS כדי שלא ייפול ל-Agent.
         from feature_flags import is_enabled as _flag_disambig
