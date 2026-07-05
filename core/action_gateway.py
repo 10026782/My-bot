@@ -473,6 +473,16 @@ class ActionGateway:
         "רביעית": 4, "רביעי": 4, "הרביעית": 4, "הרביעי":  4, "fourth": 4,
     }
 
+    # BUG-070 gap #1: combined wording ("כן 1"/"אשר 3"/"לא 2") — a leading
+    # confirm/cancel keyword followed by an ordinal, targeting one specific
+    # contract in a single message instead of requiring two round-trips.
+    _CONFIRM_KEYWORDS = frozenset({
+        "כן", "אשר", "מאשר", "מאשרת", "אוקי", "בצע", "קדימה", "yes", "y", "ok",
+    })
+    _CANCEL_KEYWORDS = frozenset({
+        "לא", "בטל", "ביטול", "עצור", "cancel", "no", "n",
+    })
+
     @classmethod
     def _parse_ordinal(cls, text: str) -> int | None:
         """מחזיר אינדקס 1-based אם הטקסט הוא סדרתי; אחרת None."""
@@ -481,6 +491,25 @@ class ActionGateway:
         if t.isdigit():
             return int(t)
         return cls._ORDINALS_HE.get(t)
+
+    @classmethod
+    def _parse_combined(cls, text: str) -> tuple[str, int] | None:
+        """
+        מפרש "<מילת אישור/ביטול> <סדרתי>" (למשל "כן 1", "אשר 3", "לא 2").
+        מחזיר ("confirm"|"cancel", idx) או None אם הטקסט לא תואם את התבנית.
+        """
+        parts = text.strip().split()
+        if len(parts) != 2:
+            return None
+        word, ord_token = parts[0].lower(), parts[1]
+        idx = int(ord_token) if ord_token.isdigit() else cls._ORDINALS_HE.get(ord_token.lower())
+        if idx is None:
+            return None
+        if word in cls._CONFIRM_KEYWORDS:
+            return ("confirm", idx)
+        if word in cls._CANCEL_KEYWORDS:
+            return ("cancel", idx)
+        return None
 
     def route_disambiguation(self, canonical_user_id: str, text: str) -> str | None:
         """
@@ -522,6 +551,61 @@ class ActionGateway:
             canonical_user_id, idx, contract.contract_id, contract.tool_name,
         )
         return self.approve(contract.contract_id, approver=canonical_user_id)
+
+    # ── BUG-070 gap #1 — route_combined_word ────────────────────────
+    # "כן 1"/"אשר 3" (אישור ממוקד) ו-"לא 2" (דחייה ממוקדת) בהודעה אחת,
+    # בלי לדרוש קודם שהמשתמש יראה את הרשימה הממוספרת (route_confirmation_word)
+    # ובלי להמתין למצב disambiguation קיים — פועל ישירות מול contracts חיים.
+
+    def route_combined_word(self, canonical_user_id: str, text: str) -> str | None:
+        """
+        מיירט "<מילת אישור/ביטול> <סדרתי>" (כמו "כן 1"/"אשר 3"/"לא 2").
+        מחזיר None אם הטקסט לא תואם את התבנית, או שאין contracts חיים —
+        ממשיך לזרימה הקיימת/ל-Agent. אחרת מחזיר תשובה ישירה.
+        """
+        parsed = self._parse_combined(text)
+        if parsed is None:
+            return None
+        action, idx = parsed
+
+        live = self.find_live_contracts(canonical_user_id)
+        if not live:
+            return None
+
+        # בחירה תקפה — מנקה גם disambiguation state ישן כדי לא להשאיר אותו תלוי
+        with self._disambiguation_lock:
+            self._disambiguation.pop(canonical_user_id, None)
+
+        if not (1 <= idx <= len(live)):
+            return f"⚠️ אין פעולה מספר {idx}. יש {len(live)} פעולות ממתינות."
+
+        contract = live[idx - 1]
+
+        if action == "confirm":
+            # §21 — כמו route_disambiguation: בחירה ממוקדת סוגרת siblings אחרים
+            for sibling in live:
+                if sibling.contract_id != contract.contract_id and sibling.status == "pending":
+                    self._ledger.update_status(sibling.contract_id, "rejected")
+                    logger.info(
+                        "[ActionGateway] combined_word confirm: closing sibling contract=%s tool=%s",
+                        sibling.contract_id, sibling.tool_name,
+                    )
+            logger.info(
+                "[ActionGateway] combined_word: user=%s confirm idx=%d contract=%s tool=%s",
+                canonical_user_id, idx, contract.contract_id, contract.tool_name,
+            )
+            return self.approve(contract.contract_id, approver=canonical_user_id)
+
+        # action == "cancel" — דוחה רק את הפריט שנבחר, לא נוגע בשאר הממתינים
+        self._ledger.update_status(contract.contract_id, "rejected")
+        logger.info(
+            "[ActionGateway] combined_word: user=%s cancel idx=%d contract=%s tool=%s",
+            canonical_user_id, idx, contract.contract_id, contract.tool_name,
+        )
+        remaining = len(live) - 1
+        if remaining > 0:
+            return f"🚫 פעולה מספר {idx} ({contract.tool_name}) בוטלה. נשארו {remaining} פעולות ממתינות."
+        return f"🚫 פעולה מספר {idx} בוטלה."
 
     # ── §10 — route_override_word ────────────────────────────────────
 
