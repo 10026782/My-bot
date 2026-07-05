@@ -2046,9 +2046,16 @@ def _process_structured_file_upload(
         try:
             ic = classify_ingress(envelope.normalized_text, source_type="file")
         except Exception as exc:
-            logger.error(f"[C94] classify_ingress error for {filename} row {row_index}: {exc}", exc_info=True)
-            # classification_error is evidence, potentially surfaced later — only the exception
-            # TYPE goes on the trace, never str(exc)/row text (could embed PII like phone/name).
+            # PII-safety: never log str(exc)/row text (may embed phone/name),
+            # and never exc_info=True here either — a full traceback usually
+            # embeds the same exception message/args in its last frame, which
+            # would leak the same PII through the back door. Only safe,
+            # structured metadata goes to the log; same discipline as the
+            # Trace itself (classification_error = type(exc).__name__ only).
+            logger.error(
+                "[C94] classify_ingress error file_row envelope_id=%s row=%s error_type=%s",
+                envelope.envelope_id, row_index, type(exc).__name__,
+            )
             trace.record_classification(classification_error=type(exc).__name__)
             failed_count += 1
             continue
@@ -2064,7 +2071,12 @@ def _process_structured_file_upload(
         try:
             reply = lch.handle_lead_candidate(identity, envelope.normalized_text, chat_id, channel, domain=domain, ic=ic)
         except Exception as exc:
-            logger.error(f"[C90] row dispatch error for {filename}: {exc}", exc_info=True)
+            # Same PII-safety discipline as the classify_ingress except above —
+            # no str(exc), no exc_info=True.
+            logger.error(
+                "[C90] row dispatch error envelope_id=%s row=%s error_type=%s",
+                envelope.envelope_id, row_index, type(exc).__name__,
+            )
             reply = None
         if reply is None:
             continue
