@@ -1998,9 +1998,19 @@ def _process_structured_file_upload(
     + raw_ref משלה (BUG-065). כל Tier 1-3 דורש אישור פרטני ("כן"/"לא"),
     בדיוק כמו הודעת טקסט בודדת — אין "אישור קבוצתי" (BUG-058 עדיין פתוח,
     לא נבנה resolver ל-batch כאן).
+
+    C94 Stage ב: כל שורה עוברת קודם דרך build_file_row_envelope() ל-
+    IngressEnvelope (validate() נכשל/עוצר את השורה הזו בלבד, לא את כל
+    הקובץ) — ואז דרך אותו classify_ingress()/handle_lead_candidate() בדיוק
+    כמו היום (ללא שינוי ב-C89/C90 עצמם). EvidenceTrace נבנה כתוצר לוואי
+    אחרי classify_ingress() חוזר. classify_ingress() עצמו עטוף כעת ב-
+    try/except: חריגה בשורה בודדת (למשל קלט לא צפוי) נלכדת, מתועדת כ-
+    classification_error על ה-trace, וממשיכה לשורה הבאה — לפני התיקון הזה
+    חריגה כזו הייתה מפילה את כל שאר שורות הקובץ בשקט.
     """
-    from core.file_ingress_adapter import parse_structured_file_rows, FileParseError
+    from core.file_ingress_adapter import build_file_row_envelope, parse_structured_file_rows, FileParseError
     from core.ingress_classifier import classify_ingress
+    from core.ingress_envelope import EvidenceTrace, EnvelopeValidationError
     import core.lead_candidate_handler as lch
 
     try:
@@ -2020,11 +2030,39 @@ def _process_structured_file_upload(
     written_count = 0
     failed_count = 0
 
-    for row_text in rows_to_process:
-        ic = classify_ingress(row_text, source_type="file")
+    for row_index, row_text in enumerate(rows_to_process, start=1):
+        envelope = build_file_row_envelope(
+            identity=identity, channel=channel, filename=filename,
+            row_index=row_index, row_text=row_text,
+        )
+        try:
+            envelope.validate()
+        except EnvelopeValidationError as exc:
+            logger.error(f"[C94] invalid envelope for {filename} row {row_index}: {exc}")
+            failed_count += 1
+            continue
+
+        trace = EvidenceTrace(envelope_id=envelope.envelope_id)
+        try:
+            ic = classify_ingress(envelope.normalized_text, source_type="file")
+        except Exception as exc:
+            logger.error(f"[C94] classify_ingress error for {filename} row {row_index}: {exc}", exc_info=True)
+            # classification_error is evidence, potentially surfaced later — only the exception
+            # TYPE goes on the trace, never str(exc)/row text (could embed PII like phone/name).
+            trace.record_classification(classification_error=type(exc).__name__)
+            failed_count += 1
+            continue
+        trace.record_classification(
+            classification_result={"tier": ic.tier, "confidence": ic.confidence, "reason": ic.reason},
+            raw_ref=ic.raw_ref,
+        )
+        logger.debug(
+            f"[C94] row trace: envelope_id={envelope.envelope_id} tier={ic.tier} raw_ref={trace.raw_ref}"
+        )
+
         tier_counts[ic.tier] = tier_counts.get(ic.tier, 0) + 1
         try:
-            reply = lch.handle_lead_candidate(identity, row_text, chat_id, channel, domain=domain, ic=ic)
+            reply = lch.handle_lead_candidate(identity, envelope.normalized_text, chat_id, channel, domain=domain, ic=ic)
         except Exception as exc:
             logger.error(f"[C90] row dispatch error for {filename}: {exc}", exc_info=True)
             reply = None
@@ -2045,7 +2083,7 @@ def _process_structured_file_upload(
     if written_count:
         lines.append(f"✅ {written_count} נכתבו (FEATURE_AUTO_CAPTURE פעיל).")
     if failed_count:
-        lines.append(f"❌ {failed_count} נכשלו בכתיבה.")
+        lines.append(f"❌ {failed_count} שורות נכשלו בעיבוד (סיווג או כתיבה).")
     lines.append("לא בוצעה כתיבה אוטומטית קבוצתית — כל שורה דורשת אישור נפרד.")
     if truncated:
         lines.append(f"⚠️ הקובץ הכיל {len(rows)} שורות — עובדו רק {_MAX_FILE_ROWS_PROCESSED} הראשונות (מגבלת בטיחות תפעולית).")

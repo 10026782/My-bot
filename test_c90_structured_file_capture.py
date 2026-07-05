@@ -221,6 +221,49 @@ chk("unparseable file produces an explicit error reply", "❌" in error_summary,
 
 
 # ══════════════════════════════════════════════════
+# 4b. C94 Stage ב — a classify_ingress() exception on ONE row must not crash
+#     the rest of the file. Before this wiring, the row loop had no
+#     try/except around classify_ingress() itself (only around
+#     handle_lead_candidate()) — an exception here would propagate up and
+#     abort processing of every remaining row in the file, silently.
+# ══════════════════════════════════════════════════
+CSV_WITH_CLASSIFY_EXPLOSION = (
+    "Name,Phone\n"
+    "משה כהן,0501234567\n"
+    "בום,0009999999\n"
+    "דנה לוי,0521234567\n"
+)
+
+_real_classify_ingress = classify_ingress
+
+
+def _boom_classify_ingress(text, source_type="text"):
+    if "0009999999" in text:
+        raise ValueError(f"boom — this message must never reach user-facing text: {text}")
+    return _real_classify_ingress(text, source_type=source_type)
+
+
+gw4 = _new_gw(executor=None)
+with patch.object(lch, "_at_find_lead", return_value=None), \
+     patch("core.action_gateway.action_gateway", gw4), \
+     patch("feature_flags.is_enabled", return_value=False), \
+     patch("core.ingress_classifier.classify_ingress", side_effect=_boom_classify_ingress):
+    summary4 = app._process_structured_file_upload(
+        OWNER_IDENTITY, "chat_c90_4", "telegram", "general",
+        CSV_WITH_CLASSIFY_EXPLOSION.encode("utf-8"), "leads.csv",
+    )
+
+chk("a classify_ingress() exception on one row does not crash the whole file", summary4 is not None, summary4)
+chk("the other 2 (non-exploding) rows still get processed", len(gw4._ledger._store) == 2, f"got {len(gw4._ledger._store)}")
+chk("the exploding row is counted as failed in the summary", "1 שורות נכשלו" in summary4, summary4)
+chk(
+    "raw exception text/PII never leaks into the user-facing summary",
+    "0009999999" not in summary4 and "boom" not in summary4,
+    summary4,
+)
+
+
+# ══════════════════════════════════════════════════
 # 5. _is_structured_file() — extension/mime detection (unchanged from before)
 # ══════════════════════════════════════════════════
 chk("'leads.xlsx' detected by extension", app._is_structured_file("leads.xlsx", ""))
