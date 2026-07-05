@@ -1,10 +1,36 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-07-05 (מאוחר ביותר) — C94: נוסף `FEATURE_INGRESS_ENVELOPE` כ-kill-switch (default ON) ל-envelope-dispatch ב-`run_agent()` — ראה 0.13 למטה. קודם: כל 4 שלבי C94 מוזגו ל-`main` (PR #236–#239) — ראה 0.12 למטה.
-**עודכן על ידי:** Claude Code — FEATURE_INGRESS_ENVELOPE נוסף, ראה 0.13 למטה
+**עודכן:** 2026-07-05 (מאוחר ביותר) — C94 Telegram+WhatsApp inbound אומת בפרודקשן בפועל ע"י הבעלים (envelope בונה תקין, אין שגיאות `[C94]`); נמצא ותועד BUG-072 (לוגים קיימים חושפים chat_id גולמי — לא C94, לא תוקן) — ראה 0.15 למטה. קודם: C89 סטטוס סגור — ראה 0.14 למטה.
+**עודכן על ידי:** Claude Code — production verification + BUG-072, ראה 0.15 למטה
 
 > מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (מיושן, 19/06) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
+
+---
+
+## 0.15 C94 — Production verification (Telegram+WhatsApp) ✅ בוצע ע"י הבעלים; BUG-072 נמצא (לא C94) — 2026-07-05 (קרא לפני 0.14)
+
+**Production verification — 2/5 בוצעו, ע"י הבעלים (לא מה-sandbox):**
+- ✅ הודעת Telegram אמיתית: נכנסה תקין, Identity resolved, Router עבד, `classify_ingress` לא הפיל את ה-router, אין `[C94] telegram envelope build/validate failed` בלוגים.
+- ✅ הודעת WhatsApp/Twilio אמיתית: אותו דבר — נכנסה תקין, Identity resolved, Router עבד, אין `[C94] whatsapp envelope build/validate failed`; `MessageSid` אמיתי (`SM...`) נראה כ-`raw_ref`, מאשר שה-envelope נבנה ונוצל בפועל.
+- ⚠️ עדיין פתוח: commit hash מול Render לא אומת במפורש; קובץ xlsx/csv אמיתי (תלוי הפעלת `FEATURE_STRUCTURED_FILE_CAPTURE`, עדיין כבוי); מסלול "classify_ingress נכשל בעדינות" עדיין לא נבדק על תעבורה live בכוונה.
+- ✅ נצפה גם: WhatsApp outbound מציג "honest stub" — תואם את המתועד (`META_OUTBOUND_ENABLED=false`), לא ממצא חדש.
+
+**BUG-072 (חדש, פתוח, לא תוקן, לא C94):** לוגים קיימים ב-`app.py` חושפים `chat_id`/`user_chat_id`/`owner_chat_id` גולמי (מספר טלפון/user_id) ב-8 מקומות לפחות (שורות 677/844/853/900/1241/1248/1477/1980/1995) — מאומת ב-grep, לא רק נטען. שונה לגמרי ממנגנון הסניטיזציה של C94 עצמו (`type(exc).__name__` בלבד) — זה gap ב-לוגים ישנים, קדם ל-C94. לא תוקן בסבב הזה — ממתין להנחיה. ראה BUG_AUDIT_LOG.md BUG-072.
+
+**ראה:** ROADMAP.md §C94 (עדכון "Production verification" + "שני ממצאים נוספים").
+
+---
+
+## 0.14 C89 — סטטוס סגור: ✅ CLOSED/VERIFIED עם `FEATURE_AUTO_CAPTURE=false` (החלטת הבעלים) — 2026-07-05 (קרא לפני 0.13)
+
+**החלטה מפורשת של הבעלים:** כל הממצאים הידועים מ-QA ידני על C89 (Stage 3 Capture Policy — טקסט) סגורים בקוד+טסטים, מאומת מחדש היום (לא רק נטען): IC ambiguous routing, Sessions root, Gateway path/no direct dispatch, Preview pending approval, Approval identity (Telegram+WhatsApp), Existing lead update UX, Dedupe/idempotency, Tier 4 hard-precedence, RAW-OBS. `FEATURE_AUTO_CAPTURE` **נשאר כבוי בפרודקשן בכוונה** — לא הופעל, לא ייבדק על תעבורה אמיתית.
+
+**חשוב לדייק — זו לא "production verification" במובן שה-ROADMAP המקורי הגדיר לסעיף הזה** (הפעלת flag + מעקב `AgentObservation` על תעבורה אמיתית). זו סגירת scope מודעת: "קוד+טסטים מאומתים, הבעלים בוחר במפורש לא להפעיל." C90/C91/C92/C93 שהיו "חסומים על C89 production-verification" נחשבים כעת משוחררים תחת ההגדרה הזו (C90 כבר נבנה ומוזג ממילא מקודם, PR #228 — לא נגעתי בו).
+
+**RAW-OBS re-verified (05/07/2026):** `test_c89_raw_obs.py` 15/15 — כל bullet באודיט שהמשתמש הציג הושווה מול הרצה אמיתית ותאם במדויק: raw_ref לעולם לא ריק בשום Tier (כולל flag OFF וכשל כתיבת Airtable), `AgentObservation(kind="capture_classification", contract_id=None)` נרשם לכל קריאה, ללא coupling ל-ActionContract.
+
+**ראה:** ROADMAP.md §C89 לפירוט מלא + היסטוריית ה-PRs (BUG-047 עד BUG-065).
 
 ---
 

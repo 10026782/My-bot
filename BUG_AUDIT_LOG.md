@@ -1077,3 +1077,11 @@
 - **Deployed:** לא עדיין
 - **Verified בפרודקשן:** לא עדיין (ממתין למיזוג + Render deploy)
 - **סטטוס:** 🟡 תוקן בקוד — ממתין ל-merge ו-verification בפרודקשן.
+
+### BUG-072 — לוגים קיימים חושפים sender ID/מספר טלפון גולמי (לא C94, לא תוקן)
+- **תאריך:** 05/07/2026
+- **דווח על ידי:** המשתמש — נצפה אגב בדיקת production smoke ל-C94 (Telegram+WhatsApp inbound). לא קשור למנגנון הסניטיזציה של C94 עצמו (`type(exc).__name__` בלבד, ראה C94 Stage ב/ג) — זה pre-existing gap בנתיבי לוג אחרים, ישנים יותר.
+- **מאומת בקוד (grep, לא רק נטען):** `app.py` — `logger.info(f"[APPROVAL] ... | saved for {chat_id}")` (שורה 677), `logger.info(f"[Approval] ✅ sent to owner {owner_chat_id} | {action_id}")` (844), `logger.info(f"[Approval] queued {action_id} | {tool_name} | user={user_chat_id}")` (853), `logger.warning(f"[C60] set_last_tool_result failed for {chat_id}: {e}")` (900), `logger.debug(f"[Typing] failed for {chat_id}: {e}")` (1241, 1248), `logger.info(f"[PendingApproval] 🚫 cancelled by {chat_id}")` (1477), `logger.warning(f"[Agent] Claude transient error ... for {chat_id}")` (1980), `logger.error(f"[Agent] Timeout for {chat_id}")` (1995). `chat_id`/`user_chat_id`/`owner_chat_id` הם ה-external_id הגולמי (מספר טלפון ל-WhatsApp, user_id ל-Telegram) — לא memory_key/hash. לא grep מקיף על כל הריפו — רק app.py נבדק בסבב הזה; ייתכנו עוד מקומות בקבצים אחרים.
+- **Severity:** Low-Medium — לוגים תפעוליים פנימיים, לא user-facing, אבל אם לוגים אלו מגיעים ל-log aggregator חיצוני/נצפים ע"י מי שלא "צריך לדעת", זו חשיפת PII אמיתית (בדומה לעיקרון שכבר יושם ב-C94: `type(exc).__name__` בלבד, לא `str(exc)`/`exc_info=True`).
+- **תיקון:** ❌ לא בוצע — נתפס ותועד בלבד בסבב הזה, מחוץ ל-scope של C94.
+- **סטטוס:** 🔴 פתוח, לא מתוכנן — ממתין להנחיה מפורשת אם/מתי לתקן.
