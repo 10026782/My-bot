@@ -981,20 +981,20 @@
 - **Verified בפרודקשן:** לא רלוונטי
 - **סטטוס:** 🔴 פתוח — שורש מאומת בקוד, תיקון לא בוצע
 
-### BUG-067 (BUG-DAILY-02) — Daily Digest נשלח בשבת למרות הודעת "Shabbat Mode" — הגייט מוסיף טקסט בלבד, לא חוסם שליחה
+### BUG-067 (BUG-DAILY-02) — ✅ תוקן — Daily Digest נשלח בשבת למרות הודעת "Shabbat Mode" — הגייט הוסיף טקסט בלבד, לא חסם שליחה
 - **תאריך:** 05/07/2026
 - **דווח על ידי:** המשתמש — ראיה חיה: דוח נשלח ב-04/07/2026 (שבת) עם כותרת "שבת — הודעות אוטומטיות מושהות עד מוצ״ש בשעה 20:00 בערך" בראש הדוח עצמו שנשלח
 - **קבצים:** `daily_digest.py`, `shabbat_guard.py`, `scheduler.py`
 - **Severity:** High — סתירה לוגית ישירה בין ההודעה לבין ההתנהגות בפועל
 - **שורש (מאומת בקוד):** `shabbat_guard.py` מספק **שני מנגנונים נפרדים**: (1) `should_send_now(channel)`/`shabbat_safe(job_fn)` (שורות 131-147, 187-201) — gate אמיתי שמדלג על קריאת ה-job לגמרי בזמן שבת/חג ("Job '...' skipped — Shabbat/Holiday"). (2) `shabbat_status_message()` (שורות 173-180) — מחזיר **רק מחרוזת תצוגה**, ללא אפקט חוסם. `daily_digest.py` משתמש **אך ורק** במנגנון השני: `build_digest()` (שורה 301-302) מייבא ומפעיל רק `shabbat_status_message()`, ומצרף אותו כשורת כותרת בראש הדוח (שורות 319-321: `if shabbat: header.append(shabbat)`) — לעולם לא מחזיר early, לעולם לא מבטל את השליחה. `send_daily_digest()` (שורות 341-351) קורא תמיד ל-`bot.send_message(...)` ללא תלות בשבת. גרפ מלא על `daily_digest.py` מאשר: `should_send_now`/`shabbat_safe`/`is_shabbat_now` **אף פעם לא מיובאים או נקראים** בקובץ. **ההוכחה המכרעת שזו לא תקלה נקודתית אלא פער מבני:** ב-`scheduler.py:801-816`, רוב ה-jobs עטופים ב-`shabbat_safe(...)` (למשל שורות 808-816: `followup_scan`, `payment_reminders`, `lead_recovery`, `abandoned_scan`, `audience_report`, `interaction_scan`) — אבל דווקא `_job_daily_digest` (שורה 802) ו-`_job_daily_collector` (שורה 804) **אינם עטופים ב-`shabbat_safe`** בכלל. מאומת ישירות ב-`grep -n "_job_daily_digest\|_job_daily_collector\|shabbat_safe" scheduler.py`.
-- **תיקון:** לא בוצע — תיעוד בלבד לפי בקשת המשתמש.
-- **כיוון תיקון מוצע (מהדיווח):** לעטוף את `_job_daily_digest`/`_job_daily_collector` ב-`shabbat_safe(...)` ב-`scheduler.py` (התבנית כבר קיימת ומיושמת ל-6 jobs אחרים — לא נדרש מנגנון חדש, רק החלת הקיים); לשקול gate נוסף בתוך `daily_digest.py` עצמו (הגנה כפולה); לוג מפורש `skipped_daily_digest_due_to_shabbat_mode`; חריגים מוגדרים במפורש בלבד (owner manual request / emergency alert) אם נדרשים.
-- **בדיקה:** אין עדיין — **מאומת: אין שום קובץ טסט בריפו (`test_daily_digest.py`/`test_shabbat_guard.py` לא קיימים) שבודק "בתאריך שבת, הדוח לא נשלח"**. `shabbat_guard.py`'s self-test הפנימי (`_run_tests()`, שורות 208-297) בודק את המודול הזה בבידוד בלבד, לא את השילוב עם `daily_digest.py`. `test_c86_scheduler_emergency_matrix.py` בכוונה מנטרל את `shabbat_safe` (`monkeypatch.setattr(shabbat_guard, "shabbat_safe", lambda job: job)`, שורה 59) כדי לבדוק רק את EMERGENCY_STOP_AUTOMATION — לא בודק שבת בכלל. `smoke_tests.py`'s `check_daily_digest` (שורות 182-206) בודק רק שהפלט הוא string לא-ריק, לא נוגע בשבת. בדיקת קבלה מוצעת (מהדיווח): הרצת Daily Digest בתאריך מדומה 04/07/2026 → לא נשלח דוח מלא, לוג מציין skip, אחרי מוצ״ש חוזר לשלוח.
-- **PR:** אין עדיין
-- **Merged:** לא רלוונטי (לא תוקן)
-- **Deployed:** לא רלוונטי
-- **Verified בפרודקשן:** לא רלוונטי
-- **סטטוס:** 🔴 פתוח — שורש מאומת בקוד עם ראיה חיה, תיקון לא בוצע
+- **תיקון:** ✅ בוצע — `scheduler.py`'s `_job_daily_digest`/`_job_daily_collector` נעטפו ב-`shabbat_safe(...)` (אותו pattern בדיוק כמו 6 ה-jobs האחרים, אותו סדר קומפוזיציה `shabbat_safe(_automation_guard(fn, name=...))`). 2 שורות שונו ב-`scheduler.py` בלבד — לא נגע ב-`build_digest()`, Airtable queries, scoring, leads, formatting (מאומת: `smoke_tests.py`'s `check_daily_digest` מחזיר בדיוק אותם 215 תווים לפני ואחרי).
+- **בדיקה:** `test_bug067_shabbat_gates_scheduled_digest.py` (חדש, 3/3) — שני ה-jobs מדולגים כש-`should_send_now()` מחזיר `False` (gate אמיתי, לא מנוטרל), שניהם עדיין רצים ביום רגיל (regression guard), וכל job אחר (מגודר-שבת כבר קודם / לא-מגודר-שבת בכלל) נשאר בדיוק כמו שהיה (scope guard) — לפי אותו pattern רישום-וקריאה של `test_c86_scheduler_emergency_matrix.py` הקיים (2/2, ירוק ללא שינוי). `shabbat_guard.py`'s self-test הפנימי (19/19) — ירוק, לא נגע במודול עצמו.
+- **PR:** #230 (`fix/bug067-shabbat-gate-digest`)
+- **Merged:** כן — `b31b880`, merge commit `cfa3205` (מאומת `git log origin/main --oneline`)
+- **Deployed:** לא אומת מול Render Dashboard
+- **Verified בפרודקשן:** לא
+- **Verification ראיה:** ראה בדיקה למעלה; `git merge-base --is-ancestor b31b880 origin/main` → הצלחה
+- **סטטוס:** ✅ מוזג ל-main — ממתין ל-production verification (הרצה אמיתית בשבת קרובה)
 
 ### BUG-068 (BUG-DAILY-03) — Daily Digest ארוך מדי, ללא הגבלת אורך/מספר פריטים
 - **תאריך:** 05/07/2026
