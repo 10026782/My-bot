@@ -1251,11 +1251,18 @@ def _typing_indicator(chat_id: str, channel: str, stop_event: threading.Event, i
             pass
 
 
-def _safe_route(text: str, channel: str, identity, domain_from_channel: str = "") -> RouteDecision:
+def _safe_route(text: str, channel: str, identity, domain_from_channel: str = "", envelope_id: str = "") -> RouteDecision:
     """
     עוטף את route_request עם fallback.
     כלל ברזל #9: אם Router נכשל — ממשיכים עם intent=unknown, risk=review.
     לא נופלים.
+
+    envelope_id: C94 Stage ג — forwarded to route_request()/capture_router;
+    "" for any caller that didn't build an IngressEnvelope. This function's
+    own blanket try/except below is UNCHANGED — it still catches every OTHER
+    kind of router failure exactly as before (classify_ingress() failures
+    specifically no longer reach here at all — capture_router.py degrades
+    them to capture_ic=None internally; see C94 Stage ג).
     """
     try:
         return route_request(
@@ -1263,6 +1270,7 @@ def _safe_route(text: str, channel: str, identity, domain_from_channel: str = ""
             channel_raw         = channel,
             identity            = identity,
             domain_from_channel = domain_from_channel,
+            envelope_id         = envelope_id,
         )
     except Exception as e:
         logger.error(f"[Router] FAILED — fallback fail-closed: {e}", exc_info=True)
@@ -1327,7 +1335,15 @@ def run_agent(
     _skip_approval:      bool = False,
     _resolved_domain:    dict | None = None,
     _out_meta:           dict | None = None,
+    raw_event_id:        str = "",
 ) -> str:
+    # raw_event_id: C94 Stage ג — the channel's own raw event id (e.g.
+    # Telegram update_id), if the caller has one. "" for every existing
+    # caller (backward-compatible, zero behavior change) — only the Telegram
+    # webhook passes this today. Used below to build an IngressEnvelope
+    # before routing; other channels get the same classify_ingress()
+    # exception-safety fix (via capture_router.py) but not yet the full
+    # Envelope/Trace wiring (Stage ד, WhatsApp, is separate/unapproved).
 
     # ── 1. Identity ───────────────────────────────
     identity = resolve_identity(channel, chat_id)
@@ -1582,8 +1598,27 @@ def run_agent(
     # וה-LLM יראו התייחסות מפורשת במקום לנחש מהקשר חלקי.
     user_text = resolve_context_pronouns(user_text, chat_id, session=_session_snapshot)
 
+    # ── 2.7. C94 Stage ג — IngressEnvelope (Telegram only, additive) ─────
+    # Built BEFORE routing/classification, per C94's validation gate. Only
+    # wired for channel="telegram" with a real raw_event_id — WhatsApp (Stage
+    # ד) isn't connected yet. A build/validate failure here degrades to no
+    # envelope (envelope_id="") rather than blocking the request — this is
+    # observability plumbing, not a new gate on the agent pipeline.
+    envelope_id = ""
+    if channel == "telegram" and raw_event_id:
+        try:
+            from core.telegram_ingress_adapter import build_telegram_envelope
+            envelope = build_telegram_envelope(identity=identity, raw_event_id=raw_event_id, text=user_text)
+            envelope.validate()
+            envelope_id = envelope.envelope_id
+        except Exception as exc:
+            logger.error(
+                "[C94] telegram envelope build/validate failed chat=%s error_type=%s",
+                chat_id, type(exc).__name__,
+            )
+
     # ── 3. Router — CORE_02.6 Integration ────────
-    route = _safe_route(user_text, channel, identity, domain_from_channel)
+    route = _safe_route(user_text, channel, identity, domain_from_channel, envelope_id=envelope_id)
     logger.info(route.to_log())
 
     # BUG-NEW-13: כעת ש-domain אמיתי ידוע, כתוב Lead Event (אם דולג למעלה
@@ -2424,7 +2459,7 @@ def _webhook_telegram_impl():
         typing_thread.start()
 
         try:
-            reply = run_agent(text, sender_user_id, channel="telegram")
+            reply = run_agent(text, sender_user_id, channel="telegram", raw_event_id=str(update.update_id))
         except Exception as e:
             from core.error_reporter import report_error
             report_error(e, context="run_agent (telegram)")
