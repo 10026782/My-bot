@@ -1054,11 +1054,18 @@
 - **קבצים:** `app.py` (`_webhook_whatsapp_impl`, שורות 2398-2470; Meta WhatsApp Cloud API handler, משורה 2477; `_is_structured_file`/`_process_structured_file_upload`, שורות 1960-2036; `_handle_telegram_media`, שורה 2039)
 - **Severity:** Medium — C90 לא "נשבר" ב-Telegram (עדיין באמצע אימות שם ממילא), אבל התכונה חסרה לגמרי בערוץ WhatsApp; לא רגרסיה, gap שמעולם לא נסגר.
 - **שורש (מאומת בקוד):** `_is_structured_file()`/`_process_structured_file_upload()` (C90) מחוברים **אך ורק** דרך `_handle_telegram_media()` (שורה 2381: `_handle_telegram_media(update.message)`, קרוא רק מתוך ה-Telegram document callback). גרפ מלא על `_webhook_whatsapp_impl()` (Twilio, שורות 2398-2470) מראה שהיא קוראת **רק** `request.values.get("Body", "")` — אין קריאה בשום מקום ל-`NumMedia`/`MediaUrl0`/`MediaContentType0` (שדות ה-attachment של Twilio WhatsApp). Meta WhatsApp Cloud API handler (משורה 2477) גם הוא **ללא כל טיפול media/attachment** (מאומת: `grep -n "media\|Media\|document\|attachment\|MediaUrl\|NumMedia"` על הבלוק שלו — אפס hits). המסקנה: זה לא "C90 לא מחובר ל-WhatsApp" בלבד — **אין שום טיפול media/קובץ בשום ערוץ WhatsApp כרגע** (לא רק CSV/XLSX — גם תמונה/קול/מסמך כלשהו). קובץ שמגיע ב-WhatsApp פשוט מתעלם מה-attachment ומעביר את `Body` (ריק/לא-קשור) ל-`run_agent()` כטקסט רגיל — ה-Agent, ללא הקשר לקובץ אמיתי, מנחש ומנסה `read_drive_file`/`search_drive` (הכלים היחידים שיש לו לחיפוש "קובץ" בכלל), ומקבל "not found" כי הקובץ מעולם לא הגיע ל-Drive או לשום מקום אחר בשרת.
-- **תיקון:** לא בוצע — תיעוד בלבד לפי בקשת המשתמש.
-- **כיוון תיקון מוצע:** לחווט הורדת attachment מ-Twilio (`MediaUrl0`+`MediaContentType0`, דורש הרשאת Basic Auth של Twilio להורדה) ו/או מ-Meta Cloud API (מנגנון media שונה — media_id → GET נפרד ל-URL זמני), ואז לקרוא ל-`_is_structured_file`/`_process_structured_file_upload` הקיימים (ללא שינוי בהם) — אותו gate בדיוק (`identity.is_internal` + `FEATURE_STRUCTURED_FILE_CAPTURE` + סיומת/mime) שכבר קיים ל-Telegram.
-- **בדיקה:** אין עדיין.
-- **PR:** אין עדיין
-- **Merged:** לא רלוונטי (לא תוקן)
-- **Deployed:** לא רלוונטי
-- **Verified בפרודקשן:** לא רלוונטי
-- **סטטוס:** 🔴 פתוח — שורש מאומת בקוד (רחב יותר ממה שדווח במקור: אין טיפול media בכלל ב-WhatsApp, לא רק C90), תיקון לא בוצע.
+- **תיקון:** ✅ בוצע בעלות GitHub issue #235 (BUG-071)
+  * `providers/whatsapp_media_adapter.py` — Twilio WhatsApp media extraction (NumMedia, MediaUrl0, MediaContentType0 → בהורדה מ-signed URL; אין צורך ב-Twilio Basic Auth, Twilio מספקת URL מחתומים פומיים)
+  * `providers/meta_whatsapp_media_adapter.py` — Meta Cloud API media extraction (image/video/audio/document; media_id → URL fetch דרך Meta Media API עם access_token)
+  * `app.py._webhook_whatsapp_impl()` (שורות 2419-2467) — Twilio media handling אחרי dedup, לפני furniture funnel
+  * `app.py._normalize_meta_payload()` (שורות 222-256) — Meta media metadata extraction
+  * `app.py.webhook_meta_whatsapp()` (שורות 2582-2642) — Meta media handling אחרי dedup, לפני outbound gate
+  * שניהם מנתבים דרך `media_handler.handle_voice_note()` (audio) או `handle_file_upload()` (files/images/video)
+- **Commit:** `4f64666` ("BUG-071 fix: Unified WhatsApp media support (Twilio + Meta Cloud API)")
+- **Branch:** `claude/ic-01b-ambiguous-prefix-routing-zp109k`
+- **PR:** זמין לפתיחה עם בקשת המשתמש
+- **Merged:** לא עדיין (branch פתוח, ממתין לאישור)
+- **Tested:** smoke_tests.py ✅ | test_bug070_pending_approval_multi.py ✅ | test_whatsapp_media.py ✅ (6 tests)
+- **Deployed:** לא עדיין
+- **Verified בפרודקשן:** לא עדיין (ממתין למיזוג + Render deploy)
+- **סטטוס:** 🟡 תוקן בקוד — ממתין ל-merge ו-verification בפרודקשן.
