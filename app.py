@@ -1337,13 +1337,15 @@ def run_agent(
     _out_meta:           dict | None = None,
     raw_event_id:        str = "",
 ) -> str:
-    # raw_event_id: C94 Stage ג — the channel's own raw event id (e.g.
-    # Telegram update_id), if the caller has one. "" for every existing
-    # caller (backward-compatible, zero behavior change) — only the Telegram
-    # webhook passes this today. Used below to build an IngressEnvelope
-    # before routing; other channels get the same classify_ingress()
-    # exception-safety fix (via capture_router.py) but not yet the full
-    # Envelope/Trace wiring (Stage ד, WhatsApp, is separate/unapproved).
+    # raw_event_id: C94 Stage ג/ד — the channel's own raw event id (e.g.
+    # Telegram update_id, Twilio MessageSid), if the caller has one. "" for
+    # every existing caller (backward-compatible, zero behavior change) —
+    # only the Telegram webhook and the Twilio WhatsApp webhook pass this
+    # today. Used below to build an IngressEnvelope before routing. Meta
+    # WhatsApp Cloud API deliberately does NOT pass this (see
+    # core/whatsapp_ingress_adapter.py's module docstring) — it gets the
+    # same classify_ingress() exception-safety fix (via capture_router.py,
+    # channel-agnostic since Stage ג) but no envelope/Trace wiring yet.
 
     # ── 1. Identity ───────────────────────────────
     identity = resolve_identity(channel, chat_id)
@@ -1598,23 +1600,30 @@ def run_agent(
     # וה-LLM יראו התייחסות מפורשת במקום לנחש מהקשר חלקי.
     user_text = resolve_context_pronouns(user_text, chat_id, session=_session_snapshot)
 
-    # ── 2.7. C94 Stage ג — IngressEnvelope (Telegram only, additive) ─────
+    # ── 2.7. C94 Stage ג/ד — IngressEnvelope (Telegram + WhatsApp/Twilio) ──
     # Built BEFORE routing/classification, per C94's validation gate. Only
-    # wired for channel="telegram" with a real raw_event_id — WhatsApp (Stage
-    # ד) isn't connected yet. A build/validate failure here degrades to no
-    # envelope (envelope_id="") rather than blocking the request — this is
-    # observability plumbing, not a new gate on the agent pipeline.
+    # wired for channel="telegram"/"whatsapp" with a real raw_event_id — Meta
+    # WhatsApp Cloud API's webhook deliberately never passes raw_event_id
+    # (see core/whatsapp_ingress_adapter.py's module docstring), so it never
+    # reaches this block; it's still untouched/gated. A build/validate
+    # failure here degrades to no envelope (envelope_id="") rather than
+    # blocking the request — this is observability plumbing, not a new gate
+    # on the agent pipeline.
     envelope_id = ""
-    if channel == "telegram" and raw_event_id:
+    if raw_event_id and channel in ("telegram", "whatsapp"):
         try:
-            from core.telegram_ingress_adapter import build_telegram_envelope
-            envelope = build_telegram_envelope(identity=identity, raw_event_id=raw_event_id, text=user_text)
+            if channel == "telegram":
+                from core.telegram_ingress_adapter import build_telegram_envelope
+                envelope = build_telegram_envelope(identity=identity, raw_event_id=raw_event_id, text=user_text)
+            else:
+                from core.whatsapp_ingress_adapter import build_whatsapp_envelope
+                envelope = build_whatsapp_envelope(identity=identity, raw_event_id=raw_event_id, text=user_text)
             envelope.validate()
             envelope_id = envelope.envelope_id
         except Exception as exc:
             logger.error(
-                "[C94] telegram envelope build/validate failed chat=%s error_type=%s",
-                chat_id, type(exc).__name__,
+                "[C94] %s envelope build/validate failed chat=%s error_type=%s",
+                channel, chat_id, type(exc).__name__,
             )
 
     # ── 3. Router — CORE_02.6 Integration ────────
@@ -2608,6 +2617,7 @@ def _webhook_whatsapp_impl():
         domain_from_channel = domain_from_channel,
         _resolved_domain    = _resolved,
         _out_meta           = _run_meta,
+        raw_event_id        = msg_sid,
     )
     # תיקון: COG מקבל את הדומיין הסופי (אחרי Router), לא domain_from_channel
     # הישן שנקבע לפני שה-Router רץ — אחרת domain=general נרשם ב-COG גם
