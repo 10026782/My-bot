@@ -966,35 +966,34 @@
 - **סטטוס:** ✅ מוזג ל-main — ממתין ל-production verification
 - **עדכון (PR #227, `ca207ba`, merge commit `64b477a`):** תיקון היה נכון פונקציונלית, אך `_classify_ingress_core()` עדיין כתב `raw_ref=""` באופן מילולי בכל אחת מ-8 נקודות ה-return הפנימיות שלה (הערך נדרס ע"י ה-wrapper לפני ההחזרה בפועל, אבל grep סטטי על `raw_ref=""` עדיין מצא hits ותועד בטעות כאילו התיקון חסר). `IngressClassification.raw_ref` קיבל ברירת מחדל sentinel פרטי (`__unset__`) במקום `""`, כך שאף return statement פנימי לא צריך להזכיר `raw_ref` בכלל — `classify_ingress()` הוא המקום היחיד שמקצה ערך אמיתי. אומת: `grep -rn 'raw_ref=""' --include="*.py" .` → אפס hits בקוד בפועל (רק במחרוזת הבדיקה עצמה). נוסף guard סטטי (`inspect.getsource`) ל-`test_c89_raw_obs.py` — 15/15. אין שינוי התנהגות.
 
-### BUG-066 (BUG-DAILY-01) — Boss Daily Tasks נתקע ולא ממשיך (אין fail-safe פר-שלב)
+### BUG-066 (BUG-DAILY-01) — ✅ תוקן — Boss Daily Tasks נתקע ולא ממשיך (אין fail-safe פר-שלב)
 - **תאריך:** 05/07/2026
 - **דווח על ידי:** המשתמש — תצפית תפעולית ("הריצה מתחילה, אך נעצרת/נתקעת באמצע, בלי מעבר תקין להמשך השלבים")
 - **קבצים:** `daily_collector.py`, `scheduler.py`
 - **Severity:** High
 - **שורש (מאומת בקוד):** `daily_collector.py`'s `collect_daily()` עוטף רק את קריאת ה-LLM+parse ב-try/except (`daily_collector.py:76-100`, `except Exception as e: logger.error(...); return {"items": [], "all_clear": True}`). קריאת ה-history (`memory.get_for_claude(memory_key)`, שורה 62) **לא** עטופה בכלל — חריגה שם מתפשטת ללא טיפול. `format_collector_message()` (שורות 114-135) **גם היא ללא כל try/except**. כלומר מתוך 3 שלבים אמיתיים (fetch history → LLM/parse → format/send), רק אחד מוגן. הרשת היחידה שתופסת כשל בלתי-מוגן היא ה-wrapper החיצוני ב-`scheduler.py:72-87`'s `_job_daily_collector()` — `except Exception as e: logger.error(f"daily_collector error: {e}")` — **בלוק אחד גורף**, לא פר-שלב, כך שהלוג לעולם לא מציין איזה שלב נכשל (fetch/LLM/format/send), ואין log של "התחלת שלב"/"סיום שלב"/"דילוג" בשום מקום. Timeout מפורש קיים רק לקריאת Anthropic (`timeout=30`, `daily_collector.py:80`) — ל-`bot.send_message` (שורות 157-161) אין timeout מוגדר בשום מקום בריפו (מאומת גרפ על `apihelper`). ה-scheduler loop עצמו (`scheduler.py:740-747`) עטוף try/except משלו, כך שחריגה *שנזרקת* לא הורגת את ה-thread לצמיתות — אבל קריאה ש**נתקעת** (hang, לא raise) בכל מקום ללא timeout (במיוחד `send_message`) תחסום את `schedule.run_pending()` הבודד-thread-י הזה ותקפיא כל job אחר שממתין באותו תור, וזה בדיוק המנגנון הריאלי ל"נתקע ולא ממשיך".
-- **תיקון:** לא בוצע — תיעוד בלבד לפי בקשת המשתמש.
-- **כיוון תיקון מוצע (מהדיווח):** try/except נפרד לכל שלב (fetch/LLM/format/send) עם logging מפורש (start/end/error/skip/continue); timeout מפורש ל-`bot.send_message`; הפרדה בין כשל-משימה-בודדת לכשל-ריצה-שלמה; הדוח מציין במפורש מה לא נבדק/נכשל.
-- **בדיקה:** אין עדיין — אין `test_daily_collector.py` בריפו. בדיקת קבלה מוצעת (מהדיווח): הרצת Daily Tasks עם משימה תקולה אחת → השגיאה נרשמת, שאר המשימות ממשיכות, אין תקיעה כללית.
-- **PR:** אין עדיין
-- **Merged:** לא רלוונטי (לא תוקן)
+- **תיקון:** ✅ בוצע — `daily_collector.py`'s `collect_daily()` פוצל ל-2 שלבים מבודדים בנפרד (fetch history / LLM+parse), כל אחד עם try/except משלו ו-logging מפורש (start/done/error); הפונקציה לעולם לא raise-ת, תמיד מחזירה fallback בטוח. `send_daily_collector()` בודד גם את שלב ה-format ואת שלב ה-send בנפרד, כל אחד עם try/except+logging משלו. `bot.send_message()` מקבל כעת `timeout=15` מפורש (`_SEND_TIMEOUT`) כדי שקריאת רשת תקועה לא תקפיא את ה-scheduler thread הבודד. `scheduler.py`'s `_job_daily_digest`/`_job_daily_collector` קיבלו logging מפורש של start/done/skip/error ברמת ה-job (בנוסף לזה שבתוך `daily_collector.py` עצמו). כאגב תוקנה גם corruption (mojibake) שהתגלתה בשתי שורות טקסט בקובץ (דומה ל-BUG-018) — לא היו קשורות לבאג המקורי אך תוקנו באותה עריכה.
+- **בדיקה:** `test_bug066_daily_collector_fail_safe.py` (חדש, 8/8) — כשל בשלב fetch/LLM/JSON-parse/format/send כל אחד בנפרד לא raise-ה, נרשם ב-log, וממשיכה בבטחה; מסלול הצלחה מציג logging של כל גבול-שלב; `timeout` מפורש מאומת בקריאה ל-`bot.send_message`; regression guard ש-`all_clear=True` לא שולח כלום. `test_c86_scheduler_emergency_matrix.py` (2/2) ו-`test_bug067_shabbat_gates_scheduled_digest.py` (3/3) — ירוקים ללא שינוי (אותו registration block ב-`scheduler.py`). `smoke_tests.py` — `build_digest` מחזיר בדיוק אותם 215 תווים (לא נגעתי ב-`daily_digest.py`).
+- **PR:** #231
+- **Merged:** לא עדיין — PR פתוח
 - **Deployed:** לא רלוונטי
 - **Verified בפרודקשן:** לא רלוונטי
-- **סטטוס:** 🔴 פתוח — שורש מאומת בקוד, תיקון לא בוצע
+- **סטטוס:** 🟡 CODE DONE — PR #231 פתוח, ממתין למיזוג
 
-### BUG-067 (BUG-DAILY-02) — Daily Digest נשלח בשבת למרות הודעת "Shabbat Mode" — הגייט מוסיף טקסט בלבד, לא חוסם שליחה
+### BUG-067 (BUG-DAILY-02) — ✅ תוקן — Daily Digest נשלח בשבת למרות הודעת "Shabbat Mode" — הגייט הוסיף טקסט בלבד, לא חסם שליחה
 - **תאריך:** 05/07/2026
 - **דווח על ידי:** המשתמש — ראיה חיה: דוח נשלח ב-04/07/2026 (שבת) עם כותרת "שבת — הודעות אוטומטיות מושהות עד מוצ״ש בשעה 20:00 בערך" בראש הדוח עצמו שנשלח
 - **קבצים:** `daily_digest.py`, `shabbat_guard.py`, `scheduler.py`
 - **Severity:** High — סתירה לוגית ישירה בין ההודעה לבין ההתנהגות בפועל
 - **שורש (מאומת בקוד):** `shabbat_guard.py` מספק **שני מנגנונים נפרדים**: (1) `should_send_now(channel)`/`shabbat_safe(job_fn)` (שורות 131-147, 187-201) — gate אמיתי שמדלג על קריאת ה-job לגמרי בזמן שבת/חג ("Job '...' skipped — Shabbat/Holiday"). (2) `shabbat_status_message()` (שורות 173-180) — מחזיר **רק מחרוזת תצוגה**, ללא אפקט חוסם. `daily_digest.py` משתמש **אך ורק** במנגנון השני: `build_digest()` (שורה 301-302) מייבא ומפעיל רק `shabbat_status_message()`, ומצרף אותו כשורת כותרת בראש הדוח (שורות 319-321: `if shabbat: header.append(shabbat)`) — לעולם לא מחזיר early, לעולם לא מבטל את השליחה. `send_daily_digest()` (שורות 341-351) קורא תמיד ל-`bot.send_message(...)` ללא תלות בשבת. גרפ מלא על `daily_digest.py` מאשר: `should_send_now`/`shabbat_safe`/`is_shabbat_now` **אף פעם לא מיובאים או נקראים** בקובץ. **ההוכחה המכרעת שזו לא תקלה נקודתית אלא פער מבני:** ב-`scheduler.py:801-816`, רוב ה-jobs עטופים ב-`shabbat_safe(...)` (למשל שורות 808-816: `followup_scan`, `payment_reminders`, `lead_recovery`, `abandoned_scan`, `audience_report`, `interaction_scan`) — אבל דווקא `_job_daily_digest` (שורה 802) ו-`_job_daily_collector` (שורה 804) **אינם עטופים ב-`shabbat_safe`** בכלל. מאומת ישירות ב-`grep -n "_job_daily_digest\|_job_daily_collector\|shabbat_safe" scheduler.py`.
-- **תיקון:** לא בוצע — תיעוד בלבד לפי בקשת המשתמש.
-- **כיוון תיקון מוצע (מהדיווח):** לעטוף את `_job_daily_digest`/`_job_daily_collector` ב-`shabbat_safe(...)` ב-`scheduler.py` (התבנית כבר קיימת ומיושמת ל-6 jobs אחרים — לא נדרש מנגנון חדש, רק החלת הקיים); לשקול gate נוסף בתוך `daily_digest.py` עצמו (הגנה כפולה); לוג מפורש `skipped_daily_digest_due_to_shabbat_mode`; חריגים מוגדרים במפורש בלבד (owner manual request / emergency alert) אם נדרשים.
-- **בדיקה:** אין עדיין — **מאומת: אין שום קובץ טסט בריפו (`test_daily_digest.py`/`test_shabbat_guard.py` לא קיימים) שבודק "בתאריך שבת, הדוח לא נשלח"**. `shabbat_guard.py`'s self-test הפנימי (`_run_tests()`, שורות 208-297) בודק את המודול הזה בבידוד בלבד, לא את השילוב עם `daily_digest.py`. `test_c86_scheduler_emergency_matrix.py` בכוונה מנטרל את `shabbat_safe` (`monkeypatch.setattr(shabbat_guard, "shabbat_safe", lambda job: job)`, שורה 59) כדי לבדוק רק את EMERGENCY_STOP_AUTOMATION — לא בודק שבת בכלל. `smoke_tests.py`'s `check_daily_digest` (שורות 182-206) בודק רק שהפלט הוא string לא-ריק, לא נוגע בשבת. בדיקת קבלה מוצעת (מהדיווח): הרצת Daily Digest בתאריך מדומה 04/07/2026 → לא נשלח דוח מלא, לוג מציין skip, אחרי מוצ״ש חוזר לשלוח.
-- **PR:** אין עדיין
-- **Merged:** לא רלוונטי (לא תוקן)
-- **Deployed:** לא רלוונטי
-- **Verified בפרודקשן:** לא רלוונטי
-- **סטטוס:** 🔴 פתוח — שורש מאומת בקוד עם ראיה חיה, תיקון לא בוצע
+- **תיקון:** ✅ בוצע — `scheduler.py`'s `_job_daily_digest`/`_job_daily_collector` נעטפו ב-`shabbat_safe(...)` (אותו pattern בדיוק כמו 6 ה-jobs האחרים, אותו סדר קומפוזיציה `shabbat_safe(_automation_guard(fn, name=...))`). 2 שורות שונו ב-`scheduler.py` בלבד — לא נגע ב-`build_digest()`, Airtable queries, scoring, leads, formatting (מאומת: `smoke_tests.py`'s `check_daily_digest` מחזיר בדיוק אותם 215 תווים לפני ואחרי).
+- **בדיקה:** `test_bug067_shabbat_gates_scheduled_digest.py` (חדש, 3/3) — שני ה-jobs מדולגים כש-`should_send_now()` מחזיר `False` (gate אמיתי, לא מנוטרל), שניהם עדיין רצים ביום רגיל (regression guard), וכל job אחר (מגודר-שבת כבר קודם / לא-מגודר-שבת בכלל) נשאר בדיוק כמו שהיה (scope guard) — לפי אותו pattern רישום-וקריאה של `test_c86_scheduler_emergency_matrix.py` הקיים (2/2, ירוק ללא שינוי). `shabbat_guard.py`'s self-test הפנימי (19/19) — ירוק, לא נגע במודול עצמו.
+- **PR:** #230 (`fix/bug067-shabbat-gate-digest`)
+- **Merged:** כן — `b31b880`, merge commit `cfa3205` (מאומת `git log origin/main --oneline`)
+- **Deployed:** לא אומת מול Render Dashboard
+- **Verified בפרודקשן:** לא
+- **Verification ראיה:** ראה בדיקה למעלה; `git merge-base --is-ancestor b31b880 origin/main` → הצלחה
+- **סטטוס:** ✅ מוזג ל-main — ממתין ל-production verification (הרצה אמיתית בשבת קרובה)
 
 ### BUG-068 (BUG-DAILY-03) — Daily Digest ארוך מדי, ללא הגבלת אורך/מספר פריטים
 - **תאריך:** 05/07/2026

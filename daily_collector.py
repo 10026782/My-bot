@@ -6,10 +6,16 @@
 # הרעיון: כמו מאסף בטיול — אחרי הכל, סורק שאף אחד לא אבד.
 
 import os
+import json
 import logging
 from llm_fallback import call_anthropic_text
 
 logger = logging.getLogger(__name__)
+
+# BUG-066 (BUG-DAILY-01): bounds bot.send_message so a network stall can't
+# freeze the single scheduler thread (schedule runs jobs sequentially — a
+# hanging call here would stall every other due job behind it, not just this one).
+_SEND_TIMEOUT = 15
 
 # ══════════════════════════════════════════════════
 # Prompt למאסף
@@ -56,12 +62,22 @@ def collect_daily(memory_key: str) -> dict:
     """
     שולף את היסטוריית היום, שולח ל-Claude לניתוח,
     מחזיר dict עם items שעלולים להיות חסרים.
-    """
-    from memory_store import memory
 
-    history = memory.get_for_claude(memory_key)
+    BUG-066 (BUG-DAILY-01): כל שלב מבודד בנפרד (fetch history / LLM+parse)
+    עם logging מפורש (start/success/error) — כשל בשלב אחד לא מתפשט כחריגה
+    בלתי-מטופלת; הפונקציה תמיד מחזירה fallback בטוח
+    ({"items": [], "all_clear": True}) ולעולם לא raise.
+    """
+    logger.info("collect_daily: start — fetch history")
+    try:
+        from memory_store import memory
+        history = memory.get_for_claude(memory_key)
+    except Exception as e:
+        logger.error(f"collect_daily: fetch history failed — {e}")
+        return {"items": [], "all_clear": True}
+
     if not history:
-        logger.info("collect_daily: אין היסטוריה להיום")
+        logger.info("collect_daily: אין היסטוריה להיום — skip")
         return {"items": [], "all_clear": True}
 
     # בנה טקסט שיחה קריא
@@ -71,8 +87,10 @@ def collect_daily(memory_key: str) -> dict:
     )
 
     if len(convo_text) < 50:
+        logger.info("collect_daily: היסטוריה קצרה מדי לניתוח — skip")
         return {"items": [], "all_clear": True}
 
+    logger.info("collect_daily: fetch history done — start LLM analysis")
     try:
         raw = call_anthropic_text(
             source="daily_collector.collect_daily",
@@ -86,17 +104,15 @@ def collect_daily(memory_key: str) -> dict:
             }]
         ).strip()
 
-        # ׳ ׳§׳” ```json ׳׳ ׳™׳©
+        # נקה ```json אם יש
         raw = raw.replace("```json", "").replace("```", "").strip()
 
-        import json
         result = json.loads(raw)
-        logger.info(f"collect_daily: {len(result.get('items',[]))} ׳₪׳¨׳™׳˜׳™׳ ׳–׳•׳”׳•")
+        logger.info(f"collect_daily: LLM analysis done — {len(result.get('items', []))} פריטים זוהו")
         return result
 
-
     except Exception as e:
-        logger.error(f"collect_daily error: {e}")
+        logger.error(f"collect_daily: LLM analysis failed — {e}")
         return {"items": [], "all_clear": True}
 
 
@@ -143,21 +159,33 @@ def send_daily_collector(bot, chat_id: str, memory_key: str):
     """
     נקודת הכניסה מ-scheduler.
     שולף, מנתח, ושולח אם יש משהו.
+
+    BUG-066 (BUG-DAILY-01): כל שלב (fetch+analyze / format / send) מתועד
+    בנפרד (start/done/error) ומבודד — כשל בפורמט או בשליחה לא מתפשט,
+    נרשם ומחזיר בשקט. collect_daily() עצמה כבר לא raise-ת (ראה שם).
     """
     logger.info(f"🔍 מאסף יומי מתחיל | {memory_key}")
 
-    result  = collect_daily(memory_key)
-    message = format_collector_message(result)
+    result = collect_daily(memory_key)
+
+    logger.info("מאסף יומי: start — format message")
+    try:
+        message = format_collector_message(result)
+    except Exception as e:
+        logger.error(f"מאסף יומי: format נכשל — {e}")
+        return
 
     if message is None:
         logger.info("✅ מאסף יומי: הכל תקין, אין מה לדווח")
         return
 
+    logger.info("מאסף יומי: format done — start send")
     try:
         bot.send_message(
             chat_id,
             message,
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            timeout=_SEND_TIMEOUT,
         )
         logger.info(f"✅ מאסף יומי נשלח | {len(result['items'])} פריטים")
     except Exception as e:

@@ -26,21 +26,22 @@ def _job_cleanup_pending():
 
 
 def _job_daily_digest():
+    logger.info("[Scheduler] job=daily_digest start")
     try:
         from daily_digest import send_daily_digest
         import telebot
         token   = os.environ.get("TELEGRAM_TOKEN", "")
         chat_id = os.environ.get("DIGEST_CHAT_ID", "")
         if not token or not chat_id:
-            logger.warning("DIGEST_CHAT_ID לא מוגדר — דוח בוקר דולג")
+            logger.warning("[Scheduler] job=daily_digest skip — DIGEST_CHAT_ID לא מוגדר")
             return
         bot = telebot.TeleBot(token)
         send_daily_digest(bot=bot, chat_id=chat_id)
-        logger.info(f"✅ Daily digest נשלח ל-{chat_id}")
+        logger.info(f"[Scheduler] job=daily_digest done — ✅ נשלח ל-{chat_id}")
     except ImportError:
-        logger.info("daily_digest לא קיים — דולג")
+        logger.info("[Scheduler] job=daily_digest skip — daily_digest לא קיים")
     except Exception as e:
-        logger.error(f"daily_digest error: {e}")
+        logger.error(f"[Scheduler] job=daily_digest error: {e}")
 
 
 def _job_daily_git_audit():
@@ -70,6 +71,7 @@ def _job_overdue_payments():
 
 
 def _job_daily_collector():
+    logger.info("[Scheduler] job=daily_collector start")
     try:
         from daily_collector import send_daily_collector
         import telebot
@@ -77,14 +79,15 @@ def _job_daily_collector():
         chat_id   = os.environ.get("DIGEST_CHAT_ID", "")
         owner_key = os.environ.get("OWNER_MEMORY_KEY", "boss_hq:eliyahu")
         if not token or not chat_id:
-            logger.warning("DIGEST_CHAT_ID לא מוגדר — מאסף דולג")
+            logger.warning("[Scheduler] job=daily_collector skip — DIGEST_CHAT_ID לא מוגדר")
             return
         bot = telebot.TeleBot(token)
         send_daily_collector(bot=bot, chat_id=chat_id, memory_key=owner_key)
+        logger.info("[Scheduler] job=daily_collector done")
     except ImportError:
-        logger.info("daily_collector לא קיים — דולג")
+        logger.info("[Scheduler] job=daily_collector skip — daily_collector לא קיים")
     except Exception as e:
-        logger.error(f"daily_collector error: {e}")
+        logger.error(f"[Scheduler] job=daily_collector error: {e}")
 
 
 # ══════════════════════════════════════════════════
