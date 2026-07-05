@@ -1817,6 +1817,20 @@ def run_agent(
 # Endpoints
 # ══════════════════════════════════════════════════
 
+# C90 — Structured File Capture: xlsx/csv detection (routing only, not a classifier)
+_STRUCTURED_FILE_EXTENSIONS = (".xlsx", ".csv")
+_STRUCTURED_FILE_MIME_TYPES = frozenset({
+    "text/csv",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+})
+
+
+def _is_structured_file(filename: str, mime_type: str) -> bool:
+    if mime_type in _STRUCTURED_FILE_MIME_TYPES:
+        return True
+    return filename.lower().endswith(_STRUCTURED_FILE_EXTENSIONS)
+
+
 # F16 — Media Layer: Telegram voice/photo/document intake
 def _handle_telegram_media(message) -> None:
     chat_id = str(message.chat.id)
@@ -1878,6 +1892,39 @@ def _handle_telegram_media(message) -> None:
     except Exception as e:
         logger.error(f"[DecisionHub] precedence gate error: {e}", exc_info=True)
         # fall through to default Drive/Voice handling — fail-safe, not fail-closed
+
+    # ── C90 — Structured File Capture (xlsx/csv) ──────────────────────
+    # Routes through the same classify_ingress() single entry point
+    # (source_type="file") instead of the FEATURE_MEDIA_UPLOAD Drive/Media
+    # Files path. Preview-only by design (ROADMAP.md C90): no auto-write,
+    # no content parsing, no Airtable write — every matching file is Tier 4.
+    # Internal senders only, matching LCH's own is_internal gate.
+    if (
+        message.content_type == "document"
+        and getattr(identity, "is_internal", False)
+        and _flag_enabled("FEATURE_STRUCTURED_FILE_CAPTURE")
+    ):
+        doc = message.document
+        filename = doc.file_name or ""
+        mime_type = doc.mime_type or ""
+        if _is_structured_file(filename, mime_type):
+            try:
+                from core.ingress_classifier import classify_ingress
+                classify_ingress(filename, source_type="file")
+                bot.send_message(
+                    chat_id,
+                    f"📊 קיבלתי את הקובץ *{filename}* — תצוגה מקדימה בלבד, לא בוצעה שום פעולה אוטומטית.\n"
+                    "קליטת קבצים מובנים (xlsx/csv) עדיין לא נתמכת. אם יש לידים ברשימה, "
+                    "אפשר להעתיק ולשלוח אותם כטקסט רגיל.",
+                    parse_mode="Markdown",
+                )
+            except Exception as e:
+                logger.error(f"[Media] structured file capture error: {e}", exc_info=True)
+                try:
+                    bot.send_message(chat_id, "❌ שגיאה בעיבוד הקובץ")
+                except Exception:
+                    pass
+            return
 
     if message.content_type == "voice":
         if not _flag_enabled("FEATURE_VOICE_NOTES"):

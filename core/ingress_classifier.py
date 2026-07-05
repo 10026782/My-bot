@@ -32,7 +32,7 @@ _RAW_REF_UNSET = "__unset__"  # never returned to callers — classify_ingress()
 
 @dataclass(frozen=True)
 class IngressClassification:
-    source_type:   str          # "text" | "file" | "voice" | "email" | "image" (C90+)
+    source_type:   str          # "text" | "file" (C90) | "voice"/"email"/"image" (C91-C93, not yet implemented)
     content_class: str          # "lead" | "task" | "meeting" | "table" | "log" | "unknown"
     tier:          int          # 1-5
     confidence:    float        # 0.0 – 1.0
@@ -400,7 +400,8 @@ def classify_ingress(
 
     השתמש בזה לפני כל החלטת כתיבה. אסור לשום מודול לסווג קלט בעצמו.
 
-    source_type: "text" (now), "file"/"voice"/"email"/"image" (C90–C93, fallback Tier5)
+    source_type: "text" (Tier 1-5) | "file" (C90, always Tier 4, preview only) |
+                 "voice"/"email"/"image" (C91-C93, not yet implemented, fallback Tier 5)
 
     C89 RAW-OBS: לכל קריאה (כל Tier 1-5, כולל empty_text/source_type לא
     נתמך) נשמר raw_ref לא-ריק (הפניה ל-Decision Inbox כש-FEATURE_RAW_CAPTURE
@@ -420,14 +421,28 @@ def _classify_ingress_core(
     source_type: str,
 ) -> IngressClassification:
     """הלוגיקה המקורית של הסיווג — ללא raw_ref/observation, שמעליהם עוטף classify_ingress()."""
-    # ── Source types not yet implemented → Tier 5 ──
+    # ── C90: structured file uploads (xlsx/csv) → always Tier 4 ──────
+    # Preview-only by design (ROADMAP.md C90): no content parsing, no new
+    # classifier — every file is Tier 4 regardless of its actual contents.
+    # The caller (app.py) decides which uploads reach this with source_type="file".
+    if source_type == "file":
+        return IngressClassification(
+            source_type="file",
+            content_class="table",
+            tier=4,
+            confidence=1.0,
+            reason="file_upload_default_tier4",
+            candidates=(),
+        )
+
+    # ── Other source types not yet implemented → Tier 5 ──────────────
     if source_type != "text":
         return IngressClassification(
             source_type=source_type,
             content_class="unknown",
             tier=5,
             confidence=0.0,
-            reason=f"source_type={source_type} not implemented (C90+)",
+            reason=f"source_type={source_type} not implemented (C91+)",
             candidates=(),
         )
 
