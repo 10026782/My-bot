@@ -1,6 +1,7 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 05/07/2026 — C94 production verification הושלם 4/5 ע"י הבעלים: Telegram+WhatsApp+File(xlsx/csv, נבדק זמנית עם flag ON, הוחזר ל-OFF)+Render commit hash (`41f3305`) — כולם ✅. הפריט היחיד שנשאר (חריגת classify_ingress) נשאר לא-נבדק live בכוונה. ראה סעיף C94 למטה.
+עודכן: 05/07/2026 — ניקוי doc-drift: כמה "חסמים"/"PARTIAL" ב-ROADMAP היו סטטוס תיעודי ישן שסתר סעיפים מעודכנים יותר באותו קובץ, לא חסם אמיתי בקוד. תוקן: (1) C91/C92 סומנו "לא חסום על C89" (C89 סגור 05/07) — C93 נשאר חסום, אך על צבירת AgentObservation data, לא על C89. (2) F09/F10/F11 עודכנו — F10 היה כפול/vestige ל-N02/N03 שכבר מיושמים (lead_memory כבר מחובר בפועל), F11 כבר לא "MVP חסר" (N04+N05-B מיושמים), F09 נשאר החלטת-מוצר לא חסם-טכני. (3) "פערים ידועים" table עודכן בהתאם, שורת F10 הוסרה (מיושן/כפול). (4) F12/F13 קיבלו הבהרה מפורשת: חוסמים רק multi-tenant/SaaS provider-abstraction עתידי, לא שום עבודה שוטפת. (5) בלוק Audit ישן (14/06/2026) שטען N02-N05 "PARTIAL" סומן במפורש כהיסטורי/מוחלף — לא נמחק (evidence), אבל לא עוד קריא כסטטוס נוכחי. Decision Hub (BUG-DH-03/04) ו-N05-C (Meta outbound) נשארים חסמים אמיתיים — לא שונו.
+עודכן קודם: 05/07/2026 — C94 production verification הושלם 4/5 ע"י הבעלים: Telegram+WhatsApp+File(xlsx/csv, נבדק זמנית עם flag ON, הוחזר ל-OFF)+Render commit hash (`41f3305`) — כולם ✅. הפריט היחיד שנשאר (חריגת classify_ingress) נשאר לא-נבדק live בכוונה. ראה סעיף C94 למטה.
 עודכן קודם: 05/07/2026 — BUG-070 gap #1 (מתוך 3) נסגר: `core/action_gateway.py` מקבל `route_combined_word()`/`_parse_combined()` — מפרש "כן 1"/"אשר 3" (אישור ממוקד, סוגר siblings כמו `route_disambiguation`) ו-"לא 2" (דחייה ממוקדת — נשארת gap חדשה: reject-by-index לא היה קיים בכלל קודם, לא רק ניסוח). מחווט ב-`app.py` *לפני* בדיקת ה-disambiguation הרגילה (כדי לא לנקות בטעות state ישן) ולפני `_CONFIRM_WORDS`/`_CANCEL_WORDS`. `test_bug070_combined_wording.py` (חדש, 27/27). gap #2 כבר נסגר קודם (ראה עודכן קודם 05/07). **gap #3 (daily_collector numbered-reply ללא backend) ו-BUG-058 (Tier-2 batch-confirm resolver) נשארים פתוחים במכוון** — gap #3 קיבל רק תיקון מינימלי (הוסרה ההבטחה המטעה "ענה במספר" מ-`daily_collector.py`, ללא בניית backend); BUG-058 נשאר תיעוד-בלבד כפי שתועד ב-03/07 (דורש עיצוב precedence לפני קוד). ראה BUG_AUDIT_LOG.md BUG-070.
 עודכן קודם: 05/07/2026 — C89 סטטוס סגור: ✅ CLOSED/VERIFIED עם `FEATURE_AUTO_CAPTURE=false` (החלטה מפורשת של הבעלים — קוד+טסטים מאומתים מחדש, כולל RAW-OBS 15/15; flag נשאר כבוי בפרוד בכוונה, לא production-verification במובן המקורי). C90 לא נוגע — כבר בנוי ומוזג מקודם (PR #228). ראה סעיף C89 למטה.
 עודכן קודם: 05/07/2026 — C94: נוסף `FEATURE_INGRESS_ENVELOPE` כ-kill-switch ל-envelope-dispatch ב-`run_agent()` — **ברירת מחדל ON** (נוסף ל-`_DEFAULTS` ב-feature_flags.py, אותו מנגנון בדיוק כמו `IMPORT_DOMAIN`), כי C94 כבר ב-main/כנראה בפרוד ודגל שברירת המחדל שלו OFF היה מכבה אותו שקט ב-deploy. אומת: `is_enabled()` על דגל לא-מוגדר מחזיר `False` כברירת מחדל הרגילה — בלי ה-`_DEFAULTS` entry זה היה שובר את מה שכבר רץ. 138 הבדיקות (57+41+28+12) רצות זהה כשה-flag לא מוגדר בסביבה וכש-`=true` מפורש; אומת גם ש-`=false` באמת מדכא את בניית ה-envelope (0 קריאות ל-`build_telegram_envelope`). שינוי שורה אחת בתנאי + 2 שורות ב-feature_flags.py, שום refactor. ראה AI_CONTEXT.md §0.12 + סעיף C94 למטה.
@@ -330,15 +331,15 @@ Decision Hub Stage 3 (Readiness Engine, F18): `decision_readiness.py` (`calc_rea
 **לא אומת:** production/Render (אין גישה מה-sandbox). C91-C93 (voice/email/image) נשארים לא-ממומשים (Tier 5), חוץ מהסעיף הזה.
 
 ### C91 — Stage 3.2: Capture Policy — קול (Whisper → טקסט)
-**עדיפות:** 🟠 בינוני (חסום על C89)
+**עדיפות:** 🟠 בינוני — **לא חסום על C89** (C89 נסגר 05/07/2026 כ-CLOSED/VERIFIED עם `FEATURE_AUTO_CAPTURE=false`, החלטת הבעלים — ראה N13/AI_CONTEXT.md §0.14). לא התחיל בפועל; פתוח לביצוע/החלטת flag בכל עת.
 **פעולה:** Whisper תמלול → `classify_ingress(source_type="voice")`. confidence baseline מופחת אוטומטית.
 
 ### C92 — Stage 3.3: Capture Policy — מייל נכנס
-**עדיפות:** 🟡 גבוה (חסום על C89)
+**עדיפות:** 🟡 גבוה — **לא חסום על C89** (ראה הערה ב-C91 למעלה). תלוי רק בהחלטת flags ובחיבור נתיב ה-inbound הקיים.
 **פעולה:** `email_inbound.py` מתחבר לאותו `classify_ingress()` במקום לוגיקה נפרדת — איחוד, לא בנייה.
 
 ### C93 — Stage 4: OCR / כרטיסי ביקור
-**עדיפות:** 🟠 בינוני (חסום על C89 + AgentObservation data ≥ 2 שבועות)
+**עדיפות:** 🟠 בינוני — עדיין חסום, אך **לא על C89** (סגור) — חסום על צבירת ≥2 שבועות `AgentObservation` data (needs_review rate + תיקונים ידניים ב-Tier 1), תנאי מוצהר מראש שעדיין לא מתקיים.
 **פעולה:** תמונה → OCR → `classify_ingress(source_type="image")`. נפתח רק אם שיעור needs_review ושיעור תיקונים ידניים ב-Tier 1 נמוכים (נתוני AgentObservation).
 
 ### C94 — 🟡 שלב א׳+ב׳+ג׳+ד׳ הושלמו — Unified Ingress Envelope + Evidence Trace
@@ -962,19 +963,19 @@ agent: `last_tool_result` נשמר ב-session אחרי כל tool dispatch אמי
 ### F09 — Lead Qualifier Wire-up
 מה: חיבור lead_qualifier.handle_lead_message() לתוך run_agent — state machine שאלון לכל ליד WhatsApp.
 מצב: **בנוי ובדוק** — lead_qualifier.py קיים ומלא. לא מחובר לפרודקשן.
-תלוי ב: N04 (קודם צריך scoring + followup פשוטים). אחר כך להחליט: לחבר או להחליף ב-Claude-native scoring.
+**עדכון 05/07/2026:** N04 כבר מיושם (scheduler מחובר, flag כבוי — ראה N04 למטה) — התלות המקורית ("קודם צריך N04") סגורה. הנותר הוא **החלטת מוצר**, לא חסם טכני: לחבר את ה-state-machine הזה כמו-שהוא, או להחליף ב-Claude-native scoring (הנתיב שכבר פעיל דרך N02/N03).
 קבצים: lead_qualifier.py (קיים), app.py (hook).
 
 ### F10 — Lead Memory Wire-up
 מה: חיבור lead_memory.update() לתוך lead_capture — זיכרון ארוך-טווח per lead.
-מצב: **בנוי ובדוק** — core/lead_memory.py קיים כולל debounce, flush, TTL, feature flag.
-תלוי ב: N02 (scoring קודם — אין טעם לזכור ליד ללא ציון).
+מצב: **✅ בפועל כבר מחובר** — לא רק "בנוי ובדוק". N02/N03 (למטה) חיווטו בדיוק את זה: `lead_capture.py` קורא ל-`lead_memory.update()` הן ב-create (domain/channel/contact_name/summary/last_message, N04-A) והן אחרי scoring (tier/score/record_id, N04-B), גייטד ב-`LEAD_MEMORY` בלבד. הסעיף הזה היה כפול ל-N02/N03 מרגע שהם נבנו — נשאר כאן רק כהפניה היסטורית, לא כפריט עבודה נפרד.
+תלוי ב: כלום — התלות המקורית (N02) כבר מומשה.
 קבצים: core/lead_memory.py (קיים), lead_capture.py.
 
 ### F11 — Followup Engine Full Activation
 מה: הפעלת core/followup_engine.py המלא — determine_followup_needed, יצירת טיוטות, שליחה לאישור.
-מצב: **תשתית קיימת** — followup_engine.py בנוי. scheduler job קיים (כבוי).
-תלוי ב: N04 (N04 הוא גרסת MVP — F11 הוא הגרסה המלאה עם טיוטות וזיכרון).
+מצב: **תשתית קיימת + הרחבה חלקית כבר בפרודקשן-קוד.** N04 (MVP: scheduler+scan, למטה) ו-N05-B (טיוטת followup מגיעה בטלגרם לאישור owner, למטה) כבר מיושמים — שני הרכיבים המרכזיים שה-"MVP" המקורי דיבר עליהם קיימים. **לא חסום עוד** — מה שנשאר הוא הרחבה עתידית אופציונלית (למשל: זיכרון/היסטוריית followups עשירה יותר), לא MVP חסר.
+תלוי ב: כלום.
 קבצים: core/followup_engine.py (קיים), scheduler.py.
 
 ### F14 — Contact Gate: find_or_create_contact()
@@ -1001,9 +1002,11 @@ Piggyback trigger: כשנוגעים ב-`crm.py` לסיבה אחרת (F14 או le
 מצב: **לא קיים** — Fix #1/#3 + `FEATURE_LLM_FALLBACK` מטפלים בעכשיו. זהו ה-design הנכון לטווח ארוך.
 תלוי ב: domain skill documents (F-future), `FEATURE_LLM_FALLBACK` יציב בפרודקשן.
 קבצים לעתיד: `providers/` (חדש), `llm_fallback.py` (migrate/replace).
+**חשוב:** F12 חוסם אך ורק multi-tenant/SaaS provider-abstraction עתידי — **אינו** חוסם שום עבודה שוטפת (לידים, digest, C89-C94, Decision Hub וכו').
 
 ### F13 — TenantConfig + Provider Interfaces
 ⚠️ **STATUS: DEAD CODE — DO NOT WIRE**
+**חשוב:** כמו F12 — חוסם אך ורק F08 (SaaS Multi-Tenant) עתידי. אינו חוסם, ואינו קשור ל, שום עבודה שוטפת אחרת ברשימה הזו.
 - קיים: `core/tenant_config.py` + `providers/` (5 קבצים)
 - לא מחובר: אפס imports מקוד חי
 - כפילות: `TenantConfig` קיים גם ב-`tenant_provisioner.py`
@@ -1063,9 +1066,8 @@ scope: **infrastructure only — אפס שינוי runtime behavior** בשלב �
 
 | פער | סיבה | מתי נטפל |
 |-----|-------|----------|
-| F09 lead_qualifier — לא מחובר | state machine בנוי, מחכה ל-N04 | F09 |
-| F10 lead_memory — לא מחובר | debounce בנוי, מחכה ל-N02 | F10 |
-| F11 followup_engine — חלקי | תשתית בנויה, מחכה ל-N04 MVP | F11 |
+| F09 lead_qualifier — לא מחובר | state machine בנוי; N04 שהוא היה מחכה לו כבר מיושם — נותרה החלטת מוצר (לחבר את ה-state-machine או להישאר עם Claude-native scoring דרך N02/N03), לא חסם טכני | F09 |
+| F11 followup_engine — הרחבה עתידית אופציונלית | N04 (MVP) + N05-B (טיוטת אישור) כבר מיושמים ומחוברים — לא "חלקי" עוד; מה שנשאר הוא הרחבה (זיכרון/היסטוריה עשירה יותר), לא MVP חסר | F11 |
 | core_knowledge.py smoke test false positive | _NEVER_FAKE_CONTROL מכיל פראזה שהtest מזהה בטעות | לתעד כ-known false positive |
 | Voice/IVR Twilio signature validation | לא קריטי עד שF07 פעיל | לפני F07 |
 | /status handler חסר decorator | @bot.message_handler הוסר בשלב לא ידוע | מחר — תיקון שורה אחת |
@@ -1102,13 +1104,17 @@ Active planning source of truth is now limited to:
 
 All other planning/report Markdown files are archived historical evidence unless a future batch explicitly promotes content back into one of these two files.
 
-Current verified status for N02-N05:
+**עדכון 05/07/2026 — הבלוק הבא (מ-14/06/2026) התיישן ומנוגד ישירות לסעיפי N02/N03/N04/N05/N05-B למעלה (שכולם ✅ מיושם, single path, קוד+טסטים) — נשאר כתיעוד היסטורי בלבד, לא כסטטוס נוכחי:**
+
+Current verified status for N02-N05 (**היסטורי — 14/06/2026, לפני N02-N05 המיושמים למעלה**):
 - N02 Live Lead Scoring: PARTIAL. Code exists in `lead_capture.py` behind `LEAD_SCORING`; default off and not verified active in production.
 - N03 Lead Memory Wire-up: PARTIAL. `lead_memory.update()` is wired from `lead_capture.py` after successful scoring behind `LEAD_MEMORY`; default off and not verified active in production.
 - N04 Followup Activation: PARTIAL. Scheduler job and approval queuing exist behind `FOLLOWUP_AUTOMATION`, but the flow depends on populated `lead_memory` and is not active end-to-end.
 - N05 Daily Digest upgrade: PARTIAL. Digest reads `Score`, but hot-lead filtering still uses status only and does not filter by score/tier as documented.
 
-Recommended next action: Fix docs first, then choose whether to activate/ship the intended single N02 path.
+**סטטוס נוכחי (ראה N02/N03/N04/N05/N05-B למעלה בקובץ זה):** כל הארבעה **✅ מיושם** — קוד+single-path+flags, לא PARTIAL. הנותר האמיתי אינו "לתקן קוד" אלא **החלטת הפעלה בלבד**: להדליק את `LEAD_SCORING`/`LEAD_MEMORY`/`FOLLOWUP_AUTOMATION` ב-Render ולאמת על תעבורה חיה — לא בעיה בקוד.
+
+Recommended next action (היסטורי, 14/06/2026 — כבר בוצע): Fix docs first, then choose whether to activate/ship the intended single N02 path.
 
 Archived / historical Markdown disposition:
 
