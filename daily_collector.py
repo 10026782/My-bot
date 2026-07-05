@@ -147,7 +147,9 @@ def format_collector_message(result: dict) -> str | None:
         if action:
             lines.append(f"   ↳ {action}")
 
-    lines.append("\nענה במספר לאישור שמירה, או 'הכל בסדר' אם כבר טופל.")
+    # BUG-070 gap #3: אין handler שמפרסר תגובה ממוספרת לפריטי המאסף היומי
+    # (אין contract/state שמייצג אותם) — אין להבטיח יכולת שלא קיימת.
+    lines.append("\nכדי לשמור פריט — עדכן אותו ידנית או שלח לי אותו כליד/משימה בנפרד.")
     return "\n".join(lines)
 
 
