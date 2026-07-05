@@ -1,10 +1,24 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-07-05 (מאוחר ביותר) — C90 Structured File Capture מוזג ל-`main` (PR #228, `004fbf9`) — ראה 0.10 למטה. קודם: 5 באגי C89-family מוזגו (PR #220–#224) — ראה 0.9 למטה
-**עודכן על ידי:** Claude Code — PR #225/#227/#228 מוזגו (docs + hardening + C90), ראה 0.10/0.9 למטה
+**עודכן:** 2026-07-05 (מאוחר ביותר) — BUG-066/BUG-067 (Daily Tasks fail-safe + Shabbat gate) מוזגו ל-`main` (PR #231, PR #230) — ראה 0.11 למטה. קודם: C90 Structured File Capture מוזג (PR #228) — ראה 0.10 למטה. קודם: 5 באגי C89-family מוזגו (PR #220–#224) — ראה 0.9 למטה
+**עודכן על ידי:** Claude Code — PR #229/#230/#231 מוזגו (BUG-audit docs + BUG-067 Shabbat gate + BUG-066 fail-safe), ראה 0.11 למטה
 
 > מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (מיושן, 19/06) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
+
+---
+
+## 0.11 BUG-066/BUG-067 — Daily Tasks/Daily Digest hardening, מוזגו ל-main (PR #230, #231) — 2026-07-05 (קרא לפני 0.10)
+
+**רקע:** המשתמש דיווח 4 באגים תפעוליים ב-Daily Tasks/Daily Digest/Shabbat Mode (BUG-DAILY-01..04, מתועדים ב-BUG_AUDIT_LOG.md כ-BUG-066..069) והחליט במפורש על סדר עבודה: PR #229 (מוזג) — תיעוד באגים בלבד, בלי תיקונים; אחריו PR נפרד לכל תיקון, אחד בכל פעם. BUG-068/BUG-069 (Daily Digest UX/compact mode) נדחו במפורש ל"אחר כך" ולא הוחל עליהם עדיין שום תיקון.
+
+**PR #230 — BUG-067 (Shabbat gate, ענף `fix/bug067-shabbat-gate-digest`, מוזג `b31b880`/`cfa3205`):** `daily_digest.py` השתמש רק ב-`shabbat_status_message()` (טקסט תצוגה בלבד) ולא ב-`shabbat_safe()`/`should_send_now()` (הגייט האמיתי החוסם) — הדוח נשלח בפועל בשבת עם כותרת "מושהה" סותרת. תוקן ב-2 שורות בלבד ב-`scheduler.py`: `_job_daily_digest`/`_job_daily_collector` נעטפו ב-`shabbat_safe(...)`, אותו pattern בדיוק כמו 6 jobs אחרים. לא נגע ב-`build_digest()`/Airtable queries/scoring/formatting (מאומת: `smoke_tests.py` מחזיר בדיוק אותם 215 תווים). 3/3 בדיקות חדשות (`test_bug067_shabbat_gates_scheduled_digest.py`).
+
+**PR #231 — BUG-066 (fail-safe פר-שלב, ענף `fix/bug066-daily-collector-fail-safe`, מוזג `aa30695`/`f2431e1`):** `daily_collector.py`'s `collect_daily()` עטף רק את קריאת ה-LLM ב-try/except; fetch history ו-`format_collector_message()` היו ללא הגנה, וה-wrapper החיצוני ב-`scheduler.py` תפס הכל בבלוק אחד גורף ללא per-step logging — לוג לא ציין איזה שלב נכשל, ו-`bot.send_message()` ללא timeout יכול היה להקפיא את ה-scheduler thread הבודד-thread-י. תוקן: `collect_daily()`/`send_daily_collector()` פוצלו ל-4 שלבים מבודדים (fetch history / LLM+parse / format / send), כל אחד עם try/except+logging (start/done/error) נפרד — הפונקציות לעולם לא raise-ות. נוסף `_SEND_TIMEOUT=15` מפורש ל-`bot.send_message()`. `scheduler.py`'s job wrappers קיבלו logging `[Scheduler] job=X ...` ברמת ה-job. כאגב תוקנה corruption/mojibake בשתי שורות טקסט ב-`daily_collector.py` (דומה ל-BUG-018), לא קשורה לבאג המקורי. 8/8 בדיקות חדשות (`test_bug066_daily_collector_fail_safe.py`), אפס רגרסיה על `test_bug067_...`/`test_c86_scheduler_emergency_matrix.py`/`smoke_tests.py`.
+
+**מצב:** שני ה-PR מוזגו ל-`main` (מאומת `git log origin/main --oneline`: `f2431e1`, `cfa3205`). **לא אומת עדיין ב-production/Render** (deploy hash מול origin/main לא נבדק במסגרת session זה). BUG-068/BUG-069 עדיין פתוחים, לא הוחל עליהם תיקון — ממתינים להנחיה מפורשת מהמשתמש להתחיל.
+
+**ראה:** BUG_AUDIT_LOG.md BUG-066/BUG-067, CHANGE_CONTROL_LOG.md C91/C92.
 
 ---
 

@@ -1081,4 +1081,4 @@ Session lookup עבר מ-regex-parsing על string מפורמט ל-reader מוב
 ### C92 — BUG-066: fail-safe פר-שלב ל-Daily Tasks (05/07/2026)
 קבצים: `daily_collector.py`, `scheduler.py`, `test_bug066_daily_collector_fail_safe.py` (חדש) | PR #231 | באג: BUG-066
 `collect_daily()`/`send_daily_collector()` פוצלו לשלבים מבודדים (fetch history / LLM+parse / format / send) עם try/except+logging (start/done/error) נפרד לכל שלב — הפונקציות לעולם לא raise-ות, תמיד fallback בטוח. `bot.send_message()` מקבל `timeout=15` מפורש כדי שקריאת רשת תקועה לא תקפיא את ה-scheduler thread הבודד. `scheduler.py`'s job wrappers קיבלו logging מפורש ברמת ה-job. תוקנה גם corruption/mojibake בשתי שורות טקסט בקובץ (לא קשור לבאג עצמו). 8/8 בדיקות חדשות + אפס רגרסיה.
-**Merged:** לא עדיין — PR #231 פתוח
+**Merged:** כן (`aa30695`, merge commit `f2431e1`) — מאומת `git log origin/main --oneline` | **Verified בפרודקשן:** לא עדיין
