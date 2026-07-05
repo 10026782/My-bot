@@ -799,9 +799,12 @@ def start_scheduler() -> threading.Thread:
     weekly_summary_time   = os.environ.get("WEEKLY_SUMMARY_TIME",      "08:30")
 
     # Use automation guard wrapper for jobs that should be paused by EMERGENCY_STOP_AUTOMATION.
-    schedule.every().day.at(digest_time).do(_automation_guard(_job_daily_digest, name="daily_digest"))
+    # BUG-067 (BUG-DAILY-02): daily_digest/daily_collector previously ran on Shabbat/holidays —
+    # daily_digest.py only shows a "Shabbat Mode" text banner, it never actually gates sending.
+    # Wrapped in shabbat_safe(), same pattern already used for 6 other jobs below.
+    schedule.every().day.at(digest_time).do(shabbat_safe(_automation_guard(_job_daily_digest, name="daily_digest")))
     schedule.every().day.at(git_audit_time).do(_automation_guard(_job_daily_git_audit, name="daily_git_audit"))            # Daily Git/config integrity audit (GOV-02)
-    schedule.every().day.at(collector_time).do(_automation_guard(_job_daily_collector, name="daily_collector"))
+    schedule.every().day.at(collector_time).do(shabbat_safe(_automation_guard(_job_daily_collector, name="daily_collector")))
     schedule.every(cleanup_interval).minutes.do(_automation_guard(_job_cleanup_pending, name="cleanup_pending"))
     schedule.every().day.at("00:05").do(_automation_guard(_job_overdue_payments, name="overdue_payments"))
     schedule.every(10).minutes.do(_automation_guard(job_flush_lead_memory, name="flush_lead_memory"))                                          # N01
