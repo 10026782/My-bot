@@ -1,10 +1,38 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-07-05 (מאוחר ביותר) — BUG-066/BUG-067 (Daily Tasks fail-safe + Shabbat gate) מוזגו ל-`main` (PR #231, PR #230) — ראה 0.11 למטה. קודם: C90 Structured File Capture מוזג (PR #228) — ראה 0.10 למטה. קודם: 5 באגי C89-family מוזגו (PR #220–#224) — ראה 0.9 למטה
-**עודכן על ידי:** Claude Code — PR #229/#230/#231 מוזגו (BUG-audit docs + BUG-067 Shabbat gate + BUG-066 fail-safe), ראה 0.11 למטה
+**עודכן:** 2026-07-05 (מאוחר ביותר) — C94 (Unified Ingress Envelope + Evidence Trace) שלבים א׳-ד׳ כולם מוזגו ל-`main` (PR #236–#239) — ראה 0.12 למטה. קודם: BUG-066/BUG-067 (Daily Tasks fail-safe + Shabbat gate) מוזגו ל-`main` (PR #231, PR #230) — ראה 0.11 למטה.
+**עודכן על ידי:** Claude Code — PR #236/#237/#238/#239 מוזגו (C94 Stage א׳-ד׳), ראה 0.12 למטה
 
 > מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (מיושן, 19/06) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
+
+---
+
+## 0.12 C94 — Unified Ingress Envelope + Evidence Trace, כל 4 השלבים מוזגו ל-main (PR #236–#239) — 2026-07-05 (קרא לפני 0.11)
+
+**מה זה:** שכבת envelope/trace אחידה לכל מקור ingress (File/Telegram/WhatsApp-Twilio), כשכבה *לפני* הכניסה ל-`classify_ingress()`/C89/C90 — לא נוגעת בהם. `IngressEnvelope` (pre-classification, 7 שדות+envelope_id) ו-`EvidenceTrace` (post-classification, envelope_id FK + trace_id/attempt_no/status + classification_result/error/raw_ref/approval_contract_id/agent_observation) הם שני dataclasses נפרדים, לעולם לא ממוזגים. פירוט מלא + כל תיקוני ה-schema (A.1/A.2/A.3) ב-ROADMAP.md §C94.
+
+**שלבים:** א׳ (schemas, `core/ingress_envelope.py`) → ב׳ (File adapter, `core/file_ingress_adapter.py`, + תיקון gap אמיתי: `classify_ingress()` לא היה עטוף try/except ב-`_process_structured_file_upload`) → ג׳ (Telegram, `core/telegram_ingress_adapter.py` + `core/router/capture_router.py`'s `classify_capture_ic()` עטוף — חריגה כבר לא מפילה את כל ה-router ל-Approval/UNKNOWN) → ד׳ (WhatsApp/Twilio, `core/whatsapp_ingress_adapter.py`; Meta Cloud API נשאר gated/לא נוגע במפורש). 138 בדיקות חדשות סה"כ (57+41+28+12), אפס רגרסיה בכל שלב.
+
+**⚠️ אין Feature Flag ל-C94 עצמו — במכוון, לא נשכח:** כל שלב תוכנן להיות equivalence-preserving (טסט ייעודי לכל שלב מוכיח תוצאה זהה עם/בלי ה-wiring) ולהתדרדר בעדינות (graceful degradation) בכשל, ולכן נחשב "always-on plumbing" ולא feature חדש שדורש flag. **זה סוטה מ-`RELEASE_CHECKLIST.md`'s "Feature flag הוגדר וכבוי ברירת מחדל"** — סעיף זה לא קוים באף אחד מ-4 ה-PR. אם רוצים kill-switch (למשל למקרה חירום שה-envelope-building עצמו מתחיל לזרוק שגיאות ב-prod) — לא קיים כרגע, צריך להוסיף בנפרד.
+
+**דגלים סמוכים (לא C94 עצמו, אלא ה-pipelines שהוא עוטף) — ברירת מחדל בקוד (`feature_flags.py`'s `_DEFAULTS` מכיל רק `IMPORT_DOMAIN`; כל שאר הדגלים = כבוי אלא אם Render env var דורס):**
+- `FEATURE_STRUCTURED_FILE_CAPTURE` (C90) — כבוי בקוד; לפי הסנאפשוט הקודם של קובץ זה (0.10) — עדיין כבוי בפרודקשן.
+- `FEATURE_AUTO_CAPTURE` (C89) — כבוי בקוד; אותו סנאפשוט — עדיין כבוי בפרודקשן.
+- `FEATURE_RAW_CAPTURE` — כבוי בקוד.
+- `META_OUTBOUND_ENABLED` — כבוי בקוד; C94 Stage ד' מוודא במפורש (טסט source-level) שהוא לא נוגע בנתיב Meta כלל.
+**אין גישת Render Dashboard מה-sandbox** — הטבלה הזו היא ברירות מחדל בקוד + מה שהסנאפשוט הקודם של הקובץ הזה טוען, לא אימות live. הבעלים צריך לבדוק בפועל ב-Render env vars.
+
+**Render env vars חדשים ל-C94:** אין. נבדק בגרפ מלא על `core/ingress_envelope.py`/`file_ingress_adapter.py`/`telegram_ingress_adapter.py`/`whatsapp_ingress_adapter.py`/`capture_router.py` — אפס `os.environ`/`getenv` חדשים. C94 משתמש אך ורק בתשתית identity/classify_ingress/ActionGateway הקיימת.
+
+**Production verification — עדיין לא בוצע (לא claim, פתוח בפירוש):**
+1. אימות commit hash ב-Render מול `main` (`33aaafd`→`a4af2b8`→`b76bdc2`).
+2. הודעת Telegram אמיתית מהבעלים — תשובה זהה למצב לפני C94 + אין `[C94] telegram envelope build/validate failed` בלוגים.
+3. הודעת WhatsApp/Twilio אמיתית — אותו דבר, מחפשים `[C94] whatsapp envelope build/validate failed`.
+4. העלאת xlsx/csv אמיתית ב-Telegram (רלוונטי רק אם `FEATURE_STRUCTURED_FILE_CAPTURE` יופעל) — תשובה זהה + אין שגיאות `[C94]` פר-שורה.
+5. מסלול "חריגת classify_ingress מתדרדרת בעדינות" (התיקון המרכזי בשלב ג') — **לא ניתן/לא כדאי** להפעיל בכוונה על תעבורה אמיתית (זה יהיה לשבור prod בכוונה) — ההוכחה נשענת על 138 הבדיקות (`test_c94_*.py`), לא על trigger live.
+
+**ראה:** ROADMAP.md §C94 (הפירוט המלא של כל שלב + תיקוני schema A.1-A.3), `core/ingress_envelope.py`/`core/file_ingress_adapter.py`/`core/telegram_ingress_adapter.py`/`core/whatsapp_ingress_adapter.py`/`core/router/capture_router.py`.
 
 ---
 
