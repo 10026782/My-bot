@@ -32,7 +32,7 @@ _RAW_REF_UNSET = "__unset__"  # never returned to callers — classify_ingress()
 
 @dataclass(frozen=True)
 class IngressClassification:
-    source_type:   str          # "text" | "file" | "voice" | "email" | "image" (C90+)
+    source_type:   str          # "text" | "file" (C90) | "voice"/"email"/"image" (C91-C93, not yet implemented)
     content_class: str          # "lead" | "task" | "meeting" | "table" | "log" | "unknown"
     tier:          int          # 1-5
     confidence:    float        # 0.0 – 1.0
@@ -400,7 +400,9 @@ def classify_ingress(
 
     השתמש בזה לפני כל החלטת כתיבה. אסור לשום מודול לסווג קלט בעצמו.
 
-    source_type: "text" (now), "file"/"voice"/"email"/"image" (C90–C93, fallback Tier5)
+    source_type: "text" | "file" (C90: same Tier 1-5 logic as text, no special-casing —
+                 the caller decides *that* a row reaches here, not how it's classified) |
+                 "voice"/"email"/"image" (C91-C93, not yet implemented, fallback Tier 5)
 
     C89 RAW-OBS: לכל קריאה (כל Tier 1-5, כולל empty_text/source_type לא
     נתמך) נשמר raw_ref לא-ריק (הפניה ל-Decision Inbox כש-FEATURE_RAW_CAPTURE
@@ -420,20 +422,27 @@ def _classify_ingress_core(
     source_type: str,
 ) -> IngressClassification:
     """הלוגיקה המקורית של הסיווג — ללא raw_ref/observation, שמעליהם עוטף classify_ingress()."""
-    # ── Source types not yet implemented → Tier 5 ──
-    if source_type != "text":
+    # ── C90: source_type="file" reuses the EXACT SAME tier logic as text ──
+    # No special-casing: a file row is an ingress-source-adapter concern
+    # (app.py / core/file_ingress_adapter.py decide *that* a row reaches
+    # here), not a classification concern. The row's text runs through the
+    # identical Tier4-hard-marker/extraction/confidence pipeline below —
+    # a row with a clear name+phone can legitimately resolve to Tier 1/2/3,
+    # same as any text message. Only genuinely unimplemented source types
+    # (voice/email/image, C91-C93) short-circuit here.
+    if source_type not in ("text", "file"):
         return IngressClassification(
             source_type=source_type,
             content_class="unknown",
             tier=5,
             confidence=0.0,
-            reason=f"source_type={source_type} not implemented (C90+)",
+            reason=f"source_type={source_type} not implemented (C91+)",
             candidates=(),
         )
 
     if not text or not text.strip():
         return IngressClassification(
-            source_type="text",
+            source_type=source_type,
             content_class="unknown",
             tier=5,
             confidence=0.0,
@@ -445,7 +454,7 @@ def _classify_ingress_core(
     is_t4, t4_reason = _is_tier4(text)
     if is_t4:
         return IngressClassification(
-            source_type="text",
+            source_type=source_type,
             content_class="table",
             tier=4,
             confidence=1.0,
@@ -458,7 +467,7 @@ def _classify_ingress_core(
 
     if not candidates:
         return IngressClassification(
-            source_type="text",
+            source_type=source_type,
             content_class="unknown",
             tier=5,
             confidence=0.0,
@@ -473,7 +482,7 @@ def _classify_ingress_core(
     if len(candidates) == 1 and high:
         c = candidates[0]
         return IngressClassification(
-            source_type="text",
+            source_type=source_type,
             content_class="lead",
             tier=1,
             confidence=c["confidence"],
@@ -485,7 +494,7 @@ def _classify_ingress_core(
     if len(candidates) >= 2 and not low:
         avg_conf = sum(c["confidence"] for c in candidates) / len(candidates)
         return IngressClassification(
-            source_type="text",
+            source_type=source_type,
             content_class="lead",
             tier=2,
             confidence=avg_conf,
@@ -497,7 +506,7 @@ def _classify_ingress_core(
     if high:
         avg_conf = sum(c["confidence"] for c in high) / len(high)
         return IngressClassification(
-            source_type="text",
+            source_type=source_type,
             content_class="lead",
             tier=3,
             confidence=avg_conf,
@@ -507,7 +516,7 @@ def _classify_ingress_core(
 
     # ── All candidates low-confidence → Tier 5 ───
     return IngressClassification(
-        source_type="text",
+        source_type=source_type,
         content_class="unknown",
         tier=5,
         confidence=max((c["confidence"] for c in candidates), default=0.0),

@@ -59,6 +59,12 @@ CAPTURE POLICY (C89):
                                  as IngressClassification.raw_ref. OFF (default): raw_ref still
                                  always populated (local fallback reference), no live Airtable
                                  write — classification behavior is unchanged either way.
+  FEATURE_STRUCTURED_FILE_CAPTURE - C90: xlsx/csv uploaded to Telegram routes through
+                                 classify_ingress(source_type="file") for a Tier-4-only preview
+                                 reply, instead of the FEATURE_MEDIA_UPLOAD Drive/Media-Files
+                                 path. No auto-write, no content parsing, no Airtable write.
+                                 OFF (default): xlsx/csv uploads fall through to the existing
+                                 FEATURE_MEDIA_UPLOAD behavior unchanged.
 
 F52 STAGE 1 (safe refactors):
   FEATURE_LAST_TOOL_RESULT_SHADOW - passive Last-Tool-Result recorder (core/last_tool_result_shadow.py).
