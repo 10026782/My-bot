@@ -1,6 +1,7 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 05/07/2026 — BUG-066 עד BUG-069 (BUG-DAILY-01..04) תועדו — **פתוחים, לא תוקנו**: (1) Daily Tasks נתקע — אין fail-safe/logging פר-שלב ב-`daily_collector.py`, wrapper גורף יחיד ב-`scheduler.py`. (2) Daily Digest נשלח בשבת — `shabbat_guard.py`'s gate האמיתי (`shabbat_safe`) קיים ומיושם ל-6 jobs אחרים ב-`scheduler.py`, אבל לא ל-`_job_daily_digest`/`_job_daily_collector` — הם משתמשים רק ב-`shabbat_status_message()` (טקסט בלבד, לא חוסם). (3) הדוח ארוך מדי — אין cap על אורך/מספר פריטים. (4) משימות שהושלמו מוצגות בפירוט מלא במקום ספירה בלבד. ראה BUG_AUDIT_LOG.md BUG-066..069.
+עודכן: 05/07/2026 — C94 (Unified Ingress Envelope + Evidence Trace) שלב א׳ הושלם: `core/ingress_envelope.py` חדש — `IngressEnvelope`(7 שדות, pre-classification)/`EvidenceTrace`(3 שדות, post preview/approval/write) כ-dataclasses נפרדים + `validate()`. `test_c94_ingress_envelope.py` 26/26. ממוספר C94 (לא C91, כדי לא להתנגש עם C91-קול הקיים). אין שינוי בשום ערוץ חי, אין wiring ל-adapters — עצירה לאישור לפני שלב ב׳ (File adapter). ראה סעיף C94.
+עודכן קודם: 05/07/2026 — BUG-066 עד BUG-069 (BUG-DAILY-01..04) תועדו — **פתוחים, לא תוקנו**: (1) Daily Tasks נתקע — אין fail-safe/logging פר-שלב ב-`daily_collector.py`, wrapper גורף יחיד ב-`scheduler.py`. (2) Daily Digest נשלח בשבת — `shabbat_guard.py`'s gate האמיתי (`shabbat_safe`) קיים ומיושם ל-6 jobs אחרים ב-`scheduler.py`, אבל לא ל-`_job_daily_digest`/`_job_daily_collector` — הם משתמשים רק ב-`shabbat_status_message()` (טקסט בלבד, לא חוסם). (3) הדוח ארוך מדי — אין cap על אורך/מספר פריטים. (4) משימות שהושלמו מוצגות בפירוט מלא במקום ספירה בלבד. ראה BUG_AUDIT_LOG.md BUG-066..069.
 עודכן קודם: 05/07/2026 — C90 (Structured File Capture, PR #228): file upload כ-ingress source adapter בלבד — `core/file_ingress_adapter.py` חדש מפרסר xlsx/csv לשורות, כל שורה עוברת ללא special-casing דרך אותו `classify_ingress()`/`handle_lead_candidate()` כמו טקסט (שורה ברורה יכולה להיות Tier1 לגיטימי). הוחלט לבנות למרות ש-C89 עדיין לא production-verified, כי C90 לא תלוי בנתיב auto-write. ראה סעיף C90.
 עודכן קודם: 04/07/2026 — BUG-061 עד BUG-065 (C89 QA closure, PR #220–#227, כולם מוזגו ל-main): prefix-ביטויים דו-משמעיים, owner שאיבד role אחרי אישור, Session lookup fail-closed, hard markers ל-Tier 4 (טבלה/CSV/Airtable-status), raw_ref+AgentObservation מחוברים. `FEATURE_AUTO_CAPTURE` עדיין כבוי בפרודקשן — production verification (התלות של C90) עדיין לא בוצע. ראה סעיף C89 + BUG_AUDIT_LOG.md.
 עודכן קודם: 03/07/2026 — BUG-058 (TIER2-SILENT-PREVIEW-NO-READER): Tier 2 batch preview (`_handle_clean_batch`) הבטיח "אישור קבוצתי" (`ענה כן`) שאף resolver לא קורא בפועל — `pending_lead_preview` נכתב, 0 קוראים בכל הריפו. תוקן: הודעת Tier 2 שונתה לתצפית-בלבד, ללא CTA מטעה; `_store_pending_preview` מתועד כ-`INTENTIONAL — no resolver yet`; השדה נשאר נכתב (audit/future design). Batch-confirm resolver עצמו נדחה בכוונה — דורש עיצוב precedence מול Tier 1 ActionGateway contract *לפני* בנייה. תיקון ב-`branch fix/bug058-tier2-silent-preview`. ראה BUG_AUDIT_LOG.md BUG-058.
@@ -331,6 +332,16 @@ Decision Hub Stage 3 (Readiness Engine, F18): `decision_readiness.py` (`calc_rea
 ### C93 — Stage 4: OCR / כרטיסי ביקור
 **עדיפות:** 🟠 בינוני (חסום על C89 + AgentObservation data ≥ 2 שבועות)
 **פעולה:** תמונה → OCR → `classify_ingress(source_type="image")`. נפתח רק אם שיעור needs_review ושיעור תיקונים ידניים ב-Tier 1 נמוכים (נתוני AgentObservation).
+
+### C94 — 🟡 שלב א׳ הושלם (schemas בלבד) — Unified Ingress Envelope + Evidence Trace
+**עדיפות:** 🟠 בינוני — לא תלוי ב-C89 production verification; שכבה *לפני* הכניסה ל-classify_ingress/C90, לא נוגעת בהם.
+**הערת מספור:** מקורי בדוח שהתקבל תויג "C91" — שונה ל-C94 כדי לא להתנגש עם C91 (Stage 3.2 — קול) הקיים כבר למעלה.
+**עקרון:** שתי שכבות נפרדות, אף פעם לא ממוזגות לאובייקט אחד:
+- `IngressEnvelope` (7 שדות: source_channel, provider, raw_event_id, sender_identity, normalized_text, attachments, raw_ref) — תקף **לפני** סיווג; שום שדה לא תלוי בתהליך מאוחר יותר, ולכן חובה validation gate מלא (7/7) לפני כניסה ל-C89/C90.
+- `EvidenceTrace` (3 שדות: classification_result, approval_contract_id, agent_observation) — נוצר **אחרי** classify_ingress/preview/approval; trace חלקי (למשל Tier 3/4 בלי approval/write) הוא מצב תקין, לא כשל.
+**קובץ ראשי:** `core/ingress_envelope.py` (חדש) — `IngressEnvelope`/`EvidenceTrace` dataclasses + `validate()` לכל אחד. אין adapter wiring בשלב זה, אין שינוי ב-`classify_ingress`/C90.
+**בדיקה:** `test_c94_ingress_envelope.py` (26/26) — 7/7 שדות נדרשים ל-Envelope, source_channel≠provider (BUG-071 pattern: "twilio"/"meta" ב-source_channel נדחה), trace ריק/חלקי (Tier 3/4) עובר כתקין, ordering invariant (approval/observation בלי classification_result) נדחה.
+**נותר (שלבים הבאים, כל אחד דורש אישור נפרד לפני שמתחילים):** שלב ב׳ — File adapter → Envelope → C90 pipeline קיים (equivalence suite); שלב ג׳ — Telegram; שלב ד׳ — WhatsApp Twilio (source_channel="whatsapp", provider="twilio_whatsapp", לא "twilio").
 
 ---
 
