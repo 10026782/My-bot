@@ -1,10 +1,22 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-07-05 (מאוחר ביותר) — C94: נוסף `FEATURE_INGRESS_ENVELOPE` כ-kill-switch (default ON) ל-envelope-dispatch ב-`run_agent()` — ראה 0.13 למטה. קודם: כל 4 שלבי C94 מוזגו ל-`main` (PR #236–#239) — ראה 0.12 למטה.
-**עודכן על ידי:** Claude Code — FEATURE_INGRESS_ENVELOPE נוסף, ראה 0.13 למטה
+**עודכן:** 2026-07-05 (מאוחר ביותר) — C89 סטטוס סגור: ✅ CLOSED/VERIFIED עם `FEATURE_AUTO_CAPTURE=false` (החלטת הבעלים) — ראה 0.14 למטה. קודם: C94 `FEATURE_INGRESS_ENVELOPE` kill-switch נוסף — ראה 0.13 למטה.
+**עודכן על ידי:** Claude Code — C89 closure, ראה 0.14 למטה
 
 > מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (מיושן, 19/06) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
+
+---
+
+## 0.14 C89 — סטטוס סגור: ✅ CLOSED/VERIFIED עם `FEATURE_AUTO_CAPTURE=false` (החלטת הבעלים) — 2026-07-05 (קרא לפני 0.13)
+
+**החלטה מפורשת של הבעלים:** כל הממצאים הידועים מ-QA ידני על C89 (Stage 3 Capture Policy — טקסט) סגורים בקוד+טסטים, מאומת מחדש היום (לא רק נטען): IC ambiguous routing, Sessions root, Gateway path/no direct dispatch, Preview pending approval, Approval identity (Telegram+WhatsApp), Existing lead update UX, Dedupe/idempotency, Tier 4 hard-precedence, RAW-OBS. `FEATURE_AUTO_CAPTURE` **נשאר כבוי בפרודקשן בכוונה** — לא הופעל, לא ייבדק על תעבורה אמיתית.
+
+**חשוב לדייק — זו לא "production verification" במובן שה-ROADMAP המקורי הגדיר לסעיף הזה** (הפעלת flag + מעקב `AgentObservation` על תעבורה אמיתית). זו סגירת scope מודעת: "קוד+טסטים מאומתים, הבעלים בוחר במפורש לא להפעיל." C90/C91/C92/C93 שהיו "חסומים על C89 production-verification" נחשבים כעת משוחררים תחת ההגדרה הזו (C90 כבר נבנה ומוזג ממילא מקודם, PR #228 — לא נגעתי בו).
+
+**RAW-OBS re-verified (05/07/2026):** `test_c89_raw_obs.py` 15/15 — כל bullet באודיט שהמשתמש הציג הושווה מול הרצה אמיתית ותאם במדויק: raw_ref לעולם לא ריק בשום Tier (כולל flag OFF וכשל כתיבת Airtable), `AgentObservation(kind="capture_classification", contract_id=None)` נרשם לכל קריאה, ללא coupling ל-ActionContract.
+
+**ראה:** ROADMAP.md §C89 לפירוט מלא + היסטוריית ה-PRs (BUG-047 עד BUG-065).
 
 ---
 
