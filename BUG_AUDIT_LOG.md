@@ -965,3 +965,63 @@
 - **Verification ראיה:** ראה בדיקה למעלה; `git merge-base --is-ancestor 68f8c97 origin/main` → הצלחה
 - **סטטוס:** ✅ מוזג ל-main — ממתין ל-production verification
 - **עדכון (PR #227, `ca207ba`, merge commit `64b477a`):** תיקון היה נכון פונקציונלית, אך `_classify_ingress_core()` עדיין כתב `raw_ref=""` באופן מילולי בכל אחת מ-8 נקודות ה-return הפנימיות שלה (הערך נדרס ע"י ה-wrapper לפני ההחזרה בפועל, אבל grep סטטי על `raw_ref=""` עדיין מצא hits ותועד בטעות כאילו התיקון חסר). `IngressClassification.raw_ref` קיבל ברירת מחדל sentinel פרטי (`__unset__`) במקום `""`, כך שאף return statement פנימי לא צריך להזכיר `raw_ref` בכלל — `classify_ingress()` הוא המקום היחיד שמקצה ערך אמיתי. אומת: `grep -rn 'raw_ref=""' --include="*.py" .` → אפס hits בקוד בפועל (רק במחרוזת הבדיקה עצמה). נוסף guard סטטי (`inspect.getsource`) ל-`test_c89_raw_obs.py` — 15/15. אין שינוי התנהגות.
+
+### BUG-066 (BUG-DAILY-01) — Boss Daily Tasks נתקע ולא ממשיך (אין fail-safe פר-שלב)
+- **תאריך:** 05/07/2026
+- **דווח על ידי:** המשתמש — תצפית תפעולית ("הריצה מתחילה, אך נעצרת/נתקעת באמצע, בלי מעבר תקין להמשך השלבים")
+- **קבצים:** `daily_collector.py`, `scheduler.py`
+- **Severity:** High
+- **שורש (מאומת בקוד):** `daily_collector.py`'s `collect_daily()` עוטף רק את קריאת ה-LLM+parse ב-try/except (`daily_collector.py:76-100`, `except Exception as e: logger.error(...); return {"items": [], "all_clear": True}`). קריאת ה-history (`memory.get_for_claude(memory_key)`, שורה 62) **לא** עטופה בכלל — חריגה שם מתפשטת ללא טיפול. `format_collector_message()` (שורות 114-135) **גם היא ללא כל try/except**. כלומר מתוך 3 שלבים אמיתיים (fetch history → LLM/parse → format/send), רק אחד מוגן. הרשת היחידה שתופסת כשל בלתי-מוגן היא ה-wrapper החיצוני ב-`scheduler.py:72-87`'s `_job_daily_collector()` — `except Exception as e: logger.error(f"daily_collector error: {e}")` — **בלוק אחד גורף**, לא פר-שלב, כך שהלוג לעולם לא מציין איזה שלב נכשל (fetch/LLM/format/send), ואין log של "התחלת שלב"/"סיום שלב"/"דילוג" בשום מקום. Timeout מפורש קיים רק לקריאת Anthropic (`timeout=30`, `daily_collector.py:80`) — ל-`bot.send_message` (שורות 157-161) אין timeout מוגדר בשום מקום בריפו (מאומת גרפ על `apihelper`). ה-scheduler loop עצמו (`scheduler.py:740-747`) עטוף try/except משלו, כך שחריגה *שנזרקת* לא הורגת את ה-thread לצמיתות — אבל קריאה ש**נתקעת** (hang, לא raise) בכל מקום ללא timeout (במיוחד `send_message`) תחסום את `schedule.run_pending()` הבודד-thread-י הזה ותקפיא כל job אחר שממתין באותו תור, וזה בדיוק המנגנון הריאלי ל"נתקע ולא ממשיך".
+- **תיקון:** לא בוצע — תיעוד בלבד לפי בקשת המשתמש.
+- **כיוון תיקון מוצע (מהדיווח):** try/except נפרד לכל שלב (fetch/LLM/format/send) עם logging מפורש (start/end/error/skip/continue); timeout מפורש ל-`bot.send_message`; הפרדה בין כשל-משימה-בודדת לכשל-ריצה-שלמה; הדוח מציין במפורש מה לא נבדק/נכשל.
+- **בדיקה:** אין עדיין — אין `test_daily_collector.py` בריפו. בדיקת קבלה מוצעת (מהדיווח): הרצת Daily Tasks עם משימה תקולה אחת → השגיאה נרשמת, שאר המשימות ממשיכות, אין תקיעה כללית.
+- **PR:** אין עדיין
+- **Merged:** לא רלוונטי (לא תוקן)
+- **Deployed:** לא רלוונטי
+- **Verified בפרודקשן:** לא רלוונטי
+- **סטטוס:** 🔴 פתוח — שורש מאומת בקוד, תיקון לא בוצע
+
+### BUG-067 (BUG-DAILY-02) — Daily Digest נשלח בשבת למרות הודעת "Shabbat Mode" — הגייט מוסיף טקסט בלבד, לא חוסם שליחה
+- **תאריך:** 05/07/2026
+- **דווח על ידי:** המשתמש — ראיה חיה: דוח נשלח ב-04/07/2026 (שבת) עם כותרת "שבת — הודעות אוטומטיות מושהות עד מוצ״ש בשעה 20:00 בערך" בראש הדוח עצמו שנשלח
+- **קבצים:** `daily_digest.py`, `shabbat_guard.py`, `scheduler.py`
+- **Severity:** High — סתירה לוגית ישירה בין ההודעה לבין ההתנהגות בפועל
+- **שורש (מאומת בקוד):** `shabbat_guard.py` מספק **שני מנגנונים נפרדים**: (1) `should_send_now(channel)`/`shabbat_safe(job_fn)` (שורות 131-147, 187-201) — gate אמיתי שמדלג על קריאת ה-job לגמרי בזמן שבת/חג ("Job '...' skipped — Shabbat/Holiday"). (2) `shabbat_status_message()` (שורות 173-180) — מחזיר **רק מחרוזת תצוגה**, ללא אפקט חוסם. `daily_digest.py` משתמש **אך ורק** במנגנון השני: `build_digest()` (שורה 301-302) מייבא ומפעיל רק `shabbat_status_message()`, ומצרף אותו כשורת כותרת בראש הדוח (שורות 319-321: `if shabbat: header.append(shabbat)`) — לעולם לא מחזיר early, לעולם לא מבטל את השליחה. `send_daily_digest()` (שורות 341-351) קורא תמיד ל-`bot.send_message(...)` ללא תלות בשבת. גרפ מלא על `daily_digest.py` מאשר: `should_send_now`/`shabbat_safe`/`is_shabbat_now` **אף פעם לא מיובאים או נקראים** בקובץ. **ההוכחה המכרעת שזו לא תקלה נקודתית אלא פער מבני:** ב-`scheduler.py:801-816`, רוב ה-jobs עטופים ב-`shabbat_safe(...)` (למשל שורות 808-816: `followup_scan`, `payment_reminders`, `lead_recovery`, `abandoned_scan`, `audience_report`, `interaction_scan`) — אבל דווקא `_job_daily_digest` (שורה 802) ו-`_job_daily_collector` (שורה 804) **אינם עטופים ב-`shabbat_safe`** בכלל. מאומת ישירות ב-`grep -n "_job_daily_digest\|_job_daily_collector\|shabbat_safe" scheduler.py`.
+- **תיקון:** לא בוצע — תיעוד בלבד לפי בקשת המשתמש.
+- **כיוון תיקון מוצע (מהדיווח):** לעטוף את `_job_daily_digest`/`_job_daily_collector` ב-`shabbat_safe(...)` ב-`scheduler.py` (התבנית כבר קיימת ומיושמת ל-6 jobs אחרים — לא נדרש מנגנון חדש, רק החלת הקיים); לשקול gate נוסף בתוך `daily_digest.py` עצמו (הגנה כפולה); לוג מפורש `skipped_daily_digest_due_to_shabbat_mode`; חריגים מוגדרים במפורש בלבד (owner manual request / emergency alert) אם נדרשים.
+- **בדיקה:** אין עדיין — **מאומת: אין שום קובץ טסט בריפו (`test_daily_digest.py`/`test_shabbat_guard.py` לא קיימים) שבודק "בתאריך שבת, הדוח לא נשלח"**. `shabbat_guard.py`'s self-test הפנימי (`_run_tests()`, שורות 208-297) בודק את המודול הזה בבידוד בלבד, לא את השילוב עם `daily_digest.py`. `test_c86_scheduler_emergency_matrix.py` בכוונה מנטרל את `shabbat_safe` (`monkeypatch.setattr(shabbat_guard, "shabbat_safe", lambda job: job)`, שורה 59) כדי לבדוק רק את EMERGENCY_STOP_AUTOMATION — לא בודק שבת בכלל. `smoke_tests.py`'s `check_daily_digest` (שורות 182-206) בודק רק שהפלט הוא string לא-ריק, לא נוגע בשבת. בדיקת קבלה מוצעת (מהדיווח): הרצת Daily Digest בתאריך מדומה 04/07/2026 → לא נשלח דוח מלא, לוג מציין skip, אחרי מוצ״ש חוזר לשלוח.
+- **PR:** אין עדיין
+- **Merged:** לא רלוונטי (לא תוקן)
+- **Deployed:** לא רלוונטי
+- **Verified בפרודקשן:** לא רלוונטי
+- **סטטוס:** 🔴 פתוח — שורש מאומת בקוד עם ראיה חיה, תיקון לא בוצע
+
+### BUG-068 (BUG-DAILY-03) — Daily Digest ארוך מדי, ללא הגבלת אורך/מספר פריטים
+- **תאריך:** 05/07/2026
+- **דווח על ידי:** המשתמש
+- **קבצים:** `daily_digest.py`
+- **Severity:** Medium-High (UX)
+- **שורש (מאומת בקוד):** `build_digest()` (`daily_digest.py:295-338`) מרכיב 6 סקשנים (`_hot_leads` max_rec=8, `_followups_today` max_rec=15, `_roadmap_tasks_today` max_rec=30, `_open_deals` max_rec=10, `_upcoming_payments` max_rec=10, `_yesterday_changes` — leads max_rec=10 + deals max_rec=5 + completed tasks max_rec=5) ומחבר אותם ב-`"\n".join(...)` (שורות 325-338) **ללא שום cap על אורך כולל, מספר שורות, או בדיקה מול מגבלת ה-4096 תווים של Telegram**. ה-`max_rec` הקיימים מגבילים רק כמה רשומות **נשלפות מ-Airtable**, לא כמה **מוצגות בפועל** בדוח — אין "top N לפי עדיפות והשאר מקופל", אין הפרדה "דורש פעולה" מול "מידע בלבד" (`_roadmap_tasks_today`, שורות 154-166, כן מקבץ לפי P0-P3 אבל מדפיס **כל** משימה תואמת בכל bucket, לא top-N).
+- **תיקון:** לא בוצע — תיעוד בלבד לפי בקשת המשתמש.
+- **כיוון תיקון מוצע (מהדיווח + החלטת מוצר מוצעת בסוף הדיווח):** מבנה קצר — (1) דורש פעולה היום, (2) חסימות/תקיעות, (3) לידים חמים Top 5, (4) משימות P0/P1 בלבד, (5) סיכום שינויים קצר, (6) קישור/פקודה להרחבה. הגבלת מספר פריטים לכל סקשן; הסתרת פריטים ללא פעולה נדרשת; תקציר עליון ("היום יש X פעולות, Y לידים חמים, Z חסימות").
+- **בדיקה:** אין עדיין. בדיקת קבלה מוצעת (מהדיווח): Daily Digest רגיל לא עובר אורך מוגדר מראש; כל סקשן מוגבל במספר פריטים; הפרדה בין "דורש פעולה" ל"מידע בלבד".
+- **PR:** אין עדיין
+- **Merged:** לא רלוונטי (לא תוקן)
+- **Deployed:** לא רלוונטי
+- **Verified בפרודקשן:** לא רלוונטי
+- **סטטוס:** 🟡 פתוח — שורש מאומת בקוד, החלטת עיצוב + תיקון לא בוצעו
+
+### BUG-069 (BUG-DAILY-04) — Daily Digest מציג פירוט מלא של משימות שהושלמו במקום ספירה בלבד
+- **תאריך:** 05/07/2026
+- **דווח על ידי:** המשתמש — ראיה: סקשן "מה השתנה אתמול — משימות שהושלמו (5)" עם פירוט מלא מתחתיו
+- **קבצים:** `daily_digest.py`
+- **Severity:** Medium
+- **שורש (מאומת בקוד):** `_yesterday_changes()`'s completed-tasks בלוק (`daily_digest.py:275-280`) — `if done_recs: lines.append(f"• *משימות שהושלמו ({len(done_recs)}):*"); for r in done_recs: ... lines.append(f"  – {f.get('כותרת המשימה','?')}")`. הכותרת אמנם מציגה ספירה (`len(done_recs)`) אבל **תחתיה מודפס פירוט מלא** של כותרת כל משימה — לא ספירה-בלבד כפי שהדיווח מצפה. אין flag/מצב `compact_daily_digest` בקוד.
+- **תיקון:** לא בוצע — תיעוד בלבד לפי בקשת המשתמש.
+- **כיוון תיקון מוצע (מהדיווח):** Daily Digest מציג completed tasks כספירה בלבד ("הושלמו אתמול 5 משימות"); פירוט מלא רק ב-Weekly Digest או לפי בקשת owner ("הרחב"); flag/מצב `compact_daily_digest=true`.
+- **בדיקה:** אין עדיין. בדיקת קבלה מוצעת (מהדיווח): משימות completed לא מופיעות ברשימת "משימות היום"; בדוח יומי מוצגת רק ספירה; פירוט מופיע רק בדוח שבועי/לפי בקשה.
+- **PR:** אין עדיין
+- **Merged:** לא רלוונטי (לא תוקן)
+- **Deployed:** לא רלוונטי
+- **Verified בפרודקשן:** לא רלוונטי
+- **סטטוס:** 🟡 פתוח — שורש מאומת בקוד, תיקון לא בוצע
