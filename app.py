@@ -5,7 +5,9 @@
 #   resolve_identity → route_request → build_context → run_agent
 
 import os
+import re
 import time
+import uuid
 import hmac
 import hashlib
 import logging
@@ -78,7 +80,12 @@ AGENT_TIMEOUT  = 25
 # ─── Pending Approvals (router-level) ──────────────────────────
 # Saves messages routed to Handler.APPROVAL until the user confirms.
 # key: chat_id (telegram user_id / whatsapp number)
-_pending_approvals: dict[str, dict] = {}
+# BUG-070 fix: value is now a dict of {approval_id: entry}, not a single
+# entry — a chat_id can have multiple pending approvals queued at once.
+# Each entry carries its own "display_index" (1, 2, 3...) so users can
+# reply with a bare number ("1", "2") to disambiguate, matching the UX
+# promise made elsewhere in the bot (e.g. daily_collector.py).
+_pending_approvals: dict[str, dict[str, dict]] = {}
 # LL-13: guards _pending_approvals against TOCTOU double-execution — two
 # near-simultaneous requests for the same chat_id (duplicate webhook delivery,
 # fast double "כן") must not both observe-then-act on the same pending entry.
@@ -583,17 +590,90 @@ def clarify_response(route: RouteDecision) -> str:
     return route.response_override or "לא הצלחתי להבין — תוכל לנסח אחרת?"
 
 
+def _add_pending_approval(chat_id: str, entry: dict) -> str:
+    """
+    BUG-070: מוסיף approval חדש לרשימת הממתינים של chat_id בלי לדרוס
+    approvals קיימים. מחזיר approval_id ייחודי. חייב להיקרא תחת
+    _pending_approvals_lock (עקבי עם LL-13).
+    """
+    approval_id = uuid.uuid4().hex[:8]
+    bucket = _pending_approvals.setdefault(chat_id, {})
+    entry["display_index"] = len(bucket) + 1
+    bucket[approval_id] = entry
+    return approval_id
+
+
+def _resolve_pending_reply(chat_id: str, user_text: str) -> tuple[str, dict] | None:
+    """
+    BUG-070: מפענח תשובת משתמש מול רשימת ה-approvals הממתינים של chat_id.
+    - אם הטקסט מכיל מספר -> מחפש entry עם display_index תואם.
+    - אם אין מספר וקיים ממתין יחיד -> מחזיר אותו (backward compatible
+      עם ההתנהגות הקודמת, פשוט "כן"/"לא" בלי מספר).
+    - אם אין מספר ויש כמה ממתינים -> מחזיר None (לא מנחשים).
+    חייב להיקרא תחת _pending_approvals_lock.
+    מחזיר (approval_id, entry) או None; לא מסיר מהמפה (caller אחראי לזה).
+    """
+    bucket = _pending_approvals.get(chat_id)
+    if not bucket:
+        return None
+
+    match = re.search(r"\d+", user_text)
+    if match:
+        target_index = int(match.group())
+        for approval_id, entry in bucket.items():
+            if entry.get("display_index") == target_index:
+                return approval_id, entry
+        return None  # מספר לא תואם אף approval ממתין
+
+    if len(bucket) == 1:
+        approval_id, entry = next(iter(bucket.items()))
+        return approval_id, entry
+
+    return None  # כמה ממתינים, אין מספר -> דורשים הבהרה, לא מנחשים
+
+
+def _pop_pending_approval(chat_id: str, approval_id: str) -> dict | None:
+    """מסיר approval ספציפי בלי לגעת בשאר הממתינים לאותו chat_id."""
+    bucket = _pending_approvals.get(chat_id)
+    if not bucket:
+        return None
+    entry = bucket.pop(approval_id, None)
+    if not bucket:
+        _pending_approvals.pop(chat_id, None)
+    return entry
+
+
+def _pending_clarification_message(chat_id: str) -> str:
+    """כשיש כמה approvals ממתינים ואין מספר בתשובה — מציג רשימה וממתין להבהרה."""
+    bucket = _pending_approvals.get(chat_id, {})
+    lines = ["⏳ יש כמה פעולות ממתינות לאישור. ענה במספר:"]
+    for entry in sorted(bucket.values(), key=lambda e: e["display_index"]):
+        preview = entry["text"][:80] + ("…" if len(entry["text"]) > 80 else "")
+        lines.append(f"{entry['display_index']}. `{preview}`")
+    return "\n".join(lines)
+
+
 def approval_response(route: RouteDecision, original_text: str, chat_id: str,
                        channel: str, domain: str) -> str:
     """Saves original action and asks owner to confirm with כן/לא."""
     logger.info(f"[APPROVAL] intent={route.intent} domain={route.domain} | saved for {chat_id}")
-    _pending_approvals[chat_id] = {
-        "text":       original_text,
-        "channel":    channel,
-        "domain":     domain,
-        "created_at": time.time(),
-    }
+    with _pending_approvals_lock:
+        approval_id = _add_pending_approval(chat_id, {
+            "text":       original_text,
+            "channel":    channel,
+            "domain":     domain,
+            "created_at": time.time(),
+        })
+        pending_count = len(_pending_approvals.get(chat_id, {}))
     preview = original_text[:120] + ("…" if len(original_text) > 120 else "")
+    if pending_count > 1:
+        # BUG-070: כשיש כבר ממתין אחר, מציינים את המספר לתשובה חד-משמעית.
+        display_index = _pending_approvals[chat_id][approval_id]["display_index"]
+        return (
+            f"⏳ *אישור נדרש* (#{display_index})\n\n"
+            f"פעולה: `{preview}`\n\n"
+            f"ענה *כן {display_index}* לביצוע או *לא {display_index}* לביטול."
+        )
     return (
         f"⏳ *אישור נדרש*\n\n"
         f"פעולה: `{preview}`\n\n"
@@ -1281,46 +1361,98 @@ def run_agent(
         return "⚠️ יותר מדי בקשות. המתן דקה ונסה שוב."
 
     # ── 2.5. Pending Approval Gate ────────────────
-    # LL-13: a single lock-guarded pop() is the only read site — there is no
-    # separate "check" step, so two concurrent calls for the same chat_id
-    # can never both see the same pending entry (TOCTOU fix).
+    # LL-13: decision (which entry, confirm/cancel) + pop happen inside the
+    # same lock-guarded critical section — there is no separate "check" step,
+    # so two concurrent calls for the same chat_id can never both act on the
+    # same pending entry (TOCTOU fix preserved from before BUG-070).
+    #
+    # BUG-070: _pending_approvals[chat_id] is now a dict of possibly multiple
+    # queued entries, keyed by approval_id. A user reply can:
+    #   - "כן" / "לא"                -> resolves only if exactly 1 is queued
+    #     (fully backward compatible with the pre-BUG-070 behavior)
+    #   - "כן 2" / "לא 2" / bare "2" -> targets entry with display_index=2
+    #   - anything else with 2+ queued and no matching number -> ambiguous;
+    #     nothing is popped, and the user is shown the numbered list again.
+    pending_action = None   # "confirm" | "cancel" | None
+    pending_entry  = None
+    pending_id     = None
+    pending_ambiguous = False
+
     with _pending_approvals_lock:
-        pending = _pending_approvals.pop(chat_id, None)
-    if pending:
-        if time.time() - pending.get("created_at", 0) > _PENDING_APPROVAL_TTL:
-            logger.info("[PendingApproval] expired (>%ss) for %s",
-                        _PENDING_APPROVAL_TTL, chat_id)
-            pending = None
-    if pending:
-        lower = user_text.strip().lower()
-        if lower in _CONFIRM_WORDS:
+        bucket = _pending_approvals.get(chat_id)
+        if bucket:
+            stripped = user_text.strip()
+            lower = stripped.lower()
+            first_token = lower.split()[0] if lower.split() else ""
+
+            if first_token in _CONFIRM_WORDS:
+                pending_action = "confirm"
+            elif first_token in _CANCEL_WORDS:
+                pending_action = "cancel"
+            elif len(bucket) > 1 and re.fullmatch(r"\d+", stripped):
+                # BUG-070 review fix: a bare digit only means "approve item N"
+                # when disambiguation is actually needed (2+ queued). With a
+                # single pending item, a bare "1" is indistinguishable from an
+                # unrelated numeric reply (quantity, price, date-of-month...)
+                # elsewhere in the conversation — treating it as silent confirm
+                # would execute the pending action without real user intent.
+                # The single-pending case is already fully covered by
+                # _CONFIRM_WORDS ("כן"/"אשר"/...), so no bare-digit fallback
+                # is needed there.
+                pending_action = "confirm"  # bare number selects among multiple pending
+
+            if pending_action:
+                resolved = _resolve_pending_reply(chat_id, stripped)
+                if resolved:
+                    pending_id, pending_entry = resolved
+                elif len(bucket) > 1:
+                    pending_ambiguous = True
+                # else: single pending but no number given -> _resolve_pending_reply
+                # already returns it via the len(bucket)==1 branch, so resolved
+                # would only be None here if a number was given but didn't match
+                # any queued item — treat as unrelated (fall through).
+
+            if pending_entry is not None:
+                if time.time() - pending_entry.get("created_at", 0) > _PENDING_APPROVAL_TTL:
+                    logger.info("[PendingApproval] expired (>%ss) for %s",
+                                _PENDING_APPROVAL_TTL, chat_id)
+                    _pop_pending_approval(chat_id, pending_id)
+                    pending_entry = None
+                    pending_action = None
+                else:
+                    _pop_pending_approval(chat_id, pending_id)
+
+    if pending_ambiguous:
+        return _pending_clarification_message(chat_id)
+
+    if pending_entry is not None:
+        if pending_action == "confirm":
             logger.info(
                 f"[PendingApproval] ✅ confirmed by {chat_id} → "
-                f"executing: {pending['text'][:60]}"
+                f"executing: {pending_entry['text'][:60]}"
             )
             return run_agent(
-                pending["text"], chat_id, channel,
-                domain_from_channel=pending.get("domain", domain_from_channel),
+                pending_entry["text"], chat_id, channel,
+                domain_from_channel=pending_entry.get("domain", domain_from_channel),
                 _skip_approval=True,
                 _resolved_domain=_resolved_domain,
             )
-        elif lower in _CANCEL_WORDS:
+        elif pending_action == "cancel":
             logger.info(f"[PendingApproval] 🚫 cancelled by {chat_id}")
             return "🚫 הפעולה בוטלה."
-        # else: new unrelated message — pending already popped above, treat normally
+        # else: new unrelated message — nothing was popped above, treat normally
 
     # ── 2.55. Confirm-word + canonical tool-approval intercept ───────
     # Stage A / SPEC section 3.3: "מאשר" חופשי לעולם לא מאשר tool רגיש.
     # Stage B: "בצע שוב <קוד>" מיורט לפני Agent עבור DuplicateOverrideApproval.
     # אם FEATURE_ACTION_GATEWAY פעיל → route_confirmation_word מ-Gateway.
     # אחרת → Stage A bus.find_pending_tool_approval (מסלול הקיים).
-    if not pending:
+    if pending_entry is None:
         _stripped = user_text.strip()
         _lower = _stripped.lower()
 
         # §10 §17 — "בצע שוב <קוד>" מיורט לפני Agent, בכל מצב flag
-        import re as _re
-        _override_match = _re.match(r"^בצע\s+שוב\s+(\d{4,8})$", _stripped)
+        _override_match = re.match(r"^בצע\s+שוב\s+(\d{4,8})$", _stripped)
         if _override_match:
             _override_code = _override_match.group(1)
             from core.action_gateway import action_gateway as _gw_ow
