@@ -86,6 +86,15 @@ GAME / SCHEDULER:
   PAYMENT_REMINDERS           - תזכורות תשלום אוטומטיות
   GIT_AUDIT_SCHEDULER         - הרצה יומית אוטומטית של daily_git_audit.py; default OFF (נשאר manual-only)
 
+C94 (Unified Ingress Envelope + Evidence Trace):
+  FEATURE_INGRESS_ENVELOPE    - קיל-סוויץ' לבניית IngressEnvelope ב-run_agent() (Telegram+WhatsApp/
+                                 Twilio, C94 Stage ג/ד). default ON (ברירת מחדל הפוכה מרוב הדגלים
+                                 כאן — ראה _DEFAULTS למטה) כי C94 כבר ב-main/כנראה בפרוד: אם ה-flag
+                                 חסר לגמרי (עוד לא הוגדר ב-Render) הוא חייב להתנהג כאילו true, אחרת
+                                 deploy של הקוד הזה היה מכבה שקט את מה שכבר רץ. false → run_agent()
+                                 מדלג לגמרי על בניית ה-envelope (capture_ic=None כמו תמיד), classify_
+                                 ingress()/הרואטר עצמם לא מושפעים כלל.
+
 FUTURE (לא פעיל):
   AUDIENCE_INTELLIGENCE       - ניתוח קהל יעד (Future)
   INTERACTION_INTELLIGENCE    - ניתוח דפוסי שיחה (Future)
@@ -115,6 +124,7 @@ _RUNTIME: dict[str, bool] = {}
 # default-OFF behavior). Each entry mirrors os.environ.get(NAME, default).
 _DEFAULTS: dict[str, str] = {
     "IMPORT_DOMAIN": os.environ.get("IMPORT_DOMAIN", "true"),
+    "FEATURE_INGRESS_ENVELOPE": os.environ.get("FEATURE_INGRESS_ENVELOPE", "true"),
 }
 
 

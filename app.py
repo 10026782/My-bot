@@ -1609,8 +1609,11 @@ def run_agent(
     # failure here degrades to no envelope (envelope_id="") rather than
     # blocking the request — this is observability plumbing, not a new gate
     # on the agent pipeline.
+    # FEATURE_INGRESS_ENVELOPE: kill-switch, default ON (see feature_flags.py
+    # _DEFAULTS — C94 is already on main/likely in prod, so an unset flag must
+    # behave as if true, or deploying this line would silently disable it).
     envelope_id = ""
-    if raw_event_id and channel in ("telegram", "whatsapp"):
+    if _flag_enabled("FEATURE_INGRESS_ENVELOPE") and raw_event_id and channel in ("telegram", "whatsapp"):
         try:
             if channel == "telegram":
                 from core.telegram_ingress_adapter import build_telegram_envelope
