@@ -1138,7 +1138,7 @@
 - **Merged:** ✅ כן — `main` `e1436e9` (Merge pull request #246), commit `bb4b9ca`. מאומת: `git merge-base --is-ancestor bb4b9ca origin/main` + `git show origin/main:core/action_gateway.py | grep -c "classify_approval_policy\|approval_policy"` → 15.
 - **סטטוס:** ✅ תוקן ומוזג ל-main — **לא** מאומת עדיין ב-production/Render.
 
-### BUG-077 — `propose_action()` סומך עיוורת על `requires_approval` שמצהיר הקורא, בלי לאמת מול `tool_registry.py` (עוקף לגמרי את שער האישור)
+### BUG-077 — `propose_action()` סומך עיוורת על `requires_approval` שמצהיר הקורא, בלי לאמת מול `tool_registry.py` (עוקף לגמרי את שער האישור) — 🟡 חלקית תוקן 06/07/2026
 - **תאריך:** 06/07/2026
 - **דווח על ידי:** ביקורת C95A (Archive Carry-Forward Gap Discovery), session audit-only — לא בוצע שינוי קוד בזמן הגילוי.
 - **Severity:** P0 — כתיבה חיה לטבלת `Leads` ב-Airtable עם אפס שער אישור, במסלול שכבר רץ בפרודקשן (לא תלוי ב-`FEATURE_ACTION_GATEWAY`, אותו דפוס כמו BUG-074/076 — הפגם חי גם כש-shadow-mode פעיל, כי `propose_action()` עצמו מחליט `status` ללא תלות בדגל).
@@ -1159,3 +1159,12 @@
 
 #### עדכון 06/07/2026 (C83 audit cross-check — לא פותח BUG חדש, זה אותו ממצא)
 במהלך סגירת C83 (ROADMAP.md, Single Policy Source) נבדק שוב מסלול `_write_one_lead:354` כדי לוודא שאין חפיפה/סתירה עם הרישום הזה. **תיקון לניסוח ראשוני שגוי שנשקל במהלך אותה בדיקה:** הועלתה השערה שהפגם "לא חי" כי `FEATURE_AUTO_CAPTURE=false` — ההשערה נבדקה בקוד ונמצאה **שגויה**. Tier 1/2 (`_handle_single_candidate`/`_handle_clean_batch`, `core/lead_candidate_handler.py`) אכן נשערים מאחורי `auto_capture`, אבל **Tier 3** (`_handle_mixed_batch`, שורות 615-621 → קריאה ל-`_write_one_lead` בשורה 746) **קורא ללא שום בדיקת flag**. כלומר על כל דיקטציית owner/staff שמניבה batch מעורב-ביטחון (`ic.tier == 3`), `_write_one_lead` — ועמו ה-gap המתואר למעלה — רץ בפרודקשן היום, ללא תלות ב-`FEATURE_AUTO_CAPTURE`. אין שינוי ל-Severity/סטטוס (עדיין 🟡 OPEN, P0) — זו רק הבהרה שמונעת הנחה מוטעית שהדגל מגן על המסלול הזה. ראה גם `docs/governance/BOSS_UNIFIED_MASTER_PLAN.md` §3.5/§7 ו-ROADMAP.md §C83.
+
+#### תיקון חלקי 06/07/2026 — סוגר את התסמין החי (Tier 3), לא את הפער הארכיטקטוני המקורי
+- **מה תוקן:** `core/lead_candidate_handler.py` — פונקציה משותפת חדשה `_should_auto_write(auto_capture, existing_id)` (כתיבה אוטומטית רק ל-lead חדש לגמרי + auto_capture דלוק; עדכון ליד קיים תמיד עובר אישור, עקבי עם BUG-074/076). Tier 1/2 הועברו לשימוש בה (איחוד קוד, ללא שינוי התנהגות). **Tier 3** (`_handle_mixed_batch`) קיבל את השער שחסר לו: כל `high`-confidence candidate נבדק כעת מול `_should_auto_write()` לפני `_write_one_lead()`; אחרת עובר דרך `_propose_lead_write()` בדיוק כמו Tier 1. כותרת הסיכום של ה-batch תוקנה גם היא כדי לא לטעון "X נשמרו" כשבפועל רק נוצר contract ממתין.
+- **מה *לא* תוקן (עדיין פתוח, זה הפער המקורי מ-Root Cause למעלה):** `propose_action()` עצמו (`core/action_gateway.py:419-485`) עדיין סומך עיוורת על ה-`requires_approval` שמצהיר כל קורא, ועדיין **לא** קורא ל-`tool_registry.get_tool_meta(tool_name)` כדי לאמת/לדרוס אותו. התיקון הנוכחי סוגר את מסלול הקריאה היחיד שהיה חי בפרודקשן היום (Tier 3), אבל אינו מטפל ב-root cause עצמו — קורא עתידי אחר שיצהיר `requires_approval=False` בטעות על tool שה-registry מסמן `True` עדיין לא ייתפס. ה"מיקום תיקון מדויק" שתועד למעלה (לפני שורה 468 ב-`action_gateway.py`) נשאר scope נפרד, לא בוצע כאן במכוון (SPEC המקורי הגביל את ההיקף לקובץ `lead_candidate_handler.py` בלבד).
+- **בדיקה:** `test_bug077_tier3_auto_capture_gate.py` (חדש, 5/5) — מכסה: auto_capture כבוי + lead חדש → אין כתיבה מיידית (contract ממתין); auto_capture דלוק + lead חדש → נכתב מיד (control, ללא רגרסיה); auto_capture דלוק + lead קיים → עדיין עובר אישור (ליבת התיקון); דיוק כותרת הסיכום; guard סטטי על ה-wiring ב-call site. אפס רגרסיה: כל 50+ קבצי `test_*.py` בריפו ירוקים (הורצו במלואם), `smoke_tests.py` ירוק, `python3 -m compileall .` נקי.
+- **Merged:** לא — קיים רק בענף `claude/tool-approval-metadata-mi89lu` (commit `e1c0ea5`, נדחף `git push` — לא ל-`main`).
+- **Deployed:** לא.
+- **Verified בפרודקשן:** לא.
+- **סטטוס:** 🟡 CODE DONE, NOT VERIFIED — התסמין החי (Tier 3) תוקן ונבדק, אך לא ממוזג/נפרס/מאומת בפרוד. **לא לסמן ✅ עד מיזוג ל-main + production evidence** (עקבי עם הכלל בראש הקובץ). ה-root cause הארכיטקטוני ב-`propose_action()` נשאר 🟡 OPEN בנפרד — לא לסגור את BUG-077 במלואו עד שגם הוא מטופל או שמתקבלת החלטת בעלים מפורשת שהתיקון החלקי מספיק.
