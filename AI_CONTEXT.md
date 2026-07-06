@@ -1,10 +1,42 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-07-05 (מאוחר ביותר) — C94 production verification הושלם 4/5 (Telegram+WhatsApp+File+Render commit hash, ראה 0.16 למטה). קודם: אימות ראשוני (Telegram+WhatsApp inbound) + BUG-072 — ראה 0.15 למטה.
-**עודכן על ידי:** Claude Code — production verification 4/5 הושלם, ראה 0.16 למטה
+**עודכן:** 2026-07-06 (מאוחר ביותר) — BUG-076: הפרדת "confirmation"/"approval" ל-lead capture בטוח, בהמשך לביקורת האבטחה (BUG-072/074/075), ראה 0.18 למטה. קודם: C94 production verification הושלם 4/5 — ראה 0.16 למטה.
+**עודכן על ידי:** Claude Code — ביקורת אבטחה + 4 תיקוני קוד מאומתים מקומית (לא merged/deployed עדיין), ראה 0.18/0.17 למטה
 
-> מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (מיושן, 19/06) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
+> מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (תוקן 06/07 — ראה 0.17) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
+
+---
+
+## 0.18 BUG-076 — הפרדת "confirmation" מ-"approval" ל-lead capture בטוח — 2026-07-06 (קרא לפני 0.17)
+
+**החלטת הבעלים בתגובה לתופעת-הלוואי של BUG-074 (0.17 למטה):** lead capture הוא low-risk ולא אמור לדרוש אישור owner — "confirmation" (המבקש מאשש שהמערכת הבינה נכון) שונה מ-"approval" (זהות מורשית מסמיכה פעולה רגישה). `approve()` **נשאר** שער האכיפה המרכזי — לא הוחלש גורפית, נוסף carve-out צר ומחושב מרכזית.
+
+**מה נוסף:** `core/action_gateway.py`'s `classify_approval_policy(tool_name, tool_inputs)` — מחזירה `self_confirm` **רק** ל-`airtable_add`/`airtable_update` על טבלת `Leads`, עם שדות שכולם בתוך allowlist בטוח (יצירה: `Name/phone/channel/memory_key/domain/source/status/summary/Score/sender_id` — תואם בדיוק את `_write_one_lead()`; עדכון: **רק** `phone/summary/domain`, בלי status/score/tier/Owner/Next Action). כל דבר אחר (טבלה אחרת, כלי אחר, שדה מוגן) → `approval` (fail-closed, ברירת מחדל). `ActionContract` קיבל שדה `approval_policy` המחושב פעם אחת ב-`propose_action()` מתוך ה-payload בפועל (לא נסמך על טענת הקורא). `approve()`: כש-`approval_policy == "self_confirm"` — מאשר רק אם המאשר הוא **בדיוק** אותה זהות שביקשה **וגם** מחזיק role פנימי — לא "כל אחד יכול לאשש כל דבר".
+
+**תוצאה מעשית:** manager/partner/employee יכולים כעת לאשש בעצמם ("כן") טיוטת יצירת/עדכון-בטוח של ליד ב-Tier-1 preview — בדיוק כפי שכתיבת ליד אוטומטית (`FEATURE_AUTO_CAPTURE`) כבר עושה היום ללא אישור נפרד. מחיקה, שדות מוגנים (סטטוס/ציון/שיוך), דילס/פיננסים/יוצא/bulk — עדיין דורשים owner/"actions.approve" בדיוק כמו ב-BUG-074, ללא שינוי.
+
+**בדיקות:** `test_bug076_lead_confirmation_policy.py` (חדש, 32/32) — ראה BUG_AUDIT_LOG.md BUG-076 לפירוט מלא של כל התרחישים. `test_bug074_approval_authority.py` עודכן (תרחיש הבסיס הוחלף לטבלת "Deals" כדי להמשיך לבדוק את הכלל הכללי, לא את ה-carve-out) — נשאר 22/22. כל 50 קבצי `test_*.py` ירוקים חוץ מ-`test_document_converter.py` (לא קשור, חבילת pip חסרה).
+
+**לא בוצע עדיין:** commit/push של סבב זה (ראה STATUS בתחתית תגובת הסבב), merge, deploy, production verification.
+
+---
+
+## 0.17 Security Audit — `app.py`/`tma_api.py`/`tools/` + BUG-072/074/075 — 2026-07-06 (קרא לפני 0.16)
+
+**ביקורת אבטחה** (DEV_MODE bypass, endpoints ללא auth, approval workflows, Twilio signature validation) הריצה מול הקוד הנוכחי על `main` (לא מול `BOSS_CURRENT_STATE.md`, שנמצא **סותר את עצמו** — טבלה אחת שם מסמנת DEV_MODE/`/worker/trigger`/`/health` כ-"✅ FIXED", בלוק "Security checklist consolidation" באותו קובץ מסמן את אותם ממצאים כ-"active risk to carry forward"). נמצא: DEV_MODE bypass **כבר תוקן ומאומת** בקוד (`tma_api.py:52-58`, `_DEV_MODE=False` קשיח + אזהרה אם `TMA_DEV_MODE` מוגדר) — ה-"carry forward" ב-`BOSS_CURRENT_STATE.md` **מיושן**. Twilio/Meta webhook signature validation תקינים ואוכפים fail-closed.
+
+**3 ממצאים אמיתיים נתפסו ותוקנו באותו סבב (קוד + טסטים, לא merged עדיין):**
+
+1. **BUG-074 (בטיקט: "BUG-073") — ActionGateway free-text confirmation מאפשר אישור עצמי.** `core/action_gateway.py`'s `approve()` הפך לשער האכיפה היחיד — מקבל `approver_role` חדש, חוסם (לא רק warning) אם למאשר אין `owner`/`"actions.approve"`, גם כשהמאשר הוא בדיוק אותה זהות שביקשה את הפעולה (וזה תמיד המצב במסלולי הטקסט החופשי). **קריטי לדעת:** זה לא היה תלוי-flag בלבד — מסלול Tier-1 lead-preview (`_propose_lead_write`, BUG-056) קורא ל-`route_confirmation_word()` **תמיד**, גם כש-`FEATURE_ACTION_GATEWAY` כבוי (ברירת המחדל) — כך שהבאג היה חי בפרודקשן היום עבור אישור-עצמי של כתיבת/עדכון ליד. **תופעת-לוואי שדורשת החלטת בעלים (לא הוכרעה כאן):** אחרי התיקון, staff שאינו owner (manager/partner/employee) כבר לא יכול לאשר בעצמו כתיבת ליד דרך Tier-1 preview ("כן") — אין עדיין מנגנון owner-notification לזרימה הזו (בניגוד ל-`_queue_approval` הרגיל). ה-contract פשוט יישאר pending עד תפוגה. ראו BUG_AUDIT_LOG.md BUG-074 לפירוט המלא + המלצה.
+2. **BUG-075 (בטיקט: "BUG-074") — `/api/tma/upload` בלי role check.** נוסף `if identity.role not in {OWNER, MANAGER, PARTNER}: 403` — תואם למדיניות בכל endpoint כתיבה אחר ב-`tma_api.py`. דורם — `FEATURE_MEDIA_UPLOAD` כבוי כברירת מחדל.
+3. **BUG-072 — raw chat_id/user_id בלוגים — כעת ✅ תוקן** (היה פתוח מ-05/07). נוסף `_sanitize_id()` (`app.py`) — sha256 fingerprint קצר לא-הפיך; 19 מופעים תוקנו (8 מהממצא המקורי + 11 נוספים שנתפסו בסריקה מלאה).
+
+**⚠️ שים לב למספור:** הטיקט שהזמין את התיקון קרא לבאגים "BUG-073"/"BUG-074", אבל `BUG-073` כבר תפוס ב-`BUG_AUDIT_LOG.md` (ROADMAP-DOC-DRIFT-01, לא קשור) — התיקונים תועדו כ-BUG-074/BUG-075 כדי לא ליצור doc drift (בדיוק סוג הבעיה ש-BUG-073 עצמו עוסק בה). קוד/comments/שמות קבצי טסט (`test_bug074_approval_authority.py`, `test_bug075_tma_upload_role_gate.py`) עקביים עם המספור המתוקן.
+
+**בדיקות:** 3 קבצי טסט חדשים (`test_bug072_log_sanitization.py` 7/7, `test_bug074_approval_authority.py` 22/22, `test_bug075_tma_upload_role_gate.py` 17/17). 7 קבצי טסט קיימים עודכנו (קריאות ל-`approve()`/`route_confirmation_word()`/וכו' קיבלו `approver_role=`) ונשארו ירוקים במלואם. כל 50 קבצי `test_*.py` בריפו הורצו מקומית — ירוקים חוץ מ-`test_document_converter.py` (חבילת pip `markdown` חסרה בסביבה, לא קשור לשינויים כאן).
+
+**עדכון (אותו יום, 06/07/2026):** commit `54961f1` נדחף בפועל ל-`origin/claude/quirky-cori-yrgrvb` (`git push` הוצג ואומת). `BOSS_CURRENT_STATE.md` תוקן (הסתירה הפנימית שתועדה למעלה תוקנה בפועל — לא רק תועדה — ראה "Security checklist consolidation" בקובץ). **לא בוצע:** merge ל-main, deploy, production verification — ראה 0.18 למעלה להמשך (BUG-076, אותו PR/ענף).
 
 ---
 

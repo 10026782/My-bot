@@ -104,9 +104,9 @@ r = gw.propose_action(
 )
 cid = r.contract_id
 
-gw.approve(cid, approver="boss_hq:owner_1")  # ביצוע ראשון
-result2 = gw.approve(cid, approver="boss_hq:owner_1")  # שני — מצב כבר executed
-result3 = gw.approve(cid, approver="boss_hq:owner_1")  # שלישי
+gw.approve(cid, approver="boss_hq:owner_1", approver_role="owner")  # ביצוע ראשון
+result2 = gw.approve(cid, approver="boss_hq:owner_1", approver_role="owner")  # שני — מצב כבר executed
+result3 = gw.approve(cid, approver="boss_hq:owner_1", approver_role="owner")  # שלישי
 
 chk("DoD12: tool executed exactly once", len(executions) == 1)
 chk("DoD12: second approve returns warning", "אינה במצב" in result2)
@@ -213,7 +213,7 @@ chk("DoD17: no live override → message mentions 'override'/'אין'", "אין"
 # ══════════════════════════════════════════════════
 print("\n── DoD §3: confirm word without pending ─────────────────────")
 gw4 = _make_gw()
-reply = gw4.route_confirmation_word("boss_hq:nobody")
+reply = gw4.route_confirmation_word("boss_hq:nobody", approver_role="owner")
 chk("DoD3: route_confirmation_word returns 'אין פעולה'", "אין" in reply)
 
 
@@ -236,7 +236,7 @@ r5 = gw5.propose_action(
     origin_channel="telegram", origin_chat_id="tg:1",
     requires_approval=True,
 )
-gw5.approve(r5.contract_id, approver="boss_hq:owner_1")
+gw5.approve(r5.contract_id, approver="boss_hq:owner_1", approver_role="owner")
 chk("DoD6: exactly one execution", len(executed_payloads) == 1)
 expected_norm = gw5.normalize_payload(original_inputs)
 chk("DoD6: executed_payload == approved normalized_payload", executed_payloads[0] == expected_norm)
@@ -296,7 +296,7 @@ try:
     )
     chk("BUG-C89: propose_action (with identity) ok", r_id.ok)
 
-    logger_output = action_gateway.approve(r_id.contract_id, approver=_owner_identity.memory_key)
+    logger_output = action_gateway.approve(r_id.contract_id, approver=_owner_identity.memory_key, approver_role="owner")
     chk("BUG-C89: approve() executes without denial", "❌" not in logger_output)
     chk("BUG-C89: dispatcher receives role=owner (not readonly)",
         _captured_identity.get("role") == Role.OWNER)

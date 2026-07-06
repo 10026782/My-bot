@@ -83,7 +83,7 @@ contract_before = gw.find_contract(r2.contract_id)
 saved_normalized = dict(contract_before.normalized_payload)
 
 # Confirm — should execute saved_normalized, not re-derive from Agent
-reply = gw.route_confirmation_word("boss_hq:owner_2")
+reply = gw.route_confirmation_word("boss_hq:owner_2", approver_role="owner")
 chk("Req2: exactly one dispatch after confirm", len(dispatched) == 1)
 chk("Req2: dispatched payload == saved normalized (not Agent-derived)", dispatched[0] == saved_normalized or True)  # mock captures tool_name only
 chk("Req2: contract status=executed after confirm", gw.find_contract(r2.contract_id).status == "executed")
@@ -102,7 +102,7 @@ r3 = gw3.propose_action(
     origin_channel="whatsapp", origin_chat_id="whatsapp:9725012",
     requires_approval=True,
 )
-gw3.route_confirmation_word("boss_hq:owner_3")
+gw3.route_confirmation_word("boss_hq:owner_3", approver_role="owner")
 expected_normalized = gw3._ledger.find_by_id(r3.contract_id).normalized_payload
 chk("Req2: dispatched inputs == contract.normalized_payload", dispatched2[0]["inputs"] == expected_normalized)
 
@@ -124,7 +124,7 @@ r_fail = gw_fail.propose_action(
     origin_channel="telegram", origin_chat_id="tg:1",
     requires_approval=True,
 )
-reply_fail = gw_fail.route_confirmation_word("boss_hq:owner_1")
+reply_fail = gw_fail.route_confirmation_word("boss_hq:owner_1", approver_role="owner")
 chk("Req3: failure from tool → error reply, not success", "❌" in reply_fail or "לא הושלמה" in reply_fail)
 chk("Req3: contract status=failed when tool fails", gw_fail.find_contract(r_fail.contract_id).status == "failed")
 chk("Req3: success reply not sent for failed tool", "✅" not in reply_fail or "נוספה" not in reply_fail)
@@ -175,9 +175,9 @@ r5 = gw5.propose_action(
     origin_channel="telegram", origin_chat_id="tg:5",
     requires_approval=True,
 )
-gw5.route_confirmation_word("boss_hq:owner_5")   # ✅ 1st confirm
-gw5.route_confirmation_word("boss_hq:owner_5")   # 2nd — should be no-op
-gw5.route_confirmation_word("boss_hq:owner_5")   # 3rd — should be no-op
+gw5.route_confirmation_word("boss_hq:owner_5", approver_role="owner")   # ✅ 1st confirm
+gw5.route_confirmation_word("boss_hq:owner_5", approver_role="owner")   # 2nd — should be no-op
+gw5.route_confirmation_word("boss_hq:owner_5", approver_role="owner")   # 3rd — should be no-op
 
 chk("Req5: tool executed exactly once despite 3 confirms", sum(exec_count) == 1)
 
@@ -224,7 +224,7 @@ r6 = gw6.propose_action(
     origin_channel="whatsapp", origin_chat_id="whatsapp:97250",
     requires_approval=True,
 )
-reply6 = gw6.route_confirmation_word("boss_hq:owner_6")
+reply6 = gw6.route_confirmation_word("boss_hq:owner_6", approver_role="owner")
 chk("Req6f: Gateway returns error when no record created", "❌" in reply6 or "לא הושלמה" in reply6)
 chk("Req6f: no '✅ נוצר'/'✅ רשומה נוספה' in error reply", "נוצר" not in reply6 and "נוספה" not in reply6)
 

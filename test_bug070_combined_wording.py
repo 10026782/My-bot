@@ -79,7 +79,7 @@ r1 = _propose(gw, "boss_hq:u1", "airtable_add")
 r2 = _propose(gw, "boss_hq:u1", "gmail_send_draft")
 r3 = _propose(gw, "boss_hq:u1", "calendar_create_event")
 
-reply = gw.route_combined_word("boss_hq:u1", "כן 2")
+reply = gw.route_combined_word("boss_hq:u1", "כן 2", approver_role="owner")
 chk("combined confirm: reply is not None", reply is not None)
 chk("combined confirm: executes exactly the targeted contract", executions == ["gmail_send_draft"])
 chk("combined confirm: targeted contract now executed",
@@ -99,7 +99,7 @@ c1 = _propose(gw2, "boss_hq:u2", "airtable_add")
 c2 = _propose(gw2, "boss_hq:u2", "gmail_send_draft")
 c3 = _propose(gw2, "boss_hq:u2", "calendar_create_event")
 
-reply2 = gw2.route_combined_word("boss_hq:u2", "לא 2")
+reply2 = gw2.route_combined_word("boss_hq:u2", "לא 2", approver_role="owner")
 chk("combined cancel: reply is not None", reply2 is not None)
 chk("combined cancel: targeted contract rejected",
     gw2.find_contract(c2.contract_id).status == "rejected")
@@ -119,13 +119,13 @@ gw3, _ = _make_gw()
 _propose(gw3, "boss_hq:u3", "airtable_add")
 
 chk("out-of-range index → warning, not a crash",
-    "אין פעולה מספר" in (gw3.route_combined_word("boss_hq:u3", "כן 9") or ""))
+    "אין פעולה מספר" in (gw3.route_combined_word("boss_hq:u3", "כן 9", approver_role="owner") or ""))
 chk("no live contracts for unrelated user → None (falls through)",
-    gw3.route_combined_word("boss_hq:nobody", "כן 1") is None)
+    gw3.route_combined_word("boss_hq:nobody", "כן 1", approver_role="owner") is None)
 chk("non-matching text ('מה קורה') → None (falls through to Agent)",
-    gw3.route_combined_word("boss_hq:u3", "מה קורה") is None)
+    gw3.route_combined_word("boss_hq:u3", "מה קורה", approver_role="owner") is None)
 chk("bare ordinal without keyword ('2') → None (unchanged — still route_disambiguation's job)",
-    gw3.route_combined_word("boss_hq:u3", "2") is None)
+    gw3.route_combined_word("boss_hq:u3", "2", approver_role="owner") is None)
 
 
 # ══════════════════════════════════════════════════
@@ -136,7 +136,7 @@ chk("bare ordinal without keyword ('2') → None (unchanged — still route_disa
 print("\n── route_combined_word: single pending contract ──────────────")
 gw4, executions4 = _make_gw()
 single = _propose(gw4, "boss_hq:u4", "airtable_update")
-reply4 = gw4.route_combined_word("boss_hq:u4", "אשר 1")
+reply4 = gw4.route_combined_word("boss_hq:u4", "אשר 1", approver_role="owner")
 chk("single pending + 'אשר 1' → executes it", executions4 == ["airtable_update"])
 chk("single pending contract now executed",
     gw4.find_contract(single.contract_id).status == "executed")

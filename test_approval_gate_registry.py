@@ -161,14 +161,14 @@ chk("Test4: second propose blocked (pending exists)", not r2.ok)
 chk("Test4: still no dispatch before approval", len(_dispatched) == 0)
 
 # Step 2: "מאשר" (the 11:07 message) → approval route
-reply = gw.route_confirmation_word("boss_hq:owner_1")
+reply = gw.route_confirmation_word("boss_hq:owner_1", approver_role="owner")
 chk("Test4: route_confirmation_word dispatches exactly once", len(_dispatched) == 1)
 chk("Test4: dispatched tool is airtable_add", _dispatched[0]["tool"] == "airtable_add")
 chk("Test4: dispatched inputs include Tasks table", _dispatched[0]["inputs"].get("table") == "Tasks")
 
 # Step 3: triple "מאשר" — must not execute again
-gw.route_confirmation_word("boss_hq:owner_1")
-gw.route_confirmation_word("boss_hq:owner_1")
+gw.route_confirmation_word("boss_hq:owner_1", approver_role="owner")
+gw.route_confirmation_word("boss_hq:owner_1", approver_role="owner")
 chk("Test4: triple מאשר — still exactly one dispatch total", len(_dispatched) == 1)
 
 # Step 4: contract is now executed (DoD §15 — consumed flag equivalent)
