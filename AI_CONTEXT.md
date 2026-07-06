@@ -1,8 +1,8 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-07-06 (מאוחר ביותר) — BUG-076: הפרדת "confirmation"/"approval" ל-lead capture בטוח, בהמשך לביקורת האבטחה (BUG-072/074/075), ראה 0.18 למטה. קודם: C94 production verification הושלם 4/5 — ראה 0.16 למטה.
-**עודכן על ידי:** Claude Code — ביקורת אבטחה + 4 תיקוני קוד מאומתים מקומית (לא merged/deployed עדיין), ראה 0.18/0.17 למטה
+**עודכן:** 2026-07-06 (מאוחר ביותר) — BUG-072/074/075/076 **מוזגו ל-main** (PR #246, `e1436e9`), ראה 0.18/0.17 למטה. קודם: C94 production verification הושלם 4/5 — ראה 0.16 למטה.
+**עודכן על ידי:** Claude Code — 4 תיקוני קוד מוזגים ל-main (מאומת `git merge-base --is-ancestor` + grep על origin/main), עדיין **לא** מאומתים ב-production/Render, ראה 0.18/0.17 למטה
 
 > מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (תוקן 06/07 — ראה 0.17) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
 
@@ -18,7 +18,7 @@
 
 **בדיקות:** `test_bug076_lead_confirmation_policy.py` (חדש, 32/32) — ראה BUG_AUDIT_LOG.md BUG-076 לפירוט מלא של כל התרחישים. `test_bug074_approval_authority.py` עודכן (תרחיש הבסיס הוחלף לטבלת "Deals" כדי להמשיך לבדוק את הכלל הכללי, לא את ה-carve-out) — נשאר 22/22. כל 50 קבצי `test_*.py` ירוקים חוץ מ-`test_document_converter.py` (לא קשור, חבילת pip חסרה).
 
-**לא בוצע עדיין:** commit/push של סבב זה (ראה STATUS בתחתית תגובת הסבב), merge, deploy, production verification.
+**עדכון (06/07/2026) — מוזג ל-main:** commit `bb4b9ca` נדחף ל-`claude/quirky-cori-yrgrvb`, ואז מוזג ל-`main` (PR #246, merge commit `e1436e9`) — הענף נמחק לאחר המיזוג. **מאומת ישירות מול origin/main (לא לפי דיווח המשתמש בלבד):** `git fetch origin main` → head `e1436e9`; `git merge-base --is-ancestor bb4b9ca origin/main` → true; `git show origin/main:core/action_gateway.py | grep -c "classify_approval_policy\|approval_policy"` → 15; `git ls-tree -r origin/main --name-only | grep test_bug07` מציג את כל 5 קבצי הטסט החדשים. **לא בוצע עדיין:** deploy ל-Render, production verification.
 
 ---
 
@@ -36,7 +36,7 @@
 
 **בדיקות:** 3 קבצי טסט חדשים (`test_bug072_log_sanitization.py` 7/7, `test_bug074_approval_authority.py` 22/22, `test_bug075_tma_upload_role_gate.py` 17/17). 7 קבצי טסט קיימים עודכנו (קריאות ל-`approve()`/`route_confirmation_word()`/וכו' קיבלו `approver_role=`) ונשארו ירוקים במלואם. כל 50 קבצי `test_*.py` בריפו הורצו מקומית — ירוקים חוץ מ-`test_document_converter.py` (חבילת pip `markdown` חסרה בסביבה, לא קשור לשינויים כאן).
 
-**עדכון (אותו יום, 06/07/2026):** commit `54961f1` נדחף בפועל ל-`origin/claude/quirky-cori-yrgrvb` (`git push` הוצג ואומת). `BOSS_CURRENT_STATE.md` תוקן (הסתירה הפנימית שתועדה למעלה תוקנה בפועל — לא רק תועדה — ראה "Security checklist consolidation" בקובץ). **לא בוצע:** merge ל-main, deploy, production verification — ראה 0.18 למעלה להמשך (BUG-076, אותו PR/ענף).
+**עדכון (אותו יום, 06/07/2026):** commit `54961f1` נדחף בפועל ל-`origin/claude/quirky-cori-yrgrvb` (`git push` הוצג ואומת). `BOSS_CURRENT_STATE.md` תוקן (הסתירה הפנימית שתועדה למעלה תוקנה בפועל — לא רק תועדה — ראה "Security checklist consolidation" בקובץ). **✅ מוזג ל-main בהמשך (ראה 0.18 למעלה)** — PR #246, `e1436e9`, מאומת ישירות מול origin/main. **לא בוצע:** deploy, production verification.
 
 ---
 
