@@ -40,6 +40,88 @@ def _has_approval_authority(role: str) -> bool:
     return role == Role.OWNER or "actions.approve" in ROLE_PERMISSIONS.get(role, set())
 
 
+def _is_internal_role(role: str) -> bool:
+    from identity import Role
+    return role in (Role.OWNER, Role.PARTNER, Role.MANAGER, Role.EMPLOYEE)
+
+
+# ══════════════════════════════════════════════════
+# BUG-076 — "confirmation" vs "approval" policy
+#
+# Two distinct concepts (product decision, 2026-07-06):
+#   - APPROVAL_POLICY_APPROVAL (default, strict): a privileged identity
+#     (owner / "actions.approve") must authorize a sensitive action. This is
+#     the BUG-074 rule above, unchanged for everything except the narrow
+#     carve-out below.
+#   - APPROVAL_POLICY_SELF_CONFIRM: the requester merely confirms the system
+#     understood a low-risk draft/preview correctly — no privileged approver
+#     needed. Reserved for a tight, explicitly allowlisted class of lead
+#     writes (see classify_approval_policy()) — never for deletion, protected
+#     fields (status/score/owner-assignment/tier), financial/legal/deal
+#     mutation, outbound messaging, or bulk actions. Anything outside the
+#     allowlist falls back to APPROVAL_POLICY_APPROVAL automatically — the
+#     classification is computed here, centrally, from the actual tool_name/
+#     tool_inputs being proposed, never trusted from the caller.
+# ══════════════════════════════════════════════════
+
+APPROVAL_POLICY_APPROVAL     = "approval"
+APPROVAL_POLICY_SELF_CONFIRM = "self_confirm"
+
+_LEAD_CAPTURE_TABLE = "Leads"
+
+
+def _lead_safe_fields() -> tuple[frozenset, frozenset]:
+    """
+    Lazy import to avoid module-load-order coupling to airtable_schema.
+
+    create_fields: matches exactly what _write_one_lead()/_propose_lead_write()
+    (core/lead_candidate_handler.py) already write for a brand-new lead —
+    establishing a record's initial state is not a "status escalation" (there
+    is no prior state to escalate from).
+
+    update_fields: deliberately narrower — matches exactly what
+    _propose_lead_write() writes for an EXISTING lead today. No status/score/
+    tier/owner/next-step field may ever appear here: those are assignment/
+    escalation, not safe self-confirm.
+    """
+    from airtable_schema import LeadFields
+    create_fields = frozenset({
+        LeadFields.NAME, LeadFields.PHONE, LeadFields.CHANNEL, LeadFields.MEMORY_KEY,
+        LeadFields.DOMAIN, LeadFields.SOURCE, LeadFields.STATUS, LeadFields.SUMMARY,
+        LeadFields.SCORE, LeadFields.SENDER_ID,
+    })
+    update_fields = frozenset({
+        LeadFields.PHONE, LeadFields.SUMMARY, LeadFields.DOMAIN,
+    })
+    return create_fields, update_fields
+
+
+def classify_approval_policy(tool_name: str, tool_inputs: dict) -> str:
+    """
+    Returns APPROVAL_POLICY_SELF_CONFIRM ONLY for a narrow, allowlisted class
+    of safe lead-capture writes on the Leads table (create, or update
+    restricted to {phone, summary, domain}). Everything else — any other
+    tool, any other table, or any Leads write that touches a field outside
+    the allowlist (status, score, tier, owner, next-step, or anything not
+    explicitly listed) — is APPROVAL_POLICY_APPROVAL, the strict default.
+    """
+    if tool_name not in ("airtable_add", "airtable_update"):
+        return APPROVAL_POLICY_APPROVAL
+    if not isinstance(tool_inputs, dict) or tool_inputs.get("table") != _LEAD_CAPTURE_TABLE:
+        return APPROVAL_POLICY_APPROVAL
+
+    fields = tool_inputs.get("fields")
+    if not isinstance(fields, dict) or not fields:
+        return APPROVAL_POLICY_APPROVAL
+
+    create_fields, update_fields = _lead_safe_fields()
+    safe_fields = create_fields if tool_name == "airtable_add" else update_fields
+    if not set(fields.keys()) <= safe_fields:
+        return APPROVAL_POLICY_APPROVAL
+
+    return APPROVAL_POLICY_SELF_CONFIRM
+
+
 # ══════════════════════════════════════════════════
 # 3.1 — ActionContract
 # ══════════════════════════════════════════════════
@@ -71,6 +153,11 @@ class ActionContract:
     actor_domain_id:             str = ""
     actor_external_id:           str = ""
     actor_allowed_domains:       list = field(default_factory=list)
+    # BUG-076: "approval" (default, strict — owner/actions.approve required)
+    # or "self_confirm" (requester may confirm their own low-risk draft —
+    # see classify_approval_policy()). Computed once at propose time from the
+    # actual tool_name/tool_inputs, never trusted from the caller.
+    approval_policy:             str = APPROVAL_POLICY_APPROVAL
 
 
 # ══════════════════════════════════════════════════
@@ -387,6 +474,9 @@ class ActionGateway:
             actor_domain_id=getattr(identity, "domain_id", "") or "",
             actor_external_id=getattr(identity, "external_id", "") or "",
             actor_allowed_domains=list(getattr(identity, "allowed_domains", None) or []),
+            # BUG-076: classified from the actual normalized payload that will
+            # be dispatched — never trusted from the caller.
+            approval_policy=classify_approval_policy(tool_name, normalized),
         )
 
         if requires_approval:
@@ -682,9 +772,19 @@ class ActionGateway:
         ולא מ-contract.actor_role (זהות המבקש המקורי). היות שכל מסלולי
         הטקסט החופשי (route_confirmation_word/route_disambiguation/
         route_combined_word) מוצאים רק contracts ששייכים ל-canonical_user_id
-        של המאשר עצמו, זהו למעשה תמיד "אישור עצמי" — ולכן התפקיד המאשר
-        עצמו חייב להחזיק בסמכות אישור (owner / "actions.approve"), אחרת
-        הבקשה נחסמת ללא תלות בזהות/תפקיד המבקש המקורי.
+        של המאשר עצמו, זהו למעשה תמיד "אישור עצמי".
+
+        BUG-076: "אישור עצמי" אינו אומר "לא צריך סמכות" באופן גורף —
+        זה תלוי במדיניות (`contract.approval_policy`, ראה
+        classify_approval_policy()):
+          - APPROVAL_POLICY_APPROVAL (ברירת מחדל): המאשר חייב סמכות אישור
+            אמיתית (owner / "actions.approve") — בדיוק כמו ב-BUG-074,
+            ללא תלות בזהות/תפקיד המבקש המקורי.
+          - APPROVAL_POLICY_SELF_CONFIRM: זהו "confirmation" לא "approval" —
+            המבקש המקורי בעצמו יכול לאשר את הטיוטה שלו, בתנאי שהמאשר הוא
+            *אותה* זהות בדיוק (לא זהות אחרת) וגם מחזיק role פנימי
+            (owner/partner/manager/employee). שמור אך ורק ל-lead capture
+            בטוח שסווג ככזה — ראה classify_approval_policy().
         """
         contract = self._ledger.find_by_id(contract_id)
         if not contract:
@@ -697,14 +797,20 @@ class ActionGateway:
             )
             return f"⚠️ הפעולה אינה במצב המתנה (מצב נוכחי: {contract.status})."
 
-        # BUG-074 — hard authorization boundary. Fail-closed: unknown/insufficient
-        # role never dispatches. The contract stays "pending" (not consumed), so
-        # a genuinely authorized approver can still act on it afterward.
-        if not _has_approval_authority(approver_role):
+        # BUG-074/076 — hard authorization boundary. Fail-closed: unknown/
+        # insufficient role never dispatches. The contract stays "pending"
+        # (not consumed), so a genuinely authorized approver can still act
+        # on it afterward.
+        policy = getattr(contract, "approval_policy", APPROVAL_POLICY_APPROVAL)
+        if policy == APPROVAL_POLICY_SELF_CONFIRM:
+            authorized = approver == contract.canonical_user_id and _is_internal_role(approver_role)
+        else:
+            authorized = _has_approval_authority(approver_role)
+        if not authorized:
             logger.warning(
-                "[ActionGateway] approve: DENIED — approver lacks approval authority "
+                "[ActionGateway] approve: DENIED — approver lacks authority for policy=%s "
                 "contract=%s tool=%s approver=%s role=%r requester=%s",
-                contract_id, contract.tool_name, approver, approver_role, contract.canonical_user_id,
+                policy, contract_id, contract.tool_name, approver, approver_role, contract.canonical_user_id,
             )
             return "⛔ הפעולה דורשת אישור בעלים."
 

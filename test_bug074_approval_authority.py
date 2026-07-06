@@ -12,6 +12,12 @@
 # After the fix: approve() takes an explicit approver_role and hard-fails unless
 # that role is owner or holds "actions.approve" — regardless of who the original
 # requester was, and regardless of whether requester == approver.
+#
+# BUG-076 (later, separate policy decision) carves out a narrow self-confirm
+# exception for SAFE lead-capture writes specifically — see
+# test_bug076_lead_confirmation_policy.py. The scenarios here intentionally
+# use a NON-lead-capture tool (table="Deals") so they keep testing the
+# general/strict rule, unaffected by that carve-out.
 
 import sys
 
@@ -64,11 +70,11 @@ employee = _identity(Role.EMPLOYEE, "emp1")
 
 r = gw.propose_action(
     tenant_id="boss_hq", canonical_user_id=employee.memory_key,
-    tool_name="airtable_add", tool_inputs={"table": "Leads", "fields": {"Name": "Test"}},
+    tool_name="airtable_add", tool_inputs={"table": "Deals", "fields": {"Name": "Test"}},
     origin_channel="telegram", origin_chat_id=employee.external_id,
     requires_approval=True, identity=employee,
 )
-chk("propose_action ok for employee-requested airtable_add", r.ok)
+chk("propose_action ok for employee-requested airtable_add (Deals, not lead-capture)", r.ok)
 
 reply = gw.route_confirmation_word(employee.memory_key, approver_role=employee.role)
 chk("BUG-074: employee self-confirm is denied", "⛔" in reply and "בעלים" in reply)
@@ -103,6 +109,9 @@ chk("BUG-074: dispatched tool is airtable_add", executed == ["airtable_add"])
 # manager also lacks approval authority by default permission map (only
 # "actions.approve" grants it, and only Role.OWNER currently holds it) —
 # same self-approval attempt on a fresh contract must also be denied.
+# Uses table="Leads" but field "Name" — NOT in BUG-076's update-safe-fields
+# allowlist ({phone, summary, domain}), so this still classifies as strict
+# APPROVAL_POLICY_APPROVAL despite being on the Leads table.
 # ══════════════════════════════════════════════════
 print("\n── BUG-074: manager self-approval is also blocked (not owner-specific) ──")
 

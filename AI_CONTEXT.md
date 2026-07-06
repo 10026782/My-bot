@@ -1,10 +1,24 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-07-06 (מאוחר ביותר) — ביקורת אבטחה על `app.py`/`tma_api.py`/`tools/` + תיקון BUG-072/074/075, ראה 0.17 למטה. קודם: C94 production verification הושלם 4/5 — ראה 0.16 למטה.
-**עודכן על ידי:** Claude Code — ביקורת אבטחה + 3 תיקוני קוד מאומתים מקומית (לא merged/deployed עדיין), ראה 0.17 למטה
+**עודכן:** 2026-07-06 (מאוחר ביותר) — BUG-076: הפרדת "confirmation"/"approval" ל-lead capture בטוח, בהמשך לביקורת האבטחה (BUG-072/074/075), ראה 0.18 למטה. קודם: C94 production verification הושלם 4/5 — ראה 0.16 למטה.
+**עודכן על ידי:** Claude Code — ביקורת אבטחה + 4 תיקוני קוד מאומתים מקומית (לא merged/deployed עדיין), ראה 0.18/0.17 למטה
 
-> מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (מיושן, 26/06, וסותר את עצמו — ראה 0.17) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
+> מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (תוקן 06/07 — ראה 0.17) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
+
+---
+
+## 0.18 BUG-076 — הפרדת "confirmation" מ-"approval" ל-lead capture בטוח — 2026-07-06 (קרא לפני 0.17)
+
+**החלטת הבעלים בתגובה לתופעת-הלוואי של BUG-074 (0.17 למטה):** lead capture הוא low-risk ולא אמור לדרוש אישור owner — "confirmation" (המבקש מאשש שהמערכת הבינה נכון) שונה מ-"approval" (זהות מורשית מסמיכה פעולה רגישה). `approve()` **נשאר** שער האכיפה המרכזי — לא הוחלש גורפית, נוסף carve-out צר ומחושב מרכזית.
+
+**מה נוסף:** `core/action_gateway.py`'s `classify_approval_policy(tool_name, tool_inputs)` — מחזירה `self_confirm` **רק** ל-`airtable_add`/`airtable_update` על טבלת `Leads`, עם שדות שכולם בתוך allowlist בטוח (יצירה: `Name/phone/channel/memory_key/domain/source/status/summary/Score/sender_id` — תואם בדיוק את `_write_one_lead()`; עדכון: **רק** `phone/summary/domain`, בלי status/score/tier/Owner/Next Action). כל דבר אחר (טבלה אחרת, כלי אחר, שדה מוגן) → `approval` (fail-closed, ברירת מחדל). `ActionContract` קיבל שדה `approval_policy` המחושב פעם אחת ב-`propose_action()` מתוך ה-payload בפועל (לא נסמך על טענת הקורא). `approve()`: כש-`approval_policy == "self_confirm"` — מאשר רק אם המאשר הוא **בדיוק** אותה זהות שביקשה **וגם** מחזיק role פנימי — לא "כל אחד יכול לאשש כל דבר".
+
+**תוצאה מעשית:** manager/partner/employee יכולים כעת לאשש בעצמם ("כן") טיוטת יצירת/עדכון-בטוח של ליד ב-Tier-1 preview — בדיוק כפי שכתיבת ליד אוטומטית (`FEATURE_AUTO_CAPTURE`) כבר עושה היום ללא אישור נפרד. מחיקה, שדות מוגנים (סטטוס/ציון/שיוך), דילס/פיננסים/יוצא/bulk — עדיין דורשים owner/"actions.approve" בדיוק כמו ב-BUG-074, ללא שינוי.
+
+**בדיקות:** `test_bug076_lead_confirmation_policy.py` (חדש, 32/32) — ראה BUG_AUDIT_LOG.md BUG-076 לפירוט מלא של כל התרחישים. `test_bug074_approval_authority.py` עודכן (תרחיש הבסיס הוחלף לטבלת "Deals" כדי להמשיך לבדוק את הכלל הכללי, לא את ה-carve-out) — נשאר 22/22. כל 50 קבצי `test_*.py` ירוקים חוץ מ-`test_document_converter.py` (לא קשור, חבילת pip חסרה).
+
+**לא בוצע עדיין:** commit/push של סבב זה (ראה STATUS בתחתית תגובת הסבב), merge, deploy, production verification.
 
 ---
 
@@ -22,7 +36,7 @@
 
 **בדיקות:** 3 קבצי טסט חדשים (`test_bug072_log_sanitization.py` 7/7, `test_bug074_approval_authority.py` 22/22, `test_bug075_tma_upload_role_gate.py` 17/17). 7 קבצי טסט קיימים עודכנו (קריאות ל-`approve()`/`route_confirmation_word()`/וכו' קיבלו `approver_role=`) ונשארו ירוקים במלואם. כל 50 קבצי `test_*.py` בריפו הורצו מקומית — ירוקים חוץ מ-`test_document_converter.py` (חבילת pip `markdown` חסרה בסביבה, לא קשור לשינויים כאן).
 
-**לא בוצע בסבב הזה:** merge, deploy, production verification. אין push עדיין (ראה STATUS בתחתית התגובה של הסבב). `BOSS_CURRENT_STATE.md` צריך עדכון נפרד לתקן את הסתירה הפנימית שתועדה למעלה — לא נגעתי בו בסבב הזה מעבר להערה כאן (דורש decision על אילו שורות "נכונות").
+**עדכון (אותו יום, 06/07/2026):** commit `54961f1` נדחף בפועל ל-`origin/claude/quirky-cori-yrgrvb` (`git push` הוצג ואומת). `BOSS_CURRENT_STATE.md` תוקן (הסתירה הפנימית שתועדה למעלה תוקנה בפועל — לא רק תועדה — ראה "Security checklist consolidation" בקובץ). **לא בוצע:** merge ל-main, deploy, production verification — ראה 0.18 למעלה להמשך (BUG-076, אותו PR/ענף).
 
 ---
 
