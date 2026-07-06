@@ -100,7 +100,7 @@ def test_confirm_after_tier2_only_no_false_positive():
         # Simulates app.py's confirm-word handling: ActionGateway has no live
         # contract for this user (Tier 2 never registers one), so the reply
         # must be the honest "nothing pending" message, not a fabricated success.
-        confirm_reply = gw.route_confirmation_word(identity.memory_key)
+        confirm_reply = gw.route_confirmation_word(identity.memory_key, approver_role=identity.role)
 
     assert confirm_reply == "אין פעולה שממתינה לאישור.", f"got={confirm_reply!r}"
     return "OK"

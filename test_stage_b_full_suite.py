@@ -120,7 +120,7 @@ gw2 = _new_gw(_contract_tracking_executor)
 r2 = gw2.propose_action(**_BASE_PROPOSE)
 
 # "מאשר" arrives as confirmation word → route_confirmation_word
-reply = gw2.route_confirmation_word("boss_hq:owner_1")
+reply = gw2.route_confirmation_word("boss_hq:owner_1", approver_role="owner")
 chk("Req2: exactly one dispatch after מאשר", len(_dispatched2) == 1)
 chk("Req2: executed tool is airtable_add (not re-inferred)", executed_tool[0] == "airtable_add")
 chk("Req2: executed table is Tasks (preserved from contract)", executed_inputs[0].get("table") == "Tasks")
@@ -134,7 +134,7 @@ gw3 = ActionGateway(ledger=ExecutionLedger(), tool_executor=None)
 r3 = gw3.propose_action(**_BASE_PROPOSE)
 chk("Req3: propose_action succeeds (creates contract)", r3.ok)
 
-reply3 = gw3.approve(r3.contract_id, approver="boss_hq:owner_1")
+reply3 = gw3.approve(r3.contract_id, approver="boss_hq:owner_1", approver_role="owner")
 chk("Req3: approve with no executor returns error message", "❌" in reply3 or "לא מחובר" in reply3 or "executor" in reply3.lower())
 # Must NOT claim success ("לא בוצעה" is acceptable — it's a negation; only "✅ בוצע" is a false claim)
 chk("Req3: error message does not claim success", "✅" not in reply3)
@@ -201,7 +201,7 @@ def _no_id_executor(tool_name, tool_inputs, contract_id):
 
 gw4 = _new_gw(_no_id_executor)
 r4 = gw4.propose_action(**_BASE_PROPOSE)
-reply4 = gw4.approve(r4.contract_id, approver="boss_hq:owner_1")
+reply4 = gw4.approve(r4.contract_id, approver="boss_hq:owner_1", approver_role="owner")
 chk("Req4F: no external_id → no '✅ נוצר' in reply", "✅ נוצר" not in reply4 and "✅ רשומה נוספה" not in reply4)
 
 # ══════════════════════════════════════════════════
@@ -216,9 +216,9 @@ def _rep_executor(tool_name, tool_inputs, contract_id):
 
 gw5 = _new_gw(_rep_executor)
 gw5.propose_action(**_BASE_PROPOSE)
-gw5.route_confirmation_word("boss_hq:owner_1")  # first confirm
-gw5.route_confirmation_word("boss_hq:owner_1")  # second
-gw5.route_confirmation_word("boss_hq:owner_1")  # third
+gw5.route_confirmation_word("boss_hq:owner_1", approver_role="owner")  # first confirm
+gw5.route_confirmation_word("boss_hq:owner_1", approver_role="owner")  # second
+gw5.route_confirmation_word("boss_hq:owner_1", approver_role="owner")  # third
 chk("Req5: triple מאשר → exactly 1 dispatch", len(_rep_dispatched) == 1)
 chk("Req5: no pending contracts after execution",
     len(gw5.find_live_contracts("boss_hq:owner_1")) == 0)
@@ -235,7 +235,7 @@ def _dup_executor(tool_name, tool_inputs, contract_id):
 
 gw6 = _new_gw(_dup_executor)
 r6 = gw6.propose_action(**_BASE_PROPOSE)
-gw6.approve(r6.contract_id, approver="boss_hq:owner_1")
+gw6.approve(r6.contract_id, approver="boss_hq:owner_1", approver_role="owner")
 chk("Req6: first execution dispatched", len(_dup_dispatched) == 1)
 
 # Second propose of same payload → blocked, returns challenge
@@ -246,7 +246,7 @@ chk("Req6: duplicate message contains 6-digit code",
     bool(re.search(r'\b\d{6}\b', r6b.user_message or "")))
 
 # Plain "מאשר" must NOT re-execute
-gw6.route_confirmation_word("boss_hq:owner_1")
+gw6.route_confirmation_word("boss_hq:owner_1", approver_role="owner")
 chk("Req6: מאשר alone does NOT re-dispatch", len(_dup_dispatched) == 1)
 
 # Correct override code re-executes
@@ -284,7 +284,7 @@ r7 = gw7.propose_action(
     origin_chat_id="tg:123",
     requires_approval=True,
 )
-gw7.approve(r7.contract_id, approver="boss_hq:owner_1")
+gw7.approve(r7.contract_id, approver="boss_hq:owner_1", approver_role="owner")
 chk("Req7: dispatched tool is airtable_add (not sheets_append)", _tool7 == ["airtable_add"])
 chk("Req7: dispatched table is Tasks (not substituted)", _inputs7[0].get("table") == "Tasks")
 
@@ -417,7 +417,7 @@ r9 = gw9.propose_action(
     origin_chat_id="whatsapp:972501234567",
     requires_approval=True,
 )
-gw9.approve(r9.contract_id, approver="boss_hq:owner_1")
+gw9.approve(r9.contract_id, approver="boss_hq:owner_1", approver_role="owner")
 
 gw_logger.removeHandler(handler)
 log_output = log_stream.getvalue()
@@ -454,18 +454,18 @@ for channel, chat_id, label in [
         requires_approval=True,
     )
     chk(f"Req10/{label}: propose ok, no dispatch yet", re.ok and len(_e2e_dispatched) == 0)
-    gw_e.route_confirmation_word("boss_hq:owner_1")
+    gw_e.route_confirmation_word("boss_hq:owner_1", approver_role="owner")
     chk(f"Req10/{label}: after מאשר → exactly 1 dispatch", len(_e2e_dispatched) == 1)
     chk(f"Req10/{label}: dispatched tool is airtable_add", _e2e_dispatched[0]["tool"] == "airtable_add")
     chk(f"Req10/{label}: dispatched table is Tasks", _e2e_dispatched[0]["inputs"].get("table") == "Tasks")
-    gw_e.route_confirmation_word("boss_hq:owner_1")
+    gw_e.route_confirmation_word("boss_hq:owner_1", approver_role="owner")
     chk(f"Req10/{label}: second מאשר → still 1 dispatch", len(_e2e_dispatched) == 1)
 
 # ── Req10: FEATURE_ACTION_GATEWAY=true with executor missing → fail closed ──
 print("\n── Req10: Executor-missing fail-closed ──────────────────────")
 gw_noexec = ActionGateway(ledger=ExecutionLedger(), tool_executor=None)
 r_ne = gw_noexec.propose_action(**_BASE_PROPOSE)
-reply_ne = gw_noexec.approve(r_ne.contract_id, approver="boss_hq:owner_1")
+reply_ne = gw_noexec.approve(r_ne.contract_id, approver="boss_hq:owner_1", approver_role="owner")
 chk("Req10/noexec: error returned", "❌" in reply_ne or "executor" in reply_ne.lower() or "לא מחובר" in reply_ne)
 chk("Req10/noexec: no success claim", "✅" not in reply_ne)
 
@@ -484,7 +484,7 @@ r_sub = gw_sub.propose_action(
     origin_channel="telegram", origin_chat_id="tg:1",
     requires_approval=True,
 )
-gw_sub.approve(r_sub.contract_id, approver="boss_hq:owner_1")
+gw_sub.approve(r_sub.contract_id, approver="boss_hq:owner_1", approver_role="owner")
 chk("Req10/tool-sub: airtable_add dispatched (not sheets_append)", _sub_tools == ["airtable_add"])
 
 # ══════════════════════════════════════════════════
@@ -520,7 +520,7 @@ gw_live01._ledger.update_status(
 chk("BUG-LIVE-01: contract marked executed after Stage A sync", contract_live01.status == "executed")
 
 # Step 3: user says "מאשר" on WhatsApp → must NOT re-dispatch
-reply_live01 = gw_live01.route_confirmation_word("boss_hq:owner_1")
+reply_live01 = gw_live01.route_confirmation_word("boss_hq:owner_1", approver_role="owner")
 chk("BUG-LIVE-01: מאשר after Stage A execution → no re-dispatch", len(_live01_dispatched) == 0)
 chk("BUG-LIVE-01: reply says no pending action", "אין" in reply_live01 or "ממתינ" not in reply_live01)
 
@@ -572,7 +572,7 @@ _pre_exec_reply = _gw20.query_execution_status("boss_hq:owner_1")
 chk("DoD20: no execution yet, pending contract → query returns pending message",
     _pre_exec_reply is not None and "פתוחה" in _pre_exec_reply)
 # approve (executes via _ok_executor)
-_gw20.approve(_p20.contract_id, approver="boss_hq:owner_1")
+_gw20.approve(_p20.contract_id, approver="boss_hq:owner_1", approver_role="owner")
 _sq_reply = _gw20.query_execution_status("boss_hq:owner_1")
 chk("DoD20: after execution → query returns non-None", _sq_reply is not None)
 chk("DoD20: query reply contains ✅ (executed)", _sq_reply is not None and "✅" in _sq_reply)
@@ -593,11 +593,11 @@ _p21b = _gw21.propose_action(
     origin_channel="whatsapp", origin_chat_id="972501111111", requires_approval=True,
 )
 # route_confirmation_word → triggers disambiguation list (>1 pending)
-_dis_reply = _gw21.route_confirmation_word("boss_hq:owner_21")
+_dis_reply = _gw21.route_confirmation_word("boss_hq:owner_21", approver_role="owner")
 chk("DoD21: disambiguation list shown when >1 pending", "איזו" in _dis_reply or "1." in _dis_reply)
 
 # user selects index 1 → sheets_append sibling should be closed
-_sel_reply = _gw21.route_disambiguation("boss_hq:owner_21", "1")
+_sel_reply = _gw21.route_disambiguation("boss_hq:owner_21", "1", approver_role="owner")
 chk("DoD21: selection reply is non-None", _sel_reply is not None)
 _c21a = _gw21.find_contract(_p21a.contract_id)
 _c21b = _gw21.find_contract(_p21b.contract_id)
@@ -620,13 +620,13 @@ _p22b = _gw22.propose_action(
     origin_channel="whatsapp", origin_chat_id="972501111111", requires_approval=True,
 )
 # trigger disambiguation
-_gw22.route_confirmation_word("boss_hq:owner_22")
+_gw22.route_confirmation_word("boss_hq:owner_22", approver_role="owner")
 # ordinal "הראשונה" → intercepted by Gateway, not Agent
-_d22 = _gw22.route_disambiguation("boss_hq:owner_22", "הראשונה")
+_d22 = _gw22.route_disambiguation("boss_hq:owner_22", "הראשונה", approver_role="owner")
 chk("DoD22: 'הראשונה' intercepted by Gateway (returns non-None)", _d22 is not None)
 chk("DoD22: result is a reply string (not None/empty)", isinstance(_d22, str) and bool(_d22))
 # "השנייה" after state cleared → falls through to Agent (returns None)
-_d22_second = _gw22.route_disambiguation("boss_hq:owner_22", "השנייה")
+_d22_second = _gw22.route_disambiguation("boss_hq:owner_22", "השנייה", approver_role="owner")
 chk("DoD22: 'השנייה' after state cleared → returns None (falls to Agent)", _d22_second is None)
 
 # ══════════════════════════════════════════════════

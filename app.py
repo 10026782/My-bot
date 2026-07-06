@@ -178,6 +178,16 @@ def _is_junk_inbound_text(text: str) -> bool:
     return False
 
 
+def _sanitize_id(raw_id) -> str:
+    """BUG-072: log a short, non-reversible fingerprint instead of a raw
+    phone number / Telegram chat/user id. Same input always yields the same
+    fingerprint, so repeated log lines for the same identity can still be
+    correlated for debugging without exposing the identifier itself."""
+    if not raw_id:
+        return "?"
+    return hashlib.sha256(str(raw_id).encode()).hexdigest()[:8]
+
+
 def _public_request_url() -> str:
     # Prefer configured public URL to avoid trusting attacker-supplied X-Forwarded-Host.
     base = os.environ.get("RENDER_APP_URL", "").rstrip("/")
@@ -674,7 +684,7 @@ def _pending_clarification_message(chat_id: str) -> str:
 def approval_response(route: RouteDecision, original_text: str, chat_id: str,
                        channel: str, domain: str) -> str:
     """Saves original action and asks owner to confirm with כן/לא."""
-    logger.info(f"[APPROVAL] intent={route.intent} domain={route.domain} | saved for {chat_id}")
+    logger.info(f"[APPROVAL] intent={route.intent} domain={route.domain} | saved for {_sanitize_id(chat_id)}")
     with _pending_approvals_lock:
         approval_id = _add_pending_approval(chat_id, {
             "text":       original_text,
@@ -747,7 +757,7 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
     fp = executed_action_cache.compute(user_chat_id, tool_name, tool_inputs)
     if executed_action_cache.is_recently_executed(fp):
         logger.warning(
-            f"[Approval] duplicate fingerprint blocked: {fp[:8]} | {tool_name} | user={user_chat_id}"
+            f"[Approval] duplicate fingerprint blocked: {fp[:8]} | {tool_name} | user={_sanitize_id(user_chat_id)}"
         )
         return f"⚠️ פעולה זו כבר בוצעה לאחרונה ({tool_name}). כפילות נחסמה."
 
@@ -841,7 +851,7 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
                 f"⏳ בקשת אישור\n\n{label}\n\nID: {action_id} | פג תוקף בעוד 10 דקות",
                 reply_markup=kb,
             )
-            logger.info(f"[Approval] ✅ sent to owner {owner_chat_id} | {action_id}")
+            logger.info(f"[Approval] ✅ sent to owner {_sanitize_id(owner_chat_id)} | {action_id}")
         except Exception as e:
             logger.error(f"[Approval] ❌ failed to notify owner: {e}")
             # BOSS NEVER FAKES: לא מחזירים "ממתין לאישור" כשהשליחה נכשלה
@@ -850,7 +860,7 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
                 f"הפעולה לא בוצעה: {label}"
             )
 
-    logger.info(f"[Approval] queued {action_id} | {tool_name} | user={user_chat_id}")
+    logger.info(f"[Approval] queued {action_id} | {tool_name} | user={_sanitize_id(user_chat_id)}")
     return f"⏳ הפעולה ממתינה לאישור: {label}\nשלח *מאשר* כדי לאשר (בכל ערוץ)."
 
 
@@ -897,7 +907,7 @@ def _capture_last_tool_result(chat_id: str, tool_name: str, result, tool_input: 
         if ok and tool_name in ("airtable_add", "airtable_update") and tool_input.get("table") == "Leads":
             lead_sessions.set_current_lead_record_id(chat_id, record_id)
     except Exception as e:
-        logger.warning(f"[C60] set_last_tool_result failed for {chat_id}: {e}")
+        logger.warning(f"[C60] set_last_tool_result failed for {_sanitize_id(chat_id)}: {e}")
 
 
 def _build_tool_context(chat_id: str, session: dict | None) -> str:
@@ -1003,7 +1013,7 @@ def _handle_approval_callback_impl(cq) -> None:
         if not (approver_identity.is_owner or approver_identity.can("actions.approve")):
             logger.warning(
                 f"[Approval] unauthorized {action} attempt {action_id} "
-                f"by {approver_identity.user_id} role={approver_identity.role}"
+                f"by {_sanitize_id(approver_identity.user_id)} role={approver_identity.role}"
             )
             bot.answer_callback_query(cq.id, "⛔ אין לך הרשאה לאשר פעולה זו")
             return
@@ -1092,7 +1102,7 @@ def _handle_approval_callback_impl(cq) -> None:
             except ToolDenied as e:
                 logger.warning(
                     f"[Approval] denied approved action {action_id} | "
-                    f"{tool_name} | user={identity.user_id} role={identity.role}: {e}"
+                    f"{tool_name} | user={_sanitize_id(identity.user_id)} role={identity.role}: {e}"
                 )
                 bot.answer_callback_query(cq.id, "⛔ הפעולה כבר אינה מורשית")
                 return
@@ -1238,14 +1248,14 @@ def _typing_indicator(chat_id: str, channel: str, stop_event: threading.Event, i
         try:
             bot.send_chat_action(chat_id, "typing")
         except Exception as e:
-            logger.debug(f"[Typing] failed for {chat_id}: {e}")
+            logger.debug(f"[Typing] failed for {_sanitize_id(chat_id)}: {e}")
 
     while not stop_event.wait(interval):
         if channel == "telegram":
             try:
                 bot.send_chat_action(chat_id, "typing")
             except Exception as e:
-                logger.debug(f"[Typing] failed for {chat_id}: {e}")
+                logger.debug(f"[Typing] failed for {_sanitize_id(chat_id)}: {e}")
         else:
             # Future platforms can be added here if they support typing indicators.
             pass
@@ -1353,7 +1363,7 @@ def run_agent(
     if identity.role in (Role.READONLY, Role.GUEST):
         logger.warning(
             f"[Identity] LOW-PRIVILEGE request — "
-            f"channel={channel} id={chat_id} role={identity.role} "
+            f"channel={channel} id={_sanitize_id(chat_id)} role={identity.role} "
             f"msg='{user_text[:60]}'"
         )
 
@@ -1464,7 +1474,7 @@ def run_agent(
     if pending_entry is not None:
         if pending_action == "confirm":
             logger.info(
-                f"[PendingApproval] ✅ confirmed by {chat_id} → "
+                f"[PendingApproval] ✅ confirmed by {_sanitize_id(chat_id)} → "
                 f"executing: {pending_entry['text'][:60]}"
             )
             return run_agent(
@@ -1474,7 +1484,7 @@ def run_agent(
                 _resolved_domain=_resolved_domain,
             )
         elif pending_action == "cancel":
-            logger.info(f"[PendingApproval] 🚫 cancelled by {chat_id}")
+            logger.info(f"[PendingApproval] 🚫 cancelled by {_sanitize_id(chat_id)}")
             return "🚫 הפעולה בוטלה."
         # else: new unrelated message — nothing was popped above, treat normally
 
@@ -1500,7 +1510,9 @@ def run_agent(
         # ולפני _CONFIRM_WORDS/_CANCEL_WORDS כדי שלא ייפול ל-Agent.
         # פועל מול contracts חיים ישירות (כמו BUG-056) — לא תלוי בדגל.
         from core.action_gateway import action_gateway as _gw_combined
-        _combined_reply = _gw_combined.route_combined_word(identity.memory_key, _stripped)
+        _combined_reply = _gw_combined.route_combined_word(
+            identity.memory_key, _stripped, approver_role=identity.role,
+        )
         if _combined_reply is not None:
             logger.info(
                 "[ActionGateway] route_combined_word: user=%s text=%.30r reply=%.60s",
@@ -1515,7 +1527,9 @@ def run_agent(
         from feature_flags import is_enabled as _flag_disambig
         if _flag_disambig("FEATURE_ACTION_GATEWAY"):
             from core.action_gateway import action_gateway as _gw_disambig
-            _disambig_reply = _gw_disambig.route_disambiguation(identity.memory_key, _stripped)
+            _disambig_reply = _gw_disambig.route_disambiguation(
+                identity.memory_key, _stripped, approver_role=identity.role,
+            )
             if _disambig_reply is not None:
                 logger.info(
                     "[ActionGateway] route_disambiguation: user=%s text=%.30r reply=%.60s",
@@ -1557,7 +1571,7 @@ def run_agent(
             # to the flag-gated Stage A/B logic exactly as before.
             from core.action_gateway import action_gateway as _gw_cw
             if _gw_cw.find_live_contracts(identity.memory_key):
-                _gw_reply = _gw_cw.route_confirmation_word(identity.memory_key)
+                _gw_reply = _gw_cw.route_confirmation_word(identity.memory_key, approver_role=identity.role)
                 logger.info(
                     "[ActionGateway] route_confirmation_word: user=%s reply=%.60s",
                     identity.memory_key, _gw_reply,
@@ -1568,7 +1582,7 @@ def run_agent(
             from feature_flags import is_enabled as _flag_cw
             if _flag_cw("FEATURE_ACTION_GATEWAY"):
                 # Stage B: Gateway הוא מקור האמת לאישור (אין contract חי -> "אין פעולה...")
-                _gw_reply = _gw_cw.route_confirmation_word(identity.memory_key)
+                _gw_reply = _gw_cw.route_confirmation_word(identity.memory_key, approver_role=identity.role)
                 logger.info(
                     "[ActionGateway] route_confirmation_word: user=%s reply=%.60s",
                     identity.memory_key, _gw_reply,
@@ -1715,14 +1729,14 @@ def run_agent(
     if route.restricted:
         logger.warning(
             f"[Restricted] external request: "
-            f"user={identity.user_id} role={identity.role} "
+            f"user={_sanitize_id(identity.user_id)} role={identity.role} "
             f"intent={route.intent} notify_owner=True tool_allowed=False"
         )
 
     # ── 5. Agent Loop ─────────────────────────────
     if _flag_enabled("EMERGENCY_STOP_AI"):
         logger.warning(
-            f"[CostWatchdog] EMERGENCY_STOP_AI active — blocking agent for {identity.user_id}"
+            f"[CostWatchdog] EMERGENCY_STOP_AI active — blocking agent for {_sanitize_id(identity.user_id)}"
         )
         return "⛔ מערכת ה-AI בעצירת חירום עקב עלות גבוהה. נסה שוב מאוחר יותר."
 
@@ -1836,7 +1850,7 @@ def run_agent(
             if tool_calls_made >= MAX_TOOL_TURNS:
                 logger.warning(
                     f"[Agent] reached max tool turns ({tool_calls_made}/{MAX_TOOL_TURNS}) "
-                    f"for user={identity.user_id} role={identity.role} intent={route.intent}"
+                    f"for user={_sanitize_id(identity.user_id)} role={identity.role} intent={route.intent}"
                 )
                 final_reply = (text_blocks[0].text if text_blocks
                                else "⚠️ הגעתי למגבלת הפעולות לריצה זו. נסה לפרק את הבקשה לשלבים.")
@@ -1870,7 +1884,7 @@ def run_agent(
                     if _mutating_approvals_this_turn >= 1:
                         logger.warning(
                             f"[Approval] multi-pending blocked: {tu.name} | "
-                            f"turn already has 1 approval queued | user={chat_id}"
+                            f"turn already has 1 approval queued | user={_sanitize_id(chat_id)}"
                         )
                         tool_results.append({
                             "type": "tool_result", "tool_use_id": tu.id,
@@ -1993,7 +2007,7 @@ def run_agent(
         logger.error(f"[Agent] Anthropic {e.status_code}: {e.message}")
         _transient = e.status_code in (429, 529) or e.status_code >= 500
         if _transient and _flag_enabled("LLM_FALLBACK"):
-            logger.warning(f"[Agent] Claude transient error {e.status_code} — OpenAI fallback for {chat_id}")
+            logger.warning(f"[Agent] Claude transient error {e.status_code} — OpenAI fallback for {_sanitize_id(chat_id)}")
             try:
                 fallback = llm_fallback.call_openai_text(
                     source="run_agent.status_error",
@@ -2008,7 +2022,7 @@ def run_agent(
             return "❗ ההודעה ארוכה מדי. נסה לשלוח קצר יותר."
         return f"מצטערים, יש תקלה זמנית ({e.status_code}). ננסה שוב בקרוב."
     except anthropic.APITimeoutError:
-        logger.error(f"[Agent] Timeout for {chat_id}")
+        logger.error(f"[Agent] Timeout for {_sanitize_id(chat_id)}")
         if _flag_enabled("LLM_FALLBACK"):
             try:
                 fallback = llm_fallback.call_openai_text(
@@ -2277,7 +2291,7 @@ def _handle_telegram_media(message) -> None:
 
             voice_size = message.voice.file_size or 0
             if _classify_size(voice_size) == "oversized":
-                logger.info(f"[Media] oversized voice note ({voice_size} bytes) from user={user_id} — skipping download")
+                logger.info(f"[Media] oversized voice note ({voice_size} bytes) from user={_sanitize_id(user_id)} — skipping download")
                 bot.send_message(chat_id, _format_media_result(MediaResult(
                     ok=False, file_size_tier="oversized",
                     error=MediaError("FILE_TOO_LARGE", "הקובץ גדול מ-50MB. הגודל המרבי הוא 50MB.", False),
@@ -2335,7 +2349,7 @@ def _handle_telegram_media(message) -> None:
             file_size = doc.file_size or 0
 
         if _classify_size(file_size) == "oversized":
-            logger.info(f"[Media] oversized {file_type} ({file_size} bytes) from user={user_id} — skipping download")
+            logger.info(f"[Media] oversized {file_type} ({file_size} bytes) from user={_sanitize_id(user_id)} — skipping download")
             bot.send_message(chat_id, _format_media_result(MediaResult(
                 ok=False, file_size_tier="oversized",
                 error=MediaError("FILE_TOO_LARGE", "הקובץ גדול מ-50MB. הגודל המרבי הוא 50MB.", False),

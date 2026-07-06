@@ -3039,6 +3039,13 @@ def tma_upload(identity):
     if not ff.is_enabled("FEATURE_MEDIA_UPLOAD"):
         return jsonify({"coming_soon": True, "message": "Media upload not yet enabled"}), 200
 
+    # BUG-075: every other TMA write endpoint gates on role — this one only
+    # had @require_tma_auth (authentication, not authorization). Any resolved
+    # identity (including lead/guest/readonly) could otherwise upload once
+    # the flag above is enabled.
+    if identity.role not in {Role.OWNER, Role.MANAGER, Role.PARTNER}:
+        return jsonify({"error": "forbidden"}), 403
+
     uploaded = request.files.get("file")
     if not uploaded:
         return jsonify({"error": "missing 'file' in multipart form data"}), 400

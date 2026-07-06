@@ -100,7 +100,7 @@ def test_confirm_yes_resolves_via_gateway_and_writes():
         live_before = gw.find_live_contracts(identity.memory_key)
         assert len(live_before) == 1, "must find the real pending contract from the preview"
 
-        confirm_reply = gw.route_confirmation_word(identity.memory_key)
+        confirm_reply = gw.route_confirmation_word(identity.memory_key, approver_role=identity.role)
 
     assert confirm_reply is not None
     assert "בוצע" in confirm_reply or VALID_REC_ID in confirm_reply, f"confirm_reply={confirm_reply!r}"
@@ -135,7 +135,7 @@ def test_cancel_no_clears_pending_no_write():
     assert contract.status == "rejected", f"status={contract.status}"
     # Confirming afterward must find nothing pending (no accidental write).
     with patch("core.action_gateway.action_gateway", gw):
-        confirm_after_cancel = gw.route_confirmation_word(identity.memory_key)
+        confirm_after_cancel = gw.route_confirmation_word(identity.memory_key, approver_role=identity.role)
     assert confirm_after_cancel == "אין פעולה שממתינה לאישור.", f"got={confirm_after_cancel!r}"
     return "OK"
 
@@ -165,7 +165,7 @@ def test_repeated_tier1_after_execution_needs_override():
          patch("core.action_gateway.action_gateway", gw), \
          patch("feature_flags.is_enabled", return_value=False):
         lch.handle_lead_candidate(identity, LEAD_TEXT, "chat_p5", "telegram")
-        gw.route_confirmation_word(identity.memory_key)  # executes it
+        gw.route_confirmation_word(identity.memory_key, approver_role=identity.role)  # executes it
 
         reply_again = lch.handle_lead_candidate(identity, LEAD_TEXT, "chat_p5", "telegram")
 

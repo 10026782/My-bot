@@ -25,6 +25,22 @@ logger = logging.getLogger(__name__)
 
 
 # ══════════════════════════════════════════════════
+# BUG-074 — approval authority check
+#
+# approve() is the sole enforcement boundary for every approval path
+# (Telegram callback + all free-text confirm routes). A confirming identity
+# must independently hold approval authority (owner, or the "actions.approve"
+# permission) — being the same person who requested the action is not
+# sufficient, even though every free-text route below only ever matches
+# contracts belonging to the confirming user's own canonical_user_id.
+# ══════════════════════════════════════════════════
+
+def _has_approval_authority(role: str) -> bool:
+    from identity import Role, ROLE_PERMISSIONS
+    return role == Role.OWNER or "actions.approve" in ROLE_PERMISSIONS.get(role, set())
+
+
+# ══════════════════════════════════════════════════
 # 3.1 — ActionContract
 # ══════════════════════════════════════════════════
 
@@ -425,16 +441,19 @@ class ActionGateway:
 
     # ── §4 — route_confirmation_word ────────────────────────────────
 
-    def route_confirmation_word(self, canonical_user_id: str) -> str:
+    def route_confirmation_word(self, canonical_user_id: str, approver_role: str = "") -> str:
         """
         מיירט מילת אישור חופשית (כמו "מאשר") לפני שמגיעה ל-Agent.
         מחזיר תשובה ישירה למשתמש.
+
+        approver_role: BUG-074 — התפקיד המאומת של המשתמש שמאשר עכשיו (לא
+        נגזר מ-canonical_user_id). approve() הוא שער האכיפה — ראה שם.
         """
         live = self.find_live_contracts(canonical_user_id)
         if len(live) == 0:
             return "אין פעולה שממתינה לאישור."
         if len(live) == 1:
-            result = self.approve(live[0].contract_id, approver=canonical_user_id)
+            result = self.approve(live[0].contract_id, approver=canonical_user_id, approver_role=approver_role)
             return result
         # יותר מאחת — מציג רשימה ממוספרת + שומר disambiguation state
         with self._disambiguation_lock:
@@ -511,11 +530,13 @@ class ActionGateway:
             return ("cancel", idx)
         return None
 
-    def route_disambiguation(self, canonical_user_id: str, text: str) -> str | None:
+    def route_disambiguation(self, canonical_user_id: str, text: str, approver_role: str = "") -> str | None:
         """
         מיירט בחירת סדרתי ("הראשונה", "2", ...) אחרי שה-Gateway הציג רשימה.
         מחזיר None אם המשתמש אינו במצב disambiguation — ממשיך ל-Agent.
         מחזיר תשובה ישירה אם הבחירה חוקית.
+
+        approver_role: BUG-074 — ראה route_confirmation_word / approve().
         """
         with self._disambiguation_lock:
             pending_list = self._disambiguation.get(canonical_user_id)
@@ -550,18 +571,20 @@ class ActionGateway:
             "[ActionGateway] disambiguation: user=%s selected idx=%d contract=%s tool=%s",
             canonical_user_id, idx, contract.contract_id, contract.tool_name,
         )
-        return self.approve(contract.contract_id, approver=canonical_user_id)
+        return self.approve(contract.contract_id, approver=canonical_user_id, approver_role=approver_role)
 
     # ── BUG-070 gap #1 — route_combined_word ────────────────────────
     # "כן 1"/"אשר 3" (אישור ממוקד) ו-"לא 2" (דחייה ממוקדת) בהודעה אחת,
     # בלי לדרוש קודם שהמשתמש יראה את הרשימה הממוספרת (route_confirmation_word)
     # ובלי להמתין למצב disambiguation קיים — פועל ישירות מול contracts חיים.
 
-    def route_combined_word(self, canonical_user_id: str, text: str) -> str | None:
+    def route_combined_word(self, canonical_user_id: str, text: str, approver_role: str = "") -> str | None:
         """
         מיירט "<מילת אישור/ביטול> <סדרתי>" (כמו "כן 1"/"אשר 3"/"לא 2").
         מחזיר None אם הטקסט לא תואם את התבנית, או שאין contracts חיים —
         ממשיך לזרימה הקיימת/ל-Agent. אחרת מחזיר תשובה ישירה.
+
+        approver_role: BUG-074 — ראה route_confirmation_word / approve().
         """
         parsed = self._parse_combined(text)
         if parsed is None:
@@ -594,7 +617,7 @@ class ActionGateway:
                 "[ActionGateway] combined_word: user=%s confirm idx=%d contract=%s tool=%s",
                 canonical_user_id, idx, contract.contract_id, contract.tool_name,
             )
-            return self.approve(contract.contract_id, approver=canonical_user_id)
+            return self.approve(contract.contract_id, approver=canonical_user_id, approver_role=approver_role)
 
         # action == "cancel" — דוחה רק את הפריט שנבחר, לא נוגע בשאר הממתינים
         self._ledger.update_status(contract.contract_id, "rejected")
@@ -648,10 +671,20 @@ class ActionGateway:
 
     # ── §3.3 — approve ──────────────────────────────────────────────
 
-    def approve(self, contract_id: str, approver: str) -> str:
+    def approve(self, contract_id: str, approver: str, approver_role: str = "") -> str:
         """
         מאשר contract ומבצע אותו.
         Fail closed: אם _tool_executor חסר — לא מחזיר success, לא מסמן executed.
+
+        BUG-074: approve() הוא שער האכיפה היחיד לכל מסלולי האישור (כפתור
+        טלגרם + כל מילות האישור החופשיות). approver_role חייב לשקף את
+        התפקיד המאומת בפועל של מי שמאשר עכשיו — לא נגזר מ-canonical_user_id
+        ולא מ-contract.actor_role (זהות המבקש המקורי). היות שכל מסלולי
+        הטקסט החופשי (route_confirmation_word/route_disambiguation/
+        route_combined_word) מוצאים רק contracts ששייכים ל-canonical_user_id
+        של המאשר עצמו, זהו למעשה תמיד "אישור עצמי" — ולכן התפקיד המאשר
+        עצמו חייב להחזיק בסמכות אישור (owner / "actions.approve"), אחרת
+        הבקשה נחסמת ללא תלות בזהות/תפקיד המבקש המקורי.
         """
         contract = self._ledger.find_by_id(contract_id)
         if not contract:
@@ -663,6 +696,17 @@ class ActionGateway:
                 contract_id, contract.status,
             )
             return f"⚠️ הפעולה אינה במצב המתנה (מצב נוכחי: {contract.status})."
+
+        # BUG-074 — hard authorization boundary. Fail-closed: unknown/insufficient
+        # role never dispatches. The contract stays "pending" (not consumed), so
+        # a genuinely authorized approver can still act on it afterward.
+        if not _has_approval_authority(approver_role):
+            logger.warning(
+                "[ActionGateway] approve: DENIED — approver lacks approval authority "
+                "contract=%s tool=%s approver=%s role=%r requester=%s",
+                contract_id, contract.tool_name, approver, approver_role, contract.canonical_user_id,
+            )
+            return "⛔ הפעולה דורשת אישור בעלים."
 
         # §§3/#6 fail-closed: without executor no execution can be verified
         if not self._tool_executor:
@@ -676,11 +720,6 @@ class ActionGateway:
                 "פנה לתמיכה טכנית."
             )
 
-        if contract.canonical_user_id != approver and not approver.startswith("owner"):
-            logger.warning(
-                "[ActionGateway] approve: approver mismatch contract=%s approver=%s owner=%s",
-                contract_id, approver, contract.canonical_user_id,
-            )
         self._ledger.update_status(
             contract_id, "approved",
             approved_by=approver,

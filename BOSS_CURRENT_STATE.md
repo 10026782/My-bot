@@ -374,9 +374,16 @@ Resolved mismatch: scoring is consolidated into `lead_capture.py`; the old separ
 
 ## Security checklist consolidation
 
-`SECURITY_CHECKLIST.md` is archived as a historical checklist. Active security risks to carry forward here:
+`SECURITY_CHECKLIST.md` is archived as a historical checklist.
 
-- `_safe_route()` can drop the approval gate on router exception.
-- `DEV_MODE` HMAC bypass remains a production risk if enabled.
-- `/worker/trigger` accepts caller-controlled `chat_id` if `WORKER_SECRET` leaks.
-- `/health` is public and exposes internal check state/version-style data.
+**Correction (06/07/2026, superseded by code verification — see AI_CONTEXT.md §0.17):** this section previously listed 4 items as "active security risks to carry forward," contradicting the "Resolved Security Findings (audit 12/06)" table above in this same file, which already marks all 4 as fixed. A fresh security audit against current `main` (not this doc) re-verified all 4 directly in code — they are fixed, and this section's "carry forward" framing was stale doc drift, not a real open risk:
+
+- `_safe_route()` (`app.py:1264`) fails **closed** on router exception — returns `Risk.NEEDS_APPROVAL`/`Handler.APPROVAL`/`needs_approval=True`, not an open/permissive fallback. ✅ Confirmed fixed.
+- `DEV_MODE` HMAC bypass — `tma_api.py:52-58` hardcodes `_DEV_MODE = False` and loudly rejects `TMA_DEV_MODE` if set via env var. There is no dev bypass in current code. ✅ Confirmed fixed.
+- `/worker/trigger` (`app.py:2780`) derives `chat_id` server-side from `ELIYAHU_CHAT_ID` only — the caller-supplied payload has no `chat_id` field at all, so a leaked `WORKER_SECRET` cannot be used to impersonate an arbitrary chat. ✅ Confirmed fixed.
+- `/health` (`app.py:2389`) returns only `{"status": ...}` — no version/internal-check detail. The full detail lives behind owner-authenticated `/api/owner/health`. ✅ Confirmed fixed.
+
+**New findings from the same audit (06/07/2026) — see `BUG_AUDIT_LOG.md` BUG-074/BUG-075/BUG-072 for full detail, code-fixed and test-verified locally, not yet merged/deployed:**
+- BUG-074 (High, but dormant behind `FEATURE_ACTION_GATEWAY` for most tools — **live today** for the Tier-1 lead-preview self-confirm path): `core/action_gateway.py`'s free-text confirm routes let the same identity that requested a `requires_approval=True` tool approve it themselves; `approve()` is now the enforcement boundary.
+- BUG-075 (Medium, dormant behind `FEATURE_MEDIA_UPLOAD`): `/api/tma/upload` had authentication but no role check; now gated to owner/manager/partner like every other TMA write endpoint.
+- BUG-072 (Low-Medium, now fixed): raw chat_id/user_id were logged in plaintext in `app.py`; now routed through a `_sanitize_id()` fingerprint helper.
