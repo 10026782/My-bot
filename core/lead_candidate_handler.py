@@ -617,7 +617,7 @@ def handle_lead_candidate(
         high = [c for c in candidates if c["confidence"] >= 0.75]
         low  = [c for c in candidates if c["confidence"] <  0.75]
         return _handle_mixed_batch(
-            identity, high, low, text, chat_id, channel, domain
+            identity, high, low, text, chat_id, channel, domain, auto_capture=auto_capture
         )
 
     return None
@@ -626,6 +626,15 @@ def handle_lead_candidate(
 # ══════════════════════════════════════════════════
 # Tier-routing handlers (C89)
 # ══════════════════════════════════════════════════
+
+def _should_auto_write(auto_capture: bool, existing_id: Optional[str]) -> bool:
+    """
+    C89 gate, מאוחד לכל ה-Tiers: כתיבה אוטומטית רק ל-lead חדש לגמרי,
+    וגם auto_capture דלוק. עדכון ליד קיים (existing_id) תמיד עובר אישור,
+    ללא קשר ל-flag — עקבי עם BUG-074/076.
+    """
+    return auto_capture and not existing_id
+
 
 def _handle_single_candidate(
     identity,
@@ -652,7 +661,7 @@ def _handle_single_candidate(
 
     existing_id = _at_find_lead(name, phone)
 
-    if not auto_write or existing_id:
+    if not _should_auto_write(auto_write, existing_id):
         # BUG-056: preview mode now proposes a REAL pending ActionContract
         # (instead of the dead-end session["pending_lead_preview"]) so "כן"
         # can actually resolve it — see _propose_lead_write() + app.py's
@@ -710,7 +719,7 @@ def _handle_clean_batch(
     auto_write=False → BUG-058: תצפית בלבד — אין resolver ל-batch confirm
     (ראה _store_pending_preview), אז ההודעה לא רומזת שאישור קבוצתי אפשרי.
     """
-    if not auto_write:
+    if not _should_auto_write(auto_write, None):
         _store_pending_preview(chat_id, candidates, text)
         lines = [
             f"• {c['name']} ({c['phone']})" + (f" [{', '.join(c['context'])}]" if c.get("context") else "")
@@ -736,22 +745,46 @@ def _handle_mixed_batch(
     chat_id: str,
     channel: str,
     domain: str,
+    auto_capture: bool,
 ) -> str:
     """
     Tier 3: חלק ברור (high), חלק עמום (low).
-    ברורים → נכתבים. עמומים → needs_review + הודעה.
+    high + lead חדש + auto_capture דלוק → נכתב מיד.
+    high + (ליד קיים, או auto_capture כבוי) → עובר אישור כמו Tier 1
+    (BUG-077 fix: קודם נכתב תמיד ללא תלות ב-existing_id/flag — הפרה של
+    אותו gate שקיים כבר ב-Tier 1/2).
+    low (עמומים) → needs_review + הודעה, ללא שינוי.
     """
     results = []
+    written = 0
+    pending = 0
     for c in high:
-        ok, record_id, action = _write_one_lead(
-            identity, c["name"], c["phone"], text, channel, domain
-        )
+        existing_id = _at_find_lead(c["name"], c["phone"])
         ctx_str = _context_suffix(c.get("context", []), domain)
-        if ok and record_id:
-            verb = "עדכנתי" if action == "update" else "שמרתי"
-            results.append(f"✅ {verb} את {c['name']} ({c['phone']}){ctx_str}")
+        if _should_auto_write(auto_capture, existing_id):
+            ok, record_id, action = _write_one_lead(
+                identity, c["name"], c["phone"], text, channel, domain
+            )
+            if ok and record_id:
+                verb = "עדכנתי" if action == "update" else "שמרתי"
+                results.append(f"✅ {verb} את {c['name']} ({c['phone']}){ctx_str}")
+                written += 1
+            else:
+                results.append(f"❌ {c['name']} ({c['phone']}) — לא נשמר")
         else:
-            results.append(f"❌ {c['name']} ({c['phone']}) — לא נשמר")
+            gw_result = _propose_lead_write(
+                identity, c["name"], c["phone"], text, channel, domain
+            )
+            if gw_result.ok:
+                verb = "לעדכון" if existing_id else "לשמירה"
+                results.append(
+                    f"📋 {c['name']} ({c['phone']}){ctx_str} — ממתין לאישור ({verb}). ענה *כן* לאשר."
+                )
+                pending += 1
+            else:
+                results.append(
+                    f"❌ {c['name']} ({c['phone']}) — {gw_result.user_message or gw_result.reason}"
+                )
 
     needs_review_lines = [
         f"⏳ {c['name'] or '?'} ({c['phone']}) — confidence נמוך, ממתין לבדיקה"
@@ -760,8 +793,15 @@ def _handle_mixed_batch(
 
     lines = results + needs_review_lines
     header = f"📋 עובדתי {len(high) + len(low)} לידים:"
+    parts = []
+    if written:
+        parts.append(f"{written} נשמרו")
+    if pending:
+        parts.append(f"{pending} ממתינים לאישור")
     if needs_review_lines:
-        header += f" {len(high)} נשמרו, {len(low)} ממתינים לבדיקה"
+        parts.append(f"{len(low)} ממתינים לבדיקה")
+    if parts:
+        header += " " + ", ".join(parts)
     return header + "\n" + "\n".join(lines)
 
 
