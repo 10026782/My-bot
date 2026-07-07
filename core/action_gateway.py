@@ -21,6 +21,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Callable
 
+from tool_registry import needs_approval
+
 logger = logging.getLogger(__name__)
 
 
@@ -438,6 +440,13 @@ class ActionGateway:
         לאחר אישור ישתמש בזהות המקורית ולא ינסה resolve_identity() מחדש על
         canonical_user_id/origin_chat_id (שיכולים להיות memory_key, לא
         external_id ערוץ אמיתי).
+
+        BUG-077: requires_approval לא נסמך עיוורת על הקורא — cross-check
+        fail-closed מול tool_registry.needs_approval(tool_name). אם הרישום
+        דורש אישור אבל הקורא העביר False, הרישום מנצח (True גובר תמיד) —
+        חוץ מ-approval_policy == self_confirm (BUG-076 carve-out: lead
+        capture בטוח לא צריך אישור owner; classify_approval_policy() כבר
+        מחשב את זה מהתוכן בפועל, לא מהקורא, אז אין כאן בריחה מהבדיקה).
         """
         normalized = self.normalize_payload(tool_inputs)
         fingerprint = self.compute_business_fingerprint(
@@ -455,6 +464,21 @@ class ActionGateway:
                 )
             if existing.status == "executed":
                 return self._handle_duplicate_executed(existing, canonical_user_id)
+
+        # BUG-076: classified from the actual normalized payload that will
+        # be dispatched — never trusted from the caller.
+        approval_policy = classify_approval_policy(tool_name, normalized)
+
+        if (approval_policy != APPROVAL_POLICY_SELF_CONFIRM
+                and needs_approval(tool_name)
+                and not requires_approval):
+            logger.warning(
+                "[ActionGateway] propose_action: caller passed "
+                "requires_approval=False for '%s' but tool_registry requires "
+                "True — overriding to True (fail-closed, BUG-077).",
+                tool_name,
+            )
+            requires_approval = True
 
         contract = ActionContract(
             contract_id=str(uuid.uuid4()),
@@ -474,9 +498,7 @@ class ActionGateway:
             actor_domain_id=getattr(identity, "domain_id", "") or "",
             actor_external_id=getattr(identity, "external_id", "") or "",
             actor_allowed_domains=list(getattr(identity, "allowed_domains", None) or []),
-            # BUG-076: classified from the actual normalized payload that will
-            # be dispatched — never trusted from the caller.
-            approval_policy=classify_approval_policy(tool_name, normalized),
+            approval_policy=approval_policy,
         )
 
         if requires_approval:

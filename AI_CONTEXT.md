@@ -1,12 +1,26 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-07-07 (מאוחר ביותר) — 4 עדכונים: (1) doc-drift תוקן — C60 היה מתועד כאן כ"לא ממוזג" בזמן שכבר מוזג (PR #152), אומת עצמאית (`git merge-base --is-ancestor`), ראה 0.19. (2) C83 (Single Policy Source) סגור, ראה 0.22. (3) BUG-077 (Tier 3 auto-write gate) תוקן חלקית — root cause נשאר פתוח במכוון, ראה 0.21. (4) BUG-DH-03/04 (Formula Injection) תוקן, ראה 0.20. כל ה-3 האחרונים **מוזגים ל-main** (PR #249/#250/#251), **לא מאומתים בפרודקשן**. קודם: BUG-072/074/075/076 **מוזגו ל-main** (PR #246, `e1436e9`), ראה 0.18/0.17 למטה.
-**עודכן על ידי:** Claude Code — 3 תיקוני קוד + 1 doc-drift fix, כולם מוזגים ל-main (מאומת `git merge-base --is-ancestor` + GitHub PR state), עדיין **לא** מאומתים ב-production/Render, ראה 0.22/0.21/0.20/0.19 למטה
+**עודכן:** 2026-07-07 (מאוחר ביותר) — BUG-077 root cause נסגר (לא רק התסמין): `propose_action()` מאמת כעת `requires_approval` מול `tool_registry.needs_approval()`, פרט ל-self_confirm carve-out. יישום ראשוני נאיבי שבר 2 טסטים קיימים (BUG-076 self_confirm) — תוקן לפני push, כולל תיקון נלווה ל-`_write_one_lead()`. ראה 0.23. 🟡 קוד מוכן, טרם ממוזג. קודם: (1) doc-drift תוקן — C60 היה מתועד כאן כ"לא ממוזג" בזמן שכבר מוזג (PR #152), ראה 0.19. (2) C83 (Single Policy Source) סגור, ראה 0.22. (3) BUG-DH-03/04 (Formula Injection) תוקן, ראה 0.20. שלושתם **מוזגים ל-main** (PR #249/#251), **לא מאומתים בפרודקשן**.
+**עודכן על ידי:** Claude Code — BUG-077 root-cause fix (2 קבצים, קוד+טסט, טרם ממוזג), ראה 0.23 למטה
 
 > מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (תוקן 06/07 — ראה 0.17) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
 
 ---
+
+## 0.23 BUG-077 root cause נסגר — `propose_action()` מאמת מול `tool_registry.needs_approval()`, פרט ל-self_confirm — 2026-07-07 (קרא לפני 0.22)
+
+**מה תוקן:** `core/action_gateway.py::propose_action()` — `approval_policy` (מ-`classify_approval_policy()`, BUG-076) מחושב לפני ה-cross-check, ומשמש גם אותו וגם את שדה ה-contract (לא קריאה כפולה). Override ל-`requires_approval=True` מתבצע **רק אם**: (א) `approval_policy != self_confirm`, (ב) `tool_registry.needs_approval(tool_name)` אמת, (ג) הקורא העביר `False`.
+
+**תיקון עובדתי ל-SPEC שהתקבל:** אין פונקציה `tool_registry.get_tool_meta()` — האקססור האמיתי הוא `needs_approval(tool_name) -> bool`, כבר מכוסה ב-2 טסטים קיימים.
+
+**קונפליקט שהתגלה ותוקן לפני push:** יישום ראשוני נאיבי (override גורף, בלי תנאי (א)) שבר 2 טסטים קיימים (`test_bug077_tier3_auto_capture_gate.py`, `test_c89_preview_confirmation.py`) — כי `_write_one_lead()` (`core/lead_candidate_handler.py`) קרא ל-`propose_action()` עם payload בלי מפתח `"fields"`, ולכן **תמיד** קיבל `approval_policy="approval"` (לעולם לא `self_confirm`), אף שמדובר בדיוק בתרחיש הבטוח (ליד חדש, שדות allowlisted) ש-BUG-076 התכוון לפטור מאישור. תוקן שני הקבצים יחד: ה-cross-check מכבד self_confirm, ו-`_write_one_lead()`'s payload נעטף תחת `"fields"` (זהה למה שנכתב בפועל), תואם למה ש-`_lead_safe_fields()`'s docstring כבר הניח כעובדה (`core/action_gateway.py:79`).
+
+**בדיקה:** `test_action_gateway.py` — 3 טסטים חדשים (override ל-`sheets_append`, ללא-שינוי כשcaller כבר True, ללא-override ל-`airtable_get`). אפס רגרסיה: כל 50+ קבצי `test_*.py` ירוקים, `smoke_tests.py` ירוק, `compileall` נקי.
+
+**Merged:** לא עדיין — ענף `claude/tool-approval-metadata-mi89lu`. **Deployed/Verified בפרודקשן:** לא.
+
+**סטטוס:** 🟡 CODE DONE, NOT MERGED — BUG-077 סגור במלואו בקוד (root cause + תסמין Tier 3), ר' `BUG_AUDIT_LOG.md` BUG-077.
 
 ## 0.22 C83 — Single Policy Source סגור: `event_bus.ACTIONS_REQUIRING_APPROVAL` הוא alias ל-`tool_registry`, לא רשימה עצמאית — 2026-07-06 (קרא לפני 0.21)
 
