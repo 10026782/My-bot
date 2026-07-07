@@ -331,6 +331,76 @@ def _extract_document_text(bot, message) -> str | None:
         return None
 
 
+# ── נרמול שדות לפני כתיבה ל-Business Memory ──────────────────────
+# Airtable מחזיר 422 על ערך שאינו option קיים בשדה singleSelect/
+# multipleSelects (אין typecast=true בשכבת ה-gateway). BusinessMemoryFields
+# עד כה לא היה לה שדה Domain ייעודי — ה-domain key הגולמי (למשל "media")
+# נכתב ישירות לתוך Tags הכללי, שם אין לו שום ערבות שהוא option קיים.
+# הפונקציה הזו מפרידה זאת: Domain נכתב לשדה הייעודי (ממופה לערך Airtable
+# חוקי), ו-Tags מסונן לערכים חוקיים בלבד (domain keys לא-רלוונטיים מוסרים).
+
+_VALID_EVENT_TYPES = {"Milestone", "Decision", "Crisis", "Announcement", "Learning", "Other"}
+
+_VALID_TAGS = {
+    "Strategy", "Operations", "Finance", "HR", "Sales", "Customer", "Product",
+    "Legal", "Risk", "Other", "real_estate", "blue_view", "negotiation",
+    "lessons", "gross_profit", "profit_distribution", "contracts", "numbers",
+    "fatigue", "pressure", "option_agreement", "partners", "bargaining_power",
+    "principle",
+}
+
+# מיפוי domain-key (מה-DOMAINS tuple הפנימי) → ערך Airtable חוקי
+_DOMAIN_TO_AIRTABLE = {
+    "real_estate": "real_estate",   # או "Real Estate" — תלוי איזה option נשאר אחרי ניקוי
+    "import":      "Import",
+    "media":       "media",
+    "saas":        "SaaS",
+    "finance":     "General",       # אין option ייעודי — נופל ל-General, עם warning
+    "general":     "General",
+}
+
+
+def normalize_business_memory_fields(fields: dict, raw_domain_key: str) -> dict:
+    from airtable_schema import BusinessMemoryFields as BMF
+
+    result = dict(fields)
+
+    # Event Date
+    if not result.get(BMF.DATE):
+        result[BMF.DATE] = datetime.now(ZoneInfo("Asia/Jerusalem")).date().isoformat()
+
+    # Event Type
+    et = result.get(BMF.EVENT_TYPE)
+    if et not in _VALID_EVENT_TYPES:
+        logger.info(f"[BMF] normalized Event Type: {et!r} → Other")
+        result[BMF.EVENT_TYPE] = "Other"
+
+    # Tags — לא domain, רק נושאים
+    if BMF.TAGS in result:
+        raw_tags = result[BMF.TAGS]
+        filtered = [t for t in raw_tags if t in _VALID_TAGS]
+        dropped = set(raw_tags) - set(filtered)
+        for d in dropped:
+            logger.info(f"[BMF] dropped invalid tag: {d}")
+        if filtered:
+            result[BMF.TAGS] = filtered
+        else:
+            result.pop(BMF.TAGS, None)
+            logger.info("[BMF] removed empty Tags after filtering")
+
+    # Domain — כתיבה לשדה הייעודי, לא ל-Tags
+    airtable_domain = _DOMAIN_TO_AIRTABLE.get(raw_domain_key)
+    if airtable_domain:
+        if airtable_domain != raw_domain_key:
+            logger.info(f"[BMF] normalized Domain: {raw_domain_key} → {airtable_domain}")
+        result[BMF.DOMAIN] = airtable_domain
+    else:
+        logger.warning(f"[BMF] no domain mapping for '{raw_domain_key}' — defaulting to General")
+        result[BMF.DOMAIN] = "General"
+
+    return result
+
+
 # ── שמירה — דרך gateway בלבד ────────────────────────────────────
 
 def _save_to_business_memory(
@@ -353,6 +423,7 @@ def _save_to_business_memory(
             BMF.TAGS:        [domain],     # multi-select — חייב להיות list
             BMF.IMPACT:      "Manual Entry",
         }
+        fields = normalize_business_memory_fields(fields, domain)
 
         record = airtable_create(
             Tables.BUSINESS_MEMORY,

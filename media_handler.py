@@ -153,6 +153,8 @@ def _save_transcript_to_memory(transcript: str, domain: str, source: str) -> boo
         BMF.TAGS: [domain],
         BMF.IMPACT: "Voice Note",
     }
+    from cmd_update import normalize_business_memory_fields
+    fields = normalize_business_memory_fields(fields, domain)
     record = airtable_create(Tables.BUSINESS_MEMORY, fields, source=f"media_handler:{source}")
     if record:
         logger.info("[media_handler] saved transcript to Business Memory id=%s", record.get("id"))
