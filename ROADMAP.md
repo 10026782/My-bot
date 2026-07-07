@@ -1,6 +1,7 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 07/07/2026 — BUG-DH-03/04 (Formula Injection ב-Decision Hub) תוקן בקוד: `_safe_formula_param()` נוסף ל-`tools/airtable_gateway.py`, מיושם ב-`cmd_decision.py::_resolve_decision_ref`, `decision_pipeline.py::maybe_supersede`, ו-`core/lead_candidate_handler.py::_search_formulas`. עדיין 🟡 CODE DONE, NOT VERIFIED — לא ממוזג, `FEATURE_DECISION_HUB` נשאר חסום עד production evidence. ראה BUG_AUDIT_LOG.md BUG-036/BUG-037 וסעיף BUG-DH-03/04 למטה.
+עודכן: 07/07/2026 (מאוחר יותר) — 3 תיקוני doc-drift: (1) BUG-077 (Tier 3 auto-capture gate, `core/lead_candidate_handler.py`) ✅ ממוזג ל-`main` (PR #250, `cdc41b5`) — `BUG_AUDIT_LOG.md` עדיין רשם "Merged: לא", תוקן. (2) F12 vs F13: הכרעת בעלים מפורשת — F13 סופגת את F12, F12 נגנז. ראה סעיפי F12/F13 למטה. (3) BUG-DH-03/04 גם ✅ ממוזג ל-`main` (PR #251, `d51e6be`) — השורה הקודמת כאן טענה "לא ממוזג" בטעות (זה כבר תוקן, נשאר רק production verification). `FEATURE_DECISION_HUB` נשאר חסום עד production evidence.
+עודכן קודם: 07/07/2026 — BUG-DH-03/04 (Formula Injection ב-Decision Hub) תוקן בקוד: `_safe_formula_param()` נוסף ל-`tools/airtable_gateway.py`, מיושם ב-`cmd_decision.py::_resolve_decision_ref`, `decision_pipeline.py::maybe_supersede`, ו-`core/lead_candidate_handler.py::_search_formulas`. ראה BUG_AUDIT_LOG.md BUG-036/BUG-037 וסעיף BUG-DH-03/04 למטה.
 עודכן קודם: 06/07/2026 — C83 (Single Policy Source: הפרדת requires_approval מ-blocked_by_emergency) נסגר: מאומת בקוד ש-`event_bus.ACTIONS_REQUIRING_APPROVAL` הוא alias טהור ל-`tool_registry.TOOLS_REQUIRING_APPROVAL`, לא רשימה עצמאית סותרת. אותה בדיקה אימתה מחדש (לא פתחה חדש) את BUG-077 הקיים (`core/action_gateway.py`/`propose_action()`) — ראה BUG_AUDIT_LOG.md ו-`docs/governance/BOSS_UNIFIED_MASTER_PLAN.md` §3.5/§7.
 עודכן קודם: 05/07/2026 — ניקוי doc-drift: כמה "חסמים"/"PARTIAL" ב-ROADMAP היו סטטוס תיעודי ישן שסתר סעיפים מעודכנים יותר באותו קובץ, לא חסם אמיתי בקוד. תוקן: (1) C91/C92 סומנו "לא חסום על C89" (C89 סגור 05/07) — C93 נשאר חסום, אך על צבירת AgentObservation data, לא על C89. (2) F09/F10/F11 עודכנו — F10 היה כפול/vestige ל-N02/N03 שכבר מיושמים (lead_memory כבר מחובר בפועל), F11 כבר לא "MVP חסר" (N04+N05-B מיושמים), F09 נשאר החלטת-מוצר לא חסם-טכני. (3) "פערים ידועים" table עודכן בהתאם, שורת F10 הוסרה (מיושן/כפול). (4) F12/F13 קיבלו הבהרה מפורשת: חוסמים רק multi-tenant/SaaS provider-abstraction עתידי, לא שום עבודה שוטפת. (5) בלוק Audit ישן (14/06/2026) שטען N02-N05 "PARTIAL" סומן במפורש כהיסטורי/מוחלף — לא נמחק (evidence), אבל לא עוד קריא כסטטוס נוכחי. Decision Hub (BUG-DH-03/04) ו-N05-C (Meta outbound) נשארים חסמים אמיתיים — לא שונו.
 עודכן קודם: 05/07/2026 — C94 production verification הושלם 4/5 ע"י הבעלים: Telegram+WhatsApp+File(xlsx/csv, נבדק זמנית עם flag ON, הוחזר ל-OFF)+Render commit hash (`41f3305`) — כולם ✅. הפריט היחיד שנשאר (חריגת classify_ingress) נשאר לא-נבדק live בכוונה. ראה סעיף C94 למטה.
@@ -995,6 +996,7 @@ Piggyback trigger: כשנוגעים ב-`crm.py` לסיבה אחרת (F14 או le
 קבצים: crm.py, airtable_gateway.py
 
 ### F12 — Model Provider Adapter
+⚠️ **STATUS: ABSORBED BY F13 — לא ייבנה בנפרד.** הכרעת בעלים סופית (07/07/2026): F13 סופגת את F12; F12 נגנז כתכנון עצמאי. נשאר בתיעוד כהיסטוריה/הקשר-כוונה בלבד — ה-`providers/` overlap שתועד למטה (F13) הוכרע לטובת F13.
 מה: abstraction layer אחיד ל-LLM providers — interface יחיד `generate(prompt, context, model_tier) → text` שמאחד Anthropic, OpenAI, ו-providers עתידיים.
 מטרה: שינוי provider = שינוי config בלבד, לא קוד. כולל sanitization עקבי (A32) בכל provider.
 פרטים:
@@ -1002,18 +1004,18 @@ Piggyback trigger: כשנוגעים ב-`crm.py` לסיבה אחרת (F14 או le
 - כל implementation עוטף API ספציפי + sanitize_agent_response
 - selection: env config / cost watchdog / health-based fallback אוטומטי
 - כל domain יכול לבחור model tier שונה (domain skill documents)
-מצב: **לא קיים** — Fix #1/#3 + `FEATURE_LLM_FALLBACK` מטפלים בעכשיו. זהו ה-design הנכון לטווח ארוך.
+מצב (היסטורי — לפני ההכרעה): לא קיים — Fix #1/#3 + `FEATURE_LLM_FALLBACK` מטפלים בעכשיו.
 תלוי ב: domain skill documents (F-future), `FEATURE_LLM_FALLBACK` יציב בפרודקשן.
-קבצים לעתיד: `providers/` (חדש), `llm_fallback.py` (migrate/replace).
+קבצים לעתיד: `providers/` (חדש, ראה F13 — זה המימוש הנבחר), `llm_fallback.py` (migrate/replace).
 **חשוב:** F12 חוסם אך ורק multi-tenant/SaaS provider-abstraction עתידי — **אינו** חוסם שום עבודה שוטפת (לידים, digest, C89-C94, Decision Hub וכו').
 
 ### F13 — TenantConfig + Provider Interfaces
-⚠️ **STATUS: DEAD CODE — DO NOT WIRE**
+⚠️ **STATUS: DEAD CODE — DO NOT WIRE** (ללא קשר להכרעת F12, ראה למטה)
 **חשוב:** כמו F12 — חוסם אך ורק F08 (SaaS Multi-Tenant) עתידי. אינו חוסם, ואינו קשור ל, שום עבודה שוטפת אחרת ברשימה הזו.
 - קיים: `core/tenant_config.py` + `providers/` (5 קבצים)
 - לא מחובר: אפס imports מקוד חי
 - כפילות: `TenantConfig` קיים גם ב-`tenant_provisioner.py`
-- הכרעה נדרשת: F12 vs F13 overlap ב-`providers/` — אין לחבר לפני הכרעה
+- **F12 vs F13 overlap ב-`providers/` — הוכרע 07/07/2026: F13 סופגת את F12** (הכרעת בעלים מפורשת). עדיין **אין לחבר** — ה-DEAD CODE status למעלה נשאר בתוקף עד sprint multi-tenancy ייעודי; ההכרעה קובעת רק *איזה* תכנון ממשיך (F13), לא מתירה activation.
 - Piggyback Trigger: sprint multi-tenancy בלבד
 
 מה: שכבת תשתית SaaS — `TenantConfig` (dataclass: storage/LLM/memory/channel/features/allowed_tools per tenant) + `Protocol`-based interfaces (`StorageProvider`, `LLMProvider`, `ChannelAdapter`) + שלושה shims שעוטפים את האינטגרציות הקיימות (`AirtableStorageProvider`, `AnthropicLLMProvider`, `TwilioChannelAdapter`) בלי לשנות אותן.
@@ -1040,11 +1042,11 @@ scope: **infrastructure only — אפס שינוי runtime behavior** בשלב �
 
 ---
 
-### BUG-DH-03/04 — Formula Injection ב-Decision Hub 🟡 CODE DONE, NOT VERIFIED (07/07/2026)
+### BUG-DH-03/04 — Formula Injection ב-Decision Hub 🟡 MERGED, NOT PRODUCTION-VERIFIED (עודכן 07/07/2026)
 **קבצים:** `cmd_decision.py` (`_resolve_decision_ref`), `decision_pipeline.py` (`maybe_supersede`)
 **מה:** Claim Topic + decision ref מגיעים מ-raw user content ללא sanitization לפני הכנסה ל-formula Airtable
-**חסום:** לפני הפעלת `FEATURE_DECISION_HUB` בפרודקשן — **עדיין חסום** עד מיזוג ל-main + production evidence
-**תיקון (✅ בוצע בקוד, לא ממוזג):** `_safe_formula_param()` נוסף ל-`tools/airtable_gateway.py`, שני call sites + `core/lead_candidate_handler.py::_search_formulas` (שכבר עשה escaping דומה, הוחלף במקור המשותף) מעודכנים. בדיקה: `test_bugdh03_04_formula_injection.py` (15/15). ענף `claude/tool-approval-metadata-mi89lu`, commit `2e9bb57`.
+**חסום:** לפני הפעלת `FEATURE_DECISION_HUB` בפרודקשן — **עדיין חסום** עד production evidence (המיזוג עצמו כבר בוצע)
+**תיקון (✅ בוצע בקוד, ✅ ממוזג ל-`main`):** `_safe_formula_param()` נוסף ל-`tools/airtable_gateway.py`, שני call sites + `core/lead_candidate_handler.py::_search_formulas` (שכבר עשה escaping דומה, הוחלף במקור המשותף) מעודכנים. בדיקה: `test_bugdh03_04_formula_injection.py` (15/15). Merged: PR #251, commit `d51e6be`.
 **ראו:** BUG_AUDIT_LOG.md BUG-036, BUG-037
 
 ---
