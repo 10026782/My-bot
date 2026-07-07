@@ -381,6 +381,7 @@ class BusinessMemoryFields:
     EVENT_TYPE      = "Event Type"      # Milestone|Decision|Crisis|Announcement|Learning|Other
     LEARNINGS_LINK  = "Related Learnings & Insights"
     TAGS            = "Tags"            # multi-select list field
+    DOMAIN          = "Domain"          # singleSelect — Airtable-confirmed live options
 
 
 class InteractionLogFields:
