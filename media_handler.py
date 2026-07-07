@@ -150,7 +150,6 @@ def _save_transcript_to_memory(transcript: str, domain: str, source: str) -> boo
         BMF.DESCRIPTION: transcript,
         BMF.DATE: datetime.now(ZoneInfo("Asia/Jerusalem")).date().isoformat(),
         BMF.EVENT_TYPE: "Other",
-        BMF.TAGS: [domain],
         BMF.IMPACT: "Voice Note",
     }
     from cmd_update import normalize_business_memory_fields
