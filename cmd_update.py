@@ -343,7 +343,7 @@ _VALID_EVENT_TYPES = {"Milestone", "Decision", "Crisis", "Announcement", "Learni
 
 _VALID_TAGS = {
     "Strategy", "Operations", "Finance", "HR", "Sales", "Customer", "Product",
-    "Legal", "Risk", "Other", "real_estate", "blue_view", "negotiation",
+    "Legal", "Risk", "Other", "blue_view", "negotiation",
     "lessons", "gross_profit", "profit_distribution", "contracts", "numbers",
     "fatigue", "pressure", "option_agreement", "partners", "bargaining_power",
     "principle",
