@@ -343,7 +343,7 @@ _VALID_EVENT_TYPES = {"Milestone", "Decision", "Crisis", "Announcement", "Learni
 
 _VALID_TAGS = {
     "Strategy", "Operations", "Finance", "HR", "Sales", "Customer", "Product",
-    "Legal", "Risk", "Other", "blue_view", "negotiation",
+    "Legal", "Risk", "Other", "Real Estate", "blue_view", "negotiation",
     "lessons", "gross_profit", "profit_distribution", "contracts", "numbers",
     "fatigue", "pressure", "option_agreement", "partners", "bargaining_power",
     "principle",
@@ -357,6 +357,13 @@ _DOMAIN_TO_AIRTABLE = {
     "saas":        "SaaS",
     "finance":     "General",       # אין option ייעודי — נופל ל-General, עם warning
     "general":     "General",
+}
+
+# מיפוי ערך גולמי (domain-key שדלף ל-Tags) → ערך Tag קנוני ב-Airtable.
+# חייב לזוז יחד עם _DOMAIN_TO_AIRTABLE: אותו duplicate-cleanup ב-Airtable
+# (2 real-estate options → נשאר רק "Real Estate") חל גם על Tags, לא רק Domain.
+_TAG_NORMALIZE = {
+    "real_estate": "Real Estate",
 }
 
 
@@ -378,8 +385,9 @@ def normalize_business_memory_fields(fields: dict, raw_domain_key: str) -> dict:
     # Tags — לא domain, רק נושאים
     if BMF.TAGS in result:
         raw_tags = result[BMF.TAGS]
-        filtered = [t for t in raw_tags if t in _VALID_TAGS]
-        dropped = set(raw_tags) - set(filtered)
+        normalized_tags = [_TAG_NORMALIZE.get(t, t) for t in raw_tags]
+        filtered = [t for t in normalized_tags if t in _VALID_TAGS]
+        dropped = set(normalized_tags) - set(filtered)
         for d in dropped:
             logger.info(f"[BMF] dropped invalid tag: {d}")
         if filtered:
