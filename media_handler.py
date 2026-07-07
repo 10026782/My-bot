@@ -481,6 +481,62 @@ def handle_tma_upload(
     )
 
 
+# mime -> document_converter input_type, mirrors tools/google_tools.py's
+# _MIME_TO_TYPE (kept local — that dict is private to its own module).
+_DOCUMENT_MIME_TO_TYPE = {
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "text/csv": "csv",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+    "text/html": "html",
+    "text/plain": "txt",
+    "text/markdown": "markdown",
+}
+
+
+def extract_text_if_document(file_bytes: bytes, mime_type: str) -> str | None:
+    """Best-effort text extraction via document_converter, for callers (e.g.
+    cmd_update.py) that want a document's content alongside its caption/link.
+    Never raises: unsupported mime types (images, pdf, pptx, ...) and any
+    conversion failure both return None so the caller can fall back to
+    whatever it already had (caption/Drive link)."""
+    input_type = _DOCUMENT_MIME_TO_TYPE.get(mime_type)
+    if input_type is None:
+        return None
+
+    import os
+    import tempfile
+    from pathlib import Path
+    from document_converter.engine import convert_document
+
+    tmp_path: str | None = None
+    output_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=f".{input_type}", delete=False) as tmp:
+            tmp.write(file_bytes)
+            tmp_path = tmp.name
+
+        result = convert_document(tmp_path, input_type, "markdown")
+        if result.get("confidence") != "high" or not result.get("output_file"):
+            return None
+
+        output_path = Path(result["output_file"])
+        return output_path.read_text(encoding="utf-8")[:3000]
+    except Exception as e:
+        logger.error(f"[Media] extract_text_if_document failed: {e}", exc_info=True)
+        return None
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        if output_path:
+            try:
+                output_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
 if __name__ == "__main__":
     assert _classify_size(5 * 1024 * 1024) == "normal"
     assert _classify_size(20 * 1024 * 1024) == "large"
