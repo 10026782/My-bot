@@ -188,6 +188,112 @@ def register_update_command(bot, get_identity):
     logger.info("[/update] handler registered successfully")
 
 
+# ── תפיסת קובץ (photo/document) בשלב 'text' ──────────────────────
+# app.py's webhook routes photo/document updates straight to the F16
+# media handler (_handle_telegram_media) before ever calling
+# bot.process_new_updates — so capture_text above, which only matches
+# messages with .text, never sees them. Without this, an attachment sent
+# mid-/update would silently fall through to the generic Drive-upload
+# flow and orphan the pending state until its TTL expires. app.py must
+# check has_pending_file_capture() and call capture_photo_or_document()
+# *before* _handle_telegram_media for photo/document content types.
+
+def has_pending_file_capture(user_id: str) -> bool:
+    state = _get_valid_state(user_id)
+    return bool(state and state.get("step") == "text")
+
+
+def capture_photo_or_document(bot, message, get_identity) -> None:
+    uid     = str(message.from_user.id)
+    chat_id = message.chat.id
+    state   = _pending.pop(uid, None)
+
+    if not state:
+        return
+
+    if _is_expired(state):
+        bot.send_message(chat_id, "⏱ פג תוקף — נסה /update מחדש.")
+        return
+
+    # re-check הרשאה לפני כתיבה בפועל — לעולם לא לסמוך על state ישן בלבד
+    identity = get_identity("telegram", uid)
+    if not identity or not (identity.is_owner or identity.role in _ALLOWED_ROLES):
+        bot.send_message(chat_id, "אין הרשאה לפקודה זו.")
+        return
+
+    caption = (getattr(message, "caption", None) or "").strip()
+    drive_url = _upload_attachment(bot, message, uid, state.get("domain", "general"))
+
+    raw_text = caption or "קובץ מצורף"
+    if drive_url:
+        raw_text = f"{raw_text}\n📎 {drive_url}"
+
+    record = _save_to_business_memory(
+        identity   = identity,
+        title      = f"{state['entry_type']}: {(caption or 'קובץ מצורף')[:60]}",
+        raw_text   = raw_text,
+        domain     = state.get("domain", "general"),
+        entry_type = state.get("entry_type", "Other"),
+    )
+
+    if record:
+        lines = [
+            "✅ *נשמר בזיכרון עסקי*",
+            "",
+            f"📌 {state['entry_type']} | {_domain_label(state['domain'])}",
+        ]
+        if drive_url:
+            lines.append(f"🔗 {drive_url}")
+        if caption:
+            lines.append(f"_{caption[:80]}{'...' if len(caption) > 80 else ''}_")
+        bot.send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
+    else:
+        bot.send_message(chat_id, "⚠️ הקובץ התקבל אבל לא נשמר. בדוק logs.")
+
+
+def _upload_attachment(bot, message, uid: str, domain: str) -> str:
+    """מעלה photo/document ל-Drive דרך media_handler הקיים. לא חוסם — כשל מחזיר ''."""
+    try:
+        from feature_flags import is_enabled
+        if not is_enabled("FEATURE_MEDIA_UPLOAD"):
+            return ""
+    except ImportError:
+        return ""
+
+    try:
+        from media_handler import handle_file_upload
+
+        if message.content_type == "photo":
+            photo     = message.photo[-1]
+            file_id   = photo.file_id
+            filename  = f"{file_id}.jpg"
+            mime_type = "image/jpeg"
+            file_type = "image"
+        else:
+            doc       = message.document
+            file_id   = doc.file_id
+            filename  = doc.file_name or f"{file_id}"
+            mime_type = doc.mime_type or "application/octet-stream"
+            file_type = "document"
+
+        file_info  = bot.get_file(file_id)
+        file_bytes = bot.download_file(file_info.file_path)
+        result = handle_file_upload(
+            file_bytes = file_bytes,
+            filename   = filename,
+            mime_type  = mime_type,
+            file_type  = file_type,
+            file_id    = file_id,
+            user_id    = uid,
+            domain     = domain,
+            source     = "telegram",
+        )
+        return result.drive_url if result.ok else ""
+    except Exception as e:
+        logger.error(f"[C20] attachment upload failed: {e}", exc_info=True)
+        return ""
+
+
 # ── שמירה — דרך gateway בלבד ────────────────────────────────────
 
 def _save_to_business_memory(
