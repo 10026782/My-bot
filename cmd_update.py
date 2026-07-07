@@ -336,8 +336,11 @@ def _extract_document_text(bot, message) -> str | None:
 # multipleSelects (אין typecast=true בשכבת ה-gateway). BusinessMemoryFields
 # עד כה לא היה לה שדה Domain ייעודי — ה-domain key הגולמי (למשל "media")
 # נכתב ישירות לתוך Tags הכללי, שם אין לו שום ערבות שהוא option קיים.
-# הפונקציה הזו מפרידה זאת: Domain נכתב לשדה הייעודי (ממופה לערך Airtable
-# חוקי), ו-Tags מסונן לערכים חוקיים בלבד (domain keys לא-רלוונטיים מוסרים).
+# Root cause (מאושר מול production logs): domain לעולם לא אמור להיכתב
+# ל-Tags בכלל — Tags הוא לנושאים אמיתיים ממקור נפרד, לא ל-domain. הכתיבה
+# ל-Tags הוסרה לגמרי ב-_save_to_business_memory; domain נכתב רק לשדה
+# Domain הייעודי (ממופה לערך Airtable חוקי). הסינון כאן נשאר כ-defense-in-
+# depth בלבד, למקרה שמקור עתידי כן ימלא Tags עם נושאים אמיתיים.
 
 _VALID_EVENT_TYPES = {"Milestone", "Decision", "Crisis", "Announcement", "Learning", "Other"}
 
@@ -359,13 +362,6 @@ _DOMAIN_TO_AIRTABLE = {
     "general":     "General",
 }
 
-# מיפוי ערך גולמי (domain-key שדלף ל-Tags) → ערך Tag קנוני ב-Airtable.
-# חייב לזוז יחד עם _DOMAIN_TO_AIRTABLE: אותו duplicate-cleanup ב-Airtable
-# (2 real-estate options → נשאר רק "Real Estate") חל גם על Tags, לא רק Domain.
-_TAG_NORMALIZE = {
-    "real_estate": "Real Estate",
-}
-
 
 def normalize_business_memory_fields(fields: dict, raw_domain_key: str) -> dict:
     from airtable_schema import BusinessMemoryFields as BMF
@@ -382,12 +378,11 @@ def normalize_business_memory_fields(fields: dict, raw_domain_key: str) -> dict:
         logger.info(f"[BMF] normalized Event Type: {et!r} → Other")
         result[BMF.EVENT_TYPE] = "Other"
 
-    # Tags — לא domain, רק נושאים
+    # Tags — לא domain, רק נושאים אמיתיים (ממקור נפרד, אם וכשיהיה)
     if BMF.TAGS in result:
         raw_tags = result[BMF.TAGS]
-        normalized_tags = [_TAG_NORMALIZE.get(t, t) for t in raw_tags]
-        filtered = [t for t in normalized_tags if t in _VALID_TAGS]
-        dropped = set(normalized_tags) - set(filtered)
+        filtered = [t for t in raw_tags if t in _VALID_TAGS]
+        dropped = set(raw_tags) - set(filtered)
         for d in dropped:
             logger.info(f"[BMF] dropped invalid tag: {d}")
         if filtered:
@@ -428,7 +423,6 @@ def _save_to_business_memory(
             BMF.DESCRIPTION: raw_text,
             BMF.DATE:        datetime.now(ZoneInfo("Asia/Jerusalem")).date().isoformat(),
             BMF.EVENT_TYPE:  entry_type,   # ערך חוקי: Decision|Milestone|Crisis|Announcement|Learning|Other
-            BMF.TAGS:        [domain],     # multi-select — חייב להיות list
             BMF.IMPACT:      "Manual Entry",
         }
         fields = normalize_business_memory_fields(fields, domain)
