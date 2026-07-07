@@ -348,10 +348,37 @@ def _write_one_lead(
     contract_id = None
     try:
         from core.action_gateway import action_gateway as _gw, _ledger_singleton
+        from airtable_schema import LeadFields
         _tool = "airtable_update" if action == "update" else "airtable_add"
-        _inputs = {"table": "Leads", "name": name, "phone": phone}
+        _domain_key = domain if (domain and domain != "general") else "general"
+        # BUG-077: wrap under "fields" matching exactly what the Write step
+        # below actually writes — this is what lets classify_approval_policy()
+        # (core/action_gateway.py) correctly classify a brand-new safe lead
+        # as self_confirm (BUG-076 carve-out), instead of always falling
+        # through to the strict "approval" default and getting force-flagged
+        # pending by the requires_approval cross-check even though the write
+        # happens unconditionally right below regardless of contract status.
         if existing_id:
-            _inputs["record_id"] = existing_id
+            _fields = {LeadFields.PHONE: phone, LeadFields.SUMMARY: text[:500]}
+            if _domain_key != "general":
+                _fields[LeadFields.DOMAIN] = _domain_key
+            _inputs = {"table": "Leads", "record_id": existing_id, "fields": _fields}
+        else:
+            _inputs = {
+                "table": "Leads",
+                "fields": {
+                    LeadFields.NAME:       name,
+                    LeadFields.PHONE:      phone,
+                    LeadFields.CHANNEL:    channel,
+                    LeadFields.MEMORY_KEY: memory_key,
+                    LeadFields.DOMAIN:     _domain_key,
+                    LeadFields.SOURCE:     "owner_dictation",
+                    LeadFields.STATUS:     "new",
+                    LeadFields.SUMMARY:    text[:500],
+                    LeadFields.SCORE:      0,
+                    LeadFields.SENDER_ID:  phone,
+                },
+            }
         gw_result = _gw.propose_action(
             tenant_id         = tenant_id,
             canonical_user_id = identity.memory_key,

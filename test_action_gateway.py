@@ -323,6 +323,52 @@ chk("BUG-C89: legacy contract (no identity) has empty actor_role", legacy_contra
 
 
 # ══════════════════════════════════════════════════
+# BUG-077 root cause: propose_action() cross-checks requires_approval
+# against tool_registry.needs_approval() — fail-closed, caller cannot
+# under-declare it for a tool the registry marks as requiring approval.
+# ══════════════════════════════════════════════════
+print("\n── BUG-077: propose_action() overrides caller-declared requires_approval ──")
+
+gw_bug077 = _make_gw()
+r_override = gw_bug077.propose_action(
+    tenant_id="boss_hq", canonical_user_id="boss_hq:user_bug077a",
+    tool_name="sheets_append",  # registry: requires_approval=True
+    tool_inputs={"spreadsheet_name": "Sales", "row": "test"},
+    origin_channel="telegram", origin_chat_id="tg:bug077a",
+    requires_approval=False,  # caller under-declares
+)
+contract_override = gw_bug077.find_contract(r_override.contract_id)
+chk("BUG-077: contract forced to pending when registry requires approval",
+    contract_override.status == "pending")
+chk("BUG-077: contract.requires_approval overridden to True",
+    contract_override.requires_approval is True)
+
+gw_bug077b = _make_gw()
+r_match = gw_bug077b.propose_action(
+    tenant_id="boss_hq", canonical_user_id="boss_hq:user_bug077b",
+    tool_name="sheets_append",
+    tool_inputs={"spreadsheet_name": "Sales", "row": "test2"},
+    origin_channel="telegram", origin_chat_id="tg:bug077b",
+    requires_approval=True,  # caller correctly declares — no change expected
+)
+contract_match = gw_bug077b.find_contract(r_match.contract_id)
+chk("BUG-077: no behavior change when caller already declares True",
+    contract_match.status == "pending")
+
+gw_bug077c = _make_gw()
+r_noop = gw_bug077c.propose_action(
+    tenant_id="boss_hq", canonical_user_id="boss_hq:user_bug077c",
+    tool_name="airtable_get",  # registry: requires_approval not set (False)
+    tool_inputs={"table": "Leads"},
+    origin_channel="telegram", origin_chat_id="tg:bug077c",
+    requires_approval=False,
+)
+contract_noop = gw_bug077c.find_contract(r_noop.contract_id)
+chk("BUG-077: no override for a tool the registry does NOT require approval for",
+    contract_noop.status == "approved")
+
+
+# ══════════════════════════════════════════════════
 print(f"\n{'='*50}")
 print(f"Action Gateway tests: {passed} passed, {failed} failed")
 sys.exit(0 if failed == 0 else 1)
