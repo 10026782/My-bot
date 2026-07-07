@@ -348,7 +348,7 @@ def _save_to_business_memory(
         fields = {
             BMF.TITLE:       title,
             BMF.DESCRIPTION: raw_text,
-            BMF.DATE:        datetime.now(ZoneInfo("Asia/Jerusalem")).isoformat(),
+            BMF.DATE:        datetime.now(ZoneInfo("Asia/Jerusalem")).date().isoformat(),
             BMF.EVENT_TYPE:  entry_type,   # ערך חוקי: Decision|Milestone|Crisis|Announcement|Learning|Other
             BMF.TAGS:        [domain],     # multi-select — חייב להיות list
             BMF.IMPACT:      "Manual Entry",
