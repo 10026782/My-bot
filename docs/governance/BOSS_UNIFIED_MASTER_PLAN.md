@@ -67,7 +67,7 @@
 | `ROADMAP.md` | C/N/F ליבה + באגים | H0 | ראה Current Execution Status בקובץ עצמו | ראה טבלת Next Actions שם |
 | Approval Policy Single Source (F52→C83) | Core/Security | H0 | ✅ C83 סגור ומאומת — `event_bus.ACTIONS_REQUIRING_APPROVAL` הוא alias טהור ל-`tool_registry.TOOLS_REQUIRING_APPROVAL`, לא רשימה עצמאית (ר' ROADMAP.md §C83). **BUG-077** (אומת מחדש באותה בדיקה, לא נפתח כפול): 🟡 **חלקית תוקן** 06/07/2026 — התסמין החי (Tier 3, `_handle_mixed_batch` כתב לידים ללא שום בדיקת `FEATURE_AUTO_CAPTURE`/ליד-קיים) נסגר ב-`core/lead_candidate_handler.py` (שער `_should_auto_write()` משותף ל-3 ה-Tiers) + `test_bug077_tier3_auto_capture_gate.py` (5/5), **קוד בלבד — טרם ממוזג/נפרס/מאומת בפרוד**. ה-root cause הארכיטקטוני (`propose_action()` ב-`action_gateway.py` עדיין לא מאמת `requires_approval` מול `tool_registry`) **נשאר פתוח במכוון** — SPEC המקורי הגביל את ההיקף לקובץ אחד. | 1) למזג את הענף ולאמת בפרוד. 2) להחליט אם/מתי לתקן גם את ה-root cause ב-`action_gateway.py:propose_action()` (לפני שורה 468) — ראה `BUG_AUDIT_LOG.md` BUG-077 לפרטים המלאים. |
 | `BOSS_Marketing_Execution_Map.md` | Revenue Execution | H1-H2, H5 | גל 1 (הפעלת הלולאה הקיימת) — טרם אומת בפרוד | להדליק `LEAD_CAPTURE=true` ולאמת (זהה ל-H1.1) |
-| Decision Hub | Trust/Decision loop | H3 | Stage 0-1 merged, flag off, לא verified | לבדוק BUG-DH-03/04 בקוד לפני כל activation (§9) |
+| Decision Hub | Trust/Decision loop | H3 | Stage 0-1 merged, flag off, לא verified. **BUG-DH-03/04** (formula injection) 🟡 תוקן בקוד 07/07/2026 (`tools/airtable_gateway._safe_formula_param()`, `cmd_decision.py`/`decision_pipeline.py`, `test_bugdh03_04_formula_injection.py` 15/15) — טרם ממוזג/מאומת בפרוד, ר' BUG_AUDIT_LOG.md BUG-036/BUG-037 | לא להפעיל `FEATURE_DECISION_HUB` עד שהתיקון ממוזג + מאומת בפרוד (לא מספיק שהקוד "בענף") |
 | Media Layer (F16) | Media/Context loop | H4 | קוד ממוזג, flag off | ליצור טבלת Media Files ידנית |
 | Tasks/Deadlines/Roadmap_Tasks איחוד | Data model | — | בעבודה בפועל (לא סגור) | לעדכן כאן כשנסגר |
 | Command Center / Knowledge Hub | Product UI loop | H6 | טרם התחיל | תלוי ב-H1-H2 יציבים |
@@ -96,7 +96,7 @@
 - H0.2 לנקות סטטוסים שגויים (✅→🟡 בלי evidence)
 - H0.3 לאמת Deployment/flags
 - H0.4 לסגור קונפליקטים פתוחים:
-  - `[ROADMAP: BUG-DH-03/04]` Formula injection — **סטטוס לא מאומת מחדש, טעון בדיקת קוד**
+  - `[ROADMAP: BUG-DH-03/04]` Formula injection — 🟡 **תוקן בקוד 07/07/2026** (`_safe_formula_param()`), **טרם ממוזג/מאומת בפרוד** — ר' BUG_AUDIT_LOG.md BUG-036/BUG-037
   - **C59/C60 ID collision** — טעון תיעוד mapping, לא בוצע עדיין
   - C60 Tool Context Awareness — merge או freeze, טרם הוכרע
   - `[ROADMAP: F12/F13]` — **סגור בשלושה מסמכים בעקביות** (Continuation, Unified Plan, ROADMAP) — נותר רק לרשום את ההחלטה בפועל ב-ROADMAP.md ולסגור
@@ -110,7 +110,7 @@
 
 ### Horizon 3 — Decision Hub Owner-Only
 H3.1 מצב קיים (Stage 0/0.5/0.6 merged flag-off; Stage 1 Trust Layer merged not-verified; Stages 2-4 לא התחילו)
-H3.2 לפני הדלקה: Airtable fields, multi-select, Source Reliability UI, owner-only test, **+ אימות ש-BUG-DH-03/04 אכן תוקן (לא נבדק כאן)**
+H3.2 לפני הדלקה: Airtable fields, multi-select, Source Reliability UI, owner-only test, **+ מיזוג/אימות בפרוד של תיקון BUG-DH-03/04 (קוד קיים בענף, ר' BUG_AUDIT_LOG.md BUG-036/BUG-037 — עדיין לא מספיק להדלקה)**
 H3.3 החלטת C60
 
 ### Horizon 4 — Media Layer Enablement
@@ -156,7 +156,7 @@ C-CORE-01 lead_memory Persistence · C-CORE-02 Airtable Write Queue (תלוי V3
 
 | # | פער | דורש |
 |---|---|---|
-| 1 | BUG-DH-03/04 עדיין קיים? | קריאת `cmd_decision.py`/`decision_pipeline.py` |
+| 1 | ~~BUG-DH-03/04 עדיין קיים?~~ נבדק 07/07/2026 — היה קיים, תוקן בקוד (`_safe_formula_param()`), טרם ממוזג/מאומת בפרוד | מיזוג + production evidence לפני סגירה מלאה |
 | 2 | C59/C60 mapping מתועד? | קריאת קוד/היסטוריית ROADMAP |
 | 3 | CLAUDE.md מבטא Rule 14/16 בפועל? | העלאת הקובץ |
 
