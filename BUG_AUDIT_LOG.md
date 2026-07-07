@@ -592,19 +592,25 @@
 - **שורש:** strings עבריים hard-coded במקום קבועי schema
 - **סטטוס:** 🟡 מתועד ב-drift map, לא קריטי — לא תוקן עדיין
 
-### BUG-036 (BUG-DH-03) — formula injection ב-`_resolve_decision_ref`
-- **תאריך:** 30/06/2026
+### BUG-036 (BUG-DH-03) — formula injection ב-`_resolve_decision_ref` — ✅ תוקן 07/07/2026
+- **תאריך:** 30/06/2026 (דווח) → 07/07/2026 (תוקן)
 - **קובץ:** `cmd_decision.py`
 - **שורש:** `FIND('{ref}', ...)` ללא sanitization על `ref` מגיע מ-user input
-- **תיקון נדרש:** `_safe_formula_param` לפני הכנסה ל-formula
-- **סטטוס:** 🔴 פתוח — עדיפות גבוהה | חסום לפני הפעלת `FEATURE_DECISION_HUB` בפרודקשן
+- **תיקון (✅ בוצע):** נוסף `tools.airtable_gateway._safe_formula_param()` — helper משותף אחד, `_resolve_decision_ref()` מעביר את `ref` דרכו לפני הכנסה ל-formula. אותו helper משמש גם לתיקון BUG-037 ול-`core/lead_candidate_handler.py::_search_formulas` (שכבר עשה escaping דומה inline — הוחלף במקור המשותף).
+- **בדיקה:** `test_bugdh03_04_formula_injection.py` (חדש, 15/15) — כולל בדיקת injection ייעודית ל-`_resolve_decision_ref` (`ref="test' OR 1=1 --"` → כל `'` בקלט נשמר escaped בפורמולה שנבנתה, לא נשאר raw).
+- **Merged:** לא — ענף `claude/tool-approval-metadata-mi89lu`, commit `2e9bb57`.
+- **Deployed:** לא. **Verified בפרודקשן:** לא.
+- **סטטוס:** 🟡 CODE DONE, NOT VERIFIED — עדיין חוסם הפעלת `FEATURE_DECISION_HUB` עד מיזוג+production evidence (עקבי עם הכלל בראש הקובץ; לא לסמן ✅ מלא עד אז).
 
-### BUG-037 (BUG-DH-04) — formula injection ב-`maybe_supersede`
-- **תאריך:** 30/06/2026
+### BUG-037 (BUG-DH-04) — formula injection ב-`maybe_supersede` — ✅ תוקן 07/07/2026
+- **תאריך:** 30/06/2026 (דווח) → 07/07/2026 (תוקן)
 - **קובץ:** `decision_pipeline.py`
-- **שורש:** Claim Topic מגיע מ-raw content ויכול לשבור Airtable formula
-- **תיקון נדרש:** `_safe_formula_param` על Claim Topic לפני הכנסה
-- **סטטוס:** 🔴 פתוח — עדיפות גבוהה | חסום לפני הפעלת `FEATURE_DECISION_HUB` בפרודקשן
+- **שורש:** Claim Topic (וגם Decision ID) מגיעים ל-formula ללא escaping ויכולים לשבור Airtable formula
+- **תיקון (✅ בוצע):** `maybe_supersede()` מעביר גם את `decision_id` וגם את `new_event["Claim Topic"]` דרך `tools.airtable_gateway._safe_formula_param()` לפני בניית ה-`AND(...)` formula. (הבהרה: `decision_ports.py`'s `StoragePort.get()` הוא רק passthrough דק ל-`filterByFormula` — הבנייה עצמה תמיד הייתה ב-`decision_pipeline.py`, לא ב-`decision_ports.py`.)
+- **בדיקה:** `test_bugdh03_04_formula_injection.py` (חדש, 15/15) — `maybe_supersede()` עם `decision_id`/Claim Topic זדוניים, מוודא escaping מלא בפורמולה שנבנתה בפועל דרך `StoragePort.get()` מדומה.
+- **Merged:** לא — ענף `claude/tool-approval-metadata-mi89lu`, commit `2e9bb57`.
+- **Deployed:** לא. **Verified בפרודקשן:** לא.
+- **סטטוס:** 🟡 CODE DONE, NOT VERIFIED — עדיין חוסם הפעלת `FEATURE_DECISION_HUB` עד מיזוג+production evidence.
 
 ### BUG-038 (BUG-DH-05) — COG מקבל domain ישן (domain drift)
 - **תאריך:** 30/06/2026

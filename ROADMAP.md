@@ -1,6 +1,7 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 06/07/2026 — C83 (Single Policy Source: הפרדת requires_approval מ-blocked_by_emergency) נסגר: מאומת בקוד ש-`event_bus.ACTIONS_REQUIRING_APPROVAL` הוא alias טהור ל-`tool_registry.TOOLS_REQUIRING_APPROVAL`, לא רשימה עצמאית סותרת. אותה בדיקה אימתה מחדש (לא פתחה חדש) את BUG-077 הקיים (`core/action_gateway.py`/`propose_action()`) — ראה BUG_AUDIT_LOG.md ו-`docs/governance/BOSS_UNIFIED_MASTER_PLAN.md` §3.5/§7.
+עודכן: 07/07/2026 — BUG-DH-03/04 (Formula Injection ב-Decision Hub) תוקן בקוד: `_safe_formula_param()` נוסף ל-`tools/airtable_gateway.py`, מיושם ב-`cmd_decision.py::_resolve_decision_ref`, `decision_pipeline.py::maybe_supersede`, ו-`core/lead_candidate_handler.py::_search_formulas`. עדיין 🟡 CODE DONE, NOT VERIFIED — לא ממוזג, `FEATURE_DECISION_HUB` נשאר חסום עד production evidence. ראה BUG_AUDIT_LOG.md BUG-036/BUG-037 וסעיף BUG-DH-03/04 למטה.
+עודכן קודם: 06/07/2026 — C83 (Single Policy Source: הפרדת requires_approval מ-blocked_by_emergency) נסגר: מאומת בקוד ש-`event_bus.ACTIONS_REQUIRING_APPROVAL` הוא alias טהור ל-`tool_registry.TOOLS_REQUIRING_APPROVAL`, לא רשימה עצמאית סותרת. אותה בדיקה אימתה מחדש (לא פתחה חדש) את BUG-077 הקיים (`core/action_gateway.py`/`propose_action()`) — ראה BUG_AUDIT_LOG.md ו-`docs/governance/BOSS_UNIFIED_MASTER_PLAN.md` §3.5/§7.
 עודכן קודם: 05/07/2026 — ניקוי doc-drift: כמה "חסמים"/"PARTIAL" ב-ROADMAP היו סטטוס תיעודי ישן שסתר סעיפים מעודכנים יותר באותו קובץ, לא חסם אמיתי בקוד. תוקן: (1) C91/C92 סומנו "לא חסום על C89" (C89 סגור 05/07) — C93 נשאר חסום, אך על צבירת AgentObservation data, לא על C89. (2) F09/F10/F11 עודכנו — F10 היה כפול/vestige ל-N02/N03 שכבר מיושמים (lead_memory כבר מחובר בפועל), F11 כבר לא "MVP חסר" (N04+N05-B מיושמים), F09 נשאר החלטת-מוצר לא חסם-טכני. (3) "פערים ידועים" table עודכן בהתאם, שורת F10 הוסרה (מיושן/כפול). (4) F12/F13 קיבלו הבהרה מפורשת: חוסמים רק multi-tenant/SaaS provider-abstraction עתידי, לא שום עבודה שוטפת. (5) בלוק Audit ישן (14/06/2026) שטען N02-N05 "PARTIAL" סומן במפורש כהיסטורי/מוחלף — לא נמחק (evidence), אבל לא עוד קריא כסטטוס נוכחי. Decision Hub (BUG-DH-03/04) ו-N05-C (Meta outbound) נשארים חסמים אמיתיים — לא שונו.
 עודכן קודם: 05/07/2026 — C94 production verification הושלם 4/5 ע"י הבעלים: Telegram+WhatsApp+File(xlsx/csv, נבדק זמנית עם flag ON, הוחזר ל-OFF)+Render commit hash (`41f3305`) — כולם ✅. הפריט היחיד שנשאר (חריגת classify_ingress) נשאר לא-נבדק live בכוונה. ראה סעיף C94 למטה.
 עודכן קודם: 05/07/2026 — BUG-070 gap #1 (מתוך 3) נסגר: `core/action_gateway.py` מקבל `route_combined_word()`/`_parse_combined()` — מפרש "כן 1"/"אשר 3" (אישור ממוקד, סוגר siblings כמו `route_disambiguation`) ו-"לא 2" (דחייה ממוקדת — נשארת gap חדשה: reject-by-index לא היה קיים בכלל קודם, לא רק ניסוח). מחווט ב-`app.py` *לפני* בדיקת ה-disambiguation הרגילה (כדי לא לנקות בטעות state ישן) ולפני `_CONFIRM_WORDS`/`_CANCEL_WORDS`. `test_bug070_combined_wording.py` (חדש, 27/27). gap #2 כבר נסגר קודם (ראה עודכן קודם 05/07). **gap #3 (daily_collector numbered-reply ללא backend) ו-BUG-058 (Tier-2 batch-confirm resolver) נשארים פתוחים במכוון** — gap #3 קיבל רק תיקון מינימלי (הוסרה ההבטחה המטעה "ענה במספר" מ-`daily_collector.py`, ללא בניית backend); BUG-058 נשאר תיעוד-בלבד כפי שתועד ב-03/07 (דורש עיצוב precedence לפני קוד). ראה BUG_AUDIT_LOG.md BUG-070.
@@ -667,7 +668,7 @@ Pull-only reasoning engine. `run()` מחבר Stages 1→2→4→6. `RequestState
 **מצב:** EXISTS_UNWIRED — `append_reasoning_block()` נקרא רק מ-`cmd_decision.py._format_decision_card()` כ-fallback (F22-WIRE, PR #177), `run()` ו-`core.adapters.leads_adapter` טרם חוברו לpipeline חי.
 
 **Quality Gate 30/06/2026:** 5 בעיות נמצאו. 2 תוקנו (missing_penalty + domain drift).
-2 formula injection פתוחים (BUG-DH-03/04) — עדיפות גבוהה לפני הפעלת `FEATURE_DECISION_HUB`.
+2 formula injection (BUG-DH-03/04) — תוקנו בקוד 07/07/2026 (🟡 לא ממוזג/מאומת עדיין), ראה סעיף BUG-DH-03/04 למטה — עדיפות גבוהה לפני הפעלת `FEATURE_DECISION_HUB`.
 2 xfail מתועדים (`domain_rules`, `lead_score`) — design decisions.
 Stage 6 Orchestrator מוזג. CI ירוק ✅.
 
@@ -1039,11 +1040,11 @@ scope: **infrastructure only — אפס שינוי runtime behavior** בשלב �
 
 ---
 
-### BUG-DH-03/04 — Formula Injection ב-Decision Hub 🔴 HIGH (פתוח)
+### BUG-DH-03/04 — Formula Injection ב-Decision Hub 🟡 CODE DONE, NOT VERIFIED (07/07/2026)
 **קבצים:** `cmd_decision.py` (`_resolve_decision_ref`), `decision_pipeline.py` (`maybe_supersede`)
 **מה:** Claim Topic + decision ref מגיעים מ-raw user content ללא sanitization לפני הכנסה ל-formula Airtable
-**חסום:** לפני הפעלת `FEATURE_DECISION_HUB` בפרודקשן
-**תיקון:** `_safe_formula_param()` לפני כל הכנסה לformula Airtable
+**חסום:** לפני הפעלת `FEATURE_DECISION_HUB` בפרודקשן — **עדיין חסום** עד מיזוג ל-main + production evidence
+**תיקון (✅ בוצע בקוד, לא ממוזג):** `_safe_formula_param()` נוסף ל-`tools/airtable_gateway.py`, שני call sites + `core/lead_candidate_handler.py::_search_formulas` (שכבר עשה escaping דומה, הוחלף במקור המשותף) מעודכנים. בדיקה: `test_bugdh03_04_formula_injection.py` (15/15). ענף `claude/tool-approval-metadata-mi89lu`, commit `2e9bb57`.
 **ראו:** BUG_AUDIT_LOG.md BUG-036, BUG-037
 
 ---
