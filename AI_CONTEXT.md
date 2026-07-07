@@ -1,12 +1,64 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-07-07 (מאוחר ביותר) — BUG-077 root cause נסגר (לא רק התסמין): `propose_action()` מאמת כעת `requires_approval` מול `tool_registry.needs_approval()`, פרט ל-self_confirm carve-out. יישום ראשוני נאיבי שבר 2 טסטים קיימים (BUG-076 self_confirm) — תוקן לפני push, כולל תיקון נלווה ל-`_write_one_lead()`. ראה 0.23. 🟡 קוד מוכן, טרם ממוזג. קודם: (1) doc-drift תוקן — C60 היה מתועד כאן כ"לא ממוזג" בזמן שכבר מוזג (PR #152), ראה 0.19. (2) C83 (Single Policy Source) סגור, ראה 0.22. (3) BUG-DH-03/04 (Formula Injection) תוקן, ראה 0.20. שלושתם **מוזגים ל-main** (PR #249/#251), **לא מאומתים בפרודקשן**.
-**עודכן על ידי:** Claude Code — BUG-077 root-cause fix (2 קבצים, קוד+טסט, טרם ממוזג), ראה 0.23 למטה
+**עודכן:** 2026-07-07 (מאוחר ביותר עוד) — BUG-078/079/080/081: שרשרת תיקוני `/update`+Business Memory. BUG-078/079 סוגרים bypass כפול ב-`app.py`'s webhook (photo/document וגם טקסט חופשי היו מדלגים על ה-pending state של `/update` ובורחים לזרימה הכללית). BUG-080 מתקן 7 נקודות כתיבה ששלחו `datetime` מלא לשדות Date-בלבד ב-Airtable (422). BUG-081 מוסיף שדה `Domain` ייעודי ל-Business Memory במקום למחזר אותו לתוך `Tags` — כולל 2 סבבי תיקון נוספים על בסיס production evidence (`real_estate` lowercase לא היה option קיים יותר, גם ב-Domain וגם ב-Tags). כל 4 ה-BUGs **מוזגים ל-main** (PR #255/#256/#258/#259/#260/#261), **לא מאומתים בפרודקשן**. ראה 0.24-0.28. גם: C99 — חילוץ טקסט ממסמך שנשלח באמצע `/update` (PR #257, לא באג — feature). BUG-077 root cause (הרישום הקודם כאן) התברר כבר **מוזג בפועל** (PR #254, `07caf9d`) — הרישום הקודם ("טרם ממוזג") היה stale, תוקן.
+**עודכן על ידי:** Claude Code — 5 PRs נוספים (255-261 חוץ מ-254 שכבר היה קיים), תיעוד ב-0.24-0.28 למטה
 
 > מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (תוקן 06/07 — ראה 0.17) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
 
 ---
+
+## 0.28 BUG-081 — Business Memory `Domain` נכתב לשדה הייעודי, לא ממוחזר לתוך `Tags` — 2026-07-07 (קרא לפני 0.27)
+
+**מה תוקן:** `BusinessMemoryFields` לא היה לה שדה `Domain` (בניגוד לכל טבלה אחרת בסכימה) — `cmd_update.py`/`media_handler.py` כתבו domain key גולמי (`"media"` וכו') ישירות ל-`Tags` הכללי, בלי אימות מול live options; אין `typecast=true` בגייטוויי → 422 `INVALID_MULTIPLE_CHOICE_OPTIONS` על ערך לא-קיים. תוקן ב-3 שלבים: (1, PR #259) נוסף `BusinessMemoryFields.DOMAIN` + `cmd_update.normalize_business_memory_fields()` — ממפה domain→ערך Domain מאומת, מסננת `Tags` לערכים חוקיים. (2, PR #260) — production evidence הראה ש-`_DOMAIN_TO_AIRTABLE["real_estate"]` מופה בטעות ל-lowercase (option שנמחק בניקוי Airtable); תוקן ל-`"Real Estate"` (Title Case, היחיד שנשאר). (3, PR #261, 2 commits) — 422 חי **נוסף** אחרי שלב 2: `_VALID_TAGS` עדיין הכיל `"real_estate"` lowercase כ-tag עצמאי; הוסר (עצר 422, אבל הפיק `Tags` ריק), ואז נוסף `_TAG_NORMALIZE` כדי ש-`domain="real_estate"` יפיק `Domain="Real Estate"` **וגם** `Tags=["Real Estate"]`.
+
+**בדיקה:** `smoke_tests.py` ירוק בכל שלב, `test_integration.py` 4/4, `core/router/test_router.py` 44/44 (שלב 1) + טסטים ידניים ממוקדים בכל שלב, מאומתים מול production log אמיתי (422 שנצפה בפועל).
+
+**פער ידוע, backlog:** `weekly_summary.py::_group_by_domain()` ו-`tma_api.py`'s Business Memory listing עדיין קוראים `Tags[0]` כ-domain — ישברו בשקט (default general/ריק) עם רשומות חדשות. אף אחד מהשניים לא בשימוש פעיל כרגע (`FEATURE_WEEKLY_SUMMARY` כבוי, TMA business memory screen לא בשימוש) — piggyback-trigger כשמישהו מהם יופעל.
+
+**Merged:** ✅ כן — `main` `50847b7`/`0094a82`/`fa08a58` (PR #259/#260/#261). **Deployed/Verified בפרודקשן:** לא.
+
+**סטטוס:** ✅ תוקן ומוזג ל-main — **לא** מאומת עדיין ב-production. ראה `BUG_AUDIT_LOG.md` BUG-081, `CHANGE_CONTROL_LOG.md` C101.
+
+## 0.27 BUG-080 — שדות Date-בלבד ב-Airtable מקבלים `.date().isoformat()`, לא `datetime` מלא — 2026-07-07 (קרא לפני 0.26)
+
+**מה תוקן:** `BusinessMemoryFields.DATE`/`DecisionEventFields.EVENT_DATE`/`DecisionInboxFields.RECEIVED` הם שדות `Date` בלבד ב-Airtable (`datetime_fields: []`, אומת מול live field-type metadata) — 7 נקודות כתיבה (`cmd_update.py`, `media_handler.py`, `cmd_decision.py` ×5) שלחו `datetime.now(ZoneInfo("Asia/Jerusalem")).isoformat()` (עם שעה/מיקרושניות/offset), נדחות ב-422. שונה ל-`.date().isoformat()` בכל 7 המקומות. 2 מקומות דומים (`FileUploadResult(timestamp=...)` — session_store בזיכרון) ו-1 שימוש read-only נבדקו ונשארו בכוונה ללא שינוי.
+
+**בדיקה:** `smoke_tests.py`/`test_integration.py` (4/4)/`core/router/test_router.py` (44/44)/`test_decision_attention.py` (11/11)/`test_core_reasoning.py` (59/59) ירוקים, `grep` מאמת בדיוק 7 מקומות שונו.
+
+**Merged:** ✅ כן — `main` `a8ffa07` (PR #258, commit `02bc343`). **Deployed/Verified בפרודקשן:** לא.
+
+**סטטוס:** ✅ תוקן ומוזג ל-main — **לא** מאומת עדיין ב-production. ראה `BUG_AUDIT_LOG.md` BUG-080, `CHANGE_CONTROL_LOG.md` C100.
+
+## 0.26 C99 — חילוץ טקסט ממסמך שנשלח באמצע `/update` — 2026-07-07 (קרא לפני 0.25)
+
+**מה נוסף (feature, לא באג):** מסמכים שנתפסו ע"י `capture_photo_or_document` (0.25/0.24 למטה) נשמרו רק עם caption+drive_url — התוכן עצמו מעולם לא נקרא. `media_handler.extract_text_if_document(file_bytes, mime_type)` עוטף את `document_converter.convert_document()` הקיים (temp-file+ניקוי+טיפול כשלים בפנים, פורמט לא-נתמך/כשל→`None`). `capture_photo_or_document` קורא לזה עבור document, משלב את הטקסט שחולץ ל-`raw_text` לצד caption+drive_url. אין שינוי ל-API הציבורי של `document_converter`.
+
+**בדיקה:** `smoke_tests.py`/`test_integration.py` (4/4)/`core/router/test_router.py` (44/44)/`test_document_converter.py` (6/6) ירוקים + טסטים ידניים (mime לא-נתמך→`None`, txt→טקסט, docx פגום→`None` בלי exception, אין קבצים זמניים שנשארים).
+
+**Merged:** ✅ כן — `main` `caef337` (PR #257, commit `3d69609`). **Deployed/Verified בפרודקשן:** לא.
+
+**סטטוס:** ✅ תוקן ומוזג ל-main — **לא** מאומת עדיין ב-production. ראה `CHANGE_CONTROL_LOG.md` C99.
+
+## 0.25 BUG-079 — `/update` שלב הטקסט החופשי מגיע ל-`capture_text`, לא בורח ל-`run_agent` — 2026-07-07 (קרא לפני 0.24)
+
+**מה תוקן:** `app.py`'s webhook קורא ל-`bot.process_new_updates()` (מפעיל `capture_text` ודומיו) רק כש-`text.startswith("/")` — טקסט חופשי במהלך `/update` המשיך ל-`idempotency.is_duplicate()` ואז ל-`run_agent()` הכללי, `capture_text` אף פעם לא רץ. פגם בתרחיש הראשי של `/update`, לא edge-case — שבור מאז ש-C20 נוסף. נוסף `cmd_update.has_pending_text_capture()`, נבדק ב-`app.py` לפני idempotency (fail-open) — מפעיל `process_new_updates()` בעצמו כש-`/update` ממתין בשלב `text`.
+
+**בדיקה:** `smoke_tests.py`/`test_integration.py` (4/4)/`core/router/test_router.py` (44/44) ירוקים + טסט ידני מבודד על מעברי שלב.
+
+**Merged:** ✅ כן — `main` `baa0283` (PR #256, commit `912b94e`). **Deployed/Verified בפרודקשן:** לא.
+
+**סטטוס:** ✅ תוקן ומוזג ל-main — **לא** מאומת עדיין ב-production. ראה `BUG_AUDIT_LOG.md` BUG-079, `CHANGE_CONTROL_LOG.md` C98.
+
+## 0.24 BUG-078 — `/update` תופס קובץ מצורף (photo/document) במקום לאבד אותו — 2026-07-07 (קרא לפני 0.23)
+
+**מה תוקן:** `app.py`'s webhook ניתב photo/document ישירות ל-`_handle_telegram_media()` (Drive הכללי) לפני שקרא בכלל ל-`bot.process_new_updates()` — `/update`'s pending state לא נבדק, קובץ שנשלח באמצע האשף אבד לגמרי מהקשר העסקי. נוספו `cmd_update.has_pending_file_capture()`/`capture_photo_or_document()`, נבדקים לפני `_handle_telegram_media` — קובץ נתפס, מועלה ל-Drive (best-effort), נשמר ל-Business Memory עם domain/entry_type שכבר נבחרו.
+
+**בדיקה:** `smoke_tests.py`/`test_integration.py` (4/4)/`core/router/test_router.py` (44/44) ירוקים + טסט ידני ממוקד (mock bot+identity).
+
+**Merged:** ✅ כן — `main` `194b3da` (PR #255, commit `32bbb75`). **Deployed/Verified בפרודקשן:** לא.
+
+**סטטוס:** ✅ תוקן ומוזג ל-main — **לא** מאומת עדיין ב-production. ראה `BUG_AUDIT_LOG.md` BUG-078, `CHANGE_CONTROL_LOG.md` C97.
 
 ## 0.23 BUG-077 root cause נסגר — `propose_action()` מאמת מול `tool_registry.needs_approval()`, פרט ל-self_confirm — 2026-07-07 (קרא לפני 0.22)
 
