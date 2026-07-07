@@ -2523,6 +2523,18 @@ def _webhook_telegram_impl():
 
     # F16 — Media Layer: voice notes / photo / document uploads
     if update.message and update.message.content_type in ("voice", "photo", "document"):
+        # C20 — an /update session waiting on its free-text step must claim
+        # the next photo/document itself; otherwise it silently falls
+        # through to the generic Drive-upload flow below and the pending
+        # state is orphaned until its TTL expires (see cmd_update.py).
+        if update.message.content_type in ("photo", "document"):
+            try:
+                from cmd_update import has_pending_file_capture, capture_photo_or_document
+                if has_pending_file_capture(str(update.message.from_user.id)):
+                    capture_photo_or_document(bot, update.message, resolve_identity)
+                    return "", 200
+            except Exception as e:
+                logger.error(f"[/update] file capture routing failed: {e}", exc_info=True)
         _handle_telegram_media(update.message)
         return "", 200
 
