@@ -354,9 +354,9 @@ _VALID_TAGS = {
 
 # מיפוי domain-key (מה-DOMAINS tuple הפנימי) → ערך Airtable חוקי
 _DOMAIN_TO_AIRTABLE = {
-    "real_estate": "Real Estate",   # תוקן — Title Case הוא היחיד שנשאר ב-Airtable
+    "real_estate": "Real Estate",   # Title Case הוא היחיד שנשאר ב-Airtable
     "import":      "Import",
-    "media":       "media",
+    "media":       "Media",         # תוקן — Title Case, לא lowercase
     "saas":        "SaaS",
     "finance":     "General",       # אין option ייעודי — נופל ל-General, עם warning
     "general":     "General",
@@ -468,10 +468,14 @@ def get_recent_business_context(domain: str = "general", limit: int = 5) -> str:
         from airtable_schema import Tables, BusinessMemoryFields as BMF
 
         if domain and domain != "general":
+            airtable_domain = _DOMAIN_TO_AIRTABLE.get(domain, "General")
             formula = (
                 f"OR("
-                f"FIND('{domain}',ARRAYJOIN({{{BMF.TAGS}}})),"
-                f"FIND('general',ARRAYJOIN({{{BMF.TAGS}}}))"
+                f"{{{BMF.DOMAIN}}}='{airtable_domain}',"
+                f"{{{BMF.DOMAIN}}}='General',"
+                # legacy fallback: records written before BUG-081 (Domain field
+                # didn't exist yet) have the raw domain key baked into Tags instead
+                f"FIND('{domain}',ARRAYJOIN({{{BMF.TAGS}}}))"
                 f")"
             )
         else:
