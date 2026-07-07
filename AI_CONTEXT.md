@@ -1,10 +1,60 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-07-06 (מאוחר ביותר) — BUG-072/074/075/076 **מוזגו ל-main** (PR #246, `e1436e9`), ראה 0.18/0.17 למטה. קודם: C94 production verification הושלם 4/5 — ראה 0.16 למטה.
-**עודכן על ידי:** Claude Code — 4 תיקוני קוד מוזגים ל-main (מאומת `git merge-base --is-ancestor` + grep על origin/main), עדיין **לא** מאומתים ב-production/Render, ראה 0.18/0.17 למטה
+**עודכן:** 2026-07-07 (מאוחר ביותר) — 4 עדכונים: (1) doc-drift תוקן — C60 היה מתועד כאן כ"לא ממוזג" בזמן שכבר מוזג (PR #152), אומת עצמאית (`git merge-base --is-ancestor`), ראה 0.19. (2) C83 (Single Policy Source) סגור, ראה 0.22. (3) BUG-077 (Tier 3 auto-write gate) תוקן חלקית — root cause נשאר פתוח במכוון, ראה 0.21. (4) BUG-DH-03/04 (Formula Injection) תוקן, ראה 0.20. כל ה-3 האחרונים **מוזגים ל-main** (PR #249/#250/#251), **לא מאומתים בפרודקשן**. קודם: BUG-072/074/075/076 **מוזגו ל-main** (PR #246, `e1436e9`), ראה 0.18/0.17 למטה.
+**עודכן על ידי:** Claude Code — 3 תיקוני קוד + 1 doc-drift fix, כולם מוזגים ל-main (מאומת `git merge-base --is-ancestor` + GitHub PR state), עדיין **לא** מאומתים ב-production/Render, ראה 0.22/0.21/0.20/0.19 למטה
 
 > מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (תוקן 06/07 — ראה 0.17) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
+
+---
+
+## 0.22 C83 — Single Policy Source סגור: `event_bus.ACTIONS_REQUIRING_APPROVAL` הוא alias ל-`tool_registry`, לא רשימה עצמאית — 2026-07-06 (קרא לפני 0.21)
+
+**מה נסגר:** `ROADMAP.md` §C83 עבר מ-🔴 דחוף ל-✅ סגור. אומת בקוד: `event_bus.py:187-188` — `from tool_registry import TOOLS_REQUIRING_APPROVAL; ACTIONS_REQUIRING_APPROVAL = TOOLS_REQUIRING_APPROVAL` — כלומר אין שתי רשימות סותרות, יש alias טהור אחד למקור אחד. `test_c83_single_policy_source.py` (קיים) 3/3 עובר.
+
+**תוצר לוואי חשוב — אותה בדיקה חשפה מחדש (לא פתחה) את BUG-077:** `propose_action()` ב-`core/action_gateway.py` עדיין סומך על `requires_approval` שמצהיר הקורא בלי לאמת מול `tool_registry.get_tool_meta()`. **תיקון לניסוח ראשוני שגוי בתוך אותה בדיקה:** הועלתה השערה ש-BUG-077 "לא חי" כי `FEATURE_AUTO_CAPTURE=false` — ההשערה נמצאה **שגויה בקוד**: Tier 3 (`_handle_mixed_batch`, `core/lead_candidate_handler.py`) קרא ל-`_write_one_lead` ללא שום בדיקת flag כלל — חי בפרודקשן היום, לא תלוי בדגל. ראו 0.21 למטה לתיקון בפועל.
+
+**Merged:** ✅ כן — `main` `6f7062c` (PR #249, C83+merge master plan docs). **Deployed/Verified בפרודקשן:** לא נבדק.
+
+**Docs:** `ROADMAP.md` §C83, `BUG_AUDIT_LOG.md` BUG-077 (addendum, לא רשומה כפולה), `docs/governance/BOSS_UNIFIED_MASTER_PLAN.md` (מסמך מאוחד חדש, ממזג `BOSS_ROADMAP_CONTINUATION.md`+`BOSS_UNIFIED_MASTER_PLAN_v2.md` שהועברו ל-`archive/`).
+
+## 0.21 BUG-077 (חלקית) — Tier 3 mixed-batch מקבל את אותו auto-write gate כמו Tier 1/2 — 2026-07-06 (קרא לפני 0.20)
+
+**הבעיה שתוקנה:** `_handle_mixed_batch()` (Tier 3 lead dictation, `core/lead_candidate_handler.py`) קרא ל-`_write_one_lead()` ללא תנאי לכל candidate high-confidence — עוקף לגמרי את `FEATURE_AUTO_CAPTURE` וגם כותב עדכון ללִיד קיים בלי שלב אישור, בניגוד לכלל C89 (עדכון ליד קיים תמיד עובר אישור). חי בפרודקשן, ללא תלות בדגל.
+
+**מה תוקן:** פונקציה משותפת חדשה `_should_auto_write(auto_capture, existing_id)` — כתיבה אוטומטית רק ל-lead חדש לגמרי + auto_capture דלוק. Tier 1/2 עברו לשימוש בה (איחוד קוד, ללא שינוי התנהגות). Tier 3 קיבל את השער בפועל: `high`-confidence candidate נבדק מול `_should_auto_write()` לפני `_write_one_lead()`; אחרת עובר דרך `_propose_lead_write()` כמו Tier 1. כותרת סיכום ה-batch תוקנה גם היא — לא טוענת "X נשמרו" יותר כשבפועל רק נוצר contract ממתין.
+
+**מה *לא* תוקן (במכוון, scope מוגבל):** ה-root cause הארכיטקטוני — `propose_action()` עצמו (`core/action_gateway.py`) עדיין לא מאמת `requires_approval` מול `tool_registry.get_tool_meta()`. קורא עתידי אחר שיצהיר ערך שגוי עדיין לא ייתפס. SPEC המקורי (מאושר ע"י הבעלים) הגביל את ההיקף לקובץ `lead_candidate_handler.py` בלבד — זה נשאר backlog item נפרד (`C-CORE-05` ב-`docs/governance/BOSS_UNIFIED_MASTER_PLAN.md` §7).
+
+**בדיקה:** `test_bug077_tier3_auto_capture_gate.py` (חדש, 5/5). אפס רגרסיה: כל 50+ קבצי `test_*.py` ירוקים, `smoke_tests.py` ירוק, `compileall` נקי.
+
+**Merged:** ✅ כן — `main` (PR #250, commits `e1c0ea5`/`d3732cb`/`f0deee2`). **Deployed/Verified בפרודקשן:** לא.
+
+**סטטוס:** 🟡 CODE DONE, MERGED, NOT PRODUCTION-VERIFIED — התסמין החי (Tier 3) סגור ובדוק; ה-root cause הארכיטקטוני נשאר 🟡 OPEN בנפרד (`BUG_AUDIT_LOG.md` BUG-077).
+
+## 0.20 BUG-DH-03/04 — Formula Injection ב-Decision Hub תוקן: `_safe_formula_param()` — 2026-07-07 (קרא לפני 0.19)
+
+**הבעיה שתוקנה:** Airtable formula strings משתמשים ב-`'` כתוחם מחרוזת. שלושה call sites הזריקו טקסט מבוקר-משתמש ל-`filterByFormula` דרך f-string גולמי, מאפשרים ל-`'` לשבור את גבול המחרוזת ולהזריק לוגיקת formula: `cmd_decision.py::_resolve_decision_ref` (ref), `decision_pipeline.py::maybe_supersede` (decision_id, Claim Topic — **תיקון לתפיסה שגויה שנבדקה בתחילת אותו סשן:** הקוד הרלוונטי ב-`decision_pipeline.py`, לא ב-`decision_ports.py` — `StoragePort.get()` שם הוא רק passthrough ל-`filterByFormula`, לא בונה אותו), ו-`core/lead_candidate_handler.py::_search_formulas` (name+phone — כבר עשה escaping דומה inline, הוחלף במקור משותף).
+
+**מה נוסף:** `tools/airtable_gateway._safe_formula_param()` — helper יחיד, משותף לשלושת ה-call sites. אין builder חדש נפרד לכל סוג formula (SPEC מינימלי, מאושר ע"י הבעלים).
+
+**בדיקה:** `test_bugdh03_04_formula_injection.py` (חדש, 15/15) — escaping unit tests + injection-blocked על שני ה-call sites שתוקנו + no-regression על `_search_formulas`. אפס רגרסיה על שאר הסוויטה, `smoke_tests.py` ירוק, `compileall` נקי.
+
+**Merged:** ✅ כן — `main` (PR #251, commits `2e9bb57`/`011f5ea`). **Deployed/Verified בפרודקשן:** לא.
+
+**Docs:** `BUG_AUDIT_LOG.md` BUG-036/BUG-037 עודכנו ל-🟡 CODE DONE, NOT VERIFIED; `ROADMAP.md` §BUG-DH-03/04 + 2 אזכורים נוספים עודכנו; `docs/governance/BOSS_UNIFIED_MASTER_PLAN.md` §3.5/§5/§9 עודכנו.
+
+**סטטוס:** 🟡 CODE DONE, MERGED, NOT PRODUCTION-VERIFIED — `FEATURE_DECISION_HUB` נשאר חסום עד production evidence.
+
+## 0.19 doc-drift fix — C60 Tool Context Awareness was documented here as unmerged; it's merged (PR #152) — 2026-07-07 (קרא לפני 0.18)
+
+**מה נמצא:** בזמן session נפרד (BUG-DH-03/04 formula-injection fix + grep audit), המשתמש שאל לבדוק את מצב C59/C60 ID-collision mapping מול `docs/governance/BOSS_UNIFIED_MASTER_PLAN.md` §9. הריצה `grep` הראתה ש-`ROADMAP.md` (עודכן 26/06/2026) כבר תיעד את C60 כמוזג ל-`main` (PR #152, commit `2d85b84`, merge `3e0094b`), אבל `AI_CONTEXT.md` (מסמך זה) עדיין טען ב-3 מקומות שונים ("Executive Summary" §1, "Completed Since Last Update" §3, "Next Priorities" §4) שC60 "לא ממוזג" — סתירה ישירה, בדיוק דוגמת ה-doc-drift ש-Rule 17 (Single Source of Status) נועד למנוע.
+
+**אימות:** בדיקה מקומית ראשונה נכשלה כי ה-clone היה shallow (`2d85b84` לא valid object). לאחר `git fetch origin main --unshallow` — `git merge-base --is-ancestor 2d85b84 origin/main` **מאושר**. המשתמש גם אישר ויזואלית ב-GitHub ("✅ מוזג ל-main — PR #152, 'Merged', מאומת ויזואלית").
+
+**מה תוקן:** שלוש הרשומות ב-`AI_CONTEXT.md` עודכנו לשקף מיזוג (§1/§3/§4, לפי מספור השורות הקודם). לא נמחק/שוכתב תוכן היסטורי — נוסף הבהרה בכל מקום שהמצב הקודם ("לא ממוזג") היה נכון רק ביום הכתיבה המקורי ולא עודכן מאז. §10 פריט 7 של ספק C60 (production verification בפועל — "העלה קובץ → 'תעלה לדסישנס' → BOSS זוכר") **נשאר פתוח** — המיזוג ל-main אינו production verification.
+
+**הערה:** בזמן כתיבת רשומה זו, C83/BUG-077/BUG-DH-03/04 (0.22/0.21/0.20 למעלה) סומנו "מחוץ להיקף" — הם הושלמו ותועדו בהמשך אותו יום, לפי בקשת המשתמש.
 
 ---
 
@@ -415,7 +465,8 @@ Lead Buffer מקבל domain type נכון; UTM injection — באג שלא יד�
 ## 1. Executive Summary
 - **Fxx Safe Document Converter — Implemented but not yet verified** — standalone `document_converter` package exposes `convert_document(input_file, input_type, output_type)` and supports deterministic Markdown/HTML/TXT/DOCX/CSV/XLSX MVP conversions. It is not wired into `app.py`, Telegram, TMA, Airtable, or agent tools. It explicitly rejects PDF/OCR/scanned/complex layout reconstruction and returns no output file unless confidence is high.
 - **F52 tool architecture audit maps — Implemented but not yet verified** — audit-only docs exist under `docs/f52/`: `F52_CURRENT_TOOL_MAP.md`, `F52_CONTRACT_COVERAGE_MAP.md`, and `F52_BYPASS_MAP.md`. No production behavior changes, no `app.py` changes, and no Airtable schema changes.
-- **C60 Tool Context Awareness — 🟡 CODE DONE, על branch בלבד, לא מוזג** — `last_tool_result` נשמר ב-session אחרי כל tool dispatch אמיתי ומוזרק ל-system prompt כ-"🔧 הקשר כלים" (TTL 5 דקות); `resolve_context_pronouns()` מחליף כינויי הצבעה עבריים ("זה"/"הנספח"/"הקודם") בהתייחסות מפורשת לפני ה-Router. 40/40 self-tests עוברים, **3 סטיות מתועדות מהספק** (העיקרית: הספק הניח חוזה `tool_result` שגוי — `id`/`record_id`/`url`/`drive_url` — מול החוזה האמיתי C53-A `{ok,tool,external_id,evidence,user_message}`). ⚠️ הספק תייג עצמו "C59" — מתנגש עם C59 הקיים (Trust Layer, מוזג, ראו למטה) — תויג מחדש **C60**. ראו פירוט מלא: ROADMAP.md/CHANGE_CONTROL_LOG.md (C60).
+- **C60 Tool Context Awareness — מוזג ל-`main` (PR #152, commit `2d85b84`, merge `3e0094b`), לא מאומת בפרודקשן** — תוקן 07/07/2026: המסמך הזה טען בטעות "🟡 CODE DONE, על branch בלבד, לא מוזג", בזמן ש-`ROADMAP.md` כבר תיעד את המיזוג (עודכן 26/06/2026). אומת עצמאית ב-07/07/2026: `git fetch origin main --unshallow` + `git merge-base --is-ancestor 2d85b84 origin/main` → מאושר. `last_tool_result` נשמר ב-session אחרי כל tool dispatch אמיתי ומוזרק ל-system prompt כ-"🔧 הקשר כלים" (TTL 5 דקות); `resolve_context_pronouns()` מחליף כינויי הצבעה עבריים ("זה"/"הנספח"/"הקודם") בהתייחסות מפורשת לפני ה-Router. 40/40 self-tests עוברים, **3 סטיות מתועדות מהספק** (העיקרית: הספק הניח חוזה `tool_result` שגוי — `id`/`record_id`/`url`/`drive_url` — מול החוזה האמיתי C53-A `{ok,tool,external_id,evidence,user_message}`). ⚠️ הספק תייג עצמו "C59" — מתנגש עם C59 הקיים (Trust Layer, מוזג, ראו למטה) — תויג מחדש **C60**. ראו פירוט מלא: ROADMAP.md/CHANGE_CONTROL_LOG.md (C60).
+- **C83/BUG-077/BUG-DH-03/04 — כולם מוזגים ל-`main`, לא מאומתים בפרודקשן (06-07/07/2026)** — C83 (Single Policy Source) סגור, BUG-077 (Tier 3 auto-write gate) תוקן חלקית (root cause ב-`propose_action()` נשאר פתוח במכוון), BUG-DH-03/04 (Formula Injection) תוקן. ראו 0.22/0.21/0.20 למעלה לפירוט מלא.
 - **C59 Decision Hub Stage 1 Trust Layer — מוזג ל-`main` (PR #151, commit `73f6fe8`), לא מאומת בפרודקשן** — `gate_trust` ב-`decision_pipeline.py` עבר ממ-stub למודל אמינות אמיתי (Authority×Medium, מתואם ע"י Verify status) שמייצר Trust Level (T0-T3)+Confidence מספרי+Claim Topic אוטומטי לכל Decision Event, עם Supersedes בטוח (אותו נושא + Trust גבוה יותר בלבד). 33/33 self-tests עוברים, **9 סטיות מתועדות מהספק** (כולל `_has_keyword_conflict` שהספק קורא לו ב-§5 אך לא מגדיר את גופו בשום מקום — מומש כ-stub). ראו פירוט מלא: ROADMAP.md/CHANGE_CONTROL_LOG.md (C59).
 - `main` = `b289ab6` (PR #151 מוזג, אומת GitHub MCP `pull_request_read` + `git log`). Identity → Router → Context → Agent + Approval flow (3-state, fail-closed) — **תקינים ופעילים בפרודקשן**.
 - **C58 Universal Sessions — מוזג ל-`main` (PR #150, commit `84f2ef3`), לא מאומת בפרודקשן** — `session_store.py` עבר מ-`Tables.LEAD_SESSIONS` (טבלה שלא קיימת בפועל ב-Airtable — כל כתיבה הייתה 403, באג latent לא-מתועד) ל-`Tables.SESSIONS` (טבלה אמיתית, `tblHLfE24lTkVUhz0`) עם schema גנרי (`Context Type`+`State JSON`+`Linked *`). 36/36 self-tests עברו במיזוג; **לא אומת מול Airtable חי** — סעיף 5 בספק המקורי ("רשומה אמיתית נוצרת ב-Sessions בייצור") עדיין פתוח. ראו פירוט: ROADMAP.md/CHANGE_CONTROL_LOG.md.
@@ -438,7 +489,7 @@ Lead Buffer מקבל domain type נכון; UTM injection — באג שלא יד�
 
 ## 3. Completed Since Last Update
 
-**C60 Tool Context Awareness (25/06/2026, branch `claude/new-session-be1ckb`, 🟡 CODE DONE — לא ממוזג, לא מאומת בפרודקשן):**
+**C60 Tool Context Awareness (25/06/2026, branch `claude/new-session-be1ckb` → מוזג ל-`main` (PR #152, commit `2d85b84`, merge `3e0094b`) — לא מאומת בפרודקשן):**
 - **מקור:** `SPEC_C59_Tool_Context_Awareness.md` (הועלה ע"י הבעלים בלי טקסט מלווה; אישור התקבל דרך `AskUserQuestion`: "Yes, implement now", מקיים את שער "SPEC ONLY — אין קוד עד אישור אליהו").
 - ⚠️ **ID collision מתועד (כמו C54→C57):** הספק תייג עצמו "C59" — מתנגש עם C59 הקיים (Decision Hub Stage 1 Trust Layer, מוזג, ראו לעיל). תויג מחדש **C60** בכל מסמכי התיעוד; כותרת הספק וכל מחרוזות הקוד נשארו ללא שינוי.
 - **הבעיה שנפתרה:** הסוכן לא זוכר מה כלים עשו בסבב הקודם → intent שגוי (למשל "תעלה לדסישנס" אחרי שקובץ כבר נמצא ב-context, בלי שהסוכן יודע).
@@ -446,7 +497,7 @@ Lead Buffer מקבל domain type נכון; UTM injection — באג שלא יד�
 - **`app.py`** — `_capture_last_tool_result()` נקרא אחרי כל tool dispatch אמיתי בלולאת ה-agent (לא על branches חסומים/ממתינים לאישור); `_build_tool_context()` מזריק "🔧 הקשר כלים" ל-`ctx.system_prompt` (TTL 5 דקות לפי timestamp, כולל `last_file` מ-Stage 0.6); `resolve_context_pronouns()` + `CONTEXT_PRONOUNS` מחליפים כינויי הצבעה עבריים בהתייחסות מפורשת לפני ה-Router (שלב חדש "2.6" ב-`run_agent()`).
 - ⚠️ **3 סטיות מתועדות מהספק:** (1) הספק מניח חוזה `tool_result` עם `id`/`record_id`/`url`/`drive_url` — החוזה האמיתי בקוד (C53-A, `test_c53a.py`: `{ok,tool,external_id,evidence,user_message}` בלבד) שונה; תוקן ל-`external_id`→`record_id`, `evidence.get("htmlLink") or evidence.get("url")`→`url`. (2) `_seconds_ago()` מוזכר ב-§5 בלי הגדרה (כמו `_has_keyword_conflict` ב-C59) — מומש inline. (3) §6 "Table Registry fix" (4 קבועי Decision Tables) — אומת מראש שכבר קיימים מ-C59 — no-op.
 - **Verification:** `python3 -m py_compile` נקי על `app.py`/`session_store.py`/`airtable_schema.py`; `session_store.py` self-test → **40/40 עוברים** (4 חדשים ל-C60); `test_c53a.py` → 50/50 (ללא רגרסיה בחוזה); `test_integration.py` → 4/4; `smoke_tests.py` — 2 כשלים קיימים-מראש (`flask`/`httpx` חסרים בסביבת dev, אומת זהה ב-`git stash`); §9 greps של הספק כולם תקינים.
-- **ממתין:** §10 פריט 7 של הספק (בדיקת לייב: העלה קובץ → "תעלה לדסישנס" → BOSS זוכר ומנתב נכון) — פתוח עד merge+deploy; commit+push לענף עדיין לא בוצעו בזמן כתיבת שורות אלו (ראו §4 Next Priorities).
+- **ממתין:** §10 פריט 7 של הספק (בדיקת לייב: העלה קובץ → "תעלה לדסישנס" → BOSS זוכר ומנתב נכון) — פתוח עד production verification. **עדכון 07/07/2026:** commit+push+merge ל-`main` כבר בוצעו (PR #152) — השורה הקודמת כאן ("commit+push לענף עדיין לא בוצעו") הייתה נכונה רק ביום הכתיבה (25/06/2026) ולא עודכנה מאז; §10 פריט 7 (production verification) נשאר הפריט היחיד שעדיין פתוח בפועל.
 
 **C59 Decision Hub Stage 1 — Trust Layer (25/06/2026, מוזג ל-`main` — PR #151, commit `73f6fe8` — לא מאומת בפרודקשן):**
 - **מקור:** `SPEC_Decision_Hub_Stage1_Trust_Rev2.md` (הועלה ע"י הבעלים; 3 שדות חדשים נוצרו ב-Airtable Decision Events — Claim Topic/Claim Topic Source/Claim Topic Confidence — ואושר מפורשות "ניתן ליישם ספק", מקיים את שער "SPEC ONLY — אין קוד עד אישור אליהו").
@@ -506,7 +557,7 @@ Lead Buffer מקבל domain type נכון; UTM injection — באג שלא יד�
 ## 4. Next Priorities
 0. **Fxx Safe Document Converter — כבר מוזג ל-`main`** (PR #158, `db719ab`, 26/06/2026; תוקן 29/06/2026 Gap Report — לא "open PR, merge" כמו שכתוב היה). הבא בתור: לחבר ל-נתיב חי (drive/voice upload) **רק** אחרי PLANNING_GATE, או להחליט במפורש להשאיר merged-but-unreachable. Pandoc אופציונלי, מועדף כשמותקן. **CI gap (`test_document_converter.py` רץ בלי `__main__` guard, `ci.yml` מריץ `python` ולא `pytest`) תוקן 02/07/2026** — BUG-049, `__main__` guard נוסף (קורא ל-6 הפונקציות במפורש עם temp dir, בלי לגעת ב-`ci.yml`), branch `fix/ci-silent-pass-document-converter`, **טרם ממוזג ל-main**. 6/6 tests עוברים גם דרך `python3 test_document_converter.py` ישירות וגם דרך `pytest` (עם `beautifulsoup4`/`markdown`/`python-docx`/`openpyxl` שכבר ב-`requirements.txt`).
 0. **F52 audit branch** — open/refresh PR for `f52-current-tool-map-audit`; docs only, no production code changes.
-0. **C60 Tool Context Awareness — 🟡 CODE DONE, לא ממוזג** — לבצע commit+push ל-`claude/new-session-be1ckb`, ואז PR (רק אם יתבקש)+merge+deploy; לאחר deploy, לאמת §10 פריט 7 של הספק (העלה קובץ → "תעלה לדסישנס" → BOSS זוכר ומנתב נכון). **Decision Hub Stage 1 (Trust Layer) — מוזג** (PR #151); לאחר deploy יש לאמת §10 פריט 11 (T0 event אמיתי מציג flag בטלגרם). Stage 2-4 (ליבה) ממשיכים לפני יציאות נוספות (דומיינים/ערוצים/ייעודים), לפי `archive/BOSS_MASTER_PLAN_One_Road.md` (ARCHIVE, לא מקור אמת).
+0. **C60 Tool Context Awareness — כבר מוזג ל-`main`** (PR #152, commit `2d85b84`, merge `3e0094b`; תוקן 07/07/2026 — שורה זו טענה בטעות "לא ממוזג" בזמן ש-`ROADMAP.md` כבר תיעד את המיזוג, ראו §1/§3 למעלה). הבא בתור: deploy verification בפועל — לאמת §10 פריט 7 של הספק (העלה קובץ → "תעלה לדסישנס" → BOSS זוכר ומנתב נכון). **Decision Hub Stage 1 (Trust Layer) — מוזג** (PR #151); לאחר deploy יש לאמת §10 פריט 11 (T0 event אמיתי מציג flag בטלגרם). Stage 2-4 (ליבה) ממשיכים לפני יציאות נוספות (דומיינים/ערוצים/ייעודים), לפי `archive/BOSS_MASTER_PLAN_One_Road.md` (ARCHIVE, לא מקור אמת).
 1. **לאמת BUG-013/014/015/016/017 בפרודקשן בפועל** — כולם מוזגים ל-`main`, אפס אימות ידני עד כה (קובץ >50MB אמיתי / Drive evidence gate / N07 מול live Airtable / security-review persistence).
 2. **F16 — הדלקת flags** (`FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD`) — אך ורק אחרי יצירת טבלת "Media Files" ידנית ב-Airtable.
 3. **להריץ N07 (`tools/schema_governance.py`) מול live Airtable** — עדיין לא רץ פעם ראשונה (אין credentials בסביבת sandbox).
