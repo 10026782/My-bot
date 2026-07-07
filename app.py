@@ -2458,6 +2458,20 @@ def _webhook_telegram_impl():
                 report_error(e, context="command_dispatch")
             return "", 200
 
+        # C20 — free text mid-/update never reaches capture_text (registered
+        # via @bot.message_handler) because bot.process_new_updates() is only
+        # called for slash commands above. Dispatch it ourselves so the
+        # pending wizard claims its own text instead of falling through to
+        # idempotency/run_agent. Fail-open: any error here just continues
+        # to the normal flow below, it never blocks the message.
+        try:
+            from cmd_update import has_pending_text_capture
+            if has_pending_text_capture(sender_user_id):
+                bot.process_new_updates([update])
+                return "", 200
+        except Exception as e:
+            logger.error(f"[/update] text capture routing failed: {e}", exc_info=True)
+
         if idempotency.is_duplicate("telegram", sender_user_id, text):
             try:
                 bot.send_message(

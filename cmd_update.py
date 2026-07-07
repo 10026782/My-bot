@@ -203,6 +203,21 @@ def has_pending_file_capture(user_id: str) -> bool:
     return bool(state and state.get("step") == "text")
 
 
+# ── תפיסת טקסט חופשי בשלב 'text' ─────────────────────────────────
+# app.py's webhook only calls bot.process_new_updates() for slash-command
+# text (see the `if text.startswith("/")` branch) — free text never goes
+# through it, so capture_text above (registered via @bot.message_handler)
+# never fires for it either. Free text sent mid-/update instead falls all
+# the way through to idempotency.is_duplicate() and then run_agent(),
+# silently abandoning the pending state until its TTL expires. app.py must
+# check has_pending_text_capture() *before* the idempotency check and, if
+# True, call bot.process_new_updates([update]) itself so capture_text runs.
+
+def has_pending_text_capture(user_id: str) -> bool:
+    state = _get_valid_state(user_id)
+    return bool(state and state.get("step") == "text")
+
+
 def capture_photo_or_document(bot, message, get_identity) -> None:
     uid     = str(message.from_user.id)
     chat_id = message.chat.id
