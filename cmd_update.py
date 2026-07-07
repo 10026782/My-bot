@@ -238,8 +238,11 @@ def capture_photo_or_document(bot, message, get_identity) -> None:
 
     caption = (getattr(message, "caption", None) or "").strip()
     drive_url = _upload_attachment(bot, message, uid, state.get("domain", "general"))
+    extracted_text = _extract_document_text(bot, message)
 
     raw_text = caption or "קובץ מצורף"
+    if extracted_text:
+        raw_text = f"{raw_text}\n\n{extracted_text}"
     if drive_url:
         raw_text = f"{raw_text}\n📎 {drive_url}"
 
@@ -307,6 +310,25 @@ def _upload_attachment(bot, message, uid: str, domain: str) -> str:
     except Exception as e:
         logger.error(f"[C20] attachment upload failed: {e}", exc_info=True)
         return ""
+
+
+def _extract_document_text(bot, message) -> str | None:
+    """מוריד document (לא photo) ומעביר ל-media_handler.extract_text_if_document.
+    לא חוסם — כל כשל/פורמט לא נתמך מחזיר None והרשומה נשמרת רק עם caption+drive_url."""
+    if message.content_type != "document":
+        return None
+
+    try:
+        from media_handler import extract_text_if_document
+
+        doc = message.document
+        mime_type = doc.mime_type or "application/octet-stream"
+        file_info  = bot.get_file(doc.file_id)
+        file_bytes = bot.download_file(file_info.file_path)
+        return extract_text_if_document(file_bytes, mime_type)
+    except Exception as e:
+        logger.error(f"[C20] document text extraction failed: {e}", exc_info=True)
+        return None
 
 
 # ── שמירה — דרך gateway בלבד ────────────────────────────────────
