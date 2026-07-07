@@ -148,7 +148,7 @@ def _save_transcript_to_memory(transcript: str, domain: str, source: str) -> boo
     fields = {
         BMF.TITLE: f"הודעה קולית — {datetime.now(ZoneInfo('Asia/Jerusalem')).strftime('%d/%m/%Y')}",
         BMF.DESCRIPTION: transcript,
-        BMF.DATE: datetime.now(ZoneInfo("Asia/Jerusalem")).isoformat(),
+        BMF.DATE: datetime.now(ZoneInfo("Asia/Jerusalem")).date().isoformat(),
         BMF.EVENT_TYPE: "Other",
         BMF.TAGS: [domain],
         BMF.IMPACT: "Voice Note",
