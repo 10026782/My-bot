@@ -158,6 +158,20 @@ def _at_headers() -> dict:
     }
 
 
+def _safe_formula_param(value: str) -> str:
+    """
+    Escape a value for safe interpolation into an Airtable filterByFormula
+    string literal. Single quotes are the field delimiter in Airtable
+    formulas — backslash-escape them.
+
+    This is the ONLY sanctioned way to interpolate user-controlled text into
+    a filterByFormula string anywhere in the codebase (BUG-DH-03/04). Any
+    code building filterByFormula with a raw f-string/format on unescaped
+    input is a bug — route it through this function instead.
+    """
+    return value.replace("'", "\\'")
+
+
 # ══════════════════════════════════════════════════════════════════
 # Audit
 # ══════════════════════════════════════════════════════════════════

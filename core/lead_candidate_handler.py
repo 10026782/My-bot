@@ -304,10 +304,11 @@ def _at_find_lead(name: str, phone: str) -> Optional[str]:
 
 
 def _search_formulas(name: str, phone: str) -> list[str]:
-    safe_name = name.replace("'", "\\'")
+    from tools.airtable_gateway import _safe_formula_param
+    safe_name = _safe_formula_param(name)
     formulas  = []
     if phone:
-        safe_phone = phone.replace("'", "\\'")
+        safe_phone = _safe_formula_param(phone)
         formulas.append(f"AND(SEARCH('{safe_name}', {{Name}}), {{phone}}='{safe_phone}')")
         formulas.append(f"{{phone}}='{safe_phone}'")
     formulas.append(f"SEARCH('{safe_name}', {{Name}})")

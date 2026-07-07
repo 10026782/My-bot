@@ -866,7 +866,8 @@ def _resolve_decision_ref(ref: str) -> dict | None:
         if record:
             return record
 
-    formula = f"FIND('{ref}', {{{DecisionFields.TITLE}}})"
+    from tools.airtable_gateway import _safe_formula_param
+    formula = f"FIND('{_safe_formula_param(ref)}', {{{DecisionFields.TITLE}}})"
     matches = _at_list(Tables.DECISIONS, formula)
     return matches[0] if matches else None
 
