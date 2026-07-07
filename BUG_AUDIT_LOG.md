@@ -598,9 +598,10 @@
 - **שורש:** `FIND('{ref}', ...)` ללא sanitization על `ref` מגיע מ-user input
 - **תיקון (✅ בוצע):** נוסף `tools.airtable_gateway._safe_formula_param()` — helper משותף אחד, `_resolve_decision_ref()` מעביר את `ref` דרכו לפני הכנסה ל-formula. אותו helper משמש גם לתיקון BUG-037 ול-`core/lead_candidate_handler.py::_search_formulas` (שכבר עשה escaping דומה inline — הוחלף במקור המשותף).
 - **בדיקה:** `test_bugdh03_04_formula_injection.py` (חדש, 15/15) — כולל בדיקת injection ייעודית ל-`_resolve_decision_ref` (`ref="test' OR 1=1 --"` → כל `'` בקלט נשמר escaped בפורמולה שנבנתה, לא נשאר raw).
-- **Merged:** לא — ענף `claude/tool-approval-metadata-mi89lu`, commit `2e9bb57`.
+- **Merged:** ✅ כן — `main` `4ba3002` (עד ל-PR #251, commit `2e9bb57`). מאומת עצמאית 07/07/2026: `git fetch origin` + `git merge-base --is-ancestor 2e9bb57 origin/main`. **תיקון מרישום קודם שגוי שאמר "לא"** — הענף כבר היה ממוזג בפועל, פשוט לא נבדק עם `git fetch` עדכני.
+- **בדיקה בפועל (07/07/2026):** הותקן `httpx` בסביבת sandbox (היה חסר) והורץ `python3 test_bugdh03_04_formula_injection.py` בפועל — **15/15 עברו**, לא רק "קובץ קיים בקוד".
 - **Deployed:** לא. **Verified בפרודקשן:** לא.
-- **סטטוס:** 🟡 CODE DONE, NOT VERIFIED — עדיין חוסם הפעלת `FEATURE_DECISION_HUB` עד מיזוג+production evidence (עקבי עם הכלל בראש הקובץ; לא לסמן ✅ מלא עד אז).
+- **סטטוס:** 🟡 MERGED, NOT PRODUCTION-VERIFIED — עדיין חוסם הפעלת `FEATURE_DECISION_HUB` עד production evidence (עקבי עם הכלל בראש הקובץ; לא לסמן ✅ מלא עד אז).
 
 ### BUG-037 (BUG-DH-04) — formula injection ב-`maybe_supersede` — ✅ תוקן 07/07/2026
 - **תאריך:** 30/06/2026 (דווח) → 07/07/2026 (תוקן)
@@ -608,9 +609,10 @@
 - **שורש:** Claim Topic (וגם Decision ID) מגיעים ל-formula ללא escaping ויכולים לשבור Airtable formula
 - **תיקון (✅ בוצע):** `maybe_supersede()` מעביר גם את `decision_id` וגם את `new_event["Claim Topic"]` דרך `tools.airtable_gateway._safe_formula_param()` לפני בניית ה-`AND(...)` formula. (הבהרה: `decision_ports.py`'s `StoragePort.get()` הוא רק passthrough דק ל-`filterByFormula` — הבנייה עצמה תמיד הייתה ב-`decision_pipeline.py`, לא ב-`decision_ports.py`.)
 - **בדיקה:** `test_bugdh03_04_formula_injection.py` (חדש, 15/15) — `maybe_supersede()` עם `decision_id`/Claim Topic זדוניים, מוודא escaping מלא בפורמולה שנבנתה בפועל דרך `StoragePort.get()` מדומה.
-- **Merged:** לא — ענף `claude/tool-approval-metadata-mi89lu`, commit `2e9bb57`.
+- **Merged:** ✅ כן — `main` `4ba3002` (עד ל-PR #251, commit `2e9bb57`). מאומת עצמאית 07/07/2026: `git fetch origin` + `git merge-base --is-ancestor 2e9bb57 origin/main`. **תיקון מרישום קודם שגוי שאמר "לא"** — הענף כבר היה ממוזג בפועל.
+- **בדיקה בפועל (07/07/2026):** אותה הרצה כמו BUG-036 למעלה — `test_bugdh03_04_formula_injection.py` הורץ בפועל (לא רק grep) — **15/15 עברו**, כולל תרחיש `maybe_supersede`.
 - **Deployed:** לא. **Verified בפרודקשן:** לא.
-- **סטטוס:** 🟡 CODE DONE, NOT VERIFIED — עדיין חוסם הפעלת `FEATURE_DECISION_HUB` עד מיזוג+production evidence.
+- **סטטוס:** 🟡 MERGED, NOT PRODUCTION-VERIFIED — עדיין חוסם הפעלת `FEATURE_DECISION_HUB` עד production evidence.
 
 ### BUG-038 (BUG-DH-05) — COG מקבל domain ישן (domain drift)
 - **תאריך:** 30/06/2026
@@ -1144,7 +1146,7 @@
 - **Merged:** ✅ כן — `main` `e1436e9` (Merge pull request #246), commit `bb4b9ca`. מאומת: `git merge-base --is-ancestor bb4b9ca origin/main` + `git show origin/main:core/action_gateway.py | grep -c "classify_approval_policy\|approval_policy"` → 15.
 - **סטטוס:** ✅ תוקן ומוזג ל-main — **לא** מאומת עדיין ב-production/Render.
 
-### BUG-077 — `propose_action()` סומך עיוורת על `requires_approval` שמצהיר הקורא, בלי לאמת מול `tool_registry.py` (עוקף לגמרי את שער האישור) — 🟡 תוקן בקוד במלואו 07/07/2026 (root cause + תסמין), טרם ממוזג
+### BUG-077 — `propose_action()` סומך עיוורת על `requires_approval` שמצהיר הקורא, בלי לאמת מול `tool_registry.py` (עוקף לגמרי את שער האישור) — ✅ תוקן ומוזג ל-main 07/07/2026 (root cause + תסמין), 🟡 NOT PRODUCTION-VERIFIED
 - **תאריך:** 06/07/2026
 - **דווח על ידי:** ביקורת C95A (Archive Carry-Forward Gap Discovery), session audit-only — לא בוצע שינוי קוד בזמן הגילוי.
 - **Severity:** P0 — כתיבה חיה לטבלת `Leads` ב-Airtable עם אפס שער אישור, במסלול שכבר רץ בפרודקשן (לא תלוי ב-`FEATURE_ACTION_GATEWAY`, אותו דפוס כמו BUG-074/076 — הפגם חי גם כש-shadow-mode פעיל, כי `propose_action()` עצמו מחליט `status` ללא תלות בדגל).
@@ -1182,6 +1184,7 @@
   1. `core/action_gateway.py::propose_action()` — `approval_policy` (מ-`classify_approval_policy()`) מחושב **לפני** בדיקת ה-cross-check, ומשמש גם את הבדיקה וגם את שדה ה-contract (לא קריאה כפולה). ה-override מתבצע **רק אם** `approval_policy != APPROVAL_POLICY_SELF_CONFIRM` **וגם** `tool_registry.needs_approval(tool_name)` **וגם** לא `requires_approval` — כך שה-carve-out הבטוח של BUG-076 לא נדרס.
   2. `core/lead_candidate_handler.py::_write_one_lead()` — ה-`tool_inputs` שנשלח ל-`propose_action()` נבנה מחדש לעטוף תחת `"fields"`, זהה בדיוק לשדות שהקטע "Write" בפועל כותב (`LeadFields.NAME/PHONE/CHANNEL/MEMORY_KEY/DOMAIN/SOURCE/STATUS/SUMMARY/SCORE/SENDER_ID` ליצירה; `PHONE/SUMMARY/DOMAIN` לעדכון) — כעת מקבל `self_confirm` נכון, תואם למה ש-`_lead_safe_fields()`'s docstring כבר הניח.
 - **בדיקה:** `test_action_gateway.py` — 3 טסטים חדשים (override ל-`sheets_append`, ללא-שינוי כש-caller כבר מצהיר True, ללא-override ל-`airtable_get` שהרישום לא דורש לו אישור). אפס רגרסיה: 2 הטסטים ששברו בגרסה הנאיבית עוברים שוב; כל 50+ קבצי `test_*.py` ירוקים; `smoke_tests.py` ירוק; `python3 -m compileall .` נקי.
-- **Merged:** בתהליך — ענף `claude/tool-approval-metadata-mi89lu`.
-- **Deployed / Verified בפרודקשן:** לא.
-- **סטטוס:** 🟡 CODE DONE, NOT MERGED — root cause **וגם** תסמין Tier 3 סגורים באותו קוד. **לא לסמן ✅ עד מיזוג + production evidence.**
+- **Merged:** ✅ כן — `main` `4ba3002` (PR #254, commit `07caf9d`). מאומת עצמאית 07/07/2026: `git fetch origin` + `git merge-base --is-ancestor 07caf9d origin/main`. **תיקון מרישום קודם שגוי שאמר "בתהליך"** — הענף כבר היה ממוזג בפועל, הבדיקה הקודמת לא כללה `git fetch` עדכני.
+- **בדיקה בפועל (07/07/2026):** הותקן `httpx`/`pyTelegramBotAPI` בסביבת sandbox (היו חסרים) והורץ `python3 test_action_gateway.py` בפועל — **41/41 עברו**, כולל לוג חי שמוכיח את ה-fail-closed override פועל: `"[ActionGateway] propose_action: caller passed requires_approval=False for 'sheets_append' but tool_registry requires True — overriding to True (fail-closed, BUG-077)"`. גם `test_bug077_tier3_auto_capture_gate.py` הורץ מחדש — **5/5 עברו**. `python3 -m py_compile` נקי על `core/action_gateway.py`/`core/lead_candidate_handler.py`. `smoke_tests.py`'s "Decision Hub call-site governance" check עבר בנפרד (לא קשור ישירות ל-BUG-077, אבל מאשר ש-import graph לא נשבר על ידי התיקון).
+- **Deployed / Verified בפרודקשן:** לא — הרצת הטסטים הייתה מקומית/sandbox (לא Render, לא Airtable חי). אין claim על deploy.
+- **סטטוס:** 🟡 MERGED, TESTS PASS LOCALLY, NOT PRODUCTION-VERIFIED — root cause **וגם** תסמין Tier 3 סגורים באותו קוד, ממוזגים, ונבדקו execution בפועל בסבב הזה. **לא לסמן ✅ עד production evidence.**

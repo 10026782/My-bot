@@ -1,10 +1,33 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 
-**עודכן:** 2026-07-07 (מאוחר ביותר) — BUG-077 root cause נסגר (לא רק התסמין): `propose_action()` מאמת כעת `requires_approval` מול `tool_registry.needs_approval()`, פרט ל-self_confirm carve-out. יישום ראשוני נאיבי שבר 2 טסטים קיימים (BUG-076 self_confirm) — תוקן לפני push, כולל תיקון נלווה ל-`_write_one_lead()`. ראה 0.23. 🟡 קוד מוכן, טרם ממוזג. קודם: (1) doc-drift תוקן — C60 היה מתועד כאן כ"לא ממוזג" בזמן שכבר מוזג (PR #152), ראה 0.19. (2) C83 (Single Policy Source) סגור, ראה 0.22. (3) BUG-DH-03/04 (Formula Injection) תוקן, ראה 0.20. שלושתם **מוזגים ל-main** (PR #249/#251), **לא מאומתים בפרודקשן**.
-**עודכן על ידי:** Claude Code — BUG-077 root-cause fix (2 קבצים, קוד+טסט, טרם ממוזג), ראה 0.23 למטה
+**עודכן:** 2026-07-07 (מאוחר ביותר עוד, סבב אימות עצמאי) — סשן נפרד (C95A audit) אימת מחדש, ב-execution בפועל, את מצב BUG-077 (Tier-3 + root-cause) ו-BUG-DH-03/04: כולם **כן ממוזגים ל-`origin/main`** (`git fetch` + `git merge-base --is-ancestor` על `e1c0ea5`/`07caf9d`/`2e9bb57`, כולם ⊂ `4ba3002`, PR #254) — השורה הקודמת כאן ("🟡 קוד מוכן, טרם ממוזג") הייתה נכונה רק ברגע כתיבתה, לפני שה-PR התמזג, ולא עודכנה מאז. הותקנו `httpx`/`pyTelegramBotAPI` בסביבת ה-sandbox (היו חסרים) והורצו בפועל: `test_bugdh03_04_formula_injection.py` 15/15 ✅, `test_bug077_tier3_auto_capture_gate.py` 5/5 ✅, `test_action_gateway.py` 41/41 ✅, `smoke_tests.py`'s Decision Hub call-site governance check ✅ (מאשר גם F22/N14). ראה 0.24. **עדיין 🟡 NOT PRODUCTION-VERIFIED** — הרצה מקומית/sandbox בלבד, אין Render/Airtable חי בסבב הזה.
+**עודכן על ידי:** Claude Code — doc-drift fix + test-execution verification בלבד (אין שינוי קוד בסבב הזה, מלבד סנכרון branch ל-`origin/main`), ראה 0.24 למטה
 
 > מקור אמת: `ROADMAP.md` + `BOSS_CURRENT_STATE.md` (תוקן 06/07 — ראה 0.17) + `CHANGELOG.md` + git log. `CANONICAL_STATE.md` לא קיים בריפו. כאשר המסמכים סתרו זה את זה, עדיפות: main (git) > ROADMAP.md > AI_CONTEXT.md הקודם > BOSS_CURRENT_STATE.md.
+
+---
+
+## 0.24 סבב אימות עצמאי — BUG-077/BUG-DH-03/04 היו כבר ממוזגים בפועל, לא זוהה כי `git fetch` לא הורץ קודם — 2026-07-07 (קרא לפני 0.23)
+
+**מה קרה:** במהלך C95A audit session נפרד (`docs/audit/C95A_ARCHIVE_CARRY_FORWARD_GAP_REPORT.md`), הוצגה טענה שBUG-077 "מיושם, נבדק, ממוזג — PR #250" ו-BUG-DH-03/04 "תוקן, ממוזג — PR #251". הבדיקה הראשונה (`git branch -a`, `git log --all --oneline`) **לא כללה `git fetch` מוקדם**, ולכן לא ראתה את ה-commits/branch שכבר היו קיימים ב-`origin` — הניבה מסקנה שגויה ש"שום ראיה לא נמצאה". אחרי `git fetch origin` מפורש, אותם commits (`e1c0ea5`, `07caf9d`, `2e9bb57`) אותרו, ואומתו כ-ancestors אמיתיים של `origin/main` (`git merge-base --is-ancestor`).
+
+**מה תוקן בסבב הזה (רק תיעוד + הרצת בדיקות, אין שינוי קוד):**
+- `ROADMAP.md`: 2 מקומות תוקנו מ-"טרם ממוזג"/"לא ממוזג/מאומת עדיין" ל-"✅ ממוזג, 🟡 NOT PRODUCTION-VERIFIED".
+- `BUG_AUDIT_LOG.md`: BUG-036/BUG-037 (`Merged: לא` → `✅ כן`) ו-BUG-077's root-cause subsection (`Merged: בתהליך` → `✅ כן`) עודכנו, עם evidence של `git merge-base --is-ancestor` וגם עם evidence חדש של הרצת הטסטים בפועל (לא רק grep על commit messages).
+- `core/lead_candidate_handler.py`, `core/action_gateway.py`, `cmd_decision.py`, `decision_pipeline.py`, `tools/airtable_gateway.py` — סונכרנו לגרסת `origin/main` (fast-forward merge, `3a64c93..4ba3002`), אין diff/שינוי קוד נוסף בסבב הזה.
+
+**הרצת בדיקות בפועל (לא רק "הקובץ קיים"):** הותקנו `httpx==0.28.1` ו-`pyTelegramBotAPI` בסביבת ה-sandbox (חסרו — `flask` נשאר חסר, קונפליקט `blinker` ברמת debian, לא קשור לריפו). לאחר ההתקנה:
+- `python3 -m py_compile app.py cmd_decision.py decision_pipeline.py core/action_gateway.py tools/airtable_gateway.py core/lead_candidate_handler.py` → נקי.
+- `python3 test_bugdh03_04_formula_injection.py` → **15/15 עברו**.
+- `python3 test_bug077_tier3_auto_capture_gate.py` → **5/5 עברו**.
+- `python3 test_action_gateway.py` → **41/41 עברו**, כולל לוג חי: `"[ActionGateway] propose_action: caller passed requires_approval=False for 'sheets_append' but tool_registry requires True — overriding to True (fail-closed, BUG-077)"`.
+- `python3 smoke_tests.py` → 6/7 (הכשל היחיד: `flask` חסר בסביבה, לא קשור לקוד); "Decision Hub call-site governance" ✅ "7 Decision Hub entrypoints match their declared wiring state" — מאשר מכנית גם את מצב F22/N14 (`core.adapters.decision_adapter` wired כ-fallback, `core.reasoning_engines`/`leads_adapter` unwired) בלי להסתמך על תיעוד ידני.
+- C20 (`/update` callback routing) אומת בקוד: `cmd_update.py:93,116` (`@bot.callback_query_handler`) + `298,307` (keyboards תואמים) + `app.py:2439-2454` (`bot.process_new_updates` מנתב).
+
+**מה *לא* אומת (וחשוב להישאר `🟡`, לא `✅`):** אין גישה מכאן ל-Render deployment hash או ל-Airtable חי. כל commit message הרלוונטי (`07caf9d`, `2e9bb57`) כבר מציין בעצמו "not yet merged/verified" ברמת production — הסטטוס הנכון לכל שלושת הפריטים נשאר `🟡 MERGED, TESTS PASS LOCALLY, NOT PRODUCTION-VERIFIED`, לא `✅ VERIFIED IN PROD`.
+
+**לקח לתהליך (לא רק לתיקון הזה):** כל בדיקת "האם commit/branch X קיים ב-origin" **חייבת** `git fetch origin` מפורש קודם — `git branch -a`/`git log --all` בלבד יכולים להראות מצב מקומי stale ולהוביל למסקנת "לא קיים" שגויה, בדיוק כמו שקרה כאן.
 
 ---
 
