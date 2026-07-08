@@ -123,13 +123,45 @@ def validate_airtable_fields(table: str, fields: dict) -> tuple[dict, list[str]]
 
         clean[k] = v
 
-    # (final) schema_cache.json guard — drop fields Airtable doesn't know about
-    unknown = _sv.validate_fields(table, clean)
+    # (final) unknown-field guard — drop fields Airtable doesn't know about.
+    # PR3B (rev.2): reads through RuntimeSchemaProvider.get_table_contract()
+    # in shadow/enforce state instead of schema_validator directly. "off"
+    # (default) preserves prior behavior exactly — the provider is never
+    # even called. Do not reintroduce ad-hoc schema validation outside
+    # RuntimeSchemaProvider going forward.
+    from feature_flags import get_runtime_schema_provider_state
+    state = get_runtime_schema_provider_state()
+
+    legacy_unknown = _sv.validate_fields(table, clean)
+
+    if state == "off":
+        unknown = legacy_unknown
+    else:
+        provider_unknown = _provider_unknown_fields(table, clean)
+        if state == "shadow":
+            unknown = legacy_unknown
+            if set(provider_unknown) != set(legacy_unknown):
+                logger.warning(
+                    "[RuntimeSchemaProvider:SHADOW] discrepancy table=%s legacy_unknown=%s "
+                    "provider_unknown=%s (not blocking — shadow state)",
+                    table, legacy_unknown, provider_unknown,
+                )
+        else:  # "enforce"
+            unknown = provider_unknown
+
     for u in unknown:
         errors.append(f"unknown field '{u}' in {table} (not in schema_cache)")
         del clean[u]
 
     return clean, errors
+
+
+def _provider_unknown_fields(table: str, fields: dict) -> list[str]:
+    """Unknown-field list per RuntimeSchemaProvider.get_table_contract()."""
+    from core.runtime_schema_provider import get_provider
+    contract = get_provider().get_table_contract(table)
+    known = contract["fields"].keys()
+    return [k for k in fields if k not in known]
 
 
 # ══════════════════════════════════════════════════════════════════
