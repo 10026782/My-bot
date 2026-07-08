@@ -95,6 +95,19 @@ archive work — see core/runtime_schema_provider.py):
                                  בפועל קובעת אילו שדות נחסמים). קריאה דרך
                                  get_runtime_schema_provider_state(), לא is_enabled().
 
+PR2 (rev.2) — Gateway select-value validation (depends on PR3B's
+RuntimeSchemaProvider; independent flag from it — see
+tools/airtable_gateway.py:_provider_invalid_select_values()):
+  FEATURE_AIRTABLE_SELECT_VALUE_VALIDATION_STATE - שלוש מצבים (לא boolean רגיל):
+                                 "off" (ברירת מחדל, אין בדיקת ערכים בכלל) / "shadow"
+                                 (מלוגג ערך singleSelect/multipleSelects לא-תקין מול
+                                 choices החיים, לא חוסם/מוריד כלום) / "enforce" (שדה
+                                 עם ערך לא-תקין מוסר כולו מה-write — multipleSelects עם
+                                 ערך לא-תקין אחד מוסר כולו, אין סינון חלקי). פועל רק
+                                 כש-RuntimeSchemaProvider מחזיר mode="full" לטבלה —
+                                 ב-mode="name_only" (seed) תמיד מדלג, ללא false positives.
+                                 קריאה דרך get_select_value_validation_state(), לא is_enabled().
+
 C94 (Unified Ingress Envelope + Evidence Trace):
   FEATURE_INGRESS_ENVELOPE    - קיל-סוויץ' לבניית IngressEnvelope ב-run_agent() (Telegram+WhatsApp/
                                  Twilio, C94 Stage ג/ד). default ON (ברירת מחדל הפוכה מרוב הדגלים
@@ -182,6 +195,17 @@ def get_runtime_schema_provider_state() -> str:
     Returns "off" for any unset/unrecognized value — fail closed to old behavior.
     """
     value = os.environ.get("FEATURE_AIRTABLE_RUNTIME_SCHEMA_PROVIDER_STATE", "off").strip().lower()
+    return value if value in _SCHEMA_PROVIDER_STATES else "off"
+
+
+def get_select_value_validation_state() -> str:
+    """
+    Three-state accessor for FEATURE_AIRTABLE_SELECT_VALUE_VALIDATION_STATE
+    (PR2 rev.2). Independent of get_runtime_schema_provider_state() — a
+    deployment can run one in enforce and the other in shadow/off.
+    Returns "off" for any unset/unrecognized value — fail closed to old behavior.
+    """
+    value = os.environ.get("FEATURE_AIRTABLE_SELECT_VALUE_VALIDATION_STATE", "off").strip().lower()
     return value if value in _SCHEMA_PROVIDER_STATES else "off"
 
 
