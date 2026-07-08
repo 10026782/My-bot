@@ -123,13 +123,47 @@ def validate_airtable_fields(table: str, fields: dict) -> tuple[dict, list[str]]
 
         clean[k] = v
 
-    # (final) schema_cache.json guard — drop fields Airtable doesn't know about
-    unknown = _sv.validate_fields(table, clean)
+    # (final) unknown-field guard — drop fields Airtable doesn't know about.
+    # PR3B: reads through RuntimeSchemaProvider in SHADOW/ENFORCE mode instead
+    # of schema_validator directly. OFF (default) preserves prior behavior
+    # exactly. Do not reintroduce ad-hoc schema validation outside
+    # RuntimeSchemaProvider going forward.
+    from feature_flags import get_schema_provider_mode
+    mode = get_schema_provider_mode()
+
+    legacy_unknown = _sv.validate_fields(table, clean)
+
+    if mode == "off":
+        unknown = legacy_unknown
+    else:
+        provider_unknown = _provider_unknown_fields(table, clean)
+        if mode == "shadow":
+            unknown = legacy_unknown
+            if provider_unknown is not None and set(provider_unknown) != set(legacy_unknown):
+                logger.warning(
+                    "[RuntimeSchemaProvider:SHADOW] discrepancy table=%s legacy_unknown=%s "
+                    "provider_unknown=%s (not blocking — SHADOW mode)",
+                    table, legacy_unknown, provider_unknown,
+                )
+        else:  # "enforce"
+            unknown = provider_unknown if provider_unknown is not None else legacy_unknown
+
     for u in unknown:
         errors.append(f"unknown field '{u}' in {table} (not in schema_cache)")
         del clean[u]
 
     return clean, errors
+
+
+def _provider_unknown_fields(table: str, fields: dict) -> list[str] | None:
+    """Unknown-field list per RuntimeSchemaProvider, or None if the provider
+    has no info for this table (mirrors schema_validator's "no info → don't
+    block" behavior)."""
+    from core.runtime_schema_provider import get_provider
+    known = get_provider().get_known_fields(table)
+    if not known:
+        return None
+    return [k for k in fields if k not in known]
 
 
 # ══════════════════════════════════════════════════════════════════
