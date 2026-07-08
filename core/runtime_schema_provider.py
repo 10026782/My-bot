@@ -1,4 +1,4 @@
-# core/runtime_schema_provider.py — PR3B (rev.2): RuntimeSchemaProvider
+# core/runtime_schema_provider.py — PR3B (rev.2) + PR3B.1 (snapshot tier)
 #
 # One schema provider that Airtable write validation reads from, per table:
 #   1. Fresh live Meta API fetch (when the TTL for that table has expired).
@@ -6,14 +6,22 @@
 #      still valid — no Meta API call at all in this case.
 #   3. If the TTL expired and the live re-fetch fails: the same last-good
 #      result, served stale, with a WARNING log (age included).
-#   4. If there is no last-good result at all (cold start) and the live
-#      fetch fails: schema_cache.json seed via the existing, unchanged
-#      schema_validator.get_known_fields() — mode="name_only", table_id=None,
-#      choices=[] always (schema_cache.json has never stored choices).
+#   4. (PR3B.1) If there is no last-good result at all (cold start, e.g.
+#      right after a restart) and the live fetch fails: read the latest
+#      successful (Status=OK) canonical JSON snapshot from PR3A's
+#      Tables.SCHEMA_SNAPSHOTS archive (read-only — tools/schema_snapshot.py
+#      itself is not modified by this tier). Closes the gap where a cold
+#      start + Meta API outage used to fall straight to the seed, which is
+#      exactly the BUG-020 failure mode this tier exists to prevent.
+#   5. If no snapshot is usable either (table missing from the archive, no
+#      OK record, download/parse failure): schema_cache.json seed via the
+#      existing, unchanged schema_validator.get_known_fields() —
+#      mode="name_only", table_id=None, choices=[] always (schema_cache.json
+#      has never stored choices).
 #
 # This module owns no on-disk state — schema_cache.json is never written
-# here, and this provider does not depend on PR3A's snapshot archive or on
-# document_converter in any way.
+# here. document_converter is never touched (tier 4 reads the already-
+# uploaded JSON attachment directly, never the XLSX report).
 
 from __future__ import annotations
 
@@ -49,7 +57,7 @@ class RuntimeSchemaProvider:
         {
             "table_id": str | None,
             "mode": "full" | "name_only",
-            "source": "live" | "cached" | "seed",
+            "source": "live" | "cached" | "snapshot" | "seed",
             "fetched_at": iso str | None,
             "fields": {field_name: {"field_id", "type", "choices"}},
         }
@@ -73,8 +81,18 @@ class RuntimeSchemaProvider:
                 )
                 return self._contract_from_entry(entry, source="cached")
 
+            snapshot_entry = self._load_snapshot(table)
+            if snapshot_entry is not None:
+                self._last_good[table] = snapshot_entry
+                logger.warning(
+                    "[RuntimeSchemaProvider] no live/cached schema for %s — "
+                    "using canonical snapshot fallback (tier 3, PR3B.1)",
+                    table,
+                )
+                return self._contract_from_entry(snapshot_entry, source="snapshot")
+
             logger.critical(
-                "[RuntimeSchemaProvider] no live/cached schema for %s — "
+                "[RuntimeSchemaProvider] no live/cached/snapshot schema for %s — "
                 "falling back to seed, name_only mode",
                 table,
             )
@@ -141,6 +159,81 @@ class RuntimeSchemaProvider:
             "fetched_at": datetime.now(timezone.utc).isoformat(),
             "fetched_at_mono": time.monotonic(),
         }
+
+    @staticmethod
+    def _load_snapshot(table: str) -> dict | None:
+        """
+        PR3B.1 tier 3: read the latest successful (Status=OK) canonical JSON
+        snapshot from Tables.SCHEMA_SNAPSHOTS (PR3A's archive) and extract
+        this table's entry from it. Read-only against PR3A's data — does
+        not call tools/schema_snapshot.py's write path, does not touch
+        document_converter (only the already-uploaded JSON attachment is
+        read, never the XLSX report). Returns None (logged) on any failure
+        — callers must fail through to the seed tier, never raise.
+        """
+        try:
+            from tools.airtable_tools import airtable_get_records
+            from airtable_schema import SchemaSnapshotFields, SchemaSnapshotStatus, Tables
+            import httpx
+        except Exception as e:
+            logger.warning("[RuntimeSchemaProvider] snapshot tier import failure: %s", e)
+            return None
+
+        try:
+            records = airtable_get_records(Tables.SCHEMA_SNAPSHOTS, "")
+        except Exception as e:
+            logger.warning("[RuntimeSchemaProvider] snapshot tier: could not list records: %s", e)
+            return None
+
+        ok_records = [
+            r for r in records
+            if r.get("fields", {}).get(SchemaSnapshotFields.STATUS) == SchemaSnapshotStatus.OK
+        ]
+        if not ok_records:
+            logger.warning("[RuntimeSchemaProvider] snapshot tier: no Status=OK snapshot record found")
+            return None
+
+        latest = max(
+            ok_records,
+            key=lambda r: str(r.get("fields", {}).get(SchemaSnapshotFields.SNAPSHOT_DATE, "")),
+        )
+        attachments = latest.get("fields", {}).get(SchemaSnapshotFields.SNAPSHOT_FILE, []) or []
+        json_attachment = next(
+            (a for a in attachments if a.get("filename", "").endswith(".json")), None
+        )
+        if not json_attachment:
+            logger.warning("[RuntimeSchemaProvider] snapshot tier: latest OK record has no JSON attachment")
+            return None
+
+        try:
+            r = httpx.get(json_attachment["url"], timeout=15)
+            r.raise_for_status()
+            snapshot = r.json()
+        except Exception as e:
+            logger.warning("[RuntimeSchemaProvider] snapshot tier: failed to download/parse JSON: %s", e)
+            return None
+
+        for t in snapshot.get("tables", []):
+            if t.get("table_name") == table:
+                fields = {
+                    f["field_name"]: {
+                        "field_id": f.get("field_id"),
+                        "type": f.get("field_type"),
+                        "choices": list(f.get("choices", [])),
+                    }
+                    for f in t.get("fields", [])
+                }
+                return {
+                    "table_id": t.get("table_id"),
+                    "fields": fields,
+                    "fetched_at": snapshot.get("fetched_at"),
+                    "fetched_at_mono": time.monotonic(),
+                }
+
+        logger.warning(
+            "[RuntimeSchemaProvider] snapshot tier: table '%s' not found in latest snapshot", table
+        )
+        return None
 
     @staticmethod
     def _seed_contract(table: str) -> dict:
