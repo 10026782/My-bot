@@ -124,29 +124,30 @@ def validate_airtable_fields(table: str, fields: dict) -> tuple[dict, list[str]]
         clean[k] = v
 
     # (final) unknown-field guard — drop fields Airtable doesn't know about.
-    # PR3B: reads through RuntimeSchemaProvider in SHADOW/ENFORCE mode instead
-    # of schema_validator directly. OFF (default) preserves prior behavior
-    # exactly. Do not reintroduce ad-hoc schema validation outside
+    # PR3B (rev.2): reads through RuntimeSchemaProvider.get_table_contract()
+    # in shadow/enforce state instead of schema_validator directly. "off"
+    # (default) preserves prior behavior exactly — the provider is never
+    # even called. Do not reintroduce ad-hoc schema validation outside
     # RuntimeSchemaProvider going forward.
-    from feature_flags import get_schema_provider_mode
-    mode = get_schema_provider_mode()
+    from feature_flags import get_runtime_schema_provider_state
+    state = get_runtime_schema_provider_state()
 
     legacy_unknown = _sv.validate_fields(table, clean)
 
-    if mode == "off":
+    if state == "off":
         unknown = legacy_unknown
     else:
         provider_unknown = _provider_unknown_fields(table, clean)
-        if mode == "shadow":
+        if state == "shadow":
             unknown = legacy_unknown
-            if provider_unknown is not None and set(provider_unknown) != set(legacy_unknown):
+            if set(provider_unknown) != set(legacy_unknown):
                 logger.warning(
                     "[RuntimeSchemaProvider:SHADOW] discrepancy table=%s legacy_unknown=%s "
-                    "provider_unknown=%s (not blocking — SHADOW mode)",
+                    "provider_unknown=%s (not blocking — shadow state)",
                     table, legacy_unknown, provider_unknown,
                 )
         else:  # "enforce"
-            unknown = provider_unknown if provider_unknown is not None else legacy_unknown
+            unknown = provider_unknown
 
     for u in unknown:
         errors.append(f"unknown field '{u}' in {table} (not in schema_cache)")
@@ -155,14 +156,11 @@ def validate_airtable_fields(table: str, fields: dict) -> tuple[dict, list[str]]
     return clean, errors
 
 
-def _provider_unknown_fields(table: str, fields: dict) -> list[str] | None:
-    """Unknown-field list per RuntimeSchemaProvider, or None if the provider
-    has no info for this table (mirrors schema_validator's "no info → don't
-    block" behavior)."""
+def _provider_unknown_fields(table: str, fields: dict) -> list[str]:
+    """Unknown-field list per RuntimeSchemaProvider.get_table_contract()."""
     from core.runtime_schema_provider import get_provider
-    known = get_provider().get_known_fields(table)
-    if not known:
-        return None
+    contract = get_provider().get_table_contract(table)
+    known = contract["fields"].keys()
     return [k for k in fields if k not in known]
 
 

@@ -1,182 +1,168 @@
-# core/runtime_schema_provider.py — PR3B: RuntimeSchemaProvider
+# core/runtime_schema_provider.py — PR3B (rev.2): RuntimeSchemaProvider
 #
-# One schema provider that all Airtable write validation reads from.
-# Resolves the best available schema in priority order:
-#   1. Fresh runtime schema (live Meta API fetch via refresh())
-#   2. Last good schema already held in memory
-#   3. Latest successful canonical JSON snapshot from Tables.SCHEMA_SNAPSHOTS (PR3A)
-#   4. schema_cache.json seed/fallback
-# If none are available: fail closed for unsafe writes (empty schema —
-# callers must treat "table/field unknown" conservatively).
+# One schema provider that Airtable write validation reads from, per table:
+#   1. Fresh live Meta API fetch (when the TTL for that table has expired).
+#   2. Last-good in-memory result for that table, served while its TTL is
+#      still valid — no Meta API call at all in this case.
+#   3. If the TTL expired and the live re-fetch fails: the same last-good
+#      result, served stale, with a WARNING log (age included).
+#   4. If there is no last-good result at all (cold start) and the live
+#      fetch fails: schema_cache.json seed via the existing, unchanged
+#      schema_validator.get_known_fields() — mode="name_only", table_id=None,
+#      choices=[] always (schema_cache.json has never stored choices).
 #
-# Reuses tools.schema_snapshot's fetch_live_schema()/normalize_schema() for
-# the live-fetch path so there is exactly one Meta-API-normalization
-# implementation, not two. Reads only the canonical JSON attachment from a
-# snapshot record — never parses XLSX, never depends on document_converter.
+# This module owns no on-disk state — schema_cache.json is never written
+# here, and this provider does not depend on PR3A's snapshot archive or on
+# document_converter in any way.
 
 from __future__ import annotations
 
-import json
 import logging
-from pathlib import Path
+import os
+import threading
+import time
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-# Internal schema shape: {table_name: {field_name: {"type": str|None, "choices": list[str]}}}
-SchemaDict = dict
+_DEFAULT_TTL_SECONDS = 300
 
 
 class RuntimeSchemaProvider:
-    """Injectable for tests — construct your own instance rather than relying
-    on the module-level singleton when a test needs isolation."""
+    """Singleton (see get_provider()), thread-safe. Construct your own
+    instance directly in tests for isolation."""
 
-    def __init__(self) -> None:
-        self._last_good: SchemaDict | None = None
-        self._last_good_source: str | None = None
+    def __init__(self, ttl_seconds: int | None = None) -> None:
+        self._lock = threading.Lock()
+        # table -> {"table_id", "mode", "fields", "fetched_at" (iso str),
+        #           "fetched_at_mono" (time.monotonic() float)}
+        self._last_good: dict[str, dict] = {}
+        self._ttl = (
+            ttl_seconds
+            if ttl_seconds is not None
+            else int(os.environ.get("SCHEMA_PROVIDER_TTL_SECONDS", _DEFAULT_TTL_SECONDS))
+        )
 
-    # ── Public provider API (required by spec) ──────────────────────
-
-    def get_schema(self) -> SchemaDict:
-        """Best available schema; never raises. Lazily resolves the full
-        fallback chain on cold start, otherwise serves the last good
-        in-memory schema without hitting the network on every call."""
-        if self._last_good is not None:
-            return self._last_good
-
-        if self.refresh():
-            return self._last_good  # type: ignore[return-value]
-
-        snapshot = self._load_latest_snapshot()
-        if snapshot is not None:
-            self._last_good = snapshot
-            self._last_good_source = "snapshot"
-            return snapshot
-
-        seed = self.load_seed_schema()
-        self._last_good = seed
-        self._last_good_source = "seed" if seed else "none"
-        return seed
-
-    def refresh(self) -> bool:
-        """Fetch fresh schema from the Meta API. On success, updates the
-        in-memory last-good schema and returns True. On failure, leaves
-        last_good untouched (refresh failure must never erase last good)
-        and returns False."""
-        fresh = self._fetch_fresh()
-        if fresh is None:
-            return False
-        self._last_good = fresh
-        self._last_good_source = "live_meta_api"
-        return True
-
-    def get_last_good(self) -> SchemaDict | None:
-        return self._last_good
-
-    def load_seed_schema(self) -> SchemaDict:
-        """schema_cache.json seed — field names only, no types/choices."""
-        path = Path(__file__).resolve().parent.parent / "schema_cache.json"
-        if not path.exists():
-            return {}
-        try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-        except Exception as e:
-            logger.warning("[RuntimeSchemaProvider] failed to read schema_cache.json seed: %s", e)
-            return {}
-        return {
-            table: {field: {"type": None, "choices": []} for field in fields}
-            for table, fields in raw.get("tables", {}).items()
+    def get_table_contract(self, table: str) -> dict:
+        """
+        Returns:
+        {
+            "table_id": str | None,
+            "mode": "full" | "name_only",
+            "source": "live" | "cached" | "seed",
+            "fetched_at": iso str | None,
+            "fields": {field_name: {"field_id", "type", "choices"}},
         }
+        Never raises.
+        """
+        with self._lock:
+            entry = self._last_good.get(table)
 
-    @property
-    def last_good_source(self) -> str | None:
-        return self._last_good_source
+            if entry is not None and (time.monotonic() - entry["fetched_at_mono"]) < self._ttl:
+                return self._contract_from_entry(entry, source="cached")
 
-    # ── Convenience read helpers used by Gateway integration ─────────
+            fresh = self._fetch_live(table)
+            if fresh is not None:
+                self._last_good[table] = fresh
+                return self._contract_from_entry(fresh, source="live")
 
-    def get_known_fields(self, table: str) -> set[str]:
-        return set(self.get_schema().get(table, {}).keys())
+            if entry is not None:
+                age = time.monotonic() - entry["fetched_at_mono"]
+                logger.warning(
+                    "[RuntimeSchemaProvider] stale schema used for %s, age=%.0fs", table, age
+                )
+                return self._contract_from_entry(entry, source="cached")
 
-    def get_field_info(self, table: str, field: str) -> dict | None:
-        return self.get_schema().get(table, {}).get(field)
-
-    # ── Internal fetch paths ─────────────────────────────────────────
-
-    def _fetch_fresh(self) -> SchemaDict | None:
-        try:
-            from tools.schema_snapshot import fetch_live_schema, normalize_schema
-            import os
-        except Exception as e:
-            logger.warning("[RuntimeSchemaProvider] import failure during fresh fetch: %s", e)
-            return None
-
-        raw_meta = fetch_live_schema()
-        if raw_meta is None:
-            return None
-        base_id = os.environ.get("AIRTABLE_BASE_ID", "")
-        snapshot = normalize_schema(raw_meta, base_id)
-        return self._snapshot_to_provider_shape(snapshot)
-
-    def _load_latest_snapshot(self) -> SchemaDict | None:
-        try:
-            from tools.airtable_tools import airtable_get_records
-            from airtable_schema import SchemaSnapshotFields, SchemaSnapshotStatus, Tables
-            import httpx
-        except Exception as e:
-            logger.warning("[RuntimeSchemaProvider] import failure during snapshot fallback: %s", e)
-            return None
-
-        try:
-            records = airtable_get_records(
-                Tables.SCHEMA_SNAPSHOTS,
-                f"{{{SchemaSnapshotFields.STATUS}}}='{SchemaSnapshotStatus.OK}'",
+            logger.critical(
+                "[RuntimeSchemaProvider] no live/cached schema for %s — "
+                "falling back to seed, name_only mode",
+                table,
             )
-        except Exception as e:
-            logger.warning("[RuntimeSchemaProvider] could not list snapshot records: %s", e)
-            return None
-        if not records:
-            return None
+            return self._seed_contract(table)
 
-        latest = max(
-            records,
-            key=lambda r: str(r.get("fields", {}).get(SchemaSnapshotFields.SNAPSHOT_DATE, "")),
-        )
-        attachments = latest.get("fields", {}).get(SchemaSnapshotFields.SNAPSHOT_FILE, []) or []
-        json_attachment = next(
-            (a for a in attachments if a.get("filename", "").endswith(".json")), None
-        )
-        if not json_attachment:
-            logger.warning("[RuntimeSchemaProvider] latest snapshot record has no JSON attachment")
-            return None
-
-        try:
-            r = httpx.get(json_attachment["url"], timeout=15)
-            r.raise_for_status()
-            raw_snapshot = r.json()
-        except Exception as e:
-            logger.warning("[RuntimeSchemaProvider] failed to download snapshot JSON: %s", e)
-            return None
-
-        return self._snapshot_to_provider_shape(raw_snapshot)
+    # ── Internal ──────────────────────────────────────────────────────
 
     @staticmethod
-    def _snapshot_to_provider_shape(snapshot: dict) -> SchemaDict:
-        """Convert tools.schema_snapshot's canonical {tables: [...]} shape
-        into {table_name: {field_name: {type, choices}}}."""
-        out: SchemaDict = {}
-        for t in snapshot.get("tables", []):
-            fields = {}
-            for f in t.get("fields", []):
-                fields[f["field_name"]] = {
-                    "type": f.get("field_type"),
-                    "choices": list(f.get("choices", [])),
-                }
-            out[t["table_name"]] = fields
-        return out
+    def _contract_from_entry(entry: dict, source: str) -> dict:
+        return {
+            "table_id": entry["table_id"],
+            "mode": "full",
+            "source": source,
+            "fetched_at": entry["fetched_at"],
+            "fields": entry["fields"],
+        }
+
+    def _fetch_live(self, table: str) -> dict | None:
+        key = os.environ.get("AIRTABLE_API_KEY", "")
+        base = os.environ.get("AIRTABLE_BASE_ID", "")
+        if not key or not base:
+            logger.warning(
+                "[RuntimeSchemaProvider] AIRTABLE_API_KEY/AIRTABLE_BASE_ID missing — "
+                "cannot fetch live schema for %s",
+                table,
+            )
+            return None
+        try:
+            import httpx
+
+            r = httpx.get(
+                f"https://api.airtable.com/v0/meta/bases/{base}/tables",
+                headers={"Authorization": f"Bearer {key}"},
+                timeout=15,
+            )
+            r.raise_for_status()
+        except Exception as e:
+            logger.warning(
+                "[RuntimeSchemaProvider] Meta API fetch failed for table=%s: %s", table, e
+            )
+            return None
+
+        for t in r.json().get("tables", []):
+            if t.get("name") == table:
+                return self._build_entry(t)
+
+        logger.warning("[RuntimeSchemaProvider] table '%s' not found via Meta API", table)
+        return None
+
+    @staticmethod
+    def _build_entry(t: dict) -> dict:
+        fields: dict = {}
+        for f in t.get("fields", []):
+            options = f.get("options") or {}
+            choices = [c.get("name") for c in options.get("choices", [])]
+            fields[f["name"]] = {
+                "field_id": f.get("id"),
+                "type": f.get("type"),
+                "choices": choices,
+            }
+        return {
+            "table_id": t.get("id"),
+            "fields": fields,
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "fetched_at_mono": time.monotonic(),
+        }
+
+    @staticmethod
+    def _seed_contract(table: str) -> dict:
+        """schema_cache.json seed via the existing, unchanged
+        schema_validator.get_known_fields(). Always mode="name_only",
+        table_id=None, choices=[] — schema_cache.json has never stored
+        select-option choices, so this is not a special case to fix here."""
+        import schema_validator as _sv
+
+        known = _sv.get_known_fields(table)
+        return {
+            "table_id": None,
+            "mode": "name_only",
+            "source": "seed",
+            "fetched_at": None,
+            "fields": {name: {"field_id": None, "type": None, "choices": []} for name in known},
+        }
 
 
 # ══════════════════════════════════════════════════════════════════
 # Module-level singleton for production use — construct a fresh
-# RuntimeSchemaProvider() directly in tests for isolation instead.
+# RuntimeSchemaProvider() directly in tests for isolation.
 # ══════════════════════════════════════════════════════════════════
 
 _provider: RuntimeSchemaProvider | None = None
