@@ -1224,7 +1224,7 @@
 - **Deployed/Verified בפרודקשן:** ✅ חלקית — 08/07/2026: `cmd_update.py`'s `BMF.DATE` נבדק בפועל (`/update` → נדל"ן → Other → טקסט → נשמר, אין 422). שאר 6 נקודות הכתיבה (`media_handler.py`, `cmd_decision.py` ×5) **לא נבדקו עדיין** בתרחיש הזה.
 - **סטטוס:** ✅ תוקן ומוזג ל-main — נקודת הכתיבה של `/update` מאומתת בפרודקשן, שאר הנקודות עדיין ממתינות לאימות.
 
-### BUG-081 — Business Memory `Domain` "ממוחזר" לתוך `Tags` הכללי, בלי אימות מול live options → 422 (תוקן ב-5 שלבים) — ✅ תוקן 07/07/2026, ✅ מאומת בפרודקשן 08/07/2026 (real_estate)
+### BUG-081 — Business Memory `Domain` "ממוחזר" לתוך `Tags` הכללי, בלי אימות מול live options → 422 (תוקן ב-5 שלבים) — ✅ תוקן 07/07/2026, ✅ מאומת בפרודקשן במלואו 08/07/2026 (6/6 domains)
 - **תאריך:** 07/07/2026
 - **דווח על ידי:** session audit, בהמשך ל-BUG-080 — נבדק אם domain key גולמי (למשל `"media"`) שנכתב ל-`Tags` הוא בכלל option קיים.
 - **קבצים:** `airtable_schema.py` (`BusinessMemoryFields.DOMAIN` — שדה חדש), `cmd_update.py` (`normalize_business_memory_fields`, `_VALID_TAGS`, `_DOMAIN_TO_AIRTABLE`, `_TAG_NORMALIZE`), `media_handler.py` (`_save_transcript_to_memory`).
@@ -1236,9 +1236,9 @@
 - **שלב 5 (PR #265) — תיקון סופי, רווח בסוף:** אומת ישירות מול Airtable Meta API (לא צילום מסך) שהאופציות החיות הן `"Real Estate "` ו-`"SaaS "` (עם רווח בסוף), לא המחרוזות הנקיות ששימשו עד כה. `_DOMAIN_TO_AIRTABLE["real_estate"]`/`["saas"]` עודכנו בהתאם; אומת ב-`repr()` שהרווח נשמר בקוד ולא נגזם ע"י עורך/linter.
 - **בדיקה:** `smoke_tests.py` ירוק בכל שלב, `test_integration.py` 4/4, `core/router/test_router.py` 44/44 (שלבים 1/4). בדיקות ידניות ממוקדות בכל שלב, כולל `repr()` על שלב 5.
 - **Merged:** ✅ כן — `main` `50847b7` (PR #259), `0094a82` (PR #260), `fa08a58` (PR #261), `eaa01fa` (PR #263), `def0a00` (PR #265). מאומת: `git grep`/`git merge-base --is-ancestor` על `origin/main` בכל שלב.
-- **Deployed/Verified בפרודקשן:** ✅ כן — 08/07/2026: `/update` נבדק ב-4 domains שונים ברצף אמיתי (Telegram, Eli↔BOSS) — `נדל"ן` (real_estate), `SaaS`, `מדיה` (media), `ייבוא` (import), כולם → `Other` → טקסט חופשי → נשמר בהצלחה, "📌 Other | <domain>" הוצג נכון בכל אחד, **אין 422** באף אחד. מאמת בפועל את המיפוי הסופי (שלב 5 כלול) עבור 4 מתוך 6 המפתחות ב-`_DOMAIN_TO_AIRTABLE`. **לא מאומת עדיין:** `finance`/`general`.
+- **Deployed/Verified בפרודקשן:** ✅ כן — 08/07/2026: `/update` נבדק ב-**כל 6** ה-domains ברצף אמיתי (Telegram, Eli↔BOSS) — `נדל"ן` (real_estate), `SaaS`, `מדיה` (media), `ייבוא` (import), `כללי` (general), `כספים` (finance), כולם → `Other` → טקסט חופשי → נשמר בהצלחה, "📌 Other | <domain>" הוצג נכון בכל אחד, **אין 422** באף אחד. מאמת בפועל את המיפוי הסופי (שלב 5 כלול) עבור **6/6** המפתחות ב-`_DOMAIN_TO_AIRTABLE`.
 - **פער ידוע, לא בסקופ:** `weekly_summary.py::_group_by_domain()` ו-`tma_api.py`'s Business Memory listing עדיין קוראים `Tags[0]` כ-domain — ישברו בשקט (default ל-`"general"`/ריק) ברגע שרשומות חדשות ייכתבו עם `Domain` בשדה הייעודי במקום ב-`Tags`. Backlog, piggyback-trigger על הפעלת `FEATURE_WEEKLY_SUMMARY` או שימוש פעיל ב-TMA business memory screen — אף אחד מהשניים לא בשימוש פעיל כרגע.
-- **סטטוס:** ✅ תוקן ומוזג ל-main (5 PRs) — **מאומת בפרודקשן** עבור 4/6 domains (real_estate/SaaS/media/import); `finance`/`general` ממתינים לאימות.
+- **סטטוס:** ✅ תוקן ומוזג ל-main (5 PRs) — **מאומת בפרודקשן במלואו, 6/6 domains** (real_estate/SaaS/media/import/general/finance).
 
 ### BUG-082 — כשל בפענוח הפניות אנאפוריות ("זה", "הנספח", "הקודם") — נבדק, לא אושר: הופרך בקוד
 - **דווח:** 08/07/2026
