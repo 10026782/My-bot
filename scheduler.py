@@ -44,6 +44,23 @@ def _job_daily_digest():
         logger.error(f"[Scheduler] job=daily_digest error: {e}")
 
 
+def _job_schema_snapshot_archive():
+    """Feature flag: FEATURE_AIRTABLE_SCHEMA_SNAPSHOT (default off, PR3A).
+    No scheduled job may modify git files — this only writes to Airtable."""
+    try:
+        from feature_flags import is_enabled
+        if not is_enabled("FEATURE_AIRTABLE_SCHEMA_SNAPSHOT"):
+            return
+        from tools.schema_snapshot import run_snapshot_archive
+        result = run_snapshot_archive()
+        if not result.get("ok"):
+            logger.warning(f"[Scheduler] job=schema_snapshot_archive not ok: {result}")
+    except ImportError:
+        logger.info("tools.schema_snapshot לא קיים — דולג")
+    except Exception as e:
+        logger.error(f"[Scheduler] job=schema_snapshot_archive error: {e}")
+
+
 def _job_daily_git_audit():
     """Feature flag: GIT_AUDIT_SCHEDULER (default off) — daily_git_audit.py נשאר manual-only עד שמופעל."""
     try:
@@ -807,6 +824,7 @@ def start_scheduler() -> threading.Thread:
     # Wrapped in shabbat_safe(), same pattern already used for 6 other jobs below.
     schedule.every().day.at(digest_time).do(shabbat_safe(_automation_guard(_job_daily_digest, name="daily_digest")))
     schedule.every().day.at(git_audit_time).do(_automation_guard(_job_daily_git_audit, name="daily_git_audit"))            # Daily Git/config integrity audit (GOV-02)
+    schedule.every().day.at("03:30").do(_automation_guard(_job_schema_snapshot_archive, name="schema_snapshot_archive"))  # PR3A — flag: FEATURE_AIRTABLE_SCHEMA_SNAPSHOT
     schedule.every().day.at(collector_time).do(shabbat_safe(_automation_guard(_job_daily_collector, name="daily_collector")))
     schedule.every(cleanup_interval).minutes.do(_automation_guard(_job_cleanup_pending, name="cleanup_pending"))
     schedule.every().day.at("00:05").do(_automation_guard(_job_overdue_payments, name="overdue_payments"))

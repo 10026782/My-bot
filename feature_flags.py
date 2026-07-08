@@ -86,6 +86,15 @@ GAME / SCHEDULER:
   PAYMENT_REMINDERS           - תזכורות תשלום אוטומטיות
   GIT_AUDIT_SCHEDULER         - הרצה יומית אוטומטית של daily_git_audit.py; default OFF (נשאר manual-only)
 
+PR3A — Airtable Schema Snapshot Archive:
+  FEATURE_AIRTABLE_SCHEMA_SNAPSHOT         - scheduler job מייצר snapshot של ה-schema החי
+                                 ומעלה JSON+XLSX ל-Tables.SCHEMA_SNAPSHOTS; default OFF.
+                                 דורש manual pre-activation checklist (טבלה קיימת + שדות
+                                 תואמים) לפני הפעלה — ראה tools/schema_snapshot.py.
+  FEATURE_AIRTABLE_SCHEMA_SNAPSHOT_CLEANUP - מפעיל retention policy (מחיקת snapshots ישנים)
+                                 בתוך run_snapshot_archive(); default OFF — ניקוי ראשוני
+                                 ייעשה ידנית (tools/schema_snapshot.apply_retention_policy()).
+
 PR3B (rev.2) — Airtable RuntimeSchemaProvider (independent of any snapshot-
 archive work — see core/runtime_schema_provider.py):
   FEATURE_AIRTABLE_RUNTIME_SCHEMA_PROVIDER_STATE - שלוש מצבים (לא boolean רגיל):
