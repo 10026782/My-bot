@@ -86,6 +86,15 @@ GAME / SCHEDULER:
   PAYMENT_REMINDERS           - תזכורות תשלום אוטומטיות
   GIT_AUDIT_SCHEDULER         - הרצה יומית אוטומטית של daily_git_audit.py; default OFF (נשאר manual-only)
 
+PR3B (rev.2) — Airtable RuntimeSchemaProvider (independent of any snapshot-
+archive work — see core/runtime_schema_provider.py):
+  FEATURE_AIRTABLE_RUNTIME_SCHEMA_PROVIDER_STATE - שלוש מצבים (לא boolean רגיל):
+                                 "off" (ברירת מחדל, התנהגות קיימת ללא שינוי) / "shadow"
+                                 (הפרובידר רץ, משווה מול schema_validator הקיים, מלוגג
+                                 discrepancy — לא חוסם כתיבה) / "enforce" (תוצאת הפרובידר
+                                 בפועל קובעת אילו שדות נחסמים). קריאה דרך
+                                 get_runtime_schema_provider_state(), לא is_enabled().
+
 C94 (Unified Ingress Envelope + Evidence Trace):
   FEATURE_INGRESS_ENVELOPE    - קיל-סוויץ' לבניית IngressEnvelope ב-run_agent() (Telegram+WhatsApp/
                                  Twilio, C94 Stage ג/ד). default ON (ברירת מחדל הפוכה מרוב הדגלים
@@ -160,6 +169,20 @@ def is_enabled(name: str) -> bool:
         return _RUNTIME[name]
     value = os.environ.get(name, _DEFAULTS.get(name, "")).strip().lower()
     return value in ("1", "true", "yes", "on", "enabled")
+
+
+_SCHEMA_PROVIDER_STATES = ("off", "shadow", "enforce")
+
+
+def get_runtime_schema_provider_state() -> str:
+    """
+    Three-state accessor for FEATURE_AIRTABLE_RUNTIME_SCHEMA_PROVIDER_STATE.
+    Unlike every other flag in this registry, this one is not a boolean —
+    it has an off/shadow/enforce lifecycle (see core/runtime_schema_provider.py).
+    Returns "off" for any unset/unrecognized value — fail closed to old behavior.
+    """
+    value = os.environ.get("FEATURE_AIRTABLE_RUNTIME_SCHEMA_PROVIDER_STATE", "off").strip().lower()
+    return value if value in _SCHEMA_PROVIDER_STATES else "off"
 
 
 def set_flag(name: str, value: bool) -> None:
