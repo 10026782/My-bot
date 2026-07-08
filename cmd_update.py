@@ -354,10 +354,10 @@ _VALID_TAGS = {
 
 # מיפוי domain-key (מה-DOMAINS tuple הפנימי) → ערך Airtable חוקי
 _DOMAIN_TO_AIRTABLE = {
-    "real_estate": "Real Estate",   # Title Case הוא היחיד שנשאר ב-Airtable
+    "real_estate": "Real Estate ",  # רווח בסוף — מאומת מול Airtable Meta API, לא לתקן/לגזום
     "import":      "Import",
-    "media":       "Media",         # תוקן — Title Case, לא lowercase
-    "saas":        "SaaS",
+    "media":       "Media",         # Title Case, לא lowercase
+    "saas":        "SaaS ",         # רווח בסוף — אותה בעיה, מאומת מול Meta API
     "finance":     "General",       # אין option ייעודי — נופל ל-General, עם warning
     "general":     "General",
 }
