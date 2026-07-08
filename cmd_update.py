@@ -352,15 +352,71 @@ _VALID_TAGS = {
     "principle",
 }
 
-# מיפוי domain-key (מה-DOMAINS tuple הפנימי) → ערך Airtable חוקי
+# מיפוי domain-key (מה-DOMAINS tuple הפנימי) → ערך Airtable חוקי.
+# Fallback בלבד — משמש רק כש-RuntimeSchemaProvider לא זמין (אין live schema
+# בכלל). בזרימה הרגילה הערך החי נלקח דינמית מ-resolve_business_memory_domain(),
+# לא מהמילון הזה — ראה BUG-081 (5 תיקונים חוזרים על מיפוי סטטי שיצא מסונכרן).
 _DOMAIN_TO_AIRTABLE = {
-    "real_estate": "Real Estate ",  # רווח בסוף — מאומת מול Airtable Meta API, לא לתקן/לגזום
+    "real_estate": "Real Estate",
     "import":      "Import",
-    "media":       "Media",         # Title Case, לא lowercase
-    "saas":        "SaaS ",         # רווח בסוף — אותה בעיה, מאומת מול Meta API
+    "media":       "Media",
+    "saas":        "SaaS",
     "finance":     "General",       # אין option ייעודי — נופל ל-General, עם warning
     "general":     "General",
 }
+
+# domain-key-ים בלי option ייעודי משלהם ב-Airtable — מתחילים חיפוש לפי
+# ה-domain-key הזה במקום לפי עצמם. זו החלטה עסקית (אין "Finance" ב-Airtable),
+# לא עובדה על הסכימה — ולכן נשארת סטטית גם אחרי המעבר ל-live lookup.
+_DOMAIN_NO_DEDICATED_OPTION = {"finance": "general"}
+
+
+def _normalize_domain_option(value: str) -> str:
+    import re
+    return re.sub(r"\s+", " ", value.replace("_", " ").strip().lower())
+
+
+def resolve_business_memory_domain(raw_domain_key: str) -> dict:
+    """
+    בירור חי, מול RuntimeSchemaProvider, של הערך המדויק של Domain ב-Business
+    Memory שתואם ל-raw_domain_key (case/whitespace-tolerant). לא מנרמל/גוזם/
+    ממציא ערך — אם יש שינוי שם live (rename), הכתיבה הבאה מסתגלת אוטומטית
+    בלי תיקון קוד.
+
+    Returns {"ok": True, "value": <המחרוזת המדויקת מ-Airtable>} או
+    {"ok": False, "error": <הודעה>}. לעולם לא זורק חריגה.
+    """
+    lookup_key = _DOMAIN_NO_DEDICATED_OPTION.get(raw_domain_key, raw_domain_key)
+    target = _normalize_domain_option(lookup_key)
+
+    try:
+        from core.runtime_schema_provider import get_provider
+        from airtable_schema import Tables, BusinessMemoryFields as BMF
+
+        contract = get_provider().get_table_contract(Tables.BUSINESS_MEMORY)
+        field_info = contract.get("fields", {}).get(BMF.DOMAIN) if contract.get("mode") == "full" else None
+        choices = field_info.get("choices") if field_info else None
+    except Exception as e:
+        choices = None
+        logger.warning(f"[BMF] RuntimeSchemaProvider lookup failed for Domain: {e}")
+
+    if not choices:
+        static_value = _DOMAIN_TO_AIRTABLE.get(raw_domain_key)
+        if static_value:
+            logger.warning(
+                f"[BMF] no live schema for Domain — falling back to static mapping for '{raw_domain_key}'"
+            )
+            return {"ok": True, "value": static_value}
+        return {"ok": False, "error": f"no live schema and no static mapping for domain key '{raw_domain_key}'"}
+
+    matches = [c for c in choices if _normalize_domain_option(c) == target]
+
+    if len(matches) > 1:
+        return {"ok": False, "error": f"duplicate option name found: {matches[0]} ({len(matches)} matching options)"}
+    if len(matches) == 1:
+        return {"ok": True, "value": matches[0]}
+
+    return {"ok": False, "error": f"no live Airtable Domain option matches domain key '{raw_domain_key}'"}
 
 
 def normalize_business_memory_fields(fields: dict, raw_domain_key: str) -> dict:
@@ -391,15 +447,18 @@ def normalize_business_memory_fields(fields: dict, raw_domain_key: str) -> dict:
             result.pop(BMF.TAGS, None)
             logger.info("[BMF] removed empty Tags after filtering")
 
-    # Domain — כתיבה לשדה הייעודי, לא ל-Tags
-    airtable_domain = _DOMAIN_TO_AIRTABLE.get(raw_domain_key)
-    if airtable_domain:
-        if airtable_domain != raw_domain_key:
-            logger.info(f"[BMF] normalized Domain: {raw_domain_key} → {airtable_domain}")
-        result[BMF.DOMAIN] = airtable_domain
+    # Domain — כתיבה לשדה הייעודי, לא ל-Tags. בירור חי, לא מילון סטטי (ראה
+    # resolve_business_memory_domain). אם הבירור נכשל (no-match/duplicate),
+    # לא ממציאים ערך שרירותי — משאירים את BMF.DOMAIN בחוץ; הקורא (למשל
+    # _save_to_business_memory) אחראי להחליט אם זו סיבה לחסום את הכתיבה.
+    resolved = resolve_business_memory_domain(raw_domain_key)
+    if resolved["ok"]:
+        if resolved["value"] != raw_domain_key:
+            logger.info(f"[BMF] normalized Domain: {raw_domain_key} → {resolved['value']}")
+        result[BMF.DOMAIN] = resolved["value"]
     else:
-        logger.warning(f"[BMF] no domain mapping for '{raw_domain_key}' — defaulting to General")
-        result[BMF.DOMAIN] = "General"
+        logger.error(f"[BMF] Domain resolution failed for '{raw_domain_key}': {resolved['error']}")
+        result.pop(BMF.DOMAIN, None)
 
     return result
 
@@ -426,6 +485,12 @@ def _save_to_business_memory(
             BMF.IMPACT:      "Manual Entry",
         }
         fields = normalize_business_memory_fields(fields, domain)
+
+        if BMF.DOMAIN not in fields:
+            logger.error(
+                f"[C20] aborting save — Domain resolution failed for '{domain}' source={source_tag}"
+            )
+            return None
 
         record = airtable_create(
             Tables.BUSINESS_MEMORY,
@@ -468,7 +533,8 @@ def get_recent_business_context(domain: str = "general", limit: int = 5) -> str:
         from airtable_schema import Tables, BusinessMemoryFields as BMF
 
         if domain and domain != "general":
-            airtable_domain = _DOMAIN_TO_AIRTABLE.get(domain, "General")
+            resolved = resolve_business_memory_domain(domain)
+            airtable_domain = resolved["value"] if resolved["ok"] else "General"
             formula = (
                 f"OR("
                 f"{{{BMF.DOMAIN}}}='{airtable_domain}',"
