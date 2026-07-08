@@ -86,6 +86,22 @@ GAME / SCHEDULER:
   PAYMENT_REMINDERS           - תזכורות תשלום אוטומטיות
   GIT_AUDIT_SCHEDULER         - הרצה יומית אוטומטית של daily_git_audit.py; default OFF (נשאר manual-only)
 
+PR3A/PR3B/PR3C — Airtable Schema Snapshot / RuntimeSchemaProvider (SPEC v2):
+  FEATURE_AIRTABLE_SCHEMA_SNAPSHOT         - scheduler job מייצר snapshot של ה-schema החי
+                                 ומעלה JSON+XLSX ל-Tables.SCHEMA_SNAPSHOTS; default OFF.
+                                 דורש manual pre-activation checklist (טבלה קיימת + שדות
+                                 תואמים) לפני הפעלה — ראה tools/schema_snapshot.py.
+  FEATURE_AIRTABLE_SCHEMA_SNAPSHOT_CLEANUP - מפעיל retention policy (מחיקת snapshots ישנים)
+                                 בתוך run_snapshot_archive(); default OFF — ניקוי ראשוני
+                                 ייעשה ידנית (tools/schema_snapshot.apply_retention_policy()).
+  FEATURE_AIRTABLE_RUNTIME_SCHEMA_PROVIDER - שלוש מצבים (לא boolean רגיל — ראה
+                                 core/runtime_schema_provider.py): "off" (ברירת מחדל, התנהגות
+                                 קיימת) / "shadow" (הפרובידר רץ ומשווה, לא חוסם כתיבה) /
+                                 "enforce" (הפרובידר חוסם כתיבה). קריאה דרך get_schema_provider_mode(),
+                                 לא is_enabled() — זה לא boolean.
+  FEATURE_AIRTABLE_RUNTIME_SCHEMA_REFRESH  - מפעיל refresh() תקופתי של הפרובידר מה-scheduler;
+                                 default OFF.
+
 C94 (Unified Ingress Envelope + Evidence Trace):
   FEATURE_INGRESS_ENVELOPE    - קיל-סוויץ' לבניית IngressEnvelope ב-run_agent() (Telegram+WhatsApp/
                                  Twilio, C94 Stage ג/ד). default ON (ברירת מחדל הפוכה מרוב הדגלים
@@ -160,6 +176,20 @@ def is_enabled(name: str) -> bool:
         return _RUNTIME[name]
     value = os.environ.get(name, _DEFAULTS.get(name, "")).strip().lower()
     return value in ("1", "true", "yes", "on", "enabled")
+
+
+_SCHEMA_PROVIDER_MODES = ("off", "shadow", "enforce")
+
+
+def get_schema_provider_mode() -> str:
+    """
+    Three-state accessor for FEATURE_AIRTABLE_RUNTIME_SCHEMA_PROVIDER.
+    Unlike every other flag in this registry, this one is not a boolean —
+    it has an OFF/SHADOW/ENFORCE lifecycle (see core/runtime_schema_provider.py).
+    Returns "off" for any unset/unrecognized value — fail closed to old behavior.
+    """
+    value = os.environ.get("FEATURE_AIRTABLE_RUNTIME_SCHEMA_PROVIDER", "").strip().lower()
+    return value if value in _SCHEMA_PROVIDER_MODES else "off"
 
 
 def set_flag(name: str, value: bool) -> None:

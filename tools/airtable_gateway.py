@@ -308,6 +308,108 @@ def airtable_create(
         return None
 
 
+def airtable_delete(table: str, record_id: str, source: str = "unknown") -> bool:
+    """DELETE an existing Airtable record. Returns True on success."""
+    try:
+        r = httpx.delete(
+            f"{_at_url(table)}/{record_id}",
+            headers=_at_headers(),
+            timeout=10,
+        )
+        ok = r.status_code == 200
+        _audit_log(source, table, "delete", record_id, [], ok=ok)
+        if not ok:
+            logger.warning(
+                "[gateway:%s] DELETE %s/%s → %d: %s",
+                source, table, record_id, r.status_code, r.text[:200],
+            )
+        return ok
+    except Exception as e:
+        logger.warning("[gateway:%s] DELETE %s/%s error: %s", source, table, record_id, e)
+        _audit_log(source, table, "delete", record_id, [], ok=False)
+        return False
+
+
+# ══════════════════════════════════════════════════════════════════
+# PR3A — Native attachment upload (Meta API ID resolution + uploadAttachment)
+# ══════════════════════════════════════════════════════════════════
+#
+# Airtable's regular record PATCH/POST does not accept raw bytes for
+# attachment fields — only {"url": ...} pointing at an already-public file.
+# Uploading bytes we generated internally (no public URL) requires the
+# dedicated binary upload endpoint below, which lives on a different host
+# (content.airtable.com, not api.airtable.com) and needs the *field ID*,
+# not the field name. Table/field name != table/field ID — always resolve
+# via the Meta API rather than assuming they match.
+
+def resolve_table_and_field_ids(table_name: str, field_name: str) -> tuple[str, str]:
+    """
+    Resolve Airtable's internal tableId/fieldId for (table_name, field_name)
+    via the Meta API. Raises RuntimeError if either cannot be found —
+    callers must fail closed, never guess an ID.
+    """
+    r = httpx.get(
+        f"https://api.airtable.com/v0/meta/bases/{_at_base()}/tables",
+        headers={"Authorization": f"Bearer {_at_key()}"},
+        timeout=15,
+    )
+    r.raise_for_status()
+    for t in r.json().get("tables", []):
+        if t.get("name") == table_name:
+            table_id = t["id"]
+            for f in t.get("fields", []):
+                if f.get("name") == field_name:
+                    return table_id, f["id"]
+            raise RuntimeError(
+                f"field '{field_name}' not found in table '{table_name}' via Meta API"
+            )
+    raise RuntimeError(f"table '{table_name}' not found via Meta API")
+
+
+def airtable_upload_attachment(
+    record_id: str,
+    field_id: str,
+    filename: str,
+    content_bytes: bytes,
+    content_type: str,
+    source: str = "unknown",
+) -> dict:
+    """
+    Upload raw bytes as a native Airtable attachment on an existing record.
+    This is a new write path inside the Gateway, not a bypass of it.
+    Returns {"ok": bool, "error": str|None, "raw": dict}.
+    """
+    import base64
+
+    b64 = base64.b64encode(content_bytes).decode("ascii")
+    try:
+        r = httpx.post(
+            f"https://content.airtable.com/v0/{_at_base()}/{record_id}/{field_id}/uploadAttachment",
+            headers={
+                "Authorization": f"Bearer {_at_key()}",
+                "Content-Type": "application/json",
+            },
+            json={"contentType": content_type, "filename": filename, "file": b64},
+            timeout=30,
+        )
+        ok = r.status_code == 200
+        _audit_log(source, "attachment_upload", "upload", record_id, [field_id], ok=ok)
+        if ok:
+            return {"ok": True, "error": None, "raw": r.json()}
+        body = r.text[:300]
+        logger.warning(
+            "[gateway:%s] uploadAttachment %s/%s → %d: %s",
+            source, record_id, field_id, r.status_code, body,
+        )
+        return {"ok": False, "error": f"HTTP {r.status_code}: {body}", "raw": {}}
+    except Exception as e:
+        logger.warning(
+            "[gateway:%s] uploadAttachment %s/%s error: %s", source, record_id, field_id, e
+        )
+        _audit_log(source, "attachment_upload", "upload", record_id, [field_id], ok=False)
+        return {"ok": False, "error": str(e), "raw": {}}
+
+
 # ══════════════════════════════════════════════════════════════════
 # Step 5 — Startup consistency check
 # ══════════════════════════════════════════════════════════════════
