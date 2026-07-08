@@ -40,7 +40,17 @@ def run() -> bool:
 
     def fake_airtable_add(table, fields):
         adds.append((table, dict(fields)))
-        return "✅ רשומה נוספה | ID: recNew123"
+        # C53-A contract shape (matches the real tools.airtable_tools.airtable_add) —
+        # was stale as a "✅"-prefixed string before PR_RESPONSE_CONTRACT, which
+        # made inbound_handler._create_email_lead's success check crash on this
+        # fake (silently swallowed by its own broad except, but a stale test double).
+        return {
+            "ok": True,
+            "tool": "airtable_add",
+            "external_id": "recNew123",
+            "evidence": {"record_id": "recNew123", "table": table, "fields": dict(fields)},
+            "user_message": "✅ רשומה נוספה | ID: recNew123",
+        }
 
     def fake_airtable_patch(table, record_id, fields, source="unknown"):
         patches.append((table, record_id, dict(fields)))

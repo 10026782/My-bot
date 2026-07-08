@@ -126,8 +126,10 @@ def _create_email_lead(
             LeadFields.MEMORY_KEY:  f"email:{sender_id}",
         }
         result = airtable_add(Tables.LEADS, fields)
-        m = re.search(r"rec\w+", result or "")
-        record_id = m.group(0) if m else "unknown"
+        if not result.get("ok"):
+            logger.warning("[InboundHandler] create_email_lead not ok: %s", result.get("user_message", result))
+            return
+        record_id = result.get("external_id") or "unknown"
         logger.info("[InboundHandler] created email lead %s domain=%s", record_id, domain)
     except Exception as e:
         logger.error("[InboundHandler] create_email_lead error: %s", e)
