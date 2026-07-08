@@ -257,7 +257,10 @@ def create_human_pipeline_task(lead: AbandonedLead, owner_chat_id: str) -> bool:
                 f"תשובות: {answers_str}"
             ),
         }
-        airtable_add(Tables.TASKS, fields)
+        result = airtable_add(Tables.TASKS, fields)
+        if not result.get("ok"):
+            logger.warning(f"[D02] create_human_pipeline_task not ok for {lead.sender}: {result.get('user_message', result)}")
+            return False
         _notify_human_pipeline(lead, owner_chat_id)
         return True
 
@@ -467,7 +470,7 @@ def _run_tests() -> bool:
     sys.modules["event_bus"] = eb
     at = types.ModuleType("airtable_tools")
     at.airtable_get = lambda t, f: "אין רשומות"
-    at.airtable_add = lambda t, f: "✅ rec001"
+    at.airtable_add = lambda t, f: {"ok": True, "external_id": "rec001", "user_message": "✅ rec001"}
     sys.modules["airtable_tools"] = at
 
     spec = importlib.util.spec_from_file_location("abandoned_lead_worker", __file__)

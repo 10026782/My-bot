@@ -183,7 +183,9 @@ def _save_lead(sender: str, session: dict) -> None:
                 session["lead_record_id"] = record_id
 
         if record_id:
-            airtable_patch(Tables.LEADS, record_id, fields, source="furniture_funnel")
+            ok = airtable_patch(Tables.LEADS, record_id, fields, source="furniture_funnel")
+            if not ok:
+                logger.warning("[FurnitureFunnel] lead patch not ok for %s (record_id=%s)", sender, record_id)
             return
 
         rec = airtable_create(Tables.LEADS, fields, source="furniture_funnel")

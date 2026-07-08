@@ -501,7 +501,9 @@ class PersistentSessionStore:
                 "last_uploaded_file": session.get("last_uploaded_file"),
                 "last_tool_result":   session.get("last_tool_result"),
             }
-            airtable_update(Tables.SESSIONS, record_id, {SF.STATE_JSON: json.dumps(state, ensure_ascii=False)})
+            result = airtable_update(Tables.SESSIONS, record_id, {SF.STATE_JSON: json.dumps(state, ensure_ascii=False)})
+            if not result.get("ok"):
+                logger.warning("[SessionStore] _delete_from_db not ok for record_id=%s: %s", record_id, result.get("user_message", result))
         except Exception:
             pass
 
