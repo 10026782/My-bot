@@ -1236,6 +1236,40 @@
 - **שלב 5 (PR #265) — תיקון סופי, רווח בסוף:** אומת ישירות מול Airtable Meta API (לא צילום מסך) שהאופציות החיות הן `"Real Estate "` ו-`"SaaS "` (עם רווח בסוף), לא המחרוזות הנקיות ששימשו עד כה. `_DOMAIN_TO_AIRTABLE["real_estate"]`/`["saas"]` עודכנו בהתאם; אומת ב-`repr()` שהרווח נשמר בקוד ולא נגזם ע"י עורך/linter.
 - **בדיקה:** `smoke_tests.py` ירוק בכל שלב, `test_integration.py` 4/4, `core/router/test_router.py` 44/44 (שלבים 1/4). בדיקות ידניות ממוקדות בכל שלב, כולל `repr()` על שלב 5.
 - **Merged:** ✅ כן — `main` `50847b7` (PR #259), `0094a82` (PR #260), `fa08a58` (PR #261), `eaa01fa` (PR #263), `def0a00` (PR #265). מאומת: `git grep`/`git merge-base --is-ancestor` על `origin/main` בכל שלב.
-- **Deployed/Verified בפרודקשן:** ✅ כן — 08/07/2026: `/update` → `נדל"ן` (real_estate) → `Other` → טקסט חופשי → נשמר בהצלחה, "📌 Other | נדל"ן" הוצג נכון בתגובה, **אין 422**. מאמת בפועל את המיפוי הסופי (שלב 5 כלול): `Domain="Real Estate "` (עם רווח), `Tags` נעדר. **לא מאומת עדיין:** שאר ה-domains (`media`/`saas`/`import`/`finance`/`general`).
+- **Deployed/Verified בפרודקשן:** ✅ כן — 08/07/2026: `/update` נבדק ב-4 domains שונים ברצף אמיתי (Telegram, Eli↔BOSS) — `נדל"ן` (real_estate), `SaaS`, `מדיה` (media), `ייבוא` (import), כולם → `Other` → טקסט חופשי → נשמר בהצלחה, "📌 Other | <domain>" הוצג נכון בכל אחד, **אין 422** באף אחד. מאמת בפועל את המיפוי הסופי (שלב 5 כלול) עבור 4 מתוך 6 המפתחות ב-`_DOMAIN_TO_AIRTABLE`. **לא מאומת עדיין:** `finance`/`general`.
 - **פער ידוע, לא בסקופ:** `weekly_summary.py::_group_by_domain()` ו-`tma_api.py`'s Business Memory listing עדיין קוראים `Tags[0]` כ-domain — ישברו בשקט (default ל-`"general"`/ריק) ברגע שרשומות חדשות ייכתבו עם `Domain` בשדה הייעודי במקום ב-`Tags`. Backlog, piggyback-trigger על הפעלת `FEATURE_WEEKLY_SUMMARY` או שימוש פעיל ב-TMA business memory screen — אף אחד מהשניים לא בשימוש פעיל כרגע.
-- **סטטוס:** ✅ תוקן ומוזג ל-main (5 PRs) — **מאומת בפרודקשן** עבור תרחיש real_estate/Other; שאר ה-domains ממתינים לאימות.
+- **סטטוס:** ✅ תוקן ומוזג ל-main (5 PRs) — **מאומת בפרודקשן** עבור 4/6 domains (real_estate/SaaS/media/import); `finance`/`general` ממתינים לאימות.
+
+### BUG-082 — כשל בפענוח הפניות אנאפוריות ("זה", "הנספח", "הקודם") — נבדק, לא אושר: הופרך בקוד
+- **דווח:** 08/07/2026
+- **דווח על ידי:** session audit — השוואת סיכום שיחה (`KNOWN_ISSUES.md`, לא קיים בריפו כקובץ) מול `BUG_AUDIT_LOG.md` הקיים, ללא grep מוקדם.
+- **grep-אימות שבוצע (התבקש מפורשות לפני קביעת סטטוס):** `grep -n "last_entity\|last_tool_result\|working_memory\|anaphor\|entity_ref" context.py memory_store.py app.py`.
+- **ממצא:** ה-hypothesis **מופרך ישירות בקוד**. קיים מנגנון Working-Memory מלא ומחווט: `app.py:955` — `CONTEXT_PRONOUNS` ממפה בדיוק את המילים שדווחו ("זה"→`last_tool_result`, "הנספח"/"הקובץ"/"הקובץ האחרון"→`last_file`, "הקודם"/"ההוא"/"אותו"→`last_tool_result`) לשדה session (`last_tool_result`/`last_uploaded_file`, נשמר ע"י `_capture_last_tool_result()` אחרי כל tool call, `app.py:883`). `resolve_context_pronouns()` (`app.py:966`) מחליף את הכינוי בהתייחסות מפורשת ("הפעולה «...»"/"הקובץ «...»") **לפני** intent detection. מחווט בפועל בתוך `run_agent()` (`app.py:1631`), עם תגובה מפורשת בקוד: `# "תעלה לדסישנס"/"זה הנספח" וכד' — לפני intent detection` — כלומר "זה הנספח" (הדוגמה המדויקת מהדיווח) מתועד כ-use-case שהמנגנון הזה נבנה לטפל בו. זהו הפיצ'ר **C60 Tool Context Awareness** (ראה `AI_CONTEXT.md` היסטורי, PR #152 — מאומת מוזג).
+- **מגבלה אמיתית שנותרה (לא הבאג שדווח):** הפתרון עובד רק אם `session["last_tool_result"]`/`["last_uploaded_file"]` מאוכלס בפועל (כלומר יש tool call/קובץ קודם בשיחה) — אם הכינוי מתייחס לישות שיחתית כללית שאינה tool-result/קובץ (למשל עובדה שנאמרה בטקסט חופשי, לא פלט כלי), הוא לא נפתר. זו מגבלת-scope ידועה של C60, לא "חוסר מוחלט ב-Working Memory" כפי שנוסח בדיווח המקורי.
+- **Root Cause:** אין — ה-hypothesis שגויה. הדיווח המקורי כנראה נבע מתצפית ישנה/לפני C60, או מ-repro ספציפי שבו `last_tool_result` לא היה מאוכלס (התרחיש הצר שכן פתוח, ראו למעלה).
+- **Merged:** לא רלוונטי — אין תיקון קוד, אין באג מאושר.
+- **Verification ראיה:** `grep` בוצע, קוד נקרא במלואו (`app.py:883-986, 1631`), מסקנה מבוססת קוד לא ניחוש.
+- **סטטוס:** ❌ Won't Fix / Not a Bug — מופרך בקוד. אם רוצים לחקור את המגבלה הצרה (כינוי ללא tool-result קודם), זה backlog item נפרד, לא BUG-082.
+
+### BUG-083 — Decision Inbox חסרה מ-schema drift coverage — הפרמיס המקורי שגוי, אך נמצא פער אמיתי וצר יותר
+- **דווח:** 08/07/2026
+- **דווח על ידי:** session audit — לא אומת ב-grep מול קוד בפועל בזמן הדיווח.
+- **grep-אימות שבוצע (התבקש מפורשות):** `grep -n "DECISION_INBOX\|DecisionInbox" core/router/*.py airtable_schema.py schema_audit.py`.
+- **ממצא 1 — הפרמיס המקורי ("לא רשומה ב-Router Table Registry") שגוי:** **אין בכלל "Router Table Registry" בקוד.** `grep` על `core/router/*.py` לכל תבנית table-registry (`TABLE_CLASS_MAP`/`TABLE_REGISTRY`/`Tables\.`) מחזיר **אפס תוצאות**. הראוטר (`core/router/`) מנתב לפי Identity→Intent/Domain/Risk→Handler — אין לו מושג של "טבלת Airtable רשומה", לא ל-Decision Inbox ולא לאף טבלה אחרת. הפרמיס מבלבל בין שכבת הראוטר לשכבת schema governance (קובץ שונה לגמרי).
+- **ממצא 2 — פער אמיתי, אך שונה וצר יותר:** `Tables.DECISION_INBOX`/`DecisionInboxFields` **כן** מוגדרים ב-`airtable_schema.py` (שורות 76, 1147+), אבל `schema_audit.py`'s `TABLE_CLASS_MAP` (הרשימה שמשמשת את בדיקת schema-drift מול Airtable החי) **לא כוללת אותם בכלל** — `grep -n "Decision" schema_audit.py` מחזיר אפס תוצאות. אותו דבר חל על `DecisionEventFields`/`DecisionInboxFields` וכל שאר Decision Hub. זו אותה משפחת-פער כמו BUG-015 (Media Files חסרה מ-`TABLE_CLASS_MAP`) — אבל `MEDIA_FILES` **כן** נמצא כיום ב-`TABLE_CLASS_MAP` (שורה 34, כנראה תוקן מאז BUG-015), בעוד Decision Hub מעולם לא נוסף.
+- **Root Cause (הפער האמיתי, לא הפרמיס המקורי):** `schema_audit.py`'s `TABLE_CLASS_MAP` נבנה לפני/בלי Decision Hub (C89+ epic) והוא ידני (dict קשיח) — אף אחד לא הוסיף אליו את טבלאות Decision Hub כשהן נוצרו.
+- **השפעה בפועל:** `schema_audit.py`/`schema_validator.py`'s coverage לא מזהה drift בשדות Decision Events/Decision Inbox מול Airtable החי — לא חוסם כתיבה (זה תפקיד `airtable_gateway.py`, לא `schema_audit.py`), רק אומר ש-audit ידני נדרש אם רוצים לוודא שאין drift שם.
+- **תיקון מוצע (לא בוצע — audit בלבד):** הוספת `schema.Tables.DECISION_EVENTS: schema.DecisionEventFields` ו-`schema.Tables.DECISION_INBOX: schema.DecisionInboxFields` ל-`TABLE_CLASS_MAP` ב-`schema_audit.py`. שינוי קובץ יחיד, אדיטיבי, ללא נגיעה בכתיבה/router.
+- **Merged:** לא — לא בוצע קוד בסבב זה (audit בלבד, כמבוקש).
+- **Verification ראיה:** `grep` בוצע כמבוקש, שני הממצאים מבוססי קוד.
+- **סטטוס:** 🟡 Open, אך **לא** כפי שתואר במקור — "Router Table Registry" לא קיים ולא רלוונטי; הפער האמיתי (Decision Hub חסר מ-`schema_audit.py`'s `TABLE_CLASS_MAP`) הוא low-severity (audit coverage בלבד, לא production write path) ולא בסקופ תיקון בסבב זה.
+
+### BUG-084 — commit+push מצליחים אך PR לא נפתח — נבדק מול הסשן הנוכחי, לא שוחזר
+- **דווח:** 08/07/2026
+- **דווח על ידי:** session audit — לא אומת מול היסטוריית PRs בפועל בזמן הדיווח.
+- **בדיקה שבוצעה:** נבדקה היסטוריית הסשן הנוכחי (PRs #255-#266, 12 PRs) — בכל מקרה שבו `git push` הצליח, נעשה ניסיון מיידי לפתוח PR דרך כלי ה-GitHub. בשני מקרים בסשן הנוכחי כלי ה-`create_pull_request` היה זמנית לא-זמין (MCP server disconnected) — בשני המקרים זה דווח במפורש למשתמש בטקסט, ולא הושאר בשקט; ה-PR נפתח בפועל ברגע שהכלי חזר להיות זמין (`ToolSearch` לאיתור מחדש). כלומר: יש תרחיש אמיתי של "לא נפתח PR מיד אחרי push" — אבל הוא **תוצאה של זמינות כלי חיצוני חולפת, לא של החלטה שקטה לדלג על פתיחת PR**, ותמיד טופל/תוקשר.
+- **תואם את הערכת המדווח עצמו:** "בבדיקת כל הרשומות בלוג הקיים — כל ה-PRs שתועדו נפתחו ומוזגו בפועל... ייתכן כשל gh CLI/auth (ראו BUG-063), לא כשל לוגי שיטתי."
+- **Root Cause:** אין כשל לוגי מאושר בקוד המוצר או בתהליך — רק תלות בזמינות כלי MCP חיצוני, שמטופלת כבר (retry + תקשור מפורש כשקורה).
+- **Merged:** לא רלוונטי — אין קוד מוצר מעורב, אין תיקון.
+- **Verification ראיה:** נבדק מול היסטוריית הסשן הנוכחי (12 PRs, כולל 2 מקרי disconnection שטופלו).
+- **סטטוס:** ❌ Won't Fix — אין ראיה לכשל שיטתי; מקביל ל-BUG-063 (כשל זמינות כלי, לא באג לוגי). אם יופיע שוב עם ראיה קונקרטית (PR שבאמת לא נפתח בלי תקשור), לפתוח רשומה חדשה עם אותה ראיה.

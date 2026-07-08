@@ -45,7 +45,7 @@
 4. **BUG-081 + תיקון סופי (PR #263)** — Business Memory קיבלה שדה `Domain` ייעודי; אחרי 3 סבבי תיקון על בסיס production evidence, הפתרון הסופי: `domain` **לא נכתב ל-`Tags` בכלל** (רק ל-`Domain`), `media` תוקן ל-Title Case, וקריאת ההקשר (`get_recent_business_context`) עברה לסנן לפי `Domain`.
 5. **BUG-077** (root cause) — `propose_action()` מאמת כעת `requires_approval` מול `tool_registry.needs_approval()` fail-closed — ✅ merged.
 
-**✅ PRODUCTION VERIFIED (08/07/2026):** תרחיש `/update` → `נדל"ן` (real_estate) → `Other` → טקסט חופשי → נשמר בהצלחה, "📌 Other | נדל"ן" הוצג נכון בתגובה, **אין 422**. מאמת בפועל את השרשרת המלאה כולל PR #265 (`"Real Estate "` עם רווח, המיפוי הנכון הסופי): BUG-078 (טקסט מגיע ל-`capture_text`), BUG-080 (Event Date), BUG-081+#265 (Domain נכתב עם הערך המדויק, לא Tags). **לא מאומת עדיין:** שאר ה-domains (media/saas/import/finance/general), C99 (חילוץ מסמך).
+**✅ PRODUCTION VERIFIED (08/07/2026):** `/update` נבדק ב-4 domains ברצף אמיתי (Telegram) — `נדל"ן`/`SaaS`/`מדיה`/`ייבוא`, כולם → `Other` → טקסט חופשי → נשמר בהצלחה, "📌 Other | <domain>" הוצג נכון בכולם, **אין 422** באף אחד. מאמת בפועל את השרשרת המלאה כולל PR #265 (רווח בסוף, המיפוי הנכון הסופי): BUG-078 (טקסט מגיע ל-`capture_text`), BUG-080 (Event Date), BUG-081+#265 (Domain נכתב עם הערך המדויק, לא Tags). **לא מאומת עדיין:** `finance`/`general`, C99 (חילוץ מסמך).
 
 **פער ידוע שנותר, לא בטיפול:** `weekly_summary.py::_group_by_domain()` ו-Business Memory listing ב-`tma_api.py` עדיין קוראים `Tags[0]` כ-domain — ישברו בשקט על רשומות חדשות. לא דחוף — שני הצרכנים כבויים (`FEATURE_WEEKLY_SUMMARY` off, TMA business-memory screen לא בשימוש).
 
@@ -55,6 +55,6 @@
 
 1. **🔴 C81-FU** — Recovery: לאמת תוצאת שליחה בפועל לפני סימון `recovery_count`/הושלם (כרגע גדל גם כשההודעה לא נמסרה).
 2. **🔴 C82-FU** — Gate מרכזי אחד ל-`EMERGENCY_STOP_AUTOMATION` לפני כניסה לכל scheduler job (היום נאכף רק ב-followup/payment reminders).
-3. **Production verification** של שאר שרשרת BUG-078..081/C97-C99 — domains שלא real_estate (media/saas/import/finance/general), C99 (חילוץ מסמך) + בדיקת commit hash מול Render.
+3. **Production verification** של שאר שרשרת BUG-078..081/C97-C99 — `finance`/`general` domains (4/6 כבר מאומתים), C99 (חילוץ מסמך) + בדיקת commit hash מול Render.
 4. **🟡 C84-C86** — TMA approvals TTL/freshness check, structural test ל-orphan approval actions, coverage מטריציוני ל-Emergency Stop על כל scheduler jobs.
 5. **Decision Hub activation gate** — `FEATURE_DECISION_HUB` יישאר כבוי עד שיתקבל production evidence אמיתי ל-BUG-DH-03/04 (formula injection fix כבר ממוזג, חסר רק אימות live).
