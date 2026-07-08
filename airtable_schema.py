@@ -87,6 +87,9 @@ class Tables:
     # Lead Events — אירועים על ליד קיים (topic חדש, עדכון domain, interest, note)
     # יש ליצור ידנית ב-Airtable לפני הפעלה. ראה LeadEventFields.
     LEAD_EVENTS      = "Lead Events"
+    # PR3A — Airtable schema snapshot archive. Must be created manually in Airtable
+    # before FEATURE_AIRTABLE_SCHEMA_SNAPSHOT can be turned on. ראה SchemaSnapshotFields.
+    SCHEMA_SNAPSHOTS = "System Schema Snapshots"
 
 
 # ══════════════════════════════════════════════════
@@ -1247,3 +1250,25 @@ class LeadEventType:
     DOMAIN_CHANGE    = "domain_change"    # שינוי domain לאותו ליד
     FOLLOWUP_REQUEST = "followup_request" # ליד מבקש שיחזרו אליו
     OTHER            = "other"            # אחר
+
+
+# ══════════════════════════════════════════════════
+# PR3A — Schema Snapshot Archive
+# ══════════════════════════════════════════════════
+
+class SchemaSnapshotFields:
+    """Tables.SCHEMA_SNAPSHOTS — must be created manually in Airtable before use."""
+    SNAPSHOT_DATE  = "Snapshot Date"    # dateTime
+    SNAPSHOT_FILE  = "Snapshot File"    # multipleAttachments — JSON + XLSX
+    TABLES_COUNT   = "Tables Count"     # number
+    STATUS         = "Status"           # singleSelect — see SchemaSnapshotStatus
+    NOTES          = "Notes"            # multilineText
+    SCHEMA_HASH    = "Schema Hash"      # singleLineText
+    BASE_ID        = "Base ID"          # singleLineText
+
+
+class SchemaSnapshotStatus:
+    """Tables.SCHEMA_SNAPSHOTS.Status singleSelect — exact values."""
+    OK             = "OK"
+    DRIFT_DETECTED = "Drift Detected"
+    ERROR          = "Error"
