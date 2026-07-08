@@ -1198,8 +1198,8 @@
 - **תיקון:** `cmd_update.py` קיבל `has_pending_file_capture(user_id)`/`capture_photo_or_document(bot, message, get_identity)`. `app.py` בודק את זה **לפני** `_handle_telegram_media` עבור `photo`/`document`; אם יש `/update` ממתין בשלב `text`, הקובץ מנותב לפונקציה החדשה: מעלה ל-Drive (best-effort, דרך `media_handler.handle_file_upload` הקיים) ושומר caption+drive_url ל-Business Memory עם ה-domain/entry_type שכבר נבחרו באשף.
 - **בדיקה:** `smoke_tests.py` ירוק, `test_integration.py` 4/4, `core/router/test_router.py` 44/44, טסט ידני ממוקד (mock `bot`+`identity`) מאמת שה-state נצרך נכון ושהרשומה נשמרת עם domain/entry_type נכונים.
 - **Merged:** ✅ כן — `main` `194b3da` (Merge pull request #255), commit `32bbb75`. מאומת: `git grep` על `origin/main`.
-- **Deployed/Verified בפרודקשן:** לא.
-- **סטטוס:** ✅ תוקן ומוזג ל-main — **לא** מאומת עדיין ב-production.
+- **Deployed/Verified בפרודקשן:** ✅ כן — 08/07/2026, ראה תרחיש מאומת ב-BUG-081 למטה (`/update` → נדל"ן → Other → טקסט → נשמר תקין, אין 422). מכסה את זרימת ה-webhook הכללית של `/update`, לא ספציפית את photo/document capture עצמו (התרחיש שנבדק היה טקסט חופשי).
+- **סטטוס:** ✅ תוקן, מוזג ל-main, וזרימת `/update` הכללית מאומתת בפרודקשן (ראה הערה למעלה).
 
 ### BUG-079 — `/update` — שלב הטקסט החופשי אף פעם לא מגיע ל-`capture_text`, בורח ל-`run_agent` הכללי — ✅ תוקן 07/07/2026
 - **תאריך:** 07/07/2026
@@ -1210,8 +1210,8 @@
 - **תיקון:** `cmd_update.py` קיבל `has_pending_text_capture(user_id)` — `app.py` בודק אותו מיד אחרי בלוק ה-slash-command ולפני בדיקת ה-idempotency (fail-open בשגיאה — כשל בבדיקה ממשיך לזרימה הרגילה). אם `/update` ממתין בשלב `text`, ה-webhook קורא ל-`bot.process_new_updates()` בעצמו כדי ש-`capture_text` יתפוס את ההודעה.
 - **בדיקה:** `smoke_tests.py` ירוק, `test_integration.py` 4/4, `core/router/test_router.py` 44/44, טסט ידני מבודד של `has_pending_text_capture()` על פני מעברי שלב (domain→type→text) מאמת שהיא מחזירה `True` רק בשלב `text` ולא צורכת state (תואם ל-`capture_text`'s own pop).
 - **Merged:** ✅ כן — `main` `baa0283` (Merge pull request #256), commit `912b94e`. מאומת: `git grep` על `origin/main`.
-- **Deployed/Verified בפרודקשן:** לא.
-- **סטטוס:** ✅ תוקן ומוזג ל-main — **לא** מאומת עדיין ב-production.
+- **Deployed/Verified בפרודקשן:** ✅ כן — 08/07/2026: `/update` → נדל"ן → Other → טקסט חופשי → `capture_text` תפס את ההודעה ושמר בהצלחה (ראה תרחיש מלא ב-BUG-081 למטה).
+- **סטטוס:** ✅ תוקן, מוזג ל-main, ומאומת בפרודקשן.
 
 ### BUG-080 — כתיבת `datetime` מלא (עם שעה/מיקרושניות/offset) לשדות Date-בלבד ב-Airtable → 422 — ✅ תוקן 07/07/2026
 - **תאריך:** 07/07/2026
@@ -1221,10 +1221,10 @@
 - **תיקון:** שינוי `.isoformat()` ל-`.date().isoformat()` בכל 7 המקומות — מחרוזת `"YYYY-MM-DD"` בלבד, תואמת את טיפוס השדה. נבדק ונשאר ללא שינוי במפורש: 2 מקומות ב-`cmd_decision.py` שהם `FileUploadResult(timestamp=...)` — אובייקט `session_store` בזיכרון, לא שדה Airtable; שימוש read-only אחד ב-`.get(EVENT_DATE, "")` כמפתח מיון; `Created`/`Last Updated` מאושרים כ-Airtable auto-populated (`createdTime`/`lastModifiedTime`), אין נקודת כתיבה ידנית להם ב-`cmd_decision.py` כלל.
 - **בדיקה:** `smoke_tests.py` ירוק, `test_integration.py` 4/4, `core/router/test_router.py` 44/44, `test_decision_attention.py` 11/11, `test_core_reasoning.py` 59/59 (משתמשים ב-fixture strings קבועים, לא מושפעים), בדיקה ידנית של הפורמט לפני/אחרי, `grep` מאמת שבדיוק 7 המקומות השתנו ולא יותר.
 - **Merged:** ✅ כן — `main` `a8ffa07` (Merge pull request #258), commit `02bc343`. מאומת: `git grep` על `origin/main`.
-- **Deployed/Verified בפרודקשן:** לא.
-- **סטטוס:** ✅ תוקן ומוזג ל-main — **לא** מאומת עדיין ב-production.
+- **Deployed/Verified בפרודקשן:** ✅ חלקית — 08/07/2026: `cmd_update.py`'s `BMF.DATE` נבדק בפועל (`/update` → נדל"ן → Other → טקסט → נשמר, אין 422). שאר 6 נקודות הכתיבה (`media_handler.py`, `cmd_decision.py` ×5) **לא נבדקו עדיין** בתרחיש הזה.
+- **סטטוס:** ✅ תוקן ומוזג ל-main — נקודת הכתיבה של `/update` מאומתת בפרודקשן, שאר הנקודות עדיין ממתינות לאימות.
 
-### BUG-081 — Business Memory `Domain` "ממוחזר" לתוך `Tags` הכללי, בלי אימות מול live options → 422 (תוקן במספר שלבים) — ✅ תוקן 07/07/2026
+### BUG-081 — Business Memory `Domain` "ממוחזר" לתוך `Tags` הכללי, בלי אימות מול live options → 422 (תוקן ב-5 שלבים) — ✅ תוקן 07/07/2026, ✅ מאומת בפרודקשן 08/07/2026 (real_estate)
 - **תאריך:** 07/07/2026
 - **דווח על ידי:** session audit, בהמשך ל-BUG-080 — נבדק אם domain key גולמי (למשל `"media"`) שנכתב ל-`Tags` הוא בכלל option קיים.
 - **קבצים:** `airtable_schema.py` (`BusinessMemoryFields.DOMAIN` — שדה חדש), `cmd_update.py` (`normalize_business_memory_fields`, `_VALID_TAGS`, `_DOMAIN_TO_AIRTABLE`, `_TAG_NORMALIZE`), `media_handler.py` (`_save_transcript_to_memory`).
@@ -1232,8 +1232,10 @@
 - **שלב 1 (PR #259):** נוסף `BusinessMemoryFields.DOMAIN = "Domain"`. נוספה `normalize_business_memory_fields(fields, raw_domain_key)` — ממפה domain key → ערך Airtable מאומת (`import`→`Import`, `media`→`media`, `saas`→`SaaS`, `finance`/`general`→`General`, `real_estate`→`"real_estate"` **[שגוי, ראה שלב 2]**) לשדה `Domain` הייעודי; מסננת `Tags` לערכים חוקיים בלבד (`_VALID_TAGS`) כך ש-domain keys שדלפו מוסרים; מנרמלת גם `Event Type`/`Event Date` כ-defense-in-depth. נקראת משני מקומות הכתיבה (`cmd_update.py`, `media_handler.py`) לפני `airtable_create`.
 - **שלב 2 (PR #260) — תיקון על בסיס production evidence:** `_DOMAIN_TO_AIRTABLE["real_estate"]` מופה בטעות ל-`"real_estate"` (lowercase) בשלב 1; אושר מול live Airtable ש-2 real-estate options היו קיימים במקור ואחד (ה-lowercase) נמחק בניקוי — Title Case `"Real Estate"` הוא היחיד שנשאר. תוקן ל-`"real_estate": "Real Estate"`.
 - **שלב 3 (PR #261, 2 commits) — 422 חי נוסף בפרודקשן אחרי מיזוג שלב 2:** `_VALID_TAGS` עדיין הכיל `"real_estate"` (lowercase) כ-tag עצמאי חוקי — אותו duplicate-cleanup שחל על `Domain` חל גם על `Tags`, אז `domain="real_estate"` עדיין שלח `"real_estate"` (lowercase) ל-`Tags` וקיבל 422 בפרודקשן (`INVALID_MULTIPLE_CHOICE_OPTIONS`, נצפה בלוג). תיקון ראשון (`f367469`): הוסר `"real_estate"` מ-`_VALID_TAGS` — עצר את ה-422 אבל הפיק `Tags` ריק במקום הערך הקנוני. תיקון שני (`7526e60`): נוסף `_TAG_NORMALIZE = {"real_estate": "Real Estate"}` (מיושם על raw tags **לפני** הסינון), ו-`"Real Estate"` (Title Case) נוסף ל-`_VALID_TAGS` — כעת `domain="real_estate"` מפיק `Domain="Real Estate"` **וגם** `Tags=["Real Estate"]`, אף לא ערך lowercase אחד מגיע ל-Airtable.
-- **בדיקה:** `smoke_tests.py` ירוק בכל שלב, `test_integration.py` 4/4, `core/router/test_router.py` 44/44 (שלב 1). בדיקות ידניות ממוקדות בכל שלב: `media` domain → `Domain="media"`/`Tags` נעדר; `real_estate` domain (שלב סופי) → `Domain="Real Estate"`, `Tags=["Real Estate"]`, `grep` מאמת אין `"real_estate"` lowercase בשום מקום בפלט.
-- **Merged:** ✅ כן — `main` `50847b7` (PR #259, `bd0f32c`), `0094a82` (PR #260, `42ed90c`), `fa08a58` (PR #261, `f367469`+`7526e60`). מאומת: `git grep` על `origin/main` בכל שלב.
-- **Deployed/Verified בפרודקשן:** לא.
+- **שלב 4 (PR #263) — root cause אמיתי, לא רק normalization:** מאומת מול production logs ש-`_save_to_business_memory` (וגם `media_handler.py::_save_transcript_to_memory`) **תמיד** הזריקו את ה-domain הנבחר ל-`BMF.TAGS` (`BMF.TAGS: [domain]`), בלי קשר אם זה ערך-נושא אמיתי. שלבים 1-3 טיפלו בזה כבעיית נרמול-ערכים (מיפוי/סינון/קנוניזציה של מה שנכנס ל-`Tags`) במקום לתקן את הפגם עצמו: domain לא אמור להגיע ל-`Tags` בכלל. הוסר `BMF.TAGS: [domain]` משני מקומות הכתיבה; הוסר `_TAG_NORMALIZE` לגמרי (לא נדרש יותר — אין יותר domain-value שדולף ל-Tags לתקן). `_VALID_TAGS` נשאר כ-defense-in-depth למקור נושאים עתידי היפותטי, אך אינו רלוונטי לנתיב הנוכחי. גם תוקן `_DOMAIN_TO_AIRTABLE["media"]` (`"media"` lowercase → `"Media"` Title Case), ותוקנה `get_recent_business_context()` לסנן לפי `{Domain}` במקום `{Tags}` (עם `FIND(...)` על `Tags` כ-legacy fallback לרשומות ישנות בלבד).
+- **שלב 5 (PR #265) — תיקון סופי, רווח בסוף:** אומת ישירות מול Airtable Meta API (לא צילום מסך) שהאופציות החיות הן `"Real Estate "` ו-`"SaaS "` (עם רווח בסוף), לא המחרוזות הנקיות ששימשו עד כה. `_DOMAIN_TO_AIRTABLE["real_estate"]`/`["saas"]` עודכנו בהתאם; אומת ב-`repr()` שהרווח נשמר בקוד ולא נגזם ע"י עורך/linter.
+- **בדיקה:** `smoke_tests.py` ירוק בכל שלב, `test_integration.py` 4/4, `core/router/test_router.py` 44/44 (שלבים 1/4). בדיקות ידניות ממוקדות בכל שלב, כולל `repr()` על שלב 5.
+- **Merged:** ✅ כן — `main` `50847b7` (PR #259), `0094a82` (PR #260), `fa08a58` (PR #261), `eaa01fa` (PR #263), `def0a00` (PR #265). מאומת: `git grep`/`git merge-base --is-ancestor` על `origin/main` בכל שלב.
+- **Deployed/Verified בפרודקשן:** ✅ כן — 08/07/2026: `/update` → `נדל"ן` (real_estate) → `Other` → טקסט חופשי → נשמר בהצלחה, "📌 Other | נדל"ן" הוצג נכון בתגובה, **אין 422**. מאמת בפועל את המיפוי הסופי (שלב 5 כלול): `Domain="Real Estate "` (עם רווח), `Tags` נעדר. **לא מאומת עדיין:** שאר ה-domains (`media`/`saas`/`import`/`finance`/`general`).
 - **פער ידוע, לא בסקופ:** `weekly_summary.py::_group_by_domain()` ו-`tma_api.py`'s Business Memory listing עדיין קוראים `Tags[0]` כ-domain — ישברו בשקט (default ל-`"general"`/ריק) ברגע שרשומות חדשות ייכתבו עם `Domain` בשדה הייעודי במקום ב-`Tags`. Backlog, piggyback-trigger על הפעלת `FEATURE_WEEKLY_SUMMARY` או שימוש פעיל ב-TMA business memory screen — אף אחד מהשניים לא בשימוש פעיל כרגע.
-- **סטטוס:** ✅ תוקן ומוזג ל-main (3 PRs) — **לא** מאומת עדיין ב-production.
+- **סטטוס:** ✅ תוקן ומוזג ל-main (5 PRs) — **מאומת בפרודקשן** עבור תרחיש real_estate/Other; שאר ה-domains ממתינים לאימות.
