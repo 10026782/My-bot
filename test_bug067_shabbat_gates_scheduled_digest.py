@@ -28,6 +28,7 @@ import shabbat_guard
 SCHEDULER_JOB_NAMES = (
     "_job_daily_digest",
     "_job_daily_git_audit",
+    "_job_schema_snapshot_archive",
     "_job_daily_collector",
     "_job_cleanup_pending",
     "_job_overdue_payments",
