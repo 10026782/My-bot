@@ -107,12 +107,14 @@ with patch.object(p3, "_fetch_live", return_value=None), \
     chk("stale fallback: logs WARNING", mock_logger.warning.called)
 
 # ══════════════════════════════════════════════════════════════════
-# 4. Cold start + no last_good + live fails → seed + CRITICAL + name_only
+# 4. Cold start + no last_good + live fails + snapshot also unavailable
+#    → seed + CRITICAL + name_only
 # ══════════════════════════════════════════════════════════════════
 print("\n── cold start — seed fallback ────────")
 
 p4 = RuntimeSchemaProvider(ttl_seconds=300)
 with patch.object(p4, "_fetch_live", return_value=None), \
+     patch.object(p4, "_load_snapshot", return_value=None), \
      patch("schema_validator.get_known_fields", return_value={"Name", "Score"}), \
      patch("core.runtime_schema_provider.logger") as mock_logger:
     contract = p4.get_table_contract("Leads")
@@ -122,6 +124,108 @@ with patch.object(p4, "_fetch_live", return_value=None), \
     chk("cold start: choices always empty", all(f["choices"] == [] for f in contract["fields"].values()))
     chk("cold start: field names from seed", contract["fields"].keys() == {"Name", "Score"})
     chk("cold start: logs CRITICAL", mock_logger.critical.called)
+
+# ══════════════════════════════════════════════════════════════════
+# 4b. PR3B.1 — snapshot tier (tier 3): cold start + live fails +
+#     canonical snapshot succeeds → source=snapshot, mode=full
+# ══════════════════════════════════════════════════════════════════
+print("\n── PR3B.1 snapshot tier ──────────────")
+
+_SNAPSHOT_RECORDS_OK = [
+    {"id": "recSNAP1", "fields": {
+        "Status": "OK",
+        "Snapshot Date": "2026-07-08T00:00:00+00:00",
+        "Snapshot File": [
+            {"filename": "airtable_schema_snapshot.json", "url": "https://example.com/snap.json"},
+            {"filename": "airtable_schema_report.xlsx", "url": "https://example.com/snap.xlsx"},
+        ],
+    }},
+    {"id": "recSNAP0", "fields": {
+        "Status": "OK",
+        "Snapshot Date": "2026-07-01T00:00:00+00:00",
+        "Snapshot File": [{"filename": "airtable_schema_snapshot.json", "url": "https://old.example.com/snap.json"}],
+    }},
+]
+
+_SNAPSHOT_JSON_BODY = {
+    "base_id": "appFAKE",
+    "fetched_at": "2026-07-08T00:00:00+00:00",
+    "tables": [
+        {
+            "table_id": "tblLEADS",
+            "table_name": "Leads",
+            "fields": [
+                {"field_id": "fldDOM", "field_name": "Domain", "field_type": "singleSelect",
+                 "choices": ["Real Estate", "Import"]},
+            ],
+        },
+    ],
+}
+
+
+class _FakeHttpResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._payload
+
+
+p4b = RuntimeSchemaProvider(ttl_seconds=300)
+with patch.object(p4b, "_fetch_live", return_value=None), \
+     patch("tools.airtable_tools.airtable_get_records", return_value=_SNAPSHOT_RECORDS_OK), \
+     patch("httpx.get", return_value=_FakeHttpResponse(_SNAPSHOT_JSON_BODY)), \
+     patch("core.runtime_schema_provider.logger") as mock_logger:
+    contract = p4b.get_table_contract("Leads")
+    chk("PR3B.1 DoD: source=snapshot when live fails + no last_good", contract["source"] == "snapshot")
+    chk("PR3B.1 DoD: mode=full (snapshot has real field data)", contract["mode"] == "full")
+    chk("PR3B.1: table_id from snapshot", contract["table_id"] == "tblLEADS")
+    chk("PR3B.1: fields loaded from snapshot", "Domain" in contract["fields"])
+    chk("PR3B.1: choices preserved from snapshot", contract["fields"]["Domain"]["choices"] == ["Real Estate", "Import"])
+    chk("PR3B.1: warning logged (not silent)", mock_logger.warning.called)
+    chk("PR3B.1: snapshot result cached into last_good", "Leads" in p4b._last_good)
+
+# picks the LATEST OK record (by Snapshot Date), not just any OK record
+with patch.object(p4b, "_fetch_live", return_value=None), \
+     patch("tools.airtable_tools.airtable_get_records", return_value=_SNAPSHOT_RECORDS_OK), \
+     patch("httpx.get", return_value=_FakeHttpResponse(_SNAPSHOT_JSON_BODY)) as mock_httpx_get:
+    p_latest = RuntimeSchemaProvider(ttl_seconds=300)
+    p_latest.get_table_contract("Leads")
+    chk(
+        "PR3B.1: downloads the LATEST OK snapshot's attachment, not an older one",
+        mock_httpx_get.call_args.args[0] == "https://example.com/snap.json",
+    )
+
+# no OK record at all → falls through to seed
+p4c = RuntimeSchemaProvider(ttl_seconds=300)
+with patch.object(p4c, "_fetch_live", return_value=None), \
+     patch("tools.airtable_tools.airtable_get_records", return_value=[
+         {"id": "recERR", "fields": {"Status": "Error", "Snapshot Date": "2026-07-08T00:00:00+00:00"}},
+     ]), \
+     patch("schema_validator.get_known_fields", return_value={"Name"}):
+    contract = p4c.get_table_contract("Leads")
+    chk("PR3B.1: no Status=OK record → falls through to seed", contract["source"] == "seed")
+
+# snapshot JSON download fails → falls through to seed
+p4d = RuntimeSchemaProvider(ttl_seconds=300)
+with patch.object(p4d, "_fetch_live", return_value=None), \
+     patch("tools.airtable_tools.airtable_get_records", return_value=_SNAPSHOT_RECORDS_OK), \
+     patch("httpx.get", side_effect=Exception("network down")), \
+     patch("schema_validator.get_known_fields", return_value={"Name"}):
+    contract = p4d.get_table_contract("Leads")
+    chk("PR3B.1: snapshot download failure → falls through to seed", contract["source"] == "seed")
+
+# requested table not present in the snapshot content → falls through to seed
+p4e = RuntimeSchemaProvider(ttl_seconds=300)
+with patch.object(p4e, "_fetch_live", return_value=None), \
+     patch("tools.airtable_tools.airtable_get_records", return_value=_SNAPSHOT_RECORDS_OK), \
+     patch("httpx.get", return_value=_FakeHttpResponse(_SNAPSHOT_JSON_BODY)), \
+     patch("schema_validator.get_known_fields", return_value={"Name"}):
+    contract = p4e.get_table_contract("SomeOtherTable")
+    chk("PR3B.1: table absent from snapshot content → falls through to seed", contract["source"] == "seed")
 
 # ══════════════════════════════════════════════════════════════════
 # 5-7. Gateway integration — off / shadow / enforce
