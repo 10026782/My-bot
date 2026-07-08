@@ -58,6 +58,10 @@ LINKED_RECORD_FIELDS: dict[str, set[str]] = {
 # Fields the agent should never write — security layer
 _ALWAYS_FORBIDDEN: frozenset[str] = frozenset({"tenant", "owner_id", "user_id", "chat_id"})
 
+# PR2 rev.2 — Airtable Meta API field type strings for select fields.
+# Same two literal values already used independently by tools/schema_governance.py.
+_SELECT_FIELD_TYPES: frozenset[str] = frozenset({"singleSelect", "multipleSelects"})
+
 
 # ══════════════════════════════════════════════════════════════════
 # Core normalise / validate
@@ -153,6 +157,32 @@ def validate_airtable_fields(table: str, fields: dict) -> tuple[dict, list[str]]
         errors.append(f"unknown field '{u}' in {table} (not in schema_cache)")
         del clean[u]
 
+    # (PR2 rev.2) select-value validation — reads through the same
+    # RuntimeSchemaProvider contract, but only ever runs when
+    # contract["mode"] == "full" (never during "name_only" seed fallback —
+    # schema_cache.json has no choices to check against, so it must not
+    # produce false positives; see core/runtime_schema_provider.py).
+    # Independent flag/state from the unknown-field guard above — a table
+    # can be enforce for one and shadow/off for the other.
+    from feature_flags import get_select_value_validation_state
+    value_state = get_select_value_validation_state()
+
+    if value_state != "off":
+        invalid = _provider_invalid_select_values(table, clean)
+        for field, (value, allowed) in invalid.items():
+            if value_state == "shadow":
+                logger.warning(
+                    "[SelectValueValidation:SHADOW] invalid value table=%s field=%s "
+                    "value=%r allowed=%s (not blocking — shadow state)",
+                    table, field, value, allowed,
+                )
+            else:  # "enforce"
+                errors.append(
+                    f"Airtable value validation failed: table={table} field={field} "
+                    f"value={value!r} allowed={allowed}"
+                )
+                del clean[field]
+
     return clean, errors
 
 
@@ -162,6 +192,46 @@ def _provider_unknown_fields(table: str, fields: dict) -> list[str]:
     contract = get_provider().get_table_contract(table)
     known = contract["fields"].keys()
     return [k for k in fields if k not in known]
+
+
+def _provider_invalid_select_values(table: str, fields: dict) -> dict[str, tuple[object, list[str]]]:
+    """
+    Returns {field_name: (offending_value, allowed_choices)} for every
+    singleSelect/multipleSelects field in `fields` whose value(s) aren't in
+    RuntimeSchemaProvider's live choices for this table.
+
+    Only runs when the provider's contract for this table is mode="full" —
+    mode="name_only" (seed fallback) never has choices, so it's always
+    skipped here rather than risk a false-positive block. A multipleSelects
+    field with any invalid entry is reported (and, in enforce, dropped) as
+    a whole — no partial-list filtering (PR2 rev.2 scope decision).
+    """
+    from core.runtime_schema_provider import get_provider
+    contract = get_provider().get_table_contract(table)
+    if contract["mode"] != "full":
+        return {}
+
+    invalid: dict[str, tuple[object, list[str]]] = {}
+    for field, value in fields.items():
+        info = contract["fields"].get(field)
+        if not info or info["type"] not in _SELECT_FIELD_TYPES:
+            continue
+        choices = info["choices"]
+        if not choices:
+            continue  # select field with no configured options yet — nothing to check against
+
+        if info["type"] == "multipleSelects":
+            if not isinstance(value, list):
+                continue  # not our shape to validate — leave to existing coercion/validation
+            if any(v not in choices for v in value):
+                invalid[field] = (value, choices)
+        else:  # singleSelect
+            if not isinstance(value, str):
+                continue
+            if value not in choices:
+                invalid[field] = (value, choices)
+
+    return invalid
 
 
 # ══════════════════════════════════════════════════════════════════
