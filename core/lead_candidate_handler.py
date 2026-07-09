@@ -506,8 +506,12 @@ def _propose_lead_write(
     (app.py's confirm-word handling checks Gateway live contracts first,
     regardless of FEATURE_ACTION_GATEWAY) — so the confirmed write goes
     through the same dispatcher path as any other approved tool call, not a
-    direct one-off airtable_add. "_source": "lead_capture" is required to
-    pass tools/dispatcher.py's enforce_leads_write_gate() for table=Leads.
+    direct one-off airtable_add. trusted_source="lead_capture" (BUG-091) is
+    required to pass tools/dispatcher.py's enforce_leads_write_gate() for
+    table=Leads — passed as an explicit propose_action() keyword argument,
+    NOT embedded in tool_inputs (a "_source" dict key would be Claude-
+    controlled data if this payload ever originated from a tool_use, so it
+    can no longer serve as the trust boundary).
 
     Returns the GatewayResult (ok / contract_id / user_message) from
     propose_action() — dedup (pending/already-executed) is handled entirely
@@ -527,7 +531,7 @@ def _propose_lead_write(
             fields[LeadFields.DOMAIN] = _domain_key
         tool_inputs = {
             "table": "Leads", "record_id": existing_id,
-            "fields": fields, "_source": "lead_capture",
+            "fields": fields,
         }
     else:
         _phone_key = re.sub(r"[\s\-\+]", "", phone)
@@ -549,7 +553,7 @@ def _propose_lead_write(
             LeadFields.SCORE:      0,
             LeadFields.SENDER_ID:  phone,
         }
-        tool_inputs = {"table": "Leads", "fields": fields, "_source": "lead_capture"}
+        tool_inputs = {"table": "Leads", "fields": fields}
 
     return _gw.propose_action(
         tenant_id         = tenant_id,
@@ -560,6 +564,7 @@ def _propose_lead_write(
         origin_chat_id    = identity.memory_key,
         requires_approval = True,
         identity          = identity,
+        trusted_source    = "lead_capture",
     )
 
 
