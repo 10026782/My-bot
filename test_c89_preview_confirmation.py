@@ -108,8 +108,11 @@ def test_confirm_yes_resolves_via_gateway_and_writes():
     assert len(live_after) == 0, "contract must no longer be pending after execution"
     contract = gw.find_contract(live_before[0].contract_id)
     assert contract.status == "executed", f"status={contract.status}"
-    assert contract.normalized_payload.get("_source") == "lead_capture", \
-        "write must go through dispatch_tool with _source=lead_capture (Leads write gate), not a raw call"
+    # BUG-091: "_source" is no longer a tool_inputs/normalized_payload key —
+    # it's an explicit trusted_source kwarg to propose_action(), stored on
+    # the contract itself (never inside Claude-reachable payload data).
+    assert contract.trusted_source == "lead_capture", \
+        "write must go through dispatch_tool with trusted_source='lead_capture' (Leads write gate), not a raw call"
     return "OK"
 
 

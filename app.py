@@ -52,6 +52,7 @@ from context         import build_context
 from tool_registry   import enforce, ToolDenied
 from scheduler       import start_scheduler
 from tools           import dispatch_tool
+from tools.airtable_security import enforce_leads_write_gate, LeadsDirectWriteBlocked
 from guards          import idempotency, rate_limiter, validate_tool_output
 from config          import get_domain as _channel_domain
 from core.router     import route_request, RouteDecision, Handler
@@ -1107,7 +1108,12 @@ def _handle_approval_callback_impl(cq) -> None:
                 bot.answer_callback_query(cq.id, "⛔ הפעולה כבר אינה מורשית")
                 return
 
-            raw    = dispatch_tool(tool_name, tool_inputs, identity)
+            # BUG-091: this replays the payload stored at _queue_approval()
+            # time (dict(tu.input) — Claude's own tool_use JSON, verbatim).
+            # _queue_approval() is only ever called from the raw Agent
+            # tool_use loop below — hardcode "agent", never trust a
+            # "_source" key that might be sitting inside tool_inputs.
+            raw    = dispatch_tool(tool_name, tool_inputs, identity, trusted_source="agent")
             result = validate_tool_output(tool_name, raw)
 
             exec_check = verify_execution(tool_name, result)
@@ -1884,6 +1890,27 @@ def run_agent(
 
                 # ── Approval Gate ─────────────────────
                 if meta.requires_approval:
+                    # BUG-091: preflight — a write enforce_leads_write_gate()
+                    # provably blocks must never become a pending approval at
+                    # all ("אושר אך נכשל בביצוע" is worse than never asking,
+                    # and previously nothing stopped it from being queued).
+                    # source is hardcoded "agent" — this branch IS the raw
+                    # Agent tool_use loop, never a trusted internal call site;
+                    # never read from tu.input, which Claude fully controls.
+                    if tu.name in ("airtable_add", "airtable_update"):
+                        try:
+                            enforce_leads_write_gate(
+                                tu.name, {"table": tu.input.get("table", "")}, source="agent",
+                            )
+                        except LeadsDirectWriteBlocked as e:
+                            logger.warning(
+                                f"[Approval] preflight blocked Leads write before queueing: {tu.name}"
+                            )
+                            tool_results.append({
+                                "type": "tool_result", "tool_use_id": tu.id, "content": str(e)
+                            })
+                            continue
+
                     # BUG-V1-MULTI-PENDING-PAYLOAD-CONTAMINATION: one mutating
                     # approval per agent turn; block the second unconditionally.
                     if _mutating_approvals_this_turn >= 1:
@@ -1923,7 +1950,11 @@ def run_agent(
                     raw, result, result_text = cached["raw"], cached["result"], cached["result_text"]
                 else:
                     logger.info(f"[Tool] {tu.name} | {str(tu.input)[:80]}")
-                    raw    = dispatch_tool(tu.name, tu.input, identity)
+                    # BUG-091: raw Agent tool_use loop — always "agent",
+                    # explicit for clarity/defense-in-depth even though
+                    # airtable_add/update never reach this branch (both
+                    # requires_approval=True, handled above).
+                    raw    = dispatch_tool(tu.name, tu.input, identity, trusted_source="agent")
                     result = validate_tool_output(tu.name, raw)
                     result_text = _tool_user_message(result)
                     logger.info(f"[Tool] → {result_text[:80]}")

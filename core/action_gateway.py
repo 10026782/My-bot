@@ -160,6 +160,14 @@ class ActionContract:
     # see classify_approval_policy()). Computed once at propose time from the
     # actual tool_name/tool_inputs, never trusted from the caller.
     approval_policy:             str = APPROVAL_POLICY_APPROVAL
+    # BUG-091: which Python call site proposed this contract — "agent" (raw
+    # LLM tool_use, the default/least-trusted) or a specific trusted internal
+    # source (e.g. "lead_capture"). Set once at propose_action() time from an
+    # explicit keyword argument, never from tool_inputs — a "_source" key
+    # inside tool_inputs is Claude-controlled data and must never be trusted
+    # as a security boundary. Read by _make_dispatch_executor() at execution
+    # time and passed to dispatch_tool(trusted_source=...).
+    trusted_source:              str = "agent"
 
 
 # ══════════════════════════════════════════════════
@@ -429,9 +437,16 @@ class ActionGateway:
         origin_chat_id: str,
         requires_approval: bool,
         identity=None,
+        trusted_source: str = "agent",
     ) -> GatewayResult:
         """
         מציע פעולה חדשה ל-Gateway.
+
+        trusted_source (BUG-091): מי שקורא ל-propose_action() בפועל —
+        "agent" (ברירת מחדל, הכי לא-מהימן) לקריאות שמקורן ב-Agent tool_use
+        loop, או source פנימי מהימן (למשל "lead_capture") רק כשקוד Python
+        מהימן קורא ישירות. חייב להיות ארגומנט Python מפורש מהקורא — לעולם
+        אסור לגזור אותו מתוך tool_inputs (זה תוכן ש-Claude שולט בו).
         מחזיר GatewayResult(ok=True, contract_id=...) אם מותרת.
         מחזיר GatewayResult(ok=False, ...) אם נחסמת (כפילות/pending).
 
@@ -499,6 +514,7 @@ class ActionGateway:
             actor_external_id=getattr(identity, "external_id", "") or "",
             actor_allowed_domains=list(getattr(identity, "allowed_domains", None) or []),
             approval_policy=approval_policy,
+            trusted_source=trusted_source,
         )
 
         if requires_approval:
@@ -1118,7 +1134,12 @@ def _make_dispatch_executor(ledger: ExecutionLedger):
                 except Exception as exc:
                     logger.warning("[ActionGateway] identity resolve failed: %s", exc)
 
-        return dispatch_tool(tool_name, tool_inputs, identity=identity)
+        # BUG-091: trusted_source comes from the contract itself (set once,
+        # server-side, at propose_action() time) — never re-derived from
+        # tool_inputs, which is Claude-controlled data that survives
+        # normalize_payload() unchanged (including any "_source" key).
+        _trusted_source = getattr(contract, "trusted_source", "agent") if contract else "agent"
+        return dispatch_tool(tool_name, tool_inputs, identity=identity, trusted_source=_trusted_source)
 
     return _executor
 

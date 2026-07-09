@@ -271,10 +271,11 @@ _owner_identity = Identity(
 _captured_identity: dict = {}
 
 
-def _fake_dispatch_tool(name, inputs, identity=None):
+def _fake_dispatch_tool(name, inputs, identity=None, trusted_source=None):
     _captured_identity["role"]        = getattr(identity, "role", None)
     _captured_identity["external_id"] = getattr(identity, "external_id", None)
     _captured_identity["tenant_id"]   = getattr(identity, "tenant_id", None)
+    _captured_identity["trusted_source"] = trusted_source
     return {"ok": True, "external_id": "rec12345678901234", "tool": name}
 
 
