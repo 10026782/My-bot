@@ -56,6 +56,7 @@ from tools.airtable_security import enforce_leads_write_gate, LeadsDirectWriteBl
 from guards          import idempotency, rate_limiter, validate_tool_output
 from config          import get_domain as _channel_domain
 from core.router     import route_request, RouteDecision, Handler
+from core.router.deterministic_denial import check_deterministic_denial
 from core.anti_hallucination import verify_execution, sanitize_agent_response
 from health_monitor import get_health_status
 from feature_flags import is_enabled as _flag_enabled
@@ -1745,6 +1746,23 @@ def run_agent(
             f"[CostWatchdog] EMERGENCY_STOP_AI active — blocking agent for {_sanitize_id(identity.user_id)}"
         )
         return "⛔ מערכת ה-AI בעצירת חירום עקב עלות גבוהה. נסה שוב מאוחר יותר."
+
+    # ── 5.1. Deterministic Denial Short-Circuit ────
+    # כמה צירופי (intent, כלי משוער) ידועים כבר עכשיו ב-100% כך ששער מאוחר
+    # יחסום אותם בכל מקרה, לא משנה מה Claude יעשה — מדלגים על סבב Claude
+    # לגמרי, באותה קונבנציה כמו EMERGENCY_STOP_AI למעלה. שומרים על
+    # tool_allowed (לא handler==AGENT): נתיבי RESTRICTED/blocked/clarify/
+    # approval כבר חזרו למעלה או שיש להם מנגנון קיים משלהם בהמשך
+    # (app.py, "הבקשה נרשמה במערכת.") — אסור להחליף אותם בהודעה הזו.
+    if route.tool_allowed:
+        denial = check_deterministic_denial(route.intent, identity)
+        if denial is not None:
+            logger.warning(
+                f"[DeterministicDenial] {denial.reason} short-circuited before Agent | "
+                f"intent={route.intent} tool={denial.tool_name} role={identity.role} "
+                f"user={_sanitize_id(identity.user_id)}"
+            )
+            return denial.message
 
     try:
         research_mode = user_text.startswith("#") and identity.is_owner
