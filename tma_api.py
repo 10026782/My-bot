@@ -37,6 +37,39 @@ logger = logging.getLogger(__name__)
 tma_api = Blueprint("tma_api", __name__)
 
 
+_TASK_DOMAIN_OPTIONS = (
+    "Real Estate",
+    "Income Properties",
+    "Recruitment",
+    "Import",
+    "Saas",
+)
+
+
+def _normalize_task_domain(value: str) -> str:
+    """Return the exact Airtable Tasks.Domain option for known domain keys."""
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+
+    def key(text: str) -> str:
+        return re.sub(r"\s+", " ", text.replace("_", " ").replace("-", " ")).strip().lower()
+
+    options_by_key = {key(option): option for option in _TASK_DOMAIN_OPTIONS}
+    aliases = {
+        "real estate": "Real Estate",
+        "income properties": "Income Properties",
+        "recruiting": "Recruitment",
+        "recruitment": "Recruitment",
+        "import": "Import",
+        "imports": "Import",
+        "saas": "Saas",
+    }
+
+    normalized = key(raw)
+    return options_by_key.get(normalized) or aliases.get(normalized) or raw
+
+
 @tma_api.errorhandler(RuntimeError)
 def _handle_runtime_error(e):
     logger.error(f"[tma_api] unhandled RuntimeError: {e}")
@@ -1498,7 +1531,7 @@ def create_lead_task(lead_id, identity):
         return jsonify({"error": "lead not found"}), 404
     lf = lead_rec.get("fields", {})
     lead_name   = lf.get(LeadFields.NAME, lead_id)
-    lead_domain = lf.get(LeadFields.DOMAIN, "")
+    lead_domain = _normalize_task_domain(lf.get(LeadFields.DOMAIN, ""))
     lead_owner  = lf.get(LeadFields.OWNER, "")
 
     task_fields: dict = {

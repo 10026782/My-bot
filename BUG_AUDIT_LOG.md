@@ -286,19 +286,19 @@
 - **Verification ראיה:** ראה audit-log למעלה + `git show ba5ad6d -- tools/airtable_tools.py`.
 - **סטטוס:** ✅ VERIFIED / CLOSED.
 
-### BUG-018 — tma_api.py כותב ל-TaskFields.LEAD_LINK שלא קיים ב-Tasks החי → "צור משימה מליד" נכשל
+### BUG-018 — tma_api.py כותב ל-TaskFields.LEAD_LINK שלא קיים ב-Tasks החי → "צור משימה מליד" נכשל — ✅ CLOSED / PROD VERIFIED 10/07/2026
 - **דווח:** 24/06/2026 — באותו אודיט כמו BUG-020
 - **דווח על ידי:** המשתמש
 - **מסך / מודול:** `tma_api.py` — POST ל-`Tables.TASKS` ב-flow של "צור משימה מליד" ב-TMA, שורה 1499 (וגם 1513 ב-queue-for-approval path)
 - **תיאור:** `task_fields[TaskFields.LEAD_LINK] = [lead_id]` — `TaskFields.LEAD_LINK = "Leads"`, אבל אין שדה linked-record כזה בטבלת "משימות (Tasks)" החיה (אומת דרך Airtable MCP). ה-POST השלם נכשל (500) כי Airtable דוחה שדה לא קיים — "צור משימה מליד" נכשל **בכל קריאה**, גם ל-owner וגם ב-approval flow למנהל.
 - **Severity:** High — חוסם תכונה שלמה ב-TMA (יצירת משימה מתוך מסך ליד).
 - **Root Cause:** הקוד הניח קיומו של שדה linked-record "Leads" על Tasks שלא נוצר בפועל.
-- **תוקן:** לא תוקן עדיין — ממתין להחלטת המשתמש בין: (א) להוסיף שדה Linked Record בשם "Leads" לטבלת "משימות (Tasks)" ב-Airtable (ב) להוריד את השורה `task_fields[TaskFields.LEAD_LINK] = [lead_id]` ואת `TaskFields.LEAD_LINK` מ-`airtable_schema.py`.
-- **Merged:** לא
-- **Deployed:** לא
-- **Verified בפרודקשן:** לא
-- **Verification ראיה:** אומת רק דרך השוואה ל-schema החי ב-Airtable MCP — לא אומת דרך קריאה אמיתית ל-endpoint
-- **סטטוס:** Open — דורש החלטת המשתמש לפני תיקון
+- **תוקן:** כן — תוקן בצד Airtable schema, לא בקוד. לטבלת `"משימות (Tasks)"` נוסף/קיים כעת שדה linked-record בשם `"Leads"` שתואם ל-`TaskFields.LEAD_LINK`.
+- **Merged:** N/A — אין שינוי קוד; הקוד הקיים היה נכון ביחס ל-schema הרצוי.
+- **Deployed:** N/A — שינוי Airtable schema, לא deploy אפליקטיבי.
+- **Verified בפרודקשן:** ✅ כן — 10/07/2026.
+- **Verification ראיה:** production smoke: `POST משימות (Tasks) → 200 OK`, נוצר record `recbpQzwrmZdxIaDf`, keys כוללים `Domain` + `Leads`; `/api/leads/.../task` הצליח; `Interaction Log → 200 OK`.
+- **סטטוס:** ✅ CLOSED / PROD VERIFIED.
 
 ### BUG-019 — crm.py: כמה פונקציות כותבות/מסננות לפי שדות ש-Contacts/Deals/Payments החיים לא מכילים
 - **דווח:** 24/06/2026 — באותו אודיט כמו BUG-020
@@ -312,12 +312,13 @@
   - **(e) `crm_upcoming_payments` + `crm_overdue_payments`** (שורות ~311-380): ה-formula משתמש ב-`{סטטוס}`/`{תאריך}` (עברית) על טבלת Payments, אבל השדות החיים הם `status`/`date` (אנגלית) — תוצאה ריקה לתמיד, בלי שגיאה (תזכורות תשלום שלא שולחות כלום).
 - **Severity:** High — פוגע בפונקציונליות CRM ליבתית (חיפוש אנשי קשר, יצירת עסקאות, תזכורות תשלום) שבשימוש בפועל.
 - **Root Cause:** `crm.py` נכתב מול גרסה ישנה/אנגלית של הסכמה ולא עודכן אחרי שהטבלאות "אנשי קשר (Contacts)"/"עסקאות (Deals)" עברו ל-Hebrew naming ו-Payments צומצם לשדות הנוכחיים.
-- **תוקן:** לא תוקן עדיין — ממתין להחלטת המשתמש לכל תת-סעיף (להוסיף שדות חסרים ל-Airtable מול להוריד/להחליף לוגיקה בקוד). מומלץ לתקן את כל הסעיף כמקבץ אחד ולהריץ טסט אינטגרציה ידני לפני merge.
-- **Merged:** לא
-- **Deployed:** לא
-- **Verified בפרודקשן:** לא
-- **Verification ראיה:** אומת רק דרך השוואה ל-schema החי ב-Airtable MCP — לא אומת דרך הרצת הפונקציות בפועל
-- **סטטוס:** Open — דורש החלטת המשתמש לפני תיקון
+- **עדכון 10/07/2026:** re-check מול CSV/live schema: Contacts ו-Payments תואמים לקוד הנוכחי; drift מאושר רק ב-Deals.
+- **תוקן:** כן — `DealFields.ADDRESS`/`FUNDING_COST`/`ROI` עודכנו לשמות Airtable-generated החיים: `"Adress"`, `"Funding Cost"`, `"Roi"`. לא בוצע שינוי Airtable, לא בוצע rename, ולא נגעו ב-`crm.py`, Contacts או Payments.
+- **Merged:** לא עדיין — שינוי קוד מקומי בסבב זה.
+- **Deployed:** לא.
+- **Verified בפרודקשן:** לא.
+- **Verification ראיה:** grep מאשר ש-`crm.py` משתמש ב-`DealFields.ADDRESS`/`FUNDING_COST`/`ROI`, והקבועים האלה נפתרים כעת לשמות החיים ב-`airtable_schema.py`.
+- **סטטוס:** 🟡 Implemented but not yet verified — Deals drift confirmed; Contacts/Payments OK; code constants updated to Airtable-generated field names.
 
 ### BUG-021 — schema_audit.py: UnboundLocalError במקום fallback ל-cache כשה-live fetch נכשל
 - **דווח:** 24/06/2026 — תוך כדי ניסיון להריץ `schema_audit.py` בלי `AIRTABLE_API_KEY`/`AIRTABLE_BASE_ID` ב-env
