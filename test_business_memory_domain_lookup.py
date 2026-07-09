@@ -27,8 +27,10 @@ back to the static dict only when no live schema is available at all.
 8. normalize_business_memory_fields: success sets BMF.DOMAIN to the resolved
    exact value; failure omits BMF.DOMAIN entirely (never writes "General" or
    any other arbitrary value on failure).
-9. _save_to_business_memory aborts (returns None, never calls airtable_create)
-   when Domain resolution failed.
+9. _save_to_business_memory returns {"ok": False, "error": ...} (never a bare
+   None, never calls airtable_create) when Domain resolution failed — and
+   {"ok": True, "record": ...} on success — matching the PR_RESPONSE_CONTRACT
+   {ok, ...} discipline instead of reintroducing a silent-None anti-pattern.
 """
 
 from __future__ import annotations
@@ -173,7 +175,7 @@ with _patched(["Import", "Media"]):  # real_estate has no match here
 # ══════════════════════════════════════════════════════════════════
 # 9. _save_to_business_memory aborts when Domain resolution failed
 # ══════════════════════════════════════════════════════════════════
-print("\n── _save_to_business_memory aborts on failure ─")
+print("\n── _save_to_business_memory: structured {ok,...} contract ─")
 
 class _FakeIdentity:
     tenant_id = "t1"
@@ -184,7 +186,8 @@ with _patched(["Import", "Media"]), patch("tools.airtable_gateway.airtable_creat
     result = cmd_update._save_to_business_memory(
         identity=_FakeIdentity(), title="x", raw_text="y", domain="real_estate", entry_type="Other",
     )
-    chk("_save_to_business_memory returns None on Domain resolution failure", result is None)
+    chk("_save_to_business_memory returns ok=False (never a bare None) on Domain resolution failure", result["ok"] is False)
+    chk("error message names the domain resolution failure", "Domain resolution failed" in result["error"])
     chk("_save_to_business_memory never calls airtable_create when Domain resolution failed", fake_create.call_count == 0)
 
 with _patched(["Real Estate", "Import"]), patch("tools.airtable_gateway.airtable_create") as fake_create:
@@ -192,8 +195,20 @@ with _patched(["Real Estate", "Import"]), patch("tools.airtable_gateway.airtable
     result = cmd_update._save_to_business_memory(
         identity=_FakeIdentity(), title="x", raw_text="y", domain="real_estate", entry_type="Other",
     )
-    chk("_save_to_business_memory proceeds and returns record when resolution succeeds", result == {"id": "recFAKE"})
+    chk("_save_to_business_memory returns {ok:True, record:...} when resolution succeeds", result == {"ok": True, "record": {"id": "recFAKE"}})
     chk("airtable_create called with resolved exact Domain value", fake_create.call_args.args[1][BMF.DOMAIN] == "Real Estate")
+
+with _patched(["Real Estate", "Import"]), patch("tools.airtable_gateway.airtable_create", return_value=None):
+    result = cmd_update._save_to_business_memory(
+        identity=_FakeIdentity(), title="x", raw_text="y", domain="real_estate", entry_type="Other",
+    )
+    chk("airtable_create returning falsy also yields a structured ok=False (not None)", result == {"ok": False, "error": "airtable_create returned no record"})
+
+with _patched(["Real Estate", "Import"]), patch("tools.airtable_gateway.airtable_create", side_effect=Exception("network boom")):
+    result = cmd_update._save_to_business_memory(
+        identity=_FakeIdentity(), title="x", raw_text="y", domain="real_estate", entry_type="Other",
+    )
+    chk("unexpected exception also yields a structured ok=False (not None)", result["ok"] is False and "network boom" in result["error"])
 
 
 print(f"\n{'='*50}\n{passed} passed, {failed} failed\n{'='*50}")

@@ -163,7 +163,7 @@ def register_update_command(bot, get_identity):
             bot.send_message(msg.chat.id, "אין הרשאה לפקודה זו.")
             return
 
-        record = _save_to_business_memory(
+        result = _save_to_business_memory(
             identity   = identity,
             title      = f"{state['entry_type']}: {msg.text[:60]}",
             raw_text   = msg.text,
@@ -171,13 +171,18 @@ def register_update_command(bot, get_identity):
             entry_type = state.get("entry_type", "Other"),
         )
 
-        if record:
+        if result["ok"]:
             bot.send_message(
                 msg.chat.id,
                 f"✅ *נשמר בזיכרון עסקי*\n\n"
                 f"📌 {state['entry_type']} | {_domain_label(state['domain'])}\n"
                 f"_{msg.text[:80]}{'...' if len(msg.text) > 80 else ''}_",
                 parse_mode="Markdown",
+            )
+        elif "Domain resolution failed" in result["error"]:
+            bot.send_message(
+                msg.chat.id,
+                "❌ לא הצלחתי לשמור — בעיה בזיהוי תחום העסק (Domain). נסה שוב או פנה לבעל המערכת.",
             )
         else:
             bot.send_message(
@@ -246,7 +251,7 @@ def capture_photo_or_document(bot, message, get_identity) -> None:
     if drive_url:
         raw_text = f"{raw_text}\n📎 {drive_url}"
 
-    record = _save_to_business_memory(
+    result = _save_to_business_memory(
         identity   = identity,
         title      = f"{state['entry_type']}: {(caption or 'קובץ מצורף')[:60]}",
         raw_text   = raw_text,
@@ -254,7 +259,7 @@ def capture_photo_or_document(bot, message, get_identity) -> None:
         entry_type = state.get("entry_type", "Other"),
     )
 
-    if record:
+    if result["ok"]:
         lines = [
             "✅ *נשמר בזיכרון עסקי*",
             "",
@@ -265,6 +270,8 @@ def capture_photo_or_document(bot, message, get_identity) -> None:
         if caption:
             lines.append(f"_{caption[:80]}{'...' if len(caption) > 80 else ''}_")
         bot.send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
+    elif "Domain resolution failed" in result["error"]:
+        bot.send_message(chat_id, "❌ לא הצלחתי לשמור — בעיה בזיהוי תחום העסק (Domain). נסה שוב או פנה לבעל המערכת.")
     else:
         bot.send_message(chat_id, "⚠️ הקובץ התקבל אבל לא נשמר. בדוק logs.")
 
@@ -471,7 +478,14 @@ def _save_to_business_memory(
     raw_text: str,
     domain: str,
     entry_type: str,
-) -> dict | None:
+) -> dict:
+    """
+    Returns {"ok": True, "record": <airtable record dict>} on success, or
+    {"ok": False, "error": <reason>} on any failure — never a bare None, so
+    callers can always tell why it failed instead of a silent swallow (same
+    contract discipline as PR_RESPONSE_CONTRACT: {ok, ...} everywhere, no
+    ad-hoc None/string checks).
+    """
     source_tag = f"cmd_update:{identity.tenant_id}:{identity.user_id}"
     try:
         from tools.airtable_gateway import airtable_create
@@ -487,10 +501,9 @@ def _save_to_business_memory(
         fields = normalize_business_memory_fields(fields, domain)
 
         if BMF.DOMAIN not in fields:
-            logger.error(
-                f"[C20] aborting save — Domain resolution failed for '{domain}' source={source_tag}"
-            )
-            return None
+            error = f"Domain resolution failed for '{domain}'"
+            logger.error(f"[C20] aborting save — {error} source={source_tag}")
+            return {"ok": False, "error": error}
 
         record = airtable_create(
             Tables.BUSINESS_MEMORY,
@@ -510,14 +523,15 @@ def _save_to_business_memory(
                 )
             except Exception:
                 pass  # audit לעולם לא שובר את ה-flow
-        else:
-            logger.warning(f"[C20] airtable_create returned None source={source_tag}")
+            return {"ok": True, "record": record}
 
-        return record
+        error = "airtable_create returned no record"
+        logger.warning(f"[C20] {error} source={source_tag}")
+        return {"ok": False, "error": error}
 
     except Exception as e:
         logger.error(f"[C20] _save_to_business_memory failed: {e}")
-        return None
+        return {"ok": False, "error": f"unexpected error: {e}"}
 
 
 # ── Context injection — נקרא מ-context.py ───────────────────────
