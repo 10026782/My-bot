@@ -12,6 +12,9 @@ test_schema_snapshot.py — Regression tests for tools/schema_snapshot.py (PR3A)
 7. upload שנכשל מסומן/מלוגג בלי לקרוס.
 8. retention policy מוחקת רק רשומות מעבר למגבלה.
 9. retention policy אף פעם לא מוחקת את ה-snapshot המוצלח האחרון.
+10. BUG-085 — run_snapshot_archive מזהה ומדווח DRIFT_DETECTED כשטבלה
+    שהקוד מכיר חסרה מהתגובה החיה, ולא רק OK/Error.
+11. BUG-085 — כש"הכל תקין" (כל הטבלאות שהקוד מכיר קיימות חי), עדיין נכתב OK.
 """
 
 from __future__ import annotations
@@ -32,6 +35,7 @@ from tools.schema_snapshot import (
     run_snapshot_archive,
     apply_retention_policy,
     _snapshot_table_exists,
+    _missing_tables,
 )
 from tools.airtable_gateway import airtable_upload_attachment
 
@@ -204,6 +208,85 @@ print("\n── flag off ──────────────────�
 with patch("feature_flags.is_enabled", return_value=False):
     result = run_snapshot_archive()
     chk("run_snapshot_archive no-ops when flag is off", result == {"ok": False, "reason": "flag_off"})
+
+# ══════════════════════════════════════════════════════════════════
+# 10/11. BUG-085 — DRIFT_DETECTED actually gets set
+# ══════════════════════════════════════════════════════════════════
+print("\n── BUG-085: drift detection ──────────")
+
+import types
+
+# Small fake Tables namespace (same pattern as test_check_airtable_schema_runtime.py)
+# so "no drift" is achievable without having to mirror the entire real
+# airtable_schema.Tables class in a test fixture.
+_fake_tables_ns = types.SimpleNamespace(
+    LEADS="Leads",
+    SCHEMA_SNAPSHOTS=Tables.SCHEMA_SNAPSHOTS,
+)
+
+with patch("tools.schema_snapshot.Tables", _fake_tables_ns):
+    chk("_missing_tables: none missing when live has every fake-code table",
+        _missing_tables(_RAW_META) == [])
+
+    _RAW_META_MISSING_LEADS = {"tables": [_RAW_META["tables"][1]]}  # only SCHEMA_SNAPSHOTS, no Leads
+    chk("_missing_tables: reports a code table absent from live",
+        _missing_tables(_RAW_META_MISSING_LEADS) == ["Leads"])
+
+
+def _fake_run_snapshot_archive(raw_meta: dict, tmp_path):
+    """Drives run_snapshot_archive() end-to-end with every network call mocked,
+    so the DRIFT_DETECTED/OK status actually written can be inspected."""
+    xlsx_file = tmp_path / "fake.xlsx"
+    xlsx_file.write_bytes(b"fake-xlsx-bytes")
+    fake_xlsx_result = {"status": "success", "confidence": "high", "warnings": [], "output_file": str(xlsx_file)}
+
+    created_fields: dict = {}
+    patched_fields: list[dict] = []
+
+    def _fake_create(table, fields, source=""):
+        created_fields.update(fields)
+        return {"id": "recSNAPNEW"}
+
+    def _fake_patch(table, record_id, fields, source=""):
+        patched_fields.append(fields)
+        return True
+
+    with patch("tools.schema_snapshot.Tables", _fake_tables_ns), \
+         patch("feature_flags.is_enabled", side_effect=lambda flag: flag == "FEATURE_AIRTABLE_SCHEMA_SNAPSHOT"), \
+         patch("tools.schema_snapshot.fetch_live_schema", return_value=raw_meta), \
+         patch("document_converter.engine.convert_document", return_value=fake_xlsx_result), \
+         patch("tools.airtable_gateway.airtable_create", side_effect=_fake_create), \
+         patch("tools.airtable_gateway.airtable_patch", side_effect=_fake_patch), \
+         patch("tools.airtable_gateway.resolve_table_and_field_ids", return_value=("tblSNAP", "fldSNAPFILE")), \
+         patch("tools.airtable_gateway.airtable_upload_attachment", return_value={"ok": True}), \
+         patch.dict("os.environ", {"AIRTABLE_API_KEY": "key", "AIRTABLE_BASE_ID": "appFAKE"}, clear=False):
+        result = run_snapshot_archive()
+    return result, created_fields, patched_fields
+
+
+with tempfile.TemporaryDirectory() as td:
+    tdp = Path(td)
+
+    # 10a. All fake-code tables present live → still OK (regression: the
+    # common "everything is fine" case must not start reporting drift).
+    result_ok, created_ok, patched_ok = _fake_run_snapshot_archive(_RAW_META, tdp)
+    chk("BUG-085 regression: no drift → run_snapshot_archive still reports ok",
+        result_ok["ok"] is True)
+    chk("BUG-085 regression: no drift → missing_tables empty in result",
+        result_ok.get("missing_tables") == [])
+    chk("BUG-085 regression: no drift → final patched Status is OK",
+        patched_ok[-1][SchemaSnapshotFields.STATUS] == SchemaSnapshotStatus.OK)
+
+    # 10b. Leads missing from the live response → DRIFT_DETECTED, not OK.
+    result_drift, created_drift, patched_drift = _fake_run_snapshot_archive(_RAW_META_MISSING_LEADS, tdp)
+    chk("BUG-085: drift detected → missing_tables reports 'Leads'",
+        result_drift.get("missing_tables") == ["Leads"])
+    chk("BUG-085: drift detected → initial created Status is Drift Detected",
+        created_drift[SchemaSnapshotFields.STATUS] == SchemaSnapshotStatus.DRIFT_DETECTED)
+    chk("BUG-085: drift detected → final patched Status is Drift Detected (not OK)",
+        patched_drift[-1][SchemaSnapshotFields.STATUS] == SchemaSnapshotStatus.DRIFT_DETECTED)
+    chk("BUG-085: drift detected → Notes mentions the missing table",
+        "Leads" in patched_drift[-1][SchemaSnapshotFields.NOTES])
 
 # ══════════════════════════════════════════════════════════════════
 # 8/9. Retention policy
