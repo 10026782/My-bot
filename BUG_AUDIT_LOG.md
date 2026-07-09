@@ -1386,8 +1386,8 @@
 ביחד, #285+#286 סוגרים את דרישת ה-Single-Speaker במלואה. אף PR לבד לא היה מספיק.
 - **בדיקה:** `test_bug090_leads_gate_message.py` (18/18 חדש) — gate עדיין חוסם (create+update), הודעת update מפנה למסך הלידים, שני המסרים בלי `capture_inbound_lead()`/שם פונקציה/suffix דיבאג, create≠update, `airtable_patch` מקובץ עם update, regression על טבלאות שאינן Leads/מקורות מורשים/`airtable_get`. עודכנו assertions ב-`test_bug091_source_trust_boundary.py`/`test_bug091_preflight_no_pending_approval.py` (טקסט ההודעה השתנה, לא ההתנהגות). כל 65 קבצי `test_*.py` + `smoke_tests.py` + `test_integration.py` — ירוקים, אפס רגרסיה.
 - **Merged:** ✅ כן — `main` `5338fa9` (Merge pull request #286, commit `85c08f9` + docs commit `314f0dd`). מאומת: `git log --oneline origin/main` וגם `git merge-base --is-ancestor` בפועל בסשן זה (09/07/2026).
-- **Deployed/Verified בפרודקשן:** לא עדיין.
-- **סטטוס:** ✅ תוקן, ממוזג ל-main. לא מאומת בפרודקשן.
+- **Deployed/Verified בפרודקשן:** ✅ כן — ראיה חיה מהמשתמש (09/07/2026): הודעה אמיתית מ-Eli "עדכן ליד קיים אברהם ברסלר לא רלוונטי" קיבלה בפועל "❌ עדכון ליד קיים דרך הצ׳אט חסום כרגע. לעדכון ליד קיים יש להשתמש במסך הלידים באפליקציה." — התאמה byte-for-byte להודעת ה-update החדשה (`tools/airtable_security.py:84-85`, מאומת ישירות בקוד). מאשר: (א) התיקון פרוס בפרודקשן, (ב) ההודעה הספציפית-ל-update (לא ההודעה הישנה/גנרית) אכן מוצגת למשתמש אמיתי, (ג) אין `capture_inbound_lead()`/suffix דיבאג/הודעה כפולה (Single-Speaker) — משפט אחד נקי, תואם למה שנצפה. **לא ניתן לקבוע מה-screenshot בלבד** אם החסימה הגיעה דרך ה-preflight המאוחר (BUG-091, אמצע tool loop) או ה-short-circuit המוקדם (BUG-092, לפני קריאת Claude) — שניהם מפיקים בדיוק אותו טקסט. לאישור ספציפי של BUG-092 (אפס round-trip ל-Claude) נדרשים לוגים (כמו הראיה מ-20:08:46 שכבר ניתנה ל-BUG-091), לא רק תוכן ההודעה.
+- **סטטוס:** ✅ תוקן, ממוזג ל-main, **מאומת בפרודקשן**.
 
 ### BUG-091 — `_source` בתוך tool_inputs עוקף את `enforce_leads_write_gate()` — privilege escalation, לא UX (09/07/2026)
 - **תאריך:** 09/07/2026

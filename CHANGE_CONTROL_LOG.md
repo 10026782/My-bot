@@ -1157,7 +1157,7 @@ Privilege escalation, לא UX: `source` ל-`enforce_leads_write_gate()` נגזר
 ### C107 — BUG-090: LeadsWriteGate — הודעת חסימה נכונה לפי create/update, Single-Speaker (09/07/2026)
 קבצים: `tools/airtable_security.py` (`_leads_write_blocked_message` חדשה), `test_bug090_leads_gate_message.py` (חדש) | PR #286 | באג: BUG-090
 `enforce_leads_write_gate()` החזירה תמיד אותה הודעה קבועה ("...capture_inbound_lead() בלבד") גם ל-`airtable_update` (עדכון ליד קיים) — לא רלוונטי, ודולפת שם פונקציה פנימי. תוקנה הודעה נפרדת לפי `tool_name`: update מפנה למסך הלידים באפליקציה, create מסביר שלידים נוצרים אוטומטית — בלי שם פונקציה, בלי suffix דיבאג. חצי שני של דרישת Single-Speaker המקורית (החצי המבני נסגר יחד עם C106/BUG-091 באותו PR chain — לא side effect, שני חצאים מתוכננים מההתחלה). 18/18 בדיקות חדשות; אפס שינוי בהתנהגות החסימה עצמה.
-**Merged:** כן (`85c08f9`+`314f0dd`, merge commit `5338fa9`, PR #286) | **Verified בפרודקשן:** לא עדיין
+**Merged:** כן (`85c08f9`+`314f0dd`, merge commit `5338fa9`, PR #286) | **Verified בפרודקשן:** ✅ כן (09/07/2026) — הודעת update אמיתית ממשתמש חי ("עדכן ליד קיים אברהם ברסלר לא רלוונטי") קיבלה טקסט זהה byte-for-byte להודעה המתוקנת, ראה BUG_AUDIT_LOG.md לפירוט
 
 ### C108 — BUG-092: Deterministic Denial Short-Circuit — חוסך סבב Claude מיותר לחסימות ודאיות (09/07/2026)
 קבצים: `core/router/deterministic_denial.py` (חדש), `app.py`, `test_deterministic_denial.py` (חדש) | PR #287 | באג: BUG-092
