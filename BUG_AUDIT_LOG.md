@@ -97,7 +97,7 @@
 - **Verification ראיה:** `py_compile` עבר; Flask reproduction script אישר 500→204 לאחר התיקון. אין עדיין אימות בפרודקשן החיה.
 - **סטטוס:** 🟡 Fixed — ממתין לאימות ידני בפרודקשן (בחירת Domain ב-Venture)
 
-### BUG-008 — Lead Business Outcome 422 (trailing space in Airtable options)
+### BUG-008 — Lead Business Outcome 422 (trailing space in Airtable options) — ✅ VERIFIED / CLOSED 09/07/2026
 - **דווח:** 17/06/2026 — Airtable PATCH נכשל עם `422 INVALID_MULTIPLE_CHOICE_OPTIONS`, `keys=['Business Outcome', 'status']`; ב-UI רק "סמן כמתאים" עבד, שאר כפתורי הסטטוס הציגו "update failed"
 - **מסך / מודול:** `tma_api.py` — `update_lead_status`, `set_lead_outcome`, `patch_lead`; `airtable_schema.py` — קבועי `LeadStatus`/`LeadOutcome` חדשים
 - **Severity:** High — חסם את כל כפתורי הסטטוס/תוצאה במסך Lead Detail מלבד אחד
@@ -105,11 +105,17 @@
 - **תוקן ב-commit:** `7d5cb3a`
 - **תוקן ב-branch:** `claude/meta-whatsapp-phase-1-q6pp3e`
 - **תיקון:** `LeadOutcome.BY_KEY` ב-`airtable_schema.py` ממפה מפתח נקי קנוני (ללא רווח) לערך המדויק בפועל ב-Airtable; `LeadStatus.ALL` לבדיקת תקינות `status`. שני השדות מאומתים לפני PATCH — אם הערך לא תקין, מוחזר 400 ברור במקום לאפשר ל-Airtable להחזיר 422.
-- **Merged:** לא — ממתין לאימות ידני לפני merge (לפי הנחיית המשתמש)
-- **Deployed:** לא ידוע — דרוש Render deploy
-- **Verified בפרודקשן:** לא
-- **Verification ראיה:** `py_compile` עבר; `test_integration.py` 4/4 PASS; `smoke_tests.py` 5/6 PASS (כשל אחד תלוי-סביבה, ידוע מראש — `anthropic` import); `npm run build` עבר. אין עדיין אימות בפרודקשן החיה (5 כפתורי סטטוס/תוצאה).
-- **סטטוס:** 🟡 Fixed — ממתין לאימות ידני בפרודקשן
+- **Merged:** ✅ כן (מוזג בשלב מוקדם יותר — commit `7d5cb3a`).
+- **Deployed:** ✅ כן.
+- **Verified בפרודקשן:** ✅ כן — 09/07/2026:
+  ```
+  PATCH /api/leads/recLQNCnuyfoMMcV4/outcome
+  PATCH Airtable /Leads/recLQNCnuyfoMMcV4 → 200 OK
+  [AUDIT:gateway] keys=['Business Outcome', 'status'] ok=True
+  ```
+  אותו זוג שדות בדיוק מהבאג המקורי (`Business Outcome`+`status`), 200 OK, אין 422.
+- **Verification ראיה:** `py_compile` עבר; `test_integration.py` 4/4 PASS; `smoke_tests.py` 5/6 PASS (כשל תלוי-סביבה, לא קשור); `npm run build` עבר. + audit-log למעלה, 09/07/2026.
+- **סטטוס:** ✅ VERIFIED / CLOSED.
 
 ### FLAGGED (not fixed) — `Next Action` field schema drift
 - **דווח:** 17/06/2026, תוך כדי חקירת BUG-008
@@ -258,19 +264,27 @@
 - **Verification ראיה:** השוואה ישירה ל-`list_tables_for_base`/`get_table_schema` החי דרך Airtable MCP, 24/06/2026; `py_compile` עבר; `smoke_tests.py` 6/6 PASS
 - **סטטוס:** 🟡 Implemented but not yet verified — ממתין ל-merge + אימות
 
-### BUG-017 — inbound_handler.py כותב ל-LeadFields.UPDATED_AT שלא קיים ב-Leads החי
+### BUG-017 — inbound_handler.py כותב ל-LeadFields.UPDATED_AT שלא קיים ב-Leads החי — ✅ VERIFIED / CLOSED 09/07/2026
 - **דווח:** 24/06/2026 — באותו אודיט כמו BUG-020
 - **דווח על ידי:** המשתמש
 - **מסך / מודול:** `inbound_handler.py` — `_update_existing()`, שורות 75-86 (F06, נקרא בפועל ע"י `email_inbound.py`)
 - **תיאור:** `_update_existing()` עושה PATCH יחיד ל-Leads עם 3 שדות: `SUMMARY`, `UPDATED_AT`, `EXTERNAL_ID`. `LeadFields.UPDATED_AT = "updated_at"` — שדה שלא קיים בטבלת Leads החיה (אומת דרך Airtable MCP: אין `updated_at`, יש רק `created_at`). Airtable דוחה PATCH עם שדה לא קיים (422) — **כל הבקשה נכשלת**, לא רק השדה החסר, כך שגם `SUMMARY` וגם `EXTERNAL_ID` לא מתעדכנים בפועל כשליד קיים שולח הודעה נכנסת חדשה. ה-`except` הסוגר רק כותב ל-log, אז זה נכשל בשקט.
 - **Severity:** High — F06 inbound-lead gate בשימוש בפועל; כל "ליד קיים עונה שוב" לא מתעדכן בכלל ב-production.
 - **Root Cause:** הקוד הניח קיומו של שדה `updated_at` שלא נוצר בפועל ב-Airtable.
-- **תוקן:** לא תוקן עדיין — ממתין להחלטת המשתמש בין: (א) להוסיף שדה Airtable מטיפוס "Last Modified Time" בשם "Updated At" (לא דורש כתיבה מהקוד בכלל) (ב) להוסיף שדה רגיל "updated_at" ולהשאיר את הקוד (ג) להוריד את השורה `LeadFields.UPDATED_AT: _now_iso()` ואת `LeadFields.UPDATED_AT` מ-`airtable_schema.py` לגמרי.
-- **Merged:** לא
-- **Deployed:** לא
-- **Verified בפרודקשן:** לא
-- **Verification ראיה:** אומת רק דרך השוואה ל-schema החי ב-Airtable MCP — לא אומת דרך webhook אמיתי
-- **סטטוס:** Open — דורש החלטת המשתמש לפני תיקון
+- **תוקן (09/07/2026) — נרטיב מדויק:** הבאג המקורי (24/06) דיווח כתיבת `UPDATED_AT` בפועל מתוך `inbound_handler.py::_update_existing()`. באימות מול `origin/main` נקי (09/07), נתיב הכתיבה הזה **כבר לא היה קיים בכלל** — `_update_existing()` הנוכחי כותב רק `SUMMARY`+`EXTERNAL_ID` (`git log --all -S "LeadFields.UPDATED_AT" -- inbound_handler.py` לא מחזיר שום commit, כך שאי אפשר לצטט מתי/איך זה הוסר — רק לאשר שהקוד הנוכחי נקי). הסיכון האמיתי שנשאר בקוד הנוכחי היה הרשאה ישנה שנשכחה: `tools/airtable_tools.py::_TABLE_FIELDS["Leads"]` עדיין כלל `"created_at"`/`"updated_at"` ברשימת השדות המותרים — הרשאה מתה (dormant permission), לא bug פעיל, אבל סיכון אמיתי לו יכתוב אליה שוב קוד עתידי. **PR #283 מסיר את הסיכון הנשאר הזה בקוד הנוכחי. הוא לא מוסיף שדה Airtable** (לא מיישם את אופציה (א)/(ב) מהרשומה המקורית — Meta API עדיין לא כולל `updated_at`/`Last Modified Time` ב-Leads).
+- **Merged:** ✅ כן — `main` `d3d0fc5` (Merge pull request #283), commit `ba5ad6d` (`fix(leads): remove non-writable timestamps from legacy allowlist`).
+- **Deployed:** ✅ כן.
+- **Verified בפרודקשן:** ✅ כן — 09/07/2026, ראיית audit-log ישירה:
+  ```
+  POST /Leads → 200 OK
+  [AUDIT:gateway] table=Leads keys=[Name, phone, channel, memory_key, domain, source, status, summary, Score, sender_id, tenant_id]
+
+  PATCH /Leads/recLQNCnuyfoMMcV4 → 200 OK
+  [AUDIT:gateway] source=tma op=patch table=Leads keys=['Business Outcome', 'status'] ok=True
+  ```
+  לא הופיעו `created_at`/`updated_at`/`Created At`/`Updated At`/422 באף אחת מהקריאות — גם create וגם update דרך TMA עוברים נקי.
+- **Verification ראיה:** ראה audit-log למעלה + `git show ba5ad6d -- tools/airtable_tools.py`.
+- **סטטוס:** ✅ VERIFIED / CLOSED.
 
 ### BUG-018 — tma_api.py כותב ל-TaskFields.LEAD_LINK שלא קיים ב-Tasks החי → "צור משימה מליד" נכשל
 - **דווח:** 24/06/2026 — באותו אודיט כמו BUG-020
@@ -361,7 +375,8 @@
 - **Deployed:** לא אומת מהסביבה הזו (אין Render dashboard access).
 - **Verified בפרודקשן:** ✅ חלקי — ראיית-לוג אמיתית מתוך `BOSS_Manual_Verification_ChecklIST_UPDATED2.docx` (V1-04, מתוך מייל עם רשימת לידים בפועל) מציגה ליד עם `שם: ליד חדש` ו-`תאריך יצירה: 26/6/2026` ו-`15/6/2026` — **לפני** התיקון (`ca1f5a0` מתאריך 28/06/2026 23:52). כלומר הבאג היה פעיל בפרודקשן והשפיע על רשומות אמיתיות; אין עדיין ראיה ישירה (לוג/screenshot) שליד שנוצר **אחרי** ה-commit מקבל את הטלפון כ-Name כראוי — מומלץ לאמת ב-בדיקה הבאה (LL-01/LF-01 עם ליד טרי).
 - **Verification ראיה:** `grep -n "ליד חדש\|display_name" identity.py` → שורות 267-273 (הערת BUG-NEW-01 ROOT CAUSE FIX + `display_name=""`); `git show ca1f5a0 -- identity.py lead_capture.py` מציג את הדיף המלא; checklist evidence מצוטט מעל.
-- **סטטוס:** 🟡 MERGED TO MAIN (`ca1f5a0`) — ממתין לאימות פרודקשן על ליד **טרי** שנוצר אחרי התיקון (לא רק היסטוריה ישנה).
+- **Production smoke 09/07/2026:** ליד חדש שנוצר היום לא נשמר בשם "ליד חדש" הליטרלי — `Name='מתעניין במיטות עץ'`, `record=recZBwXryhG7QfgCd`. **תומך בתיקון, אך לא סוגר סופית:** הבדיקה הייתה דרך owner dictation/Telegram, לא flow חיצוני נקי של ליד אמיתי חדש (מספר טלפון חדש שמעולם לא נראה במערכת). **סטטוס: partially verified — לא לסגור כ-Verified מלא עד בדיקה ממספר חיצוני חדש לגמרי.**
+- **סטטוס:** 🟡 MERGED TO MAIN (`ca1f5a0`) — 🟡 Partially Verified 09/07/2026 (smoke test דרך owner dictation) — עדיין ממתין לאימות מלא עם ליד **טרי ממספר חיצוני חדש לגמרי**.
 
 ### FLAGGED (cleanup candidates, not bugs) — קוד מת ב-airtable_schema.py / קובץ cache מטעה
 - **דווח:** 24/06/2026 — באותו אודיט כמו BUG-020
@@ -494,7 +509,8 @@
 - **Regression:** T01 ב-`anti_hallucination.py`
 - **הערה:** ראו גם BUG-023 שתיעד את אותה בעיה מזווית ה-Primary Field. BUG-025 מתמקד ב-display_name fix כחלק מסדרת תיקוני Lead Lifecycle.
 - **PR:** #169
-- **סטטוס:** ✅ תוקן | ⚠️ אימות מלא עם מספר חדש לגמרי — ממתין
+- **Production smoke 09/07/2026:** ראה BUG-023 — ליד חדש היום לא הציג "ליד חדש" הליטרלי (`Name='מתעניין במיטות עץ'`), אבל דרך owner dictation, לא מספר חיצוני חדש לגמרי. תומך בתיקון, לא סוגר.
+- **סטטוס:** ✅ תוקן | 🟡 Partially Verified 09/07/2026 (smoke test) | ⚠️ אימות מלא עם מספר חיצוני חדש לגמרי — עדיין ממתין
 
 ### BUG-026 (BUG-NEW-02) — dict error ב-`airtable_add` return value
 - **תאריך:** 28/06/2026
@@ -526,7 +542,7 @@
 - **חסום:** `agent`
 - **Evidence לתיקון:** 6/6 gate tests + 9/9 security tests
 - **PR:** #172
-- **עדכון 09/07/2026 (policy re-review, ראה BUG-088):** נבדק מחדש אם `enforce_leads_write_gate()` צריך להכליל לטבלאות נוספות (Business Memory/Contacts/Deals), בעקבות עבודה על BUG-081/086/087. **הוכרע לא לגעת:**
+- **עדכון 09/07/2026 (policy re-review, ראה BUG-090):** נבדק מחדש אם `enforce_leads_write_gate()` צריך להכליל לטבלאות נוספות (Business Memory/Contacts/Deals), בעקבות עבודה על BUG-081/086/087. **הוכרע לא לגעת:**
   ```
   DECISION (09/07/2026): Leads' structural source-gate (BUG-028) remains
   Leads-specific by design. Other tables rely on requires_approval (tool_registry.py)
@@ -534,7 +550,12 @@
   Revisit ONLY if a similar repeated-failure pattern emerges for another table.
   ```
   לא PR, לא שינוי קוד — `tool_registry.py`'s `requires_approval=True` על `airtable_add`/`airtable_update` כבר עוצר ביצוע כל כתיבה יזומת-Agent (לכל טבלה) בתור אישור, ללא תלות ב-table-specific gate.
-- **סטטוס:** ✅ תוקן ומוזג — scope Leads-only אושר כמכוון, לא פער (09/07/2026).
+- **Verified בפרודקשן (09/07/2026):** ✅ כן — ראיית לוג ישירה שה-gate עצר כתיבה אמיתית:
+  ```
+  [LeadsWriteGate] BLOCKED direct Leads write | tool=airtable_update source=agent table=Leads
+  ```
+  השאלה המקורית ("האם כתיבה ישירה ל-Leads מה-Agent חסומה?") מאומתת חיובית בפרודקשן. **Follow-up נפתח בנפרד:** BUG-090 — הודעת החסימה למשתמש שגויה עבור `airtable_update` (מציגה `capture_inbound_lead()` שלא רלוונטי לעדכון) + הפרת Single-Speaker בנתיב הכשל — לא פותח מחדש את BUG-028 עצמו (ה-gate עובד נכון), רק את הניסוח/UX.
+- **סטטוס:** ✅ תוקן ומוזג, ✅ VERIFIED בפרודקשן — scope Leads-only אושר כמכוון, לא פער (09/07/2026).
 
 ### BUG-029 (BUG-NEW-05) — A32: FOUND יכול להצדיק CREATED
 - **תאריך:** 28/06/2026
@@ -1343,3 +1364,15 @@
 - **תוצאה:** אין מופע שלישי של המשפחה (מעבר ל-BUG-086/087). המשפחה נחשבת סגורה נכון ל-09/07/2026.
 - **Merged:** לא רלוונטי — audit בלבד, אין קוד מוצר מעורב.
 - **סטטוס:** ✅ הושלם — נבדק ותועד, אין ממצאים חדשים.
+
+### BUG-090 — LeadsWriteGate: הודעת חסימה שגויה ל-update + הפרת Single-Speaker בנתיב הכשל (09/07/2026) — Open, טרם תוקן
+- **תאריך:** 09/07/2026
+- **דווח על ידי:** המשתמש — תוייג בטעות בשיחה כ-"BUG-088" (מספר תפוס — BUG-088/089 הם שני ה-Audits מ-PR #282; המספר הפנוי הנכון הוא BUG-090).
+- **מסך / מודול:** `tools/airtable_security.py::enforce_leads_write_gate()` (הודעת חסימה), נתיב הכשל אחרי approval (Single-Speaker).
+- **תיאור:** אומת בפרודקשן ש-BUG-028's gate עובד נכון (חוסם `airtable_update source=agent table=Leads`) — אבל שני פגמים נלווים נצפו באותה זרימה:
+  1. **הודעה שגויה ל-update:** `enforce_leads_write_gate()` מחזירה תמיד את אותה הודעה קבועה — `"❌ כתיבה ישירה ל-Leads חסומה. השתמש ב-capture_inbound_lead() בלבד."` — גם כשה-tool החסום הוא `airtable_update` (עדכון ליד קיים), למרות ש-`capture_inbound_lead()` רלוונטי רק ל-inbound create flow, לא לעדכון ליד קיים. גם דולפת שם פונקציה פנימי למשתמש.
+  2. **הפרת Single-Speaker:** נצפה בפרודקשן רצף כמו: "אושר אך נכשל בביצוע... כתיבה ישירה ל-Leads חסומה. השתמש ב-capture_inbound_lead()... לא הצלחתי לבצע את הפעולה... אותה שגיאה שוב" — כלומר המשתמש מקבל כמה הודעות/שכבות (raw exception + ניסוח סוכן נוסף), לא הודעה אחת נקייה.
+- **Contract Chain (בוצע, ראה גם דיון בצ'אט):** `grep -n "enforce_leads_write_gate\|כתיבה ישירה ל-Leads חסומה" tools/airtable_security.py` → הודעה אחת קבועה ב-`enforce_leads_write_gate()` (שורות 74-78), לא תלוית `tool_name` למרות ש-`tool_name` כבר מגיע כפרמטר. `grep -n "LeadsWriteGate\|airtable_update.*Leads\|source=agent" tools/dispatcher.py tools/airtable_security.py` → שני call sites נפרדים ב-`dispatcher.py` (`airtable_add`/`airtable_update`), שניהם `except LeadsDirectWriteBlocked as e: return str(e)` — ה-`str(e)` חוזר ישירות כתוצאת ה-tool, ה-agent רואה את זה ועלול לנסח עוד משפט מעליו (מקור ה-duplication).
+- **Scope מאושר (מהמשתמש):** תיקון הודעה בלבד ב-`enforce_leads_write_gate()`/`tools/airtable_security.py`. **לא** לבנות `update_existing_lead()` חדש, **לא** לפתוח כתיבות Agent כלליות ל-Leads, **לא** להחליש את ה-gate עצמו — רק המחרוזת משתנה, לפי `tool_name` (create vs update), single-speaker (הודעה אחת נקייה, לא raw exception + ניסוח סוכן נוסף), בלי לחשוף שם פונקציה פנימי.
+- **Merged:** לא — טרם תוקן.
+- **סטטוס:** Open — Contract Chain הושלם, ממתין למימוש.
