@@ -676,6 +676,7 @@
 - **תיקון:** (א) `_queue_approval()` מזריק sentinel `__approval_queued__` ל-`tool_results_log` בכל הרצה. (ב) A32 קיבל pattern חדש: ביטויי approval דורשים עדות `__approval_queued__`. ללא sentinel — תגובה נחסמת.
 - **PR:** #188
 - **סטטוס:** ✅ תוקן ומוזג
+- **עדכון אימות 09/07/2026 — כיסוי מול BUG-086/087:** ✅ סגור בפועל במסלול Agent tool-loop. הטענה הבעייתית היא טקסט שיוצא מה-Agent ונבדק ב-`sanitize_agent_response()` לפני החזרה למשתמש (`app.py:1969-1973`). `_queue_approval()` מזריק עדות `{"tool": "__approval_queued__", "ok": True}` ל-`tool_results_log` רק אחרי queue אמיתי (`app.py:1897-1911`). ב-`core/anti_hallucination.py:235-247` יש pattern מפורש לטענות "ממתינה לאישור" שדורש את ה-sentinel הזה; בלי sentinel התגובה מוחלפת ל-`_NO_TOOL_EVIDENCE_FALLBACK` דרך הלולאה ב-`core/anti_hallucination.py:546-554`. כלומר BUG-086/087 לא צריכים PR נוסף עבור BUG-041.
 
 ### BUG-042 (BUG-V1-APPROVAL-REQUEUE-AFTER-CONFIRM) — פעולה שאושרה ניתנת ל-re-queue מיידי
 - **תאריך:** 30/06/2026
@@ -891,6 +892,7 @@
 - **Deployed:** לא אומת (אין גישת Render dashboard מה-sandbox)
 - **Verified בפרודקשן:** לא עדיין
 - **סטטוס:** ✅ מוזג ל-main — ממתין ל-production verification
+- **עדכון אימות 09/07/2026 — כיסוי מול BUG-086/087:** ✅ סגור כטקסט מטעה, לא דרך anti-hallucination. זה לא Agent claim ולא עובר דרך `sanitize_agent_response()`, אלא הודעה קבועה מ-`core/lead_candidate_handler.py`. הקוד הנוכחי ב-`_handle_clean_batch()` אומר במפורש "לא שמרתי אותם ולא נפתחה פעולת אישור קבוצתית" ו"אישור קבוצתי עדיין לא זמין" (`core/lead_candidate_handler.py:713-724`). `_store_pending_preview()` מתועד כ-`INTENTIONAL — no resolver yet`, ושומר `pending_lead_preview` ל-audit/future-design בלבד (`core/lead_candidate_handler.py:770-794`). לכן BUG-086/087 אינם המנגנון הרלוונטי כאן; ה-resolver הקבוצתי נשאר functional gap נפרד ומכוון, אבל ההבטחה הכוזבת "ענה כן לאישור batch" כבר סגורה.
 
 ### BUG-059 (LEAD-EVENT-DOMAIN-ORDERING-DORMANT-INJECTION) — ענף claude/lead-event-domain-ordering (לא ממוזג) מכיל prompt-injection surface + dual mechanism
 - **תאריך:** 03/07/2026
@@ -1087,6 +1089,7 @@
   - **PR:** אותו ענף (`claude/bug-070-058-gaps-1i1spl`) — commit נפרד ל-gap(1)+gap(3) מעבר ל-#234 המקורי.
   - **Merged:** ממתין ל-push/PR של סבב זה.
   - **סטטוס (עדכון):** gap (1) — combined wording + reject-by-index — ✅ קוד הושלם, בדיקות עברו, ממתין ל-merge+production verification. gap (2) כבר נסגר קודם (#234). gap (3) — 🟡 רק ניסוח תוקן, backend עדיין לא קיים, נשאר פתוח במכוון.
+  - **עדכון אימות 09/07/2026 — כיסוי מול BUG-086/087:** ✅ סגור כטקסט מטעה, לא דרך anti-hallucination. `daily_collector` אינו Agent tool-loop: `scheduler.py` מפעיל `_job_daily_collector()` ומשם `send_daily_collector()` (`scheduler.py:73-90`, `scheduler.py:805-810`), ו-`daily_collector.py` בונה הודעה קבועה ב-`format_collector_message()` ושולח אותה ישירות עם `bot.send_message()` (`daily_collector.py:130-153`, `daily_collector.py:160-190`). לכן BUG-086/087 לא יכולים ולא צריכים לתפוס את ההבטחה הישנה. ההוכחה לסגירה היא שהטקסט הנוכחי כבר לא אומר "ענה במספר לאישור שמירה", אלא "כדי לשמור פריט — עדכן אותו ידנית או שלח לי אותו כליד/משימה בנפרד" (`daily_collector.py:150-152`). ה-backend/state לפריטי המאסף היומי נשאר functional gap נפרד ומכוון.
 
 - **תיקון-טעות שתועדה בסבב קודם (05/07/2026, אחרי בדיקה חיה):** ניתוח קודם (בשיחה, לא הגיע ל-commit) טען ש-`route_disambiguation()` הוא "dead code" בפועל, כי הצרכן שלו (§4, `app.py`) עטוף ב-`FEATURE_ACTION_GATEWAY` בעוד היצרן שלו (`route_confirmation_word()`, populates `self._disambiguation`) רץ ללא תלות בדגל (BUG-056). **המשתמש בדק חי בטלגרם והפריך את הטענה:** כששולחים קודם מילת אישור בודדת ("כן"/"מאשר") ומחכים לרשימה הממוספרת, ואז שולחים מספר/סדר בודד בנפרד — הבחירה **כן** נפתרת נכון. המסקנה המתוקנת: אין כאן באג — הייתה ציפייה שגויה לפרוטוקול (ניסיון לשלוח מספר ישיר בלי לשלוח קודם מילת אישור בודדת שמפעילה את `route_confirmation_word()` ומאכלסת את `_disambiguation`). כלומר: ב-סביבה שנבדקה, `FEATURE_ACTION_GATEWAY` בפועל **פעיל** (אחרת גם הפרוטוקול הדו-שלבי לא היה עובד) — לא מאומת דרך קוד סטטי (ברירת המחדל בקוד היא כבוי, `feature_flags.py:116-118`), אלא רק דרך תצפית חיה. אין תיקון קוד נדרש לממצא הזה.
 - **נקודה לתיעוד עתידי (לא באג, לא תוקן):** יש חוסר-אחידות UX אמיתי בין שני מסלולי disambiguation בבוט — מסלול ה-file-upload/ActionGateway דורש פרוטוקול דו-שלבי ("כן"/"מאשר" קודם, ואז מספר בנפרד), בעוד `daily_collector.py`'s `format_collector_message()` (gap 3 למעלה) מבטיח בטקסט יכולת תגובה ישירה במספר בודד ("ענה במספר") שלא קיימת כלל. שני הפרוטוקולים שונים זה מזה ואף אחד מהם לא תומך ב-"כן/מאשר + מספר" משולב באותה הודעה (gap 1 למעלה). ראוי לשקול בעתיד איחוד לחוויה אחת עקבית בין שני המסלולים, כחלק מטיפול בgaps 1 ו-3.
