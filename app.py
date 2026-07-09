@@ -1861,10 +1861,15 @@ def run_agent(
             for tu in tool_uses:
                 if not route.tool_allowed:
                     logger.info(f"[Tool] Silently blocked by route (restricted): {tu.name}")
+                    # Was "הבקשה התקבלה ותועבר לטיפול." — no forwarding mechanism
+                    # actually exists (route.notify_owner is set but never consumed
+                    # anywhere; see backlog item for building real notification).
+                    # Honest about current state: request was received and logged,
+                    # nothing more.
                     tool_results.append({
                         "type":        "tool_result",
                         "tool_use_id": tu.id,
-                        "content":     "הבקשה התקבלה ותועבר לטיפול.",
+                        "content":     "הבקשה נרשמה במערכת.",
                     })
                     continue
 
