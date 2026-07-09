@@ -526,7 +526,15 @@
 - **חסום:** `agent`
 - **Evidence לתיקון:** 6/6 gate tests + 9/9 security tests
 - **PR:** #172
-- **סטטוס:** ✅ תוקן ומוזג
+- **עדכון 09/07/2026 (policy re-review, ראה BUG-088):** נבדק מחדש אם `enforce_leads_write_gate()` צריך להכליל לטבלאות נוספות (Business Memory/Contacts/Deals), בעקבות עבודה על BUG-081/086/087. **הוכרע לא לגעת:**
+  ```
+  DECISION (09/07/2026): Leads' structural source-gate (BUG-028) remains
+  Leads-specific by design. Other tables rely on requires_approval (tool_registry.py)
+  as their write-gate — sufficient given no corruption history exists for them.
+  Revisit ONLY if a similar repeated-failure pattern emerges for another table.
+  ```
+  לא PR, לא שינוי קוד — `tool_registry.py`'s `requires_approval=True` על `airtable_add`/`airtable_update` כבר עוצר ביצוע כל כתיבה יזומת-Agent (לכל טבלה) בתור אישור, ללא תלות ב-table-specific gate.
+- **סטטוס:** ✅ תוקן ומוזג — scope Leads-only אושר כמכוון, לא פער (09/07/2026).
 
 ### BUG-029 (BUG-NEW-05) — A32: FOUND יכול להצדיק CREATED
 - **תאריך:** 28/06/2026
@@ -1309,3 +1317,29 @@
 - **Merged:** ✅ כן — `main` `b9a1ee7` (PR #280, commit `cd20653`), `75cdb45` (PR #281, commit `9065339`). מאומת: `git grep` על `origin/main`.
 - **Deployed/Verified בפרודקשן:** לא עדיין.
 - **סטטוס:** ✅ תוקן ומוזג ל-main — לא מאומת בפרודקשן. N15 (מדיניות notify_owner) נשאר פתוח ב-`ROADMAP.md`, לא בסקופ התיקון הזה.
+
+### BUG-088 — Audit: Structural vs Enumeration על כל תיקוני היום (09/07/2026) — ✅ Audit בלבד, ללא action items
+- **תאריך:** 09/07/2026
+- **דווח על ידי:** session audit, ביוזמת המשתמש — בקשה לוודא שכל תיקון היום הוא כלל גנרי (structural) ולא רשימה שצריך לעדכן ידנית לכל מקרה עתידי (enumeration), לפני שממשיכים ל-item הבא.
+- **נבדק (6 פריטים, מול קוד ממוזג בפועל, לא זיכרון):**
+  1. `resolve_business_memory_domain()` (BUG-081 שלב 6) — **Structural**: live lookup + נרמול גנרי (`.strip().lower()`), לא רשימת תיקונים.
+  2. Anti-hallucination generic guard (BUG-086) — **Structural**: `_has_write_tool_evidence()` לפי חברות ב-set, לא per-verb.
+  3. `enforce_leads_write_gate` (BUG-028) — **Enumeration, מכוון**: `_LEADS_TABLE_NAMES` hardcoded, Leads-only. אושר כהחלטת מדיניות (ראה עדכון ב-BUG-028 למעלה), לא נגעו.
+  4. SelectValueValidation (PR2, SHADOW) — **Structural**: `choices` נשלף רק מ-`RuntimeSchemaProvider.get_table_contract()`, אין רשימה hardcoded מקבילה (`schema_intelligence.py`'s `SCHEMA` dict אומת כ-dead code, לא מחובר).
+  5. BUG-085 drift detection — **Structural**: `set(vars(Tables)) - set(live_names)`, גנרי לכל טבלה עתידית.
+  6. Duplicate-option/whitespace normalization — **Structural**: `_normalize_domain_option()` גנרי, לא רשימת הוריאציות הידועות ("Real  Estate ", "SaaS   " וכו').
+- **תוצאה:** 5/6 structural, 1/6 enumeration מכוון ומתועד. אין action items חדשים — האודיט עצמו הוא התוצר.
+- **Merged:** לא רלוונטי — audit בלבד, אין קוד מוצר מעורב.
+- **סטטוס:** ✅ הושלם — נבדק ותועד, ללא ממצאים דורשי תיקון.
+
+### BUG-089 — Audit: סריקה רחבה ל"הבטחת המשך כוזבת" ברחבי הקוד, אחרי BUG-086/087 (09/07/2026) — ✅ Audit בלבד, המשפחה סגורה
+- **תאריך:** 09/07/2026
+- **דווח על ידי:** session audit — אחרי תיקון BUG-086 (anti-hallucination CREATE claims) ו-BUG-087 (fallback messages כוזבות), grep מכוון לחיפוש מופעים נוספים מאותה משפחה (טענת תהליך-המשך/סטטוס שאין מנגנון אמיתי מאחוריה) בכל הריפו, לפני מעבר ל-item הבא.
+- **נבדק:** grep רחב על ניסוחי "יטופל/יישלח/יעודכן בהמשך" וכדומה על כל `*.py` (לא test files). 4 מופעים אותרו:
+  1. `app.py:1864`/`core/anti_hallucination.py:500`/`:1079` — הערות קוד שמתעדות את המחרוזות **הישנות** שכבר תוקנו (BUG-087) — לא מופע חדש.
+  2. `core/adapters/leads_adapter.py:274` (`_phase_label`) — `PHASE_AWAITING: "ממתין לטיפול"` — **לגיטימי**: label שנגזר מ-`phase` field אמיתי בנתונים, לא הבטחה לתהליך שלא קיים.
+  3. `core/anti_hallucination.py` (אזור `__approval_queued__` pattern) — זהו ה-detection pattern עצמו (מזהה טענות כוזבות), לא מופע של הבעיה.
+  4. `core/learning_engine.py:27` — `"בהמשך"` מופיע רק כמילת מפתח לסיווג טקסט היסטורי (keyword classification), לעולם לא כפלט למשתמש; `FEATURE_LEARNING_ENGINE` כבוי כברירת מחדל ממילא (ראה `core/learning_engine.py`'s תיאור ב-`CLAUDE.md`: אינרטי במכוון).
+- **תוצאה:** אין מופע שלישי של המשפחה (מעבר ל-BUG-086/087). המשפחה נחשבת סגורה נכון ל-09/07/2026.
+- **Merged:** לא רלוונטי — audit בלבד, אין קוד מוצר מעורב.
+- **סטטוס:** ✅ הושלם — נבדק ותועד, אין ממצאים חדשים.
