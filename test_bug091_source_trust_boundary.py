@@ -73,25 +73,25 @@ base_inputs = {"table": "Leads", "record_id": "recFAKE1234567890AB", "fields": {
 # No trusted_source passed at all -> defaults to "agent" -> blocked.
 result_default = _dispatch_leads_update(dict(base_inputs), trusted_source=None)
 chk("no trusted_source passed -> defaults to agent -> blocked",
-    "כתיבה ישירה ל-Leads חסומה" in result_default)
+    "עדכון ליד קיים דרך הצ׳אט חסום" in result_default)
 
 # Spoofed "_source" inside inputs, no trusted_source kwarg -> still blocked.
 spoofed = dict(base_inputs)
 spoofed["_source"] = "lead_capture"
 result_spoofed = _dispatch_leads_update(spoofed, trusted_source=None)
 chk("inputs['_source']='lead_capture' with no trusted_source kwarg -> STILL blocked (spoofing does not work)",
-    "כתיבה ישירה ל-Leads חסומה" in result_spoofed)
+    "עדכון ליד קיים דרך הצ׳אט חסום" in result_spoofed)
 
 # Spoofed "_source" AND an unrelated trusted_source="agent" explicitly passed
 # -> still blocked, proving the dict key is never consulted even as a fallback.
 result_spoofed2 = _dispatch_leads_update(dict(spoofed), trusted_source="agent")
 chk("inputs['_source'] spoofed + trusted_source='agent' explicit -> still blocked",
-    "כתיבה ישירה ל-Leads חסומה" in result_spoofed2)
+    "עדכון ליד קיים דרך הצ׳אט חסום" in result_spoofed2)
 
 # Legitimate trusted_source kwarg (no "_source" key in inputs at all) -> passes.
 result_trusted = _dispatch_leads_update(dict(base_inputs), trusted_source="lead_capture")
 chk("trusted_source='lead_capture' kwarg (no _source key needed) -> not blocked",
-    "כתיבה ישירה ל-Leads חסומה" not in result_trusted)
+    "עדכון ליד קיים דרך הצ׳אט חסום" not in result_trusted)
 
 # ══════════════════════════════════════════════════════════════════
 # 3-5. ActionGateway: trusted_source persisted on the contract, spoofing
@@ -129,7 +129,7 @@ with patch("tools.dispatcher.enforce_tenant_scope", return_value=legit_inputs), 
     mock_verify.return_value = VerifyResult("ok")
     legit_exec = gw.approve(legit_result.contract_id, approver="boss_hq:owner1", approver_role="owner")
 chk("legitimate lead_capture contract executes without hitting the Leads gate",
-    "כתיבה ישירה ל-Leads חסומה" not in legit_exec)
+    "עדכון ליד קיים דרך הצ׳אט חסום" not in legit_exec)
 
 # 4. Attack simulation: propose with the DEFAULT trusted_source ("agent" —
 # i.e. simulating the raw Agent tool_use loop), but tool_inputs carries a
@@ -156,7 +156,7 @@ with patch("tools.dispatcher.enforce_tenant_scope", return_value=attack_inputs),
      patch("core.action_gateway._has_approval_authority", return_value=True):
     attack_exec = gw.approve(attack_result.contract_id, approver="boss_hq:owner1", approver_role="owner")
 chk("BUG-091 attack: spoofed _source inside tool_inputs does NOT bypass the gate at execution time",
-    "כתיבה ישירה ל-Leads חסומה" in attack_exec)
+    "עדכון ליד קיים דרך הצ׳אט חסום" in attack_exec)
 
 print(f"\n{'='*50}\n{passed} passed, {failed} failed\n{'='*50}")
 sys.exit(1 if failed else 0)

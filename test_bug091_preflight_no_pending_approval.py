@@ -99,7 +99,7 @@ chk("tool loop produced exactly one tool_result for the blocked airtable_update"
 
 content = result[0]["content"]
 chk("blocked at preflight — message is the LeadsWriteGate block, not '⏳ אישור נדרש'",
-    "כתיבה ישירה ל-Leads חסומה" in content and "אישור" not in content)
+    "עדכון ליד קיים דרך הצ׳אט חסום" in content and "אישור" not in content)
 
 chk("BUG-091 DoD #2: bus.request_approval() was NEVER called — no pending approval created",
     mock_request_approval.call_count == 0)
