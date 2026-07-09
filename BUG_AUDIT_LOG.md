@@ -1365,7 +1365,7 @@
 - **Merged:** לא רלוונטי — audit בלבד, אין קוד מוצר מעורב.
 - **סטטוס:** ✅ הושלם — נבדק ותועד, אין ממצאים חדשים.
 
-### BUG-090 — LeadsWriteGate: הודעת חסימה שגויה ל-update + הפרת Single-Speaker בנתיב הכשל (09/07/2026) — Open, טרם תוקן
+### BUG-090 — LeadsWriteGate: הודעת חסימה שגויה ל-update + הפרת Single-Speaker בנתיב הכשל (09/07/2026) — ✅ תוקן, טרם ממוזג
 - **תאריך:** 09/07/2026
 - **דווח על ידי:** המשתמש — תוייג בטעות בשיחה כ-"BUG-088" (מספר תפוס — BUG-088/089 הם שני ה-Audits מ-PR #282; המספר הפנוי הנכון הוא BUG-090).
 - **מסך / מודול:** `tools/airtable_security.py::enforce_leads_write_gate()` (הודעת חסימה), נתיב הכשל אחרי approval (Single-Speaker).
@@ -1374,8 +1374,11 @@
   2. **הפרת Single-Speaker:** נצפה בפרודקשן רצף כמו: "אושר אך נכשל בביצוע... כתיבה ישירה ל-Leads חסומה. השתמש ב-capture_inbound_lead()... לא הצלחתי לבצע את הפעולה... אותה שגיאה שוב" — כלומר המשתמש מקבל כמה הודעות/שכבות (raw exception + ניסוח סוכן נוסף), לא הודעה אחת נקייה.
 - **Contract Chain (בוצע, ראה גם דיון בצ'אט):** `grep -n "enforce_leads_write_gate\|כתיבה ישירה ל-Leads חסומה" tools/airtable_security.py` → הודעה אחת קבועה ב-`enforce_leads_write_gate()` (שורות 74-78), לא תלוית `tool_name` למרות ש-`tool_name` כבר מגיע כפרמטר. `grep -n "LeadsWriteGate\|airtable_update.*Leads\|source=agent" tools/dispatcher.py tools/airtable_security.py` → שני call sites נפרדים ב-`dispatcher.py` (`airtable_add`/`airtable_update`), שניהם `except LeadsDirectWriteBlocked as e: return str(e)` — ה-`str(e)` חוזר ישירות כתוצאת ה-tool, ה-agent רואה את זה ועלול לנסח עוד משפט מעליו (מקור ה-duplication).
 - **Scope מאושר (מהמשתמש):** תיקון הודעה בלבד ב-`enforce_leads_write_gate()`/`tools/airtable_security.py`. **לא** לבנות `update_existing_lead()` חדש, **לא** לפתוח כתיבות Agent כלליות ל-Leads, **לא** להחליש את ה-gate עצמו — רק המחרוזת משתנה, לפי `tool_name` (create vs update), single-speaker (הודעה אחת נקייה, לא raw exception + ניסוח סוכן נוסף), בלי לחשוף שם פונקציה פנימי.
-- **Merged:** לא — טרם תוקן.
-- **סטטוס:** Open — Contract Chain הושלם, ממתין למימוש.
+- **תיקון:** `_leads_write_blocked_message(tool_name)` חדשה ב-`tools/airtable_security.py` — `airtable_update`/`airtable_patch` מקבלים "עדכון ליד קיים דרך הצ׳אט חסום כרגע. לעדכון ליד קיים יש להשתמש במסך הלידים באפליקציה." (אין קישור TMA קונקרטי בקוד היום — הושארה הנחיה כללית, לא הומצא קישור); `airtable_add` מקבל "יצירת ליד חדש ידנית דרך הצ׳אט חסומה כרגע. לידים חדשים נוצרים אוטומטית מהודעות נכנסות." שני המסרים: בלי `capture_inbound_lead()`, בלי שום שם פונקציה פנימי, בלי suffix דיבאג (`tool=`/`source=` — נשאר רק ב-`logger.error` הקיים, לא בהודעה למשתמש). התנהגות ה-gate עצמה (מה שנחסם/מותר) לא שונתה כלל. **הפרת Single-Speaker (פגם 2 בתיאור המקורי) נסגרה בפועל כתוצר-לוואי של BUG-091** — ה-preflight ב-`app.py` מונע יצירת pending approval מלכתחילה עבור כתיבה חסומה, כך שרצף "אושר אך נכשל בביצוע... אותה שגיאה שוב" לא קורה יותר בזרימת ה-Agent הרגילה; מסלול ה-fallback הישן (`dispatch_tool` בזמן ביצוע, אם משהו בכל זאת מגיע לשם) עדיין מחזיר הודעה אחת נקייה, לא כפולה.
+- **בדיקה:** `test_bug090_leads_gate_message.py` (18/18 חדש) — gate עדיין חוסם (create+update), הודעת update מפנה למסך הלידים, שני המסרים בלי `capture_inbound_lead()`/שם פונקציה/suffix דיבאג, create≠update, `airtable_patch` מקובץ עם update, regression על טבלאות שאינן Leads/מקורות מורשים/`airtable_get`. עודכנו assertions ב-`test_bug091_source_trust_boundary.py`/`test_bug091_preflight_no_pending_approval.py` (טקסט ההודעה השתנה, לא ההתנהגות). כל 65 קבצי `test_*.py` + `smoke_tests.py` + `test_integration.py` — ירוקים, אפס רגרסיה.
+- **Merged:** לא עדיין — קוד מוכן.
+- **Deployed/Verified בפרודקשן:** לא עדיין.
+- **סטטוס:** ✅ תוקן בקוד במלואו, נבדק, טרם ממוזג.
 
 ### BUG-091 — `_source` בתוך tool_inputs עוקף את `enforce_leads_write_gate()` — privilege escalation, לא UX (09/07/2026)
 - **תאריך:** 09/07/2026
