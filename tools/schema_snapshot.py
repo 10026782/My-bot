@@ -132,6 +132,26 @@ def _snapshot_table_exists(raw_meta: dict) -> bool:
     return any(t.get("name") == Tables.SCHEMA_SNAPSHOTS for t in raw_meta.get("tables", []))
 
 
+def _missing_tables(raw_meta: dict) -> list[str]:
+    """
+    Tables known to code (airtable_schema.Tables) but absent from the live
+    Meta API response — the content-drift signal run_snapshot_archive()
+    previously never checked (BUG-085): it only ever set Status=OK/Error
+    based on whether the *snapshot operation itself* succeeded, even though
+    SchemaSnapshotStatus.DRIFT_DETECTED has existed since PR3A and was never
+    referenced anywhere. Mirrors tools/check_airtable_schema_runtime.py's
+    missing_in_airtable comparison (same code-tables extraction) so the two
+    stay consistent — this does not replace that on-demand diagnostic, it
+    gives the archived snapshot record itself an honest status.
+    """
+    live_names = {t.get("name", "") for t in raw_meta.get("tables", []) if t.get("name")}
+    code_names = {
+        v for k, v in vars(Tables).items()
+        if not k.startswith("_") and isinstance(v, str)
+    }
+    return sorted(code_names - live_names)
+
+
 def run_snapshot_archive() -> dict:
     """
     Full snapshot flow: fetch -> normalize -> CSV -> XLSX -> create record ->
@@ -158,6 +178,7 @@ def run_snapshot_archive() -> dict:
     base_id = os.environ.get("AIRTABLE_BASE_ID", "")
     snapshot = normalize_schema(raw_meta, base_id)
     h = schema_hash(snapshot)
+    missing_tables = _missing_tables(raw_meta)
 
     tmpdir = Path(tempfile.mkdtemp(prefix="schema_snapshot_"))
     try:
@@ -180,7 +201,9 @@ def run_snapshot_archive() -> dict:
                 SchemaSnapshotFields.SNAPSHOT_DATE: datetime.now(timezone.utc).isoformat(),
                 SchemaSnapshotFields.TABLES_COUNT: len(snapshot["tables"]),
                 SchemaSnapshotFields.STATUS: (
-                    SchemaSnapshotStatus.OK if xlsx_path else SchemaSnapshotStatus.ERROR
+                    SchemaSnapshotStatus.ERROR if not xlsx_path
+                    else SchemaSnapshotStatus.DRIFT_DETECTED if missing_tables
+                    else SchemaSnapshotStatus.OK
                 ),
                 SchemaSnapshotFields.SCHEMA_HASH: h,
                 SchemaSnapshotFields.BASE_ID: base_id,
@@ -227,13 +250,20 @@ def run_snapshot_archive() -> dict:
         else:
             upload_errors.append("xlsx: conversion failed")
 
-        final_status = SchemaSnapshotStatus.OK if not upload_errors else SchemaSnapshotStatus.ERROR
+        final_status = (
+            SchemaSnapshotStatus.ERROR if upload_errors
+            else SchemaSnapshotStatus.DRIFT_DETECTED if missing_tables
+            else SchemaSnapshotStatus.OK
+        )
+        notes_parts = list(upload_errors)
+        if missing_tables:
+            notes_parts.append(f"missing_in_live: {', '.join(missing_tables)}")
         airtable_patch(
             Tables.SCHEMA_SNAPSHOTS, record_id,
             {
                 SchemaSnapshotFields.STATUS: final_status,
                 SchemaSnapshotFields.NOTES: (
-                    "; ".join(upload_errors) if upload_errors else "snapshot archived successfully"
+                    "; ".join(notes_parts) if notes_parts else "snapshot archived successfully"
                 ),
             },
             source="schema_snapshot",
@@ -247,6 +277,7 @@ def run_snapshot_archive() -> dict:
             "record_id": record_id,
             "tables_count": len(snapshot["tables"]),
             "errors": upload_errors,
+            "missing_tables": missing_tables,
         }
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)

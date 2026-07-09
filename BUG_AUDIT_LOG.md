@@ -1273,3 +1273,14 @@
 - **Merged:** לא רלוונטי — אין קוד מוצר מעורב, אין תיקון.
 - **Verification ראיה:** נבדק מול היסטוריית הסשן הנוכחי (12 PRs, כולל 2 מקרי disconnection שטופלו).
 - **סטטוס:** ❌ Won't Fix — אין ראיה לכשל שיטתי; מקביל ל-BUG-063 (כשל זמינות כלי, לא באג לוגי). אם יופיע שוב עם ראיה קונקרטית (PR שבאמת לא נפתח בלי תקשור), לפתוח רשומה חדשה עם אותה ראיה.
+
+### BUG-085 — `run_snapshot_archive()` אף פעם לא כותב `Status=Drift Detected`, למרות שה-enum קיים מ-PR3A — 🟡 תוקן בקוד, טרם ממוזג
+- **תאריך:** 09/07/2026
+- **דווח על ידי:** session audit, בהמשך לעבודה על PR3A/PR3B — תוייג בטעות בשיחה כ-"BUG-082" (מספר זמני, לא ID אמיתי מהלוג; BUG-082 הרשמי הוא נושא נפרד ולא קשור — anaphora resolution, כבר סגור כ-Won't Fix).
+- **קבצים:** `tools/schema_snapshot.py` (`run_snapshot_archive`, `_missing_tables` חדשה), `test_schema_snapshot.py`.
+- **Severity:** Medium — `SchemaSnapshotStatus.DRIFT_DETECTED` (`airtable_schema.py`) קיים כ-option מאז PR3A, אבל `run_snapshot_archive()` מעולם לא כתב אליו — הפונקציה קבעה רק `OK`/`Error` על בסיס האם פעולת ה-snapshot עצמה (fetch/upload/XLSX conversion) הצליחה, בלי שום השוואה בין הטבלאות שהקוד מכיר (`airtable_schema.Tables`) לבין מה שחי בפועל ב-Meta API. כלומר: אם טבלה נמחקה/שונה שם ב-Airtable החי, ה-snapshot עדיין נכתב כ-`OK` — אין שום איתות.
+- **תיקון:** נוספה `_missing_tables(raw_meta)` — משווה `set(airtable_schema.Tables)` מול שמות הטבלאות החיות מה-Meta API response, אותה שיטת חילוץ בדיוק כמו `tools/check_airtable_schema_runtime.py`'s `missing_in_airtable` (לא כפילות לוגית, רק שימוש חוזר בעיקרון). אם יש טבלאות חסרות — הסטטוס הנכתב (גם ביצירת הרשומה וגם בעדכון הסופי) הוא `Drift Detected` במקום `OK`; `Error` (כשל תפעולי — upload/conversion נכשל) עדיין גובר על `Drift Detected` אם שניהם קורים יחד. `Notes` כולל את רשימת הטבלאות החסרות. `apply_retention_policy()` לא שונה (מגן רק על ה-`OK` האחרון, כפי שהיה — שאלת מדיניות נפרדת, לא בסקופ).
+- **בדיקה:** `test_schema_snapshot.py` — 34/34 (9 טסטים חדשים: `_missing_tables` ישיר + end-to-end `run_snapshot_archive()` עם כל הרשתות מדומות, גם למקרה "הכל תקין" (עדיין `OK`, regression) וגם למקרה עם טבלה חסרה (`Drift Detected` גם ב-create וגם ב-patch הסופי, `Notes` מזכיר את הטבלה החסרה)). `smoke_tests.py`/`test_integration.py` ירוקים (רק כשל flask קיים-מראש בסביבה, לא קשור).
+- **Merged:** לא עדיין — קוד מוכן, PR טרם נפתח בזמן כתיבת הרשומה הזו.
+- **Deployed/Verified בפרודקשן:** לא — אין נתונים עדיין; `FEATURE_AIRTABLE_SCHEMA_SNAPSHOT` כבוי כברירת מחדל.
+- **סטטוס:** 🟡 תוקן בקוד במלואו (root cause), נבדק מקומית, טרם ממוזג ל-main.
