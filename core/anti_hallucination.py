@@ -497,7 +497,11 @@ _AGENT_ACTION_STATUS_PATTERN = re.compile(
     r"(?<!לא )(?<!עדיין )\b(הוספתי|שמרתי|עדכנתי|יצרתי|שלחתי|רשמתי|ביצעתי|קבעתי|תיעדתי)\b",
     re.UNICODE,
 )
-_SINGLE_SPEAKER_FALLBACK = "הפעולה התקבלה. תוצאה תישלח בנפרד."
+# Was "הפעולה התקבלה. תוצאה תישלח בנפרד." — a false continuation claim with
+# no real pending/queue behind it: when this gate fires, nothing actually
+# follows up. Same claim-without-evidence class the rest of this module
+# exists to block, just in the fallback copy itself.
+_SINGLE_SPEAKER_FALLBACK = "לא הצלחתי לבצע את הפעולה. נסה שוב או נסח אחרת."
 
 
 def _has_required_tool(tool_results: list[dict], required_tools: frozenset[str]) -> bool:
@@ -1066,6 +1070,51 @@ def _run_tests() -> bool:
     print(f"{'✅' if ok18 else '❌'} 'לא הוספתי' (negation) does not false-positive trigger the creation gate")
     if not ok18:
         print(f"     got: {no_false_positive!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    # ── Generic structural safety net (_AGENT_ACTION_STATUS_PATTERN +
+    # ── Single-Speaker fallback message no longer promises a fake
+    # continuation ("תוצאה תישלח בנפרד" — nothing actually follows up when
+    # this gate fires). DoD: (1) when the gate fires, the user gets the new
+    # message, not the old false-continuation one; (2) trigger conditions
+    # are unchanged — still only fires when _gateway_active=True AND the
+    # action-status pattern matches; still passed-through otherwise. ──
+    print("\n── Single-Speaker fallback message ───")
+
+    ss_text = "✅ הפעולה בוצעה בהצלחה."
+    ss_result = sanitize_agent_response(ss_text, [], _gateway_active=True)
+    ok_ss1 = ss_result == _SINGLE_SPEAKER_FALLBACK
+    print(f"{'✅' if ok_ss1 else '❌'} Single-Speaker gate fires when gateway_active + action-status text")
+    if not ok_ss1:
+        print(f"     got: {ss_result!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    ok_ss2 = ss_result == "לא הצלחתי לבצע את הפעולה. נסה שוב או נסח אחרת."
+    print(f"{'✅' if ok_ss2 else '❌'} fallback text no longer promises a fake continuation")
+    if not ok_ss2:
+        print(f"     got: {ss_result!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    ss_no_gateway = sanitize_agent_response(ss_text, [{"tool": "airtable_add", "content": "✅ ok", "ok": True}], _gateway_active=False)
+    ok_ss3 = ss_no_gateway not in (_SINGLE_SPEAKER_FALLBACK, _NO_TOOL_EVIDENCE_FALLBACK, _SAFE_FALLBACK)
+    print(f"{'✅' if ok_ss3 else '❌'} regression: gateway_active=False → Single-Speaker gate does not fire (unchanged trigger condition)")
+    if not ok_ss3:
+        print(f"     got: {ss_no_gateway!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    ss_no_action_text = sanitize_agent_response("בטח, איך אפשר לעזור?", [], _gateway_active=True)
+    ok_ss4 = ss_no_action_text == "בטח, איך אפשר לעזור?"
+    print(f"{'✅' if ok_ss4 else '❌'} regression: gateway_active=True but no action-status text → gate does not fire")
+    if not ok_ss4:
+        print(f"     got: {ss_no_action_text!r}")
         failed += 1
     else:
         passed += 1
