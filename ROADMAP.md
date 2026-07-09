@@ -1,6 +1,10 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 08/07/2026 — BUG-078/079/080/081 (שרשרת `/update`+Business Memory, PR #255/#256/#257/#258/#259/#260/#261/#263/#265) **✅ PRODUCTION VERIFIED במלואו, 6/6 domains**: `/update` נבדק ברצף אמיתי (real_estate/SaaS/media/import/general/finance) → `Other` → טקסט חופשי → נשמר בהצלחה בכולם, "📌 Other | <domain>" מוצג נכון, אין 422 באף אחד. מכסה: BUG-078 (זרימת `/update` הכללית), BUG-079 (`capture_text`), BUG-080 (`cmd_update.py`'s Event Date בלבד — שאר 6 נקודות הכתיבה טרם נבדקו), BUG-081 המלא כולל PR #263 (root cause — domain לא נכתב ל-Tags בכלל) ו-PR #265 (רווח בסוף ב-"Real Estate "/"SaaS ", מאומת מול Meta API) עבור כל 6 המפתחות. **נותר לבדוק:** C99 (חילוץ מסמך). ראה `BUG_AUDIT_LOG.md` BUG-078..081 ו-`CHANGE_CONTROL_LOG.md` C97-C101 לפירוט מלא.
+עודכן: 09/07/2026 — N15 נפתח (Restricted-flow `notify_owner` — שדה נקבע אך לעולם לא נצרך, אין
+מנגנון התראה אמיתי לבעלים; התגלה תוך כדי תיקון claim-without-evidence כוזב באותו איזור —
+`_SINGLE_SPEAKER_FALLBACK` (PR #280) ו-`app.py`'s Restricted tool loop). שני הניסוחים הכוזבים
+תוקנו מיידית; ה-N15 עצמו (החלטה: לבנות התראה אמיתית או להסיר את השדה) עדיין PLANNED, לא מומש.
+עודכן קודם: 08/07/2026 — BUG-078/079/080/081 (שרשרת `/update`+Business Memory, PR #255/#256/#257/#258/#259/#260/#261/#263/#265) **✅ PRODUCTION VERIFIED במלואו, 6/6 domains**: `/update` נבדק ברצף אמיתי (real_estate/SaaS/media/import/general/finance) → `Other` → טקסט חופשי → נשמר בהצלחה בכולם, "📌 Other | <domain>" מוצג נכון, אין 422 באף אחד. מכסה: BUG-078 (זרימת `/update` הכללית), BUG-079 (`capture_text`), BUG-080 (`cmd_update.py`'s Event Date בלבד — שאר 6 נקודות הכתיבה טרם נבדקו), BUG-081 המלא כולל PR #263 (root cause — domain לא נכתב ל-Tags בכלל) ו-PR #265 (רווח בסוף ב-"Real Estate "/"SaaS ", מאומת מול Meta API) עבור כל 6 המפתחות. **נותר לבדוק:** C99 (חילוץ מסמך). ראה `BUG_AUDIT_LOG.md` BUG-078..081 ו-`CHANGE_CONTROL_LOG.md` C97-C101 לפירוט מלא.
 עודכן קודם: 07/07/2026 (מאוחר יותר עוד עוד) — BUG-078/079/080/081 תוקנו ומוזגו ל-main (PR #255/#256/#258/#259/#260/#261): (1) BUG-078/079 — `app.py`'s webhook היה מדלג על ה-pending state של `/update` עבור photo/document וגם עבור טקסט חופשי, ובורח לזרימות אחרות (Drive הכללי / `run_agent`) — שני ה-bypass-ים נסגרו. (2) BUG-080 — 7 נקודות כתיבה שלחו `datetime` מלא לשדות Date-בלבד ב-Airtable (422), תוקן ל-`.date().isoformat()`. (3) BUG-081 — Business Memory קיבלה שדה `Domain` ייעודי במקום למחזר domain לתוך `Tags` הכללי; דרש 2 סבבי תיקון נוספים על בסיס production evidence (422 חי אחרי מיזוג, "real_estate" lowercase לא היה option קיים יותר). גם C99 (feature, לא באג) — חילוץ טקסט ממסמך שנשלח באמצע `/update`. כל השישה ✅ מוזגים ל-main, **לא מאומתים בפרודקשן**. ראה `BUG_AUDIT_LOG.md` BUG-078..081 לפירוט מלא. גם: BUG-077 (השורה הקודמת כאן) התברר **כבר מוזג בפועל** (PR #254) — תוקן.
 עודכן קודם: 07/07/2026 (מאוחר יותר עוד) — BUG-077 root cause נסגר בקוד: `propose_action()` (`core/action_gateway.py`) מאמת כעת `requires_approval` מול `tool_registry.needs_approval()` fail-closed, פרט ל-`self_confirm` carve-out (BUG-076). דרש גם תיקון ל-`core/lead_candidate_handler.py::_write_one_lead()` (payload היה חסר "fields", מנע ממנו self_confirm תקין) — ראה `BUG_AUDIT_LOG.md` BUG-077 לפירוט מלא כולל קונפליקט עם יישום ראשוני נאיבי שתוקן לפני push. 🟡 קוד מוכן, טרם ממוזג.
 עודכן קודם: 07/07/2026 — 3 תיקוני doc-drift: (1) BUG-077 (Tier 3 auto-capture gate, `core/lead_candidate_handler.py`) ✅ ממוזג ל-`main` (PR #250, `cdc41b5`) — `BUG_AUDIT_LOG.md` עדיין רשם "Merged: לא", תוקן. (2) F12 vs F13: הכרעת בעלים מפורשת — F13 סופגת את F12, F12 נגנז. ראה סעיפי F12/F13 למטה. (3) BUG-DH-03/04 גם ✅ ממוזג ל-`main` (PR #251, `d51e6be`) — השורה הקודמת כאן טענה "לא ממוזג" בטעות (זה כבר תוקן, נשאר רק production verification). `FEATURE_DECISION_HUB` נשאר חסום עד production evidence.
@@ -675,6 +679,22 @@ Pull-only reasoning engine. `run()` מחבר Stages 1→2→4→6. `RequestState
 2 formula injection (BUG-DH-03/04) — תוקנו בקוד 07/07/2026 (🟡 לא ממוזג/מאומת עדיין), ראה סעיף BUG-DH-03/04 למטה — עדיפות גבוהה לפני הפעלת `FEATURE_DECISION_HUB`.
 2 xfail מתועדים (`domain_rules`, `lead_score`) — design decisions.
 Stage 6 Orchestrator מוזג. CI ירוק ✅.
+
+### N15 — Restricted-flow owner notification: `notify_owner` field is set but never consumed 🔲 PLANNED
+**מה:** `RouteDecision.notify_owner` (`core/router/route_decision.py`) נקבע ל-`True` עבור
+`Handler.RESTRICTED` (`core/router/router.py`) — אבל `grep -rn "\.notify_owner"` על כל הריפו
+מראה שהוא **אף פעם לא נקרא** מחוץ ל-assertions בטסטים. אין שום מנגנון שמודיע בפועל לבעלים
+כשמשתמש מוגבל מנסה פעולה חסומה — הנראות היחידה היא שורת `logger.warning(...)` בלוגי שרת
+(`app.py`), לא push/הודעה שאדם יראה בפועל.
+**רקע:** התגלה תוך כדי תיקון `_SINGLE_SPEAKER_FALLBACK`'s טענת-המשך כוזבת (PR #280) ואותה
+בעיה בדיוק ב-`app.py`'s Restricted-flow tool loop (`"הבקשה נרשמה במערכת."` — קוד תוקן באותו
+audit, ראה `git log` על `app.py`'s tool loop לקומיט המדויק) — שני המקומות תוקנו מיידית להיות
+כנים על המצב הנוכחי (אין מנגנון). זה ה-backlog item המקביל: **להחליט בפועל**, לא רק לתקן ניסוח.
+**להחליט:** (א) לבנות מנגנון התראה אמיתי לבעלים (ערוץ עדיין לא נקבע — Telegram push? לוג
+מרכזי שנבדק אקטיבית?), או (ב) אם ההתראה מעולם לא הייתה נחוצה בפועל — להסיר את השדה/לפשט את
+לוגיקת `Handler.RESTRICTED` במקום להשאיר שדה מת.
+**עד שמוחלט:** ה-copy בקוד (`app.py`, `core/anti_hallucination.py`) כבר לא מבטיח העברה
+שלא קיימת — זה סגר את הסיכון המיידי (claim-without-evidence), לא את שאלת המדיניות.
 
 ### F17 — Decision Hub Stage 2: Smart Trust Layer (PR #157, מוזג ל-`main`, commit `9252b1e`/merge `78f9bae`)
 **מה:** שכבת ביטחון על גבי Stage 1 — מסתכלת על ה-Decision כולו (לא Event בודד): האם
