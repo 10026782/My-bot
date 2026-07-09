@@ -286,19 +286,19 @@
 - **Verification ראיה:** ראה audit-log למעלה + `git show ba5ad6d -- tools/airtable_tools.py`.
 - **סטטוס:** ✅ VERIFIED / CLOSED.
 
-### BUG-018 — tma_api.py כותב ל-TaskFields.LEAD_LINK שלא קיים ב-Tasks החי → "צור משימה מליד" נכשל
+### BUG-018 — tma_api.py כותב ל-TaskFields.LEAD_LINK שלא קיים ב-Tasks החי → "צור משימה מליד" נכשל — ✅ CLOSED / PROD VERIFIED 10/07/2026
 - **דווח:** 24/06/2026 — באותו אודיט כמו BUG-020
 - **דווח על ידי:** המשתמש
 - **מסך / מודול:** `tma_api.py` — POST ל-`Tables.TASKS` ב-flow של "צור משימה מליד" ב-TMA, שורה 1499 (וגם 1513 ב-queue-for-approval path)
 - **תיאור:** `task_fields[TaskFields.LEAD_LINK] = [lead_id]` — `TaskFields.LEAD_LINK = "Leads"`, אבל אין שדה linked-record כזה בטבלת "משימות (Tasks)" החיה (אומת דרך Airtable MCP). ה-POST השלם נכשל (500) כי Airtable דוחה שדה לא קיים — "צור משימה מליד" נכשל **בכל קריאה**, גם ל-owner וגם ב-approval flow למנהל.
 - **Severity:** High — חוסם תכונה שלמה ב-TMA (יצירת משימה מתוך מסך ליד).
 - **Root Cause:** הקוד הניח קיומו של שדה linked-record "Leads" על Tasks שלא נוצר בפועל.
-- **תוקן:** לא תוקן עדיין — ממתין להחלטת המשתמש בין: (א) להוסיף שדה Linked Record בשם "Leads" לטבלת "משימות (Tasks)" ב-Airtable (ב) להוריד את השורה `task_fields[TaskFields.LEAD_LINK] = [lead_id]` ואת `TaskFields.LEAD_LINK` מ-`airtable_schema.py`.
-- **Merged:** לא
-- **Deployed:** לא
-- **Verified בפרודקשן:** לא
-- **Verification ראיה:** אומת רק דרך השוואה ל-schema החי ב-Airtable MCP — לא אומת דרך קריאה אמיתית ל-endpoint
-- **סטטוס:** Open — דורש החלטת המשתמש לפני תיקון
+- **תוקן:** כן — תוקן בצד Airtable schema, לא בקוד. לטבלת `"משימות (Tasks)"` נוסף/קיים כעת שדה linked-record בשם `"Leads"` שתואם ל-`TaskFields.LEAD_LINK`.
+- **Merged:** N/A — אין שינוי קוד; הקוד הקיים היה נכון ביחס ל-schema הרצוי.
+- **Deployed:** N/A — שינוי Airtable schema, לא deploy אפליקטיבי.
+- **Verified בפרודקשן:** ✅ כן — 10/07/2026.
+- **Verification ראיה:** production smoke: `POST משימות (Tasks) → 200 OK`, נוצר record `recbpQzwrmZdxIaDf`, keys כוללים `Domain` + `Leads`; `/api/leads/.../task` הצליח; `Interaction Log → 200 OK`.
+- **סטטוס:** ✅ CLOSED / PROD VERIFIED.
 
 ### BUG-019 — crm.py: כמה פונקציות כותבות/מסננות לפי שדות ש-Contacts/Deals/Payments החיים לא מכילים
 - **דווח:** 24/06/2026 — באותו אודיט כמו BUG-020
@@ -312,12 +312,13 @@
   - **(e) `crm_upcoming_payments` + `crm_overdue_payments`** (שורות ~311-380): ה-formula משתמש ב-`{סטטוס}`/`{תאריך}` (עברית) על טבלת Payments, אבל השדות החיים הם `status`/`date` (אנגלית) — תוצאה ריקה לתמיד, בלי שגיאה (תזכורות תשלום שלא שולחות כלום).
 - **Severity:** High — פוגע בפונקציונליות CRM ליבתית (חיפוש אנשי קשר, יצירת עסקאות, תזכורות תשלום) שבשימוש בפועל.
 - **Root Cause:** `crm.py` נכתב מול גרסה ישנה/אנגלית של הסכמה ולא עודכן אחרי שהטבלאות "אנשי קשר (Contacts)"/"עסקאות (Deals)" עברו ל-Hebrew naming ו-Payments צומצם לשדות הנוכחיים.
-- **תוקן:** לא תוקן עדיין — ממתין להחלטת המשתמש לכל תת-סעיף (להוסיף שדות חסרים ל-Airtable מול להוריד/להחליף לוגיקה בקוד). מומלץ לתקן את כל הסעיף כמקבץ אחד ולהריץ טסט אינטגרציה ידני לפני merge.
-- **Merged:** לא
-- **Deployed:** לא
-- **Verified בפרודקשן:** לא
-- **Verification ראיה:** אומת רק דרך השוואה ל-schema החי ב-Airtable MCP — לא אומת דרך הרצת הפונקציות בפועל
-- **סטטוס:** Open — דורש החלטת המשתמש לפני תיקון
+- **עדכון 10/07/2026:** re-check מול CSV/live schema: Contacts ו-Payments תואמים לקוד הנוכחי; drift מאושר רק ב-Deals.
+- **תוקן:** כן — `DealFields.ADDRESS`/`FUNDING_COST`/`ROI` עודכנו לשמות Airtable-generated החיים: `"Adress"`, `"Funding Cost"`, `"Roi"`. לא בוצע שינוי Airtable, לא בוצע rename, ולא נגעו ב-`crm.py`, Contacts או Payments.
+- **Merged:** לא עדיין — שינוי קוד מקומי בסבב זה.
+- **Deployed:** לא.
+- **Verified בפרודקשן:** לא.
+- **Verification ראיה:** grep מאשר ש-`crm.py` משתמש ב-`DealFields.ADDRESS`/`FUNDING_COST`/`ROI`, והקבועים האלה נפתרים כעת לשמות החיים ב-`airtable_schema.py`.
+- **סטטוס:** 🟡 Implemented but not yet verified — Deals drift confirmed; Contacts/Payments OK; code constants updated to Airtable-generated field names.
 
 ### BUG-021 — schema_audit.py: UnboundLocalError במקום fallback ל-cache כשה-live fetch נכשל
 - **דווח:** 24/06/2026 — תוך כדי ניסיון להריץ `schema_audit.py` בלי `AIRTABLE_API_KEY`/`AIRTABLE_BASE_ID` ב-env
@@ -1386,8 +1387,8 @@
 ביחד, #285+#286 סוגרים את דרישת ה-Single-Speaker במלואה. אף PR לבד לא היה מספיק.
 - **בדיקה:** `test_bug090_leads_gate_message.py` (18/18 חדש) — gate עדיין חוסם (create+update), הודעת update מפנה למסך הלידים, שני המסרים בלי `capture_inbound_lead()`/שם פונקציה/suffix דיבאג, create≠update, `airtable_patch` מקובץ עם update, regression על טבלאות שאינן Leads/מקורות מורשים/`airtable_get`. עודכנו assertions ב-`test_bug091_source_trust_boundary.py`/`test_bug091_preflight_no_pending_approval.py` (טקסט ההודעה השתנה, לא ההתנהגות). כל 65 קבצי `test_*.py` + `smoke_tests.py` + `test_integration.py` — ירוקים, אפס רגרסיה.
 - **Merged:** ✅ כן — `main` `5338fa9` (Merge pull request #286, commit `85c08f9` + docs commit `314f0dd`). מאומת: `git log --oneline origin/main` וגם `git merge-base --is-ancestor` בפועל בסשן זה (09/07/2026).
-- **Deployed/Verified בפרודקשן:** לא עדיין.
-- **סטטוס:** ✅ תוקן, ממוזג ל-main. לא מאומת בפרודקשן.
+- **Deployed/Verified בפרודקשן:** ✅ כן — ראיה חיה מהמשתמש (09/07/2026): הודעה אמיתית מ-Eli "עדכן ליד קיים אברהם ברסלר לא רלוונטי" קיבלה בפועל "❌ עדכון ליד קיים דרך הצ׳אט חסום כרגע. לעדכון ליד קיים יש להשתמש במסך הלידים באפליקציה." — התאמה byte-for-byte להודעת ה-update החדשה (`tools/airtable_security.py:84-85`, מאומת ישירות בקוד). מאשר: (א) התיקון פרוס בפרודקשן, (ב) ההודעה הספציפית-ל-update (לא ההודעה הישנה/גנרית) אכן מוצגת למשתמש אמיתי, (ג) אין `capture_inbound_lead()`/suffix דיבאג/הודעה כפולה (Single-Speaker) — משפט אחד נקי, תואם למה שנצפה. **לא ניתן לקבוע מה-screenshot בלבד** אם החסימה הגיעה דרך ה-preflight המאוחר (BUG-091, אמצע tool loop) או ה-short-circuit המוקדם (BUG-092, לפני קריאת Claude) — שניהם מפיקים בדיוק אותו טקסט. לאישור ספציפי של BUG-092 (אפס round-trip ל-Claude) נדרשים לוגים (כמו הראיה מ-20:08:46 שכבר ניתנה ל-BUG-091), לא רק תוכן ההודעה.
+- **סטטוס:** ✅ תוקן, ממוזג ל-main, **מאומת בפרודקשן**.
 
 ### BUG-091 — `_source` בתוך tool_inputs עוקף את `enforce_leads_write_gate()` — privilege escalation, לא UX (09/07/2026)
 - **תאריך:** 09/07/2026
@@ -1417,8 +1418,13 @@
   - שיטת עבודה: לפני כתיבת קוד המימוש, נכתב `test_deterministic_denial.py` והורץ **מול המודול שעדיין לא קיים** — נכשל כצפוי (`ModuleNotFoundError`), ורק אז נכתב `core/router/deterministic_denial.py` ו-`app.py`'s השינוי, לפי בקשת המשתמש "תכתוב ותריץ את הבדיקה קודם כתיבת קוד".
 - **בדיקה:** `test_deterministic_denial.py` (18/18 חדש) — כולל: הודעת `UPDATE_LEAD`/`CREATE_LEAD` זהה byte-for-byte ל-`_leads_write_blocked_message()` האמיתית; role חסום (`guest`) מזוהה גם כש-`owner` עדיין נחסם ע"י שער המקור (מוכיח שהשער מבוסס-מקור, לא role); intent בלי hint (`CREATE_TASK`/`FIND_LEAD`) מחזיר `None` לכל role (fail-safe/no-over-block); guard מבני — כל `ToolHint` מפנה לכלי אמיתי ב-`tool_registry`; guard רגרסיה — `enforce_leads_write_gate()`/`tool_registry.enforce()` **עדיין זורקים בעצמם**, בלי תלות במודול החדש (מוכיח שהשערים המקוריים לא שונו); ו-4 בדיקות `app.run_agent()` אמיתיות מקצה לקצה (Identity/Router/Anthropic מדומים) — `UPDATE_LEAD`+`manager`/`guest` חוסמים עם **אפס** קריאות ל-Claude (`mock.call_count==0`), `UPDATE_TASK` (בלי hint) ממשיך רגיל עם קריאת Claude אחת (`call_count==1`, אין over-blocking), ו-`UPDATE_LEAD` עם `tool_allowed=False` (restricted) **לא** מופעל ע"י ה-short-circuit (נתיב restricted הקיים נשמר במלואו). הורצו גם מחדש **ללא שינוי**: `test_bug090_leads_gate_message.py` (18/18), `test_bug091_preflight_no_pending_approval.py` (3/3), `test_bug091_source_trust_boundary.py` (10/10), `smoke_tests.py` (7/7), `test_integration.py` (4/4) — כולם ירוקים, אפס רגרסיה. `python3 -m py_compile core/router/deterministic_denial.py app.py` — עבר.
 - **Merged:** ✅ כן — `main` `55d7f08` (Merge pull request #287, commit `b519d50`). מאומת: `git fetch origin main` + `git merge-base --is-ancestor b519d50 origin/main` בפועל בסשן זה (09/07/2026).
-- **Deployed/Verified בפרודקשן:** לא עדיין.
-- **סטטוס:** ✅ תוקן, ממוזג ל-main. לא מאומת בפרודקשן.
+- **Deployed/Verified בפרודקשן:** ✅ כן — לוגים אמיתיים מהמשתמש (10/07/2026, 00:10:29):
+  ```
+  [ERROR] tools.airtable_security: [LeadsWriteGate] BLOCKED direct Leads write | tool=airtable_update source=agent table=Leads
+  [WARNING] app: [DeterministicDenial] leads_write_gate short-circuited before Agent | intent=update_lead tool=airtable_update role=owner user=7f464269
+  ```
+  שורת ה-`[DeterministicDenial]` תואמת byte-for-byte ל-`app.py:1761` (`f"[DeterministicDenial] {denial.reason} short-circuited before Agent | "`) — **זו ההוכחה הספציפית ל-BUG-092 שהייתה חסרה בראיית ה-screenshot הקודמת (BUG-090)**: מוכיחה בפועל שה-short-circuit המוקדם (לפני `build_context`/קריאת Claude) הוא זה שחסם, לא ה-preflight המאוחר של BUG-091 (שהיה מדפיס `[Approval] preflight blocked Leads write before queueing`, לא הופיע כאן). גם מוכיח `role=owner` — תואם לבדיקה #3 ב-`test_deterministic_denial.py` (השער מבוסס-מקור, חוסם גם owner).
+- **סטטוס:** ✅ תוקן, ממוזג ל-main, **מאומת בפרודקשן** (כולל הוכחת timing ספציפית ל-short-circuit המוקדם, לא רק תוכן ההודעה).
 
 ### BUG-093 (LL-13) — אישור כפול (double-tap/redelivery) מבצע פעולה בלתי-הפיכה פעמיים — כבר תוקן, לא היה מתועד בלוג
 - **תאריך:** 09/07/2026 — התגלה תוך התאמת טיוטת log שהמשתמש הכין מקומית (Windows path, קובץ מקומי שהכיל conflict markers `<<<<<<< Updated upstream`/`=======`/`>>>>>>> Stashed changes` בין שתי גרסאות מתנגשות). הטיוטה טענה ל-commit `7ccb4a6`/PR #183 — **שניהם לא אומתו**: `7ccb4a6` לא קיים בהיסטוריית git של הריפו הזה בכלל (`git show 7ccb4a6` → `fatal: unknown revision`), ו-`test_ll13_double_execution.py` מתגלה בפועל דרך PR #193 (merge commit `97ebe3e`, מרג' ענק שכלל גם את `BUG_AUDIT_LOG.md`/`SPEC_LL13_Pending_Approval_Unification.md` עצמם) — **לא** PR #183. הטיוטה גם מספרה את זה כ-"BUG-066", שמתנגש עם BUG-066 הקיים כבר בלוג הזה (BUG-DAILY-01). ממוספר כאן מחדש כ-BUG-093 (המספר הפנוי הבא), עם ציטוט רק לעובדות שאומתו ישירות מול `origin/main` בסשן הזה — לא הועתקו commit hash/PR number מהטיוטה.
