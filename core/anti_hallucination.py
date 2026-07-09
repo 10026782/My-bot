@@ -181,9 +181,13 @@ _NO_TOOL_CLAIMS: list[tuple[re.Pattern, frozenset[str]]] = [
     ),
     # CRM creation claims — דורשות airtable_add בלבד.
     # FOUND לא כותב airtable_add → אסור לשמש כ-evidence ליצירה.
+    # גוף ראשון (הוספתי/שמרתי/רשמתי/תיעדתי) נוסף symmetric ל-UPDATE claims
+    # (ראה BUG-NEW-09 למטה) — "הוספתי... 30 רשומות פעילות" חמק מה-Gate
+    # בדוגמה חיה (09/07) כי ה-pattern הקודם תפס רק צורות גוף שלישי/סביל.
     (
         re.compile(
-            r"(הרשומה נוצרה|נוצר ליד|הליד נוצר|נוסף ל-?Airtable|נוספה רשומה|ליד חדש נוצר|lead_capture:created)",
+            r"(הרשומה נוצרה|נוצר ליד|הליד נוצר|נוסף ל-?Airtable|נוספה רשומה|ליד חדש נוצר|lead_capture:created|"
+            r"(?<!לא )(?<!עדיין )(הוספתי|שמרתי|רשמתי|תיעדתי).{0,40}(רשומ|ליד|תיעוד|זיכרון ה?עסקי|Business Memory))",
             re.UNICODE,
         ),
         frozenset({"airtable_add"}),
@@ -972,6 +976,55 @@ def _run_tests() -> bool:
     check_b = verify_result_claim("עדכנתי את הרשומה בהצלחה.", blocked_update)
     print(f"{'✅' if check_b.status == 'hallucination' else '❌'} 'עדכנתי' after blocked airtable_update → hallucination")
     if check_b.status != "hallucination":
+        failed += 1
+    else:
+        passed += 1
+
+    # ── live incident (09/07): "הוספתי... 30 רשומות פעילות" with zero tool
+    # calls this turn slipped through _NO_TOOL_CLAIMS entirely — the CRM
+    # creation pattern only matched third-person/passive forms, unlike the
+    # UPDATE pattern above (already fixed for BUG-NEW-09). ──
+    no_tool_create_first_person = sanitize_agent_response(
+        "✅ הוספתי לזיכרון העסקי. יש כעת 30 רשומות פעילות.", []
+    )
+    ok16 = no_tool_create_first_person == _NO_TOOL_EVIDENCE_FALLBACK
+    print(f"{'✅' if ok16 else '❌'} live incident: 'הוספתי...רשומות פעילות' with no airtable_add result → blocked")
+    if not ok16:
+        print(f"     got: {no_tool_create_first_person!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    with_tool_create_first_person = sanitize_agent_response(
+        "✅ הוספתי את העדכון לזיכרון העסקי.",
+        [{"tool": "airtable_add", "content": "✅ רשומה נוספה | ID: rec123", "ok": True}],
+    )
+    ok17 = with_tool_create_first_person not in (_NO_TOOL_EVIDENCE_FALLBACK, _SAFE_FALLBACK)
+    print(f"{'✅' if ok17 else '❌'} 'הוספתי' with real airtable_add result present → passed through")
+    if not ok17:
+        print(f"     got: {with_tool_create_first_person!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    for verb in ("שמרתי", "רשמתי", "תיעדתי"):
+        text = f"✅ {verb} את הרשומה בזיכרון העסקי."
+        got = sanitize_agent_response(text, [])
+        okv = got == _NO_TOOL_EVIDENCE_FALLBACK
+        print(f"{'✅' if okv else '❌'} '{verb}' with no airtable_add result → blocked")
+        if not okv:
+            print(f"     got: {got!r}")
+            failed += 1
+        else:
+            passed += 1
+
+    no_false_positive = sanitize_agent_response(
+        "לא הוספתי רשומה כי חסר לי מידע.", []
+    )
+    ok18 = no_false_positive not in (_NO_TOOL_EVIDENCE_FALLBACK, _SAFE_FALLBACK)
+    print(f"{'✅' if ok18 else '❌'} 'לא הוספתי' (negation) does not false-positive trigger the creation gate")
+    if not ok18:
+        print(f"     got: {no_false_positive!r}")
         failed += 1
     else:
         passed += 1
