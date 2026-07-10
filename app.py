@@ -683,6 +683,18 @@ def _pending_clarification_message(chat_id: str) -> str:
     return "\n".join(lines)
 
 
+# SPEC Preview Content Fix (Site #4) — wording-only clarification that the
+# preview text above is the user's raw request, not the actual action that
+# will run; the real tool call is only decided when the Agent re-runs at
+# confirm-time (see run_agent's recursive _skip_approval=True call). Does
+# NOT change the "run again" architecture itself — that's a deliberate
+# cost/latency + context-freshness trade-off, documented separately.
+CONFIRMATION_SUFFIX = (
+    "\n\nℹ️ הפרטים המדויקים ייקבעו כשאכין את הפעולה בפועל, "
+    "ותוכל לבדוק ולאשר לפני שהיא מתבצעת."
+)
+
+
 def approval_response(route: RouteDecision, original_text: str, chat_id: str,
                        channel: str, domain: str) -> str:
     """Saves original action and asks owner to confirm with כן/לא."""
@@ -703,17 +715,46 @@ def approval_response(route: RouteDecision, original_text: str, chat_id: str,
             f"⏳ *אישור נדרש* (#{display_index})\n\n"
             f"פעולה: `{preview}`\n\n"
             f"ענה *כן {display_index}* לביצוע או *לא {display_index}* לביטול."
+            f"{CONFIRMATION_SUFFIX}"
         )
     return (
         f"⏳ *אישור נדרש*\n\n"
         f"פעולה: `{preview}`\n\n"
         f"ענה *כן* לביצוע או *לא* לביטול."
+        f"{CONFIRMATION_SUFFIX}"
     )
 
 
 # ══════════════════════════════════════════════════
 # Approval Gate Helpers
 # ══════════════════════════════════════════════════
+
+# SPEC Preview Content Fix (Site #3) — Contract Chain (10/07/2026) grepped
+# airtable_schema.py for every phone/email/internal-identifier-shaped field
+# key across all table classes, not just LeadFields. Tables with Hebrew
+# schemas (e.g. ContactFields in "אנשי קשר (Contacts)") use "טלפון"/"אימייל"
+# as the literal field key Claude passes in tool inputs — the English-only
+# set from the original spec draft would silently leave those unmasked.
+# "email"/"אימייל" included alongside phone for the same PII reasoning even
+# though it wasn't in the original 4; "external_id" added because it's the
+# same class of internal dedup/routing key as sender_id/memory_key/tenant_id
+# (LeadFields.EXTERNAL_ID — "gmail:<msg_id>", not shown to a human approver).
+_SENSITIVE_FIELD_KEYS = {
+    "phone", "sender_id", "memory_key", "tenant_id", "external_id",
+    "email", "טלפון", "אימייל",
+}
+
+
+def _format_field_value(key: str, value) -> str:
+    """מסך שדות רגישים, וחותך ערכים ארוכים בבטחה."""
+    if key.lower() in _SENSITIVE_FIELD_KEYS:
+        s = str(value)
+        return s[:2] + "*" * max(len(s) - 4, 0) + s[-2:] if len(s) > 4 else "****"
+    s = str(value)
+    if len(s) > 80:
+        return s[:80] + "..."
+    return s
+
 
 def _describe_tool_call(tool_name: str, inputs: dict) -> str:
     """תיאור קריא של קריאת כלי לכפתורי אישור."""
@@ -723,10 +764,21 @@ def _describe_tool_call(tool_name: str, inputs: dict) -> str:
         start = str(inputs.get("start_time", "?"))[:16]
         return f"📅 קבע: {inputs.get('summary', '?')} ב-{start}"
     if tool_name == "airtable_add":
-        field_keys = ", ".join(inputs.get("fields", {}).keys()) if isinstance(inputs.get("fields"), dict) else "?"
-        return f"➕ הוסף ל-{inputs.get('table', '?')}: [{field_keys}]"
+        fields = inputs.get("fields", {})
+        if not isinstance(fields, dict):
+            return f"➕ הוסף ל-{inputs.get('table', '?')}: [?]"
+        fields_preview = "\n".join(
+            f"  • {k}: {_format_field_value(k, v)}" for k, v in fields.items()
+        )
+        return f"➕ הוסף ל-{inputs.get('table', '?')}:\n{fields_preview}"
     if tool_name == "airtable_update":
-        return f"✏️ עדכן {inputs.get('record_id', '?')} ב-{inputs.get('table', '?')}"
+        fields = inputs.get("fields", {})
+        if not isinstance(fields, dict):
+            return f"✏️ עדכן {inputs.get('record_id', '?')} ב-{inputs.get('table', '?')}"
+        fields_preview = "\n".join(
+            f"  • {k}: {_format_field_value(k, v)}" for k, v in fields.items()
+        )
+        return f"✏️ עדכן {inputs.get('record_id', '?')} ב-{inputs.get('table', '?')}:\n{fields_preview}"
     if tool_name == "sheets_append":
         return f"📊 כתוב ל-{inputs.get('sheet_name', '?')}"
     return f"⚡ {tool_name}: {str(inputs)[:60]}"
