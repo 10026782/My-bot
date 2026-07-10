@@ -30,6 +30,29 @@ logger = logging.getLogger(__name__)
 
 _PHONE_RE = re.compile(r"(?:0\d{1,2}[-\s]?\d{7,8}|[\+]?972[-\s]?\d{8,9})")
 
+# BUG-094-C: RouterDomain values that are routing/meta concepts, not business
+# verticals — never valid values for Airtable's Leads/Lead Events "Domain"
+# singleSelect field (live schema: real_estate/import/recruiting/general).
+# core/router/domain_router.py classifies any message containing "ליד"/"lead"/
+# "crm" as RouterDomain.CRM (0.85 confidence) — which a batch lead-dictation
+# message like "ליד חדש: ..." naturally contains, so resolved_route_domain
+# reaching handle_lead_candidate() can legitimately be "crm". Writing that
+# straight into the Domain field 422s on Lead Events (Airtable rejects the
+# value outright) and is meaningless on Leads either way — "crm"/"internal"
+# describe the *routing intent*, not which business the lead belongs to.
+_NON_BUSINESS_DOMAINS = frozenset({"crm", "internal"})
+
+
+def _lead_domain_key(domain: str) -> str:
+    """Normalizes a Router domain into a value safe to write to Airtable's
+    Leads/Lead Events Domain field — meta-domains (crm/internal) and empty
+    values fall back to 'general', same as the pre-existing empty-domain
+    fallback."""
+    if not domain or domain in _NON_BUSINESS_DOMAINS:
+        return "general"
+    return domain
+
+
 _SAVE_WORDS = frozenset({
     "תשמור", "שמור", "שמרי", "תרשום", "רשום",
     "תוסיף", "הוסף", "תוסיפי", "save", "add",
@@ -232,13 +255,15 @@ def parse_batch_dictation(text: str) -> list[dict]:
     מחזיר רשימה של {name, phone, context} רק אם יש ≥2 בלוקים ברורים.
     אחרת מחזיר רשימה ריקה (→ fallback ל-parse_lead_dictation).
 
-    בלוק = שם עברי + טלפון בקרבה (עד 60 תווים לפני/אחרי).
+    בלוק = שם עברי + טלפון בקרבה (עד 60 תווים לפני/אחרי, לא חוצה למספר
+    הטלפון השכן — ראה BUG-094).
     """
     # אסטרטגיה: מצא את כל מספרי הטלפון, ולכל אחד חפש שם עברי בסביבתו
     candidates: list[dict] = []
     seen_phones: set[str] = set()
 
-    for phone_match in _PHONE_RE.finditer(text):
+    phone_matches = list(_PHONE_RE.finditer(text))
+    for i, phone_match in enumerate(phone_matches):
         raw_phone = re.sub(r"[\s\-]", "", phone_match.group())
         if raw_phone.startswith("+972"):
             raw_phone = "0" + raw_phone[4:]
@@ -249,9 +274,19 @@ def parse_batch_dictation(text: str) -> list[dict]:
             continue
         seen_phones.add(raw_phone)
 
-        # חלון טקסט סביב הטלפון
-        start  = max(0, phone_match.start() - 60)
-        end    = min(len(text), phone_match.end() + 60)
+        # חלון טקסט סביב הטלפון — BUG-094: מוגבל גם לגבולות הטלפון השכן
+        # (הקודם/הבא), לא רק ל-±60 תווים קבוע. בלי זה, כששני בלוקי-ליד
+        # קרובים (פחות מ-120 תווים משולבים ביניהם — המקרה הנפוץ בהכתבת
+        # רשימה קצרה), החלון של המועמד השני "דלף" אחורה וכלל גם את השם
+        # של המועמד הראשון; _extract_name() תמיד מחזיר את ההתאמה הראשונה
+        # בחלון (לא את הקרובה ביותר לטלפון) — כך ששני המועמדים קיבלו את
+        # אותו שם, ואז _at_find_lead() (SEARCH-by-name fallback) "מצא" את
+        # הרשומה שנוצרה זה עתה לליד הראשון וכתב "עדכון" על גביה במקום
+        # ליצור רשומה שנייה.
+        prev_end   = phone_matches[i - 1].end() if i > 0 else 0
+        next_start = phone_matches[i + 1].start() if i + 1 < len(phone_matches) else len(text)
+        start  = max(0, phone_match.start() - 60, prev_end)
+        end    = min(len(text), phone_match.end() + 60, next_start)
         window = text[start:end]
 
         name = _extract_name(window)
@@ -290,12 +325,20 @@ def _at_find_lead(name: str, phone: str) -> Optional[str]:
             if r.status_code == 200:
                 records = r.json().get("records", [])
                 if records:
-                    # prefer exact phone match
                     if phone:
+                        # BUG-094: כשיש phone, רק התאמת phone מדויקת נחשבת
+                        # "אותו ליד" — לא מספיק להסתמך על ה-formula האחרון
+                        # (SEARCH(name, {Name}) ללא phone בכלל) ולהחזיר
+                        # records[0] בלי אימות. שם דומה/משותף (נפוץ בעברית)
+                        # היה גורם ל-false match על ליד קיים לא-קשור וכתיבת
+                        # phone/summary שגויים על גביו — בדיוק המנגנון
+                        # שהפך "שני מועמדים עם אותו שם" ל"שתי כתיבות לאותה
+                        # רשומה" בפרודקשן. formula הבא (אם יש) ינוסה במקום.
                         for rec in records:
                             rec_phone = re.sub(r"[\s\-]", "", str(rec.get("fields", {}).get("phone", "")))
                             if rec_phone == phone:
                                 return rec["id"]
+                        continue
                     return records[0]["id"]
         except Exception as exc:
             logger.warning("[LCH] Airtable search error: %s", exc)
@@ -350,7 +393,7 @@ def _write_one_lead(
         from core.action_gateway import action_gateway as _gw, _ledger_singleton
         from airtable_schema import LeadFields
         _tool = "airtable_update" if action == "update" else "airtable_add"
-        _domain_key = domain if (domain and domain != "general") else "general"
+        _domain_key = _lead_domain_key(domain)
         # BUG-077: wrap under "fields" matching exactly what the Write step
         # below actually writes — this is what lets classify_approval_policy()
         # (core/action_gateway.py) correctly classify a brand-new safe lead
@@ -402,7 +445,7 @@ def _write_one_lead(
     try:
         from tools.airtable_gateway import airtable_create, airtable_patch
         from airtable_schema import LeadFields
-        _domain_key = domain if (domain and domain != "general") else "general"
+        _domain_key = _lead_domain_key(domain)
 
         if action == "update" and existing_id:
             patch_fields = {
@@ -417,7 +460,7 @@ def _write_one_lead(
                 record_id = existing_id
                 ok = True
         else:
-            _domain_key = domain if (domain and domain != "general") else "general"
+            _domain_key = _lead_domain_key(domain)
             lead_fields = {
                 LeadFields.NAME:       name,
                 LeadFields.PHONE:      phone,
@@ -453,7 +496,7 @@ def _write_one_lead(
 
     # Post-write enrichment (non-blocking, flag-gated)
     if ok and record_id:
-        _domain_key = domain if (domain and domain != "general") else "general"
+        _domain_key = _lead_domain_key(domain)
         try:
             from lead_capture import capture_lead_event
             from feature_flags import is_enabled as _flag
@@ -522,7 +565,7 @@ def _propose_lead_write(
 
     tenant_id   = getattr(identity, "tenant_id", "default") or "default"
     existing_id = _at_find_lead(name, phone)
-    _domain_key = domain if (domain and domain != "general") else "general"
+    _domain_key = _lead_domain_key(domain)
 
     if existing_id:
         tool_name = "airtable_update"
