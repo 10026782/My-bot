@@ -846,11 +846,16 @@ def _handle_mixed_batch(
     written = 0
     pending = 0
     for c in high:
+        # BUG-096-B: use this candidate's own segment (raw_text, set by
+        # core/ingress_classifier.py's block-based extraction) as their
+        # Summary/Lead-Event/memory text — not the whole batch message,
+        # which would leak other candidates' details into this lead's record.
+        c_text = c.get("raw_text") or text
         existing_id = _at_find_lead(c["name"], c["phone"])
         ctx_str = _context_suffix(c.get("context", []), domain)
         if _should_auto_write(auto_capture, existing_id):
             ok, record_id, action = _write_one_lead(
-                identity, c["name"], c["phone"], text, channel, domain
+                identity, c["name"], c["phone"], c_text, channel, domain
             )
             if ok and record_id:
                 verb = "עדכנתי" if action == "update" else "שמרתי"
@@ -860,7 +865,7 @@ def _handle_mixed_batch(
                 results.append(f"❌ {c['name']} ({c['phone']}) — לא נשמר")
         else:
             gw_result = _propose_lead_write(
-                identity, c["name"], c["phone"], text, channel, domain
+                identity, c["name"], c["phone"], c_text, channel, domain
             )
             if gw_result.ok:
                 verb = "לעדכון" if existing_id else "לשמירה"
@@ -981,7 +986,10 @@ def _handle_batch(
     for item in batch:
         name  = item["name"]
         phone = item["phone"]
-        ok, record_id, action = _write_one_lead(identity, name, phone, text, channel, domain)
+        # BUG-096-B: this candidate's own segment, not the whole batch text —
+        # see identical reasoning in _handle_mixed_batch above.
+        item_text = item.get("raw_text") or text
+        ok, record_id, action = _write_one_lead(identity, name, phone, item_text, channel, domain)
         ctx = _context_suffix(item.get("context", []), domain)
         if ok and record_id:
             verb = "עדכנתי" if action == "update" else "שמרתי"
