@@ -1038,10 +1038,20 @@ def _context_suffix(context: list[str], domain: str) -> str:
 # Batch session state + follow-up routing (Section 4C)
 # ══════════════════════════════════════════════════
 
+# BUG-098: word-boundary matching, not substring — "ומה" as a plain `in`
+# check matched inside "קומה" (floor), a completely ordinary real-estate
+# word, falsely triggering this branch for any lead message that mentions
+# a floor number. \b is Unicode-aware in Python 3 (treats Hebrew letters
+# as \w), so it correctly separates whole words — verified empirically
+# against "קומה"/"ישאר"/"נשאר"/"אישר" (must NOT match) and real follow-up
+# phrasing like "ומה עם השאר?" (must match) before landing this fix.
 _FOLLOWUP_WORDS = frozenset({
     "ומה", "השאר", "שאר", "הנותרים", "נותרים", "שאר הלידים",
     "שאר הרשימה", "מה עם השאר", "מה עם הנותרים",
 })
+_FOLLOWUP_WORD_PATTERN = re.compile(
+    r"\b(?:" + "|".join(re.escape(w) for w in _FOLLOWUP_WORDS) + r")\b"
+)
 
 
 def _save_batch_state(chat_id: str, original_text: str, results: list[dict]) -> None:
@@ -1083,7 +1093,7 @@ def _handle_batch_followup(
     מחזיר תשובה מבוססת על מצב ה-batch השמור.
     """
     lower = text.strip().lower()
-    if not any(w in lower for w in _FOLLOWUP_WORDS):
+    if not _FOLLOWUP_WORD_PATTERN.search(lower):
         return None
 
     try:
