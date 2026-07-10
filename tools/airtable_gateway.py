@@ -308,11 +308,24 @@ def airtable_patch(
     fields = normalize_airtable_fields(table, fields)
     clean, errors = validate_airtable_fields(table, fields)
 
-    if errors:
+    # SPEC A1 (Atomic Fail-Closed): a partial write (some fields silently
+    # dropped by validate_airtable_fields) must not proceed and report
+    # success — the caller/user would have no way to know data was lost.
+    # dropped is computed against `fields` (post-normalize, pre-validate),
+    # not the original caller payload, because normalize_airtable_fields
+    # may rename keys (aliases) — comparing must stay within one namespace.
+    # Coercions (e.g. a single "recXXX" string wrapped into ["recXXX"] for
+    # a linked-record field) stay under the SAME key in `clean`, so they
+    # are correctly NOT counted as dropped.
+    dropped = set(fields.keys()) - set(clean.keys())
+    if dropped:
         logger.warning(
-            "[gateway:%s] PATCH %s/%s — dropped fields: %s",
-            source, table, record_id, errors,
+            "[gateway:%s] PATCH %s/%s — fields dropped, write blocked: %s (all errors: %s)",
+            source, table, record_id, sorted(dropped), errors,
         )
+        _audit_log(source, table, "patch", record_id, [], ok=False)
+        return False
+
     if not clean:
         logger.warning(
             "[gateway:%s] PATCH %s/%s — no valid fields after normalization",
@@ -366,11 +379,16 @@ def airtable_create(
     fields = normalize_airtable_fields(table, fields)
     clean, errors = validate_airtable_fields(table, fields)
 
-    if errors:
+    # SPEC A1 (Atomic Fail-Closed) — see identical reasoning in airtable_patch().
+    dropped = set(fields.keys()) - set(clean.keys())
+    if dropped:
         logger.warning(
-            "[gateway:%s] POST %s — dropped fields: %s",
-            source, table, errors,
+            "[gateway:%s] POST %s — fields dropped, write blocked: %s (all errors: %s)",
+            source, table, sorted(dropped), errors,
         )
+        _audit_log(source, table, "create", "", [], ok=False)
+        return None
+
     if not clean:
         logger.warning(
             "[gateway:%s] POST %s — no valid fields after normalization",
