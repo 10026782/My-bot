@@ -23,6 +23,12 @@
 # found in the same production log: every candidate in a batch was written
 # with the ENTIRE multi-lead message as its Summary/Lead-Event/memory text,
 # leaking other candidates' details into each lead's own record.
+#
+# BUG-097 (also covered below) is a follow-up found in a second live
+# production test after BUG-096 shipped: block-splitting correctly handled
+# a malformed phone in the middle of a 3-candidate batch, but an interest
+# verb ("מעוניין") right after a name — with the phone at the END of the
+# block — leaked into the extracted name. Fixed via _NAME_STOP.
 
 import os, sys
 os.environ.setdefault("ANTHROPIC_API_KEY", "sk-test")
@@ -118,6 +124,39 @@ for label, (text, expected_names) in REGRESSION_CASES.items():
     names = [c["name"] for c in result]
     chk(f"regression ({label}): correct candidate count", len(result) == len(expected_names))
     chk(f"regression ({label}): names match exactly", names == expected_names)
+
+
+# ══════════════════════════════════════════════════
+# BUG-097 (NAME-TRAILING-INTENT-VERB) — found in a second live production
+# test, after BUG-096 shipped: with 3 candidates (one with a malformed
+# phone), block-splitting correctly dropped the malformed one without
+# corrupting a neighbor (BUG-096 working as intended) — but a NEW, narrower
+# defect surfaced: when the phone sits at the END of a block (name ->
+# interest-phrase -> phone, e.g. "משה אבני מעוניין ב3 חדרים 0546546345"),
+# _HEBREW_NAME_RE greedily matches the whole contiguous Hebrew-word run
+# including the interest verb ("מעוניין"), and _NAME_STOP had no entry to
+# trim it off. Fixed: intent/interest verbs (מעוניין/רוצה/מחפש/צריך/מבקש +
+# feminine/plural forms) added to _NAME_STOP so the existing trailing-word
+# trim in _extract_name_from_window() strips them like any other stop-word.
+# ══════════════════════════════════════════════════
+print("\n── BUG-097: trailing intent verb no longer leaks into the name ──")
+PROD_REPRO_2 = (
+    "משה אבני  מעוניין ב3 חדרים 0546546345\n"
+    "אורי כדורי 0768767  4 חדרים\n"
+    "אלי חוטי 0768765678 דירת 5 חדרים"
+)
+result2 = _extract_lead_candidates(PROD_REPRO_2)
+chk("BUG-097: 2 candidates extracted (אורי כדורי's malformed 7-digit phone dropped cleanly)",
+    len(result2) == 2)
+if len(result2) == 2:
+    chk("BUG-097: candidate 1 name is exactly 'משה אבני' — 'מעוניין' not included",
+        result2[0]["name"] == "משה אבני")
+    chk("BUG-097: candidate 1 keeps the correct phone",
+        result2[0]["phone"] == "0546546345")
+    chk("BUG-097: candidate 2 is אלי חוטי, untouched by the fix",
+        result2[1]["name"] == "אלי חוטי" and result2[1]["phone"] == "0768765678")
+    chk("BUG-097: 'אורי כדורי' (malformed-phone block) does not appear as any candidate",
+        all("אורי כדורי" not in c["name"] for c in result2))
 
 
 # ══════════════════════════════════════════════════

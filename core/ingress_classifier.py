@@ -195,6 +195,15 @@ _NAME_STOP = frozenset({
     # common chat noise
     "לא", "אני", "כן", "גם", "של", "עם", "על", "את",
     "הוא", "היא", "הם", "אנחנו", "אתם", "היום", "מחר", "ביקש", "יצר",
+    # BUG-097: interest/intent verbs that follow a name with no separator
+    # the block/window logic recognizes (e.g. "משה אבני מעוניין ב3 חדרים
+    # 0546..." — phone at the end of the block, not right after the name).
+    # _HEBREW_NAME_RE greedily matches the whole contiguous Hebrew-word run,
+    # so without these in _NAME_STOP the trailing-word trim in
+    # _extract_name_from_window() has nothing to strip and the verb gets
+    # kept as if it were part of the person's name.
+    "מעוניין", "מעוניינת", "רוצה", "רוצים", "רוצות", "מחפש", "מחפשת",
+    "צריך", "צריכה", "מבקש", "מבקשת",
 })
 
 _HEBREW_WORD_RE = re.compile(r"[א-ת]{2,}")
