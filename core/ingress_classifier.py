@@ -200,6 +200,12 @@ _NAME_STOP = frozenset({
 _HEBREW_WORD_RE = re.compile(r"[א-ת]{2,}")
 _HEBREW_NAME_RE = re.compile(r"(?<!\w)([א-ת]{2,}(?:\s+[א-ת]{2,})+)(?!\w)")
 
+# BUG-096: block separator — new line starting with a Hebrew letter / bullet /
+# numbering / blank line. Used to bound per-candidate windows at block
+# boundaries, not just at neighboring recognized phone numbers (see
+# _extract_lead_candidates below).
+_BLOCK_SEP = re.compile(r"\n\s*\n|\n[-•*]\s+|\n\d+[.)]\s+|\n(?=[א-ת])")
+
 # Sender-name line pattern for WhatsApp-style chat logs (not exports):
 # "דני:" or "דני כהן:" at start of line — name before colon is a SENDER, not a lead
 _SENDER_LINE_RE = re.compile(r"^([א-ת]{2,}(?:\s+[א-ת]{2,})?)\s*:\s*", re.MULTILINE)
@@ -249,30 +255,68 @@ def _candidate_confidence(name: str, phone: str, window: str) -> float:
 def _extract_lead_candidates(text: str) -> list[dict]:
     """
     מחלץ כל צמדי (שם, טלפון) מהטקסט עם confidence לכל אחד.
-    משמש את classify_ingress לסיווג Tier 1/2/3.
+    משמש את classify_ingress לסיווג Tier 1/2/3 — זו המימוש היחיד שבאמת
+    בשימוש בפרודקשן (core/lead_candidate_handler.py's parse_batch_dictation/
+    parse_lead_dictation הם מימוש כפול ומת — 0 קוראים בכל הריפו, ראה BUG-096
+    ב-BUG_AUDIT_LOG.md; אל תתקן שם בטעות שוב).
+
+    BUG-096: הטקסט מפוצל קודם ל-בלוקים (_BLOCK_SEP — שורה חדשה שמתחילה
+    באות עברית / bullet / מספור / שורה ריקה) לפני כל חילוץ טלפון/שם. כל
+    בלוק מעובד בנפרד לגמרי (_extract_candidates_from_block), כדי שטלפון
+    פגום/לא-ניתן-לזיהוי בבלוק אחד לא "יבלע" את הבלוק (כולל השם) לתוך החלון
+    של הבלוק הבא — בדיוק המנגנון שגרם לחיבור שם+טלפון של שני אנשים שונים
+    שנצפה בפרודקשן (ראה BUG-096).
     """
     candidates: list[dict] = []
     seen_phones: set[str] = set()
     sender_names = {m.group(1).strip() for m in _SENDER_LINE_RE.finditer(text)}
 
-    for phone_match in _PHONE_RE.finditer(text):
+    for block in _BLOCK_SEP.split(text):
+        if not block.strip():
+            continue
+        _extract_candidates_from_block(block, candidates, seen_phones, sender_names)
+
+    return candidates
+
+
+def _extract_candidates_from_block(
+    block: str,
+    candidates: list[dict],
+    seen_phones: set[str],
+    sender_names: set,
+) -> None:
+    """
+    מחלץ candidates מתוך בלוק בודד (כבר מפוצל ע"י _BLOCK_SEP, ראה
+    _extract_lead_candidates) ומוסיף ל-candidates.
+
+    בתוך בלוק בודד יכולים עדיין להיות כמה זוגות שם+טלפון (למשל שורה אחת עם
+    כמה לידים מופרדים בפסיקים) — לכן עדיין נדרש windowing per-phone: החלון
+    מוגבל גם לגבולות הטלפון השכן *בתוך הבלוק הזה בלבד*, לא חוצה בין בלוקים,
+    ולא רק ל-±80 תווים קבוע (BUG-096, ממשיך את אותו עיקרון).
+
+    כל candidate נושא גם "raw_text" — הבלוק המקורי שלו בלבד, לא כל ההודעה —
+    כדי ש-Summary/Lead Event/lead_memory לכל ליד ישקפו רק אותו (BUG-096-B:
+    לפני זה כל הלידים בבאצ' קיבלו את אותו טקסט מלא כ-summary, כולל תוכן של
+    אנשים אחרים).
+    """
+    phone_matches = list(_PHONE_RE.finditer(block))
+    for i, phone_match in enumerate(phone_matches):
         phone = _normalize_phone(phone_match.group())
         if phone in seen_phones:
             continue
         seen_phones.add(phone)
 
-        # חלון ±80 תווים סביב הטלפון
-        start  = max(0, phone_match.start() - 80)
-        end    = min(len(text), phone_match.end() + 80)
-        window = text[start:end]
+        prev_end   = phone_matches[i - 1].end() if i > 0 else 0
+        next_start = phone_matches[i + 1].start() if i + 1 < len(phone_matches) else len(block)
+        start  = max(0, phone_match.start() - 80, prev_end)
+        end    = min(len(block), phone_match.end() + 80, next_start)
+        window = block[start:end]
 
-        # מצא שם עברי בחלון
         name = _extract_name_from_window(window, sender_names)
         if not name:
             continue
 
         conf = _candidate_confidence(name, phone, window)
-        # Context keywords
         ctx  = _extract_context_kw(window, name, phone)
 
         candidates.append({
@@ -280,9 +324,8 @@ def _extract_lead_candidates(text: str) -> list[dict]:
             "phone":      phone,
             "confidence": conf,
             "context":    ctx,
+            "raw_text":   block.strip(),
         })
-
-    return candidates
 
 
 def _extract_name_from_window(window: str, sender_names: set) -> Optional[str]:
