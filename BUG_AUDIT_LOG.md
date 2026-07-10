@@ -301,7 +301,7 @@
 - **Verification ראיה:** production smoke אמיתי — `record=recbpQzwrmZdxIaDf`, `200 OK`, שדות `Domain`/`Leads` תקינים.
 - **סטטוס:** ✅ CLOSED / PROD VERIFIED.
 
-### BUG-019 — crm.py: כמה פונקציות כותבות/מסננות לפי שדות ש-Contacts/Deals/Payments החיים לא מכילים
+### BUG-019 — crm.py: כמה פונקציות כותבות/מסננות לפי שדות ש-Contacts/Deals/Payments החיים לא מכילים — ✅ CLOSED (10/07/2026)
 - **דווח:** 24/06/2026 — באותו אודיט כמו BUG-020
 - **דווח על ידי:** המשתמש
 - **מסך / מודול:** `crm.py` — בשימוש בפועל ע"י `scheduler.py`, `payment_reminder.py`, `lead_conversion.py`, `tools/contact_resolver.py`, ו-`tools/dispatcher.py` (`crm_mark_payment_paid`)
@@ -313,18 +313,17 @@
   - **(e) `crm_upcoming_payments` + `crm_overdue_payments`** (שורות ~311-380): ה-formula משתמש ב-`{סטטוס}`/`{תאריך}` (עברית) על טבלת Payments, אבל השדות החיים הם `status`/`date` (אנגלית) — תוצאה ריקה לתמיד, בלי שגיאה (תזכורות תשלום שלא שולחות כלום).
 - **Severity:** High — פוגע בפונקציונליות CRM ליבתית (חיפוש אנשי קשר, יצירת עסקאות, תזכורות תשלום) שבשימוש בפועל.
 - **Root Cause:** `crm.py` נכתב מול גרסה ישנה/אנגלית של הסכמה ולא עודכן אחרי שהטבלאות "אנשי קשר (Contacts)"/"עסקאות (Deals)" עברו ל-Hebrew naming ו-Payments צומצם לשדות הנוכחיים.
-- **עדכון (10/07/2026) — שני מקורות עצמאיים, מוזגים כאן:**
-  - **(a) ✅ כבר תוקן** — `crm_find_contact()` (`crm.py:126-152`) משתמש היום ב-`ContactFields.NAME`/`ContactFields.COMPANY`, שניהם מוגדרים כ-`"שם"`/`"חברה"` (עברית) — תואם לשדות החיים.
-  - **(b) ✅ כבר תוקן** — `crm_add_contact()`/`crm_list_contacts()` כותבים/מסננים ל-`ContactFields.ROLE_CATEGORY`, לא `TYPE`. `ContactFields.TYPE` לא בשימוש בשתי הפונקציות האלו יותר.
-  - **(c) ✅ תוקן — commit `9b51537` (ישיר, `eli chazan`, PR #289, "fix(tma): align task and deal schema field values"), ממוזג ל-`origin/main`.** `DealFields.ADDRESS`/`FUNDING_COST`/`ROI` עודכנו לשמות ה-Airtable-generated האמיתיים: `"Adress"`, `"Funding Cost"`, `"Roi"` (typo/casing תואמים ל-live, לא ל-code-clean names — סימן מובהק שאומתו ישירות מול הסכמה החיה, לא נוחשו). **⚠️ `DealFields.RISK_LEVEL`/`NOTES` לא שונו באותו commit** — עדיין `"Risk Level"`/`"Notes"`, לא אומתו מול live. אם הם שגויים גם הם, `crm_add_deal`'s POST עדיין עלול להיכשל ב-422 (הכתיבה שולחת את כל 5 השדות יחד — `ADDRESS`/`FUNDING_COST`/`ROI` המתוקנים לא מספיקים לבדם אם `RISK_LEVEL`/`NOTES` עדיין שגויים).
-  - **(d) 🟡 הבעיה המקורית נעלמה, הוחלפה בבעיה חדשה, לא טופלה ב-`9b51537`** — `crm_add_payment()` (`crm.py:280-306`) כבר **לא** כותב ל-`PaymentFields.CONTACT`/`NOTES` — אבל הפרמטרים `contact_id`/`notes` עדיין מתקבלים בחתימת הפונקציה ופשוט **נזרקים בשקט**, לא נכתבים לשום מקום. אין קריסת 422 יותר, אבל יש אובדן מידע שקט.
-  - **(e) ✅ כבר תוקן** — `crm_upcoming_payments`/`crm_overdue_payments` משתמשים ב-`PaymentFields.STATUS`/`PaymentFields.DUE_DATE` (מפנים ל-`"status"`/`"date"` אנגלית) — לא `{סטטוס}`/`{תאריך}` קשיח יותר.
-- **תוקן:** (a)/(b)/(e) — כבר תוקנו, אין פעולה נדרשת. (c) — תוקן חלקית (ADDRESS/FUNDING_COST/ROI), RISK_LEVEL/NOTES עדיין לא אומתו. (d) — דורש החלטת משתמש (האם לחבר contact_id/notes לשדה אמיתי, או להסיר את הפרמטרים המתים).
-- **Merged:** חלקי — (a)/(b)/(e) + (c) החלקי קיימים ב-`origin/main` (`9b51537`). (d) ו-RISK_LEVEL/NOTES ב-(c) ללא שינוי.
+- **עדכון (10/07/2026) — סגור סופית: re-audit יסודי של המשתמש מול ייצוא CSV חי מ-Airtable, מאומת גם ישירות בקוד:**
+  - **(a)/(b) Contacts — ✅ אין באג פעיל.** `crm_find_contact()`/`crm_add_contact()`/`crm_list_contacts()` משתמשים כולם ב-`ContactFields.NAME`/`COMPANY`/`ROLE_CATEGORY` (`"שם"`/`"חברה"`/`"Role Category"`) — תואמים בדיוק לייצוא ה-CSV החי. `ContactFields.TYPE` לא בשימוש בפונקציות אלו יותר.
+  - **(e) Payments — ✅ אין באג פעיל במסלול הכתיבה.** `crm_add_payment()` כותב רק `NAME`/`AMOUNT`/`DUE_DATE`/`STATUS`/`DEAL` (`"reference"`/`"amount"`/`"date"`/`"status"`/`"deal_id"`) — תואם לייצוא ה-CSV החי. `crm_upcoming_payments`/`crm_overdue_payments` גם תואמים.
+  - **(d) `PaymentFields.CONTACT`/`NOTES` — לא בשימוש בכתיבה בכלל, לא באג.** מאומת: `crm_add_payment()` מקבלת `contact_id`/`notes` כפרמטרים אך אינה כותבת אותם לשום מקום. בבדיקה נוספת: **ל-`crm_add_payment()` אין אף קורא בכל הריפו** (`grep -rn "crm_add_payment(" --include="*.py" .` → 0 hits מחוץ ל-`crm.py` עצמו) — הפונקציה אינה רשומה ב-`tool_registry.py` וגם אין לה `case` ב-`tools/dispatcher.py`, כלומר אינה נגישה ל-Agent כלל דרך לולאת הכלים החיה. אין סיכון live, אין קורא שסובל מאובדן מידע.
+  - **(c) Deals — ✅ תוקן, מאומת מול ייצוא CSV חי.** שלושת הפערים שהמשתמש איתר (Address→Adress, Funding Cost %→Funding Cost, ROI %→Roi) תוקנו ב-commit `9b51537` (ישיר, `eli chazan`, PR #289), **וגם RISK_LEVEL ("Risk Level") וגם NOTES ("Notes") אושרו כתואמים ל-live ללא צורך בשינוי** — מאומת ישירות בקוד הנוכחי: `DealFields.ADDRESS="Adress"`, `FUNDING_COST="Funding Cost"`, `ROI="Roi"`, `RISK_LEVEL="Risk Level"`, `NOTES="Notes"`. **חשוב:** גם `crm_add_deal()` אין לו אף קורא בריפו ואינו רשום ב-`tool_registry.py`/`dispatcher.py` — כמו `crm_add_payment()`, אינו נגיש ל-Agent החי. **המשמעות המעשית:** אין דרך "לבדוק ב-POST אמיתי דרך התנהגות משתמש חיה" כפי שהוצע — צריך קריאה ידנית ישירה ל-`crm.crm_add_deal(...)` כדי לאשר 200 OK, לא תרחיש production ארגי.
+- **תוקן:** כל 5 תת-הבעיות — סגורות ברמת הקוד. Contacts/Payments לא היו צריכים תיקון (re-verify בלבד). Deals תוקן במלואו ב-`9b51537`.
+- **Merged:** ✅ כן — כולל ב-`origin/main` (`9b51537` + מיזוגים קודמים).
 - **Deployed:** לא ידוע.
-- **Verified בפרודקשן:** לא — (c) אומת רק ברמת שם-שדה (grep/commit), לא נבדקה קריאת `crm_add_deal` אמיתית מקצה לקצה.
-- **Verification ראיה:** `git show 9b51537 -- airtable_schema.py`; קריאה ישירה של `crm.py`/`airtable_schema.py` על `origin/main`, 10/07/2026.
-- **סטטוס:** 🟡 חלקי — 3/5 סגורות (a/b/e), 1/5 חלקית (c — ADDRESS/FUNDING_COST/ROI תוקנו, RISK_LEVEL/NOTES פתוחים), 1/5 פתוחה (d — silent data loss, לא crash).
+- **Verified בפרודקשן:** ⚠️ חלקי במובן מיוחד — Contacts/Payments בשימוש חי (`crm_find_contact`/`crm_add_contact` דרך `tools/contact_resolver.py`, ראה למעלה) ולא דווחה עדיין בעיה בפועל לאחר התיקון. Deals/`crm_add_payment` **אינם נגישים ל-Agent כלל כרגע** (לא ב-registry/dispatcher) — "אימות בפרודקשן" עליהם לא רלוונטי עד שמישהו יחבר אותם ל-dispatcher; אם וכשזה יקרה, יש לוודא POST אמיתי מצליח לפני חשיפה ל-Agent.
+- **Verification ראיה:** `git show 9b51537 -- airtable_schema.py`; קריאה ישירה של `crm.py`/`airtable_schema.py`/`tool_registry.py`/`tools/dispatcher.py` על `origin/main`, 10/07/2026; re-audit מלא של המשתמש מול ייצוא CSV חי מ-Airtable (Contacts/Deals/Payments).
+- **סטטוס:** ✅ CLOSED — 5/5 תת-בעיות סגורות. `crm_add_deal`/`crm_add_payment` נשארים unwired (לא רשומים ב-tool_registry/dispatcher) — לא באג, אבל שווה לזכור לפני חיבור עתידי.
 
 ### BUG-021 — schema_audit.py: UnboundLocalError במקום fallback ל-cache כשה-live fetch נכשל — ✅ כבר תוקן, לא היה מתועד (סטטוס עודכן 10/07/2026)
 - **דווח:** 24/06/2026 — תוך כדי ניסיון להריץ `schema_audit.py` בלי `AIRTABLE_API_KEY`/`AIRTABLE_BASE_ID` ב-env
