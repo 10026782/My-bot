@@ -749,11 +749,13 @@ def _handle_clean_batch(
     """
     Tier 2: כל הלידים high-confidence.
     auto_write=True → כותב הכל + סיכום.
-    auto_write=False → BUG-058: תצפית בלבד — אין resolver ל-batch confirm
-    (ראה _store_pending_preview), אז ההודעה לא רומזת שאישור קבוצתי אפשרי.
+    auto_write=False → BUG-058: preview עם resolver אמיתי — "כן"/"לא" נפתרים
+    ע"י resolve_pending_lead_preview() ב-app.py section 2.55, אחרי שנבדק
+    שאין contract Tier-1 חי (Tier-1 מנצח תמיד כששני המנגנונים חיים בו-זמנית
+    לאותו chat_id — ראה תיעוד ב-app.py וב-resolve_pending_lead_preview()).
     """
     if not _should_auto_write(auto_write, None):
-        _store_pending_preview(chat_id, candidates, text)
+        _store_pending_preview(chat_id, candidates, text, channel, domain)
         lines = [
             f"• {c['name']} ({c['phone']})" + (f" [{', '.join(c['context'])}]" if c.get("context") else "")
             for c in candidates
@@ -761,9 +763,7 @@ def _handle_clean_batch(
         return (
             f"📋 זיהיתי {len(candidates)} לידים אפשריים בקבוצה:\n" +
             "\n".join(lines) +
-            "\n\nלא שמרתי אותם ולא נפתחה פעולת אישור קבוצתית.\n"
-            "אישור קבוצתי עדיין לא זמין.\n"
-            "כדי לשמור ליד, שלח ליד אחד בכל פעם או בקש ממני להכין רשימה לבדיקה."
+            "\n\nענה \"כן\" לשמירת כולם, או \"לא\" לביטול. (בתוקף ל-30 דקות)"
         )
 
     # auto-write
@@ -840,31 +840,74 @@ def _handle_mixed_batch(
 
 # ── Pending preview store (FEATURE_AUTO_CAPTURE=OFF) ──────────────────────────
 
-def _store_pending_preview(chat_id: str, candidates: list[dict], raw_text: str) -> None:
-    """שומר preview של batch (Tier 2) ב-session — audit/future-design בלבד.
+def _store_pending_preview(
+    chat_id: str, candidates: list[dict], raw_text: str,
+    channel: str, domain: str,
+) -> None:
+    """שומר preview של batch (Tier 2) עם TTL 30 דקות — BUG-058 resolver.
 
-    INTENTIONAL (BUG-058): no resolver yet — batch-confirm design pending.
-    Do not treat this as a live contract like Tier 1's ActionGateway contract
-    (_propose_lead_write). Nothing in the codebase reads pending_lead_preview
-    back; "כן"/"לא" never resolve it. Kept written (not removed) so the field
-    is available for audit and for whatever resolver design eventually lands.
-    The caller (_handle_clean_batch) is responsible for not implying to the
-    user that a confirmation action exists for this state.
+    channel/domain נשמרים כאן (לא מבוקשים מחדש ב-resolve time) כי ב-app.py
+    section 2.55 (נקודת ה-resolve, "כן"/"לא") ה-Router עוד לא רץ — אין
+    resolved_route_domain זמין שם. _handle_clean_batch כבר מקבל את שניהם.
 
-    BUG-056: היה `_ls.get(chat_id)` — מחזיר None בשקט ב-session חדש (סשן ראשון
-    של chat_id), ואז ה-preview לעולם לא נשמר בפועל. `get_or_create()` מבטיח
-    ש-session תמיד קיים לפני הכתיבה.
+    ראו resolve_pending_lead_preview() למטה — הצרכן בפועל של השדה הזה.
     """
     try:
         from session_store import lead_sessions as _ls
-        session = _ls.get_or_create(chat_id)
-        session["pending_lead_preview"] = {
-            "candidates": candidates,
-            "raw_text":   raw_text,
-        }
-        _ls._sync_to_db(chat_id, session)
+        _ls.set_pending_lead_preview(chat_id, candidates, raw_text, channel, domain)
     except Exception as exc:
         logger.warning("[LCH] pending_preview store failed: %s", exc)
+
+
+def resolve_pending_lead_preview(
+    identity, chat_id: str, is_confirm: bool, is_cancel: bool,
+) -> Optional[str]:
+    """BUG-058 resolver: קורא pending_lead_preview בחזרה, מבצע batch confirm/cancel.
+
+    מוחזר None אם: (א) אין preview ממתין / פג תוקפו, או (ב) לא confirm/cancel
+    כלל — בשני המקרים app.py ממשיך כרגיל בזרימת ActionGateway/Agent הרגילה.
+    מוחזר string אם ה-resolver "צרך" את ההודעה.
+
+    channel/domain נשלפים מתוך ה-preview עצמו (נשמרו בזמן הכתיבה) — לא
+    מהקורא, כי בנקודת ה-app.py הזו (2.55) ה-Router עוד לא רץ.
+
+    לא נוגע ב-_pending_approvals או ActionGateway contracts — Tier 1
+    (_propose_lead_write) ממשיך לעבוד בדיוק כפי שהוא, ללא שינוי.
+    אין תמיכה ב-selection חלקי ("כן 1") — רק אישור/ביטול מלא לכל ה-batch.
+
+    Precedence מול Tier 1 (BUG-058 caveat שנפתר): app.py קורא לפונקציה הזו
+    רק *אחרי* שנבדק שאין contract ActionGateway חי לאותו chat_id (אותו
+    gate שכבר קיים לשני ה-elif של _CONFIRM_WORDS/_CANCEL_WORDS, BUG-056
+    precedent) — כלומר Tier 1 מנצח תמיד כששני המנגנונים חיים בו-זמנית.
+    הפונקציה הזו לא בודקת בעצמה — ההכרעה ברמת ה-caller ב-app.py.
+    """
+    if not (is_confirm or is_cancel):
+        return None
+
+    try:
+        from session_store import lead_sessions as _ls
+    except Exception:
+        return None
+
+    preview = _ls.get_pending_lead_preview(chat_id)
+    if preview is None:
+        return None  # אין preview ממתין, או שפג תוקפו ונוקה בשקט
+
+    if is_cancel:
+        _ls.clear_pending_lead_preview(chat_id)
+        return "ביטלתי את רשימת הלידים הממתינה."
+
+    # is_confirm
+    candidates = preview.get("candidates") or []
+    raw_text   = preview.get("raw_text", "")
+    channel    = preview.get("channel", "telegram")
+    domain     = preview.get("domain", "general")
+    _ls.clear_pending_lead_preview(chat_id)
+
+    if not candidates:
+        return "לא נמצאו לידים לשמירה — כנראה שהרשימה כבר טופלה."
+
+    return _handle_batch(identity, raw_text, chat_id, channel, domain, candidates)
 
 
 # ══════════════════════════════════════════════════

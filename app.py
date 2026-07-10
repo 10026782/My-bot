@@ -1586,6 +1586,24 @@ def run_agent(
                 if _out_meta is not None:
                     _out_meta["source_module"] = "action_gateway"
                 return _gw_reply
+
+            # BUG-058: no live Tier-1 ActionGateway contract — check the
+            # Tier-2 batch lead-preview next (core/lead_candidate_handler.py's
+            # _handle_clean_batch). Tier-1 always wins when both exist
+            # simultaneously for the same chat_id (BUG-056 precedent, same
+            # ordering as above) — this check runs only after Tier-1 found
+            # nothing. Not gated by FEATURE_ACTION_GATEWAY — separate mechanism.
+            from core.lead_candidate_handler import resolve_pending_lead_preview as _resolve_t2
+            _t2_reply = _resolve_t2(identity, chat_id, is_confirm=True, is_cancel=False)
+            if _t2_reply is not None:
+                logger.info(
+                    "[LCH] resolve_pending_lead_preview(confirm): user=%s reply=%.60s",
+                    identity.memory_key, _t2_reply,
+                )
+                if _out_meta is not None:
+                    _out_meta["source_module"] = "action_gateway"
+                return _t2_reply
+
             from feature_flags import is_enabled as _flag_cw
             if _flag_cw("FEATURE_ACTION_GATEWAY"):
                 # Stage B: Gateway הוא מקור האמת לאישור (אין contract חי -> "אין פעולה...")
@@ -1631,6 +1649,20 @@ def run_agent(
                 if _out_meta is not None:
                     _out_meta["source_module"] = "action_gateway"
                 return _cancel_reply
+
+            # BUG-058: no live Tier-1 contract was cancelled (route_cancellation_word
+            # returned None) — check the Tier-2 batch lead-preview next. Same
+            # Tier-1-wins precedence as the _CONFIRM_WORDS branch above.
+            from core.lead_candidate_handler import resolve_pending_lead_preview as _resolve_t2_cancel
+            _t2_cancel_reply = _resolve_t2_cancel(identity, chat_id, is_confirm=False, is_cancel=True)
+            if _t2_cancel_reply is not None:
+                logger.info(
+                    "[LCH] resolve_pending_lead_preview(cancel): user=%s reply=%.60s",
+                    identity.memory_key, _t2_cancel_reply,
+                )
+                if _out_meta is not None:
+                    _out_meta["source_module"] = "action_gateway"
+                return _t2_cancel_reply
 
     # ── 2.6. Context Pronoun Resolution (C60) ────────
     # "תעלה לדסישנס"/"זה הנספח" וכד' — לפני intent detection, כדי שה-Router

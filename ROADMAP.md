@@ -1,6 +1,7 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 09/07/2026 — N15 נפתח (Restricted-flow `notify_owner` — שדה נקבע אך לעולם לא נצרך, אין
+עודכן: 10/07/2026 — BUG-058 סגור במלואו: Tier-2 batch-confirm resolver נבנה (`session_store.py`'s `set/get/clear_pending_lead_preview()`, `core/lead_candidate_handler.py`'s `resolve_pending_lead_preview()`), מחווט ב-`app.py` section 2.55. Precedence-decision שנדרש לפני בנייה (ראה 03/07 למטה) הוכרע: Tier-1 ActionGateway מנצח תמיד Tier-2 כששני המנגנונים חיים בו-זמנית לאותו chat_id — אותו precedent שכבר קיים ב-BUG-056 ("check ActionGateway live contracts FIRST"), לא הכרעה חדשה משורש. `test_tier2_silent_preview.py` נכתב מחדש (9/9). אפס רגרסיה. ראה BUG_AUDIT_LOG.md BUG-058.
+עודכן קודם: 09/07/2026 — N15 נפתח (Restricted-flow `notify_owner` — שדה נקבע אך לעולם לא נצרך, אין
 מנגנון התראה אמיתי לבעלים; התגלה תוך כדי תיקון claim-without-evidence כוזב באותו איזור —
 `_SINGLE_SPEAKER_FALLBACK` (PR #280) ו-`app.py`'s Restricted tool loop). שני הניסוחים הכוזבים
 תוקנו מיידית; ה-N15 עצמו (החלטה: לבנות התראה אמיתית או להסיר את השדה) עדיין PLANNED, לא מומש.
