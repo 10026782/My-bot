@@ -256,13 +256,38 @@ def parse_batch_dictation(text: str) -> list[dict]:
     אחרת מחזיר רשימה ריקה (→ fallback ל-parse_lead_dictation).
 
     בלוק = שם עברי + טלפון בקרבה (עד 60 תווים לפני/אחרי, לא חוצה למספר
-    הטלפון השכן — ראה BUG-094).
+    הטלפון השכן — ראה BUG-094). מ-BUG-095: הטקסט מפוצל קודם ל-_BLOCK_SEP
+    (שורה חדשה שמתחילה באות עברית / bullet / מספור / שורה ריקה) — כל בלוק
+    מעובד בנפרד לגמרי, כדי שטלפון פגום/לא-ניתן-לזיהוי בבלוק אחד לא "יבלע"
+    לתוך החלון של הבלוק הבא (ראה תיעוד `_extract_batch_candidates_from_block`
+    ו-BUG-095 ב-BUG_AUDIT_LOG.md).
     """
-    # אסטרטגיה: מצא את כל מספרי הטלפון, ולכל אחד חפש שם עברי בסביבתו
     candidates: list[dict] = []
     seen_phones: set[str] = set()
 
-    phone_matches = list(_PHONE_RE.finditer(text))
+    for block in _BLOCK_SEP.split(text):
+        if not block.strip():
+            continue
+        _extract_batch_candidates_from_block(block, candidates, seen_phones)
+
+    # החזר רק אם ≥2 בלוקים שונים
+    if len(candidates) >= 2:
+        return candidates
+    return []
+
+
+def _extract_batch_candidates_from_block(
+    block: str, candidates: list[dict], seen_phones: set[str],
+) -> None:
+    """
+    מחלץ candidates מתוך בלוק בודד (כבר מפוצל ע"י _BLOCK_SEP) ומוסיף ל-candidates.
+
+    בתוך בלוק בודד יכולים עדיין להיות כמה זוגות שם+טלפון (למשל שורה אחת עם
+    כמה לידים מופרדים בפסיקים) — לכן עדיין נדרש אותו windowing per-phone
+    (BUG-094): החלון מוגבל גם לגבולות הטלפון השכן *בתוך הבלוק הזה בלבד*,
+    לא חוצה בין בלוקים (ראה BUG-095) ולא רק ל-±60 תווים קבוע.
+    """
+    phone_matches = list(_PHONE_RE.finditer(block))
     for i, phone_match in enumerate(phone_matches):
         raw_phone = re.sub(r"[\s\-]", "", phone_match.group())
         if raw_phone.startswith("+972"):
@@ -274,20 +299,11 @@ def parse_batch_dictation(text: str) -> list[dict]:
             continue
         seen_phones.add(raw_phone)
 
-        # חלון טקסט סביב הטלפון — BUG-094: מוגבל גם לגבולות הטלפון השכן
-        # (הקודם/הבא), לא רק ל-±60 תווים קבוע. בלי זה, כששני בלוקי-ליד
-        # קרובים (פחות מ-120 תווים משולבים ביניהם — המקרה הנפוץ בהכתבת
-        # רשימה קצרה), החלון של המועמד השני "דלף" אחורה וכלל גם את השם
-        # של המועמד הראשון; _extract_name() תמיד מחזיר את ההתאמה הראשונה
-        # בחלון (לא את הקרובה ביותר לטלפון) — כך ששני המועמדים קיבלו את
-        # אותו שם, ואז _at_find_lead() (SEARCH-by-name fallback) "מצא" את
-        # הרשומה שנוצרה זה עתה לליד הראשון וכתב "עדכון" על גביה במקום
-        # ליצור רשומה שנייה.
         prev_end   = phone_matches[i - 1].end() if i > 0 else 0
-        next_start = phone_matches[i + 1].start() if i + 1 < len(phone_matches) else len(text)
+        next_start = phone_matches[i + 1].start() if i + 1 < len(phone_matches) else len(block)
         start  = max(0, phone_match.start() - 60, prev_end)
-        end    = min(len(text), phone_match.end() + 60, next_start)
-        window = text[start:end]
+        end    = min(len(block), phone_match.end() + 60, next_start)
+        window = block[start:end]
 
         name = _extract_name(window)
         if not name:
@@ -295,11 +311,6 @@ def parse_batch_dictation(text: str) -> list[dict]:
 
         context = _extract_context_keywords(window, name, raw_phone)
         candidates.append({"name": name, "phone": raw_phone, "context": context})
-
-    # החזר רק אם ≥2 בלוקים שונים
-    if len(candidates) >= 2:
-        return candidates
-    return []
 
 
 # ══════════════════════════════════════════════════

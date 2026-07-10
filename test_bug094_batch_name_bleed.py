@@ -21,6 +21,16 @@
 # match's position (previous phone's end / next phone's start), not just a
 # fixed ±60 radius — so one candidate's window can no longer include another
 # candidate's name at all.
+#
+# BUG-095 (BATCH-MALFORMED-PHONE-BLOCK-BLEED) is also covered in this file
+# (see below) — a related but distinct follow-up found in a live post-merge
+# production test of the BUG-094 fix above: the neighbor-phone clip only
+# works when every candidate's phone is recognized by _PHONE_RE. A malformed
+# phone number in the middle of a batch (no recognized boundary to clip
+# against) still let that block bleed into the next candidate's window.
+# Fixed by splitting on _BLOCK_SEP (previously unused) before any per-phone
+# windowing, so block boundaries — not just phone positions — bound each
+# candidate's window.
 
 import os, sys
 os.environ.setdefault("ANTHROPIC_API_KEY", "sk-test")
@@ -106,6 +116,46 @@ chk("regression: candidate 2 correct", len(result4) == 2 and result4[1]["name"] 
 from core.lead_candidate_handler import parse_lead_dictation
 single = parse_lead_dictation("שמו יוסי כהן 0501234567")
 chk("regression: single-lead parse still works", single is not None and single["name"] == "יוסי כהן")
+
+
+# ══════════════════════════════════════════════════
+# BUG-095 (BATCH-MALFORMED-PHONE-BLOCK-BLEED) — BUG-094's neighbor-phone
+# window clip only works when EVERY candidate's phone is recognized by
+# _PHONE_RE. Observed live in production (10/07/2026, post BUG-094 merge):
+# "אבי אבן 0543546354 ...\nמשה אבני 05647389 ...\nשמואל גרין 0368028368 ..."
+# — the middle phone (05647389) is malformed (8 digits, missing one), so
+# _PHONE_RE never matches it at all. With no recognized phone to clip
+# against, משה אבני's entire block "bled" into candidate 2's window,
+# producing a garbled name ("חדרים משה אבני" — leftover words crossing a
+# newline) attached to שמואל גרין's phone. Both real identities were lost.
+#
+# Fix: parse_batch_dictation() now splits the text into blocks via the
+# (previously unused/dead) _BLOCK_SEP regex BEFORE any phone/name
+# extraction — each block is parsed independently, so a block with no
+# recognized phone can no longer bleed into a neighboring block's window
+# at all (block boundaries, not phone positions, are now the hard limit).
+# ══════════════════════════════════════════════════
+print("\n── BUG-095: malformed phone in the middle no longer corrupts a neighbor ──")
+PROD_REPRO = (
+    "אבי אבן 0543546354 מעוניין ב3 חדרים\n"
+    "משה אבני 05647389 מעוניין ב4 חדרים\n"
+    "שמואל גרין 0368028368 מעוניין ב5 חדרים"
+)
+
+result5 = parse_batch_dictation(PROD_REPRO)
+chk("BUG-095: exactly 2 candidates extracted (malformed-phone block dropped, not merged)",
+    len(result5) == 2)
+if len(result5) == 2:
+    chk("BUG-095: candidate 1 is אבי אבן with his own phone",
+        result5[0]["name"] == "אבי אבן" and result5[0]["phone"] == "0543546354")
+    chk("BUG-095: candidate 2 is שמואל גרין (not garbled with משה אבני's leftovers)",
+        result5[1]["name"] == "שמואל גרין")
+    chk("BUG-095: candidate 2 keeps HIS OWN phone, not misattributed",
+        result5[1]["phone"] == "0368028368")
+    chk("BUG-095: 'משה אבני' (malformed-phone block) does not appear as any candidate's name",
+        all("משה אבני" not in c["name"] for c in result5))
+    chk("BUG-095: no leftover context word ('חדרים') leaked into a name",
+        all("חדרים" not in c["name"] for c in result5))
 
 
 # ══════════════════════════════════════════════════
