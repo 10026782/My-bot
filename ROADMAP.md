@@ -1,6 +1,17 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 10/07/2026 — BUG-094 (BATCH-NAME-WINDOW-BLEED) נסגר: בדיקה חיה בפרודקשן של BUG-058's resolver (למטה) חשפה 3 באגים נפרדים ב-upstream — (1) `parse_batch_dictation()`'s חלון ±60 תווים "דלף" שם של מועמד קודם למועמד הבא כששני בלוקי-ליד קרובים; (2) `_at_find_lead()` נפל בעיוור ל-name-only match בלי לוודא phone, מה שהפך את (1) ל"שתי כתיבות לאותה רשומה" בפועל; (3) `RouterDomain.CRM`/`INTERNAL` (דומייני-מטא של ה-Router, לא ורטיקלים עסקיים) זלגו ל-`Leads`/`Lead Events`' Domain field, גרמו ל-422 על Lead Events. שלושתם תוקנו (`_lead_domain_key()` חדש מטפל ב-(3)). `test_bug094_batch_name_bleed.py` (חדש, 25/25). ראה BUG_AUDIT_LOG.md BUG-094 + עדכון BUG-058.
+עודכן: 10/07/2026 — PR4 (Airtable Schema Refresh — docs cleanup) הושלם, סוגר את יוזמת PR3A/3B/3C/
+PR2/PR_RESPONSE_CONTRACT (כל 5 ה-PRs הקודמים כבר ממוזגים ל-`main`). נוסף `docs/governance/
+AIRTABLE_SCHEMA_GOVERNANCE.md` (source-of-truth vs. seed vs. runtime provider vs. snapshot archive,
+מה כל PR מכסה, למה response-contract היא משפחת באג נפרדת). `CLAUDE.md`'s module list עודכן עם
+`core/runtime_schema_provider.py`/`tools/schema_snapshot.py`/`tools/check_airtable_schema_runtime.py`.
+באותו סבב: BUG-018/020/021 נסגרו (doc drift — הקוד כבר תוקן, לא היה מתועד), BUG-019 3/5 תת-בעיות
+נסגרו + 1/5 חלקית (Deals ADDRESS/FUNDING_COST/ROI תוקנו ב-commit `9b51537` ישיר של המשתמש,
+RISK_LEVEL/NOTES עדיין לא אומתו) + 1/5 פתוחה (Payments contact_id/notes — silent data loss, לא
+crash), ו-3 מחלקות קוד מת (`ImportsFields`/`TenantsFields`/`DailyTaskFields`) נמחקו מ-
+`airtable_schema.py` (0 שימושים, מאומת מחדש לפני מחיקה). `schema_cache.json` (seed מטעה) נשאר
+במכוון — הוא ה-fallback הפעיל של BUG-021, לא קוד מת. ראה BUG_AUDIT_LOG.md לפירוט מלא.
+עודכן קודם: 10/07/2026 — BUG-094 (BATCH-NAME-WINDOW-BLEED) נסגר: בדיקה חיה בפרודקשן של BUG-058's resolver (למטה) חשפה 3 באגים נפרדים ב-upstream — (1) `parse_batch_dictation()`'s חלון ±60 תווים "דלף" שם של מועמד קודם למועמד הבא כששני בלוקי-ליד קרובים; (2) `_at_find_lead()` נפל בעיוור ל-name-only match בלי לוודא phone, מה שהפך את (1) ל"שתי כתיבות לאותה רשומה" בפועל; (3) `RouterDomain.CRM`/`INTERNAL` (דומייני-מטא של ה-Router, לא ורטיקלים עסקיים) זלגו ל-`Leads`/`Lead Events`' Domain field, גרמו ל-422 על Lead Events. שלושתם תוקנו (`_lead_domain_key()` חדש מטפל ב-(3)). `test_bug094_batch_name_bleed.py` (חדש, 25/25). ראה BUG_AUDIT_LOG.md BUG-094 + עדכון BUG-058.
 עודכן קודם: 10/07/2026 — BUG-058 סגור במלואו: Tier-2 batch-confirm resolver נבנה (`session_store.py`'s `set/get/clear_pending_lead_preview()`, `core/lead_candidate_handler.py`'s `resolve_pending_lead_preview()`), מחווט ב-`app.py` section 2.55. Precedence-decision שנדרש לפני בנייה (ראה 03/07 למטה) הוכרע: Tier-1 ActionGateway מנצח תמיד Tier-2 כששני המנגנונים חיים בו-זמנית לאותו chat_id — אותו precedent שכבר קיים ב-BUG-056 ("check ActionGateway live contracts FIRST"), לא הכרעה חדשה משורש. `test_tier2_silent_preview.py` נכתב מחדש (9/9). אפס רגרסיה. ראה BUG_AUDIT_LOG.md BUG-058.
 עודכן קודם: 09/07/2026 — N15 נפתח (Restricted-flow `notify_owner` — שדה נקבע אך לעולם לא נצרך, אין
 מנגנון התראה אמיתי לבעלים; התגלה תוך כדי תיקון claim-without-evidence כוזב באותו איזור —
