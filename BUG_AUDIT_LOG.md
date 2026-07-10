@@ -386,15 +386,14 @@
 - **Production smoke 09/07/2026:** ליד חדש שנוצר היום לא נשמר בשם "ליד חדש" הליטרלי — `Name='מתעניין במיטות עץ'`, `record=recZBwXryhG7QfgCd`. **תומך בתיקון, אך לא סוגר סופית:** הבדיקה הייתה דרך owner dictation/Telegram, לא flow חיצוני נקי של ליד אמיתי חדש (מספר טלפון חדש שמעולם לא נראה במערכת). **סטטוס: partially verified — לא לסגור כ-Verified מלא עד בדיקה ממספר חיצוני חדש לגמרי.**
 - **סטטוס:** 🟡 MERGED TO MAIN (`ca1f5a0`) — 🟡 Partially Verified 09/07/2026 (smoke test דרך owner dictation) — עדיין ממתין לאימות מלא עם ליד **טרי ממספר חיצוני חדש לגמרי**.
 
-### FLAGGED (cleanup candidates, not bugs) — קוד מת ב-airtable_schema.py / קובץ cache מטעה
+### FLAGGED (cleanup candidates, not bugs) — קוד מת ב-airtable_schema.py / קובץ cache מטעה — 3/4 נמחקו 10/07/2026
 - **דווח:** 24/06/2026 — באותו אודיט כמו BUG-020
 - **תיאור:** אומת ב-`grep` (0 שימושים מעבר להגדרה עצמה):
-  - `class ImportsFields` + `Tables.IMPORTS` — הטבלה "Imports" לא קיימת ב-Airtable החי, ואין קובץ אחר שמשתמש בקבועים האלה. בטוח למחיקה מלאה.
-  - `class TenantsFields` + `Tables.TENANTS` — הטבלה "Tenants" לא קיימת חי; `tenant_provisioner.py` (F08) לא מייבא מ-`airtable_schema` בכלל, אז אין תלות. בטוח למחיקה מלאה.
-  - `class DailyTaskFields` + `class DailyTaskStatus` + `Tables.DAILY_TASKS` — הטבלה "Daily_Tasks" לא קיימת חי (`Daily_Checkin` היא הטבלה החיה הנפרדת בשימוש בפועל). תלות אחת: `tma_api.py:27` מייבא `DailyTaskFields, DailyTaskStatus` בלי להשתמש בהם בשום מקום אחר — import מת. מחיקה דורשת גם הסרת שני השמות האלה משורת ה-import ב-`tma_api.py:27`.
-  - `schema_cache.json` (root) — מכיל `"fetched_at": "seed-from-schema-py"`, כלומר זה לא snapshot אמיתי מ-Airtable אלא seed שנוצר מתוך הקוד עצמו, ומכיל רק 15 מתוך כל הטבלאות החיות. מטעה כל הרצה של `schema_audit.py --offline`. אפשר למחוק (יחודש בהרצה חיה תקינה) או לרענן עם credentials אמיתיים.
-- **למה לא נמחק:** ממתין לאישור מפורש של המשתמש למחיקה (לא בוצעה מחיקה יזומה ללא בקשה).
-- **סטטוס:** Open — ממתין להחלטה
+  - **✅ נמחק (10/07/2026)** — `class ImportsFields` + `Tables.IMPORTS` — הטבלה "Imports" לא קיימת ב-Airtable החי, ואין קובץ אחר שמשתמש בקבועים האלה.
+  - **✅ נמחק (10/07/2026)** — `class TenantsFields` + `Tables.TENANTS` — הטבלה "Tenants" לא קיימת חי; `tenant_provisioner.py` (F08) לא מייבא מ-`airtable_schema` בכלל, אין תלות.
+  - **✅ נמחק (10/07/2026)** — `class DailyTaskFields` + `class DailyTaskStatus` + `Tables.DAILY_TASKS` — הטבלה "Daily_Tasks" לא קיימת חי. `tma_api.py:27` **כבר לא** מייבא `DailyTaskFields`/`DailyTaskStatus` (נוקה מוקדם יותר, בנפרד מהמחיקה הזו — grep מאשר 0 שימוש לפני המחיקה). re-grep אחרי המחיקה: `grep -rn "ImportsFields\|TenantsFields\|DailyTaskFields\|DailyTaskStatus\|Tables\.IMPORTS\b\|Tables\.TENANTS\b\|Tables\.DAILY_TASKS\b" --include="*.py" .` → 0 hits. `python3 -m py_compile airtable_schema.py` עבר; `smoke_tests.py`/`test_integration.py` — כולם ירוקים, אפס רגרסיה.
+  - **🟡 עדיין פתוח, לא נגעתי** — `schema_cache.json` (root) — מכיל `"fetched_at": "seed-from-schema-py"`, כלומר לא snapshot אמיתי מ-Airtable אלא seed שנוצר מתוך הקוד עצמו. **לא נמחק בסבב הזה** — בניגוד לשלוש המחלקות למעלה (0 תלות אמיתית), הקובץ הזה הוא ה-fallback הפעיל בפועל של `schema_audit.py`'s except branch (BUG-021, כבר מאומת שעובד נכון) — מחיקתו תסיר את רשת הביטחון הזו (גם אם באופן fail-safe: `except FileNotFoundError` קיים ומחזיר `False` בלי קריסה). דורש החלטה נפרדת: למחוק / לרענן עם credentials אמיתיים / להשאיר כפי שהוא.
+- **סטטוס:** 🟡 3/4 נסגרו (המחלקות המתות נמחקו). `schema_cache.json` נשאר Open — ממתין להחלטה נפרדת.
 
 ---
 

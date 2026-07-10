@@ -51,14 +51,10 @@ class Tables:
     # זיכרון עסקי
     BUSINESS_MEMORY  = "Business Memory"   # אירועים אסטרטגיים — הזנה ידנית
     INTERACTION_LOG  = "Interaction Log"   # לוג אוטומטי — agent/system interactions
-    # שמורים לשימוש פנימי — מאומת ב-Airtable MCP 2026-06-24: שתי הטבלאות לא קיימות ב-base החי כלל
-    IMPORTS         = "Imports"
-    TENANTS         = "Tenants"
     # Game / Gamification
     WORLDS          = "Worlds"
     QUESTS          = "Quests"
     COINS_LOG       = "Coins_Log"
-    DAILY_TASKS     = "Daily_Tasks"   # DEAD CODE — לא קיימת ב-Airtable החי (מאומת 2026-06-24); ראה DailyTaskFields
     DAILY_CHECKIN   = "Daily_Checkin"
     # Roadmap
     ROADMAP_TASKS   = "Roadmap_Tasks"
@@ -411,42 +407,6 @@ class ProfileFields:
     """
     NAME            = "name"          # always "main" — single profile row. Live field is lowercase.
     PROFILE_DATA    = "ProfileData"   # NOT YET CREATED LIVE — must be added to Airtable before profile.py can be wired in
-
-
-class ImportsFields:
-    """Import shipment records — table: Tables.IMPORTS.
-    Not yet wired to any live read/write path (see registry_calibration_report.md
-    — table is currently UNUSED). Confirmed via Airtable MCP 2026-06-24: this table
-    does not exist in the live base at all — fields below are aspirational only.
-    """
-    NAME            = "Name"
-    SUPPLIER        = "Supplier"
-    STATUS          = "Status"        # Pending | In Transit | Customs | Delivered | Cancelled
-    ORDER_DATE      = "Order Date"
-    ETA             = "ETA"
-    TOTAL_COST      = "Total Cost"
-    ADVANCE_PCT     = "Advance %"
-    BALANCE_PCT     = "Balance %"
-    NOTES           = "Notes"
-
-
-class TenantsFields:
-    """Multi-tenant registry — table: Tables.TENANTS.
-    Mirrors tenant_provisioner._save_tenant_to_airtable()'s actual field dict.
-    Confirmed via Airtable MCP 2026-06-24: this table does not exist in the live
-    base — consistent with F08/MULTITENANT being code-complete but unwired.
-    """
-    TENANT_ID       = "tenant_id"
-    NAME            = "Name"
-    TEMPLATE        = "template"
-    OWNER_NAME      = "owner_name"
-    OWNER_PHONE     = "owner_phone"
-    PLAN            = "plan"
-    STATUS          = "status"
-    CREATED_AT      = "created_at"
-    AIRTABLE_BASE   = "airtable_base"
-    DOMAINS         = "domains"
-    FEATURES        = "features"
 
 
 class WorldsFields:
@@ -1174,25 +1134,6 @@ class DecisionInboxStatus:
     PENDING   = "Pending"
     LINKED    = "Linked"
     REJECTED  = "Rejected"
-
-
-class DailyTaskFields:
-    """DEAD CODE — Tables.DAILY_TASKS ("Daily_Tasks") does not exist in the live
-    Airtable base (confirmed via Airtable MCP 2026-06-24). Imported but unused in
-    tma_api.py (DailyCheckinFields/Tables.DAILY_CHECKIN is the live equivalent
-    actually in use). Do not wire this in without creating the table first.
-    """
-    DATE   = "Date"
-    TASK   = "Task"
-    QUEST  = "Quest"    # linked record → Quests
-    COINS  = "Coins"
-    STATUS = "Status"   # Todo | Done | Skipped
-    WHO    = "Who"      # אליהו | קלוד קוד | אורי
-
-class DailyTaskStatus:
-    TODO    = "Todo"
-    DONE    = "Done"
-    SKIPPED = "Skipped"
 
 
 class TrafficSourcesFields:
