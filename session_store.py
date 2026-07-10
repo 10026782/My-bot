@@ -275,6 +275,52 @@ class PersistentSessionStore:
             return None
         return cand
 
+    def set_pending_lead_preview(
+        self, sender: str, candidates: list[dict], raw_text: str,
+        channel: str, domain: str,
+    ) -> None:
+        """שומר preview של batch (Tier 2) עם TTL 30 דקות — BUG-058 resolver.
+        channel/domain נשמרים כאן כי ב-app.py section 2.55 (נקודת ה-resolve)
+        ה-Router עוד לא רץ — אין resolved_route_domain זמין שם. נשמרים בזמן
+        הכתיבה (_handle_clean_batch כבר מקבל את שניהם), לא מבוקשים מחדש."""
+        import time as _time
+        session = self.get_or_create(sender)
+        session["pending_lead_preview"] = {
+            "candidates": candidates,
+            "raw_text":   raw_text,
+            "channel":    channel,
+            "domain":     domain,
+            "set_at":     _time.time(),
+        }
+        session["updated_at"] = _now_iso()
+        self._sync_to_db(sender, session)
+
+    def get_pending_lead_preview(self, sender: str) -> Optional[dict]:
+        """מחזיר pending_lead_preview אם לא פג תוקפו (>1800 שניות), אחרת None.
+        בניגוד ל-get_active_lead_candidate(): קורא ל-_sync_to_db() גם אחרי ניקוי
+        expired state — preview עם לידים לא-נכתבים לא אמור להישאר רפאים ב-DB."""
+        import time as _time
+        session = self.get(sender)
+        if not session:
+            return None
+        preview = session.get("pending_lead_preview")
+        if not preview:
+            return None
+        if _time.time() - preview.get("set_at", 0) > 1800:
+            session["pending_lead_preview"] = None
+            self._sync_to_db(sender, session)
+            return None
+        return preview
+
+    def clear_pending_lead_preview(self, sender: str) -> None:
+        """מנקה pending_lead_preview אחרי אישור/ביטול/מימוש."""
+        session = self.get(sender)
+        if not session:
+            return
+        session["pending_lead_preview"] = None
+        session["updated_at"] = _now_iso()
+        self._sync_to_db(sender, session)
+
     def delete(self, sender: str) -> None:
         """מוחק session (איפוס)."""
         sender = _normalize_sender(sender)
