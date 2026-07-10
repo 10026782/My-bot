@@ -249,7 +249,7 @@
 - **Verified בפרודקשן:** לא
 - **Verification ראיה:** `py_compile session_store.py` עבר; `python3 session_store.py` self-test 18/20 עברו (2 כשלים קיימים מראש, mock-import-path bug בלתי תלוי בתיקון זה — `sys.modules["airtable_tools"]` ממוקֶה בעוד הקוד האמיתי עושה `from tools.airtable_tools import ...`); בדיקה ידנית נוספת עם mock נכון על `tools.airtable_tools` אישרה את הלוגיקה המתוקנת.
 - **סטטוס:** 🟡 MERGED TO MAIN (PR #147, `483851f`) — ממתין לאימות פרודקשן
-### BUG-020 — airtable_schema.py: כמה קבועי טבלה/שדה לא תאמו ל-base החי (מומש חלקית, לא אומת)
+### BUG-020 — airtable_schema.py: כמה קבועי טבלה/שדה לא תאמו ל-base החי — ✅ מוזג ל-main (סטטוס עודכן 10/07/2026, doc drift שתוקן)
 - **דווח:** 24/06/2026 — אודיט ידני מול "בסיס עיקרי" (`app4bcgoX7t0HUVnm`) דרך Airtable MCP (`list_tables_for_base`), אחרי שהתברר ש-`schema_cache.json` הקיים הוא seed שנוצר מהקוד עצמו ולא snapshot אמיתי מ-Airtable (ראה BUG-021).
 - **דווח על ידי:** המשתמש
 - **מסך / מודול:** `airtable_schema.py`
@@ -258,11 +258,12 @@
 - **Root Cause:** `airtable_schema.py` תיעד כוונה/תכנון שלא עודכן אחרי שהטבלאות נבנו/שונו בפועל ב-Airtable.
 - **שינוי שבוצע:** עודכן ישירות ב-`airtable_schema.py` (ללא commit בזמן התיעוד המקורי): שם `Tables.LEARNINGS` עודכן; `AssetsFields` הוחלף לחלוטין לשדות האמיתיים; `ProfileFields.NAME` עודכן ל-`"name"` + הערה ש-`PROFILE_DATA` עדיין לא קיים חי; `Tables.IMPORTS`/`Tables.TENANTS`/`Tables.DAILY_TASKS`/`DailyTaskFields`/`DailyTaskStatus` סומנו במפורש כ-DEAD CODE (בדומה לסימון F13); נוסף `class TrafficSourcesFields` לתיעוד הטבלה החדשה.
 - **תועד ב-commit:** commit הענף שמוסיף את BUG-020 ואת עדכון `airtable_schema.py`
-- **Merged:** לא
-- **Deployed:** לא
-- **Verified בפרודקשן:** לא — `py_compile airtable_schema.py` ו-`smoke_tests.py` (6/6 PASS) הורצו מקומית בלבד
-- **Verification ראיה:** השוואה ישירה ל-`list_tables_for_base`/`get_table_schema` החי דרך Airtable MCP, 24/06/2026; `py_compile` עבר; `smoke_tests.py` 6/6 PASS
-- **סטטוס:** 🟡 Implemented but not yet verified — ממתין ל-merge + אימות
+- **עדכון סטטוס (10/07/2026):** התיקון עצמו **כבר ממוזג בפועל** — הרשומה הזו פשוט לא עודכנה כשזה קרה (doc drift, לא באג בקוד). מאומת ישירות מול `origin/main` עכשיו: `Tables.LEARNINGS = "למידות ותובנות (Learnings & Insights)"` (airtable_schema.py:50), `Tables.TRAFFIC_SOURCES = "TRAFFIC_SOURCES"` (airtable_schema.py:86) — שניהם קיימים בפועל. מתגלה לראשונה דרך merge ענק PR #193 (`97ebe3e`) — אותה תבנית בדיוק כמו BUG-093 (LL-13): commit ספציפי לא ניתן לאיתור מדויק כי הוא הגיע בתוך מיזוג גדול, לא PR ממוקד.
+- **Merged:** ✅ כן — קיים ב-`origin/main` (מאומת `git show origin/main:airtable_schema.py`), מקור מדויק (PR/commit) לא ניתן לאיתור מעבר ל-PR #193's merge.
+- **Deployed:** לא ידוע — לא אומת מול Render.
+- **Verified בפרודקשן:** לא — אימות הקוד עצמו (השמות/הקבועים) בוצע, אבל לא אומת שהתנהגות חיה (כתיבה/קריאה בפועל דרך הקבועים המתוקנים) נבדקה בפרודקשן.
+- **Verification ראיה:** השוואה ישירה ל-`list_tables_for_base`/`get_table_schema` החי דרך Airtable MCP, 24/06/2026 (המקור); `git show origin/main:airtable_schema.py` מאשר את הקבועים בקוד היום (10/07/2026).
+- **סטטוס:** ✅ ממוזג ל-main — לא מאומת בפרודקשן (behavioral, לא code-existence).
 
 ### BUG-017 — inbound_handler.py כותב ל-LeadFields.UPDATED_AT שלא קיים ב-Leads החי — ✅ VERIFIED / CLOSED 09/07/2026
 - **דווח:** 24/06/2026 — באותו אודיט כמו BUG-020
@@ -296,11 +297,11 @@
 - **תוקן:** כן — תוקן בצד Airtable schema, לא בקוד. לטבלת `"משימות (Tasks)"` נוסף/קיים כעת שדה linked-record בשם `"Leads"` שתואם ל-`TaskFields.LEAD_LINK`.
 - **Merged:** N/A — אין שינוי קוד; הקוד הקיים היה נכון ביחס ל-schema הרצוי.
 - **Deployed:** N/A — שינוי Airtable schema, לא deploy אפליקטיבי.
-- **Verified בפרודקשן:** ✅ כן — 10/07/2026.
-- **Verification ראיה:** production smoke: `POST משימות (Tasks) → 200 OK`, נוצר record `recbpQzwrmZdxIaDf`, keys כוללים `Domain` + `Leads`; `/api/leads/.../task` הצליח; `Interaction Log → 200 OK`.
+- **Verified בפרודקשן:** ✅ כן — 10/07/2026 — **ראיה קשיחה**, לא רק דיווח: POST אמיתי ל-"משימות (Tasks)" החזיר `200 OK`, `record=recbpQzwrmZdxIaDf`, עם שדות `Domain`+`Leads` שניהם נכתבו בהצלחה. `/api/leads/.../task` הצליח קצה-לקצה; `Interaction Log` → `200 OK`.
+- **Verification ראיה:** production smoke אמיתי — `record=recbpQzwrmZdxIaDf`, `200 OK`, שדות `Domain`/`Leads` תקינים.
 - **סטטוס:** ✅ CLOSED / PROD VERIFIED.
 
-### BUG-019 — crm.py: כמה פונקציות כותבות/מסננות לפי שדות ש-Contacts/Deals/Payments החיים לא מכילים
+### BUG-019 — crm.py: כמה פונקציות כותבות/מסננות לפי שדות ש-Contacts/Deals/Payments החיים לא מכילים — ✅ CLOSED (10/07/2026)
 - **דווח:** 24/06/2026 — באותו אודיט כמו BUG-020
 - **דווח על ידי:** המשתמש
 - **מסך / מודול:** `crm.py` — בשימוש בפועל ע"י `scheduler.py`, `payment_reminder.py`, `lead_conversion.py`, `tools/contact_resolver.py`, ו-`tools/dispatcher.py` (`crm_mark_payment_paid`)
@@ -312,27 +313,32 @@
   - **(e) `crm_upcoming_payments` + `crm_overdue_payments`** (שורות ~311-380): ה-formula משתמש ב-`{סטטוס}`/`{תאריך}` (עברית) על טבלת Payments, אבל השדות החיים הם `status`/`date` (אנגלית) — תוצאה ריקה לתמיד, בלי שגיאה (תזכורות תשלום שלא שולחות כלום).
 - **Severity:** High — פוגע בפונקציונליות CRM ליבתית (חיפוש אנשי קשר, יצירת עסקאות, תזכורות תשלום) שבשימוש בפועל.
 - **Root Cause:** `crm.py` נכתב מול גרסה ישנה/אנגלית של הסכמה ולא עודכן אחרי שהטבלאות "אנשי קשר (Contacts)"/"עסקאות (Deals)" עברו ל-Hebrew naming ו-Payments צומצם לשדות הנוכחיים.
-- **עדכון 10/07/2026:** re-check מול CSV/live schema: Contacts ו-Payments תואמים לקוד הנוכחי; drift מאושר רק ב-Deals.
-- **תוקן:** כן — `DealFields.ADDRESS`/`FUNDING_COST`/`ROI` עודכנו לשמות Airtable-generated החיים: `"Adress"`, `"Funding Cost"`, `"Roi"`. לא בוצע שינוי Airtable, לא בוצע rename, ולא נגעו ב-`crm.py`, Contacts או Payments.
-- **Merged:** לא עדיין — שינוי קוד מקומי בסבב זה.
-- **Deployed:** לא.
-- **Verified בפרודקשן:** לא.
-- **Verification ראיה:** grep מאשר ש-`crm.py` משתמש ב-`DealFields.ADDRESS`/`FUNDING_COST`/`ROI`, והקבועים האלה נפתרים כעת לשמות החיים ב-`airtable_schema.py`.
-- **סטטוס:** 🟡 Implemented but not yet verified — Deals drift confirmed; Contacts/Payments OK; code constants updated to Airtable-generated field names.
+- **עדכון (10/07/2026) — סגור סופית: re-audit יסודי של המשתמש מול ייצוא CSV חי מ-Airtable, מאומת גם ישירות בקוד:**
+  - **(a)/(b) Contacts — ✅ אין באג פעיל.** `crm_find_contact()`/`crm_add_contact()`/`crm_list_contacts()` משתמשים כולם ב-`ContactFields.NAME`/`COMPANY`/`ROLE_CATEGORY` (`"שם"`/`"חברה"`/`"Role Category"`) — תואמים בדיוק לייצוא ה-CSV החי. `ContactFields.TYPE` לא בשימוש בפונקציות אלו יותר.
+  - **(e) Payments — ✅ אין באג פעיל במסלול הכתיבה.** `crm_add_payment()` כותב רק `NAME`/`AMOUNT`/`DUE_DATE`/`STATUS`/`DEAL` (`"reference"`/`"amount"`/`"date"`/`"status"`/`"deal_id"`) — תואם לייצוא ה-CSV החי. `crm_upcoming_payments`/`crm_overdue_payments` גם תואמים.
+  - **(d) `PaymentFields.CONTACT`/`NOTES` — לא בשימוש בכתיבה בכלל, לא באג.** מאומת: `crm_add_payment()` מקבלת `contact_id`/`notes` כפרמטרים אך אינה כותבת אותם לשום מקום. בבדיקה נוספת: **ל-`crm_add_payment()` אין אף קורא בכל הריפו** (`grep -rn "crm_add_payment(" --include="*.py" .` → 0 hits מחוץ ל-`crm.py` עצמו) — הפונקציה אינה רשומה ב-`tool_registry.py` וגם אין לה `case` ב-`tools/dispatcher.py`, כלומר אינה נגישה ל-Agent כלל דרך לולאת הכלים החיה. אין סיכון live, אין קורא שסובל מאובדן מידע.
+  - **(c) Deals — ✅ תוקן, מאומת מול ייצוא CSV חי.** שלושת הפערים שהמשתמש איתר (Address→Adress, Funding Cost %→Funding Cost, ROI %→Roi) תוקנו ב-commit `9b51537` (ישיר, `eli chazan`, PR #289), **וגם RISK_LEVEL ("Risk Level") וגם NOTES ("Notes") אושרו כתואמים ל-live ללא צורך בשינוי** — מאומת ישירות בקוד הנוכחי: `DealFields.ADDRESS="Adress"`, `FUNDING_COST="Funding Cost"`, `ROI="Roi"`, `RISK_LEVEL="Risk Level"`, `NOTES="Notes"`. **חשוב:** גם `crm_add_deal()` אין לו אף קורא בריפו ואינו רשום ב-`tool_registry.py`/`dispatcher.py` — כמו `crm_add_payment()`, אינו נגיש ל-Agent החי. **המשמעות המעשית:** אין דרך "לבדוק ב-POST אמיתי דרך התנהגות משתמש חיה" כפי שהוצע — צריך קריאה ידנית ישירה ל-`crm.crm_add_deal(...)` כדי לאשר 200 OK, לא תרחיש production ארגי.
+- **תוקן:** כל 5 תת-הבעיות — סגורות ברמת הקוד. Contacts/Payments לא היו צריכים תיקון (re-verify בלבד). Deals תוקן במלואו ב-`9b51537`.
+- **Merged:** ✅ כן — כולל ב-`origin/main` (`9b51537` + מיזוגים קודמים).
+- **Deployed:** לא ידוע.
+- **Verified בפרודקשן:** ⚠️ חלקי במובן מיוחד — Contacts/Payments בשימוש חי (`crm_find_contact`/`crm_add_contact` דרך `tools/contact_resolver.py`, ראה למעלה) ולא דווחה עדיין בעיה בפועל לאחר התיקון. Deals/`crm_add_payment` **אינם נגישים ל-Agent כלל כרגע** (לא ב-registry/dispatcher) — "אימות בפרודקשן" עליהם לא רלוונטי עד שמישהו יחבר אותם ל-dispatcher; אם וכשזה יקרה, יש לוודא POST אמיתי מצליח לפני חשיפה ל-Agent.
+- **Verification ראיה:** `git show 9b51537 -- airtable_schema.py`; קריאה ישירה של `crm.py`/`airtable_schema.py`/`tool_registry.py`/`tools/dispatcher.py` על `origin/main`, 10/07/2026; re-audit מלא של המשתמש מול ייצוא CSV חי מ-Airtable (Contacts/Deals/Payments).
+- **סטטוס:** ✅ CLOSED — 5/5 תת-בעיות סגורות. `crm_add_deal`/`crm_add_payment` נשארים unwired (לא רשומים ב-tool_registry/dispatcher) — לא באג, אבל שווה לזכור לפני חיבור עתידי.
 
-### BUG-021 — schema_audit.py: UnboundLocalError במקום fallback ל-cache כשה-live fetch נכשל
+### BUG-021 — schema_audit.py: UnboundLocalError במקום fallback ל-cache כשה-live fetch נכשל — ✅ כבר תוקן, לא היה מתועד (סטטוס עודכן 10/07/2026)
 - **דווח:** 24/06/2026 — תוך כדי ניסיון להריץ `schema_audit.py` בלי `AIRTABLE_API_KEY`/`AIRTABLE_BASE_ID` ב-env
 - **דווח על ידי:** המשתמש (זוהה ע"י קלוד תוך כדי ביצוע)
 - **מסך / מודול:** `schema_audit.py` — `run_audit()`, שורות 48-65
 - **תיאור:** אם `sv.refresh_cache()` זורק exception (חסרי credentials), הענף `except` (שורות 53-55) רק מדפיס אזהרה "ממשיך עם cache קיים" אבל **לא בפועל טוען cache** — המשתנה `tables` נשאר לא מוגדר, והקריאה הבאה ל-`tables.get(...)` (שורה 65) קורסת עם `UnboundLocalError`. ה-fallback ל-cache עובד רק אם מריצים עם `--offline` במפורש (`sys.argv`), לא אוטומטית כמו שההודעה מבטיחה.
 - **Severity:** Low — הסקריפט עצמו לא בשימוש production, אבל ההודעה המוטעה ("ממשיך עם cache קיים") מטעה את מי שמריץ אותו.
-- **Root Cause:** ה-except branch לא קורא בפועל את לוגיקת ה-fallback הקיימת בענף `else` (שורות 56-59) של `live=False`.
-- **תוקן:** לא — מוצע: בענף ה-`except`, להוסיף את אותה לוגיקת טעינת cache מהדיסק שכבר קיימת בענף `else`.
-- **Merged:** לא
-- **Deployed:** לא
-- **Verified בפרודקשן:** N/A — סקריפט פיתוח, לא production
-- **Verification ראיה:** שוחזר ידנית: הרצת `python3 schema_audit.py` בלי env vars מתאימים קורסת עם `UnboundLocalError: tables`
-- **סטטוס:** Open
+- **Root Cause:** ה-except branch לא קרא בפועל את לוגיקת ה-fallback הקיימת בענף `else` של `live=False`.
+- **תוקן:** ✅ כבר תוקן בקוד — הענף `except` (`schema_audit.py:53-61` היום) **כן** טוען `tables` מ-`schema_cache.json` בפועל (`json.loads(cache_path.read_text(...))`) לפני שממשיך לביקורת — בדיוק התיקון שהוצע במקור. לא ניתן לאתר commit ממוקד — מתגלה לראשונה דרך אותו merge ענק PR #193 (`97ebe3e`) כמו BUG-020/BUG-093, אותה תבנית של doc שלא עודכן אחרי שהקוד תוקן.
+- **בדיקה (הורצה בפועל, 10/07/2026):** שחזור התרחיש המדויק מהדיווח — `AIRTABLE_API_KEY=""` `AIRTABLE_BASE_ID=""` `python3 -c "import schema_audit; schema_audit.run_audit(live=True)"` — **לא קורס**. פלט אמיתי: `"⚠️ לא ניתן לשלוף schema: AIRTABLE_API_KEY / AIRTABLE_BASE_ID חסרים"` ואז `"ממשיך עם cache קיים (אם יש)"`, ומיד אחריו דוח mismatches מלא ואמיתי מתוך `schema_cache.json` (למשל `Leads: 'updated_at' ב-Airtable אך לא בקוד`, `Assets: 'Asset Potential' בקוד אך לא ב-Airtable`) — מוכיח שה-except branch נכנס בפועל וטען את ה-cache בהצלחה, לא רק שהקוד "נראה" מתוקן.
+- **Merged:** ✅ כן — קיים ב-`origin/main` (מאומת ישירות דרך הרצה אמיתית של הקוד).
+- **Deployed:** N/A — סקריפט פיתוח, לא production.
+- **Verified בפרודקשן:** N/A — סקריפט פיתוח, לא production.
+- **Verification ראיה:** הרצה אמיתית מול `origin/main`, 10/07/2026 — ראה "בדיקה" למעלה.
+- **סטטוס:** ✅ תוקן, ממוזג — אין exposure חי מלכתחילה (סקריפט dev-only).
 
 ### BUG-022 — SPEC_DAILY_CHANGES_AUDIT.md מניח קיומה של reports/daily_changes/ — לא קיימת, לא הייתה קיימת
 - **דווח:** 29/06/2026
@@ -379,15 +385,14 @@
 - **Production smoke 09/07/2026:** ליד חדש שנוצר היום לא נשמר בשם "ליד חדש" הליטרלי — `Name='מתעניין במיטות עץ'`, `record=recZBwXryhG7QfgCd`. **תומך בתיקון, אך לא סוגר סופית:** הבדיקה הייתה דרך owner dictation/Telegram, לא flow חיצוני נקי של ליד אמיתי חדש (מספר טלפון חדש שמעולם לא נראה במערכת). **סטטוס: partially verified — לא לסגור כ-Verified מלא עד בדיקה ממספר חיצוני חדש לגמרי.**
 - **סטטוס:** 🟡 MERGED TO MAIN (`ca1f5a0`) — 🟡 Partially Verified 09/07/2026 (smoke test דרך owner dictation) — עדיין ממתין לאימות מלא עם ליד **טרי ממספר חיצוני חדש לגמרי**.
 
-### FLAGGED (cleanup candidates, not bugs) — קוד מת ב-airtable_schema.py / קובץ cache מטעה
+### FLAGGED (cleanup candidates, not bugs) — קוד מת ב-airtable_schema.py / קובץ cache מטעה — 3/4 נמחקו 10/07/2026
 - **דווח:** 24/06/2026 — באותו אודיט כמו BUG-020
 - **תיאור:** אומת ב-`grep` (0 שימושים מעבר להגדרה עצמה):
-  - `class ImportsFields` + `Tables.IMPORTS` — הטבלה "Imports" לא קיימת ב-Airtable החי, ואין קובץ אחר שמשתמש בקבועים האלה. בטוח למחיקה מלאה.
-  - `class TenantsFields` + `Tables.TENANTS` — הטבלה "Tenants" לא קיימת חי; `tenant_provisioner.py` (F08) לא מייבא מ-`airtable_schema` בכלל, אז אין תלות. בטוח למחיקה מלאה.
-  - `class DailyTaskFields` + `class DailyTaskStatus` + `Tables.DAILY_TASKS` — הטבלה "Daily_Tasks" לא קיימת חי (`Daily_Checkin` היא הטבלה החיה הנפרדת בשימוש בפועל). תלות אחת: `tma_api.py:27` מייבא `DailyTaskFields, DailyTaskStatus` בלי להשתמש בהם בשום מקום אחר — import מת. מחיקה דורשת גם הסרת שני השמות האלה משורת ה-import ב-`tma_api.py:27`.
-  - `schema_cache.json` (root) — מכיל `"fetched_at": "seed-from-schema-py"`, כלומר זה לא snapshot אמיתי מ-Airtable אלא seed שנוצר מתוך הקוד עצמו, ומכיל רק 15 מתוך כל הטבלאות החיות. מטעה כל הרצה של `schema_audit.py --offline`. אפשר למחוק (יחודש בהרצה חיה תקינה) או לרענן עם credentials אמיתיים.
-- **למה לא נמחק:** ממתין לאישור מפורש של המשתמש למחיקה (לא בוצעה מחיקה יזומה ללא בקשה).
-- **סטטוס:** Open — ממתין להחלטה
+  - **✅ נמחק (10/07/2026)** — `class ImportsFields` + `Tables.IMPORTS` — הטבלה "Imports" לא קיימת ב-Airtable החי, ואין קובץ אחר שמשתמש בקבועים האלה.
+  - **✅ נמחק (10/07/2026)** — `class TenantsFields` + `Tables.TENANTS` — הטבלה "Tenants" לא קיימת חי; `tenant_provisioner.py` (F08) לא מייבא מ-`airtable_schema` בכלל, אין תלות.
+  - **✅ נמחק (10/07/2026)** — `class DailyTaskFields` + `class DailyTaskStatus` + `Tables.DAILY_TASKS` — הטבלה "Daily_Tasks" לא קיימת חי. `tma_api.py:27` **כבר לא** מייבא `DailyTaskFields`/`DailyTaskStatus` (נוקה מוקדם יותר, בנפרד מהמחיקה הזו — grep מאשר 0 שימוש לפני המחיקה). re-grep אחרי המחיקה: `grep -rn "ImportsFields\|TenantsFields\|DailyTaskFields\|DailyTaskStatus\|Tables\.IMPORTS\b\|Tables\.TENANTS\b\|Tables\.DAILY_TASKS\b" --include="*.py" .` → 0 hits. `python3 -m py_compile airtable_schema.py` עבר; `smoke_tests.py`/`test_integration.py` — כולם ירוקים, אפס רגרסיה.
+  - **🟡 עדיין פתוח, לא נגעתי** — `schema_cache.json` (root) — מכיל `"fetched_at": "seed-from-schema-py"`, כלומר לא snapshot אמיתי מ-Airtable אלא seed שנוצר מתוך הקוד עצמו. **לא נמחק בסבב הזה** — בניגוד לשלוש המחלקות למעלה (0 תלות אמיתית), הקובץ הזה הוא ה-fallback הפעיל בפועל של `schema_audit.py`'s except branch (BUG-021, כבר מאומת שעובד נכון) — מחיקתו תסיר את רשת הביטחון הזו (גם אם באופן fail-safe: `except FileNotFoundError` קיים ומחזיר `False` בלי קריסה). דורש החלטה נפרדת: למחוק / לרענן עם credentials אמיתיים / להשאיר כפי שהוא.
+- **סטטוס:** 🟡 3/4 נסגרו (המחלקות המתות נמחקו). `schema_cache.json` נשאר Open — ממתין להחלטה נפרדת.
 
 ---
 
