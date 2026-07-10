@@ -249,7 +249,7 @@
 - **Verified בפרודקשן:** לא
 - **Verification ראיה:** `py_compile session_store.py` עבר; `python3 session_store.py` self-test 18/20 עברו (2 כשלים קיימים מראש, mock-import-path bug בלתי תלוי בתיקון זה — `sys.modules["airtable_tools"]` ממוקֶה בעוד הקוד האמיתי עושה `from tools.airtable_tools import ...`); בדיקה ידנית נוספת עם mock נכון על `tools.airtable_tools` אישרה את הלוגיקה המתוקנת.
 - **סטטוס:** 🟡 MERGED TO MAIN (PR #147, `483851f`) — ממתין לאימות פרודקשן
-### BUG-020 — airtable_schema.py: כמה קבועי טבלה/שדה לא תאמו ל-base החי (מומש חלקית, לא אומת)
+### BUG-020 — airtable_schema.py: כמה קבועי טבלה/שדה לא תאמו ל-base החי — ✅ מוזג ל-main (סטטוס עודכן 10/07/2026, doc drift שתוקן)
 - **דווח:** 24/06/2026 — אודיט ידני מול "בסיס עיקרי" (`app4bcgoX7t0HUVnm`) דרך Airtable MCP (`list_tables_for_base`), אחרי שהתברר ש-`schema_cache.json` הקיים הוא seed שנוצר מהקוד עצמו ולא snapshot אמיתי מ-Airtable (ראה BUG-021).
 - **דווח על ידי:** המשתמש
 - **מסך / מודול:** `airtable_schema.py`
@@ -258,11 +258,12 @@
 - **Root Cause:** `airtable_schema.py` תיעד כוונה/תכנון שלא עודכן אחרי שהטבלאות נבנו/שונו בפועל ב-Airtable.
 - **שינוי שבוצע:** עודכן ישירות ב-`airtable_schema.py` (ללא commit בזמן התיעוד המקורי): שם `Tables.LEARNINGS` עודכן; `AssetsFields` הוחלף לחלוטין לשדות האמיתיים; `ProfileFields.NAME` עודכן ל-`"name"` + הערה ש-`PROFILE_DATA` עדיין לא קיים חי; `Tables.IMPORTS`/`Tables.TENANTS`/`Tables.DAILY_TASKS`/`DailyTaskFields`/`DailyTaskStatus` סומנו במפורש כ-DEAD CODE (בדומה לסימון F13); נוסף `class TrafficSourcesFields` לתיעוד הטבלה החדשה.
 - **תועד ב-commit:** commit הענף שמוסיף את BUG-020 ואת עדכון `airtable_schema.py`
-- **Merged:** לא
-- **Deployed:** לא
-- **Verified בפרודקשן:** לא — `py_compile airtable_schema.py` ו-`smoke_tests.py` (6/6 PASS) הורצו מקומית בלבד
-- **Verification ראיה:** השוואה ישירה ל-`list_tables_for_base`/`get_table_schema` החי דרך Airtable MCP, 24/06/2026; `py_compile` עבר; `smoke_tests.py` 6/6 PASS
-- **סטטוס:** 🟡 Implemented but not yet verified — ממתין ל-merge + אימות
+- **עדכון סטטוס (10/07/2026):** התיקון עצמו **כבר ממוזג בפועל** — הרשומה הזו פשוט לא עודכנה כשזה קרה (doc drift, לא באג בקוד). מאומת ישירות מול `origin/main` עכשיו: `Tables.LEARNINGS = "למידות ותובנות (Learnings & Insights)"` (airtable_schema.py:50), `Tables.TRAFFIC_SOURCES = "TRAFFIC_SOURCES"` (airtable_schema.py:86) — שניהם קיימים בפועל. מתגלה לראשונה דרך merge ענק PR #193 (`97ebe3e`) — אותה תבנית בדיוק כמו BUG-093 (LL-13): commit ספציפי לא ניתן לאיתור מדויק כי הוא הגיע בתוך מיזוג גדול, לא PR ממוקד.
+- **Merged:** ✅ כן — קיים ב-`origin/main` (מאומת `git show origin/main:airtable_schema.py`), מקור מדויק (PR/commit) לא ניתן לאיתור מעבר ל-PR #193's merge.
+- **Deployed:** לא ידוע — לא אומת מול Render.
+- **Verified בפרודקשן:** לא — אימות הקוד עצמו (השמות/הקבועים) בוצע, אבל לא אומת שהתנהגות חיה (כתיבה/קריאה בפועל דרך הקבועים המתוקנים) נבדקה בפרודקשן.
+- **Verification ראיה:** השוואה ישירה ל-`list_tables_for_base`/`get_table_schema` החי דרך Airtable MCP, 24/06/2026 (המקור); `git show origin/main:airtable_schema.py` מאשר את הקבועים בקוד היום (10/07/2026).
+- **סטטוס:** ✅ ממוזג ל-main — לא מאומת בפרודקשן (behavioral, לא code-existence).
 
 ### BUG-017 — inbound_handler.py כותב ל-LeadFields.UPDATED_AT שלא קיים ב-Leads החי — ✅ VERIFIED / CLOSED 09/07/2026
 - **דווח:** 24/06/2026 — באותו אודיט כמו BUG-020
