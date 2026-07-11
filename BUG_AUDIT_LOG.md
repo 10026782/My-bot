@@ -1600,3 +1600,46 @@
   - **BUG-099a (✅ קוד+טסטים מוכנים):** הרחבת `_NAME_STOP` (`core/ingress_classifier.py:205-217`) עם 24 מילות תיאור-נכס — Contract Chain קצר (5 שורות, `_NAME_STOP` לא משותף עם עותק מת ב-`lead_candidate_handler.py`, מאומת ב-grep), `test_bug099a_name_stop_extension.py` (חדש, 9/9: T1 reproduction מדויק של `recRvK6hFTNgyj8ag` דרך `summary` field, T2, 2 control cases, isolation check; sanity-check מוכיח שהטסטים תופסים רגרסיה — 5/9 נכשלים בלי התיקון). Regression מלא: `test_bug096_ingress_classifier_batch_bleed.py` (29/29), `test_bug098_followup_word_boundary.py` (16/16), `core/router/test_router.py` (44/44), `smoke_tests.py` — כולם ירוקים, כנדרש במפורש (שינוי בקובץ משותף עם BUG-096/097 גם אם "קטן").
   - **BUG-099b (טרם התחיל):** הרחבת חיפוש השם מעבר לחלון ±80-התווים-סביב-הטלפון (למצוא את "יעל רייס" בפועל, לא רק לדחות תיאור-נכס) — שינוי גדול וסיכוני-רגרסיה יותר, חולק תשתית עם לוגיקת ה-batch-extraction שכבר תוקנה בזהירות ב-BUG-096/097, דורש Contract Chain נפרד.
   - **BUG-099c (טרם התחיל):** fallback form כש-LCH לא מצליח לחלץ אבל ה-Router בטוח שזו כוונת create_lead — לא reuse של `core/lead_buffer.py` (מחובר לזרימת `capture_inbound_lead` החיצונית, לא ל-LCH כלל, אומת בקוד).
+
+---
+
+## §3.5 — BUG-102/103/104 (Family F: מנגנון קיים אך לא מחובר לחיים)
+
+> רישום ראשוני בלבד (`DOC-20260712-WA0002`). Contract Chain לכל שלושתם כבר בוצע במחקר קודם (`DOC-20260712-WA0001`) — ראה שם לפירוט מלא. מה שנרשם כאן הוא מיפוי המצב + שאלת-ההחלטה הפתוחה לכל אחד, **לא** תיקון. אינם חוסמים ואינם תלויים ב-BUG-101a/b/c — נתיבים מבניים נפרדים לגמרי (אומת). משפחה: Family F ("מנגנון קיים אך לא מחובר") — מצטרפים ל-BUG-058 כמופע רביעי/חמישי/שישי של אותה תבנית.
+
+### BUG-102 — IngressEnvelope: `normalized_text` נבנה ונזרק בנתיב הודעת-טקסט
+- **תאריך:** 12/07/2026
+- **קבצים:** `core/ingress_envelope.py:113-163` (המבנה), `app.py:1737-1793` (הנתיב שבו זה קורה)
+- **שורש (מאומת בקוד):** `build_telegram_envelope`/`build_whatsapp_envelope` נבנים, `envelope.validate()` רץ (`app.py:1745`) — אבל `_safe_route(user_text, ...)` (`app.py:1754`) ו-`handle_lead_candidate(identity, user_text, ...)` (`app.py:1790-1793`) ממשיכים לעבוד על `user_text` המקורי, לא על `envelope.normalized_text`. רק נתיב הקובץ (C90, `app.py:2249-2287`) באמת קורא מה-envelope עצמו.
+- **Severity:** Low-Medium — בלתי-מזיק היום (`normalized_text=text` ורבטים, אז הערך זהה בפועל), אבל bug מבני-שקט: שום trim/normalize עתידי ב-`build_telegram_envelope`/`build_whatsapp_envelope` לא ישפיע על הנתיב הזה, אלא אם מישהו יחליף גם את `_safe_route`/`handle_lead_candidate` לקרוא מה-envelope.
+- **שאלת החלטה (לא Contract Chain — כבר קיים):** לחבר את `_safe_route`/`handle_lead_candidate` לקרוא מ-`envelope.normalized_text`, או לתעד במפורש ש-C91 מיועד ל-C90 (קבצים) בלבד ולסגור את השאלה?
+- **סיכון לתיקון:** בינוני — שינוי בנתיב חי בפרודקשן (Telegram/WhatsApp טקסט), דורש regression מלא.
+- **תוקן:** לא — רישום בלבד.
+- **PR:** לא נפתח.
+- **Merged:** לא.
+- **סטטוס:** 🟡 רישום בלבד — ממתין להחלטת תיקון (לחבר / לתעד-כמכוון).
+
+### BUG-103 — EvidenceTrace: נבנה, נרשם, אף פעם לא נשמר
+- **תאריך:** 12/07/2026
+- **קובץ:** `core/ingress_envelope.py:183-335`
+- **שורש (מאומת בקוד):** `record_classification()` נקרא בפועל בייצור (`core/router/capture_router.py:72,79`, `app.py:2260,2277`) — אבל docstring המודול עצמו (`core/ingress_envelope.py:63-74`) מצהיר במפורש "NOT YET DONE — intentional, not forgotten": כל caller בונה Trace, קורא ל-`record_classification()`, עושה `logger.debug()`, והאובייקט יוצא מ-scope. אין Airtable/DB backing store. `latest_trace()`/`next_attempt()` (`:314-335`) מיועדים לעבוד על היסטוריה שכרגע אף פעם לא נשמרת מעבר לקריאה בודדת.
+- **Severity:** Low — תשתית audit-trail שלמה-בקוד שלא מייצרת שום דבר ניתן-לשליפה. שונה מ-BUG-102: כאן זו לא "אותה תוצאה במקרה" אלא תכנון מוצהר-חלקי (documented gap בקוד עצמו) שלא הושלם.
+- **שאלת החלטה:** האם זה P1 (נדרש ל-observability שכבר התבקש בהצעת "שכבת ההבנה הכללית", סעיף 7) או שיישאר דחוי במכוון עד שהשכבה הרחבה יותר תוחלט?
+- **תוקן:** לא — רישום בלבד.
+- **PR:** לא נפתח.
+- **Merged:** לא.
+- **סטטוס:** 🟡 רישום בלבד — ממתין להחלטה (P1 persisted store / דחייה מכוונת).
+
+### BUG-104 — ReasoningEntity/leads_adapter/decision_adapter: לא מחוברים לחיים
+- **תאריך:** 12/07/2026
+- **קבצים:** `core/reasoning_entity.py`, `core/reasoning_engines.py`, `core/adapters/leads_adapter.py`, `core/adapters/decision_adapter.py`
+- **שורש (מאומת בקוד):** `leads_adapter.py` (עם `entity_type=ENTITY_LEAD`, `:56,107`) — **אפס קוראים חיצוניים** בכל הריפו מעבר ל-`smoke_tests.py`/`core/reasoning_ports.py` (הגדרת port, לא caller אמיתי). `decision_adapter.py` כן מחובר לחיים (`cmd_decision.py:445`, `append_reasoning_block`) — אבל `FEATURE_DECISION_HUB` = OFF כברירת מחדל (`feature_flags.py:75`), כלומר "חי" רק תיאורטית.
+- **חשיבות מיוחדת:** זה הכי קרוב במבנה למה שהצעת "שכבת ההבנה הכללית" מבקשת — `PHASE_COLLECTING`/`PHASE_BLOCKED`/`PHASE_REVIEW`/`PHASE_AWAITING`/`PHASE_DECIDED`/`PHASE_CLOSED` (`core/reasoning_entity.py:34-39`) ≈ RESOLVED/NEEDS_CLARIFICATION/REJECTED שההצעה מגדירה. **לפני שממשיכים בכל דיון על "לבנות Understanding Contract חדש" — זו הבדיקה שקובעת אם צריך לבנות בכלל, או רק לחבר+להדליק flag.**
+- **Severity:** Medium — לא באג פעיל (אין נזק תפעולי), אבל relevant-prior-art מהותי שיכול לשנות החלטת ארכיטקטורה רחבה אם יתעלמו ממנו.
+- **שאלת החלטה:** נבדק בנפרד מ-102/103 כי התשובה כאן משפיעה על ההחלטה הארכיטקטונית הרחבה ("שכבת הבנה כללית"), לא רק על תיקון-נקודה. נדרשת החלטה: להרחיב/לחבר `leads_adapter.py` ולהדליק `FEATURE_DECISION_HUB` באופן מבוקר, או לבנות מנגנון נפרד ולהשאיר את זה כקוד-מת מתועד.
+- **תוקן:** לא — רישום בלבד.
+- **PR:** לא נפתח.
+- **Merged:** לא.
+- **סטטוס:** 🟡 רישום בלבד — ממתין להחלטה ארכיטקטונית רחבה (חלק מדיון "שכבת ההבנה הכללית", עדיין פתוח — ר' הבהרה למטה).
+
+**הבהרה — הדיון על "שכבת ההבנה הכללית" עדיין פתוח:** רישום שלושת ה-BUGים האלה **אינו** החלטה לבנות/לא-לבנות את ההצעה הרחבה (Interaction Envelope + Understanding Contract + PendingAction Store). זו הפרדה מכוונת: קודם ממפים כל מנגנון קיים בנפרד (מה קיים, מה שבור, מה מחובר — ראה `DOC-20260712-WA0001`), ורק אז חוזרים לשאלת הארכיטקטורה השלמה עם עובדות מלאות על כל שלושת המרכיבים.
