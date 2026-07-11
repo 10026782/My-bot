@@ -204,6 +204,20 @@ _NAME_STOP = frozenset({
     # kept as if it were part of the person's name.
     "מעוניין", "מעוניינת", "רוצה", "רוצים", "רוצות", "מחפש", "מחפשת",
     "צריך", "צריכה", "מבקש", "מבקשת",
+    # BUG-099a: property-description vocabulary. When a description sits
+    # between the name and phone (outside _extract_name_from_window()'s
+    # +-80-char window around the phone), _HEBREW_NAME_RE's first match
+    # inside the window used to be accepted as the "name" verbatim — e.g.
+    # "חדרים קומה ראשונה" written to Leads.Name in production
+    # (recRvK6hFTNgyj8ag, BUG-099). None of these words were previously
+    # in _NAME_STOP (only cities/streets were covered) — the existing
+    # rejection check just below (`if any(w in _NAME_STOP ...): continue`)
+    # already handles this correctly once the vocabulary is present; no
+    # new extraction logic needed.
+    "קומה", "חדרים", "ראשונה", "שנייה", "שניה", "שלישית", "רביעית",
+    "חמישית", "שישית", "שביעית", "מרפסת", "מטבח", "חניה", "מעלית",
+    "נוף", "משופץ", "משופצת", "צמודה", "צמוד", "קרקעית", "תת",
+    "לגמרי", "מאוד", "שמש",
 })
 
 _HEBREW_WORD_RE = re.compile(r"[א-ת]{2,}")
