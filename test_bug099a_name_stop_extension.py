@@ -17,6 +17,17 @@ correctly once the vocabulary is present. No new extraction logic.
 Scope: single set (_NAME_STOP) in core/ingress_classifier.py only —
 confirmed NOT shared with lead_candidate_handler.py's separate (dead)
 _NAME_STOP copy.
+
+BUG-099b update: at the time this file was written, 099a's fix meant a
+description-before-phone candidate degraded to "no candidate" (safer than
+garbage, but the real name was still lost). BUG-099b changed
+_extract_name_from_window() to split a matched run into segments at
+stop-word boundaries and keep the longest surviving segment, instead of
+rejecting the whole match if any stop-word appeared anywhere in it — so
+T1/T2 below now correctly extract the real name instead of falling
+through. This is an intentional behavior improvement on top of 099a, not a
+regression: the "no candidate" assertions from 099a's original scope have
+been updated to "correct name extracted" per 099b's DoD.
 """
 
 from __future__ import annotations
@@ -56,10 +67,12 @@ cands = _extract_lead_candidates(_T1_TEXT)
 names = [c["name"] for c in cands]
 
 chk("T1: garbage name 'חדרים קומה ראשונה' no longer produced", "חדרים קומה ראשונה" not in names)
-chk("T1: falls through to no-candidates (safer than garbage) rather than writing bad data", cands == [])
+chk("T1 (BUG-099b): real name 'יעל רייס' is now correctly extracted, not just safely dropped",
+    names == ["יעל רייס"])
 
 ic = classify_ingress(_T1_TEXT)
-chk("T1: classify_ingress degrades to Tier 5 (no_lead_candidates), not a false Tier 1", ic.tier == 5)
+chk("T1 (BUG-099b): classify_ingress resolves to Tier 1 (single high-confidence candidate)",
+    ic.tier == 1)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -72,7 +85,8 @@ cands = _extract_lead_candidates(_T2_TEXT)
 names = [c["name"] for c in cands]
 
 chk("T2: garbage name 'חדרים בקומה חמישית' no longer produced", not any("קומה" in n for n in names))
-chk("T2: falls through to no-candidates", cands == [])
+chk("T2 (BUG-099b): real name 'יוסי יהלום' is now correctly extracted, not just safely dropped",
+    names == ["יוסי יהלום"])
 
 
 # ══════════════════════════════════════════════════════════════════

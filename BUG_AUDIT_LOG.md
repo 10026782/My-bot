@@ -1598,7 +1598,7 @@
 - **Merged:** לא.
 - **סטטוס:** 🟡 **BUG-099a קוד+טסטים מוכנים (ממתין ל-PR+production verification), BUG-099b/c טרם התחילו.** תוכנית מימוש מפוצלת (לא כגוש אחד), נרשמת ב-§3.5:
   - **BUG-099a (✅ קוד+טסטים מוכנים):** הרחבת `_NAME_STOP` (`core/ingress_classifier.py:205-217`) עם 24 מילות תיאור-נכס — Contract Chain קצר (5 שורות, `_NAME_STOP` לא משותף עם עותק מת ב-`lead_candidate_handler.py`, מאומת ב-grep), `test_bug099a_name_stop_extension.py` (חדש, 9/9: T1 reproduction מדויק של `recRvK6hFTNgyj8ag` דרך `summary` field, T2, 2 control cases, isolation check; sanity-check מוכיח שהטסטים תופסים רגרסיה — 5/9 נכשלים בלי התיקון). Regression מלא: `test_bug096_ingress_classifier_batch_bleed.py` (29/29), `test_bug098_followup_word_boundary.py` (16/16), `core/router/test_router.py` (44/44), `smoke_tests.py` — כולם ירוקים, כנדרש במפורש (שינוי בקובץ משותף עם BUG-096/097 גם אם "קטן").
-  - **BUG-099b (טרם התחיל):** הרחבת חיפוש השם מעבר לחלון ±80-התווים-סביב-הטלפון (למצוא את "יעל רייס" בפועל, לא רק לדחות תיאור-נכס) — שינוי גדול וסיכוני-רגרסיה יותר, חולק תשתית עם לוגיקת ה-batch-extraction שכבר תוקנה בזהירות ב-BUG-096/097, דורש Contract Chain נפרד.
+  - **BUG-099b — ✅ תוקן בקוד, בדיקות עברו (12/07/2026, ראה רשומה מלאה למטה):** הרחבת חיפוש השם מעבר לחלון ±80-התווים-סביב-הטלפון (למצוא את "יעל רייס" בפועל, לא רק לדחות תיאור-נכס).
   - **BUG-099c (טרם התחיל):** fallback form כש-LCH לא מצליח לחלץ אבל ה-Router בטוח שזו כוונת create_lead — לא reuse של `core/lead_buffer.py` (מחובר לזרימת `capture_inbound_lead` החיצונית, לא ל-LCH כלל, אומת בקוד).
 
 ---
@@ -1646,7 +1646,7 @@
 
 ---
 
-## BUG-101 (umbrella) — ייבוא ייצוא-WhatsApp: כשל מצטבר בגבולות הודעה — ✅ תוקן, ממתין ל-merge+production verification
+## BUG-101 (umbrella) — ייבוא ייצוא-WhatsApp: כשל מצטבר בגבולות הודעה — ✅ VERIFIED IN PROD (12/07/2026)
 
 - **תאריך:** 12/07/2026
 - **משפחה:** Family A (upstream) — לא הרחבה של BUG-096/097/099b כפי שהונח במקור; זו ההנחה (גבולות-בלוק נכונים) שמתבררת כשגויה על קלט מסוג ייצוא-צ'אט. 099b נשאר חסום עד לאימות פרודקשן של BUG-101 (לא רק merge).
@@ -1675,10 +1675,17 @@
 
 **ממצא צדדי, מפורשות מחוץ ל-scope (לא תוקן כאן):** טלפון בפורמט בינלאומי עם מקפים פנימיים מרובים (`"+972 54-211-6211"`, המספר של אליאב לוי בעדות המקורית) לא תואם את `_PHONE_RE` כלל — המועמד שלו נשמט בשקט (Family C: לא-ברור → השמטה שקטה) במקום להיכתב שגוי. השמטה שקטה בטוחה יותר מזיהום, אבל זהו פער נפרד, לא תוקן ב-101a/b/c ולא בסקופ ה-DoD שהתבקש.
 
-- **PR:** #304 (`claude/table-incorrect-names-6chfvb` → `main`), פתוח 12/07/2026.
-- **Merged:** לא עדיין — ממתין ל-review/merge.
-- **Deployed/Verified בפרודקשן:** לא עדיין. **חובה לפני ✅ VERIFIED IN PROD:** grep-anchored verification על `origin/main` אחרי merge + Render deploy verification (commit hash בדשבורד מול `git ls-remote origin main`) — לא merge בלבד.
-- **סטטוס:** ✅ תוקן בקוד (101a+101b+101c, commit יחיד), רגרסיה מלאה ירוקה (29+16+9+44+1 smoke + 19 טסטים חדשים = 0 כשלים), PR #304 פתוח — ממתין ל-merge+production verification. **099b נשאר חסום עד שזה יאומת בפרודקשן, לא רק ימוזג** (לפי תלות מפורשת שנקבעה מראש).
+- **PR:** #304 (`claude/table-incorrect-names-6chfvb` → `main`), פתוח 12/07/2026 — **✅ מוזג**.
+- **Merged:** ✅ כן — `main` `74193db` (Merge pull request #304). מאומת: `git fetch origin main` + `git merge-base --is-ancestor 74193db origin/main` → exit 0 (12/07/2026).
+- **Deployed בפרודקשן:** ✅ כן — `74193db`, 12/07/2026 02:02 (Render deploy hash אושר ע"י המשתמש מול הדשבורד).
+- **Verified בפרודקשן — בסיס האימות (מתועד במלואו, לא רק merge status):**
+  1. PR #304 מוזג ל-`origin/main`, deploy live מאושר (`74193db`, 12/07/2026 02:02).
+  2. **Grep-anchored confirmation על `origin/main` עצמו** (לא worktree מקומי, `git checkout -B ... origin/main` בוצע לפני האימות) — `git show origin/main:core/ingress_classifier.py` מאשר קיום בפועל של `_strip_bidi_controls` (101a), `_CHAT_EXPORT_TIMESTAMP`/`_CHAT_EXPORT_HEADER` ב-`_BLOCK_SEP` (101b) וב-`_SENDER_LINE_RE` (101c) — שלושתם קיימים ומחוברים.
+  3. **אימות התנהגות** — `test_bug101_whatsapp_export_bleed.py` (19/19) הורץ מחדש נגד ה-worktree המסונכרן ל-`origin/main`'s `74193db` בדיוק (לא נגד commit מקומי ישן): קריאה ישירה ל-`_extract_lead_candidates()` על הטקסט האמיתי מהתקרית משחזרת נכון — דב אטינגר/שמואל/ירמיהו ישורון נכתבים עם שם+טלפון נכונים; "אורי צדוק"/"אחרי החגים"/"עומד להתקשר" לא מופיעים יותר כשמות-רפאים.
+  4. **הערה מפורשת לגבי מה שלא נבדק:** אימות-חי דרך הודעת-צ'אט אמיתית **אינו ישים במבנה הנוכחי** — Tier-4 (טבלה/CSV/export) מיירט טקסט בפורמט הזה תמיד, ללא flag, בכוונה (`BUG-C89-TIER4-PRECEDENCE`). זו לא פרצה באימות אלא עדות שגייט-בטיחות נפרד עובד כמתוכנן — הבדיקה בסעיף 3 (קריאה ישירה לפונקציית החילוץ) היא השקילה התקפה היחידה במבנה הזה.
+- **סטטוס:** ✅ **VERIFIED IN PROD** — 101a+101b+101c מוזגים, deploy מאושר, grep-anchored confirmation על `origin/main` עצמו, ואימות התנהגות מלא מול הקוד החי. **099b נפתח כעת** (ראה רשומה נפרדת למטה) — התלות שנקבעה מראש מולאה.
+
+**BUG-105** (פורמט טלפון בין-לאומי עם מקף, נשמט בשקט) נשאר רשום בנפרד, לא דחוף, **לא חלק מהסגירה הזו**.
 
 ---
 
@@ -1693,4 +1700,24 @@
 - **תוקן:** לא — רישום בלבד, לא דחוף.
 - **PR:** לא נפתח.
 - **Merged:** לא.
-- **סטטוס:** 🟡 רשום, לא דחוף — ממתין לתעדוף מול שאר התור (099b/099c/102/103/104). **DoD כשמגיעים אליו:** Contract Chain קצר (בידוד, בדומה ל-099a/101a) + regression על `test_bug101_whatsapp_export_bleed.py`'s suite הקיים + test עם הפורמט הספציפי (מקפים פנימיים מרובים בטלפון בינלאומי).
+- **סטטוס:** 🟡 רשום, לא דחוף — ממתין לתעדוף מול שאר התור (099c/102/103/104). **DoD כשמגיעים אליו:** Contract Chain קצר (בידוד, בדומה ל-099a/101a) + regression על `test_bug101_whatsapp_export_bleed.py`'s suite הקיים + test עם הפורמט הספציפי (מקפים פנימיים מרובים בטלפון בינלאומי).
+
+---
+
+## BUG-099b (NAME-WINDOW-SEGMENTATION) — שחזור שם מחוץ ל"ראשון-שנמצא" בתוך החלון, לא רק דחיית תיאור-נכס — ✅ תוקן בקוד
+
+- **תאריך:** 12/07/2026
+- **תיאום מפורש שבוצע (נדרש לפני מימוש, DoD §1):** אומת מול BUG-096/097/101b — 099b **לא** נוגע ב-±80-חלון-סביב-הטלפון, בגזירת neighbor-phone, או ב-`_BLOCK_SEP` בכלל. השינוי היחיד הוא **איך בוחרים שם בתוך match שכבר תחום נכון** — לכן לא יכול לפתוח מחדש bleed שכבר נסגר. נבדק ישירות (ראה regression למטה): batch עם 2 מועמדים, פועל-כוונה טרails, וגבול-הודעה של ייצוא-צ'אט — כולם עדיין מבודדים נכון.
+- **קבצים:** `core/ingress_classifier.py` — `_extract_name_from_window()`
+- **שורש (מאומת בשחזור ישיר, לא ניחוש):** `_HEBREW_NAME_RE` מחזיר **רצף רציף אחד** של מילים עבריות (נשבר רק ע"י ספרות/פיסוק — לא ע"י מילות-עצירה). ב-`"צור ליד חדש יעל רייס  מעוניינת בדירת 2 חדרים..."` הרצף `"צור ליד חדש יעל רייס  מעוניינת בדירת"` הוא match **אחד** (אין ספרה/פיסוק בין "חדש" ל-"יעל"), כש-"ליד"/"חדש" (מילות-עצירה) יושבות **בתוך** אותו match, בין קידומת-הפקודה לשם האמיתי, ו-"מעוניינת" (מילת-עצירה מ-BUG-097) מיד אחריו. הלוגיקה הקודמת (BUG-099a) חתכה מילות-עצירה רק **מהסוף**, ודחתה את כל ה-match אם נותרה מילת-עצירה **בכל מקום** — כך שהרצף כולו (כולל "יעל רייס") נדחה, ולא רק הקטע הבעייתי. שוחזר ישירות: `_extract_lead_candidates()` על `recRvK6hFTNgyj8ag`'s טקסט המקורי החזיר `[]` (0 candidates) לפני התיקון, לא `[{"name": "יעל רייס", ...}]`.
+- **שאלת עיצוב (DoD §3) — הוכרעה:** **לא** להרחיב את חלון ה-±80 (מסוכן, עלול להחזיר cross-message bleed — ראה אזהרת ה-handoff). **במקום זאת:** לשנות את אסטרטגיית החיפוש **בתוך** אותו match/חלון — מילות-עצירה עכשיו **מפצלות** את הרצף לסגמנטים (כמו separator, לא רק trim-מהסוף), והסגמנט **הארוך ביותר** נבחר. מבודד את "יעל רייס" מתוך הרצף הגדול יותר, במקום לדחות את כולו.
+- **תיקון:** `_extract_name_from_window()` נבנה מחדש — במקום `while words and words[-1] in _NAME_STOP: pop()` + `if any(w in _NAME_STOP...): continue`, מילות הרצף מפוצלות לרשימת סגמנטים בכל מילת-עצירה, והסגמנט עם הכי הרבה מילים נבחר (`max(segments, key=len)`). Trailing-trim הישן (BUG-097) הופך מיותר ומוסר — פיצול-לסגמנטים מפיק את אותה תוצאה למקרה ה-suffix (מילת-עצירה בסוף = סגמנט ריק אחריה, לא נבחר).
+- **שני התרחישים הנדרשים (DoD §2/§4), שניהם מאומתים:**
+  1. **תיאור-נכס לפני הטלפון** ("יעל רייס", `recRvK6hFTNgyj8ag` המקורי + וריאנט פסיק) — עכשיו מחלץ נכון את השם האמיתי, `classify_ingress` עולה ל-Tier 1 (במקום Tier 5).
+  2. **תיאור-נכס אחרי הטלפון** (כבר עבד נכון קודם) — נבדק כ-regression guard, ממשיך לעבוד זהה.
+- **עדכון ל-`test_bug099a_name_stop_extension.py`:** T1/T2 שם קודם טענו "falls through to no-candidates (safer than garbage)" — זו הייתה ההתנהגות הבטוחה-אך-לא-שלמה של 099a; עודכנו לטעון על שחזור השם הנכון בפועל (שיפור מכוון, לא רגרסיה) — 9/9 עדיין ירוקים.
+- **בדיקה:** `test_bug099b_name_window_segmentation.py` (חדש, 14/14) — שני התרחישים הנדרשים, 3 coordination guards ישירים מול 096 (batch window-bleed)/097 (trailing intent-verb)/101b (chat-export block boundary) שמוכיחים ששום דבר לא נפתח מחדש, ו-3 בדיקות ישירות על לוגיקת הפיצול-לסגמנטים עצמה. **Regression suite מלא כנדרש (עודכן לכלול גם 101, לא רק 096/097/098):** `test_bug096_ingress_classifier_batch_bleed.py` (29/29), `test_bug098_followup_word_boundary.py` (16/16), `test_bug099a_name_stop_extension.py` (9/9, מעודכן), `test_bug101_whatsapp_export_bleed.py` (19/19), `core/router/test_router.py` (44/44), `smoke_tests.py`, כל שאר `test_*.py` בריפו — כולם ירוקים, אפס רגרסיה.
+- **PR:** #305 (`claude/table-incorrect-names-6chfvb` → `main`), פתוח 12/07/2026.
+- **Merged:** לא עדיין — ממתין ל-review/merge.
+- **Deployed/Verified בפרודקשן:** לא עדיין. **חובה לפני ✅ VERIFIED IN PROD:** grep-anchored verification על `origin/main` אחרי merge + Render deploy verification (commit hash בדשבורד מול `git ls-remote origin main`) — לא merge בלבד.
+- **סטטוס:** ✅ תוקן בקוד, בדיקות עברו (14 חדשות + 9 מעודכנות + רגרסיה מלאה), PR #305 פתוח — ממתין ל-merge+production verification. **099c נשאר הפריט הבא בתור** (fallback form כש-LCH נכשל אך ה-Router בטוח שזו כוונת create_lead — "יוסי ארגמן" מהאודיט המקורי הוא הדוגמה החיה לזה).
