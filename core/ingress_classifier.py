@@ -396,17 +396,38 @@ def _extract_candidates_from_block(
 
 
 def _extract_name_from_window(window: str, sender_names: set) -> Optional[str]:
-    """מחלץ שם עברי מחלון טקסט, מסנן sender names ומילות עצירה."""
+    """מחלץ שם עברי מחלון טקסט, מסנן sender names ומילות עצירה.
+
+    BUG-099b: a single _HEBREW_NAME_RE match is one CONTIGUOUS run of Hebrew
+    words (broken only by digits/punctuation) — a real name can sit inside
+    that same run, flanked by stop-words with no such break between them
+    (e.g. "צור ליד חדש יעל רייס מעוניינת בדירת..." is ONE match; "ליד"/"חדש"
+    sit between the command prefix and "יעל רייס", "מעוניינת" right after
+    it). The prior logic (trim stop-words off the END only, reject the whole
+    match if a stop-word remained ANYWHERE) safely dropped candidates like
+    this rather than writing garbage (BUG-099a) — safer, but the real name
+    was still lost, not recovered.
+    Fix: stop-words split the run into segments (they act as separators, not
+    just a suffix to strip), and the LONGEST surviving segment is used —
+    isolating "יעל רייס" out of the larger run instead of discarding the
+    whole thing. This does not touch the +-80-char phone window, the
+    neighbor-phone clipping, or _BLOCK_SEP (BUG-096/097/101b's fixes) at
+    all — it only changes which words *within* an already correctly-bounded
+    match are picked as the name.
+    """
     for m in _HEBREW_NAME_RE.finditer(window):
         raw   = m.group(1).strip().rstrip(",;:")
         words = raw.split()
-        # Clean trailing stop-words
-        while words and words[-1] in _NAME_STOP:
-            words.pop()
-        name = " ".join(words)
+
+        segments: list[list[str]] = [[]]
+        for w in words:
+            if w in _NAME_STOP:
+                segments.append([])
+            else:
+                segments[-1].append(w)
+        name = " ".join(max(segments, key=len))
+
         if not name or len(name) < 4:
-            continue
-        if any(w in _NAME_STOP for w in name.split()):
             continue
         if name in sender_names:
             continue
