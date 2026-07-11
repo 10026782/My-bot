@@ -1646,7 +1646,7 @@
 
 ---
 
-## BUG-101 (umbrella) — ייבוא ייצוא-WhatsApp: כשל מצטבר בגבולות הודעה — ✅ תוקן, ממתין ל-merge+production verification
+## BUG-101 (umbrella) — ייבוא ייצוא-WhatsApp: כשל מצטבר בגבולות הודעה — ✅ VERIFIED IN PROD (12/07/2026)
 
 - **תאריך:** 12/07/2026
 - **משפחה:** Family A (upstream) — לא הרחבה של BUG-096/097/099b כפי שהונח במקור; זו ההנחה (גבולות-בלוק נכונים) שמתבררת כשגויה על קלט מסוג ייצוא-צ'אט. 099b נשאר חסום עד לאימות פרודקשן של BUG-101 (לא רק merge).
@@ -1675,10 +1675,17 @@
 
 **ממצא צדדי, מפורשות מחוץ ל-scope (לא תוקן כאן):** טלפון בפורמט בינלאומי עם מקפים פנימיים מרובים (`"+972 54-211-6211"`, המספר של אליאב לוי בעדות המקורית) לא תואם את `_PHONE_RE` כלל — המועמד שלו נשמט בשקט (Family C: לא-ברור → השמטה שקטה) במקום להיכתב שגוי. השמטה שקטה בטוחה יותר מזיהום, אבל זהו פער נפרד, לא תוקן ב-101a/b/c ולא בסקופ ה-DoD שהתבקש.
 
-- **PR:** #304 (`claude/table-incorrect-names-6chfvb` → `main`), פתוח 12/07/2026.
-- **Merged:** לא עדיין — ממתין ל-review/merge.
-- **Deployed/Verified בפרודקשן:** לא עדיין. **חובה לפני ✅ VERIFIED IN PROD:** grep-anchored verification על `origin/main` אחרי merge + Render deploy verification (commit hash בדשבורד מול `git ls-remote origin main`) — לא merge בלבד.
-- **סטטוס:** ✅ תוקן בקוד (101a+101b+101c, commit יחיד), רגרסיה מלאה ירוקה (29+16+9+44+1 smoke + 19 טסטים חדשים = 0 כשלים), PR #304 פתוח — ממתין ל-merge+production verification. **099b נשאר חסום עד שזה יאומת בפרודקשן, לא רק ימוזג** (לפי תלות מפורשת שנקבעה מראש).
+- **PR:** #304 (`claude/table-incorrect-names-6chfvb` → `main`), פתוח 12/07/2026 — **✅ מוזג**.
+- **Merged:** ✅ כן — `main` `74193db` (Merge pull request #304). מאומת: `git fetch origin main` + `git merge-base --is-ancestor 74193db origin/main` → exit 0 (12/07/2026).
+- **Deployed בפרודקשן:** ✅ כן — `74193db`, 12/07/2026 02:02 (Render deploy hash אושר ע"י המשתמש מול הדשבורד).
+- **Verified בפרודקשן — בסיס האימות (מתועד במלואו, לא רק merge status):**
+  1. PR #304 מוזג ל-`origin/main`, deploy live מאושר (`74193db`, 12/07/2026 02:02).
+  2. **Grep-anchored confirmation על `origin/main` עצמו** (לא worktree מקומי, `git checkout -B ... origin/main` בוצע לפני האימות) — `git show origin/main:core/ingress_classifier.py` מאשר קיום בפועל של `_strip_bidi_controls` (101a), `_CHAT_EXPORT_TIMESTAMP`/`_CHAT_EXPORT_HEADER` ב-`_BLOCK_SEP` (101b) וב-`_SENDER_LINE_RE` (101c) — שלושתם קיימים ומחוברים.
+  3. **אימות התנהגות** — `test_bug101_whatsapp_export_bleed.py` (19/19) הורץ מחדש נגד ה-worktree המסונכרן ל-`origin/main`'s `74193db` בדיוק (לא נגד commit מקומי ישן): קריאה ישירה ל-`_extract_lead_candidates()` על הטקסט האמיתי מהתקרית משחזרת נכון — דב אטינגר/שמואל/ירמיהו ישורון נכתבים עם שם+טלפון נכונים; "אורי צדוק"/"אחרי החגים"/"עומד להתקשר" לא מופיעים יותר כשמות-רפאים.
+  4. **הערה מפורשת לגבי מה שלא נבדק:** אימות-חי דרך הודעת-צ'אט אמיתית **אינו ישים במבנה הנוכחי** — Tier-4 (טבלה/CSV/export) מיירט טקסט בפורמט הזה תמיד, ללא flag, בכוונה (`BUG-C89-TIER4-PRECEDENCE`). זו לא פרצה באימות אלא עדות שגייט-בטיחות נפרד עובד כמתוכנן — הבדיקה בסעיף 3 (קריאה ישירה לפונקציית החילוץ) היא השקילה התקפה היחידה במבנה הזה.
+- **סטטוס:** ✅ **VERIFIED IN PROD** — 101a+101b+101c מוזגים, deploy מאושר, grep-anchored confirmation על `origin/main` עצמו, ואימות התנהגות מלא מול הקוד החי. **099b נפתח כעת** (ראה רשומה נפרדת למטה) — התלות שנקבעה מראש מולאה.
+
+**BUG-105** (פורמט טלפון בין-לאומי עם מקף, נשמט בשקט) נשאר רשום בנפרד, לא דחוף, **לא חלק מהסגירה הזו**.
 
 ---
 
