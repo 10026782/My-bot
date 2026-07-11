@@ -41,6 +41,23 @@ class IngressClassification:
     candidates:    tuple = ()   # extracted lead candidates for tier 1-3 (tuple of dicts, frozen)
 
 
+# BUG-101a: invisible bidi control characters (RLM/LRM/embedding-override
+# marks) are a common artifact of copy-pasting mixed Hebrew/English text from
+# a phone (e.g. WhatsApp chat exports) — e.g. "[נייד] ‏ +972 54-211-6211
+# ‏" from a real production incident. Left in place, they silently break
+# every downstream regex that expects a contiguous match (_TIMESTAMP_RE,
+# _WHATSAPP_EXPORT_RE, _BLOCK_SEP, _SENDER_LINE_RE) — a single such mark
+# inside a "[DD.MM.YYYY, HH:MM]" bracket is enough to defeat Tier-4 detection
+# entirely, letting export/log text fall through into lead extraction (see
+# BUG-101 umbrella). Stripped once, at the top of classification, so every
+# regex below always sees the same clean text — not patched individually.
+_BIDI_CONTROL_RE = re.compile("[\u200e\u200f\u202a-\u202e\u2066-\u2069]")
+
+
+def _strip_bidi_controls(text: str) -> str:
+    return _BIDI_CONTROL_RE.sub("", text)
+
+
 # ══════════════════════════════════════════════════
 # Tier-4 detection — must run FIRST (safety gate)
 # ══════════════════════════════════════════════════
@@ -223,15 +240,42 @@ _NAME_STOP = frozenset({
 _HEBREW_WORD_RE = re.compile(r"[א-ת]{2,}")
 _HEBREW_NAME_RE = re.compile(r"(?<!\w)([א-ת]{2,}(?:\s+[א-ת]{2,})+)(?!\w)")
 
+# BUG-101b/c: date/time bracket prefix used by pasted WhatsApp chat exports,
+# e.g. "[12.9.2023, 14:25] אורי צדוק: ...". Day/month 1-2 digits, "." or "/"
+# separator, year 2-4 digits, seconds optional — covers the variety actually
+# seen in real export text (BUG-101 evidence). Shared between _BLOCK_SEP
+# (needs the full header incl. sender name to treat it as a high-confidence
+# new-message boundary) and _SENDER_LINE_RE (needs only the bracket, as an
+# optional prefix before the existing name+colon capture) so the two never
+# drift apart on what counts as "an export timestamp".
+_CHAT_EXPORT_TIMESTAMP = r"\[\d{1,2}[./]\d{1,2}[./]\d{2,4},?\s*\d{1,2}:\d{2}(?::\d{2})?\]"
+_CHAT_EXPORT_HEADER = _CHAT_EXPORT_TIMESTAMP + r"\s*[^\n:]{1,40}:"
+
 # BUG-096: block separator — new line starting with a Hebrew letter / bullet /
 # numbering / blank line. Used to bound per-candidate windows at block
 # boundaries, not just at neighboring recognized phone numbers (see
 # _extract_lead_candidates below).
-_BLOCK_SEP = re.compile(r"\n\s*\n|\n[-•*]\s+|\n\d+[.)]\s+|\n(?=[א-ת])")
+# BUG-101b: a chat-export message header ("[date, time] sender:") starts a
+# new block too — without this, none of the four prior conditions fire on a
+# line like "[8.4.2024, 20:18] אליהו: ..." (it starts with "[", not a Hebrew
+# letter, and there's no blank line/bullet/numbering before it), so the whole
+# header gets swallowed into the PRECEDING block — the root cause of the
+# cross-message name/phone bleed in BUG-101's production evidence.
+_BLOCK_SEP = re.compile(
+    r"\n\s*\n|\n[-•*]\s+|\n\d+[.)]\s+|\n(?=[א-ת])|\n(?=" + _CHAT_EXPORT_HEADER + r")"
+)
 
 # Sender-name line pattern for WhatsApp-style chat logs (not exports):
-# "דני:" or "דני כהן:" at start of line — name before colon is a SENDER, not a lead
-_SENDER_LINE_RE = re.compile(r"^([א-ת]{2,}(?:\s+[א-ת]{2,})?)\s*:\s*", re.MULTILINE)
+# "דני:" or "דני כהן:" at start of line — name before colon is a SENDER, not a lead.
+# BUG-101c: the `^` anchor alone missed a sender name preceded by an export
+# timestamp ("[12.9.2023, 14:25] אורי צדוק: ..." — "אורי צדוק" is not at the
+# literal start of the line, so it was never recognized as a sender and got
+# extracted as if it were a lead's name). The bracket prefix is optional so
+# the plain "דני:" case still matches exactly as before.
+_SENDER_LINE_RE = re.compile(
+    r"^(?:" + _CHAT_EXPORT_TIMESTAMP + r"\s*)?([א-ת]{2,}(?:\s+[א-ת]{2,})?)\s*:\s*",
+    re.MULTILINE,
+)
 
 
 def _normalize_phone(raw: str) -> str:
@@ -515,6 +559,10 @@ def _classify_ingress_core(
             reason="empty_text",
             candidates=(),
         )
+
+    # BUG-101a: strip invisible bidi marks BEFORE Tier-4 detection (and
+    # everything downstream) — see _strip_bidi_controls's own docstring.
+    text = _strip_bidi_controls(text)
 
     # ── Tier 4 gate — ALWAYS first ──────────────────
     is_t4, t4_reason = _is_tier4(text)
