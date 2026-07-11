@@ -1717,6 +1717,7 @@
   2. **תיאור-נכס אחרי הטלפון** (כבר עבד נכון קודם) — נבדק כ-regression guard, ממשיך לעבוד זהה.
 - **עדכון ל-`test_bug099a_name_stop_extension.py`:** T1/T2 שם קודם טענו "falls through to no-candidates (safer than garbage)" — זו הייתה ההתנהגות הבטוחה-אך-לא-שלמה של 099a; עודכנו לטעון על שחזור השם הנכון בפועל (שיפור מכוון, לא רגרסיה) — 9/9 עדיין ירוקים.
 - **בדיקה:** `test_bug099b_name_window_segmentation.py` (חדש, 14/14) — שני התרחישים הנדרשים, 3 coordination guards ישירים מול 096 (batch window-bleed)/097 (trailing intent-verb)/101b (chat-export block boundary) שמוכיחים ששום דבר לא נפתח מחדש, ו-3 בדיקות ישירות על לוגיקת הפיצול-לסגמנטים עצמה. **Regression suite מלא כנדרש (עודכן לכלול גם 101, לא רק 096/097/098):** `test_bug096_ingress_classifier_batch_bleed.py` (29/29), `test_bug098_followup_word_boundary.py` (16/16), `test_bug099a_name_stop_extension.py` (9/9, מעודכן), `test_bug101_whatsapp_export_bleed.py` (19/19), `core/router/test_router.py` (44/44), `smoke_tests.py`, כל שאר `test_*.py` בריפו — כולם ירוקים, אפס רגרסיה.
-- **PR:** לא נפתח עדיין.
-- **Merged:** לא.
-- **סטטוס:** ✅ תוקן בקוד, בדיקות עברו (14 חדשות + 9 מעודכנות + רגרסיה מלאה) — ממתין ל-push/PR+production verification. **099c נשאר הפריט הבא בתור** (fallback form כש-LCH נכשל אך ה-Router בטוח שזו כוונת create_lead — "יוסי ארגמן" מהאודיט המקורי הוא הדוגמה החיה לזה).
+- **PR:** #305 (`claude/table-incorrect-names-6chfvb` → `main`), פתוח 12/07/2026.
+- **Merged:** לא עדיין — ממתין ל-review/merge.
+- **Deployed/Verified בפרודקשן:** לא עדיין. **חובה לפני ✅ VERIFIED IN PROD:** grep-anchored verification על `origin/main` אחרי merge + Render deploy verification (commit hash בדשבורד מול `git ls-remote origin main`) — לא merge בלבד.
+- **סטטוס:** ✅ תוקן בקוד, בדיקות עברו (14 חדשות + 9 מעודכנות + רגרסיה מלאה), PR #305 פתוח — ממתין ל-merge+production verification. **099c נשאר הפריט הבא בתור** (fallback form כש-LCH נכשל אך ה-Router בטוח שזו כוונת create_lead — "יוסי ארגמן" מהאודיט המקורי הוא הדוגמה החיה לזה).
