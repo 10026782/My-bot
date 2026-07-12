@@ -2108,12 +2108,43 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 כל 22/22 assertions חדשות עברו, כל test_*.py הקיימים (כולל `test_approval_concurrency.py` המעודכן), `smoke_tests.py`, ו-`test_integration.py` עברו full run לאחר השינוי.
 
 - **Severity:** High — "אישור" כוזב על פעולות שלא בוצעו הוא בדיוק אותה מחלקת באג כמו BUG-108/BUG-PENDING-APPROVAL-B, בנתיב אישור נפרד.
+- **תוקן ב-commit:** `1d3ed4b` (PR #316, `75fc242` merge commit ל-`main`) — אומת ב-`git show origin/main:tma_api.py \| grep _claim_and_execute_approval` שהקוד קיים בפועל ב-main, לא רק ב-git log.
+- **תוקן ב-branch:** `claude/table-incorrect-names-6chfvb`
+- **Merged:** כן — PR #316
+- **Deployed:** לא ידוע — דרוש בדיקה ידנית (Render), לא אומת בסבב הזה
+- **Verified בפרודקשן:** לא — merge מאומת, production behavior לא נבדק חי
+- **סטטוס:** Merged. PR-0C (הגירת event_bus writers ל-ActionGateway) מתחיל כעת.
+- **הערה על scope:** זהו PR-0C0 בלבד — hotfix ל-truthfulness. PR-0C (הגירת 6 ה-writers החיים ל-`ActionGateway.propose_action()`, כולל הפיכת טבלת Airtable "Approvals" ל-projection/audit log או הסרתה) ו-PR-0B (הגירת `app.py::_pending_approvals`) עדיין פתוחים ונדרשים לפני תחילת UnderstandingResult/BUG-104A, לפי הנחיית הבעלים המפורשת.
+
+---
+
+## PR-0C — Phase 1/4: ActionGateway adapters for media_save_to_memory/send_followup/send_recovery
+
+- **דווח:** 12/07/2026, כחלק מהגירת PR-0C (event_bus approval writers → ActionGateway) לפי סדר עבודה שהבעלים אישר מפורשות: 4 PRs נפרדים כמו שרשרת BUG-108 (#311-#314) — (1) adapters, ללא שינוי התנהגות; (2) `app.py::_queue_approval` + כפתור טלגרם; (3) 5 ה-writers החיצוניים; (4) TMA + טבלת Airtable Approvals + deprecation ל-`PendingActionsStore`. זהו ה-PR הראשון בשרשרת.
+- **Finding מרכזי (grounding לפני מימוש):** `ActionGateway._execute_contract()` יודע לבצע אך ורק דרך `dispatch_tool(tool_name, tool_inputs, contract_id)` — אין נתיב גנרי ל"הרצת callback Python שרירותי". לכן "adapters" ל-`media_save_to_memory`/`send_followup`/`send_recovery` פירושו להפוך כל אחת מהן לכלי dispatcher אמיתי (checklist מלא: `tools/schemas.py`, `tool_registry.py`, `tools/dispatcher.py`), לא רק "לחבר" אותן ל-Gateway.
+- **החלטת עיצוב (owner-confirmed via AskUserQuestion):** מסלול "✏️ עריכה" ב-`media_handler.py` (שהיום מדלג על אישור לגמרי — pop + שמירה ישירה של הטקסט הערוך) **לא** ישמר כ-bypass. יטופל בפאזה מאוחרת יותר (לא כאן) כ"הצעה חדשה": ה-contract הישן נשאר, הטקסט הערוך יוצר `propose_action()` חדש עם preview טרי, וההצלה תתבצע רק אחרי "כן" מפורש — לא מתוך העריכה עצמה.
+
+### מה נבנה (Phase 1 — תוסף בלבד, אפס שינוי התנהגות לקוראים קיימים)
+1. **`tools/approval_actions.py`** (חדש) — שלוש הפונקציות, מראה 1:1 את הלוגיקה המקורית (`app.py::_handle_send_followup_confirmed`/`_handle_send_recovery_confirmed`, `media_handler.py::_save_transcript_to_memory`), כולל אי-הסימטריה הקיימת בין followup (לא בודק `delivery_success` לפני `followup_count+=1`) ל-recovery (כן בודק, לא מגדיל מונה) — לא תוקן כאן, לא בהיקף ה-migration. מחזירות את חוזה C53-A המובנה (`{ok, tool, external_id, evidence, user_message}`) במקום string גולמי.
+2. **`tool_registry.py`** — שלושת הכלים נרשמו: `roles_allowed=_INTERNAL`, `requires_approval=True`, `blocked_by_emergency=True`. שים לב: `blocked_by_emergency=True` הוא תוספת-בטיחות חדשה שלא הייתה קיימת קודם (event_bus.confirm() לא עבר דרך `EMERGENCY_STOP_ALL` בכלל) — לא "no behavior change" טהור, אבל תואם את הכוונה המוצהרת של הדגל ("חוסם את כל כלי הכתיבה/שליחה") ואינו פעיל היום כי אין עדיין caller אמיתי (Phase 2/3).
+3. **`tools/dispatcher.py`** — נוסף `case` לכל אחד משלושת הכלים, קורא ל-`tools.approval_actions.*`.
+4. **`action_validator.py`** — נוסף `_REQUIRED` entry לכל כלי (שלב-הגנה נפרד מ-tool_registry שכמעט התפספס — `dispatch_tool()` חוסם "כלי לא מוכר" *לפני* ה-match/case אם הכלי לא רשום כאן).
+5. **`tools/schemas.py`** — נוספו schemas ל-`_APPROVAL_ACTION_SCHEMAS_HIDDEN` (בדומה ל-`_CRM_SCHEMAS_HIDDEN`) — **במכוון לא** ב-`TOOL_SCHEMAS`, כדי שה-Agent tool_use loop לא יוכל להציע את הפעולות האלה בעצמו; רק קוד Python מהימן (Phase 2/3: `media_handler.py`/`followup_engine.py`/`core/lead_recovery.py`) יוכל לקרוא ל-`ActionGateway.propose_action(trusted_source=...)`.
+6. **`core/anti_hallucination.py`** — נוספו `_validate_media_memory_evidence`/`_validate_owner_draft_evidence` ל-`_EVIDENCE_VALIDATORS`. קריטי: מכיוון ש-`requires_approval=True`, שלושת הכלים אוטומטית ב-`_WRITE_ACTION_TOOLS`, ובלי validator `verify_execution()` היה נכשל-סגור על כל ביצוע (fail-closed by design) — זה היה חוסם כל approve() עתידי דרך ה-Gateway.
+
+### Tests
+`test_pr0c_action_gateway_adapters.py` (חדש, 34 assertions) — מכסה: לוגיקת כל פונקציה (הצלחה/כישלון, כולל exception מ-`send_outbound`); רישום ב-`tool_registry` + roles; ניתוב ב-`dispatcher`; היעדר מ-`TOOL_SCHEMAS`; `verify_execution` מקבל/דוחה נכון; **מסלול end-to-end מלא**: `ActionGateway.propose_action() → approve() → dispatch_tool() → tools.approval_actions.* → verify_execution()`, contract מסתיים ב-status `"executed"`.
+
+`test_c83_single_policy_source.py` הקיים עודכן (`EXPECTED_APPROVAL_TOOLS` allowlist) — נכשל בצדק אחרי הוספת 3 הכלים ל-registry (regression מכוון, לא שבור).
+
+כל 34/34 assertions חדשות עברו, כל test_*.py הקיימים (כולל השניים המעודכנים), `smoke_tests.py`, ו-`test_integration.py` עברו full run לאחר השינוי.
+
+- **Severity:** N/A — תשתית תוספת, לא תיקון באג. חלק מ-PR-0C.
 - **תוקן ב-commit:** (למלא אחרי commit)
 - **תוקן ב-branch:** `claude/table-incorrect-names-6chfvb`
 - **Merged:** לא עדיין
 - **Deployed:** לא
-- **Verified בפרודקשן:** לא
-- **סטטוס:** Fixed, ממתין ל-merge + production verification
-- **הערה על scope:** זהו PR-0C0 בלבד — hotfix ל-truthfulness. PR-0C (הגירת 6 ה-writers החיים ל-`ActionGateway.propose_action()`, כולל הפיכת טבלת Airtable "Approvals" ל-projection/audit log או הסרתה) ו-PR-0B (הגירת `app.py::_pending_approvals`) עדיין פתוחים ונדרשים לפני תחילת UnderstandingResult/BUG-104A, לפי הנחיית הבעלים המפורשת.
+- **Verified בפרודקשן:** לא — אין עדיין caller אמיתי (Phase 2/3 יחברו את 6 ה-writers + כפתור טלגרם + TMA)
+- **סטטוס:** Phase 1/4 של PR-0C הושלם. Phase 2 (`app.py::_queue_approval` + כפתור טלגרם) הבא בתור.
 
 הלוג האחרון (מעלה) מוכיח את **כל השרשרת יחד**, לא רק חתיכה אחת: preview → 2 הפרעות → "כן" (re-display מדויק) → הפרעה שלישית → "כן" (superseded מדויק, אין ביצוע כפול/שגוי). אין פערים פתוחים ידועים בנושא הזה.

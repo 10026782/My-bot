@@ -25,6 +25,7 @@ try:
 except ImportError:
     _save_lead_buffer = None  # fallback — לא שובר אם core חסר
 from .contact_resolver  import resolve_contact
+from . import approval_actions
 
 from tool_registry import enforce, ToolDenied
 import feature_flags as _ff
@@ -361,6 +362,31 @@ def dispatch_tool(
                 result = crm_mark_payment_paid(record_id)
                 audit_log_airtable("crm_mark_payment_paid", identity, {"record_id": record_id}, result)
                 return result
+
+            # ── PR-0C — ActionGateway adapters (former event_bus custom actions) ──
+            case "media_save_to_memory":
+                return approval_actions.media_save_to_memory(
+                    transcript=inputs.get("transcript", ""),
+                    domain=inputs.get("domain", "general"),
+                    source=inputs.get("source", "media_handler"),
+                )
+            case "send_followup":
+                return approval_actions.send_followup(
+                    chat_id=inputs.get("chat_id", ""),
+                    draft=inputs.get("draft", ""),
+                    contact_name=inputs.get("contact_name", ""),
+                    channel=inputs.get("channel", ""),
+                    memory_key=inputs.get("memory_key", ""),
+                )
+            case "send_recovery":
+                return approval_actions.send_recovery(
+                    chat_id=inputs.get("chat_id", ""),
+                    draft=inputs.get("draft", ""),
+                    contact_name=inputs.get("contact_name", ""),
+                    channel=inputs.get("channel", ""),
+                    memory_key=inputs.get("memory_key", ""),
+                    tier=inputs.get("tier", ""),
+                )
 
             # ── Unknown ───────────────────────────────
             case _:
