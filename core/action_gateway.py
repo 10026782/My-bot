@@ -178,6 +178,16 @@ class ActionContract:
     # route_confirmation_word() for the state machine.
     context_interrupted:         bool = False
     reconfirmation_required:     bool = False
+    # Global ingress gate follow-up: distinct from context_interrupted — set
+    # when the gate could not positively record whether this contract's
+    # context was interrupted (the primary mark raised and even the
+    # independent fallback path failed). Never silently treated as "context
+    # intact": route_confirmation_word() gates on this exactly like a real
+    # interruption, but it stays a separate, observable field so a genuine
+    # interruption is never confused in logs/audits with "we don't actually
+    # know." Does not block the incoming message itself from being routed —
+    # only affects whether a later bare confirm executes directly.
+    context_integrity_unknown:   bool = False
 
 
 # ══════════════════════════════════════════════════
@@ -388,6 +398,20 @@ class ExecutionLedger:
             for c in self._store.values():
                 if c.canonical_user_id == canonical_user_id and c.status == "pending":
                     c.context_interrupted = True
+
+    def mark_context_integrity_unknown(self, canonical_user_id: str) -> None:
+        """Independent fallback primitive — a separately-written method
+        touching a different field, so a bug specific to
+        mark_context_interrupted()'s own logic doesn't also break this one.
+        Used by app.py's ingress gate when the primary mark_context_interrupted()
+        call itself raised — a marking failure must never be indistinguishable
+        from "context intact"; route_confirmation_word() gates on this flag
+        exactly like a real interruption, but keeps it a separate, observable
+        field rather than conflating "known interrupted" with "unknown"."""
+        with self._lock:
+            for c in self._store.values():
+                if c.canonical_user_id == canonical_user_id and c.status == "pending":
+                    c.context_integrity_unknown = True
 
 
 # ══════════════════════════════════════════════════
@@ -612,6 +636,30 @@ class ActionGateway:
             ),
         )
 
+    # ── ingress context gate — is_own_resolution_event ───────────────
+    # BUG-PENDING-APPROVAL-B follow-up: used by app.py's webhook-level
+    # ingress gate to decide whether an incoming *text* event is a genuine
+    # attempt to resolve one of this identity's own live contracts (exempt
+    # from being marked context_interrupted) versus any other event, which
+    # is not exempt. Mirrors route_confirmation_word/route_cancellation_word/
+    # route_disambiguation/route_combined_word's own matching exactly — same
+    # keyword sets, same bare-digit-only-with-2+-live precedent (BUG-070) —
+    # so this check can never drift from what those routes actually consume.
+
+    def is_own_resolution_event(self, canonical_user_id: str, text: str) -> bool:
+        live = self.find_live_contracts(canonical_user_id)
+        if not live:
+            return False
+        stripped = text.strip()
+        lower = stripped.lower()
+        if lower in self._CONFIRM_KEYWORDS or lower in self._CANCEL_KEYWORDS:
+            return True
+        if self._parse_combined(stripped) is not None:
+            return True
+        if len(live) > 1 and self._parse_ordinal(stripped) is not None:
+            return True
+        return False
+
     # ── §4 — route_confirmation_word ────────────────────────────────
 
     def route_confirmation_word(self, canonical_user_id: str, approver_role: str = "") -> str:
@@ -631,8 +679,11 @@ class ActionGateway:
             # contract arrived since the preview was shown (mark_context_interrupted).
             # The first "כן" after that must re-show the business description
             # and require an explicit second "כן" — never silently execute a
-            # stale action (context poisoning).
-            if contract.context_interrupted and not contract.reconfirmation_required:
+            # stale action (context poisoning). context_integrity_unknown is
+            # gated identically — a marking failure must never be treated as
+            # "context intact" (see _apply_ingress_context_gate in app.py).
+            if (contract.context_interrupted or contract.context_integrity_unknown) \
+                    and not contract.reconfirmation_required:
                 self._ledger.update_status(
                     contract.contract_id, contract.status,
                     reconfirmation_required=True,
@@ -1089,6 +1140,10 @@ class ActionGateway:
         """נקרא מ-app.py לכל הודעה שאינה עצמה resolution (כן/לא/disambiguation/
         combined) עבור contract חי של הזהות הזו — ראה route_confirmation_word()."""
         self._ledger.mark_context_interrupted(canonical_user_id)
+
+    def mark_context_integrity_unknown(self, canonical_user_id: str) -> None:
+        """Fallback delegate — see ExecutionLedger.mark_context_integrity_unknown()."""
+        self._ledger.mark_context_integrity_unknown(canonical_user_id)
 
     # ── §5 — AgentObservation ────────────────────────────────────────
 
