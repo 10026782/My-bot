@@ -2742,7 +2742,6 @@ def _webhook_whatsapp_impl():
             extract_whatsapp_media, download_whatsapp_media, infer_file_type, infer_filename
         )
         from media_handler import handle_voice_note, handle_file_upload
-        from identity import resolve_identity
 
         media_meta = extract_whatsapp_media(request.values.to_dict())
         if media_meta:
@@ -2892,7 +2891,6 @@ def webhook_meta_whatsapp():
                     get_meta_media_download_url, infer_mime_type_from_meta_type
                 )
                 from media_handler import handle_voice_note, handle_file_upload
-                from identity import resolve_identity
 
                 # Fetch download URL from Meta API
                 access_token = os.environ.get("META_BUSINESS_TOKEN", "")
