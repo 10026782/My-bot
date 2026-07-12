@@ -1806,7 +1806,7 @@
 
 `test_bug106_session_determinism.py` (חדש, 7/7): 3 בדיקות ישירות על ה-helper (כולל 18 רשומות בלי timestamp → יציבות מלאה, timestamp אמיתי תמיד מנצח ריק/חסר), ו-**ההוכחה המרכזית שנדרשה** — שתי מופעי `PersistentSessionStore` **נפרדים** (מדמים request 1 ו-request 2 אחרי הפעלה-מחדש/cache-miss) בוחרים **אותו Airtable record ID** בדיוק, לא רק "נמצא ערך". רגרסיה: `test_session_store_contract.py` (BUG-063's own suite, 4/4) ירוק ללא שינוי.
 
-- **PR:** #307 (`claude/table-incorrect-names-6chfvb` → `main`).
+- **PR:** #308 (`claude/table-incorrect-names-6chfvb` → `main`).
 - **Merged:** לא עדיין — ממתין ל-review/merge.
 - **Deployed/Verified בפרודקשן:** לא עדיין. **חובה לפני ✅ VERIFIED IN PROD:** grep-anchored verification על `origin/main` אחרי merge + Render deploy verification.
 - **סטטוס:** ✅ תוקן בקוד, בדיקות עברו (7 חדשות + 4 רגרסיה) — קדם-תנאי ל-BUG-099c מולא. ממתין ל-merge+production verification.
@@ -1837,7 +1837,7 @@
 
 `test_bug099c_lead_clarification.py` (חדש, 25/25): מסלול-שמח מקצה-לקצה (2 הודעות, preview אחד, payload נכון כולל הטקסט המקורי לא תשובת-השם), ביטול, פקיעת TTL, פקודה-חדשה-מפריעה, תשובה-לא-ברורה (כולל "נדבר אחר כך" — האזהרה שנתפסה תוך-כדי), שם-פסול ("בקומה" עצמו), כשל `propose_action()` (state שורד), 3 תנאי-כניסה (בלי טלפון / intent שגוי / Tier 4 — אף אחד לא מפעיל הבהרה), `session=None` (לא קורס, לא "פותר" בטעות), ביקורת-consumer (בוקמארק ישן לא מתבלבל), ובדיקת LL-11 מפורשת (`handle_lead_candidate()` לא קורא ל-Sessions כשsnapshot כבר סופק). **Regression suite מלא כנדרש:** `test_bug096` (29/29), `test_bug098` (16/16), `test_bug099a` (9/9), `test_bug099b` (14/14), `test_bug099b1` (20/20), `test_bug101` (19/19), `test_bug106` (7/7), `test_session_store_contract.py` (4/4), `core/router/test_router.py` (44/44), `test_capture_router_wiring.py` (10/10), `test_session_snapshot.py` (2/2, LL-11 עצמו), `smoke_tests.py`, כל שאר `test_*.py` בריפו — כולם ירוקים, אפס רגרסיה.
 
-- **PR:** #307 (אותו PR כמו BUG-106, commit נפרד).
+- **PR:** #308 (אותו PR כמו BUG-106, commit נפרד).
 - **Merged:** לא עדיין — ממתין ל-review/merge.
 - **Deployed/Verified בפרודקשן:** לא עדיין. **חובה לפני ✅ VERIFIED IN PROD:** grep-anchored verification על `origin/main` אחרי merge + Render deploy + אימות חי בשתי הודעות נפרדות (לא unit tests/merge/deploy בלבד) — כולל אימות ששתי הקריאות השתמשו באותה רשומת Session.
 - **סטטוס:** ✅ תוקן בקוד, בדיקות עברו (25 חדשות + רגרסיה מלאה) — ממתין ל-merge+production verification.
