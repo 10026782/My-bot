@@ -374,6 +374,16 @@ class ExecutionLedger:
                 result.append(c)
         return result
 
+    def find_most_recent_by_user(self, canonical_user_id: str) -> "ActionContract | None":
+        """Most recent contract (any status) for this identity — used to give
+        a specific "your previous action was superseded" message instead of a
+        generic "nothing pending" when the most recent contract was closed by
+        a second interruption rather than executed/cancelled by the user."""
+        candidates = [c for c in self._store.values() if c.canonical_user_id == canonical_user_id]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda c: c.created_at)
+
     def update_status(self, contract_id: str, status: str, **kwargs) -> None:
         with self._lock:
             c = self._store.get(contract_id)
@@ -392,12 +402,19 @@ class ExecutionLedger:
     # ── PR-0 / BUG-PENDING-APPROVAL-B ────────────────────────────────
 
     def mark_context_interrupted(self, canonical_user_id: str) -> None:
-        """כל pending contract חי לזהות זו מסומן כ-context_interrupted=True.
-        לא נוגע ב-status/dispatch — דגל בלבד, נקרא לפני approve()."""
+        """כל pending contract חי לזהות זו מטופל לפי bounded one-shot FSM:
+        contract שטרם הציג reconfirmation (reconfirmation_required=False)
+        מסומן context_interrupted=True (עדיין ניתן להצלה בסיבוב אחד). contract
+        שכבר הציג reconfirmation פעם אחת (reconfirmation_required=True) —
+        הפרעה נוספת מבטלת אותו סופית (status="superseded"), לא פותחת סיבוב
+        שני. אין מעגלי reconfirmation חוזרים — ראה route_confirmation_word()."""
         with self._lock:
             for c in self._store.values():
                 if c.canonical_user_id == canonical_user_id and c.status == "pending":
-                    c.context_interrupted = True
+                    if c.reconfirmation_required:
+                        c.status = "superseded"
+                    else:
+                        c.context_interrupted = True
 
     def mark_context_integrity_unknown(self, canonical_user_id: str) -> None:
         """Independent fallback primitive — a separately-written method
@@ -407,11 +424,16 @@ class ExecutionLedger:
         call itself raised — a marking failure must never be indistinguishable
         from "context intact"; route_confirmation_word() gates on this flag
         exactly like a real interruption, but keeps it a separate, observable
-        field rather than conflating "known interrupted" with "unknown"."""
+        field rather than conflating "known interrupted" with "unknown".
+        Same bounded one-shot rule as mark_context_interrupted(): a contract
+        that already required reconfirmation once is superseded, not re-armed."""
         with self._lock:
             for c in self._store.values():
                 if c.canonical_user_id == canonical_user_id and c.status == "pending":
-                    c.context_integrity_unknown = True
+                    if c.reconfirmation_required:
+                        c.status = "superseded"
+                    else:
+                        c.context_integrity_unknown = True
 
 
 # ══════════════════════════════════════════════════
@@ -660,6 +682,25 @@ class ActionGateway:
             return True
         return False
 
+    # ── bounded one-shot reconfirmation — "no pending" reason ────────
+    # BUG-PENDING-APPROVAL-B follow-up: when nothing is live, distinguish
+    # "there genuinely was never anything pending" (unchanged wording, relied
+    # on by existing tests) from "the last contract was superseded by a
+    # second interruption" — the latter gets a specific, actionable message
+    # instead of a silent dead end (the exact production bug reported: a
+    # bare כן after a supersede must never look identical to "nothing ever
+    # happened").
+
+    def describe_no_pending_reason(self, canonical_user_id: str) -> str:
+        recent = self._ledger.find_most_recent_by_user(canonical_user_id)
+        if recent and recent.status == "superseded":
+            desc = _describe_contract_for_reconfirmation(recent)
+            return (
+                f"הפעולה הקודמת בוטלה כי התחלת פעולה אחרת: {desc}.\n"
+                f"כדי לבצע אותה, שלח את הבקשה מחדש."
+            )
+        return "אין פעולה שממתינה לאישור."
+
     # ── §4 — route_confirmation_word ────────────────────────────────
 
     def route_confirmation_word(self, canonical_user_id: str, approver_role: str = "") -> str:
@@ -672,7 +713,7 @@ class ActionGateway:
         """
         live = self.find_live_contracts(canonical_user_id)
         if len(live) == 0:
-            return "אין פעולה שממתינה לאישור."
+            return self.describe_no_pending_reason(canonical_user_id)
         if len(live) == 1:
             contract = live[0]
             # PR-0 / BUG-PENDING-APPROVAL-B: a message unrelated to this
@@ -1065,8 +1106,16 @@ class ActionGateway:
 
     def compose_status_reply(self, fact: ActionFact) -> GatewayReply:
         if fact.outcome == "executed":
+            # BUG-PENDING-APPROVAL-B follow-up: reuse the frozen contract's
+            # business description (e.g. "יצירת ליד: יוסי כהן, ...") instead
+            # of the bare tool_name — the payload never changes between
+            # proposal and execution (approved_payload == executed_payload),
+            # so the description computed at reconfirmation time is exactly
+            # what was actually written.
+            contract = self._ledger.find_by_id(fact.contract_id)
+            label = _describe_contract_for_reconfirmation(contract) if contract else fact.tool_name
             rid = f" | מזהה: `{fact.record_id}`" if fact.record_id else ""
-            text = f"✅ בוצע: {fact.tool_name}{rid}"
+            text = f"✅ בוצע: {label}{rid}"
         elif fact.outcome == "failed":
             ec = f" ({fact.error_code})" if fact.error_code else ""
             text = f"❌ נכשל: {fact.tool_name}{ec}"
