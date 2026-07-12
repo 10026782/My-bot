@@ -1106,8 +1106,16 @@ class ActionGateway:
 
     def compose_status_reply(self, fact: ActionFact) -> GatewayReply:
         if fact.outcome == "executed":
+            # BUG-PENDING-APPROVAL-B follow-up: reuse the frozen contract's
+            # business description (e.g. "יצירת ליד: יוסי כהן, ...") instead
+            # of the bare tool_name — the payload never changes between
+            # proposal and execution (approved_payload == executed_payload),
+            # so the description computed at reconfirmation time is exactly
+            # what was actually written.
+            contract = self._ledger.find_by_id(fact.contract_id)
+            label = _describe_contract_for_reconfirmation(contract) if contract else fact.tool_name
             rid = f" | מזהה: `{fact.record_id}`" if fact.record_id else ""
-            text = f"✅ בוצע: {fact.tool_name}{rid}"
+            text = f"✅ בוצע: {label}{rid}"
         elif fact.outcome == "failed":
             ec = f" ({fact.error_code})" if fact.error_code else ""
             text = f"❌ נכשל: {fact.tool_name}{ec}"

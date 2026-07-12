@@ -167,6 +167,32 @@ contract_e = gw4.find_contract(r4.contract_id)
 chk("E: superseded via the fallback method too", contract_e.status == "superseded")
 
 
+# ══════════════════════════════════════════════════
+# Regression F: execution receipt reuses the frozen contract's business
+# description instead of showing only the bare tool name.
+# ══════════════════════════════════════════════════
+print("\n── F: execution receipt shows business description, not just tool ─")
+gw5, executions5 = _make_gw()
+r5 = _propose_lead(gw5, "boss_hq:oneshot_f")
+reply5 = gw5.route_confirmation_word("boss_hq:oneshot_f", approver_role="owner")  # direct כן, no interruption
+chk("F: executed", len(executions5) == 1)
+chk("F: receipt shows the lead's name (business description)", "מני חזי" in reply5)
+chk("F: receipt shows the phone", "050-9998877" in reply5)
+chk("F: receipt still includes the record id", "recTEST123456789A" in reply5)
+chk("F: receipt no longer shows the bare tool name alone",
+    reply5 != f"✅ בוצע: airtable_add | מזהה: `recTEST123456789A`")
+
+# Non-table tools (e.g. gmail_send_draft) are unaffected — falls back to
+# tool_name exactly as before, since there is no business description to show.
+r5b = gw5.propose_action(
+    tenant_id="boss_hq", canonical_user_id="boss_hq:oneshot_f2",
+    tool_name="gmail_send_draft", tool_inputs={"to": "a@b.com"},
+    origin_channel="telegram", origin_chat_id="tg:1", requires_approval=True,
+)
+reply5b = gw5.route_confirmation_word("boss_hq:oneshot_f2", approver_role="owner")
+chk("F: non-table tool receipt unchanged (still shows tool_name)",
+    reply5b.startswith("✅ בוצע: gmail_send_draft"))
+
 
 print(f"\n{'='*60}\nOne-shot reconfirmation FSM: {passed} passed, {failed} failed\n{'='*60}")
 sys.exit(1 if failed else 0)
