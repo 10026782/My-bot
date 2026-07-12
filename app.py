@@ -1161,18 +1161,64 @@ def _handle_approval_callback_impl(cq) -> None:
                 bot.answer_callback_query(cq.id, "⛔ הפעולה כבר אינה מורשית")
                 return
 
-            # BUG-091: this replays the payload stored at _queue_approval()
-            # time (dict(tu.input) — Claude's own tool_use JSON, verbatim).
-            # _queue_approval() is only ever called from the raw Agent
-            # tool_use loop below — hardcode "agent", never trust a
-            # "_source" key that might be sitting inside tool_inputs.
-            raw    = dispatch_tool(tool_name, tool_inputs, identity, trusted_source="agent")
-            result = validate_tool_output(tool_name, raw)
+            # PR-0C: prefer executing through the frozen ActionGateway contract
+            # (approve() = the single claim -> dispatch -> verify -> status
+            # boundary) over re-implementing those same steps by hand here,
+            # when a live contract exists for this fingerprint. Falls back to
+            # the pre-migration direct dispatch_tool() call if no contract is
+            # found (e.g. the shadow-mode propose_action() at _queue_approval
+            # time failed silently, or FEATURE_ACTION_GATEWAY is off) — never
+            # a new failure mode versus today. approver_role/approver here are
+            # deliberately the button-clicking approver_identity (BUG-074: the
+            # actual authenticated approver, never the original requester's
+            # identity) — dispatch itself still executes scoped to the
+            # requester, via contract.actor_role/actor_external_id already
+            # captured by _queue_approval()'s propose_action(identity=...).
+            _gw_contract_id = None
+            if _flag_enabled("FEATURE_ACTION_GATEWAY"):
+                try:
+                    from core.action_gateway import action_gateway as _gw_exec
+                    _fp_exec = _gw_exec.compute_business_fingerprint(
+                        getattr(identity, "tenant_id", "boss_hq"),
+                        canonical_user_id or identity.memory_key, tool_name,
+                        _gw_exec.normalize_payload(tool_inputs),
+                    )
+                    _contract_exec = _gw_exec._ledger.find_by_fingerprint(_fp_exec)
+                    if _contract_exec and _contract_exec.status == "pending":
+                        _gw_contract_id = _contract_exec.contract_id
+                except Exception as _gw_lookup_exc:
+                    logger.warning(
+                        "[ActionGateway] contract lookup failed for execution — "
+                        "falling back to legacy dispatch: %s", _gw_lookup_exc,
+                    )
 
-            exec_check = verify_execution(tool_name, result)
-            if exec_check.status == "failed":
-                logger.error(f"[Approval:A32] Execution failed: {tool_name} -- {exec_check.reason}")
-                fail_text = f"❌ הפעולה לא הושלמה: {exec_check.reason}"
+            if _gw_contract_id:
+                from core.action_gateway import action_gateway as _gw_exec
+                result = _gw_exec.approve(
+                    _gw_contract_id,
+                    approver=approver_identity.memory_key or approver_identity.user_id,
+                    approver_role=approver_identity.role,
+                )
+                _contract_after = _gw_exec._ledger.find_by_id(_gw_contract_id)
+                exec_failed = not (_contract_after and _contract_after.status == "executed")
+                fail_text   = result
+            else:
+                # BUG-091: this replays the payload stored at _queue_approval()
+                # time (dict(tu.input) — Claude's own tool_use JSON, verbatim).
+                # _queue_approval() is only ever called from the raw Agent
+                # tool_use loop below — hardcode "agent", never trust a
+                # "_source" key that might be sitting inside tool_inputs.
+                raw    = dispatch_tool(tool_name, tool_inputs, identity, trusted_source="agent")
+                result = validate_tool_output(tool_name, raw)
+
+                exec_check = verify_execution(tool_name, result)
+                exec_failed = exec_check.status == "failed"
+                fail_text   = f"❌ הפעולה לא הושלמה: {exec_check.reason}"
+                if exec_check.status == "warn":
+                    logger.warning(f"[Approval:A32] Execution warn: {tool_name} -- {exec_check.reason}")
+
+            if exec_failed:
+                logger.error(f"[Approval:A32] Execution failed: {tool_name} -- {fail_text}")
                 if origin_channel == "telegram":
                     try:
                         bot.send_message(origin_chat_id, fail_text)
@@ -1191,8 +1237,6 @@ def _handle_approval_callback_impl(cq) -> None:
                     pass
                 bot.answer_callback_query(cq.id, "❌ הביצוע נכשל")
                 return
-            if exec_check.status == "warn":
-                logger.warning(f"[Approval:A32] Execution warn: {tool_name} -- {exec_check.reason}")
 
             # PR #188: raw chat_id fingerprint
             from event_bus import executed_action_cache as _eac
