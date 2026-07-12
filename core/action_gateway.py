@@ -628,6 +628,56 @@ class ActionGateway:
         )
         return GatewayResult(ok=True, reason="contract נרשם", contract_id=contract.contract_id)
 
+    # PR-0C Phase 3 — shared shadow/enforced propose wrapper. Every approval
+    # writer (app.py::_queue_approval, media_handler.py, followup_engine.py,
+    # core/lead_recovery.py) needs the identical FEATURE_ACTION_GATEWAY policy:
+    # flag ON -> propose_action() gates the caller for real (duplicate/pending
+    # blocks propagate as a user-facing message); flag OFF -> best-effort
+    # shadow propose for ledger/audit visibility only, never blocks, any
+    # exception is swallowed (log only). Extracted here so new writers don't
+    # each re-implement this dance by hand.
+    def propose_gated(
+        self,
+        *,
+        tenant_id: str,
+        canonical_user_id: str,
+        tool_name: str,
+        tool_inputs: dict,
+        origin_channel: str,
+        origin_chat_id: str,
+        identity=None,
+        trusted_source: str = "agent",
+    ) -> str | None:
+        """Returns None to proceed normally, or a user-facing block message the
+        caller must return immediately instead of queuing the approval."""
+        from feature_flags import is_enabled as _flag
+
+        if _flag("FEATURE_ACTION_GATEWAY"):
+            result = self.propose_action(
+                tenant_id=tenant_id, canonical_user_id=canonical_user_id,
+                tool_name=tool_name, tool_inputs=tool_inputs,
+                origin_channel=origin_channel, origin_chat_id=origin_chat_id,
+                requires_approval=True, identity=identity, trusted_source=trusted_source,
+            )
+            if not result.ok:
+                logger.info(
+                    "[ActionGateway] propose_gated blocked: %s | contract=%s",
+                    result.reason, result.contract_id,
+                )
+                return result.user_message or f"⏳ {result.reason}"
+            return None
+
+        try:
+            self.propose_action(
+                tenant_id=tenant_id, canonical_user_id=canonical_user_id,
+                tool_name=tool_name, tool_inputs=tool_inputs,
+                origin_channel=origin_channel, origin_chat_id=origin_chat_id,
+                requires_approval=True, identity=identity, trusted_source=trusted_source,
+            )
+        except Exception as exc:
+            logger.debug("[ActionGateway] shadow propose_gated failed (non-blocking): %s", exc)
+        return None
+
     def _handle_duplicate_executed(
         self, existing: ActionContract, canonical_user_id: str
     ) -> GatewayResult:

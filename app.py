@@ -274,98 +274,12 @@ from tma_api import tma_api as _tma_blueprint
 app.register_blueprint(_tma_blueprint)
 
 
-# ── N05-B: send_followup.confirmed handler ────────────────────────────────────
-# Sends the approved followup draft to the owner via Telegram for manual
-# forwarding.9 Does NOT send outbound WhatsApp to lead (blocked on Meta, N05-C).
-# C52: owner notification routed through core.output_gateway (TELEGRAM_OWNER is
-# always INTERNAL — no Financial Gate, no behavior change vs. direct bot.send_message).
-
-def _handle_send_followup_confirmed(payload: dict, chat_id: str) -> str:
-    draft        = payload.get("draft", "")
-    contact_name = payload.get("contact_name", "")
-    channel      = payload.get("channel", "")
-    memory_key   = payload.get("memory_key", "")
-
-    msg = (f"📋 פולואפ מאושר — לשליחה ידנית ({channel}):\n"
-           f"אל: {contact_name}\n\n{draft}")
-
-    try:
-        from core.output_gateway import send_outbound, OutboundEnvelope, AudienceClass, OutputChannel
-        send_outbound(OutboundEnvelope(
-            channel=OutputChannel.TELEGRAM_OWNER,
-            recipient=chat_id,
-            body=msg,
-            audience=AudienceClass.INTERNAL,
-            source_module="app.send_followup_confirmed",
-            source_ref=memory_key,
-            domain="followup",
-        ))
-    except Exception as e:
-        logger.error(f"[Followup] notify owner failed: {e}")
-        return f"⚠️ שגיאה בהצגת הטיוטה: {e}"
-
-    if memory_key:
-        try:
-            from lead_memory import lead_memory
-            state = lead_memory.get(memory_key)
-            lead_memory.update(memory_key, followup_count=state.followup_count + 1)
-        except Exception as e:
-            logger.warning(f"[Followup] followup_count update failed: {e}")
-
-    return "✅ הטיוטה נשלחה אליך להעברה ידנית"
-
-
-from event_bus import bus as _event_bus
-_event_bus.subscribe("send_followup.confirmed", _handle_send_followup_confirmed)
-
-
-# ── C53 FIX-1: send_recovery.confirmed handler ────────────────────────────
-# lead_recovery.request_recovery_approval() שולח action="send_recovery" —
-# ללא handler זה emit מחזיר None ומדפיס שגיאה שקטה. מבנה הפאיילוד
-# תואם ל-core/lead_recovery.py:227-234.
-# לא שולח WhatsApp ללקוח (Meta blocked, N05-C) — רק מעביר לבעלים.
-
-def _handle_send_recovery_confirmed(payload: dict, chat_id: str) -> str:
-    draft        = payload.get("draft", "")
-    contact_name = payload.get("contact_name", "")
-    channel      = payload.get("channel", "")
-    memory_key   = payload.get("memory_key", "")
-    tier         = payload.get("tier", "")
-
-    msg = (f"♻️ Recovery מאושר — לשליחה ידנית ({channel}, {tier}):\n"
-           f"אל: {contact_name}\n\n{draft}")
-
-    try:
-        from core.output_gateway import send_outbound, OutboundEnvelope, AudienceClass, OutputChannel
-        result = send_outbound(OutboundEnvelope(
-            channel=OutputChannel.TELEGRAM_OWNER,
-            recipient=chat_id,
-            body=msg,
-            audience=AudienceClass.INTERNAL,
-            source_module="app.send_recovery_confirmed",
-            source_ref=memory_key,
-            domain="recovery",
-        ))
-    except Exception as e:
-        logger.error(f"[Recovery] notify owner failed: {e}")
-        return f"⚠️ שגיאה בהצגת הטיוטה: {e}"
-
-    owner_delivery = getattr(result, "action_result", None)
-    if not owner_delivery or not owner_delivery.delivery_success:
-        logger.error(
-            "[Recovery] owner draft delivery not verified | memory_key=%s audit=%s",
-            memory_key,
-            getattr(result, "audit_id", ""),
-        )
-        return "⚠️ האישור נקלט, אך מסירת הטיוטה אליך לא אומתה. ה-recovery לא סומן כהושלם."
-
-    # Delivery to TELEGRAM_OWNER is only a draft preview. It is not evidence
-    # that the customer received the recovery message, so recovery_count must
-    # remain unchanged until a customer-capable adapter confirms delivery.
-    return "✅ הטיוטה נשלחה אליך להעברה ידנית"
-
-
-_event_bus.subscribe("send_recovery.confirmed", _handle_send_recovery_confirmed)
+# PR-0C Phase 3: send_followup.confirmed / send_recovery.confirmed subscribers
+# removed — followup_engine.py/core/lead_recovery.py now queue tool_name=
+# "send_followup"/"send_recovery" payloads, so this same logic runs via
+# tools/approval_actions.py (through ActionGateway.approve() when
+# FEATURE_ACTION_GATEWAY is on) from the tool_name branch below, not from a
+# .confirmed event anymore.
 
 
 
