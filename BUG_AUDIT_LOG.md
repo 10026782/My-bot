@@ -1960,5 +1960,7 @@
 זהה ל-PR #311 (ActionGateway בלבד) — מנגנונים #2 (`_pending_approvals`)/#3 (`event_bus.py`) לא טופלו — נשאר follow-up נפרד אם ירצו.
 
 - **PR:** #312 (`claude/table-incorrect-names-6chfvb` → `main`), 4 קומיטים (3 קוד + docs). #311 כבר merged וסגור — לא ניתן "לעדכן" אותו ישירות ב-GitHub; זהו PR נפרד שמשלים את אותה עבודה, לפי פרוטוקול ה-merged-PR הקיים בריפו.
-- **Merged/Deployed/Verified בפרודקשן:** לא עדיין.
-- **סטטוס:** ✅ תוקן בקוד, בדיקות עברו (39+33+4+8 חדשות + רגרסיה מלאה של כל הריפו) — נרשם ל-PR #312 להגיב ל-CI/review. ממתין ל-merge+production verification עם אותו רצף חי (`/update`→`בדיקה`→`כן`) שנכשל בלוג המקורי, ובנוסף smoke לכל מחלקת מסלול (callback לא-קשור, slash command, wizard text, wizard media, מדיה כללית, WhatsApp media, עדכון כפול).
+- **Merged:** ✅ כן — `417cf45` (`origin/main`), CI ירוק (`backend-ci`/`frontend-ci`/Vercel) לפני מיזוג, אין review comments פתוחים. מאומת ב-grep ישיר מול `origin/main` (לא רק merge status): `context_integrity_unknown`/`mark_context_integrity_unknown`/`is_own_resolution_event` ב-`core/action_gateway.py`; `_apply_ingress_context_gate`/`_IngressEvent` בכל 4+ אתרי הקריאה ב-`app.py`; **אפס** מופעים של `from identity import resolve_identity` מקומי (תיקון ה-scoping אומת שנעלם); סדר ה-dedup לפני `text.startswith("/")` אומת ב-`app.py`.
+- **Deployed:** לא עדיין דווח.
+- **Verified בפרודקשן:** ❌ טרם — נדרש הרצף החי המדויק (`/update`→`בדיקה`→`כן`) שנכשל בלוג המקורי, ובנוסף smoke לכל מחלקת מסלול (callback לא-קשור, slash command, wizard text, wizard media, מדיה כללית, WhatsApp media, עדכון כפול). לא ניתן להריץ עצמאית מהסביבה הזו — דורש הודעות אמיתיות בפרודקשן + לוגים שהמשתמש ידביק.
+- **סטטוס:** ✅ תוקן בקוד ומוזג ל-main, בדיקות עברו (39+33+4+8 חדשות + רגרסיה מלאה של כל הריפו) — ממתין ל-deploy+production verification.
