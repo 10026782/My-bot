@@ -1997,6 +1997,6 @@
 
 נגעו רק ב-`app.py` (שורת ה-`content` שמועברת ל-Telegram call site). `guards/idempotency.py` עצמו, WhatsApp/Meta call sites, וסדר הבדיקות (dedup לפני gate) — **לא** שונו.
 
-- **PR:** טרם נפתח.
+- **PR:** #313 (`claude/table-incorrect-names-6chfvb` → `main`).
 - **Merged/Deployed/Verified בפרודקשן:** לא עדיין.
-- **סטטוס:** ✅ תוקן בקוד, בדיקות עברו (17 חדשות + רגרסיה מלאה) — ממתין ל-PR+merge+production verification עם הרצף החי המדויק שנכשל (כן → כן).
+- **סטטוס:** ✅ תוקן בקוד, בדיקות עברו (17 חדשות + רגרסיה מלאה) — נרשם ל-PR #313. ממתין ל-merge+production verification עם הרצף החי המדויק שנכשל (כן → כן).
