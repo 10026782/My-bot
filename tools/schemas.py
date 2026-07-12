@@ -229,3 +229,59 @@ TOOL_SCHEMAS = [
 # ══════════════════════════════════════════════════
 
 _CRM_SCHEMAS_HIDDEN = []
+
+# ══════════════════════════════════════════════════
+# PR-0C — ActionGateway adapters for former event_bus custom actions.
+# Fully implemented in tool_registry/dispatcher, but deliberately NOT in
+# TOOL_SCHEMAS: these are internal-execution-only tools, proposed exclusively
+# by trusted Python callers (media_handler.py, followup_engine.py,
+# core/lead_recovery.py) via ActionGateway.propose_action(trusted_source=...),
+# never by the Agent tool_use loop directly.
+# ══════════════════════════════════════════════════
+
+_APPROVAL_ACTION_SCHEMAS_HIDDEN = [
+    {
+        "name": "media_save_to_memory",
+        "description": "שמירת תמלול הודעה קולית ל-Business Memory — לאחר אישור בעלים",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "transcript": {"type": "string", "description": "תמליל ההודעה הקולית"},
+                "domain":     {"type": "string", "description": "דומיין עסקי (ברירת מחדל: general)"},
+                "source":     {"type": "string", "description": "מקור הבקשה (ברירת מחדל: media_handler)"},
+            },
+            "required": ["transcript"],
+        },
+    },
+    {
+        "name": "send_followup",
+        "description": "הצגת טיוטת פולואפ מאושרת לבעלים להעברה ידנית (N05-B)",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "chat_id":      {"type": "string", "description": "chat_id של הבעלים לשליחת הטיוטה"},
+                "draft":        {"type": "string", "description": "טיוטת ההודעה"},
+                "contact_name": {"type": "string", "description": "שם איש הקשר"},
+                "channel":      {"type": "string", "description": "ערוץ (whatsapp/telegram/...)"},
+                "memory_key":   {"type": "string", "description": "מפתח זיכרון הליד"},
+            },
+            "required": ["chat_id"],
+        },
+    },
+    {
+        "name": "send_recovery",
+        "description": "הצגת טיוטת recovery מאושרת לבעלים להעברה ידנית (C53 FIX-1)",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "chat_id":      {"type": "string", "description": "chat_id של הבעלים לשליחת הטיוטה"},
+                "draft":        {"type": "string", "description": "טיוטת ההודעה"},
+                "contact_name": {"type": "string", "description": "שם איש הקשר"},
+                "channel":      {"type": "string", "description": "ערוץ (whatsapp/telegram/...)"},
+                "memory_key":   {"type": "string", "description": "מפתח זיכרון הליד"},
+                "tier":         {"type": "string", "description": "tier ה-recovery"},
+            },
+            "required": ["chat_id"],
+        },
+    },
+]

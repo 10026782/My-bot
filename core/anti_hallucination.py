@@ -129,6 +129,27 @@ def _validate_crm_payment_evidence(tool_name: str, result: dict) -> "VerifyResul
     return None
 
 
+def _validate_media_memory_evidence(tool_name: str, result: dict) -> "VerifyResult | None":
+    external_id = str(result.get("external_id", "") or "")
+    evidence = result.get("evidence", {}) or {}
+    has = external_id or (isinstance(evidence, dict) and evidence.get("record_id"))
+    if not has:
+        return VerifyResult("failed", f"{tool_name}: missing external_id/record_id in structured result")
+    return None
+
+
+def _validate_owner_draft_evidence(tool_name: str, result: dict) -> "VerifyResult | None":
+    """send_followup/send_recovery: evidence is the output_gateway audit_id proving
+    the draft delivery to the owner was actually attempted and audited — there is
+    no external record_id since these never write to Airtable."""
+    external_id = str(result.get("external_id", "") or "")
+    evidence = result.get("evidence", {}) or {}
+    has = external_id or (isinstance(evidence, dict) and evidence.get("audit_id"))
+    if not has:
+        return VerifyResult("failed", f"{tool_name}: missing external_id/audit_id in structured result")
+    return None
+
+
 # Registry: tool_name → evidence validator function.
 # Only tools with explicit validators here are permitted to produce success claims.
 _EVIDENCE_VALIDATORS: dict[str, Any] = {
@@ -141,6 +162,9 @@ _EVIDENCE_VALIDATORS: dict[str, Any] = {
     "gmail_send_draft":      _validate_gmail_evidence,
     "calendar_create_event": _validate_calendar_evidence,
     "crm_mark_payment_paid": _validate_crm_payment_evidence,
+    "media_save_to_memory":  _validate_media_memory_evidence,
+    "send_followup":         _validate_owner_draft_evidence,
+    "send_recovery":         _validate_owner_draft_evidence,
 }
 
 # Write/action/sensitive tools that must fail closed if not in _EVIDENCE_VALIDATORS.

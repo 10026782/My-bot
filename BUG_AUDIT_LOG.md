@@ -1569,6 +1569,7 @@
   5. **אימות ישיר מול Airtable** (Session record `rec3YS5Zcr2FenX7z`, נשלף חי דרך Airtable MCP): `state.last_lead_candidate_batch.per_lead` מכיל בדיוק `["משה אבני מעוניין"→recW8lw2SxrCH9dse, "אלי חוטי"→recwFDw8UoxjnyMyP]`, `original_message_text` זהה מילה-במילה לטקסט הבדיקה של BUG-096/BUG-097 (אותו יום, מוקדם יותר). `createdTime` של הרשומה: 01/07/2026 (9+ ימים), `Updated At`: 10/07/2026 02:09 — רשומה ותיקה שממשיכה להצטבר state, לא רשומה טרייה.
   6. **גיל חביב מאושר כלא-נוצר**: כש-`_handle_batch_followup()` מחזירה reply, שום קוד לא מגיע ל-`classify_ingress()`/`_extract_name`/`_extract_phone`/`_at_find_lead`/`_write_one_lead`/`propose_action` עבור ההודעה החדשה — אין tool attempt (מוצלח או כושל), אין job מקביל, אין retry ממתין. ההודעה נבלעה במלואה לפני שהגיעה לכל קוד שיכול היה ליצור אותו.
 - **ממצא נלווה, נפרד — Session selection לא-דטרמיניסטי (לא הגורם הישיר כאן, אבל risk אמיתי):** `_load_from_db`/`_find_best_session_in_db` (`session_store.py:449-451, 480-482`) קוראים ל-`airtable_get_records` **בלי `sort` מפורש** ובוחרים `records[0]` (`logger.warning("...using first")`) — סדר ברירת המחדל של Airtable אינו מובטח כ"החדש ביותר". טבלת Sessions (אומת מול הסכימה החיה) **אין לה שדה Status כלל** — אין דרך לסנן רשומות "done"/"resolved" ברמת ה-formula, וגם `_find_best_session_in_db` לא נעול תחת `_create_lock` (בניגוד ל-`get_or_create`) — פוטנציאל race בין workers. במקרה הזה הרשומה שנבחרה הזדמן שהייתה עדכנית ורלוונטית, כך שזה לא הגורם לתקרית — אבל זה מנגנון-סיכון נפרד שיכול לגרום לתקריות דומות/גרועות יותר.
+  **הישנות נוספת, מאומתת (12/07/2026, אותו לוג שאימת BUG-099b.1 בפרודקשן):** `[SessionStore] load sender=7228089151 found_count=18 -- using first: rec3YS5Zcr2FenX7z` — 18(!) רשומות Session לאותו sender, עדיין נבחרת הראשונה בלי sort. **אומת שלא זו הסיבה לתוצאה בבדיקה הזו** (ה-tier=5/no_lead_candidates המקורי היה נכון ללא תלות ב-session שנבחר) — עדיין לא תוקן, לא BUG-ID נפרד, זו אותה בעיה בדיוק שכבר תועדה כאן, פשוט הישנות עם found_count גבוה יותר (18 לעומת פחות קודם) — ראייה נוספת שזה מצטבר ולא נעלם מעצמו.
 - **פער נוסף שהתגלה (לא תוקן, רק מתועד):** אין correlation ID עקבי דרך inbound→session→tool→outbound — `update_id`/`message_id` של Telegram לא נרשמים ברמת INFO, כך שלא ניתן להוכיח אוטומטית 1:1 בין webhook ל-outbound reply (רק היקש מטיימינג).
 - **בדיקה:** לא נוספה עדיין — **root cause מאומת, קוד לא שונה**. Contract Chain בוצע במלואו (6 סעיפים) לפני כל שינוי קוד, לפי בקשת המשתמש.
 - **PR:** #301, ממוזג ל-`main` (commit `165bcee`, מאושר: `git log origin/main`).
@@ -1599,7 +1600,9 @@
 - **סטטוס:** 🟡 **BUG-099a קוד+טסטים מוכנים (ממתין ל-PR+production verification), BUG-099b/c טרם התחילו.** תוכנית מימוש מפוצלת (לא כגוש אחד), נרשמת ב-§3.5:
   - **BUG-099a (✅ קוד+טסטים מוכנים):** הרחבת `_NAME_STOP` (`core/ingress_classifier.py:205-217`) עם 24 מילות תיאור-נכס — Contract Chain קצר (5 שורות, `_NAME_STOP` לא משותף עם עותק מת ב-`lead_candidate_handler.py`, מאומת ב-grep), `test_bug099a_name_stop_extension.py` (חדש, 9/9: T1 reproduction מדויק של `recRvK6hFTNgyj8ag` דרך `summary` field, T2, 2 control cases, isolation check; sanity-check מוכיח שהטסטים תופסים רגרסיה — 5/9 נכשלים בלי התיקון). Regression מלא: `test_bug096_ingress_classifier_batch_bleed.py` (29/29), `test_bug098_followup_word_boundary.py` (16/16), `core/router/test_router.py` (44/44), `smoke_tests.py` — כולם ירוקים, כנדרש במפורש (שינוי בקובץ משותף עם BUG-096/097 גם אם "קטן").
   - **BUG-099b — ✅ תוקן בקוד, בדיקות עברו (12/07/2026, ראה רשומה מלאה למטה):** הרחבת חיפוש השם מעבר לחלון ±80-התווים-סביב-הטלפון (למצוא את "יעל רייס" בפועל, לא רק לדחות תיאור-נכס).
-  - **BUG-099c (טרם התחיל):** fallback form כש-LCH לא מצליח לחלץ אבל ה-Router בטוח שזו כוונת create_lead — לא reuse של `core/lead_buffer.py` (מחובר לזרימת `capture_inbound_lead` החיצונית, לא ל-LCH כלל, אומת בקוד).
+  - **BUG-099c — ✅ תוקן בקוד, בדיקות עברו (12/07/2026, ראה רשומה מלאה למטה):** fallback form כש-LCH לא מצליח לחלץ אבל ה-Router בטוח שזו כוונת create_lead — לא reuse של `core/lead_buffer.py` (מחובר לזרימת `capture_inbound_lead` החיצונית, לא ל-LCH כלל, אומת בקוד). מומש כ-clarification (שאלת "מה שם הליד?"), לא fallback-form קלאסי — ראה DoD המלא + BUG-106 (קדם-תנאי) ברשומות הנפרדות.
+    **ראיה חיה מדויקת (12/07/2026, 03:51:59, אותו לוג שאימת את BUG-099b.1):** `"צור ליד חדש מעוניין בדירת 4 חדרים בקומה חמישית טלפון 0501234571"` (ללא שם) → כעת (אחרי 099b.1) `LCH` מדלג נכון (`Tier 5 — not a lead dictation, skip`), אבל `Router` עדיין קובע `intent=create_lead confidence=0.95` ומגיע ל-`DeterministicDenial` שמחזיר את הודעת החסימה השגויה-הקשר: `"יצירת ליד חדש ידנית דרך הצ׳אט חסומה כרגע"` — **המערכת הבינה נכון שזו כוונת יצירת-ליד, ורק לא מצאה שם**, אבל התגובה מנוסחת כאילו הבקשה עצמה נדחתה/אסורה (אותו mechanism כמו BUG-090/092), לא כאילו חסר רק פרט אחד.
+    **ההתנהגות הרצויה שהוגדרה (לא מומשה עדיין):** כש-`Intent.CREATE_LEAD` בביטחון גבוה + `handle_lead_candidate()` מחזיר `None`/Tier 5 (לא נחסם ע"י gate של-Leads, אלא כי לא זוהה candidate כלל) → הודעת **הבהרה**, לא דחייה: `"זיהיתי בקשה ליצור ליד ואת מספר הטלפון, אבל לא מצאתי שם. מה שם הליד?"` — לא reuse של `DeterministicDenial`'s ניסוח (שמיועד למקרה אחר לגמרי: חסימת source/role, לא "חסר פרט"). דורש להבחין בין שני מצבים ששניהם היום נופלים לאותו branch: (א) הבקשה נחסמה במכוון (gate אמיתי) מול (ב) הבקשה לא הובנה/הושלמה (LCH לא מצא candidate) — ראה גם ההבחנה המקבילה שנשאלה על 099b.1 עצמו (שאלת מחקר #2 שם).
 
 ---
 
@@ -1643,6 +1646,8 @@
 - **סטטוס:** 🟡 רישום בלבד — ממתין להחלטה ארכיטקטונית רחבה (חלק מדיון "שכבת ההבנה הכללית", עדיין פתוח — ר' הבהרה למטה).
 
 **הבהרה — הדיון על "שכבת ההבנה הכללית" עדיין פתוח:** רישום שלושת ה-BUGים האלה **אינו** החלטה לבנות/לא-לבנות את ההצעה הרחבה (Interaction Envelope + Understanding Contract + PendingAction Store). זו הפרדה מכוונת: קודם ממפים כל מנגנון קיים בנפרד (מה קיים, מה שבור, מה מחובר — ראה `DOC-20260712-WA0001`), ורק אז חוזרים לשאלת הארכיטקטורה השלמה עם עובדות מלאות על כל שלושת המרכיבים.
+
+**תכנית פעולה מעודכנת (12/07/2026):** נרשם רשמית ב-`ROADMAP.md`'s F-section כ-**U1 — Understanding Layer Architecture Decision**, עם קישור חוסם מפורש ל-UX-01 (Unified BOSS Experience — גם נרשם 12/07/2026, ראה ROADMAP.md). סדר התלות הרשמי מעכשיו: ייצוב Pending Approval flow (✅ הושלם — BUG-PENDING-APPROVAL-B) → סגירת ההחלטה הארכיטקטונית כאן (U1) → רק אז UX-01. שתי האופציות שנותרו על השולחן (מ-"שאלת ההחלטה" למעלה) לא השתנו — עדיין ממתינות להחלטת בעלים, לא טכני.
 
 ---
 
@@ -1725,7 +1730,7 @@
 
 ---
 
-## BUG-099b.1 — כשל-validation: קלט ללא שם אמיתי עדיין הפיק candidate שגוי — ✅ תוקן בקוד
+## BUG-099b.1 — כשל-validation: קלט ללא שם אמיתי עדיין הפיק candidate שגוי — ✅ VERIFIED IN PROD (12/07/2026)
 
 - **תאריך:** 12/07/2026
 - **מקור:** התגלה תוך כדי בדיקת production חיה ל-BUG-099b (מקרה 4 מתוך 5, ראה למעלה) — לא regression, פער נפרד שנחשף באותו סבב בדיקות.
@@ -1737,9 +1742,16 @@
 - **מפורשות מחוץ ל-scope (הוכרע מראש, לא ניחוש בדיעבד):** אין recursive prefix stripping, אין טיפול בתחיליות מוערמות (כמו "ובקומה" = ו+ב+קומה — "מהדירה" למשל **לא** מזוהה כמילת-עצירה, כי הסרת קידומת אחת בלבד משאירה "הדירה" שאינה ב-`_NAME_STOP` בעצמה), אין stemming/מנתח מורפולוגי, אין שינוי בחלון ±80-התווים-סביב-הטלפון, ב-`_BLOCK_SEP`, ב-neighbor-phone clipping, או בזרימת ה-clarification/fallback.
 - **בדיקה:** `test_bug099b1_no_name_validation.py` (20/20, כולל **mutation check מפורש**: `unittest.mock.patch` על `_is_name_stop_token` להחזרה זמנית ל-membership-ישיר-בלבד מוכיח ש-"בקומה" חוזר כ-candidate שגוי — הוכחה שה-helper הוא load-bearing, לא קוסמטי) — שחזור מדויק של מקרה 4 (0 candidates), `classify_ingress` יורד ל-Tier 5, שני תרחישי הרגרסיה הנדרשים (`בקומה` בתיאור-נכס עם שם אמיתי + `בקומה` בלי שם בכלל), 4 בדיקות ישירות על `_is_name_stop_token()` (כולל בנימין/משה/הלל/שחר + מהדירה), ורגרסיה מלאה על 4 המקרים האחרים מאותו סבב בדיקות (3 single-lead + batch) + שני תרחישי BUG-099b המקוריים. אפס רגרסיה: `test_bug096` (29/29), `test_bug098` (16/16), `test_bug099a` (9/9), `test_bug099b_name_window_segmentation.py` (14/14), `test_bug101` (19/19), `core/router/test_router.py` (44/44), `smoke_tests.py`, כל שאר `test_*.py` בריפו.
 - **פער "מאומת"-מול-חי שדווח ונפתר (12/07/2026, לפני פתיחת PR):** דיווח חי הראה `Name="בקומה"` על הטקסט המדויק **אחרי** שהתיקון כבר דווח כ"נבדק ועובר" — נראה כסתירה. **אומת ישירות, לא הונח:** `git worktree` נקי של `origin/main` (`0c9b611`, טרם כלל PR עבור 099b.1) הריץ את הטקסט המדויק והחזיר `candidates=[{"name": "בקומה", ...}]`, `tier=1` — כלומר `origin/main` (וממילא הפריסה בפרודקשן) **מעולם לא כלל את התיקון הזה בכלל**, כי לא נפתח לו PR. אין סתירה בין "קוד מתוקן ונבדק" ל"פרודקשן עדיין שבור" — אלו שני דברים נכונים בו-זמנית: התיקון קיים ועובד ב-branch, אך לא הגיע ל-`main`/Render. אין תיקון-קוד נוסף נדרש כתוצאה מהפער הזה — פער-deploy בלבד, לא באג.
-- **PR:** #306 (`claude/table-incorrect-names-6chfvb` → `main`), פתוח 12/07/2026.
-- **Merged:** לא עדיין — ממתין ל-review/merge.
-- **Deployed/Verified בפרודקשן:** לא עדיין. **חובה לפני ✅ VERIFIED IN PROD:** grep-anchored verification על `origin/main` אחרי merge + Render deploy verification (commit hash בדשבורד מול `git ls-remote origin main`) + **בדיקה חוזרת בפרודקשן על הטקסט המדויק** (לא גרסה מקוצרת) שמראה `candidates=[]`/Tier 5, לא `Name="בקומה"`.
+- **PR:** #306 (`claude/table-incorrect-names-6chfvb` → `main`) — **✅ מוזג**.
+- **Merged:** ✅ כן — `main` `a04ec47` (Merge pull request #306), commit `4292845`. מאומת: `git fetch origin main` + `git merge-base --is-ancestor a04ec47 origin/main` → exit 0 (12/07/2026).
+- **Deployed בפרודקשן:** ✅ כן — `a04ec47`, 12/07/2026 03:49-03:50 (Render deploy hash אושר ע"י המשתמש מול הדשבורד, "Deploy live for a04ec47").
+- **Verified בפרודקשן:** ✅ כן — **על הטקסט המדויק, לא גרסה מקוצרת** (לוג Render אמיתי, 03:51:59):
+  ```
+  [IngressClassifier] tier=5 conf=0.00 class=unknown reason=no_lead_candidates candidates=0 chat=boss_hq:eliyahu
+  [LCH] Tier 5 — not a lead dictation (reason=no_lead_candidates), skip
+  ```
+  `grep-anchored confirmation`: `_is_name_stop_token`/`_HEBREW_SINGLE_LETTER_PREFIXES` מאושרים ב-`origin/main` עצמו (לא רק worktree מקומי). "בקומה" לא נבחר כשם, אין preview מזוהם — בדיוק ה-DoD שנדרש.
+- **סטטוס:** ✅ **VERIFIED IN PROD** — merge+deploy+grep-anchored confirmation+אימות התנהגות חי, כולם מאושרים.
 - **סטטוס:** 🟡 CODE DONE, NOT VERIFIED — תוקן בקוד, בדיקות עברו, PR #306 פתוח — ממתין ל-merge+production verification. לא לסמן ✅ עד אימות חי בפועל.
 
 ---
@@ -1766,3 +1778,442 @@
 - **PR:** לא נפתח.
 - **Merged:** לא.
 - **סטטוס:** 🟡 רשום, ממתין ל-PR נפרד. לא חוסם/תלוי ב-BUG-099b/099b.1/099c.
+
+---
+
+## BUG-106 — Session lookup לא-דטרמיניסטי עבור active_lead_candidate (קדם-תנאי ל-BUG-099c) — ✅ VERIFIED IN PROD
+
+- **תאריך:** 12/07/2026
+- **הוראה מחייבת שהתקבלה:** BUG-106 ו-BUG-099c מבוצעים באותו branch/PR, ב-commits נפרדים, בסדר מחייב — BUG-106 קודם, BUG-099c רק לאחר שהבדיקה של 106 ירוקה. בוצע בדיוק כך.
+- **קבצים:** `session_store.py` — `_select_canonical_session_record()` (חדשה), `_find_best_session_in_db()`, `_load_from_db()`.
+
+### Contract Chain (בוצע לפני כל שינוי קוד, כנדרש)
+
+1. **מי יוצר רשומת Session:** `PersistentSessionStore.get_or_create()` → `_sync_to_db(is_new=True)` → POST רק כש-`_find_best_session_in_db` מחזיר `found_count==0, reason=="no_records"` (fail-closed אחרת, לפי BUG-063).
+2. **מי טוען Session:** `.get(sender)` (RAM תחילה, `_load_from_db()` כ-fallback) — קרוא מ-`get_or_create`, `update_step`, `mark_done`, `get_last_file`, `get_last_tool_result`, `get_current_lead_record_id`, `get_active_lead_candidate`, `get_pending_lead_preview`, `delete`.
+3. **מי כותב `active_lead_candidate`:** `set_active_lead_candidate()` — 2 קוראים חיים בלבד, שניהם ב-`core/lead_candidate_handler.py` (אחרי כתיבת ליד מוצלחת — bookmark שלאחר-כתיבה, לא state שלפני-החלטה).
+4. **מי קורא `active_lead_candidate`:** `get_active_lead_candidate()` — **אפס קוראים חיים** לפני BUG-099c (מאומת ב-grep) — write-only בפועל בקוד הקיים.
+5. **למה קיימות 18 רשומות לאותו Sender ID:** לא ניתן לאימות מול Airtable חי מהסביבה הזו, אך ההיסטוריה בקוד מסבירה מנגנון סביר: BUG-063/BUG-SESSIONS-ROOT (מוזג `eead2cc`) תיקן שורש שבו כשל-lookup שקט גרם ל-`found_count=0` גם כשרשומות אמיתיות קיימות, ומפעיל POST-במקום-PATCH בכל lookup רועש. התיקון ההוא מונע כפילויות **חדשות** מאותו מנגנון מכאן ואילך, אך לא מנקה למפרע רשומות שכבר נוצרו. 18 הרשומות תואמות הצטברות היסטורית מהשורש הזה (שכבר תוקן) — לא סימן לבאג חי/מתמשך.
+6. **הבדל לפי tenant/channel/context/created-time/status/race/get_or_create חוזר:** **אין שדה tenant בכלל** ב-Sessions (מאומת מול הסכימה). ה-filter formula הוא `{Sender ID}='...'` בלבד — בלי scoping לפי channel/context-type/tenant (Channel/Context Type נשמרים כשדות אך לא בפילטר). **אין שדה Status כלל** (כבר תועד ב-BUG-098). **אין ראיה לרייס חי היום:** הפרודקשן רץ `gunicorn app:app` בלי `--workers`/`--threads` מפורשים (ברירת מחדל: sync worker יחיד, תהליך יחיד) — רייס בין-תהליכי על אותו sender אינו אפשרי מבנית תחת התצורה הזו. `_create_lock` (`threading.Lock()`) הוא per-process, רלוונטי רק תחת ריבוי-workers/instances שאין ראיה שקיימת כאן.
+7. **המפתח הקנוני:** מחרוזת `chat_id`/`sender` הגולמית שמועברת מכל caller — מאומת דרך `app.py`'s `run_agent(user_text, chat_id, ...)` → `handle_lead_candidate(identity, user_text, chat_id, ...)` — זהו מספר הטלפון/user_id הגולמי, **לא** `identity.memory_key`. `_normalize_sender()` (`str(sender).strip()`) הוא הנרמול היחיד.
+8. **האם ה-query ממוין:** **לא** — `_find_best_session_in_db`/`_load_from_db` קוראים ל-`airtable_get_records(Tables.SESSIONS, filter_formula)` בלי פרמטר `sort` כלל; לפונקציה עצמה אין תמיכת מיון.
+9. **האם "using first" תלוי בסדר החזרה של Airtable:** **כן** — בלי sort מפורש, סדר ה-REST API אינו מובטח חוזית כסדר-יצירה או כל סדר יציב אחר לטווח ארוך; `records[0]` הייתה בחירה שרירותית מבחינת ה-API, לא כוונה מודעת מהקוד.
+10. **Consumers נוספים ל-lookup:** רק אחד — `test_session_store_contract.py` (ניגש ל-`_find_best_session_in_db` הפרטית ישירות, לבדיקה בלבד). שום קוד production אחר לא קורא לפונקציות הפרטיות האלה.
+
+### תיקון
+
+`_select_canonical_session_record(records)` חדשה — ממיינת לפי `Updated At` יורד (השדה היחיד שהסכימה בפועל מספקת לזיהוי "מי הרשומה העדכנית", בהיעדר שדה Status). מיון **יציב**: רשומות שוות/חסרות `Updated At` (כולל **כל** הרשומות, כשהשדה נעדר מכולן) שומרות על סדרן היחסי המקורי — לא מנוחשות מחדש — כך שכל caller/טסט שמעולם לא מילא `Updated At` ממשיך לבחור `records[0]` בדיוק כמו קודם. שימוש זהה בשני מקומות הבחירה (`_find_best_session_in_db` ו-`_load_from_db`) — אותה רשומה מנצחת בשניהם, בהינתן אותו קלט.
+
+### בדיקה
+
+`test_bug106_session_determinism.py` (חדש, 7/7): 3 בדיקות ישירות על ה-helper (כולל 18 רשומות בלי timestamp → יציבות מלאה, timestamp אמיתי תמיד מנצח ריק/חסר), ו-**ההוכחה המרכזית שנדרשה** — שתי מופעי `PersistentSessionStore` **נפרדים** (מדמים request 1 ו-request 2 אחרי הפעלה-מחדש/cache-miss) בוחרים **אותו Airtable record ID** בדיוק, לא רק "נמצא ערך". רגרסיה: `test_session_store_contract.py` (BUG-063's own suite, 4/4) ירוק ללא שינוי.
+
+- **PR:** #308 (`claude/table-incorrect-names-6chfvb` → `main`).
+- **Merged:** ✅ כן — `c1311b8` (`origin/main`), מאומת ב-grep ישיר מול `origin/main` (`_select_canonical_session_record` קיימת ב-`session_store.py`, משמשת בשני call sites).
+- **Deployed:** ✅ כן — Render deploy notification עבור `c1311b8` התקבל.
+- **Verified בפרודקשן:** ✅ כן — לוג הפרודקשן (אימות BUG-099c, ראו שם) מציג `found_count=18 -- using canonical (most recently updated): rec3YS5Zcr2FenX7z` ברישום ההודעה הראשונה, ואותו `rec3YS5Zcr2FenX7z` שוב ב-PATCH-ים העוקבים (הודעה שנייה + confirm) — הוכחה ישירה שאותה רשומה קנונית נבחרה בעקביות על פני שלוש קריאות נפרדות ל-store, לא רק unit test.
+- **סטטוס:** ✅ VERIFIED IN PROD (12/07/2026) — merged + deployed + live evidence, לא רק unit tests/merge/deploy.
+
+---
+
+## BUG-099c — Clarification במקום Denial כשחסר שם ליד — ✅ VERIFIED IN PROD
+
+- **תאריך:** 12/07/2026
+- **תלות שמולאה:** BUG-106 (deterministic session selection) — נדרש כקדם-תנאי כי הזרימה חוצה שתי הודעות/requests נפרדות; אם הודעה 1 (שמירה) והודעה 2 (קריאה) יכלו לנחות על שתי רשומות-כפילות שונות, הזרימה הייתה עובדת "לפעמים", לא לפי עיצוב.
+- **ראיה (מאותו לוג פרודקשן שאימת BUG-099b.1):** `"צור ליד חדש מעוניין בדירת 4 חדרים בקומה חמישית טלפון 0501234571"` → Router: `intent=create_lead confidence=0.95`; LCH: Tier 5/no_lead_candidates, מדלג נכון (BUG-099b.1); נופל ל-`DeterministicDenial` שמחזיר "יצירת ליד חדש ידנית דרך הצ׳אט חסומה כרגע" — **שגוי**: המערכת הבינה נכון את הכוונה, רק חסר שדה אחד.
+- **Scope:** Leads-only. **לא** בונה Understanding Layer כללית — BUG-104 (ReasoningEntity/reasoning_engines) נשאר פתוח כהחלטת ארכיטקטורה נפרדת; מימוש עתידי של BUG-104 יכול לעדכן את הזרימה הזו בלי לפגוע בנכונותה.
+
+### עיצוב שמומש
+
+- **State:** תחת המפתח הקיים `active_lead_candidate` (אין store חדש) — צורה חדשה ונבדלת `{"state": "needs_clarification", "expected_field", "partial_payload", "original_text", "set_at"}`, לעולם לא מתבלבלת עם צורת-הבוקמארק הישנה `{"name", "record_id", "set_at"}` (0 קוראים חיים, ראה BUG-106). כל consumer בודק `state` במפורש. `set_at` משותף בכוונה לשתי הצורות — כך שה-TTL הקיים (1800 שניות) חל זהה על שתיהן בלי שינוי שם.
+- **פונקציות חדשות:** `session_store.py::set_lead_clarification()`/`clear_active_lead_candidate()` (החדש — ניקוי מפורש, לא רק אגב בדיקת-פקיעה). `get_active_lead_candidate()`'s TTL-clear תוקן לסנכרן ל-DB (כמו `get_pending_lead_preview` כבר עושה) — לפני זה פקיעה נוקתה רק ב-RAM, ויכלה "לקום לתחייה" מה-DB אחרי restart.
+- **`core/lead_candidate_handler.py`:** `_maybe_start_lead_clarification()` (נקודת-כניסה — Tier 5/no_lead_candidates + `Intent.CREATE_LEAD` + טלפון קיים בטקסט → שומר state, מחזיר "זיהיתי בקשה ליצור ליד ואת מספר הטלפון X, אבל לא מצאתי שם. מה שם הליד?"). `_resolve_lead_clarification()` (resolver — נבדק **ראשון** ב-`handle_lead_candidate()`, לפני batch-followup ולפני `classify_ingress()` על ההודעה החדשה) — סדר עדיפויות מחייב: (1) TTL פג, (2) ביטול, (3) פקודה חדשה מפורשת (Intent מה-Router, לא זיהוי מקומי), (4) תשובה תקינה, (5) תשובה לא-ברורה. `_validate_clarification_name()` — reuse של `_HEBREW_NAME_RE`/`_is_name_stop_token` (`core/ingress_classifier.py`, לא לוגיקה חדשה) עם fullmatch (לא segmentation) **וגם** תקרת-מילים (בדיוק 2) — בלעדיה, "נדבר אחר כך" (משפט שיחה אמיתי, בלי אף מילת-עצירה) עבר בטעות כ"שם" תקין (נמצא ותוקן תוך כדי בדיקה עצמית, לפני הרצת הרגרסיה).
+- **Reuse, לא duplication:** תשובה תקינה בונה candidate synthetic ומעביר אותו ל-`_handle_single_candidate()` הקיים (פרמטר חדש `clear_clarification: bool`) — **אותו** dedupe (`_at_find_lead`), **אותו** ActionContract (`_propose_lead_write`), **אותו** preview. הטקסט שמועבר ל-preview/summary הוא ה-`original_text` (ההודעה הראשונה, עם הטלפון+תיאור-העניין) — לא תשובת-השם הקצרה — כך שהפרטים מההודעה הראשונה לא אובדים.
+- **ניקוי state:** רק אחרי הצלחה בפועל — `clear_clarification=True` מנוקה רק בענף שאחרי `gw_result.ok`/`ok and record_id`, **לא** לפני. כשל ב-`propose_action()` משאיר את ה-state פעיל, בלי אובדן payload ובלי "פעולה חלקית".
+- **LL-11 (אילוץ ארכיטקטוני שהתגלה תוך-כדי, נאכף כבר):** Sessions נקרא **פעם אחת** בלבד לכל request (`test_session_snapshot.py`) — `app.py`'s `run_agent()` כבר טוען snapshot יחיד ומעביר אותו הלאה ל-`resolve_context_pronouns`/`_build_tool_context`. גרסה ראשונה של המימוש קראה ל-`get_active_lead_candidate()` (קריאת Sessions נוספת) **בלי תנאי, על כל הודעה** — הפרה ישירה, שנתפסה ע"י הרגרסיה המלאה (`test_session_snapshot.py` נכשל: "Expected 1 Sessions GET, got 2"; `test_capture_router_wiring.py` נכשל גם, כי fake session-store minimal לא מימש את המתודה החדשה). **תוקן:** `handle_lead_candidate()` קיבל פרמטר `session` חדש — ה-snapshot שה-caller כבר טען, מועבר מ-`app.py`'s `_session_snapshot`. `_resolve_lead_clarification()` קורא `active_lead_candidate` **מה-snapshot הזה**, לא קורא ל-`lead_sessions.get()`/`get_active_lead_candidate()` בעצמו — רק במקרה הנדיר שבו יש state ממתין (ולא בכל הודעה) הוא מבצע כתיבה (שממילא קוראת internally, כמו התקדים הקיים ב-`set_active_lead_candidate`).
+
+### Consumer Audit (grep מלא בוצע כנדרש)
+
+`grep -rn "active_lead_candidate\|pending_lead_preview\|lead_sessions\|session_store" --include="*.py" .` — כל writer/reader/clear אותרו (session_store.py's methods עצמן, שני call sites ב-`lead_candidate_handler.py` לבוקמארק הישן, `interaction_engine.py`/`cmd_decision.py` למתודות גנריות אחרות שלא נוגעות ב-`active_lead_candidate` בכלל). אף consumer קיים לא הניח שקיים `name`/שה-candidate תמיד מלא — הבדיקה `cand.get("state") != "needs_clarification": return None` היא ההגנה המפורשת שמונעת בדיוק את זה.
+
+### בדיקה
+
+`test_bug099c_lead_clarification.py` (חדש, 25/25): מסלול-שמח מקצה-לקצה (2 הודעות, preview אחד, payload נכון כולל הטקסט המקורי לא תשובת-השם), ביטול, פקיעת TTL, פקודה-חדשה-מפריעה, תשובה-לא-ברורה (כולל "נדבר אחר כך" — האזהרה שנתפסה תוך-כדי), שם-פסול ("בקומה" עצמו), כשל `propose_action()` (state שורד), 3 תנאי-כניסה (בלי טלפון / intent שגוי / Tier 4 — אף אחד לא מפעיל הבהרה), `session=None` (לא קורס, לא "פותר" בטעות), ביקורת-consumer (בוקמארק ישן לא מתבלבל), ובדיקת LL-11 מפורשת (`handle_lead_candidate()` לא קורא ל-Sessions כשsnapshot כבר סופק). **Regression suite מלא כנדרש:** `test_bug096` (29/29), `test_bug098` (16/16), `test_bug099a` (9/9), `test_bug099b` (14/14), `test_bug099b1` (20/20), `test_bug101` (19/19), `test_bug106` (7/7), `test_session_store_contract.py` (4/4), `core/router/test_router.py` (44/44), `test_capture_router_wiring.py` (10/10), `test_session_snapshot.py` (2/2, LL-11 עצמו), `smoke_tests.py`, כל שאר `test_*.py` בריפו — כולם ירוקים, אפס רגרסיה.
+
+- **PR:** #308 (אותו PR כמו BUG-106, commit נפרד).
+- **Merged:** ✅ כן — `c1311b8` (`origin/main`), מאומת ב-grep ישיר: `_maybe_start_lead_clarification`, `_resolve_lead_clarification`, `_validate_clarification_name` קיימים ב-`core/lead_candidate_handler.py`, וקריאת `app.py` כוללת `intent=route.intent, session=_session_snapshot`.
+- **Deployed:** ✅ כן — Render deploy notification עבור `c1311b8` התקבל.
+- **Verified בפרודקשן — הרצף החי המלא (2 הודעות נפרדות, כנדרש):**
+  - הודעה 1 (בלי שם, רק טלפון) → תשובת ההבהרה המדויקת שנדרשת: "זיהיתי בקשה ליצור ליד ואת מספר הטלפון 0501234571, אבל לא מצאתי שם. מה שם הליד?" — session record `rec3YS5Zcr2FenX7z` (מתוך 18 כפילויות, `_select_canonical_session_record` בחר בעקביות).
+  - הודעה 2 (נפרדת! רק "יוסי כהן") → preview נכון עם שם+טלפון+הקשר מהודעה 1 (ה-`original_text` נשמר ולא אבד) — אותה `rec3YS5Zcr2FenX7z` שוב ב-PATCH, מוכיח ששתי הקריאות נחתו על אותה רשומת Session (BUG-106 עשה את עבודתו).
+  - אישור ("כן") → רשומת Airtable **יחידה** נוצרה: `recpD6csFGrLCpGjT` — אין כפילות.
+  - **הוכחת-בונוס לניקוי ה-state:** הודעה עוקבת בלתי-קשורה ("שמואל כהן") **לא** נבלעה כהמשך-הבהרה — מוכיח ש-`clear_active_lead_candidate()` פעל נכון אחרי יצירת ה-ActionContract, ולא נשאר state תקוע.
+  - כל הראיות הנ"ל מלוג פרודקשן שהועבר ישירות (לא unit test, לא הסקה).
+- **סטטוס:** ✅ VERIFIED IN PROD (12/07/2026) — merged + deployed + live 2-message sequence + session-record consistency + state-clear regression, כל התנאים שנדרשו לפני סימון ✅ מולאו.
+
+---
+
+## BUG-107 — חיפוש Deals עם שם-שדה שגוי → 422 INVALID_FILTER_BY_FORMULA → A32 false MISMATCH — 🔴 נרשם, לא תוקן (registration-only)
+
+- **תאריך:** 12/07/2026
+- **מקור:** התגלה אגב אימות-חי של BUG-106/BUG-099c (אותו לוג פרודקשן) — **אינו** תקלה ב-099c; תקלה נפרדת במסלול החיפוש הכללי. **לא לפתוח מחדש PR #308 בגלל זה.**
+- **תיאור:** חיפוש בטבלת "עסקאות (Deals)" בונה formula עם שם-שדה שגוי (`SEARCH('שמואל כהן', {שם})` — השדה `שם` כנראה אינו קיים/אינו נכון בטבלת Deals), מה שגורם ל-Airtable להחזיר `422 INVALID_FILTER_BY_FORMULA` חי בפרודקשן. השילוב של השגיאה הזו (Deals) יחד עם שתי תוצאות "0 רשומות" לגיטימיות מ-Leads/Contacts מפעיל אזהרת A32 anti-hallucination שגויה: `MISMATCH` ("agent says 'not found' but tool results contain data") — כלומר שכבת ה-anti-hallucination מפרשת שגיאת-422 (לא "לא נמצא") כאילו יש נתונים שהסוכן התעלם מהם.
+- **קבצים לחקירה (טרם נחקרו — Contract Chain טרם בוצע):** מודול החיפוש הכללי שבונה formulas לפי טבלה (ככל הנראה `crm.py`/`airtable_tools.py`/`contact_resolver.py` או שכבת "חיפוש-בכל-הטבלאות"), שם השדה הנכון בטבלת "עסקאות (Deals)" מול `airtable_schema.py`, ו-`core/anti_hallucination.py`'s טיפול ב-tool-error/422 מול "0 records" לגיטימי.
+- **השערת שורש (לא מאומתת עדיין):** קרוב לוודאי שם-שדה קשיח (hardcoded) שגוי או לא-מעודכן מול הסכימה בפועל של טבלת Deals — ייתכן קשור לדפוסי drift שכבר תועדו ב-`docs/governance/ARCHITECTURE_DRIFT_MAP.md`. דורש grep+trace לפני כל תיקון (Contract Chain), לא הונח כאן.
+- **סטטוס:** 🔴 נרשם בלבד — לא נחקר לעומק, לא תוקן, לא PR. ממתין להנחיה להתחיל Contract Chain.
+
+---
+
+## BUG-108 / BUG-PENDING-APPROVAL-B (PR-0) — Pending ActionGateway approval שורד הודעות-ביניים לא-קשורות (context poisoning) — ✅ VERIFIED IN PROD
+
+- **תאריך רישום:** 12/07/2026. **תאריך מימוש (PR-0):** 12/07/2026.
+- **מקור:** התגלה אגב אימות-חי של BUG-106/BUG-099c — **אינה** תקלה ב-099c. נרשם תחילה כפריט-החלטה בלבד (3 אפשרויות), מומש כ-PR-0 לפי handoff נפרד (`PR0_PENDING_APPROVAL_CONTEXT_SAFETY.md`) שבחר באפשרות #3: "כן" אחרי הודעת-ביניים **חייב** להציג מחדש את תיאור הפעולה לפני ביצוע.
+- **תרחיש הבאג:** `preview: יצירת ליד יוסי כהן → הודעת ביניים: שמואל כהן → "כן" → יוסי כהן נוצר` — המשתמש התכוון "כן" בהקשר ההודעה האחרונה, אבל ActionGateway אישר את ה-ActionContract הפתוח מההודעה הישנה יותר. לא disambiguation — context poisoning: הפעולה בוצעה עם אישור אמיתי, אבל ההקשר השתנה בינתיים.
+
+### Contract Chain (בוצע לפני כל שינוי קוד, כנדרש ע"י PR-0 doc)
+
+מיפוי גילה **שלושה מנגנוני pending-approval נפרדים ובלתי-תלויים** בקוד, לא אחד:
+1. `core/action_gateway.py`'s `ActionContract`/`ExecutionLedger` (מפתח: `canonical_user_id`, **אין TTL בכלל**) — המנגנון החי בפועל לאישור כתיבת-ליד של LCH (`core/lead_candidate_handler.py::_propose_lead_write` קורא ל-`propose_action()` **תמיד**, "regardless of FEATURE_ACTION_GATEWAY" לפי הערת הקוד עצמה). **זה בדיוק המנגנון שמשחזר את התרחיש בדוח.**
+2. `app.py`'s `_pending_approvals` dict (מפתח: `chat_id`, TTL=600s) — מזין גם `_handle_approval_callback_impl()` (כפתורי טלגרם) וגם אישור-חופשי-בטקסט עבור בקשות Agent כלליות (`run_agent`'s pending-check block). **אותה תבנית פגיעות בדיוק**, אך לא זה שמשחזר את התרחיש שבדוח.
+3. `event_bus.py`'s `PendingActionsStore`/`bus` (מפתח: `chat_id`, TTL=30min) — Stage-A legacy fallback, נדרש רק כש-`FEATURE_ACTION_GATEWAY` כבוי וגם אין live Gateway contract — נדיר בפועל.
+
+ה-Scope שב-PR-0 doc הזכיר `_handle_approval_callback_impl()`/"EventBus" (מנגנונים #2/#3), אך התרחיש המדווח בפועל משחזר במנגנון #1. **הוצג למשתמש במפורש** (AskUserQuestion) — הוחלט: **ActionGateway בלבד (מנגנון #1)** למימוש הזה; מנגנונים #2/#3 יש להם את אותה בעיה שורשית אך נשארים מחוץ ל-scope, לפתיחה כ-follow-up נפרד אם ירצו.
+
+שאר תשובות ה-Contract Chain: `route_confirmation_word()` (single live contract) מאשר ומבצע מיידית ללא שום בדיקת "האם עבר זמן/הודעה מאז ה-preview" — `ActionContract` לא נשא `created_at`-based TTL ולא state של "הופרע". הודעה שאינה כן/לא/disambiguation/combined נופלת פשוט הלאה לזרימת Context Pronoun Resolution/Agent/LCH בלי לגעת ב-Gateway בכלל. כמה contracts pending בו-זמנית אפשריים (disambiguation קיים מטפל). הודעת-ביניים יכולה בהחלט ליצור בעצמה ActionContract חדש (fingerprint שונה → contract נפרד, לא מתמזג).
+
+### תיקון
+
+- **`core/action_gateway.py`:** `ActionContract` קיבל שני שדות בוליאניים חדשים: `context_interrupted`/`reconfirmation_required` (ברירת מחדל `False`) — לא נדרש store חדש. `ExecutionLedger.mark_context_interrupted(canonical_user_id)` (חדש) מסמן כל contract pending של הזהות כ-`context_interrupted=True`, בלי לגעת ב-status/dispatch. `ActionGateway.mark_context_interrupted()` (חדש) — delegate ציבורי. `_describe_contract_for_reconfirmation(contract)` (חדש) — תיאור עסקי קריא: עבור `airtable_add`/`airtable_update` על טבלת Leads מציג שם+טלפון+domain בפועל (לא internal id); עבור כל tool אחר, `"{tool_name} / {table}"` fallback גנרי. `route_confirmation_word()`'s single-live-contract branch: אם `context_interrupted=True` וטרם `reconfirmation_required` — **לא מבצע**, מציג תיאור עסקי + "לאשר אותה? (כן/לא)", מסמן `reconfirmation_required=True`; אם `reconfirmation_required` כבר `True` — מבצע רגיל (`approve()` הקיים, ללא שינוי בלוגיקת ה-dispatch/execute עצמה). `route_cancellation_word`/`route_disambiguation`/`route_combined_word` **לא שונו** — disambiguation הקיים ממשיך בדיוק כפי שהיה (הבדיקה החדשה חלה רק בענף single-contract).
+- **`app.py`:** נקודת-חיבור יחידה — אחרי כל בדיקות combined/disambiguation/confirm/cancel (שכולן `return` כשמזוהות), לפני "2.6 Context Pronoun Resolution": `action_gateway.mark_context_interrupted(identity.memory_key)`. רץ בדיוק עבור הודעה שהגיעה לנקודה הזו בלי שנצרכה כ-resolution לאף contract חי — כלומר "הודעת ביניים" לפי ההגדרה של ה-state machine. הודעת ה"כן" עצמה שכן פותרת contract חי חוזרת (`return`) **לפני** השורה הזו, כך שהיא לעולם לא מסמנת את עצמה כהפרעה (DoD #1 שלם).
+- **הוחלט במכוון לא לממש** את השדות `last_prompt_message_id`/`last_user_message_sequence` שה-doc הציע: העיצוב שנבחר (סימון פרואקטיבי של כל pending contract בכל הודעה שאינה resolution) משיג את כל ה-DoD בלי לתלות ב-message_id/sequence-counter, שהיו מוסיפים plumbing חוצה-קבצים (LCH+app.py) ללא תועלת התנהגותית נוספת — עקבי עם "מינימלי — state tracking בלבד" שה-doc עצמו דורש.
+
+### בדיקה
+
+`test_pr0_pending_approval_context_safety.py` (חדש, 26/26): DoD #1 (כן ישיר, ללא הודעת ביניים — מבצע מיידית, לא נשבר), #2 (הודעת ביניים → כן → לא מבצע, `reconfirmation_required` הופך `True`), #3/#9 (התיאור המוצג הוא עסקי-קריא — כולל תרחיש Leads מדויק עם שם+טלפון בפועל — ולא internal contract_id בלבד), #4 (כן נוסף אחרי reconfirmation מבצע בדיוק את אותו payload, פעם אחת), #5 (לא אחרי reconfirmation מבטל, לא מבצע), #6 (פעולה חדשה שמגיעה בזמן pending מקבלת contract_id נפרד, לא מתמזגת עם הישן), #7 (2+ contracts pending → disambiguation קיים ממשיך לעבוד בדיוק כפי שהיה, גם כששניהם מסומנים interrupted), #8 (contract שבוצע יוצא מ-`find_live_contracts`, lifecycle לא נפגע). **Regression suite מלא:** `test_action_gateway.py` (41/41), `test_bug070_combined_wording.py` (27/27), `test_bug070_pending_approval_multi.py` (9/9), `test_bug099c_lead_clarification.py` (25/25), `test_bug106_session_determinism.py` (7/7), `smoke_tests.py` (כולם PASS), `python3 -m compileall app.py core/action_gateway.py core/lead_candidate_handler.py` — כולם ירוקים, אפס רגרסיה.
+
+### Scope
+
+תואם למדויק את ה-Scope שהוחלט (ActionGateway בלבד): נגעו רק ב-`core/action_gateway.py` ו-`app.py` (שורה אחת, נקודת-חיבור). לא נגעו: `dispatch`/`execute` logic של ActionGateway (`_execute_contract`/`approve()`'s dispatch נשארו ללא שינוי), `FEATURE_ACTION_GATEWAY` flag, `LeadsWriteGate`, לוגיקת disambiguation הקיימת. מנגנונים #2 (`app.py`'s `_pending_approvals`) ו-#3 (`event_bus.py`) **לא טופלו** — נשארים עם אותה פגיעות שורשית, למי שירצה follow-up נפרד.
+
+- **PR:** #311 (`claude/table-incorrect-names-6chfvb` → `main`) — **הראשון משני PRs**, ראה Follow-up למטה.
+- **Merged:** ✅ כן — `233b196` (`origin/main`), מאומת ב-grep ישיר מול `origin/main`: `context_interrupted`/`reconfirmation_required`/`mark_context_interrupted`/`_describe_contract_for_reconfirmation` קיימים ב-`core/action_gateway.py`, וקריאת `app.py` ל-`mark_context_interrupted` קיימת בשורה 1725.
+- **Deployed:** דווח ע"י המשתמש (12/07/2026), Render deploy live for `c1311b8`→ בפועל commit `233b196` פעיל.
+- **Verified בפרודקשן (הרצף המקורי — preview→כן ישיר, ללא הודעת ביניים):** ✅ עבד כצפוי.
+- **⚠️ פער שנתגלה באימות-חי (12/07/2026) — ראה Follow-up:** רצף אמיתי בפרודקשן (`preview: צור ליד מעיין יכ` → `/update` → `בדיקה` → `כן`) **לא** הפעיל reconfirmation — ה-"כן" ביצע מיידית. שורש: ה-hook היחיד (PR #311) חי **בתוך** `run_agent()`, ו-`/update` + תשובת-הטקסט שלו (`capture_text` ב-`cmd_update.py`) עוברים ב-`app.py`'s webhook דרך `bot.process_new_updates()` **בלי לעבור דרך `run_agent()` בכלל** — לכן ה-hook מעולם לא רץ עבורן.
+
+---
+
+## Follow-up ל-BUG-PENDING-APPROVAL-B — Global Ingress Context Gate (PR #311 לא כיסה מסלולים שעוקפים run_agent) — ✅ VERIFIED IN PROD
+
+- **תאריך:** 12/07/2026.
+- **מקור:** לוג פרודקשן אמיתי שהמשתמש הדביק, שאמור להוכיח VERIFIED IN PROD — במקום זאת חשף שה-fix של PR #311 לא מספיק.
+
+### שורש (מאומת, לא הונח)
+
+מיפוי מלא של `app.py`'s Telegram/WhatsApp webhooks גילה **מנגנון עקיפה רחב בהרבה מ-`/update` בלבד** — כל אחד מהמסלולים הבאים מדלג לגמרי על `run_agent()`, ולכן על ה-hook היחיד שהיה קיים בתוכו:
+1. כל callback_query (כפתורי inline: `upd_domain:`, `upd_type:`, weekly-summary, **וגם** `approve:`/`reject:` ששייכים למנגנון הנפרד `app.py`'s `_pending_approvals`).
+2. כל slash command (`/update`, `/status`, `/schema`, `/cancel`, `/convert` וכו').
+3. טקסט חופשי שנלכד ע"י wizard מפעיל (`cmd_update.py`'s `capture_text`, מסונן ב-`app.py` דרך `has_pending_text_capture`).
+4. קובץ/תמונה שנלכדים ע"י אותו wizard (`capture_photo_or_document`).
+5. Decision Hub attachment-reference handling (`FEATURE_DECISION_HUB`, flag-gated).
+6. מדיה כללית (voice/photo/document) מחוץ ל-wizard (`_handle_telegram_media`).
+7. מדיה ב-WhatsApp (Twilio + Meta Cloud API).
+
+מסלולים #7/#9 מהמיפוי הקודם (dedup/junk filters) **אינם** מסלולי-עקיפה אמיתיים — הודעה כפולה/זבל אינה "פעולה חדשה" ואינה אמורה להפריע לכלום.
+
+### עיצוב שהוחלט (הוראה מפורשת מהמשתמש — "אל תתקן כל bypass point בנפרד")
+
+**לא** תוקן כל אחד מהמסלולים הנ"ל בנפרד. במקום זאת: **קריאה אחת לכל webhook ערוץ**, בגבול משותף — אחרי אימות (signature) + סינון junk/idempotency/duplicate + resolve_identity, לפני כל ניתוב callback/command/wizard/media/Decision Hub/Agent/early-return. ה-hook הישן בתוך `run_agent()` (PR #311) **הוסר לגמרי** — לא נשמרו שני מנגנונים מקבילים.
+
+### תיקון
+
+- **`core/action_gateway.py`:** `ActionGateway.is_own_resolution_event(canonical_user_id, text)` (חדש) — קובע אם טקסט הוא ניסיון-resolution אמיתי (משתמש **באותם** `_CONFIRM_KEYWORDS`/`_CANCEL_KEYWORDS`/`_parse_ordinal`/`_parse_combined` שה-routes עצמם כבר משתמשים בהם, כולל התקדים של BUG-070 שספרה בודדת נחשבת disambiguation רק כש-2+ contracts חיים) — כך שאין סיכון לסטייה בין הבדיקה הזו לבין ההתנהגות האמיתית של `route_confirmation_word`/`route_cancellation_word`/`route_disambiguation`/`route_combined_word`.
+- **`app.py`:** hook יחיד חדש — `_apply_ingress_context_gate(identity, event)` + `_IngressEvent` (dataclass: channel/kind/text). קורא ל-`is_own_resolution_event` (רק כש-`kind=="text"`) — אם אמת, לא עושה דבר (המסלול הרגיל יפתור); אחרת, `mark_context_interrupted`.
+- **חוברה בכל אחד מ-6 נקודות ה-webhook** (Telegram: callback/text/media; WhatsApp: Twilio + Meta), **בלי** לגעת ב-dispatch/execute logic. ה-hook הישן (`app.py` שורה 1725 מ-PR #311) **הוסר**.
+
+### Fail-closed מפורש — context_integrity_unknown (תיקון לאחר code review)
+
+בסקירה ראשונה, ה-fallback (כשהקריאה הראשית ל-`mark_context_interrupted` נכשלת) פשוט ניסה להפעיל מחדש את אותה סמנטיקה (`context_interrupted=True`) דרך קוד חלופי. code review דרש הבחנה מפורשת: **כשל ב-marking אסור שישאיר contract כאילו ההקשר בטוח, אבל גם אסור שיפיל את ההודעה העסקית הנכנסת** — יש לסמן את ה-integrity כ-"לא-ידוע" (state נבדל, לא מתבלבל עם הפרעה אמיתית), ולאפשר routing להמשיך כרגיל.
+
+- **שדה חדש ל-`ActionContract`:** `context_integrity_unknown: bool = False` — נבדל מ-`context_interrupted` (state שונה, נצפה בנפרד ב-logs/audits).
+- `ExecutionLedger.mark_context_integrity_unknown()`/`ActionGateway.mark_context_integrity_unknown()` (חדשים) — מימוש **עצמאי**, כתוב בנפרד מ-`mark_context_interrupted` (לא reuse של אותה לולאה), כדי שבאג ספציפי לזה לא ישבור גם את זה.
+- `route_confirmation_word()`'s single-contract gate: `if (contract.context_interrupted or contract.context_integrity_unknown) and not contract.reconfirmation_required:` — שני המצבים נשערים **זהה** (לא מבצע, מציג תיאור עסקי, דורש כן נוסף), אך נשמרים כשדות נפרדים.
+- `_apply_ingress_context_gate()`: אם הקריאה הראשית ל-`mark_context_interrupted` זורקת exception — נרשם ERROR ונקרא `mark_context_integrity_unknown` (fallback עצמאי). אם **גם** זה נכשל (כשל כפול) — נרשם CRITICAL, לא בשקט; ההודעה הנכנסת **ממשיכה ל-routing הרגיל בכל מקרה** (ה-try/except בכל אתר-קריאה ב-webhook לא עוצר את הבקשה) — רק אישור מאוחר מושפע.
+- נבדק במפורש: `T11` (כשל ראשי → מסומן `context_integrity_unknown`, לא `context_interrupted`), `T12` (מצב "לא-ידוע" חוסם ביצוע ישיר בדיוק כמו הפרעה אמיתית), `T13` (כשל כפול → CRITICAL, אין קריסה, הבקשה חוזרת 200 כרגיל) — ב-`test_pr0_ingress_context_gate.py`.
+
+### שלושה שערים לפני merge (נדרשו במפורש ע"י המשתמש, כל אחד עם בדיקה נפרדת)
+
+1. **הוכחת מיקום גלובלי** (לא רק טענה) — `test_pr0_gates_structural.py`'s Gate 1a-1e: בדיקת AST על `app.py` בפועל, משווה מספרי-שורה, מוכיחה שבכל אחד משלושת ה-webhooks הסדר הוא בדיוק `auth/filter/dedup → identity resolution → gate → routing`, לכל הענפים (callback/text/media בטלגרם; Twilio/Meta ב-WhatsApp) — לא רק שהתנהגות היום נכונה, אלא שהמבנה עצמו אוכף את זה (רגרסיה עתידית שתשבור את הסדר תיכשל ב-CI).
+2. **הוכחת reuse אמיתי, לא duplication** — `test_pr0_gates_structural.py`'s Gate 2a-2c: מוטציה על `_CONFIRM_KEYWORDS`/`_parse_combined` המשותפים מוכיחה ש-`is_own_resolution_event` **קורא מאותו מקור** כמו ה-routing האמיתי (לא רשימה מקבילה שיכולה לסטות), הבדל תקדים BUG-070 (ספרה בודדת) נבדק במפורש, וקריאת callback חיצונית (`approve:`/`reject:`, מנגנון נפרד) עדיין מפריעה ל-ActionGateway.
+3. **הפרדת שני התיקונים לקומיטים נפרדים** — ראה למטה.
+
+### מבנה קומיטים (PR #312, לפי דרישה מפורשת — לא לבלוע תיקונים בתוך diff הפיצ'ר)
+
+1. `fix(whatsapp): remove local resolve_identity import that shadows the module-level one` + `test_whatsapp_resolve_identity_scoping.py` (חדש, 4/4) — תיקון scoping עצמאי (Python: import מקומי בהמשך הפונקציה הופך את השם ל-local על פני **כל** הפונקציה, כולל לפני שורת ה-import עצמה), תקף גם בלי הפיצ'ר.
+2. `fix(telegram-webhook): run idempotency dedup before command/wizard dispatch` + `test_telegram_dedup_ordering.py` (חדש, 8/8) — תיקון סדר עצמאי (dedup רץ אחרי command/wizard dispatch, כך שהודעה כפולה בוצעה פעמיים), תקף גם בלי הפיצ'ר.
+3. `feat(action-gateway): global ingress context gate at the webhook boundary` — הפיצ'ר עצמו (מעל שני התיקונים לעיל), עם `test_pr0_ingress_context_gate.py` ו-`test_pr0_gates_structural.py`.
+
+### בדיקה (מלא)
+
+`test_pr0_ingress_context_gate.py` (33/33) — אינטגרציה אמיתית מול Flask test client על `/telegram`, `/whatsapp`, `/webhooks/meta/whatsapp`: כל מחלקת מסלול (slash command, wizard text-capture, callback לא-קשור, callback `approve:`/`reject:`, מדיה כללית, Decision Hub attachment reference, WhatsApp Twilio, Meta WhatsApp) מפריעה; "כן" אמיתי **לא** מפריע לעצמו; הודעה כפולה/inbound זבל **לא** מפריעים (מסוננים לפני ה-gate); fail-closed (כשל בודד → `context_integrity_unknown`; חוסם ביצוע כמו הפרעה אמיתית; כשל כפול → CRITICAL, לא קורס). `test_pr0_gates_structural.py` (39/39) — Gate 1+2 כמתואר למעלה. `test_whatsapp_resolve_identity_scoping.py` (4/4), `test_telegram_dedup_ordering.py` (8/8). **Regression suite מלא (כל `test_*.py` בריפו):** כולם ירוקים, `smoke_tests.py` PASS, `python3 -m compileall app.py core/action_gateway.py cmd_update.py` — אפס רגרסיה.
+
+### Scope
+
+זהה ל-PR #311 (ActionGateway בלבד) — מנגנונים #2 (`_pending_approvals`)/#3 (`event_bus.py`) לא טופלו — נשאר follow-up נפרד אם ירצו.
+
+- **PR:** #312 (`claude/table-incorrect-names-6chfvb` → `main`), 4 קומיטים (3 קוד + docs). #311 כבר merged וסגור — לא ניתן "לעדכן" אותו ישירות ב-GitHub; זהו PR נפרד שמשלים את אותה עבודה, לפי פרוטוקול ה-merged-PR הקיים בריפו.
+- **Merged:** ✅ כן — `417cf45` (`origin/main`), CI ירוק (`backend-ci`/`frontend-ci`/Vercel) לפני מיזוג, אין review comments פתוחים. מאומת ב-grep ישיר מול `origin/main` (לא רק merge status): `context_integrity_unknown`/`mark_context_integrity_unknown`/`is_own_resolution_event` ב-`core/action_gateway.py`; `_apply_ingress_context_gate`/`_IngressEvent` בכל 4+ אתרי הקריאה ב-`app.py`; **אפס** מופעים של `from identity import resolve_identity` מקומי (תיקון ה-scoping אומת שנעלם); סדר ה-dedup לפני `text.startswith("/")` אומת ב-`app.py`.
+- **Deployed:** ✅ כן — "Deploy live for `417cf45`" (12/07/2026 13:54).
+- **Verified בפרודקשן (הגבול עצמו — reconfirmation מופעל):** ✅ כן — לאחר `/cal` ופעולה נוספת, ה-"כן" הראשון **לא** בוצע והציג מחדש את הליד הממתין כנדרש. **זו ההוכחה החיה שה-global ingress gate עובד** — בדיוק התרחיש שהמנגנון הקודם (PR #311) פספס.
+- **⚠️ חוסם חדש שנחשף באימות-חי — ראה Follow-up #2 למטה:** ה-"כן" השני (ה-reconfirmation הלגיטימי) נחסם ע"י `guards.idempotency` כ-duplicate של ה-"כן" הראשון — dead end מוחלט (אין דרך לעקוף/לנסות שוב, רק ליצור פעולה מחדש).
+- **סטטוס:** ✅ תוקן בקוד, מוזג, ונפרס — הגבול עצמו אומת חי בפרודקשן. חוסם חדש (idempotency key) תוקן ב-Follow-up #2.
+
+---
+
+## Follow-up #2 ל-BUG-PENDING-APPROVAL-B — מפתח ה-idempotency הטלגרמי לא היה event-identity — ✅ VERIFIED IN PROD
+
+- **תאריך:** 12/07/2026.
+- **מקור:** אימות-חי בפרודקשן של הגבול הגלובלי (Follow-up #1, למעלה) — הגבול עצמו עבד, אבל חשף חוסם חדש: "כן" לגיטימי נחסם כ-duplicate.
+
+### שורש (מאומת ב-grep ישיר, לא הונח)
+
+`guards/idempotency.py`'s `IdempotencyStore.is_duplicate(channel, sender, content)` מחשב `hash(f"{channel}:{sender}:{content}")` — המימוש עצמו תקין ו**channel-agnostic**. הבעיה הייתה **מה כל caller מעביר בתור `content`**:
+- WhatsApp (Twilio, `app.py`): `dedup_key = msg_sid if msg_sid else incoming` — כבר משתמש ב-`MessageSid` הייחודי של Twilio. ✅ תקין.
+- Meta WhatsApp (`app.py`): `idempotency.is_duplicate("whatsapp_meta", sender, msg_id)` — כבר משתמש ב-`msg_id` הייחודי של Meta. ✅ תקין.
+- **Telegram (`app.py`):** `idempotency.is_duplicate("telegram", sender_user_id, text)` — מעביר את **טקסט ההודעה הגולמי**. ❌ זה הבאג: שתי הודעות טלגרם **נבדלות** (update_id/message_id שונים) יכולות לשאת טקסט זהה לגיטימית — הדוגמה הברורה ביותר: שני "כן" רצופים בזרימת ה-reconfirmation. מיפוי-תוכן (במקום מיפוי-זהות) גרם ל-"כן" השני להיחסם כ"כבר טופל", בלי שום דרך לשלוח אותו מחדש (הטקסט תמיד יהיה "כן").
+
+### תיקון (מינימלי, ממוקד — לא נגע ב-`guards/idempotency.py` עצמו)
+
+`app.py`'s Telegram call site בלבד: `_dedup_event_id = f"{update.update_id}:{update.message.message_id}"` — זהות האירוע של הספק (Telegram), לא הטקסט. `update_id` ייחודי per-bot לפי הבטחת Telegram עצמה (וזו בדיוק הסיבה ההיסטורית ל-idempotency guard — "Telegram retries"); `message_id` נוסף כהגנה-כפולה. ה-scoping לפי chat/sender כבר קיים דרך הפרמטר הקיים `sender_user_id` (הארגומנט השני, ללא שינוי). **סדר הבדיקות לא השתנה** — dedup עדיין רץ **לפני** ה-context gate (לא נחלש, לפי הוראה מפורשת).
+
+### בדיקה
+
+`test_bug_telegram_idempotency_key.py` (חדש, 17/17):
+1. אותו `update_id`/`message_id` פעמיים → השנייה נחסמת (רטריי אמיתי של טלגרם עדיין נתפס).
+2. `message_id` שונים עם טקסט "כן" זהה → **שתיהן** מעובדות (לא נחסמות).
+3. הרצף המלא של reconfirmation — "כן" ראשון (event id שונה, לא נחסם) → לא מבצע, מציג מחדש; "כן" שני (event id שונה נוסף, אותו טקסט, לא נחסם) → מבצע **פעם אחת בדיוק**; חזרה אמיתית על אותו event id של ה-"כן" השני **כן** נחסמת. משלב בדיקה אמיתית של `IdempotencyStore` + state machine אמיתי של `ActionGateway` יחד.
+
+**Regression suite מלא (כל `test_*.py` בריפו כולל `test_telegram_dedup_ordering.py`'s structural check ש-dedup עדיין לפני slash-command/gate):** כולם ירוקים, `smoke_tests.py` PASS, `python3 -m compileall app.py core/action_gateway.py cmd_update.py guards/idempotency.py` — אפס רגרסיה.
+
+### Scope
+
+נגעו רק ב-`app.py` (שורת ה-`content` שמועברת ל-Telegram call site). `guards/idempotency.py` עצמו, WhatsApp/Meta call sites, וסדר הבדיקות (dedup לפני gate) — **לא** שונו.
+
+- **PR:** #313 (`claude/table-incorrect-names-6chfvb` → `main`).
+- **Merged:** ✅ כן — `f8ce334` (`origin/main`), מאומת ב-grep ישיר מול `origin/main`: `_dedup_event_id = f"{update.update_id}:{update.message.message_id}"` קיים בשורות 2683-2684 של `app.py`.
+- **Deployed:** ✅ כן — "Deploy live for `417cf45`" (הפריסה של #312; #313 עצמו נכלל ב-deploy הבא).
+- **Verified בפרודקשן (הבדיקה עצמה — dedup לא חוסם reconfirmation לגיטימי):** ✅ כן — אימות-חי אישר: ה-global ingress gate וה-Telegram event-id dedup **שניהם עובדים כצפוי**. ה-"כן" הראשון (אחרי הפרעה) הציג מחדש נכון; ה-dedup כבר לא חסם את ה-"כן" השני.
+- **⚠️ חוסם שלישי שנחשף באימות-חי — ראה Follow-up #3 למטה:** אחרי שה-reconfirmation הוצג פעם ראשונה, הפרעה **שנייה** (wizard `/update` שהשלים פעולה עסקית אחרת) לא אילצה re-display נוסף — ה-"כן" הבא ביצע את הליד הישן **בלי** להציג אותו מחדש.
+- **סטטוס:** ✅ תוקן, מוזג, ונפרס — ה-dedup key עצמו אומת חי. חוסם נוסף (סמנטיקת ה-state, לא ה-dedup) תוקן ב-Follow-up #3.
+
+---
+
+## Follow-up #3 ל-BUG-PENDING-APPROVAL-B — בוליאנים לא מספיקים לייצג הפרעות חוזרות; FSM חסום-סיבוב-אחד — ✅ VERIFIED IN PROD
+
+- **תאריך:** 12/07/2026.
+- **מקור:** אימות-חי בפרודקשן (Follow-up #2 למעלה) — ה-gate וה-dedup עובדים; חוסם שלישי נחשף: הפרעה **שנייה** אחרי שה-reconfirmation כבר הוצג פעם אחת לא נתפסה.
+
+### שורש (מאומת, לא הונח)
+
+`context_interrupted`/`reconfirmation_required` הבוליאניים (PR #311) מייצגים רק "הופרע פעם אחת / לא" — ברגע ש-`reconfirmation_required=True` נקבע (אחרי ה-re-display הראשון), `route_confirmation_word()`'s תנאי הגישה (`if (context_interrupted or context_integrity_unknown) and not reconfirmation_required`) הופך תמיד ל-`False` (כי `reconfirmation_required` כבר `True`) — ולכן כל "כן" עתידי מבצע **מיידית**, בלי קשר לכמה הפרעות נוספות קרו בינתיים. זה בדיוק התרחיש שקרה בפרודקשן: preview → הפרעה #1 → "כן" (re-display, `reconfirmation_required=True`) → הפרעה #2 (`/update` wizard) → "כן" ביצע ישירות.
+
+### עיצוב שהוחלט (הוראה מפורשת מהמשתמש — לא recursive/infinite, bounded one-shot)
+
+המשתמש הציע תחילה מודל "context generation/version" (increment בכל הפרעה, השוואת version-at-proposal מול version-at-reconfirm) שמאפשר שרשרת בלתי-מוגבלת של re-displays. **באותה הודעה** המשתמש תיקן/הידק את המדיניות במפורש למודל **חסום, לא-רקורסיבי**: אחרי re-display אחד, כל אירוע נוסף (לא "כן"/"לא") **סוגר** את ה-contract לגמרי (SUPERSEDED), לא פותח סיבוב שני. ה-FSM הסופי המחייב:
+
+```
+PENDING
+  ├─ כן              → EXECUTED
+  ├─ לא              → CANCELLED
+  └─ הודעה אחרת      → RECONFIRM_REQUIRED
+
+RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
+  ├─ כן              → EXECUTED
+  ├─ לא              → CANCELLED
+  └─ כל דבר אחר      → SUPERSEDED (סופי — לא נפתח מחדש)
+```
+
+**הוחלט במכוון לא לממש** context_generation/version counter: המשתמש עצמו הוריד את זה לדרגת "audit-only, optional" באותה הודעה. ה-status הסופי `"superseded"` משיג את אותה ערובת-בטיחות (bounded recovery, לא infinite chain) בלי plumbing נוסף — עקבי עם ההחלטה הקודמת (BUG-108/PR-0) לא לממש `last_prompt_message_id`/`last_user_message_sequence`.
+
+### תיקון
+
+- **`core/action_gateway.py`:** `ExecutionLedger.mark_context_interrupted()`/`mark_context_integrity_unknown()` — לפני שמסמנים `context_interrupted`/`context_integrity_unknown`, בודקים `c.reconfirmation_required`: אם `True` (ה-prompt כבר הוצג) → `c.status = "superseded"` (סופי, לא "pending" יותר — נופל אוטומטית מ-`find_live_by_user`); אם `False` (הפרעה ראשונה) → מתנהג בדיוק כמו קודם. `ExecutionLedger.find_most_recent_by_user()` (חדש) — הקונטרקט האחרון (כל status) לזהות, לצורך הודעה ספציפית. `ActionGateway.describe_no_pending_reason()` (חדש) — כש-`len(live)==0`: אם ה-contract האחרון הוא `"superseded"` → מציג תיאור עסקי + "הפעולה הקודמת בוטלה כי התחלת פעולה אחרת... שלח את הבקשה מחדש"; אחרת — ההודעה הכללית הקיימת (`"אין פעולה שממתינה לאישור."`, ללא שינוי ניסוח — נדרש ע"י `test_c89_preview_confirmation.py`'s assertion קיים). `route_confirmation_word()`'s ענף `len(live)==0` ו-`app.py`'s Stage A fallback (המסלול שבאמת נדרס כש-`FEATURE_ACTION_GATEWAY` כבוי, ברירת המחדל) שניהם עוברים דרך ה-helper המשותף הזה — כדי שההודעה הספציפית תגיע למשתמש בפועל, לא רק ב-Stage B התיאורטי.
+- **`compose_status_reply()`'s "executed" branch (שינוי נפרד, לפי בקשה מפורשת "Separately, change...")**: מציג עכשיו את התיאור העסקי הקפוא של ה-contract (`_describe_contract_for_reconfirmation`, אותו helper כמו ה-reconfirmation prompt) במקום `tool_name` גולמי — `"✅ בוצע: יצירת ליד: יוסי כהן, 050-1234567, real_estate | מזהה: recXXX"` במקום `"✅ בוצע: airtable_add | מזהה: recXXX"`. בטוח לעשות reuse כי `approved_payload == executed_payload` (ללא מוטציה בין הצעה לביצוע). tools בלי טבלה ב-payload (למשל `gmail_send_draft`) לא מושפעים — fallback ל-`tool_name` בדיוק כמו קודם.
+
+### בדיקה
+
+`test_bug_reconfirmation_oneshot_fsm.py` (חדש, 27/27):
+- **A** (הרגרסיה המדויקת שהמשתמש ביקש): `preview → הפרעה → כן → כן` — "כן" ראשון מציג מחדש, שני מבצע פעם אחת.
+- **B** (הרגרסיה השנייה המדויקת): `preview → הפרעה → כן → הפרעה נוספת → כן` — ה-contract נהיה `superseded`; "כן" האחרון **לא מבצע**; ההודעה הספציפית מוצגת (שם הפעולה + "שלח מחדש").
+- **C:** הפרעה שלישית אחרי supersede — no-op חסום, אין קריסה, אין דרדור נוסף.
+- **D:** "לא" אחרי reconfirmation עדיין מבטל (`status="rejected"`, לא `"superseded"`) — לא נפגע.
+- **E:** ה-fallback (`context_integrity_unknown`) מקבל את אותו bounded rule.
+- **F:** קבלת-הודעת-ביצוע מציגה תיאור עסקי (שם+טלפון), לא רק `tool_name`; tools בלי טבלה (למשל `gmail_send_draft`) לא מושפעים.
+
+**Regression suite מלא (כל `test_*.py` בריפו כולל `test_c89_preview_confirmation.py`'s pinned "אין פעולה שממתינה לאישור." exact-string assertion):** כולם ירוקים, `smoke_tests.py` PASS, `python3 -m compileall app.py core/action_gateway.py` — אפס רגרסיה.
+
+### Scope
+
+נגעו רק ב-`core/action_gateway.py` (state machine + describe_no_pending_reason + compose_status_reply) ו-`app.py` (שורה אחת — Stage A fallback קורא ל-helper המשותף במקום מחרוזת קשיחה). לא נגעו: global ingress gate (PR #312), Telegram event-id dedup (PR #313), `ActionContract`'s frozen payload semantics, immediate-confirm behavior (DoD #1 מ-PR-0 — עדיין ללא שינוי).
+
+- **PR:** #314 (`claude/table-incorrect-names-6chfvb` → `main`).
+- **Merged:** ✅ כן — `0ef5e85` (`origin/main`), מאומת ב-grep ישיר מול `origin/main`: `status = "superseded"` (שני המקומות), `find_most_recent_by_user`, `describe_no_pending_reason`, ו-`compose_status_reply`'s תיאור-עסקי (`label = _describe_contract_for_reconfirmation(...)`) קיימים.
+- **Deployed:** ✅ כן (מרומז מהלוג החי למטה — הקוד שהראה את ההתנהגות הנכונה חייב להיות זה שרץ בפרודקשן).
+- **Verified בפרודקשן:** ✅ כן — לוג פרודקשן מילולי מלא, 12/07/2026, תואם **בדיוק** (מילה במילה) לעיצוב:
+  1. preview: `"📋 זיהיתי ליד: מני מנחם (0567468374)\nלשמור? ענה כן לאישור או לא לביטול."`
+  2. הפרעה #1+#2 (`/update` + `מעניין`, לפני כל reconfirmation) — נבלעות כראוי, contract עדיין ניתן-להצלה.
+  3. "כן" ראשון → `"יש פעולה קודמת שממתינה לאישור: יצירת ליד: מני מנחם, 0567468374, general.\nלאשר אותה? (כן/לא)"` — **התאמה מדויקת** ל-`_describe_contract_for_reconfirmation`'s הפורמט ול-reconfirmation prompt. **אין** `airtable_add` בוצע.
+  4. הפרעה #3 (`/gmail` + "בדוק 5 מיילים אחרונים") **אחרי** שה-reconfirmation כבר הוצג — Agent מגיב כרגיל (Gmail לא מחובר), ה-contract מסומן `superseded` בשקט ברקע.
+  5. "כן" השני → `"הפעולה הקודמת בוטלה כי התחלת פעולה אחרת: יצירת ליד: מני מנחם, 0567468374, general.\nכדי לבצע אותה, שלח את הבקשה מחדש."` — **התאמה מדויקת** ל-`describe_no_pending_reason`'s superseded branch. **אין** ביצוע, אין רשומת Airtable.
+- **סטטוס:** ✅ VERIFIED IN PROD (12/07/2026) — merged + deployed + רצף חי מדויק עם לוגים אמיתיים, לא unit tests/merge/deploy בלבד.
+
+---
+
+## סיכום BUG-PENDING-APPROVAL-B (PR #311 → #312 → #313 → #314) — ✅ VERIFIED IN PROD, כל השרשרת
+
+כל ארבעת ה-PRs באשכול הזה אומתו חי בפרודקשן, כל אחד בתורו, ולבסוף השרשרת המלאה יחד (12/07/2026):
+1. **PR #311** — state fields + reconfirmation logic (`route_confirmation_word`'s single-contract gate).
+2. **PR #312** — global ingress context gate (מכסה slash commands/wizard/callbacks/media שעוקפים `run_agent()`).
+3. **PR #313** — Telegram idempotency key = event identity (`update_id:message_id`), לא טקסט — כדי ש-"כן" חוזר לא ייחסם.
+4. **PR #314** — bounded one-shot FSM (`SUPERSEDED` אחרי הפרעה שנייה) + קבלת-ביצוע עם תיאור עסקי.
+
+---
+
+## BUG-TMA-APPROVAL-TRUTHFULNESS (PR-0C0) — TMA `bulk_approve` סימן אושר בלי לבצע כלום; `_try_bus_action` בלע כל תוצאה בשקט
+
+- **דווח:** 12/07/2026, כחלק מ-Contract Chain רחב לשלושת מנגנוני האישור המקבילים (PR-0B `app.py::_pending_approvals`, PR-0C `event_bus.PendingActionsStore`, ומנגנון רביעי שהתגלה — טבלת Airtable "Approvals" הנצרכת אך ורק ע"י `tma_api.py`).
+- **מסך / מודול:** `tma_api.py` — `bulk_approve()` (route `/api/approvals/bulk`), `_try_bus_action()`, `act_on_approval()`.
+
+### Contract Chain מצומצם על טבלת Airtable "Approvals" (כפי שהתבקש לפני המימוש)
+- **Writer יחיד בפועל:** `_queue_tma_write_approval()` — כל רשומה נכתבת עם `CONTEXT_TYPE="tma_write"` ו-`CONTEXT_ID=<action name string>` (לעולם לא `event_bus` action_id אמיתי).
+- **Status transitions:** מודל 3-מצבים תקין וקיים מראש — `ממתין → מעבד (durable claim ב-Airtable) → אושר | נכשל`, ממומש נכון ב-`act_on_approval()`'s single-item approve path (claim לפני ביצוע, re-read בתוך lock סוגר race).
+- **קשר ל-EventBus IDs:** מכיוון ש-`CONTEXT_ID` הוא תמיד שם-פעולה של TMA ולא action_id אמיתי, `_try_bus_action()` מפספס תמיד היום ב-harmless way — **לא קיים היום תרחיש live שבו TMA מאשרת פעולת-כלי (tool-based) עם `.confirmed` subscriber אמיתי דרך הנתיב הזה.** זו תיקון-מסלול לתיקון האודיט הקודם שלי (שהניח בטעות שהתרחיש הזה קורה היום).
+- **סדר ביצוע:** בנתיב היחיד (`act_on_approval`) התיקון הקודם (BUG-090-ish 3-state) כבר הבטיח claim-before-execute-before-finalize. **הבאג האמיתי היה ב-`bulk_approve()` בלבד** — נתיב מקביל, נפרד, שמעולם לא קרא ל-`_execute_tma_write()`: הוא כתב `{"סטטוס": "אושר"}` ישירות ל-Airtable בלי ביצוע כלשהו, כלומר "בulk approve" של N רשומות low-risk לא ביצע אף פעולה אחת בפועל — TMA דיווחה ואישרה משהו שמעולם לא רץ.
+- **Restart behavior:** אין persistence ל-in-memory event_bus items — restart מוחק pending items שם. `_try_bus_action` על context_id שאבד ב-restart פשוט מחזיר False (miss), לא raise — לא היה תקין קודם (הערך פשוט נבלע ב-`except Exception: pass` ברמת DEBUG).
+- **Failure/retry states:** לפני התיקון — אין מסלול retry, כל exception אחרי claim משאיר רשומה תקועה לצמיתות ב-`מעבד`. אחרי התיקון — `_claim_and_execute_approval()` מחזירה רשומה שנתקעה ל-`ממתין` בכל exception לא-צפוי אחרי ה-claim, כדי לאפשר ניסיון חוזר.
+- **האם TMA מסמנת אושר לפני ביצוע:** **כן, זה בדיוק הבאג** — רק ב-`bulk_approve()`. הנתיב היחיד היה כבר תקין.
+
+### Root Cause
+כפילות קוד: `act_on_approval()` (יחיד) ו-`bulk_approve()` (מרובה) מימשו שתי גרסאות עצמאיות של אותה לוגיקה — האחת claim→execute→finalize מלאה, השנייה PATCH ישיר בלי execute בכלל. אין single source of truth לרצף האישור.
+
+### התיקון (commit על גבי `claude/table-incorrect-names-6chfvb`)
+1. **`_try_bus_action()`** — שוכתב להחזיר `bool` אמיתי. `_BUS_MISS_MESSAGES` (frozenset) מבחין בין "אין מה לסנכרן" (המצב הצפוי היום, לפי ה-Contract Chain למעלה) לבין "נמצא אבל event_bus עצמו דיווח כישלון" — כבר לא נבלע בשקט ב-DEBUG.
+2. **`_claim_and_execute_approval(approval_id, identity)`** — helper משותף חדש, ממומש פעם אחת: claim (`ממתין→מעבד` בתוך lock, re-read סוגר race) → `_execute_tma_write()` אם יש `tma_write` payload → finalize ל-`אושר` רק על הצלחה, אחרת `נכשל`. Exception לא-צפוי אחרי ה-claim מחזיר את הרשומה ל-`ממתין` (לא משאיר תקוע ב-`מעבד`).
+3. **`act_on_approval()`** — נתיב האישור הבודד שוכתב לקרוא ל-helper המשותף במקום ללוגיקה מוטבעת; נתיב הדחייה חושף `bus_synced` בתגובת ה-JSON במקום להשליך אותו.
+4. **`bulk_approve()`** — **התיקון המרכזי.** במקום `_at_patch(..., {"סטטוס": "אושר"})` ישיר, כל רשומה low-risk עוברת דרך `_claim_and_execute_approval()`. רשומות high/medium risk ממשיכות לא להיגע בהן (hard rule ללא שינוי). התגובה כוללת עכשיו `approved`/`failed`/`skipped` נפרדים במקום `approved`/`skipped` בלבד — "failed" חדש כדי לחשוף רשומות שנכשלו בביצוע בפועל, לא רק "לא low-risk".
+
+### Tests
+`test_pr0c0_tma_approval_truthfulness.py` (חדש, 22 assertions) — מכסה: miss strings מ-event_bus (כולל restart שמאבד in-memory item) → False; sync אמיתי → True; exception מ-event_bus לא מתפשט (נבלע ל-False); `bulk_approve` מבצע `_execute_tma_write` בפועל לפני ספירת "approved"; כשל ביצוע → "failed" ולא "approved" (הבאג המקורי); high/medium risk לא נגעת אף פעם; recovery מ-`מעבד` תקוע ל-`ממתין` אחרי exception לא-צפוי; `bus_synced` נחשף באמת (True/False) בתגובת reject. `test_approval_concurrency.py` הקיים עודכן (4 מקומות) להעביר `return_value=False` מפורש ל-mock של `_try_bus_action` — לפני התיקון `MagicMock()` לא-מוגדר לא נכנס אף פעם ל-JSON response, אחרי התיקון כן (ונכשל serialization בלי הערך המפורש).
+
+כל 22/22 assertions חדשות עברו, כל test_*.py הקיימים (כולל `test_approval_concurrency.py` המעודכן), `smoke_tests.py`, ו-`test_integration.py` עברו full run לאחר השינוי.
+
+- **Severity:** High — "אישור" כוזב על פעולות שלא בוצעו הוא בדיוק אותה מחלקת באג כמו BUG-108/BUG-PENDING-APPROVAL-B, בנתיב אישור נפרד.
+- **תוקן ב-commit:** `1d3ed4b` (PR #316, `75fc242` merge commit ל-`main`) — אומת ב-`git show origin/main:tma_api.py \| grep _claim_and_execute_approval` שהקוד קיים בפועל ב-main, לא רק ב-git log.
+- **תוקן ב-branch:** `claude/table-incorrect-names-6chfvb`
+- **Merged:** כן — PR #316
+- **Deployed:** לא ידוע — דרוש בדיקה ידנית (Render), לא אומת בסבב הזה
+- **Verified בפרודקשן:** לא — merge מאומת, production behavior לא נבדק חי
+- **סטטוס:** Merged. PR-0C (הגירת event_bus writers ל-ActionGateway) מתחיל כעת.
+- **הערה על scope:** זהו PR-0C0 בלבד — hotfix ל-truthfulness. PR-0C (הגירת 6 ה-writers החיים ל-`ActionGateway.propose_action()`, כולל הפיכת טבלת Airtable "Approvals" ל-projection/audit log או הסרתה) ו-PR-0B (הגירת `app.py::_pending_approvals`) עדיין פתוחים ונדרשים לפני תחילת UnderstandingResult/BUG-104A, לפי הנחיית הבעלים המפורשת.
+
+---
+
+## PR-0C — Phase 1/4: ActionGateway adapters for media_save_to_memory/send_followup/send_recovery
+
+- **דווח:** 12/07/2026, כחלק מהגירת PR-0C (event_bus approval writers → ActionGateway) לפי סדר עבודה שהבעלים אישר מפורשות: 4 PRs נפרדים כמו שרשרת BUG-108 (#311-#314) — (1) adapters, ללא שינוי התנהגות; (2) `app.py::_queue_approval` + כפתור טלגרם; (3) 5 ה-writers החיצוניים; (4) TMA + טבלת Airtable Approvals + deprecation ל-`PendingActionsStore`. זהו ה-PR הראשון בשרשרת.
+- **Finding מרכזי (grounding לפני מימוש):** `ActionGateway._execute_contract()` יודע לבצע אך ורק דרך `dispatch_tool(tool_name, tool_inputs, contract_id)` — אין נתיב גנרי ל"הרצת callback Python שרירותי". לכן "adapters" ל-`media_save_to_memory`/`send_followup`/`send_recovery` פירושו להפוך כל אחת מהן לכלי dispatcher אמיתי (checklist מלא: `tools/schemas.py`, `tool_registry.py`, `tools/dispatcher.py`), לא רק "לחבר" אותן ל-Gateway.
+- **החלטת עיצוב (owner-confirmed via AskUserQuestion):** מסלול "✏️ עריכה" ב-`media_handler.py` (שהיום מדלג על אישור לגמרי — pop + שמירה ישירה של הטקסט הערוך) **לא** ישמר כ-bypass. יטופל בפאזה מאוחרת יותר (לא כאן) כ"הצעה חדשה": ה-contract הישן נשאר, הטקסט הערוך יוצר `propose_action()` חדש עם preview טרי, וההצלה תתבצע רק אחרי "כן" מפורש — לא מתוך העריכה עצמה.
+
+### מה נבנה (Phase 1 — תוסף בלבד, אפס שינוי התנהגות לקוראים קיימים)
+1. **`tools/approval_actions.py`** (חדש) — שלוש הפונקציות, מראה 1:1 את הלוגיקה המקורית (`app.py::_handle_send_followup_confirmed`/`_handle_send_recovery_confirmed`, `media_handler.py::_save_transcript_to_memory`), כולל אי-הסימטריה הקיימת בין followup (לא בודק `delivery_success` לפני `followup_count+=1`) ל-recovery (כן בודק, לא מגדיל מונה) — לא תוקן כאן, לא בהיקף ה-migration. מחזירות את חוזה C53-A המובנה (`{ok, tool, external_id, evidence, user_message}`) במקום string גולמי.
+2. **`tool_registry.py`** — שלושת הכלים נרשמו: `roles_allowed=_INTERNAL`, `requires_approval=True`, `blocked_by_emergency=True`. שים לב: `blocked_by_emergency=True` הוא תוספת-בטיחות חדשה שלא הייתה קיימת קודם (event_bus.confirm() לא עבר דרך `EMERGENCY_STOP_ALL` בכלל) — לא "no behavior change" טהור, אבל תואם את הכוונה המוצהרת של הדגל ("חוסם את כל כלי הכתיבה/שליחה") ואינו פעיל היום כי אין עדיין caller אמיתי (Phase 2/3).
+3. **`tools/dispatcher.py`** — נוסף `case` לכל אחד משלושת הכלים, קורא ל-`tools.approval_actions.*`.
+4. **`action_validator.py`** — נוסף `_REQUIRED` entry לכל כלי (שלב-הגנה נפרד מ-tool_registry שכמעט התפספס — `dispatch_tool()` חוסם "כלי לא מוכר" *לפני* ה-match/case אם הכלי לא רשום כאן).
+5. **`tools/schemas.py`** — נוספו schemas ל-`_APPROVAL_ACTION_SCHEMAS_HIDDEN` (בדומה ל-`_CRM_SCHEMAS_HIDDEN`) — **במכוון לא** ב-`TOOL_SCHEMAS`, כדי שה-Agent tool_use loop לא יוכל להציע את הפעולות האלה בעצמו; רק קוד Python מהימן (Phase 2/3: `media_handler.py`/`followup_engine.py`/`core/lead_recovery.py`) יוכל לקרוא ל-`ActionGateway.propose_action(trusted_source=...)`.
+6. **`core/anti_hallucination.py`** — נוספו `_validate_media_memory_evidence`/`_validate_owner_draft_evidence` ל-`_EVIDENCE_VALIDATORS`. קריטי: מכיוון ש-`requires_approval=True`, שלושת הכלים אוטומטית ב-`_WRITE_ACTION_TOOLS`, ובלי validator `verify_execution()` היה נכשל-סגור על כל ביצוע (fail-closed by design) — זה היה חוסם כל approve() עתידי דרך ה-Gateway.
+
+### Tests
+`test_pr0c_action_gateway_adapters.py` (חדש, 34 assertions) — מכסה: לוגיקת כל פונקציה (הצלחה/כישלון, כולל exception מ-`send_outbound`); רישום ב-`tool_registry` + roles; ניתוב ב-`dispatcher`; היעדר מ-`TOOL_SCHEMAS`; `verify_execution` מקבל/דוחה נכון; **מסלול end-to-end מלא**: `ActionGateway.propose_action() → approve() → dispatch_tool() → tools.approval_actions.* → verify_execution()`, contract מסתיים ב-status `"executed"`.
+
+`test_c83_single_policy_source.py` הקיים עודכן (`EXPECTED_APPROVAL_TOOLS` allowlist) — נכשל בצדק אחרי הוספת 3 הכלים ל-registry (regression מכוון, לא שבור).
+
+כל 34/34 assertions חדשות עברו, כל test_*.py הקיימים (כולל השניים המעודכנים), `smoke_tests.py`, ו-`test_integration.py` עברו full run לאחר השינוי.
+
+- **Severity:** N/A — תשתית תוספת, לא תיקון באג. חלק מ-PR-0C.
+- **תוקן ב-commit:** `db98d82` (PR #317, `119f053` merge commit ל-`main`) — אומת ב-`git show origin/main:tools/dispatcher.py \| grep approval_actions` שהקוד קיים בפועל ב-main.
+- **תוקן ב-branch:** `claude/table-incorrect-names-6chfvb`
+- **Merged:** כן — PR #317
+- **Deployed:** לא ידוע — דרוש בדיקה ידנית (Render)
+- **Verified בפרודקשן:** לא — אין עדיין caller אמיתי (Phase 2/3 יחברו את 6 ה-writers + כפתור טלגרם + TMA)
+- **סטטוס:** Phase 1/4 של PR-0C הושלם ומוזג. Phase 2 (`app.py::_queue_approval` + כפתור טלגרם) — ראה רשומה הבאה.
+
+---
+
+## PR-0C — Phase 2/4: Telegram approve button executes through ActionGateway.approve()
+
+- **דווח:** 12/07/2026, המשך ישיר ל-Phase 1 (adapters, PR #317).
+
+### Finding מרכזי (grounding לפני מימוש)
+`app.py::_queue_approval` **כבר** קורא ל-`ActionGateway.propose_action()` היום — בין אם `FEATURE_ACTION_GATEWAY` דלוק (חוסם בפועל אם `propose_action` מחזירה `ok=False`) או כבוי (shadow mode, best-effort, לא חוסם). המשמעות: ה-caller **כבר** "migrated" בחלקו. הפער האמיתי היה במקום אחר — `_handle_approval_callback_impl` (כפתור ✅/❌ בטלגרם) **מעולם לא** קרא ל-`ActionGateway.approve()`; הוא ביצע `dispatch_tool()` ישירות ואז "סנכרן" ידנית את סטטוס ה-contract ב-ledger בדיעבד (בלוק "Stage B sync", מסתמך על fingerprint lookup חוזר) — כפילות מלאה של הלוגיקה ש-`approve()`/`_execute_contract()` כבר מספקים (claim → dispatch → verify_execution → עדכון סטטוס).
+
+### מה השתנה (`app.py::_handle_approval_callback_impl`, ענף approve עם tool_name)
+כאשר `FEATURE_ACTION_GATEWAY` דלוק **וגם** נמצא contract חי (`status="pending"`) עבור אותו fingerprint (tenant_id+canonical_user_id+tool_name+normalized_payload — אותו נוסחה בדיוק כבר בשימוש ב-SB-02 pre-check הקיים) — הביצוע עובר עכשיו דרך `gw.approve(contract_id, approver=..., approver_role=...)` במקום `dispatch_tool()` ישיר. אם לא נמצא contract (למשל shadow propose_action נכשל בשקט, או הדגל כבוי) — **נופל חזרה ל-fallback המקורי** (`dispatch_tool()` ישיר) בלי שינוי התנהגות — לעולם לא מצב כשל חדש לעומת היום.
+
+**BUG-074 קריטי:** `approver_role` המועבר ל-`approve()` הוא התפקיד של **המאשר בפועל** (`approver_identity`, שנפתר מ-`cq.from_user.id` בתחילת הפונקציה) — **לא** של `identity` (מבקש הפעולה המקורי, שמשמש רק לביצוע עצמו דרך `contract.actor_role`/`actor_external_id` שכבר הוקפאו ב-`_queue_approval`). זהו בדיוק ההבחנה ש-BUG-074 דורש במפורש בתיעוד הפנימי של `ActionGateway.approve()`. נבדק במפורש ב-test (ראה למטה) עם מבקש=employee (חסר סמכות אישור) ומאשר=owner — ה-contract מבוצע בהצלחה, מה שהיה נכשל אם הקוד היה (בטעות) גוזר את approver_role מה-מבקש.
+
+הבלוקים הקיימים סביב (SB-02 duplicate pre-check, SB-04 status wrap, Stage-B sync, executed_action_cache, cross-channel completion) **לא שונו** — הם ממשיכים לפעול נכון: ה-Stage-B sync block הופך אוטומטית ל-no-op כשמשתמשים בנתיב Gateway (כי ה-contract כבר "executed" בזמן שהבלוק רץ, לא "pending"), וה-SB-04 wrap מדלג על wrapping מחדש כי `result` הוא כבר string (מה ש-`compose_status_reply` כבר בנה בתוך `approve()`).
+
+### Finding נלווה (לא תוקן כאן — מחוץ ל-scope, מתועד להמשך טיפול)
+בזמן כתיבת הטסטים התגלה שה-SB-02 duplicate pre-check (`bus.get(action_id)`) **נכשל תמיד** בשקט: `EventBus` (המחלקה החיצונית שנחשפת כ-`bus` singleton) **אין לה מתודת `get()`** — רק ה-`PendingActionsStore` הפנימי כן. הקריאה תמיד זורקת `AttributeError`, נתפסת ע"י ה-`except Exception` הרחב ב-SB-02, ומתועדת רק כ-warning. המשמעות: הגנת ה-duplicate-approval-blocking של SB-02 מעולם לא הייתה פעילה בפועל מאז שנכתבה. זו לא רגרסיה מה-PR הזה (הבאג קדם לו) ולא תוקנה כאן כדי לא לערבב scope — ראוי לבאג נפרד.
+
+### Tests
+`test_pr0c_telegram_callback_gateway.py` (חדש, 8 assertions) — מריץ את `app._handle_approval_callback_impl` בפועל (עם `event_bus.bus` ו-`core.action_gateway.action_gateway` אמיתיים, רק `bot`/`resolve_identity`/`dispatch_tool`/דגלים מדומים): (1) דגל כבוי → נתיב legacy, dispatch פעם אחת; (2) דגל דלוק + contract חי → נתיב Gateway, dispatch פעם אחת, contract מסתיים "executed"; (3) **BUG-074 differential** — מבקש=employee, מאשר=owner → מבוצע בהצלחה (מוכיח ש-approver_role הוא של המאשר, לא המבקש); (4) דגל דלוק בלי contract → fallback ל-legacy, dispatch פעם אחת; (5) דגל דלוק + contract חי + ביצוע נכשל → contract מסתיים "failed", dispatch פעם אחת (ללא retry).
+
+כל 8/8 assertions חדשות עברו, כל test_*.py הקיימים, `smoke_tests.py`, ו-`test_integration.py` עברו full run לאחר השינוי.
+
+- **Severity:** N/A — migration, לא תיקון באג. חלק מ-PR-0C.
+- **תוקן ב-commit:** `0bca565` (PR #318, ראה סטטוס merge בהמשך)
+- **תוקן ב-branch:** `claude/table-incorrect-names-6chfvb`
+- **Merged:** לא עדיין (PR #318 פתוח, CI ירוק, אין review comments)
+- **Deployed:** לא
+- **Verified בפרודקשן:** לא — `FEATURE_ACTION_GATEWAY` כבוי כברירת מחדל, אין שינוי התנהגות היום עד שהדגל יופעל ויאומת בנפרד
+- **סטטוס:** Phase 2/4 של PR-0C הושלם (ממתין ל-merge). Phase 3 — ראה רשומה הבאה.
+
+---
+
+## PR-0C — Phase 3/4: migration של 3 מתוך 5 ה-writers החיצוניים + blocker לשניים הנותרים
+
+- **דווח:** 12/07/2026, המשך ישיר ל-Phase 2 (PR #318).
+
+### Finding מרכזי (grounding לפני מימוש)
+מיפוי מדויק של 5 ה-writers החיצוניים חשף שרק 3 מתוכם (media_handler.py, followup_engine.py, core/lead_recovery.py) שולחים payload שמתאים ל-3 ה-adapters שנבנו ב-Phase 1 — **אבל** ה-payload שלהם היה בפורמט "non-tool" (`{transcript, domain, source}` וכו', בלי `tool_name`/`tool_inputs`), מה שגרם ל-`_handle_approval_callback_impl` לנתב אותם דרך ה-ענף הישן `bus.emit(f"{action}.confirmed", ...)` **ולא** דרך ה-tool_name branch שכבר עבר migration ל-ActionGateway ב-Phase 2. כלומר: בניית ה-adapters (Phase 1) והעברת נתיב-הביצוע (Phase 2) לא הספיקו — היה צריך גם לשנות את **צורת ה-payload** בזמן ה-request כדי שהזרימה בפועל תשתמש בהם.
+
+שני writers נוספים (`email_inbound.py`'s `send_email_reply`, `abandoned_lead_worker.py`'s `send_bounce`) **אין להם `.confirmed` subscriber בכלל** — אישור שלהם היום מסתיים תמיד ב-"⚠️ אין handler — הפעולה לא בוצעה." שניהם flag-off (`EMAIL_INBOUND`, `ABANDONED_LEADS`) ולא מאומתים בפרודקשן. **החלטת בעלים (12/07/2026):** לא לגעת בשני אלה ב-PR-0C — להשאיר על המסלול הישן, ו**להוסיף blocker מפורש** שמונע הדלקת הדגלים לפני שהאדפטר המלא (schema+registry+dispatcher+service+tests) קיים.
+
+### מה השתנה
+1. **`core/action_gateway.py`** — `ActionGateway.propose_gated()` (helper משותף חדש) עוטף את הרצף shadow/enforced שכבר קיים ב-`app.py::_queue_approval` (דגל דלוק → `propose_action()` חוסם באמת; דגל כבוי → shadow best-effort, אף פעם לא חוסם, בולע exceptions) — כדי שלא כל writer חדש יממש את אותו קוד בעצמו. `_queue_approval` עצמו **לא שונה** (כבר עובד ונבדק ב-Phase 2 המוזג).
+2. **`media_handler.py`** — `_send_voice_approval_request()` בונה עכשיו payload עם `tool_name="media_save_to_memory"`+`tool_inputs`, קורא ל-`propose_gated()`. `_handle_memory_confirmed` וההרשמה שלו הוסרו (dead code — לא ניתן להגיע אליהם יותר). `_cb_voice_edit` תוקן לקרוא ל-`domain`/`source` מתוך `payload["tool_inputs"]` במקום מה-payload הישן (top-level) — **תיקון מכני בלבד**, לא redesign. מסלול "✏️ ערוך" עדיין שומר ישירות בלי אישור מחדש — כפי שהוחלט קודם ("Route edit as a new proposal"), redesign זה **עדיין לא מומש**, נשאר open item מפורש (ראה למטה).
+3. **`followup_engine.py`** — `request_followup_approval()` בונה payload עם `tool_name="send_followup"`+`tool_inputs`, קורא ל-`propose_gated()`.
+4. **`core/lead_recovery.py`** — `request_recovery_approval()` בונה payload עם `tool_name="send_recovery"`+`tool_inputs` (כולל `tier`), קורא ל-`propose_gated()`.
+5. **`app.py`** — `_handle_send_followup_confirmed`/`_handle_send_recovery_confirmed` והרשמותיהם הוסרו (dead code אחרי (3)/(4) — לא ניתן להגיע אליהם יותר, כל ה-writers ששלחו אליהם עברו ל-tool_name payload).
+6. **`feature_flags.py`** — `is_enabled()` חוסם כעת מבנית הדלקת `EMAIL_INBOUND`/`ABANDONED_LEADS` אם `tool_registry` אין לו entry ל-`send_email_reply`/`send_bounce` בהתאמה (fail-closed, לא רק תיעוד) — ה-blocker המפורש שהבעלים ביקש.
+
+### Open item שלא טופל כאן (מוצהר, לא הוסתר)
+מסלול "✏️ ערוך" ב-media_handler.py עדיין שומר ישירות מהעריכה בלי preview/אישור מחדש (כפי שהיה). ה-redesign ל"עריכה = הצעה חדשה" (contract ישן נשאר, טקסט ערוך יוצר propose_action חדש, preview טרי, רק "כן" מבצע) **הוחלט אך לא מומש** — נדרש state-machine נוסף (מעקב pending-edit-proposal, trigger "כן" חדש) שהוא מחוץ ל-scope של "migrate 5 writers". ממתין לפרויקט נפרד.
+
+### Tests
+`test_pr0c_writer_migration.py` (חדש, 16 assertions) — מכסה: `propose_gated()` (shadow לא חוסם/בולע exceptions מול enforced חוסם על duplicate); שלושת ה-writers בונים payload עם `tool_name`/`tool_inputs` נכונים; `_cb_voice_edit` קורא נכון מה-nested `tool_inputs`.
+
+**תופעת לוואי חשובה:** בזמן ריצת רגרסיה התגלה ש-`test_c81_recovery_truth.py` (pytest-style, `assert`-based) **אף פעם לא רץ בפועל** תחת ריצת `python3 <file>.py` (הקובץ לא מריץ את הפונקציות שלו בלי `pytest`, ואין footer `if __name__=="__main__"`), וגם לא נכלל ב-allowlist ה-pytest המפורש של `.github/workflows/ci.yml`. הוא נשבר בפועל אחרי הסרת `_handle_send_recovery_confirmed` (2 טסטים קראו לו ישירות) — עודכן לקרוא ל-`tools.approval_actions.send_recovery()` החדש, ואומת ב-`python3 -m pytest`. **לא תוקן כאן**: הוספת הקובץ ל-CI pytest allowlist — מחוץ ל-scope, ראוי לבאג נפרד ("CI blind spot: pytest-style test_*.py files not covered by either CI mechanism").
+
+הרצה מלאה: כל ה-`test_*.py` (הרצת script + הרצת pytest מפורשת על כל הקבצים ה-pytest-style), `smoke_tests.py`, ו-`test_integration.py` — ירוק, פרט ל-flake ידוע וקודם ב-`test_session_store_contract.py::test_raw_records_reader_follows_airtable_pagination` (עובר לבד, נכשל רק כשרץ יחד עם קבצים אחרים — לא קשור לשינוי הזה).
+
+- **Severity:** N/A — migration + blocker חדש, לא תיקון באג. חלק מ-PR-0C.
+- **תוקן ב-commit:** (למלא אחרי commit)
+- **תוקן ב-branch:** `claude/table-incorrect-names-6chfvb`
+- **Merged:** לא עדיין
+- **Deployed:** לא
+- **Verified בפרודקשן:** לא
+- **סטטוס:** Phase 3/4 של PR-0C הושלם (ממתין ל-merge). Phase 4 (TMA + טבלת Airtable Approvals + deprecation ל-PendingActionsStore) הבא בתור.
+
+הלוג האחרון (מעלה) מוכיח את **כל השרשרת יחד**, לא רק חתיכה אחת: preview → 2 הפרעות → "כן" (re-display מדויק) → הפרעה שלישית → "כן" (superseded מדויק, אין ביצוע כפול/שגוי). אין פערים פתוחים ידועים בנושא הזה.

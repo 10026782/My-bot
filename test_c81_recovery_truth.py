@@ -11,8 +11,8 @@ os.environ.setdefault("AIRTABLE_BASE_ID", "appC81Test")
 os.environ.setdefault("RENDER_APP_URL", "https://example.com")
 os.environ.setdefault("SETUP_WEBHOOK", "0")
 
-import app
 import core.output_gateway as output_gateway
+import tools.approval_actions as approval_actions
 from core.action_result import ActionResult, ClaimType
 from core.output_gateway import GatewayResult
 from tools.telegram_adapter import send_telegram
@@ -45,18 +45,16 @@ def test_owner_draft_delivery_does_not_complete_customer_recovery(monkeypatch):
         lambda *args, **kwargs: updates.append((args, kwargs)),
     )
 
-    result = app._handle_send_recovery_confirmed(
-        {
-            "draft": "Recovery draft",
-            "contact_name": "Customer",
-            "channel": "whatsapp",
-            "memory_key": "whatsapp:+972500000000",
-            "tier": "WARM",
-        },
-        "owner-chat",
+    result = approval_actions.send_recovery(
+        chat_id="owner-chat",
+        draft="Recovery draft",
+        contact_name="Customer",
+        channel="whatsapp",
+        memory_key="whatsapp:+972500000000",
+        tier="WARM",
     )
 
-    assert result
+    assert result["ok"] is True
     assert updates == []
 
 
@@ -72,12 +70,12 @@ def test_unverified_owner_draft_is_reported_and_does_not_complete_recovery(monke
         lambda *args, **kwargs: updates.append((args, kwargs)),
     )
 
-    result = app._handle_send_recovery_confirmed(
-        {"draft": "Recovery draft", "memory_key": "lead-2"},
-        "owner-chat",
+    result = approval_actions.send_recovery(
+        chat_id="owner-chat", draft="Recovery draft", memory_key="lead-2",
     )
 
-    assert result.startswith("⚠️")
+    assert result["ok"] is False
+    assert result["user_message"].startswith("⚠️")
     assert updates == []
 
 

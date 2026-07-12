@@ -184,6 +184,33 @@ _REGISTRY: dict[str, ToolMeta] = {
         high_risk        = True,
         description_he   = "סימון תשלום כ-שולם — דורש אישור owner/partner",
     ),
+
+    # ── PR-0C — ActionGateway adapters for former event_bus custom actions ──
+    # Internal-execution-only: not in tools/schemas.py's TOOL_SCHEMAS, so the
+    # Agent tool_use loop can never propose these directly — only trusted
+    # Python callers (media_handler.py, followup_engine.py, core/lead_recovery.py)
+    # via ActionGateway.propose_action(trusted_source=...).
+    "media_save_to_memory": ToolMeta(
+        name             = "media_save_to_memory",
+        roles_allowed    = _INTERNAL,
+        requires_approval= True,
+        blocked_by_emergency=True,
+        description_he   = "שמירת תמלול הודעה קולית ל-Business Memory — לאחר אישור בעלים",
+    ),
+    "send_followup": ToolMeta(
+        name             = "send_followup",
+        roles_allowed    = _INTERNAL,
+        requires_approval= True,
+        blocked_by_emergency=True,
+        description_he   = "הצגת טיוטת פולואפ מאושרת לבעלים להעברה ידנית",
+    ),
+    "send_recovery": ToolMeta(
+        name             = "send_recovery",
+        roles_allowed    = _INTERNAL,
+        requires_approval= True,
+        blocked_by_emergency=True,
+        description_he   = "הצגת טיוטת recovery מאושרת לבעלים להעברה ידנית",
+    ),
 }
 
 

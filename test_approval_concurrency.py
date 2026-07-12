@@ -108,7 +108,7 @@ with _app.test_request_context(
     with (
         patch("tma_api._at_get_record", return_value=_approval_rec(ApprovalStatus.PENDING)),
         patch("tma_api._at_patch", side_effect=_record_patch),
-        patch("tma_api._try_bus_action"),
+        patch("tma_api._try_bus_action", return_value=False),
         patch("tma_api._audit"),
         patch("tma_api._notify_owner"),
     ):
@@ -135,7 +135,7 @@ with _app.test_request_context(
     with (
         patch("tma_api._at_get_record", return_value=_approval_rec(ApprovalStatus.PENDING)),
         patch("tma_api._at_patch", side_effect=_record_patch),
-        patch("tma_api._try_bus_action"),
+        patch("tma_api._try_bus_action", return_value=False),
         patch("tma_api._audit"),
         patch("tma_api._notify_owner"),
     ):
@@ -167,7 +167,7 @@ with _app.test_request_context(
         patch("tma_api._at_get_record",   return_value=_approval_rec(ApprovalStatus.PENDING, tma_write_payload)),
         patch("tma_api._at_patch",        side_effect=_record_patch),
         patch("tma_api._execute_tma_write", return_value={"ok": False, "error": "timeout"}),
-        patch("tma_api._try_bus_action"),
+        patch("tma_api._try_bus_action", return_value=False),
         patch("tma_api._audit"),
         patch("tma_api._notify_owner"),
     ):
@@ -221,7 +221,7 @@ def _run_approve():
         with (
             patch("tma_api._at_get_record", side_effect=_stateful_get),
             patch("tma_api._at_patch",      side_effect=_stateful_patch),
-            patch("tma_api._try_bus_action"),
+            patch("tma_api._try_bus_action", return_value=False),
             patch("tma_api._audit"),
             patch("tma_api._notify_owner"),
         ):

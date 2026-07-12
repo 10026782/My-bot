@@ -168,6 +168,26 @@ class ActionContract:
     # as a security boundary. Read by _make_dispatch_executor() at execution
     # time and passed to dispatch_tool(trusted_source=...).
     trusted_source:              str = "agent"
+    # PR-0 / BUG-PENDING-APPROVAL-B: context-poisoning guard. context_interrupted
+    # is set by mark_context_interrupted() when a message arrives that is not
+    # itself a confirm/cancel/disambiguation resolution for this contract —
+    # i.e. the user has moved on since the preview was shown. reconfirmation_required
+    # is set once route_confirmation_word() has re-shown the business description
+    # in response to a "כן" that arrived after an interruption; only a second
+    # "כן" (with reconfirmation_required=True) actually executes. See
+    # route_confirmation_word() for the state machine.
+    context_interrupted:         bool = False
+    reconfirmation_required:     bool = False
+    # Global ingress gate follow-up: distinct from context_interrupted — set
+    # when the gate could not positively record whether this contract's
+    # context was interrupted (the primary mark raised and even the
+    # independent fallback path failed). Never silently treated as "context
+    # intact": route_confirmation_word() gates on this exactly like a real
+    # interruption, but it stays a separate, observable field so a genuine
+    # interruption is never confused in logs/audits with "we don't actually
+    # know." Does not block the incoming message itself from being routed —
+    # only affects whether a later bare confirm executes directly.
+    context_integrity_unknown:   bool = False
 
 
 # ══════════════════════════════════════════════════
@@ -354,6 +374,16 @@ class ExecutionLedger:
                 result.append(c)
         return result
 
+    def find_most_recent_by_user(self, canonical_user_id: str) -> "ActionContract | None":
+        """Most recent contract (any status) for this identity — used to give
+        a specific "your previous action was superseded" message instead of a
+        generic "nothing pending" when the most recent contract was closed by
+        a second interruption rather than executed/cancelled by the user."""
+        candidates = [c for c in self._store.values() if c.canonical_user_id == canonical_user_id]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda c: c.created_at)
+
     def update_status(self, contract_id: str, status: str, **kwargs) -> None:
         with self._lock:
             c = self._store.get(contract_id)
@@ -368,6 +398,67 @@ class ExecutionLedger:
                 self._airtable_writer(self._store[contract_id])
             except Exception as exc:
                 logger.warning("[ActionGateway] Airtable status update failed: %s", exc)
+
+    # ── PR-0 / BUG-PENDING-APPROVAL-B ────────────────────────────────
+
+    def mark_context_interrupted(self, canonical_user_id: str) -> None:
+        """כל pending contract חי לזהות זו מטופל לפי bounded one-shot FSM:
+        contract שטרם הציג reconfirmation (reconfirmation_required=False)
+        מסומן context_interrupted=True (עדיין ניתן להצלה בסיבוב אחד). contract
+        שכבר הציג reconfirmation פעם אחת (reconfirmation_required=True) —
+        הפרעה נוספת מבטלת אותו סופית (status="superseded"), לא פותחת סיבוב
+        שני. אין מעגלי reconfirmation חוזרים — ראה route_confirmation_word()."""
+        with self._lock:
+            for c in self._store.values():
+                if c.canonical_user_id == canonical_user_id and c.status == "pending":
+                    if c.reconfirmation_required:
+                        c.status = "superseded"
+                    else:
+                        c.context_interrupted = True
+
+    def mark_context_integrity_unknown(self, canonical_user_id: str) -> None:
+        """Independent fallback primitive — a separately-written method
+        touching a different field, so a bug specific to
+        mark_context_interrupted()'s own logic doesn't also break this one.
+        Used by app.py's ingress gate when the primary mark_context_interrupted()
+        call itself raised — a marking failure must never be indistinguishable
+        from "context intact"; route_confirmation_word() gates on this flag
+        exactly like a real interruption, but keeps it a separate, observable
+        field rather than conflating "known interrupted" with "unknown".
+        Same bounded one-shot rule as mark_context_interrupted(): a contract
+        that already required reconfirmation once is superseded, not re-armed."""
+        with self._lock:
+            for c in self._store.values():
+                if c.canonical_user_id == canonical_user_id and c.status == "pending":
+                    if c.reconfirmation_required:
+                        c.status = "superseded"
+                    else:
+                        c.context_integrity_unknown = True
+
+
+# ══════════════════════════════════════════════════
+# PR-0 / BUG-PENDING-APPROVAL-B — business description for reconfirmation
+# תיאור עסקי קריא בלבד — לעולם לא internal contract_id בלבד (DoD #3/#9).
+# ══════════════════════════════════════════════════
+
+def _describe_contract_for_reconfirmation(contract: ActionContract) -> str:
+    payload = contract.normalized_payload or {}
+    if contract.tool_name in ("airtable_add", "airtable_update") and payload.get("table") == _LEAD_CAPTURE_TABLE:
+        fields = payload.get("fields") or {}
+        try:
+            from airtable_schema import LeadFields
+            parts = [
+                fields.get(LeadFields.NAME, ""),
+                fields.get(LeadFields.PHONE, ""),
+                fields.get(LeadFields.DOMAIN, ""),
+            ]
+        except Exception:
+            parts = []
+        parts = [p for p in parts if p]
+        verb = "יצירת ליד" if contract.tool_name == "airtable_add" else "עדכון ליד"
+        return f"{verb}: {', '.join(parts)}" if parts else verb
+    table = payload.get("table") or payload.get("spreadsheet_name") or ""
+    return f"{contract.tool_name} / {table}" if table else contract.tool_name
 
 
 # ══════════════════════════════════════════════════
@@ -537,6 +628,56 @@ class ActionGateway:
         )
         return GatewayResult(ok=True, reason="contract נרשם", contract_id=contract.contract_id)
 
+    # PR-0C Phase 3 — shared shadow/enforced propose wrapper. Every approval
+    # writer (app.py::_queue_approval, media_handler.py, followup_engine.py,
+    # core/lead_recovery.py) needs the identical FEATURE_ACTION_GATEWAY policy:
+    # flag ON -> propose_action() gates the caller for real (duplicate/pending
+    # blocks propagate as a user-facing message); flag OFF -> best-effort
+    # shadow propose for ledger/audit visibility only, never blocks, any
+    # exception is swallowed (log only). Extracted here so new writers don't
+    # each re-implement this dance by hand.
+    def propose_gated(
+        self,
+        *,
+        tenant_id: str,
+        canonical_user_id: str,
+        tool_name: str,
+        tool_inputs: dict,
+        origin_channel: str,
+        origin_chat_id: str,
+        identity=None,
+        trusted_source: str = "agent",
+    ) -> str | None:
+        """Returns None to proceed normally, or a user-facing block message the
+        caller must return immediately instead of queuing the approval."""
+        from feature_flags import is_enabled as _flag
+
+        if _flag("FEATURE_ACTION_GATEWAY"):
+            result = self.propose_action(
+                tenant_id=tenant_id, canonical_user_id=canonical_user_id,
+                tool_name=tool_name, tool_inputs=tool_inputs,
+                origin_channel=origin_channel, origin_chat_id=origin_chat_id,
+                requires_approval=True, identity=identity, trusted_source=trusted_source,
+            )
+            if not result.ok:
+                logger.info(
+                    "[ActionGateway] propose_gated blocked: %s | contract=%s",
+                    result.reason, result.contract_id,
+                )
+                return result.user_message or f"⏳ {result.reason}"
+            return None
+
+        try:
+            self.propose_action(
+                tenant_id=tenant_id, canonical_user_id=canonical_user_id,
+                tool_name=tool_name, tool_inputs=tool_inputs,
+                origin_channel=origin_channel, origin_chat_id=origin_chat_id,
+                requires_approval=True, identity=identity, trusted_source=trusted_source,
+            )
+        except Exception as exc:
+            logger.debug("[ActionGateway] shadow propose_gated failed (non-blocking): %s", exc)
+        return None
+
     def _handle_duplicate_executed(
         self, existing: ActionContract, canonical_user_id: str
     ) -> GatewayResult:
@@ -567,6 +708,49 @@ class ActionGateway:
             ),
         )
 
+    # ── ingress context gate — is_own_resolution_event ───────────────
+    # BUG-PENDING-APPROVAL-B follow-up: used by app.py's webhook-level
+    # ingress gate to decide whether an incoming *text* event is a genuine
+    # attempt to resolve one of this identity's own live contracts (exempt
+    # from being marked context_interrupted) versus any other event, which
+    # is not exempt. Mirrors route_confirmation_word/route_cancellation_word/
+    # route_disambiguation/route_combined_word's own matching exactly — same
+    # keyword sets, same bare-digit-only-with-2+-live precedent (BUG-070) —
+    # so this check can never drift from what those routes actually consume.
+
+    def is_own_resolution_event(self, canonical_user_id: str, text: str) -> bool:
+        live = self.find_live_contracts(canonical_user_id)
+        if not live:
+            return False
+        stripped = text.strip()
+        lower = stripped.lower()
+        if lower in self._CONFIRM_KEYWORDS or lower in self._CANCEL_KEYWORDS:
+            return True
+        if self._parse_combined(stripped) is not None:
+            return True
+        if len(live) > 1 and self._parse_ordinal(stripped) is not None:
+            return True
+        return False
+
+    # ── bounded one-shot reconfirmation — "no pending" reason ────────
+    # BUG-PENDING-APPROVAL-B follow-up: when nothing is live, distinguish
+    # "there genuinely was never anything pending" (unchanged wording, relied
+    # on by existing tests) from "the last contract was superseded by a
+    # second interruption" — the latter gets a specific, actionable message
+    # instead of a silent dead end (the exact production bug reported: a
+    # bare כן after a supersede must never look identical to "nothing ever
+    # happened").
+
+    def describe_no_pending_reason(self, canonical_user_id: str) -> str:
+        recent = self._ledger.find_most_recent_by_user(canonical_user_id)
+        if recent and recent.status == "superseded":
+            desc = _describe_contract_for_reconfirmation(recent)
+            return (
+                f"הפעולה הקודמת בוטלה כי התחלת פעולה אחרת: {desc}.\n"
+                f"כדי לבצע אותה, שלח את הבקשה מחדש."
+            )
+        return "אין פעולה שממתינה לאישור."
+
     # ── §4 — route_confirmation_word ────────────────────────────────
 
     def route_confirmation_word(self, canonical_user_id: str, approver_role: str = "") -> str:
@@ -579,9 +763,28 @@ class ActionGateway:
         """
         live = self.find_live_contracts(canonical_user_id)
         if len(live) == 0:
-            return "אין פעולה שממתינה לאישור."
+            return self.describe_no_pending_reason(canonical_user_id)
         if len(live) == 1:
-            result = self.approve(live[0].contract_id, approver=canonical_user_id, approver_role=approver_role)
+            contract = live[0]
+            # PR-0 / BUG-PENDING-APPROVAL-B: a message unrelated to this
+            # contract arrived since the preview was shown (mark_context_interrupted).
+            # The first "כן" after that must re-show the business description
+            # and require an explicit second "כן" — never silently execute a
+            # stale action (context poisoning). context_integrity_unknown is
+            # gated identically — a marking failure must never be treated as
+            # "context intact" (see _apply_ingress_context_gate in app.py).
+            if (contract.context_interrupted or contract.context_integrity_unknown) \
+                    and not contract.reconfirmation_required:
+                self._ledger.update_status(
+                    contract.contract_id, contract.status,
+                    reconfirmation_required=True,
+                )
+                desc = _describe_contract_for_reconfirmation(contract)
+                return (
+                    f"יש פעולה קודמת שממתינה לאישור: {desc}.\n"
+                    f"לאשר אותה? (כן/לא)"
+                )
+            result = self.approve(contract.contract_id, approver=canonical_user_id, approver_role=approver_role)
             return result
         # יותר מאחת — מציג רשימה ממוספרת + שומר disambiguation state
         with self._disambiguation_lock:
@@ -953,8 +1156,16 @@ class ActionGateway:
 
     def compose_status_reply(self, fact: ActionFact) -> GatewayReply:
         if fact.outcome == "executed":
+            # BUG-PENDING-APPROVAL-B follow-up: reuse the frozen contract's
+            # business description (e.g. "יצירת ליד: יוסי כהן, ...") instead
+            # of the bare tool_name — the payload never changes between
+            # proposal and execution (approved_payload == executed_payload),
+            # so the description computed at reconfirmation time is exactly
+            # what was actually written.
+            contract = self._ledger.find_by_id(fact.contract_id)
+            label = _describe_contract_for_reconfirmation(contract) if contract else fact.tool_name
             rid = f" | מזהה: `{fact.record_id}`" if fact.record_id else ""
-            text = f"✅ בוצע: {fact.tool_name}{rid}"
+            text = f"✅ בוצע: {label}{rid}"
         elif fact.outcome == "failed":
             ec = f" ({fact.error_code})" if fact.error_code else ""
             text = f"❌ נכשל: {fact.tool_name}{ec}"
@@ -1021,6 +1232,17 @@ class ActionGateway:
 
     def find_contract(self, contract_id: str) -> ActionContract | None:
         return self._ledger.find_by_id(contract_id)
+
+    # ── PR-0 / BUG-PENDING-APPROVAL-B ────────────────────────────────
+
+    def mark_context_interrupted(self, canonical_user_id: str) -> None:
+        """נקרא מ-app.py לכל הודעה שאינה עצמה resolution (כן/לא/disambiguation/
+        combined) עבור contract חי של הזהות הזו — ראה route_confirmation_word()."""
+        self._ledger.mark_context_interrupted(canonical_user_id)
+
+    def mark_context_integrity_unknown(self, canonical_user_id: str) -> None:
+        """Fallback delegate — see ExecutionLedger.mark_context_integrity_unknown()."""
+        self._ledger.mark_context_integrity_unknown(canonical_user_id)
 
     # ── §5 — AgentObservation ────────────────────────────────────────
 
