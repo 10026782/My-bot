@@ -1999,6 +1999,61 @@
 
 - **PR:** #313 (`claude/table-incorrect-names-6chfvb` → `main`).
 - **Merged:** ✅ כן — `f8ce334` (`origin/main`), מאומת ב-grep ישיר מול `origin/main`: `_dedup_event_id = f"{update.update_id}:{update.message.message_id}"` קיים בשורות 2683-2684 של `app.py`.
-- **Deployed:** לא עדיין דווח.
-- **Verified בפרודקשן:** ❌ טרם — נדרש הרצף החי המדויק שנכשל (כן → כן, מסתיים בביצוע יחיד) עם לוגים אמיתיים. לא ניתן להריץ עצמאית מהסביבה הזו.
-- **סטטוס:** ✅ תוקן בקוד ומוזג ל-main, בדיקות עברו (17 חדשות + רגרסיה מלאה) — ממתין ל-deploy+production verification.
+- **Deployed:** ✅ כן — "Deploy live for `417cf45`" (הפריסה של #312; #313 עצמו נכלל ב-deploy הבא).
+- **Verified בפרודקשן (הבדיקה עצמה — dedup לא חוסם reconfirmation לגיטימי):** ✅ כן — אימות-חי אישר: ה-global ingress gate וה-Telegram event-id dedup **שניהם עובדים כצפוי**. ה-"כן" הראשון (אחרי הפרעה) הציג מחדש נכון; ה-dedup כבר לא חסם את ה-"כן" השני.
+- **⚠️ חוסם שלישי שנחשף באימות-חי — ראה Follow-up #3 למטה:** אחרי שה-reconfirmation הוצג פעם ראשונה, הפרעה **שנייה** (wizard `/update` שהשלים פעולה עסקית אחרת) לא אילצה re-display נוסף — ה-"כן" הבא ביצע את הליד הישן **בלי** להציג אותו מחדש.
+- **סטטוס:** ✅ תוקן, מוזג, ונפרס — ה-dedup key עצמו אומת חי. חוסם נוסף (סמנטיקת ה-state, לא ה-dedup) תוקן ב-Follow-up #3.
+
+---
+
+## Follow-up #3 ל-BUG-PENDING-APPROVAL-B — בוליאנים לא מספיקים לייצג הפרעות חוזרות; FSM חסום-סיבוב-אחד
+
+- **תאריך:** 12/07/2026.
+- **מקור:** אימות-חי בפרודקשן (Follow-up #2 למעלה) — ה-gate וה-dedup עובדים; חוסם שלישי נחשף: הפרעה **שנייה** אחרי שה-reconfirmation כבר הוצג פעם אחת לא נתפסה.
+
+### שורש (מאומת, לא הונח)
+
+`context_interrupted`/`reconfirmation_required` הבוליאניים (PR #311) מייצגים רק "הופרע פעם אחת / לא" — ברגע ש-`reconfirmation_required=True` נקבע (אחרי ה-re-display הראשון), `route_confirmation_word()`'s תנאי הגישה (`if (context_interrupted or context_integrity_unknown) and not reconfirmation_required`) הופך תמיד ל-`False` (כי `reconfirmation_required` כבר `True`) — ולכן כל "כן" עתידי מבצע **מיידית**, בלי קשר לכמה הפרעות נוספות קרו בינתיים. זה בדיוק התרחיש שקרה בפרודקשן: preview → הפרעה #1 → "כן" (re-display, `reconfirmation_required=True`) → הפרעה #2 (`/update` wizard) → "כן" ביצע ישירות.
+
+### עיצוב שהוחלט (הוראה מפורשת מהמשתמש — לא recursive/infinite, bounded one-shot)
+
+המשתמש הציע תחילה מודל "context generation/version" (increment בכל הפרעה, השוואת version-at-proposal מול version-at-reconfirm) שמאפשר שרשרת בלתי-מוגבלת של re-displays. **באותה הודעה** המשתמש תיקן/הידק את המדיניות במפורש למודל **חסום, לא-רקורסיבי**: אחרי re-display אחד, כל אירוע נוסף (לא "כן"/"לא") **סוגר** את ה-contract לגמרי (SUPERSEDED), לא פותח סיבוב שני. ה-FSM הסופי המחייב:
+
+```
+PENDING
+  ├─ כן              → EXECUTED
+  ├─ לא              → CANCELLED
+  └─ הודעה אחרת      → RECONFIRM_REQUIRED
+
+RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
+  ├─ כן              → EXECUTED
+  ├─ לא              → CANCELLED
+  └─ כל דבר אחר      → SUPERSEDED (סופי — לא נפתח מחדש)
+```
+
+**הוחלט במכוון לא לממש** context_generation/version counter: המשתמש עצמו הוריד את זה לדרגת "audit-only, optional" באותה הודעה. ה-status הסופי `"superseded"` משיג את אותה ערובת-בטיחות (bounded recovery, לא infinite chain) בלי plumbing נוסף — עקבי עם ההחלטה הקודמת (BUG-108/PR-0) לא לממש `last_prompt_message_id`/`last_user_message_sequence`.
+
+### תיקון
+
+- **`core/action_gateway.py`:** `ExecutionLedger.mark_context_interrupted()`/`mark_context_integrity_unknown()` — לפני שמסמנים `context_interrupted`/`context_integrity_unknown`, בודקים `c.reconfirmation_required`: אם `True` (ה-prompt כבר הוצג) → `c.status = "superseded"` (סופי, לא "pending" יותר — נופל אוטומטית מ-`find_live_by_user`); אם `False` (הפרעה ראשונה) → מתנהג בדיוק כמו קודם. `ExecutionLedger.find_most_recent_by_user()` (חדש) — הקונטרקט האחרון (כל status) לזהות, לצורך הודעה ספציפית. `ActionGateway.describe_no_pending_reason()` (חדש) — כש-`len(live)==0`: אם ה-contract האחרון הוא `"superseded"` → מציג תיאור עסקי + "הפעולה הקודמת בוטלה כי התחלת פעולה אחרת... שלח את הבקשה מחדש"; אחרת — ההודעה הכללית הקיימת (`"אין פעולה שממתינה לאישור."`, ללא שינוי ניסוח — נדרש ע"י `test_c89_preview_confirmation.py`'s assertion קיים). `route_confirmation_word()`'s ענף `len(live)==0` ו-`app.py`'s Stage A fallback (המסלול שבאמת נדרס כש-`FEATURE_ACTION_GATEWAY` כבוי, ברירת המחדל) שניהם עוברים דרך ה-helper המשותף הזה — כדי שההודעה הספציפית תגיע למשתמש בפועל, לא רק ב-Stage B התיאורטי.
+- **`compose_status_reply()`'s "executed" branch (שינוי נפרד, לפי בקשה מפורשת "Separately, change...")**: מציג עכשיו את התיאור העסקי הקפוא של ה-contract (`_describe_contract_for_reconfirmation`, אותו helper כמו ה-reconfirmation prompt) במקום `tool_name` גולמי — `"✅ בוצע: יצירת ליד: יוסי כהן, 050-1234567, real_estate | מזהה: recXXX"` במקום `"✅ בוצע: airtable_add | מזהה: recXXX"`. בטוח לעשות reuse כי `approved_payload == executed_payload` (ללא מוטציה בין הצעה לביצוע). tools בלי טבלה ב-payload (למשל `gmail_send_draft`) לא מושפעים — fallback ל-`tool_name` בדיוק כמו קודם.
+
+### בדיקה
+
+`test_bug_reconfirmation_oneshot_fsm.py` (חדש, 27/27):
+- **A** (הרגרסיה המדויקת שהמשתמש ביקש): `preview → הפרעה → כן → כן` — "כן" ראשון מציג מחדש, שני מבצע פעם אחת.
+- **B** (הרגרסיה השנייה המדויקת): `preview → הפרעה → כן → הפרעה נוספת → כן` — ה-contract נהיה `superseded`; "כן" האחרון **לא מבצע**; ההודעה הספציפית מוצגת (שם הפעולה + "שלח מחדש").
+- **C:** הפרעה שלישית אחרי supersede — no-op חסום, אין קריסה, אין דרדור נוסף.
+- **D:** "לא" אחרי reconfirmation עדיין מבטל (`status="rejected"`, לא `"superseded"`) — לא נפגע.
+- **E:** ה-fallback (`context_integrity_unknown`) מקבל את אותו bounded rule.
+- **F:** קבלת-הודעת-ביצוע מציגה תיאור עסקי (שם+טלפון), לא רק `tool_name`; tools בלי טבלה (למשל `gmail_send_draft`) לא מושפעים.
+
+**Regression suite מלא (כל `test_*.py` בריפו כולל `test_c89_preview_confirmation.py`'s pinned "אין פעולה שממתינה לאישור." exact-string assertion):** כולם ירוקים, `smoke_tests.py` PASS, `python3 -m compileall app.py core/action_gateway.py` — אפס רגרסיה.
+
+### Scope
+
+נגעו רק ב-`core/action_gateway.py` (state machine + describe_no_pending_reason + compose_status_reply) ו-`app.py` (שורה אחת — Stage A fallback קורא ל-helper המשותף במקום מחרוזת קשיחה). לא נגעו: global ingress gate (PR #312), Telegram event-id dedup (PR #313), `ActionContract`'s frozen payload semantics, immediate-confirm behavior (DoD #1 מ-PR-0 — עדיין ללא שינוי).
+
+- **PR:** טרם נפתח.
+- **Merged/Deployed/Verified בפרודקשן:** לא עדיין.
+- **סטטוס:** ✅ תוקן בקוד, בדיקות עברו (27 חדשות + רגרסיה מלאה) — ממתין ל-PR+merge+production verification עם הרצף המדויק: preview → הפרעה → כן (re-display) → הפרעה נוספת → כן (superseded, אין ביצוע).
