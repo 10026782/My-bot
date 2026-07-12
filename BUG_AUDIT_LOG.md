@@ -1647,6 +1647,8 @@
 
 **הבהרה — הדיון על "שכבת ההבנה הכללית" עדיין פתוח:** רישום שלושת ה-BUGים האלה **אינו** החלטה לבנות/לא-לבנות את ההצעה הרחבה (Interaction Envelope + Understanding Contract + PendingAction Store). זו הפרדה מכוונת: קודם ממפים כל מנגנון קיים בנפרד (מה קיים, מה שבור, מה מחובר — ראה `DOC-20260712-WA0001`), ורק אז חוזרים לשאלת הארכיטקטורה השלמה עם עובדות מלאות על כל שלושת המרכיבים.
 
+**תכנית פעולה מעודכנת (12/07/2026):** נרשם רשמית ב-`ROADMAP.md`'s F-section כ-**U1 — Understanding Layer Architecture Decision**, עם קישור חוסם מפורש ל-UX-01 (Unified BOSS Experience — גם נרשם 12/07/2026, ראה ROADMAP.md). סדר התלות הרשמי מעכשיו: ייצוב Pending Approval flow (✅ הושלם — BUG-PENDING-APPROVAL-B) → סגירת ההחלטה הארכיטקטונית כאן (U1) → רק אז UX-01. שתי האופציות שנותרו על השולחן (מ-"שאלת ההחלטה" למעלה) לא השתנו — עדיין ממתינות להחלטת בעלים, לא טכני.
+
 ---
 
 ## BUG-101 (umbrella) — ייבוא ייצוא-WhatsApp: כשל מצטבר בגבולות הודעה — ✅ VERIFIED IN PROD (12/07/2026)
@@ -1862,7 +1864,7 @@
 
 ---
 
-## BUG-108 / BUG-PENDING-APPROVAL-B (PR-0) — Pending ActionGateway approval שורד הודעות-ביניים לא-קשורות (context poisoning) — ✅ תוקן בקוד
+## BUG-108 / BUG-PENDING-APPROVAL-B (PR-0) — Pending ActionGateway approval שורד הודעות-ביניים לא-קשורות (context poisoning) — ✅ VERIFIED IN PROD
 
 - **תאריך רישום:** 12/07/2026. **תאריך מימוש (PR-0):** 12/07/2026.
 - **מקור:** התגלה אגב אימות-חי של BUG-106/BUG-099c — **אינה** תקלה ב-099c. נרשם תחילה כפריט-החלטה בלבד (3 אפשרויות), מומש כ-PR-0 לפי handoff נפרד (`PR0_PENDING_APPROVAL_CONTEXT_SAFETY.md`) שבחר באפשרות #3: "כן" אחרי הודעת-ביניים **חייב** להציג מחדש את תיאור הפעולה לפני ביצוע.
@@ -1901,7 +1903,7 @@
 
 ---
 
-## Follow-up ל-BUG-PENDING-APPROVAL-B — Global Ingress Context Gate (PR #311 לא כיסה מסלולים שעוקפים run_agent)
+## Follow-up ל-BUG-PENDING-APPROVAL-B — Global Ingress Context Gate (PR #311 לא כיסה מסלולים שעוקפים run_agent) — ✅ VERIFIED IN PROD
 
 - **תאריך:** 12/07/2026.
 - **מקור:** לוג פרודקשן אמיתי שהמשתמש הדביק, שאמור להוכיח VERIFIED IN PROD — במקום זאת חשף שה-fix של PR #311 לא מספיק.
@@ -1968,7 +1970,7 @@
 
 ---
 
-## Follow-up #2 ל-BUG-PENDING-APPROVAL-B — מפתח ה-idempotency הטלגרמי לא היה event-identity
+## Follow-up #2 ל-BUG-PENDING-APPROVAL-B — מפתח ה-idempotency הטלגרמי לא היה event-identity — ✅ VERIFIED IN PROD
 
 - **תאריך:** 12/07/2026.
 - **מקור:** אימות-חי בפרודקשן של הגבול הגלובלי (Follow-up #1, למעלה) — הגבול עצמו עבד, אבל חשף חוסם חדש: "כן" לגיטימי נחסם כ-duplicate.
@@ -2006,7 +2008,7 @@
 
 ---
 
-## Follow-up #3 ל-BUG-PENDING-APPROVAL-B — בוליאנים לא מספיקים לייצג הפרעות חוזרות; FSM חסום-סיבוב-אחד
+## Follow-up #3 ל-BUG-PENDING-APPROVAL-B — בוליאנים לא מספיקים לייצג הפרעות חוזרות; FSM חסום-סיבוב-אחד — ✅ VERIFIED IN PROD
 
 - **תאריך:** 12/07/2026.
 - **מקור:** אימות-חי בפרודקשן (Follow-up #2 למעלה) — ה-gate וה-dedup עובדים; חוסם שלישי נחשף: הפרעה **שנייה** אחרי שה-reconfirmation כבר הוצג פעם אחת לא נתפסה.
@@ -2055,5 +2057,24 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 נגעו רק ב-`core/action_gateway.py` (state machine + describe_no_pending_reason + compose_status_reply) ו-`app.py` (שורה אחת — Stage A fallback קורא ל-helper המשותף במקום מחרוזת קשיחה). לא נגעו: global ingress gate (PR #312), Telegram event-id dedup (PR #313), `ActionContract`'s frozen payload semantics, immediate-confirm behavior (DoD #1 מ-PR-0 — עדיין ללא שינוי).
 
 - **PR:** #314 (`claude/table-incorrect-names-6chfvb` → `main`).
-- **Merged/Deployed/Verified בפרודקשן:** לא עדיין.
-- **סטטוס:** ✅ תוקן בקוד, בדיקות עברו (27 חדשות + רגרסיה מלאה) — נרשם ל-PR #314. ממתין ל-merge+production verification עם הרצף המדויק: preview → הפרעה → כן (re-display) → הפרעה נוספת → כן (superseded, אין ביצוע).
+- **Merged:** ✅ כן — `0ef5e85` (`origin/main`), מאומת ב-grep ישיר מול `origin/main`: `status = "superseded"` (שני המקומות), `find_most_recent_by_user`, `describe_no_pending_reason`, ו-`compose_status_reply`'s תיאור-עסקי (`label = _describe_contract_for_reconfirmation(...)`) קיימים.
+- **Deployed:** ✅ כן (מרומז מהלוג החי למטה — הקוד שהראה את ההתנהגות הנכונה חייב להיות זה שרץ בפרודקשן).
+- **Verified בפרודקשן:** ✅ כן — לוג פרודקשן מילולי מלא, 12/07/2026, תואם **בדיוק** (מילה במילה) לעיצוב:
+  1. preview: `"📋 זיהיתי ליד: מני מנחם (0567468374)\nלשמור? ענה כן לאישור או לא לביטול."`
+  2. הפרעה #1+#2 (`/update` + `מעניין`, לפני כל reconfirmation) — נבלעות כראוי, contract עדיין ניתן-להצלה.
+  3. "כן" ראשון → `"יש פעולה קודמת שממתינה לאישור: יצירת ליד: מני מנחם, 0567468374, general.\nלאשר אותה? (כן/לא)"` — **התאמה מדויקת** ל-`_describe_contract_for_reconfirmation`'s הפורמט ול-reconfirmation prompt. **אין** `airtable_add` בוצע.
+  4. הפרעה #3 (`/gmail` + "בדוק 5 מיילים אחרונים") **אחרי** שה-reconfirmation כבר הוצג — Agent מגיב כרגיל (Gmail לא מחובר), ה-contract מסומן `superseded` בשקט ברקע.
+  5. "כן" השני → `"הפעולה הקודמת בוטלה כי התחלת פעולה אחרת: יצירת ליד: מני מנחם, 0567468374, general.\nכדי לבצע אותה, שלח את הבקשה מחדש."` — **התאמה מדויקת** ל-`describe_no_pending_reason`'s superseded branch. **אין** ביצוע, אין רשומת Airtable.
+- **סטטוס:** ✅ VERIFIED IN PROD (12/07/2026) — merged + deployed + רצף חי מדויק עם לוגים אמיתיים, לא unit tests/merge/deploy בלבד.
+
+---
+
+## סיכום BUG-PENDING-APPROVAL-B (PR #311 → #312 → #313 → #314) — ✅ VERIFIED IN PROD, כל השרשרת
+
+כל ארבעת ה-PRs באשכול הזה אומתו חי בפרודקשן, כל אחד בתורו, ולבסוף השרשרת המלאה יחד (12/07/2026):
+1. **PR #311** — state fields + reconfirmation logic (`route_confirmation_word`'s single-contract gate).
+2. **PR #312** — global ingress context gate (מכסה slash commands/wizard/callbacks/media שעוקפים `run_agent()`).
+3. **PR #313** — Telegram idempotency key = event identity (`update_id:message_id`), לא טקסט — כדי ש-"כן" חוזר לא ייחסם.
+4. **PR #314** — bounded one-shot FSM (`SUPERSEDED` אחרי הפרעה שנייה) + קבלת-ביצוע עם תיאור עסקי.
+
+הלוג האחרון (מעלה) מוכיח את **כל השרשרת יחד**, לא רק חתיכה אחת: preview → 2 הפרעות → "כן" (re-display מדויק) → הפרעה שלישית → "כן" (superseded מדויק, אין ביצוע כפול/שגוי). אין פערים פתוחים ידועים בנושא הזה.

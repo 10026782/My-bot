@@ -1,6 +1,7 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 10/07/2026 — SPEC A1 (Atomic Fail-Closed) נסגר: audit של "Preview Integrity" (Contract Chain, אותו סבב) איתר ש-`tools/airtable_gateway.py`'s `airtable_patch()`/`airtable_create()` כתבו payload חלקי בהצלחה כש-`validate_airtable_fields()` השמיטה רק חלק מהשדות — ה-`errors` שהפונקציה מחזירה תועדו ב-log בלבד, לעולם לא נבדקו ע"י הקוראות. משפיע על **כל** נתיב כתיבה בקוד (לא ספציפי ל-Leads). תוקן: שתי הפונקציות מחשבות `dropped = set(fields) - set(clean)` וחוסמות כתיבה כליל אם לא ריק (fail-closed אטומי) — בלי לגעת ב-`validate_airtable_fields` עצמה. Coercion (linked-record string→list) נשאר תחת אותו מפתח, לכן לא נחסם — מקרה קצה קריטי שנבדק במפורש (T3). 5 טסטים חדשים ב-`test_airtable_gateway.py` (32/32 בקובץ). ראה BUG_AUDIT_LOG.md SPEC A1.
+עודכן: 12/07/2026 — BUG-PENDING-APPROVAL-B (Pending Approval Context Safety) נסגר במלואו, ✅ VERIFIED IN PROD, שרשרת של 4 PRs (#311-#314) שכל אחד נבדק חי בפרודקשן בנפרד ולבסוף כולם יחד: (1) **PR #311** — `ActionContract` קיבל `context_interrupted`/`reconfirmation_required`; `route_confirmation_word()`'s single-contract gate מציג מחדש תיאור עסקי במקום לבצע בשקט פעולה ישנה כשהודעת-ביניים הגיעה בינתיים ("context poisoning"). (2) **PR #312** — התגלה בבדיקה חיה שה-hook היה בתוך `run_agent()` בלבד, ולכן לא ראה מסלולים שעוקפים אותו (`/update` ו-slash commands אחרים, callbacks, wizard text/media, Decision Hub, מדיה כללית) — הוחלף ב-**global ingress context gate** יחיד לכל webhook (Telegram+WhatsApp Twilio+Meta), אחרי auth/dedup/identity, לפני כל ניתוב; `ActionGateway.is_own_resolution_event()` מזהה resolution אמיתי בלי לשכפל את לוגיקת ה-routing. (3) **PR #313** — בדיקה חיה נוספת חשפה ש-`guards/idempotency`'s Telegram dedup key היה מבוסס טקסט-הודעה, לא זהות-אירוע — "כן" שני זהה-טקסט נחסם כ-duplicate; תוקן ל-`update_id:message_id`. (4) **PR #314** — עוד בדיקה חיה חשפה שהבוליאנים לא ייצגו הפרעות *חוזרות*: אחרי reconfirmation אחד, הפרעה שנייה לא נתפסה, "כן" הבא ביצע ישירות. הוחלף ב-FSM חסום-סיבוב-אחד: `PENDING → (הפרעה) → RECONFIRM_REQUIRED → (הפרעה נוספת) → SUPERSEDED` (סופי, לא רקורסיבי) — הודעת supersede ספציפית ("הפעולה הקודמת בוטלה... שלח מחדש"), לא dead-end שקט. גם: קבלת-ביצוע מציגה תיאור עסקי (`compose_status_reply`), לא `tool_name`/`airtable_add` גולמי. **אימות סופי (12/07/2026):** לוג פרודקשן מילולי מלא — preview → 2 הפרעות → "כן" (re-display מדויק, מילה-במילה) → הפרעה שלישית → "כן" (superseded מדויק, אין ביצוע) — כל השרשרת ביחד, לא רק חתיכה אחת. ראה BUG_AUDIT_LOG.md BUG-108/BUG-PENDING-APPROVAL-B + 3 ה-Follow-ups.
+עודכן קודם: 10/07/2026 — SPEC A1 (Atomic Fail-Closed) נסגר: audit של "Preview Integrity" (Contract Chain, אותו סבב) איתר ש-`tools/airtable_gateway.py`'s `airtable_patch()`/`airtable_create()` כתבו payload חלקי בהצלחה כש-`validate_airtable_fields()` השמיטה רק חלק מהשדות — ה-`errors` שהפונקציה מחזירה תועדו ב-log בלבד, לעולם לא נבדקו ע"י הקוראות. משפיע על **כל** נתיב כתיבה בקוד (לא ספציפי ל-Leads). תוקן: שתי הפונקציות מחשבות `dropped = set(fields) - set(clean)` וחוסמות כתיבה כליל אם לא ריק (fail-closed אטומי) — בלי לגעת ב-`validate_airtable_fields` עצמה. Coercion (linked-record string→list) נשאר תחת אותו מפתח, לכן לא נחסם — מקרה קצה קריטי שנבדק במפורש (T3). 5 טסטים חדשים ב-`test_airtable_gateway.py` (32/32 בקובץ). ראה BUG_AUDIT_LOG.md SPEC A1.
 עודכן קודם: 10/07/2026 — BUG-097 (NAME-TRAILING-INTENT-VERB) נסגר: בדיקה חיה שנייה בפרודקשן **אחרי** מיזוג BUG-096 אישרה שה-block-splitting עובד נכון (3 לידים, טלפון פגום אחד — נדחה נקי, ללא זיהום שכן!), אבל חשפה שורש צר יותר — כשהטלפון בסוף הבלוק (לא מייד אחרי השם), פועל-כוונה כמו "מעוניין" נדבק לשם כי `_HEBREW_NAME_RE` תופס greedy את כל הרצף העברי הרציף ו-`_NAME_STOP` לא כלל פעלי-עניין. תוקן: `מעוניין`/`רוצה`/`מחפש`/`צריך`/`מבקש` (+נטיות) נוספו ל-`_NAME_STOP` — אותו מנגנון חיתוך קיים, לא regex חדש. `test_bug096_ingress_classifier_batch_bleed.py` הורחב ל-29/29. ראה BUG_AUDIT_LOG.md BUG-097.
 עודכן קודם: 10/07/2026 — 🔴 **תיקון-טעות: BUG-094/BUG-095 (למטה) תוקנו בקוד מת**, לא נגעו בפרודקשן. `parse_batch_dictation()`/`parse_lead_dictation()` ב-`core/lead_candidate_handler.py` (שהם תוקנו) אין להן אף קורא חי — `handle_lead_candidate()` בפועל משתמש ב-`core/ingress_classifier.py`'s `_extract_lead_candidates()`, מימוש כפול ונפרד עם אותו באג בדיוק. **BUG-096 (חדש) הוא התיקון האמיתי**, במקום הנכון: `_extract_lead_candidates()` מפוצל עכשיו לבלוקים דרך `_BLOCK_SEP` חדש, ומצורף `raw_text` per-candidate (סוגר גם ממצא נוסף שנמצא — Summary/Lead Event של כל ליד בבאצ' הכיל בטעות את כל הבאצ', לא רק את הליד עצמו). `_at_find_lead`/`_lead_domain_key` (BUG-094-B/C) כן היו תיקונים חיים תקפים — לא הושפעו. `test_bug096_ingress_classifier_batch_bleed.py` (חדש, 24/24). ראה BUG_AUDIT_LOG.md BUG-096 + תיקון-הטעות בסוף BUG-095.
 עודכן קודם: 10/07/2026 — BUG-095 (BATCH-MALFORMED-PHONE-BLOCK-BLEED) נסגר: בדיקה חיה בפרודקשן **אחרי** מיזוג BUG-094 חשפה שורש נוסף — כשמספר טלפון באמצע באצ' פגום (לא מזוהה ע"י `_PHONE_RE` בכלל), אין גבול-טלפון-שכן לחסום מולו, והבלוק כולו "נבלע" לתוך המועמד הבא (garbled name + phone מיוחס למועמד הלא-נכון). תוקן: `parse_batch_dictation()` מפצל עכשיו לבלוקים דרך `_BLOCK_SEP` (regex קיים בקובץ, מעולם לא נקרא בפועל עד עכשיו) *לפני* חילוץ טלפון/שם — גבול-בלוק, לא רק מיקום-טלפון, חוסם bleed. קלט מסוג אחר לגמרי שהמשתמש בדק (WhatsApp chat-export עם headers) אומת כ**לא**-רלוונטי — `classify_ingress()` כבר מסווג אותו tier=4/table (BUG-064 hard-marker gate קיים), לא מגיע בכלל ל-`parse_batch_dictation`. `test_bug094_batch_name_bleed.py` הורחב ל-31/31. ראה BUG_AUDIT_LOG.md BUG-095.
@@ -1079,6 +1080,62 @@ scope: **infrastructure only — אפס שינוי runtime behavior** בשלב �
 - **Batch ז — `airtable_schema.py`**: ✅ קיים מהבנייה המקורית — `Tables.MEDIA_FILES = "Media Files"` ו-`MediaFileFields` (NAME/FILE_TYPE/MIME_TYPE/DRIVE_URL/DRIVE_FILE_ID/DOMAIN/SOURCE/SIZE_BYTES/CREATED_BY/TELEGRAM_FILE_ID/LINKED_LEAD/RAW_TRANSCRIPT/NORMALIZED_TRANSCRIPT) מכסים את כל מה ש-`media_gateway.py` כותב. `AssetsFields` (נדל"ן) לא נגע. ⚠️ הטבלה עצמה חייבת להיווצר ידנית ב-Airtable לפני הדלקת flag — הקוד לא יוצר טבלה.
 תלוי ב: כלום (עומד בפני עצמו). דגלים `FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD` קיימים ב-`feature_flags.py`, **כבויים כברירת מחדל** (`is_enabled()` חוזר `False` ללא env var) — הקוד רץ במלואו אך אינו פעיל בפרודקשן עד הדלקה מפורשת.
 קבצים: `voice_stt_adapter.py`, `drive_adapter.py`, `media_gateway.py`, `media_handler.py`, `app.py`, `tma_api.py`, `airtable_schema.py` — כולם מוזגים ל-`main`. בדיקות: `test_media_layer.py` (33/33).
+
+---
+
+### U1 — Understanding Layer Architecture Decision (נרשם 12/07/2026)
+מה: החלטה ארכיטקטונית רחבה — האם לבנות "שכבת הבנה" כללית חדשה (Interaction Envelope + Understanding Contract + PendingAction Store, כפי שהוצע בדיון נפרד) או להרחיב/לחבר מנגנון קרוב שכבר קיים בקוד (`core/reasoning_entity.py`/`core/reasoning_engines.py` + `core/adapters/leads_adapter.py`/`decision_adapter.py` — ראה BUG-104 ב-`BUG_AUDIT_LOG.md`).
+מצב: 🟡 **רישום בלבד, ממתין להחלטה** — BUG-102/103/104 מיפו כל מנגנון קיים בנפרד (מה קיים, מה שבור, מה מחובר לחיים — ראה `DOC-20260712-WA0001` המוזכר ב-BUG_AUDIT_LOG.md). `leads_adapter.py` (`entity_type=ENTITY_LEAD`) הוא **הכי קרוב מבנית** למה שהצעת "שכבת הבנה כללית" מבקשת (`PHASE_COLLECTING`/`PHASE_BLOCKED`/`PHASE_REVIEW`/`PHASE_AWAITING`/`PHASE_DECIDED`/`PHASE_CLOSED` ≈ RESOLVED/NEEDS_CLARIFICATION/REJECTED) — **אפס קוראים חיצוניים** בכל הריפו מעבר ל-smoke test. `decision_adapter.py` כן מחובר לחיים (`cmd_decision.py`), אבל `FEATURE_DECISION_HUB`=OFF כברירת מחדל, כלומר "חי" רק תיאורטית. **זו הבדיקה שקובעת אם צריך לבנות Understanding Contract חדש בכלל, או רק לחבר+להדליק flag קיים** — לפני שממשיכים בכל דיון נוסף על הארכיטקטורה הרחבה.
+תלוי ב: כלום טכני — החלטת ארכיטקטורה/מוצר גרידא, לא חסם קוד.
+חוסם: UX-01 (למטה) — אין טעם לבנות שכבת ניסוח-הודעות אחידה פעמיים אם שכבת הבנה כללית עומדת לשנות את מבנה ה-clarification/status/error messages בעצמה.
+קבצים: `core/reasoning_entity.py`, `core/reasoning_engines.py`, `core/adapters/leads_adapter.py`, `core/adapters/decision_adapter.py`.
+
+### UX-01 — Unified BOSS Experience (נרשם 12/07/2026, PLANNED — לא התחיל)
+
+**סדר תלות מחייב (הוראה מפורשת): ייצוב Pending Approval (✅ הושלם — BUG-PENDING-APPROVAL-B, מעלה) → סגירת U1 architecture (🟡 פתוח, מעלה) → ואז UX-01.** נרשם עכשיו כשלב רשמי ב-tracker; **אין לגעת בניסוחי הודעות בקוד עד שהלוגיקה עצמה (U1) סגורה** — כדי לא לקבל טלאים שונים בין Telegram/WhatsApp/Daily Digest/אישורים/שגיאות/Mini App תוך-כדי תיקוני-באגים נפרדים.
+
+**מטרה:** כל הודעה של BOSS → אותו קול → אותו מבנה → אותו מינוח → אותה היררכיה → בלי פרטי מערכת פנימיים.
+
+**עקרונות מחייבים:**
+- לא מציגים `record_id`/`contract_id`/`fingerprint`/שם כלי טכני (כמו `airtable_add`).
+- לא מציגים שמות טכניים של טבלאות אלא אם זה מידע עסקי שהמשתמש ביקש.
+- אימוג'ים רק כשיש להם תפקיד ברור, לא כקישוט.
+- הודעות קצרות, נקיות, עם פעולה אחת ברורה.
+- אותה פעולה נראית אותו דבר בכל ערוץ.
+- שגיאה אומרת מה קרה ומה אפשר לעשות עכשיו.
+- אישור תמיד מציג מה עומד לקרות.
+- קבלה אחרי ביצוע מציגה מה בוצע בפועל, לא את המנגנון הטכני.
+
+דוגמה: במקום `✅ בוצע: airtable_add | מזהה: rec...` → "הליד מלי חני נשמר בהצלחה." במקום `❌ Gmail לא מחובר כרגע` → "לא הצלחתי לקרוא את המיילים כי חשבון Gmail אינו מחובר. אפשר לחבר אותו בהגדרות."
+(הערה: `compose_status_reply`'s תיקון תיאור-עסקי מ-BUG-PENDING-APPROVAL-B/Follow-up #3 הוא צעד ראשון בכיוון הזה, בהיקף מצומצם — לא UX-01 המלא.)
+
+**מה נכנס לשלב:** Daily Digest, confirmations, cancellations, errors, success receipts, clarification questions, search results, empty states, multi-step wizards, Telegram, WhatsApp, Mini App, system notices, loading/retry/expired states.
+
+**מה בונים:** לא רק "נוסחים" — שכבה אחידה: `UXMessage` / `MessageType` / `BusinessDescription` / `ChannelRenderer`. לדוגמה:
+```python
+UXMessage(
+    type="success",
+    title="הליד נשמר",
+    body="מלי חני · 0567467372",
+    action=None,
+)
+```
+וה-renderer מתאים אותו ל-Telegram/WhatsApp/Mini App בלי לשנות את המשמעות.
+
+**סדר העבודה:** (1) ייצוב מערכת ואישורים. (2) אודיט של כל ההודעות הקיימות. (3) מילון UX אחיד. (4) Message Contract. (5) renderer משותף. (6) מעבר מודול־מודול. (7) בדיקות snapshot. (8) rollout הדרגתי.
+
+**DoD לשלב:**
+- אין מזהי Airtable בהודעות משתמש.
+- אין שמות כלים טכניים.
+- אין אימוג'ים כפולים או אקראיים.
+- כל success/error/confirm משתמש באותו מבנה.
+- אותה פעולה מוצגת זהה בכל ערוץ.
+- Mini App והודעות הצ'אט משתמשים באותו vocabulary.
+- יש snapshot tests לכל סוג הודעה מרכזי.
+- הודעות ישנות לא נשארות מפוזרות כ-strings בתוך handlers.
+
+מצב: 📋 PLANNED — רישום בלבד, ממתין ל-U1 (מעלה). לא לגעת עד שהלוגיקה סגורה.
+תלוי ב: U1 (מעלה), ייצוב מלא של Pending Approval flow (✅ הושלם).
 
 ---
 

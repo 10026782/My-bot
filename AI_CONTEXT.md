@@ -3,14 +3,15 @@
 > זהו מסמך תדרוך (briefing), לא תיעוד מלא. לפרטים מלאים: `ROADMAP.md` (מקור אמת יחיד),
 > `BUG_AUDIT_LOG.md`, `CHANGE_CONTROL_LOG.md`. `CANONICAL_STATE.md` **לא קיים** בריפו.
 
-**עודכן:** 2026-07-11 · **main:** `20cdac7` (PR #291) · **סטטוס:** תדרוך קודם היה תקוע ב-PR #265 (07-08/07) — פער של 26 PR נסגר בעדכון הזה.
+**עודכן:** 2026-07-12 · **main:** `0ef5e85` (PR #314) · **סטטוס:** BUG-PENDING-APPROVAL-B (Pending Approval Context Safety) נסגר במלואו ו-✅ VERIFIED IN PROD — שרשרת 4 PRs (#311-#314), ראה §1. שני items חדשים נרשמו ב-`ROADMAP.md`'s F-section: U1 (Understanding Layer architecture decision — פתוח, ראה BUG-104) ו-UX-01 (Unified BOSS Experience — PLANNED, חסום מאחורי U1, אין לגעת בניסוחי-הודעות עד שסגור).
 
 ---
 
 ## 1. Executive Summary
 
 - הבוט חי בפרודקשן (Telegram + WhatsApp/Twilio) על `main`, בנוי סביב Identity → Router → Context → Agent, Airtable כ-CRM.
-- הסבב האחרון (09-10/07) סגר שרשרת batch lead-capture: BUG-058 (Tier-2 batch-confirm resolver, `session_store.py`/`core/lead_candidate_handler.py`) נבנה ומחווט, ובדיקה חיה שלו בפרודקשן חשפה 3 באגים נפרדים ב-upstream שנסגרו יחד תחת BUG-094 (חלון שם ±60 תווים "דולף" בין מועמדים סמוכים; dedup עיוור-לטלפון שהופך "דליפה" לכתיבה כפולה לאותה רשומה; דומייני-מטא של ה-Router `CRM`/`INTERNAL` שזלגו ל-`Domain` field של `Leads`/`Lead Events` וגרמו ל-422). `test_bug094_batch_name_bleed.py` 25/25.
+- **הסבב האחרון (12/07):** BUG-PENDING-APPROVAL-B נסגר במלואו — "context poisoning" בזרימת אישור-ליד: הודעת-ביניים בין preview ל-"כן" גרמה לביצוע שקט של פעולה ישנה. תוקן ב-4 PRs עוקבים, כל אחד נבדק חי בפרודקשן וחשף את הפער הבא: (1) PR #311 — state fields + reconfirmation logic. (2) PR #312 — global ingress context gate (המנגנון הקודם היה בתוך `run_agent()` בלבד, לא ראה `/update`/slash commands/callbacks/wizard/מדיה שעוקפים אותו). (3) PR #313 — Telegram idempotency key = event identity (`update_id:message_id`), לא טקסט (טקסט זהה ל-2 הודעות שונות, כמו "כן" פעמיים, נחסם בטעות כ-duplicate). (4) PR #314 — FSM חסום-סיבוב-אחד: הפרעה שנייה אחרי reconfirmation ראשון = SUPERSEDED (סופי), לא dead-end שקט; קבלת-ביצוע מציגה תיאור עסקי, לא `tool_name` גולמי. **אימות סופי (12/07):** לוג פרודקשן מילולי מלא מוכיח את כל השרשרת יחד. ראה `BUG_AUDIT_LOG.md` BUG-108/BUG-PENDING-APPROVAL-B.
+- הסבב הקודם (09-10/07) סגר שרשרת batch lead-capture: BUG-058 (Tier-2 batch-confirm resolver, `session_store.py`/`core/lead_candidate_handler.py`) נבנה ומחווט, ובדיקה חיה שלו בפרודקשן חשפה 3 באגים נפרדים ב-upstream שנסגרו יחד תחת BUG-094 (חלון שם ±60 תווים "דולף" בין מועמדים סמוכים; dedup עיוור-לטלפון שהופך "דליפה" לכתיבה כפולה לאותה רשומה; דומייני-מטא של ה-Router `CRM`/`INTERNAL` שזלגו ל-`Domain` field של `Leads`/`Lead Events` וגרמו ל-422). `test_bug094_batch_name_bleed.py` 25/25.
 - שרשרת אבטחה/ראוטר נוספת נסגרה: BUG-090 (הודעת חסימה נכונה לפי סוג פעולה ב-Leads write gate), BUG-091 (`_source` כבר לא נאמן מ-`tool_inputs` — תיקון privilege-escalation), BUG-092 (דחיות דטרמיניסטיות נחסמות *לפני* שה-Agent רץ בכלל, לא אחריו).
 - שכבת Airtable Schema Governance הושלמה (PR3 series, כל השלבים ממוזגים): snapshot archive (PR3A), RuntimeSchemaProvider + canonical-snapshot fallback tier (PR3B/B.1), diagnostic CLI ידני (PR3C), ואימות ערכי select לפני כתיבה (PR2 rev.2).
 - Anti-hallucination חוזק: guard מבני גנרי ל-claims על פעולות (יצירה/העברה/המשך) שאין להן כיסוי כלי אמיתי, וכמה תיקוני ניסוח כוזב קונקרטיים (הודעת "forward" מדומה ב-Restricted flow, "המשך" מדומה ב-Single-Speaker fallback).
