@@ -2671,7 +2671,17 @@ def _webhook_telegram_impl():
         # command/wizard dispatch so a duplicate slash-command or wizard
         # reply is discarded before it can reach the context gate at all
         # (BUG-PENDING-APPROVAL-B: duplicates must never interrupt anything).
-        if idempotency.is_duplicate("telegram", sender_user_id, text):
+        #
+        # BUG-PENDING-APPROVAL-B follow-up: the dedup key must be the
+        # provider's own event identity (update_id + message_id, chat-scoped
+        # via sender_user_id), never the message text. Two DISTINCT Telegram
+        # messages can legitimately carry identical text — e.g. the
+        # reconfirmation flow's second "כן" after context_interrupted —
+        # and keying on text falsely treated the second one as a duplicate
+        # of the first, creating a dead end with no way to ever complete
+        # the reconfirmation.
+        _dedup_event_id = f"{update.update_id}:{update.message.message_id}"
+        if idempotency.is_duplicate("telegram", sender_user_id, _dedup_event_id):
             try:
                 bot.send_message(
                     reply_chat_id,

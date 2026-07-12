@@ -1960,5 +1960,43 @@
 זהה ל-PR #311 (ActionGateway בלבד) — מנגנונים #2 (`_pending_approvals`)/#3 (`event_bus.py`) לא טופלו — נשאר follow-up נפרד אם ירצו.
 
 - **PR:** #312 (`claude/table-incorrect-names-6chfvb` → `main`), 4 קומיטים (3 קוד + docs). #311 כבר merged וסגור — לא ניתן "לעדכן" אותו ישירות ב-GitHub; זהו PR נפרד שמשלים את אותה עבודה, לפי פרוטוקול ה-merged-PR הקיים בריפו.
+- **Merged:** ✅ כן — `417cf45` (`origin/main`), CI ירוק (`backend-ci`/`frontend-ci`/Vercel) לפני מיזוג, אין review comments פתוחים. מאומת ב-grep ישיר מול `origin/main` (לא רק merge status): `context_integrity_unknown`/`mark_context_integrity_unknown`/`is_own_resolution_event` ב-`core/action_gateway.py`; `_apply_ingress_context_gate`/`_IngressEvent` בכל 4+ אתרי הקריאה ב-`app.py`; **אפס** מופעים של `from identity import resolve_identity` מקומי (תיקון ה-scoping אומת שנעלם); סדר ה-dedup לפני `text.startswith("/")` אומת ב-`app.py`.
+- **Deployed:** ✅ כן — "Deploy live for `417cf45`" (12/07/2026 13:54).
+- **Verified בפרודקשן (הגבול עצמו — reconfirmation מופעל):** ✅ כן — לאחר `/cal` ופעולה נוספת, ה-"כן" הראשון **לא** בוצע והציג מחדש את הליד הממתין כנדרש. **זו ההוכחה החיה שה-global ingress gate עובד** — בדיוק התרחיש שהמנגנון הקודם (PR #311) פספס.
+- **⚠️ חוסם חדש שנחשף באימות-חי — ראה Follow-up #2 למטה:** ה-"כן" השני (ה-reconfirmation הלגיטימי) נחסם ע"י `guards.idempotency` כ-duplicate של ה-"כן" הראשון — dead end מוחלט (אין דרך לעקוף/לנסות שוב, רק ליצור פעולה מחדש).
+- **סטטוס:** ✅ תוקן בקוד, מוזג, ונפרס — הגבול עצמו אומת חי בפרודקשן. חוסם חדש (idempotency key) תוקן ב-Follow-up #2.
+
+---
+
+## Follow-up #2 ל-BUG-PENDING-APPROVAL-B — מפתח ה-idempotency הטלגרמי לא היה event-identity
+
+- **תאריך:** 12/07/2026.
+- **מקור:** אימות-חי בפרודקשן של הגבול הגלובלי (Follow-up #1, למעלה) — הגבול עצמו עבד, אבל חשף חוסם חדש: "כן" לגיטימי נחסם כ-duplicate.
+
+### שורש (מאומת ב-grep ישיר, לא הונח)
+
+`guards/idempotency.py`'s `IdempotencyStore.is_duplicate(channel, sender, content)` מחשב `hash(f"{channel}:{sender}:{content}")` — המימוש עצמו תקין ו**channel-agnostic**. הבעיה הייתה **מה כל caller מעביר בתור `content`**:
+- WhatsApp (Twilio, `app.py`): `dedup_key = msg_sid if msg_sid else incoming` — כבר משתמש ב-`MessageSid` הייחודי של Twilio. ✅ תקין.
+- Meta WhatsApp (`app.py`): `idempotency.is_duplicate("whatsapp_meta", sender, msg_id)` — כבר משתמש ב-`msg_id` הייחודי של Meta. ✅ תקין.
+- **Telegram (`app.py`):** `idempotency.is_duplicate("telegram", sender_user_id, text)` — מעביר את **טקסט ההודעה הגולמי**. ❌ זה הבאג: שתי הודעות טלגרם **נבדלות** (update_id/message_id שונים) יכולות לשאת טקסט זהה לגיטימית — הדוגמה הברורה ביותר: שני "כן" רצופים בזרימת ה-reconfirmation. מיפוי-תוכן (במקום מיפוי-זהות) גרם ל-"כן" השני להיחסם כ"כבר טופל", בלי שום דרך לשלוח אותו מחדש (הטקסט תמיד יהיה "כן").
+
+### תיקון (מינימלי, ממוקד — לא נגע ב-`guards/idempotency.py` עצמו)
+
+`app.py`'s Telegram call site בלבד: `_dedup_event_id = f"{update.update_id}:{update.message.message_id}"` — זהות האירוע של הספק (Telegram), לא הטקסט. `update_id` ייחודי per-bot לפי הבטחת Telegram עצמה (וזו בדיוק הסיבה ההיסטורית ל-idempotency guard — "Telegram retries"); `message_id` נוסף כהגנה-כפולה. ה-scoping לפי chat/sender כבר קיים דרך הפרמטר הקיים `sender_user_id` (הארגומנט השני, ללא שינוי). **סדר הבדיקות לא השתנה** — dedup עדיין רץ **לפני** ה-context gate (לא נחלש, לפי הוראה מפורשת).
+
+### בדיקה
+
+`test_bug_telegram_idempotency_key.py` (חדש, 17/17):
+1. אותו `update_id`/`message_id` פעמיים → השנייה נחסמת (רטריי אמיתי של טלגרם עדיין נתפס).
+2. `message_id` שונים עם טקסט "כן" זהה → **שתיהן** מעובדות (לא נחסמות).
+3. הרצף המלא של reconfirmation — "כן" ראשון (event id שונה, לא נחסם) → לא מבצע, מציג מחדש; "כן" שני (event id שונה נוסף, אותו טקסט, לא נחסם) → מבצע **פעם אחת בדיוק**; חזרה אמיתית על אותו event id של ה-"כן" השני **כן** נחסמת. משלב בדיקה אמיתית של `IdempotencyStore` + state machine אמיתי של `ActionGateway` יחד.
+
+**Regression suite מלא (כל `test_*.py` בריפו כולל `test_telegram_dedup_ordering.py`'s structural check ש-dedup עדיין לפני slash-command/gate):** כולם ירוקים, `smoke_tests.py` PASS, `python3 -m compileall app.py core/action_gateway.py cmd_update.py guards/idempotency.py` — אפס רגרסיה.
+
+### Scope
+
+נגעו רק ב-`app.py` (שורת ה-`content` שמועברת ל-Telegram call site). `guards/idempotency.py` עצמו, WhatsApp/Meta call sites, וסדר הבדיקות (dedup לפני gate) — **לא** שונו.
+
+- **PR:** #313 (`claude/table-incorrect-names-6chfvb` → `main`).
 - **Merged/Deployed/Verified בפרודקשן:** לא עדיין.
-- **סטטוס:** ✅ תוקן בקוד, בדיקות עברו (39+33+4+8 חדשות + רגרסיה מלאה של כל הריפו) — נרשם ל-PR #312 להגיב ל-CI/review. ממתין ל-merge+production verification עם אותו רצף חי (`/update`→`בדיקה`→`כן`) שנכשל בלוג המקורי, ובנוסף smoke לכל מחלקת מסלול (callback לא-קשור, slash command, wizard text, wizard media, מדיה כללית, WhatsApp media, עדכון כפול).
+- **סטטוס:** ✅ תוקן בקוד, בדיקות עברו (17 חדשות + רגרסיה מלאה) — נרשם ל-PR #313. ממתין ל-merge+production verification עם הרצף החי המדויק שנכשל (כן → כן).
