@@ -228,9 +228,9 @@ _NAME_STOP = frozenset({
     # "חדרים קומה ראשונה" written to Leads.Name in production
     # (recRvK6hFTNgyj8ag, BUG-099). None of these words were previously
     # in _NAME_STOP (only cities/streets were covered) — the existing
-    # rejection check just below (`if any(w in _NAME_STOP ...): continue`)
-    # already handles this correctly once the vocabulary is present; no
-    # new extraction logic needed.
+    # stop-word rejection logic already handles this correctly once the
+    # vocabulary is present (see _is_name_stop_token, BUG-099b.1); no new
+    # extraction logic needed.
     "קומה", "חדרים", "ראשונה", "שנייה", "שניה", "שלישית", "רביעית",
     "חמישית", "שישית", "שביעית", "מרפסת", "מטבח", "חניה", "מעלית",
     "נוף", "משופץ", "משופצת", "צמודה", "צמוד", "קרקעית", "תת",
@@ -239,6 +239,41 @@ _NAME_STOP = frozenset({
 
 _HEBREW_WORD_RE = re.compile(r"[א-ת]{2,}")
 _HEBREW_NAME_RE = re.compile(r"(?<!\w)([א-ת]{2,}(?:\s+[א-ת]{2,})+)(?!\w)")
+
+# BUG-099b.1: single-letter Hebrew prepositions/conjunctions (ב/ל/כ/מ/ש/ו/ה)
+# attach directly to the following word with no space — "קומה" (floor) is in
+# _NAME_STOP, but "בקומה" ("on/at-the-floor") is a different token and was
+# not recognized as a stop-word at all, so a message with NO real name at all
+# ("...בקומה חמישית טלפון 0501234571") had "בקומה" survive segmentation as
+# the only non-empty segment and get written as the lead's Name.
+#
+# _is_name_stop_token() is the SINGLE shared helper for this check — every
+# call site in the name-segmentation/name-validation path must go through it
+# instead of a direct `token in _NAME_STOP`, or a bare/prefixed form could
+# get inconsistent treatment between call sites (exactly what happened here:
+# the segmentation loop and _candidate_confidence()'s "no stop-words" bonus
+# were two separate direct-membership checks before this fix).
+#
+# Deliberately narrow: checks ONE single-letter prefix only. Does not
+# recurse (no handling of stacked prefixes like "ובקומה" = ו+ב+קומה — no
+# production reproduction for that shape yet), does no stemming/morphology.
+# "מהדירה" (מ + ה + דירה, two stacked prefixes) is intentionally NOT matched
+# — stripping one prefix leaves "הדירה", which is not itself in _NAME_STOP.
+# A real name is never rejected just for starting with one of these letters
+# unless the remainder, on its own, is already a known stop-word (checked
+# below in the test suite: "בנימין"/"משה"/"הלל"/"שחר" all stay valid).
+_HEBREW_SINGLE_LETTER_PREFIXES = frozenset("בלכמשוה")
+
+
+def _is_name_stop_token(token: str) -> bool:
+    token = token.strip()
+    if token in _NAME_STOP:
+        return True
+    return (
+        len(token) > 1
+        and token[0] in _HEBREW_SINGLE_LETTER_PREFIXES
+        and token[1:] in _NAME_STOP
+    )
 
 # BUG-101b/c: date/time bracket prefix used by pasted WhatsApp chat exports,
 # e.g. "[12.9.2023, 14:25] אורי צדוק: ...". Day/month 1-2 digits, "." or "/"
@@ -308,7 +343,7 @@ def _candidate_confidence(name: str, phone: str, window: str) -> float:
         score += 0.10
 
     # Name: no stop-words
-    if not any(w in _NAME_STOP for w in words):
+    if not any(_is_name_stop_token(w) for w in words):
         score += 0.20
 
     # Name: not a sender line (e.g. "דני: 050...")
@@ -421,7 +456,7 @@ def _extract_name_from_window(window: str, sender_names: set) -> Optional[str]:
 
         segments: list[list[str]] = [[]]
         for w in words:
-            if w in _NAME_STOP:
+            if _is_name_stop_token(w):
                 segments.append([])
             else:
                 segments[-1].append(w)
