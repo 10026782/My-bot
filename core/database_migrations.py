@@ -1,15 +1,26 @@
 # core/database_migrations.py — PostgreSQL migration runner
 #
 # Phase 4B0.1A — schema initialization for atomic coordination.
-# Run migrations on startup if PostgreSQL is configured.
 # Idempotent — safe to call repeatedly.
+#
+# CLI Usage:
+#   python -m core.database_migrations
+#
+# Exits 0 on success (or no-op when PostgreSQL not configured).
+# Exits 1 if any migration fails or PostgreSQL connection fails.
+# Used as Render Pre-Deploy Command to ensure schema is initialized before app starts.
 
 from __future__ import annotations
 
 import logging
-import os
+import sys
 from pathlib import Path
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 logger = logging.getLogger(__name__)
 
 
@@ -23,9 +34,10 @@ def run_migrations() -> bool:
 
     pool = get_conn()
     if pool is None:
-        logger.debug("PostgreSQL not configured — migrations skipped")
+        logger.debug("PostgreSQL not configured — migrations skipped (no-op)")
         return True
 
+    conn = None
     try:
         conn = get_conn()
         if conn is None:
@@ -56,6 +68,7 @@ def run_migrations() -> bool:
                     logger.error(f"Migration failed ({migration_file.name}): {e}")
                     return False
 
+        logger.info("All migrations completed successfully")
         return True
 
     except Exception as e:
@@ -64,3 +77,23 @@ def run_migrations() -> bool:
     finally:
         if conn is not None:
             release_conn(conn)
+
+
+def main() -> int:
+    """
+    CLI entry point for migrations.
+    Returns 0 on success, 1 on failure.
+    """
+    logger.info("PostgreSQL Migration Runner — Phase 4B0.1A Atomic Coordination")
+
+    if run_migrations():
+        logger.info("✅ Migration completed successfully")
+        return 0
+    else:
+        logger.error("❌ Migration failed — aborting")
+        return 1
+
+
+if __name__ == "__main__":
+    exit_code = main()
+    sys.exit(exit_code)

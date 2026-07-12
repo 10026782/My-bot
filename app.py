@@ -130,21 +130,19 @@ bot.exception_handler = handle_telebot_error
 
 app = Flask(__name__)
 
-# Phase 4B0.1A/B — Initialize PostgreSQL migrations and health check for atomic claims
+# Phase 4B0.1A/B — Verify atomic claims health (migrations run via pre-deploy command)
+# Migrations are executed as Render Pre-Deploy Command: python -m core.database_migrations
+# This checks health only; actual migration execution happens before app starts.
 try:
     from feature_flags import is_enabled
     if is_enabled("FEATURE_ATOMIC_CLAIMS"):
-        from core.database_migrations import run_migrations
         from core.atomic_claims_health import log_health_on_startup
-        if run_migrations():
-            logging.info("PostgreSQL migrations completed successfully")
-        else:
-            logging.error("PostgreSQL migrations failed — atomic claims unavailable")
         log_health_on_startup()
 except ImportError:
     pass
 except Exception as e:
-    logging.warning(f"Atomic claims initialization skipped: {e}")
+    logging.error(f"Atomic claims health check failed: {e}")
+    raise
 
 
 def _empty_twiml() -> Response:
