@@ -1736,9 +1736,11 @@
 - **מקרה קצה שנבדק ואומת לא-נפגע:** שם אמיתי המתחיל באחת מ-7 האותיות (בנימין/משה/הלל/שחר, מאומת ישירות בטסט) **לא** נפסל — הבדיקה נכשלת אלא אם השארית שווה בדיוק למילה שכבר קיימת ב-`_NAME_STOP`.
 - **מפורשות מחוץ ל-scope (הוכרע מראש, לא ניחוש בדיעבד):** אין recursive prefix stripping, אין טיפול בתחיליות מוערמות (כמו "ובקומה" = ו+ב+קומה — "מהדירה" למשל **לא** מזוהה כמילת-עצירה, כי הסרת קידומת אחת בלבד משאירה "הדירה" שאינה ב-`_NAME_STOP` בעצמה), אין stemming/מנתח מורפולוגי, אין שינוי בחלון ±80-התווים-סביב-הטלפון, ב-`_BLOCK_SEP`, ב-neighbor-phone clipping, או בזרימת ה-clarification/fallback.
 - **בדיקה:** `test_bug099b1_no_name_validation.py` (20/20, כולל **mutation check מפורש**: `unittest.mock.patch` על `_is_name_stop_token` להחזרה זמנית ל-membership-ישיר-בלבד מוכיח ש-"בקומה" חוזר כ-candidate שגוי — הוכחה שה-helper הוא load-bearing, לא קוסמטי) — שחזור מדויק של מקרה 4 (0 candidates), `classify_ingress` יורד ל-Tier 5, שני תרחישי הרגרסיה הנדרשים (`בקומה` בתיאור-נכס עם שם אמיתי + `בקומה` בלי שם בכלל), 4 בדיקות ישירות על `_is_name_stop_token()` (כולל בנימין/משה/הלל/שחר + מהדירה), ורגרסיה מלאה על 4 המקרים האחרים מאותו סבב בדיקות (3 single-lead + batch) + שני תרחישי BUG-099b המקוריים. אפס רגרסיה: `test_bug096` (29/29), `test_bug098` (16/16), `test_bug099a` (9/9), `test_bug099b_name_window_segmentation.py` (14/14), `test_bug101` (19/19), `core/router/test_router.py` (44/44), `smoke_tests.py`, כל שאר `test_*.py` בריפו.
-- **PR:** לא נפתח עדיין.
-- **Merged:** לא.
-- **סטטוס:** ✅ תוקן בקוד, בדיקות עברו — ממתין ל-push/PR+production verification.
+- **פער "מאומת"-מול-חי שדווח ונפתר (12/07/2026, לפני פתיחת PR):** דיווח חי הראה `Name="בקומה"` על הטקסט המדויק **אחרי** שהתיקון כבר דווח כ"נבדק ועובר" — נראה כסתירה. **אומת ישירות, לא הונח:** `git worktree` נקי של `origin/main` (`0c9b611`, טרם כלל PR עבור 099b.1) הריץ את הטקסט המדויק והחזיר `candidates=[{"name": "בקומה", ...}]`, `tier=1` — כלומר `origin/main` (וממילא הפריסה בפרודקשן) **מעולם לא כלל את התיקון הזה בכלל**, כי לא נפתח לו PR. אין סתירה בין "קוד מתוקן ונבדק" ל"פרודקשן עדיין שבור" — אלו שני דברים נכונים בו-זמנית: התיקון קיים ועובד ב-branch, אך לא הגיע ל-`main`/Render. אין תיקון-קוד נוסף נדרש כתוצאה מהפער הזה — פער-deploy בלבד, לא באג.
+- **PR:** #306 (`claude/table-incorrect-names-6chfvb` → `main`), פתוח 12/07/2026.
+- **Merged:** לא עדיין — ממתין ל-review/merge.
+- **Deployed/Verified בפרודקשן:** לא עדיין. **חובה לפני ✅ VERIFIED IN PROD:** grep-anchored verification על `origin/main` אחרי merge + Render deploy verification (commit hash בדשבורד מול `git ls-remote origin main`) + **בדיקה חוזרת בפרודקשן על הטקסט המדויק** (לא גרסה מקוצרת) שמראה `candidates=[]`/Tier 5, לא `Name="בקומה"`.
+- **סטטוס:** 🟡 CODE DONE, NOT VERIFIED — תוקן בקוד, בדיקות עברו, PR #306 פתוח — ממתין ל-merge+production verification. לא לסמן ✅ עד אימות חי בפועל.
 
 ---
 
