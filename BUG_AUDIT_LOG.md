@@ -1893,6 +1893,6 @@
 
 תואם למדויק את ה-Scope שהוחלט (ActionGateway בלבד): נגעו רק ב-`core/action_gateway.py` ו-`app.py` (שורה אחת, נקודת-חיבור). לא נגעו: `dispatch`/`execute` logic של ActionGateway (`_execute_contract`/`approve()`'s dispatch נשארו ללא שינוי), `FEATURE_ACTION_GATEWAY` flag, `LeadsWriteGate`, לוגיקת disambiguation הקיימת. מנגנונים #2 (`app.py`'s `_pending_approvals`) ו-#3 (`event_bus.py`) **לא טופלו** — נשארים עם אותה פגיעות שורשית, למי שירצה follow-up נפרד.
 
-- **PR:** טרם נפתח — ימתין לקומיט זה.
+- **PR:** #311 (`claude/table-incorrect-names-6chfvb` → `main`).
 - **Merged/Deployed/Verified בפרודקשן:** לא עדיין.
-- **סטטוס:** ✅ תוקן בקוד, בדיקות עברו (26 חדשות + רגרסיה מלאה) — ממתין ל-PR+merge+production verification.
+- **סטטוס:** ✅ תוקן בקוד, בדיקות עברו (26 חדשות + רגרסיה מלאה) — ממתין ל-merge+production verification.
