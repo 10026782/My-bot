@@ -1779,7 +1779,7 @@
 
 ---
 
-## BUG-106 — Session lookup לא-דטרמיניסטי עבור active_lead_candidate (קדם-תנאי ל-BUG-099c) — ✅ תוקן בקוד
+## BUG-106 — Session lookup לא-דטרמיניסטי עבור active_lead_candidate (קדם-תנאי ל-BUG-099c) — ✅ VERIFIED IN PROD
 
 - **תאריך:** 12/07/2026
 - **הוראה מחייבת שהתקבלה:** BUG-106 ו-BUG-099c מבוצעים באותו branch/PR, ב-commits נפרדים, בסדר מחייב — BUG-106 קודם, BUG-099c רק לאחר שהבדיקה של 106 ירוקה. בוצע בדיוק כך.
@@ -1807,13 +1807,14 @@
 `test_bug106_session_determinism.py` (חדש, 7/7): 3 בדיקות ישירות על ה-helper (כולל 18 רשומות בלי timestamp → יציבות מלאה, timestamp אמיתי תמיד מנצח ריק/חסר), ו-**ההוכחה המרכזית שנדרשה** — שתי מופעי `PersistentSessionStore` **נפרדים** (מדמים request 1 ו-request 2 אחרי הפעלה-מחדש/cache-miss) בוחרים **אותו Airtable record ID** בדיוק, לא רק "נמצא ערך". רגרסיה: `test_session_store_contract.py` (BUG-063's own suite, 4/4) ירוק ללא שינוי.
 
 - **PR:** #308 (`claude/table-incorrect-names-6chfvb` → `main`).
-- **Merged:** לא עדיין — ממתין ל-review/merge.
-- **Deployed/Verified בפרודקשן:** לא עדיין. **חובה לפני ✅ VERIFIED IN PROD:** grep-anchored verification על `origin/main` אחרי merge + Render deploy verification.
-- **סטטוס:** ✅ תוקן בקוד, בדיקות עברו (7 חדשות + 4 רגרסיה) — קדם-תנאי ל-BUG-099c מולא. ממתין ל-merge+production verification.
+- **Merged:** ✅ כן — `c1311b8` (`origin/main`), מאומת ב-grep ישיר מול `origin/main` (`_select_canonical_session_record` קיימת ב-`session_store.py`, משמשת בשני call sites).
+- **Deployed:** ✅ כן — Render deploy notification עבור `c1311b8` התקבל.
+- **Verified בפרודקשן:** ✅ כן — לוג הפרודקשן (אימות BUG-099c, ראו שם) מציג `found_count=18 -- using canonical (most recently updated): rec3YS5Zcr2FenX7z` ברישום ההודעה הראשונה, ואותו `rec3YS5Zcr2FenX7z` שוב ב-PATCH-ים העוקבים (הודעה שנייה + confirm) — הוכחה ישירה שאותה רשומה קנונית נבחרה בעקביות על פני שלוש קריאות נפרדות ל-store, לא רק unit test.
+- **סטטוס:** ✅ VERIFIED IN PROD (12/07/2026) — merged + deployed + live evidence, לא רק unit tests/merge/deploy.
 
 ---
 
-## BUG-099c — Clarification במקום Denial כשחסר שם ליד — ✅ תוקן בקוד
+## BUG-099c — Clarification במקום Denial כשחסר שם ליד — ✅ VERIFIED IN PROD
 
 - **תאריך:** 12/07/2026
 - **תלות שמולאה:** BUG-106 (deterministic session selection) — נדרש כקדם-תנאי כי הזרימה חוצה שתי הודעות/requests נפרדות; אם הודעה 1 (שמירה) והודעה 2 (קריאה) יכלו לנחות על שתי רשומות-כפילות שונות, הזרימה הייתה עובדת "לפעמים", לא לפי עיצוב.
@@ -1838,6 +1839,37 @@
 `test_bug099c_lead_clarification.py` (חדש, 25/25): מסלול-שמח מקצה-לקצה (2 הודעות, preview אחד, payload נכון כולל הטקסט המקורי לא תשובת-השם), ביטול, פקיעת TTL, פקודה-חדשה-מפריעה, תשובה-לא-ברורה (כולל "נדבר אחר כך" — האזהרה שנתפסה תוך-כדי), שם-פסול ("בקומה" עצמו), כשל `propose_action()` (state שורד), 3 תנאי-כניסה (בלי טלפון / intent שגוי / Tier 4 — אף אחד לא מפעיל הבהרה), `session=None` (לא קורס, לא "פותר" בטעות), ביקורת-consumer (בוקמארק ישן לא מתבלבל), ובדיקת LL-11 מפורשת (`handle_lead_candidate()` לא קורא ל-Sessions כשsnapshot כבר סופק). **Regression suite מלא כנדרש:** `test_bug096` (29/29), `test_bug098` (16/16), `test_bug099a` (9/9), `test_bug099b` (14/14), `test_bug099b1` (20/20), `test_bug101` (19/19), `test_bug106` (7/7), `test_session_store_contract.py` (4/4), `core/router/test_router.py` (44/44), `test_capture_router_wiring.py` (10/10), `test_session_snapshot.py` (2/2, LL-11 עצמו), `smoke_tests.py`, כל שאר `test_*.py` בריפו — כולם ירוקים, אפס רגרסיה.
 
 - **PR:** #308 (אותו PR כמו BUG-106, commit נפרד).
-- **Merged:** לא עדיין — ממתין ל-review/merge.
-- **Deployed/Verified בפרודקשן:** לא עדיין. **חובה לפני ✅ VERIFIED IN PROD:** grep-anchored verification על `origin/main` אחרי merge + Render deploy + אימות חי בשתי הודעות נפרדות (לא unit tests/merge/deploy בלבד) — כולל אימות ששתי הקריאות השתמשו באותה רשומת Session.
-- **סטטוס:** ✅ תוקן בקוד, בדיקות עברו (25 חדשות + רגרסיה מלאה) — ממתין ל-merge+production verification.
+- **Merged:** ✅ כן — `c1311b8` (`origin/main`), מאומת ב-grep ישיר: `_maybe_start_lead_clarification`, `_resolve_lead_clarification`, `_validate_clarification_name` קיימים ב-`core/lead_candidate_handler.py`, וקריאת `app.py` כוללת `intent=route.intent, session=_session_snapshot`.
+- **Deployed:** ✅ כן — Render deploy notification עבור `c1311b8` התקבל.
+- **Verified בפרודקשן — הרצף החי המלא (2 הודעות נפרדות, כנדרש):**
+  - הודעה 1 (בלי שם, רק טלפון) → תשובת ההבהרה המדויקת שנדרשת: "זיהיתי בקשה ליצור ליד ואת מספר הטלפון 0501234571, אבל לא מצאתי שם. מה שם הליד?" — session record `rec3YS5Zcr2FenX7z` (מתוך 18 כפילויות, `_select_canonical_session_record` בחר בעקביות).
+  - הודעה 2 (נפרדת! רק "יוסי כהן") → preview נכון עם שם+טלפון+הקשר מהודעה 1 (ה-`original_text` נשמר ולא אבד) — אותה `rec3YS5Zcr2FenX7z` שוב ב-PATCH, מוכיח ששתי הקריאות נחתו על אותה רשומת Session (BUG-106 עשה את עבודתו).
+  - אישור ("כן") → רשומת Airtable **יחידה** נוצרה: `recpD6csFGrLCpGjT` — אין כפילות.
+  - **הוכחת-בונוס לניקוי ה-state:** הודעה עוקבת בלתי-קשורה ("שמואל כהן") **לא** נבלעה כהמשך-הבהרה — מוכיח ש-`clear_active_lead_candidate()` פעל נכון אחרי יצירת ה-ActionContract, ולא נשאר state תקוע.
+  - כל הראיות הנ"ל מלוג פרודקשן שהועבר ישירות (לא unit test, לא הסקה).
+- **סטטוס:** ✅ VERIFIED IN PROD (12/07/2026) — merged + deployed + live 2-message sequence + session-record consistency + state-clear regression, כל התנאים שנדרשו לפני סימון ✅ מולאו.
+
+---
+
+## BUG-107 — חיפוש Deals עם שם-שדה שגוי → 422 INVALID_FILTER_BY_FORMULA → A32 false MISMATCH — 🔴 נרשם, לא תוקן (registration-only)
+
+- **תאריך:** 12/07/2026
+- **מקור:** התגלה אגב אימות-חי של BUG-106/BUG-099c (אותו לוג פרודקשן) — **אינו** תקלה ב-099c; תקלה נפרדת במסלול החיפוש הכללי. **לא לפתוח מחדש PR #308 בגלל זה.**
+- **תיאור:** חיפוש בטבלת "עסקאות (Deals)" בונה formula עם שם-שדה שגוי (`SEARCH('שמואל כהן', {שם})` — השדה `שם` כנראה אינו קיים/אינו נכון בטבלת Deals), מה שגורם ל-Airtable להחזיר `422 INVALID_FILTER_BY_FORMULA` חי בפרודקשן. השילוב של השגיאה הזו (Deals) יחד עם שתי תוצאות "0 רשומות" לגיטימיות מ-Leads/Contacts מפעיל אזהרת A32 anti-hallucination שגויה: `MISMATCH` ("agent says 'not found' but tool results contain data") — כלומר שכבת ה-anti-hallucination מפרשת שגיאת-422 (לא "לא נמצא") כאילו יש נתונים שהסוכן התעלם מהם.
+- **קבצים לחקירה (טרם נחקרו — Contract Chain טרם בוצע):** מודול החיפוש הכללי שבונה formulas לפי טבלה (ככל הנראה `crm.py`/`airtable_tools.py`/`contact_resolver.py` או שכבת "חיפוש-בכל-הטבלאות"), שם השדה הנכון בטבלת "עסקאות (Deals)" מול `airtable_schema.py`, ו-`core/anti_hallucination.py`'s טיפול ב-tool-error/422 מול "0 records" לגיטימי.
+- **השערת שורש (לא מאומתת עדיין):** קרוב לוודאי שם-שדה קשיח (hardcoded) שגוי או לא-מעודכן מול הסכימה בפועל של טבלת Deals — ייתכן קשור לדפוסי drift שכבר תועדו ב-`docs/governance/ARCHITECTURE_DRIFT_MAP.md`. דורש grep+trace לפני כל תיקון (Contract Chain), לא הונח כאן.
+- **סטטוס:** 🔴 נרשם בלבד — לא נחקר לעומק, לא תוקן, לא PR. ממתין להנחיה להתחיל Contract Chain.
+
+---
+
+## BUG-108 (follow-up/decision item, לא bug קוד) — Pending ActionGateway approval שורד הודעות-ביניים לא-קשורות
+
+- **תאריך:** 12/07/2026
+- **מקור:** התגלה אגב אימות-חי של BUG-106/BUG-099c — **אינה** תקלה ב-099c, זו שאלת מדיניות/UX ב-`core/action_gateway.py`/TTL, לא קשורה ל-lead-clarification.
+- **תיאור הבעיה:** אישור/preview ממתין (pending ActionContract) נשאר בתוקף גם אחרי הודעות/שיחות אחרות לא-קשורות שהתערבו בינתיים. כלומר משתמש יכול לענות "כן" הרבה אחרי ש"שכח" שהיה preview פתוח, וה-"כן" הזה יאשר פעולה ישנה ולא-רלוונטית יותר, בלי שהמשתמש רואה שוב את תיאור הפעולה שהוא בעצם מאשר.
+- **החלטה נדרשת (לא הוכרעה עדיין — 3 אפשרויות מוצעות):**
+  1. פעולה ממתינה נשארת בתוקף כרגיל (המצב הנוכחי) — אין שינוי.
+  2. פעולה ממתינה **מתבטלת** אוטומטית ברגע שמתחילה כוונה/פעולה אחרת (intent חדש מזוהה) לפני שהמשתמש הספיק לאשר.
+  3. "כן" לאחר הודעת-ביניים כלשהי **חייב** להציג מחדש את תיאור הפעולה הממתינה (summary/preview) לפני ביצוע בפועל — לא לבצע על סמך "כן" יבש בלבד.
+- **קבצים רלוונטיים לכל מימוש עתידי:** `core/action_gateway.py` (`ActionGateway.propose_action`, TTL/lifecycle של `ActionContract`), `app.py`'s `_handle_approval_callback`/`_CONFIRM_WORDS`/`_CANCEL_WORDS`.
+- **סטטוס:** 🔵 נרשם כפריט-החלטה בלבד — אין קוד, אין תיקון, אין PR. ממתין להחלטת מוצר/מדיניות לפני כל מימוש.
