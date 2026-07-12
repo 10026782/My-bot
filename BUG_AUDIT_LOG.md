@@ -2209,11 +2209,69 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 הרצה מלאה: כל ה-`test_*.py` (הרצת script + הרצת pytest מפורשת על כל הקבצים ה-pytest-style), `smoke_tests.py`, ו-`test_integration.py` — ירוק, פרט ל-flake ידוע וקודם ב-`test_session_store_contract.py::test_raw_records_reader_follows_airtable_pagination` (עובר לבד, נכשל רק כשרץ יחד עם קבצים אחרים — לא קשור לשינוי הזה).
 
 - **Severity:** N/A — migration + blocker חדש, לא תיקון באג. חלק מ-PR-0C.
+- **תוקן ב-commit:** `6391328` (PR #319, `570a367` merge commit ל-`main`) — אומת ב-`git show origin/main:app.py \| grep _handle_send_recovery_confirmed` (0 תוצאות, dead code הוסר בפועל).
+- **תוקן ב-branch:** `claude/table-incorrect-names-6chfvb`
+- **Merged:** כן — PR #319
+- **Deployed:** לא ידוע — דרוש בדיקה ידנית (Render)
+- **Verified בפרודקשן:** לא
+- **סטטוס:** Phase 3/4 של PR-0C הושלם ומוזג. Phase 4 — ראה רשומות הבאות (פוצל ל-4A/4B לפי החלטת הבעלים).
+
+---
+
+## PR-0C — Phase 4A/4B: durable ActionContracts persistence + resolve Airtable Approvals table role
+
+- **דווח:** 12/07/2026, המשך ישיר ל-Phase 3 (PR #319).
+
+### החלטת הבעלים (מפורשת, custom answer ב-AskUserQuestion)
+- **ActionContracts = מקור אמת יחיד וקנוני** (durable, ב-Airtable).
+- **Approvals = read-model/projection ל-TMA בלבד** — display-safe fields, לא payloads/fingerprints/secrets פנימיים.
+- שדה "Action Contract ID" נוסף ל-Approvals, מקשר לרשומת ActionContracts הקנונית.
+- TMA list endpoints ממשיכים לקרוא מ-Approvals (ללא שינוי).
+- TMA approve/reject קוראים ל-ActionGateway לפי Action Contract ID — **אסור** לעדכן סטטוס terminal ישירות על Approvals.
+- Projection ל-Approvals מתעדכן **אחרי** שינוי סטטוס קנוני ב-ActionContracts (idempotent).
+- רשומות Approvals ישנות (legacy) מתנקזות/פגות — **לא** replay אוטומטי.
+- מותר לפצל: **4A** (persistence durable) + **4B** (projection + TMA command routing). בוצע בדיוק כך.
+- ביצוע TMA כשירותג: route דרך `airtable_add`/`airtable_update` (כלים קיימים, מחוזקים, עם evidence validators) — לא reuse ל-`_execute_tma_write()`.
+
+### Finding מרכזי (grounding לפני מימוש) — Phase 4A
+`core/action_gateway.py::_build_airtable_writer()` היה כתוב במלואו מראש (factory שבודק `hasattr(Tables, "ACTION_CONTRACTS")` ובונה writer ל-Airtable), אבל **מעולם לא חובר** — ה-singleton היה hardcoded ל-`airtable_writer=None` ("RAM-only until Airtable table exists"). בנוסף התגלה שהפונקציה שהוא מייבא, `tools.airtable_gateway.at_upsert`, **לא הייתה קיימת בכלל בקוד** — כלומר גם אם היה מחובר, הייתה נכשלת ב-`ImportError` (נבלע ב-`except Exception: return None` הרחב) בכל קריאה. שתי הבעיות תוקנו יחד.
+
+### מה נבנה — Phase 4A
+1. **`airtable_schema.py`** — `Tables.ACTION_CONTRACTS = "ActionContracts"` (טבלה חדשה, נוצרה בפועל דרך Airtable MCP בבסיס החי `app4bcgoX7t0HUVnm`, מאומתת בכתיבה/מחיקה של רשומת בדיקה). `ActionContractsFields` — שמות שדות תואמים 1:1 למה ש-`_build_airtable_writer()`'s `_writer()` כבר שולח. `ActionContractStatus` — 8 הערכים בפועל בקוד. כולל כעת spec מלא לשחזור הטבלה בסביבה אחרת (אין עדיין script אוטומטי — פער מוצהר, ראה תיקון למטה).
+2. **`tools/airtable_gateway.py`** — `at_upsert(table, fields, match_field, source)` חדש: מחפש רשומה קיימת לפי `{match_field}=value`, `airtable_patch` אם נמצא אחרת `airtable_create`.
+3. **`core/action_gateway.py`** — `_build_airtable_writer()` תוקנה לא לבלוע exceptions בשקט (logger.warning נוסף).
+
+### תיקון קריטי לפני merge (code review, לא self-caught)
+ה-reviewer עצר את ה-merge וזיהה שהתיאור המקורי של ה-PR **כזב בטעות** בשתי נקודות מהותיות:
+
+1. **"Phase 4A הוא תשתית בלבד, אין caller חי" — לא נכון.** `_queue_approval` (app.py) וכל שלושת ה-writers שהיגרו ב-Phase 3 (media_handler.py, followup_engine.py, core/lead_recovery.py) כבר קוראים ל-`action_gateway.propose_action()`/`propose_gated()` **ללא תנאי** בפרודקשן היום (shadow mode כש-`FEATURE_ACTION_GATEWAY` כבוי). חיבור ה-`airtable_writer` ל-singleton היה גורם לכתיבות אמיתיות ל-Airtable בכל בקשת אישור בפרודקשן **מיד עם ה-merge** — שינוי התנהגות חי, לא "אפס שינוי" כפי שנכתב.
+2. **"ActionContracts = מקור אמת קנוני" מוקדם מדי.** `ExecutionLedger` הוא RAM-only לחלוטין — אין נתיב read/recovery (load-by-contract_id אחרי restart, שחזור pending contracts). writer-only אינו הופך טבלה למקור אמת דורבל; Phase 4B לא יכול לנתב TMA לפי contract_id בביטחון בלי הנתיב הזה.
+
+**תיקון שבוצע (באותו commit, לפני merge):**
+- **`_ledger_singleton` הוחזר במפורש ל-`airtable_writer=None`** — Phase 4A נשאר תשתית אמיתית (schema+at_upsert+build_writer בנויים ונבדקים), אבל ה-singleton החי **לא מחובר** עד שיהיה נתיב read/recovery, הגנת concurrency, ואימות מחוץ לפרודקשן.
+- `_build_airtable_writer()` — exceptions כבר לא נבלעים בשקט לגמרי (logger.warning).
+- `at_upsert()` — docstring מתעד במפורש TOCTOU race ידוע (יצירה כפולה בכתיבה מקבילה על אותו contract_id חדש; כתיבה stale יכולה לדרוס סטטוס חדש יותר) — לא תוקן (דורש locking/versioning אמיתי), מתועד כמגבלה חסומה לפני production rollout אמיתי.
+- `ActionContractsFields` docstring עודכן להסיר את הניסוח "canonical durable truth" עד ששני הנתיבים (write + read/recovery) קיימים.
+- נוסף regression test מפורש: `action_gateway._ledger._airtable_writer is None` — נכשל בקול אם מישהו יחבר את ה-singleton לפני שהעבודה הנדרשת (read/recovery path, concurrency review, אימות מחוץ ל-production) הושלמה.
+
+### Tests — Phase 4A (מעודכן)
+`test_pr0c_action_contracts_persistence.py` (15 assertions, לא 14) — מכסה: `at_upsert` create/patch/missing-match-value; `_build_airtable_writer()` מחזירה callable אמיתי; ה-writer שולח שדות נכונים; `ExecutionLedger.save()`/`update_status()` קוראים ל-writer; writer שזורק exception לא מאבד רשומה מה-RAM; **וה-live singleton עדיין לא מחובר** (regression guard חדש).
+
+כל 15/15 assertions עברו, כל test_*.py הקיימים, `smoke_tests.py`, ו-`test_integration.py` עברו full run (אותו flake ידוע וקודם ב-`test_session_store_contract.py`, לא קשור).
+
+### נשאר פתוח לפני שמחברים את ה-singleton בפועל (לא בהיקף ה-PR הזה)
+- נתיב read/recovery: load-by-contract_id, שחזור pending contracts אחרי restart, reconciliation.
+- הגנת concurrency/version ל-`at_upsert` (TOCTOU race מתועד, לא מתוקן).
+- מדדים/observability מבניים לכשלי כתיבה (מעבר ל-log warning בודד).
+- script provisioning אוטומטי לסביבות נוספות (staging וכו') — כרגע spec כתוב ב-docstring בלבד, לא script.
+- אימות rollout מחוץ ל-production לפני חיבור אמיתי.
+
+- **Severity:** N/A — תשתית. חלק מ-PR-0C. (הכזב בתיאור המקורי תוקן — לא היה fix ל-production bug, אלא תיקון claim לא-מאומת לפני merge).
 - **תוקן ב-commit:** (למלא אחרי commit)
 - **תוקן ב-branch:** `claude/table-incorrect-names-6chfvb`
 - **Merged:** לא עדיין
-- **Deployed:** לא
-- **Verified בפרודקשן:** לא
-- **סטטוס:** Phase 3/4 של PR-0C הושלם (ממתין ל-merge). Phase 4 (TMA + טבלת Airtable Approvals + deprecation ל-PendingActionsStore) הבא בתור.
+- **Deployed:** לא (טבלת Airtable כן נוצרה בפועל בבסיס החי — verified via MCP)
+- **Verified בפרודקשן:** לא רלוונטי — אין שינוי live (singleton לא מחובר)
+- **סטטוס:** Phase 4A הושלם מחדש אחרי תיקון code review, לפני merge. Phase 4B (Approvals projection + TMA command routing) חסום עד שנתיב read/recovery ל-ActionContracts ייבנה בנוסף.
 
 הלוג האחרון (מעלה) מוכיח את **כל השרשרת יחד**, לא רק חתיכה אחת: preview → 2 הפרעות → "כן" (re-display מדויק) → הפרעה שלישית → "כן" (superseded מדויק, אין ביצוע כפול/שגוי). אין פערים פתוחים ידועים בנושא הזה.

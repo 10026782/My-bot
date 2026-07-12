@@ -428,6 +428,57 @@ def airtable_create(
         return None
 
 
+def at_upsert(
+    table: str,
+    fields: dict,
+    match_field: str,
+    source: str = "unknown",
+) -> bool:
+    """
+    Create-or-update by match_field's value (e.g. contract_id). Intended for
+    core/action_gateway.py's ExecutionLedger to persist ActionContracts.
+
+    KNOWN LIMITATION — not safe under concurrent calls for the same
+    match_field value: the lookup-then-write here is not atomic (classic
+    TOCTOU), so two near-simultaneous at_upsert() calls for a brand-new
+    contract_id could both see "no existing record" and both create one
+    (duplicate rows), and two racing writes for an existing record could
+    apply out of order (a stale status could overwrite a newer one — last
+    HTTP call to land wins, not last logical call). In practice today's only
+    caller (ExecutionLedger) writes to a given contract_id from a single
+    synchronous call chain (propose -> approve -> execute), so this hasn't
+    been observed, but do not rely on this function for state that multiple
+    processes/threads may write to the same key concurrently without adding
+    real locking/versioning first. Returns True on success.
+    """
+    match_value = fields.get(match_field)
+    if not match_value:
+        logger.warning(
+            "[gateway:%s] at_upsert %s — match_field '%s' missing/empty in fields",
+            source, table, match_field,
+        )
+        return False
+
+    try:
+        r = httpx.get(
+            _at_url(table),
+            headers=_at_headers(),
+            params={
+                "filterByFormula": f"{{{match_field}}}='{_safe_formula_param(str(match_value))}'",
+                "maxRecords": 1,
+            },
+            timeout=10,
+        )
+        existing = r.json().get("records", []) if r.status_code == 200 else []
+    except Exception as e:
+        logger.warning("[gateway:%s] at_upsert %s lookup error: %s", source, table, e)
+        existing = []
+
+    if existing:
+        return airtable_patch(table, existing[0]["id"], fields, source=source)
+    return airtable_create(table, fields, source=source) is not None
+
+
 def airtable_delete(table: str, record_id: str, source: str = "unknown") -> bool:
     """DELETE an existing Airtable record. Returns True on success."""
     try:

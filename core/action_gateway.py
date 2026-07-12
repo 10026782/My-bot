@@ -1280,7 +1280,9 @@ def _build_airtable_writer():
     """
     מחזיר callable שכותב ActionContract ל-Airtable ActionContracts table.
     נקרא lazy בעת יצוא singleton — לא בזמן import.
-    כאשר Airtable לא מוגדר/לא מחובר, מחזיר None (RAM-only).
+    כאשר Airtable לא מוגדר/לא מחובר, מחזיר None (RAM-only) — מצב צפוי, לא שגיאה.
+    כל כשל אחר (import שבור, bug) מתועד ב-warning — אסור להיבלע בשקט לגמרי,
+    אחרת "אין writer" ו"יש באג ב-writer" נראים זהים בלוגים.
     """
     try:
         from airtable_schema import Tables
@@ -1310,7 +1312,11 @@ def _build_airtable_writer():
             )
 
         return _writer
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "[ActionGateway] _build_airtable_writer failed — falling back to RAM-only: %s",
+            exc,
+        )
         return None
 
 
@@ -1366,7 +1372,21 @@ def _make_dispatch_executor(ledger: ExecutionLedger):
     return _executor
 
 
-_ledger_singleton = ExecutionLedger(airtable_writer=None)  # RAM-only until Airtable table exists
+# PR-0C Phase 4A: _build_airtable_writer()/at_upsert()/Tables.ACTION_CONTRACTS
+# are built and tested, but deliberately NOT wired into the live singleton
+# yet. propose_action()/propose_gated() are already called unconditionally
+# in production today (shadow mode when FEATURE_ACTION_GATEWAY is off) by
+# app.py::_queue_approval, media_handler.py, followup_engine.py, and
+# core/lead_recovery.py — wiring this writer in would mean every one of
+# those calls starts writing real Airtable records immediately, which is a
+# live behavior change, not inert infrastructure. It also requires a durable
+# read/recovery path first (load-by-contract_id on restart, pending-contract
+# recovery) — ExecutionLedger is 100% in-memory today, so "ActionContracts"
+# cannot honestly be called canonical durable truth until contracts can be
+# read back, not just written. Wire this only after that read path exists,
+# at_upsert()'s concurrent-write behavior has been reviewed, and the rollout
+# has been verified in a non-production environment first.
+_ledger_singleton = ExecutionLedger(airtable_writer=None)
 action_gateway = ActionGateway(
     ledger=_ledger_singleton,
     tool_executor=_make_dispatch_executor(_ledger_singleton),
