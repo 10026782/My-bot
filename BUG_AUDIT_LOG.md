@@ -2077,4 +2077,43 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 3. **PR #313** — Telegram idempotency key = event identity (`update_id:message_id`), לא טקסט — כדי ש-"כן" חוזר לא ייחסם.
 4. **PR #314** — bounded one-shot FSM (`SUPERSEDED` אחרי הפרעה שנייה) + קבלת-ביצוע עם תיאור עסקי.
 
+---
+
+## BUG-TMA-APPROVAL-TRUTHFULNESS (PR-0C0) — TMA `bulk_approve` סימן אושר בלי לבצע כלום; `_try_bus_action` בלע כל תוצאה בשקט
+
+- **דווח:** 12/07/2026, כחלק מ-Contract Chain רחב לשלושת מנגנוני האישור המקבילים (PR-0B `app.py::_pending_approvals`, PR-0C `event_bus.PendingActionsStore`, ומנגנון רביעי שהתגלה — טבלת Airtable "Approvals" הנצרכת אך ורק ע"י `tma_api.py`).
+- **מסך / מודול:** `tma_api.py` — `bulk_approve()` (route `/api/approvals/bulk`), `_try_bus_action()`, `act_on_approval()`.
+
+### Contract Chain מצומצם על טבלת Airtable "Approvals" (כפי שהתבקש לפני המימוש)
+- **Writer יחיד בפועל:** `_queue_tma_write_approval()` — כל רשומה נכתבת עם `CONTEXT_TYPE="tma_write"` ו-`CONTEXT_ID=<action name string>` (לעולם לא `event_bus` action_id אמיתי).
+- **Status transitions:** מודל 3-מצבים תקין וקיים מראש — `ממתין → מעבד (durable claim ב-Airtable) → אושר | נכשל`, ממומש נכון ב-`act_on_approval()`'s single-item approve path (claim לפני ביצוע, re-read בתוך lock סוגר race).
+- **קשר ל-EventBus IDs:** מכיוון ש-`CONTEXT_ID` הוא תמיד שם-פעולה של TMA ולא action_id אמיתי, `_try_bus_action()` מפספס תמיד היום ב-harmless way — **לא קיים היום תרחיש live שבו TMA מאשרת פעולת-כלי (tool-based) עם `.confirmed` subscriber אמיתי דרך הנתיב הזה.** זו תיקון-מסלול לתיקון האודיט הקודם שלי (שהניח בטעות שהתרחיש הזה קורה היום).
+- **סדר ביצוע:** בנתיב היחיד (`act_on_approval`) התיקון הקודם (BUG-090-ish 3-state) כבר הבטיח claim-before-execute-before-finalize. **הבאג האמיתי היה ב-`bulk_approve()` בלבד** — נתיב מקביל, נפרד, שמעולם לא קרא ל-`_execute_tma_write()`: הוא כתב `{"סטטוס": "אושר"}` ישירות ל-Airtable בלי ביצוע כלשהו, כלומר "בulk approve" של N רשומות low-risk לא ביצע אף פעולה אחת בפועל — TMA דיווחה ואישרה משהו שמעולם לא רץ.
+- **Restart behavior:** אין persistence ל-in-memory event_bus items — restart מוחק pending items שם. `_try_bus_action` על context_id שאבד ב-restart פשוט מחזיר False (miss), לא raise — לא היה תקין קודם (הערך פשוט נבלע ב-`except Exception: pass` ברמת DEBUG).
+- **Failure/retry states:** לפני התיקון — אין מסלול retry, כל exception אחרי claim משאיר רשומה תקועה לצמיתות ב-`מעבד`. אחרי התיקון — `_claim_and_execute_approval()` מחזירה רשומה שנתקעה ל-`ממתין` בכל exception לא-צפוי אחרי ה-claim, כדי לאפשר ניסיון חוזר.
+- **האם TMA מסמנת אושר לפני ביצוע:** **כן, זה בדיוק הבאג** — רק ב-`bulk_approve()`. הנתיב היחיד היה כבר תקין.
+
+### Root Cause
+כפילות קוד: `act_on_approval()` (יחיד) ו-`bulk_approve()` (מרובה) מימשו שתי גרסאות עצמאיות של אותה לוגיקה — האחת claim→execute→finalize מלאה, השנייה PATCH ישיר בלי execute בכלל. אין single source of truth לרצף האישור.
+
+### התיקון (commit על גבי `claude/table-incorrect-names-6chfvb`)
+1. **`_try_bus_action()`** — שוכתב להחזיר `bool` אמיתי. `_BUS_MISS_MESSAGES` (frozenset) מבחין בין "אין מה לסנכרן" (המצב הצפוי היום, לפי ה-Contract Chain למעלה) לבין "נמצא אבל event_bus עצמו דיווח כישלון" — כבר לא נבלע בשקט ב-DEBUG.
+2. **`_claim_and_execute_approval(approval_id, identity)`** — helper משותף חדש, ממומש פעם אחת: claim (`ממתין→מעבד` בתוך lock, re-read סוגר race) → `_execute_tma_write()` אם יש `tma_write` payload → finalize ל-`אושר` רק על הצלחה, אחרת `נכשל`. Exception לא-צפוי אחרי ה-claim מחזיר את הרשומה ל-`ממתין` (לא משאיר תקוע ב-`מעבד`).
+3. **`act_on_approval()`** — נתיב האישור הבודד שוכתב לקרוא ל-helper המשותף במקום ללוגיקה מוטבעת; נתיב הדחייה חושף `bus_synced` בתגובת ה-JSON במקום להשליך אותו.
+4. **`bulk_approve()`** — **התיקון המרכזי.** במקום `_at_patch(..., {"סטטוס": "אושר"})` ישיר, כל רשומה low-risk עוברת דרך `_claim_and_execute_approval()`. רשומות high/medium risk ממשיכות לא להיגע בהן (hard rule ללא שינוי). התגובה כוללת עכשיו `approved`/`failed`/`skipped` נפרדים במקום `approved`/`skipped` בלבד — "failed" חדש כדי לחשוף רשומות שנכשלו בביצוע בפועל, לא רק "לא low-risk".
+
+### Tests
+`test_pr0c0_tma_approval_truthfulness.py` (חדש, 22 assertions) — מכסה: miss strings מ-event_bus (כולל restart שמאבד in-memory item) → False; sync אמיתי → True; exception מ-event_bus לא מתפשט (נבלע ל-False); `bulk_approve` מבצע `_execute_tma_write` בפועל לפני ספירת "approved"; כשל ביצוע → "failed" ולא "approved" (הבאג המקורי); high/medium risk לא נגעת אף פעם; recovery מ-`מעבד` תקוע ל-`ממתין` אחרי exception לא-צפוי; `bus_synced` נחשף באמת (True/False) בתגובת reject. `test_approval_concurrency.py` הקיים עודכן (4 מקומות) להעביר `return_value=False` מפורש ל-mock של `_try_bus_action` — לפני התיקון `MagicMock()` לא-מוגדר לא נכנס אף פעם ל-JSON response, אחרי התיקון כן (ונכשל serialization בלי הערך המפורש).
+
+כל 22/22 assertions חדשות עברו, כל test_*.py הקיימים (כולל `test_approval_concurrency.py` המעודכן), `smoke_tests.py`, ו-`test_integration.py` עברו full run לאחר השינוי.
+
+- **Severity:** High — "אישור" כוזב על פעולות שלא בוצעו הוא בדיוק אותה מחלקת באג כמו BUG-108/BUG-PENDING-APPROVAL-B, בנתיב אישור נפרד.
+- **תוקן ב-commit:** (למלא אחרי commit)
+- **תוקן ב-branch:** `claude/table-incorrect-names-6chfvb`
+- **Merged:** לא עדיין
+- **Deployed:** לא
+- **Verified בפרודקשן:** לא
+- **סטטוס:** Fixed, ממתין ל-merge + production verification
+- **הערה על scope:** זהו PR-0C0 בלבד — hotfix ל-truthfulness. PR-0C (הגירת 6 ה-writers החיים ל-`ActionGateway.propose_action()`, כולל הפיכת טבלת Airtable "Approvals" ל-projection/audit log או הסרתה) ו-PR-0B (הגירת `app.py::_pending_approvals`) עדיין פתוחים ונדרשים לפני תחילת UnderstandingResult/BUG-104A, לפי הנחיית הבעלים המפורשת.
+
 הלוג האחרון (מעלה) מוכיח את **כל השרשרת יחד**, לא רק חתיכה אחת: preview → 2 הפרעות → "כן" (re-display מדויק) → הפרעה שלישית → "כן" (superseded מדויק, אין ביצוע כפול/שגוי). אין פערים פתוחים ידועים בנושא הזה.
