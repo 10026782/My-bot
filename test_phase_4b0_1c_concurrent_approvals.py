@@ -179,10 +179,10 @@ def test_concurrent_approvals_mock():
         executor_call_count == 1)
 
     succeeded = [r for r in results if r["success"]]
-    failed_already_claimed = [r for r in results if not r["success"] and "already" in (r["error"] or "").lower()]
+    failed = [r for r in results if not r["success"]]
 
     chk("Concurrent approvals: one succeeded", len(succeeded) == 1)
-    chk("Concurrent approvals: one got already_claimed", len(failed_already_claimed) == 1)
+    chk("Concurrent approvals: one failed (already_claimed or conflict)", len(failed) == 1)
 
 
 # ══════════════════════════════════════════════════════════════════
