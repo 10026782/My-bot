@@ -15,16 +15,19 @@
 # Root cause (confirmed by direct reproduction): "קומה" (floor) is in
 # _NAME_STOP, but "בקומה" ("on/at-the-floor" — the same word with the
 # single-letter Hebrew preposition "ב" attached, no space) is a DIFFERENT
-# token and was not recognized as a stop-word at all. In the Hebrew-word run
-# "חדרים בקומה חמישית טלפון", "חדרים"/"חמישית"/"טלפון" are all stop-words and
-# split into their own (empty) segments, but "בקומה" survived as the only
-# non-empty segment and was returned as the name.
+# token and was not recognized as a stop-word at all.
 #
-# Fix: _is_stopword() (core/ingress_classifier.py) checks the exact word
-# AND, if it starts with one of the single-letter Hebrew prefixes
-# (ב/ל/כ/מ/ש/ו/ה), the remainder on its own — so "בקומה" now matches via its
-# "קומה" remainder. Scoped ONLY to this recognition check: no change to the
-# +-80-char phone window, neighbor-phone clipping, or _BLOCK_SEP.
+# Fix: a single SHARED helper, _is_name_stop_token(), replaces every direct
+# `token in _NAME_STOP` membership check in the name-segmentation/
+# name-validation path (there were two: the segmentation loop in
+# _extract_name_from_window(), and the "no stop-words" confidence bonus in
+# _candidate_confidence() — fixing only one would have left the other on
+# the old, incomplete check). Checks the exact token AND, if it starts with
+# one of the single-letter Hebrew prefixes (ב/ל/כ/מ/ש/ו/ה), the remainder on
+# its own. Scoped ONLY to this recognition check: no change to the +-80-char
+# phone window, neighbor-phone clipping, or _BLOCK_SEP. Deliberately does
+# NOT recurse (no stacked-prefix handling, e.g. "ובקומה" = ו+ב+קומה — no
+# production reproduction for that shape) and does no stemming/morphology.
 
 import os, sys
 os.environ.setdefault("ANTHROPIC_API_KEY", "sk-test")
@@ -34,7 +37,15 @@ os.environ.setdefault("AIRTABLE_BASE_ID", "appTest")
 os.environ.setdefault("RENDER_APP_URL", "https://example.com")
 os.environ.setdefault("SETUP_WEBHOOK", "0")
 
-from core.ingress_classifier import _extract_lead_candidates, _is_stopword, classify_ingress
+from unittest.mock import patch
+
+import core.ingress_classifier as ic
+from core.ingress_classifier import (
+    _extract_lead_candidates,
+    _is_name_stop_token,
+    _NAME_STOP,
+    classify_ingress,
+)
 
 passed = failed = 0
 
@@ -49,27 +60,63 @@ def chk(desc: str, cond: bool) -> None:
         failed += 1
 
 
+# ── Required behavior: _is_name_stop_token() itself ───────────────────────
+print("── Direct: _is_name_stop_token() required behaviors ──")
+
+chk("T1: 'קומה' (bare) is a stop token", _is_name_stop_token("קומה"))
+chk("T2: 'בקומה' (single prefix) is a stop token", _is_name_stop_token("בקומה"))
+chk("T3: 'לקומה' (single prefix) is a stop token", _is_name_stop_token("לקומה"))
+chk("T4: 'מהדירה' (two stacked prefixes: מ+ה+דירה) is NOT matched — "
+    "out of scope, no reproduction for stacked prefixes",
+    not _is_name_stop_token("מהדירה"))
+chk("T5: 'בנימין' remains a valid name token", not _is_name_stop_token("בנימין"))
+chk("T6: 'משה' remains a valid name token", not _is_name_stop_token("משה"))
+chk("T7: 'הלל' remains a valid name token", not _is_name_stop_token("הלל"))
+chk("T8: 'שחר' remains a valid name token", not _is_name_stop_token("שחר"))
+
+
 # ── The exact production failure: no name at all ──────────────────────────
+print()
 print("── Production repro: no real name in the text at all ──")
 
 NO_NAME = "צור ליד חדש מעוניין בדירת 4 חדרים בקומה חמישית טלפון 0501234571"
 cands = _extract_lead_candidates(NO_NAME)
-chk("T1: no candidate produced (was: name='בקומה')", cands == [])
+chk("T9: no candidate produced (was: name='בקומה')", cands == [])
 
-ic = classify_ingress(NO_NAME, source_type="text")
-chk("T2: classify_ingress degrades to Tier 5 (no_lead_candidates), not a false Tier 1",
-    ic.tier == 5)
+result = classify_ingress(NO_NAME, source_type="text")
+chk("T10: classify_ingress degrades to Tier 5 (no_lead_candidates), not a false Tier 1",
+    result.tier == 5)
 
 
-# ── Direct check: the stop-word helper itself ─────────────────────────────
+# ── Required regression case: a real name with "בקומה" in the description ─
 print()
-print("── Direct: _is_stopword recognizes a single-letter-prefixed stop-word ──")
+print("── Required: real name still recovered when the description uses 'בקומה' ──")
 
-chk("T3: 'בקומה' (prefixed) is now a stop-word", _is_stopword("בקומה"))
-chk("T4: 'קומה' (bare) is still a stop-word (regression)", _is_stopword("קומה"))
-chk("T5: 'לחדרים' (prefixed) is a stop-word", _is_stopword("לחדרים"))
-chk("T6: a real name is NOT treated as a stop-word just for starting with one of these letters",
-    not _is_stopword("משה") and not _is_stopword("בר") and not _is_stopword("הדס"))
+REAL_NAME = "צור ליד חדש יעל רייך מעוניינת בדירת 2 חדרים בקומה ראשונה טלפון 0503234568"
+cands = _extract_lead_candidates(REAL_NAME)
+chk("T11: name='יעל רייך' recovered correctly", len(cands) == 1 and cands[0]["name"] == "יעל רייך")
+chk("T12: phone correct", len(cands) == 1 and cands[0]["phone"] == "0503234568")
+
+
+# ── Mutation check: prove the helper is load-bearing, not incidental ─────
+print()
+print("── Mutation check: naive `token in _NAME_STOP` (no helper) reintroduces the bug ──")
+
+
+def _naive_membership_only(token: str) -> bool:
+    """The OLD, incomplete check this fix replaces — exact-match only."""
+    return token.strip() in _NAME_STOP
+
+
+with patch.object(ic, "_is_name_stop_token", side_effect=_naive_membership_only):
+    mutated_cands = ic._extract_lead_candidates(NO_NAME)
+chk("T13: with the helper swapped for naive membership-only, the bug REAPPEARS "
+    "('בקומה' comes back as a fake candidate) — proves the helper is load-bearing",
+    len(mutated_cands) == 1 and mutated_cands[0]["name"] == "בקומה")
+
+# Same check with the helper restored (guards against a broken `with` scope above)
+cands_after = _extract_lead_candidates(NO_NAME)
+chk("T14: with the helper restored, the no-name case is clean again", cands_after == [])
 
 
 # ── Regression: the 4 other production cases from the same test round ────
@@ -86,7 +133,7 @@ cases = [
 ]
 for i, (text, expected_name, expected_phone) in enumerate(cases, start=1):
     cands = _extract_lead_candidates(text)
-    chk(f"T{6+i}: case {i} still extracts '{expected_name}' correctly",
+    chk(f"T{14+i}: case {i} still extracts '{expected_name}' correctly",
         len(cands) == 1 and cands[0]["name"] == expected_name and cands[0]["phone"] == expected_phone)
 
 BATCH = (
@@ -95,7 +142,7 @@ BATCH = (
 )
 cands = _extract_lead_candidates(BATCH)
 names = sorted(c["name"] for c in cands)
-chk("T10: batch case still extracts both names correctly",
+chk("T18: batch case still extracts both names correctly",
     names == ["אבי יוסף", "משה אבן"])
 
 
@@ -103,14 +150,14 @@ chk("T10: batch case still extracts both names correctly",
 print()
 print("── Regression: BUG-099b's description-before/after-phone scenarios ──")
 
-T11 = "צור ליד חדש יעל רייס  מעוניינת בדירת 2 חדרים קומה ראשונה   065726763"
-cands = _extract_lead_candidates(T11)
-chk("T11: description-before-phone (099b's original repro) still recovers the name",
+T19 = "צור ליד חדש יעל רייס  מעוניינת בדירת 2 חדרים קומה ראשונה   065726763"
+cands = _extract_lead_candidates(T19)
+chk("T19: description-before-phone (099b's original repro) still recovers the name",
     len(cands) == 1 and cands[0]["name"] == "יעל רייס")
 
-T12 = "יוסי יהלום טלפון 0736637363, מעוניין בדירת 4 חדרים בקומה חמישית"
-cands = _extract_lead_candidates(T12)
-chk("T12: description-after-phone still works",
+T20 = "יוסי יהלום טלפון 0736637363, מעוניין בדירת 4 חדרים בקומה חמישית"
+cands = _extract_lead_candidates(T20)
+chk("T20: description-after-phone still works",
     len(cands) == 1 and cands[0]["name"] == "יוסי יהלום")
 
 
