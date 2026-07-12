@@ -110,15 +110,30 @@ def log_health_on_startup() -> None:
     """
     Log atomic claims health at startup.
     Called from app.py initialization.
+
+    When FEATURE_ATOMIC_CLAIMS is enabled:
+    - Must have PostgreSQL available
+    - Must have migrations already run
+    - Startup FAILS (hard error, not warning) if either is missing
+
+    Never allows graceful degradation: flag ON = atomic claims MUST be operational.
     """
     health = check_health()
     logger.info(f"Atomic claims health: {health.summary()}")
 
     if health.error:
-        logger.warning(f"Atomic claims error: {health.error}")
+        logger.error(f"Atomic claims infrastructure error: {health.error}")
 
+    # Fail-closed: flag enabled but infrastructure not ready = fatal startup error
     if health.enabled and not health.is_ready():
-        logger.error(
-            "FEATURE_ATOMIC_CLAIMS is enabled but infrastructure not ready. "
-            "Atomic claims will be unavailable — all executions will fail closed."
+        fatal_msg = (
+            f"FATAL: FEATURE_ATOMIC_CLAIMS is enabled but infrastructure not ready.\n"
+            f"  Status: {health.summary()}\n"
+            f"  Error: {health.error}\n"
+            f"  Action: Check PostgreSQL configuration, run migrations, or disable flag."
+        )
+        logger.critical(fatal_msg)
+        raise RuntimeError(
+            "Atomic claims infrastructure not ready. See logs for details. "
+            "Never fall back to non-atomic execution."
         )

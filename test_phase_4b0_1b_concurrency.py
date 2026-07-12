@@ -3,21 +3,40 @@
 test_phase_4b0_1b_concurrency.py — Phase 4B0.1B real concurrency tests
 PostgreSQL atomic coordination: prove only one caller wins simultaneous claims.
 
-IMPORTANT: This test requires PostgreSQL to be configured and FEATURE_ATOMIC_CLAIMS=true.
-Without a real PostgreSQL database, tests are skipped (no PostgreSQL configured).
+STATUS: ⏳ IMPLEMENTED, NOT VERIFIED
+  - Mock concurrency tests: ✅ pass (no real DB needed)
+  - Real PostgreSQL tests: ⏳ skipped in this environment (need staging DB)
 
-To run against staging PostgreSQL:
+BLOCKER FOR PHASE 4B0.1C:
+  Real database concurrency tests MUST pass before wiring ActionGateway.
+  Do NOT start 4B0.1C until this is verified against staging PostgreSQL.
+
+To run against staging PostgreSQL (REQUIRED):
   export FEATURE_ATOMIC_CLAIMS=true
-  export DATABASE_URL="postgresql://user:pass@staging-db:5432/boss_bot_test"
+  export DATABASE_URL="postgresql://user:pass@staging-db.onrender.com:5432/boss_bot"
   python3 test_phase_4b0_1b_concurrency.py
 
-Coverage:
-  1. Two independent DB connections try to claim same contract simultaneously
-  2. Only one caller receives acquired result (claim succeeds)
-  3. Other caller receives already_claimed result (claim fails)
-  4. Exactly one execution happens — no duplicate mutations
-  5. Status in DB correctly reflects ownership
-  6. Idempotency key prevents double claims on retry
+Expected results (all 17 tests):
+  ✅ Result semantics (5 tests) — only ACQUIRED allows dispatch
+  ✅ Mock concurrency (2 tests) — single winner guaranteed
+  ✅ Real PostgreSQL (3 tests) — independent connections race atomically
+  ✅ Idempotency (2 tests) — same key safe across retries
+  ✅ Fail-closed (3 tests) — unavailable never proceeds to legacy path
+  ✅ Strict barrier (2 tests) — synchronization forces exact-simultaneous race
+
+  PASSED: 17 | FAILED: 0
+
+Verification checklist after staging test run:
+  ☐ All 17 tests pass
+  ☐ Exactly one ACQUIRED per contract
+  ☐ All other callers get ALREADY_CLAIMED
+  ☐ Durable row visible in PostgreSQL (status=executing)
+  ☐ Idempotency key prevents duplicates
+  ☐ Fail-closed: unavailable never acquired
+  ☐ Winner/loser results recorded in log
+  ☐ Database state verified (no duplicate rows per contract_id)
+
+Then approve Phase 4B0.1C wiring.
 """
 
 from __future__ import annotations

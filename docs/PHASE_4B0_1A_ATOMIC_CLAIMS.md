@@ -1,8 +1,10 @@
-# Phase 4B0.1A — PostgreSQL Atomic Claims (Atomic Coordination Primitive)
+# Phase 4B0.1A/B — PostgreSQL Atomic Claims (Atomic Coordination Primitive)
 
-**Status:** PHASE 4B0.1A COMPLETE (infrastructure only, not wired to live)  
+**Phase 4B0.1A Status:** ✅ COMPLETE (infrastructure only, not wired to live)  
+**Phase 4B0.1B Status:** ⏳ IMPLEMENTED, NOT VERIFIED (real PostgreSQL tests pending)  
 **Updated:** 2026-07-12  
-**Feature Flag:** `FEATURE_ATOMIC_CLAIMS` (default OFF)
+**Feature Flag:** `FEATURE_ATOMIC_CLAIMS` (default OFF)  
+**Blocker for 4B0.1C:** Phase 4B0.1B must pass against staging PostgreSQL
 
 ## Overview
 

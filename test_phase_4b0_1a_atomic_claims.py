@@ -256,13 +256,47 @@ def test_atomic_claims_health_when_disabled():
     chk("Health check when flag OFF: summary mentions DISABLED", "DISABLED" in health.summary())
 
 
+def test_health_check_startup_behavior():
+    """Health startup behavior when flag OFF (no-op)."""
+    from core.atomic_claims_health import log_health_on_startup
+
+    # Flag OFF: startup should not raise
+    try:
+        log_health_on_startup()
+        chk("Health startup when flag OFF: completes without error", True)
+    except Exception as e:
+        chk(f"Health startup when flag OFF: should not raise (got {e})", False)
+
+
+def test_health_check_startup_fails_if_flag_on_but_db_missing():
+    """
+    When FEATURE_ATOMIC_CLAIMS=ON but PostgreSQL unavailable:
+    Startup MUST fail (hard error), never silent degradation.
+    """
+    from core.atomic_claims_health import log_health_on_startup
+
+    # Simulate flag ON but DB down
+    with patch('feature_flags.is_enabled', return_value=True):
+        with patch('core.database.get_conn', return_value=None):
+            # Should raise RuntimeError, not just log warning
+            try:
+                log_health_on_startup()
+                chk("Health startup when flag ON + DB missing: should raise RuntimeError", False)
+            except RuntimeError as e:
+                chk("Health startup when flag ON + DB missing: raises RuntimeError", True)
+                chk(
+                    "Health startup error mentions 'not ready'",
+                    "not ready" in str(e).lower()
+                )
+
+
 # ══════════════════════════════════════════════════════════════════
 # Main
 # ══════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     print("=" * 70)
-    print("Phase 4B0.1A/B — PostgreSQL Atomic Claims (Infrastructure Tests)")
+    print("Phase 4B0.1A — PostgreSQL Atomic Claims (Infrastructure Tests)")
     print("=" * 70)
 
     test_imports()
@@ -274,6 +308,8 @@ if __name__ == "__main__":
     test_database_module_graceful_degradation()
     test_feature_flag_registered()
     test_atomic_claims_health_when_disabled()
+    test_health_check_startup_behavior()
+    test_health_check_startup_fails_if_flag_on_but_db_missing()
 
     print()
     print("=" * 70)
