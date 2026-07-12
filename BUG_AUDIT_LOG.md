@@ -1569,6 +1569,7 @@
   5. **אימות ישיר מול Airtable** (Session record `rec3YS5Zcr2FenX7z`, נשלף חי דרך Airtable MCP): `state.last_lead_candidate_batch.per_lead` מכיל בדיוק `["משה אבני מעוניין"→recW8lw2SxrCH9dse, "אלי חוטי"→recwFDw8UoxjnyMyP]`, `original_message_text` זהה מילה-במילה לטקסט הבדיקה של BUG-096/BUG-097 (אותו יום, מוקדם יותר). `createdTime` של הרשומה: 01/07/2026 (9+ ימים), `Updated At`: 10/07/2026 02:09 — רשומה ותיקה שממשיכה להצטבר state, לא רשומה טרייה.
   6. **גיל חביב מאושר כלא-נוצר**: כש-`_handle_batch_followup()` מחזירה reply, שום קוד לא מגיע ל-`classify_ingress()`/`_extract_name`/`_extract_phone`/`_at_find_lead`/`_write_one_lead`/`propose_action` עבור ההודעה החדשה — אין tool attempt (מוצלח או כושל), אין job מקביל, אין retry ממתין. ההודעה נבלעה במלואה לפני שהגיעה לכל קוד שיכול היה ליצור אותו.
 - **ממצא נלווה, נפרד — Session selection לא-דטרמיניסטי (לא הגורם הישיר כאן, אבל risk אמיתי):** `_load_from_db`/`_find_best_session_in_db` (`session_store.py:449-451, 480-482`) קוראים ל-`airtable_get_records` **בלי `sort` מפורש** ובוחרים `records[0]` (`logger.warning("...using first")`) — סדר ברירת המחדל של Airtable אינו מובטח כ"החדש ביותר". טבלת Sessions (אומת מול הסכימה החיה) **אין לה שדה Status כלל** — אין דרך לסנן רשומות "done"/"resolved" ברמת ה-formula, וגם `_find_best_session_in_db` לא נעול תחת `_create_lock` (בניגוד ל-`get_or_create`) — פוטנציאל race בין workers. במקרה הזה הרשומה שנבחרה הזדמן שהייתה עדכנית ורלוונטית, כך שזה לא הגורם לתקרית — אבל זה מנגנון-סיכון נפרד שיכול לגרום לתקריות דומות/גרועות יותר.
+  **הישנות נוספת, מאומתת (12/07/2026, אותו לוג שאימת BUG-099b.1 בפרודקשן):** `[SessionStore] load sender=7228089151 found_count=18 -- using first: rec3YS5Zcr2FenX7z` — 18(!) רשומות Session לאותו sender, עדיין נבחרת הראשונה בלי sort. **אומת שלא זו הסיבה לתוצאה בבדיקה הזו** (ה-tier=5/no_lead_candidates המקורי היה נכון ללא תלות ב-session שנבחר) — עדיין לא תוקן, לא BUG-ID נפרד, זו אותה בעיה בדיוק שכבר תועדה כאן, פשוט הישנות עם found_count גבוה יותר (18 לעומת פחות קודם) — ראייה נוספת שזה מצטבר ולא נעלם מעצמו.
 - **פער נוסף שהתגלה (לא תוקן, רק מתועד):** אין correlation ID עקבי דרך inbound→session→tool→outbound — `update_id`/`message_id` של Telegram לא נרשמים ברמת INFO, כך שלא ניתן להוכיח אוטומטית 1:1 בין webhook ל-outbound reply (רק היקש מטיימינג).
 - **בדיקה:** לא נוספה עדיין — **root cause מאומת, קוד לא שונה**. Contract Chain בוצע במלואו (6 סעיפים) לפני כל שינוי קוד, לפי בקשת המשתמש.
 - **PR:** #301, ממוזג ל-`main` (commit `165bcee`, מאושר: `git log origin/main`).
@@ -1599,7 +1600,9 @@
 - **סטטוס:** 🟡 **BUG-099a קוד+טסטים מוכנים (ממתין ל-PR+production verification), BUG-099b/c טרם התחילו.** תוכנית מימוש מפוצלת (לא כגוש אחד), נרשמת ב-§3.5:
   - **BUG-099a (✅ קוד+טסטים מוכנים):** הרחבת `_NAME_STOP` (`core/ingress_classifier.py:205-217`) עם 24 מילות תיאור-נכס — Contract Chain קצר (5 שורות, `_NAME_STOP` לא משותף עם עותק מת ב-`lead_candidate_handler.py`, מאומת ב-grep), `test_bug099a_name_stop_extension.py` (חדש, 9/9: T1 reproduction מדויק של `recRvK6hFTNgyj8ag` דרך `summary` field, T2, 2 control cases, isolation check; sanity-check מוכיח שהטסטים תופסים רגרסיה — 5/9 נכשלים בלי התיקון). Regression מלא: `test_bug096_ingress_classifier_batch_bleed.py` (29/29), `test_bug098_followup_word_boundary.py` (16/16), `core/router/test_router.py` (44/44), `smoke_tests.py` — כולם ירוקים, כנדרש במפורש (שינוי בקובץ משותף עם BUG-096/097 גם אם "קטן").
   - **BUG-099b — ✅ תוקן בקוד, בדיקות עברו (12/07/2026, ראה רשומה מלאה למטה):** הרחבת חיפוש השם מעבר לחלון ±80-התווים-סביב-הטלפון (למצוא את "יעל רייס" בפועל, לא רק לדחות תיאור-נכס).
-  - **BUG-099c (טרם התחיל):** fallback form כש-LCH לא מצליח לחלץ אבל ה-Router בטוח שזו כוונת create_lead — לא reuse של `core/lead_buffer.py` (מחובר לזרימת `capture_inbound_lead` החיצונית, לא ל-LCH כלל, אומת בקוד).
+  - **BUG-099c (טרם התחיל, סקופ מדויק עודכן 12/07/2026 לאחר אימות פרודקשן של 099b.1):** fallback form כש-LCH לא מצליח לחלץ אבל ה-Router בטוח שזו כוונת create_lead — לא reuse של `core/lead_buffer.py` (מחובר לזרימת `capture_inbound_lead` החיצונית, לא ל-LCH כלל, אומת בקוד).
+    **ראיה חיה מדויקת (12/07/2026, 03:51:59, אותו לוג שאימת את BUG-099b.1):** `"צור ליד חדש מעוניין בדירת 4 חדרים בקומה חמישית טלפון 0501234571"` (ללא שם) → כעת (אחרי 099b.1) `LCH` מדלג נכון (`Tier 5 — not a lead dictation, skip`), אבל `Router` עדיין קובע `intent=create_lead confidence=0.95` ומגיע ל-`DeterministicDenial` שמחזיר את הודעת החסימה השגויה-הקשר: `"יצירת ליד חדש ידנית דרך הצ׳אט חסומה כרגע"` — **המערכת הבינה נכון שזו כוונת יצירת-ליד, ורק לא מצאה שם**, אבל התגובה מנוסחת כאילו הבקשה עצמה נדחתה/אסורה (אותו mechanism כמו BUG-090/092), לא כאילו חסר רק פרט אחד.
+    **ההתנהגות הרצויה שהוגדרה (לא מומשה עדיין):** כש-`Intent.CREATE_LEAD` בביטחון גבוה + `handle_lead_candidate()` מחזיר `None`/Tier 5 (לא נחסם ע"י gate של-Leads, אלא כי לא זוהה candidate כלל) → הודעת **הבהרה**, לא דחייה: `"זיהיתי בקשה ליצור ליד ואת מספר הטלפון, אבל לא מצאתי שם. מה שם הליד?"` — לא reuse של `DeterministicDenial`'s ניסוח (שמיועד למקרה אחר לגמרי: חסימת source/role, לא "חסר פרט"). דורש להבחין בין שני מצבים ששניהם היום נופלים לאותו branch: (א) הבקשה נחסמה במכוון (gate אמיתי) מול (ב) הבקשה לא הובנה/הושלמה (LCH לא מצא candidate) — ראה גם ההבחנה המקבילה שנשאלה על 099b.1 עצמו (שאלת מחקר #2 שם).
 
 ---
 
@@ -1725,7 +1728,7 @@
 
 ---
 
-## BUG-099b.1 — כשל-validation: קלט ללא שם אמיתי עדיין הפיק candidate שגוי — ✅ תוקן בקוד
+## BUG-099b.1 — כשל-validation: קלט ללא שם אמיתי עדיין הפיק candidate שגוי — ✅ VERIFIED IN PROD (12/07/2026)
 
 - **תאריך:** 12/07/2026
 - **מקור:** התגלה תוך כדי בדיקת production חיה ל-BUG-099b (מקרה 4 מתוך 5, ראה למעלה) — לא regression, פער נפרד שנחשף באותו סבב בדיקות.
@@ -1737,9 +1740,16 @@
 - **מפורשות מחוץ ל-scope (הוכרע מראש, לא ניחוש בדיעבד):** אין recursive prefix stripping, אין טיפול בתחיליות מוערמות (כמו "ובקומה" = ו+ב+קומה — "מהדירה" למשל **לא** מזוהה כמילת-עצירה, כי הסרת קידומת אחת בלבד משאירה "הדירה" שאינה ב-`_NAME_STOP` בעצמה), אין stemming/מנתח מורפולוגי, אין שינוי בחלון ±80-התווים-סביב-הטלפון, ב-`_BLOCK_SEP`, ב-neighbor-phone clipping, או בזרימת ה-clarification/fallback.
 - **בדיקה:** `test_bug099b1_no_name_validation.py` (20/20, כולל **mutation check מפורש**: `unittest.mock.patch` על `_is_name_stop_token` להחזרה זמנית ל-membership-ישיר-בלבד מוכיח ש-"בקומה" חוזר כ-candidate שגוי — הוכחה שה-helper הוא load-bearing, לא קוסמטי) — שחזור מדויק של מקרה 4 (0 candidates), `classify_ingress` יורד ל-Tier 5, שני תרחישי הרגרסיה הנדרשים (`בקומה` בתיאור-נכס עם שם אמיתי + `בקומה` בלי שם בכלל), 4 בדיקות ישירות על `_is_name_stop_token()` (כולל בנימין/משה/הלל/שחר + מהדירה), ורגרסיה מלאה על 4 המקרים האחרים מאותו סבב בדיקות (3 single-lead + batch) + שני תרחישי BUG-099b המקוריים. אפס רגרסיה: `test_bug096` (29/29), `test_bug098` (16/16), `test_bug099a` (9/9), `test_bug099b_name_window_segmentation.py` (14/14), `test_bug101` (19/19), `core/router/test_router.py` (44/44), `smoke_tests.py`, כל שאר `test_*.py` בריפו.
 - **פער "מאומת"-מול-חי שדווח ונפתר (12/07/2026, לפני פתיחת PR):** דיווח חי הראה `Name="בקומה"` על הטקסט המדויק **אחרי** שהתיקון כבר דווח כ"נבדק ועובר" — נראה כסתירה. **אומת ישירות, לא הונח:** `git worktree` נקי של `origin/main` (`0c9b611`, טרם כלל PR עבור 099b.1) הריץ את הטקסט המדויק והחזיר `candidates=[{"name": "בקומה", ...}]`, `tier=1` — כלומר `origin/main` (וממילא הפריסה בפרודקשן) **מעולם לא כלל את התיקון הזה בכלל**, כי לא נפתח לו PR. אין סתירה בין "קוד מתוקן ונבדק" ל"פרודקשן עדיין שבור" — אלו שני דברים נכונים בו-זמנית: התיקון קיים ועובד ב-branch, אך לא הגיע ל-`main`/Render. אין תיקון-קוד נוסף נדרש כתוצאה מהפער הזה — פער-deploy בלבד, לא באג.
-- **PR:** #306 (`claude/table-incorrect-names-6chfvb` → `main`), פתוח 12/07/2026.
-- **Merged:** לא עדיין — ממתין ל-review/merge.
-- **Deployed/Verified בפרודקשן:** לא עדיין. **חובה לפני ✅ VERIFIED IN PROD:** grep-anchored verification על `origin/main` אחרי merge + Render deploy verification (commit hash בדשבורד מול `git ls-remote origin main`) + **בדיקה חוזרת בפרודקשן על הטקסט המדויק** (לא גרסה מקוצרת) שמראה `candidates=[]`/Tier 5, לא `Name="בקומה"`.
+- **PR:** #306 (`claude/table-incorrect-names-6chfvb` → `main`) — **✅ מוזג**.
+- **Merged:** ✅ כן — `main` `a04ec47` (Merge pull request #306), commit `4292845`. מאומת: `git fetch origin main` + `git merge-base --is-ancestor a04ec47 origin/main` → exit 0 (12/07/2026).
+- **Deployed בפרודקשן:** ✅ כן — `a04ec47`, 12/07/2026 03:49-03:50 (Render deploy hash אושר ע"י המשתמש מול הדשבורד, "Deploy live for a04ec47").
+- **Verified בפרודקשן:** ✅ כן — **על הטקסט המדויק, לא גרסה מקוצרת** (לוג Render אמיתי, 03:51:59):
+  ```
+  [IngressClassifier] tier=5 conf=0.00 class=unknown reason=no_lead_candidates candidates=0 chat=boss_hq:eliyahu
+  [LCH] Tier 5 — not a lead dictation (reason=no_lead_candidates), skip
+  ```
+  `grep-anchored confirmation`: `_is_name_stop_token`/`_HEBREW_SINGLE_LETTER_PREFIXES` מאושרים ב-`origin/main` עצמו (לא רק worktree מקומי). "בקומה" לא נבחר כשם, אין preview מזוהם — בדיוק ה-DoD שנדרש.
+- **סטטוס:** ✅ **VERIFIED IN PROD** — merge+deploy+grep-anchored confirmation+אימות התנהגות חי, כולם מאושרים.
 - **סטטוס:** 🟡 CODE DONE, NOT VERIFIED — תוקן בקוד, בדיקות עברו, PR #306 פתוח — ממתין ל-merge+production verification. לא לסמן ✅ עד אימות חי בפועל.
 
 ---
