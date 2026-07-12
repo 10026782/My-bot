@@ -221,21 +221,50 @@ def request_recovery_approval(
     """
     שולח לאישור owner דרך event_bus.
     לא שולח ללקוח!
+
+    PR-0C Phase 3: payload now carries tool_name/tool_inputs so app.py's
+    tool_name branch — which executes via tools/approval_actions.py::send_recovery,
+    through ActionGateway.approve() when FEATURE_ACTION_GATEWAY is on — handles
+    ✅ אשר, instead of the removed send_recovery.confirmed event_bus subscriber.
     """
     try:
         from event_bus import bus  # type: ignore
-        payload = {
-            "memory_key":   candidate.memory_key,
-            "channel":      candidate.channel,
+        from identity import resolve_identity
+        from core.action_gateway import action_gateway as _gw
+
+        identity = resolve_identity("telegram", owner_chat_id)
+        tool_inputs = {
+            "chat_id":      owner_chat_id,
             "draft":        candidate.draft,
-            "tier":         candidate.tier,
             "contact_name": candidate.name,
-            "action_type":  "recovery",
+            "channel":      candidate.channel,
+            "memory_key":   candidate.memory_key,
+            "tier":         candidate.tier,
         }
+
+        block_message = _gw.propose_gated(
+            tenant_id=getattr(identity, "tenant_id", "boss_hq"),
+            canonical_user_id=identity.memory_key,
+            tool_name="send_recovery", tool_inputs=tool_inputs,
+            origin_channel="telegram", origin_chat_id=owner_chat_id,
+            identity=identity,
+        )
+        if block_message:
+            return "", block_message
+
         label = f"♻️ Recovery → {candidate.name} ({candidate.tier}, {candidate.days_silent}d)"
         action_id, btn_label = bus.request_approval(
             action  = "send_recovery",
-            payload = payload,
+            payload = {
+                "tool_name":         "send_recovery",
+                "tool_inputs":       tool_inputs,
+                "origin_channel":    "telegram",
+                "origin_chat_id":    owner_chat_id,
+                "canonical_user_id": identity.memory_key,
+                "user_chat_id":      owner_chat_id,
+                "channel":           "telegram",
+                "action_type":       "recovery",
+            },
             chat_id = owner_chat_id,
             label   = label,
         )

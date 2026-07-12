@@ -2172,11 +2172,48 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 כל 8/8 assertions חדשות עברו, כל test_*.py הקיימים, `smoke_tests.py`, ו-`test_integration.py` עברו full run לאחר השינוי.
 
 - **Severity:** N/A — migration, לא תיקון באג. חלק מ-PR-0C.
+- **תוקן ב-commit:** `0bca565` (PR #318, ראה סטטוס merge בהמשך)
+- **תוקן ב-branch:** `claude/table-incorrect-names-6chfvb`
+- **Merged:** לא עדיין (PR #318 פתוח, CI ירוק, אין review comments)
+- **Deployed:** לא
+- **Verified בפרודקשן:** לא — `FEATURE_ACTION_GATEWAY` כבוי כברירת מחדל, אין שינוי התנהגות היום עד שהדגל יופעל ויאומת בנפרד
+- **סטטוס:** Phase 2/4 של PR-0C הושלם (ממתין ל-merge). Phase 3 — ראה רשומה הבאה.
+
+---
+
+## PR-0C — Phase 3/4: migration של 3 מתוך 5 ה-writers החיצוניים + blocker לשניים הנותרים
+
+- **דווח:** 12/07/2026, המשך ישיר ל-Phase 2 (PR #318).
+
+### Finding מרכזי (grounding לפני מימוש)
+מיפוי מדויק של 5 ה-writers החיצוניים חשף שרק 3 מתוכם (media_handler.py, followup_engine.py, core/lead_recovery.py) שולחים payload שמתאים ל-3 ה-adapters שנבנו ב-Phase 1 — **אבל** ה-payload שלהם היה בפורמט "non-tool" (`{transcript, domain, source}` וכו', בלי `tool_name`/`tool_inputs`), מה שגרם ל-`_handle_approval_callback_impl` לנתב אותם דרך ה-ענף הישן `bus.emit(f"{action}.confirmed", ...)` **ולא** דרך ה-tool_name branch שכבר עבר migration ל-ActionGateway ב-Phase 2. כלומר: בניית ה-adapters (Phase 1) והעברת נתיב-הביצוע (Phase 2) לא הספיקו — היה צריך גם לשנות את **צורת ה-payload** בזמן ה-request כדי שהזרימה בפועל תשתמש בהם.
+
+שני writers נוספים (`email_inbound.py`'s `send_email_reply`, `abandoned_lead_worker.py`'s `send_bounce`) **אין להם `.confirmed` subscriber בכלל** — אישור שלהם היום מסתיים תמיד ב-"⚠️ אין handler — הפעולה לא בוצעה." שניהם flag-off (`EMAIL_INBOUND`, `ABANDONED_LEADS`) ולא מאומתים בפרודקשן. **החלטת בעלים (12/07/2026):** לא לגעת בשני אלה ב-PR-0C — להשאיר על המסלול הישן, ו**להוסיף blocker מפורש** שמונע הדלקת הדגלים לפני שהאדפטר המלא (schema+registry+dispatcher+service+tests) קיים.
+
+### מה השתנה
+1. **`core/action_gateway.py`** — `ActionGateway.propose_gated()` (helper משותף חדש) עוטף את הרצף shadow/enforced שכבר קיים ב-`app.py::_queue_approval` (דגל דלוק → `propose_action()` חוסם באמת; דגל כבוי → shadow best-effort, אף פעם לא חוסם, בולע exceptions) — כדי שלא כל writer חדש יממש את אותו קוד בעצמו. `_queue_approval` עצמו **לא שונה** (כבר עובד ונבדק ב-Phase 2 המוזג).
+2. **`media_handler.py`** — `_send_voice_approval_request()` בונה עכשיו payload עם `tool_name="media_save_to_memory"`+`tool_inputs`, קורא ל-`propose_gated()`. `_handle_memory_confirmed` וההרשמה שלו הוסרו (dead code — לא ניתן להגיע אליהם יותר). `_cb_voice_edit` תוקן לקרוא ל-`domain`/`source` מתוך `payload["tool_inputs"]` במקום מה-payload הישן (top-level) — **תיקון מכני בלבד**, לא redesign. מסלול "✏️ ערוך" עדיין שומר ישירות בלי אישור מחדש — כפי שהוחלט קודם ("Route edit as a new proposal"), redesign זה **עדיין לא מומש**, נשאר open item מפורש (ראה למטה).
+3. **`followup_engine.py`** — `request_followup_approval()` בונה payload עם `tool_name="send_followup"`+`tool_inputs`, קורא ל-`propose_gated()`.
+4. **`core/lead_recovery.py`** — `request_recovery_approval()` בונה payload עם `tool_name="send_recovery"`+`tool_inputs` (כולל `tier`), קורא ל-`propose_gated()`.
+5. **`app.py`** — `_handle_send_followup_confirmed`/`_handle_send_recovery_confirmed` והרשמותיהם הוסרו (dead code אחרי (3)/(4) — לא ניתן להגיע אליהם יותר, כל ה-writers ששלחו אליהם עברו ל-tool_name payload).
+6. **`feature_flags.py`** — `is_enabled()` חוסם כעת מבנית הדלקת `EMAIL_INBOUND`/`ABANDONED_LEADS` אם `tool_registry` אין לו entry ל-`send_email_reply`/`send_bounce` בהתאמה (fail-closed, לא רק תיעוד) — ה-blocker המפורש שהבעלים ביקש.
+
+### Open item שלא טופל כאן (מוצהר, לא הוסתר)
+מסלול "✏️ ערוך" ב-media_handler.py עדיין שומר ישירות מהעריכה בלי preview/אישור מחדש (כפי שהיה). ה-redesign ל"עריכה = הצעה חדשה" (contract ישן נשאר, טקסט ערוך יוצר propose_action חדש, preview טרי, רק "כן" מבצע) **הוחלט אך לא מומש** — נדרש state-machine נוסף (מעקב pending-edit-proposal, trigger "כן" חדש) שהוא מחוץ ל-scope של "migrate 5 writers". ממתין לפרויקט נפרד.
+
+### Tests
+`test_pr0c_writer_migration.py` (חדש, 16 assertions) — מכסה: `propose_gated()` (shadow לא חוסם/בולע exceptions מול enforced חוסם על duplicate); שלושת ה-writers בונים payload עם `tool_name`/`tool_inputs` נכונים; `_cb_voice_edit` קורא נכון מה-nested `tool_inputs`.
+
+**תופעת לוואי חשובה:** בזמן ריצת רגרסיה התגלה ש-`test_c81_recovery_truth.py` (pytest-style, `assert`-based) **אף פעם לא רץ בפועל** תחת ריצת `python3 <file>.py` (הקובץ לא מריץ את הפונקציות שלו בלי `pytest`, ואין footer `if __name__=="__main__"`), וגם לא נכלל ב-allowlist ה-pytest המפורש של `.github/workflows/ci.yml`. הוא נשבר בפועל אחרי הסרת `_handle_send_recovery_confirmed` (2 טסטים קראו לו ישירות) — עודכן לקרוא ל-`tools.approval_actions.send_recovery()` החדש, ואומת ב-`python3 -m pytest`. **לא תוקן כאן**: הוספת הקובץ ל-CI pytest allowlist — מחוץ ל-scope, ראוי לבאג נפרד ("CI blind spot: pytest-style test_*.py files not covered by either CI mechanism").
+
+הרצה מלאה: כל ה-`test_*.py` (הרצת script + הרצת pytest מפורשת על כל הקבצים ה-pytest-style), `smoke_tests.py`, ו-`test_integration.py` — ירוק, פרט ל-flake ידוע וקודם ב-`test_session_store_contract.py::test_raw_records_reader_follows_airtable_pagination` (עובר לבד, נכשל רק כשרץ יחד עם קבצים אחרים — לא קשור לשינוי הזה).
+
+- **Severity:** N/A — migration + blocker חדש, לא תיקון באג. חלק מ-PR-0C.
 - **תוקן ב-commit:** (למלא אחרי commit)
 - **תוקן ב-branch:** `claude/table-incorrect-names-6chfvb`
 - **Merged:** לא עדיין
 - **Deployed:** לא
-- **Verified בפרודקשן:** לא — `FEATURE_ACTION_GATEWAY` כבוי כברירת מחדל, אין שינוי התנהגות היום עד שהדגל יופעל ויאומת בנפרד
-- **סטטוס:** Phase 2/4 של PR-0C הושלם. Phase 3 (5 ה-writers החיצוניים) הבא בתור.
+- **Verified בפרודקשן:** לא
+- **סטטוס:** Phase 3/4 של PR-0C הושלם (ממתין ל-merge). Phase 4 (TMA + טבלת Airtable Approvals + deprecation ל-PendingActionsStore) הבא בתור.
 
 הלוג האחרון (מעלה) מוכיח את **כל השרשרת יחד**, לא רק חתיכה אחת: preview → 2 הפרעות → "כן" (re-display מדויק) → הפרעה שלישית → "כן" (superseded מדויק, אין ביצוע כפול/שגוי). אין פערים פתוחים ידועים בנושא הזה.

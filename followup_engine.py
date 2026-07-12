@@ -175,18 +175,48 @@ def _send_whatsapp(candidate: FollowupCandidate, draft: str) -> bool:
 # ── 4. Approval ───────────────────────────────────
 
 def request_followup_approval(candidate: FollowupCandidate, owner_chat_id: str) -> tuple[str, str]:
+    """
+    PR-0C Phase 3: payload now carries tool_name/tool_inputs so app.py's
+    tool_name branch — which executes via tools/approval_actions.py::send_followup,
+    through ActionGateway.approve() when FEATURE_ACTION_GATEWAY is on — handles
+    ✅ אשר, instead of the removed send_followup.confirmed event_bus subscriber.
+    """
     try:
         from event_bus import bus  # type: ignore
-        payload = {
-            "memory_key":   candidate.memory_key,
-            "channel":      candidate.contact_channel,
+        from identity import resolve_identity
+        from core.action_gateway import action_gateway as _gw
+
+        identity = resolve_identity("telegram", owner_chat_id)
+        tool_inputs = {
+            "chat_id":      owner_chat_id,
             "draft":        candidate.draft,
-            "tier":         candidate.tier,
             "contact_name": candidate.contact_name,
+            "channel":      candidate.contact_channel,
+            "memory_key":   candidate.memory_key,
         }
+
+        block_message = _gw.propose_gated(
+            tenant_id=getattr(identity, "tenant_id", "boss_hq"),
+            canonical_user_id=identity.memory_key,
+            tool_name="send_followup", tool_inputs=tool_inputs,
+            origin_channel="telegram", origin_chat_id=owner_chat_id,
+            identity=identity,
+        )
+        if block_message:
+            return "", block_message
+
         label = f"📤 פולואפ → {candidate.contact_name} ({candidate.tier})"
         action_id, btn_label = bus.request_approval(
-            action="send_followup", payload=payload,
+            action="send_followup",
+            payload={
+                "tool_name":         "send_followup",
+                "tool_inputs":       tool_inputs,
+                "origin_channel":    "telegram",
+                "origin_chat_id":    owner_chat_id,
+                "canonical_user_id": identity.memory_key,
+                "user_chat_id":      owner_chat_id,
+                "channel":           "telegram",
+            },
             chat_id=owner_chat_id, label=label,
         )
         return action_id, btn_label
