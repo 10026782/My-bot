@@ -45,6 +45,10 @@ _REQUIRED: dict[str, list[str]] = {
     "resolve_contact":           ["name_query"],
     "search_business_memory":    ["query"],
     "get_daily_report":          [],
+    # PR-0C — ActionGateway adapters (former event_bus custom actions)
+    "media_save_to_memory":      ["transcript"],
+    "send_followup":             ["chat_id"],
+    "send_recovery":             ["chat_id"],
 }
 
 _FIELD_QUESTIONS: dict[str, str] = {

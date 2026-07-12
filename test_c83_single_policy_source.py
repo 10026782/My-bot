@@ -20,6 +20,10 @@ EXPECTED_APPROVAL_TOOLS = frozenset({
     "gmail_draft",
     "gmail_send_draft",
     "sheets_append",
+    # PR-0C — ActionGateway adapters (former event_bus custom actions)
+    "media_save_to_memory",
+    "send_followup",
+    "send_recovery",
 })
 
 
