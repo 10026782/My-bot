@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS action_execution_claims (
     contract_id TEXT PRIMARY KEY,
     claimant_id TEXT NOT NULL,
     execution_id TEXT NOT NULL UNIQUE,
-    status TEXT NOT NULL DEFAULT 'pending',
+    status TEXT NOT NULL DEFAULT 'executing',
     claimed_at REAL NOT NULL,
     completed_at REAL,
     idempotency_key TEXT UNIQUE,

@@ -1,7 +1,7 @@
 # core/atomic_claim_repository.py — PostgreSQL-backed atomic execution claims
 #
-# Phase 4B0.1A — transactional coordination for ActionContract execution.
-# Every execution claim is atomic: only the caller receiving a returned claim
+# Phase 4B0.1A/B — transactional coordination for ActionContract execution.
+# Every execution claim is atomic: only the caller receiving an ACQUIRED result
 # has the right to proceed to dispatch_tool(). All other callers (duplicates,
 # concurrent requests) must stop before execution.
 #
@@ -9,11 +9,23 @@
 # If the row is returned, this caller wins the race and owns the contract.
 # If None is returned, another caller already owns it — stop immediately.
 #
-# Outcomes:
+# Result types (explicit, not ambiguous None):
+#   - ACQUIRED: this caller won the race, acquired claim, may proceed to dispatch
+#   - ALREADY_CLAIMED: another caller owns this contract, stop before execution
+#   - UNAVAILABLE: PostgreSQL down or migrations not run — fail closed, never proceed
+#   - DISABLED: FEATURE_ATOMIC_CLAIMS flag is OFF
+#   - ERROR: unexpected error during claim attempt
+#
+# Claim status lifecycle (once ACQUIRED):
+#   - executing: claim acquired, execution in progress
 #   - completed: execution succeeded (tool result recorded in Airtable contract)
 #   - failed: execution failed (error recorded in last_error, contract preserved)
 #   - outcome_unknown: execution may have succeeded or failed (unclear)
 #     Never automatically retry outcome_unknown — investigate manually.
+#
+# Fail-closed semantics: when FEATURE_ATOMIC_CLAIMS is ON and PostgreSQL is DOWN,
+# claim_contract_execution() returns UNAVAILABLE. Caller must NOT fall back to
+# legacy execution path — must fail the entire action closed.
 #
 # Feature flag: FEATURE_ATOMIC_CLAIMS (default OFF)
 # Only active when flag is ON and PostgreSQL is configured.
@@ -24,23 +36,56 @@ import json
 import logging
 import time
 import uuid
+from dataclasses import dataclass
 from typing import Optional, Literal
 
 logger = logging.getLogger(__name__)
 
 # Claim status constants
-STATUS_PENDING = "pending"
+STATUS_EXECUTING = "executing"  # claim acquired, execution in progress
 STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
 STATUS_OUTCOME_UNKNOWN = "outcome_unknown"
 
 ExecutionOutcome = Literal["completed", "failed", "outcome_unknown"]
+ClaimResult = Literal["acquired", "already_claimed", "unavailable", "disabled", "error"]
+
+
+@dataclass
+class ClaimAcquisitionResult:
+    """
+    Explicit result type for claim acquisition attempts.
+    Only ACQUIRED results may proceed to dispatch_tool().
+    """
+    result: ClaimResult
+    claim: Optional[AtomicExecutionClaim] = None
+    error: Optional[str] = None
+
+    def is_acquired(self) -> bool:
+        """Returns True only if this caller won the race and may proceed to dispatch."""
+        return self.result == "acquired"
+
+    def is_already_claimed(self) -> bool:
+        """Returns True if another caller already owns this contract."""
+        return self.result == "already_claimed"
+
+    def is_unavailable(self) -> bool:
+        """Returns True if PostgreSQL is down (fail-closed)."""
+        return self.result == "unavailable"
+
+    def is_disabled(self) -> bool:
+        """Returns True if FEATURE_ATOMIC_CLAIMS flag is OFF."""
+        return self.result == "disabled"
+
+    def is_error(self) -> bool:
+        """Returns True if an unexpected error occurred."""
+        return self.result == "error"
 
 
 class AtomicExecutionClaim:
     """
     A claim to execute an ActionContract.
-    Only the holder of a claim may proceed to dispatch_tool().
+    Only the holder of a claim (status=EXECUTING) may proceed to dispatch_tool().
     """
 
     def __init__(
@@ -56,7 +101,7 @@ class AtomicExecutionClaim:
         self.execution_id = execution_id
         self.claimed_at = claimed_at
         self.idempotency_key = idempotency_key or str(uuid.uuid4())
-        self.status = STATUS_PENDING
+        self.status = STATUS_EXECUTING  # claim acquired, execution in progress
         self.completed_at: Optional[float] = None
         self.last_error: Optional[str] = None
 
@@ -82,7 +127,7 @@ def claim_contract_execution(
     contract_id: str,
     claimant_id: str,
     idempotency_key: Optional[str] = None,
-) -> Optional[AtomicExecutionClaim]:
+) -> ClaimAcquisitionResult:
     """
     Attempt to claim ownership of a contract for execution.
 
@@ -92,13 +137,17 @@ def claim_contract_execution(
         idempotency_key: optional key for retry-safety
 
     Returns:
-        AtomicExecutionClaim if this caller won the race (owns the contract)
-        None if another caller already owns it (stop before execution)
+        ClaimAcquisitionResult with one of:
+          - ACQUIRED: this caller won the race, claim is ready to use, status=executing
+          - ALREADY_CLAIMED: another caller owns this contract, stop before execution
+          - UNAVAILABLE: PostgreSQL down or not configured (fail-closed, never proceed)
+          - DISABLED: FEATURE_ATOMIC_CLAIMS flag is OFF
+          - ERROR: unexpected error during claim attempt
 
-    Semantics:
-        - If this caller gets a claim back, only they may call dispatch_tool().
-        - If None is returned, the contract is already being executed by someone else.
-        - Idempotency: same idempotency_key prevents duplicate claims.
+    Only ACQUIRED results may proceed to dispatch_tool().
+    All other results must stop before execution (fail-closed).
+
+    Idempotency: same idempotency_key prevents duplicate rows if retried.
     """
     from feature_flags import is_enabled
 
@@ -107,17 +156,20 @@ def claim_contract_execution(
             f"FEATURE_ATOMIC_CLAIMS disabled — claim_contract_execution skipped "
             f"(contract_id={contract_id})"
         )
-        return None
+        return ClaimAcquisitionResult(result="disabled")
 
     from core.database import get_conn, release_conn
 
     conn = get_conn()
     if conn is None:
-        logger.warning(
-            f"PostgreSQL not configured — claim_contract_execution failed "
-            f"(contract_id={contract_id})"
+        logger.error(
+            f"PostgreSQL unavailable (fail-closed) — claim_contract_execution failed "
+            f"(contract_id={contract_id}). Never fall back to legacy execution path."
         )
-        return None
+        return ClaimAcquisitionResult(
+            result="unavailable",
+            error="PostgreSQL not available or not configured"
+        )
 
     try:
         execution_id = str(uuid.uuid4())
@@ -134,17 +186,17 @@ def claim_contract_execution(
                 ON CONFLICT (contract_id) DO NOTHING
                 RETURNING contract_id;
                 """,
-                (contract_id, claimant_id, execution_id, STATUS_PENDING, claimed_at, idempotency_key),
+                (contract_id, claimant_id, execution_id, STATUS_EXECUTING, claimed_at, idempotency_key),
             )
             result = cur.fetchone()
             conn.commit()
 
         if result is None:
             logger.info(
-                f"Claim rejected (contract already claimed): "
-                f"contract_id={contract_id}, claimant_id={claimant_id}"
+                f"Claim rejected (contract already claimed by another caller): "
+                f"contract_id={contract_id}, attempted_claimant={claimant_id}"
             )
-            return None
+            return ClaimAcquisitionResult(result="already_claimed")
 
         claim = AtomicExecutionClaim(
             contract_id=contract_id,
@@ -154,16 +206,19 @@ def claim_contract_execution(
             idempotency_key=idempotency_key,
         )
         logger.info(
-            f"Claim granted (contract execution owned): "
+            f"Claim acquired (execution ownership acquired): "
             f"contract_id={contract_id}, claimant_id={claimant_id}, execution_id={execution_id}"
         )
-        return claim
+        return ClaimAcquisitionResult(result="acquired", claim=claim)
 
     except Exception as e:
         logger.error(
             f"Error claiming contract execution: contract_id={contract_id}, error={e}"
         )
-        return None
+        return ClaimAcquisitionResult(
+            result="error",
+            error=str(e)
+        )
     finally:
         release_conn(conn)
 

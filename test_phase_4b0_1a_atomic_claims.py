@@ -49,7 +49,7 @@ def chk(desc: str, cond: bool) -> None:
 # ══════════════════════════════════════════════════════════════════
 
 def test_feature_flag_disabled():
-    """When FEATURE_ATOMIC_CLAIMS is OFF, all operations are no-ops."""
+    """When FEATURE_ATOMIC_CLAIMS is OFF, all operations are safe no-ops."""
     from core import atomic_claim_repository
 
     result = atomic_claim_repository.claim_contract_execution(
@@ -57,7 +57,8 @@ def test_feature_flag_disabled():
         claimant_id="boss_hq:owner_1",
     )
 
-    chk("claim_contract_execution returns None when flag is OFF", result is None)
+    chk("claim_contract_execution returns disabled result when flag is OFF",
+        result.result == "disabled" and result.is_disabled())
 
     result = atomic_claim_repository.get_claim("test-contract-1")
     chk("get_claim returns None when flag is OFF", result is None)
@@ -70,9 +71,31 @@ def test_feature_flag_disabled():
 # Test 2: Atomic claim data structure
 # ══════════════════════════════════════════════════════════════════
 
+def test_claim_acquisition_result():
+    """ClaimAcquisitionResult explicit types."""
+    from core.atomic_claim_repository import ClaimAcquisitionResult
+
+    acquired = ClaimAcquisitionResult(result="acquired")
+    chk("ClaimAcquisitionResult.is_acquired() works", acquired.is_acquired())
+    chk("ClaimAcquisitionResult.is_already_claimed() false for acquired", not acquired.is_already_claimed())
+
+    already_claimed = ClaimAcquisitionResult(result="already_claimed")
+    chk("ClaimAcquisitionResult.is_already_claimed() works", already_claimed.is_already_claimed())
+
+    unavailable = ClaimAcquisitionResult(result="unavailable", error="PostgreSQL down")
+    chk("ClaimAcquisitionResult.is_unavailable() works", unavailable.is_unavailable())
+    chk("ClaimAcquisitionResult.error preserved", unavailable.error is not None)
+
+    disabled = ClaimAcquisitionResult(result="disabled")
+    chk("ClaimAcquisitionResult.is_disabled() works", disabled.is_disabled())
+
+    error = ClaimAcquisitionResult(result="error", error="unexpected error")
+    chk("ClaimAcquisitionResult.is_error() works", error.is_error())
+
+
 def test_atomic_execution_claim_dataclass():
     """AtomicExecutionClaim lifecycle."""
-    from core.atomic_claim_repository import AtomicExecutionClaim
+    from core.atomic_claim_repository import AtomicExecutionClaim, STATUS_EXECUTING
 
     claim = AtomicExecutionClaim(
         contract_id="test-contract-2",
@@ -81,7 +104,7 @@ def test_atomic_execution_claim_dataclass():
         claimed_at=time.time(),
     )
 
-    chk("AtomicExecutionClaim initialized with pending status", claim.status == "pending")
+    chk("AtomicExecutionClaim initialized with executing status (acquired)", claim.status == STATUS_EXECUTING)
 
     claim.mark_completed()
     chk("mark_completed sets status correctly", claim.status == "completed")
@@ -137,13 +160,13 @@ def test_schema_file_exists():
 def test_status_constants():
     """All status constants are defined."""
     from core.atomic_claim_repository import (
-        STATUS_PENDING,
+        STATUS_EXECUTING,
         STATUS_COMPLETED,
         STATUS_FAILED,
         STATUS_OUTCOME_UNKNOWN,
     )
 
-    chk("STATUS_PENDING == 'pending'", STATUS_PENDING == "pending")
+    chk("STATUS_EXECUTING == 'executing'", STATUS_EXECUTING == "executing")
     chk("STATUS_COMPLETED == 'completed'", STATUS_COMPLETED == "completed")
     chk("STATUS_FAILED == 'failed'", STATUS_FAILED == "failed")
     chk("STATUS_OUTCOME_UNKNOWN == 'outcome_unknown'", STATUS_OUTCOME_UNKNOWN == "outcome_unknown")
@@ -200,6 +223,7 @@ def test_imports():
     try:
         from core.atomic_claim_repository import (
             AtomicExecutionClaim,
+            ClaimAcquisitionResult,
             claim_contract_execution,
             update_claim_status,
             get_claim,
@@ -209,6 +233,28 @@ def test_imports():
     except Exception as e:
         chk(f"core.atomic_claim_repository import failed: {e}", False)
 
+    try:
+        from core.atomic_claims_health import (
+            AtomicClaimsHealth,
+            check_health,
+            log_health_on_startup,
+        )
+        chk("core.atomic_claims_health imports successfully", True)
+    except Exception as e:
+        chk(f"core.atomic_claims_health import failed: {e}", False)
+
+
+def test_atomic_claims_health_when_disabled():
+    """Health check when flag is OFF."""
+    from core.atomic_claims_health import check_health
+
+    health = check_health()
+    chk("Health check when flag OFF: enabled=False", not health.enabled)
+    chk("Health check when flag OFF: postgresql_available=False", not health.postgresql_available)
+    chk("Health check when flag OFF: migrations_run=False", not health.migrations_run)
+    chk("Health check when flag OFF: not is_ready()", not health.is_ready())
+    chk("Health check when flag OFF: summary mentions DISABLED", "DISABLED" in health.summary())
+
 
 # ══════════════════════════════════════════════════════════════════
 # Main
@@ -216,16 +262,18 @@ def test_imports():
 
 if __name__ == "__main__":
     print("=" * 70)
-    print("Phase 4B0.1A — PostgreSQL Atomic Claims (Infrastructure Tests)")
+    print("Phase 4B0.1A/B — PostgreSQL Atomic Claims (Infrastructure Tests)")
     print("=" * 70)
 
     test_imports()
+    test_claim_acquisition_result()
     test_feature_flag_disabled()
     test_atomic_execution_claim_dataclass()
     test_schema_file_exists()
     test_status_constants()
     test_database_module_graceful_degradation()
     test_feature_flag_registered()
+    test_atomic_claims_health_when_disabled()
 
     print()
     print("=" * 70)
