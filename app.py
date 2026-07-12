@@ -1789,7 +1789,7 @@ def run_agent(
             from core.lead_candidate_handler import handle_lead_candidate
             _lch_reply = handle_lead_candidate(
                 identity, user_text, chat_id, channel, domain=resolved_route_domain,
-                ic=route.capture_ic,
+                ic=route.capture_ic, intent=route.intent, session=_session_snapshot,
             )
             if _lch_reply is not None:
                 # BUG-SB-01: COG sees "lead_candidate_handler" as a different speaker.
