@@ -2140,11 +2140,43 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 כל 34/34 assertions חדשות עברו, כל test_*.py הקיימים (כולל השניים המעודכנים), `smoke_tests.py`, ו-`test_integration.py` עברו full run לאחר השינוי.
 
 - **Severity:** N/A — תשתית תוספת, לא תיקון באג. חלק מ-PR-0C.
+- **תוקן ב-commit:** `db98d82` (PR #317, `119f053` merge commit ל-`main`) — אומת ב-`git show origin/main:tools/dispatcher.py \| grep approval_actions` שהקוד קיים בפועל ב-main.
+- **תוקן ב-branch:** `claude/table-incorrect-names-6chfvb`
+- **Merged:** כן — PR #317
+- **Deployed:** לא ידוע — דרוש בדיקה ידנית (Render)
+- **Verified בפרודקשן:** לא — אין עדיין caller אמיתי (Phase 2/3 יחברו את 6 ה-writers + כפתור טלגרם + TMA)
+- **סטטוס:** Phase 1/4 של PR-0C הושלם ומוזג. Phase 2 (`app.py::_queue_approval` + כפתור טלגרם) — ראה רשומה הבאה.
+
+---
+
+## PR-0C — Phase 2/4: Telegram approve button executes through ActionGateway.approve()
+
+- **דווח:** 12/07/2026, המשך ישיר ל-Phase 1 (adapters, PR #317).
+
+### Finding מרכזי (grounding לפני מימוש)
+`app.py::_queue_approval` **כבר** קורא ל-`ActionGateway.propose_action()` היום — בין אם `FEATURE_ACTION_GATEWAY` דלוק (חוסם בפועל אם `propose_action` מחזירה `ok=False`) או כבוי (shadow mode, best-effort, לא חוסם). המשמעות: ה-caller **כבר** "migrated" בחלקו. הפער האמיתי היה במקום אחר — `_handle_approval_callback_impl` (כפתור ✅/❌ בטלגרם) **מעולם לא** קרא ל-`ActionGateway.approve()`; הוא ביצע `dispatch_tool()` ישירות ואז "סנכרן" ידנית את סטטוס ה-contract ב-ledger בדיעבד (בלוק "Stage B sync", מסתמך על fingerprint lookup חוזר) — כפילות מלאה של הלוגיקה ש-`approve()`/`_execute_contract()` כבר מספקים (claim → dispatch → verify_execution → עדכון סטטוס).
+
+### מה השתנה (`app.py::_handle_approval_callback_impl`, ענף approve עם tool_name)
+כאשר `FEATURE_ACTION_GATEWAY` דלוק **וגם** נמצא contract חי (`status="pending"`) עבור אותו fingerprint (tenant_id+canonical_user_id+tool_name+normalized_payload — אותו נוסחה בדיוק כבר בשימוש ב-SB-02 pre-check הקיים) — הביצוע עובר עכשיו דרך `gw.approve(contract_id, approver=..., approver_role=...)` במקום `dispatch_tool()` ישיר. אם לא נמצא contract (למשל shadow propose_action נכשל בשקט, או הדגל כבוי) — **נופל חזרה ל-fallback המקורי** (`dispatch_tool()` ישיר) בלי שינוי התנהגות — לעולם לא מצב כשל חדש לעומת היום.
+
+**BUG-074 קריטי:** `approver_role` המועבר ל-`approve()` הוא התפקיד של **המאשר בפועל** (`approver_identity`, שנפתר מ-`cq.from_user.id` בתחילת הפונקציה) — **לא** של `identity` (מבקש הפעולה המקורי, שמשמש רק לביצוע עצמו דרך `contract.actor_role`/`actor_external_id` שכבר הוקפאו ב-`_queue_approval`). זהו בדיוק ההבחנה ש-BUG-074 דורש במפורש בתיעוד הפנימי של `ActionGateway.approve()`. נבדק במפורש ב-test (ראה למטה) עם מבקש=employee (חסר סמכות אישור) ומאשר=owner — ה-contract מבוצע בהצלחה, מה שהיה נכשל אם הקוד היה (בטעות) גוזר את approver_role מה-מבקש.
+
+הבלוקים הקיימים סביב (SB-02 duplicate pre-check, SB-04 status wrap, Stage-B sync, executed_action_cache, cross-channel completion) **לא שונו** — הם ממשיכים לפעול נכון: ה-Stage-B sync block הופך אוטומטית ל-no-op כשמשתמשים בנתיב Gateway (כי ה-contract כבר "executed" בזמן שהבלוק רץ, לא "pending"), וה-SB-04 wrap מדלג על wrapping מחדש כי `result` הוא כבר string (מה ש-`compose_status_reply` כבר בנה בתוך `approve()`).
+
+### Finding נלווה (לא תוקן כאן — מחוץ ל-scope, מתועד להמשך טיפול)
+בזמן כתיבת הטסטים התגלה שה-SB-02 duplicate pre-check (`bus.get(action_id)`) **נכשל תמיד** בשקט: `EventBus` (המחלקה החיצונית שנחשפת כ-`bus` singleton) **אין לה מתודת `get()`** — רק ה-`PendingActionsStore` הפנימי כן. הקריאה תמיד זורקת `AttributeError`, נתפסת ע"י ה-`except Exception` הרחב ב-SB-02, ומתועדת רק כ-warning. המשמעות: הגנת ה-duplicate-approval-blocking של SB-02 מעולם לא הייתה פעילה בפועל מאז שנכתבה. זו לא רגרסיה מה-PR הזה (הבאג קדם לו) ולא תוקנה כאן כדי לא לערבב scope — ראוי לבאג נפרד.
+
+### Tests
+`test_pr0c_telegram_callback_gateway.py` (חדש, 8 assertions) — מריץ את `app._handle_approval_callback_impl` בפועל (עם `event_bus.bus` ו-`core.action_gateway.action_gateway` אמיתיים, רק `bot`/`resolve_identity`/`dispatch_tool`/דגלים מדומים): (1) דגל כבוי → נתיב legacy, dispatch פעם אחת; (2) דגל דלוק + contract חי → נתיב Gateway, dispatch פעם אחת, contract מסתיים "executed"; (3) **BUG-074 differential** — מבקש=employee, מאשר=owner → מבוצע בהצלחה (מוכיח ש-approver_role הוא של המאשר, לא המבקש); (4) דגל דלוק בלי contract → fallback ל-legacy, dispatch פעם אחת; (5) דגל דלוק + contract חי + ביצוע נכשל → contract מסתיים "failed", dispatch פעם אחת (ללא retry).
+
+כל 8/8 assertions חדשות עברו, כל test_*.py הקיימים, `smoke_tests.py`, ו-`test_integration.py` עברו full run לאחר השינוי.
+
+- **Severity:** N/A — migration, לא תיקון באג. חלק מ-PR-0C.
 - **תוקן ב-commit:** (למלא אחרי commit)
 - **תוקן ב-branch:** `claude/table-incorrect-names-6chfvb`
 - **Merged:** לא עדיין
 - **Deployed:** לא
-- **Verified בפרודקשן:** לא — אין עדיין caller אמיתי (Phase 2/3 יחברו את 6 ה-writers + כפתור טלגרם + TMA)
-- **סטטוס:** Phase 1/4 של PR-0C הושלם. Phase 2 (`app.py::_queue_approval` + כפתור טלגרם) הבא בתור.
+- **Verified בפרודקשן:** לא — `FEATURE_ACTION_GATEWAY` כבוי כברירת מחדל, אין שינוי התנהגות היום עד שהדגל יופעל ויאומת בנפרד
+- **סטטוס:** Phase 2/4 של PR-0C הושלם. Phase 3 (5 ה-writers החיצוניים) הבא בתור.
 
 הלוג האחרון (מעלה) מוכיח את **כל השרשרת יחד**, לא רק חתיכה אחת: preview → 2 הפרעות → "כן" (re-display מדויק) → הפרעה שלישית → "כן" (superseded מדויק, אין ביצוע כפול/שגוי). אין פערים פתוחים ידועים בנושא הזה.
