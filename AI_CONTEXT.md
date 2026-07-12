@@ -1,62 +1,62 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
-> זהו מסמך תדרוך (briefing), לא תיעוד מלא. לפרטים מלאים: `ROADMAP.md` (מקור אמת יחיד),
-> `BUG_AUDIT_LOG.md`, `CHANGE_CONTROL_LOG.md`. `CANONICAL_STATE.md` **לא קיים** בריפו.
+> זהו מסמך תדרוך (briefing), לא תיעוד מלא. לפרטים מלאים: `ROADMAP.md` (מקור אמת יחיד
+> למתוכנן), `BUG_AUDIT_LOG.md` (המקור **הכי עדכני** בפועל — ראה הערה למטה), `CHANGE_CONTROL_LOG.md`.
+> `CANONICAL_STATE.md` **לא קיים** בריפו.
 
-**עודכן:** 2026-07-12 · **main:** `0ef5e85` (PR #314) · **סטטוס:** BUG-PENDING-APPROVAL-B (Pending Approval Context Safety) נסגר במלואו ו-✅ VERIFIED IN PROD — שרשרת 4 PRs (#311-#314), ראה §1. שני items חדשים נרשמו ב-`ROADMAP.md`'s F-section: U1 (Understanding Layer architecture decision — פתוח, ראה BUG-104) ו-UX-01 (Unified BOSS Experience — PLANNED, חסום מאחורי U1, אין לגעת בניסוחי-הודעות עד שסגור).
+**עודכן:** 2026-07-12 · **main:** `a04ec47` (PR #306, BUG-099b.1) · **סטטוס:** ראו §1
+
+**⚠️ פער תיעוד שהתגלה בעת יצירת מסמך זה:** `ROADMAP.md` (עודכן לאחרונה 10/07), `CHANGELOG.md` ו-`CHANGE_CONTROL_LOG.md` (שניהם עוצרים סביב 08/07) **לא** משקפים סבב עבודה שלם מ-10-12/07 (SPEC A1, BUG-094..101, BUG-099b/099b.1, BUG-102..105) — כל הסבב הזה מתועד רק ב-`BUG_AUDIT_LOG.md`, שהוא כרגע המקור העדכני ביותר בפועל, לא שלושת המסמכים ש"אמורים" להיות מקור האמת. יש לרענן את שלושתם (כולל בומפ לתאריך `עודכן:` ב-ROADMAP) לפני שסומכים עליהם לסטטוס "עכשווי".
 
 ---
 
 ## 1. Executive Summary
 
-- הבוט חי בפרודקשן (Telegram + WhatsApp/Twilio) על `main`, בנוי סביב Identity → Router → Context → Agent, Airtable כ-CRM.
-- **הסבב האחרון (12/07):** BUG-PENDING-APPROVAL-B נסגר במלואו — "context poisoning" בזרימת אישור-ליד: הודעת-ביניים בין preview ל-"כן" גרמה לביצוע שקט של פעולה ישנה. תוקן ב-4 PRs עוקבים, כל אחד נבדק חי בפרודקשן וחשף את הפער הבא: (1) PR #311 — state fields + reconfirmation logic. (2) PR #312 — global ingress context gate (המנגנון הקודם היה בתוך `run_agent()` בלבד, לא ראה `/update`/slash commands/callbacks/wizard/מדיה שעוקפים אותו). (3) PR #313 — Telegram idempotency key = event identity (`update_id:message_id`), לא טקסט (טקסט זהה ל-2 הודעות שונות, כמו "כן" פעמיים, נחסם בטעות כ-duplicate). (4) PR #314 — FSM חסום-סיבוב-אחד: הפרעה שנייה אחרי reconfirmation ראשון = SUPERSEDED (סופי), לא dead-end שקט; קבלת-ביצוע מציגה תיאור עסקי, לא `tool_name` גולמי. **אימות סופי (12/07):** לוג פרודקשן מילולי מלא מוכיח את כל השרשרת יחד. ראה `BUG_AUDIT_LOG.md` BUG-108/BUG-PENDING-APPROVAL-B.
-- הסבב הקודם (09-10/07) סגר שרשרת batch lead-capture: BUG-058 (Tier-2 batch-confirm resolver, `session_store.py`/`core/lead_candidate_handler.py`) נבנה ומחווט, ובדיקה חיה שלו בפרודקשן חשפה 3 באגים נפרדים ב-upstream שנסגרו יחד תחת BUG-094 (חלון שם ±60 תווים "דולף" בין מועמדים סמוכים; dedup עיוור-לטלפון שהופך "דליפה" לכתיבה כפולה לאותה רשומה; דומייני-מטא של ה-Router `CRM`/`INTERNAL` שזלגו ל-`Domain` field של `Leads`/`Lead Events` וגרמו ל-422). `test_bug094_batch_name_bleed.py` 25/25.
-- שרשרת אבטחה/ראוטר נוספת נסגרה: BUG-090 (הודעת חסימה נכונה לפי סוג פעולה ב-Leads write gate), BUG-091 (`_source` כבר לא נאמן מ-`tool_inputs` — תיקון privilege-escalation), BUG-092 (דחיות דטרמיניסטיות נחסמות *לפני* שה-Agent רץ בכלל, לא אחריו).
-- שכבת Airtable Schema Governance הושלמה (PR3 series, כל השלבים ממוזגים): snapshot archive (PR3A), RuntimeSchemaProvider + canonical-snapshot fallback tier (PR3B/B.1), diagnostic CLI ידני (PR3C), ואימות ערכי select לפני כתיבה (PR2 rev.2).
-- Anti-hallucination חוזק: guard מבני גנרי ל-claims על פעולות (יצירה/העברה/המשך) שאין להן כיסוי כלי אמיתי, וכמה תיקוני ניסוח כוזב קונקרטיים (הודעת "forward" מדומה ב-Restricted flow, "המשך" מדומה ב-Single-Speaker fallback).
-- רוב דגלי הפיצ'רים (`FEATURE_AUTO_CAPTURE`, `LEAD_SCORING`, `LEAD_MEMORY`, `FOLLOWUP_AUTOMATION`, `FEATURE_DECISION_HUB`) **כבויים בכוונה** — קוד מוכן/ממוזג, לא מופעל בפרוד. C89 נסגר רשמית כ-CLOSED/VERIFIED עם הדגל כבוי (החלטת בעלים מפורשת, לא production-verification במובן המקורי).
-- שני items בעדיפות 🔴 דחוף **עדיין** פתוחים ולא טופלו מאז התדרוך הקודם: C81-FU (אימות משלוח ב-Recovery) ו-C82-FU (gate מרכזי ל-EMERGENCY_STOP_AUTOMATION).
-- כלל ברזל: "הושלם" ≠ "מאומת". שום claim כאן לא production-verified אלא אם צוין כך במפורש.
+- הבוט חי בפרודקשן (Telegram + WhatsApp/Twilio) על `main`, Identity→Router→Context→Agent, Airtable כ-CRM.
+- סבב 10-12/07 סגר **SPEC A1** (כתיבות Airtable הופכות ל-fail-closed אטומי — dropped fields חוסמים כתיבה כליל, במקום payload חלקי בשקט) ושרשרת ארוכה של באגי חילוץ-ליד מ-WhatsApp (BUG-094..101, BUG-099b) — **רובם VERIFIED IN PROD** עם רשומות Airtable אמיתיות/לוגים חיים.
+- **BUG-099b.1** (PR #306) התמזג הרגע ל-`main` (`a04ec47`) אך **עדיין לא deployed/verified בפרודקשן** — אין לטעון "תוקן בחיים" עד אימות Render hash + בדיקה חוזרת על הטקסט המדויק שגרם לבאג.
+- נזק ידוע קיים כרגע ב-Airtable: רשומת ליד אמיתית (`recRvK6hFTNgyj8ag`, "יעל רייס") נכתבה בעבר עם `Name="חדרים קומה ראשונה"` (BUG-099 לפני התיקון) — טרם תוקנה ידנית.
+- רוב דגלי הפיצ'רים עדיין כבויים בכוונה: `FEATURE_AUTO_CAPTURE`, `LEAD_SCORING`, `LEAD_MEMORY`, `FOLLOWUP_AUTOMATION`, `FEATURE_DECISION_HUB` — קוד מוכן/ממוזג, לא מופעל בפרוד. `FEATURE_INGRESS_ENVELOPE` נשאר יוצא-דופן: ברירת מחדל **ON**.
+- שני items בעדיפות 🔴 דחוף מסבבים קודמים עדיין פתוחים ולא טופלו: C81-FU (אימות משלוח ב-Recovery) ו-C82-FU (gate מרכזי ל-EMERGENCY_STOP_AUTOMATION).
+- 4 ממצאים חדשים מ-12/07 נרשמו בלבד, לא תוקנו: BUG-102/103/104 ("מנגנון קיים אך לא מחובר לחיים" — normalized_text נזרק, EvidenceTrace לא נשמר, Core Reasoning Layer ללא caller חי) ו-BUG-105 (טלפון בין-לאומי עם מקף פנימי נשמט בשקט).
+- אין harness pytest — בדיקות הן סקריפטים עצמאיים (`python3 <file>.py`); CI מריץ את כולן על כל PR/push ל-main.
 
 ---
 
 ## 2. Current System State
 
-**עובד בפרודקשן:** Telegram + WhatsApp(Twilio) inbound עם Identity resolution; Airtable Gateway כנתיב-כתיבה יחיד (normalize→validate→audit, כולל אימות ערכי select כעת); Approval flow (ActionGateway + `tool_registry.enforce`) עם דחיות דטרמיניסטיות שמתבצעות לפני כניסה ל-Agent (BUG-092); Daily Digest; Finance Pulse; TMA (Leads/Projects/Game/Finance Pulse); Cost Watchdog; C94 Ingress Envelope (דגל ON כברירת מחדל); Airtable Schema Runtime Provider (Meta API חי → in-memory אחרון-טוב → snapshot archive → `schema_cache.json`, בסדר עדיפות הזה).
+**עובד בפרודקשן:** Telegram + WhatsApp(Twilio) inbound עם Identity resolution; Airtable Gateway כנתיב-כתיבה יחיד, כעת **fail-closed אטומי** (SPEC A1); Approval flow; Daily Digest; Finance Pulse; TMA; Cost Watchdog; C94 Ingress Envelope (ON כברירת מחדל); צינור חילוץ-ליד מ-WhatsApp (batch/single, chat-export, bidi-control stripping) — מאומת חי אחרי BUG-094..101/099b.
 
 **מיושם חלקית / ממתין להפעלה (קוד מוכן, flag כבוי):**
-- C89 Capture Policy (auto-write tiers) — נסגר כ-CLOSED/VERIFIED בהחלטת הבעלים, `FEATURE_AUTO_CAPTURE` נשאר כבוי בכוונה.
-- BUG-058 Tier-2 batch-confirm resolver — קוד מוכן ומחווט, precedence מול Tier-1 ActionGateway מוכרע (Tier-1 מנצח תמיד).
-- C90 (קבצי xlsx/csv), Lead Scoring/Memory/Followup (N02-N04) — code done, flags off, לא מאומת בתעבורה אמיתית.
-- Decision Hub (Stages 0-6, F17-F22) — כל השלבים ממוזגים ל-main; `FEATURE_DECISION_HUB` כבוי, חסום עד production evidence (ראו חסימות למטה).
-- N15 (Restricted-flow `notify_owner`) — שדה נקבע אך לעולם לא נצרך; נפתח 09/07, עדיין PLANNED, לא מומש.
+- C89 Capture Policy — נסגר CLOSED/VERIFIED בהחלטת הבעלים, `FEATURE_AUTO_CAPTURE` נשאר כבוי בכוונה.
+- C90 (xlsx/csv), Lead Scoring/Memory/Followup (N02-N04) — code done, flags off.
+- Decision Hub (Stages 0-6) — ממוזג ל-main; `FEATURE_DECISION_HUB` כבוי, חסום עד production evidence.
+- `IngressEnvelope.normalized_text` נבנה אך נזרק בנתיב טקסט (BUG-102); `EvidenceTrace` נבנה ונרשם אך אף פעם לא נשמר ל-DB (BUG-103); Core Reasoning Layer / `leads_adapter.py` ממוזגים, אפס קוראים חיים (BUG-104).
 
 **חסום:**
-- Decision Hub activation — חסום ל-BUG-DH-03/04 (Formula Injection): התיקון עצמו **ממוזג** (PR #251), אבל עדיין אין production evidence שמאשר את זה live.
+- Decision Hub activation — התיקון ל-BUG-DH-03/04 (Formula Injection) ממוזג, עדיין אין production evidence.
 - WhatsApp outbound אמיתי — honest stub, ממתין לאישור Meta Cloud API.
-- C93 (OCR/כרטיסי ביקור) — חסום על צבירת ≥2 שבועות נתוני `AgentObservation` אמיתיים (עדיין לא מתקיימים כי C89 לא הופעל).
-- C87 Unified Approval Store — תכנון בלבד, חסום עד שC81-FU–C83 ייסגרו (C83 כבר סגור; C81-FU/C82-FU עדיין פתוחים).
+- C93 (OCR/כרטיסי ביקור) — חסום על צבירת ≥2 שבועות `AgentObservation` אמיתיים (לא מתקיימים כי C89 לא הופעל).
+- BUG-099b.1 — merged אך לא deployed/verified (ראו §1).
 
 ---
 
-## 3. Completed Since Last Update
+## 3. Completed Since Last Update (08/07 → 12/07)
 
-תדרוך קודם היה מבוסס PR #265 (07-08/07); להלן עיקרי 26 ה-PR שנסגרו מאז (#266-#291), לפי נושא:
-
-1. **Batch lead-capture hardening (BUG-058 + BUG-094, 09-10/07)** — Tier-2 batch-confirm resolver נבנה בפועל (הודעת "אישור קבוצתי" סוף-סוף מחוברת ל-resolver אמיתי, לא רק נכתבת ל-state). בדיקה חיה שלו בפרודקשן חשפה וסגרה 3 באגים ב-upstream: חלון-שם דולף בין מועמדים סמוכים, dedup עיוור-לטלפון, וזליגת דומייני-מטא (`CRM`/`INTERNAL`) לשדה `Domain` העסקי ב-`Leads`/`Lead Events` (422). `_lead_domain_key()` חדש סוגר את הפער השלישי.
-2. **אבטחת ראוטר/אישורים (BUG-090/091/092/093)** — הודעת חסימה מדויקת יותר ב-Leads write gate; `_source` כבר לא נאמן ישירות מ-`tool_inputs` (סגר וקטור privilege-escalation); דחיות דטרמיניסטיות (BUG-041/058/070 guard coverage) קוצרות-מעגל לפני שה-Agent בכלל רץ; LL-13 double-execution fix אומת כבר ממוזג (תיעוד בלבד, לא קוד חדש).
-3. **Airtable Schema Governance PR3 series** — snapshot archive scheduler job (PR3A), `RuntimeSchemaProvider` עם fallback chain מלא כולל canonical-snapshot tier (PR3B/PR3B.1), CLI אבחון ידני `tools/check_airtable_schema_runtime.py` (PR3C), ואימות ערכי select לפני כתיבה ב-gateway (PR2 rev.2). BUG-085 (`run_snapshot_archive()` לא כתב `Drift Detected`) נסגר בתוך אותה עבודה.
-4. **Response contract + anti-hallucination hardening** — כתיבות Airtable מסוג fire-and-forget קיבלו visibility לכישלון (במקום להיבלע בשקט); בדיקות הצלחה מבוססות string/regex הוחלפו ב-`result.get("ok")` בכל הריפו; guard מבני גנרי חדש ל-claims על פעולות ללא כיסוי כלי, כולל תיקון סימטרי ל-claims מסוג CREATE (BUG-NEW-09 symmetry); שתי הודעות ניסוח כוזבות ספציפיות תוקנו (Restricted-flow "forward" מדומה, Single-Speaker fallback "המשך" מדומה).
-5. **Business Memory Domain lookup** — מיפוי סטטי ל-`Domain` הוחלף בחיפוש live מול schema; `_save_to_business_memory` מחזיר עכשיו contract `{ok,...}` אמיתי במקום `None` גולמי.
-6. **TMA schema alignment** — task/deal schema field values יושרו (PR #289).
+1. **SPEC A1 (10/07)** — `airtable_gateway.py`'s `airtable_patch`/`airtable_create` חוסמים כתיבה כליל אם `validate_airtable_fields()` השמיטה שדות, במקום לכתוב payload חלקי בשקט. משפיע על כל נתיב כתיבה בקוד. 32/32 טסטים.
+2. **BUG-094/095/096/097 (10/07)** — שרשרת bleed בין לידים בדיקטציית batch: חלון-שם דלף בין מועמדים, `_at_find_lead` נפל ל-name-only match, domain מטא-router זלג לשדה Domain, טלפון פגום באמצע batch "בלע" בלוק שכן, ופעלי-כוונה (מעוניין/רוצה) נדבקו לשם. תוקן ב-`core/ingress_classifier.py`'s `_extract_lead_candidates()` (המימוש **החי** — לא `core/lead_candidate_handler.py`'s גרסה המתה, שתוקנה בטעות תחילה).
+3. **BUG-098 (10/07)** — `_FOLLOWUP_WORDS` (substring match) תפס "קומה" בטעות כ-"ומה" (המשך-batch), חטף הודעות ליד חדשות והחזיר "✅ נשמר בהצלחה" כוזב פעמיים ברצף בלי שום ליד נוצר בפועל. תוקן ל-word-boundary regex. **VERIFIED IN PROD.**
+4. **BUG-099/099a/099b (10-12/07)** — המשך חקירת BUG-098: חלון חילוץ-שם מעוגן ל-±80 תווים סביב הטלפון בלבד, בלי העדפה שם-מול-תיאור-נכס; שם אמיתי ("יעל רייס") הפך בפועל ל-`Name="חדרים קומה ראשונה"` ברשומת Airtable אמיתית (ראו §1). 099a הרחיב `_NAME_STOP`; **099b (PR #305)** שינה אסטרטגיה — פיצול הרצף לסגמנטים לפי מילות-עצירה ובחירת הארוך ביותר. **VERIFIED IN PROD** — 5 בדיקות חיות, 2 רשומות Airtable תקינות.
+5. **BUG-101a/b/c (12/07, PR #304)** — ייבוא-ייצוא WhatsApp: תווי כיווניות (RLM/LRM) שברו זיהוי Tier-4; `_BLOCK_SEP` לא זיהה `[תאריך, שעה] שם:` כגבול-הודעה; `_SENDER_LINE_RE` לא סבל קידומת timestamp. **VERIFIED IN PROD** — grep-anchored על `origin/main` + Render deploy מאושר.
+6. **BUG-099b.1 (12/07, PR #306, `a04ec47`)** — helper משותף `_is_name_stop_token()` סוגר call-site שני (`_candidate_confidence()`) שפספס טוקנים עם קידומת-יחס חד-אותית ("בקומה"), שהופקו כשם-ליד שגוי כשלא היה שם בכלל. **ממוזג ל-main, לא deployed/verified.**
+7. **נרשמו (לא תוקנו):** BUG-102/103/104 (מנגנון-קיים-לא-מחובר), BUG-105 (טלפון בין-לאומי עם מקף פנימי נשמט בשקט), פער UX ב-preview שלא מאוחד (single-lead/batch/disambiguation) — כל אחד ב-PR נפרד עתידי.
 
 ---
 
 ## 4. Next Priorities
 
-1. **🔴 C81-FU** — Recovery: לאמת תוצאת שליחה בפועל לפני סימון `recovery_count`/הושלם (כרגע גדל גם כשההודעה לא נמסרה). **עדיין פתוח.**
-2. **🔴 C82-FU** — Gate מרכזי אחד ל-`EMERGENCY_STOP_AUTOMATION` לפני כניסה לכל scheduler job (היום נאכף רק ב-followup/payment reminders). **עדיין פתוח.**
-3. **🟡 N15** — החלטה + מימוש: Restricted-flow `notify_owner` — לבנות מנגנון התראה אמיתי לבעלים או להסיר את השדה שנקבע ולעולם לא נצרך.
-4. **🟡 C84-C86** — TMA approvals TTL/freshness check, structural test ל-orphan approval actions, coverage מטריציוני ל-Emergency Stop על כל scheduler jobs.
-5. **Decision Hub activation gate** — `FEATURE_DECISION_HUB` יישאר כבוי עד שיתקבל production evidence אמיתי ל-BUG-DH-03/04 (formula injection fix כבר ממוזג, חסר רק אימות live).
+1. **🔴 Production-verify BUG-099b.1** — Render deploy hash מול `a04ec47`, ואז בדיקה חוזרת על הטקסט המדויק ("...בקומה חמישית טלפון...") שמצפה ל-`candidates=[]`/Tier 5, לא `Name="בקומה"`.
+2. **תיקון ידני** לרשומת `recRvK6hFTNgyj8ag` ("יעל רייס", כרגע `Name="חדרים קומה ראשונה"`) ב-Airtable — נזק אמיתי שכבר קיים, לא תלוי בקוד.
+3. **BUG-099c** — fallback form כש-LCH נכשל בחילוץ אבל ה-Router בטוח שזו כוונת create_lead (הפריט הבא בתור בשרשרת BUG-099).
+4. **🔴 C81-FU / C82-FU** — אימות משלוח בפועל ב-Recovery לפני סימון הושלם; gate מרכזי אחד ל-`EMERGENCY_STOP_AUTOMATION` לפני כל scheduler job (היום נאכף רק ב-followup/payment reminders). שני הפריטים משבבים קודמים, עדיין לא טופלו.
+5. **רענון תיעוד** — לעדכן `ROADMAP.md`/`CHANGELOG.md`/`CHANGE_CONTROL_LOG.md` עם סבב 10-12/07 (כולל בומפ תאריך `עודכן:` ב-ROADMAP) — שלושתם כרגע לא-עקביים מול `BUG_AUDIT_LOG.md` (ראו §1).
