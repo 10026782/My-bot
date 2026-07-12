@@ -35,6 +35,37 @@ _MAX_SESSIONS = 1000
 
 
 # ══════════════════════════════════════════════════
+# BUG-106 — deterministic selection among duplicate Session rows
+# ══════════════════════════════════════════════════
+
+def _select_canonical_session_record(records: list[dict]) -> dict:
+    """
+    Deterministically picks ONE record out of possibly-many rows matching
+    the same Sender ID (the Sessions filter formula is Sender-ID-only — no
+    tenant/channel/context-type scoping, confirmed against the live schema;
+    see the BUG-106 Contract Chain in BUG_AUDIT_LOG.md).
+
+    Sorted by Updated At descending — "most recently active session for
+    this sender" is the only signal the schema actually provides for "which
+    one is current" (Sessions has no Status field at all, per BUG-098's
+    finding). Without this, `records[0]` depended entirely on whatever
+    order Airtable's API happened to return for an unsorted filter query —
+    never a deliberate choice, and not guaranteed stable across requests.
+
+    `sorted(..., reverse=True)` is stable: records that tie on Updated At
+    (including ALL of them, when the field is absent/empty on every row)
+    keep their original relative order rather than being reshuffled — this
+    is what keeps `records[0]` selection unchanged for any caller/test that
+    never populated Updated At in the first place.
+    """
+    return sorted(
+        records,
+        key=lambda r: r.get("fields", {}).get(SF.UPDATED_AT, "") or "",
+        reverse=True,
+    )[0]
+
+
+# ══════════════════════════════════════════════════
 # Session Schema
 # ══════════════════════════════════════════════════
 
@@ -460,7 +491,7 @@ class PersistentSessionStore:
                 )
                 return None, 0, "no_records"
 
-            selected = records[0]["id"]
+            selected = _select_canonical_session_record(records)["id"]
             return selected, len(records), "patch_existing"
         except Exception as exc:
             logger.warning("[SessionStore] live dedup check failed for %s: %s", sender, exc)
@@ -484,11 +515,11 @@ class PersistentSessionStore:
             if records is None or not records:
                 return None
 
-            record = records[0]
+            record = _select_canonical_session_record(records)
             record_id = record["id"]
             if len(records) > 1:
                 logger.warning(
-                    "[SessionStore] load sender=%s found_count=%d -- using first: %s",
+                    "[SessionStore] load sender=%s found_count=%d -- using canonical (most recently updated): %s",
                     sender, len(records), record_id,
                 )
 
