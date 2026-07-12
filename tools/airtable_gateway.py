@@ -428,6 +428,46 @@ def airtable_create(
         return None
 
 
+def at_upsert(
+    table: str,
+    fields: dict,
+    match_field: str,
+    source: str = "unknown",
+) -> bool:
+    """
+    Create-or-update by match_field's value (e.g. contract_id). Used by
+    core/action_gateway.py's ExecutionLedger to persist ActionContracts —
+    idempotent so repeated status-transition writes for the same contract_id
+    update one record instead of creating duplicates. Returns True on success.
+    """
+    match_value = fields.get(match_field)
+    if not match_value:
+        logger.warning(
+            "[gateway:%s] at_upsert %s — match_field '%s' missing/empty in fields",
+            source, table, match_field,
+        )
+        return False
+
+    try:
+        r = httpx.get(
+            _at_url(table),
+            headers=_at_headers(),
+            params={
+                "filterByFormula": f"{{{match_field}}}='{_safe_formula_param(str(match_value))}'",
+                "maxRecords": 1,
+            },
+            timeout=10,
+        )
+        existing = r.json().get("records", []) if r.status_code == 200 else []
+    except Exception as e:
+        logger.warning("[gateway:%s] at_upsert %s lookup error: %s", source, table, e)
+        existing = []
+
+    if existing:
+        return airtable_patch(table, existing[0]["id"], fields, source=source)
+    return airtable_create(table, fields, source=source) is not None
+
+
 def airtable_delete(table: str, record_id: str, source: str = "unknown") -> bool:
     """DELETE an existing Airtable record. Returns True on success."""
     try:

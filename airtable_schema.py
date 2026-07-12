@@ -86,6 +86,12 @@ class Tables:
     # PR3A — Airtable schema snapshot archive. Must be created manually in Airtable
     # before FEATURE_AIRTABLE_SCHEMA_SNAPSHOT can be turned on. ראה SchemaSnapshotFields.
     SCHEMA_SNAPSHOTS = "System Schema Snapshots"
+    # PR-0C Phase 4A — canonical durable persistence for core/action_gateway.py's
+    # ActionContract/ExecutionLedger (Stage B). One state owner: this table is
+    # the source of truth; "Approvals" (below, TMA) is a display-safe projection
+    # of it, never an independent source of approval truth. Created in the live
+    # base (app4bcgoX7t0HUVnm) via Airtable MCP, 12/07/2026. ראה ActionContractsFields.
+    ACTION_CONTRACTS = "ActionContracts"
 
 
 # ══════════════════════════════════════════════════
@@ -629,6 +635,40 @@ class ApprovalStatus:
     APPROVED   = "אושר"
     REJECTED   = "נדחה"
     FAILED     = "נכשל"   # execution was attempted but failed
+
+
+class ActionContractsFields:
+    """
+    PR-0C Phase 4A — canonical durable persistence for ActionContract/
+    ExecutionLedger (core/action_gateway.py). Field names match exactly what
+    core/action_gateway.py::_build_airtable_writer()'s _writer() already sends
+    (do not rename without updating that function). Table name: Tables.ACTION_CONTRACTS.
+    contract_id is the match/primary field for at_upsert().
+    """
+    CONTRACT_ID      = "contract_id"
+    TENANT_ID        = "tenant_id"
+    CANONICAL_USER_ID = "canonical_user_id"
+    TOOL_NAME        = "tool_name"
+    NORMALIZED_PAYLOAD = "normalized_payload"       # JSON string
+    BUSINESS_FINGERPRINT = "business_action_fingerprint"
+    ORIGIN_CHANNEL   = "origin_channel"
+    ORIGIN_CHAT_ID   = "origin_chat_id"
+    REQUIRES_APPROVAL = "requires_approval"
+    STATUS           = "status"    # draft|pending|approved|rejected|executing|executed|failed|superseded
+    CREATED_AT       = "created_at"       # unix timestamp (float)
+    APPROVED_BY      = "approved_by"
+    APPROVED_AT      = "approved_at"      # unix timestamp (float)
+
+
+class ActionContractStatus:
+    DRAFT      = "draft"
+    PENDING    = "pending"
+    APPROVED   = "approved"
+    REJECTED   = "rejected"
+    EXECUTING  = "executing"
+    EXECUTED   = "executed"
+    FAILED     = "failed"
+    SUPERSEDED = "superseded"
 
 
 class EmergencyWindowFields:

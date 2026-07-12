@@ -1366,7 +1366,7 @@ def _make_dispatch_executor(ledger: ExecutionLedger):
     return _executor
 
 
-_ledger_singleton = ExecutionLedger(airtable_writer=None)  # RAM-only until Airtable table exists
+_ledger_singleton = ExecutionLedger(airtable_writer=_build_airtable_writer())
 action_gateway = ActionGateway(
     ledger=_ledger_singleton,
     tool_executor=_make_dispatch_executor(_ledger_singleton),
