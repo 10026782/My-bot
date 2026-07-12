@@ -240,6 +240,23 @@ _NAME_STOP = frozenset({
 _HEBREW_WORD_RE = re.compile(r"[א-ת]{2,}")
 _HEBREW_NAME_RE = re.compile(r"(?<!\w)([א-ת]{2,}(?:\s+[א-ת]{2,})+)(?!\w)")
 
+# BUG-099b.1: single-letter Hebrew prepositions/conjunctions (ב/ל/כ/מ/ש/ו/ה)
+# attach directly to the following word with no space — "קומה" (floor) is in
+# _NAME_STOP, but "בקומה" ("on/at-the-floor") is a different token and was
+# not recognized as a stop-word at all, so a message with NO real name at all
+# ("...בקומה חמישית טלפון 0501234571") had "בקומה" survive segmentation as
+# the only non-empty segment and get written as the lead's Name. Checked in
+# ADDITION to the exact-match check — a real name is never rejected just for
+# starting with one of these letters unless the remainder, on its own, is
+# already a known stop-word.
+_STOP_PREFIXES = "בלכמשוה"
+
+
+def _is_stopword(word: str) -> bool:
+    if word in _NAME_STOP:
+        return True
+    return len(word) > 2 and word[0] in _STOP_PREFIXES and word[1:] in _NAME_STOP
+
 # BUG-101b/c: date/time bracket prefix used by pasted WhatsApp chat exports,
 # e.g. "[12.9.2023, 14:25] אורי צדוק: ...". Day/month 1-2 digits, "." or "/"
 # separator, year 2-4 digits, seconds optional — covers the variety actually
@@ -421,7 +438,7 @@ def _extract_name_from_window(window: str, sender_names: set) -> Optional[str]:
 
         segments: list[list[str]] = [[]]
         for w in words:
-            if w in _NAME_STOP:
+            if _is_stopword(w):
                 segments.append([])
             else:
                 segments[-1].append(w)
