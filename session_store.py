@@ -293,7 +293,10 @@ class PersistentSessionStore:
         self._sync_to_db(sender, session)
 
     def get_active_lead_candidate(self, sender: str) -> Optional[dict]:
-        """מחזיר candidate פעיל אם לא פג תוקפו (>1800 שניות), אחרת None."""
+        """מחזיר candidate פעיל אם לא פג תוקפו (>1800 שניות), אחרת None.
+        BUG-099c: expiry-clear כעת מסונכרן ל-DB (כמו get_pending_lead_preview
+        כבר עושה) — לפני התיקון הזה, פקיעת תוקף נוקתה רק ב-RAM; אחרי restart
+        ה-state הפג-תוקף היה יכול "לקום לתחייה" מה-DB כי ה-None מעולם לא נכתב."""
         import time as _time
         session = self.get(sender)
         if not session:
@@ -303,8 +306,45 @@ class PersistentSessionStore:
             return None
         if _time.time() - cand.get("set_at", 0) > 1800:
             session["active_lead_candidate"] = None
+            self._sync_to_db(sender, session)
             return None
         return cand
+
+    def set_lead_clarification(
+        self, sender: str, expected_field: str, partial_payload: dict, original_text: str,
+    ) -> None:
+        """שומר state של הבהרה-לפני-החלטה (BUG-099c) — קודם ליצירת candidate
+        מלא, לא ActionContract. נשמר תחת אותו מפתח session כמו
+        set_active_lead_candidate (אין store חדש) אבל עם צורה שונה לגמרי:
+        {"state": "needs_clarification", ...} לעומת {"name", "record_id",
+        "set_at"} של הבוקמארק הישן (נכתב אחרי כתיבה מוצלחת, לא נקרא היום
+        בשום מקום חי — ראה BUG-106 Contract Chain). כל consumer קיים/עתידי
+        של active_lead_candidate חייב לבדוק "state" במפורש לפני שהוא מניח
+        משהו על הצורה. "set_at" משותף לשתי הצורות בכוונה — כך ש-TTL קיים
+        (1800 שניות, get_active_lead_candidate) חל זהה על שתיהן בלי שינוי שם."""
+        import time as _time
+        session = self.get_or_create(sender)
+        session["active_lead_candidate"] = {
+            "state":           "needs_clarification",
+            "expected_field":  expected_field,
+            "partial_payload": partial_payload,
+            "original_text":   original_text,
+            "set_at":          _time.time(),
+        }
+        session["updated_at"] = _now_iso()
+        self._sync_to_db(sender, session)
+
+    def clear_active_lead_candidate(self, sender: str) -> None:
+        """מנקה active_lead_candidate במפורש (ביטול / פקודה חדשה / ActionContract
+        נוצר בהצלחה) — בניגוד ל-get_active_lead_candidate() שמנקה רק אגב
+        בדיקת-פקיעה. לא קיימת היום בשום מקום אחר; BUG-099c הראשון שצריך ניקוי
+        יזום, לא רק תלוי-TTL."""
+        session = self.get(sender)
+        if not session:
+            return
+        session["active_lead_candidate"] = None
+        session["updated_at"] = _now_iso()
+        self._sync_to_db(sender, session)
 
     def set_pending_lead_preview(
         self, sender: str, candidates: list[dict], raw_text: str,

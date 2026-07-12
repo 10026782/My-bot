@@ -1600,7 +1600,7 @@
 - **סטטוס:** 🟡 **BUG-099a קוד+טסטים מוכנים (ממתין ל-PR+production verification), BUG-099b/c טרם התחילו.** תוכנית מימוש מפוצלת (לא כגוש אחד), נרשמת ב-§3.5:
   - **BUG-099a (✅ קוד+טסטים מוכנים):** הרחבת `_NAME_STOP` (`core/ingress_classifier.py:205-217`) עם 24 מילות תיאור-נכס — Contract Chain קצר (5 שורות, `_NAME_STOP` לא משותף עם עותק מת ב-`lead_candidate_handler.py`, מאומת ב-grep), `test_bug099a_name_stop_extension.py` (חדש, 9/9: T1 reproduction מדויק של `recRvK6hFTNgyj8ag` דרך `summary` field, T2, 2 control cases, isolation check; sanity-check מוכיח שהטסטים תופסים רגרסיה — 5/9 נכשלים בלי התיקון). Regression מלא: `test_bug096_ingress_classifier_batch_bleed.py` (29/29), `test_bug098_followup_word_boundary.py` (16/16), `core/router/test_router.py` (44/44), `smoke_tests.py` — כולם ירוקים, כנדרש במפורש (שינוי בקובץ משותף עם BUG-096/097 גם אם "קטן").
   - **BUG-099b — ✅ תוקן בקוד, בדיקות עברו (12/07/2026, ראה רשומה מלאה למטה):** הרחבת חיפוש השם מעבר לחלון ±80-התווים-סביב-הטלפון (למצוא את "יעל רייס" בפועל, לא רק לדחות תיאור-נכס).
-  - **BUG-099c (טרם התחיל, סקופ מדויק עודכן 12/07/2026 לאחר אימות פרודקשן של 099b.1):** fallback form כש-LCH לא מצליח לחלץ אבל ה-Router בטוח שזו כוונת create_lead — לא reuse של `core/lead_buffer.py` (מחובר לזרימת `capture_inbound_lead` החיצונית, לא ל-LCH כלל, אומת בקוד).
+  - **BUG-099c — ✅ תוקן בקוד, בדיקות עברו (12/07/2026, ראה רשומה מלאה למטה):** fallback form כש-LCH לא מצליח לחלץ אבל ה-Router בטוח שזו כוונת create_lead — לא reuse של `core/lead_buffer.py` (מחובר לזרימת `capture_inbound_lead` החיצונית, לא ל-LCH כלל, אומת בקוד). מומש כ-clarification (שאלת "מה שם הליד?"), לא fallback-form קלאסי — ראה DoD המלא + BUG-106 (קדם-תנאי) ברשומות הנפרדות.
     **ראיה חיה מדויקת (12/07/2026, 03:51:59, אותו לוג שאימת את BUG-099b.1):** `"צור ליד חדש מעוניין בדירת 4 חדרים בקומה חמישית טלפון 0501234571"` (ללא שם) → כעת (אחרי 099b.1) `LCH` מדלג נכון (`Tier 5 — not a lead dictation, skip`), אבל `Router` עדיין קובע `intent=create_lead confidence=0.95` ומגיע ל-`DeterministicDenial` שמחזיר את הודעת החסימה השגויה-הקשר: `"יצירת ליד חדש ידנית דרך הצ׳אט חסומה כרגע"` — **המערכת הבינה נכון שזו כוונת יצירת-ליד, ורק לא מצאה שם**, אבל התגובה מנוסחת כאילו הבקשה עצמה נדחתה/אסורה (אותו mechanism כמו BUG-090/092), לא כאילו חסר רק פרט אחד.
     **ההתנהגות הרצויה שהוגדרה (לא מומשה עדיין):** כש-`Intent.CREATE_LEAD` בביטחון גבוה + `handle_lead_candidate()` מחזיר `None`/Tier 5 (לא נחסם ע"י gate של-Leads, אלא כי לא זוהה candidate כלל) → הודעת **הבהרה**, לא דחייה: `"זיהיתי בקשה ליצור ליד ואת מספר הטלפון, אבל לא מצאתי שם. מה שם הליד?"` — לא reuse של `DeterministicDenial`'s ניסוח (שמיועד למקרה אחר לגמרי: חסימת source/role, לא "חסר פרט"). דורש להבחין בין שני מצבים ששניהם היום נופלים לאותו branch: (א) הבקשה נחסמה במכוון (gate אמיתי) מול (ב) הבקשה לא הובנה/הושלמה (LCH לא מצא candidate) — ראה גם ההבחנה המקבילה שנשאלה על 099b.1 עצמו (שאלת מחקר #2 שם).
 
@@ -1776,3 +1776,68 @@
 - **PR:** לא נפתח.
 - **Merged:** לא.
 - **סטטוס:** 🟡 רשום, ממתין ל-PR נפרד. לא חוסם/תלוי ב-BUG-099b/099b.1/099c.
+
+---
+
+## BUG-106 — Session lookup לא-דטרמיניסטי עבור active_lead_candidate (קדם-תנאי ל-BUG-099c) — ✅ תוקן בקוד
+
+- **תאריך:** 12/07/2026
+- **הוראה מחייבת שהתקבלה:** BUG-106 ו-BUG-099c מבוצעים באותו branch/PR, ב-commits נפרדים, בסדר מחייב — BUG-106 קודם, BUG-099c רק לאחר שהבדיקה של 106 ירוקה. בוצע בדיוק כך.
+- **קבצים:** `session_store.py` — `_select_canonical_session_record()` (חדשה), `_find_best_session_in_db()`, `_load_from_db()`.
+
+### Contract Chain (בוצע לפני כל שינוי קוד, כנדרש)
+
+1. **מי יוצר רשומת Session:** `PersistentSessionStore.get_or_create()` → `_sync_to_db(is_new=True)` → POST רק כש-`_find_best_session_in_db` מחזיר `found_count==0, reason=="no_records"` (fail-closed אחרת, לפי BUG-063).
+2. **מי טוען Session:** `.get(sender)` (RAM תחילה, `_load_from_db()` כ-fallback) — קרוא מ-`get_or_create`, `update_step`, `mark_done`, `get_last_file`, `get_last_tool_result`, `get_current_lead_record_id`, `get_active_lead_candidate`, `get_pending_lead_preview`, `delete`.
+3. **מי כותב `active_lead_candidate`:** `set_active_lead_candidate()` — 2 קוראים חיים בלבד, שניהם ב-`core/lead_candidate_handler.py` (אחרי כתיבת ליד מוצלחת — bookmark שלאחר-כתיבה, לא state שלפני-החלטה).
+4. **מי קורא `active_lead_candidate`:** `get_active_lead_candidate()` — **אפס קוראים חיים** לפני BUG-099c (מאומת ב-grep) — write-only בפועל בקוד הקיים.
+5. **למה קיימות 18 רשומות לאותו Sender ID:** לא ניתן לאימות מול Airtable חי מהסביבה הזו, אך ההיסטוריה בקוד מסבירה מנגנון סביר: BUG-063/BUG-SESSIONS-ROOT (מוזג `eead2cc`) תיקן שורש שבו כשל-lookup שקט גרם ל-`found_count=0` גם כשרשומות אמיתיות קיימות, ומפעיל POST-במקום-PATCH בכל lookup רועש. התיקון ההוא מונע כפילויות **חדשות** מאותו מנגנון מכאן ואילך, אך לא מנקה למפרע רשומות שכבר נוצרו. 18 הרשומות תואמות הצטברות היסטורית מהשורש הזה (שכבר תוקן) — לא סימן לבאג חי/מתמשך.
+6. **הבדל לפי tenant/channel/context/created-time/status/race/get_or_create חוזר:** **אין שדה tenant בכלל** ב-Sessions (מאומת מול הסכימה). ה-filter formula הוא `{Sender ID}='...'` בלבד — בלי scoping לפי channel/context-type/tenant (Channel/Context Type נשמרים כשדות אך לא בפילטר). **אין שדה Status כלל** (כבר תועד ב-BUG-098). **אין ראיה לרייס חי היום:** הפרודקשן רץ `gunicorn app:app` בלי `--workers`/`--threads` מפורשים (ברירת מחדל: sync worker יחיד, תהליך יחיד) — רייס בין-תהליכי על אותו sender אינו אפשרי מבנית תחת התצורה הזו. `_create_lock` (`threading.Lock()`) הוא per-process, רלוונטי רק תחת ריבוי-workers/instances שאין ראיה שקיימת כאן.
+7. **המפתח הקנוני:** מחרוזת `chat_id`/`sender` הגולמית שמועברת מכל caller — מאומת דרך `app.py`'s `run_agent(user_text, chat_id, ...)` → `handle_lead_candidate(identity, user_text, chat_id, ...)` — זהו מספר הטלפון/user_id הגולמי, **לא** `identity.memory_key`. `_normalize_sender()` (`str(sender).strip()`) הוא הנרמול היחיד.
+8. **האם ה-query ממוין:** **לא** — `_find_best_session_in_db`/`_load_from_db` קוראים ל-`airtable_get_records(Tables.SESSIONS, filter_formula)` בלי פרמטר `sort` כלל; לפונקציה עצמה אין תמיכת מיון.
+9. **האם "using first" תלוי בסדר החזרה של Airtable:** **כן** — בלי sort מפורש, סדר ה-REST API אינו מובטח חוזית כסדר-יצירה או כל סדר יציב אחר לטווח ארוך; `records[0]` הייתה בחירה שרירותית מבחינת ה-API, לא כוונה מודעת מהקוד.
+10. **Consumers נוספים ל-lookup:** רק אחד — `test_session_store_contract.py` (ניגש ל-`_find_best_session_in_db` הפרטית ישירות, לבדיקה בלבד). שום קוד production אחר לא קורא לפונקציות הפרטיות האלה.
+
+### תיקון
+
+`_select_canonical_session_record(records)` חדשה — ממיינת לפי `Updated At` יורד (השדה היחיד שהסכימה בפועל מספקת לזיהוי "מי הרשומה העדכנית", בהיעדר שדה Status). מיון **יציב**: רשומות שוות/חסרות `Updated At` (כולל **כל** הרשומות, כשהשדה נעדר מכולן) שומרות על סדרן היחסי המקורי — לא מנוחשות מחדש — כך שכל caller/טסט שמעולם לא מילא `Updated At` ממשיך לבחור `records[0]` בדיוק כמו קודם. שימוש זהה בשני מקומות הבחירה (`_find_best_session_in_db` ו-`_load_from_db`) — אותה רשומה מנצחת בשניהם, בהינתן אותו קלט.
+
+### בדיקה
+
+`test_bug106_session_determinism.py` (חדש, 7/7): 3 בדיקות ישירות על ה-helper (כולל 18 רשומות בלי timestamp → יציבות מלאה, timestamp אמיתי תמיד מנצח ריק/חסר), ו-**ההוכחה המרכזית שנדרשה** — שתי מופעי `PersistentSessionStore` **נפרדים** (מדמים request 1 ו-request 2 אחרי הפעלה-מחדש/cache-miss) בוחרים **אותו Airtable record ID** בדיוק, לא רק "נמצא ערך". רגרסיה: `test_session_store_contract.py` (BUG-063's own suite, 4/4) ירוק ללא שינוי.
+
+- **PR:** #307 (`claude/table-incorrect-names-6chfvb` → `main`).
+- **Merged:** לא עדיין — ממתין ל-review/merge.
+- **Deployed/Verified בפרודקשן:** לא עדיין. **חובה לפני ✅ VERIFIED IN PROD:** grep-anchored verification על `origin/main` אחרי merge + Render deploy verification.
+- **סטטוס:** ✅ תוקן בקוד, בדיקות עברו (7 חדשות + 4 רגרסיה) — קדם-תנאי ל-BUG-099c מולא. ממתין ל-merge+production verification.
+
+---
+
+## BUG-099c — Clarification במקום Denial כשחסר שם ליד — ✅ תוקן בקוד
+
+- **תאריך:** 12/07/2026
+- **תלות שמולאה:** BUG-106 (deterministic session selection) — נדרש כקדם-תנאי כי הזרימה חוצה שתי הודעות/requests נפרדות; אם הודעה 1 (שמירה) והודעה 2 (קריאה) יכלו לנחות על שתי רשומות-כפילות שונות, הזרימה הייתה עובדת "לפעמים", לא לפי עיצוב.
+- **ראיה (מאותו לוג פרודקשן שאימת BUG-099b.1):** `"צור ליד חדש מעוניין בדירת 4 חדרים בקומה חמישית טלפון 0501234571"` → Router: `intent=create_lead confidence=0.95`; LCH: Tier 5/no_lead_candidates, מדלג נכון (BUG-099b.1); נופל ל-`DeterministicDenial` שמחזיר "יצירת ליד חדש ידנית דרך הצ׳אט חסומה כרגע" — **שגוי**: המערכת הבינה נכון את הכוונה, רק חסר שדה אחד.
+- **Scope:** Leads-only. **לא** בונה Understanding Layer כללית — BUG-104 (ReasoningEntity/reasoning_engines) נשאר פתוח כהחלטת ארכיטקטורה נפרדת; מימוש עתידי של BUG-104 יכול לעדכן את הזרימה הזו בלי לפגוע בנכונותה.
+
+### עיצוב שמומש
+
+- **State:** תחת המפתח הקיים `active_lead_candidate` (אין store חדש) — צורה חדשה ונבדלת `{"state": "needs_clarification", "expected_field", "partial_payload", "original_text", "set_at"}`, לעולם לא מתבלבלת עם צורת-הבוקמארק הישנה `{"name", "record_id", "set_at"}` (0 קוראים חיים, ראה BUG-106). כל consumer בודק `state` במפורש. `set_at` משותף בכוונה לשתי הצורות — כך שה-TTL הקיים (1800 שניות) חל זהה על שתיהן בלי שינוי שם.
+- **פונקציות חדשות:** `session_store.py::set_lead_clarification()`/`clear_active_lead_candidate()` (החדש — ניקוי מפורש, לא רק אגב בדיקת-פקיעה). `get_active_lead_candidate()`'s TTL-clear תוקן לסנכרן ל-DB (כמו `get_pending_lead_preview` כבר עושה) — לפני זה פקיעה נוקתה רק ב-RAM, ויכלה "לקום לתחייה" מה-DB אחרי restart.
+- **`core/lead_candidate_handler.py`:** `_maybe_start_lead_clarification()` (נקודת-כניסה — Tier 5/no_lead_candidates + `Intent.CREATE_LEAD` + טלפון קיים בטקסט → שומר state, מחזיר "זיהיתי בקשה ליצור ליד ואת מספר הטלפון X, אבל לא מצאתי שם. מה שם הליד?"). `_resolve_lead_clarification()` (resolver — נבדק **ראשון** ב-`handle_lead_candidate()`, לפני batch-followup ולפני `classify_ingress()` על ההודעה החדשה) — סדר עדיפויות מחייב: (1) TTL פג, (2) ביטול, (3) פקודה חדשה מפורשת (Intent מה-Router, לא זיהוי מקומי), (4) תשובה תקינה, (5) תשובה לא-ברורה. `_validate_clarification_name()` — reuse של `_HEBREW_NAME_RE`/`_is_name_stop_token` (`core/ingress_classifier.py`, לא לוגיקה חדשה) עם fullmatch (לא segmentation) **וגם** תקרת-מילים (בדיוק 2) — בלעדיה, "נדבר אחר כך" (משפט שיחה אמיתי, בלי אף מילת-עצירה) עבר בטעות כ"שם" תקין (נמצא ותוקן תוך כדי בדיקה עצמית, לפני הרצת הרגרסיה).
+- **Reuse, לא duplication:** תשובה תקינה בונה candidate synthetic ומעביר אותו ל-`_handle_single_candidate()` הקיים (פרמטר חדש `clear_clarification: bool`) — **אותו** dedupe (`_at_find_lead`), **אותו** ActionContract (`_propose_lead_write`), **אותו** preview. הטקסט שמועבר ל-preview/summary הוא ה-`original_text` (ההודעה הראשונה, עם הטלפון+תיאור-העניין) — לא תשובת-השם הקצרה — כך שהפרטים מההודעה הראשונה לא אובדים.
+- **ניקוי state:** רק אחרי הצלחה בפועל — `clear_clarification=True` מנוקה רק בענף שאחרי `gw_result.ok`/`ok and record_id`, **לא** לפני. כשל ב-`propose_action()` משאיר את ה-state פעיל, בלי אובדן payload ובלי "פעולה חלקית".
+- **LL-11 (אילוץ ארכיטקטוני שהתגלה תוך-כדי, נאכף כבר):** Sessions נקרא **פעם אחת** בלבד לכל request (`test_session_snapshot.py`) — `app.py`'s `run_agent()` כבר טוען snapshot יחיד ומעביר אותו הלאה ל-`resolve_context_pronouns`/`_build_tool_context`. גרסה ראשונה של המימוש קראה ל-`get_active_lead_candidate()` (קריאת Sessions נוספת) **בלי תנאי, על כל הודעה** — הפרה ישירה, שנתפסה ע"י הרגרסיה המלאה (`test_session_snapshot.py` נכשל: "Expected 1 Sessions GET, got 2"; `test_capture_router_wiring.py` נכשל גם, כי fake session-store minimal לא מימש את המתודה החדשה). **תוקן:** `handle_lead_candidate()` קיבל פרמטר `session` חדש — ה-snapshot שה-caller כבר טען, מועבר מ-`app.py`'s `_session_snapshot`. `_resolve_lead_clarification()` קורא `active_lead_candidate` **מה-snapshot הזה**, לא קורא ל-`lead_sessions.get()`/`get_active_lead_candidate()` בעצמו — רק במקרה הנדיר שבו יש state ממתין (ולא בכל הודעה) הוא מבצע כתיבה (שממילא קוראת internally, כמו התקדים הקיים ב-`set_active_lead_candidate`).
+
+### Consumer Audit (grep מלא בוצע כנדרש)
+
+`grep -rn "active_lead_candidate\|pending_lead_preview\|lead_sessions\|session_store" --include="*.py" .` — כל writer/reader/clear אותרו (session_store.py's methods עצמן, שני call sites ב-`lead_candidate_handler.py` לבוקמארק הישן, `interaction_engine.py`/`cmd_decision.py` למתודות גנריות אחרות שלא נוגעות ב-`active_lead_candidate` בכלל). אף consumer קיים לא הניח שקיים `name`/שה-candidate תמיד מלא — הבדיקה `cand.get("state") != "needs_clarification": return None` היא ההגנה המפורשת שמונעת בדיוק את זה.
+
+### בדיקה
+
+`test_bug099c_lead_clarification.py` (חדש, 25/25): מסלול-שמח מקצה-לקצה (2 הודעות, preview אחד, payload נכון כולל הטקסט המקורי לא תשובת-השם), ביטול, פקיעת TTL, פקודה-חדשה-מפריעה, תשובה-לא-ברורה (כולל "נדבר אחר כך" — האזהרה שנתפסה תוך-כדי), שם-פסול ("בקומה" עצמו), כשל `propose_action()` (state שורד), 3 תנאי-כניסה (בלי טלפון / intent שגוי / Tier 4 — אף אחד לא מפעיל הבהרה), `session=None` (לא קורס, לא "פותר" בטעות), ביקורת-consumer (בוקמארק ישן לא מתבלבל), ובדיקת LL-11 מפורשת (`handle_lead_candidate()` לא קורא ל-Sessions כשsnapshot כבר סופק). **Regression suite מלא כנדרש:** `test_bug096` (29/29), `test_bug098` (16/16), `test_bug099a` (9/9), `test_bug099b` (14/14), `test_bug099b1` (20/20), `test_bug101` (19/19), `test_bug106` (7/7), `test_session_store_contract.py` (4/4), `core/router/test_router.py` (44/44), `test_capture_router_wiring.py` (10/10), `test_session_snapshot.py` (2/2, LL-11 עצמו), `smoke_tests.py`, כל שאר `test_*.py` בריפו — כולם ירוקים, אפס רגרסיה.
+
+- **PR:** #307 (אותו PR כמו BUG-106, commit נפרד).
+- **Merged:** לא עדיין — ממתין ל-review/merge.
+- **Deployed/Verified בפרודקשן:** לא עדיין. **חובה לפני ✅ VERIFIED IN PROD:** grep-anchored verification על `origin/main` אחרי merge + Render deploy + אימות חי בשתי הודעות נפרדות (לא unit tests/merge/deploy בלבד) — כולל אימות ששתי הקריאות השתמשו באותה רשומת Session.
+- **סטטוס:** ✅ תוקן בקוד, בדיקות עברו (25 חדשות + רגרסיה מלאה) — ממתין ל-merge+production verification.
