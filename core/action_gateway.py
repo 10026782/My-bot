@@ -188,6 +188,11 @@ class ActionContract:
     # know." Does not block the incoming message itself from being routed —
     # only affects whether a later bare confirm executes directly.
     context_integrity_unknown:   bool = False
+    # PR-0C Phase 4B0 — optimistic-concurrency guard for
+    # ActionContractRepository.guarded_transition(). Starts at 1 for a new
+    # contract; bumped by 1 on every durable status transition. Not meaningful
+    # for in-memory-only contracts that never touch the repository.
+    version:                     int = 1
 
 
 # ══════════════════════════════════════════════════
@@ -340,11 +345,20 @@ class ExecutionLedger:
     RAM + כתיבה ל-Airtable ייעודי (ActionContracts) כאשר הוא מוגדר.
     """
 
-    def __init__(self, airtable_writer: Callable | None = None):
-        self._store: dict[str, ActionContract] = {}    # contract_id → contract
+    def __init__(self, airtable_writer: Callable | None = None, repository=None):
+        self._store: dict[str, ActionContract] = {}    # contract_id → contract (CACHE, not source of truth)
         self._by_fingerprint: dict[str, str] = {}      # fingerprint → contract_id
         self._lock = threading.Lock()
-        self._airtable_writer = airtable_writer        # callable(contract) → None
+        self._airtable_writer = airtable_writer        # callable(contract) → None — legacy best-effort mirror (Phase 4A)
+        # PR-0C Phase 4B0: ActionContractRepository | None. When set, find_by_id()
+        # falls back to it on a cache miss (restart/second-instance recovery),
+        # and guarded_update_status() uses it for version-guarded durable
+        # transitions instead of a bare in-memory update. See
+        # core/action_contract_repository.py's module docstring for the
+        # concurrency caveat. Deliberately None on the live singleton for now
+        # (see _ledger_singleton comment) — this is tested, inert infrastructure,
+        # not yet an activated live persistence/recovery path.
+        self._repository = repository
 
     def save(self, contract: ActionContract) -> None:
         with self._lock:
@@ -355,9 +369,77 @@ class ExecutionLedger:
                 self._airtable_writer(contract)
             except Exception as exc:
                 logger.warning("[ActionGateway] Airtable write failed (RAM intact): %s", exc)
+        if self._repository:
+            try:
+                self._repository.save(contract)
+            except Exception as exc:
+                logger.warning("[ActionGateway] repository save failed (RAM intact): %s", exc)
 
     def find_by_id(self, contract_id: str) -> ActionContract | None:
-        return self._store.get(contract_id)
+        cached = self._store.get(contract_id)
+        if cached is not None:
+            return cached
+        if not self._repository:
+            return None
+        # Cache miss — fall back to the durable repository (restart / second
+        # instance recovery). get() already fails closed (returns None) on
+        # not-found, store-unreachable, or expiry; never fabricate a contract
+        # here if it returns None.
+        hydrated = self._repository.get(contract_id)
+        if hydrated is None:
+            return None
+        with self._lock:
+            self._store[contract_id] = hydrated
+            self._by_fingerprint[hydrated.business_action_fingerprint] = contract_id
+        return hydrated
+
+    def guarded_update_status(
+        self, contract_id: str, expected_status: str, new_status: str, **kwargs,
+    ) -> ActionContract | None:
+        """
+        PR-0C Phase 4B0 — the durable, version-guarded counterpart to
+        update_status(), for the approve/reject/execute critical path where
+        two Render instances (or a duplicate webhook) must not both act on
+        the same contract. Returns the updated contract on success; returns
+        None on conflict/not-found/store-error, and the caller MUST treat
+        that as "did not transition" — never proceed as if it succeeded.
+
+        Falls back to a plain in-memory update (today's original
+        update_status() semantics, always succeeds if the contract is cached)
+        when no repository is wired — e.g. tests using a bare
+        ExecutionLedger(), or the live singleton before repository wiring is
+        activated. This keeps current behavior byte-identical until that
+        activation is a deliberate, separate step.
+        """
+        if not self._repository:
+            with self._lock:
+                c = self._store.get(contract_id)
+                if not c or c.status != expected_status:
+                    return None
+                c.status = new_status
+                for k, v in kwargs.items():
+                    if hasattr(c, k):
+                        setattr(c, k, v)
+            if self._airtable_writer and c:
+                try:
+                    self._airtable_writer(c)
+                except Exception as exc:
+                    logger.warning("[ActionGateway] Airtable status update failed: %s", exc)
+            return c
+
+        current = self.find_by_id(contract_id)
+        if not current:
+            return None
+        updated = self._repository.guarded_transition(
+            contract_id, expected_version=current.version,
+            expected_status=expected_status, new_status=new_status, **kwargs,
+        )
+        if not updated:
+            return None
+        with self._lock:
+            self._store[contract_id] = updated
+            self._by_fingerprint[updated.business_action_fingerprint] = contract_id
+        return updated
 
     def find_by_fingerprint(self, fingerprint: str) -> ActionContract | None:
         cid = self._by_fingerprint.get(fingerprint)
@@ -1067,28 +1149,47 @@ class ActionGateway:
                 "פנה לתמיכה טכנית."
             )
 
-        self._ledger.update_status(
-            contract_id, "approved",
-            approved_by=approver,
-            approved_at=time.time(),
+        # PR-0C Phase 4B0: guarded_update_status is the sole claim boundary —
+        # if a repository is wired and two Render instances (or a duplicate
+        # webhook) both reach this point for the same contract, only one can
+        # win the pending->approved transition; the other gets None back and
+        # must not execute. With no repository wired (today's default — see
+        # ExecutionLedger's docstring), this behaves exactly like the old
+        # unconditional update_status() call it replaces.
+        updated = self._ledger.guarded_update_status(
+            contract_id, expected_status="pending", new_status="approved",
+            approved_by=approver, approved_at=time.time(),
         )
+        if not updated:
+            refreshed = self._ledger.find_by_id(contract_id)
+            status_now = refreshed.status if refreshed else "לא נמצא/פג תוקף"
+            logger.warning(
+                "[ActionGateway] approve: guarded transition failed for contract=%s "
+                "(expected pending, now=%s) — another writer won or it expired/vanished",
+                contract_id, status_now,
+            )
+            return f"⚠️ הפעולה אינה במצב המתנה (מצב נוכחי: {status_now})."
+
         logger.info(
             "[ActionGateway] approved: contract=%s fingerprint=%.12s tool=%s "
             "payload_keys=%s by=%s",
             contract_id,
-            contract.business_action_fingerprint,
-            contract.tool_name,
-            list(contract.normalized_payload.keys()),
+            updated.business_action_fingerprint,
+            updated.tool_name,
+            list(updated.normalized_payload.keys()),
             approver,
         )
-        return self._execute_contract(contract)
+        return self._execute_contract(updated)
 
     def _execute_contract(self, contract: ActionContract) -> str:
         """
         מבצע tool לאחר אישור — approved_payload == executed_payload (DoD §6).
         מריץ verify_execution על התוצאה — success claims require real tool evidence (DoD §3, §6).
         """
-        self._ledger.update_status(contract.contract_id, "executing")
+        executing = self._ledger.guarded_update_status(
+            contract.contract_id, expected_status="approved", new_status="executing",
+        )
+        contract = executing or contract
         try:
             raw = self._tool_executor(
                 tool_name=contract.tool_name,
@@ -1096,7 +1197,9 @@ class ActionGateway:
                 contract_id=contract.contract_id,
             )
         except Exception as exc:
-            self._ledger.update_status(contract.contract_id, "failed")
+            self._ledger.guarded_update_status(
+                contract.contract_id, expected_status="executing", new_status="failed",
+            )
             logger.error(
                 "[ActionGateway] execution failed: contract=%s error=%s",
                 contract.contract_id, exc,
@@ -1108,7 +1211,9 @@ class ActionGateway:
             from core.anti_hallucination import verify_execution
             check = verify_execution(contract.tool_name, raw)
             if check.status == "failed":
-                self._ledger.update_status(contract.contract_id, "failed")
+                self._ledger.guarded_update_status(
+                    contract.contract_id, expected_status="executing", new_status="failed",
+                )
                 logger.error(
                     "[ActionGateway] evidence missing: contract=%s tool=%s reason=%s",
                     contract.contract_id, contract.tool_name, check.reason,
@@ -1118,7 +1223,9 @@ class ActionGateway:
             logger.warning("[ActionGateway] verify_execution import failed: %s", verify_exc)
 
         ext_id = raw.get("external_id", "") if isinstance(raw, dict) else ""
-        self._ledger.update_status(contract.contract_id, "executed")
+        self._ledger.guarded_update_status(
+            contract.contract_id, expected_status="executing", new_status="executed",
+        )
         # persist record_id as observation so query_execution_status can retrieve it
         if ext_id:
             contract.agent_observations.append({

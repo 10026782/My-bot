@@ -428,6 +428,66 @@ def airtable_create(
         return None
 
 
+class AirtableLookupError(Exception):
+    """Raised by at_get_by_field on a network/HTTP failure — distinct from a
+    clean "no matching record" result, so callers (esp.
+    ActionContractRepository) can fail closed on a store outage instead of
+    silently treating "can't reach Airtable" the same as "genuinely not found"."""
+
+
+def at_get_by_field(table: str, field: str, value: str) -> dict | None:
+    """
+    Finds a single record by an exact field match. Returns the raw Airtable
+    record dict ({"id": ..., "fields": {...}}) or None if no match. Raises
+    AirtableLookupError on a network/HTTP failure — the caller must not treat
+    that the same as "not found" (see ActionContractRepository.get()).
+    """
+    try:
+        r = httpx.get(
+            _at_url(table),
+            headers=_at_headers(),
+            params={
+                "filterByFormula": f"{{{field}}}='{_safe_formula_param(str(value))}'",
+                "maxRecords": 1,
+            },
+            timeout=10,
+        )
+    except Exception as e:
+        raise AirtableLookupError(f"{table}/{field}={value!r}: {e}") from e
+
+    if r.status_code != 200:
+        raise AirtableLookupError(f"{table}/{field}={value!r}: HTTP {r.status_code}")
+
+    records = r.json().get("records", [])
+    return records[0] if records else None
+
+
+def at_list_by_formula(table: str, formula: str, max_records: int = 100) -> list[dict]:
+    """
+    Lists records matching a caller-built filterByFormula string. The caller
+    is responsible for escaping any interpolated values via
+    _safe_formula_param() — this function does no escaping of its own (the
+    formula may combine multiple conditions with AND()/OR(), which a single
+    value-escaping helper can't safely do generically). Raises
+    AirtableLookupError on a network/HTTP failure — same fail-closed contract
+    as at_get_by_field().
+    """
+    try:
+        r = httpx.get(
+            _at_url(table),
+            headers=_at_headers(),
+            params={"filterByFormula": formula, "maxRecords": max_records},
+            timeout=10,
+        )
+    except Exception as e:
+        raise AirtableLookupError(f"{table} list error: {e}") from e
+
+    if r.status_code != 200:
+        raise AirtableLookupError(f"{table} list: HTTP {r.status_code}")
+
+    return r.json().get("records", [])
+
+
 def at_upsert(
     table: str,
     fields: dict,
@@ -444,12 +504,11 @@ def at_upsert(
     contract_id could both see "no existing record" and both create one
     (duplicate rows), and two racing writes for an existing record could
     apply out of order (a stale status could overwrite a newer one — last
-    HTTP call to land wins, not last logical call). In practice today's only
-    caller (ExecutionLedger) writes to a given contract_id from a single
-    synchronous call chain (propose -> approve -> execute), so this hasn't
-    been observed, but do not rely on this function for state that multiple
-    processes/threads may write to the same key concurrently without adding
-    real locking/versioning first. Returns True on success.
+    HTTP call to land wins, not last logical call). Callers needing real
+    concurrency protection for status transitions should use
+    core/action_contract_repository.py::ActionContractRepository.guarded_transition()
+    instead — this function remains a plain best-effort upsert. Returns True
+    on success.
     """
     match_value = fields.get(match_field)
     if not match_value:
@@ -460,22 +519,13 @@ def at_upsert(
         return False
 
     try:
-        r = httpx.get(
-            _at_url(table),
-            headers=_at_headers(),
-            params={
-                "filterByFormula": f"{{{match_field}}}='{_safe_formula_param(str(match_value))}'",
-                "maxRecords": 1,
-            },
-            timeout=10,
-        )
-        existing = r.json().get("records", []) if r.status_code == 200 else []
-    except Exception as e:
+        existing = at_get_by_field(table, match_field, str(match_value))
+    except AirtableLookupError as e:
         logger.warning("[gateway:%s] at_upsert %s lookup error: %s", source, table, e)
-        existing = []
+        existing = None
 
     if existing:
-        return airtable_patch(table, existing[0]["id"], fields, source=source)
+        return airtable_patch(table, existing["id"], fields, source=source)
     return airtable_create(table, fields, source=source) is not None
 
 

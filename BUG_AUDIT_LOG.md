@@ -2267,11 +2267,47 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - אימות rollout מחוץ ל-production לפני חיבור אמיתי.
 
 - **Severity:** N/A — תשתית. חלק מ-PR-0C. (הכזב בתיאור המקורי תוקן — לא היה fix ל-production bug, אלא תיקון claim לא-מאומת לפני merge).
+- **תוקן ב-commit:** `5045439` (PR #320, `c80a821` merge commit ל-`main`) — אומת ב-`git show origin/main:core/action_gateway.py \| grep "airtable_writer=None"`.
+- **תוקן ב-branch:** `claude/table-incorrect-names-6chfvb`
+- **Merged:** כן — PR #320
+- **Deployed:** לא ידוע — דרוש בדיקה ידנית (Render). טבלת Airtable כן נוצרה בפועל בבסיס החי — verified via MCP.
+- **Verified בפרודקשן:** לא רלוונטי — אין שינוי live (singleton לא מחובר)
+- **סטטוס:** Phase 4A הושלם ומוזג אחרי תיקון code review. Phase 4B0 — ראה רשומה הבאה.
+
+---
+
+## PR-0C — Phase 4B0: Durable Ledger Recovery (prerequisite ל-Phase 4B)
+
+- **דווח:** 12/07/2026, המשך ישיר להחלטת ה-reviewer ב-Phase 4A: "Phase 4B cannot route TMA commands reliably by contract ID without this [read/recovery path]." הבעלים אישר במפורש להמשיך (לא לעצור), עם spec מדויק.
+
+### דרישת הבעלים (מפורשת, verbatim עיקרי)
+"Do not route TMA approve/reject by contract_id while ExecutionLedger remains memory-only. Insert Phase 4B0 — Durable Ledger Recovery before the projection/routing work. Implement an ActionContractRepository... find_by_id() must fall back to the repository, reconstruct the frozen contract, validate tenant/identity/expiry, and hydrate the cache. Approve/reject must use a compare-and-set or version-guarded durable transition so two Render instances cannot both execute the same contract... Fail closed when the durable store is unavailable... Never re-plan from raw text or create a replacement contract as recovery. Add restart, multi-instance race, identity-binding, expiry, repeated-approval, stale-status-regression, and store-outage tests."
+
+### מה נבנה
+1. **`core/action_contract_repository.py`** (חדש) — `ActionContractRepository`: `save()` (upsert מלא), `get()` (fail-closed על not-found/store-unreachable/expired — לעולם None, לא fallback ל-fabricate), `guarded_transition()` (verify-read → PATCH → verify-reread; **לא CAS אמיתי** — Airtable REST API אין לו conditional-write primitive, מתועד במפורש כ"מצמצם את חלון המרוץ, לא סוגר אותו לגמרי"), `find_pending_by_canonical_user()`.
+2. **`airtable_schema.py`** — 12 שדות חדשים ל-`ActionContractsFields`: `version` (guard ל-optimistic concurrency), שדות זהות מלאים (`actor_role/user_id/display_name/domain_id/external_id/allowed_domains`), `approval_policy`, `trusted_source`, ושלושת דגלי ה-context (`context_interrupted`, `reconfirmation_required`, `context_integrity_unknown`) — כולם נדרשים כדי ש-hydration אחרי restart ישמר את הזהות/מדיניות המקורית, לא רק tool_name/payload. `agent_observations` **לא** נשמר (מוצהר: אינו authoritative, לא נדרש ל-re-execution בטוח).
+3. **`tools/airtable_gateway.py`** — `at_get_by_field()` (extracted מ-`at_upsert`), `at_list_by_formula()` (חדש, ל-pending lookup), `AirtableLookupError` (מבחין store-outage מ-not-found).
+4. **`core/action_gateway.py`**:
+   - `ActionContract.version: int = 1` (שדה חדש).
+   - `ExecutionLedger` מקבל `repository` (constructor param חדש). `find_by_id()` נופל בחזרה ל-`repository.get()` על cache miss, מ-hydrate את ה-cache. `save()` קורא גם ל-`repository.save()` אם קיים.
+   - `ExecutionLedger.guarded_update_status()` (חדש) — עוטף transition version-guarded כש-repository קיים; **ללא שינוי התנהגות** כש-repository הוא None (fallback להתנהגות המקורית של `update_status`, רק עם בדיקת expected_status נוספת שמתקיימת תמיד במסלול הרציף הקיים).
+   - `ActionGateway.approve()` ו-`_execute_contract()` שוכתבו להשתמש ב-`guarded_update_status()` במקום `update_status()` הישן, בדיוק בנקודות שבהן שני Render instances יכולים לרוץ על אותו contract_id (pending→approved, approved→executing→executed/failed).
+5. **`_ledger_singleton` נשאר `airtable_writer=None`, ללא `repository`** — **אותה משמעת בדיוק כמו התיקון ב-Phase 4A**: זו עדיין תשתית נבנית ונבדקת, לא activation live. הפעלה בפועל (חיבור ה-repository ל-singleton החי) היא צעד נפרד, מכוון, שידרוש ניטור/staging משלו — לא נכלל כאן.
+
+### Tests
+`test_pr0c_action_contract_repository.py` (חדש, 24 assertions) — מכסה במדויק את 7 הקטגוריות שהבעלים דרש: (1) restart recovery; (2) multi-instance race — שתי `ExecutionLedger` נפרדות (ללא cache משותף) חולקות רק את ה-repository, רק אחת מנצחת; (3) identity binding — actor_role/actor_external_id/trusted_source נשמרים במדויק דרך hydration; (4) expiry — contract pending ישן מ-24h לא ניתן לשחזור; (5) repeated approval — ניסיון שני עם expected_version/status ישנים נדחה; (6) stale-status regression — ניסיון "לחזור אחורה" ל-approved על contract שכבר executed נדחה; (7) store outage — כל שלוש הפונקציות (`get`/`find_by_id`/`guarded_transition`) fail-closed (None), לא זורקות, לא ממציאות contract חלופי. **פלוס test #8** — הוכחה end-to-end דרך ה-API הציבורי: שני `ActionGateway` נפרדים (executor + ledger נפרדים, רק repository משותף — מדמה שני Render instances אמיתיים) קוראים ל-`approve()` על אותו contract_id; ה-dispatch executor נקרא **פעם אחת בדיוק**. **test #9** — regression guard: ה-singleton החי עדיין לא מחובר (אותה משמעת כמו Phase 4A).
+
+כל 24/24 assertions חדשות עברו, כל test_*.py הקיימים (כולל test_action_gateway.py 41, test_stage_b_full_suite.py 124, test_bug074_approval_authority.py 22, וכל בדיקות ה-PR-0C הקודמות) עברו full run ללא רגרסיה — `approve()`/`_execute_contract()` שוכתבו אך מתנהגים זהה לגמרי כש-repository=None (המצב היום).
+
+### הודאה מפורשת על מגבלת התכן (לא הוסתרה)
+`guarded_transition()` **אינו** CAS אמיתי ברמת מסד נתונים — Airtable REST API אין לו primitive ל-conditional write. המימוש (verify-read → PATCH → verify-reread) מצמצם משמעותית את חלון המרוץ אך אינו סוגר אותו לחלוטין תיאורטית (כתיבה מתחרה שנופלת בדיוק בפער הקטן בין ה-verify-read שלנו ל-PATCH שלנו עדיין יכולה תיאורטית לחמוק, אם כי ה-reread שלנו יזהה וידווח על הקונפליקט בדיעבד). זה מספיק לתעבורת אישורים בקצב אנושי (Render, לא high-throughput), לא מוצג כערובה מתמטית תחת concurrency יריבה.
+
+- **Severity:** N/A — תשתית קריטית לפני Phase 4B. חלק מ-PR-0C.
 - **תוקן ב-commit:** (למלא אחרי commit)
 - **תוקן ב-branch:** `claude/table-incorrect-names-6chfvb`
 - **Merged:** לא עדיין
-- **Deployed:** לא (טבלת Airtable כן נוצרה בפועל בבסיס החי — verified via MCP)
-- **Verified בפרודקשן:** לא רלוונטי — אין שינוי live (singleton לא מחובר)
-- **סטטוס:** Phase 4A הושלם מחדש אחרי תיקון code review, לפני merge. Phase 4B (Approvals projection + TMA command routing) חסום עד שנתיב read/recovery ל-ActionContracts ייבנה בנוסף.
+- **Deployed:** לא
+- **Verified בפרודקשן:** לא רלוונטי — אין שינוי live (singleton עדיין לא מחובר)
+- **סטטוס:** Phase 4B0 הושלם. Phase 4B (TMA Approvals projection + routing by contract_id) יכול להתחיל רק אחרי merge כאן, ורק אחרי החלטה נפרדת ומודעת על הפעלת ה-repository ב-singleton החי (לא נכלל אוטומטית ב-4B0 או ב-4B עצמו).
 
 הלוג האחרון (מעלה) מוכיח את **כל השרשרת יחד**, לא רק חתיכה אחת: preview → 2 הפרעות → "כן" (re-display מדויק) → הפרעה שלישית → "כן" (superseded מדויק, אין ביצוע כפול/שגוי). אין פערים פתוחים ידועים בנושא הזה.
