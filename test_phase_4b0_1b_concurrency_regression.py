@@ -128,7 +128,7 @@ def test_same_contract_same_idempotency_key():
 def test_same_contract_different_idempotency_keys():
     """
     Scenario: Two threads try to claim the same contract with DIFFERENT idempotency_keys.
-    Expected: One ACQUIRED (wins contract), one ALREADY_CLAIMED (loses to first).
+    Expected: One ACQUIRED (wins contract), one CONTRACT_IDENTITY_CONFLICT (loses, concurrent execution attempt).
     """
     from core.atomic_claim_repository import claim_contract_execution
 
@@ -154,19 +154,19 @@ def test_same_contract_different_idempotency_keys():
             future.result()
 
     acquired = [r for r in results if r["result"] == "acquired"]
-    already_claimed = [r for r in results if r["result"] == "already_claimed"]
+    contract_identity_conflicts = [r for r in results if r["result"] == "contract_identity_conflict"]
 
     chk(
         "Same contract + different idempotency_keys: exactly one ACQUIRED",
         len(acquired) == 1
     )
     chk(
-        "Same contract + different idempotency_keys: exactly one ALREADY_CLAIMED",
-        len(already_claimed) == 1
+        "Same contract + different idempotency_keys: exactly one CONTRACT_IDENTITY_CONFLICT",
+        len(contract_identity_conflicts) == 1
     )
     chk(
-        "Same contract + different idempotency_keys: no conflicts",
-        len(acquired) + len(already_claimed) == 2
+        "Same contract + different idempotency_keys: zero ALREADY_CLAIMED",
+        len([r for r in results if r["result"] == "already_claimed"]) == 0
     )
 
     cleanup_test_contracts(contract_id)
@@ -266,15 +266,15 @@ def test_idempotent_reruns():
     chk("Idempotent run 2: Same claim with same idempotency_key (ALREADY_CLAIMED)",
         result_2.is_already_claimed())
 
-    # Run 3: Different claimant, same contract (should lose the race)
+    # Run 3: Different claimant, same contract (should be rejected as concurrent execution attempt)
     result_3 = claim_contract_execution(
         contract_id=contract_id,
         claimant_id="approver_2",
         idempotency_key="test-idem-idempotent-2",  # Different idempotency_key
     )
 
-    chk("Idempotent run 3: Different claimant loses to existing claim (ALREADY_CLAIMED)",
-        result_3.is_already_claimed())
+    chk("Idempotent run 3: Different claimant, different idempotency_key (CONTRACT_IDENTITY_CONFLICT)",
+        result_3.is_contract_identity_conflict())
 
     # Run 4: New contract with same idempotency_key (should conflict)
     result_4 = claim_contract_execution(
