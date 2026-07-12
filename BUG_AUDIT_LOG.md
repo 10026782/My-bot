@@ -1894,5 +1894,7 @@
 תואם למדויק את ה-Scope שהוחלט (ActionGateway בלבד): נגעו רק ב-`core/action_gateway.py` ו-`app.py` (שורה אחת, נקודת-חיבור). לא נגעו: `dispatch`/`execute` logic של ActionGateway (`_execute_contract`/`approve()`'s dispatch נשארו ללא שינוי), `FEATURE_ACTION_GATEWAY` flag, `LeadsWriteGate`, לוגיקת disambiguation הקיימת. מנגנונים #2 (`app.py`'s `_pending_approvals`) ו-#3 (`event_bus.py`) **לא טופלו** — נשארים עם אותה פגיעות שורשית, למי שירצה follow-up נפרד.
 
 - **PR:** #311 (`claude/table-incorrect-names-6chfvb` → `main`).
-- **Merged/Deployed/Verified בפרודקשן:** לא עדיין.
-- **סטטוס:** ✅ תוקן בקוד, בדיקות עברו (26 חדשות + רגרסיה מלאה) — ממתין ל-merge+production verification.
+- **Merged:** ✅ כן — `233b196` (`origin/main`), מאומת ב-grep ישיר מול `origin/main`: `context_interrupted`/`reconfirmation_required`/`mark_context_interrupted`/`_describe_contract_for_reconfirmation` קיימים ב-`core/action_gateway.py`, וקריאת `app.py` ל-`mark_context_interrupted` קיימת בשורה 1725.
+- **Deployed:** דווח ע"י המשתמש (12/07/2026) — טרם אומת מול commit hash ב-Render dashboard (אין גישה ישירה מהסביבה הזו).
+- **Verified בפרודקשן:** ❌ טרם — לפי הכלל הקיים בריפו, נדרש רצף חי בפועל (preview → הודעת ביניים → "כן" → הצגה-מחדש של תיאור עסקי → "כן" נוסף → ביצוע) עם לוגים אמיתיים, לא merge/deploy/unit-tests בלבד.
+- **סטטוס:** ✅ תוקן בקוד ומוזג ל-main, בדיקות עברו (26 חדשות + רגרסיה מלאה) — ממתין לאימות-חי בפרודקשן לפני VERIFIED IN PROD.
