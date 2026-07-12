@@ -4,20 +4,27 @@ test_phase_4b0_1b_concurrency_regression.py — Phase 4B0.1B real concurrency re
 
 CRITICAL: Tests real PostgreSQL concurrency to verify idempotency_key constraint handling.
 
+⚠️  REQUIRES: RUN_REAL_POSTGRES_TESTS=true (opt-in flag)
+    Without flag: tests SKIPPED, exit 0
+    With flag: missing DATABASE_URL/connection failures exit non-zero
+
 Previous bug: idempotency_key uniqueness violations were not handled atomically.
 When racer 2 tried to claim with duplicate idempotency_key (different contract), it returned
 ERROR instead of IDEMPOTENCY_CONFLICT.
 
-This suite verifies the fix by testing three concurrent scenarios:
+This suite verifies the fix by testing four concurrent scenarios:
 
 1. Same contract + same idempotency_key (retry):
    → One ACQUIRED (winner), one ALREADY_CLAIMED (loser, same contract)
 
 2. Same contract + different idempotency_key (concurrent approvals):
-   → One ACQUIRED (winner), one ALREADY_CLAIMED (loser, same contract)
+   → One ACQUIRED (winner), one CONTRACT_IDENTITY_CONFLICT (loser, fail-closed)
 
 3. Different contracts + same idempotency_key (identity mismatch / bug):
    → One ACQUIRED (winner contract A), one IDEMPOTENCY_CONFLICT (loser contract B)
+
+4. Idempotent re-runs:
+   → Same database state produces same results across runs
 
 All tests use real PostgreSQL connection (no mocks).
 Tests are idempotent — safe to run repeatedly against same database.
@@ -31,6 +38,9 @@ import time
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
+
+# Opt-in flag: only run real PostgreSQL tests if explicitly enabled
+RUN_REAL_POSTGRES_TESTS = os.environ.get("RUN_REAL_POSTGRES_TESTS", "false").lower() == "true"
 
 os.environ.setdefault("FEATURE_ATOMIC_CLAIMS", "true")  # Enable for real tests
 
@@ -298,13 +308,20 @@ def test_schema_constraints():
     Verify that database schema has correct constraints in place:
     - contract_id PRIMARY KEY (unique, not null)
     - idempotency_key UNIQUE (allows multiple nulls)
+
+    When RUN_REAL_POSTGRES_TESTS=true: HARD FAIL if PostgreSQL unavailable
+    When flag not set: (skipped by main, never called)
     """
     from core.database import get_conn, release_conn
 
     conn = get_conn()
     if conn is None:
-        chk("PostgreSQL available", False)
-        return
+        # When real tests are enabled, PostgreSQL unavailability is a critical error
+        print()
+        print("❌ CRITICAL: PostgreSQL unavailable (RUN_REAL_POSTGRES_TESTS=true)")
+        print("   Set DATABASE_URL and ensure PostgreSQL is running")
+        print("   Exiting with code 1")
+        sys.exit(1)
 
     try:
         with conn.cursor() as cur:
@@ -352,6 +369,17 @@ def test_schema_constraints():
 # ══════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
+    # Skip if RUN_REAL_POSTGRES_TESTS not explicitly enabled
+    if not RUN_REAL_POSTGRES_TESTS:
+        print("=" * 70)
+        print("Phase 4B0.1B — Concurrency Regression Tests (Real PostgreSQL)")
+        print("=" * 70)
+        print()
+        print("⊘ SKIPPED: RUN_REAL_POSTGRES_TESTS not enabled")
+        print("   Set RUN_REAL_POSTGRES_TESTS=true to run real PostgreSQL tests on Render staging")
+        print()
+        sys.exit(0)
+
     print("=" * 70)
     print("Phase 4B0.1B — Concurrency Regression Tests (Real PostgreSQL)")
     print("=" * 70)
