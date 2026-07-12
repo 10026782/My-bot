@@ -19,11 +19,15 @@ from __future__ import annotations
 import os
 import sys
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from unittest.mock import patch, MagicMock
 from typing import Optional
 
 os.environ.setdefault("FEATURE_ATOMIC_CLAIMS", "false")  # Flag OFF by default
+
+# Per-run UUID to namespace all test contract IDs (prevents collisions on repeated staging runs)
+TEST_RUN_ID = str(uuid.uuid4())[:8]
 
 passed = failed = 0
 
@@ -67,7 +71,7 @@ def test_atomic_executor_flag_off():
         return {"ok": True, "external_id": "test-id"}
 
     success, result, error = execute_with_atomic_claim(
-        contract_id="test-contract-1",
+        contract_id=f"test-contract-flag-off-{TEST_RUN_ID}",
         canonical_user_id="boss_hq:approver_1",
         tool_name="test_tool",
         tool_inputs={"param": "value"},
@@ -97,7 +101,7 @@ def test_atomic_executor_fail_closed_db_down():
             mock_claim.return_value = ClaimAcquisitionResult(result="unavailable", error="DB down")
 
             success, result, error = execute_with_atomic_claim(
-                contract_id="test-contract-fail-closed",
+                contract_id=f"test-contract-fail-closed-{TEST_RUN_ID}",
                 canonical_user_id="boss_hq:approver_1",
                 tool_name="test_tool",
                 tool_inputs={},
@@ -118,7 +122,7 @@ def test_concurrent_approvals_mock():
     """Mock concurrent approvals: only one reaches executor."""
     from core.action_gateway_atomic_executor import execute_with_atomic_claim
 
-    contract_id = "test-contract-concurrent-1"
+    contract_id = f"test-contract-concurrent-{TEST_RUN_ID}"
     executor_call_count = 0
     executor_call_lock = __import__("threading").Lock()
 
@@ -206,9 +210,9 @@ def test_atomic_executor_factory():
 
     chk("Atomic executor factory: returns callable", callable(atomic_exec))
 
-    # Call it (should work with flag OFF)
+    # Call it (should work with flag OFF) — use unique contract_id to avoid collisions
     try:
-        result = atomic_exec("test_tool", {}, "test-contract-1")
+        result = atomic_exec("test_tool", {}, f"test-contract-factory-{TEST_RUN_ID}")
         chk("Atomic executor factory: callable executes", result is not None)
     except Exception as e:
         chk(f"Atomic executor factory: execution failed: {e}", False)
