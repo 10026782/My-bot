@@ -130,6 +130,20 @@ bot.exception_handler = handle_telebot_error
 
 app = Flask(__name__)
 
+# Phase 4B0.1A — Initialize PostgreSQL migrations if atomic claims enabled
+try:
+    from feature_flags import is_enabled
+    if is_enabled("FEATURE_ATOMIC_CLAIMS"):
+        from core.database_migrations import run_migrations
+        if run_migrations():
+            logging.info("PostgreSQL migrations completed successfully")
+        else:
+            logging.error("PostgreSQL migrations failed — atomic claims may be unavailable")
+except ImportError:
+    pass
+except Exception as e:
+    logging.warning(f"Atomic claims initialization skipped: {e}")
+
 
 def _empty_twiml() -> Response:
     return Response(str(MessagingResponse()), mimetype="application/xml")
