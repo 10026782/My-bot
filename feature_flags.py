@@ -47,6 +47,7 @@ INTEGRATIONS:
 APPROVAL POLICY:
   EMERGENCY_WINDOW             - מאפשר הפעלת חריג זמני ל-High מהטלפון (core/emergency_window.py, כבוי כברירת מחדל)
   FEATURE_ACTION_GATEWAY       - ActionContract + Action Gateway (Stage B) — מרכז כל mutation תחת חוזה; default OFF
+  FEATURE_ATOMIC_CLAIMS        - PostgreSQL atomic coordination for contract execution (Phase 4B0.1A); default OFF
 
 CAPTURE POLICY (C89):
   FEATURE_AUTO_CAPTURE         - Tiered auto-write via IngressClassification (Stage 3).
