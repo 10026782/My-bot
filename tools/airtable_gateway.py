@@ -435,10 +435,21 @@ def at_upsert(
     source: str = "unknown",
 ) -> bool:
     """
-    Create-or-update by match_field's value (e.g. contract_id). Used by
-    core/action_gateway.py's ExecutionLedger to persist ActionContracts —
-    idempotent so repeated status-transition writes for the same contract_id
-    update one record instead of creating duplicates. Returns True on success.
+    Create-or-update by match_field's value (e.g. contract_id). Intended for
+    core/action_gateway.py's ExecutionLedger to persist ActionContracts.
+
+    KNOWN LIMITATION — not safe under concurrent calls for the same
+    match_field value: the lookup-then-write here is not atomic (classic
+    TOCTOU), so two near-simultaneous at_upsert() calls for a brand-new
+    contract_id could both see "no existing record" and both create one
+    (duplicate rows), and two racing writes for an existing record could
+    apply out of order (a stale status could overwrite a newer one — last
+    HTTP call to land wins, not last logical call). In practice today's only
+    caller (ExecutionLedger) writes to a given contract_id from a single
+    synchronous call chain (propose -> approve -> execute), so this hasn't
+    been observed, but do not rely on this function for state that multiple
+    processes/threads may write to the same key concurrently without adding
+    real locking/versioning first. Returns True on success.
     """
     match_value = fields.get(match_field)
     if not match_value:

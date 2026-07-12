@@ -639,11 +639,36 @@ class ApprovalStatus:
 
 class ActionContractsFields:
     """
-    PR-0C Phase 4A — canonical durable persistence for ActionContract/
-    ExecutionLedger (core/action_gateway.py). Field names match exactly what
-    core/action_gateway.py::_build_airtable_writer()'s _writer() already sends
-    (do not rename without updating that function). Table name: Tables.ACTION_CONTRACTS.
-    contract_id is the match/primary field for at_upsert().
+    PR-0C Phase 4A — intended future durable persistence for ActionContract/
+    ExecutionLedger (core/action_gateway.py). NOT YET WIRED into the live
+    singleton (see core/action_gateway.py::_ledger_singleton comment) — the
+    write path (_build_airtable_writer/at_upsert) exists and is tested, but
+    ExecutionLedger is still 100% in-memory (no read-by-contract_id/recovery
+    path back from this table), so this table is a write-capable target only,
+    not yet a canonical source of truth in practice. Field names match exactly
+    what core/action_gateway.py::_build_airtable_writer()'s _writer() already
+    sends (do not rename without updating that function). Table name:
+    Tables.ACTION_CONTRACTS. contract_id is the match/primary field for
+    at_upsert() — see its docstring for known concurrent-write limitations.
+
+    Reproducible schema spec (table created via Airtable MCP in app4bcgoX7t0HUVnm,
+    12/07/2026 — no automated provisioning script exists yet; recreate these
+    fields by hand in any other environment/base until one is written):
+      contract_id                  singleLineText (primary field)
+      tenant_id                    singleLineText
+      canonical_user_id            singleLineText
+      tool_name                    singleLineText
+      normalized_payload           multilineText   (JSON string)
+      business_action_fingerprint  singleLineText
+      origin_channel                singleLineText
+      origin_chat_id                singleLineText
+      requires_approval             checkbox
+      status                        singleSelect {draft, pending, approved,
+                                     rejected, executing, executed, failed,
+                                     superseded}
+      created_at                    number (precision 3)
+      approved_by                   singleLineText
+      approved_at                   number (precision 3)
     """
     CONTRACT_ID      = "contract_id"
     TENANT_ID        = "tenant_id"

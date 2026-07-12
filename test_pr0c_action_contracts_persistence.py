@@ -11,6 +11,12 @@ Coverage:
   3. ExecutionLedger.save()/update_status() call the airtable_writer with the
      expected field shape, and a writer failure never loses the RAM record
      (graceful degrade, matching the pre-existing try/except).
+  4. The live action_gateway singleton's ledger is NOT wired to this writer —
+     propose_action()/propose_gated() are already called unconditionally in
+     production (shadow mode) by 5 live call sites, so wiring it would be a
+     live behavior change, not inert infrastructure, until a durable
+     read/recovery path exists. This is a deliberate regression guard: it
+     must fail loudly if someone wires the singleton before that work lands.
 """
 
 from __future__ import annotations
@@ -137,6 +143,21 @@ contract3 = ActionContract(
 ledger2.save(contract3)  # must not raise
 chk("ExecutionLedger.save() survives a writer exception (RAM intact)",
     ledger2.find_by_id("c-test-3") is not None)
+
+
+# ══════════════════════════════════════════════════════════════════
+# 4. Live singleton must NOT be wired yet — regression guard
+# ══════════════════════════════════════════════════════════════════
+print("\n── Test 4: live singleton is deliberately unwired ────────────")
+
+from core.action_gateway import action_gateway as _live_gw
+
+chk(
+    "action_gateway's live ledger has no airtable_writer "
+    "(propose_action/propose_gated already fire unconditionally in prod — "
+    "wiring this now would be a live behavior change, not inert infra)",
+    _live_gw._ledger._airtable_writer is None,
+)
 
 
 # ══════════════════════════════════════════════════════════════════

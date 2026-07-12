@@ -2237,21 +2237,41 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 `core/action_gateway.py::_build_airtable_writer()` היה כתוב במלואו מראש (factory שבודק `hasattr(Tables, "ACTION_CONTRACTS")` ובונה writer ל-Airtable), אבל **מעולם לא חובר** — ה-singleton היה hardcoded ל-`airtable_writer=None` ("RAM-only until Airtable table exists"). בנוסף התגלה שהפונקציה שהוא מייבא, `tools.airtable_gateway.at_upsert`, **לא הייתה קיימת בכלל בקוד** — כלומר גם אם היה מחובר, הייתה נכשלת ב-`ImportError` (נבלע ב-`except Exception: return None` הרחב) בכל קריאה. שתי הבעיות תוקנו יחד.
 
 ### מה נבנה — Phase 4A
-1. **`airtable_schema.py`** — `Tables.ACTION_CONTRACTS = "ActionContracts"` (טבלה חדשה, נוצרה בפועל דרך Airtable MCP בבסיס החי `app4bcgoX7t0HUVnm`, מאומתת בכתיבה/מחיקה של רשומת בדיקה). `ActionContractsFields` — שמות שדות תואמים 1:1 למה ש-`_build_airtable_writer()`'s `_writer()` כבר שולח (contract_id, tenant_id, canonical_user_id, tool_name, normalized_payload, business_action_fingerprint, origin_channel, origin_chat_id, requires_approval, status, created_at, approved_by, approved_at). `ActionContractStatus` — 8 הערכים בפועל בקוד (draft/pending/approved/rejected/executing/executed/failed/superseded), רשומים כ-singleSelect choices בטבלה.
-2. **`tools/airtable_gateway.py`** — `at_upsert(table, fields, match_field, source)` חדש: מחפש רשומה קיימת לפי `{match_field}=value` (filterByFormula עם `_safe_formula_param` הקיים), `airtable_patch` אם נמצא אחרת `airtable_create`. Idempotent — כתיבות חוזרות לאותו contract_id מעדכנות רשומה אחת, לא יוצרות כפילויות.
-3. **`core/action_gateway.py`** — `_ledger_singleton` מחובר עכשיו ל-`_build_airtable_writer()` האמיתי במקום `None` קשיח. `ExecutionLedger.save()`/`update_status()` (קוד קיים, לא שונה) כבר עוטפים את קריאת ה-writer ב-try/except ("Airtable write failed (RAM intact)") — degradation חינני שמור.
+1. **`airtable_schema.py`** — `Tables.ACTION_CONTRACTS = "ActionContracts"` (טבלה חדשה, נוצרה בפועל דרך Airtable MCP בבסיס החי `app4bcgoX7t0HUVnm`, מאומתת בכתיבה/מחיקה של רשומת בדיקה). `ActionContractsFields` — שמות שדות תואמים 1:1 למה ש-`_build_airtable_writer()`'s `_writer()` כבר שולח. `ActionContractStatus` — 8 הערכים בפועל בקוד. כולל כעת spec מלא לשחזור הטבלה בסביבה אחרת (אין עדיין script אוטומטי — פער מוצהר, ראה תיקון למטה).
+2. **`tools/airtable_gateway.py`** — `at_upsert(table, fields, match_field, source)` חדש: מחפש רשומה קיימת לפי `{match_field}=value`, `airtable_patch` אם נמצא אחרת `airtable_create`.
+3. **`core/action_gateway.py`** — `_build_airtable_writer()` תוקנה לא לבלוע exceptions בשקט (logger.warning נוסף).
 
-### Tests — Phase 4A
-`test_pr0c_action_contracts_persistence.py` (חדש, 14 assertions) — מכסה: `at_upsert` create/patch/missing-match-value (mock httpx); `_build_airtable_writer()` מחזירה עכשיו callable אמיתי (לא None); ה-writer שולח את כל השדות הנכונים כולל JSON-serialized payload; `ExecutionLedger.save()`/`update_status()` קוראים ל-writer; writer שזורק exception לא מאבד את הרשומה מה-RAM.
+### תיקון קריטי לפני merge (code review, לא self-caught)
+ה-reviewer עצר את ה-merge וזיהה שהתיאור המקורי של ה-PR **כזב בטעות** בשתי נקודות מהותיות:
 
-כל 14/14 assertions חדשות עברו, כל test_*.py הקיימים (script-style + pytest-style), `smoke_tests.py`, ו-`test_integration.py` עברו full run לאחר השינוי (אותו flake ידוע וקודם ב-`test_session_store_contract.py`, לא קשור).
+1. **"Phase 4A הוא תשתית בלבד, אין caller חי" — לא נכון.** `_queue_approval` (app.py) וכל שלושת ה-writers שהיגרו ב-Phase 3 (media_handler.py, followup_engine.py, core/lead_recovery.py) כבר קוראים ל-`action_gateway.propose_action()`/`propose_gated()` **ללא תנאי** בפרודקשן היום (shadow mode כש-`FEATURE_ACTION_GATEWAY` כבוי). חיבור ה-`airtable_writer` ל-singleton היה גורם לכתיבות אמיתיות ל-Airtable בכל בקשת אישור בפרודקשן **מיד עם ה-merge** — שינוי התנהגות חי, לא "אפס שינוי" כפי שנכתב.
+2. **"ActionContracts = מקור אמת קנוני" מוקדם מדי.** `ExecutionLedger` הוא RAM-only לחלוטין — אין נתיב read/recovery (load-by-contract_id אחרי restart, שחזור pending contracts). writer-only אינו הופך טבלה למקור אמת דורבל; Phase 4B לא יכול לנתב TMA לפי contract_id בביטחון בלי הנתיב הזה.
 
-- **Severity:** N/A — תשתית + תיקון gap שקט (at_upsert חסר). חלק מ-PR-0C.
+**תיקון שבוצע (באותו commit, לפני merge):**
+- **`_ledger_singleton` הוחזר במפורש ל-`airtable_writer=None`** — Phase 4A נשאר תשתית אמיתית (schema+at_upsert+build_writer בנויים ונבדקים), אבל ה-singleton החי **לא מחובר** עד שיהיה נתיב read/recovery, הגנת concurrency, ואימות מחוץ לפרודקשן.
+- `_build_airtable_writer()` — exceptions כבר לא נבלעים בשקט לגמרי (logger.warning).
+- `at_upsert()` — docstring מתעד במפורש TOCTOU race ידוע (יצירה כפולה בכתיבה מקבילה על אותו contract_id חדש; כתיבה stale יכולה לדרוס סטטוס חדש יותר) — לא תוקן (דורש locking/versioning אמיתי), מתועד כמגבלה חסומה לפני production rollout אמיתי.
+- `ActionContractsFields` docstring עודכן להסיר את הניסוח "canonical durable truth" עד ששני הנתיבים (write + read/recovery) קיימים.
+- נוסף regression test מפורש: `action_gateway._ledger._airtable_writer is None` — נכשל בקול אם מישהו יחבר את ה-singleton לפני שהעבודה הנדרשת (read/recovery path, concurrency review, אימות מחוץ ל-production) הושלמה.
+
+### Tests — Phase 4A (מעודכן)
+`test_pr0c_action_contracts_persistence.py` (15 assertions, לא 14) — מכסה: `at_upsert` create/patch/missing-match-value; `_build_airtable_writer()` מחזירה callable אמיתי; ה-writer שולח שדות נכונים; `ExecutionLedger.save()`/`update_status()` קוראים ל-writer; writer שזורק exception לא מאבד רשומה מה-RAM; **וה-live singleton עדיין לא מחובר** (regression guard חדש).
+
+כל 15/15 assertions עברו, כל test_*.py הקיימים, `smoke_tests.py`, ו-`test_integration.py` עברו full run (אותו flake ידוע וקודם ב-`test_session_store_contract.py`, לא קשור).
+
+### נשאר פתוח לפני שמחברים את ה-singleton בפועל (לא בהיקף ה-PR הזה)
+- נתיב read/recovery: load-by-contract_id, שחזור pending contracts אחרי restart, reconciliation.
+- הגנת concurrency/version ל-`at_upsert` (TOCTOU race מתועד, לא מתוקן).
+- מדדים/observability מבניים לכשלי כתיבה (מעבר ל-log warning בודד).
+- script provisioning אוטומטי לסביבות נוספות (staging וכו') — כרגע spec כתוב ב-docstring בלבד, לא script.
+- אימות rollout מחוץ ל-production לפני חיבור אמיתי.
+
+- **Severity:** N/A — תשתית. חלק מ-PR-0C. (הכזב בתיאור המקורי תוקן — לא היה fix ל-production bug, אלא תיקון claim לא-מאומת לפני merge).
 - **תוקן ב-commit:** (למלא אחרי commit)
 - **תוקן ב-branch:** `claude/table-incorrect-names-6chfvb`
 - **Merged:** לא עדיין
-- **Deployed:** לא (טבלת Airtable כן נוצרה בפועל בבסיס החי — verified via MCP, לפני ה-merge של הקוד)
-- **Verified בפרודקשן:** לא — אין עדיין caller אמיתי (Phase 4B יחבר את TMA)
-- **סטטוס:** Phase 4A הושלם. Phase 4B (Approvals projection + TMA command routing) הבא בתור.
+- **Deployed:** לא (טבלת Airtable כן נוצרה בפועל בבסיס החי — verified via MCP)
+- **Verified בפרודקשן:** לא רלוונטי — אין שינוי live (singleton לא מחובר)
+- **סטטוס:** Phase 4A הושלם מחדש אחרי תיקון code review, לפני merge. Phase 4B (Approvals projection + TMA command routing) חסום עד שנתיב read/recovery ל-ActionContracts ייבנה בנוסף.
 
 הלוג האחרון (מעלה) מוכיח את **כל השרשרת יחד**, לא רק חתיכה אחת: preview → 2 הפרעות → "כן" (re-display מדויק) → הפרעה שלישית → "כן" (superseded מדויק, אין ביצוע כפול/שגוי). אין פערים פתוחים ידועים בנושא הזה.
