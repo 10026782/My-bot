@@ -2593,6 +2593,22 @@ def _webhook_telegram_impl():
         sender_user_id = str(update.message.from_user.id)  # מי שלח (תמיד USER_ID)
         text           = update.message.text
 
+        # BUG-070-adjacent: idempotency dedup must run before slash-command/
+        # wizard dispatch below — otherwise a duplicate delivery of a
+        # command or a wizard reply is dispatched (and can execute) twice
+        # instead of being discarded as "already handled". Moved ahead of
+        # those checks (previously ran after them).
+        if idempotency.is_duplicate("telegram", sender_user_id, text):
+            try:
+                bot.send_message(
+                    reply_chat_id,
+                    "♻️ ההודעה הזו כבר טופלה.\n"
+                    "אם זו בקשה חדשה — נסח אותה אחרת."
+                )
+            except Exception as e:
+                logger.debug(f"[Idempotency] notify failed: {e}")
+            return "", 200
+
         # Slash commands → registered @bot.message_handler(commands=[...]) handlers.
         # They authenticate via resolve_identity internally; we don't go through run_agent.
         if text.startswith("/"):
@@ -2617,17 +2633,6 @@ def _webhook_telegram_impl():
                 return "", 200
         except Exception as e:
             logger.error(f"[/update] text capture routing failed: {e}", exc_info=True)
-
-        if idempotency.is_duplicate("telegram", sender_user_id, text):
-            try:
-                bot.send_message(
-                    reply_chat_id,
-                    "♻️ ההודעה הזו כבר טופלה.\n"
-                    "אם זו בקשה חדשה — נסח אותה אחרת."
-                )
-            except Exception as e:
-                logger.debug(f"[Idempotency] notify failed: {e}")
-            return "", 200
 
         # ── Decision Hub Stage 0.6 — "זה הנספח" attachment reference ──
         # SPEC_File_Context_Reference.md, Rule 10: max one linking question.
