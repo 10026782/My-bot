@@ -1716,14 +1716,6 @@ def run_agent(
                     _out_meta["source_module"] = "action_gateway"
                 return _t2_cancel_reply
 
-    # ── PR-0 / BUG-PENDING-APPROVAL-B — context safety ────────────────
-    # הגענו לכאן = ההודעה לא נצרכה כ-resolution (כן/לא/disambiguation/combined)
-    # של contract חי. מסמן כל pending ActionGateway contract של הזהות הזו
-    # כ-context_interrupted, כדי ש-"כן" מאוחר יותר לא יאשר בשקט פעולה ישנה
-    # שהמשתמש כבר לא מתכוון אליה (ראה route_confirmation_word).
-    from core.action_gateway import action_gateway as _gw_interrupt
-    _gw_interrupt.mark_context_interrupted(identity.memory_key)
-
     # ── 2.6. Context Pronoun Resolution (C60) ────────
     # "תעלה לדסישנס"/"זה הנספח" וכד' — לפני intent detection, כדי שה-Router
     # וה-LLM יראו התייחסות מפורשת במקום לנחש מהקשר חלקי.
@@ -2552,6 +2544,76 @@ def health():
     return jsonify({"status": health_status["status"]}), 200
 
 
+# ══════════════════════════════════════════════════
+# BUG-PENDING-APPROVAL-B — global ingress context gate
+#
+# Single boundary, called once per inbound webhook event (Telegram +
+# WhatsApp), after authentication + junk/idempotency/duplicate filtering +
+# identity resolution, but before any callback/command/wizard/media/
+# Decision Hub/Agent/early-return routing. Supersedes the earlier
+# run_agent()-internal hook (PR #311) — that hook only ever saw events that
+# already made it into the Agent message pipeline, missing every event
+# handled by a separate code path (slash commands, wizard text/media
+# capture, unrelated callbacks, general media, Decision Hub attachment
+# references, WhatsApp media). This is the one place that sees all of them.
+#
+# Only a genuine attempt to resolve one of the identity's own live
+# ActionGateway contracts (ActionGateway.is_own_resolution_event — confirm/
+# cancel/disambiguation free text) is exempt. Everything else — including
+# callbacks belonging to app.py's own separate _pending_approvals mechanism,
+# which is not an ActionGateway resolution — marks live contracts
+# interrupted. Duplicate/junk-filtered updates never reach this point at
+# all (filtered earlier), so they cannot interrupt anything.
+# ══════════════════════════════════════════════════
+
+from dataclasses import dataclass as _dataclass
+
+
+@_dataclass
+class _IngressEvent:
+    channel: str          # "telegram" | "whatsapp"
+    kind: str             # "text" | "callback" | "media"
+    text: str | None = None
+
+
+def _apply_ingress_context_gate(identity, event: _IngressEvent) -> None:
+    """See module note above. Fail-closed: if the primary mark cannot be
+    recorded, an independent fallback path (find_live_contracts + the
+    ledger's own update_status, not the same internal loop) forces the same
+    result — a later bare confirm must never execute as though context
+    integrity were known when it isn't."""
+    if identity is None or not getattr(identity, "memory_key", None):
+        # No action without identity (project-wide rule) — nothing pending
+        # can be tied to an identity that never resolved in the first place.
+        return
+    user = identity.memory_key
+    from core.action_gateway import action_gateway as _gw
+    try:
+        if event.kind == "text" and _gw.is_own_resolution_event(user, event.text or ""):
+            return  # genuine confirm/cancel/disambiguation — let normal routing resolve it
+        _gw.mark_context_interrupted(user)
+    except Exception:
+        # Fail-closed, not fail-open: the primary mark couldn't be recorded,
+        # so we cannot claim to know this contract's context is intact. The
+        # incoming message still proceeds to normal routing below — only a
+        # later bare confirm is affected — but the contract's integrity is
+        # marked explicitly "unknown" (not silently left as "not interrupted"),
+        # via an independently-written fallback method so a bug specific to
+        # mark_context_interrupted() doesn't also break this path.
+        logger.error(
+            "[ActionGateway] ingress context gate primary mark failed for user=%s "
+            "— marking context integrity unknown via independent fallback",
+            user, exc_info=True,
+        )
+        try:
+            _gw.mark_context_integrity_unknown(user)
+        except Exception:
+            logger.critical(
+                "[ActionGateway] ingress context gate fallback ALSO failed for user=%s "
+                "— pending contracts may be silently stale-approvable", user, exc_info=True,
+            )
+
+
 @app.route("/telegram", methods=["POST"])
 def webhook_telegram():
     """H1 top-level handler — דק, מעביר ל-impl ומדווח שגיאות לא-מטופלות."""
@@ -2578,6 +2640,18 @@ def _webhook_telegram_impl():
     if update.callback_query:
         call = update.callback_query
         data = call.data or ""
+        # BUG-PENDING-APPROVAL-B: no junk/idempotency filter exists for
+        # callbacks today — gate right after identity resolution. Every
+        # callback (including approve:/reject:, which belongs to app.py's
+        # own separate _pending_approvals mechanism, not ActionGateway) is
+        # "not an ActionGateway resolution" — always interrupts.
+        try:
+            _cb_identity = resolve_identity("telegram", str(call.from_user.id))
+            _apply_ingress_context_gate(
+                _cb_identity, _IngressEvent(channel="telegram", kind="callback"),
+            )
+        except Exception as e:
+            logger.error(f"[ActionGateway] ingress gate (callback) failed: {e}", exc_info=True)
         try:
             if data.startswith(("approve:", "reject:")):
                 _handle_approval_callback(call)
@@ -2593,11 +2667,10 @@ def _webhook_telegram_impl():
         sender_user_id = str(update.message.from_user.id)  # מי שלח (תמיד USER_ID)
         text           = update.message.text
 
-        # BUG-070-adjacent: idempotency dedup must run before slash-command/
-        # wizard dispatch below — otherwise a duplicate delivery of a
-        # command or a wizard reply is dispatched (and can execute) twice
-        # instead of being discarded as "already handled". Moved ahead of
-        # those checks (previously ran after them).
+        # ── junk/idempotency/duplicate filtering FIRST — moved ahead of
+        # command/wizard dispatch so a duplicate slash-command or wizard
+        # reply is discarded before it can reach the context gate at all
+        # (BUG-PENDING-APPROVAL-B: duplicates must never interrupt anything).
         if idempotency.is_duplicate("telegram", sender_user_id, text):
             try:
                 bot.send_message(
@@ -2608,6 +2681,13 @@ def _webhook_telegram_impl():
             except Exception as e:
                 logger.debug(f"[Idempotency] notify failed: {e}")
             return "", 200
+
+        # ── identity resolution + ingress context gate — before ANY
+        # command/wizard/media/Decision Hub/Agent routing below.
+        identity_for_gate = resolve_identity("telegram", sender_user_id)
+        _apply_ingress_context_gate(
+            identity_for_gate, _IngressEvent(channel="telegram", kind="text", text=text),
+        )
 
         # Slash commands → registered @bot.message_handler(commands=[...]) handlers.
         # They authenticate via resolve_identity internally; we don't go through run_agent.
@@ -2642,8 +2722,7 @@ def _webhook_telegram_impl():
             try:
                 from cmd_decision import is_attachment_reference, handle_attachment_reference
                 if is_attachment_reference(text):
-                    identity_for_ref = resolve_identity("telegram", sender_user_id)
-                    if handle_attachment_reference(bot, identity_for_ref, reply_chat_id, text):
+                    if handle_attachment_reference(bot, identity_for_gate, reply_chat_id, text):
                         return "", 200
             except Exception as e:
                 logger.error(f"[DecisionHub] attachment reference handling failed: {e}", exc_info=True)
@@ -2688,6 +2767,17 @@ def _webhook_telegram_impl():
 
     # F16 — Media Layer: voice notes / photo / document uploads
     if update.message and update.message.content_type in ("voice", "photo", "document"):
+        # BUG-PENDING-APPROVAL-B: no junk/idempotency filter exists for
+        # media today — gate right after identity resolution, before any
+        # wizard-file-capture or generic media routing below.
+        try:
+            _media_identity_gate = resolve_identity("telegram", str(update.message.from_user.id))
+            _apply_ingress_context_gate(
+                _media_identity_gate, _IngressEvent(channel="telegram", kind="media"),
+            )
+        except Exception as e:
+            logger.error(f"[ActionGateway] ingress gate (media) failed: {e}", exc_info=True)
+
         # C20 — an /update session waiting on its free-text step must claim
         # the next photo/document itself; otherwise it silently falls
         # through to the generic Drive-upload flow below and the pending
@@ -2737,6 +2827,20 @@ def _webhook_whatsapp_impl():
     dedup_key = msg_sid if msg_sid else incoming
     if idempotency.is_duplicate("whatsapp", sender, dedup_key):
         return _empty_twiml()
+
+    # BUG-PENDING-APPROVAL-B: identity resolution + ingress context gate —
+    # after junk/idempotency filtering above, before media/furniture-funnel/
+    # Agent routing below. WhatsApp text ("כן"/"לא"/etc.) still reaches
+    # run_agent() unconditionally further down, so kind="text" here lets
+    # is_own_resolution_event exempt a genuine resolution the same way.
+    try:
+        _wa_identity_gate = resolve_identity("whatsapp", sender)
+        _apply_ingress_context_gate(
+            _wa_identity_gate,
+            _IngressEvent(channel="whatsapp", kind="text", text=incoming),
+        )
+    except Exception as e:
+        logger.error(f"[ActionGateway] ingress gate (whatsapp) failed: {e}", exc_info=True)
 
     # ── BUG-071 FIX: WhatsApp Media Support ─────────────────────────────
     # Extract and process media (voice/file) from Twilio webhook.
@@ -2882,6 +2986,18 @@ def webhook_meta_whatsapp():
 
     if idempotency.is_duplicate("whatsapp_meta", sender, msg_id):
         return jsonify({"status": "duplicate"}), 200
+
+    # BUG-PENDING-APPROVAL-B: identity resolution + ingress context gate —
+    # after junk/idempotency filtering above, before media/outbound-stub/
+    # Agent routing below.
+    try:
+        _meta_identity_gate = resolve_identity("whatsapp", sender)
+        _apply_ingress_context_gate(
+            _meta_identity_gate,
+            _IngressEvent(channel="whatsapp", kind="text", text=incoming),
+        )
+    except Exception as e:
+        logger.error(f"[ActionGateway] ingress gate (meta whatsapp) failed: {e}", exc_info=True)
 
     domain_from_channel = _channel_domain(to_number)
 
