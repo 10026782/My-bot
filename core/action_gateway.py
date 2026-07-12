@@ -168,6 +168,16 @@ class ActionContract:
     # as a security boundary. Read by _make_dispatch_executor() at execution
     # time and passed to dispatch_tool(trusted_source=...).
     trusted_source:              str = "agent"
+    # PR-0 / BUG-PENDING-APPROVAL-B: context-poisoning guard. context_interrupted
+    # is set by mark_context_interrupted() when a message arrives that is not
+    # itself a confirm/cancel/disambiguation resolution for this contract —
+    # i.e. the user has moved on since the preview was shown. reconfirmation_required
+    # is set once route_confirmation_word() has re-shown the business description
+    # in response to a "כן" that arrived after an interruption; only a second
+    # "כן" (with reconfirmation_required=True) actually executes. See
+    # route_confirmation_word() for the state machine.
+    context_interrupted:         bool = False
+    reconfirmation_required:     bool = False
 
 
 # ══════════════════════════════════════════════════
@@ -368,6 +378,41 @@ class ExecutionLedger:
                 self._airtable_writer(self._store[contract_id])
             except Exception as exc:
                 logger.warning("[ActionGateway] Airtable status update failed: %s", exc)
+
+    # ── PR-0 / BUG-PENDING-APPROVAL-B ────────────────────────────────
+
+    def mark_context_interrupted(self, canonical_user_id: str) -> None:
+        """כל pending contract חי לזהות זו מסומן כ-context_interrupted=True.
+        לא נוגע ב-status/dispatch — דגל בלבד, נקרא לפני approve()."""
+        with self._lock:
+            for c in self._store.values():
+                if c.canonical_user_id == canonical_user_id and c.status == "pending":
+                    c.context_interrupted = True
+
+
+# ══════════════════════════════════════════════════
+# PR-0 / BUG-PENDING-APPROVAL-B — business description for reconfirmation
+# תיאור עסקי קריא בלבד — לעולם לא internal contract_id בלבד (DoD #3/#9).
+# ══════════════════════════════════════════════════
+
+def _describe_contract_for_reconfirmation(contract: ActionContract) -> str:
+    payload = contract.normalized_payload or {}
+    if contract.tool_name in ("airtable_add", "airtable_update") and payload.get("table") == _LEAD_CAPTURE_TABLE:
+        fields = payload.get("fields") or {}
+        try:
+            from airtable_schema import LeadFields
+            parts = [
+                fields.get(LeadFields.NAME, ""),
+                fields.get(LeadFields.PHONE, ""),
+                fields.get(LeadFields.DOMAIN, ""),
+            ]
+        except Exception:
+            parts = []
+        parts = [p for p in parts if p]
+        verb = "יצירת ליד" if contract.tool_name == "airtable_add" else "עדכון ליד"
+        return f"{verb}: {', '.join(parts)}" if parts else verb
+    table = payload.get("table") or payload.get("spreadsheet_name") or ""
+    return f"{contract.tool_name} / {table}" if table else contract.tool_name
 
 
 # ══════════════════════════════════════════════════
@@ -581,7 +626,23 @@ class ActionGateway:
         if len(live) == 0:
             return "אין פעולה שממתינה לאישור."
         if len(live) == 1:
-            result = self.approve(live[0].contract_id, approver=canonical_user_id, approver_role=approver_role)
+            contract = live[0]
+            # PR-0 / BUG-PENDING-APPROVAL-B: a message unrelated to this
+            # contract arrived since the preview was shown (mark_context_interrupted).
+            # The first "כן" after that must re-show the business description
+            # and require an explicit second "כן" — never silently execute a
+            # stale action (context poisoning).
+            if contract.context_interrupted and not contract.reconfirmation_required:
+                self._ledger.update_status(
+                    contract.contract_id, contract.status,
+                    reconfirmation_required=True,
+                )
+                desc = _describe_contract_for_reconfirmation(contract)
+                return (
+                    f"יש פעולה קודמת שממתינה לאישור: {desc}.\n"
+                    f"לאשר אותה? (כן/לא)"
+                )
+            result = self.approve(contract.contract_id, approver=canonical_user_id, approver_role=approver_role)
             return result
         # יותר מאחת — מציג רשימה ממוספרת + שומר disambiguation state
         with self._disambiguation_lock:
@@ -1021,6 +1082,13 @@ class ActionGateway:
 
     def find_contract(self, contract_id: str) -> ActionContract | None:
         return self._ledger.find_by_id(contract_id)
+
+    # ── PR-0 / BUG-PENDING-APPROVAL-B ────────────────────────────────
+
+    def mark_context_interrupted(self, canonical_user_id: str) -> None:
+        """נקרא מ-app.py לכל הודעה שאינה עצמה resolution (כן/לא/disambiguation/
+        combined) עבור contract חי של הזהות הזו — ראה route_confirmation_word()."""
+        self._ledger.mark_context_interrupted(canonical_user_id)
 
     # ── §5 — AgentObservation ────────────────────────────────────────
 

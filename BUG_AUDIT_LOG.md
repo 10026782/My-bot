@@ -1862,14 +1862,37 @@
 
 ---
 
-## BUG-108 (follow-up/decision item, לא bug קוד) — Pending ActionGateway approval שורד הודעות-ביניים לא-קשורות
+## BUG-108 / BUG-PENDING-APPROVAL-B (PR-0) — Pending ActionGateway approval שורד הודעות-ביניים לא-קשורות (context poisoning) — ✅ תוקן בקוד
 
-- **תאריך:** 12/07/2026
-- **מקור:** התגלה אגב אימות-חי של BUG-106/BUG-099c — **אינה** תקלה ב-099c, זו שאלת מדיניות/UX ב-`core/action_gateway.py`/TTL, לא קשורה ל-lead-clarification.
-- **תיאור הבעיה:** אישור/preview ממתין (pending ActionContract) נשאר בתוקף גם אחרי הודעות/שיחות אחרות לא-קשורות שהתערבו בינתיים. כלומר משתמש יכול לענות "כן" הרבה אחרי ש"שכח" שהיה preview פתוח, וה-"כן" הזה יאשר פעולה ישנה ולא-רלוונטית יותר, בלי שהמשתמש רואה שוב את תיאור הפעולה שהוא בעצם מאשר.
-- **החלטה נדרשת (לא הוכרעה עדיין — 3 אפשרויות מוצעות):**
-  1. פעולה ממתינה נשארת בתוקף כרגיל (המצב הנוכחי) — אין שינוי.
-  2. פעולה ממתינה **מתבטלת** אוטומטית ברגע שמתחילה כוונה/פעולה אחרת (intent חדש מזוהה) לפני שהמשתמש הספיק לאשר.
-  3. "כן" לאחר הודעת-ביניים כלשהי **חייב** להציג מחדש את תיאור הפעולה הממתינה (summary/preview) לפני ביצוע בפועל — לא לבצע על סמך "כן" יבש בלבד.
-- **קבצים רלוונטיים לכל מימוש עתידי:** `core/action_gateway.py` (`ActionGateway.propose_action`, TTL/lifecycle של `ActionContract`), `app.py`'s `_handle_approval_callback`/`_CONFIRM_WORDS`/`_CANCEL_WORDS`.
-- **סטטוס:** 🔵 נרשם כפריט-החלטה בלבד — אין קוד, אין תיקון, אין PR. ממתין להחלטת מוצר/מדיניות לפני כל מימוש.
+- **תאריך רישום:** 12/07/2026. **תאריך מימוש (PR-0):** 12/07/2026.
+- **מקור:** התגלה אגב אימות-חי של BUG-106/BUG-099c — **אינה** תקלה ב-099c. נרשם תחילה כפריט-החלטה בלבד (3 אפשרויות), מומש כ-PR-0 לפי handoff נפרד (`PR0_PENDING_APPROVAL_CONTEXT_SAFETY.md`) שבחר באפשרות #3: "כן" אחרי הודעת-ביניים **חייב** להציג מחדש את תיאור הפעולה לפני ביצוע.
+- **תרחיש הבאג:** `preview: יצירת ליד יוסי כהן → הודעת ביניים: שמואל כהן → "כן" → יוסי כהן נוצר` — המשתמש התכוון "כן" בהקשר ההודעה האחרונה, אבל ActionGateway אישר את ה-ActionContract הפתוח מההודעה הישנה יותר. לא disambiguation — context poisoning: הפעולה בוצעה עם אישור אמיתי, אבל ההקשר השתנה בינתיים.
+
+### Contract Chain (בוצע לפני כל שינוי קוד, כנדרש ע"י PR-0 doc)
+
+מיפוי גילה **שלושה מנגנוני pending-approval נפרדים ובלתי-תלויים** בקוד, לא אחד:
+1. `core/action_gateway.py`'s `ActionContract`/`ExecutionLedger` (מפתח: `canonical_user_id`, **אין TTL בכלל**) — המנגנון החי בפועל לאישור כתיבת-ליד של LCH (`core/lead_candidate_handler.py::_propose_lead_write` קורא ל-`propose_action()` **תמיד**, "regardless of FEATURE_ACTION_GATEWAY" לפי הערת הקוד עצמה). **זה בדיוק המנגנון שמשחזר את התרחיש בדוח.**
+2. `app.py`'s `_pending_approvals` dict (מפתח: `chat_id`, TTL=600s) — מזין גם `_handle_approval_callback_impl()` (כפתורי טלגרם) וגם אישור-חופשי-בטקסט עבור בקשות Agent כלליות (`run_agent`'s pending-check block). **אותה תבנית פגיעות בדיוק**, אך לא זה שמשחזר את התרחיש שבדוח.
+3. `event_bus.py`'s `PendingActionsStore`/`bus` (מפתח: `chat_id`, TTL=30min) — Stage-A legacy fallback, נדרש רק כש-`FEATURE_ACTION_GATEWAY` כבוי וגם אין live Gateway contract — נדיר בפועל.
+
+ה-Scope שב-PR-0 doc הזכיר `_handle_approval_callback_impl()`/"EventBus" (מנגנונים #2/#3), אך התרחיש המדווח בפועל משחזר במנגנון #1. **הוצג למשתמש במפורש** (AskUserQuestion) — הוחלט: **ActionGateway בלבד (מנגנון #1)** למימוש הזה; מנגנונים #2/#3 יש להם את אותה בעיה שורשית אך נשארים מחוץ ל-scope, לפתיחה כ-follow-up נפרד אם ירצו.
+
+שאר תשובות ה-Contract Chain: `route_confirmation_word()` (single live contract) מאשר ומבצע מיידית ללא שום בדיקת "האם עבר זמן/הודעה מאז ה-preview" — `ActionContract` לא נשא `created_at`-based TTL ולא state של "הופרע". הודעה שאינה כן/לא/disambiguation/combined נופלת פשוט הלאה לזרימת Context Pronoun Resolution/Agent/LCH בלי לגעת ב-Gateway בכלל. כמה contracts pending בו-זמנית אפשריים (disambiguation קיים מטפל). הודעת-ביניים יכולה בהחלט ליצור בעצמה ActionContract חדש (fingerprint שונה → contract נפרד, לא מתמזג).
+
+### תיקון
+
+- **`core/action_gateway.py`:** `ActionContract` קיבל שני שדות בוליאניים חדשים: `context_interrupted`/`reconfirmation_required` (ברירת מחדל `False`) — לא נדרש store חדש. `ExecutionLedger.mark_context_interrupted(canonical_user_id)` (חדש) מסמן כל contract pending של הזהות כ-`context_interrupted=True`, בלי לגעת ב-status/dispatch. `ActionGateway.mark_context_interrupted()` (חדש) — delegate ציבורי. `_describe_contract_for_reconfirmation(contract)` (חדש) — תיאור עסקי קריא: עבור `airtable_add`/`airtable_update` על טבלת Leads מציג שם+טלפון+domain בפועל (לא internal id); עבור כל tool אחר, `"{tool_name} / {table}"` fallback גנרי. `route_confirmation_word()`'s single-live-contract branch: אם `context_interrupted=True` וטרם `reconfirmation_required` — **לא מבצע**, מציג תיאור עסקי + "לאשר אותה? (כן/לא)", מסמן `reconfirmation_required=True`; אם `reconfirmation_required` כבר `True` — מבצע רגיל (`approve()` הקיים, ללא שינוי בלוגיקת ה-dispatch/execute עצמה). `route_cancellation_word`/`route_disambiguation`/`route_combined_word` **לא שונו** — disambiguation הקיים ממשיך בדיוק כפי שהיה (הבדיקה החדשה חלה רק בענף single-contract).
+- **`app.py`:** נקודת-חיבור יחידה — אחרי כל בדיקות combined/disambiguation/confirm/cancel (שכולן `return` כשמזוהות), לפני "2.6 Context Pronoun Resolution": `action_gateway.mark_context_interrupted(identity.memory_key)`. רץ בדיוק עבור הודעה שהגיעה לנקודה הזו בלי שנצרכה כ-resolution לאף contract חי — כלומר "הודעת ביניים" לפי ההגדרה של ה-state machine. הודעת ה"כן" עצמה שכן פותרת contract חי חוזרת (`return`) **לפני** השורה הזו, כך שהיא לעולם לא מסמנת את עצמה כהפרעה (DoD #1 שלם).
+- **הוחלט במכוון לא לממש** את השדות `last_prompt_message_id`/`last_user_message_sequence` שה-doc הציע: העיצוב שנבחר (סימון פרואקטיבי של כל pending contract בכל הודעה שאינה resolution) משיג את כל ה-DoD בלי לתלות ב-message_id/sequence-counter, שהיו מוסיפים plumbing חוצה-קבצים (LCH+app.py) ללא תועלת התנהגותית נוספת — עקבי עם "מינימלי — state tracking בלבד" שה-doc עצמו דורש.
+
+### בדיקה
+
+`test_pr0_pending_approval_context_safety.py` (חדש, 26/26): DoD #1 (כן ישיר, ללא הודעת ביניים — מבצע מיידית, לא נשבר), #2 (הודעת ביניים → כן → לא מבצע, `reconfirmation_required` הופך `True`), #3/#9 (התיאור המוצג הוא עסקי-קריא — כולל תרחיש Leads מדויק עם שם+טלפון בפועל — ולא internal contract_id בלבד), #4 (כן נוסף אחרי reconfirmation מבצע בדיוק את אותו payload, פעם אחת), #5 (לא אחרי reconfirmation מבטל, לא מבצע), #6 (פעולה חדשה שמגיעה בזמן pending מקבלת contract_id נפרד, לא מתמזגת עם הישן), #7 (2+ contracts pending → disambiguation קיים ממשיך לעבוד בדיוק כפי שהיה, גם כששניהם מסומנים interrupted), #8 (contract שבוצע יוצא מ-`find_live_contracts`, lifecycle לא נפגע). **Regression suite מלא:** `test_action_gateway.py` (41/41), `test_bug070_combined_wording.py` (27/27), `test_bug070_pending_approval_multi.py` (9/9), `test_bug099c_lead_clarification.py` (25/25), `test_bug106_session_determinism.py` (7/7), `smoke_tests.py` (כולם PASS), `python3 -m compileall app.py core/action_gateway.py core/lead_candidate_handler.py` — כולם ירוקים, אפס רגרסיה.
+
+### Scope
+
+תואם למדויק את ה-Scope שהוחלט (ActionGateway בלבד): נגעו רק ב-`core/action_gateway.py` ו-`app.py` (שורה אחת, נקודת-חיבור). לא נגעו: `dispatch`/`execute` logic של ActionGateway (`_execute_contract`/`approve()`'s dispatch נשארו ללא שינוי), `FEATURE_ACTION_GATEWAY` flag, `LeadsWriteGate`, לוגיקת disambiguation הקיימת. מנגנונים #2 (`app.py`'s `_pending_approvals`) ו-#3 (`event_bus.py`) **לא טופלו** — נשארים עם אותה פגיעות שורשית, למי שירצה follow-up נפרד.
+
+- **PR:** טרם נפתח — ימתין לקומיט זה.
+- **Merged/Deployed/Verified בפרודקשן:** לא עדיין.
+- **סטטוס:** ✅ תוקן בקוד, בדיקות עברו (26 חדשות + רגרסיה מלאה) — ממתין ל-PR+merge+production verification.
