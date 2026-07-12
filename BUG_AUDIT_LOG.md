@@ -1893,8 +1893,72 @@
 
 תואם למדויק את ה-Scope שהוחלט (ActionGateway בלבד): נגעו רק ב-`core/action_gateway.py` ו-`app.py` (שורה אחת, נקודת-חיבור). לא נגעו: `dispatch`/`execute` logic של ActionGateway (`_execute_contract`/`approve()`'s dispatch נשארו ללא שינוי), `FEATURE_ACTION_GATEWAY` flag, `LeadsWriteGate`, לוגיקת disambiguation הקיימת. מנגנונים #2 (`app.py`'s `_pending_approvals`) ו-#3 (`event_bus.py`) **לא טופלו** — נשארים עם אותה פגיעות שורשית, למי שירצה follow-up נפרד.
 
-- **PR:** #311 (`claude/table-incorrect-names-6chfvb` → `main`).
+- **PR:** #311 (`claude/table-incorrect-names-6chfvb` → `main`) — **הראשון משני PRs**, ראה Follow-up למטה.
 - **Merged:** ✅ כן — `233b196` (`origin/main`), מאומת ב-grep ישיר מול `origin/main`: `context_interrupted`/`reconfirmation_required`/`mark_context_interrupted`/`_describe_contract_for_reconfirmation` קיימים ב-`core/action_gateway.py`, וקריאת `app.py` ל-`mark_context_interrupted` קיימת בשורה 1725.
-- **Deployed:** דווח ע"י המשתמש (12/07/2026) — טרם אומת מול commit hash ב-Render dashboard (אין גישה ישירה מהסביבה הזו).
-- **Verified בפרודקשן:** ❌ טרם — לפי הכלל הקיים בריפו, נדרש רצף חי בפועל (preview → הודעת ביניים → "כן" → הצגה-מחדש של תיאור עסקי → "כן" נוסף → ביצוע) עם לוגים אמיתיים, לא merge/deploy/unit-tests בלבד.
-- **סטטוס:** ✅ תוקן בקוד ומוזג ל-main, בדיקות עברו (26 חדשות + רגרסיה מלאה) — ממתין לאימות-חי בפרודקשן לפני VERIFIED IN PROD.
+- **Deployed:** דווח ע"י המשתמש (12/07/2026), Render deploy live for `c1311b8`→ בפועל commit `233b196` פעיל.
+- **Verified בפרודקשן (הרצף המקורי — preview→כן ישיר, ללא הודעת ביניים):** ✅ עבד כצפוי.
+- **⚠️ פער שנתגלה באימות-חי (12/07/2026) — ראה Follow-up:** רצף אמיתי בפרודקשן (`preview: צור ליד מעיין יכ` → `/update` → `בדיקה` → `כן`) **לא** הפעיל reconfirmation — ה-"כן" ביצע מיידית. שורש: ה-hook היחיד (PR #311) חי **בתוך** `run_agent()`, ו-`/update` + תשובת-הטקסט שלו (`capture_text` ב-`cmd_update.py`) עוברים ב-`app.py`'s webhook דרך `bot.process_new_updates()` **בלי לעבור דרך `run_agent()` בכלל** — לכן ה-hook מעולם לא רץ עבורן.
+
+---
+
+## Follow-up ל-BUG-PENDING-APPROVAL-B — Global Ingress Context Gate (PR #311 לא כיסה מסלולים שעוקפים run_agent)
+
+- **תאריך:** 12/07/2026.
+- **מקור:** לוג פרודקשן אמיתי שהמשתמש הדביק, שאמור להוכיח VERIFIED IN PROD — במקום זאת חשף שה-fix של PR #311 לא מספיק.
+
+### שורש (מאומת, לא הונח)
+
+מיפוי מלא של `app.py`'s Telegram/WhatsApp webhooks גילה **מנגנון עקיפה רחב בהרבה מ-`/update` בלבד** — כל אחד מהמסלולים הבאים מדלג לגמרי על `run_agent()`, ולכן על ה-hook היחיד שהיה קיים בתוכו:
+1. כל callback_query (כפתורי inline: `upd_domain:`, `upd_type:`, weekly-summary, **וגם** `approve:`/`reject:` ששייכים למנגנון הנפרד `app.py`'s `_pending_approvals`).
+2. כל slash command (`/update`, `/status`, `/schema`, `/cancel`, `/convert` וכו').
+3. טקסט חופשי שנלכד ע"י wizard מפעיל (`cmd_update.py`'s `capture_text`, מסונן ב-`app.py` דרך `has_pending_text_capture`).
+4. קובץ/תמונה שנלכדים ע"י אותו wizard (`capture_photo_or_document`).
+5. Decision Hub attachment-reference handling (`FEATURE_DECISION_HUB`, flag-gated).
+6. מדיה כללית (voice/photo/document) מחוץ ל-wizard (`_handle_telegram_media`).
+7. מדיה ב-WhatsApp (Twilio + Meta Cloud API).
+
+מסלולים #7/#9 מהמיפוי הקודם (dedup/junk filters) **אינם** מסלולי-עקיפה אמיתיים — הודעה כפולה/זבל אינה "פעולה חדשה" ואינה אמורה להפריע לכלום.
+
+### עיצוב שהוחלט (הוראה מפורשת מהמשתמש — "אל תתקן כל bypass point בנפרד")
+
+**לא** תוקן כל אחד מהמסלולים הנ"ל בנפרד. במקום זאת: **קריאה אחת לכל webhook ערוץ**, בגבול משותף — אחרי אימות (signature) + סינון junk/idempotency/duplicate + resolve_identity, לפני כל ניתוב callback/command/wizard/media/Decision Hub/Agent/early-return. ה-hook הישן בתוך `run_agent()` (PR #311) **הוסר לגמרי** — לא נשמרו שני מנגנונים מקבילים.
+
+### תיקון
+
+- **`core/action_gateway.py`:** `ActionGateway.is_own_resolution_event(canonical_user_id, text)` (חדש) — קובע אם טקסט הוא ניסיון-resolution אמיתי (משתמש **באותם** `_CONFIRM_KEYWORDS`/`_CANCEL_KEYWORDS`/`_parse_ordinal`/`_parse_combined` שה-routes עצמם כבר משתמשים בהם, כולל התקדים של BUG-070 שספרה בודדת נחשבת disambiguation רק כש-2+ contracts חיים) — כך שאין סיכון לסטייה בין הבדיקה הזו לבין ההתנהגות האמיתית של `route_confirmation_word`/`route_cancellation_word`/`route_disambiguation`/`route_combined_word`.
+- **`app.py`:** hook יחיד חדש — `_apply_ingress_context_gate(identity, event)` + `_IngressEvent` (dataclass: channel/kind/text). קורא ל-`is_own_resolution_event` (רק כש-`kind=="text"`) — אם אמת, לא עושה דבר (המסלול הרגיל יפתור); אחרת, `mark_context_interrupted`.
+- **חוברה בכל אחד מ-6 נקודות ה-webhook** (Telegram: callback/text/media; WhatsApp: Twilio + Meta), **בלי** לגעת ב-dispatch/execute logic. ה-hook הישן (`app.py` שורה 1725 מ-PR #311) **הוסר**.
+
+### Fail-closed מפורש — context_integrity_unknown (תיקון לאחר code review)
+
+בסקירה ראשונה, ה-fallback (כשהקריאה הראשית ל-`mark_context_interrupted` נכשלת) פשוט ניסה להפעיל מחדש את אותה סמנטיקה (`context_interrupted=True`) דרך קוד חלופי. code review דרש הבחנה מפורשת: **כשל ב-marking אסור שישאיר contract כאילו ההקשר בטוח, אבל גם אסור שיפיל את ההודעה העסקית הנכנסת** — יש לסמן את ה-integrity כ-"לא-ידוע" (state נבדל, לא מתבלבל עם הפרעה אמיתית), ולאפשר routing להמשיך כרגיל.
+
+- **שדה חדש ל-`ActionContract`:** `context_integrity_unknown: bool = False` — נבדל מ-`context_interrupted` (state שונה, נצפה בנפרד ב-logs/audits).
+- `ExecutionLedger.mark_context_integrity_unknown()`/`ActionGateway.mark_context_integrity_unknown()` (חדשים) — מימוש **עצמאי**, כתוב בנפרד מ-`mark_context_interrupted` (לא reuse של אותה לולאה), כדי שבאג ספציפי לזה לא ישבור גם את זה.
+- `route_confirmation_word()`'s single-contract gate: `if (contract.context_interrupted or contract.context_integrity_unknown) and not contract.reconfirmation_required:` — שני המצבים נשערים **זהה** (לא מבצע, מציג תיאור עסקי, דורש כן נוסף), אך נשמרים כשדות נפרדים.
+- `_apply_ingress_context_gate()`: אם הקריאה הראשית ל-`mark_context_interrupted` זורקת exception — נרשם ERROR ונקרא `mark_context_integrity_unknown` (fallback עצמאי). אם **גם** זה נכשל (כשל כפול) — נרשם CRITICAL, לא בשקט; ההודעה הנכנסת **ממשיכה ל-routing הרגיל בכל מקרה** (ה-try/except בכל אתר-קריאה ב-webhook לא עוצר את הבקשה) — רק אישור מאוחר מושפע.
+- נבדק במפורש: `T11` (כשל ראשי → מסומן `context_integrity_unknown`, לא `context_interrupted`), `T12` (מצב "לא-ידוע" חוסם ביצוע ישיר בדיוק כמו הפרעה אמיתית), `T13` (כשל כפול → CRITICAL, אין קריסה, הבקשה חוזרת 200 כרגיל) — ב-`test_pr0_ingress_context_gate.py`.
+
+### שלושה שערים לפני merge (נדרשו במפורש ע"י המשתמש, כל אחד עם בדיקה נפרדת)
+
+1. **הוכחת מיקום גלובלי** (לא רק טענה) — `test_pr0_gates_structural.py`'s Gate 1a-1e: בדיקת AST על `app.py` בפועל, משווה מספרי-שורה, מוכיחה שבכל אחד משלושת ה-webhooks הסדר הוא בדיוק `auth/filter/dedup → identity resolution → gate → routing`, לכל הענפים (callback/text/media בטלגרם; Twilio/Meta ב-WhatsApp) — לא רק שהתנהגות היום נכונה, אלא שהמבנה עצמו אוכף את זה (רגרסיה עתידית שתשבור את הסדר תיכשל ב-CI).
+2. **הוכחת reuse אמיתי, לא duplication** — `test_pr0_gates_structural.py`'s Gate 2a-2c: מוטציה על `_CONFIRM_KEYWORDS`/`_parse_combined` המשותפים מוכיחה ש-`is_own_resolution_event` **קורא מאותו מקור** כמו ה-routing האמיתי (לא רשימה מקבילה שיכולה לסטות), הבדל תקדים BUG-070 (ספרה בודדת) נבדק במפורש, וקריאת callback חיצונית (`approve:`/`reject:`, מנגנון נפרד) עדיין מפריעה ל-ActionGateway.
+3. **הפרדת שני התיקונים לקומיטים נפרדים** — ראה למטה.
+
+### מבנה קומיטים (PR #312, לפי דרישה מפורשת — לא לבלוע תיקונים בתוך diff הפיצ'ר)
+
+1. `fix(whatsapp): remove local resolve_identity import that shadows the module-level one` + `test_whatsapp_resolve_identity_scoping.py` (חדש, 4/4) — תיקון scoping עצמאי (Python: import מקומי בהמשך הפונקציה הופך את השם ל-local על פני **כל** הפונקציה, כולל לפני שורת ה-import עצמה), תקף גם בלי הפיצ'ר.
+2. `fix(telegram-webhook): run idempotency dedup before command/wizard dispatch` + `test_telegram_dedup_ordering.py` (חדש, 8/8) — תיקון סדר עצמאי (dedup רץ אחרי command/wizard dispatch, כך שהודעה כפולה בוצעה פעמיים), תקף גם בלי הפיצ'ר.
+3. `feat(action-gateway): global ingress context gate at the webhook boundary` — הפיצ'ר עצמו (מעל שני התיקונים לעיל), עם `test_pr0_ingress_context_gate.py` ו-`test_pr0_gates_structural.py`.
+
+### בדיקה (מלא)
+
+`test_pr0_ingress_context_gate.py` (33/33) — אינטגרציה אמיתית מול Flask test client על `/telegram`, `/whatsapp`, `/webhooks/meta/whatsapp`: כל מחלקת מסלול (slash command, wizard text-capture, callback לא-קשור, callback `approve:`/`reject:`, מדיה כללית, Decision Hub attachment reference, WhatsApp Twilio, Meta WhatsApp) מפריעה; "כן" אמיתי **לא** מפריע לעצמו; הודעה כפולה/inbound זבל **לא** מפריעים (מסוננים לפני ה-gate); fail-closed (כשל בודד → `context_integrity_unknown`; חוסם ביצוע כמו הפרעה אמיתית; כשל כפול → CRITICAL, לא קורס). `test_pr0_gates_structural.py` (39/39) — Gate 1+2 כמתואר למעלה. `test_whatsapp_resolve_identity_scoping.py` (4/4), `test_telegram_dedup_ordering.py` (8/8). **Regression suite מלא (כל `test_*.py` בריפו):** כולם ירוקים, `smoke_tests.py` PASS, `python3 -m compileall app.py core/action_gateway.py cmd_update.py` — אפס רגרסיה.
+
+### Scope
+
+זהה ל-PR #311 (ActionGateway בלבד) — מנגנונים #2 (`_pending_approvals`)/#3 (`event_bus.py`) לא טופלו — נשאר follow-up נפרד אם ירצו.
+
+- **PR:** #312 (`claude/table-incorrect-names-6chfvb` → `main`), 4 קומיטים (3 קוד + docs). #311 כבר merged וסגור — לא ניתן "לעדכן" אותו ישירות ב-GitHub; זהו PR נפרד שמשלים את אותה עבודה, לפי פרוטוקול ה-merged-PR הקיים בריפו.
+- **Merged/Deployed/Verified בפרודקשן:** לא עדיין.
+- **סטטוס:** ✅ תוקן בקוד, בדיקות עברו (39+33+4+8 חדשות + רגרסיה מלאה של כל הריפו) — נרשם ל-PR #312 להגיב ל-CI/review. ממתין ל-merge+production verification עם אותו רצף חי (`/update`→`בדיקה`→`כן`) שנכשל בלוג המקורי, ובנוסף smoke לכל מחלקת מסלול (callback לא-קשור, slash command, wizard text, wizard media, מדיה כללית, WhatsApp media, עדכון כפול).
