@@ -1684,7 +1684,11 @@ def run_agent(
                     logger.info(
                         f"[PendingApproval] free-text confirm, no pending for {identity.memory_key}"
                     )
-                    return "אין פעולה שממתינה לאישור. אם זו בקשה חדשה — שלח את הנתונים המדויקים."
+                    # BUG-PENDING-APPROVAL-B follow-up: this is the path
+                    # actually hit by default (FEATURE_ACTION_GATEWAY off) —
+                    # must also surface a specific "superseded" message
+                    # instead of looking identical to "nothing ever happened".
+                    return _gw_cw.describe_no_pending_reason(identity.memory_key)
         elif _lower in _CANCEL_WORDS:
             # BUG-056: same reasoning as _CONFIRM_WORDS above — LCH's Tier-1
             # preview may have a live ActionGateway contract regardless of
