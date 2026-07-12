@@ -101,6 +101,19 @@ def execute_with_atomic_claim(
             "Contract is already being executed by another approver. Please wait or try again."
         )
 
+    if result.is_contract_identity_conflict():
+        # Same contract already being executed with different idempotency_key (concurrent execution)
+        logger.error(
+            f"Contract identity conflict (fail-closed): same contract already being executed "
+            f"with different idempotency_key (concurrent execution attempt). "
+            f"contract={contract_id}, canonical_user_id={canonical_user_id}, error={result.error}"
+        )
+        return (
+            False,
+            None,
+            f"Contract is already being executed (fail-closed): {result.error}"
+        )
+
     if result.is_idempotency_conflict():
         # Idempotency key already used for a different contract (identity/session mismatch)
         logger.error(

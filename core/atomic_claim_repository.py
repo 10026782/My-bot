@@ -49,12 +49,13 @@ STATUS_OUTCOME_UNKNOWN = "outcome_unknown"
 
 ExecutionOutcome = Literal["completed", "failed", "outcome_unknown"]
 ClaimResult = Literal[
-    "acquired",           # This caller won the race, claim acquired
-    "already_claimed",    # Another caller owns this contract
-    "idempotency_conflict",  # Same idempotency_key under a different contract (fail-closed)
-    "unavailable",        # PostgreSQL down (fail-closed)
-    "disabled",           # FEATURE_ATOMIC_CLAIMS flag OFF
-    "error",              # Unexpected error
+    "acquired",                    # This caller won the race, claim acquired
+    "already_claimed",             # Another caller owns this contract
+    "idempotency_conflict",        # Same idempotency_key under a different contract (fail-closed)
+    "contract_identity_conflict",  # Same contract with different idempotency_key (concurrent execution attempt, fail-closed)
+    "unavailable",                 # PostgreSQL down (fail-closed)
+    "disabled",                    # FEATURE_ATOMIC_CLAIMS flag OFF
+    "error",                       # Unexpected error
 ]
 
 
@@ -87,6 +88,10 @@ class ClaimAcquisitionResult:
     def is_idempotency_conflict(self) -> bool:
         """Returns True if same idempotency_key exists under a different contract."""
         return self.result == "idempotency_conflict"
+
+    def is_contract_identity_conflict(self) -> bool:
+        """Returns True if same contract already claimed with different idempotency_key (concurrent execution)."""
+        return self.result == "contract_identity_conflict"
 
     def is_error(self) -> bool:
         """Returns True if an unexpected error occurred."""
@@ -150,8 +155,9 @@ def claim_contract_execution(
     Returns:
         ClaimAcquisitionResult with one of:
           - ACQUIRED: this caller won the race, claim is ready to use, status=executing
-          - ALREADY_CLAIMED: another caller owns this contract, stop before execution
-          - IDEMPOTENCY_CONFLICT: same idempotency_key exists under different contract (fail-closed)
+          - ALREADY_CLAIMED: another caller owns this contract (same contract_id), stop before execution
+          - IDEMPOTENCY_CONFLICT: same idempotency_key under different contract (fail-closed, identity mismatch)
+          - CONTRACT_IDENTITY_CONFLICT: same contract with different idempotency_key (fail-closed, concurrent execution)
           - UNAVAILABLE: PostgreSQL down or not configured (fail-closed, never proceed)
           - DISABLED: FEATURE_ATOMIC_CLAIMS flag is OFF
           - ERROR: unexpected error during claim attempt
@@ -159,15 +165,20 @@ def claim_contract_execution(
     Only ACQUIRED results may proceed to dispatch_tool().
     All other results must stop before execution (fail-closed).
 
-    Concurrency safety:
-      Two independent race conditions must be handled atomically:
-      1. Contract_id PRIMARY KEY: only one claim per contract
-      2. Idempotency_key UNIQUE: only one claim per idempotency_key (for retry safety)
+    Atomic constraint handling:
+      Uses untargeted ON CONFLICT DO NOTHING to catch ALL unique constraint violations:
+      1. contract_id PRIMARY KEY: only one claim per contract
+      2. idempotency_key UNIQUE: only one claim per idempotency_key (for retry safety)
 
-    Three concurrent scenarios:
-      A. Same contract_id, same idempotency_key (retry): one ACQUIRED, one ALREADY_CLAIMED
-      B. Same contract_id, different idempotency_key (concurrent approvals): one ACQUIRED, one ALREADY_CLAIMED
-      C. Different contract_id, same idempotency_key (bug/identity mismatch): one ACQUIRED, one IDEMPOTENCY_CONFLICT (fail-closed)
+    Four concurrent scenarios:
+      A. Same contract_id + same idempotency_key (retry):
+         → One ACQUIRED (first attempt), one ALREADY_CLAIMED (retry with same key)
+      B. Same contract_id + different idempotency_key (concurrent execution):
+         → One ACQUIRED (first approver), one CONTRACT_IDENTITY_CONFLICT (second approver, same contract, different key, fail-closed)
+      C. Different contract_id + same idempotency_key (identity/session mismatch):
+         → One ACQUIRED (contract A), one IDEMPOTENCY_CONFLICT (contract B, fail-closed)
+      D. Different contract_id + different idempotency_key (independent claims):
+         → Both ACQUIRED (normal concurrent operations, no conflict)
     """
     from feature_flags import is_enabled
 
@@ -198,103 +209,117 @@ def claim_contract_execution(
         claimed_at = time.time()
 
         with conn.cursor() as cur:
-            # Step 1: Attempt atomic claim on contract_id PRIMARY KEY.
-            # Only the contract_id matters for claim ownership.
-            # ON CONFLICT (contract_id) DO NOTHING means:
-            # - If contract_id already exists: return no row (we lost the race)
-            # - If contract_id doesn't exist: INSERT succeeds and returns the row (we won the race)
+            # Step 1: Attempt atomic INSERT with untargeted ON CONFLICT DO NOTHING.
+            # This atomically handles ALL unique constraint violations:
+            # - contract_id PRIMARY KEY
+            # - idempotency_key UNIQUE
             #
-            # Note: this doesn't protect against idempotency_key uniqueness violations,
-            # which must be checked separately in Step 2.
+            # If any unique constraint is violated, the INSERT silently fails (DO NOTHING)
+            # and we get no row returned. We then classify the conflict in Step 2.
             cur.execute(
                 """
                 INSERT INTO action_execution_claims
                 (contract_id, claimant_id, execution_id, status, claimed_at, idempotency_key)
                 VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (contract_id) DO NOTHING
+                ON CONFLICT DO NOTHING
                 RETURNING contract_id;
                 """,
                 (contract_id, claimant_id, execution_id, STATUS_EXECUTING, claimed_at, idempotency_key),
             )
             result = cur.fetchone()
 
-            # Step 2: If we didn't get a row back, the contract_id was already claimed.
-            # But we need to distinguish between:
-            #   a) contract_id already has a claim (ALREADY_CLAIMED) — normal case
-            #   b) idempotency_key already exists under a different contract (IDEMPOTENCY_CONFLICT) — fail-closed
-            #
-            # Note: The INSERT might have silently failed due to either constraint.
-            # We check both to provide clear diagnostics.
-            if result is None:
-                # Check which constraint fired
-                cur.execute(
-                    """
-                    SELECT contract_id FROM action_execution_claims
-                    WHERE contract_id = %s;
-                    """,
-                    (contract_id,),
+            # Step 2: If we got a row back, we won — commit and return ACQUIRED.
+            if result is not None:
+                conn.commit()
+                claim = AtomicExecutionClaim(
+                    contract_id=contract_id,
+                    claimant_id=claimant_id,
+                    execution_id=execution_id,
+                    claimed_at=claimed_at,
+                    idempotency_key=idempotency_key,
                 )
-                contract_exists = cur.fetchone() is not None
+                logger.info(
+                    f"Claim acquired (execution ownership acquired): "
+                    f"contract_id={contract_id}, claimant_id={claimant_id}, execution_id={execution_id}"
+                )
+                return ClaimAcquisitionResult(result="acquired", claim=claim)
 
-                if contract_exists:
-                    # The contract_id already has a claim — normal race condition
+            # Step 3: INSERT failed (no row returned). Determine which constraint(s) were violated.
+            # Query both contract_id and idempotency_key in the same transaction to classify the conflict.
+            cur.execute(
+                """
+                SELECT contract_id, idempotency_key FROM action_execution_claims
+                WHERE contract_id = %s OR idempotency_key = %s;
+                """,
+                (contract_id, idempotency_key),
+            )
+            conflict_rows = cur.fetchall()
+
+            # Classify the conflict based on what we found
+            contract_conflict = None  # (existing_contract_id, existing_idem_key)
+            idempotency_conflict = None  # (existing_contract_id, existing_idem_key)
+
+            for existing_contract_id, existing_idem_key in conflict_rows:
+                if existing_contract_id == contract_id:
+                    # Same contract already exists
+                    contract_conflict = (existing_contract_id, existing_idem_key)
+                if existing_idem_key == idempotency_key:
+                    # Same idempotency_key already exists
+                    idempotency_conflict = (existing_contract_id, existing_idem_key)
+
+            # Determine outcome based on which constraints were violated
+            if contract_conflict is not None:
+                existing_contract_id, existing_idem_key = contract_conflict
+                if existing_idem_key == idempotency_key:
+                    # Same contract, same idempotency_key — this is a retry
                     logger.info(
-                        f"Claim rejected (contract already claimed by another caller): "
-                        f"contract_id={contract_id}, attempted_claimant={claimant_id}"
+                        f"Claim rejected (contract already claimed, retry with same key): "
+                        f"contract_id={contract_id}, attempted_claimant={claimant_id}, "
+                        f"idempotency_key={idempotency_key}"
                     )
                     return ClaimAcquisitionResult(result="already_claimed")
-
-                # Contract doesn't exist, so the issue must be idempotency_key
-                # Check if idempotency_key already exists under a different contract
-                cur.execute(
-                    """
-                    SELECT contract_id FROM action_execution_claims
-                    WHERE idempotency_key = %s;
-                    """,
-                    (idempotency_key,),
-                )
-                idem_row = cur.fetchone()
-                if idem_row is not None:
-                    # Same idempotency_key, different contract — identity/idempotency conflict
-                    conflict_contract_id = idem_row[0]
+                else:
+                    # Same contract, DIFFERENT idempotency_key — concurrent execution attempt (fail-closed)
                     logger.error(
-                        f"IDEMPOTENCY CONFLICT (fail-closed): "
-                        f"same idempotency_key used for different contract_id. "
+                        f"CONTRACT IDENTITY CONFLICT (fail-closed): "
+                        f"same contract already being executed with different idempotency_key. "
                         f"Attempted: contract_id={contract_id}, claimant_id={claimant_id}, "
                         f"idempotency_key={idempotency_key}. "
-                        f"Already claimed by: contract_id={conflict_contract_id}. "
+                        f"Already claimed by: contract_id={existing_contract_id}, "
+                        f"idempotency_key={existing_idem_key}. "
                         f"Never fall back to non-atomic execution."
                     )
                     return ClaimAcquisitionResult(
-                        result="idempotency_conflict",
-                        error=f"Idempotency key already used for different contract (existing: {conflict_contract_id}, attempted: {contract_id})"
+                        result="contract_identity_conflict",
+                        error=f"Contract already being executed (existing idempotency_key: {existing_idem_key}, attempted: {idempotency_key})"
                     )
 
-                # Neither contract_id nor idempotency_key found, but INSERT failed — unexpected
+            if idempotency_conflict is not None:
+                existing_contract_id, existing_idem_key = idempotency_conflict
+                # idempotency_key exists but under a DIFFERENT contract — identity/session mismatch (fail-closed)
                 logger.error(
-                    f"INSERT failed but no conflict detected: "
-                    f"contract_id={contract_id}, idempotency_key={idempotency_key}. "
-                    f"This should not happen."
+                    f"IDEMPOTENCY CONFLICT (fail-closed): "
+                    f"same idempotency_key used for different contract_id. "
+                    f"Attempted: contract_id={contract_id}, claimant_id={claimant_id}, "
+                    f"idempotency_key={idempotency_key}. "
+                    f"Already claimed by: contract_id={existing_contract_id}. "
+                    f"Never fall back to non-atomic execution."
                 )
                 return ClaimAcquisitionResult(
-                    result="error",
-                    error="INSERT failed but no conflict detected (internal error)"
+                    result="idempotency_conflict",
+                    error=f"Idempotency key already used for different contract (existing: {existing_contract_id}, attempted: {contract_id})"
                 )
 
-            # Step 3: We won the race — return the acquired claim
-            conn.commit()
-            claim = AtomicExecutionClaim(
-                contract_id=contract_id,
-                claimant_id=claimant_id,
-                execution_id=execution_id,
-                claimed_at=claimed_at,
-                idempotency_key=idempotency_key,
+            # Neither contract_id nor idempotency_key found, but INSERT failed — unexpected error
+            logger.error(
+                f"INSERT failed but no conflict detected: "
+                f"contract_id={contract_id}, idempotency_key={idempotency_key}. "
+                f"This should not happen (constraint violated but no matching row found)."
             )
-            logger.info(
-                f"Claim acquired (execution ownership acquired): "
-                f"contract_id={contract_id}, claimant_id={claimant_id}, execution_id={execution_id}"
+            return ClaimAcquisitionResult(
+                result="error",
+                error="INSERT failed but no conflict detected (internal database error)"
             )
-            return ClaimAcquisitionResult(result="acquired", claim=claim)
 
     except Exception as e:
         logger.error(
