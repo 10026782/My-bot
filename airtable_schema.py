@@ -639,21 +639,32 @@ class ApprovalStatus:
 
 class ActionContractsFields:
     """
-    PR-0C Phase 4A — intended future durable persistence for ActionContract/
-    ExecutionLedger (core/action_gateway.py). NOT YET WIRED into the live
-    singleton (see core/action_gateway.py::_ledger_singleton comment) — the
-    write path (_build_airtable_writer/at_upsert) exists and is tested, but
-    ExecutionLedger is still 100% in-memory (no read-by-contract_id/recovery
-    path back from this table), so this table is a write-capable target only,
-    not yet a canonical source of truth in practice. Field names match exactly
-    what core/action_gateway.py::_build_airtable_writer()'s _writer() already
-    sends (do not rename without updating that function). Table name:
-    Tables.ACTION_CONTRACTS. contract_id is the match/primary field for
-    at_upsert() — see its docstring for known concurrent-write limitations.
+    PR-0C Phase 4B0 — durable persistence for ActionContract/ExecutionLedger
+    (core/action_gateway.py), fronted by core/action_contract_repository.py::
+    ActionContractRepository. ExecutionLedger's in-memory _store is a cache in
+    front of this table, not the source of truth — find_by_id() falls back to
+    the repository on a cache miss and hydrates the full contract from here,
+    including actor identity/policy fields, so a restarted/second process can
+    safely resume and authorize execution exactly as the original propose_action()
+    call intended. Field names match exactly what
+    core/action_contract_repository.py's serializer sends (do not rename
+    without updating that module). Table name: Tables.ACTION_CONTRACTS.
+    contract_id is the match/primary field.
 
-    Reproducible schema spec (table created via Airtable MCP in app4bcgoX7t0HUVnm,
-    12/07/2026 — no automated provisioning script exists yet; recreate these
-    fields by hand in any other environment/base until one is written):
+    agent_observations is deliberately NOT persisted here — per its own
+    docstring it is "never user-facing, never executable" signal data, not
+    needed to safely re-authorize or re-execute a hydrated contract.
+
+    VERSION is persisted metadata only — it is NOT an active concurrency-
+    control mechanism today. No transition path in this codebase checks or
+    CAS's on it; ActionContractRepository has no transition/claim method at
+    all (see its module docstring). A real claim mechanism using this field
+    (or a replacement) is tracked separately as Phase 4B0.1, requiring a
+    genuinely atomic coordination primitive outside Airtable.
+
+    Reproducible schema spec (table created/extended via Airtable MCP in
+    app4bcgoX7t0HUVnm — no automated provisioning script exists yet; recreate
+    these fields by hand in any other environment/base until one is written):
       contract_id                  singleLineText (primary field)
       tenant_id                    singleLineText
       canonical_user_id            singleLineText
@@ -669,6 +680,18 @@ class ActionContractsFields:
       created_at                    number (precision 3)
       approved_by                   singleLineText
       approved_at                   number (precision 3)
+      version                       number (precision 0)
+      actor_role                    singleLineText
+      actor_user_id                 singleLineText
+      actor_display_name            singleLineText
+      actor_domain_id               singleLineText
+      actor_external_id             singleLineText
+      actor_allowed_domains         multilineText   (JSON array string)
+      approval_policy               singleLineText
+      trusted_source                singleLineText
+      context_interrupted           checkbox
+      reconfirmation_required       checkbox
+      context_integrity_unknown     checkbox
     """
     CONTRACT_ID      = "contract_id"
     TENANT_ID        = "tenant_id"
@@ -683,6 +706,18 @@ class ActionContractsFields:
     CREATED_AT       = "created_at"       # unix timestamp (float)
     APPROVED_BY      = "approved_by"
     APPROVED_AT      = "approved_at"      # unix timestamp (float)
+    VERSION          = "version"          # persisted metadata only — not an active concurrency guard (see class docstring)
+    ACTOR_ROLE               = "actor_role"
+    ACTOR_USER_ID             = "actor_user_id"
+    ACTOR_DISPLAY_NAME        = "actor_display_name"
+    ACTOR_DOMAIN_ID           = "actor_domain_id"
+    ACTOR_EXTERNAL_ID         = "actor_external_id"
+    ACTOR_ALLOWED_DOMAINS     = "actor_allowed_domains"    # JSON array string
+    APPROVAL_POLICY           = "approval_policy"
+    TRUSTED_SOURCE            = "trusted_source"
+    CONTEXT_INTERRUPTED       = "context_interrupted"
+    RECONFIRMATION_REQUIRED   = "reconfirmation_required"
+    CONTEXT_INTEGRITY_UNKNOWN = "context_integrity_unknown"
 
 
 class ActionContractStatus:

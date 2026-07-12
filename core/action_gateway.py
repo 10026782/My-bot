@@ -188,6 +188,11 @@ class ActionContract:
     # know." Does not block the incoming message itself from being routed —
     # only affects whether a later bare confirm executes directly.
     context_integrity_unknown:   bool = False
+    # PR-0C Phase 4B0 — persisted version metadata, bumped on save. NOT a
+    # concurrency-control mechanism today: no transition path in this codebase
+    # checks or CAS's on this value. A real claim mechanism using this (or a
+    # replacement) is tracked separately as Phase 4B0.1.
+    version:                     int = 1
 
 
 # ══════════════════════════════════════════════════
@@ -340,11 +345,20 @@ class ExecutionLedger:
     RAM + כתיבה ל-Airtable ייעודי (ActionContracts) כאשר הוא מוגדר.
     """
 
-    def __init__(self, airtable_writer: Callable | None = None):
-        self._store: dict[str, ActionContract] = {}    # contract_id → contract
+    def __init__(self, airtable_writer: Callable | None = None, repository=None):
+        self._store: dict[str, ActionContract] = {}    # contract_id → contract (CACHE, not source of truth)
         self._by_fingerprint: dict[str, str] = {}      # fingerprint → contract_id
         self._lock = threading.Lock()
-        self._airtable_writer = airtable_writer        # callable(contract) → None
+        self._airtable_writer = airtable_writer        # callable(contract) → None — legacy best-effort mirror (Phase 4A)
+        # PR-0C Phase 4B0: ActionContractRepository | None. When set, find_by_id()
+        # falls back to it on a cache miss (restart/second-instance recovery) and
+        # hydrates the cache. There is no status-transition use of this
+        # repository — update_status() below remains a bare in-memory update
+        # regardless of whether a repository is set. Deliberately None on the
+        # live singleton for now (see _ledger_singleton comment) — this is
+        # tested, inert infrastructure, not yet an activated live
+        # persistence/recovery path.
+        self._repository = repository
 
     def save(self, contract: ActionContract) -> None:
         with self._lock:
@@ -355,9 +369,29 @@ class ExecutionLedger:
                 self._airtable_writer(contract)
             except Exception as exc:
                 logger.warning("[ActionGateway] Airtable write failed (RAM intact): %s", exc)
+        if self._repository:
+            try:
+                self._repository.save(contract)
+            except Exception as exc:
+                logger.warning("[ActionGateway] repository save failed (RAM intact): %s", exc)
 
     def find_by_id(self, contract_id: str) -> ActionContract | None:
-        return self._store.get(contract_id)
+        cached = self._store.get(contract_id)
+        if cached is not None:
+            return cached
+        if not self._repository:
+            return None
+        # Cache miss — fall back to the durable repository (restart / second
+        # instance recovery). get() already fails closed (returns None) on
+        # not-found, store-unreachable, or expiry; never fabricate a contract
+        # here if it returns None.
+        hydrated = self._repository.get(contract_id)
+        if hydrated is None:
+            return None
+        with self._lock:
+            self._store[contract_id] = hydrated
+            self._by_fingerprint[hydrated.business_action_fingerprint] = contract_id
+        return hydrated
 
     def find_by_fingerprint(self, fingerprint: str) -> ActionContract | None:
         cid = self._by_fingerprint.get(fingerprint)
@@ -1067,21 +1101,34 @@ class ActionGateway:
                 "פנה לתמיכה טכנית."
             )
 
+        # NOTE: this is a plain in-memory status update, not an atomic claim.
+        # There is no protection here against two callers (two Render
+        # instances, a duplicate webhook, a double-tap) both reaching this
+        # point for the same contract — a genuinely atomic coordination
+        # primitive outside Airtable is tracked separately as Phase 4B0.1 and
+        # does not exist yet. TMA routing by contract_id stays blocked until
+        # it does (see core/action_contract_repository.py's module docstring).
         self._ledger.update_status(
-            contract_id, "approved",
-            approved_by=approver,
-            approved_at=time.time(),
+            contract_id, "approved", approved_by=approver, approved_at=time.time(),
         )
+        updated = self._ledger.find_by_id(contract_id)
+        if not updated:
+            logger.warning(
+                "[ActionGateway] approve: contract vanished immediately after update_status contract=%s",
+                contract_id,
+            )
+            return "⚠️ הפעולה לא נמצאה."
+
         logger.info(
             "[ActionGateway] approved: contract=%s fingerprint=%.12s tool=%s "
             "payload_keys=%s by=%s",
             contract_id,
-            contract.business_action_fingerprint,
-            contract.tool_name,
-            list(contract.normalized_payload.keys()),
+            updated.business_action_fingerprint,
+            updated.tool_name,
+            list(updated.normalized_payload.keys()),
             approver,
         )
-        return self._execute_contract(contract)
+        return self._execute_contract(updated)
 
     def _execute_contract(self, contract: ActionContract) -> str:
         """
