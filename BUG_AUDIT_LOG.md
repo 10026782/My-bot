@@ -2311,3 +2311,37 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **סטטוס:** Phase 4B0 הושלם. Phase 4B (TMA Approvals projection + routing by contract_id) יכול להתחיל רק אחרי merge כאן, ורק אחרי החלטה נפרדת ומודעת על הפעלת ה-repository ב-singleton החי (לא נכלל אוטומטית ב-4B0 או ב-4B עצמו).
 
 הלוג האחרון (מעלה) מוכיח את **כל השרשרת יחד**, לא רק חתיכה אחת: preview → 2 הפרעות → "כן" (re-display מדויק) → הפרעה שלישית → "כן" (superseded מדויק, אין ביצוע כפול/שגוי). אין פערים פתוחים ידועים בנושא הזה.
+
+---
+
+## PR-0C — Phase 4B0 CORRECTION: guarded_transition() provided NO protection under genuine concurrency, removed from all execution paths
+
+- **דווח:** 12/07/2026, אותו יום כמו הרשומה המקורית למעלה — הבעלים ביקש להראות את המימוש המדויק של `guarded_transition()` ואת בדיקת ה-race, ולאשר אם מדובר ב-CAS אמיתי או ב-read-check-patch.
+
+### מה התגלה (בדיקה עצמית, לא דיווח מהבעלים)
+בעקבות מעקב מדויק אחרי הרצף של `guarded_transition()`, התברר שהניסוח המקורי ברשומה למעלה — "מצמצם משמעותית את חלון המרוץ" — **שגוי**. עבור המקרה המדויק שהכי חשוב (שני קוראים קוראים את הרשומה *לפני* שמישהו מהם כותב — למשל webhook כפול, double-tap, או שני Render instances שמטפלים באותה בקשה במקביל): שני הקוראים מחשבים באופן עצמאי את אותו `expected_version+1`/`new_status`, שניהם עושים PATCH, שניהם קוראים מחדש ורואים (version, status) שתואם למה שהם עצמם ציפו לכתוב, ו**שניהם מקבלים success לא-None** — למרות שה-PATCH השני דרס בשקט שדות אחרים של הראשון (למשל `approved_by`). זו לא "צמצום חלון מרוץ" — זו **אפס הגנה** בדיוק במקרה הזה, ושני הקוראים **ימשיכו לביצוע בפועל**. הבדיקות שתויגו כ-"multi-instance race" (test #2, #5, #6, #8 ברשומה המקורית) לא הוכיחו הגנה אמיתית — הן היו סדרתיות (single-threaded script: הקריאה הראשונה רצה עד הסוף לפני שהשנייה מתחילה), ולכן מעולם לא הציבו שני קוראים בחלון הפגיע בפועל.
+
+### הוראת הבעלים המפורשת (verbatim עיקרי)
+"Do not only correct the documentation. The current guarded transition cannot provide the safety property Phase 4B requires. Re-scope PR #321 to durable persistence, hydration, identity binding and fail-closed reads only. Remove or clearly disable the non-atomic transition from any execution path, and retract the multi-instance race claim. Keep the live singleton unwired and keep TMA routing blocked. Add a separate Phase 4B0.1 using a genuinely atomic coordination primitive outside Airtable: transactional SQL/CAS, Redis SET-NX with lease and fencing, or a single-consumer execution queue."
+
+### מה שונה בפועל (לא רק תיעוד)
+1. **`core/action_contract_repository.py`** — `guarded_transition()` ו-`_TRANSITION_EXTRA_FIELDS` **הוסרו לגמרי** מהקובץ. נשארו רק `save()`, `get()`, `find_pending_by_canonical_user()` וה-serialization helpers — persistence/hydration/fail-closed-reads בלבד, ללא שום מנגנון transition/claim.
+2. **`core/action_gateway.py`** — `ExecutionLedger.guarded_update_status()` **הוסרה לגמרי**. `ActionGateway.approve()` ו-`_execute_contract()` הוחזרו לקרוא ל-`update_status()` הרגיל (הישן), בדיוק כמו לפני שכתוב Phase 4B0 — לא נשאר שום קריאה ל-guarded/version-guarded transition בשום מסלול ביצוע חי. `ExecutionLedger.__init__`'s `repository` param ו-`find_by_id()`'s cache-fallback/hydration נשארו (persistence/hydration תקינים, לא מושפעים).
+3. **`_ledger_singleton` נשאר `airtable_writer=None`, ללא `repository`** — ללא שינוי, כפי שהבעלים דרש במפורש ("Keep the live singleton unwired").
+4. **`test_pr0c_action_contract_repository.py`** — נבנה מחדש: הוסרו הבדיקות שנבנו סביב `guarded_transition`/`guarded_update_status` (התיוג הקודם "multi-instance race" הוסר לגמרי, לא רק נוסח). נשארו: restart recovery, identity binding, expiry, store outage, וregression guard חדש שמוודא במפורש ש-`guarded_transition`/`guarded_update_status` **לא קיימות יותר** בקוד (hasattr checks) — כדי שהמנגנון הלא-בטוח לא יוכל לחזור בשקט. 14/14 assertions עוברות.
+5. **`airtable_schema.py`** — תיאור השדה `VERSION` תוקן: מטא-דאטה מתמידה בלבד, **לא** מנגנון concurrency פעיל — אין היום שום קוד שבודק/עושה CAS על הערך הזה.
+6. **`tools/airtable_gateway.py`** — docstring של `at_upsert()` תוקן: לא מפנה יותר ל-`guarded_transition()` (שהוסרה); מציין שאין היום פתרון concurrency-safe בקודבייס למעברי סטטוס.
+
+### רגרסיה מלאה
+`python3 -m py_compile` על כל הקבצים שהשתנו — נקי. `test_pr0c_action_contract_repository.py` — 14/14. `test_action_gateway.py` — 41/41. `test_stage_b_full_suite.py` — 124/124. `test_bug074_approval_authority.py` — 22/22. `smoke_tests.py` — pass. לולאת `test_*.py` המלאה (כפי ש-CI מריץ) — כולם עברו, ללא כשל אחד. ההחזרה ל-`update_status()` היא **behavior-neutral** בדיוק כפי שהיה צפוי — `guarded_update_status()` בעצמה כבר הייתה fallback ל-`update_status()` הרגיל כש-repository=None (המצב היחיד שהיה live).
+
+### Phase 4B0.1 — טרם החל
+דרישת הבעלים למנגנון claim אטומי אמיתי מחוץ ל-Airtable (transactional SQL/CAS, Redis SET-NX עם lease+fencing, או single-consumer execution queue) **טרם נבנתה**. אימות ב-grep מאשר: **אין** תשתית Redis/SQL/transactional-DB חיה בקודבייס הזה כיום (הפגיעה היחידה — `core/tenant_config.py`'s `Literal["airtable", "supabase", "hubspot", "postgres"]` — type hint בלבד, מודול "code-complete... zero imports from any live module" לפי CLAUDE.md). המשמעות: Phase 4B0.1 תדרוש להכניס תשתית חדשה לגמרי או לבחור בגישת single-consumer-queue — החלטה ארכיטקטונית שטרם הועלתה לבעלים עם אפשרויות והשלכות. Phase 4B (TMA routing by contract_id) **נשאר חסום** עד שPhase 4B0.1 תיבנה, עם acceptance test שמסנכרן שני קוראים כך ששניהם קוראים את אותה גרסה pending לפני שמישהו מהם מנסה claim, ומוכיח ש-**בדיוק קורא אחד** מגיע ל-`dispatch_tool()`.
+
+- **Severity:** גבוה — תיקון עצמי של over-claim בתיעוד קודם (הצהרת "מצמצם race" שהייתה שגויה במקרה הכי חשוב).
+- **תוקן ב-commit:** (למלא אחרי commit)
+- **תוקן ב-branch:** `claude/table-incorrect-names-6chfvb`
+- **Merged:** לא עדיין
+- **Deployed:** לא
+- **Verified בפרודקשן:** לא רלוונטי — אין שינוי live (singleton עדיין לא מחובר, אף לפני ואף אחרי התיקון)
+- **סטטוס:** re-scope הושלם. Phase 4B0.1 (מנגנון claim אטומי אמיתי) טרם החל — נדרשת החלטת בעלים על תשתית לפני תכנון.

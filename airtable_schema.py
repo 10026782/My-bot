@@ -655,10 +655,12 @@ class ActionContractsFields:
     docstring it is "never user-facing, never executable" signal data, not
     needed to safely re-authorize or re-execute a hydrated contract.
 
-    VERSION is the optimistic-concurrency guard for guarded_transition() —
-    see ActionContractRepository's docstring for why this is "narrows the
-    race, does not eliminate it" rather than a true database-level CAS
-    (Airtable's REST API has no conditional-write primitive).
+    VERSION is persisted metadata only — it is NOT an active concurrency-
+    control mechanism today. No transition path in this codebase checks or
+    CAS's on it; ActionContractRepository has no transition/claim method at
+    all (see its module docstring). A real claim mechanism using this field
+    (or a replacement) is tracked separately as Phase 4B0.1, requiring a
+    genuinely atomic coordination primitive outside Airtable.
 
     Reproducible schema spec (table created/extended via Airtable MCP in
     app4bcgoX7t0HUVnm — no automated provisioning script exists yet; recreate
@@ -704,7 +706,7 @@ class ActionContractsFields:
     CREATED_AT       = "created_at"       # unix timestamp (float)
     APPROVED_BY      = "approved_by"
     APPROVED_AT      = "approved_at"      # unix timestamp (float)
-    VERSION          = "version"          # optimistic-concurrency guard
+    VERSION          = "version"          # persisted metadata only — not an active concurrency guard (see class docstring)
     ACTOR_ROLE               = "actor_role"
     ACTOR_USER_ID             = "actor_user_id"
     ACTOR_DISPLAY_NAME        = "actor_display_name"

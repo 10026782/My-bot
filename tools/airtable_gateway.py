@@ -504,11 +504,11 @@ def at_upsert(
     contract_id could both see "no existing record" and both create one
     (duplicate rows), and two racing writes for an existing record could
     apply out of order (a stale status could overwrite a newer one — last
-    HTTP call to land wins, not last logical call). Callers needing real
-    concurrency protection for status transitions should use
-    core/action_contract_repository.py::ActionContractRepository.guarded_transition()
-    instead — this function remains a plain best-effort upsert. Returns True
-    on success.
+    HTTP call to land wins, not last logical call). There is no
+    concurrency-safe alternative in this codebase yet for status transitions
+    — a genuinely atomic coordination primitive outside Airtable is tracked
+    separately as Phase 4B0.1. This function remains a plain best-effort
+    upsert. Returns True on success.
     """
     match_value = fields.get(match_field)
     if not match_value:

@@ -8,23 +8,36 @@
 # restarted or second process can safely resume and authorize execution
 # exactly as the original propose_action() call intended.
 #
-# IMPORTANT — Airtable's REST API has no compare-and-swap / conditional-PATCH
-# primitive. guarded_transition() below implements optimistic concurrency as
-# verify-read -> PATCH -> verify-reread. This narrows the race window
-# substantially (a conflicting write must land in the small gap between our
-# verify-read and our own PATCH, or between our PATCH and our reread, to slip
-# through) but is NOT a true atomic CAS — a real conditional-write primitive
-# would be needed to close it completely, and this codebase has none. Treat
-# this as "catches the overwhelming majority of realistic double-approval
-# races in human-paced, low-concurrency traffic," not as a hard guarantee
-# under adversarial or high-throughput concurrent writers.
+# SCOPE OF THIS FILE — persistence, hydration, identity-binding, and
+# fail-closed reads ONLY. There is NO transition/claim mechanism in this
+# file. An earlier version of this file included a guarded_transition()
+# method built on read -> check (in Python) -> PATCH -> re-read against
+# Airtable's REST API, which has no compare-and-swap / conditional-PATCH
+# primitive. That method was removed: it is a plain TOCTOU sequence, not
+# optimistic concurrency control. Two callers that both read before either
+# writes independently compute the identical expected_version+1 and the
+# identical new_status, both PATCH, both re-read (version, status) matching,
+# and BOTH get a non-None success back — even though the second PATCH
+# silently overwrote the first caller's other fields (e.g. approved_by). For
+# genuinely concurrent callers (duplicate webhook delivery, a double-tap, two
+# Render instances handling the same request at once) it provided NO
+# protection and both callers would proceed to execute. This is not a
+# "narrowed race window" that was hardened here — it never worked, and no
+# claim mechanism has replaced it yet.
 #
-# Never re-plan/re-derive a replacement contract as "recovery" — get() and
-# guarded_transition() return None on any failure to find/verify the exact
-# durable record (not-found, store unreachable, expired, conflicting write).
-# Callers must fail closed on None, never fabricate a new contract to fill
-# the gap; that would defeat the entire frozen-contract security model this
-# work protects (approved_payload must always equal executed_payload).
+# A real fix requires a genuinely atomic coordination primitive outside
+# Airtable (transactional SQL/CAS, Redis SET-NX with lease and fencing, or a
+# single-consumer execution queue) — tracked separately as Phase 4B0.1. Until
+# that lands, Phase 4B (TMA routing approve/reject by contract_id) must stay
+# blocked, and ActionGateway.approve()/_execute_contract() must keep using
+# their original in-memory update_status() path, not anything in this file.
+#
+# Never re-plan/re-derive a replacement contract as "recovery" — get()
+# returns None on any failure to find/verify the exact durable record
+# (not-found, store unreachable, expired). Callers must fail closed on None,
+# never fabricate a new contract to fill the gap; that would defeat the
+# entire frozen-contract security model this work protects (approved_payload
+# must always equal executed_payload).
 
 from __future__ import annotations
 
@@ -36,7 +49,6 @@ from typing import TYPE_CHECKING
 from airtable_schema import ActionContractsFields, Tables
 from tools.airtable_gateway import (
     AirtableLookupError,
-    airtable_patch,
     at_get_by_field,
     at_list_by_formula,
     at_upsert,
@@ -56,14 +68,6 @@ logger = logging.getLogger(__name__)
 # still bounded, so a stale contract can never be resurrected and executed
 # long after its context is meaningless.
 CONTRACT_PENDING_TTL_SECONDS = 24 * 3600  # 24h
-
-# kwargs -> ActionContractsFields mapping accepted by guarded_transition()'s
-# **extra_fields. Explicit allowlist (not dynamic getattr) so an unrecognized
-# kwarg fails loudly instead of being silently dropped or mis-mapped.
-_TRANSITION_EXTRA_FIELDS = {
-    "approved_by": ActionContractsFields.APPROVED_BY,
-    "approved_at": ActionContractsFields.APPROVED_AT,
-}
 
 
 def _is_expired(contract: "ActionContract") -> bool:
@@ -149,9 +153,10 @@ class ActionContractRepository:
 
     def save(self, contract: "ActionContract") -> bool:
         """Full upsert. Appropriate for a brand-new contract (version=1) or a
-        non-contentious field update (e.g. context_interrupted) where no
-        other writer is racing for the SAME status transition. For approve/
-        reject/execute transitions, use guarded_transition() instead."""
+        non-contentious field update (e.g. context_interrupted). This file has
+        no transition/claim mechanism — see module docstring — so callers
+        must not use save() to implement an approve/reject/execute race
+        without an external atomic claim (Phase 4B0.1, not yet built)."""
         fields = _contract_to_fields(contract)
         return at_upsert(
             Tables.ACTION_CONTRACTS, fields,
@@ -181,77 +186,6 @@ class ActionContractRepository:
             )
             return None
         return contract
-
-    def guarded_transition(
-        self,
-        contract_id: str,
-        expected_version: int,
-        expected_status: str,
-        new_status: str,
-        **extra_fields,
-    ) -> "ActionContract | None":
-        """
-        Transitions contract_id from expected_status (at expected_version) to
-        new_status, durably. Returns the hydrated, updated contract on
-        success; None on conflict (another writer already transitioned it),
-        not-found, expiry, or a store error — see class/module docstring for
-        the concurrency caveat (narrows the race, does not eliminate it).
-        """
-        unknown_kwargs = set(extra_fields) - set(_TRANSITION_EXTRA_FIELDS)
-        if unknown_kwargs:
-            raise TypeError(f"guarded_transition: unrecognized extra_fields {unknown_kwargs}")
-
-        try:
-            record = at_get_by_field(Tables.ACTION_CONTRACTS, ActionContractsFields.CONTRACT_ID, contract_id)
-        except AirtableLookupError as exc:
-            logger.warning("[ActionContractRepository] guarded_transition(%s) store unreachable: %s", contract_id, exc)
-            return None
-        if not record:
-            logger.warning("[ActionContractRepository] guarded_transition(%s) — not found", contract_id)
-            return None
-
-        current = _record_to_contract(record)
-        if current.version != expected_version or current.status != expected_status:
-            logger.warning(
-                "[ActionContractRepository] guarded_transition(%s) conflict: expected version=%s "
-                "status=%s, found version=%s status=%s",
-                contract_id, expected_version, expected_status, current.version, current.status,
-            )
-            return None
-        if expected_status == "pending" and _is_expired(current):
-            logger.info("[ActionContractRepository] guarded_transition(%s) — expired, refusing", contract_id)
-            return None
-
-        new_version = expected_version + 1
-        patch_fields = {
-            ActionContractsFields.STATUS: new_status,
-            ActionContractsFields.VERSION: new_version,
-        }
-        for kwarg_name, value in extra_fields.items():
-            patch_fields[_TRANSITION_EXTRA_FIELDS[kwarg_name]] = value
-
-        if not airtable_patch(Tables.ACTION_CONTRACTS, record["id"], patch_fields, source="action_contract_repository"):
-            logger.warning("[ActionContractRepository] guarded_transition(%s) — patch failed", contract_id)
-            return None
-
-        # Re-read to detect a race that slipped in between our verify-read and our PATCH.
-        try:
-            reread = at_get_by_field(Tables.ACTION_CONTRACTS, ActionContractsFields.CONTRACT_ID, contract_id)
-        except AirtableLookupError as exc:
-            logger.warning("[ActionContractRepository] guarded_transition(%s) post-patch reread failed: %s", contract_id, exc)
-            return None
-        if not reread:
-            return None
-
-        final = _record_to_contract(reread)
-        if final.version != new_version or final.status != new_status:
-            logger.error(
-                "[ActionContractRepository] guarded_transition(%s) LOST RACE after patch — "
-                "expected version=%s status=%s, found version=%s status=%s (another writer won)",
-                contract_id, new_version, new_status, final.version, final.status,
-            )
-            return None
-        return final
 
     def find_pending_by_canonical_user(self, canonical_user_id: str) -> list["ActionContract"]:
         """Durable equivalent of ExecutionLedger.find_live_by_user() — used to
