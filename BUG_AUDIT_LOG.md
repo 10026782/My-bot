@@ -2054,6 +2054,6 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 
 נגעו רק ב-`core/action_gateway.py` (state machine + describe_no_pending_reason + compose_status_reply) ו-`app.py` (שורה אחת — Stage A fallback קורא ל-helper המשותף במקום מחרוזת קשיחה). לא נגעו: global ingress gate (PR #312), Telegram event-id dedup (PR #313), `ActionContract`'s frozen payload semantics, immediate-confirm behavior (DoD #1 מ-PR-0 — עדיין ללא שינוי).
 
-- **PR:** טרם נפתח.
+- **PR:** #314 (`claude/table-incorrect-names-6chfvb` → `main`).
 - **Merged/Deployed/Verified בפרודקשן:** לא עדיין.
-- **סטטוס:** ✅ תוקן בקוד, בדיקות עברו (27 חדשות + רגרסיה מלאה) — ממתין ל-PR+merge+production verification עם הרצף המדויק: preview → הפרעה → כן (re-display) → הפרעה נוספת → כן (superseded, אין ביצוע).
+- **סטטוס:** ✅ תוקן בקוד, בדיקות עברו (27 חדשות + רגרסיה מלאה) — נרשם ל-PR #314. ממתין ל-merge+production verification עם הרצף המדויק: preview → הפרעה → כן (re-display) → הפרעה נוספת → כן (superseded, אין ביצוע).
