@@ -2108,12 +2108,12 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 כל 22/22 assertions חדשות עברו, כל test_*.py הקיימים (כולל `test_approval_concurrency.py` המעודכן), `smoke_tests.py`, ו-`test_integration.py` עברו full run לאחר השינוי.
 
 - **Severity:** High — "אישור" כוזב על פעולות שלא בוצעו הוא בדיוק אותה מחלקת באג כמו BUG-108/BUG-PENDING-APPROVAL-B, בנתיב אישור נפרד.
-- **תוקן ב-commit:** (למלא אחרי commit)
+- **תוקן ב-commit:** `1d3ed4b` (PR #316, `75fc242` merge commit ל-`main`) — אומת ב-`git show origin/main:tma_api.py \| grep _claim_and_execute_approval` שהקוד קיים בפועל ב-main, לא רק ב-git log.
 - **תוקן ב-branch:** `claude/table-incorrect-names-6chfvb`
-- **Merged:** לא עדיין
-- **Deployed:** לא
-- **Verified בפרודקשן:** לא
-- **סטטוס:** Fixed, ממתין ל-merge + production verification
+- **Merged:** כן — PR #316
+- **Deployed:** לא ידוע — דרוש בדיקה ידנית (Render), לא אומת בסבב הזה
+- **Verified בפרודקשן:** לא — merge מאומת, production behavior לא נבדק חי
+- **סטטוס:** Merged. PR-0C (הגירת event_bus writers ל-ActionGateway) מתחיל כעת.
 - **הערה על scope:** זהו PR-0C0 בלבד — hotfix ל-truthfulness. PR-0C (הגירת 6 ה-writers החיים ל-`ActionGateway.propose_action()`, כולל הפיכת טבלת Airtable "Approvals" ל-projection/audit log או הסרתה) ו-PR-0B (הגירת `app.py::_pending_approvals`) עדיין פתוחים ונדרשים לפני תחילת UnderstandingResult/BUG-104A, לפי הנחיית הבעלים המפורשת.
 
 הלוג האחרון (מעלה) מוכיח את **כל השרשרת יחד**, לא רק חתיכה אחת: preview → 2 הפרעות → "כן" (re-display מדויק) → הפרעה שלישית → "כן" (superseded מדויק, אין ביצוע כפול/שגוי). אין פערים פתוחים ידועים בנושא הזה.
