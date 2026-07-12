@@ -1716,6 +1716,14 @@ def run_agent(
                     _out_meta["source_module"] = "action_gateway"
                 return _t2_cancel_reply
 
+    # ── PR-0 / BUG-PENDING-APPROVAL-B — context safety ────────────────
+    # הגענו לכאן = ההודעה לא נצרכה כ-resolution (כן/לא/disambiguation/combined)
+    # של contract חי. מסמן כל pending ActionGateway contract של הזהות הזו
+    # כ-context_interrupted, כדי ש-"כן" מאוחר יותר לא יאשר בשקט פעולה ישנה
+    # שהמשתמש כבר לא מתכוון אליה (ראה route_confirmation_word).
+    from core.action_gateway import action_gateway as _gw_interrupt
+    _gw_interrupt.mark_context_interrupted(identity.memory_key)
+
     # ── 2.6. Context Pronoun Resolution (C60) ────────
     # "תעלה לדסישנס"/"זה הנספח" וכד' — לפני intent detection, כדי שה-Router
     # וה-LLM יראו התייחסות מפורשת במקום לנחש מהקשר חלקי.
