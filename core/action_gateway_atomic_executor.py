@@ -210,7 +210,7 @@ def execute_with_atomic_claim(
             )
             # Update claim status: failed
             update_claim_status(contract_id, "failed", error=outcome.error)
-            return (False, None, outcome.error)
+            return (False, outcome, outcome.error)
 
         elif outcome.is_outcome_unknown():
             logger.warning(
@@ -219,7 +219,7 @@ def execute_with_atomic_claim(
             )
             # Update claim status: outcome_unknown (never auto-retry)
             update_claim_status(contract_id, "outcome_unknown", error=outcome.error)
-            return (False, None, f"Outcome unknown (may be in progress): {outcome.error}")
+            return (False, outcome, f"Outcome unknown (may be in progress): {outcome.error}")
 
     except Exception as e:
         execution_error = str(e)
@@ -229,7 +229,16 @@ def execute_with_atomic_claim(
         )
         # Update claim status: failed
         update_claim_status(contract_id, "failed", error=execution_error)
-        return (False, None, execution_error)
+        from core.dispatcher_outcome import DispatcherOutcome
+        return (
+            False,
+            DispatcherOutcome(
+                result="failed",
+                user_message="",
+                error=execution_error,
+            ),
+            execution_error,
+        )
 
 
 def create_atomic_aware_executor(ledger, base_executor_fn):

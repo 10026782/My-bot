@@ -674,8 +674,9 @@ class ActionContractsFields:
       origin_chat_id                singleLineText
       requires_approval             checkbox
       status                        singleSelect {draft, pending, approved,
-                                     rejected, executing, executed, failed,
-                                     superseded}
+                                     rejected, executing, completed, failed,
+                                     outcome_unknown, superseded, executed}
+                                     (executed is legacy read compatibility)
       created_at                    number (precision 3)
       approved_by                   singleLineText
       approved_at                   number (precision 3)
@@ -702,7 +703,7 @@ class ActionContractsFields:
     ORIGIN_CHANNEL   = "origin_channel"
     ORIGIN_CHAT_ID   = "origin_chat_id"
     REQUIRES_APPROVAL = "requires_approval"
-    STATUS           = "status"    # draft|pending|approved|rejected|executing|executed|failed|superseded
+    STATUS           = "status"    # draft|pending|approved|rejected|executing|completed|failed|outcome_unknown|superseded
     CREATED_AT       = "created_at"       # unix timestamp (float)
     APPROVED_BY      = "approved_by"
     APPROVED_AT      = "approved_at"      # unix timestamp (float)
@@ -727,9 +728,11 @@ class ActionContractStatus:
     APPROVED   = "approved"
     REJECTED   = "rejected"
     EXECUTING  = "executing"
-    EXECUTED   = "executed"
+    COMPLETED  = "completed"
     FAILED     = "failed"
+    OUTCOME_UNKNOWN = "outcome_unknown"
     SUPERSEDED = "superseded"
+    EXECUTED   = "executed"  # legacy terminal value; do not emit for new transitions
 
 
 class EmergencyWindowFields:

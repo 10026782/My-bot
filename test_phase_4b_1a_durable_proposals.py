@@ -1,8 +1,7 @@
 """Phase 4B-1A: durable new proposals and proposal-recovery lookups.
 
-This suite intentionally does not test or enable durable status/context
-mutations. Those remain Phase 4B-1B scope. ``agent_observations`` are also
-intentionally non-durable and are asserted as such below.
+``agent_observations`` remain intentionally non-durable. Lifecycle durability
+is exercised separately by the Phase 4B-1B suite.
 """
 
 from __future__ import annotations
@@ -56,6 +55,21 @@ class MemoryRepository:
             if record["fields"].get("business_action_fingerprint") == fingerprint:
                 return _record_to_contract(record)
         return None
+
+    def transition(
+        self, contract_id, *, expected_status, expected_version, new_status, updates=None,
+    ):
+        contract = self.get(contract_id)
+        if contract is None:
+            raise RuntimeError("contract missing")
+        if contract.status != expected_status or contract.version != expected_version:
+            raise RuntimeError("stale lifecycle transition")
+        contract.status = new_status
+        contract.version += 1
+        for key, value in (updates or {}).items():
+            setattr(contract, key, value)
+        self.records[contract_id]["fields"] = _contract_to_fields(contract)
+        return self.get(contract_id)
 
 
 def _identity():
@@ -119,7 +133,7 @@ def test_successful_durable_save_happens_before_ok_result():
     assert result.contract_id in ledger._store
 
 
-def test_status_updates_remain_non_durable_phase_4b_1b_scope():
+def test_status_update_is_durable_without_reusing_proposal_save():
     repo = MemoryRepository()
     ledger = ExecutionLedger(repository=repo)
     result = _propose(ActionGateway(ledger=ledger))
@@ -129,7 +143,7 @@ def test_status_updates_remain_non_durable_phase_4b_1b_scope():
 
     assert repo.save_calls == 1
     assert ledger.find_by_id(result.contract_id).status == "approved"
-    assert repo.get(result.contract_id).status == "pending"
+    assert repo.get(result.contract_id).status == "approved"
 
 
 def test_repository_false_produces_no_actionable_proposal_or_ram_contract():

@@ -1,35 +1,20 @@
 # core/action_contract_repository.py — PR-0C Phase 4B0
 #
-# Durable repository for NEW ActionContract proposals and proposal-recovery
-# lookups, backed by Tables.ACTION_CONTRACTS. When
+# Durable repository for ActionContract proposals, lifecycle transitions, and
+# recovery lookups, backed by Tables.ACTION_CONTRACTS. When
 # FEATURE_ACTION_CONTRACT_PERSISTENCE is enabled, ExecutionLedger's in-memory
-# _store is a cache for those proposal records. This does NOT make the complete
-# contract lifecycle durable: status/context write-through and terminal-state
-# semantics remain explicitly deferred to Phase 4B-1B.
+# _store is a cache for those records. PostgreSQL remains the sole owner of
+# atomic execution claims; this repository is the durable contract/audit store.
 #
-# SCOPE OF THIS FILE — persistence, hydration, identity-binding, and
-# fail-closed reads ONLY. There is NO transition/claim mechanism in this
-# file. An earlier version of this file included a guarded_transition()
-# method built on read -> check (in Python) -> PATCH -> re-read against
-# Airtable's REST API, which has no compare-and-swap / conditional-PATCH
-# primitive. That method was removed: it is a plain TOCTOU sequence, not
-# optimistic concurrency control. Two callers that both read before either
-# writes independently compute the identical expected_version+1 and the
-# identical new_status, both PATCH, both re-read (version, status) matching,
-# and BOTH get a non-None success back — even though the second PATCH
-# silently overwrote the first caller's other fields (e.g. approved_by). For
-# genuinely concurrent callers (duplicate webhook delivery, a double-tap, two
-# Render instances handling the same request at once) it provided NO
-# protection and both callers would proceed to execute. This is not a
-# "narrowed race window" that was hardened here — it never worked, and no
-# claim mechanism has replaced it yet.
-#
-# A real fix requires a genuinely atomic coordination primitive outside
-# Airtable (transactional SQL/CAS, Redis SET-NX with lease and fencing, or a
-# single-consumer execution queue) — tracked separately as Phase 4B0.1. Until
-# that lands, Phase 4B (TMA routing approve/reject by contract_id) must stay
-# blocked, and ActionGateway.approve()/_execute_contract() must keep using
-# their original in-memory update_status() path, not anything in this file.
+# SCOPE OF THIS FILE — persistence, hydration, identity-binding, fail-closed
+# reads, and guarded partial lifecycle audit writes. Airtable has no
+# compare-and-swap / conditional-PATCH primitive, so transition() is not an
+# execution claim and must never be used as one. It rejects already-stale
+# state, limits writes to lifecycle fields, and verifies the resulting
+# status/version. PostgreSQL atomic claims remain the execution-ownership
+# primitive; Airtable records the canonical state selected by that claim
+# owner. A simultaneous same-version Airtable write remains a documented
+# read/check/PATCH race rather than a hidden claim guarantee.
 #
 # Never re-plan/re-derive a replacement contract as "recovery". Clean
 # not-found/expiry returns None, while an unavailable lookup raises
@@ -48,6 +33,7 @@ from tools.airtable_gateway import (
     at_get_by_field,
     at_list_by_formula,
     at_upsert,
+    airtable_patch,
 )
 # _safe_formula_param is airtable_gateway's own sanctioned formula-value
 # escaping helper (see its docstring) — reused here rather than duplicated.
@@ -61,6 +47,34 @@ logger = logging.getLogger(__name__)
 
 class ActionContractLookupError(RuntimeError):
     """The durable store could not determine whether a contract exists."""
+
+
+class ActionContractTransitionError(RuntimeError):
+    """Base error for a lifecycle transition that was not durably accepted."""
+
+
+class ActionContractTransitionConflictError(ActionContractTransitionError):
+    """The durable contract no longer matches the caller's expected state."""
+
+
+class ActionContractTransitionPersistenceError(ActionContractTransitionError):
+    """The durable store could not persist or verify a lifecycle transition."""
+
+
+ALLOWED_CONTRACT_TRANSITIONS: dict[str, frozenset[str]] = {
+    "draft": frozenset({"pending", "approved"}),
+    "pending": frozenset({"approved", "rejected", "superseded", "completed", "failed"}),
+    "approved": frozenset({"executing", "completed", "failed", "outcome_unknown"}),
+    "executing": frozenset({"completed", "failed", "outcome_unknown"}),
+}
+
+_LIFECYCLE_FIELD_MAP = {
+    "approved_by": ActionContractsFields.APPROVED_BY,
+    "approved_at": ActionContractsFields.APPROVED_AT,
+    "context_interrupted": ActionContractsFields.CONTEXT_INTERRUPTED,
+    "reconfirmation_required": ActionContractsFields.RECONFIRMATION_REQUIRED,
+    "context_integrity_unknown": ActionContractsFields.CONTEXT_INTEGRITY_UNKNOWN,
+}
 
 # How long a "pending" contract may sit before it's considered too stale to
 # safely act on. Longer than event_bus's 30-minute Telegram-button TTL, since
@@ -167,6 +181,96 @@ class ActionContractRepository:
             fail_closed_on_lookup_error=True,
         )
 
+    def transition(
+        self,
+        contract_id: str,
+        *,
+        expected_status: str,
+        expected_version: int,
+        new_status: str,
+        updates: dict | None = None,
+    ) -> "ActionContract":
+        """Persist one expected lifecycle transition using a partial PATCH.
+
+        Airtable has no conditional PATCH/CAS primitive. This method therefore
+        rejects stale state before the write, patches only lifecycle fields
+        (never the frozen payload/identity), and verifies status+version with a
+        read-back. PostgreSQL remains the atomic execution-ownership boundary.
+        """
+        updates = dict(updates or {})
+        unknown_updates = set(updates) - set(_LIFECYCLE_FIELD_MAP)
+        if unknown_updates:
+            raise ActionContractTransitionConflictError(
+                f"unsupported lifecycle fields: {sorted(unknown_updates)}"
+            )
+
+        current, record_id = self._get_for_transition(contract_id)
+        if current.status == new_status and not updates:
+            return current
+        if current.status != expected_status or current.version != expected_version:
+            raise ActionContractTransitionConflictError(
+                f"stale lifecycle state: expected={expected_status}/v{expected_version} "
+                f"actual={current.status}/v{current.version}"
+            )
+        if (new_status != current.status
+                and new_status not in ALLOWED_CONTRACT_TRANSITIONS.get(current.status, frozenset())):
+            raise ActionContractTransitionConflictError(
+                f"invalid lifecycle transition: {current.status} -> {new_status}"
+            )
+
+        next_version = current.version + 1
+        patch_fields = {
+            ActionContractsFields.STATUS: new_status,
+            ActionContractsFields.VERSION: next_version,
+        }
+        for attr, value in updates.items():
+            if attr == "approved_by":
+                value = value or ""
+            elif attr == "approved_at":
+                value = value or 0.0
+            patch_fields[_LIFECYCLE_FIELD_MAP[attr]] = value
+
+        try:
+            patched = airtable_patch(
+                Tables.ACTION_CONTRACTS,
+                record_id,
+                patch_fields,
+                source="action_contract_repository.lifecycle",
+            )
+        except Exception as exc:
+            raise ActionContractTransitionPersistenceError(
+                f"lifecycle PATCH raised: {contract_id}"
+            ) from exc
+        if not patched:
+            raise ActionContractTransitionPersistenceError(
+                f"lifecycle PATCH failed: {contract_id}"
+            )
+
+        verified, _ = self._get_for_transition(contract_id)
+        if verified.status != new_status or verified.version != next_version:
+            raise ActionContractTransitionConflictError(
+                f"lifecycle read-back conflict: expected={new_status}/v{next_version} "
+                f"actual={verified.status}/v{verified.version}"
+            )
+        return verified
+
+    def _get_for_transition(self, contract_id: str) -> tuple["ActionContract", str]:
+        try:
+            record = at_get_by_field(
+                Tables.ACTION_CONTRACTS,
+                ActionContractsFields.CONTRACT_ID,
+                contract_id,
+            )
+        except AirtableLookupError as exc:
+            raise ActionContractTransitionPersistenceError(
+                f"lifecycle lookup failed: {contract_id}"
+            ) from exc
+        if not record:
+            raise ActionContractTransitionConflictError(
+                f"contract not found for lifecycle transition: {contract_id}"
+            )
+        return _record_to_contract(record), record["id"]
+
     def get(self, contract_id: str) -> "ActionContract | None":
         """Return a verified contract, or None for clean not-found/expiry.
 
@@ -209,7 +313,7 @@ class ActionContractRepository:
                 f"pending-contract lookup failed: {canonical_user_id}"
             ) from exc
         contracts = [_record_to_contract(r) for r in records]
-        return [c for c in contracts if not _is_expired(c)]
+        return [c for c in contracts if c.status == "pending" and not _is_expired(c)]
 
     def find_by_business_fingerprint(self, fingerprint: str) -> "ActionContract | None":
         """Recover the exact frozen contract for restart-safe proposal dedup.

@@ -746,8 +746,8 @@ from pathlib import Path as _Path
 _app_src = _Path(__file__).with_name("app.py").read_text(encoding="utf-8")
 chk("SB-02: callback peeks bus.get before pop (fingerprint resolution)",
     "bus.get(action_id)" in _app_src or "_peek_item = bus.get" in _app_src)
-chk("SB-02: callback checks contract.status == 'executed'",
-    '_contract_sb02.status == "executed"' in _app_src)
+chk("SB-02: callback accepts durable completed and legacy executed",
+    '_contract_sb02.status in ("completed", "executed")' in _app_src)
 chk("SB-02: callback checks contract.status == 'rejected'",
     '_contract_sb02.status == "rejected"' in _app_src)
 chk("SB-02: compute_business_fingerprint used in callback",
