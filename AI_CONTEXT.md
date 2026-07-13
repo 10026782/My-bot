@@ -4,7 +4,7 @@
 > למתוכנן), `BUG_AUDIT_LOG.md` (המקור **הכי עדכני** בפועל — ראה הערה למטה), `CHANGE_CONTROL_LOG.md`.
 > `CANONICAL_STATE.md` **לא קיים** בריפו.
 
-**עודכן:** 2026-07-12 · **main:** `a04ec47` (PR #306, BUG-099b.1) · **סטטוס:** ראו §1
+**עודכן:** 2026-07-13 · **main:** `b962773` (PR #326, P0 unhashable-Identity fix) · **סטטוס:** ראו §1
 
 **⚠️ פער תיעוד שהתגלה בעת יצירת מסמך זה:** `ROADMAP.md` (עודכן לאחרונה 10/07), `CHANGELOG.md` ו-`CHANGE_CONTROL_LOG.md` (שניהם עוצרים סביב 08/07) **לא** משקפים סבב עבודה שלם מ-10-12/07 (SPEC A1, BUG-094..101, BUG-099b/099b.1, BUG-102..105) — כל הסבב הזה מתועד רק ב-`BUG_AUDIT_LOG.md`, שהוא כרגע המקור העדכני ביותר בפועל, לא שלושת המסמכים ש"אמורים" להיות מקור האמת. יש לרענן את שלושתם (כולל בומפ לתאריך `עודכן:` ב-ROADMAP) לפני שסומכים עליהם לסטטוס "עכשווי".
 
@@ -32,6 +32,7 @@
 - C90 (xlsx/csv), Lead Scoring/Memory/Followup (N02-N04) — code done, flags off.
 - Decision Hub (Stages 0-6) — ממוזג ל-main; `FEATURE_DECISION_HUB` כבוי, חסום עד production evidence.
 - `IngressEnvelope.normalized_text` נבנה אך נזרק בנתיב טקסט (BUG-102); `EvidenceTrace` נבנה ונרשם אך אף פעם לא נשמר ל-DB (BUG-103); Core Reasoning Layer / `leads_adapter.py` ממוזגים, אפס קוראים חיים (BUG-104).
+- **Phase 4B0 — Atomic Claims (13/07, PR #325+#326, ראו C110/C111 ב-CHANGE_CONTROL_LOG.md):** `FEATURE_ATOMIC_CLAIMS` — קוד מוכן ומאומת ב-staging (real PostgreSQL + Telegram confirmation smoke, לוג חי מלא), **Production נשאר כבוי בכוונה** (`FEATURE_ATOMIC_CLAIMS=false`). שרשרת תקריות P0 אמיתיות תוקנה ברצף: (1) עקיפת רכישת claim בכל 4 מסלולי האישור, (2) אובדן זהות + סיווג-הצלחה שגוי דרך ה-wrapper האטומי, (3) `unhashable type: 'Identity'` שנבע מקריאה פוזיציונלית ל-executor האמיתי (`contract_id` הוחלף בשקט ב-`Identity`), (4) `dispatch_tool()` מעולם לא החזיר בפועל `DispatcherOutcome` — כל ביצוע אמיתי היה נכשל ב-"type mismatch" גם אחרי תיקון הזהות. עדיין נדרש לפני הפעלה: staged rollout plan (5%→25%→100%) ותקופת תצפית.
 
 **חסום:**
 - Decision Hub activation — התיקון ל-BUG-DH-03/04 (Formula Injection) ממוזג, עדיין אין production evidence.
