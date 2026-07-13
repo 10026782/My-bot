@@ -271,11 +271,12 @@ _owner_identity = Identity(
 _captured_identity: dict = {}
 
 
-def _fake_dispatch_tool(name, inputs, identity=None, trusted_source=None):
+def _fake_dispatch_tool(name, inputs, identity=None, trusted_source=None, execution_context=None):
     _captured_identity["role"]        = getattr(identity, "role", None)
     _captured_identity["external_id"] = getattr(identity, "external_id", None)
     _captured_identity["tenant_id"]   = getattr(identity, "tenant_id", None)
     _captured_identity["trusted_source"] = trusted_source
+    _captured_identity["execution_context"] = execution_context
     return {"ok": True, "external_id": "rec12345678901234", "tool": name}
 
 
@@ -305,6 +306,14 @@ try:
         _captured_identity.get("external_id") == "7228089151")
     chk("BUG-C89: dispatcher receives correct tenant_id",
         _captured_identity.get("tenant_id") == "boss_hq")
+    # Phase 4B-2 follow-up: _make_dispatch_executor() must supply
+    # execution_context (contract_id + approved_by) on every real approve()
+    # -> dispatch_tool() call, from the durable contract itself.
+    ec = _captured_identity.get("execution_context")
+    chk("BUG-C89: execution_context.contract_id matches the approved contract",
+        ec is not None and ec.get("contract_id") == r_id.contract_id)
+    chk("BUG-C89: execution_context.approved_by is the approver, not the requester",
+        ec is not None and ec.get("approved_by") == _owner_identity.memory_key)
 finally:
     _dispatcher_mod.dispatch_tool = _orig_dispatch_tool
 

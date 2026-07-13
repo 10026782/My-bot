@@ -1737,7 +1737,7 @@ def _make_dispatch_executor(ledger: ExecutionLedger):
     which never had an identity to give), behavior is unchanged from before —
     identity is derived from contract_id via the ledger lookup below.
     """
-    def _executor(tool_name: str, tool_inputs: dict, contract_id: str, identity=None):
+    def _executor(tool_name: str, tool_inputs: dict, contract_id: str, identity=None, claim_execution_id=None):
         from tools.dispatcher import dispatch_tool
         from identity import Identity, resolve_identity
 
@@ -1778,7 +1778,41 @@ def _make_dispatch_executor(ledger: ExecutionLedger):
         # tool_inputs, which is Claude-controlled data that survives
         # normalize_payload() unchanged (including any "_source" key).
         _trusted_source = getattr(contract, "trusted_source", "agent") if contract else "agent"
-        return dispatch_tool(tool_name, tool_inputs, identity=identity, trusted_source=_trusted_source)
+
+        # Phase 4B-2 follow-up: execution_context is the ONLY legitimate
+        # source of contract_id/approved_by for tools (like tma_write) that
+        # refuse to run outside the propose/approve ceremony. Populated only
+        # here, from the durable contract itself — never from tool_inputs
+        # (frozen, attacker-influenceable payload) and never re-derived from
+        # `identity` (the frozen REQUESTER, not the approver — see
+        # tools/approval_actions.py::tma_write()'s docstring). approved_by
+        # is only meaningful once approve() has durably transitioned the
+        # contract, which is always true by the time _execute_contract()
+        # (and therefore this executor) runs.
+        #
+        # claim_execution_id (Phase 4B-2 authority-boundary follow-up): a
+        # plain execution_context dict is caller-constructible and therefore
+        # forgeable proof by itself — contract_id/approved_by alone are NOT
+        # sufficient. claim_execution_id is the execution_id of the real
+        # PostgreSQL row that execute_with_atomic_claim() acquired for THIS
+        # specific execution attempt (passed in only when the atomic-claims
+        # path ran and won the claim; None on the legacy flag-OFF path, where
+        # no PostgreSQL claim was ever created). Gated tools must independently
+        # verify this id against a live claim via
+        # core.atomic_claim_repository.get_claim(contract_id) — never trust
+        # the dict's presence alone.
+        execution_context = (
+            {
+                "contract_id": contract_id,
+                "approved_by": getattr(contract, "approved_by", "") or "",
+                "claim_execution_id": claim_execution_id,
+            }
+            if contract else None
+        )
+        return dispatch_tool(
+            tool_name, tool_inputs, identity=identity, trusted_source=_trusted_source,
+            execution_context=execution_context,
+        )
 
     return _executor
 
