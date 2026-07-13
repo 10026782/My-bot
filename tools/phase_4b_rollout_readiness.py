@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from tools.phase_4b_rollout_common import REPO_ROOT, dump_json_report, git_state, utc_now_iso  # noqa: E402
 
-REPORT_PATH = REPO_ROOT / "reports" / "phase_4b_rollout_readiness.json"
+REPORT_PATH = REPO_ROOT / "reports" / "runtime" / "phase_4b_rollout_readiness.json"
 
 _IMPORT_MODULES = [
     "core.action_gateway",
@@ -462,15 +462,28 @@ def _check_action_contract_persistence() -> list[dict]:
 # E — Airtable schema (live)
 # ══════════════════════════════════════════════════
 
-def _expected_action_contracts_fields() -> set[str]:
-    from airtable_schema import ActionContractsFields
-    return {
-        v for k, v in vars(ActionContractsFields).items()
-        if not k.startswith("_") and isinstance(v, str)
-    }
+_EXPECTED_APPROVALS_PROJECTION_TYPES = {
+    "action_contract_id": "singleLineText",
+    "legacy_read_only": "checkbox",
+    "projected_lifecycle_status": "singleSelect",
+}
+
+_ALL_E_CHECK_IDS = [
+    ("E.action_contracts_exists", "ActionContracts table exists live"),
+    ("E.approvals_exists", "Approvals table exists live"),
+    ("E.approvals_projection_fields", "Approvals projection fields present with correct types"),
+    ("E.projected_lifecycle_choices", "projected_lifecycle_status choices match exactly"),
+    ("E.action_contracts_fields", "ActionContracts fields match ActionContractsFields (name)"),
+    ("E.action_contracts_field_types", "ActionContracts fields match expected live field types"),
+    ("E.action_contracts_status_choices", "ActionContracts status field singleSelect choices match exactly"),
+]
 
 
 def _check_airtable_schema() -> list[dict]:
+    """Reuses tools.schema_snapshot.normalize_schema() — the same
+    Meta-API-response parsing already centralized for PR3A's snapshot
+    archive — instead of re-deriving field type/choice extraction here a
+    second, potentially-incompatible way."""
     findings = []
     import os
 
@@ -484,21 +497,14 @@ def _check_airtable_schema() -> list[dict]:
         "present" if env_present else "missing",
     ))
     if not env_present:
-        for check_id, desc in [
-            ("E.live_reachable", "live Meta API schema fetch reachable"),
-            ("E.action_contracts_exists", "ActionContracts table exists live"),
-            ("E.approvals_exists", "Approvals table exists live"),
-            ("E.approvals_projection_fields", "Approvals projection fields present with correct types"),
-            ("E.projected_lifecycle_choices", "projected_lifecycle_status choices match exactly"),
-            ("E.action_contracts_fields", "ActionContracts fields match ActionContractsFields"),
-        ]:
+        for check_id, desc in _ALL_E_CHECK_IDS:
             findings.append(_finding(check_id, "E_airtable_schema", desc, True, "SKIP",
                                       "skipped: Airtable credentials not present"))
         return findings
 
     fetch_error: str | None = None
     try:
-        from tools.schema_snapshot import fetch_live_schema
+        from tools.schema_snapshot import fetch_live_schema, normalize_schema
         raw = fetch_live_schema()
     except Exception as exc:
         raw = None
@@ -509,13 +515,7 @@ def _check_airtable_schema() -> list[dict]:
             "E.live_reachable", "E_airtable_schema", "live Meta API schema fetch reachable",
             True, "FAIL", fetch_error or "fetch_live_schema() returned None",
         ))
-        for check_id, desc in [
-            ("E.action_contracts_exists", "ActionContracts table exists live"),
-            ("E.approvals_exists", "Approvals table exists live"),
-            ("E.approvals_projection_fields", "Approvals projection fields present with correct types"),
-            ("E.projected_lifecycle_choices", "projected_lifecycle_status choices match exactly"),
-            ("E.action_contracts_fields", "ActionContracts fields match ActionContractsFields"),
-        ]:
+        for check_id, desc in _ALL_E_CHECK_IDS:
             findings.append(_finding(check_id, "E_airtable_schema", desc, True, "SKIP",
                                       "skipped: live schema unreachable"))
         return findings
@@ -525,7 +525,8 @@ def _check_airtable_schema() -> list[dict]:
         True, "PASS",
     ))
 
-    tables_by_name = {t.get("name"): t for t in raw.get("tables", [])}
+    snapshot = normalize_schema(raw, base)
+    tables_by_name = {t["table_name"]: t for t in snapshot["tables"]}
 
     ac_table = tables_by_name.get("ActionContracts")
     findings.append(_finding(
@@ -542,19 +543,14 @@ def _check_airtable_schema() -> list[dict]:
     ))
 
     if approvals_table:
-        fields_by_name = {f.get("name"): f for f in approvals_table.get("fields", [])}
-        expected_types = {
-            "action_contract_id": "singleLineText",
-            "legacy_read_only": "checkbox",
-            "projected_lifecycle_status": "singleSelect",
-        }
+        fields_by_name = {f["field_name"]: f for f in approvals_table["fields"]}
         problems = []
-        for fname, expected_type in expected_types.items():
+        for fname, expected_type in _EXPECTED_APPROVALS_PROJECTION_TYPES.items():
             f = fields_by_name.get(fname)
             if f is None:
                 problems.append(f"missing field '{fname}'")
-            elif f.get("type") != expected_type:
-                problems.append(f"field '{fname}' has type {f.get('type')!r}, expected {expected_type!r}")
+            elif f["field_type"] != expected_type:
+                problems.append(f"field '{fname}' has type {f['field_type']!r}, expected {expected_type!r}")
         findings.append(_finding(
             "E.approvals_projection_fields", "E_airtable_schema",
             "Approvals projection fields present with correct types", True,
@@ -562,8 +558,8 @@ def _check_airtable_schema() -> list[dict]:
         ))
 
         status_field = fields_by_name.get("projected_lifecycle_status")
-        if status_field is not None and status_field.get("type") == "singleSelect":
-            choices = {c.get("name") for c in (status_field.get("options") or {}).get("choices", [])}
+        if status_field is not None and status_field["field_type"] == "singleSelect":
+            choices = set(status_field.get("choices") or [])
             matches = choices == _PROJECTED_LIFECYCLE_CHOICES
             findings.append(_finding(
                 "E.projected_lifecycle_choices", "E_airtable_schema",
@@ -587,21 +583,60 @@ def _check_airtable_schema() -> list[dict]:
                                       "Approvals table missing live"))
 
     if ac_table:
-        live_fields = {f.get("name") for f in ac_table.get("fields", [])}
-        expected_fields = _expected_action_contracts_fields()
+        from tools.phase_4b_rollout_common import (
+            ACTION_CONTRACTS_EXPECTED_TYPES, ACTION_CONTRACTS_STATUS_CHOICES,
+        )
+        ac_fields_by_name = {f["field_name"]: f for f in ac_table["fields"]}
+        live_fields = set(ac_fields_by_name.keys())
+        expected_fields = set(ACTION_CONTRACTS_EXPECTED_TYPES.keys())
         missing = expected_fields - live_fields
         findings.append(_finding(
             "E.action_contracts_fields", "E_airtable_schema",
-            "ActionContracts fields match ActionContractsFields", True,
+            "ActionContracts fields match ActionContractsFields (name)", True,
             "PASS" if not missing else "FAIL",
             "" if not missing else f"missing live fields: {sorted(missing)}",
         ))
-    else:
+
+        type_problems = []
+        for fname, expected_type in ACTION_CONTRACTS_EXPECTED_TYPES.items():
+            f = ac_fields_by_name.get(fname)
+            if f is None:
+                continue  # already reported by E.action_contracts_fields above
+            if f["field_type"] != expected_type:
+                type_problems.append(
+                    f"field '{fname}' has type {f['field_type']!r}, expected {expected_type!r}"
+                )
         findings.append(_finding(
-            "E.action_contracts_fields", "E_airtable_schema",
-            "ActionContracts fields match ActionContractsFields", True, "FAIL",
-            "ActionContracts table missing live",
+            "E.action_contracts_field_types", "E_airtable_schema",
+            "ActionContracts fields match expected live field types", True,
+            "PASS" if not type_problems else "FAIL", "; ".join(type_problems),
         ))
+
+        status_field = ac_fields_by_name.get("status")
+        if status_field is not None and status_field["field_type"] == "singleSelect":
+            live_status_choices = set(status_field.get("choices") or [])
+            matches = live_status_choices == ACTION_CONTRACTS_STATUS_CHOICES
+            findings.append(_finding(
+                "E.action_contracts_status_choices", "E_airtable_schema",
+                "ActionContracts status field singleSelect choices match exactly", True,
+                "PASS" if matches else "FAIL",
+                "" if matches else
+                f"live={sorted(live_status_choices)} expected={sorted(ACTION_CONTRACTS_STATUS_CHOICES)}",
+            ))
+        else:
+            findings.append(_finding(
+                "E.action_contracts_status_choices", "E_airtable_schema",
+                "ActionContracts status field singleSelect choices match exactly", True, "FAIL",
+                "status field missing or not singleSelect — cannot compare choices",
+            ))
+    else:
+        for check_id, desc in [
+            ("E.action_contracts_fields", "ActionContracts fields match ActionContractsFields (name)"),
+            ("E.action_contracts_field_types", "ActionContracts fields match expected live field types"),
+            ("E.action_contracts_status_choices", "ActionContracts status field singleSelect choices match exactly"),
+        ]:
+            findings.append(_finding(check_id, "E_airtable_schema", desc, True, "FAIL",
+                                      "ActionContracts table missing live"))
 
     return findings
 

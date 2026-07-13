@@ -7,18 +7,24 @@
 # tools/phase_4b_repair_projections.py, gated separately.
 #
 # Run manually:
-#   python3 tools/phase_4b_reconciliation.py
-#   python3 tools/phase_4b_reconciliation.py --json
+#   python3 tools/phase_4b_reconciliation.py --tenant-id boss_hq
+#   python3 tools/phase_4b_reconciliation.py --tenant-id boss_hq --json
 #
-# Produces reports/phase_4b_reconciliation.json.
+# Produces reports/runtime/phase_4b_reconciliation.json (gitignored — see
+# reports/samples/phase_4b_reconciliation.sample.json for a fixture example).
 #
-# Two checks below (R9/R10) need a documented interpretation, spelled out at
-# their definitions, because the live Approvals schema (airtable_schema.py::
-# ApprovalsFields) has no tenant_id field of its own to compare against — the
-# canonical tenant always lives on ActionContracts. Where an exact live check
-# isn't possible offline (no identity object, as the live approve/reject path
-# has), each check documents the closest structurally-grounded proxy it uses
-# instead of silently skipping.
+# --tenant-id is required: R10 verifies every contract-linked Approvals row
+# points to a contract belonging to that ONE rollout tenant (the real check —
+# ApprovalsFields itself has no tenant_id field of its own, so the canonical
+# tenant always comes from the linked ActionContract). Omitting --tenant-id
+# is never silently treated as "nothing to check" — run_reconciliation()
+# reports it as its own blocking finding so an operator can't accidentally
+# get a false rollout_target_met=true by forgetting the flag.
+#
+# R16 is a separate, independent anomaly: two ActionContracts sharing a
+# business_action_fingerprint but disagreeing with EACH OTHER on tenant_id
+# (a structural fingerprint-collision signal, unrelated to which tenant this
+# particular rollout is scoped to).
 
 from __future__ import annotations
 
@@ -37,7 +43,7 @@ from tools.phase_4b_rollout_common import (  # noqa: E402
     fetch_all_claims, git_state, is_canonical_tma_contract, utc_now_iso,
 )
 
-REPORT_PATH = REPO_ROOT / "reports" / "phase_4b_reconciliation.json"
+REPORT_PATH = REPO_ROOT / "reports" / "runtime" / "phase_4b_reconciliation.json"
 
 # A claim sitting in "executing" longer than this is flagged for manual
 # attention alongside genuine outcome_unknown claims — a fresh in-flight
@@ -57,7 +63,7 @@ def _finding(check_id: str, description: str, severity: str, items: list) -> dic
     }
 
 
-def run_reconciliation() -> dict:
+def run_reconciliation(tenant_id: str | None = None) -> dict:
     fetch_errors: dict[str, str] = {}
 
     contracts_raw = fetch_all_action_contracts()
@@ -199,33 +205,56 @@ def run_reconciliation() -> dict:
         "blocking", non_tma_contract_rows,
     ))
 
-    # 10. Cross-tenant projection/contract mismatches.
-    #
-    # ApprovalsFields (airtable_schema.py) has no tenant_id field of its own —
-    # the live approve/reject path (_is_canonical_tma_contract) checks
-    # contract.tenant_id against the REQUESTING identity's tenant_id, which
-    # this offline batch tool does not have (no live request/identity). As a
-    # structurally-grounded proxy: business_action_fingerprint is defined as
-    # hash(tenant + user + tool + payload) (core/action_gateway.py), so two
-    # ActionContracts sharing the same fingerprint but disagreeing on
-    # tenant_id is a genuine cross-tenant inconsistency this tool CAN detect
-    # from the data it has, independent of any specific request's identity.
+    # 10. Real tenant-scope check: every contract-linked Approvals row must
+    # point to a contract belonging to the ONE tenant this rollout is scoped
+    # to (--tenant-id). Absent tenant_id is NEVER treated as "nothing to
+    # check" — it is its own guaranteed blocking finding under the same
+    # stable check_id, so a forgotten --tenant-id can never silently produce
+    # rollout_target_met=true.
+    if tenant_id is None:
+        findings.append(_finding(
+            "R10_tenant_scope_mismatch",
+            "Tenant scope could not be verified — --tenant-id was not provided. This is a "
+            "blocking gap, never a silent pass.",
+            "blocking", ["__tenant_id_not_provided__"],
+        ))
+    else:
+        tenant_scope_mismatch = []
+        for cid, rows in approvals_by_contract.items():
+            contract = contracts_by_id.get(cid)
+            if contract is None:
+                continue
+            if contract.tenant_id != tenant_id:
+                tenant_scope_mismatch.extend(row["id"] for row in rows)
+        findings.append(_finding(
+            "R10_tenant_scope_mismatch",
+            f"Contract-linked Approvals rows whose canonical contract's tenant_id does not "
+            f"match the expected rollout tenant ({tenant_id!r})",
+            "blocking", tenant_scope_mismatch,
+        ))
+
+    # 16. Fingerprint-level cross-tenant duplication — a separate, independent
+    # anomaly from R10 above. R10 checks each row against the ONE rollout
+    # tenant; this checks whether two ActionContracts share a
+    # business_action_fingerprint (hash(tenant+user+tool+payload),
+    # core/action_gateway.py) while disagreeing with EACH OTHER on
+    # tenant_id — a structural fingerprint-collision signal independent of
+    # which tenant any particular rollout is scoped to.
     fingerprint_tenants: dict[str, set[str]] = defaultdict(set)
     fingerprint_contracts: dict[str, list[str]] = defaultdict(list)
     for c, _rec_id in contracts_raw:
         if c.business_action_fingerprint:
             fingerprint_tenants[c.business_action_fingerprint].add(c.tenant_id)
             fingerprint_contracts[c.business_action_fingerprint].append(c.contract_id)
-    cross_tenant_contracts = []
+    fingerprint_cross_tenant = []
     for fp, tenants in fingerprint_tenants.items():
         if len(tenants) > 1:
-            cross_tenant_contracts.extend(fingerprint_contracts[fp])
+            fingerprint_cross_tenant.extend(fingerprint_contracts[fp])
     findings.append(_finding(
-        "R10_cross_tenant_mismatch",
-        "ActionContracts sharing a business_action_fingerprint but disagreeing on tenant_id "
-        "(proxy for cross-tenant projection/contract mismatch — Approvals carries no tenant_id "
-        "field of its own to compare against directly)",
-        "blocking", cross_tenant_contracts,
+        "R16_fingerprint_cross_tenant_duplication",
+        "ActionContracts sharing a business_action_fingerprint but disagreeing with each "
+        "other on tenant_id (independent of R10's single-rollout-tenant check)",
+        "blocking", fingerprint_cross_tenant,
     ))
 
     # 11. Pending projections whose canonical contract is already terminal.
@@ -276,20 +305,44 @@ def run_reconciliation() -> dict:
         "blocking", orphaned_claims,
     ))
 
-    # 14. Completed contracts whose claim status is not completed.
+    # 14. Completed/executed contracts whose EXISTING claim status disagrees.
     completed_contract_claim_mismatch = []
     for c, _rec_id in contracts_raw:
-        if c.status != "completed":
+        if c.status not in ("completed", "executed"):
             continue
         claim = claims_by_contract.get(c.contract_id)
         if claim is not None and claim["status"] != "completed":
             completed_contract_claim_mismatch.append(c.contract_id)
     findings.append(_finding(
         "R14_completed_contract_claim_mismatch",
-        "ActionContracts with status=completed whose PostgreSQL claim exists but disagrees "
-        "(claim status != completed) — a claim entirely absent is not flagged here, since it "
-        "may predate FEATURE_ATOMIC_CLAIMS being enabled for this contract's lifetime",
+        "ActionContracts with status=completed/executed whose PostgreSQL claim exists but "
+        "disagrees (claim status != completed)",
         "blocking", completed_contract_claim_mismatch,
+    ))
+
+    # 17. A completed/executed CANONICAL tma_write contract must have a
+    # PostgreSQL claim at all — Phase 4B-2 makes PostgreSQL claims the sole
+    # execution-ownership primitive for tma_write, so a canonical contract
+    # that reached completed/executed with no claim row at all is a real gap,
+    # not tolerable history. Historical tolerance (missing claim silently OK)
+    # is preserved ONLY for non-canonical contracts — other tools may have
+    # completed via the legacy pre-atomic-claims path for their entire
+    # lifetime and never created a claim at all; that remains untouched.
+    canonical_completed_missing_claim = []
+    for c, _rec_id in contracts_raw:
+        if c.status not in ("completed", "executed"):
+            continue
+        if not is_canonical_tma_contract(c):
+            continue
+        if claims_by_contract.get(c.contract_id) is None:
+            canonical_completed_missing_claim.append(c.contract_id)
+    findings.append(_finding(
+        "R17_canonical_completed_missing_claim",
+        "Completed/executed canonical tma_write ActionContracts with no PostgreSQL claim at "
+        "all (blocking — historical tolerance for a missing claim is preserved only for "
+        "non-TMA contracts)",
+        "blocking" if not claims_unavailable else "warning",
+        canonical_completed_missing_claim,
     ))
 
     # 15. Duplicate active execution ownership anomaly.
@@ -362,11 +415,13 @@ def _print_human(result: dict) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Phase 4B reconciliation diagnostic (read-only, no --apply mode)")
+    parser.add_argument("--tenant-id", required=True,
+                         help="The single tenant this rollout is scoped to (required — see R10)")
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON instead of text")
     args = parser.parse_args()
 
     try:
-        result = run_reconciliation()
+        result = run_reconciliation(tenant_id=args.tenant_id)
     except Exception as exc:
         err = {"error": f"{type(exc).__name__}: {exc}", "rollout_target_met": False}
         print(json.dumps(err, indent=2), file=sys.stderr)

@@ -18,10 +18,52 @@ from pathlib import Path
 
 import httpx
 
-from airtable_schema import ApprovalsFields, Tables
+from airtable_schema import ActionContractsFields, ActionContractStatus, ApprovalsFields, Tables
 from tools.airtable_gateway import _at_headers, _at_url, AirtableLookupError
 
 logger = logging.getLogger(__name__)
+
+# Expected live field types for ActionContractsFields, mirroring the
+# reproducible schema spec documented in ActionContractsFields' own
+# docstring (airtable_schema.py). Kept here as ONE machine-readable source
+# so readiness checks compare against this instead of re-deriving it from
+# prose each time.
+ACTION_CONTRACTS_EXPECTED_TYPES: dict[str, str] = {
+    ActionContractsFields.CONTRACT_ID: "singleLineText",
+    ActionContractsFields.TENANT_ID: "singleLineText",
+    ActionContractsFields.CANONICAL_USER_ID: "singleLineText",
+    ActionContractsFields.TOOL_NAME: "singleLineText",
+    ActionContractsFields.NORMALIZED_PAYLOAD: "multilineText",
+    ActionContractsFields.BUSINESS_FINGERPRINT: "singleLineText",
+    ActionContractsFields.ORIGIN_CHANNEL: "singleLineText",
+    ActionContractsFields.ORIGIN_CHAT_ID: "singleLineText",
+    ActionContractsFields.REQUIRES_APPROVAL: "checkbox",
+    ActionContractsFields.STATUS: "singleSelect",
+    ActionContractsFields.CREATED_AT: "number",
+    ActionContractsFields.APPROVED_BY: "singleLineText",
+    ActionContractsFields.APPROVED_AT: "number",
+    ActionContractsFields.VERSION: "number",
+    ActionContractsFields.ACTOR_ROLE: "singleLineText",
+    ActionContractsFields.ACTOR_USER_ID: "singleLineText",
+    ActionContractsFields.ACTOR_DISPLAY_NAME: "singleLineText",
+    ActionContractsFields.ACTOR_DOMAIN_ID: "singleLineText",
+    ActionContractsFields.ACTOR_EXTERNAL_ID: "singleLineText",
+    ActionContractsFields.ACTOR_ALLOWED_DOMAINS: "multilineText",
+    ActionContractsFields.APPROVAL_POLICY: "singleLineText",
+    ActionContractsFields.TRUSTED_SOURCE: "singleLineText",
+    ActionContractsFields.CONTEXT_INTERRUPTED: "checkbox",
+    ActionContractsFields.RECONFIRMATION_REQUIRED: "checkbox",
+    ActionContractsFields.CONTEXT_INTEGRITY_UNKNOWN: "checkbox",
+    ActionContractsFields.IDEMPOTENCY_KEY: "singleLineText",
+}
+
+# Reused directly from ActionContractStatus (airtable_schema.py) — the
+# single canonical source of these values — rather than a second hardcoded
+# literal set that could drift from it.
+ACTION_CONTRACTS_STATUS_CHOICES: set[str] = {
+    v for k, v in vars(ActionContractStatus).items()
+    if not k.startswith("_") and isinstance(v, str)
+}
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -95,16 +137,47 @@ def fetch_all_approvals() -> list[dict] | None:
     return fetch_all_records("Approvals")
 
 
-def fetch_all_claims(limit: int = 10000) -> list[dict] | None:
+def fetch_record_by_id(table: str, record_id: str) -> dict | None:
+    """Read-only GET of exactly one record by its Airtable record ID (used
+    by tools/phase_4b_canary_verify.py to confirm a supplied Approvals/
+    provider record actually exists — never a write). Returns None on any
+    failure (network error, non-200, 404) — this helper does not distinguish
+    "not found" from "unreachable"; callers that need that distinction
+    should use fetch_all_records() + an id match instead."""
+    try:
+        r = httpx.get(f"{_at_url(table)}/{record_id}", headers=_at_headers(), timeout=15)
+        if r.status_code != 200:
+            return None
+        return r.json()
+    except Exception as exc:
+        logger.error(
+            "[phase_4b_rollout_common] fetch_record_by_id(%s, %s) failed: %s",
+            table, record_id, exc,
+        )
+        return None
+
+
+def fetch_all_claims(limit: int = 100_000) -> list[dict] | None:
     """All action_execution_claims rows (read-only SELECT, no locking).
-    Returns None if PostgreSQL is unavailable/not configured, [] if the table
-    is empty."""
+    Returns None if PostgreSQL is unavailable/not configured, or if the fetch
+    would be truncated — `limit` is a generous safety bound, not a silent
+    cap: a COUNT(*) is taken first and compared against what was actually
+    fetched, so a dataset larger than `limit` is reported as a fetch failure
+    (None) rather than silently handed to callers as a complete-looking but
+    partial list. Callers must never derive rollout_target_met=true from a
+    truncated claims fetch — returning None here routes straight into the
+    existing "claims unavailable" / fetch_errors path.
+    Returns [] if the table is genuinely empty."""
     from core.database import get_conn, release_conn
 
     conn = get_conn()
     if conn is None:
         return None
     try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM action_execution_claims;")
+            total = cur.fetchone()[0]
+
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -117,6 +190,16 @@ def fetch_all_claims(limit: int = 10000) -> list[dict] | None:
                 (limit,),
             )
             rows = cur.fetchall()
+
+        if len(rows) < total:
+            logger.error(
+                "[phase_4b_rollout_common] fetch_all_claims truncated: fetched=%d total=%d "
+                "(limit=%d) — treating as a fetch failure rather than returning a partial "
+                "dataset; raise `limit` or paginate if this table has genuinely grown this large",
+                len(rows), total, limit,
+            )
+            return None
+
         return [
             {
                 "contract_id": row[0],

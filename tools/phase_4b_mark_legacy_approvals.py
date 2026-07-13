@@ -36,7 +36,7 @@ from tools.phase_4b_rollout_common import (  # noqa: E402
     REPO_ROOT, dump_json_report, fetch_all_approvals, git_state, utc_now_iso,
 )
 
-REPORT_PATH = REPO_ROOT / "reports" / "phase_4b_legacy_marking.json"
+REPORT_PATH = REPO_ROOT / "reports" / "runtime" / "phase_4b_legacy_marking.json"
 _CONFIRM_TOKEN = "APPLY_LEGACY_READ_ONLY"
 
 

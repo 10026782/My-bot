@@ -49,15 +49,15 @@ PR #334.
 
 ## 2. Rollout gates
 
-Every gate below is a **hard stop**, not a recommendation. All four tools referenced here are report-only by default (see `tools/phase_4b_rollout_readiness.py`, `tools/phase_4b_reconciliation.py`, `tools/phase_4b_mark_legacy_approvals.py`, `tools/phase_4b_repair_projections.py`).
+Every gate below is a **hard stop**, not a recommendation. All five tools referenced here are report-only / observational by default (see `tools/phase_4b_rollout_readiness.py`, `tools/phase_4b_reconciliation.py`, `tools/phase_4b_mark_legacy_approvals.py`, `tools/phase_4b_repair_projections.py`, `tools/phase_4b_canary_verify.py`). Every tool writes its JSON report under `reports/runtime/` (gitignored — see `reports/samples/*.sample.json` for deterministic fixture examples of the readiness, reconciliation, and canary-evidence shapes).
 
 | Gate | Condition to pass | Tool |
 |---|---|---|
 | G1 — Code readiness | `python3 tools/phase_4b_rollout_readiness.py` exits 0 (GO or WARNING, not NO-GO) | readiness |
-| G2 — No orphaned/anomalous state | `python3 tools/phase_4b_reconciliation.py` reports zero `blocking_findings` | reconciliation |
+| G2 — No orphaned/anomalous state | `python3 tools/phase_4b_reconciliation.py --tenant-id <tenant>` reports zero `blocking_findings` | reconciliation |
 | G3 — Legacy rows marked | Every pre-4B-2 Approvals row (`action_contract_id` empty) has `legacy_read_only=true`, confirmed by re-running reconciliation after `phase_4b_mark_legacy_approvals.py --apply` | legacy marking + reconciliation |
 | G4 — Both flags flip together | `FEATURE_ACTION_CONTRACT_PERSISTENCE` and `FEATURE_ATOMIC_CLAIMS` are set in the **same** Render configuration change — never one without the other | Render dashboard (manual) |
-| G5 — Canary evidence | The 15-point canary checklist (§9) plus the 10 follow-up scenarios all pass, recorded in `reports/phase_4b_canary_evidence.json` | manual + evidence file |
+| G5 — Canary evidence | The 15-point canary checklist (§9) plus the 10 follow-up scenarios all pass, each verified with `tools/phase_4b_canary_verify.py` and assembled into `reports/runtime/phase_4b_canary_evidence.json` | manual + `phase_4b_canary_verify.py` + evidence file |
 | G6 — Owner approval | Explicit sign-off recorded before each of: legacy-apply, flag-flip, and canary execution | manual |
 
 No gate may be skipped because a later gate looks fine. Reconciliation must be re-run after legacy marking and again after the flags are enabled (§9).
@@ -69,7 +69,7 @@ No gate may be skipped because a later gate looks fine. Reconciliation must be r
 1. Confirm PR #334 (and this rollout tooling PR) are merged to `main`; capture the exact commit SHA.
 2. Confirm the Render **Pre-Deploy Command** is `python -m core.database_migrations` (unchanged from current config — this rollout does not add new migrations, `core/migrations/001_action_execution_claims.sql` already covers `action_execution_claims`).
 3. Run `tools/phase_4b_rollout_readiness.py` in report-only mode against the target environment.
-4. Run `tools/phase_4b_reconciliation.py` in report-only mode; review every blocking finding with the owner.
+4. Run `tools/phase_4b_reconciliation.py --tenant-id <tenant>` in report-only mode; review every blocking finding with the owner.
 5. Run `tools/phase_4b_mark_legacy_approvals.py --report-only`; get explicit owner approval; only then run with `--apply --confirm APPLY_LEGACY_READ_ONLY`.
 6. Re-run reconciliation — expect zero rows with `action_contract_id` empty and `legacy_read_only` false.
 7. Deploy the exact reviewed `main` commit (this triggers the pre-deploy migration command automatically — idempotent, safe even though the claims table already exists).
@@ -90,13 +90,13 @@ See §9 (Required canary tests) for the full checklist. Summary: one harmless ma
 
 ## 5. Reconciliation procedure
 
-Run `python3 tools/phase_4b_reconciliation.py` (report-only by default; it has no `--apply` mode at all — see tool file). It cross-references:
+Run `python3 tools/phase_4b_reconciliation.py --tenant-id <tenant>` (report-only by default; it has no `--apply` mode at all — see tool file; `--tenant-id` is required, since R10 verifies every contract-linked Approvals row belongs to that one tenant — omitting it is itself a guaranteed blocking finding, never a silent pass). It cross-references:
 
 - All `ActionContracts` rows (`tools/phase_4b_rollout_common.py::fetch_all_action_contracts()`)
 - All `Approvals` rows (`fetch_all_approvals()`)
 - All PostgreSQL `action_execution_claims` rows (`fetch_all_claims()`, skipped with a warning if PostgreSQL is unreachable)
 
-against the 15 anomaly classes in `tools/phase_4b_reconciliation.py`'s module docstring, and separates its findings into `blocking_findings` / `warnings` / `informational`. The **mandatory rollout target** is stated in that file and repeated in the report's `rollout_target_met` field: zero orphaned contract-linked projections, zero cross-tenant mismatches, zero non-TMA contracts exposed as TMA approvals, zero executable legacy rows, zero contract-linked rows with non-empty `CONTEXT_DATA`, zero duplicate active projections, zero unresolved claim-ownership anomalies.
+against the 17 anomaly classes in `tools/phase_4b_reconciliation.py`'s module docstring, and separates its findings into `blocking_findings` / `warnings` / `informational`. The **mandatory rollout target** is stated in that file and repeated in the report's `rollout_target_met` field: zero orphaned contract-linked projections, zero cross-tenant mismatches, zero non-TMA contracts exposed as TMA approvals, zero executable legacy rows, zero contract-linked rows with non-empty `CONTEXT_DATA`, zero duplicate active projections, zero unresolved claim-ownership anomalies.
 
 Run reconciliation: before legacy marking, after legacy marking, after the flags are enabled, and again after the canary. Never repair anything from this tool — that's `tools/phase_4b_repair_projections.py`'s job, and only for the safe display-repair subset it documents.
 
@@ -181,7 +181,7 @@ Then run, each as its own isolated canary with its own evidence entry:
 
 For any `outcome_unknown` result: do not retry automatically. Stop and require manual reconciliation (`tools/phase_4b_reconciliation.py` flags "Executing/outcome_unknown claims requiring manual attention" and "Claims whose canonical ActionContract cannot be found" explicitly).
 
-Save all of the above as structured evidence (IDs and statuses, no secrets, no full sensitive payloads) in `reports/phase_4b_canary_evidence.json`.
+Verify each scenario with `tools/phase_4b_canary_verify.py --contract-id <id> [--approval-record-id <id>] [--provider-table <table> --provider-record-id <id>]` — it is purely observational (never proposes, approves, rejects, dispatches, claims, retries, or writes) and cross-checks contract/projection/claim/provider IDs, lifecycle alignment, requester/approver separation, and duplicate-execution evidence. Save all of the above as structured evidence (IDs and statuses, no secrets, no full sensitive payloads) in `reports/runtime/phase_4b_canary_evidence.json` — see `reports/samples/phase_4b_canary_evidence.sample.json` for the expected shape.
 
 ---
 
@@ -191,7 +191,7 @@ Save all of the above as structured evidence (IDs and statuses, no secrets, no f
 2. Confirm the current `main` SHA (`git rev-parse origin/main`).
 3. Confirm the Render Pre-Deploy Command is still `python -m core.database_migrations`.
 4. Run `tools/phase_4b_rollout_readiness.py` in report-only mode.
-5. Run `tools/phase_4b_reconciliation.py` in report-only mode.
+5. Run `tools/phase_4b_reconciliation.py --tenant-id <tenant>` in report-only mode.
 6. Review every blocking finding with the owner; do not proceed while any remain open.
 7. Run `tools/phase_4b_mark_legacy_approvals.py --report-only`; review the exact record IDs proposed.
 8. Obtain explicit owner approval for the legacy-apply step.
@@ -220,7 +220,7 @@ Rollback **never** restores the old direct-execution path. When a blocking probl
 4. Do not delete any `ActionContracts` row.
 5. Do not delete any PostgreSQL execution claim.
 6. Do not retry any `outcome_unknown` claim automatically.
-7. Run `tools/phase_4b_rollout_readiness.py` and `tools/phase_4b_reconciliation.py` to capture the exact state at the moment of rollback.
+7. Run `tools/phase_4b_rollout_readiness.py` and `tools/phase_4b_reconciliation.py --tenant-id <tenant>` to capture the exact state at the moment of rollback.
 8. Preserve all provider records and receipts (do not delete/edit the underlying Airtable records the contract wrote to).
 9. Investigate root cause before re-enabling anything.
 10. Re-enable only after a new, explicit GO decision from a fresh readiness run — not by assuming the original GO still holds.

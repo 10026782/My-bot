@@ -57,7 +57,7 @@ from tools.phase_4b_rollout_common import (  # noqa: E402
     git_state, is_canonical_tma_contract, utc_now_iso,
 )
 
-REPORT_PATH = REPO_ROOT / "reports" / "phase_4b_repair_projections.json"
+REPORT_PATH = REPO_ROOT / "reports" / "runtime" / "phase_4b_repair_projections.json"
 _CONFIRM_TOKEN = "APPLY_PROJECTION_REPAIRS"
 
 
@@ -81,14 +81,55 @@ def _plan_repairs(contracts_raw: list, approvals: list[dict]) -> dict:
         "skipped_ambiguous": [],
     }
 
-    # Repair 1 — missing projection for a valid pending canonical contract.
+    # Candidate pool for both Repair 1 and Repair 2: every valid pending
+    # canonical contract with no existing projection row at all.
     missing_contracts = [
         c for c, _rec_id in contracts_raw
         if is_canonical_tma_contract(c) and c.status == "pending"
         and not approvals_by_contract.get(c.contract_id)
     ]
-    claimed_contract_ids = {c.contract_id for c in missing_contracts}
+    missing_by_action: dict[str, list] = {}
     for c in missing_contracts:
+        action_key = str((c.normalized_payload or {}).get("action", c.tool_name))
+        missing_by_action.setdefault(action_key, []).append(c)
+
+    # Repair 2 runs FIRST: correct action_contract_id on an orphaned
+    # projection (a row whose action_contract_id points at nothing), only
+    # for an unambiguous 1:1 match — exactly one orphaned row AND exactly
+    # one missing contract sharing the same CONTEXT_ID/action key. A key
+    # matching more than one row or more than one contract is refused
+    # entirely (every row sharing that key goes to skipped_ambiguous, no
+    # guessing). A matched contract is consumed here and must never also
+    # get a brand-new projection from Repair 1 below.
+    orphaned_rows = [
+        row for row in approvals
+        if row.get("fields", {}).get(ApprovalsFields.ACTION_CONTRACT_ID)
+        and row["fields"][ApprovalsFields.ACTION_CONTRACT_ID] not in contracts_by_id
+    ]
+    rows_by_context_id: dict[str, list] = {}
+    for row in orphaned_rows:
+        key = row.get("fields", {}).get(ApprovalsFields.CONTEXT_ID, "")
+        rows_by_context_id.setdefault(key, []).append(row)
+
+    matched_contract_ids: set[str] = set()
+    for key, candidate_rows in rows_by_context_id.items():
+        candidate_contracts = missing_by_action.get(key, []) if key else []
+        if key and len(candidate_rows) == 1 and len(candidate_contracts) == 1:
+            row = candidate_rows[0]
+            contract = candidate_contracts[0]
+            plan["correct_action_contract_id"].append({
+                "record_id": row["id"], "contract_id": contract.contract_id,
+            })
+            matched_contract_ids.add(contract.contract_id)
+        else:
+            plan["skipped_ambiguous"].extend(row["id"] for row in candidate_rows)
+
+    # Repair 1 runs SECOND, only for missing contracts NOT consumed above —
+    # a contract matched to an orphaned row gets that row corrected, never
+    # also a brand-new duplicate projection.
+    for c in missing_contracts:
+        if c.contract_id in matched_contract_ids:
+            continue
         action = (c.normalized_payload or {}).get("action", c.tool_name)
         plan["create_projection"].append({
             "contract_id": c.contract_id,
@@ -111,34 +152,6 @@ def _plan_repairs(contracts_raw: list, approvals: list[dict]) -> dict:
                 # dependency for report-only mode.
             },
         })
-
-    # Repair 2 — correct action_contract_id on an orphaned projection, only
-    # for an unambiguous 1:1 match by CONTEXT_ID == contract's action value,
-    # restricted to contracts not already claimed by Repair 1 above.
-    orphaned_rows = [
-        row for row in approvals
-        if row.get("fields", {}).get(ApprovalsFields.ACTION_CONTRACT_ID)
-        and row["fields"][ApprovalsFields.ACTION_CONTRACT_ID] not in contracts_by_id
-    ]
-    unclaimed_pending = [
-        c for c, _rec_id in contracts_raw
-        if is_canonical_tma_contract(c) and c.status == "pending"
-        and c.contract_id not in claimed_contract_ids
-        and not approvals_by_contract.get(c.contract_id)
-    ]
-    for row in orphaned_rows:
-        context_id = row.get("fields", {}).get(ApprovalsFields.CONTEXT_ID, "")
-        candidates = [
-            c for c in unclaimed_pending
-            if str((c.normalized_payload or {}).get("action", c.tool_name)) == context_id
-        ]
-        if len(candidates) == 1 and context_id:
-            plan["correct_action_contract_id"].append({
-                "record_id": row["id"], "contract_id": candidates[0].contract_id,
-            })
-            claimed_contract_ids.add(candidates[0].contract_id)
-        else:
-            plan["skipped_ambiguous"].append(row["id"])
 
     # Repair 3 — clear a contradictory legacy_read_only=true on a genuinely
     # contract-linked row.

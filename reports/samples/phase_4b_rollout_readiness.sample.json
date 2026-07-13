@@ -1,168 +1,7 @@
 {
-  "blocking_findings": [
-    {
-      "description": "DATABASE_URL (or legacy DB env vars) configured",
-      "detail": "not configured",
-      "id": "C.env_present",
-      "mandatory": true,
-      "section": "C_postgresql",
-      "status": "FAIL"
-    },
-    {
-      "description": "get_pool() succeeds",
-      "detail": "skipped: PostgreSQL not configured",
-      "id": "C.pool",
-      "mandatory": true,
-      "section": "C_postgresql",
-      "status": "SKIP"
-    },
-    {
-      "description": "SELECT 1 succeeds",
-      "detail": "skipped: PostgreSQL not configured",
-      "id": "C.select1",
-      "mandatory": true,
-      "section": "C_postgresql",
-      "status": "SKIP"
-    },
-    {
-      "description": "action_execution_claims table exists",
-      "detail": "skipped: PostgreSQL not configured",
-      "id": "C.table_exists",
-      "mandatory": true,
-      "section": "C_postgresql",
-      "status": "SKIP"
-    },
-    {
-      "description": "required action_execution_claims columns exist",
-      "detail": "skipped: PostgreSQL not configured",
-      "id": "C.columns",
-      "mandatory": true,
-      "section": "C_postgresql",
-      "status": "SKIP"
-    },
-    {
-      "description": "contract_id primary-key protection exists",
-      "detail": "skipped: PostgreSQL not configured",
-      "id": "C.pk",
-      "mandatory": true,
-      "section": "C_postgresql",
-      "status": "SKIP"
-    },
-    {
-      "description": "idempotency_key uniqueness exists",
-      "detail": "skipped: PostgreSQL not configured",
-      "id": "C.unique_idem",
-      "mandatory": true,
-      "section": "C_postgresql",
-      "status": "SKIP"
-    },
-    {
-      "description": "read/write transaction opens and rolls back cleanly",
-      "detail": "skipped: PostgreSQL not configured",
-      "id": "C.rollback",
-      "mandatory": true,
-      "section": "C_postgresql",
-      "status": "SKIP"
-    },
-    {
-      "description": "migration state compatible with current code",
-      "detail": "skipped: PostgreSQL not configured",
-      "id": "C.migration_state",
-      "mandatory": true,
-      "section": "C_postgresql",
-      "status": "SKIP"
-    },
-    {
-      "description": "durable ActionContract persistence available (repository configured + reachable)",
-      "detail": "FEATURE_ACTION_CONTRACT_PERSISTENCE and repository wiring: False",
-      "id": "D.durable_persistence_available",
-      "mandatory": true,
-      "section": "D_action_contract_persistence",
-      "status": "FAIL"
-    },
-    {
-      "description": "PostgreSQL atomic claims execution available",
-      "detail": "FEATURE_ATOMIC_CLAIMS and pool reachability: False",
-      "id": "D.atomic_claims_available",
-      "mandatory": true,
-      "section": "D_action_contract_persistence",
-      "status": "FAIL"
-    },
-    {
-      "description": "a read-only repository query succeeds",
-      "detail": "skipped: durable persistence not available",
-      "id": "D.repository_query",
-      "mandatory": true,
-      "section": "D_action_contract_persistence",
-      "status": "SKIP"
-    },
-    {
-      "description": "no fallback to RAM-only persistence or direct dispatch would be used",
-      "detail": "at least one dependency is unavailable — tma_api._queue_tma_write_approval would refuse with HTTP 503 (correct fail-closed behavior, but not GO for cutover)",
-      "id": "D.no_ram_fallback",
-      "mandatory": true,
-      "section": "D_action_contract_persistence",
-      "status": "FAIL"
-    },
-    {
-      "description": "AIRTABLE_API_KEY / AIRTABLE_BASE_ID present",
-      "detail": "missing",
-      "id": "E.env_present",
-      "mandatory": true,
-      "section": "E_airtable_schema",
-      "status": "FAIL"
-    },
-    {
-      "description": "live Meta API schema fetch reachable",
-      "detail": "skipped: Airtable credentials not present",
-      "id": "E.live_reachable",
-      "mandatory": true,
-      "section": "E_airtable_schema",
-      "status": "SKIP"
-    },
-    {
-      "description": "ActionContracts table exists live",
-      "detail": "skipped: Airtable credentials not present",
-      "id": "E.action_contracts_exists",
-      "mandatory": true,
-      "section": "E_airtable_schema",
-      "status": "SKIP"
-    },
-    {
-      "description": "Approvals table exists live",
-      "detail": "skipped: Airtable credentials not present",
-      "id": "E.approvals_exists",
-      "mandatory": true,
-      "section": "E_airtable_schema",
-      "status": "SKIP"
-    },
-    {
-      "description": "Approvals projection fields present with correct types",
-      "detail": "skipped: Airtable credentials not present",
-      "id": "E.approvals_projection_fields",
-      "mandatory": true,
-      "section": "E_airtable_schema",
-      "status": "SKIP"
-    },
-    {
-      "description": "projected_lifecycle_status choices match exactly",
-      "detail": "skipped: Airtable credentials not present",
-      "id": "E.projected_lifecycle_choices",
-      "mandatory": true,
-      "section": "E_airtable_schema",
-      "status": "SKIP"
-    },
-    {
-      "description": "ActionContracts fields match ActionContractsFields",
-      "detail": "skipped: Airtable credentials not present",
-      "id": "E.action_contracts_fields",
-      "mandatory": true,
-      "section": "E_airtable_schema",
-      "status": "SKIP"
-    }
-  ],
-  "decision": "NO-GO",
-  "exit_code": 1,
+  "blocking_findings": [],
+  "decision": "WARNING",
+  "exit_code": 0,
   "findings": [
     {
       "description": "module 'core.action_gateway' imports successfully",
@@ -270,7 +109,7 @@
     },
     {
       "description": "ActionGateway ledger repository wiring (informational)",
-      "detail": "repository configured now: False",
+      "detail": "repository configured now: True",
       "id": "A.ledger_repository_wiring",
       "mandatory": false,
       "section": "A_code_state",
@@ -278,7 +117,7 @@
     },
     {
       "description": "FEATURE_ACTION_CONTRACT_PERSISTENCE current state (informational)",
-      "detail": "enabled=False",
+      "detail": "enabled=True",
       "id": "B.acp_state",
       "mandatory": false,
       "section": "B_feature_flags",
@@ -286,7 +125,7 @@
     },
     {
       "description": "FEATURE_ATOMIC_CLAIMS current state (informational)",
-      "detail": "enabled=False",
+      "detail": "enabled=True",
       "id": "B.atc_state",
       "mandatory": false,
       "section": "B_feature_flags",
@@ -294,7 +133,7 @@
     },
     {
       "description": "flags are not in a mismatched (exactly-one-enabled) state",
-      "detail": "both flags agree (enabled=False)",
+      "detail": "both flags agree (enabled=True)",
       "id": "B.no_mismatched_flags",
       "mandatory": true,
       "section": "B_feature_flags",
@@ -302,163 +141,179 @@
     },
     {
       "description": "DATABASE_URL (or legacy DB env vars) configured",
-      "detail": "not configured",
+      "detail": "present",
       "id": "C.env_present",
       "mandatory": true,
       "section": "C_postgresql",
-      "status": "FAIL"
+      "status": "PASS"
     },
     {
       "description": "get_pool() succeeds",
-      "detail": "skipped: PostgreSQL not configured",
+      "detail": "pool initialized",
       "id": "C.pool",
       "mandatory": true,
       "section": "C_postgresql",
-      "status": "SKIP"
+      "status": "PASS"
     },
     {
       "description": "SELECT 1 succeeds",
-      "detail": "skipped: PostgreSQL not configured",
+      "detail": "",
       "id": "C.select1",
       "mandatory": true,
       "section": "C_postgresql",
-      "status": "SKIP"
+      "status": "PASS"
     },
     {
       "description": "action_execution_claims table exists",
-      "detail": "skipped: PostgreSQL not configured",
+      "detail": "",
       "id": "C.table_exists",
       "mandatory": true,
       "section": "C_postgresql",
-      "status": "SKIP"
+      "status": "PASS"
     },
     {
       "description": "required action_execution_claims columns exist",
-      "detail": "skipped: PostgreSQL not configured",
+      "detail": "",
       "id": "C.columns",
       "mandatory": true,
       "section": "C_postgresql",
-      "status": "SKIP"
+      "status": "PASS"
     },
     {
       "description": "contract_id primary-key protection exists",
-      "detail": "skipped: PostgreSQL not configured",
+      "detail": "",
       "id": "C.pk",
       "mandatory": true,
       "section": "C_postgresql",
-      "status": "SKIP"
+      "status": "PASS"
     },
     {
       "description": "idempotency_key uniqueness exists",
-      "detail": "skipped: PostgreSQL not configured",
+      "detail": "",
       "id": "C.unique_idem",
       "mandatory": true,
       "section": "C_postgresql",
-      "status": "SKIP"
-    },
-    {
-      "description": "read/write transaction opens and rolls back cleanly",
-      "detail": "skipped: PostgreSQL not configured",
-      "id": "C.rollback",
-      "mandatory": true,
-      "section": "C_postgresql",
-      "status": "SKIP"
+      "status": "PASS"
     },
     {
       "description": "migration state compatible with current code",
-      "detail": "skipped: PostgreSQL not configured",
+      "detail": "derived from table/column/constraint checks above",
       "id": "C.migration_state",
       "mandatory": true,
       "section": "C_postgresql",
-      "status": "SKIP"
+      "status": "PASS"
+    },
+    {
+      "description": "read/write transaction opens and rolls back cleanly",
+      "detail": "probe row absent, as expected",
+      "id": "C.rollback",
+      "mandatory": true,
+      "section": "C_postgresql",
+      "status": "PASS"
     },
     {
       "description": "durable ActionContract persistence available (repository configured + reachable)",
-      "detail": "FEATURE_ACTION_CONTRACT_PERSISTENCE and repository wiring: False",
+      "detail": "FEATURE_ACTION_CONTRACT_PERSISTENCE and repository wiring: True",
       "id": "D.durable_persistence_available",
       "mandatory": true,
       "section": "D_action_contract_persistence",
-      "status": "FAIL"
+      "status": "PASS"
     },
     {
       "description": "PostgreSQL atomic claims execution available",
-      "detail": "FEATURE_ATOMIC_CLAIMS and pool reachability: False",
+      "detail": "FEATURE_ATOMIC_CLAIMS and pool reachability: True",
       "id": "D.atomic_claims_available",
       "mandatory": true,
       "section": "D_action_contract_persistence",
-      "status": "FAIL"
+      "status": "PASS"
     },
     {
       "description": "a read-only repository query succeeds",
-      "detail": "skipped: durable persistence not available",
+      "detail": "",
       "id": "D.repository_query",
       "mandatory": true,
       "section": "D_action_contract_persistence",
-      "status": "SKIP"
+      "status": "PASS"
     },
     {
       "description": "no fallback to RAM-only persistence or direct dispatch would be used",
-      "detail": "at least one dependency is unavailable — tma_api._queue_tma_write_approval would refuse with HTTP 503 (correct fail-closed behavior, but not GO for cutover)",
+      "detail": "both durable persistence and atomic claims are available",
       "id": "D.no_ram_fallback",
       "mandatory": true,
       "section": "D_action_contract_persistence",
-      "status": "FAIL"
+      "status": "PASS"
     },
     {
       "description": "AIRTABLE_API_KEY / AIRTABLE_BASE_ID present",
-      "detail": "missing",
+      "detail": "present",
       "id": "E.env_present",
       "mandatory": true,
       "section": "E_airtable_schema",
-      "status": "FAIL"
+      "status": "PASS"
     },
     {
       "description": "live Meta API schema fetch reachable",
-      "detail": "skipped: Airtable credentials not present",
+      "detail": "",
       "id": "E.live_reachable",
       "mandatory": true,
       "section": "E_airtable_schema",
-      "status": "SKIP"
+      "status": "PASS"
     },
     {
       "description": "ActionContracts table exists live",
-      "detail": "skipped: Airtable credentials not present",
+      "detail": "",
       "id": "E.action_contracts_exists",
       "mandatory": true,
       "section": "E_airtable_schema",
-      "status": "SKIP"
+      "status": "PASS"
     },
     {
       "description": "Approvals table exists live",
-      "detail": "skipped: Airtable credentials not present",
+      "detail": "",
       "id": "E.approvals_exists",
       "mandatory": true,
       "section": "E_airtable_schema",
-      "status": "SKIP"
+      "status": "PASS"
     },
     {
       "description": "Approvals projection fields present with correct types",
-      "detail": "skipped: Airtable credentials not present",
+      "detail": "",
       "id": "E.approvals_projection_fields",
       "mandatory": true,
       "section": "E_airtable_schema",
-      "status": "SKIP"
+      "status": "PASS"
     },
     {
       "description": "projected_lifecycle_status choices match exactly",
-      "detail": "skipped: Airtable credentials not present",
+      "detail": "",
       "id": "E.projected_lifecycle_choices",
       "mandatory": true,
       "section": "E_airtable_schema",
-      "status": "SKIP"
+      "status": "PASS"
     },
     {
-      "description": "ActionContracts fields match ActionContractsFields",
-      "detail": "skipped: Airtable credentials not present",
+      "description": "ActionContracts fields match ActionContractsFields (name)",
+      "detail": "",
       "id": "E.action_contracts_fields",
       "mandatory": true,
       "section": "E_airtable_schema",
-      "status": "SKIP"
+      "status": "PASS"
+    },
+    {
+      "description": "ActionContracts fields match expected live field types",
+      "detail": "",
+      "id": "E.action_contracts_field_types",
+      "mandatory": true,
+      "section": "E_airtable_schema",
+      "status": "PASS"
+    },
+    {
+      "description": "ActionContracts status field singleSelect choices match exactly",
+      "detail": "",
+      "id": "E.action_contracts_status_choices",
+      "mandatory": true,
+      "section": "E_airtable_schema",
+      "status": "PASS"
     },
     {
       "description": "schema_cache.json permits all three Approvals projection fields",
@@ -493,10 +348,10 @@
       "status": "PASS"
     }
   ],
-  "generated_at": "2026-07-13T21:02:41.186876+00:00",
+  "generated_at": "2026-07-14T09:00:00+00:00",
   "git": {
     "branch": "claude/phase-4b-rollout-zd0f3y",
-    "commit_sha": "4d3787e6e6fcbc93bd5a30f62f0834136b706f06"
+    "commit_sha": "c7ad62e13850ad797cb8a48241476d82f39b17a7"
   },
   "warnings": [
     {

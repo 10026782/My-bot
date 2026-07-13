@@ -1,0 +1,223 @@
+{
+  "generated_at": "2026-07-14T09:10:00+00:00",
+  "git": {
+    "branch": "claude/phase-4b-rollout-zd0f3y",
+    "commit_sha": "c7ad62e13850ad797cb8a48241476d82f39b17a7"
+  },
+  "note": "Sample fixture — illustrates the evidence shape an operator assembles from tools/phase_4b_canary_verify.py runs across docs/PHASE_4B_ROLLOUT_AND_CUTOVER.md Sec9's canary checklist. IDs/timestamps here are synthetic, not from a real run.",
+  "scenarios": [
+    {
+      "approved_by": "Owner Two",
+      "checklist_ref": "Sec9 points 1-15",
+      "provider_record_id": "recProviderSample010",
+      "provider_table": "Leads",
+      "requested_by": "Manager One",
+      "scenario": "single_low_risk_approve_canary",
+      "second_approval_attempt_provider_writes": 0,
+      "verifier_result": {
+        "blocking_findings": [],
+        "contract_id": "c7f3a1b2-0000-4a11-9c22-000000000010",
+        "findings": [
+          {
+            "description": "ActionContract is reachable and found",
+            "detail": "status=completed",
+            "id": "contract_lookup",
+            "mandatory": true,
+            "status": "PASS"
+          },
+          {
+            "description": "contract has the canonical tma_write/tma_api/tma shape",
+            "detail": "",
+            "id": "contract_canonical_shape",
+            "mandatory": true,
+            "status": "PASS"
+          },
+          {
+            "description": "requested_by and approved_by identities are distinct",
+            "detail": "requester='Owner One' approver='Manager Two'",
+            "id": "requester_approver_separation",
+            "mandatory": true,
+            "status": "PASS"
+          },
+          {
+            "description": "an Approvals projection exists for this contract",
+            "detail": "",
+            "id": "projection_lookup",
+            "mandatory": true,
+            "status": "PASS"
+          },
+          {
+            "description": "projection's action_contract_id matches the contract",
+            "detail": "projection.action_contract_id='c7f3a1b2-0000-4a11-9c22-000000000010' expected='c7f3a1b2-0000-4a11-9c22-000000000010'",
+            "id": "projection_contract_link",
+            "mandatory": true,
+            "status": "PASS"
+          },
+          {
+            "description": "projection's projected_lifecycle_status matches the contract",
+            "detail": "projection='completed' expected='completed'",
+            "id": "projection_lifecycle_match",
+            "mandatory": true,
+            "status": "PASS"
+          },
+          {
+            "description": "projection is not marked legacy_read_only",
+            "detail": "legacy_read_only=False",
+            "id": "projection_not_legacy",
+            "mandatory": true,
+            "status": "PASS"
+          },
+          {
+            "description": "projection CONTEXT_DATA is empty",
+            "detail": "",
+            "id": "projection_context_data_empty",
+            "mandatory": true,
+            "status": "PASS"
+          },
+          {
+            "description": "PostgreSQL claim presence/status matches the contract's lifecycle",
+            "detail": "claim.status='completed'",
+            "id": "claim_expectation",
+            "mandatory": true,
+            "status": "PASS"
+          },
+          {
+            "description": "no other claim shares this claim's idempotency_key",
+            "detail": "PostgreSQL unavailable for duplicate-idempotency-key check",
+            "id": "duplicate_execution_evidence",
+            "mandatory": false,
+            "status": "SKIP"
+          },
+          {
+            "description": "the supplied provider record actually exists",
+            "detail": "",
+            "id": "provider_record_exists",
+            "mandatory": true,
+            "status": "PASS"
+          }
+        ],
+        "generated_at": "2026-07-14T09:05:00+00:00",
+        "git": {
+          "branch": "claude/phase-4b-rollout-zd0f3y",
+          "commit_sha": "c7ad62e13850ad797cb8a48241476d82f39b17a7"
+        },
+        "verdict": "VERIFIED"
+      }
+    },
+    {
+      "approved_by": "Owner Two",
+      "checklist_ref": "Sec9 'one reject canary'",
+      "requested_by": "Manager One",
+      "scenario": "reject_canary",
+      "verifier_result": {
+        "blocking_findings": [],
+        "contract_id": "c7f3a1b2-0000-4a11-9c22-000000000020",
+        "findings": [
+          {
+            "description": "ActionContract is reachable and found",
+            "detail": "status=rejected",
+            "id": "contract_lookup",
+            "mandatory": true,
+            "status": "PASS"
+          },
+          {
+            "description": "contract has the canonical tma_write/tma_api/tma shape",
+            "detail": "",
+            "id": "contract_canonical_shape",
+            "mandatory": true,
+            "status": "PASS"
+          },
+          {
+            "description": "requested_by and approved_by identities are distinct",
+            "detail": "requester='Owner One' approver='Owner Two'",
+            "id": "requester_approver_separation",
+            "mandatory": true,
+            "status": "PASS"
+          },
+          {
+            "description": "an Approvals projection exists for this contract",
+            "detail": "",
+            "id": "projection_lookup",
+            "mandatory": true,
+            "status": "PASS"
+          },
+          {
+            "description": "projection's action_contract_id matches the contract",
+            "detail": "projection.action_contract_id='c7f3a1b2-0000-4a11-9c22-000000000020' expected='c7f3a1b2-0000-4a11-9c22-000000000020'",
+            "id": "projection_contract_link",
+            "mandatory": true,
+            "status": "PASS"
+          },
+          {
+            "description": "projection's projected_lifecycle_status matches the contract",
+            "detail": "projection='rejected' expected='rejected'",
+            "id": "projection_lifecycle_match",
+            "mandatory": true,
+            "status": "PASS"
+          },
+          {
+            "description": "projection is not marked legacy_read_only",
+            "detail": "legacy_read_only=False",
+            "id": "projection_not_legacy",
+            "mandatory": true,
+            "status": "PASS"
+          },
+          {
+            "description": "projection CONTEXT_DATA is empty",
+            "detail": "",
+            "id": "projection_context_data_empty",
+            "mandatory": true,
+            "status": "PASS"
+          },
+          {
+            "description": "PostgreSQL claim presence/status matches the contract's lifecycle",
+            "detail": "no claim, as expected for a rejected contract",
+            "id": "claim_expectation",
+            "mandatory": true,
+            "status": "PASS"
+          },
+          {
+            "description": "no other claim shares this claim's idempotency_key",
+            "detail": "skipped: no claim to check",
+            "id": "duplicate_execution_evidence",
+            "mandatory": false,
+            "status": "SKIP"
+          },
+          {
+            "description": "the supplied provider record actually exists",
+            "detail": "skipped: --provider-table/--provider-record-id not supplied",
+            "id": "provider_record_exists",
+            "mandatory": false,
+            "status": "SKIP"
+          }
+        ],
+        "generated_at": "2026-07-14T09:05:00+00:00",
+        "git": {
+          "branch": "claude/phase-4b-rollout-zd0f3y",
+          "commit_sha": "c7ad62e13850ad797cb8a48241476d82f39b17a7"
+        },
+        "verdict": "VERIFIED"
+      }
+    },
+    {
+      "checklist_ref": "Sec9 'a legacy-row approval attempt'",
+      "expected_outcome": "refused before any contract lookup",
+      "http_status_observed": 409,
+      "provider_writes_observed": 0,
+      "scenario": "legacy_row_approval_attempt"
+    },
+    {
+      "checklist_ref": "Sec9 'a direct-dispatch attempt with forged execution_context'",
+      "expected_outcome": "refused — no live PostgreSQL claim behind the forged context",
+      "provider_writes_observed": 0,
+      "scenario": "direct_dispatch_forged_execution_context"
+    },
+    {
+      "checklist_ref": "Sec9 'flags-disabled request'",
+      "expected_outcome": "HTTP 503, zero writes",
+      "http_status_observed": 503,
+      "provider_writes_observed": 0,
+      "scenario": "flags_disabled_request"
+    }
+  ]
+}

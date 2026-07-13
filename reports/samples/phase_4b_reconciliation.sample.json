@@ -1,15 +1,11 @@
 {
   "blocking_findings": [],
   "counts": {
-    "action_contracts": 0,
-    "approvals": 0,
-    "claims": null
+    "action_contracts": 1,
+    "approvals": 1,
+    "claims": 1
   },
-  "fetch_errors": {
-    "action_contracts": "fetch failed — see logs; treating as unavailable",
-    "approvals": "fetch failed — see logs; treating as unavailable",
-    "claims": "PostgreSQL unavailable — claim-based checks skipped"
-  },
+  "fetch_errors": {},
   "findings": [
     {
       "check_id": "R1_contract_missing_projection",
@@ -75,9 +71,16 @@
       "severity": "blocking"
     },
     {
-      "check_id": "R10_cross_tenant_mismatch",
+      "check_id": "R10_tenant_scope_mismatch",
       "count": 0,
-      "description": "ActionContracts sharing a business_action_fingerprint but disagreeing on tenant_id (proxy for cross-tenant projection/contract mismatch — Approvals carries no tenant_id field of its own to compare against directly)",
+      "description": "Contract-linked Approvals rows whose canonical contract's tenant_id does not match the expected rollout tenant ('boss_hq')",
+      "items": [],
+      "severity": "blocking"
+    },
+    {
+      "check_id": "R16_fingerprint_cross_tenant_duplication",
+      "count": 0,
+      "description": "ActionContracts sharing a business_action_fingerprint but disagreeing with each other on tenant_id (independent of R10's single-rollout-tenant check)",
       "items": [],
       "severity": "blocking"
     },
@@ -93,7 +96,7 @@
       "count": 0,
       "description": "Claims with status=outcome_unknown, or status=executing for over 3600s (never auto-retry — investigate manually)",
       "items": [],
-      "severity": "warning"
+      "severity": "blocking"
     },
     {
       "check_id": "R13_orphaned_claim",
@@ -105,7 +108,14 @@
     {
       "check_id": "R14_completed_contract_claim_mismatch",
       "count": 0,
-      "description": "ActionContracts with status=completed whose PostgreSQL claim exists but disagrees (claim status != completed) — a claim entirely absent is not flagged here, since it may predate FEATURE_ATOMIC_CLAIMS being enabled for this contract's lifetime",
+      "description": "ActionContracts with status=completed/executed whose PostgreSQL claim exists but disagrees (claim status != completed)",
+      "items": [],
+      "severity": "blocking"
+    },
+    {
+      "check_id": "R17_canonical_completed_missing_claim",
+      "count": 0,
+      "description": "Completed/executed canonical tma_write ActionContracts with no PostgreSQL claim at all (blocking — historical tolerance for a missing claim is preserved only for non-TMA contracts)",
       "items": [],
       "severity": "blocking"
     },
@@ -117,12 +127,12 @@
       "severity": "blocking"
     }
   ],
-  "generated_at": "2026-07-13T21:05:00.886491+00:00",
+  "generated_at": "2026-07-14T09:00:00+00:00",
   "git": {
     "branch": "claude/phase-4b-rollout-zd0f3y",
-    "commit_sha": "4d3787e6e6fcbc93bd5a30f62f0834136b706f06"
+    "commit_sha": "c7ad62e13850ad797cb8a48241476d82f39b17a7"
   },
   "informational": [],
-  "rollout_target_met": false,
+  "rollout_target_met": true,
   "warnings": []
 }
