@@ -36,10 +36,11 @@ def chk(desc: str, cond: bool) -> None:
 
 @dataclass
 class MockIdentity:
-    user_id:   str = "owner_1"
-    role:      str = "owner"
-    tenant_id: str = "boss_hq"
-    domain_id: str = "general"
+    user_id:     str = "owner_1"
+    role:        str = "owner"
+    tenant_id:   str = "boss_hq"
+    domain_id:   str = "general"
+    external_id: str = "tg_owner_1"
 
     @property
     def is_internal(self) -> bool:

@@ -140,23 +140,62 @@ def execute_with_atomic_claim(
         f"execution_id={claim.execution_id}, canonical_user_id={canonical_user_id}"
     )
 
-    # Execute the tool
+    # Execute the tool — expects structured DispatcherOutcome
     execution_error = None
     execution_result = None
     try:
-        execution_result = executor_fn(tool_name, tool_inputs, identity)
-        logger.info(
-            f"Execution succeeded: contract={contract_id}, execution_id={claim.execution_id}, "
-            f"tool={tool_name}"
+        outcome = executor_fn(tool_name, tool_inputs, identity)
+
+        # Phase 4B0: Outcome must be DispatcherOutcome with explicit result classification
+        # Never infer truth from user_message text (it's for display only)
+        from core.dispatcher_outcome import DispatcherOutcome
+
+        if not isinstance(outcome, DispatcherOutcome):
+            logger.error(
+                f"Dispatcher outcome type error: contract={contract_id}, execution_id={claim.execution_id}, "
+                f"tool={tool_name}: expected DispatcherOutcome, got {type(outcome).__name__}"
+            )
+            # Type mismatch is a contract violation — fail closed
+            update_claim_status(contract_id, "failed", error="Dispatcher outcome type mismatch")
+            return (False, None, "Dispatcher outcome type mismatch")
+
+        logger.debug(
+            f"Execution returned outcome: contract={contract_id}, execution_id={claim.execution_id}, "
+            f"tool={tool_name}, result={outcome.result}, external_id={outcome.external_id}"
         )
-        # Update claim status: completed
-        update_claim_status(contract_id, "completed")
-        return (True, execution_result, None)
+
+        # Classify based on explicit outcome result (not string parsing)
+        if outcome.is_completed():
+            logger.info(
+                f"Execution succeeded (explicit): contract={contract_id}, execution_id={claim.execution_id}, "
+                f"tool={tool_name}, external_id={outcome.external_id}"
+            )
+            # Update claim status: completed
+            update_claim_status(contract_id, "completed")
+            return (True, outcome, None)
+
+        elif outcome.is_failed():
+            logger.error(
+                f"Execution failed (explicit): contract={contract_id}, execution_id={claim.execution_id}, "
+                f"tool={tool_name}, error_code={outcome.error_code}, error={outcome.error}"
+            )
+            # Update claim status: failed
+            update_claim_status(contract_id, "failed", error=outcome.error)
+            return (False, None, outcome.error)
+
+        elif outcome.is_outcome_unknown():
+            logger.warning(
+                f"Execution outcome unknown (ambiguous): contract={contract_id}, execution_id={claim.execution_id}, "
+                f"tool={tool_name}, error={outcome.error} (DO NOT AUTO-RETRY)"
+            )
+            # Update claim status: outcome_unknown (never auto-retry)
+            update_claim_status(contract_id, "outcome_unknown", error=outcome.error)
+            return (False, None, f"Outcome unknown (may be in progress): {outcome.error}")
 
     except Exception as e:
         execution_error = str(e)
         logger.error(
-            f"Execution failed: contract={contract_id}, execution_id={claim.execution_id}, "
+            f"Execution failed (exception): contract={contract_id}, execution_id={claim.execution_id}, "
             f"tool={tool_name}, error={e}"
         )
         # Update claim status: failed

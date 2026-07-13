@@ -1137,6 +1137,8 @@ class ActionGateway:
 
         Phase 4B0: When FEATURE_ATOMIC_CLAIMS=true, acquisition of atomic claim is REQUIRED
         before any dispatcher call. No exception falls back to direct dispatch.
+        Identity from frozen contract must be preserved through atomic wrapper.
+        Dispatcher result must be classified explicitly (not just exception-based).
         """
         from feature_flags import is_enabled
 
@@ -1145,8 +1147,42 @@ class ActionGateway:
         # Phase 4B0 atomic claim gate (if flag enabled)
         if is_enabled("FEATURE_ATOMIC_CLAIMS"):
             from core.action_gateway_atomic_executor import execute_with_atomic_claim
-            from core.atomic_claim_repository import claim_contract_execution
+            from identity import Identity
             import hashlib
+
+            # Reconstruct identity from frozen contract (actor who proposed this contract)
+            # This identity is bound at proposal time and must not be re-derived at execution.
+            # FAIL-CLOSED: If required immutable fields are missing, fail immediately (don't fall back).
+            # BUG-C89-APPROVAL-IDENTITY: actor_role, actor_external_id, tenant_id, actor_user_id
+            # are integrity-bound at proposal time and must never be missing for a valid contract.
+            # Scoped to the atomic-claims path only — the legacy (flag-off) dispatch below never
+            # consumed a reconstructed identity and must not change behavior while flag is off.
+            identity = None
+            if contract.actor_role and contract.actor_external_id and contract.tenant_id and contract.actor_user_id:
+                identity = Identity(
+                    user_id=contract.actor_user_id,
+                    role=contract.actor_role,
+                    display_name=contract.actor_display_name or "",
+                    tenant_id=contract.tenant_id,
+                    domain_id=contract.actor_domain_id or "general",
+                    allowed_domains=list(contract.actor_allowed_domains or []),
+                    channel=contract.origin_channel,
+                    external_id=contract.actor_external_id,
+                )
+            else:
+                # Missing tenant, user, role, or external identity — fail closed.
+                logger.error(
+                    "[ActionGateway] identity integrity violation: contract=%s "
+                    "actor_role=%s actor_external_id=%s tenant_id=%s actor_user_id=%s "
+                    "(all required for valid frozen identity under FEATURE_ATOMIC_CLAIMS)",
+                    contract.contract_id,
+                    contract.actor_role,
+                    contract.actor_external_id,
+                    contract.tenant_id,
+                    contract.actor_user_id,
+                )
+                self._ledger.update_status(contract.contract_id, "failed")
+                return "❌ שגיאת זהות: לא ניתן לאמת את הזהות של המבקש. פנה לתמיכה טכנית."
 
             # Deterministic idempotency key: hash(contract_id + approved_by)
             # Same contract + same approver → same key → ALREADY_CLAIMED on retry
@@ -1160,7 +1196,7 @@ class ActionGateway:
                     canonical_user_id=contract.approved_by or contract.actor_user_id,
                     tool_name=contract.tool_name,
                     tool_inputs=contract.normalized_payload,
-                    identity=None,  # identity already resolved at proposal time
+                    identity=identity,  # Frozen contract identity
                     executor_fn=self._tool_executor,
                     idempotency_key=idempotency_key,
                 )
@@ -1174,7 +1210,20 @@ class ActionGateway:
                     )
                     return f"❌ ביצוע נכשל: {error}"
 
-                raw = result
+                # Phase 4B0: result is DispatcherOutcome when flag enabled
+                # Extract structured fields and convert to dict for downstream processing
+                from core.dispatcher_outcome import DispatcherOutcome
+                if isinstance(result, DispatcherOutcome):
+                    # Convert DispatcherOutcome to dict for verify_execution and status reply
+                    raw = result.raw_response or {
+                        "ok": True,
+                        "external_id": result.external_id,
+                    }
+                    # Ensure user_message is available for status reply
+                    if "user_message" not in raw:
+                        raw["user_message"] = result.user_message
+                else:
+                    raw = result
             except Exception as exc:
                 # No exception fallback to direct dispatch when flag is ON — fail closed
                 self._ledger.update_status(contract.contract_id, "failed")
@@ -1185,6 +1234,7 @@ class ActionGateway:
                 return f"❌ ביצוע נכשל: {exc}"
         else:
             # Flag OFF: legacy direct dispatch (no claim creation, no atomic coordination)
+            # _tool_executor reconstructs identity from contract using contract_id
             try:
                 raw = self._tool_executor(
                     tool_name=contract.tool_name,

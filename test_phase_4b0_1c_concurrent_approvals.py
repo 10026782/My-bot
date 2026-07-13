@@ -127,11 +127,16 @@ def test_concurrent_approvals_mock():
     executor_call_lock = __import__("threading").Lock()
 
     def counting_executor(tool_name, tool_inputs, identity):
+        from core.dispatcher_outcome import DispatcherOutcome
         nonlocal executor_call_count
         with executor_call_lock:
             executor_call_count += 1
         time.sleep(0.01)  # Simulate tool execution
-        return {"ok": True, "external_id": f"exec-{executor_call_count}"}
+        return DispatcherOutcome(
+            result="completed",
+            user_message="✅ בוצע",
+            external_id=f"exec-{executor_call_count}",
+        )
 
     results = []
     results_lock = __import__("threading").Lock()
