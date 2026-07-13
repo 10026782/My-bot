@@ -618,6 +618,25 @@ class ApprovalsFields:
     Table name: Approvals
     Must be created manually in Airtable.
     Owner only.
+
+    Phase 4B-2 (schema-prep stage) — three additive projection fields, not yet
+    wired to any write/read path (tma_api.py is unchanged in this stage). Per
+    the Phase 4B-2 audit, Approvals is a non-authoritative TMA display
+    projection of ActionContracts (below); it must never be sufficient by
+    itself to authorize a claim or execution. Must be created manually in
+    Airtable before use, same as the rest of this table:
+      action_contract_id           singleLineText  — FK to
+                                    ActionContractsFields.CONTRACT_ID. Empty on
+                                    any pre-4B-2 ("legacy") row.
+      legacy_read_only             checkbox (default false) — true for any row
+                                    with no action_contract_id. Never
+                                    auto-replayed, never actionable.
+      projected_lifecycle_status   singleSelect — display-only mirror of
+                                    ActionContractsFields.STATUS, see
+                                    core/approvals_projection.py::
+                                    project_lifecycle_status(). Mutable,
+                                    non-authoritative — never consulted for
+                                    claim/execution authority.
     """
     ACTION         = "פעולה"
     REQUESTED_BY   = "מבוקש על ידי"
@@ -628,6 +647,10 @@ class ApprovalsFields:
     CONTEXT_DATA   = "נתוני הקשר"     # JSON string
     STATUS         = "סטטוס"           # ממתין|אושר|נדחה
     REJECTION_NOTE = "הערת דחייה"
+    # Phase 4B-2 — projection fields (schema-prep stage; not yet wired)
+    ACTION_CONTRACT_ID         = "action_contract_id"
+    LEGACY_READ_ONLY           = "legacy_read_only"
+    PROJECTED_LIFECYCLE_STATUS = "projected_lifecycle_status"
 
 class ApprovalStatus:
     PENDING    = "ממתין"
@@ -635,6 +658,28 @@ class ApprovalStatus:
     APPROVED   = "אושר"
     REJECTED   = "נדחה"
     FAILED     = "נכשל"   # execution was attempted but failed
+
+
+class ProjectedLifecycleStatus:
+    """
+    Phase 4B-2 — display-only bucket values for
+    ApprovalsFields.PROJECTED_LIFECYCLE_STATUS. Mirrors ActionContractStatus
+    (canonical, below) for TMA display purposes only. Mutable, non-
+    authoritative — never consulted to authorize a claim or execution; see
+    core/approvals_projection.py for the pure mapping and the Phase 4B-2 audit
+    for the full canonical-status -> bucket table (draft is intentionally
+    excluded from the owner-approval pending list — it may be a self_confirm
+    proposal confirmed through a separate free-text flow, not this screen).
+    """
+    PENDING         = "pending"
+    APPROVED        = "approved"
+    REJECTED        = "rejected"
+    EXECUTING       = "executing"
+    COMPLETED       = "completed"
+    FAILED          = "failed"
+    OUTCOME_UNKNOWN = "outcome_unknown"
+    SUPERSEDED      = "superseded"
+    LEGACY          = "legacy"   # bucket for ActionContractStatus.EXECUTED (legacy compat)
 
 
 class ActionContractsFields:
