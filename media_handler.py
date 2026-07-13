@@ -148,11 +148,12 @@ def _save_transcript_to_memory(transcript: str, domain: str, source: str) -> boo
     fields = {
         BMF.TITLE: f"הודעה קולית — {datetime.now(ZoneInfo('Asia/Jerusalem')).strftime('%d/%m/%Y')}",
         BMF.DESCRIPTION: transcript,
-        BMF.DATE: datetime.now(ZoneInfo("Asia/Jerusalem")).isoformat(),
+        BMF.DATE: datetime.now(ZoneInfo("Asia/Jerusalem")).date().isoformat(),
         BMF.EVENT_TYPE: "Other",
-        BMF.TAGS: [domain],
         BMF.IMPACT: "Voice Note",
     }
+    from cmd_update import normalize_business_memory_fields
+    fields = normalize_business_memory_fields(fields, domain)
     record = airtable_create(Tables.BUSINESS_MEMORY, fields, source=f"media_handler:{source}")
     if record:
         logger.info("[media_handler] saved transcript to Business Memory id=%s", record.get("id"))
@@ -188,22 +189,12 @@ def _save_transcript_to_media_files(transcript: str, domain: str, source: str, s
     return False
 
 
-def _handle_memory_confirmed(payload: dict, chat_id: str) -> str:
-    """Subscribed to media_save_to_memory.confirmed — fires after the owner taps ✅ שמור."""
-    transcript = payload.get("transcript", "")
-    domain = payload.get("domain", "general")
-    source = payload.get("source", "media_handler")
-    saved = _save_transcript_to_memory(transcript, domain, source)
-    return "✅ נשמר ב-Business Memory" if saved else "❌ שמירה ל-Business Memory נכשלה"
-
-
-def _register_subscriptions() -> None:
-    from event_bus import bus
-
-    bus.subscribe("media_save_to_memory.confirmed", _handle_memory_confirmed)
-
-
-_register_subscriptions()
+# PR-0C Phase 3: media_save_to_memory.confirmed is no longer subscribed here —
+# _send_voice_approval_request() below now queues a tool_name="media_save_to_memory"
+# payload, so app.py::_handle_approval_callback_impl's tool_name branch (which
+# executes via tools/approval_actions.py::media_save_to_memory, and through
+# ActionGateway.approve() when FEATURE_ACTION_GATEWAY is on) handles ✅ שמור —
+# not this .confirmed event anymore.
 
 
 # Owner chat_id -> {"domain": ..., "source": ...} while awaiting a follow-up
@@ -230,9 +221,12 @@ def _register_voice_callbacks(bot) -> None:
             return
 
         owner_id = str(call.from_user.id)
+        # PR-0C Phase 3: fields now live under tool_inputs (see
+        # _send_voice_approval_request) — not at the payload's top level.
+        _tool_inputs = item["payload"].get("tool_inputs", {})
         _pending_voice_edits[owner_id] = {
-            "domain": item["payload"].get("domain", "general"),
-            "source": item["payload"].get("source", "media_handler"),
+            "domain": _tool_inputs.get("domain", "general"),
+            "source": _tool_inputs.get("source", "media_handler"),
         }
         try:
             bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
@@ -267,12 +261,41 @@ def _send_voice_approval_request(
 ) -> str:
     """Queues an owner-approval request and sends the ✅ שמור / ✏️ ערוך / ❌ בטל buttons.
     Approve/reject are handled by app.py's existing generic approval-callback routing
-    (callback_data prefixes "approve:"/"reject:"); ✏️ ערוך is registered here."""
+    (callback_data prefixes "approve:"/"reject:"); ✏️ ערוך is registered here.
+
+    PR-0C Phase 3: payload now carries tool_name/tool_inputs (like every other
+    Agent-tool approval) so app.py's tool_name branch — which executes via
+    tools/approval_actions.py::media_save_to_memory, through ActionGateway.approve()
+    when FEATURE_ACTION_GATEWAY is on — handles ✅ שמור, instead of the removed
+    media_save_to_memory.confirmed event_bus subscriber."""
     from event_bus import bus
+    from identity import resolve_identity
+
+    identity = resolve_identity("telegram", owner_chat_id)
+    tool_inputs = {"transcript": transcript, "domain": domain, "source": source}
+
+    from core.action_gateway import action_gateway as _gw
+    block_message = _gw.propose_gated(
+        tenant_id=getattr(identity, "tenant_id", "boss_hq"),
+        canonical_user_id=identity.memory_key,
+        tool_name="media_save_to_memory", tool_inputs=tool_inputs,
+        origin_channel="telegram", origin_chat_id=owner_chat_id,
+        identity=identity,
+    )
+    if block_message:
+        return block_message
 
     action_id, _ = bus.request_approval(
         action="media_save_to_memory",
-        payload={"transcript": transcript, "domain": domain, "source": source},
+        payload={
+            "tool_name":         "media_save_to_memory",
+            "tool_inputs":       tool_inputs,
+            "origin_channel":    "telegram",
+            "origin_chat_id":    owner_chat_id,
+            "canonical_user_id": identity.memory_key,
+            "user_chat_id":      owner_chat_id,
+            "channel":           "telegram",
+        },
         chat_id=owner_chat_id,
         label=f"🧠 שמירה ב-Business Memory ({reason}): {transcript[:60]}",
     )
@@ -479,6 +502,62 @@ def handle_tma_upload(
         source=source,
         linked_lead_id=linked_lead_id,
     )
+
+
+# mime -> document_converter input_type, mirrors tools/google_tools.py's
+# _MIME_TO_TYPE (kept local — that dict is private to its own module).
+_DOCUMENT_MIME_TO_TYPE = {
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "text/csv": "csv",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+    "text/html": "html",
+    "text/plain": "txt",
+    "text/markdown": "markdown",
+}
+
+
+def extract_text_if_document(file_bytes: bytes, mime_type: str) -> str | None:
+    """Best-effort text extraction via document_converter, for callers (e.g.
+    cmd_update.py) that want a document's content alongside its caption/link.
+    Never raises: unsupported mime types (images, pdf, pptx, ...) and any
+    conversion failure both return None so the caller can fall back to
+    whatever it already had (caption/Drive link)."""
+    input_type = _DOCUMENT_MIME_TO_TYPE.get(mime_type)
+    if input_type is None:
+        return None
+
+    import os
+    import tempfile
+    from pathlib import Path
+    from document_converter.engine import convert_document
+
+    tmp_path: str | None = None
+    output_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=f".{input_type}", delete=False) as tmp:
+            tmp.write(file_bytes)
+            tmp_path = tmp.name
+
+        result = convert_document(tmp_path, input_type, "markdown")
+        if result.get("confidence") != "high" or not result.get("output_file"):
+            return None
+
+        output_path = Path(result["output_file"])
+        return output_path.read_text(encoding="utf-8")[:3000]
+    except Exception as e:
+        logger.error(f"[Media] extract_text_if_document failed: {e}", exc_info=True)
+        return None
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        if output_path:
+            try:
+                output_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 if __name__ == "__main__":

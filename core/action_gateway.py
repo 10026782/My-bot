@@ -160,6 +160,39 @@ class ActionContract:
     # see classify_approval_policy()). Computed once at propose time from the
     # actual tool_name/tool_inputs, never trusted from the caller.
     approval_policy:             str = APPROVAL_POLICY_APPROVAL
+    # BUG-091: which Python call site proposed this contract — "agent" (raw
+    # LLM tool_use, the default/least-trusted) or a specific trusted internal
+    # source (e.g. "lead_capture"). Set once at propose_action() time from an
+    # explicit keyword argument, never from tool_inputs — a "_source" key
+    # inside tool_inputs is Claude-controlled data and must never be trusted
+    # as a security boundary. Read by _make_dispatch_executor() at execution
+    # time and passed to dispatch_tool(trusted_source=...).
+    trusted_source:              str = "agent"
+    # PR-0 / BUG-PENDING-APPROVAL-B: context-poisoning guard. context_interrupted
+    # is set by mark_context_interrupted() when a message arrives that is not
+    # itself a confirm/cancel/disambiguation resolution for this contract —
+    # i.e. the user has moved on since the preview was shown. reconfirmation_required
+    # is set once route_confirmation_word() has re-shown the business description
+    # in response to a "כן" that arrived after an interruption; only a second
+    # "כן" (with reconfirmation_required=True) actually executes. See
+    # route_confirmation_word() for the state machine.
+    context_interrupted:         bool = False
+    reconfirmation_required:     bool = False
+    # Global ingress gate follow-up: distinct from context_interrupted — set
+    # when the gate could not positively record whether this contract's
+    # context was interrupted (the primary mark raised and even the
+    # independent fallback path failed). Never silently treated as "context
+    # intact": route_confirmation_word() gates on this exactly like a real
+    # interruption, but it stays a separate, observable field so a genuine
+    # interruption is never confused in logs/audits with "we don't actually
+    # know." Does not block the incoming message itself from being routed —
+    # only affects whether a later bare confirm executes directly.
+    context_integrity_unknown:   bool = False
+    # PR-0C Phase 4B0 — persisted version metadata, bumped on save. NOT a
+    # concurrency-control mechanism today: no transition path in this codebase
+    # checks or CAS's on this value. A real claim mechanism using this (or a
+    # replacement) is tracked separately as Phase 4B0.1.
+    version:                     int = 1
 
 
 # ══════════════════════════════════════════════════
@@ -312,11 +345,20 @@ class ExecutionLedger:
     RAM + כתיבה ל-Airtable ייעודי (ActionContracts) כאשר הוא מוגדר.
     """
 
-    def __init__(self, airtable_writer: Callable | None = None):
-        self._store: dict[str, ActionContract] = {}    # contract_id → contract
+    def __init__(self, airtable_writer: Callable | None = None, repository=None):
+        self._store: dict[str, ActionContract] = {}    # contract_id → contract (CACHE, not source of truth)
         self._by_fingerprint: dict[str, str] = {}      # fingerprint → contract_id
         self._lock = threading.Lock()
-        self._airtable_writer = airtable_writer        # callable(contract) → None
+        self._airtable_writer = airtable_writer        # callable(contract) → None — legacy best-effort mirror (Phase 4A)
+        # PR-0C Phase 4B0: ActionContractRepository | None. When set, find_by_id()
+        # falls back to it on a cache miss (restart/second-instance recovery) and
+        # hydrates the cache. There is no status-transition use of this
+        # repository — update_status() below remains a bare in-memory update
+        # regardless of whether a repository is set. Deliberately None on the
+        # live singleton for now (see _ledger_singleton comment) — this is
+        # tested, inert infrastructure, not yet an activated live
+        # persistence/recovery path.
+        self._repository = repository
 
     def save(self, contract: ActionContract) -> None:
         with self._lock:
@@ -327,9 +369,29 @@ class ExecutionLedger:
                 self._airtable_writer(contract)
             except Exception as exc:
                 logger.warning("[ActionGateway] Airtable write failed (RAM intact): %s", exc)
+        if self._repository:
+            try:
+                self._repository.save(contract)
+            except Exception as exc:
+                logger.warning("[ActionGateway] repository save failed (RAM intact): %s", exc)
 
     def find_by_id(self, contract_id: str) -> ActionContract | None:
-        return self._store.get(contract_id)
+        cached = self._store.get(contract_id)
+        if cached is not None:
+            return cached
+        if not self._repository:
+            return None
+        # Cache miss — fall back to the durable repository (restart / second
+        # instance recovery). get() already fails closed (returns None) on
+        # not-found, store-unreachable, or expiry; never fabricate a contract
+        # here if it returns None.
+        hydrated = self._repository.get(contract_id)
+        if hydrated is None:
+            return None
+        with self._lock:
+            self._store[contract_id] = hydrated
+            self._by_fingerprint[hydrated.business_action_fingerprint] = contract_id
+        return hydrated
 
     def find_by_fingerprint(self, fingerprint: str) -> ActionContract | None:
         cid = self._by_fingerprint.get(fingerprint)
@@ -346,6 +408,16 @@ class ExecutionLedger:
                 result.append(c)
         return result
 
+    def find_most_recent_by_user(self, canonical_user_id: str) -> "ActionContract | None":
+        """Most recent contract (any status) for this identity — used to give
+        a specific "your previous action was superseded" message instead of a
+        generic "nothing pending" when the most recent contract was closed by
+        a second interruption rather than executed/cancelled by the user."""
+        candidates = [c for c in self._store.values() if c.canonical_user_id == canonical_user_id]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda c: c.created_at)
+
     def update_status(self, contract_id: str, status: str, **kwargs) -> None:
         with self._lock:
             c = self._store.get(contract_id)
@@ -360,6 +432,67 @@ class ExecutionLedger:
                 self._airtable_writer(self._store[contract_id])
             except Exception as exc:
                 logger.warning("[ActionGateway] Airtable status update failed: %s", exc)
+
+    # ── PR-0 / BUG-PENDING-APPROVAL-B ────────────────────────────────
+
+    def mark_context_interrupted(self, canonical_user_id: str) -> None:
+        """כל pending contract חי לזהות זו מטופל לפי bounded one-shot FSM:
+        contract שטרם הציג reconfirmation (reconfirmation_required=False)
+        מסומן context_interrupted=True (עדיין ניתן להצלה בסיבוב אחד). contract
+        שכבר הציג reconfirmation פעם אחת (reconfirmation_required=True) —
+        הפרעה נוספת מבטלת אותו סופית (status="superseded"), לא פותחת סיבוב
+        שני. אין מעגלי reconfirmation חוזרים — ראה route_confirmation_word()."""
+        with self._lock:
+            for c in self._store.values():
+                if c.canonical_user_id == canonical_user_id and c.status == "pending":
+                    if c.reconfirmation_required:
+                        c.status = "superseded"
+                    else:
+                        c.context_interrupted = True
+
+    def mark_context_integrity_unknown(self, canonical_user_id: str) -> None:
+        """Independent fallback primitive — a separately-written method
+        touching a different field, so a bug specific to
+        mark_context_interrupted()'s own logic doesn't also break this one.
+        Used by app.py's ingress gate when the primary mark_context_interrupted()
+        call itself raised — a marking failure must never be indistinguishable
+        from "context intact"; route_confirmation_word() gates on this flag
+        exactly like a real interruption, but keeps it a separate, observable
+        field rather than conflating "known interrupted" with "unknown".
+        Same bounded one-shot rule as mark_context_interrupted(): a contract
+        that already required reconfirmation once is superseded, not re-armed."""
+        with self._lock:
+            for c in self._store.values():
+                if c.canonical_user_id == canonical_user_id and c.status == "pending":
+                    if c.reconfirmation_required:
+                        c.status = "superseded"
+                    else:
+                        c.context_integrity_unknown = True
+
+
+# ══════════════════════════════════════════════════
+# PR-0 / BUG-PENDING-APPROVAL-B — business description for reconfirmation
+# תיאור עסקי קריא בלבד — לעולם לא internal contract_id בלבד (DoD #3/#9).
+# ══════════════════════════════════════════════════
+
+def _describe_contract_for_reconfirmation(contract: ActionContract) -> str:
+    payload = contract.normalized_payload or {}
+    if contract.tool_name in ("airtable_add", "airtable_update") and payload.get("table") == _LEAD_CAPTURE_TABLE:
+        fields = payload.get("fields") or {}
+        try:
+            from airtable_schema import LeadFields
+            parts = [
+                fields.get(LeadFields.NAME, ""),
+                fields.get(LeadFields.PHONE, ""),
+                fields.get(LeadFields.DOMAIN, ""),
+            ]
+        except Exception:
+            parts = []
+        parts = [p for p in parts if p]
+        verb = "יצירת ליד" if contract.tool_name == "airtable_add" else "עדכון ליד"
+        return f"{verb}: {', '.join(parts)}" if parts else verb
+    table = payload.get("table") or payload.get("spreadsheet_name") or ""
+    return f"{contract.tool_name} / {table}" if table else contract.tool_name
 
 
 # ══════════════════════════════════════════════════
@@ -429,9 +562,16 @@ class ActionGateway:
         origin_chat_id: str,
         requires_approval: bool,
         identity=None,
+        trusted_source: str = "agent",
     ) -> GatewayResult:
         """
         מציע פעולה חדשה ל-Gateway.
+
+        trusted_source (BUG-091): מי שקורא ל-propose_action() בפועל —
+        "agent" (ברירת מחדל, הכי לא-מהימן) לקריאות שמקורן ב-Agent tool_use
+        loop, או source פנימי מהימן (למשל "lead_capture") רק כשקוד Python
+        מהימן קורא ישירות. חייב להיות ארגומנט Python מפורש מהקורא — לעולם
+        אסור לגזור אותו מתוך tool_inputs (זה תוכן ש-Claude שולט בו).
         מחזיר GatewayResult(ok=True, contract_id=...) אם מותרת.
         מחזיר GatewayResult(ok=False, ...) אם נחסמת (כפילות/pending).
 
@@ -499,6 +639,7 @@ class ActionGateway:
             actor_external_id=getattr(identity, "external_id", "") or "",
             actor_allowed_domains=list(getattr(identity, "allowed_domains", None) or []),
             approval_policy=approval_policy,
+            trusted_source=trusted_source,
         )
 
         if requires_approval:
@@ -520,6 +661,56 @@ class ActionGateway:
             canonical_user_id,
         )
         return GatewayResult(ok=True, reason="contract נרשם", contract_id=contract.contract_id)
+
+    # PR-0C Phase 3 — shared shadow/enforced propose wrapper. Every approval
+    # writer (app.py::_queue_approval, media_handler.py, followup_engine.py,
+    # core/lead_recovery.py) needs the identical FEATURE_ACTION_GATEWAY policy:
+    # flag ON -> propose_action() gates the caller for real (duplicate/pending
+    # blocks propagate as a user-facing message); flag OFF -> best-effort
+    # shadow propose for ledger/audit visibility only, never blocks, any
+    # exception is swallowed (log only). Extracted here so new writers don't
+    # each re-implement this dance by hand.
+    def propose_gated(
+        self,
+        *,
+        tenant_id: str,
+        canonical_user_id: str,
+        tool_name: str,
+        tool_inputs: dict,
+        origin_channel: str,
+        origin_chat_id: str,
+        identity=None,
+        trusted_source: str = "agent",
+    ) -> str | None:
+        """Returns None to proceed normally, or a user-facing block message the
+        caller must return immediately instead of queuing the approval."""
+        from feature_flags import is_enabled as _flag
+
+        if _flag("FEATURE_ACTION_GATEWAY"):
+            result = self.propose_action(
+                tenant_id=tenant_id, canonical_user_id=canonical_user_id,
+                tool_name=tool_name, tool_inputs=tool_inputs,
+                origin_channel=origin_channel, origin_chat_id=origin_chat_id,
+                requires_approval=True, identity=identity, trusted_source=trusted_source,
+            )
+            if not result.ok:
+                logger.info(
+                    "[ActionGateway] propose_gated blocked: %s | contract=%s",
+                    result.reason, result.contract_id,
+                )
+                return result.user_message or f"⏳ {result.reason}"
+            return None
+
+        try:
+            self.propose_action(
+                tenant_id=tenant_id, canonical_user_id=canonical_user_id,
+                tool_name=tool_name, tool_inputs=tool_inputs,
+                origin_channel=origin_channel, origin_chat_id=origin_chat_id,
+                requires_approval=True, identity=identity, trusted_source=trusted_source,
+            )
+        except Exception as exc:
+            logger.debug("[ActionGateway] shadow propose_gated failed (non-blocking): %s", exc)
+        return None
 
     def _handle_duplicate_executed(
         self, existing: ActionContract, canonical_user_id: str
@@ -551,6 +742,49 @@ class ActionGateway:
             ),
         )
 
+    # ── ingress context gate — is_own_resolution_event ───────────────
+    # BUG-PENDING-APPROVAL-B follow-up: used by app.py's webhook-level
+    # ingress gate to decide whether an incoming *text* event is a genuine
+    # attempt to resolve one of this identity's own live contracts (exempt
+    # from being marked context_interrupted) versus any other event, which
+    # is not exempt. Mirrors route_confirmation_word/route_cancellation_word/
+    # route_disambiguation/route_combined_word's own matching exactly — same
+    # keyword sets, same bare-digit-only-with-2+-live precedent (BUG-070) —
+    # so this check can never drift from what those routes actually consume.
+
+    def is_own_resolution_event(self, canonical_user_id: str, text: str) -> bool:
+        live = self.find_live_contracts(canonical_user_id)
+        if not live:
+            return False
+        stripped = text.strip()
+        lower = stripped.lower()
+        if lower in self._CONFIRM_KEYWORDS or lower in self._CANCEL_KEYWORDS:
+            return True
+        if self._parse_combined(stripped) is not None:
+            return True
+        if len(live) > 1 and self._parse_ordinal(stripped) is not None:
+            return True
+        return False
+
+    # ── bounded one-shot reconfirmation — "no pending" reason ────────
+    # BUG-PENDING-APPROVAL-B follow-up: when nothing is live, distinguish
+    # "there genuinely was never anything pending" (unchanged wording, relied
+    # on by existing tests) from "the last contract was superseded by a
+    # second interruption" — the latter gets a specific, actionable message
+    # instead of a silent dead end (the exact production bug reported: a
+    # bare כן after a supersede must never look identical to "nothing ever
+    # happened").
+
+    def describe_no_pending_reason(self, canonical_user_id: str) -> str:
+        recent = self._ledger.find_most_recent_by_user(canonical_user_id)
+        if recent and recent.status == "superseded":
+            desc = _describe_contract_for_reconfirmation(recent)
+            return (
+                f"הפעולה הקודמת בוטלה כי התחלת פעולה אחרת: {desc}.\n"
+                f"כדי לבצע אותה, שלח את הבקשה מחדש."
+            )
+        return "אין פעולה שממתינה לאישור."
+
     # ── §4 — route_confirmation_word ────────────────────────────────
 
     def route_confirmation_word(self, canonical_user_id: str, approver_role: str = "") -> str:
@@ -563,9 +797,28 @@ class ActionGateway:
         """
         live = self.find_live_contracts(canonical_user_id)
         if len(live) == 0:
-            return "אין פעולה שממתינה לאישור."
+            return self.describe_no_pending_reason(canonical_user_id)
         if len(live) == 1:
-            result = self.approve(live[0].contract_id, approver=canonical_user_id, approver_role=approver_role)
+            contract = live[0]
+            # PR-0 / BUG-PENDING-APPROVAL-B: a message unrelated to this
+            # contract arrived since the preview was shown (mark_context_interrupted).
+            # The first "כן" after that must re-show the business description
+            # and require an explicit second "כן" — never silently execute a
+            # stale action (context poisoning). context_integrity_unknown is
+            # gated identically — a marking failure must never be treated as
+            # "context intact" (see _apply_ingress_context_gate in app.py).
+            if (contract.context_interrupted or contract.context_integrity_unknown) \
+                    and not contract.reconfirmation_required:
+                self._ledger.update_status(
+                    contract.contract_id, contract.status,
+                    reconfirmation_required=True,
+                )
+                desc = _describe_contract_for_reconfirmation(contract)
+                return (
+                    f"יש פעולה קודמת שממתינה לאישור: {desc}.\n"
+                    f"לאשר אותה? (כן/לא)"
+                )
+            result = self.approve(contract.contract_id, approver=canonical_user_id, approver_role=approver_role)
             return result
         # יותר מאחת — מציג רשימה ממוספרת + שומר disambiguation state
         with self._disambiguation_lock:
@@ -848,41 +1101,153 @@ class ActionGateway:
                 "פנה לתמיכה טכנית."
             )
 
+        # NOTE: this is a plain in-memory status update, not an atomic claim.
+        # There is no protection here against two callers (two Render
+        # instances, a duplicate webhook, a double-tap) both reaching this
+        # point for the same contract — a genuinely atomic coordination
+        # primitive outside Airtable is tracked separately as Phase 4B0.1 and
+        # does not exist yet. TMA routing by contract_id stays blocked until
+        # it does (see core/action_contract_repository.py's module docstring).
         self._ledger.update_status(
-            contract_id, "approved",
-            approved_by=approver,
-            approved_at=time.time(),
+            contract_id, "approved", approved_by=approver, approved_at=time.time(),
         )
+        updated = self._ledger.find_by_id(contract_id)
+        if not updated:
+            logger.warning(
+                "[ActionGateway] approve: contract vanished immediately after update_status contract=%s",
+                contract_id,
+            )
+            return "⚠️ הפעולה לא נמצאה."
+
         logger.info(
             "[ActionGateway] approved: contract=%s fingerprint=%.12s tool=%s "
             "payload_keys=%s by=%s",
             contract_id,
-            contract.business_action_fingerprint,
-            contract.tool_name,
-            list(contract.normalized_payload.keys()),
+            updated.business_action_fingerprint,
+            updated.tool_name,
+            list(updated.normalized_payload.keys()),
             approver,
         )
-        return self._execute_contract(contract)
+        return self._execute_contract(updated)
 
     def _execute_contract(self, contract: ActionContract) -> str:
         """
         מבצע tool לאחר אישור — approved_payload == executed_payload (DoD §6).
         מריץ verify_execution על התוצאה — success claims require real tool evidence (DoD §3, §6).
+
+        Phase 4B0: When FEATURE_ATOMIC_CLAIMS=true, acquisition of atomic claim is REQUIRED
+        before any dispatcher call. No exception falls back to direct dispatch.
+        Identity from frozen contract must be preserved through atomic wrapper.
+        Dispatcher result must be classified explicitly (not just exception-based).
         """
+        from feature_flags import is_enabled
+
         self._ledger.update_status(contract.contract_id, "executing")
-        try:
-            raw = self._tool_executor(
-                tool_name=contract.tool_name,
-                tool_inputs=contract.normalized_payload,
-                contract_id=contract.contract_id,
-            )
-        except Exception as exc:
-            self._ledger.update_status(contract.contract_id, "failed")
-            logger.error(
-                "[ActionGateway] execution failed: contract=%s error=%s",
-                contract.contract_id, exc,
-            )
-            return f"❌ ביצוע נכשל: {exc}"
+
+        # Phase 4B0 atomic claim gate (if flag enabled)
+        if is_enabled("FEATURE_ATOMIC_CLAIMS"):
+            from core.action_gateway_atomic_executor import execute_with_atomic_claim
+            from identity import Identity
+            import hashlib
+
+            # Reconstruct identity from frozen contract (actor who proposed this contract)
+            # This identity is bound at proposal time and must not be re-derived at execution.
+            # FAIL-CLOSED: If required immutable fields are missing, fail immediately (don't fall back).
+            # BUG-C89-APPROVAL-IDENTITY: actor_role, actor_external_id, tenant_id, actor_user_id
+            # are integrity-bound at proposal time and must never be missing for a valid contract.
+            # Scoped to the atomic-claims path only — the legacy (flag-off) dispatch below never
+            # consumed a reconstructed identity and must not change behavior while flag is off.
+            identity = None
+            if contract.actor_role and contract.actor_external_id and contract.tenant_id and contract.actor_user_id:
+                identity = Identity(
+                    user_id=contract.actor_user_id,
+                    role=contract.actor_role,
+                    display_name=contract.actor_display_name or "",
+                    tenant_id=contract.tenant_id,
+                    domain_id=contract.actor_domain_id or "general",
+                    allowed_domains=list(contract.actor_allowed_domains or []),
+                    channel=contract.origin_channel,
+                    external_id=contract.actor_external_id,
+                )
+            else:
+                # Missing tenant, user, role, or external identity — fail closed.
+                logger.error(
+                    "[ActionGateway] identity integrity violation: contract=%s "
+                    "actor_role=%s actor_external_id=%s tenant_id=%s actor_user_id=%s "
+                    "(all required for valid frozen identity under FEATURE_ATOMIC_CLAIMS)",
+                    contract.contract_id,
+                    contract.actor_role,
+                    contract.actor_external_id,
+                    contract.tenant_id,
+                    contract.actor_user_id,
+                )
+                self._ledger.update_status(contract.contract_id, "failed")
+                return "❌ שגיאת זהות: לא ניתן לאמת את הזהות של המבקש. פנה לתמיכה טכנית."
+
+            # Deterministic idempotency key: hash(contract_id + approved_by)
+            # Same contract + same approver → same key → ALREADY_CLAIMED on retry
+            idem_seed = f"{contract.contract_id}:{contract.approved_by or contract.actor_user_id}"
+            idempotency_key = hashlib.sha256(idem_seed.encode()).hexdigest()[:16]
+
+            # Gate dispatcher behind atomic claim acquisition
+            try:
+                success, result, error = execute_with_atomic_claim(
+                    contract_id=contract.contract_id,
+                    canonical_user_id=contract.approved_by or contract.actor_user_id,
+                    tool_name=contract.tool_name,
+                    tool_inputs=contract.normalized_payload,
+                    identity=identity,  # Frozen contract identity
+                    executor_fn=self._tool_executor,
+                    idempotency_key=idempotency_key,
+                )
+
+                if not success:
+                    # Fail-closed: claim unavailable, DB down, conflict, or disabled
+                    self._ledger.update_status(contract.contract_id, "failed")
+                    logger.error(
+                        "[ActionGateway] atomic claim failed: contract=%s error=%s",
+                        contract.contract_id, error,
+                    )
+                    return f"❌ ביצוע נכשל: {error}"
+
+                # Phase 4B0: result is DispatcherOutcome when flag enabled
+                # Extract structured fields and convert to dict for downstream processing
+                from core.dispatcher_outcome import DispatcherOutcome
+                if isinstance(result, DispatcherOutcome):
+                    # Convert DispatcherOutcome to dict for verify_execution and status reply
+                    raw = result.raw_response or {
+                        "ok": True,
+                        "external_id": result.external_id,
+                    }
+                    # Ensure user_message is available for status reply
+                    if "user_message" not in raw:
+                        raw["user_message"] = result.user_message
+                else:
+                    raw = result
+            except Exception as exc:
+                # No exception fallback to direct dispatch when flag is ON — fail closed
+                self._ledger.update_status(contract.contract_id, "failed")
+                logger.error(
+                    "[ActionGateway] atomic executor raised: contract=%s error=%s",
+                    contract.contract_id, exc,
+                )
+                return f"❌ ביצוע נכשל: {exc}"
+        else:
+            # Flag OFF: legacy direct dispatch (no claim creation, no atomic coordination)
+            # _tool_executor reconstructs identity from contract using contract_id
+            try:
+                raw = self._tool_executor(
+                    tool_name=contract.tool_name,
+                    tool_inputs=contract.normalized_payload,
+                    contract_id=contract.contract_id,
+                )
+            except Exception as exc:
+                self._ledger.update_status(contract.contract_id, "failed")
+                logger.error(
+                    "[ActionGateway] execution failed: contract=%s error=%s",
+                    contract.contract_id, exc,
+                )
+                return f"❌ ביצוע נכשל: {exc}"
 
         # §3 / §6: verify before reporting success — no real evidence → failure
         try:
@@ -937,8 +1302,16 @@ class ActionGateway:
 
     def compose_status_reply(self, fact: ActionFact) -> GatewayReply:
         if fact.outcome == "executed":
+            # BUG-PENDING-APPROVAL-B follow-up: reuse the frozen contract's
+            # business description (e.g. "יצירת ליד: יוסי כהן, ...") instead
+            # of the bare tool_name — the payload never changes between
+            # proposal and execution (approved_payload == executed_payload),
+            # so the description computed at reconfirmation time is exactly
+            # what was actually written.
+            contract = self._ledger.find_by_id(fact.contract_id)
+            label = _describe_contract_for_reconfirmation(contract) if contract else fact.tool_name
             rid = f" | מזהה: `{fact.record_id}`" if fact.record_id else ""
-            text = f"✅ בוצע: {fact.tool_name}{rid}"
+            text = f"✅ בוצע: {label}{rid}"
         elif fact.outcome == "failed":
             ec = f" ({fact.error_code})" if fact.error_code else ""
             text = f"❌ נכשל: {fact.tool_name}{ec}"
@@ -1006,6 +1379,17 @@ class ActionGateway:
     def find_contract(self, contract_id: str) -> ActionContract | None:
         return self._ledger.find_by_id(contract_id)
 
+    # ── PR-0 / BUG-PENDING-APPROVAL-B ────────────────────────────────
+
+    def mark_context_interrupted(self, canonical_user_id: str) -> None:
+        """נקרא מ-app.py לכל הודעה שאינה עצמה resolution (כן/לא/disambiguation/
+        combined) עבור contract חי של הזהות הזו — ראה route_confirmation_word()."""
+        self._ledger.mark_context_interrupted(canonical_user_id)
+
+    def mark_context_integrity_unknown(self, canonical_user_id: str) -> None:
+        """Fallback delegate — see ExecutionLedger.mark_context_integrity_unknown()."""
+        self._ledger.mark_context_integrity_unknown(canonical_user_id)
+
     # ── §5 — AgentObservation ────────────────────────────────────────
 
     def record_agent_observation(
@@ -1042,7 +1426,9 @@ def _build_airtable_writer():
     """
     מחזיר callable שכותב ActionContract ל-Airtable ActionContracts table.
     נקרא lazy בעת יצוא singleton — לא בזמן import.
-    כאשר Airtable לא מוגדר/לא מחובר, מחזיר None (RAM-only).
+    כאשר Airtable לא מוגדר/לא מחובר, מחזיר None (RAM-only) — מצב צפוי, לא שגיאה.
+    כל כשל אחר (import שבור, bug) מתועד ב-warning — אסור להיבלע בשקט לגמרי,
+    אחרת "אין writer" ו"יש באג ב-writer" נראים זהים בלוגים.
     """
     try:
         from airtable_schema import Tables
@@ -1072,7 +1458,11 @@ def _build_airtable_writer():
             )
 
         return _writer
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "[ActionGateway] _build_airtable_writer failed — falling back to RAM-only: %s",
+            exc,
+        )
         return None
 
 
@@ -1088,42 +1478,77 @@ def _make_dispatch_executor(ledger: ExecutionLedger):
     יכול להיות identity.memory_key ("boss_hq:eliyahu") ולא external_id ערוץ
     אמיתי, מה שגורם ל-role ליפול חזרה ל-readonly. fallback ל-resolve_identity
     נשאר רק לחוזים ישנים/callers שלא העבירו identity ל-propose_action.
+
+    P0 (unhashable Identity): the atomic-claims wrapper (execute_with_atomic_claim)
+    already reconstructs and fail-closed-validates an Identity from the frozen
+    contract before calling this executor — it must be threaded straight through
+    to dispatch_tool's identity= keyword, not re-derived here a second time.
+    `identity` is therefore an explicit keyword param: when the caller supplies
+    one (atomic path), it is used as-is; when omitted (legacy flag-OFF path,
+    which never had an identity to give), behavior is unchanged from before —
+    identity is derived from contract_id via the ledger lookup below.
     """
-    def _executor(tool_name: str, tool_inputs: dict, contract_id: str):
+    def _executor(tool_name: str, tool_inputs: dict, contract_id: str, identity=None):
         from tools.dispatcher import dispatch_tool
         from identity import Identity, resolve_identity
 
-        identity = None
         contract = ledger.find_by_id(contract_id)
-        if contract:
-            if contract.actor_role and contract.actor_external_id:
-                identity = Identity(
-                    user_id         = contract.actor_user_id or contract.canonical_user_id,
-                    role            = contract.actor_role,
-                    display_name    = contract.actor_display_name,
-                    tenant_id       = contract.tenant_id,
-                    domain_id       = contract.actor_domain_id or "general",
-                    allowed_domains = list(contract.actor_allowed_domains or []),
-                    channel         = contract.origin_channel,
-                    external_id     = contract.actor_external_id,
-                )
-                logger.info(
-                    "[ActionGateway] approved by=%s/%s@%s external_id=%s | dispatch role=%s",
-                    contract.tenant_id, identity.user_id, contract.actor_role,
-                    contract.actor_external_id, identity.role,
-                )
-            else:
-                try:
-                    identity = resolve_identity(contract.origin_channel, contract.origin_chat_id)
-                except Exception as exc:
-                    logger.warning("[ActionGateway] identity resolve failed: %s", exc)
 
-        return dispatch_tool(tool_name, tool_inputs, identity=identity)
+        if identity is None:
+            if contract:
+                if contract.actor_role and contract.actor_external_id:
+                    identity = Identity(
+                        user_id         = contract.actor_user_id or contract.canonical_user_id,
+                        role            = contract.actor_role,
+                        display_name    = contract.actor_display_name,
+                        tenant_id       = contract.tenant_id,
+                        domain_id       = contract.actor_domain_id or "general",
+                        allowed_domains = list(contract.actor_allowed_domains or []),
+                        channel         = contract.origin_channel,
+                        external_id     = contract.actor_external_id,
+                    )
+                    logger.info(
+                        "[ActionGateway] approved by=%s/%s@%s external_id=%s | dispatch role=%s",
+                        contract.tenant_id, identity.user_id, contract.actor_role,
+                        contract.actor_external_id, identity.role,
+                    )
+                else:
+                    try:
+                        identity = resolve_identity(contract.origin_channel, contract.origin_chat_id)
+                    except Exception as exc:
+                        logger.warning("[ActionGateway] identity resolve failed: %s", exc)
+        else:
+            logger.info(
+                "[ActionGateway] using pre-resolved identity from atomic wrapper: "
+                "contract=%s tenant=%s user=%s role=%s external_id=%s",
+                contract_id, identity.tenant_id, identity.user_id, identity.role, identity.external_id,
+            )
+
+        # BUG-091: trusted_source comes from the contract itself (set once,
+        # server-side, at propose_action() time) — never re-derived from
+        # tool_inputs, which is Claude-controlled data that survives
+        # normalize_payload() unchanged (including any "_source" key).
+        _trusted_source = getattr(contract, "trusted_source", "agent") if contract else "agent"
+        return dispatch_tool(tool_name, tool_inputs, identity=identity, trusted_source=_trusted_source)
 
     return _executor
 
 
-_ledger_singleton = ExecutionLedger(airtable_writer=None)  # RAM-only until Airtable table exists
+# PR-0C Phase 4A: _build_airtable_writer()/at_upsert()/Tables.ACTION_CONTRACTS
+# are built and tested, but deliberately NOT wired into the live singleton
+# yet. propose_action()/propose_gated() are already called unconditionally
+# in production today (shadow mode when FEATURE_ACTION_GATEWAY is off) by
+# app.py::_queue_approval, media_handler.py, followup_engine.py, and
+# core/lead_recovery.py — wiring this writer in would mean every one of
+# those calls starts writing real Airtable records immediately, which is a
+# live behavior change, not inert infrastructure. It also requires a durable
+# read/recovery path first (load-by-contract_id on restart, pending-contract
+# recovery) — ExecutionLedger is 100% in-memory today, so "ActionContracts"
+# cannot honestly be called canonical durable truth until contracts can be
+# read back, not just written. Wire this only after that read path exists,
+# at_upsert()'s concurrent-write behavior has been reviewed, and the rollout
+# has been verified in a non-production environment first.
+_ledger_singleton = ExecutionLedger(airtable_writer=None)
 action_gateway = ActionGateway(
     ledger=_ledger_singleton,
     tool_executor=_make_dispatch_executor(_ledger_singleton),

@@ -35,6 +35,37 @@ _MAX_SESSIONS = 1000
 
 
 # ══════════════════════════════════════════════════
+# BUG-106 — deterministic selection among duplicate Session rows
+# ══════════════════════════════════════════════════
+
+def _select_canonical_session_record(records: list[dict]) -> dict:
+    """
+    Deterministically picks ONE record out of possibly-many rows matching
+    the same Sender ID (the Sessions filter formula is Sender-ID-only — no
+    tenant/channel/context-type scoping, confirmed against the live schema;
+    see the BUG-106 Contract Chain in BUG_AUDIT_LOG.md).
+
+    Sorted by Updated At descending — "most recently active session for
+    this sender" is the only signal the schema actually provides for "which
+    one is current" (Sessions has no Status field at all, per BUG-098's
+    finding). Without this, `records[0]` depended entirely on whatever
+    order Airtable's API happened to return for an unsorted filter query —
+    never a deliberate choice, and not guaranteed stable across requests.
+
+    `sorted(..., reverse=True)` is stable: records that tie on Updated At
+    (including ALL of them, when the field is absent/empty on every row)
+    keep their original relative order rather than being reshuffled — this
+    is what keeps `records[0]` selection unchanged for any caller/test that
+    never populated Updated At in the first place.
+    """
+    return sorted(
+        records,
+        key=lambda r: r.get("fields", {}).get(SF.UPDATED_AT, "") or "",
+        reverse=True,
+    )[0]
+
+
+# ══════════════════════════════════════════════════
 # Session Schema
 # ══════════════════════════════════════════════════
 
@@ -262,7 +293,10 @@ class PersistentSessionStore:
         self._sync_to_db(sender, session)
 
     def get_active_lead_candidate(self, sender: str) -> Optional[dict]:
-        """מחזיר candidate פעיל אם לא פג תוקפו (>1800 שניות), אחרת None."""
+        """מחזיר candidate פעיל אם לא פג תוקפו (>1800 שניות), אחרת None.
+        BUG-099c: expiry-clear כעת מסונכרן ל-DB (כמו get_pending_lead_preview
+        כבר עושה) — לפני התיקון הזה, פקיעת תוקף נוקתה רק ב-RAM; אחרי restart
+        ה-state הפג-תוקף היה יכול "לקום לתחייה" מה-DB כי ה-None מעולם לא נכתב."""
         import time as _time
         session = self.get(sender)
         if not session:
@@ -272,8 +306,91 @@ class PersistentSessionStore:
             return None
         if _time.time() - cand.get("set_at", 0) > 1800:
             session["active_lead_candidate"] = None
+            self._sync_to_db(sender, session)
             return None
         return cand
+
+    def set_lead_clarification(
+        self, sender: str, expected_field: str, partial_payload: dict, original_text: str,
+    ) -> None:
+        """שומר state של הבהרה-לפני-החלטה (BUG-099c) — קודם ליצירת candidate
+        מלא, לא ActionContract. נשמר תחת אותו מפתח session כמו
+        set_active_lead_candidate (אין store חדש) אבל עם צורה שונה לגמרי:
+        {"state": "needs_clarification", ...} לעומת {"name", "record_id",
+        "set_at"} של הבוקמארק הישן (נכתב אחרי כתיבה מוצלחת, לא נקרא היום
+        בשום מקום חי — ראה BUG-106 Contract Chain). כל consumer קיים/עתידי
+        של active_lead_candidate חייב לבדוק "state" במפורש לפני שהוא מניח
+        משהו על הצורה. "set_at" משותף לשתי הצורות בכוונה — כך ש-TTL קיים
+        (1800 שניות, get_active_lead_candidate) חל זהה על שתיהן בלי שינוי שם."""
+        import time as _time
+        session = self.get_or_create(sender)
+        session["active_lead_candidate"] = {
+            "state":           "needs_clarification",
+            "expected_field":  expected_field,
+            "partial_payload": partial_payload,
+            "original_text":   original_text,
+            "set_at":          _time.time(),
+        }
+        session["updated_at"] = _now_iso()
+        self._sync_to_db(sender, session)
+
+    def clear_active_lead_candidate(self, sender: str) -> None:
+        """מנקה active_lead_candidate במפורש (ביטול / פקודה חדשה / ActionContract
+        נוצר בהצלחה) — בניגוד ל-get_active_lead_candidate() שמנקה רק אגב
+        בדיקת-פקיעה. לא קיימת היום בשום מקום אחר; BUG-099c הראשון שצריך ניקוי
+        יזום, לא רק תלוי-TTL."""
+        session = self.get(sender)
+        if not session:
+            return
+        session["active_lead_candidate"] = None
+        session["updated_at"] = _now_iso()
+        self._sync_to_db(sender, session)
+
+    def set_pending_lead_preview(
+        self, sender: str, candidates: list[dict], raw_text: str,
+        channel: str, domain: str,
+    ) -> None:
+        """שומר preview של batch (Tier 2) עם TTL 30 דקות — BUG-058 resolver.
+        channel/domain נשמרים כאן כי ב-app.py section 2.55 (נקודת ה-resolve)
+        ה-Router עוד לא רץ — אין resolved_route_domain זמין שם. נשמרים בזמן
+        הכתיבה (_handle_clean_batch כבר מקבל את שניהם), לא מבוקשים מחדש."""
+        import time as _time
+        session = self.get_or_create(sender)
+        session["pending_lead_preview"] = {
+            "candidates": candidates,
+            "raw_text":   raw_text,
+            "channel":    channel,
+            "domain":     domain,
+            "set_at":     _time.time(),
+        }
+        session["updated_at"] = _now_iso()
+        self._sync_to_db(sender, session)
+
+    def get_pending_lead_preview(self, sender: str) -> Optional[dict]:
+        """מחזיר pending_lead_preview אם לא פג תוקפו (>1800 שניות), אחרת None.
+        בניגוד ל-get_active_lead_candidate(): קורא ל-_sync_to_db() גם אחרי ניקוי
+        expired state — preview עם לידים לא-נכתבים לא אמור להישאר רפאים ב-DB."""
+        import time as _time
+        session = self.get(sender)
+        if not session:
+            return None
+        preview = session.get("pending_lead_preview")
+        if not preview:
+            return None
+        if _time.time() - preview.get("set_at", 0) > 1800:
+            session["pending_lead_preview"] = None
+            self._sync_to_db(sender, session)
+            return None
+        return preview
+
+    def clear_pending_lead_preview(self, sender: str) -> None:
+        """מנקה pending_lead_preview אחרי אישור/ביטול/מימוש."""
+        session = self.get(sender)
+        if not session:
+            return
+        session["pending_lead_preview"] = None
+        session["updated_at"] = _now_iso()
+        self._sync_to_db(sender, session)
 
     def delete(self, sender: str) -> None:
         """מוחק session (איפוס)."""
@@ -414,7 +531,7 @@ class PersistentSessionStore:
                 )
                 return None, 0, "no_records"
 
-            selected = records[0]["id"]
+            selected = _select_canonical_session_record(records)["id"]
             return selected, len(records), "patch_existing"
         except Exception as exc:
             logger.warning("[SessionStore] live dedup check failed for %s: %s", sender, exc)
@@ -438,11 +555,11 @@ class PersistentSessionStore:
             if records is None or not records:
                 return None
 
-            record = records[0]
+            record = _select_canonical_session_record(records)
             record_id = record["id"]
             if len(records) > 1:
                 logger.warning(
-                    "[SessionStore] load sender=%s found_count=%d -- using first: %s",
+                    "[SessionStore] load sender=%s found_count=%d -- using canonical (most recently updated): %s",
                     sender, len(records), record_id,
                 )
 
@@ -501,7 +618,9 @@ class PersistentSessionStore:
                 "last_uploaded_file": session.get("last_uploaded_file"),
                 "last_tool_result":   session.get("last_tool_result"),
             }
-            airtable_update(Tables.SESSIONS, record_id, {SF.STATE_JSON: json.dumps(state, ensure_ascii=False)})
+            result = airtable_update(Tables.SESSIONS, record_id, {SF.STATE_JSON: json.dumps(state, ensure_ascii=False)})
+            if not result.get("ok"):
+                logger.warning("[SessionStore] _delete_from_db not ok for record_id=%s: %s", record_id, result.get("user_message", result))
         except Exception:
             pass
 

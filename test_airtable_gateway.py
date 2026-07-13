@@ -204,6 +204,109 @@ mismatches = check_alias_consistency()
 chk("no alias mismatches in schema_cache", len(mismatches) == 0)
 
 # ══════════════════════════════════════════════════════════════════
+# 6. SPEC A1 (Atomic Fail-Closed) — a mixed payload with ONE dropped field
+# must block the ENTIRE write (fail-closed), not silently proceed with a
+# partial write reported as full success. T3 is the critical regression
+# guard: linked-record string→list COERCION (not a drop) must still write.
+# ══════════════════════════════════════════════════════════════════
+
+print("\n── SPEC A1: atomic fail-closed on partial field drop ────")
+
+
+def _never_called_patch(url, *, headers, json, timeout):
+    raise AssertionError("httpx.patch must not be called when a field was dropped (A1)")
+
+
+def _never_called_post(url, *, headers, json, timeout):
+    raise AssertionError("httpx.post must not be called when a field was dropped (A1)")
+
+
+# T1 — unknown field mixed with a valid field → blocked entirely, no httpx call
+with patch("tools.airtable_gateway.httpx.patch", side_effect=_never_called_patch), \
+     patch("tools.airtable_gateway._at_base", return_value="appFAKE"):
+    ok = airtable_patch("Leads", "recABC123", {"Score": 80, "nonexistent_xyz": "val"}, source="tma")
+    chk("T1 (patch): unknown field mixed with valid field → blocked (False)", ok is False)
+
+with patch("tools.airtable_gateway.httpx.post", side_effect=_never_called_post), \
+     patch("tools.airtable_gateway._at_base", return_value="appFAKE"):
+    rec = airtable_create("Leads", {"Score": 80, "nonexistent_xyz": "val"}, source="tma")
+    chk("T1 (create): unknown field mixed with valid field → blocked (None)", rec is None)
+
+
+# T2 — invalid select value (enforce mode) mixed with a valid field → blocked
+def _contract(fields: dict, mode: str = "full") -> dict:
+    return {"table_id": "tblAAA", "mode": mode, "source": "live", "fetched_at": "now", "fields": fields}
+
+
+class _FakeProvider:
+    def __init__(self, contract: dict):
+        self._contract = contract
+
+    def get_table_contract(self, table):
+        return self._contract
+
+
+_LEADS_CONTRACT_T2 = _contract({
+    "Name": {"field_id": "fldZZZ", "type": "singleLineText", "choices": []},
+    "Domain": {"field_id": "fldYYY", "type": "singleSelect", "choices": ["Real Estate", "Import"]},
+})
+
+_t2_patches = (
+    patch("feature_flags.get_select_value_validation_state", return_value="enforce"),
+    patch("feature_flags.get_runtime_schema_provider_state", return_value="off"),
+    patch("core.runtime_schema_provider.get_provider", return_value=_FakeProvider(_LEADS_CONTRACT_T2)),
+    patch("schema_validator.validate_fields", return_value=[]),
+    patch("tools.airtable_gateway.httpx.patch", side_effect=_never_called_patch),
+    patch("tools.airtable_gateway._at_base", return_value="appFAKE"),
+)
+with _t2_patches[0], _t2_patches[1], _t2_patches[2], _t2_patches[3], _t2_patches[4], _t2_patches[5]:
+    ok = airtable_patch("Leads", "recABC123", {"Name": "Dani", "Domain": "invalid_value"}, source="tma")
+    chk("T2: invalid select value mixed with valid field → blocked (False)", ok is False)
+
+
+# T3 (critical) — linked-record single-string COERCION (not a drop) → succeeds
+create_calls: list[dict] = []
+
+
+def fake_post_t3(url, *, headers, json, timeout):
+    create_calls.append(json)
+    resp = MagicMock()
+    resp.status_code = 201
+    resp.json.return_value = {"id": "recNEWOWNER01", "fields": json.get("fields", {})}
+    return resp
+
+
+with patch("tools.airtable_gateway.httpx.post", side_effect=fake_post_t3), \
+     patch("tools.airtable_gateway._at_base", return_value="appFAKE"):
+    rec = airtable_create("Leads", {"Owner": "recABC123"}, source="tma")
+    chk("T3: linked-record string coercion → write SUCCEEDS (not blocked)", rec is not None)
+    chk(
+        "T3: Owner sent to Airtable as a list (coerced), not the bare string",
+        create_calls and create_calls[-1].get("fields", {}).get("Owner") == ["recABC123"],
+    )
+
+
+# T4 — read-only field mixed with a valid field → blocked entirely
+with patch("tools.airtable_gateway.httpx.patch", side_effect=_never_called_patch), \
+     patch("tools.airtable_gateway._at_base", return_value="appFAKE"):
+    ok = airtable_patch("Leads", "recABC123", {"Score": 80, "טמפרטורה": "HOT"}, source="tma")
+    chk("T4: read-only field mixed with valid field → blocked (False)", ok is False)
+
+
+# T5 — fully valid payload → unchanged behavior (success, httpx called)
+def fake_patch_t5(url, *, headers, json, timeout):
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {}
+    return resp
+
+
+with patch("tools.airtable_gateway.httpx.patch", side_effect=fake_patch_t5), \
+     patch("tools.airtable_gateway._at_base", return_value="appFAKE"):
+    ok = airtable_patch("Leads", "recABC123", {"Score": 80}, source="tma")
+    chk("T5: fully valid payload → still succeeds (no regression)", ok is True)
+
+# ══════════════════════════════════════════════════════════════════
 # Summary
 # ══════════════════════════════════════════════════════════════════
 

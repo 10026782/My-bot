@@ -51,14 +51,10 @@ class Tables:
     # זיכרון עסקי
     BUSINESS_MEMORY  = "Business Memory"   # אירועים אסטרטגיים — הזנה ידנית
     INTERACTION_LOG  = "Interaction Log"   # לוג אוטומטי — agent/system interactions
-    # שמורים לשימוש פנימי — מאומת ב-Airtable MCP 2026-06-24: שתי הטבלאות לא קיימות ב-base החי כלל
-    IMPORTS         = "Imports"
-    TENANTS         = "Tenants"
     # Game / Gamification
     WORLDS          = "Worlds"
     QUESTS          = "Quests"
     COINS_LOG       = "Coins_Log"
-    DAILY_TASKS     = "Daily_Tasks"   # DEAD CODE — לא קיימת ב-Airtable החי (מאומת 2026-06-24); ראה DailyTaskFields
     DAILY_CHECKIN   = "Daily_Checkin"
     # Roadmap
     ROADMAP_TASKS   = "Roadmap_Tasks"
@@ -87,6 +83,15 @@ class Tables:
     # Lead Events — אירועים על ליד קיים (topic חדש, עדכון domain, interest, note)
     # יש ליצור ידנית ב-Airtable לפני הפעלה. ראה LeadEventFields.
     LEAD_EVENTS      = "Lead Events"
+    # PR3A — Airtable schema snapshot archive. Must be created manually in Airtable
+    # before FEATURE_AIRTABLE_SCHEMA_SNAPSHOT can be turned on. ראה SchemaSnapshotFields.
+    SCHEMA_SNAPSHOTS = "System Schema Snapshots"
+    # PR-0C Phase 4A — canonical durable persistence for core/action_gateway.py's
+    # ActionContract/ExecutionLedger (Stage B). One state owner: this table is
+    # the source of truth; "Approvals" (below, TMA) is a display-safe projection
+    # of it, never an independent source of approval truth. Created in the live
+    # base (app4bcgoX7t0HUVnm) via Airtable MCP, 12/07/2026. ראה ActionContractsFields.
+    ACTION_CONTRACTS = "ActionContracts"
 
 
 # ══════════════════════════════════════════════════
@@ -220,9 +225,9 @@ class DealFields:
     # backwards compat — crm.py uses these
     STATUS          = "שלב"
     PRICE           = "סכום"
-    ADDRESS         = "Address"
-    FUNDING_COST    = "Funding Cost %"
-    ROI             = "ROI %"
+    ADDRESS         = "Adress"
+    FUNDING_COST    = "Funding Cost"
+    ROI             = "Roi"
     RISK_LEVEL      = "Risk Level"
     CONTACT         = "מקושר לאנשי קשר"
     DEADLINE        = "תאריך סגירה"
@@ -381,6 +386,7 @@ class BusinessMemoryFields:
     EVENT_TYPE      = "Event Type"      # Milestone|Decision|Crisis|Announcement|Learning|Other
     LEARNINGS_LINK  = "Related Learnings & Insights"
     TAGS            = "Tags"            # multi-select list field
+    DOMAIN          = "Domain"          # singleSelect — Airtable-confirmed live options
 
 
 class InteractionLogFields:
@@ -407,42 +413,6 @@ class ProfileFields:
     """
     NAME            = "name"          # always "main" — single profile row. Live field is lowercase.
     PROFILE_DATA    = "ProfileData"   # NOT YET CREATED LIVE — must be added to Airtable before profile.py can be wired in
-
-
-class ImportsFields:
-    """Import shipment records — table: Tables.IMPORTS.
-    Not yet wired to any live read/write path (see registry_calibration_report.md
-    — table is currently UNUSED). Confirmed via Airtable MCP 2026-06-24: this table
-    does not exist in the live base at all — fields below are aspirational only.
-    """
-    NAME            = "Name"
-    SUPPLIER        = "Supplier"
-    STATUS          = "Status"        # Pending | In Transit | Customs | Delivered | Cancelled
-    ORDER_DATE      = "Order Date"
-    ETA             = "ETA"
-    TOTAL_COST      = "Total Cost"
-    ADVANCE_PCT     = "Advance %"
-    BALANCE_PCT     = "Balance %"
-    NOTES           = "Notes"
-
-
-class TenantsFields:
-    """Multi-tenant registry — table: Tables.TENANTS.
-    Mirrors tenant_provisioner._save_tenant_to_airtable()'s actual field dict.
-    Confirmed via Airtable MCP 2026-06-24: this table does not exist in the live
-    base — consistent with F08/MULTITENANT being code-complete but unwired.
-    """
-    TENANT_ID       = "tenant_id"
-    NAME            = "Name"
-    TEMPLATE        = "template"
-    OWNER_NAME      = "owner_name"
-    OWNER_PHONE     = "owner_phone"
-    PLAN            = "plan"
-    STATUS          = "status"
-    CREATED_AT      = "created_at"
-    AIRTABLE_BASE   = "airtable_base"
-    DOMAINS         = "domains"
-    FEATURES        = "features"
 
 
 class WorldsFields:
@@ -665,6 +635,100 @@ class ApprovalStatus:
     APPROVED   = "אושר"
     REJECTED   = "נדחה"
     FAILED     = "נכשל"   # execution was attempted but failed
+
+
+class ActionContractsFields:
+    """
+    PR-0C Phase 4B0 — durable persistence for ActionContract/ExecutionLedger
+    (core/action_gateway.py), fronted by core/action_contract_repository.py::
+    ActionContractRepository. ExecutionLedger's in-memory _store is a cache in
+    front of this table, not the source of truth — find_by_id() falls back to
+    the repository on a cache miss and hydrates the full contract from here,
+    including actor identity/policy fields, so a restarted/second process can
+    safely resume and authorize execution exactly as the original propose_action()
+    call intended. Field names match exactly what
+    core/action_contract_repository.py's serializer sends (do not rename
+    without updating that module). Table name: Tables.ACTION_CONTRACTS.
+    contract_id is the match/primary field.
+
+    agent_observations is deliberately NOT persisted here — per its own
+    docstring it is "never user-facing, never executable" signal data, not
+    needed to safely re-authorize or re-execute a hydrated contract.
+
+    VERSION is persisted metadata only — it is NOT an active concurrency-
+    control mechanism today. No transition path in this codebase checks or
+    CAS's on it; ActionContractRepository has no transition/claim method at
+    all (see its module docstring). A real claim mechanism using this field
+    (or a replacement) is tracked separately as Phase 4B0.1, requiring a
+    genuinely atomic coordination primitive outside Airtable.
+
+    Reproducible schema spec (table created/extended via Airtable MCP in
+    app4bcgoX7t0HUVnm — no automated provisioning script exists yet; recreate
+    these fields by hand in any other environment/base until one is written):
+      contract_id                  singleLineText (primary field)
+      tenant_id                    singleLineText
+      canonical_user_id            singleLineText
+      tool_name                    singleLineText
+      normalized_payload           multilineText   (JSON string)
+      business_action_fingerprint  singleLineText
+      origin_channel                singleLineText
+      origin_chat_id                singleLineText
+      requires_approval             checkbox
+      status                        singleSelect {draft, pending, approved,
+                                     rejected, executing, executed, failed,
+                                     superseded}
+      created_at                    number (precision 3)
+      approved_by                   singleLineText
+      approved_at                   number (precision 3)
+      version                       number (precision 0)
+      actor_role                    singleLineText
+      actor_user_id                 singleLineText
+      actor_display_name            singleLineText
+      actor_domain_id               singleLineText
+      actor_external_id             singleLineText
+      actor_allowed_domains         multilineText   (JSON array string)
+      approval_policy               singleLineText
+      trusted_source                singleLineText
+      context_interrupted           checkbox
+      reconfirmation_required       checkbox
+      context_integrity_unknown     checkbox
+    """
+    CONTRACT_ID      = "contract_id"
+    TENANT_ID        = "tenant_id"
+    CANONICAL_USER_ID = "canonical_user_id"
+    TOOL_NAME        = "tool_name"
+    NORMALIZED_PAYLOAD = "normalized_payload"       # JSON string
+    BUSINESS_FINGERPRINT = "business_action_fingerprint"
+    ORIGIN_CHANNEL   = "origin_channel"
+    ORIGIN_CHAT_ID   = "origin_chat_id"
+    REQUIRES_APPROVAL = "requires_approval"
+    STATUS           = "status"    # draft|pending|approved|rejected|executing|executed|failed|superseded
+    CREATED_AT       = "created_at"       # unix timestamp (float)
+    APPROVED_BY      = "approved_by"
+    APPROVED_AT      = "approved_at"      # unix timestamp (float)
+    VERSION          = "version"          # persisted metadata only — not an active concurrency guard (see class docstring)
+    ACTOR_ROLE               = "actor_role"
+    ACTOR_USER_ID             = "actor_user_id"
+    ACTOR_DISPLAY_NAME        = "actor_display_name"
+    ACTOR_DOMAIN_ID           = "actor_domain_id"
+    ACTOR_EXTERNAL_ID         = "actor_external_id"
+    ACTOR_ALLOWED_DOMAINS     = "actor_allowed_domains"    # JSON array string
+    APPROVAL_POLICY           = "approval_policy"
+    TRUSTED_SOURCE            = "trusted_source"
+    CONTEXT_INTERRUPTED       = "context_interrupted"
+    RECONFIRMATION_REQUIRED   = "reconfirmation_required"
+    CONTEXT_INTEGRITY_UNKNOWN = "context_integrity_unknown"
+
+
+class ActionContractStatus:
+    DRAFT      = "draft"
+    PENDING    = "pending"
+    APPROVED   = "approved"
+    REJECTED   = "rejected"
+    EXECUTING  = "executing"
+    EXECUTED   = "executed"
+    FAILED     = "failed"
+    SUPERSEDED = "superseded"
 
 
 class EmergencyWindowFields:
@@ -1172,25 +1236,6 @@ class DecisionInboxStatus:
     REJECTED  = "Rejected"
 
 
-class DailyTaskFields:
-    """DEAD CODE — Tables.DAILY_TASKS ("Daily_Tasks") does not exist in the live
-    Airtable base (confirmed via Airtable MCP 2026-06-24). Imported but unused in
-    tma_api.py (DailyCheckinFields/Tables.DAILY_CHECKIN is the live equivalent
-    actually in use). Do not wire this in without creating the table first.
-    """
-    DATE   = "Date"
-    TASK   = "Task"
-    QUEST  = "Quest"    # linked record → Quests
-    COINS  = "Coins"
-    STATUS = "Status"   # Todo | Done | Skipped
-    WHO    = "Who"      # אליהו | קלוד קוד | אורי
-
-class DailyTaskStatus:
-    TODO    = "Todo"
-    DONE    = "Done"
-    SKIPPED = "Skipped"
-
-
 class TrafficSourcesFields:
     """BOSS Growth P0 — channel-level traffic source attribution.
     Table name: Tables.TRAFFIC_SOURCES ("TRAFFIC_SOURCES"), already live.
@@ -1246,3 +1291,25 @@ class LeadEventType:
     DOMAIN_CHANGE    = "domain_change"    # שינוי domain לאותו ליד
     FOLLOWUP_REQUEST = "followup_request" # ליד מבקש שיחזרו אליו
     OTHER            = "other"            # אחר
+
+
+# ══════════════════════════════════════════════════
+# PR3A — Schema Snapshot Archive
+# ══════════════════════════════════════════════════
+
+class SchemaSnapshotFields:
+    """Tables.SCHEMA_SNAPSHOTS — must be created manually in Airtable before use."""
+    SNAPSHOT_DATE  = "Snapshot Date"    # dateTime
+    SNAPSHOT_FILE  = "Snapshot File"    # multipleAttachments — JSON + XLSX
+    TABLES_COUNT   = "Tables Count"     # number
+    STATUS         = "Status"           # singleSelect — see SchemaSnapshotStatus
+    NOTES          = "Notes"            # multilineText
+    SCHEMA_HASH    = "Schema Hash"      # singleLineText
+    BASE_ID        = "Base ID"          # singleLineText
+
+
+class SchemaSnapshotStatus:
+    """Tables.SCHEMA_SNAPSHOTS.Status singleSelect — exact values."""
+    OK             = "OK"
+    DRIFT_DETECTED = "Drift Detected"
+    ERROR          = "Error"

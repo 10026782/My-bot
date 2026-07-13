@@ -83,11 +83,18 @@ SETUP_WEBHOOK=1 python app.py
 |-------|-----|
 | Build Command | `pip install -r requirements.txt` |
 | Start Command | `gunicorn app:app` |
+| Pre-Deploy Command | `python -m core.database_migrations` |
 | Python Version | 3.11 |
 | Auto-Deploy | Yes (main branch) |
 | Health Check Path | `/health` |
 
-**Environment Variables:** הוסף את כל המשתנים מ-SETUP.md ב-Render Dashboard → Environment.
+**Pre-Deploy Command:** Runs PostgreSQL migrations for Phase 4B0.1A atomic coordination (if `FEATURE_ATOMIC_CLAIMS=true`). Blocks deploy if migrations fail. Idempotent — safe to run repeatedly on each deploy. See `docs/PHASE_4B0_1C_STAGING_WIRING.md` for more details.
+
+**Environment Variables:** הוסף את כל המשתנים מ-SETUP.md ב-Render Dashboard → Environment. For atomic claims (staging only), also set:
+```
+FEATURE_ATOMIC_CLAIMS=true
+DATABASE_URL=postgresql://...  # Or individual DATABASE_HOST, DATABASE_PORT, etc.
+```
 
 ---
 

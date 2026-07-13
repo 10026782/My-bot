@@ -58,6 +58,10 @@ LINKED_RECORD_FIELDS: dict[str, set[str]] = {
 # Fields the agent should never write — security layer
 _ALWAYS_FORBIDDEN: frozenset[str] = frozenset({"tenant", "owner_id", "user_id", "chat_id"})
 
+# PR2 rev.2 — Airtable Meta API field type strings for select fields.
+# Same two literal values already used independently by tools/schema_governance.py.
+_SELECT_FIELD_TYPES: frozenset[str] = frozenset({"singleSelect", "multipleSelects"})
+
 
 # ══════════════════════════════════════════════════════════════════
 # Core normalise / validate
@@ -123,13 +127,111 @@ def validate_airtable_fields(table: str, fields: dict) -> tuple[dict, list[str]]
 
         clean[k] = v
 
-    # (final) schema_cache.json guard — drop fields Airtable doesn't know about
-    unknown = _sv.validate_fields(table, clean)
+    # (final) unknown-field guard — drop fields Airtable doesn't know about.
+    # PR3B (rev.2): reads through RuntimeSchemaProvider.get_table_contract()
+    # in shadow/enforce state instead of schema_validator directly. "off"
+    # (default) preserves prior behavior exactly — the provider is never
+    # even called. Do not reintroduce ad-hoc schema validation outside
+    # RuntimeSchemaProvider going forward.
+    from feature_flags import get_runtime_schema_provider_state
+    state = get_runtime_schema_provider_state()
+
+    legacy_unknown = _sv.validate_fields(table, clean)
+
+    if state == "off":
+        unknown = legacy_unknown
+    else:
+        provider_unknown = _provider_unknown_fields(table, clean)
+        if state == "shadow":
+            unknown = legacy_unknown
+            if set(provider_unknown) != set(legacy_unknown):
+                logger.warning(
+                    "[RuntimeSchemaProvider:SHADOW] discrepancy table=%s legacy_unknown=%s "
+                    "provider_unknown=%s (not blocking — shadow state)",
+                    table, legacy_unknown, provider_unknown,
+                )
+        else:  # "enforce"
+            unknown = provider_unknown
+
     for u in unknown:
         errors.append(f"unknown field '{u}' in {table} (not in schema_cache)")
         del clean[u]
 
+    # (PR2 rev.2) select-value validation — reads through the same
+    # RuntimeSchemaProvider contract, but only ever runs when
+    # contract["mode"] == "full" (never during "name_only" seed fallback —
+    # schema_cache.json has no choices to check against, so it must not
+    # produce false positives; see core/runtime_schema_provider.py).
+    # Independent flag/state from the unknown-field guard above — a table
+    # can be enforce for one and shadow/off for the other.
+    from feature_flags import get_select_value_validation_state
+    value_state = get_select_value_validation_state()
+
+    if value_state != "off":
+        invalid = _provider_invalid_select_values(table, clean)
+        for field, (value, allowed) in invalid.items():
+            if value_state == "shadow":
+                logger.warning(
+                    "[SelectValueValidation:SHADOW] invalid value table=%s field=%s "
+                    "value=%r allowed=%s (not blocking — shadow state)",
+                    table, field, value, allowed,
+                )
+            else:  # "enforce"
+                errors.append(
+                    f"Airtable value validation failed: table={table} field={field} "
+                    f"value={value!r} allowed={allowed}"
+                )
+                del clean[field]
+
     return clean, errors
+
+
+def _provider_unknown_fields(table: str, fields: dict) -> list[str]:
+    """Unknown-field list per RuntimeSchemaProvider.get_table_contract()."""
+    from core.runtime_schema_provider import get_provider
+    contract = get_provider().get_table_contract(table)
+    known = contract["fields"].keys()
+    return [k for k in fields if k not in known]
+
+
+def _provider_invalid_select_values(table: str, fields: dict) -> dict[str, tuple[object, list[str]]]:
+    """
+    Returns {field_name: (offending_value, allowed_choices)} for every
+    singleSelect/multipleSelects field in `fields` whose value(s) aren't in
+    RuntimeSchemaProvider's live choices for this table.
+
+    Only runs when the provider's contract for this table is mode="full" —
+    mode="name_only" (seed fallback) never has choices, so it's always
+    skipped here rather than risk a false-positive block. A multipleSelects
+    field with any invalid entry is reported (and, in enforce, dropped) as
+    a whole — no partial-list filtering (PR2 rev.2 scope decision).
+    """
+    from core.runtime_schema_provider import get_provider
+    contract = get_provider().get_table_contract(table)
+    if contract["mode"] != "full":
+        return {}
+
+    invalid: dict[str, tuple[object, list[str]]] = {}
+    for field, value in fields.items():
+        info = contract["fields"].get(field)
+        if not info or info["type"] not in _SELECT_FIELD_TYPES:
+            continue
+        choices = info["choices"]
+        if not choices:
+            continue  # select field with no configured options yet — nothing to check against
+
+        if info["type"] == "multipleSelects":
+            if not isinstance(value, list):
+                continue  # not our shape to validate — leave to existing coercion/validation
+            if any(v not in choices for v in value):
+                invalid[field] = (value, choices)
+        else:  # singleSelect
+            if not isinstance(value, str):
+                continue
+            if value not in choices:
+                invalid[field] = (value, choices)
+
+    return invalid
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -206,11 +308,24 @@ def airtable_patch(
     fields = normalize_airtable_fields(table, fields)
     clean, errors = validate_airtable_fields(table, fields)
 
-    if errors:
+    # SPEC A1 (Atomic Fail-Closed): a partial write (some fields silently
+    # dropped by validate_airtable_fields) must not proceed and report
+    # success — the caller/user would have no way to know data was lost.
+    # dropped is computed against `fields` (post-normalize, pre-validate),
+    # not the original caller payload, because normalize_airtable_fields
+    # may rename keys (aliases) — comparing must stay within one namespace.
+    # Coercions (e.g. a single "recXXX" string wrapped into ["recXXX"] for
+    # a linked-record field) stay under the SAME key in `clean`, so they
+    # are correctly NOT counted as dropped.
+    dropped = set(fields.keys()) - set(clean.keys())
+    if dropped:
         logger.warning(
-            "[gateway:%s] PATCH %s/%s — dropped fields: %s",
-            source, table, record_id, errors,
+            "[gateway:%s] PATCH %s/%s — fields dropped, write blocked: %s (all errors: %s)",
+            source, table, record_id, sorted(dropped), errors,
         )
+        _audit_log(source, table, "patch", record_id, [], ok=False)
+        return False
+
     if not clean:
         logger.warning(
             "[gateway:%s] PATCH %s/%s — no valid fields after normalization",
@@ -264,11 +379,16 @@ def airtable_create(
     fields = normalize_airtable_fields(table, fields)
     clean, errors = validate_airtable_fields(table, fields)
 
-    if errors:
+    # SPEC A1 (Atomic Fail-Closed) — see identical reasoning in airtable_patch().
+    dropped = set(fields.keys()) - set(clean.keys())
+    if dropped:
         logger.warning(
-            "[gateway:%s] POST %s — dropped fields: %s",
-            source, table, errors,
+            "[gateway:%s] POST %s — fields dropped, write blocked: %s (all errors: %s)",
+            source, table, sorted(dropped), errors,
         )
+        _audit_log(source, table, "create", "", [], ok=False)
+        return None
+
     if not clean:
         logger.warning(
             "[gateway:%s] POST %s — no valid fields after normalization",
@@ -306,6 +426,209 @@ def airtable_create(
         logger.warning("[gateway:%s] POST %s error: %s", source, table, e)
         _audit_log(source, table, "create", "", [], ok=False)
         return None
+
+
+class AirtableLookupError(Exception):
+    """Raised by at_get_by_field on a network/HTTP failure — distinct from a
+    clean "no matching record" result, so callers (esp.
+    ActionContractRepository) can fail closed on a store outage instead of
+    silently treating "can't reach Airtable" the same as "genuinely not found"."""
+
+
+def at_get_by_field(table: str, field: str, value: str) -> dict | None:
+    """
+    Finds a single record by an exact field match. Returns the raw Airtable
+    record dict ({"id": ..., "fields": {...}}) or None if no match. Raises
+    AirtableLookupError on a network/HTTP failure — the caller must not treat
+    that the same as "not found" (see ActionContractRepository.get()).
+    """
+    try:
+        r = httpx.get(
+            _at_url(table),
+            headers=_at_headers(),
+            params={
+                "filterByFormula": f"{{{field}}}='{_safe_formula_param(str(value))}'",
+                "maxRecords": 1,
+            },
+            timeout=10,
+        )
+    except Exception as e:
+        raise AirtableLookupError(f"{table}/{field}={value!r}: {e}") from e
+
+    if r.status_code != 200:
+        raise AirtableLookupError(f"{table}/{field}={value!r}: HTTP {r.status_code}")
+
+    records = r.json().get("records", [])
+    return records[0] if records else None
+
+
+def at_list_by_formula(table: str, formula: str, max_records: int = 100) -> list[dict]:
+    """
+    Lists records matching a caller-built filterByFormula string. The caller
+    is responsible for escaping any interpolated values via
+    _safe_formula_param() — this function does no escaping of its own (the
+    formula may combine multiple conditions with AND()/OR(), which a single
+    value-escaping helper can't safely do generically). Raises
+    AirtableLookupError on a network/HTTP failure — same fail-closed contract
+    as at_get_by_field().
+    """
+    try:
+        r = httpx.get(
+            _at_url(table),
+            headers=_at_headers(),
+            params={"filterByFormula": formula, "maxRecords": max_records},
+            timeout=10,
+        )
+    except Exception as e:
+        raise AirtableLookupError(f"{table} list error: {e}") from e
+
+    if r.status_code != 200:
+        raise AirtableLookupError(f"{table} list: HTTP {r.status_code}")
+
+    return r.json().get("records", [])
+
+
+def at_upsert(
+    table: str,
+    fields: dict,
+    match_field: str,
+    source: str = "unknown",
+) -> bool:
+    """
+    Create-or-update by match_field's value (e.g. contract_id). Intended for
+    core/action_gateway.py's ExecutionLedger to persist ActionContracts.
+
+    KNOWN LIMITATION — not safe under concurrent calls for the same
+    match_field value: the lookup-then-write here is not atomic (classic
+    TOCTOU), so two near-simultaneous at_upsert() calls for a brand-new
+    contract_id could both see "no existing record" and both create one
+    (duplicate rows), and two racing writes for an existing record could
+    apply out of order (a stale status could overwrite a newer one — last
+    HTTP call to land wins, not last logical call). There is no
+    concurrency-safe alternative in this codebase yet for status transitions
+    — a genuinely atomic coordination primitive outside Airtable is tracked
+    separately as Phase 4B0.1. This function remains a plain best-effort
+    upsert. Returns True on success.
+    """
+    match_value = fields.get(match_field)
+    if not match_value:
+        logger.warning(
+            "[gateway:%s] at_upsert %s — match_field '%s' missing/empty in fields",
+            source, table, match_field,
+        )
+        return False
+
+    try:
+        existing = at_get_by_field(table, match_field, str(match_value))
+    except AirtableLookupError as e:
+        logger.warning("[gateway:%s] at_upsert %s lookup error: %s", source, table, e)
+        existing = None
+
+    if existing:
+        return airtable_patch(table, existing["id"], fields, source=source)
+    return airtable_create(table, fields, source=source) is not None
+
+
+def airtable_delete(table: str, record_id: str, source: str = "unknown") -> bool:
+    """DELETE an existing Airtable record. Returns True on success."""
+    try:
+        r = httpx.delete(
+            f"{_at_url(table)}/{record_id}",
+            headers=_at_headers(),
+            timeout=10,
+        )
+        ok = r.status_code == 200
+        _audit_log(source, table, "delete", record_id, [], ok=ok)
+        if not ok:
+            logger.warning(
+                "[gateway:%s] DELETE %s/%s → %d: %s",
+                source, table, record_id, r.status_code, r.text[:200],
+            )
+        return ok
+    except Exception as e:
+        logger.warning("[gateway:%s] DELETE %s/%s error: %s", source, table, record_id, e)
+        _audit_log(source, table, "delete", record_id, [], ok=False)
+        return False
+
+
+# ══════════════════════════════════════════════════════════════════
+# PR3A — Native attachment upload (Meta API ID resolution + uploadAttachment)
+# ══════════════════════════════════════════════════════════════════
+#
+# Airtable's regular record PATCH/POST does not accept raw bytes for
+# attachment fields — only {"url": ...} pointing at an already-public file.
+# Uploading bytes we generated internally (no public URL) requires the
+# dedicated binary upload endpoint below, which lives on a different host
+# (content.airtable.com, not api.airtable.com) and needs the *field ID*,
+# not the field name. Table/field name != table/field ID — always resolve
+# via the Meta API rather than assuming they match.
+
+def resolve_table_and_field_ids(table_name: str, field_name: str) -> tuple[str, str]:
+    """
+    Resolve Airtable's internal tableId/fieldId for (table_name, field_name)
+    via the Meta API. Raises RuntimeError if either cannot be found —
+    callers must fail closed, never guess an ID.
+    """
+    r = httpx.get(
+        f"https://api.airtable.com/v0/meta/bases/{_at_base()}/tables",
+        headers={"Authorization": f"Bearer {_at_key()}"},
+        timeout=15,
+    )
+    r.raise_for_status()
+    for t in r.json().get("tables", []):
+        if t.get("name") == table_name:
+            table_id = t["id"]
+            for f in t.get("fields", []):
+                if f.get("name") == field_name:
+                    return table_id, f["id"]
+            raise RuntimeError(
+                f"field '{field_name}' not found in table '{table_name}' via Meta API"
+            )
+    raise RuntimeError(f"table '{table_name}' not found via Meta API")
+
+
+def airtable_upload_attachment(
+    record_id: str,
+    field_id: str,
+    filename: str,
+    content_bytes: bytes,
+    content_type: str,
+    source: str = "unknown",
+) -> dict:
+    """
+    Upload raw bytes as a native Airtable attachment on an existing record.
+    This is a new write path inside the Gateway, not a bypass of it.
+    Returns {"ok": bool, "error": str|None, "raw": dict}.
+    """
+    import base64
+
+    b64 = base64.b64encode(content_bytes).decode("ascii")
+    try:
+        r = httpx.post(
+            f"https://content.airtable.com/v0/{_at_base()}/{record_id}/{field_id}/uploadAttachment",
+            headers={
+                "Authorization": f"Bearer {_at_key()}",
+                "Content-Type": "application/json",
+            },
+            json={"contentType": content_type, "filename": filename, "file": b64},
+            timeout=30,
+        )
+        ok = r.status_code == 200
+        _audit_log(source, "attachment_upload", "upload", record_id, [field_id], ok=ok)
+        if ok:
+            return {"ok": True, "error": None, "raw": r.json()}
+        body = r.text[:300]
+        logger.warning(
+            "[gateway:%s] uploadAttachment %s/%s → %d: %s",
+            source, record_id, field_id, r.status_code, body,
+        )
+        return {"ok": False, "error": f"HTTP {r.status_code}: {body}", "raw": {}}
+    except Exception as e:
+        logger.warning(
+            "[gateway:%s] uploadAttachment %s/%s error: %s", source, record_id, field_id, e
+        )
+        _audit_log(source, "attachment_upload", "upload", record_id, [field_id], ok=False)
+        return {"ok": False, "error": str(e), "raw": {}}
 
 
 # ══════════════════════════════════════════════════════════════════

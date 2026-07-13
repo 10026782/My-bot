@@ -317,7 +317,7 @@ def _create_decision_event(identity, decision_id: str, event: dict) -> str | Non
     source_tag = f"cmd_decision:{identity.tenant_id}:{identity.user_id}"
     fields = {
         DecisionEventFields.DECISION: [decision_id],
-        DecisionEventFields.EVENT_DATE: datetime.now(ZoneInfo("Asia/Jerusalem")).isoformat(),
+        DecisionEventFields.EVENT_DATE: datetime.now(ZoneInfo("Asia/Jerusalem")).date().isoformat(),
         DecisionEventFields.CHANNEL: event.get("Channel", DecisionEventChannel.TELEGRAM),
         DecisionEventFields.RAW_CONTENT: event.get("raw_content", ""),
         DecisionEventFields.DELTA_TYPE: event.get("Delta Type", ""),
@@ -559,7 +559,7 @@ def _handle_forward(bot, msg, identity) -> None:
     inbox_fields = {
         DecisionInboxFields.RAW_INPUT: text,
         DecisionInboxFields.CHANNEL: DecisionInboxChannel.TELEGRAM,
-        DecisionInboxFields.RECEIVED: datetime.now(ZoneInfo("Asia/Jerusalem")).isoformat(),
+        DecisionInboxFields.RECEIVED: datetime.now(ZoneInfo("Asia/Jerusalem")).date().isoformat(),
         DecisionInboxFields.STATUS: DecisionInboxStatus.PENDING,
         DecisionInboxFields.TENANT_ID: identity.tenant_id,
     }
@@ -613,7 +613,7 @@ def _link_inbox_to_decision(bot, call, inbox_id: str, decision_id: str) -> None:
 
     event_fields = {
         DecisionEventFields.DECISION: [decision_id],
-        DecisionEventFields.EVENT_DATE: datetime.now(ZoneInfo("Asia/Jerusalem")).isoformat(),
+        DecisionEventFields.EVENT_DATE: datetime.now(ZoneInfo("Asia/Jerusalem")).date().isoformat(),
         DecisionEventFields.CHANNEL: event.get("Channel", DecisionEventChannel.TELEGRAM),
         DecisionEventFields.RAW_CONTENT: raw_text,
         DecisionEventFields.DELTA_TYPE: event.get("Delta Type", ""),
@@ -708,7 +708,7 @@ def route_file_to_decision_inbox(
     inbox_fields = {
         DecisionInboxFields.RAW_INPUT: text,
         DecisionInboxFields.CHANNEL: channel,
-        DecisionInboxFields.RECEIVED: datetime.now(ZoneInfo("Asia/Jerusalem")).isoformat(),
+        DecisionInboxFields.RECEIVED: datetime.now(ZoneInfo("Asia/Jerusalem")).date().isoformat(),
         DecisionInboxFields.STATUS: DecisionInboxStatus.PENDING,
         DecisionInboxFields.TENANT_ID: identity.tenant_id,
     }
@@ -789,7 +789,7 @@ def handle_attachment_reference(bot, identity, chat_id, text: str) -> bool:
     inbox_fields = {
         DecisionInboxFields.RAW_INPUT: filename,
         DecisionInboxFields.CHANNEL: DecisionInboxChannel.TELEGRAM,
-        DecisionInboxFields.RECEIVED: datetime.now(ZoneInfo("Asia/Jerusalem")).isoformat(),
+        DecisionInboxFields.RECEIVED: datetime.now(ZoneInfo("Asia/Jerusalem")).date().isoformat(),
         DecisionInboxFields.STATUS: DecisionInboxStatus.PENDING,
         DecisionInboxFields.TENANT_ID: identity.tenant_id,
     }

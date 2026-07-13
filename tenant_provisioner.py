@@ -173,7 +173,7 @@ def _save_tenant_to_airtable(config: TenantConfig) -> bool:
             "features":      ",".join(config.features),
         }
         result = airtable_add("Tenants", fields)
-        return "✅" in result
+        return bool(result.get("ok"))
 
     except ImportError:
         logger.debug("[Tenant] airtable_tools not available — dry-run")
@@ -261,6 +261,9 @@ def suspend_tenant(tenant_id: str) -> str:
             return "❌ לא נמצא record_id."
 
         result = airtable_update("Tenants", m.group(1), {"status": "suspended"})
+        if not result.get("ok"):
+            logger.warning(f"[Tenant] Suspend failed: {tenant_id} — {result.get('user_message', result)}")
+            return f"❌ השעיית tenant '{tenant_id}' נכשלה."
         logger.warning(f"[Tenant] Suspended: {tenant_id}")
         return f"⏸ Tenant '{tenant_id}' הושעה."
 

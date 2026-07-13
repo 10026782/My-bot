@@ -163,7 +163,7 @@ def register_update_command(bot, get_identity):
             bot.send_message(msg.chat.id, "אין הרשאה לפקודה זו.")
             return
 
-        record = _save_to_business_memory(
+        result = _save_to_business_memory(
             identity   = identity,
             title      = f"{state['entry_type']}: {msg.text[:60]}",
             raw_text   = msg.text,
@@ -171,13 +171,18 @@ def register_update_command(bot, get_identity):
             entry_type = state.get("entry_type", "Other"),
         )
 
-        if record:
+        if result["ok"]:
             bot.send_message(
                 msg.chat.id,
                 f"✅ *נשמר בזיכרון עסקי*\n\n"
                 f"📌 {state['entry_type']} | {_domain_label(state['domain'])}\n"
                 f"_{msg.text[:80]}{'...' if len(msg.text) > 80 else ''}_",
                 parse_mode="Markdown",
+            )
+        elif "Domain resolution failed" in result["error"]:
+            bot.send_message(
+                msg.chat.id,
+                "❌ לא הצלחתי לשמור — בעיה בזיהוי תחום העסק (Domain). נסה שוב או פנה לבעל המערכת.",
             )
         else:
             bot.send_message(
@@ -188,6 +193,283 @@ def register_update_command(bot, get_identity):
     logger.info("[/update] handler registered successfully")
 
 
+# ── תפיסת קובץ (photo/document) בשלב 'text' ──────────────────────
+# app.py's webhook routes photo/document updates straight to the F16
+# media handler (_handle_telegram_media) before ever calling
+# bot.process_new_updates — so capture_text above, which only matches
+# messages with .text, never sees them. Without this, an attachment sent
+# mid-/update would silently fall through to the generic Drive-upload
+# flow and orphan the pending state until its TTL expires. app.py must
+# check has_pending_file_capture() and call capture_photo_or_document()
+# *before* _handle_telegram_media for photo/document content types.
+
+def has_pending_file_capture(user_id: str) -> bool:
+    state = _get_valid_state(user_id)
+    return bool(state and state.get("step") == "text")
+
+
+# ── תפיסת טקסט חופשי בשלב 'text' ─────────────────────────────────
+# app.py's webhook only calls bot.process_new_updates() for slash-command
+# text (see the `if text.startswith("/")` branch) — free text never goes
+# through it, so capture_text above (registered via @bot.message_handler)
+# never fires for it either. Free text sent mid-/update instead falls all
+# the way through to idempotency.is_duplicate() and then run_agent(),
+# silently abandoning the pending state until its TTL expires. app.py must
+# check has_pending_text_capture() *before* the idempotency check and, if
+# True, call bot.process_new_updates([update]) itself so capture_text runs.
+
+def has_pending_text_capture(user_id: str) -> bool:
+    state = _get_valid_state(user_id)
+    return bool(state and state.get("step") == "text")
+
+
+def capture_photo_or_document(bot, message, get_identity) -> None:
+    uid     = str(message.from_user.id)
+    chat_id = message.chat.id
+    state   = _pending.pop(uid, None)
+
+    if not state:
+        return
+
+    if _is_expired(state):
+        bot.send_message(chat_id, "⏱ פג תוקף — נסה /update מחדש.")
+        return
+
+    # re-check הרשאה לפני כתיבה בפועל — לעולם לא לסמוך על state ישן בלבד
+    identity = get_identity("telegram", uid)
+    if not identity or not (identity.is_owner or identity.role in _ALLOWED_ROLES):
+        bot.send_message(chat_id, "אין הרשאה לפקודה זו.")
+        return
+
+    caption = (getattr(message, "caption", None) or "").strip()
+    drive_url = _upload_attachment(bot, message, uid, state.get("domain", "general"))
+    extracted_text = _extract_document_text(bot, message)
+
+    raw_text = caption or "קובץ מצורף"
+    if extracted_text:
+        raw_text = f"{raw_text}\n\n{extracted_text}"
+    if drive_url:
+        raw_text = f"{raw_text}\n📎 {drive_url}"
+
+    result = _save_to_business_memory(
+        identity   = identity,
+        title      = f"{state['entry_type']}: {(caption or 'קובץ מצורף')[:60]}",
+        raw_text   = raw_text,
+        domain     = state.get("domain", "general"),
+        entry_type = state.get("entry_type", "Other"),
+    )
+
+    if result["ok"]:
+        lines = [
+            "✅ *נשמר בזיכרון עסקי*",
+            "",
+            f"📌 {state['entry_type']} | {_domain_label(state['domain'])}",
+        ]
+        if drive_url:
+            lines.append(f"🔗 {drive_url}")
+        if caption:
+            lines.append(f"_{caption[:80]}{'...' if len(caption) > 80 else ''}_")
+        bot.send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
+    elif "Domain resolution failed" in result["error"]:
+        bot.send_message(chat_id, "❌ לא הצלחתי לשמור — בעיה בזיהוי תחום העסק (Domain). נסה שוב או פנה לבעל המערכת.")
+    else:
+        bot.send_message(chat_id, "⚠️ הקובץ התקבל אבל לא נשמר. בדוק logs.")
+
+
+def _upload_attachment(bot, message, uid: str, domain: str) -> str:
+    """מעלה photo/document ל-Drive דרך media_handler הקיים. לא חוסם — כשל מחזיר ''."""
+    try:
+        from feature_flags import is_enabled
+        if not is_enabled("FEATURE_MEDIA_UPLOAD"):
+            return ""
+    except ImportError:
+        return ""
+
+    try:
+        from media_handler import handle_file_upload
+
+        if message.content_type == "photo":
+            photo     = message.photo[-1]
+            file_id   = photo.file_id
+            filename  = f"{file_id}.jpg"
+            mime_type = "image/jpeg"
+            file_type = "image"
+        else:
+            doc       = message.document
+            file_id   = doc.file_id
+            filename  = doc.file_name or f"{file_id}"
+            mime_type = doc.mime_type or "application/octet-stream"
+            file_type = "document"
+
+        file_info  = bot.get_file(file_id)
+        file_bytes = bot.download_file(file_info.file_path)
+        result = handle_file_upload(
+            file_bytes = file_bytes,
+            filename   = filename,
+            mime_type  = mime_type,
+            file_type  = file_type,
+            file_id    = file_id,
+            user_id    = uid,
+            domain     = domain,
+            source     = "telegram",
+        )
+        return result.drive_url if result.ok else ""
+    except Exception as e:
+        logger.error(f"[C20] attachment upload failed: {e}", exc_info=True)
+        return ""
+
+
+def _extract_document_text(bot, message) -> str | None:
+    """מוריד document (לא photo) ומעביר ל-media_handler.extract_text_if_document.
+    לא חוסם — כל כשל/פורמט לא נתמך מחזיר None והרשומה נשמרת רק עם caption+drive_url."""
+    if message.content_type != "document":
+        return None
+
+    try:
+        from media_handler import extract_text_if_document
+
+        doc = message.document
+        mime_type = doc.mime_type or "application/octet-stream"
+        file_info  = bot.get_file(doc.file_id)
+        file_bytes = bot.download_file(file_info.file_path)
+        return extract_text_if_document(file_bytes, mime_type)
+    except Exception as e:
+        logger.error(f"[C20] document text extraction failed: {e}", exc_info=True)
+        return None
+
+
+# ── נרמול שדות לפני כתיבה ל-Business Memory ──────────────────────
+# Airtable מחזיר 422 על ערך שאינו option קיים בשדה singleSelect/
+# multipleSelects (אין typecast=true בשכבת ה-gateway). BusinessMemoryFields
+# עד כה לא היה לה שדה Domain ייעודי — ה-domain key הגולמי (למשל "media")
+# נכתב ישירות לתוך Tags הכללי, שם אין לו שום ערבות שהוא option קיים.
+# Root cause (מאושר מול production logs): domain לעולם לא אמור להיכתב
+# ל-Tags בכלל — Tags הוא לנושאים אמיתיים ממקור נפרד, לא ל-domain. הכתיבה
+# ל-Tags הוסרה לגמרי ב-_save_to_business_memory; domain נכתב רק לשדה
+# Domain הייעודי (ממופה לערך Airtable חוקי). הסינון כאן נשאר כ-defense-in-
+# depth בלבד, למקרה שמקור עתידי כן ימלא Tags עם נושאים אמיתיים.
+
+_VALID_EVENT_TYPES = {"Milestone", "Decision", "Crisis", "Announcement", "Learning", "Other"}
+
+_VALID_TAGS = {
+    "Strategy", "Operations", "Finance", "HR", "Sales", "Customer", "Product",
+    "Legal", "Risk", "Other", "Real Estate", "blue_view", "negotiation",
+    "lessons", "gross_profit", "profit_distribution", "contracts", "numbers",
+    "fatigue", "pressure", "option_agreement", "partners", "bargaining_power",
+    "principle",
+}
+
+# מיפוי domain-key (מה-DOMAINS tuple הפנימי) → ערך Airtable חוקי.
+# Fallback בלבד — משמש רק כש-RuntimeSchemaProvider לא זמין (אין live schema
+# בכלל). בזרימה הרגילה הערך החי נלקח דינמית מ-resolve_business_memory_domain(),
+# לא מהמילון הזה — ראה BUG-081 (5 תיקונים חוזרים על מיפוי סטטי שיצא מסונכרן).
+_DOMAIN_TO_AIRTABLE = {
+    "real_estate": "Real Estate",
+    "import":      "Import",
+    "media":       "Media",
+    "saas":        "SaaS",
+    "finance":     "General",       # אין option ייעודי — נופל ל-General, עם warning
+    "general":     "General",
+}
+
+# domain-key-ים בלי option ייעודי משלהם ב-Airtable — מתחילים חיפוש לפי
+# ה-domain-key הזה במקום לפי עצמם. זו החלטה עסקית (אין "Finance" ב-Airtable),
+# לא עובדה על הסכימה — ולכן נשארת סטטית גם אחרי המעבר ל-live lookup.
+_DOMAIN_NO_DEDICATED_OPTION = {"finance": "general"}
+
+
+def _normalize_domain_option(value: str) -> str:
+    import re
+    return re.sub(r"\s+", " ", value.replace("_", " ").strip().lower())
+
+
+def resolve_business_memory_domain(raw_domain_key: str) -> dict:
+    """
+    בירור חי, מול RuntimeSchemaProvider, של הערך המדויק של Domain ב-Business
+    Memory שתואם ל-raw_domain_key (case/whitespace-tolerant). לא מנרמל/גוזם/
+    ממציא ערך — אם יש שינוי שם live (rename), הכתיבה הבאה מסתגלת אוטומטית
+    בלי תיקון קוד.
+
+    Returns {"ok": True, "value": <המחרוזת המדויקת מ-Airtable>} או
+    {"ok": False, "error": <הודעה>}. לעולם לא זורק חריגה.
+    """
+    lookup_key = _DOMAIN_NO_DEDICATED_OPTION.get(raw_domain_key, raw_domain_key)
+    target = _normalize_domain_option(lookup_key)
+
+    try:
+        from core.runtime_schema_provider import get_provider
+        from airtable_schema import Tables, BusinessMemoryFields as BMF
+
+        contract = get_provider().get_table_contract(Tables.BUSINESS_MEMORY)
+        field_info = contract.get("fields", {}).get(BMF.DOMAIN) if contract.get("mode") == "full" else None
+        choices = field_info.get("choices") if field_info else None
+    except Exception as e:
+        choices = None
+        logger.warning(f"[BMF] RuntimeSchemaProvider lookup failed for Domain: {e}")
+
+    if not choices:
+        static_value = _DOMAIN_TO_AIRTABLE.get(raw_domain_key)
+        if static_value:
+            logger.warning(
+                f"[BMF] no live schema for Domain — falling back to static mapping for '{raw_domain_key}'"
+            )
+            return {"ok": True, "value": static_value}
+        return {"ok": False, "error": f"no live schema and no static mapping for domain key '{raw_domain_key}'"}
+
+    matches = [c for c in choices if _normalize_domain_option(c) == target]
+
+    if len(matches) > 1:
+        return {"ok": False, "error": f"duplicate option name found: {matches[0]} ({len(matches)} matching options)"}
+    if len(matches) == 1:
+        return {"ok": True, "value": matches[0]}
+
+    return {"ok": False, "error": f"no live Airtable Domain option matches domain key '{raw_domain_key}'"}
+
+
+def normalize_business_memory_fields(fields: dict, raw_domain_key: str) -> dict:
+    from airtable_schema import BusinessMemoryFields as BMF
+
+    result = dict(fields)
+
+    # Event Date
+    if not result.get(BMF.DATE):
+        result[BMF.DATE] = datetime.now(ZoneInfo("Asia/Jerusalem")).date().isoformat()
+
+    # Event Type
+    et = result.get(BMF.EVENT_TYPE)
+    if et not in _VALID_EVENT_TYPES:
+        logger.info(f"[BMF] normalized Event Type: {et!r} → Other")
+        result[BMF.EVENT_TYPE] = "Other"
+
+    # Tags — לא domain, רק נושאים אמיתיים (ממקור נפרד, אם וכשיהיה)
+    if BMF.TAGS in result:
+        raw_tags = result[BMF.TAGS]
+        filtered = [t for t in raw_tags if t in _VALID_TAGS]
+        dropped = set(raw_tags) - set(filtered)
+        for d in dropped:
+            logger.info(f"[BMF] dropped invalid tag: {d}")
+        if filtered:
+            result[BMF.TAGS] = filtered
+        else:
+            result.pop(BMF.TAGS, None)
+            logger.info("[BMF] removed empty Tags after filtering")
+
+    # Domain — כתיבה לשדה הייעודי, לא ל-Tags. בירור חי, לא מילון סטטי (ראה
+    # resolve_business_memory_domain). אם הבירור נכשל (no-match/duplicate),
+    # לא ממציאים ערך שרירותי — משאירים את BMF.DOMAIN בחוץ; הקורא (למשל
+    # _save_to_business_memory) אחראי להחליט אם זו סיבה לחסום את הכתיבה.
+    resolved = resolve_business_memory_domain(raw_domain_key)
+    if resolved["ok"]:
+        if resolved["value"] != raw_domain_key:
+            logger.info(f"[BMF] normalized Domain: {raw_domain_key} → {resolved['value']}")
+        result[BMF.DOMAIN] = resolved["value"]
+    else:
+        logger.error(f"[BMF] Domain resolution failed for '{raw_domain_key}': {resolved['error']}")
+        result.pop(BMF.DOMAIN, None)
+
+    return result
+
+
 # ── שמירה — דרך gateway בלבד ────────────────────────────────────
 
 def _save_to_business_memory(
@@ -196,7 +478,14 @@ def _save_to_business_memory(
     raw_text: str,
     domain: str,
     entry_type: str,
-) -> dict | None:
+) -> dict:
+    """
+    Returns {"ok": True, "record": <airtable record dict>} on success, or
+    {"ok": False, "error": <reason>} on any failure — never a bare None, so
+    callers can always tell why it failed instead of a silent swallow (same
+    contract discipline as PR_RESPONSE_CONTRACT: {ok, ...} everywhere, no
+    ad-hoc None/string checks).
+    """
     source_tag = f"cmd_update:{identity.tenant_id}:{identity.user_id}"
     try:
         from tools.airtable_gateway import airtable_create
@@ -205,11 +494,16 @@ def _save_to_business_memory(
         fields = {
             BMF.TITLE:       title,
             BMF.DESCRIPTION: raw_text,
-            BMF.DATE:        datetime.now(ZoneInfo("Asia/Jerusalem")).isoformat(),
+            BMF.DATE:        datetime.now(ZoneInfo("Asia/Jerusalem")).date().isoformat(),
             BMF.EVENT_TYPE:  entry_type,   # ערך חוקי: Decision|Milestone|Crisis|Announcement|Learning|Other
-            BMF.TAGS:        [domain],     # multi-select — חייב להיות list
             BMF.IMPACT:      "Manual Entry",
         }
+        fields = normalize_business_memory_fields(fields, domain)
+
+        if BMF.DOMAIN not in fields:
+            error = f"Domain resolution failed for '{domain}'"
+            logger.error(f"[C20] aborting save — {error} source={source_tag}")
+            return {"ok": False, "error": error}
 
         record = airtable_create(
             Tables.BUSINESS_MEMORY,
@@ -229,14 +523,15 @@ def _save_to_business_memory(
                 )
             except Exception:
                 pass  # audit לעולם לא שובר את ה-flow
-        else:
-            logger.warning(f"[C20] airtable_create returned None source={source_tag}")
+            return {"ok": True, "record": record}
 
-        return record
+        error = "airtable_create returned no record"
+        logger.warning(f"[C20] {error} source={source_tag}")
+        return {"ok": False, "error": error}
 
     except Exception as e:
         logger.error(f"[C20] _save_to_business_memory failed: {e}")
-        return None
+        return {"ok": False, "error": f"unexpected error: {e}"}
 
 
 # ── Context injection — נקרא מ-context.py ───────────────────────
@@ -252,10 +547,15 @@ def get_recent_business_context(domain: str = "general", limit: int = 5) -> str:
         from airtable_schema import Tables, BusinessMemoryFields as BMF
 
         if domain and domain != "general":
+            resolved = resolve_business_memory_domain(domain)
+            airtable_domain = resolved["value"] if resolved["ok"] else "General"
             formula = (
                 f"OR("
-                f"FIND('{domain}',ARRAYJOIN({{{BMF.TAGS}}})),"
-                f"FIND('general',ARRAYJOIN({{{BMF.TAGS}}}))"
+                f"{{{BMF.DOMAIN}}}='{airtable_domain}',"
+                f"{{{BMF.DOMAIN}}}='General',"
+                # legacy fallback: records written before BUG-081 (Domain field
+                # didn't exist yet) have the raw domain key baked into Tags instead
+                f"FIND('{domain}',ARRAYJOIN({{{BMF.TAGS}}}))"
                 f")"
             )
         else:

@@ -41,6 +41,23 @@ class IngressClassification:
     candidates:    tuple = ()   # extracted lead candidates for tier 1-3 (tuple of dicts, frozen)
 
 
+# BUG-101a: invisible bidi control characters (RLM/LRM/embedding-override
+# marks) are a common artifact of copy-pasting mixed Hebrew/English text from
+# a phone (e.g. WhatsApp chat exports) — e.g. "[נייד] ‏ +972 54-211-6211
+# ‏" from a real production incident. Left in place, they silently break
+# every downstream regex that expects a contiguous match (_TIMESTAMP_RE,
+# _WHATSAPP_EXPORT_RE, _BLOCK_SEP, _SENDER_LINE_RE) — a single such mark
+# inside a "[DD.MM.YYYY, HH:MM]" bracket is enough to defeat Tier-4 detection
+# entirely, letting export/log text fall through into lead extraction (see
+# BUG-101 umbrella). Stripped once, at the top of classification, so every
+# regex below always sees the same clean text — not patched individually.
+_BIDI_CONTROL_RE = re.compile("[\u200e\u200f\u202a-\u202e\u2066-\u2069]")
+
+
+def _strip_bidi_controls(text: str) -> str:
+    return _BIDI_CONTROL_RE.sub("", text)
+
+
 # ══════════════════════════════════════════════════
 # Tier-4 detection — must run FIRST (safety gate)
 # ══════════════════════════════════════════════════
@@ -195,14 +212,105 @@ _NAME_STOP = frozenset({
     # common chat noise
     "לא", "אני", "כן", "גם", "של", "עם", "על", "את",
     "הוא", "היא", "הם", "אנחנו", "אתם", "היום", "מחר", "ביקש", "יצר",
+    # BUG-097: interest/intent verbs that follow a name with no separator
+    # the block/window logic recognizes (e.g. "משה אבני מעוניין ב3 חדרים
+    # 0546..." — phone at the end of the block, not right after the name).
+    # _HEBREW_NAME_RE greedily matches the whole contiguous Hebrew-word run,
+    # so without these in _NAME_STOP the trailing-word trim in
+    # _extract_name_from_window() has nothing to strip and the verb gets
+    # kept as if it were part of the person's name.
+    "מעוניין", "מעוניינת", "רוצה", "רוצים", "רוצות", "מחפש", "מחפשת",
+    "צריך", "צריכה", "מבקש", "מבקשת",
+    # BUG-099a: property-description vocabulary. When a description sits
+    # between the name and phone (outside _extract_name_from_window()'s
+    # +-80-char window around the phone), _HEBREW_NAME_RE's first match
+    # inside the window used to be accepted as the "name" verbatim — e.g.
+    # "חדרים קומה ראשונה" written to Leads.Name in production
+    # (recRvK6hFTNgyj8ag, BUG-099). None of these words were previously
+    # in _NAME_STOP (only cities/streets were covered) — the existing
+    # stop-word rejection logic already handles this correctly once the
+    # vocabulary is present (see _is_name_stop_token, BUG-099b.1); no new
+    # extraction logic needed.
+    "קומה", "חדרים", "ראשונה", "שנייה", "שניה", "שלישית", "רביעית",
+    "חמישית", "שישית", "שביעית", "מרפסת", "מטבח", "חניה", "מעלית",
+    "נוף", "משופץ", "משופצת", "צמודה", "צמוד", "קרקעית", "תת",
+    "לגמרי", "מאוד", "שמש",
 })
 
 _HEBREW_WORD_RE = re.compile(r"[א-ת]{2,}")
 _HEBREW_NAME_RE = re.compile(r"(?<!\w)([א-ת]{2,}(?:\s+[א-ת]{2,})+)(?!\w)")
 
+# BUG-099b.1: single-letter Hebrew prepositions/conjunctions (ב/ל/כ/מ/ש/ו/ה)
+# attach directly to the following word with no space — "קומה" (floor) is in
+# _NAME_STOP, but "בקומה" ("on/at-the-floor") is a different token and was
+# not recognized as a stop-word at all, so a message with NO real name at all
+# ("...בקומה חמישית טלפון 0501234571") had "בקומה" survive segmentation as
+# the only non-empty segment and get written as the lead's Name.
+#
+# _is_name_stop_token() is the SINGLE shared helper for this check — every
+# call site in the name-segmentation/name-validation path must go through it
+# instead of a direct `token in _NAME_STOP`, or a bare/prefixed form could
+# get inconsistent treatment between call sites (exactly what happened here:
+# the segmentation loop and _candidate_confidence()'s "no stop-words" bonus
+# were two separate direct-membership checks before this fix).
+#
+# Deliberately narrow: checks ONE single-letter prefix only. Does not
+# recurse (no handling of stacked prefixes like "ובקומה" = ו+ב+קומה — no
+# production reproduction for that shape yet), does no stemming/morphology.
+# "מהדירה" (מ + ה + דירה, two stacked prefixes) is intentionally NOT matched
+# — stripping one prefix leaves "הדירה", which is not itself in _NAME_STOP.
+# A real name is never rejected just for starting with one of these letters
+# unless the remainder, on its own, is already a known stop-word (checked
+# below in the test suite: "בנימין"/"משה"/"הלל"/"שחר" all stay valid).
+_HEBREW_SINGLE_LETTER_PREFIXES = frozenset("בלכמשוה")
+
+
+def _is_name_stop_token(token: str) -> bool:
+    token = token.strip()
+    if token in _NAME_STOP:
+        return True
+    return (
+        len(token) > 1
+        and token[0] in _HEBREW_SINGLE_LETTER_PREFIXES
+        and token[1:] in _NAME_STOP
+    )
+
+# BUG-101b/c: date/time bracket prefix used by pasted WhatsApp chat exports,
+# e.g. "[12.9.2023, 14:25] אורי צדוק: ...". Day/month 1-2 digits, "." or "/"
+# separator, year 2-4 digits, seconds optional — covers the variety actually
+# seen in real export text (BUG-101 evidence). Shared between _BLOCK_SEP
+# (needs the full header incl. sender name to treat it as a high-confidence
+# new-message boundary) and _SENDER_LINE_RE (needs only the bracket, as an
+# optional prefix before the existing name+colon capture) so the two never
+# drift apart on what counts as "an export timestamp".
+_CHAT_EXPORT_TIMESTAMP = r"\[\d{1,2}[./]\d{1,2}[./]\d{2,4},?\s*\d{1,2}:\d{2}(?::\d{2})?\]"
+_CHAT_EXPORT_HEADER = _CHAT_EXPORT_TIMESTAMP + r"\s*[^\n:]{1,40}:"
+
+# BUG-096: block separator — new line starting with a Hebrew letter / bullet /
+# numbering / blank line. Used to bound per-candidate windows at block
+# boundaries, not just at neighboring recognized phone numbers (see
+# _extract_lead_candidates below).
+# BUG-101b: a chat-export message header ("[date, time] sender:") starts a
+# new block too — without this, none of the four prior conditions fire on a
+# line like "[8.4.2024, 20:18] אליהו: ..." (it starts with "[", not a Hebrew
+# letter, and there's no blank line/bullet/numbering before it), so the whole
+# header gets swallowed into the PRECEDING block — the root cause of the
+# cross-message name/phone bleed in BUG-101's production evidence.
+_BLOCK_SEP = re.compile(
+    r"\n\s*\n|\n[-•*]\s+|\n\d+[.)]\s+|\n(?=[א-ת])|\n(?=" + _CHAT_EXPORT_HEADER + r")"
+)
+
 # Sender-name line pattern for WhatsApp-style chat logs (not exports):
-# "דני:" or "דני כהן:" at start of line — name before colon is a SENDER, not a lead
-_SENDER_LINE_RE = re.compile(r"^([א-ת]{2,}(?:\s+[א-ת]{2,})?)\s*:\s*", re.MULTILINE)
+# "דני:" or "דני כהן:" at start of line — name before colon is a SENDER, not a lead.
+# BUG-101c: the `^` anchor alone missed a sender name preceded by an export
+# timestamp ("[12.9.2023, 14:25] אורי צדוק: ..." — "אורי צדוק" is not at the
+# literal start of the line, so it was never recognized as a sender and got
+# extracted as if it were a lead's name). The bracket prefix is optional so
+# the plain "דני:" case still matches exactly as before.
+_SENDER_LINE_RE = re.compile(
+    r"^(?:" + _CHAT_EXPORT_TIMESTAMP + r"\s*)?([א-ת]{2,}(?:\s+[א-ת]{2,})?)\s*:\s*",
+    re.MULTILINE,
+)
 
 
 def _normalize_phone(raw: str) -> str:
@@ -235,7 +343,7 @@ def _candidate_confidence(name: str, phone: str, window: str) -> float:
         score += 0.10
 
     # Name: no stop-words
-    if not any(w in _NAME_STOP for w in words):
+    if not any(_is_name_stop_token(w) for w in words):
         score += 0.20
 
     # Name: not a sender line (e.g. "דני: 050...")
@@ -249,30 +357,68 @@ def _candidate_confidence(name: str, phone: str, window: str) -> float:
 def _extract_lead_candidates(text: str) -> list[dict]:
     """
     מחלץ כל צמדי (שם, טלפון) מהטקסט עם confidence לכל אחד.
-    משמש את classify_ingress לסיווג Tier 1/2/3.
+    משמש את classify_ingress לסיווג Tier 1/2/3 — זו המימוש היחיד שבאמת
+    בשימוש בפרודקשן (core/lead_candidate_handler.py's parse_batch_dictation/
+    parse_lead_dictation הם מימוש כפול ומת — 0 קוראים בכל הריפו, ראה BUG-096
+    ב-BUG_AUDIT_LOG.md; אל תתקן שם בטעות שוב).
+
+    BUG-096: הטקסט מפוצל קודם ל-בלוקים (_BLOCK_SEP — שורה חדשה שמתחילה
+    באות עברית / bullet / מספור / שורה ריקה) לפני כל חילוץ טלפון/שם. כל
+    בלוק מעובד בנפרד לגמרי (_extract_candidates_from_block), כדי שטלפון
+    פגום/לא-ניתן-לזיהוי בבלוק אחד לא "יבלע" את הבלוק (כולל השם) לתוך החלון
+    של הבלוק הבא — בדיוק המנגנון שגרם לחיבור שם+טלפון של שני אנשים שונים
+    שנצפה בפרודקשן (ראה BUG-096).
     """
     candidates: list[dict] = []
     seen_phones: set[str] = set()
     sender_names = {m.group(1).strip() for m in _SENDER_LINE_RE.finditer(text)}
 
-    for phone_match in _PHONE_RE.finditer(text):
+    for block in _BLOCK_SEP.split(text):
+        if not block.strip():
+            continue
+        _extract_candidates_from_block(block, candidates, seen_phones, sender_names)
+
+    return candidates
+
+
+def _extract_candidates_from_block(
+    block: str,
+    candidates: list[dict],
+    seen_phones: set[str],
+    sender_names: set,
+) -> None:
+    """
+    מחלץ candidates מתוך בלוק בודד (כבר מפוצל ע"י _BLOCK_SEP, ראה
+    _extract_lead_candidates) ומוסיף ל-candidates.
+
+    בתוך בלוק בודד יכולים עדיין להיות כמה זוגות שם+טלפון (למשל שורה אחת עם
+    כמה לידים מופרדים בפסיקים) — לכן עדיין נדרש windowing per-phone: החלון
+    מוגבל גם לגבולות הטלפון השכן *בתוך הבלוק הזה בלבד*, לא חוצה בין בלוקים,
+    ולא רק ל-±80 תווים קבוע (BUG-096, ממשיך את אותו עיקרון).
+
+    כל candidate נושא גם "raw_text" — הבלוק המקורי שלו בלבד, לא כל ההודעה —
+    כדי ש-Summary/Lead Event/lead_memory לכל ליד ישקפו רק אותו (BUG-096-B:
+    לפני זה כל הלידים בבאצ' קיבלו את אותו טקסט מלא כ-summary, כולל תוכן של
+    אנשים אחרים).
+    """
+    phone_matches = list(_PHONE_RE.finditer(block))
+    for i, phone_match in enumerate(phone_matches):
         phone = _normalize_phone(phone_match.group())
         if phone in seen_phones:
             continue
         seen_phones.add(phone)
 
-        # חלון ±80 תווים סביב הטלפון
-        start  = max(0, phone_match.start() - 80)
-        end    = min(len(text), phone_match.end() + 80)
-        window = text[start:end]
+        prev_end   = phone_matches[i - 1].end() if i > 0 else 0
+        next_start = phone_matches[i + 1].start() if i + 1 < len(phone_matches) else len(block)
+        start  = max(0, phone_match.start() - 80, prev_end)
+        end    = min(len(block), phone_match.end() + 80, next_start)
+        window = block[start:end]
 
-        # מצא שם עברי בחלון
         name = _extract_name_from_window(window, sender_names)
         if not name:
             continue
 
         conf = _candidate_confidence(name, phone, window)
-        # Context keywords
         ctx  = _extract_context_kw(window, name, phone)
 
         candidates.append({
@@ -280,23 +426,43 @@ def _extract_lead_candidates(text: str) -> list[dict]:
             "phone":      phone,
             "confidence": conf,
             "context":    ctx,
+            "raw_text":   block.strip(),
         })
-
-    return candidates
 
 
 def _extract_name_from_window(window: str, sender_names: set) -> Optional[str]:
-    """מחלץ שם עברי מחלון טקסט, מסנן sender names ומילות עצירה."""
+    """מחלץ שם עברי מחלון טקסט, מסנן sender names ומילות עצירה.
+
+    BUG-099b: a single _HEBREW_NAME_RE match is one CONTIGUOUS run of Hebrew
+    words (broken only by digits/punctuation) — a real name can sit inside
+    that same run, flanked by stop-words with no such break between them
+    (e.g. "צור ליד חדש יעל רייס מעוניינת בדירת..." is ONE match; "ליד"/"חדש"
+    sit between the command prefix and "יעל רייס", "מעוניינת" right after
+    it). The prior logic (trim stop-words off the END only, reject the whole
+    match if a stop-word remained ANYWHERE) safely dropped candidates like
+    this rather than writing garbage (BUG-099a) — safer, but the real name
+    was still lost, not recovered.
+    Fix: stop-words split the run into segments (they act as separators, not
+    just a suffix to strip), and the LONGEST surviving segment is used —
+    isolating "יעל רייס" out of the larger run instead of discarding the
+    whole thing. This does not touch the +-80-char phone window, the
+    neighbor-phone clipping, or _BLOCK_SEP (BUG-096/097/101b's fixes) at
+    all — it only changes which words *within* an already correctly-bounded
+    match are picked as the name.
+    """
     for m in _HEBREW_NAME_RE.finditer(window):
         raw   = m.group(1).strip().rstrip(",;:")
         words = raw.split()
-        # Clean trailing stop-words
-        while words and words[-1] in _NAME_STOP:
-            words.pop()
-        name = " ".join(words)
+
+        segments: list[list[str]] = [[]]
+        for w in words:
+            if _is_name_stop_token(w):
+                segments.append([])
+            else:
+                segments[-1].append(w)
+        name = " ".join(max(segments, key=len))
+
         if not name or len(name) < 4:
-            continue
-        if any(w in _NAME_STOP for w in name.split()):
             continue
         if name in sender_names:
             continue
@@ -449,6 +615,10 @@ def _classify_ingress_core(
             reason="empty_text",
             candidates=(),
         )
+
+    # BUG-101a: strip invisible bidi marks BEFORE Tier-4 detection (and
+    # everything downstream) — see _strip_bidi_controls's own docstring.
+    text = _strip_bidi_controls(text)
 
     # ── Tier 4 gate — ALWAYS first ──────────────────
     is_t4, t4_reason = _is_tier4(text)

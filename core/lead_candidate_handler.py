@@ -30,6 +30,29 @@ logger = logging.getLogger(__name__)
 
 _PHONE_RE = re.compile(r"(?:0\d{1,2}[-\s]?\d{7,8}|[\+]?972[-\s]?\d{8,9})")
 
+# BUG-094-C: RouterDomain values that are routing/meta concepts, not business
+# verticals — never valid values for Airtable's Leads/Lead Events "Domain"
+# singleSelect field (live schema: real_estate/import/recruiting/general).
+# core/router/domain_router.py classifies any message containing "ליד"/"lead"/
+# "crm" as RouterDomain.CRM (0.85 confidence) — which a batch lead-dictation
+# message like "ליד חדש: ..." naturally contains, so resolved_route_domain
+# reaching handle_lead_candidate() can legitimately be "crm". Writing that
+# straight into the Domain field 422s on Lead Events (Airtable rejects the
+# value outright) and is meaningless on Leads either way — "crm"/"internal"
+# describe the *routing intent*, not which business the lead belongs to.
+_NON_BUSINESS_DOMAINS = frozenset({"crm", "internal"})
+
+
+def _lead_domain_key(domain: str) -> str:
+    """Normalizes a Router domain into a value safe to write to Airtable's
+    Leads/Lead Events Domain field — meta-domains (crm/internal) and empty
+    values fall back to 'general', same as the pre-existing empty-domain
+    fallback."""
+    if not domain or domain in _NON_BUSINESS_DOMAINS:
+        return "general"
+    return domain
+
+
 _SAVE_WORDS = frozenset({
     "תשמור", "שמור", "שמרי", "תרשום", "רשום",
     "תוסיף", "הוסף", "תוסיפי", "save", "add",
@@ -232,13 +255,40 @@ def parse_batch_dictation(text: str) -> list[dict]:
     מחזיר רשימה של {name, phone, context} רק אם יש ≥2 בלוקים ברורים.
     אחרת מחזיר רשימה ריקה (→ fallback ל-parse_lead_dictation).
 
-    בלוק = שם עברי + טלפון בקרבה (עד 60 תווים לפני/אחרי).
+    בלוק = שם עברי + טלפון בקרבה (עד 60 תווים לפני/אחרי, לא חוצה למספר
+    הטלפון השכן — ראה BUG-094). מ-BUG-095: הטקסט מפוצל קודם ל-_BLOCK_SEP
+    (שורה חדשה שמתחילה באות עברית / bullet / מספור / שורה ריקה) — כל בלוק
+    מעובד בנפרד לגמרי, כדי שטלפון פגום/לא-ניתן-לזיהוי בבלוק אחד לא "יבלע"
+    לתוך החלון של הבלוק הבא (ראה תיעוד `_extract_batch_candidates_from_block`
+    ו-BUG-095 ב-BUG_AUDIT_LOG.md).
     """
-    # אסטרטגיה: מצא את כל מספרי הטלפון, ולכל אחד חפש שם עברי בסביבתו
     candidates: list[dict] = []
     seen_phones: set[str] = set()
 
-    for phone_match in _PHONE_RE.finditer(text):
+    for block in _BLOCK_SEP.split(text):
+        if not block.strip():
+            continue
+        _extract_batch_candidates_from_block(block, candidates, seen_phones)
+
+    # החזר רק אם ≥2 בלוקים שונים
+    if len(candidates) >= 2:
+        return candidates
+    return []
+
+
+def _extract_batch_candidates_from_block(
+    block: str, candidates: list[dict], seen_phones: set[str],
+) -> None:
+    """
+    מחלץ candidates מתוך בלוק בודד (כבר מפוצל ע"י _BLOCK_SEP) ומוסיף ל-candidates.
+
+    בתוך בלוק בודד יכולים עדיין להיות כמה זוגות שם+טלפון (למשל שורה אחת עם
+    כמה לידים מופרדים בפסיקים) — לכן עדיין נדרש אותו windowing per-phone
+    (BUG-094): החלון מוגבל גם לגבולות הטלפון השכן *בתוך הבלוק הזה בלבד*,
+    לא חוצה בין בלוקים (ראה BUG-095) ולא רק ל-±60 תווים קבוע.
+    """
+    phone_matches = list(_PHONE_RE.finditer(block))
+    for i, phone_match in enumerate(phone_matches):
         raw_phone = re.sub(r"[\s\-]", "", phone_match.group())
         if raw_phone.startswith("+972"):
             raw_phone = "0" + raw_phone[4:]
@@ -249,10 +299,11 @@ def parse_batch_dictation(text: str) -> list[dict]:
             continue
         seen_phones.add(raw_phone)
 
-        # חלון טקסט סביב הטלפון
-        start  = max(0, phone_match.start() - 60)
-        end    = min(len(text), phone_match.end() + 60)
-        window = text[start:end]
+        prev_end   = phone_matches[i - 1].end() if i > 0 else 0
+        next_start = phone_matches[i + 1].start() if i + 1 < len(phone_matches) else len(block)
+        start  = max(0, phone_match.start() - 60, prev_end)
+        end    = min(len(block), phone_match.end() + 60, next_start)
+        window = block[start:end]
 
         name = _extract_name(window)
         if not name:
@@ -260,11 +311,6 @@ def parse_batch_dictation(text: str) -> list[dict]:
 
         context = _extract_context_keywords(window, name, raw_phone)
         candidates.append({"name": name, "phone": raw_phone, "context": context})
-
-    # החזר רק אם ≥2 בלוקים שונים
-    if len(candidates) >= 2:
-        return candidates
-    return []
 
 
 # ══════════════════════════════════════════════════
@@ -290,12 +336,20 @@ def _at_find_lead(name: str, phone: str) -> Optional[str]:
             if r.status_code == 200:
                 records = r.json().get("records", [])
                 if records:
-                    # prefer exact phone match
                     if phone:
+                        # BUG-094: כשיש phone, רק התאמת phone מדויקת נחשבת
+                        # "אותו ליד" — לא מספיק להסתמך על ה-formula האחרון
+                        # (SEARCH(name, {Name}) ללא phone בכלל) ולהחזיר
+                        # records[0] בלי אימות. שם דומה/משותף (נפוץ בעברית)
+                        # היה גורם ל-false match על ליד קיים לא-קשור וכתיבת
+                        # phone/summary שגויים על גביו — בדיוק המנגנון
+                        # שהפך "שני מועמדים עם אותו שם" ל"שתי כתיבות לאותה
+                        # רשומה" בפרודקשן. formula הבא (אם יש) ינוסה במקום.
                         for rec in records:
                             rec_phone = re.sub(r"[\s\-]", "", str(rec.get("fields", {}).get("phone", "")))
                             if rec_phone == phone:
                                 return rec["id"]
+                        continue
                     return records[0]["id"]
         except Exception as exc:
             logger.warning("[LCH] Airtable search error: %s", exc)
@@ -350,7 +404,7 @@ def _write_one_lead(
         from core.action_gateway import action_gateway as _gw, _ledger_singleton
         from airtable_schema import LeadFields
         _tool = "airtable_update" if action == "update" else "airtable_add"
-        _domain_key = domain if (domain and domain != "general") else "general"
+        _domain_key = _lead_domain_key(domain)
         # BUG-077: wrap under "fields" matching exactly what the Write step
         # below actually writes — this is what lets classify_approval_policy()
         # (core/action_gateway.py) correctly classify a brand-new safe lead
@@ -402,7 +456,7 @@ def _write_one_lead(
     try:
         from tools.airtable_gateway import airtable_create, airtable_patch
         from airtable_schema import LeadFields
-        _domain_key = domain if (domain and domain != "general") else "general"
+        _domain_key = _lead_domain_key(domain)
 
         if action == "update" and existing_id:
             patch_fields = {
@@ -417,7 +471,7 @@ def _write_one_lead(
                 record_id = existing_id
                 ok = True
         else:
-            _domain_key = domain if (domain and domain != "general") else "general"
+            _domain_key = _lead_domain_key(domain)
             lead_fields = {
                 LeadFields.NAME:       name,
                 LeadFields.PHONE:      phone,
@@ -453,7 +507,7 @@ def _write_one_lead(
 
     # Post-write enrichment (non-blocking, flag-gated)
     if ok and record_id:
-        _domain_key = domain if (domain and domain != "general") else "general"
+        _domain_key = _lead_domain_key(domain)
         try:
             from lead_capture import capture_lead_event
             from feature_flags import is_enabled as _flag
@@ -506,8 +560,12 @@ def _propose_lead_write(
     (app.py's confirm-word handling checks Gateway live contracts first,
     regardless of FEATURE_ACTION_GATEWAY) — so the confirmed write goes
     through the same dispatcher path as any other approved tool call, not a
-    direct one-off airtable_add. "_source": "lead_capture" is required to
-    pass tools/dispatcher.py's enforce_leads_write_gate() for table=Leads.
+    direct one-off airtable_add. trusted_source="lead_capture" (BUG-091) is
+    required to pass tools/dispatcher.py's enforce_leads_write_gate() for
+    table=Leads — passed as an explicit propose_action() keyword argument,
+    NOT embedded in tool_inputs (a "_source" dict key would be Claude-
+    controlled data if this payload ever originated from a tool_use, so it
+    can no longer serve as the trust boundary).
 
     Returns the GatewayResult (ok / contract_id / user_message) from
     propose_action() — dedup (pending/already-executed) is handled entirely
@@ -518,7 +576,7 @@ def _propose_lead_write(
 
     tenant_id   = getattr(identity, "tenant_id", "default") or "default"
     existing_id = _at_find_lead(name, phone)
-    _domain_key = domain if (domain and domain != "general") else "general"
+    _domain_key = _lead_domain_key(domain)
 
     if existing_id:
         tool_name = "airtable_update"
@@ -527,7 +585,7 @@ def _propose_lead_write(
             fields[LeadFields.DOMAIN] = _domain_key
         tool_inputs = {
             "table": "Leads", "record_id": existing_id,
-            "fields": fields, "_source": "lead_capture",
+            "fields": fields,
         }
     else:
         _phone_key = re.sub(r"[\s\-\+]", "", phone)
@@ -549,7 +607,7 @@ def _propose_lead_write(
             LeadFields.SCORE:      0,
             LeadFields.SENDER_ID:  phone,
         }
-        tool_inputs = {"table": "Leads", "fields": fields, "_source": "lead_capture"}
+        tool_inputs = {"table": "Leads", "fields": fields}
 
     return _gw.propose_action(
         tenant_id         = tenant_id,
@@ -560,7 +618,226 @@ def _propose_lead_write(
         origin_chat_id    = identity.memory_key,
         requires_approval = True,
         identity          = identity,
+        trusted_source    = "lead_capture",
     )
+
+
+# ══════════════════════════════════════════════════
+# BUG-099c — clarification instead of denial when the name is missing
+# ══════════════════════════════════════════════════
+#
+# Scope: Leads-only. Deliberately does NOT build a general Understanding
+# Layer — BUG-104 (ReasoningEntity/reasoning_engines, see BUG_AUDIT_LOG.md)
+# remains open as the separate general-architecture decision; a future
+# BUG-104 implementation may refactor this flow without invalidating its
+# correctness.
+#
+# State lives in session_store's EXISTING active_lead_candidate key (no new
+# store) — extended with a distinct {"state": "needs_clarification", ...}
+# shape, never confused with the pre-existing post-write bookmark shape
+# ({"name", "record_id", "set_at"}, written by _handle_single_candidate/
+# _handle_batch AFTER a successful write — zero live readers today, see
+# BUG-106's Contract Chain). Every consumer below checks "state" explicitly
+# before touching the dict's other keys.
+
+# Local duplicate of app.py's _CANCEL_WORDS content — app.py imports FROM
+# this module, so importing back would be circular. Small and deliberate;
+# not a shared-constants refactor (out of scope for this fix).
+_LEAD_CLARIFY_CANCEL_WORDS = frozenset({"לא", "בטל", "ביטול", "עצור", "cancel", "no", "❌"})
+
+# Intents that unambiguously mean "this message is a different command
+# entirely," not a reply to "what's the lead's name?" — anything NOT in
+# this exclusion set (UNKNOWN/GREETING/SMALLTALK/CREATE_LEAD/UPDATE_LEAD)
+# is treated as an explicit new command. Reuses the Router's OWN
+# classification (passed in as `intent`) rather than re-detecting intent
+# locally — same principle as core/router/deterministic_denial.py.
+# Imported at module scope: core/router/route_decision.py is a pure
+# dataclass/constants leaf module (no imports back into this file, no
+# circular-import risk — verified).
+from core.router.route_decision import Intent as _Intent  # noqa: E402
+
+_LEAD_CLARIFY_NON_INTERRUPTING_INTENTS = frozenset({
+    _Intent.UNKNOWN, _Intent.GREETING, _Intent.SMALLTALK,
+    _Intent.CREATE_LEAD, _Intent.UPDATE_LEAD,
+})
+
+
+def _validate_clarification_name(text: str) -> Optional[str]:
+    """
+    Validates a raw reply as a lead name for the clarification flow.
+    Reuses _HEBREW_NAME_RE/_is_name_stop_token (core/ingress_classifier.py —
+    the SAME building blocks normal dictation extraction uses, not new
+    validation logic) but with fullmatch semantics: unlike
+    _extract_name_from_window() (which segments noisy free text to FIND a
+    name inside it), a clarification reply is expected to BE the name and
+    nothing else — no segmentation, no partial credit. "בקומה" (a stop-word,
+    even after BUG-099b.1's prefix-aware check) correctly returns None here.
+
+    Word count is capped at exactly 2 (first+last name — the only shape the
+    spec's own examples exercise, "יוסי כהן"). This is NOT just cosmetic:
+    a stop-word blocklist alone is too permissive for a full-reply check —
+    "נדבר אחר כך" ("we'll talk later," a real conversational sentence)
+    contains no property/lead-dictation stop-words at all and would
+    otherwise fullmatch as a 3-word "name." Capping at 2 words rejects it
+    as an unclear reply instead of a false-positive name, without adding
+    stemming/grammar detection (still out of scope).
+    """
+    from core.ingress_classifier import _HEBREW_NAME_RE, _is_name_stop_token
+
+    stripped = text.strip()
+    m = _HEBREW_NAME_RE.fullmatch(stripped)
+    if not m:
+        return None
+    words = stripped.split()
+    if len(words) != 2:
+        return None
+    if any(_is_name_stop_token(w) for w in words):
+        return None
+    return stripped
+
+
+def _build_clarification_summary(text: str, phone: str) -> str:
+    """Best-effort summary for the clarification's partial_payload — the
+    original text with the phone number and the most common trigger words
+    stripped, trimmed. Used only for display (preview/summary), not for any
+    gate/validation decision, so this deliberately stays simple rather than
+    inventing new extraction logic.
+
+    Uses core.ingress_classifier's _PHONE_RE (the live extraction path's own
+    regex) — NOT this module's own top-level _PHONE_RE, which is part of the
+    dead parse_lead_dictation/parse_batch_dictation cluster (0 live callers,
+    see BUG-096) and must not be reintroduced into a live code path."""
+    from core.ingress_classifier import _PHONE_RE as _ic_phone_re
+
+    cleaned = text
+    if phone:
+        cleaned = _ic_phone_re.sub(" ", cleaned)
+    for trigger in ("צור ליד חדש", "צור ליד", "ליד חדש", "תוסיף ליד", "הוסף ליד", "טלפון", "פלאפון", "נייד"):
+        cleaned = cleaned.replace(trigger, " ")
+    return re.sub(r"\s+", " ", cleaned).strip(" ,:.")
+
+
+def _maybe_start_lead_clarification(
+    identity, text: str, chat_id: str, channel: str, domain: str,
+) -> Optional[str]:
+    """
+    Entry point: called only when classify_ingress() already resolved Tier 5
+    (no_lead_candidates) AND the Router already resolved Intent.CREATE_LEAD
+    at whatever confidence it uses for routing — i.e. "the system understood
+    what you want, just couldn't find a name." Never triggers on Tier 4
+    (export/table/log content is not a lead-creation attempt at all) and
+    never triggers without a phone number actually present in the text —
+    "some free text that happens to not extract a name" is not the same as
+    "a clear create-lead request missing exactly one field."
+    """
+    from core.ingress_classifier import _PHONE_RE as _ic_phone_re
+
+    phone_match = _ic_phone_re.search(text)
+    if not phone_match:
+        return None
+    phone = phone_match.group().strip()
+
+    from session_store import lead_sessions as _ls
+
+    partial_payload = {
+        "phone":   phone,
+        "summary": _build_clarification_summary(text, phone),
+        "domain":  _lead_domain_key(domain),
+        "source":  "owner_dictation",
+        "channel": channel,
+    }
+    _ls.set_lead_clarification(chat_id, "name", partial_payload, text)
+
+    return f"זיהיתי בקשה ליצור ליד ואת מספר הטלפון {phone}, אבל לא מצאתי שם. מה שם הליד?"
+
+
+def _resolve_lead_clarification(
+    identity, text: str, chat_id: str, channel: str, domain: str, intent: str,
+    session: Optional[dict],
+) -> Optional[str]:
+    """
+    Checked FIRST in handle_lead_candidate() — before batch-followup and
+    before classify_ingress() runs on the new message — because a pending
+    clarification must interpret the NEXT message (a bare name like "יוסי
+    כהן" would otherwise itself resolve to Tier 5/no_lead_candidates and
+    silently vanish, never reaching this logic at all).
+
+    session (LL-11): the caller's ALREADY-LOADED session snapshot
+    (app.py's run_agent() reads Sessions via lead_sessions.get() exactly
+    ONCE per request and threads that single dict through, same convention
+    as resolve_context_pronouns()/_build_tool_context() — see
+    test_session_snapshot.py). This function must read active_lead_candidate
+    from THAT dict, never call lead_sessions.get()/get_active_lead_candidate()
+    itself — doing so would be a second, redundant Sessions read per request,
+    exactly the regression LL-11 exists to catch. None (no snapshot passed,
+    e.g. any caller other than the live text-message path) means "nothing
+    pending" — safe default, matches deterministic_denial.py's own
+    fail-safe convention (missing info skips the optimization, never grants
+    something incorrectly).
+
+    Priority order (mandatory, matches the spec exactly):
+      1. TTL expired      — checked here as a pure/no-I/O comparison against
+                             the snapshot's own "set_at"; only the WRITE that
+                             clears it touches session_store (rare path, same
+                             precedent as the pre-existing
+                             set_active_lead_candidate() write-after-read)
+      2. cancellation      — explicit cancel word
+      3. explicit new command — Router-classified intent that isn't this
+                                 flow's own intent/unknown/small-talk
+      4. valid reply        — a validated name completes the candidate
+      5. unclear reply      — state stays, ask again
+    """
+    if not session:
+        return None
+    cand = session.get("active_lead_candidate")
+    if not cand:
+        return None
+    if cand.get("state") != "needs_clarification":
+        return None  # the OLD post-write bookmark shape — not our concern
+
+    from session_store import lead_sessions as _ls
+    import time as _time
+
+    # Priority 1 — TTL expired (pure check against the snapshot already in
+    # hand; only clearing it is a write)
+    if _time.time() - cand.get("set_at", 0) > 1800:
+        _ls.clear_active_lead_candidate(chat_id)
+        return None
+
+    lower = text.strip().lower()
+
+    # Priority 2 — cancellation
+    if lower in _LEAD_CLARIFY_CANCEL_WORDS:
+        _ls.clear_active_lead_candidate(chat_id)
+        return "ביטלתי את יצירת הליד."
+
+    # Priority 3 — explicit new command (Router's own classification reused,
+    # not re-detected here)
+    if intent and intent not in _LEAD_CLARIFY_NON_INTERRUPTING_INTENTS:
+        _ls.clear_active_lead_candidate(chat_id)
+        return None  # let the new command fall through to normal routing
+
+    # Priority 4 — valid reply for the expected field
+    if cand.get("expected_field") == "name":
+        name = _validate_clarification_name(text)
+        if name is not None:
+            payload = cand.get("partial_payload", {})
+            original_text = cand.get("original_text", text)
+            candidate = {
+                "name":       name,
+                "phone":      payload.get("phone", ""),
+                "confidence": 1.0,
+                "context":    [],
+                "raw_text":   original_text,
+            }
+            return _handle_single_candidate(
+                identity, candidate, original_text, chat_id, channel,
+                payload.get("domain", domain), auto_write=False,
+                clear_clarification=True,
+            )
+
+    # Priority 5 — unclear reply: state stays, ask again
+    return "עדיין חסר לי שם הליד. מה השם?"
 
 
 # ══════════════════════════════════════════════════
@@ -574,13 +851,15 @@ def handle_lead_candidate(
     channel: str,
     domain: str = "",
     ic=None,
+    intent: str = "",
+    session: Optional[dict] = None,
 ) -> Optional[str]:
     """
     מטפל דטרמיניסטית בהכתבת ליד (בודד או batch) של owner/staff.
     מחזיר GatewayReply string אם הפעולה הסתיימה, None אם לא תבנית — ממשיך לאייג'נט.
 
     C89: כל קלט עובר classify_ingress() לפני כל פרסור.
-    Tier 4/5 → None (אסור לכתוב, מועבר לאייג'נט).
+    Tier 4/5 → None (אסור לכתוב, מועבר לאייג'נט) — למעט BUG-099c (למטה).
     Tier 1/2 + FEATURE_AUTO_CAPTURE → auto-write.
     Tier 3   → ברורים נכתבים, עמומים → needs_review.
     source_module בapp.py מוגדר ל-"action_gateway" כדי שCOG יאשר.
@@ -593,6 +872,22 @@ def handle_lead_candidate(
     ic: IngressClassification מוכן מראש (route.capture_ic מ-router.py) —
     כשמועבר, נחסך classify_ingress() כפול על אותו טקסט (BUG-056). ריק
     כברירת מחדל — מסווג בעצמו, לתאימות לאחור לכל caller אחר / לבדיקות.
+
+    intent (BUG-099c): route.intent מ-router.py — Router's OWN classification,
+    reused (לא מזוהה מחדש) לשני דברים: (1) לזהות "פקודה חדשה מפורשת" תוך כדי
+    פתרון הבהרה ממתינה, (2) לקבוע אם להתחיל הבהרה בכלל (Tier 5 + intent
+    create_lead + טלפון קיים = "הכוונה ברורה, חסר רק שם"). ריק כברירת מחדל —
+    תאימות לאחור לכל caller אחר; ריק פירושו "לעולם לא להתחיל הבהרה חדשה",
+    לא "להתיר הכל" (fail-safe זהה לעיצוב deterministic_denial.py).
+
+    session (BUG-099c, LL-11): app.py's run_agent() כבר טוען session snapshot
+    יחיד (_session_snapshot = lead_sessions.get(chat_id)) ומעביר אותו הלאה
+    ל-resolve_context_pronouns/_build_tool_context — Sessions נקרא פעם אחת
+    בלבד לכל request (test_session_snapshot.py). _resolve_lead_clarification
+    קורא active_lead_candidate מה-snapshot הזה, לא קורא ל-lead_sessions.get()/
+    get_active_lead_candidate() בעצמו — קריאה שנייה הייתה בדיוק הרגרסיה ש-
+    LL-11 קיים כדי לתפוס. None (ברירת מחדל, לכל caller שלא מעביר snapshot,
+    למשל נתיב הקובץ C90) = "אין כלום ממתין" — לא מפעיל שום לוגיקת הבהרה.
     """
     if not getattr(identity, "is_internal", False):
         return None
@@ -600,6 +895,17 @@ def handle_lead_candidate(
     # ── domain: Router (route.domain) is the source of truth when passed in;
     #    _detect_domain() stays as the fallback for any other caller ──────
     domain = domain or _detect_domain(text, getattr(identity, "domain_id", "general"))
+
+    # ── BUG-099c: resolve a PENDING lead-clarification first — before batch-
+    #    followup and before classify_ingress() even runs on this message.
+    #    A bare name reply ("יוסי כהן") would otherwise itself resolve to
+    #    Tier 5/no_lead_candidates and silently vanish before ever reaching
+    #    this logic. ──────────────────────────────────────────────────────
+    _clarify_reply = _resolve_lead_clarification(
+        identity, text, chat_id, channel, domain, intent, session,
+    )
+    if _clarify_reply is not None:
+        return _clarify_reply
 
     # ── Follow-up on stored batch? ────────────────
     _follow_up_reply = _handle_batch_followup(identity, text, chat_id, channel, domain)
@@ -619,6 +925,17 @@ def handle_lead_candidate(
     # Tier 4 (table/export/bot output) or Tier 5 (no signal) → agent handles it
     if ic.tier >= 4:
         logger.info("[LCH] Tier %d — not a lead dictation (reason=%s), skip", ic.tier, ic.reason)
+        # BUG-099c: Tier 5 specifically (no_lead_candidates — some signal,
+        # just no name found) + a Router-confirmed create_lead intent means
+        # "the system understood the request, only one field is missing" —
+        # ask for it instead of falling through to DeterministicDenial's
+        # generic "manual creation blocked" message. Tier 4 (export/table/
+        # log content) never triggers this — that's genuinely not a lead
+        # dictation attempt at all.
+        if ic.tier == 5 and ic.reason == "no_lead_candidates" and intent == _Intent.CREATE_LEAD:
+            _start_reply = _maybe_start_lead_clarification(identity, text, chat_id, channel, domain)
+            if _start_reply is not None:
+                return _start_reply
         return None
 
     # ── Tier 1/2/3 routing ───────────────────────
@@ -672,6 +989,7 @@ def _handle_single_candidate(
     channel: str,
     domain: str,
     auto_write: bool,
+    clear_clarification: bool = False,
 ) -> Optional[str]:
     """
     Tier 1: ליד בודד high-confidence.
@@ -679,6 +997,12 @@ def _handle_single_candidate(
     עדכון ליד קיים (airtable_update) תמיד עובר דרך אישור — גם כש-auto_write=True
     (C89 UX: לעולם לא לעדכן ליד קיים בלי אישור מפורש).
     auto_write=False → מחזיר preview ומאחסן ActionContract ממתין.
+
+    clear_clarification (BUG-099c): כשה-candidate הגיע מפתרון הבהרה
+    (_resolve_lead_clarification, לא מחילוץ Tier 1 רגיל) — מנקה את
+    active_lead_candidate's "needs_clarification" state, אבל **רק** אחרי
+    ש-propose_action()/הכתיבה בפועל הצליחו (לא לפני) — כך שכשל משאיר את
+    ה-state פעיל, ללא פעולה חלקית וללא אובדן payload (per spec).
     """
     name  = candidate["name"]
     phone = candidate.get("phone", "")
@@ -701,7 +1025,15 @@ def _handle_single_candidate(
         if not gw_result.ok:
             # Already-pending or duplicate-executed — Gateway's own message
             # (dedup by business fingerprint) is the correct user-facing reply.
+            # clear_clarification NOT applied — propose_action() did not
+            # succeed, the clarification state must survive (spec).
             return gw_result.user_message or gw_result.reason
+        if clear_clarification:
+            try:
+                from session_store import lead_sessions as _ls
+                _ls.clear_active_lead_candidate(chat_id)
+            except Exception as exc:
+                logger.warning("[LCH] clarification clear failed: %s", exc)
         ctx_str = f" [{', '.join(ctx)}]" if ctx else ""
         if existing_id:
             return (
@@ -718,6 +1050,16 @@ def _handle_single_candidate(
     if ok and record_id:
         try:
             from session_store import lead_sessions as _ls
+            # set_active_lead_candidate() overwrites the whole
+            # active_lead_candidate dict with the post-write bookmark shape
+            # — the needs_clarification state (if any) is already gone by
+            # replacement; clearing it separately here would instead ERASE
+            # the bookmark this line just wrote (last-write-wins), so
+            # clear_clarification is intentionally not applied in this
+            # branch. In practice this branch never runs from the
+            # clarification resolver anyway (auto_write is always False
+            # there, per BUG-074/076's "existing lead never auto-writes"
+            # convention followed for new leads here too).
             _ls.set_active_lead_candidate(chat_id, name, record_id=record_id)
             _ls.set_current_lead_record_id(chat_id, record_id)
         except Exception as exc:
@@ -744,11 +1086,13 @@ def _handle_clean_batch(
     """
     Tier 2: כל הלידים high-confidence.
     auto_write=True → כותב הכל + סיכום.
-    auto_write=False → BUG-058: תצפית בלבד — אין resolver ל-batch confirm
-    (ראה _store_pending_preview), אז ההודעה לא רומזת שאישור קבוצתי אפשרי.
+    auto_write=False → BUG-058: preview עם resolver אמיתי — "כן"/"לא" נפתרים
+    ע"י resolve_pending_lead_preview() ב-app.py section 2.55, אחרי שנבדק
+    שאין contract Tier-1 חי (Tier-1 מנצח תמיד כששני המנגנונים חיים בו-זמנית
+    לאותו chat_id — ראה תיעוד ב-app.py וב-resolve_pending_lead_preview()).
     """
     if not _should_auto_write(auto_write, None):
-        _store_pending_preview(chat_id, candidates, text)
+        _store_pending_preview(chat_id, candidates, text, channel, domain)
         lines = [
             f"• {c['name']} ({c['phone']})" + (f" [{', '.join(c['context'])}]" if c.get("context") else "")
             for c in candidates
@@ -756,9 +1100,7 @@ def _handle_clean_batch(
         return (
             f"📋 זיהיתי {len(candidates)} לידים אפשריים בקבוצה:\n" +
             "\n".join(lines) +
-            "\n\nלא שמרתי אותם ולא נפתחה פעולת אישור קבוצתית.\n"
-            "אישור קבוצתי עדיין לא זמין.\n"
-            "כדי לשמור ליד, שלח ליד אחד בכל פעם או בקש ממני להכין רשימה לבדיקה."
+            "\n\nענה \"כן\" לשמירת כולם, או \"לא\" לביטול. (בתוקף ל-30 דקות)"
         )
 
     # auto-write
@@ -787,11 +1129,16 @@ def _handle_mixed_batch(
     written = 0
     pending = 0
     for c in high:
+        # BUG-096-B: use this candidate's own segment (raw_text, set by
+        # core/ingress_classifier.py's block-based extraction) as their
+        # Summary/Lead-Event/memory text — not the whole batch message,
+        # which would leak other candidates' details into this lead's record.
+        c_text = c.get("raw_text") or text
         existing_id = _at_find_lead(c["name"], c["phone"])
         ctx_str = _context_suffix(c.get("context", []), domain)
         if _should_auto_write(auto_capture, existing_id):
             ok, record_id, action = _write_one_lead(
-                identity, c["name"], c["phone"], text, channel, domain
+                identity, c["name"], c["phone"], c_text, channel, domain
             )
             if ok and record_id:
                 verb = "עדכנתי" if action == "update" else "שמרתי"
@@ -801,7 +1148,7 @@ def _handle_mixed_batch(
                 results.append(f"❌ {c['name']} ({c['phone']}) — לא נשמר")
         else:
             gw_result = _propose_lead_write(
-                identity, c["name"], c["phone"], text, channel, domain
+                identity, c["name"], c["phone"], c_text, channel, domain
             )
             if gw_result.ok:
                 verb = "לעדכון" if existing_id else "לשמירה"
@@ -835,31 +1182,74 @@ def _handle_mixed_batch(
 
 # ── Pending preview store (FEATURE_AUTO_CAPTURE=OFF) ──────────────────────────
 
-def _store_pending_preview(chat_id: str, candidates: list[dict], raw_text: str) -> None:
-    """שומר preview של batch (Tier 2) ב-session — audit/future-design בלבד.
+def _store_pending_preview(
+    chat_id: str, candidates: list[dict], raw_text: str,
+    channel: str, domain: str,
+) -> None:
+    """שומר preview של batch (Tier 2) עם TTL 30 דקות — BUG-058 resolver.
 
-    INTENTIONAL (BUG-058): no resolver yet — batch-confirm design pending.
-    Do not treat this as a live contract like Tier 1's ActionGateway contract
-    (_propose_lead_write). Nothing in the codebase reads pending_lead_preview
-    back; "כן"/"לא" never resolve it. Kept written (not removed) so the field
-    is available for audit and for whatever resolver design eventually lands.
-    The caller (_handle_clean_batch) is responsible for not implying to the
-    user that a confirmation action exists for this state.
+    channel/domain נשמרים כאן (לא מבוקשים מחדש ב-resolve time) כי ב-app.py
+    section 2.55 (נקודת ה-resolve, "כן"/"לא") ה-Router עוד לא רץ — אין
+    resolved_route_domain זמין שם. _handle_clean_batch כבר מקבל את שניהם.
 
-    BUG-056: היה `_ls.get(chat_id)` — מחזיר None בשקט ב-session חדש (סשן ראשון
-    של chat_id), ואז ה-preview לעולם לא נשמר בפועל. `get_or_create()` מבטיח
-    ש-session תמיד קיים לפני הכתיבה.
+    ראו resolve_pending_lead_preview() למטה — הצרכן בפועל של השדה הזה.
     """
     try:
         from session_store import lead_sessions as _ls
-        session = _ls.get_or_create(chat_id)
-        session["pending_lead_preview"] = {
-            "candidates": candidates,
-            "raw_text":   raw_text,
-        }
-        _ls._sync_to_db(chat_id, session)
+        _ls.set_pending_lead_preview(chat_id, candidates, raw_text, channel, domain)
     except Exception as exc:
         logger.warning("[LCH] pending_preview store failed: %s", exc)
+
+
+def resolve_pending_lead_preview(
+    identity, chat_id: str, is_confirm: bool, is_cancel: bool,
+) -> Optional[str]:
+    """BUG-058 resolver: קורא pending_lead_preview בחזרה, מבצע batch confirm/cancel.
+
+    מוחזר None אם: (א) אין preview ממתין / פג תוקפו, או (ב) לא confirm/cancel
+    כלל — בשני המקרים app.py ממשיך כרגיל בזרימת ActionGateway/Agent הרגילה.
+    מוחזר string אם ה-resolver "צרך" את ההודעה.
+
+    channel/domain נשלפים מתוך ה-preview עצמו (נשמרו בזמן הכתיבה) — לא
+    מהקורא, כי בנקודת ה-app.py הזו (2.55) ה-Router עוד לא רץ.
+
+    לא נוגע ב-_pending_approvals או ActionGateway contracts — Tier 1
+    (_propose_lead_write) ממשיך לעבוד בדיוק כפי שהוא, ללא שינוי.
+    אין תמיכה ב-selection חלקי ("כן 1") — רק אישור/ביטול מלא לכל ה-batch.
+
+    Precedence מול Tier 1 (BUG-058 caveat שנפתר): app.py קורא לפונקציה הזו
+    רק *אחרי* שנבדק שאין contract ActionGateway חי לאותו chat_id (אותו
+    gate שכבר קיים לשני ה-elif של _CONFIRM_WORDS/_CANCEL_WORDS, BUG-056
+    precedent) — כלומר Tier 1 מנצח תמיד כששני המנגנונים חיים בו-זמנית.
+    הפונקציה הזו לא בודקת בעצמה — ההכרעה ברמת ה-caller ב-app.py.
+    """
+    if not (is_confirm or is_cancel):
+        return None
+
+    try:
+        from session_store import lead_sessions as _ls
+    except Exception:
+        return None
+
+    preview = _ls.get_pending_lead_preview(chat_id)
+    if preview is None:
+        return None  # אין preview ממתין, או שפג תוקפו ונוקה בשקט
+
+    if is_cancel:
+        _ls.clear_pending_lead_preview(chat_id)
+        return "ביטלתי את רשימת הלידים הממתינה."
+
+    # is_confirm
+    candidates = preview.get("candidates") or []
+    raw_text   = preview.get("raw_text", "")
+    channel    = preview.get("channel", "telegram")
+    domain     = preview.get("domain", "general")
+    _ls.clear_pending_lead_preview(chat_id)
+
+    if not candidates:
+        return "לא נמצאו לידים לשמירה — כנראה שהרשימה כבר טופלה."
+
+    return _handle_batch(identity, raw_text, chat_id, channel, domain, candidates)
 
 
 # ══════════════════════════════════════════════════
@@ -879,7 +1269,10 @@ def _handle_batch(
     for item in batch:
         name  = item["name"]
         phone = item["phone"]
-        ok, record_id, action = _write_one_lead(identity, name, phone, text, channel, domain)
+        # BUG-096-B: this candidate's own segment, not the whole batch text —
+        # see identical reasoning in _handle_mixed_batch above.
+        item_text = item.get("raw_text") or text
+        ok, record_id, action = _write_one_lead(identity, name, phone, item_text, channel, domain)
         ctx = _context_suffix(item.get("context", []), domain)
         if ok and record_id:
             verb = "עדכנתי" if action == "update" else "שמרתי"
@@ -928,10 +1321,20 @@ def _context_suffix(context: list[str], domain: str) -> str:
 # Batch session state + follow-up routing (Section 4C)
 # ══════════════════════════════════════════════════
 
+# BUG-098: word-boundary matching, not substring — "ומה" as a plain `in`
+# check matched inside "קומה" (floor), a completely ordinary real-estate
+# word, falsely triggering this branch for any lead message that mentions
+# a floor number. \b is Unicode-aware in Python 3 (treats Hebrew letters
+# as \w), so it correctly separates whole words — verified empirically
+# against "קומה"/"ישאר"/"נשאר"/"אישר" (must NOT match) and real follow-up
+# phrasing like "ומה עם השאר?" (must match) before landing this fix.
 _FOLLOWUP_WORDS = frozenset({
     "ומה", "השאר", "שאר", "הנותרים", "נותרים", "שאר הלידים",
     "שאר הרשימה", "מה עם השאר", "מה עם הנותרים",
 })
+_FOLLOWUP_WORD_PATTERN = re.compile(
+    r"\b(?:" + "|".join(re.escape(w) for w in _FOLLOWUP_WORDS) + r")\b"
+)
 
 
 def _save_batch_state(chat_id: str, original_text: str, results: list[dict]) -> None:
@@ -973,7 +1376,7 @@ def _handle_batch_followup(
     מחזיר תשובה מבוססת על מצב ה-batch השמור.
     """
     lower = text.strip().lower()
-    if not any(w in lower for w in _FOLLOWUP_WORDS):
+    if not _FOLLOWUP_WORD_PATTERN.search(lower):
         return None
 
     try:

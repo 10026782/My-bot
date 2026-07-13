@@ -173,7 +173,7 @@ def record_lead_source(memory_key: str, utm: UTMParams) -> bool:
         if not rec_m:
             return False
         result = airtable_update("Leads", rec_m.group(0), utm.to_airtable_fields())
-        return "✅" in result
+        return bool(result.get("ok"))
     except ImportError:
         logger.debug(f"[Attribution] dry-run: {memory_key} → {utm.campaign_source}")
         return False
@@ -198,7 +198,7 @@ def mark_converted(memory_key: str, deal_value: float = 0) -> bool:
             fields["deal_value"] = deal_value
         result = airtable_update("Leads", rec_m.group(0), fields)
         logger.info(f"[Attribution] converted: {memory_key} ₪{deal_value:,.0f}")
-        return "✅" in result
+        return bool(result.get("ok"))
     except ImportError:
         return False
     except Exception as e:

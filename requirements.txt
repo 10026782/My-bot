@@ -21,3 +21,5 @@ beautifulsoup4
 markdown
 openpyxl
 python-docx
+psycopg2-binary
+

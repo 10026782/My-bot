@@ -86,14 +86,16 @@ def _update_existing(record_id: str, message: str, external_id: str) -> None:
 
 
 def _log_interaction(record_id: str, message: str) -> None:
-    """תועד אינטראקציה ב-Interaction Log."""
+    """תועד אינטראקציה ב-Interaction Log. Best-effort — לא חוסם, אבל לא שקט על כשלון."""
     try:
         from tools.airtable_tools import airtable_add
-        airtable_add(Tables.INTERACTION_LOG, {
+        result = airtable_add(Tables.INTERACTION_LOG, {
             InteractionLogFields.TITLE:     "email inbound",
             InteractionLogFields.SUMMARY:   (message or "")[:500],
             InteractionLogFields.TIMESTAMP: _now_iso(),
         })
+        if not result.get("ok"):
+            logger.warning("[InboundHandler] log_interaction not ok: %s", result.get("user_message", result))
     except Exception as e:
         logger.warning("[InboundHandler] log_interaction error: %s", e)
 
@@ -126,8 +128,10 @@ def _create_email_lead(
             LeadFields.MEMORY_KEY:  f"email:{sender_id}",
         }
         result = airtable_add(Tables.LEADS, fields)
-        m = re.search(r"rec\w+", result or "")
-        record_id = m.group(0) if m else "unknown"
+        if not result.get("ok"):
+            logger.warning("[InboundHandler] create_email_lead not ok: %s", result.get("user_message", result))
+            return
+        record_id = result.get("external_id") or "unknown"
         logger.info("[InboundHandler] created email lead %s domain=%s", record_id, domain)
     except Exception as e:
         logger.error("[InboundHandler] create_email_lead error: %s", e)

@@ -71,10 +71,22 @@ def enforce_leads_write_gate(
         f"[LeadsWriteGate] BLOCKED direct Leads write | "
         f"tool={tool_name} source={source} table={table_name}"
     )
-    raise LeadsDirectWriteBlocked(
-        f"❌ כתיבה ישירה ל-Leads חסומה. "
-        f"השתמש ב-capture_inbound_lead() בלבד. "
-        f"(tool={tool_name} source={source})"
+    raise LeadsDirectWriteBlocked(_leads_write_blocked_message(tool_name))
+
+
+# BUG-090: הודעה שונה לפי הפעולה שנחסמה — capture_inbound_lead() רלוונטי
+# רק ליצירת ליד נכנס חדש, לא לעדכון ליד קיים. גם ליצירה, לא חושפים שם
+# פונקציה פנימי למשתמש — הודעה אחת נקייה בלבד (single-speaker), בלי
+# suffix דיבאג (tool=/source=) שנשאר רק בלוג (logger.error למעלה).
+def _leads_write_blocked_message(tool_name: str) -> str:
+    if tool_name in ("airtable_update", "airtable_patch"):
+        return (
+            "❌ עדכון ליד קיים דרך הצ׳אט חסום כרגע. "
+            "לעדכון ליד קיים יש להשתמש במסך הלידים באפליקציה."
+        )
+    return (
+        "❌ יצירת ליד חדש ידנית דרך הצ׳אט חסומה כרגע. "
+        "לידים חדשים נוצרים אוטומטית מהודעות נכנסות."
     )
 
 

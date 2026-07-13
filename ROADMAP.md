@@ -1,6 +1,31 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
 עודכן: 07/07/2026 (מאוחר יותר עוד, סבב אימות עצמאי) — סשן נפרד (C95A audit) אימת מחדש, עצמאית וב-execution בפועל (לא רק grep/commit-message), את מצב שלושת הפריטים למטה: (1) `git fetch origin` (הריצה הקודמת של `git branch -a`/`git log --all` בסשן הזה נעשתה **לפני** fetch ולכן פספסה commits קיימים — תוקן). (2) `git merge-base --is-ancestor` אישר ששלושתם — BUG-077 Tier-3 fix (`e1c0ea5`), BUG-077 root-cause fix (`07caf9d`), BUG-DH-03/04 (`2e9bb57`) — **כן ממוזגים ל-`origin/main`** (עד ומכיל `4ba3002`, PR #254). (3) הותקנו `httpx`/`pyTelegramBotAPI` בסביבת ה-sandbox (היו חסרים) והורצו בפועל: `test_bugdh03_04_formula_injection.py` 15/15 ✅, `test_bug077_tier3_auto_capture_gate.py` 5/5 ✅, `test_action_gateway.py` 41/41 ✅, `python3 -m py_compile` נקי על 6 קבצי הליבה, `smoke_tests.py`'s "Decision Hub call-site governance" check עבר ("7 Decision Hub entrypoints match their declared wiring state" — מאשר גם F22/N14). ענף `claude/dazzling-knuth-29z82s` סונכרן ל-`origin/main` (`git merge --ff-only`, נדחף). **עדיין 🟡 NOT PRODUCTION-VERIFIED** — הרצת הטסטים הייתה מקומית/sandbox, לא Render/Airtable חי; אין claim על deploy. השורה הקודמת ("🟡 קוד מוכן, טרם ממוזג") הייתה נכונה רק ברגע כתיבתה (לפני שה-PR התמזג) ולא עודכנה מאז — ראה גם `BUG_AUDIT_LOG.md` BUG-077/BUG-036/BUG-037 לתיקון מקביל.
+עודכן: 12/07/2026 — BUG-PENDING-APPROVAL-B (Pending Approval Context Safety) נסגר במלואו, ✅ VERIFIED IN PROD, שרשרת של 4 PRs (#311-#314) שכל אחד נבדק חי בפרודקשן בנפרד ולבסוף כולם יחד: (1) **PR #311** — `ActionContract` קיבל `context_interrupted`/`reconfirmation_required`; `route_confirmation_word()`'s single-contract gate מציג מחדש תיאור עסקי במקום לבצע בשקט פעולה ישנה כשהודעת-ביניים הגיעה בינתיים ("context poisoning"). (2) **PR #312** — התגלה בבדיקה חיה שה-hook היה בתוך `run_agent()` בלבד, ולכן לא ראה מסלולים שעוקפים אותו (`/update` ו-slash commands אחרים, callbacks, wizard text/media, Decision Hub, מדיה כללית) — הוחלף ב-**global ingress context gate** יחיד לכל webhook (Telegram+WhatsApp Twilio+Meta), אחרי auth/dedup/identity, לפני כל ניתוב; `ActionGateway.is_own_resolution_event()` מזהה resolution אמיתי בלי לשכפל את לוגיקת ה-routing. (3) **PR #313** — בדיקה חיה נוספת חשפה ש-`guards/idempotency`'s Telegram dedup key היה מבוסס טקסט-הודעה, לא זהות-אירוע — "כן" שני זהה-טקסט נחסם כ-duplicate; תוקן ל-`update_id:message_id`. (4) **PR #314** — עוד בדיקה חיה חשפה שהבוליאנים לא ייצגו הפרעות *חוזרות*: אחרי reconfirmation אחד, הפרעה שנייה לא נתפסה, "כן" הבא ביצע ישירות. הוחלף ב-FSM חסום-סיבוב-אחד: `PENDING → (הפרעה) → RECONFIRM_REQUIRED → (הפרעה נוספת) → SUPERSEDED` (סופי, לא רקורסיבי) — הודעת supersede ספציפית ("הפעולה הקודמת בוטלה... שלח מחדש"), לא dead-end שקט. גם: קבלת-ביצוע מציגה תיאור עסקי (`compose_status_reply`), לא `tool_name`/`airtable_add` גולמי. **אימות סופי (12/07/2026):** לוג פרודקשן מילולי מלא — preview → 2 הפרעות → "כן" (re-display מדויק, מילה-במילה) → הפרעה שלישית → "כן" (superseded מדויק, אין ביצוע) — כל השרשרת ביחד, לא רק חתיכה אחת. ראה BUG_AUDIT_LOG.md BUG-108/BUG-PENDING-APPROVAL-B + 3 ה-Follow-ups.
+עודכן קודם: 10/07/2026 — SPEC A1 (Atomic Fail-Closed) נסגר: audit של "Preview Integrity" (Contract Chain, אותו סבב) איתר ש-`tools/airtable_gateway.py`'s `airtable_patch()`/`airtable_create()` כתבו payload חלקי בהצלחה כש-`validate_airtable_fields()` השמיטה רק חלק מהשדות — ה-`errors` שהפונקציה מחזירה תועדו ב-log בלבד, לעולם לא נבדקו ע"י הקוראות. משפיע על **כל** נתיב כתיבה בקוד (לא ספציפי ל-Leads). תוקן: שתי הפונקציות מחשבות `dropped = set(fields) - set(clean)` וחוסמות כתיבה כליל אם לא ריק (fail-closed אטומי) — בלי לגעת ב-`validate_airtable_fields` עצמה. Coercion (linked-record string→list) נשאר תחת אותו מפתח, לכן לא נחסם — מקרה קצה קריטי שנבדק במפורש (T3). 5 טסטים חדשים ב-`test_airtable_gateway.py` (32/32 בקובץ). ראה BUG_AUDIT_LOG.md SPEC A1.
+עודכן קודם: 10/07/2026 — BUG-097 (NAME-TRAILING-INTENT-VERB) נסגר: בדיקה חיה שנייה בפרודקשן **אחרי** מיזוג BUG-096 אישרה שה-block-splitting עובד נכון (3 לידים, טלפון פגום אחד — נדחה נקי, ללא זיהום שכן!), אבל חשפה שורש צר יותר — כשהטלפון בסוף הבלוק (לא מייד אחרי השם), פועל-כוונה כמו "מעוניין" נדבק לשם כי `_HEBREW_NAME_RE` תופס greedy את כל הרצף העברי הרציף ו-`_NAME_STOP` לא כלל פעלי-עניין. תוקן: `מעוניין`/`רוצה`/`מחפש`/`צריך`/`מבקש` (+נטיות) נוספו ל-`_NAME_STOP` — אותו מנגנון חיתוך קיים, לא regex חדש. `test_bug096_ingress_classifier_batch_bleed.py` הורחב ל-29/29. ראה BUG_AUDIT_LOG.md BUG-097.
+עודכן קודם: 10/07/2026 — 🔴 **תיקון-טעות: BUG-094/BUG-095 (למטה) תוקנו בקוד מת**, לא נגעו בפרודקשן. `parse_batch_dictation()`/`parse_lead_dictation()` ב-`core/lead_candidate_handler.py` (שהם תוקנו) אין להן אף קורא חי — `handle_lead_candidate()` בפועל משתמש ב-`core/ingress_classifier.py`'s `_extract_lead_candidates()`, מימוש כפול ונפרד עם אותו באג בדיוק. **BUG-096 (חדש) הוא התיקון האמיתי**, במקום הנכון: `_extract_lead_candidates()` מפוצל עכשיו לבלוקים דרך `_BLOCK_SEP` חדש, ומצורף `raw_text` per-candidate (סוגר גם ממצא נוסף שנמצא — Summary/Lead Event של כל ליד בבאצ' הכיל בטעות את כל הבאצ', לא רק את הליד עצמו). `_at_find_lead`/`_lead_domain_key` (BUG-094-B/C) כן היו תיקונים חיים תקפים — לא הושפעו. `test_bug096_ingress_classifier_batch_bleed.py` (חדש, 24/24). ראה BUG_AUDIT_LOG.md BUG-096 + תיקון-הטעות בסוף BUG-095.
+עודכן קודם: 10/07/2026 — BUG-095 (BATCH-MALFORMED-PHONE-BLOCK-BLEED) נסגר: בדיקה חיה בפרודקשן **אחרי** מיזוג BUG-094 חשפה שורש נוסף — כשמספר טלפון באמצע באצ' פגום (לא מזוהה ע"י `_PHONE_RE` בכלל), אין גבול-טלפון-שכן לחסום מולו, והבלוק כולו "נבלע" לתוך המועמד הבא (garbled name + phone מיוחס למועמד הלא-נכון). תוקן: `parse_batch_dictation()` מפצל עכשיו לבלוקים דרך `_BLOCK_SEP` (regex קיים בקובץ, מעולם לא נקרא בפועל עד עכשיו) *לפני* חילוץ טלפון/שם — גבול-בלוק, לא רק מיקום-טלפון, חוסם bleed. קלט מסוג אחר לגמרי שהמשתמש בדק (WhatsApp chat-export עם headers) אומת כ**לא**-רלוונטי — `classify_ingress()` כבר מסווג אותו tier=4/table (BUG-064 hard-marker gate קיים), לא מגיע בכלל ל-`parse_batch_dictation`. `test_bug094_batch_name_bleed.py` הורחב ל-31/31. ראה BUG_AUDIT_LOG.md BUG-095.
+עודכן קודם: 10/07/2026 — PR4 (Airtable Schema Refresh — docs cleanup) הושלם, סוגר את יוזמת PR3A/3B/3C/
+PR2/PR_RESPONSE_CONTRACT (כל 5 ה-PRs הקודמים כבר ממוזגים ל-`main`). נוסף `docs/governance/
+AIRTABLE_SCHEMA_GOVERNANCE.md` (source-of-truth vs. seed vs. runtime provider vs. snapshot archive,
+מה כל PR מכסה, למה response-contract היא משפחת באג נפרדת). `CLAUDE.md`'s module list עודכן עם
+`core/runtime_schema_provider.py`/`tools/schema_snapshot.py`/`tools/check_airtable_schema_runtime.py`.
+באותו סבב: BUG-018/020/021 נסגרו (doc drift — הקוד כבר תוקן, לא היה מתועד), BUG-019 3/5 תת-בעיות
+נסגרו + 1/5 חלקית (Deals ADDRESS/FUNDING_COST/ROI תוקנו ב-commit `9b51537` ישיר של המשתמש,
+RISK_LEVEL/NOTES עדיין לא אומתו) + 1/5 פתוחה (Payments contact_id/notes — silent data loss, לא
+crash), ו-3 מחלקות קוד מת (`ImportsFields`/`TenantsFields`/`DailyTaskFields`) נמחקו מ-
+`airtable_schema.py` (0 שימושים, מאומת מחדש לפני מחיקה). `schema_cache.json` (seed מטעה) נשאר
+במכוון — הוא ה-fallback הפעיל של BUG-021, לא קוד מת. ראה BUG_AUDIT_LOG.md לפירוט מלא.
+עודכן קודם: 10/07/2026 — BUG-094 (BATCH-NAME-WINDOW-BLEED) נסגר: בדיקה חיה בפרודקשן של BUG-058's resolver (למטה) חשפה 3 באגים נפרדים ב-upstream — (1) `parse_batch_dictation()`'s חלון ±60 תווים "דלף" שם של מועמד קודם למועמד הבא כששני בלוקי-ליד קרובים; (2) `_at_find_lead()` נפל בעיוור ל-name-only match בלי לוודא phone, מה שהפך את (1) ל"שתי כתיבות לאותה רשומה" בפועל; (3) `RouterDomain.CRM`/`INTERNAL` (דומייני-מטא של ה-Router, לא ורטיקלים עסקיים) זלגו ל-`Leads`/`Lead Events`' Domain field, גרמו ל-422 על Lead Events. שלושתם תוקנו (`_lead_domain_key()` חדש מטפל ב-(3)). `test_bug094_batch_name_bleed.py` (חדש, 25/25). ראה BUG_AUDIT_LOG.md BUG-094 + עדכון BUG-058.
+עודכן קודם: 10/07/2026 — BUG-058 סגור במלואו: Tier-2 batch-confirm resolver נבנה (`session_store.py`'s `set/get/clear_pending_lead_preview()`, `core/lead_candidate_handler.py`'s `resolve_pending_lead_preview()`), מחווט ב-`app.py` section 2.55. Precedence-decision שנדרש לפני בנייה (ראה 03/07 למטה) הוכרע: Tier-1 ActionGateway מנצח תמיד Tier-2 כששני המנגנונים חיים בו-זמנית לאותו chat_id — אותו precedent שכבר קיים ב-BUG-056 ("check ActionGateway live contracts FIRST"), לא הכרעה חדשה משורש. `test_tier2_silent_preview.py` נכתב מחדש (9/9). אפס רגרסיה. ראה BUG_AUDIT_LOG.md BUG-058.
+עודכן קודם: 09/07/2026 — N15 נפתח (Restricted-flow `notify_owner` — שדה נקבע אך לעולם לא נצרך, אין
+מנגנון התראה אמיתי לבעלים; התגלה תוך כדי תיקון claim-without-evidence כוזב באותו איזור —
+`_SINGLE_SPEAKER_FALLBACK` (PR #280) ו-`app.py`'s Restricted tool loop). שני הניסוחים הכוזבים
+תוקנו מיידית; ה-N15 עצמו (החלטה: לבנות התראה אמיתית או להסיר את השדה) עדיין PLANNED, לא מומש.
+עודכן קודם: 08/07/2026 — BUG-078/079/080/081 (שרשרת `/update`+Business Memory, PR #255/#256/#257/#258/#259/#260/#261/#263/#265) **✅ PRODUCTION VERIFIED במלואו, 6/6 domains**: `/update` נבדק ברצף אמיתי (real_estate/SaaS/media/import/general/finance) → `Other` → טקסט חופשי → נשמר בהצלחה בכולם, "📌 Other | <domain>" מוצג נכון, אין 422 באף אחד. מכסה: BUG-078 (זרימת `/update` הכללית), BUG-079 (`capture_text`), BUG-080 (`cmd_update.py`'s Event Date בלבד — שאר 6 נקודות הכתיבה טרם נבדקו), BUG-081 המלא כולל PR #263 (root cause — domain לא נכתב ל-Tags בכלל) ו-PR #265 (רווח בסוף ב-"Real Estate "/"SaaS ", מאומת מול Meta API) עבור כל 6 המפתחות. **נותר לבדוק:** C99 (חילוץ מסמך). ראה `BUG_AUDIT_LOG.md` BUG-078..081 ו-`CHANGE_CONTROL_LOG.md` C97-C101 לפירוט מלא.
+עודכן קודם: 07/07/2026 (מאוחר יותר עוד עוד) — BUG-078/079/080/081 תוקנו ומוזגו ל-main (PR #255/#256/#258/#259/#260/#261): (1) BUG-078/079 — `app.py`'s webhook היה מדלג על ה-pending state של `/update` עבור photo/document וגם עבור טקסט חופשי, ובורח לזרימות אחרות (Drive הכללי / `run_agent`) — שני ה-bypass-ים נסגרו. (2) BUG-080 — 7 נקודות כתיבה שלחו `datetime` מלא לשדות Date-בלבד ב-Airtable (422), תוקן ל-`.date().isoformat()`. (3) BUG-081 — Business Memory קיבלה שדה `Domain` ייעודי במקום למחזר domain לתוך `Tags` הכללי; דרש 2 סבבי תיקון נוספים על בסיס production evidence (422 חי אחרי מיזוג, "real_estate" lowercase לא היה option קיים יותר). גם C99 (feature, לא באג) — חילוץ טקסט ממסמך שנשלח באמצע `/update`. כל השישה ✅ מוזגים ל-main, **לא מאומתים בפרודקשן**. ראה `BUG_AUDIT_LOG.md` BUG-078..081 לפירוט מלא. גם: BUG-077 (השורה הקודמת כאן) התברר **כבר מוזג בפועל** (PR #254) — תוקן.
+עודכן קודם: 07/07/2026 (מאוחר יותר עוד) — BUG-077 root cause נסגר בקוד: `propose_action()` (`core/action_gateway.py`) מאמת כעת `requires_approval` מול `tool_registry.needs_approval()` fail-closed, פרט ל-`self_confirm` carve-out (BUG-076). דרש גם תיקון ל-`core/lead_candidate_handler.py::_write_one_lead()` (payload היה חסר "fields", מנע ממנו self_confirm תקין) — ראה `BUG_AUDIT_LOG.md` BUG-077 לפירוט מלא כולל קונפליקט עם יישום ראשוני נאיבי שתוקן לפני push. 🟡 קוד מוכן, טרם ממוזג.
 עודכן קודם: 07/07/2026 — 3 תיקוני doc-drift: (1) BUG-077 (Tier 3 auto-capture gate, `core/lead_candidate_handler.py`) ✅ ממוזג ל-`main` (PR #250, `cdc41b5`) — `BUG_AUDIT_LOG.md` עדיין רשם "Merged: לא", תוקן. (2) F12 vs F13: הכרעת בעלים מפורשת — F13 סופגת את F12, F12 נגנז. ראה סעיפי F12/F13 למטה. (3) BUG-DH-03/04 גם ✅ ממוזג ל-`main` (PR #251, `d51e6be`) — השורה הקודמת כאן טענה "לא ממוזג" בטעות (זה כבר תוקן, נשאר רק production verification). `FEATURE_DECISION_HUB` נשאר חסום עד production evidence.
 עודכן קודם: 07/07/2026 — BUG-DH-03/04 (Formula Injection ב-Decision Hub) תוקן בקוד: `_safe_formula_param()` נוסף ל-`tools/airtable_gateway.py`, מיושם ב-`cmd_decision.py::_resolve_decision_ref`, `decision_pipeline.py::maybe_supersede`, ו-`core/lead_candidate_handler.py::_search_formulas`. ראה BUG_AUDIT_LOG.md BUG-036/BUG-037 וסעיף BUG-DH-03/04 למטה.
 עודכן קודם: 06/07/2026 — C83 (Single Policy Source: הפרדת requires_approval מ-blocked_by_emergency) נסגר: מאומת בקוד ש-`event_bus.ACTIONS_REQUIRING_APPROVAL` הוא alias טהור ל-`tool_registry.TOOLS_REQUIRING_APPROVAL`, לא רשימה עצמאית סותרת. אותה בדיקה אימתה מחדש (לא פתחה חדש) את BUG-077 הקיים (`core/action_gateway.py`/`propose_action()`) — ראה BUG_AUDIT_LOG.md ו-`docs/governance/BOSS_UNIFIED_MASTER_PLAN.md` §3.5/§7.
@@ -674,6 +699,22 @@ Pull-only reasoning engine. `run()` מחבר Stages 1→2→4→6. `RequestState
 2 xfail מתועדים (`domain_rules`, `lead_score`) — design decisions.
 Stage 6 Orchestrator מוזג. CI ירוק ✅.
 
+### N15 — Restricted-flow owner notification: `notify_owner` field is set but never consumed 🔲 PLANNED
+**מה:** `RouteDecision.notify_owner` (`core/router/route_decision.py`) נקבע ל-`True` עבור
+`Handler.RESTRICTED` (`core/router/router.py`) — אבל `grep -rn "\.notify_owner"` על כל הריפו
+מראה שהוא **אף פעם לא נקרא** מחוץ ל-assertions בטסטים. אין שום מנגנון שמודיע בפועל לבעלים
+כשמשתמש מוגבל מנסה פעולה חסומה — הנראות היחידה היא שורת `logger.warning(...)` בלוגי שרת
+(`app.py`), לא push/הודעה שאדם יראה בפועל.
+**רקע:** התגלה תוך כדי תיקון `_SINGLE_SPEAKER_FALLBACK`'s טענת-המשך כוזבת (PR #280) ואותה
+בעיה בדיוק ב-`app.py`'s Restricted-flow tool loop (`"הבקשה נרשמה במערכת."` — קוד תוקן באותו
+audit, ראה `git log` על `app.py`'s tool loop לקומיט המדויק) — שני המקומות תוקנו מיידית להיות
+כנים על המצב הנוכחי (אין מנגנון). זה ה-backlog item המקביל: **להחליט בפועל**, לא רק לתקן ניסוח.
+**להחליט:** (א) לבנות מנגנון התראה אמיתי לבעלים (ערוץ עדיין לא נקבע — Telegram push? לוג
+מרכזי שנבדק אקטיבית?), או (ב) אם ההתראה מעולם לא הייתה נחוצה בפועל — להסיר את השדה/לפשט את
+לוגיקת `Handler.RESTRICTED` במקום להשאיר שדה מת.
+**עד שמוחלט:** ה-copy בקוד (`app.py`, `core/anti_hallucination.py`) כבר לא מבטיח העברה
+שלא קיימת — זה סגר את הסיכון המיידי (claim-without-evidence), לא את שאלת המדיניות.
+
 ### F17 — Decision Hub Stage 2: Smart Trust Layer (PR #157, מוזג ל-`main`, commit `9252b1e`/merge `78f9bae`)
 **מה:** שכבת ביטחון על גבי Stage 1 — מסתכלת על ה-Decision כולו (לא Event בודד): האם
 האירועים התומכים מסכימים, מה חסר, כמה ביטחון לפני חתימה. 4 יכולות: (1) AI Conflict
@@ -1040,6 +1081,62 @@ scope: **infrastructure only — אפס שינוי runtime behavior** בשלב �
 - **Batch ז — `airtable_schema.py`**: ✅ קיים מהבנייה המקורית — `Tables.MEDIA_FILES = "Media Files"` ו-`MediaFileFields` (NAME/FILE_TYPE/MIME_TYPE/DRIVE_URL/DRIVE_FILE_ID/DOMAIN/SOURCE/SIZE_BYTES/CREATED_BY/TELEGRAM_FILE_ID/LINKED_LEAD/RAW_TRANSCRIPT/NORMALIZED_TRANSCRIPT) מכסים את כל מה ש-`media_gateway.py` כותב. `AssetsFields` (נדל"ן) לא נגע. ⚠️ הטבלה עצמה חייבת להיווצר ידנית ב-Airtable לפני הדלקת flag — הקוד לא יוצר טבלה.
 תלוי ב: כלום (עומד בפני עצמו). דגלים `FEATURE_VOICE_NOTES`/`FEATURE_MEDIA_UPLOAD` קיימים ב-`feature_flags.py`, **כבויים כברירת מחדל** (`is_enabled()` חוזר `False` ללא env var) — הקוד רץ במלואו אך אינו פעיל בפרודקשן עד הדלקה מפורשת.
 קבצים: `voice_stt_adapter.py`, `drive_adapter.py`, `media_gateway.py`, `media_handler.py`, `app.py`, `tma_api.py`, `airtable_schema.py` — כולם מוזגים ל-`main`. בדיקות: `test_media_layer.py` (33/33).
+
+---
+
+### U1 — Understanding Layer Architecture Decision (נרשם 12/07/2026)
+מה: החלטה ארכיטקטונית רחבה — האם לבנות "שכבת הבנה" כללית חדשה (Interaction Envelope + Understanding Contract + PendingAction Store, כפי שהוצע בדיון נפרד) או להרחיב/לחבר מנגנון קרוב שכבר קיים בקוד (`core/reasoning_entity.py`/`core/reasoning_engines.py` + `core/adapters/leads_adapter.py`/`decision_adapter.py` — ראה BUG-104 ב-`BUG_AUDIT_LOG.md`).
+מצב: 🟡 **רישום בלבד, ממתין להחלטה** — BUG-102/103/104 מיפו כל מנגנון קיים בנפרד (מה קיים, מה שבור, מה מחובר לחיים — ראה `DOC-20260712-WA0001` המוזכר ב-BUG_AUDIT_LOG.md). `leads_adapter.py` (`entity_type=ENTITY_LEAD`) הוא **הכי קרוב מבנית** למה שהצעת "שכבת הבנה כללית" מבקשת (`PHASE_COLLECTING`/`PHASE_BLOCKED`/`PHASE_REVIEW`/`PHASE_AWAITING`/`PHASE_DECIDED`/`PHASE_CLOSED` ≈ RESOLVED/NEEDS_CLARIFICATION/REJECTED) — **אפס קוראים חיצוניים** בכל הריפו מעבר ל-smoke test. `decision_adapter.py` כן מחובר לחיים (`cmd_decision.py`), אבל `FEATURE_DECISION_HUB`=OFF כברירת מחדל, כלומר "חי" רק תיאורטית. **זו הבדיקה שקובעת אם צריך לבנות Understanding Contract חדש בכלל, או רק לחבר+להדליק flag קיים** — לפני שממשיכים בכל דיון נוסף על הארכיטקטורה הרחבה.
+תלוי ב: כלום טכני — החלטת ארכיטקטורה/מוצר גרידא, לא חסם קוד.
+חוסם: UX-01 (למטה) — אין טעם לבנות שכבת ניסוח-הודעות אחידה פעמיים אם שכבת הבנה כללית עומדת לשנות את מבנה ה-clarification/status/error messages בעצמה.
+קבצים: `core/reasoning_entity.py`, `core/reasoning_engines.py`, `core/adapters/leads_adapter.py`, `core/adapters/decision_adapter.py`.
+
+### UX-01 — Unified BOSS Experience (נרשם 12/07/2026, PLANNED — לא התחיל)
+
+**סדר תלות מחייב (הוראה מפורשת): ייצוב Pending Approval (✅ הושלם — BUG-PENDING-APPROVAL-B, מעלה) → סגירת U1 architecture (🟡 פתוח, מעלה) → ואז UX-01.** נרשם עכשיו כשלב רשמי ב-tracker; **אין לגעת בניסוחי הודעות בקוד עד שהלוגיקה עצמה (U1) סגורה** — כדי לא לקבל טלאים שונים בין Telegram/WhatsApp/Daily Digest/אישורים/שגיאות/Mini App תוך-כדי תיקוני-באגים נפרדים.
+
+**מטרה:** כל הודעה של BOSS → אותו קול → אותו מבנה → אותו מינוח → אותה היררכיה → בלי פרטי מערכת פנימיים.
+
+**עקרונות מחייבים:**
+- לא מציגים `record_id`/`contract_id`/`fingerprint`/שם כלי טכני (כמו `airtable_add`).
+- לא מציגים שמות טכניים של טבלאות אלא אם זה מידע עסקי שהמשתמש ביקש.
+- אימוג'ים רק כשיש להם תפקיד ברור, לא כקישוט.
+- הודעות קצרות, נקיות, עם פעולה אחת ברורה.
+- אותה פעולה נראית אותו דבר בכל ערוץ.
+- שגיאה אומרת מה קרה ומה אפשר לעשות עכשיו.
+- אישור תמיד מציג מה עומד לקרות.
+- קבלה אחרי ביצוע מציגה מה בוצע בפועל, לא את המנגנון הטכני.
+
+דוגמה: במקום `✅ בוצע: airtable_add | מזהה: rec...` → "הליד מלי חני נשמר בהצלחה." במקום `❌ Gmail לא מחובר כרגע` → "לא הצלחתי לקרוא את המיילים כי חשבון Gmail אינו מחובר. אפשר לחבר אותו בהגדרות."
+(הערה: `compose_status_reply`'s תיקון תיאור-עסקי מ-BUG-PENDING-APPROVAL-B/Follow-up #3 הוא צעד ראשון בכיוון הזה, בהיקף מצומצם — לא UX-01 המלא.)
+
+**מה נכנס לשלב:** Daily Digest, confirmations, cancellations, errors, success receipts, clarification questions, search results, empty states, multi-step wizards, Telegram, WhatsApp, Mini App, system notices, loading/retry/expired states.
+
+**מה בונים:** לא רק "נוסחים" — שכבה אחידה: `UXMessage` / `MessageType` / `BusinessDescription` / `ChannelRenderer`. לדוגמה:
+```python
+UXMessage(
+    type="success",
+    title="הליד נשמר",
+    body="מלי חני · 0567467372",
+    action=None,
+)
+```
+וה-renderer מתאים אותו ל-Telegram/WhatsApp/Mini App בלי לשנות את המשמעות.
+
+**סדר העבודה:** (1) ייצוב מערכת ואישורים. (2) אודיט של כל ההודעות הקיימות. (3) מילון UX אחיד. (4) Message Contract. (5) renderer משותף. (6) מעבר מודול־מודול. (7) בדיקות snapshot. (8) rollout הדרגתי.
+
+**DoD לשלב:**
+- אין מזהי Airtable בהודעות משתמש.
+- אין שמות כלים טכניים.
+- אין אימוג'ים כפולים או אקראיים.
+- כל success/error/confirm משתמש באותו מבנה.
+- אותה פעולה מוצגת זהה בכל ערוץ.
+- Mini App והודעות הצ'אט משתמשים באותו vocabulary.
+- יש snapshot tests לכל סוג הודעה מרכזי.
+- הודעות ישנות לא נשארות מפוזרות כ-strings בתוך handlers.
+
+מצב: 📋 PLANNED — רישום בלבד, ממתין ל-U1 (מעלה). לא לגעת עד שהלוגיקה סגורה.
+תלוי ב: U1 (מעלה), ייצוב מלא של Pending Approval flow (✅ הושלם).
 
 ---
 

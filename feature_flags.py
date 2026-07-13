@@ -47,6 +47,7 @@ INTEGRATIONS:
 APPROVAL POLICY:
   EMERGENCY_WINDOW             - מאפשר הפעלת חריג זמני ל-High מהטלפון (core/emergency_window.py, כבוי כברירת מחדל)
   FEATURE_ACTION_GATEWAY       - ActionContract + Action Gateway (Stage B) — מרכז כל mutation תחת חוזה; default OFF
+  FEATURE_ATOMIC_CLAIMS        - PostgreSQL atomic coordination for contract execution (Phase 4B0.1A); default OFF
 
 CAPTURE POLICY (C89):
   FEATURE_AUTO_CAPTURE         - Tiered auto-write via IngressClassification (Stage 3).
@@ -85,6 +86,37 @@ GAME / SCHEDULER:
   GAME_SCHEDULER              - scheduler jobs של מערכת הגיימיפיקציה
   PAYMENT_REMINDERS           - תזכורות תשלום אוטומטיות
   GIT_AUDIT_SCHEDULER         - הרצה יומית אוטומטית של daily_git_audit.py; default OFF (נשאר manual-only)
+
+PR3A — Airtable Schema Snapshot Archive:
+  FEATURE_AIRTABLE_SCHEMA_SNAPSHOT         - scheduler job מייצר snapshot של ה-schema החי
+                                 ומעלה JSON+XLSX ל-Tables.SCHEMA_SNAPSHOTS; default OFF.
+                                 דורש manual pre-activation checklist (טבלה קיימת + שדות
+                                 תואמים) לפני הפעלה — ראה tools/schema_snapshot.py.
+  FEATURE_AIRTABLE_SCHEMA_SNAPSHOT_CLEANUP - מפעיל retention policy (מחיקת snapshots ישנים)
+                                 בתוך run_snapshot_archive(); default OFF — ניקוי ראשוני
+                                 ייעשה ידנית (tools/schema_snapshot.apply_retention_policy()).
+
+PR3B (rev.2) — Airtable RuntimeSchemaProvider (independent of any snapshot-
+archive work — see core/runtime_schema_provider.py):
+  FEATURE_AIRTABLE_RUNTIME_SCHEMA_PROVIDER_STATE - שלוש מצבים (לא boolean רגיל):
+                                 "off" (ברירת מחדל, התנהגות קיימת ללא שינוי) / "shadow"
+                                 (הפרובידר רץ, משווה מול schema_validator הקיים, מלוגג
+                                 discrepancy — לא חוסם כתיבה) / "enforce" (תוצאת הפרובידר
+                                 בפועל קובעת אילו שדות נחסמים). קריאה דרך
+                                 get_runtime_schema_provider_state(), לא is_enabled().
+
+PR2 (rev.2) — Gateway select-value validation (depends on PR3B's
+RuntimeSchemaProvider; independent flag from it — see
+tools/airtable_gateway.py:_provider_invalid_select_values()):
+  FEATURE_AIRTABLE_SELECT_VALUE_VALIDATION_STATE - שלוש מצבים (לא boolean רגיל):
+                                 "off" (ברירת מחדל, אין בדיקת ערכים בכלל) / "shadow"
+                                 (מלוגג ערך singleSelect/multipleSelects לא-תקין מול
+                                 choices החיים, לא חוסם/מוריד כלום) / "enforce" (שדה
+                                 עם ערך לא-תקין מוסר כולו מה-write — multipleSelects עם
+                                 ערך לא-תקין אחד מוסר כולו, אין סינון חלקי). פועל רק
+                                 כש-RuntimeSchemaProvider מחזיר mode="full" לטבלה —
+                                 ב-mode="name_only" (seed) תמיד מדלג, ללא false positives.
+                                 קריאה דרך get_select_value_validation_state(), לא is_enabled().
 
 C94 (Unified Ingress Envelope + Evidence Trace):
   FEATURE_INGRESS_ENVELOPE    - קיל-סוויץ' לבניית IngressEnvelope ב-run_agent() (Telegram+WhatsApp/
@@ -155,11 +187,66 @@ def _save_persistent() -> None:
         logger.error(f"[FeatureFlags] failed to save {_PERSIST_PATH}: {e}")
 
 
+# PR-0C (BUG-TMA-APPROVAL-TRUTHFULNESS follow-up): EMAIL_INBOUND/ABANDONED_LEADS
+# request approval for "send_email_reply"/"send_bounce" via event_bus, but
+# neither action has a working execution path — no .confirmed subscriber, and
+# no dispatcher tool (unlike media_save_to_memory/send_followup/send_recovery,
+# migrated in Phase 1). Approving either today always dead-ends with
+# "⚠️ אין handler — הפעולה לא בוצעה." Owner decision (12/07/2026): do not touch
+# these two writers in PR-0C; hard-block turning either flag on until the full
+# adapter (schema + tool_registry + dispatcher + service + tests) exists for
+# its action — checked here structurally (tool_registry entry), not by trust.
+_ADAPTER_GATED_FLAGS: dict[str, str] = {
+    "EMAIL_INBOUND":   "send_email_reply",
+    "ABANDONED_LEADS": "send_bounce",
+}
+
+
 def is_enabled(name: str) -> bool:
     if name in _RUNTIME:
-        return _RUNTIME[name]
-    value = os.environ.get(name, _DEFAULTS.get(name, "")).strip().lower()
-    return value in ("1", "true", "yes", "on", "enabled")
+        value = _RUNTIME[name]
+    else:
+        raw = os.environ.get(name, _DEFAULTS.get(name, "")).strip().lower()
+        value = raw in ("1", "true", "yes", "on", "enabled")
+
+    if value and name in _ADAPTER_GATED_FLAGS:
+        import tool_registry
+        required_tool = _ADAPTER_GATED_FLAGS[name]
+        if tool_registry.get(required_tool) is None:
+            logging.getLogger(__name__).error(
+                "[FeatureFlags] %s requested ON but blocked — '%s' has no "
+                "ActionGateway adapter yet (tool_registry entry missing). "
+                "Build the adapter (schema + registry + dispatcher + service + "
+                "tests) before enabling this flag.", name, required_tool,
+            )
+            return False
+
+    return value
+
+
+_SCHEMA_PROVIDER_STATES = ("off", "shadow", "enforce")
+
+
+def get_runtime_schema_provider_state() -> str:
+    """
+    Three-state accessor for FEATURE_AIRTABLE_RUNTIME_SCHEMA_PROVIDER_STATE.
+    Unlike every other flag in this registry, this one is not a boolean —
+    it has an off/shadow/enforce lifecycle (see core/runtime_schema_provider.py).
+    Returns "off" for any unset/unrecognized value — fail closed to old behavior.
+    """
+    value = os.environ.get("FEATURE_AIRTABLE_RUNTIME_SCHEMA_PROVIDER_STATE", "off").strip().lower()
+    return value if value in _SCHEMA_PROVIDER_STATES else "off"
+
+
+def get_select_value_validation_state() -> str:
+    """
+    Three-state accessor for FEATURE_AIRTABLE_SELECT_VALUE_VALIDATION_STATE
+    (PR2 rev.2). Independent of get_runtime_schema_provider_state() — a
+    deployment can run one in enforce and the other in shadow/off.
+    Returns "off" for any unset/unrecognized value — fail closed to old behavior.
+    """
+    value = os.environ.get("FEATURE_AIRTABLE_SELECT_VALUE_VALIDATION_STATE", "off").strip().lower()
+    return value if value in _SCHEMA_PROVIDER_STATES else "off"
 
 
 def set_flag(name: str, value: bool) -> None:

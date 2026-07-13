@@ -246,7 +246,7 @@ def _save_voice_lead(session: VoiceSession) -> bool:
         }
 
         result = airtable_add(Tables.LEADS, fields)
-        ok = "✅" in result
+        ok = bool(result.get("ok"))
         if ok:
             logger.info(f"[Voice] Lead saved: {session.from_num} | {session.domain}")
             _notify_owner(session)

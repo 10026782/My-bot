@@ -36,10 +36,11 @@ def chk(desc: str, cond: bool) -> None:
 
 @dataclass
 class MockIdentity:
-    user_id:   str = "owner_1"
-    role:      str = "owner"
-    tenant_id: str = "boss_hq"
-    domain_id: str = "general"
+    user_id:     str = "owner_1"
+    role:        str = "owner"
+    tenant_id:   str = "boss_hq"
+    domain_id:   str = "general"
+    external_id: str = "tg_owner_1"
 
     @property
     def is_internal(self) -> bool:
@@ -108,8 +109,11 @@ def test_confirm_yes_resolves_via_gateway_and_writes():
     assert len(live_after) == 0, "contract must no longer be pending after execution"
     contract = gw.find_contract(live_before[0].contract_id)
     assert contract.status == "executed", f"status={contract.status}"
-    assert contract.normalized_payload.get("_source") == "lead_capture", \
-        "write must go through dispatch_tool with _source=lead_capture (Leads write gate), not a raw call"
+    # BUG-091: "_source" is no longer a tool_inputs/normalized_payload key —
+    # it's an explicit trusted_source kwarg to propose_action(), stored on
+    # the contract itself (never inside Claude-reachable payload data).
+    assert contract.trusted_source == "lead_capture", \
+        "write must go through dispatch_tool with trusted_source='lead_capture' (Leads write gate), not a raw call"
     return "OK"
 
 
@@ -236,12 +240,16 @@ def test_app_py_confirm_word_checks_gateway_before_flag_branch():
     src = open(os.path.join(os.path.dirname(__file__), "app.py"), encoding="utf-8").read()
     marker = 'elif _lower in _CONFIRM_WORDS:'
     idx = src.index(marker)
-    block = src[idx: idx + 1200]
+    # BUG-058: window widened — a Tier-2 batch-preview resolver check
+    # (core/lead_candidate_handler.resolve_pending_lead_preview) was added
+    # between the find_live_contracts() check and the FEATURE_ACTION_GATEWAY
+    # flag branch, pushing the flag check further from the marker.
+    block = src[idx: idx + 3000]
     gw_check_idx = block.index("find_live_contracts")
     flag_check_idx = block.index('_flag_cw("FEATURE_ACTION_GATEWAY")')
     assert gw_check_idx < flag_check_idx, \
         "find_live_contracts() check must come before the FEATURE_ACTION_GATEWAY flag branch"
-    assert "_CANCEL_WORDS" in src[idx: idx + 3000], "cancel-word branch must exist alongside confirm-word"
+    assert "_CANCEL_WORDS" in src[idx: idx + 5000], "cancel-word branch must exist alongside confirm-word"
     return "OK"
 
 

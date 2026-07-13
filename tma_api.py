@@ -37,6 +37,39 @@ logger = logging.getLogger(__name__)
 tma_api = Blueprint("tma_api", __name__)
 
 
+_TASK_DOMAIN_OPTIONS = (
+    "Real Estate",
+    "Income Properties",
+    "Recruitment",
+    "Import",
+    "Saas",
+)
+
+
+def _normalize_task_domain(value: str) -> str:
+    """Return the exact Airtable Tasks.Domain option for known domain keys."""
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+
+    def key(text: str) -> str:
+        return re.sub(r"\s+", " ", text.replace("_", " ").replace("-", " ")).strip().lower()
+
+    options_by_key = {key(option): option for option in _TASK_DOMAIN_OPTIONS}
+    aliases = {
+        "real estate": "Real Estate",
+        "income properties": "Income Properties",
+        "recruiting": "Recruitment",
+        "recruitment": "Recruitment",
+        "import": "Import",
+        "imports": "Import",
+        "saas": "Saas",
+    }
+
+    normalized = key(raw)
+    return options_by_key.get(normalized) or aliases.get(normalized) or raw
+
+
 @tma_api.errorhandler(RuntimeError)
 def _handle_runtime_error(e):
     logger.error(f"[tma_api] unhandled RuntimeError: {e}")
@@ -295,18 +328,45 @@ def _notify_owner(text: str) -> None:
         logger.warning(f"[notify_owner] {e}")
 
 
-def _try_bus_action(context_id: str, decision: str) -> None:
-    """Try to confirm/reject a matching in-memory event_bus pending action. Silent on miss."""
+# PR-0C0 (BUG-TMA-APPROVAL-TRUTHFULNESS): the exact strings event_bus.py's
+# EventBus.confirm()/reject() return when there was nothing to act on — used
+# to tell "no matching pending action" (expected today; no live writer links
+# an Airtable Approvals record to a real event_bus action_id yet, see the
+# PR-0C0 Contract Chain in BUG_AUDIT_LOG.md) apart from an actual sync.
+_BUS_MISS_MESSAGES = frozenset({
+    "⚠️ הפעולה פגה או לא נמצאה.",                      # EventBus.confirm(): not found
+    "⚠️ אין handler לפעולה זו — הפעולה לא בוצעה.",       # EventBus.confirm(): no .confirmed subscriber
+    "⚠️ הפעולה כבר לא קיימת.",                          # EventBus.reject(): not found
+})
+
+
+def _try_bus_action(context_id: str, decision: str) -> bool:
+    """
+    Try to confirm/reject a matching in-memory event_bus pending action.
+
+    Returns True only if a real pending item was found and event_bus did not
+    itself report a miss (not-found / no-subscriber). Returns False both for
+    "nothing to sync" (the expected case today) and for a genuine failure —
+    this is an observability signal, not an approval-outcome signal: callers
+    must not treat False as "the approval failed". What it replaces is the
+    previous behavior of silently discarding event_bus's own miss/failure
+    strings, which would have made a real sync failure indistinguishable
+    from an intentional no-op the moment a future writer starts linking real
+    event_bus action_ids into this table (see PR-0C).
+    """
     if not context_id:
-        return
+        return False
     try:
         from event_bus import bus  # noqa: PLC0415
-        if decision == "approve":
-            bus.confirm(context_id)
-        else:
-            bus.reject(context_id)
+        result = bus.confirm(context_id) if decision == "approve" else bus.reject(context_id)
+        if result in _BUS_MISS_MESSAGES:
+            logger.info(f"[event_bus] no matching pending action for context_id={context_id}: {result}")
+            return False
+        logger.info(f"[event_bus] synced {decision} for context_id={context_id}: {str(result)[:80]}")
+        return True
     except Exception as e:
-        logger.debug(f"[event_bus] no matching action for {context_id}: {e}")
+        logger.warning(f"[event_bus] sync failed for context_id={context_id}: {e}")
+        return False
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1498,7 +1558,7 @@ def create_lead_task(lead_id, identity):
         return jsonify({"error": "lead not found"}), 404
     lf = lead_rec.get("fields", {})
     lead_name   = lf.get(LeadFields.NAME, lead_id)
-    lead_domain = lf.get(LeadFields.DOMAIN, "")
+    lead_domain = _normalize_task_domain(lf.get(LeadFields.DOMAIN, ""))
     lead_owner  = lf.get(LeadFields.OWNER, "")
 
     task_fields: dict = {
@@ -2113,12 +2173,19 @@ def get_approvals(identity):
 @tma_api.route("/api/approvals/bulk", methods=["POST"])
 @require_tma_auth
 def bulk_approve(identity):
-    """Approve ALL low-risk pending approvals. High/medium risk are NEVER bulk-approved."""
+    """Approve ALL low-risk pending approvals. High/medium risk are NEVER bulk-approved.
+
+    PR-0C0: previously patched status straight to אושר without ever calling
+    _execute_tma_write() — bulk approve performed no write at all. Now routes
+    each low-risk record through the same claim -> execute -> finalize helper
+    used by the single-item approve path, so "approved" only means "executed".
+    """
     if not identity.is_owner:
         return jsonify({"error": "forbidden"}), 403
 
     recs     = _at_list("Approvals", "{סטטוס}='ממתין'", max_records=100)
     approved = []
+    failed   = []
     skipped  = []
 
     for rec in recs:
@@ -2127,23 +2194,28 @@ def bulk_approve(identity):
         if risk.lower() not in _RISK_LOW:
             skipped.append(rec["id"])
             continue
-        ok = _at_patch("Approvals", rec["id"], {"סטטוס": "אושר"})
-        if ok:
+        outcome = _claim_and_execute_approval(rec["id"], identity)
+        if outcome.get("ok"):
             approved.append(rec["id"])
-            ctx_id = rec.get("fields", {}).get("מזהה הקשר", "")
-            _try_bus_action(ctx_id, "approve")
+            _try_bus_action(outcome.get("ctx_id", ""), "approve")
         else:
-            skipped.append(rec["id"])
+            logger.warning("[bulk_approve] record %s failed: %s", rec["id"], outcome)
+            failed.append(rec["id"])
 
-    if approved:
-        _audit("bulk_approve", identity, details=f"{len(approved)} low-risk approvals")
+    if approved or failed:
+        _audit("bulk_approve", identity, details=f"{len(approved)} approved, {len(failed)} failed")
         _notify_owner(
-            f"✅ TMA: {len(approved)} פעולות Low Risk אושרו\n"
+            f"✅ TMA: {len(approved)} פעולות Low Risk אושרו ובוצעו\n"
             f"על ידי: {identity.display_name or identity.user_id}\n"
-            f"דחויות (לא low-risk): {len(skipped)}"
+            f"נכשלו: {len(failed)} | דחויות (לא low-risk): {len(skipped)}"
         )
 
-    return jsonify({"ok": True, "approved": len(approved), "skipped": len(skipped)})
+    return jsonify({
+        "ok": True,
+        "approved": len(approved),
+        "failed": len(failed),
+        "skipped": len(skipped),
+    })
 
 
 # Per-approval in-process locks — prevent concurrent double-claim within a single worker.
@@ -2157,6 +2229,96 @@ def _get_approval_lock(approval_id: str) -> threading.Lock:
         if approval_id not in _APPROVAL_LOCKS:
             _APPROVAL_LOCKS[approval_id] = threading.Lock()
         return _APPROVAL_LOCKS[approval_id]
+
+
+# PR-0C0 (BUG-TMA-APPROVAL-TRUTHFULNESS): shared claim -> execute -> finalize
+# flow for a single Approvals record. Used by both act_on_approval() (single)
+# and bulk_approve() (previously patched straight to APPROVED without ever
+# calling _execute_tma_write() at all -- "bulk approve" performed no write).
+# Never marks APPROVED without either a successful execution or no tma_write
+# payload to execute. On unexpected exception after claiming, reverts the
+# record to PENDING instead of leaving it stuck at PROCESSING forever with
+# no retry path.
+def _claim_and_execute_approval(approval_id: str, identity) -> dict:
+    """
+    Returns a dict, always including "ok" (bool) and "status_code" (int):
+      success: {"ok": True, "status_code": 200, "new_status": APPROVED,
+                "action_label": ..., "ctx_id": ..., "bus_synced": bool,
+                "execution_result": dict | None}
+      failure: {"ok": False, "status_code": int, "error": str, "detail": ... (optional)}
+    """
+    lock = _get_approval_lock(approval_id)
+    with lock:
+        # Re-read inside lock to close the concurrent race window.
+        fresh = _at_get_record("Approvals", approval_id)
+        if not fresh:
+            return {"ok": False, "status_code": 404, "error": "approval not found"}
+        fresh_status = fresh.get("fields", {}).get(ApprovalsFields.STATUS, "")
+        if fresh_status != ApprovalStatus.PENDING:
+            return {"ok": False, "status_code": 409, "error": f"approval already {fresh_status}"}
+
+        # Claim: mark as "מעבד" — durable lock in Airtable.
+        # A second concurrent request will see "מעבד" on its re-read -> 409.
+        claimed = _at_patch("Approvals", approval_id, {ApprovalsFields.STATUS: ApprovalStatus.PROCESSING})
+        if not claimed:
+            return {"ok": False, "status_code": 500, "error": "claim failed — could not set מעבד"}
+    # Lock released here — "מעבד" in Airtable is now the single source of truth.
+
+    f = fresh.get("fields", {})
+    action_label = f.get(ApprovalsFields.ACTION, approval_id)
+    ctx_id = f.get(ApprovalsFields.CONTEXT_ID, "")
+    context_data = f.get(ApprovalsFields.CONTEXT_DATA, "")
+
+    try:
+        execution_result = None
+        if context_data:
+            try:
+                payload = json.loads(context_data)
+            except (TypeError, ValueError):
+                payload = {}
+            if isinstance(payload, dict) and payload.get("type") == "tma_write":
+                execution_result = _execute_tma_write(payload, identity)
+                if not execution_result.get("ok"):
+                    logger.error(
+                        "[Approval] write failed after claim for %s: %s",
+                        approval_id, execution_result,
+                    )
+                    # Mark נכשל so the record reflects the real outcome.
+                    _at_patch("Approvals", approval_id, {ApprovalsFields.STATUS: ApprovalStatus.FAILED})
+                    return {
+                        "ok": False, "status_code": 500,
+                        "error": "approval execution failed", "detail": execution_result,
+                        "action_label": action_label, "ctx_id": ctx_id,
+                    }
+
+        # Execution succeeded (or no tma_write payload) — finalize to אושר.
+        _at_patch("Approvals", approval_id, {ApprovalsFields.STATUS: ApprovalStatus.APPROVED})
+    except Exception as exc:
+        # Unexpected failure after claiming — do not leave the record stuck at
+        # PROCESSING with no retry path. Revert to PENDING so a later attempt
+        # can claim and retry it, instead of a permanent 409 dead end.
+        logger.error(
+            "[Approval] unexpected error after claim for %s — reverting to pending: %s",
+            approval_id, exc, exc_info=True,
+        )
+        try:
+            _at_patch("Approvals", approval_id, {ApprovalsFields.STATUS: ApprovalStatus.PENDING})
+        except Exception as revert_exc:
+            logger.critical(
+                "[Approval] could not revert stuck PROCESSING record %s — manual intervention needed: %s",
+                approval_id, revert_exc,
+            )
+        return {"ok": False, "status_code": 500, "error": "unexpected error during execution", "detail": str(exc)}
+
+    bus_synced = False
+    if execution_result is None:
+        bus_synced = _try_bus_action(ctx_id, "approve")
+
+    return {
+        "ok": True, "status_code": 200, "new_status": ApprovalStatus.APPROVED,
+        "action_label": action_label, "ctx_id": ctx_id, "bus_synced": bus_synced,
+        "execution_result": execution_result,
+    }
 
 
 @tma_api.route("/api/approvals/<approval_id>", methods=["POST"])
@@ -2180,7 +2342,6 @@ def act_on_approval(approval_id, identity):
     f = rec.get("fields", {})
     action_label = f.get(ApprovalsFields.ACTION, approval_id)
     ctx_id = f.get(ApprovalsFields.CONTEXT_ID, "")
-    context_data = f.get(ApprovalsFields.CONTEXT_DATA, "")
 
     if decision == "reject":
         status = f.get(ApprovalsFields.STATUS, "")
@@ -2192,58 +2353,29 @@ def act_on_approval(approval_id, identity):
         ok = _at_patch("Approvals", approval_id, patch_fields)
         if not ok:
             return jsonify({"error": "update failed"}), 500
-        _try_bus_action(ctx_id, decision)
+        bus_synced = _try_bus_action(ctx_id, decision)
         _audit("approval_reject", identity, details=f"{action_label[:100]} | note: {note[:80]}")
         _notify_owner(
             f"REJECTED TMA: נדחה - {action_label}\n"
             f"approved_by: {identity.display_name or identity.user_id}"
             + (f"\nnote: {note}" if note else "")
         )
-        return jsonify({"ok": True, "approval_id": approval_id, "new_status": ApprovalStatus.REJECTED})
+        return jsonify({
+            "ok": True, "approval_id": approval_id, "new_status": ApprovalStatus.REJECTED,
+            "bus_synced": bus_synced,
+        })
 
     # ── approve path: 3-state claim (ממתין → מעבד → אושר / נכשל) ──────────────────
-    lock = _get_approval_lock(approval_id)
-    with lock:
-        # Re-read inside lock to close the concurrent race window.
-        fresh = _at_get_record("Approvals", approval_id)
-        if not fresh:
-            return jsonify({"error": "approval not found"}), 404
-        fresh_status = fresh.get("fields", {}).get(ApprovalsFields.STATUS, "")
-        if fresh_status != ApprovalStatus.PENDING:
-            return jsonify({"error": f"approval already {fresh_status}"}), 409
+    # PR-0C0: claim+execute+finalize now lives in the shared
+    # _claim_and_execute_approval() helper (also used by bulk_approve()) so
+    # both endpoints go through the exact same execute-before-approve logic.
+    outcome = _claim_and_execute_approval(approval_id, identity)
+    if not outcome["ok"]:
+        body = {"error": outcome["error"]}
+        if "detail" in outcome:
+            body["detail"] = outcome["detail"]
+        return jsonify(body), outcome["status_code"]
 
-        # Claim: mark as "מעבד" — durable lock in Airtable.
-        # A second concurrent request will see "מעבד" on its re-read → 409.
-        claimed = _at_patch("Approvals", approval_id, {ApprovalsFields.STATUS: ApprovalStatus.PROCESSING})
-        if not claimed:
-            return jsonify({"error": "claim failed — could not set מעבד"}), 500
-    # Lock released here — "מעבד" in Airtable is now the single source of truth.
-
-    execution_result = None
-    if context_data:
-        try:
-            payload = json.loads(context_data)
-        except (TypeError, ValueError):
-            payload = {}
-        if isinstance(payload, dict) and payload.get("type") == "tma_write":
-            execution_result = _execute_tma_write(payload, identity)
-            if not execution_result.get("ok"):
-                logger.error(
-                    "[Approval] write failed after claim for %s: %s",
-                    approval_id, execution_result,
-                )
-                # Mark נכשל so the record reflects the real outcome.
-                _at_patch("Approvals", approval_id, {ApprovalsFields.STATUS: ApprovalStatus.FAILED})
-                return jsonify({
-                    "error": "approval execution failed",
-                    "detail": execution_result,
-                }), 500
-
-    # Execution succeeded (or no tma_write payload) — finalize to אושר.
-    _at_patch("Approvals", approval_id, {ApprovalsFields.STATUS: ApprovalStatus.APPROVED})
-
-    if execution_result is None:
-        _try_bus_action(ctx_id, decision)
     _audit("approval_approve", identity, details=f"{action_label[:100]} | note: {note[:80]}")
     _notify_owner(
         f"OK TMA: אושר - {action_label}\n"
@@ -2252,8 +2384,8 @@ def act_on_approval(approval_id, identity):
     )
 
     response = {"ok": True, "approval_id": approval_id, "new_status": ApprovalStatus.APPROVED}
-    if execution_result is not None:
-        response.update(execution_result)
+    if outcome.get("execution_result") is not None:
+        response.update(outcome["execution_result"])
     return jsonify(response)
 
 

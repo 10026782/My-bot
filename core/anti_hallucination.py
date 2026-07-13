@@ -129,6 +129,27 @@ def _validate_crm_payment_evidence(tool_name: str, result: dict) -> "VerifyResul
     return None
 
 
+def _validate_media_memory_evidence(tool_name: str, result: dict) -> "VerifyResult | None":
+    external_id = str(result.get("external_id", "") or "")
+    evidence = result.get("evidence", {}) or {}
+    has = external_id or (isinstance(evidence, dict) and evidence.get("record_id"))
+    if not has:
+        return VerifyResult("failed", f"{tool_name}: missing external_id/record_id in structured result")
+    return None
+
+
+def _validate_owner_draft_evidence(tool_name: str, result: dict) -> "VerifyResult | None":
+    """send_followup/send_recovery: evidence is the output_gateway audit_id proving
+    the draft delivery to the owner was actually attempted and audited — there is
+    no external record_id since these never write to Airtable."""
+    external_id = str(result.get("external_id", "") or "")
+    evidence = result.get("evidence", {}) or {}
+    has = external_id or (isinstance(evidence, dict) and evidence.get("audit_id"))
+    if not has:
+        return VerifyResult("failed", f"{tool_name}: missing external_id/audit_id in structured result")
+    return None
+
+
 # Registry: tool_name → evidence validator function.
 # Only tools with explicit validators here are permitted to produce success claims.
 _EVIDENCE_VALIDATORS: dict[str, Any] = {
@@ -141,6 +162,9 @@ _EVIDENCE_VALIDATORS: dict[str, Any] = {
     "gmail_send_draft":      _validate_gmail_evidence,
     "calendar_create_event": _validate_calendar_evidence,
     "crm_mark_payment_paid": _validate_crm_payment_evidence,
+    "media_save_to_memory":  _validate_media_memory_evidence,
+    "send_followup":         _validate_owner_draft_evidence,
+    "send_recovery":         _validate_owner_draft_evidence,
 }
 
 # Write/action/sensitive tools that must fail closed if not in _EVIDENCE_VALIDATORS.
@@ -181,9 +205,13 @@ _NO_TOOL_CLAIMS: list[tuple[re.Pattern, frozenset[str]]] = [
     ),
     # CRM creation claims — דורשות airtable_add בלבד.
     # FOUND לא כותב airtable_add → אסור לשמש כ-evidence ליצירה.
+    # גוף ראשון (הוספתי/שמרתי/רשמתי/תיעדתי) נוסף symmetric ל-UPDATE claims
+    # (ראה BUG-NEW-09 למטה) — "הוספתי... 30 רשומות פעילות" חמק מה-Gate
+    # בדוגמה חיה (09/07) כי ה-pattern הקודם תפס רק צורות גוף שלישי/סביל.
     (
         re.compile(
-            r"(הרשומה נוצרה|נוצר ליד|הליד נוצר|נוסף ל-?Airtable|נוספה רשומה|ליד חדש נוצר|lead_capture:created)",
+            r"(הרשומה נוצרה|נוצר ליד|הליד נוצר|נוסף ל-?Airtable|נוספה רשומה|ליד חדש נוצר|lead_capture:created|"
+            r"(?<!לא )(?<!עדיין )(הוספתי|שמרתי|רשמתי|תיעדתי).{0,40}(רשומ|ליד|תיעוד|זיכרון ה?עסקי|Business Memory))",
             re.UNICODE,
         ),
         frozenset({"airtable_add"}),
@@ -481,14 +509,23 @@ _NO_TOOL_EVIDENCE_FALLBACK = "לא ניתן לאמת כרגע את מצב הפע
 
 # Single Speaker: when FEATURE_ACTION_GATEWAY=true, the Agent must NOT emit action-status
 # text (נוסף/בוצע/נשלח etc.) — only the Gateway/compose_status_reply may do so.
-# This pattern is imported by output_gateway.py as well; keep in sync.
+# Also reused (see _has_write_tool_evidence / the generic structural gate below)
+# as the trigger for an always-on, category-agnostic hallucination check.
+# First-person forms (הוספתי/שמרתי/...) carry a (?<!לא )(?<!עדיין ) guard since
+# they're common enough in negated/hedged sentences that a bare match would
+# false-positive too often; the original passive forms are left as they were.
 _AGENT_ACTION_STATUS_PATTERN = re.compile(
     r"(?<!\?)\b(נוסף|נוספה|נוספו|בוצע|בוצעה|נשלח|נשלחה|נשמר|נשמרה|"
     r"נוצר|נוצרה|עודכן|עודכנה|הושלם|הושלמה|"
-    r"מושלם|המשימה נוספה|הפעולה בוצעה|הרשומה נוצרה)\b",
+    r"מושלם|המשימה נוספה|הפעולה בוצעה|הרשומה נוצרה)\b|"
+    r"(?<!לא )(?<!עדיין )\b(הוספתי|שמרתי|עדכנתי|יצרתי|שלחתי|רשמתי|ביצעתי|קבעתי|תיעדתי)\b",
     re.UNICODE,
 )
-_SINGLE_SPEAKER_FALLBACK = "הפעולה התקבלה. תוצאה תישלח בנפרד."
+# Was "הפעולה התקבלה. תוצאה תישלח בנפרד." — a false continuation claim with
+# no real pending/queue behind it: when this gate fires, nothing actually
+# follows up. Same claim-without-evidence class the rest of this module
+# exists to block, just in the fallback copy itself.
+_SINGLE_SPEAKER_FALLBACK = "לא הצלחתי לבצע את הפעולה. נסה שוב או נסח אחרת."
 
 
 def _has_required_tool(tool_results: list[dict], required_tools: frozenset[str]) -> bool:
@@ -499,6 +536,27 @@ def _has_required_tool(tool_results: list[dict], required_tools: frozenset[str])
     """
     return any(
         r.get("tool") in required_tools and r.get("ok", True)
+        for r in tool_results
+    )
+
+
+def _has_write_tool_evidence(tool_results: list[dict]) -> bool:
+    """
+    True if at least one successful (ok=True) result from ANY tool in
+    _WRITE_ACTION_TOOLS is present — deliberately "any write tool", not
+    "any tool at all": read-only calls (airtable_get etc.) must not count
+    as evidence for a completed-write claim. This is the structural,
+    category-agnostic safety net behind _AGENT_ACTION_STATUS_PATTERN,
+    complementing (not replacing) the specific per-category _NO_TOOL_CLAIMS
+    patterns above — it exists to catch phrasing those don't yet enumerate.
+
+    Live incident (09/07): 3x airtable_get (read-only) preceded a fabricated
+    "✅ הוספתי... 30 רשומות פעילות" claim with zero write-tool calls. A naive
+    "any tool call at all" check would have missed it — the reads would have
+    silenced the guard even though nothing was actually written.
+    """
+    return any(
+        r.get("tool") in _WRITE_ACTION_TOOLS and r.get("ok", True)
         for r in tool_results
     )
 
@@ -552,6 +610,21 @@ def sanitize_agent_response(agent_text: str, tool_results: list[dict],
                 f"agent claims '{claim_pattern.pattern[:40]}' but no {sorted(required_tools)} tool result found"
             )
             return _NO_TOOL_EVIDENCE_FALLBACK
+
+    # Generic structural safety net — always on, not gated by _gateway_active.
+    # Complements _NO_TOOL_CLAIMS above: those patterns require a *specific*
+    # tool category per claim wording (e.g. "CREATE claims" → airtable_add
+    # only) and need a new entry whenever a new phrasing shows up. This check
+    # is category-agnostic — it fires on ANY action-completion-shaped text
+    # (_AGENT_ACTION_STATUS_PATTERN) as long as NO write tool succeeded this
+    # turn, regardless of which verb/table/service was actually claimed.
+    if _AGENT_ACTION_STATUS_PATTERN.search(agent_text) and not _has_write_tool_evidence(tool_results):
+        logger.error(
+            "[A32] NO-TOOL-EVIDENCE generic action-claim hallucination: "
+            f"agent text matched action-status language but no successful "
+            f"write-tool result found (checked: {sorted(_WRITE_ACTION_TOOLS)})"
+        )
+        return _NO_TOOL_EVIDENCE_FALLBACK
 
     # Mirror gate: agent claims a live check/action *failed* with no tool
     # attempt at all to back that diagnosis up — a fabricated failure is
@@ -972,6 +1045,161 @@ def _run_tests() -> bool:
     check_b = verify_result_claim("עדכנתי את הרשומה בהצלחה.", blocked_update)
     print(f"{'✅' if check_b.status == 'hallucination' else '❌'} 'עדכנתי' after blocked airtable_update → hallucination")
     if check_b.status != "hallucination":
+        failed += 1
+    else:
+        passed += 1
+
+    # ── live incident (09/07): "הוספתי... 30 רשומות פעילות" with zero tool
+    # calls this turn slipped through _NO_TOOL_CLAIMS entirely — the CRM
+    # creation pattern only matched third-person/passive forms, unlike the
+    # UPDATE pattern above (already fixed for BUG-NEW-09). ──
+    no_tool_create_first_person = sanitize_agent_response(
+        "✅ הוספתי לזיכרון העסקי. יש כעת 30 רשומות פעילות.", []
+    )
+    ok16 = no_tool_create_first_person == _NO_TOOL_EVIDENCE_FALLBACK
+    print(f"{'✅' if ok16 else '❌'} live incident: 'הוספתי...רשומות פעילות' with no airtable_add result → blocked")
+    if not ok16:
+        print(f"     got: {no_tool_create_first_person!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    with_tool_create_first_person = sanitize_agent_response(
+        "✅ הוספתי את העדכון לזיכרון העסקי.",
+        [{"tool": "airtable_add", "content": "✅ רשומה נוספה | ID: rec123", "ok": True}],
+    )
+    ok17 = with_tool_create_first_person not in (_NO_TOOL_EVIDENCE_FALLBACK, _SAFE_FALLBACK)
+    print(f"{'✅' if ok17 else '❌'} 'הוספתי' with real airtable_add result present → passed through")
+    if not ok17:
+        print(f"     got: {with_tool_create_first_person!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    for verb in ("שמרתי", "רשמתי", "תיעדתי"):
+        text = f"✅ {verb} את הרשומה בזיכרון העסקי."
+        got = sanitize_agent_response(text, [])
+        okv = got == _NO_TOOL_EVIDENCE_FALLBACK
+        print(f"{'✅' if okv else '❌'} '{verb}' with no airtable_add result → blocked")
+        if not okv:
+            print(f"     got: {got!r}")
+            failed += 1
+        else:
+            passed += 1
+
+    no_false_positive = sanitize_agent_response(
+        "לא הוספתי רשומה כי חסר לי מידע.", []
+    )
+    ok18 = no_false_positive not in (_NO_TOOL_EVIDENCE_FALLBACK, _SAFE_FALLBACK)
+    print(f"{'✅' if ok18 else '❌'} 'לא הוספתי' (negation) does not false-positive trigger the creation gate")
+    if not ok18:
+        print(f"     got: {no_false_positive!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    # ── Generic structural safety net (_AGENT_ACTION_STATUS_PATTERN +
+    # ── Single-Speaker fallback message no longer promises a fake
+    # continuation ("תוצאה תישלח בנפרד" — nothing actually follows up when
+    # this gate fires). DoD: (1) when the gate fires, the user gets the new
+    # message, not the old false-continuation one; (2) trigger conditions
+    # are unchanged — still only fires when _gateway_active=True AND the
+    # action-status pattern matches; still passed-through otherwise. ──
+    print("\n── Single-Speaker fallback message ───")
+
+    ss_text = "✅ הפעולה בוצעה בהצלחה."
+    ss_result = sanitize_agent_response(ss_text, [], _gateway_active=True)
+    ok_ss1 = ss_result == _SINGLE_SPEAKER_FALLBACK
+    print(f"{'✅' if ok_ss1 else '❌'} Single-Speaker gate fires when gateway_active + action-status text")
+    if not ok_ss1:
+        print(f"     got: {ss_result!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    ok_ss2 = ss_result == "לא הצלחתי לבצע את הפעולה. נסה שוב או נסח אחרת."
+    print(f"{'✅' if ok_ss2 else '❌'} fallback text no longer promises a fake continuation")
+    if not ok_ss2:
+        print(f"     got: {ss_result!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    ss_no_gateway = sanitize_agent_response(ss_text, [{"tool": "airtable_add", "content": "✅ ok", "ok": True}], _gateway_active=False)
+    ok_ss3 = ss_no_gateway not in (_SINGLE_SPEAKER_FALLBACK, _NO_TOOL_EVIDENCE_FALLBACK, _SAFE_FALLBACK)
+    print(f"{'✅' if ok_ss3 else '❌'} regression: gateway_active=False → Single-Speaker gate does not fire (unchanged trigger condition)")
+    if not ok_ss3:
+        print(f"     got: {ss_no_gateway!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    ss_no_action_text = sanitize_agent_response("בטח, איך אפשר לעזור?", [], _gateway_active=True)
+    ok_ss4 = ss_no_action_text == "בטח, איך אפשר לעזור?"
+    print(f"{'✅' if ok_ss4 else '❌'} regression: gateway_active=True but no action-status text → gate does not fire")
+    if not ok_ss4:
+        print(f"     got: {ss_no_action_text!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    # ── Generic structural safety net (_AGENT_ACTION_STATUS_PATTERN +
+    # _has_write_tool_evidence) — category-agnostic, always-on. DoD per the
+    # design review: (1) the original live incident is blocked, (2) a real
+    # GET+CREATE turn is NOT blocked (must not break the common case),
+    # (3) a *failed* airtable_add + success claim is still blocked (the
+    # actual 422 Real Estate/SaaS scenario), (4) a verb not in any specific
+    # _NO_TOOL_CLAIMS list is still caught, generically, with no new regex
+    # entry needed. ──
+    print("\n── generic structural safety net ─────")
+
+    # 1. Original incident: 3x read-only GET, zero writes, fabricated claim.
+    reads_only = [
+        {"tool": "airtable_get", "content": "28 records", "ok": True},
+        {"tool": "airtable_get", "content": "28 records", "ok": True},
+        {"tool": "airtable_get", "content": "28 records", "ok": True},
+    ]
+    g1 = sanitize_agent_response("✅ הוספתי לזיכרון העסקי. יש כעת 30 רשומות פעילות.", reads_only)
+    okg1 = g1 == _NO_TOOL_EVIDENCE_FALLBACK
+    print(f"{'✅' if okg1 else '❌'} generic guard: reads-only + fabricated claim → blocked (naive 'any tool' check would have missed this)")
+    if not okg1:
+        print(f"     got: {g1!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    # 2. Regression: real GET + real successful CREATE + matching claim → NOT blocked.
+    reads_then_write = reads_only + [
+        {"tool": "airtable_add", "content": "✅ רשומה נוספה | ID: rec123", "ok": True},
+    ]
+    g2 = sanitize_agent_response("✅ הוספתי לזיכרון העסקי. יש כעת 29 רשומות פעילות.", reads_then_write)
+    okg2 = g2 not in (_NO_TOOL_EVIDENCE_FALLBACK, _SAFE_FALLBACK)
+    print(f"{'✅' if okg2 else '❌'} generic guard: real airtable_add ok=True + matching claim → passed through (common case not broken)")
+    if not okg2:
+        print(f"     got: {g2!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    # 3. The actual 422-style scenario: airtable_add attempted but failed,
+    # agent still claims success — must be blocked.
+    failed_write = [{"tool": "airtable_add", "content": "❌ Airtable 422: invalid select value", "ok": False}]
+    g3 = sanitize_agent_response("✅ הוספתי לזיכרון העסקי בהצלחה.", failed_write)
+    okg3 = g3 in (_NO_TOOL_EVIDENCE_FALLBACK, _SAFE_FALLBACK)
+    print(f"{'✅' if okg3 else '❌'} generic guard: airtable_add ok=False + success claim → still blocked")
+    if not okg3:
+        print(f"     got: {g3!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    # 4. A verb/phrasing not present in any specific _NO_TOOL_CLAIMS entry —
+    # caught generically via _AGENT_ACTION_STATUS_PATTERN, no new regex needed.
+    g4 = sanitize_agent_response("הפעולה בוצעה והמידע נשמר במערכת.", [])
+    okg4 = g4 == _NO_TOOL_EVIDENCE_FALLBACK
+    print(f"{'✅' if okg4 else '❌'} generic guard: unenumerated passive phrasing with zero tools → blocked without a category-specific pattern")
+    if not okg4:
+        print(f"     got: {g4!r}")
         failed += 1
     else:
         passed += 1

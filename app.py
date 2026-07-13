@@ -52,9 +52,11 @@ from context         import build_context
 from tool_registry   import enforce, ToolDenied
 from scheduler       import start_scheduler
 from tools           import dispatch_tool
+from tools.airtable_security import enforce_leads_write_gate, LeadsDirectWriteBlocked
 from guards          import idempotency, rate_limiter, validate_tool_output
 from config          import get_domain as _channel_domain
 from core.router     import route_request, RouteDecision, Handler
+from core.router.deterministic_denial import check_deterministic_denial
 from core.anti_hallucination import verify_execution, sanitize_agent_response
 from health_monitor import get_health_status
 from feature_flags import is_enabled as _flag_enabled
@@ -127,6 +129,20 @@ def handle_telebot_error(exception):
 bot.exception_handler = handle_telebot_error
 
 app = Flask(__name__)
+
+# Phase 4B0.1A/B — Verify atomic claims health (migrations run via pre-deploy command)
+# Migrations are executed as Render Pre-Deploy Command: python -m core.database_migrations
+# This checks health only; actual migration execution happens before app starts.
+try:
+    from feature_flags import is_enabled
+    if is_enabled("FEATURE_ATOMIC_CLAIMS"):
+        from core.atomic_claims_health import log_health_on_startup
+        log_health_on_startup()
+except ImportError:
+    pass
+except Exception as e:
+    logging.error(f"Atomic claims health check failed: {e}")
+    raise
 
 
 def _empty_twiml() -> Response:
@@ -272,98 +288,12 @@ from tma_api import tma_api as _tma_blueprint
 app.register_blueprint(_tma_blueprint)
 
 
-# ── N05-B: send_followup.confirmed handler ────────────────────────────────────
-# Sends the approved followup draft to the owner via Telegram for manual
-# forwarding.9 Does NOT send outbound WhatsApp to lead (blocked on Meta, N05-C).
-# C52: owner notification routed through core.output_gateway (TELEGRAM_OWNER is
-# always INTERNAL — no Financial Gate, no behavior change vs. direct bot.send_message).
-
-def _handle_send_followup_confirmed(payload: dict, chat_id: str) -> str:
-    draft        = payload.get("draft", "")
-    contact_name = payload.get("contact_name", "")
-    channel      = payload.get("channel", "")
-    memory_key   = payload.get("memory_key", "")
-
-    msg = (f"📋 פולואפ מאושר — לשליחה ידנית ({channel}):\n"
-           f"אל: {contact_name}\n\n{draft}")
-
-    try:
-        from core.output_gateway import send_outbound, OutboundEnvelope, AudienceClass, OutputChannel
-        send_outbound(OutboundEnvelope(
-            channel=OutputChannel.TELEGRAM_OWNER,
-            recipient=chat_id,
-            body=msg,
-            audience=AudienceClass.INTERNAL,
-            source_module="app.send_followup_confirmed",
-            source_ref=memory_key,
-            domain="followup",
-        ))
-    except Exception as e:
-        logger.error(f"[Followup] notify owner failed: {e}")
-        return f"⚠️ שגיאה בהצגת הטיוטה: {e}"
-
-    if memory_key:
-        try:
-            from lead_memory import lead_memory
-            state = lead_memory.get(memory_key)
-            lead_memory.update(memory_key, followup_count=state.followup_count + 1)
-        except Exception as e:
-            logger.warning(f"[Followup] followup_count update failed: {e}")
-
-    return "✅ הטיוטה נשלחה אליך להעברה ידנית"
-
-
-from event_bus import bus as _event_bus
-_event_bus.subscribe("send_followup.confirmed", _handle_send_followup_confirmed)
-
-
-# ── C53 FIX-1: send_recovery.confirmed handler ────────────────────────────
-# lead_recovery.request_recovery_approval() שולח action="send_recovery" —
-# ללא handler זה emit מחזיר None ומדפיס שגיאה שקטה. מבנה הפאיילוד
-# תואם ל-core/lead_recovery.py:227-234.
-# לא שולח WhatsApp ללקוח (Meta blocked, N05-C) — רק מעביר לבעלים.
-
-def _handle_send_recovery_confirmed(payload: dict, chat_id: str) -> str:
-    draft        = payload.get("draft", "")
-    contact_name = payload.get("contact_name", "")
-    channel      = payload.get("channel", "")
-    memory_key   = payload.get("memory_key", "")
-    tier         = payload.get("tier", "")
-
-    msg = (f"♻️ Recovery מאושר — לשליחה ידנית ({channel}, {tier}):\n"
-           f"אל: {contact_name}\n\n{draft}")
-
-    try:
-        from core.output_gateway import send_outbound, OutboundEnvelope, AudienceClass, OutputChannel
-        result = send_outbound(OutboundEnvelope(
-            channel=OutputChannel.TELEGRAM_OWNER,
-            recipient=chat_id,
-            body=msg,
-            audience=AudienceClass.INTERNAL,
-            source_module="app.send_recovery_confirmed",
-            source_ref=memory_key,
-            domain="recovery",
-        ))
-    except Exception as e:
-        logger.error(f"[Recovery] notify owner failed: {e}")
-        return f"⚠️ שגיאה בהצגת הטיוטה: {e}"
-
-    owner_delivery = getattr(result, "action_result", None)
-    if not owner_delivery or not owner_delivery.delivery_success:
-        logger.error(
-            "[Recovery] owner draft delivery not verified | memory_key=%s audit=%s",
-            memory_key,
-            getattr(result, "audit_id", ""),
-        )
-        return "⚠️ האישור נקלט, אך מסירת הטיוטה אליך לא אומתה. ה-recovery לא סומן כהושלם."
-
-    # Delivery to TELEGRAM_OWNER is only a draft preview. It is not evidence
-    # that the customer received the recovery message, so recovery_count must
-    # remain unchanged until a customer-capable adapter confirms delivery.
-    return "✅ הטיוטה נשלחה אליך להעברה ידנית"
-
-
-_event_bus.subscribe("send_recovery.confirmed", _handle_send_recovery_confirmed)
+# PR-0C Phase 3: send_followup.confirmed / send_recovery.confirmed subscribers
+# removed — followup_engine.py/core/lead_recovery.py now queue tool_name=
+# "send_followup"/"send_recovery" payloads, so this same logic runs via
+# tools/approval_actions.py (through ActionGateway.approve() when
+# FEATURE_ACTION_GATEWAY is on) from the tool_name branch below, not from a
+# .confirmed event anymore.
 
 
 
@@ -681,6 +611,18 @@ def _pending_clarification_message(chat_id: str) -> str:
     return "\n".join(lines)
 
 
+# SPEC Preview Content Fix (Site #4) — wording-only clarification that the
+# preview text above is the user's raw request, not the actual action that
+# will run; the real tool call is only decided when the Agent re-runs at
+# confirm-time (see run_agent's recursive _skip_approval=True call). Does
+# NOT change the "run again" architecture itself — that's a deliberate
+# cost/latency + context-freshness trade-off, documented separately.
+CONFIRMATION_SUFFIX = (
+    "\n\nℹ️ הפרטים המדויקים ייקבעו כשאכין את הפעולה בפועל, "
+    "ותוכל לבדוק ולאשר לפני שהיא מתבצעת."
+)
+
+
 def approval_response(route: RouteDecision, original_text: str, chat_id: str,
                        channel: str, domain: str) -> str:
     """Saves original action and asks owner to confirm with כן/לא."""
@@ -701,17 +643,46 @@ def approval_response(route: RouteDecision, original_text: str, chat_id: str,
             f"⏳ *אישור נדרש* (#{display_index})\n\n"
             f"פעולה: `{preview}`\n\n"
             f"ענה *כן {display_index}* לביצוע או *לא {display_index}* לביטול."
+            f"{CONFIRMATION_SUFFIX}"
         )
     return (
         f"⏳ *אישור נדרש*\n\n"
         f"פעולה: `{preview}`\n\n"
         f"ענה *כן* לביצוע או *לא* לביטול."
+        f"{CONFIRMATION_SUFFIX}"
     )
 
 
 # ══════════════════════════════════════════════════
 # Approval Gate Helpers
 # ══════════════════════════════════════════════════
+
+# SPEC Preview Content Fix (Site #3) — Contract Chain (10/07/2026) grepped
+# airtable_schema.py for every phone/email/internal-identifier-shaped field
+# key across all table classes, not just LeadFields. Tables with Hebrew
+# schemas (e.g. ContactFields in "אנשי קשר (Contacts)") use "טלפון"/"אימייל"
+# as the literal field key Claude passes in tool inputs — the English-only
+# set from the original spec draft would silently leave those unmasked.
+# "email"/"אימייל" included alongside phone for the same PII reasoning even
+# though it wasn't in the original 4; "external_id" added because it's the
+# same class of internal dedup/routing key as sender_id/memory_key/tenant_id
+# (LeadFields.EXTERNAL_ID — "gmail:<msg_id>", not shown to a human approver).
+_SENSITIVE_FIELD_KEYS = {
+    "phone", "sender_id", "memory_key", "tenant_id", "external_id",
+    "email", "טלפון", "אימייל",
+}
+
+
+def _format_field_value(key: str, value) -> str:
+    """מסך שדות רגישים, וחותך ערכים ארוכים בבטחה."""
+    if key.lower() in _SENSITIVE_FIELD_KEYS:
+        s = str(value)
+        return s[:2] + "*" * max(len(s) - 4, 0) + s[-2:] if len(s) > 4 else "****"
+    s = str(value)
+    if len(s) > 80:
+        return s[:80] + "..."
+    return s
+
 
 def _describe_tool_call(tool_name: str, inputs: dict) -> str:
     """תיאור קריא של קריאת כלי לכפתורי אישור."""
@@ -721,10 +692,21 @@ def _describe_tool_call(tool_name: str, inputs: dict) -> str:
         start = str(inputs.get("start_time", "?"))[:16]
         return f"📅 קבע: {inputs.get('summary', '?')} ב-{start}"
     if tool_name == "airtable_add":
-        field_keys = ", ".join(inputs.get("fields", {}).keys()) if isinstance(inputs.get("fields"), dict) else "?"
-        return f"➕ הוסף ל-{inputs.get('table', '?')}: [{field_keys}]"
+        fields = inputs.get("fields", {})
+        if not isinstance(fields, dict):
+            return f"➕ הוסף ל-{inputs.get('table', '?')}: [?]"
+        fields_preview = "\n".join(
+            f"  • {k}: {_format_field_value(k, v)}" for k, v in fields.items()
+        )
+        return f"➕ הוסף ל-{inputs.get('table', '?')}:\n{fields_preview}"
     if tool_name == "airtable_update":
-        return f"✏️ עדכן {inputs.get('record_id', '?')} ב-{inputs.get('table', '?')}"
+        fields = inputs.get("fields", {})
+        if not isinstance(fields, dict):
+            return f"✏️ עדכן {inputs.get('record_id', '?')} ב-{inputs.get('table', '?')}"
+        fields_preview = "\n".join(
+            f"  • {k}: {_format_field_value(k, v)}" for k, v in fields.items()
+        )
+        return f"✏️ עדכן {inputs.get('record_id', '?')} ב-{inputs.get('table', '?')}:\n{fields_preview}"
     if tool_name == "sheets_append":
         return f"📊 כתוב ל-{inputs.get('sheet_name', '?')}"
     return f"⚡ {tool_name}: {str(inputs)[:60]}"
@@ -1107,13 +1089,64 @@ def _handle_approval_callback_impl(cq) -> None:
                 bot.answer_callback_query(cq.id, "⛔ הפעולה כבר אינה מורשית")
                 return
 
-            raw    = dispatch_tool(tool_name, tool_inputs, identity)
-            result = validate_tool_output(tool_name, raw)
+            # PR-0C: prefer executing through the frozen ActionGateway contract
+            # (approve() = the single claim -> dispatch -> verify -> status
+            # boundary) over re-implementing those same steps by hand here,
+            # when a live contract exists for this fingerprint. Falls back to
+            # the pre-migration direct dispatch_tool() call if no contract is
+            # found (e.g. the shadow-mode propose_action() at _queue_approval
+            # time failed silently, or FEATURE_ACTION_GATEWAY is off) — never
+            # a new failure mode versus today. approver_role/approver here are
+            # deliberately the button-clicking approver_identity (BUG-074: the
+            # actual authenticated approver, never the original requester's
+            # identity) — dispatch itself still executes scoped to the
+            # requester, via contract.actor_role/actor_external_id already
+            # captured by _queue_approval()'s propose_action(identity=...).
+            _gw_contract_id = None
+            if _flag_enabled("FEATURE_ACTION_GATEWAY"):
+                try:
+                    from core.action_gateway import action_gateway as _gw_exec
+                    _fp_exec = _gw_exec.compute_business_fingerprint(
+                        getattr(identity, "tenant_id", "boss_hq"),
+                        canonical_user_id or identity.memory_key, tool_name,
+                        _gw_exec.normalize_payload(tool_inputs),
+                    )
+                    _contract_exec = _gw_exec._ledger.find_by_fingerprint(_fp_exec)
+                    if _contract_exec and _contract_exec.status == "pending":
+                        _gw_contract_id = _contract_exec.contract_id
+                except Exception as _gw_lookup_exc:
+                    logger.warning(
+                        "[ActionGateway] contract lookup failed for execution — "
+                        "falling back to legacy dispatch: %s", _gw_lookup_exc,
+                    )
 
-            exec_check = verify_execution(tool_name, result)
-            if exec_check.status == "failed":
-                logger.error(f"[Approval:A32] Execution failed: {tool_name} -- {exec_check.reason}")
-                fail_text = f"❌ הפעולה לא הושלמה: {exec_check.reason}"
+            if _gw_contract_id:
+                from core.action_gateway import action_gateway as _gw_exec
+                result = _gw_exec.approve(
+                    _gw_contract_id,
+                    approver=approver_identity.memory_key or approver_identity.user_id,
+                    approver_role=approver_identity.role,
+                )
+                _contract_after = _gw_exec._ledger.find_by_id(_gw_contract_id)
+                exec_failed = not (_contract_after and _contract_after.status == "executed")
+                fail_text   = result
+            else:
+                # BUG-091: this replays the payload stored at _queue_approval()
+                # time (dict(tu.input) — Claude's own tool_use JSON, verbatim).
+                # _queue_approval() is only ever called from the raw Agent
+                # tool_use loop below — hardcode "agent", never trust a
+                # "_source" key that might be sitting inside tool_inputs.
+                raw    = dispatch_tool(tool_name, tool_inputs, identity, trusted_source="agent")
+                result = validate_tool_output(tool_name, raw)
+
+                exec_check = verify_execution(tool_name, result)
+                exec_failed = exec_check.status == "failed"
+                fail_text   = f"❌ הפעולה לא הושלמה: {exec_check.reason}"
+                if exec_check.status == "warn":
+                    logger.warning(f"[Approval:A32] Execution warn: {tool_name} -- {exec_check.reason}")
+
+            if exec_failed:
+                logger.error(f"[Approval:A32] Execution failed: {tool_name} -- {fail_text}")
                 if origin_channel == "telegram":
                     try:
                         bot.send_message(origin_chat_id, fail_text)
@@ -1132,8 +1165,6 @@ def _handle_approval_callback_impl(cq) -> None:
                     pass
                 bot.answer_callback_query(cq.id, "❌ הביצוע נכשל")
                 return
-            if exec_check.status == "warn":
-                logger.warning(f"[Approval:A32] Execution warn: {tool_name} -- {exec_check.reason}")
 
             # PR #188: raw chat_id fingerprint
             from event_bus import executed_action_cache as _eac
@@ -1579,6 +1610,24 @@ def run_agent(
                 if _out_meta is not None:
                     _out_meta["source_module"] = "action_gateway"
                 return _gw_reply
+
+            # BUG-058: no live Tier-1 ActionGateway contract — check the
+            # Tier-2 batch lead-preview next (core/lead_candidate_handler.py's
+            # _handle_clean_batch). Tier-1 always wins when both exist
+            # simultaneously for the same chat_id (BUG-056 precedent, same
+            # ordering as above) — this check runs only after Tier-1 found
+            # nothing. Not gated by FEATURE_ACTION_GATEWAY — separate mechanism.
+            from core.lead_candidate_handler import resolve_pending_lead_preview as _resolve_t2
+            _t2_reply = _resolve_t2(identity, chat_id, is_confirm=True, is_cancel=False)
+            if _t2_reply is not None:
+                logger.info(
+                    "[LCH] resolve_pending_lead_preview(confirm): user=%s reply=%.60s",
+                    identity.memory_key, _t2_reply,
+                )
+                if _out_meta is not None:
+                    _out_meta["source_module"] = "action_gateway"
+                return _t2_reply
+
             from feature_flags import is_enabled as _flag_cw
             if _flag_cw("FEATURE_ACTION_GATEWAY"):
                 # Stage B: Gateway הוא מקור האמת לאישור (אין contract חי -> "אין פעולה...")
@@ -1607,7 +1656,11 @@ def run_agent(
                     logger.info(
                         f"[PendingApproval] free-text confirm, no pending for {identity.memory_key}"
                     )
-                    return "אין פעולה שממתינה לאישור. אם זו בקשה חדשה — שלח את הנתונים המדויקים."
+                    # BUG-PENDING-APPROVAL-B follow-up: this is the path
+                    # actually hit by default (FEATURE_ACTION_GATEWAY off) —
+                    # must also surface a specific "superseded" message
+                    # instead of looking identical to "nothing ever happened".
+                    return _gw_cw.describe_no_pending_reason(identity.memory_key)
         elif _lower in _CANCEL_WORDS:
             # BUG-056: same reasoning as _CONFIRM_WORDS above — LCH's Tier-1
             # preview may have a live ActionGateway contract regardless of
@@ -1624,6 +1677,20 @@ def run_agent(
                 if _out_meta is not None:
                     _out_meta["source_module"] = "action_gateway"
                 return _cancel_reply
+
+            # BUG-058: no live Tier-1 contract was cancelled (route_cancellation_word
+            # returned None) — check the Tier-2 batch lead-preview next. Same
+            # Tier-1-wins precedence as the _CONFIRM_WORDS branch above.
+            from core.lead_candidate_handler import resolve_pending_lead_preview as _resolve_t2_cancel
+            _t2_cancel_reply = _resolve_t2_cancel(identity, chat_id, is_confirm=False, is_cancel=True)
+            if _t2_cancel_reply is not None:
+                logger.info(
+                    "[LCH] resolve_pending_lead_preview(cancel): user=%s reply=%.60s",
+                    identity.memory_key, _t2_cancel_reply,
+                )
+                if _out_meta is not None:
+                    _out_meta["source_module"] = "action_gateway"
+                return _t2_cancel_reply
 
     # ── 2.6. Context Pronoun Resolution (C60) ────────
     # "תעלה לדסישנס"/"זה הנספח" וכד' — לפני intent detection, כדי שה-Router
@@ -1698,7 +1765,7 @@ def run_agent(
             from core.lead_candidate_handler import handle_lead_candidate
             _lch_reply = handle_lead_candidate(
                 identity, user_text, chat_id, channel, domain=resolved_route_domain,
-                ic=route.capture_ic,
+                ic=route.capture_ic, intent=route.intent, session=_session_snapshot,
             )
             if _lch_reply is not None:
                 # BUG-SB-01: COG sees "lead_candidate_handler" as a different speaker.
@@ -1739,6 +1806,23 @@ def run_agent(
             f"[CostWatchdog] EMERGENCY_STOP_AI active — blocking agent for {_sanitize_id(identity.user_id)}"
         )
         return "⛔ מערכת ה-AI בעצירת חירום עקב עלות גבוהה. נסה שוב מאוחר יותר."
+
+    # ── 5.1. Deterministic Denial Short-Circuit ────
+    # כמה צירופי (intent, כלי משוער) ידועים כבר עכשיו ב-100% כך ששער מאוחר
+    # יחסום אותם בכל מקרה, לא משנה מה Claude יעשה — מדלגים על סבב Claude
+    # לגמרי, באותה קונבנציה כמו EMERGENCY_STOP_AI למעלה. שומרים על
+    # tool_allowed (לא handler==AGENT): נתיבי RESTRICTED/blocked/clarify/
+    # approval כבר חזרו למעלה או שיש להם מנגנון קיים משלהם בהמשך
+    # (app.py, "הבקשה נרשמה במערכת.") — אסור להחליף אותם בהודעה הזו.
+    if route.tool_allowed:
+        denial = check_deterministic_denial(route.intent, identity)
+        if denial is not None:
+            logger.warning(
+                f"[DeterministicDenial] {denial.reason} short-circuited before Agent | "
+                f"intent={route.intent} tool={denial.tool_name} role={identity.role} "
+                f"user={_sanitize_id(identity.user_id)}"
+            )
+            return denial.message
 
     try:
         research_mode = user_text.startswith("#") and identity.is_owner
@@ -1861,10 +1945,15 @@ def run_agent(
             for tu in tool_uses:
                 if not route.tool_allowed:
                     logger.info(f"[Tool] Silently blocked by route (restricted): {tu.name}")
+                    # Was "הבקשה התקבלה ותועבר לטיפול." — no forwarding mechanism
+                    # actually exists (route.notify_owner is set but never consumed
+                    # anywhere; see backlog item for building real notification).
+                    # Honest about current state: request was received and logged,
+                    # nothing more.
                     tool_results.append({
                         "type":        "tool_result",
                         "tool_use_id": tu.id,
-                        "content":     "הבקשה התקבלה ותועבר לטיפול.",
+                        "content":     "הבקשה נרשמה במערכת.",
                     })
                     continue
 
@@ -1879,6 +1968,27 @@ def run_agent(
 
                 # ── Approval Gate ─────────────────────
                 if meta.requires_approval:
+                    # BUG-091: preflight — a write enforce_leads_write_gate()
+                    # provably blocks must never become a pending approval at
+                    # all ("אושר אך נכשל בביצוע" is worse than never asking,
+                    # and previously nothing stopped it from being queued).
+                    # source is hardcoded "agent" — this branch IS the raw
+                    # Agent tool_use loop, never a trusted internal call site;
+                    # never read from tu.input, which Claude fully controls.
+                    if tu.name in ("airtable_add", "airtable_update"):
+                        try:
+                            enforce_leads_write_gate(
+                                tu.name, {"table": tu.input.get("table", "")}, source="agent",
+                            )
+                        except LeadsDirectWriteBlocked as e:
+                            logger.warning(
+                                f"[Approval] preflight blocked Leads write before queueing: {tu.name}"
+                            )
+                            tool_results.append({
+                                "type": "tool_result", "tool_use_id": tu.id, "content": str(e)
+                            })
+                            continue
+
                     # BUG-V1-MULTI-PENDING-PAYLOAD-CONTAMINATION: one mutating
                     # approval per agent turn; block the second unconditionally.
                     if _mutating_approvals_this_turn >= 1:
@@ -1918,7 +2028,11 @@ def run_agent(
                     raw, result, result_text = cached["raw"], cached["result"], cached["result_text"]
                 else:
                     logger.info(f"[Tool] {tu.name} | {str(tu.input)[:80]}")
-                    raw    = dispatch_tool(tu.name, tu.input, identity)
+                    # BUG-091: raw Agent tool_use loop — always "agent",
+                    # explicit for clarity/defense-in-depth even though
+                    # airtable_add/update never reach this branch (both
+                    # requires_approval=True, handled above).
+                    raw    = dispatch_tool(tu.name, tu.input, identity, trusted_source="agent")
                     result = validate_tool_output(tu.name, raw)
                     result_text = _tool_user_message(result)
                     logger.info(f"[Tool] → {result_text[:80]}")
@@ -2406,6 +2520,76 @@ def health():
     return jsonify({"status": health_status["status"]}), 200
 
 
+# ══════════════════════════════════════════════════
+# BUG-PENDING-APPROVAL-B — global ingress context gate
+#
+# Single boundary, called once per inbound webhook event (Telegram +
+# WhatsApp), after authentication + junk/idempotency/duplicate filtering +
+# identity resolution, but before any callback/command/wizard/media/
+# Decision Hub/Agent/early-return routing. Supersedes the earlier
+# run_agent()-internal hook (PR #311) — that hook only ever saw events that
+# already made it into the Agent message pipeline, missing every event
+# handled by a separate code path (slash commands, wizard text/media
+# capture, unrelated callbacks, general media, Decision Hub attachment
+# references, WhatsApp media). This is the one place that sees all of them.
+#
+# Only a genuine attempt to resolve one of the identity's own live
+# ActionGateway contracts (ActionGateway.is_own_resolution_event — confirm/
+# cancel/disambiguation free text) is exempt. Everything else — including
+# callbacks belonging to app.py's own separate _pending_approvals mechanism,
+# which is not an ActionGateway resolution — marks live contracts
+# interrupted. Duplicate/junk-filtered updates never reach this point at
+# all (filtered earlier), so they cannot interrupt anything.
+# ══════════════════════════════════════════════════
+
+from dataclasses import dataclass as _dataclass
+
+
+@_dataclass
+class _IngressEvent:
+    channel: str          # "telegram" | "whatsapp"
+    kind: str             # "text" | "callback" | "media"
+    text: str | None = None
+
+
+def _apply_ingress_context_gate(identity, event: _IngressEvent) -> None:
+    """See module note above. Fail-closed: if the primary mark cannot be
+    recorded, an independent fallback path (find_live_contracts + the
+    ledger's own update_status, not the same internal loop) forces the same
+    result — a later bare confirm must never execute as though context
+    integrity were known when it isn't."""
+    if identity is None or not getattr(identity, "memory_key", None):
+        # No action without identity (project-wide rule) — nothing pending
+        # can be tied to an identity that never resolved in the first place.
+        return
+    user = identity.memory_key
+    from core.action_gateway import action_gateway as _gw
+    try:
+        if event.kind == "text" and _gw.is_own_resolution_event(user, event.text or ""):
+            return  # genuine confirm/cancel/disambiguation — let normal routing resolve it
+        _gw.mark_context_interrupted(user)
+    except Exception:
+        # Fail-closed, not fail-open: the primary mark couldn't be recorded,
+        # so we cannot claim to know this contract's context is intact. The
+        # incoming message still proceeds to normal routing below — only a
+        # later bare confirm is affected — but the contract's integrity is
+        # marked explicitly "unknown" (not silently left as "not interrupted"),
+        # via an independently-written fallback method so a bug specific to
+        # mark_context_interrupted() doesn't also break this path.
+        logger.error(
+            "[ActionGateway] ingress context gate primary mark failed for user=%s "
+            "— marking context integrity unknown via independent fallback",
+            user, exc_info=True,
+        )
+        try:
+            _gw.mark_context_integrity_unknown(user)
+        except Exception:
+            logger.critical(
+                "[ActionGateway] ingress context gate fallback ALSO failed for user=%s "
+                "— pending contracts may be silently stale-approvable", user, exc_info=True,
+            )
+
+
 @app.route("/telegram", methods=["POST"])
 def webhook_telegram():
     """H1 top-level handler — דק, מעביר ל-impl ומדווח שגיאות לא-מטופלות."""
@@ -2432,6 +2616,18 @@ def _webhook_telegram_impl():
     if update.callback_query:
         call = update.callback_query
         data = call.data or ""
+        # BUG-PENDING-APPROVAL-B: no junk/idempotency filter exists for
+        # callbacks today — gate right after identity resolution. Every
+        # callback (including approve:/reject:, which belongs to app.py's
+        # own separate _pending_approvals mechanism, not ActionGateway) is
+        # "not an ActionGateway resolution" — always interrupts.
+        try:
+            _cb_identity = resolve_identity("telegram", str(call.from_user.id))
+            _apply_ingress_context_gate(
+                _cb_identity, _IngressEvent(channel="telegram", kind="callback"),
+            )
+        except Exception as e:
+            logger.error(f"[ActionGateway] ingress gate (callback) failed: {e}", exc_info=True)
         try:
             if data.startswith(("approve:", "reject:")):
                 _handle_approval_callback(call)
@@ -2447,6 +2643,38 @@ def _webhook_telegram_impl():
         sender_user_id = str(update.message.from_user.id)  # מי שלח (תמיד USER_ID)
         text           = update.message.text
 
+        # ── junk/idempotency/duplicate filtering FIRST — moved ahead of
+        # command/wizard dispatch so a duplicate slash-command or wizard
+        # reply is discarded before it can reach the context gate at all
+        # (BUG-PENDING-APPROVAL-B: duplicates must never interrupt anything).
+        #
+        # BUG-PENDING-APPROVAL-B follow-up: the dedup key must be the
+        # provider's own event identity (update_id + message_id, chat-scoped
+        # via sender_user_id), never the message text. Two DISTINCT Telegram
+        # messages can legitimately carry identical text — e.g. the
+        # reconfirmation flow's second "כן" after context_interrupted —
+        # and keying on text falsely treated the second one as a duplicate
+        # of the first, creating a dead end with no way to ever complete
+        # the reconfirmation.
+        _dedup_event_id = f"{update.update_id}:{update.message.message_id}"
+        if idempotency.is_duplicate("telegram", sender_user_id, _dedup_event_id):
+            try:
+                bot.send_message(
+                    reply_chat_id,
+                    "♻️ ההודעה הזו כבר טופלה.\n"
+                    "אם זו בקשה חדשה — נסח אותה אחרת."
+                )
+            except Exception as e:
+                logger.debug(f"[Idempotency] notify failed: {e}")
+            return "", 200
+
+        # ── identity resolution + ingress context gate — before ANY
+        # command/wizard/media/Decision Hub/Agent routing below.
+        identity_for_gate = resolve_identity("telegram", sender_user_id)
+        _apply_ingress_context_gate(
+            identity_for_gate, _IngressEvent(channel="telegram", kind="text", text=text),
+        )
+
         # Slash commands → registered @bot.message_handler(commands=[...]) handlers.
         # They authenticate via resolve_identity internally; we don't go through run_agent.
         if text.startswith("/"):
@@ -2458,16 +2686,19 @@ def _webhook_telegram_impl():
                 report_error(e, context="command_dispatch")
             return "", 200
 
-        if idempotency.is_duplicate("telegram", sender_user_id, text):
-            try:
-                bot.send_message(
-                    reply_chat_id,
-                    "♻️ ההודעה הזו כבר טופלה.\n"
-                    "אם זו בקשה חדשה — נסח אותה אחרת."
-                )
-            except Exception as e:
-                logger.debug(f"[Idempotency] notify failed: {e}")
-            return "", 200
+        # C20 — free text mid-/update never reaches capture_text (registered
+        # via @bot.message_handler) because bot.process_new_updates() is only
+        # called for slash commands above. Dispatch it ourselves so the
+        # pending wizard claims its own text instead of falling through to
+        # idempotency/run_agent. Fail-open: any error here just continues
+        # to the normal flow below, it never blocks the message.
+        try:
+            from cmd_update import has_pending_text_capture
+            if has_pending_text_capture(sender_user_id):
+                bot.process_new_updates([update])
+                return "", 200
+        except Exception as e:
+            logger.error(f"[/update] text capture routing failed: {e}", exc_info=True)
 
         # ── Decision Hub Stage 0.6 — "זה הנספח" attachment reference ──
         # SPEC_File_Context_Reference.md, Rule 10: max one linking question.
@@ -2477,8 +2708,7 @@ def _webhook_telegram_impl():
             try:
                 from cmd_decision import is_attachment_reference, handle_attachment_reference
                 if is_attachment_reference(text):
-                    identity_for_ref = resolve_identity("telegram", sender_user_id)
-                    if handle_attachment_reference(bot, identity_for_ref, reply_chat_id, text):
+                    if handle_attachment_reference(bot, identity_for_gate, reply_chat_id, text):
                         return "", 200
             except Exception as e:
                 logger.error(f"[DecisionHub] attachment reference handling failed: {e}", exc_info=True)
@@ -2523,6 +2753,29 @@ def _webhook_telegram_impl():
 
     # F16 — Media Layer: voice notes / photo / document uploads
     if update.message and update.message.content_type in ("voice", "photo", "document"):
+        # BUG-PENDING-APPROVAL-B: no junk/idempotency filter exists for
+        # media today — gate right after identity resolution, before any
+        # wizard-file-capture or generic media routing below.
+        try:
+            _media_identity_gate = resolve_identity("telegram", str(update.message.from_user.id))
+            _apply_ingress_context_gate(
+                _media_identity_gate, _IngressEvent(channel="telegram", kind="media"),
+            )
+        except Exception as e:
+            logger.error(f"[ActionGateway] ingress gate (media) failed: {e}", exc_info=True)
+
+        # C20 — an /update session waiting on its free-text step must claim
+        # the next photo/document itself; otherwise it silently falls
+        # through to the generic Drive-upload flow below and the pending
+        # state is orphaned until its TTL expires (see cmd_update.py).
+        if update.message.content_type in ("photo", "document"):
+            try:
+                from cmd_update import has_pending_file_capture, capture_photo_or_document
+                if has_pending_file_capture(str(update.message.from_user.id)):
+                    capture_photo_or_document(bot, update.message, resolve_identity)
+                    return "", 200
+            except Exception as e:
+                logger.error(f"[/update] file capture routing failed: {e}", exc_info=True)
         _handle_telegram_media(update.message)
         return "", 200
 
@@ -2561,6 +2814,20 @@ def _webhook_whatsapp_impl():
     if idempotency.is_duplicate("whatsapp", sender, dedup_key):
         return _empty_twiml()
 
+    # BUG-PENDING-APPROVAL-B: identity resolution + ingress context gate —
+    # after junk/idempotency filtering above, before media/furniture-funnel/
+    # Agent routing below. WhatsApp text ("כן"/"לא"/etc.) still reaches
+    # run_agent() unconditionally further down, so kind="text" here lets
+    # is_own_resolution_event exempt a genuine resolution the same way.
+    try:
+        _wa_identity_gate = resolve_identity("whatsapp", sender)
+        _apply_ingress_context_gate(
+            _wa_identity_gate,
+            _IngressEvent(channel="whatsapp", kind="text", text=incoming),
+        )
+    except Exception as e:
+        logger.error(f"[ActionGateway] ingress gate (whatsapp) failed: {e}", exc_info=True)
+
     # ── BUG-071 FIX: WhatsApp Media Support ─────────────────────────────
     # Extract and process media (voice/file) from Twilio webhook.
     # Per F13 architecture: metadata extraction + byte download from signed URL,
@@ -2570,7 +2837,6 @@ def _webhook_whatsapp_impl():
             extract_whatsapp_media, download_whatsapp_media, infer_file_type, infer_filename
         )
         from media_handler import handle_voice_note, handle_file_upload
-        from identity import resolve_identity
 
         media_meta = extract_whatsapp_media(request.values.to_dict())
         if media_meta:
@@ -2707,6 +2973,18 @@ def webhook_meta_whatsapp():
     if idempotency.is_duplicate("whatsapp_meta", sender, msg_id):
         return jsonify({"status": "duplicate"}), 200
 
+    # BUG-PENDING-APPROVAL-B: identity resolution + ingress context gate —
+    # after junk/idempotency filtering above, before media/outbound-stub/
+    # Agent routing below.
+    try:
+        _meta_identity_gate = resolve_identity("whatsapp", sender)
+        _apply_ingress_context_gate(
+            _meta_identity_gate,
+            _IngressEvent(channel="whatsapp", kind="text", text=incoming),
+        )
+    except Exception as e:
+        logger.error(f"[ActionGateway] ingress gate (meta whatsapp) failed: {e}", exc_info=True)
+
     domain_from_channel = _channel_domain(to_number)
 
     # ── BUG-071 FIX: Meta WhatsApp Media Support ───────────────────────────
@@ -2720,7 +2998,6 @@ def webhook_meta_whatsapp():
                     get_meta_media_download_url, infer_mime_type_from_meta_type
                 )
                 from media_handler import handle_voice_note, handle_file_upload
-                from identity import resolve_identity
 
                 # Fetch download URL from Meta API
                 access_token = os.environ.get("META_BUSINESS_TOKEN", "")

@@ -97,7 +97,7 @@
 - **Verification ראיה:** `py_compile` עבר; Flask reproduction script אישר 500→204 לאחר התיקון. אין עדיין אימות בפרודקשן החיה.
 - **סטטוס:** 🟡 Fixed — ממתין לאימות ידני בפרודקשן (בחירת Domain ב-Venture)
 
-### BUG-008 — Lead Business Outcome 422 (trailing space in Airtable options)
+### BUG-008 — Lead Business Outcome 422 (trailing space in Airtable options) — ✅ VERIFIED / CLOSED 09/07/2026
 - **דווח:** 17/06/2026 — Airtable PATCH נכשל עם `422 INVALID_MULTIPLE_CHOICE_OPTIONS`, `keys=['Business Outcome', 'status']`; ב-UI רק "סמן כמתאים" עבד, שאר כפתורי הסטטוס הציגו "update failed"
 - **מסך / מודול:** `tma_api.py` — `update_lead_status`, `set_lead_outcome`, `patch_lead`; `airtable_schema.py` — קבועי `LeadStatus`/`LeadOutcome` חדשים
 - **Severity:** High — חסם את כל כפתורי הסטטוס/תוצאה במסך Lead Detail מלבד אחד
@@ -105,11 +105,17 @@
 - **תוקן ב-commit:** `7d5cb3a`
 - **תוקן ב-branch:** `claude/meta-whatsapp-phase-1-q6pp3e`
 - **תיקון:** `LeadOutcome.BY_KEY` ב-`airtable_schema.py` ממפה מפתח נקי קנוני (ללא רווח) לערך המדויק בפועל ב-Airtable; `LeadStatus.ALL` לבדיקת תקינות `status`. שני השדות מאומתים לפני PATCH — אם הערך לא תקין, מוחזר 400 ברור במקום לאפשר ל-Airtable להחזיר 422.
-- **Merged:** לא — ממתין לאימות ידני לפני merge (לפי הנחיית המשתמש)
-- **Deployed:** לא ידוע — דרוש Render deploy
-- **Verified בפרודקשן:** לא
-- **Verification ראיה:** `py_compile` עבר; `test_integration.py` 4/4 PASS; `smoke_tests.py` 5/6 PASS (כשל אחד תלוי-סביבה, ידוע מראש — `anthropic` import); `npm run build` עבר. אין עדיין אימות בפרודקשן החיה (5 כפתורי סטטוס/תוצאה).
-- **סטטוס:** 🟡 Fixed — ממתין לאימות ידני בפרודקשן
+- **Merged:** ✅ כן (מוזג בשלב מוקדם יותר — commit `7d5cb3a`).
+- **Deployed:** ✅ כן.
+- **Verified בפרודקשן:** ✅ כן — 09/07/2026:
+  ```
+  PATCH /api/leads/recLQNCnuyfoMMcV4/outcome
+  PATCH Airtable /Leads/recLQNCnuyfoMMcV4 → 200 OK
+  [AUDIT:gateway] keys=['Business Outcome', 'status'] ok=True
+  ```
+  אותו זוג שדות בדיוק מהבאג המקורי (`Business Outcome`+`status`), 200 OK, אין 422.
+- **Verification ראיה:** `py_compile` עבר; `test_integration.py` 4/4 PASS; `smoke_tests.py` 5/6 PASS (כשל תלוי-סביבה, לא קשור); `npm run build` עבר. + audit-log למעלה, 09/07/2026.
+- **סטטוס:** ✅ VERIFIED / CLOSED.
 
 ### FLAGGED (not fixed) — `Next Action` field schema drift
 - **דווח:** 17/06/2026, תוך כדי חקירת BUG-008
@@ -243,7 +249,7 @@
 - **Verified בפרודקשן:** לא
 - **Verification ראיה:** `py_compile session_store.py` עבר; `python3 session_store.py` self-test 18/20 עברו (2 כשלים קיימים מראש, mock-import-path bug בלתי תלוי בתיקון זה — `sys.modules["airtable_tools"]` ממוקֶה בעוד הקוד האמיתי עושה `from tools.airtable_tools import ...`); בדיקה ידנית נוספת עם mock נכון על `tools.airtable_tools` אישרה את הלוגיקה המתוקנת.
 - **סטטוס:** 🟡 MERGED TO MAIN (PR #147, `483851f`) — ממתין לאימות פרודקשן
-### BUG-020 — airtable_schema.py: כמה קבועי טבלה/שדה לא תאמו ל-base החי (מומש חלקית, לא אומת)
+### BUG-020 — airtable_schema.py: כמה קבועי טבלה/שדה לא תאמו ל-base החי — ✅ מוזג ל-main (סטטוס עודכן 10/07/2026, doc drift שתוקן)
 - **דווח:** 24/06/2026 — אודיט ידני מול "בסיס עיקרי" (`app4bcgoX7t0HUVnm`) דרך Airtable MCP (`list_tables_for_base`), אחרי שהתברר ש-`schema_cache.json` הקיים הוא seed שנוצר מהקוד עצמו ולא snapshot אמיתי מ-Airtable (ראה BUG-021).
 - **דווח על ידי:** המשתמש
 - **מסך / מודול:** `airtable_schema.py`
@@ -252,41 +258,50 @@
 - **Root Cause:** `airtable_schema.py` תיעד כוונה/תכנון שלא עודכן אחרי שהטבלאות נבנו/שונו בפועל ב-Airtable.
 - **שינוי שבוצע:** עודכן ישירות ב-`airtable_schema.py` (ללא commit בזמן התיעוד המקורי): שם `Tables.LEARNINGS` עודכן; `AssetsFields` הוחלף לחלוטין לשדות האמיתיים; `ProfileFields.NAME` עודכן ל-`"name"` + הערה ש-`PROFILE_DATA` עדיין לא קיים חי; `Tables.IMPORTS`/`Tables.TENANTS`/`Tables.DAILY_TASKS`/`DailyTaskFields`/`DailyTaskStatus` סומנו במפורש כ-DEAD CODE (בדומה לסימון F13); נוסף `class TrafficSourcesFields` לתיעוד הטבלה החדשה.
 - **תועד ב-commit:** commit הענף שמוסיף את BUG-020 ואת עדכון `airtable_schema.py`
-- **Merged:** לא
-- **Deployed:** לא
-- **Verified בפרודקשן:** לא — `py_compile airtable_schema.py` ו-`smoke_tests.py` (6/6 PASS) הורצו מקומית בלבד
-- **Verification ראיה:** השוואה ישירה ל-`list_tables_for_base`/`get_table_schema` החי דרך Airtable MCP, 24/06/2026; `py_compile` עבר; `smoke_tests.py` 6/6 PASS
-- **סטטוס:** 🟡 Implemented but not yet verified — ממתין ל-merge + אימות
+- **עדכון סטטוס (10/07/2026):** התיקון עצמו **כבר ממוזג בפועל** — הרשומה הזו פשוט לא עודכנה כשזה קרה (doc drift, לא באג בקוד). מאומת ישירות מול `origin/main` עכשיו: `Tables.LEARNINGS = "למידות ותובנות (Learnings & Insights)"` (airtable_schema.py:50), `Tables.TRAFFIC_SOURCES = "TRAFFIC_SOURCES"` (airtable_schema.py:86) — שניהם קיימים בפועל. מתגלה לראשונה דרך merge ענק PR #193 (`97ebe3e`) — אותה תבנית בדיוק כמו BUG-093 (LL-13): commit ספציפי לא ניתן לאיתור מדויק כי הוא הגיע בתוך מיזוג גדול, לא PR ממוקד.
+- **Merged:** ✅ כן — קיים ב-`origin/main` (מאומת `git show origin/main:airtable_schema.py`), מקור מדויק (PR/commit) לא ניתן לאיתור מעבר ל-PR #193's merge.
+- **Deployed:** לא ידוע — לא אומת מול Render.
+- **Verified בפרודקשן:** לא — אימות הקוד עצמו (השמות/הקבועים) בוצע, אבל לא אומת שהתנהגות חיה (כתיבה/קריאה בפועל דרך הקבועים המתוקנים) נבדקה בפרודקשן.
+- **Verification ראיה:** השוואה ישירה ל-`list_tables_for_base`/`get_table_schema` החי דרך Airtable MCP, 24/06/2026 (המקור); `git show origin/main:airtable_schema.py` מאשר את הקבועים בקוד היום (10/07/2026).
+- **סטטוס:** ✅ ממוזג ל-main — לא מאומת בפרודקשן (behavioral, לא code-existence).
 
-### BUG-017 — inbound_handler.py כותב ל-LeadFields.UPDATED_AT שלא קיים ב-Leads החי
+### BUG-017 — inbound_handler.py כותב ל-LeadFields.UPDATED_AT שלא קיים ב-Leads החי — ✅ VERIFIED / CLOSED 09/07/2026
 - **דווח:** 24/06/2026 — באותו אודיט כמו BUG-020
 - **דווח על ידי:** המשתמש
 - **מסך / מודול:** `inbound_handler.py` — `_update_existing()`, שורות 75-86 (F06, נקרא בפועל ע"י `email_inbound.py`)
 - **תיאור:** `_update_existing()` עושה PATCH יחיד ל-Leads עם 3 שדות: `SUMMARY`, `UPDATED_AT`, `EXTERNAL_ID`. `LeadFields.UPDATED_AT = "updated_at"` — שדה שלא קיים בטבלת Leads החיה (אומת דרך Airtable MCP: אין `updated_at`, יש רק `created_at`). Airtable דוחה PATCH עם שדה לא קיים (422) — **כל הבקשה נכשלת**, לא רק השדה החסר, כך שגם `SUMMARY` וגם `EXTERNAL_ID` לא מתעדכנים בפועל כשליד קיים שולח הודעה נכנסת חדשה. ה-`except` הסוגר רק כותב ל-log, אז זה נכשל בשקט.
 - **Severity:** High — F06 inbound-lead gate בשימוש בפועל; כל "ליד קיים עונה שוב" לא מתעדכן בכלל ב-production.
 - **Root Cause:** הקוד הניח קיומו של שדה `updated_at` שלא נוצר בפועל ב-Airtable.
-- **תוקן:** לא תוקן עדיין — ממתין להחלטת המשתמש בין: (א) להוסיף שדה Airtable מטיפוס "Last Modified Time" בשם "Updated At" (לא דורש כתיבה מהקוד בכלל) (ב) להוסיף שדה רגיל "updated_at" ולהשאיר את הקוד (ג) להוריד את השורה `LeadFields.UPDATED_AT: _now_iso()` ואת `LeadFields.UPDATED_AT` מ-`airtable_schema.py` לגמרי.
-- **Merged:** לא
-- **Deployed:** לא
-- **Verified בפרודקשן:** לא
-- **Verification ראיה:** אומת רק דרך השוואה ל-schema החי ב-Airtable MCP — לא אומת דרך webhook אמיתי
-- **סטטוס:** Open — דורש החלטת המשתמש לפני תיקון
+- **תוקן (09/07/2026) — נרטיב מדויק:** הבאג המקורי (24/06) דיווח כתיבת `UPDATED_AT` בפועל מתוך `inbound_handler.py::_update_existing()`. באימות מול `origin/main` נקי (09/07), נתיב הכתיבה הזה **כבר לא היה קיים בכלל** — `_update_existing()` הנוכחי כותב רק `SUMMARY`+`EXTERNAL_ID` (`git log --all -S "LeadFields.UPDATED_AT" -- inbound_handler.py` לא מחזיר שום commit, כך שאי אפשר לצטט מתי/איך זה הוסר — רק לאשר שהקוד הנוכחי נקי). הסיכון האמיתי שנשאר בקוד הנוכחי היה הרשאה ישנה שנשכחה: `tools/airtable_tools.py::_TABLE_FIELDS["Leads"]` עדיין כלל `"created_at"`/`"updated_at"` ברשימת השדות המותרים — הרשאה מתה (dormant permission), לא bug פעיל, אבל סיכון אמיתי לו יכתוב אליה שוב קוד עתידי. **PR #283 מסיר את הסיכון הנשאר הזה בקוד הנוכחי. הוא לא מוסיף שדה Airtable** (לא מיישם את אופציה (א)/(ב) מהרשומה המקורית — Meta API עדיין לא כולל `updated_at`/`Last Modified Time` ב-Leads).
+- **Merged:** ✅ כן — `main` `d3d0fc5` (Merge pull request #283), commit `ba5ad6d` (`fix(leads): remove non-writable timestamps from legacy allowlist`).
+- **Deployed:** ✅ כן.
+- **Verified בפרודקשן:** ✅ כן — 09/07/2026, ראיית audit-log ישירה:
+  ```
+  POST /Leads → 200 OK
+  [AUDIT:gateway] table=Leads keys=[Name, phone, channel, memory_key, domain, source, status, summary, Score, sender_id, tenant_id]
 
-### BUG-018 — tma_api.py כותב ל-TaskFields.LEAD_LINK שלא קיים ב-Tasks החי → "צור משימה מליד" נכשל
+  PATCH /Leads/recLQNCnuyfoMMcV4 → 200 OK
+  [AUDIT:gateway] source=tma op=patch table=Leads keys=['Business Outcome', 'status'] ok=True
+  ```
+  לא הופיעו `created_at`/`updated_at`/`Created At`/`Updated At`/422 באף אחת מהקריאות — גם create וגם update דרך TMA עוברים נקי.
+- **Verification ראיה:** ראה audit-log למעלה + `git show ba5ad6d -- tools/airtable_tools.py`.
+- **סטטוס:** ✅ VERIFIED / CLOSED.
+
+### BUG-018 — tma_api.py כותב ל-TaskFields.LEAD_LINK שלא קיים ב-Tasks החי → "צור משימה מליד" נכשל — ✅ CLOSED / PROD VERIFIED 10/07/2026
 - **דווח:** 24/06/2026 — באותו אודיט כמו BUG-020
 - **דווח על ידי:** המשתמש
 - **מסך / מודול:** `tma_api.py` — POST ל-`Tables.TASKS` ב-flow של "צור משימה מליד" ב-TMA, שורה 1499 (וגם 1513 ב-queue-for-approval path)
 - **תיאור:** `task_fields[TaskFields.LEAD_LINK] = [lead_id]` — `TaskFields.LEAD_LINK = "Leads"`, אבל אין שדה linked-record כזה בטבלת "משימות (Tasks)" החיה (אומת דרך Airtable MCP). ה-POST השלם נכשל (500) כי Airtable דוחה שדה לא קיים — "צור משימה מליד" נכשל **בכל קריאה**, גם ל-owner וגם ב-approval flow למנהל.
 - **Severity:** High — חוסם תכונה שלמה ב-TMA (יצירת משימה מתוך מסך ליד).
 - **Root Cause:** הקוד הניח קיומו של שדה linked-record "Leads" על Tasks שלא נוצר בפועל.
-- **תוקן:** לא תוקן עדיין — ממתין להחלטת המשתמש בין: (א) להוסיף שדה Linked Record בשם "Leads" לטבלת "משימות (Tasks)" ב-Airtable (ב) להוריד את השורה `task_fields[TaskFields.LEAD_LINK] = [lead_id]` ואת `TaskFields.LEAD_LINK` מ-`airtable_schema.py`.
-- **Merged:** לא
-- **Deployed:** לא
-- **Verified בפרודקשן:** לא
-- **Verification ראיה:** אומת רק דרך השוואה ל-schema החי ב-Airtable MCP — לא אומת דרך קריאה אמיתית ל-endpoint
-- **סטטוס:** Open — דורש החלטת המשתמש לפני תיקון
+- **תוקן:** כן — תוקן בצד Airtable schema, לא בקוד. לטבלת `"משימות (Tasks)"` נוסף/קיים כעת שדה linked-record בשם `"Leads"` שתואם ל-`TaskFields.LEAD_LINK`.
+- **Merged:** N/A — אין שינוי קוד; הקוד הקיים היה נכון ביחס ל-schema הרצוי.
+- **Deployed:** N/A — שינוי Airtable schema, לא deploy אפליקטיבי.
+- **Verified בפרודקשן:** ✅ כן — 10/07/2026 — **ראיה קשיחה**, לא רק דיווח: POST אמיתי ל-"משימות (Tasks)" החזיר `200 OK`, `record=recbpQzwrmZdxIaDf`, עם שדות `Domain`+`Leads` שניהם נכתבו בהצלחה. `/api/leads/.../task` הצליח קצה-לקצה; `Interaction Log` → `200 OK`.
+- **Verification ראיה:** production smoke אמיתי — `record=recbpQzwrmZdxIaDf`, `200 OK`, שדות `Domain`/`Leads` תקינים.
+- **סטטוס:** ✅ CLOSED / PROD VERIFIED.
 
-### BUG-019 — crm.py: כמה פונקציות כותבות/מסננות לפי שדות ש-Contacts/Deals/Payments החיים לא מכילים
+### BUG-019 — crm.py: כמה פונקציות כותבות/מסננות לפי שדות ש-Contacts/Deals/Payments החיים לא מכילים — ✅ CLOSED (10/07/2026)
 - **דווח:** 24/06/2026 — באותו אודיט כמו BUG-020
 - **דווח על ידי:** המשתמש
 - **מסך / מודול:** `crm.py` — בשימוש בפועל ע"י `scheduler.py`, `payment_reminder.py`, `lead_conversion.py`, `tools/contact_resolver.py`, ו-`tools/dispatcher.py` (`crm_mark_payment_paid`)
@@ -298,26 +313,32 @@
   - **(e) `crm_upcoming_payments` + `crm_overdue_payments`** (שורות ~311-380): ה-formula משתמש ב-`{סטטוס}`/`{תאריך}` (עברית) על טבלת Payments, אבל השדות החיים הם `status`/`date` (אנגלית) — תוצאה ריקה לתמיד, בלי שגיאה (תזכורות תשלום שלא שולחות כלום).
 - **Severity:** High — פוגע בפונקציונליות CRM ליבתית (חיפוש אנשי קשר, יצירת עסקאות, תזכורות תשלום) שבשימוש בפועל.
 - **Root Cause:** `crm.py` נכתב מול גרסה ישנה/אנגלית של הסכמה ולא עודכן אחרי שהטבלאות "אנשי קשר (Contacts)"/"עסקאות (Deals)" עברו ל-Hebrew naming ו-Payments צומצם לשדות הנוכחיים.
-- **תוקן:** לא תוקן עדיין — ממתין להחלטת המשתמש לכל תת-סעיף (להוסיף שדות חסרים ל-Airtable מול להוריד/להחליף לוגיקה בקוד). מומלץ לתקן את כל הסעיף כמקבץ אחד ולהריץ טסט אינטגרציה ידני לפני merge.
-- **Merged:** לא
-- **Deployed:** לא
-- **Verified בפרודקשן:** לא
-- **Verification ראיה:** אומת רק דרך השוואה ל-schema החי ב-Airtable MCP — לא אומת דרך הרצת הפונקציות בפועל
-- **סטטוס:** Open — דורש החלטת המשתמש לפני תיקון
+- **עדכון (10/07/2026) — סגור סופית: re-audit יסודי של המשתמש מול ייצוא CSV חי מ-Airtable, מאומת גם ישירות בקוד:**
+  - **(a)/(b) Contacts — ✅ אין באג פעיל.** `crm_find_contact()`/`crm_add_contact()`/`crm_list_contacts()` משתמשים כולם ב-`ContactFields.NAME`/`COMPANY`/`ROLE_CATEGORY` (`"שם"`/`"חברה"`/`"Role Category"`) — תואמים בדיוק לייצוא ה-CSV החי. `ContactFields.TYPE` לא בשימוש בפונקציות אלו יותר.
+  - **(e) Payments — ✅ אין באג פעיל במסלול הכתיבה.** `crm_add_payment()` כותב רק `NAME`/`AMOUNT`/`DUE_DATE`/`STATUS`/`DEAL` (`"reference"`/`"amount"`/`"date"`/`"status"`/`"deal_id"`) — תואם לייצוא ה-CSV החי. `crm_upcoming_payments`/`crm_overdue_payments` גם תואמים.
+  - **(d) `PaymentFields.CONTACT`/`NOTES` — לא בשימוש בכתיבה בכלל, לא באג.** מאומת: `crm_add_payment()` מקבלת `contact_id`/`notes` כפרמטרים אך אינה כותבת אותם לשום מקום. בבדיקה נוספת: **ל-`crm_add_payment()` אין אף קורא בכל הריפו** (`grep -rn "crm_add_payment(" --include="*.py" .` → 0 hits מחוץ ל-`crm.py` עצמו) — הפונקציה אינה רשומה ב-`tool_registry.py` וגם אין לה `case` ב-`tools/dispatcher.py`, כלומר אינה נגישה ל-Agent כלל דרך לולאת הכלים החיה. אין סיכון live, אין קורא שסובל מאובדן מידע.
+  - **(c) Deals — ✅ תוקן, מאומת מול ייצוא CSV חי.** שלושת הפערים שהמשתמש איתר (Address→Adress, Funding Cost %→Funding Cost, ROI %→Roi) תוקנו ב-commit `9b51537` (ישיר, `eli chazan`, PR #289), **וגם RISK_LEVEL ("Risk Level") וגם NOTES ("Notes") אושרו כתואמים ל-live ללא צורך בשינוי** — מאומת ישירות בקוד הנוכחי: `DealFields.ADDRESS="Adress"`, `FUNDING_COST="Funding Cost"`, `ROI="Roi"`, `RISK_LEVEL="Risk Level"`, `NOTES="Notes"`. **חשוב:** גם `crm_add_deal()` אין לו אף קורא בריפו ואינו רשום ב-`tool_registry.py`/`dispatcher.py` — כמו `crm_add_payment()`, אינו נגיש ל-Agent החי. **המשמעות המעשית:** אין דרך "לבדוק ב-POST אמיתי דרך התנהגות משתמש חיה" כפי שהוצע — צריך קריאה ידנית ישירה ל-`crm.crm_add_deal(...)` כדי לאשר 200 OK, לא תרחיש production ארגי.
+- **תוקן:** כל 5 תת-הבעיות — סגורות ברמת הקוד. Contacts/Payments לא היו צריכים תיקון (re-verify בלבד). Deals תוקן במלואו ב-`9b51537`.
+- **Merged:** ✅ כן — כולל ב-`origin/main` (`9b51537` + מיזוגים קודמים).
+- **Deployed:** לא ידוע.
+- **Verified בפרודקשן:** ⚠️ חלקי במובן מיוחד — Contacts/Payments בשימוש חי (`crm_find_contact`/`crm_add_contact` דרך `tools/contact_resolver.py`, ראה למעלה) ולא דווחה עדיין בעיה בפועל לאחר התיקון. Deals/`crm_add_payment` **אינם נגישים ל-Agent כלל כרגע** (לא ב-registry/dispatcher) — "אימות בפרודקשן" עליהם לא רלוונטי עד שמישהו יחבר אותם ל-dispatcher; אם וכשזה יקרה, יש לוודא POST אמיתי מצליח לפני חשיפה ל-Agent.
+- **Verification ראיה:** `git show 9b51537 -- airtable_schema.py`; קריאה ישירה של `crm.py`/`airtable_schema.py`/`tool_registry.py`/`tools/dispatcher.py` על `origin/main`, 10/07/2026; re-audit מלא של המשתמש מול ייצוא CSV חי מ-Airtable (Contacts/Deals/Payments).
+- **סטטוס:** ✅ CLOSED — 5/5 תת-בעיות סגורות. `crm_add_deal`/`crm_add_payment` נשארים unwired (לא רשומים ב-tool_registry/dispatcher) — לא באג, אבל שווה לזכור לפני חיבור עתידי.
 
-### BUG-021 — schema_audit.py: UnboundLocalError במקום fallback ל-cache כשה-live fetch נכשל
+### BUG-021 — schema_audit.py: UnboundLocalError במקום fallback ל-cache כשה-live fetch נכשל — ✅ כבר תוקן, לא היה מתועד (סטטוס עודכן 10/07/2026)
 - **דווח:** 24/06/2026 — תוך כדי ניסיון להריץ `schema_audit.py` בלי `AIRTABLE_API_KEY`/`AIRTABLE_BASE_ID` ב-env
 - **דווח על ידי:** המשתמש (זוהה ע"י קלוד תוך כדי ביצוע)
 - **מסך / מודול:** `schema_audit.py` — `run_audit()`, שורות 48-65
 - **תיאור:** אם `sv.refresh_cache()` זורק exception (חסרי credentials), הענף `except` (שורות 53-55) רק מדפיס אזהרה "ממשיך עם cache קיים" אבל **לא בפועל טוען cache** — המשתנה `tables` נשאר לא מוגדר, והקריאה הבאה ל-`tables.get(...)` (שורה 65) קורסת עם `UnboundLocalError`. ה-fallback ל-cache עובד רק אם מריצים עם `--offline` במפורש (`sys.argv`), לא אוטומטית כמו שההודעה מבטיחה.
 - **Severity:** Low — הסקריפט עצמו לא בשימוש production, אבל ההודעה המוטעה ("ממשיך עם cache קיים") מטעה את מי שמריץ אותו.
-- **Root Cause:** ה-except branch לא קורא בפועל את לוגיקת ה-fallback הקיימת בענף `else` (שורות 56-59) של `live=False`.
-- **תוקן:** לא — מוצע: בענף ה-`except`, להוסיף את אותה לוגיקת טעינת cache מהדיסק שכבר קיימת בענף `else`.
-- **Merged:** לא
-- **Deployed:** לא
-- **Verified בפרודקשן:** N/A — סקריפט פיתוח, לא production
-- **Verification ראיה:** שוחזר ידנית: הרצת `python3 schema_audit.py` בלי env vars מתאימים קורסת עם `UnboundLocalError: tables`
-- **סטטוס:** Open
+- **Root Cause:** ה-except branch לא קרא בפועל את לוגיקת ה-fallback הקיימת בענף `else` של `live=False`.
+- **תוקן:** ✅ כבר תוקן בקוד — הענף `except` (`schema_audit.py:53-61` היום) **כן** טוען `tables` מ-`schema_cache.json` בפועל (`json.loads(cache_path.read_text(...))`) לפני שממשיך לביקורת — בדיוק התיקון שהוצע במקור. לא ניתן לאתר commit ממוקד — מתגלה לראשונה דרך אותו merge ענק PR #193 (`97ebe3e`) כמו BUG-020/BUG-093, אותה תבנית של doc שלא עודכן אחרי שהקוד תוקן.
+- **בדיקה (הורצה בפועל, 10/07/2026):** שחזור התרחיש המדויק מהדיווח — `AIRTABLE_API_KEY=""` `AIRTABLE_BASE_ID=""` `python3 -c "import schema_audit; schema_audit.run_audit(live=True)"` — **לא קורס**. פלט אמיתי: `"⚠️ לא ניתן לשלוף schema: AIRTABLE_API_KEY / AIRTABLE_BASE_ID חסרים"` ואז `"ממשיך עם cache קיים (אם יש)"`, ומיד אחריו דוח mismatches מלא ואמיתי מתוך `schema_cache.json` (למשל `Leads: 'updated_at' ב-Airtable אך לא בקוד`, `Assets: 'Asset Potential' בקוד אך לא ב-Airtable`) — מוכיח שה-except branch נכנס בפועל וטען את ה-cache בהצלחה, לא רק שהקוד "נראה" מתוקן.
+- **Merged:** ✅ כן — קיים ב-`origin/main` (מאומת ישירות דרך הרצה אמיתית של הקוד).
+- **Deployed:** N/A — סקריפט פיתוח, לא production.
+- **Verified בפרודקשן:** N/A — סקריפט פיתוח, לא production.
+- **Verification ראיה:** הרצה אמיתית מול `origin/main`, 10/07/2026 — ראה "בדיקה" למעלה.
+- **סטטוס:** ✅ תוקן, ממוזג — אין exposure חי מלכתחילה (סקריפט dev-only).
 
 ### BUG-022 — SPEC_DAILY_CHANGES_AUDIT.md מניח קיומה של reports/daily_changes/ — לא קיימת, לא הייתה קיימת
 - **דווח:** 29/06/2026
@@ -361,17 +382,17 @@
 - **Deployed:** לא אומת מהסביבה הזו (אין Render dashboard access).
 - **Verified בפרודקשן:** ✅ חלקי — ראיית-לוג אמיתית מתוך `BOSS_Manual_Verification_ChecklIST_UPDATED2.docx` (V1-04, מתוך מייל עם רשימת לידים בפועל) מציגה ליד עם `שם: ליד חדש` ו-`תאריך יצירה: 26/6/2026` ו-`15/6/2026` — **לפני** התיקון (`ca1f5a0` מתאריך 28/06/2026 23:52). כלומר הבאג היה פעיל בפרודקשן והשפיע על רשומות אמיתיות; אין עדיין ראיה ישירה (לוג/screenshot) שליד שנוצר **אחרי** ה-commit מקבל את הטלפון כ-Name כראוי — מומלץ לאמת ב-בדיקה הבאה (LL-01/LF-01 עם ליד טרי).
 - **Verification ראיה:** `grep -n "ליד חדש\|display_name" identity.py` → שורות 267-273 (הערת BUG-NEW-01 ROOT CAUSE FIX + `display_name=""`); `git show ca1f5a0 -- identity.py lead_capture.py` מציג את הדיף המלא; checklist evidence מצוטט מעל.
-- **סטטוס:** 🟡 MERGED TO MAIN (`ca1f5a0`) — ממתין לאימות פרודקשן על ליד **טרי** שנוצר אחרי התיקון (לא רק היסטוריה ישנה).
+- **Production smoke 09/07/2026:** ליד חדש שנוצר היום לא נשמר בשם "ליד חדש" הליטרלי — `Name='מתעניין במיטות עץ'`, `record=recZBwXryhG7QfgCd`. **תומך בתיקון, אך לא סוגר סופית:** הבדיקה הייתה דרך owner dictation/Telegram, לא flow חיצוני נקי של ליד אמיתי חדש (מספר טלפון חדש שמעולם לא נראה במערכת). **סטטוס: partially verified — לא לסגור כ-Verified מלא עד בדיקה ממספר חיצוני חדש לגמרי.**
+- **סטטוס:** 🟡 MERGED TO MAIN (`ca1f5a0`) — 🟡 Partially Verified 09/07/2026 (smoke test דרך owner dictation) — עדיין ממתין לאימות מלא עם ליד **טרי ממספר חיצוני חדש לגמרי**.
 
-### FLAGGED (cleanup candidates, not bugs) — קוד מת ב-airtable_schema.py / קובץ cache מטעה
+### FLAGGED (cleanup candidates, not bugs) — קוד מת ב-airtable_schema.py / קובץ cache מטעה — 3/4 נמחקו 10/07/2026
 - **דווח:** 24/06/2026 — באותו אודיט כמו BUG-020
 - **תיאור:** אומת ב-`grep` (0 שימושים מעבר להגדרה עצמה):
-  - `class ImportsFields` + `Tables.IMPORTS` — הטבלה "Imports" לא קיימת ב-Airtable החי, ואין קובץ אחר שמשתמש בקבועים האלה. בטוח למחיקה מלאה.
-  - `class TenantsFields` + `Tables.TENANTS` — הטבלה "Tenants" לא קיימת חי; `tenant_provisioner.py` (F08) לא מייבא מ-`airtable_schema` בכלל, אז אין תלות. בטוח למחיקה מלאה.
-  - `class DailyTaskFields` + `class DailyTaskStatus` + `Tables.DAILY_TASKS` — הטבלה "Daily_Tasks" לא קיימת חי (`Daily_Checkin` היא הטבלה החיה הנפרדת בשימוש בפועל). תלות אחת: `tma_api.py:27` מייבא `DailyTaskFields, DailyTaskStatus` בלי להשתמש בהם בשום מקום אחר — import מת. מחיקה דורשת גם הסרת שני השמות האלה משורת ה-import ב-`tma_api.py:27`.
-  - `schema_cache.json` (root) — מכיל `"fetched_at": "seed-from-schema-py"`, כלומר זה לא snapshot אמיתי מ-Airtable אלא seed שנוצר מתוך הקוד עצמו, ומכיל רק 15 מתוך כל הטבלאות החיות. מטעה כל הרצה של `schema_audit.py --offline`. אפשר למחוק (יחודש בהרצה חיה תקינה) או לרענן עם credentials אמיתיים.
-- **למה לא נמחק:** ממתין לאישור מפורש של המשתמש למחיקה (לא בוצעה מחיקה יזומה ללא בקשה).
-- **סטטוס:** Open — ממתין להחלטה
+  - **✅ נמחק (10/07/2026)** — `class ImportsFields` + `Tables.IMPORTS` — הטבלה "Imports" לא קיימת ב-Airtable החי, ואין קובץ אחר שמשתמש בקבועים האלה.
+  - **✅ נמחק (10/07/2026)** — `class TenantsFields` + `Tables.TENANTS` — הטבלה "Tenants" לא קיימת חי; `tenant_provisioner.py` (F08) לא מייבא מ-`airtable_schema` בכלל, אין תלות.
+  - **✅ נמחק (10/07/2026)** — `class DailyTaskFields` + `class DailyTaskStatus` + `Tables.DAILY_TASKS` — הטבלה "Daily_Tasks" לא קיימת חי. `tma_api.py:27` **כבר לא** מייבא `DailyTaskFields`/`DailyTaskStatus` (נוקה מוקדם יותר, בנפרד מהמחיקה הזו — grep מאשר 0 שימוש לפני המחיקה). re-grep אחרי המחיקה: `grep -rn "ImportsFields\|TenantsFields\|DailyTaskFields\|DailyTaskStatus\|Tables\.IMPORTS\b\|Tables\.TENANTS\b\|Tables\.DAILY_TASKS\b" --include="*.py" .` → 0 hits. `python3 -m py_compile airtable_schema.py` עבר; `smoke_tests.py`/`test_integration.py` — כולם ירוקים, אפס רגרסיה.
+  - **🟡 עדיין פתוח, לא נגעתי** — `schema_cache.json` (root) — מכיל `"fetched_at": "seed-from-schema-py"`, כלומר לא snapshot אמיתי מ-Airtable אלא seed שנוצר מתוך הקוד עצמו. **לא נמחק בסבב הזה** — בניגוד לשלוש המחלקות למעלה (0 תלות אמיתית), הקובץ הזה הוא ה-fallback הפעיל בפועל של `schema_audit.py`'s except branch (BUG-021, כבר מאומת שעובד נכון) — מחיקתו תסיר את רשת הביטחון הזו (גם אם באופן fail-safe: `except FileNotFoundError` קיים ומחזיר `False` בלי קריסה). דורש החלטה נפרדת: למחוק / לרענן עם credentials אמיתיים / להשאיר כפי שהוא.
+- **סטטוס:** 🟡 3/4 נסגרו (המחלקות המתות נמחקו). `schema_cache.json` נשאר Open — ממתין להחלטה נפרדת.
 
 ---
 
@@ -494,7 +515,8 @@
 - **Regression:** T01 ב-`anti_hallucination.py`
 - **הערה:** ראו גם BUG-023 שתיעד את אותה בעיה מזווית ה-Primary Field. BUG-025 מתמקד ב-display_name fix כחלק מסדרת תיקוני Lead Lifecycle.
 - **PR:** #169
-- **סטטוס:** ✅ תוקן | ⚠️ אימות מלא עם מספר חדש לגמרי — ממתין
+- **Production smoke 09/07/2026:** ראה BUG-023 — ליד חדש היום לא הציג "ליד חדש" הליטרלי (`Name='מתעניין במיטות עץ'`), אבל דרך owner dictation, לא מספר חיצוני חדש לגמרי. תומך בתיקון, לא סוגר.
+- **סטטוס:** ✅ תוקן | 🟡 Partially Verified 09/07/2026 (smoke test) | ⚠️ אימות מלא עם מספר חיצוני חדש לגמרי — עדיין ממתין
 
 ### BUG-026 (BUG-NEW-02) — dict error ב-`airtable_add` return value
 - **תאריך:** 28/06/2026
@@ -526,7 +548,20 @@
 - **חסום:** `agent`
 - **Evidence לתיקון:** 6/6 gate tests + 9/9 security tests
 - **PR:** #172
-- **סטטוס:** ✅ תוקן ומוזג
+- **עדכון 09/07/2026 (policy re-review, ראה BUG-090):** נבדק מחדש אם `enforce_leads_write_gate()` צריך להכליל לטבלאות נוספות (Business Memory/Contacts/Deals), בעקבות עבודה על BUG-081/086/087. **הוכרע לא לגעת:**
+  ```
+  DECISION (09/07/2026): Leads' structural source-gate (BUG-028) remains
+  Leads-specific by design. Other tables rely on requires_approval (tool_registry.py)
+  as their write-gate — sufficient given no corruption history exists for them.
+  Revisit ONLY if a similar repeated-failure pattern emerges for another table.
+  ```
+  לא PR, לא שינוי קוד — `tool_registry.py`'s `requires_approval=True` על `airtable_add`/`airtable_update` כבר עוצר ביצוע כל כתיבה יזומת-Agent (לכל טבלה) בתור אישור, ללא תלות ב-table-specific gate.
+- **Verified בפרודקשן (09/07/2026):** ✅ כן — ראיית לוג ישירה שה-gate עצר כתיבה אמיתית:
+  ```
+  [LeadsWriteGate] BLOCKED direct Leads write | tool=airtable_update source=agent table=Leads
+  ```
+  השאלה המקורית ("האם כתיבה ישירה ל-Leads מה-Agent חסומה?") מאומתת חיובית בפרודקשן. **Follow-up נפתח בנפרד:** BUG-090 — הודעת החסימה למשתמש שגויה עבור `airtable_update` (מציגה `capture_inbound_lead()` שלא רלוונטי לעדכון) + הפרת Single-Speaker בנתיב הכשל — לא פותח מחדש את BUG-028 עצמו (ה-gate עובד נכון), רק את הניסוח/UX.
+- **סטטוס:** ✅ תוקן ומוזג, ✅ VERIFIED בפרודקשן — scope Leads-only אושר כמכוון, לא פער (09/07/2026).
 
 ### BUG-029 (BUG-NEW-05) — A32: FOUND יכול להצדיק CREATED
 - **תאריך:** 28/06/2026
@@ -649,6 +684,7 @@
 - **תיקון:** (א) `_queue_approval()` מזריק sentinel `__approval_queued__` ל-`tool_results_log` בכל הרצה. (ב) A32 קיבל pattern חדש: ביטויי approval דורשים עדות `__approval_queued__`. ללא sentinel — תגובה נחסמת.
 - **PR:** #188
 - **סטטוס:** ✅ תוקן ומוזג
+- **עדכון אימות 09/07/2026 — כיסוי מול BUG-086/087:** ✅ סגור בפועל במסלול Agent tool-loop. הטענה הבעייתית היא טקסט שיוצא מה-Agent ונבדק ב-`sanitize_agent_response()` לפני החזרה למשתמש (`app.py:1969-1973`). `_queue_approval()` מזריק עדות `{"tool": "__approval_queued__", "ok": True}` ל-`tool_results_log` רק אחרי queue אמיתי (`app.py:1897-1911`). ב-`core/anti_hallucination.py:235-247` יש pattern מפורש לטענות "ממתינה לאישור" שדורש את ה-sentinel הזה; בלי sentinel התגובה מוחלפת ל-`_NO_TOOL_EVIDENCE_FALLBACK` דרך הלולאה ב-`core/anti_hallucination.py:546-554`. כלומר BUG-086/087 לא צריכים PR נוסף עבור BUG-041.
 
 ### BUG-042 (BUG-V1-APPROVAL-REQUEUE-AFTER-CONFIRM) — פעולה שאושרה ניתנת ל-re-queue מיידי
 - **תאריך:** 30/06/2026
@@ -864,6 +900,21 @@
 - **Deployed:** לא אומת (אין גישת Render dashboard מה-sandbox)
 - **Verified בפרודקשן:** לא עדיין
 - **סטטוס:** ✅ מוזג ל-main — ממתין ל-production verification
+- **עדכון אימות 09/07/2026 — כיסוי מול BUG-086/087:** ✅ סגור כטקסט מטעה, לא דרך anti-hallucination. זה לא Agent claim ולא עובר דרך `sanitize_agent_response()`, אלא הודעה קבועה מ-`core/lead_candidate_handler.py`. הקוד הנוכחי ב-`_handle_clean_batch()` אומר במפורש "לא שמרתי אותם ולא נפתחה פעולת אישור קבוצתית" ו"אישור קבוצתי עדיין לא זמין" (`core/lead_candidate_handler.py:713-724`). `_store_pending_preview()` מתועד כ-`INTENTIONAL — no resolver yet`, ושומר `pending_lead_preview` ל-audit/future-design בלבד (`core/lead_candidate_handler.py:770-794`). לכן BUG-086/087 אינם המנגנון הרלוונטי כאן; ה-resolver הקבוצתי נשאר functional gap נפרד ומכוון, אבל ההבטחה הכוזבת "ענה כן לאישור batch" כבר סגורה.
+
+- **עדכון 10/07/2026 — Tier-2 batch-confirm resolver נבנה בפועל, ה-precedence-decision שנדרש לפני בנייה (ראה למעלה) הוכרע ומומש:**
+  - **`session_store.py`:** שלוש מתודות חדשות אחרי `get_active_lead_candidate()` — `set_pending_lead_preview(sender, candidates, raw_text, channel, domain)` (TTL 30 דק', כולל `set_at`), `get_pending_lead_preview(sender)` (מחזיר `None` אם פג תוקף, מנקה + `_sync_to_db()` גם ב-expiry — בשונה מ-`get_active_lead_candidate()` הקיים), `clear_pending_lead_preview(sender)`.
+  - **`core/lead_candidate_handler.py`:** `_store_pending_preview()` קיבל פרמטרים חדשים `channel`/`domain` (נשמרים בזמן הכתיבה — ב-app.py section 2.55, נקודת ה-resolve, ה-Router עוד לא רץ ואין `resolved_route_domain` זמין שם). פונקציה חדשה `resolve_pending_lead_preview(identity, chat_id, is_confirm, is_cancel)` — קוראת preview בחזרה, "כן" מפעיל `_handle_batch()` בפועל (כתיבה אמיתית ל-Airtable per lead) עם channel/domain מה-preview עצמו, "לא" מנקה בלי לכתוב. מחזירה `None` אם אין preview/פג תוקף/לא confirm-או-cancel — כך ש-app.py ממשיך לזרימה הרגילה. הודעת ה-preview חזרה להזמין אישור אמיתי ("ענה \"כן\" לשמירת כולם, או \"לא\" לביטול. (בתוקף ל-30 דקות)") — כי הפעם יש resolver אמיתי מאחוריה.
+  - **Precedence decision (הקונפליקט שסומן כלא-פתור):** Tier-1 ActionGateway **מנצח תמיד** Tier-2 batch preview כששני המנגנונים חיים בו-זמנית לאותו `chat_id` — לא נבחר סתם, זו המשכיות ישירה של precedent קיים כבר בקוד (BUG-056: "check ActionGateway live contracts FIRST, regardless of FEATURE_ACTION_GATEWAY"). מומש ב-`app.py`'s section 2.55: קריאה ל-`resolve_pending_lead_preview()` נוספה **בתוך** ה-`elif _lower in _CONFIRM_WORDS:`/`elif _lower in _CANCEL_WORDS:` הקיימים, **אחרי** ש-`_gw_cw.find_live_contracts(...)`/`route_cancellation_word(...)` (Tier-1) כבר נבדקו ולא מצאו כלום — לא בנקודת כניסה נפרדת/מוקדמת יותר כפי שהוצע בטיוטת התיקון המקורית. Tier-2 resolver עצמו לא בודק Tier-1 בכלל (במפורש ב-docstring) — ה-ordering guarantee חי כולו ב-caller (`app.py`), לא בתוך `resolve_pending_lead_preview()`.
+  - **בדיקה:** `test_tier2_silent_preview.py` נכתב מחדש (9/9) — הודעת Tier-2 מזמינה אישור אמיתי, `pending_lead_preview` נכתב עם `set_at`/`channel`/`domain`, "כן" כותב בפועל דרך `_handle_batch` עם channel/domain מהמאוחסן, "לא" מנקה בלי לכתוב, preview שפג תוקפו נופל דרך (`None`), אין-preview נופל דרך, לא-confirm-ולא-cancel לא צורך את ה-preview, ו-regression guard ל-Tier-1 (הודעת preview המקורית לא השתנתה). `test_c89_preview_confirmation.py`'s בדיקה סטטית (`test_app_py_confirm_word_checks_gateway_before_flag_branch`) עודכנה (חלון חיפוש הורחב מ-1200/3000 ל-3000/5000 תווים — הקוד החדש דחף את `_flag_cw(...)`/`_CANCEL_WORDS` רחוק יותר מה-marker, אך הסדר עצמו — `find_live_contracts` לפני `_flag_cw` — לא השתנה) — 9/9. אפס רגרסיה: `test_action_gateway.py` (37/37), `test_bug070_combined_wording.py` (27/27), `test_bug070_pending_approval_multi.py`, `smoke_tests.py`, `test_integration.py` (4/4), `core/router/test_router.py` (44/44), `test_c53a.py` (50/50), `test_approval_concurrency.py` (14/14), וכל שאר `test_*.py` בריפו (חוץ מ-`test_document_converter.py` — כשל קודם/לא-קשור, משוכפל זהה גם על `main` ללא נגיעה).
+  - **PR:** ראה branch/PR של סבב זה (10/07/2026).
+  - **Merged:** ממתין ל-push/PR.
+  - **סטטוס:** ✅ **BUG-058 סגור במלואו** — התיקון המקורי (טקסט מטעה) + הפתרון המלא (resolver אמיתי, precedence מוכרע ומיושם) שניהם ב-main/ממתינים ל-merge. לא נותר functional gap.
+
+- **עדכון 10/07/2026 — בדיקה חיה בפרודקשן, תוצאה מדויקת: BUG-058 (ה-resolver עצמו) IMPLEMENTED ✅, אך PROD TEST חשף באג נפרד במעלה הזרם:**
+  - **מה עבד:** הלוג `[LCH] resolve_pending_lead_preview(confirm): user=boss_hq:eliyahu` הוכיח ש-"כן" נתפס נכון ע"י ה-resolver, `pending_lead_preview` נקרא בחזרה, וה-batch בוצע בפועל (לא נפל ל-"אין פעולה שממתינה לאישור") — **בדיוק ה-gap שה-resolver נועד לסגור נסגר**, מאומת חי, לא רק בטסטים.
+  - **מה לא עבד (לא קשור ל-resolver עצמו):** שני הלידים בבאצ' נכתבו לאותה רשומת Airtable בדיוק, עם אותו שם שגוי למועמד השני. שורש: `parse_batch_dictation()` (שורש upstream, קודם ל-resolver, קודם אפילו ל-`_store_pending_preview`) העתיק את שם המועמד הראשון למועמד השני לפני שהם בכלל הגיעו ל-preview — ה-resolver רק העביר הלאה candidates שכבר היו שגויים. ראה **BUG-094** (למטה) לאבחון המלא ולתיקון.
+  - **מסקנה מדויקת:** ה-resolver (BUG-058's scope) עצמו לא היה הבאג — הוא רק חשף באג upstream קיים-מראש (BUG-094) שהיה בלתי-נראה כל עוד לא היה resolver שמבצע את ה-batch בפועל. BUG-058 נשאר ✅ סגור לגבי ה-scope שלו (route "כן"/"לא" ל-preview אמיתי); הבטיחות של batch confirm מקצה-לקצה תלויה כעת ב-BUG-094 (תוקן באותו סבב, ראה למטה) — **לפני BUG-094, batch confirm "קיים אך אינו בטוח לשימוש"**; בדיקה חוזרת בפרודקשן אחרי מיזוג BUG-094 חייבת להראות שני `record_id` שונים לשני מועמדים שונים.
 
 ### BUG-059 (LEAD-EVENT-DOMAIN-ORDERING-DORMANT-INJECTION) — ענף claude/lead-event-domain-ordering (לא ממוזג) מכיל prompt-injection surface + dual mechanism
 - **תאריך:** 03/07/2026
@@ -1060,6 +1111,7 @@
   - **PR:** אותו ענף (`claude/bug-070-058-gaps-1i1spl`) — commit נפרד ל-gap(1)+gap(3) מעבר ל-#234 המקורי.
   - **Merged:** ממתין ל-push/PR של סבב זה.
   - **סטטוס (עדכון):** gap (1) — combined wording + reject-by-index — ✅ קוד הושלם, בדיקות עברו, ממתין ל-merge+production verification. gap (2) כבר נסגר קודם (#234). gap (3) — 🟡 רק ניסוח תוקן, backend עדיין לא קיים, נשאר פתוח במכוון.
+  - **עדכון אימות 09/07/2026 — כיסוי מול BUG-086/087:** ✅ סגור כטקסט מטעה, לא דרך anti-hallucination. `daily_collector` אינו Agent tool-loop: `scheduler.py` מפעיל `_job_daily_collector()` ומשם `send_daily_collector()` (`scheduler.py:73-90`, `scheduler.py:805-810`), ו-`daily_collector.py` בונה הודעה קבועה ב-`format_collector_message()` ושולח אותה ישירות עם `bot.send_message()` (`daily_collector.py:130-153`, `daily_collector.py:160-190`). לכן BUG-086/087 לא יכולים ולא צריכים לתפוס את ההבטחה הישנה. ההוכחה לסגירה היא שהטקסט הנוכחי כבר לא אומר "ענה במספר לאישור שמירה", אלא "כדי לשמור פריט — עדכן אותו ידנית או שלח לי אותו כליד/משימה בנפרד" (`daily_collector.py:150-152`). ה-backend/state לפריטי המאסף היומי נשאר functional gap נפרד ומכוון.
 
 - **תיקון-טעות שתועדה בסבב קודם (05/07/2026, אחרי בדיקה חיה):** ניתוח קודם (בשיחה, לא הגיע ל-commit) טען ש-`route_disambiguation()` הוא "dead code" בפועל, כי הצרכן שלו (§4, `app.py`) עטוף ב-`FEATURE_ACTION_GATEWAY` בעוד היצרן שלו (`route_confirmation_word()`, populates `self._disambiguation`) רץ ללא תלות בדגל (BUG-056). **המשתמש בדק חי בטלגרם והפריך את הטענה:** כששולחים קודם מילת אישור בודדת ("כן"/"מאשר") ומחכים לרשימה הממוספרת, ואז שולחים מספר/סדר בודד בנפרד — הבחירה **כן** נפתרת נכון. המסקנה המתוקנת: אין כאן באג — הייתה ציפייה שגויה לפרוטוקול (ניסיון לשלוח מספר ישיר בלי לשלוח קודם מילת אישור בודדת שמפעילה את `route_confirmation_word()` ומאכלסת את `_disambiguation`). כלומר: ב-סביבה שנבדקה, `FEATURE_ACTION_GATEWAY` בפועל **פעיל** (אחרת גם הפרוטוקול הדו-שלבי לא היה עובד) — לא מאומת דרך קוד סטטי (ברירת המחדל בקוד היא כבוי, `feature_flags.py:116-118`), אלא רק דרך תצפית חיה. אין תיקון קוד נדרש לממצא הזה.
 - **נקודה לתיעוד עתידי (לא באג, לא תוקן):** יש חוסר-אחידות UX אמיתי בין שני מסלולי disambiguation בבוט — מסלול ה-file-upload/ActionGateway דורש פרוטוקול דו-שלבי ("כן"/"מאשר" קודם, ואז מספר בנפרד), בעוד `daily_collector.py`'s `format_collector_message()` (gap 3 למעלה) מבטיח בטקסט יכולת תגובה ישירה במספר בודד ("ענה במספר") שלא קיימת כלל. שני הפרוטוקולים שונים זה מזה ואף אחד מהם לא תומך ב-"כן/מאשר + מספר" משולב באותה הודעה (gap 1 למעלה). ראוי לשקול בעתיד איחוד לחוויה אחת עקבית בין שני המסלולים, כחלק מטיפול בgaps 1 ו-3.

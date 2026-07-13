@@ -25,6 +25,7 @@ try:
 except ImportError:
     _save_lead_buffer = None  # fallback — לא שובר אם core חסר
 from .contact_resolver  import resolve_contact
+from . import approval_actions
 
 from tool_registry import enforce, ToolDenied
 import feature_flags as _ff
@@ -95,12 +96,24 @@ def _check_duplicate(real_table: str, field: str, value: str) -> dict | None:
     return None
 
 
-def dispatch_tool(name: str, inputs: dict, identity: "Identity | None" = None) -> str:
+def dispatch_tool(
+    name: str,
+    inputs: dict,
+    identity: "Identity | None" = None,
+    trusted_source: str | None = None,
+) -> str:
     """
     מקבל שם כלי + inputs + identity ומחזיר תוצאה כטקסט.
 
     identity מועברת לכלים שצריכים לסנן לפי tenant/user.
     כלים שלא צריכים אותה — מתעלמים ממנה.
+
+    BUG-091: trusted_source הוא ה-source היחיד ש-enforce_leads_write_gate()
+    סומך עליו — פרמטר Python מפורש שרק קוד קורא מהימן (app.py/
+    core/action_gateway.py) יכול להעביר, לעולם לא נגזר מ-inputs (ה-JSON
+    שקלוד יצר). ברירת מחדל None → "agent" (הכי לא-מהימן, fail-closed) —
+    כל קורא שלא מעביר במפורש trusted_source נחשב "agent". inputs["_source"]
+    (אם קיים) מתעלם ממנו לחלוטין — לא מקור אמון עוד.
     """
     tenant_id = identity.tenant_id if identity else "unknown"
     user_id   = identity.user_id   if identity else "unknown"
@@ -218,8 +231,10 @@ def dispatch_tool(name: str, inputs: dict, identity: "Identity | None" = None) -
 
                 # BUG-B FIX: חסום כתיבה ישירה ל-Leads מה-Agent.
                 # Lead creation מותרת רק דרך capture_inbound_lead().
-                # source="agent" = ברירת מחדל כשהAgent קורא ישירות.
-                _write_source = inputs.get("_source", "agent")
+                # BUG-091: source נגזר אך ורק מ-trusted_source (פרמטר Python
+                # מהקורא), לעולם לא מ-inputs["_source"] — זה key שקלוד יכול
+                # לכתוב בעצמו ב-tool_use.input ולזייף מקור מהימן.
+                _write_source = trusted_source or "agent"
                 try:
                     enforce_leads_write_gate("airtable_add", {"table": table}, source=_write_source)
                 except LeadsDirectWriteBlocked as e:
@@ -281,7 +296,9 @@ def dispatch_tool(name: str, inputs: dict, identity: "Identity | None" = None) -
                 fields    = dict(inputs["fields"])
 
                 # BUG-B FIX: חסום עדכון ישיר ל-Leads מה-Agent
-                _write_source = inputs.get("_source", "agent")
+                # BUG-091: ראה הערה מקבילה ב-airtable_add — trusted_source
+                # בלבד, לעולם לא inputs["_source"].
+                _write_source = trusted_source or "agent"
                 try:
                     enforce_leads_write_gate("airtable_update", {"table": table}, source=_write_source)
                 except LeadsDirectWriteBlocked as e:
@@ -345,6 +362,31 @@ def dispatch_tool(name: str, inputs: dict, identity: "Identity | None" = None) -
                 result = crm_mark_payment_paid(record_id)
                 audit_log_airtable("crm_mark_payment_paid", identity, {"record_id": record_id}, result)
                 return result
+
+            # ── PR-0C — ActionGateway adapters (former event_bus custom actions) ──
+            case "media_save_to_memory":
+                return approval_actions.media_save_to_memory(
+                    transcript=inputs.get("transcript", ""),
+                    domain=inputs.get("domain", "general"),
+                    source=inputs.get("source", "media_handler"),
+                )
+            case "send_followup":
+                return approval_actions.send_followup(
+                    chat_id=inputs.get("chat_id", ""),
+                    draft=inputs.get("draft", ""),
+                    contact_name=inputs.get("contact_name", ""),
+                    channel=inputs.get("channel", ""),
+                    memory_key=inputs.get("memory_key", ""),
+                )
+            case "send_recovery":
+                return approval_actions.send_recovery(
+                    chat_id=inputs.get("chat_id", ""),
+                    draft=inputs.get("draft", ""),
+                    contact_name=inputs.get("contact_name", ""),
+                    channel=inputs.get("channel", ""),
+                    memory_key=inputs.get("memory_key", ""),
+                    tier=inputs.get("tier", ""),
+                )
 
             # ── Unknown ───────────────────────────────
             case _:

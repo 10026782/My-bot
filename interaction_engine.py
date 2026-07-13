@@ -297,13 +297,11 @@ def save_to_interaction_log(
         }
 
         result = airtable_add(Tables.INTERACTION_LOG, fields)
-        if "✅" in result:
-            import re
-            m = re.search(r'rec\w+', result)
-            record_id = m.group(0) if m else "saved"
+        if result.get("ok"):
+            record_id = result.get("external_id") or "saved"
             logger.info(f"[InteractionLog] saved: {interaction.title} → {record_id}")
             return record_id
-        logger.warning(f"[InteractionLog] write failed: {result[:120]}")
+        logger.warning(f"[InteractionLog] write failed: {result.get('user_message', result)}")
         return ""
 
     except ImportError:
@@ -383,7 +381,7 @@ def create_tasks_from_analysis(
             if task.get("due"):
                 fields[TaskFields.DUE_DATE] = task.get("due", "")
             result = airtable_add(Tables.TASKS, fields)
-            if "✅" in result:
+            if result.get("ok"):
                 created += 1
     except ImportError:
         pass
