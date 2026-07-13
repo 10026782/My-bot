@@ -21,7 +21,11 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Callable
 
-from core.action_contract_repository import ActionContractLookupError
+from core.action_contract_repository import (
+    ActionContractLookupError,
+    ActionContractTransitionError,
+    ActionContractTransitionPersistenceError,
+)
 from tool_registry import needs_approval
 
 logger = logging.getLogger(__name__)
@@ -140,7 +144,7 @@ class ActionContract:
     origin_channel:             str
     origin_chat_id:             str
     requires_approval:          bool
-    status:                     str    # draft|pending|approved|rejected|executing|executed|failed
+    status:                     str    # draft|pending|approved|rejected|completed|failed|outcome_unknown (executed legacy)
     created_at:                 float
     approved_by:                str | None = None
     approved_at:                float | None = None
@@ -189,14 +193,13 @@ class ActionContract:
     # know." Does not block the incoming message itself from being routed —
     # only affects whether a later bare confirm executes directly.
     context_integrity_unknown:   bool = False
-    # Phase 4B-1A: frozen proposal identity for durable recovery/audit. This
-    # value is deliberately not wired into the Phase 4B0 atomic executor in
-    # this PR; atomic-claim behavior remains unchanged.
+    # Frozen proposal identity for durable recovery/audit. PostgreSQL claim
+    # ownership remains separate from this provider idempotency metadata.
     idempotency_key:             str = ""
-    # PR-0C Phase 4B0 — persisted version metadata, bumped on save. NOT a
-    # concurrency-control mechanism today: no transition path in this codebase
-    # checks or CAS's on this value. A real claim mechanism using this (or a
-    # replacement) is tracked separately as Phase 4B0.1.
+    # Persisted lifecycle version. Repository transitions reject a stale
+    # pre-write version and verify the increment after their partial PATCH;
+    # Airtable still provides no atomic compare-and-swap primitive. PostgreSQL
+    # owns the genuinely atomic execution claim.
     version:                     int = 1
 
 
@@ -360,14 +363,9 @@ class ExecutionLedger:
         self._by_fingerprint: dict[str, str] = {}      # fingerprint → contract_id
         self._lock = threading.Lock()
         self._airtable_writer = airtable_writer        # callable(contract) → None — legacy best-effort mirror (Phase 4A)
-        # PR-0C Phase 4B0: ActionContractRepository | None. When set, find_by_id()
-        # falls back to it on a cache miss (restart/second-instance recovery) and
-        # hydrates the cache. There is no status-transition use of this
-        # repository — update_status() below remains a bare in-memory update
-        # regardless of whether a repository is set. Deliberately None on the
-        # live singleton for now (see _ledger_singleton comment) — this is
-        # tested, inert infrastructure, not yet an activated live
-        # persistence/recovery path.
+        # ActionContractRepository | None. When set, reads recover through it
+        # and lifecycle updates persist there before the RAM cache changes.
+        # PostgreSQL remains the separate atomic execution-claim owner.
         self._repository = repository
 
     def _cache_contract(self, contract: ActionContract) -> None:
@@ -429,11 +427,10 @@ class ExecutionLedger:
 
     def find_live_by_user(self, canonical_user_id: str) -> list[ActionContract]:
         """מחזיר contracts חיים (pending) לזהות קנונית."""
-        # Repository recovery is cache-miss only. Once this process has any
-        # contract for the user, its RAM state may be newer than the durable
-        # proposal snapshot because status/context write-through is explicitly
-        # deferred to 4B-1B. Re-hydrating the durable pending snapshot here
-        # would resurrect a locally changed contract.
+        # Repository recovery is cache-miss only. Lifecycle transitions write
+        # through before RAM changes, so the durable query is authoritative on
+        # restart; avoiding a second query once this user's cache is populated
+        # also keeps one request path internally consistent.
         has_cached_user_contract = any(
             c.canonical_user_id == canonical_user_id for c in self._store.values()
         )
@@ -455,11 +452,42 @@ class ExecutionLedger:
             return None
         return max(candidates, key=lambda c: c.created_at)
 
-    def update_status(self, contract_id: str, status: str, **kwargs) -> None:
+    def update_status(self, contract_id: str, status: str, **kwargs) -> bool:
+        """Persist an expected lifecycle transition before updating RAM.
+
+        With no repository configured, preserves the legacy RAM-only behavior.
+        Transition failures propagate so callers cannot report approval,
+        rejection, or execution success when the durable audit row disagrees.
+        """
         with self._lock:
             c = self._store.get(contract_id)
             if not c:
-                return
+                return False
+            expected_status = c.status
+            expected_version = c.version
+
+        if self._repository:
+            try:
+                persisted = self._repository.transition(
+                    contract_id,
+                    expected_status=expected_status,
+                    expected_version=expected_version,
+                    new_status=status,
+                    updates=kwargs,
+                )
+            except ActionContractTransitionError:
+                raise
+            except Exception as exc:
+                raise ActionContractTransitionPersistenceError(
+                    f"repository lifecycle transition raised: {type(exc).__name__}"
+                ) from exc
+            self._cache_contract(persisted)
+            return True
+
+        with self._lock:
+            c = self._store.get(contract_id)
+            if not c:
+                return False
             c.status = status
             for k, v in kwargs.items():
                 if hasattr(c, k):
@@ -469,6 +497,7 @@ class ExecutionLedger:
                 self._airtable_writer(self._store[contract_id])
             except Exception as exc:
                 logger.warning("[ActionGateway] Airtable status update failed: %s", exc)
+        return True
 
     # ── PR-0 / BUG-PENDING-APPROVAL-B ────────────────────────────────
 
@@ -480,12 +509,15 @@ class ExecutionLedger:
         הפרעה נוספת מבטלת אותו סופית (status="superseded"), לא פותחת סיבוב
         שני. אין מעגלי reconfirmation חוזרים — ראה route_confirmation_word()."""
         with self._lock:
-            for c in self._store.values():
-                if c.canonical_user_id == canonical_user_id and c.status == "pending":
-                    if c.reconfirmation_required:
-                        c.status = "superseded"
-                    else:
-                        c.context_interrupted = True
+            changes = [
+                (c.contract_id, "superseded", {})
+                if c.reconfirmation_required
+                else (c.contract_id, "pending", {"context_interrupted": True})
+                for c in self._store.values()
+                if c.canonical_user_id == canonical_user_id and c.status == "pending"
+            ]
+        for contract_id, status, updates in changes:
+            self.update_status(contract_id, status, **updates)
 
     def mark_context_integrity_unknown(self, canonical_user_id: str) -> None:
         """Independent fallback primitive — a separately-written method
@@ -499,12 +531,15 @@ class ExecutionLedger:
         Same bounded one-shot rule as mark_context_interrupted(): a contract
         that already required reconfirmation once is superseded, not re-armed."""
         with self._lock:
-            for c in self._store.values():
-                if c.canonical_user_id == canonical_user_id and c.status == "pending":
-                    if c.reconfirmation_required:
-                        c.status = "superseded"
-                    else:
-                        c.context_integrity_unknown = True
+            changes = [
+                (c.contract_id, "superseded", {})
+                if c.reconfirmation_required
+                else (c.contract_id, "pending", {"context_integrity_unknown": True})
+                for c in self._store.values()
+                if c.canonical_user_id == canonical_user_id and c.status == "pending"
+            ]
+        for contract_id, status, updates in changes:
+            self.update_status(contract_id, status, **updates)
 
 
 # ══════════════════════════════════════════════════
@@ -657,8 +692,18 @@ class ActionGateway:
                     contract_id=existing.contract_id,
                     user_message="⏳ כבר יש בקשת אישור פתוחה לפעולה זו. שלח *מאשר* כדי לאשר.",
                 )
-            if existing.status == "executed":
+            if existing.status in ("completed", "executed"):
                 return self._handle_duplicate_executed(existing, canonical_user_id)
+            if existing.status in ("approved", "executing", "outcome_unknown"):
+                return GatewayResult(
+                    ok=False,
+                    reason=f"הפעולה כבר קיימת במצב {existing.status}.",
+                    contract_id=existing.contract_id,
+                    user_message=(
+                        "⚠️ הפעולה כבר אושרה או שתוצאתה אינה סופית. "
+                        "אין ליצור אותה מחדש אוטומטית."
+                    ),
+                )
 
         # BUG-076: classified from the actual normalized payload that will
         # be dispatched — never trusted from the caller.
@@ -886,10 +931,21 @@ class ActionGateway:
             # "context intact" (see _apply_ingress_context_gate in app.py).
             if (contract.context_interrupted or contract.context_integrity_unknown) \
                     and not contract.reconfirmation_required:
-                self._ledger.update_status(
-                    contract.contract_id, contract.status,
-                    reconfirmation_required=True,
-                )
+                try:
+                    self._ledger.update_status(
+                        contract.contract_id, contract.status,
+                        reconfirmation_required=True,
+                    )
+                except ActionContractTransitionError as exc:
+                    logger.error(
+                        "[ActionGateway] durable reconfirmation update failed: "
+                        "contract=%s error=%s",
+                        contract.contract_id, exc,
+                    )
+                    return (
+                        "❌ לא ניתן לשמור את מצב האישור באופן עמיד. "
+                        "הפעולה לא בוצעה; אין לנסות שוב עד לבדיקת המערכת."
+                    )
                 desc = _describe_contract_for_reconfirmation(contract)
                 return (
                     f"יש פעולה קודמת שממתינה לאישור: {desc}.\n"
@@ -908,6 +964,30 @@ class ActionGateway:
 
     # ── BUG-056 — route_cancellation_word ───────────────────────────
 
+    def reject(self, contract_id: str, rejected_by: str = "") -> str:
+        """Durably reject one pending contract without executing it."""
+        contract = self._ledger.find_by_id(contract_id)
+        if not contract:
+            return "⚠️ פעולה לא נמצאה."
+        if contract.status != "pending":
+            return f"⚠️ הפעולה אינה במצב המתנה (מצב נוכחי: {contract.status})."
+        try:
+            self._ledger.update_status(contract_id, "rejected")
+        except ActionContractTransitionError as exc:
+            logger.error(
+                "[ActionGateway] durable rejection failed: contract=%s by=%s error=%s",
+                contract_id, rejected_by, exc,
+            )
+            return (
+                "❌ לא ניתן לשמור את ביטול הפעולה באופן עמיד. "
+                "הפעולה לא סומנה כמבוטלת; אין לנסות לאשר אותה עד לבדיקת המערכת."
+            )
+        logger.info(
+            "[ActionGateway] rejected: contract=%s tool=%s by=%s",
+            contract_id, contract.tool_name, rejected_by,
+        )
+        return "🚫 הפעולה בוטלה."
+
     def route_cancellation_word(self, canonical_user_id: str) -> str | None:
         """
         מיירט מילת ביטול חופשית ("לא") לפני שמגיעה ל-Agent.
@@ -918,11 +998,9 @@ class ActionGateway:
         if not live:
             return None
         for c in live:
-            self._ledger.update_status(c.contract_id, "rejected")
-            logger.info(
-                "[ActionGateway] rejected via cancel word: contract=%s tool=%s user=%s",
-                c.contract_id, c.tool_name, canonical_user_id,
-            )
+            result = self.reject(c.contract_id, rejected_by=canonical_user_id)
+            if not result.startswith("🚫"):
+                return result
         return "🚫 הפעולה בוטלה."
 
     # ── disambiguation ordinal resolver ─────────────────────────────
@@ -1004,7 +1082,9 @@ class ActionGateway:
         # so no sibling contracts linger after the user makes a selection.
         for sibling in pending_list:
             if sibling.contract_id != contract.contract_id and sibling.status == "pending":
-                self._ledger.update_status(sibling.contract_id, "rejected")
+                rejection = self.reject(sibling.contract_id, rejected_by=canonical_user_id)
+                if not rejection.startswith("🚫"):
+                    return rejection
                 logger.info(
                     "[ActionGateway] disambiguation: closing sibling contract=%s tool=%s",
                     sibling.contract_id, sibling.tool_name,
@@ -1050,7 +1130,9 @@ class ActionGateway:
             # §21 — כמו route_disambiguation: בחירה ממוקדת סוגרת siblings אחרים
             for sibling in live:
                 if sibling.contract_id != contract.contract_id and sibling.status == "pending":
-                    self._ledger.update_status(sibling.contract_id, "rejected")
+                    rejection = self.reject(sibling.contract_id, rejected_by=canonical_user_id)
+                    if not rejection.startswith("🚫"):
+                        return rejection
                     logger.info(
                         "[ActionGateway] combined_word confirm: closing sibling contract=%s tool=%s",
                         sibling.contract_id, sibling.tool_name,
@@ -1062,7 +1144,9 @@ class ActionGateway:
             return self.approve(contract.contract_id, approver=canonical_user_id, approver_role=approver_role)
 
         # action == "cancel" — דוחה רק את הפריט שנבחר, לא נוגע בשאר הממתינים
-        self._ledger.update_status(contract.contract_id, "rejected")
+        rejection = self.reject(contract.contract_id, rejected_by=canonical_user_id)
+        if not rejection.startswith("🚫"):
+            return rejection
         logger.info(
             "[ActionGateway] combined_word: user=%s cancel idx=%d contract=%s tool=%s",
             canonical_user_id, idx, contract.contract_id, contract.tool_name,
@@ -1178,16 +1262,23 @@ class ActionGateway:
                 "פנה לתמיכה טכנית."
             )
 
-        # NOTE: this is a plain in-memory status update, not an atomic claim.
-        # There is no protection here against two callers (two Render
-        # instances, a duplicate webhook, a double-tap) both reaching this
-        # point for the same contract — a genuinely atomic coordination
-        # primitive outside Airtable is tracked separately as Phase 4B0.1 and
-        # does not exist yet. TMA routing by contract_id stays blocked until
-        # it does (see core/action_contract_repository.py's module docstring).
-        self._ledger.update_status(
-            contract_id, "approved", approved_by=approver, approved_at=time.time(),
-        )
+        # Approval is durably recorded before execution. This is not the
+        # execution claim: PostgreSQL claim acquisition inside
+        # _execute_contract remains the sole dispatcher-ownership boundary.
+        try:
+            self._ledger.update_status(
+                contract_id, "approved", approved_by=approver, approved_at=time.time(),
+            )
+        except ActionContractTransitionError as exc:
+            logger.error(
+                "[ActionGateway] durable approval failed before execution: "
+                "contract=%s approver=%s error=%s",
+                contract_id, approver, exc,
+            )
+            return (
+                "❌ האישור לא נשמר באופן עמיד ולכן הפעולה לא בוצעה. "
+                "אין לנסות שוב עד לבדיקת המערכת."
+            )
         updated = self._ledger.find_by_id(contract_id)
         if not updated:
             logger.warning(
@@ -1219,7 +1310,24 @@ class ActionGateway:
         """
         from feature_flags import is_enabled
 
-        self._ledger.update_status(contract.contract_id, "executing")
+        def _persist_execution_status(status: str) -> bool:
+            try:
+                persisted = self._ledger.update_status(contract.contract_id, status)
+            except ActionContractTransitionError as exc:
+                logger.critical(
+                    "[ActionGateway] durable execution lifecycle write failed: "
+                    "contract=%s status=%s error=%s",
+                    contract.contract_id, status, exc,
+                )
+                return False
+            if not persisted:
+                logger.critical(
+                    "[ActionGateway] execution lifecycle contract missing: "
+                    "contract=%s status=%s",
+                    contract.contract_id, status,
+                )
+                return False
+            return True
 
         # Phase 4B0 atomic claim gate (if flag enabled)
         if is_enabled("FEATURE_ATOMIC_CLAIMS"):
@@ -1258,7 +1366,11 @@ class ActionGateway:
                     contract.tenant_id,
                     contract.actor_user_id,
                 )
-                self._ledger.update_status(contract.contract_id, "failed")
+                if not _persist_execution_status("failed"):
+                    return (
+                        "❌ לא ניתן לאמת את זהות המבקש, וגם סטטוס הכשל לא נשמר "
+                        "באופן עמיד. אין לנסות שוב עד לבדיקת המערכת."
+                    )
                 return "❌ שגיאת זהות: לא ניתן לאמת את הזהות של המבקש. פנה לתמיכה טכנית."
 
             # Deterministic idempotency key: hash(contract_id + approved_by)
@@ -1279,8 +1391,25 @@ class ActionGateway:
                 )
 
                 if not success:
-                    # Fail-closed: claim unavailable, DB down, conflict, or disabled
-                    self._ledger.update_status(contract.contract_id, "failed")
+                    # A structured dispatcher outcome means claim ownership was
+                    # acquired and the provider result is known. A None result
+                    # means dispatch never started (DB unavailable/conflict);
+                    # leave the durable contract approved rather than letting a
+                    # losing caller overwrite the claim owner's terminal state.
+                    from core.dispatcher_outcome import DispatcherOutcome
+                    if isinstance(result, DispatcherOutcome):
+                        terminal_status = result.result
+                        if not _persist_execution_status(terminal_status):
+                            return (
+                                "⚠️ תוצאת הביצוע סווגה כ־"
+                                f"{terminal_status}, אך לא נשמרה באופן עמיד. "
+                                "אין לנסות שוב עד לבדיקת המערכת."
+                            )
+                        if result.is_outcome_unknown():
+                            return (
+                                result.user_message
+                                or "⚠️ תוצאת הפעולה אינה ידועה. אין לנסות שוב אוטומטית."
+                            )
                     logger.error(
                         "[ActionGateway] atomic claim failed: contract=%s error=%s",
                         contract.contract_id, error,
@@ -1303,7 +1432,11 @@ class ActionGateway:
                     raw = result
             except Exception as exc:
                 # No exception fallback to direct dispatch when flag is ON — fail closed
-                self._ledger.update_status(contract.contract_id, "failed")
+                if not _persist_execution_status("failed"):
+                    return (
+                        "❌ המבצע האטומי נכשל, וגם סטטוס הכשל לא נשמר באופן עמיד. "
+                        "אין לנסות שוב עד לבדיקת המערכת."
+                    )
                 logger.error(
                     "[ActionGateway] atomic executor raised: contract=%s error=%s",
                     contract.contract_id, exc,
@@ -1319,19 +1452,48 @@ class ActionGateway:
                     contract_id=contract.contract_id,
                 )
             except Exception as exc:
-                self._ledger.update_status(contract.contract_id, "failed")
+                if not _persist_execution_status("failed"):
+                    return (
+                        "❌ הביצוע נכשל, וגם סטטוס הכשל לא נשמר באופן עמיד. "
+                        "אין לנסות שוב עד לבדיקת המערכת."
+                    )
                 logger.error(
                     "[ActionGateway] execution failed: contract=%s error=%s",
                     contract.contract_id, exc,
                 )
                 return f"❌ ביצוע נכשל: {exc}"
 
+        # A legacy/direct executor may already expose the same structured
+        # outcome contract used by the atomic path. Preserve ambiguity rather
+        # than forcing it through evidence parsing as a generic failure.
+        from core.dispatcher_outcome import DispatcherOutcome
+        if isinstance(raw, DispatcherOutcome):
+            if raw.is_failed() or raw.is_outcome_unknown():
+                if not _persist_execution_status(raw.result):
+                    return (
+                        "⚠️ תוצאת הביצוע סווגה כ־"
+                        f"{raw.result}, אך לא נשמרה באופן עמיד. "
+                        "אין לנסות שוב עד לבדיקת המערכת."
+                    )
+                if raw.is_outcome_unknown():
+                    return raw.user_message or "⚠️ תוצאת הפעולה אינה ידועה. אין לנסות שוב אוטומטית."
+                return f"❌ ביצוע נכשל: {raw.error or raw.user_message}"
+            raw = raw.raw_response or {
+                "ok": True,
+                "external_id": raw.external_id,
+                "user_message": raw.user_message,
+            }
+
         # §3 / §6: verify before reporting success — no real evidence → failure
         try:
             from core.anti_hallucination import verify_execution
             check = verify_execution(contract.tool_name, raw)
             if check.status == "failed":
-                self._ledger.update_status(contract.contract_id, "failed")
+                if not _persist_execution_status("failed"):
+                    return (
+                        "❌ לא נמצאה הוכחת ביצוע, וגם סטטוס הכשל לא נשמר באופן עמיד. "
+                        "אין לנסות שוב עד לבדיקת המערכת."
+                    )
                 logger.error(
                     "[ActionGateway] evidence missing: contract=%s tool=%s reason=%s",
                     contract.contract_id, contract.tool_name, check.reason,
@@ -1341,7 +1503,16 @@ class ActionGateway:
             logger.warning("[ActionGateway] verify_execution import failed: %s", verify_exc)
 
         ext_id = raw.get("external_id", "") if isinstance(raw, dict) else ""
-        self._ledger.update_status(contract.contract_id, "executed")
+        # Preserve Phase 4B-1A flag-OFF behavior exactly: RAM-only ledgers keep
+        # the legacy success value. Durable ledgers emit canonical completed.
+        success_status = (
+            "completed" if getattr(self._ledger, "_repository", None) else "executed"
+        )
+        if not _persist_execution_status(success_status):
+            return (
+                f"⚠️ הספק החזיר הצלחה מפורשת, אך סטטוס {success_status} לא נשמר "
+                "באופן עמיד. אין לנסות שוב עד לבדיקת המערכת."
+            )
         # persist record_id as observation so query_execution_status can retrieve it
         if ext_id:
             contract.agent_observations.append({
@@ -1378,7 +1549,7 @@ class ActionGateway:
     # הפונקציה היחידה בכל הקוד שמותר לה לייצר טקסט סטטוס-פעולה.
 
     def compose_status_reply(self, fact: ActionFact) -> GatewayReply:
-        if fact.outcome == "executed":
+        if fact.outcome in ("completed", "executed"):
             # BUG-PENDING-APPROVAL-B follow-up: reuse the frozen contract's
             # business description (e.g. "יצירת ליד: יוסי כהן, ...") instead
             # of the bare tool_name — the payload never changes between
@@ -1415,7 +1586,7 @@ class ActionGateway:
         candidates = [
             c for c in self._ledger._store.values()
             if c.canonical_user_id == canonical_user_id
-            and c.status in ("executed", "failed")
+            and c.status in ("completed", "executed", "failed", "outcome_unknown")
         ]
         if not candidates:
             # BUG-SB-03: check for pending contracts before returning None

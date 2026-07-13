@@ -400,8 +400,9 @@ def _write_one_lead(
 
     # Gateway dedup check
     contract_id = None
+    contract_ledger = None
     try:
-        from core.action_gateway import action_gateway as _gw, _ledger_singleton
+        from core.action_gateway import action_gateway as _gw
         from airtable_schema import LeadFields
         _tool = "airtable_update" if action == "update" else "airtable_add"
         _domain_key = _lead_domain_key(domain)
@@ -447,6 +448,7 @@ def _write_one_lead(
             logger.info("[LCH] gateway blocked for %r: %s", name, gw_result.reason)
             return False, "", "duplicate"
         contract_id = gw_result.contract_id
+        contract_ledger = _gw._ledger
     except Exception as exc:
         logger.warning("[LCH] gateway propose failed: %s", exc)
 
@@ -492,18 +494,30 @@ def _write_one_lead(
     except Exception as exc:
         logger.error("[LCH] write failed for %r: %s", name, exc)
 
-    # Update ledger
+    # Update the durable lifecycle before reporting a normal success. The
+    # provider may already have written the lead, so a persistence failure is
+    # surfaced as an explicit unknown audit state and must not invite retry.
+    lifecycle_persistence_failed = False
     if contract_id:
         try:
-            from core.action_gateway import _ledger_singleton
-            _ledger_singleton.update_status(contract_id, "executed" if ok else "failed")
+            success_status = "completed" if contract_ledger._repository else "executed"
+            if not contract_ledger.update_status(contract_id, success_status if ok else "failed"):
+                raise RuntimeError("contract missing during lifecycle update")
             if ok and record_id:
-                c = _ledger_singleton.find_by_id(contract_id)
+                c = contract_ledger.find_by_id(contract_id)
                 if c:
                     import time as _t
                     c.agent_observations.append({"kind": "execution_fact", "record_id": record_id, "created_at": _t.time()})
         except Exception as exc:
-            logger.warning("[LCH] ledger update failed: %s", exc)
+            lifecycle_persistence_failed = True
+            logger.critical(
+                "[LCH] provider result could not be persisted to ActionContracts: "
+                "contract=%s provider_ok=%s error=%s",
+                contract_id, ok, exc,
+            )
+
+    if lifecycle_persistence_failed:
+        return False, record_id, "lifecycle_persistence_failed"
 
     # Post-write enrichment (non-blocking, flag-gated)
     if ok and record_id:
@@ -1066,6 +1080,11 @@ def _handle_single_candidate(
             logger.warning("[LCH] session persist failed: %s", exc)
 
     if not ok:
+        if action == "lifecycle_persistence_failed":
+            return (
+                "⚠️ ייתכן שהליד נשמר, אך סטטוס ActionContract לא נשמר "
+                "באופן עמיד. אין לנסות שוב עד לבדיקת המערכת."
+            )
         return f"❌ לא הצלחתי לשמור את {name}. נסה שוב."
 
     ctx_str = _context_suffix(ctx, domain)
@@ -1144,6 +1163,11 @@ def _handle_mixed_batch(
                 verb = "עדכנתי" if action == "update" else "שמרתי"
                 results.append(f"✅ {verb} את {c['name']} ({c['phone']}){ctx_str}")
                 written += 1
+            elif action == "lifecycle_persistence_failed":
+                results.append(
+                    f"⚠️ {c['name']} ({c['phone']}) — ייתכן שנשמר; "
+                    "הביקורת לא נשמרה. אין לנסות שוב."
+                )
             else:
                 results.append(f"❌ {c['name']} ({c['phone']}) — לא נשמר")
         else:
@@ -1279,6 +1303,13 @@ def _handle_batch(
             results.append({"name": name, "phone": phone, "ok": True,
                             "record_id": record_id, "action": action,
                             "line": f"✅ {verb} את {name} ({phone}){ctx} | {record_id}"})
+        elif action == "lifecycle_persistence_failed":
+            results.append({"name": name, "phone": phone, "ok": False,
+                            "record_id": record_id, "action": action,
+                            "line": (
+                                f"⚠️ {name} ({phone}) — ייתכן שנשמר; "
+                                "הביקורת לא נשמרה. אין לנסות שוב."
+                            )})
         else:
             results.append({"name": name, "phone": phone, "ok": False,
                             "record_id": "", "action": "failed",

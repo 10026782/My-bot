@@ -1024,7 +1024,7 @@ def _handle_approval_callback_impl(cq) -> None:
                         )
                         _contract_sb02 = _gw_sb02._ledger.find_by_fingerprint(_fp_sb02)
                         if _contract_sb02 is not None:
-                            if _contract_sb02.status == "executed":
+                            if _contract_sb02.status in ("completed", "executed"):
                                 bot.answer_callback_query(cq.id, "✅ פעולה זו כבר בוצעה")
                                 try:
                                     bot.edit_message_reply_markup(
@@ -1130,7 +1130,9 @@ def _handle_approval_callback_impl(cq) -> None:
                     approver_role=approver_identity.role,
                 )
                 _contract_after = _gw_exec._ledger.find_by_id(_gw_contract_id)
-                exec_failed = not (_contract_after and _contract_after.status == "executed")
+                exec_failed = not (
+                    _contract_after and _contract_after.status in ("completed", "executed")
+                )
                 fail_text   = result
             else:
                 # BUG-091: this replays the payload stored at _queue_approval()
@@ -1174,8 +1176,9 @@ def _handle_approval_callback_impl(cq) -> None:
             # Stage A: also clear cross-channel duplicate pending
             if canonical_user_id:
                 bus.mark_equivalent_pending_completed(canonical_user_id, tool_name, tool_inputs)
-            # Stage B sync: mark the Gateway contract executed so a subsequent
+            # Stage B sync: mark the Gateway contract completed so a subsequent
             # free-text "מאשר" on another channel doesn't re-dispatch the same tool.
+            _gw_lifecycle_failure = None
             try:
                 from feature_flags import is_enabled as _flag_gw
                 if _flag_gw("FEATURE_ACTION_GATEWAY"):
@@ -1187,17 +1190,52 @@ def _handle_approval_callback_impl(cq) -> None:
                     )
                     _existing = _gw_sync._ledger.find_by_fingerprint(_fp)
                     if _existing and _existing.status == "pending":
-                        _gw_sync._ledger.update_status(
-                            _existing.contract_id, "executed",
+                        _success_status = (
+                            "completed" if _gw_sync._ledger._repository else "executed"
+                        )
+                        if not _gw_sync._ledger.update_status(
+                            _existing.contract_id, _success_status,
                             approved_by=canonical_user_id,
                             approved_at=__import__("time").time(),
-                        )
+                        ):
+                            raise RuntimeError("contract missing during lifecycle update")
                         logger.info(
-                            "[ActionGateway] Stage-A callback synced contract=%s tool=%s → executed",
-                            _existing.contract_id, tool_name,
+                            "[ActionGateway] Stage-A callback synced contract=%s tool=%s → %s",
+                            _existing.contract_id, tool_name, _success_status,
                         )
             except Exception as _gw_sync_exc:
-                logger.warning("[ActionGateway] Stage-A sync failed (non-blocking): %s", _gw_sync_exc)
+                _gw_lifecycle_failure = str(_gw_sync_exc)
+                logger.critical(
+                    "[ActionGateway] Stage-A provider succeeded but durable lifecycle sync failed: "
+                    "action=%s tool=%s error=%s",
+                    action_id, tool_name, _gw_sync_exc,
+                )
+
+            if _gw_lifecycle_failure:
+                _lifecycle_message = (
+                    "⚠️ הספק החזיר הצלחה, אך סטטוס ActionContract לא נשמר "
+                    "באופן עמיד. אין לנסות שוב עד לבדיקת המערכת."
+                )
+                if origin_channel == "telegram":
+                    try:
+                        bot.send_message(origin_chat_id, _lifecycle_message)
+                    except Exception as _notify_exc:
+                        logger.error("[Approval] lifecycle failure notify failed: %s", _notify_exc)
+                else:
+                    _write_execution_receipt(
+                        canonical_user_id, origin_channel, origin_chat_id,
+                        action_id, tool_name, _lifecycle_message,
+                    )
+                try:
+                    bot.edit_message_text(
+                        f"⚠️ *הביצוע הושלם אך הביקורת לא נשמרה*\n{item['label']}",
+                        cq.message.chat.id, cq.message.message_id,
+                        parse_mode="Markdown",
+                    )
+                except Exception:
+                    pass
+                bot.answer_callback_query(cq.id, "⚠️ סטטוס הביקורת לא נשמר")
+                return
 
             # BUG-SB-04: legacy approval path — wrap tool result via ActionFact + compose_status_reply
             # when FEATURE_ACTION_GATEWAY is enabled, so the reply text is gated by Single Speaker.
