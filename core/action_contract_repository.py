@@ -31,12 +31,9 @@
 # blocked, and ActionGateway.approve()/_execute_contract() must keep using
 # their original in-memory update_status() path, not anything in this file.
 #
-# Never re-plan/re-derive a replacement contract as "recovery" — get()
-# returns None on any failure to find/verify the exact durable record
-# (not-found, store unreachable, expired). Callers must fail closed on None,
-# never fabricate a new contract to fill the gap; that would defeat the
-# entire frozen-contract security model this work protects (approved_payload
-# must always equal executed_payload).
+# Never re-plan/re-derive a replacement contract as "recovery". Clean
+# not-found/expiry returns None, while an unavailable lookup raises
+# ActionContractLookupError so callers cannot confuse an outage with absence.
 
 from __future__ import annotations
 
@@ -60,6 +57,10 @@ if TYPE_CHECKING:
     from core.action_gateway import ActionContract
 
 logger = logging.getLogger(__name__)
+
+
+class ActionContractLookupError(RuntimeError):
+    """The durable store could not determine whether a contract exists."""
 
 # How long a "pending" contract may sit before it's considered too stale to
 # safely act on. Longer than event_bus's 30-minute Telegram-button TTL, since
@@ -163,19 +164,20 @@ class ActionContractRepository:
             Tables.ACTION_CONTRACTS, fields,
             match_field=ActionContractsFields.CONTRACT_ID,
             source="action_contract_repository",
+            fail_closed_on_lookup_error=True,
         )
 
     def get(self, contract_id: str) -> "ActionContract | None":
-        """Returns None for "not found", "store unreachable", AND "found but
-        expired while still pending" — all three are fail-closed cases from
-        the caller's perspective. Never distinguishes them via a truthy
-        fallback; ExecutionLedger.find_by_id() must not treat None as
-        license to fabricate a replacement contract."""
+        """Return a verified contract, or None for clean not-found/expiry.
+
+        Raises ActionContractLookupError when Airtable cannot answer. This
+        distinction prevents callers from inventing absence during an outage.
+        """
         try:
             record = at_get_by_field(Tables.ACTION_CONTRACTS, ActionContractsFields.CONTRACT_ID, contract_id)
         except AirtableLookupError as exc:
             logger.warning("[ActionContractRepository] get(%s) store unreachable: %s", contract_id, exc)
-            return None
+            raise ActionContractLookupError(f"contract-id lookup failed: {contract_id}") from exc
         if not record:
             return None
 
@@ -203,7 +205,9 @@ class ActionContractRepository:
                 "[ActionContractRepository] find_pending_by_canonical_user(%s) store unreachable: %s",
                 canonical_user_id, exc,
             )
-            return []
+            raise ActionContractLookupError(
+                f"pending-contract lookup failed: {canonical_user_id}"
+            ) from exc
         contracts = [_record_to_contract(r) for r in records]
         return [c for c in contracts if not _is_expired(c)]
 
@@ -226,7 +230,9 @@ class ActionContractRepository:
                 "store unreachable: %s",
                 fingerprint, exc,
             )
-            return None
+            raise ActionContractLookupError(
+                f"fingerprint lookup failed: {fingerprint}"
+            ) from exc
         if not record:
             return None
         contract = _record_to_contract(record)

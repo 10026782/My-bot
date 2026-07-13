@@ -798,7 +798,7 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
                 requires_approval=True,
                 identity=identity,
             )
-            if _gw_result.failure_code == "persistence_failed":
+            if _gw_result.failure_code in {"persistence_failed", "persistence_lookup_failed"}:
                 return _gw_result.user_message or f"❌ {_gw_result.reason}"
         except Exception as _gw_exc:
             logger.debug("[ActionGateway] shadow propose failed (non-blocking): %s", _gw_exc)

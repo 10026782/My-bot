@@ -493,6 +493,7 @@ def at_upsert(
     fields: dict,
     match_field: str,
     source: str = "unknown",
+    fail_closed_on_lookup_error: bool = False,
 ) -> bool:
     """
     Create-or-update by match_field's value (e.g. contract_id). Intended for
@@ -509,6 +510,12 @@ def at_upsert(
     — a genuinely atomic coordination primitive outside Airtable is tracked
     separately as Phase 4B0.1. This function remains a plain best-effort
     upsert. Returns True on success.
+
+    ``fail_closed_on_lookup_error`` is intentionally opt-in for compatibility
+    with legacy callers. When enabled, an unavailable/error lookup returns
+    False without attempting a create. Durable ActionContract callers enable
+    it explicitly so an Airtable read failure can never become a duplicate
+    row.
     """
     match_value = fields.get(match_field)
     if not match_value:
@@ -522,6 +529,8 @@ def at_upsert(
         existing = at_get_by_field(table, match_field, str(match_value))
     except AirtableLookupError as e:
         logger.warning("[gateway:%s] at_upsert %s lookup error: %s", source, table, e)
+        if fail_closed_on_lookup_error:
+            return False
         existing = None
 
     if existing:

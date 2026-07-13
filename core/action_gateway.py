@@ -21,6 +21,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Callable
 
+from core.action_contract_repository import ActionContractLookupError
 from tool_registry import needs_approval
 
 logger = logging.getLogger(__name__)
@@ -405,9 +406,8 @@ class ExecutionLedger:
         if not self._repository:
             return None
         # Cache miss — fall back to the durable repository (restart / second
-        # instance recovery). get() already fails closed (returns None) on
-        # not-found, store-unreachable, or expiry; never fabricate a contract
-        # here if it returns None.
+        # instance recovery). Repository lookup failures intentionally
+        # propagate; only clean not-found/expiry returns None.
         hydrated = self._repository.get(contract_id)
         if hydrated is None:
             return None
@@ -630,7 +630,25 @@ class ActionGateway:
             tenant_id, canonical_user_id, tool_name, normalized
         )
 
-        existing = self._ledger.find_by_fingerprint(fingerprint)
+        # The durable lookup happens before generating any contract identity.
+        # An unavailable store is not evidence that the action is absent.
+        try:
+            existing = self._ledger.find_by_fingerprint(fingerprint)
+        except ActionContractLookupError as exc:
+            logger.error(
+                "[ActionGateway] durable fingerprint lookup failed: tool=%s "
+                "fingerprint=%.12s user=%s error=%s",
+                tool_name, fingerprint, canonical_user_id, exc,
+            )
+            return GatewayResult(
+                ok=False,
+                reason="לא ניתן לבדוק אם בקשת הפעולה כבר קיימת.",
+                user_message=(
+                    "❌ לא ניתן לבדוק כרגע את מאגר בקשות האישור. "
+                    "הפעולה לא הועברה לאישור ולא תבוצע."
+                ),
+                failure_code="persistence_lookup_failed",
+            )
         if existing:
             if existing.status == "pending":
                 return GatewayResult(
@@ -765,7 +783,7 @@ class ActionGateway:
                 origin_channel=origin_channel, origin_chat_id=origin_chat_id,
                 requires_approval=True, identity=identity, trusted_source=trusted_source,
             )
-            if result.failure_code == "persistence_failed":
+            if result.failure_code in {"persistence_failed", "persistence_lookup_failed"}:
                 return result.user_message or f"❌ {result.reason}"
         except Exception as exc:
             logger.debug("[ActionGateway] shadow propose_gated failed (non-blocking): %s", exc)
@@ -1514,6 +1532,7 @@ def _build_airtable_writer():
                     "approved_at":                c.approved_at or 0.0,
                 },
                 match_field="contract_id",
+                fail_closed_on_lookup_error=True,
             )
 
         return _writer

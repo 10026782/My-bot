@@ -28,8 +28,8 @@ Coverage in this file (persistence/hydration/identity/fail-closed only):
      actor_external_id/etc. exactly, so re-execution dispatches with the
      correct original identity, not a re-resolved one.
   3. Expiry — a pending contract older than the TTL is not recoverable.
-  4. Store outage — repository unreachable and not cached -> fails closed
-     (None), never fabricates a replacement contract.
+  4. Store outage — repository unreachable and not cached raises an explicit
+     lookup error, never fabricates a not-found result.
   5. Live singleton must still not be wired with a repository, and
      ActionGateway.approve()/_execute_contract() must still use the plain,
      non-atomic update_status() path — activating any durable claim
@@ -49,6 +49,7 @@ os.environ.setdefault("AIRTABLE_BASE_ID", "appPR0C4B0Test")
 from airtable_schema import ActionContractsFields, Tables  # noqa: E402
 from core.action_contract_repository import (  # noqa: E402
     CONTRACT_PENDING_TTL_SECONDS,
+    ActionContractLookupError,
     ActionContractRepository,
 )
 from core.action_gateway import ActionContract, ExecutionLedger  # noqa: E402
@@ -236,14 +237,22 @@ chk("Test3: fresh (non-expired) pending contract IS recoverable", result is not 
 print("\n── Test 4: store outage fails closed ──────────────────────────")
 
 repo4 = ActionContractRepository()
+lookup_error = None
 with patch("tools.airtable_gateway.httpx.get", side_effect=RuntimeError("network down")):
-    result = repo4.get("c-outage-1")
-chk("Test4: get() returns None on store outage (not an exception, not a fabricated contract)", result is None)
+    try:
+        repo4.get("c-outage-1")
+    except ActionContractLookupError as exc:
+        lookup_error = exc
+chk("Test4: get() distinguishes store outage from clean not-found", lookup_error is not None)
 
 ledger4 = ExecutionLedger(repository=repo4)
+ledger_lookup_error = None
 with patch("tools.airtable_gateway.httpx.get", side_effect=RuntimeError("network down")):
-    found = ledger4.find_by_id("c-outage-2")
-chk("Test4: ExecutionLedger.find_by_id() also fails closed on store outage", found is None)
+    try:
+        ledger4.find_by_id("c-outage-2")
+    except ActionContractLookupError as exc:
+        ledger_lookup_error = exc
+chk("Test4: ExecutionLedger.find_by_id() propagates lookup failure", ledger_lookup_error is not None)
 
 
 # ══════════════════════════════════════════════════════════════════

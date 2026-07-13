@@ -104,6 +104,10 @@ chk("writer() sends status field", written_fields.get(ActionContractsFields.STAT
 chk("writer() serializes normalized_payload as JSON string",
     written_fields.get(ActionContractsFields.NORMALIZED_PAYLOAD) == '{"chat_id": "x"}')
 chk("writer() match_field is contract_id", _upsert.call_args.kwargs.get("match_field") == ActionContractsFields.CONTRACT_ID)
+chk(
+    "legacy ActionContracts writer opts into fail-closed lookup",
+    _upsert.call_args.kwargs.get("fail_closed_on_lookup_error") is True,
+)
 
 
 # ══════════════════════════════════════════════════════════════════
