@@ -95,6 +95,16 @@ class _FakeContract:
     def __init__(self, contract_id: str, status: str = "pending"):
         self.contract_id = contract_id
         self.status = status
+        # Phase 4B-2 follow-up: _is_canonical_tma_contract() reads these
+        # directly — defaults match this file's tma_write happy path and
+        # _owner()'s identity, which has no tenant_id attribute at all
+        # (getattr(..., "tenant_id", None) is None), so tenant_id here is
+        # None too rather than a real tenant string.
+        self.approval_policy = "approval"
+        self.tool_name = "tma_write"
+        self.trusted_source = "tma_api"
+        self.origin_channel = "tma"
+        self.tenant_id = None
 
 
 class _FakeRepository:

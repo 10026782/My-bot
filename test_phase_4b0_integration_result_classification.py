@@ -161,7 +161,7 @@ def test_permission_denial_claim_failed():
             mock_update_claim.side_effect = lambda cid, status, error=None: claim_status_updates.append({"contract_id": cid, "status": status, "error": error})
 
             # Dispatcher returns structured DispatcherOutcome: permission denied
-            def executor_permission_denied(tool_name, tool_inputs, contract_id=None, identity=None):
+            def executor_permission_denied(tool_name, tool_inputs, contract_id=None, identity=None, claim_execution_id=None):
                 return DispatcherOutcome(
                     result="failed",
                     user_message="❌ גישה נחסמה: אין הרשאה לבצע פעולת כתיבה.",
@@ -247,7 +247,7 @@ def test_explicit_success_claim_completed():
             mock_update_claim.side_effect = lambda cid, status, error=None: claim_status_updates.append({"contract_id": cid, "status": status, "error": error})
 
             # Dispatcher returns structured DispatcherOutcome: explicit success with evidence
-            def executor_success(tool_name, tool_inputs, contract_id=None, identity=None):
+            def executor_success(tool_name, tool_inputs, contract_id=None, identity=None, claim_execution_id=None):
                 return DispatcherOutcome(
                     result="completed",
                     user_message="✅ בוצע: הוסף ליד יוסי כהן",
@@ -333,7 +333,7 @@ def test_ambiguous_outcome_claim_unknown():
             mock_update_claim.side_effect = lambda cid, status, error=None: claim_status_updates.append({"contract_id": cid, "status": status, "error": error})
 
             # Dispatcher returns structured DispatcherOutcome: ambiguous outcome (timeout after request)
-            def executor_ambiguous(tool_name, tool_inputs, contract_id=None, identity=None):
+            def executor_ambiguous(tool_name, tool_inputs, contract_id=None, identity=None, claim_execution_id=None):
                 return DispatcherOutcome(
                     result="outcome_unknown",
                     user_message="⏱️ תהליך עדכון מתמשך — עלול לקחת זמן. אנא המתן.",

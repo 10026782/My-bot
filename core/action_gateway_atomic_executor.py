@@ -149,7 +149,17 @@ def execute_with_atomic_claim(
     execution_error = None
     execution_result = None
     try:
-        raw_outcome = executor_fn(tool_name, tool_inputs, contract_id=contract_id, identity=identity)
+        # Phase 4B-2 follow-up: the acquired claim's execution_id is the only
+        # genuine proof that THIS call is the one that won claim ownership —
+        # threaded through by keyword, never placed in tool_inputs (frozen,
+        # attacker-influenceable payload). Tools that gate on execution_context
+        # (e.g. tma_write) verify this id against a live PostgreSQL row via
+        # core.atomic_claim_repository.get_claim(), so a caller-constructed
+        # dict alone can never satisfy the check.
+        raw_outcome = executor_fn(
+            tool_name, tool_inputs, contract_id=contract_id, identity=identity,
+            claim_execution_id=claim.execution_id,
+        )
 
         # Phase 4B0: consume an explicit structured outcome, never infer truth from
         # user_message text. The real production executor (_make_dispatch_executor)

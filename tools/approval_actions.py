@@ -236,6 +236,43 @@ def _identity_ref(identity) -> str:
     return str(getattr(identity, "user_id", "") or getattr(identity, "display_name", "") or "unknown")
 
 
+def _verify_active_execution_claim(contract_id: str, claim_execution_id: str, approved_by: str) -> bool:
+    """Genuine proof of approval — never a caller-constructible dict.
+
+    A plain execution_context dict (contract_id + approved_by) is forgeable
+    by any in-process caller of dispatch_tool(); it proves nothing by itself.
+    The only real proof that this specific call is the one ActionGateway
+    authorized is a live row in PostgreSQL's action_execution_claims table —
+    the sole execution-ownership primitive (core/atomic_claim_repository.py)
+    — acquired via claim_contract_execution() and still in STATUS_EXECUTING.
+
+    This queries that row directly via get_claim(contract_id) and checks:
+      - a claim exists at all (None means no claim was ever acquired — e.g.
+        FEATURE_ATOMIC_CLAIMS is OFF, so the legacy dispatch path never
+        created one; tma_write fails closed rather than trusting a dict)
+      - claim.execution_id matches the execution_id threaded in by
+        execute_with_atomic_claim() for THIS acquisition (a forged id
+        supplied directly to dispatch_tool cannot match a real row)
+      - claim.status is still STATUS_EXECUTING (not completed/failed/
+        outcome_unknown — an id copied from a finished claim doesn't count)
+      - claim.claimant_id matches the approved_by the caller is asserting,
+        so the dict's approved_by cannot be swapped for a different identity
+        than the one that actually acquired the claim
+    """
+    if not contract_id or not claim_execution_id:
+        return False
+    from core.atomic_claim_repository import get_claim, STATUS_EXECUTING
+
+    claim = get_claim(contract_id)
+    if claim is None:
+        return False
+    return (
+        claim.execution_id == claim_execution_id
+        and claim.status == STATUS_EXECUTING
+        and claim.claimant_id == approved_by
+    )
+
+
 def tma_write(
     op: str,
     table: str,
@@ -260,13 +297,17 @@ def tma_write(
 
     Phase 4B-2 follow-up — direct-dispatch bypass closed: this function
     performs ZERO provider writes unless trusted_source == "tma_api" AND
-    execution_context carries both a contract_id and an approved_by,
-    supplied exclusively by core/action_gateway.py's
-    _make_dispatch_executor() closure after ActionGateway.approve() has
-    durably transitioned a real ActionContract. A bare
-    dispatch_tool("tma_write", ...) call — from the Agent tool_use loop, a
-    future bug, or any caller that skips the propose/approve ceremony — has
-    no way to supply this context and is refused before touching Airtable.
+    execution_context's contract_id + claim_execution_id resolve to a real,
+    currently-EXECUTING claim in PostgreSQL (see
+    _verify_active_execution_claim()) owned by the asserted approved_by.
+    That claim can only exist because execute_with_atomic_claim() won a real
+    claim_contract_execution() race and threaded its execution_id through
+    core/action_gateway.py's _make_dispatch_executor() closure — a bare
+    dispatch_tool("tma_write", ...) call with a hand-built execution_context
+    dict (from the Agent tool_use loop, a future bug, or any caller that
+    skips the propose/approve ceremony) has no way to produce a matching
+    PostgreSQL row and is refused before touching Airtable, even if the
+    dict's shape looks legitimate.
 
     identity here is the frozen REQUESTER's identity (bound at propose
     time, reconstructed by _make_dispatch_executor() from the ActionContract
@@ -284,12 +325,23 @@ def tma_write(
     from tools.airtable_gateway import airtable_create, airtable_patch
 
     ctx = execution_context or {}
-    if trusted_source != "tma_api" or not ctx.get("contract_id") or not ctx.get("approved_by"):
+    _contract_id = ctx.get("contract_id") or ""
+    _approved_by = ctx.get("approved_by") or ""
+    _claim_execution_id = ctx.get("claim_execution_id") or ""
+    if (
+        trusted_source != "tma_api"
+        or not _contract_id
+        or not _approved_by
+        or not _claim_execution_id
+        or not _verify_active_execution_claim(_contract_id, _claim_execution_id, _approved_by)
+    ):
         logger.error(
             "[approval_actions] tma_write: refused — requires trusted_source='tma_api' "
-            "and an execution_context with contract_id+approved_by (direct-dispatch "
-            "bypass guard). trusted_source=%r has_contract_id=%s has_approved_by=%s",
-            trusted_source, bool(ctx.get("contract_id")), bool(ctx.get("approved_by")),
+            "and an execution_context whose contract_id+claim_execution_id verify "
+            "against a live, EXECUTING PostgreSQL claim (direct-dispatch bypass "
+            "guard; a caller-constructed dict is never sufficient proof). "
+            "trusted_source=%r has_contract_id=%s has_approved_by=%s has_claim_execution_id=%s",
+            trusted_source, bool(_contract_id), bool(_approved_by), bool(_claim_execution_id),
         )
         return _tool_result(
             ok=False, tool="tma_write",
@@ -305,7 +357,8 @@ def tma_write(
 
     fields = dict(fields or {})
     # Never derived from `identity` (the frozen requester) — see docstring.
-    approved_by = ctx["approved_by"]
+    # Already verified above against the live PostgreSQL claim's claimant_id.
+    approved_by = _approved_by
 
     if op == "post":
         rec = airtable_create(table, fields, source="tma_write")

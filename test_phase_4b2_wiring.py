@@ -122,7 +122,9 @@ def _identity(user_id="owner_1", role="owner", tenant_id="boss_hq") -> SimpleNam
 
 class _FakeContract:
     def __init__(self, contract_id: str, status: str = "pending", requester_identity=None,
-                 approval_policy: str = "approval"):
+                 approval_policy: str = "approval", tool_name: str = "tma_write",
+                 trusted_source: str = "tma_api", origin_channel: str = "tma",
+                 tenant_id: str = "boss_hq"):
         self.contract_id = contract_id
         self.status = status
         self.requester_identity = requester_identity
@@ -130,6 +132,16 @@ class _FakeContract:
         # matches real propose_action() behavior for tma_write, which is
         # never classified as self_confirm (see classify_approval_policy()).
         self.approval_policy = approval_policy
+        # Phase 4B-2 follow-up: _is_canonical_tma_contract() checks these
+        # four fields directly (AttributeError, not just a False result, if
+        # missing) — defaults here match the happy path every existing test
+        # in this file exercises: a real tma_write contract proposed through
+        # tma_api.py's TMA flow, approved by an identity in tenant "boss_hq"
+        # (the default tenant_id in this file's _identity() helper).
+        self.tool_name = tool_name
+        self.trusted_source = trusted_source
+        self.origin_channel = origin_channel
+        self.tenant_id = tenant_id
 
 
 class _GatewayResult:
@@ -545,13 +557,21 @@ def _tracking_single(approval_id, identity):
 
 recs8 = [_projection_rec("recB1"), _projection_rec("recB2")]
 
-with patch("tma_api._at_list", return_value=recs8):
-    with patch("tma_api._claim_and_execute_approval", side_effect=_tracking_single):
-        with patch("tma_api._audit"):
-            with patch("tma_api._notify_owner"):
-                with _app.test_request_context("/api/approvals/bulk", method="POST"):
-                    result = _bulk_raw(identity=_identity())
-                    resp = result[0] if isinstance(result, tuple) else result
+# bulk_approve() now applies the same _is_canonical_tma_contract() pre-filter
+# as the single-item helpers before ever calling them — needs a real gateway
+# with matching pending contracts so the two rows survive that filter.
+gw8 = _FakeGateway()
+gw8.contracts["c_recB1"] = _FakeContract("c_recB1")
+gw8.contracts["c_recB2"] = _FakeContract("c_recB2")
+
+with patch("core.action_gateway.action_gateway", gw8):
+    with patch("tma_api._at_list", return_value=recs8):
+        with patch("tma_api._claim_and_execute_approval", side_effect=_tracking_single):
+            with patch("tma_api._audit"):
+                with patch("tma_api._notify_owner"):
+                    with _app.test_request_context("/api/approvals/bulk", method="POST"):
+                        result = _bulk_raw(identity=_identity())
+                        resp = result[0] if isinstance(result, tuple) else result
 
 chk("Test8: bulk_approve called the single-item helper once per eligible row",
     sorted(call_log) == ["recB1", "recB2"])
@@ -786,8 +806,9 @@ linked_row_15 = _projection_rec("recLinked15", "c15")
 
 with patch("core.action_gateway.action_gateway", gw15):
     with patch("feature_flags.is_enabled", return_value=True):
-        legacy_fmt = _tma._fmt_approval(legacy_row_15)
-        linked_fmt = _tma._fmt_approval(linked_row_15)
+        linked_identity_15 = _identity()
+        legacy_fmt = _tma._fmt_approval(legacy_row_15, linked_identity_15)
+        linked_fmt = _tma._fmt_approval(linked_row_15, linked_identity_15)
 
 chk("Test15: legacy row exposes action_contract_id (empty)",
     legacy_fmt["action_contract_id"] == "")
@@ -909,6 +930,80 @@ chk("Test16d: bulk response carries projection_sync_pending count",
     resp16d.json.get("projection_sync_pending") == 1)
 chk("Test16d: bulk response carries the specific projection_sync_pending_ids list",
     resp16d.json.get("projection_sync_pending_ids") == ["rec16d1"])
+
+
+# ══════════════════════════════════════════════════════════════════
+# 17. A pending contract that is NOT a canonical TMA write-through-approval
+#     contract (e.g. gmail_send_draft proposed via the general agent flow)
+#     must be actionable=false in the read model, and both
+#     _claim_and_execute_approval / _claim_and_reject_approval must refuse
+#     it WITHOUT ever calling action_gateway.approve()/reject() — even
+#     though the contract itself is perfectly valid pending state, it did
+#     not enter pending through this TMA projection flow and this screen
+#     has no authority over it.
+# ══════════════════════════════════════════════════════════════════
+print("\n── Test 17: non-TMA pending contract is never actionable ──────")
+
+gw17 = _FakeGateway()
+gw17.contracts["c17"] = _FakeContract(
+    "c17", tool_name="gmail_send_draft", trusted_source="agent", origin_channel="telegram",
+)
+
+row17 = _projection_rec("rec17", "c17")
+
+with patch("core.action_gateway.action_gateway", gw17):
+    with patch("feature_flags.is_enabled", return_value=True):
+        fmt17 = _tma._fmt_approval(row17, _identity())
+chk("Test17: read model reports actionable=False for a non-TMA contract", fmt17["actionable"] is False)
+
+with _gateway_patches(gw17):
+    with patch("tma_api._at_get_record", return_value=row17):
+        approve17 = _tma._claim_and_execute_approval("rec17", _identity())
+        reject17 = _tma._claim_and_reject_approval("rec17", _identity())
+
+chk("Test17: approve refused (409)", approve17.get("status_code") == 409 and approve17.get("ok") is False)
+chk("Test17: reject refused (409)", reject17.get("status_code") == 409 and reject17.get("ok") is False)
+chk("Test17: action_gateway.approve() never called for a non-TMA contract", gw17.approve_calls == [])
+chk("Test17: action_gateway.reject() never called for a non-TMA contract", gw17.reject_calls == [])
+chk("Test17: contract itself remains untouched (still pending)", gw17.contracts["c17"].status == "pending")
+
+
+# ══════════════════════════════════════════════════════════════════
+# 18. A genuinely legacy row — pre-Phase-4B-2 — never had either new field
+#     populated at all. Prove classification does not depend on the field
+#     being explicitly set to a falsy default; a row missing both keys
+#     entirely from Airtable's fields dict must still be legacy_read_only.
+# ══════════════════════════════════════════════════════════════════
+print("\n── Test 18: legacy row missing both new fields entirely ───────")
+
+truly_legacy_row = {
+    "id": "recTrulyLegacy",
+    "fields": {
+        ApprovalsFields.STATUS:       ApprovalStatus.PENDING,
+        ApprovalsFields.ACTION:       "add lead (pre-4B-2)",
+        ApprovalsFields.RISK_LEVEL:   "low",
+        ApprovalsFields.CONTEXT_ID:   "ctx_old",
+        ApprovalsFields.CONTEXT_DATA: '{"type": "airtable_add"}',
+        # ACTION_CONTRACT_ID and LEGACY_READ_ONLY deliberately absent —
+        # this row predates the Phase 4B-2 schema fields entirely.
+    },
+}
+
+chk("Test18: neither new field is present in the raw row",
+    ApprovalsFields.ACTION_CONTRACT_ID not in truly_legacy_row["fields"]
+    and ApprovalsFields.LEGACY_READ_ONLY not in truly_legacy_row["fields"])
+
+fmt18 = _tma._fmt_approval(truly_legacy_row, _identity())
+chk("Test18: _derive_legacy_read_only classifies it legacy despite the stored flag being absent (not False)",
+    fmt18["legacy_read_only"] is True)
+chk("Test18: action_contract_id surfaces as empty string, not KeyError/None",
+    fmt18["action_contract_id"] == "")
+chk("Test18: actionable=False", fmt18["actionable"] is False)
+
+with patch("tma_api._at_get_record", return_value=truly_legacy_row):
+    approve18 = _tma._claim_and_execute_approval("recTrulyLegacy", _identity())
+chk("Test18: approve refused (409) purely from the load-projection precondition, no contract lookup needed",
+    approve18.get("status_code") == 409 and approve18.get("ok") is False)
 
 
 # ══════════════════════════════════════════════════════════════════

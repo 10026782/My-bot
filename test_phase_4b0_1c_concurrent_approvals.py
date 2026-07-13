@@ -126,7 +126,7 @@ def test_concurrent_approvals_mock():
     executor_call_count = 0
     executor_call_lock = __import__("threading").Lock()
 
-    def counting_executor(tool_name, tool_inputs, contract_id=None, identity=None):
+    def counting_executor(tool_name, tool_inputs, contract_id=None, identity=None, claim_execution_id=None):
         from core.dispatcher_outcome import DispatcherOutcome
         nonlocal executor_call_count
         with executor_call_lock:

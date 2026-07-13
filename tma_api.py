@@ -1962,31 +1962,74 @@ _RISK_HIGH = {"גבוה", "high"}
 _RISK_LOW  = {"נמוך", "low"}
 
 
-def _projection_actionable(contract_id: str, legacy_read_only: bool) -> bool:
+def _derive_legacy_read_only(fields: dict) -> bool:
+    """A projection row is legacy/read-only if EITHER the stored flag says
+    so, OR it has no action_contract_id at all. Never trust the stored flag
+    alone: a genuinely pre-Phase-4B-2 row never had either field populated,
+    so a missing contract_id must independently force legacy_read_only=True
+    even if the (absent) flag would otherwise default to False."""
+    contract_id = fields.get(ApprovalsFields.ACTION_CONTRACT_ID, "")
+    stored_flag = bool(fields.get(ApprovalsFields.LEGACY_READ_ONLY, False))
+    return stored_flag or not contract_id
+
+
+def _is_canonical_tma_contract(contract, identity) -> bool:
+    """
+    Phase 4B-2 follow-up: an Approvals row is only actionable — and only
+    ever eligible for action_gateway.approve()/reject() — if its canonical
+    ActionContract is unambiguously a TMA write-through-approval contract
+    belonging to the acting identity's own tenant. A projection whose
+    action_contract_id happens to point at some other kind of pending
+    contract (gmail_send_draft, calendar_create_event, a lead-capture
+    airtable_add proposed through an entirely different flow, or a
+    different tenant's contract) must never be treated as actionable
+    through this screen, and approve()/reject() must never be called on it
+    from here — even though those contracts are individually legitimate,
+    they did not enter their pending state through this TMA projection
+    flow and this screen has no authority over them.
+
+    Every condition is required:
+      - contract.status == "pending"       — the only actionable state
+      - contract.tool_name == "tma_write"  — the TMA adapter, nothing else
+      - contract.trusted_source == "tma_api"
+      - contract.origin_channel == "tma"
+      - contract.approval_policy == "approval" — never self_confirm
+      - contract.tenant_id == identity.tenant_id — no cross-tenant action
+    """
+    if contract is None:
+        return False
+    return (
+        contract.status == "pending"
+        and contract.tool_name == "tma_write"
+        and getattr(contract, "trusted_source", "") == "tma_api"
+        and contract.origin_channel == "tma"
+        and getattr(contract, "approval_policy", "") == "approval"
+        and contract.tenant_id == getattr(identity, "tenant_id", None)
+    )
+
+
+def _projection_actionable(contract_id: str, legacy_read_only: bool, identity) -> bool:
     """Whether this Approvals row is actionable, derived strictly from the
-    canonical ActionContract's status + approval_policy — never from
+    canonical ActionContract via _is_canonical_tma_contract() — never from
     Approvals.STATUS. Legacy/no-contract rows are always False. Any lookup
-    failure or unexpected canonical status also degrades to False (fail
-    closed for a display flag: better to under- than over-claim
-    actionability) rather than raising out of a list-rendering path."""
+    failure also degrades to False (fail closed for a display flag: better
+    to under- than over-claim actionability) rather than raising out of a
+    list-rendering path."""
     if not contract_id or legacy_read_only:
         return False
     try:
         from core.action_gateway import action_gateway as _gw  # noqa: PLC0415
-        from core.approvals_projection import is_actionable  # noqa: PLC0415
         contract = _gw.find_contract(contract_id)
-        if not contract:
-            return False
-        return is_actionable(contract.status, getattr(contract, "approval_policy", ""))
+        return _is_canonical_tma_contract(contract, identity)
     except Exception as exc:
         logger.warning("_projection_actionable: lookup failed for contract=%s: %s", contract_id, exc)
         return False
 
 
-def _fmt_approval(rec: dict) -> dict:
+def _fmt_approval(rec: dict, identity) -> dict:
     f = rec.get("fields", {})
     contract_id = f.get(ApprovalsFields.ACTION_CONTRACT_ID, "")
-    legacy_read_only = bool(f.get(ApprovalsFields.LEGACY_READ_ONLY, False))
+    legacy_read_only = _derive_legacy_read_only(f)
     return {
         "id":           rec["id"],
         "action":       f.get(ApprovalsFields.ACTION, ""),
@@ -1999,7 +2042,7 @@ def _fmt_approval(rec: dict) -> dict:
         "action_contract_id":         contract_id,
         "legacy_read_only":           legacy_read_only,
         "projected_lifecycle_status": f.get(ApprovalsFields.PROJECTED_LIFECYCLE_STATUS, ""),
-        "actionable":                 _projection_actionable(contract_id, legacy_read_only),
+        "actionable":                 _projection_actionable(contract_id, legacy_read_only, identity),
     }
 
 
@@ -2157,14 +2200,14 @@ def _owner_blockers_and_actions(capability_map: dict) -> tuple[list[str], list[s
     ]
 
 
-def _owner_approvals_snapshot() -> tuple[dict, list[str]]:
+def _owner_approvals_snapshot(identity) -> tuple[dict, list[str]]:
     warnings: list[str] = []
     pending: list[dict] = []
     executed: list[dict] = []
 
     try:
         pending_formula = f"{{{ApprovalsFields.STATUS}}}='\u05de\u05de\u05ea\u05d9\u05df'"
-        pending = [_fmt_approval(r) for r in _at_list("Approvals", pending_formula, max_records=50)]
+        pending = [_fmt_approval(r, identity) for r in _at_list("Approvals", pending_formula, max_records=50)]
     except Exception as e:
         logger.warning(f"[OwnerControlCenter] pending approvals read failed: {e}")
         warnings.append(f"pending approvals read failed: {type(e).__name__}")
@@ -2172,7 +2215,7 @@ def _owner_approvals_snapshot() -> tuple[dict, list[str]]:
     try:
         recs = _at_list("Approvals", "", max_records=25)
         for rec in recs:
-            item = _fmt_approval(rec)
+            item = _fmt_approval(rec, identity)
             if item.get("status") != "\u05de\u05de\u05ea\u05d9\u05df":
                 executed.append(item)
         executed.sort(key=lambda x: x.get("requested_at", ""), reverse=True)
@@ -2263,7 +2306,7 @@ def owner_control_center(identity):
     capability_map, map_warnings = _load_capability_map()
     warnings.extend(map_warnings)
 
-    approvals, approval_warnings = _owner_approvals_snapshot()
+    approvals, approval_warnings = _owner_approvals_snapshot(identity)
     warnings.extend(approval_warnings)
 
     receipts, receipt_warnings = _owner_recent_receipts()
@@ -2295,7 +2338,7 @@ def get_approvals(identity):
         return jsonify({"error": "forbidden"}), 403
 
     recs = _at_list("Approvals", "{סטטוס}='ממתין'", max_records=50)
-    approvals = [_fmt_approval(r) for r in recs]
+    approvals = [_fmt_approval(r, identity) for r in recs]
     return jsonify({"count": len(approvals), "approvals": approvals})
 
 
@@ -2320,14 +2363,24 @@ def bulk_approve(identity):
     skipped  = []
     projection_sync_pending_ids: list[str] = []
 
+    from core.action_gateway import action_gateway as _gw  # noqa: PLC0415
+
     for rec in recs:
         f = rec.get("fields", {})
         risk = (f.get(ApprovalsFields.RISK_LEVEL, "") or "").strip()
         contract_id = f.get(ApprovalsFields.ACTION_CONTRACT_ID, "")
-        legacy_read_only = bool(f.get(ApprovalsFields.LEGACY_READ_ONLY, False))
+        legacy_read_only = _derive_legacy_read_only(f)
         # Hard rules: NEVER bulk-approve high risk, NEVER bulk-approve a
         # legacy/no-contract row (not actionable — Phase 4B-2 audit §8).
         if risk.lower() not in _RISK_LOW or not contract_id or legacy_read_only:
+            skipped.append(rec["id"])
+            continue
+        # Phase 4B-2 follow-up: same shared scope check used by the
+        # single-item approve/reject helpers and the read model — a row
+        # whose contract_id points at a pending contract that is not a
+        # canonical TMA write-through-approval contract for this identity's
+        # own tenant is skipped, never bulk-actioned.
+        if not _is_canonical_tma_contract(_gw.find_contract(contract_id), identity):
             skipped.append(rec["id"])
             continue
         outcome = _claim_and_execute_approval(rec["id"], identity)
@@ -2434,7 +2487,7 @@ def _load_actionable_projection(approval_id: str) -> tuple[dict | None, dict]:
     action_label = f.get(ApprovalsFields.ACTION, approval_id)
     ctx_id = f.get(ApprovalsFields.CONTEXT_ID, "")
     contract_id = f.get(ApprovalsFields.ACTION_CONTRACT_ID, "")
-    legacy_read_only = bool(f.get(ApprovalsFields.LEGACY_READ_ONLY, False))
+    legacy_read_only = _derive_legacy_read_only(f)
     if not contract_id or legacy_read_only:
         return None, {
             "ok": False, "status_code": 409,
@@ -2504,10 +2557,18 @@ def _claim_and_execute_approval(approval_id: str, identity) -> dict:
                 "error": "canonical ActionContract not found — orphaned projection row",
                 "action_label": action_label, "ctx_id": ctx_id,
             }
-        if contract.status != "pending":
+        if not _is_canonical_tma_contract(contract, identity):
+            logger.warning(
+                "_claim_and_execute_approval: refusing — contract=%s is not a canonical "
+                "pending TMA contract for this identity's tenant (status=%s tool_name=%s "
+                "trusted_source=%s origin_channel=%s approval_policy=%s tenant_id=%s)",
+                contract_id, contract.status, contract.tool_name,
+                getattr(contract, "trusted_source", ""), contract.origin_channel,
+                getattr(contract, "approval_policy", ""), contract.tenant_id,
+            )
             return {
                 "ok": False, "status_code": 409,
-                "error": f"approval already {contract.status}",
+                "error": f"approval is not an actionable TMA contract (status={contract.status})",
                 "action_label": action_label, "ctx_id": ctx_id,
             }
 
@@ -2598,10 +2659,18 @@ def _claim_and_reject_approval(approval_id: str, identity, note: str = "") -> di
                 "error": "canonical ActionContract not found — orphaned projection row",
                 "action_label": action_label, "ctx_id": ctx_id,
             }
-        if contract.status != "pending":
+        if not _is_canonical_tma_contract(contract, identity):
+            logger.warning(
+                "_claim_and_reject_approval: refusing — contract=%s is not a canonical "
+                "pending TMA contract for this identity's tenant (status=%s tool_name=%s "
+                "trusted_source=%s origin_channel=%s approval_policy=%s tenant_id=%s)",
+                contract_id, contract.status, contract.tool_name,
+                getattr(contract, "trusted_source", ""), contract.origin_channel,
+                getattr(contract, "approval_policy", ""), contract.tenant_id,
+            )
             return {
                 "ok": False, "status_code": 409,
-                "error": f"approval already {contract.status}",
+                "error": f"approval is not an actionable TMA contract (status={contract.status})",
                 "action_label": action_label, "ctx_id": ctx_id,
             }
 
