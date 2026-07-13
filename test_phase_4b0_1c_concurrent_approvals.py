@@ -67,7 +67,7 @@ def test_atomic_executor_flag_off():
     from core.action_gateway_atomic_executor import execute_with_atomic_claim
 
     # Mock executor that just returns success
-    def mock_executor(tool_name, tool_inputs, identity):
+    def mock_executor(tool_name, tool_inputs, contract_id=None, identity=None):
         return {"ok": True, "external_id": "test-id"}
 
     success, result, error = execute_with_atomic_claim(
@@ -126,7 +126,7 @@ def test_concurrent_approvals_mock():
     executor_call_count = 0
     executor_call_lock = __import__("threading").Lock()
 
-    def counting_executor(tool_name, tool_inputs, identity):
+    def counting_executor(tool_name, tool_inputs, contract_id=None, identity=None):
         from core.dispatcher_outcome import DispatcherOutcome
         nonlocal executor_call_count
         with executor_call_lock:
