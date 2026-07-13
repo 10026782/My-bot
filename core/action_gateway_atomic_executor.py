@@ -34,7 +34,12 @@ def execute_with_atomic_claim(
         tool_name: Name of tool to execute
         tool_inputs: Tool input payload
         identity: Identity object for dispatch
-        executor_fn: Callable that calls dispatch_tool()
+        executor_fn: Callable that calls dispatch_tool() — MUST be invoked by keyword
+            (contract_id=..., identity=...), never positionally. The real production
+            executor (core.action_gateway._make_dispatch_executor) has the signature
+            (tool_name, tool_inputs, contract_id, identity=None) — a positional 3rd
+            argument silently binds to contract_id, not identity (BUG: unhashable
+            Identity used as a dict key inside ledger.find_by_id()).
         idempotency_key: Optional deterministic key for retry-safety; if None, generated as UUID
 
     Returns:
@@ -52,7 +57,7 @@ def execute_with_atomic_claim(
     if not is_enabled("FEATURE_ATOMIC_CLAIMS"):
         logger.debug(f"FEATURE_ATOMIC_CLAIMS disabled — executing without claim: {contract_id}")
         try:
-            result = executor_fn(tool_name, tool_inputs, identity)
+            result = executor_fn(tool_name, tool_inputs, contract_id=contract_id, identity=identity)
             return (True, result, None)
         except Exception as e:
             return (False, None, str(e))
@@ -71,7 +76,7 @@ def execute_with_atomic_claim(
         # Flag OFF but we checked above — shouldn't happen
         logger.warning(f"Unexpected: flag check mismatch for {contract_id}")
         try:
-            result_obj = executor_fn(tool_name, tool_inputs, identity)
+            result_obj = executor_fn(tool_name, tool_inputs, contract_id=contract_id, identity=identity)
             return (True, result_obj, None)
         except Exception as e:
             return (False, None, str(e))
@@ -144,20 +149,44 @@ def execute_with_atomic_claim(
     execution_error = None
     execution_result = None
     try:
-        outcome = executor_fn(tool_name, tool_inputs, identity)
+        raw_outcome = executor_fn(tool_name, tool_inputs, contract_id=contract_id, identity=identity)
 
-        # Phase 4B0: Outcome must be DispatcherOutcome with explicit result classification
-        # Never infer truth from user_message text (it's for display only)
+        # Phase 4B0: consume an explicit structured outcome, never infer truth from
+        # user_message text. The real production executor (_make_dispatch_executor)
+        # returns dispatch_tool()'s raw C53-A result (dict/string), not a
+        # DispatcherOutcome — classify it via the same evidence-based verifier
+        # _execute_contract's legacy path already trusts (verify_execution), so a
+        # real successful write actually reaches "completed" instead of always
+        # failing closed on a type mismatch. A caller that already returns a
+        # DispatcherOutcome directly (e.g. a future ambiguous-outcome-aware
+        # dispatcher, or tests) is used as-is.
         from core.dispatcher_outcome import DispatcherOutcome
 
-        if not isinstance(outcome, DispatcherOutcome):
-            logger.error(
-                f"Dispatcher outcome type error: contract={contract_id}, execution_id={claim.execution_id}, "
-                f"tool={tool_name}: expected DispatcherOutcome, got {type(outcome).__name__}"
+        if isinstance(raw_outcome, DispatcherOutcome):
+            outcome = raw_outcome
+        else:
+            from core.anti_hallucination import verify_execution
+            check = verify_execution(tool_name, raw_outcome)
+            _raw_dict = raw_outcome if isinstance(raw_outcome, dict) else None
+            _user_message = (
+                raw_outcome.get("user_message", "") if isinstance(raw_outcome, dict)
+                else (raw_outcome if isinstance(raw_outcome, str) else "")
             )
-            # Type mismatch is a contract violation — fail closed
-            update_claim_status(contract_id, "failed", error="Dispatcher outcome type mismatch")
-            return (False, None, "Dispatcher outcome type mismatch")
+            _ext_id = raw_outcome.get("external_id", "") if isinstance(raw_outcome, dict) else ""
+            if check.status == "ok":
+                outcome = DispatcherOutcome(
+                    result="completed",
+                    user_message=_user_message,
+                    external_id=_ext_id,
+                    raw_response=_raw_dict,
+                )
+            else:
+                outcome = DispatcherOutcome(
+                    result="failed",
+                    user_message=_user_message,
+                    error=check.reason,
+                    raw_response=_raw_dict,
+                )
 
         logger.debug(
             f"Execution returned outcome: contract={contract_id}, execution_id={claim.execution_id}, "

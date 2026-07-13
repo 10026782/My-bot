@@ -1478,35 +1478,51 @@ def _make_dispatch_executor(ledger: ExecutionLedger):
     יכול להיות identity.memory_key ("boss_hq:eliyahu") ולא external_id ערוץ
     אמיתי, מה שגורם ל-role ליפול חזרה ל-readonly. fallback ל-resolve_identity
     נשאר רק לחוזים ישנים/callers שלא העבירו identity ל-propose_action.
+
+    P0 (unhashable Identity): the atomic-claims wrapper (execute_with_atomic_claim)
+    already reconstructs and fail-closed-validates an Identity from the frozen
+    contract before calling this executor — it must be threaded straight through
+    to dispatch_tool's identity= keyword, not re-derived here a second time.
+    `identity` is therefore an explicit keyword param: when the caller supplies
+    one (atomic path), it is used as-is; when omitted (legacy flag-OFF path,
+    which never had an identity to give), behavior is unchanged from before —
+    identity is derived from contract_id via the ledger lookup below.
     """
-    def _executor(tool_name: str, tool_inputs: dict, contract_id: str):
+    def _executor(tool_name: str, tool_inputs: dict, contract_id: str, identity=None):
         from tools.dispatcher import dispatch_tool
         from identity import Identity, resolve_identity
 
-        identity = None
         contract = ledger.find_by_id(contract_id)
-        if contract:
-            if contract.actor_role and contract.actor_external_id:
-                identity = Identity(
-                    user_id         = contract.actor_user_id or contract.canonical_user_id,
-                    role            = contract.actor_role,
-                    display_name    = contract.actor_display_name,
-                    tenant_id       = contract.tenant_id,
-                    domain_id       = contract.actor_domain_id or "general",
-                    allowed_domains = list(contract.actor_allowed_domains or []),
-                    channel         = contract.origin_channel,
-                    external_id     = contract.actor_external_id,
-                )
-                logger.info(
-                    "[ActionGateway] approved by=%s/%s@%s external_id=%s | dispatch role=%s",
-                    contract.tenant_id, identity.user_id, contract.actor_role,
-                    contract.actor_external_id, identity.role,
-                )
-            else:
-                try:
-                    identity = resolve_identity(contract.origin_channel, contract.origin_chat_id)
-                except Exception as exc:
-                    logger.warning("[ActionGateway] identity resolve failed: %s", exc)
+
+        if identity is None:
+            if contract:
+                if contract.actor_role and contract.actor_external_id:
+                    identity = Identity(
+                        user_id         = contract.actor_user_id or contract.canonical_user_id,
+                        role            = contract.actor_role,
+                        display_name    = contract.actor_display_name,
+                        tenant_id       = contract.tenant_id,
+                        domain_id       = contract.actor_domain_id or "general",
+                        allowed_domains = list(contract.actor_allowed_domains or []),
+                        channel         = contract.origin_channel,
+                        external_id     = contract.actor_external_id,
+                    )
+                    logger.info(
+                        "[ActionGateway] approved by=%s/%s@%s external_id=%s | dispatch role=%s",
+                        contract.tenant_id, identity.user_id, contract.actor_role,
+                        contract.actor_external_id, identity.role,
+                    )
+                else:
+                    try:
+                        identity = resolve_identity(contract.origin_channel, contract.origin_chat_id)
+                    except Exception as exc:
+                        logger.warning("[ActionGateway] identity resolve failed: %s", exc)
+        else:
+            logger.info(
+                "[ActionGateway] using pre-resolved identity from atomic wrapper: "
+                "contract=%s tenant=%s user=%s role=%s external_id=%s",
+                contract_id, identity.tenant_id, identity.user_id, identity.role, identity.external_id,
+            )
 
         # BUG-091: trusted_source comes from the contract itself (set once,
         # server-side, at propose_action() time) — never re-derived from
