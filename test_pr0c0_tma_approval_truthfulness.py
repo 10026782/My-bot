@@ -25,8 +25,11 @@ what this file covers:
   6. _claim_and_execute_approval: an orphaned projection (action_contract_id
      set but no matching canonical contract) is refused, not silently
      treated as success.
-  7. Consistency: act_on_approval's approve/reject responses surface
-     bus_synced truthfully (True only on a real event_bus sync).
+  7. Phase 4B-2 follow-up: act_on_approval's approve/reject responses never
+     call event_bus at all through the ActionContract-backed flow —
+     bus_synced is always False, and _try_bus_action is never invoked, even
+     if it would have returned True (Approvals.CONTEXT_ID is projection
+     data, not a live event_bus action_id).
 """
 
 from __future__ import annotations
@@ -311,9 +314,11 @@ chk("Test6: action_gateway.approve() never called for an orphaned contract", gw6
 
 
 # ══════════════════════════════════════════════════════════════════
-# 7. Consistency: act_on_approval surfaces bus_synced truthfully
+# 7. Phase 4B-2 follow-up: event_bus is never touched by the
+#    ActionContract-backed reject flow — bus_synced is always False, even
+#    when _try_bus_action is mocked to return True.
 # ══════════════════════════════════════════════════════════════════
-print("\n── Test 7: bus_synced surfaced truthfully on reject ──────────")
+print("\n── Test 7: event_bus never invoked; bus_synced always False ──")
 
 _act_raw = _tma.act_on_approval.__wrapped__
 
@@ -325,24 +330,18 @@ def _reject_rec() -> dict:
     return _rec("recE", contract_id="c_recE")
 
 
+# _try_bus_action mocked to return True — if the reject path still called
+# it, bus_synced would come back True. It must not.
+bus_mock = MagicMock(return_value=True)
 with _app.test_request_context("/api/approvals/recE", method="POST", json={"action": "reject"}):
     with _patched(gw7, at_get_record=lambda t, rid: _reject_rec(), at_patch=lambda t, rid, f: True,
-                  extra=[patch("tma_api._try_bus_action", return_value=True)]):
+                  extra=[patch("tma_api._try_bus_action", bus_mock)]):
         result = _act_raw("recE", identity=_owner())
         resp, code = result if isinstance(result, tuple) else (result, 200)
 
-chk("Test7: bus_synced True is surfaced in response", resp.json.get("bus_synced") is True)
-
-gw7b = _FakeGateway()
-gw7b.contracts["c_recE"] = _FakeContract("c_recE")
-
-with _app.test_request_context("/api/approvals/recE", method="POST", json={"action": "reject"}):
-    with _patched(gw7b, at_get_record=lambda t, rid: _reject_rec(), at_patch=lambda t, rid, f: True,
-                  extra=[patch("tma_api._try_bus_action", return_value=False)]):
-        result = _act_raw("recE", identity=_owner())
-        resp, code = result if isinstance(result, tuple) else (result, 200)
-
-chk("Test7: bus_synced False is surfaced (not hidden as True)", resp.json.get("bus_synced") is False)
+chk("Test7: bus_synced is False even though _try_bus_action would have returned True",
+    resp.json.get("bus_synced") is False)
+chk("Test7: _try_bus_action was never called by the reject flow", bus_mock.call_count == 0)
 
 
 # ══════════════════════════════════════════════════════════════════

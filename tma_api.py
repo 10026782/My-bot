@@ -528,12 +528,15 @@ def _queue_tma_write_approval(action: str, payload: dict, identity, label: str) 
     if table not in _TMA_WRITE_ALLOWED_TABLES:
         return _reject(f"table '{table}' is not permitted for TMA writes", code=400)
 
+    # Server-owned fields (op/table/action/requested_by) are applied AFTER
+    # the payload spread, so nothing in payload — even a future call site
+    # that starts forwarding request-body keys — can ever override them.
     tool_inputs = {
+        **{k: v for k, v in payload.items() if k not in ("op", "table", "action", "requested_by")},
         "op": op,
         "table": table,
         "action": action,
         "requested_by": _identity_ref(identity),
-        **{k: v for k, v in payload.items() if k not in ("op", "table")},
     }
 
     result = _gw.propose_action(
@@ -590,7 +593,11 @@ def _queue_tma_write_approval(action: str, payload: dict, identity, label: str) 
             contract_id, action,
         )
         return "", {
-            "status": "approved_pending_projection",
+            # The contract is pending, not approved — "approved_pending_projection"
+            # overstated its own state. Renamed to reflect reality: an
+            # otherwise-valid pending contract whose display projection is
+            # currently missing.
+            "status": "pending_approval_projection_missing",
             "contract_id": contract_id,
             "message": (
                 "הבקשה נקלטה לאישור, אך תצוגת ה-Approvals לא עודכנה כעת. "
@@ -607,30 +614,82 @@ def _queue_tma_write_approval(action: str, payload: dict, identity, label: str) 
     }, 202
 
 
+class _ProjectionLookupFailed(Exception):
+    """Raised when the Approvals projection existence check itself could not
+    be completed — distinct from "confirmed not found". Must never be
+    treated as "safe to POST a new row": a POST after an unknown lookup
+    result could create a duplicate projection for a contract that already
+    has one."""
+
+
 def _find_approval_projection_by_contract(contract_id: str) -> dict | None:
     """Idempotent lookup — is there already an Approvals projection row for
     this ActionContract? contract_id is always a server-generated uuid4
     (core.action_gateway.ActionGateway.propose_action), never user input, so
-    no formula-injection risk from embedding it directly."""
-    recs = _at_list(
-        "Approvals",
-        f"{{{ApprovalsFields.ACTION_CONTRACT_ID}}}='{contract_id}'",
-        max_records=2,
-    )
+    no formula-injection risk from embedding it directly.
+
+    strict=True: a lookup/network failure raises _ProjectionLookupFailed
+    instead of silently returning [] — callers must never fall through to
+    POST on an unknown lookup result."""
+    try:
+        recs = _at_list(
+            "Approvals",
+            f"{{{ApprovalsFields.ACTION_CONTRACT_ID}}}='{contract_id}'",
+            max_records=2,
+            strict=True,
+        )
+    except AirtableError as exc:
+        raise _ProjectionLookupFailed(str(exc)) from exc
     return recs[0] if recs else None
+
+
+def _repair_approval_projection(existing: dict, contract_id: str) -> dict | None:
+    """An existing projection row was found for this contract at propose
+    time — repair its canonical projection fields rather than trusting it
+    untouched, since it may predate a field's existence or have been left
+    inconsistent by a prior partial failure. Only touches the 3 Phase-4B-2
+    projection fields plus CONTEXT_DATA (always re-blanked) — never the
+    pre-existing display fields (ACTION/REQUESTED_BY/etc.), which were
+    already correct at original creation.
+
+    Only valid at propose time, when the contract is known to still be
+    "pending" — do not call this once a contract has progressed further."""
+    from core.approvals_projection import project_lifecycle_status  # noqa: PLC0415
+    patch_fields = {
+        ApprovalsFields.ACTION_CONTRACT_ID: contract_id,
+        ApprovalsFields.LEGACY_READ_ONLY: False,
+        ApprovalsFields.PROJECTED_LIFECYCLE_STATUS: project_lifecycle_status("pending"),
+        ApprovalsFields.CONTEXT_DATA: "",
+    }
+    ok = _at_patch("Approvals", existing["id"], patch_fields)
+    if not ok:
+        return None
+    merged = dict(existing)
+    merged["fields"] = {**existing.get("fields", {}), **patch_fields}
+    return merged
 
 
 def _ensure_approval_projection(
     contract_id: str, action: str, label: str, risk: str, identity,
 ) -> dict | None:
     """Best-effort, idempotent create of the Approvals display projection for
-    an already-persisted ActionContract. Only ever called after the
-    canonical contract is durably saved; its own failure never rolls back or
-    duplicates that contract (Phase 4B-2 audit §6). CONTEXT_DATA is always
-    left empty — the canonical payload lives in ActionContracts only."""
-    existing = _find_approval_projection_by_contract(contract_id)
+    an already-persisted, still-pending ActionContract. Only ever called
+    after the canonical contract is durably saved; its own failure never
+    rolls back or duplicates that contract (Phase 4B-2 audit §6). CONTEXT_DATA
+    is always left empty — the canonical payload lives in ActionContracts
+    only. A lookup failure is treated exactly like a write failure (returns
+    None — "projection visibility failure") rather than risking a duplicate
+    row by falling through to POST on an unknown result."""
+    try:
+        existing = _find_approval_projection_by_contract(contract_id)
+    except _ProjectionLookupFailed as exc:
+        logger.error(
+            "_ensure_approval_projection: projection lookup failed for contract=%s "
+            "— refusing to POST (would risk a duplicate row): %s", contract_id, exc,
+        )
+        return None
     if existing:
-        return existing
+        return _repair_approval_projection(existing, contract_id)
     from core.approvals_projection import project_lifecycle_status  # noqa: PLC0415
     return _at_post("Approvals", {
         ApprovalsFields.ACTION: label,
@@ -1903,17 +1962,44 @@ _RISK_HIGH = {"גבוה", "high"}
 _RISK_LOW  = {"נמוך", "low"}
 
 
+def _projection_actionable(contract_id: str, legacy_read_only: bool) -> bool:
+    """Whether this Approvals row is actionable, derived strictly from the
+    canonical ActionContract's status + approval_policy — never from
+    Approvals.STATUS. Legacy/no-contract rows are always False. Any lookup
+    failure or unexpected canonical status also degrades to False (fail
+    closed for a display flag: better to under- than over-claim
+    actionability) rather than raising out of a list-rendering path."""
+    if not contract_id or legacy_read_only:
+        return False
+    try:
+        from core.action_gateway import action_gateway as _gw  # noqa: PLC0415
+        from core.approvals_projection import is_actionable  # noqa: PLC0415
+        contract = _gw.find_contract(contract_id)
+        if not contract:
+            return False
+        return is_actionable(contract.status, getattr(contract, "approval_policy", ""))
+    except Exception as exc:
+        logger.warning("_projection_actionable: lookup failed for contract=%s: %s", contract_id, exc)
+        return False
+
+
 def _fmt_approval(rec: dict) -> dict:
     f = rec.get("fields", {})
+    contract_id = f.get(ApprovalsFields.ACTION_CONTRACT_ID, "")
+    legacy_read_only = bool(f.get(ApprovalsFields.LEGACY_READ_ONLY, False))
     return {
         "id":           rec["id"],
-        "action":       f.get("פעולה", ""),
-        "requested_by": f.get("מבוקש על ידי", ""),
-        "requested_at": f.get("בוקש בתאריך", ""),
-        "risk_level":   f.get("רמת סיכון", ""),
-        "context_type": f.get("סוג הקשר", ""),
-        "context_id":   f.get("מזהה הקשר", ""),
-        "status":       f.get("סטטוס", "ממתין"),
+        "action":       f.get(ApprovalsFields.ACTION, ""),
+        "requested_by": f.get(ApprovalsFields.REQUESTED_BY, ""),
+        "requested_at": f.get(ApprovalsFields.REQUESTED_AT, ""),
+        "risk_level":   f.get(ApprovalsFields.RISK_LEVEL, ""),
+        "context_type": f.get(ApprovalsFields.CONTEXT_TYPE, ""),
+        "context_id":   f.get(ApprovalsFields.CONTEXT_ID, ""),
+        "status":       f.get(ApprovalsFields.STATUS, ApprovalStatus.PENDING),
+        "action_contract_id":         contract_id,
+        "legacy_read_only":           legacy_read_only,
+        "projected_lifecycle_status": f.get(ApprovalsFields.PROJECTED_LIFECYCLE_STATUS, ""),
+        "actionable":                 _projection_actionable(contract_id, legacy_read_only),
     }
 
 
@@ -2282,13 +2368,20 @@ def _get_approval_lock(approval_id: str) -> threading.Lock:
         return _APPROVAL_LOCKS[approval_id]
 
 
-def _sync_approval_projection_status(approval_id: str, contract) -> None:
+def _sync_approval_projection_status(approval_id: str, contract) -> bool:
     """After approve()/reject() re-reads the canonical ActionContract, mirror
     its status into the Approvals projection fields — display-only, never
     authoritative for claim/execution. Never touches CONTEXT_DATA. The
     legacy Hebrew STATUS field is kept in sync purely so the existing
     get_approvals()/bulk_approve() '{סטטוס}=ממתין' list-formula continues to
-    drop resolved rows — it is not read back for any authority decision."""
+    drop resolved rows — it is not read back for any authority decision.
+
+    Returns whether the sync write succeeded. The canonical contract's own
+    lifecycle transition already happened inside approve()/reject() before
+    this is ever called — a False return means the *display* is stale, not
+    that the execution/rejection itself is in doubt. Callers must surface
+    projection_sync_pending=True and leave reconciliation to a later pass
+    rather than treating this as an execution failure."""
     from core.approvals_projection import project_lifecycle_status  # noqa: PLC0415
 
     projected = project_lifecycle_status(contract.status)
@@ -2304,10 +2397,18 @@ def _sync_approval_projection_status(approval_id: str, contract) -> None:
         "rejected":         ApprovalStatus.REJECTED,
         "superseded":       ApprovalStatus.REJECTED,
     }.get(contract.status, ApprovalStatus.PROCESSING)
-    _at_patch("Approvals", approval_id, {
+    ok = _at_patch("Approvals", approval_id, {
         ApprovalsFields.PROJECTED_LIFECYCLE_STATUS: projected,
         ApprovalsFields.STATUS: legacy_status,
     })
+    if not ok:
+        logger.error(
+            "_sync_approval_projection_status: projection sync failed for approval=%s "
+            "contract=%s canonical_status=%s — canonical outcome is authoritative and "
+            "unaffected; this row needs reconciliation to reflect it.",
+            approval_id, contract.contract_id, contract.status,
+        )
+    return ok
 
 
 def _load_actionable_projection(approval_id: str) -> tuple[dict | None, dict]:
@@ -2408,35 +2509,54 @@ def _claim_and_execute_approval(approval_id: str, identity) -> dict:
     # regardless of message text.
 
     updated = _gw.find_contract(contract_id)
+    sync_ok = True
     if updated:
-        _sync_approval_projection_status(approval_id, updated)
+        sync_ok = _sync_approval_projection_status(approval_id, updated)
     final_status = updated.status if updated else "outcome_unknown"
     execution_result = {"message": message, "contract_status": final_status}
 
+    # Phase 4B-2 follow-up: Approvals.CONTEXT_ID is projection/display data,
+    # not a live event_bus action_id — it must never be used to confirm or
+    # reject an event_bus action (a tampered/coincidentally-matching
+    # CONTEXT_ID could otherwise resolve an unrelated pending action).
+    # event_bus sync is not part of the ActionContract-backed flow.
+    bus_synced = False
+
     if final_status in ("completed", "executed"):
-        bus_synced = _try_bus_action(ctx_id, "approve")
-        return {
+        result = {
             "ok": True, "status_code": 200, "new_status": ApprovalStatus.APPROVED,
             "action_label": action_label, "ctx_id": ctx_id, "bus_synced": bus_synced,
             "execution_result": execution_result,
         }
+        if not sync_ok:
+            result["projection_sync_pending"] = True
+        return result
     if final_status == "outcome_unknown":
         # Never collapsed into failed, never auto-retried (Phase 4B-2 audit §5).
-        return {
+        result = {
             "ok": False, "status_code": 202,
             "error": "execution outcome unknown — do not retry automatically",
             "action_label": action_label, "ctx_id": ctx_id, "detail": execution_result,
         }
+        if not sync_ok:
+            result["projection_sync_pending"] = True
+        return result
     if message.startswith("⛔"):
-        return {
+        result = {
             "ok": False, "status_code": 403, "error": message,
             "action_label": action_label, "ctx_id": ctx_id,
         }
-    return {
+        if not sync_ok:
+            result["projection_sync_pending"] = True
+        return result
+    result = {
         "ok": False, "status_code": 500,
         "error": f"approval execution failed: {message}",
         "action_label": action_label, "ctx_id": ctx_id, "detail": execution_result,
     }
+    if not sync_ok:
+        result["projection_sync_pending"] = True
+    return result
 
 
 # Phase 4B-2: reject-path mirror of _claim_and_execute_approval() — same
@@ -2478,10 +2598,12 @@ def _claim_and_reject_approval(approval_id: str, identity, note: str = "") -> di
         message = _gw.reject(contract_id, rejected_by=_identity_ref(identity))
 
     updated = _gw.find_contract(contract_id)
+    sync_ok = True
     if updated:
-        _sync_approval_projection_status(approval_id, updated)
+        sync_ok = _sync_approval_projection_status(approval_id, updated)
         if note:
-            _at_patch("Approvals", approval_id, {ApprovalsFields.REJECTION_NOTE: note})
+            note_ok = _at_patch("Approvals", approval_id, {ApprovalsFields.REJECTION_NOTE: note})
+            sync_ok = sync_ok and note_ok
 
     if not message.startswith("🚫"):
         return {
@@ -2489,11 +2611,16 @@ def _claim_and_reject_approval(approval_id: str, identity, note: str = "") -> di
             "action_label": action_label, "ctx_id": ctx_id,
         }
 
-    bus_synced = _try_bus_action(ctx_id, "reject")
-    return {
+    # Phase 4B-2 follow-up: see _claim_and_execute_approval — CONTEXT_ID is
+    # projection/display data, never a live event_bus action_id.
+    bus_synced = False
+    result = {
         "ok": True, "status_code": 200, "new_status": ApprovalStatus.REJECTED,
         "action_label": action_label, "ctx_id": ctx_id, "bus_synced": bus_synced,
     }
+    if not sync_ok:
+        result["projection_sync_pending"] = True
+    return result
 
 
 @tma_api.route("/api/approvals/<approval_id>", methods=["POST"])

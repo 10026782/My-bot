@@ -99,10 +99,15 @@ def _identity(user_id="owner_1", role="owner", tenant_id="boss_hq") -> SimpleNam
 # ── Fake ActionGateway: propose_action + approve/reject + find_contract ──
 
 class _FakeContract:
-    def __init__(self, contract_id: str, status: str = "pending", requester_identity=None):
+    def __init__(self, contract_id: str, status: str = "pending", requester_identity=None,
+                 approval_policy: str = "approval"):
         self.contract_id = contract_id
         self.status = status
         self.requester_identity = requester_identity
+        # "approval" (APPROVAL_POLICY_APPROVAL) is the default/strict policy —
+        # matches real propose_action() behavior for tma_write, which is
+        # never classified as self_confirm (see classify_approval_policy()).
+        self.approval_policy = approval_policy
 
 
 class _GatewayResult:
@@ -133,6 +138,23 @@ class _FakeGateway:
         self._next_id = 0
         self.propose_fail_persistence = False
         self.outcomes: dict[str, str] = {}   # contract_id -> forced approve() outcome
+        # Models the PostgreSQL atomic claim: the check-then-transition below
+        # is done under this lock, so it is atomic regardless of which
+        # (possibly different) approval_id/process-local lock the caller
+        # used to get here — exactly the property being proven in the
+        # two-different-approval-IDs concurrency test.
+        self._claim_lock = threading.Lock()
+        # Incremented only by the caller that actually wins the
+        # check-then-transition race — i.e. only once per contract, no
+        # matter how many callers reach approve()/reject(). Distinct from
+        # approve_calls/reject_calls, which count invocations (both a
+        # winner and a loser show up there).
+        self.execution_count = 0
+        # Optional threading.Barrier: when set, approve()/reject() wait on
+        # it before acquiring _claim_lock, so a concurrency test can force
+        # every caller to actually reach the race window at the same time
+        # instead of depending on OS thread-scheduling luck.
+        self._entry_barrier: threading.Barrier | None = None
 
     def _new_id(self) -> str:
         self._next_id += 1
@@ -165,13 +187,17 @@ class _FakeGateway:
 
     def approve(self, contract_id, approver, approver_role=""):
         self.approve_calls.append({"contract_id": contract_id, "approver": approver, "approver_role": approver_role})
-        c = self.contracts.get(contract_id)
-        if c is None:
-            return "⚠️ פעולה לא נמצאה."
-        if c.status != "pending":
-            return f"⚠️ הפעולה אינה במצב המתנה (מצב נוכחי: {c.status})."
-        outcome = self.outcomes.get(contract_id, "completed")
-        c.status = outcome
+        if self._entry_barrier is not None:
+            self._entry_barrier.wait()
+        with self._claim_lock:
+            c = self.contracts.get(contract_id)
+            if c is None:
+                return "⚠️ פעולה לא נמצאה."
+            if c.status != "pending":
+                return f"⚠️ הפעולה אינה במצב המתנה (מצב נוכחי: {c.status})."
+            outcome = self.outcomes.get(contract_id, "completed")
+            c.status = outcome
+            self.execution_count += 1
         if outcome in ("completed", "executed"):
             return "✅ בוצע: test"
         if outcome == "outcome_unknown":
@@ -180,12 +206,14 @@ class _FakeGateway:
 
     def reject(self, contract_id, rejected_by=""):
         self.reject_calls.append({"contract_id": contract_id, "rejected_by": rejected_by})
-        c = self.contracts.get(contract_id)
-        if c is None:
-            return "⚠️ פעולה לא נמצאה."
-        if c.status != "pending":
-            return f"⚠️ הפעולה אינה במצב המתנה (מצב נוכחי: {c.status})."
-        c.status = "rejected"
+        with self._claim_lock:
+            c = self.contracts.get(contract_id)
+            if c is None:
+                return "⚠️ פעולה לא נמצאה."
+            if c.status != "pending":
+                return f"⚠️ הפעולה אינה במצב המתנה (מצב נוכחי: {c.status})."
+            c.status = "rejected"
+            self.execution_count += 1
         return "🚫 הפעולה בוטלה."
 
 
@@ -307,8 +335,8 @@ with _gateway_patches(gw3):
 chk("Test3: canonical contract WAS created despite projection failure", len(gw3.contracts) == 1)
 first_contract_id = next(iter(gw3.contracts))
 chk("Test3: contract remains valid (pending), not deleted", gw3.contracts[first_contract_id].status == "pending")
-chk("Test3: response reports approved_pending_projection, not a hard error",
-    body.get("status") == "approved_pending_projection" and body.get("contract_id") == first_contract_id)
+chk("Test3: response reports pending_approval_projection_missing, not a hard error",
+    body.get("status") == "pending_approval_projection_missing" and body.get("contract_id") == first_contract_id)
 chk("Test3: no second/duplicate contract was created", len(gw3.propose_calls) == 1)
 
 # Retry: same payload → propose_action recovers the SAME pending contract;
@@ -536,6 +564,214 @@ chk("Test9 execute: refused when durable persistence unavailable at execution ti
 chk("Test9 execute: approve() never called — no direct-execution fallback",
     gw9b.approve_calls == [])
 chk("Test9 execute: contract remains pending, untouched", gw9b.contracts["c9"].status == "pending")
+
+
+# ══════════════════════════════════════════════════════════════════
+# 10. Two DIFFERENT approval IDs referencing the SAME contract, concurrently
+#     -> exactly one dispatcher/provider execution, via the atomic-claim-
+#     equivalent lock inside approve() — NOT the per-approval_id process-
+#     local lock, which cannot see across two different rows.
+# ══════════════════════════════════════════════════════════════════
+print("\n── Test 10: two different approval IDs, same contract, concurrent ─")
+
+gw10 = _FakeGateway()
+gw10.contracts["c_shared"] = _FakeContract("c_shared")
+# Force both threads to actually reach approve() together before either can
+# acquire the claim lock — proves the race is won/lost inside approve()
+# itself, not just an artifact of whichever thread the OS scheduler happened
+# to run first.
+gw10._entry_barrier = threading.Barrier(2)
+_tma._APPROVAL_LOCKS.pop("recDupC", None)
+_tma._APPROVAL_LOCKS.pop("recDupD", None)
+
+rows10 = {
+    "recDupC": _projection_rec("recDupC", "c_shared"),
+    "recDupD": _projection_rec("recDupD", "c_shared"),
+}
+
+results10: list[dict] = []
+results10_lock = threading.Lock()
+
+
+def _run10(approval_id):
+    with _gateway_patches(gw10):
+        with patch("tma_api._at_get_record", side_effect=lambda t, rid: rows10[rid]):
+            with patch("tma_api._at_patch", return_value=True):
+                outcome = _tma._claim_and_execute_approval(approval_id, _identity())
+    with results10_lock:
+        results10.append(outcome)
+
+
+t_c = threading.Thread(target=_run10, args=("recDupC",))
+t_d = threading.Thread(target=_run10, args=("recDupD",))
+t_c.start(); t_d.start()
+t_c.join(); t_d.join()
+
+chk("Test10: both different-approval_id requests reached action_gateway.approve() "
+    "(their process-local locks do not serialize each other — different approval_ids)",
+    len(gw10.approve_calls) == 2)
+chk("Test10: the contract was dispatched/executed exactly once — proven by the "
+    "atomic-claim-equivalent lock inside approve() itself, independent of which "
+    "(different) process-local lock either caller held",
+    gw10.execution_count == 1)
+chk("Test10: contract ends completed, not double-run", gw10.contracts["c_shared"].status == "completed")
+
+
+# ══════════════════════════════════════════════════════════════════
+# 11. CONTEXT_ID tampering cannot invoke event_bus, even when it collides
+#     with a real pending event_bus action.
+# ══════════════════════════════════════════════════════════════════
+print("\n── Test 11: tampered CONTEXT_ID cannot reach event_bus ────────────")
+
+gw11 = _FakeGateway()
+gw11.contracts["c11"] = _FakeContract("c11")
+
+tampered_row = _projection_rec("rec11", "c11")
+tampered_row["fields"][ApprovalsFields.CONTEXT_ID] = "some_unrelated_live_event_bus_action_id"
+
+bus_mock_11 = MagicMock(return_value=True)  # would "succeed" if ever called
+with _gateway_patches(gw11):
+    with patch("tma_api._at_get_record", return_value=tampered_row):
+        with patch("tma_api._at_patch", return_value=True):
+            with patch("tma_api._try_bus_action", bus_mock_11):
+                outcome11 = _tma._claim_and_execute_approval("rec11", _identity())
+
+chk("Test11: approval still executes correctly", outcome11.get("ok") is True)
+chk("Test11: bus_synced is False regardless of CONTEXT_ID content", outcome11.get("bus_synced") is False)
+chk("Test11: _try_bus_action is never called — CONTEXT_ID is never used to reach event_bus",
+    bus_mock_11.call_count == 0)
+
+
+# ══════════════════════════════════════════════════════════════════
+# 12. Projection lookup failure does not create a duplicate row
+# ══════════════════════════════════════════════════════════════════
+print("\n── Test 12: projection lookup failure never falls through to POST ─")
+
+post_calls_12: list[dict] = []
+
+
+def _tracking_post_12(table, fields):
+    post_calls_12.append(fields)
+    return {"id": "should-not-exist", "fields": fields}
+
+
+with patch("tma_api._at_list", side_effect=_tma.AirtableError("Approvals", 500, "boom")):
+    with patch("tma_api._at_post", side_effect=_tracking_post_12):
+        result12 = _tma._ensure_approval_projection("c12", "tma_create_project", "label", "Low", _identity())
+
+chk("Test12: _ensure_approval_projection returns None on lookup failure (visibility failure)",
+    result12 is None)
+chk("Test12: no POST was ever attempted after a failed lookup — no duplicate risk",
+    post_calls_12 == [])
+
+
+# ══════════════════════════════════════════════════════════════════
+# 13. A malformed existing projection is repaired, not returned untouched
+# ══════════════════════════════════════════════════════════════════
+print("\n── Test 13: malformed existing projection is repaired ─────────────")
+
+malformed_row = {
+    "id": "recMalformed",
+    "fields": {
+        ApprovalsFields.ACTION: "add lead",
+        # action_contract_id present but legacy_read_only was left True by
+        # a prior inconsistent write — must be corrected, not trusted as-is.
+        ApprovalsFields.ACTION_CONTRACT_ID: "c13",
+        ApprovalsFields.LEGACY_READ_ONLY: True,
+        ApprovalsFields.PROJECTED_LIFECYCLE_STATUS: "failed",  # stale/wrong
+    },
+}
+
+patch_calls_13: list[dict] = []
+
+
+def _tracking_patch_13(table, rec_id, fields):
+    patch_calls_13.append({"rec_id": rec_id, **fields})
+    return True
+
+
+with patch("tma_api._at_list", return_value=[malformed_row]):
+    with patch("tma_api._at_patch", side_effect=_tracking_patch_13):
+        result13 = _tma._ensure_approval_projection("c13", "tma_create_project", "label", "Low", _identity())
+
+chk("Test13: repair PATCH was issued against the existing row", len(patch_calls_13) == 1
+    and patch_calls_13[0]["rec_id"] == "recMalformed")
+chk("Test13: legacy_read_only corrected to False",
+    patch_calls_13[0][ApprovalsFields.LEGACY_READ_ONLY] is False)
+chk("Test13: projected_lifecycle_status corrected to pending",
+    patch_calls_13[0][ApprovalsFields.PROJECTED_LIFECYCLE_STATUS] == "pending")
+chk("Test13: CONTEXT_DATA re-blanked during repair", patch_calls_13[0][ApprovalsFields.CONTEXT_DATA] == "")
+chk("Test13: returned record reflects the repaired fields, not the stale ones",
+    result13 is not None
+    and result13["fields"][ApprovalsFields.LEGACY_READ_ONLY] is False
+    and result13["fields"][ApprovalsFields.PROJECTED_LIFECYCLE_STATUS] == "pending")
+
+
+# ══════════════════════════════════════════════════════════════════
+# 14. Projection sync failure surfaces projection_sync_pending, canonical
+#     outcome preserved
+# ══════════════════════════════════════════════════════════════════
+print("\n── Test 14: projection sync failure surfaces projection_sync_pending ─")
+
+gw14 = _FakeGateway()
+gw14.contracts["c14"] = _FakeContract("c14")
+
+with _gateway_patches(gw14):
+    with patch("tma_api._at_get_record", return_value=_projection_rec("rec14", "c14")):
+        with patch("tma_api._at_patch", return_value=False):   # projection sync PATCH fails
+            with patch("tma_api._try_bus_action", return_value=False):
+                outcome14 = _tma._claim_and_execute_approval("rec14", _identity())
+
+chk("Test14: canonical execution still succeeded (approve() itself unaffected)",
+    gw14.contracts["c14"].status == "completed")
+chk("Test14: response still reports ok=True — canonical outcome is authoritative",
+    outcome14.get("ok") is True)
+chk("Test14: projection_sync_pending=True surfaces the display lag",
+    outcome14.get("projection_sync_pending") is True)
+
+
+# ══════════════════════════════════════════════════════════════════
+# 15. GET /api/approvals: legacy rows are actionable=false, action_contract_id
+#     / legacy_read_only / projected_lifecycle_status are all exposed
+# ══════════════════════════════════════════════════════════════════
+print("\n── Test 15: GET /api/approvals exposes projection fields, legacy=non-actionable ─")
+
+gw15 = _FakeGateway()
+gw15.contracts["c15"] = _FakeContract("c15")   # pending, real contract
+
+legacy_row_15 = _projection_rec("recLegacy15", legacy=True)
+linked_row_15 = _projection_rec("recLinked15", "c15")
+
+with patch("core.action_gateway.action_gateway", gw15):
+    with patch("feature_flags.is_enabled", return_value=True):
+        legacy_fmt = _tma._fmt_approval(legacy_row_15)
+        linked_fmt = _tma._fmt_approval(linked_row_15)
+
+chk("Test15: legacy row exposes action_contract_id (empty)",
+    legacy_fmt["action_contract_id"] == "")
+chk("Test15: legacy row exposes legacy_read_only=True", legacy_fmt["legacy_read_only"] is True)
+chk("Test15: legacy row is actionable=False", legacy_fmt["actionable"] is False)
+chk("Test15: contract-linked pending row is actionable=True",
+    linked_fmt["action_contract_id"] == "c15"
+    and linked_fmt["legacy_read_only"] is False
+    and linked_fmt["actionable"] is True)
+chk("Test15: projected_lifecycle_status is exposed in the read model",
+    "projected_lifecycle_status" in linked_fmt)
+
+# Full GET /api/approvals endpoint, end to end.
+_get_approvals_raw = _tma.get_approvals.__wrapped__
+with patch("core.action_gateway.action_gateway", gw15):
+    with patch("feature_flags.is_enabled", return_value=True):
+        with patch("tma_api._at_list", return_value=[legacy_row_15, linked_row_15]):
+            with _app.test_request_context("/api/approvals", method="GET"):
+                resp = _get_approvals_raw(identity=_identity())
+
+approvals_list = resp.json["approvals"]
+by_id = {a["id"]: a for a in approvals_list}
+chk("Test15: GET /api/approvals surfaces actionable=false for the legacy row",
+    by_id["recLegacy15"]["actionable"] is False)
+chk("Test15: GET /api/approvals surfaces actionable=true for the contract-linked row",
+    by_id["recLinked15"]["actionable"] is True)
 
 
 # ══════════════════════════════════════════════════════════════════

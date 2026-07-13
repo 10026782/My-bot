@@ -192,12 +192,16 @@ def send_recovery(
 # ══════════════════════════════════════════════════
 
 # Allowlist of tables that TMA write-through-approval is permitted to touch.
-# Mirrors tma_api.py's former _TMA_WRITE_ALLOWED_TABLES exactly.
+# "Approvals" deliberately excluded: none of the six mapped TMA business-
+# write callers (tma_create_project / tma_update_lead_status / tma_patch_lead
+# / tma_set_lead_outcome / tma_create_lead_task / tma_create_followup) needs
+# it, and tma_write must never be usable to mutate the Approvals projection
+# itself — that table is written only by the propose/approve/reject flow in
+# tma_api.py, never through this dispatcher tool.
 _TMA_WRITE_ALLOWED_TABLES = {
     "Leads",
     "משימות (Tasks)", "Tasks",
     "ProjectsHub",
-    "Approvals",
     "אנשי קשר (Contacts)", "Contacts",
 }
 
