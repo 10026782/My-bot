@@ -1778,7 +1778,25 @@ def _make_dispatch_executor(ledger: ExecutionLedger):
         # tool_inputs, which is Claude-controlled data that survives
         # normalize_payload() unchanged (including any "_source" key).
         _trusted_source = getattr(contract, "trusted_source", "agent") if contract else "agent"
-        return dispatch_tool(tool_name, tool_inputs, identity=identity, trusted_source=_trusted_source)
+
+        # Phase 4B-2 follow-up: execution_context is the ONLY legitimate
+        # source of contract_id/approved_by for tools (like tma_write) that
+        # refuse to run outside the propose/approve ceremony. Populated only
+        # here, from the durable contract itself — never from tool_inputs
+        # (frozen, attacker-influenceable payload) and never re-derived from
+        # `identity` (the frozen REQUESTER, not the approver — see
+        # tools/approval_actions.py::tma_write()'s docstring). approved_by
+        # is only meaningful once approve() has durably transitioned the
+        # contract, which is always true by the time _execute_contract()
+        # (and therefore this executor) runs.
+        execution_context = (
+            {"contract_id": contract_id, "approved_by": getattr(contract, "approved_by", "") or ""}
+            if contract else None
+        )
+        return dispatch_tool(
+            tool_name, tool_inputs, identity=identity, trusted_source=_trusted_source,
+            execution_context=execution_context,
+        )
 
     return _executor
 

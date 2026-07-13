@@ -246,6 +246,8 @@ def tma_write(
     audit_action: str = "",
     audit_details: str = "",
     identity=None,
+    trusted_source: str | None = None,
+    execution_context: dict | None = None,
 ) -> dict:
     """Executes a TMA-originated Airtable write after ActionGateway approval.
 
@@ -255,10 +257,44 @@ def tma_write(
     audit write, same receipt shape + best-effort persistence) — only the
     outer envelope changed, from a raw {"ok": ...} dict to the C53-A
     structured contract every other dispatcher tool returns.
+
+    Phase 4B-2 follow-up — direct-dispatch bypass closed: this function
+    performs ZERO provider writes unless trusted_source == "tma_api" AND
+    execution_context carries both a contract_id and an approved_by,
+    supplied exclusively by core/action_gateway.py's
+    _make_dispatch_executor() closure after ActionGateway.approve() has
+    durably transitioned a real ActionContract. A bare
+    dispatch_tool("tma_write", ...) call — from the Agent tool_use loop, a
+    future bug, or any caller that skips the propose/approve ceremony — has
+    no way to supply this context and is refused before touching Airtable.
+
+    identity here is the frozen REQUESTER's identity (bound at propose
+    time, reconstructed by _make_dispatch_executor() from the ActionContract
+    — see core/action_gateway.py's BUG-C89-APPROVAL-IDENTITY notes), used
+    only for requested_by/audit attribution of who asked for this action.
+    It is never the approver. approved_by — who actually authorized
+    execution — comes exclusively from execution_context["approved_by"],
+    which core/action_gateway.py populates from the ActionContract's own
+    approved_by field (set by approve() at approval time, a materially
+    different identity in the common TMA case of a manager requesting and
+    the owner approving).
     """
     from datetime import datetime, timezone
     from airtable_schema import InteractionLogFields, Tables
     from tools.airtable_gateway import airtable_create, airtable_patch
+
+    ctx = execution_context or {}
+    if trusted_source != "tma_api" or not ctx.get("contract_id") or not ctx.get("approved_by"):
+        logger.error(
+            "[approval_actions] tma_write: refused — requires trusted_source='tma_api' "
+            "and an execution_context with contract_id+approved_by (direct-dispatch "
+            "bypass guard). trusted_source=%r has_contract_id=%s has_approved_by=%s",
+            trusted_source, bool(ctx.get("contract_id")), bool(ctx.get("approved_by")),
+        )
+        return _tool_result(
+            ok=False, tool="tma_write",
+            user_message="❌ tma_write יכול לרוץ רק דרך זרימת האישור של ActionGateway",
+        )
 
     if table not in _TMA_WRITE_ALLOWED_TABLES:
         logger.error("[approval_actions] tma_write: table '%s' not in allowlist — rejected", table)
@@ -268,7 +304,8 @@ def tma_write(
         )
 
     fields = dict(fields or {})
-    approved_by = _identity_ref(identity)
+    # Never derived from `identity` (the frozen requester) — see docstring.
+    approved_by = ctx["approved_by"]
 
     if op == "post":
         rec = airtable_create(table, fields, source="tma_write")

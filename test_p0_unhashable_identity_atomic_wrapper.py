@@ -218,9 +218,10 @@ def test_identity_reaches_real_executor_correctly_typed():
     )
 
     captured = {}
-    def fake_dispatch_tool(name, inputs, identity=None, trusted_source=None):
+    def fake_dispatch_tool(name, inputs, identity=None, trusted_source=None, execution_context=None):
         captured["identity"] = identity
         captured["trusted_source"] = trusted_source
+        captured["execution_context"] = execution_context
         return {"ok": True, "external_id": "recXOW7FBZQZcNdw1", "user_message": "✅ בוצע"}
 
     with patch("tools.dispatcher.dispatch_tool", side_effect=fake_dispatch_tool):

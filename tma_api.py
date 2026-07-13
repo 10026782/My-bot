@@ -2318,6 +2318,7 @@ def bulk_approve(identity):
     approved = []
     failed   = []
     skipped  = []
+    projection_sync_pending_ids: list[str] = []
 
     for rec in recs:
         f = rec.get("fields", {})
@@ -2330,6 +2331,8 @@ def bulk_approve(identity):
             skipped.append(rec["id"])
             continue
         outcome = _claim_and_execute_approval(rec["id"], identity)
+        if outcome.get("projection_sync_pending"):
+            projection_sync_pending_ids.append(rec["id"])
         if outcome.get("ok"):
             approved.append(rec["id"])
         else:
@@ -2344,12 +2347,19 @@ def bulk_approve(identity):
             f"נכשלו: {len(failed)} | דחויות (לא low-risk / legacy): {len(skipped)}"
         )
 
-    return jsonify({
+    response = {
         "ok": True,
         "approved": len(approved),
         "failed": len(failed),
         "skipped": len(skipped),
-    })
+    }
+    if projection_sync_pending_ids:
+        # Canonical execution/rejection outcomes above are unaffected by a
+        # display-sync failure — surface it as its own count/list so the
+        # caller can trigger reconciliation, never conflated with "failed".
+        response["projection_sync_pending"] = len(projection_sync_pending_ids)
+        response["projection_sync_pending_ids"] = projection_sync_pending_ids
+    return jsonify(response)
 
 
 # Per-approval in-process locks — reduce concurrent double-claim within a
@@ -2648,17 +2658,23 @@ def act_on_approval(approval_id, identity):
     if decision == "reject":
         outcome = _claim_and_reject_approval(approval_id, identity, note=note)
         if not outcome["ok"]:
-            return jsonify({"error": outcome["error"]}), outcome["status_code"]
+            body = {"error": outcome["error"]}
+            if outcome.get("projection_sync_pending"):
+                body["projection_sync_pending"] = True
+            return jsonify(body), outcome["status_code"]
         _audit("approval_reject", identity, details=f"{outcome['action_label'][:100]} | note: {note[:80]}")
         _notify_owner(
             f"REJECTED TMA: נדחה - {outcome['action_label']}\n"
             f"approved_by: {identity.display_name or identity.user_id}"
             + (f"\nnote: {note}" if note else "")
         )
-        return jsonify({
+        response = {
             "ok": True, "approval_id": approval_id, "new_status": ApprovalStatus.REJECTED,
             "bus_synced": outcome["bus_synced"],
-        })
+        }
+        if outcome.get("projection_sync_pending"):
+            response["projection_sync_pending"] = True
+        return jsonify(response)
 
     # ── approve path — shared claim -> canonical-contract -> approve helper,
     # used by both this endpoint and bulk_approve() (Phase 4B-2). ──────────
@@ -2667,6 +2683,8 @@ def act_on_approval(approval_id, identity):
         body = {"error": outcome["error"]}
         if "detail" in outcome:
             body["detail"] = outcome["detail"]
+        if outcome.get("projection_sync_pending"):
+            body["projection_sync_pending"] = True
         return jsonify(body), outcome["status_code"]
 
     _audit("approval_approve", identity, details=f"{outcome['action_label'][:100]} | note: {note[:80]}")
@@ -2679,6 +2697,8 @@ def act_on_approval(approval_id, identity):
     response = {"ok": True, "approval_id": approval_id, "new_status": ApprovalStatus.APPROVED}
     if outcome.get("execution_result") is not None:
         response.update(outcome["execution_result"])
+    if outcome.get("projection_sync_pending"):
+        response["projection_sync_pending"] = True
     return jsonify(response)
 
 

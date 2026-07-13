@@ -68,7 +68,10 @@
       "סוג הקשר",
       "סטטוס",
       "פעולה",
-      "רמת סיכון"
+      "רמת סיכון",
+      "action_contract_id",
+      "legacy_read_only",
+      "projected_lifecycle_status"
     ],
     "Interaction Log": [
       "Business Memory",

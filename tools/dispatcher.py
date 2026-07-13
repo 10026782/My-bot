@@ -101,6 +101,7 @@ def dispatch_tool(
     inputs: dict,
     identity: "Identity | None" = None,
     trusted_source: str | None = None,
+    execution_context: dict | None = None,
 ) -> str:
     """
     מקבל שם כלי + inputs + identity ומחזיר תוצאה כטקסט.
@@ -114,6 +115,18 @@ def dispatch_tool(
     שקלוד יצר). ברירת מחדל None → "agent" (הכי לא-מהימן, fail-closed) —
     כל קורא שלא מעביר במפורש trusted_source נחשב "agent". inputs["_source"]
     (אם קיים) מתעלם ממנו לחלוטין — לא מקור אמון עוד.
+
+    Phase 4B-2 follow-up: execution_context is a runtime-only dict supplied
+    exclusively by core/action_gateway.py's _make_dispatch_executor() closure
+    — never persisted, never part of the frozen tool_inputs an
+    ActionContract stores, and never derived from anything the Agent/caller
+    controls. Carries facts only the ActionGateway itself can know after a
+    contract has actually been approved (currently: contract_id,
+    approved_by). Tools that must never run outside the propose/approve
+    ceremony (e.g. tma_write) require this to be present and populated —
+    see tools/approval_actions.py::tma_write(). A direct dispatch_tool(...)
+    call that omits it is exactly the "direct-dispatch bypass" this guards
+    against: the tool refuses before performing any provider write.
     """
     tenant_id = identity.tenant_id if identity else "unknown"
     user_id   = identity.user_id   if identity else "unknown"
@@ -400,6 +413,8 @@ def dispatch_tool(
                     audit_action=inputs.get("audit_action", ""),
                     audit_details=inputs.get("audit_details", ""),
                     identity=identity,
+                    trusted_source=trusted_source,
+                    execution_context=execution_context,
                 )
 
             # ── Unknown ───────────────────────────────

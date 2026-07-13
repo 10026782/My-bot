@@ -18,7 +18,7 @@ Covers the 9 scenarios required for this wiring stage:
      same action_contract_id cannot cause a double execution, because the
      second approve() sees the contract already resolved.
   5. Concurrent approval → exactly one execution (two threads racing the
-     same Approvals row).
+     same Approvals row) — WIRING-ONLY, see the WIRING-ONLY note below.
   6. Identity preservation — the original requester's identity is frozen
      onto the proposed contract; the approver's identity (not the
      requester's) is what action_gateway.approve() receives.
@@ -31,6 +31,28 @@ Covers the 9 scenarios required for this wiring stage:
      before creating any ActionContract or Approvals row (no RAM-only /
      direct-execution fallback), and _claim_and_execute_approval() refuses
      the same way even if a contract already exists.
+ 10. Two different approval IDs, same contract, concurrent — WIRING-ONLY,
+     see the WIRING-ONLY note below.
+
+WIRING-ONLY NOTE (Tests 5 and 10 — concurrency): every test in this file
+replaces core.action_gateway.action_gateway with _FakeGateway, whose
+approve()/reject() serialize under their OWN threading.Lock
+(_claim_lock). That proves this file's wiring layer (tma_api.py's
+_claim_and_execute_approval/_claim_and_reject_approval) correctly treats
+action_gateway.approve() as the single choke point for execution — it
+correctly handles whatever approve() returns, regardless of which
+approval_id/process-local lock reached it first, and never performs a
+second dispatch itself. It does NOT exercise, and must never be read as
+proof of, PostgreSQL's own atomic coordination — _FakeGateway._claim_lock
+is a Python-level substitute chosen by this test file, not
+core.atomic_claim_repository's real INSERT ... ON CONFLICT DO NOTHING. The
+authoritative proof that concurrent approvals produce exactly one
+dispatcher/provider call through the REAL PostgreSQL claim lives in
+test_phase_4b0_1b_concurrency.py (claim_contract_execution() race
+semantics, including real-PostgreSQL cases against a staging DB) and
+test_phase_4b0_1c_concurrent_approvals.py (concurrent approval requests via
+the real ActionGateway + execute_with_atomic_claim path) — see those files,
+not this one, for that guarantee.
 """
 
 from __future__ import annotations
@@ -138,11 +160,14 @@ class _FakeGateway:
         self._next_id = 0
         self.propose_fail_persistence = False
         self.outcomes: dict[str, str] = {}   # contract_id -> forced approve() outcome
-        # Models the PostgreSQL atomic claim: the check-then-transition below
-        # is done under this lock, so it is atomic regardless of which
-        # (possibly different) approval_id/process-local lock the caller
-        # used to get here — exactly the property being proven in the
-        # two-different-approval-IDs concurrency test.
+        # Test-only substitute for whatever ultimately gives approve() a
+        # single-winner guarantee (in production: PostgreSQL's atomic
+        # claim). The check-then-transition below is atomic under this
+        # lock regardless of which (possibly different) approval_id/
+        # process-local lock the caller used to get here — this proves the
+        # WIRING layer's response to a single-winner outcome is correct, not
+        # that PostgreSQL itself provides one (see the WIRING-ONLY note at
+        # the top of this file).
         self._claim_lock = threading.Lock()
         # Incremented only by the caller that actually wins the
         # check-then-transition race — i.e. only once per contract, no
@@ -394,9 +419,14 @@ chk("Test4: second call never reaches action_gateway.approve() at all — "
 
 
 # ══════════════════════════════════════════════════════════════════
-# 5. Concurrent approval → exactly one execution
+# 5. WIRING-ONLY: same approval_id, concurrent requests -> the wiring layer
+#    routes both through action_gateway.approve() and correctly surfaces
+#    exactly one success. This exercises _FakeGateway._claim_lock, a test
+#    substitute — NOT PostgreSQL's real atomic claim. See the WIRING-ONLY
+#    note at the top of this file; the real proof lives in
+#    test_phase_4b0_1b_concurrency.py / test_phase_4b0_1c_concurrent_approvals.py.
 # ══════════════════════════════════════════════════════════════════
-print("\n── Test 5: concurrent approval → exactly one execution ───────")
+print("\n── Test 5 (wiring-only): concurrent approval, same approval_id ─")
 
 gw5 = _FakeGateway()
 gw5.contracts["c5"] = _FakeContract("c5")
@@ -423,8 +453,11 @@ for t in threads:
     t.join()
 
 ok_count = sum(1 for r in results if r.get("ok"))
-chk("Test5: exactly one thread succeeded", ok_count == 1)
-chk("Test5: contract executed exactly once", gw5.contracts["c5"].status == "completed")
+chk("Test5 (wiring-only): exactly one thread succeeded through the wiring layer",
+    ok_count == 1)
+chk("Test5 (wiring-only): _FakeGateway's own lock resolved the contract to completed "
+    "(not proof of PostgreSQL atomicity — see test_phase_4b0_1b/1c)",
+    gw5.contracts["c5"].status == "completed")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -567,12 +600,18 @@ chk("Test9 execute: contract remains pending, untouched", gw9b.contracts["c9"].s
 
 
 # ══════════════════════════════════════════════════════════════════
-# 10. Two DIFFERENT approval IDs referencing the SAME contract, concurrently
-#     -> exactly one dispatcher/provider execution, via the atomic-claim-
-#     equivalent lock inside approve() — NOT the per-approval_id process-
-#     local lock, which cannot see across two different rows.
+# 10. WIRING-ONLY: two DIFFERENT approval IDs referencing the SAME contract,
+#     concurrently. Proves the wiring layer's per-approval_id
+#     threading.Lock (_get_approval_lock) does NOT — and is not relied on
+#     to — serialize these two rows (different approval_ids -> different
+#     locks), and that both requests correctly funnel through the single
+#     action_gateway.approve() choke point regardless. The single-winner
+#     outcome here comes from _FakeGateway._claim_lock, a test substitute —
+#     see the WIRING-ONLY note at the top of this file. It is NOT proof of
+#     PostgreSQL's real atomic claim; that is test_phase_4b0_1b_concurrency.py
+#     / test_phase_4b0_1c_concurrent_approvals.py's job, not this file's.
 # ══════════════════════════════════════════════════════════════════
-print("\n── Test 10: two different approval IDs, same contract, concurrent ─")
+print("\n── Test 10 (wiring-only): two different approval IDs, same contract ─")
 
 gw10 = _FakeGateway()
 gw10.contracts["c_shared"] = _FakeContract("c_shared")
@@ -607,14 +646,17 @@ t_d = threading.Thread(target=_run10, args=("recDupD",))
 t_c.start(); t_d.start()
 t_c.join(); t_d.join()
 
-chk("Test10: both different-approval_id requests reached action_gateway.approve() "
-    "(their process-local locks do not serialize each other — different approval_ids)",
+chk("Test10 (wiring-only): both different-approval_id requests reached "
+    "action_gateway.approve() — confirms their process-local locks do NOT "
+    "serialize each other (different approval_ids); the wiring layer relies "
+    "on approve() itself, not _get_approval_lock, for correctness here",
     len(gw10.approve_calls) == 2)
-chk("Test10: the contract was dispatched/executed exactly once — proven by the "
-    "atomic-claim-equivalent lock inside approve() itself, independent of which "
-    "(different) process-local lock either caller held",
+chk("Test10 (wiring-only): the contract was resolved exactly once by "
+    "_FakeGateway's own lock — a test substitute for PostgreSQL's atomic "
+    "claim, not the claim itself (see test_phase_4b0_1b/1c for that proof)",
     gw10.execution_count == 1)
-chk("Test10: contract ends completed, not double-run", gw10.contracts["c_shared"].status == "completed")
+chk("Test10 (wiring-only): contract ends completed, not double-run",
+    gw10.contracts["c_shared"].status == "completed")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -772,6 +814,101 @@ chk("Test15: GET /api/approvals surfaces actionable=false for the legacy row",
     by_id["recLegacy15"]["actionable"] is False)
 chk("Test15: GET /api/approvals surfaces actionable=true for the contract-linked row",
     by_id["recLinked15"]["actionable"] is True)
+
+
+# ══════════════════════════════════════════════════════════════════
+# 16. projection_sync_pending propagates through the actual HTTP boundary —
+#     approve success, approve failure/outcome_unknown, reject success, and
+#     bulk_approve's count/list. Endpoint-level (full Flask route), not just
+#     the internal helper dicts already covered by Test 14.
+# ══════════════════════════════════════════════════════════════════
+print("\n── Test 16: projection_sync_pending propagates through HTTP ──────")
+
+_act_raw_16 = _tma.act_on_approval.__wrapped__
+_bulk_raw_16 = _tma.bulk_approve.__wrapped__
+
+# 16a. approve success, sync fails -> HTTP 200 body carries projection_sync_pending.
+gw16a = _FakeGateway()
+gw16a.contracts["c16a"] = _FakeContract("c16a")
+
+with _app.test_request_context("/api/approvals/rec16a", method="POST", json={"action": "approve"}):
+    with _gateway_patches(gw16a):
+        with patch("tma_api._at_get_record", return_value=_projection_rec("rec16a", "c16a")):
+            with patch("tma_api._at_patch", return_value=False):  # projection sync fails
+                with patch("tma_api._audit"), patch("tma_api._notify_owner"):
+                    result16a = _act_raw_16("rec16a", identity=_identity())
+                    resp16a, code16a = result16a if isinstance(result16a, tuple) else (result16a, 200)
+
+chk("Test16a: HTTP 200 despite sync failure (canonical outcome succeeded)", code16a == 200)
+chk("Test16a: JSON body carries projection_sync_pending=true",
+    resp16a.json.get("projection_sync_pending") is True)
+
+# 16b. approve outcome_unknown, sync ALSO fails -> HTTP 202 body still carries it.
+gw16b = _FakeGateway()
+gw16b.contracts["c16b"] = _FakeContract("c16b")
+gw16b.outcomes["c16b"] = "outcome_unknown"
+
+with _app.test_request_context("/api/approvals/rec16b", method="POST", json={"action": "approve"}):
+    with _gateway_patches(gw16b):
+        with patch("tma_api._at_get_record", return_value=_projection_rec("rec16b", "c16b")):
+            with patch("tma_api._at_patch", return_value=False):
+                result16b = _act_raw_16("rec16b", identity=_identity())
+                resp16b, code16b = result16b if isinstance(result16b, tuple) else (result16b, 200)
+
+chk("Test16b: HTTP 202 for outcome_unknown", code16b == 202)
+chk("Test16b: JSON error body ALSO carries projection_sync_pending=true "
+    "(display lag surfaced even on a non-2xx response)",
+    resp16b.json.get("projection_sync_pending") is True)
+
+# 16c. reject success, sync fails -> HTTP 200 body carries projection_sync_pending.
+gw16c = _FakeGateway()
+gw16c.contracts["c16c"] = _FakeContract("c16c")
+
+with _app.test_request_context("/api/approvals/rec16c", method="POST", json={"action": "reject"}):
+    with _gateway_patches(gw16c):
+        with patch("tma_api._at_get_record", return_value=_projection_rec("rec16c", "c16c")):
+            with patch("tma_api._at_patch", return_value=False):
+                with patch("tma_api._audit"), patch("tma_api._notify_owner"):
+                    result16c = _act_raw_16("rec16c", identity=_identity())
+                    resp16c, code16c = result16c if isinstance(result16c, tuple) else (result16c, 200)
+
+chk("Test16c: HTTP 200 on reject despite sync failure", code16c == 200)
+chk("Test16c: JSON body carries projection_sync_pending=true on reject",
+    resp16c.json.get("projection_sync_pending") is True)
+
+# 16d. bulk_approve: one of two rows has a sync failure -> count + id list surfaced.
+gw16d = _FakeGateway()
+gw16d.contracts["c16d1"] = _FakeContract("c16d1")
+gw16d.contracts["c16d2"] = _FakeContract("c16d2")
+
+rows16d = {
+    "rec16d1": _projection_rec("rec16d1", "c16d1"),
+    "rec16d2": _projection_rec("rec16d2", "c16d2"),
+}
+patch_call_count_16d = {"n": 0}
+
+
+def _patch_16d(table, rec_id, fields):
+    # First projection-sync PATCH (for rec16d1) fails; everything else succeeds.
+    patch_call_count_16d["n"] += 1
+    return patch_call_count_16d["n"] != 1
+
+
+with _gateway_patches(gw16d):
+    with patch("tma_api._at_list", return_value=[rows16d["rec16d1"], rows16d["rec16d2"]]):
+        with patch("tma_api._at_get_record", side_effect=lambda t, rid: rows16d[rid]):
+            with patch("tma_api._at_patch", side_effect=_patch_16d):
+                with patch("tma_api._audit"), patch("tma_api._notify_owner"):
+                    with _app.test_request_context("/api/approvals/bulk", method="POST"):
+                        result16d = _bulk_raw_16(identity=_identity())
+                        resp16d = result16d[0] if isinstance(result16d, tuple) else result16d
+
+chk("Test16d: both rows still approved (sync failure doesn't block canonical outcome)",
+    resp16d.json.get("approved") == 2)
+chk("Test16d: bulk response carries projection_sync_pending count",
+    resp16d.json.get("projection_sync_pending") == 1)
+chk("Test16d: bulk response carries the specific projection_sync_pending_ids list",
+    resp16d.json.get("projection_sync_pending_ids") == ["rec16d1"])
 
 
 # ══════════════════════════════════════════════════════════════════
