@@ -27,7 +27,18 @@
 from __future__ import annotations
 
 from airtable_schema import ProjectedLifecycleStatus
-from core.action_gateway import APPROVAL_POLICY_APPROVAL, APPROVAL_POLICY_SELF_CONFIRM
+
+# Canonical persisted ActionContract.approval_policy string values
+# (ActionContractsFields.APPROVAL_POLICY, airtable_schema.py). Compared
+# locally by literal rather than importing core.action_gateway's
+# APPROVAL_POLICY_APPROVAL/APPROVAL_POLICY_SELF_CONFIRM constants: importing
+# that module constructs the ActionGateway/ledger singleton and reads
+# feature flags at import time, which would make this module neither
+# side-effect-free nor safe from a future circular import. Not refactored/
+# moved here — core.action_gateway remains the source of these values; keep
+# in sync with it if it ever changes them.
+APPROVAL_POLICY_APPROVAL = "approval"
+APPROVAL_POLICY_SELF_CONFIRM = "self_confirm"
 
 # ActionContractStatus values (airtable_schema.py) -> ProjectedLifecycleStatus
 # bucket. "draft" maps into the same display bucket as "pending" — it is
@@ -59,6 +70,20 @@ TERMINAL_CONTRACT_STATUSES: frozenset[str] = frozenset({
 AUDIT_HIDDEN_STATUSES: frozenset[str] = frozenset({"superseded"})
 
 
+def _require_known_status(contract_status: str) -> None:
+    """
+    Fail-closed guard shared by every public helper below that accepts a
+    contract_status. An unrecognized/new canonical status must be a loud
+    ValueError, never a silent default — no helper may classify an unknown
+    status as visible, non-terminal, or non-actionable by falling through a
+    membership test that simply evaluates to False/not-in.
+    """
+    if contract_status not in _CONTRACT_STATUS_TO_PROJECTION:
+        raise ValueError(
+            f"unknown ActionContract status for projection: {contract_status!r}"
+        )
+
+
 def project_lifecycle_status(contract_status: str) -> str:
     """
     Pure display-bucket mapping for one canonical ActionContractStatus value.
@@ -68,21 +93,19 @@ def project_lifecycle_status(contract_status: str) -> str:
     silently defaulting, so an unrecognized/new canonical status is a loud
     schema-contract failure, not a quiet mis-projection.
     """
-    try:
-        return _CONTRACT_STATUS_TO_PROJECTION[contract_status]
-    except KeyError:
-        raise ValueError(
-            f"unknown ActionContract status for projection: {contract_status!r}"
-        ) from None
+    _require_known_status(contract_status)
+    return _CONTRACT_STATUS_TO_PROJECTION[contract_status]
 
 
 def is_terminal(contract_status: str) -> bool:
     """Whether this canonical status has no further lifecycle transition."""
+    _require_known_status(contract_status)
     return contract_status in TERMINAL_CONTRACT_STATUSES
 
 
 def is_visible_for_audit(contract_status: str) -> bool:
     """Whether this canonical status should surface in general audit/history views."""
+    _require_known_status(contract_status)
     return contract_status not in AUDIT_HIDDEN_STATUSES
 
 
@@ -94,6 +117,7 @@ def is_pending_list_visible(contract_status: str) -> bool:
     separate free-text flow (core.action_gateway.route_confirmation_word),
     not the Approvals owner-approval screen.
     """
+    _require_known_status(contract_status)
     return contract_status == "pending"
 
 
@@ -111,6 +135,7 @@ def is_actionable(contract_status: str, approval_policy: str) -> bool:
     This function does not itself authorize anything: a future wiring stage
     still requires the PostgreSQL execution claim before any dispatch.
     """
+    _require_known_status(contract_status)
     if contract_status != "pending":
         return False
     return approval_policy == APPROVAL_POLICY_APPROVAL

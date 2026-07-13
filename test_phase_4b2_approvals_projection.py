@@ -28,7 +28,10 @@
 #      actionable through this projection.
 #   9. is_legacy_row() treats empty/None action_contract_id as legacy.
 #  10. An unrecognized canonical status raises ValueError (loud schema
-#      failure) rather than silently mis-projecting.
+#      failure) on EVERY helper that accepts contract_status
+#      (project_lifecycle_status/is_terminal/is_visible_for_audit/
+#      is_pending_list_visible/is_actionable) — none may silently classify
+#      an unknown status as visible, non-terminal, or non-actionable.
 
 import os, sys
 os.environ.setdefault("ANTHROPIC_API_KEY", "sk-test")
@@ -207,14 +210,32 @@ chk("populated action_contract_id -> NOT legacy", not proj.is_legacy_row("contra
 
 
 # ══════════════════════════════════════════════════
-# Test 10: unrecognized status is a loud failure, not a silent default
+# Test 10: unrecognized status is a loud failure, not a silent default —
+# every public helper that accepts contract_status must raise ValueError,
+# never fall through a membership test to a quiet True/False.
 # ══════════════════════════════════════════════════
-print("\n── Test 10: unknown status raises ─────────────────────────────")
-try:
-    proj.project_lifecycle_status("not_a_real_status")
-    chk("unknown status raises ValueError", False)
-except ValueError:
-    chk("unknown status raises ValueError", True)
+print("\n── Test 10: unknown status raises on every helper ──────────────")
+_BOGUS = "not_a_real_status"
+
+
+def _raises_value_error(fn, *args) -> bool:
+    try:
+        fn(*args)
+        return False
+    except ValueError:
+        return True
+
+
+chk("project_lifecycle_status(bogus) raises ValueError",
+    _raises_value_error(proj.project_lifecycle_status, _BOGUS))
+chk("is_terminal(bogus) raises ValueError",
+    _raises_value_error(proj.is_terminal, _BOGUS))
+chk("is_visible_for_audit(bogus) raises ValueError",
+    _raises_value_error(proj.is_visible_for_audit, _BOGUS))
+chk("is_pending_list_visible(bogus) raises ValueError",
+    _raises_value_error(proj.is_pending_list_visible, _BOGUS))
+chk("is_actionable(bogus, APPROVAL_POLICY_APPROVAL) raises ValueError",
+    _raises_value_error(proj.is_actionable, _BOGUS, proj.APPROVAL_POLICY_APPROVAL))
 
 
 # ══════════════════════════════════════════════════
