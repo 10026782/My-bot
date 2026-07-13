@@ -67,7 +67,7 @@
 | יוזמה / מסמך | היקף | Horizon מקביל | שלב נוכחי בפועל | הצעד הבא שהוחלט |
 |---|---|---|---|---|
 | `ROADMAP.md` | C/N/F ליבה + באגים | H0 | ראה Current Execution Status בקובץ עצמו | ראה טבלת Next Actions שם |
-| Approval Policy Single Source (F52→C83) | Core/Security | H0 | ✅ C83 סגור ומאומת — `event_bus.ACTIONS_REQUIRING_APPROVAL` הוא alias טהור ל-`tool_registry.TOOLS_REQUIRING_APPROVAL`, לא רשימה עצמאית (ר' ROADMAP.md §C83). **BUG-077**: ✅ **תוקן במלואו בקוד וממוזג ל-`main`** (`4ba3002`, PR #254, commits `e1c0ea5`+`07caf9d`) — אומת עצמאית 07/07/2026 (`git fetch origin` + `git merge-base --is-ancestor`, לאחר שבדיקה קודמת ללא `fetch` פספסה זאת). התסמין החי (Tier 3) **וגם** ה-root cause הארכיטקטוני (`propose_action()` כעת מאמת `requires_approval` מול `tool_registry.needs_approval()`, פרט ל-`self_confirm` carve-out) סגורים. `test_action_gateway.py` (41/41) ו-`test_bug077_tier3_auto_capture_gate.py` (5/5) הורצו בפועל בסבב הזה, לא רק grep. 🟡 **NOT PRODUCTION-VERIFIED**. ר' `BUG_AUDIT_LOG.md` BUG-077 לפירוט מלא. | לאמת בפרוד — ראה `BUG_AUDIT_LOG.md` BUG-077. |
+| Approval Policy Single Source (F52→C83) | Core/Security | H0 | ✅ C83 סגור ומאומת — `event_bus.ACTIONS_REQUIRING_APPROVAL` הוא alias טהור ל-`tool_registry.TOOLS_REQUIRING_APPROVAL`, לא רשימה עצמאית (ר' ROADMAP.md §C83). **BUG-077** (אומת מחדש באותה בדיקה, לא נפתח כפול): 🟡 **תוקן במלואו בקוד 07/07/2026 (root cause + תסמין), טרם ממוזג** — התסמין החי (Tier 3, PR #250, ✅ ממוזג) **וגם** ה-root cause הארכיטקטוני (`propose_action()` כעת מאמת `requires_approval` מול `tool_registry.needs_approval()`, פרט ל-`self_confirm` carve-out; נדרש גם לתקן את `core/lead_candidate_handler.py::_write_one_lead()` שהיה עם payload שגוי שמנע ממנו לקבל self_confirm) סגורים. ר' `BUG_AUDIT_LOG.md` BUG-077 לפירוט מלא, כולל קונפליקט שהתגלה עם יישום נאיבי-מדי ותוקן לפני push. | לאמת בפרוד אחרי מיזוג — ראה `BUG_AUDIT_LOG.md` BUG-077. |
 | `BOSS_Marketing_Execution_Map.md` | Revenue Execution | H1-H2, H5 | גל 1 (הפעלת הלולאה הקיימת) — טרם אומת בפרוד | להדליק `LEAD_CAPTURE=true` ולאמת (זהה ל-H1.1) |
 | Decision Hub | Trust/Decision loop | H3 | Stage 0-1 merged, flag off, לא verified. **BUG-DH-03/04** (formula injection) 🟡 תוקן בקוד, **✅ ממוזג ל-main** (PR #251, `d51e6be`; תוקן 07/07/2026, רשומה קודמת טענה "טרם ממוזג" בטעות) — `tools/airtable_gateway._safe_formula_param()`, `cmd_decision.py`/`decision_pipeline.py`, `test_bugdh03_04_formula_injection.py` 15/15, ר' BUG_AUDIT_LOG.md BUG-036/BUG-037. **לא מאומת בפרוד.** | לא להפעיל `FEATURE_DECISION_HUB` עד production evidence (המיזוג עצמו כבר בוצע) |
 | Media Layer (F16) | Media/Context loop | H4 | קוד ממוזג, flag off | ליצור טבלת Media Files ידנית |
@@ -120,7 +120,7 @@
 - H0.2 לנקות סטטוסים שגויים (✅→🟡 בלי evidence)
 - H0.3 לאמת Deployment/flags
 - H0.4 לסגור קונפליקטים פתוחים:
-  - `[ROADMAP: BUG-DH-03/04]` Formula injection — ✅ **תוקן בקוד וממוזג ל-`main`** (PR #251, `2e9bb57`, `_safe_formula_param()`) — אומת עצמאית 07/07/2026 + `test_bugdh03_04_formula_injection.py` (15/15) הורץ בפועל. 🟡 **NOT PRODUCTION-VERIFIED** — ר' BUG_AUDIT_LOG.md BUG-036/BUG-037
+  - `[ROADMAP: BUG-DH-03/04]` Formula injection — 🟡 **תוקן בקוד 07/07/2026** (`_safe_formula_param()`), **טרם ממוזג/מאומת בפרוד** — ר' BUG_AUDIT_LOG.md BUG-036/BUG-037
   - **C59/C60 ID collision** — טעון תיעוד mapping, לא בוצע עדיין
   - C60 Tool Context Awareness — merge או freeze, טרם הוכרע
   - `[ROADMAP: F12/F13]` — **סגור בשלושה מסמכים בעקביות** (Continuation, Unified Plan, ROADMAP) — נותר רק לרשום את ההחלטה בפועל ב-ROADMAP.md ולסגור
@@ -134,7 +134,7 @@
 
 ### Horizon 3 — Decision Hub Owner-Only
 H3.1 מצב קיים (Stage 0/0.5/0.6 merged flag-off; Stage 1 Trust Layer merged not-verified; Stages 2-4 לא התחילו)
-H3.2 לפני הדלקה: Airtable fields, multi-select, Source Reliability UI, owner-only test, **+ אימות בפרוד של תיקון BUG-DH-03/04 (✅ ממוזג ל-main + טסטים עברו מקומית, ר' BUG_AUDIT_LOG.md BUG-036/BUG-037 — production evidence עדיין לא מספיק להדלקה)**
+H3.2 לפני הדלקה: Airtable fields, multi-select, Source Reliability UI, owner-only test, **+ מיזוג/אימות בפרוד של תיקון BUG-DH-03/04 (קוד קיים בענף, ר' BUG_AUDIT_LOG.md BUG-036/BUG-037 — עדיין לא מספיק להדלקה)**
 H3.3 החלטת C60
 
 ### Horizon 4 — Media Layer Enablement
@@ -159,7 +159,7 @@ BM-01 5 Gates: Delta · BM-02 Readiness Engine · BM-03 Attention Engine · BM-0
 
 ## 7. Core Strengthening (רץ במקביל ל-Horizon 0)
 
-C-CORE-01 lead_memory Persistence · C-CORE-02 Airtable Write Queue (תלוי V3 מאומת) · C-CORE-04 N10 Rollback אוטומטי · **C-CORE-05 BUG-077 root-cause fix — ✅ הושלם בקוד 07/07/2026 (סגור, לא backlog עוד)** — `propose_action()` ב-`core/action_gateway.py` מאמת כעת `requires_approval` מול `tool_registry.needs_approval(tool_name)` (fail-closed), חוץ מ-`approval_policy == self_confirm` (carve-out בטוח של BUG-076). תוקן גם `core/lead_candidate_handler.py::_write_one_lead()` — עטף `tool_inputs` תחת `"fields"` (היה חסר, גרם לכל קריאותיו לקבל בטעות `approval_policy="approval"` תמיד, לא `self_confirm`). ר' `BUG_AUDIT_LOG.md` BUG-077 לפירוט המלא כולל הקונפליקט שהתגלה עם יישום נאיבי-מדי. ✅ ממוזג ל-`main` (`4ba3002`, PR #254) — אומת עצמאית 07/07/2026 + `test_action_gateway.py` (41/41) הורץ בפועל. 🟡 עדיין NOT PRODUCTION-VERIFIED.
+C-CORE-01 lead_memory Persistence · C-CORE-02 Airtable Write Queue (תלוי V3 מאומת) · C-CORE-04 N10 Rollback אוטומטי · **C-CORE-05 BUG-077 root-cause fix — ✅ הושלם בקוד 07/07/2026 (סגור, לא backlog עוד)** — `propose_action()` ב-`core/action_gateway.py` מאמת כעת `requires_approval` מול `tool_registry.needs_approval(tool_name)` (fail-closed), חוץ מ-`approval_policy == self_confirm` (carve-out בטוח של BUG-076). תוקן גם `core/lead_candidate_handler.py::_write_one_lead()` — עטף `tool_inputs` תחת `"fields"` (היה חסר, גרם לכל קריאותיו לקבל בטעות `approval_policy="approval"` תמיד, לא `self_confirm`). ר' `BUG_AUDIT_LOG.md` BUG-077 לפירוט המלא כולל הקונפליקט שהתגלה עם יישום נאיבי-מדי. 🟡 קוד מוכן, טרם ממוזג/מאומת בפרוד.
 
 ---
 
@@ -180,7 +180,7 @@ C-CORE-01 lead_memory Persistence · C-CORE-02 Airtable Write Queue (תלוי V3
 
 | # | פער | דורש |
 |---|---|---|
-| 1 | ~~BUG-DH-03/04 עדיין קיים?~~ ~~טרם ממוזג?~~ נבדק שוב 07/07/2026 — היה קיים, תוקן בקוד (`_safe_formula_param()`), **✅ ממוזג ל-main** (PR #251), 15/15 טסטים עברו בפועל | production evidence לפני סגירה מלאה |
+| 1 | ~~BUG-DH-03/04 עדיין קיים?~~ נבדק 07/07/2026 — היה קיים, תוקן בקוד (`_safe_formula_param()`), טרם ממוזג/מאומת בפרוד | מיזוג + production evidence לפני סגירה מלאה |
 | 2 | C59/C60 mapping מתועד? | קריאת קוד/היסטוריית ROADMAP |
 | 3 | CLAUDE.md מבטא Rule 14/16 בפועל? | העלאת הקובץ |
 
