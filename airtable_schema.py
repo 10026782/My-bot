@@ -639,14 +639,13 @@ class ApprovalStatus:
 
 class ActionContractsFields:
     """
-    PR-0C Phase 4B0 — durable persistence for ActionContract/ExecutionLedger
+    PR-0C Phase 4B0 / Phase 4B-1A — durable NEW proposal persistence and
+    proposal-recovery lookups for ActionContract/ExecutionLedger
     (core/action_gateway.py), fronted by core/action_contract_repository.py::
-    ActionContractRepository. ExecutionLedger's in-memory _store is a cache in
-    front of this table, not the source of truth — find_by_id() falls back to
-    the repository on a cache miss and hydrates the full contract from here,
-    including actor identity/policy fields, so a restarted/second process can
-    safely resume and authorize execution exactly as the original propose_action()
-    call intended. Field names match exactly what
+    ActionContractRepository. This does not claim a fully durable lifecycle:
+    status/context write-through is deferred to Phase 4B-1B. find_by_id()
+    falls back to the repository on a cache miss and hydrates the frozen
+    proposal fields from here. Field names match exactly what
     core/action_contract_repository.py's serializer sends (do not rename
     without updating that module). Table name: Tables.ACTION_CONTRACTS.
     contract_id is the match/primary field.
@@ -692,6 +691,7 @@ class ActionContractsFields:
       context_interrupted           checkbox
       reconfirmation_required       checkbox
       context_integrity_unknown     checkbox
+      idempotency_key               singleLineText
     """
     CONTRACT_ID      = "contract_id"
     TENANT_ID        = "tenant_id"
@@ -718,6 +718,7 @@ class ActionContractsFields:
     CONTEXT_INTERRUPTED       = "context_interrupted"
     RECONFIRMATION_REQUIRED   = "reconfirmation_required"
     CONTEXT_INTEGRITY_UNKNOWN = "context_integrity_unknown"
+    IDEMPOTENCY_KEY           = "idempotency_key"  # frozen proposal key; execution wiring unchanged in 4B-1A
 
 
 class ActionContractStatus:

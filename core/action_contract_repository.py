@@ -1,12 +1,11 @@
 # core/action_contract_repository.py — PR-0C Phase 4B0
 #
-# Durable repository for ActionContract, backed by Tables.ACTION_CONTRACTS.
-# This is the source of truth across restarts and separate Render instances —
-# ExecutionLedger's in-memory _store is a CACHE in front of this repository,
-# never the reverse. find_by_id() falls back here on a cache miss and
-# hydrates the full contract (including actor identity/policy fields) so a
-# restarted or second process can safely resume and authorize execution
-# exactly as the original propose_action() call intended.
+# Durable repository for NEW ActionContract proposals and proposal-recovery
+# lookups, backed by Tables.ACTION_CONTRACTS. When
+# FEATURE_ACTION_CONTRACT_PERSISTENCE is enabled, ExecutionLedger's in-memory
+# _store is a cache for those proposal records. This does NOT make the complete
+# contract lifecycle durable: status/context write-through and terminal-state
+# semantics remain explicitly deferred to Phase 4B-1B.
 #
 # SCOPE OF THIS FILE — persistence, hydration, identity-binding, and
 # fail-closed reads ONLY. There is NO transition/claim mechanism in this
@@ -101,6 +100,7 @@ def _contract_to_fields(contract: "ActionContract") -> dict:
         ActionContractsFields.CONTEXT_INTERRUPTED: contract.context_interrupted,
         ActionContractsFields.RECONFIRMATION_REQUIRED: contract.reconfirmation_required,
         ActionContractsFields.CONTEXT_INTEGRITY_UNKNOWN: contract.context_integrity_unknown,
+        ActionContractsFields.IDEMPOTENCY_KEY: contract.idempotency_key,
     }
 
 
@@ -143,6 +143,7 @@ def _record_to_contract(record: dict) -> "ActionContract":
         context_interrupted=bool(f.get(ActionContractsFields.CONTEXT_INTERRUPTED, False)),
         reconfirmation_required=bool(f.get(ActionContractsFields.RECONFIRMATION_REQUIRED, False)),
         context_integrity_unknown=bool(f.get(ActionContractsFields.CONTEXT_INTEGRITY_UNKNOWN, False)),
+        idempotency_key=f.get(ActionContractsFields.IDEMPOTENCY_KEY, ""),
     )
     contract.version = int(f.get(ActionContractsFields.VERSION) or 1)
     return contract
@@ -152,11 +153,11 @@ class ActionContractRepository:
     """See module docstring. Stateless — every call talks to Airtable fresh."""
 
     def save(self, contract: "ActionContract") -> bool:
-        """Full upsert. Appropriate for a brand-new contract (version=1) or a
-        non-contentious field update (e.g. context_interrupted). This file has
-        no transition/claim mechanism — see module docstring — so callers
-        must not use save() to implement an approve/reject/execute race
-        without an external atomic claim (Phase 4B0.1, not yet built)."""
+        """Full upsert used by 4B-1A for a brand-new contract (version=1).
+
+        This file has no transition/update API. Callers must not use save() as
+        status/context write-through; lifecycle persistence is Phase 4B-1B.
+        """
         fields = _contract_to_fields(contract)
         return at_upsert(
             Tables.ACTION_CONTRACTS, fields,
@@ -205,3 +206,30 @@ class ActionContractRepository:
             return []
         contracts = [_record_to_contract(r) for r in records]
         return [c for c in contracts if not _is_expired(c)]
+
+    def find_by_business_fingerprint(self, fingerprint: str) -> "ActionContract | None":
+        """Recover the exact frozen contract for restart-safe proposal dedup.
+
+        This is a lookup, not an atomic uniqueness/claim primitive. It makes a
+        proposal written by one process visible to later proposals in another
+        process, while concurrent creation races remain outside this PR.
+        """
+        try:
+            record = at_get_by_field(
+                Tables.ACTION_CONTRACTS,
+                ActionContractsFields.BUSINESS_FINGERPRINT,
+                fingerprint,
+            )
+        except AirtableLookupError as exc:
+            logger.warning(
+                "[ActionContractRepository] find_by_business_fingerprint(%.12s) "
+                "store unreachable: %s",
+                fingerprint, exc,
+            )
+            return None
+        if not record:
+            return None
+        contract = _record_to_contract(record)
+        if contract.status == "pending" and _is_expired(contract):
+            return None
+        return contract
