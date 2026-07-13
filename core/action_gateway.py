@@ -13,7 +13,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 import random
 import re
 import threading
@@ -631,43 +630,11 @@ class ActionGateway:
             tenant_id, canonical_user_id, tool_name, normalized
         )
 
-        # TEMP Phase 4B-1A live diagnostic. Keep this record deliberately
-        # payload/identity-free; remove it after the staging lookup trace is
-        # conclusive.
-        from feature_flags import is_enabled as _diagnostic_flag
-        _diagnostic_persistence_flag = _diagnostic_flag(
-            "FEATURE_ACTION_CONTRACT_PERSISTENCE"
-        )
-        _diagnostic_repository = getattr(self._ledger, "_repository", None)
-        _diagnostic_repository_type = (
-            type(_diagnostic_repository).__name__
-            if _diagnostic_repository is not None else "None"
-        )
-
-        def _log_lookup_diagnostic(
-            lookup_outcome: str,
-            returned_contract_id: str | None,
-            new_contract_id_generated: bool,
-        ) -> None:
-            logger.warning(
-                "[ActionContractLookupDiagnostic] fingerprint=%s process_id=%s "
-                "persistence_flag=%s repository_type=%s lookup_outcome=%s "
-                "returned_contract_id=%s new_contract_id_generated=%s",
-                fingerprint,
-                os.getpid(),
-                _diagnostic_persistence_flag,
-                _diagnostic_repository_type,
-                lookup_outcome,
-                returned_contract_id,
-                new_contract_id_generated,
-            )
-
         # The durable lookup happens before generating any contract identity.
         # An unavailable store is not evidence that the action is absent.
         try:
             existing = self._ledger.find_by_fingerprint(fingerprint)
         except ActionContractLookupError as exc:
-            _log_lookup_diagnostic("error", None, False)
             logger.error(
                 "[ActionGateway] durable fingerprint lookup failed: tool=%s "
                 "fingerprint=%.12s user=%s error=%s",
@@ -684,7 +651,6 @@ class ActionGateway:
             )
         if existing:
             if existing.status == "pending":
-                _log_lookup_diagnostic("found", existing.contract_id, False)
                 return GatewayResult(
                     ok=False,
                     reason="כבר קיימת בקשת אישור פתוחה לפעולה הזו.",
@@ -692,7 +658,6 @@ class ActionGateway:
                     user_message="⏳ כבר יש בקשת אישור פתוחה לפעולה זו. שלח *מאשר* כדי לאשר.",
                 )
             if existing.status == "executed":
-                _log_lookup_diagnostic("found", existing.contract_id, False)
                 return self._handle_duplicate_executed(existing, canonical_user_id)
 
         # BUG-076: classified from the actual normalized payload that will
@@ -711,11 +676,6 @@ class ActionGateway:
             requires_approval = True
 
         contract_id = str(uuid.uuid4())
-        _log_lookup_diagnostic(
-            "found" if existing else "clean_not_found",
-            existing.contract_id if existing else None,
-            True,
-        )
         contract = ActionContract(
             contract_id=contract_id,
             tenant_id=tenant_id,

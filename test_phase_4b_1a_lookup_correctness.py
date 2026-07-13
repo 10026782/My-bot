@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import logging
-import os
 import re
+import os
 import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -298,32 +297,3 @@ def test_actioncontracts_at_upsert_callers_explicitly_choose_strict_mode():
 
     gateway_source = open("core/action_gateway.py", encoding="utf-8").read()
     assert "fail_closed_on_lookup_error=True" in gateway_source
-
-
-def test_live_lookup_diagnostic_contains_only_safe_lookup_metadata(caplog):
-    repository = MagicMock()
-    repository.find_by_business_fingerprint.return_value = None
-    repository.save.return_value = True
-    gateway = ActionGateway(ledger=ExecutionLedger(repository=repository))
-
-    with patch("feature_flags.is_enabled", return_value=True), caplog.at_level(logging.WARNING):
-        result = _propose(gateway)
-
-    assert result.ok is True
-    diagnostics = [
-        record.getMessage() for record in caplog.records
-        if record.getMessage().startswith("[ActionContractLookupDiagnostic]")
-    ]
-    assert len(diagnostics) == 1
-    message = diagnostics[0]
-    for field in (
-        "fingerprint=", "process_id=", "persistence_flag=",
-        "repository_type=", "lookup_outcome=", "returned_contract_id=",
-        "new_contract_id_generated=",
-    ):
-        assert field in message
-    assert "lookup_outcome=clean_not_found" in message
-    assert "new_contract_id_generated=True" in message
-    assert "normalized_payload" not in message
-    assert "Same lead" not in message
-    assert "boss_hq:owner-1" not in message
