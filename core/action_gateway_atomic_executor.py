@@ -23,6 +23,7 @@ def execute_with_atomic_claim(
     tool_inputs: dict,
     identity,
     executor_fn,
+    idempotency_key: Optional[str] = None,
 ) -> tuple[bool, Any, Optional[str]]:
     """
     Execute a tool with atomic claim coordination.
@@ -34,6 +35,7 @@ def execute_with_atomic_claim(
         tool_inputs: Tool input payload
         identity: Identity object for dispatch
         executor_fn: Callable that calls dispatch_tool()
+        idempotency_key: Optional deterministic key for retry-safety; if None, generated as UUID
 
     Returns:
         (success: bool, result: any, error: optional str)
@@ -62,7 +64,7 @@ def execute_with_atomic_claim(
     result = claim_contract_execution(
         contract_id=contract_id,
         claimant_id=canonical_user_id,
-        idempotency_key=None,  # Let repo generate unique execution_id
+        idempotency_key=idempotency_key,
     )
 
     if result.is_disabled():

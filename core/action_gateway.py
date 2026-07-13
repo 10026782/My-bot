@@ -1134,21 +1134,70 @@ class ActionGateway:
         """
         מבצע tool לאחר אישור — approved_payload == executed_payload (DoD §6).
         מריץ verify_execution על התוצאה — success claims require real tool evidence (DoD §3, §6).
+
+        Phase 4B0: When FEATURE_ATOMIC_CLAIMS=true, acquisition of atomic claim is REQUIRED
+        before any dispatcher call. No exception falls back to direct dispatch.
         """
+        from feature_flags import is_enabled
+
         self._ledger.update_status(contract.contract_id, "executing")
-        try:
-            raw = self._tool_executor(
-                tool_name=contract.tool_name,
-                tool_inputs=contract.normalized_payload,
-                contract_id=contract.contract_id,
-            )
-        except Exception as exc:
-            self._ledger.update_status(contract.contract_id, "failed")
-            logger.error(
-                "[ActionGateway] execution failed: contract=%s error=%s",
-                contract.contract_id, exc,
-            )
-            return f"❌ ביצוע נכשל: {exc}"
+
+        # Phase 4B0 atomic claim gate (if flag enabled)
+        if is_enabled("FEATURE_ATOMIC_CLAIMS"):
+            from core.action_gateway_atomic_executor import execute_with_atomic_claim
+            from core.atomic_claim_repository import claim_contract_execution
+            import hashlib
+
+            # Deterministic idempotency key: hash(contract_id + approved_by)
+            # Same contract + same approver → same key → ALREADY_CLAIMED on retry
+            idem_seed = f"{contract.contract_id}:{contract.approved_by or contract.actor_user_id}"
+            idempotency_key = hashlib.sha256(idem_seed.encode()).hexdigest()[:16]
+
+            # Gate dispatcher behind atomic claim acquisition
+            try:
+                success, result, error = execute_with_atomic_claim(
+                    contract_id=contract.contract_id,
+                    canonical_user_id=contract.approved_by or contract.actor_user_id,
+                    tool_name=contract.tool_name,
+                    tool_inputs=contract.normalized_payload,
+                    identity=None,  # identity already resolved at proposal time
+                    executor_fn=self._tool_executor,
+                    idempotency_key=idempotency_key,
+                )
+
+                if not success:
+                    # Fail-closed: claim unavailable, DB down, conflict, or disabled
+                    self._ledger.update_status(contract.contract_id, "failed")
+                    logger.error(
+                        "[ActionGateway] atomic claim failed: contract=%s error=%s",
+                        contract.contract_id, error,
+                    )
+                    return f"❌ ביצוע נכשל: {error}"
+
+                raw = result
+            except Exception as exc:
+                # No exception fallback to direct dispatch when flag is ON — fail closed
+                self._ledger.update_status(contract.contract_id, "failed")
+                logger.error(
+                    "[ActionGateway] atomic executor raised: contract=%s error=%s",
+                    contract.contract_id, exc,
+                )
+                return f"❌ ביצוע נכשל: {exc}"
+        else:
+            # Flag OFF: legacy direct dispatch (no claim creation, no atomic coordination)
+            try:
+                raw = self._tool_executor(
+                    tool_name=contract.tool_name,
+                    tool_inputs=contract.normalized_payload,
+                    contract_id=contract.contract_id,
+                )
+            except Exception as exc:
+                self._ledger.update_status(contract.contract_id, "failed")
+                logger.error(
+                    "[ActionGateway] execution failed: contract=%s error=%s",
+                    contract.contract_id, exc,
+                )
+                return f"❌ ביצוע נכשל: {exc}"
 
         # §3 / §6: verify before reporting success — no real evidence → failure
         try:
