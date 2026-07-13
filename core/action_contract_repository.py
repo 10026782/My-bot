@@ -1,12 +1,11 @@
 # core/action_contract_repository.py — PR-0C Phase 4B0
 #
-# Durable repository for ActionContract, backed by Tables.ACTION_CONTRACTS.
-# This is the source of truth across restarts and separate Render instances —
-# ExecutionLedger's in-memory _store is a CACHE in front of this repository,
-# never the reverse. find_by_id() falls back here on a cache miss and
-# hydrates the full contract (including actor identity/policy fields) so a
-# restarted or second process can safely resume and authorize execution
-# exactly as the original propose_action() call intended.
+# Durable repository for NEW ActionContract proposals and proposal-recovery
+# lookups, backed by Tables.ACTION_CONTRACTS. When
+# FEATURE_ACTION_CONTRACT_PERSISTENCE is enabled, ExecutionLedger's in-memory
+# _store is a cache for those proposal records. This does NOT make the complete
+# contract lifecycle durable: status/context write-through and terminal-state
+# semantics remain explicitly deferred to Phase 4B-1B.
 #
 # SCOPE OF THIS FILE — persistence, hydration, identity-binding, and
 # fail-closed reads ONLY. There is NO transition/claim mechanism in this
@@ -32,12 +31,9 @@
 # blocked, and ActionGateway.approve()/_execute_contract() must keep using
 # their original in-memory update_status() path, not anything in this file.
 #
-# Never re-plan/re-derive a replacement contract as "recovery" — get()
-# returns None on any failure to find/verify the exact durable record
-# (not-found, store unreachable, expired). Callers must fail closed on None,
-# never fabricate a new contract to fill the gap; that would defeat the
-# entire frozen-contract security model this work protects (approved_payload
-# must always equal executed_payload).
+# Never re-plan/re-derive a replacement contract as "recovery". Clean
+# not-found/expiry returns None, while an unavailable lookup raises
+# ActionContractLookupError so callers cannot confuse an outage with absence.
 
 from __future__ import annotations
 
@@ -61,6 +57,10 @@ if TYPE_CHECKING:
     from core.action_gateway import ActionContract
 
 logger = logging.getLogger(__name__)
+
+
+class ActionContractLookupError(RuntimeError):
+    """The durable store could not determine whether a contract exists."""
 
 # How long a "pending" contract may sit before it's considered too stale to
 # safely act on. Longer than event_bus's 30-minute Telegram-button TTL, since
@@ -101,6 +101,7 @@ def _contract_to_fields(contract: "ActionContract") -> dict:
         ActionContractsFields.CONTEXT_INTERRUPTED: contract.context_interrupted,
         ActionContractsFields.RECONFIRMATION_REQUIRED: contract.reconfirmation_required,
         ActionContractsFields.CONTEXT_INTEGRITY_UNKNOWN: contract.context_integrity_unknown,
+        ActionContractsFields.IDEMPOTENCY_KEY: contract.idempotency_key,
     }
 
 
@@ -143,6 +144,7 @@ def _record_to_contract(record: dict) -> "ActionContract":
         context_interrupted=bool(f.get(ActionContractsFields.CONTEXT_INTERRUPTED, False)),
         reconfirmation_required=bool(f.get(ActionContractsFields.RECONFIRMATION_REQUIRED, False)),
         context_integrity_unknown=bool(f.get(ActionContractsFields.CONTEXT_INTEGRITY_UNKNOWN, False)),
+        idempotency_key=f.get(ActionContractsFields.IDEMPOTENCY_KEY, ""),
     )
     contract.version = int(f.get(ActionContractsFields.VERSION) or 1)
     return contract
@@ -152,29 +154,30 @@ class ActionContractRepository:
     """See module docstring. Stateless — every call talks to Airtable fresh."""
 
     def save(self, contract: "ActionContract") -> bool:
-        """Full upsert. Appropriate for a brand-new contract (version=1) or a
-        non-contentious field update (e.g. context_interrupted). This file has
-        no transition/claim mechanism — see module docstring — so callers
-        must not use save() to implement an approve/reject/execute race
-        without an external atomic claim (Phase 4B0.1, not yet built)."""
+        """Full upsert used by 4B-1A for a brand-new contract (version=1).
+
+        This file has no transition/update API. Callers must not use save() as
+        status/context write-through; lifecycle persistence is Phase 4B-1B.
+        """
         fields = _contract_to_fields(contract)
         return at_upsert(
             Tables.ACTION_CONTRACTS, fields,
             match_field=ActionContractsFields.CONTRACT_ID,
             source="action_contract_repository",
+            fail_closed_on_lookup_error=True,
         )
 
     def get(self, contract_id: str) -> "ActionContract | None":
-        """Returns None for "not found", "store unreachable", AND "found but
-        expired while still pending" — all three are fail-closed cases from
-        the caller's perspective. Never distinguishes them via a truthy
-        fallback; ExecutionLedger.find_by_id() must not treat None as
-        license to fabricate a replacement contract."""
+        """Return a verified contract, or None for clean not-found/expiry.
+
+        Raises ActionContractLookupError when Airtable cannot answer. This
+        distinction prevents callers from inventing absence during an outage.
+        """
         try:
             record = at_get_by_field(Tables.ACTION_CONTRACTS, ActionContractsFields.CONTRACT_ID, contract_id)
         except AirtableLookupError as exc:
             logger.warning("[ActionContractRepository] get(%s) store unreachable: %s", contract_id, exc)
-            return None
+            raise ActionContractLookupError(f"contract-id lookup failed: {contract_id}") from exc
         if not record:
             return None
 
@@ -202,6 +205,37 @@ class ActionContractRepository:
                 "[ActionContractRepository] find_pending_by_canonical_user(%s) store unreachable: %s",
                 canonical_user_id, exc,
             )
-            return []
+            raise ActionContractLookupError(
+                f"pending-contract lookup failed: {canonical_user_id}"
+            ) from exc
         contracts = [_record_to_contract(r) for r in records]
         return [c for c in contracts if not _is_expired(c)]
+
+    def find_by_business_fingerprint(self, fingerprint: str) -> "ActionContract | None":
+        """Recover the exact frozen contract for restart-safe proposal dedup.
+
+        This is a lookup, not an atomic uniqueness/claim primitive. It makes a
+        proposal written by one process visible to later proposals in another
+        process, while concurrent creation races remain outside this PR.
+        """
+        try:
+            record = at_get_by_field(
+                Tables.ACTION_CONTRACTS,
+                ActionContractsFields.BUSINESS_FINGERPRINT,
+                fingerprint,
+            )
+        except AirtableLookupError as exc:
+            logger.warning(
+                "[ActionContractRepository] find_by_business_fingerprint(%.12s) "
+                "store unreachable: %s",
+                fingerprint, exc,
+            )
+            raise ActionContractLookupError(
+                f"fingerprint lookup failed: {fingerprint}"
+            ) from exc
+        if not record:
+            return None
+        contract = _record_to_contract(record)
+        if contract.status == "pending" and _is_expired(contract):
+            return None
+        return contract

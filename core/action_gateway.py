@@ -21,6 +21,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Callable
 
+from core.action_contract_repository import ActionContractLookupError
 from tool_registry import needs_approval
 
 logger = logging.getLogger(__name__)
@@ -188,6 +189,10 @@ class ActionContract:
     # know." Does not block the incoming message itself from being routed —
     # only affects whether a later bare confirm executes directly.
     context_integrity_unknown:   bool = False
+    # Phase 4B-1A: frozen proposal identity for durable recovery/audit. This
+    # value is deliberately not wired into the Phase 4B0 atomic executor in
+    # this PR; atomic-claim behavior remains unchanged.
+    idempotency_key:             str = ""
     # PR-0C Phase 4B0 — persisted version metadata, bumped on save. NOT a
     # concurrency-control mechanism today: no transition path in this codebase
     # checks or CAS's on this value. A real claim mechanism using this (or a
@@ -205,6 +210,7 @@ class GatewayResult:
     reason:       str
     contract_id:  str | None = None
     user_message: str | None = None   # מה להציג למשתמש (None = שקט)
+    failure_code: str | None = None   # machine-readable, e.g. persistence_failed
 
 
 # ══════════════════════════════════════════════════
@@ -339,6 +345,10 @@ def _gen_challenge_code() -> str:
 # ממשק מופרד מ-ActionGateway; backing ראשוני = RAM + Airtable stub.
 # ══════════════════════════════════════════════════
 
+class ActionContractPersistenceError(RuntimeError):
+    """A durable proposal could not be committed to its repository."""
+
+
 class ExecutionLedger:
     """
     שכבת אחסון עמידה ל-ActionContracts.
@@ -360,20 +370,34 @@ class ExecutionLedger:
         # persistence/recovery path.
         self._repository = repository
 
-    def save(self, contract: ActionContract) -> None:
+    def _cache_contract(self, contract: ActionContract) -> None:
         with self._lock:
             self._store[contract.contract_id] = contract
             self._by_fingerprint[contract.business_action_fingerprint] = contract.contract_id
+
+    def save(self, contract: ActionContract) -> bool:
+        # Phase 4B-1A: when a repository is configured it is authoritative for
+        # NEW proposals. Persist before publishing the contract into RAM so a
+        # failed durable write can never leave an actionable RAM-only contract.
+        # This does not make later status/context mutations durable; those stay
+        # explicitly deferred to Phase 4B-1B.
+        if self._repository:
+            try:
+                persisted = self._repository.save(contract)
+            except Exception as exc:
+                raise ActionContractPersistenceError(
+                    f"repository save raised: {type(exc).__name__}"
+                ) from exc
+            if persisted is not True:
+                raise ActionContractPersistenceError("repository save returned non-True")
+
+        self._cache_contract(contract)
         if self._airtable_writer:
             try:
                 self._airtable_writer(contract)
             except Exception as exc:
                 logger.warning("[ActionGateway] Airtable write failed (RAM intact): %s", exc)
-        if self._repository:
-            try:
-                self._repository.save(contract)
-            except Exception as exc:
-                logger.warning("[ActionGateway] repository save failed (RAM intact): %s", exc)
+        return True
 
     def find_by_id(self, contract_id: str) -> ActionContract | None:
         cached = self._store.get(contract_id)
@@ -382,31 +406,44 @@ class ExecutionLedger:
         if not self._repository:
             return None
         # Cache miss — fall back to the durable repository (restart / second
-        # instance recovery). get() already fails closed (returns None) on
-        # not-found, store-unreachable, or expiry; never fabricate a contract
-        # here if it returns None.
+        # instance recovery). Repository lookup failures intentionally
+        # propagate; only clean not-found/expiry returns None.
         hydrated = self._repository.get(contract_id)
         if hydrated is None:
             return None
-        with self._lock:
-            self._store[contract_id] = hydrated
-            self._by_fingerprint[hydrated.business_action_fingerprint] = contract_id
+        self._cache_contract(hydrated)
         return hydrated
 
     def find_by_fingerprint(self, fingerprint: str) -> ActionContract | None:
         cid = self._by_fingerprint.get(fingerprint)
-        return self._store.get(cid) if cid else None
+        cached = self._store.get(cid) if cid else None
+        if cached is not None:
+            return cached
+        if not self._repository:
+            return None
+        recovered = self._repository.find_by_business_fingerprint(fingerprint)
+        if recovered is None:
+            return None
+        self._cache_contract(recovered)
+        return recovered
 
     def find_live_by_user(self, canonical_user_id: str) -> list[ActionContract]:
         """מחזיר contracts חיים (pending) לזהות קנונית."""
-        now = time.time()
-        result = []
-        for c in self._store.values():
-            if c.canonical_user_id != canonical_user_id:
-                continue
-            if c.status == "pending":
-                result.append(c)
-        return result
+        # Repository recovery is cache-miss only. Once this process has any
+        # contract for the user, its RAM state may be newer than the durable
+        # proposal snapshot because status/context write-through is explicitly
+        # deferred to 4B-1B. Re-hydrating the durable pending snapshot here
+        # would resurrect a locally changed contract.
+        has_cached_user_contract = any(
+            c.canonical_user_id == canonical_user_id for c in self._store.values()
+        )
+        if self._repository and not has_cached_user_contract:
+            for recovered in self._repository.find_pending_by_canonical_user(canonical_user_id):
+                self._cache_contract(recovered)
+        return [
+            c for c in self._store.values()
+            if c.canonical_user_id == canonical_user_id and c.status == "pending"
+        ]
 
     def find_most_recent_by_user(self, canonical_user_id: str) -> "ActionContract | None":
         """Most recent contract (any status) for this identity — used to give
@@ -593,7 +630,25 @@ class ActionGateway:
             tenant_id, canonical_user_id, tool_name, normalized
         )
 
-        existing = self._ledger.find_by_fingerprint(fingerprint)
+        # The durable lookup happens before generating any contract identity.
+        # An unavailable store is not evidence that the action is absent.
+        try:
+            existing = self._ledger.find_by_fingerprint(fingerprint)
+        except ActionContractLookupError as exc:
+            logger.error(
+                "[ActionGateway] durable fingerprint lookup failed: tool=%s "
+                "fingerprint=%.12s user=%s error=%s",
+                tool_name, fingerprint, canonical_user_id, exc,
+            )
+            return GatewayResult(
+                ok=False,
+                reason="לא ניתן לבדוק אם בקשת הפעולה כבר קיימת.",
+                user_message=(
+                    "❌ לא ניתן לבדוק כרגע את מאגר בקשות האישור. "
+                    "הפעולה לא הועברה לאישור ולא תבוצע."
+                ),
+                failure_code="persistence_lookup_failed",
+            )
         if existing:
             if existing.status == "pending":
                 return GatewayResult(
@@ -620,8 +675,9 @@ class ActionGateway:
             )
             requires_approval = True
 
+        contract_id = str(uuid.uuid4())
         contract = ActionContract(
-            contract_id=str(uuid.uuid4()),
+            contract_id=contract_id,
             tenant_id=tenant_id,
             canonical_user_id=canonical_user_id,
             tool_name=tool_name,
@@ -640,6 +696,9 @@ class ActionGateway:
             actor_allowed_domains=list(getattr(identity, "allowed_domains", None) or []),
             approval_policy=approval_policy,
             trusted_source=trusted_source,
+            idempotency_key=hashlib.sha256(
+                f"{contract_id}:{fingerprint}".encode()
+            ).hexdigest()[:32],
         )
 
         if requires_approval:
@@ -647,7 +706,23 @@ class ActionGateway:
         else:
             contract.status = "approved"
 
-        self._ledger.save(contract)
+        try:
+            self._ledger.save(contract)
+        except ActionContractPersistenceError as exc:
+            logger.error(
+                "[ActionGateway] durable proposal persistence failed: tool=%s "
+                "fingerprint=%.12s user=%s error=%s",
+                tool_name, fingerprint, canonical_user_id, exc,
+            )
+            return GatewayResult(
+                ok=False,
+                reason="לא ניתן לשמור את בקשת הפעולה באופן עמיד.",
+                user_message=(
+                    "❌ לא ניתן לשמור כרגע את בקשת האישור. "
+                    "הפעולה לא הועברה לאישור ולא תבוצע."
+                ),
+                failure_code="persistence_failed",
+            )
         logger.info(
             "[ActionGateway] propose_action: contract=%s fingerprint=%.12s "
             "tool=%s table=%s provider=%s channel=%s status=%s user=%s",
@@ -702,12 +777,14 @@ class ActionGateway:
             return None
 
         try:
-            self.propose_action(
+            result = self.propose_action(
                 tenant_id=tenant_id, canonical_user_id=canonical_user_id,
                 tool_name=tool_name, tool_inputs=tool_inputs,
                 origin_channel=origin_channel, origin_chat_id=origin_chat_id,
                 requires_approval=True, identity=identity, trusted_source=trusted_source,
             )
+            if result.failure_code in {"persistence_failed", "persistence_lookup_failed"}:
+                return result.user_message or f"❌ {result.reason}"
         except Exception as exc:
             logger.debug("[ActionGateway] shadow propose_gated failed (non-blocking): %s", exc)
         return None
@@ -1455,6 +1532,7 @@ def _build_airtable_writer():
                     "approved_at":                c.approved_at or 0.0,
                 },
                 match_field="contract_id",
+                fail_closed_on_lookup_error=True,
             )
 
         return _writer
@@ -1534,21 +1612,25 @@ def _make_dispatch_executor(ledger: ExecutionLedger):
     return _executor
 
 
-# PR-0C Phase 4A: _build_airtable_writer()/at_upsert()/Tables.ACTION_CONTRACTS
-# are built and tested, but deliberately NOT wired into the live singleton
-# yet. propose_action()/propose_gated() are already called unconditionally
-# in production today (shadow mode when FEATURE_ACTION_GATEWAY is off) by
-# app.py::_queue_approval, media_handler.py, followup_engine.py, and
-# core/lead_recovery.py — wiring this writer in would mean every one of
-# those calls starts writing real Airtable records immediately, which is a
-# live behavior change, not inert infrastructure. It also requires a durable
-# read/recovery path first (load-by-contract_id on restart, pending-contract
-# recovery) — ExecutionLedger is 100% in-memory today, so "ActionContracts"
-# cannot honestly be called canonical durable truth until contracts can be
-# read back, not just written. Wire this only after that read path exists,
-# at_upsert()'s concurrent-write behavior has been reviewed, and the rollout
-# has been verified in a non-production environment first.
-_ledger_singleton = ExecutionLedger(airtable_writer=None)
+# Phase 4B-1A: durable NEW proposals and proposal-recovery lookups are enabled
+# independently from ActionGateway enforcement. Default OFF means the exact
+# existing RAM-only ledger and zero ActionContractRepository calls. The legacy
+# _build_airtable_writer() is intentionally never activated: it is a partial
+# mirror that omits frozen identity/policy/context fields. Status/context
+# write-through remains out of scope until Phase 4B-1B.
+def _build_action_contract_repository():
+    from feature_flags import is_enabled
+    if not is_enabled("FEATURE_ACTION_CONTRACT_PERSISTENCE"):
+        return None
+    from core.action_contract_repository import ActionContractRepository
+    return ActionContractRepository()
+
+
+_action_contract_repository_singleton = _build_action_contract_repository()
+_ledger_singleton = ExecutionLedger(
+    airtable_writer=None,
+    repository=_action_contract_repository_singleton,
+)
 action_gateway = ActionGateway(
     ledger=_ledger_singleton,
     tool_executor=_make_dispatch_executor(_ledger_singleton),

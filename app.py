@@ -788,7 +788,7 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
         try:
             from core.action_gateway import action_gateway as _gw
             tenant_id = getattr(identity, "tenant_id", "boss_hq")
-            _gw.propose_action(
+            _gw_result = _gw.propose_action(
                 tenant_id=tenant_id,
                 canonical_user_id=identity.memory_key,
                 tool_name=tool_name,
@@ -798,6 +798,8 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
                 requires_approval=True,
                 identity=identity,
             )
+            if _gw_result.failure_code in {"persistence_failed", "persistence_lookup_failed"}:
+                return _gw_result.user_message or f"❌ {_gw_result.reason}"
         except Exception as _gw_exc:
             logger.debug("[ActionGateway] shadow propose failed (non-blocking): %s", _gw_exc)
 
