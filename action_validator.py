@@ -49,6 +49,10 @@ _REQUIRED: dict[str, list[str]] = {
     "media_save_to_memory":      ["transcript"],
     "send_followup":             ["chat_id"],
     "send_recovery":             ["chat_id"],
+    # Phase 4B-2 wiring — TMA write-through-approval adapter. op/table
+    # presence only; allowlist + op-specific shape (fields vs record_id) is
+    # validated inside tools/approval_actions.py::tma_write() itself.
+    "tma_write":                 ["op", "table"],
 }
 
 _FIELD_QUESTIONS: dict[str, str] = {

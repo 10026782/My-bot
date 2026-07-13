@@ -211,6 +211,25 @@ _REGISTRY: dict[str, ToolMeta] = {
         blocked_by_emergency=True,
         description_he   = "הצגת טיוטת recovery מאושרת לבעלים להעברה ידנית",
     ),
+
+    # ── Phase 4B-2 wiring — TMA write-through-approval adapter ──
+    # Internal-execution-only, like the three adapters above: not in
+    # tools/schemas.py's TOOL_SCHEMAS, so the Agent tool_use loop can never
+    # propose this directly — only tma_api.py, via
+    # ActionGateway.propose_action(trusted_source="tma_api"). roles_allowed
+    # is the union of roles that actually reach tma_api.py's
+    # _queue_tma_write_approval() call sites (owner for project creation,
+    # owner+manager for lead/task writes) — narrower than _INTERNAL since
+    # partner/employee never call it. This is a defense-in-depth layer only:
+    # the stricter per-endpoint role check in tma_api.py's route handlers is
+    # unchanged and still runs first.
+    "tma_write": ToolMeta(
+        name             = "tma_write",
+        roles_allowed    = {"owner", "manager"},
+        requires_approval= True,
+        blocked_by_emergency=True,
+        description_he   = "כתיבת Airtable שמקורה ב-TMA — לאחר אישור ActionGateway",
+    ),
 }
 
 

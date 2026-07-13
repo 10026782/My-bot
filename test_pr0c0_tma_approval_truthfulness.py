@@ -1,32 +1,40 @@
 #!/usr/bin/env python3
 """
 test_pr0c0_tma_approval_truthfulness.py — Regression tests for PR-0C0
-(BUG-TMA-APPROVAL-TRUTHFULNESS).
+(BUG-TMA-APPROVAL-TRUTHFULNESS), updated for Phase 4B-2.
 
 TMA must never report or persist "approved" unless the underlying action
-executed successfully. Covers what test_approval_concurrency.py does not:
+executed successfully. Phase 4B-2 moved that guarantee from a raw
+CONTEXT_DATA payload deserialized and dispatched directly out of tma_api.py
+into core.action_gateway.action_gateway.approve() -> _execute_contract(),
+which is itself covered by extensive dedicated tests (test_action_gateway.py,
+test_stage_b_full_suite.py, etc.). What remains specific to tma_api.py, and
+what this file covers:
 
-  1. _try_bus_action: real sync → True; "miss" strings (not found / no
-     subscriber / restart-lost in-memory item) → False, never raises.
-  2. _try_bus_action: unexpected exception from event_bus → False, not raised.
-  3. bulk_approve: low-risk record with a real tma_write payload is actually
-     executed via _execute_tma_write before being counted as approved.
-  4. bulk_approve: execution failure keeps the record out of "approved" and
-     puts it in "failed", instead of the old bug (direct PATCH to אושר with
-     no execution at all).
-  5. bulk_approve: never touches high/medium risk records (hard rule).
-  6. _claim_and_execute_approval: unexpected exception after claim reverts
-     the record from מעבד back to ממתין instead of leaving it stuck.
+  1. _try_bus_action: real sync -> True; "miss" strings (not found / no
+     subscriber / restart-lost in-memory item) -> False, never raises.
+  2. _try_bus_action: unexpected exception from event_bus -> False, not raised.
+  3. bulk_approve: low-risk, contract-linked record is actually routed
+     through action_gateway.approve() before being counted as approved.
+  4. bulk_approve: a contract that ends up "failed" keeps the record out of
+     "approved" and puts it in "failed" — never a bare status flip with no
+     execution (the original PR-0C0 bug).
+  5. bulk_approve: never touches high/medium risk records (hard rule),
+     and never touches legacy (no action_contract_id) records either
+     (Phase 4B-2 audit §8).
+  6. _claim_and_execute_approval: an orphaned projection (action_contract_id
+     set but no matching canonical contract) is refused, not silently
+     treated as success.
   7. Consistency: act_on_approval's approve/reject responses surface
      bus_synced truthfully (True only on a real event_bus sync).
 """
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 import types
+from contextlib import ExitStack
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -78,6 +86,94 @@ def _bulk(identity) -> dict:
         return resp.json
 
 
+# ── Fake ActionGateway (same pattern as test_approval_concurrency.py) ──
+
+class _FakeContract:
+    def __init__(self, contract_id: str, status: str = "pending"):
+        self.contract_id = contract_id
+        self.status = status
+
+
+class _FakeRepository:
+    """Non-None sentinel — presence alone signals durable persistence available."""
+
+
+class _FakeLedger:
+    def __init__(self):
+        self._repository = _FakeRepository()
+
+
+class _FakeGateway:
+    def __init__(self):
+        self._ledger = _FakeLedger()
+        self.contracts: dict[str, _FakeContract] = {}
+        self.approve_calls: list[str] = []
+        # per-contract_id outcome override; default "completed"
+        self.outcomes: dict[str, str] = {}
+
+    def find_contract(self, contract_id):
+        return self.contracts.get(contract_id)
+
+    def approve(self, contract_id, approver, approver_role=""):
+        self.approve_calls.append(contract_id)
+        c = self.contracts.get(contract_id)
+        if c is None:
+            return "⚠️ פעולה לא נמצאה."
+        if c.status != "pending":
+            return f"⚠️ הפעולה אינה במצב המתנה (מצב נוכחי: {c.status})."
+        outcome = self.outcomes.get(contract_id, "completed")
+        c.status = outcome
+        if outcome in ("completed", "executed"):
+            return "✅ בוצע: test"
+        return "❌ ביצוע נכשל: simulated failure"
+
+    def reject(self, contract_id, rejected_by=""):
+        c = self.contracts.get(contract_id)
+        if c is None:
+            return "⚠️ פעולה לא נמצאה."
+        if c.status != "pending":
+            return f"⚠️ הפעולה אינה במצב המתנה (מצב נוכחי: {c.status})."
+        c.status = "rejected"
+        return "🚫 הפעולה בוטלה."
+
+
+def _patched(gateway, at_list=None, at_get_record=None, at_patch=None, extra=()) -> ExitStack:
+    stack = ExitStack()
+    cms = [
+        patch("core.action_gateway.action_gateway", gateway),
+        patch("core.database.get_pool", return_value=object()),
+        patch("feature_flags.is_enabled", return_value=True),
+        patch("tma_api._try_bus_action", return_value=False),
+        patch("tma_api._audit"),
+        patch("tma_api._notify_owner"),
+        *extra,
+    ]
+    if at_list is not None:
+        cms.append(patch("tma_api._at_list", return_value=at_list))
+    if at_get_record is not None:
+        cms.append(patch("tma_api._at_get_record", side_effect=at_get_record))
+    if at_patch is not None:
+        cms.append(patch("tma_api._at_patch", side_effect=at_patch))
+    for cm in cms:
+        stack.enter_context(cm)
+    return stack
+
+
+def _rec(rec_id: str, contract_id: str = "", risk: str = "low", legacy: bool = False) -> dict:
+    return {
+        "id": rec_id,
+        "fields": {
+            ApprovalsFields.STATUS:              ApprovalStatus.PENDING,
+            ApprovalsFields.ACTION:                "add lead",
+            ApprovalsFields.RISK_LEVEL:            risk,
+            ApprovalsFields.CONTEXT_ID:            f"ctx_{rec_id}",
+            ApprovalsFields.CONTEXT_DATA:          "",
+            ApprovalsFields.ACTION_CONTRACT_ID:    "" if legacy else (contract_id or f"c_{rec_id}"),
+            ApprovalsFields.LEGACY_READ_ONLY:      legacy,
+        },
+    }
+
+
 # ══════════════════════════════════════════════════════════════════
 # 1. _try_bus_action: miss strings → False, never raises
 # ══════════════════════════════════════════════════════════════════
@@ -125,142 +221,93 @@ chk("Test2: exception from event_bus → False", result is False)
 
 
 # ══════════════════════════════════════════════════════════════════
-# 3. bulk_approve: low-risk record actually executes before "approved"
+# 3. bulk_approve: low-risk, contract-linked record is actually routed
+#    through action_gateway.approve() before being counted as approved
 # ══════════════════════════════════════════════════════════════════
-print("\n── Test 3: bulk_approve executes tma_write before counting ──")
+print("\n── Test 3: bulk_approve routes through action_gateway.approve() ──")
 
-tma_write_payload = json.dumps({
-    "type": "tma_write", "action": "add", "table": "Leads", "op": "post", "fields": {},
-})
+gw3 = _FakeGateway()
+gw3.contracts["c_recA"] = _FakeContract("c_recA")
+gw3.outcomes["c_recA"] = "completed"
 
-def _low_risk_rec(rec_id: str, ctx_data: str = "") -> dict:
-    return {
-        "id": rec_id,
-        "fields": {
-            ApprovalsFields.STATUS: ApprovalStatus.PENDING,
-            ApprovalsFields.ACTION: "add lead",
-            "רמת סיכון": "low",
-            ApprovalsFields.CONTEXT_ID: f"ctx_{rec_id}",
-            ApprovalsFields.CONTEXT_DATA: ctx_data,
-        },
-    }
-
-execute_calls: list[dict] = []
-
-def _record_execute(payload, identity):
-    execute_calls.append(payload)
-    return {"ok": True, "record_id": "recNEW1"}
-
-patches_recorded: list[dict] = []
-
-def _record_patch(table, rec_id, fields):
-    patches_recorded.append({"rec_id": rec_id, **fields})
-    return True
-
-with (
-    patch("tma_api._at_list", return_value=[_low_risk_rec("recA", tma_write_payload)]),
-    patch("tma_api._at_get_record", side_effect=lambda t, rid: _low_risk_rec("recA", tma_write_payload)),
-    patch("tma_api._at_patch", side_effect=_record_patch),
-    patch("tma_api._execute_tma_write", side_effect=_record_execute),
-    patch("tma_api._try_bus_action", return_value=False),
-    patch("tma_api._audit"),
-    patch("tma_api._notify_owner"),
-):
-    execute_calls.clear()
-    patches_recorded.clear()
+with _patched(gw3, at_list=[_rec("recA")], at_get_record=lambda t, rid: _rec("recA"),
+              at_patch=lambda t, rid, fields: True):
     resp = _bulk(_owner())
 
-chk("Test3: _execute_tma_write was actually called", len(execute_calls) == 1)
+chk("Test3: action_gateway.approve() was actually called", gw3.approve_calls == ["c_recA"])
+chk("Test3: contract ended completed", gw3.contracts["c_recA"].status == "completed")
 chk("Test3: approved count is 1", resp.get("approved") == 1)
 chk("Test3: response has failed/skipped keys", "failed" in resp and "skipped" in resp)
 
 
 # ══════════════════════════════════════════════════════════════════
-# 4. bulk_approve: execution failure → failed, not approved (old bug)
+# 4. bulk_approve: contract ends failed → failed bucket, not approved
+#    (the original PR-0C0 bug: a bare status flip with no real execution)
 # ══════════════════════════════════════════════════════════════════
-print("\n── Test 4: bulk_approve execution failure → failed bucket ───")
+print("\n── Test 4: bulk_approve failure → failed bucket, never approved ─")
 
-def _failing_execute(payload, identity):
-    return {"ok": False, "error": "airtable 422"}
+gw4 = _FakeGateway()
+gw4.contracts["c_recB"] = _FakeContract("c_recB")
+gw4.outcomes["c_recB"] = "failed"
 
-with (
-    patch("tma_api._at_list", return_value=[_low_risk_rec("recB", tma_write_payload)]),
-    patch("tma_api._at_get_record", side_effect=lambda t, rid: _low_risk_rec("recB", tma_write_payload)),
-    patch("tma_api._at_patch", side_effect=_record_patch),
-    patch("tma_api._execute_tma_write", side_effect=_failing_execute),
-    patch("tma_api._try_bus_action", return_value=False),
-    patch("tma_api._audit"),
-    patch("tma_api._notify_owner"),
-):
+patches_recorded: list[dict] = []
+
+
+def _record_patch(table, rec_id, fields):
+    patches_recorded.append(dict(fields))
+    return True
+
+
+with _patched(gw4, at_list=[_rec("recB")], at_get_record=lambda t, rid: _rec("recB"),
+              at_patch=_record_patch):
     patches_recorded.clear()
     resp = _bulk(_owner())
 
-statuses = [p.get(ApprovalsFields.STATUS) for p in patches_recorded]
+statuses = [p.get(ApprovalsFields.STATUS) for p in patches_recorded if ApprovalsFields.STATUS in p]
 chk("Test4: approved count is 0", resp.get("approved") == 0)
 chk("Test4: failed count is 1", resp.get("failed") == 1)
-chk("Test4: record ends at נכשל, never אושר", ApprovalStatus.APPROVED not in statuses)
-chk("Test4: record was claimed (מעבד) before failing", ApprovalStatus.PROCESSING in statuses)
+chk("Test4: record ends at נכשל, never אושר",
+    ApprovalStatus.FAILED in statuses and ApprovalStatus.APPROVED not in statuses)
 
 
 # ══════════════════════════════════════════════════════════════════
-# 5. bulk_approve: never touches high/medium risk records
+# 5. bulk_approve: never touches high/medium risk or legacy records
 # ══════════════════════════════════════════════════════════════════
-print("\n── Test 5: bulk_approve skips high/medium risk ──────────────")
+print("\n── Test 5: bulk_approve skips high-risk and legacy rows ─────")
 
-def _high_risk_rec(rec_id: str) -> dict:
-    return {
-        "id": rec_id,
-        "fields": {
-            ApprovalsFields.STATUS: ApprovalStatus.PENDING,
-            ApprovalsFields.ACTION: "delete everything",
-            "רמת סיכון": "high",
-            ApprovalsFields.CONTEXT_ID: "ctx_high",
-            ApprovalsFields.CONTEXT_DATA: "",
-        },
-    }
+gw5 = _FakeGateway()
+gw5.contracts["c_recC"] = _FakeContract("c_recC")   # high risk — must never be reached
+# recD is contract-linked but legacy_read_only would never be set alongside
+# a real contract_id in practice; here we simulate the no-contract-id case.
 
-claim_calls: list[str] = []
+recs = [
+    _rec("recC", risk="high"),
+    _rec("recD", legacy=True),   # no action_contract_id — must be skipped
+]
 
-def _tracking_claim(approval_id, identity):
-    claim_calls.append(approval_id)
-    return {"ok": True, "status_code": 200, "new_status": ApprovalStatus.APPROVED,
-            "action_label": "x", "ctx_id": "", "bus_synced": False, "execution_result": None}
-
-with (
-    patch("tma_api._at_list", return_value=[_high_risk_rec("recC")]),
-    patch("tma_api._claim_and_execute_approval", side_effect=_tracking_claim),
-    patch("tma_api._audit"),
-    patch("tma_api._notify_owner"),
-):
-    claim_calls.clear()
+with _patched(gw5, at_list=recs, at_get_record=lambda t, rid: None, at_patch=lambda t, rid, f: True):
     resp = _bulk(_owner())
 
-chk("Test5: high-risk record never claimed/executed", len(claim_calls) == 0)
-chk("Test5: high-risk record is skipped", resp.get("skipped") == 1)
+chk("Test5: no contract ever approved", gw5.approve_calls == [])
+chk("Test5: both records skipped", resp.get("skipped") == 2)
 chk("Test5: approved count is 0", resp.get("approved") == 0)
 
 
 # ══════════════════════════════════════════════════════════════════
-# 6. _claim_and_execute_approval: exception after claim reverts to ממתין
+# 6. _claim_and_execute_approval: orphaned projection (contract_id set,
+#    no matching canonical contract) is refused, not silently "succeeded"
 # ══════════════════════════════════════════════════════════════════
-print("\n── Test 6: stuck-PROCESSING recovery on unexpected exception ─")
+print("\n── Test 6: orphaned projection is refused ────────────────────")
 
-def _explode_execute(payload, identity):
-    raise RuntimeError("network blew up mid-execution")
+gw6 = _FakeGateway()  # no contracts registered — find_contract() always misses
 
-with (
-    patch("tma_api._at_get_record", return_value=_low_risk_rec("recD", tma_write_payload)),
-    patch("tma_api._at_patch", side_effect=_record_patch),
-    patch("tma_api._execute_tma_write", side_effect=_explode_execute),
-):
-    patches_recorded.clear()
-    outcome = _tma._claim_and_execute_approval("recD", _owner())
+with _patched(gw6, at_get_record=lambda t, rid: _rec("recE", contract_id="c_missing"),
+              at_patch=lambda t, rid, f: True):
+    outcome = _tma._claim_and_execute_approval("recE", _owner())
 
-statuses = [p.get(ApprovalsFields.STATUS) for p in patches_recorded]
 chk("Test6: outcome is not ok", outcome.get("ok") is False)
-chk("Test6: claimed (מעבד) then reverted to ממתין, never stuck",
-    statuses == [ApprovalStatus.PROCESSING, ApprovalStatus.PENDING])
-chk("Test6: never reached אושר", ApprovalStatus.APPROVED not in statuses)
+chk("Test6: status_code is 404 (orphaned reference)", outcome.get("status_code") == 404)
+chk("Test6: action_gateway.approve() never called for an orphaned contract", gw6.approve_calls == [])
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -270,38 +317,28 @@ print("\n── Test 7: bus_synced surfaced truthfully on reject ─────
 
 _act_raw = _tma.act_on_approval.__wrapped__
 
+gw7 = _FakeGateway()
+gw7.contracts["c_recE"] = _FakeContract("c_recE")
+
+
 def _reject_rec() -> dict:
-    return {
-        "id": "recE",
-        "fields": {
-            ApprovalsFields.STATUS: ApprovalStatus.PENDING,
-            ApprovalsFields.ACTION: "test",
-            ApprovalsFields.CONTEXT_ID: "ctx_e",
-            ApprovalsFields.CONTEXT_DATA: "",
-        },
-    }
+    return _rec("recE", contract_id="c_recE")
+
 
 with _app.test_request_context("/api/approvals/recE", method="POST", json={"action": "reject"}):
-    with (
-        patch("tma_api._at_get_record", return_value=_reject_rec()),
-        patch("tma_api._at_patch", return_value=True),
-        patch("tma_api._try_bus_action", return_value=True),
-        patch("tma_api._audit"),
-        patch("tma_api._notify_owner"),
-    ):
+    with _patched(gw7, at_get_record=lambda t, rid: _reject_rec(), at_patch=lambda t, rid, f: True,
+                  extra=[patch("tma_api._try_bus_action", return_value=True)]):
         result = _act_raw("recE", identity=_owner())
         resp, code = result if isinstance(result, tuple) else (result, 200)
 
 chk("Test7: bus_synced True is surfaced in response", resp.json.get("bus_synced") is True)
 
+gw7b = _FakeGateway()
+gw7b.contracts["c_recE"] = _FakeContract("c_recE")
+
 with _app.test_request_context("/api/approvals/recE", method="POST", json={"action": "reject"}):
-    with (
-        patch("tma_api._at_get_record", return_value=_reject_rec()),
-        patch("tma_api._at_patch", return_value=True),
-        patch("tma_api._try_bus_action", return_value=False),
-        patch("tma_api._audit"),
-        patch("tma_api._notify_owner"),
-    ):
+    with _patched(gw7b, at_get_record=lambda t, rid: _reject_rec(), at_patch=lambda t, rid, f: True,
+                  extra=[patch("tma_api._try_bus_action", return_value=False)]):
         result = _act_raw("recE", identity=_owner())
         resp, code = result if isinstance(result, tuple) else (result, 200)
 

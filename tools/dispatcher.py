@@ -388,6 +388,20 @@ def dispatch_tool(
                     tier=inputs.get("tier", ""),
                 )
 
+            # ── Phase 4B-2 wiring — TMA write-through-approval adapter ──
+            case "tma_write":
+                return approval_actions.tma_write(
+                    op=inputs.get("op", ""),
+                    table=inputs.get("table", ""),
+                    action=inputs.get("action", ""),
+                    requested_by=inputs.get("requested_by", ""),
+                    fields=inputs.get("fields", {}),
+                    record_id=inputs.get("record_id", ""),
+                    audit_action=inputs.get("audit_action", ""),
+                    audit_details=inputs.get("audit_details", ""),
+                    identity=identity,
+                )
+
             # ── Unknown ───────────────────────────────
             case _:
                 logger.warning(f"[Dispatch] Unknown tool: {name}")

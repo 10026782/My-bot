@@ -24,6 +24,8 @@ EXPECTED_APPROVAL_TOOLS = frozenset({
     "media_save_to_memory",
     "send_followup",
     "send_recovery",
+    # Phase 4B-2 wiring — TMA write-through-approval adapter
+    "tma_write",
 })
 
 

@@ -484,124 +484,167 @@ def _queue_tma_write_approval(action: str, payload: dict, identity, label: str) 
 
         # Low — no gate.
 
-    approval_payload = {
-        "type": "tma_write",
+    # ══════════════════════════════════════════════════════════════════
+    # Phase 4B-2 wiring — Approvals is now a non-authoritative TMA display
+    # projection of ActionContracts (core/action_gateway.py), never an
+    # independent source of execution authority. Fail closed unless BOTH
+    # durable ActionContract persistence (FEATURE_ACTION_CONTRACT_PERSISTENCE)
+    # and PostgreSQL atomic execution claims (FEATURE_ATOMIC_CLAIMS) are
+    # available — no fallback to a RAM-only ledger or direct execution. See
+    # the Phase 4B-2 audit's authority split: ActionContracts = canonical
+    # contract + lifecycle/audit store; PostgreSQL = the sole execution-
+    # ownership primitive (reachable only through
+    # ActionGateway._execute_contract()); Approvals = display-only
+    # projection, never sufficient by itself to execute anything.
+    # ══════════════════════════════════════════════════════════════════
+    from core.action_gateway import action_gateway as _gw  # noqa: PLC0415
+    import core.database as _db  # noqa: PLC0415
+
+    durable_persistence_available = (
+        feature_flags.is_enabled("FEATURE_ACTION_CONTRACT_PERSISTENCE")
+        and getattr(_gw._ledger, "_repository", None) is not None
+    )
+    atomic_claims_available = (
+        feature_flags.is_enabled("FEATURE_ATOMIC_CLAIMS")
+        and _db.get_pool() is not None
+    )
+    if not (durable_persistence_available and atomic_claims_available):
+        logger.error(
+            "_queue_tma_write_approval: refusing action=%s — durable_persistence=%s "
+            "atomic_claims=%s (both required; no RAM-only/direct-execution fallback)",
+            action, durable_persistence_available, atomic_claims_available,
+        )
+        return _reject(
+            "TMA write approvals require the durable approval infrastructure to be "
+            "fully online — contact the owner.",
+            code=503,
+        )
+
+    op = payload.get("op", "")
+    table = payload.get("table", "")
+    if op not in ("post", "patch"):
+        return _reject(f"unsupported TMA write operation: {op!r}", code=400)
+    from tools.approval_actions import _TMA_WRITE_ALLOWED_TABLES  # noqa: PLC0415
+    if table not in _TMA_WRITE_ALLOWED_TABLES:
+        return _reject(f"table '{table}' is not permitted for TMA writes", code=400)
+
+    tool_inputs = {
+        "op": op,
+        "table": table,
         "action": action,
         "requested_by": _identity_ref(identity),
-        **payload,
+        **{k: v for k, v in payload.items() if k not in ("op", "table")},
     }
-    rec = _at_post("Approvals", {
+
+    result = _gw.propose_action(
+        tenant_id=identity.tenant_id,
+        canonical_user_id=identity.memory_key,
+        tool_name="tma_write",
+        tool_inputs=tool_inputs,
+        origin_channel="tma",
+        origin_chat_id=identity.user_id,
+        requires_approval=True,
+        identity=identity,
+        trusted_source="tma_api",
+    )
+
+    if not result.ok:
+        if result.failure_code in ("persistence_failed", "persistence_lookup_failed"):
+            logger.error(
+                "_queue_tma_write_approval: propose_action persistence failure for "
+                "action=%s: %s", action, result.reason,
+            )
+            return _reject(result.user_message or result.reason, code=503)
+        contract_id = result.contract_id
+        if not contract_id:
+            return _reject(result.user_message or result.reason, code=409)
+        existing_contract = _gw.find_contract(contract_id)
+        if existing_contract and existing_contract.status == "pending":
+            # Self-heal: the exact same request (same fingerprint) is still
+            # pending — recover/ensure its projection instead of erroring,
+            # in case an earlier attempt's projection write failed.
+            rec = _ensure_approval_projection(contract_id, action, label, risk, identity)
+            if rec:
+                return rec["id"], {
+                    "status": "pending_approval",
+                    "approval_id": rec["id"],
+                    "contract_id": contract_id,
+                    "message": result.user_message or result.reason,
+                }, 202
+        # Any other duplicate state (approved/executing/executed/completed/
+        # outcome_unknown) — do not touch Approvals; surface the Gateway's
+        # own message rather than guessing at a display projection.
+        return _reject(result.user_message or result.reason, code=409)
+
+    contract_id = result.contract_id
+    rec = _ensure_approval_projection(contract_id, action, label, risk, identity)
+    if not rec:
+        # Phase 4B-2 audit §6: a persisted canonical contract is never
+        # deleted or duplicated because the projection write failed. Surface
+        # an explicit visibility failure — the contract itself remains valid
+        # and will still execute correctly once approved.
+        logger.error(
+            "_queue_tma_write_approval: projection write failed for new contract=%s "
+            "action=%s — canonical ActionContract is valid; only the TMA display "
+            "projection is missing.",
+            contract_id, action,
+        )
+        return "", {
+            "status": "approved_pending_projection",
+            "contract_id": contract_id,
+            "message": (
+                "הבקשה נקלטה לאישור, אך תצוגת ה-Approvals לא עודכנה כעת. "
+                "הבקשה עצמה תקינה ולא תבוצע כפול."
+            ),
+        }, 202
+
+    approval_id = rec["id"]
+    return approval_id, {
+        "status": "pending_approval",
+        "approval_id": approval_id,
+        "contract_id": contract_id,
+        "message": "Approval required",
+    }, 202
+
+
+def _find_approval_projection_by_contract(contract_id: str) -> dict | None:
+    """Idempotent lookup — is there already an Approvals projection row for
+    this ActionContract? contract_id is always a server-generated uuid4
+    (core.action_gateway.ActionGateway.propose_action), never user input, so
+    no formula-injection risk from embedding it directly."""
+    recs = _at_list(
+        "Approvals",
+        f"{{{ApprovalsFields.ACTION_CONTRACT_ID}}}='{contract_id}'",
+        max_records=2,
+    )
+    return recs[0] if recs else None
+
+
+def _ensure_approval_projection(
+    contract_id: str, action: str, label: str, risk: str, identity,
+) -> dict | None:
+    """Best-effort, idempotent create of the Approvals display projection for
+    an already-persisted ActionContract. Only ever called after the
+    canonical contract is durably saved; its own failure never rolls back or
+    duplicates that contract (Phase 4B-2 audit §6). CONTEXT_DATA is always
+    left empty — the canonical payload lives in ActionContracts only."""
+    existing = _find_approval_projection_by_contract(contract_id)
+    if existing:
+        return existing
+    from core.approvals_projection import project_lifecycle_status  # noqa: PLC0415
+    return _at_post("Approvals", {
         ApprovalsFields.ACTION: label,
         ApprovalsFields.REQUESTED_BY: _identity_ref(identity),
         ApprovalsFields.REQUESTED_AT: datetime.now(timezone.utc).isoformat(),
         ApprovalsFields.RISK_LEVEL: _RISK_LEVEL_AIRTABLE.get(risk, "high"),
         ApprovalsFields.CONTEXT_TYPE: "tma_write",
         ApprovalsFields.CONTEXT_ID: action,
-        ApprovalsFields.CONTEXT_DATA: json.dumps(approval_payload, ensure_ascii=False),
+        ApprovalsFields.CONTEXT_DATA: "",
         ApprovalsFields.STATUS: ApprovalStatus.PENDING,
+        ApprovalsFields.ACTION_CONTRACT_ID: contract_id,
+        ApprovalsFields.LEGACY_READ_ONLY: False,
+        ApprovalsFields.PROJECTED_LIFECYCLE_STATUS: project_lifecycle_status("pending"),
     })
-    if not rec:
-        logger.error(f"_queue_tma_write_approval: Approvals POST failed for action={action}")
-        raise RuntimeError(f"approval_queue_failed: {action}")
-    approval_id = rec["id"]
-    return approval_id, {
-        "status": "pending_approval",
-        "approval_id": approval_id,
-        "message": "Approval required",
-    }, 202
-
-
-def _receipt(action: str, table: str, record_id: str, requested_by: str, approved_by: str) -> dict:
-    return {
-        "action": action,
-        "table": table,
-        "record_id": record_id,
-        "requested_by": requested_by,
-        "approved_by": approved_by,
-        "status": "executed",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-
-
-def _persist_receipt(receipt: dict) -> str | None:
-    """Persist approval execution receipt to Interaction Log; never rolls back writes."""
-    try:
-        rec = _at_post(Tables.INTERACTION_LOG, {
-            InteractionLogFields.TITLE: f"[TMA receipt] {receipt.get('action', '')}",
-            InteractionLogFields.SUMMARY: json.dumps(receipt, ensure_ascii=False),
-            InteractionLogFields.TIMESTAMP: receipt.get("timestamp", ""),
-            InteractionLogFields.PARTICIPANTS: receipt.get("approved_by", ""),
-            InteractionLogFields.KEY_INSIGHTS: (
-                f"{receipt.get('status', '')} {receipt.get('table', '')}/{receipt.get('record_id', '')}"
-            ).strip(),
-        })
-        if rec:
-            return None
-        warning = "receipt persistence failed: Interaction Log write returned no record"
-        logger.warning(f"[Receipt] {warning}")
-        return warning
-    except Exception as e:
-        warning = f"receipt persistence failed: {type(e).__name__}"
-        logger.warning(f"[Receipt] {warning}: {e}")
-        return warning
-
-
-def _clean_fields_select_values(table: str, fields: dict) -> dict:
-    """Unwrap embedded quotes from select field values before writing to Airtable."""
-    if table not in ("Leads",):
-        return fields
-    cleaned = dict(fields)
-    for k in _LEAD_SELECT_FIELDS:
-        if k in cleaned:
-            cleaned[k] = _clean_select_value(cleaned[k])
-    return cleaned
-
-
-# Allowlist of tables that TMA write-through-approval is permitted to touch.
-_TMA_WRITE_ALLOWED_TABLES = {
-    "Leads",
-    "משימות (Tasks)", "Tasks",
-    "ProjectsHub",
-    "Approvals",
-    "אנשי קשר (Contacts)", "Contacts",
-}
-
-
-def _execute_tma_write(payload: dict, approved_by_identity) -> dict:
-    action = payload.get("action", "")
-    table = payload.get("table", "")
-    requested_by = payload.get("requested_by", "unknown")
-    approved_by = _identity_ref(approved_by_identity)
-
-    if table not in _TMA_WRITE_ALLOWED_TABLES:
-        logger.error(f"_execute_tma_write: table '{table}' not in allowlist — rejected")
-        return {"ok": False, "error": f"table '{table}' is not permitted for TMA writes"}
-
-    if payload.get("op") == "post":
-        rec = _at_post(table, payload.get("fields", {}))
-        if not rec:
-            return {"ok": False, "error": f"failed to create record in {table}"}
-        record_id = rec.get("id", "")
-    elif payload.get("op") == "patch":
-        record_id = payload.get("record_id", "")
-        fields = _clean_fields_select_values(table, payload.get("fields", {}))
-        ok = _at_patch(table, record_id, fields)
-        if not ok:
-            return {"ok": False, "error": f"failed to update record in {table}", "record_id": record_id}
-    else:
-        return {"ok": False, "error": "unsupported TMA write operation"}
-
-    _audit(payload.get("audit_action", action), approved_by_identity, details=payload.get("audit_details", ""))
-    receipt = _receipt(action, table, record_id, requested_by, approved_by)
-    receipt_warning = _persist_receipt(receipt)
-    result = {
-        "ok": True,
-        "action": "approve",
-        "receipt": receipt,
-    }
-    if receipt_warning:
-        result["warning"] = receipt_warning
-    return result
 
 
 def _validate_initdata(init_data_str: str) -> dict | None:
@@ -2175,10 +2218,12 @@ def get_approvals(identity):
 def bulk_approve(identity):
     """Approve ALL low-risk pending approvals. High/medium risk are NEVER bulk-approved.
 
-    PR-0C0: previously patched status straight to אושר without ever calling
-    _execute_tma_write() — bulk approve performed no write at all. Now routes
-    each low-risk record through the same claim -> execute -> finalize helper
-    used by the single-item approve path, so "approved" only means "executed".
+    Phase 4B-2: routes each low-risk record through the same
+    claim -> load-contract -> approve -> re-read helper used by the
+    single-item approve path (_claim_and_execute_approval), so "approved"
+    only means "canonical ActionContract executed". Rows with no
+    action_contract_id / legacy_read_only=True are skipped, never
+    bulk-actioned — see the Phase 4B-2 audit's legacy policy (§8).
     """
     if not identity.is_owner:
         return jsonify({"error": "forbidden"}), 403
@@ -2189,15 +2234,18 @@ def bulk_approve(identity):
     skipped  = []
 
     for rec in recs:
-        risk = (rec.get("fields", {}).get("רמת סיכון", "") or "").strip()
-        # Hard rule: NEVER bulk-approve high risk
-        if risk.lower() not in _RISK_LOW:
+        f = rec.get("fields", {})
+        risk = (f.get(ApprovalsFields.RISK_LEVEL, "") or "").strip()
+        contract_id = f.get(ApprovalsFields.ACTION_CONTRACT_ID, "")
+        legacy_read_only = bool(f.get(ApprovalsFields.LEGACY_READ_ONLY, False))
+        # Hard rules: NEVER bulk-approve high risk, NEVER bulk-approve a
+        # legacy/no-contract row (not actionable — Phase 4B-2 audit §8).
+        if risk.lower() not in _RISK_LOW or not contract_id or legacy_read_only:
             skipped.append(rec["id"])
             continue
         outcome = _claim_and_execute_approval(rec["id"], identity)
         if outcome.get("ok"):
             approved.append(rec["id"])
-            _try_bus_action(outcome.get("ctx_id", ""), "approve")
         else:
             logger.warning("[bulk_approve] record %s failed: %s", rec["id"], outcome)
             failed.append(rec["id"])
@@ -2207,7 +2255,7 @@ def bulk_approve(identity):
         _notify_owner(
             f"✅ TMA: {len(approved)} פעולות Low Risk אושרו ובוצעו\n"
             f"על ידי: {identity.display_name or identity.user_id}\n"
-            f"נכשלו: {len(failed)} | דחויות (לא low-risk): {len(skipped)}"
+            f"נכשלו: {len(failed)} | דחויות (לא low-risk / legacy): {len(skipped)}"
         )
 
     return jsonify({
@@ -2218,8 +2266,11 @@ def bulk_approve(identity):
     })
 
 
-# Per-approval in-process locks — prevent concurrent double-claim within a single worker.
-# Airtable מעבד status is the durable claim; this lock closes the in-process race window.
+# Per-approval in-process locks — reduce concurrent double-claim within a
+# single worker process. The genuine cross-process execution-ownership
+# boundary is the PostgreSQL atomic claim inside
+# ActionGateway._execute_contract() (Phase 4B-2) — this lock is a same-
+# process race-window guard only, not the source of truth.
 _APPROVAL_LOCKS: dict[str, threading.Lock] = {}
 _APPROVAL_LOCKS_GUARD = threading.Lock()
 
@@ -2231,14 +2282,67 @@ def _get_approval_lock(approval_id: str) -> threading.Lock:
         return _APPROVAL_LOCKS[approval_id]
 
 
-# PR-0C0 (BUG-TMA-APPROVAL-TRUTHFULNESS): shared claim -> execute -> finalize
-# flow for a single Approvals record. Used by both act_on_approval() (single)
-# and bulk_approve() (previously patched straight to APPROVED without ever
-# calling _execute_tma_write() at all -- "bulk approve" performed no write).
-# Never marks APPROVED without either a successful execution or no tma_write
-# payload to execute. On unexpected exception after claiming, reverts the
-# record to PENDING instead of leaving it stuck at PROCESSING forever with
-# no retry path.
+def _sync_approval_projection_status(approval_id: str, contract) -> None:
+    """After approve()/reject() re-reads the canonical ActionContract, mirror
+    its status into the Approvals projection fields — display-only, never
+    authoritative for claim/execution. Never touches CONTEXT_DATA. The
+    legacy Hebrew STATUS field is kept in sync purely so the existing
+    get_approvals()/bulk_approve() '{סטטוס}=ממתין' list-formula continues to
+    drop resolved rows — it is not read back for any authority decision."""
+    from core.approvals_projection import project_lifecycle_status  # noqa: PLC0415
+
+    projected = project_lifecycle_status(contract.status)
+    legacy_status = {
+        "draft":            ApprovalStatus.PENDING,
+        "pending":          ApprovalStatus.PENDING,
+        "approved":         ApprovalStatus.PROCESSING,
+        "executing":        ApprovalStatus.PROCESSING,
+        "outcome_unknown":  ApprovalStatus.PROCESSING,
+        "completed":        ApprovalStatus.APPROVED,
+        "executed":         ApprovalStatus.APPROVED,
+        "failed":           ApprovalStatus.FAILED,
+        "rejected":         ApprovalStatus.REJECTED,
+        "superseded":       ApprovalStatus.REJECTED,
+    }.get(contract.status, ApprovalStatus.PROCESSING)
+    _at_patch("Approvals", approval_id, {
+        ApprovalsFields.PROJECTED_LIFECYCLE_STATUS: projected,
+        ApprovalsFields.STATUS: legacy_status,
+    })
+
+
+def _load_actionable_projection(approval_id: str) -> tuple[dict | None, dict]:
+    """Shared precondition for both approve and reject: fetch the Approvals
+    row and refuse (Phase 4B-2 audit §8) unless it carries a live
+    action_contract_id and is not legacy_read_only. Returns
+    (fields_dict_or_None, refusal_outcome_dict). fields_dict is None iff a
+    refusal_outcome was produced."""
+    fresh = _at_get_record("Approvals", approval_id)
+    if not fresh:
+        return None, {"ok": False, "status_code": 404, "error": "approval not found"}
+    f = fresh.get("fields", {})
+    action_label = f.get(ApprovalsFields.ACTION, approval_id)
+    ctx_id = f.get(ApprovalsFields.CONTEXT_ID, "")
+    contract_id = f.get(ApprovalsFields.ACTION_CONTRACT_ID, "")
+    legacy_read_only = bool(f.get(ApprovalsFields.LEGACY_READ_ONLY, False))
+    if not contract_id or legacy_read_only:
+        return None, {
+            "ok": False, "status_code": 409,
+            "error": "this approval predates ActionContracts and cannot be actioned — submit a new request",
+            "action_label": action_label, "ctx_id": ctx_id,
+        }
+    return f, {}
+
+
+# Phase 4B-2: shared claim -> load-canonical-contract -> approve -> re-read
+# flow for a single Approvals projection row. Used by both act_on_approval()
+# (single) and bulk_approve(). Approvals.CONTEXT_DATA is never read or
+# deserialized here — the canonical, frozen payload lives only in
+# ActionContracts, and execution is driven entirely by
+# ActionGateway.approve() -> _execute_contract(), which acquires the
+# PostgreSQL atomic claim before any dispatcher call. On return, only the
+# projection fields (projected_lifecycle_status + legacy display STATUS) are
+# updated — the canonical contract's own lifecycle write already happened
+# inside approve() and is never re-derived from this projection.
 def _claim_and_execute_approval(approval_id: str, identity) -> dict:
     """
     Returns a dict, always including "ok" (bool) and "status_code" (int):
@@ -2247,84 +2351,163 @@ def _claim_and_execute_approval(approval_id: str, identity) -> dict:
                 "execution_result": dict | None}
       failure: {"ok": False, "status_code": int, "error": str, "detail": ... (optional)}
     """
+    import feature_flags  # noqa: PLC0415
+    from core.action_gateway import action_gateway as _gw  # noqa: PLC0415
+    import core.database as _db  # noqa: PLC0415
+
     lock = _get_approval_lock(approval_id)
     with lock:
-        # Re-read inside lock to close the concurrent race window.
-        fresh = _at_get_record("Approvals", approval_id)
-        if not fresh:
-            return {"ok": False, "status_code": 404, "error": "approval not found"}
-        fresh_status = fresh.get("fields", {}).get(ApprovalsFields.STATUS, "")
-        if fresh_status != ApprovalStatus.PENDING:
-            return {"ok": False, "status_code": 409, "error": f"approval already {fresh_status}"}
+        f, refusal = _load_actionable_projection(approval_id)
+        if f is None:
+            return refusal
+        action_label = f.get(ApprovalsFields.ACTION, approval_id)
+        ctx_id = f.get(ApprovalsFields.CONTEXT_ID, "")
+        contract_id = f.get(ApprovalsFields.ACTION_CONTRACT_ID, "")
 
-        # Claim: mark as "מעבד" — durable lock in Airtable.
-        # A second concurrent request will see "מעבד" on its re-read -> 409.
-        claimed = _at_patch("Approvals", approval_id, {ApprovalsFields.STATUS: ApprovalStatus.PROCESSING})
-        if not claimed:
-            return {"ok": False, "status_code": 500, "error": "claim failed — could not set מעבד"}
-    # Lock released here — "מעבד" in Airtable is now the single source of truth.
-
-    f = fresh.get("fields", {})
-    action_label = f.get(ApprovalsFields.ACTION, approval_id)
-    ctx_id = f.get(ApprovalsFields.CONTEXT_ID, "")
-    context_data = f.get(ApprovalsFields.CONTEXT_DATA, "")
-
-    try:
-        execution_result = None
-        if context_data:
-            try:
-                payload = json.loads(context_data)
-            except (TypeError, ValueError):
-                payload = {}
-            if isinstance(payload, dict) and payload.get("type") == "tma_write":
-                execution_result = _execute_tma_write(payload, identity)
-                if not execution_result.get("ok"):
-                    logger.error(
-                        "[Approval] write failed after claim for %s: %s",
-                        approval_id, execution_result,
-                    )
-                    # Mark נכשל so the record reflects the real outcome.
-                    _at_patch("Approvals", approval_id, {ApprovalsFields.STATUS: ApprovalStatus.FAILED})
-                    return {
-                        "ok": False, "status_code": 500,
-                        "error": "approval execution failed", "detail": execution_result,
-                        "action_label": action_label, "ctx_id": ctx_id,
-                    }
-
-        # Execution succeeded (or no tma_write payload) — finalize to אושר.
-        _at_patch("Approvals", approval_id, {ApprovalsFields.STATUS: ApprovalStatus.APPROVED})
-    except Exception as exc:
-        # Unexpected failure after claiming — do not leave the record stuck at
-        # PROCESSING with no retry path. Revert to PENDING so a later attempt
-        # can claim and retry it, instead of a permanent 409 dead end.
-        logger.error(
-            "[Approval] unexpected error after claim for %s — reverting to pending: %s",
-            approval_id, exc, exc_info=True,
+        # Phase 4B-2: re-verify both flags at execution time, not just at
+        # propose time — do not fall back to RAM-only/direct dispatch if
+        # either was disabled since the contract was proposed.
+        durable_persistence_available = (
+            feature_flags.is_enabled("FEATURE_ACTION_CONTRACT_PERSISTENCE")
+            and getattr(_gw._ledger, "_repository", None) is not None
         )
-        try:
-            _at_patch("Approvals", approval_id, {ApprovalsFields.STATUS: ApprovalStatus.PENDING})
-        except Exception as revert_exc:
-            logger.critical(
-                "[Approval] could not revert stuck PROCESSING record %s — manual intervention needed: %s",
-                approval_id, revert_exc,
+        atomic_claims_available = (
+            feature_flags.is_enabled("FEATURE_ATOMIC_CLAIMS")
+            and _db.get_pool() is not None
+        )
+        if not (durable_persistence_available and atomic_claims_available):
+            logger.error(
+                "_claim_and_execute_approval: refusing contract=%s — durable_persistence=%s "
+                "atomic_claims=%s", contract_id, durable_persistence_available, atomic_claims_available,
             )
-        return {"ok": False, "status_code": 500, "error": "unexpected error during execution", "detail": str(exc)}
+            return {
+                "ok": False, "status_code": 503,
+                "error": "durable approval infrastructure is not fully online",
+                "action_label": action_label, "ctx_id": ctx_id,
+            }
 
-    bus_synced = False
-    if execution_result is None:
+        contract = _gw.find_contract(contract_id)
+        if not contract:
+            return {
+                "ok": False, "status_code": 404,
+                "error": "canonical ActionContract not found — orphaned projection row",
+                "action_label": action_label, "ctx_id": ctx_id,
+            }
+        if contract.status != "pending":
+            return {
+                "ok": False, "status_code": 409,
+                "error": f"approval already {contract.status}",
+                "action_label": action_label, "ctx_id": ctx_id,
+            }
+
+        # approve() is the sole enforcement boundary (BUG-074) and drives
+        # dispatch through _execute_contract() — released here only after
+        # approve() itself returns (execution already completed by then).
+        message = _gw.approve(contract_id, approver=_identity_ref(identity), approver_role=identity.role)
+    # Lock released — canonical status re-read below is authoritative
+    # regardless of message text.
+
+    updated = _gw.find_contract(contract_id)
+    if updated:
+        _sync_approval_projection_status(approval_id, updated)
+    final_status = updated.status if updated else "outcome_unknown"
+    execution_result = {"message": message, "contract_status": final_status}
+
+    if final_status in ("completed", "executed"):
         bus_synced = _try_bus_action(ctx_id, "approve")
-
+        return {
+            "ok": True, "status_code": 200, "new_status": ApprovalStatus.APPROVED,
+            "action_label": action_label, "ctx_id": ctx_id, "bus_synced": bus_synced,
+            "execution_result": execution_result,
+        }
+    if final_status == "outcome_unknown":
+        # Never collapsed into failed, never auto-retried (Phase 4B-2 audit §5).
+        return {
+            "ok": False, "status_code": 202,
+            "error": "execution outcome unknown — do not retry automatically",
+            "action_label": action_label, "ctx_id": ctx_id, "detail": execution_result,
+        }
+    if message.startswith("⛔"):
+        return {
+            "ok": False, "status_code": 403, "error": message,
+            "action_label": action_label, "ctx_id": ctx_id,
+        }
     return {
-        "ok": True, "status_code": 200, "new_status": ApprovalStatus.APPROVED,
+        "ok": False, "status_code": 500,
+        "error": f"approval execution failed: {message}",
+        "action_label": action_label, "ctx_id": ctx_id, "detail": execution_result,
+    }
+
+
+# Phase 4B-2: reject-path mirror of _claim_and_execute_approval() — same
+# load-canonical-contract precondition, drives rejection through
+# ActionGateway.reject() instead of approve(), then re-reads canonical
+# status and updates only the projection fields.
+def _claim_and_reject_approval(approval_id: str, identity, note: str = "") -> dict:
+    """
+    Returns a dict shaped like _claim_and_execute_approval()'s contract:
+      success: {"ok": True, "status_code": 200, "new_status": REJECTED,
+                "action_label": ..., "ctx_id": ..., "bus_synced": bool}
+      failure: {"ok": False, "status_code": int, "error": str}
+    """
+    from core.action_gateway import action_gateway as _gw  # noqa: PLC0415
+
+    lock = _get_approval_lock(approval_id)
+    with lock:
+        f, refusal = _load_actionable_projection(approval_id)
+        if f is None:
+            return refusal
+        action_label = f.get(ApprovalsFields.ACTION, approval_id)
+        ctx_id = f.get(ApprovalsFields.CONTEXT_ID, "")
+        contract_id = f.get(ApprovalsFields.ACTION_CONTRACT_ID, "")
+
+        contract = _gw.find_contract(contract_id)
+        if not contract:
+            return {
+                "ok": False, "status_code": 404,
+                "error": "canonical ActionContract not found — orphaned projection row",
+                "action_label": action_label, "ctx_id": ctx_id,
+            }
+        if contract.status != "pending":
+            return {
+                "ok": False, "status_code": 409,
+                "error": f"approval already {contract.status}",
+                "action_label": action_label, "ctx_id": ctx_id,
+            }
+
+        message = _gw.reject(contract_id, rejected_by=_identity_ref(identity))
+
+    updated = _gw.find_contract(contract_id)
+    if updated:
+        _sync_approval_projection_status(approval_id, updated)
+        if note:
+            _at_patch("Approvals", approval_id, {ApprovalsFields.REJECTION_NOTE: note})
+
+    if not message.startswith("🚫"):
+        return {
+            "ok": False, "status_code": 500, "error": message,
+            "action_label": action_label, "ctx_id": ctx_id,
+        }
+
+    bus_synced = _try_bus_action(ctx_id, "reject")
+    return {
+        "ok": True, "status_code": 200, "new_status": ApprovalStatus.REJECTED,
         "action_label": action_label, "ctx_id": ctx_id, "bus_synced": bus_synced,
-        "execution_result": execution_result,
     }
 
 
 @tma_api.route("/api/approvals/<approval_id>", methods=["POST"])
 @require_tma_auth
 def act_on_approval(approval_id, identity):
-    """Approve or reject a single pending approval."""
+    """Approve or reject a single pending approval.
+
+    Phase 4B-2: both branches load the canonical ActionContract behind this
+    Approvals projection row and drive the decision through
+    ActionGateway.approve()/reject() — never patches Approvals.STATUS
+    directly as if it were authoritative. Rows with no action_contract_id /
+    legacy_read_only=True are refused by the shared helpers before either
+    branch runs.
+    """
     if not identity.is_owner:
         return jsonify({"error": "forbidden"}), 403
 
@@ -2335,40 +2518,23 @@ def act_on_approval(approval_id, identity):
     if decision not in ("approve", "reject"):
         return jsonify({"error": "action must be 'approve' or 'reject'"}), 400
 
-    rec = _at_get_record("Approvals", approval_id)
-    if not rec:
-        return jsonify({"error": "approval not found"}), 404
-
-    f = rec.get("fields", {})
-    action_label = f.get(ApprovalsFields.ACTION, approval_id)
-    ctx_id = f.get(ApprovalsFields.CONTEXT_ID, "")
-
     if decision == "reject":
-        status = f.get(ApprovalsFields.STATUS, "")
-        if status != ApprovalStatus.PENDING:
-            return jsonify({"error": f"approval already {status}"}), 409
-        patch_fields: dict = {ApprovalsFields.STATUS: ApprovalStatus.REJECTED}
-        if note:
-            patch_fields[ApprovalsFields.REJECTION_NOTE] = note
-        ok = _at_patch("Approvals", approval_id, patch_fields)
-        if not ok:
-            return jsonify({"error": "update failed"}), 500
-        bus_synced = _try_bus_action(ctx_id, decision)
-        _audit("approval_reject", identity, details=f"{action_label[:100]} | note: {note[:80]}")
+        outcome = _claim_and_reject_approval(approval_id, identity, note=note)
+        if not outcome["ok"]:
+            return jsonify({"error": outcome["error"]}), outcome["status_code"]
+        _audit("approval_reject", identity, details=f"{outcome['action_label'][:100]} | note: {note[:80]}")
         _notify_owner(
-            f"REJECTED TMA: נדחה - {action_label}\n"
+            f"REJECTED TMA: נדחה - {outcome['action_label']}\n"
             f"approved_by: {identity.display_name or identity.user_id}"
             + (f"\nnote: {note}" if note else "")
         )
         return jsonify({
             "ok": True, "approval_id": approval_id, "new_status": ApprovalStatus.REJECTED,
-            "bus_synced": bus_synced,
+            "bus_synced": outcome["bus_synced"],
         })
 
-    # ── approve path: 3-state claim (ממתין → מעבד → אושר / נכשל) ──────────────────
-    # PR-0C0: claim+execute+finalize now lives in the shared
-    # _claim_and_execute_approval() helper (also used by bulk_approve()) so
-    # both endpoints go through the exact same execute-before-approve logic.
+    # ── approve path — shared claim -> canonical-contract -> approve helper,
+    # used by both this endpoint and bulk_approve() (Phase 4B-2). ──────────
     outcome = _claim_and_execute_approval(approval_id, identity)
     if not outcome["ok"]:
         body = {"error": outcome["error"]}
@@ -2376,9 +2542,9 @@ def act_on_approval(approval_id, identity):
             body["detail"] = outcome["detail"]
         return jsonify(body), outcome["status_code"]
 
-    _audit("approval_approve", identity, details=f"{action_label[:100]} | note: {note[:80]}")
+    _audit("approval_approve", identity, details=f"{outcome['action_label'][:100]} | note: {note[:80]}")
     _notify_owner(
-        f"OK TMA: אושר - {action_label}\n"
+        f"OK TMA: אושר - {outcome['action_label']}\n"
         f"approved_by: {identity.display_name or identity.user_id}"
         + (f"\nnote: {note}" if note else "")
     )

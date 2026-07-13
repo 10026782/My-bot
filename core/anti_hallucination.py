@@ -165,6 +165,10 @@ _EVIDENCE_VALIDATORS: dict[str, Any] = {
     "media_save_to_memory":  _validate_media_memory_evidence,
     "send_followup":         _validate_owner_draft_evidence,
     "send_recovery":         _validate_owner_draft_evidence,
+    # Phase 4B-2 wiring — tma_write always writes/updates a real Airtable
+    # record (Leads/Tasks/ProjectsHub/Contacts), so the same record_id shape
+    # check as airtable_add/airtable_update applies.
+    "tma_write":             _validate_airtable_evidence,
 }
 
 # Write/action/sensitive tools that must fail closed if not in _EVIDENCE_VALIDATORS.

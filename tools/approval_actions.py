@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 
 logger = logging.getLogger(__name__)
@@ -170,4 +171,172 @@ def send_recovery(
         external_id=getattr(result, "audit_id", "") or "",
         evidence={"audit_id": getattr(result, "audit_id", "") or ""},
         user_message="✅ הטיוטה נשלחה אליך להעברה ידנית",
+    )
+
+
+# ══════════════════════════════════════════════════
+# Phase 4B-2 wiring — tma_write
+#
+# Extracted from tma_api.py::_execute_tma_write (formerly called directly by
+# tma_api.py::_claim_and_execute_approval / bulk_approve() with a raw payload
+# dict deserialized from Approvals.CONTEXT_DATA). Approvals is now a
+# non-authoritative display projection of ActionContracts — tma_api.py no
+# longer performs this write itself; it only creates/approves an
+# ActionContract whose approved execution reaches this function through
+# dispatch_tool(), exactly like any other tool. Same allowlist, field-
+# cleaning, audit-write, and receipt behavior as the original — repackaged
+# into the C53-A structured result contract required by
+# core.anti_hallucination.verify_execution() (tma_write has an evidence
+# validator registered there — see _validate_airtable_evidence via
+# tool_registry/anti_hallucination wiring).
+# ══════════════════════════════════════════════════
+
+# Allowlist of tables that TMA write-through-approval is permitted to touch.
+# Mirrors tma_api.py's former _TMA_WRITE_ALLOWED_TABLES exactly.
+_TMA_WRITE_ALLOWED_TABLES = {
+    "Leads",
+    "משימות (Tasks)", "Tasks",
+    "ProjectsHub",
+    "Approvals",
+    "אנשי קשר (Contacts)", "Contacts",
+}
+
+
+def _clean_tma_write_select_value(value) -> str:
+    """Strip whitespace and unwrap any surrounding quote chars from a select value.
+    Mirrors tma_api.py::_clean_select_value exactly."""
+    if value is None:
+        return ""
+    value = str(value).strip()
+    while len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        value = value[1:-1].strip()
+    return value
+
+
+def _clean_tma_write_fields(table: str, fields: dict) -> dict:
+    """Unwrap embedded quotes from Leads select field values before writing.
+    Mirrors tma_api.py::_clean_fields_select_values exactly."""
+    if table != "Leads":
+        return fields
+    from airtable_schema import LeadFields
+    lead_select_fields = {LeadFields.STATUS, LeadFields.OUTCOME, LeadFields.NEXT_STEP}
+    cleaned = dict(fields)
+    for k in lead_select_fields:
+        if k in cleaned:
+            cleaned[k] = _clean_tma_write_select_value(cleaned[k])
+    return cleaned
+
+
+def _identity_ref(identity) -> str:
+    """Mirrors tma_api.py::_identity_ref exactly."""
+    return str(getattr(identity, "user_id", "") or getattr(identity, "display_name", "") or "unknown")
+
+
+def tma_write(
+    op: str,
+    table: str,
+    action: str = "",
+    requested_by: str = "",
+    fields: dict | None = None,
+    record_id: str = "",
+    audit_action: str = "",
+    audit_details: str = "",
+    identity=None,
+) -> dict:
+    """Executes a TMA-originated Airtable write after ActionGateway approval.
+
+    op: "post" (create) or "patch" (update). table must be in the allowlist.
+    Mirrors tma_api.py's former _execute_tma_write() behavior exactly (same
+    allowlist check, same Leads select-field cleaning, same Interaction Log
+    audit write, same receipt shape + best-effort persistence) — only the
+    outer envelope changed, from a raw {"ok": ...} dict to the C53-A
+    structured contract every other dispatcher tool returns.
+    """
+    from datetime import datetime, timezone
+    from airtable_schema import InteractionLogFields, Tables
+    from tools.airtable_gateway import airtable_create, airtable_patch
+
+    if table not in _TMA_WRITE_ALLOWED_TABLES:
+        logger.error("[approval_actions] tma_write: table '%s' not in allowlist — rejected", table)
+        return _tool_result(
+            ok=False, tool="tma_write",
+            user_message=f"❌ טבלה '{table}' אינה מורשית לכתיבה מ-TMA",
+        )
+
+    fields = dict(fields or {})
+    approved_by = _identity_ref(identity)
+
+    if op == "post":
+        rec = airtable_create(table, fields, source="tma_write")
+        if not rec:
+            return _tool_result(
+                ok=False, tool="tma_write",
+                user_message=f"❌ יצירת רשומה נכשלה ב-{table}",
+            )
+        result_record_id = rec.get("id", "") or ""
+    elif op == "patch":
+        result_record_id = record_id
+        cleaned_fields = _clean_tma_write_fields(table, fields)
+        ok = airtable_patch(table, result_record_id, cleaned_fields, source="tma_write")
+        if not ok:
+            return _tool_result(
+                ok=False, tool="tma_write",
+                external_id=result_record_id,
+                evidence={"record_id": result_record_id, "table": table},
+                user_message=f"❌ עדכון רשומה נכשל ב-{table}",
+            )
+    else:
+        return _tool_result(
+            ok=False, tool="tma_write",
+            user_message=f"❌ פעולת כתיבה לא נתמכת: {op!r}",
+        )
+
+    # Audit — mirrors tma_api.py::_audit() exactly (fails silently, own try/except).
+    try:
+        airtable_create(Tables.INTERACTION_LOG, {
+            InteractionLogFields.TITLE:        f"[TMA] {audit_action or action}",
+            InteractionLogFields.SUMMARY:      (audit_details or audit_action or action)[:200],
+            InteractionLogFields.PARTICIPANTS: getattr(identity, "display_name", "") or getattr(identity, "user_id", ""),
+        }, source="tma_write_audit")
+    except Exception as exc:
+        logger.warning("[approval_actions] tma_write audit failed for '%s': %s", audit_action or action, exc)
+
+    # Receipt — mirrors tma_api.py::_receipt()/_persist_receipt() exactly.
+    receipt = {
+        "action": action,
+        "table": table,
+        "record_id": result_record_id,
+        "requested_by": requested_by or "unknown",
+        "approved_by": approved_by,
+        "status": "executed",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    receipt_warning = ""
+    try:
+        rec = airtable_create(Tables.INTERACTION_LOG, {
+            InteractionLogFields.TITLE:   f"[TMA receipt] {receipt['action']}",
+            InteractionLogFields.SUMMARY: json.dumps(receipt, ensure_ascii=False),
+            InteractionLogFields.TIMESTAMP: receipt["timestamp"],
+            InteractionLogFields.PARTICIPANTS: receipt["approved_by"],
+            InteractionLogFields.KEY_INSIGHTS: (
+                f"{receipt['status']} {receipt['table']}/{receipt['record_id']}"
+            ).strip(),
+        }, source="tma_write_receipt")
+        if not rec:
+            receipt_warning = "receipt persistence failed: Interaction Log write returned no record"
+            logger.warning("[approval_actions] %s", receipt_warning)
+    except Exception as exc:
+        receipt_warning = f"receipt persistence failed: {type(exc).__name__}"
+        logger.warning("[approval_actions] %s: %s", receipt_warning, exc)
+
+    evidence = {"record_id": result_record_id, "table": table, "receipt": receipt}
+    if receipt_warning:
+        evidence["receipt_warning"] = receipt_warning
+
+    return _tool_result(
+        ok=True,
+        tool="tma_write",
+        external_id=result_record_id,
+        evidence=evidence,
+        user_message=f"✅ בוצע: {action or audit_action} | מזהה: {result_record_id}",
     )
