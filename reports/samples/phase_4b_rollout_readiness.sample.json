@@ -140,6 +140,14 @@
       "status": "PASS"
     },
     {
+      "description": "both flags are ON (required for --mode active)",
+      "detail": "FEATURE_ACTION_CONTRACT_PERSISTENCE=True FEATURE_ATOMIC_CLAIMS=True",
+      "id": "B.flags_both_on",
+      "mandatory": true,
+      "section": "B_feature_flags",
+      "status": "PASS"
+    },
+    {
       "description": "DATABASE_URL (or legacy DB env vars) configured",
       "detail": "present",
       "id": "C.env_present",
@@ -353,6 +361,7 @@
     "branch": "claude/phase-4b-rollout-zd0f3y",
     "commit_sha": "c7ad62e13850ad797cb8a48241476d82f39b17a7"
   },
+  "mode": "active",
   "warnings": [
     {
       "description": "ActionContracts present in schema_cache.json seed (risk flag, non-mandatory)",

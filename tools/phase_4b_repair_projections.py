@@ -337,6 +337,14 @@ def main() -> int:
 
     if "error" in result:
         return 2
+    # --apply requested without the exact confirmation token is a refused
+    # write attempt, not a clean report-only run — exit 1, not 0.
+    if result.get("apply_requested") and result.get("refused_reason"):
+        return 1
+    # Any *_failed result list being non-empty means at least one repair
+    # was attempted and did not succeed.
+    if any(k.endswith("_failed") and v for k, v in result.get("applied", {}).items()):
+        return 1
     return 0
 
 

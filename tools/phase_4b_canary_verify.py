@@ -15,11 +15,23 @@
 #   - retries anything
 #   - writes to Airtable or PostgreSQL in any way
 #
+# --expected-outcome is required (completed|rejected|outcome_unknown) — a
+# pending/approved/executing contract can never match any of the three and
+# therefore can never be reported VERIFIED. 'completed' additionally
+# requires a completed PostgreSQL claim AND supplied, existing provider
+# evidence (--provider-table/--provider-record-id are not optional in that
+# case). 'outcome_unknown', once confirmed, returns verdict=MANUAL_REVIEW —
+# a distinct third state, never VERIFIED and never bluntly FAILED, matching
+# the "never auto-retry outcome_unknown — investigate manually" rule
+# elsewhere in this codebase.
+#
 # Run manually, after a canary step, with whatever IDs you have:
-#   python3 tools/phase_4b_canary_verify.py --contract-id <id>
-#   python3 tools/phase_4b_canary_verify.py --contract-id <id> \
-#       --approval-record-id <id> \
-#       --provider-table Leads --provider-record-id <id> --json
+#   python3 tools/phase_4b_canary_verify.py --contract-id <id> --expected-outcome completed \
+#       --provider-table Leads --provider-record-id <id>
+#   python3 tools/phase_4b_canary_verify.py --contract-id <id> --expected-outcome rejected
+#   python3 tools/phase_4b_canary_verify.py --contract-id <id> --expected-outcome outcome_unknown --json
+#
+# Exit codes: 0 = VERIFIED, 1 = FAILED, 2 = tool error, 3 = MANUAL_REVIEW.
 #
 # Produces reports/runtime/phase_4b_canary_verify.json (gitignored — see
 # reports/samples/phase_4b_canary_evidence.sample.json for a fixture shape).
@@ -42,6 +54,22 @@ from tools.phase_4b_rollout_common import (  # noqa: E402
 REPORT_PATH = REPO_ROOT / "reports" / "runtime" / "phase_4b_canary_verify.json"
 
 _TERMINAL_SUCCESS_STATUSES = ("completed", "executed")
+_VALID_EXPECTED_OUTCOMES = ("completed", "rejected", "outcome_unknown")
+
+
+def _outcome_matches(contract_status: str, claim, expected_outcome: str) -> bool:
+    """Whether the contract's (and, for outcome_unknown, the claim's) actual
+    state matches what the operator expected this canary to have reached.
+    A pending/approved/executing contract can never match any of the three
+    expected outcomes — that's exactly what keeps a not-yet-terminal canary
+    from ever being reported VERIFIED."""
+    if expected_outcome == "completed":
+        return contract_status in _TERMINAL_SUCCESS_STATUSES
+    if expected_outcome == "rejected":
+        return contract_status == "rejected"
+    if expected_outcome == "outcome_unknown":
+        return contract_status == "outcome_unknown" or (claim is not None and claim.status == "outcome_unknown")
+    raise ValueError(f"unknown expected_outcome: {expected_outcome!r}")
 
 
 def _finding(id_: str, description: str, mandatory: bool, status: str, detail: str = "") -> dict:
@@ -73,8 +101,13 @@ def _find_projection_for_contract(contract_id: str) -> tuple[dict | None, str]:
     return records[0], ""
 
 
-def verify_canary(contract_id: str, approval_record_id: str | None = None,
+def verify_canary(contract_id: str, expected_outcome: str, approval_record_id: str | None = None,
                    provider_table: str | None = None, provider_record_id: str | None = None) -> dict:
+    if expected_outcome not in _VALID_EXPECTED_OUTCOMES:
+        raise ValueError(
+            f"expected_outcome must be one of {_VALID_EXPECTED_OUTCOMES}, got {expected_outcome!r}"
+        )
+
     findings: list[dict] = []
 
     from core.action_contract_repository import ActionContractRepository, ActionContractLookupError
@@ -95,8 +128,9 @@ def verify_canary(contract_id: str, approval_record_id: str | None = None,
     if contract is None:
         # Nothing else can be meaningfully checked without the contract.
         for check_id, desc in [
+            ("expected_outcome_match", "contract's actual lifecycle status matches --expected-outcome"),
             ("contract_canonical_shape", "contract has the canonical tma_write/tma_api/tma shape"),
-            ("requester_approver_separation", "requested_by and approved_by identities are distinct"),
+            ("requester_approver_separation", "requester and approver stable IDs are distinct"),
             ("projection_lookup", "an Approvals projection exists for this contract"),
             ("projection_contract_link", "projection's action_contract_id matches the contract"),
             ("projection_lifecycle_match", "projection's projected_lifecycle_status matches the contract"),
@@ -107,7 +141,21 @@ def verify_canary(contract_id: str, approval_record_id: str | None = None,
             ("provider_record_exists", "the supplied provider record actually exists"),
         ]:
             findings.append(_finding(check_id, desc, False, "SKIP", "skipped: contract not found"))
-        return _package(findings, contract_id)
+        return _package(findings, contract_id, expected_outcome)
+
+    # Fetched once, up front — needed both for expected_outcome_match
+    # (the outcome_unknown case looks at the claim, not just the contract)
+    # and for claim_expectation/duplicate_execution_evidence below.
+    from core.atomic_claim_repository import get_claim
+    claim = get_claim(contract_id)
+
+    outcome_matches = _outcome_matches(contract.status, claim, expected_outcome)
+    findings.append(_finding(
+        "expected_outcome_match", "contract's actual lifecycle status matches --expected-outcome",
+        True, "PASS" if outcome_matches else "FAIL",
+        f"expected_outcome={expected_outcome!r} actual_contract_status={contract.status!r}"
+        + ("" if claim is None else f" claim_status={claim.status!r}"),
+    ))
 
     canonical = is_canonical_tma_contract(contract)
     findings.append(_finding(
@@ -118,19 +166,24 @@ def verify_canary(contract_id: str, approval_record_id: str | None = None,
         f"origin_channel={contract.origin_channel!r} approval_policy={getattr(contract,'approval_policy','')!r}",
     ))
 
-    requester = contract.actor_display_name or contract.actor_user_id or contract.canonical_user_id
-    approver = contract.approved_by or ""
+    # Stable-ID comparison — actor_user_id/canonical_user_id (the frozen
+    # proposal-time identity) versus approved_by. actor_display_name is
+    # never the primary comparison: it's free-text, not a stable identity,
+    # and is only ever included in the detail message for human context.
+    requester_id = contract.actor_user_id or contract.canonical_user_id
+    approver_id = contract.approved_by or ""
     if contract.status in ("approved", "executing") or contract.status in _TERMINAL_SUCCESS_STATUSES \
             or contract.status == "rejected":
-        separated = bool(approver) and approver != requester
+        separated = bool(approver_id) and approver_id != requester_id
         findings.append(_finding(
-            "requester_approver_separation", "requested_by and approved_by identities are distinct",
+            "requester_approver_separation", "requester and approver stable IDs are distinct",
             True, "PASS" if separated else "FAIL",
-            f"requester={requester!r} approver={approver!r}",
+            f"requester_id={requester_id!r} approver_id={approver_id!r} "
+            f"(actor_display_name={contract.actor_display_name!r}, shown for reference only)",
         ))
     else:
         findings.append(_finding(
-            "requester_approver_separation", "requested_by and approved_by identities are distinct",
+            "requester_approver_separation", "requester and approver stable IDs are distinct",
             False, "SKIP", f"contract status={contract.status!r} — not yet approved",
         ))
 
@@ -193,10 +246,8 @@ def verify_canary(contract_id: str, approval_record_id: str | None = None,
 
     # Claim expectation depends on the contract's own lifecycle — a
     # rejected contract MUST NEVER have a claim; a completed/executed
-    # canonical contract MUST have one, and it must be completed.
-    from core.atomic_claim_repository import get_claim
-    claim = get_claim(contract_id)
-
+    # canonical contract MUST have one, and it must be completed. `claim`
+    # was already fetched above for expected_outcome_match.
     if contract.status == "rejected":
         findings.append(_finding(
             "claim_expectation", "PostgreSQL claim presence/status matches the contract's lifecycle",
@@ -263,6 +314,12 @@ def verify_canary(contract_id: str, approval_record_id: str | None = None,
             False, "SKIP", "skipped: no claim to check",
         ))
 
+    # A "completed" canary MUST have supplied, existing provider evidence —
+    # this is mandatory=True unconditionally for expected_outcome=="completed",
+    # so omitting --provider-table/--provider-record-id is itself a FAIL, not
+    # a SKIP. For "rejected"/"outcome_unknown" canaries, provider evidence is
+    # optional context (SKIP when omitted, as before).
+    provider_required = (expected_outcome == "completed")
     if provider_table and provider_record_id:
         rec = fetch_record_by_id(provider_table, provider_record_id)
         findings.append(_finding(
@@ -270,22 +327,43 @@ def verify_canary(contract_id: str, approval_record_id: str | None = None,
             True, "PASS" if rec else "FAIL",
             "" if rec else f"'{provider_record_id}' not found in table '{provider_table}'",
         ))
+    elif provider_required:
+        findings.append(_finding(
+            "provider_record_exists", "the supplied provider record actually exists",
+            True, "FAIL",
+            "--expected-outcome completed requires --provider-table and --provider-record-id evidence",
+        ))
     else:
         findings.append(_finding(
             "provider_record_exists", "the supplied provider record actually exists",
             False, "SKIP", "skipped: --provider-table/--provider-record-id not supplied",
         ))
 
-    return _package(findings, contract_id)
+    return _package(findings, contract_id, expected_outcome, claim=claim, contract_status=contract.status)
 
 
-def _package(findings: list[dict], contract_id: str) -> dict:
+def _package(findings: list[dict], contract_id: str, expected_outcome: str,
+             claim=None, contract_status: str | None = None) -> dict:
     blocking = [f for f in findings if f["mandatory"] and f["status"] in ("FAIL", "SKIP")]
-    verdict = "FAILED" if blocking else "VERIFIED"
+
+    manual_review = (
+        contract_status is not None
+        and expected_outcome == "outcome_unknown"
+        and _outcome_matches(contract_status, claim, expected_outcome)
+    )
+
+    if manual_review:
+        verdict = "MANUAL_REVIEW"
+    elif blocking:
+        verdict = "FAILED"
+    else:
+        verdict = "VERIFIED"
+
     return {
         "generated_at": utc_now_iso(),
         "git": git_state(),
         "contract_id": contract_id,
+        "expected_outcome": expected_outcome,
         "verdict": verdict,
         "findings": findings,
         "blocking_findings": blocking,
@@ -297,6 +375,7 @@ def _print_human(result: dict) -> None:
     print("=" * 60)
     print(f"generated_at: {result['generated_at']}")
     print(f"contract_id: {result['contract_id']}")
+    print(f"expected_outcome: {result.get('expected_outcome')}")
     print()
     for f in result["findings"]:
         tag = "mandatory" if f["mandatory"] else "info"
@@ -313,18 +392,30 @@ def main() -> int:
         description="Phase 4B observational canary verifier (read-only — never mutates anything)"
     )
     parser.add_argument("--contract-id", required=True, help="ActionContract.contract_id to verify")
+    parser.add_argument(
+        "--expected-outcome", required=True, choices=list(_VALID_EXPECTED_OUTCOMES),
+        help=(
+            "What this canary was expected to reach. A pending/approved/executing contract "
+            "never matches any of these and can never be reported VERIFIED. 'completed' also "
+            "requires a completed claim and supplied, existing provider evidence. "
+            "'outcome_unknown' returns verdict=MANUAL_REVIEW when confirmed, never VERIFIED/FAILED."
+        ),
+    )
     parser.add_argument("--approval-record-id", default=None,
                          help="Approvals record id (auto-discovered by contract_id if omitted)")
     parser.add_argument("--provider-table", default=None,
-                         help="Airtable table the provider write landed in (optional)")
+                         help="Airtable table the provider write landed in (required with "
+                              "--expected-outcome completed)")
     parser.add_argument("--provider-record-id", default=None,
-                         help="Airtable record id the provider write produced (optional)")
+                         help="Airtable record id the provider write produced (required with "
+                              "--expected-outcome completed)")
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON instead of text")
     args = parser.parse_args()
 
     try:
         result = verify_canary(
             contract_id=args.contract_id,
+            expected_outcome=args.expected_outcome,
             approval_record_id=args.approval_record_id,
             provider_table=args.provider_table,
             provider_record_id=args.provider_record_id,
@@ -342,7 +433,13 @@ def main() -> int:
     else:
         _print_human(result)
 
-    return 0 if result["verdict"] == "VERIFIED" else 1
+    # 0 = VERIFIED, 1 = FAILED, 3 = MANUAL_REVIEW (neither a clean pass nor
+    # a hard failure — a human must look at an outcome_unknown result).
+    if result["verdict"] == "VERIFIED":
+        return 0
+    if result["verdict"] == "MANUAL_REVIEW":
+        return 3
+    return 1
 
 
 if __name__ == "__main__":

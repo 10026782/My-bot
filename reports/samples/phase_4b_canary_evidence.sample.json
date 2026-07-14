@@ -17,11 +17,19 @@
       "verifier_result": {
         "blocking_findings": [],
         "contract_id": "c7f3a1b2-0000-4a11-9c22-000000000010",
+        "expected_outcome": "completed",
         "findings": [
           {
             "description": "ActionContract is reachable and found",
             "detail": "status=completed",
             "id": "contract_lookup",
+            "mandatory": true,
+            "status": "PASS"
+          },
+          {
+            "description": "contract's actual lifecycle status matches --expected-outcome",
+            "detail": "expected_outcome='completed' actual_contract_status='completed' claim_status='completed'",
+            "id": "expected_outcome_match",
             "mandatory": true,
             "status": "PASS"
           },
@@ -33,8 +41,8 @@
             "status": "PASS"
           },
           {
-            "description": "requested_by and approved_by identities are distinct",
-            "detail": "requester='Owner One' approver='Manager Two'",
+            "description": "requester and approver stable IDs are distinct",
+            "detail": "requester_id='owner-1' approver_id='Manager Two' (actor_display_name='Owner One', shown for reference only)",
             "id": "requester_approver_separation",
             "mandatory": true,
             "status": "PASS"
@@ -112,11 +120,19 @@
       "verifier_result": {
         "blocking_findings": [],
         "contract_id": "c7f3a1b2-0000-4a11-9c22-000000000020",
+        "expected_outcome": "rejected",
         "findings": [
           {
             "description": "ActionContract is reachable and found",
             "detail": "status=rejected",
             "id": "contract_lookup",
+            "mandatory": true,
+            "status": "PASS"
+          },
+          {
+            "description": "contract's actual lifecycle status matches --expected-outcome",
+            "detail": "expected_outcome='rejected' actual_contract_status='rejected'",
+            "id": "expected_outcome_match",
             "mandatory": true,
             "status": "PASS"
           },
@@ -128,8 +144,8 @@
             "status": "PASS"
           },
           {
-            "description": "requested_by and approved_by identities are distinct",
-            "detail": "requester='Owner One' approver='Owner Two'",
+            "description": "requester and approver stable IDs are distinct",
+            "detail": "requester_id='owner-1' approver_id='Owner Two' (actor_display_name='Owner One', shown for reference only)",
             "id": "requester_approver_separation",
             "mandatory": true,
             "status": "PASS"

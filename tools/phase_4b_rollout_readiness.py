@@ -148,7 +148,12 @@ def _check_code_state() -> list[dict]:
 # B — Feature flags
 # ══════════════════════════════════════════════════
 
-def _check_feature_flags() -> list[dict]:
+def _check_feature_flags(mode: str) -> list[dict]:
+    """--mode preflight: flags may legitimately both be OFF — only a
+    mismatched (exactly-one-enabled) state is ever blocking.
+    --mode active: this is a post-cutover check, so both flags must
+    actually be ON — an OFF flag here means the wiring this mode claims to
+    verify was never actually enabled."""
     findings = []
     try:
         import feature_flags
@@ -175,6 +180,14 @@ def _check_feature_flags() -> list[dict]:
              "never enable only one of these as a rollout state") if mismatched
             else f"both flags agree (enabled={acp})",
         ))
+
+        if mode == "active":
+            findings.append(_finding(
+                "B.flags_both_on", "B_feature_flags",
+                "both flags are ON (required for --mode active)", True,
+                "PASS" if (acp and atc) else "FAIL",
+                f"FEATURE_ACTION_CONTRACT_PERSISTENCE={acp} FEATURE_ATOMIC_CLAIMS={atc}",
+            ))
     except Exception as exc:
         findings.append(_finding(
             "B.flags_readable", "B_feature_flags",
@@ -386,12 +399,26 @@ def _check_postgresql() -> list[dict]:
 
 
 # ══════════════════════════════════════════════════
-# D — ActionContract persistence (mirrors tma_api._queue_tma_write_approval's
-# own fail-closed gate exactly, so this section can never drift from the
-# live authorization check it is validating readiness for).
+# D — ActionContract persistence.
+#
+# --mode active mirrors tma_api._queue_tma_write_approval's own fail-closed
+# gate exactly (so this branch can never drift from the live authorization
+# check it is validating readiness for): both flags must be ON AND the
+# ActionGateway singleton's runtime wiring must already be active.
+#
+# --mode preflight deliberately does NOT require either flag to be on — it
+# proves the underlying ActionContractRepository code path is reachable
+# right now, independent of whatever the singleton's current wiring state
+# is, so infra readiness can be confirmed *before* flipping any flag.
 # ══════════════════════════════════════════════════
 
-def _check_action_contract_persistence() -> list[dict]:
+def _check_action_contract_persistence(mode: str) -> list[dict]:
+    if mode == "active":
+        return _check_action_contract_persistence_active()
+    return _check_action_contract_persistence_preflight()
+
+
+def _check_action_contract_persistence_active() -> list[dict]:
     findings = []
     try:
         import feature_flags
@@ -454,6 +481,28 @@ def _check_action_contract_persistence() -> list[dict]:
             "D.unexpected", "D_action_contract_persistence",
             "ActionContract persistence diagnostic ran without error", True, "FAIL",
             _safe_str(exc),
+        ))
+    return findings
+
+
+def _check_action_contract_persistence_preflight() -> list[dict]:
+    findings = []
+    try:
+        from core.action_contract_repository import ActionContractRepository
+        repo = ActionContractRepository()
+        repo.find_pending_by_canonical_user("__phase4b_readiness_probe__")
+        findings.append(_finding(
+            "D.repository_direct_reachable", "D_action_contract_persistence",
+            "ActionContractRepository is directly reachable (independent of "
+            "FEATURE_ACTION_CONTRACT_PERSISTENCE — proves the code path works before cutover)",
+            True, "PASS",
+        ))
+    except Exception as exc:
+        findings.append(_finding(
+            "D.repository_direct_reachable", "D_action_contract_persistence",
+            "ActionContractRepository is directly reachable (independent of "
+            "FEATURE_ACTION_CONTRACT_PERSISTENCE — proves the code path works before cutover)",
+            True, "FAIL", _safe_str(exc),
         ))
     return findings
 
@@ -720,12 +769,15 @@ def _check_gateway_cache_compat() -> list[dict]:
 # Orchestration
 # ══════════════════════════════════════════════════
 
-def run_readiness() -> dict:
+def run_readiness(mode: str = "preflight") -> dict:
+    if mode not in ("preflight", "active"):
+        raise ValueError(f"mode must be 'preflight' or 'active', got {mode!r}")
+
     findings: list[dict] = []
     findings += _check_code_state()
-    findings += _check_feature_flags()
+    findings += _check_feature_flags(mode)
     findings += _check_postgresql()
-    findings += _check_action_contract_persistence()
+    findings += _check_action_contract_persistence(mode)
     findings += _check_airtable_schema()
     findings += _check_gateway_cache_compat()
 
@@ -745,6 +797,7 @@ def run_readiness() -> dict:
     return {
         "generated_at": utc_now_iso(),
         "git": git_state(),
+        "mode": mode,
         "decision": decision,
         "exit_code": exit_code,
         "findings": findings,
@@ -757,6 +810,7 @@ def _print_human(result: dict) -> None:
     print("Phase 4B Rollout Readiness")
     print("=" * 60)
     print(f"generated_at: {result['generated_at']}")
+    print(f"mode: {result['mode']}")
     print(f"git: commit={result['git']['commit_sha']} branch={result['git']['branch']}")
     print()
     for f in result["findings"]:
@@ -776,11 +830,20 @@ def _print_human(result: dict) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Phase 4B rollout readiness diagnostic (read-only)")
+    parser.add_argument(
+        "--mode", required=True, choices=["preflight", "active"],
+        help=(
+            "preflight: both flags may be OFF together — verifies infrastructure, migrations, "
+            "database constraints, schema, and direct repository reachability, independent of "
+            "flag state. active: both flags must be ON and the ActionGateway runtime "
+            "repository/atomic-claim wiring must actually be active (post-cutover check)."
+        ),
+    )
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON instead of text")
     args = parser.parse_args()
 
     try:
-        result = run_readiness()
+        result = run_readiness(mode=args.mode)
     except Exception as exc:
         err = {"decision": "UNKNOWN", "exit_code": 2, "error": _safe_str(exc)}
         print(json.dumps(err, indent=2), file=sys.stderr)

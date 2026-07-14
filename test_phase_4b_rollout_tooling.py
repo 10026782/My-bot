@@ -505,6 +505,50 @@ def test_repair_apply_requires_both_flag_and_confirm_token():
     mock_create.assert_not_called()
 
 
+def _run_repair_main(argv):
+    with patch("sys.argv", ["phase_4b_repair_projections.py"] + argv):
+        return repair_mod.main()
+
+
+def test_repair_main_exit_code_1_when_apply_without_confirm_token():
+    ct = _contract("ct-repair-exit-1")
+    contracts_raw = [(ct, "rec-1")]
+    with patch.object(repair_mod, "fetch_all_action_contracts", return_value=contracts_raw), \
+         patch.object(repair_mod, "fetch_all_approvals", return_value=[]):
+        code = _run_repair_main(["--apply"])
+    assert code == 1
+
+
+def test_repair_main_exit_code_1_when_a_failed_list_is_nonempty():
+    ct = _contract("ct-repair-exit-2")
+    contracts_raw = [(ct, "rec-1")]
+    with patch.object(repair_mod, "fetch_all_action_contracts", return_value=contracts_raw), \
+         patch.object(repair_mod, "fetch_all_approvals", return_value=[]), \
+         patch("tools.airtable_gateway.airtable_create", return_value=None):  # simulate a failed create
+        code = _run_repair_main(["--apply", "--confirm", "APPLY_PROJECTION_REPAIRS"])
+    assert code == 1
+
+
+def test_repair_main_exit_code_0_when_apply_succeeds():
+    ct = _contract("ct-repair-exit-3")
+    contracts_raw = [(ct, "rec-1")]
+    with patch.object(repair_mod, "fetch_all_action_contracts", return_value=contracts_raw), \
+         patch.object(repair_mod, "fetch_all_approvals", return_value=[]), \
+         patch("tools.airtable_gateway.airtable_create",
+               return_value={"id": "recNew1", "fields": {}}):
+        code = _run_repair_main(["--apply", "--confirm", "APPLY_PROJECTION_REPAIRS"])
+    assert code == 0
+
+
+def test_repair_main_exit_code_0_for_clean_report_only():
+    ct = _contract("ct-repair-exit-4")
+    contracts_raw = [(ct, "rec-1")]
+    with patch.object(repair_mod, "fetch_all_action_contracts", return_value=contracts_raw), \
+         patch.object(repair_mod, "fetch_all_approvals", return_value=[]):
+        code = _run_repair_main(["--report-only"])
+    assert code == 0
+
+
 # ══════════════════════════════════════════════════
 # Shared helpers (tools/phase_4b_rollout_common.py)
 # ══════════════════════════════════════════════════
@@ -687,7 +731,7 @@ def _live_meta_schema():
 
 def _run_readiness_with_mocks(*, acp_enabled, atc_enabled, pool_ok, claims_table_ok=True,
                                claims_columns=None, claims_constraints=None,
-                               live_schema=None, env=None):
+                               live_schema=None, env=None, mode="active"):
     env = dict(env or {})
     env.setdefault("AIRTABLE_API_KEY", "fake-key")
     env.setdefault("AIRTABLE_BASE_ID", "fake-base")
@@ -722,7 +766,7 @@ def _run_readiness_with_mocks(*, acp_enabled, atc_enabled, pool_ok, claims_table
              patch("tools.schema_snapshot.fetch_live_schema",
                    return_value=(live_schema if live_schema is not None else _live_meta_schema())):
             real_gateway._ledger._repository = fake_repo if acp_enabled else None
-            return readiness_mod.run_readiness()
+            return readiness_mod.run_readiness(mode=mode)
     finally:
         real_gateway._ledger._repository = original_repository
 
@@ -842,6 +886,70 @@ def test_readiness_clean_schema_passes_all_field_type_and_choice_checks():
     assert "E.action_contracts_fields" not in ids
 
 
+def test_readiness_preflight_allows_both_flags_off():
+    """--mode preflight must not require either flag to be on — only infra/
+    migrations/schema/direct-repository-reachability are mandatory."""
+    result = _run_readiness_with_mocks(
+        acp_enabled=False, atc_enabled=False, pool_ok=True, mode="preflight",
+    )
+    ids = {f["id"] for f in result["blocking_findings"]}
+    assert "B.no_mismatched_flags" not in ids  # both False agree — not mismatched
+    assert "B.flags_both_on" not in ids  # that check doesn't even run in preflight
+    assert "D.durable_persistence_available" not in ids  # active-only check
+    assert "D.atomic_claims_available" not in ids  # active-only check
+
+
+def test_readiness_preflight_checks_direct_repository_reachability():
+    from core.action_contract_repository import ActionContractRepository
+    with patch.object(ActionContractRepository, "find_pending_by_canonical_user", return_value=[]):
+        result = _run_readiness_with_mocks(
+            acp_enabled=False, atc_enabled=False, pool_ok=True, mode="preflight",
+        )
+    by_id = {f["id"]: f for f in result["findings"]}
+    assert "D.repository_direct_reachable" in by_id
+    assert by_id["D.repository_direct_reachable"]["status"] == "PASS"
+
+
+def test_readiness_preflight_fails_when_repository_unreachable():
+    from core.action_contract_repository import ActionContractRepository
+    with patch.object(ActionContractRepository, "find_pending_by_canonical_user",
+                       side_effect=RuntimeError("boom")):
+        result = _run_readiness_with_mocks(
+            acp_enabled=False, atc_enabled=False, pool_ok=True, mode="preflight",
+        )
+    ids = {f["id"] for f in result["blocking_findings"]}
+    assert "D.repository_direct_reachable" in ids
+
+
+def test_readiness_active_requires_both_flags_on():
+    """--mode active must fail if either flag is off, even if the singleton
+    happens to still look wired (defense in depth beyond the existing
+    durable_persistence_available/atomic_claims_available checks)."""
+    result = _run_readiness_with_mocks(
+        acp_enabled=False, atc_enabled=False, pool_ok=True, mode="active",
+    )
+    ids = {f["id"] for f in result["blocking_findings"]}
+    assert "B.flags_both_on" in ids
+
+
+def test_readiness_active_passes_when_both_flags_on_and_wired():
+    result = _run_readiness_with_mocks(acp_enabled=True, atc_enabled=True, pool_ok=True, mode="active")
+    ids = {f["id"] for f in result["blocking_findings"]}
+    assert "B.flags_both_on" not in ids
+    assert "D.durable_persistence_available" not in ids
+    assert "D.atomic_claims_available" not in ids
+
+
+def test_readiness_mode_is_required_on_cli():
+    import subprocess
+    proc = subprocess.run(
+        ["python3", "tools/phase_4b_rollout_readiness.py"],
+        capture_output=True, text=True, cwd=str(common_mod.REPO_ROOT),
+    )
+    assert proc.returncode != 0
+    assert "--mode" in proc.stderr
+
+
 def test_readiness_never_logs_secret_values():
     secret_key = "SECRET_MARKER_AIRTABLE_KEY_abc123"
     secret_pw = "SECRET_MARKER_DB_PASSWORD_xyz789"
@@ -905,7 +1013,7 @@ def _patched_canary(contract_lookup, claim_lookup=None, record_lookup=None,
 
 def test_canary_verify_contract_not_found_fails():
     with _patched_canary(contract_lookup=lambda cid: None)[0]:
-        result = canary_mod.verify_canary(contract_id="does-not-exist")
+        result = canary_mod.verify_canary(contract_id="does-not-exist", expected_outcome="completed")
 
     assert result["verdict"] == "FAILED"
     by_id = {f["id"]: f for f in result["findings"]}
@@ -940,12 +1048,142 @@ def test_canary_verify_full_match_is_verified():
     )
     with patches[0], patches[1], patches[2], patches[3], patches[4]:
         result = canary_mod.verify_canary(
-            contract_id=ct.contract_id, approval_record_id="recApproval1",
+            contract_id=ct.contract_id, expected_outcome="completed", approval_record_id="recApproval1",
             provider_table="Leads", provider_record_id="recProvider1",
         )
 
     assert result["verdict"] == "VERIFIED", result["blocking_findings"]
     assert result["blocking_findings"] == []
+
+
+def test_canary_verify_completed_without_provider_evidence_never_verified():
+    """--expected-outcome completed must require SUPPLIED provider evidence
+    — omitting --provider-table/--provider-record-id is itself a FAIL, even
+    though the contract/claim/projection all genuinely check out."""
+    ct = _contract("ct-canary-no-provider", status="completed", approved_by="Owner Two")
+    row = {"id": "recApprovalNoProvider", "fields": {
+        ApprovalsFields.ACTION_CONTRACT_ID: ct.contract_id,
+        ApprovalsFields.LEGACY_READ_ONLY: False,
+        ApprovalsFields.PROJECTED_LIFECYCLE_STATUS: "completed",
+        ApprovalsFields.CONTEXT_DATA: "",
+    }}
+    claim = MagicMock(contract_id=ct.contract_id, status="completed", idempotency_key="idem-no-provider")
+
+    class _NoDupCursor:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def execute(self, *a, **k): pass
+        def fetchall(self): return []
+    class _NoDupConn:
+        def cursor(self): return _NoDupCursor()
+
+    patches = _patched_canary(
+        contract_lookup=lambda cid: ct if cid == ct.contract_id else None,
+        claim_lookup=lambda cid: claim if cid == ct.contract_id else None,
+        record_lookup=lambda table, rid: row if rid == "recApprovalNoProvider" else None,
+        conn_for_dup_check=_NoDupConn(),
+    )
+    with patches[0], patches[1], patches[2], patches[3], patches[4]:
+        result = canary_mod.verify_canary(
+            contract_id=ct.contract_id, expected_outcome="completed",
+            approval_record_id="recApprovalNoProvider",
+        )  # no provider_table/provider_record_id supplied
+
+    by_id = {f["id"]: f for f in result["findings"]}
+    assert by_id["provider_record_exists"]["mandatory"] is True
+    assert by_id["provider_record_exists"]["status"] == "FAIL"
+    assert result["verdict"] == "FAILED"
+
+
+def test_canary_verify_non_terminal_contract_never_verified():
+    """A pending/approved/executing contract must never receive VERIFIED,
+    regardless of --expected-outcome."""
+    for status in ("pending", "approved", "executing"):
+        for expected_outcome in ("completed", "rejected", "outcome_unknown"):
+            ct = _contract(f"ct-canary-nonterminal-{status}-{expected_outcome}", status=status)
+            patches = _patched_canary(contract_lookup=lambda cid, c=ct: c if cid == c.contract_id else None)
+            with patches[0], patches[1], patches[2], patches[3], patches[4]:
+                result = canary_mod.verify_canary(contract_id=ct.contract_id, expected_outcome=expected_outcome)
+
+            assert result["verdict"] != "VERIFIED", (status, expected_outcome, result["verdict"])
+            by_id = {f["id"]: f for f in result["findings"]}
+            assert by_id["expected_outcome_match"]["status"] == "FAIL"
+
+
+def test_canary_verify_expected_outcome_mismatch_fails():
+    """Expecting 'rejected' but the contract actually completed must FAIL,
+    not silently pass because other checks happen to look fine."""
+    ct = _contract("ct-canary-mismatch", status="completed", approved_by="Owner Two")
+    patches = _patched_canary(contract_lookup=lambda cid: ct if cid == ct.contract_id else None)
+    with patches[0], patches[1], patches[2], patches[3], patches[4]:
+        result = canary_mod.verify_canary(contract_id=ct.contract_id, expected_outcome="rejected")
+
+    assert result["verdict"] == "FAILED"
+    by_id = {f["id"]: f for f in result["findings"]}
+    assert by_id["expected_outcome_match"]["status"] == "FAIL"
+
+
+def test_canary_verify_outcome_unknown_returns_manual_review():
+    ct = _contract("ct-canary-outcome-unknown", status="outcome_unknown", approved_by="Owner Two")
+    patches = _patched_canary(contract_lookup=lambda cid: ct if cid == ct.contract_id else None)
+    with patches[0], patches[1], patches[2], patches[3], patches[4]:
+        result = canary_mod.verify_canary(contract_id=ct.contract_id, expected_outcome="outcome_unknown")
+
+    assert result["verdict"] == "MANUAL_REVIEW"
+
+
+def test_canary_verify_outcome_unknown_via_claim_status_returns_manual_review():
+    """A contract that isn't itself status=outcome_unknown, but whose claim
+    is, must also be recognized and routed to MANUAL_REVIEW."""
+    ct = _contract("ct-canary-claim-outcome-unknown", status="executing", approved_by="Owner Two")
+    claim = MagicMock(contract_id=ct.contract_id, status="outcome_unknown", idempotency_key="idem-ou")
+    patches = _patched_canary(
+        contract_lookup=lambda cid: ct if cid == ct.contract_id else None,
+        claim_lookup=lambda cid: claim if cid == ct.contract_id else None,
+    )
+    with patches[0], patches[1], patches[2], patches[3], patches[4]:
+        result = canary_mod.verify_canary(contract_id=ct.contract_id, expected_outcome="outcome_unknown")
+
+    assert result["verdict"] == "MANUAL_REVIEW"
+
+
+def test_canary_verify_cli_exit_code_3_for_manual_review():
+    import subprocess
+    proc = subprocess.run(
+        ["python3", "tools/phase_4b_canary_verify.py", "--contract-id", "does-not-exist",
+         "--expected-outcome", "outcome_unknown"],
+        capture_output=True, text=True, cwd=str(common_mod.REPO_ROOT),
+    )
+    # contract not found -> FAILED, not MANUAL_REVIEW (never manufacture a
+    # manual-review verdict for a contract that couldn't even be looked up).
+    assert proc.returncode == 1
+
+
+def test_canary_verify_display_name_collision_alone_does_not_fail_separation():
+    """approved_by matching actor_display_name (but NOT actor_user_id/
+    canonical_user_id) must NOT be treated as the same identity — proves
+    display_name is not used as the primary comparison."""
+    ct = _contract("ct-canary-display-name-collision", status="completed", approved_by="Owner One")
+    row = {"id": "recApprovalDN", "fields": {
+        ApprovalsFields.ACTION_CONTRACT_ID: ct.contract_id,
+        ApprovalsFields.LEGACY_READ_ONLY: False,
+        ApprovalsFields.PROJECTED_LIFECYCLE_STATUS: "completed",
+        ApprovalsFields.CONTEXT_DATA: "",
+    }}
+    claim = MagicMock(contract_id=ct.contract_id, status="completed", idempotency_key="idem-dn")
+    patches = _patched_canary(
+        contract_lookup=lambda cid: ct if cid == ct.contract_id else None,
+        claim_lookup=lambda cid: claim if cid == ct.contract_id else None,
+        record_lookup=lambda table, rid: row if rid == "recApprovalDN" else None,
+    )
+    with patches[0], patches[1], patches[2], patches[3], patches[4]:
+        result = canary_mod.verify_canary(contract_id=ct.contract_id, expected_outcome="completed",
+                                           approval_record_id="recApprovalDN")
+
+    by_id = {f["id"]: f for f in result["findings"]}
+    # ct.actor_user_id="owner-1" (stable ID) != approved_by="Owner One" -> separated,
+    # even though approved_by collides with actor_display_name="Owner One".
+    assert by_id["requester_approver_separation"]["status"] == "PASS"
 
 
 def test_canary_verify_rejected_contract_with_unexpected_claim_fails():
@@ -964,7 +1202,7 @@ def test_canary_verify_rejected_contract_with_unexpected_claim_fails():
         record_lookup=lambda table, rid: row if rid == "recApproval2" else None,
     )
     with patches[0], patches[1], patches[2]:
-        result = canary_mod.verify_canary(contract_id=ct.contract_id, approval_record_id="recApproval2")
+        result = canary_mod.verify_canary(contract_id=ct.contract_id, expected_outcome="rejected", approval_record_id="recApproval2")
 
     assert result["verdict"] == "FAILED"
     by_id = {f["id"]: f for f in result["findings"]}
@@ -985,7 +1223,7 @@ def test_canary_verify_missing_claim_for_completed_canonical_fails():
         record_lookup=lambda table, rid: row if rid == "recApproval3" else None,
     )
     with patches[0], patches[1], patches[2]:
-        result = canary_mod.verify_canary(contract_id=ct.contract_id, approval_record_id="recApproval3")
+        result = canary_mod.verify_canary(contract_id=ct.contract_id, expected_outcome="completed", approval_record_id="recApproval3")
 
     assert result["verdict"] == "FAILED"
     by_id = {f["id"]: f for f in result["findings"]}
@@ -994,7 +1232,9 @@ def test_canary_verify_missing_claim_for_completed_canonical_fails():
 
 
 def test_canary_verify_requester_equals_approver_fails():
-    ct = _contract("ct-canary-same-identity-2", status="completed", approved_by="Owner One")
+    # approved_by matches actor_user_id (the stable ID), NOT actor_display_name
+    # ("Owner One") — proves the comparison uses stable IDs, not display names.
+    ct = _contract("ct-canary-same-identity-2", status="completed", approved_by="owner-1")
     row = {"id": "recApproval5", "fields": {
         ApprovalsFields.ACTION_CONTRACT_ID: ct.contract_id,
         ApprovalsFields.LEGACY_READ_ONLY: False,
@@ -1008,7 +1248,7 @@ def test_canary_verify_requester_equals_approver_fails():
         record_lookup=lambda table, rid: row if rid == "recApproval5" else None,
     )
     with patches[0], patches[1], patches[2]:
-        result = canary_mod.verify_canary(contract_id=ct.contract_id, approval_record_id="recApproval5")
+        result = canary_mod.verify_canary(contract_id=ct.contract_id, expected_outcome="completed", approval_record_id="recApproval5")
 
     by_id = {f["id"]: f for f in result["findings"]}
     assert by_id["requester_approver_separation"]["status"] == "FAIL"
@@ -1040,7 +1280,7 @@ def test_canary_verify_duplicate_idempotency_key_evidence_fails():
         conn_for_dup_check=_DupConn(),
     )
     with patches[0], patches[1], patches[2], patches[3], patches[4]:
-        result = canary_mod.verify_canary(contract_id=ct.contract_id, approval_record_id="recApproval6")
+        result = canary_mod.verify_canary(contract_id=ct.contract_id, expected_outcome="completed", approval_record_id="recApproval6")
 
     assert result["verdict"] == "FAILED"
     by_id = {f["id"]: f for f in result["findings"]}
@@ -1088,8 +1328,8 @@ def test_canary_verify_json_report_deterministic_and_machine_readable():
         conn_for_dup_check=_NoDupConn(),
     )
     with patches[0], patches[1], patches[2], patches[3], patches[4]:
-        result1 = canary_mod.verify_canary(contract_id=ct.contract_id, approval_record_id="recApprovalDet")
-        result2 = canary_mod.verify_canary(contract_id=ct.contract_id, approval_record_id="recApprovalDet")
+        result1 = canary_mod.verify_canary(contract_id=ct.contract_id, expected_outcome="completed", approval_record_id="recApprovalDet")
+        result2 = canary_mod.verify_canary(contract_id=ct.contract_id, expected_outcome="completed", approval_record_id="recApprovalDet")
 
     def _strip_volatile(d):
         d = dict(d)
