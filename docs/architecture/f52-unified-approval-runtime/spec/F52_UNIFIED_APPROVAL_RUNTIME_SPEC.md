@@ -1,6 +1,10 @@
-# Draft Spec — Phase 4C Unified Approval Runtime
+# F52 — Unified Approval Runtime Migration and Implementation Specification
 
-Status: research draft, not implementation instruction. Evidence baseline: `origin/main` `4d3787e6e6fcbc93bd5a30f62f0834136b706f06`. Final sequencing and policy require review after Phase 4B rollout verification.
+Historical research identifier: Phase 4C
+Status: Planning-gate candidate
+Implementation authority: Effective only after explicit planning-gate approval
+
+Evidence baseline: `origin/main` `4d3787e6e6fcbc93bd5a30f62f0834136b706f06`. Final sequencing and policy require review after Phase 4B rollout verification.
 
 ## Objective
 
@@ -32,7 +36,7 @@ Telegram, TMA and WhatsApp may present and parse differently. They may not diffe
 ## Interaction classifications
 
 - **Approval:** an authorized identity other than (or allowed independently from) the requester authorizes a mutation. `approved_by` is durable.
-- **Self-confirmation:** the canonical requester confirms the same frozen action and policy explicitly permits it. Current code permits this only for narrowly allowed Leads fields ([core/action_gateway.py:106](../../core/action_gateway.py#L106)).
+- **Self-confirmation:** the canonical requester confirms the same frozen action and policy explicitly permits it. Current code permits this only for narrowly allowed Leads fields ([core/action_gateway.py:106](../../../../core/action_gateway.py#L106)).
 - **Selection/clarification:** chooses a candidate or completes missing input. It can lead to a proposal but is never execution authorization by itself.
 - **Read-only interaction:** bypasses approval runtime and cannot mutate provider/business state.
 - **Notification:** outbound delivery only. If it also changes counters/status, that mutation requires its own explicit evidence/policy.
@@ -50,7 +54,7 @@ Before a channel displays an actionable approval:
 7. Persist the AC before returning an actionable presentation reference.
 8. Projection creation/delivery failure leaves the AC pending and returns a non-successful presentation outcome; retry repairs presentation without creating another AC.
 
-The existing proposal order already satisfies items 5–7 ([core/action_gateway.py:663](../../core/action_gateway.py#L663), [core/action_gateway.py:670](../../core/action_gateway.py#L670), [core/action_gateway.py:723](../../core/action_gateway.py#L723), [core/action_gateway.py:754](../../core/action_gateway.py#L754)).
+The existing proposal order already satisfies items 5–7 ([core/action_gateway.py:663](../../../../core/action_gateway.py#L663), [core/action_gateway.py:670](../../../../core/action_gateway.py#L670), [core/action_gateway.py:723](../../../../core/action_gateway.py#L723), [core/action_gateway.py:754](../../../../core/action_gateway.py#L754)).
 
 ## Adapter boundary
 
@@ -72,11 +76,82 @@ It may not:
 - deserialize `CONTEXT_DATA` as execution input;
 - fall back when contract/repository/claim lookup is unavailable.
 
-TMA `_load_actionable_projection()` and `_claim_and_execute_approval()` are the closest current reference ([tma_api.py:2477](../../tma_api.py#L2477), [tma_api.py:2510](../../tma_api.py#L2510)). Telegram callback is the counterexample ([app.py:1098](../../app.py#L1098), [app.py:1137](../../app.py#L1137)).
+TMA `_load_actionable_projection()` and `_claim_and_execute_approval()` are the closest current reference ([tma_api.py:2477](../../../../tma_api.py#L2477), [tma_api.py:2510](../../../../tma_api.py#L2510)). Telegram callback is the counterexample ([app.py:1098](../../../../app.py#L1098), [app.py:1137](../../../../app.py#L1137)).
+
+## Presentation Projection Store
+
+`ActionContract` is the authority and owns the frozen executable payload. Presentation state is not stored inside `ActionContract`. A separate projection store is linked by `contract_id`; it holds only channel-delivery and display state. A signed reference is a transport token only. Projection data, callback data and external message IDs are not authority and contain no executable payload.
+
+Minimum proposed projection shape:
+
+```text
+presentation_id
+contract_id
+adapter
+provider
+canonical_recipient
+external_chat_or_thread_id
+external_message_id
+reference_version
+reference_expires_at
+projection_status
+created_at
+updated_at
+```
+
+Canonical flow:
+
+```text
+signed reference
+→ validate signature/version/TTL/action/recipient
+→ load presentation projection
+→ resolve canonical contract_id
+→ re-read ActionContract
+→ ActionGateway approve/reject
+```
+
+Forbidden flow:
+
+```text
+signed reference
+→ reconstruct payload
+→ dispatch
+```
+
+### Signed reference requirements
+
+The reference logically includes `version`, `presentation_id`, `contract_id`, `action`, recipient binding, `issued_at`, `expires_at`, `key id`, and signature. Validation occurs before any execution-related call and requires action binding between approve/reject, recipient binding, TTL expiry, versioning, and key-rotation readiness. Expiry is explicit. Audit events record expired tokens, modified/invalid tokens and unsupported versions without logging executable payloads.
+
+### Legacy compatibility invariant
+
+The legacy compatibility layer is lookup-only.
+
+It may resolve an existing EventBus identifier only to an already-existing canonical ActionContract.
+
+It must never create, reconstruct, infer, repair, or persist a new contract.
+
+Required cases:
+
+```text
+mapped EventBus ID + existing contract
+→ resolve existing contract
+
+mapped EventBus ID + missing contract
+→ fail closed
+
+unmapped EventBus ID
+→ fail closed
+
+ambiguous mapping
+→ fail closed
+
+payload appears sufficient for reconstruction
+→ still do not create a contract
+```
 
 ## Contract field assessment
 
-Current AC fields are defined at [core/action_gateway.py:136](../../core/action_gateway.py#L136) and round-tripped by [core/action_contract_repository.py:91](../../core/action_contract_repository.py#L91).
+Current AC fields are defined at [core/action_gateway.py:136](../../../../core/action_gateway.py#L136) and round-tripped by [core/action_contract_repository.py:91](../../../../core/action_contract_repository.py#L91).
 
 | Need | Existing representation | Sufficient? |
 |---|---|---|
@@ -146,7 +221,7 @@ At approval time:
 1. Resolve current actor from signed channel input.
 2. Re-read AC from durable repository.
 3. Require pending and matching tenant/presentation recipient rules.
-4. Re-evaluate policy permission: `approval` requires owner or `actions.approve`; `self_confirm` requires exact canonical requester and allowed internal role ([core/action_gateway.py:1240](../../core/action_gateway.py#L1240)).
+4. Re-evaluate policy permission: `approval` requires owner or `actions.approve`; `self_confirm` requires exact canonical requester and allowed internal role ([core/action_gateway.py:1240](../../../../core/action_gateway.py#L1240)).
 5. Persist approved actor/time with expected transition/version.
 6. Attempt PG claim. Database unavailable/conflict never dispatches.
 7. Only the acquired claimant executes frozen inputs.
@@ -155,7 +230,7 @@ Selection and clarification complete steps before proposal or select which AC en
 
 ## Execution proof and dispatcher
 
-Every `requires_approval=True` dispatcher case must refuse an ordinary call even when role is allowed. The gateway/atomic executor must provide an execution context containing contract ID, claim execution ID and approved actor; dispatcher or a shared guard verifies the live PG claim and that tool, tenant and frozen payload correspond to the AC. A plain caller-constructed dictionary is not proof—the existing `tma_write` verification demonstrates the required distinction ([tools/approval_actions.py:239](../../tools/approval_actions.py#L239)).
+Every `requires_approval=True` dispatcher case must refuse an ordinary call even when role is allowed. The gateway/atomic executor must provide an execution context containing contract ID, claim execution ID and approved actor; dispatcher or a shared guard verifies the live PG claim and that tool, tenant and frozen payload correspond to the AC. A plain caller-constructed dictionary is not proof—the existing `tma_write` verification demonstrates the required distinction ([tools/approval_actions.py:239](../../../../tools/approval_actions.py#L239)).
 
 Read-only tools and explicitly policy-exempt bounded writes should use separate typed entry points; they should not forge approval context.
 
@@ -227,3 +302,71 @@ Duplicate approval reads canonical terminal status and returns the prior outcome
 - EB and projections are provably presentation/notification only.
 - Legacy records have a documented drain/expiry/read-only policy and are never replayed.
 - Production verification proves one AC, one PG winner, one provider write and durable terminal lifecycle for each migrated action class.
+
+## Acceptance matrix
+
+### Authorization
+
+- authorized callback;
+- unauthorized callback;
+- exact requester match for `self_confirm`;
+- current role downgrade;
+- separation of requester and approver.
+
+### Identity and tenant
+
+- frozen requester reaches provider;
+- approver stored separately;
+- cross-tenant refusal;
+- cross-domain refusal;
+- presentation recipient is not authority.
+
+### Restart
+
+- proposal in instance A;
+- approval in instance B;
+- same durable contract;
+- no dependency on EventBus or RAM state.
+
+### Duplicate and concurrency
+
+- duplicate click;
+- concurrent clicks;
+- stale callback after terminal state;
+- exactly one provider execution.
+
+### Forgery
+
+- unknown contract ID;
+- modified signed reference;
+- wrong action binding;
+- wrong recipient binding;
+- expired reference;
+- unsupported reference version;
+- forged execution context;
+- direct dispatch refusal for all approval-required tools.
+
+### Failure handling
+
+- repository unavailable;
+- PostgreSQL unavailable;
+- claim conflict;
+- provider explicit failure;
+- receipt verification failure;
+- `outcome_unknown`;
+- projection delivery failure;
+- projection synchronization failure.
+
+### Flags and rollback
+
+- every supported flag combination;
+- dark deployment under disabled flag;
+- no activation before full readiness;
+- rollback never restores direct dispatch;
+- pending contracts remain canonical.
+
+### Callback regression
+
+- approve/reject use the new path;
+- unrelated callback families remain functional;
+- the legacy fallback test is inverted deliberately, not deleted silently.

@@ -1,6 +1,36 @@
 # Phase 4C — Open Questions
 
+Program: F52 — Unified Approval Runtime Migration and Implementation
+Document role: Decision and blocker register
+Historical research identifier: Phase 4C
+Status: Active planning register
+
 Only questions not answerable from repository code/tests at `origin/main` `4d3787e6e6fcbc93bd5a30f62f0834136b706f06` are listed. “Blocks 4C-1” means implementation should not start without the answer; other questions block only their named later phase.
+
+## Closed decisions
+
+### Q3 — Claim requirement for all 11 approval-required tools
+
+Status: CLOSED
+
+Decision:
+All 11 tools currently marked `requires_approval` remain in the
+approval-required cohort for F52 migration.
+
+Every one of these tools requires verified live PostgreSQL execution ownership
+before provider execution.
+
+This includes:
+
+- `gmail_draft`
+- `send_followup`
+- `send_recovery`
+
+Any future reclassification of drafts, notifications, or other low-risk actions
+is a separate business-policy change and is not part of the F52 migration.
+
+Effect:
+Q3 no longer blocks implementation readiness.
 
 ## Q1 — Which feature-flag combinations are supported after Phase 4B cutover?
 
@@ -15,13 +45,6 @@ Only questions not answerable from repository code/tests at `origin/main` `4d378
 - Missing evidence: product preference for raw UUID versus signed compact opaque reference; retention/expiry expectation for old messages.
 - Decision owner: technical owner with product/security review.
 - Blocking: **Blocks 4C-1.**
-
-## Q3 — Must every approval-required dispatcher tool require a live PostgreSQL claim, including drafts and owner notifications?
-
-- Why it matters: the target invariant says yes, but current metadata marks Gmail draft and notification-like internal tools as approval-required while their business risk differs. Weakening the global guard for selected tools would require an explicit policy class, not an implicit exception.
-- Missing evidence: approved policy inventory for the 11 tools and whether `gmail_draft`, `send_followup`, and `send_recovery` should remain approval-required.
-- Decision owner: business owner/security owner.
-- Blocking: **Blocks 4C-1** for final cohort membership; implementation can prepare the generic guard only after policy is fixed.
 
 ## Q4 — What should happen to Telegram buttons created before 4C-1?
 

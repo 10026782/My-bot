@@ -1,5 +1,10 @@
 # Phase 4C — Current-State Approval Runtime Map
 
+Program: F52 — Unified Approval Runtime Migration and Implementation
+Document role: Latest verified current-state runtime audit
+Historical research identifier: Phase 4C
+Status: Verified research baseline
+
 Research baseline: `origin/main` at `4d3787e6e6fcbc93bd5a30f62f0834136b706f06` (2026-07-14). This document is a static code and test audit. It does not assert deployed feature-flag values.
 
 ## Method and counting
@@ -17,11 +22,11 @@ Labels used below:
 
 ## Canonical runtime that already exists
 
-`ActionContract` freezes tenant, canonical requester, tool/payload, fingerprint, origin, policy, trusted source, context-integrity facts, idempotency key, actors, timestamps, status and version ([core/action_gateway.py:136](../../core/action_gateway.py#L136)). `ExecutionLedger` persists a proposal before indexing it, hydrates both RAM indexes on repository recovery, and persists lifecycle transitions before changing RAM ([core/action_gateway.py:355](../../core/action_gateway.py#L355), [core/action_gateway.py:376](../../core/action_gateway.py#L376), [core/action_gateway.py:400](../../core/action_gateway.py#L400), [core/action_gateway.py:455](../../core/action_gateway.py#L455)).
+`ActionContract` freezes tenant, canonical requester, tool/payload, fingerprint, origin, policy, trusted source, context-integrity facts, idempotency key, actors, timestamps, status and version ([core/action_gateway.py:136](../../../../../core/action_gateway.py#L136)). `ExecutionLedger` persists a proposal before indexing it, hydrates both RAM indexes on repository recovery, and persists lifecycle transitions before changing RAM ([core/action_gateway.py:355](../../../../../core/action_gateway.py#L355), [core/action_gateway.py:376](../../../../../core/action_gateway.py#L376), [core/action_gateway.py:400](../../../../../core/action_gateway.py#L400), [core/action_gateway.py:455](../../../../../core/action_gateway.py#L455)).
 
-`ActionGateway.approve()` re-reads the contract, validates `approval` versus `self_confirm`, persists `approved`, and delegates execution ([core/action_gateway.py:1200](../../core/action_gateway.py#L1200)). With atomic claims enabled, `_execute_contract()` delegates to `execute_with_atomic_claim()`; only a PostgreSQL `ACQUIRED` claim reaches the dispatcher, and database unavailability fails closed ([core/action_gateway.py:1301](../../core/action_gateway.py#L1301), [core/action_gateway_atomic_executor.py:19](../../core/action_gateway_atomic_executor.py#L19), [core/atomic_claim_repository.py:45](../../core/atomic_claim_repository.py#L45)). Provider output is verified before `completed`; uncertain evidence remains `outcome_unknown` ([core/action_gateway.py:1487](../../core/action_gateway.py#L1487)).
+`ActionGateway.approve()` re-reads the contract, validates `approval` versus `self_confirm`, persists `approved`, and delegates execution ([core/action_gateway.py:1200](../../../../../core/action_gateway.py#L1200)). With atomic claims enabled, `_execute_contract()` delegates to `execute_with_atomic_claim()`; only a PostgreSQL `ACQUIRED` claim reaches the dispatcher, and database unavailability fails closed ([core/action_gateway.py:1301](../../../../../core/action_gateway.py#L1301), [core/action_gateway_atomic_executor.py:19](../../../../../core/action_gateway_atomic_executor.py#L19), [core/atomic_claim_repository.py:45](../../../../../core/atomic_claim_repository.py#L45)). Provider output is verified before `completed`; uncertain evidence remains `outcome_unknown` ([core/action_gateway.py:1487](../../../../../core/action_gateway.py#L1487)).
 
-This runtime is feature gated. The singleton receives `ActionContractRepository` only when `FEATURE_ACTION_CONTRACT_PERSISTENCE` is enabled ([core/action_gateway.py:1826](../../core/action_gateway.py#L1826)); the repository and atomic-claim flags are default-off in source ([feature_flags.py:47](../../feature_flags.py#L47)). Therefore code proves capability, not live enablement.
+This runtime is feature gated. The singleton receives `ActionContractRepository` only when `FEATURE_ACTION_CONTRACT_PERSISTENCE` is enabled ([core/action_gateway.py:1826](../../../../../core/action_gateway.py#L1826)); the repository and atomic-claim flags are default-off in source ([feature_flags.py:47](../../../../../feature_flags.py#L47)). Therefore code proves capability, not live enablement.
 
 ## Current-state matrix
 
@@ -86,82 +91,82 @@ Compact values: `AC` = canonical ActionContract, `PG` = PostgreSQL atomic claim,
 
 Proposal (six queued route branches):
 
-`require_tma_auth()` validates Telegram initData HMAC and resolves stable identity ([tma_api.py:709](../../tma_api.py#L709), [tma_api.py:788](../../tma_api.py#L788)) → endpoint role check → `_queue_tma_write_approval()` checks durable persistence and atomic claims, calls `ActionGateway.propose_action(tool_name="tma_write", trusted_source="tma_api")` ([tma_api.py:444](../../tma_api.py#L444), [tma_api.py:542](../../tma_api.py#L542)) → repository saves AC → `_ensure_approval_projection()` finds/repairs/creates AP row with blank `CONTEXT_DATA` ([tma_api.py:617](../../tma_api.py#L617)) → returns pending/projection-missing response. The route call sites are project create ([tma_api.py:1018](../../tma_api.py#L1018)), lead status ([tma_api.py:1457](../../tma_api.py#L1457)), lead patch ([tma_api.py:1545](../../tma_api.py#L1545)), outcome ([tma_api.py:1596](../../tma_api.py#L1596)), task create ([tma_api.py:1642](../../tma_api.py#L1642)), and follow-up task ([tma_api.py:1706](../../tma_api.py#L1706)).
+`require_tma_auth()` validates Telegram initData HMAC and resolves stable identity ([tma_api.py:709](../../../../../tma_api.py#L709), [tma_api.py:788](../../../../../tma_api.py#L788)) → endpoint role check → `_queue_tma_write_approval()` checks durable persistence and atomic claims, calls `ActionGateway.propose_action(tool_name="tma_write", trusted_source="tma_api")` ([tma_api.py:444](../../../../../tma_api.py#L444), [tma_api.py:542](../../../../../tma_api.py#L542)) → repository saves AC → `_ensure_approval_projection()` finds/repairs/creates AP row with blank `CONTEXT_DATA` ([tma_api.py:617](../../../../../tma_api.py#L617)) → returns pending/projection-missing response. The route call sites are project create ([tma_api.py:1018](../../../../../tma_api.py#L1018)), lead status ([tma_api.py:1457](../../../../../tma_api.py#L1457)), lead patch ([tma_api.py:1545](../../../../../tma_api.py#L1545)), outcome ([tma_api.py:1596](../../../../../tma_api.py#L1596)), task create ([tma_api.py:1642](../../../../../tma_api.py#L1642)), and follow-up task ([tma_api.py:1706](../../../../../tma_api.py#L1706)).
 
-Approval: `POST /api/approvals/<approval_id>` ([tma_api.py:2705](../../tma_api.py#L2705)) → `_load_actionable_projection()` requires immutable AC ID ([tma_api.py:2477](../../tma_api.py#L2477)) → `_claim_and_execute_approval()` re-reads AC and validates pending/tool/source/origin/policy/tenant ([tma_api.py:2510](../../tma_api.py#L2510)) → `ActionGateway.approve(contract_id, approver, role)` → durable `approved` → PostgreSQL claim → `_make_dispatch_executor()` reconstructs frozen requester ([core/action_gateway.py:1718](../../core/action_gateway.py#L1718)) → `dispatch_tool("tma_write", ..., execution_context)` → `tma_write()` verifies a live matching EXECUTING claim ([tools/approval_actions.py:239](../../tools/approval_actions.py#L239)) → Airtable provider write and receipt ([tools/approval_actions.py:363](../../tools/approval_actions.py#L363), [tools/approval_actions.py:398](../../tools/approval_actions.py#L398)) → canonical lifecycle → projection sync ([tma_api.py:2434](../../tma_api.py#L2434)) → JSON `{ok, message, status_code, projected_lifecycle_status, projection_sync_pending}`. `outcome_unknown` returns HTTP 202 and is not collapsed.
+Approval: `POST /api/approvals/<approval_id>` ([tma_api.py:2705](../../../../../tma_api.py#L2705)) → `_load_actionable_projection()` requires immutable AC ID ([tma_api.py:2477](../../../../../tma_api.py#L2477)) → `_claim_and_execute_approval()` re-reads AC and validates pending/tool/source/origin/policy/tenant ([tma_api.py:2510](../../../../../tma_api.py#L2510)) → `ActionGateway.approve(contract_id, approver, role)` → durable `approved` → PostgreSQL claim → `_make_dispatch_executor()` reconstructs frozen requester ([core/action_gateway.py:1718](../../../../../core/action_gateway.py#L1718)) → `dispatch_tool("tma_write", ..., execution_context)` → `tma_write()` verifies a live matching EXECUTING claim ([tools/approval_actions.py:239](../../../../../tools/approval_actions.py#L239)) → Airtable provider write and receipt ([tools/approval_actions.py:363](../../../../../tools/approval_actions.py#L363), [tools/approval_actions.py:398](../../../../../tools/approval_actions.py#L398)) → canonical lifecycle → projection sync ([tma_api.py:2434](../../../../../tma_api.py#L2434)) → JSON `{ok, message, status_code, projected_lifecycle_status, projection_sync_pending}`. `outcome_unknown` returns HTTP 202 and is not collapsed.
 
 ### 2. Telegram agent proposal
 
-Telegram webhook → `run_agent()` → Claude `tool_use` → `tool_registry.enforce()` → if `meta.requires_approval`, `_queue_approval()` ([app.py:1983](../../app.py#L1983), [app.py:2000](../../app.py#L2000), [app.py:2047](../../app.py#L2047), [app.py:730](../../app.py#L730)) → `ActionGateway.propose_action()` plus `bus.request_approval()` → Telegram buttons contain `approve:<event_bus_id>` / `reject:<event_bus_id>`, not the AC ID. Return is approval-queued text to Claude. The AC save is durable when enabled; the displayed EB pointer is not.
+Telegram webhook → `run_agent()` → Claude `tool_use` → `tool_registry.enforce()` → if `meta.requires_approval`, `_queue_approval()` ([app.py:1983](../../../../../app.py#L1983), [app.py:2000](../../../../../app.py#L2000), [app.py:2047](../../../../../app.py#L2047), [app.py:730](../../../../../app.py#L730)) → `ActionGateway.propose_action()` plus `bus.request_approval()` → Telegram buttons contain `approve:<event_bus_id>` / `reject:<event_bus_id>`, not the AC ID. Return is approval-queued text to Claude. The AC save is durable when enabled; the displayed EB pointer is not.
 
 ### 3. Telegram callback approval
 
-Webhook callback routing keeps `approve:`/`reject:` separate from unrelated callbacks ([app.py:2633](../../app.py#L2633)) → `_handle_approval_callback_impl()` verifies current role ([app.py:983](../../app.py#L983)) → looks up EB item and recomputes a business fingerprint → pops EB → if gateway flag on and matching pending AC found, `ActionGateway.approve()` → PG → dispatcher → provider/evidence. If lookup throws or no AC is found, code explicitly calls `dispatch_tool()` directly ([app.py:1098](../../app.py#L1098), [app.py:1119](../../app.py#L1119), [app.py:1137](../../app.py#L1137)). It then manually patches any recovered contract lifecycle ([app.py:1179](../../app.py#L1179)). Return is edited callback message. This is not fail-closed.
+Webhook callback routing keeps `approve:`/`reject:` separate from unrelated callbacks ([app.py:2633](../../../../../app.py#L2633)) → `_handle_approval_callback_impl()` verifies current role ([app.py:983](../../../../../app.py#L983)) → looks up EB item and recomputes a business fingerprint → pops EB → if gateway flag on and matching pending AC found, `ActionGateway.approve()` → PG → dispatcher → provider/evidence. If lookup throws or no AC is found, code explicitly calls `dispatch_tool()` directly ([app.py:1098](../../../../../app.py#L1098), [app.py:1119](../../../../../app.py#L1119), [app.py:1137](../../../../../app.py#L1137)). It then manually patches any recovered contract lifecycle ([app.py:1179](../../../../../app.py#L1179)). Return is edited callback message. This is not fail-closed.
 
-Reject pops EB and notifies but does not call `ActionGateway.reject()` for the linked contract ([app.py:1289](../../app.py#L1289)).
+Reject pops EB and notifies but does not call `ActionGateway.reject()` for the linked contract ([app.py:1289](../../../../../app.py#L1289)).
 
 ### 4. Telegram free text, selection and reconfirmation
 
-`run_agent()` resolves identity → ingress context gate → router-level `_pending_approvals` (raw-plan confirmation) → ActionGateway combined word → numbered disambiguation → status query → confirmation → cancellation ([app.py:1475](../../app.py#L1475), [app.py:1562](../../app.py#L1562)). A live AC is always preferred for confirm words, even if the gateway feature is off ([app.py:1636](../../app.py#L1636)). `route_confirmation_word()` finds pending contracts, may request disambiguation/reconfirmation, and finally calls `approve()` ([core/action_gateway.py:912](../../core/action_gateway.py#L912)). Selection alone only identifies a contract; authorization remains in `approve()`. Multiple live contracts produce a numbered choice. Combined approval+ordinal calls the same authority boundary. Cancellation calls `reject()`.
+`run_agent()` resolves identity → ingress context gate → router-level `_pending_approvals` (raw-plan confirmation) → ActionGateway combined word → numbered disambiguation → status query → confirmation → cancellation ([app.py:1475](../../../../../app.py#L1475), [app.py:1562](../../../../../app.py#L1562)). A live AC is always preferred for confirm words, even if the gateway feature is off ([app.py:1636](../../../../../app.py#L1636)). `route_confirmation_word()` finds pending contracts, may request disambiguation/reconfirmation, and finally calls `approve()` ([core/action_gateway.py:912](../../../../../core/action_gateway.py#L912)). Selection alone only identifies a contract; authorization remains in `approve()`. Multiple live contracts produce a numbered choice. Combined approval+ordinal calls the same authority boundary. Cancellation calls `reject()`.
 
 ### 5. WhatsApp mutation paths
 
-Twilio: signed `/whatsapp` → sender phone canonicalization → destination-number domain → MessageSid idempotency → `resolve_identity("whatsapp", sender)` → media handlers and furniture funnel → `run_agent(channel="whatsapp")` ([app.py:2825](../../app.py#L2825), [app.py:2836](../../app.py#L2836), [app.py:2850](../../app.py#L2850), [app.py:2951](../../app.py#L2951)). Text therefore shares ActionGateway parsers and the same EB-ID callback weakness, but Twilio has no WhatsApp-native approval presentation; internal media proposals target Telegram owner buttons.
+Twilio: signed `/whatsapp` → sender phone canonicalization → destination-number domain → MessageSid idempotency → `resolve_identity("whatsapp", sender)` → media handlers and furniture funnel → `run_agent(channel="whatsapp")` ([app.py:2825](../../../../../app.py#L2825), [app.py:2836](../../../../../app.py#L2836), [app.py:2850](../../../../../app.py#L2850), [app.py:2951](../../../../../app.py#L2951)). Text therefore shares ActionGateway parsers and the same EB-ID callback weakness, but Twilio has no WhatsApp-native approval presentation; internal media proposals target Telegram owner buttons.
 
-Meta: signature/normalization/idempotency/domain are present ([app.py:2979](../../app.py#L2979)). Media processing happens before the outbound-enable guard and may write Drive/Airtable ([app.py:3030](../../app.py#L3030)); text skips `run_agent()` by default. When enabled, Agent runs but outbound remains a log-only stub ([app.py:3091](../../app.py#L3091)). There is no Meta reply parser or durable WhatsApp presentation state.
+Meta: signature/normalization/idempotency/domain are present ([app.py:2979](../../../../../app.py#L2979)). Media processing happens before the outbound-enable guard and may write Drive/Airtable ([app.py:3030](../../../../../app.py#L3030)); text skips `run_agent()` by default. When enabled, Agent runs but outbound remains a log-only stub ([app.py:3091](../../../../../app.py#L3091)). There is no Meta reply parser or durable WhatsApp presentation state.
 
 ### 6. EventBus-confirmed mutation
 
-`bus.request_approval()` → `PendingActionsStore.add()` (RAM, 30m) → Telegram button → callback normally bypasses `bus.confirm()` for tool payloads and handles them itself. Generic `bus.confirm()` atomically pops then emits `<action>.confirmed` ([event_bus.py:242](../../event_bus.py#L242), [event_bus.py:253](../../event_bus.py#L253)). Static search found no production `bus.subscribe()` calls; therefore email/bounce events dead-end rather than write. Current real mutation authority is in the Telegram callback fallback, not in a subscriber. Follow-up, recovery and voice publishers now also propose ACs before creating EB presentation rows ([followup_engine.py:198](../../followup_engine.py#L198), [core/lead_recovery.py:245](../../core/lead_recovery.py#L245), [media_handler.py:277](../../media_handler.py#L277)).
+`bus.request_approval()` → `PendingActionsStore.add()` (RAM, 30m) → Telegram button → callback normally bypasses `bus.confirm()` for tool payloads and handles them itself. Generic `bus.confirm()` atomically pops then emits `<action>.confirmed` ([event_bus.py:242](../../../../../event_bus.py#L242), [event_bus.py:253](../../../../../event_bus.py#L253)). Static search found no production `bus.subscribe()` calls; therefore email/bounce events dead-end rather than write. Current real mutation authority is in the Telegram callback fallback, not in a subscriber. Follow-up, recovery and voice publishers now also propose ACs before creating EB presentation rows ([followup_engine.py:198](../../../../../followup_engine.py#L198), [core/lead_recovery.py:245](../../../../../core/lead_recovery.py#L245), [media_handler.py:277](../../../../../media_handler.py#L277)).
 
 ### 7. Scheduler/background mutation
 
-`start_scheduler()` registers 23 jobs behind `_automation_guard()` ([scheduler.py:770](../../scheduler.py#L770), [scheduler.py:825](../../scheduler.py#L825)). Representative mutation chains:
+`start_scheduler()` registers 23 jobs behind `_automation_guard()` ([scheduler.py:770](../../../../../scheduler.py#L770), [scheduler.py:825](../../../../../scheduler.py#L825)). Representative mutation chains:
 
 - follow-up/recovery scan → AC proposal → EB/Telegram presentation → callback chain above.
 - lead-memory flush every 10m → `lead_memory` → direct Airtable add/update.
-- interaction scan every 15m → `save_to_interaction_log()` → direct Airtable add, then `create_tasks_from_analysis()` → direct Tasks adds ([interaction_engine.py:276](../../interaction_engine.py#L276), [interaction_engine.py:358](../../interaction_engine.py#L358)).
-- abandoned scan → direct task creation ([abandoned_lead_worker.py:240](../../abandoned_lead_worker.py#L240)); bounce approval is disabled because no adapter exists ([feature_flags.py:191](../../feature_flags.py#L191)).
-- weekly quest reset → direct Airtable patch ([scheduler.py:586](../../scheduler.py#L586)).
+- interaction scan every 15m → `save_to_interaction_log()` → direct Airtable add, then `create_tasks_from_analysis()` → direct Tasks adds ([interaction_engine.py:276](../../../../../interaction_engine.py#L276), [interaction_engine.py:358](../../../../../interaction_engine.py#L358)).
+- abandoned scan → direct task creation ([abandoned_lead_worker.py:240](../../../../../abandoned_lead_worker.py#L240)); bounce approval is disabled because no adapter exists ([feature_flags.py:191](../../../../../feature_flags.py#L191)).
+- weekly quest reset → direct Airtable patch ([scheduler.py:586](../../../../../scheduler.py#L586)).
 
 ### 8. Media/file mutation
 
-Voice: channel webhook → `handle_voice_note()` → risky transcript → `_send_voice_approval_request()` → AC+EB → generic callback. The Edit callback instead pops EB, stores only domain/source in `_pending_voice_edits`, and the next text directly calls `_save_transcript_to_memory()` ([media_handler.py:213](../../media_handler.py#L213), [media_handler.py:245](../../media_handler.py#L245)).
+Voice: channel webhook → `handle_voice_note()` → risky transcript → `_send_voice_approval_request()` → AC+EB → generic callback. The Edit callback instead pops EB, stores only domain/source in `_pending_voice_edits`, and the next text directly calls `_save_transcript_to_memory()` ([media_handler.py:213](../../../../../media_handler.py#L213), [media_handler.py:245](../../../../../media_handler.py#L245)).
 
-File: Telegram/Twilio/Meta/TMA → `handle_file_upload()` → idempotency check → `drive_adapter.upload_file()` → `save_asset()` Airtable record ([media_handler.py:418](../../media_handler.py#L418), [media_handler.py:444](../../media_handler.py#L444), [media_handler.py:465](../../media_handler.py#L465)). There is no claim and Drive may remain written if metadata persistence fails.
+File: Telegram/Twilio/Meta/TMA → `handle_file_upload()` → idempotency check → `drive_adapter.upload_file()` → `save_asset()` Airtable record ([media_handler.py:418](../../../../../media_handler.py#L418), [media_handler.py:444](../../../../../media_handler.py#L444), [media_handler.py:465](../../../../../media_handler.py#L465)). There is no claim and Drive may remain written if metadata persistence fails.
 
 ### 9. Direct dispatcher map for every approval-required tool
 
-`dispatch_tool()` calls `tool_registry.enforce()` but never checks `meta.requires_approval` ([tools/dispatcher.py:136](../../tools/dispatcher.py#L136), [tool_registry.py:265](../../tool_registry.py#L265)). Thus any authorized in-process caller can invoke the following cases without an AC or PG claim. `tma_write` is the only tool with its own live-claim guard.
+`dispatch_tool()` calls `tool_registry.enforce()` but never checks `meta.requires_approval` ([tools/dispatcher.py:136](../../../../../tools/dispatcher.py#L136), [tool_registry.py:265](../../../../../tool_registry.py#L265)). Thus any authorized in-process caller can invoke the following cases without an AC or PG claim. `tma_write` is the only tool with its own live-claim guard.
 
 | Tool | Registry policy | Direct dispatcher target | Provider/business write | Direct-call result |
 |---|---|---|---|---|
-| `calendar_create_event` | approval, management | [tools/dispatcher.py:176](../../tools/dispatcher.py#L176) | Google Calendar create | Executes |
-| `gmail_draft` | approval, management | [tools/dispatcher.py:185](../../tools/dispatcher.py#L185) | Gmail draft create | Executes |
-| `gmail_send_draft` | approval, senior | [tools/dispatcher.py:187](../../tools/dispatcher.py#L187) | Gmail send | Executes |
-| `sheets_append` | approval, management | [tools/dispatcher.py:197](../../tools/dispatcher.py#L197) | Sheets append | Executes |
-| `airtable_add` | approval, internal | [tools/dispatcher.py:241](../../tools/dispatcher.py#L241) | Airtable create; Leads has additional source gate | Executes for allowed table/source |
-| `airtable_update` | approval, management | [tools/dispatcher.py:306](../../tools/dispatcher.py#L306) | Airtable patch; Leads has source gate | Executes for allowed table/source |
-| `crm_mark_payment_paid` | approval, senior | [tools/dispatcher.py:365](../../tools/dispatcher.py#L365) | CRM/Airtable payment update | Executes |
-| `media_save_to_memory` | approval, internal | [tools/dispatcher.py:380](../../tools/dispatcher.py#L380) | Airtable Business Memory create | Executes |
-| `send_followup` | approval, internal | [tools/dispatcher.py:386](../../tools/dispatcher.py#L386) | owner notification + lead-memory mutation | Executes |
-| `send_recovery` | approval, internal | [tools/dispatcher.py:394](../../tools/dispatcher.py#L394) | owner notification | Executes |
-| `tma_write` | approval, owner/manager | [tools/dispatcher.py:405](../../tools/dispatcher.py#L405) | Airtable create/patch | Refuses unless live matching PG claim ([tools/approval_actions.py:327](../../tools/approval_actions.py#L327)) |
+| `calendar_create_event` | approval, management | [tools/dispatcher.py:176](../../../../../tools/dispatcher.py#L176) | Google Calendar create | Executes |
+| `gmail_draft` | approval, management | [tools/dispatcher.py:185](../../../../../tools/dispatcher.py#L185) | Gmail draft create | Executes |
+| `gmail_send_draft` | approval, senior | [tools/dispatcher.py:187](../../../../../tools/dispatcher.py#L187) | Gmail send | Executes |
+| `sheets_append` | approval, management | [tools/dispatcher.py:197](../../../../../tools/dispatcher.py#L197) | Sheets append | Executes |
+| `airtable_add` | approval, internal | [tools/dispatcher.py:241](../../../../../tools/dispatcher.py#L241) | Airtable create; Leads has additional source gate | Executes for allowed table/source |
+| `airtable_update` | approval, management | [tools/dispatcher.py:306](../../../../../tools/dispatcher.py#L306) | Airtable patch; Leads has source gate | Executes for allowed table/source |
+| `crm_mark_payment_paid` | approval, senior | [tools/dispatcher.py:365](../../../../../tools/dispatcher.py#L365) | CRM/Airtable payment update | Executes |
+| `media_save_to_memory` | approval, internal | [tools/dispatcher.py:380](../../../../../tools/dispatcher.py#L380) | Airtable Business Memory create | Executes |
+| `send_followup` | approval, internal | [tools/dispatcher.py:386](../../../../../tools/dispatcher.py#L386) | owner notification + lead-memory mutation | Executes |
+| `send_recovery` | approval, internal | [tools/dispatcher.py:394](../../../../../tools/dispatcher.py#L394) | owner notification | Executes |
+| `tma_write` | approval, owner/manager | [tools/dispatcher.py:405](../../../../../tools/dispatcher.py#L405) | Airtable create/patch | Refuses unless live matching PG claim ([tools/approval_actions.py:327](../../../../../tools/approval_actions.py#L327)) |
 
 The first ten are direct execution paths. The Agent loop itself does not take them because it checks `meta.requires_approval`; the boundary remains bypassable by other Python callers.
 
 ## Tool Registry authority and mismatch inventory
 
-The registry contains 21 tools; 11 require approval ([tool_registry.py:49](../../tool_registry.py#L49), [tool_registry.py:238](../../tool_registry.py#L238)). `tools/schemas.py` exposes 17 tools to Claude ([tools/schemas.py:4](../../tools/schemas.py#L4)). The four approval tools absent from agent schemas—`media_save_to_memory`, `send_followup`, `send_recovery`, `tma_write`—are intentionally internal ([tools/schemas.py:234](../../tools/schemas.py#L234)). Static comparison found no agent-exposed schema absent from the registry.
+The registry contains 21 tools; 11 require approval ([tool_registry.py:49](../../../../../tool_registry.py#L49), [tool_registry.py:238](../../../../../tool_registry.py#L238)). `tools/schemas.py` exposes 17 tools to Claude ([tools/schemas.py:4](../../../../../tools/schemas.py#L4)). The four approval tools absent from agent schemas—`media_save_to_memory`, `send_followup`, `send_recovery`, `tma_write`—are intentionally internal ([tools/schemas.py:234](../../../../../tools/schemas.py#L234)). Static comparison found no agent-exposed schema absent from the registry.
 
 Mismatches:
 
 1. `requires_approval` is metadata consumed by `run_agent()` and EventBus, not an execution boundary in `enforce()` or `dispatch_tool()`.
-2. TMA maintains separate `ACTION_RISK` values ([tma_api.py:392](../../tma_api.py#L392)); bulk eligibility therefore is not derived from Tool Registry or contract policy.
-3. Gateway has its own policy classifier (`approval`/`self_confirm`) for Leads ([core/action_gateway.py:106](../../core/action_gateway.py#L106)). This is legitimate policy detail but not represented by Tool Registry metadata.
-4. Router-level `_APPROVAL_REQUIRED_ACTIONS` applies to raw user intents, not tool execution ([app.py:77](../../app.py#L77)); its “approval” terminology conflates plan confirmation with mutation authorization.
-5. EventBus now derives `ACTIONS_REQUIRING_APPROVAL` from Tool Registry ([event_bus.py:186](../../event_bus.py#L186)); no mismatch there.
-6. `approvals_projection.py` correctly implements display mapping, but its header still describes the module as unwired even though TMA imports it—documentation drift ([core/approvals_projection.py:1](../../core/approvals_projection.py#L1), [tma_api.py:2029](../../tma_api.py#L2029)).
+2. TMA maintains separate `ACTION_RISK` values ([tma_api.py:392](../../../../../tma_api.py#L392)); bulk eligibility therefore is not derived from Tool Registry or contract policy.
+3. Gateway has its own policy classifier (`approval`/`self_confirm`) for Leads ([core/action_gateway.py:106](../../../../../core/action_gateway.py#L106)). This is legitimate policy detail but not represented by Tool Registry metadata.
+4. Router-level `_APPROVAL_REQUIRED_ACTIONS` applies to raw user intents, not tool execution ([app.py:77](../../../../../app.py#L77)); its “approval” terminology conflates plan confirmation with mutation authorization.
+5. EventBus now derives `ACTIONS_REQUIRING_APPROVAL` from Tool Registry ([event_bus.py:186](../../../../../event_bus.py#L186)); no mismatch there.
+6. `approvals_projection.py` correctly implements display mapping, but its header still describes the module as unwired even though TMA imports it—documentation drift ([core/approvals_projection.py:1](../../../../../core/approvals_projection.py#L1), [tma_api.py:2029](../../../../../tma_api.py#L2029)).
 
 Future single source: Tool Registry should own coarse tool risk/approval requirements; a typed policy service using immutable proposal facts should own allowed policy variants and return the policy stored on AC. Dispatcher must enforce proof of a live canonical execution context for every approval-required tool, not only `tma_write`.
 
@@ -177,22 +182,22 @@ Future single source: Tool Registry should own coarse tool risk/approval require
 | `send_bounce` | abandoned worker | EB RAM / lost | no subscriber/tool | none | Dead approval UI; keep feature hard-disabled |
 | non-tool `.confirmed` | callback emits event | no production subscriber found | no write | none | Observability only or delete after proven caller migration |
 
-EventBus is presently a pending/presentation mechanism and, through the callback’s fallback, indirectly participates in execution authority. Its own `confirm()` is process-local and at-most-once only inside one process; restart loses items. `PendingActionsStore.pop()` is locked, but list/fingerprint iterations are not consistently locked ([event_bus.py:69](../../event_bus.py#L69), [event_bus.py:90](../../event_bus.py#L90)). It can remain for notifications, but it cannot be authorization or execution authority.
+EventBus is presently a pending/presentation mechanism and, through the callback’s fallback, indirectly participates in execution authority. Its own `confirm()` is process-local and at-most-once only inside one process; restart loses items. `PendingActionsStore.pop()` is locked, but list/fingerprint iterations are not consistently locked ([event_bus.py:69](../../../../../event_bus.py#L69), [event_bus.py:90](../../../../../event_bus.py#L90)). It can remain for notifications, but it cannot be authorization or execution authority.
 
 ## Identity map
 
 | Representation | Source/conversion | Use and lossiness |
 |---|---|---|
-| `Identity.tenant_id`, `user_id`, `external_id`, `display_name`, `role`, `allowed_domains` | registry/env resolution in `identity.py` ([identity.py:104](../../identity.py#L104), [identity.py:234](../../identity.py#L234)) | Full runtime identity. Display name is not stable authority. |
-| `canonical_user_id` | normally `identity.memory_key = tenant_id:user_id` ([identity.py:127](../../identity.py#L127)) | Stored on AC; stable requester lookup. Some legacy callers pass chat-derived values; audit each migration. |
+| `Identity.tenant_id`, `user_id`, `external_id`, `display_name`, `role`, `allowed_domains` | registry/env resolution in `identity.py` ([identity.py:104](../../../../../identity.py#L104), [identity.py:234](../../../../../identity.py#L234)) | Full runtime identity. Display name is not stable authority. |
+| `canonical_user_id` | normally `identity.memory_key = tenant_id:user_id` ([identity.py:127](../../../../../identity.py#L127)) | Stored on AC; stable requester lookup. Some legacy callers pass chat-derived values; audit each migration. |
 | Telegram user/chat IDs | update/callback/TMA initData | Callback re-resolves current role; TMA validates signed initData. Chat ID is presentation target, not identity authority. |
 | WhatsApp sender | Twilio/Meta phone → `resolve_identity("whatsapp", sender)` | Known owner maps to canonical owner; unknown sender maps to lead. Phone normalization and registry matching are the conversion boundary. |
-| WhatsApp destination | `_channel_domain(to_number)` | Domain selection only. It is not a tenant selector; current tenant config statically supports `boss_hq` ([core/tenant_config.py:55](../../core/tenant_config.py#L55)). |
+| WhatsApp destination | `_channel_domain(to_number)` | Domain selection only. It is not a tenant selector; current tenant config statically supports `boss_hq` ([core/tenant_config.py:55](../../../../../core/tenant_config.py#L55)). |
 | TMA requester/approver | signed initData identity; `_identity_ref` | Contract freezes requester identity; `approved_by` receives current owner identity separately. |
 | scheduler/system | usually implicit function execution | No uniform canonical system identity, tenant, allowed domain, or delegation record. This is lossy and blocks general pre-authorization design. |
 | `requested_by` strings in TMA payload | display/user reference | Audit/display only; canonical requester remains AC fields. |
 
-The canonical executor reconstructs the frozen requester from AC and passes actual approver separately ([core/action_gateway.py:1750](../../core/action_gateway.py#L1750)). TMA also checks contract tenant against requester/projection context. Direct handlers generally do not preserve this separation.
+The canonical executor reconstructs the frozen requester from AC and passes actual approver separately ([core/action_gateway.py:1750](../../../../../core/action_gateway.py#L1750)). TMA also checks contract tenant against requester/projection context. Direct handlers generally do not preserve this separation.
 
 ## State-store map
 
@@ -209,7 +214,7 @@ The canonical executor reconstructs the frozen requester from AC and passes actu
 
 ## Background job classification
 
-All registrations are visible at [scheduler.py:825](../../scheduler.py#L825). Repository code proves schedule and calls, but not deployed flags.
+All registrations are visible at [scheduler.py:825](../../../../../scheduler.py#L825). Repository code proves schedule and calls, but not deployed flags.
 
 | Job | Class | Mutation/evidence/idempotency | Phase 4C implication |
 |---|---|---|---|
@@ -238,4 +243,4 @@ All registrations are visible at [scheduler.py:825](../../scheduler.py#L825). Re
 
 Strong boundary tests exist for durable proposal/restart dedup (`test_phase_4b_1a_durable_proposals.py:104-255`, `test_phase_4b_1a_lookup_correctness.py:106-264`), lifecycle persistence (`test_phase_4b_1b_durable_lifecycle.py:113-327`), atomic concurrency (`test_phase_4b0_1c_concurrent_approvals.py:49-201`), TMA projection/wiring (`test_phase_4b2_wiring.py:308-967`), and TMA direct-dispatch refusal (`test_phase_4b2_direct_dispatch_bypass.py:173-357`).
 
-The Telegram callback test is a legacy-behavior test that migration must deliberately change: it asserts direct dispatch when the gateway flag is off and when no contract is found ([test_pr0c_telegram_callback_gateway.py:137](../../test_pr0c_telegram_callback_gateway.py#L137), [test_pr0c_telegram_callback_gateway.py:184](../../test_pr0c_telegram_callback_gateway.py#L184)). TMA tests are mostly mocked wiring tests; the PostgreSQL opt-in/concurrency suites prove the claim boundary separately. Media, scheduler and direct TMA business routes generally have mock/component tests, not end-to-end authorization/claim tests.
+The Telegram callback test is a legacy-behavior test that migration must deliberately change: it asserts direct dispatch when the gateway flag is off and when no contract is found ([test_pr0c_telegram_callback_gateway.py:137](../../../../../test_pr0c_telegram_callback_gateway.py#L137), [test_pr0c_telegram_callback_gateway.py:184](../../../../../test_pr0c_telegram_callback_gateway.py#L184)). TMA tests are mostly mocked wiring tests; the PostgreSQL opt-in/concurrency suites prove the claim boundary separately. Media, scheduler and direct TMA business routes generally have mock/component tests, not end-to-end authorization/claim tests.

@@ -1,5 +1,10 @@
 # Phase 4C — Migration Options
 
+Program: F52 — Unified Approval Runtime Migration and Implementation
+Document role: Migration strategy analysis
+Historical research identifier: Phase 4C
+Status: Planning input
+
 Baseline: `origin/main` `4d3787e6e6fcbc93bd5a30f62f0834136b706f06`. Final sequencing must be reconfirmed after Phase 4B rollout/cutover verification. The recommendation reuses ActionGateway, PostgreSQL claims and the dispatcher; it does not create a second runtime.
 
 ## Option comparison

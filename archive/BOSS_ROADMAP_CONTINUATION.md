@@ -325,7 +325,7 @@ Stage 6      Future — SaaS, Learning, Multi-Tenant, WhatsApp Production
 ---
 
 ## BM-10 — F52: Tool Architecture Refactor 🔲 PLANNED
-**מצב:** 4 מסמכי audit מוזגים (docs/f52/). אפס שינוי קוד.
+**מצב:** 4 מסמכי audit מוזגים (docs/architecture/f52-unified-approval-runtime/audits/original/). אפס שינוי קוד.
 **תנאי כניסה:** Stage Revenue יציב (BM-04/05).
 **מה שיבוא:** סגירת high-risk bypasses לפי F52_BYPASS_MAP.md.
 **קבצים:** `crm.py` (→BM-09), `lead_conversion.py`, dispatcher

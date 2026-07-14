@@ -1,13 +1,18 @@
 # F52 Bypass Map
 
+> Status: Historical baseline audit
+> Canonical program: F52 — Unified Approval Runtime Migration and Implementation
+> Superseded for current-state conclusions by: ../phase-4c/CURRENT_STATE_MAP.md
+> Do not use this document as current implementation instruction.
+
 Updated: 03/07/2026 — added `cmd_decision.py:700` (`route_file_to_decision_inbox`), a Drive-upload bypass in the same Route/Controller family as `_handle_telegram_media`/`tma_upload`/`media_handler.py`, missed in the original scan (see C89/F52 scope-verification thread).
 
 Scope: audit-only map of current places where code bypasses one or more F52 contract layers. This document does not change production behavior, refactor code, modify `app.py`, or change Airtable schema.
 
 Source context:
 
-- `docs/f52/F52_CURRENT_TOOL_MAP.md`
-- `docs/f52/F52_CONTRACT_COVERAGE_MAP.md`
+- `docs/architecture/f52-unified-approval-runtime/audits/original/F52_CURRENT_TOOL_MAP.md`
+- `docs/architecture/f52-unified-approval-runtime/audits/original/F52_CONTRACT_COVERAGE_MAP.md`
 - Static scans of `app.py`, `tma_api.py`, `crm.py`, `tools/`, media, lead/session, scheduler, and provider adapter modules
 
 Contract layers audited:
@@ -208,4 +213,3 @@ These are audit tests only; they should fail loudly when new bypasses are introd
 8. Wrap TMA write routes with route-level contract adapters that record proof without forcing them into Claude tool schemas.
 9. Add a media adapter that converts local `MediaResult` statuses into generic F52 proof records.
 10. Bring scheduler/background jobs under a background-action contract with durable proof, explicit send/write classification, and policy review.
-
