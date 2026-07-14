@@ -172,8 +172,24 @@ def verify_canary(contract_id: str, expected_outcome: str, approval_record_id: s
     # and is only ever included in the detail message for human context.
     requester_id = contract.actor_user_id or contract.canonical_user_id
     approver_id = contract.approved_by or ""
-    if contract.status in ("approved", "executing") or contract.status in _TERMINAL_SUCCESS_STATUSES \
-            or contract.status == "rejected":
+    if contract.status == "rejected":
+        # ActionGateway.reject() (core/action_gateway.py) takes a
+        # rejected_by parameter but only ever logs it — it is never written
+        # to approved_by or any other ActionContract field (update_status()
+        # is called with just "rejected", no identity kwarg). There is
+        # therefore no durable field this check could compare against for a
+        # rejection, so it is non-mandatory here — a known schema gap, not a
+        # verification failure, and it must never by itself block a rejected
+        # canary from being VERIFIED. Persisting rejected_by is a separately
+        # scoped lifecycle/audit improvement, not part of this rollout.
+        findings.append(_finding(
+            "requester_approver_separation", "requester and approver stable IDs are distinct",
+            False, "WARN",
+            "rejected_by is not persisted on ActionContract (only approved_by is, and only for "
+            "approvals) — rejector/requester separation cannot be durably verified from the "
+            "existing contract schema for a rejection; this is a known gap, not a check failure",
+        ))
+    elif contract.status in ("approved", "executing") or contract.status in _TERMINAL_SUCCESS_STATUSES:
         separated = bool(approver_id) and approver_id != requester_id
         findings.append(_finding(
             "requester_approver_separation", "requester and approver stable IDs are distinct",

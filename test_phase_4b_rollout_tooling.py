@@ -1186,6 +1186,82 @@ def test_canary_verify_display_name_collision_alone_does_not_fail_separation():
     assert by_id["requester_approver_separation"]["status"] == "PASS"
 
 
+def test_canary_verify_rejected_returns_verified_with_identity_warning():
+    """A genuinely rejected contract — no approved_by (ActionGateway.reject()
+    never persists rejected_by), matching projection, no claim — must be
+    reported VERIFIED, with requester_approver_separation surfaced as a
+    non-mandatory WARN documenting why identity separation can't be proven."""
+    ct = _contract("ct-canary-rejected-verified", status="rejected", approved_by=None)
+    row = {"id": "recApprovalRejVerified", "fields": {
+        ApprovalsFields.ACTION_CONTRACT_ID: ct.contract_id,
+        ApprovalsFields.LEGACY_READ_ONLY: False,
+        ApprovalsFields.PROJECTED_LIFECYCLE_STATUS: "rejected",
+        ApprovalsFields.CONTEXT_DATA: "",
+    }}
+    patches = _patched_canary(
+        contract_lookup=lambda cid: ct if cid == ct.contract_id else None,
+        claim_lookup=lambda cid: None,
+        record_lookup=lambda table, rid: row if rid == "recApprovalRejVerified" else None,
+    )
+    with patches[0], patches[1], patches[2], patches[3], patches[4]:
+        result = canary_mod.verify_canary(contract_id=ct.contract_id, expected_outcome="rejected",
+                                           approval_record_id="recApprovalRejVerified")
+
+    assert result["verdict"] == "VERIFIED", result["blocking_findings"]
+    by_id = {f["id"]: f for f in result["findings"]}
+    sep = by_id["requester_approver_separation"]
+    assert sep["mandatory"] is False
+    assert sep["status"] in ("SKIP", "WARN")
+    assert "rejected_by is not persisted" in sep["detail"]
+
+
+def test_canary_verify_rejected_with_any_claim_fails():
+    """A rejected contract must never have a claim at all — any claim
+    (regardless of its own status) is itself a FAIL."""
+    ct = _contract("ct-canary-rejected-claim-exists", status="rejected", approved_by=None)
+    row = {"id": "recApprovalRejClaim", "fields": {
+        ApprovalsFields.ACTION_CONTRACT_ID: ct.contract_id,
+        ApprovalsFields.LEGACY_READ_ONLY: False,
+        ApprovalsFields.PROJECTED_LIFECYCLE_STATUS: "rejected",
+        ApprovalsFields.CONTEXT_DATA: "",
+    }}
+    unexpected_claim = MagicMock(contract_id=ct.contract_id, status="completed")
+    patches = _patched_canary(
+        contract_lookup=lambda cid: ct if cid == ct.contract_id else None,
+        claim_lookup=lambda cid: unexpected_claim if cid == ct.contract_id else None,
+        record_lookup=lambda table, rid: row if rid == "recApprovalRejClaim" else None,
+    )
+    with patches[0], patches[1], patches[2]:
+        result = canary_mod.verify_canary(contract_id=ct.contract_id, expected_outcome="rejected",
+                                           approval_record_id="recApprovalRejClaim")
+
+    assert result["verdict"] == "FAILED"
+    by_id = {f["id"]: f for f in result["findings"]}
+    assert by_id["claim_expectation"]["status"] == "FAIL"
+
+
+def test_canary_verify_rejected_mismatching_projection_fails():
+    ct = _contract("ct-canary-rejected-mismatch-proj", status="rejected", approved_by=None)
+    row = {"id": "recApprovalRejMismatch", "fields": {
+        ApprovalsFields.ACTION_CONTRACT_ID: ct.contract_id,
+        ApprovalsFields.LEGACY_READ_ONLY: False,
+        ApprovalsFields.PROJECTED_LIFECYCLE_STATUS: "pending",  # should be "rejected"
+        ApprovalsFields.CONTEXT_DATA: "",
+    }}
+    patches = _patched_canary(
+        contract_lookup=lambda cid: ct if cid == ct.contract_id else None,
+        claim_lookup=lambda cid: None,
+        record_lookup=lambda table, rid: row if rid == "recApprovalRejMismatch" else None,
+    )
+    with patches[0], patches[1], patches[2]:
+        result = canary_mod.verify_canary(contract_id=ct.contract_id, expected_outcome="rejected",
+                                           approval_record_id="recApprovalRejMismatch")
+
+    assert result["verdict"] == "FAILED"
+    by_id = {f["id"]: f for f in result["findings"]}
+    assert by_id["projection_lifecycle_match"]["status"] == "FAIL"
+
+
 def test_canary_verify_rejected_contract_with_unexpected_claim_fails():
     ct = _contract("ct-canary-reject", status="rejected", approved_by="Owner Two")
     row = {"id": "recApproval2", "fields": {

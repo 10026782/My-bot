@@ -2,13 +2,21 @@
 # tools/phase_4b_rollout_readiness.py — Phase 4B rollout readiness diagnostic.
 #
 # Read-only by default (this tool has no --apply/mutation mode at all).
-# Run manually before any Phase 4B cutover step:
-#   python3 tools/phase_4b_rollout_readiness.py
-#   python3 tools/phase_4b_rollout_readiness.py --json
+# --mode is required. Run manually before any Phase 4B cutover step:
+#   python3 tools/phase_4b_rollout_readiness.py --mode preflight
+#   python3 tools/phase_4b_rollout_readiness.py --mode active --json
 #
-# Produces reports/phase_4b_rollout_readiness.json and a GO/NO-GO/WARNING
-# terminal summary. See docs/PHASE_4B_ROLLOUT_AND_CUTOVER.md for how this
-# fits into the overall rollout sequence.
+# --mode preflight: both flags may be OFF together — validates infrastructure,
+# migrations, database constraints, schema, and direct ActionContractRepository
+# reachability, independent of flag state.
+# --mode active: both flags must be ON and the ActionGateway runtime
+# repository/atomic-claim wiring must actually be active (post-cutover check).
+#
+# Produces reports/runtime/phase_4b_rollout_readiness.json (gitignored — see
+# reports/samples/phase_4b_rollout_readiness.sample.json for a fixture
+# example) and a GO/NO-GO/WARNING terminal summary. See
+# docs/PHASE_4B_ROLLOUT_AND_CUTOVER.md for how this fits into the overall
+# rollout sequence.
 #
 # Never logs/prints secret values — only presence (yes/no) of configuration
 # and booleans for feature flags.
