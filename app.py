@@ -2785,10 +2785,15 @@ def _webhook_telegram_impl():
                 except Exception:
                     pass
 
-        try:
-            bot.send_message(reply_chat_id, reply)
-        except Exception as e:
-            logger.error(f"[Telegram] send error: {e}")
+        # BUG-SS-FALLBACK-CONTRADICTION: sanitize_agent_response() can return
+        # "" to deliberately suppress a redundant/contradictory reply (e.g.
+        # after a pending-approval message was already sent this turn) —
+        # an empty reply must never be sent as a blank Telegram message.
+        if reply:
+            try:
+                bot.send_message(reply_chat_id, reply)
+            except Exception as e:
+                logger.error(f"[Telegram] send error: {e}")
         return "", 200
 
     # F16 — Media Layer: voice notes / photo / document uploads
@@ -2967,7 +2972,11 @@ def _webhook_whatsapp_impl():
     gated_reply = _gateway_whatsapp_reply(sender, agent_reply, final_domain, msg_sid or sender,
                                           source_module=_reply_source)
     resp = MessagingResponse()
-    if gated_reply is not None:
+    # BUG-SS-FALLBACK-CONTRADICTION: agent_reply (and therefore gated_reply)
+    # can be "" — a deliberate suppression signal from
+    # sanitize_agent_response(), not just "no reply computed" (None). Treat
+    # both as "send nothing" rather than sending a blank WhatsApp message.
+    if gated_reply:
         resp.message(gated_reply)
     return Response(str(resp), mimetype="application/xml")
 
@@ -3126,10 +3135,11 @@ def worker_trigger():
         if not event:
             return jsonify({"error": "event required"}), 400
         reply = run_agent(f"[system event]: {event}", owner_chat_id)
-        try:
-            bot.send_message(owner_chat_id, reply)
-        except Exception as e:
-            logger.error(f"[Worker] telegram: {e}")
+        if reply:
+            try:
+                bot.send_message(owner_chat_id, reply)
+            except Exception as e:
+                logger.error(f"[Worker] telegram: {e}")
         return jsonify({"status": "ok", "reply": reply[:200]}), 200
     except Exception as e:
         logger.error(f"[Worker] trigger error: {e}", exc_info=True)

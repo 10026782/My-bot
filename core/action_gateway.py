@@ -1538,11 +1538,16 @@ class ActionGateway:
             error_code=None,
             raw_tool_response=raw if isinstance(raw, dict) else {"raw": str(raw)},
         )
+        # BUG-SS-DOUBLE-SUCCESS: compose_status_reply() is documented above
+        # (§15.2) as "the only function allowed to produce action-status
+        # text" — this used to also append the executor's own C53-A
+        # user_message as a second line, producing two success statements
+        # in one reply (e.g. "✅ בוצע: ..." followed by "✅ רשומה נוספה...").
+        # The executor's raw response (including user_message) is still
+        # preserved internally on `fact.raw_tool_response` (and already
+        # logged above) for verification/audit — it is simply never
+        # surfaced a second time in the user-facing text.
         gateway_reply = self.compose_status_reply(fact)
-        # Append C53-A user_message as conversational context after the fact
-        c53_message = raw.get("user_message") if isinstance(raw, dict) else None
-        if c53_message and c53_message != gateway_reply.text:
-            return f"{gateway_reply.text}\n{c53_message}"
         return gateway_reply.text
 
     # ── §15.2 — compose_status_reply ────────────────────────────────
