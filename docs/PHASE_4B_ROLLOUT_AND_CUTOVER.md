@@ -1,5 +1,12 @@
 # Phase 4B — Rollout & Cutover
 
+> **Provenance of this document/tooling — read this first.** The Rollout & Cutover
+> implementation (§1-11, all five tools in §2) is **PR #336**. **PR #335 is a
+> verification-hardening layer merged on top of #336** (see the "Verification
+> hardening" note below) — it is **not** an alternative, competing, or replacement
+> Cutover layer. Every tool file, gate, and procedure below is #336's; #335 only
+> adds the specific hardening checks called out explicitly by name.
+
 > **Status of this document: first pass, report-only.** Nothing in this
 > document has been executed against production. No Render env var, no
 > Airtable record, no production PostgreSQL row has been changed as part of
@@ -21,10 +28,11 @@ tooling it describes were written by reading the code directly
 them as stale until a future change updates them with a `C11x` entry for
 PR #334.
 
-**Verification hardening (post-review, on top of the tooling below — not a competing "Cutover" layer):**
-An independent review of the initial version of this tooling found six gaps where a GO/clean-report
-could be produced without actually proving what it claimed to prove. All six are now closed directly
-inside the tools described in §2, not as a parallel implementation:
+**Verification hardening — PR #335, merged on top of PR #336 (not a competing "Cutover" layer):**
+An independent review of the initial (pre-rebase) version of PR #335 found six gaps where a GO/clean
+report could be produced without actually proving what it claimed to prove. PR #335 was then rebased
+onto #336 — dropping its own from-scratch tool reimplementations entirely in favor of #336's — and now
+contributes only the six hardening checks below, added directly inside #336's own tool files:
 
 - `tools/phase_4b_rollout_readiness.py`'s `--mode preflight` now has its own mandatory
   `B.preflight_not_already_cutover` check: both flags already being ON during a *preflight* (pre-rollout)
