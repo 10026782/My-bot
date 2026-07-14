@@ -41,7 +41,18 @@ def chk(desc: str, cond: bool) -> None:
 VALID_REC_ID = "recXOW7FBZQZcNdw1"  # exactly rec + 14 chars
 
 
-def _ok_executor(tool_name, tool_inputs, contract_id):
+# Every local executor below accepts **kwargs (or an explicit identity=None
+# where a test cares about it) because the real production atomic executor
+# (core.action_gateway_atomic_executor.execute_with_atomic_claim, only
+# exercised when FEATURE_ATOMIC_CLAIMS=true) invokes the registered
+# tool_executor as executor_fn(tool_name, tool_inputs, contract_id=...,
+# identity=..., claim_execution_id=...) — see core/action_gateway.py's
+# _make_dispatch_executor for the real executor's matching signature. The
+# legacy (flag-off) dispatch path never passes identity/claim_execution_id
+# at all, so accepting-and-ignoring them here is a no-op in that mode.
+
+
+def _ok_executor(tool_name, tool_inputs, contract_id, **kwargs):
     return {
         "ok": True,
         "tool": tool_name,
@@ -51,7 +62,7 @@ def _ok_executor(tool_name, tool_inputs, contract_id):
     }
 
 
-def _fail_executor(tool_name, tool_inputs, contract_id):
+def _fail_executor(tool_name, tool_inputs, contract_id, **kwargs):
     return {
         "ok": False,
         "tool": tool_name,
@@ -61,7 +72,7 @@ def _fail_executor(tool_name, tool_inputs, contract_id):
     }
 
 
-def _sheets_executor(tool_name, tool_inputs, contract_id):
+def _sheets_executor(tool_name, tool_inputs, contract_id, **kwargs):
     """Simulates wrong tool being called — sheets_append instead of airtable_add."""
     return {
         "ok": True,
@@ -92,6 +103,18 @@ def _identity_for(tenant_id: str, canonical_user_id: str, channel: str = "whatsa
     return Identity(user_id=user_id, role=role, tenant_id=tenant_id, channel=channel, external_id=canonical_user_id)
 
 
+from feature_flags import is_enabled as _flag_enabled
+
+# Only the atomic path (core/action_gateway_atomic_executor.py, exercised
+# when this is True) threads identity/canonical_user_id through to the
+# registered tool_executor at dispatch time — the legacy flag-off path
+# never does. Assertions that specifically prove identity reached the
+# executor are therefore only meaningful (and only run for real) when this
+# is True; with the flag off they degrade to a documented no-op pass rather
+# than a false failure.
+_ATOMIC_CLAIMS_ON = _flag_enabled("FEATURE_ATOMIC_CLAIMS")
+
+
 _BASE_PROPOSE = dict(
     tenant_id="boss_hq",
     canonical_user_id="boss_hq:owner_1",
@@ -110,7 +133,7 @@ _BASE_PROPOSE = dict(
 print("\n── Req1: No execution before approval ──────────────────────")
 
 _dispatched = []
-def _tracking_executor(tool_name, tool_inputs, contract_id):
+def _tracking_executor(tool_name, tool_inputs, contract_id, **kwargs):
     _dispatched.append(tool_name)
     return _ok_executor(tool_name, tool_inputs, contract_id)
 
@@ -127,11 +150,13 @@ print("\n── Req2: מאשר executes saved contract only ──────�
 _dispatched2 = []
 executed_tool = []
 executed_inputs = []
+executed_identity = []
 
-def _contract_tracking_executor(tool_name, tool_inputs, contract_id):
+def _contract_tracking_executor(tool_name, tool_inputs, contract_id, identity=None, **kwargs):
     _dispatched2.append(tool_name)
     executed_tool.append(tool_name)
     executed_inputs.append(tool_inputs)
+    executed_identity.append(identity)
     return _ok_executor(tool_name, tool_inputs, contract_id)
 
 gw2 = _new_gw(_contract_tracking_executor)
@@ -142,6 +167,19 @@ reply = gw2.route_confirmation_word("boss_hq:owner_1", approver_role="owner")
 chk("Req2: exactly one dispatch after מאשר", len(_dispatched2) == 1)
 chk("Req2: executed tool is airtable_add (not re-inferred)", bool(executed_tool) and executed_tool[0] == "airtable_add")
 chk("Req2: executed table is Tasks (preserved from contract)", bool(executed_inputs) and executed_inputs[0].get("table") == "Tasks")
+
+if _ATOMIC_CLAIMS_ON:
+    chk("Req2/atomic: WhatsApp atomic dispatch receives the proposer's identity",
+        bool(executed_identity) and executed_identity[0] is not None)
+    chk("Req2/atomic: identity.channel is whatsapp",
+        bool(executed_identity) and executed_identity[0] is not None
+        and executed_identity[0].channel == "whatsapp")
+    chk("Req2/atomic: identity.memory_key matches canonical_user_id boss_hq:owner_1",
+        bool(executed_identity) and executed_identity[0] is not None
+        and executed_identity[0].memory_key == "boss_hq:owner_1")
+else:
+    chk("Req2/atomic: identity threading skipped (FEATURE_ATOMIC_CLAIMS off — "
+        "legacy dispatch path never passes identity to the executor)", True)
 
 # ══════════════════════════════════════════════════
 # Req #3: Fail-closed if executor missing
@@ -213,7 +251,7 @@ chk("Req4E: short rec id (not exactly 14) → verify failed", v4e.status == "fai
 
 # 4F: Gateway returns error not fake success when executor returns no ID
 _no_id_dispatched = []
-def _no_id_executor(tool_name, tool_inputs, contract_id):
+def _no_id_executor(tool_name, tool_inputs, contract_id, **kwargs):
     _no_id_dispatched.append(tool_name)
     return {"ok": True, "tool": tool_name, "external_id": "", "evidence": {}, "user_message": "ok"}
 
@@ -228,7 +266,7 @@ chk("Req4F: no external_id → no '✅ נוצר' in reply", "✅ נוצר" not i
 print("\n── Req5: Repeated confirms execute once only ────────────────")
 
 _rep_dispatched = []
-def _rep_executor(tool_name, tool_inputs, contract_id):
+def _rep_executor(tool_name, tool_inputs, contract_id, **kwargs):
     _rep_dispatched.append(tool_name)
     return _ok_executor(tool_name, tool_inputs, contract_id)
 
@@ -247,7 +285,7 @@ chk("Req5: no pending contracts after execution",
 print("\n── Req6: Duplicate requires override code ───────────────────")
 
 _dup_dispatched = []
-def _dup_executor(tool_name, tool_inputs, contract_id):
+def _dup_executor(tool_name, tool_inputs, contract_id, **kwargs):
     _dup_dispatched.append(tool_name)
     return _ok_executor(tool_name, tool_inputs, contract_id)
 
@@ -287,9 +325,11 @@ print("\n── Req7: Explicit destination preserved ─────────
 
 _tool7 = []
 _inputs7 = []
-def _dest_executor(tool_name, tool_inputs, contract_id):
+_identity7 = []
+def _dest_executor(tool_name, tool_inputs, contract_id, identity=None, **kwargs):
     _tool7.append(tool_name)
     _inputs7.append(dict(tool_inputs))
+    _identity7.append(identity)
     return _ok_executor(tool_name, tool_inputs, contract_id)
 
 gw7 = _new_gw(_dest_executor)
@@ -306,6 +346,17 @@ r7 = gw7.propose_action(
 gw7.approve(r7.contract_id, approver="boss_hq:owner_1", approver_role="owner")
 chk("Req7: dispatched tool is airtable_add (not sheets_append)", _tool7 == ["airtable_add"])
 chk("Req7: dispatched table is Tasks (not substituted)", bool(_inputs7) and _inputs7[0].get("table") == "Tasks")
+
+if _ATOMIC_CLAIMS_ON:
+    chk("Req7/atomic: Telegram atomic dispatch receives the proposer's identity",
+        bool(_identity7) and _identity7[0] is not None)
+    chk("Req7/atomic: identity.channel is telegram",
+        bool(_identity7) and _identity7[0] is not None and _identity7[0].channel == "telegram")
+    chk("Req7/atomic: identity.memory_key matches canonical_user_id boss_hq:owner_1",
+        bool(_identity7) and _identity7[0] is not None and _identity7[0].memory_key == "boss_hq:owner_1")
+else:
+    chk("Req7/atomic: identity threading skipped (FEATURE_ATOMIC_CLAIMS off — "
+        "legacy dispatch path never passes identity to the executor)", True)
 
 # ══════════════════════════════════════════════════
 # Req #4 extension: other providers don't use Airtable rec ID
@@ -367,7 +418,7 @@ chk("Req4-ext/calendar: missing htmlLink → fails", v_cal_fail.status == "faile
 print("\n── Req8: Status questions must not trigger execution ────────")
 
 _q8_dispatched = []
-def _q8_executor(tool_name, tool_inputs, contract_id):
+def _q8_executor(tool_name, tool_inputs, contract_id, **kwargs):
     _q8_dispatched.append(tool_name)
     return _ok_executor(tool_name, tool_inputs, contract_id)
 
@@ -421,7 +472,7 @@ gw_logger.addHandler(handler)
 gw_logger.setLevel(logging.DEBUG)
 
 _log_dispatched = []
-def _log_executor(tool_name, tool_inputs, contract_id):
+def _log_executor(tool_name, tool_inputs, contract_id, **kwargs):
     _log_dispatched.append(tool_name)
     return _ok_executor(tool_name, tool_inputs, contract_id)
 
@@ -459,8 +510,8 @@ for channel, chat_id, label in [
     ("telegram", "tg:999111222", "Telegram"),
 ]:
     _e2e_dispatched = []
-    def _e2e_exec(tool_name, tool_inputs, contract_id):
-        _e2e_dispatched.append({"tool": tool_name, "inputs": dict(tool_inputs)})
+    def _e2e_exec(tool_name, tool_inputs, contract_id, identity=None, **kwargs):
+        _e2e_dispatched.append({"tool": tool_name, "inputs": dict(tool_inputs), "identity": identity})
         return _ok_executor(tool_name, tool_inputs, contract_id)
 
     gw_e = ActionGateway(ledger=ExecutionLedger(), tool_executor=_e2e_exec)
@@ -479,6 +530,19 @@ for channel, chat_id, label in [
     chk(f"Req10/{label}: after מאשר → exactly 1 dispatch", len(_e2e_dispatched) == 1)
     chk(f"Req10/{label}: dispatched tool is airtable_add", bool(_e2e_dispatched) and _e2e_dispatched[0]["tool"] == "airtable_add")
     chk(f"Req10/{label}: dispatched table is Tasks", bool(_e2e_dispatched) and _e2e_dispatched[0]["inputs"].get("table") == "Tasks")
+
+    if _ATOMIC_CLAIMS_ON:
+        _e2e_identity = _e2e_dispatched[0]["identity"] if _e2e_dispatched else None
+        chk(f"Req10/{label}/atomic: atomic dispatch receives the proposer's identity",
+            _e2e_identity is not None)
+        chk(f"Req10/{label}/atomic: identity.channel is {channel}",
+            _e2e_identity is not None and _e2e_identity.channel == channel)
+        chk(f"Req10/{label}/atomic: identity.memory_key matches canonical_user_id boss_hq:owner_1",
+            _e2e_identity is not None and _e2e_identity.memory_key == "boss_hq:owner_1")
+    else:
+        chk(f"Req10/{label}/atomic: identity threading skipped (FEATURE_ATOMIC_CLAIMS off — "
+            "legacy dispatch path never passes identity to the executor)", True)
+
     gw_e.route_confirmation_word("boss_hq:owner_1", approver_role="owner")
     chk(f"Req10/{label}: second מאשר → still 1 dispatch", len(_e2e_dispatched) == 1)
 
@@ -493,7 +557,7 @@ chk("Req10/noexec: no success claim", "✅" not in reply_ne)
 # ── Req10: Airtable vs Sheets — tool_name preserved ──
 print("\n── Req10: Tool substitution prevention ──────────────────────")
 _sub_tools = []
-def _sub_executor(tool_name, tool_inputs, contract_id):
+def _sub_executor(tool_name, tool_inputs, contract_id, **kwargs):
     _sub_tools.append(tool_name)
     return _ok_executor(tool_name, tool_inputs, contract_id)
 
@@ -518,7 +582,7 @@ chk("Req10/tool-sub: airtable_add dispatched (not sheets_append)", _sub_tools ==
 print("\n── BUG-LIVE-01: Stage A → Gateway ledger sync ───────────────")
 
 _live01_dispatched = []
-def _live01_executor(tool_name, tool_inputs, contract_id):
+def _live01_executor(tool_name, tool_inputs, contract_id, **kwargs):
     _live01_dispatched.append(tool_name)
     return _ok_executor(tool_name, tool_inputs, contract_id)
 
