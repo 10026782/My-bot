@@ -21,6 +21,34 @@ tooling it describes were written by reading the code directly
 them as stale until a future change updates them with a `C11x` entry for
 PR #334.
 
+**Verification hardening (post-review, on top of the tooling below — not a competing "Cutover" layer):**
+An independent review of the initial version of this tooling found six gaps where a GO/clean-report
+could be produced without actually proving what it claimed to prove. All six are now closed directly
+inside the tools described in §2, not as a parallel implementation:
+
+- `tools/phase_4b_rollout_readiness.py`'s `--mode preflight` now has its own mandatory
+  `B.preflight_not_already_cutover` check: both flags already being ON during a *preflight* (pre-rollout)
+  run is a `FAIL`, not a silent pass — a preflight check finding the rollout already happened is not
+  readiness. (`--mode active`'s existing `B.flags_both_on` requirement is unchanged.)
+- A new mandatory `G_regression_suite` section: `G.regression_test_files_present` (file presence) and
+  `G.regression_tests_pass` (actually executes the suite, only with `--run-regression-tests`; without
+  that flag it reports `SKIP`, which — like any other mandatory `SKIP` in this tool — is already
+  blocking, i.e. `NO-GO`, not a silent `GO`).
+- `tools/phase_4b_reconciliation.py` has an 18th check, `R18_duplicate_contract_id`: two raw
+  `ActionContracts` rows sharing one `contract_id` is a data-integrity anomaly (this file's own
+  `contracts_by_id` dict would otherwise silently last-write-win between them), reported as its own
+  blocking finding — independent of `R3`'s existing duplicate-*projection* check.
+- `tools/phase_4b_mark_legacy_approvals.py` and `tools/phase_4b_repair_projections.py` now perform
+  **read-back verification** after every successful `airtable_patch()`/`airtable_create()` call: the
+  affected record is re-fetched and the intended field values are confirmed before counting the write as
+  applied. A mismatch lands in a dedicated `*_verify_failed` list (distinct from `*_failed`, a rejected/
+  errored API call) and fails the run's exit code — a `200`/`ok` response alone was never sufficient
+  proof the write actually persisted.
+
+None of the above changes this document's rollout sequence, gates, or the observational
+`tools/phase_4b_canary_verify.py` — they make the existing gates strictly harder to pass on paper, never
+easier.
+
 ---
 
 ## 1. Current production topology
@@ -53,7 +81,7 @@ Every gate below is a **hard stop**, not a recommendation. All five tools refere
 
 | Gate | Condition to pass | Tool |
 |---|---|---|
-| G1 — Code readiness | `python3 tools/phase_4b_rollout_readiness.py --mode preflight` exits 0 (GO or WARNING, not NO-GO) before cutover; `--mode active` exits 0 after both flags are enabled | readiness |
+| G1 — Code readiness | `python3 tools/phase_4b_rollout_readiness.py --mode preflight --run-regression-tests` exits 0 (GO or WARNING, not NO-GO) before cutover; `--mode active --run-regression-tests` exits 0 after both flags are enabled. Omitting `--run-regression-tests` reports `G.regression_tests_pass=SKIP`, which is already blocking (`NO-GO`) — a real GO requires it. | readiness |
 | G2 — No orphaned/anomalous state | `python3 tools/phase_4b_reconciliation.py --tenant-id <tenant>` reports zero `blocking_findings` | reconciliation |
 | G3 — Legacy rows marked | Every pre-4B-2 Approvals row (`action_contract_id` empty) has `legacy_read_only=true`, confirmed by re-running reconciliation after `phase_4b_mark_legacy_approvals.py --apply` | legacy marking + reconciliation |
 | G4 — Both flags flip together | `FEATURE_ACTION_CONTRACT_PERSISTENCE` and `FEATURE_ATOMIC_CLAIMS` are set in the **same** Render configuration change — never one without the other | Render dashboard (manual) |
@@ -68,7 +96,7 @@ No gate may be skipped because a later gate looks fine. Reconciliation must be r
 
 1. Confirm PR #334 (and this rollout tooling PR) are merged to `main`; capture the exact commit SHA.
 2. Confirm the Render **Pre-Deploy Command** is `python -m core.database_migrations` (unchanged from current config — this rollout does not add new migrations, `core/migrations/001_action_execution_claims.sql` already covers `action_execution_claims`).
-3. Run `tools/phase_4b_rollout_readiness.py --mode preflight` against the target environment — both flags may still be off at this point.
+3. Run `tools/phase_4b_rollout_readiness.py --mode preflight --run-regression-tests` against the target environment — both flags may still be off at this point (if they're already both ON, this is itself a blocking `B.preflight_not_already_cutover` finding).
 4. Run `tools/phase_4b_reconciliation.py --tenant-id <tenant>` in report-only mode; review every blocking finding with the owner.
 5. Run `tools/phase_4b_mark_legacy_approvals.py --report-only`; get explicit owner approval; only then run with `--apply --confirm APPLY_LEGACY_READ_ONLY`.
 6. Re-run reconciliation — expect zero rows with `action_contract_id` empty and `legacy_read_only` false.
@@ -76,7 +104,7 @@ No gate may be skipped because a later gate looks fine. Reconciliation must be r
 8. Confirm the deploy succeeded and the app started (`/health`).
 9. In **one** Render configuration change, set both `FEATURE_ACTION_CONTRACT_PERSISTENCE=true` and `FEATURE_ATOMIC_CLAIMS=true`.
 10. Restart/redeploy once to apply the env change (Render env var changes require a restart to take effect for a running process; do not rely on a hot env reload).
-11. Re-run `tools/phase_4b_rollout_readiness.py --mode preflight` — must be GO.
+11. Re-run `tools/phase_4b_rollout_readiness.py --mode preflight --run-regression-tests` — must be GO.
 12. Run exactly one low-risk production canary (§9).
 13. Only after the canary is fully verified, resume normal TMA approval traffic (§9 step 18-20).
 
@@ -96,7 +124,7 @@ Run `python3 tools/phase_4b_reconciliation.py --tenant-id <tenant>` (report-only
 - All `Approvals` rows (`fetch_all_approvals()`)
 - All PostgreSQL `action_execution_claims` rows (`fetch_all_claims()`, skipped with a warning if PostgreSQL is unreachable)
 
-against the 17 anomaly classes in `tools/phase_4b_reconciliation.py`'s module docstring, and separates its findings into `blocking_findings` / `warnings` / `informational`. The **mandatory rollout target** is stated in that file and repeated in the report's `rollout_target_met` field: zero orphaned contract-linked projections, zero cross-tenant mismatches, zero non-TMA contracts exposed as TMA approvals, zero executable legacy rows, zero contract-linked rows with non-empty `CONTEXT_DATA`, zero duplicate active projections, zero unresolved claim-ownership anomalies.
+against the 18 anomaly classes in `tools/phase_4b_reconciliation.py`'s module docstring, and separates its findings into `blocking_findings` / `warnings` / `informational`. The **mandatory rollout target** is stated in that file and repeated in the report's `rollout_target_met` field: zero orphaned contract-linked projections, zero cross-tenant mismatches, zero non-TMA contracts exposed as TMA approvals, zero executable legacy rows, zero contract-linked rows with non-empty `CONTEXT_DATA`, zero duplicate active projections, zero unresolved claim-ownership anomalies.
 
 Run reconciliation: before legacy marking, after legacy marking, after the flags are enabled, and again after the canary. Never repair anything from this tool — that's `tools/phase_4b_repair_projections.py`'s job, and only for the safe display-repair subset it documents.
 
@@ -190,7 +218,7 @@ Verify each scenario with `tools/phase_4b_canary_verify.py --contract-id <id> --
 1. Confirm PR #334 and this rollout tooling PR are both merged to `main`.
 2. Confirm the current `main` SHA (`git rev-parse origin/main`).
 3. Confirm the Render Pre-Deploy Command is still `python -m core.database_migrations`.
-4. Run `tools/phase_4b_rollout_readiness.py --mode preflight`.
+4. Run `tools/phase_4b_rollout_readiness.py --mode preflight --run-regression-tests`.
 5. Run `tools/phase_4b_reconciliation.py --tenant-id <tenant>` in report-only mode.
 6. Review every blocking finding with the owner; do not proceed while any remain open.
 7. Run `tools/phase_4b_mark_legacy_approvals.py --report-only`; review the exact record IDs proposed.
@@ -201,7 +229,7 @@ Verify each scenario with `tools/phase_4b_canary_verify.py --contract-id <id> --
 12. Confirm the pre-deploy migration succeeded (Render deploy log) and the app started.
 13. In one Render configuration change, enable both `FEATURE_ACTION_CONTRACT_PERSISTENCE=true` and `FEATURE_ATOMIC_CLAIMS=true`.
 14. Restart/deploy once to apply the change.
-15. Run `tools/phase_4b_rollout_readiness.py --mode active` again — must be GO (both flags must now genuinely be on and wired).
+15. Run `tools/phase_4b_rollout_readiness.py --mode active --run-regression-tests` again — must be GO (both flags must now genuinely be on and wired).
 16. Run exactly one low-risk production canary (§9, points 1-15).
 17. Verify the `ActionContract`, PostgreSQL claim, `Approvals` projection, provider record, and audit/receipt all agree.
 18. Only after the canary is fully verified may normal TMA approvals resume.

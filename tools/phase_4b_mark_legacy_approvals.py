@@ -16,6 +16,13 @@
 # Idempotent: a row already legacy_read_only=true is left alone (not
 # re-patched, not counted as a pending candidate on a second run).
 #
+# Read-back verification: after each successful airtable_patch() call, the
+# patched record is re-fetched and legacy_read_only is confirmed True before
+# counting it as applied — a 200/ok response is necessary but not sufficient
+# proof the write actually persisted. A mismatch or failed read-back lands in
+# verify_failed_record_ids (distinct from failed_record_ids, which is a
+# rejected/errored PATCH call itself) and fails the run's exit code.
+#
 # Run manually:
 #   python3 tools/phase_4b_mark_legacy_approvals.py --report-only
 #   python3 tools/phase_4b_mark_legacy_approvals.py --apply --confirm APPLY_LEGACY_READ_ONLY
@@ -33,7 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from airtable_schema import ApprovalsFields  # noqa: E402
 from tools.phase_4b_rollout_common import (  # noqa: E402
-    REPO_ROOT, dump_json_report, fetch_all_approvals, git_state, utc_now_iso,
+    REPO_ROOT, dump_json_report, fetch_all_approvals, fetch_record_by_id, git_state, utc_now_iso,
 )
 
 REPORT_PATH = REPO_ROOT / "reports" / "runtime" / "phase_4b_legacy_marking.json"
@@ -61,6 +68,7 @@ def run(apply: bool, confirm: str | None) -> dict:
             "candidate_record_ids": [],
             "applied_record_ids": [],
             "failed_record_ids": [],
+            "verify_failed_record_ids": [],
         }
 
     candidates = _find_candidates(approvals)
@@ -78,6 +86,7 @@ def run(apply: bool, confirm: str | None) -> dict:
         "candidate_record_ids": candidate_ids,
         "applied_record_ids": [],
         "failed_record_ids": [],
+        "verify_failed_record_ids": [],
     }
 
     if apply and not will_apply:
@@ -92,17 +101,34 @@ def run(apply: bool, confirm: str | None) -> dict:
 
     from tools.airtable_gateway import airtable_patch
 
-    applied, failed = [], []
+    applied, failed, verify_failed = [], [], []
     for record_id in candidate_ids:
         ok = airtable_patch(
             "Approvals", record_id,
             {ApprovalsFields.LEGACY_READ_ONLY: True},
             source="phase_4b_mark_legacy_approvals",
         )
-        (applied if ok else failed).append(record_id)
+        if not ok:
+            failed.append(record_id)
+            continue
+
+        # A 200/ok response from airtable_patch() is necessary but not
+        # sufficient proof the write actually stuck (e.g. a stale
+        # schema-cache entry can silently drop a field without failing the
+        # call in every code path) — read the record back and confirm the
+        # persisted value before counting it as applied.
+        rec = fetch_record_by_id("Approvals", record_id)
+        if rec is None:
+            verify_failed.append(record_id)
+            continue
+        if rec.get("fields", {}).get(ApprovalsFields.LEGACY_READ_ONLY) is not True:
+            verify_failed.append(record_id)
+            continue
+        applied.append(record_id)
 
     result["applied_record_ids"] = sorted(applied)
     result["failed_record_ids"] = sorted(failed)
+    result["verify_failed_record_ids"] = sorted(verify_failed)
     return result
 
 
@@ -122,9 +148,12 @@ def _print_human(result: dict) -> None:
         print(f"\nREFUSED: {result['refused_reason']}")
     if result["mode"] == "apply":
         print(f"\napplied: {len(result['applied_record_ids'])}")
-        print(f"failed:  {len(result['failed_record_ids'])}")
+        print(f"failed (patch call itself failed):  {len(result['failed_record_ids'])}")
         for rid in result["failed_record_ids"]:
             print(f"  FAILED: {rid}")
+        print(f"failed (read-back verification mismatch): {len(result['verify_failed_record_ids'])}")
+        for rid in result["verify_failed_record_ids"]:
+            print(f"  VERIFY_FAILED: {rid}")
 
 
 def main() -> int:
@@ -157,7 +186,7 @@ def main() -> int:
 
     if "error" in result:
         return 2
-    if result["mode"] == "apply" and result["failed_record_ids"]:
+    if result["mode"] == "apply" and (result["failed_record_ids"] or result["verify_failed_record_ids"]):
         return 1
     return 0
 

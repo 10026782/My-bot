@@ -25,6 +25,11 @@
 # business_action_fingerprint but disagreeing with EACH OTHER on tenant_id
 # (a structural fingerprint-collision signal, unrelated to which tenant this
 # particular rollout is scoped to).
+#
+# R18 is a separate, independent anomaly from R3: R3 flags a contract_id
+# with more than one Approvals PROJECTION row; R18 flags a contract_id with
+# more than one raw ACTIONCONTRACTS row (a data-integrity problem in the
+# canonical table itself, upstream of any projection).
 
 from __future__ import annotations
 
@@ -32,7 +37,7 @@ import argparse
 import json
 import sys
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -91,6 +96,23 @@ def run_reconciliation(tenant_id: str | None = None) -> dict:
     from core.approvals_projection import project_lifecycle_status, is_terminal
 
     findings: list[dict] = []
+
+    # 18. Duplicate contract_id across raw ActionContracts rows. This is a
+    # data-integrity anomaly, not display drift: `contracts_by_id` above is a
+    # dict keyed by contract_id, so two rows sharing one contract_id silently
+    # last-write-wins there and everywhere else in this file that looks a
+    # contract up by id — a duplicate can hide a real contract's true state
+    # behind another row entirely. Checked directly against contracts_raw
+    # (not the dict) so the duplication itself is never lost to that same
+    # last-write-wins collapse.
+    contract_id_counts = Counter(c.contract_id for c, _rec_id in contracts_raw if c.contract_id)
+    duplicate_contract_ids = [cid for cid, n in contract_id_counts.items() if n > 1]
+    findings.append(_finding(
+        "R18_duplicate_contract_id",
+        "contract_id values with more than one ActionContracts row (data-integrity anomaly — "
+        "can silently hide a real contract's true state behind another row)",
+        "blocking", duplicate_contract_ids,
+    ))
 
     # 1. ActionContracts (canonical TMA shape) with no Approvals projection.
     missing_projection = [

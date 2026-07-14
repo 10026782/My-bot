@@ -12,9 +12,27 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess as _subprocess_module
 import time
 from contextlib import redirect_stdout
 from unittest.mock import MagicMock, patch
+
+_real_subprocess_run = _subprocess_module.run
+
+
+def _subprocess_run_stub(regression_returncode=0):
+    """subprocess.run stub that only fakes the regression-test-file
+    invocations (tools/phase_4b_rollout_readiness.py's G.regression_tests_pass,
+    when --run-regression-tests is exercised) and passes every other call
+    (notably tools/phase_4b_rollout_common.py::git_state()'s real `git
+    rev-parse` calls) straight through to the real subprocess.run — a
+    blanket subprocess.run mock would otherwise corrupt git_state()'s output
+    with a MagicMock instead of a real commit SHA/branch string."""
+    def _run(args, *a, **kw):
+        if args and str(args[0]) == "git":
+            return _real_subprocess_run(args, *a, **kw)
+        return MagicMock(returncode=regression_returncode)
+    return _run
 
 from core.action_gateway import ActionContract
 from airtable_schema import ApprovalsFields
@@ -249,6 +267,37 @@ def test_reconciliation_detects_every_listed_anomaly():
     assert len(result["blocking_findings"]) == 17
 
 
+def test_reconciliation_r18_duplicate_contract_id_is_blocking():
+    """Two raw ActionContracts rows sharing one contract_id is a data-
+    integrity anomaly (contracts_by_id would silently last-write-win between
+    them everywhere else in this file) — must be its own blocking finding,
+    never silently collapsed away."""
+    ct_a = _contract("ct-dup", tenant_id="boss_hq")
+    ct_b = _contract("ct-dup", tenant_id="boss_hq", status="completed")
+    contracts_raw = [(ct_a, "rec-a"), (ct_b, "rec-b")]
+    with patch.object(recon_mod, "fetch_all_action_contracts", return_value=contracts_raw), \
+         patch.object(recon_mod, "fetch_all_approvals", return_value=[]), \
+         patch.object(recon_mod, "fetch_all_claims", return_value=[]):
+        result = recon_mod.run_reconciliation(tenant_id="boss_hq")
+
+    by_id = {f["check_id"]: f for f in result["findings"]}
+    assert by_id["R18_duplicate_contract_id"]["severity"] == "blocking"
+    assert by_id["R18_duplicate_contract_id"]["items"] == ["ct-dup"]
+    assert result["rollout_target_met"] is False
+
+
+def test_reconciliation_r18_absent_when_no_duplicates():
+    ct = _contract("ct-unique", tenant_id="boss_hq")
+    contracts_raw = [(ct, "rec-1")]
+    with patch.object(recon_mod, "fetch_all_action_contracts", return_value=contracts_raw), \
+         patch.object(recon_mod, "fetch_all_approvals", return_value=[]), \
+         patch.object(recon_mod, "fetch_all_claims", return_value=[]):
+        result = recon_mod.run_reconciliation(tenant_id="boss_hq")
+
+    by_id = {f["check_id"]: f for f in result["findings"]}
+    assert by_id["R18_duplicate_contract_id"]["count"] == 0
+
+
 def test_reconciliation_r10_absent_tenant_id_is_blocking_not_pass():
     """Omitting tenant_id must never look like a clean pass."""
     ct = _contract("ct-clean-notenant")
@@ -360,16 +409,34 @@ def test_legacy_apply_changes_only_legacy_read_only_field():
         _row("row-already-marked", action_contract_id="", legacy_read_only=True),
         _row("row-contract-linked", action_contract_id="ct-1", legacy_read_only=False),
     ]
+    persisted = _row("row-legacy-1", action_contract_id="", legacy_read_only=True)
     with patch.object(legacy_mod, "fetch_all_approvals", return_value=rows), \
+         patch.object(legacy_mod, "fetch_record_by_id", return_value=persisted), \
          patch("tools.airtable_gateway.airtable_patch", return_value=True) as mock_patch:
         result = legacy_mod.run(apply=True, confirm="APPLY_LEGACY_READ_ONLY")
 
     assert result["mode"] == "apply"
     assert result["applied_record_ids"] == ["row-legacy-1"]
+    assert result["verify_failed_record_ids"] == []
     mock_patch.assert_called_once_with(
         "Approvals", "row-legacy-1", {ApprovalsFields.LEGACY_READ_ONLY: True},
         source="phase_4b_mark_legacy_approvals",
     )
+
+
+def test_legacy_apply_read_back_mismatch_is_verify_failed_not_applied():
+    """A 200/ok airtable_patch() response is not itself trusted — if the
+    read-back shows the field didn't actually stick, the row must land in
+    verify_failed_record_ids, never applied_record_ids."""
+    rows = [_row("row-legacy-1", action_contract_id="", legacy_read_only=False)]
+    stale = _row("row-legacy-1", action_contract_id="", legacy_read_only=False)  # patch "succeeded" but didn't stick
+    with patch.object(legacy_mod, "fetch_all_approvals", return_value=rows), \
+         patch.object(legacy_mod, "fetch_record_by_id", return_value=stale), \
+         patch("tools.airtable_gateway.airtable_patch", return_value=True):
+        result = legacy_mod.run(apply=True, confirm="APPLY_LEGACY_READ_ONLY")
+
+    assert result["applied_record_ids"] == []
+    assert result["verify_failed_record_ids"] == ["row-legacy-1"]
 
 
 def test_legacy_apply_is_idempotent_on_second_run():
@@ -532,12 +599,69 @@ def test_repair_main_exit_code_1_when_a_failed_list_is_nonempty():
 def test_repair_main_exit_code_0_when_apply_succeeds():
     ct = _contract("ct-repair-exit-3")
     contracts_raw = [(ct, "rec-1")]
+    persisted = {"id": "recNew1", "fields": {ApprovalsFields.ACTION_CONTRACT_ID: ct.contract_id}}
     with patch.object(repair_mod, "fetch_all_action_contracts", return_value=contracts_raw), \
          patch.object(repair_mod, "fetch_all_approvals", return_value=[]), \
+         patch.object(repair_mod, "fetch_record_by_id", return_value=persisted), \
          patch("tools.airtable_gateway.airtable_create",
                return_value={"id": "recNew1", "fields": {}}):
         code = _run_repair_main(["--apply", "--confirm", "APPLY_PROJECTION_REPAIRS"])
     assert code == 0
+
+
+def test_repair_apply_clear_legacy_flag_verified_by_read_back():
+    """Repair 3 (clear a contradictory legacy_read_only=true on a genuinely
+    contract-linked row) must be confirmed by re-fetching the record, not
+    just trusted from airtable_patch()'s return value."""
+    ct = _contract("ct-repair-legacy-clear")
+    contracts_raw = [(ct, "rec-1")]
+    rows = [_row("row-legacy-clear", action_contract_id=ct.contract_id, legacy_read_only=True,
+                  projected_status="completed" if ct.status == "completed" else "pending")]
+    persisted = _row("row-legacy-clear", action_contract_id=ct.contract_id, legacy_read_only=False)
+    with patch.object(repair_mod, "fetch_all_action_contracts", return_value=contracts_raw), \
+         patch.object(repair_mod, "fetch_all_approvals", return_value=rows), \
+         patch.object(repair_mod, "fetch_record_by_id", return_value=persisted), \
+         patch("tools.airtable_gateway.airtable_patch", return_value=True):
+        result = repair_mod.run(apply=True, confirm="APPLY_PROJECTION_REPAIRS")
+
+    assert result["applied"]["legacy_flag_cleared"] == ["row-legacy-clear"]
+    assert result["applied"]["legacy_clear_verify_failed"] == []
+
+
+def test_repair_apply_clear_legacy_flag_read_back_mismatch_is_verify_failed():
+    """A 200/ok airtable_patch() response for Repair 3 is not itself trusted
+    — a stale read-back (flag still true) must land in
+    legacy_clear_verify_failed, never legacy_flag_cleared."""
+    ct = _contract("ct-repair-legacy-clear-2")
+    contracts_raw = [(ct, "rec-1")]
+    rows = [_row("row-legacy-clear-2", action_contract_id=ct.contract_id, legacy_read_only=True,
+                  projected_status="pending")]
+    stale = _row("row-legacy-clear-2", action_contract_id=ct.contract_id, legacy_read_only=True)
+    with patch.object(repair_mod, "fetch_all_action_contracts", return_value=contracts_raw), \
+         patch.object(repair_mod, "fetch_all_approvals", return_value=rows), \
+         patch.object(repair_mod, "fetch_record_by_id", return_value=stale), \
+         patch("tools.airtable_gateway.airtable_patch", return_value=True):
+        result = repair_mod.run(apply=True, confirm="APPLY_PROJECTION_REPAIRS")
+
+    assert result["applied"]["legacy_flag_cleared"] == []
+    assert result["applied"]["legacy_clear_verify_failed"] == ["row-legacy-clear-2"]
+
+
+def test_repair_apply_create_projection_read_back_mismatch_is_verify_failed():
+    """Repair 1 (create a missing projection) must confirm the created
+    record's action_contract_id via an independent read-back, not just
+    trust airtable_create()'s response."""
+    ct = _contract("ct-repair-create-verify", normalized_payload={"action": "tma_create_lead_task"})
+    contracts_raw = [(ct, "rec-1")]
+    stale = {"id": "recNewX", "fields": {ApprovalsFields.ACTION_CONTRACT_ID: "some-other-contract"}}
+    with patch.object(repair_mod, "fetch_all_action_contracts", return_value=contracts_raw), \
+         patch.object(repair_mod, "fetch_all_approvals", return_value=[]), \
+         patch.object(repair_mod, "fetch_record_by_id", return_value=stale), \
+         patch("tools.airtable_gateway.airtable_create", return_value={"id": "recNewX", "fields": {}}):
+        result = repair_mod.run(apply=True, confirm="APPLY_PROJECTION_REPAIRS")
+
+    assert result["applied"]["created"] == []
+    assert result["applied"]["create_verify_failed"] == [ct.contract_id]
 
 
 def test_repair_main_exit_code_0_for_clean_report_only():
@@ -731,7 +855,8 @@ def _live_meta_schema():
 
 def _run_readiness_with_mocks(*, acp_enabled, atc_enabled, pool_ok, claims_table_ok=True,
                                claims_columns=None, claims_constraints=None,
-                               live_schema=None, env=None, mode="active"):
+                               live_schema=None, env=None, mode="active",
+                               run_regression_tests=False):
     env = dict(env or {})
     env.setdefault("AIRTABLE_API_KEY", "fake-key")
     env.setdefault("AIRTABLE_BASE_ID", "fake-base")
@@ -764,18 +889,86 @@ def _run_readiness_with_mocks(*, acp_enabled, atc_enabled, pool_ok, claims_table
              patch.object(db_mod, "get_conn", return_value=(fake_conn if pool_ok else None)), \
              patch.object(db_mod, "release_conn"), \
              patch("tools.schema_snapshot.fetch_live_schema",
-                   return_value=(live_schema if live_schema is not None else _live_meta_schema())):
+                   return_value=(live_schema if live_schema is not None else _live_meta_schema())), \
+             patch("subprocess.run", side_effect=_subprocess_run_stub(0)):
             real_gateway._ledger._repository = fake_repo if acp_enabled else None
-            return readiness_mod.run_readiness(mode=mode)
+            return readiness_mod.run_readiness(mode=mode, run_regression_tests=run_regression_tests)
     finally:
         real_gateway._ledger._repository = original_repository
 
 
 def test_readiness_go_with_all_dependencies_available():
-    result = _run_readiness_with_mocks(acp_enabled=True, atc_enabled=True, pool_ok=True)
+    result = _run_readiness_with_mocks(
+        acp_enabled=True, atc_enabled=True, pool_ok=True, run_regression_tests=True,
+    )
     assert result["decision"] in ("GO", "WARNING")
     blocking_ids = {f["id"] for f in result["blocking_findings"]}
     assert blocking_ids == set()
+
+
+def test_readiness_no_go_when_regression_tests_not_run():
+    """--mode active with everything else green but --run-regression-tests
+    omitted must still be NO-GO — an un-executed suite is never GO, exactly
+    like any other unassessed mandatory check in this tool."""
+    result = _run_readiness_with_mocks(acp_enabled=True, atc_enabled=True, pool_ok=True)
+    assert result["decision"] == "NO-GO"
+    ids = {f["id"] for f in result["blocking_findings"]}
+    assert "G.regression_tests_pass" in ids
+
+
+def test_readiness_no_go_when_regression_tests_fail():
+    result = _run_readiness_with_mocks(
+        acp_enabled=True, atc_enabled=True, pool_ok=True, run_regression_tests=True,
+    )
+    assert result["decision"] in ("GO", "WARNING")  # sanity: green path first
+
+    env = {"AIRTABLE_API_KEY": "fake-key", "AIRTABLE_BASE_ID": "fake-base",
+           "DATABASE_URL": "postgresql://user:pass@host/db"}
+    fake_conn = _FakeConn(table_exists=True, columns=None, constraints=None)
+    import feature_flags
+    import core.database as db_mod
+    from core.action_gateway import action_gateway as real_gateway
+    original_repository = real_gateway._ledger._repository
+    fake_repo = MagicMock()
+    fake_repo.find_pending_by_canonical_user.return_value = []
+    try:
+        with patch.dict("os.environ", env, clear=False), \
+             patch.object(feature_flags, "is_enabled", return_value=True), \
+             patch.object(db_mod, "get_pool", return_value=MagicMock()), \
+             patch.object(db_mod, "get_conn", return_value=fake_conn), \
+             patch.object(db_mod, "release_conn"), \
+             patch("tools.schema_snapshot.fetch_live_schema", return_value=_live_meta_schema()), \
+             patch("subprocess.run", side_effect=_subprocess_run_stub(1)):
+            real_gateway._ledger._repository = fake_repo
+            result = readiness_mod.run_readiness(mode="active", run_regression_tests=True)
+    finally:
+        real_gateway._ledger._repository = original_repository
+
+    assert result["decision"] == "NO-GO"
+    ids = {f["id"] for f in result["blocking_findings"]}
+    assert "G.regression_tests_pass" in ids
+
+
+def test_readiness_preflight_blocks_when_atomic_claims_already_on():
+    """A preflight (pre-rollout) run finding both flags already ON is not
+    readiness for a rollout that's about to start — it means the rollout
+    already happened. Must be NO-GO, not a silent GO."""
+    result = _run_readiness_with_mocks(
+        acp_enabled=True, atc_enabled=True, pool_ok=True, mode="preflight",
+        run_regression_tests=True,
+    )
+    assert result["decision"] == "NO-GO"
+    ids = {f["id"] for f in result["blocking_findings"]}
+    assert "B.preflight_not_already_cutover" in ids
+
+
+def test_readiness_preflight_allows_both_flags_off_still_passes_new_check():
+    result = _run_readiness_with_mocks(
+        acp_enabled=False, atc_enabled=False, pool_ok=True, mode="preflight",
+        run_regression_tests=True,
+    )
+    ids = {f["id"] for f in result["blocking_findings"]}
+    assert "B.preflight_not_already_cutover" not in ids
 
 
 def test_readiness_no_go_when_postgresql_unavailable():
