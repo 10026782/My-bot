@@ -23,6 +23,7 @@ os.environ.setdefault("SETUP_WEBHOOK", "0")
 
 from core.action_gateway import ActionGateway, ExecutionLedger
 from core.anti_hallucination import verify_execution
+from identity import Identity
 
 passed = failed = 0
 
@@ -75,6 +76,22 @@ def _new_gw(executor=None):
     return ActionGateway(ledger=ExecutionLedger(), tool_executor=executor or _ok_executor)
 
 
+def _identity_for(tenant_id: str, canonical_user_id: str, channel: str = "whatsapp", role: str = "owner") -> Identity:
+    """Builds a resolved Identity matching what every real propose_action()
+    caller (app.py, tma_api.py, core/lead_candidate_handler.py) always passes.
+
+    Without this, ActionContract.actor_role/actor_external_id/actor_user_id
+    stay empty, and ActionGateway._execute_contract()'s identity-integrity
+    fail-closed check (core/action_gateway.py ~line 1360, BUG-C89-APPROVAL-
+    IDENTITY) blocks dispatch entirely the moment FEATURE_ATOMIC_CLAIMS is
+    enabled — exactly the gap this fixture had (found via a real Render run
+    with that flag on; the legacy flag-off dispatch path never reads
+    `identity` at all, so this is a no-op there — see _execute_contract's
+    `else` branch calling self._tool_executor directly)."""
+    user_id = canonical_user_id.split(":", 1)[-1] if ":" in canonical_user_id else canonical_user_id
+    return Identity(user_id=user_id, role=role, tenant_id=tenant_id, channel=channel, external_id=canonical_user_id)
+
+
 _BASE_PROPOSE = dict(
     tenant_id="boss_hq",
     canonical_user_id="boss_hq:owner_1",
@@ -83,6 +100,7 @@ _BASE_PROPOSE = dict(
     origin_channel="whatsapp",
     origin_chat_id="whatsapp:972501234567",
     requires_approval=True,
+    identity=_identity_for("boss_hq", "boss_hq:owner_1", "whatsapp"),
 )
 
 
@@ -122,8 +140,8 @@ r2 = gw2.propose_action(**_BASE_PROPOSE)
 # "מאשר" arrives as confirmation word → route_confirmation_word
 reply = gw2.route_confirmation_word("boss_hq:owner_1", approver_role="owner")
 chk("Req2: exactly one dispatch after מאשר", len(_dispatched2) == 1)
-chk("Req2: executed tool is airtable_add (not re-inferred)", executed_tool[0] == "airtable_add")
-chk("Req2: executed table is Tasks (preserved from contract)", executed_inputs[0].get("table") == "Tasks")
+chk("Req2: executed tool is airtable_add (not re-inferred)", bool(executed_tool) and executed_tool[0] == "airtable_add")
+chk("Req2: executed table is Tasks (preserved from contract)", bool(executed_inputs) and executed_inputs[0].get("table") == "Tasks")
 
 # ══════════════════════════════════════════════════
 # Req #3: Fail-closed if executor missing
@@ -283,10 +301,11 @@ r7 = gw7.propose_action(
     origin_channel="telegram",
     origin_chat_id="tg:123",
     requires_approval=True,
+    identity=_identity_for("boss_hq", "boss_hq:owner_1", "telegram"),
 )
 gw7.approve(r7.contract_id, approver="boss_hq:owner_1", approver_role="owner")
 chk("Req7: dispatched tool is airtable_add (not sheets_append)", _tool7 == ["airtable_add"])
-chk("Req7: dispatched table is Tasks (not substituted)", _inputs7[0].get("table") == "Tasks")
+chk("Req7: dispatched table is Tasks (not substituted)", bool(_inputs7) and _inputs7[0].get("table") == "Tasks")
 
 # ══════════════════════════════════════════════════
 # Req #4 extension: other providers don't use Airtable rec ID
@@ -416,6 +435,7 @@ r9 = gw9.propose_action(
     origin_channel="whatsapp",
     origin_chat_id="whatsapp:972501234567",
     requires_approval=True,
+    identity=_identity_for("boss_hq", "boss_hq:owner_1", "whatsapp"),
 )
 gw9.approve(r9.contract_id, approver="boss_hq:owner_1", approver_role="owner")
 
@@ -452,12 +472,13 @@ for channel, chat_id, label in [
         origin_channel=channel,
         origin_chat_id=chat_id,
         requires_approval=True,
+        identity=_identity_for("boss_hq", "boss_hq:owner_1", channel),
     )
     chk(f"Req10/{label}: propose ok, no dispatch yet", re.ok and len(_e2e_dispatched) == 0)
     gw_e.route_confirmation_word("boss_hq:owner_1", approver_role="owner")
     chk(f"Req10/{label}: after מאשר → exactly 1 dispatch", len(_e2e_dispatched) == 1)
-    chk(f"Req10/{label}: dispatched tool is airtable_add", _e2e_dispatched[0]["tool"] == "airtable_add")
-    chk(f"Req10/{label}: dispatched table is Tasks", _e2e_dispatched[0]["inputs"].get("table") == "Tasks")
+    chk(f"Req10/{label}: dispatched tool is airtable_add", bool(_e2e_dispatched) and _e2e_dispatched[0]["tool"] == "airtable_add")
+    chk(f"Req10/{label}: dispatched table is Tasks", bool(_e2e_dispatched) and _e2e_dispatched[0]["inputs"].get("table") == "Tasks")
     gw_e.route_confirmation_word("boss_hq:owner_1", approver_role="owner")
     chk(f"Req10/{label}: second מאשר → still 1 dispatch", len(_e2e_dispatched) == 1)
 
@@ -483,6 +504,7 @@ r_sub = gw_sub.propose_action(
     tool_inputs={"table": "Tasks", "fields": {"Task": "test"}},
     origin_channel="telegram", origin_chat_id="tg:1",
     requires_approval=True,
+    identity=_identity_for("boss_hq", "boss_hq:owner_1", "telegram"),
 )
 gw_sub.approve(r_sub.contract_id, approver="boss_hq:owner_1", approver_role="owner")
 chk("Req10/tool-sub: airtable_add dispatched (not sheets_append)", _sub_tools == ["airtable_add"])
@@ -586,11 +608,13 @@ _p21a = _gw21.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:owner_21",
     tool_name="airtable_add", tool_inputs={"table": "Tasks", "fields": {"name": "T1"}},
     origin_channel="whatsapp", origin_chat_id="972501111111", requires_approval=True,
+    identity=_identity_for("boss_hq", "boss_hq:owner_21", "whatsapp"),
 )
 _p21b = _gw21.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:owner_21",
     tool_name="sheets_append", tool_inputs={"spreadsheet_name": "Tasks", "row_data": ["T1"]},
     origin_channel="whatsapp", origin_chat_id="972501111111", requires_approval=True,
+    identity=_identity_for("boss_hq", "boss_hq:owner_21", "whatsapp"),
 )
 # route_confirmation_word → triggers disambiguation list (>1 pending)
 _dis_reply = _gw21.route_confirmation_word("boss_hq:owner_21", approver_role="owner")
@@ -613,11 +637,13 @@ _p22a = _gw22.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:owner_22",
     tool_name="airtable_add", tool_inputs={"table": "Tasks", "fields": {"name": "T2"}},
     origin_channel="whatsapp", origin_chat_id="972501111111", requires_approval=True,
+    identity=_identity_for("boss_hq", "boss_hq:owner_22", "whatsapp"),
 )
 _p22b = _gw22.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:owner_22",
     tool_name="sheets_append", tool_inputs={"spreadsheet_name": "Tasks", "row_data": ["T2"]},
     origin_channel="whatsapp", origin_chat_id="972501111111", requires_approval=True,
+    identity=_identity_for("boss_hq", "boss_hq:owner_22", "whatsapp"),
 )
 # trigger disambiguation
 _gw22.route_confirmation_word("boss_hq:owner_22", approver_role="owner")
@@ -761,6 +787,7 @@ gw_sb03.propose_action(
     tool_name="airtable_add", tool_inputs={"table": "Leads", "fields": {"Name": "Test"}},
     origin_channel="whatsapp", origin_chat_id="u_sb03",
     requires_approval=True,
+    identity=_identity_for("t1", "u_sb03", "whatsapp"),
 )
 _status_reply = gw_sb03.query_execution_status("u_sb03")
 chk("SB-03: query_execution_status returns pending reply when contract is pending",
