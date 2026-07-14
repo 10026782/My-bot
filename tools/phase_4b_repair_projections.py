@@ -35,6 +35,14 @@
 # PostgreSQL execution claim, retries a provider write, changes an
 # ActionContract's lifecycle/status, or auto-repairs outcome_unknown.
 #
+# Read-back verification: after each successful airtable_create()/
+# airtable_patch() call, the affected record is re-fetched and the intended
+# field values are confirmed before counting the repair as applied — a
+# 200/ok response is necessary but not sufficient proof the write actually
+# persisted. A mismatch or failed read-back lands in its own "*_verify_failed"
+# list (distinct from "*_failed", which is a rejected/errored API call
+# itself) and fails the run's exit code.
+#
 # Run manually:
 #   python3 tools/phase_4b_repair_projections.py --report-only
 #   python3 tools/phase_4b_repair_projections.py --apply --confirm APPLY_PROJECTION_REPAIRS
@@ -54,7 +62,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from airtable_schema import ApprovalsFields, ApprovalStatus  # noqa: E402
 from tools.phase_4b_rollout_common import (  # noqa: E402
     REPO_ROOT, dump_json_report, fetch_all_action_contracts, fetch_all_approvals,
-    git_state, is_canonical_tma_contract, utc_now_iso,
+    fetch_record_by_id, git_state, is_canonical_tma_contract, utc_now_iso,
 )
 
 REPORT_PATH = REPO_ROOT / "reports" / "runtime" / "phase_4b_repair_projections.json"
@@ -229,12 +237,32 @@ def run(apply: bool, confirm: str | None) -> dict:
     from tools.airtable_gateway import airtable_create, airtable_patch
 
     applied = {
-        "created": [], "create_failed": [],
-        "action_contract_id_corrected": [], "correction_failed": [],
-        "legacy_flag_cleared": [], "legacy_clear_failed": [],
-        "projected_status_set": [], "projected_status_failed": [],
-        "context_data_blanked": [], "context_data_blank_failed": [],
+        "created": [], "create_failed": [], "create_verify_failed": [],
+        "action_contract_id_corrected": [], "correction_failed": [], "correction_verify_failed": [],
+        "legacy_flag_cleared": [], "legacy_clear_failed": [], "legacy_clear_verify_failed": [],
+        "projected_status_set": [], "projected_status_failed": [], "projected_status_verify_failed": [],
+        "context_data_blanked": [], "context_data_blank_failed": [], "context_data_blank_verify_failed": [],
     }
+
+    def _verify_fields(record_id: str, expected: dict) -> bool:
+        """Read-back proof a patch/create actually persisted on Approvals —
+        a 200/ok response from airtable_patch()/airtable_create() is
+        necessary but not sufficient (e.g. a stale schema-cache entry can
+        silently drop a field without failing the call in every code path).
+        String fields compare empty-string/None as equivalent; other types
+        (booleans, selects) compare exactly."""
+        rec = fetch_record_by_id("Approvals", record_id)
+        if rec is None:
+            return False
+        fields = rec.get("fields", {})
+        for key, value in expected.items():
+            actual = fields.get(key)
+            if isinstance(value, str):
+                if (actual or "") != (value or ""):
+                    return False
+            elif actual != value:
+                return False
+        return True
 
     try:
         from tma_api import ACTION_RISK, _RISK_LEVEL_AIRTABLE, _DEFAULT_RISK
@@ -247,37 +275,54 @@ def run(apply: bool, confirm: str | None) -> dict:
         risk = ACTION_RISK.get(action, _DEFAULT_RISK)
         fields[ApprovalsFields.RISK_LEVEL] = _RISK_LEVEL_AIRTABLE.get(risk, "high")
         rec = airtable_create("Approvals", fields, source="phase_4b_repair_projections")
-        (applied["created"] if rec else applied["create_failed"]).append(item["contract_id"])
+        if not rec:
+            applied["create_failed"].append(item["contract_id"])
+            continue
+        record_id = rec.get("id", "")
+        if record_id and _verify_fields(record_id, {ApprovalsFields.ACTION_CONTRACT_ID: item["contract_id"]}):
+            applied["created"].append(item["contract_id"])
+        else:
+            applied["create_verify_failed"].append(item["contract_id"])
 
     for item in plan["correct_action_contract_id"]:
-        ok = airtable_patch(
-            "Approvals", item["record_id"],
-            {ApprovalsFields.ACTION_CONTRACT_ID: item["contract_id"], ApprovalsFields.LEGACY_READ_ONLY: False},
-            source="phase_4b_repair_projections",
-        )
-        (applied["action_contract_id_corrected"] if ok else applied["correction_failed"]).append(item["record_id"])
+        patch_fields = {ApprovalsFields.ACTION_CONTRACT_ID: item["contract_id"], ApprovalsFields.LEGACY_READ_ONLY: False}
+        ok = airtable_patch("Approvals", item["record_id"], patch_fields, source="phase_4b_repair_projections")
+        if not ok:
+            applied["correction_failed"].append(item["record_id"])
+        elif _verify_fields(item["record_id"], patch_fields):
+            applied["action_contract_id_corrected"].append(item["record_id"])
+        else:
+            applied["correction_verify_failed"].append(item["record_id"])
 
     for record_id in plan["clear_legacy_flag"]:
-        ok = airtable_patch(
-            "Approvals", record_id, {ApprovalsFields.LEGACY_READ_ONLY: False},
-            source="phase_4b_repair_projections",
-        )
-        (applied["legacy_flag_cleared"] if ok else applied["legacy_clear_failed"]).append(record_id)
+        patch_fields = {ApprovalsFields.LEGACY_READ_ONLY: False}
+        ok = airtable_patch("Approvals", record_id, patch_fields, source="phase_4b_repair_projections")
+        if not ok:
+            applied["legacy_clear_failed"].append(record_id)
+        elif _verify_fields(record_id, patch_fields):
+            applied["legacy_flag_cleared"].append(record_id)
+        else:
+            applied["legacy_clear_verify_failed"].append(record_id)
 
     for item in plan["set_projected_status"]:
-        ok = airtable_patch(
-            "Approvals", item["record_id"],
-            {ApprovalsFields.PROJECTED_LIFECYCLE_STATUS: item["new_status"]},
-            source="phase_4b_repair_projections",
-        )
-        (applied["projected_status_set"] if ok else applied["projected_status_failed"]).append(item["record_id"])
+        patch_fields = {ApprovalsFields.PROJECTED_LIFECYCLE_STATUS: item["new_status"]}
+        ok = airtable_patch("Approvals", item["record_id"], patch_fields, source="phase_4b_repair_projections")
+        if not ok:
+            applied["projected_status_failed"].append(item["record_id"])
+        elif _verify_fields(item["record_id"], patch_fields):
+            applied["projected_status_set"].append(item["record_id"])
+        else:
+            applied["projected_status_verify_failed"].append(item["record_id"])
 
     for record_id in plan["blank_context_data"]:
-        ok = airtable_patch(
-            "Approvals", record_id, {ApprovalsFields.CONTEXT_DATA: ""},
-            source="phase_4b_repair_projections",
-        )
-        (applied["context_data_blanked"] if ok else applied["context_data_blank_failed"]).append(record_id)
+        patch_fields = {ApprovalsFields.CONTEXT_DATA: ""}
+        ok = airtable_patch("Approvals", record_id, patch_fields, source="phase_4b_repair_projections")
+        if not ok:
+            applied["context_data_blank_failed"].append(record_id)
+        elif _verify_fields(record_id, patch_fields):
+            applied["context_data_blanked"].append(record_id)
+        else:
+            applied["context_data_blank_verify_failed"].append(record_id)
 
     result["applied"] = applied
     return result

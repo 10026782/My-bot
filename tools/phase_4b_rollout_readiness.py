@@ -196,6 +196,26 @@ def _check_feature_flags(mode: str) -> list[dict]:
                 "PASS" if (acp and atc) else "FAIL",
                 f"FEATURE_ACTION_CONTRACT_PERSISTENCE={acp} FEATURE_ATOMIC_CLAIMS={atc}",
             ))
+        else:
+            # mode == "preflight": a mismatched state is already caught above,
+            # but two flags that agree by BOTH already being ON is not a
+            # mismatch and would otherwise pass through unnoticed. A
+            # "preflight" (pre-rollout) run finding the rollout has already
+            # happened is not readiness — it's evidence this check is being
+            # run at the wrong time, or that a previous rollout was never
+            # rolled back cleanly. Block it explicitly rather than silently
+            # reporting GO for a state this mode isn't meant to describe.
+            already_on = acp and atc
+            findings.append(_finding(
+                "B.preflight_not_already_cutover", "B_feature_flags",
+                "flags are not already both ON (a preflight/pre-rollout check finding "
+                "the rollout has already happened is not readiness)",
+                True, "FAIL" if already_on else "PASS",
+                "FEATURE_ACTION_CONTRACT_PERSISTENCE and FEATURE_ATOMIC_CLAIMS are both "
+                "already ON — re-run with --mode active instead, or investigate why a "
+                "preflight check is being run post-cutover" if already_on
+                else "at least one flag is still off, consistent with --mode preflight",
+            ))
     except Exception as exc:
         findings.append(_finding(
             "B.flags_readable", "B_feature_flags",
@@ -774,10 +794,82 @@ def _check_gateway_cache_compat() -> list[dict]:
 
 
 # ══════════════════════════════════════════════════
+# G — Regression suite (file presence is mandatory always; actually running
+# it is opt-in via --run-regression-tests, but an un-run suite is reported
+# SKIP, and SKIP on a mandatory finding is already blocking in this tool's
+# own aggregation rule below — a NO-GO, not a silent pass, exactly like any
+# other unassessed mandatory check here.)
+# ══════════════════════════════════════════════════
+
+_REQUIRED_REGRESSION_TEST_FILES = [
+    "test_phase_4b0_wiring_regression.py",
+    "test_phase_4b2_wiring.py",
+    "test_phase_4b2_approvals_projection.py",
+    "test_phase_4b2_direct_dispatch_bypass.py",
+    "test_p0_unhashable_identity_atomic_wrapper.py",
+    "test_approval_concurrency.py",
+    "test_phase_4b_rollout_tooling.py",
+]
+
+
+def _check_regression_suite(run_regression_tests: bool) -> list[dict]:
+    findings = []
+    missing = [name for name in _REQUIRED_REGRESSION_TEST_FILES if not (REPO_ROOT / name).is_file()]
+    findings.append(_finding(
+        "G.regression_test_files_present", "G_regression_suite",
+        "the fixed set of Phase 4B regression test files exist (presence only — "
+        "does not prove they pass; see G.regression_tests_pass)",
+        True, "FAIL" if missing else "PASS",
+        f"missing: {missing}" if missing else "all required files present",
+    ))
+
+    if not run_regression_tests:
+        findings.append(_finding(
+            "G.regression_tests_pass", "G_regression_suite",
+            "the regression suite was actually executed and passed for this commit",
+            True, "SKIP",
+            "not executed — pass --run-regression-tests to actually run these before "
+            "trusting a GO (an un-executed suite is not proof of anything, and SKIP on "
+            "a mandatory check is already blocking, per this tool's own rule)",
+        ))
+        return findings
+
+    results: dict[str, str] = {}
+    failures: list[str] = []
+    import subprocess
+    for name in _REQUIRED_REGRESSION_TEST_FILES:
+        path = REPO_ROOT / name
+        if not path.is_file():
+            results[name] = "MISSING"
+            failures.append(name)
+            continue
+        try:
+            proc = subprocess.run(
+                [sys.executable, str(path)], cwd=REPO_ROOT,
+                capture_output=True, text=True, timeout=180,
+            )
+        except Exception as exc:
+            results[name] = _safe_str(exc)
+            failures.append(name)
+            continue
+        results[name] = "PASS" if proc.returncode == 0 else f"FAIL (exit {proc.returncode})"
+        if proc.returncode != 0:
+            failures.append(name)
+
+    findings.append(_finding(
+        "G.regression_tests_pass", "G_regression_suite",
+        "the regression suite was actually executed and passed for this commit",
+        True, "FAIL" if failures else "PASS",
+        f"results={results}" if failures else f"all {len(results)} files passed",
+    ))
+    return findings
+
+
+# ══════════════════════════════════════════════════
 # Orchestration
 # ══════════════════════════════════════════════════
 
-def run_readiness(mode: str = "preflight") -> dict:
+def run_readiness(mode: str = "preflight", run_regression_tests: bool = False) -> dict:
     if mode not in ("preflight", "active"):
         raise ValueError(f"mode must be 'preflight' or 'active', got {mode!r}")
 
@@ -788,6 +880,7 @@ def run_readiness(mode: str = "preflight") -> dict:
     findings += _check_action_contract_persistence(mode)
     findings += _check_airtable_schema()
     findings += _check_gateway_cache_compat()
+    findings += _check_regression_suite(run_regression_tests)
 
     blocking = [f for f in findings if f["mandatory"] and f["status"] in ("FAIL", "SKIP")]
     warnings = [f for f in findings if f["status"] == "WARN"]
@@ -848,10 +941,19 @@ def main() -> int:
         ),
     )
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON instead of text")
+    parser.add_argument(
+        "--run-regression-tests", action="store_true",
+        help=(
+            "Actually execute the Phase 4B regression suite (each file as its own "
+            "subprocess, slower) instead of only checking file presence. Without this "
+            "flag, G.regression_tests_pass reports SKIP, which is already blocking "
+            "(mandatory + SKIP => NO-GO) — an un-executed suite is never treated as GO."
+        ),
+    )
     args = parser.parse_args()
 
     try:
-        result = run_readiness(mode=args.mode)
+        result = run_readiness(mode=args.mode, run_regression_tests=args.run_regression_tests)
     except Exception as exc:
         err = {"decision": "UNKNOWN", "exit_code": 2, "error": _safe_str(exc)}
         print(json.dumps(err, indent=2), file=sys.stderr)
