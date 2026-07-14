@@ -1,15 +1,20 @@
 # F52 Approval Flow Map
 
+> Status: Historical baseline audit
+> Canonical program: F52 — Unified Approval Runtime Migration and Implementation
+> Superseded for current-state conclusions by: ../phase-4c/CURRENT_STATE_MAP.md
+> Do not use this document as current implementation instruction.
+
 Updated: 26/06/2026
 
 Scope: audit-only map of current approval flows in BOSS before F52 implementation. This document does not change production behavior, refactor code, modify `app.py`, or change Airtable schema.
 
 Source context:
 
-- `docs/f52/F52_CURRENT_TOOL_MAP.md`
-- `docs/f52/F52_CONTRACT_COVERAGE_MAP.md`
-- `docs/f52/F52_BYPASS_MAP.md`
-- `docs/f52/F52_STATE_FLOW_MAP.md`
+- `docs/architecture/f52-unified-approval-runtime/audits/original/F52_CURRENT_TOOL_MAP.md`
+- `docs/architecture/f52-unified-approval-runtime/audits/original/F52_CONTRACT_COVERAGE_MAP.md`
+- `docs/architecture/f52-unified-approval-runtime/audits/original/F52_BYPASS_MAP.md`
+- `docs/architecture/f52-unified-approval-runtime/audits/original/F52_STATE_FLOW_MAP.md`
 - Static audit of `tool_registry.py`, `event_bus.py`, `app.py`, `action_validator.py`, `tools/dispatcher.py`, `tma_api.py`, `scheduler.py`, `worker.py`, `core/router/risk_router.py`, `core/financial_gate.py`, `core/output_gateway.py`
 
 ## 1. Executive Summary

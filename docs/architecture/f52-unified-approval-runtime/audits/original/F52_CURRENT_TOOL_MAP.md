@@ -1,5 +1,10 @@
 # F52 Current Tool Map
 
+> Status: Historical baseline audit
+> Canonical program: F52 — Unified Approval Runtime Migration and Implementation
+> Superseded for current-state conclusions by: ../phase-4c/CURRENT_STATE_MAP.md
+> Do not use this document as current implementation instruction.
+
 Updated: 25/06/2026
 
 Scope: audit-only map of the current BOSS tool architecture before F52. No production behavior changes are included in this document.

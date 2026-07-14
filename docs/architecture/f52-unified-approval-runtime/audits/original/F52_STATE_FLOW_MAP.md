@@ -1,14 +1,19 @@
 # F52 State Flow Map
 
+> Status: Historical baseline audit
+> Canonical program: F52 — Unified Approval Runtime Migration and Implementation
+> Superseded for current-state conclusions by: ../phase-4c/CURRENT_STATE_MAP.md
+> Do not use this document as current implementation instruction.
+
 Updated: 25/06/2026
 
 Scope: audit-only map of how state currently flows through BOSS before F52 implementation. This document does not change production behavior, refactor code, modify `app.py`, or change Airtable schema.
 
 Source context:
 
-- `docs/f52/F52_CURRENT_TOOL_MAP.md`
-- `docs/f52/F52_CONTRACT_COVERAGE_MAP.md`
-- `docs/f52/F52_BYPASS_MAP.md`
+- `docs/architecture/f52-unified-approval-runtime/audits/original/F52_CURRENT_TOOL_MAP.md`
+- `docs/architecture/f52-unified-approval-runtime/audits/original/F52_CONTRACT_COVERAGE_MAP.md`
+- `docs/architecture/f52-unified-approval-runtime/audits/original/F52_BYPASS_MAP.md`
 - Static audit of `app.py`, `memory_store.py`, `event_bus.py`, `session_store.py`, `lead_memory.py`, `lead_capture.py`, `media_handler.py`, `tma_api.py`, `scheduler.py`, `worker.py`, and `airtable_schema.py`
 
 ## 1. Executive Summary

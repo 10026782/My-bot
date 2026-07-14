@@ -41,13 +41,13 @@
 ### F52-STAGE1 — Safe Refactors: static audits (#6/#7) + shadow tool-result recorder (#4)
 - **תאריך:** 03/07/2026
 - **סוג:** Feature (audit tooling, additive-only, zero behavior change)
-- **Requirement:** `docs/f52/F52_CURRENT_TOOL_MAP.md` §"Safe No-Brainer Refactors" #4, #6, #7.
+- **Requirement:** `docs/architecture/f52-unified-approval-runtime/audits/original/F52_CURRENT_TOOL_MAP.md` §"Safe No-Brainer Refactors" #4, #6, #7.
 - **Commit:** `0695b11`, `2ae6b0c`
 - **PR:** #207 — מוזג (`22b2f74`)
 - **Review על ידי:** —
 - **Deploy תאריך:** —
 - **Verified בפרודקשן:** לא
-- **Verification ראיה:** Pre-implementation gate (§0 of the task SPEC) re-ran the F52 audit greps against the live repo and found the SPEC's claimed baseline did not match reality on either #6 or #7: `cmd_decision.py:806` has no `httpx` call at all (goes through `airtable_create`); `tools/telegram_adapter.py`/`app.py`/`google_tools.py`/`email_inbound.py`/`knowledge_engine.py`/`survey_worker.py` contain none of the `"✅" in result`/`rec\w+` anti-pattern (telegram_adapter.py already uses a structured `ActionResult`/`delivery_success` bool). Corrected baselines were derived by actually running the new scanners against the repo and cross-checking against `docs/f52/F52_BYPASS_MAP.md`. `tools/audit_gateway_bypass.py` (24 known Airtable-bypass call-sites, 2 write/22 read) and `tools/audit_result_parsing.py` (21 known false-success text-parsing occurrences across 12 files) both self-test clean and report 0 new / 0 resolved against their baselines on the current repo. `core/last_tool_result_shadow.py` (RAM-only, TTL-bounded dataclass recorder) wired passively into `tools/dispatcher.py`'s existing `finally:` clause (source=`agent_tool`) and `tma_api.py`'s `_at_patch`/`_at_post` (source=`tma_route`) — manually verified with the flag on vs off that `dispatch_tool()`'s return value is byte-identical either way. `FEATURE_LAST_TOOL_RESULT_SHADOW` confirmed default-off (not in `feature_flags._DEFAULTS`). All 30+ `test_*.py` scripts, `smoke_tests.py`, `test_integration.py`, and `core/router/test_router.py` pass unchanged; `python -m compileall -q .` clean. Zero `app.py` changes. Both new audit scripts added to `.github/workflows/ci.yml` as warning-only steps (`|| true`), matching the existing `schema_governance.py` pattern.
+- **Verification ראיה:** Pre-implementation gate (§0 of the task SPEC) re-ran the F52 audit greps against the live repo and found the SPEC's claimed baseline did not match reality on either #6 or #7: `cmd_decision.py:806` has no `httpx` call at all (goes through `airtable_create`); `tools/telegram_adapter.py`/`app.py`/`google_tools.py`/`email_inbound.py`/`knowledge_engine.py`/`survey_worker.py` contain none of the `"✅" in result`/`rec\w+` anti-pattern (telegram_adapter.py already uses a structured `ActionResult`/`delivery_success` bool). Corrected baselines were derived by actually running the new scanners against the repo and cross-checking against `docs/architecture/f52-unified-approval-runtime/audits/original/F52_BYPASS_MAP.md`. `tools/audit_gateway_bypass.py` (24 known Airtable-bypass call-sites, 2 write/22 read) and `tools/audit_result_parsing.py` (21 known false-success text-parsing occurrences across 12 files) both self-test clean and report 0 new / 0 resolved against their baselines on the current repo. `core/last_tool_result_shadow.py` (RAM-only, TTL-bounded dataclass recorder) wired passively into `tools/dispatcher.py`'s existing `finally:` clause (source=`agent_tool`) and `tma_api.py`'s `_at_patch`/`_at_post` (source=`tma_route`) — manually verified with the flag on vs off that `dispatch_tool()`'s return value is byte-identical either way. `FEATURE_LAST_TOOL_RESULT_SHADOW` confirmed default-off (not in `feature_flags._DEFAULTS`). All 30+ `test_*.py` scripts, `smoke_tests.py`, `test_integration.py`, and `core/router/test_router.py` pass unchanged; `python -m compileall -q .` clean. Zero `app.py` changes. Both new audit scripts added to `.github/workflows/ci.yml` as warning-only steps (`|| true`), matching the existing `schema_governance.py` pattern.
 - **Docs עודכנו:** feature_flags.py (registry docstring), CHANGE_CONTROL_LOG (this entry)
 - **Feature Flag:** `FEATURE_LAST_TOOL_RESULT_SHADOW` (new, default OFF)
 - **Rollback plan:** revert the branch; all three additions (2 audit scripts + shadow recorder module) are new files or additive call-sites behind a default-off flag — no existing behavior depends on them.
@@ -76,7 +76,7 @@
 - **Deploy תאריך:** לא רלוונטי
 - **Verified בפרודקשן:** כן
 - **Verification ראיה:** `main @ ce2ea76` — `F52_BYPASS_MAP.md:132` מכיל את שורת `cmd_decision.py`; `BUG_AUDIT_LOG.md` מכיל BUG-055.
-- **Docs עודכנו:** `docs/f52/F52_BYPASS_MAP.md`, `BUG_AUDIT_LOG.md`
+- **Docs עודכנו:** `docs/architecture/f52-unified-approval-runtime/audits/original/F52_BYPASS_MAP.md`, `BUG_AUDIT_LOG.md`
 - **Feature Flag:** לא רלוונטי
 - **Rollback plan:** docs-only.
 
@@ -353,14 +353,14 @@
 - **תאריך:** 26/06/2026
 - **סוג:** Documentation — audit-only, אין שינוי קוד/התנהגות
 - **Requirement:** audit מקדים לפני מימוש F52 (לא תועד בקובץ ROADMAP item נפרד מעבר לסעיף F52 עצמו)
-- **תיאור:** 4 מסמכי audit ב-`docs/f52/` שמתעדים את ארכיטקטורת הכלים הקיימת לפני כל refactor: `F52_CURRENT_TOOL_MAP.md` (מפת כלים נוכחית), `F52_CONTRACT_COVERAGE_MAP.md` (כיסוי חוזה C53-A), `F52_BYPASS_MAP.md` (קטגוריות bypass + bypasses בסיכון גבוה), `F52_STATE_FLOW_MAP.md` (מפת זרימת state). Scope guard מפורש בכל 3 ה-PRs: אין שינוי `app.py`, אין refactor, אין שינוי סכמת Airtable.
+- **תיאור:** 4 מסמכי audit ב-`docs/architecture/f52-unified-approval-runtime/audits/original/` שמתעדים את ארכיטקטורת הכלים הקיימת לפני כל refactor: `F52_CURRENT_TOOL_MAP.md` (מפת כלים נוכחית), `F52_CONTRACT_COVERAGE_MAP.md` (כיסוי חוזה C53-A), `F52_BYPASS_MAP.md` (קטגוריות bypass + bypasses בסיכון גבוה), `F52_STATE_FLOW_MAP.md` (מפת זרימת state). Scope guard מפורש בכל 3 ה-PRs: אין שינוי `app.py`, אין refactor, אין שינוי סכמת Airtable.
 - ⚠️ **רשומה זו נוספה בדיעבד** — F52 מוזג כבר ב-3 PRs נפרדים בלי שנפתחה רשומת CHANGE_CONTROL_LOG ייעודית בזמן המיזוג (רק עדכון ROADMAP.md חלקי, שגם הוא היה חסר את הקובץ הרביעי — תוקן באותו commit כמו רשומה זו). אותר ע"י audit יומי (סשן `claude/gifted-clarke-ajyjsa`, 26/06/2026).
 - **Commit:** `6afc393` (PR #153) / `84762f0` (PR #155) / `4b0f5d3` (PR #156)
 - **PR:** #153 (merge `0ffdc7c`), #155 (merge `d57f405`), #156 (merge `64a018b`) — **כל השלושה מוזגו ל-`main`**, אומת עצמאית דרך `git merge-base --is-ancestor` על כל אחד מ-3 ה-commits
 - **Review על ידי:** הבעלים
 - **Deploy תאריך:** לא רלוונטי — מסמכי תיעוד בלבד, אין קוד לפרוס
 - **Verified בפרודקשן:** לא רלוונטי — אין קוד/התנהגות לאמת
-- **Verification ראיה:** `ls docs/f52/` מאשר קיום 4 הקבצים בפועל על דיסק; `git merge-base --is-ancestor` אישר שלושת ה-commits כ-ancestors של `origin/main`
+- **Verification ראיה:** `ls docs/architecture/f52-unified-approval-runtime/audits/original/` מאשר קיום 4 הקבצים בפועל על דיסק; `git merge-base --is-ancestor` אישר שלושת ה-commits כ-ancestors של `origin/main`
 - **Docs עודכנו:** ROADMAP.md (סעיף F52 תוקן — נוסף הקובץ הרביעי החסר + תוקן סטטוס "branch" ל-"מוזג"), CHANGE_CONTROL_LOG.md (רשומה זו, נוספה בדיעבד)
 - **Feature Flag:** N/A — תיעוד בלבד
 - **Rollback plan:** לא רלוונטי — מחיקת קבצי Markdown בלבד, אפס סיכון קוד

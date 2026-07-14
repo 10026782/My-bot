@@ -1241,10 +1241,10 @@ Status: Merged to `main` across 3 PRs (#153, #155, #156), branch `f52-current-to
 
 What: audit-only documentation before F52 implementation — 4 docs (not 3; `F52_STATE_FLOW_MAP.md` landed in the third PR and was previously missing from this list):
 
-- `docs/f52/F52_CURRENT_TOOL_MAP.md` — PR #153, commit `6afc393`, merge `0ffdc7c`
-- `docs/f52/F52_CONTRACT_COVERAGE_MAP.md` — PR #155, commit `84762f0`, merge `d57f405`
-- `docs/f52/F52_BYPASS_MAP.md` — PR #155, commit `84762f0`, merge `d57f405`
-- `docs/f52/F52_STATE_FLOW_MAP.md` — PR #156, commit `4b0f5d3`, merge `64a018b`
+- `docs/architecture/f52-unified-approval-runtime/audits/original/F52_CURRENT_TOOL_MAP.md` — PR #153, commit `6afc393`, merge `0ffdc7c`
+- `docs/architecture/f52-unified-approval-runtime/audits/original/F52_CONTRACT_COVERAGE_MAP.md` — PR #155, commit `84762f0`, merge `d57f405`
+- `docs/architecture/f52-unified-approval-runtime/audits/original/F52_BYPASS_MAP.md` — PR #155, commit `84762f0`, merge `d57f405`
+- `docs/architecture/f52-unified-approval-runtime/audits/original/F52_STATE_FLOW_MAP.md` — PR #156, commit `4b0f5d3`, merge `64a018b`
 
 Scope guard: no production behavior changes, no `app.py` changes, no refactor, and no Airtable schema changes. The audit maps current tool architecture, contract coverage, bypass categories, high-risk bypasses, safe audit tests, and design-review items.
 

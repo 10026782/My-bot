@@ -1,12 +1,17 @@
 # F52 Contract Coverage Map
 
+> Status: Historical baseline audit
+> Canonical program: F52 — Unified Approval Runtime Migration and Implementation
+> Superseded for current-state conclusions by: ../phase-4c/CURRENT_STATE_MAP.md
+> Do not use this document as current implementation instruction.
+
 Updated: 25/06/2026
 
 Scope: audit-only contract coverage map for current BOSS tools and tool-like actions. This document does not change production behavior, code, `app.py`, or Airtable schema.
 
 Source context:
 
-- `docs/f52/F52_CURRENT_TOOL_MAP.md`
+- `docs/architecture/f52-unified-approval-runtime/audits/original/F52_CURRENT_TOOL_MAP.md`
 - `tools/schemas.py`
 - `tool_registry.py`
 - `action_validator.py`
