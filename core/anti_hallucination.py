@@ -588,6 +588,19 @@ def sanitize_agent_response(agent_text: str, tool_results: list[dict],
     """
     # Single Speaker: when Gateway is active, Agent must not emit action-status text.
     if _gateway_active and _AGENT_ACTION_STATUS_PATTERN.search(agent_text):
+        # BUG-SS-FALLBACK-CONTRADICTION: if a pending-approval message was
+        # already sent this turn (the __approval_queued__ sentinel — see
+        # app.py's _queue_approval() call site), the agent's follow-up text
+        # is a redundant/contradictory second message, not a hallucination
+        # to correct. Replacing it with _SINGLE_SPEAKER_FALLBACK ("לא הצלחתי
+        # לבצע את הפעולה...") falsely tells the user the action failed when
+        # it is, correctly, still pending — suppress entirely instead.
+        if any(r.get("tool") == "__approval_queued__" for r in tool_results):
+            logger.info(
+                "[A32] Single-Speaker: agent emitted action-status text after an approval "
+                "was already queued this turn — suppressing (not replacing with fallback)"
+            )
+            return ""
         logger.warning("[A32] Single-Speaker: agent emitted action-status text, replacing")
         return _SINGLE_SPEAKER_FALLBACK
 
