@@ -1,0 +1,375 @@
+{
+  "blocking_findings": [],
+  "decision": "WARNING",
+  "exit_code": 0,
+  "findings": [
+    {
+      "description": "module 'core.action_gateway' imports successfully",
+      "detail": "",
+      "id": "A.import.core.action_gateway",
+      "mandatory": true,
+      "section": "A_code_state",
+      "status": "PASS"
+    },
+    {
+      "description": "module 'core.action_contract_repository' imports successfully",
+      "detail": "",
+      "id": "A.import.core.action_contract_repository",
+      "mandatory": true,
+      "section": "A_code_state",
+      "status": "PASS"
+    },
+    {
+      "description": "module 'core.atomic_claim_repository' imports successfully",
+      "detail": "",
+      "id": "A.import.core.atomic_claim_repository",
+      "mandatory": true,
+      "section": "A_code_state",
+      "status": "PASS"
+    },
+    {
+      "description": "module 'core.database' imports successfully",
+      "detail": "",
+      "id": "A.import.core.database",
+      "mandatory": true,
+      "section": "A_code_state",
+      "status": "PASS"
+    },
+    {
+      "description": "module 'core.database_migrations' imports successfully",
+      "detail": "",
+      "id": "A.import.core.database_migrations",
+      "mandatory": true,
+      "section": "A_code_state",
+      "status": "PASS"
+    },
+    {
+      "description": "module 'core.approvals_projection' imports successfully",
+      "detail": "",
+      "id": "A.import.core.approvals_projection",
+      "mandatory": true,
+      "section": "A_code_state",
+      "status": "PASS"
+    },
+    {
+      "description": "module 'core.runtime_schema_provider' imports successfully",
+      "detail": "",
+      "id": "A.import.core.runtime_schema_provider",
+      "mandatory": true,
+      "section": "A_code_state",
+      "status": "PASS"
+    },
+    {
+      "description": "module 'tool_registry' imports successfully",
+      "detail": "",
+      "id": "A.import.tool_registry",
+      "mandatory": true,
+      "section": "A_code_state",
+      "status": "PASS"
+    },
+    {
+      "description": "module 'tools.dispatcher' imports successfully",
+      "detail": "",
+      "id": "A.import.tools.dispatcher",
+      "mandatory": true,
+      "section": "A_code_state",
+      "status": "PASS"
+    },
+    {
+      "description": "module 'tools.approval_actions' imports successfully",
+      "detail": "",
+      "id": "A.import.tools.approval_actions",
+      "mandatory": true,
+      "section": "A_code_state",
+      "status": "PASS"
+    },
+    {
+      "description": "module 'tma_api' imports successfully",
+      "detail": "",
+      "id": "A.import.tma_api",
+      "mandatory": true,
+      "section": "A_code_state",
+      "status": "PASS"
+    },
+    {
+      "description": "tma_write is registered in tool_registry",
+      "detail": "found",
+      "id": "A.tma_write_registered",
+      "mandatory": true,
+      "section": "A_code_state",
+      "status": "PASS"
+    },
+    {
+      "description": "tma_write is NOT exposed in tools/schemas.py",
+      "detail": "absent, as required",
+      "id": "A.tma_write_not_exposed",
+      "mandatory": true,
+      "section": "A_code_state",
+      "status": "PASS"
+    },
+    {
+      "description": "ActionGateway ledger repository wiring (informational)",
+      "detail": "repository configured now: True",
+      "id": "A.ledger_repository_wiring",
+      "mandatory": false,
+      "section": "A_code_state",
+      "status": "PASS"
+    },
+    {
+      "description": "FEATURE_ACTION_CONTRACT_PERSISTENCE current state (informational)",
+      "detail": "enabled=True",
+      "id": "B.acp_state",
+      "mandatory": false,
+      "section": "B_feature_flags",
+      "status": "PASS"
+    },
+    {
+      "description": "FEATURE_ATOMIC_CLAIMS current state (informational)",
+      "detail": "enabled=True",
+      "id": "B.atc_state",
+      "mandatory": false,
+      "section": "B_feature_flags",
+      "status": "PASS"
+    },
+    {
+      "description": "flags are not in a mismatched (exactly-one-enabled) state",
+      "detail": "both flags agree (enabled=True)",
+      "id": "B.no_mismatched_flags",
+      "mandatory": true,
+      "section": "B_feature_flags",
+      "status": "PASS"
+    },
+    {
+      "description": "both flags are ON (required for --mode active)",
+      "detail": "FEATURE_ACTION_CONTRACT_PERSISTENCE=True FEATURE_ATOMIC_CLAIMS=True",
+      "id": "B.flags_both_on",
+      "mandatory": true,
+      "section": "B_feature_flags",
+      "status": "PASS"
+    },
+    {
+      "description": "DATABASE_URL (or legacy DB env vars) configured",
+      "detail": "present",
+      "id": "C.env_present",
+      "mandatory": true,
+      "section": "C_postgresql",
+      "status": "PASS"
+    },
+    {
+      "description": "get_pool() succeeds",
+      "detail": "pool initialized",
+      "id": "C.pool",
+      "mandatory": true,
+      "section": "C_postgresql",
+      "status": "PASS"
+    },
+    {
+      "description": "SELECT 1 succeeds",
+      "detail": "",
+      "id": "C.select1",
+      "mandatory": true,
+      "section": "C_postgresql",
+      "status": "PASS"
+    },
+    {
+      "description": "action_execution_claims table exists",
+      "detail": "",
+      "id": "C.table_exists",
+      "mandatory": true,
+      "section": "C_postgresql",
+      "status": "PASS"
+    },
+    {
+      "description": "required action_execution_claims columns exist",
+      "detail": "",
+      "id": "C.columns",
+      "mandatory": true,
+      "section": "C_postgresql",
+      "status": "PASS"
+    },
+    {
+      "description": "contract_id primary-key protection exists",
+      "detail": "",
+      "id": "C.pk",
+      "mandatory": true,
+      "section": "C_postgresql",
+      "status": "PASS"
+    },
+    {
+      "description": "idempotency_key uniqueness exists",
+      "detail": "",
+      "id": "C.unique_idem",
+      "mandatory": true,
+      "section": "C_postgresql",
+      "status": "PASS"
+    },
+    {
+      "description": "migration state compatible with current code",
+      "detail": "derived from table/column/constraint checks above",
+      "id": "C.migration_state",
+      "mandatory": true,
+      "section": "C_postgresql",
+      "status": "PASS"
+    },
+    {
+      "description": "read/write transaction opens and rolls back cleanly",
+      "detail": "probe row absent, as expected",
+      "id": "C.rollback",
+      "mandatory": true,
+      "section": "C_postgresql",
+      "status": "PASS"
+    },
+    {
+      "description": "durable ActionContract persistence available (repository configured + reachable)",
+      "detail": "FEATURE_ACTION_CONTRACT_PERSISTENCE and repository wiring: True",
+      "id": "D.durable_persistence_available",
+      "mandatory": true,
+      "section": "D_action_contract_persistence",
+      "status": "PASS"
+    },
+    {
+      "description": "PostgreSQL atomic claims execution available",
+      "detail": "FEATURE_ATOMIC_CLAIMS and pool reachability: True",
+      "id": "D.atomic_claims_available",
+      "mandatory": true,
+      "section": "D_action_contract_persistence",
+      "status": "PASS"
+    },
+    {
+      "description": "a read-only repository query succeeds",
+      "detail": "",
+      "id": "D.repository_query",
+      "mandatory": true,
+      "section": "D_action_contract_persistence",
+      "status": "PASS"
+    },
+    {
+      "description": "no fallback to RAM-only persistence or direct dispatch would be used",
+      "detail": "both durable persistence and atomic claims are available",
+      "id": "D.no_ram_fallback",
+      "mandatory": true,
+      "section": "D_action_contract_persistence",
+      "status": "PASS"
+    },
+    {
+      "description": "AIRTABLE_API_KEY / AIRTABLE_BASE_ID present",
+      "detail": "present",
+      "id": "E.env_present",
+      "mandatory": true,
+      "section": "E_airtable_schema",
+      "status": "PASS"
+    },
+    {
+      "description": "live Meta API schema fetch reachable",
+      "detail": "",
+      "id": "E.live_reachable",
+      "mandatory": true,
+      "section": "E_airtable_schema",
+      "status": "PASS"
+    },
+    {
+      "description": "ActionContracts table exists live",
+      "detail": "",
+      "id": "E.action_contracts_exists",
+      "mandatory": true,
+      "section": "E_airtable_schema",
+      "status": "PASS"
+    },
+    {
+      "description": "Approvals table exists live",
+      "detail": "",
+      "id": "E.approvals_exists",
+      "mandatory": true,
+      "section": "E_airtable_schema",
+      "status": "PASS"
+    },
+    {
+      "description": "Approvals projection fields present with correct types",
+      "detail": "",
+      "id": "E.approvals_projection_fields",
+      "mandatory": true,
+      "section": "E_airtable_schema",
+      "status": "PASS"
+    },
+    {
+      "description": "projected_lifecycle_status choices match exactly",
+      "detail": "",
+      "id": "E.projected_lifecycle_choices",
+      "mandatory": true,
+      "section": "E_airtable_schema",
+      "status": "PASS"
+    },
+    {
+      "description": "ActionContracts fields match ActionContractsFields (name)",
+      "detail": "",
+      "id": "E.action_contracts_fields",
+      "mandatory": true,
+      "section": "E_airtable_schema",
+      "status": "PASS"
+    },
+    {
+      "description": "ActionContracts fields match expected live field types",
+      "detail": "",
+      "id": "E.action_contracts_field_types",
+      "mandatory": true,
+      "section": "E_airtable_schema",
+      "status": "PASS"
+    },
+    {
+      "description": "ActionContracts status field singleSelect choices match exactly",
+      "detail": "",
+      "id": "E.action_contracts_status_choices",
+      "mandatory": true,
+      "section": "E_airtable_schema",
+      "status": "PASS"
+    },
+    {
+      "description": "schema_cache.json permits all three Approvals projection fields",
+      "detail": "",
+      "id": "F.cache_has_projection_fields",
+      "mandatory": true,
+      "section": "F_gateway_cache_compat",
+      "status": "PASS"
+    },
+    {
+      "description": "ActionContracts present in schema_cache.json seed (risk flag, non-mandatory)",
+      "detail": "ActionContracts is entirely absent from schema_cache.json — if FEATURE_AIRTABLE_RUNTIME_SCHEMA_PROVIDER_STATE is ever 'enforce' and the live/snapshot tiers are both unavailable for this table, RuntimeSchemaProvider falls back to an empty seed field-set, and every ActionContracts write would have all its fields reported 'unknown' and dropped (SPEC A1 fail-closed block).",
+      "id": "F.action_contracts_in_cache",
+      "mandatory": false,
+      "section": "F_gateway_cache_compat",
+      "status": "WARN"
+    },
+    {
+      "description": "RuntimeSchemaProvider state (informational)",
+      "detail": "state=off",
+      "id": "F.runtime_provider_state",
+      "mandatory": false,
+      "section": "F_gateway_cache_compat",
+      "status": "PASS"
+    },
+    {
+      "description": "the active schema-validation path will not drop the projection fields",
+      "detail": "state=off uses schema_cache.json directly (see F.cache_has_projection_fields)",
+      "id": "F.validation_path_safe",
+      "mandatory": true,
+      "section": "F_gateway_cache_compat",
+      "status": "PASS"
+    }
+  ],
+  "generated_at": "2026-07-14T09:00:00+00:00",
+  "git": {
+    "branch": "claude/phase-4b-rollout-zd0f3y",
+    "commit_sha": "c7ad62e13850ad797cb8a48241476d82f39b17a7"
+  },
+  "mode": "active",
+  "warnings": [
+    {
+      "description": "ActionContracts present in schema_cache.json seed (risk flag, non-mandatory)",
+      "detail": "ActionContracts is entirely absent from schema_cache.json — if FEATURE_AIRTABLE_RUNTIME_SCHEMA_PROVIDER_STATE is ever 'enforce' and the live/snapshot tiers are both unavailable for this table, RuntimeSchemaProvider falls back to an empty seed field-set, and every ActionContracts write would have all its fields reported 'unknown' and dropped (SPEC A1 fail-closed block).",
+      "id": "F.action_contracts_in_cache",
+      "mandatory": false,
+      "section": "F_gateway_cache_compat",
+      "status": "WARN"
+    }
+  ]
+}

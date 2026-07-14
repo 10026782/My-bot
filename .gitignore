@@ -9,3 +9,7 @@ contacts_merged.csv
 *.vcf
 schema_drift_report.json
 .c8*/
+
+# Phase 4B rollout tooling — runtime-generated diagnostic reports. See
+# reports/samples/*.sample.json for deterministic fixture examples instead.
+reports/runtime/
