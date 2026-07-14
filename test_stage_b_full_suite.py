@@ -306,6 +306,14 @@ gw6.route_confirmation_word("boss_hq:owner_1", approver_role="owner")
 chk("Req6: מאשר alone does NOT re-dispatch", len(_dup_dispatched) == 1)
 
 # Correct override code re-executes
+#
+# KNOWN GAP (BUG_AUDIT_LOG.md BUG-109, open, not fixed): under
+# FEATURE_ATOMIC_CLAIMS=true these next two assertions fail — the override's
+# claim attempt collides with the already-claimed contract_id (single,
+# non-composite PRIMARY KEY on action_execution_claims), so the override
+# silently does not re-dispatch. Owner decision: leave these assertions as-is
+# (do not fix, do not remove/weaken) until the side effects of a fix are
+# reviewed. See BUG-109 for the root cause and proposed design.
 code_match = re.search(r'\b(\d{6})\b', r6b.user_message or "")
 if code_match:
     code = code_match.group(1)
