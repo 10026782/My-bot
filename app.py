@@ -79,6 +79,43 @@ _MEMORABLE_TOOLS = frozenset({
 })
 AGENT_TIMEOUT  = 25
 
+# ─── PA-01 — Phantom Approval Prompt structural enforcement ─────────
+# docs/architecture/turn-coordinator/PA-01_PLANNING_GATE.md (approved commit
+# 81676ad). State-only: never read for text-detection purposes — these two
+# constants are the only user-facing text the mechanism ever introduces, and
+# _pa01_structured_terminal_outcome() only ever reads structured
+# tool_results_log keys, never final_reply.
+_PA01_PHANTOM_APPROVAL_FALLBACK = (
+    "לא הצלחתי להכין את הפעולה לאישור, ולכן לא נוצרה כרגע פעולה שממתינה. "
+    "אפשר לשלוח שוב את הבקשה."
+)
+_PA01_CAPABILITY_UNAVAILABLE_FALLBACK = (
+    "לא ניתן לבצע את הפעולה הזו דרך החשבון הנוכחי. "
+    "לביצוע, יש לפנות למנהל מורשה."
+)
+
+
+def _pa01_structured_terminal_outcome(
+    tool_results_log: list, expected_tool: str | None,
+) -> tuple | None:
+    """
+    Scoped lookup (PA-01_PLANNING_GATE.md §4.2f) — only a tool_results_log
+    entry whose own tool identity matches expected_tool counts as a
+    terminal outcome for this intent. A denial/preflight-block/queue-error
+    for a different tool the agent also touched this turn is invisible
+    here. Returns (outcome_kind, gate_authored_message) or None.
+    """
+    if expected_tool is None:
+        return None
+    for r in tool_results_log:
+        outcome = r.get("terminal_outcome")
+        if not outcome:
+            continue
+        entry_tool = r.get("action_tool") if r.get("tool") == "__approval_queued__" else r.get("tool")
+        if entry_tool == expected_tool:
+            return outcome, r.get("content", "")
+    return None
+
 # ─── Pending Approvals (router-level) ──────────────────────────
 # Saves messages routed to Handler.APPROVAL until the user confirms.
 # key: chat_id (telegram user_id / whatsapp number)
@@ -732,6 +769,35 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
     """
     שומר פעולה ממתינה ושולח בקשת אישור לowner.
     מחזיר string לmodel: "⏳ ממתין לאישור..."
+    Thin wrapper over _queue_approval_detailed() — kept string-returning for
+    every existing caller/test that already depends on that contract; the
+    raw Agent tool_use loop calls _queue_approval_detailed() directly since
+    PA-01 needs the structured outcome, not just the message (see
+    docs/architecture/turn-coordinator/PA-01_PLANNING_GATE.md §4.2a —
+    planning assumed the Gateway's own result object was already in scope
+    at the tool-loop call site; in the real code it is local to this
+    function, hence this split).
+    """
+    return _queue_approval_detailed(tool_name, tool_inputs, user_chat_id, channel, user_text)["message"]
+
+
+def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
+                             user_chat_id: str, channel: str, user_text: str = "") -> dict:
+    """
+    Same behavior as _queue_approval() (see that docstring), but returns a
+    structured outcome instead of just the model-facing message:
+      {"message": str, "contract_id": str|None, "ok": bool,
+       "terminal_outcome": str|None}
+    "terminal_outcome" is None only for a genuine successful contract
+    creation; every early-return branch (duplicate fingerprint, cross-
+    channel duplicate, Gateway rejection, persistence failure, owner-notify
+    failure) sets it to "APPROVAL_QUEUE_ERROR" — per-branch, not inferred
+    from contract_id alone (PA-01_PLANNING_GATE.md §3.6's own classification
+    lists owner-notify failure under APPROVAL_QUEUE_ERROR explicitly; a
+    contract_id can technically already exist in the ledger by that point
+    but the user was never notified, so it is deliberately not surfaced
+    here — an orphaned, unreachable contract must not be treated as
+    "created" for this turn's purposes).
     PR #188: blocks re-queuing via executed_action_cache (raw chat_id fingerprint).
     Stage A: also dedupes cross-channel via canonical identity.memory_key.
 
@@ -754,7 +820,10 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
         logger.warning(
             f"[Approval] duplicate fingerprint blocked: {fp[:8]} | {tool_name} | user={_sanitize_id(user_chat_id)}"
         )
-        return f"⚠️ פעולה זו כבר בוצעה לאחרונה ({tool_name}). כפילות נחסמה."
+        return {
+            "message": f"⚠️ פעולה זו כבר בוצעה לאחרונה ({tool_name}). כפילות נחסמה.",
+            "contract_id": None, "ok": False, "terminal_outcome": "APPROVAL_QUEUE_ERROR",
+        }
 
     # Stage A: canonical dedup — אותה זהות עסקית מ-channel שני
     identity = resolve_identity(channel, user_chat_id)
@@ -769,7 +838,10 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
             f"[Approval] cross-channel duplicate suppressed | {existing['action_id']} "
             f"| canonical={identity.memory_key} | tool={tool_name}"
         )
-        return f"⏳ הפעולה כבר ממתינה לאישור הבעלים{' (מ-' + origin + ')' if origin else ''}."
+        return {
+            "message": f"⏳ הפעולה כבר ממתינה לאישור הבעלים{' (מ-' + origin + ')' if origin else ''}.",
+            "contract_id": None, "ok": False, "terminal_outcome": "APPROVAL_QUEUE_ERROR",
+        }
 
     label     = _describe_tool_call(tool_name, tool_inputs)
 
@@ -777,6 +849,7 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
     # propose_action רושם contract ל-ledger ולמעקב — לא חוסם את המסלול הקיים.
     # כאשר הדגל פעיל: GatewayResult(ok=False) יחזיר כאן ויפסיק את הזרימה.
     from feature_flags import is_enabled as _flag
+    _gw_result = None  # PA-01: keep defined even if the shadow-mode try/except below never assigns it
     if _flag("FEATURE_ACTION_GATEWAY"):
         from core.action_gateway import action_gateway as _gw
         tenant_id = getattr(identity, "tenant_id", "boss_hq")
@@ -796,7 +869,11 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
                 "[ActionGateway] propose blocked: %s | contract=%s",
                 _gw_result.reason, _gw_result.contract_id,
             )
-            return _gw_result.user_message or f"⏳ {_gw_result.reason}"
+            return {
+                "message": _gw_result.user_message or f"⏳ {_gw_result.reason}",
+                "contract_id": getattr(_gw_result, "contract_id", None),
+                "ok": False, "terminal_outcome": "APPROVAL_QUEUE_ERROR",
+            }
     else:
         # shadow mode — log only, do not block
         try:
@@ -814,7 +891,10 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
                 user_text=user_text,
             )
             if _gw_result.failure_code in {"persistence_failed", "persistence_lookup_failed"}:
-                return _gw_result.user_message or f"❌ {_gw_result.reason}"
+                return {
+                    "message": _gw_result.user_message or f"❌ {_gw_result.reason}",
+                    "contract_id": None, "ok": False, "terminal_outcome": "APPROVAL_QUEUE_ERROR",
+                }
         except Exception as _gw_exc:
             logger.debug("[ActionGateway] shadow propose failed (non-blocking): %s", _gw_exc)
 
@@ -854,13 +934,24 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
         except Exception as e:
             logger.error(f"[Approval] ❌ failed to notify owner: {e}")
             # BOSS NEVER FAKES: לא מחזירים "ממתין לאישור" כשהשליחה נכשלה
-            return (
-                f"❌ לא הצלחתי לשלוח בקשת אישור לבעלים.\n"
-                f"הפעולה לא בוצעה: {label}"
-            )
+            return {
+                "message": (
+                    f"❌ לא הצלחתי לשלוח בקשת אישור לבעלים.\n"
+                    f"הפעולה לא בוצעה: {label}"
+                ),
+                # Deliberately None even if _gw_result already carries a real
+                # contract_id — see this function's docstring.
+                "contract_id": None, "ok": False, "terminal_outcome": "APPROVAL_QUEUE_ERROR",
+            }
 
     logger.info(f"[Approval] queued {action_id} | {tool_name} | user={_sanitize_id(user_chat_id)}")
-    return f"⏳ הפעולה ממתינה לאישור: {label}\nשלח *מאשר* כדי לאשר (בכל ערוץ)."
+    _contract_id = _gw_result.contract_id if _gw_result else None
+    return {
+        "message": f"⏳ הפעולה ממתינה לאישור: {label}\nשלח *מאשר* כדי לאשר (בכל ערוץ).",
+        "contract_id": _contract_id,
+        "ok": bool(_contract_id),
+        "terminal_outcome": None if _contract_id else "APPROVAL_QUEUE_ERROR",
+    }
 
 
 def _promote_next_batch_item(canonical_user_id: str) -> None:
@@ -2355,6 +2446,12 @@ def run_agent(
                     tool_results.append({
                         "type": "tool_result", "tool_use_id": tu.id, "content": str(e)
                     })
+                    # PA-01: gate-authored, non-agent text — see
+                    # docs/architecture/turn-coordinator/PA-01_PLANNING_GATE.md §4.2b.
+                    tool_results_log.append({
+                        "tool": tu.name, "content": str(e), "ok": False,
+                        "terminal_outcome": "PERMISSION_DENIED",
+                    })
                     continue
 
                 # ── Approval Gate ─────────────────────
@@ -2377,6 +2474,12 @@ def run_agent(
                             )
                             tool_results.append({
                                 "type": "tool_result", "tool_use_id": tu.id, "content": str(e)
+                            })
+                            # PA-01: gate-authored, non-agent text — see
+                            # docs/architecture/turn-coordinator/PA-01_PLANNING_GATE.md §4.2b.
+                            tool_results_log.append({
+                                "tool": tu.name, "content": str(e), "ok": False,
+                                "terminal_outcome": "PREFLIGHT_BLOCKED",
                             })
                             continue
 
@@ -2426,9 +2529,10 @@ def run_agent(
                             "content": f"⏳ נשמר בתור לאישור אחרי הפעולה הראשונה: {_label}",
                         })
                         continue
-                    result = _queue_approval(
+                    _approval_outcome = _queue_approval_detailed(
                         tu.name, dict(tu.input), chat_id, channel, user_text
                     )
+                    result = _approval_outcome["message"]
                     _mutating_approvals_this_turn += 1
                     tool_results.append({
                         "type": "tool_result", "tool_use_id": tu.id, "content": result
@@ -2436,10 +2540,16 @@ def run_agent(
                     # BUG-V1-FAKE-APPROVAL-STATE: inject A32 sentinel so
                     # sanitize_agent_response can verify the "⏳ ממתינה לאישור"
                     # echo came from a real approval, not hallucinated text.
+                    # PA-01: "action_tool" is the real tool_use block's own
+                    # name (tu.name), never guessed from route.intent — see
+                    # docs/architecture/turn-coordinator/PA-01_PLANNING_GATE.md §4.2a.
                     tool_results_log.append({
                         "tool": "__approval_queued__",
                         "content": result,
-                        "ok": True,
+                        "ok": _approval_outcome["ok"],
+                        "contract_id": _approval_outcome["contract_id"],
+                        "terminal_outcome": _approval_outcome["terminal_outcome"],
+                        "action_tool": tu.name,
                     })
                     continue
 
@@ -2569,6 +2679,85 @@ def run_agent(
             log_ownership_signal(_ownership_signal, canonical_user_id=identity.memory_key)
         except Exception:
             logger.debug("[TurnEnvelope] ownership signal skipped due to error", exc_info=True)
+
+        # ── PA-01 — Phantom Approval Prompt structural enforcement ──────
+        # docs/architecture/turn-coordinator/PA-01_PLANNING_GATE.md (approved
+        # commit 81676ad). State-only: never inspects final_reply's text at
+        # any point. is_hijack/detect_case_c2_signal() above are
+        # observability/shadow-metrics/defense-in-depth only, not read here
+        # (decision 8) — this block does not consume _ownership_signal.
+        try:
+            from core.router.risk_router import intent_requires_contract_for_success
+            _pa01_contract_required = intent_requires_contract_for_success(getattr(route, "intent", None))
+        except Exception:
+            # Cannot classify -> treat as non-contract-required (matrix row 1),
+            # per decision 5 — never fail an ordinary turn because PA-01's own
+            # classifier broke. A PA-01 coverage gap if it ever fires,
+            # accepted per fail-safe-degraded policy's own asymmetry.
+            _pa01_contract_required = False
+
+        if _pa01_contract_required:
+            from feature_flags import get_pa01_enforcement_state
+            _pa01_state = get_pa01_enforcement_state()
+            if _pa01_state in ("shadow", "enforce"):
+                try:
+                    from core.router.risk_router import (
+                        expected_tool_for_intent, contract_capable_this_turn,
+                    )
+                    _pa01_expected_tool = expected_tool_for_intent(getattr(route, "intent", None))
+                    _pa01_contract_created = any(
+                        r.get("tool") == "__approval_queued__"
+                        and r.get("contract_id")
+                        and r.get("action_tool") == _pa01_expected_tool
+                        for r in tool_results_log
+                    )
+                    _pa01_outcome = None if _pa01_contract_created else _pa01_structured_terminal_outcome(
+                        tool_results_log, _pa01_expected_tool,
+                    )
+                    _pa01_capable = (
+                        _pa01_contract_created  # row 2 short-circuits capability entirely
+                        or contract_capable_this_turn(route, identity, ctx)
+                    )
+                except Exception as exc:
+                    # Fail-safe degraded (decision 5): cannot verify state ->
+                    # block, forcing the Phantom row specifically, never the
+                    # capability row (a broken check must not be misreported
+                    # as "your role can't do this"). Distinct log marker.
+                    logger.error(
+                        "[PA-01] PA01_ENFORCEMENT_ERROR error_type=%s user=%s",
+                        type(exc).__name__, _sanitize_id(identity.memory_key),
+                    )
+                    _pa01_contract_created, _pa01_outcome, _pa01_capable = False, None, True
+
+                # Matrix row 2 — a contract for THIS intent's own expected
+                # tool genuinely exists: nothing to do, Gateway's own message
+                # already stands. A contract for a different tool does not
+                # satisfy this row — it falls through exactly like no contract.
+                if not _pa01_contract_created:
+                    _pa01_response = None
+                    if not _pa01_capable:
+                        # Matrix row 5 — capability/permission gap.
+                        _pa01_response = _PA01_CAPABILITY_UNAVAILABLE_FALLBACK
+                        _pa01_row = "capability_unavailable"
+                    elif _pa01_outcome is not None:
+                        # Matrix row 3 — a real, gate-authored terminal outcome exists.
+                        _outcome_kind, _outcome_message = _pa01_outcome
+                        _pa01_response = _outcome_message  # the gate's own text, not agent text
+                        _pa01_row = _outcome_kind.lower()
+                    else:
+                        # Matrix row 4 — the actual Phantom Approval Prompt case.
+                        _pa01_response = _PA01_PHANTOM_APPROVAL_FALLBACK
+                        _pa01_row = "phantom_approval_prompt"
+
+                    if _pa01_response is not None:
+                        logger.warning(
+                            "[PA-01] %s state=%s user=%s intent=%s action=%s",
+                            _pa01_row, _pa01_state, _sanitize_id(identity.memory_key),
+                            getattr(route, "intent", "unknown"),
+                            "blocked" if _pa01_state == "enforce" else "would_block",
+                        )
+                        if _pa01_state == "enforce":
+                            final_reply = _pa01_response
 
         # ── שמירת זיכרון ─────────────────────────
         memory.add(ctx.memory_key, "user",      clean_msg)
