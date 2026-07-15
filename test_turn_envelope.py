@@ -29,10 +29,12 @@ from core.turn_envelope import (  # noqa: E402
     ExecutionKind,
     PendingItem,
     PendingQueueAwareness,
+    build_ownership_signal,
     build_turn_envelope,
     detect_case_c2_signal,
     execution_kind_of,
     log_case_c_signal,
+    log_ownership_signal,
     log_turn_envelope,
 )
 
@@ -356,6 +358,94 @@ with patch("core.action_gateway.action_gateway") as _mock_gw5, \
     app._build_and_log_turn_envelope(_id1, "chat-1", None)
     chk("_build_and_log_turn_envelope(): 1 live contract -> C1 signal does not fire",
         _mock_c1_log2.call_count == 0)
+
+
+# ══════════════════════════════════════════════════
+# Ownership signal — recognized_intent/selected_handler/tool_use_emitted/
+# approval_queued/agent_claimed_approval/reply_owner
+# ══════════════════════════════════════════════════
+
+_hijack_signal = build_ownership_signal(
+    recognized_intent="create_task", selected_handler="agent",
+    tool_use_emitted=False, approval_queued=False,
+    final_reply="הפעולה ממתינה לאישור.",
+)
+chk("hijack scenario: agent_claimed_approval is True (text matches pending language)",
+    _hijack_signal.agent_claimed_approval is True)
+chk("hijack scenario: is_hijack is True (claimed + no tool_use + nothing queued)",
+    _hijack_signal.is_hijack is True)
+chk("hijack scenario: fields match the requested log shape exactly",
+    _hijack_signal.to_log_dict() == {
+        "recognized_intent": "create_task", "selected_handler": "agent",
+        "tool_use_emitted": False, "approval_queued": False,
+        "agent_claimed_approval": True, "reply_owner": "agent",
+    })
+
+_legit_signal = build_ownership_signal(
+    recognized_intent="create_task", selected_handler="agent",
+    tool_use_emitted=True, approval_queued=True,
+    final_reply="הפעולה ממתינה לאישור.",
+)
+chk("legit scenario: same claim text, but tool_use WAS emitted and approval WAS queued -> not a hijack",
+    _legit_signal.is_hijack is False)
+
+_ordinary_signal = build_ownership_signal(
+    recognized_intent="general_chat", selected_handler="agent",
+    tool_use_emitted=False, approval_queued=False,
+    final_reply="בטח, אשמח לעזור.",
+)
+chk("ordinary reply (no pending-language claim at all) -> not a hijack",
+    _ordinary_signal.is_hijack is False)
+chk("ordinary reply -> agent_claimed_approval is False",
+    _ordinary_signal.agent_claimed_approval is False)
+
+_partial_signal = build_ownership_signal(
+    recognized_intent="create_task", selected_handler="agent",
+    tool_use_emitted=True, approval_queued=False,
+    final_reply="הפעולה ממתינה לאישור.",
+)
+chk("tool_use WAS emitted (even though nothing got queued, e.g. denied) -> not classified as hijack",
+    _partial_signal.is_hijack is False)
+
+chk("build_ownership_signal defaults reply_owner to 'agent'",
+    _hijack_signal.reply_owner == "agent")
+chk("build_ownership_signal falls back to 'unknown' for empty intent/handler",
+    build_ownership_signal(
+        recognized_intent="", selected_handler="", tool_use_emitted=False,
+        approval_queued=False, final_reply="",
+    ).recognized_intent == "unknown")
+
+with patch("core.turn_envelope.logger") as _mock_own_logger:
+    log_ownership_signal(_hijack_signal, canonical_user_id="boss_hq:0501234567")
+    chk("log_ownership_signal logs the routine INFO line",
+        _mock_own_logger.info.call_count == 1)
+    chk("log_ownership_signal ALSO logs a distinct WARNING when is_hijack is True",
+        _mock_own_logger.warning.call_count == 1)
+    _info_args = _mock_own_logger.info.call_args[0]
+    _info_msg = _info_args[0] % _info_args[1:]
+    chk("routine log fingerprints canonical_user_id, never logs it raw",
+        "0501234567" not in _info_msg)
+    chk("routine log carries recognized_intent=create_task",
+        '"recognized_intent": "create_task"' in _info_msg)
+    _warn_args = _mock_own_logger.warning.call_args[0]
+    _warn_msg = _warn_args[0] % _warn_args[1:]
+    chk("hijack WARNING line names the intent and handler",
+        "intent=create_task" in _warn_msg and "handler=agent" in _warn_msg)
+
+with patch("core.turn_envelope.logger") as _mock_own_logger2:
+    log_ownership_signal(_legit_signal, canonical_user_id="u1")
+    chk("log_ownership_signal logs routine INFO even for a non-hijack turn",
+        _mock_own_logger2.info.call_count == 1)
+    chk("log_ownership_signal does NOT emit the WARNING line when is_hijack is False",
+        _mock_own_logger2.warning.call_count == 0)
+
+with patch("core.turn_envelope.logger") as _mock_own_logger3:
+    _mock_own_logger3.info.side_effect = RuntimeError("logging backend down")
+    try:
+        log_ownership_signal(_hijack_signal, canonical_user_id="u1")
+        chk("log_ownership_signal never raises even if the logging backend breaks", True)
+    except Exception:
+        chk("log_ownership_signal never raises even if the logging backend breaks", False)
 
 
 print(f"\n{'='*50}")

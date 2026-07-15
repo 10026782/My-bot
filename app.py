@@ -1314,6 +1314,20 @@ def _handle_approval_callback_impl(cq) -> None:
             tool_inputs = payload.get("tool_inputs", {})
             identity    = resolve_identity(channel, user_chat_id)
 
+            # TurnCoordinator Phase 0 — observation only (see
+            # docs/architecture/turn-coordinator/). Extends coverage from
+            # run_agent() (text turns) to the Telegram approval callback —
+            # AP-02 in TURN_OWNERSHIP_EXTENSION.md, where the reply is
+            # Gateway-authored, not agent-authored, and where a Case C1
+            # multi-contract conflict is just as observable as at turn
+            # start. No session_snapshot here (not a lead-preview context);
+            # no pre-fetched live_contracts (this handler doesn't already
+            # query it elsewhere, unlike run_agent()'s "1.65" — one read
+            # here is the baseline, not an amplification of an existing one).
+            _build_and_log_turn_envelope(
+                identity, user_chat_id, None, entry_point="telegram_callback",
+            )
+
             try:
                 enforce(tool_name, identity)
             except ToolDenied as e:
@@ -2530,6 +2544,31 @@ def run_agent(
                 log_case_c_signal("C2", canonical_user_id=identity.memory_key)
         except Exception:
             logger.debug("[TurnEnvelope] case_c2 detection skipped due to error", exc_info=True)
+
+        # Ownership signal (routine, every agent-handled turn — not just
+        # anomalies): recognized_intent/selected_handler/tool_use_emitted/
+        # approval_queued/agent_claimed_approval/reply_owner. Requested to
+        # prove precisely where the agent takes over reply ownership without
+        # a backing action — a generalization of the Case C2 check above
+        # with the routing context (which intent, which handler) attached,
+        # logged for every turn so the population can be measured, not only
+        # the already-suspected ones. Reuses route/tool_calls_made/
+        # _approval_queued_this_turn already computed this turn — no new
+        # reads. Log-only: never blocks/alters final_reply. Covers Telegram
+        # and WhatsApp text turns identically, since both share this same
+        # run_agent() code path.
+        try:
+            from core.turn_envelope import build_ownership_signal, log_ownership_signal
+            _ownership_signal = build_ownership_signal(
+                recognized_intent=getattr(route, "intent", "unknown"),
+                selected_handler=getattr(route, "handler", "unknown"),
+                tool_use_emitted=tool_calls_made > 0,
+                approval_queued=_approval_queued_this_turn,
+                final_reply=final_reply,
+            )
+            log_ownership_signal(_ownership_signal, canonical_user_id=identity.memory_key)
+        except Exception:
+            logger.debug("[TurnEnvelope] ownership signal skipped due to error", exc_info=True)
 
         # ── שמירת זיכרון ─────────────────────────
         memory.add(ctx.memory_key, "user",      clean_msg)
