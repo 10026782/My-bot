@@ -1,0 +1,252 @@
+#!/usr/bin/env python3
+"""
+test_turn_envelope.py — TurnCoordinator Phase 0 (core/turn_envelope.py +
+app._build_and_log_turn_envelope). Phase 0 is observation-only: these tests
+verify the snapshot/log builder is correct and, critically, that it can never
+break run_agent() — a raising lookup must be swallowed, not propagated.
+
+See docs/architecture/turn-coordinator/TURN_COORDINATOR_PROPOSAL_V2.md and
+docs/architecture/f52-unified-approval-runtime/audits/phase-4c/
+TURN_OWNERSHIP_EXTENSION.md for the design this is Phase 0 of.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from unittest.mock import MagicMock, patch
+
+os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-turnenv-test")
+os.environ.setdefault("TELEGRAM_TOKEN", "123456789:TURNENV_TEST_TOKEN")
+os.environ.setdefault("AIRTABLE_API_KEY", "patTurnEnvTest")
+os.environ.setdefault("AIRTABLE_BASE_ID", "appTurnEnvTest")
+os.environ.setdefault("RENDER_APP_URL", "https://example.com")
+os.environ.setdefault("SETUP_WEBHOOK", "0")
+os.environ.setdefault("ELIYAHU_CHAT_ID", "999999999")
+
+from core.turn_envelope import (  # noqa: E402
+    AgentAvailability,
+    ExecutionKind,
+    PendingItem,
+    PendingQueueAwareness,
+    build_turn_envelope,
+    execution_kind_of,
+    log_turn_envelope,
+)
+
+passed = failed = 0
+
+
+def chk(desc: str, cond: bool) -> None:
+    global passed, failed
+    if cond:
+        print(f"✅ {desc}")
+        passed += 1
+    else:
+        print(f"❌ {desc}")
+        failed += 1
+
+
+# ══════════════════════════════════════════════════
+# build_turn_envelope() — pure function, no I/O
+# ══════════════════════════════════════════════════
+
+env_free = build_turn_envelope()
+chk("no queues -> free_agent mode", env_free.turn_mode == "free_agent")
+chk("no queues -> empty pending_queues", env_free.pending_queues == ())
+chk("no queues -> active_queue_id is None", env_free.active_queue_id is None)
+chk("no queues -> reply_owner is 'agent'", env_free.reply_owner == "agent")
+chk("Phase 0 never sets resolved_reference", env_free.resolved_reference is None)
+chk("Phase 0 never sets message_kind", env_free.message_kind is None)
+chk("agent_availability defaults to PRIMARY in Phase 0",
+    env_free.agent_availability.mode == AgentAvailability.PRIMARY)
+
+_ac_queue = PendingQueueAwareness(
+    queue_id="ac:u1", source="action_gateway", kind="action_contract",
+    summary="1 live contract(s)",
+    items=(PendingItem(index=1, id="c1", kind="action_contract", label=""),),
+    approval_granularity="all_or_nothing", priority=3,
+)
+env_approval = build_turn_envelope(
+    live_contract_reply_owner="gateway", action_gateway_queue=_ac_queue,
+)
+chk("live AC queue with no reconfirmation -> approval_pending",
+    env_approval.turn_mode == "approval_pending")
+chk("live AC queue -> active_queue_id points at it",
+    env_approval.active_queue_id == "ac:u1")
+chk("live AC queue -> reply_owner is what the caller passed",
+    env_approval.reply_owner == "gateway")
+
+env_reconfirm = build_turn_envelope(
+    live_contract_reply_owner="gateway",
+    reconfirmation_required=True,
+    action_gateway_queue=_ac_queue,
+)
+chk("reconfirmation_required takes priority over plain approval_pending",
+    env_reconfirm.turn_mode == "reconfirmation_required")
+
+env_disambig = build_turn_envelope(disambiguation_active=True, action_gateway_queue=_ac_queue)
+chk("disambiguation_active -> partial_selection_ambiguous",
+    env_disambig.turn_mode == "partial_selection_ambiguous")
+
+_lead_queue = PendingQueueAwareness(
+    queue_id="lead_preview:c1", source="lead_capture", kind="lead_candidate",
+    summary="5 candidate(s) pending",
+    items=tuple(PendingItem(index=i + 1, id=f"05{i}", kind="lead_candidate", label=f"lead{i}")
+                for i in range(5)),
+    approval_granularity="all_or_nothing", priority=5,
+)
+env_multi = build_turn_envelope(
+    live_contract_reply_owner="gateway",
+    action_gateway_queue=_ac_queue,
+    lead_capture_queue=_lead_queue,
+)
+chk("two simultaneous queues -> both present in pending_queues",
+    len(env_multi.pending_queues) == 2)
+chk("two simultaneous queues -> active_queue_id picks the lower-priority-number one",
+    env_multi.active_queue_id == "ac:u1")
+
+log_dict = env_multi.to_log_dict()
+chk("to_log_dict has all Gate A required fields", set(log_dict.keys()) == {
+    "turn_mode", "queue_count", "queue_sources", "active_queue_id",
+    "resolved_reference", "reply_owner", "message_kind",
+    "policy_snapshot_version", "agent_availability_mode",
+})
+chk("to_log_dict queue_count matches", log_dict["queue_count"] == 2)
+chk("to_log_dict queue_sources matches", log_dict["queue_sources"] == ["action_gateway", "lead_capture"])
+
+
+# ══════════════════════════════════════════════════
+# execution_kind_of() — static classification lookup
+# ══════════════════════════════════════════════════
+
+chk("confirm_word classified as deterministic",
+    execution_kind_of("confirm_word") == ExecutionKind.DETERMINISTIC)
+chk("agent_tool_call classified as agent_interpreted",
+    execution_kind_of("agent_tool_call") == ExecutionKind.AGENT_INTERPRETED)
+chk("background_job_llm_analysis classified as agent_interpreted (but not live-turn agent)",
+    execution_kind_of("background_job_llm_analysis") == ExecutionKind.AGENT_INTERPRETED)
+chk("unknown call_site_id returns None, never guessed",
+    execution_kind_of("something_never_registered") is None)
+
+
+# ══════════════════════════════════════════════════
+# log_turn_envelope() — never raises
+# ══════════════════════════════════════════════════
+
+try:
+    log_turn_envelope(env_free, canonical_user_id="tenant:u1")
+    chk("log_turn_envelope() with a normal envelope does not raise", True)
+except Exception:
+    chk("log_turn_envelope() with a normal envelope does not raise", False)
+
+with patch("core.turn_envelope.logger") as _broken_logger:
+    _broken_logger.info.side_effect = RuntimeError("logging backend down")
+    try:
+        log_turn_envelope(env_free, canonical_user_id="tenant:u1")
+        chk("log_turn_envelope() swallows a broken logging backend", True)
+    except Exception:
+        chk("log_turn_envelope() swallows a broken logging backend", False)
+
+
+# ══════════════════════════════════════════════════
+# app._build_and_log_turn_envelope() — wiring + fail-open guarantee
+# ══════════════════════════════════════════════════
+
+import app  # noqa: E402
+from identity import Identity, Role  # noqa: E402
+
+
+def _identity(user_id: str) -> Identity:
+    return Identity(
+        user_id=user_id, role=Role.OWNER, display_name=user_id,
+        tenant_id="boss_hq", domain_id="general", channel="telegram", external_id=user_id,
+    )
+
+
+_id1 = _identity("turnenv-user-1")
+
+# No live contracts, no batch queue, no lead preview -> must not raise and
+# must not touch session_store at all (session_snapshot is passed in, per
+# LL-11's single-Sessions-read-per-turn invariant — see app.py's docstring
+# on _build_and_log_turn_envelope).
+with patch("core.action_gateway.action_gateway") as _mock_gw, \
+     patch("event_bus.batch_queue") as _mock_bq, \
+     patch("session_store.lead_sessions") as _mock_ls:
+    _mock_gw.find_live_contracts.return_value = []
+    _mock_bq.count_pending.return_value = 0
+    try:
+        app._build_and_log_turn_envelope(_id1, "chat-1", None)
+        chk("_build_and_log_turn_envelope() with empty state does not raise", True)
+    except Exception:
+        chk("_build_and_log_turn_envelope() with empty state does not raise", False)
+    chk("empty state: find_live_contracts() was consulted (read-only)",
+        _mock_gw.find_live_contracts.called)
+    chk("session_store.lead_sessions is never touched (LL-11 single-read invariant)",
+        not _mock_ls.method_calls)
+
+# A live contract + a nonzero batch queue + a lead preview all at once ->
+# still must not raise, and must reflect them in the log payload. The
+# preview comes from session_snapshot directly, not a fresh session read.
+_fake_contract = MagicMock(contract_id="c-live-1", reconfirmation_required=False)
+_snapshot_with_preview = {
+    "pending_lead_preview": {
+        "candidates": [{"name": "א", "phone": "0501"}, {"name": "ב", "phone": "0502"}],
+        "set_at": __import__("time").time(),
+    },
+}
+with patch("core.action_gateway.action_gateway") as _mock_gw2, \
+     patch("event_bus.batch_queue") as _mock_bq2, \
+     patch("session_store.lead_sessions") as _mock_ls2, \
+     patch("core.turn_envelope.log_turn_envelope") as _mock_log:
+    _mock_gw2.find_live_contracts.return_value = [_fake_contract]
+    _mock_bq2.count_pending.return_value = 3
+    try:
+        app._build_and_log_turn_envelope(_id1, "chat-1", _snapshot_with_preview)
+        chk("_build_and_log_turn_envelope() with 3 simultaneous sources does not raise", True)
+    except Exception:
+        chk("_build_and_log_turn_envelope() with 3 simultaneous sources does not raise", False)
+    chk("log_turn_envelope() was called exactly once", _mock_log.call_count == 1)
+    _logged_envelope = _mock_log.call_args[0][0]
+    chk("all 3 pending sources landed in the envelope", len(_logged_envelope.pending_queues) == 3)
+    chk("reply_owner reflects the live contract, not a guess",
+        _logged_envelope.reply_owner == "gateway")
+    chk("session_store.lead_sessions is still never touched with a snapshot passed in",
+        not _mock_ls2.method_calls)
+
+# An expired preview (set_at > 1800s ago) must not surface as a pending
+# queue, and must not be mutated/cleared (Phase 0 never writes).
+_snapshot_with_expired_preview = {
+    "pending_lead_preview": {
+        "candidates": [{"name": "א", "phone": "0501"}],
+        "set_at": __import__("time").time() - 9999,
+    },
+}
+with patch("core.action_gateway.action_gateway") as _mock_gw2b, \
+     patch("event_bus.batch_queue") as _mock_bq2b, \
+     patch("core.turn_envelope.log_turn_envelope") as _mock_log2b:
+    _mock_gw2b.find_live_contracts.return_value = []
+    _mock_bq2b.count_pending.return_value = 0
+    app._build_and_log_turn_envelope(_id1, "chat-1", _snapshot_with_expired_preview)
+    _logged_envelope2b = _mock_log2b.call_args[0][0]
+    chk("expired lead preview does not surface as a pending queue",
+        _logged_envelope2b.pending_queues == ())
+    chk("expired preview leaves turn_mode as free_agent",
+        _logged_envelope2b.turn_mode == "free_agent")
+
+# Every lookup raising -> must still not raise (fail-open, Phase 0's core
+# guarantee: this instrumentation can never break a live turn).
+with patch("core.action_gateway.action_gateway") as _mock_gw3, \
+     patch("event_bus.batch_queue") as _mock_bq3:
+    _mock_gw3.find_live_contracts.side_effect = RuntimeError("Airtable down")
+    _mock_bq3.count_pending.side_effect = RuntimeError("lock error")
+    try:
+        app._build_and_log_turn_envelope(_id1, "chat-1", {"pending_lead_preview": "not-a-dict"})
+        chk("_build_and_log_turn_envelope() fail-opens when every lookup raises", True)
+    except Exception:
+        chk("_build_and_log_turn_envelope() fail-opens when every lookup raises", False)
+
+
+print(f"\n{'='*50}")
+print(f"turn_envelope tests: {passed} passed, {failed} failed")
+sys.exit(0 if failed == 0 else 1)
