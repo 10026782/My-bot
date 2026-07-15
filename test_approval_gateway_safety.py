@@ -10,9 +10,29 @@ Covers:
                                         without sheets_append evidence.
   BUG-V1-FAKE-APPROVAL-STATE         — A32 must block "⏳ ממתינה לאישור" text
                                         emitted without a real pending approval.
-  BUG-V1-MULTI-PENDING-PAYLOAD-CONTAMINATION
-                                     — A single agent turn may not queue >1
-                                        mutating approval.
+  BUG-V1-MULTI-PENDING-PAYLOAD-CONTAMINATION / BUG-BATCH-DISCARD
+                                     — CORRECTED 15/07/2026: the original fix
+                                        blocked (discarded) any mutating
+                                        approval beyond the first in a turn
+                                        outright — a regression from working
+                                        batch behavior, since the payload-
+                                        contamination it cited was never
+                                        actually reproduced (each
+                                        _queue_approval() call already made
+                                        its own independent copy/contract,
+                                        both before and after that fix). Now:
+                                        every mutating tool call in a turn is
+                                        durably preserved — the first becomes
+                                        a live ActionContract + notification,
+                                        the rest are held in
+                                        event_bus.batch_queue and promoted
+                                        one at a time via
+                                        app._promote_next_batch_item(), only
+                                        once nothing is live for that
+                                        identity. See
+                                        test_bug_batch_approval_preserved.py
+                                        for the live-path regression
+                                        coverage.
   BUG-V1-APPROVAL-REQUEUE-AFTER-CONFIRM
                                      — ExecutedActionCache blocks re-queuing
                                         the same action within the TTL window.
@@ -188,22 +208,28 @@ chk(
 
 
 # ══════════════════════════════════════════════════
-# BUG-V1-MULTI-PENDING-PAYLOAD-CONTAMINATION
+# BUG-V1-MULTI-PENDING-PAYLOAD-CONTAMINATION / BUG-BATCH-DISCARD
 # ══════════════════════════════════════════════════
 
-print("\n── BUG-V1-MULTI-PENDING (agent turn counter) ────────────────")
+print("\n── BUG-BATCH-DISCARD (agent turn: queue+promote, not discard) ──")
 
-# Simulate the counter logic directly (same logic as in app.py's tool loop)
+
+# Simulate the corrected logic directly (same logic as in app.py's tool loop
+# — see the BUG-BATCH-DISCARD comment there): the first mutating approval
+# this turn queues normally; every one beyond it is deferred (not discarded).
+# Replaces the old simulate_approval_gate() which asserted the removed
+# "queued, blocked, blocked" hard-discard behavior — see
+# test_bug_batch_approval_preserved.py for the live-path (real
+# _queue_approval()/ActionGateway/batch_queue) regression coverage of the
+# actual fix, including promotion order and dispatch-exactly-once guarantees.
 def simulate_approval_gate(approvals_requested: int) -> list[str]:
-    """
-    Simulates app.py's _mutating_approvals_this_turn gate.
-    Returns list of outcomes per request ("queued" or "blocked").
-    """
+    """Returns list of outcomes per request: "queued" (live now) or
+    "deferred" (durably held, promoted later — never discarded)."""
     _mutating_approvals_this_turn = 0
     outcomes = []
     for _ in range(approvals_requested):
         if _mutating_approvals_this_turn >= 1:
-            outcomes.append("blocked")
+            outcomes.append("deferred")
         else:
             _mutating_approvals_this_turn += 1
             outcomes.append("queued")
@@ -217,15 +243,15 @@ chk(
 
 outcomes_2 = simulate_approval_gate(2)
 chk(
-    "test_no_multi_pending_from_yes_add_now: "
-    "2 approvals in 1 turn → [queued, blocked]",
-    outcomes_2 == ["queued", "blocked"],
+    "BUG-BATCH-DISCARD: 2 approvals in 1 turn → both preserved "
+    "(first queued live, second deferred — never discarded)",
+    outcomes_2 == ["queued", "deferred"],
 )
 
-outcomes_3 = simulate_approval_gate(3)
+outcomes_5 = simulate_approval_gate(5)
 chk(
-    "3 approvals in 1 turn → [queued, blocked, blocked]",
-    outcomes_3 == ["queued", "blocked", "blocked"],
+    "BUG-BATCH-DISCARD: 5 approvals in 1 turn → all 5 preserved",
+    outcomes_5 == ["queued"] + ["deferred"] * 4,
 )
 
 
