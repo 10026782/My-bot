@@ -1197,6 +1197,39 @@ def _handle_approval_callback(cq) -> None:
         raise
 
 
+def _notify_stale_or_resolved_callback(
+    cq, *, notify_chat_id: str, label: str, state_text: str,
+) -> None:
+    """
+    BUG-STALE-CALLBACK-UX: answer_callback_query()'s popup alone is a poor
+    user-facing result for a completed/already-resolved/stale approval
+    callback — small, disappears quickly, names no action, easy to miss.
+    Sends a persistent chat message naming the action and confirming no
+    duplicate execution occurred, and edits the original approval message
+    to show its final state (removing the now-stale inline keyboard in the
+    same call). Purely a notice about a callback that performed zero
+    dispatcher calls, zero new Atomic Claims, and zero writes — never
+    dispatches or claims anything itself.
+    """
+    if notify_chat_id:
+        try:
+            bot.send_message(notify_chat_id, f"ℹ️ {label}\n\n{state_text}, ולכן לא בוצעה שוב.")
+        except Exception as e:
+            logger.error(f"[Approval] stale-callback notice send failed: {e}")
+    try:
+        bot.edit_message_text(
+            f"ℹ️ *{state_text}*\n{label}",
+            cq.message.chat.id, cq.message.message_id,
+            parse_mode="Markdown",
+        )
+    except Exception:
+        try:
+            bot.edit_message_reply_markup(
+                cq.message.chat.id, cq.message.message_id, reply_markup=None)
+        except Exception:
+            pass
+
+
 def _handle_approval_callback_impl(cq) -> None:
     """מטפל בלחיצה על ✅/❌ של בקשת אישור."""
     from event_bus import bus
@@ -1246,13 +1279,13 @@ def _handle_approval_callback_impl(cq) -> None:
                         )
                         _contract_sb02 = _gw_sb02._ledger.find_by_fingerprint(_fp_sb02)
                         if _contract_sb02 is not None:
+                            _peek_label = _peek_item.get("label") or _describe_tool_call(_peek_tool, _peek_inputs)
                             if _contract_sb02.status in ("completed", "executed"):
                                 bot.answer_callback_query(cq.id, "✅ פעולה זו כבר בוצעה")
-                                try:
-                                    bot.edit_message_reply_markup(
-                                        cq.message.chat.id, cq.message.message_id, reply_markup=None)
-                                except Exception:
-                                    pass
+                                _notify_stale_or_resolved_callback(
+                                    cq, notify_chat_id=approver_chat_id,
+                                    label=_peek_label, state_text="כבר בוצעה",
+                                )
                                 logger.info(
                                     "[ActionGateway] SB-02: blocked duplicate callback "
                                     "action_id=%s contract=%s tool=%s status=executed",
@@ -1261,11 +1294,10 @@ def _handle_approval_callback_impl(cq) -> None:
                                 return
                             if _contract_sb02.status == "rejected":
                                 bot.answer_callback_query(cq.id, "❌ פעולה זו בוטלה")
-                                try:
-                                    bot.edit_message_reply_markup(
-                                        cq.message.chat.id, cq.message.message_id, reply_markup=None)
-                                except Exception:
-                                    pass
+                                _notify_stale_or_resolved_callback(
+                                    cq, notify_chat_id=approver_chat_id,
+                                    label=_peek_label, state_text="כבר בוטלה",
+                                )
                                 return
         except Exception as _sb02_exc:
             logger.warning("[ActionGateway] SB-02 status pre-check failed (non-blocking): %s", _sb02_exc)
@@ -1274,11 +1306,13 @@ def _handle_approval_callback_impl(cq) -> None:
         item = bus.pop(action_id)
         if not item:
             bot.answer_callback_query(cq.id, "⏰ פג תוקף — הפעולה לא קיימת יותר")
-            try:
-                bot.edit_message_reply_markup(cq.message.chat.id, cq.message.message_id,
-                                              reply_markup=None)
-            except Exception:
-                pass
+            # No payload was ever available (SB-02's own peek above would
+            # have found the same nothing) — no specific action to name,
+            # but still give a persistent result, not just the popup.
+            _notify_stale_or_resolved_callback(
+                cq, notify_chat_id=approver_chat_id,
+                label="הפעולה המבוקשת", state_text="פגה או כבר לא קיימת",
+            )
             return
 
         payload          = item["payload"]
@@ -1372,11 +1406,14 @@ def _handle_approval_callback_impl(cq) -> None:
                     action_id, _gw_terminal_contract_id, tool_name, _gw_terminal_status,
                 )
                 bot.answer_callback_query(cq.id, _gw_terminal_reply)
-                try:
-                    bot.edit_message_reply_markup(
-                        cq.message.chat.id, cq.message.message_id, reply_markup=None)
-                except Exception:
-                    pass
+                _notify_stale_or_resolved_callback(
+                    cq, notify_chat_id=approver_chat_id,
+                    label=item.get("label") or _describe_tool_call(tool_name, tool_inputs),
+                    state_text=(
+                        "כבר בוצעה" if _gw_terminal_status in ("completed", "executed")
+                        else "כבר בוטלה"
+                    ),
+                )
                 return
 
             if _gw_contract_id:
@@ -1408,11 +1445,11 @@ def _handle_approval_callback_impl(cq) -> None:
                     action_id, tool_name,
                 )
                 bot.answer_callback_query(cq.id, "⏰ הפעולה פגה או כבר טופלה.")
-                try:
-                    bot.edit_message_reply_markup(
-                        cq.message.chat.id, cq.message.message_id, reply_markup=None)
-                except Exception:
-                    pass
+                _notify_stale_or_resolved_callback(
+                    cq, notify_chat_id=approver_chat_id,
+                    label=item.get("label") or _describe_tool_call(tool_name, tool_inputs),
+                    state_text="כבר טופלה או שאין לה רישום אישור פעיל",
+                )
                 return
             else:
                 # Legacy path — FEATURE_ACTION_GATEWAY entirely off, no
