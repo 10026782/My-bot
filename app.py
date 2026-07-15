@@ -728,13 +728,26 @@ def _write_execution_receipt(
 
 
 def _queue_approval(tool_name: str, tool_inputs: dict,
-                    user_chat_id: str, channel: str) -> str:
+                    user_chat_id: str, channel: str, user_text: str = "") -> str:
     """
     שומר פעולה ממתינה ושולח בקשת אישור לowner.
     מחזיר string לmodel: "⏳ ממתין לאישור..."
     PR #188: blocks re-queuing via executed_action_cache (raw chat_id fingerprint).
     Stage A: also dedupes cross-channel via canonical identity.memory_key.
+
+    BUG-CANONICAL-TOOL-WIRING: resolved here, once, before anything else uses
+    tool_name (dedup fingerprint, button label, legacy bus payload, and the
+    ActionGateway contract all must agree) — resolving only inside
+    propose_action() would leave the legacy bus item and button label
+    pointing at the original (e.g. sheets_append) hint while the durable
+    contract stores the resolved one (e.g. airtable_add), reintroducing the
+    same fingerprint-mismatch class of bug fixed for the post-completion
+    callback fallthrough (the button would fall through to a legacy dispatch
+    of the wrong tool).
     """
+    from core.action_gateway import resolve_canonical_tool
+    tool_name = resolve_canonical_tool(tool_name, tool_inputs, user_text)
+
     from event_bus import bus, executed_action_cache
     fp = executed_action_cache.compute(user_chat_id, tool_name, tool_inputs)
     if executed_action_cache.is_recently_executed(fp):
@@ -776,6 +789,7 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
             origin_chat_id=user_chat_id,
             requires_approval=True,
             identity=identity,
+            user_text=user_text,
         )
         if not _gw_result.ok:
             logger.info(
@@ -797,6 +811,7 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
                 origin_chat_id=user_chat_id,
                 requires_approval=True,
                 identity=identity,
+                user_text=user_text,
             )
             if _gw_result.failure_code in {"persistence_failed", "persistence_lookup_failed"}:
                 return _gw_result.user_message or f"❌ {_gw_result.reason}"
@@ -2085,7 +2100,7 @@ def run_agent(
                         })
                         continue
                     result = _queue_approval(
-                        tu.name, dict(tu.input), chat_id, channel
+                        tu.name, dict(tu.input), chat_id, channel, user_text
                     )
                     _mutating_approvals_this_turn += 1
                     tool_results.append({
