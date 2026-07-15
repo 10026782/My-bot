@@ -9,7 +9,14 @@
 
 from __future__ import annotations
 import logging
+from typing import TYPE_CHECKING
 from .route_decision import Intent, RouterDomain, Risk, Handler
+import tool_registry
+
+if TYPE_CHECKING:
+    from identity import Identity
+    from context import AgentContext
+    from .route_decision import RouteDecision
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +46,63 @@ _NORMAL_INTENTS = {
     Intent.DRAFT_EMAIL, Intent.DRAFT_MESSAGE,
     Intent.STORE_MEMORY,
 }
+
+# ══════════════════════════════════════════════════
+# PA-01 — Canonical intent → contract-expectation policy
+# docs/architecture/turn-coordinator/PA-01_PLANNING_GATE.md §3.5/§3.6
+# (approved commit 81676ad). Single policy source — no duplicate list/dict
+# of this mapping anywhere else, including app.py.
+# ══════════════════════════════════════════════════
+
+_CONTRACT_REQUIRED_INTENT_TO_TOOL: dict[str, str] = {
+    Intent.CREATE_TASK:       "airtable_add",
+    Intent.UPDATE_TASK:       "airtable_update",
+    Intent.COMPLETE_TASK:     "airtable_update",
+    Intent.CREATE_EVENT:      "calendar_create_event",
+    Intent.SCHEDULE_MEETING:  "calendar_create_event",
+    Intent.CREATE_CONTACT:    "airtable_add",
+    Intent.UPDATE_CONTACT:    "airtable_update",
+    Intent.CREATE_LEAD:       "airtable_add",
+    Intent.UPDATE_LEAD:       "airtable_update",
+    Intent.UPDATE_DEAL_STAGE: "airtable_update",
+}
+assert set(_CONTRACT_REQUIRED_INTENT_TO_TOOL) <= _NORMAL_INTENTS
+_NON_CONTRACT_NORMAL_INTENTS = _NORMAL_INTENTS - set(_CONTRACT_REQUIRED_INTENT_TO_TOOL)
+
+
+def intent_requires_contract_for_success(intent: str | None) -> bool:
+    """True iff a successful fulfillment of this intent requires a real
+    ActionContract — policy-only, role/domain-invariant. See §3.5."""
+    return intent in _CONTRACT_REQUIRED_INTENT_TO_TOOL
+
+
+def expected_tool_for_intent(intent: str | None) -> str | None:
+    """The one dispatcher tool this intent's ActionContract must be created
+    for. None if the intent is not contract-required."""
+    return _CONTRACT_REQUIRED_INTENT_TO_TOOL.get(intent)
+
+
+def contract_capable_this_turn(
+    route: "RouteDecision", identity: "Identity", ctx: "AgentContext",
+) -> bool:
+    """
+    Runtime-dependent — can *this* identity's *this* turn actually reach a
+    contract for the intent's expected tool at all? Combines three already-
+    existing, independently-maintained signals (§3.6): the role-filtered
+    tool list actually offered to Claude this turn, the tool_registry's own
+    role-tool policy, and the router's own tool_allowed flag. Table-
+    granularity gaps (e.g. Leads-specific preflight) are NOT covered here —
+    see PREFLIGHT_BLOCKED in §3.6's terminal-outcome table.
+    """
+    expected_tool = expected_tool_for_intent(getattr(route, "intent", None))
+    if expected_tool is None:
+        return False
+    return (
+        any(t.get("name") == expected_tool for t in (getattr(ctx, "allowed_tools", None) or []))
+        and tool_registry.check_allowed(expected_tool, identity)
+        and bool(getattr(route, "tool_allowed", True))
+    )
+
 
 # Explicit protected actions — block for anyone below senior
 _HIGH_RISK_INTENTS = {
