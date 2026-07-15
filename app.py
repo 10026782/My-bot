@@ -910,6 +910,161 @@ def _gateway_reply_with_promotion(reply, canonical_user_id: str):
     return reply
 
 
+def _build_and_log_turn_envelope(
+    identity, chat_id: str, session_snapshot: dict | None, entry_point: str = "run_agent",
+) -> None:
+    """TurnCoordinator Phase 0 — observation only, log-only, no routing
+    effect. See core/turn_envelope.py's module docstring for exact scope and
+    docs/architecture/turn-coordinator/TURN_COORDINATOR_PROPOSAL_V2.md /
+    docs/architecture/f52-unified-approval-runtime/audits/phase-4c/
+    TURN_OWNERSHIP_EXTENSION.md for the design and call-site inventory.
+
+    Reads already-live state (ActionGateway contracts, BatchQueueStore)
+    purely for logging — never pops/mutates anything, never changes what
+    run_agent() does next. Must never raise into the caller: this whole
+    function is a best-effort side effect, called before any of this turn's
+    own routing has run.
+
+    session_snapshot: the SAME dict run_agent() already loaded via
+    session_store.lead_sessions.get(chat_id) at "1.6 Session snapshot" —
+    reused here instead of calling get_pending_lead_preview() (which does
+    its own internal .get()), to preserve the single-Sessions-read-per-turn
+    invariant test_session_snapshot.py (LL-11) guards. This inlines
+    get_pending_lead_preview()'s own TTL check read-only — it deliberately
+    does not replicate that method's expired-preview cleanup write, since
+    Phase 0 must never mutate state.
+
+    Log content boundary: this runs unconditionally (no flag) on every turn,
+    so identifiers embedded in queue_id (memory_key/chat_id — frequently a
+    phone number for WhatsApp) are fingerprinted via _sanitize_id() before
+    being placed anywhere a log line could reach, and lead-candidate
+    PendingItem.id/label deliberately do NOT carry the raw phone/name — see
+    inline notes below. No action payload, no user message text, and no
+    business-record field values are ever passed to core/turn_envelope.py.
+
+    entry_point: identifies which call site is calling, for the
+    build_failed log below — lets a future second call site (TMA, the
+    Telegram callback handler) be told apart from this one without adding a
+    new mechanism.
+    """
+    try:
+        from core.turn_envelope import (
+            PendingItem, PendingQueueAwareness, build_turn_envelope, log_turn_envelope,
+        )
+        from core.action_gateway import action_gateway as _gw_te
+        from event_bus import batch_queue as _bq_te
+
+        live_contracts = _gw_te.find_live_contracts(identity.memory_key)
+        reconfirmation_required = any(
+            getattr(c, "reconfirmation_required", False) for c in live_contracts
+        )
+
+        ac_queue = None
+        if live_contracts:
+            ac_queue = PendingQueueAwareness(
+                queue_id=f"ac:{_sanitize_id(identity.memory_key)}",
+                source="action_gateway",
+                kind="action_contract",
+                summary=f"{len(live_contracts)} live contract(s)",
+                items=tuple(
+                    # contract_id is an internal UUID, not PII — safe as-is.
+                    PendingItem(
+                        index=i + 1, id=getattr(c, "contract_id", "") or "",
+                        kind="action_contract", label="",
+                    )
+                    for i, c in enumerate(live_contracts)
+                ),
+                approval_granularity="single_choice" if len(live_contracts) > 1 else "all_or_nothing",
+                priority=3,
+            )
+
+        preview = None
+        try:
+            if session_snapshot:
+                _candidate_preview = session_snapshot.get("pending_lead_preview")
+                if _candidate_preview and (
+                    time.time() - _candidate_preview.get("set_at", 0) <= 1800
+                ):
+                    preview = _candidate_preview
+        except Exception:
+            preview = None
+
+        lead_queue = None
+        if preview:
+            candidates = preview.get("candidates") or []
+            lead_queue = PendingQueueAwareness(
+                queue_id=f"lead_preview:{_sanitize_id(chat_id)}",
+                source="lead_capture",
+                kind="lead_candidate",
+                summary=f"{len(candidates)} candidate(s) pending",
+                items=tuple(
+                    # Deliberately NOT c["phone"]/c["name"] — Phase 0 has no
+                    # consumer that needs the real value yet (to_log_dict()
+                    # doesn't even serialize items today), so there is no
+                    # reason to hold raw PII in this snapshot at all. A real
+                    # label will be needed once Phase 2's
+                    # resolve_numbered_reference() lands — that is an
+                    # explicit future decision, not inherited silently here.
+                    PendingItem(
+                        index=i + 1, id=_sanitize_id(c.get("phone", "")),
+                        kind="lead_candidate", label="",
+                    )
+                    for i, c in enumerate(candidates)
+                ),
+                # AP-12 / finding 1b: all-or-nothing only, no partial
+                # selection exists today — see TURN_OWNERSHIP_EXTENSION.md.
+                approval_granularity="all_or_nothing",
+                priority=5,
+            )
+
+        other_queues = []
+        try:
+            batch_count = _bq_te.count_pending(identity.memory_key)
+        except Exception:
+            batch_count = 0
+        if batch_count:
+            other_queues.append(PendingQueueAwareness(
+                queue_id=f"batch_queue:{_sanitize_id(identity.memory_key)}",
+                source="action_gateway",
+                kind="deferred_tool_call",
+                summary=f"{batch_count} item(s) queued behind a live contract",
+                priority=4,
+            ))
+
+        envelope = build_turn_envelope(
+            live_contract_reply_owner="gateway" if live_contracts else None,
+            reconfirmation_required=reconfirmation_required,
+            action_gateway_queue=ac_queue,
+            lead_capture_queue=lead_queue,
+            other_queues=tuple(other_queues),
+        )
+        log_turn_envelope(envelope, canonical_user_id=identity.memory_key)
+
+        # Case C1 signal (see docs/architecture/turn-coordinator/
+        # CASE_C_CLARIFICATION_CONTINUITY.md) — more than one live
+        # ActionContract simultaneously pending for this identity violates
+        # BatchQueueStore's own single-live-contract invariant, regardless of
+        # how it happened. Log-only: does not block or alter this turn.
+        if len(live_contracts) > 1:
+            from core.turn_envelope import log_case_c_signal
+            log_case_c_signal(
+                "C1", canonical_user_id=identity.memory_key,
+                detail=f"live_contracts={len(live_contracts)}",
+            )
+    except Exception as exc:
+        # Fail-open, not silent: a build failure must leave evidence, or the
+        # one turn most likely to have unusual state (the one that broke
+        # this) is exactly the one with no observation at all. error_type
+        # only (never str(exc)) — an inner KeyError/AttributeError message
+        # could echo back a dict key or attribute value that itself embeds
+        # user content; type(exc).__name__ never can.
+        logger.warning(
+            "[TurnEnvelope] build_failed error_type=%s entry_point=%s user=%s",
+            type(exc).__name__, entry_point, _sanitize_id(getattr(identity, "memory_key", "")),
+        )
+        logger.debug("[TurnEnvelope] build_failed detail", exc_info=True)
+
+
 def _tool_user_message(result) -> str:
     """Extract display text from a C53-A structured tool result (dict) or pass through a plain string."""
     if isinstance(result, dict):
@@ -1611,6 +1766,14 @@ def run_agent(
     except Exception:
         _session_snapshot = None
 
+    # ── 1.7. TurnCoordinator Phase 0 (observation only) ──────────
+    # Snapshot of turn-start pending state, logged only — see
+    # _build_and_log_turn_envelope()'s docstring. Placed here, before the
+    # Pending Approval Gate below pops anything, so it reflects what this
+    # turn actually started with, not what's left after this turn's own
+    # routing has already consumed it. Passes _session_snapshot through
+    # (LL-11: single Sessions read per turn) instead of re-reading it.
+    _build_and_log_turn_envelope(identity, chat_id, _session_snapshot)
 
     # ── 2. Rate Limit ─────────────────────────────
     if not rate_limiter.is_allowed(identity.memory_key):
@@ -2298,6 +2461,35 @@ def run_agent(
             final_reply, tool_results_log,
             _gateway_active=_flag_enabled("FEATURE_ACTION_GATEWAY"),
         )
+
+        # Case C2 signal (see docs/architecture/turn-coordinator/
+        # CASE_C_CLARIFICATION_CONTINUITY.md) — final_reply reads as a
+        # pending-approval claim but this turn ends with nothing actually
+        # pending and nothing newly queued. Needs a POST-turn read (this
+        # turn's own tool calls may have just changed what's live), not the
+        # turn-start envelope built earlier — deliberately does not re-read
+        # session_store (LL-11 single-read invariant); lead-preview coverage
+        # is intentionally out of scope for this first pass, see the doc.
+        # Log-only: never blocks/alters final_reply.
+        try:
+            from core.turn_envelope import detect_case_c2_signal, log_case_c_signal
+            from core.action_gateway import action_gateway as _gw_c2
+            from event_bus import batch_queue as _bq_c2
+            _post_turn_queue_count = (
+                len(_gw_c2.find_live_contracts(identity.memory_key))
+                + _bq_c2.count_pending(identity.memory_key)
+            )
+            _approval_queued_this_turn = any(
+                r.get("tool") == "__approval_queued__" for r in tool_results_log
+            )
+            if detect_case_c2_signal(
+                final_reply,
+                queue_count=_post_turn_queue_count,
+                approval_queued_this_turn=_approval_queued_this_turn,
+            ):
+                log_case_c_signal("C2", canonical_user_id=identity.memory_key)
+        except Exception:
+            logger.debug("[TurnEnvelope] case_c2 detection skipped due to error", exc_info=True)
 
         # ── שמירת זיכרון ─────────────────────────
         memory.add(ctx.memory_key, "user",      clean_msg)
