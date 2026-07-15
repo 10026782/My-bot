@@ -16,8 +16,13 @@ Coverage:
      by making the requester a role with NO approval authority (employee) and
      the approver the owner; if the code wrongly used the requester's role,
      approve() would deny and the contract would stay "pending".
-  4. Flag on + no contract found (shadow propose_action() failed silently) ->
-     falls back to legacy dispatch_tool(), same as flag-off.
+  4. CORRECTED 15/07/2026 (BUG-STALE-CALLBACK-FALLTHROUGH): flag on + no
+     contract found (shadow propose_action() failed silently, or a stale/
+     replayed/unlinked callback) used to fall back to legacy dispatch_tool()
+     with no ActionGateway approval and no Atomic Claim behind it at all —
+     a live incident. Now fails closed: zero dispatches, a deterministic
+     expired/already-resolved reply. The flag-off case (no Gateway
+     involvement in that mode at all) is unaffected — see Test 1.
   5. Flag on + contract found + execution fails -> contract ends "failed",
      dispatch_tool called exactly once (no retry), user notified.
 """
@@ -179,9 +184,10 @@ chk(
 
 
 # ══════════════════════════════════════════════════════════════════
-# 4. Flag ON but no contract found — falls back to legacy dispatch
+# 4. Flag ON but no contract found — BUG-STALE-CALLBACK-FALLTHROUGH: must
+# fail closed (zero dispatches), never fall back to legacy dispatch_tool()
 # ══════════════════════════════════════════════════════════════════
-print("\n── Test 4: flag on, no contract found — fallback ─────────────")
+print("\n── Test 4: flag on, no contract found — fail closed ───────────")
 
 requester = _identity("req_4", Role.OWNER)
 approver = _identity("appr_4", Role.OWNER)
@@ -189,7 +195,7 @@ calls, contract = _run_callback(
     requester=requester, approver=approver, dispatch_mock=_ok_dispatch,
     seed_contract=False, feature_gw=True, tool_inputs={"chat_id": "req_4", "draft": "w"},
 )
-chk("Test4: dispatch_tool called exactly once (fallback to legacy)", calls == 1)
+chk("Test4: dispatch_tool NEVER called — no contract, no legacy fallback", calls == 0)
 chk("Test4: no contract to check (fallback path, none seeded)", contract is None)
 
 

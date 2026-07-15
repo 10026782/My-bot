@@ -541,6 +541,26 @@ _AGENT_PENDING_STATUS_PATTERN = re.compile(
     r"כשתאשר.{0,40}(תתווסף|יבוצע|תישלח|יישלח))",
     re.UNICODE,
 )
+# BUG-FAKE-APPROVAL-INVITE: live incident — the agent (Claude, on this turn
+# running claude-haiku-4-5-20251001) wrote "✅ המשימה מוכנה להוספה:\n...\n
+# שלח מאשר כדי לאשר הוספה." without ever calling a tool at all this turn —
+# no _queue_approval(), no EventBus item, no ActionContract. "מאשר"/"כן"
+# afterward correctly found nothing pending (there genuinely was nothing),
+# but the user had no way to know that from the fabricated message alone.
+# This phrasing matched neither _AGENT_PENDING_STATUS_PATTERN above (no
+# "לאישור"/"ממתינ" near "מוכנה") nor the __approval_queued__-gated
+# NO_TOOL_CLAIMS entry below (no "⏳"/"ממתינה לאישור"/"כשתאשר") — a novel
+# phrasing slipping past both enumerated patterns, the same "whack-a-mole"
+# risk _has_write_tool_evidence's category-agnostic design already exists
+# to close for completion claims. This is the parallel structural net for
+# approval-invite claims: matches the actual call-to-action inviting the
+# user to send a confirm word, regardless of the surrounding phrasing.
+_AGENT_APPROVAL_INVITE_PATTERN = re.compile(
+    r"(שלח\s*\*?(מאשר|כן)\*?|לחץ.{0,15}(מאשר|אשר)|"
+    r"אשר\s*(כדי|על מנת|בבקשה)|"
+    r"מוכנ[הת]?\s.{0,40}(להוספה|לביצוע|לשליחה|לעדכון|ליצירה|לשמירה))",
+    re.UNICODE,
+)
 # Was "הפעולה התקבלה. תוצאה תישלח בנפרד." — a false continuation claim with
 # no real pending/queue behind it: when this gate fires, nothing actually
 # follows up. Same claim-without-evidence class the rest of this module
@@ -579,6 +599,18 @@ def _has_write_tool_evidence(tool_results: list[dict]) -> bool:
         r.get("tool") in _WRITE_ACTION_TOOLS and r.get("ok", True)
         for r in tool_results
     )
+
+
+def _has_approval_queued_evidence(tool_results: list[dict]) -> bool:
+    """
+    True if this turn actually queued an approval (the __approval_queued__
+    sentinel app.py's tool loop injects whenever _queue_approval() ran).
+    Structural counterpart to _has_write_tool_evidence(), but for
+    approval-invite claims rather than completion claims: an agent inviting
+    the user to send a confirm word must be backed by a real pending
+    EventBus item / ActionContract, not just text that reads that way.
+    """
+    return any(r.get("tool") == "__approval_queued__" for r in tool_results)
 
 
 def _has_negative_evidence(tool_results: list[dict], required_tools: frozenset[str] | None) -> bool:
@@ -664,6 +696,22 @@ def sanitize_agent_response(agent_text: str, tool_results: list[dict],
             "[A32] NO-TOOL-EVIDENCE generic action-claim hallucination: "
             f"agent text matched action-status language but no successful "
             f"write-tool result found (checked: {sorted(_WRITE_ACTION_TOOLS)})"
+        )
+        return _NO_TOOL_EVIDENCE_FALLBACK
+
+    # BUG-FAKE-APPROVAL-INVITE structural safety net — parallel to the
+    # completion-claim net above, same rationale: _AGENT_PENDING_STATUS_PATTERN
+    # and the __approval_queued__-gated NO_TOOL_CLAIMS entry both require
+    # specific wording ("ממתינ"/"⏳"/"כשתאשר") and missed a live incident where
+    # the agent invited the user to send a confirm word ("שלח מאשר כדי לאשר
+    # הוספה") without ever calling a tool this turn. Category-agnostic: fires
+    # on ANY approval-invite-shaped text as long as no approval was actually
+    # queued this turn, regardless of the surrounding phrasing.
+    if _AGENT_APPROVAL_INVITE_PATTERN.search(agent_text) and not _has_approval_queued_evidence(tool_results):
+        logger.error(
+            "[A32] NO-TOOL-EVIDENCE fake-approval-invite hallucination: "
+            "agent text invites the user to confirm/approve but no "
+            "__approval_queued__ evidence found this turn"
         )
         return _NO_TOOL_EVIDENCE_FALLBACK
 
