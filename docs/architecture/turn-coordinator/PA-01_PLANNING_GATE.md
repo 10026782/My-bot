@@ -50,6 +50,22 @@ role/domain-invariant, what pass 2 already had, renamed) and `contract_capable_t
 validation cases. The Phantom-fallback predicate now requires all of: contract required, capable,
 no contract created, no other structured terminal outcome.
 
+**Revision note (pass 4, this pass):** pass 3's `contract_created`/`structured_terminal_outcome` still
+had a third structural false positive: **neither term was scoped to the intent's own expected tool.**
+`contract_created` matched *any* `__approval_queued__` sentinel carrying *any* `contract_id` — so an
+agent that misfires and calls `calendar_create_event` while the user actually asked for `CREATE_TASK`
+(expected tool `airtable_add`) would produce a real `ActionContract` for the *event*, and pass 3's
+predicate would read that as "the task's contract exists," routing to matrix row 2 (Gateway prompt)
+for a task that was never actually queued for approval — the opposite failure from Phantom (a false
+*negative* on the block, not a false positive on it, but equally a misreport of what actually
+happened). The same gap applied to `structured_terminal_outcome`: `_pa01_structured_terminal_outcome()`
+returned the *first* `terminal_outcome` found in `tool_results_log` regardless of which tool it
+belonged to, so an unrelated `PERMISSION_DENIED` earlier in the same turn could suppress a genuine
+Phantom block for the intent actually being evaluated. §4.2(a) now tags the sentinel with the real
+`action_tool` the contract was created for; both `contract_created_for_expected_tool` and the
+terminal-outcome lookup (§4.2f) are scoped against `expected_tool_for_intent(route.intent)` before
+being read at all (§4.0, revised again).
+
 ---
 
 ## 1. Production facts — verification status
@@ -407,7 +423,13 @@ two layers are complementary by necessity, not redundant.
 
 A `StructuredTerminalOutcome` is looked up from `tool_results_log` entries carrying a new
 `"terminal_outcome"` key (added at three existing catch/return sites, §4.2) — never from `final_reply`
-or any agent-authored text:
+or any agent-authored text. **Scoped by tool, since pass 4:** the lookup only considers an entry whose
+own tool identity matches `expected_tool_for_intent(route.intent)` — `r["tool"] == expected_tool` for
+the `ToolDenied`/`LeadsDirectWriteBlocked` entries (§4.2b, already tagged with the real `tu.name`), or
+`r["action_tool"] == expected_tool` for the `__approval_queued__` sentinel (§4.2a, new `action_tool`
+key). An outcome belonging to a different tool the agent happened to call this turn is not a terminal
+outcome *for this intent* and must not suppress its Phantom check — see the pass-4 revision note above
+for the concrete misfire this closes.
 
 | Outcome | Source (file:line) | Reachable at PA-01's gate today? |
 |---|---|---|
@@ -422,33 +444,57 @@ or any agent-authored text:
 
 ## 4. Minimal patch design — state-only structural predicate
 
-### 4.0 The decision matrix and the Phantom-only predicate, exact (revised, pass 3)
+### 4.0 The decision matrix and the Phantom-only predicate, exact (revised, pass 4)
 
-Pass 3 splits pass 2's single `approval_contract_expected` boolean into the four independent signals
-§3.5/§3.6 established, and states the **full decision matrix** (not just the Phantom-block case) so it
-is unambiguous which of the four possible responses a contract-required turn gets:
+Pass 3 split pass 2's single `approval_contract_expected` boolean into four independent signals
+(§3.5/§3.6) and stated the **full decision matrix** (not just the Phantom-block case). Pass 4 keeps the
+same four-signal shape but scopes two of the four terms to the intent's own expected tool — otherwise a
+contract or terminal outcome belonging to a *different* tool the agent happened to touch this turn could
+be misread as covering the intent actually being evaluated (pass-4 revision note above):
 
 ```
-intent_requires_contract_for_success := intent_requires_contract_for_success(route.intent)   # §3.5, policy-only
+expected_tool                         := expected_tool_for_intent(route.intent)                # §3.5, policy-only
+intent_requires_contract_for_success  := intent_requires_contract_for_success(route.intent)    # §3.5, policy-only
 contract_capable_this_turn            := contract_capable_this_turn(route, identity, ctx)      # §3.6, runtime-dependent
-contract_created                      := any(r.get("tool") == "__approval_queued__" and r.get("contract_id")
-                                              for r in tool_results_log)                        # turn-scoped, real id required
-structured_terminal_outcome           := first r.get("terminal_outcome") in tool_results_log, else None   # §3.6's six-outcome table
+
+contract_created_for_expected_tool    := any(
+    r.get("tool") == "__approval_queued__"
+    and r.get("contract_id")
+    and r.get("action_tool") == expected_tool
+    for r in tool_results_log
+)                                                                                                # turn-scoped AND tool-scoped (pass 4)
+
+structured_terminal_outcome           := first entry in tool_results_log where either
+                                              (r.get("tool") == expected_tool and r.get("terminal_outcome"))
+                                           or (r.get("tool") == "__approval_queued__"
+                                               and r.get("action_tool") == expected_tool
+                                               and r.get("terminal_outcome")),
+                                          else None                                              # §3.6's outcome table, now tool-scoped (pass 4)
 ```
+
+`contract_created_for_expected_tool` replaces pass 3's `contract_created` (renamed, not just
+re-scoped — the name itself now states the invariant it enforces). A contract or terminal outcome for
+any tool other than `expected_tool` is invisible to this predicate entirely; it may still be logged
+elsewhere (A32 telemetry, `is_hijack` shadow metrics) but never satisfies rows 2 or 3 below for *this*
+intent.
 
 **Decision matrix (§4.4 implements this directly):**
 
-| `intent_requires_contract_for_success` | `contract_capable_this_turn` | `contract_created` | `structured_terminal_outcome` | Response |
+| `intent_requires_contract_for_success` | `contract_capable_this_turn` | `contract_created_for_expected_tool` | `structured_terminal_outcome` | Response |
 |---|---|---|---|---|
 | False | — | — | — | ordinary agent reply, PA-01 never touches it |
 | True | — | True | — | `_queue_approval()`'s own Gateway Approval Prompt (`app.py:863`), unchanged |
 | True | True | False | set | that outcome's own deterministic response (§4.4) |
 | True | True | False | None | **Phantom fallback** (§4.3) — this is the only cell that was ever the actual target |
-| True | False | False | — | **Capability/permission deterministic response** (§4.3b, new this pass) — never the Phantom fallback, never a raw agent reply |
+| True | False | False | — | **Capability/permission deterministic response** (§4.3b) — never the Phantom fallback, never a raw agent reply |
 
-(Row 2 — `contract_created=True` — takes priority regardless of `contract_capable_this_turn`/
-`structured_terminal_outcome`: if a contract genuinely exists this turn, capability was self-evidently
-sufficient and no further check is needed.)
+(Row 2 — `contract_created_for_expected_tool=True` — takes priority regardless of
+`contract_capable_this_turn`/`structured_terminal_outcome`: if a contract genuinely exists **for this
+intent's own expected tool** this turn, capability was self-evidently sufficient and no further check is
+needed. Pass 4 correction: a contract created for a *different* tool — e.g. the agent called
+`calendar_create_event` while the intent was `CREATE_TASK` — no longer satisfies this row at all; it
+falls through to whichever of rows 3-5 the real state resolves to, exactly as if no contract had been
+created, because for `CREATE_TASK`'s purposes none was.)
 
 **The Phantom-only predicate, exact — this is what actually replaces `final_reply` with §4.3's fallback
 text specifically:**
@@ -456,18 +502,21 @@ text specifically:**
 ```
 BLOCK_PHANTOM  :=  intent_requires_contract_for_success
                     and contract_capable_this_turn
-                    and not contract_created
+                    and not contract_created_for_expected_tool
                     and not structured_terminal_outcome
 ```
 
-`final_reply`'s own **text is never read** by any of these four signals — unchanged from pass 1.
+`final_reply`'s own **text is never read** by any of these signals — unchanged from pass 1.
 `intent_requires_contract_for_success` is pass 2's `approval_contract_expected`, renamed to match this
 pass's terminology (same function, same set, no behavior change to this term). `contract_capable_this_turn`
-and `structured_terminal_outcome` are both new this pass (§3.6) — together they fix the structural false
+and `structured_terminal_outcome` were both new in pass 3 (§3.6) — together they fix the structural false
 positive described in the pass-3 revision note above: a `guest`/`employee`/`lead`/`readonly` identity
 attempting a contract-required intent now resolves to the capability row, not the Phantom row; a
 mid-turn `ToolDenied`/`LeadsDirectWriteBlocked`/queueing failure now resolves to its own outcome row, not
-the Phantom row.
+the Phantom row. Pass 4 adds the `_for_expected_tool` scoping to `contract_created` and tool-scopes
+`structured_terminal_outcome` (§4.0 above) — without it, a contract or denial belonging to a tool other
+than the intent's own `expected_tool` could wrongly satisfy row 2 or row 3, hiding a genuine Phantom case
+behind unrelated turn activity.
 
 **`structural_clarify` remains dropped from the live predicate** (pass 2's finding, unchanged): `Handler.
 CLARIFY` is decided entirely upstream, inside `core/router/` (`intent_router.py:128`/`:40`), consumed by
@@ -504,21 +553,27 @@ neither is part of `BLOCK` at all now.
 (`core/action_gateway.py:214`) — it is simply not threaded into the log record yet:
 
 ```python
-# app.py:2439-2443, two new keys added to the dict already being constructed
+# app.py:2439-2443, three new keys added to the dict already being constructed
 tool_results_log.append({
     "tool": "__approval_queued__",
     "content": result,
     "ok": bool(_gw_result and _gw_result.contract_id),                                # CHANGED (was hardcoded True)
     "contract_id": _gw_result.contract_id if _gw_result else None,                    # NEW (pass 2)
     "terminal_outcome": None if (_gw_result and _gw_result.contract_id) else "APPROVAL_QUEUE_ERROR",  # NEW (pass 3, §3.6)
+    "action_tool": tu.name,                                                            # NEW (pass 4, §4.0) — the real tool call that triggered this contract
 })
 ```
 
-`_gw_result` is already in scope at this exact point. **Revised this pass:** pass 2 only added
-`contract_id`; pass 3 also fixes `"ok"` (previously hardcoded `True` even for duplicate/rejected/
+`_gw_result` is already in scope at this exact point, and so is `tu` (the `tool_use` block whose
+`requires_approval=True` tool routed here — the same object `tu.name` is read from at the `enforce()`
+call a few lines earlier in the same loop iteration). **Revised this pass:** pass 2 only added
+`contract_id`; pass 3 also fixed `"ok"` (previously hardcoded `True` even for duplicate/rejected/
 notify-failed returns — itself a pre-existing minor inaccuracy in the A32 log, unrelated to PA-01 but
-worth fixing alongside since the same line is being touched) and adds `"terminal_outcome"` so
-§3.6's `APPROVAL_QUEUE_ERROR` case is structurally detectable without inspecting `result`'s text.
+worth fixing alongside since the same line was being touched) and added `"terminal_outcome"` so
+§3.6's `APPROVAL_QUEUE_ERROR` case is structurally detectable without inspecting `result`'s text; pass 4
+adds `"action_tool"` — **from the real tool call, never guessed from `route.intent`** — so §4.0's
+`contract_created_for_expected_tool` can verify the contract was actually created for the tool the
+intent expected, not merely that *some* contract exists this turn.
 
 **(b) Tag the two existing mid-turn denial branches with a `terminal_outcome`.** Both already exist and
 already produce an accurate, gate-authored message — they currently just don't reach `tool_results_log`
@@ -558,7 +613,11 @@ Both reuse `str(e)` — text the *gate itself* already authored (`ToolDenied`'s/
 own exception message), not agent-generated text. Reading it back later (§4.4) is not the text-detection
 this document's decision 8/pass-1's "no wording as primary mechanism" rule forbids — that rule is about
 never inferring intent from the *agent's* free-form output; a fixed, gate-authored, non-agent string
-keyed by a structured `terminal_outcome` field is state, not inference.
+keyed by a structured `terminal_outcome` field is state, not inference. Both entries already carry
+`"tool": tu.name` — the real tool the denial/preflight-block happened on — so no separate `action_tool`
+key is needed here for pass 4's scoping (§4.0): `r.get("tool") == expected_tool` is sufficient for these
+two, and only the `__approval_queued__` sentinel needed a dedicated `action_tool` key since its own
+`"tool"` field is the fixed literal `"__approval_queued__"`, not a real tool name.
 
 **(c) A dedicated, independent 3-state flag.** Reuses this repo's own established off/shadow/enforce
 convention exactly (`get_runtime_schema_provider_state()`/`get_select_value_validation_state()`,
@@ -596,14 +655,27 @@ module) or as a local helper in `app.py` immediately before its one call site (�
 acceptable; the planning-stage recommendation is `risk_router.py`, for the same "one home for intent
 policy" reasoning as (d), since it also needs `expected_tool_for_intent()` internally.
 
-**(f) Structured terminal-outcome lookup, one small helper.** Reads only `tool_results_log` (already
-fully constructed by (a)/(b) above by the time PA-01's block runs):
+**(f) Structured terminal-outcome lookup, one small helper — scoped to `expected_tool` (revised pass 4).**
+Reads only `tool_results_log` (already fully constructed by (a)/(b) above by the time PA-01's block
+runs). Pass 3's version returned the *first* `terminal_outcome` in the log regardless of which tool it
+belonged to; pass 4 requires the entry's own tool identity to match `expected_tool` first — an entry for
+a different tool is not a terminal outcome for *this* intent and is skipped, not returned:
 
 ```python
-def _pa01_structured_terminal_outcome(tool_results_log: list[dict]) -> tuple[str, str] | None:
+def _pa01_structured_terminal_outcome(
+    tool_results_log: list[dict], expected_tool: str | None,
+) -> tuple[str, str] | None:
+    if expected_tool is None:
+        return None
     for r in tool_results_log:
         outcome = r.get("terminal_outcome")
-        if outcome:
+        if not outcome:
+            continue
+        # the __approval_queued__ sentinel's real tool lives in "action_tool" (§4.2a);
+        # every other tagged entry (ToolDenied/LeadsDirectWriteBlocked, §4.2b) already
+        # carries the real tool name directly in "tool".
+        entry_tool = r.get("action_tool") if r.get("tool") == "__approval_queued__" else r.get("tool")
+        if entry_tool == expected_tool:
             return outcome, r.get("content", "")
     return None
 ```
@@ -618,19 +690,20 @@ _PA01_PHANTOM_APPROVAL_FALLBACK = (
     "אפשר לשלוח שוב את הבקשה."
 )
 
-# (b) NEW this pass — capability/permission gap. Deliberately does NOT say
-# "try sending the request again": resending changes nothing when the real
-# blocker is a role/capability gap, and telling the user otherwise is
-# actively misleading (the exact failure mode §3.6 was written to prevent).
+# (b) Capability/permission gap. Deliberately does NOT say "try sending the
+# request again": resending changes nothing when the real blocker is a
+# role/capability gap, and telling the user otherwise is actively misleading
+# (the exact failure mode §3.6 was written to prevent).
+# Wording approved by decision 7, pass 4 — supersedes pass 3's draft text.
 _PA01_CAPABILITY_UNAVAILABLE_FALLBACK = (
-    "הפעולה הזו אינה זמינה עבור התפקיד שלך במערכת. "
-    "לביצוע הפעולה, פנה לבעלים או למנהל."
+    "לא ניתן לבצע את הפעולה הזו דרך החשבון הנוכחי. "
+    "לביצוע, יש לפנות למנהל מורשה."
 )
 ```
 
-`_PA01_CAPABILITY_UNAVAILABLE_FALLBACK` is new user-facing copy requiring the same owner sign-off as
-(a) already required (§7) — not yet approved wording, flagged explicitly as open. For the four
-mid-turn `structured_terminal_outcome` cases (`PERMISSION_DENIED`/`PREFLIGHT_BLOCKED`/
+`_PA01_CAPABILITY_UNAVAILABLE_FALLBACK`'s wording is now **approved** (decision 7, pass 4) — pass 3's
+draft ("הפעולה הזו אינה זמינה עבור התפקיד שלך... פנה לבעלים או למנהל") is superseded and should not be
+used. For the four mid-turn `structured_terminal_outcome` cases (`PERMISSION_DENIED`/`PREFLIGHT_BLOCKED`/
 `APPROVAL_QUEUE_ERROR`/`VALIDATION_FAILED`), **no new constant is introduced** — §4.4 reuses the
 gate-authored `content` string §4.2(b)/(a) already captured, since it is already accurate and
 outcome-specific (e.g. `enforce_leads_write_gate()`'s own message names the exact table/reason), and
@@ -659,14 +732,20 @@ except Exception:
 
 if _pa01_contract_required:
     from feature_flags import get_pa01_enforcement_state
+    from core.router.risk_router import expected_tool_for_intent
     _pa01_state = get_pa01_enforcement_state()
     if _pa01_state in ("shadow", "enforce"):
         try:
+            _pa01_expected_tool = expected_tool_for_intent(getattr(route, "intent", None))
             _pa01_contract_created = any(
-                r.get("tool") == "__approval_queued__" and r.get("contract_id")
+                r.get("tool") == "__approval_queued__"
+                and r.get("contract_id")
+                and r.get("action_tool") == _pa01_expected_tool          # NEW (pass 4, §4.0)
                 for r in tool_results_log
             )
-            _pa01_outcome = None if _pa01_contract_created else _pa01_structured_terminal_outcome(tool_results_log)
+            _pa01_outcome = None if _pa01_contract_created else _pa01_structured_terminal_outcome(
+                tool_results_log, _pa01_expected_tool,                    # NEW arg (pass 4, §4.2f)
+            )
             _pa01_capable = (
                 _pa01_contract_created  # row 2 short-circuits capability entirely — see §4.0's matrix note
                 or contract_capable_this_turn(route, identity, ctx)
@@ -680,8 +759,10 @@ if _pa01_contract_required:
             )
             _pa01_contract_created, _pa01_outcome, _pa01_capable = False, None, True  # forces the Phantom row, not silently ignored
 
-        # Matrix row 2 — contract genuinely exists: nothing to do, Gateway's
-        # own message already stands.
+        # Matrix row 2 — a contract for THIS intent's own expected tool genuinely
+        # exists: nothing to do, Gateway's own message already stands. A contract
+        # for a different tool the agent happened to call this turn does not
+        # satisfy this row (pass 4) — it falls through exactly like no contract.
         if not _pa01_contract_created:
             _pa01_response = None
             if not _pa01_capable:
@@ -833,13 +914,44 @@ verbatim):**
   `_READ_ONLY_INTENTS`/`UNKNOWN`) → unaffected regardless of role/capability/tool outcome — restates the
   §3.5 policy-regression bullets above as the user's 7th literal case.
 
+**§4.0 tool-scoping regression (new this pass, the user's 5 required cases, verbatim):**
+- [ ] **`owner` + `CREATE_TASK` + a real contract of `airtable_add`** (`tool_use` emitted for
+  `airtable_add`, `__approval_queued__` sentinel with `contract_id` set and `action_tool="airtable_add"`)
+  → `expected_tool_for_intent(CREATE_TASK) == "airtable_add"` matches → `contract_created_for_expected_tool`
+  is `True` → matrix row 2 → `final_reply` is `_queue_approval()`'s own Gateway prompt, untouched,
+  `=enforce` mode included.
+- [ ] **`owner` + `CREATE_TASK` + a real contract of `calendar_create_event`** (agent misfires and calls
+  the wrong tool; sentinel has `contract_id` set but `action_tool="calendar_create_event"`) → does
+  **not** satisfy `contract_created_for_expected_tool` for `CREATE_TASK` (`"calendar_create_event" !=
+  "airtable_add"`) → matrix does not reach row 2 for this intent — falls through to row 3/4/5 exactly as
+  if no contract existed. With no other `tool_results_log` entry for `airtable_add` and a capable
+  identity, this resolves to row 4 (Phantom fallback) — asserting that a contract for the wrong tool is
+  worth nothing to this intent's own check.
+- [ ] **`owner` + `CREATE_TASK` + `PERMISSION_DENIED` tagged against an unrelated tool** (e.g. a
+  `ToolDenied` entry with `"tool": "gmail_send_draft"`, unrelated to this turn's `CREATE_TASK` request) →
+  `_pa01_structured_terminal_outcome(tool_results_log, "airtable_add")` skips it (`entry_tool !=
+  expected_tool`) → `structured_terminal_outcome` is `None` for this intent → does not suppress the
+  Phantom check — if capable, no `contract_created_for_expected_tool`, and no matching outcome, matrix
+  resolves to row 4 (Phantom fallback), not row 3.
+- [ ] **`owner` + `CREATE_TASK` + `PREFLIGHT_BLOCKED` tagged against `airtable_add`** (a real
+  `LeadsDirectWriteBlocked` entry with `"tool": "airtable_add"`, matching `expected_tool`) → the lookup
+  matches → matrix row 3 → `=enforce` replaces `final_reply` with that entry's own `content` — a valid,
+  in-scope terminal outcome, contrasted directly with the unrelated-tool case above.
+- [ ] **Multiple `tool_results_log` entries in one turn** (e.g. an unrelated `gmail_draft` denial *and* a
+  genuine `airtable_add` contract, both present) → only the entry whose tool identity (`"tool"` directly,
+  or `"action_tool"` for the sentinel) equals `expected_tool_for_intent(route.intent)` is ever selected
+  by either `contract_created_for_expected_tool` or `_pa01_structured_terminal_outcome` — the unrelated
+  entry is present in the log (for A32/telemetry purposes) but structurally invisible to this intent's
+  matrix evaluation.
+
 **Additional regression, must-pass:**
 - [ ] The **false-negative fix** from §4.1 (still valid, restated for the new predicate): identity has
   an unrelated pre-existing pending contract (e.g. a Gmail draft) *and* this turn fabricates an
   unrelated phantom claim for a contract-required intent with zero `tool_use` and no `contract_id` for
   **this turn's** intent → `=enforce` still replaces `final_reply` with the Phantom fallback, because
-  `contract_created` is computed from `tool_results_log` (turn-scoped) and finds nothing — not fooled by
-  an unrelated live contract belonging to a different request.
+  `contract_created_for_expected_tool` is computed from `tool_results_log` (turn-scoped **and**
+  tool-scoped, pass 4) and finds nothing matching `expected_tool` — not fooled by an unrelated live
+  contract belonging to a different request or a different tool.
 - [ ] **`APPROVAL_QUEUE_ERROR` regression (new this pass, §3.6):** `_queue_approval()` returns a
   duplicate-fingerprint-blocked or cross-channel-duplicate-suppressed string (`app.py:753-757`/
   `766-772`) → the `__approval_queued__` sentinel now carries `"terminal_outcome": "APPROVAL_QUEUE_ERROR"`
@@ -887,9 +999,13 @@ Reuses the 5-phase order already approved, mapped concretely to PA-01:
    - [ ] At least **50 contract-required-intent turns or replays** (i.e. `route.intent` in
      `_CONTRACT_REQUIRED_INTENT_TO_TOOL`, §3.5 — not the broader former `_NORMAL_INTENTS`) observed in
      the shadow log during that window (a sample too small to trust a false-positive rate from).
-   - [ ] **Zero** blocks of a real approval (matrix row 2 — `contract_created` would have been `True`)
-     logged as if it were row 4/5. Any such event found is a bug in §4.0's matrix and must be fixed
-     before graduating, not accepted as noise.
+   - [ ] **Zero** blocks of a real approval (matrix row 2 — `contract_created_for_expected_tool` would
+     have been `True`) logged as if it were row 4/5. Any such event found is a bug in §4.0's matrix and
+     must be fixed before graduating, not accepted as noise.
+   - [ ] **Zero** cases where a contract or terminal outcome for a *different* tool than
+     `expected_tool_for_intent(route.intent)` was observed to affect the row selected for a
+     contract-required intent (pass 4's tool-scoping fix, §4.0/§4.2f) — any such event is a bug in the
+     scoping logic itself.
    - [ ] **Zero** blocks of a `DRAFT_EMAIL`/`DRAFT_MESSAGE`/`QUALIFY_LEAD`/`UPDATE_EVENT`/`STORE_MEMORY`
      turn (§3.5's non-contract-required set). Structurally unreachable by construction
      (`intent_requires_contract_for_success` is `False` for all five, matrix row 1) — recorded as an
@@ -940,13 +1056,21 @@ Reuses the 5-phase order already approved, mapped concretely to PA-01:
   `structured_terminal_outcome` (§3.6), and the 5-row decision matrix (§4.0) that routes each case to
   its own, accurate response instead of the generic Phantom fallback. Recorded here, not as a residual
   risk, but as the reason the matrix has 5 rows instead of 2.
+- **Structural false positive #3 (pass 4, this pass), closed.** Pass 3's `contract_created`/
+  `structured_terminal_outcome` matched *any* tool's contract or terminal outcome present in
+  `tool_results_log` this turn, not specifically the one the intent's own `expected_tool_for_intent()`
+  names — so a contract or denial belonging to an unrelated tool the agent also touched this turn could
+  wrongly satisfy matrix row 2 or row 3 for a *different* intent. Fixed by scoping both signals to
+  `expected_tool`: the sentinel now carries `"action_tool"` (§4.2a) and `_pa01_structured_terminal_
+  outcome()` takes `expected_tool` as a required argument (§4.2f), renamed to
+  `contract_created_for_expected_tool` to state the invariant in the name itself.
 - **Narrowed, still-real risk — legitimate free-text agent clarifying questions on *capable*
   contract-required turns will be blocked/replaced (matrix row 4), not just phantom claims.** §4.0's
   matrix is deliberately strict per decision 2: for a contract-required, *capable* turn, only a
   router-classified `Handler.CLARIFY` may return a clarifying question — any other clarifying text the
   agent generates itself (e.g. "איזה משימה, X או Y?" for `owner` + `CREATE_TASK`, zero `tool_use`) has
-  `contract_created=False` and no `structured_terminal_outcome`, landing on row 4 exactly like an actual
-  phantom claim. This risk is unchanged by this pass's capability fix — it is orthogonal: the capability
+  `contract_created_for_expected_tool=False` and no `structured_terminal_outcome`, landing on row 4
+  exactly like an actual phantom claim. This risk is unchanged by this pass's capability fix — it is orthogonal: the capability
   fix only ever redirects *incapable* turns away from row 4 to row 5; it does nothing for capable turns
   where the agent is genuinely asking a legitimate question. Not measured yet — this is exactly what
   §6's manual-review graduation criterion exists to quantify before `"enforce"` ships. If shadow data
@@ -977,10 +1101,11 @@ Reuses the 5-phase order already approved, mapped concretely to PA-01:
   have no backing tool at all** — a separate, pre-existing gap (§3.5) this pass found but does not fix:
   the agent has no way to actually fulfill these requests through any registered tool, regardless of
   PA-01. Worth its own backlog item; out of PA-01's scope.
-- **Two pieces of new user-facing copy now require owner sign-off, not one.** `_PA01_PHANTOM_APPROVAL_
-  FALLBACK` (§4.3a, prior pass) and `_PA01_CAPABILITY_UNAVAILABLE_FALLBACK` (§4.3b, new this pass) are
-  both new strings, not a "no UX change" patch — both need explicit sign-off before `"enforce"` ships,
-  separate from approving the mechanism itself.
+- **Two pieces of new user-facing copy, both now approved wording, not a "no UX change" patch.**
+  `_PA01_PHANTOM_APPROVAL_FALLBACK` (§4.3a, decision 4, pass 1) and `_PA01_CAPABILITY_UNAVAILABLE_
+  FALLBACK` (§4.3b, decision 7, pass 4) are both new strings with owner-approved exact wording — neither
+  is open for further revision at the planning stage; still worth flagging here since two new strings
+  reaching production users is a real UX surface, even with wording already settled.
 - **A fourth flag** (`FEATURE_PA01_ENFORCEMENT_STATE`) added to an already flag-heavy codebase —
   justified specifically because §1 found `FEATURE_ACTION_GATEWAY` coupling to be part of the root
   cause, not incidental; reusing that flag would reintroduce the exact uncertainty documented in §1b.
@@ -998,73 +1123,77 @@ Reuses the 5-phase order already approved, mapped concretely to PA-01:
 
 ## Next step
 
-This document is the complete Planning Gate deliverable for PA-01 through three corrections: pass 1
+This document is the complete Planning Gate deliverable for PA-01 through four corrections: pass 1
 replaced the rejected `is_hijack`-as-trigger design with a state-only structural mechanism; pass 2 fixed
-a structural false positive treating draft/conversational intents as contract-required; pass 3 (this
-edit) fixes a second structural false positive — treating every contract-required intent as if a
-contract could be created by *any* identity, ignoring role-based tool availability and mid-turn
-denial/preflight gates. No code has been written, no branch opened — **אין לממש עדיין** remains in
-force. Direct answers to the required return items:
+a structural false positive treating draft/conversational intents as contract-required; pass 3 fixed a
+second structural false positive — treating every contract-required intent as if a contract could be
+created by *any* identity, ignoring role-based tool availability and mid-turn denial/preflight gates;
+pass 4 (this edit) fixes a third structural false positive — `contract_created`/`structured_terminal_outcome`
+matching *any* tool's contract or outcome in `tool_results_log`, not specifically the intent's own
+expected tool, which could hide a genuine Phantom case behind an unrelated tool call in the same turn.
+No code has been written, no branch opened — **אין לממש עדיין** remains in force. Direct answers to the
+required return items:
 
-**Intent → tool mapping (§3.5):** `_CONTRACT_REQUIRED_INTENT_TO_TOOL`, a 10-entry dict in
-`core/router/risk_router.py` — `CREATE_TASK`/`CREATE_CONTACT`/`CREATE_LEAD` → `airtable_add`;
-`UPDATE_TASK`/`COMPLETE_TASK`/`UPDATE_CONTACT`/`UPDATE_LEAD`/`UPDATE_DEAL_STAGE` → `airtable_update`;
-`CREATE_EVENT`/`SCHEDULE_MEETING` → `calendar_create_event`. The remaining 5 `_NORMAL_INTENTS` members
-(`DRAFT_EMAIL`/`DRAFT_MESSAGE`/`QUALIFY_LEAD`/`UPDATE_EVENT`/`STORE_MEMORY`) are excluded, with per-intent
-reasoning in §3.5's table.
+**Sentinel structure, final (§4.2a):** the `__approval_queued__` entry now carries five keys —
+`"tool": "__approval_queued__"` (fixed literal, unchanged), `"content"` (the Gateway's own message,
+unchanged), `"ok"` (pass 3: real success/failure, no longer hardcoded `True`), `"contract_id"` (pass 2:
+the real id from `_gw_result.contract_id`), `"terminal_outcome"` (pass 3: `None` on success, else
+`"APPROVAL_QUEUE_ERROR"`), and `"action_tool"` (**new, pass 4**: `tu.name` — the real tool call that
+produced this contract, read from the same `tu` object `enforce()` was already called with a few lines
+earlier, never guessed from `route.intent`). The two other tagged sites (`ToolDenied`,
+`LeadsDirectWriteBlocked`, §4.2b) needed no new key — their existing `"tool": tu.name` already names the
+real tool directly.
 
-**Capability/permission source (§3.6):** three independent, already-existing state signals, combined by
-a new `contract_capable_this_turn(route, identity, ctx)` function — (1) `ctx.allowed_tools`
-(`context.py:30-79`, role-filtered tool list actually offered to Claude this turn), (2)
-`tool_registry.check_allowed(expected_tool, identity)` (`tool_registry.py:258-262`, a second,
-independently-maintained role-tool policy layer), (3) `route.tool_allowed`
-(`route_decision.py:166`/`router.py:109-136`). All three already exist; none is duplicated. Mid-turn
-denial/preflight/validation is a separate signal, `structured_terminal_outcome`, read from
-`tool_results_log` entries newly tagged at three existing sites (§4.2b): `ToolDenied`
-(`app.py:2352-2358`) → `PERMISSION_DENIED`; `LeadsDirectWriteBlocked`
-(`app.py:2369-2378`) → `PREFLIGHT_BLOCKED`; `_queue_approval()`'s non-success early returns
-(`app.py:753-860`) → `APPROVAL_QUEUE_ERROR` (§4.2a).
-
-**Terminal outcomes, six, per §3.6's table:** `CAPABILITY_UNAVAILABLE` (computed upfront by
-`contract_capable_this_turn`, not read from the log), `PERMISSION_DENIED`, `PREFLIGHT_BLOCKED`
-(load-bearing — catches the table-granularity gap `contract_capable_this_turn` structurally cannot),
-`APPROVAL_QUEUE_ERROR` (load-bearing — prevents accurate dedup/error messages from being overwritten by
-the generic fallback), `VALIDATION_FAILED` (defined for completeness; **not reachable** within a
-PA-01-relevant turn today, since `_queue_approval()` bypasses `dispatch_tool()`/`validate_action()`
-entirely), `STRUCTURED_CLARIFICATION` (defined for matrix completeness; **not reachable** at PA-01's
-gate, `Handler.CLARIFY` always returns upstream). None of the six is detected from agent-authored text —
-five are read from structured `tool_results_log` keys this pass adds, one is computed from
-role/tool-registry/router state directly.
-
-**Corrected predicate — now a 5-row decision matrix (§4.0), with the Phantom-only sub-predicate:**
+**Predicate, scoped by `expected_tool` (§4.0):**
 ```
-intent_requires_contract_for_success := intent_requires_contract_for_success(route.intent)     # §3.5
-contract_capable_this_turn            := contract_capable_this_turn(route, identity, ctx)        # §3.6
-contract_created                      := any(r["tool"]=="__approval_queued__" and r["contract_id"]
-                                              for r in tool_results_log)
-structured_terminal_outcome           := first r["terminal_outcome"] in tool_results_log, else None
+expected_tool                         := expected_tool_for_intent(route.intent)                # §3.5
+intent_requires_contract_for_success  := intent_requires_contract_for_success(route.intent)    # §3.5
+contract_capable_this_turn            := contract_capable_this_turn(route, identity, ctx)      # §3.6
+
+contract_created_for_expected_tool    := any(
+    r.get("tool") == "__approval_queued__"
+    and r.get("contract_id")
+    and r.get("action_tool") == expected_tool
+    for r in tool_results_log
+)
+
+structured_terminal_outcome           := _pa01_structured_terminal_outcome(tool_results_log, expected_tool)
+                                          # scoped: r["tool"]==expected_tool for direct entries,
+                                          # r["action_tool"]==expected_tool for the sentinel
 
 BLOCK_PHANTOM := intent_requires_contract_for_success and contract_capable_this_turn
-                 and not contract_created and not structured_terminal_outcome
+                 and not contract_created_for_expected_tool and not structured_terminal_outcome
 ```
-Full 5-row response table (not-required → unaffected; contract exists → Gateway prompt; terminal
-outcome → that outcome's own message; `BLOCK_PHANTOM` → Phantom fallback; not capable → capability
-fallback) in §4.0. No term in either the matrix or `BLOCK_PHANTOM` reads `final_reply`'s text.
+`contract_created` is renamed to `contract_created_for_expected_tool` — not a cosmetic rename, the name
+now states the invariant it enforces: a contract for a *different* tool than the intent's own
+`expected_tool` (e.g. `calendar_create_event` when the intent was `CREATE_TASK`, expecting
+`airtable_add`) no longer satisfies matrix row 2 at all; it is treated exactly as if no contract existed
+for this intent, and the matrix falls through to whichever of rows 3-5 the real state resolves to. The
+full 5-row response table (§4.0) is otherwise unchanged in shape from pass 3.
 
-**Verdict: PASS.** This pass's correction is state-only and duplication-free, same as the prior two:
-`contract_capable_this_turn` reads three signals that already exist in three different files, combined
-in one new function, not reimplemented; `structured_terminal_outcome` reads a new key added at three
-sites where a real gate already produces an accurate message, reusing that gate's own text rather than
-inventing a new one. The result is *more* permissive where it should be (row 5's dedicated capability
-message replaces what would otherwise be a misleading "try again" for a `guest`/`employee`/`lead`/
-`readonly` identity that structurally cannot ever succeed) and *more* accurate where it should be (row 3
-preserves the real dedup/denial/preflight message instead of overwriting it with the generic fallback) —
-without reintroducing any text-pattern dependency into the decision itself (decision 8, still holds: the
-gate-authored strings reused in row 3 are read by structured key, never pattern-matched). §5 carries all
-7 of the user's required capability-layer regression cases plus the `APPROVAL_QUEUE_ERROR` case found
-along the way; §6 adds two new graduation criteria (a manually-reviewed row-5 sample, and a
-`PERMISSION_DENIED`/`PREFLIGHT_BLOCKED` volume-spike check against each gate's own pre-PA-01 baseline);
-§7 records both closed structural false positives (pass 2's and this pass's) and the remaining, narrower
-open risk (row 4's clarifying-question trade-off for *capable* identities, unchanged and orthogonal to
-this pass's fix). No further correction is required before implementation may begin. OH-01/OS-01/RC-01
-remain out of scope until their own planning gates, per the approved order.
+**Terminal-outcome lookup, scoped (§4.2f):** `_pa01_structured_terminal_outcome()` now takes
+`expected_tool` as a required second argument and skips any entry whose own tool identity doesn't match
+it — computed as `r.get("action_tool")` when `r["tool"] == "__approval_queued__"` (the sentinel), else
+`r.get("tool")` directly (the two other tagged sites already carry the real name). Pass 3's version
+returned the *first* `terminal_outcome` in the log unconditionally; pass 4 requires a match first, so an
+unrelated `PERMISSION_DENIED` earlier in the same turn (e.g. from a different tool the agent also
+touched) can no longer suppress a genuine Phantom block for the intent actually being evaluated.
+
+**Capability wording, approved (decision 7):** `_PA01_CAPABILITY_UNAVAILABLE_FALLBACK` is updated to
+`"לא ניתן לבצע את הפעולה הזו דרך החשבון הנוכחי. לביצוע, יש לפנות למנהל מורשה."` — this supersedes pass
+3's draft text and is no longer flagged as pending owner sign-off for wording (§4.3).
+
+**Verdict: PASS.** This pass's correction is state-only and duplication-free, same as the prior three: no
+new signal source is introduced — `action_tool` is read from the same `tu` object already in scope at the
+sentinel's existing append site, and the scoping comparison reuses `expected_tool_for_intent()` (§3.5,
+already canonical, no second definition). The result closes a real cross-tool misattribution (a contract
+or denial for tool A no longer covers an intent whose canonical tool is B) without touching
+`intent_requires_contract_for_success`, `contract_capable_this_turn`, or any of pass 1-3's already-closed
+findings. §5 carries all 5 of the user's required tool-scoping regression cases (matching contract passes,
+mismatched contract falls through, unrelated denial ignored, matching preflight block honored, multiple
+log entries resolve to only the matching one) plus a restated false-negative test now asserting
+tool-scoping specifically. §6/§7 need no further change this pass — the rollout gating and risk register
+already covered "wrong contract/outcome attribution" only implicitly via the general accuracy criteria;
+no new graduation criterion or open risk is introduced, since this is a closed correctness fix to an
+already-planned mechanism, not a new capability. No further correction is required before implementation
+may begin. OH-01/OS-01/RC-01 remain out of scope until their own planning gates, per the approved order.
