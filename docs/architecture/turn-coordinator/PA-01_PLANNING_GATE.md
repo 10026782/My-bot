@@ -1248,6 +1248,43 @@ block itself — `app.py`, immediately after the `OwnershipSignal` try/except, i
 specified. `get_pa01_enforcement_state()` — `feature_flags.py`, alongside the two existing three-state
 accessors, exactly as §4.2(c) specified.
 
-**No deviation from any of decisions 1-13** (the approved implementation instructions) — every deviation
-above is a plumbing-level correction to how §4's sketch accesses already-correct state, not a change to
-the predicate, the policy source, the sentinel's required keys, the matrix, or the approved wording.
+**Main Integration Pass finding (merge commit 8fb0d0c → canonical-tool-wiring fix, commit follows this
+edit): `action_tool` must be the CANONICAL tool, not `tu.name`.** `_queue_approval_detailed()` calls
+`resolve_canonical_tool(tool_name, tool_inputs, user_text)` (`app.py`, BUG-CANONICAL-TOOL-WIRING, existing
+since before PA-01) *before* computing the fingerprint, the label, the EventBus payload, and the
+`ActionGateway` contract itself — so the `tool_name` local variable inside that function, from that point
+on, is the resolved canonical tool (e.g. `airtable_add`), which can differ from the raw `tool_use` block's
+own name the model called (e.g. `sheets_append`). The first implementation pass had the tool loop's
+sentinel read `"action_tool": tu.name` — the pre-canonicalization name — at the call site, not the
+canonical one `_queue_approval_detailed()` actually used to create the contract. Concretely:
+`route.intent = CREATE_TASK` (`expected_tool = airtable_add`), `tu.name = sheets_append`,
+`resolve_canonical_tool(...)` rewrites it to `airtable_add`, the real `ActionContract.tool_name` is
+`airtable_add` — but the sentinel recorded `action_tool = sheets_append`, so
+`contract_created_for_expected_tool` (§4.0) would incorrectly evaluate `False` for a turn that in fact
+had a real, correctly-scoped contract, risking PA-01 overwriting a genuine Gateway Approval Prompt with
+the Phantom fallback. **Fixed:** `_queue_approval_detailed()`'s return dict gained a fifth key,
+`"action_tool"`, set to the post-canonicalization `tool_name` on every return branch (including all five
+early-return/non-success branches, since canonicalization happens once, at the top of the function, before
+any of them) — never inferred from `contract_id`, never recomputed at the call site. The tool loop's
+sentinel now reads `"action_tool": _approval_outcome["action_tool"]`, not `tu.name`. `tu.name` itself is
+not surfaced anywhere in the sentinel — no `requested_tool` telemetry field was added, per instruction 3.
+This is, like the other Main Integration Pass corrections, a plumbing-level fix: it does not touch
+`intent_requires_contract_for_success`, `contract_capable_this_turn`, the matrix, the sentinel's other four
+keys, or any approved wording — it only corrects which tool identity the fifth key (`action_tool`, added in
+this same implementation) actually carries, so that it means what §4.0's scoping was always meant to check
+against: *the tool the contract was actually created for*, not *the tool name the model happened to type*.
+
+**Historical note on the pre-Main-Integration-Pass state:** before this correction, `tu.name` and the
+canonical tool coincided in every test case exercised prior to the Main Integration Pass (none of them
+triggered `resolve_canonical_tool()`'s rewrite branch), which is why the gap was not caught until the
+integration pass's own review deliberately traced `_queue_approval_detailed()`'s internal canonicalization
+step against the sentinel's construction site. Restated per instruction 4: the source of truth for
+`action_tool` was never, and is not now, an inference from `route.intent` — it is the exact tool name that
+was actually used to create the `ActionContract`, read directly from `_queue_approval_detailed()`'s own
+return value.
+
+**No deviation from any of decisions 1-13** (the approved implementation instructions), nor from the Main
+Integration Pass instructions — every deviation recorded in this §8 is a plumbing-level correction to how
+the sketch/first pass accessed or propagated already-correct state, not a change to the predicate, the
+policy source, the sentinel's required *keys* (only which value one of them carries), the matrix, or the
+approved wording.

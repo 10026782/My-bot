@@ -787,7 +787,7 @@ def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
     Same behavior as _queue_approval() (see that docstring), but returns a
     structured outcome instead of just the model-facing message:
       {"message": str, "contract_id": str|None, "ok": bool,
-       "terminal_outcome": str|None}
+       "terminal_outcome": str|None, "action_tool": str}
     "terminal_outcome" is None only for a genuine successful contract
     creation; every early-return branch (duplicate fingerprint, cross-
     channel duplicate, Gateway rejection, persistence failure, owner-notify
@@ -798,6 +798,13 @@ def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
     but the user was never notified, so it is deliberately not surfaced
     here — an orphaned, unreachable contract must not be treated as
     "created" for this turn's purposes).
+    "action_tool" is the CANONICAL tool_name — after resolve_canonical_tool()
+    below, the same name used for the fingerprint, the label, the EventBus
+    payload, and the ActionGateway contract itself — on every branch,
+    including the early-return ones (canonicalization happens once, before
+    any of them). PA-01_PLANNING_GATE.md's Main Integration Pass finding:
+    the caller must NOT use the pre-canonicalization tool_use block's own
+    name for this purpose — see the call site in the tool loop.
     PR #188: blocks re-queuing via executed_action_cache (raw chat_id fingerprint).
     Stage A: also dedupes cross-channel via canonical identity.memory_key.
 
@@ -823,6 +830,7 @@ def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
         return {
             "message": f"⚠️ פעולה זו כבר בוצעה לאחרונה ({tool_name}). כפילות נחסמה.",
             "contract_id": None, "ok": False, "terminal_outcome": "APPROVAL_QUEUE_ERROR",
+            "action_tool": tool_name,
         }
 
     # Stage A: canonical dedup — אותה זהות עסקית מ-channel שני
@@ -841,6 +849,7 @@ def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
         return {
             "message": f"⏳ הפעולה כבר ממתינה לאישור הבעלים{' (מ-' + origin + ')' if origin else ''}.",
             "contract_id": None, "ok": False, "terminal_outcome": "APPROVAL_QUEUE_ERROR",
+            "action_tool": tool_name,
         }
 
     label     = _describe_tool_call(tool_name, tool_inputs)
@@ -873,6 +882,7 @@ def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
                 "message": _gw_result.user_message or f"⏳ {_gw_result.reason}",
                 "contract_id": getattr(_gw_result, "contract_id", None),
                 "ok": False, "terminal_outcome": "APPROVAL_QUEUE_ERROR",
+                "action_tool": tool_name,
             }
     else:
         # shadow mode — log only, do not block
@@ -894,6 +904,7 @@ def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
                 return {
                     "message": _gw_result.user_message or f"❌ {_gw_result.reason}",
                     "contract_id": None, "ok": False, "terminal_outcome": "APPROVAL_QUEUE_ERROR",
+                    "action_tool": tool_name,
                 }
         except Exception as _gw_exc:
             logger.debug("[ActionGateway] shadow propose failed (non-blocking): %s", _gw_exc)
@@ -942,6 +953,7 @@ def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
                 # Deliberately None even if _gw_result already carries a real
                 # contract_id — see this function's docstring.
                 "contract_id": None, "ok": False, "terminal_outcome": "APPROVAL_QUEUE_ERROR",
+                "action_tool": tool_name,
             }
 
     logger.info(f"[Approval] queued {action_id} | {tool_name} | user={_sanitize_id(user_chat_id)}")
@@ -951,6 +963,7 @@ def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
         "contract_id": _contract_id,
         "ok": bool(_contract_id),
         "terminal_outcome": None if _contract_id else "APPROVAL_QUEUE_ERROR",
+        "action_tool": tool_name,
     }
 
 
@@ -2603,16 +2616,24 @@ def run_agent(
                     # BUG-V1-FAKE-APPROVAL-STATE: inject A32 sentinel so
                     # sanitize_agent_response can verify the "⏳ ממתינה לאישור"
                     # echo came from a real approval, not hallucinated text.
-                    # PA-01: "action_tool" is the real tool_use block's own
-                    # name (tu.name), never guessed from route.intent — see
-                    # docs/architecture/turn-coordinator/PA-01_PLANNING_GATE.md §4.2a.
+                    # PA-01 Main Integration Pass fix: "action_tool" MUST be
+                    # the CANONICAL tool name _queue_approval_detailed()
+                    # actually used to create the contract (resolve_canonical_
+                    # tool() can rewrite it, e.g. sheets_append -> airtable_add
+                    # — BUG-CANONICAL-TOOL-WIRING), never tu.name (the raw,
+                    # pre-canonicalization tool the model happened to call) —
+                    # using tu.name here would make a genuine contract
+                    # invisible to PA-01's expected-tool scoping whenever
+                    # canonicalization rewrote the tool. See
+                    # docs/architecture/turn-coordinator/PA-01_PLANNING_GATE.md
+                    # §4.2a / §8.
                     tool_results_log.append({
                         "tool": "__approval_queued__",
                         "content": result,
                         "ok": _approval_outcome["ok"],
                         "contract_id": _approval_outcome["contract_id"],
                         "terminal_outcome": _approval_outcome["terminal_outcome"],
-                        "action_tool": tu.name,
+                        "action_tool": _approval_outcome["action_tool"],
                     })
                     continue
 

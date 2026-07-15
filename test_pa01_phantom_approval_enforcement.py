@@ -413,7 +413,7 @@ chk("LeadsDirectWriteBlocked (BUG-091 preflight) on the expected tool -> final_r
 _queue_error_msg = "⚠️ פעולה זו כבר בוצעה לאחרונה (airtable_add). כפילות נחסמה."
 with patch.object(app, "_queue_approval_detailed", return_value={
     "message": _queue_error_msg, "contract_id": None, "ok": False,
-    "terminal_outcome": "APPROVAL_QUEUE_ERROR",
+    "terminal_outcome": "APPROVAL_QUEUE_ERROR", "action_tool": "airtable_add",
 }):
     reply_qerr, _ = _run_agent(
         "queue_error", "צור לי משימה", role=Role.OWNER, intent=Intent.CREATE_TASK,
@@ -437,7 +437,7 @@ chk("_queue_approval_detailed() APPROVAL_QUEUE_ERROR outcome -> final_reply repl
 _gw_reply_correct = "⏳ הפעולה ממתינה לאישור: הוסף ל-Tasks\nשלח *מאשר* כדי לאשר (בכל ערוץ)."
 with patch.object(app, "_queue_approval_detailed", return_value={
     "message": _gw_reply_correct, "contract_id": "contract-correct-1", "ok": True,
-    "terminal_outcome": None,
+    "terminal_outcome": None, "action_tool": "airtable_add",
 }):
     reply_correct, _ = _run_agent(
         "contract_correct", "צור לי משימה", role=Role.OWNER, intent=Intent.CREATE_TASK,
@@ -461,7 +461,7 @@ chk("CREATE_TASK + a real contract for airtable_add (the correct expected tool) 
 _gw_reply_wrong = "⏳ הפעולה ממתינה לאישור: קבע פגישה\nשלח *מאשר* כדי לאשר (בכל ערוץ)."
 with patch.object(app, "_queue_approval_detailed", return_value={
     "message": _gw_reply_wrong, "contract_id": "contract-wrong-tool-1", "ok": True,
-    "terminal_outcome": None,
+    "terminal_outcome": None, "action_tool": "calendar_create_event",
 }):
     reply_wrong, _ = _run_agent(
         "contract_wrong_tool", "צור לי משימה", role=Role.OWNER, intent=Intent.CREATE_TASK,
@@ -478,6 +478,123 @@ with patch.object(app, "_queue_approval_detailed", return_value={
 chk("CREATE_TASK + a real contract for calendar_create_event (the WRONG tool) -> "
     "does NOT satisfy row 2 -> falls through to Phantom fallback (row 4)",
     reply_wrong == PHANTOM)
+
+
+# ══════════════════════════════════════════════════
+# J2. BUG-CANONICAL-TOOL-WIRING x PA-01 (Main Integration Pass finding) —
+# sentinel["action_tool"] must be the CANONICAL tool_name
+# resolve_canonical_tool() actually used to create the contract, never the
+# raw tool_use block's own (pre-canonicalization) name. Real
+# _queue_approval_detailed()/ActionGateway.propose_action() — NOT mocked —
+# so this exercises the actual canonicalization path end to end.
+# ══════════════════════════════════════════════════
+
+from core.action_gateway import action_gateway as _canon_gw  # noqa: E402
+
+# J2.1 — model calls the expected tool directly (no rewrite needed) ->
+# contract tool = airtable_add, sentinel action_tool = airtable_add,
+# Gateway prompt preserved (row 2).
+_gw_echo_1 = "⏳ ההוספה ממתינה לאישור שלך."
+reply_j2_1, _ = _run_agent(
+    "canon_direct", "צור לי משימה", role=Role.OWNER, intent=Intent.CREATE_TASK,
+    allowed_tool_names=("airtable_add",),
+    anthropic_responses=[
+        _tool_use_response([{"name": "airtable_add",
+                              "input": {"table": "Tasks", "fields": {"Task": "בדיקה קנונית 1"}}}]),
+        _text_response(_gw_echo_1),
+    ],
+    pa01_state="enforce",
+)
+_contracts_1 = _canon_gw.find_live_contracts("boss_hq:canon_direct")
+chk("J2.1: model calls airtable_add directly -> a real contract for airtable_add exists",
+    len(_contracts_1) == 1 and _contracts_1[0].tool_name == "airtable_add")
+chk("J2.1: row 2 holds -> final_reply untouched by PA-01",
+    reply_j2_1 == _gw_echo_1)
+
+# J2.2 — model calls sheets_append, user_text has no explicit Sheets/Drive
+# request -> resolve_canonical_tool() rewrites it to airtable_add (the
+# _CANONICAL_TOOL_DEFAULT). expected_tool for CREATE_TASK is airtable_add ->
+# must still satisfy row 2, using the CANONICAL name, not the raw "sheets_append"
+# the model actually called.
+_gw_echo_2 = "⏳ ההוספה ממתינה לאישור שלך (2)."
+reply_j2_2, _ = _run_agent(
+    "canon_rewrite", "צור לי משימה לבדוק מה קורה עם אבי", role=Role.OWNER,
+    intent=Intent.CREATE_TASK, allowed_tool_names=("airtable_add", "sheets_append"),
+    anthropic_responses=[
+        _tool_use_response([{"name": "sheets_append",
+                              "input": {"table": "Tasks", "fields": {"Task": "בדיקה קנונית 2"}}}]),
+        _text_response(_gw_echo_2),
+    ],
+    pa01_state="enforce",
+)
+_contracts_2 = _canon_gw.find_live_contracts("boss_hq:canon_rewrite")
+chk("J2.2: model calls sheets_append (no explicit Sheets request) -> the REAL contract "
+    "is created under the canonical airtable_add, not sheets_append",
+    len(_contracts_2) == 1 and _contracts_2[0].tool_name == "airtable_add")
+chk("J2.2: sentinel['action_tool'] (the canonical tool) matches expected_tool for CREATE_TASK "
+    "-> contract_created_for_expected_tool=True -> row 2 holds, Gateway prompt preserved "
+    "(would have been wrongly Phantom-blocked if action_tool had stayed 'sheets_append')",
+    reply_j2_2 == _gw_echo_2)
+chk("J2.2 invariant: sentinel['action_tool'] == the real stored ActionContract.tool_name",
+    _contracts_2[0].tool_name == "airtable_add")
+
+# J2.3 — canonical resolver returns a tool that is NOT the expected tool for
+# this intent (CREATE_EVENT expects calendar_create_event; the model calls
+# sheets_append with no explicit Sheets request, which resolves to
+# airtable_add — a real but WRONG-for-this-intent tool). The contract must
+# not be accepted as evidence for this intent; PA-01 must not reach row 2.
+reply_j2_3, _ = _run_agent(
+    "canon_mismatch", "קבע לי פגישה מחר", role=Role.OWNER, intent=Intent.CREATE_EVENT,
+    allowed_tool_names=("calendar_create_event", "sheets_append"),
+    anthropic_responses=[
+        _tool_use_response([{"name": "sheets_append",
+                              "input": {"table": "Tasks", "fields": {"Task": "לא רלוונטי"}}}]),
+        _text_response("קבעתי לך, שלח מאשר"),
+    ],
+    pa01_state="enforce",
+)
+_contracts_3 = _canon_gw.find_live_contracts("boss_hq:canon_mismatch")
+chk("J2.3: a real contract WAS created (for the canonical airtable_add), but it is not "
+    "calendar_create_event (CREATE_EVENT's expected tool)",
+    len(_contracts_3) == 1 and _contracts_3[0].tool_name != "calendar_create_event")
+chk("J2.3: that contract is NOT accepted as evidence for CREATE_EVENT -> PA-01 does not "
+    "reach row 2 -> final_reply is replaced (Phantom fallback, since owner is capable "
+    "for calendar_create_event and no terminal outcome matches it either)",
+    reply_j2_3 == PHANTOM)
+
+# J2.4 — APPROVAL_QUEUE_ERROR after canonicalization: a second request with
+# the same (canonicalized) tool/inputs/identity hits the cross-channel-
+# duplicate branch. sentinel['action_tool'] must be the canonical tool, and
+# the terminal outcome must be found only when scoped to the expected tool.
+_dup_identity = Identity(user_id="canon_dup", role=Role.OWNER)
+_first = app._queue_approval_detailed(
+    "sheets_append", {"table": "Tasks", "fields": {"Task": "כפילות קנונית"}},
+    "canon_dup", "telegram", "צור לי משימה",
+)
+chk("J2.4: first call's action_tool is already canonical (airtable_add), not sheets_append",
+    _first["action_tool"] == "airtable_add")
+_second = app._queue_approval_detailed(
+    "sheets_append", {"table": "Tasks", "fields": {"Task": "כפילות קנונית"}},
+    "canon_dup", "telegram", "צור לי משימה",
+)
+chk("J2.4: duplicate call -> APPROVAL_QUEUE_ERROR, action_tool still the canonical tool",
+    _second["terminal_outcome"] == "APPROVAL_QUEUE_ERROR" and _second["action_tool"] == "airtable_add")
+_dup_log = [{"tool": "__approval_queued__", "content": _second["message"], "ok": False,
+             "contract_id": _second["contract_id"], "terminal_outcome": _second["terminal_outcome"],
+             "action_tool": _second["action_tool"]}]
+chk("J2.4: scoped lookup finds this outcome for airtable_add (the expected tool)...",
+    app._pa01_structured_terminal_outcome(_dup_log, "airtable_add") is not None)
+chk("...but NOT for an unrelated expected tool (e.g. calendar_create_event)",
+    app._pa01_structured_terminal_outcome(_dup_log, "calendar_create_event") is None)
+
+# J2.5 — backward compatibility: _queue_approval() (the string-returning
+# wrapper) is unaffected by the action_tool addition.
+_wrapper_reply = app._queue_approval(
+    "airtable_add", {"table": "Tasks", "fields": {"Task": "wrapper בדיקה"}},
+    "canon_wrapper", "telegram", "צור לי משימה",
+)
+chk("J2.5: _queue_approval() still returns a plain string",
+    isinstance(_wrapper_reply, str))
 
 
 # ══════════════════════════════════════════════════
