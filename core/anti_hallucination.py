@@ -525,6 +525,22 @@ _AGENT_ACTION_STATUS_PATTERN = re.compile(
     r"(?<!לא )(?<!עדיין )\b(הוספתי|שמרתי|עדכנתי|יצרתי|שלחתי|רשמתי|ביצעתי|קבעתי|תיעדתי)\b",
     re.UNICODE,
 )
+# BUG-SS-MULTITURN-PENDING-NARRATION: multi-turn task flows (e.g. a task
+# missing its due date, completed on a later turn) surfaced a second class of
+# Single-Speaker violation the completion-verb pattern above doesn't catch —
+# the agent narrating that the action is *ready/pending approval* (true,
+# evidenced, not a hallucination) in the same turn ActionGateway already sent
+# its own canonical pending-approval message. Reuses the same wording already
+# trusted elsewhere in this module (the __approval_queued__-gated NO_TOOL_CLAIMS
+# entry below) — only the trigger differs: there it *permits* this phrasing
+# when evidenced, here it additionally flags it for Single-Speaker suppression.
+_AGENT_PENDING_STATUS_PATTERN = re.compile(
+    r"(מוכנ[הת]?\s.{0,25}(לאישור|ממתינ)|ממתינ[הת]\s?(ל)?אישור|"
+    r"⏳.{0,25}(ממתינ[הת] לאישור|אישור הבעלים)|"
+    r"הפעולה ממתינה לאישור|ממתינ[הת] לאישור הבעלים|"
+    r"כשתאשר.{0,40}(תתווסף|יבוצע|תישלח|יישלח))",
+    re.UNICODE,
+)
 # Was "הפעולה התקבלה. תוצאה תישלח בנפרד." — a false continuation claim with
 # no real pending/queue behind it: when this gate fires, nothing actually
 # follows up. Same claim-without-evidence class the rest of this module
@@ -586,8 +602,16 @@ def sanitize_agent_response(agent_text: str, tool_results: list[dict],
     Replaces hallucinated text; adds a warning for mismatches.
     _gateway_active: pass True when FEATURE_ACTION_GATEWAY is on to enforce Single Speaker.
     """
-    # Single Speaker: when Gateway is active, Agent must not emit action-status text.
-    if _gateway_active and _AGENT_ACTION_STATUS_PATTERN.search(agent_text):
+    # Single Speaker: when Gateway is active, Agent must not emit action-status
+    # text — covers both completion claims (_AGENT_ACTION_STATUS_PATTERN) and
+    # pending/ready-for-approval narration (_AGENT_PENDING_STATUS_PATTERN); the
+    # latter is truthful and evidenced (see BUG-SS-MULTITURN-PENDING-NARRATION
+    # above) but still a second speaker describing a status ActionGateway's own
+    # pending message already covers.
+    if _gateway_active and (
+        _AGENT_ACTION_STATUS_PATTERN.search(agent_text)
+        or _AGENT_PENDING_STATUS_PATTERN.search(agent_text)
+    ):
         # BUG-SS-FALLBACK-CONTRADICTION: if a pending-approval message was
         # already sent this turn (the __approval_queued__ sentinel — see
         # app.py's _queue_approval() call site), the agent's follow-up text

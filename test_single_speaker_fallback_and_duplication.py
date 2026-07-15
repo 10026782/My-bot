@@ -27,6 +27,17 @@
 # sites that must treat an empty reply as "send nothing". Dispatch, Atomic
 # Claims, idempotency, and Req6 (repeated-confirm) behavior are unchanged —
 # see the dispatch-count and repeated-confirm regressions below.
+#
+# Follow-up (post-PR #341 manual verification): a multi-turn task-creation
+# flow (a required field completed on a later turn) still produced two
+# messages — the official pending-approval message plus separate agent text
+# narrating that the task is "ready and waiting for approval". That text is
+# truthful and evidenced (not the false-completion claim Finding A covered),
+# so _AGENT_ACTION_STATUS_PATTERN (completion verbs only) never caught it.
+# Fixed: the Single-Speaker gate's trigger now also matches
+# _AGENT_PENDING_STATUS_PATTERN (ready/pending-approval narration), routed
+# through the same __approval_queued__-gated suppress-vs-fallback branch as
+# Finding A.
 
 from __future__ import annotations
 
@@ -89,6 +100,41 @@ chk("Finding A regression: gateway_active=False -> gate does not fire -> not sup
     r_gateway_off != "")
 chk("Finding A regression: gateway_active=False -> not the Single-Speaker fallback either",
     r_gateway_off != _SINGLE_SPEAKER_FALLBACK)
+
+
+# ══════════════════════════════════════════════════
+# Finding A follow-up (multi-turn) — agent narrating "ready/pending approval"
+# is ALSO a Single-Speaker violation, not just false completion claims.
+# Live report: in a multi-turn task-creation flow (missing field completed on
+# a later turn), the user received BOTH the official pending-approval message
+# AND separate agent text explaining the task is "ready and waiting for
+# approval" — a truthful, evidenced claim that _AGENT_ACTION_STATUS_PATTERN
+# (completion verbs only) never caught, so PR #341's fix didn't cover it.
+# ══════════════════════════════════════════════════
+
+r_pending_suppressed = sanitize_agent_response(
+    "המשימה מוכנה וממתינה לאישור הבעלים.", _approval_queued_evidence, _gateway_active=True,
+)
+chk("multi-turn: 'ready/pending approval' narration after approval queued -> suppressed entirely",
+    r_pending_suppressed == "")
+chk("multi-turn: suppressed pending-narration is NOT the false-failure fallback",
+    r_pending_suppressed != _SINGLE_SPEAKER_FALLBACK)
+
+# Regression: without __approval_queued__ evidence, this is a fabricated
+# pending-approval claim -> still blocked (now via the Single-Speaker gate
+# rather than falling through unchecked).
+r_pending_fake = sanitize_agent_response(
+    "המשימה מוכנה וממתינה לאישור הבעלים.", [], _gateway_active=True,
+)
+chk("multi-turn regression: fabricated 'pending approval' claim with no evidence -> still blocked",
+    r_pending_fake == _SINGLE_SPEAKER_FALLBACK)
+
+# Regression: gateway inactive -> untouched, exactly like the completion-verb case.
+r_pending_gateway_off = sanitize_agent_response(
+    "המשימה מוכנה וממתינה לאישור הבעלים.", _approval_queued_evidence, _gateway_active=False,
+)
+chk("multi-turn regression: gateway_active=False -> pending narration passes through unchanged",
+    r_pending_gateway_off == "המשימה מוכנה וממתינה לאישור הבעלים.")
 
 
 # ══════════════════════════════════════════════════
