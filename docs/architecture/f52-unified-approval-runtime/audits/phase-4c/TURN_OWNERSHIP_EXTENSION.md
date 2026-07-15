@@ -10,12 +10,19 @@ F52 / Phase 4C audit maps, adding only the missing turn-level dimensions."*
 
 Status: Research input to Phase 0. Not implementation. No code changed by this document.
 
+**Revision note (this pass):** refreshed against `main` `ac8355b` (2026-07-15, through PR #345)
+per explicit instruction, narrow scope: revalidate cited line numbers, re-assess Case A against
+`BUG-BATCH-DISCARD`, keep the callback context-interrupted finding open, make an explicit call on
+`_pending_voice_edits`' temporary classification, and soften the AP-25 reuse suggestion into an
+explicit separate-decision requirement. No other section was re-audited in this pass.
+
 ## Baseline staleness this extension corrects for
 
 `CURRENT_STATE_MAP.md`'s baseline is `4d3787e6e6fcbc93bd5a30f62f0834136b706f06` (2026-07-14).
-Current `main` at the time of this extension is `0a1d5e3` (2026-07-15), eight commits later.
-Four of those eight are not documentation or rollout tooling — they are behavioral changes to
-exactly the rows this extension depends on (AP-01, AP-02, AP-04, AP-09, AP-10, AP-12):
+Current `main` at the time of this revision is `ac8355b` (2026-07-15, through PR #345),
+27 commits later. Five of those 27 are not documentation or rollout tooling — they are
+behavioral changes to exactly the rows this extension depends on (AP-01, AP-02, AP-04, AP-09,
+AP-10, AP-12):
 
 - `e26df5a` **Fix Single-Speaker contradictory fallback and duplicated success text** — added a
   suppression sentinel (`__approval_queued__`) to `sanitize_agent_response()` so the agent's
@@ -30,11 +37,22 @@ exactly the rows this extension depends on (AP-01, AP-02, AP-04, AP-09, AP-10, A
   could resolve to `sheets_append`) is now canonicalized before a contract/button is built, so
   the durable contract and the legacy `event_bus` button no longer disagree on which tool will
   run.
+- `15b8567` **Fix BUG-BATCH-DISCARD: restore multi-task batch preservation** (PR #345) — replaced
+  the hard per-turn `_mutating_approvals_this_turn >= 1` discard with `event_bus.BatchQueueStore`
+  (`event_bus.py:200-235`): every mutating tool call in a turn is now durably preserved (in-memory,
+  same volatility class as `PendingActionsStore`), the first still queues immediately, the rest
+  are held per `canonical_user_id` and promoted one at a time — via `app._promote_next_batch_item()`
+  (`app.py:866`) — only once no contract is currently live for that identity. Promotion is wired
+  as a side effect through a new `_gateway_reply_with_promotion()` wrapper (`app.py:905`) at every
+  ActionGateway resolution call site: override word, combined word, disambiguation, cancellation,
+  and the Telegram callback (`app.py:1393`, `1423`). See findings 1a/1b below — this fixes
+  a *sibling* mechanism to the one the original Case A dialogue describes, not Case A's own path.
 
-None of these four commits are reflected in `CURRENT_STATE_MAP.md`'s prose for AP-01/02/04/09/10,
-and `AI_CONTEXT.md` (checked separately) is itself three commits stale relative to `main` at the
-time of this writing. Per `AGENTS.md`'s post-merge verification protocol, this extension treats
-`main` as authoritative and flags the gap rather than silently working around it.
+None of these five commits are reflected in `CURRENT_STATE_MAP.md`'s prose for
+AP-01/02/04/09/10/12, and `AI_CONTEXT.md` (checked separately) was three commits stale relative
+to `main` as of the prior pass and has not been re-checked in this one. Per `AGENTS.md`'s
+post-merge verification protocol, this extension treats `main` as authoritative and flags the gap
+rather than silently working around it.
 
 **Direct consequence for TurnCoordinator:** the "documented incident" the proposal cites as
 urgency for Phase 3 Reply Ownership (*"approval prompt מול fallback סותר, הודעת הצלחה כפולה"*)
@@ -48,15 +66,21 @@ regression baseline Phase 3 must not weaken, since that suite currently encodes 
 behavior (pattern-based suppression) that a real `reply_owner` gate should eventually make
 unnecessary — not just coexist with.
 
-The `bb8312a` commit message itself documents three items explicitly deferred as "out of scope,"
-all three of which are exactly the gaps this extension independently surfaces below:
-only one mutating approval is queued per agent turn with the rest silently discarded (see AP-12),
-no durable queue behind the agent's promise to continue a batch (see AP-12), and
-`_apply_ingress_context_gate()` marks `context_interrupted` on every inbound **callback** event
-including the approve/reject button press itself, because the exemption
-(`event.kind == "text"` at `app.py:2663`) never covers `kind == "callback"` (see AP-02/AP-08).
-Verified directly against `app.py:2663` for this extension — the callback branch has no
-equivalent `is_own_resolution_event` check.
+The `bb8312a` commit message itself documented three items explicitly deferred as "out of scope."
+Two of those three are now resolved by `15b8567`/PR #345: only one mutating approval queued per
+agent turn with the rest silently discarded, and no durable queue behind the agent's promise to
+continue a batch — both fixed by `BatchQueueStore` (see findings 1a/1b below). The third
+remains fully open and was independently re-verified for this revision, not just re-cited:
+`_apply_ingress_context_gate()` (`app.py:2742`) marks `context_interrupted` on every inbound
+**callback** event including the approve/reject button press itself, because the exemption
+(`event.kind == "text"` at `app.py:2755`) never covers `kind == "callback"`. `15b8567` did not
+touch this. Re-reading the callback call site directly (`app.py:2813-2819`) confirms this is not
+an oversight but an explicit, documented design choice as of today: *"Every callback (including
+approve:/reject:, which belongs to app.py's own separate `_pending_approvals` mechanism, not
+ActionGateway) is 'not an ActionGateway resolution' — always interrupts."* That comment is honest
+about the tradeoff but does not resolve it — a button press on one pending contract still marks a
+different, unrelated still-pending contract as context-interrupted (see AP-02/AP-08, and finding 2
+below).
 
 ## Dimensions added (per the proposal's `TurnEnvelope`/`CapabilityAction`/`MessageKind`)
 
@@ -90,17 +114,17 @@ closed fact. `—` = not applicable (no conversational turn exists at this entry
 | AP-09 | router / `run_agent()` re-run of original text | `run_agent()` caller send | untyped; doc's own mismatch #4 notes this conflates "plan confirmation" with "tool authorization" | Y | RAM `_pending_approvals` dict, 10m | Y (original free text needed agent interpretation) | N |
 | AP-10 | agent pipeline or Gateway depending on branch | `run_agent()` caller send | untyped (APPROVAL_PROMPT shape) | Y | AC | Y (agent proposed it) | N* (confirmation step may be deterministic once AC exists; proposal step is not) |
 | AP-11 | — (no conversational turn; internal auto-write) | none directly (feeds AP-12 preview later) | — | N | AC created but ignored by write step (P0-3) | N | Y — and that is *why* the bypass is dangerous: nothing is asking first |
-| AP-12 | session/preview handler | `run_agent()` caller send (batch summary) | untyped (APPROVAL_PROMPT shape for the batch; **no kind at all for "שמור 3"**) | Y | **session/preview RAM — a queue source not covered by AC/EB/AP**, restart behavior unknown per original doc | Y today (this is Case A's literal failure: no `resolve_numbered_reference()` exists, so the agent must guess/search CRM instead of reading its own list) | N today; **should become Y once Phase 2 ships** `resolve_numbered_reference()` |
+| AP-12 | session/preview handler, `resolve_pending_lead_preview()` (`core/lead_candidate_handler.py:1228`) | `run_agent()` caller send (batch summary) | untyped (APPROVAL_PROMPT shape for the batch; **no kind at all for "שמור 3"**) | Y | `session_store.lead_sessions` preview RAM — a queue source not covered by AC/EB/AP, and **not touched by `BatchQueueStore`** (Tier 2, separate from Tier 1's tool-loop batch mechanism — see findings 1a/1b) | Y today (this is Case A's literal failure) | N today; **should become Y once Phase 2 ships** `resolve_numbered_reference()` |
 | AP-13..AP-15, AP-17, AP-19, AP-21 (TMA approval routes) | TMA endpoint (HTTP JSON) | HTTP response | untyped (APPROVAL_PROMPT/completion shape) | N — TMA is request/response, not a standing conversational turn; `TurnEnvelope`/`MessageKind` apply weakly here except where the same action also produces a Telegram/EB notification | AC + AP projection | N (typed REST call, no LLM) | Y |
 | AP-16, AP-18, AP-20 (TMA owner-direct branches) | TMA endpoint | HTTP response | — (no pending message at all) | N | none | N | Y |
 | AP-22 (read-only approvals list) | TMA endpoint | HTTP response | — | N | reads AP, creates none | N | Y |
 | AP-23, AP-24 (TMA approve/reject route) | TMA endpoint | HTTP response | untyped | N | AC + AP | N | Y |
-| AP-25 (TMA bulk approvals) | TMA endpoint, aggregates per-item outcomes | HTTP response (typed per-item result list) | untyped | N | AC + AP | N | Y — **and note this already has an explicit per-item outcome list, unlike AP-12's silent drop; worth mirroring for the agent/Telegram batch case** |
+| AP-25 (TMA bulk approvals) | TMA endpoint, aggregates per-item outcomes | HTTP response (typed per-item result list) | untyped | N | AC + AP | N | Y — **a reusable reference pattern for typed per-item batch outcomes (see finding 5); not to be adopted into the agent/Telegram flow without a separate decision** |
 | AP-26 (legacy Approvals row) | TMA endpoint | HTTP response | conceptually CAPABILITY_BOUNDARY ("this can no longer execute") | N | AP only, no AC | N | Y |
 | AP-27 (`followup_engine.scan_and_propose`) | scheduler job → Telegram EB buttons | Telegram send (proactive, not a reply to any inbound turn) | conceptually SYSTEM_NOTIFICATION carrying an embedded APPROVAL_PROMPT — today untagged, so a user scrolling back cannot tell this from an ordinary agent reply | Y | AC + EB | N for the proposal; **Y for whatever reply the owner sends back**, since free text not matching a button goes through `run_agent()` | Y for the proposal itself |
 | AP-28 (`lead_recovery.scan_and_propose`) | same pattern as AP-27 | Telegram send | same as AP-27 | Y | AC + EB | same split as AP-27 | Y for the proposal |
 | AP-29 (voice approval request) | Telegram callback (same shape as AP-02) | Telegram callback edit | untyped notification+prompt hybrid | Y | AC + EB | N | Y |
-| AP-30 (`voice_edit:` then next text) | media handler callback, then **a separate ad-hoc "next raw text" capture that is not `run_agent()` and not a registered pending source** | Telegram send from media handler | untyped | Y — waits for the edited transcript text | `_pending_voice_edits` RAM dict — **a third undocumented conversational pending source beyond AC/EB/session; not representable in the proposal's own `PendingQueueAwareness.source` Literal (`action_gateway \| lead_capture \| file_flow \| task_flow \| system`) — feedback for a v3 revision, not just a code gap** | N (raw text goes straight to save, bypassing the agent entirely — if the user says something unrelated instead of the edit, there is no `TurnEnvelope`-style awareness to catch that) | Y |
+| AP-30 (`voice_edit:` then next text) | media handler callback, then **a separate ad-hoc "next raw text" capture that is not `run_agent()` and not a registered pending source** | Telegram send from media handler | untyped | Y — waits for the edited transcript text | `_pending_voice_edits` RAM dict (`media_handler.py:202`) — **temporarily classified under `source="file_flow"` for Phase 0 purposes, see finding 4** | N (raw text goes straight to save, bypassing the agent entirely — if the user says something unrelated instead of the edit, there is no `TurnEnvelope`-style awareness to catch that) | Y |
 | AP-31, AP-32 (file upload) | channel handler / TMA endpoint | channel response / HTTP response | untyped completion/error | N | idempotency store only, not conversational | N | Y |
 | AP-33 (WhatsApp Twilio text → `run_agent()`) | same as AP-01/04 | **TwiML response — a distinct `outbound_sender` from Telegram even though the reply logic is shared** | same as AP-01 | Y | same as AP-01 | Y | N |
 | AP-34 (WhatsApp media) | same pattern as AP-29/31 | Telegram owner buttons / TwiML | same | Y | AC+EB / idem | N | Y |
@@ -119,34 +143,60 @@ closed fact. `—` = not applicable (no conversational turn exists at this entry
 
 ## New findings this pass surfaces (feed into Phase 0's exact call-site list)
 
-1. **Case A's root cause is now independently pinned to two verified mechanisms, not just described.**
-   `_mutating_approvals_this_turn` (`app.py:2089`) blocks any second mutating-approval tool call
-   within one turn and returns a generic Hebrew warning to the *tool_result* channel (i.e. the
-   agent sees it, the user may or may not get an honest account of it depending on how the agent
-   narrates the block) — with no durable record of which batch items were dropped. This is the
-   literal mechanism behind "5 מועמדים ממתינים... שמור 3 → וואקום מוחלט." `PendingQueueAwareness`
-   (Phase 0/1) and `resolve_numbered_reference()` (Phase 2) are necessary but not sufficient on
-   their own unless this gate also becomes queue-aware instead of a hard per-turn cap.
-2. **The callback-context-interrupted gap is real and unaddressed.** `_apply_ingress_context_gate()`
-   (`app.py:2663`) only exempts `event.kind == "text"` via `is_own_resolution_event()`; a
-   `kind == "callback"` event (an approve/reject button press) always calls
-   `mark_context_interrupted()`. A button press on one pending contract can therefore mark a
-   *different*, unrelated still-pending contract as context-interrupted, forcing spurious
-   reconfirmation. This belongs in Gate B's "two queues active simultaneously" regression
-   requirement, and in `active_queue_id`'s priority-order test, not only in Case A's own fix.
+1a. **RESOLVED by PR #345 — Tier 1 (agent tool-loop) batch discard.** The former
+   `_mutating_approvals_this_turn >= 1` hard block (silent discard, generic warning only in the
+   *tool_result* channel) is now `BatchQueueStore`: every mutating tool call this turn is durably
+   preserved and promoted one at a time as the previous one resolves. Verified directly against
+   `app.py:2145-2197` and `event_bus.py:200-235` for this revision, plus
+   `test_bug_batch_approval_preserved.py` (33 assertions, cited in `15b8567`). This closes the
+   *data-loss* half of the original finding 1. It does **not** implement `PendingQueueAwareness` or
+   `resolve_numbered_reference()` — items are still promoted and approved sequentially, one live
+   contract at a time, never presented as a numbered list the user can address by index. Phase 1/2
+   remain necessary for that; they are no longer blocked by silent loss underneath them.
+1b. **STILL OPEN — Tier 2 (lead batch preview) is a separate mechanism, untouched by PR #345, and
+   is what the proposal's Case A dialogue literally describes.** "5 מועמדים ממתינים... שמור 3" is
+   `resolve_pending_lead_preview()` (AP-12, `core/lead_candidate_handler.py:1228`), not the
+   tool-loop path finding 1a fixes — its own docstring says so explicitly
+   (`core/lead_candidate_handler.py:1240-1241`: *"לא נוגע ב-`_pending_approvals` או ActionGateway
+   contracts — Tier 1 (`_propose_lead_write`) ממשיך לעבוד בדיוק כפי שהוא, ללא שינוי"*). More
+   precisely than the prior pass stated: this is not merely *unresolved by the agent's own
+   reasoning* — the handler's docstring states outright, by design, **"אין תמיכה ב-selection חלקי
+   ('כן 1') — רק אישור/ביטול מלא לכל ה-batch"** (`core/lead_candidate_handler.py:1242`, "no partial
+   selection support — only full confirm/cancel for the entire batch"). Case A's failure is not a
+   bug in this function; it is the function's documented scope boundary. `PendingQueueAwareness`
+   (Phase 0/1) and `resolve_numbered_reference()` (Phase 2) remain both necessary and, for this
+   entry point specifically, not yet started by any merged work.
+2. **The callback-context-interrupted gap is real, unaddressed by PR #345, and now explicitly
+   confirmed as a known-but-open design choice, not a silent oversight.** `_apply_ingress_context_gate()`
+   (`app.py:2742`, exemption check at `app.py:2755`) only exempts `event.kind == "text"` via
+   `is_own_resolution_event()`; a `kind == "callback"` event (an approve/reject button press)
+   always calls `mark_context_interrupted()` — the callback call site's own comment
+   (`app.py:2813-2819`) says this is intentional for now. A button press on one pending contract
+   can therefore mark a *different*, unrelated still-pending contract as context-interrupted,
+   forcing spurious reconfirmation. This belongs in Gate B's "two queues active simultaneously"
+   regression requirement, and in `active_queue_id`'s priority-order test, not only in Case A's fix.
 3. **AP-02's reply is Gateway-authored, not agent-authored, and today's fix is a suppression
    patch, not a `reply_owner` field.** The single-speaker regression suite
    (`test_single_speaker_fallback_and_duplication.py`) should be named explicitly in Gate C's DoD
    as the pre-existing behavior Phase 3 generalizes — see the staleness note above.
-4. **A third undocumented pending-conversation source exists: `_pending_voice_edits`.** It is not
-   `AC`, not `EB`, not lead-preview session state. The proposal's `PendingQueueAwareness.source`
-   Literal (`action_gateway | lead_capture | file_flow | task_flow | system`) has no slot for it.
-   Recommend adding `voice_edit_flow` (or folding it under `file_flow`) before Phase 1 schemas are
-   finalized — flagging back to the proposal rather than silently picking one.
-5. **AP-25 (TMA bulk approvals) already solves, for its own channel, the exact problem AP-12 fails
-   at**: an explicit typed per-item outcome list instead of a silent drop. Phase 2's batch/queue
-   design for the agent/Telegram side has a working reference implementation already in this
-   repo — worth reusing the shape, not just the principle.
+4. **DECISION for this pass — `_pending_voice_edits` is temporarily classified under
+   `source="file_flow"`, not left as an open question.** It is not `AC`, not `EB`, not lead-preview
+   session state, and the proposal's `PendingQueueAwareness.source` Literal
+   (`action_gateway | lead_capture | file_flow | task_flow | system`) has no exact slot for it.
+   Rationale for `file_flow` over a new `voice_edit_flow` value or `system`: it is handled by the
+   same `media_handler.py` module as file/media uploads (AP-31/32, already under `file_flow` in
+   spirit), and a new Literal value should not be added unilaterally to an externally-authored
+   proposal document without the proposal owner's sign-off. This is explicitly a **temporary
+   placeholder for Phase 0's call-site inventory**, not a recommendation to leave it unfixed in the
+   v3 schema — whoever finalizes the Phase 1 `PendingQueueAwareness` schema should treat this as an
+   open item to confirm, not inherit silently.
+5. **AP-25 (TMA bulk approvals) is a reusable reference pattern for typed per-item batch outcomes —
+   adopting its shape into the agent/Telegram flow is a separate decision, not implied by this
+   audit.** It already solves, for its own channel, a version of the problem AP-12 has (an explicit
+   typed per-item outcome list instead of a silent drop) and PR #345 also solved differently for
+   Tier 1 (sequential promotion rather than a single batch response). Recording it here as prior art
+   only; Phase 2's actual batch/queue design should evaluate it against `BatchQueueStore`'s
+   sequential-promotion approach on its own merits, not default to either.
 6. **Background LLM calls (AP-41, and `lead_qualifier.py` within AP-50) are `AGENT_INTERPRETED` in
    the proposal's `ExecutionKind` sense but are not the live per-turn conversational agent.** The
    proposal's Phase 0 mapping instruction ("map which `CapabilityAction` are `AGENT_INTERPRETED`
@@ -171,11 +221,18 @@ just log and defer, since without it "AGENTLESS routes still work for approve/re
 (Gate B) is not actually achievable — those routes still go through `run_agent()`'s entry point
 even though they don't need the LLM once inside it.
 
+**Unchanged by this revision, but now carries an added side effect to preserve:** PR #345 wrapped
+every one of these call sites' return value in `_gateway_reply_with_promotion()` (override word,
+combined word, disambiguation, cancellation — `app.py`, within the same `run_agent()` conditional
+blocks as before) so that resolving one contract also promotes the next `BatchQueueStore` item for
+that identity. Whatever Phase 1 wiring moves these parsers to run before the agent must carry this
+promotion side effect with them — it is not separable from the parser call itself today.
+
 ## What this extension deliberately does not do
 
 - It does not re-verify AP-13..AP-50's original file:line evidence — that remains
   `CURRENT_STATE_MAP.md`'s responsibility.
-- It does not propose code changes. Findings 1-7 and the routing-order gap are Phase 0 inputs.
-- It does not resolve the `_pending_voice_edits` taxonomy question (finding 4) — that is a
-  decision for whoever finalizes the Phase 1 `PendingQueueAwareness` schema, flagged here so it
-  isn't discovered mid-implementation instead of during planning.
+- It does not propose code changes. Findings 1a/1b/2-7 and the routing-order gap are Phase 0 inputs.
+- Finding 4's `file_flow` classification for `_pending_voice_edits` is a working placeholder for
+  Phase 0's inventory, not a closed decision on the proposal's v3 schema — whoever finalizes the
+  Phase 1 `PendingQueueAwareness` schema should still confirm or override it explicitly.
