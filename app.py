@@ -912,6 +912,7 @@ def _gateway_reply_with_promotion(reply, canonical_user_id: str):
 
 def _build_and_log_turn_envelope(
     identity, chat_id: str, session_snapshot: dict | None, entry_point: str = "run_agent",
+    live_contracts_snapshot: list | None = None,
 ) -> None:
     """TurnCoordinator Phase 0 — observation only, log-only, no routing
     effect. See core/turn_envelope.py's module docstring for exact scope and
@@ -934,6 +935,13 @@ def _build_and_log_turn_envelope(
     does not replicate that method's expired-preview cleanup write, since
     Phase 0 must never mutate state.
 
+    live_contracts_snapshot: the SAME list run_agent() already established at
+    "1.65" — reused here instead of calling find_live_contracts() again
+    (Case C read-amplification fix, TURN_OWNERSHIP_EXTENSION.md). Always
+    provided by the one live caller (run_agent()); the None fallback below
+    exists only for direct/standalone callers (tests) that construct their
+    own envelope without going through run_agent()'s "1.65" step.
+
     Log content boundary: this runs unconditionally (no flag) on every turn,
     so identifiers embedded in queue_id (memory_key/chat_id — frequently a
     phone number for WhatsApp) are fingerprinted via _sanitize_id() before
@@ -954,7 +962,10 @@ def _build_and_log_turn_envelope(
         from core.action_gateway import action_gateway as _gw_te
         from event_bus import batch_queue as _bq_te
 
-        live_contracts = _gw_te.find_live_contracts(identity.memory_key)
+        live_contracts = (
+            live_contracts_snapshot if live_contracts_snapshot is not None
+            else _gw_te.find_live_contracts(identity.memory_key)
+        )
         reconfirmation_required = any(
             getattr(c, "reconfirmation_required", False) for c in live_contracts
         )
@@ -1685,7 +1696,18 @@ def run_agent(
     _resolved_domain:    dict | None = None,
     _out_meta:           dict | None = None,
     raw_event_id:        str = "",
+    _live_contracts_snapshot: list | None = None,
 ) -> str:
+    # _live_contracts_snapshot: Case C read-amplification fix (see
+    # TURN_OWNERSHIP_EXTENSION.md) — an already-fetched find_live_contracts()
+    # result for this identity from the caller's own ingress-gate query, so
+    # this turn does not query again. None (default) is fully
+    # backward-compatible: every caller that doesn't pass this (recursive
+    # run_agent() calls, tests, any future caller) gets the exact original
+    # behavior — this function fetches it once itself, the first time it's
+    # needed, instead of not fetching at all. Either way, ONE fetch is
+    # established below and reused for the rest of this turn — never
+    # refetched, never cached across turns/calls.
     # raw_event_id: C94 Stage ג/ד — the channel's own raw event id (e.g.
     # Telegram update_id, Twilio MessageSid), if the caller has one. "" for
     # every existing caller (backward-compatible, zero behavior change) —
@@ -1740,14 +1762,41 @@ def run_agent(
     except Exception:
         _session_snapshot = None
 
+    # ── 1.65. Establish the single per-turn live-contracts snapshot ──
+    # Case C read-amplification fix. If the caller (webhook handler) already
+    # fetched this for the ingress-gate check, reuse it (0 additional
+    # queries). Otherwise fetch it exactly once, here, and reuse it for
+    # everything below in this turn (Pending Approval Gate at 2.55,
+    # build_turn_envelope() at 1.7, and the Case C2 signal after the tool
+    # loop) — never refetched within this call, never cached across turns.
+    if _live_contracts_snapshot is None:
+        try:
+            from core.action_gateway import action_gateway as _gw_snapshot
+            _live_contracts_snapshot = _gw_snapshot.find_live_contracts(identity.memory_key)
+        except Exception:
+            _live_contracts_snapshot = []
+    # Turn-start batch_queue count (RAM-only, not an Airtable read — no
+    # amplification concern, captured here purely so the Case C2 check below
+    # uses the same turn-start moment as build_turn_envelope() rather than a
+    # separately-timed read).
+    try:
+        from event_bus import batch_queue as _bq_snapshot
+        _batch_count_snapshot = _bq_snapshot.count_pending(identity.memory_key)
+    except Exception:
+        _batch_count_snapshot = 0
+
     # ── 1.7. TurnCoordinator Phase 0 (observation only) ──────────
     # Snapshot of turn-start pending state, logged only — see
     # _build_and_log_turn_envelope()'s docstring. Placed here, before the
     # Pending Approval Gate below pops anything, so it reflects what this
     # turn actually started with, not what's left after this turn's own
     # routing has already consumed it. Passes _session_snapshot through
-    # (LL-11: single Sessions read per turn) instead of re-reading it.
-    _build_and_log_turn_envelope(identity, chat_id, _session_snapshot)
+    # (LL-11: single Sessions read per turn) instead of re-reading it, and
+    # _live_contracts_snapshot through (Case C read-amplification fix)
+    # instead of querying ActionGateway again.
+    _build_and_log_turn_envelope(
+        identity, chat_id, _session_snapshot, live_contracts_snapshot=_live_contracts_snapshot,
+    )
 
     # ── 2. Rate Limit ─────────────────────────────
     if not rate_limiter.is_allowed(identity.memory_key):
@@ -1920,6 +1969,15 @@ def run_agent(
             # default). Only when Gateway has nothing pending do we fall back
             # to the flag-gated Stage A/B logic exactly as before.
             from core.action_gateway import action_gateway as _gw_cw
+            # NOTE: deliberately NOT reusing _live_contracts_snapshot here —
+            # left as its own fresh find_live_contracts() call. Not required
+            # for the Case C read-amplification fix (this branch never
+            # executes on a greeting turn, the reported regression's
+            # scenario) and test_c89_preview_confirmation.py's
+            # test_app_py_confirm_word_checks_gateway_before_flag_branch
+            # statically asserts this exact call appears here, ahead of the
+            # FEATURE_ACTION_GATEWAY flag branch — an intentional structural
+            # invariant, not incidental text.
             if _gw_cw.find_live_contracts(identity.memory_key):
                 _gw_reply = _gw_cw.route_confirmation_word(identity.memory_key, approver_role=identity.role)
                 logger.info(
@@ -2439,26 +2497,34 @@ def run_agent(
         # Case C2 signal (see docs/architecture/turn-coordinator/
         # CASE_C_CLARIFICATION_CONTINUITY.md) — final_reply reads as a
         # pending-approval claim but this turn ends with nothing actually
-        # pending and nothing newly queued. Needs a POST-turn read (this
-        # turn's own tool calls may have just changed what's live), not the
-        # turn-start envelope built earlier — deliberately does not re-read
-        # session_store (LL-11 single-read invariant); lead-preview coverage
-        # is intentionally out of scope for this first pass, see the doc.
-        # Log-only: never blocks/alters final_reply.
+        # pending and nothing newly queued.
+        #
+        # Read-amplification fix: this used to re-query find_live_contracts()
+        # + batch_queue.count_pending() fresh here. Reuses the turn-start
+        # _live_contracts_snapshot/_batch_count_snapshot (from "1.65")
+        # instead — provably equivalent, not just cheaper: this code path is
+        # only reached after falling through to the Agent tool loop (every
+        # confirm/disambiguation/cancellation/override route returns early,
+        # before this point), so the only way contract/batch-queue state can
+        # have changed since turn start is a _queue_approval() call
+        # succeeding this turn — which is exactly what
+        # approval_queued_this_turn (tool_results_log's __approval_queued__
+        # sentinel) already detects and short-circuits on inside
+        # detect_case_c2_signal(). When approval_queued_this_turn is False,
+        # nothing on this path could have touched either count, so the
+        # turn-start values are still accurate; deliberately does not re-read
+        # session_store either (LL-11 single-read invariant) — lead-preview
+        # coverage remains intentionally out of scope for this signal, see
+        # the doc. Log-only: never blocks/alters final_reply.
         try:
             from core.turn_envelope import detect_case_c2_signal, log_case_c_signal
-            from core.action_gateway import action_gateway as _gw_c2
-            from event_bus import batch_queue as _bq_c2
-            _post_turn_queue_count = (
-                len(_gw_c2.find_live_contracts(identity.memory_key))
-                + _bq_c2.count_pending(identity.memory_key)
-            )
+            _turn_start_queue_count = len(_live_contracts_snapshot) + _batch_count_snapshot
             _approval_queued_this_turn = any(
                 r.get("tool") == "__approval_queued__" for r in tool_results_log
             )
             if detect_case_c2_signal(
                 final_reply,
-                queue_count=_post_turn_queue_count,
+                queue_count=_turn_start_queue_count,
                 approval_queued_this_turn=_approval_queued_this_turn,
             ):
                 log_case_c_signal("C2", canonical_user_id=identity.memory_key)
@@ -2931,12 +2997,23 @@ class _IngressEvent:
     text: str | None = None
 
 
-def _apply_ingress_context_gate(identity, event: _IngressEvent) -> None:
+def _apply_ingress_context_gate(
+    identity, event: _IngressEvent, live_contracts: list | None = None,
+) -> None:
     """See module note above. Fail-closed: if the primary mark cannot be
     recorded, an independent fallback path (find_live_contracts + the
     ledger's own update_status, not the same internal loop) forces the same
     result — a later bare confirm must never execute as though context
-    integrity were known when it isn't."""
+    integrity were known when it isn't.
+
+    live_contracts: an already-fetched find_live_contracts() result for this
+    identity, reused instead of querying again inside is_own_resolution_event.
+    None (default, unchanged from before) means "fetch internally" — every
+    caller that doesn't pass this keeps its exact original behavior. The
+    three text-event webhook call sites pass this (see the Case C
+    read-amplification fix — TURN_OWNERSHIP_EXTENSION.md); this makes it the
+    SINGLE per-turn query, also threaded into run_agent() below.
+    """
     if identity is None or not getattr(identity, "memory_key", None):
         # No action without identity (project-wide rule) — nothing pending
         # can be tied to an identity that never resolved in the first place.
@@ -2944,7 +3021,9 @@ def _apply_ingress_context_gate(identity, event: _IngressEvent) -> None:
     user = identity.memory_key
     from core.action_gateway import action_gateway as _gw
     try:
-        if event.kind == "text" and _gw.is_own_resolution_event(user, event.text or ""):
+        if event.kind == "text" and _gw.is_own_resolution_event(
+            user, event.text or "", live=live_contracts,
+        ):
             return  # genuine confirm/cancel/disambiguation — let normal routing resolve it
         _gw.mark_context_interrupted(user)
     except Exception:
@@ -3050,8 +3129,25 @@ def _webhook_telegram_impl():
         # ── identity resolution + ingress context gate — before ANY
         # command/wizard/media/Decision Hub/Agent routing below.
         identity_for_gate = resolve_identity("telegram", sender_user_id)
+        # Case C read-amplification fix (TURN_OWNERSHIP_EXTENSION.md): fetch
+        # this identity's live contracts ONCE here — the single per-turn
+        # source — and thread it into both the ingress gate (replacing its
+        # own internal query) and run_agent() below (replacing its own
+        # internal query at "1.65"), instead of three independent reads for
+        # one incoming message. On failure, stays None: both downstream
+        # callers already fall back to fetching internally on their own
+        # (identical to this fetch never having existed), preserving the
+        # ingress gate's original fail-open behavior — this new fetch must
+        # not become a fail-closed point that wasn't one before.
+        _live_contracts_for_turn = None
+        try:
+            from core.action_gateway import action_gateway as _gw_ingress
+            _live_contracts_for_turn = _gw_ingress.find_live_contracts(identity_for_gate.memory_key)
+        except Exception:
+            logger.debug("[TurnEnvelope] turn-start live-contracts prefetch failed", exc_info=True)
         _apply_ingress_context_gate(
             identity_for_gate, _IngressEvent(channel="telegram", kind="text", text=text),
+            live_contracts=_live_contracts_for_turn,
         )
 
         # Slash commands → registered @bot.message_handler(commands=[...]) handlers.
@@ -3110,7 +3206,10 @@ def _webhook_telegram_impl():
         typing_thread.start()
 
         try:
-            reply = run_agent(text, sender_user_id, channel="telegram", raw_event_id=str(update.update_id))
+            reply = run_agent(
+                text, sender_user_id, channel="telegram", raw_event_id=str(update.update_id),
+                _live_contracts_snapshot=_live_contracts_for_turn,
+            )
         except Exception as e:
             from core.error_reporter import report_error
             report_error(e, context="run_agent (telegram)")
@@ -3203,11 +3302,21 @@ def _webhook_whatsapp_impl():
     # Agent routing below. WhatsApp text ("כן"/"לא"/etc.) still reaches
     # run_agent() unconditionally further down, so kind="text" here lets
     # is_own_resolution_event exempt a genuine resolution the same way.
+    # Case C read-amplification fix (TURN_OWNERSHIP_EXTENSION.md): fetch
+    # once, thread into both the ingress gate and run_agent() below — see
+    # the Telegram handler's identical comment for the full rationale.
+    _live_contracts_for_turn = None
     try:
         _wa_identity_gate = resolve_identity("whatsapp", sender)
+        try:
+            from core.action_gateway import action_gateway as _gw_ingress_wa
+            _live_contracts_for_turn = _gw_ingress_wa.find_live_contracts(_wa_identity_gate.memory_key)
+        except Exception:
+            logger.debug("[TurnEnvelope] turn-start live-contracts prefetch failed (whatsapp)", exc_info=True)
         _apply_ingress_context_gate(
             _wa_identity_gate,
             _IngressEvent(channel="whatsapp", kind="text", text=incoming),
+            live_contracts=_live_contracts_for_turn,
         )
     except Exception as e:
         logger.error(f"[ActionGateway] ingress gate (whatsapp) failed: {e}", exc_info=True)
@@ -3301,6 +3410,7 @@ def _webhook_whatsapp_impl():
         _resolved_domain    = _resolved,
         _out_meta           = _run_meta,
         raw_event_id        = msg_sid,
+        _live_contracts_snapshot = _live_contracts_for_turn,
     )
     # תיקון: COG מקבל את הדומיין הסופי (אחרי Router), לא domain_from_channel
     # הישן שנקבע לפני שה-Router רץ — אחרת domain=general נרשם ב-COG גם
@@ -3364,11 +3474,21 @@ def webhook_meta_whatsapp():
     # BUG-PENDING-APPROVAL-B: identity resolution + ingress context gate —
     # after junk/idempotency filtering above, before media/outbound-stub/
     # Agent routing below.
+    # Case C read-amplification fix (TURN_OWNERSHIP_EXTENSION.md): fetch
+    # once, thread into both the ingress gate and run_agent() below — see
+    # the Telegram handler's identical comment for the full rationale.
+    _live_contracts_for_turn = None
     try:
         _meta_identity_gate = resolve_identity("whatsapp", sender)
+        try:
+            from core.action_gateway import action_gateway as _gw_ingress_meta
+            _live_contracts_for_turn = _gw_ingress_meta.find_live_contracts(_meta_identity_gate.memory_key)
+        except Exception:
+            logger.debug("[TurnEnvelope] turn-start live-contracts prefetch failed (meta whatsapp)", exc_info=True)
         _apply_ingress_context_gate(
             _meta_identity_gate,
             _IngressEvent(channel="whatsapp", kind="text", text=incoming),
+            live_contracts=_live_contracts_for_turn,
         )
     except Exception as e:
         logger.error(f"[ActionGateway] ingress gate (meta whatsapp) failed: {e}", exc_info=True)
@@ -3447,6 +3567,7 @@ def webhook_meta_whatsapp():
         incoming, sender,
         channel             = "whatsapp",
         domain_from_channel = domain_from_channel,
+        _live_contracts_snapshot = _live_contracts_for_turn,
     )
 
     # Outbound — stub כנה: מחשב תשובה, לא שולח (Phase 1)
