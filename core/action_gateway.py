@@ -635,6 +635,7 @@ class ActionGateway:
         requires_approval: bool,
         identity=None,
         trusted_source: str = "agent",
+        user_text: str = "",
     ) -> GatewayResult:
         """
         מציע פעולה חדשה ל-Gateway.
@@ -659,7 +660,18 @@ class ActionGateway:
         חוץ מ-approval_policy == self_confirm (BUG-076 carve-out: lead
         capture בטוח לא צריך אישור owner; classify_approval_policy() כבר
         מחשב את זה מהתוכן בפועל, לא מהקורא, אז אין כאן בריחה מהבדיקה).
+
+        BUG-CANONICAL-TOOL-WIRING: resolve_canonical_tool() existed and was
+        unit-tested (DoD19) but was never actually called from this method —
+        the durable contract stored whatever tool_name the caller (including
+        the raw, untrusted Agent tool_use loop) passed in verbatim. A "create
+        task" request with no Sheets/Drive wording could therefore create a
+        sheets_append/drive_* ActionContract that later failed on missing
+        Google OAuth. Applied here, at the single contract-creation entry
+        point, so every caller is protected uniformly; a no-op for every
+        current caller that never passes a sheets/drive tool_hint.
         """
+        tool_name = resolve_canonical_tool(tool_name, tool_inputs, user_text)
         normalized = self.normalize_payload(tool_inputs)
         fingerprint = self.compute_business_fingerprint(
             tenant_id, canonical_user_id, tool_name, normalized
@@ -801,6 +813,7 @@ class ActionGateway:
         origin_chat_id: str,
         identity=None,
         trusted_source: str = "agent",
+        user_text: str = "",
     ) -> str | None:
         """Returns None to proceed normally, or a user-facing block message the
         caller must return immediately instead of queuing the approval."""
@@ -812,6 +825,7 @@ class ActionGateway:
                 tool_name=tool_name, tool_inputs=tool_inputs,
                 origin_channel=origin_channel, origin_chat_id=origin_chat_id,
                 requires_approval=True, identity=identity, trusted_source=trusted_source,
+                user_text=user_text,
             )
             if not result.ok:
                 logger.info(
@@ -827,6 +841,7 @@ class ActionGateway:
                 tool_name=tool_name, tool_inputs=tool_inputs,
                 origin_channel=origin_channel, origin_chat_id=origin_chat_id,
                 requires_approval=True, identity=identity, trusted_source=trusted_source,
+                user_text=user_text,
             )
             if result.failure_code in {"persistence_failed", "persistence_lookup_failed"}:
                 return result.user_message or f"❌ {result.reason}"

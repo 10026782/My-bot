@@ -284,6 +284,14 @@ class EventBus:
         """שולף ומוחק פעולה ממתינה — ממשק ציבורי ל-PendingActionsStore.pop."""
         return self._pending.pop(action_id)
 
+    def peek(self, action_id: str) -> dict | None:
+        """שולף פעולה ממתינה בלי למחוק — ממשק ציבורי ל-PendingActionsStore.get.
+        BUG-POST-COMPLETION-FALLTHROUGH: EventBus never exposed a non-destructive
+        read — a caller that needed to peek (app.py's SB-02 pre-check) called the
+        non-existent `bus.get()` instead, which raised AttributeError on every
+        invocation."""
+        return self._pending.get(action_id)
+
     def needs_approval(self, action: str) -> bool:
         """האם הפעולה דורשת אישור?"""
         return action in ACTIONS_REQUIRING_APPROVAL
