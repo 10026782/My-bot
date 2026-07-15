@@ -28,6 +28,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from dataclasses import dataclass, field
@@ -190,7 +191,10 @@ _MODE_PRIORITY: dict[str, int] = {
 class TurnEnvelope:
     turn_mode: TurnMode
     pending_queues: tuple[PendingQueueAwareness, ...]
-    active_queue_id: Optional[str]
+    active_queue_id: Optional[str]  # logged verbatim by to_log_dict() — callers building
+                                     # PendingQueueAwareness.queue_id must fingerprint any
+                                     # identifier embedded in it (see app.py's
+                                     # _build_and_log_turn_envelope, which uses _sanitize_id())
     resolved_reference: Optional[str]  # always None in Phase 0 — no resolve_numbered_reference() yet
     reply_owner: Optional[str]  # best-effort label of who WOULD reply today, not a new mechanism
     message_kind: Optional[str]  # always None in Phase 0 — not computed until Phase 4
@@ -273,6 +277,19 @@ def build_turn_envelope(
     )
 
 
+def _fingerprint(raw_id: str) -> str:
+    """Same BUG-072 pattern as app.py's _sanitize_id() — a short,
+    non-reversible fingerprint instead of a raw phone number/chat/user id.
+    Duplicated (not imported from app.py) so this module has zero dependency
+    on app.py and can never accidentally log an identifier verbatim even if
+    a future caller forgets to sanitize before calling this function — see
+    module docstring's "no God Object" note: this module owns its own output
+    safety, it does not trust the caller for it."""
+    if not raw_id:
+        return "-"
+    return hashlib.sha256(str(raw_id).encode()).hexdigest()[:8]
+
+
 def log_turn_envelope(envelope: TurnEnvelope, *, canonical_user_id: str = "") -> None:
     """
     The only place this module writes anything — a single structured log
@@ -280,11 +297,24 @@ def log_turn_envelope(envelope: TurnEnvelope, *, canonical_user_id: str = "") ->
     is observation-only). Callers should still wrap the whole build+log call
     defensively, since this function does not swallow errors from a
     misbehaving logging handler — see run_agent()'s usage in app.py.
+
+    canonical_user_id is always fingerprinted before logging (never logged
+    raw), since it is frequently tenant_id:phone_number for WhatsApp
+    identities — this runs unconditionally, unflagged, on every turn, so
+    there is no flag boundary protecting against a raw phone number ending
+    up in logs the way there would be for a flag-gated feature.
+
+    Fields intentionally NEVER logged here (Phase 0 log content boundary):
+    no action/tool payload, no user message text, no phone numbers/emails/
+    addresses, no lead/business record field values. TurnEnvelope.to_log_dict()
+    only exposes counts, enum values, and (now-fingerprinted) identifiers —
+    see its own docstring. Do not widen what to_log_dict() returns to include
+    PendingQueueAwareness.items/summary without re-reviewing this boundary.
     """
     try:
         logger.info(
             "[TurnEnvelope] user=%s %s",
-            canonical_user_id or "-",
+            _fingerprint(canonical_user_id),
             json.dumps(envelope.to_log_dict(), ensure_ascii=False, default=str),
         )
     except Exception:

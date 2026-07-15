@@ -213,6 +213,14 @@ with patch("core.action_gateway.action_gateway") as _mock_gw2, \
         _logged_envelope.reply_owner == "gateway")
     chk("session_store.lead_sessions is still never touched with a snapshot passed in",
         not _mock_ls2.method_calls)
+    chk("active_queue_id never contains the raw memory_key (PII boundary)",
+        _id1.memory_key not in (_logged_envelope.active_queue_id or ""))
+    chk("no PendingItem.id/label anywhere carries the raw phone number",
+        all("0501" not in (i.id + i.label) and "0502" not in (i.id + i.label)
+            for q in _logged_envelope.pending_queues for i in q.items))
+    chk("no PendingItem.label anywhere carries the raw lead name",
+        all("א" not in i.label and "ב" not in i.label
+            for q in _logged_envelope.pending_queues for i in q.items))
 
 # An expired preview (set_at > 1800s ago) must not surface as a pending
 # queue, and must not be mutated/cleared (Phase 0 never writes).
@@ -235,16 +243,32 @@ with patch("core.action_gateway.action_gateway") as _mock_gw2b, \
         _logged_envelope2b.turn_mode == "free_agent")
 
 # Every lookup raising -> must still not raise (fail-open, Phase 0's core
-# guarantee: this instrumentation can never break a live turn).
+# guarantee: this instrumentation can never break a live turn) AND must not
+# be silent about it — a visible, structured build_failed log is required.
 with patch("core.action_gateway.action_gateway") as _mock_gw3, \
-     patch("event_bus.batch_queue") as _mock_bq3:
-    _mock_gw3.find_live_contracts.side_effect = RuntimeError("Airtable down")
+     patch("event_bus.batch_queue") as _mock_bq3, \
+     patch.object(app, "logger") as _mock_app_logger:
+    _mock_gw3.find_live_contracts.side_effect = KeyError("Airtable down")
     _mock_bq3.count_pending.side_effect = RuntimeError("lock error")
     try:
-        app._build_and_log_turn_envelope(_id1, "chat-1", {"pending_lead_preview": "not-a-dict"})
+        app._build_and_log_turn_envelope(
+            _id1, "chat-1", {"pending_lead_preview": "not-a-dict"}, entry_point="test_entry",
+        )
         chk("_build_and_log_turn_envelope() fail-opens when every lookup raises", True)
     except Exception:
         chk("_build_and_log_turn_envelope() fail-opens when every lookup raises", False)
+    chk("build_failed is logged at a visible level (not silent)",
+        _mock_app_logger.warning.call_count == 1)
+    _warn_args = _mock_app_logger.warning.call_args[0]
+    _warn_msg = _warn_args[0] % _warn_args[1:]
+    chk("build_failed log names the real error_type (KeyError), not a generic message",
+        "error_type=KeyError" in _warn_msg)
+    chk("build_failed log names the entry_point the caller passed",
+        "entry_point=test_entry" in _warn_msg)
+    chk("build_failed log does not contain the raw exception message text",
+        "Airtable down" not in _warn_msg)
+    chk("build_failed log fingerprints the user id, not the raw memory_key",
+        _id1.memory_key not in _warn_msg)
 
 
 print(f"\n{'='*50}")

@@ -910,7 +910,9 @@ def _gateway_reply_with_promotion(reply, canonical_user_id: str):
     return reply
 
 
-def _build_and_log_turn_envelope(identity, chat_id: str, session_snapshot: dict | None) -> None:
+def _build_and_log_turn_envelope(
+    identity, chat_id: str, session_snapshot: dict | None, entry_point: str = "run_agent",
+) -> None:
     """TurnCoordinator Phase 0 — observation only, log-only, no routing
     effect. See core/turn_envelope.py's module docstring for exact scope and
     docs/architecture/turn-coordinator/TURN_COORDINATOR_PROPOSAL_V2.md /
@@ -931,6 +933,19 @@ def _build_and_log_turn_envelope(identity, chat_id: str, session_snapshot: dict 
     get_pending_lead_preview()'s own TTL check read-only — it deliberately
     does not replicate that method's expired-preview cleanup write, since
     Phase 0 must never mutate state.
+
+    Log content boundary: this runs unconditionally (no flag) on every turn,
+    so identifiers embedded in queue_id (memory_key/chat_id — frequently a
+    phone number for WhatsApp) are fingerprinted via _sanitize_id() before
+    being placed anywhere a log line could reach, and lead-candidate
+    PendingItem.id/label deliberately do NOT carry the raw phone/name — see
+    inline notes below. No action payload, no user message text, and no
+    business-record field values are ever passed to core/turn_envelope.py.
+
+    entry_point: identifies which call site is calling, for the
+    build_failed log below — lets a future second call site (TMA, the
+    Telegram callback handler) be told apart from this one without adding a
+    new mechanism.
     """
     try:
         from core.turn_envelope import (
@@ -947,11 +962,12 @@ def _build_and_log_turn_envelope(identity, chat_id: str, session_snapshot: dict 
         ac_queue = None
         if live_contracts:
             ac_queue = PendingQueueAwareness(
-                queue_id=f"ac:{identity.memory_key}",
+                queue_id=f"ac:{_sanitize_id(identity.memory_key)}",
                 source="action_gateway",
                 kind="action_contract",
                 summary=f"{len(live_contracts)} live contract(s)",
                 items=tuple(
+                    # contract_id is an internal UUID, not PII — safe as-is.
                     PendingItem(
                         index=i + 1, id=getattr(c, "contract_id", "") or "",
                         kind="action_contract", label="",
@@ -977,14 +993,21 @@ def _build_and_log_turn_envelope(identity, chat_id: str, session_snapshot: dict 
         if preview:
             candidates = preview.get("candidates") or []
             lead_queue = PendingQueueAwareness(
-                queue_id=f"lead_preview:{chat_id}",
+                queue_id=f"lead_preview:{_sanitize_id(chat_id)}",
                 source="lead_capture",
                 kind="lead_candidate",
                 summary=f"{len(candidates)} candidate(s) pending",
                 items=tuple(
+                    # Deliberately NOT c["phone"]/c["name"] — Phase 0 has no
+                    # consumer that needs the real value yet (to_log_dict()
+                    # doesn't even serialize items today), so there is no
+                    # reason to hold raw PII in this snapshot at all. A real
+                    # label will be needed once Phase 2's
+                    # resolve_numbered_reference() lands — that is an
+                    # explicit future decision, not inherited silently here.
                     PendingItem(
-                        index=i + 1, id=str(c.get("phone", "")),
-                        kind="lead_candidate", label=str(c.get("name", "")),
+                        index=i + 1, id=_sanitize_id(c.get("phone", "")),
+                        kind="lead_candidate", label="",
                     )
                     for i, c in enumerate(candidates)
                 ),
@@ -1001,7 +1024,7 @@ def _build_and_log_turn_envelope(identity, chat_id: str, session_snapshot: dict 
             batch_count = 0
         if batch_count:
             other_queues.append(PendingQueueAwareness(
-                queue_id=f"batch_queue:{identity.memory_key}",
+                queue_id=f"batch_queue:{_sanitize_id(identity.memory_key)}",
                 source="action_gateway",
                 kind="deferred_tool_call",
                 summary=f"{batch_count} item(s) queued behind a live contract",
@@ -1016,8 +1039,18 @@ def _build_and_log_turn_envelope(identity, chat_id: str, session_snapshot: dict 
             other_queues=tuple(other_queues),
         )
         log_turn_envelope(envelope, canonical_user_id=identity.memory_key)
-    except Exception:
-        logger.debug("[TurnEnvelope] build/log skipped due to error", exc_info=True)
+    except Exception as exc:
+        # Fail-open, not silent: a build failure must leave evidence, or the
+        # one turn most likely to have unusual state (the one that broke
+        # this) is exactly the one with no observation at all. error_type
+        # only (never str(exc)) — an inner KeyError/AttributeError message
+        # could echo back a dict key or attribute value that itself embeds
+        # user content; type(exc).__name__ never can.
+        logger.warning(
+            "[TurnEnvelope] build_failed error_type=%s entry_point=%s user=%s",
+            type(exc).__name__, entry_point, _sanitize_id(getattr(identity, "memory_key", "")),
+        )
+        logger.debug("[TurnEnvelope] build_failed detail", exc_info=True)
 
 
 def _tool_user_message(result) -> str:
