@@ -889,8 +889,23 @@ class ActionGateway:
     # keyword sets, same bare-digit-only-with-2+-live precedent (BUG-070) —
     # so this check can never drift from what those routes actually consume.
 
-    def is_own_resolution_event(self, canonical_user_id: str, text: str) -> bool:
-        live = self.find_live_contracts(canonical_user_id)
+    def is_own_resolution_event(
+        self, canonical_user_id: str, text: str, live: list | None = None,
+    ) -> bool:
+        """
+        live: an already-fetched find_live_contracts() result, reused instead
+        of querying again. None (default) preserves the original behavior —
+        fetch internally — so every existing caller (including direct tests
+        that call this with 2 positional args) is unaffected. Passing `live`
+        must be the SAME canonical_user_id's live contracts, fetched no
+        earlier than this identity's current turn began — this method does
+        not verify that; the caller owns that invariant. See app.py's
+        _apply_ingress_context_gate() for the one caller that passes it, and
+        docs/architecture/f52-unified-approval-runtime/audits/phase-4c/
+        TURN_OWNERSHIP_EXTENSION.md's Case C read-amplification fix.
+        """
+        if live is None:
+            live = self.find_live_contracts(canonical_user_id)
         if not live:
             return False
         stripped = text.strip()

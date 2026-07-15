@@ -228,6 +228,54 @@ blocks as before) so that resolving one contract also promotes the next `BatchQu
 that identity. Whatever Phase 1 wiring moves these parsers to run before the agent must carry this
 promotion side effect with them — it is not separable from the parser call itself today.
 
+## Case C read-amplification fix (Phase 0 self-regression, found and fixed)
+
+A production baseline comparison (2026-07-14 vs 2026-07-15) found a plain greeting turn's pending-
+ActionContract reads went from 1 to 3: the pre-existing ingress-gate check
+(`_apply_ingress_context_gate()` → `ActionGateway.is_own_resolution_event()` →
+`find_live_contracts()`) plus Phase 0's own two additions (`_build_and_log_turn_envelope()` at
+"1.7" and the Case C2 signal check after `sanitize_agent_response()`) — three independent queries
+for one identity's state within a single request, none of them reusing another's result.
+
+Fixed by establishing one per-turn snapshot and threading it through every consumer instead of
+re-querying:
+
+- `core/action_gateway.py`'s `is_own_resolution_event()` gained an optional `live` parameter
+  (`None` default — fully backward compatible for the direct-call tests in
+  `test_pr0_gates_structural.py`).
+- `app.py`'s `_apply_ingress_context_gate()` gained an optional `live_contracts` parameter, threaded
+  to `is_own_resolution_event()`.
+- The three `kind="text"` webhook handlers (Telegram, WhatsApp Twilio, WhatsApp Meta) each fetch
+  `find_live_contracts()` exactly once, pass it into `_apply_ingress_context_gate()`, and thread the
+  same value into `run_agent()` via a new `_live_contracts_snapshot` parameter.
+- `run_agent()` establishes this as the turn's single source at a new "1.65" step (reusing the
+  threaded-in value, or fetching once itself as a fallback for callers that don't thread it — e.g.
+  recursive `run_agent()` calls) and passes it to `_build_and_log_turn_envelope()`.
+- The Case C2 check's post-turn re-read was removed entirely, not just deduplicated: the code path
+  that reaches it (past the tool loop, past `sanitize_agent_response()`) is only reachable when
+  every confirm/disambiguation/cancellation/override route returned early instead — none of which
+  is on this path — so the only way contract/batch-queue state could differ from the turn-start
+  snapshot on this path is a `_queue_approval()` call succeeding this same turn, which is exactly
+  what `tool_results_log`'s `__approval_queued__` sentinel (already used for `approval_queued_this_turn`)
+  detects. The turn-start snapshot is therefore provably still accurate whenever that flag is False,
+  making a second query unnecessary rather than merely redundant.
+- One exception, deliberately left unfixed: the "2.55" confirm-word section's own
+  `find_live_contracts()` check was **not** consolidated — `test_c89_preview_confirmation.py`'s
+  `test_app_py_confirm_word_checks_gateway_before_flag_branch` statically asserts this exact call
+  appears there, ahead of the `FEATURE_ACTION_GATEWAY` flag branch, as an intentional structural
+  invariant. This branch never executes on a greeting turn (the reported regression's scenario) —
+  reverted after breaking that test, to keep the fix's blast radius to what the regression actually
+  required.
+
+Verified empirically (not just reasoned about): a direct `run_agent()`-level count (mirroring
+`test_session_snapshot.py`'s LL-11 pattern) showed 2 internal `find_live_contracts()` calls for a
+greeting turn before this fix, 1 when called without a threaded snapshot (fallback) after, and 0
+when called with one (the webhook-handler path) — see `test_pending_contract_read_amplification.py`.
+Combined with the webhook handler's own single explicit fetch, a full production request goes from
+3 reads to 1. `multi_contract_conflict`/Case C1 and Case C2 detection logic and output are
+unchanged — same signal, same conditions, only the data source changed from a fresh query to an
+already-fetched snapshot proven equivalent for this code path.
+
 ## What this extension deliberately does not do
 
 - It does not re-verify AP-13..AP-50's original file:line evidence — that remains
