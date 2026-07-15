@@ -1197,3 +1197,57 @@ already covered "wrong contract/outcome attribution" only implicitly via the gen
 no new graduation criterion or open risk is introduced, since this is a closed correctness fix to an
 already-planned mechanism, not a new capability. No further correction is required before implementation
 may begin. OH-01/OS-01/RC-01 remain out of scope until their own planning gates, per the approved order.
+
+---
+
+## 8. Implementation notes (post-approval, commit 81676ad → implementation)
+
+Per this document's own minimal-update rule: recorded here only because real line numbers/implementation
+details differ from what §4 sketched — no planning decision changed, no new signal, no new policy source.
+
+**§4.2(a)'s `_gw_result`-in-scope assumption was wrong.** The plan's sketch read `_gw_result` directly at
+the tool-loop's `__approval_queued__` append site, assuming it was already in scope there. In the real
+code, `_gw_result` is local to `_queue_approval()` (`app.py`, pre-implementation ~line 767) — the tool
+loop only ever received `_queue_approval()`'s plain `str` return, never the Gateway result object.
+Fix: `_queue_approval()`'s body was renamed to `_queue_approval_detailed()`, returning a dict
+(`{"message", "contract_id", "ok", "terminal_outcome"}`) instead of a bare string; `_queue_approval()`
+itself became a one-line wrapper (`return _queue_approval_detailed(...)["message"]`) preserving the
+exact string-returning contract two existing tests already depend on directly
+(`test_bug_canonical_tool_wiring.py`, `test_bug_batch_approval_preserved.py`) and that
+`_promote_next_batch_item()` (`app.py`, discards the return value) already relies on implicitly. The
+tool loop's approval-gate branch now calls `_queue_approval_detailed()` and builds the sentinel from its
+four fields directly, plus `"action_tool": tu.name` (from the real `tool_use` block, exactly per
+decision 4/requirement 4 — never from the dict).
+
+**§4.2(a)'s `"ok"`/`"terminal_outcome"` formula (`bool(contract_id)`) does not hold on every branch.**
+Applying it uniformly would have mis-classified the owner-notify-failure branch: `propose_action()` can
+already have created a real `contract_id` by that point (enforce-mode `FEATURE_ACTION_GATEWAY`), yet the
+user was never actually notified — a practically-broken, orphaned contract, not a usable one. Fix: each
+of `_queue_approval_detailed()`'s five early-return branches (duplicate fingerprint, cross-channel
+duplicate, Gateway rejection, persistence failure, owner-notify failure) explicitly sets
+`"ok": False, "terminal_outcome": "APPROVAL_QUEUE_ERROR", "contract_id": None` — matching §3.6's own
+branch-by-branch classification (which already listed owner-notify failure under `APPROVAL_QUEUE_ERROR`)
+rather than re-deriving it from `contract_id` truthiness. Only the genuine success return (end of the
+function) uses the `bool(contract_id)`-based formula, where it is valid.
+
+**Undefined-variable guard added.** `_gw_result = None` is now initialized before the
+`FEATURE_ACTION_GATEWAY` if/else in `_queue_approval_detailed()` — the shadow-mode branch's
+`except Exception` can leave `_gw_result` unassigned before the function reaches its success return,
+which would otherwise raise `NameError` instead of completing the (correct, existing) shadow-mode
+non-blocking behavior.
+
+**Real line numbers** (post-implementation, this branch): `_PA01_PHANTOM_APPROVAL_FALLBACK`/
+`_PA01_CAPABILITY_UNAVAILABLE_FALLBACK`/`_pa01_structured_terminal_outcome()` — `app.py` module scope,
+immediately after `AGENT_TIMEOUT`. `_queue_approval()`/`_queue_approval_detailed()` — `app.py`, where
+`_queue_approval()` previously stood. `ToolDenied`/`LeadsDirectWriteBlocked` catches and the
+`__approval_queued__` sentinel — `app.py`'s tool loop, unchanged relative position. The PA-01 matrix
+block itself — `app.py`, immediately after the `OwnershipSignal` try/except, immediately before
+`memory.add()`, exactly as §4.4/§4.5 specified. `_CONTRACT_REQUIRED_INTENT_TO_TOOL`,
+`intent_requires_contract_for_success()`, `expected_tool_for_intent()`, `contract_capable_this_turn()` —
+`core/router/risk_router.py`, between `_NORMAL_INTENTS` and `_HIGH_RISK_INTENTS`, exactly as §4.2(d)/(e)
+specified. `get_pa01_enforcement_state()` — `feature_flags.py`, alongside the two existing three-state
+accessors, exactly as §4.2(c) specified.
+
+**No deviation from any of decisions 1-13** (the approved implementation instructions) — every deviation
+above is a plumbing-level correction to how §4's sketch accesses already-correct state, not a change to
+the predicate, the policy source, the sentinel's required keys, the matrix, or the approved wording.
