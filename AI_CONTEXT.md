@@ -1,63 +1,64 @@
 # AI_CONTEXT.md
 > קרא אותי לפני כל דבר אחר. אם אני ישן מ-7 ימים — עדכן אותי לפני שאתה עובד.
 > זהו מסמך תדרוך (briefing), לא תיעוד מלא. לפרטים מלאים: `ROADMAP.md` (מקור אמת יחיד
-> למתוכנן), `BUG_AUDIT_LOG.md` (המקור **הכי עדכני** בפועל — ראה הערה למטה), `CHANGE_CONTROL_LOG.md`.
-> `CANONICAL_STATE.md` **לא קיים** בריפו.
+> למתוכנן), `BUG_AUDIT_LOG.md`, `CHANGE_CONTROL_LOG.md`.
+> `CANONICAL_STATE.md` **לא קיים** בריפו. `BOSS_CURRENT_STATE.md` מיושן (עודכן לאחרונה
+> 26/06/2026) — נשמר כארכיון, לא מקור אמת נוכחי.
 
-**עודכן:** 2026-07-13 · **main:** `b962773` (PR #326, P0 unhashable-Identity fix) · **סטטוס:** ראו §1
+**עודכן:** 2026-07-15 · **main:** `5c94e20` (PR #341, Single-Speaker fallback fix) · **סטטוס:** ראו §1
 
-**⚠️ פער תיעוד שהתגלה בעת יצירת מסמך זה:** `ROADMAP.md` (עודכן לאחרונה 10/07), `CHANGELOG.md` ו-`CHANGE_CONTROL_LOG.md` (שניהם עוצרים סביב 08/07) **לא** משקפים סבב עבודה שלם מ-10-12/07 (SPEC A1, BUG-094..101, BUG-099b/099b.1, BUG-102..105) — כל הסבב הזה מתועד רק ב-`BUG_AUDIT_LOG.md`, שהוא כרגע המקור העדכני ביותר בפועל, לא שלושת המסמכים ש"אמורים" להיות מקור האמת. יש לרענן את שלושתם (כולל בומפ לתאריך `עודכן:` ב-ROADMAP) לפני שסומכים עליהם לסטטוס "עכשווי".
+**⚠️ פער תיעוד:** `ROADMAP.md` (עודכן לאחרונה 13/07, `b962773`) ו-`CHANGELOG.md`/`CHANGE_CONTROL_LOG.md`/`BUG_AUDIT_LOG.md` (עוצרים באותה נקודה, PR #326) **לא** משקפים ~15 PRs שמוזגו מאז (#327-#341): Phase 4B-1A/1B/2 (durable proposals+claims, Approvals→projection), כלי ה-rollout ל-Phase 4B, תוכנית F52 Unified Approval Runtime, ותיקון Single-Speaker (PR #341). שום דבר מזה **לא** נבדק כרגע מול פרודקשן — לא VERIFIED, לא CRITICAL, פשוט UNVERIFIED. יש לרענן את ROADMAP/CHANGELOG/CHANGE_CONTROL_LOG/BUG_AUDIT_LOG (כולל בומפ `עודכן:` ב-ROADMAP) לפני שסומכים עליהם לסטטוס עכשווי.
 
 ---
 
 ## 1. Executive Summary
 
-- הבוט חי בפרודקשן (Telegram + WhatsApp/Twilio) על `main`, Identity→Router→Context→Agent, Airtable כ-CRM.
-- סבב 10-12/07 סגר **SPEC A1** (כתיבות Airtable הופכות ל-fail-closed אטומי — dropped fields חוסמים כתיבה כליל, במקום payload חלקי בשקט) ושרשרת ארוכה של באגי חילוץ-ליד מ-WhatsApp (BUG-094..101, BUG-099b) — **רובם VERIFIED IN PROD** עם רשומות Airtable אמיתיות/לוגים חיים.
-- **BUG-099b.1** (PR #306) התמזג הרגע ל-`main` (`a04ec47`) אך **עדיין לא deployed/verified בפרודקשן** — אין לטעון "תוקן בחיים" עד אימות Render hash + בדיקה חוזרת על הטקסט המדויק שגרם לבאג.
-- נזק ידוע קיים כרגע ב-Airtable: רשומת ליד אמיתית (`recRvK6hFTNgyj8ag`, "יעל רייס") נכתבה בעבר עם `Name="חדרים קומה ראשונה"` (BUG-099 לפני התיקון) — טרם תוקנה ידנית.
-- רוב דגלי הפיצ'רים עדיין כבויים בכוונה: `FEATURE_AUTO_CAPTURE`, `LEAD_SCORING`, `LEAD_MEMORY`, `FOLLOWUP_AUTOMATION`, `FEATURE_DECISION_HUB` — קוד מוכן/ממוזג, לא מופעל בפרוד. `FEATURE_INGRESS_ENVELOPE` נשאר יוצא-דופן: ברירת מחדל **ON**.
-- שני items בעדיפות 🔴 דחוף מסבבים קודמים עדיין פתוחים ולא טופלו: C81-FU (אימות משלוח ב-Recovery) ו-C82-FU (gate מרכזי ל-EMERGENCY_STOP_AUTOMATION).
-- 4 ממצאים חדשים מ-12/07 נרשמו בלבד, לא תוקנו: BUG-102/103/104 ("מנגנון קיים אך לא מחובר לחיים" — normalized_text נזרק, EvidenceTrace לא נשמר, Core Reasoning Layer ללא caller חי) ו-BUG-105 (טלפון בין-לאומי עם מקף פנימי נשמט בשקט).
-- אין harness pytest — בדיקות הן סקריפטים עצמאיים (`python3 <file>.py`); CI מריץ את כולן על כל PR/push ל-main.
+- הבוט חי בפרודקשן (Telegram + WhatsApp/Twilio) על `main`, Identity→Router→Context→Agent, Airtable כ-CRM. אין שינוי במסלול הזה מהעדכון הקודם.
+- מאז 13/07: שרשרת ארוכה של עבודת תשתית על **Phase 4B — Atomic Claims** (durable ActionContract persistence ב-PostgreSQL, "Approvals" הופך ל-projection לא-אותנטי של ActionContracts, כלי rollout מלאים — canary/readiness/reconciliation/repair). כל זה **קוד מוכן, לא מופעל**: `FEATURE_ATOMIC_CLAIMS` ו-`FEATURE_ACTION_CONTRACT_PERSISTENCE` שניהם עדיין כבויים כברירת מחדל (`feature_flags.py:50-51`), הפעלה בפרודקשן **טרם התבצעה**.
+- תוכנית ה-rollout שתועדה (`docs/PHASE_4B_ROLLOUT_AND_CUTOVER.md`) היא flip בינארי + קנרי יחיד — **אין** בה תוכנית %-staged (5%→25%→100%) שנזכרה קודם כ"נדרש"; אם רוצים staged rollout אמיתי, הוא עדיין לא נכתב.
+- נפתח `docs/architecture/f52-unified-approval-runtime/` — תוכנית מיזוג ל-runtime אישורים אחד. **תכנון/מחקר בלבד, אפס קוד** — README מסמן "Planning Gate", CUTOVER_PLAN עדיין draft ריק, 9 החלטות תכנון (D-001..D-009) סגורות ב-14/07 אך ללא build.
+- **PR #341 (החדש ביותר, `e26df5a`)** תיקן 2 באגים חיים ב-Single-Speaker: (א) הודעת אישור-ממתין נדרסה בטעות בפולבאק כשלון גנרי; (ב) טקסט הצלחה כפול הוצג פעמיים. **קוד מוכן, ממוזג — לא נבדק בפרודקשן עדיין.**
+- שני items בעדיפות 🔴 דחוף מסבבים קודמים (C81-FU, C82-FU) — אין ראיה שטופלו, נחשבים עדיין פתוחים.
+- נזק ידוע שהיה קיים ב-Airtable (רשומת ליד `recRvK6hFTNgyj8ag`, "יעל רייס" עם `Name` שגוי) — לא אומת שתוקן ידנית מאז הדיווח הקודם.
+- אין harness pytest — בדיקות הן סקריפטים עצמאיים; CI מריץ את כולן על כל PR/push ל-main.
 
 ---
 
 ## 2. Current System State
 
-**עובד בפרודקשן:** Telegram + WhatsApp(Twilio) inbound עם Identity resolution; Airtable Gateway כנתיב-כתיבה יחיד, כעת **fail-closed אטומי** (SPEC A1); Approval flow; Daily Digest; Finance Pulse; TMA; Cost Watchdog; C94 Ingress Envelope (ON כברירת מחדל); צינור חילוץ-ליד מ-WhatsApp (batch/single, chat-export, bidi-control stripping) — מאומת חי אחרי BUG-094..101/099b.
+**עובד בפרודקשן:** Telegram + WhatsApp(Twilio) inbound עם Identity resolution; Airtable Gateway כנתיב-כתיבה יחיד (fail-closed אטומי, SPEC A1); Approval flow (Airtable `Approvals` כרגע עדיין הנתיב האמיתי — ה-projection החדש דורם); Daily Digest; Finance Pulse; TMA; Cost Watchdog; C94 Ingress Envelope (ON כברירת מחדל); צינור חילוץ-ליד מ-WhatsApp.
 
 **מיושם חלקית / ממתין להפעלה (קוד מוכן, flag כבוי):**
-- C89 Capture Policy — נסגר CLOSED/VERIFIED בהחלטת הבעלים, `FEATURE_AUTO_CAPTURE` נשאר כבוי בכוונה.
-- C90 (xlsx/csv), Lead Scoring/Memory/Followup (N02-N04) — code done, flags off.
-- Decision Hub (Stages 0-6) — ממוזג ל-main; `FEATURE_DECISION_HUB` כבוי, חסום עד production evidence.
-- `IngressEnvelope.normalized_text` נבנה אך נזרק בנתיב טקסט (BUG-102); `EvidenceTrace` נבנה ונרשם אך אף פעם לא נשמר ל-DB (BUG-103); Core Reasoning Layer / `leads_adapter.py` ממוזגים, אפס קוראים חיים (BUG-104).
-- **Phase 4B0 — Atomic Claims (13/07, PR #325+#326, ראו C110/C111 ב-CHANGE_CONTROL_LOG.md):** `FEATURE_ATOMIC_CLAIMS` — קוד מוכן ומאומת ב-staging (real PostgreSQL + Telegram confirmation smoke, לוג חי מלא), **Production נשאר כבוי בכוונה** (`FEATURE_ATOMIC_CLAIMS=false`). שרשרת תקריות P0 אמיתיות תוקנה ברצף: (1) עקיפת רכישת claim בכל 4 מסלולי האישור, (2) אובדן זהות + סיווג-הצלחה שגוי דרך ה-wrapper האטומי, (3) `unhashable type: 'Identity'` שנבע מקריאה פוזיציונלית ל-executor האמיתי (`contract_id` הוחלף בשקט ב-`Identity`), (4) `dispatch_tool()` מעולם לא החזיר בפועל `DispatcherOutcome` — כל ביצוע אמיתי היה נכשל ב-"type mismatch" גם אחרי תיקון הזהות. עדיין נדרש לפני הפעלה: staged rollout plan (5%→25%→100%) ותקופת תצפית.
+- **Phase 4B — Atomic Claims (PostgreSQL):** durable proposal persistence (4B-1A), durable execution-ledger lifecycle (4B-1B), Approvals הופך ל-projection לא-אותנטי + `tma_write` דורש claim חי לפני כתיבה (4B-2). כל השכבה נעולה מאחורי `FEATURE_ACTION_CONTRACT_PERSISTENCE`+`FEATURE_ATOMIC_CLAIMS` (שניהם OFF) — "dormant" במפורש בקוד. כלי rollout (`tools/phase_4b_*`) קיימים ומתועדים אך לא הופעלו על פרודקשן.
+- **F52 Unified Approval Runtime** — תוכנית מיזוג ל-4 מנגנוני אישור קיימים למנוע אחד. תכנון בלבד (README="Planning Gate", CUTOVER_PLAN=draft ריק). אין קוד production.
+- C90 (xlsx/csv), Lead Scoring/Memory/Followup (N02-N04), Decision Hub (Stages 0-6) — ללא שינוי מהעדכון הקודם: code done, flags off.
+- `IngressEnvelope.normalized_text` נבנה ונזרק (BUG-102); `EvidenceTrace` נבנה ולא נשמר ל-DB (BUG-103); Core Reasoning Layer ללא קוראים חיים (BUG-104) — ללא עדכון סטטוס.
 
 **חסום:**
-- Decision Hub activation — התיקון ל-BUG-DH-03/04 (Formula Injection) ממוזג, עדיין אין production evidence.
-- WhatsApp outbound אמיתי — honest stub, ממתין לאישור Meta Cloud API.
-- C93 (OCR/כרטיסי ביקור) — חסום על צבירת ≥2 שבועות `AgentObservation` אמיתיים (לא מתקיימים כי C89 לא הופעל).
-- BUG-099b.1 — merged אך לא deployed/verified (ראו §1).
+- Decision Hub activation — ממתין ל-production evidence.
+- WhatsApp outbound אמיתי — honest stub, ממתין ל-Meta Cloud API.
+- C93 (OCR) — חסום על צבירת `AgentObservation`.
+- BUG-099b.1, PR #341 — ממוזגים, לא deployed/verified בפרודקשן.
 
 ---
 
-## 3. Completed Since Last Update (08/07 → 12/07)
+## 3. Completed Since Last Update (13/07 → 15/07)
 
-1. **SPEC A1 (10/07)** — `airtable_gateway.py`'s `airtable_patch`/`airtable_create` חוסמים כתיבה כליל אם `validate_airtable_fields()` השמיטה שדות, במקום לכתוב payload חלקי בשקט. משפיע על כל נתיב כתיבה בקוד. 32/32 טסטים.
-2. **BUG-094/095/096/097 (10/07)** — שרשרת bleed בין לידים בדיקטציית batch: חלון-שם דלף בין מועמדים, `_at_find_lead` נפל ל-name-only match, domain מטא-router זלג לשדה Domain, טלפון פגום באמצע batch "בלע" בלוק שכן, ופעלי-כוונה (מעוניין/רוצה) נדבקו לשם. תוקן ב-`core/ingress_classifier.py`'s `_extract_lead_candidates()` (המימוש **החי** — לא `core/lead_candidate_handler.py`'s גרסה המתה, שתוקנה בטעות תחילה).
-3. **BUG-098 (10/07)** — `_FOLLOWUP_WORDS` (substring match) תפס "קומה" בטעות כ-"ומה" (המשך-batch), חטף הודעות ליד חדשות והחזיר "✅ נשמר בהצלחה" כוזב פעמיים ברצף בלי שום ליד נוצר בפועל. תוקן ל-word-boundary regex. **VERIFIED IN PROD.**
-4. **BUG-099/099a/099b (10-12/07)** — המשך חקירת BUG-098: חלון חילוץ-שם מעוגן ל-±80 תווים סביב הטלפון בלבד, בלי העדפה שם-מול-תיאור-נכס; שם אמיתי ("יעל רייס") הפך בפועל ל-`Name="חדרים קומה ראשונה"` ברשומת Airtable אמיתית (ראו §1). 099a הרחיב `_NAME_STOP`; **099b (PR #305)** שינה אסטרטגיה — פיצול הרצף לסגמנטים לפי מילות-עצירה ובחירת הארוך ביותר. **VERIFIED IN PROD** — 5 בדיקות חיות, 2 רשומות Airtable תקינות.
-5. **BUG-101a/b/c (12/07, PR #304)** — ייבוא-ייצוא WhatsApp: תווי כיווניות (RLM/LRM) שברו זיהוי Tier-4; `_BLOCK_SEP` לא זיהה `[תאריך, שעה] שם:` כגבול-הודעה; `_SENDER_LINE_RE` לא סבל קידומת timestamp. **VERIFIED IN PROD** — grep-anchored על `origin/main` + Render deploy מאושר.
-6. **BUG-099b.1 (12/07, PR #306, `a04ec47`)** — helper משותף `_is_name_stop_token()` סוגר call-site שני (`_candidate_confidence()`) שפספס טוקנים עם קידומת-יחס חד-אותית ("בקומה"), שהופקו כשם-ליד שגוי כשלא היה שם בכלל. **ממוזג ל-main, לא deployed/verified.**
-7. **נרשמו (לא תוקנו):** BUG-102/103/104 (מנגנון-קיים-לא-מחובר), BUG-105 (טלפון בין-לאומי עם מקף פנימי נשמט בשקט), פער UX ב-preview שלא מאוחד (single-lead/batch/disambiguation) — כל אחד ב-PR נפרד עתידי.
+1. **Phase 4B-1A (PR #329, #331) — Durable ActionContract proposals**: פרסיסטנס אמיתי (PostgreSQL) + recovery lookups, מחליף את ה-in-memory contract store. Fail-closed על שגיאות lookup.
+2. **Phase 4B-1B (PR #332) — Durable execution-ledger lifecycle**: מחזור-חיים מלא (`ActionContract` lifecycle) נשמר, לא רק ב-RAM.
+3. **Phase 4B-2 (PR #333, #334) — Approvals הופך ל-projection לא-אותנטי**: טבלת Airtable `Approvals` היא עכשיו תצוגה בלבד של ה-`ActionContracts` הקנוני; `tma_write` (כלי חדש, internal-only) דורש claim חי (`EXECUTING`) מה-repository לפני כל כתיבה — סוגר עקיפת-dispatch ישירה וזיוף-זהות בקבלות. פעיל רק כששני הדגלים ON (שניהם כרגע OFF) — dormant בפרודקשן.
+4. **Phase 4B rollout tooling (PR #335, #336, #337, #338)** — סקריפטי readiness/canary-verify/reconciliation/repair-projections (`tools/phase_4b_*`) + `docs/PHASE_4B_ROLLOUT_AND_CUTOVER.md` (gates G1-G6, deploy sequence, rollback). **הערה חשובה:** זו תוכנית flip בינארי + קנרי יחיד — לא תוכנית %-staged כפי שצוין קודם כדרוש.
+5. **F52 Unified Approval Runtime — פתיחת תוכנית (commit ba20796, 14/07)**: מסמכי תכנון/מחקר בלבד תחת `docs/architecture/f52-unified-approval-runtime/` (audit maps, decision log עם 9 החלטות D-001..D-009, cutover plan כ-draft ריק). אפס שינוי קוד.
+6. **Stage-B identity fixture fixes (PR #339, #340)** — תיקוני קובץ-בדיקה בלבד (`test_stage_b_full_suite.py`), אין שינוי בקוד production.
+7. **PR #341 — Single-Speaker: תוקנו 2 באגים חיים** (תקרית `contract_id=9c6ff34e...`): (א) `sanitize_agent_response()` דרס בטעות הודעת אישור-ממתין שכבר נשלחה בפולבאק-כשלון גנרי; תוקן ע"י sentinel דיכוי. (ב) `ActionGateway._execute_contract()` הציג טקסט הצלחה כפול; תוקן להחזיר רק את `compose_status_reply()`. 23 בדיקות חדשות + מלוא ה-suite עובר. **קוד מוכן, ממוזג — לא נבדק בפרודקשן.**
+8. **אין רישום** ל-#2-#7 לעיל ב-`BUG_AUDIT_LOG.md`/`CHANGE_CONTROL_LOG.md` — פער תיעוד פעיל, ראו §0.
 
 ---
 
 ## 4. Next Priorities
 
-1. **🔴 Production-verify BUG-099b.1** — Render deploy hash מול `a04ec47`, ואז בדיקה חוזרת על הטקסט המדויק ("...בקומה חמישית טלפון...") שמצפה ל-`candidates=[]`/Tier 5, לא `Name="בקומה"`.
-2. **תיקון ידני** לרשומת `recRvK6hFTNgyj8ag` ("יעל רייס", כרגע `Name="חדרים קומה ראשונה"`) ב-Airtable — נזק אמיתי שכבר קיים, לא תלוי בקוד.
-3. **BUG-099c** — fallback form כש-LCH נכשל בחילוץ אבל ה-Router בטוח שזו כוונת create_lead (הפריט הבא בתור בשרשרת BUG-099).
-4. **🔴 C81-FU / C82-FU** — אימות משלוח בפועל ב-Recovery לפני סימון הושלם; gate מרכזי אחד ל-`EMERGENCY_STOP_AUTOMATION` לפני כל scheduler job (היום נאכף רק ב-followup/payment reminders). שני הפריטים משבבים קודמים, עדיין לא טופלו.
-5. **רענון תיעוד** — לעדכן `ROADMAP.md`/`CHANGELOG.md`/`CHANGE_CONTROL_LOG.md` עם סבב 10-12/07 (כולל בומפ תאריך `עודכן:` ב-ROADMAP) — שלושתם כרגע לא-עקביים מול `BUG_AUDIT_LOG.md` (ראו §1).
+1. **רענון תיעוד** — לעדכן `ROADMAP.md` (כולל בומפ `עודכן:`), `CHANGELOG.md`, `CHANGE_CONTROL_LOG.md`, `BUG_AUDIT_LOG.md` עם כל סבב Phase 4B-1/4B-2/F52/PR #341 — 4 המסמכים כרגע לא-עקביים מול מצב `main` בפועל.
+2. **🔴 Production-verify PR #341** — לוודא ב-Render שה-hash החדש פרוס, ואז לשחזר את תקרית ה-Single-Speaker המקורית (`contract_id=9c6ff34e...`) ולוודא ששני התיקונים אכן מונעים אותה חי.
+3. **החלטה על Phase 4B staged rollout** — אם דרוש %-staged אמיתי (5%→25%→100%) לפני הפעלת `FEATURE_ATOMIC_CLAIMS`/`FEATURE_ACTION_CONTRACT_PERSISTENCE` בפרודקשן, התוכנית עדיין לא קיימת בכתב — לכתוב אותה או להחליט במפורש על מודל ה-flip-הבינארי+קנרי הקיים.
+4. **🔴 C81-FU / C82-FU** — אימות משלוח בפועל ב-Recovery; gate מרכזי ל-`EMERGENCY_STOP_AUTOMATION` לפני כל scheduler job. שני הפריטים משבבים קודמים, עדיין ללא ראיה שטופלו.
+5. **תיקון ידני** לרשומת `recRvK6hFTNgyj8ag` ("יעל רייס") ב-Airtable — לא אומת שבוצע.
