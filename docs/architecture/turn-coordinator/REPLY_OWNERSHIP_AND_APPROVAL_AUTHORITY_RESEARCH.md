@@ -4,18 +4,17 @@ Program: TurnCoordinator (consumes F52/Phase 4C audits + this program's own prio
 Status: **RESEARCH ONLY.** No code changed by this document. No implementation started.
 Baseline: `main` `6d7875b` (2026-07-15), the commit this research evaluates.
 
-**Naming note, flagged up front, not decided unilaterally:** this document's §2 is titled
-"Case C — Phantom Approval Prompt" per explicit instruction. That name collides with the
-already-existing `CASE_C_CLARIFICATION_CONTINUITY.md` ("Case C — Clarification breaks operational
-continuity", with its own C1/C2 sub-cases). The two are related — Phantom Approval Prompt is the
-single-turn, no-clarification-needed manifestation of the same underlying gap C2 already names —
-but they are not the same scenario and using the same top-level letter for both will confuse anyone
-who greps "Case C" later. Recommend the owner decide the final naming (e.g. renumber this one Case D,
-or fold it into the existing doc as a named sub-case) — not decided here.
+**Naming resolved by owner decision (superseding the original note below).** §2 is now
+**PA-01 — Phantom Approval Prompt**. §1 (Agent Ownership Hijack) is **OH-01**; the two specific
+sub-findings within it — false cancellation/completion (§1.4 item 2) and the cross-request
+concurrency race (§1.3c/§1.4 item 3) — are **OS-01** and **RC-01** respectively. "Case C" in this
+program's docs now refers unambiguously to `CASE_C_CLARIFICATION_CONTINUITY.md` (clarification-
+continuity, C1/C2) only. See `PA-01_PLANNING_GATE.md` for the approved implementation plan for PA-01
+specifically — OH-01/OS-01/RC-01 remain research-only per the approved implementation order.
 
 ---
 
-# Part 1 — Agent Ownership Hijack
+# Part 1 — Agent Ownership Hijack (OH-01)
 
 ## 1.1 Reply/ownership paths per channel, as they exist today
 
@@ -112,7 +111,7 @@ evidence this research adds; it was not previously named as its own category in 
    written.
 
 **Conclusion for 1.4:** `OwnershipSignal` is a correct and useful *detector* for the one scenario it
-targets, and this research's own Part 2 leans on it as the evidentiary base for Case C /
+targets, and this research's own Part 2 leans on it as the evidentiary base for PA-01 /
 Phantom Approval Prompt. It is not, and was never claimed to be, a general hijack-coverage
 mechanism — items 2 and 3 above are real, unaddressed gaps that a structural invariant (not another
 pattern list) must close.
@@ -151,7 +150,7 @@ established "observe, then decide, then enforce" phasing.
 
 ---
 
-# Part 2 — Case C / "Phantom Approval Prompt" — Commitment Without Contract
+# Part 2 — PA-01 / "Phantom Approval Prompt" — Commitment Without Contract
 
 ## 2.1 Reproduction of the "פר 349" scenario, traced through code
 
@@ -267,7 +266,7 @@ part of the current gap, not a mitigation of it.
 | 3 | **`MessageKind.APPROVAL_PROMPT` + structural gate before send** | Every outbound message is tagged with a `MessageKind` (per the original TurnCoordinator proposal, Phase 4); a structural gate refuses to send anything tagged/shaped as `APPROVAL_PROMPT` unless a `contract_id` accompanies it | Reuses the proposal's own already-designed `MessageKind` taxonomy — no new concept; the gate is a single checkpoint, easy to reason about and test | `MessageKind` tagging is currently unbuilt (Phase 4, not started) — this alternative is not available until that phase lands; still needs *something* to decide the tag (back to needing gate 1 or 2's logic underneath) |
 | 4 | **Separate `agent_text` from `system_messages` as distinct types** | Two disjoint message classes at the type level; `system_messages` (which includes real approval prompts) can only be constructed by system code, never assigned from `agent_text` | Strong compile-time-adjacent guarantee if the type boundary is enforced in code (e.g. distinct dataclasses, no implicit string coercion) | Large refactor surface — every current `str`-typed reply becomes two types; retrofitting 5 channels' worth of send call sites; highest implementation cost of the six |
 | 5 | **Deterministic fallback when the agent proposes an action but no contract was created** | After the agent's turn, if `OwnershipSignal.is_hijack`-shaped state is detected (claimed + no tool_use + nothing queued), the reply is replaced with a deterministic fallback ("אני יכול להכין את זה — לחץ כאן/כתוב שוב כדי שאכין הצעה אמיתית"), not sent as-is | Directly closes the reproduced incident with the least new architecture — reuses exactly what `OwnershipSignal` already computes; symmetrical with the existing Single-Speaker fallback pattern | Reactive, not preventive — still requires the detection step (§2.4's limits apply to *detection accuracy*, even though this alternative doesn't rely on detection for *enforcement decisions* about real contracts, only for *this one* fallback trigger); best paired with 1 or 3, not a full replacement for either |
-| 6 | **Block all agent replies after a tool/approval handoff** | Once a turn has queued a real approval or executed a tool this turn, no further agent text is sent at all for the rest of that turn | Already effectively true today for the C54/Single-Speaker same-turn case (§1.3a) — this generalizes an existing, working pattern | Does not address Case C / Phantom Approval Prompt at all — that scenario has *zero* tool calls, so there is no "handoff" to block after; solves a different problem (§1.3a/b) than the one this Part is about |
+| 6 | **Block all agent replies after a tool/approval handoff** | Once a turn has queued a real approval or executed a tool this turn, no further agent text is sent at all for the rest of that turn | Already effectively true today for the C54/Single-Speaker same-turn case (§1.3a) — this generalizes an existing, working pattern | Does not address PA-01 / Phantom Approval Prompt at all — that scenario has *zero* tool calls, so there is no "handoff" to block after; solves a different problem (§1.3a/b) than the one this Part is about |
 
 **Recommendation:** Alternative 1 (Gateway-only Approval Prompt emission) as the structural
 enforcement mechanism, with Alternative 5 (deterministic fallback) as its companion for the specific
@@ -387,7 +386,7 @@ already-speced Phase 3, not a new design. Pattern/regex-based `validate_agent_ou
 valuable as the **detection input** to both, never as the **enforcement decision** itself (§2.4).
 
 **Decisions requiring owner approval before implementation starts:**
-- The Case C / Case D naming resolution (flagged at the top of this document).
+- ~~The Case C / Case D naming resolution~~ — resolved: PA-01/OH-01/OS-01/RC-01 (see top of document).
 - Which of the six Part 2 alternatives (or combination) to build, and in what order relative to
   Part 1's `reply_owner` claim (they are complementary, not sequential-dependent, but touch
   overlapping code).
