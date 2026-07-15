@@ -863,6 +863,53 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
     return f"⏳ הפעולה ממתינה לאישור: {label}\nשלח *מאשר* כדי לאשר (בכל ערוץ)."
 
 
+def _promote_next_batch_item(canonical_user_id: str) -> None:
+    """
+    BUG-BATCH-DISCARD: after any approval-resolution attempt (confirm word,
+    disambiguation, combined word, cancellation, or the Telegram callback),
+    check whether this identity has batch items deferred by the tool loop
+    (event_bus.batch_queue) and — only if no ActionContract is currently
+    live for them — promote the next one into a real, notified contract via
+    the exact same _queue_approval() path the first task used.
+
+    Safe to call unconditionally, including after a resolution attempt that
+    didn't actually resolve anything (e.g. route_combined_word() returning
+    None): find_live_contracts() being non-empty is the guard, so nothing
+    is promoted while something for this identity is still pending.
+    """
+    if not canonical_user_id:
+        return
+    try:
+        from core.action_gateway import action_gateway as _gw_promote
+        from event_bus import batch_queue as _batch_queue
+        if _gw_promote.find_live_contracts(canonical_user_id):
+            return
+        item = _batch_queue.pop_next(canonical_user_id)
+        if not item:
+            return
+        logger.info(
+            "[BatchQueue] promoting next queued item for user=%s | tool=%s",
+            _sanitize_id(canonical_user_id), item["tool_name"],
+        )
+        _queue_approval(
+            item["tool_name"], item["tool_inputs"], item["user_chat_id"],
+            item["channel"], item.get("user_text", ""),
+        )
+    except Exception as exc:
+        logger.error(
+            "[BatchQueue] promotion failed for user=%s: %s",
+            _sanitize_id(canonical_user_id), exc, exc_info=True,
+        )
+
+
+def _gateway_reply_with_promotion(reply, canonical_user_id: str):
+    """Thin wrapper: runs _promote_next_batch_item() as a side effect, then
+    returns reply unchanged — lets every ActionGateway resolution call site
+    opt into batch promotion with a one-line change."""
+    _promote_next_batch_item(canonical_user_id)
+    return reply
+
+
 def _tool_user_message(result) -> str:
     """Extract display text from a C53-A structured tool result (dict) or pass through a plain string."""
     if isinstance(result, dict):
@@ -1340,6 +1387,10 @@ def _handle_approval_callback_impl(cq) -> None:
         except Exception:
             pass
         bot.answer_callback_query(cq.id, "✅ בוצע!")
+        # BUG-BATCH-DISCARD: this contract just resolved — promote the next
+        # deferred batch item for this identity, if any and if none other is
+        # still live.
+        _promote_next_batch_item(canonical_user_id)
 
     elif action == "reject":
         item = bus.pop(action_id)
@@ -1363,6 +1414,13 @@ def _handle_approval_callback_impl(cq) -> None:
         except Exception:
             pass
         bot.answer_callback_query(cq.id, "🚫 בוטל")
+        # BUG-BATCH-DISCARD: same as the approve branch above — this is the
+        # legacy button-reject path, which (pre-existing, out of scope here)
+        # does not sync-cancel the corresponding ActionContract, so
+        # find_live_contracts() may still show it live and correctly defer
+        # promotion until that's resolved through another path.
+        if item:
+            _promote_next_batch_item(item["payload"].get("canonical_user_id", ""))
 
     else:
         bot.answer_callback_query(cq.id, "⚠️ פעולה לא מוכרת")
@@ -1628,7 +1686,10 @@ def run_agent(
         if _override_match:
             _override_code = _override_match.group(1)
             from core.action_gateway import action_gateway as _gw_ow
-            return _gw_ow.route_override_word(identity.memory_key, _override_code)
+            return _gateway_reply_with_promotion(
+                _gw_ow.route_override_word(identity.memory_key, _override_code),
+                identity.memory_key,
+            )
 
         # BUG-070 gap #1 — "כן 1"/"אשר 3"/"לא 2": אישור/דחייה ממוקדת בהודעה
         # אחת, בלי לדרוש קודם רשימה ממוספרת. חייב לרוץ *לפני* בדיקת
@@ -1646,7 +1707,7 @@ def run_agent(
             )
             if _out_meta is not None:
                 _out_meta["source_module"] = "action_gateway"
-            return _combined_reply
+            return _gateway_reply_with_promotion(_combined_reply, identity.memory_key)
 
         # §4 disambiguation — "הראשונה"/"1"/etc. כשה-Gateway הציג רשימת בחירה.
         # חייב להיות לפני בדיקת "?" ולפני _CONFIRM_WORDS כדי שלא ייפול ל-Agent.
@@ -1663,7 +1724,7 @@ def run_agent(
                 )
                 if _out_meta is not None:
                     _out_meta["source_module"] = "action_gateway"
-                return _disambig_reply
+                return _gateway_reply_with_promotion(_disambig_reply, identity.memory_key)
 
         # §8 — שאלות סטטוס ("?", "נכשל?", "אושר?") לא מהוות אישור לעולם.
         # §7 §20 — שאלות "נוספה?" / "הצליח?" נענות מה-ExecutionLedger בלבד, לא מטקסט Agent.
@@ -1704,7 +1765,7 @@ def run_agent(
                 )
                 if _out_meta is not None:
                     _out_meta["source_module"] = "action_gateway"
-                return _gw_reply
+                return _gateway_reply_with_promotion(_gw_reply, identity.memory_key)
 
             # BUG-058: no live Tier-1 ActionGateway contract — check the
             # Tier-2 batch lead-preview next (core/lead_candidate_handler.py's
@@ -1733,7 +1794,7 @@ def run_agent(
                 )
                 if _out_meta is not None:
                     _out_meta["source_module"] = "action_gateway"
-                return _gw_reply
+                return _gateway_reply_with_promotion(_gw_reply, identity.memory_key)
             else:
                 # Stage A fallback (flag כבוי)
                 from event_bus import bus as _bus_cw
@@ -1771,7 +1832,7 @@ def run_agent(
                 )
                 if _out_meta is not None:
                     _out_meta["source_module"] = "action_gateway"
-                return _cancel_reply
+                return _gateway_reply_with_promotion(_cancel_reply, identity.memory_key)
 
             # BUG-058: no live Tier-1 contract was cancelled (route_cancellation_word
             # returned None) — check the Tier-2 batch lead-preview next. Same
@@ -2084,19 +2145,50 @@ def run_agent(
                             })
                             continue
 
-                    # BUG-V1-MULTI-PENDING-PAYLOAD-CONTAMINATION: one mutating
-                    # approval per agent turn; block the second unconditionally.
+                    # BUG-V1-MULTI-PENDING-PAYLOAD-CONTAMINATION originally
+                    # blocked (discarded) any second mutating approval in the
+                    # same turn outright. The payload-contamination it cited
+                    # was never actually reproduced — dict(tu.input) already
+                    # made an independent copy per call both before and after
+                    # that fix, and each _queue_approval() call already
+                    # creates its own independent EventBus item +
+                    # ActionContract. The blanket block conflated "prevent a
+                    # hypothetical shared-memory hazard" with "prohibit more
+                    # than one pending action per turn", silently discarding
+                    # every task beyond the first in a multi-task request.
+                    #
+                    # BUG-BATCH-DISCARD fix: every mutating tool call this
+                    # turn is now durably preserved. The first still queues
+                    # normally (live ActionContract + Telegram notification).
+                    # The rest are held in batch_queue (event_bus.py) rather
+                    # than also becoming live contracts — ActionGateway's
+                    # existing len(live)>1 disambiguation closes sibling
+                    # contracts when one is picked (§21, commit 6752ec0),
+                    # which is correct for choosing among alternative
+                    # interpretations of ONE request but would silently
+                    # reject the other batch items here, and would also
+                    # break the current single-contract direct-approval UX
+                    # the moment >1 contract is simultaneously live. Each
+                    # queued item is promoted into its own live contract +
+                    # notification one at a time, only once nothing is live
+                    # for this identity — see _promote_next_batch_item().
                     if _mutating_approvals_this_turn >= 1:
-                        logger.warning(
-                            f"[Approval] multi-pending blocked: {tu.name} | "
-                            f"turn already has 1 approval queued | user={_sanitize_id(chat_id)}"
+                        from event_bus import batch_queue as _batch_queue
+                        _batch_queue.enqueue(identity.memory_key, {
+                            "tool_name":   tu.name,
+                            "tool_inputs": dict(tu.input),
+                            "user_chat_id": chat_id,
+                            "channel":     channel,
+                            "user_text":   user_text,
+                        })
+                        _label = _describe_tool_call(tu.name, dict(tu.input))
+                        logger.info(
+                            f"[BatchQueue] deferred (turn already has 1 approval queued): "
+                            f"{tu.name} | user={_sanitize_id(chat_id)}"
                         )
                         tool_results.append({
                             "type": "tool_result", "tool_use_id": tu.id,
-                            "content": (
-                                "⚠️ לא ניתן לבצע מספר פעולות הדורשות אישור בו-זמנית. "
-                                "אנא אשר את הפעולה הנוכחית קודם."
-                            ),
+                            "content": f"⏳ נשמר בתור לאישור אחרי הפעולה הראשונה: {_label}",
                         })
                         continue
                     result = _queue_approval(

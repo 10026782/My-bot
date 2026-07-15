@@ -2344,4 +2344,39 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **Merged:** לא עדיין
 - **Deployed:** לא
 - **Verified בפרודקשן:** לא רלוונטי — אין שינוי live (singleton עדיין לא מחובר, אף לפני ואף אחרי התיקון)
+
+---
+
+## BUG-BATCH-DISCARD — תיקון רגרסיה: בקשה עם כמה משימות (batch) איבדה משימות בשקט
+
+- **דווח:** 15/07/2026, הבעלים — בקשת "צור לי 5 משימות" בהודעה אחת שמרה ואישרה רק את המשימה הראשונה; 4 הנותרות נעלמו בשקט, למרות שהסוכן הבטיח "שלח מאשר כדי להמשיך עם שאר 4 המשימות".
+- **מסך / מודול:** `app.py` (לולאת ה-tool-use של ה-Agent), `core/action_gateway.py`.
+
+### תחקור (root cause) — לפני כל תיקון
+1. **הקומיט המדויק שהציג את הרגרסיה:** `9ab4af7` (30/06/2026, "fix(approval-gateway): systemic Approval Gateway Safety — Section 1 bugs"), שסגר את **BUG-043 / BUG-V1-MULTI-PENDING-PAYLOAD-CONTAMINATION**. אומת ב-`git log -S` ש-`_mutating_approvals_this_turn` **לא השתנה** מאז — הרגרסיה קדמה לחלוטין לסשן הנוכחי; שום קומיט מהתיקונים האחרונים (Single-Speaker, post-completion-fallthrough, canonical-tool-wiring) לא נגע בלולאה הזו.
+2. **הכוונה המקורית (מ-BUG_AUDIT_LOG.md, BUG-043) הייתה מניעת "זיהום payload בזיכרון" בין שתי בקשות אישור באותו תור** — אך זו מעולם לא שוחזרה בפועל: `dict(tu.input)` כבר יצר עותק עצמאי לכל קריאה גם לפני וגם אחרי 9ab4af7, וכל קריאה ל-`_queue_approval()` כבר יצרה `EventBus` item + `ActionContract` עצמאיים משלה. בדיקת הרגרסיה שנוספה אז (`test_no_multi_pending_from_yes_add_now`) בדקה רק את לוגיקת ה-counter בבידוד, מעולם לא שיחזרה זיהום אמיתי — התיקון בלבל "מניעת סיכון תיאורטי בזיכרון משותף" עם "איסור על יותר מפעולה ממתינה אחת בתור", והשליך בשקט כל משימה מעבר לראשונה.
+3. **אחסון לפני ואחרי (שני הזמנים):** תמיד N פריטי `EventBus` עצמאיים + N `ActionContract` עצמאיים — מעולם לא אובייקט batch מאוחד.
+4. **ניסיון תיקון נאיבי שנבדק ונדחה לפני היישום:** הסרת החסימה בלבד (כל 5 המשימות הופכות מיד ל-`ActionContract` חי) **נבדקה אמפירית ונמצאה גרועה יותר**: (א) ברגע שיש יותר מ-contract חי אחד לאותו canonical_user_id, `route_confirmation_word()` כבר לא מבצע "מאשר" רגיל ישירות — הוא נופל לענף ה-disambiguation (`len(live)>1`), ששובר את זרימת האישור החד-פעולתי שכבר עבדה; (ב) בחירת פריט לפי מספר דרך `route_disambiguation()`/`route_combined_word()` **דוחה במכוון את כל שאר ה-siblings** (§21, קומיט `6752ec0`, "close all other pending contracts... so no residual pending contracts linger") — עיצוב מכוון ל-disambiguation בין פרשנויות חלופיות לבקשה **אחת**, לא לשימור פריטי batch עצמאיים. אומת בהרצה ישירה: אישור פריט #1 מתוך 5 גרם לדחיית 4 ה-siblings האחרים באופן מיידי.
+
+### התיקון בפועל
+1. **`event_bus.py`** — `BatchQueueStore` חדש (in-memory, אותה מחלקת נדיפות כמו `PendingActionsStore`) ששומר משימות שנדחו מהתור הראשון לכל `canonical_user_id`, עד שבטוח לקדם את הבאה.
+2. **`app.py` — לולאת ה-tool-use**: המשימה הראשונה בתור עדיין עוברת `_queue_approval()` רגיל (contract חי + הודעת Telegram). כל משימה נוספת נכנסת ל-`batch_queue.enqueue()` במקום להיחסם — משומרת באופן עמיד, לא נוצר לה contract חי עדיין.
+3. **`app.py` — `_promote_next_batch_item()` (חדש)**: אחרי כל ניסיון resolution (מאשר/ביטול/disambiguation/combined-word/override/callback כפתור), בודק אם אין contract חי לזהות הזו ואם כן מקדם את הפריט הבא מה-queue לכדי contract חי + הודעת Telegram משלו — דרך אותו `_queue_approval()` בדיוק. לעולם לא יותר מ-contract חי אחד בו-זמנית לזהות אחת ב-batch, כך שה-len(live)>1 disambiguation/sibling-reject לא מופעל אף פעם על ידי batch.
+4. **לא שונו:** `ActionGateway.approve()`, `reject()`, `_execute_contract()`, Atomic Claims, מנגנון ה-callback הקיים — התיקון כולו בשכבת התור ב-`app.py`/`event_bus.py` בלבד.
+
+### בדיקות
+`test_bug_batch_approval_preserved.py` (חדש, 33 assertions) — 5 משימות בתור אחד → כולן נשמרות, contract חי אחד בלבד, הודעת Telegram אחת; אישור-כולם מבצע כל פעולה פעם אחת בדיוק (5 dispatch, ללא כפילות), "מאשר" רגיל מבצע ישירות לכל משימה בתורה (ללא רשימת disambiguation); ביטול/דחייה על הפריט הפעיל אינו פוגע בפריטים הממתינים בתור ומקדם את הבא באופן דטרמיניסטי. `test_approval_gateway_safety.py`'s simulation עודכן לשקף את ההתנהגות המתוקנת (היה נועל בטעות את התנהגות ה-discard הישנה כטקסט-מקור מצופה).
+
+מלוא הרצה: `compileall`, `smoke_tests.py`, `core/router/test_router.py`, וכל 110 קבצי `test_*.py` — ללא רגרסיה.
+
+### תיעוד נפרד, לא נפתר כאן (מחוץ לתחום לפי הוראה מפורשת)
+- `app.py`'s `_apply_ingress_context_gate` מסמן `context_interrupted` על **כל** callback נכנס, כולל לחיצת כפתור אישור/ביטול עצמה (`kind="callback"` לעולם לא פטור, בניגוד ל-`kind="text"` דרך `is_own_resolution_event`) — עלול לגרום ל-reconfirmation מיותר על contract לא-קשור שעדיין ממתין, בכל פעם שנלחץ כפתור כלשהו.
+
+- **Severity:** גבוה — אובדן נתונים שקט (משימות שהמשתמש ביקש נעלמות בלי שום הודעת שגיאה גלויה).
+- **תוקן ב-commit:** (למלא אחרי commit)
+- **תוקן ב-branch:** `claude/single-speaker-fallback-fix`
+- **Merged:** לא עדיין
+- **Deployed:** לא
+- **Verified בפרודקשן:** לא — ממתין למיזוג ופריסה
+- **סטטוס:** תוקן ומאומת ב-suite המלא. הפריט הנפרד (ingress context gate) תועד אך לא טופל, בהתאם להוראה מפורשת שלא לחרוג מהיקף המשימה.
 - **סטטוס:** re-scope הושלם. Phase 4B0.1 (מנגנון claim אטומי אמיתי) טרם החל — נדרשת החלטת בעלים על תשתית לפני תכנון.
