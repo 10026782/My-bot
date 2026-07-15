@@ -26,6 +26,11 @@ Phase 4C remains as a historical research identifier only.
 3. Current risk authority:
    `audits/phase-4c/GAP_AND_RISK_REPORT.md`
 
+3b. Turn-ownership extension (consumed by `../turn-coordinator/` Phase 0 — adds
+    reply-ownership, pending-queue-source, message-kind and agent-dependency
+    dimensions on top of the AP-01..AP-50 inventory; does not replace it):
+   `audits/phase-4c/TURN_OWNERSHIP_EXTENSION.md`
+
 4. Migration analysis:
    `research/MIGRATION_OPTIONS.md`
 
