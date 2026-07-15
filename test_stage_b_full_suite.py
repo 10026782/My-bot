@@ -831,11 +831,16 @@ _run_sig = _inspect.signature(_app_mod.run_agent)
 chk("SB-01: run_agent has _out_meta param", "_out_meta" in _run_sig.parameters)
 chk("SB-01: _out_meta defaults to None", _run_sig.parameters["_out_meta"].default is None)
 
-# BUG-SB-02: callback resolves fingerprint via bus.get() peek before dispatch
+# BUG-SB-02: callback resolves fingerprint via bus.peek() before pop.
+# BUG-POST-COMPLETION-FALLTHROUGH: this used to assert "bus.get(action_id)"
+# in app.py — but EventBus never exposed a get() method (only pop()), so that
+# call raised AttributeError on every invocation, silently caught as
+# "non-blocking", meaning this pre-check never actually ran in production.
+# Fixed: EventBus.peek() (event_bus.py) is the real non-destructive read.
 from pathlib import Path as _Path
 _app_src = _Path(__file__).with_name("app.py").read_text(encoding="utf-8")
-chk("SB-02: callback peeks bus.get before pop (fingerprint resolution)",
-    "bus.get(action_id)" in _app_src or "_peek_item = bus.get" in _app_src)
+chk("SB-02: callback peeks bus.peek before pop (fingerprint resolution)",
+    "bus.peek(action_id)" in _app_src or "_peek_item = bus.peek" in _app_src)
 chk("SB-02: callback accepts durable completed and legacy executed",
     '_contract_sb02.status in ("completed", "executed")' in _app_src)
 chk("SB-02: callback checks contract.status == 'rejected'",

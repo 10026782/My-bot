@@ -1006,10 +1006,15 @@ def _handle_approval_callback_impl(cq) -> None:
         # BUG-SB-02: peek the bus item (without consuming) to resolve fingerprint →
         # ActionContract.status. Block if already executed/rejected before dispatching.
         # action_id is an event_bus key, NOT a contract_id — must go via fingerprint.
+        # BUG-POST-COMPLETION-FALLTHROUGH: this used to call bus.get(), which does
+        # not exist on EventBus (only pop() is exposed there) — every invocation
+        # raised AttributeError, silently swallowed below as "non-blocking", so
+        # this entire pre-check never actually ran. bus.peek() is the real
+        # non-destructive read (see event_bus.py).
         try:
             from feature_flags import is_enabled as _flag_sb02
             if _flag_sb02("FEATURE_ACTION_GATEWAY"):
-                _peek_item = bus.get(action_id)
+                _peek_item = bus.peek(action_id)
                 if _peek_item:
                     _peek_payload = _peek_item.get("payload", {})
                     _peek_tool    = _peek_payload.get("tool_name", "")
@@ -1105,6 +1110,9 @@ def _handle_approval_callback_impl(cq) -> None:
             # requester, via contract.actor_role/actor_external_id already
             # captured by _queue_approval()'s propose_action(identity=...).
             _gw_contract_id = None
+            _gw_terminal_reply = None
+            _gw_terminal_contract_id = None
+            _gw_terminal_status = None
             if _flag_enabled("FEATURE_ACTION_GATEWAY"):
                 try:
                     from core.action_gateway import action_gateway as _gw_exec
@@ -1114,13 +1122,45 @@ def _handle_approval_callback_impl(cq) -> None:
                         _gw_exec.normalize_payload(tool_inputs),
                     )
                     _contract_exec = _gw_exec._ledger.find_by_fingerprint(_fp_exec)
-                    if _contract_exec and _contract_exec.status == "pending":
-                        _gw_contract_id = _contract_exec.contract_id
+                    if _contract_exec:
+                        if _contract_exec.status == "pending":
+                            _gw_contract_id = _contract_exec.contract_id
+                        elif _contract_exec.status in ("completed", "executed"):
+                            _gw_terminal_reply = "✅ פעולה זו כבר בוצעה."
+                            _gw_terminal_contract_id = _contract_exec.contract_id
+                            _gw_terminal_status = _contract_exec.status
+                        elif _contract_exec.status == "rejected":
+                            _gw_terminal_reply = "❌ פעולה זו כבר בוטלה."
+                            _gw_terminal_contract_id = _contract_exec.contract_id
+                            _gw_terminal_status = _contract_exec.status
                 except Exception as _gw_lookup_exc:
                     logger.warning(
                         "[ActionGateway] contract lookup failed for execution — "
                         "falling back to legacy dispatch: %s", _gw_lookup_exc,
                     )
+
+            if _gw_terminal_reply:
+                # BUG-POST-COMPLETION-FALLTHROUGH: the durable ActionContract for
+                # this fingerprint already reached a terminal state (e.g. approved
+                # via a text confirmation on this or another channel, while a
+                # stale Telegram approval button for the same action was still
+                # showing). Requirement: never fall through to the legacy
+                # dispatch_tool() branch below on a terminal contract — Airtable-
+                # level dedup detection is not a substitute for this authoritative
+                # status check, and previously produced a misleading
+                # "expected structured result dict; got plain string" failure.
+                logger.info(
+                    "[ActionGateway] blocked post-completion callback fallthrough: "
+                    "action_id=%s contract=%s tool=%s status=%s",
+                    action_id, _gw_terminal_contract_id, tool_name, _gw_terminal_status,
+                )
+                bot.answer_callback_query(cq.id, _gw_terminal_reply)
+                try:
+                    bot.edit_message_reply_markup(
+                        cq.message.chat.id, cq.message.message_id, reply_markup=None)
+                except Exception:
+                    pass
+                return
 
             if _gw_contract_id:
                 from core.action_gateway import action_gateway as _gw_exec
