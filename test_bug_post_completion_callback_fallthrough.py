@@ -208,7 +208,14 @@ chk("no false 'אושר אך נכשל בביצוע' failure message is emitted",
 chk("callback answered with a deterministic already-done reply",
     mock_bot.answer_callback_query.call_args is not None and
     "כבר בוצעה" in mock_bot.answer_callback_query.call_args[0][1])
-chk("stale button markup is cleared", _markup_cleared["called"])
+# BUG-STALE-CALLBACK-UX: the stale button's message is now edited to show
+# its final state via edit_message_text() (which also clears the inline
+# keyboard, since no reply_markup is passed) — edit_message_reply_markup()
+# is only the fallback if that edit itself fails. Either one clearing the
+# button is acceptable; requiring specifically the fallback path would be
+# testing an implementation detail, not the actual requirement.
+chk("stale button's message updated to reflect final state (edited text and/or markup cleared)",
+    _markup_cleared["called"] or bool(_edited_texts))
 
 _contract_after_second = _real_gw._ledger.find_by_id(contract_id)
 chk("contract status is unchanged by the stale callback",
