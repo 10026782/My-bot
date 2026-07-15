@@ -181,7 +181,27 @@ CAPABILITY = app._PA01_CAPABILITY_UNAVAILABLE_FALLBACK
 # ══════════════════════════════════════════════════
 # A. Reproduction — the exact "פר 349" transcript, off/shadow/enforce
 # (REPLY_OWNERSHIP_AND_APPROVAL_AUTHORITY_RESEARCH.md §2.1)
+#
+# Main Integration Pass note (merge commit 8fb0d0c): origin/main independently
+# shipped BUG-FAKE-APPROVAL-INVITE (core/anti_hallucination.py's
+# _AGENT_APPROVAL_INVITE_PATTERN) between PA-01's Planning Gate approval and
+# this implementation's merge — an UNCONDITIONAL (not flag-gated), text-
+# pattern-based gate inside sanitize_agent_response() that happens to also
+# match this exact "פר 349" phrasing ("שלח מאשר" + "מוכנה להוספה") and
+# replaces it with _NO_TOOL_EVIDENCE_FALLBACK BEFORE final_reply ever reaches
+# PA-01's block. This does not change PA-01's own predicate/policy at all —
+# PA-01 still computes BLOCK_PHANTOM purely from tool_results_log state,
+# never from final_reply's text (decision 7/8, unchanged) — it only changes
+# what final_reply already looks like by the time PA-01 evaluates it at
+# state=off/shadow (where PA-01 never touches final_reply, so whichever
+# upstream gate already fired is what the test observes). Confirmed via
+# regex trace: only phrasing #1 below is caught by the new upstream pattern;
+# phrasing #2 (identical shape, "רק תאשר" instead of "שלח מאשר") is not, and
+# is used to independently pin PA-01's own off/shadow passthrough behavior
+# for phrasings the new upstream gate does not cover.
 # ══════════════════════════════════════════════════
+
+from core.anti_hallucination import _NO_TOOL_EVIDENCE_FALLBACK  # noqa: E402
 
 _PAR349_TEXT = "✅ המשימה מוכנה להוספה... שלח מאשר"
 
@@ -189,18 +209,36 @@ reply_off, _ = _run_agent(
     "par349_off", "צור משימה לבדוק פר 349 עד ל-8 בערב",
     anthropic_response=_text_response(_PAR349_TEXT), pa01_state="off",
 )
-chk("פר 349 transcript, state=off -> today's behavior unchanged (phantom text reaches final_reply)",
-    reply_off == _PAR349_TEXT)
+chk("פר 349 transcript, state=off -> upstream BUG-FAKE-APPROVAL-INVITE gate (main, unconditional) "
+    "already neutralizes this exact phrasing before PA-01's block runs; PA-01 itself does not "
+    "touch final_reply at state=off either way",
+    reply_off == _NO_TOOL_EVIDENCE_FALLBACK)
 
 reply_shadow, extra_shadow = _run_agent(
     "par349_shadow", "צור משימה לבדוק פר 349 עד ל-8 בערב",
     anthropic_response=_text_response(_PAR349_TEXT), pa01_state="shadow",
     capture_warnings=True,
 )
-chk("פר 349 transcript, state=shadow -> final_reply still equals the phantom text (unmodified)",
-    reply_shadow == _PAR349_TEXT)
-chk("state=shadow -> a would_block PA-01 WARNING line fires",
+chk("פר 349 transcript, state=shadow -> same upstream-neutralized text as state=off "
+    "(PA-01 shadow mode observes/logs but never touches final_reply)",
+    reply_shadow == _NO_TOOL_EVIDENCE_FALLBACK)
+chk("state=shadow -> a would_block PA-01 WARNING line still fires (PA-01's own state-based "
+    "detection runs regardless of what the upstream text gate already did)",
     any("[PA-01]" in w and "would_block" in w for w in extra_shadow["warning_calls"]))
+
+# Phrasing #2 — same phantom-approval shape, NOT matched by the new upstream
+# _AGENT_APPROVAL_INVITE_PATTERN (no "שלח מאשר"/"לחץ...אשר"/"אשר כדי/בבקשה"/
+# "מוכנ...להוספה" shape) — pins PA-01's own off/shadow passthrough behavior
+# independent of the upstream gate's coverage.
+_PAR349_VARIANT_TEXT = "המשימה מוכנה, רק תאשר ואני אוסיף אותה"
+
+reply_off_variant, _ = _run_agent(
+    "par349_off_variant", "צור משימה לבדוק פר 349 עד ל-8 בערב",
+    anthropic_response=_text_response(_PAR349_VARIANT_TEXT), pa01_state="off",
+)
+chk("phantom-approval variant phrasing NOT caught by the upstream text gate, state=off -> "
+    "PA-01 itself still does not touch final_reply (off means off)",
+    reply_off_variant == _PAR349_VARIANT_TEXT)
 
 reply_enforce, _ = _run_agent(
     "par349_enforce", "צור משימה לבדוק פר 349 עד ל-8 בערב",
