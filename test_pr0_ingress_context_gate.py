@@ -238,10 +238,16 @@ finally:
 
 
 # ══════════════════════════════════════════════════
-# T3b: approve:/reject: callback (app.py's OWN _pending_approvals mechanism,
-# NOT an ActionGateway resolution) still interrupts ActionGateway contracts
+# T3b: CORRECTED 15/07/2026 (BUG-APPROVAL-CALLBACK-CONTEXT-INTERRUPT) —
+# approve:/reject: callbacks are themselves legitimate resolution events
+# (exactly like a "מאשר"/"לא" text confirm exempted above), not an
+# unrelated message that happened to arrive while a contract was pending.
+# This used to mark unrelated ActionGateway contracts interrupted on every
+# button press, including a legitimate approve/reject of that very same
+# contract — production-verified regression, fixed by exempting
+# kind="callback" events whose data starts with "approve:"/"reject:".
 # ══════════════════════════════════════════════════
-print("\n── T3b: approve:/reject: callback still interrupts ActionGateway ─")
+print("\n── T3b: approve:/reject: callback does NOT interrupt ActionGateway ─")
 cid = _fresh_contract()
 originals = _patch_common(_base_env())
 originals["_handle_approval_callback"] = app._handle_approval_callback
@@ -251,7 +257,8 @@ try:
     chk("T3b: webhook responded 200", resp.status_code == 200)
     chk("T3b: routed to _handle_approval_callback (mechanism #2, unrelated)",
         any(c[0] == "handle_approval_callback" for c in _bot_calls))
-    chk("T3b: ActionGateway contract still marked interrupted", _is_interrupted(cid))
+    chk("T3b: ActionGateway contract NOT marked interrupted by an approve:/reject: callback",
+        not _is_interrupted(cid))
 finally:
     _restore(originals)
     _bot_calls.clear()
