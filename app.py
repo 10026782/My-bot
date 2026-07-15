@@ -1236,12 +1236,38 @@ def _handle_approval_callback_impl(cq) -> None:
                     _contract_after and _contract_after.status in ("completed", "executed")
                 )
                 fail_text   = result
+            elif _flag_enabled("FEATURE_ACTION_GATEWAY"):
+                # BUG-STALE-CALLBACK-FALLTHROUGH: FEATURE_ACTION_GATEWAY is on
+                # but no contract — pending or terminal — was found for this
+                # exact fingerprint at all (a stale/replayed/unlinked
+                # callback, or the shadow-mode propose_action() at
+                # _queue_approval() time failed silently). Live incident:
+                # such a callback reached direct dispatch_tool() with no
+                # ActionGateway approval and no Atomic Claim behind it at
+                # all. Once the Gateway is the authority, a callback must
+                # never execute a real write without a contract to back it —
+                # fail closed with a deterministic reply, zero dispatches.
+                logger.warning(
+                    "[ActionGateway] stale/unlinked callback: no contract found for "
+                    "fingerprint — refusing legacy dispatch. action_id=%s tool=%s",
+                    action_id, tool_name,
+                )
+                bot.answer_callback_query(cq.id, "⏰ הפעולה פגה או כבר טופלה.")
+                try:
+                    bot.edit_message_reply_markup(
+                        cq.message.chat.id, cq.message.message_id, reply_markup=None)
+                except Exception:
+                    pass
+                return
             else:
-                # BUG-091: this replays the payload stored at _queue_approval()
-                # time (dict(tu.input) — Claude's own tool_use JSON, verbatim).
-                # _queue_approval() is only ever called from the raw Agent
-                # tool_use loop below — hardcode "agent", never trust a
-                # "_source" key that might be sitting inside tool_inputs.
+                # Legacy path — FEATURE_ACTION_GATEWAY entirely off, no
+                # Gateway involvement in this mode at all; unchanged from
+                # pre-migration behavior. BUG-091: this replays the payload
+                # stored at _queue_approval() time (dict(tu.input) — Claude's
+                # own tool_use JSON, verbatim). _queue_approval() is only
+                # ever called from the raw Agent tool_use loop below —
+                # hardcode "agent", never trust a "_source" key that might be
+                # sitting inside tool_inputs.
                 raw    = dispatch_tool(tool_name, tool_inputs, identity, trusted_source="agent")
                 result = validate_tool_output(tool_name, raw)
 
@@ -2737,6 +2763,7 @@ class _IngressEvent:
     channel: str          # "telegram" | "whatsapp"
     kind: str             # "text" | "callback" | "media"
     text: str | None = None
+    data: str | None = None  # raw callback_data, for kind="callback" only
 
 
 def _apply_ingress_context_gate(identity, event: _IngressEvent) -> None:
@@ -2754,6 +2781,15 @@ def _apply_ingress_context_gate(identity, event: _IngressEvent) -> None:
     try:
         if event.kind == "text" and _gw.is_own_resolution_event(user, event.text or ""):
             return  # genuine confirm/cancel/disambiguation — let normal routing resolve it
+        # BUG-APPROVAL-CALLBACK-CONTEXT-INTERRUPT: an approve:/reject: button
+        # press IS a genuine resolution event, exactly like a "מאשר"/"לא"
+        # text confirm above — it is not some unrelated inbound message that
+        # happened to arrive while a contract was pending. Marking
+        # context_interrupted here previously forced an unnecessary
+        # reconfirmation prompt on the very contract (or an unrelated
+        # sibling) the button press was itself trying to resolve.
+        if event.kind == "callback" and (event.data or "").startswith(("approve:", "reject:")):
+            return
         _gw.mark_context_interrupted(user)
     except Exception:
         # Fail-closed, not fail-open: the primary mark couldn't be recorded,
@@ -2804,14 +2840,16 @@ def _webhook_telegram_impl():
         call = update.callback_query
         data = call.data or ""
         # BUG-PENDING-APPROVAL-B: no junk/idempotency filter exists for
-        # callbacks today — gate right after identity resolution. Every
-        # callback (including approve:/reject:, which belongs to app.py's
-        # own separate _pending_approvals mechanism, not ActionGateway) is
-        # "not an ActionGateway resolution" — always interrupts.
+        # callbacks today — gate right after identity resolution. A
+        # non-approval callback still always interrupts (BUG-APPROVAL-
+        # CALLBACK-CONTEXT-INTERRUPT: approve:/reject: itself is exempted
+        # inside _apply_ingress_context_gate, same principle as the text
+        # confirm/cancel exemption above it — it IS the resolution event,
+        # not an unrelated message that happened to arrive).
         try:
             _cb_identity = resolve_identity("telegram", str(call.from_user.id))
             _apply_ingress_context_gate(
-                _cb_identity, _IngressEvent(channel="telegram", kind="callback"),
+                _cb_identity, _IngressEvent(channel="telegram", kind="callback", data=data),
             )
         except Exception as e:
             logger.error(f"[ActionGateway] ingress gate (callback) failed: {e}", exc_info=True)

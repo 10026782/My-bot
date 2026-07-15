@@ -268,13 +268,32 @@ def dispatch_tool(
                     if dedup_val:
                         existing = _check_duplicate(real_t, dedup_field, str(dedup_val))
                         if existing:
+                            # BUG-DUPLICATE-PLAIN-STRING: this used to return a
+                            # plain string — airtable_add is a structured
+                            # write tool (registered in A32's
+                            # _EVIDENCE_VALIDATORS), so a plain-string result
+                            # was misclassified by verify_execution() as
+                            # "expected structured result dict; got plain
+                            # string", a false execution failure for what is
+                            # actually a correct no-op (record already
+                            # exists, nothing duplicated). existing_record_id
+                            # is a genuine Airtable id from the lookup, so it
+                            # passes the same evidence validator a real write
+                            # would.
                             f_data = existing.get("fields", {})
                             status = f_data.get("סטטוס", f_data.get("status", "?"))
-                            return (
-                                f"✋ כבר קיים: {dedup_field}='{dedup_val}' ב-{table}.\n"
-                                f"סטטוס: {status} | ID: {existing.get('id','?')}\n"
-                                f"לא נוצרה רשומה כפולה."
-                            )
+                            existing_record_id = existing.get("id", "")
+                            return {
+                                "ok": True,
+                                "tool": "airtable_add",
+                                "outcome": "already_exists",
+                                "external_id": existing_record_id,
+                                "evidence": {"record_id": existing_record_id},
+                                "user_message": (
+                                    f"✋ הרשומה כבר קיימת ({dedup_field}='{dedup_val}' ב-{table}) — "
+                                    f"לא נוצרה כפילות.\nסטטוס: {status} | ID: {existing_record_id or '?'}"
+                                ),
+                            }
 
                 # בלוק external users מכתיבה לטבלאות שאינן Leads
                 if identity and identity.is_external and table != "Leads":
