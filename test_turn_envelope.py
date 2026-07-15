@@ -30,7 +30,9 @@ from core.turn_envelope import (  # noqa: E402
     PendingItem,
     PendingQueueAwareness,
     build_turn_envelope,
+    detect_case_c2_signal,
     execution_kind_of,
+    log_case_c_signal,
     log_turn_envelope,
 )
 
@@ -109,11 +111,26 @@ chk("two simultaneous queues -> active_queue_id picks the lower-priority-number 
 log_dict = env_multi.to_log_dict()
 chk("to_log_dict has all Gate A required fields", set(log_dict.keys()) == {
     "turn_mode", "queue_count", "queue_sources", "active_queue_id",
-    "resolved_reference", "reply_owner", "message_kind",
+    "resolved_reference", "reply_owner", "message_kind", "multi_contract_conflict",
     "policy_snapshot_version", "agent_availability_mode",
 })
 chk("to_log_dict queue_count matches", log_dict["queue_count"] == 2)
 chk("to_log_dict queue_sources matches", log_dict["queue_sources"] == ["action_gateway", "lead_capture"])
+chk("single live contract -> multi_contract_conflict is False",
+    log_dict["multi_contract_conflict"] is False)
+
+_ac_queue_conflict = PendingQueueAwareness(
+    queue_id="ac:u1", source="action_gateway", kind="action_contract",
+    summary="2 live contract(s)",
+    items=(
+        PendingItem(index=1, id="c1", kind="action_contract", label=""),
+        PendingItem(index=2, id="c2", kind="action_contract", label=""),
+    ),
+    approval_granularity="single_choice", priority=3,
+)
+env_conflict = build_turn_envelope(action_gateway_queue=_ac_queue_conflict)
+chk("Case C1 — two live contracts -> multi_contract_conflict is True",
+    env_conflict.to_log_dict()["multi_contract_conflict"] is True)
 
 
 # ══════════════════════════════════════════════════
@@ -269,6 +286,76 @@ with patch("core.action_gateway.action_gateway") as _mock_gw3, \
         "Airtable down" not in _warn_msg)
     chk("build_failed log fingerprints the user id, not the raw memory_key",
         _id1.memory_key not in _warn_msg)
+
+
+# ══════════════════════════════════════════════════
+# Case C — clarification continuity signals
+# See docs/architecture/turn-coordinator/CASE_C_CLARIFICATION_CONTINUITY.md
+# ══════════════════════════════════════════════════
+
+chk("C2: pending-language reply with nothing pending and nothing queued -> True",
+    detect_case_c2_signal(
+        "5 הפריטים מוכנים, הפעולה ממתינה לאישור", queue_count=0, approval_queued_this_turn=False,
+    ) is True)
+chk("C2: same reply, but a queue is actually pending -> False (not a false claim)",
+    detect_case_c2_signal(
+        "5 הפריטים מוכנים, הפעולה ממתינה לאישור", queue_count=1, approval_queued_this_turn=False,
+    ) is False)
+chk("C2: same reply, but an approval WAS queued this turn -> False",
+    detect_case_c2_signal(
+        "5 הפריטים מוכנים, הפעולה ממתינה לאישור", queue_count=0, approval_queued_this_turn=True,
+    ) is False)
+chk("C2: ordinary reply with no pending-language at all -> False",
+    detect_case_c2_signal(
+        "בטח, אשמח לעזור עם זה", queue_count=0, approval_queued_this_turn=False,
+    ) is False)
+chk("C2: empty reply never signals",
+    detect_case_c2_signal("", queue_count=0, approval_queued_this_turn=False) is False)
+
+with patch("core.turn_envelope.logger") as _mock_c_logger:
+    log_case_c_signal("C1", canonical_user_id="boss_hq:0501234567", detail="live_contracts=2")
+    chk("log_case_c_signal uses WARNING level (visible by default)",
+        _mock_c_logger.warning.call_count == 1)
+    _c_args = _mock_c_logger.warning.call_args[0]
+    _c_msg = _c_args[0] % _c_args[1:]
+    chk("log_case_c_signal names the kind", "kind=C1" in _c_msg)
+    chk("log_case_c_signal includes the detail", "detail=live_contracts=2" in _c_msg)
+    chk("log_case_c_signal fingerprints canonical_user_id, never logs it raw",
+        "0501234567" not in _c_msg)
+
+with patch("core.turn_envelope.logger") as _mock_c_logger2:
+    _mock_c_logger2.warning.side_effect = RuntimeError("logging backend down")
+    try:
+        log_case_c_signal("C2", canonical_user_id="u1")
+        chk("log_case_c_signal never raises even if the logging backend breaks", True)
+    except Exception:
+        chk("log_case_c_signal never raises even if the logging backend breaks", False)
+
+# Wiring: app._build_and_log_turn_envelope() must fire the C1 signal when
+# find_live_contracts() reports more than one live contract for an identity
+# — the exact BatchQueueStore invariant violation Case C1 describes — and
+# must NOT fire it for the single-contract, ordinary-approval case.
+_fake_contract_a = MagicMock(contract_id="c-a", reconfirmation_required=False)
+_fake_contract_b = MagicMock(contract_id="c-b", reconfirmation_required=False)
+with patch("core.action_gateway.action_gateway") as _mock_gw4, \
+     patch("event_bus.batch_queue") as _mock_bq4, \
+     patch("core.turn_envelope.log_case_c_signal") as _mock_c1_log:
+    _mock_gw4.find_live_contracts.return_value = [_fake_contract_a, _fake_contract_b]
+    _mock_bq4.count_pending.return_value = 0
+    app._build_and_log_turn_envelope(_id1, "chat-1", None)
+    chk("_build_and_log_turn_envelope(): 2 live contracts -> C1 signal fires exactly once",
+        _mock_c1_log.call_count == 1)
+    _c1_call_kwargs = _mock_c1_log.call_args
+    chk("C1 signal call passes kind='C1'", _c1_call_kwargs[0][0] == "C1")
+
+with patch("core.action_gateway.action_gateway") as _mock_gw5, \
+     patch("event_bus.batch_queue") as _mock_bq5, \
+     patch("core.turn_envelope.log_case_c_signal") as _mock_c1_log2:
+    _mock_gw5.find_live_contracts.return_value = [_fake_contract_a]
+    _mock_bq5.count_pending.return_value = 0
+    app._build_and_log_turn_envelope(_id1, "chat-1", None)
+    chk("_build_and_log_turn_envelope(): 1 live contract -> C1 signal does not fire",
+        _mock_c1_log2.call_count == 0)
 
 
 print(f"\n{'='*50}")

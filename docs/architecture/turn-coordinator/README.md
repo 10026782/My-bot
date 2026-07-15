@@ -23,7 +23,17 @@ starting a new full-system audit.
   architectural proposal, ready for Phase 0 implementation planning, not yet
   ready for implementation until Phase 0 turns it into an exact list of call
   sites and state sources.
+- `CASE_C_CLARIFICATION_CONTINUITY.md` — verified failure case: a multi-item
+  request needing clarification for one item can lose queue ownership (C1)
+  or produce an unevidenced "pending approval" claim (C2). Both confirmed
+  against current `main` with file:line citations. Required invariants 1-4
+  are Phase 1+/Phase 5 (behavioral); invariant 5 (Phase 0 must log enough to
+  tell C1 from C2 apart) is implemented in `core/turn_envelope.py`.
 
 ## Status
 
-Planning — Phase 0 not started.
+Phase 0: implemented and pushed (`core/turn_envelope.py`,
+`app._build_and_log_turn_envelope()`), covering `run_agent()` only — see
+`../f52-unified-approval-runtime/audits/phase-4c/TURN_OWNERSHIP_EXTENSION.md`
+for the full call-site touch list, most of which is not yet instrumented.
+Phase 1 onward not started.

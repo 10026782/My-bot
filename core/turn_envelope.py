@@ -203,7 +203,12 @@ class TurnEnvelope:
 
     def to_log_dict(self) -> dict:
         """Structured fields for log_turn_envelope() — matches Gate A's
-        required log-only field list from the proposal's Phase 0 description."""
+        required log-only field list from the proposal's Phase 0 description.
+        multi_contract_conflict is the Case C1 signal (see
+        docs/architecture/turn-coordinator/CASE_C_CLARIFICATION_CONTINUITY.md)
+        — more than one live ActionContract simultaneously pending for the
+        same identity, which BatchQueueStore's own design treats as an
+        invariant violation regardless of how it happened."""
         return {
             "turn_mode": self.turn_mode,
             "queue_count": len(self.pending_queues),
@@ -212,6 +217,10 @@ class TurnEnvelope:
             "resolved_reference": self.resolved_reference,
             "reply_owner": self.reply_owner,
             "message_kind": self.message_kind,
+            "multi_contract_conflict": any(
+                q.source == "action_gateway" and q.kind == "action_contract" and len(q.items) > 1
+                for q in self.pending_queues
+            ),
             "policy_snapshot_version": self.policy_snapshot_version,
             "agent_availability_mode": self.agent_availability.mode.value,
         }
@@ -319,3 +328,60 @@ def log_turn_envelope(envelope: TurnEnvelope, *, canonical_user_id: str = "") ->
         )
     except Exception:
         logger.debug("[TurnEnvelope] logging failed", exc_info=True)
+
+
+# ══════════════════════════════════════════════════
+# Case C — clarification continuity signals (log-only)
+# ══════════════════════════════════════════════════
+# See docs/architecture/turn-coordinator/CASE_C_CLARIFICATION_CONTINUITY.md
+# for the verified failure modes this distinguishes. Both signals are pure
+# detection — neither blocks nor alters anything; that is explicitly Phase 1+
+# (materialization, invariants 1-3) and Phase 5 (Commitment Grounding,
+# invariant 4) work, not Phase 0. Invariant 5 ("Phase 0 must log enough state
+# to distinguish C1 from C2") is the entire scope of what follows.
+
+
+def detect_case_c2_signal(
+    final_reply: str, *, queue_count: int, approval_queued_this_turn: bool,
+) -> bool:
+    """
+    True when this turn's reply is shaped like a pending-approval claim
+    (reuses core/anti_hallucination.py's own _AGENT_PENDING_STATUS_PATTERN —
+    single source of truth, not a duplicated regex that could drift) while
+    nothing is actually pending: queue_count == 0 (this turn's post-action
+    state, not the turn-start snapshot — see app.py's call site) AND no
+    __approval_queued__ evidence was produced this turn either.
+
+    This is the C2 signature: exactly the gap in sanitize_agent_response()
+    documented in CASE_C_CLARIFICATION_CONTINUITY.md — _AGENT_PENDING_STATUS_PATTERN
+    is only checked there when FEATURE_ACTION_GATEWAY is on; this function
+    checks it unconditionally, but only to log, never to block.
+    """
+    if queue_count > 0 or approval_queued_this_turn:
+        return False
+    try:
+        from core.anti_hallucination import _AGENT_PENDING_STATUS_PATTERN
+        return bool(_AGENT_PENDING_STATUS_PATTERN.search(final_reply or ""))
+    except Exception:
+        return False
+
+
+def log_case_c_signal(kind: Literal["C1", "C2"], *, canonical_user_id: str = "", detail: str = "") -> None:
+    """
+    A distinct, visible (WARNING-level) log line — not folded into the
+    routine per-turn INFO line — because these are anomaly signatures, not
+    routine state, and per the same "fail-open, not silent" principle
+    app._build_and_log_turn_envelope()'s build_failed log follows, evidence
+    of an anomaly must not disappear into routine noise.
+
+    detail must be a short, fixed, enum-like string only (e.g.
+    "live_contracts=2") — never raw text/payload; canonical_user_id is
+    fingerprinted the same as log_turn_envelope(). Never raises.
+    """
+    try:
+        logger.warning(
+            "[TurnEnvelope] case_c_signal kind=%s user=%s detail=%s",
+            kind, _fingerprint(canonical_user_id), detail or "-",
+        )
+    except Exception:
+        logger.debug("[TurnEnvelope] case_c_signal logging failed", exc_info=True)

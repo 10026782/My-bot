@@ -1039,6 +1039,18 @@ def _build_and_log_turn_envelope(
             other_queues=tuple(other_queues),
         )
         log_turn_envelope(envelope, canonical_user_id=identity.memory_key)
+
+        # Case C1 signal (see docs/architecture/turn-coordinator/
+        # CASE_C_CLARIFICATION_CONTINUITY.md) — more than one live
+        # ActionContract simultaneously pending for this identity violates
+        # BatchQueueStore's own single-live-contract invariant, regardless of
+        # how it happened. Log-only: does not block or alter this turn.
+        if len(live_contracts) > 1:
+            from core.turn_envelope import log_case_c_signal
+            log_case_c_signal(
+                "C1", canonical_user_id=identity.memory_key,
+                detail=f"live_contracts={len(live_contracts)}",
+            )
     except Exception as exc:
         # Fail-open, not silent: a build failure must leave evidence, or the
         # one turn most likely to have unusual state (the one that broke
@@ -2423,6 +2435,35 @@ def run_agent(
             final_reply, tool_results_log,
             _gateway_active=_flag_enabled("FEATURE_ACTION_GATEWAY"),
         )
+
+        # Case C2 signal (see docs/architecture/turn-coordinator/
+        # CASE_C_CLARIFICATION_CONTINUITY.md) — final_reply reads as a
+        # pending-approval claim but this turn ends with nothing actually
+        # pending and nothing newly queued. Needs a POST-turn read (this
+        # turn's own tool calls may have just changed what's live), not the
+        # turn-start envelope built earlier — deliberately does not re-read
+        # session_store (LL-11 single-read invariant); lead-preview coverage
+        # is intentionally out of scope for this first pass, see the doc.
+        # Log-only: never blocks/alters final_reply.
+        try:
+            from core.turn_envelope import detect_case_c2_signal, log_case_c_signal
+            from core.action_gateway import action_gateway as _gw_c2
+            from event_bus import batch_queue as _bq_c2
+            _post_turn_queue_count = (
+                len(_gw_c2.find_live_contracts(identity.memory_key))
+                + _bq_c2.count_pending(identity.memory_key)
+            )
+            _approval_queued_this_turn = any(
+                r.get("tool") == "__approval_queued__" for r in tool_results_log
+            )
+            if detect_case_c2_signal(
+                final_reply,
+                queue_count=_post_turn_queue_count,
+                approval_queued_this_turn=_approval_queued_this_turn,
+            ):
+                log_case_c_signal("C2", canonical_user_id=identity.memory_key)
+        except Exception:
+            logger.debug("[TurnEnvelope] case_c2 detection skipped due to error", exc_info=True)
 
         # ── שמירת זיכרון ─────────────────────────
         memory.add(ctx.memory_key, "user",      clean_msg)
