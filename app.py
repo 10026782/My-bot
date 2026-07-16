@@ -49,7 +49,7 @@ from twilio.twiml.messaging_response import MessagingResponse
 from memory_store    import memory
 from identity        import resolve_identity, Role
 from context         import build_context
-from tool_registry   import enforce, ToolDenied
+from tool_registry   import enforce, get as get_tool_meta, ToolDenied
 from scheduler       import start_scheduler
 from tools           import dispatch_tool
 from tools.airtable_security import enforce_leads_write_gate, LeadsDirectWriteBlocked
@@ -58,8 +58,9 @@ from config          import get_domain as _channel_domain
 from core.router     import route_request, RouteDecision, Handler
 from core.router.deterministic_denial import check_deterministic_denial
 from core.anti_hallucination import verify_execution, sanitize_agent_response
+from core.turn_evidence import TurnEvidenceSummary, observe_shadow_finalizer
 from health_monitor import get_health_status
-from feature_flags import is_enabled as _flag_enabled
+from feature_flags import is_enabled as _flag_enabled, get_evidence_finalizer_state
 import cost_monitor
 import llm_fallback
 try:
@@ -2685,6 +2686,7 @@ def run_agent(
         final_reply     = "⚠️ לא התקבלה תשובה."
         tool_calls_made = 0
         tool_results_log: list[dict] = []   # A32: accumulates all tool results
+        turn_evidence = TurnEvidenceSummary()
         # LL-11: dedup repeated read-only lookups (e.g. Sessions/Leads GET)
         # within this turn — same (tool, inputs) reuses the cached result
         # instead of re-querying Airtable.
@@ -2696,6 +2698,11 @@ def run_agent(
         _lc_a32 = _action_result_to_a32_entry(lead_capture_result)
         if _lc_a32:
             tool_results_log.append(_lc_a32)
+            _lc_meta = get_tool_meta(_lc_a32["tool"])
+            turn_evidence.record_verification(
+                "ok" if _lc_a32["ok"] else "failed",
+                read_only=bool(_lc_meta and _lc_meta.read_only),
+            )
 
         while True:
             response = client.messages.create(
@@ -2780,6 +2787,7 @@ def run_agent(
                         "tool_use_id": tu.id,
                         "content":     "הבקשה נרשמה במערכת.",
                     })
+                    turn_evidence.record_verification("failed", read_only=False)
                     continue
 
                 try:
@@ -2795,6 +2803,7 @@ def run_agent(
                         "tool": tu.name, "content": str(e), "ok": False,
                         "terminal_outcome": "PERMISSION_DENIED",
                     })
+                    turn_evidence.record_verification("failed", read_only=False)
                     continue
 
                 # ── Approval Gate ─────────────────────
@@ -2824,6 +2833,7 @@ def run_agent(
                                 "tool": tu.name, "content": str(e), "ok": False,
                                 "terminal_outcome": "PREFLIGHT_BLOCKED",
                             })
+                            turn_evidence.record_verification("failed", read_only=meta.read_only)
                             continue
 
                     # BUG-V1-MULTI-PENDING-PAYLOAD-CONTAMINATION originally
@@ -2898,6 +2908,7 @@ def run_agent(
                             "action_tool": _deferred_action_tool,
                             "created_this_turn": False,
                         })
+                        turn_evidence.record_approval_pending()
                         continue
                     _approval_outcome = _queue_approval_detailed(
                         tu.name, dict(tu.input), chat_id, channel, user_text
@@ -2935,6 +2946,12 @@ def run_agent(
                         "action_tool": _approval_outcome["action_tool"],
                         "created_this_turn": _approval_outcome["created_this_turn"],
                     })
+                    if _approval_outcome["created_this_turn"]:
+                        turn_evidence.record_approval_pending()
+                    elif _approval_outcome["terminal_outcome"] == "APPROVAL_QUEUE_ORPHANED":
+                        turn_evidence.record_unverified_effect()
+                    else:
+                        turn_evidence.record_verification("failed", read_only=meta.read_only)
                     continue
 
                 dedup_key = (tu.name, tuple(sorted(tu.input.items(), key=lambda kv: kv[0])))
@@ -2962,6 +2979,7 @@ def run_agent(
                     result_text = f"❌ הפעולה לא הושלמה: {exec_check.reason}"
                 elif exec_check.status == "warn":
                     logger.warning(f"[A32] Execution warn: {tu.name} — {exec_check.reason}")
+                turn_evidence.record_verification(exec_check.status, read_only=meta.read_only)
 
                 # Fix 2: persist successful write results for next-turn memory
                 if tu.name in _MEMORABLE_TOOLS and "❌" not in result_text:
@@ -3139,6 +3157,26 @@ def run_agent(
                         )
                         if _pa01_state == "enforce":
                             final_reply = _pa01_response
+
+        # PR-RP4 — compare the current response with structured turn evidence.
+        # This observer always returns the exact input text; RP5 owns any future
+        # enforcement/footer/fallback changes.
+        try:
+            final_reply, _evidence_comparison = observe_shadow_finalizer(
+                final_reply,
+                turn_evidence,
+                state=get_evidence_finalizer_state(),
+            )
+            if _out_meta is not None and _evidence_comparison is not None:
+                _out_meta["evidence_finalizer_shadow"] = {
+                    **_evidence_comparison.safe_record(),
+                    "evidence": turn_evidence.safe_record(),
+                }
+        except Exception as _evidence_exc:
+            logger.warning(
+                "[EvidenceFinalizerShadow] observer_failed error_type=%s",
+                type(_evidence_exc).__name__,
+            )
 
         # ── שמירת זיכרון ─────────────────────────
         memory.add(ctx.memory_key, "user",      clean_msg)
