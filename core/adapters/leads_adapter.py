@@ -235,24 +235,41 @@ def _infer_domain(fields: dict) -> str:
 
 
 def _normalise_status(raw_status: str) -> str:
-    """Normalise Lead status to vocabulary the Orchestrator understands."""
+    """
+    Normalise Lead status to the literal vocabulary the shared Attention/
+    Orchestrator engines actually compare against (BUG-104 Phase 1.1).
+
+    Attention's closed_statuses (decision_attention_policy.py) and
+    Orchestrator's DECIDED_YES/DECIDED_NO/CANCELLED branches
+    (decision_orchestrator.py) compare entity.status literally against
+    DecisionStatus's own string values ("Open"/"Decided Yes"/"Decided No"/
+    "Cancelled") — the same values decision_adapter.py passes through
+    untouched for native Decision records (fields.get(DF.STATUS, "")).
+    Returning a parallel vocabulary (formerly "OPEN"/"DECIDED_YES"/...) never
+    matched those literals, so this engine wiring was structurally present
+    but dead for every Lead. The classification below (which Lead statuses
+    map to open/decided-yes/decided-no/cancelled) is unchanged — only the
+    returned string values now match DecisionStatus exactly.
+    """
+    from airtable_schema import DecisionStatus
+
     mapping = {
-        "new":       "OPEN",
-        "חדש":       "OPEN",
-        "hot":       "OPEN",
-        "חם":        "OPEN",
-        "warm":      "OPEN",
-        "פושר":      "OPEN",
-        "cold":      "OPEN",
-        "קר":        "OPEN",
-        "converted": "DECIDED_YES",
-        "הומר":      "DECIDED_YES",
-        "lost":      "DECIDED_NO",
-        "אבוד":      "DECIDED_NO",
-        "cancelled": "CANCELLED",
-        "בוטל":      "CANCELLED",
+        "new":       DecisionStatus.OPEN,
+        "חדש":       DecisionStatus.OPEN,
+        "hot":       DecisionStatus.OPEN,
+        "חם":        DecisionStatus.OPEN,
+        "warm":      DecisionStatus.OPEN,
+        "פושר":      DecisionStatus.OPEN,
+        "cold":      DecisionStatus.OPEN,
+        "קר":        DecisionStatus.OPEN,
+        "converted": DecisionStatus.DECIDED_YES,
+        "הומר":      DecisionStatus.DECIDED_YES,
+        "lost":      DecisionStatus.DECIDED_NO,
+        "אבוד":      DecisionStatus.DECIDED_NO,
+        "cancelled": DecisionStatus.CANCELLED,
+        "בוטל":      DecisionStatus.CANCELLED,
     }
-    return mapping.get(raw_status.lower(), "OPEN")
+    return mapping.get(raw_status.lower(), DecisionStatus.OPEN)
 
 
 def _source_reliability(channel: str) -> str:

@@ -65,11 +65,14 @@ LEAD = {
     },
 }
 
+# BUG-104 Phase 1.1: each event's own "Lead" link field must explicitly
+# contain LEAD["id"] to be admitted by tma_api._read_lead_events()'s linkage
+# check — reverse-link membership on the Lead snapshot alone is not proof.
 EVENTS = [
     {"id": "recEV1", "fields": {"Event Type": "interest", "Message": "מעוניין בדירת 3 חדרים",
-                               "Created At": "2026-07-10T09:00:00Z"}},
+                               "Created At": "2026-07-10T09:00:00Z", "Lead": ["recLEAD001"]}},
     {"id": "recEV2", "fields": {"Event Type": "note", "Message": "לחזור אליו מחר",
-                               "Created At": "2026-07-12T09:00:00Z"}},
+                               "Created At": "2026-07-12T09:00:00Z", "Lead": ["recLEAD001"]}},
 ]
 
 
@@ -162,8 +165,11 @@ live_rec = {
 snapshot_before = copy.deepcopy(live_rec)
 ent = build_reasoning_entity(live_rec, [])
 
-check("status=lost does NOT become OPEN", ent.status != "OPEN")
-check("status=lost maps to DECIDED_NO", ent.status == "DECIDED_NO")
+from airtable_schema import DecisionStatus  # noqa: E402 (BUG-104 Phase 1.1 — canonical status vocabulary)
+
+check("status=lost does NOT become OPEN", ent.status != DecisionStatus.OPEN)
+check("status=lost maps to the canonical DecisionStatus.DECIDED_NO (Phase 1.1)",
+      ent.status == DecisionStatus.DECIDED_NO)
 check("domain=real_estate does NOT become general", ent.domain == "real_estate")
 check("channel=email does NOT become whatsapp", ent.metadata["channel"] == "email")
 check("lowercase tier reaches ReasoningEntity", ent.metadata["tier"] == "lohet")
