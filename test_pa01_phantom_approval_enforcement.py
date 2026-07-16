@@ -766,6 +766,235 @@ chk("R3 (integration): row 2 fires from the matching second entry -> final_reply
 
 
 # ══════════════════════════════════════════════════
+# P1. Codex re-audit of commit b7eb2bb (verdict: FIX_REQUIRED) — the return
+# state of _queue_approval_detailed() must match the CANONICAL state (real
+# ActionContract status, real EventBus pending items, real batch_queue
+# contents), never just the structured GatewayResult.ok/failure_code shapes
+# R1/R2/R3 above already covered. Three findings:
+#   P1-A — a REAL exception from propose_action() (not a structured
+#          GatewayResult failure) must not fall through to the legacy
+#          EventBus path.
+#   P1-B — an expected-tool call genuinely deferred to batch_queue (mixed
+#          batch, wrong-tool contract created first) must be represented in
+#          tool_results_log, not silently invisible to PA-01.
+#   P1-C — if a contract IS durably persisted but a later step (EventBus
+#          publish / owner notification) fails, the orphaned live contract
+#          must be revoked, never left live while the return denies it.
+# ══════════════════════════════════════════════════
+
+from event_bus import bus as _real_bus, pending as _real_pending, batch_queue as _real_batch_queue  # noqa: E402
+
+# --- P1-A / R2-real: propose_action() raises a REAL exception (RuntimeError),
+# not a structured GatewayResult(ok=False, failure_code=...). Pre-fix, the
+# shadow-mode try/except around propose_action() caught this at DEBUG level
+# and fell straight through to bus.request_approval() below it, producing a
+# real legacy EventBus pending item with no canonical ActionContract behind
+# it, and a success-shaped return once execution reached the bottom of the
+# function (created_this_turn computed off a None _gw_result -> False, but
+# the MESSAGE still claimed "⏳ הפעולה ממתינה לאישור").
+with patch("feature_flags.is_enabled", return_value=False), \
+     patch.object(_canon_gw, "propose_action", side_effect=RuntimeError("boom")):
+    _r2real_result = app._queue_approval_detailed(
+        "airtable_add", {"table": "Tasks", "fields": {"Task": "R2real"}},
+        "r2real_exc", "telegram", "צור לי משימה",
+    )
+chk("P1-A / R2-real: propose_action() raising a real exception -> no ActionContract exists "
+    "for this identity afterwards",
+    len(_canon_gw.find_live_contracts("boss_hq:r2real_exc")) == 0)
+chk("P1-A / R2-real: structured failure returned -- ok=False, contract_id=None, "
+    "terminal_outcome=APPROVAL_QUEUE_ERROR, created_this_turn=False (never a raw exception, "
+    "never a phantom-success shape)",
+    _r2real_result["ok"] is False and _r2real_result["contract_id"] is None
+    and _r2real_result["terminal_outcome"] == "APPROVAL_QUEUE_ERROR"
+    and _r2real_result["created_this_turn"] is False)
+chk("P1-A / R2-real: no EventBus pending representation was created for this identity -- "
+    "the exception must not fall through to bus.request_approval()",
+    len(_real_pending.list_for_chat("r2real_exc")) == 0)
+
+with patch.object(app, "_queue_approval_detailed", return_value=_r2real_result):
+    reply_r2real, _ = _run_agent(
+        "r2real_integration", "צור לי משימה", role=Role.OWNER, intent=Intent.CREATE_TASK,
+        allowed_tool_names=("airtable_add",),
+        anthropic_responses=[
+            _tool_use_response([{"name": "airtable_add",
+                                  "input": {"table": "Tasks", "fields": {"Task": "R2real-b"}}}]),
+            _text_response("מעולה, זה ממתין לאישור"),
+        ],
+        pa01_state="enforce",
+    )
+chk("P1-A / R2-real (integration): no row 2, no false 'pending' message -> final_reply is "
+    "the deterministic queue-error message, never the raw agent reply claiming success",
+    reply_r2real == _r2real_result["message"] and reply_r2real != "מעולה, זה ממתין לאישור")
+
+# Gateway enforcement state (FEATURE_ACTION_GATEWAY) vs PA-01's own state
+# (FEATURE_PA01_ENFORCEMENT_STATE) are independent axes. The fix lives in
+# _queue_approval_detailed_impl() itself, unconditionally on every call --
+# prove the safe return contract holds with PA-01 fully unset (off), not
+# just when the outer harness happens to set pa01_state="enforce" above.
+_old_pa01_env = os.environ.pop("FEATURE_PA01_ENFORCEMENT_STATE", None)
+try:
+    with patch("feature_flags.is_enabled", return_value=False), \
+         patch.object(_canon_gw, "propose_action", side_effect=RuntimeError("boom")):
+        _r2real_off_result = app._queue_approval_detailed(
+            "airtable_add", {"table": "Tasks", "fields": {"Task": "R2real-off"}},
+            "r2real_off", "telegram", "צור לי משימה",
+        )
+finally:
+    if _old_pa01_env is not None:
+        os.environ["FEATURE_PA01_ENFORCEMENT_STATE"] = _old_pa01_env
+chk("P1-A / R2-real: PA-01 state=off (unset) -> identical safe return contract -- this is a "
+    "_queue_approval_detailed_impl() plumbing fix, not a PA-01-gated behavior",
+    _r2real_off_result["ok"] is False and _r2real_off_result["contract_id"] is None
+    and _r2real_off_result["terminal_outcome"] == "APPROVAL_QUEUE_ERROR"
+    and _r2real_off_result["created_this_turn"] is False)
+
+# Gateway ENFORCE mode (FEATURE_ACTION_GATEWAY=True) was already safe for
+# this exact exception shape pre-fix -- propose_action() raising there
+# propagates out of _queue_approval_detailed_impl() entirely (bus.
+# request_approval() is unconditionally AFTER the whole if/else block, so an
+# exception from inside the "if" branch never reaches it) and is caught only
+# by _queue_approval_detailed()'s own outer exception-normalizing wrapper.
+# Confirmed here so both Gateway modes are provably covered by this suite,
+# not just the one (shadow) that needed a real code change.
+with patch("feature_flags.is_enabled", return_value=True), \
+     patch.object(_canon_gw, "propose_action", side_effect=RuntimeError("boom")):
+    _r2real_enforce_gw_result = app._queue_approval_detailed(
+        "airtable_add", {"table": "Tasks", "fields": {"Task": "R2real-enforce-gw"}},
+        "r2real_enforce_gw", "telegram", "צור לי משימה",
+    )
+chk("P1-A / R2-real: FEATURE_ACTION_GATEWAY=True (Gateway enforce mode) -- already safe for "
+    "this exception shape pre-fix, confirmed still safe post-fix",
+    _r2real_enforce_gw_result["ok"] is False and _r2real_enforce_gw_result["contract_id"] is None
+    and _r2real_enforce_gw_result["terminal_outcome"] == "APPROVAL_QUEUE_ERROR"
+    and _r2real_enforce_gw_result["created_this_turn"] is False)
+chk("...and no EventBus pending representation was created for this identity either",
+    len(_real_pending.list_for_chat("r2real_enforce_gw")) == 0)
+
+
+# --- P1-B / R3-real: mixed batch -- a real, live contract is created for an
+# UNRELATED tool (calendar_create_event, tool call #1 this turn), and the
+# intent's own expected tool (airtable_add, tool call #2) is genuinely
+# deferred to batch_queue by the pre-existing BUG-BATCH-DISCARD mechanism.
+# Pre-fix, the deferred call left NO tool_results_log entry at all, so PA-01
+# saw "no contract, no outcome" for airtable_add and fell through to the
+# Phantom fallback -- a false claim, since the action IS queued (just not
+# yet promoted into its own live contract).
+_r3real_inputs = {"table": "Tasks", "fields": {"Task": "P1B"}}
+_r3real_expected_label = app._describe_tool_call("airtable_add", _r3real_inputs)
+_r3real_expected_deferred_msg = f"⏳ נשמר בתור לאישור אחרי הפעולה הראשונה: {_r3real_expected_label}"
+
+reply_r3real, _ = _run_agent(
+    "r3real_mixed_batch", "קבע לי פגישה וגם צור משימה", role=Role.OWNER,
+    intent=Intent.CREATE_TASK, allowed_tool_names=("airtable_add", "calendar_create_event"),
+    anthropic_responses=[
+        _tool_use_response([
+            {"name": "calendar_create_event",
+             "input": {"summary": "פגישה", "start_time": "2026-07-20T10:00"}},
+            {"name": "airtable_add", "input": _r3real_inputs},
+        ]),
+        _text_response("קבעתי וגם אוסיף את המשימה"),
+    ],
+    pa01_state="enforce",
+)
+_r3real_contracts = _canon_gw.find_live_contracts("boss_hq:r3real_mixed_batch")
+chk("P1-B / R3-real: a real contract WAS created -- for calendar_create_event (the FIRST "
+    "mutating call this turn), not airtable_add",
+    len(_r3real_contracts) == 1 and _r3real_contracts[0].tool_name == "calendar_create_event")
+chk("P1-B / R3-real: airtable_add (the expected tool for CREATE_TASK) was durably deferred "
+    "to batch_queue, not discarded and not silently promoted this turn",
+    _real_batch_queue.count_pending("boss_hq:r3real_mixed_batch") == 1)
+chk("P1-B / R3-real: row 2 does NOT fire (no __approval_queued__ sentinel for airtable_add "
+    "this turn) and the Phantom fallback does NOT fire either -- final_reply is the real, "
+    "structured deferred-batch message",
+    reply_r3real == _r3real_expected_deferred_msg)
+chk("P1-B / R3-real: the wrong-tool contract (calendar_create_event) is not mistaken for "
+    "evidence about airtable_add, and the raw agent reply is not left standing either",
+    reply_r3real != PHANTOM and reply_r3real != "קבעתי וגם אוסיף את המשימה")
+
+# Unit-level pin on the scoped lookup itself (mirrors R3's own unit/
+# integration split above): a deferred-batch entry for a DIFFERENT tool must
+# not satisfy the expected tool's lookup, and an entry for the actual
+# expected tool must be found regardless of position in the log.
+_r3real_log = [
+    {"tool": "__approval_queued__", "content": "irrelevant", "ok": True,
+     "contract_id": "c-1", "terminal_outcome": None, "action_tool": "calendar_create_event",
+     "created_this_turn": True},
+    {"tool": "__approval_deferred_batch__", "content": _r3real_expected_deferred_msg,
+     "ok": False, "contract_id": None, "terminal_outcome": "APPROVAL_DEFERRED_BATCH",
+     "action_tool": "airtable_add", "created_this_turn": False},
+]
+chk("P1-B (unit): _pa01_contract_created_for_expected_tool is False for airtable_add "
+    "(it was deferred, never a live contract this turn)",
+    app._pa01_contract_created_for_expected_tool(_r3real_log, "airtable_add") is False)
+chk("P1-B (unit): _pa01_structured_terminal_outcome finds the deferred-batch entry for "
+    "airtable_add, scanning past the unrelated calendar_create_event entry first",
+    app._pa01_structured_terminal_outcome(_r3real_log, "airtable_add")
+    == ("APPROVAL_DEFERRED_BATCH", _r3real_expected_deferred_msg))
+
+
+# --- P1-C / R4: a canonical tool's ActionContract IS durably persisted, but
+# a LATER step in the same _queue_approval_detailed_impl() call fails. The
+# orphaned live contract must be revoked -- not left live while the return
+# value claims (contract_id=None) that nothing was created.
+
+# R4a: bus.request_approval() itself raises, immediately after a successful
+# propose_action(). requested tool is sheets_append (no explicit Sheets
+# wording in user_text) -> canonicalizes to airtable_add; the return's
+# action_tool must be the canonical name throughout, never the raw request.
+with patch("feature_flags.is_enabled", return_value=False), \
+     patch.object(_real_bus, "request_approval", side_effect=RuntimeError("eventbus down")):
+    _r4a_result = app._queue_approval_detailed(
+        "sheets_append", {"table": "Tasks", "fields": {"Task": "R4a"}},
+        "r4a_eventbus_fail", "telegram", "צור לי משימה",
+    )
+chk("P1-C / R4a: canonical tool (sheets_append -> airtable_add) was persisted, then "
+    "bus.request_approval() raises -> the persisted contract is revoked, not left live",
+    len(_canon_gw.find_live_contracts("boss_hq:r4a_eventbus_fail")) == 0)
+chk("P1-C / R4a: return contract denies the contract truthfully -- contract_id=None, "
+    "ok=False, terminal_outcome=APPROVAL_QUEUE_ERROR, created_this_turn=False, and "
+    "action_tool is the CANONICAL tool (airtable_add), never the raw requested tool "
+    "(sheets_append)",
+    _r4a_result["contract_id"] is None and _r4a_result["ok"] is False
+    and _r4a_result["terminal_outcome"] == "APPROVAL_QUEUE_ERROR"
+    and _r4a_result["created_this_turn"] is False
+    and _r4a_result["action_tool"] == "airtable_add")
+
+# R4b: bus.request_approval() succeeds (a real EventBus pending item is
+# created) but the owner-notification step that follows raises. By this
+# point BOTH a live ActionContract AND a live EventBus pending item exist --
+# both must be revoked/cancelled, not just silently denied in the return.
+from unittest.mock import MagicMock  # noqa: E402
+
+_old_owner_env = os.environ.get("OWNER_TELEGRAM_ID")
+os.environ["OWNER_TELEGRAM_ID"] = "999999"
+_mock_bot_r4b = MagicMock()
+_mock_bot_r4b.send_message.side_effect = RuntimeError("telegram down")
+try:
+    with patch("feature_flags.is_enabled", return_value=False), \
+         patch.object(app, "bot", _mock_bot_r4b):
+        _r4b_result = app._queue_approval_detailed(
+            "airtable_add", {"table": "Tasks", "fields": {"Task": "R4b"}},
+            "r4b_notify_fail", "telegram", "צור לי משימה",
+        )
+finally:
+    if _old_owner_env is None:
+        os.environ.pop("OWNER_TELEGRAM_ID", None)
+    else:
+        os.environ["OWNER_TELEGRAM_ID"] = _old_owner_env
+chk("P1-C / R4b: contract persisted, then owner notification fails -> the contract is "
+    "revoked (not left live+approvable with no owner ever notified)",
+    len(_canon_gw.find_live_contracts("boss_hq:r4b_notify_fail")) == 0)
+chk("P1-C / R4b: the legacy EventBus pending item created just before the notify failure "
+    "is also cancelled, not left orphaned either",
+    len(_real_pending.list_for_chat("r4b_notify_fail")) == 0)
+chk("P1-C / R4b: return contract is truthful -- contract_id=None, ok=False, "
+    "terminal_outcome=APPROVAL_QUEUE_ERROR, created_this_turn=False",
+    _r4b_result["contract_id"] is None and _r4b_result["ok"] is False
+    and _r4b_result["terminal_outcome"] == "APPROVAL_QUEUE_ERROR"
+    and _r4b_result["created_this_turn"] is False)
+
+
+# ══════════════════════════════════════════════════
 # L. Pending approval from a PRIOR turn — unaffected, PA-01 never reached
 # ══════════════════════════════════════════════════
 

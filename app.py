@@ -111,7 +111,15 @@ def _pa01_structured_terminal_outcome(
         outcome = r.get("terminal_outcome")
         if not outcome:
             continue
-        entry_tool = r.get("action_tool") if r.get("tool") == "__approval_queued__" else r.get("tool")
+        # P1-B re-audit: a batch-deferred entry also carries its canonical
+        # tool identity in "action_tool", not "tool" (which stays the fixed
+        # sentinel name "__approval_deferred_batch__") — same reasoning as
+        # the pre-existing "__approval_queued__" case just below.
+        entry_tool = (
+            r.get("action_tool")
+            if r.get("tool") in ("__approval_queued__", "__approval_deferred_batch__")
+            else r.get("tool")
+        )
         if entry_tool == expected_tool:
             return outcome, r.get("content", "")
     return None
@@ -793,6 +801,42 @@ def _write_execution_receipt(
     )
 
 
+def _revoke_orphaned_gateway_contract(_gw_result, reason: str) -> None:
+    """
+    P1-C re-audit: if ActionGateway.propose_action() already durably saved a
+    brand-new "pending" ActionContract (ok=True, contract_id set) but a LATER
+    step in the same _queue_approval_detailed_impl() call — publishing to the
+    legacy EventBus, or notifying the owner — then fails, the contract must
+    not be left live+approvable while the function's own return value claims
+    no contract exists (contract_id=None). That combination is exactly the
+    orphan-contract state the re-audit forbids: a canonical, real,
+    button-approvable ActionContract that PA-01 (and the user) have no way to
+    know about.
+
+    Strategy: revoke (reject) the contract via the same durable lifecycle
+    transition already used for a user's own cancellation, so
+    find_live_contracts() stops returning it and it can never be approved.
+    Best-effort — a failure to revoke is logged, never raised, since the
+    caller already returns a structured failure regardless of whether this
+    succeeds (the user is never told the action is pending either way).
+    """
+    contract_id = getattr(_gw_result, "contract_id", None) if _gw_result else None
+    if not (_gw_result and getattr(_gw_result, "ok", False) and contract_id):
+        return
+    try:
+        from core.action_gateway import action_gateway as _gw_revoke
+        _revoke_outcome = _gw_revoke.reject(contract_id, rejected_by=f"system:{reason}")
+        logger.warning(
+            "[Approval] revoked orphaned contract=%s reason=%s outcome=%.80s",
+            contract_id, reason, _revoke_outcome,
+        )
+    except Exception as _revoke_exc:
+        logger.error(
+            "[Approval] failed to revoke orphaned contract=%s reason=%s error=%s",
+            contract_id, reason, _revoke_exc, exc_info=True,
+        )
+
+
 def _queue_approval(tool_name: str, tool_inputs: dict,
                     user_chat_id: str, channel: str, user_text: str = "") -> str:
     """
@@ -901,7 +945,7 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
     from core.action_gateway import resolve_canonical_tool
     tool_name = resolve_canonical_tool(tool_name, tool_inputs, user_text)
 
-    from event_bus import bus, executed_action_cache
+    from event_bus import bus, executed_action_cache, pending
     fp = executed_action_cache.compute(user_chat_id, tool_name, tool_inputs)
     if executed_action_cache.is_recently_executed(fp):
         logger.warning(
@@ -999,22 +1043,60 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
             # case (a shadow-mode dedup must not be reported as a fresh
             # creation just because the legacy path queued anyway).
         except Exception as _gw_exc:
-            logger.debug("[ActionGateway] shadow propose failed (non-blocking): %s", _gw_exc)
+            # P1-A re-audit: a real (non-GatewayResult) exception from
+            # propose_action() is NOT the same as a structured failure_code —
+            # the old code here logged at debug level and fell straight
+            # through to bus.request_approval() below, producing a real
+            # legacy EventBus pending item (and possibly leaving a live
+            # ActionContract behind too, if the exception happened after
+            # persistence but before the return) with NO canonical Gateway
+            # evidence backing the "ממתין לאישור" message the user would then
+            # see. Fail closed instead: never reach the legacy bus path off
+            # the back of an unhandled Gateway exception, in shadow mode or
+            # otherwise. If propose_action() already durably saved a contract
+            # before raising, best-effort revoke it so nothing live is left
+            # behind that this same return denies exists.
+            logger.error(
+                "[ActionGateway] shadow propose raised unexpectedly (not a "
+                "structured GatewayResult failure): %s", _gw_exc, exc_info=True,
+            )
+            _revoke_orphaned_gateway_contract(_gw_result, "shadow_propose_exception")
+            return {
+                "message": "❌ אירעה שגיאה בעת ניסיון להעביר את הפעולה לאישור. הפעולה לא בוצעה.",
+                "contract_id": None, "ok": False, "terminal_outcome": "APPROVAL_QUEUE_ERROR",
+                "action_tool": tool_name, "created_this_turn": False,
+            }
 
-    action_id, _ = bus.request_approval(
-        action  = tool_name,
-        payload = {
-            "tool_name":         tool_name,
-            "tool_inputs":       tool_inputs,
-            "origin_channel":    channel,
-            "origin_chat_id":    user_chat_id,
-            "canonical_user_id": identity.memory_key,
-            "user_chat_id":      user_chat_id,
-            "channel":           channel,
-        },
-        chat_id = user_chat_id,
-        label   = label,
-    )
+    try:
+        action_id, _ = bus.request_approval(
+            action  = tool_name,
+            payload = {
+                "tool_name":         tool_name,
+                "tool_inputs":       tool_inputs,
+                "origin_channel":    channel,
+                "origin_chat_id":    user_chat_id,
+                "canonical_user_id": identity.memory_key,
+                "user_chat_id":      user_chat_id,
+                "channel":           channel,
+            },
+            chat_id = user_chat_id,
+            label   = label,
+        )
+    except Exception as _bus_exc:
+        # P1-C re-audit: if propose_action() already durably saved a
+        # brand-new ActionContract (_gw_result.ok=True) above, it must not be
+        # left live+pending while this function returns contract_id=None —
+        # revoke it before returning the structured failure.
+        logger.error(
+            "[Approval] bus.request_approval failed after Gateway proposal: "
+            "tool=%s error=%s", tool_name, _bus_exc, exc_info=True,
+        )
+        _revoke_orphaned_gateway_contract(_gw_result, "eventbus_publish_failed")
+        return {
+            "message": "❌ אירעה שגיאה בעת ניסיון להעביר את הפעולה לאישור. הפעולה לא בוצעה.",
+            "contract_id": None, "ok": False, "terminal_outcome": "APPROVAL_QUEUE_ERROR",
+            "action_tool": tool_name, "created_this_turn": False,
+        }
 
     owner_chat_id = (
         os.environ.get("OWNER_TELEGRAM_ID", "") or
@@ -1036,7 +1118,20 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
             logger.info(f"[Approval] ✅ sent to owner {_sanitize_id(owner_chat_id)} | {action_id}")
         except Exception as e:
             logger.error(f"[Approval] ❌ failed to notify owner: {e}")
-            # BOSS NEVER FAKES: לא מחזירים "ממתין לאישור" כשהשליחה נכשלה
+            # BOSS NEVER FAKES: לא מחזירים "ממתין לאישור" כשהשליחה נכשלה.
+            # P1-C re-audit: by this point BOTH a live EventBus pending item
+            # (created just above) and possibly a live ActionContract exist —
+            # cancel/revoke both rather than silently returning
+            # contract_id=None while they stay live and button-approvable
+            # with no owner ever having seen the request.
+            try:
+                pending.cancel(action_id)
+            except Exception:
+                logger.debug(
+                    "[Approval] failed to cancel orphaned EventBus pending item %s",
+                    action_id, exc_info=True,
+                )
+            _revoke_orphaned_gateway_contract(_gw_result, "owner_notify_failed")
             return {
                 "message": (
                     f"❌ לא הצלחתי לשלוח בקשת אישור לבעלים.\n"
@@ -2699,9 +2794,36 @@ def run_agent(
                             f"[BatchQueue] deferred (turn already has 1 approval queued): "
                             f"{tu.name} | user={_sanitize_id(chat_id)}"
                         )
+                        _deferred_content = f"⏳ נשמר בתור לאישור אחרי הפעולה הראשונה: {_label}"
                         tool_results.append({
                             "type": "tool_result", "tool_use_id": tu.id,
-                            "content": f"⏳ נשמר בתור לאישור אחרי הפעולה הראשונה: {_label}",
+                            "content": _deferred_content,
+                        })
+                        # P1-B re-audit: a deferred batch item is a real,
+                        # tracked outcome for this turn — the previous code
+                        # left NO tool_results_log entry for it at all, so a
+                        # deferred expected-tool call was structurally
+                        # invisible to PA-01. Without this, a mixed batch
+                        # (unrelated tool's contract created first, expected
+                        # tool deferred second) fell all the way through to
+                        # the Phantom fallback — a false claim that "no
+                        # action was created" when in fact one is genuinely
+                        # queued for the next promotion. Canonicalized here
+                        # (same resolve_canonical_tool() the real queue call
+                        # will use once promoted — see
+                        # _promote_next_batch_item()/_queue_approval_detailed_impl())
+                        # so PA-01's expected-tool scoping matches correctly
+                        # regardless of any Sheets/Drive rewrite.
+                        from core.action_gateway import resolve_canonical_tool as _resolve_deferred_tool
+                        _deferred_action_tool = _resolve_deferred_tool(tu.name, dict(tu.input), user_text)
+                        tool_results_log.append({
+                            "tool": "__approval_deferred_batch__",
+                            "content": _deferred_content,
+                            "ok": False,
+                            "contract_id": None,
+                            "terminal_outcome": "APPROVAL_DEFERRED_BATCH",
+                            "action_tool": _deferred_action_tool,
+                            "created_this_turn": False,
                         })
                         continue
                     _approval_outcome = _queue_approval_detailed(

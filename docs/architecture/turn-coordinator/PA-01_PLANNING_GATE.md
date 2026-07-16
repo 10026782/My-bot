@@ -1318,3 +1318,107 @@ recorded in this §8 is a plumbing-level correction to how the sketch/earlier pa
 propagated already-correct state, not a change to the predicate's *shape* (still the same 5-row matrix),
 the policy source, the sentinel's required *keys* (this round adds one — `created_this_turn` — but does
 not remove or repurpose any existing one), the matrix's rows, or the approved wording.
+
+**Codex re-audit of commit `b7eb2bb` (verdict: `FIX_REQUIRED`) — return state must match canonical
+state.** A third review found that `_queue_approval_detailed()`'s return value could still disagree with
+the *actual* durable/EventBus/batch-queue state in three concrete ways, none of them covered by the
+`created_this_turn` fix above (which only handles `propose_action()`'s own *structured*
+`GatewayResult(ok=False, ...)` returns, not exceptions, not batch-deferred calls, and not failures that
+happen *after* a contract is already saved).
+
+- **P1-A — a real exception from `propose_action()`, not a structured `GatewayResult` failure.** The
+  shadow-mode branch (`FEATURE_ACTION_GATEWAY` off) wrapped its `propose_action()` call in a bare
+  `try/except Exception` that logged at `DEBUG` and fell straight through to `bus.request_approval()`,
+  treating an unhandled bug/exception identically to "nothing happened, proceed with the legacy path."
+  This produced a real legacy `EventBus` pending item with **no** canonical `ActionContract` behind it,
+  and — because `_gw_result` stayed `None` — a message that still read `"⏳ הפעולה ממתינה לאישור"` even
+  though no Gateway evidence existed for it at all. **Fix:** the shadow branch's `except Exception` now
+  returns the same uniform fail-closed shape used everywhere else (`ok=False`, `contract_id=None`,
+  `terminal_outcome="APPROVAL_QUEUE_ERROR"`, `created_this_turn=False`) immediately, and never reaches
+  `bus.request_approval()`. Enforce mode (`FEATURE_ACTION_GATEWAY` on) needed no code change: an exception
+  there already propagated out of `_queue_approval_detailed_impl()` entirely — skipping
+  `bus.request_approval()`, which sits unconditionally *after* the whole `if/else` Gateway block — and was
+  already caught only by `_queue_approval_detailed()`'s own outer exception-normalizing wrapper; both
+  branches are now covered by regression tests (R2-real) to prove this explicitly rather than by
+  inspection alone. This fix is independent of `FEATURE_PA01_ENFORCEMENT_STATE` — it runs inside
+  `_queue_approval_detailed_impl()` on every call regardless of PA-01's own state, matching the review's
+  explicit requirement that "off" must not excuse a false pending state.
+
+- **P1-B — a batch-deferred expected-tool call was structurally invisible to PA-01.** When a turn's
+  *second* mutating tool call hits the pre-existing `BUG-BATCH-DISCARD` deferral
+  (`_mutating_approvals_this_turn >= 1` → `event_bus.batch_queue.enqueue(...)`), no `tool_results_log`
+  entry was ever appended for it. If that deferred call happened to be the intent's own expected tool
+  (e.g. a first `calendar_create_event` call creates a real, live, but *unrelated* contract, and a second
+  `airtable_add` call — the `CREATE_TASK` expected tool — is deferred to `batch_queue`), PA-01 saw "no
+  contract, no terminal outcome" for `airtable_add` and fell through to the Phantom fallback — a false
+  claim, since the action genuinely *is* queued, just not yet promoted into its own live contract. **Fix:**
+  the deferral branch now also appends a `tool_results_log` entry:
+  `{"tool": "__approval_deferred_batch__", "action_tool": <canonical>, "ok": False, "contract_id": None,
+  "terminal_outcome": "APPROVAL_DEFERRED_BATCH", "content": <the same deterministic "נשמר בתור..."
+  message already shown to the model>, "created_this_turn": False}`. The canonical tool name is resolved
+  via the same `resolve_canonical_tool()` call `_queue_approval_detailed_impl()` will use once this item is
+  promoted (see `_promote_next_batch_item()`), so PA-01's expected-tool scoping matches correctly even
+  across a Sheets/Drive rewrite. `_pa01_structured_terminal_outcome()`'s `entry_tool` extraction was
+  extended to also read `action_tool` for this new sentinel type (previously only `__approval_queued__`),
+  so this entry is found by the existing scoped, full-log-scan lookup with no change to the lookup's own
+  shape or semantics. `_pa01_contract_created_for_expected_tool()` needed no change — a deferred entry's
+  `tool` is never `__approval_queued__`, so it correctly never satisfies row 2. Net effect: a mixed batch
+  where the expected tool is deferred now resolves to row 3 (the deferred-batch message), never row 2 and
+  never row 4 (Phantom). This does **not** change `batch_queue`'s own mechanics in any way — no tool is
+  force-run, no existing contract is cancelled, only a truthful state record is added for PA-01 to read.
+
+- **P1-C — a contract persisted, then a later step (EventBus publish / owner notification) failed,
+  leaving an orphan.** Two spots in `_queue_approval_detailed_impl()` run *after* `propose_action()` may
+  themselves fail: `bus.request_approval()` (previously not wrapped in `try/except` at all — an exception
+  there propagated out uncaught, past a possibly-already-saved contract, with `_gw_result` never read
+  again to clean it up) and the owner-Telegram-notification `try/except`, whose failure branch already
+  explicitly returned `contract_id=None` "deliberately" (§8, canonical-tool-wiring note above) but never
+  actually did anything about the real, live `ActionContract` (and, by that point, the real live `EventBus`
+  pending item too) it was denying the existence of. Both are now closed with the same strategy — **revoke
+  the contract, using the durable lifecycle transition the user's own cancellation already uses**
+  (`action_gateway.reject(contract_id, rejected_by="system:<reason>")`, via a new helper
+  `_revoke_orphaned_gateway_contract()`), so `find_live_contracts()` stops returning it and it can never be
+  approved by a stale Telegram button: a `contract_id=None` return is now truthful, not just asserted.
+  `bus.request_approval()` is now wrapped in `try/except`; on failure the (possibly just-saved) contract is
+  revoked and the uniform failure shape is returned. The owner-notification failure branch additionally
+  cancels the `EventBus` pending item itself (`event_bus.pending.cancel(action_id)`) before revoking the
+  contract, since by that point both exist. Revocation is best-effort and never raises — a failure to
+  revoke is logged and the caller's own structured-failure return proceeds regardless, since the user is
+  never told the action is pending either way. No new field was added to the return contract for this —
+  "persisted" vs. "usable/notified" was resolved by making revocation synchronous and best-effort at the
+  point of failure, so by the time `_queue_approval_detailed_impl()` returns, "not live" is once again true
+  whenever the return says `contract_id=None`, without needing a distinct signal to reconcile a
+  transient-but-real disagreement between the two.
+
+**Final return contract (all three findings applied, no field renamed or removed from the
+`created_this_turn` round above):**
+
+```python
+{
+    "message": str,
+    "contract_id": str | None,          # None means: no LIVE contract exists for this call, full stop —
+                                         # true on every branch, including post-persistence revocation
+    "ok": bool,
+    "terminal_outcome": str | None,     # None only when created_this_turn is True
+    "action_tool": str,                 # canonical (post-resolve_canonical_tool) on every branch
+    "created_this_turn": bool,          # True only immediately after a fresh contract save that
+                                         # stayed live through EventBus publish + owner notification
+}
+```
+
+`tool_results_log` gained one new sentinel `tool` value, `"__approval_deferred_batch__"`, alongside the
+existing `"__approval_queued__"` — both carry the canonical tool identity in `action_tool`, not `tool`.
+
+**Regression tests added (all in `test_pa01_phantom_approval_enforcement.py`, section "P1"):** R2-real
+(propose_action() raising a real exception, shadow and enforce Gateway modes, PA-01 off and enforce
+states — 8 assertions), R3-real (mixed batch: real contract for an unrelated tool first, expected tool
+genuinely deferred second — 6 assertions, unit + end-to-end `run_agent()` integration), R4a/R4b
+(contract persisted then `bus.request_approval()` raises / owner notification fails — 7 assertions,
+including direct `find_live_contracts()`/`event_bus.pending.list_for_chat()`/`batch_queue.count_pending()`
+repository-state checks, not just the return dict). All three were confirmed red against commit `b7eb2bb`
+(8 failures, one per finding-specific assertion) before the fix, and green after
+(`test_pa01_phantom_approval_enforcement.py`: 70/70).
+
+**No deviation** from this re-audit's own instructions: no PA-01 predicate/policy/matrix/wording change,
+no extension beyond `_queue_approval_detailed_impl()`'s own plumbing and the two `_pa01_*` scoped-lookup
+helpers, `BUG-104` untouched, no new branch/PR opened.
