@@ -49,6 +49,14 @@ APPROVAL POLICY:
   FEATURE_ACTION_GATEWAY       - ActionContract + Action Gateway (Stage B) — מרכז כל mutation תחת חוזה; default OFF
   FEATURE_ACTION_CONTRACT_PERSISTENCE - durable new proposals + proposal recovery lookups (Phase 4B-1A); default OFF
   FEATURE_ATOMIC_CLAIMS        - PostgreSQL atomic coordination for contract execution (Phase 4B0.1A); default OFF
+  FEATURE_PA01_ENFORCEMENT_STATE - שלוש מצבים (לא boolean רגיל): "off" (ברירת מחדל,
+                                 התנהגות קיימת ללא שינוי) / "shadow" (מטריצת PA-01 מחושבת
+                                 ומלוגגת per-row, לעולם לא נוגעת ב-final_reply) / "enforce"
+                                 (final_reply מוחלף בהתאם לשורת המטריצה — ראה
+                                 docs/architecture/turn-coordinator/PA-01_PLANNING_GATE.md).
+                                 State-only: אף שלב לא קורא את טקסט final_reply. קריאה דרך
+                                 get_pa01_enforcement_state(), לא is_enabled(). עצמאי מ-
+                                 FEATURE_ACTION_GATEWAY (ראה §1 במסמך).
 
 CAPTURE POLICY (C89):
   FEATURE_AUTO_CAPTURE         - Tiered auto-write via IngressClassification (Stage 3).
@@ -248,6 +256,22 @@ def get_select_value_validation_state() -> str:
     """
     value = os.environ.get("FEATURE_AIRTABLE_SELECT_VALUE_VALIDATION_STATE", "off").strip().lower()
     return value if value in _SCHEMA_PROVIDER_STATES else "off"
+
+
+_PA01_STATES = frozenset({"off", "shadow", "enforce"})
+
+
+def get_pa01_enforcement_state() -> str:
+    """
+    Three-state accessor for FEATURE_PA01_ENFORCEMENT_STATE (PA-01 —
+    Phantom Approval Prompt structural enforcement). Independent of
+    FEATURE_ACTION_GATEWAY by design — see
+    docs/architecture/turn-coordinator/PA-01_PLANNING_GATE.md §1 for why.
+    Returns "off" for any unset/unrecognized value — fail closed to old
+    (log-only) behavior.
+    """
+    value = os.environ.get("FEATURE_PA01_ENFORCEMENT_STATE", "off").strip().lower()
+    return value if value in _PA01_STATES else "off"
 
 
 def set_flag(name: str, value: bool) -> None:

@@ -539,6 +539,23 @@ def _queue_tma_write_approval(action: str, payload: dict, identity, label: str) 
         "requested_by": _identity_ref(identity),
     }
 
+    # TurnCoordinator Phase 0 — observation only (see
+    # docs/architecture/turn-coordinator/). TMA's "turn" fit is weak
+    # (TURN_OWNERSHIP_EXTENSION.md finding 7 — stateless REST, not a
+    # standing conversation) so this deliberately does not build a full
+    # TurnEnvelope per HTTP response; it logs only the Case
+    # C1 signal (multi_contract_conflict) for this identity, right before a
+    # NEW contract is proposed — the one thing that's identical in meaning
+    # across channels: this identity may already have live contracts from
+    # Telegram/WhatsApp that TMA's own bulk-approval logic doesn't know
+    # about. Deferred import: tma_api.py must not import app.py at module
+    # level (app.py registers this blueprint — circular).
+    try:
+        from app import _build_and_log_turn_envelope  # noqa: PLC0415
+        _build_and_log_turn_envelope(identity, identity.user_id, None, entry_point="tma")
+    except Exception:
+        logger.debug("[TurnEnvelope] TMA observation skipped due to error", exc_info=True)
+
     result = _gw.propose_action(
         tenant_id=identity.tenant_id,
         canonical_user_id=identity.memory_key,

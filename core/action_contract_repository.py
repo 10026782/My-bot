@@ -167,6 +167,21 @@ def _record_to_contract(record: dict) -> "ActionContract":
 class ActionContractRepository:
     """See module docstring. Stateless — every call talks to Airtable fresh."""
 
+    # Codex re-audit of ce990a0, fix 1 — capability declared at the
+    # ledger/repository boundary (NOT a feature flag consulted in app.py):
+    # Airtable has no conditional-PATCH / compare-and-swap primitive, so a
+    # `require_status` conditional lifecycle transition cannot be performed
+    # atomically here. transition() is read-then-check-then-PATCH — three
+    # separate operations, TOCTOU-prone: a concurrent writer can change the
+    # durable state between the check-read and the unconditional PATCH, so a
+    # destructive conditional write (e.g. PA-01's pending->rejected orphan
+    # cleanup) could clobber a live approval. ExecutionLedger consults this
+    # BEFORE ever attempting such a write; False => fail closed, no PATCH,
+    # caller maps the result to APPROVAL_QUEUE_ORPHANED. A future
+    # Postgres-backed repository offering a real atomic conditional
+    # `UPDATE ... WHERE status = :expected` can declare this True.
+    supports_atomic_conditional_transition = False
+
     def save(self, contract: "ActionContract") -> bool:
         """Full upsert used by 4B-1A for a brand-new contract (version=1).
 
@@ -205,13 +220,24 @@ class ActionContractRepository:
             )
 
         current, record_id = self._get_for_transition(contract_id)
-        if current.status == new_status and not updates:
-            return current
+        # Codex re-audit of ce990a0, fix 2 — strict expected-state ordering:
+        # the expected-status/version check MUST run before the idempotent
+        # shortcut. Otherwise a call like (expected_status=pending,
+        # actual_status=rejected, new_status=rejected) would hit the shortcut
+        # (actual == new_status, no updates) and return SUCCESS, silently
+        # accepting a stale expectation as though this call performed the
+        # transition. That is exactly the false-success reject_if_pending()
+        # must never produce. Fail closed with a conflict instead.
         if current.status != expected_status or current.version != expected_version:
             raise ActionContractTransitionConflictError(
                 f"stale lifecycle state: expected={expected_status}/v{expected_version} "
                 f"actual={current.status}/v{current.version}"
             )
+        # Idempotent shortcut only AFTER the expectation is confirmed to match:
+        # expected_status == current.status here, so a no-op same-status write
+        # is a genuine, correctly-expected idempotent replay, not a stale one.
+        if current.status == new_status and not updates:
+            return current
         if (new_status != current.status
                 and new_status not in ALLOWED_CONTRACT_TRANSITIONS.get(current.status, frozenset())):
             raise ActionContractTransitionConflictError(

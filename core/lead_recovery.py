@@ -233,6 +233,18 @@ def request_recovery_approval(
         from core.action_gateway import action_gateway as _gw
 
         identity = resolve_identity("telegram", owner_chat_id)
+
+        # TurnCoordinator Phase 0 — observation only (see
+        # docs/architecture/turn-coordinator/). AP-28 in
+        # TURN_OWNERSHIP_EXTENSION.md — same rationale as followup_engine.py's
+        # identical addition: a scheduler-proposed contract landing on top of
+        # an already-live contract for the same owner should be observable.
+        try:
+            from app import _build_and_log_turn_envelope
+            _build_and_log_turn_envelope(identity, owner_chat_id, None, entry_point="scheduler_recovery")
+        except Exception:
+            logger.debug("[TurnEnvelope] recovery scheduler observation skipped due to error", exc_info=True)
+
         tool_inputs = {
             "chat_id":      owner_chat_id,
             "draft":        candidate.draft,

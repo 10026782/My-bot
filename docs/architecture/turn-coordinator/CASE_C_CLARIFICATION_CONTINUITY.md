@@ -7,6 +7,14 @@ code-verified with file:line citations, not inferred from the abstract
 description alone — same standard as Cases A/B in the proposal and the
 turn-ownership extension.
 
+**Naming collision — resolved by owner decision.** `REPLY_OWNERSHIP_AND_APPROVAL_AUTHORITY_RESEARCH.md`
+originally used the name "Case C — Phantom Approval Prompt" for a related but distinct scenario — the
+same underlying gap this document's C2 already names (an unevidenced "pending approval" claim), but
+manifesting on a single ordinary turn with no clarification/multi-item precondition at all. Per owner
+decision, that scenario is renamed **PA-01 — Phantom Approval Prompt**; "Case C" in this program's
+docs now refers unambiguously to this document (clarification-continuity, C1/C2) only. See
+`PA-01_PLANNING_GATE.md` for the approved implementation plan.
+
 ## The scenario
 
 A multi-item request requires clarification for one item. After the user

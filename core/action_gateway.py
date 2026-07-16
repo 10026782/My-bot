@@ -452,12 +452,27 @@ class ExecutionLedger:
             return None
         return max(candidates, key=lambda c: c.created_at)
 
-    def update_status(self, contract_id: str, status: str, **kwargs) -> bool:
+    def update_status(self, contract_id: str, status: str, *,
+                      require_status: str | None = None, **kwargs) -> bool:
         """Persist an expected lifecycle transition before updating RAM.
 
         With no repository configured, preserves the legacy RAM-only behavior.
         Transition failures propagate so callers cannot report approval,
         rejection, or execution success when the durable audit row disagrees.
+
+        require_status (Codex re-audit of 818c8a6 — TOCTOU race fix): when
+        provided, the transition is CONDITIONAL and ATOMIC — applied only if
+        the contract is still in exactly `require_status` at the moment of
+        the write, and returning False (without mutating) if it has moved on.
+        RAM path: the guard and the set share a SINGLE lock acquisition, so
+        no concurrent writer can slip a status change in between them.
+        Durable path: enforced by the repository's own CAS on
+        expected_status. This closes the window a plain check-then-update
+        leaves open — a concurrent lifecycle event moving a "pending"
+        contract to "approved" between a caller's status check and the write
+        must never be silently clobbered. When require_status is None the
+        behavior is byte-for-byte the legacy unconditional overwrite, so no
+        existing caller is affected.
         """
         with self._lock:
             c = self._store.get(contract_id)
@@ -467,15 +482,48 @@ class ExecutionLedger:
             expected_version = c.version
 
         if self._repository:
+            # Codex re-audit of ce990a0, fix 1 — durable conditional cleanup
+            # must fail closed. A require_status transition is CONDITIONAL and
+            # DESTRUCTIVE (PA-01's pending->rejected orphan cleanup). The
+            # durable store can only perform it safely if it offers a real
+            # atomic conditional primitive. Airtable's transition() is
+            # read-check-PATCH (TOCTOU-prone), so its repository declares
+            # supports_atomic_conditional_transition = False — and when it is
+            # not exactly True, we must NOT call transition() at all: an
+            # unconditional PATCH could clobber a concurrent lifecycle change
+            # (e.g. a live approval). Return False without any durable
+            # mutation; the caller (reject_if_pending -> _revoke_and_verify_
+            # contract) maps False to APPROVAL_QUEUE_ORPHANED. The decision
+            # lives here, at the ledger/repository boundary, not behind a
+            # feature-flag check in app.py. `is not True` (not just truthiness)
+            # so a test double / mock whose attribute auto-creates to a truthy
+            # object is still treated as "no CAS" — fail closed by default.
+            if (require_status is not None
+                    and getattr(self._repository, "supports_atomic_conditional_transition", False)
+                        is not True):
+                logger.warning(
+                    "[ActionGateway] conditional transition require_status=%s requested but the "
+                    "durable repository has no atomic conditional primitive — failing closed "
+                    "(no PATCH). contract=%s", require_status, contract_id,
+                )
+                return False
+            # When require_status is given (and the repository DID declare CAS
+            # support above), the durable CAS must enforce THAT status
+            # specifically (not merely the RAM-captured current one), and a
+            # CAS mismatch is a conditional-transition "no-op", not an error
+            # to propagate.
+            _cas_expected = require_status if require_status is not None else expected_status
             try:
                 persisted = self._repository.transition(
                     contract_id,
-                    expected_status=expected_status,
+                    expected_status=_cas_expected,
                     expected_version=expected_version,
                     new_status=status,
                     updates=kwargs,
                 )
             except ActionContractTransitionError:
+                if require_status is not None:
+                    return False
                 raise
             except Exception as exc:
                 raise ActionContractTransitionPersistenceError(
@@ -487,6 +535,12 @@ class ExecutionLedger:
         with self._lock:
             c = self._store.get(contract_id)
             if not c:
+                return False
+            # Atomic guard: check-and-set inside the SAME lock section (the
+            # TOCTOU fix). A concurrent update_status() for this contract
+            # also takes self._lock, so the two are serialized and this can
+            # never overwrite a status a concurrent writer already changed.
+            if require_status is not None and c.status != require_status:
                 return False
             c.status = status
             for k, v in kwargs.items():
@@ -1017,6 +1071,56 @@ class ActionGateway:
             contract_id, contract.tool_name, rejected_by,
         )
         return "🚫 הפעולה בוטלה."
+
+    def reject_if_pending(self, contract_id: str, rejected_by: str = "") -> bool:
+        """
+        Atomic conditional cancel (Codex re-audit of 818c8a6 — TOCTOU race
+        fix): transition pending -> rejected ONLY if the contract is still
+        pending at the moment of the guarded ledger write, and return True
+        iff THIS call performed that transition.
+
+        Unlike reject() — which reads the status, checks it is "pending", and
+        only THEN (in a separate step) calls update_status() — this pushes
+        the "must still be pending" check INTO the same atomic write
+        (update_status(require_status="pending")). reject()'s two-step form
+        leaves a window: a concurrent turn moving the contract pending ->
+        approved between the check and the write is silently overwritten to
+        "rejected" by the RAM ledger's unconditional set. A caller that then
+        reads back "rejected" would wrongly conclude its own cancellation
+        succeeded, when it in fact clobbered a live approval. This method
+        makes that impossible: if the contract is not pending at the write,
+        no mutation happens and False is returned.
+
+        Any failure to cleanly transition (durable CAS mismatch, a transition
+        error, or a missing contract) returns False without raising — the
+        caller treats False as "not cancelled by us", never as success.
+        reject() itself is intentionally left unchanged so its existing
+        callers (route_cancellation_word, the Telegram approval callback)
+        keep their current user-facing-string contract; this is an additive,
+        purpose-built API for the PA-01 orphan-cleanup path, which needs a
+        verified boolean, not a message.
+
+        Codex re-audit of ce990a0: True is returned ONLY when a real atomic
+        primitive actually performed pending -> rejected. On the RAM-only
+        ledger that is the single-lock guarded set in update_status(). When a
+        DURABLE repository is active that has no atomic conditional primitive
+        (Airtable — see ActionContractRepository.supports_atomic_conditional_
+        transition), update_status(require_status="pending") fails closed and
+        returns False WITHOUT any PATCH, so this returns False too — a
+        destructive conditional cleanup is never performed non-atomically
+        against the durable store. A read-back showing "rejected" is never on
+        its own sufficient to return True.
+        """
+        try:
+            return bool(self._ledger.update_status(
+                contract_id, "rejected", require_status="pending",
+            ))
+        except Exception as exc:
+            logger.warning(
+                "[ActionGateway] reject_if_pending: transition failed contract=%s error=%s",
+                contract_id, exc,
+            )
+            return False
 
     def route_cancellation_word(self, canonical_user_id: str) -> str | None:
         """

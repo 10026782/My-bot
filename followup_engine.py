@@ -187,6 +187,20 @@ def request_followup_approval(candidate: FollowupCandidate, owner_chat_id: str) 
         from core.action_gateway import action_gateway as _gw
 
         identity = resolve_identity("telegram", owner_chat_id)
+
+        # TurnCoordinator Phase 0 — observation only (see
+        # docs/architecture/turn-coordinator/). AP-27 in
+        # TURN_OWNERSHIP_EXTENSION.md: this is a scheduler-proposed contract
+        # for the owner, proactive rather than a reply to any inbound turn —
+        # logs the Case C1 signal (multi_contract_conflict) so a background
+        # proposal landing on top of an already-live Telegram/WhatsApp/TMA
+        # contract for the same owner is observable, not silent.
+        try:
+            from app import _build_and_log_turn_envelope
+            _build_and_log_turn_envelope(identity, owner_chat_id, None, entry_point="scheduler_followup")
+        except Exception:
+            logger.debug("[TurnEnvelope] followup scheduler observation skipped due to error", exc_info=True)
+
         tool_inputs = {
             "chat_id":      owner_chat_id,
             "draft":        candidate.draft,

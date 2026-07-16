@@ -341,16 +341,32 @@ def log_turn_envelope(envelope: TurnEnvelope, *, canonical_user_id: str = "") ->
 # to distinguish C1 from C2") is the entire scope of what follows.
 
 
+def _agent_text_claims_pending(final_reply: str) -> bool:
+    """
+    Raw pattern match only — does this text READ like a pending-approval
+    claim, independent of whether anything is actually pending. Reuses
+    core/anti_hallucination.py's own _AGENT_PENDING_STATUS_PATTERN (single
+    source of truth, not a duplicated regex that could drift). Extracted so
+    both detect_case_c2_signal() (which combines this with turn state to
+    decide "is this claim false") and OwnershipSignal (which records the raw
+    claim itself, alongside the turn state, as separate fields — see
+    log_ownership_signal()) share one check.
+    """
+    try:
+        from core.anti_hallucination import _AGENT_PENDING_STATUS_PATTERN
+        return bool(_AGENT_PENDING_STATUS_PATTERN.search(final_reply or ""))
+    except Exception:
+        return False
+
+
 def detect_case_c2_signal(
     final_reply: str, *, queue_count: int, approval_queued_this_turn: bool,
 ) -> bool:
     """
     True when this turn's reply is shaped like a pending-approval claim
-    (reuses core/anti_hallucination.py's own _AGENT_PENDING_STATUS_PATTERN —
-    single source of truth, not a duplicated regex that could drift) while
-    nothing is actually pending: queue_count == 0 (this turn's post-action
-    state, not the turn-start snapshot — see app.py's call site) AND no
-    __approval_queued__ evidence was produced this turn either.
+    while nothing is actually pending: queue_count == 0 (this turn's
+    post-action state, not the turn-start snapshot — see app.py's call site)
+    AND no __approval_queued__ evidence was produced this turn either.
 
     This is the C2 signature: exactly the gap in sanitize_agent_response()
     documented in CASE_C_CLARIFICATION_CONTINUITY.md — _AGENT_PENDING_STATUS_PATTERN
@@ -359,11 +375,7 @@ def detect_case_c2_signal(
     """
     if queue_count > 0 or approval_queued_this_turn:
         return False
-    try:
-        from core.anti_hallucination import _AGENT_PENDING_STATUS_PATTERN
-        return bool(_AGENT_PENDING_STATUS_PATTERN.search(final_reply or ""))
-    except Exception:
-        return False
+    return _agent_text_claims_pending(final_reply)
 
 
 def log_case_c_signal(kind: Literal["C1", "C2"], *, canonical_user_id: str = "", detail: str = "") -> None:
@@ -385,3 +397,94 @@ def log_case_c_signal(kind: Literal["C1", "C2"], *, canonical_user_id: str = "",
         )
     except Exception:
         logger.debug("[TurnEnvelope] case_c_signal logging failed", exc_info=True)
+
+
+# ══════════════════════════════════════════════════
+# Ownership signal — routine, per-turn (not anomaly-only)
+# ══════════════════════════════════════════════════
+# Requested explicitly to prove PRECISELY where the agent takes over reply
+# ownership without any backing action, across every entry point that routes
+# through the agent — not just the rare case where it's already wrong (that
+# is what log_case_c_signal("C2", ...) is for). Logged on EVERY turn that
+# reaches this checkpoint (any agent-handled turn, any recognized intent),
+# routine INFO level, so the population of turns can be analyzed later — not
+# just the anomalies. Still log-only: no blocking, no prompt injection, no
+# behavior change. See docs/architecture/turn-coordinator/ for the design
+# this extends.
+
+@dataclass(frozen=True)
+class OwnershipSignal:
+    recognized_intent: str
+    selected_handler: str
+    tool_use_emitted: bool
+    approval_queued: bool
+    agent_claimed_approval: bool
+    reply_owner: str
+
+    def to_log_dict(self) -> dict:
+        return {
+            "recognized_intent": self.recognized_intent,
+            "selected_handler": self.selected_handler,
+            "tool_use_emitted": self.tool_use_emitted,
+            "approval_queued": self.approval_queued,
+            "agent_claimed_approval": self.agent_claimed_approval,
+            "reply_owner": self.reply_owner,
+        }
+
+    @property
+    def is_hijack(self) -> bool:
+        """The exact pattern this signal exists to catch: the agent claims
+        an approval is pending, emitted no tool call at all, and nothing was
+        actually queued — a claim with zero backing action of any kind, not
+        even an attempted (later-blocked) one."""
+        return (
+            self.agent_claimed_approval
+            and not self.tool_use_emitted
+            and not self.approval_queued
+        )
+
+
+def build_ownership_signal(
+    *, recognized_intent: str, selected_handler: str, tool_use_emitted: bool,
+    approval_queued: bool, final_reply: str, reply_owner: str = "agent",
+) -> OwnershipSignal:
+    """Pure function — no I/O. final_reply is checked, never stored: only
+    the boolean match (agent_claimed_approval) survives into the returned
+    signal, never the text itself (log content boundary — see
+    log_ownership_signal())."""
+    return OwnershipSignal(
+        recognized_intent=recognized_intent or "unknown",
+        selected_handler=selected_handler or "unknown",
+        tool_use_emitted=bool(tool_use_emitted),
+        approval_queued=bool(approval_queued),
+        agent_claimed_approval=_agent_text_claims_pending(final_reply),
+        reply_owner=reply_owner,
+    )
+
+
+def log_ownership_signal(signal: OwnershipSignal, *, canonical_user_id: str = "") -> None:
+    """
+    Routine per-turn log (INFO) — the full field set, every time, so the
+    hijack pattern's actual frequency can be measured against the full
+    population of agent-handled turns, not just logged when already
+    suspected. When signal.is_hijack is True, ALSO emits a distinct
+    WARNING-level line (same fail-open-not-silent principle as
+    log_case_c_signal()) so the anomaly is independently greppable without
+    parsing JSON out of every routine INFO line.
+
+    canonical_user_id is fingerprinted (never logged raw) — same PII
+    boundary as log_turn_envelope()/log_case_c_signal(). Never raises.
+    """
+    try:
+        logger.info(
+            "[TurnEnvelope] ownership_signal user=%s %s",
+            _fingerprint(canonical_user_id),
+            json.dumps(signal.to_log_dict(), ensure_ascii=False, default=str),
+        )
+        if signal.is_hijack:
+            logger.warning(
+                "[TurnEnvelope] ownership_hijack user=%s intent=%s handler=%s",
+                _fingerprint(canonical_user_id), signal.recognized_intent, signal.selected_handler,
+            )
+    except Exception:
+        logger.debug("[TurnEnvelope] ownership_signal logging failed", exc_info=True)

@@ -258,7 +258,15 @@ def test_shadow_propose_gated_and_app_queue_block_lookup_failure():
     assert message and "לא הועברה לאישור" in message
 
     app_source = open("app.py", encoding="utf-8").read()
-    assert 'in {"persistence_failed", "persistence_lookup_failed"}' in app_source
+    # PA-01 re-audit (818c8a6) split the two durable-failure codes into
+    # separate branches: persistence_lookup_failed is provably clean
+    # (APPROVAL_QUEUE_ERROR) since it fails before any contract is
+    # constructed, while persistence_failed is acknowledgment-uncertain
+    # (APPROVAL_QUEUE_ORPHANED). Both must still be explicitly handled in the
+    # shadow queue path — assert each is referenced rather than the old
+    # single-set literal.
+    assert '"persistence_lookup_failed"' in app_source
+    assert '"persistence_failed"' in app_source
 
 
 def test_actioncontracts_at_upsert_callers_explicitly_choose_strict_mode():

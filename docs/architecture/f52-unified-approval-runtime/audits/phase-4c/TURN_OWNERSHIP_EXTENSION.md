@@ -284,3 +284,53 @@ already-fetched snapshot proven equivalent for this code path.
 - Finding 4's `file_flow` classification for `_pending_voice_edits` is a working placeholder for
   Phase 0's inventory, not a closed decision on the proposal's v3 schema — whoever finalizes the
   Phase 1 `PendingQueueAwareness` schema should still confirm or override it explicitly.
+
+## Coverage expansion: ownership-hijack signal + more entry points
+
+Extends Phase 0 past `run_agent()`-only coverage, and adds a signal specifically designed to prove
+*where* the agent takes over reply ownership without a backing action — not just that it happened
+(Case C2), but with the routing context attached (which intent, which handler).
+
+**`OwnershipSignal`** (`core/turn_envelope.py`): `recognized_intent` / `selected_handler` /
+`tool_use_emitted` / `approval_queued` / `agent_claimed_approval` / `reply_owner`, logged
+**routinely** (INFO, every agent-handled turn — not anomaly-only like Case C1/C2) so the hijack
+pattern's real frequency can be measured against the full population, plus a distinct WARNING line
+when `is_hijack` (`agent_claimed_approval and not tool_use_emitted and not approval_queued`) is
+True. Wired into `run_agent()` right alongside the existing Case C2 check, reusing `route.intent`,
+`route.handler`, `tool_calls_made > 0`, and `_approval_queued_this_turn` — no new reads. Covers
+Telegram and WhatsApp text turns identically, since both already share this one code path.
+
+**Entry points instrumented this pass:**
+
+- **Telegram callbacks** (`_handle_approval_callback_impl`, `app.py`): `_build_and_log_turn_envelope()`
+  called with `entry_point="telegram_callback"` right after the approved-action's `identity` is
+  resolved (tool-approval branch only) — captures Case C1 (`multi_contract_conflict`) at exactly the
+  point AP-02's audit finding flagged as Gateway-authored, not agent-authored. The `OwnershipSignal`
+  is deliberately **not** added here — it's about agent free-text claims, and callback resolution has
+  no agent text in the loop; forcing it in would misrepresent what's being measured.
+- **TMA** (`_queue_tma_write_approval`, `tma_api.py`): one shared entry point behind 6 routes
+  (project/lead status/lead patch/outcome/task/followup task creation) — instrumented once, covers
+  all 6. Deliberately logs only the C1 signal, not a full envelope — per finding 7, TMA's stateless
+  REST "turn" doesn't fit the conversational envelope shape, but a live contract already held by the
+  same identity from Telegram/WhatsApp is a real, channel-independent conflict worth surfacing.
+- **Scheduler proposals** (`followup_engine.py` / `core/lead_recovery.py`, AP-27/AP-28): same C1-only
+  pattern, at the point each background scan proposes an `ActionContract` for the owner — a
+  scheduler-proposed contract landing on top of an already-live one (from any channel) is exactly
+  the ownership-ambiguity case Phase 0 exists to surface.
+- **Scheduler direct-write path** (`interaction_engine.py`'s `create_tasks_from_analysis()`, AP-41)
+  — deliberately **not** instrumented. No `identity`/`chat_id`/reply context exists in that function
+  at all (a background analysis pipeline writing directly to Airtable Tasks, no ActionContract, no
+  conversational turn) — neither `TurnEnvelope` nor `OwnershipSignal` has anything to attach to.
+  Consistent with finding 6's conclusion that background LLM calls are a different `ExecutionKind`
+  sub-case from the live conversational agent; forcing coverage here would fabricate context that
+  doesn't exist rather than observe real state.
+- **WhatsApp**: no separate work needed — already covered as of the read-amplification fix, since
+  WhatsApp Twilio/Meta text turns share `run_agent()` with Telegram text turns end to end.
+
+All additions follow the same shape already established: deferred imports (no module-level
+circularity — `tma_api.py`/`followup_engine.py`/`core/lead_recovery.py` import
+`app._build_and_log_turn_envelope` lazily, inside the function, since `app.py` imports them, not the
+reverse), wrapped in `try/except` (fail-open, never blocks the real write/notification), and no new
+`find_live_contracts()` reads beyond the one each new call site performs — none of these call sites
+previously queried live contracts at all, so there is no amplification, only new observation where
+none existed.
