@@ -51,6 +51,7 @@ def run(
     ports: ReasoningPorts | None = None,
     precomputed_confidence=None,   # ConfidenceResult | None  (from Stage 2)
     require_feature_flag: bool = True,
+    now: datetime | None = None,
 ) -> ReasoningResult:
     """
     Run all applicable reasoning engines for one entity.
@@ -62,6 +63,12 @@ def run(
                              6 uses conflict-aware confidence. None = deterministic
                              only (no new AI calls).
     require_feature_flag   — set False in tests / when caller manages own gate
+    now                    — deterministic reference time threaded into the
+                             Attention engine. None (default) preserves the
+                             existing behavior (Attention reads the wall clock).
+                             Callers that need a reproducible result (e.g. a
+                             read-only API projection with a fixed as_of) pass
+                             it here so the same input + same now → same output.
     """
     if require_feature_flag and not _feature_enabled():
         return _disabled_result(entity)
@@ -83,7 +90,7 @@ def run(
     readiness = entity.metadata.get("readiness", "")
 
     # ── Stage 4: Attention ────────────────────────────────────────────────────
-    attention_priority, attention_reasons = _run_attention(entity, errors)
+    attention_priority, attention_reasons = _run_attention(entity, errors, now=now)
 
     # ── Stage 6: Orchestrator ─────────────────────────────────────────────────
     phase, next_step, blockers, awaiting_owner, after_resolution = _run_orchestrator(
@@ -171,8 +178,9 @@ def _run_confidence(
 def _run_attention(
     entity: ReasoningEntity,
     errors: list[str],
+    now: datetime | None = None,
 ) -> tuple[str, list[str]]:
-    """Returns (priority, reasons)."""
+    """Returns (priority, reasons). ``now`` defaults to the wall clock when None."""
     try:
         from decision_attention import calc_priority
 
@@ -194,7 +202,7 @@ def _run_attention(
         item = calc_priority(
             pseudo_record,
             entity.events,
-            now=datetime.now(timezone.utc),
+            now=now or datetime.now(timezone.utc),
             require_feature_flag=False,
         )
         return item.priority, list(item.reasons)
