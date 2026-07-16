@@ -28,6 +28,7 @@ from airtable_schema import (
     RoadmapTaskFields, RoadmapTaskStatus, DailyCheckinFields,
     VentureFields, VentureStage,
     LeadStatus, LeadOutcome,
+    LeadEventFields,
 )
 from tools.airtable_gateway import airtable_patch as _gw_patch, airtable_create as _gw_create
 from health_monitor import get_health_status
@@ -1418,6 +1419,21 @@ _LEAD_EVENTS_LINK_FIELD = "Lead Events"
 _REC_ID_RE = re.compile(r"^rec[A-Za-z0-9]+$")
 
 
+def _event_linked_to_lead(event: dict, lead_id: str) -> bool:
+    """
+    BUG-104 Phase 1.1 — second, independent linkage proof. The reverse-link
+    membership on the Lead snapshot only LOCATES candidate record IDs; it is
+    not itself proof that the fetched event actually links back to this lead
+    (e.g. a stale/misconfigured reverse link). An event is only admitted when
+    its OWN LeadEventFields.LEAD_LINK field is a list that explicitly contains
+    the current lead_id. Operates on the already-fetched record — no read.
+    """
+    own_link = event.get("fields", {}).get(LeadEventFields.LEAD_LINK)
+    if not isinstance(own_link, list):
+        return False   # malformed/missing own link field — excluded, fail closed
+    return lead_id in own_link
+
+
 def _read_lead_events(rec: dict):
     """
     Read the Lead Events for one lead using the reverse-link IDs already present
@@ -1425,7 +1441,9 @@ def _read_lead_events(rec: dict):
     never reads. Returns:
       - []                 when the lead has no linked events (available, count 0)
                            — NO Airtable call is made.
-      - list[event]        the linked event records (exactly ONE Airtable call).
+      - list[event]        the linked event records that also pass the
+                           independent own-field linkage check
+                           (_event_linked_to_lead) — exactly ONE Airtable call.
       - None (UNAVAILABLE) only on a real read failure.
 
     The formula matches the Lead-Event records by their own RECORD_ID() — the
@@ -1436,6 +1454,7 @@ def _read_lead_events(rec: dict):
     """
     from core.leads_reasoning_projection import MAX_LEAD_EVENT_IDS
 
+    lead_id = rec.get("id", "")
     raw_ids = rec.get("fields", {}).get(_LEAD_EVENTS_LINK_FIELD, []) or []
     event_ids = [e for e in raw_ids if isinstance(e, str) and _REC_ID_RE.match(e)]
     if not event_ids:
@@ -1445,10 +1464,13 @@ def _read_lead_events(rec: dict):
     clause  = ",".join(f"RECORD_ID()='{eid}'" for eid in capped)
     formula = f"OR({clause})"
     try:
-        return _at_list(Tables.LEAD_EVENTS, formula, max_records=MAX_LEAD_EVENT_IDS, strict=True)
+        fetched = _at_list(Tables.LEAD_EVENTS, formula, max_records=MAX_LEAD_EVENT_IDS, strict=True)
     except AirtableError as e:
-        logger.warning("[BUG-104] lead events read failed for %s: %s", rec.get("id", ""), e)
+        logger.warning("[BUG-104] lead events read failed for %s: %s", lead_id, e)
         return None   # EVENTS_UNAVAILABLE
+
+    # Second linkage proof (Phase 1.1) — filter already-fetched records, no extra read.
+    return [ev for ev in fetched if _event_linked_to_lead(ev, lead_id)]
 
 
 def _apply_leads_reasoning_projection(payload: dict, rec: dict) -> None:
