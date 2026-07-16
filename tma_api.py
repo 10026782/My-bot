@@ -924,6 +924,12 @@ def _get_project_cards(identity) -> list:
         slug   = f.get("slug", "")
         domain = f.get("domain", "")
 
+        # Temporarily hidden from Projects Hub display — record, slug, and
+        # domain are untouched in Airtable; this only excludes the card from
+        # this endpoint's response.
+        if domain == "saas":
+            continue
+
         # Non-owners: filter to projects where their user_id appears in owner_ids
         if not identity.is_owner:
             _owner_ids = [x.strip() for x in str(f.get("owner_ids", "") or "").split(",")]
