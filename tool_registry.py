@@ -5,17 +5,35 @@
 # dispatcher מבצע. registry מחליט אם מותר.
 
 from __future__ import annotations
+import logging
+import os
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     from identity import Identity
 
 
+logger = logging.getLogger(__name__)
+
+
 # ══════════════════════════════════════════════════
 # Tool Metadata
 # ══════════════════════════════════════════════════
+
+@dataclass(frozen=True)
+class ToolAvailability:
+    """Side-effect-free, redacted readiness result for one tool."""
+
+    available: bool
+    code: str
+    detail: str
+
+
+AvailabilityCheck = Callable[[], ToolAvailability]
+
 
 @dataclass
 class ToolMeta:
@@ -27,7 +45,64 @@ class ToolMeta:
     high_risk:         bool = False   # פעולה בלתי הפיכה
     read_only:         bool = False   # לא משנה נתונים
     model_exposed:     bool = True    # False = internal Python callers only
+    availability_check: AvailabilityCheck | None = None
     description_he:    str  = ""
+
+
+_STABLE_AVAILABILITY_CODE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_SECRET_ENV_MARKERS = (
+    "API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "DATABASE_URL", "DSN",
+)
+
+
+def _redact_operator_detail(detail: object) -> str:
+    """Return bounded operator text with configured secret values removed."""
+    text = str(detail or "").replace("\r", " ").replace("\n", " ")
+    for name, value in os.environ.items():
+        if value and any(marker in name.upper() for marker in _SECRET_ENV_MARKERS):
+            text = text.replace(value, "[REDACTED]")
+    text = re.sub(
+        r"(?i)(bearer\s+|(?:api[_-]?key|token|secret|password)\s*[:=]\s*)\S+",
+        r"\1[REDACTED]",
+        text,
+    )
+    return text[:500] or "No operator detail provided."
+
+
+def _required_env_availability(
+    *,
+    missing_code: str,
+    operator_label: str,
+    names: tuple[str, ...],
+) -> AvailabilityCheck:
+    """Build a local env-only readiness check; it never probes a provider."""
+    def check() -> ToolAvailability:
+        missing = [name for name in names if not os.environ.get(name, "").strip()]
+        if missing:
+            return ToolAvailability(
+                available=False,
+                code=missing_code,
+                detail=f"{operator_label} configuration is incomplete ({', '.join(missing)}).",
+            )
+        return ToolAvailability(
+            available=True,
+            code="available",
+            detail=f"{operator_label} configuration is present; provider was not contacted.",
+        )
+
+    return check
+
+
+_GOOGLE_OAUTH_AVAILABILITY = _required_env_availability(
+    missing_code="google_oauth_missing",
+    operator_label="Google OAuth",
+    names=("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN"),
+)
+_AIRTABLE_AVAILABILITY = _required_env_availability(
+    missing_code="airtable_config_missing",
+    operator_label="Airtable",
+    names=("AIRTABLE_API_KEY", "AIRTABLE_BASE_ID"),
+)
 
 
 class ToolRegistryInvariantError(ValueError):
@@ -131,12 +206,14 @@ _REGISTRY_ENTRIES: tuple[ToolMeta, ...] = (
         name="search_drive",
         roles_allowed=_MANAGEMENT,
         read_only=True,
+        availability_check=_GOOGLE_OAUTH_AVAILABILITY,
         description_he="חיפוש קבצים ב-Drive"
     ),
     ToolMeta(
         name="read_drive_file",
         roles_allowed=_MANAGEMENT,
         read_only=True,
+        availability_check=_GOOGLE_OAUTH_AVAILABILITY,
         description_he="קריאת תוכן קובץ מ-Drive"
     ),
 
@@ -145,6 +222,7 @@ _REGISTRY_ENTRIES: tuple[ToolMeta, ...] = (
         name="calendar_get_events",
         roles_allowed=_INTERNAL,
         read_only=True,
+        availability_check=_GOOGLE_OAUTH_AVAILABILITY,
         description_he="קריאת אירועים מהיומן"
     ),
     ToolMeta(
@@ -152,6 +230,7 @@ _REGISTRY_ENTRIES: tuple[ToolMeta, ...] = (
         roles_allowed=_MANAGEMENT,
         requires_approval=True,
         blocked_by_emergency=True,
+        availability_check=_GOOGLE_OAUTH_AVAILABILITY,
         description_he="יצירת אירוע ביומן — דורש אישור, בודק חפיפות, force=true לקבוע בכל זאת"
     ),
 
@@ -161,6 +240,7 @@ _REGISTRY_ENTRIES: tuple[ToolMeta, ...] = (
         roles_allowed=_MANAGEMENT,
         requires_approval=True,
         blocked_by_emergency=True,
+        availability_check=_GOOGLE_OAUTH_AVAILABILITY,
         description_he="יצירת טיוטת מייל — דורש אישור (לא שולח)"
     ),
     ToolMeta(
@@ -169,12 +249,14 @@ _REGISTRY_ENTRIES: tuple[ToolMeta, ...] = (
         requires_approval=True,
         blocked_by_emergency=True,
         high_risk=True,
+        availability_check=_GOOGLE_OAUTH_AVAILABILITY,
         description_he="שליחת טיוטה — דורש אישור owner/partner"
     ),
     ToolMeta(
         name="gmail_read",
         roles_allowed=_OWNER_ONLY,
         read_only=True,
+        availability_check=_GOOGLE_OAUTH_AVAILABILITY,
         description_he="קריאת מיילים אחרונים"
     ),
 
@@ -184,6 +266,7 @@ _REGISTRY_ENTRIES: tuple[ToolMeta, ...] = (
         roles_allowed=_MANAGEMENT,
         requires_approval=True,
         blocked_by_emergency=True,
+        availability_check=_GOOGLE_OAUTH_AVAILABILITY,
         description_he="הוספת שורה לגיליון — דורש אישור"
     ),
 
@@ -193,6 +276,7 @@ _REGISTRY_ENTRIES: tuple[ToolMeta, ...] = (
         roles_allowed=_ALL_EXTERNAL,   # lead רואה רק נתוני עצמו (filter ב-tool)
         tenant_scoped=True,
         read_only=True,
+        availability_check=_AIRTABLE_AVAILABILITY,
         description_he="שליפת רשומות מ-Airtable"
     ),
     ToolMeta(
@@ -202,6 +286,7 @@ _REGISTRY_ENTRIES: tuple[ToolMeta, ...] = (
         requires_approval=True,
         blocked_by_emergency=True,
         high_risk=True,
+        availability_check=_AIRTABLE_AVAILABILITY,
         description_he="הוספת רשומה ל-Airtable — דורש אישור"
     ),
     ToolMeta(
@@ -211,12 +296,14 @@ _REGISTRY_ENTRIES: tuple[ToolMeta, ...] = (
         requires_approval=True,
         blocked_by_emergency=True,
         high_risk=True,
+        availability_check=_AIRTABLE_AVAILABILITY,
         description_he="עדכון רשומה ב-Airtable — דורש אישור"
     ),
     ToolMeta(
         name="airtable_get_schema",
         roles_allowed=_SENIOR,
         read_only=True,
+        availability_check=_AIRTABLE_AVAILABILITY,
         description_he="קריאת כל הטבלאות והשדות מ-Airtable בזמן אמת"
     ),
 
@@ -225,6 +312,7 @@ _REGISTRY_ENTRIES: tuple[ToolMeta, ...] = (
         name             = "search_lead",
         roles_allowed    = _MANAGEMENT,
         read_only        = True,
+        availability_check = _AIRTABLE_AVAILABILITY,
         description_he   = "חיפוש ליד לפי שם חלקי בטבלת Leads",
     ),
 
@@ -233,6 +321,7 @@ _REGISTRY_ENTRIES: tuple[ToolMeta, ...] = (
         name             = "resolve_contact",
         roles_allowed    = _MANAGEMENT,
         read_only        = True,
+        availability_check = _AIRTABLE_AVAILABILITY,
         description_he   = "חיפוש fuzzy של איש קשר לפי שם — מחזיר פרטים או רשימה לבחירה",
     ),
 
@@ -241,6 +330,7 @@ _REGISTRY_ENTRIES: tuple[ToolMeta, ...] = (
         name           = "get_daily_report",
         roles_allowed  = _MANAGEMENT,
         read_only      = True,
+        availability_check = _AIRTABLE_AVAILABILITY,
         description_he = "דוח יומי מלא — לידים חמים, פולו-אפ, משימות, עסקאות, תשלומים",
     ),
 
@@ -249,6 +339,7 @@ _REGISTRY_ENTRIES: tuple[ToolMeta, ...] = (
         name             = "search_business_memory",
         roles_allowed    = _MANAGEMENT,
         read_only        = True,
+        availability_check = _AIRTABLE_AVAILABILITY,
         description_he   = "חיפוש בזיכרון עסקי — 'מה סיכמנו עם ספק X?' / 'החלטות מהפגישה עם Y'",
     ),
 
@@ -260,6 +351,7 @@ _REGISTRY_ENTRIES: tuple[ToolMeta, ...] = (
         requires_approval= True,
         blocked_by_emergency=True,
         high_risk        = True,
+        availability_check = _AIRTABLE_AVAILABILITY,
         description_he   = "סימון תשלום כ-שולם — דורש אישור owner/partner",
     ),
 
@@ -344,6 +436,46 @@ def check_allowed(tool_name: str, identity: "Identity") -> bool:
     if not meta:
         return False
     return identity.role in meta.roles_allowed
+
+
+def get_availability(tool_name: str, *, role: str | None = None) -> ToolAvailability:
+    """Evaluate local diagnostic readiness without changing authorization or execution."""
+    meta = _REGISTRY.get(tool_name)
+    if meta is None:
+        return ToolAvailability(False, "unknown_tool", "Tool is not registered.")
+    if role is not None and role not in meta.roles_allowed:
+        return ToolAvailability(False, "role_denied", "Tool is not permitted for this role.")
+    if meta.availability_check is None:
+        return ToolAvailability(
+            True,
+            "available_by_default",
+            "No availability check is declared; legacy availability is preserved.",
+        )
+
+    try:
+        result = meta.availability_check()
+    except Exception:
+        logger.warning(
+            "[ToolAvailability] tool=%s available=false code=availability_check_error",
+            tool_name,
+        )
+        return ToolAvailability(
+            False,
+            "availability_check_error",
+            "Availability check raised an exception; details were redacted.",
+        )
+
+    if not isinstance(result, ToolAvailability) or not _STABLE_AVAILABILITY_CODE.fullmatch(result.code):
+        return ToolAvailability(
+            False,
+            "availability_check_invalid",
+            "Availability check returned an invalid diagnostic contract.",
+        )
+    return ToolAvailability(
+        bool(result.available),
+        result.code,
+        _redact_operator_detail(result.detail),
+    )
 
 
 def enforce(tool_name: str, identity: "Identity") -> ToolMeta:

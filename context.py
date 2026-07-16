@@ -18,6 +18,8 @@ if TYPE_CHECKING:
 
 from identity import Role, Domain
 from core_knowledge import STATIC_MANIFEST, dynamic_context
+from feature_flags import get_tool_availability_filter_state
+from tool_registry import get_availability
 from tools.schemas import TOOL_SCHEMAS
 
 logger = logging.getLogger(__name__)
@@ -76,7 +78,33 @@ _ROLE_TOOLS: dict[str, set[str]] = {
 
 def _filter_tools(role: str) -> list:
     allowed = _ROLE_TOOLS.get(role, set())
-    return [t for t in TOOL_SCHEMAS if t["name"] in allowed]
+    exposed = [t for t in TOOL_SCHEMAS if t["name"] in allowed]
+    state = get_tool_availability_filter_state()
+    if state == "off":
+        return exposed
+
+    if state == "enforce":
+        logger.warning(
+            "[ToolAvailability] enforce requested but RP2 is diagnostic-only; "
+            "schema exposure is unchanged"
+        )
+
+    for schema in exposed:
+        tool_name = schema["name"]
+        availability = get_availability(tool_name, role=role)
+        log = logger.info if availability.available else logger.warning
+        log(
+            "[ToolAvailability] state=%s role=%s tool=%s available=%s code=%s",
+            state,
+            role,
+            tool_name,
+            str(availability.available).lower(),
+            availability.code,
+        )
+
+    # PR-RP2 is shadow-only, including when enforce is requested. PR-RP3 owns
+    # filtering; do not hide unavailable schemas here.
+    return exposed
 
 
 # ══════════════════════════════════════════════════
