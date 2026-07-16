@@ -285,3 +285,11 @@ _APPROVAL_ACTION_SCHEMAS_HIDDEN = [
         },
     },
 ]
+
+
+# PR-RP1: fail import/startup on duplicate schema names or registry/schema
+# drift. This validates declarations only; it does not filter schemas or alter
+# dispatch/runtime behavior when the declarations are valid.
+from tool_registry import validate_tool_invariants as _validate_tool_invariants
+
+_validate_tool_invariants(TOOL_SCHEMAS)
