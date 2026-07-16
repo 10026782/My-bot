@@ -1424,6 +1424,193 @@ chk("P4 (unit): reject_if_pending() returns True and transitions a genuinely pen
 
 
 # ══════════════════════════════════════════════════
+# P5. Codex re-audit of commit ce990a0 (verdict: FIX_REQUIRED) — the atomic
+# RAM guard is only atomic for the RAM-only ledger. When a DURABLE Airtable
+# repository is active, ActionContractRepository.transition() is read-check-
+# PATCH (no CAS), so a conditional destructive cleanup through it is TOCTOU-
+# prone AND its idempotent shortcut ran before the expected-status/version
+# check (returning success for expected=pending/actual=rejected). Two fixes:
+#   fix 1 — the ledger fails closed (no PATCH, returns False) for a
+#           require_status transition when the durable repository does not
+#           declare supports_atomic_conditional_transition.
+#   fix 2 — ActionContractRepository.transition() checks expected
+#           status/version BEFORE the idempotent shortcut.
+# The 5 required reproductions D1–D5.
+# ══════════════════════════════════════════════════
+
+from core.action_gateway import ExecutionLedger as _ExecutionLedger, ActionGateway as _ActionGateway  # noqa: E402
+from core.action_contract_repository import (  # noqa: E402
+    ActionContractRepository as _RealRepo,
+    ActionContractTransitionConflictError as _ConflictError,
+    _contract_to_fields as _to_fields,
+)
+from airtable_schema import ActionContractsFields as _ACF  # noqa: E402
+
+
+class _NoCASRepo:
+    """A durable repository stand-in that, like the real Airtable one, does
+    NOT declare supports_atomic_conditional_transition — so the ledger must
+    fail closed rather than route a conditional destructive write through it.
+    Records every transition() call so the test can assert none was made."""
+    # deliberately no supports_atomic_conditional_transition attribute
+    def __init__(self):
+        self.records = {}
+        self.transition_calls = []
+
+    def save(self, contract):
+        self.records[contract.contract_id] = contract
+        return True
+
+    def get(self, contract_id):
+        return self.records.get(contract_id)
+
+    def find_by_business_fingerprint(self, fingerprint):
+        return next((c for c in self.records.values()
+                     if c.business_action_fingerprint == fingerprint), None)
+
+    def find_pending_by_canonical_user(self, canonical_user_id):
+        return [c for c in self.records.values()
+                if c.canonical_user_id == canonical_user_id and c.status == "pending"]
+
+    def transition(self, contract_id, *, expected_status, expected_version, new_status, updates=None):
+        self.transition_calls.append((expected_status, expected_version, new_status))
+        c = self.records.get(contract_id)
+        if c is None:
+            raise _ConflictError("missing")
+        if c.status != expected_status or c.version != expected_version:
+            raise _ConflictError("stale")
+        c.status = new_status
+        c.version += 1
+        return c
+
+
+def _d_propose(gw, uid, chat, task):
+    r = gw.propose_action(
+        tenant_id="boss_hq", canonical_user_id=uid, tool_name="airtable_add",
+        tool_inputs={"table": "Tasks", "fields": {"Task": task}},
+        origin_channel="telegram", origin_chat_id=chat, requires_approval=True,
+        identity=Identity(user_id=chat, role=Role.OWNER), user_text="",
+    )
+    assert r.ok
+    return r.contract_id
+
+
+# --- D1: durable TOCTOU — repository active, no atomic conditional primitive.
+# reject_if_pending() must fail closed: transitioned=False, and NO transition
+# (PATCH) is attempted at all, so a concurrent approval cannot be clobbered.
+_d1_repo = _NoCASRepo()
+_d1_gw = _ActionGateway(ledger=_ExecutionLedger(repository=_d1_repo))
+_d1_cid = _d_propose(_d1_gw, "boss_hq:d1", "d1", "durable-toctou")
+# a concurrent turn approves the durable contract
+_d1_repo.records[_d1_cid].status = "approved"
+_d1_repo.records[_d1_cid].version += 1
+_d1_transitioned = _d1_gw.reject_if_pending(_d1_cid)
+chk("D1 (durable): reject_if_pending() fails closed on a non-CAS durable repository -> "
+    "returns False",
+    _d1_transitioned is False)
+chk("D1 (durable): NO durable transition/PATCH was attempted at all (the ledger refuses to "
+    "route a conditional destructive write through a non-atomic repository)",
+    _d1_repo.transition_calls == [])
+chk("D1 (durable): the concurrent approval is not clobbered -- durable status stays 'approved'",
+    _d1_repo.records[_d1_cid].status == "approved")
+
+
+# --- D2: already-rejected shortcut — the real ActionContractRepository.
+# transition() must check expected status/version BEFORE the idempotent
+# shortcut. expected=pending/v1 against an actual rejected/v2 record must
+# CONFLICT, never return success, and never PATCH.
+_d2_seed_cid = _d_propose(_canon_gw, "boss_hq:d2", "d2", "shortcut")
+_d2_pending_contract = _canon_gw.find_contract(_d2_seed_cid)
+_d2_fields = dict(_to_fields(_d2_pending_contract))
+_d2_fields.update({_ACF.STATUS: "rejected", _ACF.VERSION: 2})
+_d2_record = {"id": "rec-d2", "fields": _d2_fields}
+
+_d2_repo = _RealRepo()
+_d2_conflict = False
+with patch("core.action_contract_repository.at_get_by_field", return_value=_d2_record), \
+     patch("core.action_contract_repository.airtable_patch") as _d2_patch:
+    try:
+        _d2_repo.transition(
+            _d2_seed_cid, expected_status="pending", expected_version=1, new_status="rejected",
+        )
+    except _ConflictError:
+        _d2_conflict = True
+chk("D2 (shortcut): expected_status=pending against an actual rejected/v2 record raises a "
+    "conflict -- the idempotent shortcut never fires before the expected-state check",
+    _d2_conflict is True)
+chk("D2 (shortcut): no PATCH is attempted on the stale/already-rejected contract",
+    _d2_patch.call_count == 0)
+
+
+# --- D3: RAM-only atomic success. No repository -> the single-lock guarded
+# set genuinely performs pending -> rejected.
+_d3_cid = _d_propose(_canon_gw, "boss_hq:d3", "d3", "ram-success")
+chk("D3 (RAM): reject_if_pending() on a genuinely pending contract returns True and "
+    "transitions it to 'rejected'",
+    _canon_gw.reject_if_pending(_d3_cid) is True
+    and _canon_gw.find_contract(_d3_cid).status == "rejected")
+
+
+# --- D4: RAM-only concurrent approval wins first. reject_if_pending() must
+# refuse (atomic guard), leaving the approval intact.
+_d4_cid = _d_propose(_canon_gw, "boss_hq:d4", "d4", "ram-race")
+_canon_gw._ledger.update_status(_d4_cid, "approved", approved_by="concurrent", approved_at=0)
+chk("D4 (RAM): a concurrent approval that won first is not overwritten -- reject_if_pending() "
+    "returns False and the status stays 'approved'",
+    _canon_gw.reject_if_pending(_d4_cid) is False
+    and _canon_gw.find_contract(_d4_cid).status == "approved")
+
+
+# --- D5: PA-01 durable cleanup outcome. A post-persistence failure (owner
+# notification) triggers cleanup while a durable repository is active. There
+# must be no overwrite, no cleanup-success claim; the result is
+# APPROVAL_QUEUE_ORPHANED, row 2 is not triggered, and the message does not
+# claim the request was cancelled.
+_d5_repo = _NoCASRepo()
+_d5_saved_repo = _canon_gw._ledger._repository
+_d5_old_owner = os.environ.get("OWNER_TELEGRAM_ID")
+os.environ["OWNER_TELEGRAM_ID"] = "999999"
+_d5_bot = MagicMock()
+_d5_bot.send_message.side_effect = RuntimeError("telegram down")
+try:
+    _canon_gw._ledger._repository = _d5_repo
+    with patch("feature_flags.is_enabled", return_value=False), \
+         patch.object(app, "bot", _d5_bot):
+        _d5_result = app._queue_approval_detailed(
+            "airtable_add", {"table": "Tasks", "fields": {"Task": "d5-durable"}},
+            "d5_durable", "telegram", "צור לי משימה",
+        )
+finally:
+    _canon_gw._ledger._repository = _d5_saved_repo
+    if _d5_old_owner is None:
+        os.environ.pop("OWNER_TELEGRAM_ID", None)
+    else:
+        os.environ["OWNER_TELEGRAM_ID"] = _d5_old_owner
+
+chk("D5 (PA-01 durable cleanup): owner-notify failure under a durable non-CAS repository -> "
+    "terminal_outcome=APPROVAL_QUEUE_ORPHANED (not verified-clean APPROVAL_QUEUE_ERROR), "
+    "ok=False, created_this_turn=False",
+    _d5_result["terminal_outcome"] == "APPROVAL_QUEUE_ORPHANED"
+    and _d5_result["ok"] is False and _d5_result["created_this_turn"] is False)
+chk("D5 (PA-01 durable cleanup): the real (owned) contract_id is surfaced, and the durable "
+    "contract was NOT overwritten (no transition/PATCH attempted, still 'pending')",
+    _d5_result["contract_id"] is not None
+    and _d5_repo.transition_calls == []
+    and _d5_repo.records[_d5_result["contract_id"]].status == "pending")
+chk("D5 (PA-01 durable cleanup): the message does NOT claim the request was cancelled or is "
+    "pending approval",
+    "בוטלה" not in _d5_result["message"] and "ממתינה לאישור" not in _d5_result["message"])
+chk("D5 (PA-01 durable cleanup): this outcome does NOT satisfy row 2 (contract_created)",
+    app._pa01_contract_created_for_expected_tool(
+        [{"tool": "__approval_queued__", "content": _d5_result["message"],
+          "ok": _d5_result["ok"], "contract_id": _d5_result["contract_id"],
+          "terminal_outcome": _d5_result["terminal_outcome"],
+          "action_tool": _d5_result["action_tool"],
+          "created_this_turn": _d5_result["created_this_turn"]}],
+        "airtable_add") is False)
+
+
+# ══════════════════════════════════════════════════
 # L. Pending approval from a PRIOR turn — unaffected, PA-01 never reached
 # ══════════════════════════════════════════════════
 

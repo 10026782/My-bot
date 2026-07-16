@@ -1673,3 +1673,82 @@ most heavily), `smoke_tests.py` PASS, `compileall` clean.
 **No deviation:** no PA-01 predicate/policy/matrix/wording change. The `core/action_gateway.py` changes are
 additive and default-inert. `BUG-104` untouched; no proposal-attempt-ID/migration/schema change (still
 deferred). No new branch/PR opened.
+
+**Codex re-audit of commit `ce990a0` (verdict: `FIX_REQUIRED`) — the atomic guard was only atomic for the
+RAM-only ledger.** The `ce990a0` round made the RAM ledger's `pending → rejected` a single-lock guarded
+set — correct for the persistence-off default. But it also reached that atomicity in the *durable* path by
+passing `require_status` through to `ActionContractRepository.transition()` as though that were a CAS. It
+is not: the Airtable-backed repository has no conditional-PATCH primitive, and `transition()` is
+**read → check → PATCH** (three separate operations). A concurrent writer can change the durable state
+between the check-read and the unconditional PATCH, so routing a destructive conditional cleanup
+(PA-01's `pending → rejected`) through it can still clobber a live approval — a TOCTOU the version check
+cannot close, because the check and the write are not one operation. Two distinct bugs:
+
+1. **Durable conditional cleanup was not fail-closed.** `ExecutionLedger.update_status(require_status=...)`
+   called `repository.transition()` even though Airtable offers no atomic conditional transition.
+2. **`transition()`'s idempotent shortcut ran before the expected-state check.** `if current.status ==
+   new_status and not updates: return current` sat *above* the `expected_status`/`expected_version` check,
+   so a call with `expected_status="pending"` against an actual `rejected/v2` record hit the shortcut
+   (actual `== new_status "rejected"`, no updates) and returned **success** — silently accepting a stale
+   expectation as though this call had performed the transition. A deterministic reproduction against
+   `ce990a0` had the idempotent shortcut return success where a conflict was required.
+
+**Architectural ruling (binding):** a fingerprint proves same-action, not ownership (established the
+previous round); and now — a durable store without a *real* atomic conditional primitive must never
+perform a destructive conditional cleanup. The safe matrix is: **RAM-only ledger** — atomic
+`pending → rejected` under a single lock is allowed; **durable Airtable repository** — no conditional
+destructive cleanup at all; `reject_if_pending()` returns `False` *without any PATCH*, and the caller maps
+that to `APPROVAL_QUEUE_ORPHANED`. A read-back showing `rejected` is never, on its own, sufficient to
+return `True`.
+
+**Fix — scoped to `core/action_gateway.py` and `core/action_contract_repository.py` only (no app.py logic
+change):**
+
+- **Fix 1 — durable conditional cleanup fails closed, decided at the ledger/repository boundary.**
+  `ActionContractRepository` now declares a capability, `supports_atomic_conditional_transition = False`.
+  `ExecutionLedger.update_status()`: when `require_status is not None` and the repository does not declare
+  that capability as exactly `True` (`getattr(..., False) is not True`, so a test double whose attribute
+  auto-creates to a truthy Mock is also treated as no-CAS — fail closed by default), it returns `False`
+  **without calling `transition()` at all** — no PATCH, no durable mutation. This is not a feature-flag
+  check in `app.py`; the decision lives on the ledger/repository boundary, and a future Postgres-backed
+  repository with a real atomic `UPDATE ... WHERE status = :expected` can flip the capability to `True`.
+  `require_status=None` (every existing caller — approve, reject, execution lifecycle) is entirely
+  unchanged: still routes through `transition()` exactly as before.
+
+- **Fix 2 — strict expected-state ordering in `transition()`.** The `expected_status`/`expected_version`
+  check now runs *before* the idempotent shortcut. A stale expectation (`expected=pending` vs actual
+  `rejected/v2`) raises `ActionContractTransitionConflictError` and never PATCHes. The idempotent shortcut
+  is preserved for genuine, correctly-expected same-status replays (which now only reach it after the
+  expectation is confirmed to match).
+
+`reject_if_pending()` is unchanged in signature; its docstring now records that `True` requires a *real*
+atomic primitive to have performed the transition — the RAM single-lock set, never a non-atomic durable
+write. `_revoke_and_verify_contract()` in `app.py` needed **no logic change**: it already maps
+`reject_if_pending() → False` to `APPROVAL_QUEUE_ORPHANED`, so a durable non-CAS repository now naturally
+yields the conservative orphan outcome. (Only comments/docstrings were touched in `app.py`-adjacent code;
+no recovery logic was added there — within the re-audit's explicit scope guard.)
+
+**Regression tests (`test_pa01_phantom_approval_enforcement.py`, section "P5"), the 5 required
+reproductions:** D1 (durable TOCTOU — non-CAS repository → `reject_if_pending()` fails closed,
+`transitioned=False`, **zero** `transition()`/PATCH calls, the concurrent approval untouched), D2
+(already-rejected shortcut — real `ActionContractRepository.transition()` with `expected=pending` against
+`rejected/v2` → conflict, no PATCH), D3 (RAM atomic success — `pending → rejected`, `transitioned=True`),
+D4 (RAM concurrent approval wins first — `transitioned=False`, status stays `approved`), D5 (PA-01 durable
+cleanup outcome — owner-notify failure under a durable non-CAS repository → `APPROVAL_QUEUE_ORPHANED`, real
+owned `contract_id` surfaced, no durable overwrite (still `pending`), message makes no cancellation claim,
+row 2 not satisfied). The 4 discriminating assertions (D1 no-PATCH, D2 conflict, D5 outcome + no-overwrite)
+confirmed red against commit `ce990a0` before the fix, green after (D3/D4 are RAM-only and pass on both, as
+expected). Full suite green: `test_pa01_phantom_approval_enforcement.py` 110/110, full plain-script sweep
+117/117, all pytest-style repository/lifecycle/concurrency suites (`test_phase_4b_1b_durable_lifecycle.py`
+17/17, `test_pr0c_action_contract_repository.py` 14/14, `test_pr0c_action_contracts_persistence.py` 16/16,
+`test_action_gateway.py` 43/43, `test_approval_concurrency.py` 20/20,
+`test_phase_4b0_1c_concurrent_approvals.py` 12/12, `test_stage_b_full_suite.py` 128/128), `smoke_tests.py`
+PASS, `compileall` clean, `git diff --check` clean. (A stale brittle source-grep in
+`test_phase_4b_1a_lookup_correctness.py`, left by the `818c8a6` round's split of the two persistence
+failure codes and only surfacing under `pytest`, was updated to match the current code — test-only, no
+app.py change.)
+
+**No deviation:** no PA-01 predicate/policy/matrix/wording change. Changes are confined to
+`core/action_gateway.py`, `core/action_contract_repository.py`, tests, and docs — no new recovery logic in
+`app.py`. `BUG-104` untouched; no migration, no Postgres wiring, no attempt at full Airtable CAS (the
+durable path fails closed instead); proposal-attempt-ID still deferred. No new branch/PR opened.

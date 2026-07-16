@@ -482,10 +482,36 @@ class ExecutionLedger:
             expected_version = c.version
 
         if self._repository:
-            # When require_status is given, the durable CAS must enforce THAT
-            # status specifically (not merely the RAM-captured current one),
-            # and a CAS mismatch is a conditional-transition "no-op", not an
-            # error to propagate.
+            # Codex re-audit of ce990a0, fix 1 — durable conditional cleanup
+            # must fail closed. A require_status transition is CONDITIONAL and
+            # DESTRUCTIVE (PA-01's pending->rejected orphan cleanup). The
+            # durable store can only perform it safely if it offers a real
+            # atomic conditional primitive. Airtable's transition() is
+            # read-check-PATCH (TOCTOU-prone), so its repository declares
+            # supports_atomic_conditional_transition = False — and when it is
+            # not exactly True, we must NOT call transition() at all: an
+            # unconditional PATCH could clobber a concurrent lifecycle change
+            # (e.g. a live approval). Return False without any durable
+            # mutation; the caller (reject_if_pending -> _revoke_and_verify_
+            # contract) maps False to APPROVAL_QUEUE_ORPHANED. The decision
+            # lives here, at the ledger/repository boundary, not behind a
+            # feature-flag check in app.py. `is not True` (not just truthiness)
+            # so a test double / mock whose attribute auto-creates to a truthy
+            # object is still treated as "no CAS" — fail closed by default.
+            if (require_status is not None
+                    and getattr(self._repository, "supports_atomic_conditional_transition", False)
+                        is not True):
+                logger.warning(
+                    "[ActionGateway] conditional transition require_status=%s requested but the "
+                    "durable repository has no atomic conditional primitive — failing closed "
+                    "(no PATCH). contract=%s", require_status, contract_id,
+                )
+                return False
+            # When require_status is given (and the repository DID declare CAS
+            # support above), the durable CAS must enforce THAT status
+            # specifically (not merely the RAM-captured current one), and a
+            # CAS mismatch is a conditional-transition "no-op", not an error
+            # to propagate.
             _cas_expected = require_status if require_status is not None else expected_status
             try:
                 persisted = self._repository.transition(
@@ -1073,6 +1099,17 @@ class ActionGateway:
         keep their current user-facing-string contract; this is an additive,
         purpose-built API for the PA-01 orphan-cleanup path, which needs a
         verified boolean, not a message.
+
+        Codex re-audit of ce990a0: True is returned ONLY when a real atomic
+        primitive actually performed pending -> rejected. On the RAM-only
+        ledger that is the single-lock guarded set in update_status(). When a
+        DURABLE repository is active that has no atomic conditional primitive
+        (Airtable — see ActionContractRepository.supports_atomic_conditional_
+        transition), update_status(require_status="pending") fails closed and
+        returns False WITHOUT any PATCH, so this returns False too — a
+        destructive conditional cleanup is never performed non-atomically
+        against the durable store. A read-back showing "rejected" is never on
+        its own sufficient to return True.
         """
         try:
             return bool(self._ledger.update_status(
