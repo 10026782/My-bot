@@ -1,10 +1,11 @@
-"""PR-RP2 tests for diagnostic-only tool availability metadata."""
+"""PR-RP2/RP3 tests for tool availability diagnostics and schema enforcement."""
 
 from __future__ import annotations
 
 import logging
 import socket
 import urllib.request
+from dataclasses import replace
 
 import pytest
 import requests
@@ -119,7 +120,7 @@ def test_role_denial_precedes_and_skips_availability_check(
     assert calls == 0
 
 
-def test_declared_availability_checks_never_call_network_or_providers(
+def test_context_availability_checks_never_call_network_or_providers(
     monkeypatch: pytest.MonkeyPatch,
 ):
     def forbidden(*args, **kwargs):
@@ -142,38 +143,139 @@ def test_declared_availability_checks_never_call_network_or_providers(
     assert results
     assert all(result.available for result in results)
 
+    monkeypatch.setattr(context, "get_tool_availability_filter_state", lambda: "enforce")
+    assert _schema_names(Role.OWNER)
 
-@pytest.mark.parametrize("state", ["shadow", "enforce"])
-def test_shadow_and_requested_enforce_do_not_change_exposed_schema_list(
+
+def test_off_mode_returns_current_schema_list_without_evaluating_availability(
     monkeypatch: pytest.MonkeyPatch,
-    state: str,
+):
+    expected = [
+        schema["name"]
+        for schema in context.TOOL_SCHEMAS
+        if schema["name"] in context._ROLE_TOOLS[Role.OWNER]
+    ]
+    monkeypatch.setattr(context, "get_tool_availability_filter_state", lambda: "off")
+    monkeypatch.setattr(
+        context,
+        "get_availability",
+        lambda *args, **kwargs: pytest.fail("off mode evaluated availability"),
+    )
+
+    assert _schema_names(Role.OWNER) == expected
+
+
+def test_shadow_mode_returns_identical_schema_list(
+    monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(context, "get_tool_availability_filter_state", lambda: "off")
     off_names = _schema_names(Role.OWNER)
 
+    monkeypatch.setattr(context, "get_tool_availability_filter_state", lambda: "shadow")
+    shadow_names = _schema_names(Role.OWNER)
+
+    assert shadow_names == off_names
+
+
+def test_enforce_hides_unavailable_and_keeps_available_role_allowed_tools(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    for name in ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AIRTABLE_API_KEY", "configured-test-key")
+    monkeypatch.setenv("AIRTABLE_BASE_ID", "configured-test-base")
+    monkeypatch.setattr(context, "get_tool_availability_filter_state", lambda: "enforce")
+
+    names = _schema_names(Role.OWNER)
+
+    assert "search_drive" not in names
+    assert "gmail_read" not in names
+    assert "airtable_get" in names
+    assert "airtable_get_schema" in names
+
+
+@pytest.mark.parametrize("state", ["off", "shadow", "enforce"])
+def test_role_denied_tools_stay_hidden_in_all_modes_and_availability_cannot_grant(
+    monkeypatch: pytest.MonkeyPatch,
+    state: str,
+):
     monkeypatch.setattr(context, "get_tool_availability_filter_state", lambda: state)
-    diagnostic_names = _schema_names(Role.OWNER)
+    monkeypatch.setattr(
+        context,
+        "get_availability",
+        lambda *args, **kwargs: ToolAvailability(True, "available", "ready"),
+    )
 
-    assert diagnostic_names == off_names
+    names = _schema_names(Role.LEAD)
+
+    assert names == ["airtable_get"]
+    assert "gmail_read" not in names
+    assert "search_drive" not in names
 
 
-def test_shadow_diagnostics_log_unavailability_without_secret_values(
+def test_direct_or_stale_calls_remain_rejected_by_registry_policy():
+    from tools.dispatcher import dispatch_tool
+
+    class LeadIdentity:
+        role = Role.LEAD
+        tenant_id = "test-tenant"
+        user_id = "test-lead"
+
+    class OwnerIdentity:
+        role = Role.OWNER
+        tenant_id = "test-tenant"
+        user_id = "test-owner"
+
+    with pytest.raises(tool_registry.ToolDenied):
+        tool_registry.enforce("gmail_read", LeadIdentity())
+    with pytest.raises(tool_registry.ToolDenied):
+        tool_registry.enforce("stale_removed_tool", OwnerIdentity())
+
+    denied = dispatch_tool("gmail_read", {}, LeadIdentity())
+    stale = dispatch_tool("stale_removed_tool", {}, OwnerIdentity())
+    assert denied.startswith("❌ גישה נחסמה:")
+    assert stale.startswith("❌ גישה נחסמה:")
+
+
+def test_availability_exception_fails_closed_for_enforce_schema_exposure(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def broken_check() -> ToolAvailability:
+        raise RuntimeError("provider readiness failed")
+
+    search_drive = tool_registry.get("search_drive")
+    assert search_drive is not None
+    monkeypatch.setitem(
+        tool_registry._REGISTRY,
+        "search_drive",
+        replace(search_drive, availability_check=broken_check),
+    )
+    monkeypatch.setattr(context, "get_tool_availability_filter_state", lambda: "enforce")
+
+    assert "search_drive" not in _schema_names(Role.OWNER)
+
+
+@pytest.mark.parametrize("state", ["shadow", "enforce"])
+def test_diagnostics_log_unavailability_without_secret_values(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
+    state: str,
 ):
     secret = "SECRET_MARKER_GOOGLE_RP2"
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET", secret)
     monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
     monkeypatch.delenv("GOOGLE_REFRESH_TOKEN", raising=False)
-    monkeypatch.setattr(context, "get_tool_availability_filter_state", lambda: "shadow")
+    monkeypatch.setenv("AIRTABLE_API_KEY", "configured-test-key")
+    monkeypatch.setenv("AIRTABLE_BASE_ID", "configured-test-base")
+    monkeypatch.setattr(context, "get_tool_availability_filter_state", lambda: state)
 
     with caplog.at_level(logging.INFO, logger="context"):
-        shadow_names = _schema_names(Role.OWNER)
+        names = _schema_names(Role.OWNER)
 
-    assert shadow_names
     assert "available=false" in caplog.text
     assert "google_oauth_missing" in caplog.text
     assert secret not in caplog.text
+    assert ("search_drive" in names) is (state == "shadow")
 
 
 def test_tool_availability_flag_defaults_off_and_accepts_three_states(

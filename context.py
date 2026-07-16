@@ -83,12 +83,7 @@ def _filter_tools(role: str) -> list:
     if state == "off":
         return exposed
 
-    if state == "enforce":
-        logger.warning(
-            "[ToolAvailability] enforce requested but RP2 is diagnostic-only; "
-            "schema exposure is unchanged"
-        )
-
+    available_schemas = []
     for schema in exposed:
         tool_name = schema["name"]
         availability = get_availability(tool_name, role=role)
@@ -101,10 +96,12 @@ def _filter_tools(role: str) -> list:
             str(availability.available).lower(),
             availability.code,
         )
+        if availability.available:
+            available_schemas.append(schema)
 
-    # PR-RP2 is shadow-only, including when enforce is requested. PR-RP3 owns
-    # filtering; do not hide unavailable schemas here.
-    return exposed
+    # Exposure filtering is defense-in-depth only. tool_registry.enforce() and
+    # gateway policy remain the server-side authorization/execution boundary.
+    return available_schemas if state == "enforce" else exposed
 
 
 # ══════════════════════════════════════════════════

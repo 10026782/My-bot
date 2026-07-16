@@ -31,9 +31,9 @@ INFRA / DATA:
   IMPORT_DOMAIN               - ברירת מחדל ON; פיצ'רים יבוא/עץ
   MULTITENANT                 - מצב multi-tenant (כבוי, F08)
   FEATURE_TOOL_AVAILABILITY_FILTER - "off" (default, no checks) / "shadow"
-                                 (local readiness diagnostics only) / "enforce"
-                                 (accepted but still diagnostic-only in PR-RP2;
-                                 schema exposure is unchanged). Read through
+                                 (local readiness diagnostics only; schemas unchanged) /
+                                 "enforce" (hide role-allowed tools whose local readiness
+                                 check reports unavailable). Read through
                                  get_tool_availability_filter_state(), not is_enabled().
 
 INTEGRATIONS:
@@ -254,7 +254,7 @@ _TOOL_AVAILABILITY_STATES = frozenset({"off", "shadow", "enforce"})
 
 
 def get_tool_availability_filter_state() -> str:
-    """Return RP2's off/shadow/enforce request; enforce remains diagnostic-only."""
+    """Return the tool-availability rollout state; unknown values fail to off."""
     value = os.environ.get("FEATURE_TOOL_AVAILABILITY_FILTER", "off").strip().lower()
     return value if value in _TOOL_AVAILABILITY_STATES else "off"
 
