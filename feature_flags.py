@@ -30,6 +30,11 @@ INFRA / DATA:
   COST_WATCHDOG_LIVE          - לוג שימוש + daily Sonnet limit (CORE_05)
   IMPORT_DOMAIN               - ברירת מחדל ON; פיצ'רים יבוא/עץ
   MULTITENANT                 - מצב multi-tenant (כבוי, F08)
+  FEATURE_TOOL_AVAILABILITY_FILTER - "off" (default, no checks) / "shadow"
+                                 (local readiness diagnostics only) / "enforce"
+                                 (accepted but still diagnostic-only in PR-RP2;
+                                 schema exposure is unchanged). Read through
+                                 get_tool_availability_filter_state(), not is_enabled().
 
 INTEGRATIONS:
   VOICE_IVR                   - קו טלפוני Twilio IVR (F07)
@@ -245,6 +250,13 @@ def is_enabled(name: str) -> bool:
 
 
 _SCHEMA_PROVIDER_STATES = ("off", "shadow", "enforce")
+_TOOL_AVAILABILITY_STATES = frozenset({"off", "shadow", "enforce"})
+
+
+def get_tool_availability_filter_state() -> str:
+    """Return RP2's off/shadow/enforce request; enforce remains diagnostic-only."""
+    value = os.environ.get("FEATURE_TOOL_AVAILABILITY_FILTER", "off").strip().lower()
+    return value if value in _TOOL_AVAILABILITY_STATES else "off"
 
 
 def get_runtime_schema_provider_state() -> str:
