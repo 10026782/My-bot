@@ -701,9 +701,12 @@ with patch("feature_flags.is_enabled", return_value=False), \
         "r2_shadow_fail", "telegram", "צור לי משימה",
     )
 chk("R2 (unit): shadow proposal failure -> ok=False, contract_id=None, "
-    "terminal_outcome=APPROVAL_QUEUE_ERROR, created_this_turn=False",
+    "terminal_outcome=APPROVAL_QUEUE_ORPHANED (Codex re-audit of 818c8a6, P1-3: "
+    "ExecutionLedger.save() raising via failure_code=persistence_failed does not prove "
+    "the write never landed -- ownership/acknowledgment is uncertain, not verified-clean), "
+    "created_this_turn=False",
     _r2_result["ok"] is False and _r2_result["contract_id"] is None
-    and _r2_result["terminal_outcome"] == "APPROVAL_QUEUE_ERROR"
+    and _r2_result["terminal_outcome"] == "APPROVAL_QUEUE_ORPHANED"
     and _r2_result["created_this_turn"] is False)
 
 with patch.object(app, "_queue_approval_detailed", return_value=_r2_result):
@@ -802,10 +805,12 @@ chk("P1-A / R2-real: propose_action() raising a real exception -> no ActionContr
     "for this identity afterwards",
     len(_canon_gw.find_live_contracts("boss_hq:r2real_exc")) == 0)
 chk("P1-A / R2-real: structured failure returned -- ok=False, contract_id=None, "
-    "terminal_outcome=APPROVAL_QUEUE_ERROR, created_this_turn=False (never a raw exception, "
-    "never a phantom-success shape)",
+    "terminal_outcome=APPROVAL_QUEUE_ORPHANED (Codex re-audit of 818c8a6: propose_action() "
+    "raising without ever returning a GatewayResult means ownership of any contract_id is "
+    "NOT proven for this call -- the conservative/unattributable outcome, not verified-clean), "
+    "created_this_turn=False (never a raw exception, never a phantom-success shape)",
     _r2real_result["ok"] is False and _r2real_result["contract_id"] is None
-    and _r2real_result["terminal_outcome"] == "APPROVAL_QUEUE_ERROR"
+    and _r2real_result["terminal_outcome"] == "APPROVAL_QUEUE_ORPHANED"
     and _r2real_result["created_this_turn"] is False)
 chk("P1-A / R2-real: no EventBus pending representation was created for this identity -- "
     "the exception must not fall through to bus.request_approval()",
@@ -845,7 +850,7 @@ finally:
 chk("P1-A / R2-real: PA-01 state=off (unset) -> identical safe return contract -- this is a "
     "_queue_approval_detailed_impl() plumbing fix, not a PA-01-gated behavior",
     _r2real_off_result["ok"] is False and _r2real_off_result["contract_id"] is None
-    and _r2real_off_result["terminal_outcome"] == "APPROVAL_QUEUE_ERROR"
+    and _r2real_off_result["terminal_outcome"] == "APPROVAL_QUEUE_ORPHANED"
     and _r2real_off_result["created_this_turn"] is False)
 
 # Gateway ENFORCE mode (FEATURE_ACTION_GATEWAY=True) was already safe for
@@ -865,7 +870,7 @@ with patch("feature_flags.is_enabled", return_value=True), \
 chk("P1-A / R2-real: FEATURE_ACTION_GATEWAY=True (Gateway enforce mode) -- already safe for "
     "this exception shape pre-fix, confirmed still safe post-fix",
     _r2real_enforce_gw_result["ok"] is False and _r2real_enforce_gw_result["contract_id"] is None
-    and _r2real_enforce_gw_result["terminal_outcome"] == "APPROVAL_QUEUE_ERROR"
+    and _r2real_enforce_gw_result["terminal_outcome"] == "APPROVAL_QUEUE_ORPHANED"
     and _r2real_enforce_gw_result["created_this_turn"] is False)
 chk("...and no EventBus pending representation was created for this identity either",
     len(_real_pending.list_for_chat("r2real_enforce_gw")) == 0)
@@ -1015,11 +1020,19 @@ from event_bus import executed_action_cache as _real_eac  # noqa: E402
 from core.action_contract_repository import ActionContractTransitionError  # noqa: E402
 import core.action_gateway as _action_gateway_module  # noqa: E402
 
-# --- P2-1: propose_action() raises AFTER ExecutionLedger.save() has already
-# durably persisted the contract, but BEFORE returning a GatewayResult.
-# _gw_result therefore stays None inside _impl -- the old fix (keyed off
-# _gw_result.contract_id) had nothing to revoke. The fingerprint-based
-# rediscovery in the outer wrapper must find and revoke it regardless.
+# --- P2-1 (REVISED per Codex re-audit of 818c8a6 -- architectural ruling):
+# propose_action() raises AFTER ExecutionLedger.save() has already durably
+# persisted the contract, but BEFORE returning a GatewayResult. _gw_result
+# therefore stays None inside _impl -- there is no contract_id PROVEN to
+# belong to this call. The PREVIOUS fix (818c8a6) relocated the orphan via a
+# fingerprint match and revoked it -- but a fingerprint proves the business
+# action is identical, not that THIS call created the contract found under
+# it (it could be a pre-existing or concurrently-created one from a totally
+# different call). That fingerprint-based mutation has been REMOVED. The new,
+# correct expectation is the opposite of the old one: the contract this
+# mock genuinely persists is left COMPLETELY UNTOUCHED (still "pending"),
+# and the return is the conservative APPROVAL_QUEUE_ORPHANED state with
+# contract_id=None (unknown/unattributable -- not "verified absent").
 def _raise_after_persist(msg, *args, **kwargs):
     if isinstance(msg, str) and msg.startswith("[ActionGateway] propose_action:"):
         raise RuntimeError("simulated crash after ExecutionLedger.save()")
@@ -1032,13 +1045,16 @@ with patch("feature_flags.is_enabled", return_value=False), \
         "airtable_add", {"table": "Tasks", "fields": {"Task": "P2-1-shadow"}},
         "p2_1_shadow_after_persist", "telegram", "צור לי משימה",
     )
-chk("P2-1 (shadow mode): a contract WAS durably saved before the simulated crash, "
-    "then revoked by the fingerprint-based rediscovery -- no live contract remains",
-    len(_canon_gw.find_live_contracts("boss_hq:p2_1_shadow_after_persist")) == 0)
-chk("P2-1 (shadow mode): return is truthful -- contract_id=None, ok=False, "
-    "terminal_outcome=APPROVAL_QUEUE_ERROR, created_this_turn=False, action_tool canonical",
+_p2_1_live = _canon_gw.find_live_contracts("boss_hq:p2_1_shadow_after_persist")
+chk("P2-1 (shadow mode): a contract WAS durably saved before the simulated crash, and is "
+    "left COMPLETELY UNTOUCHED -- still live/pending -- since this call never proved it "
+    "owns any contract_id (no fingerprint-based mutation is attempted)",
+    len(_p2_1_live) == 1 and _p2_1_live[0].status == "pending")
+chk("P2-1 (shadow mode): return is the conservative ORPHANED state -- contract_id=None "
+    "(meaning 'not attributable to this call', not 'verified absent'), ok=False, "
+    "terminal_outcome=APPROVAL_QUEUE_ORPHANED, created_this_turn=False, action_tool canonical",
     _p2_1_result["contract_id"] is None and _p2_1_result["ok"] is False
-    and _p2_1_result["terminal_outcome"] == "APPROVAL_QUEUE_ERROR"
+    and _p2_1_result["terminal_outcome"] == "APPROVAL_QUEUE_ORPHANED"
     and _p2_1_result["created_this_turn"] is False
     and _p2_1_result["action_tool"] == "airtable_add")
 
@@ -1048,14 +1064,13 @@ with patch("feature_flags.is_enabled", return_value=True), \
         "airtable_add", {"table": "Tasks", "fields": {"Task": "P2-1-enforce"}},
         "p2_1_enforce_after_persist", "telegram", "צור לי משימה",
     )
-chk("P2-1 (Gateway enforce mode): same crash-after-persist shape -- also revoked, "
-    "no live contract remains (enforce mode's propose_action() call was previously "
-    "not wrapped in try/except at all; now covered by the outer wrapper's fingerprint "
-    "rediscovery, which is agnostic to which branch called propose_action())",
-    len(_canon_gw.find_live_contracts("boss_hq:p2_1_enforce_after_persist")) == 0)
-chk("P2-1 (Gateway enforce mode): return is truthful",
+_p2_1_enforce_live = _canon_gw.find_live_contracts("boss_hq:p2_1_enforce_after_persist")
+chk("P2-1 (Gateway enforce mode): same crash-after-persist shape -- also left untouched, "
+    "still live/pending",
+    len(_p2_1_enforce_live) == 1 and _p2_1_enforce_live[0].status == "pending")
+chk("P2-1 (Gateway enforce mode): return is the conservative ORPHANED state",
     _p2_1_enforce_result["contract_id"] is None and _p2_1_enforce_result["ok"] is False
-    and _p2_1_enforce_result["terminal_outcome"] == "APPROVAL_QUEUE_ERROR"
+    and _p2_1_enforce_result["terminal_outcome"] == "APPROVAL_QUEUE_ORPHANED"
     and _p2_1_enforce_result["created_this_turn"] is False)
 
 
@@ -1128,6 +1143,12 @@ chk("P2-4: action_tool is CANONICAL (airtable_add, not the raw sheets_append) ev
     _p2_4_result["action_tool"] == "airtable_add")
 chk("P2-4: no contract exists either way (the crash predates propose_action() entirely)",
     len(_canon_gw.find_live_contracts("boss_hq:p2_4_canonical_action_tool")) == 0)
+chk("P1-2 (Codex re-audit of 818c8a6): the outer wrapper never attempts a fingerprint "
+    "lookup for this unattributed exception -- return is the conservative ORPHANED state "
+    "with contract_id=None (unattributable, not 'verified absent'), not APPROVAL_QUEUE_ERROR",
+    _p2_4_result["contract_id"] is None
+    and _p2_4_result["terminal_outcome"] == "APPROVAL_QUEUE_ORPHANED"
+    and _p2_4_result["ok"] is False and _p2_4_result["created_this_turn"] is False)
 
 with patch("core.action_gateway.resolve_canonical_tool", side_effect=RuntimeError("canonicalization itself broke")):
     _p2_4b_result = app._queue_approval_detailed(
@@ -1138,6 +1159,181 @@ chk("P2-4b: when canonicalization ITSELF is what fails (the one case where 'cano
     "is genuinely unknowable), falls back to the raw pre-canonicalization name rather "
     "than raising or inventing a value",
     _p2_4b_result["action_tool"] == "sheets_append")
+chk("P1-2: no fingerprint lookup is attempted when canonicalization itself fails either -- "
+    "ORPHANED, contract_id=None",
+    _p2_4b_result["contract_id"] is None
+    and _p2_4b_result["terminal_outcome"] == "APPROVAL_QUEUE_ORPHANED"
+    and _p2_4b_result["ok"] is False and _p2_4b_result["created_this_turn"] is False)
+
+
+# ══════════════════════════════════════════════════
+# P3. Codex re-audit of commit 818c8a6 (verdict: FIX_REQUIRED) —
+# architectural ruling: a business-action fingerprint proves two calls
+# describe the same action, never that THIS call's ActionContract found
+# under it. The 8 required reproductions from the re-audit; #5 (structured
+# persistence_failed must not return verified-clean) is R2 above, #8 (exact
+# owned contract ID + durable reject failure stays ORPHANED) is P2-2 above —
+# both already updated/covered. The remaining 6 are added here.
+# ══════════════════════════════════════════════════
+
+# --- P3-1: a PRE-EXISTING pending contract for the identical fingerprint
+# already exists (created by an earlier, unrelated call) when OUR call fails
+# with an unattributed exception. Must be left completely untouched.
+_p3_1_preexisting = _canon_gw.propose_action(
+    tenant_id="boss_hq", canonical_user_id="boss_hq:p3_preexisting", tool_name="airtable_add",
+    tool_inputs={"table": "Tasks", "fields": {"Task": "pre-existing"}},
+    origin_channel="telegram", origin_chat_id="p3_preexisting", requires_approval=True,
+    identity=Identity(user_id="p3_preexisting", role=Role.OWNER), user_text="",
+)
+assert _p3_1_preexisting.ok, "test setup: pre-existing contract must be created successfully"
+
+with patch("feature_flags.is_enabled", return_value=False), \
+     patch.object(_canon_gw, "propose_action",
+                   side_effect=RuntimeError("our own call crashes, same fingerprint")):
+    _p3_1_result = app._queue_approval_detailed(
+        "airtable_add", {"table": "Tasks", "fields": {"Task": "pre-existing"}},
+        "p3_preexisting", "telegram", "",
+    )
+chk("P3-1: a pre-existing same-fingerprint contract is left COMPLETELY UNTOUCHED (still "
+    "'pending') when our own call fails without ever proving ownership of any contract_id",
+    _canon_gw.find_contract(_p3_1_preexisting.contract_id).status == "pending")
+chk("P3-1: our call's own return is the conservative ORPHANED state, never attributing "
+    "the pre-existing contract's ID to us",
+    _p3_1_result["contract_id"] is None
+    and _p3_1_result["terminal_outcome"] == "APPROVAL_QUEUE_ORPHANED"
+    and _p3_1_result["ok"] is False and _p3_1_result["created_this_turn"] is False)
+
+
+# --- P3-2: a CONCURRENT turn creates a contract for the identical
+# fingerprint (modeled here as happening right after our own call fails,
+# proving timing/ordering has no bearing -- nothing in our failure path ever
+# scans by fingerprint, so it cannot matter whether the other contract
+# existed before, during, or after).
+with patch("feature_flags.is_enabled", return_value=False), \
+     patch.object(_canon_gw, "propose_action",
+                   side_effect=RuntimeError("our own call crashes; a concurrent turn will "
+                                             "create the real contract for this fingerprint")):
+    _p3_2_result = app._queue_approval_detailed(
+        "airtable_add", {"table": "Tasks", "fields": {"Task": "concurrent"}},
+        "p3_concurrent", "telegram", "",
+    )
+_p3_2_concurrent = _canon_gw.propose_action(
+    tenant_id="boss_hq", canonical_user_id="boss_hq:p3_concurrent", tool_name="airtable_add",
+    tool_inputs={"table": "Tasks", "fields": {"Task": "concurrent"}},
+    origin_channel="telegram", origin_chat_id="p3_concurrent", requires_approval=True,
+    identity=Identity(user_id="p3_concurrent", role=Role.OWNER), user_text="",
+)
+chk("P3-2: the concurrent turn's own contract creation succeeds normally, completely "
+    "unaffected by our earlier failed call for the identical fingerprint",
+    _p3_2_concurrent.ok is True
+    and _canon_gw.find_contract(_p3_2_concurrent.contract_id).status == "pending")
+chk("P3-2: our failed call's own return never attributes the concurrent contract's ID "
+    "to itself either",
+    _p3_2_result["contract_id"] is None
+    and _p3_2_result["terminal_outcome"] == "APPROVAL_QUEUE_ORPHANED")
+
+
+# --- P3-3: a failure BEFORE propose_action() is ever reached
+# (executed_action_cache.compute()) must not touch a pre-existing
+# same-fingerprint contract either.
+_p3_3_preexisting = _canon_gw.propose_action(
+    tenant_id="boss_hq", canonical_user_id="boss_hq:p3_before_propose", tool_name="airtable_add",
+    tool_inputs={"table": "Tasks", "fields": {"Task": "before-propose"}},
+    origin_channel="telegram", origin_chat_id="p3_before_propose", requires_approval=True,
+    identity=Identity(user_id="p3_before_propose", role=Role.OWNER), user_text="",
+)
+with patch.object(_real_eac, "compute", side_effect=RuntimeError("cache compute broken")):
+    _p3_3_result = app._queue_approval_detailed(
+        "airtable_add", {"table": "Tasks", "fields": {"Task": "before-propose"}},
+        "p3_before_propose", "telegram", "",
+    )
+chk("P3-3: a failure before propose_action() is ever reached does not touch the "
+    "pre-existing same-fingerprint contract",
+    _canon_gw.find_contract(_p3_3_preexisting.contract_id).status == "pending")
+chk("P3-3: return is the conservative ORPHANED state",
+    _p3_3_result["contract_id"] is None
+    and _p3_3_result["terminal_outcome"] == "APPROVAL_QUEUE_ORPHANED")
+
+
+# --- P3-4: a canonicalization failure must not touch a pre-existing
+# contract genuinely stored under the raw (sheets_append) tool name either.
+# Explicit Sheets wording ("גיליון") ensures resolve_canonical_tool()
+# preserves sheets_append rather than rewriting it to airtable_add, so the
+# pre-existing contract is genuinely raw-tool-named.
+_p3_4_preexisting = _canon_gw.propose_action(
+    tenant_id="boss_hq", canonical_user_id="boss_hq:p3_canon_fail", tool_name="sheets_append",
+    tool_inputs={"table": "Tasks", "fields": {"Task": "raw-tool"}},
+    origin_channel="telegram", origin_chat_id="p3_canon_fail", requires_approval=True,
+    identity=Identity(user_id="p3_canon_fail", role=Role.OWNER),
+    user_text="תוסיף את זה לגיליון בבקשה",
+)
+assert _canon_gw.find_contract(_p3_4_preexisting.contract_id).tool_name == "sheets_append", (
+    "test setup: pre-existing contract must genuinely be stored under the raw tool name"
+)
+
+with patch("core.action_gateway.resolve_canonical_tool",
+           side_effect=RuntimeError("canonicalization broke")):
+    _p3_4_result = app._queue_approval_detailed(
+        "sheets_append", {"table": "Tasks", "fields": {"Task": "raw-tool"}},
+        "p3_canon_fail", "telegram", "",
+    )
+chk("P3-4: canonicalization failure does not touch a pre-existing raw-tool-named contract",
+    _canon_gw.find_contract(_p3_4_preexisting.contract_id).status == "pending")
+chk("P3-4: action_tool falls back to the raw tool name for telemetry only; no lookup/revoke "
+    "was attempted (ORPHANED, contract_id=None)",
+    _p3_4_result["action_tool"] == "sheets_append"
+    and _p3_4_result["contract_id"] is None
+    and _p3_4_result["terminal_outcome"] == "APPROVAL_QUEUE_ORPHANED")
+
+
+# --- P3-6: a lifecycle race -- a contract this call PROVES it owns (a real
+# contract_id from a genuine, unmocked propose_action() success) is moved to
+# "approved" by a concurrent turn's own approval flow WHILE our cleanup
+# would run. reject() itself is a no-op on a non-pending contract (core/
+# action_gateway.py's own reject() body: "if contract.status != 'pending':
+# return ..." without attempting any transition) -- our cleanup must not
+# report success, and must not disturb the concurrently-approved contract.
+_p3_6_owned = _canon_gw.propose_action(
+    tenant_id="boss_hq", canonical_user_id="boss_hq:p3_race", tool_name="airtable_add",
+    tool_inputs={"table": "Tasks", "fields": {"Task": "race"}},
+    origin_channel="telegram", origin_chat_id="p3_race", requires_approval=True,
+    identity=Identity(user_id="p3_race", role=Role.OWNER), user_text="",
+)
+assert _p3_6_owned.ok
+_canon_gw._ledger.update_status(
+    _p3_6_owned.contract_id, "approved", approved_by="a_concurrent_turn", approved_at=0,
+)
+_p3_6_cleanup_ok = app._revoke_and_verify_contract(
+    "boss_hq:p3_race", _p3_6_owned.contract_id, "test_lifecycle_race",
+)
+chk("P3-6: cleanup does NOT report success for a contract that raced to 'approved' "
+    "concurrently -- reject() is a no-op on a non-pending contract, and 'approved' is "
+    "not in the safe-cancelled status set",
+    _p3_6_cleanup_ok is False)
+chk("P3-6: the concurrently-approved contract is undisturbed -- our reject() attempt "
+    "never mutated its status",
+    _canon_gw.find_contract(_p3_6_owned.contract_id).status == "approved")
+
+
+# --- P3-7: the positive case -- an OWNED contract_id (proven via a genuine,
+# unmocked propose_action() success) that reject() genuinely transitions to
+# "rejected" IS reported as a successful, verified cleanup.
+_p3_7_owned = _canon_gw.propose_action(
+    tenant_id="boss_hq", canonical_user_id="boss_hq:p3_success", tool_name="airtable_add",
+    tool_inputs={"table": "Tasks", "fields": {"Task": "success"}},
+    origin_channel="telegram", origin_chat_id="p3_success", requires_approval=True,
+    identity=Identity(user_id="p3_success", role=Role.OWNER), user_text="",
+)
+assert _p3_7_owned.ok
+_p3_7_cleanup_ok = app._revoke_and_verify_contract(
+    "boss_hq:p3_success", _p3_7_owned.contract_id, "test_genuine_success",
+)
+chk("P3-7: a genuine reject() success on an owned contract_id IS verified and reported "
+    "as successful cleanup",
+    _p3_7_cleanup_ok is True)
+chk("P3-7: the contract's exact status is confirmed 'rejected' via the authoritative "
+    "find_contract() lookup by ID -- not inferred from find_live_contracts() membership",
+    _canon_gw.find_contract(_p3_7_owned.contract_id).status == "rejected")
 
 
 # ══════════════════════════════════════════════════

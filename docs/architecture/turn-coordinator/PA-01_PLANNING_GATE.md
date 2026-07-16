@@ -1446,12 +1446,24 @@ the outer wrapper:
 
 **Fix — verification, not attempts, and a distinct "unverifiable" outcome:**
 
-- `_find_live_contract_by_fingerprint(tenant_id, canonical_user_id, tool_name, tool_inputs)`: recomputes
+> **Correction (Codex re-audit of `818c8a6`, superseding the two paragraphs below):** the claim that "any
+> live contract found this way can only be the one this same call just created" is **wrong** and was
+> retracted in that next round. A business-action fingerprint proves the two calls describe the *same
+> business action*; it does not, and cannot, prove *this call* created or owns the specific `ActionContract`
+> row found under it — a fingerprint match can equally be a genuinely pre-existing contract from an
+> earlier, unrelated turn, or a concurrently-created one from a different turn entirely (a real, accepted
+> race this system already tolerates elsewhere). `_find_live_contract_by_fingerprint()` and every
+> fingerprint-keyed revoke/cleanup call site described below were **removed** in the `818c8a6 → `next round.
+> See "Codex re-audit of commit `818c8a6`" further below for the corrected ownership rule and the return
+> semantics that replaced this one. The two paragraphs immediately below are kept for historical record of
+> what commit `8e05d67` actually shipped — do not implement against them.
+
+- ~~`_find_live_contract_by_fingerprint(tenant_id, canonical_user_id, tool_name, tool_inputs)`: recomputes
   the exact business fingerprint `propose_action()` would have used and searches `find_live_contracts()`
   for a match — used whenever no `GatewayResult` is available at all (finding 1). Sound because
   `propose_action()` itself always checks `find_by_fingerprint()` first and returns *early*, without
   saving, whenever a contract for that exact fingerprint already exists — so any live contract found this
-  way can only be the one this same call just created.
+  way can only be the one this same call just created.~~ (retracted — see correction note above)
 - `_revoke_and_verify_contract(canonical_user_id, contract_id, reason)` / `_cancel_and_verify_pending
   (action_id, reason)`: each performs the revoke/cancel, then **re-queries** (`find_live_contracts()` /
   `pending.get()`) to confirm the item is actually gone, returning `True` only when independently
@@ -1468,16 +1480,17 @@ the outer wrapper:
   `terminal_outcome is None`) already excludes `APPROVAL_QUEUE_ORPHANED` from row 2 without any change —
   it surfaces via the existing scoped terminal-outcome lookup (row 3) like any other outcome, needing no
   new PA-01-side logic.
-- **Central fingerprint-based cleanup moved to the outer wrapper.** `_queue_approval_detailed()`'s
+- ~~**Central fingerprint-based cleanup moved to the outer wrapper.** `_queue_approval_detailed()`'s
   `except Exception` handler now: (a) recomputes `action_tool` via `resolve_canonical_tool()` itself
   (idempotent/pure, so safe to call again — falling back to the raw name only if canonicalization itself
   is what raised, the one case where "canonical" is genuinely unknowable), and (b) runs the fingerprint-
   based orphan lookup+revoke+verify as a backstop for any exception path that doesn't already know a
-  `contract_id`/`action_id` directly. The two Gateway-`propose_action()` call sites (shadow AND — newly, in
-  this round — enforce, neither of which has a `_gw_result` yet when `propose_action()` itself raises)
-  re-raise instead of duplicating this lookup locally; the `bus.request_approval()` and owner-notification
-  failure sites, which DO already know `_gw_result`/`action_id` precisely, call the verified helpers
-  directly (more efficient than a fingerprint rediscovery) rather than re-raising.
+  `contract_id`/`action_id` directly.~~ (the fingerprint-based backstop in (b) is retracted — see correction
+  note above; (a)'s `action_tool` recomputation remains correct and unchanged by the next round.) The two
+  Gateway-`propose_action()` call sites (shadow AND — newly, in this round — enforce, neither of which has
+  a `_gw_result` yet when `propose_action()` itself raises) re-raise instead of duplicating cleanup logic
+  locally; the `bus.request_approval()` and owner-notification failure sites, which DO already know
+  `_gw_result`/`action_id` precisely, call the verified helpers directly rather than re-raising.
 
 **Regression tests added (`test_pa01_phantom_approval_enforcement.py`, section "P2"):** P2-1 (propose_
 action() raising after a real `ExecutionLedger.save()`, shadow AND Gateway-enforce modes — 8 assertions),
@@ -1494,3 +1507,112 @@ PASS, `compileall` clean).
 ORPHANED"` is a new *value*, not a new field or a change to any existing field's meaning — the return
 contract's shape (the same 6 keys) is unchanged from the `created_this_turn` round. `BUG-104` untouched,
 no new branch/PR opened.
+
+**Codex re-audit of commit `818c8a6` (verdict: `FIX_REQUIRED`) — architectural ruling: fingerprint is not
+ownership proof.** The `8e05d67` fix above was itself unsound at its foundation: it treated a business-
+action *fingerprint match* as sufficient grounds to mutate (`reject()`) whatever `ActionContract` was found
+under it. A fingerprint proves two calls describe the identical business action — it proves nothing about
+*which call created or owns* the specific contract row found that way. A fingerprint match found during
+cleanup could be:
+
+- a genuinely **pre-existing** contract, created by an earlier, unrelated turn for the same business action
+  (e.g. the user already asked for this once before, unrelated to the call that's now failing);
+- a **concurrently-created** one, from a different call/turn racing at the same moment (an accepted race
+  this system already tolerates elsewhere — e.g. `ActionGateway`'s own `len(live)>1` sibling-closing logic).
+
+Mutating either on the theory that "our failing call probably created it" silently interferes with a
+request this call has no authority over — the exact structural risk the re-audit flagged.
+
+**Ownership rule (binding, final):** destructive cleanup (`reject()`/`update_status()`, or any other
+mutation) of an `ActionContract` is permitted **only** when the current call holds a `contract_id` it
+received **directly** from its own `propose_action()` invocation — concretely, a `GatewayResult` with
+`ok=True` and a `contract_id`, produced by *this* call. Every other case — `propose_action()` raising
+without ever returning a result, a `failure_code` whose acknowledgment is uncertain
+(`persistence_failed`), a failed `resolve_canonical_tool()`, a failed repository lookup, or simply "only a
+fingerprint is known" — is **ownership NOT proven**, and no lookup by fingerprint, no mutation, and no
+attempt to "find the likely contract" is permitted. `_find_live_contract_by_fingerprint()` and its one
+caller (the outer wrapper's fingerprint-based backstop) were **deleted outright** (not demoted to a
+read-only diagnostic — nothing else in this module needs a fingerprint→contract lookup). The outer
+`_queue_approval_detailed()` exception handler now does exactly two things on any exception: recompute
+`action_tool` canonically (best-effort, unchanged from the previous round) for telemetry, and return the
+conservative `APPROVAL_QUEUE_ORPHANED` state with `contract_id=None` — no lookup, no mutation, ever.
+
+**Persistence uncertainty reclassified.** `propose_action()`'s two structured `failure_code`s are not
+equivalent:
+
+- `"persistence_lookup_failed"` fails on the *first* operation of `propose_action()`, before any candidate
+  `ActionContract` object is even constructed — structurally, provably clean. This alone still returns
+  `APPROVAL_QUEUE_ERROR`, `contract_id=None`, verified.
+- `"persistence_failed"` means `ExecutionLedger.save()` raised — but a raised exception from a durable
+  write does not prove the write never landed (a lost acknowledgment after a real write is a classic
+  distributed-systems failure mode, and `ActionGateway` provides no attempt-ID or other explicit
+  "definitely not written" signal to rule it out). This failure_code now returns `APPROVAL_QUEUE_ORPHANED`,
+  `contract_id=None` (no id is available to attribute, ownership is not established either way), in both
+  the shadow and Gateway-enforce branches — previously both `failure_code`s were treated identically as
+  verified-clean.
+
+**Verification by exact status, not `find_live_contracts()` membership.** `_revoke_and_verify_contract()`
+now confirms cleanup via `action_gateway.find_contract(contract_id)` — an authoritative lookup of that one
+contract by ID — checking its own `status` field directly, rather than checking whether the id is merely
+absent from `find_live_contracts()`. The distinction matters: `find_live_contracts()` only proves "not
+`pending`" — a contract a *concurrent* lifecycle event moved to `"approved"`/`"executing"`/`"executed"` etc.
+also disappears from that list, without our `reject()` having caused it or the contract being in any sense
+safely cancelled. Success now requires `status` to land in `_SAFE_CANCELLED_CONTRACT_STATUSES`, currently
+`{"rejected"}` — the only status `ActionGateway.reject()` itself ever sets in this codebase's actual
+lifecycle (there is no separate `"cancelled"`/`"revoked"` status). `"approved"`, `"executing"`, `"executed"`,
+`"completed"`, `"outcome_unknown"`, still-`"pending"`, and a missing contract (lookup returns `None`, with
+no proof our own action caused the disappearance) are all **not** cleanup success — every one of them
+returns `APPROVAL_QUEUE_ORPHANED` with the real (known-owned) `contract_id`, never a false "verified clean."
+
+**`APPROVAL_QUEUE_ORPHANED` + `contract_id=None` semantics, precisely (both are legal, documented
+combinations, and mean different things depending on which produced them):**
+
+- `contract_id` is a **real, proven-owned id** when this call held a genuine `GatewayResult.ok=True`
+  `contract_id` from its own `propose_action()`, but a later verified revoke/cancel attempt on it could not
+  be confirmed.
+- `contract_id=None` means **no id is known or attributable to this call at all** — never backfilled via a
+  fingerprint lookup (removed entirely, per the ownership rule above). This is explicitly **not** the same
+  `None` as `APPROVAL_QUEUE_ERROR`'s "confirmed no contract exists" — it means *unknown/unattributable*, not
+  *confirmed absent*. `created_this_turn` is `False` in every `APPROVAL_QUEUE_ORPHANED` case regardless of
+  which `contract_id` value applies.
+
+**PA-01 matrix — unchanged, verified.** `APPROVAL_QUEUE_ORPHANED` is picked up by the existing scoped
+terminal-outcome lookup (`_pa01_structured_terminal_outcome()`) exactly like any other outcome string —
+no PA-01-side code change was needed. `_pa01_contract_created_for_expected_tool()`'s existing 5-condition
+check (`ok is True`, `terminal_outcome is None`, ...) already excludes it from row 2 without modification.
+An `ORPHANED` outcome for an *unrelated* tool does not suppress the expected tool's own row 3/row 4
+evaluation, by the same full-log-scan, scoped-by-`action_tool` logic already in place for every other
+outcome kind.
+
+**Follow-up, explicitly out of scope for this fix:** a proposal-attempt ID (assigned before `propose_
+action()` attempts to save, independent of whether the save itself succeeds) would let a future round
+positively attribute an orphan even when `propose_action()` never returns — closing the residual "genuinely
+unknowable" cases this round still reports as `contract_id=None`/`ORPHANED` rather than a specific owned
+id. This is **not** implemented here — no new schema/migration/attempt-ID field was added; the ownership
+rule above is enforced entirely with the return-value shape and lifecycle already in the codebase.
+
+**Regression tests (`test_pa01_phantom_approval_enforcement.py`, section "P3", plus in-place corrections to
+sections "K2" and "P2"):** the 8 reproductions required by the re-audit — pre-existing same-fingerprint
+contract untouched (P3-1), concurrent same-fingerprint contract untouched (P3-2), failure before `propose_
+action()` doesn't touch a pre-existing contract (P3-3), canonicalization failure doesn't touch a
+pre-existing raw-tool-named contract (P3-4), structured `persistence_failed` does not return verified-clean
+(the existing R2 unit test, updated in place to expect `APPROVAL_QUEUE_ORPHANED`), a `pending→approved`
+lifecycle race is not reported as revoke success (P3-6, calling `_revoke_and_verify_contract()` directly),
+an exact owned contract ID with a genuine `reject()`→`"rejected"` transition IS reported as success (P3-7,
+verified via `find_contract()`'s exact status — not just `find_live_contracts()` absence), and an exact
+owned contract ID with a durable `reject()` failure stays `ORPHANED` (the existing P2-2 test, already
+correct, unchanged). Three existing test blocks that encoded the now-removed fingerprint-based-revoke
+behavior were corrected in place rather than left passing against a description of code that no longer
+exists: R2 (unit, `persistence_failed` → `APPROVAL_QUEUE_ERROR` was wrong, now expects `APPROVAL_QUEUE_
+ORPHANED`), P1-A/R2-real (three assertions, same correction, all three Gateway-mode/PA-01-state
+combinations), and P2-1 (shadow + Gateway-enforce, both variants flipped from "contract revoked, no live
+contract remains" to "contract left completely untouched, still `pending`" — the literal opposite of what
+the previous round shipped, per the re-audit's explicit instruction). All 18 assertions targeting this
+round's findings confirmed red against commit `818c8a6` before the fix (the exact count: R2 ×1, P1-A/R2-real
+×3, P2-1 ×4, P2-4/P1-2 ×2, P3-1 ×2, P3-2 ×1, P3-3 ×2, P3-4 ×2, P3-6 ×1), green after
+(`test_pa01_phantom_approval_enforcement.py`: 95/95; full sweep 117/117 `test_*.py` files including
+`core/router/test_router.py`, `smoke_tests.py` PASS, `compileall` clean).
+
+**No deviation:** no PA-01 predicate/policy/matrix/wording change. `BUG-104` untouched. No proposal-attempt
+ID, migration, or schema change was introduced — explicitly deferred as a future follow-up, not part of
+this fix. No new branch/PR opened.
