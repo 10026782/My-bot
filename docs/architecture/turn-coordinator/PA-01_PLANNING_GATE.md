@@ -1616,3 +1616,60 @@ round's findings confirmed red against commit `818c8a6` before the fix (the exac
 **No deviation:** no PA-01 predicate/policy/matrix/wording change. `BUG-104` untouched. No proposal-attempt
 ID, migration, or schema change was introduced — explicitly deferred as a future follow-up, not part of
 this fix. No new branch/PR opened.
+
+**Codex re-audit of commit `0d658c1` (verdict: `FIX_REQUIRED`) — a TOCTOU race in the ownership-proven
+cleanup path.** The `818c8a6 → 0d658c1` round correctly removed fingerprint-based cleanup and required an
+owned `contract_id`, but the cleanup it did perform on that owned id was still not atomic. The dangerous
+window is *inside* `ActionGateway.reject()`: it reads the contract, checks `status == "pending"`, and only
+*then*, as a **separate** step, calls `ExecutionLedger.update_status(contract_id, "rejected")`. On the
+default `FEATURE_ACTION_CONTRACT_PERSISTENCE`-off path, that RAM write is **unconditional** (no CAS, no
+re-check of the status). So a concurrent turn moving the contract `pending → approved` in the window
+between the check and the write is silently overwritten to `rejected`, and `_revoke_and_verify_contract()`
+— reading the status back afterward — sees `rejected`, concludes its own cancellation succeeded, and
+reports `True`, having clobbered a live approval. A deterministic reproduction against `0d658c1` (concurrent
+approval injected at the write) printed `cleanup_ok=True`, `final_status=rejected` — exactly the
+false-success the previous round's exact-status verification was meant to prevent, but couldn't, because
+the clobber happened *before* the verification read.
+
+**Fix — atomic conditional transition.**
+
+- `ExecutionLedger.update_status()` gained a keyword-only `require_status` parameter. When provided, the
+  transition is applied only if the contract is still in exactly that status at the moment of the write,
+  returning `False` (no mutation) otherwise. The RAM path does the guard **and** the set inside a **single
+  `self._lock` acquisition** — a concurrent `update_status()` for the same contract also takes that lock,
+  so the two are serialized and neither can slip a change between the other's check and set. The durable
+  path enforces `require_status` via the repository's existing CAS on `expected_status` (a mismatch returns
+  `False` instead of raising). When `require_status` is `None` (every existing caller) the behavior is
+  byte-for-byte the legacy unconditional overwrite — no existing call path changes.
+- `ActionGateway.reject_if_pending(contract_id, rejected_by) -> bool`: a new, additive, purpose-built API
+  that calls `update_status(..., require_status="pending")` and returns whether it itself performed the
+  `pending → rejected` transition. `reject()` (which returns a user-facing string and is used by
+  `route_cancellation_word` and the Telegram approval callback) is left **entirely unchanged** — this
+  method is only for the PA-01 orphan-cleanup path, which needs a verified boolean, not a message.
+- `_revoke_and_verify_contract()` now uses `reject_if_pending()` and requires BOTH conditions for success,
+  defense in depth: (1) `reject_if_pending()` reports it performed the atomic transition (a contract a
+  concurrent event already moved past `pending` yields `False` here with no mutation), AND (2) the existing
+  exact-status re-read via `find_contract()` still shows a safe-cancelled status (catching the reverse
+  ordering — we transition to `rejected`, then a concurrent writer overwrites it back before we verify).
+
+**Scope note:** this round necessarily touches `core/action_gateway.py` (an additive `update_status`
+parameter and a new `reject_if_pending()` method) — the re-audit explicitly required "transition אטומי
+מותנה pending → rejected גם ב־RAM ledger, או API ייעודי כמו reject_if_pending()". Both changes are purely
+additive and default-inert: no existing caller passes `require_status`, no existing caller of `reject()` is
+affected, and `BUG-104` remains untouched.
+
+**Regression tests (`test_pa01_phantom_approval_enforcement.py`, section "P4"):** the deterministic race
+reproduction (concurrent approval injected at the exact write window via a shared `update_status` wrapper
+that exercises both the old racy `reject()` and the new atomic `reject_if_pending()` — 2 assertions:
+approval not clobbered, cleanup not reported as success), plus two unit pins on `reject_if_pending()`
+itself (returns `False`/no mutation on an already-approved contract; returns `True`/transitions a genuinely
+pending one). The 2 race assertions confirmed red against commit `0d658c1` before the fix
+(`cleanup_ok=True`, `final_status=rejected`), green after (`cleanup_ok=False`, `final_status=approved`).
+Full suite green: `test_pa01_phantom_approval_enforcement.py` 99/99, full sweep 117/117 `test_*.py` files
+(including `core/router/test_router.py`, `test_action_gateway.py`, `test_approval_concurrency.py`,
+`test_phase_4b0_1c_concurrent_approvals.py`, and the durable-lifecycle suites that exercise `update_status`
+most heavily), `smoke_tests.py` PASS, `compileall` clean.
+
+**No deviation:** no PA-01 predicate/policy/matrix/wording change. The `core/action_gateway.py` changes are
+additive and default-inert. `BUG-104` untouched; no proposal-attempt-ID/migration/schema change (still
+deferred). No new branch/PR opened.

@@ -1337,6 +1337,93 @@ chk("P3-7: the contract's exact status is confirmed 'rejected' via the authorita
 
 
 # ══════════════════════════════════════════════════
+# P4. Codex re-audit of commit 0d658c1 (verdict: FIX_REQUIRED) — the
+# ownership-proven cleanup path (P3-7 above) still had a TOCTOU race: the
+# dangerous window is AFTER reject() checks status == "pending" but BEFORE
+# ExecutionLedger.update_status() writes. On the default RAM path
+# (FEATURE_ACTION_CONTRACT_PERSISTENCE off) that write was unconditional, so
+# a concurrent turn moving the contract pending -> approved inside the window
+# was clobbered to "rejected", and _revoke_and_verify_contract() then read
+# "rejected" and falsely reported success. Fixed by making the transition an
+# ATOMIC conditional pending -> rejected (reject_if_pending() /
+# update_status(require_status="pending")).
+#
+# Deterministic reproduction of the exact window: wrap the ledger's
+# update_status so the concurrent approval lands right as the write is about
+# to happen. Both the old racy reject() and the new atomic
+# reject_if_pending() funnel through update_status(), so the SAME injection
+# seam exercises both -- red against 0d658c1 (old unconditional overwrite
+# clobbers the approval and reports success), green against the fix (the
+# atomic guard refuses to overwrite the now-approved contract).
+# ══════════════════════════════════════════════════
+
+_p4_owned = _canon_gw.propose_action(
+    tenant_id="boss_hq", canonical_user_id="boss_hq:p4_race", tool_name="airtable_add",
+    tool_inputs={"table": "Tasks", "fields": {"Task": "race-window"}},
+    origin_channel="telegram", origin_chat_id="p4_race", requires_approval=True,
+    identity=Identity(user_id="p4_race", role=Role.OWNER), user_text="",
+)
+assert _p4_owned.ok and _canon_gw.find_contract(_p4_owned.contract_id).status == "pending"
+
+_p4_cid = _p4_owned.contract_id
+_p4_ledger = _canon_gw._ledger
+_p4_orig_update = _p4_ledger.update_status
+_p4_injected = {"done": False}
+
+
+def _p4_inject_concurrent_approval(contract_id, status, **kwargs):
+    # Simulate a concurrent turn approving THIS contract in the exact window
+    # between the caller's "is it pending?" check and this write. Fires once,
+    # only for our contract's rejection write, then delegates to the real
+    # update_status with whatever args the caller passed (crucially including
+    # require_status for the new atomic path, or its absence for the old one).
+    if contract_id == _p4_cid and status == "rejected" and not _p4_injected["done"]:
+        _p4_injected["done"] = True
+        _p4_ledger._store[_p4_cid].status = "approved"
+    return _p4_orig_update(contract_id, status, **kwargs)
+
+
+with patch.object(_p4_ledger, "update_status", side_effect=_p4_inject_concurrent_approval):
+    _p4_cleanup_ok = app._revoke_and_verify_contract(
+        "boss_hq:p4_race", _p4_cid, "test_toctou_race",
+    )
+
+chk("P4 (TOCTOU race): a concurrent approval landing between the pending-check and the "
+    "ledger write is NOT clobbered -- the atomic conditional transition refuses to "
+    "overwrite the now-approved contract (final status stays 'approved')",
+    _canon_gw.find_contract(_p4_cid).status == "approved")
+chk("P4 (TOCTOU race): cleanup does NOT report success for the raced-approval contract "
+    "(the exact false-success the fix targets)",
+    _p4_cleanup_ok is False)
+
+# Unit-level pin on the atomic primitive itself: reject_if_pending() returns
+# False and mutates nothing when the contract is already non-pending, and
+# True (transitioning to 'rejected') only from a genuine pending state.
+_p4_np = _canon_gw.propose_action(
+    tenant_id="boss_hq", canonical_user_id="boss_hq:p4_nonpending", tool_name="airtable_add",
+    tool_inputs={"table": "Tasks", "fields": {"Task": "non-pending"}},
+    origin_channel="telegram", origin_chat_id="p4_nonpending", requires_approval=True,
+    identity=Identity(user_id="p4_nonpending", role=Role.OWNER), user_text="",
+)
+_canon_gw._ledger.update_status(_p4_np.contract_id, "approved", approved_by="x", approved_at=0)
+chk("P4 (unit): reject_if_pending() returns False on an already-approved contract and does "
+    "not mutate it",
+    _canon_gw.reject_if_pending(_p4_np.contract_id) is False
+    and _canon_gw.find_contract(_p4_np.contract_id).status == "approved")
+
+_p4_p = _canon_gw.propose_action(
+    tenant_id="boss_hq", canonical_user_id="boss_hq:p4_pending", tool_name="airtable_add",
+    tool_inputs={"table": "Tasks", "fields": {"Task": "pending-ok"}},
+    origin_channel="telegram", origin_chat_id="p4_pending", requires_approval=True,
+    identity=Identity(user_id="p4_pending", role=Role.OWNER), user_text="",
+)
+chk("P4 (unit): reject_if_pending() returns True and transitions a genuinely pending "
+    "contract to 'rejected'",
+    _canon_gw.reject_if_pending(_p4_p.contract_id) is True
+    and _canon_gw.find_contract(_p4_p.contract_id).status == "rejected")
+
+
+# ══════════════════════════════════════════════════
 # L. Pending approval from a PRIOR turn — unaffected, PA-01 never reached
 # ══════════════════════════════════════════════════
 

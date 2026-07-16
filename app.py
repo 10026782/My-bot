@@ -823,27 +823,39 @@ def _revoke_and_verify_contract(canonical_user_id: str, contract_id: str, reason
     Only ever called with a contract_id PROVEN to belong to the current
     call's own propose_action() invocation (a fresh GatewayResult.ok=True
     return from THIS call) — never a fingerprint-matched guess (Codex
-    re-audit of 818c8a6, ownership rule above). Revokes it and returns
-    whether the revocation was actually VERIFIED — never just whether
-    action_gateway.reject() was called without raising (reject() returns a
-    human-facing message STRING on a durable-transition failure, not an
-    exception).
+    re-audit of 818c8a6, ownership rule). Returns whether the revocation was
+    actually VERIFIED.
 
-    Verification is by an EXACT, authoritative lookup of this one contract_id
-    (action_gateway.find_contract()), checking its own status — NOT
-    find_live_contracts() membership, which only proves "not pending" and
-    would misreport success for a contract a concurrent lifecycle event
-    (approved/executing/executed elsewhere) moved on before our reject()
-    could act. Success requires the status to land in
-    _SAFE_CANCELLED_CONTRACT_STATUSES ("rejected" — the only real
-    cancellation status this codebase's lifecycle has). A missing contract
-    (find_contract() returns None) is also NOT treated as success — there is
-    no proof the disappearance was caused by OUR reject() rather than some
-    other process, so this stays conservative rather than assuming the best.
+    Codex re-audit of 0d658c1 (TOCTOU race fix): the cancellation is now
+    performed by action_gateway.reject_if_pending(), an ATOMIC conditional
+    pending -> rejected transition. reject() (used previously here) reads the
+    status, checks "pending", then in a SEPARATE step writes "rejected" — a
+    window in which a concurrent turn moving the contract pending -> approved
+    is silently clobbered to "rejected" by the RAM ledger's unconditional
+    set (the default, persistence-off path does no CAS). This function would
+    then read back "rejected" and wrongly report success while having
+    overwritten a live approval. reject_if_pending() returns True only if it
+    itself performed the pending -> rejected transition atomically, so a
+    contract that was already non-pending at the write is never touched and
+    never reported as our success.
+
+    Two independent conditions must BOTH hold for success, defense in depth:
+      1. reject_if_pending() reports it performed the atomic transition
+         (transitioned is True) — a contract a concurrent event already
+         moved past "pending" yields False here without any mutation.
+      2. an EXACT, authoritative re-read of this one contract_id
+         (find_contract(), checking its own status — NOT find_live_
+         contracts() membership, which only proves "not pending") still
+         shows a safe-cancelled status. This catches the reverse ordering
+         too: we transitioned to "rejected", then a concurrent writer
+         overwrote it back to approved/executing before we verified.
+    _SAFE_CANCELLED_CONTRACT_STATUSES is {"rejected"} — the only real
+    cancellation status this codebase's lifecycle has. A missing contract
+    (find_contract() returns None) is NOT success either.
     """
     try:
         from core.action_gateway import action_gateway as _gw_revoke
-        _gw_revoke.reject(contract_id, rejected_by=f"system:{reason}")
+        transitioned = _gw_revoke.reject_if_pending(contract_id, rejected_by=f"system:{reason}")
         found = _gw_revoke.find_contract(contract_id)
     except Exception as exc:
         logger.error(
@@ -851,17 +863,24 @@ def _revoke_and_verify_contract(canonical_user_id: str, contract_id: str, reason
             contract_id, reason, exc, exc_info=True,
         )
         return False
+    if not transitioned:
+        logger.error(
+            "[Approval] contract=%s reason=%s was NOT pending at the atomic reject transition "
+            "(a concurrent lifecycle event owns it, or it was already resolved) -- not "
+            "reporting cleanup success, contract left untouched", contract_id, reason,
+        )
+        return False
     if found is None:
         logger.error(
-            "[Approval] contract=%s reason=%s missing after revoke attempt -- no proof our "
-            "reject() caused this, treating as unverified", contract_id, reason,
+            "[Approval] contract=%s reason=%s missing after atomic revoke -- treating as "
+            "unverified", contract_id, reason,
         )
         return False
     if found.status not in _SAFE_CANCELLED_CONTRACT_STATUSES:
         logger.error(
-            "[Approval] contract=%s reason=%s status=%s after revoke attempt -- not a safe "
-            "cancelled state (a concurrent lifecycle event may have moved it on, or our "
-            "reject() itself did not take effect)", contract_id, reason, found.status,
+            "[Approval] contract=%s reason=%s status=%s after atomic revoke -- not a safe "
+            "cancelled state (a concurrent lifecycle event overwrote our rejection)",
+            contract_id, reason, found.status,
         )
         return False
     logger.warning("[Approval] revoked orphaned contract=%s reason=%s", contract_id, reason)
