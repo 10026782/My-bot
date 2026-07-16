@@ -28,7 +28,6 @@ from airtable_schema import (
     RoadmapTaskFields, RoadmapTaskStatus, DailyCheckinFields,
     VentureFields, VentureStage,
     LeadStatus, LeadOutcome,
-    LeadEventFields,
 )
 from tools.airtable_gateway import airtable_patch as _gw_patch, airtable_create as _gw_create
 from health_monitor import get_health_status
@@ -1412,26 +1411,43 @@ def get_leads(identity):
 # Leads Read-Only Reasoning Projection (GET /api/leads/<id> only)
 # ══════════════════════════════════════════════════════════════════
 
-def _read_lead_events_once(lead_id: str):
-    """
-    Read the Lead Events for one lead — AT MOST ONE Airtable call (shadow/on).
-    Returns a list of event records, or None (EVENTS_UNAVAILABLE) if the read
-    itself failed, so the projection can report an honest 'unavailable' state
-    rather than pretending there are zero events.
+# Reverse-link field on a Leads record → list of Lead-Event record IDs.
+_LEAD_EVENTS_LINK_FIELD = "Lead Events"
+# Airtable record-ID shape — used to reject anything that is not a clean rec ID
+# before it is embedded in a RECORD_ID() formula (defense in depth).
+_REC_ID_RE = re.compile(r"^rec[A-Za-z0-9]+$")
 
-    NOTE (activation is out of Phase-1 scope): the {Lead} link renders as the
-    linked record's primary-field value in filterByFormula, so this ID match is
-    best-effort against the current schema. A future activation PR must verify
-    the filter against the live Lead Events table before turning the flag on.
+
+def _read_lead_events(rec: dict):
     """
-    safe_id, err = _safe_formula_param(lead_id, "lead_id")
-    if err or not safe_id:
-        return None
-    formula = f"FIND('{safe_id}',ARRAYJOIN({{{LeadEventFields.LEAD_LINK}}}))"
+    Read the Lead Events for one lead using the reverse-link IDs already present
+    on the loaded Lead snapshot — the endpoint owns the read; the projection
+    never reads. Returns:
+      - []                 when the lead has no linked events (available, count 0)
+                           — NO Airtable call is made.
+      - list[event]        the linked event records (exactly ONE Airtable call).
+      - None (UNAVAILABLE) only on a real read failure.
+
+    The formula matches the Lead-Event records by their own RECORD_ID() — the
+    IDs come from the Lead snapshot's reverse link, never from the lead ID, and
+    the whole table is never scanned/filtered locally. Deterministic cap: the
+    first _MAX linked IDs (snapshot order) are used when a lead has more than the
+    supported cap.
+    """
+    from core.leads_reasoning_projection import MAX_LEAD_EVENT_IDS
+
+    raw_ids = rec.get("fields", {}).get(_LEAD_EVENTS_LINK_FIELD, []) or []
+    event_ids = [e for e in raw_ids if isinstance(e, str) and _REC_ID_RE.match(e)]
+    if not event_ids:
+        return []   # available, empty — no Airtable read
+
+    capped  = event_ids[:MAX_LEAD_EVENT_IDS]        # deterministic cap
+    clause  = ",".join(f"RECORD_ID()='{eid}'" for eid in capped)
+    formula = f"OR({clause})"
     try:
-        return _at_list(Tables.LEAD_EVENTS, formula, max_records=50, strict=True)
+        return _at_list(Tables.LEAD_EVENTS, formula, max_records=MAX_LEAD_EVENT_IDS, strict=True)
     except AirtableError as e:
-        logger.warning("[BUG-104] lead events read failed for %s: %s", lead_id, e)
+        logger.warning("[BUG-104] lead events read failed for %s: %s", rec.get("id", ""), e)
         return None   # EVENTS_UNAVAILABLE
 
 
@@ -1454,7 +1470,7 @@ def _apply_leads_reasoning_projection(payload: dict, rec: dict) -> None:
     as_of  = datetime.now(timezone.utc)   # single request-scoped reference time
     lead_id = rec.get("id", "")
     try:
-        events = _read_lead_events_once(lead_id)   # ≤1 Lead Events read
+        events = _read_lead_events(rec)   # ≤1 Lead Events read, keyed by linked IDs
         projection = build_reasoning_projection(rec, events, as_of)
     except Exception as e:
         # 'on' must not fail the endpoint — return an honest degraded projection.

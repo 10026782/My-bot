@@ -51,6 +51,38 @@ SCORE_PRESENT = "present"
 SCORE_MISSING = "missing"
 SCORE_INVALID = "invalid"
 
+# ── Readiness states (honest — never derived from phase) ──────────────────────
+# LeadsAdapter supplies no readiness signal and no approved Lead-readiness policy
+# exists in Phase 1, so readiness is reported as an explicit honest state, never
+# as a positive value and never as a copy of the lifecycle phase/state.
+READINESS_UNKNOWN     = "unknown"
+READINESS_UNAVAILABLE = "unavailable"
+_READINESS_UNKNOWN_REASON = "leads adapter supplies no readiness signal (phase 1)"
+
+# Deterministic cap on how many linked Lead-Event IDs feed one lookup. The
+# caller (endpoint) enforces the actual read; this constant documents the
+# contract the projection was designed against.
+MAX_LEAD_EVENT_IDS = 50
+
+# Live Leads schema → LeadsAdapter-expected field names. The adapter still
+# reads legacy CamelCase names in places; we normalize the live snapshot into
+# those names here (pure, no adapter refactor) so canonical live fields are not
+# silently dropped into wrong defaults.
+_LIVE_TO_ADAPTER_FIELDS = (
+    ("phone",      "Phone"),
+    ("status",     "Status"),
+    ("tier",       "Tier"),
+    ("source",     "Source"),
+    ("channel",    "Channel"),
+    ("domain",     "Domain"),
+    ("created_at", "Created At"),
+    ("updated_at", "Last Updated"),
+    ("notes",      "Notes"),
+    ("summary",    "Source Details"),
+    ("Score",      "Score"),          # passed through, never recomputed
+    ("Name",       "Name"),
+)
+
 # Sentinel: caller passes events=EVENTS_UNAVAILABLE when the Lead-Events read
 # itself failed (distinct from an empty list, which means "no events exist").
 EVENTS_UNAVAILABLE = None
@@ -81,16 +113,17 @@ def build_reasoning_projection(
     events_available = events is not EVENTS_UNAVAILABLE
     events_list      = list(events) if events_available else []
 
-    lead_score = _normalize_lead_score(lead_record.get("fields", lead_record))
+    live_fields = lead_record.get("fields", lead_record)
+    lead_score  = _normalize_lead_score(live_fields)
 
-    # Drive the existing Core Reasoning Layer through the Leads adapter, with
-    # all-null ports (zero I/O) and a fixed reference time (determinism).
-    from core.adapters.leads_adapter import LeadsAdapter
+    # Normalize the live snapshot into the field names LeadsAdapter reads
+    # (pure; the original record is never mutated), then drive the existing
+    # Core Reasoning Layer through the adapter with all-null ports (zero I/O)
+    # and a fixed reference time (determinism).
     from core.reasoning_engines import run as reasoning_run
     from core.reasoning_ports import ReasoningPorts
 
-    adapter = LeadsAdapter()
-    entity  = adapter.to_entity(lead_record, events=events_list)
+    entity  = build_reasoning_entity(lead_record, events_list)
     result  = reasoning_run(
         entity,
         ports=ReasoningPorts(),        # all null → no Airtable, no network, no LLM
@@ -100,6 +133,7 @@ def build_reasoning_projection(
 
     errors = sorted(str(e) for e in (result.errors or []))
     verifier = _verifier_status(errors, events_available, events_list, result.missing_evidence)
+    readiness = _readiness_state(errors)
 
     next_step = None
     if result.next_step is not None:
@@ -112,8 +146,8 @@ def build_reasoning_projection(
     return {
         "version":            PROJECTION_VERSION,
         "as_of":              as_of_iso,
-        "state":              result.phase,
-        "readiness":          result.phase,   # readiness == lifecycle phase for leads
+        "state":              result.phase,      # lifecycle phase (distinct from readiness)
+        "readiness":          readiness,          # honest state, never a copy of phase
         "confidence": {
             "score": round(float(result.confidence_score), 4),
             "basis": "reasoning_engine",       # Core Reasoning confidence over lead events
@@ -134,6 +168,27 @@ def build_reasoning_projection(
     }
 
 
+def build_reasoning_entity(lead_record: dict, events_list: list):
+    """
+    Build the ReasoningEntity for one lead: normalize the live snapshot into the
+    adapter's field names, run it through LeadsAdapter, and apply the explicit
+    canonical-domain correction. Pure — the input record is never mutated.
+    Exposed so the entity mapping is directly testable.
+    """
+    from core.adapters.leads_adapter import LeadsAdapter
+
+    normalized = _normalize_lead_snapshot(lead_record)
+    entity     = LeadsAdapter().to_entity(normalized, events=events_list)
+
+    # Deterministic domain: honor the explicit canonical `domain` field instead
+    # of the adapter's keyword inference (which can misclassify when `source`
+    # holds a channel-like token). Pure correction, no adapter refactor.
+    explicit_domain = _canonical_domain(lead_record.get("fields", lead_record).get("domain"))
+    if explicit_domain:
+        entity.domain = explicit_domain
+    return entity
+
+
 def degraded_projection(as_of: datetime, reason: str) -> dict:
     """
     Honest degraded projection for the "on" state when the projection build
@@ -145,7 +200,8 @@ def degraded_projection(as_of: datetime, reason: str) -> dict:
         "version":            PROJECTION_VERSION,
         "as_of":              as_of_iso,
         "state":              "UNKNOWN",
-        "readiness":          "UNKNOWN",
+        "readiness":          {"status": READINESS_UNAVAILABLE,
+                               "reason": "reasoning projection unavailable"},
         "confidence":         {"score": 0.0, "basis": "unavailable"},
         "missing_evidence":   [],
         "verifier":           {"status": VERIFIER_ERROR, "reason": str(reason)},
@@ -181,6 +237,42 @@ def _verifier_status(
                 "reason": "no lead events to reason over"}
     return {"status": VERIFIER_UNVERIFIED,
             "reason": "reasoning computed; no affirmative verification in read-only projection"}
+
+
+def _readiness_state(errors: list[str]) -> dict:
+    """
+    Honest readiness. Phase 1 has no approved Lead-readiness policy and the
+    adapter emits no readiness signal, so readiness is reported as an explicit
+    state with a fixed deterministic reason — never a positive value and never
+    the lifecycle phase.
+    """
+    if errors:
+        return {"status": READINESS_UNAVAILABLE,
+                "reason": "reasoning engine reported errors"}
+    return {"status": READINESS_UNKNOWN, "reason": _READINESS_UNKNOWN_REASON}
+
+
+def _normalize_lead_snapshot(lead_record: dict) -> dict:
+    """
+    Map a live Leads snapshot to the field names LeadsAdapter reads. Pure — the
+    input record is never mutated; a new {"id", "fields"} dict is returned. Only
+    known live fields with a non-empty value are carried across, so unknown
+    fields are ignored safely and empty live fields do not shadow adapter
+    fallbacks. The Score is passed through untouched (never recomputed).
+    """
+    live = lead_record.get("fields", lead_record)
+    out: dict = {}
+    for live_name, adapter_name in _LIVE_TO_ADAPTER_FIELDS:
+        if live_name in live and live[live_name] not in (None, ""):
+            out[adapter_name] = live[live_name]
+    return {"id": lead_record.get("id", ""), "fields": out}
+
+
+def _canonical_domain(value) -> str:
+    """Trim a live domain value to a canonical string, or '' when absent/blank."""
+    if value is None:
+        return ""
+    return str(value).strip()
 
 
 def _normalize_lead_score(fields: dict) -> dict:
