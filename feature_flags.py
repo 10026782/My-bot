@@ -35,6 +35,10 @@ INFRA / DATA:
                                  "enforce" (hide role-allowed tools whose local readiness
                                  check reports unavailable). Read through
                                  get_tool_availability_filter_state(), not is_enabled().
+  FEATURE_EVIDENCE_FINALIZER    - "off" (default, no comparison) / "shadow"
+                                 (evidence-derived status compared and safely logged; user
+                                 text unchanged) / "enforce" (accepted but still shadow-only
+                                 in PR-RP4). Read through get_evidence_finalizer_state().
 
 INTEGRATIONS:
   VOICE_IVR                   - קו טלפוני Twilio IVR (F07)
@@ -251,12 +255,19 @@ def is_enabled(name: str) -> bool:
 
 _SCHEMA_PROVIDER_STATES = ("off", "shadow", "enforce")
 _TOOL_AVAILABILITY_STATES = frozenset({"off", "shadow", "enforce"})
+_EVIDENCE_FINALIZER_STATES = frozenset({"off", "shadow", "enforce"})
 
 
 def get_tool_availability_filter_state() -> str:
     """Return the tool-availability rollout state; unknown values fail to off."""
     value = os.environ.get("FEATURE_TOOL_AVAILABILITY_FILTER", "off").strip().lower()
     return value if value in _TOOL_AVAILABILITY_STATES else "off"
+
+
+def get_evidence_finalizer_state() -> str:
+    """Return RP4's rollout state; enforce remains comparison-only until RP5."""
+    value = os.environ.get("FEATURE_EVIDENCE_FINALIZER", "off").strip().lower()
+    return value if value in _EVIDENCE_FINALIZER_STATES else "off"
 
 
 def get_runtime_schema_provider_state() -> str:
