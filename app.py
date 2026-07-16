@@ -116,6 +116,35 @@ def _pa01_structured_terminal_outcome(
             return outcome, r.get("content", "")
     return None
 
+
+def _pa01_contract_created_for_expected_tool(
+    tool_results_log: list, expected_tool: str | None,
+) -> bool:
+    """
+    Row 2's own predicate, exact (PA-01_PLANNING_GATE.md §8, canonical-tool-
+    wiring/created_this_turn follow-up): a __approval_queued__ sentinel only
+    counts as "a contract was created for this intent this turn" when ALL
+    five hold — a real sentinel, ok=True, no terminal_outcome, created_this_
+    turn=True, and its action_tool matches expected_tool. A non-None
+    contract_id alone is NOT sufficient: ActionGateway.propose_action() also
+    returns a real, non-None contract_id for a rejected/duplicate/pre-
+    existing contract it merely found (never created this turn) — see
+    _queue_approval_detailed_impl()'s own docstring. Scans the full log
+    (never stops at the first entry) — a matching sentinel anywhere in a
+    multi-tool-call turn is found regardless of position.
+    """
+    if expected_tool is None:
+        return False
+    return any(
+        r.get("tool") == "__approval_queued__"
+        and r.get("ok") is True
+        and r.get("terminal_outcome") is None
+        and r.get("created_this_turn") is True
+        and r.get("contract_id")
+        and r.get("action_tool") == expected_tool
+        for r in tool_results_log
+    )
+
 # ─── Pending Approvals (router-level) ──────────────────────────
 # Saves messages routed to Handler.APPROVAL until the user confirms.
 # key: chat_id (telegram user_id / whatsapp number)
@@ -787,24 +816,50 @@ def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
     Same behavior as _queue_approval() (see that docstring), but returns a
     structured outcome instead of just the model-facing message:
       {"message": str, "contract_id": str|None, "ok": bool,
-       "terminal_outcome": str|None, "action_tool": str}
+       "terminal_outcome": str|None, "action_tool": str, "created_this_turn": bool}
+
+    "created_this_turn" — PA-01 Main Integration Pass follow-up finding —
+    is the single most load-bearing key here and is deliberately NOT
+    inferred from contract_id truthiness: ActionGateway.propose_action()
+    can return a non-None contract_id for a REJECTED/DUPLICATE/PRE-EXISTING
+    contract too (existing.status == "pending"/"approved"/"executing"/
+    "outcome_unknown" all return GatewayResult(ok=False, contract_id=
+    existing.contract_id, ...) — core/action_gateway.py's own propose_action()
+    body). A contract_id is therefore evidence a contract EXISTS, never proof
+    it was created THIS turn. "created_this_turn" is set True on exactly one
+    branch: the final success return below, and only when the underlying
+    GatewayResult itself reports ok=True — which propose_action() only ever
+    returns immediately after saving a brand-new ActionContract with a fresh
+    uuid4() id (verified against that function's own body, not assumed).
+    Every other branch — including shadow mode's own success-shaped return
+    when the underlying proposal was itself a dedup/rejection that shadow
+    mode doesn't block on — sets it False.
+
     "terminal_outcome" is None only for a genuine successful contract
-    creation; every early-return branch (duplicate fingerprint, cross-
-    channel duplicate, Gateway rejection, persistence failure, owner-notify
-    failure) sets it to "APPROVAL_QUEUE_ERROR" — per-branch, not inferred
-    from contract_id alone (PA-01_PLANNING_GATE.md §3.6's own classification
-    lists owner-notify failure under APPROVAL_QUEUE_ERROR explicitly; a
-    contract_id can technically already exist in the ledger by that point
-    but the user was never notified, so it is deliberately not surfaced
-    here — an orphaned, unreachable contract must not be treated as
-    "created" for this turn's purposes).
+    creation (created_this_turn=True); every other branch (duplicate
+    fingerprint, cross-channel duplicate, Gateway rejection/dedup/pre-
+    existing, persistence failure, owner-notify failure) sets it to
+    "APPROVAL_QUEUE_ERROR" — per-branch, not inferred from contract_id alone
+    (PA-01_PLANNING_GATE.md §3.6's own classification lists owner-notify
+    failure under APPROVAL_QUEUE_ERROR explicitly; a contract_id can
+    technically already exist in the ledger by that point but the user was
+    never notified, so it is deliberately not surfaced here — an orphaned,
+    unreachable contract must not be treated as "created" for this turn's
+    purposes).
+
     "action_tool" is the CANONICAL tool_name — after resolve_canonical_tool()
     below, the same name used for the fingerprint, the label, the EventBus
     payload, and the ActionGateway contract itself — on every branch,
     including the early-return ones (canonicalization happens once, before
-    any of them). PA-01_PLANNING_GATE.md's Main Integration Pass finding:
-    the caller must NOT use the pre-canonicalization tool_use block's own
-    name for this purpose — see the call site in the tool loop.
+    any of them). Never the pre-canonicalization tool_use block's own name.
+
+    Exception safety: the caller-facing wrapper below this function's `_impl`
+    catches any exception from ANY of this function's operations (EventBus,
+    fingerprint/dedup lookups, cross-channel dedup, Gateway proposal, owner
+    notification) and normalizes it to this exact same 6-key shape — no
+    branch here, and no exception escaping this function, ever reaches the
+    tool loop as anything other than this dict shape.
+
     PR #188: blocks re-queuing via executed_action_cache (raw chat_id fingerprint).
     Stage A: also dedupes cross-channel via canonical identity.memory_key.
 
@@ -818,6 +873,31 @@ def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
     callback fallthrough (the button would fall through to a legacy dispatch
     of the wrong tool).
     """
+    try:
+        return _queue_approval_detailed_impl(tool_name, tool_inputs, user_chat_id, channel, user_text)
+    except Exception as exc:
+        # Fail-closed, uniform shape (decision 5 in this program's
+        # fail-safe-degraded policy, extended here to _queue_approval_detailed
+        # itself): any unexpected exception from EventBus/dedup/Gateway/owner-
+        # notify is a queue-time failure, never a phantom success, and never
+        # a raw exception reaching the tool loop for it to guess a shape from.
+        logger.error(
+            "[Approval] _queue_approval_detailed unexpected error: tool=%s error_type=%s",
+            tool_name, type(exc).__name__, exc_info=True,
+        )
+        return {
+            "message": "❌ אירעה שגיאה בעת ניסיון להעביר את הפעולה לאישור. הפעולה לא בוצעה.",
+            "contract_id": None, "ok": False, "terminal_outcome": "APPROVAL_QUEUE_ERROR",
+            # Best-effort: the raw (pre-canonicalization) tool name, since the
+            # exception may have occurred before/during resolve_canonical_tool()
+            # itself — never invented, and harmless either way since
+            # created_this_turn=False already keeps this out of row 2.
+            "action_tool": tool_name, "created_this_turn": False,
+        }
+
+
+def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
+                                  user_chat_id: str, channel: str, user_text: str = "") -> dict:
     from core.action_gateway import resolve_canonical_tool
     tool_name = resolve_canonical_tool(tool_name, tool_inputs, user_text)
 
@@ -830,7 +910,7 @@ def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
         return {
             "message": f"⚠️ פעולה זו כבר בוצעה לאחרונה ({tool_name}). כפילות נחסמה.",
             "contract_id": None, "ok": False, "terminal_outcome": "APPROVAL_QUEUE_ERROR",
-            "action_tool": tool_name,
+            "action_tool": tool_name, "created_this_turn": False,
         }
 
     # Stage A: canonical dedup — אותה זהות עסקית מ-channel שני
@@ -849,7 +929,7 @@ def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
         return {
             "message": f"⏳ הפעולה כבר ממתינה לאישור הבעלים{' (מ-' + origin + ')' if origin else ''}.",
             "contract_id": None, "ok": False, "terminal_outcome": "APPROVAL_QUEUE_ERROR",
-            "action_tool": tool_name,
+            "action_tool": tool_name, "created_this_turn": False,
         }
 
     label     = _describe_tool_call(tool_name, tool_inputs)
@@ -880,9 +960,14 @@ def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
             )
             return {
                 "message": _gw_result.user_message or f"⏳ {_gw_result.reason}",
+                # contract_id, if present, points at an EXISTING (pending/
+                # approved/executing) contract found by propose_action()'s own
+                # fingerprint lookup, never one created by THIS call — kept
+                # here for telemetry only; created_this_turn=False is what
+                # actually gates row 2.
                 "contract_id": getattr(_gw_result, "contract_id", None),
                 "ok": False, "terminal_outcome": "APPROVAL_QUEUE_ERROR",
-                "action_tool": tool_name,
+                "action_tool": tool_name, "created_this_turn": False,
             }
     else:
         # shadow mode — log only, do not block
@@ -904,8 +989,15 @@ def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
                 return {
                     "message": _gw_result.user_message or f"❌ {_gw_result.reason}",
                     "contract_id": None, "ok": False, "terminal_outcome": "APPROVAL_QUEUE_ERROR",
-                    "action_tool": tool_name,
+                    "action_tool": tool_name, "created_this_turn": False,
                 }
+            # Shadow mode does not early-return on _gw_result.ok == False for
+            # any other reason (dedup/pending/approved found) — by design, it
+            # never blocks the legacy bus path. Falls through to bus.request_
+            # approval() below regardless. _gw_result.ok is read again at the
+            # success return to compute created_this_turn correctly for this
+            # case (a shadow-mode dedup must not be reported as a fresh
+            # creation just because the legacy path queued anyway).
         except Exception as _gw_exc:
             logger.debug("[ActionGateway] shadow propose failed (non-blocking): %s", _gw_exc)
 
@@ -953,17 +1045,24 @@ def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
                 # Deliberately None even if _gw_result already carries a real
                 # contract_id — see this function's docstring.
                 "contract_id": None, "ok": False, "terminal_outcome": "APPROVAL_QUEUE_ERROR",
-                "action_tool": tool_name,
+                "action_tool": tool_name, "created_this_turn": False,
             }
 
     logger.info(f"[Approval] queued {action_id} | {tool_name} | user={_sanitize_id(user_chat_id)}")
+    # created_this_turn tracks _gw_result.ok specifically, NOT contract_id
+    # truthiness — propose_action() only ever returns ok=True immediately
+    # after saving a brand-new ActionContract; ok=False with a populated
+    # contract_id (dedup/pending/approved found) must never read as "created"
+    # even though shadow mode falls through to this same success return.
+    _created_this_turn = bool(_gw_result and getattr(_gw_result, "ok", False))
     _contract_id = _gw_result.contract_id if _gw_result else None
     return {
         "message": f"⏳ הפעולה ממתינה לאישור: {label}\nשלח *מאשר* כדי לאשר (בכל ערוץ).",
         "contract_id": _contract_id,
-        "ok": bool(_contract_id),
-        "terminal_outcome": None if _contract_id else "APPROVAL_QUEUE_ERROR",
+        "ok": _created_this_turn,
+        "terminal_outcome": None if _created_this_turn else "APPROVAL_QUEUE_ERROR",
         "action_tool": tool_name,
+        "created_this_turn": _created_this_turn,
     }
 
 
@@ -2624,7 +2723,12 @@ def run_agent(
                     # pre-canonicalization tool the model happened to call) —
                     # using tu.name here would make a genuine contract
                     # invisible to PA-01's expected-tool scoping whenever
-                    # canonicalization rewrote the tool. See
+                    # canonicalization rewrote the tool.
+                    # "created_this_turn" (follow-up fix): a non-None
+                    # contract_id alone does NOT prove a contract was created
+                    # THIS turn — ActionGateway.propose_action() also returns
+                    # a real, non-None contract_id for a rejected/duplicate/
+                    # pre-existing contract it merely found. See
                     # docs/architecture/turn-coordinator/PA-01_PLANNING_GATE.md
                     # §4.2a / §8.
                     tool_results_log.append({
@@ -2634,6 +2738,7 @@ def run_agent(
                         "contract_id": _approval_outcome["contract_id"],
                         "terminal_outcome": _approval_outcome["terminal_outcome"],
                         "action_tool": _approval_outcome["action_tool"],
+                        "created_this_turn": _approval_outcome["created_this_turn"],
                     })
                     continue
 
@@ -2789,11 +2894,8 @@ def run_agent(
                         expected_tool_for_intent, contract_capable_this_turn,
                     )
                     _pa01_expected_tool = expected_tool_for_intent(getattr(route, "intent", None))
-                    _pa01_contract_created = any(
-                        r.get("tool") == "__approval_queued__"
-                        and r.get("contract_id")
-                        and r.get("action_tool") == _pa01_expected_tool
-                        for r in tool_results_log
+                    _pa01_contract_created = _pa01_contract_created_for_expected_tool(
+                        tool_results_log, _pa01_expected_tool,
                     )
                     _pa01_outcome = None if _pa01_contract_created else _pa01_structured_terminal_outcome(
                         tool_results_log, _pa01_expected_tool,

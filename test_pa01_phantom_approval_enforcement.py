@@ -414,6 +414,7 @@ _queue_error_msg = "⚠️ פעולה זו כבר בוצעה לאחרונה (air
 with patch.object(app, "_queue_approval_detailed", return_value={
     "message": _queue_error_msg, "contract_id": None, "ok": False,
     "terminal_outcome": "APPROVAL_QUEUE_ERROR", "action_tool": "airtable_add",
+    "created_this_turn": False,
 }):
     reply_qerr, _ = _run_agent(
         "queue_error", "צור לי משימה", role=Role.OWNER, intent=Intent.CREATE_TASK,
@@ -437,7 +438,7 @@ chk("_queue_approval_detailed() APPROVAL_QUEUE_ERROR outcome -> final_reply repl
 _gw_reply_correct = "⏳ הפעולה ממתינה לאישור: הוסף ל-Tasks\nשלח *מאשר* כדי לאשר (בכל ערוץ)."
 with patch.object(app, "_queue_approval_detailed", return_value={
     "message": _gw_reply_correct, "contract_id": "contract-correct-1", "ok": True,
-    "terminal_outcome": None, "action_tool": "airtable_add",
+    "terminal_outcome": None, "action_tool": "airtable_add", "created_this_turn": True,
 }):
     reply_correct, _ = _run_agent(
         "contract_correct", "צור לי משימה", role=Role.OWNER, intent=Intent.CREATE_TASK,
@@ -461,7 +462,7 @@ chk("CREATE_TASK + a real contract for airtable_add (the correct expected tool) 
 _gw_reply_wrong = "⏳ הפעולה ממתינה לאישור: קבע פגישה\nשלח *מאשר* כדי לאשר (בכל ערוץ)."
 with patch.object(app, "_queue_approval_detailed", return_value={
     "message": _gw_reply_wrong, "contract_id": "contract-wrong-tool-1", "ok": True,
-    "terminal_outcome": None, "action_tool": "calendar_create_event",
+    "terminal_outcome": None, "action_tool": "calendar_create_event", "created_this_turn": True,
 }):
     reply_wrong, _ = _run_agent(
         "contract_wrong_tool", "צור לי משימה", role=Role.OWNER, intent=Intent.CREATE_TASK,
@@ -643,6 +644,125 @@ with patch.object(app, "enforce", side_effect=ToolDenied("❌ owner אינו מ�
 chk("a PERMISSION_DENIED for an unrelated tool (gmail_send_draft) does not suppress the "
     "Phantom check for this turn's own CREATE_TASK intent -> Phantom fallback still fires",
     reply_unrelated == PHANTOM)
+
+
+# ══════════════════════════════════════════════════
+# K2. Row-2 predicate: created_this_turn is required, a non-None contract_id
+# alone is NOT sufficient (R1/R2/R3, the three required reproductions).
+# ══════════════════════════════════════════════════
+
+# --- R1: rejected/dedup contract_id — a real contract_id is present, but it
+# points at an EXISTING contract the Gateway found via dedup, not one
+# created this turn. Row 2 must not fire.
+_r1_log = [{
+    "tool": "__approval_queued__", "content": "⏳ כבר יש בקשת אישור פתוחה לפעולה זו.",
+    "ok": False, "contract_id": "existing-contract-999",
+    "terminal_outcome": "APPROVAL_QUEUE_ERROR", "action_tool": "airtable_add",
+    "created_this_turn": False,
+}]
+chk("R1 (unit): contract_id present but created_this_turn=False -> "
+    "_pa01_contract_created_for_expected_tool is False",
+    app._pa01_contract_created_for_expected_tool(_r1_log, "airtable_add") is False)
+
+with patch.object(app, "_queue_approval_detailed", return_value={
+    "message": "⏳ כבר יש בקשת אישור פתוחה לפעולה זו.", "contract_id": "existing-contract-999",
+    "ok": False, "terminal_outcome": "APPROVAL_QUEUE_ERROR", "action_tool": "airtable_add",
+    "created_this_turn": False,
+}):
+    reply_r1, _ = _run_agent(
+        "r1_rejected_dedup", "צור לי משימה", role=Role.OWNER, intent=Intent.CREATE_TASK,
+        allowed_tool_names=("airtable_add",),
+        anthropic_responses=[
+            _tool_use_response([{"name": "airtable_add",
+                                  "input": {"table": "Tasks", "fields": {"Task": "R1"}}}]),
+            _text_response("איזה כיף, זה כבר בטיפול"),
+        ],
+        pa01_state="enforce",
+    )
+chk("R1 (integration): a rejected/dedup contract_id does NOT satisfy row 2 -> "
+    "final_reply is replaced with the real terminal_outcome message (row 3), not left as "
+    "a raw agent reply and not the generic Phantom fallback",
+    reply_r1 == "⏳ כבר יש בקשת אישור פתוחה לפעולה זו.")
+
+# --- R2: shadow proposal failure — no ActionContract was ever created.
+# Exercise the REAL _queue_approval_detailed() (not mocked) with
+# FEATURE_ACTION_GATEWAY off (shadow mode) and ActionGateway.propose_action()
+# itself failing (persistence_failed).
+from core.action_gateway import GatewayResult  # noqa: E402
+
+with patch("feature_flags.is_enabled", return_value=False), \
+     patch.object(_canon_gw, "propose_action", return_value=GatewayResult(
+         ok=False, reason="לא ניתן לשמור את בקשת הפעולה באופן עמיד.",
+         user_message="❌ לא ניתן לשמור כרגע את בקשת האישור. הפעולה לא הועברה לאישור ולא תבוצע.",
+         failure_code="persistence_failed",
+     )):
+    _r2_result = app._queue_approval_detailed(
+        "airtable_add", {"table": "Tasks", "fields": {"Task": "R2"}},
+        "r2_shadow_fail", "telegram", "צור לי משימה",
+    )
+chk("R2 (unit): shadow proposal failure -> ok=False, contract_id=None, "
+    "terminal_outcome=APPROVAL_QUEUE_ERROR, created_this_turn=False",
+    _r2_result["ok"] is False and _r2_result["contract_id"] is None
+    and _r2_result["terminal_outcome"] == "APPROVAL_QUEUE_ERROR"
+    and _r2_result["created_this_turn"] is False)
+
+with patch.object(app, "_queue_approval_detailed", return_value=_r2_result):
+    reply_r2, _ = _run_agent(
+        "r2_integration", "צור לי משימה", role=Role.OWNER, intent=Intent.CREATE_TASK,
+        allowed_tool_names=("airtable_add",),
+        anthropic_responses=[
+            _tool_use_response([{"name": "airtable_add",
+                                  "input": {"table": "Tasks", "fields": {"Task": "R2b"}}}]),
+            _text_response("מעולה, זה ממתין לאישור"),
+        ],
+        pa01_state="enforce",
+    )
+chk("R2 (integration): shadow proposal failure -> no Gateway-success prompt (row 2 does not "
+    "fire), final_reply is the deterministic persistence-failure message, never the raw "
+    "agent reply",
+    reply_r2 == _r2_result["message"] and reply_r2 != "מעולה, זה ממתין לאישור")
+
+# --- R3: the expected tool is the SECOND tool_results_log entry, not the
+# first. The scan must not stop at (or be determined by) entry #1.
+_r3_log = [
+    {"tool": "gmail_send_draft", "content": "❌ owner אינו מורשה", "ok": False,
+     "terminal_outcome": "PERMISSION_DENIED"},
+    {"tool": "__approval_queued__", "content": "⏳ ההוספה ממתינה לאישור",
+     "ok": True, "contract_id": "contract-r3-1", "terminal_outcome": None,
+     "action_tool": "airtable_add", "created_this_turn": True},
+]
+chk("R3 (unit): the first entry (unrelated tool) does not determine the outcome for this intent",
+    app._pa01_contract_created_for_expected_tool(_r3_log[:1], "airtable_add") is False)
+chk("R3 (unit): the scan is not stopped by the first entry -> the SECOND (matching) entry "
+    "is found and satisfies row 2",
+    app._pa01_contract_created_for_expected_tool(_r3_log, "airtable_add") is True)
+
+# R3 (integration): a real turn where tool_use #1 is denied (unrelated tool,
+# does not consume the "first mutating approval this turn" slot) and tool_use
+# #2 is the expected tool, genuinely queued as the turn's one live contract.
+with patch.object(app, "enforce", side_effect=lambda name, ident: (
+    (_ for _ in ()).throw(ToolDenied("❌ owner אינו מורשה להפעיל 'gmail_send_draft'"))
+    if name == "gmail_send_draft" else tool_registry.enforce(name, ident)
+)):
+    reply_r3, _ = _run_agent(
+        "r3_batch_second", "תכין טיוטת מייל וגם צור לי משימה", role=Role.OWNER,
+        intent=Intent.CREATE_TASK, allowed_tool_names=("airtable_add", "gmail_send_draft"),
+        anthropic_responses=[
+            _tool_use_response([
+                {"name": "gmail_send_draft", "input": {"to": "x@y.com", "body": "..."}},
+                {"name": "airtable_add", "input": {"table": "Tasks", "fields": {"Task": "R3"}}},
+            ]),
+            _text_response("סיימתי, שלח מאשר להוספה"),
+        ],
+        pa01_state="enforce",
+    )
+_r3_contracts = _canon_gw.find_live_contracts("boss_hq:r3_batch_second")
+chk("R3 (integration): a real contract for the expected tool (airtable_add) was created "
+    "even though it was the SECOND tool call this turn",
+    len(_r3_contracts) == 1 and _r3_contracts[0].tool_name == "airtable_add")
+chk("R3 (integration): row 2 fires from the matching second entry -> final_reply untouched "
+    "by PA-01, despite the unrelated first entry being a PERMISSION_DENIED",
+    reply_r3 == "סיימתי, שלח מאשר להוספה")
 
 
 # ══════════════════════════════════════════════════

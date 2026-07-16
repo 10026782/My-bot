@@ -1283,8 +1283,38 @@ step against the sentinel's construction site. Restated per instruction 4: the s
 was actually used to create the `ActionContract`, read directly from `_queue_approval_detailed()`'s own
 return value.
 
-**No deviation from any of decisions 1-13** (the approved implementation instructions), nor from the Main
-Integration Pass instructions — every deviation recorded in this §8 is a plumbing-level correction to how
-the sketch/first pass accessed or propagated already-correct state, not a change to the predicate, the
-policy source, the sentinel's required *keys* (only which value one of them carries), the matrix, or the
-approved wording.
+**Follow-up finding: `contract_id` presence ≠ creation this turn.** The Main Integration Pass's own
+review found a second, related gap in the same area: `ActionGateway.propose_action()` returns a real,
+non-`None` `contract_id` not only on genuine creation (`GatewayResult(ok=True, ...)`, always immediately
+after saving a brand-new `ActionContract`) but also on several *rejection/dedup* paths — an existing
+`"pending"` contract for the same fingerprint, an existing `"approved"`/`"executing"`/`"outcome_unknown"`
+one — all returned as `GatewayResult(ok=False, contract_id=existing.contract_id, ...)`. Row 2's original
+condition (`contract_id` truthy + `action_tool` match) did not check `ok`/`terminal_outcome` at all, so a
+rejected/duplicate lookup's `contract_id` could satisfy row 2 exactly like a genuine creation — silently
+leaving whatever the agent said unreplaced instead of correctly firing row 3 with the accurate rejection
+message. **Fix:** `_queue_approval_detailed()`'s return dict gained a sixth key, `"created_this_turn"`,
+set per-branch (`True` only on the final success return, and there specifically from
+`bool(_gw_result and _gw_result.ok)` — never from `contract_id` truthiness, since shadow mode's own
+success-shaped return can also carry a pre-existing `contract_id` when the underlying proposal was itself
+a dedup that shadow mode doesn't block on). Row 2's predicate is now: `tool == "__approval_queued__" and
+ok is True and terminal_outcome is None and created_this_turn is True and contract_id and
+action_tool == expected_tool` — all five required, extracted into its own function,
+`_pa01_contract_created_for_expected_tool()`, mirroring `_pa01_structured_terminal_outcome()`'s existing
+pattern (both now full-log scans, never first-entry-only, verified explicitly against a batch turn where
+the expected tool's sentinel is the second `tool_results_log` entry). Every other branch (duplicate
+fingerprint, cross-channel duplicate, Gateway rejection/dedup, persistence failure, owner-notify failure)
+already set `ok=False`/`terminal_outcome="APPROVAL_QUEUE_ERROR"`, so `created_this_turn=False` on those
+branches is consistent with, not a change to, their existing classification — only the previously-missing
+row-2 gate condition was added. **Exception normalization, added at the same time:** `_queue_approval_
+detailed()` is now a thin wrapper around a renamed `_queue_approval_detailed_impl()`, catching any
+exception from EventBus/dedup/Gateway/owner-notification operations and returning the same uniform
+6-key, fail-closed shape (`ok=False`, `contract_id=None`, `terminal_outcome="APPROVAL_QUEUE_ERROR"`,
+`created_this_turn=False`) — no branch, expected or exceptional, can leave the tool loop to guess a shape
+from a raw exception.
+
+**No deviation from any of decisions 1-13** (the approved implementation instructions), nor from either
+the Main Integration Pass instructions or this follow-up correction's own instructions — every deviation
+recorded in this §8 is a plumbing-level correction to how the sketch/earlier passes accessed or
+propagated already-correct state, not a change to the predicate's *shape* (still the same 5-row matrix),
+the policy source, the sentinel's required *keys* (this round adds one — `created_this_turn` — but does
+not remove or repurpose any existing one), the matrix's rows, or the approved wording.
