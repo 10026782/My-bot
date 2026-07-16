@@ -136,6 +136,17 @@ C94 (Unified Ingress Envelope + Evidence Trace):
                                  מדלג לגמרי על בניית ה-envelope (capture_ic=None כמו תמיד), classify_
                                  ingress()/הרואטר עצמם לא מושפעים כלל.
 
+BUG-104 (Core Reasoning Activation Program — Phase 1: Leads Read-Only
+Reasoning Projection — see core/leads_reasoning_projection.py):
+  FEATURE_CORE_REASONING_LEADS_STATE - שלוש מצבים (לא boolean רגיל):
+                                 "off" (ברירת מחדל — אין reasoning, אין קריאת Lead
+                                 Events נוספת, אין שדה "reasoning" ב-GET /api/leads/<id>,
+                                 response נשאר byte-compatible) / "shadow" (reasoning
+                                 מחושב, נבדק ומלוגג — אך ה-response לא משתנה, אין
+                                 persistence) / "on" (projection "reasoning" מוחזר ב-API,
+                                 אין persistence). ערך לא-מוכר → "off" (fail closed).
+                                 קריאה דרך get_core_reasoning_leads_state(), לא is_enabled().
+
 FUTURE (לא פעיל):
   AUDIENCE_INTELLIGENCE       - ניתוח קהל יעד (Future)
   INTERACTION_INTELLIGENCE    - ניתוח דפוסי שיחה (Future)
@@ -272,6 +283,30 @@ def get_pa01_enforcement_state() -> str:
     """
     value = os.environ.get("FEATURE_PA01_ENFORCEMENT_STATE", "off").strip().lower()
     return value if value in _PA01_STATES else "off"
+
+
+_CORE_REASONING_LEADS_STATES = frozenset({"off", "shadow", "on"})
+
+
+def get_core_reasoning_leads_state() -> str:
+    """
+    Three-state accessor for FEATURE_CORE_REASONING_LEADS_STATE (BUG-104 —
+    Core Reasoning Activation Program, Phase 1: Leads Read-Only Reasoning
+    Projection). Independent of FEATURE_DECISION_HUB and every other flag.
+
+      off    — no reasoning, no extra Lead Events read, no "reasoning" field
+               on GET /api/leads/<id>; the response stays byte-compatible.
+      shadow — reasoning is computed, verified and logged, but the API
+               response is unchanged and nothing is persisted.
+      on     — the "reasoning" projection is returned in the API response;
+               nothing is persisted.
+
+    Returns "off" for any unset/unrecognized value — fail closed to old
+    behavior. Read via this accessor, NOT via is_enabled() (this flag is
+    not a boolean). See core/leads_reasoning_projection.py.
+    """
+    value = os.environ.get("FEATURE_CORE_REASONING_LEADS_STATE", "off").strip().lower()
+    return value if value in _CORE_REASONING_LEADS_STATES else "off"
 
 
 def set_flag(name: str, value: bool) -> None:
