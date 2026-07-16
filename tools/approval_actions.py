@@ -379,6 +379,13 @@ def tma_write(
                 evidence={"record_id": result_record_id, "table": table},
                 user_message=f"❌ עדכון רשומה נכשל ב-{table}",
             )
+        # BUG-104 TMA Lead Event Bridge — only for approved Leads patches
+        # (covers update_lead_status + Manager-approved patch_lead/
+        # set_lead_outcome). Never for Tasks/ProjectsHub/Contacts. Best-effort:
+        # a failure here must not affect the already-successful patch above.
+        if table == "Leads":
+            from core.lead_event_writer import write_tma_lead_event
+            write_tma_lead_event(result_record_id, audit_action or action, cleaned_fields)
     else:
         return _tool_result(
             ok=False, tool="tma_write",

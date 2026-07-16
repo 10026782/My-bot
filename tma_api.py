@@ -1702,6 +1702,8 @@ def patch_lead(lead_id, identity):
         if not ok:
             return jsonify({"error": "update failed"}), 500
         _audit("lead_patch", identity, details=f"{lead_id}: {list(fields.keys())}")
+        from core.lead_event_writer import write_tma_lead_event
+        write_tma_lead_event(lead_id, "lead_patch", fields)
         return jsonify({"ok": True, "lead_id": lead_id, "updated": list(fields.keys())})
 
     _, response, status = _queue_tma_write_approval(
@@ -1748,6 +1750,8 @@ def set_lead_outcome(lead_id, identity):
         if not ok:
             return jsonify({"error": "update failed"}), 500
         _audit("lead_outcome", identity, details=f"{lead_id}: {outcome_key}")
+        from core.lead_event_writer import write_tma_lead_event
+        write_tma_lead_event(lead_id, "lead_outcome", fields)
         return jsonify({"ok": True, "lead_id": lead_id, "outcome": outcome_key})
 
     _, response, status = _queue_tma_write_approval(
