@@ -28,6 +28,7 @@ from airtable_schema import (
     RoadmapTaskFields, RoadmapTaskStatus, DailyCheckinFields,
     VentureFields, VentureStage,
     LeadStatus, LeadOutcome,
+    LeadEventFields,
 )
 from tools.airtable_gateway import airtable_patch as _gw_patch, airtable_create as _gw_create
 from health_monitor import get_health_status
@@ -1406,6 +1407,69 @@ def get_leads(identity):
     })
 
 
+# ══════════════════════════════════════════════════════════════════
+# BUG-104 — Core Reasoning Activation Program · Phase 1
+# Leads Read-Only Reasoning Projection (GET /api/leads/<id> only)
+# ══════════════════════════════════════════════════════════════════
+
+def _read_lead_events_once(lead_id: str):
+    """
+    Read the Lead Events for one lead — AT MOST ONE Airtable call (shadow/on).
+    Returns a list of event records, or None (EVENTS_UNAVAILABLE) if the read
+    itself failed, so the projection can report an honest 'unavailable' state
+    rather than pretending there are zero events.
+
+    NOTE (activation is out of Phase-1 scope): the {Lead} link renders as the
+    linked record's primary-field value in filterByFormula, so this ID match is
+    best-effort against the current schema. A future activation PR must verify
+    the filter against the live Lead Events table before turning the flag on.
+    """
+    safe_id, err = _safe_formula_param(lead_id, "lead_id")
+    if err or not safe_id:
+        return None
+    formula = f"FIND('{safe_id}',ARRAYJOIN({{{LeadEventFields.LEAD_LINK}}}))"
+    try:
+        return _at_list(Tables.LEAD_EVENTS, formula, max_records=50, strict=True)
+    except AirtableError as e:
+        logger.warning("[BUG-104] lead events read failed for %s: %s", lead_id, e)
+        return None   # EVENTS_UNAVAILABLE
+
+
+def _apply_leads_reasoning_projection(payload: dict, rec: dict) -> None:
+    """
+    Attach (or, in shadow, only compute+log) the read-only reasoning projection
+    according to FEATURE_CORE_REASONING_LEADS_STATE. Never mutates the lead,
+    never persists, and never fails the GET because of a reasoning error.
+    Mutates ``payload`` in place only in the 'on' state.
+    """
+    import feature_flags as _ff  # noqa: PLC0415
+    state = _ff.get_core_reasoning_leads_state()
+    if state == "off":
+        return   # no extra read, no reasoning, response stays byte-compatible
+
+    from core.leads_reasoning_projection import (  # noqa: PLC0415
+        build_reasoning_projection, degraded_projection,
+    )
+
+    as_of  = datetime.now(timezone.utc)   # single request-scoped reference time
+    lead_id = rec.get("id", "")
+    try:
+        events = _read_lead_events_once(lead_id)   # ≤1 Lead Events read
+        projection = build_reasoning_projection(rec, events, as_of)
+    except Exception as e:
+        # 'on' must not fail the endpoint — return an honest degraded projection.
+        logger.warning("[BUG-104] reasoning projection failed for %s: %s", lead_id, e)
+        projection = degraded_projection(as_of, f"projection_error: {e}")
+
+    if state == "shadow":
+        # Computed + verified + logged, but the API response is unchanged.
+        logger.info("[BUG-104][shadow] lead=%s reasoning=%s", lead_id, projection)
+        return
+
+    # state == "on"
+    payload["reasoning"] = projection
+
+
 @tma_api.route("/api/leads/<lead_id>", methods=["GET"])
 @require_tma_auth
 def get_lead(lead_id, identity):
@@ -1451,7 +1515,7 @@ def get_lead(lead_id, identity):
     score       = int(f.get(LeadFields.SCORE, 0) or 0)
     score_color = "red" if score >= 70 else ("yellow" if score >= 40 else "blue")
 
-    return jsonify({
+    payload = {
         "id":            rec["id"],
         "name":          f.get(LeadFields.NAME, ""),
         "phone":         f.get(LeadFields.PHONE, ""),
@@ -1468,7 +1532,15 @@ def get_lead(lead_id, identity):
         "outcome":       f.get(LeadFields.OUTCOME, ""),
         "next_followup": f.get(LeadFields.NEXT_FOLLOWUP, ""),
         "owner":         f.get(LeadFields.OWNER, ""),
-    })
+    }
+
+    # BUG-104 — Core Reasoning Activation Program, Phase 1 (read-only).
+    # off:    no extra Lead-Events read, no reasoning, response byte-compatible.
+    # shadow: reasoning computed + logged, response unchanged, no persistence.
+    # on:     "reasoning" projection attached to the response, no persistence.
+    _apply_leads_reasoning_projection(payload, rec)
+
+    return jsonify(payload)
 
 
 @tma_api.route("/api/leads/<lead_id>/status", methods=["PATCH"])
