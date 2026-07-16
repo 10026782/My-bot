@@ -995,6 +995,152 @@ chk("P1-C / R4b: return contract is truthful -- contract_id=None, ok=False, "
 
 
 # ══════════════════════════════════════════════════
+# P2. Codex re-audit of commit 8e05d67 (verdict: FIX_REQUIRED) — the P1
+# fix's own cleanup was still not verified in every failure mode:
+#   P1(4-finding-1) — propose_action() raising AFTER persist left _gw_result
+#                      None, so the old cleanup (keyed off _gw_result) could
+#                      not find anything to revoke.
+#   P1(4-finding-2) — revocation was "best-effort" and never checked
+#                      reject()'s own outcome; a durable-transition failure
+#                      there leaves the contract "pending" while the old
+#                      code still returned contract_id=None.
+#   P1(4-finding-3) — the same best-effort gap for EventBus pending.cancel().
+#   P1(4-finding-4) — the outer wrapper's action_tool fell back to the RAW
+#                      (pre-canonicalization) tool name on any exception,
+#                      contradicting the documented "always canonical" field
+#                      contract.
+# ══════════════════════════════════════════════════
+
+from event_bus import executed_action_cache as _real_eac  # noqa: E402
+from core.action_contract_repository import ActionContractTransitionError  # noqa: E402
+import core.action_gateway as _action_gateway_module  # noqa: E402
+
+# --- P2-1: propose_action() raises AFTER ExecutionLedger.save() has already
+# durably persisted the contract, but BEFORE returning a GatewayResult.
+# _gw_result therefore stays None inside _impl -- the old fix (keyed off
+# _gw_result.contract_id) had nothing to revoke. The fingerprint-based
+# rediscovery in the outer wrapper must find and revoke it regardless.
+def _raise_after_persist(msg, *args, **kwargs):
+    if isinstance(msg, str) and msg.startswith("[ActionGateway] propose_action:"):
+        raise RuntimeError("simulated crash after ExecutionLedger.save()")
+    return None
+
+
+with patch("feature_flags.is_enabled", return_value=False), \
+     patch.object(_action_gateway_module.logger, "info", side_effect=_raise_after_persist):
+    _p2_1_result = app._queue_approval_detailed(
+        "airtable_add", {"table": "Tasks", "fields": {"Task": "P2-1-shadow"}},
+        "p2_1_shadow_after_persist", "telegram", "צור לי משימה",
+    )
+chk("P2-1 (shadow mode): a contract WAS durably saved before the simulated crash, "
+    "then revoked by the fingerprint-based rediscovery -- no live contract remains",
+    len(_canon_gw.find_live_contracts("boss_hq:p2_1_shadow_after_persist")) == 0)
+chk("P2-1 (shadow mode): return is truthful -- contract_id=None, ok=False, "
+    "terminal_outcome=APPROVAL_QUEUE_ERROR, created_this_turn=False, action_tool canonical",
+    _p2_1_result["contract_id"] is None and _p2_1_result["ok"] is False
+    and _p2_1_result["terminal_outcome"] == "APPROVAL_QUEUE_ERROR"
+    and _p2_1_result["created_this_turn"] is False
+    and _p2_1_result["action_tool"] == "airtable_add")
+
+with patch("feature_flags.is_enabled", return_value=True), \
+     patch.object(_action_gateway_module.logger, "info", side_effect=_raise_after_persist):
+    _p2_1_enforce_result = app._queue_approval_detailed(
+        "airtable_add", {"table": "Tasks", "fields": {"Task": "P2-1-enforce"}},
+        "p2_1_enforce_after_persist", "telegram", "צור לי משימה",
+    )
+chk("P2-1 (Gateway enforce mode): same crash-after-persist shape -- also revoked, "
+    "no live contract remains (enforce mode's propose_action() call was previously "
+    "not wrapped in try/except at all; now covered by the outer wrapper's fingerprint "
+    "rediscovery, which is agnostic to which branch called propose_action())",
+    len(_canon_gw.find_live_contracts("boss_hq:p2_1_enforce_after_persist")) == 0)
+chk("P2-1 (Gateway enforce mode): return is truthful",
+    _p2_1_enforce_result["contract_id"] is None and _p2_1_enforce_result["ok"] is False
+    and _p2_1_enforce_result["terminal_outcome"] == "APPROVAL_QUEUE_ERROR"
+    and _p2_1_enforce_result["created_this_turn"] is False)
+
+
+# --- P2-2: ActionGateway.reject()'s own durable transition fails (returns a
+# failure STRING, does not raise) -- the contract remains "pending". The old
+# fix treated reject() not raising as proof of success; the fix must verify
+# via a fresh find_live_contracts() query instead.
+with patch("feature_flags.is_enabled", return_value=False), \
+     patch.object(_real_bus, "request_approval", side_effect=RuntimeError("eventbus down")), \
+     patch.object(_canon_gw._ledger, "update_status",
+                   side_effect=ActionContractTransitionError("simulated durable transition failure")):
+    _p2_2_result = app._queue_approval_detailed(
+        "airtable_add", {"table": "Tasks", "fields": {"Task": "P2-2"}},
+        "p2_2_durable_reject_fail", "telegram", "צור לי משימה",
+    )
+_p2_2_live = _canon_gw.find_live_contracts("boss_hq:p2_2_durable_reject_fail")
+chk("P2-2: reject()'s durable transition failed -- the contract is HONESTLY still "
+    "live (this is the correct, verified state -- not silently claimed clean)",
+    len(_p2_2_live) == 1)
+chk("P2-2: the return does NOT falsely claim contract_id=None -- it carries the REAL "
+    "(still-live) contract_id and a DISTINCT terminal_outcome (APPROVAL_QUEUE_ORPHANED), "
+    "never the generic APPROVAL_QUEUE_ERROR shape other (genuinely clean) branches use",
+    _p2_2_result["contract_id"] == _p2_2_live[0].contract_id
+    and _p2_2_result["terminal_outcome"] == "APPROVAL_QUEUE_ORPHANED"
+    and _p2_2_result["ok"] is False and _p2_2_result["created_this_turn"] is False)
+
+
+# --- P2-3: PendingActionsStore.cancel() itself raises (not just a silent
+# failure) after the contract WAS successfully revoked. The EventBus pending
+# item must be honestly reported as still-live, not silently assumed gone.
+_old_owner_env_p23 = os.environ.get("OWNER_TELEGRAM_ID")
+os.environ["OWNER_TELEGRAM_ID"] = "999999"
+_mock_bot_p23 = MagicMock()
+_mock_bot_p23.send_message.side_effect = RuntimeError("telegram down")
+try:
+    with patch("feature_flags.is_enabled", return_value=False), \
+         patch.object(app, "bot", _mock_bot_p23), \
+         patch.object(_real_pending, "cancel", side_effect=RuntimeError("eventbus cancel broken")):
+        _p2_3_result = app._queue_approval_detailed(
+            "airtable_add", {"table": "Tasks", "fields": {"Task": "P2-3"}},
+            "p2_3_pending_cancel_fail", "telegram", "צור לי משימה",
+        )
+finally:
+    if _old_owner_env_p23 is None:
+        os.environ.pop("OWNER_TELEGRAM_ID", None)
+    else:
+        os.environ["OWNER_TELEGRAM_ID"] = _old_owner_env_p23
+chk("P2-3: the contract itself WAS successfully revoked (verified) despite the "
+    "EventBus cancel() failure -- the two cleanups are independent",
+    len(_canon_gw.find_live_contracts("boss_hq:p2_3_pending_cancel_fail")) == 0)
+chk("P2-3: cancel() raising is not silently swallowed -- the return signals the "
+    "unverified EventBus state via APPROVAL_QUEUE_ORPHANED, not the generic "
+    "APPROVAL_QUEUE_ERROR shape that would imply everything is confirmed clean",
+    _p2_3_result["terminal_outcome"] == "APPROVAL_QUEUE_ORPHANED"
+    and _p2_3_result["ok"] is False and _p2_3_result["created_this_turn"] is False)
+
+
+# --- P2-4: action_tool must stay canonical even when the exception happens
+# BEFORE propose_action() is ever reached (no contract could possibly exist
+# yet) -- this is a pure "outer wrapper's own return value" bug, independent
+# of P2-1/2/3's contract-cleanup concerns.
+with patch.object(_real_eac, "compute", side_effect=RuntimeError("cache compute broken")):
+    _p2_4_result = app._queue_approval_detailed(
+        "sheets_append", {"table": "Tasks", "fields": {"Task": "P2-4"}},
+        "p2_4_canonical_action_tool", "telegram", "צור לי משימה",
+    )
+chk("P2-4: action_tool is CANONICAL (airtable_add, not the raw sheets_append) even "
+    "though the crash happened before _impl's own canonicalized local variable could "
+    "ever be read by the outer wrapper's exception handler",
+    _p2_4_result["action_tool"] == "airtable_add")
+chk("P2-4: no contract exists either way (the crash predates propose_action() entirely)",
+    len(_canon_gw.find_live_contracts("boss_hq:p2_4_canonical_action_tool")) == 0)
+
+with patch("core.action_gateway.resolve_canonical_tool", side_effect=RuntimeError("canonicalization itself broke")):
+    _p2_4b_result = app._queue_approval_detailed(
+        "sheets_append", {"table": "Tasks", "fields": {"Task": "P2-4b"}},
+        "p2_4b_canonicalization_itself_fails", "telegram", "צור לי משימה",
+    )
+chk("P2-4b: when canonicalization ITSELF is what fails (the one case where 'canonical' "
+    "is genuinely unknowable), falls back to the raw pre-canonicalization name rather "
+    "than raising or inventing a value",
+    _p2_4b_result["action_tool"] == "sheets_append")
+
+
+# ══════════════════════════════════════════════════
 # L. Pending approval from a PRIOR turn — unaffected, PA-01 never reached
 # ══════════════════════════════════════════════════
 

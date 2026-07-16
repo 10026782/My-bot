@@ -801,40 +801,119 @@ def _write_execution_receipt(
     )
 
 
-def _revoke_orphaned_gateway_contract(_gw_result, reason: str) -> None:
+def _find_live_contract_by_fingerprint(
+    tenant_id: str, canonical_user_id: str, tool_name: str, tool_inputs: dict,
+):
     """
-    P1-C re-audit: if ActionGateway.propose_action() already durably saved a
-    brand-new "pending" ActionContract (ok=True, contract_id set) but a LATER
-    step in the same _queue_approval_detailed_impl() call — publishing to the
-    legacy EventBus, or notifying the owner — then fails, the contract must
-    not be left live+approvable while the function's own return value claims
-    no contract exists (contract_id=None). That combination is exactly the
-    orphan-contract state the re-audit forbids: a canonical, real,
-    button-approvable ActionContract that PA-01 (and the user) have no way to
-    know about.
+    Codex re-audit of 8e05d67, P1: recomputes the exact business fingerprint
+    ActionGateway.propose_action() would have used and searches
+    find_live_contracts() for a match — used when propose_action() itself
+    raised a real exception, so no GatewayResult (and therefore no
+    contract_id) was ever produced, even though a contract may already have
+    been durably saved before the exception was raised. propose_action()
+    itself always checks find_by_fingerprint() first and returns EARLY —
+    without saving — whenever a contract for this exact fingerprint already
+    exists, so any live contract found here can only be the one this same
+    call just created (or a legitimate pre-existing concurrent duplicate —
+    an accepted race elsewhere in this system, not one this lookup
+    introduces). Returns the ActionContract or None.
+    """
+    from core.action_gateway import action_gateway as _gw_find
+    normalized = _gw_find.normalize_payload(tool_inputs)
+    fingerprint = _gw_find.compute_business_fingerprint(
+        tenant_id, canonical_user_id, tool_name, normalized,
+    )
+    return next(
+        (c for c in _gw_find.find_live_contracts(canonical_user_id)
+         if c.business_action_fingerprint == fingerprint),
+        None,
+    )
 
-    Strategy: revoke (reject) the contract via the same durable lifecycle
-    transition already used for a user's own cancellation, so
-    find_live_contracts() stops returning it and it can never be approved.
-    Best-effort — a failure to revoke is logged, never raised, since the
-    caller already returns a structured failure regardless of whether this
-    succeeds (the user is never told the action is pending either way).
+
+def _revoke_and_verify_contract(canonical_user_id: str, contract_id: str, reason: str) -> bool:
     """
-    contract_id = getattr(_gw_result, "contract_id", None) if _gw_result else None
-    if not (_gw_result and getattr(_gw_result, "ok", False) and contract_id):
-        return
+    Codex re-audit of 8e05d67, P2: revokes a contract and returns whether its
+    absence from find_live_contracts() was actually VERIFIED afterward —
+    never just whether action_gateway.reject() was called without raising.
+    reject() returns a human-facing message STRING, not a boolean, and a
+    durable-transition failure there leaves the contract status "pending"
+    (core/action_gateway.py's own reject() body) — a successful call is not
+    evidence of a successful transition. True only when re-confirmed gone.
+    """
     try:
         from core.action_gateway import action_gateway as _gw_revoke
-        _revoke_outcome = _gw_revoke.reject(contract_id, rejected_by=f"system:{reason}")
-        logger.warning(
-            "[Approval] revoked orphaned contract=%s reason=%s outcome=%.80s",
-            contract_id, reason, _revoke_outcome,
+        _gw_revoke.reject(contract_id, rejected_by=f"system:{reason}")
+        still_live = any(
+            c.contract_id == contract_id
+            for c in _gw_revoke.find_live_contracts(canonical_user_id)
         )
-    except Exception as _revoke_exc:
+    except Exception as exc:
         logger.error(
-            "[Approval] failed to revoke orphaned contract=%s reason=%s error=%s",
-            contract_id, reason, _revoke_exc, exc_info=True,
+            "[Approval] revoke-and-verify itself failed for contract=%s reason=%s error=%s",
+            contract_id, reason, exc, exc_info=True,
         )
+        return False
+    if still_live:
+        logger.error(
+            "[Approval] contract=%s reason=%s STILL LIVE after revoke attempt -- "
+            "durable transition did not take effect", contract_id, reason,
+        )
+        return False
+    logger.warning("[Approval] revoked orphaned contract=%s reason=%s", contract_id, reason)
+    return True
+
+
+def _cancel_and_verify_pending(action_id: str, reason: str) -> bool:
+    """
+    Codex re-audit of 8e05d67, P3: mirrors _revoke_and_verify_contract() for
+    the legacy EventBus pending-item store — PendingActionsStore.cancel()
+    completing without raising is not itself proof the item is gone; re-
+    checked via pending.get() (which independently re-validates TTL/
+    existence) before this function reports success.
+    """
+    try:
+        from event_bus import pending as _pending_cancel
+        _pending_cancel.cancel(action_id)
+        still_live = _pending_cancel.get(action_id) is not None
+    except Exception as exc:
+        logger.error(
+            "[Approval] cancel-and-verify itself failed for action_id=%s reason=%s error=%s",
+            action_id, reason, exc, exc_info=True,
+        )
+        return False
+    if still_live:
+        logger.error(
+            "[Approval] EventBus pending item=%s reason=%s STILL LIVE after cancel attempt",
+            action_id, reason,
+        )
+        return False
+    logger.warning("[Approval] cancelled orphaned EventBus pending item=%s reason=%s", action_id, reason)
+    return True
+
+
+def _orphan_cleanup_failure_response(tool_name: str, contract_id: str | None) -> dict:
+    """
+    Codex re-audit of 8e05d67: the distinct, honest terminal state for when
+    revoke/cancel could NOT be verified to have taken effect.
+    contract_id here is the REAL (possibly still-live) id — deliberately
+    never None — so this return can never be confused with the "verified
+    clean" APPROVAL_QUEUE_ERROR shape every other failure branch uses,
+    which promises contract_id=None only when that has actually been
+    confirmed. "created_this_turn" stays False regardless: even if a
+    contract does turn out to still be live, it was never properly notified
+    to the owner, so it must not be treated as usable evidence for row 2.
+    """
+    return {
+        "message": (
+            "❌ אירעה שגיאה בעת ניסיון לבטל בקשת אישור לאחר כשל. "
+            "ייתכן שנותרה בקשה תקועה במערכת — יש לבדוק ידנית מול מנהל המערכת."
+        ),
+        "contract_id": contract_id,
+        "ok": False,
+        "terminal_outcome": "APPROVAL_QUEUE_ORPHANED",
+        "action_tool": tool_name,
+        "created_this_turn": False,
+    }
 
 
 def _queue_approval(tool_name: str, tool_inputs: dict,
@@ -929,14 +1008,59 @@ def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
             "[Approval] _queue_approval_detailed unexpected error: tool=%s error_type=%s",
             tool_name, type(exc).__name__, exc_info=True,
         )
+        # Codex re-audit of 8e05d67, P2 (action_tool must stay canonical in
+        # EVERY branch, including this outermost catch-all): _impl's own
+        # canonicalized local `tool_name` variable is lost when its frame
+        # unwinds on an exception — this handler only ever sees ITS OWN
+        # parameter, the raw pre-canonicalization name. resolve_canonical_
+        # tool() is pure/idempotent, so recomputing it here (once) is safe
+        # and correct even when the exception happened deep inside _impl,
+        # after it had already canonicalized internally. Falls back to the
+        # raw name only if canonicalization itself is what raised — the one
+        # case where "canonical" is genuinely unknowable.
+        try:
+            from core.action_gateway import resolve_canonical_tool as _resolve_for_cleanup
+            _canonical_tool_name = _resolve_for_cleanup(tool_name, tool_inputs, user_text)
+        except Exception:
+            _canonical_tool_name = tool_name
+
+        # P1 (contract persisted but no GatewayResult was ever produced):
+        # propose_action() can raise AFTER durably saving a contract but
+        # BEFORE returning — _impl has no contract_id to hand this handler
+        # in that case. Independently relocate any live contract for this
+        # exact identity/tool/fingerprint and, if found, revoke it —
+        # verified via a fresh find_live_contracts() query, never assumed
+        # from reject() merely not raising (P2). If a live contract cannot
+        # be confirmed gone, this returns the REAL contract_id with a
+        # distinct terminal_outcome rather than falsely claiming
+        # contract_id=None (the exact inconsistency this re-audit found).
+        try:
+            identity = resolve_identity(channel, user_chat_id)
+            tenant_id = getattr(identity, "tenant_id", "boss_hq")
+            orphan = _find_live_contract_by_fingerprint(
+                tenant_id, identity.memory_key, _canonical_tool_name, tool_inputs,
+            )
+            if orphan is not None:
+                if not _revoke_and_verify_contract(
+                    identity.memory_key, orphan.contract_id, "queue_detailed_exception",
+                ):
+                    return _orphan_cleanup_failure_response(_canonical_tool_name, orphan.contract_id)
+        except Exception as _cleanup_exc:
+            logger.error(
+                "[Approval] outer-wrapper orphan-contract cleanup itself failed: "
+                "tool=%s error=%s", _canonical_tool_name, _cleanup_exc, exc_info=True,
+            )
+            # Identity/lookup itself is broken -- we cannot even determine
+            # whether an orphan exists. Distinct from the "verified clean"
+            # shape below: contract_id stays None only because none is
+            # KNOWN (not because absence was confirmed), but the outcome
+            # name still flags that this path could not verify anything.
+            return _orphan_cleanup_failure_response(_canonical_tool_name, None)
+
         return {
             "message": "❌ אירעה שגיאה בעת ניסיון להעביר את הפעולה לאישור. הפעולה לא בוצעה.",
             "contract_id": None, "ok": False, "terminal_outcome": "APPROVAL_QUEUE_ERROR",
-            # Best-effort: the raw (pre-canonicalization) tool name, since the
-            # exception may have occurred before/during resolve_canonical_tool()
-            # itself — never invented, and harmless either way since
-            # created_this_turn=False already keeps this out of row 2.
-            "action_tool": tool_name, "created_this_turn": False,
+            "action_tool": _canonical_tool_name, "created_this_turn": False,
         }
 
 
@@ -1047,25 +1171,23 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
             # propose_action() is NOT the same as a structured failure_code —
             # the old code here logged at debug level and fell straight
             # through to bus.request_approval() below, producing a real
-            # legacy EventBus pending item (and possibly leaving a live
-            # ActionContract behind too, if the exception happened after
-            # persistence but before the return) with NO canonical Gateway
-            # evidence backing the "ממתין לאישור" message the user would then
-            # see. Fail closed instead: never reach the legacy bus path off
-            # the back of an unhandled Gateway exception, in shadow mode or
-            # otherwise. If propose_action() already durably saved a contract
-            # before raising, best-effort revoke it so nothing live is left
-            # behind that this same return denies exists.
+            # legacy EventBus pending item with NO canonical Gateway evidence
+            # backing the "ממתין לאישור" message the user would then see.
+            #
+            # Codex re-audit of 8e05d67, P1: propose_action() can raise AFTER
+            # it has already durably saved a contract but BEFORE returning a
+            # GatewayResult — _gw_result stays None (its outer-scope init at
+            # the top of this function) in exactly that case, so there is no
+            # contract_id available HERE to revoke by. Rather than duplicate
+            # a fingerprint-based rediscovery here too, this re-raises so the
+            # single such lookup lives in _queue_approval_detailed()'s outer
+            # handler (which has no better information than this site does
+            # either — the fix is the lookup itself, not where it runs).
             logger.error(
                 "[ActionGateway] shadow propose raised unexpectedly (not a "
                 "structured GatewayResult failure): %s", _gw_exc, exc_info=True,
             )
-            _revoke_orphaned_gateway_contract(_gw_result, "shadow_propose_exception")
-            return {
-                "message": "❌ אירעה שגיאה בעת ניסיון להעביר את הפעולה לאישור. הפעולה לא בוצעה.",
-                "contract_id": None, "ok": False, "terminal_outcome": "APPROVAL_QUEUE_ERROR",
-                "action_tool": tool_name, "created_this_turn": False,
-            }
+            raise
 
     try:
         action_id, _ = bus.request_approval(
@@ -1087,11 +1209,23 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
         # brand-new ActionContract (_gw_result.ok=True) above, it must not be
         # left live+pending while this function returns contract_id=None —
         # revoke it before returning the structured failure.
+        #
+        # Codex re-audit of 8e05d67, P2: _gw_result.contract_id is known
+        # precisely here (propose_action() already returned by this point),
+        # so this uses it directly rather than a fingerprint rediscovery —
+        # but the revoke itself is now VERIFIED (a fresh find_live_
+        # contracts() re-query), never assumed just because reject() didn't
+        # raise. If verification fails, the REAL contract_id is returned
+        # with a distinct outcome rather than a false contract_id=None.
         logger.error(
             "[Approval] bus.request_approval failed after Gateway proposal: "
             "tool=%s error=%s", tool_name, _bus_exc, exc_info=True,
         )
-        _revoke_orphaned_gateway_contract(_gw_result, "eventbus_publish_failed")
+        if _gw_result is not None and getattr(_gw_result, "ok", False) and getattr(_gw_result, "contract_id", None):
+            if not _revoke_and_verify_contract(
+                identity.memory_key, _gw_result.contract_id, "eventbus_publish_failed",
+            ):
+                return _orphan_cleanup_failure_response(tool_name, _gw_result.contract_id)
         return {
             "message": "❌ אירעה שגיאה בעת ניסיון להעביר את הפעולה לאישור. הפעולה לא בוצעה.",
             "contract_id": None, "ok": False, "terminal_outcome": "APPROVAL_QUEUE_ERROR",
@@ -1124,21 +1258,35 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
             # cancel/revoke both rather than silently returning
             # contract_id=None while they stay live and button-approvable
             # with no owner ever having seen the request.
-            try:
-                pending.cancel(action_id)
-            except Exception:
-                logger.debug(
-                    "[Approval] failed to cancel orphaned EventBus pending item %s",
-                    action_id, exc_info=True,
+            #
+            # Codex re-audit of 8e05d67, P2/P3: both cleanups are now
+            # VERIFIED (a fresh re-query after the attempt), never assumed
+            # just because the cancel/revoke call itself didn't raise —
+            # PendingActionsStore.cancel() and ActionGateway.reject() can
+            # both complete "successfully" from this function's point of
+            # view while the underlying item/contract remains live (reject()
+            # in particular returns a message STRING on a durable-transition
+            # failure, not an exception). If either cannot be confirmed
+            # clear, the REAL contract_id is returned with a distinct
+            # outcome instead of the false contract_id=None this re-audit
+            # found.
+            _pending_clear = _cancel_and_verify_pending(action_id, "owner_notify_failed")
+            _contract_clear = True
+            _live_contract_id = None
+            if _gw_result is not None and getattr(_gw_result, "ok", False) and getattr(_gw_result, "contract_id", None):
+                _live_contract_id = _gw_result.contract_id
+                _contract_clear = _revoke_and_verify_contract(
+                    identity.memory_key, _gw_result.contract_id, "owner_notify_failed",
                 )
-            _revoke_orphaned_gateway_contract(_gw_result, "owner_notify_failed")
+            if not _pending_clear or not _contract_clear:
+                return _orphan_cleanup_failure_response(
+                    tool_name, _live_contract_id if not _contract_clear else None,
+                )
             return {
                 "message": (
                     f"❌ לא הצלחתי לשלוח בקשת אישור לבעלים.\n"
                     f"הפעולה לא בוצעה: {label}"
                 ),
-                # Deliberately None even if _gw_result already carries a real
-                # contract_id — see this function's docstring.
                 "contract_id": None, "ok": False, "terminal_outcome": "APPROVAL_QUEUE_ERROR",
                 "action_tool": tool_name, "created_this_turn": False,
             }

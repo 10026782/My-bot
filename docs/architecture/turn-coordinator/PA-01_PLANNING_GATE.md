@@ -1422,3 +1422,75 @@ repository-state checks, not just the return dict). All three were confirmed red
 **No deviation** from this re-audit's own instructions: no PA-01 predicate/policy/matrix/wording change,
 no extension beyond `_queue_approval_detailed_impl()`'s own plumbing and the two `_pa01_*` scoped-lookup
 helpers, `BUG-104` untouched, no new branch/PR opened.
+
+**Codex re-audit of commit `8e05d67` (verdict: `FIX_REQUIRED`) — the P1 cleanup itself was not
+verified.** The three reproductions above passed on their own SUCCESS paths, but the cleanup helper
+(`_revoke_orphaned_gateway_contract()`) had two structural gaps, plus one unrelated `action_tool` gap in
+the outer wrapper:
+
+1. **`_gw_result` is not always available to key cleanup off of.** `propose_action()` can raise AFTER
+   `ExecutionLedger.save()` has already durably persisted a contract but BEFORE returning a
+   `GatewayResult` — in that exact case, `_gw_result` stays at its outer-scope `None` initialization, so
+   a cleanup keyed on `_gw_result.contract_id` has nothing to revoke, even though a real orphan exists.
+2. **"Best-effort" swallowed durable failures without checking them.** `ActionGateway.reject()` returns a
+   human-facing message *string*, not a boolean — a durable-transition failure inside it is caught
+   internally and returned as a failure string, **not raised**. The old helper's `try/except` therefore
+   saw a normal (non-exceptional) return and logged `"revoked orphaned contract"` even when the contract
+   was still `"pending"` — the exact false-safety the original P1-C fix was meant to eliminate, just moved
+   one layer deeper.
+3. **Same gap for the EventBus pending-item cancel.** `PendingActionsStore.cancel()` raising was caught
+   and logged at `DEBUG`, then execution continued as if cleared.
+4. **`action_tool` in the outer wrapper's catch-all still read the raw, pre-canonicalization parameter.**
+   `_impl`'s own canonicalized local `tool_name` is lost when its stack frame unwinds on an exception —
+   the outer wrapper only ever saw its own untouched parameter.
+
+**Fix — verification, not attempts, and a distinct "unverifiable" outcome:**
+
+- `_find_live_contract_by_fingerprint(tenant_id, canonical_user_id, tool_name, tool_inputs)`: recomputes
+  the exact business fingerprint `propose_action()` would have used and searches `find_live_contracts()`
+  for a match — used whenever no `GatewayResult` is available at all (finding 1). Sound because
+  `propose_action()` itself always checks `find_by_fingerprint()` first and returns *early*, without
+  saving, whenever a contract for that exact fingerprint already exists — so any live contract found this
+  way can only be the one this same call just created.
+- `_revoke_and_verify_contract(canonical_user_id, contract_id, reason)` / `_cancel_and_verify_pending
+  (action_id, reason)`: each performs the revoke/cancel, then **re-queries** (`find_live_contracts()` /
+  `pending.get()`) to confirm the item is actually gone, returning `True` only when independently
+  confirmed — never merely because the call didn't raise (findings 2 and 3).
+- `_orphan_cleanup_failure_response(tool_name, contract_id)`: the distinct terminal state for when
+  verification fails — `terminal_outcome="APPROVAL_QUEUE_ORPHANED"` (new, alongside the existing
+  `"APPROVAL_QUEUE_ERROR"`), and `contract_id` is the **real**, possibly-still-live id, deliberately never
+  `None`. This is the field-semantics fix at the heart of the re-audit: `contract_id=None` now means "no
+  live contract, verified," in every branch, without exception — a branch that cannot verify this returns
+  the real id instead of a false `None`, rather than reusing the "confirmed clean" shape for an unverified
+  state. `created_this_turn` stays `False` regardless, since an unconfirmed/still-live contract was never
+  properly notified to the owner either way and must not be read as usable evidence for row 2.
+  `_pa01_contract_created_for_expected_tool()`'s existing 5-condition check (requiring `ok is True` and
+  `terminal_outcome is None`) already excludes `APPROVAL_QUEUE_ORPHANED` from row 2 without any change —
+  it surfaces via the existing scoped terminal-outcome lookup (row 3) like any other outcome, needing no
+  new PA-01-side logic.
+- **Central fingerprint-based cleanup moved to the outer wrapper.** `_queue_approval_detailed()`'s
+  `except Exception` handler now: (a) recomputes `action_tool` via `resolve_canonical_tool()` itself
+  (idempotent/pure, so safe to call again — falling back to the raw name only if canonicalization itself
+  is what raised, the one case where "canonical" is genuinely unknowable), and (b) runs the fingerprint-
+  based orphan lookup+revoke+verify as a backstop for any exception path that doesn't already know a
+  `contract_id`/`action_id` directly. The two Gateway-`propose_action()` call sites (shadow AND — newly, in
+  this round — enforce, neither of which has a `_gw_result` yet when `propose_action()` itself raises)
+  re-raise instead of duplicating this lookup locally; the `bus.request_approval()` and owner-notification
+  failure sites, which DO already know `_gw_result`/`action_id` precisely, call the verified helpers
+  directly (more efficient than a fingerprint rediscovery) rather than re-raising.
+
+**Regression tests added (`test_pa01_phantom_approval_enforcement.py`, section "P2"):** P2-1 (propose_
+action() raising after a real `ExecutionLedger.save()`, shadow AND Gateway-enforce modes — 8 assertions),
+P2-2 (`reject()`'s own durable transition failing without raising — 2 assertions, asserting the contract
+is honestly reported still-live with its real id and `APPROVAL_QUEUE_ORPHANED`), P2-3 (`pending.cancel()`
+raising after the contract itself was successfully revoked — 2 assertions), P2-4/P2-4b (`action_tool`
+stays canonical across an exception that predates `propose_action()` entirely, with a fallback-to-raw
+proof for the one case where canonicalization itself fails — 3 assertions). All 5 finding-specific
+assertions confirmed red against commit `8e05d67` before this fix, green after
+(`test_pa01_phantom_approval_enforcement.py`: 81/81; full sweep 117/117 `test_*.py` files, `smoke_tests.py`
+PASS, `compileall` clean).
+
+**No deviation:** no PA-01 predicate/policy/matrix/wording change. `terminal_outcome="APPROVAL_QUEUE_
+ORPHANED"` is a new *value*, not a new field or a change to any existing field's meaning — the return
+contract's shape (the same 6 keys) is unchanged from the `created_this_turn` round. `BUG-104` untouched,
+no new branch/PR opened.
