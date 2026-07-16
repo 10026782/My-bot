@@ -5,8 +5,9 @@
 # dispatcher מבצע. registry מחליט אם מותר.
 
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from identity import Identity
@@ -25,7 +26,84 @@ class ToolMeta:
     blocked_by_emergency: bool = False  # נחסם על ידי EMERGENCY_STOP_ALL
     high_risk:         bool = False   # פעולה בלתי הפיכה
     read_only:         bool = False   # לא משנה נתונים
+    model_exposed:     bool = True    # False = internal Python callers only
     description_he:    str  = ""
+
+
+class ToolRegistryInvariantError(ValueError):
+    """Raised when registry/schema declarations are ambiguous or drifted."""
+
+
+def _build_registry(entries: Iterable[ToolMeta]) -> dict[str, ToolMeta]:
+    """Build the registry without permitting duplicate-name overwrite."""
+    registry: dict[str, ToolMeta] = {}
+    first_positions: dict[str, int] = {}
+
+    for position, meta in enumerate(entries, start=1):
+        if not isinstance(meta, ToolMeta):
+            raise ToolRegistryInvariantError(
+                f"registry declaration #{position} is not ToolMeta"
+            )
+        name = meta.name.strip() if isinstance(meta.name, str) else ""
+        if not name:
+            raise ToolRegistryInvariantError(
+                f"registry declaration #{position} has an empty tool name"
+            )
+        if name in registry:
+            raise ToolRegistryInvariantError(
+                f"duplicate registry tool name {name!r}: declarations "
+                f"#{first_positions[name]} and #{position}"
+            )
+        registry[name] = meta
+        first_positions[name] = position
+
+    return registry
+
+
+def validate_tool_invariants(
+    model_schemas: Sequence[Mapping[str, Any]],
+    *,
+    registry: Mapping[str, ToolMeta] | None = None,
+) -> None:
+    """Validate model schema uniqueness and registry/schema coverage."""
+    active_registry = _REGISTRY if registry is None else registry
+    schema_positions: dict[str, int] = {}
+
+    for position, schema in enumerate(model_schemas, start=1):
+        raw_name = schema.get("name") if isinstance(schema, Mapping) else None
+        name = raw_name.strip() if isinstance(raw_name, str) else ""
+        if not name:
+            raise ToolRegistryInvariantError(
+                f"model schema declaration #{position} has an empty tool name"
+            )
+        if name in schema_positions:
+            raise ToolRegistryInvariantError(
+                f"duplicate model schema tool name {name!r}: declarations "
+                f"#{schema_positions[name]} and #{position}"
+            )
+        schema_positions[name] = position
+
+        meta = active_registry.get(name)
+        if meta is None:
+            raise ToolRegistryInvariantError(
+                f"model-exposed schema {name!r} has no tool_registry policy"
+            )
+        if not meta.model_exposed:
+            raise ToolRegistryInvariantError(
+                f"internal-only registry tool {name!r} must not be model-exposed"
+            )
+
+    schema_names = frozenset(schema_positions)
+    missing_schemas = sorted(
+        name
+        for name, meta in active_registry.items()
+        if meta.model_exposed and name not in schema_names
+    )
+    if missing_schemas:
+        raise ToolRegistryInvariantError(
+            "model-exposed registry tools missing schemas: "
+            + ", ".join(missing_schemas)
+        )
 
 
 # ── Shortcuts לקבוצות roles ──────────────────────
@@ -46,16 +124,16 @@ _ALL_EXTERNAL  = {"owner", "partner", "manager", "employee", "lead"}
 # Registry
 # ══════════════════════════════════════════════════
 
-_REGISTRY: dict[str, ToolMeta] = {
+_REGISTRY_ENTRIES: tuple[ToolMeta, ...] = (
 
     # ── Google Drive ─────────────────────────────
-    "search_drive": ToolMeta(
+    ToolMeta(
         name="search_drive",
         roles_allowed=_MANAGEMENT,
         read_only=True,
         description_he="חיפוש קבצים ב-Drive"
     ),
-    "read_drive_file": ToolMeta(
+    ToolMeta(
         name="read_drive_file",
         roles_allowed=_MANAGEMENT,
         read_only=True,
@@ -63,13 +141,13 @@ _REGISTRY: dict[str, ToolMeta] = {
     ),
 
     # ── Calendar ─────────────────────────────────
-    "calendar_get_events": ToolMeta(
+    ToolMeta(
         name="calendar_get_events",
         roles_allowed=_INTERNAL,
         read_only=True,
         description_he="קריאת אירועים מהיומן"
     ),
-    "calendar_create_event": ToolMeta(
+    ToolMeta(
         name="calendar_create_event",
         roles_allowed=_MANAGEMENT,
         requires_approval=True,
@@ -78,14 +156,14 @@ _REGISTRY: dict[str, ToolMeta] = {
     ),
 
     # ── Gmail ────────────────────────────────────
-    "gmail_draft": ToolMeta(
+    ToolMeta(
         name="gmail_draft",
         roles_allowed=_MANAGEMENT,
         requires_approval=True,
         blocked_by_emergency=True,
         description_he="יצירת טיוטת מייל — דורש אישור (לא שולח)"
     ),
-    "gmail_send_draft": ToolMeta(
+    ToolMeta(
         name="gmail_send_draft",
         roles_allowed=_SENIOR,
         requires_approval=True,
@@ -93,7 +171,7 @@ _REGISTRY: dict[str, ToolMeta] = {
         high_risk=True,
         description_he="שליחת טיוטה — דורש אישור owner/partner"
     ),
-    "gmail_read": ToolMeta(
+    ToolMeta(
         name="gmail_read",
         roles_allowed=_OWNER_ONLY,
         read_only=True,
@@ -101,7 +179,7 @@ _REGISTRY: dict[str, ToolMeta] = {
     ),
 
     # ── Sheets ───────────────────────────────────
-    "sheets_append": ToolMeta(
+    ToolMeta(
         name="sheets_append",
         roles_allowed=_MANAGEMENT,
         requires_approval=True,
@@ -110,14 +188,14 @@ _REGISTRY: dict[str, ToolMeta] = {
     ),
 
     # ── Airtable ─────────────────────────────────
-    "airtable_get": ToolMeta(
+    ToolMeta(
         name="airtable_get",
         roles_allowed=_ALL_EXTERNAL,   # lead רואה רק נתוני עצמו (filter ב-tool)
         tenant_scoped=True,
         read_only=True,
         description_he="שליפת רשומות מ-Airtable"
     ),
-    "airtable_add": ToolMeta(
+    ToolMeta(
         name="airtable_add",
         roles_allowed=_INTERNAL,
         tenant_scoped=True,
@@ -126,7 +204,7 @@ _REGISTRY: dict[str, ToolMeta] = {
         high_risk=True,
         description_he="הוספת רשומה ל-Airtable — דורש אישור"
     ),
-    "airtable_update": ToolMeta(
+    ToolMeta(
         name="airtable_update",
         roles_allowed=_MANAGEMENT,
         tenant_scoped=True,
@@ -135,7 +213,7 @@ _REGISTRY: dict[str, ToolMeta] = {
         high_risk=True,
         description_he="עדכון רשומה ב-Airtable — דורש אישור"
     ),
-    "airtable_get_schema": ToolMeta(
+    ToolMeta(
         name="airtable_get_schema",
         roles_allowed=_SENIOR,
         read_only=True,
@@ -143,7 +221,7 @@ _REGISTRY: dict[str, ToolMeta] = {
     ),
 
     # ── Lead Search ───────────────────────────────
-    "search_lead": ToolMeta(
+    ToolMeta(
         name             = "search_lead",
         roles_allowed    = _MANAGEMENT,
         read_only        = True,
@@ -151,7 +229,7 @@ _REGISTRY: dict[str, ToolMeta] = {
     ),
 
     # ── Contact Resolver (N03) ────────────────────
-    "resolve_contact": ToolMeta(
+    ToolMeta(
         name             = "resolve_contact",
         roles_allowed    = _MANAGEMENT,
         read_only        = True,
@@ -159,7 +237,7 @@ _REGISTRY: dict[str, ToolMeta] = {
     ),
 
     # ── Daily Digest on-demand ────────────────────
-    "get_daily_report": ToolMeta(
+    ToolMeta(
         name           = "get_daily_report",
         roles_allowed  = _MANAGEMENT,
         read_only      = True,
@@ -167,7 +245,7 @@ _REGISTRY: dict[str, ToolMeta] = {
     ),
 
     # ── D06 — Business Memory ─────────────────────
-    "search_business_memory": ToolMeta(
+    ToolMeta(
         name             = "search_business_memory",
         roles_allowed    = _MANAGEMENT,
         read_only        = True,
@@ -175,7 +253,7 @@ _REGISTRY: dict[str, ToolMeta] = {
     ),
 
     # ── CRM — Payments ─────────────────────────────
-    "crm_mark_payment_paid": ToolMeta(
+    ToolMeta(
         name             = "crm_mark_payment_paid",
         roles_allowed    = _SENIOR,
         tenant_scoped    = True,
@@ -190,25 +268,28 @@ _REGISTRY: dict[str, ToolMeta] = {
     # Agent tool_use loop can never propose these directly — only trusted
     # Python callers (media_handler.py, followup_engine.py, core/lead_recovery.py)
     # via ActionGateway.propose_action(trusted_source=...).
-    "media_save_to_memory": ToolMeta(
+    ToolMeta(
         name             = "media_save_to_memory",
         roles_allowed    = _INTERNAL,
         requires_approval= True,
         blocked_by_emergency=True,
+        model_exposed    = False,
         description_he   = "שמירת תמלול הודעה קולית ל-Business Memory — לאחר אישור בעלים",
     ),
-    "send_followup": ToolMeta(
+    ToolMeta(
         name             = "send_followup",
         roles_allowed    = _INTERNAL,
         requires_approval= True,
         blocked_by_emergency=True,
+        model_exposed    = False,
         description_he   = "הצגת טיוטת פולואפ מאושרת לבעלים להעברה ידנית",
     ),
-    "send_recovery": ToolMeta(
+    ToolMeta(
         name             = "send_recovery",
         roles_allowed    = _INTERNAL,
         requires_approval= True,
         blocked_by_emergency=True,
+        model_exposed    = False,
         description_he   = "הצגת טיוטת recovery מאושרת לבעלים להעברה ידנית",
     ),
 
@@ -223,14 +304,17 @@ _REGISTRY: dict[str, ToolMeta] = {
     # partner/employee never call it. This is a defense-in-depth layer only:
     # the stricter per-endpoint role check in tma_api.py's route handlers is
     # unchanged and still runs first.
-    "tma_write": ToolMeta(
+    ToolMeta(
         name             = "tma_write",
         roles_allowed    = {"owner", "manager"},
         requires_approval= True,
         blocked_by_emergency=True,
+        model_exposed    = False,
         description_he   = "כתיבת Airtable שמקורה ב-TMA — לאחר אישור ActionGateway",
     ),
-}
+)
+
+_REGISTRY: dict[str, ToolMeta] = _build_registry(_REGISTRY_ENTRIES)
 
 
 # C83: single policy source. Consumers import these derived views instead of
