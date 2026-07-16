@@ -1633,8 +1633,15 @@
 - **Merged:** לא.
 - **סטטוס:** 🟡 רישום בלבד — ממתין להחלטה (P1 persisted store / דחייה מכוונת).
 
-### BUG-104 — ReasoningEntity/leads_adapter/decision_adapter: לא מחוברים לחיים
-- **תאריך:** 12/07/2026
+### BUG-104 — Core Reasoning Activation Program (לשעבר: ReasoningEntity/leads_adapter/decision_adapter לא מחוברים לחיים)
+- **תאריך:** 12/07/2026 (נרשם) · 16/07/2026 (שם התוכנית עודכן + Phase 1 החל)
+- **שם קנוני של התוכנית:** **Core Reasoning Activation Program**. זהו שם *תוכנית ההפעלה* בלבד — לא שינוי שמות מודולים. `core/reasoning_entity.py`/`core/reasoning_ports.py`/`core/reasoning_engines.py`/`core/adapters/leads_adapter.py` והשם ההיסטורי-טכני **"Core Reasoning Layer" (F22)** נשארים כפי שהם.
+- **היררכיית התוכנית:**
+  ```
+  BUG-104 — Core Reasoning Activation Program
+  └── Phase 1 — Leads Read-Only Reasoning Projection
+  ```
+  **Phase 1 — Leads Read-Only Reasoning Projection:** חיבור ראשון, קריא-בלבד, של Core Reasoning Layer (F22) הקיים למסלול חי — projection בשם `"reasoning"` על `GET /api/leads/<lead_id>` בלבד. אין mutation, אין persistence, אין Decision Hub / chat / Telegram / WhatsApp / approval / ActionGateway. דגל תלת-מצבי עצמאי `FEATURE_CORE_REASONING_LEADS_STATE` (`off`/`shadow`/`on`, ברירת מחדל `off`). ראה `core/leads_reasoning_projection.py` + `test_bug104_leads_reasoning_projection.py`.
 - **קבצים:** `core/reasoning_entity.py`, `core/reasoning_engines.py`, `core/adapters/leads_adapter.py`, `core/adapters/decision_adapter.py`
 - **שורש (מאומת בקוד):** `leads_adapter.py` (עם `entity_type=ENTITY_LEAD`, `:56,107`) — **אפס קוראים חיצוניים** בכל הריפו מעבר ל-`smoke_tests.py`/`core/reasoning_ports.py` (הגדרת port, לא caller אמיתי). `decision_adapter.py` כן מחובר לחיים (`cmd_decision.py:445`, `append_reasoning_block`) — אבל `FEATURE_DECISION_HUB` = OFF כברירת מחדל (`feature_flags.py:75`), כלומר "חי" רק תיאורטית.
 - **חשיבות מיוחדת:** זה הכי קרוב במבנה למה שהצעת "שכבת ההבנה הכללית" מבקשת — `PHASE_COLLECTING`/`PHASE_BLOCKED`/`PHASE_REVIEW`/`PHASE_AWAITING`/`PHASE_DECIDED`/`PHASE_CLOSED` (`core/reasoning_entity.py:34-39`) ≈ RESOLVED/NEEDS_CLARIFICATION/REJECTED שההצעה מגדירה. **לפני שממשיכים בכל דיון על "לבנות Understanding Contract חדש" — זו הבדיקה שקובעת אם צריך לבנות בכלל, או רק לחבר+להדליק flag.**
