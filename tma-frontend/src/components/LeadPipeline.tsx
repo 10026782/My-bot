@@ -20,10 +20,10 @@ export function LeadPipeline({ project, onBack, authRole }: Props) {
   const [selectedLead, setSelectedLead] = useState<LeadSummary | null>(null);
 
   useEffect(() => {
-    fetchLeads(project.slug)
+    fetchLeads(project.domain)
       .then((data) => setState({ status: "ok", data }))
       .catch((e: unknown) => setState({ status: "error", message: String(e) }));
-  }, [project.slug]);
+  }, [project.domain]);
 
   if (selectedLead) {
     return (

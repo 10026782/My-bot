@@ -837,41 +837,21 @@ def require_tma_auth(f):
 def _get_global_kpis() -> dict:
     """
     Aggregates KPIs for Projects Hub.
-    Uses the same Airtable queries as daily_digest.py so O0 and the
-    morning Telegram digest always reflect identical data.
+
+    Payments-derived KPIs (income_this_month/pending_payments_count/
+    pending_payments_amount) were removed (TMA read-path optimization):
+    Payments belongs to the finance screen (GET /api/finance/pulse) only,
+    and the two queries this function used to run against
+    "תשלומים (Payments)" always failed (403) — the live table is
+    "Payments" (Tables.PAYMENTS); this endpoint should not query Payments
+    at all, not just fix the table name.
+
+    hot_leads_count is intentionally absent from this dict — the caller
+    (get_projects()) fills it in from the same bulk Leads read
+    _get_project_cards() already performs, so this endpoint never issues
+    more than one Leads query total.
     """
-    today       = date.today()
-    month_start = today.replace(day=1).isoformat()
-    week_ahead  = (today + timedelta(days=7)).isoformat()
-    tomorrow    = (today + timedelta(days=1)).isoformat()
-
-    # Income this month — received payments
-    received = _at_list(
-        "תשלומים (Payments)",
-        f"AND({{סטטוס}}='התקבל', IS_AFTER({{תאריך}}, '{month_start}'))",
-        max_records=200,
-    )
-    income = sum(
-        r.get("fields", {}).get("סכום", 0) or 0
-        for r in received
-        if isinstance(r.get("fields", {}).get("סכום"), (int, float))
-    )
-
-    # Pending payments in next 7 days (same formula as _upcoming_payments)
-    pending_recs = _at_list(
-        "תשלומים (Payments)",
-        (
-            f"AND({{סטטוס}}!='התקבל', "
-            f"IS_BEFORE({{תאריך}}, '{week_ahead}'), "
-            f"IS_AFTER({{תאריך}}, '{today.isoformat()}'))"
-        ),
-        max_records=50,
-    )
-    pending_amount = sum(
-        r.get("fields", {}).get("סכום", 0) or 0
-        for r in pending_recs
-        if isinstance(r.get("fields", {}).get("סכום"), (int, float))
-    )
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
 
     # Overdue tasks (same filter as _urgent_tasks)
     overdue = _at_list(
@@ -880,18 +860,8 @@ def _get_global_kpis() -> dict:
         max_records=50,
     )
 
-    hot_leads = _at_list(
-        "Leads",
-        f"{{{LeadFields.SCORE}}}>=70",  # tier הוא formula — מסנן לפי ציון בלבד
-        max_records=20,
-    )
-
     return {
-        "income_this_month":      income,
-        "pending_payments_count": len(pending_recs),
-        "pending_payments_amount": pending_amount,
-        "overdue_tasks":          len(overdue),
-        "hot_leads_count":        len(hot_leads),
+        "overdue_tasks": len(overdue),
     }
 
 
@@ -906,22 +876,38 @@ def _parse_json_field(value) -> dict | list:
         return {}
 
 
-def _get_project_cards(identity) -> list:
+_PROJECT_CARDS_BULK_LEADS_MAX_RECORDS = 200
+
+
+def _get_project_cards(identity) -> tuple[list, int]:
     """
-    Returns project status cards from ProjectsHub table.
+    Returns (cards, hot_leads_count) — project status cards from ProjectsHub,
+    and the total Score>=70 count across only the domains actually visible
+    in `cards` (TMA read-path optimization).
+
     Fields: Name, emoji, slug, mode, project_type, status,
             kpi_fields, quick_actions, owner_ids, tenant_id, domain.
     slug and domain are independent — domain drives lead filtering.
-    Returns [] if the table is empty or does not exist yet.
+    Returns ([], 0) if the table is empty or does not exist yet.
+
+    Active/hot counts for every card come from a single bulk Leads read
+    (OR of every visible card's domain, same exclude_statuses filter as
+    before) instead of one Leads query per card — this is the only Leads
+    read GET /api/projects performs. hot_leads_count is the same bulk
+    result's total Score>=70 count, so it reflects only leads in domains
+    with a visible card here, in the active statuses — not every hot lead
+    in the base regardless of domain/status (see CHANGE_CONTROL_LOG for
+    the approved semantics change).
     """
     records = _at_list("ProjectsHub", "", max_records=20)
     if not records:
-        return []
+        return [], 0
 
-    cards = []
+    # Filter to visible records BEFORE building the bulk Leads query, so the
+    # OR-of-domains only ever reflects domains that will actually be shown.
+    visible_records = []
     for r in records:
         f      = r.get("fields", {})
-        slug   = f.get("slug", "")
         domain = f.get("domain", "")
 
         # Temporarily hidden from Projects Hub display — record, slug, and
@@ -936,26 +922,57 @@ def _get_project_cards(identity) -> list:
             if identity.user_id not in _owner_ids:
                 continue
 
-        # Live KPI — uses screen filter gateway (project_hub_kpi config)
-        hub_screen = SCREEN_CONFIGS["project_hub_kpi"]
-        hub_cfg    = hub_screen["views"][hub_screen["default_view"]]
-        safe_domain, _ = _safe_formula_param(domain, "domain")
-        if safe_domain:
-            hub_formula = _build_formula(
-                entity="Lead",
-                domain=safe_domain,
-                include_statuses=hub_cfg.get("include_statuses"),
-                exclude_statuses=hub_cfg.get("exclude_statuses"),
-                raw_formula=hub_cfg.get("raw_formula", ""),
-            )
-            leads = _at_list("Leads", hub_formula,
-                             max_records=hub_screen["default_max_records"])
-            hot = [
-                l for l in leads
-                if (l.get("fields", {}).get(LeadFields.SCORE) or 0) >= 70
-            ]
+        visible_records.append(r)
+
+    if not visible_records:
+        return [], 0
+
+    hub_screen = SCREEN_CONFIGS["project_hub_kpi"]
+    hub_cfg    = hub_screen["views"][hub_screen["default_view"]]
+    exclude_statuses = hub_cfg.get("exclude_statuses") or []
+
+    domains: list[str] = []
+    for r in visible_records:
+        d = r.get("fields", {}).get("domain", "")
+        safe_d, _ = _safe_formula_param(d, "domain")
+        if safe_d and safe_d not in domains:
+            domains.append(safe_d)
+
+    leads_by_domain: dict[str, list] = {d: [] for d in domains}
+    if domains:
+        domain_conds = ", ".join(f"{{domain}}='{d}'" for d in domains)
+        or_domains = f"OR({domain_conds})" if len(domains) > 1 else domain_conds
+        if exclude_statuses:
+            status_conds = ", ".join(f"{{status}}='{s}'" for s in exclude_statuses)
+            bulk_formula = f"AND({or_domains}, NOT(OR({status_conds})))"
         else:
-            leads, hot = [], []
+            bulk_formula = or_domains
+        bulk_leads = _at_list("Leads", bulk_formula,
+                               max_records=_PROJECT_CARDS_BULK_LEADS_MAX_RECORDS)
+        if len(bulk_leads) == _PROJECT_CARDS_BULK_LEADS_MAX_RECORDS:
+            logger.warning(
+                "[_get_project_cards] bulk Leads query returned exactly "
+                "max_records=%d — active/hot counts may be truncated. domains=%s",
+                _PROJECT_CARDS_BULK_LEADS_MAX_RECORDS, domains,
+            )
+        for lead in bulk_leads:
+            d = lead.get("fields", {}).get("domain", "")
+            if d in leads_by_domain:
+                leads_by_domain[d].append(lead)
+
+    cards = []
+    total_hot = 0
+    for r in visible_records:
+        f      = r.get("fields", {})
+        slug   = f.get("slug", "")
+        domain = f.get("domain", "")
+
+        leads = leads_by_domain.get(domain, [])
+        hot = [
+            l for l in leads
+            if (l.get("fields", {}).get(LeadFields.SCORE) or 0) >= 70
+        ]
+        total_hot += len(hot)
 
         cards.append({
             "id":           r["id"],           # Airtable record_id — internal key
@@ -971,7 +988,7 @@ def _get_project_cards(identity) -> list:
             "kpi":          {"label": "לידים פעילים", "value": len(leads)},
             "exception":    f"{len(hot)} לידים חמים" if hot else None,
         })
-    return cards
+    return cards, total_hot
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1021,14 +1038,13 @@ def get_projects(identity):
     if not identity.is_owner:
         return jsonify({"error": "forbidden — owner only"}), 403
 
-    kpis     = _get_global_kpis()
-    projects = _get_project_cards(identity)
+    kpis                       = _get_global_kpis()
+    projects, hot_leads_count  = _get_project_cards(identity)
+    kpis["hot_leads_count"]    = hot_leads_count
 
     exceptions = []
     if kpis["overdue_tasks"] > 0:
         exceptions.append(f"⚡ {kpis['overdue_tasks']} משימות עבר מועד")
-    if kpis["pending_payments_count"] > 0:
-        exceptions.append(f"💰 {kpis['pending_payments_count']} תשלומים קרובים")
     if kpis["hot_leads_count"] > 0:
         exceptions.append(f"🔥 {kpis['hot_leads_count']} לידים חמים")
 

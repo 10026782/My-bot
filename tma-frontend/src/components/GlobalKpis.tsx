@@ -13,19 +13,11 @@ export function GlobalKpis({ kpis }: { kpis: TGlobalKpis }) {
   return (
     <div className="flex gap-2 overflow-x-auto pb-1 px-4">
       <KpiPill
-        label="הכנסות החודש"
-        value={`₪${kpis.income_this_month.toLocaleString("he-IL")}`}
-      />
-      <KpiPill
-        label="תשלומים ממתינים"
-        value={String(kpis.pending_payments_count)}
-      />
-      <KpiPill
         label="משימות באיחור"
         value={String(kpis.overdue_tasks)}
       />
       <KpiPill
-        label="לידים חמים"
+        label="לידים חמים בפרויקטים פעילים"
         value={String(kpis.hot_leads_count)}
       />
     </div>
