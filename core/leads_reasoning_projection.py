@@ -32,6 +32,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
+from core.reasoning_entity import PHASE_CLOSED, PHASE_COLLECTING, PHASE_DECIDED, PHASE_REVIEW
+
 logger = logging.getLogger(__name__)
 
 # Contract version — bump only on a breaking projection-shape change.
@@ -91,6 +93,81 @@ _LIVE_TO_ADAPTER_FIELDS = (
 # itself failed (distinct from an empty list, which means "no events exist").
 EVENTS_UNAVAILABLE = None
 
+# ── BUG-104 Phase 2A.2 — Lead-specific wording ────────────────────────────────
+# The shared reasoning engine (core/reasoning_engines.py -> decision_confidence.py
+# / decision_orchestrator.py) was built for Decisions and emits Decision-shaped
+# Hebrew wording ("מסמך תומך", "הוסף ראיות ועדכן אירועים", "השג אין אירועים
+# מקושרים"). This is pure text post-processing of that engine's output for Lead
+# projections only — see docs/architecture/bug-104/PHASE_2A1_CURRENT_STATE_POLICY_SPEC.md
+# and PHASE_2A_CLOSEOUT.md §5A. It never touches state/phase, confidence score,
+# or entity.status — those remain exactly as Phase 2A.1 computed them.
+_LEAD_NO_EVENTS_MISSING_EVIDENCE = "חסרה היסטוריית טיפול בליד"
+# Whatever the shared (Decision-shaped) evidence catalog reports missing
+# (e.g. "מסמך תומך", "חוזה", "שמאות") is never Lead-accurate wording — a Lead
+# has no documents/appraisals concept. Used whenever there IS evidence data
+# to report (events present, non-terminal) but the catalog items themselves
+# would leak Decision-document names.
+_LEAD_MISSING_EVIDENCE_GENERIC = "חסר מידע נוסף על התקדמות הטיפול בליד"
+
+# phase (core.reasoning_entity.PHASE_*) -> Lead-appropriate next_step.action.
+# Only the two non-terminal phases the shared engine actually reaches for a
+# Lead with a generic/Decision-shaped action are covered (Phase 2A.2 scope).
+# Terminal phases (DECIDED/CLOSED) and BLOCKED/AWAITING are left untouched —
+# their existing next_step wording is already execution-oriented, not
+# Decision-document wording.
+_LEAD_NEXT_STEP_ACTION = {
+    PHASE_COLLECTING: "הוסף הערת טיפול או עדכן תוצאת ליד",
+    PHASE_REVIEW:      "סקור את היסטוריית הטיפול והחלט על המשך",
+}
+
+_LEAD_TERMINAL_PHASES = frozenset({PHASE_DECIDED, PHASE_CLOSED})
+
+
+def _apply_lead_wording(
+    phase: str,
+    events_available: bool,
+    events_count: int,
+    missing_evidence: list[str],
+    next_step: dict | None,
+) -> tuple[list[str], dict | None]:
+    """
+    Post-process missing_evidence/next_step text for a Lead projection.
+    Pure relabeling — phase, confidence score, and entity.status are computed
+    entirely upstream (Phase 2A.1) and are never touched here.
+
+    - Terminal phase (DECIDED/CLOSED) -> missing_evidence cleared, checked
+      FIRST. A decided/closed lead is never re-opened by a stale "add
+      evidence" hint, regardless of event count.
+    - Otherwise, events.available=true and events.count=0 -> lead-specific
+      "no history" wording for missing_evidence (replaces "אין אירועים
+      מקושרים").
+    - Otherwise, any remaining (Decision-shaped) missing_evidence items
+      (e.g. "מסמך תומך") are replaced with an honest Lead-appropriate
+      placeholder instead of leaking Decision-document names.
+    - phase in _LEAD_NEXT_STEP_ACTION -> next_step.action replaced with the
+      lead-specific text; detail is rebuilt from the (already reworded)
+      missing_evidence instead of the engine's own Decision-shaped detail, so
+      "השג אין אירועים מקושרים" / "השג מסמך תומך" can never leak through.
+    """
+    no_events = events_available and events_count == 0
+
+    if phase in _LEAD_TERMINAL_PHASES:
+        missing_evidence = []
+    elif no_events:
+        missing_evidence = [_LEAD_NO_EVENTS_MISSING_EVIDENCE]
+    elif missing_evidence:
+        missing_evidence = [_LEAD_MISSING_EVIDENCE_GENERIC]
+
+    lead_action = _LEAD_NEXT_STEP_ACTION.get(phase)
+    if lead_action and next_step is not None:
+        next_step = {
+            "action":      lead_action,
+            "responsible": next_step["responsible"],
+            "detail":      _LEAD_NO_EVENTS_MISSING_EVIDENCE if no_events else "",
+        }
+
+    return missing_evidence, next_step
+
 
 def build_reasoning_projection(
     lead_record: dict,
@@ -147,6 +224,14 @@ def build_reasoning_projection(
             "detail":      result.next_step.detail,
         }
 
+    # BUG-104 Phase 2A.2 — Lead-specific wording (pure text post-processing;
+    # state/phase/confidence score above are untouched).
+    missing_evidence, next_step = _apply_lead_wording(
+        result.phase, events_available, len(events_list),
+        sorted(str(m) for m in (result.missing_evidence or [])),
+        next_step,
+    )
+
     return {
         "version":            PROJECTION_VERSION,
         "as_of":              as_of_iso,
@@ -156,7 +241,7 @@ def build_reasoning_projection(
             "score": round(float(result.confidence_score), 4),
             "basis": "reasoning_engine",       # Core Reasoning confidence over lead events
         },
-        "missing_evidence":   sorted(str(m) for m in (result.missing_evidence or [])),
+        "missing_evidence":   missing_evidence,
         "verifier":           verifier,
         "next_step":          next_step,
         "attention_priority": result.attention_priority,
