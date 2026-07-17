@@ -73,3 +73,23 @@ This log records planning decisions for the F52 program. It is not runtime imple
 - Decision: Rollback may disable presentation or new proposals, but never restores a direct-execution fallback.
 - Rationale: A rollback must not reintroduce the P0 bypass the migration removes.
 - Affected documents: `spec/F52_UNIFIED_APPROVAL_RUNTIME_SPEC.md`, `rollout/ROLLBACK_PLAN.md`.
+
+## D-010 — `display_payload` is the canonical user-message contract
+
+- Date: 17/07/2026
+- Status: Closed for planning; implementation not started
+- Decision: New and migrated action producers use structured `display_payload`.
+  Free-form `human_summary` is a read-only, untrusted compatibility hint during
+  migration and is never execution evidence. The existing
+  `compose_status_reply()` / `GatewayReply` boundary is extended rather than
+  creating a parallel formatter.
+- Rationale: The current output audit found that tool names, table/record IDs,
+  raw errors and unverified text reach user-message builders. Structured display
+  facts allow sanitization and evidence gating without changing approval or
+  execution policy.
+- Boundary with D-005: semantic display facts may be frozen with the action;
+  channel delivery/message/callback state remains in the separate presentation
+  projection store.
+- Affected documents: `spec/UNIFIED_MESSAGE_UX_STANDARD.md`,
+  `audits/phase-4c/AGENT_MESSAGE_OUTPUT_MAP.md`,
+  `rollout/UNIFIED_MESSAGE_IMPLEMENTATION_PLAN.md`.
