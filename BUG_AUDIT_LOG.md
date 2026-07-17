@@ -1658,6 +1658,51 @@
 
 ---
 
+### עדכון 17/07/2026 — Phase 1 + Phase 1.1 + TMA Lead Event Bridge: מומשו, מוזגו, **אומתו בפרודקשן end-to-end**
+
+מאז הרישום המקורי למעלה (12/07), התוכנית התקדמה בפועל דרך 3 PRs ממוזגים (ראה `CHANGE_CONTROL_LOG.md` C112/C115/C118 לפירוט מלא של כל אחד):
+- **Phase 1** (PR #354/#357, `71f04fb`/`08ad671`) — `GET /api/leads/<lead_id>`'s read-only `"reasoning"` projection, `FEATURE_CORE_REASONING_LEADS_STATE` (off/shadow/on).
+- **BUG-104 TMA Lead Event Bridge** (PR #360, `0a0c331`) — `core/lead_event_writer.write_tma_lead_event()`, מחווט ל-`tma_api.py::patch_lead/set_lead_outcome` ול-`tools/approval_actions.py::tma_write()`. סוגר בדיוק את הפער שה-"שורש" למעלה תיאר: לפני ה-bridge, אף כתיבת-ליד מה-TMA לא יצרה Lead Event, כך שה-projection תמיד קרא `events.count=0` — נכון מבחינה טכנית, אך ריק-מדגם, לא ראיה שהמנגנון עובד.
+
+**אימות פרודקשן (דווח ע"י המשתמש, ליד `recI5JAgcGc07DlOa`, דומיין `recruitment`):**
+
+לפני ה-bridge: `events.count = 0` (כל ליד, ללא יוצא מן הכלל — אין Lead Event אחד שנוצר אי-פעם מ-TMA).
+
+אחרי ה-bridge, לאחר `patch_lead`/`set_lead_outcome` אמיתיים על הליד הזה מה-TMA:
+```
+events.available = true
+events.count = 2
+engine.degraded = false
+errors = []
+state = REVIEW
+confidence = 0.2
+```
+
+שתי רשומות ה-Lead Events שנוצרו, מאומתות ישירות (לא רק דרך ה-projection):
+
+| | Summary | Message | Domain | Channel | Event Type | Lead |
+|---|---|---|---|---|---|---|
+| אירוע 1 | `TMA lead_patch` | `lead_patch: status='high_confidence'` | `recruitment` | `tma` | `other` | `recI5JAgcGc07DlOa` |
+| אירוע 2 | `TMA lead_outcome` | `Business Outcome='meeting_scheduled ', status='active'` | `recruitment` | `tma` | `other` | `recI5JAgcGc07DlOa` |
+
+זה מוכיח את כל השרשרת בפועל, לא רק בקוד: TMA lead update → Lead Event נוצר → Lead link נכון → domain נכון (`recruitment`, מ-`Leads.domain`, לא project_slug) → channel נכון (`tma` הליטרלי, לא `identity.channel`) → BUG-104 קורא את האירועים → מנוע ה-reasoning צורך אותם (state/confidence מחושבים, לא ברירת-מחדל).
+
+**Read path (אומת באותו סבב, PR #365):** פתיחת אותו ליד ביצעה 3 קריאות — `Leads/<id>` + `Interaction Log` + `Lead Events` (האחרונה קיימת כי ל-ליד הזה יש 2 אירועים מקושרים בפועל). זה **לא** סתירה להערכה הקודמת של "2 קריאות ל-ליד ללא אירועים" (ראו PR #365 audit) — אלא אישור: הערכת ה-2 חלה על ליד ריק-אירועים; הליד הזה הוא הראשון שנבדק שבאמת יש לו אירועים, ולכן מפעיל את קריאת ה-Lead Events השלישית, כמתוכנן. סה"כ הזרימה המלאה (Projects Hub → domain → ליד) אומתה ב-7 קריאות (לא 6) — מוסבר ומצופה.
+
+**⚠️ הערה פתוחה, לא אומתה כאן:** הדיווח לא ציין את מצב `FEATURE_CORE_REASONING_LEADS_STATE` בזמן הבדיקה (`shadow` היה מספיק כדי לחשב ולתעד ללוג; רק `on` מצרף `"reasoning"` לתגובת ה-API בפועל). אם הבדיקה בוצעה מול תגובת ה-API עצמה (לא לוג בלבד) — הדגל היה `on` בזמן הבדיקה. יש לוודא מהו מצב הדגל הנוכחי ב-Render **אחרי** הבדיקה (חזרה ל-`off`, נשאר `on`, או `shadow`) לפני כל הצהרת "production activation" — היעדר אימות כזה כאן אינו הצהרה שהדגל פעיל כברירת מחדל.
+
+**הסטטוס הרשמי (17/07/2026):**
+- BUG-104 Phase 1 runtime: **VERIFIED IN PROD**
+- BUG-104 Phase 1.1 linked-event path: **VERIFIED IN PROD**
+- TMA Lead Event Bridge: **VERIFIED IN PROD**
+- Active recruitment-domain producer: **VERIFIED IN PROD**
+- Domain propagation: **VERIFIED**
+- Projects Hub read optimization (PR #365): **VERIFIED IN PROD**
+
+**מה עדיין לא הוכרע:** מצב `FEATURE_CORE_REASONING_LEADS_STATE` הנוכחי בפרודקשן (ראו הערה פתוחה למעלה); ה"החלטה ארכיטקטונית רחבה" המקורית (U1, למעלה) על חיבור `leads_adapter.py`/`FEATURE_DECISION_HUB` **עדיין לא הוכרעה** — האימות הזה מוכיח שהצנרת הטכנית עובדת קצה-לקצה, לא שההחלטה הארכיטקטונית הרחבה נסגרה. השלב הבא המתוכנן: Phase 2A — Current State Policy, כ-Audit+SPEC בלבד, ללא קוד.
+
+---
+
 ## BUG-101 (umbrella) — ייבוא ייצוא-WhatsApp: כשל מצטבר בגבולות הודעה — ✅ VERIFIED IN PROD (12/07/2026)
 
 - **תאריך:** 12/07/2026

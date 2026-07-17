@@ -6,6 +6,10 @@ All notable repository-level changes should be recorded here.
 
 > **Note:** PRs #348–#353 (PA-01 saga — see `ROADMAP.md`'s 16/07/2026 entry) are not yet itemized here individually; this is a known, separate documentation gap, not addressed in this update.
 
+- **PR #364: governance docs sync for #354–#362** (`1d31aab`, merge `80fdfae`) — updated `ROADMAP.md`, `CHANGELOG.md`, and `CHANGE_CONTROL_LOG.md` with the nine merged work items below. Explicitly preserved the separate historical boundaries instead of silently expanding scope: this changelog still lacks individual #348–#353 entries, and Change Control still lacks #327–#353 after C111.
+
+- **PR #363: AI context daily briefing refresh** (`28d4f09`, merge `60991c1`) — changed `AI_CONTEXT.md` only. It summarized #354–#362 but did not update `ROADMAP.md`, `CHANGELOG.md`, or `CHANGE_CONTROL_LOG.md`; the actual governance-doc fix was PR #364.
+
 - **PR #362: PR-RP4 — shadow evidence finalizer** (`3a3edbe`) — new `core/turn_evidence.py`, wired into `app.py`; `FEATURE_EVIDENCE_FINALIZER` off/shadow/enforce, default `off`. Even `"enforce"` is comparison-only for now (real enforcement deferred to RP5). New `test_turn_evidence_shadow.py`.
 
 - **PR #361: TMA — temporarily hide saas-domain card from Projects Hub** (`bee46b5`) — `tma_api.py::_get_project_cards()` now skips any ProjectsHub record whose `domain == "saas"` from the `GET /api/projects` response only. The Airtable record, its `slug`, and its `domain` field are untouched — display-layer filter, not a data change. Opened via `--force` past `pre_session_gate.sh` (3 unrelated unmerged branches at the time, approved explicitly).
