@@ -2,7 +2,7 @@
 
 **Status:** שכבת-על יחידה — מאחד את `BOSS_ROADMAP_CONTINUATION.md` ו-`BOSS_UNIFIED_MASTER_PLAN_v2.md`.
 **לא מחליף את `ROADMAP.md`** — אינו נוגע, משנה, או ממספר מחדש שום C/N/F קיים שם. רק מפנה אליהם.
-**עודכן:** 12/07/2026 | **Owner:** אליהו
+**עודכן:** 17/07/2026 | **Owner:** אליהו
 
 ---
 
@@ -67,6 +67,7 @@
 | יוזמה / מסמך | היקף | Horizon מקביל | שלב נוכחי בפועל | הצעד הבא שהוחלט |
 |---|---|---|---|---|
 | `ROADMAP.md` | C/N/F ליבה + באגים | H0 | ראה Current Execution Status בקובץ עצמו | ראה טבלת Next Actions שם |
+| F52 Unified Approval Runtime — Unified User Messages | Message UX / Approval Runtime | H0 | PR 0 documentation/audit ready for merge — התכנון והאודיט הושלמו ותועדו; היישום טרם התחיל | PR 1 Message Contract Foundation בלבד, ללא חיבור ל־production |
 | Approval Policy Single Source (F52→C83) | Core/Security | H0 | ✅ C83 סגור ומאומת — `event_bus.ACTIONS_REQUIRING_APPROVAL` הוא alias טהור ל-`tool_registry.TOOLS_REQUIRING_APPROVAL`, לא רשימה עצמאית (ר' ROADMAP.md §C83). **BUG-077** (אומת מחדש באותה בדיקה, לא נפתח כפול): 🟡 **תוקן במלואו בקוד 07/07/2026 (root cause + תסמין), טרם ממוזג** — התסמין החי (Tier 3, PR #250, ✅ ממוזג) **וגם** ה-root cause הארכיטקטוני (`propose_action()` כעת מאמת `requires_approval` מול `tool_registry.needs_approval()`, פרט ל-`self_confirm` carve-out; נדרש גם לתקן את `core/lead_candidate_handler.py::_write_one_lead()` שהיה עם payload שגוי שמנע ממנו לקבל self_confirm) סגורים. ר' `BUG_AUDIT_LOG.md` BUG-077 לפירוט מלא, כולל קונפליקט שהתגלה עם יישום נאיבי-מדי ותוקן לפני push. | לאמת בפרוד אחרי מיזוג — ראה `BUG_AUDIT_LOG.md` BUG-077. |
 | `BOSS_Marketing_Execution_Map.md` | Revenue Execution | H1-H2, H5 | גל 1 (הפעלת הלולאה הקיימת) — טרם אומת בפרוד | להדליק `LEAD_CAPTURE=true` ולאמת (זהה ל-H1.1) |
 | Decision Hub | Trust/Decision loop | H3 | Stage 0-1 merged, flag off, לא verified. **BUG-DH-03/04** (formula injection) 🟡 תוקן בקוד, **✅ ממוזג ל-main** (PR #251, `d51e6be`; תוקן 07/07/2026, רשומה קודמת טענה "טרם ממוזג" בטעות) — `tools/airtable_gateway._safe_formula_param()`, `cmd_decision.py`/`decision_pipeline.py`, `test_bugdh03_04_formula_injection.py` 15/15, ר' BUG_AUDIT_LOG.md BUG-036/BUG-037. **לא מאומת בפרוד.** | לא להפעיל `FEATURE_DECISION_HUB` עד production evidence (המיזוג עצמו כבר בוצע) |
