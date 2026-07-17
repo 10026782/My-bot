@@ -39,6 +39,14 @@ INFRA / DATA:
                                  (evidence-derived status compared and safely logged; user
                                  text unchanged) / "enforce" (accepted but still shadow-only
                                  in PR-RP4). Read through get_evidence_finalizer_state().
+  FEATURE_UNIFIED_STATUS_FORMATTER - F52: routes ActionGateway.compose_status_reply()
+                                 through the single canonical formatter
+                                 (core/agent_message_formatter.format_agent_message).
+                                 "off" (default, legacy status text byte-identical to
+                                 before) / "shadow" (unified output computed + logged next
+                                 to legacy, legacy still sent) / "on" (unified output sent).
+                                 Read through get_unified_status_formatter_state(). Fails
+                                 closed to "off". Independent of FEATURE_ACTION_GATEWAY.
 
 INTEGRATIONS:
   VOICE_IVR                   - קו טלפוני Twilio IVR (F07)
@@ -256,6 +264,7 @@ def is_enabled(name: str) -> bool:
 _SCHEMA_PROVIDER_STATES = ("off", "shadow", "enforce")
 _TOOL_AVAILABILITY_STATES = frozenset({"off", "shadow", "enforce"})
 _EVIDENCE_FINALIZER_STATES = frozenset({"off", "shadow", "enforce"})
+_UNIFIED_STATUS_FORMATTER_STATES = frozenset({"off", "shadow", "on"})
 
 
 def get_tool_availability_filter_state() -> str:
@@ -268,6 +277,25 @@ def get_evidence_finalizer_state() -> str:
     """Return RP4's rollout state; enforce remains comparison-only until RP5."""
     value = os.environ.get("FEATURE_EVIDENCE_FINALIZER", "off").strip().lower()
     return value if value in _EVIDENCE_FINALIZER_STATES else "off"
+
+
+def get_unified_status_formatter_state() -> str:
+    """
+    Three-state accessor for FEATURE_UNIFIED_STATUS_FORMATTER (F52 — routes
+    ActionGateway.compose_status_reply() through the single canonical formatter
+    core/agent_message_formatter.format_agent_message):
+
+      off    — legacy compose_status_reply text, byte-identical to before F52.
+      shadow — the unified formatter output is computed and logged next to the
+               legacy text for comparison, but the LEGACY text is still sent.
+      on     — the unified formatter output is sent to the user.
+
+    Returns "off" for any unset/unrecognized value — fail closed to legacy
+    behavior. Read via this accessor, NOT via is_enabled() (three-state, not a
+    boolean). Independent of FEATURE_ACTION_GATEWAY.
+    """
+    value = os.environ.get("FEATURE_UNIFIED_STATUS_FORMATTER", "off").strip().lower()
+    return value if value in _UNIFIED_STATUS_FORMATTER_STATES else "off"
 
 
 def get_runtime_schema_provider_state() -> str:

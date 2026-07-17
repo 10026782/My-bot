@@ -1686,8 +1686,49 @@ class ActionGateway:
 
     # ── §15.2 — compose_status_reply ────────────────────────────────
     # הפונקציה היחידה בכל הקוד שמותר לה לייצר טקסט סטטוס-פעולה.
+    #
+    # F52 reconciliation: this remains the single entry point for action-status
+    # text, but it is no longer a second competing formatter. Under
+    # FEATURE_UNIFIED_STATUS_FORMATTER it delegates the WORDING to the one
+    # canonical formatter (core/agent_message_formatter.format_agent_message).
+    #   off    → the legacy text below, byte-identical to before F52.
+    #   shadow → unified text computed + logged next to legacy; legacy is sent.
+    #   on     → unified text is sent.
+    # The legacy renderer (_compose_status_reply_legacy) is retained only as the
+    # flag-off fallback and is slated for removal after the cutover.
 
     def compose_status_reply(self, fact: ActionFact) -> GatewayReply:
+        legacy = self._compose_status_reply_legacy(fact)
+
+        try:
+            from feature_flags import get_unified_status_formatter_state
+            state = get_unified_status_formatter_state()
+        except Exception:
+            state = "off"
+
+        if state == "off":
+            return legacy
+
+        try:
+            unified_text = self._compose_status_reply_unified(fact)
+        except Exception as exc:
+            # The live status path must never break because of the formatter.
+            logger.warning("[ActionGateway] unified status formatter failed: %s", exc)
+            return legacy
+
+        if state == "shadow":
+            logger.info(
+                "[UnifiedStatusFormatterShadow] outcome=%s legacy=%r unified=%r",
+                fact.outcome, legacy.text, unified_text,
+            )
+            return legacy
+
+        # state == "on"
+        return GatewayReply(text=unified_text, fact=fact)
+
+    def _compose_status_reply_legacy(self, fact: ActionFact) -> GatewayReply:
+        """Pre-F52 status wording. Retained only as the FEATURE_UNIFIED_STATUS_
+        FORMATTER=off fallback; do not add new call sites."""
         if fact.outcome in ("completed", "executed"):
             # BUG-PENDING-APPROVAL-B follow-up: reuse the frozen contract's
             # business description (e.g. "יצירת ליד: יוסי כהן, ...") instead
@@ -1709,6 +1750,34 @@ class ActionGateway:
         else:
             text = f"ℹ️ {fact.tool_name}: {fact.outcome}"
         return GatewayReply(text=text, fact=fact)
+
+    def _action_fact_to_message(self, fact: ActionFact) -> tuple[str, dict]:
+        """Map a structured ActionFact to the canonical formatter's
+        (state, payload). The business label comes from the frozen contract,
+        never the raw tool_name; technical ids are dropped (the formatter
+        redacts anything that slips through). Rejection/expiry are failure-family
+        variants (spec); an unrecognized outcome is outcome_unknown, never
+        success."""
+        contract = self._ledger.find_by_id(fact.contract_id) if fact.contract_id else None
+        label = _describe_contract_for_reconfirmation(contract) if contract else ""
+
+        if fact.outcome in ("completed", "executed"):
+            return "success", {"human_summary": label}
+        if fact.outcome == "pending":
+            return "approval_pending", {"human_summary": label}
+        if fact.outcome == "failed":
+            # Only the stable reason_code is passed; an unrecognized code maps to
+            # a generic human message rather than echoing the raw code.
+            return "failure", {"reason_code": fact.error_code}
+        if fact.outcome == "rejected":
+            return "failure", {"reason_code": "ACTION_REJECTED",
+                               "reason": "הפעולה נדחתה."}
+        return "outcome_unknown", {}
+
+    def _compose_status_reply_unified(self, fact: ActionFact) -> str:
+        from core.agent_message_formatter import format_agent_message
+        state, payload = self._action_fact_to_message(fact)
+        return format_agent_message(state, payload)
 
     # ── §7 §20 — query_execution_status ─────────────────────────────
     # עונה לשאלות סטטוס ("נוספה?") אך ורק מה-ExecutionLedger.
