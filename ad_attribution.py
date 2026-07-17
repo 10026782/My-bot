@@ -183,17 +183,19 @@ def record_lead_source(memory_key: str, utm: UTMParams) -> bool:
 
 
 def mark_converted(memory_key: str, deal_value: float = 0) -> bool:
-    """מסמן ליד כסגור + שווי עסקה."""
+    """מסמן ליד כסגור (status=done, Business Outcome=converted) + שווי עסקה."""
     try:
         from tools.airtable_tools import airtable_get, airtable_update  # type: ignore
+        from airtable_schema import LeadFields, LeadStatus, LeadOutcome  # type: ignore
         raw = airtable_get("Leads", f"{{memory_key}}='{memory_key}'")
         if "אין רשומות" in (raw or ""):
             return False
         rec_m = re.search(r'rec\w+', raw)
         if not rec_m:
             return False
-        fields: dict = {"status": "converted",
-                        "converted_at": datetime.now(tz=timezone.utc).isoformat()}
+        fields: dict = {LeadFields.STATUS:       LeadStatus.DONE,
+                        LeadFields.OUTCOME:      LeadOutcome.CONVERTED,
+                        LeadFields.CONVERTED_AT: datetime.now(tz=timezone.utc).isoformat()}
         if deal_value:
             fields["deal_value"] = deal_value
         result = airtable_update("Leads", rec_m.group(0), fields)
