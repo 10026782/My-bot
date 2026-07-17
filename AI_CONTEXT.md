@@ -6,7 +6,7 @@
 > `BOSS_CURRENT_STATE.md` ארכיון היסטורי (עודכן לאחרונה 26/06/2026, עם תוספות עד 07/07) —
 > **לא** מקור אמת נוכחי; main + ROADMAP גוברים עליו בכל סתירה.
 
-**עודכן:** 2026-07-17 · **main:** `ba579f2` · **סטטוס:** ראו §1
+**עודכן:** 2026-07-17 · **main:** `ba579f2` · **branch status:** PR #366 Draft, documentation-only · **סטטוס:** ראו §1
 
 **⚠️ פער תיעוד פעיל (חוזר):** מאז הבריפינג הקודם (16/07, `2be2472`) מוזגו ל-`main` **6 PRs / 9 commits נוספים** (#354–#362) — **אף אחד מהם לא מתועד** ב-`ROADMAP.md` (ה-`עודכן:` העליון עדיין 16/07/PA-01), `CHANGELOG.md`, או `CHANGE_CONTROL_LOG.md`. זהו אותו דפוס פער שכבר תועד בעדכון הקודם (PRs #327-#351) — חוזר על עצמו. פירוט המיזוגים הלא-מתועדים ב-§3.
 
@@ -20,6 +20,7 @@
 - **סדרת PR-RP0→RP4 חדשה (Runtime Reliability & Permission Hardening)** — לא הייתה קיימת בעדכון הקודם: RP0 (ספק תכנון, docs-only), RP1 (ולידציית invariants ל-`tool_registry.py`, **תמיד פעילה, לא flag-gated**), RP2 (shadow diagnostics לזמינות כלים), RP3 (מסנן schema לכלים לא-זמינים בפועל — `FEATURE_TOOL_AVAILABILITY_FILTER` off/shadow/**enforce**, ברירת מחדל `off`), RP4 (evidence finalizer — `FEATURE_EVIDENCE_FINALIZER` off/shadow/enforce, ברירת מחדל `off`, "enforce" עדיין comparison-only עד RP5). כל השרשרת flag-gated OFF/לא-פעילה בפרודקשן פרט ל-RP1 (תמיד-פעיל, מקומי בלבד — לא נוגע ב-runtime dispatch).
 - **BUG-104 bridge** — כתיבות ליד מה-TMA (owner-immediate + manager-approved) עכשיו כותבות גם ל-`Lead Events` (לא רק inbound chat) — סוגר פער-ראיה שה-reasoning projection היה תלוי בו.
 - **TMA:** כרטיס domain="saas" הוסתר זמנית מ-Projects Hub (display-only filter, אין שינוי נתונים/Airtable).
+- **F52 Unified Approval Runtime — Unified User Messages** (`docs/architecture/f52-unified-approval-runtime/`) — PR #366 הוא Draft documentation-only: תקן UX, מפת נקודות פלט, החלטת `display_payload` ותוכנית יישום מדורגת. התכנון והאודיט הושלמו ותועדו; היישום טרם התחיל. הצעד הבא לאחר מיזוג ובדיקה הוא PR 1 — Message Contract Foundation בלבד, מנותק מנתיבי production. **שונה מ-PA-01**: PA-01 חי תחת `docs/architecture/turn-coordinator/` — תוכנית TurnCoordinator נפרדת שצורכת את audit maps של F52 כקלט אך אינה מחליפה אותה.
 - פריטים שנשארו כפי שהיו מהעדכון הקודם, **לא נבדקו בסבב הזה**: PR #341 (Single-Speaker fix) — ממוזג, לא production-verified; C81-FU/C82-FU — ללא ראיה שטופלו; נזק ידוע ברשומת Airtable `recRvK6hFTNgyj8ag`; חשד לקבצי `test_*.py` בסגנון pytest שרצים ירוק ב-CI בלי assertion אמיתי.
 
 ---
@@ -33,7 +34,8 @@
 - BUG-104 Core Reasoning Phase 1 (+1.1) — `off`, read-only Leads projection בלבד, אין קורא production.
 - RP2/RP3 Tool Availability Filter — `off`, shadow diagnostics קיימות אך לא נצפו בפרודקשן.
 - RP4 Evidence Finalizer — `off`, shadow-only גם ב-"enforce" (עד RP5).
-- Phase 4B Atomic Claims, F52 Unified Approval Runtime — ללא שינוי, `off`, תכנון/קוד ממתין.
+- Phase 4B Atomic Claims — ללא שינוי, `off`, תכנון/קוד ממתין.
+- F52 Unified Approval Runtime — Unified User Messages — PR #366 documentation-only מוכן לבדיקת מיזוג אחרונה. התכנון והאודיט הושלמו ותועדו; היישום טרם התחיל. PR 1 הבא מוגבל ל־Message Contract Foundation מנותק מנתיבי production; אין קוד production במסגרת PR #366.
 - C90, Lead Scoring/Memory/Followup (N02-N04), Decision Hub — ללא שינוי, code done/flags off.
 
 **חסום:**

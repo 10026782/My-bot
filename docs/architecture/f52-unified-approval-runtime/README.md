@@ -31,6 +31,9 @@ Phase 4C remains as a historical research identifier only.
     dimensions on top of the AP-01..AP-50 inventory; does not replace it):
    `audits/phase-4c/TURN_OWNERSHIP_EXTENSION.md`
 
+3c. Unified user-message output baseline:
+   `audits/phase-4c/AGENT_MESSAGE_OUTPUT_MAP.md`
+
 4. Migration analysis:
    `research/MIGRATION_OPTIONS.md`
 
@@ -40,8 +43,14 @@ Phase 4C remains as a historical research identifier only.
 6. Canonical implementation specification:
    `spec/F52_UNIFIED_APPROVAL_RUNTIME_SPEC.md`
 
+6b. User-message semantic and UX standard:
+   `spec/UNIFIED_MESSAGE_UX_STANDARD.md`
+
 7. Rollout authority:
    `rollout/`
+
+7b. Incremental message-standard implementation plan:
+   `rollout/UNIFIED_MESSAGE_IMPLEMENTATION_PLAN.md`
 
 8. Decision history:
    `decisions/DECISION_LOG.md`
