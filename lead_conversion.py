@@ -17,7 +17,7 @@ import re
 from datetime import datetime, timezone
 
 from feature_flags import is_enabled
-from airtable_schema import Tables, LeadFields
+from airtable_schema import Tables, LeadFields, LeadStatus, LeadOutcome
 from crm import crm_add_contact
 
 logger = logging.getLogger(__name__)
@@ -91,13 +91,14 @@ def convert_lead_to_contact(query: str) -> tuple[bool, str]:
     contact_id = rec_m.group(0) if rec_m else ""
 
     patched = _at_patch(Tables.LEADS, lead["id"], {
-        LeadFields.STATUS:       "converted",
+        LeadFields.STATUS:       LeadStatus.DONE,
+        LeadFields.OUTCOME:      LeadOutcome.CONVERTED,
         LeadFields.CONVERTED_AT: datetime.now(tz=timezone.utc).isoformat(),
     })
 
     msg = f"✅ הליד *{name}* הומר לאיש קשר חדש.\n{contact_result}"
     if not patched:
-        msg += "\n⚠️ (סטטוס הליד לא עודכן ל-converted — בדוק ידנית ב-Airtable)"
+        msg += "\n⚠️ (סטטוס/Business Outcome של הליד לא עודכנו — בדוק ידנית ב-Airtable)"
 
     logger.info(f"[LeadConversion] '{query}' → {name} → contact {contact_id or '?'}")
     return True, msg

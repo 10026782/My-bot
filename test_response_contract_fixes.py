@@ -242,7 +242,7 @@ if still_present:
 # already accounted for by the known-legitimate airtable_get lines.
 _LEGITIMATE_AIRTABLE_GET_ENTRIES = {
     ("ad_attribution.py", 172, "rec"),
-    ("ad_attribution.py", 192, "rec"),
+    ("ad_attribution.py", 193, "rec"),  # shifted +1 by BUG-105's added LeadStatus/LeadOutcome import
     ("inbound_handler.py", 52, "rec"),
     ("inbound_handler.py", 66, "rec"),
 }
