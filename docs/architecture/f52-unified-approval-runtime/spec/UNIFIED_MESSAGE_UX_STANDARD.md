@@ -47,7 +47,7 @@ single public API.
 
 ## Message states
 
-The first formatter version supports exactly six states:
+The first formatter version supports exactly seven states:
 
 | State | Meaning | Required evidence |
 |---|---|---|
@@ -57,10 +57,48 @@ The first formatter version supports exactly six states:
 | `approval_batch` | Several frozen business actions await selection/approval | Durable contracts plus safe item payloads |
 | `clarification` | User input is required before a safe decision | Prompt plus at most three safe choices |
 | `idle` | No action is pending or being claimed | Verified absence/neutral state |
+| `unverified_effect` | There is an indication that a process or side effect may have occurred, but there is not enough verified evidence to report success, normal failure, or valid approval_pending | Partial evidence plus stable `reason_code`; no success evidence |
 
 Cancellation, rejection, expiry and unverified outcomes are failure-family
 variants with distinct stable reason codes; they do not create additional public
-states in formatter version 1.
+states in formatter version 1. `unverified_effect` is the exception: RP5 needs a
+distinct public state for cases where a side effect may have happened but the
+system cannot truthfully classify it as success, normal failure, or valid
+approval pending.
+
+## `unverified_effect` UX rules
+
+The formatter must treat `unverified_effect` as a manual-review state:
+
+- never render it as success;
+- never render it as normal pending approval;
+- require manual review or an explicit state check before continuing;
+- never suggest or trigger automatic retry;
+- never expose internal IDs, tool names, payloads, credentials, raw provider
+  data, raw exceptions, or model-generated success text.
+
+This state is used when the system has enough indication to avoid pretending
+"nothing happened", but not enough verified evidence to claim a completed
+business result, a clean failure, or a safe approval waiting state.
+
+## Relationship to RP5 Evidence Contract
+
+RP5 owns evidence-derived classification and state. It decides, from backend
+evidence, whether the state is `success`, `failure`, `approval_single`,
+`approval_batch`, `clarification`, `idle`, `unverified_effect`, or another
+internal state mapped into the public formatter contract.
+
+The UX formatter owns final user-facing wording. RP5 example strings are backend
+meaning examples, not final production copy. `format_agent_message(state,
+payload)` may soften wording for clarity, channel fit, and user tone, but it may
+not change truth.
+
+The formatter must never upgrade a state:
+
+- `approval_pending` must not become `executed`;
+- `outcome_unknown` must not become `success`;
+- `verified_read_only` must not become mutation success;
+- `unverified_effect` must not become success or regular pending.
 
 ## Display payload
 
