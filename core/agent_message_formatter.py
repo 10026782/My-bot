@@ -196,11 +196,13 @@ class _Redactor:
         # 6. Neutralize injected execution claims inside the value.
         text = self._sub(_INJECTED_CLAIM_RE, text)
 
-        # 7. Tidy leftover id-labels and whitespace.
+        # 7. Tidy leftover id-labels, whitespace, and separators left dangling
+        #    by redaction (e.g. a redacted trailing token leaving "..., ").
         text = _ID_LABEL_RE.sub("", text)
         text = re.sub(r"[ \t]{2,}", " ", text)
         text = re.sub(r"\s+([,.;:])", r"\1", text)
-        text = text.strip(" \t|·•-:")
+        text = re.sub(r"([,/;:])(?:\s*[,/;:])+", r"\1", text)   # collapse adjacent seps
+        text = text.strip(" \t|·•,-:/")
 
         # 8. Restore protected business tokens.
         for key, original in protected.items():

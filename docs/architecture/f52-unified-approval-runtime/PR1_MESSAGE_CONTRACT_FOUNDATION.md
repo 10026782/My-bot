@@ -71,12 +71,21 @@ recorded here so a later PR reconciles them rather than leaving silent drift:
 1. **Standalone module vs. adapting `ActionGateway.compose_status_reply()`.**
    The spec says PR 1 should "extract or adapt `compose_status_reply()` into a
    channel-neutral formatter … it must not introduce a competing formatter."
-   This PR instead creates an isolated module and leaves `compose_status_reply()`
-   untouched, because the PR-1 scope explicitly forbids changing `ActionGateway`
-   behavior and requires zero runtime change. `compose_status_reply()` today
-   exposes exactly what the standard forbids (raw `record_id`, `tool_name`,
-   backtick markup, passive "בוצע"). A follow-up PR should route it through
-   `format_agent_message()` so exactly one formatter survives.
+   PR 1 created an isolated module and left `compose_status_reply()` untouched,
+   because the PR-1 scope forbade changing `ActionGateway` behavior.
+
+   **RESOLVED (follow-up):** `compose_status_reply()` now delegates its wording
+   to `format_agent_message()` behind the three-state
+   `FEATURE_UNIFIED_STATUS_FORMATTER` flag (`off`/`shadow`/`on`, default `off`).
+   With the flag `off` the legacy text is byte-identical to before F52;
+   `shadow` computes and logs the unified text beside the legacy one but still
+   sends legacy; `on` sends the unified text (dropping `record_id`/`tool_name`,
+   mapping error codes to human text, first-person success). The legacy renderer
+   is retained only as `_compose_status_reply_legacy()`, the flag-`off`
+   fallback, and is slated for removal after the cutover. See
+   `test_f52_status_reply_reconciliation.py`. There is now one canonical
+   formatter; the legacy path is a bounded, flag-gated fallback, not a competing
+   live formatter.
 
 2. **`human_summary` as a primary payload input.** The spec deprecates
    free-form `human_summary` to an untrusted compatibility hint in favor of a
