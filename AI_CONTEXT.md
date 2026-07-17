@@ -6,7 +6,7 @@
 > `BOSS_CURRENT_STATE.md` ארכיון היסטורי (עודכן לאחרונה 26/06/2026, עם תוספות עד 07/07) —
 > **לא** מקור אמת נוכחי; main + ROADMAP גוברים עליו בכל סתירה.
 
-**עודכן:** 2026-07-17 (המשך אותו יום, אחרי מיזוג #373) · **main:** `fa29514` · **סטטוס:** ראו §1 — אין ענף פעיל פתוח כרגע (כל PRs #367–#373 ממוזגים)
+**עודכן:** 2026-07-17 (המשך אותו יום, אחרי מיזוג #379) · **main:** `8e94da9` · **סטטוס:** ראו §1 — אין ענף פעיל פתוח כרגע (כל PRs #367–#379 ממוזגים)
 
 ---
 
@@ -16,10 +16,14 @@
 - **BUG-104 — VERIFIED IN PROD:** Phase 1 (reasoning projection) + Phase 1.1 (status vocabulary + linkage hardening) + TMA Lead Event Bridge (PR #354/#357/#360) אומתו קצה-לקצה בפרודקשן. ראו `BUG_AUDIT_LOG.md`'s BUG-104 להיסטוריה המלאה.
 - **BUG-104 Phase 2A.0 — SPEC-only, ללא קוד (PR #370):** מסמך audit+SPEC תחת `docs/architecture/bug-104/PHASE_2A0_LEADS_SCHEMA_CANONICALIZATION_SPEC.md` — אינוונטר סכמת Leads חי + ערכים חיים + מפת read/write בקוד + מודל קנוני מוצע (`status`/`Business Outcome`/`Score`/`domain` כקנוניים; 6 שדות formula כ-display-only; `tier`/`Domain category`/`Domain risk assessment`/`Domain summary` כמועמדי-ניקוי — ריקים/לא-אמינים בפועל). **אין קוד runtime — ניקוי הסכמה עצמה עדיין ממתין לאישור owner.**
 - **BUG-104 Phase 2A.1 — Current State Policy — קוד ממוזג ומאומת ב-main, ⚠️ לא runtime-verified בפרודקשן (PR #373, `48b90c4`, merge `fa29514`):** ה-SPEC (PR #371, `docs/architecture/bug-104/PHASE_2A1_CURRENT_STATE_POLICY_SPEC.md`) יושם בפועל. ה-flag (`FEATURE_CORE_REASONING_LEADS_STATE`) נשאר `off`/`shadow`, כך שלמדיניות **אין עדיין effect על production traffic** — "מאומת" כאן = merge ל-main + כל חבילות הבדיקה ירוקות, לא בדיקה מול תעבורה חיה. `core/leads_reasoning_projection.py` מעביר עכשיו את `Business Outcome` ל-adapter (הוסף ל-`_LIVE_TO_ADAPTER_FIELDS`); `core/adapters/leads_adapter.py::_normalise_status()` מיישם precedence — Business Outcome טרמינלי (`converted`→DECIDED_YES, `lost`/`not_relevant`→DECIDED_NO, `duplicate`/`archived`→CANCELLED) גובר על status; אם לא טרמינלי, status קובע לפי מיפוי מורחב שמכסה את כל 10 ערכי ה-`Leads.status` החיים (לעומת קודם — רק `new`/`lost` היו ממופים בכוונה, השאר (כולל `done`, הערך הקנוני ל"הומר") נפלו ל-`OPEN`). `Score`/`tier`/`Next Action`/`Next Followup`/`Domain*` נשארים מחוץ למדיניות, כנדרש. בדיקה חדשה `test_bug104_phase2a1_current_state_policy.py` (52/52) + כל בדיקות BUG-104 הקיימות (Phase 1: 102/102, Phase 1.1: 57/57, `test_core_reasoning.py`: 59/59) ירוקות ללא שינוי, מאומת מול `main` מסונכרן לאחר המיזוג. **אין שינוי סכמה/מיגרציה/frontend/flag** — `FEATURE_CORE_REASONING_LEADS_STATE` נשאר `off`/`shadow` לפי סביבה, בדיוק כמו לפני.
+- **BUG-104 Phase 2A.2 — Lead-specific evidence & next_step wording — קוד ממוזג ומאומת ב-main, ⚠️ לא runtime-verified בפרודקשן (PR #377, `df3e1ab`, merge `d0a236b`):** `core/leads_reasoning_projection.py::_apply_lead_wording()` חדש — post-processing טהור של `missing_evidence`/`next_step` שה-engine המשותף (בנוי ל-Decisions) מחזיר, לניסוח Lead-מתאים ("חסרה היסטוריית טיפול בליד" במקום "אין אירועים מקושרים"/"מסמך תומך"; "הוסף הערת טיפול או עדכן תוצאת ליד"/"סקור את היסטוריית הטיפול והחלט על המשך" במקום ניסוחי Decision גנריים). `missing_evidence` מתאפס לחלוטין ב-phase טרמינלי (DECIDED/CLOSED) כדי שליד סגור לעולם לא "ייפתח מחדש" ע"י רמז ראיות ישן. **אין שינוי ל-state/confidence/precedence** — טהור ניסוח. `test_bug104_phase2a2_lead_wording.py` חדש (37/37) + כל 5 חבילות BUG-104 הקיימות ירוקות ללא שינוי.
+- **BUG-104 Phase 2A closeout (PR #376, `3e7dff7`, merge `8fd7fda`):** `docs/architecture/bug-104/PHASE_2A_CLOSEOUT.md` חדש — מסכם 2A.0/2A.1 SPEC + BUG-110 + יישום 2A.1, כולל סעיף "Runtime Evidence from Operator-Provided Render Logs" (לוגי shadow שנמסרו ע"י ה-operator, מתויגים במפורש כלא-מאומתים-עצמאית ע"י ה-branch/agent), מגבלות ידועות, ואפשרויות המשך מומלצות (A/B/C).
+- **BUG-104 / CR_OBS_LOG — Compact Lead Reasoning Log (PR #378, `a0bb3ef`, merge `62f0d86`):** `tma_api.py::_format_lead_reasoning_log()` חדש — שורת log קומפקטית אחת (`[LeadReasoning] lead=... mode=... status=... outcome=... state=... events=... lead_score=... degraded=... errors=...`) לכל חישוב פרויקציה (shadow/on), ללא PII (אין טלפון/שם/notes/תוכן אירוע, שגיאות כ-COUNT בלבד לא כטקסט מלא). ללא קריאת Airtable נוספת. `test_bug104_lead_reasoning_log.py` חדש (21/21).
+- **RP5 (Evidence Finalizer enforcement) — preflight audit, PR #379 (`a8d269c`, merge `8e94da9`):** `RP5_PREFLIGHT_BLOCKER.md` חדש. **ממצא חוסם:** RP4 (`core/turn_evidence.py`, PR #362) קוד-שלם ומכוסה-בדיקות אך `FEATURE_EVIDENCE_FINALIZER` נשאר `off` בפרודקשן ו-`"enforce"` נשאר comparison-only עד RP5 — **אין עדיין דגימות shadow אמיתיות מפרודקשן**. שלוש החלטות בעלים בסבב הזה: (1) הפעלת shadow תהיה גלובלית (לא owner-gated בקוד — shadow לא משנה `final_reply` בכלל, כך שאין סיכון); (2) RP5 ימתין ל-F52 PR 1 (Message Contract Foundation) לפני בניית renderer; (3) PA-01 ממשיך לקבל עדיפות על RP5 בסדר הקריאות הקיים ב-`app.py`. תוכנית איסוף דגימות ל-9 מצבי `TurnEvidenceSummary.classification()` מתועדת במסמך. **פעולה הבאה: operator עם גישת Render מגדיר `FEATURE_EVIDENCE_FINALIZER=shadow`** (מחוץ ליכולת הסשן הזה).
 - **BUG-110 — VERIFIED (PR #372):** שני נתיבי כתיבה (`lead_conversion.py`, `ad_attribution.py::mark_converted`) כתבו `status="converted"` — ערך לא-קנוני, לא ב-`LeadStatus.ALL`. תוקנו לכתוב `status=LeadStatus.DONE` + `Business Outcome=LeadOutcome.CONVERTED`. **⚠️ הערת מספור:** התיקון תויג `BUG-105` בקוד/PR/commit/שם קובץ הבדיקה (`test_bug105_non_canonical_converted_status.py`) לפני שהתגלה ש-`BUG-105` כבר תפוס ב-`BUG_AUDIT_LOG.md` (פורמט טלפון בין-לאומי עם מקף, 12/07/2026, לא קשור, עדיין פתוח) — התיעוד כאן ובקבצי הממשל משתמש ב-`BUG-110` (המספר הפנוי הבא) לפי החלטת owner מפורשת; שמות הקבצים/ה-PR עצמם **לא** שונו רטרואקטיבית. `ad_attribution.py::mark_converted()` **עדיין לא** עבר ל-canonical gateway (`tools/airtable_gateway.py`) — נשאר על `tools.airtable_tools.airtable_update` כדי לא לשבור את `test_response_contract_fixes.py`'s חוזה `result.get("ok")`; חוב טכני נפרד, מתועד לא מתוקן.
 - **תיקון debug-logging זמני — VERIFIED (PR #369):** `_log_projects_auth_debug()` (`tma_api.py`, הוכנס `9b51537` 10/07) הוסר כליל כולל 5 call sites — 19 שורות, ללא שינוי אחר להתנהגות auth. §5 למטה עודכן בהתאם (כבר לא "ממצא פתוח").
 - **TMA Projects Hub read-path optimization — VERIFIED IN PROD (PR #365):** `GET /api/projects` ירד ל-3 קריאות Airtable; `income_this_month`/`pending_payments_count`/`pending_payments_amount` הוסרו; `hot_leads_count` שינה משמעות (מאושר).
-- **PA-01 / RP0-RP4 / F52** — ללא שינוי מהותי מאז הבריפינג הקודם: כולן flag-gated `off` פרט ל-RP1 (תמיד-פעיל, מקומי). F52 PR #366 מוזג (§3).
+- **PA-01 / RP0-RP4 / F52** — כולן flag-gated `off` פרט ל-RP1 (תמיד-פעיל, מקומי). F52 PR #366 מוזג (§3). **RP5 עבר preflight audit (למעלה) — חסום, לא קוד.**
 - פריטים שנשארו כפי שהיו, **לא נבדקו בסבב הזה**: PR #341 (Single-Speaker fix) — ממוזג, לא production-verified; C81-FU/C82-FU — ללא ראיה שטופלו; נזק ידוע ברשומת Airtable `recRvK6hFTNgyj8ag`; חשד לקבצי `test_*.py` בסגנון pytest שרצים ירוק ב-CI בלי assertion אמיתי.
 
 ---
@@ -29,10 +33,10 @@
 **עובד בפרודקשן:** Telegram + WhatsApp(Twilio) inbound עם Identity resolution; Airtable Gateway כנתיב-כתיבה יחיד (fail-closed); Approval flow; Daily Digest; Finance Pulse; TMA (read path מותאם, ללא debug-log רעש); Cost Watchdog; C94 Ingress Envelope; חילוץ-ליד מ-WhatsApp; RP1 tool-registry invariants (תמיד פעיל); TMA Lead Event Bridge (verified in prod); **`lead_conversion.py`/`ad_attribution.py::mark_converted()` כותבים `status=done`+`Business Outcome=converted` (לא `status="converted"`) — BUG-110, PR #372.**
 
 **מיושם חלקית / ממתין להפעלה (קוד מוכן, flag כבוי):**
-- BUG-104 Core Reasoning Phase 1 (+1.1) — קוד וקריאה/כתיבה אומתו בפרודקשן. **+ Phase 2A.1 (PR #373)** — קוד ממוזג ומאומת ב-main/בדיקות בלבד, עדיין לא runtime-verified מול תעבורה חיה. החלטת owner על הפעלת `FEATURE_CORE_REASONING_LEADS_STATE` בקנה מידה עדיין לא התקבלה — ה-flag עדיין `off`/`shadow`, כך שהמדיניות עדיין לא משפיעה על תגובות ה-API בפועל.
+- BUG-104 Core Reasoning Phase 1 (+1.1) — קוד וקריאה/כתיבה אומתו בפרודקשן. **+ Phase 2A.1 (PR #373) + Phase 2A.2 wording (PR #377)** — קוד ממוזג ומאומת ב-main/בדיקות בלבד, עדיין לא runtime-verified מול תעבורה חיה. החלטת owner על הפעלת `FEATURE_CORE_REASONING_LEADS_STATE` בקנה מידה עדיין לא התקבלה — ה-flag עדיין `off`/`shadow`, כך שהמדיניות עדיין לא משפיעה על תגובות ה-API בפועל.
 - BUG-104 Phase 2A.0 — **SPEC בלבד, ניקוי הסכמה עצמה (`tier`/`Domain category`/`Domain risk assessment`/`Domain summary`) עדיין לא בוצע.** ממתין לאישור owner (מחיקה מול השארה-ריקה-מתועדת, ראו SPEC §12).
 - PA-01 structural enforcement — `off`, ממתין להחלטת shadow rollout.
-- RP2/RP3 Tool Availability Filter — `off`. RP4 Evidence Finalizer — `off`, shadow-only גם ב-"enforce".
+- RP2/RP3 Tool Availability Filter — `off`. RP4 Evidence Finalizer — `off`, shadow-only גם ב-"enforce". **RP5 preflight (§1) קבע: חסום עד לדגימות shadow אמיתיות — operator בתהליך הפעלת `FEATURE_EVIDENCE_FINALIZER=shadow` בפרודקשן (מחוץ לסבב הזה).**
 - Phase 4B Atomic Claims — ללא שינוי, `off`.
 - F52 Unified Approval Runtime PR 0 — מוזג (PR #366), documentation-only. PR 1 (Message Contract Foundation) עדיין לא נפתח.
 - C90, Lead Scoring/Memory/Followup (N02-N04), Decision Hub — ללא שינוי, code done/flags off.
@@ -55,19 +59,25 @@
 5. **PR #371 — BUG-104 Phase 2A.1 SPEC** (`fde5c51`, merge `7894bd0`) — `docs/architecture/bug-104/PHASE_2A1_CURRENT_STATE_POLICY_SPEC.md` חדש. Audit+SPEC בלבד, אין קוד; מתעד עובדתית ש-`Business Outcome` לא נכנס ל-reasoning entity היום.
 6. **PR #372 — BUG-110: תיקון non-canonical `status="converted"`** (`fa1506e`, merge `b344b02`) — ראו §1. 4 קבצים, כולל בדיקה חדשה (10/10) ותיקון line-number מכני ב-baseline קיים.
 7. **PR #373 — BUG-104 Phase 2A.1: יישום Current State Policy** (`48b90c4`, merge `fa29514`) — ראו §1. יישום ה-SPEC מ-PR #371: Business Outcome precedence + מיפוי status מורחב ב-`core/adapters/leads_adapter.py`/`core/leads_reasoning_projection.py`. 3 קבצים (2 שינוי + בדיקה חדשה), 52 בדיקות חדשות + 4 חבילות בדיקה קיימות (102+57+46+59) ירוקות ללא שינוי. אין שינוי סכמה/מיגרציה/frontend/flag.
+8. **PR #375 — docs sync AI_CONTEXT.md עבור PR #373** (`64d6bbb`, merge `e3ce5a4`) — docs בלבד.
+9. **PR #376 — BUG-104 Phase 2A closeout note** (`3e7dff7`, merge `8fd7fda`) — ראו §1. `docs/architecture/bug-104/PHASE_2A_CLOSEOUT.md` חדש, כולל operator-provided shadow log evidence מתויג בבירור כלא-מאומת-עצמאית.
+10. **PR #377 — BUG-104 Phase 2A.2: Lead-specific wording** (`df3e1ab`, merge `d0a236b`) — ראו §1. `core/leads_reasoning_projection.py::_apply_lead_wording()` חדש, 37 בדיקות חדשות + 5 חבילות בדיקה קיימות ירוקות ללא שינוי. ניסוח בלבד, אין שינוי state/confidence.
+11. **PR #378 — BUG-104 / CR_OBS_LOG: Compact Lead Reasoning Log** (`a0bb3ef`, merge `62f0d86`) — ראו §1. `tma_api.py::_format_lead_reasoning_log()` חדש, 21 בדיקות חדשות. ללא PII, ללא קריאת Airtable נוספת.
+12. **PR #379 — RP5 preflight audit** (`a8d269c`, merge `8e94da9`) — ראו §1. `RP5_PREFLIGHT_BLOCKER.md` חדש — ממצא חוסם + תוכנית איסוף דגימות + 3 החלטות owner. Docs בלבד.
 
 ---
 
 ## 4. Next Priorities
 
-1. **החלטת owner: הפעלת `FEATURE_CORE_REASONING_LEADS_STATE`** — הקוד (Phase 1 + 1.1 + 2A.1) קיים ומאומת ב-main; המדיניות עדיין לא נצפית ב-production traffic כי ה-flag נשאר `off`/`shadow`. יש להחליט אם לעבור ל-`shadow` בפרודקשן לצפייה, ואיזה open question מ-`PHASE_2A1_CURRENT_STATE_POLICY_SPEC.md` §11 (שמות enum ל-state, מיפוי terminal-administrative ל-phase, טיפול ב-status=`done` בלי Business Outcome תואם) דורש עוד החלטה לפני `on`.
-2. **החלטת owner: ניקוי סכמת Phase 2A.0** — `tier`/`Domain category`/`Domain risk assessment`/`Domain summary` מתועדים כמועמדי-מחיקה (SPEC §12) אך עדיין לא נמחקו/טופלו בפועל.
-3. **חוב טכני (BUG-110, נשאר פתוח במכוון):** `ad_attribution.py::mark_converted()` ל-canonical gateway; `build_attribution_report()`/`audience_intelligence.py` לעדכן את בדיקת `status=="converted"` הישנה (יחסירו לידים חדשים).
-4. **החלטת owner לגבי backfill היסטורי** — #348–#353 ב-`CHANGELOG.md`, #327–#353 ב-`CHANGE_CONTROL_LOG.md`. עדיין מסומן, לא backfilled.
-5. **החלטת owner: הפעלת PA-01/RP2-RP3/RP4 shadow modes בפרודקשן** — קוד-מוכן, `off`, ללא staged rollout plan כתוב.
-6. **🔴 Production-verify PR #341** (Single-Speaker fix) — ללא שינוי, לא נבדק.
-7. **🔴 C81-FU / C82-FU** — ללא ראיה שטופלו, carried over.
-8. **לבדוק wiring של קבצי בדיקה בסגנון pytest** מול `ci.yml` בפועל — עדיין לא אומת.
+1. **🟡 בתהליך — operator מפעיל `FEATURE_EVIDENCE_FINALIZER=shadow` ב-Render** (RP5 preflight, §1/PR #379): פעולה גלובלית, ללא code gating. לאחר ההפעלה — לאסוף לפחות דגימה אחת אמיתית לכל אחד מ-9 מצבי `TurnEvidenceSummary.classification()` (רשימה מלאה + מה לבדוק בכל אחד: `RP5_PREFLIGHT_BLOCKER.md` §3), ולבדוק שורות `mismatch=true` כבאגים פוטנציאליים. רק לאחריה RP5 (enforcement בפועל) יכול להתחיל כענף/PR נפרד.
+2. **החלטת owner: הפעלת `FEATURE_CORE_REASONING_LEADS_STATE`** — הקוד (Phase 1 + 1.1 + 2A.1 + 2A.2) קיים ומאומת ב-main; המדיניות עדיין לא נצפית ב-production traffic כי ה-flag נשאר `off`/`shadow`. יש להחליט אם לעבור ל-`shadow` בפרודקשן לצפייה, ואיזה open question מ-`PHASE_2A1_CURRENT_STATE_POLICY_SPEC.md` §11 (שמות enum ל-state, מיפוי terminal-administrative ל-phase, טיפול ב-status=`done` בלי Business Outcome תואם) דורש עוד החלטה לפני `on`.
+3. **החלטת owner: ניקוי סכמת Phase 2A.0** — `tier`/`Domain category`/`Domain risk assessment`/`Domain summary` מתועדים כמועמדי-מחיקה (SPEC §12) אך עדיין לא נמחקו/טופלו בפועל.
+4. **חוב טכני (BUG-110, נשאר פתוח במכוון):** `ad_attribution.py::mark_converted()` ל-canonical gateway; `build_attribution_report()`/`audience_intelligence.py` לעדכן את בדיקת `status=="converted"` הישנה (יחסירו לידים חדשים).
+5. **החלטת owner לגבי backfill היסטורי** — #348–#353 ב-`CHANGELOG.md`, #327–#353 ב-`CHANGE_CONTROL_LOG.md`. עדיין מסומן, לא backfilled.
+6. **החלטת owner: הפעלת PA-01/RP2-RP3 shadow modes בפרודקשן** — קוד-מוכן, `off`, ללא staged rollout plan כתוב (RP4 כוסה בפריט 1 למעלה).
+7. **🔴 Production-verify PR #341** (Single-Speaker fix) — ללא שינוי, לא נבדק.
+8. **🔴 C81-FU / C82-FU** — ללא ראיה שטופלו, carried over.
+9. **לבדוק wiring של קבצי בדיקה בסגנון pytest** מול `ci.yml` בפועל — עדיין לא אומת.
 
 ---
 
