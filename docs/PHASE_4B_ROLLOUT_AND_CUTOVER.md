@@ -57,6 +57,21 @@ None of the above changes this document's rollout sequence, gates, or the observ
 `tools/phase_4b_canary_verify.py` — they make the existing gates strictly harder to pass on paper, never
 easier.
 
+**⚠️ Known limitation — BUG-109 (override vs. atomic claim collision), open, not fixed:** Under
+`FEATURE_ATOMIC_CLAIMS=true`, an explicitly authorized override (`route_override_word()`, the "בצע שוב
+<code>" flow) re-invokes `_execute_contract()` on a contract that already has a claim row —
+`action_execution_claims.contract_id` is a single, non-composite `PRIMARY KEY`, so the override's second
+claim attempt is rejected as `already_claimed` regardless of idempotency key, and the override silently
+does not re-dispatch. `test_stage_b_full_suite.py`'s Req6 assertions ("correct override code dispatches
+again" / "consumed override code cannot re-execute") fail under this flag (134/136 passing; both failures
+here). **Owner decision (14/07/2026): do not fix and do not remove/weaken these assertions until the
+side effects of a fix are reviewed** — see `BUG_AUDIT_LOG.md`'s `BUG-109` entry for the full trace, the
+proposed (not-yet-approved) composite-key design, and the affected-files list. This gap is **not**
+currently enforced by G1 — `test_stage_b_full_suite.py` is not in
+`tools/phase_4b_rollout_readiness.py`'s `_REQUIRED_REGRESSION_TEST_FILES`, so `--run-regression-tests`
+does not surface it. Treat this as an open item to resolve or explicitly accept before any production
+environment with live traffic enables `FEATURE_ATOMIC_CLAIMS`.
+
 ---
 
 ## 1. Current production topology
