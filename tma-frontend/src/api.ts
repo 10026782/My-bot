@@ -63,8 +63,8 @@ export async function fetchDashboard(slug: string): Promise<DashboardResponse> {
   return r.json() as Promise<DashboardResponse>;
 }
 
-export async function fetchLeads(slug: string): Promise<LeadsResponse> {
-  const r = await fetch(`${BASE}/api/leads?project_slug=${encodeURIComponent(slug)}`, { headers: authHeaders() });
+export async function fetchLeads(domain: string): Promise<LeadsResponse> {
+  const r = await fetch(`${BASE}/api/leads?domain=${encodeURIComponent(domain)}`, { headers: authHeaders() });
   if (!r.ok) throw new Error(`API ${r.status}`);
   return r.json() as Promise<LeadsResponse>;
 }

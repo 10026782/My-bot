@@ -13,9 +13,6 @@ export interface ProjectCard {
 }
 
 export interface GlobalKpis {
-  income_this_month: number;
-  pending_payments_count: number;
-  pending_payments_amount: number;
   overdue_tasks: number;
   hot_leads_count: number;
 }
