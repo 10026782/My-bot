@@ -2453,3 +2453,25 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **Deployed:** לא רלוונטי.
 - **Verified בפרודקשן:** לא רלוונטי — אין קוד production שהשתנה.
 - **סטטוס:** 🔴 פתוח במכוון. Stage B: 134/136 (2 כשלים, שניהם Req6, מתועדים ומצופים). לא לתקן ולא להסיר את הבדיקות הכושלות עד החלטת בעלים מפורשת אחרי בדיקת השפעות צדדיות (ActionContract lifecycle no-op, ייחוס approved_by, כלי reconciliation/rollout-common שיזדקקו לעדכון אם הסכימה תשתנה).
+
+---
+
+## BUG-110 — Non-canonical `status="converted"` writers (Business Outcome תפוס ב-status) — ✅ תוקן, לא נבדק בפרודקשן
+
+- **תאריך:** 17/07/2026.
+- **⚠️ הערת מספור (חשוב לקרוא לפני שמחפשים "BUG-105"):** תיקון זה תויג `BUG-105` בענף/PR/commit message/שם קובץ הבדיקה (`test_bug105_non_canonical_converted_status.py`), **לפני** שהתגלה ש-`BUG-105` כבר תפוס למעלה בקובץ הזה ("פורמט טלפון בין-לאומי עם מקף — נשמט בשקט", 12/07/2026, עדיין 🟡 פתוח, **נושא שונה לגמרי, לא קשור**). לפי החלטת owner מפורשת (17/07/2026), רשומת ה-audit log משתמשת ב-**BUG-110** (המספר הפנוי הבא אחרי BUG-109) כדי לא להתנגש עם הרשומה הקיימת. **שמות הקבצים/ה-PR/ה-commit ב-`main` לא שונו רטרואקטיבית** — מי שמחפש את הקוד יחפש `bug105`/`BUG-105`, מי שמחפש בתיעוד הממשל (`BUG_AUDIT_LOG.md`/`CHANGE_CONTROL_LOG.md`/`ROADMAP.md`/`CHANGELOG.md`/`AI_CONTEXT.md`) ימצא `BUG-110`.
+- **מקור:** נמצא ב-audit של BUG-104 Phase 2A.0 (`docs/architecture/bug-104/PHASE_2A0_LEADS_SCHEMA_CANONICALIZATION_SPEC.md` §5/§7B) — מיפוי read/write מלא של שדות Leads חשף שני אתרי כתיבה עצמאיים שכותבים ערך `status` לא-קנוני.
+- **שני אתרי הכתיבה (מאומתים בקוד, לא השערה):**
+  1. `lead_conversion.py::convert_lead_to_contact()` (שורה 93-96, לפני התיקון) — `_at_patch(Tables.LEADS, lead["id"], {LeadFields.STATUS: "converted", ...})`, דרך ה-gateway (`tma_api._at_patch` → `tools/airtable_gateway.py::airtable_patch`).
+  2. `ad_attribution.py::mark_converted()` (שורה 195-196, לפני התיקון) — `airtable_update("Leads", rec_m.group(0), {"status": "converted", ...})` דרך `tools.airtable_tools.airtable_update` — **לא** דרך ה-gateway.
+- **שורש הבעיה:** `"converted"` (המחרוזת הליטרלית) **אינה** חברה ב-`LeadStatus.ALL` (`airtable_schema.py`) ואינה אופציית `Leads.status` חיה (הערכים החיים: `waiting_call/active/high_confidence/new/waiting_response/archived/lost/duplicate/not_relevant/done/ליד חדש`, מאומת ב-Airtable MCP). הערך הקנוני ל"הומר" הוא הצמד `status=LeadStatus.DONE` ("done") + `Business Outcome=LeadOutcome.CONVERTED` ("converted " — עם רווח-זנב מובנה ב-Airtable). `tma_api.py::patch_lead` עצמו מוולד מול `LeadStatus.ALL` לפני כתיבה — שני האתרים האלה עוקפים את הוולידציה הזו כי הם לא עוברים דרך אותו endpoint.
+- **תוקן:** כן. שני האתרים כותבים עכשיו `status=LeadStatus.DONE` + `Business Outcome=LeadOutcome.CONVERTED`, באמצעות הקבועים הקיימים ב-`airtable_schema.py` — אין אופציית Airtable חדשה, אין rename, אין backfill לנתונים קיימים.
+- **חוב טכני שנשאר במכוון, לא תוקן:**
+  - `ad_attribution.py::mark_converted()` **עדיין לא** עובר דרך ה-gateway הקנוני (`tools/airtable_gateway.py`) — נבדק והוערך כלא-ישים בסקופ הזה: מעבר היה משנה את חוזה ה-return של הפונקציה (`bool` מהgateway מול `dict` שנבדק היום עם `result.get("ok")`) ושובר את הבדיקה הקיימת `test_response_contract_fixes.py`.
+  - `ad_attribution.py::build_attribution_report()` (שורה 326 לפני התיקון) ו-`audience_intelligence.py` (שורה 177) שניהם קוראים `status == "converted"` לצורכי דיווח/סגמנטציה — יימשיכו לקרוא נכון נתונים ישנים (אין backfill) אך **יחסירו** לידים שהומרו **אחרי** התיקון הזה (status="done" חדש לא תואם את ההשוואה הישנה). לא תוקן, מומלץ follow-up נפרד.
+  - `lead_conversion.py`'s `lf.get(LeadFields.STATUS,"") == "converted"` (idempotency read-guard, שורה 57) נשאר ללא שינוי — לא באג: הוא OR'd עם `lf.get(LeadFields.CONVERTED_AT,"")` שנכתב תמיד יחד עם status בשני האתרים, כך שזיהוי "הומר כבר" ממשיך לעבוד נכון גם על נתונים ישנים וגם חדשים.
+- **בדיקות:** `test_bug105_non_canonical_converted_status.py` (חדש, 10/10 — שם הקובץ לא שונה, ראו הערת מספור למעלה) — מוודא ששני האתרים כותבים `status=LeadStatus.DONE`+`Business Outcome=LeadOutcome.CONVERTED`, לא `"converted"`. `test_response_contract_fixes.py` (19/19, כולל תיקון מכני של מספר-שורה קבוע ב-baseline של ה-scanner שזז ב-1 בגלל import חדש). `test_bug104_leads_reasoning_projection.py`/`test_bug104_phase1_1_contract_hardening.py`/`test_bug104_tma_lead_event_bridge.py`/`test_core_reasoning.py` — ללא שינוי, ירוקים.
+- **PR:** #372 (`fa1506e`, merge `b344b02`).
+- **Merged:** כן.
+- **Verified בפרודקשן:** לא — הכתיבות החדשות (`status=done`+`Business Outcome=converted`) עדיין לא נצפו על ליד אמיתי בפרודקשן.
+- **סטטוס:** ✅ קוד תוקן ומאומת בבדיקות, ⚠️ לא verified-in-prod. חוב טכני (gateway migration + read-side `status=="converted"` consumers) מתועד למעלה, לא נחסם ע"י זה.
