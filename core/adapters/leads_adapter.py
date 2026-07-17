@@ -83,8 +83,11 @@ class LeadsAdapter(ReasoningAdapter):
         # Domain: map lead source/product to domain
         domain = _infer_domain(fields)
 
-        # Status normalisation → standard vocabulary for engines
-        status = _normalise_status(fields.get("Status", ""))
+        # Status normalisation → standard vocabulary for engines. BUG-104
+        # Phase 2A.1: Business Outcome (when terminal) takes precedence over
+        # status — see docs/architecture/bug-104/PHASE_2A1_CURRENT_STATE_POLICY_SPEC.md.
+        raw_business_outcome = fields.get("Business Outcome", "")
+        status = _normalise_status(fields.get("Status", ""), raw_business_outcome)
 
         # Owner: assigned agent
         owner = (
@@ -122,6 +125,16 @@ class LeadsAdapter(ReasoningAdapter):
                 "phone":              fields.get("Phone") or fields.get("WhatsApp") or "",
                 "last_updated":       fields.get("Last Updated") or fields.get("Updated At") or "",
                 "created":            fields.get("Created") or fields.get("Created At") or "",
+                # BUG-104 Phase 2A.1 — raw + normalized Business Outcome, kept
+                # as an honest signal for downstream policy/observability.
+                # entity.status above already applies the terminal-override
+                # precedence; these are not re-derived state.
+                "business_outcome":            raw_business_outcome,
+                "business_outcome_normalized": _normalise_business_outcome(raw_business_outcome),
+                # Preserves the "high_confidence" operational signal even
+                # though it maps to the same DecisionStatus.OPEN as other
+                # active statuses (Phase 2A.1 §6).
+                "status_high_signal": str(fields.get("Status", "")).strip().lower() == "high_confidence",
                 # Attention engine reads this field name
                 "attention_fields":   {
                     "Score": lead_score,
@@ -234,10 +247,26 @@ def _infer_domain(fields: dict) -> str:
     return "general"
 
 
-def _normalise_status(raw_status: str) -> str:
+# BUG-104 Phase 2A.1 — Business Outcome categories (Current State Policy).
+# str(raw or "").strip().lower() normalized value -> category. Anything not
+# listed (including empty/missing) is "unknown" — no terminal override.
+# See docs/architecture/bug-104/PHASE_2A1_CURRENT_STATE_POLICY_SPEC.md §4.
+_OUTCOME_TERMINAL_POSITIVE       = {"converted"}
+_OUTCOME_TERMINAL_NEGATIVE       = {"lost", "not_relevant"}
+_OUTCOME_TERMINAL_ADMINISTRATIVE = {"duplicate", "archived"}
+_OUTCOME_INTERMEDIATE            = {"open", "needs_followup", "meeting_scheduled", "ליד חדש"}
+
+
+def _normalise_business_outcome(raw_business_outcome) -> str:
+    """str(raw or '').strip().lower() — Phase 2A.1 §3, exact spec normalization."""
+    return str(raw_business_outcome or "").strip().lower()
+
+
+def _normalise_status(raw_status: str, raw_business_outcome: str = "") -> str:
     """
-    Normalise Lead status to the literal vocabulary the shared Attention/
-    Orchestrator engines actually compare against (BUG-104 Phase 1.1).
+    Normalise Lead status (+ Business Outcome) to the literal vocabulary the
+    shared Attention/Orchestrator engines actually compare against (BUG-104
+    Phase 1.1 status-literal fix, extended by Phase 2A.1 Current State Policy).
 
     Attention's closed_statuses (decision_attention_policy.py) and
     Orchestrator's DECIDED_YES/DECIDED_NO/CANCELLED branches
@@ -245,15 +274,31 @@ def _normalise_status(raw_status: str) -> str:
     DecisionStatus's own string values ("Open"/"Decided Yes"/"Decided No"/
     "Cancelled") — the same values decision_adapter.py passes through
     untouched for native Decision records (fields.get(DF.STATUS, "")).
-    Returning a parallel vocabulary (formerly "OPEN"/"DECIDED_YES"/...) never
-    matched those literals, so this engine wiring was structurally present
-    but dead for every Lead. The classification below (which Lead statuses
-    map to open/decided-yes/decided-no/cancelled) is unchanged — only the
-    returned string values now match DecisionStatus exactly.
+
+    Phase 2A.1 precedence (PHASE_2A1_CURRENT_STATE_POLICY_SPEC.md §7):
+      A. A terminal Business Outcome (positive/negative/administrative)
+         overrides status entirely.
+      B. An intermediate Business Outcome does not close the lead.
+      C. If Business Outcome is not terminal (intermediate/unknown/missing),
+         status alone drives the operational DecisionStatus, below.
     """
     from airtable_schema import DecisionStatus
 
-    mapping = {
+    normalized_outcome = _normalise_business_outcome(raw_business_outcome)
+    if normalized_outcome in _OUTCOME_TERMINAL_POSITIVE:
+        return DecisionStatus.DECIDED_YES
+    if normalized_outcome in _OUTCOME_TERMINAL_NEGATIVE:
+        return DecisionStatus.DECIDED_NO
+    if normalized_outcome in _OUTCOME_TERMINAL_ADMINISTRATIVE:
+        return DecisionStatus.CANCELLED
+
+    # No terminal Business Outcome (intermediate/unknown/missing) — status
+    # drives the operational bucket (Phase 2A.1 §6). Legacy free-text
+    # synonyms predate Phase 2A.1 and are kept for backward compatibility;
+    # the live Leads.status values are the ones actually written today.
+    normalized_status = str(raw_status or "").strip().lower()
+    status_map = {
+        # legacy free-text synonyms (pre-Phase-2A.1)
         "new":       DecisionStatus.OPEN,
         "חדש":       DecisionStatus.OPEN,
         "hot":       DecisionStatus.OPEN,
@@ -268,8 +313,18 @@ def _normalise_status(raw_status: str) -> str:
         "אבוד":      DecisionStatus.DECIDED_NO,
         "cancelled": DecisionStatus.CANCELLED,
         "בוטל":      DecisionStatus.CANCELLED,
+        # live Leads.status values (Phase 2A.1 §6 — operational bucket)
+        "ליד חדש":          DecisionStatus.OPEN,
+        "active":           DecisionStatus.OPEN,
+        "waiting_call":     DecisionStatus.OPEN,
+        "waiting_response": DecisionStatus.OPEN,
+        "high_confidence":  DecisionStatus.OPEN,
+        "done":             DecisionStatus.DECIDED_YES,
+        "not_relevant":     DecisionStatus.DECIDED_NO,
+        "archived":         DecisionStatus.CANCELLED,
+        "duplicate":        DecisionStatus.CANCELLED,
     }
-    return mapping.get(raw_status.lower(), DecisionStatus.OPEN)
+    return status_map.get(normalized_status, DecisionStatus.OPEN)
 
 
 def _source_reliability(channel: str) -> str:

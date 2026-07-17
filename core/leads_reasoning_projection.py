@@ -69,18 +69,22 @@ MAX_LEAD_EVENT_IDS = 50
 # those names here (pure, no adapter refactor) so canonical live fields are not
 # silently dropped into wrong defaults.
 _LIVE_TO_ADAPTER_FIELDS = (
-    ("phone",      "Phone"),
-    ("status",     "Status"),
-    ("tier",       "Tier"),
-    ("source",     "Source"),
-    ("channel",    "Channel"),
-    ("domain",     "Domain"),
-    ("created_at", "Created At"),
-    ("updated_at", "Last Updated"),
-    ("notes",      "Notes"),
-    ("summary",    "Source Details"),
-    ("Score",      "Score"),          # passed through, never recomputed
-    ("Name",       "Name"),
+    ("phone",             "Phone"),
+    ("status",            "Status"),
+    ("tier",              "Tier"),
+    ("source",            "Source"),
+    ("channel",           "Channel"),
+    ("domain",            "Domain"),
+    ("created_at",        "Created At"),
+    ("updated_at",        "Last Updated"),
+    ("notes",             "Notes"),
+    ("summary",           "Source Details"),
+    ("Score",             "Score"),              # passed through, never recomputed
+    ("Name",              "Name"),
+    # BUG-104 Phase 2A.1 — Business Outcome current-state policy input. Live
+    # and adapter-facing names are identical, so this is a pure pass-through;
+    # see docs/architecture/bug-104/PHASE_2A1_CURRENT_STATE_POLICY_SPEC.md.
+    ("Business Outcome",  "Business Outcome"),
 )
 
 # Sentinel: caller passes events=EVENTS_UNAVAILABLE when the Lead-Events read
