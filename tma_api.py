@@ -1476,6 +1476,47 @@ def _read_lead_events(rec: dict):
     return [ev for ev in fetched if _event_linked_to_lead(ev, lead_id)]
 
 
+def _format_lead_reasoning_log(
+    lead_id: str,
+    mode: str,
+    raw_status,
+    raw_business_outcome,
+    projection: dict,
+) -> str:
+    """
+    BUG-104 / CR_OBS_LOG — compact, single-line Lead reasoning observability
+    log. Pure formatting, no I/O. Deliberately PII-free: only lead_id, status/
+    outcome labels, event COUNT, lead_score value/state, and error COUNT —
+    never phone/name/notes/message/event content, and never the full engine
+    error text (only how many).
+
+    Format: [LeadReasoning] lead=<id> mode=<off|shadow|on> status=<raw status>
+    outcome=<raw Business Outcome> state=<phase> events=<count|unavailable>
+    lead_score=<value|missing|invalid> degraded=<true|false> errors=<count>
+    """
+    def _raw(value) -> str:
+        text = str(value or "").strip()
+        return text if text else "<missing>"
+
+    events = projection.get("events") or {}
+    events_txt = "unavailable" if not events.get("available") else str(events.get("count", 0))
+
+    lead_score = projection.get("lead_score") or {}
+    score_state = lead_score.get("state")
+    score_txt = str(lead_score.get("value")) if score_state == "present" else str(score_state or "missing")
+
+    engine = projection.get("engine") or {}
+    degraded_txt = str(bool(engine.get("degraded"))).lower()
+    errors_count = len(engine.get("errors") or [])
+
+    return (
+        f"[LeadReasoning] lead={lead_id} mode={mode} "
+        f"status={_raw(raw_status)} outcome={_raw(raw_business_outcome)} "
+        f"state={projection.get('state')} events={events_txt} "
+        f"lead_score={score_txt} degraded={degraded_txt} errors={errors_count}"
+    )
+
+
 def _apply_leads_reasoning_projection(payload: dict, rec: dict) -> None:
     """
     Attach (or, in shadow, only compute+log) the read-only reasoning projection
@@ -1494,6 +1535,7 @@ def _apply_leads_reasoning_projection(payload: dict, rec: dict) -> None:
 
     as_of  = datetime.now(timezone.utc)   # single request-scoped reference time
     lead_id = rec.get("id", "")
+    fields  = rec.get("fields", {})
     try:
         events = _read_lead_events(rec)   # ≤1 Lead Events read, keyed by linked IDs
         projection = build_reasoning_projection(rec, events, as_of)
@@ -1501,6 +1543,13 @@ def _apply_leads_reasoning_projection(payload: dict, rec: dict) -> None:
         # 'on' must not fail the endpoint — return an honest degraded projection.
         logger.warning("[BUG-104] reasoning projection failed for %s: %s", lead_id, e)
         projection = degraded_projection(as_of, f"projection_error: {e}")
+
+    # BUG-104 / CR_OBS_LOG — compact observability line for both shadow and on
+    # (never for off — the projection above is never computed in that state).
+    # No extra Airtable read: rec/projection are already loaded in memory.
+    logger.info(_format_lead_reasoning_log(
+        lead_id, state, fields.get(LeadFields.STATUS), fields.get(LeadFields.OUTCOME), projection,
+    ))
 
     if state == "shadow":
         # Computed + verified + logged, but the API response is unchanged.
