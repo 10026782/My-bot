@@ -1224,4 +1224,10 @@ Root cause (אומת ב-grep, לא השערה): אף אחד משלושת נתי�
 `core/turn_evidence.py` חדש — evidence finalizer עבור תור-agent, three-state `FEATURE_EVIDENCE_FINALIZER` (off/shadow/enforce, ברירת מחדל `off`). גם "enforce" נשאר comparison-only בשלב הזה (עד RP5) — אין effect על ה-response האמיתי.
 **Merged:** כן (`3a3edbe`, merge commit `96cf643`, PR #362) | **Verified בפרודקשן:** לא רלוונטי — shadow-only, `off`
 
-**הערת גבולות (17/07/2026):** הרשומות C112–C120 סוגרות רק את הפער החדש (#354-362, מאז ה-briefing הקודם ב-16/07). **פער קודם ורחב יותר נשאר פתוח במכוון**: קובץ זה לא תועד כלל בין PR #326 (C111) ל-PR #354 — כלומר PRs #327 עד #353 (הכוללים את סאגת PA-01 ותיקוני approval-callback שכבר מתועדים חלקית ב-`CHANGELOG.md`) עדיין אין להם רשומת C כאן. לא טופל בסבב הזה — scope מוגבל במפורש ל-#354-362 לפי בקשה.
+### C121 — Governance docs sync: תיקון מצב הפעילות #354–#364 (17/07/2026)
+קבצים: `AI_CONTEXT.md`, `ROADMAP.md`, `CHANGELOG.md`, `CHANGE_CONTROL_LOG.md` | PRs #363–#364 | Docs בלבד
+PR #363 (`28d4f09`, merge `60991c1`) רענן את ה-daily briefing ב-`AI_CONTEXT.md` בלבד. בניגוד לטענה בדוח שהודבק לאחר מכן, merge זה לא כלל draft או תיקון ל-`ROADMAP.md`/`CHANGELOG.md`/`CHANGE_CONTROL_LOG.md`. הפער נשאר פתוח עד PR #364 (`1d31aab`, merge `80fdfae`), שהוסיף בפועל את רשומות #354–#362 לשלושת מסמכי הממשל ועדכן את תאריך ה-ROADMAP. עדכון המשך זה מיישר גם את `AI_CONTEXT.md` עם המצב לאחר המיזוג ורושם את #363–#364 עצמם.
+**גבול סקופ מפורש:** לא בוצע backfill היסטורי. `CHANGELOG.md` עדיין חסר itemization נפרד ל-#348–#353 (PA-01), וקובץ זה עדיין חסר C-records עבור #327–#353 אחרי C111. הפערים מסומנים; הם אינם מוצגים כעבודה שכבר הושלמה.
+**Merged:** PR #363 כן (`60991c1`); PR #364 כן (`80fdfae`) | **Verified בפרודקשן:** לא רלוונטי — docs בלבד
+
+**הערת גבולות (17/07/2026):** הרשומות C112–C120 מתעדות את #354–#362, ו-C121 מתעדת את סנכרון מסמכי הממשל עבור #363–#364. **פער קודם ורחב יותר נשאר פתוח במכוון**: קובץ זה לא תועד כלל בין PR #326 (C111) ל-PR #354 — כלומר PRs #327 עד #353 (הכוללים את סאגת PA-01 ותיקוני approval-callback שכבר מתועדים חלקית ב-`CHANGELOG.md`) עדיין אין להם רשומת C כאן. לא בוצע להם backfill בסבב הזה.

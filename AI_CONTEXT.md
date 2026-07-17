@@ -6,9 +6,9 @@
 > `BOSS_CURRENT_STATE.md` ארכיון היסטורי (עודכן לאחרונה 26/06/2026, עם תוספות עד 07/07) —
 > **לא** מקור אמת נוכחי; main + ROADMAP גוברים עליו בכל סתירה.
 
-**עודכן:** 2026-07-17 · **main:** `ba579f2` · **branch status:** PR #366 Draft, documentation-only · **סטטוס:** ראו §1
+**עודכן:** 2026-07-17 · **main:** `b5ca7a5` · **branch status:** PR #366 Draft, documentation-only · **סטטוס:** ראו §1
 
-**⚠️ פער תיעוד פעיל (חוזר):** מאז הבריפינג הקודם (16/07, `2be2472`) מוזגו ל-`main` **6 PRs / 9 commits נוספים** (#354–#362) — **אף אחד מהם לא מתועד** ב-`ROADMAP.md` (ה-`עודכן:` העליון עדיין 16/07/PA-01), `CHANGELOG.md`, או `CHANGE_CONTROL_LOG.md`. זהו אותו דפוס פער שכבר תועד בעדכון הקודם (PRs #327-#351) — חוזר על עצמו. פירוט המיזוגים הלא-מתועדים ב-§3.
+**✅ פער #354–#362 נסגר בתיעוד:** PR #364 (`1d31aab`, merge `80fdfae`) עדכן בפועל את `ROADMAP.md`, `CHANGELOG.md` ו-`CHANGE_CONTROL_LOG.md`. PR #363 / merge `60991c1` שקדם לו היה רענון briefing בלבד ונגע רק ב-`AI_CONTEXT.md`; הוא **לא** היה תיקון לפער בשלושת מסמכי הממשל. **⚠️ פער היסטורי נפרד נשאר פתוח במכוון:** `CHANGELOG.md` אינו מפרט בנפרד את PRs #348–#353 (PA-01), ו-`CHANGE_CONTROL_LOG.md` חסר רשומות עבור #327–#353 אחרי C111. PR #364 סימן את הגבולות האלה במפורש ולא ביצע backfill מחוץ לסקופ.
 
 ---
 
@@ -46,7 +46,7 @@
 
 ---
 
-## 3. Completed Since Last Update (16/07 → 17/07) — לא מתועד עדיין ב-ROADMAP/CHANGELOG
+## 3. Completed Since Last Update (16/07 → 17/07) — מתועד ב-PR #364
 
 1. **BUG-104 P1-A/B/C re-audit** (`71f04fb`, PR #354) — Lead Events lookup לפי record IDs אמיתיים (לא scan מלא), נורמליזציית שדות live-schema לפני ה-adapter, readiness מחושב אמיתי (לא מונח שווה ל-phase).
 2. **PR-RP0** (`4efb61b`, PR #355) — מסמכי תכנון בלבד (`RUNTIME_RELIABILITY_AND_PERMISSION_HARDENING_SPEC.md`, `BOSS_PRODUCTION_RUNTIME_MAP.md`). נפתח ב-`--force` על `pre_session_gate.sh` (מאושר ע"י המשתמש במפורש).
@@ -57,13 +57,15 @@
 7. **BUG-104 TMA bridge** (`0a0c331`, PR #360) — `core/lead_event_writer.write_tma_lead_event()` חדש, מחווט ל-`tma_api.py`/`tools/approval_actions.py` — כתיבות ליד מה-TMA נכתבות גם ל-Lead Events.
 8. **TMA saas-card hide** (`bee46b5`, PR #361) — `tma_api.py::_get_project_cards()` מסנן domain="saas" מהתצוגה בלבד. נפתח ב-`--force` (3 ענפים לא-ממוזגים לא-קשורים).
 9. **PR-RP4** (`3a3edbe`, PR #362) — `core/turn_evidence.py` חדש, evidence finalizer shadow-mode, `FEATURE_EVIDENCE_FINALIZER=off`.
-10. **לא בוצע בסבב זה:** אימות פרודקשן לאף אחד מהפריטים ב-#1-9; עדכון בפועל של `ROADMAP.md`/`CHANGELOG.md`/`CHANGE_CONTROL_LOG.md`/`BUG_AUDIT_LOG.md` עם הרשומות האלה.
+10. **PR #363 — daily briefing refresh** (`28d4f09`, merge `60991c1`) — עדכון `AI_CONTEXT.md` בלבד. לא שינה `ROADMAP.md`, `CHANGELOG.md` או `CHANGE_CONTROL_LOG.md`, ולכן לא סגר בעצמו את פער הממשל.
+11. **PR #364 — governance docs sync** (`1d31aab`, merge `80fdfae`) — עדכן את `ROADMAP.md`, `CHANGELOG.md` ו-`CHANGE_CONTROL_LOG.md` עבור #354–#362; סימן במפורש את הפערים הישנים #348–#353 / #327–#353 בלי להרחיב את הסקופ ל-backfill.
+12. **לא בוצע בסבב זה:** אימות פרודקשן לאף אחד מהפריטים ב-#1-9; עדכון `BUG_AUDIT_LOG.md` לא נדרש לסנכרון הפעילות הזה.
 
 ---
 
 ## 4. Next Priorities
 
-1. **🔴 סגירת פער התיעוד** — לעדכן `ROADMAP.md` (לבמפ `עודכן:`), `CHANGELOG.md`, `CHANGE_CONTROL_LOG.md` עבור PRs #354-#362 (§3 לעיל) — פער שנפתח מחדש כל סבב.
+1. **החלטת owner לגבי backfill היסטורי** — האם לפרט בנפרד את #348–#353 ב-`CHANGELOG.md` ואת #327–#353 ב-`CHANGE_CONTROL_LOG.md`. הפער מסומן ואינו מוסתר; הוא לא נחסם בטעות כעבודה שכבר בוצעה.
 2. **החלטת owner: הפעלת PA-01/RP2-RP3/RP4 shadow modes בפרודקשן** — כולן קוד-מוכן, `off`, ללא production evidence וללא staged rollout plan כתוב לאף אחת.
 3. **🔴 Production-verify PR #341** (Single-Speaker fix) — ללא שינוי מהעדכון הקודם, לא נבדק.
 4. **🔴 C81-FU / C82-FU** — ללא ראיה שטופלו, carried over.
