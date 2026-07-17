@@ -789,20 +789,6 @@ def _validate_initdata(init_data_str: str) -> dict | None:
         return None
 
 
-def _log_projects_auth_debug(stage: str) -> None:
-    """Temporary safe auth diagnostics for /api/projects only."""
-    if request.path != "/api/projects":
-        return
-
-    logger.info(
-        "[TMA auth debug] path=/api/projects stage=%s "
-        "has_x_telegram_init_data=%s has_origin=%s",
-        stage,
-        bool(request.headers.get("X-Telegram-Init-Data", "").strip()),
-        bool(request.headers.get("Origin", "").strip()),
-    )
-
-
 def require_tma_auth(f):
     """
     Decorator: reads X-Telegram-Init-Data header, validates HMAC on every request.
@@ -811,21 +797,16 @@ def require_tma_auth(f):
     """
     @wraps(f)
     def wrapper(*args, **kwargs):
-        _log_projects_auth_debug("start")
-        _log_projects_auth_debug("telegram_branch")
         init_data = request.headers.get("X-Telegram-Init-Data", "")
         if not init_data:
-            _log_projects_auth_debug("401_prod_missing_x_telegram_init_data")
             return jsonify({"error": "missing X-Telegram-Init-Data header"}), 401
 
         user_data = _validate_initdata(init_data)
         if not user_data:
-            _log_projects_auth_debug("401_prod_invalid_or_expired_initdata")
             return jsonify({"error": "invalid or expired initData"}), 401
 
         telegram_id = str(user_data.get("id", ""))
         identity = resolve_identity("telegram", telegram_id)
-        _log_projects_auth_debug("telegram_success")
         return f(*args, identity=identity, **kwargs)
     return wrapper
 
