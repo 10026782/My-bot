@@ -224,15 +224,27 @@ def test_mixed_with_unknown_does_not_collapse_into_full_success():
 # ── 10. sanitization / security ───────────────────────────────────────────────
 
 def test_formatter_redacts_raw_technical_identifiers():
+    # Dirty technical content in a RENDERED location (human_summary with no
+    # structured display_payload, so it is used as the descriptor) is redacted.
     payload = {"human_summary": "עשיתי recABC1234567890XYZ "
                                  "550e8400-e29b-41d4-a716-446655440000 "
                                  "https://internal.example/secret "
-                                 "deadbeefdeadbeef01 airtable_add",
-               "action": "update", "entity_name": "דני"}
+                                 "deadbeefdeadbeef01 airtable_add"}
     out, meta = fmt_meta("success", payload)
     _assert_no_raw_ids(out)
     _assert_no_tool_names(out)
     assert meta["redaction_count"] >= 3, f"expected redactions, meta={meta}"
+
+
+def test_human_summary_ignored_when_structured_payload_present():
+    # Spec 'human_summary migration': a valid structured display_payload wins,
+    # and the human_summary hint is ignored (never leaks, never renders).
+    out = fmt("success", {"action": "update", "entity_name": "דני",
+                          "human_summary": "recABC1234567890XYZ airtable_add דבר מלוכלך"})
+    assert "דני" in out and "עדכנתי" in out
+    assert "דבר מלוכלך" not in out           # hint ignored when structured present
+    _assert_no_raw_ids(out)
+    _assert_no_tool_names(out)
 
 
 def test_formatter_output_contains_no_bold_markdown():

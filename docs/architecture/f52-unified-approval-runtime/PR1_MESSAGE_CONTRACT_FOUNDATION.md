@@ -89,12 +89,22 @@ recorded here so a later PR reconciles them rather than leaving silent drift:
 
 2. **`human_summary` as a primary payload input.** The spec deprecates
    free-form `human_summary` to an untrusted compatibility hint in favor of a
-   structured `display_payload`. This foundation accepts `human_summary` (plus
-   `entity_name`/`business_identifier`/`fields`/`items`/`reason`/`user_options`)
-   as described in the PR brief, but treats it as **sanitized descriptive text
-   only** — it is never execution evidence and never enables a success state
-   (the caller-supplied state is the only truth). Converging the payload shape
-   onto the spec's `display_payload` is a follow-up task.
+   structured `display_payload`. PR 1 accepted `human_summary` as sanitized
+   descriptive text only (never execution evidence, never enables success).
+
+   **RESOLVED (follow-up):** the formatter now accepts the spec's canonical
+   `display_payload` field names (`action`, `entity_type`, `entity_name`,
+   `key_fields`, `count`, `items`, `reason_code`, `execution_verified`,
+   `occurred_at`) through a single `_normalize_payload()` mapping; the legacy
+   loose names (`fields`/`reason`/`business_identifier`/`human_summary`/
+   `user_options`) are accepted as a compatibility layer, canonical names
+   winning. `human_summary` is now enforced as a **hint only** per the spec's
+   "human_summary migration decision": it is ignored when a structured
+   display_payload is present (any of `entity_name`/`key_fields`/`items`/
+   `action`), and never enables success. `execution_verified=False` is never
+   rendered as success (spec locked principle 2); `occurred_at` renders as a
+   human `dd/mm/YYYY` date, never raw ISO. See
+   `test_agent_message_formatter_display_payload.py`.
 
 ## Tests
 

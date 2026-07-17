@@ -238,30 +238,78 @@ def _human_date(value, redactor: _Redactor) -> str:
 
 # ── Descriptor helpers ────────────────────────────────────────────────────────
 
-def _descriptor(payload: dict, redactor: _Redactor) -> str:
-    """Build a safe human business descriptor from the payload, preferring an
-    explicit human_summary, then entity_name (+ business_identifier). Returns ""
-    when nothing safe is renderable (caller falls back to a neutral message —
-    never a technical fallback such as a tool name)."""
-    summary = _clean(payload.get("human_summary"), redactor)
-    if summary:
-        return summary
+def _normalize_payload(payload) -> dict:
+    """Unified payload mapping (F52 display_payload adoption).
 
-    name = _clean(payload.get("entity_name"), redactor)
-    ident = _clean(payload.get("business_identifier"), redactor)
+    Accepts the spec's canonical `display_payload` field names (`action`,
+    `entity_type`, `entity_name`, `key_fields`, `count`, `items`, `reason_code`,
+    `execution_verified`, `occurred_at`) AND the legacy loose shape (`fields`,
+    `reason`, `business_identifier`, `human_summary`, `user_options`), mapping
+    both into one internal structure. Canonical names win; legacy names are a
+    compatibility layer.
+
+    `human_summary` is demoted to a compatibility HINT per the UX standard's
+    "human_summary migration decision": it is never execution evidence, never
+    enables a success state, and is ignored when a valid structured
+    display_payload exists (any of entity_name / key_fields / items / action).
+    """
+    p = payload if isinstance(payload, dict) else {}
+    key_fields = p.get("key_fields")
+    if key_fields is None:
+        key_fields = p.get("fields")          # legacy name
+    structured = bool(p.get("entity_name") or key_fields or p.get("items") or p.get("action"))
+    return {
+        "action":              p.get("action"),
+        "entity_type":         p.get("entity_type"),
+        "entity_name":         p.get("entity_name"),
+        "business_identifier": p.get("business_identifier"),
+        "key_fields":          key_fields or [],
+        "count":               p.get("count"),
+        "items":               p.get("items") or [],
+        "reason_code":         p.get("reason_code"),
+        "reason_text":         p.get("reason"),          # legacy human/text reason
+        "occurred_at":         p.get("occurred_at"),
+        "user_options":        p.get("user_options") or [],
+        "execution_verified":  p.get("execution_verified"),
+        "human_summary":       p.get("human_summary"),   # compatibility hint only
+        "_structured":         structured,
+    }
+
+
+def _structured_descriptor(norm: dict, redactor: _Redactor) -> str:
+    """Human business descriptor from STRUCTURED fields only (entity_name +
+    business_identifier, else the first key_field value). Never human_summary."""
+    name = _clean(norm.get("entity_name"), redactor)
+    ident = _clean(norm.get("business_identifier"), redactor)
     if name and ident:
         return f"{name} ({ident})"
     if name:
         return name
     if ident:
         return ident
+    for field in (norm.get("key_fields") or []):
+        if isinstance(field, dict):
+            value = _clean(field.get("value"), redactor)
+            if value:
+                return value
     return ""
 
 
-def _render_fields(payload: dict, redactor: _Redactor) -> list[str]:
+def _descriptor(norm: dict, redactor: _Redactor) -> str:
+    """Full descriptor: structured first; the human_summary hint is used only
+    when no structured display_payload is present (spec migration rule)."""
+    structured = _structured_descriptor(norm, redactor)
+    if structured:
+        return structured
+    if not norm.get("_structured"):
+        return _clean(norm.get("human_summary"), redactor, _MAX_ITEM_LEN)
+    return ""
+
+
+def _render_fields(norm: dict, redactor: _Redactor) -> list[str]:
     """Render up to two key business fields as 'label: value' (hyphen rows)."""
     rows: list[str] = []
-    for field in (payload.get("fields") or [])[:2]:
+    for field in (norm.get("key_fields") or [])[:2]:
         if not isinstance(field, dict):
             continue
         label = _clean(field.get("label"), redactor, _MAX_FIELD_LEN)
@@ -303,56 +351,61 @@ def _bound_total(text: str) -> str:
 
 # ── Per-state renderers ───────────────────────────────────────────────────────
 
-def _render_success(payload: dict, redactor: _Redactor) -> str:
+def _render_success(norm: dict, redactor: _Redactor) -> str:
     # Success wording is generated here; it is never derived from a tool name or
     # raw parameters. A single leading marker only.
-    desc = _descriptor(payload, redactor)
-    if not desc:
-        # Missing renderable data -> neutral, honest fallback (never technical).
-        head = "✓ הפעולה הושלמה."
-    elif _clean(payload.get("human_summary"), redactor):
-        # Producer supplied human wording already (first person preferred).
-        head = f"✓ {desc}"
+    # display_payload evidence gate: an explicit execution_verified=False is
+    # never rendered as success (spec locked principle 2). Absent/True → normal.
+    if norm.get("execution_verified") is False:
+        return "לא ניתן לאמת שהפעולה הושלמה. צריך לבדוק את המצב לפני שממשיכים."
+    structured = _structured_descriptor(norm, redactor)
+    if structured:
+        verb = _ACTION_VERB.get(str(norm.get("action") or "").lower())
+        head = f"✓ {verb} {structured}" if verb else f"✓ {structured}"
     else:
-        verb = _ACTION_VERB.get(str(payload.get("action") or "").lower())
-        head = f"✓ {verb} {desc}" if verb else f"✓ {desc}"
-    rows = _render_fields(payload, redactor)   # up to two key business fields
+        hint = _clean(norm.get("human_summary"), redactor, _MAX_ITEM_LEN) \
+            if not norm.get("_structured") else ""
+        head = f"✓ {hint}" if hint else "✓ הפעולה הושלמה."
+    rows = _render_fields(norm, redactor)   # up to two key business fields
+    occurred = _human_date(norm.get("occurred_at"), redactor) if norm.get("occurred_at") else ""
+    if occurred:
+        rows.append(f"- {occurred}")
     return head + ("\n" + "\n".join(rows) if rows else "")
 
 
-def _render_failure(payload: dict, redactor: _Redactor) -> str:
-    code = str(payload.get("reason_code") or payload.get("reason") or "").strip().upper()
+def _render_failure(norm: dict, redactor: _Redactor) -> str:
+    code = str(norm.get("reason_code") or norm.get("reason_text") or "").strip().upper()
     human = _REASON_TEXT.get(code)
     if not human:
         # An explicit human reason (already business-safe) may be provided.
-        human = _clean(payload.get("reason"), redactor, _MAX_ITEM_LEN) or _DEFAULT_REASON_TEXT
+        human = _clean(norm.get("reason_text"), redactor, _MAX_ITEM_LEN) or _DEFAULT_REASON_TEXT
     return f"לא הצלחתי להשלים את הפעולה. {human}"
 
 
-def _render_approval_pending(payload: dict, redactor: _Redactor) -> str:
-    desc = _descriptor(payload, redactor)
+def _render_approval_pending(norm: dict, redactor: _Redactor) -> str:
+    desc = _descriptor(norm, redactor)
     if not desc:
         # Safe missing-contract fallback (spec).
         return "יש פעולה שממתינה לאישור. חסר לי מידע כדי להציג אותה בצורה בטוחה."
     return f"יש פעולה שממתינה לאישור:\n{desc}\nלאשר? כן / לא"
 
 
-def _render_approval_pending_batch(payload: dict, redactor: _Redactor) -> str:
-    rows = _render_items(payload, redactor, numbered=True)
-    count = len(rows) or int(payload.get("count") or 0)
+def _render_approval_pending_batch(norm: dict, redactor: _Redactor) -> str:
+    rows = _render_items(norm, redactor, numbered=True)
+    count = len(rows) or int(norm.get("count") or 0)
     if not rows:
         return "יש פעולות שממתינות לאישור. חסר לי מידע כדי להציג אותן בצורה בטוחה."
     header = f"יש {count} פעולות שממתינות לאישור:"
     return header + "\n" + "\n".join(rows) + "\nשלח מספר כדי לבחור."
 
 
-def _render_clarification(payload: dict, redactor: _Redactor) -> str:
+def _render_clarification(norm: dict, redactor: _Redactor) -> str:
     question = _clean(
-        payload.get("human_summary") or payload.get("reason"),
+        norm.get("human_summary") or norm.get("reason_text"),
         redactor, _MAX_ITEM_LEN,
     ) or "צריך פרט נוסף כדי להמשיך. מה לעשות?"
     options = []
-    for opt in (payload.get("user_options") or [])[:_MAX_OPTIONS]:
+    for opt in (norm.get("user_options") or [])[:_MAX_OPTIONS]:
         text = _clean(opt, redactor, _MAX_FIELD_LEN)
         if text:
             options.append(f"- {text}")
@@ -361,9 +414,9 @@ def _render_clarification(payload: dict, redactor: _Redactor) -> str:
     return question
 
 
-def _render_idle(payload: dict, redactor: _Redactor) -> str:
+def _render_idle(norm: dict, redactor: _Redactor) -> str:
     # Short; never a repeated capability list.
-    desc = _clean(payload.get("human_summary"), redactor, _MAX_ITEM_LEN)
+    desc = _clean(norm.get("human_summary"), redactor, _MAX_ITEM_LEN)
     return desc or "אין כרגע פעולה שממתינה. אפשר להמשיך."
 
 
@@ -447,7 +500,7 @@ def format_agent_message_with_meta(state, payload=None) -> tuple[str, dict]:
     """Same as format_agent_message() but also returns an observability record
     (message_state, formatter_version, fallback_used, redaction_count). The
     values are for logging only and are never part of the user text."""
-    payload = payload if isinstance(payload, dict) else {}
+    norm = _normalize_payload(payload)   # unified display_payload / legacy mapping
     redactor = _Redactor()
 
     canonical = normalize_state(state)
@@ -458,7 +511,7 @@ def format_agent_message_with_meta(state, payload=None) -> tuple[str, dict]:
         text = "אין לי מספיק מידע כדי להשלים את הבקשה כרגע."
         fallback_used = True
     else:
-        text = _RENDERERS[canonical](payload, redactor)
+        text = _RENDERERS[canonical](norm, redactor)
 
     text = _bound_total(text.strip())
 
