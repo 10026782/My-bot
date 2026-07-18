@@ -90,7 +90,15 @@ _BOT_OUTPUT_RE = re.compile(r"^[✅❌⚠️⏳🔴🟡🟢📋🌤️█]\s", r
 _AIRTABLE_ID_RE = re.compile(r"\b(?:fld|rec)[A-Za-z0-9]{8,}\b")
 
 # JSON/code block
-_JSON_BLOCK_RE = re.compile(r"^\s*[\[{]", re.MULTILINE)
+# BUG-111: a leading "[" alone is not enough — a WhatsApp-style short-date
+# timestamp bracket with no year ("[18.7, 22:02] אורי צדוק: ...", day.month
+# only) also starts with "[" and was being misclassified as "json_block"
+# (an accidental, wrong-reason Tier-4 hit) purely because it happens to open
+# with a bracket. A leading "[" immediately followed by a day[./]month digit
+# pair is a timestamp, never a JSON array — excluded via negative lookahead.
+# A genuine JSON array/object is untouched (its content is never shaped like
+# a date prefix at the very first characters).
+_JSON_BLOCK_RE = re.compile(r"^\s*(?:\{|\[(?!\d{1,2}[./]\d{1,2}))", re.MULTILINE)
 
 # WhatsApp export — sender prefix pattern "[DD/MM/YYYY, HH:MM:SS] Name:"
 _WHATSAPP_EXPORT_RE = re.compile(
@@ -200,7 +208,24 @@ def _is_tier4(text: str) -> tuple[bool, str]:
 # ══════════════════════════════════════════════════
 
 # requires ≥9 total digits after leading 0 — rules out "054" partial numbers
-_PHONE_RE = re.compile(r"(?:0\d[-\s]?\d{3}[-\s]?\d{4,5}|0\d{2}[-\s]?\d{7}|[\+]?972[-\s]?\d{8,9})")
+#
+# BUG-111: mobile numbers grouped as "05X-XXX-XXXX" (a SECOND internal
+# separator between the 3-digit prefix and the 3-digit block, e.g.
+# "053-311-6744") and international numbers grouped the same way (e.g.
+# "+972 53-396-8395") were not matched by any prior alternative — each one
+# only tolerated a single internal separator. BUG-101's own comment already
+# flagged the international case as a known, deliberately-deferred gap
+# ("+972 54-211-6211 ... not fixed here"); this closes it. The two NEW
+# alternatives below are added FIRST (both other alternatives remain,
+# unchanged, for formats they already covered) so a two-separator number is
+# matched in one shot instead of arbitrarily via a shorter alternative.
+_PHONE_RE = re.compile(
+    r"(?:0\d{2}[-\s]?\d{3}[-\s]?\d{4}"                  # NEW: 05X-XXX-XXXX (mobile, 2-separator)
+    r"|\+?972[-\s]?\d{2}[-\s]?\d{3}[-\s]?\d{4}"          # NEW: +972-XX-XXX-XXXX (intl, 2-separator)
+    r"|0\d[-\s]?\d{3}[-\s]?\d{4,5}"
+    r"|0\d{2}[-\s]?\d{7}"
+    r"|[\+]?972[-\s]?\d{8,9})"
+)
 
 _NAME_STOP = frozenset({
     "טלפון", "מספר", "פלאפון", "נייד", "תשמור", "שמור", "שמרי",
@@ -235,6 +260,23 @@ _NAME_STOP = frozenset({
     "חמישית", "שישית", "שביעית", "מרפסת", "מטבח", "חניה", "מעלית",
     "נוף", "משופץ", "משופצת", "צמודה", "צמוד", "קרקעית", "תת",
     "לגמרי", "מאוד", "שמש",
+    # BUG-111: the domain/routing-context keyword itself ("דומיין"/
+    # "לדומיין" — the "ל" prefix is stripped by _is_name_stop_token()'s
+    # existing single-letter-prefix check, so bare "דומיין" here also
+    # covers "לדומיין"), kept as defense-in-depth for the rare case where
+    # _strip_domain_hint() below doesn't apply (e.g. "דומיין" with nothing
+    # recognizable after it). The primary fix for "צור ליד דומיין גיוס..."
+    # is _strip_domain_hint()/_extract_domain_hint() below — removing the
+    # WHOLE "דומיין X" phrase (keyword + hint word) from the name-extraction
+    # window before segmentation ever runs, not adding words to this list.
+    # Deliberately does NOT add "צור" (create) here: it is already too
+    # short (3 chars) to ever survive _extract_name_from_window()'s length
+    # check on its own, and adding it as a stop-word instead changes the
+    # stop-word split points and reopens a case that BUG-099b.1 (see
+    # test_bug099b1_no_name_validation.py T9) already covers — "בדירת" in
+    # "צור ליד חדש מעוניין בדירת 4 חדרים..." would win an unintended
+    # segment tie-break and be accepted as a fake name.
+    "דומיין",
 })
 
 _HEBREW_WORD_RE = re.compile(r"[א-ת]{2,}")
@@ -283,7 +325,17 @@ def _is_name_stop_token(token: str) -> bool:
 # new-message boundary) and _SENDER_LINE_RE (needs only the bracket, as an
 # optional prefix before the existing name+colon capture) so the two never
 # drift apart on what counts as "an export timestamp".
-_CHAT_EXPORT_TIMESTAMP = r"\[\d{1,2}[./]\d{1,2}[./]\d{2,4},?\s*\d{1,2}:\d{2}(?::\d{2})?\]"
+#
+# BUG-111: the year group is OPTIONAL — some WhatsApp exports/manual pastes
+# use a short "[D.M, HH:MM]" stamp with no year at all (e.g. "[18.7, 22:02]
+# אורי צדוק: 0504142604"). Without this, that header matched neither
+# _BLOCK_SEP's boundary lookahead nor _SENDER_LINE_RE's optional prefix, so
+# the sender name was never recognized and leaked into candidate extraction
+# as if it were the lead's name (same failure shape as BUG-101c, narrower
+# trigger). The mandatory day/month + time portion is unchanged, so every
+# full "D.M.YYYY, HH:MM" timestamp already covered keeps matching exactly as
+# before — this only adds coverage, it does not narrow anything.
+_CHAT_EXPORT_TIMESTAMP = r"\[\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?,?\s*\d{1,2}:\d{2}(?::\d{2})?\]"
 _CHAT_EXPORT_HEADER = _CHAT_EXPORT_TIMESTAMP + r"\s*[^\n:]{1,40}:"
 
 # BUG-096: block separator — new line starting with a Hebrew letter / bullet /
@@ -372,11 +424,17 @@ def _extract_lead_candidates(text: str) -> list[dict]:
     candidates: list[dict] = []
     seen_phones: set[str] = set()
     sender_names = {m.group(1).strip() for m in _SENDER_LINE_RE.finditer(text)}
+    # BUG-111: an explicit "דומיין X" annotation is usually a message-level
+    # command header, not necessarily inside any one candidate's +-80-char
+    # phone window (e.g. a batch header line followed by separate per-person
+    # blocks) — resolved once from the FULL original text and carried onto
+    # every candidate this message produces, never re-guessed per block.
+    domain_hint = _extract_domain_hint(text)
 
     for block in _BLOCK_SEP.split(text):
         if not block.strip():
             continue
-        _extract_candidates_from_block(block, candidates, seen_phones, sender_names)
+        _extract_candidates_from_block(block, candidates, seen_phones, sender_names, domain_hint)
 
     return candidates
 
@@ -386,6 +444,7 @@ def _extract_candidates_from_block(
     candidates: list[dict],
     seen_phones: set[str],
     sender_names: set,
+    domain_hint: Optional[str] = None,
 ) -> None:
     """
     מחלץ candidates מתוך בלוק בודד (כבר מפוצל ע"י _BLOCK_SEP, ראה
@@ -422,11 +481,12 @@ def _extract_candidates_from_block(
         ctx  = _extract_context_kw(window, name, phone)
 
         candidates.append({
-            "name":       name,
-            "phone":      phone,
-            "confidence": conf,
-            "context":    ctx,
-            "raw_text":   block.strip(),
+            "name":        name,
+            "phone":       phone,
+            "confidence":  conf,
+            "context":     ctx,
+            "raw_text":    block.strip(),
+            "domain_hint": domain_hint,
         })
 
 
@@ -449,7 +509,17 @@ def _extract_name_from_window(window: str, sender_names: set) -> Optional[str]:
     neighbor-phone clipping, or _BLOCK_SEP (BUG-096/097/101b's fixes) at
     all — it only changes which words *within* an already correctly-bounded
     match are picked as the name.
+
+    BUG-111: an explicit 'דומיין X' / 'לדומיין X' routing annotation is
+    stripped from the window FIRST (see _strip_domain_hint) — the hint word
+    alone (e.g. "גיוס") would otherwise survive as the longest segment once
+    "דומיין" itself splits the run, and a blanket word-count rule can't be
+    used to reject it instead (single-word Hebrew names are legitimate, see
+    BUG-101 T16 / "שמואל"). The hint's routing value is not lost by this —
+    it is extracted separately, from the un-stripped text, by
+    _extract_domain_hint().
     """
+    window = _strip_domain_hint(window)
     for m in _HEBREW_NAME_RE.finditer(window):
         raw   = m.group(1).strip().rstrip(",;:")
         words = raw.split()
@@ -485,6 +555,82 @@ def _extract_context_kw(text: str, name: str, phone: str) -> list[str]:
     if phone:
         cleaned = _PHONE_RE.sub(" ", cleaned)
     return [w for w in _HEBREW_WORD_RE.findall(cleaned) if w in _CONTEXT_WORDS]
+
+
+# ══════════════════════════════════════════════════
+# BUG-111 — explicit domain/routing hint ("דומיין X" / "לדומיין X")
+#
+# A command like "צור ליד דומיין גיוס 0504025707" carries an EXPLICIT routing
+# annotation ("דומיין גיוס" — "domain: recruiting") that is not part of the
+# lead's name at all. Two separate defects had to both be fixed for this:
+#   1. The hint word ("גיוס") is not a stop-word, so once "דומיין" itself is
+#      excluded (see _NAME_STOP) the segmentation in _extract_name_from_window
+#      still isolates the hint word alone as the longest surviving segment —
+#      the architecture deliberately allows single-word Hebrew names (e.g.
+#      "שמואל", see BUG-101 T16), so a blanket "names need >=2 words" rule
+#      would be wrong; the hint word specifically must never reach name
+#      extraction at all, not just fail a word-count check.
+#   2. Even once excluded from the name, the routing signal itself must not
+#      be silently discarded — the caller (core/lead_candidate_handler.py)
+#      needs it to resolve the lead's Domain field instead of falling back to
+#      "general" when the Router's own content-based domain guess misses it
+#      (e.g. "ליד" alone routes to the RouterDomain.CRM meta-domain, which the
+#      Leads Domain field never accepts, see _lead_domain_key()).
+#
+# _DOMAIN_HINT_RE captures the WHOLE two-token phrase (the optional "ל" is a
+# single attached prefix on "דומיין" itself, mirroring the single-letter-
+# prefix convention _is_name_stop_token() already uses) so callers can strip
+# it out of a name-extraction window in one operation, not two.
+_DOMAIN_HINT_RE = re.compile(r"(?:ל)?דומיין\s+([א-ת]{2,})")
+
+# Best-effort canonical mapping to the live Leads/Lead Events Domain
+# singleSelect values (airtable_schema.py: "real_estate | import | recruitment
+# | saas | finance | general" — see CLAUDE.md's documented verticals plus
+# BUG-094-C's "recruiting" note; the live field value is "recruitment").
+# An explicit "דומיין <word>" hint whose word is not in this map is still
+# EXCLUDED from the name (the regex above catches it regardless), it just has
+# no canonical routing value to offer — never invented, never guessed beyond
+# this fixed table.
+_DOMAIN_HINT_CANONICAL = {
+    "גיוס":     "recruitment",
+    "גיוסים":   "recruitment",
+    "recruiting": "recruitment",
+    "recruitment": "recruitment",
+    "נדלן":     "real_estate",
+    'נדל"ן':    "real_estate",
+    "נדלן.":    "real_estate",
+    "יבוא":     "import",
+    "ייבוא":    "import",
+    "import":   "import",
+    "מדיה":     "media",
+    "שיווק":    "media",
+    "media":    "media",
+    "כספים":    "finance",
+    "פיננסי":   "finance",
+    "finance":  "finance",
+    "saas":     "saas",
+}
+
+
+def _strip_domain_hint(text: str) -> str:
+    """Removes any 'דומיין X' / 'לדומיין X' phrase entirely (both the
+    keyword and its hint word) — used before name extraction so neither
+    token can be mistaken for a person/business name. Not the same as
+    _extract_domain_hint(): this only cleans text for name-extraction
+    purposes and does not resolve or lose the hint's routing value (the
+    caller extracts that separately, from the ORIGINAL text)."""
+    return _DOMAIN_HINT_RE.sub(" ", text)
+
+
+def _extract_domain_hint(text: str) -> Optional[str]:
+    """Returns the canonical Leads-Domain value for an explicit 'דומיין X' /
+    'לדומיין X' command annotation in text, or None if no such annotation is
+    present or its hint word has no known canonical mapping. Never guesses —
+    only the fixed _DOMAIN_HINT_CANONICAL table is consulted."""
+    m = _DOMAIN_HINT_RE.search(text)
+    if not m:
+        return None
+    return _DOMAIN_HINT_CANONICAL.get(m.group(1).strip())
 
 
 # ══════════════════════════════════════════════════

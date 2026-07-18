@@ -98,6 +98,11 @@ _DOMAIN_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"שיווק|מדיה|קמפיין|פרסום|תוכן|סושיאל|instagram|facebook|youtube|marketing|media", re.I), "media"),
     (re.compile(r"saas|מנוי|subscription|פיצ.ר|feature|product|api", re.I), "saas"),
     (re.compile(r"כסף|תזרים|הכנסה|הוצאה|רווח|חשבון|תשלום|חשבונית|finance|revenue|invoice|payment", re.I), "finance"),
+    # BUG-111: recruiting/גיוס — a live Leads/Lead Events Domain value
+    # ("recruitment", see airtable_schema.py) that had no detector at all.
+    # Deliberately narrow ("candidate"/"מועמד" excluded — too generic, would
+    # false-positive on unrelated usage, e.g. "the candidate apartment").
+    (re.compile(r"גיוס|מגייס|מגייסת|recruiting|recruitment", re.I), "recruitment"),
 ]
 
 # Minimal block separator — blank line, bullet, number+dot, or Hebrew item marker
@@ -112,7 +117,23 @@ def _detect_domain(text: str, identity_domain: str = "") -> str:
     """
     מזהה דומיין מתוכן ההודעה.
     חוזר ל-identity_domain אם לא נמצא במלל, ולבסוף "general".
+
+    BUG-111: an explicit "דומיין X"/"לדומיין X" command annotation (e.g.
+    "צור ליד דומיין גיוס ...") is a higher-precision signal than the generic
+    content-keyword scan below — checked first via the SAME extractor/mapping
+    ingress_classifier.py uses for candidates (core.ingress_classifier.
+    _extract_domain_hint), so an explicit hint and the routing value actually
+    used here can never drift apart. Falls through to the content scan when
+    no explicit annotation is present or its hint word has no known mapping.
     """
+    try:
+        from core.ingress_classifier import _extract_domain_hint
+        explicit_hint = _extract_domain_hint(text)
+    except Exception:
+        explicit_hint = None
+    if explicit_hint:
+        return explicit_hint
+
     for pattern, domain in _DOMAIN_PATTERNS:
         if pattern.search(text):
             return domain
@@ -675,6 +696,21 @@ _LEAD_CLARIFY_NON_INTERRUPTING_INTENTS = frozenset({
     _Intent.CREATE_LEAD, _Intent.UPDATE_LEAD,
 })
 
+# BUG-111: display-only Hebrew label for a canonical Leads-Domain value (the
+# inverse of core.ingress_classifier._DOMAIN_HINT_CANONICAL) — used ONLY to
+# phrase the batch-clarification prompt ("...לדומיין גיוס..."); never used
+# for any write/validation decision. "general" is intentionally absent —
+# that case omits the "לדומיין X" clause entirely (see
+# _maybe_start_lead_clarification below).
+_DOMAIN_DISPLAY_HE = {
+    "recruitment": "גיוס",
+    "real_estate": "נדל\"ן",
+    "import":      "יבוא",
+    "media":       "מדיה",
+    "finance":     "פיננסי",
+    "saas":        "SaaS",
+}
+
 
 def _validate_clarification_name(text: str) -> Optional[str]:
     """
@@ -743,26 +779,72 @@ def _maybe_start_lead_clarification(
     never triggers without a phone number actually present in the text —
     "some free text that happens to not extract a name" is not the same as
     "a clear create-lead request missing exactly one field."
-    """
-    from core.ingress_classifier import _PHONE_RE as _ic_phone_re
 
-    phone_match = _ic_phone_re.search(text)
-    if not phone_match:
+    BUG-111: a text can carry MORE THAN ONE phone number with no names at all
+    (e.g. a WhatsApp-pasted batch of phone-only lines under a "create N
+    leads" header) — the original single-`.search()` version only ever
+    stored the FIRST phone it found and silently discarded the rest, which
+    would have quietly turned a 3-phone batch into a 1-phone clarification.
+    All distinct phones in the text are now detected (finditer, normalized,
+    de-duplicated, order preserved) and handled in one of two ways:
+      - exactly 1 phone  -> the original single-name clarification, wording
+        and state shape UNCHANGED (existing callers/tests unaffected).
+      - 2+ phones        -> a batch clarification: every phone is preserved
+        in session state (never silently reduced to one), and the reply
+        explicitly states the count (and domain, when known) instead of
+        picking one phone arbitrarily.
+    """
+    from core.ingress_classifier import _PHONE_RE as _ic_phone_re, _normalize_phone as _ic_normalize_phone
+
+    # BUG-111: the raw regex match ("+972 53-396-8395") was stored/shown
+    # verbatim — spaces/dashes/leading "+972" and all — instead of the same
+    # canonical local format (_normalize_phone: "0"+9 digits) every other
+    # extraction path in this module writes to Airtable's Leads.Phone.
+    phones: list[str] = []
+    seen: set[str] = set()
+    for m in _ic_phone_re.finditer(text):
+        normalized = _ic_normalize_phone(m.group().strip())
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        phones.append(normalized)
+
+    if not phones:
         return None
-    phone = phone_match.group().strip()
 
     from session_store import lead_sessions as _ls
 
+    domain_key = _lead_domain_key(domain)
+
+    if len(phones) == 1:
+        phone = phones[0]
+        partial_payload = {
+            "phone":   phone,
+            "summary": _build_clarification_summary(text, phone),
+            "domain":  domain_key,
+            "source":  "owner_dictation",
+            "channel": channel,
+        }
+        _ls.set_lead_clarification(chat_id, "name", partial_payload, text)
+        return f"זיהיתי בקשה ליצור ליד ואת מספר הטלפון {phone}, אבל לא מצאתי שם. מה שם הליד?"
+
+    # 2+ distinct phones — batch clarification (BUG-111). ALL phones are
+    # preserved in partial_payload["phones"] — none is dropped.
     partial_payload = {
-        "phone":   phone,
-        "summary": _build_clarification_summary(text, phone),
-        "domain":  _lead_domain_key(domain),
+        "phones":  phones,
+        "domain":  domain_key,
         "source":  "owner_dictation",
         "channel": channel,
     }
-    _ls.set_lead_clarification(chat_id, "name", partial_payload, text)
+    _ls.set_lead_clarification(chat_id, "names", partial_payload, text)
 
-    return f"זיהיתי בקשה ליצור ליד ואת מספר הטלפון {phone}, אבל לא מצאתי שם. מה שם הליד?"
+    domain_suffix = f" לדומיין {_DOMAIN_DISPLAY_HE.get(domain_key, domain_key)}" if domain_key != "general" else ""
+    phones_list = "\n".join(f"• {p}" for p in phones)
+    return (
+        f"זיהיתי {len(phones)} מספרים{domain_suffix}, אבל חסרים שמות. איך לשמור אותם?\n"
+        f"{phones_list}\n\n"
+        f"שלח שם אחד בכל שורה, לפי הסדר (בסה\"כ {len(phones)} שמות), או *בטל* לביטול."
+    )
 
 
 def _resolve_lead_clarification(
@@ -849,9 +931,88 @@ def _resolve_lead_clarification(
                 payload.get("domain", domain), auto_write=False,
                 clear_clarification=True,
             )
+        # unclear reply for the single-phone case — state stays, ask again
+        return "עדיין חסר לי שם הליד. מה השם?"
 
-    # Priority 5 — unclear reply: state stays, ask again
-    return "עדיין חסר לי שם הליד. מה השם?"
+    # BUG-111 — Priority 4b: batch clarification (2+ phones, see
+    # _maybe_start_lead_clarification). One name per line, matching the
+    # phones in the SAME order they were originally listed — no attempt at
+    # fuzzy/positional matching beyond that (kept simple and predictable,
+    # matching this module's existing "no new extraction logic" convention
+    # for clarification replies, see _validate_clarification_name).
+    if cand.get("expected_field") == "names":
+        return _resolve_batch_name_clarification(
+            identity, text, chat_id, channel, domain, cand,
+        )
+
+    # Priority 5 — unrecognized expected_field: fail safe, ask again rather
+    # than silently drop the pending clarification.
+    return "עדיין חסר לי מידע כדי להשלים את הליד."
+
+
+def _resolve_batch_name_clarification(
+    identity, text: str, chat_id: str, channel: str, domain: str, cand: dict,
+) -> str:
+    """
+    Resolves a BUG-111 batch clarification (2+ phones, no names) once the
+    user replies. Expects exactly one name per line, in the same order as
+    partial_payload["phones"] — a count mismatch or any invalid line asks
+    again WITHOUT clearing state (no phone is ever silently dropped just
+    because the reply couldn't be parsed).
+
+    On a valid reply, routes through the SAME preview mechanism Tier-2 clean
+    batches already use (_store_pending_preview / resolve_pending_lead_preview,
+    BUG-058) rather than inventing a second batch-write path — "כן"/"לא"
+    then resolves it exactly like any other multi-lead preview. That
+    confirm-time rendering (per-lead record_id shown inline, "עובדתי" summary
+    header) is pre-existing, tracked separately, and intentionally NOT
+    touched here.
+    """
+    payload = cand.get("partial_payload", {})
+    phones: list[str] = payload.get("phones", [])
+    original_text = cand.get("original_text", text)
+    resolved_domain = payload.get("domain", domain)
+
+    if not phones:
+        # Defensive only — _maybe_start_lead_clarification never stores this
+        # state with an empty phones list.
+        from session_store import lead_sessions as _ls
+        _ls.clear_active_lead_candidate(chat_id)
+        return "אירעה תקלה בזיהוי המספרים. נסה לשלוח את הבקשה מחדש."
+
+    lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+
+    if len(lines) != len(phones):
+        return (
+            f"צריך בדיוק {len(phones)} שמות — אחד לכל מספר, כל שם בשורה נפרדת "
+            f"ולפי הסדר שבו הופיעו המספרים. שלח שוב, או *בטל* לביטול."
+        )
+
+    names: list[str] = []
+    for line in lines:
+        name = _validate_clarification_name(line)
+        if name is None:
+            return (
+                f"'{line}' לא נראה כמו שם תקין. שלח {len(phones)} שמות, "
+                f"אחד לכל מספר, כל שם בשורה נפרדת."
+            )
+        names.append(name)
+
+    candidates = [
+        {"name": n, "phone": p, "context": [], "raw_text": original_text}
+        for n, p in zip(names, phones)
+    ]
+
+    from session_store import lead_sessions as _ls
+    _ls.clear_active_lead_candidate(chat_id)
+    _store_pending_preview(chat_id, candidates, original_text, channel, resolved_domain)
+
+    lines_preview = [f"• {c['name']} ({c['phone']})" for c in candidates]
+    return (
+        f"📋 זיהיתי {len(candidates)} לידים אפשריים בקבוצה:\n" +
+        "\n".join(lines_preview) +
+        "\n\nענה \"כן\" לשמירת כולם, או \"לא\" לביטול. (בתוקף ל-30 דקות)"
+    )
 
 
 # ══════════════════════════════════════════════════
