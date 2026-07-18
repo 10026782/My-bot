@@ -114,10 +114,24 @@ _PENDING = re.compile(r"(?:⏳|\bpending\b|ממתינ|ממתין לאישור|מ
 _UNKNOWN = re.compile(r"(?:\boutcome[_ -]?unknown\b|לא ידוע|לא ניתן לאמת|דורש בדיקה)", re.IGNORECASE)
 
 
-def _classify_response_claim(final_text: str) -> str:
-    """Classify claim shape for comparison only; this is never execution truth."""
+def _classify_response_claim(final_text: str, *, approval_prompt_sent: bool = False) -> str:
+    """Classify claim shape for comparison only; this is never execution truth.
+
+    F52 PR6: an empty final_text is not always evidence of nothing having
+    been told to the user. When an approval was queued this turn, A32's
+    Single-Speaker gate deliberately returns "" for the agent's own text
+    (see anti_hallucination.sanitize_agent_response's __approval_queued__
+    branch) — the real, user/owner-visible "⏳ בקשת אישור..." message was
+    already sent this turn through a separate side channel (a direct
+    bot.send_message call in app.py's _queue_approval_detailed_impl(), not
+    the agent's returned text). Before this fix, that correct suppression
+    made EvidenceFinalizerShadow see response_claim=empty against
+    evidence_status=approval_pending — a false mismatch, not a real one.
+    approval_prompt_sent (proven by the caller, never guessed here — see
+    app.py's owner_notified plumbing) turns that into the honest
+    "sent_for_approval" claim instead."""
     if not final_text or not final_text.strip():
-        return "empty"
+        return "sent_for_approval" if approval_prompt_sent else "empty"
     claims = {
         "success": bool(_MUTATION_SUCCESS.search(final_text)),
         "failure": bool(_FAILURE.search(final_text)),
@@ -133,9 +147,11 @@ def _classify_response_claim(final_text: str) -> str:
 def compare_shadow_final_status(
     final_text: str,
     evidence: TurnEvidenceSummary,
+    *,
+    approval_prompt_sent: bool = False,
 ) -> ShadowFinalizerComparison:
     status = evidence.classification()
-    claim = _classify_response_claim(final_text)
+    claim = _classify_response_claim(final_text, approval_prompt_sent=approval_prompt_sent)
     expected_claim = {
         "no_evidence": "neutral",
         "verified_read_only": "neutral",
@@ -149,8 +165,12 @@ def compare_shadow_final_status(
     }[status]
 
     # Empty/no-evidence is neutral and explicitly not a shadow success.
+    # F52 PR6: "sent_for_approval" is compatible with approval_pending —
+    # a real message was already sent this turn, just not via final_text.
     compatible = claim == expected_claim or (
         status == "no_evidence" and claim in ("empty", "neutral")
+    ) or (
+        status == "approval_pending" and claim == "sent_for_approval"
     )
     mismatch = not compatible
     return ShadowFinalizerComparison(
@@ -166,12 +186,21 @@ def observe_shadow_finalizer(
     evidence: TurnEvidenceSummary,
     *,
     state: str,
+    approval_prompt_sent: bool = False,
 ) -> tuple[str, ShadowFinalizerComparison | None]:
-    """Record a safe comparison and always return user text unchanged in RP4."""
+    """Record a safe comparison and always return user text unchanged in RP4.
+
+    approval_prompt_sent: True when this turn's approval-pending message was
+    actually sent to the owner through the side channel (app.py's
+    _queue_approval_detailed_impl() owner notification), proven by the
+    caller via owner_notified — never inferred here. See
+    _classify_response_claim()'s docstring for why this matters."""
     if state not in ("shadow", "enforce"):
         return final_text, None
 
-    comparison = compare_shadow_final_status(final_text, evidence)
+    comparison = compare_shadow_final_status(
+        final_text, evidence, approval_prompt_sent=approval_prompt_sent,
+    )
     log = logger.warning if comparison.mismatch else logger.info
     log(
         "[EvidenceFinalizerShadow] state=%s evidence_status=%s response_claim=%s "

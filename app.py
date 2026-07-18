@@ -1176,18 +1176,42 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
         os.environ.get("ELIYAHU_CHAT_ID", "") or
         os.environ.get("DIGEST_CHAT_ID", "")
     )
+    # F52 PR6: proven (not assumed) — True only once bot.send_message() below
+    # actually succeeds. Threaded into the return dict's "owner_notified" key
+    # so the caller (the tool loop) can tell EvidenceFinalizerShadow a real
+    # user/owner-visible message was sent this turn, even though A32's
+    # Single-Speaker gate correctly returns "" for the agent's own text.
+    _owner_notified = False
     if owner_chat_id:
         kb = telebot.types.InlineKeyboardMarkup()
         kb.add(
             telebot.types.InlineKeyboardButton("✅ אשר", callback_data=f"approve:{action_id}"),
             telebot.types.InlineKeyboardButton("❌ בטל",  callback_data=f"reject:{action_id}"),
         )
+        _legacy_pending_text = f"⏳ בקשת אישור\n\n{label}\n\nID: {action_id} | פג תוקף בעוד 10 דקות"
+        # F52 PR6: shadow-only formatter pass — off (default) returns
+        # _legacy_pending_text byte-identical; shadow computes+logs the
+        # unified approval_pending text alongside it (never sent); on
+        # returns the unified text instead. See
+        # core.action_gateway.ActionGateway._render_pending_prompt().
+        try:
+            from core.action_gateway import action_gateway as _gw_render
+            _pending_text = _gw_render._render_pending_prompt(
+                tool_name, _gw_result.contract_id if _gw_result else None, _legacy_pending_text,
+            )
+        except Exception:
+            logger.debug(
+                "[F52 PR6] pending prompt formatter failed, using legacy text",
+                exc_info=True,
+            )
+            _pending_text = _legacy_pending_text
         try:
             bot.send_message(
                 owner_chat_id,
-                f"⏳ בקשת אישור\n\n{label}\n\nID: {action_id} | פג תוקף בעוד 10 דקות",
+                _pending_text,
                 reply_markup=kb,
             )
+            _owner_notified = True
             logger.info(f"[Approval] ✅ sent to owner {_sanitize_id(owner_chat_id)} | {action_id}")
         except Exception as e:
             logger.error(f"[Approval] ❌ failed to notify owner: {e}")
@@ -1245,6 +1269,12 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
         "terminal_outcome": None if _created_this_turn else "APPROVAL_QUEUE_ERROR",
         "action_tool": tool_name,
         "created_this_turn": _created_this_turn,
+        # F52 PR6: proven above, never assumed — see _owner_notified's own
+        # comment at its assignment. Every other return branch in this
+        # function implicitly omits this key; callers must read it via
+        # .get("owner_notified", False), which is correctly False for all
+        # of them (none actually sent the owner a message).
+        "owner_notified": _owner_notified,
     }
 
 
@@ -3074,6 +3104,12 @@ def run_agent(
                         "terminal_outcome": _approval_outcome["terminal_outcome"],
                         "action_tool": _approval_outcome["action_tool"],
                         "created_this_turn": _approval_outcome["created_this_turn"],
+                        # F52 PR6: proven-sent flag (see _queue_approval_detailed_
+                        # impl()'s own "owner_notified" comment) — .get() with a
+                        # False default so pre-existing test mocks/older call
+                        # shapes that don't set this key read as "not proven
+                        # sent," never as a silent KeyError or a false True.
+                        "owner_notified": _approval_outcome.get("owner_notified", False),
                     })
                     if _approval_outcome["created_this_turn"]:
                         turn_evidence.record_approval_pending()
@@ -3206,6 +3242,16 @@ def run_agent(
                 tool_use_emitted=tool_calls_made > 0,
                 approval_queued=_approval_queued_this_turn,
                 final_reply=final_reply,
+                # F52 PR6: build_ownership_signal()'s own reply_owner default
+                # ("agent") was never overridden here, so a turn where a real
+                # approval was queued this turn — and the agent's own text was
+                # correctly suppressed by A32's Single-Speaker gate — still
+                # logged reply_owner="agent", contradicting agent_claimed_
+                # approval=False/tool_use_emitted=true right next to it in the
+                # same record. "gateway" matches the label build_turn_envelope()
+                # already uses for this exact situation (live_contract_reply_
+                # owner="gateway") — no new vocabulary introduced.
+                reply_owner="gateway" if _approval_queued_this_turn else "agent",
             )
             log_ownership_signal(_ownership_signal, canonical_user_id=identity.memory_key)
         except Exception:
@@ -3290,11 +3336,24 @@ def run_agent(
         # PR-RP4 — compare the current response with structured turn evidence.
         # This observer always returns the exact input text; RP5 owns any future
         # enforcement/footer/fallback changes.
+        #
+        # F52 PR6: approval_prompt_sent is proven per-entry via the
+        # __approval_queued__ sentinel's own "owner_notified" key (set only
+        # when app.py's _queue_approval_detailed_impl() actually sent the
+        # owner a message this turn — see that key's own comment), not
+        # inferred from evidence.approvals_pending alone: a deferred batch
+        # item (__approval_deferred_batch__) also counts as approval_pending
+        # evidence but never sends the owner a direct notification.
         try:
+            _approval_prompt_sent_this_turn = any(
+                r.get("tool") == "__approval_queued__" and r.get("owner_notified")
+                for r in tool_results_log
+            )
             final_reply, _evidence_comparison = observe_shadow_finalizer(
                 final_reply,
                 turn_evidence,
                 state=get_evidence_finalizer_state(),
+                approval_prompt_sent=_approval_prompt_sent_this_turn,
             )
             if _out_meta is not None and _evidence_comparison is not None:
                 _out_meta["evidence_finalizer_shadow"] = {
