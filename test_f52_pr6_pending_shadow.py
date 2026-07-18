@@ -280,6 +280,64 @@ chk("T2e: approval_prompt_sent defaults to False -> unchanged pre-fix "
     "classification for any caller that doesn't pass it",
     cmp2e is not None and cmp2e.response_claim == "empty" and cmp2e.mismatch is True)
 
+# 2f-2i — F52 PR6 follow-up (production-validated): a turn that ALSO did a
+# verified read before queuing the approval classifies as
+# evidence_status="mixed" (verified_reads>0 AND approvals_pending>0), not
+# "approval_pending" — the exact production log this follow-up closed:
+# evidence_status=mixed response_claim=sent_for_approval mismatch=true
+# counts={'verified_reads': 1, 'approvals_pending': 1, ...}.
+_mixed_read_pending_evidence = TurnEvidenceSummary()
+_mixed_read_pending_evidence.record_verification("ok", read_only=True)
+_mixed_read_pending_evidence.record_approval_pending()
+assert _mixed_read_pending_evidence.classification() == "mixed"
+
+comparison_2f = compare_shadow_final_status(
+    "", _mixed_read_pending_evidence, approval_prompt_sent=True,
+)
+chk("T2f: read + approval_pending (mixed) + approval_prompt_sent=True -> "
+    "response_claim=sent_for_approval, no longer a mismatch (the exact "
+    "production finding this follow-up closes)",
+    comparison_2f.response_claim == "sent_for_approval" and comparison_2f.mismatch is False)
+chk("T2f: ...evidence_status correctly stays 'mixed' (not silently "
+    "reclassified to approval_pending)",
+    comparison_2f.evidence_status == "mixed")
+
+# 2g — regression: without approval_prompt_sent, the SAME mixed evidence
+# still reports empty/mismatch (the widening only fires when a real prompt
+# was proven sent, exactly like the plain approval_pending case).
+comparison_2g = compare_shadow_final_status("", _mixed_read_pending_evidence)
+chk("T2g: same mixed evidence WITHOUT approval_prompt_sent -> still "
+    "response_claim=empty, still a mismatch (widening requires proof)",
+    comparison_2g.response_claim == "empty" and comparison_2g.mismatch is True)
+
+# 2h — defense: a mixed turn that ALSO has a genuine failure or unverified
+# effect mixed in must NOT be swallowed by this widening — those need their
+# own claim in the text, "sent_for_approval" alone would hide them.
+_mixed_with_failure = TurnEvidenceSummary()
+_mixed_with_failure.record_verification("ok", read_only=True)
+_mixed_with_failure.record_approval_pending()
+_mixed_with_failure.record_verification("failed", read_only=False)
+assert _mixed_with_failure.classification() == "mixed"
+comparison_2h = compare_shadow_final_status(
+    "", _mixed_with_failure, approval_prompt_sent=True,
+)
+chk("T2h: mixed evidence that ALSO includes a genuine failure -> still a "
+    "mismatch even with approval_prompt_sent=True (widening is scoped to "
+    "reads+pending only, never masks a real failure)",
+    comparison_2h.mismatch is True)
+
+_mixed_with_unverified = TurnEvidenceSummary()
+_mixed_with_unverified.record_verification("ok", read_only=True)
+_mixed_with_unverified.record_approval_pending()
+_mixed_with_unverified.record_unverified_effect()
+assert _mixed_with_unverified.classification() == "mixed"
+comparison_2i = compare_shadow_final_status(
+    "", _mixed_with_unverified, approval_prompt_sent=True,
+)
+chk("T2i: mixed evidence that ALSO includes an unverified effect -> still "
+    "a mismatch even with approval_prompt_sent=True (same defense as T2h)",
+    comparison_2i.mismatch is True)
+
 
 # ══════════════════════════════════════════════════
 # Section 3 — A32 regression: Single-Speaker suppression is UNCHANGED
