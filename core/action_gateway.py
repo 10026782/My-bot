@@ -1140,6 +1140,72 @@ class ActionGateway:
         # state == "on"
         return unified_text
 
+    # ── F52 PR6 — approval_pending prompt shadow rendering ───────────────
+    # Same architectural gap PR5 closed for rejections, now for the
+    # approval-pending notification surface: app.py's
+    # _queue_approval_detailed_impl() sends its own hardcoded "⏳ בקשת
+    # אישור..." text directly via bot.send_message(), never through
+    # compose_status_reply()/ActionFact — so FEATURE_UNIFIED_STATUS_
+    # FORMATTER=shadow had no visibility into this surface, and outcome=
+    # "pending" (already a valid ActionFact.outcome, already mapped to the
+    # "approval_pending" canonical state by _action_fact_to_message() —
+    # see that method, unmodified) was never actually exercised end-to-end
+    # from a real call site.
+    #
+    # off (default): returns the caller's own legacy_text byte-identical.
+    # shadow: computes the unified text via the SAME formatter/state-mapping
+    # already used for the executed/rejected paths, logs the SAME safe
+    # comparison record (_log_shadow_comparison/_shadow_leak_flags, reused
+    # as-is), and still returns legacy_text. on: returns the unified text.
+    #
+    # Deliberately a free-standing render call at the actual send site
+    # (app.py), not folded into propose_action()/request_approval() —
+    # mirrors exactly where _render_rejection_reply() is called from
+    # route_cancellation_word()/route_combined_word(), never woven into an
+    # internal helper that other callers depend on for a different contract.
+    def _render_pending_prompt(
+        self, tool_name: str, contract_id: str | None, legacy_text: str,
+    ) -> str:
+        """Renders the approval-pending owner notification through the same
+        off/shadow/on FEATURE_UNIFIED_STATUS_FORMATTER path compose_status_
+        reply() uses, without changing the legacy EventBus/Telegram
+        notification flow itself. legacy_text is the caller's own
+        pre-existing hardcoded prompt — returned unchanged unless the flag
+        is 'on'. contract_id may be None (e.g. shadow-mode propose_action()
+        raised before returning one) — _action_fact_to_message() already
+        handles a missing/unfound contract by falling back to an empty
+        human_summary, same as every other outcome."""
+        try:
+            from feature_flags import get_unified_status_formatter_state
+            state = get_unified_status_formatter_state()
+        except Exception:
+            state = "off"
+
+        if state == "off":
+            return legacy_text
+
+        fact = ActionFact(
+            tool_name=tool_name,
+            contract_id=contract_id or "",
+            outcome="pending",
+            record_id=None,
+            error_code=None,
+            raw_tool_response={},
+        )
+        try:
+            unified_text, meta = self._compose_status_reply_unified(fact)
+        except Exception as exc:
+            # An approval prompt must never break because of the formatter.
+            logger.warning("[ActionGateway] unified pending formatter failed: %s", exc)
+            return legacy_text
+
+        if state == "shadow":
+            self._log_shadow_comparison(fact, legacy_text, unified_text, meta)
+            return legacy_text
+
+        # state == "on"
+        return unified_text
+
     def reject_if_pending(self, contract_id: str, rejected_by: str = "") -> bool:
         """
         Atomic conditional cancel (Codex re-audit of 818c8a6 — TOCTOU race
