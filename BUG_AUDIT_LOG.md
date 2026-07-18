@@ -2475,3 +2475,58 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **Merged:** כן.
 - **Verified בפרודקשן:** לא — הכתיבות החדשות (`status=done`+`Business Outcome=converted`) עדיין לא נצפו על ליד אמיתי בפרודקשן.
 - **סטטוס:** ✅ קוד תוקן ומאומת בבדיקות, ⚠️ לא verified-in-prod. חוב טכני (gateway migration + read-side `status=="converted"` consumers) מתועד למעלה, לא נחסם ע"י זה.
+
+---
+
+## BUG-111 — פענוח batch של לידים: מילת דומיין/prefix שולח/שורות דחוסות נלכדו כשם ליד מזויף — ✅ תוקן, לא נבדק בפרודקשן
+
+- **דווח:** 18/07/2026 — דווח production ישיר: הודעת batch עם 3 מספרי טלפון יצרה ליד אמיתי אחד עם `name="דומיין גיוס"` (או, בסבב השני, `name="לידים חדשים"`) — שם מזויף שנגזר מטקסט הפקודה/הכותרת, לא משם אמיתי.
+- **מסך / מודול:** `core/ingress_classifier.py` (`_extract_lead_candidates`/`_extract_candidates_from_block`/`_extract_name_from_window`/`_classify_ingress_core` — הנתיב החי; `core/lead_candidate_handler.py`'s `parse_batch_dictation`/`parse_lead_dictation` הם dead code מאומת, ראו BUG-096) ו-`core/lead_candidate_handler.py` (`_maybe_start_lead_clarification`/`_resolve_lead_clarification`).
+- **Severity:** High — יצירת רשומת Lead אמיתית ב-Airtable עם שם שגוי, ואיבוד שקט של מספרי טלפון נוספים ב-batch.
+
+### סבב 1 — PR #386 (`6bb3b61`, follow-up `7b2cd5c`, CI fix `c3499f5`, merge `fc3f51b`)
+
+- **Root Cause (4 סיבות עצמאיות, מאומתות בקוד):**
+  1. `_PHONE_RE` לא תאם פורמטים דו-מפרידים (`05X-XXX-XXXX` מקומי, `+972 XX-XXX-XXXX` בין-לאומי) — בלי match לטלפון, גם ה-Tier-5 clarification fallback לא מצא כלום וההודעה נפלה עד ל-Agent tool_use loop, שנחסם ע"י LeadsWriteGate.
+  2. `_CHAT_EXPORT_TIMESTAMP` דרש בלוק שנה מלא (`D.M.YYYY`) — חותמת WhatsApp נפוצה בלי שנה (`[D.M, HH:MM]`) הפילה גם את `_BLOCK_SEP` וגם את `_SENDER_LINE_RE`, ואז כותרת ה-batch ו-prefix השולח (`"אורי צדוק:"`) התמזגו לבלוק/חלון אחד ודלפו כ-candidate name.
+  3. `_JSON_BLOCK_RE` סיווג כל `"["` מוביל כ-JSON, כולל שורת timestamp קצרה בודדת — Tier 4 שגוי מהסיבה הלא-נכונה.
+  4. למילת המפתח `"דומיין"`/מילת הרמז שלה (למשל `"גיוס"`) לא היה טיפול stop-word/extraction — נכתבו כשם הליד במקום להיות מזוהות כהערת ניתוב.
+- **תוקן:** שני alternatives חדשים ל-`_PHONE_RE`; שנה אופציונלית ב-`_CHAT_EXPORT_TIMESTAMP`; `_JSON_BLOCK_RE` עם negative lookahead לתאריך קצר; זוג פונקציות חדש `_extract_domain_hint()`/`_strip_domain_hint()` שמסיר את הביטוי **כולו** ("דומיין X") מהחלון לפני חילוץ שם, וחושף `candidate["domain_hint"]`; pattern גיוס חדש ב-`_DOMAIN_PATTERNS`; `_maybe_start_lead_clarification()` מנרמל את הטלפון לפני שמירה/הצגה.
+- **Follow-up באותו PR (`7b2cd5c`):** batch עם טלפון-בלבד (ללא שם) קרס לטלפון יחיד (איבוד שקט של 2 מהמספרים) — `_maybe_start_lead_clarification()` נכתב מחדש להשתמש ב-`.finditer()` על **כל** הטלפונים, ומפצל למצב batch-clarification (`expected_field="names"`) כששני טלפונים+ ללא שם קיימים; `_resolve_batch_name_clarification()` חדש פותר אותו לפי סדר שורה-לכל-שם.
+- **CI-only follow-up (`c3499f5`):** 9/50 בדיקות נכשלו ב-CI (עברו 100% מקומית) — `session_store.py` נכתב ל-Airtable אמיתי ב-CI, ו-`chat_id`ים ליטרליים גרמו לזליגת מצב ישן בין ריצות CI רצופות. תוקן ע"י `uuid.uuid4().hex[:10]` suffix ל-chat_idים בקובץ הבדיקה — אין שינוי מוצר.
+- **בדיקות:** `test_bug111_lead_domain_and_sender_prefix.py` — 50/50.
+
+### סבב 2 — PR #390 (`4635bcd`, merge `ee012c3`), אותו יום
+
+- **מקור:** דגימת production חדשה, **אחרי** תיקון סבב 1, עם טקסט WhatsApp דחוס (בלי שורות חדשות בין הכותרת לחותמות ה-timestamp) — עדיין הפיק ליד אמיתי אחד עם `name="לידים חדשים"`, איבד 2 מספרי טלפון.
+- **Root Cause (3 סיבות מצטברות נוספות):**
+  1. `_BLOCK_SEP` דרש `\n` לפני **כל** סוג גבול, כולל chat-export header — כותרת שהודבקה ישירות על החותמת הראשונה (אין `\n`) מעולם לא התפצלה לבלוקים.
+  2. `_SENDER_LINE_RE` דרש התחלת שורה אמיתית (`^`) גם לצורה עם bracket-timestamp — שם שולח מיד אחרי הודעה קודמת בלי `\n` לא זוהה כשורת שולח.
+  3. `_NAME_STOP` הכיל רק את הצורות היחיד `"ליד"`/`"חדש"` (מסבב 1); הצורות הרבים `"לידים"`/`"חדשים"` שמופיעות בכותרת יצירת batch מעולם לא כוסו.
+- **תוקן:** `_BLOCK_SEP` קיבל alternative לא-מעוגן (`(?=_CHAT_EXPORT_HEADER)`) שמפצל לפני header בכל מקום, לא רק אחרי `\n`; `_SENDER_LINE_RE` שוכתב כך שהצורה עם bracket-timestamp לא דורשת `^`; `"לידים"`/`"חדשים"` נוספו ל-`_NAME_STOP`. בנוסף — **רשת ביטחון הגנתית חדשה** ב-`_classify_ingress_core()`: אם החילוץ מפיק candidate יחיד אך הטקסט הגולמי מכיל יותר ממספר טלפון אחד, ה-candidate נזרק וההודעה יורדת ל-Tier 5 (בקשת הבהרה) במקום לשמור candidate יחיד עם שם שאולי שגוי.
+- **בדיקות:** `test_bug111_followup_compact_text.py` — 29/29 (כולל שתי הדגימות המדויקות מ-production, worst-case header מודבק ישירות על טלפון, ורגרסיה על ליד יחיד אמיתי + batch נקי קיים).
+- **Scope confirmed:** שני הסבבים לא נגעו ב-F52/RP5/`ActionGateway`/דגלים.
+- **Merged:** כן (PR #386 + PR #390, שניהם).
+- **Deployed:** לא ידוע — דרוש בדיקה ידנית ב-Render.
+- **Verified בפרודקשן:** לא — לא נצפתה עדיין דגימת production אמיתית עוברת דרך הקוד המתוקן.
+- **סטטוס:** ✅ קוד תוקן ומאומת בבדיקות (79 checks סה"כ בין שני קבצי הבדיקה, suite מלא ירוק בשני הסבבים), ⚠️ לא verified-in-prod.
+
+---
+
+## BUG-112 — Telegram approval button המשיך לבצע אחרי ה-TTL המוצהר (10 דקות) — ✅ תוקן, לא נבדק בפרודקשן
+
+- **דווח:** 18/07/2026.
+- **מסך / מודול:** `app.py` — `_handle_approval_callback_impl()` (נתיב ה-Telegram inline-button), מול `event_bus.py`'s `PendingActionsStore`.
+- **Severity:** High — ביצוע כלי אמיתי (כתיבה/פעולה) אחרי שהמשתמש כבר קיבל הודעה מפורשת שהאישור פג תוקף.
+- **Root Cause:** כפתור האישור אומר **"פג תוקף בעוד 10 דקות"** — `_PENDING_APPROVAL_TTL` (600 שניות), אותו קבוע שה-gate של אישור טקסט חופשי ברמת ה-router כבר השתמש בו. אבל `_handle_approval_callback_impl()` קרא רק ל-`event_bus.bus.pop()`, שאוכף TTL **נפרד וארוך יותר** של `event_bus.py` עצמו (`PendingActionsStore.PENDING_TTL_MINUTES = 30 דקות`) — אופק ניקוי כללי לכל ה-store, לא קשור למה שהודעת אישור ספציפית מציגה. לחיצה על הכפתור בין דקה 10 ל-30 עדיין ביצעה את הכלי, בסתירה ל-TTL המוצהר.
+- **הערת רגרסיה:** ה-`_PENDING_APPROVAL_TTL` הקיים כיסה רק אישורי טקסט ברמת ה-router (בתוך `run_agent()`'s Pending Approval Gate). אישורי Telegram callback דרשו אכיפת אותו TTL **בנפרד**, כי הם עוברים בנתיב קוד שונה לחלוטין (`_handle_approval_callback_impl()`, מונע ע"י `bus.pop()` ולא ה-dict `_pending_approvals`).
+- **תוקן:** `_handle_approval_callback_impl()` בודק כעת, מיד אחרי pop מה-bus ולפני כל החלטת dispatch/execute, את חותמת ה-`"created"` של הפריט מול אותו `_PENDING_APPROVAL_TTL`, לכל callback "approve" (עם/בלי כלי). `_reject_stale_telegram_approval()` חדש מטפל בכל מה ש"פג תוקף" חייב לכלול: לא לבצע/dispatch לעולם; לדחות את ה-`ActionGateway` contract התואם אם קיים וניתן לוודא **בפועל** (לא בהנחה); להודיע למאשר בהודעת chat קבועה ("⏰ פג תוקף — הפעולה לא בוצעה"), לא רק פופ-אפ חולף; לערוך את הודעת האישור המקורית כך שלא תיראה עוד ניתנת לפעולה; לעולם לא ליפול ל-legacy dispatch.
+- **Scope:** רק `app.py` נגע, פלוס קובץ הבדיקה החדש. אין שינוי לפענוח לידים (BUG-111), F52/`agent_message_formatter`, `FEATURE_UNIFIED_STATUS_FORMATTER`, RP5, או סמנטיקת ביצוע כלים מעבר לחסימת אישור-שפג-תוקף.
+- **בדיקות:** `test_bug112_telegram_approval_ttl.py` — 22/22 (ביצוע בתוך TTL עם דגל כבוי/דלוק וגבול 9-דקות; callback שפג תוקף לעולם לא קורא ל-`dispatch_tool`/`ActionGateway.approve()`; ה-contract התואם נדחה בפועל בצורה durable; לחיצה שנייה על כפתור שפג עדיין 0 dispatches; ניסוח ההודעה הקבועה; סעיף רגרסיה שמוכיח ישירות שה-gate של אישור-טקסט ברמת ה-router לא הושפע).
+- **תוקן ב-commit:** `f639c33` ("BUG-112: enforce Telegram approval button TTL before execution").
+- **תוקן ב-branch:** `claude/bug-112-telegram-approval-ttl`.
+- **PR:** #387 (merge `2136a14`).
+- **Merged:** כן.
+- **Deployed:** לא ידוע — דרוש בדיקה ידנית ב-Render.
+- **Verified בפרודקשן:** לא — לא נבדק עדיין לחיצה אמיתית על כפתור שפג תוקף בפרודקשן.
+- **סטטוס:** ✅ קוד תוקן ומאומת בבדיקות, ⚠️ לא verified-in-prod.
