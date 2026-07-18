@@ -184,7 +184,20 @@ if not WEBHOOK_SECRET:
         "protection. Set this env var to enable header-based secret validation."
     )
 
-# Router-level pending approvals expire after this many seconds.
+# Router-level (free-text "מאשר") pending approvals expire after this many
+# seconds — matches the "פג תוקף בעוד 10 דקות" ("expires in 10 minutes")
+# wording shown on the Telegram inline approval button (_queue_approval()).
+#
+# BUG-112: this constant alone did NOT protect the Telegram callback path.
+# event_bus.py's PendingActionsStore has its OWN, separate, longer TTL
+# (PENDING_TTL_MINUTES = 30 minutes) — a general cleanup horizon for the
+# whole store, unrelated to what any specific approval message advertises.
+# bus.pop(action_id) inside _handle_approval_callback_impl() only enforced
+# THAT 30-minute window, so a button press between minute 10 and minute 30
+# still executed the tool even though the user was told it would have
+# expired by minute 10. _handle_approval_callback_impl() now enforces this
+# SAME _PENDING_APPROVAL_TTL value independently, right after popping the
+# bus item — see the "BUG-112" comment there.
 _PENDING_APPROVAL_TTL = 600
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=AGENT_TIMEOUT)
@@ -1613,6 +1626,85 @@ def _notify_stale_or_resolved_callback(
             pass
 
 
+def _reject_stale_telegram_approval(
+    cq, item: dict, action_id: str, approver_chat_id: str,
+) -> None:
+    """
+    BUG-112: called once _handle_approval_callback_impl() has determined an
+    "approve" callback arrived after _PENDING_APPROVAL_TTL (the SAME 600s
+    window advertised to the user as "פג תוקף בעוד 10 דקות") — even though
+    event_bus.py's own, separate 30-minute PendingActionsStore TTL had not
+    yet elapsed, so bus.pop() still handed back a live item.
+
+    The bus item is already popped/removed by the caller (this function does
+    not touch event_bus state itself). This function's job is everything
+    else "stale" must mean:
+      - never dispatch/execute (caller returns immediately after this call —
+        no fallthrough to any dispatch_tool()/ActionGateway.approve() path)
+      - reject the matching live ActionGateway contract, if one exists and
+        can be positively verified via business fingerprint (never a blind
+        "assume it worked" — mirrors the verified-cleanup convention used
+        elsewhere in this module, e.g. _revoke_and_verify_contract())
+      - notify the approver with a PERSISTENT chat message (not only the
+        transient answer_callback_query popup)
+      - edit the original approval message so it no longer looks actionable
+    """
+    payload   = item.get("payload", {}) or {}
+    tool_name = payload.get("tool_name")
+    canonical_user_id = payload.get("canonical_user_id", "")
+    tenant_id = payload.get("tenant_id", "boss_hq")
+
+    if tool_name and canonical_user_id:
+        try:
+            from feature_flags import is_enabled as _flag_stale
+            if _flag_stale("FEATURE_ACTION_GATEWAY"):
+                from core.action_gateway import action_gateway as _gw_stale
+                _fp_stale = _gw_stale.compute_business_fingerprint(
+                    tenant_id, canonical_user_id, tool_name,
+                    _gw_stale.normalize_payload(payload.get("tool_inputs", {})),
+                )
+                _contract_stale = _gw_stale._ledger.find_by_fingerprint(_fp_stale)
+                if _contract_stale is not None and _contract_stale.status == "pending":
+                    _gw_stale.reject(_contract_stale.contract_id, rejected_by="ttl_expired")
+                    _verify_stale = _gw_stale._ledger.find_by_id(_contract_stale.contract_id)
+                    if not (_verify_stale and _verify_stale.status == "rejected"):
+                        logger.error(
+                            "[Approval] TTL-expired callback: ActionContract=%s "
+                            "reject() did not verify as rejected — status=%s",
+                            _contract_stale.contract_id,
+                            getattr(_verify_stale, "status", None),
+                        )
+        except Exception as _stale_exc:
+            logger.warning(
+                "[Approval] TTL-expired callback: contract cleanup failed "
+                "(non-blocking, bus item already removed): %s", _stale_exc,
+            )
+
+    logger.info(
+        "[Approval] TTL-expired Telegram callback: action_id=%s tool=%s — "
+        "not executed", action_id, tool_name,
+    )
+
+    bot.answer_callback_query(cq.id, "⏰ פג תוקף — הפעולה לא בוצעה")
+    if approver_chat_id:
+        try:
+            bot.send_message(approver_chat_id, "⏰ פג תוקף — הפעולה לא בוצעה")
+        except Exception as e:
+            logger.error(f"[Approval] TTL-expired notify failed: {e}")
+    try:
+        bot.edit_message_text(
+            f"⏰ *פג תוקף*\n{item.get('label', '')}",
+            cq.message.chat.id, cq.message.message_id,
+            parse_mode="Markdown",
+        )
+    except Exception:
+        try:
+            bot.edit_message_reply_markup(
+                cq.message.chat.id, cq.message.message_id, reply_markup=None)
+        except Exception:
+            pass
+
+
 def _handle_approval_callback_impl(cq) -> None:
     """מטפל בלחיצה על ✅/❌ של בקשת אישור."""
     from event_bus import bus
@@ -1706,6 +1798,31 @@ def _handle_approval_callback_impl(cq) -> None:
         origin_channel   = payload.get("origin_channel", channel)
         origin_chat_id   = payload.get("origin_chat_id", user_chat_id)
         canonical_user_id = payload.get("canonical_user_id", "")
+
+        # BUG-112: bus.pop() above only enforced event_bus.py's OWN, separate
+        # 30-minute PendingActionsStore TTL — not the 10-minute window
+        # actually advertised to the user on the button ("פג תוקף בעוד 10
+        # דקות"). Enforce that SAME _PENDING_APPROVAL_TTL independently here,
+        # for every "approve" callback (tool AND non-tool), before any
+        # dispatch/execute decision is made. The bus item is already gone
+        # (popped above) regardless of this check's outcome — this only
+        # decides whether execution may proceed.
+        _item_created_raw = item.get("created")
+        if _item_created_raw:
+            try:
+                from datetime import datetime as _dt_stale
+                _age_seconds = (
+                    _dt_stale.now() - _dt_stale.fromisoformat(_item_created_raw)
+                ).total_seconds()
+            except (ValueError, TypeError) as _ts_exc:
+                logger.warning(
+                    "[Approval] TTL check: malformed created timestamp %r "
+                    "(%s) — not treated as stale", _item_created_raw, _ts_exc,
+                )
+                _age_seconds = 0.0
+            if _age_seconds > _PENDING_APPROVAL_TTL:
+                _reject_stale_telegram_approval(cq, item, action_id, approver_chat_id)
+                return
 
         if not tool_name:
             # Non-tool approval — emit {action}.confirmed event
