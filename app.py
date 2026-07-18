@@ -2125,6 +2125,18 @@ def _handle_approval_callback_impl(cq) -> None:
         _promote_next_batch_item(canonical_user_id)
 
     elif action == "reject":
+        # F52 PR5 note: this legacy button-reject path builds its own
+        # cancellation text directly and never calls ActionGateway.reject()/
+        # compose_status_reply() at all (same pre-existing gap the
+        # BUG-BATCH-DISCARD comment below already documents for the
+        # ActionContract sync side) — so it is NOT covered by
+        # FEATURE_UNIFIED_STATUS_FORMATTER shadow/on and never emits a
+        # [UnifiedStatusFormatterShadow] line. Explicitly left as a
+        # separate, undocumented-no-longer gap rather than folded into PR5 —
+        # wiring it in would mean first deciding whether/how this path
+        # should sync-cancel the matching contract at all, which is a bigger
+        # change than a shadow-observability addition. See
+        # docs/architecture/f52-unified-approval-runtime/PR5_REJECTION_CANCELLATION_SHADOW.md.
         item = bus.pop(action_id)
         if item:
             logger.info("🚫 Rejected: %s | %s", action_id, item.get("label", item.get("action", "")))

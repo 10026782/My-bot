@@ -1072,6 +1072,74 @@ class ActionGateway:
         )
         return "🚫 הפעולה בוטלה."
 
+    # ── F52 PR5 — rejection/cancellation shadow verification ────────
+    # Production finding: reject()/route_cancellation_word()/route_combined_word()
+    # never called compose_status_reply() at all — every rejection/cancellation
+    # reply was a hardcoded legacy string with zero FEATURE_UNIFIED_STATUS_FORMATTER
+    # involvement, so no [UnifiedStatusFormatterShadow] line was ever emitted for
+    # this surface (PR4 only wired the EXECUTED/status-query path). This closes
+    # that gap the same way PR4 did for compose_status_reply(): off (default)
+    # returns the caller's own legacy text byte-identical; shadow computes the
+    # unified text via the SAME formatter/state-mapping already used for the
+    # executed path ("rejected" -> "failure" family, locked in PR1-3 — no new
+    # canonical state invented here) and logs the SAME safe comparison record
+    # PR4 already built (_log_shadow_comparison/_shadow_leak_flags, reused
+    # as-is, not duplicated); on returns the unified text.
+    #
+    # Deliberately NOT folded into reject() itself: reject()'s return value is
+    # an internal control-flow signal multiple callers branch on via
+    # `result.startswith("🚫")` (route_cancellation_word's loop, route_
+    # disambiguation's/route_combined_word's sibling-closing) to distinguish
+    # "successfully rejected" from "a real error occurred". If reject() itself
+    # returned the unified text under 'on', that prefix check would silently
+    # break (unified wording does not start with "🚫") — a latent multi-
+    # contract correctness bug that would only surface once an operator later
+    # sets the flag to 'on'. Rendering happens instead at the OUTERMOST,
+    # actually-user-visible return points, exactly mirroring where
+    # compose_status_reply() itself is called (at the final reply boundary,
+    # never woven into internal helpers) — see route_cancellation_word() and
+    # route_combined_word() below. Sibling rejections closed while resolving a
+    # disambiguation/combined-word CONFIRM are never independently shown to
+    # the user (only the chosen contract's approve() reply is) — nothing to
+    # render there.
+
+    def _render_rejection_reply(self, contract: "ActionContract", legacy_text: str) -> str:
+        """Renders a rejection/cancellation reply through the same off/
+        shadow/on FEATURE_UNIFIED_STATUS_FORMATTER path compose_status_reply()
+        uses, without changing reject()'s own return contract. legacy_text is
+        the caller's own pre-existing hardcoded reply — returned unchanged
+        unless the flag is 'on'."""
+        try:
+            from feature_flags import get_unified_status_formatter_state
+            state = get_unified_status_formatter_state()
+        except Exception:
+            state = "off"
+
+        if state == "off":
+            return legacy_text
+
+        fact = ActionFact(
+            tool_name=contract.tool_name,
+            contract_id=contract.contract_id,
+            outcome="rejected",
+            record_id=None,
+            error_code=None,
+            raw_tool_response={},
+        )
+        try:
+            unified_text, meta = self._compose_status_reply_unified(fact)
+        except Exception as exc:
+            # A rejection reply must never break because of the formatter.
+            logger.warning("[ActionGateway] unified rejection formatter failed: %s", exc)
+            return legacy_text
+
+        if state == "shadow":
+            self._log_shadow_comparison(fact, legacy_text, unified_text, meta)
+            return legacy_text
+
+        # state == "on"
+        return unified_text
+
     def reject_if_pending(self, contract_id: str, rejected_by: str = "") -> bool:
         """
         Atomic conditional cancel (Codex re-audit of 818c8a6 — TOCTOU race
@@ -1131,11 +1199,17 @@ class ActionGateway:
         live = self.find_live_contracts(canonical_user_id)
         if not live:
             return None
+        rendered = "🚫 הפעולה בוטלה."
         for c in live:
             result = self.reject(c.contract_id, rejected_by=canonical_user_id)
             if not result.startswith("🚫"):
                 return result
-        return "🚫 הפעולה בוטלה."
+            # F52 PR5: render (off: unchanged, shadow: logged+unchanged, on:
+            # unified) only on confirmed success — reject()'s own return
+            # contract above is untouched, so the "🚫" check stays valid
+            # regardless of formatter state.
+            rendered = self._render_rejection_reply(c, result)
+        return rendered
 
     # ── disambiguation ordinal resolver ─────────────────────────────
 
@@ -1287,8 +1361,16 @@ class ActionGateway:
         )
         remaining = len(live) - 1
         if remaining > 0:
-            return f"🚫 פעולה מספר {idx} ({contract.tool_name}) בוטלה. נשארו {remaining} פעולות ממתינות."
-        return f"🚫 פעולה מספר {idx} בוטלה."
+            legacy_text = f"🚫 פעולה מספר {idx} ({contract.tool_name}) בוטלה. נשארו {remaining} פעולות ממתינות."
+        else:
+            legacy_text = f"🚫 פעולה מספר {idx} בוטלה."
+        # F52 PR5: same off/shadow/on rendering as route_cancellation_word()
+        # above. Note (pre-existing, not introduced or fixed here): the
+        # legacy_text branch above already embeds contract.tool_name — a
+        # leak that predates this PR and is intentionally left as-is (legacy
+        # output must stay byte-identical); only the unified/shadow text this
+        # renders is guaranteed tool-name-free.
+        return self._render_rejection_reply(contract, legacy_text)
 
     # ── §10 — route_override_word ────────────────────────────────────
 
