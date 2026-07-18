@@ -231,6 +231,17 @@ _NAME_STOP = frozenset({
     "טלפון", "מספר", "פלאפון", "נייד", "תשמור", "שמור", "שמרי",
     "תרשום", "רשום", "תוסיף", "הוסף", "save", "add", "כליד",
     "ליד", "לקוח", "חדש", "בשם", "השם",
+    # BUG-111 follow-up: plural forms of "ליד"/"חדש" ("לידים חדשים" = "new
+    # leads", as in "צור 3 לידים חדשים ..."). Only the singular forms were
+    # ever added (BUG-111 original), so a batch-creation header using the
+    # plural survived segmentation and got accepted as a fake candidate name
+    # whenever no block/line separator isolated it first (compact/glued
+    # WhatsApp paste with no boundary between the header and the first
+    # phone). Nouns, not verbs — unlike "צור" (see the BUG-111 comment
+    # above), adding these does not reopen the "בדירת" tie-break regression
+    # from test_bug099b1_no_name_validation.py, since neither word appears
+    # in that test's property-description text.
+    "לידים", "חדשים",
     "טבריה", "חיפה", "תלאביב", "ירושלים", "נתניה", "אשדוד", "באר", "שבע",
     "רמת", "גן", "פתח", "תקווה", "ראשון", "לציון", "רחובות", "בנייה",
     "פרויקט", "פרוייקט", "דירה", "דירות", "נדלן", "נכס",
@@ -348,8 +359,23 @@ _CHAT_EXPORT_HEADER = _CHAT_EXPORT_TIMESTAMP + r"\s*[^\n:]{1,40}:"
 # letter, and there's no blank line/bullet/numbering before it), so the whole
 # header gets swallowed into the PRECEDING block — the root cause of the
 # cross-message name/phone bleed in BUG-101's production evidence.
+#
+# BUG-111 follow-up: real production text sometimes has NO newlines between
+# WhatsApp export headers at all (a compact/newline-stripped paste — e.g.
+# "...לידים חדשים [18.7, 22:02] אורי צדוק: +972 53-396-8395[18.7, 22:02]
+# אורי צדוק: 0533123482..." — every header glued directly onto the previous
+# message with no separator whatsoever). Every alternative above requires a
+# `\n` immediately before the boundary, so none of them fired: the whole
+# message stayed ONE block, and command/header text ("לידים חדשים") ended up
+# directly adjacent to the first phone's extraction window. The last
+# alternative below is a bare, unanchored lookahead for the same header
+# shape — it splits right before a chat-export header WHEREVER it appears,
+# newline or not. A header that IS newline-preceded still gets a (harmless,
+# filtered-empty-block) redundant split from both alternatives; this only
+# ADDS coverage, it narrows nothing.
 _BLOCK_SEP = re.compile(
     r"\n\s*\n|\n[-•*]\s+|\n\d+[.)]\s+|\n(?=[א-ת])|\n(?=" + _CHAT_EXPORT_HEADER + r")"
+    r"|(?=" + _CHAT_EXPORT_HEADER + r")"
 )
 
 # Sender-name line pattern for WhatsApp-style chat logs (not exports):
@@ -359,8 +385,24 @@ _BLOCK_SEP = re.compile(
 # literal start of the line, so it was never recognized as a sender and got
 # extracted as if it were a lead's name). The bracket prefix is optional so
 # the plain "דני:" case still matches exactly as before.
+#
+# BUG-111 follow-up: the SAME compact/newline-stripped paste that defeated
+# _BLOCK_SEP above also defeats this — `^` (MULTILINE) only matches at the
+# very start of the string or right after a real `\n`, so a timestamp+sender
+# header sitting mid-line (never preceded by any newline at all) was invisible
+# to this regex, and sender_names ended up empty for the whole message —
+# "אורי צדוק" then leaked through as a candidate NAME for every phone after
+# the first. Restructured so the two forms have independent anchoring
+# requirements instead of sharing one `^` over the whole optional-bracket
+# group: the BARE "Name:" form (no bracket) still requires `^` — unanchored
+# bare "word:" matching anywhere in free text would be far too eager, a much
+# higher false-positive risk than before. The BRACKET-prefixed form no
+# longer requires `^` at all — the literal timestamp text immediately
+# preceding it is already a high-precision signal on its own (same shape
+# _CHAT_EXPORT_HEADER/_BLOCK_SEP already trust unanchored, above), so it now
+# matches wherever that exact shape occurs, line-start or not.
 _SENDER_LINE_RE = re.compile(
-    r"^(?:" + _CHAT_EXPORT_TIMESTAMP + r"\s*)?([א-ת]{2,}(?:\s+[א-ת]{2,})?)\s*:\s*",
+    r"(?:^|" + _CHAT_EXPORT_TIMESTAMP + r"\s*)([א-ת]{2,}(?:\s+[א-ת]{2,})?)\s*:\s*",
     re.MULTILINE,
 )
 
@@ -780,6 +822,26 @@ def _classify_ingress_core(
 
     # ── Extract lead candidates ───────────────────
     candidates = _extract_lead_candidates(text)
+
+    # BUG-111 follow-up — defense in depth: a SINGLE extracted candidate is
+    # not trustworthy when the raw text actually contains MORE distinct
+    # phone numbers than were captured as candidates. That mismatch means at
+    # least one phone's name-extraction window found no safe name (correctly
+    # dropped) while exactly one OTHER window produced a "name" — in every
+    # production case seen so far, that lone survivor was command/header
+    # text bleeding into a phone's window, not a real person's name (e.g.
+    # "לידים חדשים" attached to the first of three phones). Rather than
+    # trust it, this degrades to the same Tier 5/no_lead_candidates outcome
+    # a fully-nameless batch already gets — the multi-phone clarification
+    # path (_maybe_start_lead_clarification, which independently re-scans
+    # the FULL text for every phone via .finditer()) takes over instead of
+    # silently creating one lead under a name nobody actually gave.
+    # "Doubt → degrade toward safe, never toward fast" (this module's own
+    # design principle, see the file's own top-of-file comment).
+    if len(candidates) == 1:
+        distinct_phones = {_normalize_phone(m.group()) for m in _PHONE_RE.finditer(text)}
+        if len(distinct_phones) > 1:
+            candidates = []
 
     if not candidates:
         return IngressClassification(
