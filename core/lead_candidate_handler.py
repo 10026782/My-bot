@@ -98,6 +98,11 @@ _DOMAIN_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"שיווק|מדיה|קמפיין|פרסום|תוכן|סושיאל|instagram|facebook|youtube|marketing|media", re.I), "media"),
     (re.compile(r"saas|מנוי|subscription|פיצ.ר|feature|product|api", re.I), "saas"),
     (re.compile(r"כסף|תזרים|הכנסה|הוצאה|רווח|חשבון|תשלום|חשבונית|finance|revenue|invoice|payment", re.I), "finance"),
+    # BUG-111: recruiting/גיוס — a live Leads/Lead Events Domain value
+    # ("recruitment", see airtable_schema.py) that had no detector at all.
+    # Deliberately narrow ("candidate"/"מועמד" excluded — too generic, would
+    # false-positive on unrelated usage, e.g. "the candidate apartment").
+    (re.compile(r"גיוס|מגייס|מגייסת|recruiting|recruitment", re.I), "recruitment"),
 ]
 
 # Minimal block separator — blank line, bullet, number+dot, or Hebrew item marker
@@ -112,7 +117,23 @@ def _detect_domain(text: str, identity_domain: str = "") -> str:
     """
     מזהה דומיין מתוכן ההודעה.
     חוזר ל-identity_domain אם לא נמצא במלל, ולבסוף "general".
+
+    BUG-111: an explicit "דומיין X"/"לדומיין X" command annotation (e.g.
+    "צור ליד דומיין גיוס ...") is a higher-precision signal than the generic
+    content-keyword scan below — checked first via the SAME extractor/mapping
+    ingress_classifier.py uses for candidates (core.ingress_classifier.
+    _extract_domain_hint), so an explicit hint and the routing value actually
+    used here can never drift apart. Falls through to the content scan when
+    no explicit annotation is present or its hint word has no known mapping.
     """
+    try:
+        from core.ingress_classifier import _extract_domain_hint
+        explicit_hint = _extract_domain_hint(text)
+    except Exception:
+        explicit_hint = None
+    if explicit_hint:
+        return explicit_hint
+
     for pattern, domain in _DOMAIN_PATTERNS:
         if pattern.search(text):
             return domain
@@ -744,12 +765,16 @@ def _maybe_start_lead_clarification(
     "some free text that happens to not extract a name" is not the same as
     "a clear create-lead request missing exactly one field."
     """
-    from core.ingress_classifier import _PHONE_RE as _ic_phone_re
+    from core.ingress_classifier import _PHONE_RE as _ic_phone_re, _normalize_phone as _ic_normalize_phone
 
     phone_match = _ic_phone_re.search(text)
     if not phone_match:
         return None
-    phone = phone_match.group().strip()
+    # BUG-111: the raw regex match ("+972 53-396-8395") was stored/shown
+    # verbatim — spaces/dashes/leading "+972" and all — instead of the same
+    # canonical local format (_normalize_phone: "0"+9 digits) every other
+    # extraction path in this module writes to Airtable's Leads.Phone.
+    phone = _ic_normalize_phone(phone_match.group().strip())
 
     from session_store import lead_sessions as _ls
 
