@@ -1686,6 +1686,10 @@ class ActionGateway:
 
     # ── §15.2 — compose_status_reply ────────────────────────────────
     # הפונקציה היחידה בכל הקוד שמותר לה לייצר טקסט סטטוס-פעולה.
+    # F52 PR4 scope guard: represents exactly ONE ActionFact. Batch/multi-status
+    # rendering (approval_pending_batch, mixed, mixed_with_unknown) is out of
+    # scope here — this path has no multi-fact input to format. See
+    # docs/architecture/f52-unified-approval-runtime/PR4_ACTION_STATUS_SHADOW_VERIFICATION.md §5.
     #
     # F52 reconciliation: this remains the single entry point for action-status
     # text, but it is no longer a second competing formatter. Under
@@ -1710,21 +1714,56 @@ class ActionGateway:
             return legacy
 
         try:
-            unified_text = self._compose_status_reply_unified(fact)
+            unified_text, meta = self._compose_status_reply_unified(fact)
         except Exception as exc:
             # The live status path must never break because of the formatter.
             logger.warning("[ActionGateway] unified status formatter failed: %s", exc)
             return legacy
 
         if state == "shadow":
-            logger.info(
-                "[UnifiedStatusFormatterShadow] outcome=%s legacy=%r unified=%r",
-                fact.outcome, legacy.text, unified_text,
-            )
+            self._log_shadow_comparison(fact, legacy.text, unified_text, meta)
             return legacy
 
         # state == "on"
         return GatewayReply(text=unified_text, fact=fact)
+
+    # ── F52 PR4 — safe shadow comparison logging ────────────────────
+    # Logs only booleans/counts/state-names, never the rendered text itself
+    # (legacy or unified text may embed business data — names, phones, business
+    # summaries — that must not ride into logs), and never raw record_id/
+    # tool_name/contract_id values. Independently re-checks (defense in depth,
+    # on top of the formatter's own redaction) that none of those identifiers
+    # slipped into the text that would be sent if the flag were 'on'.
+
+    @staticmethod
+    def _shadow_leak_flags(fact: ActionFact, unified_text: str) -> dict:
+        return {
+            "record_id_leak":    bool(fact.record_id) and fact.record_id in unified_text,
+            "tool_name_leak":    bool(fact.tool_name) and fact.tool_name in unified_text,
+            "contract_id_leak":  bool(fact.contract_id) and fact.contract_id in unified_text,
+        }
+
+    def _log_shadow_comparison(
+        self, fact: ActionFact, legacy_text: str, unified_text: str, meta: dict,
+    ) -> None:
+        leaks = self._shadow_leak_flags(fact, unified_text)
+        logger.info(
+            "[UnifiedStatusFormatterShadow] outcome=%s mapped_state=%s text_differs=%s "
+            "record_id_leak=%s tool_name_leak=%s contract_id_leak=%s "
+            "redaction_count=%d fallback_used=%s formatter_version=%s "
+            "legacy_len=%d unified_len=%d",
+            fact.outcome, meta.get("message_state"), legacy_text != unified_text,
+            leaks["record_id_leak"], leaks["tool_name_leak"], leaks["contract_id_leak"],
+            meta.get("redaction_count", 0), meta.get("fallback_used", False),
+            meta.get("formatter_version"), len(legacy_text), len(unified_text),
+        )
+        if any(leaks.values()):
+            logger.warning(
+                "[UnifiedStatusFormatterShadow] potential identifier leak detected: "
+                "record_id_leak=%s tool_name_leak=%s contract_id_leak=%s outcome=%s",
+                leaks["record_id_leak"], leaks["tool_name_leak"], leaks["contract_id_leak"],
+                fact.outcome,
+            )
 
     def _compose_status_reply_legacy(self, fact: ActionFact) -> GatewayReply:
         """Pre-F52 status wording. Retained only as the FEATURE_UNIFIED_STATUS_
@@ -1774,10 +1813,13 @@ class ActionGateway:
                                "reason": "הפעולה נדחתה."}
         return "outcome_unknown", {}
 
-    def _compose_status_reply_unified(self, fact: ActionFact) -> str:
-        from core.agent_message_formatter import format_agent_message
+    def _compose_status_reply_unified(self, fact: ActionFact) -> tuple[str, dict]:
+        """Returns (text, meta). meta is the formatter's own observability
+        record (message_state, formatter_version, fallback_used,
+        redaction_count) — safe to log as-is, never contains raw text/ids."""
+        from core.agent_message_formatter import format_agent_message_with_meta
         state, payload = self._action_fact_to_message(fact)
-        return format_agent_message(state, payload)
+        return format_agent_message_with_meta(state, payload)
 
     # ── §7 §20 — query_execution_status ─────────────────────────────
     # עונה לשאלות סטטוס ("נוספה?") אך ורק מה-ExecutionLedger.
