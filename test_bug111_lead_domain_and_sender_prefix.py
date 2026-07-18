@@ -64,6 +64,29 @@
 #     _normalize_phone() before storing/showing it (it was previously stored
 #     as the raw regex match, spaces/dashes/"+972" and all).
 #
+# Follow-up fix (same file, review of the first version of this PR): the
+# first version above stopped the CORRUPTION (fake names) but introduced a
+# new, narrower data-loss bug of its own — a 3-phone-only batch collapsed
+# into a SINGLE-phone clarification, because _maybe_start_lead_clarification()
+# still only ever called _PHONE_RE.search() (first match only) instead of
+# finding every distinct phone in the text. Fixed: it now uses .finditer(),
+# normalizes + de-duplicates every match, and for 2+ phones stores a NEW
+# batch-clarification shape (expected_field="names", partial_payload["phones"]
+# = the full list — nothing dropped) with a reply that explicitly states the
+# count and, when known, the domain
+# ("זיהיתי 3 מספרים לדומיין גיוס, אבל חסרים שמות. איך לשמור אותם?"), plus the
+# actual phone numbers themselves. A NEW _resolve_batch_name_clarification()
+# resolves it: exactly one name per line, in the same order as the stored
+# phones — a count mismatch or an invalid name line asks again WITHOUT
+# clearing state (so a phone is never silently dropped just because the
+# reply was malformed); a valid reply routes through the SAME
+# _store_pending_preview()/resolve_pending_lead_preview() mechanism the
+# existing Tier-2 clean-batch flow (BUG-058) already uses, rather than
+# inventing a second batch-write path. That confirm-time rendering (record
+# id shown inline per lead, the "עובדתי N לידים" summary header) is
+# pre-existing in _handle_batch() and intentionally NOT touched by this PR —
+# a separate, already-tracked F52/UX concern.
+#
 # Explicitly NOT touched: F52/agent_message_formatter, RP5/evidence
 # finalizer, ActionGateway execution, approval policy, feature flags,
 # TMA/frontend. tools/airtable_security.py's LeadsWriteGate itself is also
@@ -203,10 +226,19 @@ chk("T3b: plain 'Name: phone' (no bracket) is also never extracted as a "
 
 
 # ══════════════════════════════════════════════════
-# 4. Three phone-only WhatsApp lines: not the wrong two-candidate result
+# 4. Three phone-only WhatsApp lines: ALL THREE phones must be preserved
+#    (not silently reduced to one, not wrongly named). This is the BUG-111
+#    follow-up blocker: the first version of this fix correctly stopped the
+#    fake-name/sender-as-name corruption, but _maybe_start_lead_clarification()
+#    still only ever stored the FIRST phone_match, silently discarding the
+#    other two into a single-phone clarification. Fixed: it now detects ALL
+#    distinct phones and, for 2+, stores a batch clarification carrying
+#    every one of them — never inventing names, never using the sender
+#    prefix as a name, never dropping a phone.
 # ══════════════════════════════════════════════════
 print()
-print("── 4. three phone-only lines: not two wrongly-named candidates ──")
+print("── 4. three phone-only lines: not two wrongly-named candidates, "
+      "and no phone silently dropped ──")
 
 cands4 = _extract_lead_candidates(T2)
 chk("T4: not exactly 2 candidates with sender/garbage names (the observed bug)",
@@ -219,15 +251,83 @@ chk("T4: classify_ingress never returns exactly the 2 wrong candidates as Tier 2
     not (ic4.tier == 2 and len(ic4.candidates) == 2
          and any(c["name"] == "אורי צדוק" for c in ic4.candidates)))
 
-# Per BUG-099c's existing (unmodified) flow: Tier 5 + a phone present +
-# Router-confirmed create_lead intent asks for the missing name instead of
-# silently losing the request — "a clarification requiring names" is an
-# explicitly acceptable outcome alongside "candidates extracted" (see task).
+# Per BUG-099c's existing flow: Tier 5 + a phone present + Router-confirmed
+# create_lead intent asks for the missing name(s) instead of silently losing
+# the request.
+chat_batch = "bug111_batch"
 with patch.object(lch, "_at_find_lead", return_value=None):
-    reply4 = _send("bug111_batch", T2, intent="create_lead")
-chk("T4: batch header + sender-prefixed phones triggers clarification "
-    "instead of silently vanishing or misnaming a lead",
-    isinstance(reply4, str) and "לא מצאתי שם" in reply4)
+    reply4 = _send(chat_batch, T2, intent="create_lead")
+
+chk("T4a: batch header + sender-prefixed phones triggers a clarification "
+    "reply (not None -> would fall through toward the Agent)",
+    isinstance(reply4, str))
+chk("T4b: the reply explicitly mentions 3 numbers (the count, not silently "
+    "reduced to 1)",
+    isinstance(reply4, str) and "3" in reply4 and "מספרים" in reply4)
+chk("T4c: the reply mentions the domain hint ('גיוס') too, not just the count",
+    isinstance(reply4, str) and "גיוס" in reply4)
+chk("T4d: none of the actual 3 normalized phone numbers is missing from the reply",
+    isinstance(reply4, str)
+    and "0533116744" in reply4 and "0504142604" in reply4 and "0504107630" in reply4)
+
+snap_batch = _snap(chat_batch)
+cand_batch = (snap_batch.get("active_lead_candidate") or {})
+chk("T4e: session state is the new batch-clarification shape "
+    "(expected_field='names', not the single-phone 'name' shape)",
+    cand_batch.get("state") == "needs_clarification"
+    and cand_batch.get("expected_field") == "names")
+stored_phones = cand_batch.get("partial_payload", {}).get("phones", [])
+chk("T4f: ALL THREE normalized phones are preserved in session state — "
+    "none silently dropped",
+    sorted(stored_phones) == sorted(["0533116744", "0504142604", "0504107630"]))
+chk("T4g: the stored batch payload carries the recruiting domain hint",
+    cand_batch.get("partial_payload", {}).get("domain") == "recruitment")
+
+# ── Resolving the batch clarification: one name per line, in order ───────
+with patch.object(lch, "_at_find_lead", return_value=None):
+    reply4b = _send(chat_batch, "דני כהן\nרותי לוי\nמשה אבני")
+chk("T4h: supplying 3 names (one per line) resolves into a batch preview, "
+    "not a single-lead preview — no name/phone silently dropped",
+    isinstance(reply4b, str)
+    and "דני כהן" in reply4b and "רותי לוי" in reply4b and "משה אבני" in reply4b
+    and "0533116744" in reply4b and "0504142604" in reply4b and "0504107630" in reply4b)
+
+snap_batch2 = _snap(chat_batch)
+preview = snap_batch2.get("pending_lead_preview") or {}
+preview_candidates = preview.get("candidates", [])
+chk("T4i: all 3 candidates (correct name+phone pairs) landed in the pending "
+    "batch preview — the existing Tier-2 confirm mechanism (BUG-058), reused "
+    "rather than re-invented",
+    len(preview_candidates) == 3
+    and {c["phone"] for c in preview_candidates}
+        == {"0533116744", "0504142604", "0504107630"}
+    and {c["name"] for c in preview_candidates}
+        == {"דני כהן", "רותי לוי", "משה אבני"})
+chk("T4j: the clarification state itself is cleared once resolved into the preview",
+    _snap(chat_batch).get("active_lead_candidate") is None)
+
+# ── Wrong name-count: state must NOT drop any phone, must ask again ───────
+chat_wrong_count = "bug111_batch_wrong_count"
+with patch.object(lch, "_at_find_lead", return_value=None):
+    _send(chat_wrong_count, T2, intent="create_lead")
+    reply_wc = _send(chat_wrong_count, "דני כהן\nרותי לוי")   # only 2 names for 3 phones
+chk("T4k: a wrong name count does not silently drop a phone — it asks again",
+    isinstance(reply_wc, str) and "3" in reply_wc)
+still_pending = (_snap(chat_wrong_count).get("active_lead_candidate") or {}) \
+    .get("partial_payload", {}).get("phones", [])
+chk("T4l: after a wrong-count reply, all 3 phones are STILL preserved in "
+    "session state (not reduced to 2, not cleared)",
+    sorted(still_pending) == sorted(["0533116744", "0504142604", "0504107630"]))
+
+# ── Cancellation still works for the batch shape ──────────────────────────
+chat_cancel_batch = "bug111_batch_cancel"
+with patch.object(lch, "_at_find_lead", return_value=None):
+    _send(chat_cancel_batch, T2, intent="create_lead")
+    reply_cancel = _send(chat_cancel_batch, "בטל")
+chk("T4m: cancelling a batch clarification returns the standard cancel message",
+    reply_cancel == "ביטלתי את יצירת הליד.")
+chk("T4n: cancelling clears the batch clarification state",
+    _snap(chat_cancel_batch).get("active_lead_candidate") is None)
 
 
 # ══════════════════════════════════════════════════
