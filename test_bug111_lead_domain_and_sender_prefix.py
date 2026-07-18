@@ -103,6 +103,7 @@ os.environ.setdefault("AIRTABLE_BASE_ID", "appTest")
 os.environ.setdefault("RENDER_APP_URL", "https://example.com")
 os.environ.setdefault("SETUP_WEBHOOK", "0")
 
+import uuid
 from unittest.mock import patch
 
 from core.ingress_classifier import (
@@ -118,6 +119,25 @@ import core.lead_candidate_handler as lch
 from session_store import lead_sessions
 
 passed = failed = 0
+
+# CI FIX: session_store.py's PersistentSessionStore persists to a REAL
+# Airtable "Sessions" table (SF.SENDER_ID-keyed, 30-minute TTL) whenever
+# AIRTABLE_API_KEY/AIRTABLE_BASE_ID resolve to working credentials — which
+# CI's job-level `env:` block supplies from repo secrets BEFORE this file's
+# own os.environ.setdefault() calls run (setdefault is a no-op once the key
+# already exists, even if CI's secret is empty — an empty AIRTABLE_BASE_ID
+# still short-circuits _at_find_lead(), but _load_from_db() has no such
+# guard and will genuinely round-trip if the secret IS configured).
+# A fixed, literal chat_id (e.g. "bug111_batch") is therefore NOT guaranteed
+# fresh across two separate CI job runs on the same PR pushed minutes apart
+# — well within that 30-minute TTL, a re-push reads back the PREVIOUS run's
+# leftover session state instead of starting clean, corrupting exactly the
+# multi-step clarification assertions below (this is what actually failed
+# in CI: T4/T8 read back a stale single-phone clarification written by an
+# earlier push to this same PR, under the same literal chat_id). A random
+# suffix, unique per test-process invocation, makes that collision
+# structurally impossible regardless of what credentials CI has.
+_RUN = uuid.uuid4().hex[:10]
 
 
 def chk(desc: str, cond: bool) -> None:
@@ -254,7 +274,7 @@ chk("T4: classify_ingress never returns exactly the 2 wrong candidates as Tier 2
 # Per BUG-099c's existing flow: Tier 5 + a phone present + Router-confirmed
 # create_lead intent asks for the missing name(s) instead of silently losing
 # the request.
-chat_batch = "bug111_batch"
+chat_batch = f"bug111_batch_{_RUN}"
 with patch.object(lch, "_at_find_lead", return_value=None):
     reply4 = _send(chat_batch, T2, intent="create_lead")
 
@@ -307,7 +327,7 @@ chk("T4j: the clarification state itself is cleared once resolved into the previ
     _snap(chat_batch).get("active_lead_candidate") is None)
 
 # ── Wrong name-count: state must NOT drop any phone, must ask again ───────
-chat_wrong_count = "bug111_batch_wrong_count"
+chat_wrong_count = f"bug111_batch_wrong_count_{_RUN}"
 with patch.object(lch, "_at_find_lead", return_value=None):
     _send(chat_wrong_count, T2, intent="create_lead")
     reply_wc = _send(chat_wrong_count, "דני כהן\nרותי לוי")   # only 2 names for 3 phones
@@ -320,7 +340,7 @@ chk("T4l: after a wrong-count reply, all 3 phones are STILL preserved in "
     sorted(still_pending) == sorted(["0533116744", "0504142604", "0504107630"]))
 
 # ── Cancellation still works for the batch shape ──────────────────────────
-chat_cancel_batch = "bug111_batch_cancel"
+chat_cancel_batch = f"bug111_batch_cancel_{_RUN}"
 with patch.object(lch, "_at_find_lead", return_value=None):
     _send(chat_cancel_batch, T2, intent="create_lead")
     reply_cancel = _send(chat_cancel_batch, "בטל")
@@ -415,8 +435,9 @@ chk("T8: the domain hint is not treated as the lead name "
 chk("T8: _detect_domain resolves to the canonical recruiting value",
     lch._detect_domain(T8) == "recruitment")
 
+chat_intl = f"bug111_intl_phone_{_RUN}"
 with patch.object(lch, "_at_find_lead", return_value=None):
-    reply8 = _send("bug111_intl_phone", T8, intent="create_lead")
+    reply8 = _send(chat_intl, T8, intent="create_lead")
 
 chk("T8: missing name triggers clarification/confirmation, not a bare None "
     "(which would fall through toward the Agent's own tool_use loop)",
@@ -429,7 +450,7 @@ chk("T8: the LeadsWriteGate direct-denial message is NOT what the user sees "
     isinstance(reply8, str)
     and "יצירת ליד חדש ידנית דרך הצ׳אט חסומה כרגע" not in reply8)
 
-snap8 = _snap("bug111_intl_phone")
+snap8 = _snap(chat_intl)
 cand8 = snap8.get("active_lead_candidate") or {}
 chk("T8: the stored clarification payload has the normalized phone",
     cand8.get("partial_payload", {}).get("phone") == "0533968395")
