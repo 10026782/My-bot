@@ -2696,3 +2696,34 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
   ניסוח שונה מהדגימה המקורית (`domain recruitment` באנגלית, בלי `לדומיין`/מקף) — מוודא שהתיקון כללי ולא מותאם-דיוק לניסוח הבדיקה. `_AIRTABLE_ID_RE` לא תפס `recruitment` יותר, `classify_ingress()` החזיר tier=1, שם+טלפון נחלצו נכון, תצוגת-ליד תקינה נשלחה, ולא "📄 זה נראה כמו טבלה" כמו קודם.
   **הערה על BUG-115:** אותה דגימה מראה "כן" שנפתר ישירות ל-`✅ בוצע` בלי תפריט disambiguation — עקבי עם תיקון BUG-115, אך **לא מספיק כדי לסמן את BUG-115 כ-verified**: אין ראייה בדגימה הזו (למשל שורת `case_c_signal live_contracts=N`) שאכן היו כמה contracts pending חיים במקביל באותו רגע — בלעדיה לא ניתן להבדיל בין "הבוקמארק פתר נכון מתוך כמה" לבין "היה רק contract חי אחד ממילא" (המסלול הקודם, הלא-קשור-לבאג). BUG-115 נשאר מסומן "לא נבדק בפרודקשן" עד דגימה עם ספירת live_contracts>1 מפורשת.
 - **סטטוס:** ✅ VERIFIED IN PROD / CLOSED.
+
+---
+
+## BUG-117 — Tier-2 batch lead-preview נחטף לאותה disambiguation שBUG-115 תיקן עבור Tier-1 — ✅ תוקן ומאומת בבדיקות, לא נבדק בפרודקשן
+
+- **תאריך רישום:** 19/07/2026.
+- **מקור:** דגימת production ישירה, **נושא נפרד מ-BUG-115** (שורש-תרומה משותף — contracts pending לא פוקעים לעולם, BUG-114 §2 שאלה 6 — אך מנגנון/קוד שונה לגמרי, ללא ActionContract בכלל).
+- **תסמין (production, verbatim):**
+  ```
+  BOSS: 📋 זיהיתי 2 לידים אפשריים בקבוצה:
+        • יצחק גלבר (0527696084)
+        • אהרון שמחה (0548421060)
+        ענה "כן" לשמירת כולם, או "לא" לביטול. (בתוקף ל-30 דקות)
+  Eli: כן
+  BOSS: יש כמה פעולות הממתינות לאישור — איזו?
+        • 1. הוספה ב-Tasks: בדוק פר4
+        ... (9 פריטים, כולם ישנים ולא-קשורים)
+  ```
+  ה-batch מעולם לא אושר — "כן" נחטף לתפריט disambiguation גנרי במקום.
+- **מסך / מודול:** `app.py:2632` (`_CONFIRM_WORDS` handler), `core/lead_candidate_handler.py` (`should_prefer_batch_preview()` חדש, `resolve_pending_lead_preview()`, `_store_pending_preview()`).
+- **Root Cause (מאומת בקוד, לא השערה):** תצוגת batch (BUG-058) נשמרת ב-`session_store.py`'s `pending_lead_preview` — **לא** `ActionContract` (בניגוד לתצוגת ליד-בודד, BUG-056, שכן ממירה ל-contract אמיתי). `app.py`'s `_CONFIRM_WORDS` בדק Tier-1 (`find_live_contracts()`) **תמיד ראשון וללא-תנאי**, לפני שהוא בכלל הגיע לבדיקת ה-Tier-2 (`resolve_pending_lead_preview()`, שורה מאוחרת יותר) — קוד ותיעוד קיימים (`core/lead_candidate_handler.py:1415-1419` לפני התיקון) הניחו במפורש "Tier 1 מנצח תמיד כששני המנגנונים חיים בו-זמנית". הנחה זו כבר נשברה עבור Tier-1-מול-Tier-1 (BUG-115, תוקן עם בוקמארק), אך מעולם לא תוקנה עבור Tier-1-מול-Tier-2 — הבוקמארק של BUG-115 לא יכול לכסות את זה כי אין לו `ActionContract` להצביע עליו.
+- **תוקן:** פונקציה חדשה `core.lead_candidate_handler.should_prefer_batch_preview(canonical_user_id, chat_id)` — משווה recency בין ה-`pending_lead_preview`'s `set_at` (TTL 1800s קיים) לבין `last_prompted_contract`'s `set_at` (TTL 600s קיים, BUG-115) — מי שטרי יותר מנצח. `app.py`'s `_CONFIRM_WORDS` קורא לפונקציה הזו **לפני** ה-gate הבלתי-מותנה של Tier-1, ומדלג ישירות ל-`resolve_pending_lead_preview()` כשהיא מחזירה `True`. שני מנגנוני ה-TTL הקיימים לא שונו כלל — הפונקציה רק משווה timestamps. אין נגיעה ב-BUG-114, בבוקמארק של BUG-115 עצמו, ב-`route_disambiguation()`, או ב-`route_cancellation_word()`/`_CANCEL_WORDS` (מחוץ לסקופ במפורש — ל-`route_cancellation_word()` יש התנהגות שונה/מורכבת יותר, מבטל את **כל** ה-contracts החיים כשקיימים, נושא נפרד).
+- **הערת בדיקה מבנית:** `test_c89_preview_confirmation.py`'s `test_app_py_confirm_word_checks_gateway_before_flag_branch()` בודקת סטטית שהמרחק בין הסמן ל-`find_live_contracts()`/ה-flag branch נשאר בתוך חלון-תווים קבוע — התיקון הזה דחף אותם רחוק יותר מהסמן (בדיוק כמו ש-BUG-058 כבר עשה פעם אחת קודם, לאותה סיבה); החלון הורחב (3000→5000, ו-5000→6500 לבדיקת `_CANCEL_WORDS`) עם הערה מתעדת, האינווריאנט עצמו לא השתנה.
+- **ביקורת מלאה + תיעוד:** `docs/architecture/action-gateway/BUG-117_BATCH_PREVIEW_PRECEDENCE_HIJACK.md`.
+- **Scope:** לא נוגע ב-BUG-114, בבוקמארק/route_confirmation_word() של BUG-115, ב-`route_disambiguation()`, או ב-`_CANCEL_WORDS`.
+- **בדיקות:** `test_bug117_batch_preview_precedence.py` חדש (11/11) — שחזור מדויק של דגימת production, רגרסיה ל"אין batch preview", השוואות recency בשני הכיוונים, תפוגה של כל אחד מהשני המנגנונים (ללא קריסה), בידוד chat_id, ובדיקת end-to-end שה-batch אכן מאושר. `test_c89_preview_confirmation.py` (9/9, כולל הבדיקה המבנית עם החלון המורחב) ו-`test_bug115_confirmation_routing_bookmark.py` (22/22) רצו מחדש ללא רגרסיה. Full regression sweep: **140/140 קבצי `test_*.py`, exit 0**. `smoke_tests.py` PASS, `compileall -q .` נקי, `git diff --check` נקי.
+- **תוקן ב-branch:** `claude/action-status-shadow-verification-m1m0ow` (אותו ענף כמו BUG-116, טרם PR נפרד — יתווסף ל-PR הבא על אותו ענף).
+- **Merged:** לא עדיין.
+- **Deployed:** לא.
+- **Verified בפרודקשן:** לא — התיקון טרם נצפה פותר batch lead preview אמיתי מול contracts ישנים חיים.
+- **סטטוס:** ✅ קוד תוקן ומאומת בבדיקות, ⚠️ לא verified-in-prod.
