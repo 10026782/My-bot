@@ -558,7 +558,8 @@ _AGENT_PENDING_STATUS_PATTERN = re.compile(
 _AGENT_APPROVAL_INVITE_PATTERN = re.compile(
     r"(שלח\s*\*?(מאשר|כן)\*?|לחץ.{0,15}(מאשר|אשר)|"
     r"אשר\s*(כדי|על מנת|בבקשה)|"
-    r"מוכנ[הת]?\s.{0,40}(להוספה|לביצוע|לשליחה|לעדכון|ליצירה|לשמירה))",
+    r"מוכנ[הת]?\s.{0,40}(להוספה|לביצוע|לשליחה|לעדכון|ליצירה|לשמירה)|"
+    r"הצעד הבא.{0,30}אשר\b)",
     re.UNICODE,
 )
 # Was "הפעולה התקבלה. תוצאה תישלח בנפרד." — a false continuation claim with
@@ -659,6 +660,34 @@ def sanitize_agent_response(agent_text: str, tool_results: list[dict],
             return ""
         logger.warning("[A32] Single-Speaker: agent emitted action-status text, replacing")
         return _SINGLE_SPEAKER_FALLBACK
+
+    # F52-PR6-DUP-PROSE (live incident): a real approval WAS queued this turn
+    # (ActionGateway already sent its own "⏳ בקשת אישור..." prompt), yet the
+    # agent's accompanying text still slipped through as a *second* message —
+    # "✅ המשימה מוכנה להוספה...\n➡️ הצעד הבא המומלץ: שלח מאשר כדי לאשר...".
+    # Neither pattern in the block above caught it: _AGENT_ACTION_STATUS_PATTERN
+    # needs a completion verb ("נוספה" etc — "להוספה" isn't one), and
+    # _AGENT_PENDING_STATUS_PATTERN needs "לאישור"/"ממתינ" within 25 chars of
+    # "מוכנ[הת]" — "מוכנה להוספה" doesn't have either nearby. It DOES match
+    # _AGENT_APPROVAL_INVITE_PATTERN (already defined above, reused here — see
+    # BUG-FAKE-APPROVAL-INVITE), which today is only consulted at the
+    # NO-TOOL-EVIDENCE gate further below and only when NO approval was
+    # queued (the unevidenced/fabricated-invite case). This is the mirror,
+    # evidenced case: a real __approval_queued__ sentinel is present, so this
+    # is Single-Speaker duplication of ActionGateway's own prompt, not a
+    # hallucination — suppress exactly like the block above (never replace
+    # with a fallback, which would falsely read as failure while the action
+    # is, correctly, still pending).
+    if (
+        _gateway_active
+        and _AGENT_APPROVAL_INVITE_PATTERN.search(agent_text)
+        and any(r.get("tool") == "__approval_queued__" for r in tool_results)
+    ):
+        logger.info(
+            "[A32] Single-Speaker: agent emitted approval-invite prose after an approval "
+            "was already queued this turn — suppressing (not replacing with fallback)"
+        )
+        return ""
 
     if _SELF_FIX_CLAIMS.search(agent_text):
         logger.error("[A32] SELF-REPORTED-FIX claim blocked (no code/deploy tool exists)")
