@@ -152,6 +152,12 @@ def load_all_leads() -> list[LeadProfile]:
 
 def _parse_records(records: list) -> list[LeadProfile]:
     """ממיר רשומות Airtable לLeadProfile."""
+    try:
+        from airtable_schema import LeadFields, LeadOutcome  # type: ignore
+        outcome_field, converted_outcome = LeadFields.OUTCOME, LeadOutcome.CONVERTED
+    except ImportError:
+        outcome_field, converted_outcome = "Business Outcome", None
+
     profiles = []
     now = datetime.now(tz=timezone.utc)
 
@@ -174,7 +180,10 @@ def _parse_records(records: list) -> list[LeadProfile]:
                 channel        = f.get("channel") or "whatsapp",
                 days_active    = days_active,
                 days_silent    = days_silent,
-                converted      = bool(f.get("status") in ("closed", "won", "converted")),
+                converted      = bool(
+                    f.get("status") in ("closed", "won", "converted")  # BUG-110: legacy pre-fix marker, no backfill
+                    or (converted_outcome is not None and f.get(outcome_field) == converted_outcome)
+                ),
                 followup_count = int(f.get("followup_count") or 0),
                 answers        = {},
             ))
