@@ -1247,3 +1247,125 @@ Audit + SPEC בלבד — אין קוד. תלוי ב-C122/PR #370 (הרביעי�
 תיקון ישיר על בסיס ממצא C122/Phase 2A.0: `lead_conversion.py::convert_lead_to_contact()` (`_at_patch`, דרך ה-gateway) ו-`ad_attribution.py::mark_converted()` (`tools.airtable_tools.airtable_update`, **לא** דרך ה-gateway) כתבו `status="converted"` — ערך שאינו קיים ב-`LeadStatus.ALL`/לא אופציית `Leads.status` חיה, ועוקף את הוולידציה הקיימת ב-`tma_api.py::patch_lead`. תוקן: שני האתרים כותבים כעת `status=LeadStatus.DONE` + `Business Outcome=LeadOutcome.CONVERTED` (הקבועים הקיימים ב-`airtable_schema.py`, כולל הרווח-הזנב המובנה ב-Airtable) — אין שדה/אופציה חדשה, אין backfill. **`ad_attribution.py` נשאר במכוון על `tools.airtable_tools.airtable_update`** — מעבר ל-gateway היה משנה את חוזה ה-return של הפונקציה (`bool` מול `dict` עם `result.get("ok")`) ושובר את `test_response_contract_fixes.py` הקיים; חוב טכני מתועד, לא תוקן בסבב הזה. גם תוקן: `test_response_contract_fixes.py`'s baseline (`_LEGITIMATE_AIRTABLE_GET_ENTRIES`) — מספר שורה קבוע-בקוד זז ב-1 בגלל import חדש, לא שינוי התנהגות. `build_attribution_report()` (`ad_attribution.py`) ו-`audience_intelligence.py` עדיין קוראים `status=="converted"` לדיווח/סגמנטציה — יימצאו ונשארו לא-מתוקנים במפורש (יחסירו לידים שהומרו אחרי התיקון, אין backfill). 10 בדיקות חדשות (`test_bug105_non_canonical_converted_status.py`), 19/19 `test_response_contract_fixes.py`, 102+57+46+59 בדיקות BUG-104/Core Reasoning ללא שינוי.
 **הערת מספור:** התיקון תויג `BUG-105` בקוד/PR title/commit message/שם קובץ הבדיקה **לפני** שהתגלה ש-`BUG-105` כבר תפוס ב-`BUG_AUDIT_LOG.md` (פורמט טלפון בין-לאומי עם מקף, 12/07/2026, לא קשור, עדיין פתוח/לא-תוקן). לפי החלטת owner מפורשת, התיעוד (כאן, ב-`BUG_AUDIT_LOG.md`, וב-`AI_CONTEXT.md`/`ROADMAP.md`/`CHANGELOG.md`) משתמש ב-**BUG-110** (המספר הפנוי הבא אחרי BUG-109); שמות הקבצים/ה-PR/ה-commit **לא** שונו רטרואקטיבית ב-`main`.
 **Merged:** כן (`fa1506e`, merge `b344b02`, PR #372) | **Verified בפרודקשן:** לא — הכתיבות החדשות (`status=done`+`Business Outcome=converted`) עדיין לא נצפו על ליד אמיתי בפרודקשן
+
+**הערת גבולות (19/07/2026):** רשומות C125–C148 למטה סוגרות את הפער שנפתח אחרי C124 (PR #372) — קובץ זה לא תועד כלל עבור PR #373–#396 עד עדכון זה, למרות ש-`CHANGELOG.md`/`BUG_AUDIT_LOG.md` תועדו חלקית באמצע (PR #391 סנכרן עד #390). כל הרשומות מאומתות מול `main` (`git log`/`git diff --stat`) לפני כתיבה, לא רק לפי הודעות commit.
+
+### C125 — BUG-104 Phase 2A.1: יישום מדיניות Current State (Business Outcome precedence) (17/07/2026)
+קבצים: `core/leads_reasoning_projection.py`, `core/adapters/leads_adapter.py`, `test_bug104_phase2a1_current_state_policy.py` (חדש) | PR #373 | באג: BUG-104
+מיישם בפועל את מדיניות C123/Phase 2A.1 SPEC: Business Outcome טרמינלי (`converted`/`lost`/`not_relevant`/`duplicate`/`archived`) גובר כעת על `status` בבניית ה-`ReasoningEntity`; Business Outcome ביניים/חסר/לא-ידוע נופל למיפוי status חי מורחב (כל 10 הערכים, לא רק "new"/"lost" כמו קודם — כולל `done`, הערך הקנוני ל"הומר"). Business Outcome נחשף כעת ל-`LeadsAdapter` דרך ה-projection. אין שינוי סכימה/migration/frontend, אין שינוי ל-`DecisionStatus`/phase enum, אין שינוי ל-envelope הציבורי. `FEATURE_CORE_REASONING_LEADS_STATE` לא נגע (נשאר off/shadow לפי סביבה).
+**Merged:** כן (`48b90c4`, merge `fa29514`, PR #373) | **Verified בפרודקשן:** לא — flag off/shadow, נבדק ב-tests בלבד
+
+### C126 — Governance docs sync: PR #370–#372 (BUG-104 2A.0/2A.1 SPEC + BUG-110) (17/07/2026)
+קבצים: `ROADMAP.md`, `CHANGELOG.md`, `CHANGE_CONTROL_LOG.md` (C122–C124), `BUG_AUDIT_LOG.md` (רשומת BUG-110 חדשה), `AI_CONTEXT.md` | PR #374 | Docs בלבד
+מסנכרן ארבעת מסמכי הממשל עבור PR #370–#372, כולל תיעוד מפורש של התנגשות המספור BUG-105/BUG-110 (ראו הערת המספור ב-C124 למעלה).
+**Merged:** כן (`6cadc6a`, merge `91b416c`, PR #374) | **Verified בפרודקשן:** לא רלוונטי — docs בלבד
+
+### C127 — AI_CONTEXT sync: BUG-104 Phase 2A.1 (PR #373) (17/07/2026)
+קבצים: `AI_CONTEXT.md` | PR #375
+מתעד ש-Phase 2A.1 (Business Outcome precedence + מיפוי status מורחב) ממוזג ומאומת ב-tests (merge `fa29514`), נפרד מ-Phase 2A.0 שנשאר SPEC-בלבד. מציין במפורש: merge+test verified, **לא** production-traffic verified — ה-flag נשאר off/shadow.
+**Merged:** כן (`64d6bbb`, merge `e3ce5a4`, PR #375) | **Verified בפרודקשן:** לא רלוונטי — docs בלבד
+
+### C128 — BUG-104 Phase 2A closeout note (17/07/2026)
+קבצים: `docs/architecture/bug-104/` (מסמך סיכום חדש) | PR #376 | באג: BUG-104
+Docs בלבד — סיכום סגירה ל-Phase 2A (2A.0 SPEC, 2A.1 SPEC, BUG-110, יישום 2A.1). מצטט ראיות shadow-mode שסופקו ע"י ה-operator מ-Render, מתויג במפורש כ"operator-provided, לא מאומת עצמאית" (אין גישת Render לסבב הזה) — הראיה הניתנת-לשחזור-עצמאי היחידה היא ה-test suite הממוזג. מתעד מגבלות ידועות ושלושה כיווני המשך מומלצים. אין שינוי schema/migration/frontend/flag.
+**Merged:** כן (`3e7dff7`, merge `8fd7fda`, PR #376) | **Verified בפרודקשן:** לא רלוונטי — docs בלבד
+
+### C129 — BUG-104 Phase 2A.2: ניסוח ספציפי-ל-Lead ל-evidence/next_step (17/07/2026)
+קבצים: `core/leads_reasoning_projection.py`, `test_bug104_phase2a2_lead_wording.py` (חדש) | PR #377 | באג: BUG-104
+פונקציה חדשה `_apply_lead_wording()` מתרגמת ניסוח משותף בסגנון-Decision ("מסמך תומך", "הוסף ראיות ועדכן אירועים") לניסוח מתאים-ל-Lead בלבד — relabeling טקסטואלי טהור, לא נוגע ב-state/phase/confidence/Business Outcome precedence (C125). phase טרמינלי → `missing_evidence` מנוקה; אין אירועים → ניסוח ייעודי; אירועים קיימים אך evidence עדיין חסר → placeholder מתאים-ל-Lead במקום שמות מסמכים דלופים; REVIEW → next_step ייעודי. אין מפתחות envelope חדשים, אין ערכי phase/state חדשים. `FEATURE_CORE_REASONING_LEADS_STATE` לא נגע.
+**Merged:** כן (`df3e1ab`, merge `d0a236b`, PR #377) | **Verified בפרודקשן:** לא — flag off/shadow
+
+### C130 — BUG-104 / CR_OBS_LOG: לוג observability קומפקטי לחשיבת Lead (17/07/2026)
+קבצים: `tma_api.py`, `test_bug104_lead_reasoning_log.py` (חדש) | PR #378 | באג: BUG-104
+שורת לוג אחת, קומפקטית, נטולת-PII (`_format_lead_reasoning_log()`) בכל פעם שה-Lead reasoning projection מחושב (shadow/on; לעולם לא off) — `mode`/`status`/`outcome`/`state`/`events`/`lead_score`/`degraded`/`errors`. שגיאות מנוע מתועדות כ-**ספירה** בלבד, לעולם לא כטקסט השגיאה עצמו. אין שינוי מדיניות state/reasoning, אין קריאת Airtable נוספת (חוזר-שימוש ברשומה שכבר נטענה), אין שינוי schema/flag. 21 בדיקות חדשות כולל שער PII-leak.
+**Merged:** כן (`a0bb3ef`, merge `62f0d86`, PR #378) | **Verified בפרודקשן:** לא — flag off/shadow
+
+### C131 — RP5 preflight: ממצא חוסם + החלטות owner (17/07/2026)
+קבצים: `docs/architecture/turn-coordinator/` (מסמך preflight חדש) | PR #379
+Audit/planning בלבד. מתעד ממצא חוסם: RP4 קוד-שלם ומאומת ב-unit tests, אבל `FEATURE_EVIDENCE_FINALIZER` כבוי בפרודקשן — גם "enforce" נשאר comparison-only, ואין עדיין דגימות shadow אמיתיות. תוכנית איסוף דגימות לכל 9 מצבי `TurnEvidenceSummary.classification()`. שלוש החלטות owner: היקף הפעלת shadow הוא global (לא owner-gated), RP5 ממתין ל-F52 PR1 (Message Contract Foundation) במקום renderer זמני, PA-01 שומר על עדיפות על RP5 בסדר הקריאה הקיים ב-`app.py`. לא מפעיל את הדגל בפועל — פעולה זו דורשת גישת Render שאין לסבב זה.
+**Merged:** כן (`a8d269c`, merge `8e94da9`, PR #379) | **Verified בפרודקשן:** לא רלוונטי — docs בלבד
+
+### C132 — AI_CONTEXT sync: PR #376–#379 (17/07/2026)
+קבצים: `AI_CONTEXT.md` | PR #380
+מתעד ארבעה מיזוגים מאז C127/PR #375: Phase 2A closeout (#376), Phase 2A.2 lead wording (#377), CR_OBS_LOG (#378), RP5 preflight (#379) — כולל הממצא החוסם וההחלטות שלוש. מעדכן Executive Summary/Current System State/Completed/Next Priorities; header ל-main `8e94da9`.
+**Merged:** כן (`09af663`, merge `d56c519`, PR #380) | **Verified בפרודקשן:** לא רלוונטי — docs בלבד
+
+### C133 — F52 PR1: Message Contract Foundation — agent message formatter (17/07/2026)
+קבצים: `core/agent_message_formatter.py` (חדש), `test_agent_message_formatter.py` (חדש), `docs/architecture/f52-unified-approval-runtime/` | PR #381
+מודול standalone חדש `format_agent_message(state, payload) -> str` — שלב ה-"Semantic Formatter" בזרימת F52 (Internal Result → Message Contract → Semantic Formatter → Channel Renderer). **Foundation בלבד — לא מחובר** ל-`app.py`/`ActionGateway`/approval logic/scheduler/tool registry/permissions, אין שינוי התנהגות. 10 מצבים (superset של 7 מצבי ה-UX standard + 3 מצבי vocabulary של RP4/RP5). כללי UX: טקסט רגיל בלי Markdown, marker-status יחיד, פעלי-הצלחה בגוף ראשון, תאריכים dd/mm/YYYY. Sanitizer מסנן record IDs/UUIDs/hex/contract IDs/tool names/URLs/tokens/JSON גולמי. 28 בדיקות. שתי סטיות מתועדות מהתקן (reconciliation עם `compose_status_reply`, מעבר ל-`display_payload`) נדחו ל-PRs הבאים.
+**Merged:** כן (`a90b583`, merge `2c43b2c`, PR #381) | **Verified בפרודקשן:** לא רלוונטי — קוד לא מחובר לנתיב חי
+
+### C134 — F52 PR2: איחוד compose_status_reply דרך הפורמטר הקנוני (17/07/2026)
+קבצים: `feature_flags.py`, `core/action_gateway.py`, `test_f52_status_reply_reconciliation.py` (חדש) | PR #382 | Flag: `FEATURE_UNIFIED_STATUS_FORMATTER`
+מונע שני פורמטרי status-text חיים במקביל: `ActionGateway.compose_status_reply()` נשאר נקודת הכניסה היחידה, אך מאציל את הניסוח ל-`agent_message_formatter` (C133), מאחורי דגל three-state חדש `FEATURE_UNIFIED_STATUS_FORMATTER` (off/shadow/on, ברירת מחדל **off**). `off` = טקסט legacy זהה-בייט; `shadow` = הטקסט המאוחד מחושב ונרשם ללוג להשוואה, ה-legacy עדיין נשלח; `on` = הטקסט המאוחד נשלח בפועל. חריגת formatter לעולם לא שוברת את הנתיב החי — נופלת חזרה ל-legacy. גם תוקן: edge-case ב-sanitizer שהשאיר separator תלוי אחרי טוקן מסונן.
+**Merged:** כן (`3a331d9`, merge `ab806eb`, PR #382) | **Verified בפרודקשן:** לא — flag off
+
+### C135 — F52 PR3: אימוץ display_payload קנוני + מיפוי payload מאוחד (17/07/2026)
+קבצים: `core/agent_message_formatter.py`, `test_agent_message_formatter.py`, `test_agent_message_formatter_display_payload.py` (חדש) | PR #383
+ממיר את ה-payload של הפורמטר לחוזה `display_payload` הקנוני של תקן ה-UX (סטייה #2 מ-PR1) — `_normalize_payload()` חדש מקבל גם שמות שדה קנוניים (`action`/`entity_type`/`entity_name`/`key_fields`/`count`/`items`/`reason_code`/`execution_verified`/`occurred_at`) וגם שמות legacy רופפים כשכבת תאימות; השמות הקנוניים גוברים. `human_summary` הוא HINT בלבד — מתעלם כשיש `display_payload` מובנה, לעולם לא מפעיל success. `execution_verified=False` לעולם לא מוצג כ-success. Foundation/מיפוי בלבד — אין הפעלת flag. 13 בדיקות חדשות.
+**Merged:** כן (`f0ad36c`, merge `c1b00c0`, PR #383) | **Verified בפרודקשן:** לא — flag off
+
+### C136 — AI_CONTEXT daily briefing: PR #381–#383 (F52 PR1–PR3) (18/07/2026)
+קבצים: `AI_CONTEXT.md` | PR #384
+מבנה מחדש ל-4 סעיפים סטנדרטיים (Executive Summary/Current System State/Completed/Next Priorities) ומסנכרן מ-main `8e94da9` ל-`c1b00c0` — קולט F52 PR1–PR3 (עדיין לא השתקפו כאן או ב-`ROADMAP.md`/`CHANGELOG.md`/`CHANGE_CONTROL_LOG.md`). שלושתם foundation-בלבד: אין flag מופעל, אין שינוי התנהגות. מציין את פער סנכרון ROADMAP/CHANGELOG/CHANGE_CONTROL_LOG כעדיפות הבאה במקום backfill בסבב הזה.
+**Merged:** כן (`c30824f`, merge `48ba7eb`, PR #384) | **Verified בפרודקשן:** לא רלוונטי — docs בלבד
+
+### C137 — F52 PR4: shadow verification עבור ActionGateway.compose_status_reply() (18/07/2026)
+קבצים: `core/action_gateway.py`, `test_f52_status_reply_reconciliation.py` | PR #385
+מכין ומאמת נתיב user-facing אמיתי אחד (תשובות action-status של ActionGateway) ל-cutover בטוח ללא שינוי התנהגות ברירת מחדל; מחזק observability ב-shadow mode (`_log_shadow_comparison()`/`_shadow_leak_flags()` — safe-fields-only). `FEATURE_UNIFIED_STATUS_FORMATTER` נשאר off. 13 בדיקות חדשות (21 סה"כ).
+**Merged:** כן (`1432eba`, merge `3fbd882`, PR #385) | **Verified בפרודקשן:** לא — flag off
+
+### C138 — BUG-111 (סבב 1): תיקון פענוח batch לידים — domain/sender-prefix (19/07/2026)
+קבצים: `core/ingress_classifier.py`, `test_bug111_lead_domain_and_sender_prefix.py` (חדש) | PR #386 | באג: BUG-111
+ראו `BUG_AUDIT_LOG.md`'s BUG-111 entry (סבב 1) לפירוט root-cause מלא. `_PHONE_RE` alternatives חדשים, שנה אופציונלית ב-`_CHAT_EXPORT_TIMESTAMP`, `_JSON_BLOCK_RE` מודע-timestamp, `_extract_domain_hint()`/`_strip_domain_hint()` חדשים. Follow-up באותו PR (`7b2cd5c`) תיקן batch טלפון-בלבד; תיקון CI-isolation נפרד (`c3499f5`, אין שינוי מוצר). 50 בדיקות.
+**Merged:** כן (`6bb3b61`+`7b2cd5c`+`c3499f5`, merge `fc3f51b`, PR #386) | **Verified בפרודקשן:** ✅ כן (ראו BUG_AUDIT_LOG.md — אומת בדגימות production נוספות בהמשך)
+
+### C139 — BUG-112: אכיפת TTL על כפתור אישור טלגרם לפני ביצוע (19/07/2026)
+קבצים: `app.py`, `test_bug112_telegram_approval_ttl.py` (חדש) | PR #387 | באג: BUG-112
+ראו `BUG_AUDIT_LOG.md`'s BUG-112 entry לפירוט root-cause מלא. `_handle_approval_callback_impl()` אוכף כעת את `_PENDING_APPROVAL_TTL` (10 דקות, לא רק את ה-30 דקות של `event_bus.py`) לפני כל dispatch; `_reject_stale_telegram_approval()` חדש. 22 בדיקות.
+**Merged:** כן (`f639c33`, merge `2136a14`, PR #387) | **Verified בפרודקשן:** ✅ כן (ראו BUG_AUDIT_LOG.md — לחיצה אמיתית על כפתור פג-תוקף)
+
+### C140 — AI_CONTEXT sync: PR #385–#387 (F52 PR4 + BUG-111 + BUG-112) (19/07/2026)
+קבצים: `AI_CONTEXT.md` | PR #388
+מרענן את מסמך ה-briefing החי עבור F52 PR4 (#385), BUG-111 (#386), BUG-112 (#387) — מאומת ב-grep מול `main` לפי פרוטוקול האימות שלאחר-מיזוג ב-`AGENTS.md`.
+**Merged:** כן (`f545075`, merge `855b271`, PR #388) | **Verified בפרודקשן:** לא רלוונטי — docs בלבד
+
+### C141 — F52 PR5: rejection/cancellation replies דרך unified formatter shadow (19/07/2026)
+קבצים: `core/action_gateway.py`, `test_f52_pr5_rejection_shadow.py` (חדש), `docs/architecture/f52-unified-approval-runtime/` | PR #389
+`reject()`/`route_cancellation_word()`/`route_combined_word()`'s cancel branch בנו טקסט legacy קבוע בלי מעורבות formatter כלל — PR4 (C137) חיבר shadow logging רק לנתיב executed/status-query. `ActionGateway._render_rejection_reply()` חדש, אותה מכונת off/shadow/on. **לא** מחובר לנתיב ה-reject של כפתור Telegram inline (פער נפרד, מתועד). `"rejected"` ממשיך למופה ל-state הקנוני `"failure"` הקיים — אין state formatter חדש. `FEATURE_UNIFIED_STATUS_FORMATTER` לא הופעל. 35 בדיקות חדשות.
+**Merged:** כן (`9973cc5`, merge `94ca453`, PR #389) | **Verified בפרודקשן:** לא — flag off
+
+### C142 — BUG-111 (סבב 2): follow-up — WhatsApp paste קומפקטי ללא newline (19/07/2026)
+קבצים: `core/ingress_classifier.py`, `test_bug111_followup_compact_text.py` (חדש) | PR #390 | באג: BUG-111
+ראו `BUG_AUDIT_LOG.md`'s BUG-111 entry (סבב 2) לפירוט מלא. דגימת production **אחרי** תיקון סבב 1 עדיין הפיקה שם-ליד מזויף (`"לידים חדשים"`) כש-header ה-batch מודבק ישירות על החותמת הראשונה בלי `\n`. `_BLOCK_SEP`/`_SENDER_LINE_RE` הורחבו, `_NAME_STOP` קיבל צורות רבים, ורשת ביטחון חדשה ב-`_classify_ingress_core()`. 29 בדיקות.
+**Merged:** כן (`4635bcd`, merge `ee012c3`, PR #390) | **Verified בפרודקשן:** ✅ כן (ראו BUG_AUDIT_LOG.md)
+
+### C143 — Governance docs sync: BUG_AUDIT_LOG.md/CHANGELOG.md ל-PR #385–#390 (19/07/2026)
+קבצים: `BUG_AUDIT_LOG.md`, `CHANGELOG.md` | PR #391 | Docs בלבד
+הוסיף רשומות עבור עבודה ממוזגת שעדיין לא השתקפה באף אחד משני יומני הממשל: BUG-111 (שני הסבבים), BUG-112 (#387), F52 PR4 (#385) ו-PR5 (#389), וסנכרון AI_CONTEXT (#388). כל רשומה אומתה מול `main` ב-grep לפני כתיבה, לא רק לפי git log/PR status. `ROADMAP.md`/`CHANGE_CONTROL_LOG.md` נותרו לא-מסונכרנים בסבב הזה (הפער שרשומות C125–C148 סוגרות עכשיו).
+**Merged:** כן (`8b4e444`, merge `5cfb5ad`, PR #391) | **Verified בפרודקשן:** לא רלוונטי — docs בלבד
+
+### C144 — F52 PR6: approval_pending prompt דרך unified formatter shadow + תיקון EvidenceFinalizer/ownership (19/07/2026)
+קבצים: `core/action_gateway.py`, `core/turn_evidence.py`, `app.py`, `test_f52_pr6_pending_shadow.py` (חדש), `docs/architecture/f52-unified-approval-runtime/` | PR #392
+ראו `AI_CONTEXT.md`'s Completed Since Last Update (עודכן בסבב הזה) לפירוט מלא. שלושה ממצאים אמיתיים: `_queue_approval_detailed_impl()` שלח hardcoded text בעקיפין ל-`bot.send_message()` בלי מעורבות formatter (ה-shadow לא ראה); `core.turn_evidence._classify_response_claim()` קרא דיכוי תקין של A32 כ-`response_claim=empty` (false mismatch); `build_ownership_signal()` לא סימן `reply_owner="gateway"` כשה-agent דוכא. תוקנו שלושתם ללא שינוי בהתנהגות בפועל — `ActionGateway._render_pending_prompt()` חדש (אותה מכונת off/shadow/on), `approval_prompt_sent` param חדש ב-`turn_evidence.py`, `owner_notified` param מוכח (לא מונח) ב-`app.py`. 50 בדיקות חדשות.
+**Merged:** כן (`38c2820`, merge `90e7e23`, PR #392) | **Verified בפרודקשן:** ✅ כן (ראו `BUG_AUDIT_LOG.md`'s BUG-113 entry — אותו evidence chain אומת גם עבור PR6)
+
+### C145 — F52 PR6 follow-up: הרחבת taxonomy ל-turns מעורבים (read+approval_pending) (19/07/2026)
+קבצים: `core/turn_evidence.py`, `test_f52_pr6_pending_shadow.py`, `docs/architecture/f52-unified-approval-runtime/` | PR #393
+Production validation של PR6 (C144) חשף מקרה נוסף: turn שמבצע גם read מאומת וגם מעלה approval מסווג `evidence_status="mixed"` (לא `"approval_pending"`) — עדיין false mismatch. `compare_shadow_final_status()` הורחב במדויק: `"sent_for_approval"` תואם גם ל-`"mixed"` כשה-non-success היחיד הוא `approvals_pending` (אפס כשלים/effects לא-מאומתים/unknown) — turn מעורב עם כישלון אמיתי או effect לא-ידוע נשאר מדווח כ-mismatch בכוונה. 5 בדיקות הגנה נוספות (55 סה"כ).
+**Merged:** כן (`53eb19d`, merge `440234f`, PR #393) | **Verified בפרודקשן:** לא רלוונטי — שינוי סיווג shadow בלבד, לא שולח traffic
+
+### C146 — BUG-112 (סבב 2): נרמול UX לניסוח stale/missing-callback אחיד (19/07/2026)
+קבצים: `app.py`, `test_bug112_telegram_approval_ttl.py` | PR #394 | באג: BUG-112
+ראו `BUG_AUDIT_LOG.md`'s BUG-112 entry (סבב 2) לפירוט מלא. לחיצה כפולה על כפתור שפג תוקף הפיקה שלושה ניסוחים חופפים-אך-שונים. `_notify_missing_or_expired_callback()` חדש מאחד לביטוי יחיד בכל שלוש הבמות (פופ-אפ/הודעה קבועה/עריכת הודעה). אין שינוי לסמנטיקת ביצוע. 8 בדיקות חדשות (30 סה"כ).
+**Merged:** כן (`8ac0c93`, merge `ad4afc9`, PR #394) | **Verified בפרודקשן:** לא — הניסוח המאוחד טרם נצפה live אחרי ה-deploy הזה
+
+### C147 — AI_CONTEXT daily briefing: PR #388–#393 (19/07/2026)
+קבצים: `AI_CONTEXT.md` | PR #395
+מרענן את מסמך ה-briefing עבור PR #388–#393 (F52 PR5/PR6 + follow-up, BUG-111 סבב 2, docs sync). מאמת ש-`CANONICAL_STATE.md` אינו קיים בריפו; מסמן `BOSS_CURRENT_STATE.md`/`ROADMAP.md`/`CHANGE_CONTROL_LOG.md` כמפגרים אחרי `main` (הפער שרשומה זו סוגרת).
+**Merged:** כן (`951b1b2`, merge `51405ae`, PR #395) | **Verified בפרודקשן:** לא רלוונטי — docs בלבד
+
+### C148 — BUG-113: A32 מדכא פרוזת approval-invite כפולה כשאישור אמיתי כבר בתור (19/07/2026)
+קבצים: `core/anti_hallucination.py`, `test_a32_approval_prose_suppression.py` (חדש) | PR #396 | באג: BUG-113
+ראו `BUG_AUDIT_LOG.md`'s BUG-113 entry (חדשה) לפירוט מלא. שער ה-Single-Speaker הקיים ב-`sanitize_agent_response()` לא כיסה פרוזת approval-invite ("✅ מוכנה להוספה... שלח מאשר כדי לאשר") כשאישור אמיתי כבר נכנס לתור — `_AGENT_APPROVAL_INVITE_PATTERN` הקיים נבדק רק בשער הנפרד למקרה **ההפוך** (אין ראיה). ענף דיכוי חדש, גדור ב-`_gateway_active` וראיית `__approval_queued__` אמיתית; הרחבת pattern ל-"הצעד הבא... אשר". 18 בדיקות חדשות.
+**Merged:** כן (`2d86de6`, merge `587d1fe`, PR #396) | **Verified בפרודקשן:** ✅ כן (ראו BUG_AUDIT_LOG.md — evidence מדויק מלוגים)

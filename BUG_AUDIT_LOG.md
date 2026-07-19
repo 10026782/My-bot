@@ -2513,7 +2513,7 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 
 ---
 
-## BUG-112 — Telegram approval button המשיך לבצע אחרי ה-TTL המוצהר (10 דקות) — ✅ תוקן, לא נבדק בפרודקשן
+## BUG-112 — Telegram approval button המשיך לבצע אחרי ה-TTL המוצהר (10 דקות) — ✅ VERIFIED IN PROD (מנגנון הליבה) + סבב UX נוסף
 
 - **דווח:** 18/07/2026.
 - **מסך / מודול:** `app.py` — `_handle_approval_callback_impl()` (נתיב ה-Telegram inline-button), מול `event_bus.py`'s `PendingActionsStore`.
@@ -2527,6 +2527,55 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **תוקן ב-branch:** `claude/bug-112-telegram-approval-ttl`.
 - **PR:** #387 (merge `2136a14`).
 - **Merged:** כן.
+- **Deployed:** כן (evidence: ראו "Verified בפרודקשן" למטה — ההתנהגות נצפתה live).
+- **Verified בפרודקשן:** ✅ כן — לחיצה אמיתית על כפתור שכבר פג תוקף (בין דקה 10 ל-30) הפיקה את ההודעה הצפויה **"⏰ פג תוקף — הפעולה לא בוצעה"** ולא בוצע dispatch חוזר של הכלי ("Safety is correct: it did not execute again" — דיווח המשתמש). המנגנון עצמו (TTL enforcement) מאומת live; ה-UX-polish הנפרד (סבב 2 למטה) טרם קיבל אימות production משלו אחרי deploy.
+- **סטטוס (מנגנון ליבה):** ✅ VERIFIED IN PROD.
+
+### סבב 2 — UX follow-up: כפילות ניסוח בין נתיב "פג-תוקף-ידוע" לנתיב "stale/כבר-נצרך" (PR #394)
+
+- **דווח:** 19/07/2026, מדגימת production ישירה מהמשתמש.
+- **תצפית:** לחיצה חוזרת/כפולה על כפתור אישור שכבר פג תוקף הפיקה **שלושה** ניסוחי "לא בוצע" חופפים-אך-שונים על מה שהמשתמש קורא כאירוע אחד:
+  1. לחיצה ראשונה (פריט pending ידוע, אחרי TTL המוצהר של 10 דקות): `"⏰ פג תוקף — הפעולה לא בוצעה"` — זהו התיקון המקורי של BUG-112 (סבב 1 למעלה), נכון כפי שהוא.
+  2. לחיצה שנייה (הפריט כבר נצרך — `bus.pop()` מחזיר `None`): פופ-אפ `"⏰ פג תוקף — הפעולה לא קיימת יותר"` + הודעת chat קבועה `"ℹ️ הפעולה המבוקשת... פגה או כבר לא קיימת, ולכן לא בוצעה שוב."` + עריכת ההודעה המקורית ל-`"ℹ️ פגה או כבר לא קיימת"` — כל שלוש הבמות עברו דרך `_notify_stale_or_resolved_callback()` הגנרית (בנויה במקור עבור "כבר בוצעה"/"כבר בוטלה", שכן זקוקות לניסוח נפרד משלהן) עם label placeholder, ולכן הפיקו ניסוח **שלישי**, שונה מסבב 1, כפול על גביו.
+- **Root Cause:** שני נתיבי callback שונים באמת ומכוונים בכוונה להישאר נפרדים — (א) `_reject_stale_telegram_approval()` (BUG-112 המקורי): פריט pending **ידוע** שנמצא אך פג-תוקף לפי `_PENDING_APPROVAL_TTL`. (ב) המקרה החדש: `bus.pop()` לא מוצא **כלום** — או שה-TTL הפנימי הנפרד של `event_bus.py` עצמו (30 דקות) כבר חלף, או שה-callback המדויק הזה כבר נצרך בלחיצה קודמת (תרחיש סביר מאוד מיד אחרי שנתיב (א) כבר ירה פעם אחת). נתיב (ב) נותב דרך helper גנרי לא-מותאם במקום קבלת ניסוח עקבי משלו.
+- **תוקן:** `_notify_missing_or_expired_callback()` חדש (`app.py`) — משתמש בביטוי ליטרלי **אחד**, `"ℹ️ הפעולה כבר פגה או אינה קיימת, ולכן לא בוצעה."`, זהה בפופ-אפ, בהודעת ה-chat הקבועה, ובעריכת ההודעה המקורית. שני אתרי הקריאה שזקוקים לניסוח נפרד מהותית ("כבר בוצעה"/"כבר בוטלה") נשארו על `_notify_stale_or_resolved_callback()` המקורי, ללא שינוי. `_reject_stale_telegram_approval()` (נתיב א', BUG-112 המקורי) לא נגע כלל.
+- **Scope:** אין שינוי לסמנטיקת ביצוע (0 dispatch לפני ואחרי, בשני הנתיבים). אין נגיעה ב-F52/RP5, פענוח לידים (BUG-111), או `FEATURE_UNIFIED_STATUS_FORMATTER`.
+- **בדיקות:** `test_bug112_telegram_approval_ttl.py` הורחב ל-30/30 (מ-22) — Test8b-8d (לחיצה שנייה מפיקה ניסוח עקבי אחד, שונה בכוונה מהודעת הלחיצה הראשונה); סעיף 4b חדש (Tests 14-18) — callback עצמאי ל-`action_id` שמעולם לא נכנס לתור בכלל, מוכיח 0 dispatch ושלושת הבמות (פופ-אפ/הודעה קבועה/הודעה ערוכה) זהות במדויק.
+- **תוקן ב-commit:** `8ac0c93` ("BUG-112 production follow-up: normalize stale/missing-callback UX to one message").
+- **תוקן ב-branch:** `claude/bug112-stale-callback-ux-followup`.
+- **PR:** #394 (merge `ad4afc9`).
+- **Merged:** כן.
 - **Deployed:** לא ידוע — דרוש בדיקה ידנית ב-Render.
-- **Verified בפרודקשן:** לא — לא נבדק עדיין לחיצה אמיתית על כפתור שפג תוקף בפרודקשן.
+- **Verified בפרודקשן:** לא — הניסוח המאוחד (ביטוי יחיד) טרם נצפה על callback stale אמיתי אחרי ה-deploy הזה (הדגימה שהובילה לתיקון נצפתה **לפני** המיזוג).
 - **סטטוס:** ✅ קוד תוקן ומאומת בבדיקות, ⚠️ לא verified-in-prod.
+
+---
+
+## BUG-113 — A32 לא דיכא פרוזת approval-invite כפולה כשאישור אמיתי כבר נשלח לתור — ✅ VERIFIED IN PROD
+
+- **דווח:** 19/07/2026, מדגימת production ישירה מהמשתמש (F52 PR6 כבר היה במיזוג ומאומת; זהו ממצא נפרד, לא כשל taxonomy).
+- **מסך / מודול:** `core/anti_hallucination.py::sanitize_agent_response()` — שער ה-Single-Speaker של A32.
+- **Severity:** Medium — לא כשל ביטחוני (0 dispatch כפול, ה-approval עצמו תקין), אבל שני מסרים סותרים-בפועל למשתמש/בעלים באותו turn: הודעת ה-gateway האמיתית ("⏳ בקשת אישור") **וגם** פרוזה חופשית של ה-agent שנראית כמו success ("✅ המשימה מוכנה להוספה... שלח מאשר כדי לאשר...").
+- **דגימת production (verbatim):**
+  ```
+  ⏳ בקשת אישור
+  ➕ הוסף ל-Tasks...
+  ID: 33ffc59d | פג תוקף בעוד 10 דקות
+  ```
+  ולפני התיקון, בנוסף לכך היה עובר גם:
+  ```
+  ✅ המשימה מוכנה להוספה...
+  ➡️ הצעד הבא המומלץ: שלח מאשר כדי לאשר...
+  ```
+  עם `EvidenceFinalizerShadow: evidence_status=approval_pending response_claim=success mismatch=true`.
+- **Root Cause:** שער ה-Single-Speaker הקיים ב-`sanitize_agent_response()` (מ-BUG-SS-MULTITURN-PENDING-NARRATION/PR #341) בודק רק שני patterns: `_AGENT_ACTION_STATUS_PATTERN` (דורש פועל-השלמה כמו "נוספה" — "להוספה" **אינו** "נוספה") ו-`_AGENT_PENDING_STATUS_PATTERN` (דורש "לאישור"/"ממתינ" בטווח 25 תווים מ-"מוכנ[הת]" — "מוכנה להוספה" לא עומד בכך). הטקסט **כן** תאם ל-`_AGENT_APPROVAL_INVITE_PATTERN` הקיים (מ-BUG-FAKE-APPROVAL-INVITE), אבל pattern זה נבדק **רק** בשער ה-NO-TOOL-EVIDENCE הנפרד, ורק כש**אין** ראיית `__approval_queued__` — בדיוק ההפך מהמקרה הזה, שבו אישור אמיתי **כן** נכנס לתור. פרוזת ה-invite המוזמנת-לאישור, המבוססת-ראיה (approval אמיתי בתור), נפלה בין שני השערים ועברה ללא דיכוי.
+- **תוקן:** ענף דיכוי חדש ב-`sanitize_agent_response()`, מייד אחרי שער ה-Single-Speaker הקיים — יורה כש-`_gateway_active` **וגם** `_AGENT_APPROVAL_INVITE_PATTERN` תואם **וגם** קיימת ראיית `__approval_queued__` אמיתית ב-turn הזה — מדכא ל-`""` (לעולם לא מחליף בפולבק, שהיה נקרא כביכול-כישלון בעוד הפעולה, נכון, עדיין ממתינה). `_AGENT_APPROVAL_INVITE_PATTERN` הורחב עם alternative `"הצעד הבא ... אשר"` כדי לתפוס גם את צורת "הצעד הבא המומלץ" (לא רק "שלח מאשר").
+- **Scope:** רק A32 (`core/anti_hallucination.py`) נגע. אין שינוי ל-BUG-111, BUG-112 TTL, F52 formatter states, סמנטיקת ביצוע של `ActionGateway`, או דגלי feature.
+- **בדיקות:** `test_a32_approval_prose_suppression.py` חדש (18 בדיקות) — הניסוח המדויק מ-production מדוכא; קיצור "הצעד הבא: אשר" מדוכא; הודעת ה-gateway עצמה לא מושפעת; EvidenceFinalizer רואה `sent_for_approval` לא `success`; success אמיתי אחרי ביצוע מאושר לא מדוכא (ללא ראיית invite → לא תואם); תגובות שיחה רגילות ללא approval לא מושפעות. רגרסיה מלאה: `core/anti_hallucination.py` self-tests 70/70, `test_single_speaker_fallback_and_duplication.py` 27/27, `smoke_tests.py`, `compileall`, `git diff --check` — כולם ירוקים.
+- **תוקן ב-commit:** `2d86de6` ("Fix A32: suppress approval-invite prose duplicating a queued approval prompt").
+- **תוקן ב-branch:** `claude/a32-approval-queued-prose-suppression`.
+- **PR:** #396 (merge `587d1fe`).
+- **Merged:** כן.
+- **Deployed:** כן.
+- **Verified בפרודקשן:** ✅ כן — דיווח production מהמשתמש אחרי ה-deploy: לוג `[A32] Single-Speaker: agent emitted approval-invite prose after an approval was already queued this turn — suppressing`, `ownership_signal {"agent_claimed_approval": false, "reply_owner": "gateway"}`, ו-`[EvidenceFinalizerShadow] evidence_status=approval_pending response_claim=sent_for_approval mismatch=false code=match` — הודעה אחת בלבד למשתמש (הודעת ה-gateway), ללא הפרוזה הכפולה.
+- **סטטוס:** ✅ VERIFIED IN PROD.
