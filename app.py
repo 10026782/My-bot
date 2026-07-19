@@ -2630,6 +2630,32 @@ def run_agent(
                         return _ledger_reply
             pass  # fall through — route to Agent as status query
         elif _lower in _CONFIRM_WORDS:
+            # BUG-117: recency check BEFORE the unconditional Tier-1 gate
+            # below. A fresh Tier-2 batch lead-preview ("📋 זיהיתי N לידים
+            # אפשריים בקבוצה...", core/lead_candidate_handler.py's
+            # _handle_clean_batch / session_store.py's pending_lead_preview,
+            # BUG-058) was being hijacked into generic disambiguation of old,
+            # unrelated Tier-1 ActionContracts — the same "stale contracts
+            # never expire" failure mode BUG-115 already fixed within Tier-1
+            # itself, but one level up (Tier-1-vs-Tier-2 precedence), never
+            # touched by that fix. should_prefer_batch_preview() compares
+            # this Tier-2 preview's timestamp against BUG-115's own Tier-1
+            # bookmark and only short-circuits here when Tier-2 is genuinely
+            # the more recently shown prompt; otherwise falls through
+            # unchanged to the existing Tier-1-first logic below.
+            from core.lead_candidate_handler import should_prefer_batch_preview as _prefer_t2
+            if _prefer_t2(identity.memory_key, chat_id):
+                from core.lead_candidate_handler import resolve_pending_lead_preview as _resolve_t2_early
+                _t2_reply_early = _resolve_t2_early(identity, chat_id, is_confirm=True, is_cancel=False)
+                if _t2_reply_early is not None:
+                    logger.info(
+                        "[LCH] resolve_pending_lead_preview(confirm, recency-preferred): user=%s reply=%.60s",
+                        identity.memory_key, _t2_reply_early,
+                    )
+                    if _out_meta is not None:
+                        _out_meta["source_module"] = "action_gateway"
+                    return _t2_reply_early
+
             # BUG-056: check ActionGateway live contracts FIRST, regardless of
             # FEATURE_ACTION_GATEWAY — LCH's Tier-1 lead-preview confirmation
             # (core/lead_candidate_handler.py: _propose_lead_write) always

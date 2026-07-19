@@ -1396,6 +1396,50 @@ def _store_pending_preview(
         logger.warning("[LCH] pending_preview store failed: %s", exc)
 
 
+def should_prefer_batch_preview(canonical_user_id: str, chat_id: str) -> bool:
+    """BUG-117: True if the Tier-2 batch lead-preview (pending_lead_preview,
+    BUG-058) was shown to this user more recently than any Tier-1
+    ActionContract prompt bookmark (last_prompted_contract, BUG-115).
+
+    Root cause this fixes: app.py's _CONFIRM_WORDS branch used to check
+    "does ANY Tier-1 ActionContract exist" unconditionally, before ever
+    considering the Tier-2 batch preview — so a batch of "📋 זיהיתי N
+    לידים אפשריים בקבוצה..." followed by "כן" was hijacked into generic
+    disambiguation of old, unrelated Tier-1 contracts, exactly the BUG-115
+    failure mode one level up (pending ActionContracts never expire —
+    BUG-114 §2 Q6 — so "Tier-1 has something live" is a near-permanently
+    true, mostly-irrelevant signal). BUG-115 fixed this within Tier-1
+    (bookmark beats blind live-count); this fixes it between Tier-1 and
+    Tier-2 by comparing which prompt is actually more recent, instead of
+    Tier-1 unconditionally winning by mere presence.
+
+    Both bookmarks are already independently TTL'd and self-clearing on
+    read (pending_lead_preview: 1800s, session_store.py's
+    get_pending_lead_preview; last_prompted_contract: 600s, get_
+    last_prompted_contract) — this function does no expiry logic of its
+    own, it only compares set_at timestamps of whatever each getter
+    already considers live.
+
+    Returns False (never prefer Tier-2) when no Tier-2 preview is live at
+    all — the caller's existing Tier-1-first logic is unaffected in that
+    case. Returns True when a live Tier-2 preview exists and either no
+    Tier-1 bookmark exists, or the Tier-2 preview is strictly newer.
+    """
+    try:
+        from session_store import lead_sessions as _ls
+    except Exception:
+        return False
+
+    preview = _ls.get_pending_lead_preview(chat_id)
+    if preview is None:
+        return False
+
+    bookmark = _ls.get_last_prompted_contract(canonical_user_id)
+    if bookmark is None:
+        return True
+    return preview.get("set_at", 0) > bookmark.get("set_at", 0)
+
+
 def resolve_pending_lead_preview(
     identity, chat_id: str, is_confirm: bool, is_cancel: bool,
 ) -> Optional[str]:
@@ -1412,11 +1456,13 @@ def resolve_pending_lead_preview(
     (_propose_lead_write) ממשיך לעבוד בדיוק כפי שהוא, ללא שינוי.
     אין תמיכה ב-selection חלקי ("כן 1") — רק אישור/ביטול מלא לכל ה-batch.
 
-    Precedence מול Tier 1 (BUG-058 caveat שנפתר): app.py קורא לפונקציה הזו
-    רק *אחרי* שנבדק שאין contract ActionGateway חי לאותו chat_id (אותו
-    gate שכבר קיים לשני ה-elif של _CONFIRM_WORDS/_CANCEL_WORDS, BUG-056
-    precedent) — כלומר Tier 1 מנצח תמיד כששני המנגנונים חיים בו-זמנית.
-    הפונקציה הזו לא בודקת בעצמה — ההכרעה ברמת ה-caller ב-app.py.
+    Precedence מול Tier 1 (BUG-058 caveat, מעודכן ב-BUG-117): app.py קורא
+    לפונקציה הזו גם *לפני* בדיקת ה-contract החי (דרך should_prefer_batch_
+    preview() לעיל, כשהתצוגה הזו טרייה יותר מהבוקמארק של Tier-1), וגם
+    כ-fallback *אחרי* (כמו קודם, כשל-Tier-1 אין כלום). "Tier 1 מנצח תמיד"
+    כבר לא נכון גורף — עכשיו זה "מי שהוצג לאחרונה מנצח". הפונקציה הזו
+    עצמה לא בודקת recency — ההכרעה ברמת ה-caller ב-app.py/should_prefer_
+    batch_preview().
     """
     if not (is_confirm or is_cancel):
         return None

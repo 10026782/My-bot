@@ -244,12 +244,18 @@ def test_app_py_confirm_word_checks_gateway_before_flag_branch():
     # (core/lead_candidate_handler.resolve_pending_lead_preview) was added
     # between the find_live_contracts() check and the FEATURE_ACTION_GATEWAY
     # flag branch, pushing the flag check further from the marker.
-    block = src[idx: idx + 3000]
+    # BUG-117: widened again — a recency precedence check
+    # (core/lead_candidate_handler.should_prefer_batch_preview) was added
+    # BEFORE find_live_contracts() itself, pushing everything after it
+    # further still. The invariant being asserted (find_live_contracts()
+    # textually precedes the FEATURE_ACTION_GATEWAY flag branch) is
+    # unchanged — only the window size needed to see both.
+    block = src[idx: idx + 5000]
     gw_check_idx = block.index("find_live_contracts")
     flag_check_idx = block.index('_flag_cw("FEATURE_ACTION_GATEWAY")')
     assert gw_check_idx < flag_check_idx, \
         "find_live_contracts() check must come before the FEATURE_ACTION_GATEWAY flag branch"
-    assert "_CANCEL_WORDS" in src[idx: idx + 5000], "cancel-word branch must exist alongside confirm-word"
+    assert "_CANCEL_WORDS" in src[idx: idx + 6500], "cancel-word branch must exist alongside confirm-word"
     return "OK"
 
 
