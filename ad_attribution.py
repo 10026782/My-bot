@@ -296,6 +296,12 @@ def build_attribution_report(days_back: int = 30) -> AttributionReport:
     בונה דוח attribution עם timeframe.
     Airtable pagination aware — לא שולף כל הטבלה.
     """
+    try:
+        from airtable_schema import LeadOutcome  # type: ignore
+        converted_outcome = LeadOutcome.CONVERTED
+    except ImportError:
+        converted_outcome = None
+
     leads  = _load_leads_with_timeframe(days_back)
     report = AttributionReport(
         total_leads  = len(leads),
@@ -323,7 +329,11 @@ def build_attribution_report(days_back: int = 30) -> AttributionReport:
 
     for (src, med, cmp), group in buckets.items():
         scores    = [l.get("score", 0) for l in group]
-        converted = [l for l in group if l.get("status") == "converted"]
+        converted = [
+            l for l in group
+            if l.get("status") == "converted"  # BUG-110: legacy pre-fix marker, no backfill
+            or (converted_outcome is not None and l.get("outcome") == converted_outcome)
+        ]
         revenues  = [l.get("deal_value", 0) for l in converted if l.get("deal_value")]
 
         stats = CampaignStats(
@@ -355,7 +365,7 @@ def _load_leads_with_timeframe(days_back: int) -> list[dict]:
     """
     try:
         from tools.airtable_tools import airtable_get  # type: ignore
-        from airtable_schema import Tables        # type: ignore
+        from airtable_schema import Tables, LeadFields  # type: ignore
 
         cutoff = (datetime.now(tz=timezone.utc) - timedelta(days=days_back)).strftime("%Y-%m-%d")
         formula = f"IS_AFTER({{created_at}},'{cutoff}')"
@@ -371,6 +381,7 @@ def _load_leads_with_timeframe(days_back: int) -> list[dict]:
             "utm_campaign": _norm(r.get("fields",{}).get("utm_campaign","")),
             "score":        int(r.get("fields",{}).get("Score", 0) or 0),
             "status":       r.get("fields",{}).get("status",""),
+            "outcome":      r.get("fields",{}).get(LeadFields.OUTCOME,""),  # BUG-110: canonical post-fix conversion marker
             "deal_value":   float(r.get("fields",{}).get("deal_value",0) or 0),
             "referer":      r.get("fields",{}).get("referer",""),
         } for r in raw if isinstance(r, dict)]
