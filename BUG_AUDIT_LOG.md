@@ -2555,7 +2555,7 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 
 ---
 
-## BUG-113 — A32 לא דיכא פרוזת approval-invite כפולה כשאישור אמיתי כבר נשלח לתור — ✅ VERIFIED IN PROD / CLOSED
+## BUG-113 — A32 לא דיכא פרוזת approval-invite כפולה כשאישור אמיתי כבר נשלח לתור — ✅ VERIFIED IN PROD / CLOSED (שני סבבים)
 
 - **דווח:** 19/07/2026, מדגימת production ישירה (F52 PR6 כבר היה במיזוג ומאומת — זהו ממצא נפרד, לא כשל taxonomy).
 - **מסך / מודול:** `core/anti_hallucination.py::sanitize_agent_response()` — שער ה-Single-Speaker של A32.
@@ -2579,4 +2579,21 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
   [EvidenceFinalizerShadow] state=shadow evidence_status=approval_pending response_claim=sent_for_approval mismatch=false code=match counts={'classification': 'approval_pending', 'verified_reads': 0, 'verified_writes': 0, 'failed_calls': 0, 'outcome_unknown': 0, 'approvals_pending': 1, 'unverified_effects': 0}
   ```
   הפלט למשתמש הכיל רק את הודעת ה-gateway — ללא הפרוזה הכפולה.
+- **סטטוס:** ✅ VERIFIED IN PROD / CLOSED.
+
+### סבב 2 (BUG-113-FU) — פערי markdown-emphasis וצורת-זכר, PR #399
+
+- **דווח:** 19/07/2026, מדגימת production חדשה **אחרי** סבב 1 (PR #396) כבר היה במיזוג ומאומת.
+- **תצפית:** אותה כפילות (הודעת gateway + פרוזת agent) חזרה, הפעם עם ניסוח שונה: `"⏳ **העדכון ממתין לאישור:**\n...\nשלח **מאשר** כדי לאשר את העדכון."`
+- **Root Cause (שני פערים עצמאיים באותו שורש — סבב 1 לא צפה variant markdown/דקדוק):**
+  1. `שלח **מאשר**` — Markdown **bold** (שתי כוכביות) — `_AGENT_APPROVAL_INVITE_PATTERN`'s `\*?` תמך רק בכוכבית **אחת** אופציונלית; שתי כוכביות שברו את ה-match לגמרי.
+  2. `ממתין` (זכר, ללא סיומת) — `_AGENT_PENDING_STATUS_PATTERN`'s `ממתינ[הת]` דרש סיומת נקבה (ה/ת) חובה; "העדכון" (המילה שה-⏳ מתאר) הוא זכר דקדוקית, אז המודל כתב נכון "ממתין" — אבל הצורה הבודדת הזו מסתיימת ב-nun **סופית** (ן, U+05DF), אות יוניקוד **שונה** מה-נ הרגילה (U+05E0) שבתוך "ממתינה"/"ממתינת" — לא ניתן היה לתקן רק עם סיומת אופציונלית ([הת]?), כי הבסיס "ממתינ" (עם נ רגילה) פשוט לא מופיע בתוך "ממתין" בכלל.
+- **תוקן:** `_strip_markdown_emphasis()` חדש — מסיר `*`/`_` מהטקסט **לצורך matching בלבד** (לא מהטקסט שמוצג למשתמש), בלתי-תלוי-בכמות (סוגר את הפתח ל-`***מאשר***`/`_מאשר_`/`__מאשר__` וכו', לא רק "בדיוק שתי כוכביות"). מיושם בארבע נקודות הבדיקה הרלוונטיות ב-`sanitize_agent_response()`. `_AGENT_PENDING_STATUS_PATTERN` תוקן עם אלטרנציה מפורשת `(?:ממתינ[הת]|ממתין)` (לא סיומת אופציונלית) — מכיר בשתי איות שונות באמת, לא איות אחת עם זנב אופציונלי.
+- **Scope:** רק A32 (`core/anti_hallucination.py`) נגע. אין שינוי ל-BUG-111, BUG-112, F52, ActionGateway, דגלי feature.
+- **בדיקות:** `test_a32_approval_prose_suppression.py` הורחב ל-28/28 (מ-18) — הדגימה המדויקת, כוכבית/כוכביים/שלוש כוכביות/underscore בודד/כפול, רגרסיה שמוכיחה markdown-stripping לא הופך invite מזויף (ללא ראיית אישור) למדוכא בשקט, ורגרסיה שמוכיחה טקסט רגיל עם markdown לא נפגע (matching-only, לא משנה את הטקסט המוצג).
+- **תוקן ב-commit:** `72414c3` ("BUG-113 follow-up: fix A32 markdown-emphasis and masculine-form gaps").
+- **PR:** #399 (merge `bb4efdb`).
+- **Merged:** כן.
+- **Deployed:** כן.
+- **Verified בפרודקשן:** ✅ כן — דגימת production אחרי ה-deploy (19/07/2026, "עדכן משימת בדיקת pull request 393") הראתה הודעה **יחידה** בלבד (הודעת ה-gateway), עם `[A32] Single-Speaker: ... suppressing` בלוג ו-`ownership_signal.final_reply_nonempty=false` — אין כפילות. (הדגימה הספציפית לא כללה בדיוק את אותו variant markdown-כפול שנצפה במקור, אך מוכיחה שהצינור המתוקן עובד end-to-end בפועל.)
 - **סטטוס:** ✅ VERIFIED IN PROD / CLOSED.

@@ -1264,8 +1264,8 @@ Audit + SPEC בלבד — אין קוד. תלוי ב-C122/PR #370 (הרביעי�
 ### C127 — F52 PR6 follow-up: הרחבת taxonomy ל-turns מעורבים (read+approval_pending) (19/07/2026)
 קבצים: `core/turn_evidence.py`, `test_f52_pr6_pending_shadow.py` | PR #393
 turn שמבצע גם read מאומת וגם מעלה approval מסווג `evidence_status="mixed"` (לא `"approval_pending"`) — עדיין false mismatch. `compare_shadow_final_status()` הורחב: `"sent_for_approval"` תואם גם ל-`"mixed"` כשה-non-success היחיד הוא `approvals_pending`. 5 בדיקות הגנה נוספות (55 סה"כ).
-**Runtime evidence — חלקי, לא overclaimed:** נצפתה דגימה סמוכה (`evidence_status=mixed verified_reads=1 approvals_pending=1 response_claim=mixed mismatch=false`) שמוכיחה ש-turns מעורבים מתנהגים נקי. **הענף המדויק של PR זה** (`response_claim=sent_for_approval` ספציפית, לא `mixed`, על turn מעורב) **עדיין לא נצפה** — אין לסמן אותו כ-production-verified.
-**Merged:** כן (`53eb19d`, merge `440234f`, PR #393) | **Verified בפרודקשן:** ⚠️ חלקי — ראו הערת runtime evidence למעלה; הענף המדויק עדיין דורש דגימה
+**Runtime evidence — ✅ הענף המדויק נלכד (עדכון 19/07/2026):** נצפתה דגימה סמוכה (`evidence_status=mixed verified_reads=1 approvals_pending=1 response_claim=mixed mismatch=false`) שמוכיחה ש-turns מעורבים מתנהגים נקי, **וגם** דגימה מאוחרת יותר (אותו יום) על הענף המדויק עצמו: `evidence_status=mixed response_claim=sent_for_approval mismatch=false verified_reads=1 approvals_pending=1` — turn שביצע `airtable_get` (בדיקת סטטוס משימה) ואז `airtable_update` requires_approval באותו turn. שני הענפים כעת מאומתים.
+**Merged:** כן (`53eb19d`, merge `440234f`, PR #393) | **Verified בפרודקשן:** ✅ כן (עדכון 19/07/2026) — שני הענפים נלכדו, ראו הערת runtime evidence למעלה
 
 ### C128 — BUG-112 (סבב 2): נרמול UX לניסוח stale/missing-callback אחיד (19/07/2026)
 קבצים: `app.py`, `test_bug112_telegram_approval_ttl.py` | PR #394 | באג: BUG-112
@@ -1282,3 +1282,13 @@ turn שמבצע גם read מאומת וגם מעלה approval מסווג `eviden
 שער ה-Single-Speaker הקיים לא כיסה פרוזת approval-invite ("✅ מוכנה להוספה... שלח מאשר כדי לאשר") כשאישור אמיתי כבר נכנס לתור — `_AGENT_APPROVAL_INVITE_PATTERN` הקיים נבדק רק בשער הנפרד למקרה **ההפוך** (אין ראיה). ענף דיכוי חדש, גדור ב-`_gateway_active` וראיית `__approval_queued__` אמיתית. 18 בדיקות חדשות.
 **Runtime evidence:** לוגי production **אחרי** ה-deploy מציגים את שלושתם יחד — לוג הדיכוי, `ownership_signal` עם `reply_owner=gateway`/`agent_claimed_approval=false`, ו-`EvidenceFinalizerShadow` עם `response_claim=sent_for_approval mismatch=false`. הפלט למשתמש הכיל רק את הודעת ה-gateway.
 **Merged:** כן (`2d86de6`, merge `587d1fe`, PR #396) | **Verified בפרודקשן:** ✅ כן — evidence מדויק מלוגים אחרי deploy, ראו `BUG_AUDIT_LOG.md`'s BUG-113. **סגור.**
+
+### C131 — BUG-113 (סבב 2/FU): תיקון פערי markdown-emphasis וצורת-זכר ב-A32 (19/07/2026)
+קבצים: `core/anti_hallucination.py`, `test_a32_approval_prose_suppression.py` | PR #399 | באג: BUG-113
+דגימת production חדשה **אחרי** C130/PR #396 עדיין הראתה כפילות, עם ניסוח שונה: `שלח **מאשר**` (bold markdown, שתי כוכביות — ה-`\*?` המקורי תמך רק בכוכבית אחת) ו-`⏳ ...ממתין לאישור` (זכר בלי סיומת — `ממתין` מסתיים ב-nun **סופית** ן, אות יוניקוד שונה מה-נ הרגילה בתוך "ממתינה"/"ממתינת", כך שסיומת אופציונלית לא הספיקה). תוקן: `_strip_markdown_emphasis()` חדש (מסיר `*`/`_` ל-matching בלבד, בלתי-תלוי-בכמות — סוגר גם `***מאשר***`/`_מאשר_`), ואלטרנציה מפורשת `(?:ממתינ[הת]|ממתין)` במקום סיומת אופציונלית. 10 בדיקות חדשות (28 סה"כ בקובץ).
+**Merged:** כן (`72414c3`, merge `bb4efdb`, PR #399) | **Verified בפרודקשן:** ✅ כן — דגימת production אחרי ה-deploy (19/07/2026) הראתה הודעה יחידה, אין כפילות. ראו `BUG_AUDIT_LOG.md`'s BUG-113 (סבב 2). **סגור.**
+
+### C132 — TurnOwnershipShadow: אינווריאנט shadow חדש לזליגת agent ב-turn בבעלות gateway (19/07/2026)
+קבצים: `core/turn_envelope.py`, `test_turn_envelope.py` | PR #400
+תצפית טהורה, לא flag-gated, ללא שינוי התנהגות: כש-`approval_queued=true` ו-`reply_owner="gateway"` (כלומר A32 היה אמור לדכא את טקסט ה-agent לגמרי) אך `final_reply` עדיין לא ריק, נרשם `[TurnOwnershipShadow] violation=agent_spoke_in_gateway_owned_approval_turn` + `pattern_class` (approval_invite/pending_status/action_status/unknown, מחושב מול `core/anti_hallucination.py`'s patterns הקיימים, כולל `_strip_markdown_emphasis` מ-C131). `OwnershipSignal` קיבל שני שדות חדשים (`final_reply_nonempty` ב-routine log, `leaked_pattern_class` רק ב-WARNING line). אין נגיעה ב-`app.py` (הפרמטרים הדרושים כבר עברו לפני כן), ActionGateway, או EvidenceFinalizer taxonomy. 25 בדיקות חדשות (95 סה"כ בקובץ).
+**Merged:** כן (`c31c219`, merge `8bdd504`, PR #400) | **Verified בפרודקשן:** ✅ כן — דגימת production 19/07/2026 (סגירת #393, ראו C127) הראתה `final_reply_nonempty=false` ואין violation, מאמת שהאינווריאנט מזהה נכון גם את המקרה התקין (no false positive), לא רק את מקרה הדליפה.
