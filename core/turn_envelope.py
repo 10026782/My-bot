@@ -359,6 +359,43 @@ def _agent_text_claims_pending(final_reply: str) -> bool:
         return False
 
 
+def _classify_agent_leak_pattern(final_reply: str) -> str:
+    """
+    Best-effort classification of WHICH known Single-Speaker pattern
+    final_reply still matches, for diagnosing a TurnOwnershipShadow
+    violation (see OwnershipSignal.is_gateway_owned_leak below) — purely
+    observational, never used to suppress/alter text. Reuses
+    core/anti_hallucination.py's own patterns (single source of truth) in
+    the same specificity order sanitize_agent_response()'s call sites
+    imply: the BUG-113 approval-invite call-to-action first (most
+    specific), then generic pending-narration, then generic
+    completion-status wording; "unknown" covers empty text or a genuinely
+    novel phrasing none of the three catch. Matches against
+    markdown-stripped text for the same reason sanitize_agent_response()
+    does (BUG-113-FU) — bold/italic wrapping must not hide the pattern
+    class either.
+    """
+    if not final_reply or not final_reply.strip():
+        return "unknown"
+    try:
+        from core.anti_hallucination import (
+            _AGENT_ACTION_STATUS_PATTERN,
+            _AGENT_APPROVAL_INVITE_PATTERN,
+            _AGENT_PENDING_STATUS_PATTERN,
+            _strip_markdown_emphasis,
+        )
+        norm = _strip_markdown_emphasis(final_reply)
+        if _AGENT_APPROVAL_INVITE_PATTERN.search(norm):
+            return "approval_invite"
+        if _AGENT_PENDING_STATUS_PATTERN.search(norm):
+            return "pending_status"
+        if _AGENT_ACTION_STATUS_PATTERN.search(norm):
+            return "action_status"
+    except Exception:
+        pass
+    return "unknown"
+
+
 def detect_case_c2_signal(
     final_reply: str, *, queue_count: int, approval_queued_this_turn: bool,
 ) -> bool:
@@ -420,6 +457,13 @@ class OwnershipSignal:
     approval_queued: bool
     agent_claimed_approval: bool
     reply_owner: str
+    # TurnOwnershipShadow (BUG-113-FU2): whether final_reply (post-A32) was
+    # still non-empty, and — only meaningful when it was — a best-effort
+    # classification of which known pattern it still matched. Neither field
+    # stores the raw text itself, same content boundary as
+    # agent_claimed_approval above.
+    final_reply_nonempty: bool = False
+    leaked_pattern_class: str = "unknown"
 
     def to_log_dict(self) -> dict:
         return {
@@ -429,6 +473,7 @@ class OwnershipSignal:
             "approval_queued": self.approval_queued,
             "agent_claimed_approval": self.agent_claimed_approval,
             "reply_owner": self.reply_owner,
+            "final_reply_nonempty": self.final_reply_nonempty,
         }
 
     @property
@@ -443,15 +488,33 @@ class OwnershipSignal:
             and not self.approval_queued
         )
 
+    @property
+    def is_gateway_owned_leak(self) -> bool:
+        """TurnOwnershipShadow: reply_owner=="gateway" means A32's
+        Single-Speaker gate (anti_hallucination.sanitize_agent_response's
+        __approval_queued__-gated suppression branches) should have already
+        reduced the agent's own final_reply to "" this turn — ActionGateway,
+        not the agent, is the one turn's sole legitimate speaker. If
+        final_reply_nonempty is still True here, that suppression didn't
+        fire (a live gap, same shape as BUG-113/BUG-113-FU, just not
+        necessarily the same pattern), independent of whatever caused it.
+        Log-only signal — never used to block or alter final_reply."""
+        return (
+            self.approval_queued
+            and self.reply_owner == "gateway"
+            and self.final_reply_nonempty
+        )
+
 
 def build_ownership_signal(
     *, recognized_intent: str, selected_handler: str, tool_use_emitted: bool,
     approval_queued: bool, final_reply: str, reply_owner: str = "agent",
 ) -> OwnershipSignal:
     """Pure function — no I/O. final_reply is checked, never stored: only
-    the boolean match (agent_claimed_approval) survives into the returned
-    signal, never the text itself (log content boundary — see
-    log_ownership_signal())."""
+    the boolean/enum matches (agent_claimed_approval, final_reply_nonempty,
+    leaked_pattern_class) survive into the returned signal, never the text
+    itself (log content boundary — see log_ownership_signal())."""
+    _nonempty = bool(final_reply and final_reply.strip())
     return OwnershipSignal(
         recognized_intent=recognized_intent or "unknown",
         selected_handler=selected_handler or "unknown",
@@ -459,6 +522,8 @@ def build_ownership_signal(
         approval_queued=bool(approval_queued),
         agent_claimed_approval=_agent_text_claims_pending(final_reply),
         reply_owner=reply_owner,
+        final_reply_nonempty=_nonempty,
+        leaked_pattern_class=_classify_agent_leak_pattern(final_reply) if _nonempty else "unknown",
     )
 
 
@@ -470,7 +535,10 @@ def log_ownership_signal(signal: OwnershipSignal, *, canonical_user_id: str = ""
     suspected. When signal.is_hijack is True, ALSO emits a distinct
     WARNING-level line (same fail-open-not-silent principle as
     log_case_c_signal()) so the anomaly is independently greppable without
-    parsing JSON out of every routine INFO line.
+    parsing JSON out of every routine INFO line. Same treatment for
+    signal.is_gateway_owned_leak (TurnOwnershipShadow, BUG-113-FU2) — a
+    third, independent anomaly class from is_hijack (this one has a real
+    backing approval; the agent just also spoke when it shouldn't have).
 
     canonical_user_id is fingerprinted (never logged raw) — same PII
     boundary as log_turn_envelope()/log_case_c_signal(). Never raises.
@@ -485,6 +553,12 @@ def log_ownership_signal(signal: OwnershipSignal, *, canonical_user_id: str = ""
             logger.warning(
                 "[TurnEnvelope] ownership_hijack user=%s intent=%s handler=%s",
                 _fingerprint(canonical_user_id), signal.recognized_intent, signal.selected_handler,
+            )
+        if signal.is_gateway_owned_leak:
+            logger.warning(
+                "[TurnOwnershipShadow] violation=agent_spoke_in_gateway_owned_approval_turn "
+                "user=%s pattern_class=%s",
+                _fingerprint(canonical_user_id), signal.leaked_pattern_class,
             )
     except Exception:
         logger.debug("[TurnEnvelope] ownership_signal logging failed", exc_info=True)
