@@ -2770,3 +2770,31 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **קבצים לחקירה (טרם נחקרו — Contract Chain טרם בוצע):** `core/action_gateway.py::route_confirmation_word()`/`_resolve_single_contract()` (המסלול הישן שמציג את ה-tool_name/record_id הגולמיים), מול `core/agent_message_formatter.py`/`FEATURE_UNIFIED_STATUS_FORMATTER` (F52 — שכבר בתהליך shadow soak; ייתכן שהמסלול המאוחד כבר פותר את זה ב-`shadow`/`on` ולא רק ב-legacy).
 - **השערת שורש (לא מאומתת עדיין):** תגובת ה-"בוצע" הישנה (לפני F52) בונה טקסט ישירות מ-`contract.tool_name`/`external_id` ללא שכבת-תיאור עסקי, בדומה לדפוסים שכבר טופלו במקומות דומים (BUG-115/BUG-117's `_describe_contract_for_disambiguation()`), אך כאן במסלול ה-**הצלחה** (לא disambiguation).
 - **סטטוס:** 🔴 נרשם בלבד — לא נחקר לעומק, לא תוקן, לא PR. במעקב תחת F52 soak, לא כחוסם ל-PR #407.
+
+---
+
+## BUG-119 — A32 NO-TOOL-EVIDENCE generic safety net מפספס צורות ריבוי של פעלי-השלמה — 🔴 נרשם, לא תוקן (Contract Chain בוצע, ממתין להנחיה)
+
+- **תאריך:** 20/07/2026.
+- **מקור:** דגימת staging חיה (אותה שיחת בדיקת RP5 של PR #407 — **לא** קשור ל-RP5/F52 taxonomy עצמם, ממצא-צד כללי ב-`core/anti_hallucination.py`). Turn חמישי בשיחה: אחרי שתי משימות נוצרו בפועל (אחת נחסמה ע"י RP5 write-403, אחת בוצעה באמת), Eli שלח "😊" בלבד — turn נטול כל tool call (`IngressClassifier tier=5 reason=no_lead_candidates`). BOSS ענה: *"😊 הכל בסדר! שתי המשימות נוצרו בהצלחה: ✅ בדיקת RP5 write 403 — ... ✅ בדיקת RP5 no marker — ..."* — תביעת הצלחה מלאה, ללא שום tool call ב-turn הזה.
+- **ראייה ישירה מהלוג:** `[EvidenceFinalizerShadow] state=shadow evidence_status=no_evidence response_claim=success mismatch=true code=status_claim_mismatch counts={..., 'verified_writes': 0, 'failed_calls': 0, ...}` — ה-shadow observer (log-only, לא חוסם) תפס את חוסר-ההתאמה נכון, בדיוק כפי שתוכנן. אך שער האכיפה בפועל (`core.anti_hallucination.sanitize_agent_response`) **לא** חסם/תיקן את התשובה — היא הגיעה למשתמש כמות שהיא.
+
+### Contract Chain (מאומת בהרצת קוד ישירה, לא הונח)
+
+שני פערים עצמאיים ומצטברים, שניהם נדרשו יחד כדי שההזיה תחמוק:
+
+1. **`verify_result_claim()`'s hallucination branch (`_all_failed(tool_results) and _POSITIVE_CLAIMS.search(...)`):** `_POSITIVE_CLAIMS` תפס את "נוצר" (כתת-מחרוזת בתוך "נוצרו" — regex בלי `\b`). אך `_all_failed([])` על רשימת tool_results **ריקה** מחזיר `False` (הפונקציה שואלת "האם כל הקריאות נכשלו" — ל-0 קריאות אין מה "כל" להיכשל, אז זה `False` באופן vacuous) → הענף לא מופעל, `verify_result_claim` מחזיר `"ok"`.
+2. **"Generic structural safety net" (`_AGENT_ACTION_STATUS_PATTERN` + `_has_write_tool_evidence`, שנועד במפורש לפי ה-docstring שלו לתפוס בדיוק את המקרה הזה — "fires on ANY action-completion-shaped text... as long as NO write tool succeeded"):** `_AGENT_ACTION_STATUS_PATTERN` משתמש ב-`\b(...)\b` על מילים בודדות — ומכיל **רק** צורת יחיד (זכר+נקבה) לשישה מתוך שבעה פעלי-השלמה, בלי צורת ריבוי. אומת ישירות בהרצת קוד:
+  ```
+  נוסף/נוספה/נוספו   → כולם תואמים (היחיד עם כיסוי מלא)
+  בוצע/בוצעה/בוצעו   → בוצעו: לא תואם
+  נשלח/נשלחה/נשלחו   → נשלחו: לא תואם
+  נשמר/נשמרה/נשמרו   → נשמרו: לא תואם
+  נוצר/נוצרה/נוצרו   → נוצרו: לא תואם  ← זה שקרה בפועל
+  עודכן/עודכנה/עודכנו → עודכנו: לא תואם
+  הושלם/הושלמה/הושלמו → הושלמו: לא תואם
+  ```
+  "המשימה נוצרה" (יחיד) היה נתפס. "שתי המשימות נוצרו" (ריבוי) לא נתפס — לא כי הוא שונה מהותית, אלא כי אף אחת מהמילים ברשימה לא כתובה בצורת ריבוי (חוץ מ-"נוספו").
+- **קבצים:** `core/anti_hallucination.py` — `_AGENT_ACTION_STATUS_PATTERN` (שורה ~521-527), `_all_failed()` (שורה ~455), `verify_result_claim()` (שורה ~485).
+- **היקף:** **לא** קשור ל-RP5/F52 taxonomy, ל-`core/rp5_fault_injection.py`, או ל-PR #407 — פער כללי ב-A32 שהיה קיים לפני RP5 ויחול זהה בפרודקשן תחת אותו ניסוח בדיוק (ריבוי-פריטים בתשובת סיכום). נחשף עכשיו רק כי דגימות ה-RP5 יצרו טבעית תרחיש "שני פריטים בתשובה אחת".
+- **סטטוס:** 🔴 נרשם, Contract Chain בוצע ואומת בקוד ישיר — **לא תוקן**. ממתין להנחיה: להוסיף צורות ריבוי חסרות ל-`_AGENT_ACTION_STATUS_PATTERN` (תיקון צר, low-risk) על branch נפרד מ-`claude/rp5-staging-fault-injection-v4akit` (לא קשור ל-RP5, לא לערבב scope).
