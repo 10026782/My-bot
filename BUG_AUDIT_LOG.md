@@ -2597,3 +2597,23 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **Deployed:** כן.
 - **Verified בפרודקשן:** ✅ כן — דגימת production אחרי ה-deploy (19/07/2026, "עדכן משימת בדיקת pull request 393") הראתה הודעה **יחידה** בלבד (הודעת ה-gateway), עם `[A32] Single-Speaker: ... suppressing` בלוג ו-`ownership_signal.final_reply_nonempty=false` — אין כפילות. (הדגימה הספציפית לא כללה בדיוק את אותו variant markdown-כפול שנצפה במקור, אך מוכיחה שהצינור המתוקן עובד end-to-end בפועל.)
 - **סטטוס:** ✅ VERIFIED IN PROD / CLOSED.
+
+---
+
+## BUG-114 — ActionContracts context-interrupt call amplification — ✅ תוקן ומאומת בבדיקות, לא נבדק בפרודקשן
+
+- **תאריך רישום:** 19/07/2026.
+- **מקור:** נצפה **באותה** דגימת production שסגרה את הענף המדויק של PR #393 (ראו BUG-audit history/`CHANGE_CONTROL_LOG.md` C127) — **נושא נפרד לגמרי**, לא קשור ל-BUG-111/112/113 או PR #393/#399/#400. סומן במפורש בעדכון התיעוד הקודם כ"טרם אובחן" ונחקר עכשיו בנפרד לפי בקשה מפורשת.
+- **תסמין:** הודעה נכנסת אחת (`list_tasks`, ללא קשר לאף contract חי) עם 6 `ActionContracts` פתוחים למשתמש הפיקה **19 קריאות Airtable** (`GET pending` ראשוני + 6×(`GET by contract_id` → `PATCH` → `GET by contract_id`)) — לפני שה-agent בכלל התחיל לעבד את ההודעה. `case_c_signal kind=C1 detail=live_contracts=6`, `multi_contract_conflict=true`.
+- **מסך / מודול:** `core/action_gateway.py::ExecutionLedger.mark_context_interrupted()` (שורה 558), `ActionGateway.mark_context_interrupted()` (שורה 2030), נקרא מ-`app.py:3920`; `core/action_contract_repository.py::transition()` (שורה 199) — הנתיב שמבצע בפועל את ה-GET→PATCH→GET לכל contract.
+- **Root Cause (מאומת בקוד, לא השערה):** `mark_context_interrupted()` נקרא בכל הודעה נכנסת שאינה resolution event (`app.py:3907-3920`), ומסמן מחדש **כל** contract "pending" של המשתמש כ-`context_interrupted=True` — כולל contracts שכבר `context_interrupted=True` מלכתחילה. ה-filter הקיים בודק רק `status == "pending"`, לא `context_interrupted`. ה-shortcut האידמפוטנטי הקיים ב-`transition()` (`action_contract_repository.py:239`) לא עוזר כאן כי הוא יורה רק כש-`updates` **ריק**, ו-`{"context_interrupted": True}` אינו ריק גם כשהערך כבר זהה. כל contract שנשאר "pending" ולא נסגר במפורש ממשיך לספוג GET+PATCH+GET מלא **על כל הודעה בלתי-קשורה עתידית**, ללא הגבלת זמן (אין job מתוזמן/TTL לניקוי contracts pending ישנים — נבדק ב-`scheduler.py`/`core/approval_queue_recovery.py`, לא נמצא).
+- **ביקורת מלאה + תשובות לשש השאלות:** `docs/architecture/action-gateway/BUG-114_CONTEXT_INTERRUPT_CALL_AMPLIFICATION_AUDIT.md` (§1–§5 = הביקורת המקורית, §6 = עדכון היישום).
+- **תוקן — עם תיקון חשוב מעבר להצעה המקורית:** תנאי filter נוסף ב-list comprehension הקיים של `mark_context_interrupted()`: `and (c.reconfirmation_required or not c.context_interrupted)` — **לא** `and not c.context_interrupted` הפשוט שהוצע בביקורת המקורית. ההבדל קריטי: `test_bug_reconfirmation_oneshot_fsm.py`'s Regression B (preview → הפרעה → כן → הפרעה שנייה → כן) קוראת ל-`mark_context_interrupted()` **פעמיים**; בקריאה השנייה ה-contract כבר `context_interrupted=True` מהקריאה הראשונה — filter נאיבי היה מדלג עליו **גם** כשהוא צריך supersede אמיתי, ושובר רגרסיה קיימת ומאומתת-בפרודקשן (BUG-108/BUG-PENDING-APPROVAL-B). הפער נתפס תוך כדי כתיבת הבדיקות, לא בביקורת עצמה. בדיקת RAM טהורה, ללא קריאת Airtable נוספת. אינו נוגע ב-GET-before-PATCH/GET-after-PATCH של `transition()` עצמו (Q4/Q5 — נחוצים ל-TOCTOU safety, לא מוחלשים).
+- **המלצות נוספות שנשארו מחוץ לתיקון הצר (Q5/Q6 — דורשות החלטת owner נפרדת, לא מומשו):** (1) `airtable_patch()` מזניח את גוף תגובת ה-PATCH — שימוש בו במקום GET-readback נפרד יכול לצמצם עוד, אך משנה פונקציה גנרית משותפת; (2) אין TTL/ניקוי מתוזמן ל-`ActionContracts` pending ישנים (בניגוד ל-TTL כפתור הטלגרם של BUG-112) — שאלת מדיניות, לא תיקון מכני.
+- **Scope:** לא נוגע ב-BUG-111/112/113, F52, EvidenceFinalizer taxonomy, או סמנטיקת אישור/דחייה/ביצוע.
+- **בדיקות:** `test_bug114_context_interrupt_amplification.py` חדש (12/12) — כל 5 התרחישים המתוכננים, כולל Test 3 שמקודד במפורש את רגרסיית ה-reconfirmation_required שנתפסה. `test_bug_reconfirmation_oneshot_fsm.py` (27/27, ללא שינוי) רץ מחדש כהוכחה עצמאית שהתיקון המתוקן לא שובר את ה-FSM הקיים. suite מלא ירוק, `smoke_tests.py`, `compileall`, `git diff --check` — כולם נקיים.
+- **תוקן ב-branch:** `claude/audit-action-contracts-call-amplification` (אותו branch כמו הביקורת, PR #402).
+- **Merged:** תלוי במיזוג PR #402.
+- **Deployed:** לא ידוע — דרוש בדיקה ידנית ב-Render לאחר מיזוג.
+- **Verified בפרודקשן:** לא — התיקון טרם נצפה מפחית קריאות Airtable אמיתיות מול תעבורה חיה.
+- **סטטוס:** ✅ קוד תוקן ומאומת בבדיקות, ⚠️ לא verified-in-prod.

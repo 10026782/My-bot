@@ -561,14 +561,28 @@ class ExecutionLedger:
         מסומן context_interrupted=True (עדיין ניתן להצלה בסיבוב אחד). contract
         שכבר הציג reconfirmation פעם אחת (reconfirmation_required=True) —
         הפרעה נוספת מבטלת אותו סופית (status="superseded"), לא פותחת סיבוב
-        שני. אין מעגלי reconfirmation חוזרים — ראה route_confirmation_word()."""
+        שני. אין מעגלי reconfirmation חוזרים — ראה route_confirmation_word().
+
+        BUG-114: contract שכבר context_interrupted=True (ועדיין לא הגיע
+        ל-reconfirmation) מדולג — סימון חוזר הוא no-op ערכית, אבל update_status()
+        לא יודע את זה: ה-updates dict שנשלח ({"context_interrupted": True}) אינו
+        ריק גם כשהערך כבר זהה, אז ה-shortcut האידמפוטנטי ב-
+        ActionContractRepository.transition() לא יורה, וכל הודעה נכנסת
+        בלתי-קשורה עתידית הייתה מפיקה GET+PATCH+GET מלא לכל contract כזה, ללא
+        הגבלת זמן. הבדיקה כאן היא RAM טהורה (context_interrupted כבר שדה
+        cached על ActionContract) — אפס I/O נוסף. contracts עם
+        reconfirmation_required=True **לא** מדולגים למרות ה-`or` — הם עדיין
+        זקוקים ל-supersede אמיתי (שינוי status אמיתי, לא re-write של ערך זהה),
+        ללא קשר לערך context_interrupted הנוכחי שלהם."""
         with self._lock:
             changes = [
                 (c.contract_id, "superseded", {})
                 if c.reconfirmation_required
                 else (c.contract_id, "pending", {"context_interrupted": True})
                 for c in self._store.values()
-                if c.canonical_user_id == canonical_user_id and c.status == "pending"
+                if c.canonical_user_id == canonical_user_id
+                and c.status == "pending"
+                and (c.reconfirmation_required or not c.context_interrupted)
             ]
         for contract_id, status, updates in changes:
             self.update_status(contract_id, status, **updates)
