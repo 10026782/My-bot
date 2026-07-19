@@ -89,6 +89,7 @@ def _new_session(domain: str = "real_estate", channel: str = "whatsapp") -> dict
         "active_lead_candidate": None, # ← BUG-NEW-10/Section 4B: ליד שה-owner מכתיב, TTL 30 דקות
         "last_lead_candidate_batch": None,   # ← Section 4C: batch dictation state for follow-up routing
         "pending_lead_preview":     None,   # ← C89: preview candidates awaiting confirmation (FEATURE_AUTO_CAPTURE=OFF)
+        "last_prompted_contract":   None,   # ← BUG-115: last ActionContract whose approval prompt was shown, TTL 600s
     }
 
 
@@ -392,6 +393,60 @@ class PersistentSessionStore:
         session["updated_at"] = _now_iso()
         self._sync_to_db(sender, session)
 
+    def set_last_prompted_contract(self, sender: str, contract_id: str, kind: str = "action_gateway") -> None:
+        """BUG-115: רושם את ה-ActionContract שהצגתו-לאישור הוצגה הרגע למשתמש
+        הזה, כדי שמילת אישור בודדת ("כן"/"מאשר") הבאה תיפתר מולו ישירות
+        במקום ליפול ל-disambiguation גנרי לפי ספירת contracts חיים
+        (route_confirmation_word()) — גם כשיש contracts ישנים ולא-קשורים
+        עדיין pending. sender: אותו מפתח כמו canonical_user_id
+        (route_confirmation_word() מקבל את זה, לא chat_id — נשמר עקבי בכוונה).
+        TTL של 600 שניות (לא 1800 כמו pending_lead_preview) — תואם בדיוק את
+        חלון "פג תוקף בעוד 10 דקות" שכבר מוצג למשתמש על ה-prompt עצמו
+        (_PENDING_APPROVAL_TTL, app.py) — בוקמארק לא אמור לשרוד יותר ממה
+        שנאמר למשתמש."""
+        import time as _time
+        session = self.get_or_create(sender)
+        session["last_prompted_contract"] = {
+            "contract_id": contract_id,
+            "kind":        kind,
+            "set_at":      _time.time(),
+        }
+        session["updated_at"] = _now_iso()
+        self._sync_to_db(sender, session)
+
+    def get_last_prompted_contract(self, sender: str) -> Optional[dict]:
+        """מחזיר את הבוקמארק אם לא פג תוקפו (>600 שניות), אחרת None — אותו
+        דפוס ניקוי-אגב-קריאה כמו get_pending_lead_preview()."""
+        import time as _time
+        session = self.get(sender)
+        if not session:
+            return None
+        bookmark = session.get("last_prompted_contract")
+        if not bookmark:
+            return None
+        if _time.time() - bookmark.get("set_at", 0) > 600:
+            session["last_prompted_contract"] = None
+            self._sync_to_db(sender, session)
+            return None
+        return bookmark
+
+    def clear_last_prompted_contract(self, sender: str) -> None:
+        """מנקה last_prompted_contract במפורש — אחרי אישור/כשל-עמיד, או כש-
+        route_confirmation_word() מגלה שהבוקמארק כבר לא מצביע על contract
+        חי (נצרך/בוטל/הוחלף בדרך אחרת). לא נקרא מכל נתיב סיום אפשרי אחר
+        (reject()/route_cancellation_word()/mark_context_interrupted()'s
+        supersede/כפתור Telegram) — במכוון, ראה BUG-115 audit §5a: הבדיקה
+        `status == "pending"` ב-get_last_prompted_contract()'s consumer כבר
+        עושה בוקמארק-לא-חי לחלוטין אינרטי (לעולם לא גורם להתנהגות שגויה),
+        כך שניקוי יזום בכל נתיב סיום נוסף הוא ניקיון בלבד, לא נדרש לנכונות
+        — הוחלט להשאיר scope צר ולא לגעת בארבע פונקציות נוספות עבור זה."""
+        session = self.get(sender)
+        if not session:
+            return
+        session["last_prompted_contract"] = None
+        session["updated_at"] = _now_iso()
+        self._sync_to_db(sender, session)
+
     def delete(self, sender: str) -> None:
         """מוחק session (איפוס)."""
         sender = _normalize_sender(sender)
@@ -421,6 +476,7 @@ class PersistentSessionStore:
                 "active_lead_candidate":  session.get("active_lead_candidate"),
                 "last_lead_candidate_batch": session.get("last_lead_candidate_batch"),
                 "pending_lead_preview":     session.get("pending_lead_preview"),
+                "last_prompted_contract":   session.get("last_prompted_contract"),
             }
             fields = {
                 SF.SENDER_ID:    sender,
@@ -593,6 +649,7 @@ class PersistentSessionStore:
                 ("active_lead_candidate", None),
                 ("last_lead_candidate_batch", None),
                 ("pending_lead_preview", None),
+                ("last_prompted_contract", None),
             ):
                 session[key] = state.get(key, default)
             session["record_id"] = record_id

@@ -2620,7 +2620,7 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 
 ---
 
-## BUG-115 — "כן" נחטף לתפריט disambiguation גנרי במקום לאשר את תצוגת ה-ליד שהוצגה — 🔴 מבוקר (audit-only), לא תוקן
+## BUG-115 — "כן" נחטף לתפריט disambiguation גנרי במקום לאשר את תצוגת ה-ליד שהוצגה — ✅ תוקן ומאומת בבדיקות, לא נבדק בפרודקשן
 
 - **תאריך רישום:** 19/07/2026.
 - **מקור:** דגימת production ישירה, **נושא נפרד לגמרי מ-BUG-114** (לפי בקשה מפורשת שלא לערבב) — למרות ששתיהן נובעות בסופו של דבר מאותה עובדה בסיסית: `ActionContracts` pending לא פוקעים לעולם (BUG-114 §2 שאלה 6, נשארה פתוחה במכוון).
@@ -2638,13 +2638,14 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **מסך / מודול:** `core/action_gateway.py::ActionGateway.route_confirmation_word()` (שורה 1010, במיוחד ה-branch של `len(live) > 1`, שורות 1054-1061); `core/lead_candidate_handler.py::handle_lead_candidate()`/`_propose_lead_write()` (שורות 1191-1221, 583) — יוצר את ה-contract האמיתי בפועל שהתצוגה מתארת.
 - **Root Cause (מאומת בקוד, לא השערה):** תצוגת "📋 זיהיתי ליד..." **היא** contract אמיתי ב-ActionGateway (Tier-1, לפי עיצוב BUG-056 מכוון — לא בלבול Tier-1/Tier-2 כפי שהושערה ראשונית בבקשת החקירה). `route_confirmation_word()` הניח (BUG-056) ש"בדרך כלל יש contract חי אחד — זה שהוצע עכשיו", אבל אין לו שום מנגנון לזהות "לאיזה contract ה-'כן' הזה מתייחס בפועל" — הוא רק סופר: `len(live)==1` מאשר ישירות, `len(live)>1` מציג רשימה גנרית, ללא קשר לרלוונטיות/עדכניות. כש-contracts ישנים ונטושים מצטברים (בדיוק הממצא של BUG-114 §2 שאלה 6), כל "כן" רגיל אחרי תצוגת-ליד טרייה בודדת מתדרדר לתפריט disambiguation דולף-פרטיות במקום לאשר את מה שהוצג הרגע.
 - **ממצא נוסף, מאומת ונפרד:** `TurnEnvelope.active_queue_id` (הצעה ב-Phase 0, `core/turn_envelope.py`) **כן** מעדיף `action_gateway` (`priority=3`) על פני `lead_capture` (`priority=5`) — אך זהו מנגנון **תצפית בלבד** (Phase 0, מתועד במפורש כ-"never injects into the agent's prompt/context"), נבנה בנקודת קריאה נפרדת (`app.py` סעיף "1.7") ולא נקרא כלל בנתיב הניתוב האמיתי (`app.py` סעיף "2.55"). לא הגורם לבאג בפועל — שני המנגנונים רק "מסכימים" במקרה. `TurnEnvelope.message_kind` (שנשאל עליו בבקשת החקירה) **אינו קיים כמנגנון פעיל היום** — מתועד במפורש כ-"Phase 4, לא ממומש עדיין".
-- **ביקורת מלאה + עיצוב תיקון מוצע:** `docs/architecture/action-gateway/BUG-115_CONFIRMATION_ROUTING_HIJACK_AUDIT.md` (חדש).
-- **תיקון מוצע (לא ממומש), שני חלקים עצמאיים:**
-  1. **Bookmark "contract שהוצג לאחרונה"** — reuse של דפוס `set_pending_lead_preview`/`get_pending_lead_preview` הקיים ב-`session_store.py` (לא מנגנון אחסון חדש): `_propose_lead_write()` רושם את ה-`contract_id` שהציע; `app.py`'s confirm-word branch בודק bookmark זה **לפני** `find_live_contracts()`'s ספירה גנרית — אם קיים ועדיין pending, מאשר ישירות אותו contract ספציפי, בלי קשר לכמה contracts ישנים אחרים חיים. Fallback מלא להתנהגות הקיימת כשאין bookmark/פג תוקף.
-  2. **תוויות אנושיות ל-disambiguation** — שימוש חוזר ב-`_describe_contract_for_reconfirmation()` הקיים (כבר בשימוש שורה אחת מעל, לאותה מטרה בדיוק) במקום `c.tool_name`/`c.contract_id[:8]` הגולמיים.
-- **Scope:** לא נוגע ב-BUG-114 (תיקון ה-filter של `mark_context_interrupted()`), F52, EvidenceFinalizer, או סמנטיקת approve/dispatch עצמה — רק "איזה contract 'כן' פותר" ו"איך רשימה מוצגת".
-- **בדיקות:** לא נכתבו עדיין — 5 תרחישים מוצעים במסמך הביקורת.
-- **Merged:** לא — אין קוד עדיין, רק תיעוד ביקורת.
-- **Deployed:** לא רלוונטי.
-- **Verified בפרודקשן:** לא רלוונטי — אין עדיין תיקון.
-- **סטטוס:** 🔴 מבוקר במלואו, לא תוקן. ממתין להחלטת owner אם לממש את התיקון הצר המוצע.
+- **ביקורת מלאה + עדכון יישום:** `docs/architecture/action-gateway/BUG-115_CONFIRMATION_ROUTING_HIJACK_AUDIT.md` (§1–§6 = הביקורת המקורית, §7 = עדכון היישום).
+- **תוקן, שני חלקים:**
+  1. **Bookmark "contract שהוצג לאחרונה"** — שלוש מתודות חדשות ב-`session_store.py` (`set/get/clear_last_prompted_contract`, אותו דפוס בדיוק כמו `pending_lead_preview` הקיים, כולל round-trip דרך Airtable State JSON) — TTL של 600 שניות (לא 1800 כמו הבוקמארקים האחרים בקובץ), תואם בדיוק את "פג תוקף בעוד 10 דקות" שכבר מוצג למשתמש. נרשם בשני נקודות: `core/lead_candidate_handler.py`'s `_handle_single_candidate()` (אחרי `_propose_lead_write()` מצליח) ו-`app.py`'s `_queue_approval_detailed_impl()` (אחרי `_owner_notified = True` מוכח, לא רק ניסיון). `route_confirmation_word()` (`core/action_gateway.py`) בודק את הבוקמארק **לפני** ספירת `find_live_contracts()` — אם מצביע על contract חי ("pending") לאותו canonical_user_id, נפתר ישירות מולו. **תיקון מדויק מעבר לסקיצת הביקורת:** לוגיקת ה-reconfirmation/context-poisoning הקיימת חולצה ל-`_resolve_single_contract()` חדשה, משותפת לנתיב "contract חי יחיד" ולנתיב "בוקמארק נמצא" — בוקמארק לעולם לא עוקף את הבדיקה הזו. הבוקמארק **נשמר** (לא מנוקה) כשהתוצאה היא "צריך reconfirmation" (לא terminal) — רק כשמאשרים בפועל או נכשלת כתיבה עמידה (terminal=True) הוא מנוקה — נקודה שלא פורטה במדויק בביקורת המקורית, נתפסה תוך כדי כתיבת הבדיקות (Test 6).
+  2. **תוויות אנושיות ל-disambiguation** — פונקציה חדשה ונפרדת `_describe_contract_for_disambiguation()`, **לא** הרחבה של `_describe_contract_for_reconfirmation()` הקיים (ניסיון ראשון: הרחבת ה-fallback הכללי בפונקציה המשותפת — שבר בשקט בדיקה קיימת ולא-קשורה, `test_stage_b_full_suite.py`'s DoD20, שמסתמכת על אותה פונקציה בדיוק להצגת `tool_name` גולמי בהודעת "✅ בוצע" — נתפס ותוקן ב-full regression sweep). הפונקציה החדשה: אותו ענף Leads בדיוק (delegate לפונקציה המקורית), אבל fallback כללי משלה ל"הוספה/עדכון ב-{table}" + preview קצר של שדה ראשון (לא-רגיש, לא בצורת record-id) — נקראת **רק** מלולאת ה-disambiguation; שאר נקודות הקריאה של הפונקציה המקורית לא נגעו כלל.
+- **Scope:** לא נוגע ב-BUG-114 (תיקון ה-filter של `mark_context_interrupted()`), F52, EvidenceFinalizer, סמנטיקת approve/dispatch, `route_disambiguation()`, `TurnEnvelope`, או `message_kind`.
+- **בדיקות:** `test_bug115_confirmation_routing_bookmark.py` חדש (22/22) — כל 5 התרחישים המתוכננים ועוד (בוקמארק פג-תוקף, בוקמארק ל-contract שכבר נפתר, בוקמארק למשתמש אחר, בוקמארק+interruption נשמר עד terminal, אינטגרציה עם `_handle_single_candidate()` בפועל). `test_bug114_context_interrupt_amplification.py` (12/12) ו-`test_bug_reconfirmation_oneshot_fsm.py` (27/27) רצו מחדש כהוכחה שלא נשברו. עוד ~28 קבצי בדיקה קיימים שנוגעים ב-`route_confirmation_word`/`route_disambiguation`/lead preview/BUG-070/074/076/111/Stage B/PR-0/F52 PR5 נבדקו ידנית ונשארו ירוקים. Suite מלא, smoke, compileall, diff-check — כולם נקיים.
+- **תוקן ב-branch:** `claude/bug115-confirmation-routing-audit` (אותו branch כמו הביקורת, PR #403).
+- **Merged:** תלוי במיזוג PR #403.
+- **Deployed:** לא ידוע — דרוש בדיקה ידנית ב-Render לאחר מיזוג.
+- **Verified בפרודקשן:** לא — התיקון טרם נצפה פותר "כן"/"מאשר" נכון מול תעבורה חיה עם contracts ישנים.
+- **סטטוס:** ✅ קוד תוקן ומאומת בבדיקות, ⚠️ לא verified-in-prod.

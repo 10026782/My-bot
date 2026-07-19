@@ -1213,6 +1213,19 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
             )
             _owner_notified = True
             logger.info(f"[Approval] ✅ sent to owner {_sanitize_id(owner_chat_id)} | {action_id}")
+            # BUG-115: a bare "כן"/"מאשר" reply must resolve THIS contract,
+            # not fall into ActionGateway's generic live-contract-count
+            # disambiguation just because older unrelated contracts also
+            # happen to still be pending. See
+            # core.action_gateway.route_confirmation_word()'s bookmark check.
+            if _gw_result is not None and getattr(_gw_result, "contract_id", None):
+                try:
+                    from session_store import lead_sessions as _ls_bm
+                    _ls_bm.set_last_prompted_contract(
+                        identity.memory_key, _gw_result.contract_id, kind="action_gateway",
+                    )
+                except Exception as exc:
+                    logger.warning(f"[Approval] BUG-115 last-prompted-contract bookmark failed: {exc}")
         except Exception as e:
             logger.error(f"[Approval] ❌ failed to notify owner: {e}")
             # BOSS NEVER FAKES: לא מחזירים "ממתין לאישור" כשהשליחה נכשלה.

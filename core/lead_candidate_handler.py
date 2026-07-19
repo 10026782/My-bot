@@ -1203,6 +1203,16 @@ def _handle_single_candidate(
             # clear_clarification NOT applied — propose_action() did not
             # succeed, the clarification state must survive (spec).
             return gw_result.user_message or gw_result.reason
+        # BUG-115: a bare "כן"/"מאשר" reply to the preview below must resolve
+        # THIS contract, not fall into ActionGateway's generic live-contract
+        # -count disambiguation if older unrelated contracts also happen to
+        # still be pending. See route_confirmation_word()'s bookmark check.
+        if gw_result.contract_id:
+            try:
+                from session_store import lead_sessions as _ls_bm
+                _ls_bm.set_last_prompted_contract(identity.memory_key, gw_result.contract_id, kind="lead_preview")
+            except Exception as exc:
+                logger.warning("[LCH] BUG-115 last-prompted-contract bookmark failed: %s", exc)
         if clear_clarification:
             try:
                 from session_store import lead_sessions as _ls
