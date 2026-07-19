@@ -2777,10 +2777,33 @@ def _claim_and_execute_approval(approval_id: str, identity) -> dict:
         # any dispatch decision is made. Based on the canonical contract's
         # own created_at (see _TMA_APPROVAL_TTL_SECONDS above for why not
         # Approvals.REQUESTED_AT).
-        _age_seconds = time.time() - contract.created_at
-        if _age_seconds > _TMA_APPROVAL_TTL_SECONDS:
+        #
+        # Fail CLOSED on a missing/invalid created_at — deliberately the
+        # opposite of BUG-112's Telegram TTL check, which treats a malformed
+        # timestamp as fresh (_age_seconds = 0.0, "not treated as stale").
+        # That choice is fine for a single push-notification button; it is
+        # not fine for a TMA approval that can also be bulk-executed — an
+        # ActionContract whose age can't be verified must never be allowed
+        # to execute, so an unreadable created_at is treated as "expired",
+        # not "fresh". A real ActionContract.created_at is a required
+        # dataclass field with no default (core/action_gateway.py) — this
+        # branch only guards against a malformed/legacy/corrupted object
+        # that shouldn't exist, not the normal case.
+        _created_at = getattr(contract, "created_at", None)
+        if isinstance(_created_at, (int, float)) and not isinstance(_created_at, bool) and _created_at > 0:
+            _age_seconds = time.time() - _created_at
+            _is_stale = _age_seconds > _TMA_APPROVAL_TTL_SECONDS
+        else:
+            logger.error(
+                "_claim_and_execute_approval: contract=%s has missing/invalid "
+                "created_at (%r) — failing closed, treating as expired",
+                contract_id, _created_at,
+            )
+            _age_seconds = float("inf")
+            _is_stale = True
+        if _is_stale:
             logger.info(
-                "_claim_and_execute_approval: TTL expired — contract=%s age=%.0fs "
+                "_claim_and_execute_approval: TTL expired — contract=%s age=%s "
                 "> %ss — rejecting, not executing",
                 contract_id, _age_seconds, _TMA_APPROVAL_TTL_SECONDS,
             )

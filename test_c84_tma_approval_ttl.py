@@ -319,6 +319,37 @@ chk("Test5: fresh contract ended completed", gw5.contracts["c_recF"].status == "
 
 
 # ══════════════════════════════════════════════════════════════════
+# 6. Missing/invalid created_at fails CLOSED — deliberately the opposite
+#    of BUG-112's Telegram check, which treats a malformed timestamp as
+#    fresh. A contract whose age can't be verified must never execute.
+# ══════════════════════════════════════════════════════════════════
+print("\n── Test 6: missing/invalid created_at fails closed ───────────")
+
+for label, bad_value in [
+    ("None", None),
+    ("empty string", ""),
+    ("non-numeric string", "not-a-timestamp"),
+    ("negative number", -5),
+    ("zero", 0),
+    ("bool True (never a real timestamp)", True),
+]:
+    gw6 = _FakeGateway()
+    c6 = _FakeContract("c_recG", created_at=1.0)   # placeholder, overwritten below
+    c6.created_at = bad_value
+    gw6.contracts["c_recG"] = c6
+
+    with _patched(gw6, at_get_record=lambda t, rid: _rec("recG", contract_id="c_recG"),
+                  at_patch=lambda t, rid, f: True):
+        outcome6 = _tma._claim_and_execute_approval("recG", _owner())
+
+    chk(f"Test6 ({label}): never approved", gw6.approve_calls == [])
+    chk(f"Test6 ({label}): rejected instead (fail closed)", gw6.reject_calls == ["c_recG"])
+    chk(f"Test6 ({label}): outcome not ok, status 410",
+        outcome6.get("ok") is False and outcome6.get("status_code") == 410)
+    chk(f"Test6 ({label}): contract ended rejected", gw6.contracts["c_recG"].status == "rejected")
+
+
+# ══════════════════════════════════════════════════════════════════
 print(f"\n{'='*50}")
 print(f"C84 TMA Approval TTL tests: {passed} passed, {failed} failed")
 sys.exit(0 if failed == 0 else 1)
