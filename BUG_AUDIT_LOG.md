@@ -2699,7 +2699,7 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 
 ---
 
-## BUG-117 — Tier-2 batch lead-preview נחטף לאותה disambiguation שBUG-115 תיקן עבור Tier-1 — ✅ תוקן ומאומת בבדיקות, לא נבדק בפרודקשן
+## BUG-117 — Tier-2 batch lead-preview נחטף לאותה disambiguation שBUG-115 תיקן עבור Tier-1 — ✅ VERIFIED IN PROD / CLOSED
 
 - **תאריך רישום:** 19/07/2026.
 - **מקור:** דגימת production ישירה, **נושא נפרד מ-BUG-115** (שורש-תרומה משותף — contracts pending לא פוקעים לעולם, BUG-114 §2 שאלה 6 — אך מנגנון/קוד שונה לגמרי, ללא ActionContract בכלל).
@@ -2722,8 +2722,26 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **ביקורת מלאה + תיעוד:** `docs/architecture/action-gateway/BUG-117_BATCH_PREVIEW_PRECEDENCE_HIJACK.md`.
 - **Scope:** לא נוגע ב-BUG-114, בבוקמארק/route_confirmation_word() של BUG-115, ב-`route_disambiguation()`, או ב-`_CANCEL_WORDS`.
 - **בדיקות:** `test_bug117_batch_preview_precedence.py` חדש (11/11) — שחזור מדויק של דגימת production, רגרסיה ל"אין batch preview", השוואות recency בשני הכיוונים, תפוגה של כל אחד מהשני המנגנונים (ללא קריסה), בידוד chat_id, ובדיקת end-to-end שה-batch אכן מאושר. `test_c89_preview_confirmation.py` (9/9, כולל הבדיקה המבנית עם החלון המורחב) ו-`test_bug115_confirmation_routing_bookmark.py` (22/22) רצו מחדש ללא רגרסיה. Full regression sweep: **140/140 קבצי `test_*.py`, exit 0**. `smoke_tests.py` PASS, `compileall -q .` נקי, `git diff --check` נקי.
-- **תוקן ב-branch:** `claude/action-status-shadow-verification-m1m0ow` (אותו ענף כמו BUG-116, טרם PR נפרד — יתווסף ל-PR הבא על אותו ענף).
-- **Merged:** לא עדיין.
-- **Deployed:** לא.
-- **Verified בפרודקשן:** לא — התיקון טרם נצפה פותר batch lead preview אמיתי מול contracts ישנים חיים.
-- **סטטוס:** ✅ קוד תוקן ומאומת בבדיקות, ⚠️ לא verified-in-prod.
+- **תוקן ב-branch:** `claude/action-status-shadow-verification-m1m0ow` (אותו ענף כמו BUG-116, PR #405).
+- **Merged:** ✅ כן — `main` `4546880` (Merge pull request #405), מאומת ב-`git fetch origin main` + `git log`.
+- **Deployed:** ✅ כן (נגזר מהדגימה החיה למטה).
+- **Verified בפרודקשן:** ✅ כן — דגימת production ישירה:
+  ```
+  Eli: צור לידים חדשים ענף גיוס
+       בניימין אסולין - 053-3123482
+       אהרון שמחה - 054-8421060
+
+  [TurnEnvelope] case_c_signal kind=C1 detail=live_contracts=9   ← בהודעת ה-batch dictation
+  [IngressClassifier] tier=2 conf=1.00 class=lead reason=clean_batch_2_items candidates=2
+
+  BOSS: 📋 זיהיתי 2 לידים אפשריים בקבוצה:
+        • בניימין אסולין (0533123482)
+        • אהרון שמחה (0548421060)
+        ענה "כן" לשמירת כולם, או "לא" לביטול. (בתוקף ל-30 דקות)
+  Eli: כן
+  BOSS: 📋 עובדתי 2 לידים:
+        ✅ שמרתי את בניימין אסולין (0533123482) | recoLSXsLQNKQG6Gy
+        ✅ שמרתי את אהרון שמחה (0548421060) | recgwDYidGrTc9KEU
+  ```
+  9 contracts ישנים היו pending (`live_contracts=9`, אותה תבנית כמו הדגימות הקודמות) ברגע שה-batch dictation נכנס — ולמרות זאת "כן" **לא** נחטף ל-disambiguation: שני הלידים אושרו ונכתבו בפועל (record ids אמיתיים). **הערת דיוק (שקיפות, לפי הסטנדרט שנשמר לאורך הסבב):** שורת `live_contracts=9` נלכדה בדיוק ל-turn של ה-batch dictation עצמו, לא ל-turn של "כן" בפני עצמו — אין שורת TurnEnvelope נפרדת עבור הודעת ה-"כן" בדגימה שסופקה. עם זאת, מדובר בשתי הודעות רצופות באותה שיחה, ותצוגת batch (Tier-2) לא יוצרת/מסירה ActionContracts כלל — כך שאין סיבה טכנית שמספר ה-contracts הישנים ישתנה בין שתי ההודעות. הראייה נחשבת מספקת לסגירה, בהינתן שהתסמין המדויק שדווח (batch + "כן" + contracts ישנים חיים ⇐ hijack) שוחזר ותוקן קצה-לקצה.
+- **סטטוס:** ✅ VERIFIED IN PROD / CLOSED.
