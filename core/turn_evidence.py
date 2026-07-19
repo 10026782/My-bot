@@ -167,10 +167,36 @@ def compare_shadow_final_status(
     # Empty/no-evidence is neutral and explicitly not a shadow success.
     # F52 PR6: "sent_for_approval" is compatible with approval_pending —
     # a real message was already sent this turn, just not via final_text.
+    #
+    # F52 PR6 follow-up (production-validated): a turn that ALSO did a
+    # verified read this turn (e.g. looked up a record) before queuing the
+    # approval classifies as evidence_status="mixed" (verified_reads>0 AND
+    # approvals_pending>0 — see TurnEvidenceSummary.classification()'s first
+    # "mixed" branch), not "approval_pending" — so the check above alone
+    # still reported a false mismatch for that turn shape even though
+    # "sent_for_approval" is exactly as legitimate a claim there as it is
+    # for a bare approval_pending turn. Narrowly widened: "sent_for_approval"
+    # is ALSO compatible with status=="mixed" specifically when the only
+    # "non-success" contributor to that mix is approvals_pending itself —
+    # zero failed_calls, zero unverified_effects, zero outcome_unknown.
+    # Deliberately does NOT extend to a "mixed" turn that also has a real
+    # failure or an unverified/unknown effect mixed in — those genuinely
+    # need their own claim in the text, "sent_for_approval" alone would
+    # hide them. (Given TurnEvidenceSummary.classification()'s own logic,
+    # this combination of zeros can only reach "mixed" via its first branch
+    # — verified reads/writes plus approvals_pending — never via the
+    # failed_calls/unverified_effects branches, so verified>0 is implied
+    # here, not re-checked separately.)
     compatible = claim == expected_claim or (
         status == "no_evidence" and claim in ("empty", "neutral")
     ) or (
         status == "approval_pending" and claim == "sent_for_approval"
+    ) or (
+        status == "mixed" and claim == "sent_for_approval"
+        and evidence.failed_calls == 0
+        and evidence.unverified_effects == 0
+        and evidence.outcome_unknown == 0
+        and evidence.approvals_pending > 0
     )
     mismatch = not compatible
     return ShadowFinalizerComparison(

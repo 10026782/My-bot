@@ -120,6 +120,32 @@ doesn't pass it gets byte-identical pre-PR6 behavior.
   plain conversational turn with no approval queued still reports
   `reply_owner="agent"` unchanged (see Test 5 below).
 
+### 4. Follow-up (same PR, production-validated) — the "mixed" read+pending gap
+
+After the above shipped, production shadow logs confirmed the fix (a real
+`[UnifiedStatusFormatterShadow] outcome=pending mapped_state=approval_pending`
+line, `reply_owner=gateway`, and `response_claim=sent_for_approval` all
+observed live) — but also surfaced one more real case: a turn that ALSO
+performs a verified read (e.g. an `airtable_get` lookup) before queuing the
+approval classifies as `evidence_status="mixed"`
+(`TurnEvidenceSummary.classification()`'s own first "mixed" branch:
+`verified_reads>0 AND approvals_pending>0`), not `"approval_pending"` — so
+the Section 2 fix above still reported a false mismatch for that turn shape:
+
+```
+[EvidenceFinalizerShadow] evidence_status=mixed response_claim=sent_for_approval
+mismatch=true code=status_claim_mismatch counts={'verified_reads': 1, 'approvals_pending': 1, ...}
+```
+
+`compare_shadow_final_status()`'s compatibility check is narrowly widened
+once more: `"sent_for_approval"` is now ALSO compatible with
+`status == "mixed"` specifically when the only "non-success" contributor to
+that mix is `approvals_pending` itself — zero `failed_calls`, zero
+`unverified_effects`, zero `outcome_unknown`. A mixed turn that also carries
+a genuine failure or an unverified/unknown effect is deliberately **not**
+covered by this widening — those still need their own claim in the text,
+and `"sent_for_approval"` alone would incorrectly hide them.
+
 ## What this PR does NOT do
 
 - Does not touch BUG-111 lead parsing (`core/ingress_classifier.py`,
@@ -171,7 +197,7 @@ this surface; it shares `FEATURE_UNIFIED_STATUS_FORMATTER` with PR4/PR5.
 
 ## Tests
 
-`test_f52_pr6_pending_shadow.py` (50 checks):
+`test_f52_pr6_pending_shadow.py` (55 checks):
 
 - **Section 1** — `_render_pending_prompt()` off/shadow/on (mirrors PR4/PR5's
   own pattern): legacy text byte-identical when off, exactly one safe
@@ -185,8 +211,12 @@ this surface; it shares `FEATURE_UNIFIED_STATUS_FORMATTER` with PR4/PR5.
   (`approval_prompt_sent=True` → `response_claim=sent_for_approval`,
   `mismatch=False`), proves the compatibility is scoped to
   `approval_pending` only (a genuine `failure` evidence status is still
-  flagged as a mismatch even with `approval_prompt_sent=True`), and confirms
-  `observe_shadow_finalizer()` never mutates `final_text`.
+  flagged as a mismatch even with `approval_prompt_sent=True`), confirms
+  `observe_shadow_finalizer()` never mutates `final_text`, and (the
+  production-validated follow-up) proves the `"mixed"` read+pending
+  widening: compatible when the mix is verified-read + approvals_pending
+  only, still a mismatch when a genuine failure or unverified effect is
+  also mixed in.
 - **Section 3** — A32 regression: `sanitize_agent_response()`'s
   Single-Speaker suppression is explicitly unchanged (still returns `""` for
   gateway-active + pending-status text + real `__approval_queued__`
