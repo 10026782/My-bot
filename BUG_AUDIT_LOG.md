@@ -2759,3 +2759,49 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
   ```
   9 contracts ישנים היו pending (`live_contracts=9`, אותה תבנית כמו הדגימות הקודמות) ברגע שה-batch dictation נכנס — ולמרות זאת "כן" **לא** נחטף ל-disambiguation: שני הלידים אושרו ונכתבו בפועל (record ids אמיתיים). **הערת דיוק (שקיפות, לפי הסטנדרט שנשמר לאורך הסבב):** שורת `live_contracts=9` נלכדה בדיוק ל-turn של ה-batch dictation עצמו, לא ל-turn של "כן" בפני עצמו — אין שורת TurnEnvelope נפרדת עבור הודעת ה-"כן" בדגימה שסופקה. עם זאת, מדובר בשתי הודעות רצופות באותה שיחה, ותצוגת batch (Tier-2) לא יוצרת/מסירה ActionContracts כלל — כך שאין סיבה טכנית שמספר ה-contracts הישנים ישתנה בין שתי ההודעות. הראייה נחשבת מספקת לסגירה, בהינתן שהתסמין המדויק שדווח (batch + "כן" + contracts ישנים חיים ⇐ hijack) שוחזר ותוקן קצה-לקצה.
 - **סטטוס:** ✅ VERIFIED IN PROD / CLOSED.
+
+---
+
+## BUG-118 — `route_confirmation_word()`'s legacy success reply מדליף tool_name/Airtable record_id גולמיים למשתמש — 🔴 נרשם, לא תוקן (registration-only, staged-tracking)
+
+- **תאריך:** 19/07/2026.
+- **מקור:** ממצא-צד תוך כדי staging smoke test ל-PR #407 (RP5 fault-injection marker-stripping fix) — **לא** תקלה ב-RP5/dispatch/ActionGateway lifecycle עצמם, ונצפה על **Smoke 2** (הרצה ללא marker — המסלול הרגיל, לא מסלול RP5): `route_confirmation_word()`'s תשובת-ההצלחה (המסלול הישן, לפני F52/UnifiedStatusFormatter) מציגה למשתמש שם-כלי גולמי (`tool_name`) ו-Airtable `record_id` גולמי בטקסט התשובה, במקום ניסוח עסקי (בדומה לדפוס שכבר תועד/תוקן במקומות אחרים — למשל BUG-115/BUG-117's "gצריך תיאור עסקי, לא tool_name/contract_id גולמי").
+- **מקור מפורש (הוראת המשתמש):** "track separately under F52 soak, not as PR #407 blocker" — **אינו** חוסם את מיזוג/סגירת PR #407 (RP5 נשאר staging-only, לא ממוזג בכל מקרה), ואינו נחשב חלק מ-scope ה-RP5 fault-injection עצמו.
+- **קבצים לחקירה (טרם נחקרו — Contract Chain טרם בוצע):** `core/action_gateway.py::route_confirmation_word()`/`_resolve_single_contract()` (המסלול הישן שמציג את ה-tool_name/record_id הגולמיים), מול `core/agent_message_formatter.py`/`FEATURE_UNIFIED_STATUS_FORMATTER` (F52 — שכבר בתהליך shadow soak; ייתכן שהמסלול המאוחד כבר פותר את זה ב-`shadow`/`on` ולא רק ב-legacy).
+- **השערת שורש (לא מאומתת עדיין):** תגובת ה-"בוצע" הישנה (לפני F52) בונה טקסט ישירות מ-`contract.tool_name`/`external_id` ללא שכבת-תיאור עסקי, בדומה לדפוסים שכבר טופלו במקומות דומים (BUG-115/BUG-117's `_describe_contract_for_disambiguation()`), אך כאן במסלול ה-**הצלחה** (לא disambiguation).
+- **סטטוס:** 🔴 נרשם בלבד — לא נחקר לעומק, לא תוקן, לא PR. במעקב תחת F52 soak, לא כחוסם ל-PR #407.
+
+---
+
+## BUG-119 — A32 מאפשר ל-agent "להלבין" כישלון מתועד (RP5 write-403) להצלחה בתשובה מאוחרת לא-קשורה — 🔴 נרשם, לא תוקן (Contract Chain בוצע, ממתין להנחיה)
+
+- **תאריך:** 20/07/2026.
+- **מקור:** דגימת staging חיה (אותה שיחת בדיקת RP5 של PR #407 — **לא** קשור ל-RP5/F52 taxonomy עצמם, ממצא-צד כללי ב-`core/anti_hallucination.py`).
+- **הרצף המדויק (חמור יותר מ"הזיה גנרית ללא ראייה" — עדכון לאחר סקירה נוספת):**
+  1. Turn 1-2: "מאשר [rp5-test:write-403]" → RP5 **חסם נכון**: `❌ ביצוע נכשל: ❌ אין הרשאה לבצע את הפעולה הזאת.` המשימה "בדיקת RP5 write 403" **מעולם לא נוצרה** — כישלון אמיתי, מתועד, מכוון (מנגנון ההגנה עבד כמתוכנן).
+  2. Turn 3-4: "מאשר" (בלי marker) → הצלחה אמיתית: `✅ בוצע: airtable_add / Tasks | מזהה: rec7z2ZCmZmpN1liS`. משימה **אחת** אמיתית נוצרה ("בדיקת RP5 no marker").
+  3. Turn 5: "😊" בלבד — turn נטול כל tool call (`IngressClassifier tier=5 reason=no_lead_candidates`). BOSS ענה: *"😊 הכל בסדר! **שתי** המשימות נוצרו בהצלחה: ✅ בדיקת RP5 write 403 — תאריך יעד: 25.7.2026 ✅ בדיקת RP5 no marker — תאריך יעד: 25.7.2026"* — **וכולל במפורש את המשימה שנחסמה ב-turn 1 כאילו נוצרה**, עם תאריך יעד מומצא.
+  - **למה זה חמור יותר מ"no_evidence+success" גנרי:** זו לא הזיה סתמית מתוך ואקום — זו **דריסה פעילה של כישלון אמיתי, מתועד, מכוון** שהתרחש באותה שיחה ממש. RP5 עשה בדיוק את מה שתוכנן (חסם POST אמיתי), וההזיה ביטלה את התוצאה הזו בשקט מול המשתמש, בלי שום tool call חדש שיצדיק שינוי סטטוס. ההשערה הסבירה: הסינתזה מבוססת-זיכרון-שיחה (לא בדיקת מצב Airtable בפועל), שממזגת "מה שדיברנו עליו" ל"מה שקרה בפועל" בלי הבחנה בין 403 שנחסם ל-200 שהצליח.
+- **ראייה ישירה מהלוג:** `[EvidenceFinalizerShadow] state=shadow evidence_status=no_evidence response_claim=success mismatch=true code=status_claim_mismatch counts={..., 'verified_writes': 0, 'failed_calls': 0, ...}` — ה-shadow observer (log-only, לא חוסם) תפס את חוסר-ההתאמה נכון, בדיוק כפי שתוכנן. אך שער האכיפה בפועל (`core.anti_hallucination.sanitize_agent_response`) **לא** חסם/תיקן את התשובה — היא הגיעה למשתמש כמות שהיא.
+
+### Contract Chain (מאומת בהרצת קוד ישירה, לא הונח)
+
+שני פערים עצמאיים ומצטברים, שניהם נדרשו יחד כדי שההזיה תחמוק:
+
+1. **`verify_result_claim()`'s hallucination branch (`_all_failed(tool_results) and _POSITIVE_CLAIMS.search(...)`):** `_POSITIVE_CLAIMS` תפס את "נוצר" (כתת-מחרוזת בתוך "נוצרו" — regex בלי `\b`). אך `_all_failed([])` על רשימת tool_results **ריקה** מחזיר `False` (הפונקציה שואלת "האם כל הקריאות נכשלו" — ל-0 קריאות אין מה "כל" להיכשל, אז זה `False` באופן vacuous) → הענף לא מופעל, `verify_result_claim` מחזיר `"ok"`.
+2. **"Generic structural safety net" (`_AGENT_ACTION_STATUS_PATTERN` + `_has_write_tool_evidence`, שנועד במפורש לפי ה-docstring שלו לתפוס בדיוק את המקרה הזה — "fires on ANY action-completion-shaped text... as long as NO write tool succeeded"):** `_AGENT_ACTION_STATUS_PATTERN` משתמש ב-`\b(...)\b` על מילים בודדות — ומכיל **רק** צורת יחיד (זכר+נקבה) לשישה מתוך שבעה פעלי-השלמה, בלי צורת ריבוי. אומת ישירות בהרצת קוד:
+  ```
+  נוסף/נוספה/נוספו   → כולם תואמים (היחיד עם כיסוי מלא)
+  בוצע/בוצעה/בוצעו   → בוצעו: לא תואם
+  נשלח/נשלחה/נשלחו   → נשלחו: לא תואם
+  נשמר/נשמרה/נשמרו   → נשמרו: לא תואם
+  נוצר/נוצרה/נוצרו   → נוצרו: לא תואם  ← זה שקרה בפועל
+  עודכן/עודכנה/עודכנו → עודכנו: לא תואם
+  הושלם/הושלמה/הושלמו → הושלמו: לא תואם
+  ```
+  "המשימה נוצרה" (יחיד) היה נתפס. "שתי המשימות נוצרו" (ריבוי) לא נתפס — לא כי הוא שונה מהותית, אלא כי אף אחת מהמילים ברשימה לא כתובה בצורת ריבוי (חוץ מ-"נוספו").
+- **קבצים:** `core/anti_hallucination.py` — `_AGENT_ACTION_STATUS_PATTERN` (שורה ~521-527), `_all_failed()` (שורה ~455), `verify_result_claim()` (שורה ~485).
+- **היקף:** **לא** קשור ל-RP5/F52 taxonomy, ל-`core/rp5_fault_injection.py`, או ל-PR #407 — פער כללי ב-A32 שהיה קיים לפני RP5 ויחול זהה בפרודקשן תחת אותו ניסוח בדיוק (ריבוי-פריטים בתשובת סיכום, כולל פריט-שנכשל). נחשף עכשיו רק כי דגימות ה-RP5 יצרו טבעית תרחיש "שני פריטים, אחד נכשל אחד הצליח, ואז שאלה תמימה".
+- **Cleanup נדרש (staging בלבד):** רשומה אחת אמיתית — `rec7z2ZCmZmpN1liS` ("בדיקת RP5 no marker") בטבלת Tasks — נוצרה כחלק מבדיקת "no marker" התקינה ולא קשורה לבאג עצמו, אך יש למחוק אותה כניקיון סטנדרטי של דגימת בדיקה. "בדיקת RP5 write 403" מעולם לא נוצרה (RP5 חסם) — אין מה לנקות שם.
+- **תרחיש רגרסיה מומלץ (טרם נבדק שיטתית — ראו §H בארטיפקט המעודכן):** להריץ כל אחד מ-4.2/4.3/4.4 (כישלון RP5 מתועד) עד הסוף, ואז מיד לשלוח הודעה תמימה לא-קשורה ("😊"/"תודה") ולבדוק אם ה-agent "מלבין" את הכישלון להצלחה. מוצע כתא רשמי חדש **cell2b — success claim overriding a documented failure** ברשימת 36 התרחישים (תת-מקרה של תא 2, לא תא נפרד ב-evidence_status/response_claim — עדיין `no_evidence+success` — אך שונה מהותית בהקשר-שיחה ובחומרה, ולכן ראוי לתיוג נפרד בדגימות). דורש שחזור לפחות פעם נוספת לפני קביעה סופית שזה דפוס עקבי.
+- **סטטוס:** 🔴 נרשם, Contract Chain בוצע ואומת בקוד ישיר — **לא תוקן**. ממתין להנחיה: להוסיף צורות ריבוי חסרות ל-`_AGENT_ACTION_STATUS_PATTERN` (תיקון צר, low-risk) על branch נפרד מ-`claude/rp5-staging-fault-injection-v4akit` (לא קשור ל-RP5, לא לערבב scope).
