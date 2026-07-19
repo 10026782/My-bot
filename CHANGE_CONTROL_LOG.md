@@ -1939,3 +1939,29 @@ Flag: EMERGENCY_STOP_AI=False (נשמר ב-Airtable)
 
 **Merged:** ✅ כן — PR #492, commit `db51afc`, אומת ב-grep ישיר על `origin/main`.
 **Verified בפרודקשן:** ⏳ לא עדיין — `FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS`/`FEATURE_SINGLE_SPEAKER_APPROVAL_UX` שניהם כבויים כברירת מחדל; אין claim ל-staging/production verification.
+
+### C181 — PR #494: PR Hotfix A — Tasks positional canonicalization + confirmation replay guard (29/07/2026)
+קבצים: `app.py`, `core/action_gateway.py`, `test_bug_canonical_tool_wiring.py`, `test_pa01_phantom_approval_enforcement.py`, `test_pr2_deterministic_approval_cost_cuts.py`, `docs/architecture/f52-unified-approval-runtime/audits/PR_HOTFIX_A_CROSS_LAYER_IMPACT_MATRIX.md` (חדש) | קשור: PR #492 (C180), staging acceptance audit של PR2
+
+**מקור:** תרחיש staging אמיתי (29/07/2026) שנתפס תוך כדי audit קבלה ל-PR2 — root-caused מלוגי Render בפועל + רשומות `ActionContracts` בבסיס Airtable הראשי, מתואם turn-by-turn.
+
+**PR #494 (`claude/pr2-staging-acceptance-audit-7n9f2p`, ממוזג `186832a`):** שלושה תיקונים ממוקדים. (1) `_sheets_payload_to_airtable()` תמך רק בערך positional אחד ל-Tasks (כותרת) — payload אמיתי עם 2 ערכים (כותרת+תאריך יעד) גרם ל-`CanonicalizationError` שהרג את כל ה-turn בלי ליצור contract; הורחב ל-1 או 2 ערכים. (2) הכשל הזה עדיין נספר נגד תקציב ה-mutation של BUG-122, וחסם ניסיון-חוזר לגיטימי (tool אחר) באותו turn — `_queue_approval_detailed()` תופס `CanonicalizationError` בנפרד (`terminal_outcome=APPROVAL_QUEUE_NEVER_ATTEMPTED`), וה-tool loop לא סופר את זה. (3) `_resolve_pr2_deterministic_approval()`'s בענפי "כן"/"אשר"/"לא"/"דוחה"/"מבטל" עם ללא live contract השתמשו ב-`find_recent_terminal_by_user()` (בהתחלה 24h, בתיקון-ביניים צומצם ל-10 דק') — עדיין שיחזר contract לא-קשור בן ~20 שניות בלבד. תוקן סופית: recency אינה correlation בשום חלון — הענפים האלה לא קוראים ל-`find_recent_terminal_by_user()` כלל יותר; "יצרת?" (שאילתת סטטוס מפורשת) נשאר ב-24h ללא שינוי.
+
+**CI correction (באותו PR, לפני מיזוג):** ה-push הראשון נכשל ב-`backend-ci` — `test_pa01_phantom_approval_enforcement.py` 106/108. שורש: ה-handler החדש ל-`CanonicalizationError` החזיר את שם הכלי הגולמי (טרום-קנוניזציה) במקום לחשב מחדש את השם הקנוני, בניגוד ל-handler הגנרי הסמוך שכבר עושה זאת. אומת כרגרסיה אמיתית (לא קיימת ב-`origin/main`) ע"י הרצת אותו קובץ טסט מול worktree מבודד. תוקן; assertion אחד (P1-2) עודכן לצפות ל-`APPROVAL_QUEUE_NEVER_ATTEMPTED` המדויק יותר במקום ה-`APPROVAL_QUEUE_ORPHANED` הישן, עם תיעוד-inline בטסט למה.
+
+**Cross-Layer Authority Contract gate:** מלא — `PR_HOTFIX_A_CROSS_LAYER_IMPACT_MATRIX.md` נכתב אחרי המיזוג (4 שכבות × 9 שדות, proof-of-non-impact לשכבות 1/3, וסעיף RP5 guard — ממצא: `CanonicalizationError` מסווג כעת `record_verification("failed",...)` במקום `record_unverified_effect()` ב-`core/turn_evidence.py`'s shadow classification — מדויק יותר, לא רגרסיה; `core/turn_evidence.py` עצמו לא עושה pattern-match על מחרוזות `terminal_outcome`, מאומת ב-grep).
+
+**בדיקות:** 175/175 `test_*.py`, `smoke_tests.py`, `test_integration.py`, `core/router/test_router.py` (44/44), `py_compile` — כולם ירוקים לפני המיזוג.
+
+**CodeRabbit (סבב נוסף, לא תוקן ב-PR זה):** ממצא actionable אחד — מסלול cancel ישן (`app.py:3391`, BUG-056, פעיל כברירת מחדל כש-PR2 כבוי) עדיין לא מעביר `recent_terminal=None`, אותה מחלקת-באג בדיוק. Nitpick אחד — ולידציית פורמט תאריך-יעד חסרה. שניהם נדחו במכוון לפר הבא, יחד עם Router regex ל"תייצר", אכיפת Single-Speaker בפועל (`is_gateway_owned_leak` היום log-only), והסתרת `sheets_append`/`drive_*` מרשימת הכלים כברירת מחדל.
+
+**Merged:** ✅ כן — PR #494, commit `186832a`, אומת ב-grep ישיר על `origin/main` (`APPROVAL_QUEUE_NEVER_ATTEMPTED`, `len(row_data) not in (1, 2)`).
+**Verified בפרודקשן:** ⏳ לא — לא נפרס. **Verified ב-staging:** ⏳ לא עדיין — rebase של `claude/rp5-staging-fault-injection-v4akit` בוצע באותו סבב (ראה הערת רבייז למטה), retest חי טרם בוצע.
+
+<!-- הערת רבייז (29/07/2026, RP5 staging branch): claude/rp5-staging-fault-injection-v4akit עבר
+     rebase מעל origin/main (כולל PR #494/C181 לעיל, ה-hotfix ל-PR2 staging acceptance incident)
+     והועלה מחדש (force-push). אותה תבנית קונפליקט תיעוד כמו בסבבים קודמים (ראו הערות רבייז
+     ב-C169/C173/C174 למעלה) — הוחלף במלואו בתוכן המעודכן מ-main. RP5-only hooks
+     (core/rp5_fault_injection.py, hook ב-tools/dispatcher.py, run_agent()→_run_agent_impl()
+     wrapper) משוחזרים ללא שינוי מעל התוכן החדש. -->
+
