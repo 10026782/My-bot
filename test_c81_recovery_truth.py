@@ -121,3 +121,9 @@ def test_telegram_adapter_rejects_unverified_api_response(monkeypatch):
     assert result.delivery_success is False
     assert result.business_success is False
     assert result.error == "chat not found"
+
+
+if __name__ == "__main__":
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

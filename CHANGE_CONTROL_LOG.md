@@ -1361,3 +1361,16 @@ turn שמבצע גם read מאומת וגם מעלה approval מסווג `eviden
 
 **לא נוגע:** RP5/F52/EvidenceFinalizer/UnifiedStatusFormatter, סמנטיקת אישורים (approval_policy/authority checks), לוגיקת lifecycle של `ActionGateway.approve()`/`reject()` עצמם (רק נקרא נכון, לא שונה), מסלול הכפתור בטלגרם (BUG-112, נפרד לגמרי), שום שינוי סכמה ב-Airtable.
 **Merged:** לא עדיין (branch `claude/c84-tma-approval-ttl`) | **Verified בפרודקשן:** לא — קוד+tests בלבד, טרם deployed
+
+### C144 — C81-FU/C82-FU: ניקוי ROADMAP (docs-only audit) + תיקון CI-silent-pass ב-test_c81_recovery_truth.py (19/07/2026)
+קבצים: `ROADMAP.md`, `test_c81_recovery_truth.py` | ROADMAP: C81-FU, C82-FU
+**רקע:** שני הסעיפים סומנו 🔴 דחוף ב-ROADMAP.md מאז שנכתבו, אך לא נבדקו מול קוד `main` בפועל בשום עדכון תיעוד קודם — פער בין "מה שהתיעוד אומר" ל-"מה שבאמת קיים", בדיוק סוג הפער ש-AGENTS.md's protokol אימות-אחרי-מיזוג נועד למנוע.
+
+**C81-FU (Recovery: אמת משלוח לפני סימון הושלם) — אומת ✅ פתור.** `tools/approval_actions.py::send_recovery()` (מתועד כ-"C53 FIX-1" בעצמו) כבר מחזיר `ok=False` אלא אם `owner_delivery.delivery_success` אומת, ומעולם לא כותב ל-`recovery_count` (בכוונה — הבדל מפורש מ-`send_followup()`, ש**כן** מעדכן `followup_count` תמיד). גרפ אישר: אין אף קריאה ל-`lead_memory.update(..., recovery_count=...)` בכל הריפו מחוץ ל-`lead_memory.py`/`core/lead_recovery.py` עצמם. `test_c81_recovery_truth.py` (4 בדיקות: `test_owner_draft_delivery_does_not_complete_customer_recovery`, `test_unverified_owner_draft_is_reported_and_does_not_complete_recovery`, `test_telegram_adapter_returns_verified_delivery`, `test_telegram_adapter_rejects_unverified_api_response`) מכסה את זה במדויק.
+
+**ממצא צדדי אמיתי, לא קשור ל-C81 עצמו:** לקובץ ה-test חסר היה בלוק `if __name__ == "__main__":` — `python3 test_c81_recovery_truth.py` (הקונבנציה המתועדת ב-CLAUDE.md להרצת כל test_*.py בריפו הזה, ומה ש-`ci.yml`'s "Run test_*.py scripts" step בפועל מריץ) ייבא את המודול, הגדיר את פונקציות ה-test, ויצא עם `exit 0` **בלי להריץ אף assertion** — אותה משפחת באג בדיוק כמו BUG-049/CI-SILENT-PASS-DOCUMENT-CONVERTER (`test_document_converter.py`, שכבר תוקן פעם אחת). תוקן עם אותו pattern: `if __name__ == "__main__": import pytest; raise SystemExit(pytest.main([__file__, "-q"]))`. אומת: `python3 -m pytest test_c81_recovery_truth.py -v` כבר עבר 4/4 גם לפני התיקון (הקוד עצמו תקין ומאומת) — הפער היה רק בנתיב ההרצה הישיר/CI, לא בנכונות הבדיקות עצמן.
+
+**C82-FU (EMERGENCY_STOP_AUTOMATION: gate מרכזי) — אומת ✅ פתור, מעבר לציפייה המקורית.** `scheduler.py::_automation_guard()` עוטף כיום **כל** רישום `.do(...)` בקובץ ללא יוצא מן הכלל — אומת עם `grep -n "\.do(" scheduler.py | grep -v _automation_guard` שמחזיר 0 שורות (23 jobs רשומים, כולם עטופים). `test_c86_scheduler_emergency_matrix.py::test_emergency_stop_matrix_blocks_every_registered_scheduler_job` מכסה זאת במפורש ורץ תקין (יש לו `__main__`, `python3 test_c86_scheduler_emergency_matrix.py` מריץ 2/2 בפועל).
+
+**לא נוגע:** RP5, F52, C84, שום קוד production מלבד ה-`__main__` block החדש (שאין לו השפעת התנהגות — רק מפעיל assertions שכבר היו נכונות).
+**Merged:** לא עדיין (branch `claude/c81-c82-roadmap-docs-cleanup`) | **Verified בפרודקשן:** לא רלוונטי — docs-only audit + תיקון test harness, אין שינוי קוד production
