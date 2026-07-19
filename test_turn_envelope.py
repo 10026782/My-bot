@@ -379,6 +379,7 @@ chk("hijack scenario: fields match the requested log shape exactly",
         "recognized_intent": "create_task", "selected_handler": "agent",
         "tool_use_emitted": False, "approval_queued": False,
         "agent_claimed_approval": True, "reply_owner": "agent",
+        "final_reply_nonempty": True,
     })
 
 _legit_signal = build_ownership_signal(
@@ -446,6 +447,122 @@ with patch("core.turn_envelope.logger") as _mock_own_logger3:
         chk("log_ownership_signal never raises even if the logging backend breaks", True)
     except Exception:
         chk("log_ownership_signal never raises even if the logging backend breaks", False)
+
+
+# ══════════════════════════════════════════════════
+# TurnOwnershipShadow (BUG-113-FU2) — approval_queued=True + reply_owner=
+# "gateway" but final_reply (post-A32) still non-empty. Purely observational:
+# no suppression/behavior change, no ActionGateway change, no EvidenceFinalizer
+# taxonomy change — reuses anti_hallucination.py's own patterns read-only.
+# ══════════════════════════════════════════════════
+
+_leak_signal = build_ownership_signal(
+    recognized_intent="create_task", selected_handler="agent",
+    tool_use_emitted=True, approval_queued=True,
+    final_reply="✅ המשימה מוכנה להוספה...\n➡️ שלח מאשר כדי לאשר...",
+    reply_owner="gateway",
+)
+chk("leak scenario: final_reply_nonempty is True", _leak_signal.final_reply_nonempty is True)
+chk("leak scenario: is_gateway_owned_leak is True (approval_queued + gateway-owned + text present)",
+    _leak_signal.is_gateway_owned_leak is True)
+chk("leak scenario: pattern_class classified as approval_invite",
+    _leak_signal.leaked_pattern_class == "approval_invite")
+
+_leak_signal_pending = build_ownership_signal(
+    recognized_intent="update_task", selected_handler="agent",
+    tool_use_emitted=True, approval_queued=True,
+    final_reply="⏳ העדכון ממתין לאישור: הוספת תיאור.",
+    reply_owner="gateway",
+)
+chk("leak scenario (pending narration, masculine form): is_gateway_owned_leak is True",
+    _leak_signal_pending.is_gateway_owned_leak is True)
+chk("leak scenario (pending narration): pattern_class classified as pending_status",
+    _leak_signal_pending.leaked_pattern_class == "pending_status")
+
+_leak_signal_action = build_ownership_signal(
+    recognized_intent="update_task", selected_handler="agent",
+    tool_use_emitted=True, approval_queued=True,
+    final_reply="✅ הרשומה עודכנה בהצלחה.",
+    reply_owner="gateway",
+)
+chk("leak scenario (completion wording): is_gateway_owned_leak is True",
+    _leak_signal_action.is_gateway_owned_leak is True)
+chk("leak scenario (completion wording): pattern_class classified as action_status",
+    _leak_signal_action.leaked_pattern_class == "action_status")
+
+_leak_signal_novel = build_ownership_signal(
+    recognized_intent="update_task", selected_handler="agent",
+    tool_use_emitted=True, approval_queued=True,
+    final_reply="נראה טוב, ממשיכים משם.",
+    reply_owner="gateway",
+)
+chk("leak scenario (novel/unenumerated phrasing): is_gateway_owned_leak is True",
+    _leak_signal_novel.is_gateway_owned_leak is True)
+chk("leak scenario (novel phrasing): pattern_class falls back to unknown",
+    _leak_signal_novel.leaked_pattern_class == "unknown")
+
+# Regression: this is the normal, correctly-suppressed case (matches the
+# real production evidence for BUG-113/PR #396/#399) — final_reply is
+# already "" by the time build_ownership_signal() is called, so no leak.
+_no_leak_signal = build_ownership_signal(
+    recognized_intent="create_task", selected_handler="agent",
+    tool_use_emitted=True, approval_queued=True,
+    final_reply="",
+    reply_owner="gateway",
+)
+chk("no-leak regression: correctly-suppressed empty final_reply -> final_reply_nonempty is False",
+    _no_leak_signal.final_reply_nonempty is False)
+chk("no-leak regression: is_gateway_owned_leak is False", _no_leak_signal.is_gateway_owned_leak is False)
+chk("no-leak regression: pattern_class is unknown (nothing to classify)",
+    _no_leak_signal.leaked_pattern_class == "unknown")
+
+# Regression: reply_owner="agent" (ordinary agent-owned turn, no approval
+# involved at all) never triggers this invariant even with non-empty text.
+chk("non-gateway-owned turn: is_gateway_owned_leak is False regardless of text",
+    _ordinary_signal.is_gateway_owned_leak is False)
+
+# Regression: approval_queued=False + reply_owner="gateway" is a
+# contradictory/impossible combination in practice (app.py only ever sets
+# reply_owner="gateway" when approval_queued is True — see its call site
+# comment), but the property itself stays conjunctive/defensive either way.
+_leak_signal_no_approval = build_ownership_signal(
+    recognized_intent="create_task", selected_handler="agent",
+    tool_use_emitted=True, approval_queued=False,
+    final_reply="✅ המשימה מוכנה להוספה... שלח מאשר כדי לאשר...",
+    reply_owner="gateway",
+)
+chk("defensive regression: reply_owner=gateway but approval_queued=False -> is_gateway_owned_leak is False",
+    _leak_signal_no_approval.is_gateway_owned_leak is False)
+
+chk("to_log_dict includes final_reply_nonempty (not leaked_pattern_class — anomaly-only field)",
+    "final_reply_nonempty" in _leak_signal.to_log_dict()
+    and "leaked_pattern_class" not in _leak_signal.to_log_dict())
+
+with patch("core.turn_envelope.logger") as _mock_shadow_logger:
+    log_ownership_signal(_leak_signal, canonical_user_id="boss_hq:0501234567")
+    chk("log_ownership_signal emits the TurnOwnershipShadow WARNING line for a real leak",
+        _mock_shadow_logger.warning.call_count == 1)
+    _shadow_args = _mock_shadow_logger.warning.call_args[0]
+    _shadow_msg = _shadow_args[0] % _shadow_args[1:]
+    chk("TurnOwnershipShadow line carries the exact requested violation tag",
+        "[TurnOwnershipShadow] violation=agent_spoke_in_gateway_owned_approval_turn" in _shadow_msg)
+    chk("TurnOwnershipShadow line carries pattern_class",
+        "pattern_class=approval_invite" in _shadow_msg)
+    chk("TurnOwnershipShadow line fingerprints canonical_user_id, never logs it raw",
+        "0501234567" not in _shadow_msg)
+
+with patch("core.turn_envelope.logger") as _mock_shadow_logger2:
+    log_ownership_signal(_no_leak_signal, canonical_user_id="u1")
+    chk("log_ownership_signal does NOT emit TurnOwnershipShadow for the correctly-suppressed case",
+        _mock_shadow_logger2.warning.call_count == 0)
+
+with patch("core.turn_envelope.logger") as _mock_shadow_logger3:
+    _mock_shadow_logger3.warning.side_effect = RuntimeError("logging backend down")
+    try:
+        log_ownership_signal(_leak_signal, canonical_user_id="u1")
+        chk("log_ownership_signal never raises even if the WARNING backend breaks", True)
+    except Exception:
+        chk("log_ownership_signal never raises even if the WARNING backend breaks", False)
 
 
 print(f"\n{'='*50}")
