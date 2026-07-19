@@ -62,6 +62,19 @@ INFRA / DATA:
                                  to legacy, legacy still sent) / "on" (unified output sent).
                                  Read through get_unified_status_formatter_state(). Fails
                                  closed to "off". Independent of FEATURE_ACTION_GATEWAY.
+  RP5_FAULT_INJECTION_ENABLED  - narrow, staging-only RP5/F52 evidence-sampling helper
+                                 (core/rp5_fault_injection.py). NOT read via is_enabled() —
+                                 plain os.environ, checked as one of FOUR hard-ANDed gates
+                                 (APP_ENV=="staging" + this flag + RP5_FAULT_ALLOWLIST
+                                 membership by canonical_user_id + an explicit
+                                 [rp5-test:<scenario>] marker in the triggering message —
+                                 see is_enabled_for_turn()). Default "false". Companion vars:
+                                 RP5_FAULT_ALLOWLIST (comma-separated canonical_user_id,
+                                 default empty = nobody), RP5_FAULT_REQUIRE_MARKER (default
+                                 "true" — do not disable), RP5_FAULT_MARKER_PREFIX (default
+                                 "[rp5-test:"). Never enables RP5/F52 enforcement itself —
+                                 FEATURE_EVIDENCE_FINALIZER/FEATURE_UNIFIED_STATUS_FORMATTER
+                                 stay whatever they're independently set to.
 
 INTEGRATIONS:
   VOICE_IVR                   - קו טלפוני Twilio IVR (F07)

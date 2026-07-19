@@ -62,6 +62,7 @@ from core.anti_hallucination import (
     _SINGLE_SPEAKER_FALLBACK, _has_write_tool_evidence,
 )
 from core.turn_evidence import TurnEvidenceSummary, observe_shadow_finalizer
+from core.rp5_fault_injection import begin_turn as _rp5_begin_turn, end_turn as _rp5_end_turn
 from health_monitor import get_health_status
 from feature_flags import is_enabled as _flag_enabled, get_evidence_finalizer_state
 import cost_monitor
@@ -2558,6 +2559,36 @@ def run_agent(
     raw_event_id:        str = "",
     _live_contracts_snapshot: list | None = None,
 ) -> str:
+    """Thin wrapper around _run_agent_impl() — same signature, forwarded
+    as-is. Guarantees the RP5 staging fault-injection turn state (see
+    core/rp5_fault_injection.py) is always cleared when a turn ends, even on
+    an early return or an exception, so it can never leak into an unrelated
+    later call on the same thread (e.g. a scheduler job dispatching a tool
+    outside of run_agent entirely)."""
+    try:
+        return _run_agent_impl(
+            user_text, chat_id, channel, domain_from_channel,
+            _skip_approval=_skip_approval,
+            _resolved_domain=_resolved_domain,
+            _out_meta=_out_meta,
+            raw_event_id=raw_event_id,
+            _live_contracts_snapshot=_live_contracts_snapshot,
+        )
+    finally:
+        _rp5_end_turn()
+
+
+def _run_agent_impl(
+    user_text:           str,
+    chat_id:             str,
+    channel:             str = "telegram",
+    domain_from_channel: str = "",
+    _skip_approval:      bool = False,
+    _resolved_domain:    dict | None = None,
+    _out_meta:           dict | None = None,
+    raw_event_id:        str = "",
+    _live_contracts_snapshot: list | None = None,
+) -> str:
     # _live_contracts_snapshot: Case C read-amplification fix (see
     # TURN_OWNERSHIP_EXTENSION.md) — an already-fetched find_live_contracts()
     # result for this identity from the caller's own ingress-gate query, so
@@ -2581,6 +2612,13 @@ def run_agent(
     # ── 1. Identity ───────────────────────────────
     identity = resolve_identity(channel, chat_id)
     logger.info(f"[Identity] {identity}")
+    # RP5 staging-only fault injection (core/rp5_fault_injection.py): inert
+    # unless staging + RP5_FAULT_INJECTION_ENABLED=true + identity.memory_key
+    # in RP5_FAULT_ALLOWLIST + user_text carries a recognized [rp5-test:...]
+    # marker. Recomputed fresh every call (including the recursive
+    # run_agent() call below), so this always reflects THIS turn's own text —
+    # never a stale value from a previous turn.
+    _rp5_begin_turn(identity.memory_key, user_text)
     if identity.role in (Role.READONLY, Role.GUEST):
         logger.warning(
             f"[Identity] LOW-PRIVILEGE request — "

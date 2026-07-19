@@ -27,7 +27,8 @@ except ImportError:
 from .contact_resolver  import resolve_contact
 from . import approval_actions
 
-from tool_registry import enforce, ToolDenied
+from tool_registry import enforce, ToolDenied, get as _get_tool_meta
+from core.rp5_fault_injection import maybe_raise_or_return_fault as _rp5_maybe_fault
 import feature_flags as _ff
 
 if TYPE_CHECKING:
@@ -162,6 +163,18 @@ def dispatch_tool(
         return validation.reason
 
     try:
+        # RP5 staging-only fault injection (see core/rp5_fault_injection.py):
+        # inert unless a staging+enabled+allowlisted+marker turn is active
+        # (set by app.py's run_agent() via begin_turn()). Placed after the
+        # identity/registry/action_validator gates above so it never bypasses
+        # a real permission check — it only intercepts the moment the real
+        # tool would otherwise run. May raise, caught by the `except
+        # Exception` below exactly like any other tool failure.
+        _rp5_meta = _get_tool_meta(name)
+        _rp5_fault_result = _rp5_maybe_fault(name, read_only=bool(_rp5_meta.read_only) if _rp5_meta else False)
+        if _rp5_fault_result is not None:
+            return _rp5_fault_result
+
         match name:
 
             # ── Drive ────────────────────────────────

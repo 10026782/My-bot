@@ -1811,3 +1811,18 @@ Flag: EMERGENCY_STOP_AI=False (נשמר ב-Airtable)
 
 **Merged:** ✅ כן — PR #449, commit `e2d25af` (merge), `a787203`+`eab7ba5` (תוכן).
 **Verified בפרודקשן:** ⏳ לא עדיין — ממתין לדגימת staging אמיתית אחרי ה-rebase למעלה.
+
+### C170/C171 — PR #456/#457: BUG-141..146 documentation + BUG-141 dispatch-order fix (24/07/2026)
+קבצים: `BUG_AUDIT_LOG.md`, `app.py`, `test_bug141_pending_query_dispatch_order.py` (חדש) | קשור: staging findings 24/07/2026 (AG-01/CB-01/CB-02)
+
+**PR #456 (תיעוד בלבד):** נרשמו BUG-141 (AG-01), BUG-142 (Sessions stale linked-lead sync), BUG-143 (CB-02A `resolve_canonical_tool` payload mismatch), BUG-144 (CB-02B reject לא סוגר `ActionContracts.status`), BUG-145 (הודעות כפולות approve/reject) — כולם documented-only. BUG-146 מוזג לתוך BUG-122's `bypass_new_action` scope decision (אותו קוד/מנגנון, ראיות CB-01/CB-02 מצטברות). נוסף ממצא תכנוני ללא מספר BUG: "Cost Telemetry Coverage and Per-Turn Attribution".
+
+**PR #457 (תיקון קוד, BUG-141 בלבד):** `_PENDING_QUERY_RE` נבדק כעת ב-`if` עצמאי לפני `if "?" in _stripped:` (במקום `elif` אחרי כל שרשרת ה-if/elif) — שאלת "מה ממתין כרגע לאישור?" כבר לא נחסמת ע"י ה-`"?"` הכללי. אין שינוי ב-regex, אין נגיעה ב-BUG-142/143/144/145/122/Cost Telemetry. 15 בדיקות חדשות (`test_bug141_pending_query_dispatch_order.py`), full sweep 166/169 (3 כשלים קדם-קיימים לא-קשורים: `test_document_converter.py`, `test_google_tools.py` — `docx` חסר, `test_phase_4b0_1a_atomic_claims.py` — קידוד Windows).
+
+**Merged:** ✅ כן — #456 commit `585a6f6`, #457 commit `c12a19b`.
+**Verified בפרודקשן:** ⏳ לא עדיין — קוד ממוזג ל-`main`, טרם אומת מול תעבורת production/staging בפועל.
+
+<!-- הערת רבייז (24/07/2026, RP5 staging branch): הענף claude/rp5-staging-fault-injection-v4akit
+     עבר rebase על main (כולל PR #456/#457, BUG-141 fix) והועלה מחדש (force-push) — staging מריץ
+     עכשיו את התיקון. אותה תבנית קונפליקט תיעוד כמו ב-22/07/2026 (ראה הערת רבייז קודמת ב-C169
+     למעלה) — הוחלף במלואו בתוכן המעודכן מ-`main`, כדי לא לשכפל/לסתור. -->
