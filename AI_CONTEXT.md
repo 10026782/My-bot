@@ -17,7 +17,7 @@
 > **shadow-observed**, גם אם ברירת המחדל בקוד היא `off`. אם התיעוד סותר לוגי production —
 > **התיעוד** מסומן stale, **לא** מורידים את סטטוס ה-runtime.
 
-**עודכן:** 2026-07-19 · **main:** `4546880` (אחרי מיזוג PR #405, "BUG-116/BUG-115 production verification + BUG-117 audit + fix") · **סטטוס:** BUG-115/BUG-116/BUG-117 כולם ✅ VERIFIED IN PROD / CLOSED. **PR #397 (branch `claude/docs-sync-bug-audit-roadmap-drift`) נסגר במפורש כ-superseded ע"י #398, לא מוזג במכוון.** **ענף פעיל פתוח (לא ממוזג):** `claude/c84-tma-approval-ttl` — C84 TMA Approvals TTL/freshness check (קוד+tests הושלמו, ראו `CHANGE_CONTROL_LOG.md` C143), מבוסס על `main` `b957fd8` (אחרי מיזוג PR #406). **TMA בלבד**, אינו נוגע ב-main hash למעלה עד למיזוג.
+**עודכן:** 2026-07-19 · **main:** `4546880` (אחרי מיזוג PR #405, "BUG-116/BUG-115 production verification + BUG-117 audit + fix") — **מפגר אחרי `main` בפועל:** PR #408 (C84 TMA Approvals TTL) כבר מוזג (`main` `c5c5a97`), הראש האמיתי של `main` מתקדם יותר מהמספר הזה; מיזוג-תיעוד מלא ל-#408 טרם בוצע כאן, פער מסומן במפורש (ראה הכלל "Runtime evidence > main code > docs > memory" למעלה). · **סטטוס:** BUG-115/BUG-116/BUG-117 כולם ✅ VERIFIED IN PROD / CLOSED. **PR #397 (branch `claude/docs-sync-bug-audit-roadmap-drift`) נסגר במפורש כ-superseded ע"י #398, לא מוזג במכוון.** **ענף פעיל פתוח (לא ממוזג):** `claude/c81-c82-roadmap-docs-cleanup` — ניקוי docs-only ל-C81-FU/C82-FU (שניהם נסגרו כפתורים-מראש, ראו `CHANGE_CONTROL_LOG.md` C144) + תיקון CI-silent-pass ב-`test_c81_recovery_truth.py`, מבוסס על `main` `c5c5a97` (אחרי מיזוג PR #408). **אין שינוי קוד production.**
 
 ---
 
