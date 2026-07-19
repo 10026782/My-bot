@@ -1905,14 +1905,28 @@ confidence = 0.2
 
 ---
 
-## BUG-107 — חיפוש Deals עם שם-שדה שגוי → 422 INVALID_FILTER_BY_FORMULA → A32 false MISMATCH — 🔴 נרשם, לא תוקן (registration-only)
+## BUG-107 — חיפוש Deals עם שם-שדה שגוי → 422 INVALID_FILTER_BY_FORMULA → A32 false MISMATCH — ✅ VERIFIED IN PROD
 
-- **תאריך:** 12/07/2026
+- **תאריך רישום:** 12/07/2026. **תאריך מימוש:** 19/07/2026 (PR #410, `claude/bug107-has-data-false-mismatch`).
 - **מקור:** התגלה אגב אימות-חי של BUG-106/BUG-099c (אותו לוג פרודקשן) — **אינו** תקלה ב-099c; תקלה נפרדת במסלול החיפוש הכללי. **לא לפתוח מחדש PR #308 בגלל זה.**
 - **תיאור:** חיפוש בטבלת "עסקאות (Deals)" בונה formula עם שם-שדה שגוי (`SEARCH('שמואל כהן', {שם})` — השדה `שם` כנראה אינו קיים/אינו נכון בטבלת Deals), מה שגורם ל-Airtable להחזיר `422 INVALID_FILTER_BY_FORMULA` חי בפרודקשן. השילוב של השגיאה הזו (Deals) יחד עם שתי תוצאות "0 רשומות" לגיטימיות מ-Leads/Contacts מפעיל אזהרת A32 anti-hallucination שגויה: `MISMATCH` ("agent says 'not found' but tool results contain data") — כלומר שכבת ה-anti-hallucination מפרשת שגיאת-422 (לא "לא נמצא") כאילו יש נתונים שהסוכן התעלם מהם.
-- **קבצים לחקירה (טרם נחקרו — Contract Chain טרם בוצע):** מודול החיפוש הכללי שבונה formulas לפי טבלה (ככל הנראה `crm.py`/`airtable_tools.py`/`contact_resolver.py` או שכבת "חיפוש-בכל-הטבלאות"), שם השדה הנכון בטבלת "עסקאות (Deals)" מול `airtable_schema.py`, ו-`core/anti_hallucination.py`'s טיפול ב-tool-error/422 מול "0 records" לגיטימי.
-- **השערת שורש (לא מאומתת עדיין):** קרוב לוודאי שם-שדה קשיח (hardcoded) שגוי או לא-מעודכן מול הסכימה בפועל של טבלת Deals — ייתכן קשור לדפוסי drift שכבר תועדו ב-`docs/governance/ARCHITECTURE_DRIFT_MAP.md`. דורש grep+trace לפני כל תיקון (Contract Chain), לא הונח כאן.
-- **סטטוס:** 🔴 נרשם בלבד — לא נחקר לעומק, לא תוקן, לא PR. ממתין להנחיה להתחיל Contract Chain.
+
+### Contract Chain (בוצע לפני כל שינוי קוד)
+
+מיפוי גילה **שני שורשים נפרדים**, לא אחד:
+1. **`core/anti_hallucination.py::_has_data()` (BUG-107A, השורש המשמעותי יותר):** הפונקציה סיווגה כל מחרוזת לא-ריקה שלא מתחילה ב-`❌` כ"יש דאטה" — כולל את הקונבנציה הכלל-מערכתית `📭 ...` לתוצאה ריקה לגיטימית (`airtable_tools.py`, `crm.py`, `contact_resolver.py`). המשמעות: `MISMATCH` שגוי הופיע בכל פעם שהסוכן אמר "לא מצאתי" אחרי **כל** שילוב של חיפושים שהחזירו 0 תוצאות באמת — **לא רק** בשילוב הספציפי של Deals+422 שתועד במקור. הוכח ב-replay מקומי + counterfactual (ראה למטה) ששני התרחישים (עם/בלי שגיאת 422) גרמו לאותה תקלה.
+2. **`core_knowledge.py` (BUG-107B, שורש נפרד):** הנחיית ה-system-prompt נתנה דוגמה מפורשת נכונה רק ל-Leads (`{Name}`), לא ל-Deals — מה שגרם לסוכן לנחש שם-שדה שגוי (`{שם}` במקום `{שם העסקה}` לפי `airtable_schema.py::DealFields.NAME`), ולקבל 422 אמיתי בכל חיפוש-שם ב-Deals. אין קשר-סיבתי ל-(1) — גם חיפוש Deals תקין לחלוטין (0 שגיאות) עדיין הפעיל את ה-MISMATCH השגוי לפני התיקון.
+- **קבצים ששונו:** `core/anti_hallucination.py::_has_data()` (הוספת `📭` לרשימת הקידומות שאינן "דאטה", באותו אופן כמו `❌`), `core_knowledge.py` (דוגמה מפורשת אחת ל-Deals: `airtable_get("Deals", "SEARCH('[שם]', {שם העסקה})")`). אין שינוי סכימה, אין נגיעה ב-RP5/F52/UnifiedStatusFormatter/EvidenceFinalizer.
+- **בדיקות:** `test_bug107_has_data_no_records.py` — 11/11 עוברות (כולל שני התרחישים + guidance ב-core_knowledge).
+
+### אימות (verification)
+
+1. **קוד ממוזג ל-main בפועל** — `git log -1 origin/main` → `3fc6146 Merge pull request #410`; אומת ב-grep ישיר על תוכן `origin/main` (לא רק `git log`): `📭` קיים ב-`_has_data()`, `{שם העסקה}` קיים ב-`core_knowledge.py`.
+2. **Replay מקומי מקצה-לקצה** (לא פרודקשן — אין credentials אמיתיים בסביבת הפיתוח): הרצת `app.run_agent()` האמיתי (הקוד הממוזג) עם Identity/Router/Context/Anthropic מדומים בלבד — שני התרחישים (עם/בלי שגיאת 422) חוזרים תשובה נקייה בלי קידומת MISMATCH. **Counterfactual**: אותה שרשרת בדיוק עם `_has_data()` הישנה (monkeypatch) **כן** הפיקה את `⚠️ שים לב — ייתכן שהתוצאה אינה מדויקת.` — מוכיח שהתרחיש היה שבור לפני, ותוקן עכשיו.
+3. **פרודקשן חי (19/07/2026)** — שתי פניות אמיתיות של אליהו לבוט, שתיהן תוצאה-ריקה לגיטימית לחלוטין (ללא שגיאת 422 כלל — בדיוק תרחיש BUG-107B הרחב):
+   - "מה עם ליד אבי נמני" → `❌ לא מצאתי את אבי נמני בטבלת Leads.` (עם הצעות המשך) — **בלי** קידומת MISMATCH.
+   - "מה עם משימת זכייה במונדיאל מה 20/07/27" → `❌ לא מצאתי משימה בשם "זכייה במונדיאל" בטבלת Tasks.` — **בלי** קידומת MISMATCH.
+- **סטטוס:** ✅ VERIFIED IN PROD (19/07/2026) — merged (`origin/main` 3fc6146) + replay מקומי מקצה-לקצה + counterfactual + שתי דוגמאות פרודקשן חיות, כל התנאים שנדרשו לפני סימון ✅ מולאו.
 
 ---
 
