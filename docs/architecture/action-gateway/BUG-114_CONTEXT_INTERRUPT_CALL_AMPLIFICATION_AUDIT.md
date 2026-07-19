@@ -1,7 +1,7 @@
-# BUG-114 — ActionContracts context-interrupt call amplification (audit only)
+# BUG-114 — ActionContracts context-interrupt call amplification
 
-**Status:** 🔴 Audit complete, registered, **not fixed** — narrow fix proposed below, awaiting owner decision to implement.
-**Scope of this document:** investigation only. No code was changed to produce this document. Explicitly out of scope: BUG-111, BUG-112, BUG-113, PR #393/#399/#400 — this is a separate, unrelated finding surfaced in the same production log excerpt.
+**Status:** ✅ Fix implemented, tests green (12 new + full regression sweep clean), **not yet production-verified**.
+**Scope of this document:** originally audit-only (§1–§5 below, unchanged as written); the narrow fix from §4 has since been implemented — see §6. Explicitly out of scope: BUG-111, BUG-112, BUG-113, PR #393/#399/#400 — this is a separate, unrelated finding surfaced in the same production log excerpt.
 
 ## 1. Production evidence
 
@@ -67,9 +67,45 @@ The only thing that ever moves a pending contract out of limbo is the interrupt/
 
 `mark_context_interrupted()` re-applies a no-op write to every live pending contract on every unrelated inbound message, instead of skipping contracts that are already in the target state — turning what should be O(new interruptions) into O(all live contracts) per turn.
 
-## 4. Proposed narrow fix (not yet implemented)
+## 4. Proposed narrow fix (as originally sketched here — see §6 for the corrected, actually-implemented version)
 
-Add one filter condition to `ExecutionLedger.mark_context_interrupted()`'s existing list comprehension (`action_gateway.py:565–572`):
+The original sketch added one filter condition to `ExecutionLedger.mark_context_interrupted()`'s existing list comprehension:
+
+```python
+if c.canonical_user_id == canonical_user_id
+and c.status == "pending"
+and not c.context_interrupted          # <-- naive: turned out to be wrong, see §6
+```
+
+**This exact form was NOT what got implemented — §6 explains why the naive `and not c.context_interrupted` is a real regression, caught during implementation, not during this audit.** Kept here verbatim as the audit's original (slightly incorrect) proposal, for an honest record of what was actually reasoned through before vs. during implementation.
+
+A contract with `reconfirmation_required=True` is **not** meant to be skipped by this change — it still needs the real "supersede" transition every time it's hit, since that's a genuine status change with a genuine reason to re-verify against a possible concurrent approval, not a no-op re-write of an unchanged field. The naive filter above does not actually guarantee that — see §6.
+
+### Why this meets the stated acceptance criteria
+
+- **No behavior change to approval semantics:** the FSM's decision table (pending → pending+interrupted → superseded) is untouched; this only skips contracts whose *outcome* would have been unchanged anyway (`context_interrupted` already `True`, still "pending").
+- **No weakening of `ActionGateway` lifecycle validation:** `transition()`'s TOCTOU-safe read-before-write and read-back-verify (Q4/Q5) are completely untouched — they still run in full for every contract that actually needs a write.
+- **Reduces Airtable calls for a no-op/already-interrupted pending contract:** from 3 calls (GET+PATCH+GET) to 0 for each such contract, on every subsequent unrelated message while it stays pending. In the observed 6-contract sample, once all 6 have been interrupted once, a later unrelated message would drop from 18 calls to 0 for this step (down from the 1+18=19 total in §1, though the initial `find_live_by_user` recovery GET is cache-miss-only and unaffected).
+- **Keeps fail-closed behavior:** `not c.context_interrupted` is a pure in-memory read of already-cached, already-trusted state (the same `_store` the rest of this method already reads without a fresh Airtable round-trip) — it introduces no new trust boundary or new way to silently skip a contract that actually needs marking. A contract that is NOT yet interrupted, or whose cached state is stale/uncertain, is unaffected by this change and still goes through the full write+verify path.
+
+### Suggested test coverage (implemented — see §6)
+
+The 5 scenarios below were the plan; §6 confirms all 5 were written, and names the actual test file and check count.
+1. Multiple pending contracts for one user, all `context_interrupted=False` → `mark_context_interrupted()` still marks all of them (existing behavior unchanged).
+2. A mix — some `context_interrupted=True`, some `False` — → only the `False` ones get `update_status()` called (assert call count / mock the repository's `transition()` and assert it's invoked exactly `len(false_ones)` times, not `len(all_pending)`).
+3. A contract with `reconfirmation_required=True` (already-interrupted-once) is still transitioned to `"superseded"` regardless of its `context_interrupted` value — the skip must not accidentally suppress a genuine second-interruption supersede.
+4. Regression: a contract belonging to a *different* `canonical_user_id`, or with `status != "pending"`, is still excluded exactly as before (unchanged pre-existing filter behavior).
+5. End-to-end (mocked Airtable): assert the total PATCH call count for a `mark_context_interrupted()` call over N contracts where M are already interrupted is exactly `N - M`, not `N`.
+
+## 5. What this document did NOT do, as originally written (superseded by §6)
+
+At audit time: no code was modified, the Q5/Q6 recommendations were not implemented, and nothing outside `core/action_gateway.py`'s targeted method was touched. **§6 below is the implementation follow-up** — read it for what's actually true now.
+
+## 6. Implementation (follow-up to §4, same day)
+
+The fix was implemented as requested, but **not** in the exact naive form §4 sketched. While writing Test 3 (reconfirmation_required regression) against the naive `and not c.context_interrupted` filter, it failed: `test_bug_reconfirmation_oneshot_fsm.py`'s existing "Regression B" scenario (`preview → unrelated → כן → another action → כן` — expects the contract to become `"superseded"` on the second interruption) traces through `mark_context_interrupted()` **twice**. By the *second* call, the contract already has `context_interrupted=True` from the *first* call — so a bare `not c.context_interrupted` filter would incorrectly exclude it from `changes` entirely, and the real "superseded" transition the FSM depends on would silently stop firing. That would have been a genuine regression in already-shipped, already-production-verified behavior (BUG-108/BUG-PENDING-APPROVAL-B), not just a missed optimization.
+
+**Actual implemented filter** (`core/action_gateway.py::ExecutionLedger.mark_context_interrupted()`):
 
 ```python
 with self._lock:
@@ -80,30 +116,14 @@ with self._lock:
         for c in self._store.values()
         if c.canonical_user_id == canonical_user_id
         and c.status == "pending"
-        and not c.context_interrupted          # <-- new: skip already-interrupted, no-op contracts
+        and (c.reconfirmation_required or not c.context_interrupted)
     ]
 ```
 
-A contract with `reconfirmation_required=True` is **not** skipped by this change — it still needs the real "supersede" transition every time it's hit, since that's a genuine status change with a genuine reason to re-verify against a possible concurrent approval, not a no-op re-write of an unchanged field.
+The added condition is an `or`, not a bare negation: a contract is included if it's not-yet-interrupted (the no-op skip this bug is about) **OR** if it already requires reconfirmation (a real, necessary transition, regardless of its current `context_interrupted` value). This is the version that actually satisfies the "no behavior change to approval semantics" acceptance criterion from §4 — the original sketch did not, and the gap was only caught by writing the reconfirmation-required test case, not by the audit itself.
 
-### Why this meets the stated acceptance criteria
+**Tests:** new `test_bug114_context_interrupt_amplification.py`, 12 checks, all 5 planned scenarios covered (Test 3 specifically encodes the regression above — a contract with `context_interrupted=True` AND `reconfirmation_required=True` must still supersede). `test_bug_reconfirmation_oneshot_fsm.py` (27 checks, unmodified) re-run and confirmed green against the fix — the existing FSM regression suite is the independent proof the correction above is right, not just the new test file's own assertions. Full `test_*.py` regression sweep, `smoke_tests.py`, `compileall`, `git diff --check` all clean.
 
-- **No behavior change to approval semantics:** the FSM's decision table (pending → pending+interrupted → superseded) is untouched; this only skips contracts whose *outcome* would have been unchanged anyway (`context_interrupted` already `True`, still "pending").
-- **No weakening of `ActionGateway` lifecycle validation:** `transition()`'s TOCTOU-safe read-before-write and read-back-verify (Q4/Q5) are completely untouched — they still run in full for every contract that actually needs a write.
-- **Reduces Airtable calls for a no-op/already-interrupted pending contract:** from 3 calls (GET+PATCH+GET) to 0 for each such contract, on every subsequent unrelated message while it stays pending. In the observed 6-contract sample, once all 6 have been interrupted once, a later unrelated message would drop from 18 calls to 0 for this step (down from the 1+18=19 total in §1, though the initial `find_live_by_user` recovery GET is cache-miss-only and unaffected).
-- **Keeps fail-closed behavior:** `not c.context_interrupted` is a pure in-memory read of already-cached, already-trusted state (the same `_store` the rest of this method already reads without a fresh Airtable round-trip) — it introduces no new trust boundary or new way to silently skip a contract that actually needs marking. A contract that is NOT yet interrupted, or whose cached state is stale/uncertain, is unaffected by this change and still goes through the full write+verify path.
+**Scope, confirmed unchanged from §4's design:** `ActionContractRepository.transition()`'s pre-PATCH read and post-PATCH readback (Q4/Q5) are untouched — both still run for every contract that does need a write. Q5 (reuse PATCH response instead of a readback GET) and Q6 (TTL/expiry policy for stale pending contracts) remain explicitly deferred, not implemented. No `ActionGateway` approval semantics, F52, EvidenceFinalizer taxonomy, or BUG-111/112/113 code touched.
 
-### Suggested test coverage (not yet written)
-
-A new `test_bug114_context_interrupt_amplification.py` (or extending an existing `ExecutionLedger`/`ActionGateway` suite) should cover:
-1. Multiple pending contracts for one user, all `context_interrupted=False` → `mark_context_interrupted()` still marks all of them (existing behavior unchanged).
-2. A mix — some `context_interrupted=True`, some `False` — → only the `False` ones get `update_status()` called (assert call count / mock the repository's `transition()` and assert it's invoked exactly `len(false_ones)` times, not `len(all_pending)`).
-3. A contract with `reconfirmation_required=True` (already-interrupted-once) is still transitioned to `"superseded"` regardless of its `context_interrupted` value — the skip must not accidentally suppress a genuine second-interruption supersede.
-4. Regression: a contract belonging to a *different* `canonical_user_id`, or with `status != "pending"`, is still excluded exactly as before (unchanged pre-existing filter behavior).
-5. End-to-end (mocked Airtable): assert the total PATCH call count for a `mark_context_interrupted()` call over N contracts where M are already interrupted is exactly `N - M`, not `N`.
-
-## 5. What this document does NOT do
-
-- Does not modify `core/action_gateway.py`, `core/action_contract_repository.py`, `app.py`, or any other runtime file.
-- Does not implement the Q5 (PATCH-response-reuse) or Q6 (contract expiry policy) recommendations — both are flagged as separate, deferred items requiring their own scoping/owner decision.
-- Does not touch BUG-111, BUG-112, BUG-113, or PR #393/#399/#400.
+**Not yet done:** production verification. This fix has not yet been observed reducing real Airtable call volume against live traffic — it is merged/tests-green only until a production sample confirms it.
