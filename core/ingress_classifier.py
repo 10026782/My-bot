@@ -87,7 +87,16 @@ _TIMESTAMP_RE = re.compile(
 _BOT_OUTPUT_RE = re.compile(r"^[✅❌⚠️⏳🔴🟡🟢📋🌤️█]\s", re.MULTILINE)
 
 # Airtable field/record IDs
-_AIRTABLE_ID_RE = re.compile(r"\b(?:fld|rec)[A-Za-z0-9]{8,}\b")
+# BUG-116: a bare "\b(?:fld|rec)[A-Za-z0-9]{8,}\b" also matches ordinary
+# English words like "recruitment" ("rec" + "ruitment", 8 letters) typed as
+# a literal domain hint — a real production false positive that blocked an
+# otherwise plain lead-creation sentence before extraction ever ran. Real
+# Airtable record/field IDs are random base62 strings; every genuine-ID test
+# fixture in this suite (e.g. "recABC1234567890", "recRvK6hFTNgyj8ag")
+# mixes letters and digits, while a real word never contains a digit.
+# Requiring at least one digit in the matched run keeps true-positive
+# detection of pasted IDs intact while ruling out plain-English words.
+_AIRTABLE_ID_RE = re.compile(r"\b(?:fld|rec)(?=[A-Za-z0-9]*\d)[A-Za-z0-9]{8,}\b")
 
 # JSON/code block
 # BUG-111: a leading "[" alone is not enough — a WhatsApp-style short-date
