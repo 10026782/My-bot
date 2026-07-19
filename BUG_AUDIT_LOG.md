@@ -2645,7 +2645,37 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **Scope:** לא נוגע ב-BUG-114 (תיקון ה-filter של `mark_context_interrupted()`), F52, EvidenceFinalizer, סמנטיקת approve/dispatch, `route_disambiguation()`, `TurnEnvelope`, או `message_kind`.
 - **בדיקות:** `test_bug115_confirmation_routing_bookmark.py` חדש (22/22) — כל 5 התרחישים המתוכננים ועוד (בוקמארק פג-תוקף, בוקמארק ל-contract שכבר נפתר, בוקמארק למשתמש אחר, בוקמארק+interruption נשמר עד terminal, אינטגרציה עם `_handle_single_candidate()` בפועל). `test_bug114_context_interrupt_amplification.py` (12/12) ו-`test_bug_reconfirmation_oneshot_fsm.py` (27/27) רצו מחדש כהוכחה שלא נשברו. עוד ~28 קבצי בדיקה קיימים שנוגעים ב-`route_confirmation_word`/`route_disambiguation`/lead preview/BUG-070/074/076/111/Stage B/PR-0/F52 PR5 נבדקו ידנית ונשארו ירוקים. Suite מלא, smoke, compileall, diff-check — כולם נקיים.
 - **תוקן ב-branch:** `claude/bug115-confirmation-routing-audit` (אותו branch כמו הביקורת, PR #403).
-- **Merged:** תלוי במיזוג PR #403.
+- **Merged:** ✅ כן — `main` `4ce2fae` (Merge pull request #403), מאומת ב-`git log`/`git merge-base --is-ancestor`.
 - **Deployed:** לא ידוע — דרוש בדיקה ידנית ב-Render לאחר מיזוג.
 - **Verified בפרודקשן:** לא — התיקון טרם נצפה פותר "כן"/"מאשר" נכון מול תעבורה חיה עם contracts ישנים.
+- **סטטוס:** ✅ קוד תוקן ומאומת בבדיקות, ⚠️ לא verified-in-prod.
+
+---
+
+## BUG-116 — `_AIRTABLE_ID_RE` ב-Tier-4 gate תופס מילים אנגליות רגילות ("recruitment") כ-Airtable ID — ✅ תוקן ומאומת בבדיקות, לא נבדק בפרודקשן
+
+- **תאריך רישום:** 19/07/2026.
+- **מקור:** דגימת production ישירה, **נושא נפרד לגמרי מ-BUG-114/BUG-115** — שגיאת Tier-4 ingress-classification, לא קשורה ל-ActionGateway/ActionContract routing כלל.
+- **תסמין (production, verbatim):**
+  ```
+  Eli: צור ליד חדש לדומיין recruitment
+       יהודה גרוס  0533968395
+  BOSS: 📄 זה נראה כמו טבלה/ייצוא/פלט מודבק — לא ביצעתי שום פעולה אוטומטית.
+        אם התכוונת לבקש משהו ספציפי, כתוב את זה במשפט רגיל.
+  ```
+  חזר זהה על ניסיון שני זהה, ועל ניסיון שלישי מנוסח-מחדש ("זה משפט רגיל צור ליד").
+- **מסך / מודול:** `core/ingress_classifier.py:90` (`_AIRTABLE_ID_RE`), נבדק ב-`_is_tier4()` (שורה 169) — הגייט הרץ **לפני** כל parsing/חילוץ מועמדים, ומנצח תמיד (`classify_ingress()`'s תיעוד עצמו: "Tier 4 מנצח תמיד").
+- **Root Cause (מאומת בהרצה ישירה, לא השערה):** `_AIRTABLE_ID_RE = re.compile(r"\b(?:fld|rec)[A-Za-z0-9]{8,}\b")` — ללא גבול עליון וללא דרישת-צורה, כל מילה שמתחילה ב-`rec`/`fld` ומלווה ב-8+ אותיות מותאמת, בין אם היא ID אמיתי או לא. `recruitment` = `rec` + `ruitment` (8 אותיות) → תואם. אומת ישירות: `_AIRTABLE_ID_RE.search("...recruitment...")` → match על `'recruitment'`. כל מילה אנגלית שמתחילה ב-`rec`/`fld` ומלווה ב-8+ אותיות חשופה (`recommendation`, `reconnect`, `reciprocity`, `fieldwork` וכו'), ללא תלות בתוכן עברי אחר בהודעה.
+  - **הבדל מהמוסכמה הקיימת בקוד:** בדיקות BUG-111 (`test_bug111_lead_domain_and_sender_prefix.py`) מקלידות תמיד את הרמז העברי `"גיוס"` בטקסט הודעה גולמי — `"recruitment"` שם מופיע רק כערך הקנוני שאליו `_detect_domain()`/`_extract_domain_hint()` מתרגמים פנימית, אף פעם לא כטקסט שהמשתמש הקליד. זהו המקרה הראשון שנצפה שבו המילה האנגלית עצמה הוקלדה ישירות כרמז דומיין — מקרה קצה שאף בדיקה קיימת לא בדקה.
+- **ניסיון ראשון שנדחה:** גבול-אורך מדויק (`rec[A-Za-z0-9]{14}`, כמו רגקסי ה-ID האמיתיים במקומות אחרים בקוד — `core/action_gateway.py:684`, `core/anti_hallucination.py:27`) היה שובר בדיקה קיימת ולא-קשורה: `test_c89_tier4_precedence.py`'s "Airtable rec ID" fixture (`recABC1234567890`) הוא ID מזויף שהזנב שלו רק **13** תווים, לא 14.
+- **תוקן:** דרישת ספרה אחת לפחות בתוך הרצף התואם, דרך lookahead: `_AIRTABLE_ID_RE = re.compile(r"\b(?:fld|rec)(?=[A-Za-z0-9]*\d)[A-Za-z0-9]{8,}\b")`. אומת תכנותית מול **כל** fixture של Airtable ID אמיתי/מזויף בכל קובצי הבדיקה הרלוונטיים (`recABC1234567890`, `recRvK6hFTNgyj8ag`, `rec3YS5Zcr2FenX7z`, `rec62b86WqBpaWPaG`, `recTIER3TESTREC001`, `recRAWOBS0000001` ועוד) — **כולם** מכילים ספרה, כי ID אמיתי הוא מחרוזת base62 אקראית. מילה אנגלית רגילה לעולם לא מכילה ספרה. תיקון-הידוק טהור, לא מנגנון חדש.
+- **סיכון שיורי, מקובל, מחוץ לסקופ:** ID אמיתי שבמקרה מכיל אפס ספרות (הסתברות ~6.5%) לא ייתפס יותר ע"י הסימן הזה בלבד — אך Tier-4 הוא defense-in-depth, כמעט תמיד יתפוס אותו סימן אחר (`"airtable"` + נקודתיים/newline, `_LITERAL_MARKERS`, טבלה/CSV/timestamp). לא טופל כאן — תיקון צר בלבד.
+- **מחוץ לסקופ במפורש:** `core/agent_message_formatter.py:106`'s רגקס נפרד (`\brec[A-Za-z0-9]{10,}\b`) — משמש לצנזור record ID **בפלט** ה-agent (לא לחסימת קלט), פרופיל-סיכון שונה לגמרי, נקודת-קריאה שונה. לא נגעו בו, מתועד לצורך מודעות בלבד.
+- **ביקורת מלאה + תיעוד:** `docs/architecture/ingress-classifier/BUG-116_AIRTABLE_ID_REGEX_WORD_FALSE_POSITIVE.md`.
+- **Scope:** לא נוגע ב-BUG-114/BUG-115 (ActionGateway/ActionContract), לא ב-Tier-4 markers אחרים (`_TABLE_RE`/`_TIMESTAMP_RE`/`_LITERAL_MARKERS` וכו', כולם נשארו ללא שינוי), לא ב-`core/agent_message_formatter.py`.
+- **בדיקות:** `test_bug116_airtable_id_word_false_positive.py` חדש (15/15) — שחזור מדויק של דגימת production (כעת tier≠4, candidate אחד נחלץ), מילים אנגליות נוספות שמתחילות ב-rec/fld לא תואמות, כל fixture ID אמיתי בסוויטה עדיין תואם, תרחיש ID-אמיתי-מודבק מ-`test_c89_tier4_precedence.py` (`recABC1234567890`) עדיין מגיע ל-tier=4 מקצה-לקצה. `test_c89_tier4_precedence.py` (13/13, ללא שינוי) רץ מחדש — ללא רגרסיה לאף סימן Tier-4 אחר. Full regression sweep: **138/138 קבצי `test_*.py`, exit 0**. `smoke_tests.py` PASS, `compileall -q .` נקי, `git diff --check` נקי.
+- **תוקן ב-branch:** `claude/action-status-shadow-verification-m1m0ow` (ענף חדש, לאחר restart מ-`main` העדכני — הענף המיועד המקורי כבר היה ממוזג במלואו ל-`main`, per merged-branch restart protocol).
+- **Merged:** תלוי במיזוג PR (טרם נפתח בזמן כתיבת רשומה זו).
+- **Deployed:** לא.
+- **Verified בפרודקשן:** לא — התיקון טרם נצפה פותר הודעת-ליד אמיתית עם מילת-דומיין אנגלית מול תעבורה חיה.
 - **סטטוס:** ✅ קוד תוקן ומאומת בבדיקות, ⚠️ לא verified-in-prod.
