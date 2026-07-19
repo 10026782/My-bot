@@ -2597,3 +2597,22 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **Deployed:** כן.
 - **Verified בפרודקשן:** ✅ כן — דגימת production אחרי ה-deploy (19/07/2026, "עדכן משימת בדיקת pull request 393") הראתה הודעה **יחידה** בלבד (הודעת ה-gateway), עם `[A32] Single-Speaker: ... suppressing` בלוג ו-`ownership_signal.final_reply_nonempty=false` — אין כפילות. (הדגימה הספציפית לא כללה בדיוק את אותו variant markdown-כפול שנצפה במקור, אך מוכיחה שהצינור המתוקן עובד end-to-end בפועל.)
 - **סטטוס:** ✅ VERIFIED IN PROD / CLOSED.
+
+---
+
+## BUG-114 — ActionContracts context-interrupt call amplification — 🔴 מבוקר (audit-only), לא תוקן, תיקון מוצע ממתין להחלטה
+
+- **תאריך רישום:** 19/07/2026.
+- **מקור:** נצפה **באותה** דגימת production שסגרה את הענף המדויק של PR #393 (ראו BUG-audit history/`CHANGE_CONTROL_LOG.md` C127) — **נושא נפרד לגמרי**, לא קשור ל-BUG-111/112/113 או PR #393/#399/#400. סומן במפורש בעדכון התיעוד הקודם כ"טרם אובחן" ונחקר עכשיו בנפרד לפי בקשה מפורשת.
+- **תסמין:** הודעה נכנסת אחת (`list_tasks`, ללא קשר לאף contract חי) עם 6 `ActionContracts` פתוחים למשתמש הפיקה **19 קריאות Airtable** (`GET pending` ראשוני + 6×(`GET by contract_id` → `PATCH` → `GET by contract_id`)) — לפני שה-agent בכלל התחיל לעבד את ההודעה. `case_c_signal kind=C1 detail=live_contracts=6`, `multi_contract_conflict=true`.
+- **מסך / מודול:** `core/action_gateway.py::ExecutionLedger.mark_context_interrupted()` (שורה 558), `ActionGateway.mark_context_interrupted()` (שורה 2030), נקרא מ-`app.py:3920`; `core/action_contract_repository.py::transition()` (שורה 199) — הנתיב שמבצע בפועל את ה-GET→PATCH→GET לכל contract.
+- **Root Cause (מאומת בקוד, לא השערה):** `mark_context_interrupted()` נקרא בכל הודעה נכנסת שאינה resolution event (`app.py:3907-3920`), ומסמן מחדש **כל** contract "pending" של המשתמש כ-`context_interrupted=True` — כולל contracts שכבר `context_interrupted=True` מלכתחילה. ה-filter הקיים בודק רק `status == "pending"`, לא `context_interrupted`. ה-shortcut האידמפוטנטי הקיים ב-`transition()` (`action_contract_repository.py:239`) לא עוזר כאן כי הוא יורה רק כש-`updates` **ריק**, ו-`{"context_interrupted": True}` אינו ריק גם כשהערך כבר זהה. כל contract שנשאר "pending" ולא נסגר במפורש ממשיך לספוג GET+PATCH+GET מלא **על כל הודעה בלתי-קשורה עתידית**, ללא הגבלת זמן (אין job מתוזמן/TTL לניקוי contracts pending ישנים — נבדק ב-`scheduler.py`/`core/approval_queue_recovery.py`, לא נמצא).
+- **ביקורת מלאה + תשובות לשש השאלות + עיצוב תיקון מוצע:** `docs/architecture/action-gateway/BUG-114_CONTEXT_INTERRUPT_CALL_AMPLIFICATION_AUDIT.md` (חדש).
+- **תיקון מוצע (לא ממומש):** תנאי filter נוסף אחד ב-list comprehension הקיים של `mark_context_interrupted()` — `and not c.context_interrupted` — בדיקת RAM טהורה, ללא קריאת Airtable נוספת. contracts עם `reconfirmation_required=True` **לא** מדולגים (עדיין צריכים supersede אמיתי). אינו נוגע ב-GET-before-PATCH/GET-after-PATCH של `transition()` עצמו (Q4/Q5 — נחוצים ל-TOCTOU safety, לא מוחלשים).
+- **המלצות נוספות שנשארו מחוץ לתיקון הצר (Q5/Q6 — דורשות החלטת owner נפרדת):** (1) `airtable_patch()` מזניח את גוף תגובת ה-PATCH — שימוש בו במקום GET-readback נפרד יכול לצמצם עוד, אך משנה פונקציה גנרית משותפת; (2) אין TTL/ניקוי מתוזמן ל-`ActionContracts` pending ישנים (בניגוד ל-TTL כפתור הטלגרם של BUG-112) — שאלת מדיניות, לא תיקון מכני.
+- **Scope:** לא נוגע ב-BUG-111/112/113, F52, EvidenceFinalizer taxonomy, או סמנטיקת אישור/דחייה/ביצוע.
+- **בדיקות:** לא נכתבו עדיין — 5 תרחישים מוצעים במסמך הביקורת (mix של interrupted/not-interrupted, reconfirmation_required לא מדולג, רגרסיה על משתמש/status אחר, ספירת PATCH מדויקת end-to-end).
+- **Merged:** לא — אין קוד עדיין, רק תיעוד ביקורת.
+- **Deployed:** לא רלוונטי.
+- **Verified בפרודקשן:** לא רלוונטי — אין עדיין תיקון.
+- **סטטוס:** 🔴 מבוקר במלואו, לא תוקן. ממתין להחלטת owner אם לממש את התיקון הצר המוצע.
