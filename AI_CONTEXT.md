@@ -17,7 +17,7 @@
 > **shadow-observed**, גם אם ברירת המחדל בקוד היא `off`. אם התיעוד סותר לוגי production —
 > **התיעוד** מסומן stale, **לא** מורידים את סטטוס ה-runtime.
 
-**עודכן:** 2026-07-19 · **main:** `4546880` (אחרי מיזוג PR #405, "BUG-116/BUG-115 production verification + BUG-117 audit + fix") · **סטטוס:** אין ענף פעיל פתוח כרגע — BUG-115/BUG-116/BUG-117 כולם ✅ VERIFIED IN PROD / CLOSED. **PR #397 (branch `claude/docs-sync-bug-audit-roadmap-drift`) נסגר במפורש כ-superseded ע"י #398, לא מוזג במכוון.**
+**עודכן:** 2026-07-19 · **main:** `4546880` (אחרי מיזוג PR #405, "BUG-116/BUG-115 production verification + BUG-117 audit + fix") · **סטטוס:** BUG-115/BUG-116/BUG-117 כולם ✅ VERIFIED IN PROD / CLOSED. **PR #397 (branch `claude/docs-sync-bug-audit-roadmap-drift`) נסגר במפורש כ-superseded ע"י #398, לא מוזג במכוון.** **ענף פעיל פתוח (לא ממוזג):** `claude/c84-tma-approval-ttl` — C84 TMA Approvals TTL/freshness check (קוד+tests הושלמו, ראו `CHANGE_CONTROL_LOG.md` C144), מבוסס על `main` `b957fd8` (אחרי מיזוג PR #406). **TMA בלבד**, אינו נוגע ב-main hash למעלה עד למיזוג.
 
 ---
 

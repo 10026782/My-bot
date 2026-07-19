@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 import types
 from contextlib import ExitStack
 from types import SimpleNamespace
@@ -92,7 +93,7 @@ def _bulk(identity) -> dict:
 # ── Fake ActionGateway (same pattern as test_approval_concurrency.py) ──
 
 class _FakeContract:
-    def __init__(self, contract_id: str, status: str = "pending"):
+    def __init__(self, contract_id: str, status: str = "pending", created_at: float | None = None):
         self.contract_id = contract_id
         self.status = status
         # Phase 4B-2 follow-up: _is_canonical_tma_contract() reads these
@@ -105,6 +106,11 @@ class _FakeContract:
         self.trusted_source = "tma_api"
         self.origin_channel = "tma"
         self.tenant_id = None
+        # C84: real ActionContract.created_at is a required field (no
+        # default) — always fresh ("now") unless a test explicitly wants an
+        # aged contract, so every pre-existing test here keeps passing
+        # unchanged.
+        self.created_at = created_at if created_at is not None else time.time()
 
 
 class _FakeRepository:
