@@ -26,6 +26,7 @@ from __future__ import annotations
 import contextvars
 import logging
 import os
+import re
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -85,12 +86,23 @@ class _TurnFault:
 
 
 # Per-turn state. Deliberately NOT a broad TurnCoordinator: a single
-# contextvar, set once at the top of run_agent() (begin_turn) and cleared when
-# it returns (end_turn), scoped to one synchronous request-handling call
-# stack — the same stack that also carries any ActionGateway approve()
-# dispatch_tool() call triggered by a confirmation word within that same turn.
-_turn_fault: "contextvars.ContextVar[_TurnFault | None]" = contextvars.ContextVar(
-    "rp5_fault_turn", default=None
+# contextvar, scoped to one synchronous request-handling call stack — the
+# same stack that also carries any ActionGateway approve()/dispatch_tool()
+# call triggered by a confirmation word within that same turn.
+#
+# A stack (tuple), not a single value: _run_agent_impl() can call run_agent()
+# recursively within the SAME top-level turn (e.g. the Stage-A pending-
+# approval retry — "return run_agent(pending_entry['text'], ...)"). That
+# inner call runs its own begin_turn()/end_turn() pair on DIFFERENT text
+# (usually marker-free), which — with a single shared value — would
+# overwrite the outer turn's real fault state to "inactive" the moment the
+# inner call's end_turn() ran, silently disabling RP5 protection for any
+# write dispatched by the OUTER turn afterward (see BUG-RP5-NESTED-TURN-
+# CLOBBER). Push/pop instead: end_turn() restores whatever was active
+# before the matching begin_turn(), so nested calls can never leak into the
+# turn that contains them.
+_turn_fault_stack: "contextvars.ContextVar[tuple]" = contextvars.ContextVar(
+    "rp5_fault_turn_stack", default=()
 )
 
 
@@ -152,24 +164,93 @@ def is_enabled_for_turn(env: str, canonical_user_id: str, text: str) -> bool:
     return marker is not None
 
 
-def begin_turn(canonical_user_id: str, text: str) -> None:
-    """Compute this turn's active fault scenario (if any) and stash it for the
-    duration of the turn. Call once, at the very top of run_agent(), always
-    paired with end_turn() in a finally block. Never raises — any internal
-    error fails closed to "no fault active", identical to today's behavior."""
+def _strip_marker(text: str) -> str:
+    """Removes the bracketed [rp5-test:<scenario>] token itself (not any
+    surrounding words) and collapses the whitespace left behind, so
+    "מאשר [rp5-test:write-403]" becomes exactly "מאשר" — required so
+    downstream exact-match confirmation checks (app.py's _CONFIRM_WORDS,
+    core/action_gateway.py's is_own_resolution_event) see the message the
+    user actually meant to send, not the raw marker-carrying text."""
+    prefix = os.environ.get(_PREFIX_VAR, _DEFAULT_PREFIX) or _DEFAULT_PREFIX
+    idx = text.find(prefix)
+    if idx == -1:
+        return text
+    rest = text[idx + len(prefix):]
+    end = rest.find("]")
+    if end == -1:
+        return text
+    marker_end = idx + len(prefix) + end + 1  # position right after the closing "]"
+    cleaned = text[:idx] + text[marker_end:]
+    return re.sub(r"[ \t]+", " ", cleaned).strip()
+
+
+def clean_text_for_routing(canonical_user_id: str, text: str, env: str | None = None) -> str:
+    """Stateless preview of what begin_turn() would clean this text to — no
+    contextvar side effects. For a text consumer that necessarily runs
+    BEFORE run_agent()/begin_turn() (e.g. app.py's Telegram ingress-context-
+    gate check, which runs ahead of command/wizard dispatch and only later
+    reaches run_agent()), so it sees the same marker-stripped text
+    begin_turn() will independently compute, without that earlier consumer
+    prematurely owning/activating the turn's fault state itself — activation
+    stays begin_turn()'s sole responsibility, called exactly once per turn.
+    Returns `text` unchanged unless all 4 hard safety gates hold AND the
+    marker names a recognized scenario — identical fail-closed semantics to
+    is_enabled_for_turn(), and byte-identical to today's behavior whenever
+    they don't."""
+    try:
+        if env is None:
+            env = os.environ.get("APP_ENV", "production")
+        if is_enabled_for_turn(env, canonical_user_id, text):
+            scenario = get_fault_marker(text)
+            if scenario is not None:
+                return _strip_marker(text)
+    except Exception:
+        logger.debug("[RP5FaultInjection] clean_text_for_routing failed closed", exc_info=True)
+    return text
+
+
+def begin_turn(canonical_user_id: str, text: str) -> str:
+    """Compute this turn's active fault scenario (if any), push it onto the
+    per-turn stack (see _turn_fault_stack's docstring re: nested run_agent()
+    calls), and return `text` with any recognized [rp5-test:...] marker
+    stripped out. Call once, at the very top of run_agent(), always paired
+    with end_turn() in a finally block. Callers MUST use the RETURNED text
+    for all downstream routing/classification/business-field extraction —
+    never the original raw text — so a valid marker never leaks into
+    confirmation-word matching or business payloads (task title, lead
+    fields, etc.). Never raises — any internal error fails closed to "no
+    fault active, text unchanged", identical to today's behavior."""
     scenario = None
+    cleaned = text
     try:
         env = os.environ.get("APP_ENV", "production")
         if is_enabled_for_turn(env, canonical_user_id, text):
             scenario = get_fault_marker(text)
+            if scenario is not None:
+                cleaned = _strip_marker(text)
     except Exception:
         logger.debug("[RP5FaultInjection] begin_turn failed closed", exc_info=True)
         scenario = None
-    _turn_fault.set(_TurnFault(scenario, canonical_user_id) if scenario else None)
+        cleaned = text
+    stack = _turn_fault_stack.get()
+    new_fault = _TurnFault(scenario, canonical_user_id) if scenario else None
+    _turn_fault_stack.set(stack + (new_fault,))
+    return cleaned
 
 
 def end_turn() -> None:
-    _turn_fault.set(None)
+    """Pops this turn's entry, restoring whatever fault (if any) was active
+    before the matching begin_turn() — see _turn_fault_stack's docstring.
+    Safe to call even if the stack is already empty (becomes a no-op rather
+    than raising), since this only ever runs from a `finally` block."""
+    stack = _turn_fault_stack.get()
+    if stack:
+        _turn_fault_stack.set(stack[:-1])
+
+
+def _current_fault() -> "_TurnFault | None":
+    stack = _turn_fault_stack.get()
+    return stack[-1] if stack else None
 
 
 def _provider_for_tool(tool_name: str) -> str:
@@ -196,7 +277,7 @@ def maybe_raise_or_return_fault(tool: str, *, read_only: bool):
     RP5InjectedTransportError, which the caller's existing generic
     `except Exception` already converts into a ❌-prefixed failed result.
     """
-    fault = _turn_fault.get()
+    fault = _current_fault()
     if fault is None:
         return None
     scenario = fault.scenario
