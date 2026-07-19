@@ -2144,6 +2144,22 @@ def finance_pulse(identity):
 _RISK_HIGH = {"גבוה", "high"}
 _RISK_LOW  = {"נמוך", "low"}
 
+# C84 — TMA Approvals TTL/freshness check. Mirrors the BUG-112 Telegram
+# principle (never execute a pending approval past its advertised window;
+# reject it instead, verified, and tell the caller plainly) but with a
+# TMA-appropriate window: the Telegram button is a push notification checked
+# within minutes (_PENDING_APPROVAL_TTL = 600s in app.py), while a TMA
+# Approvals-screen row is reviewed asynchronously from a dashboard, possibly
+# once a day — 600s would expire it before the owner even opens the screen.
+# 24h is a deliberately generous, single, easy-to-retune bound; see
+# _claim_and_execute_approval()'s freshness check below for where it's
+# enforced (the single place both act_on_approval() and bulk_approve() route
+# through). Based on the canonical ActionContract.created_at, never the
+# Approvals row's own REQUESTED_AT — Approvals is a non-authoritative display
+# projection (see ApprovalsFields' docstring), the contract is the source of
+# truth for "how old is this proposal really."
+_TMA_APPROVAL_TTL_SECONDS = 24 * 60 * 60
+
 
 def _derive_legacy_read_only(fields: dict) -> bool:
     """A projection row is legacy/read-only if EITHER the stored flag says
@@ -2754,6 +2770,62 @@ def _claim_and_execute_approval(approval_id: str, identity) -> dict:
                 "error": f"approval is not an actionable TMA contract (status={contract.status})",
                 "action_label": action_label, "ctx_id": ctx_id,
             }
+
+        # C84 — TTL/freshness check, mirroring BUG-112's Telegram principle:
+        # never execute a pending approval past its window; reject it
+        # instead (verified, not assumed) and tell the caller plainly, before
+        # any dispatch decision is made. Based on the canonical contract's
+        # own created_at (see _TMA_APPROVAL_TTL_SECONDS above for why not
+        # Approvals.REQUESTED_AT).
+        #
+        # Fail CLOSED on a missing/invalid created_at — deliberately the
+        # opposite of BUG-112's Telegram TTL check, which treats a malformed
+        # timestamp as fresh (_age_seconds = 0.0, "not treated as stale").
+        # That choice is fine for a single push-notification button; it is
+        # not fine for a TMA approval that can also be bulk-executed — an
+        # ActionContract whose age can't be verified must never be allowed
+        # to execute, so an unreadable created_at is treated as "expired",
+        # not "fresh". A real ActionContract.created_at is a required
+        # dataclass field with no default (core/action_gateway.py) — this
+        # branch only guards against a malformed/legacy/corrupted object
+        # that shouldn't exist, not the normal case.
+        _created_at = getattr(contract, "created_at", None)
+        if isinstance(_created_at, (int, float)) and not isinstance(_created_at, bool) and _created_at > 0:
+            _age_seconds = time.time() - _created_at
+            _is_stale = _age_seconds > _TMA_APPROVAL_TTL_SECONDS
+        else:
+            logger.error(
+                "_claim_and_execute_approval: contract=%s has missing/invalid "
+                "created_at (%r) — failing closed, treating as expired",
+                contract_id, _created_at,
+            )
+            _age_seconds = float("inf")
+            _is_stale = True
+        if _is_stale:
+            logger.info(
+                "_claim_and_execute_approval: TTL expired — contract=%s age=%s "
+                "> %ss — rejecting, not executing",
+                contract_id, _age_seconds, _TMA_APPROVAL_TTL_SECONDS,
+            )
+            _gw.reject(contract_id, rejected_by="ttl_expired")
+            _verify_ttl = _gw.find_contract(contract_id)
+            ttl_sync_ok = True
+            if _verify_ttl and _verify_ttl.status == "rejected":
+                ttl_sync_ok = _sync_approval_projection_status(approval_id, _verify_ttl)
+            else:
+                logger.error(
+                    "_claim_and_execute_approval: TTL-expired contract=%s reject() did "
+                    "not verify as rejected — status=%s",
+                    contract_id, getattr(_verify_ttl, "status", None),
+                )
+            result = {
+                "ok": False, "status_code": 410,
+                "error": "approval expired — submit a new request",
+                "action_label": action_label, "ctx_id": ctx_id,
+            }
+            if not ttl_sync_ok:
+                result["projection_sync_pending"] = True
+            return result
 
         # approve() is the sole enforcement boundary (BUG-074) and drives
         # dispatch through _execute_contract() — released here only after

@@ -60,6 +60,7 @@ from __future__ import annotations
 import os
 import sys
 import threading
+import time
 import types
 from contextlib import ExitStack
 from types import SimpleNamespace
@@ -124,10 +125,15 @@ class _FakeContract:
     def __init__(self, contract_id: str, status: str = "pending", requester_identity=None,
                  approval_policy: str = "approval", tool_name: str = "tma_write",
                  trusted_source: str = "tma_api", origin_channel: str = "tma",
-                 tenant_id: str = "boss_hq"):
+                 tenant_id: str = "boss_hq", created_at: float | None = None):
         self.contract_id = contract_id
         self.status = status
         self.requester_identity = requester_identity
+        # C84: real ActionContract.created_at is a required field (no
+        # default) — always fresh ("now") unless a test explicitly wants an
+        # aged contract, so every pre-existing test here keeps passing
+        # unchanged.
+        self.created_at = created_at if created_at is not None else time.time()
         # "approval" (APPROVAL_POLICY_APPROVAL) is the default/strict policy —
         # matches real propose_action() behavior for tma_write, which is
         # never classified as self_confirm (see classify_approval_policy()).
