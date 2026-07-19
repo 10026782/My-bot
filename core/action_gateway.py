@@ -616,6 +616,15 @@ class ExecutionLedger:
 # ══════════════════════════════════════════════════
 
 def _describe_contract_for_reconfirmation(contract: ActionContract) -> str:
+    """Unchanged by BUG-115 — this helper's fallback (raw "tool_name / table")
+    is relied on by other, pre-existing call sites outside the disambiguation
+    list (e.g. _compose_status_reply_legacy()'s "✅ בוצע: {label}" executed-
+    status text, asserted by test_stage_b_full_suite.py's DoD20 to contain
+    the tool name). Generalizing this shared function's fallback instead of
+    adding a separate one was tried first and reverted — it silently changed
+    that unrelated, already-tested behavior too. See
+    _describe_contract_for_disambiguation() below for the BUG-115-specific
+    version, used only by the multi-contract list."""
     payload = contract.normalized_payload or {}
     if contract.tool_name in ("airtable_add", "airtable_update") and payload.get("table") == _LEAD_CAPTURE_TABLE:
         fields = payload.get("fields") or {}
@@ -633,6 +642,49 @@ def _describe_contract_for_reconfirmation(contract: ActionContract) -> str:
         return f"{verb}: {', '.join(parts)}" if parts else verb
     table = payload.get("table") or payload.get("spreadsheet_name") or ""
     return f"{contract.tool_name} / {table}" if table else contract.tool_name
+
+
+def _describe_contract_for_disambiguation(contract: ActionContract) -> str:
+    """BUG-115: human-readable label for ActionGateway's multi-contract
+    disambiguation list ONLY — deliberately a separate function from
+    _describe_contract_for_reconfirmation() above, not a generalization of
+    it, so this fix cannot change that other function's behavior at its
+    other call sites (tried, reverted — see its docstring). Reuses the same
+    Leads-specific branch (identical business description either way), but
+    generalizes the *fallback* to any table for airtable_add/airtable_update
+    — production evidence showed every disambiguation-list item was exactly
+    this shape (airtable_add/airtable_update against non-Leads tables like
+    Tasks), which the shared helper's raw "tool_name / table" fallback would
+    still leak the tool name for. Other tool types (gmail_send_draft/
+    calendar_create_event/etc.) fall back to the shared helper's own
+    behavior unchanged — production reports never exercise them here, and
+    app.py's _describe_tool_call() already owns richer per-tool copy for
+    the initial approval prompt itself."""
+    payload = contract.normalized_payload or {}
+    if contract.tool_name in ("airtable_add", "airtable_update") and payload.get("table") == _LEAD_CAPTURE_TABLE:
+        return _describe_contract_for_reconfirmation(contract)
+    table = payload.get("table") or payload.get("spreadsheet_name") or ""
+    if table and contract.tool_name in ("airtable_add", "airtable_update"):
+        verb = "הוספה" if contract.tool_name == "airtable_add" else "עדכון"
+        preview = _first_field_preview(payload.get("fields") or {})
+        return f"{verb} ב-{table}" + (f": {preview}" if preview else "")
+    return _describe_contract_for_reconfirmation(contract)
+
+
+def _first_field_preview(fields: dict, *, max_len: int = 40) -> str:
+    """BUG-115: a short, human-readable preview of the first non-empty
+    string-ish field value — used only for a compact disambiguation-list
+    label, never for anything security-relevant. Skips record-id-shaped
+    keys/values (technical identifiers, not business content) and
+    truncates defensively."""
+    for key, value in (fields or {}).items():
+        if not isinstance(value, (str, int, float)):
+            continue
+        text = str(value).strip()
+        if not text or re.fullmatch(r"rec[A-Za-z0-9]{14}", text):
+            continue
+        return text[:max_len] + ("…" if len(text) > max_len else "")
+    return ""
 
 
 # ══════════════════════════════════════════════════
@@ -1007,6 +1059,55 @@ class ActionGateway:
 
     # ── §4 — route_confirmation_word ────────────────────────────────
 
+    def _resolve_single_contract(
+        self, contract: "ActionContract", approver_role: str, canonical_user_id: str,
+    ) -> tuple[str, bool]:
+        """Single-contract resolution logic shared by both the "only one live
+        contract" case and the BUG-115 bookmark-hit case below — same
+        reconfirmation/context-poisoning safety either way (BUG-PENDING-
+        APPROVAL-B), never bypassed by a bookmark.
+
+        Returns (message, terminal): terminal=True means this contract's fate
+        was fully decided this call (approved, or a durable-write failure) —
+        the caller should clear any BUG-115 bookmark pointing at it.
+        terminal=False means a reconfirmation was requested instead (context
+        was interrupted since this contract was last shown) — the contract
+        is still pending and needs one more confirm word, so a bookmark
+        pointing at it must be KEPT, not cleared, or the next confirm would
+        itself fall into the same disambiguation problem this fix exists to
+        solve."""
+        # PR-0 / BUG-PENDING-APPROVAL-B: a message unrelated to this
+        # contract arrived since the preview was shown (mark_context_interrupted).
+        # The first "כן" after that must re-show the business description
+        # and require an explicit second "כן" — never silently execute a
+        # stale action (context poisoning). context_integrity_unknown is
+        # gated identically — a marking failure must never be treated as
+        # "context intact" (see _apply_ingress_context_gate in app.py).
+        if (contract.context_interrupted or contract.context_integrity_unknown) \
+                and not contract.reconfirmation_required:
+            try:
+                self._ledger.update_status(
+                    contract.contract_id, contract.status,
+                    reconfirmation_required=True,
+                )
+            except ActionContractTransitionError as exc:
+                logger.error(
+                    "[ActionGateway] durable reconfirmation update failed: "
+                    "contract=%s error=%s",
+                    contract.contract_id, exc,
+                )
+                return (
+                    "❌ לא ניתן לשמור את מצב האישור באופן עמיד. "
+                    "הפעולה לא בוצעה; אין לנסות שוב עד לבדיקת המערכת."
+                ), True
+            desc = _describe_contract_for_reconfirmation(contract)
+            return (
+                f"יש פעולה קודמת שממתינה לאישור: {desc}.\n"
+                f"לאשר אותה? (כן/לא)"
+            ), False
+        result = self.approve(contract.contract_id, approver=canonical_user_id, approver_role=approver_role)
+        return result, True
+
     def route_confirmation_word(self, canonical_user_id: str, approver_role: str = "") -> str:
         """
         מיירט מילת אישור חופשית (כמו "מאשר") לפני שמגיעה ל-Agent.
@@ -1014,49 +1115,65 @@ class ActionGateway:
 
         approver_role: BUG-074 — התפקיד המאומת של המשתמש שמאשר עכשיו (לא
         נגזר מ-canonical_user_id). approve() הוא שער האכיפה — ראה שם.
+
+        BUG-115: בודק קודם bookmark "contract שהוצג לאחרונה" (session_store,
+        נרשם ב-_propose_lead_write()'s caller ו-app.py's
+        _queue_approval_detailed_impl() ברגע ששולחת הודעת-אישור visible
+        למשתמש) — אם קיים, מצביע על contract חי ("pending") ששייך לאותו
+        canonical_user_id, ולא פג תוקף (600 שניות), נפתר ישירות מולו,
+        ללא קשר לכמה contracts ישנים ולא-קשורים אחרים גם חיים. רק כשה-
+        bookmark חסר/פג-תוקף/לא-חי/משתמש-אחר נופל להתנהגות הקיימת (ספירה
+        לפי כמות). ראה docs/architecture/action-gateway/
+        BUG-115_CONFIRMATION_ROUTING_HIJACK_AUDIT.md.
         """
+        try:
+            from session_store import lead_sessions as _ls
+            _bookmark = _ls.get_last_prompted_contract(canonical_user_id)
+        except Exception:
+            _bookmark = None
+        if _bookmark:
+            _bookmarked = self._ledger.find_by_id(_bookmark.get("contract_id", ""))
+            if (
+                _bookmarked is not None
+                and _bookmarked.status == "pending"
+                and _bookmarked.canonical_user_id == canonical_user_id
+            ):
+                message, terminal = self._resolve_single_contract(
+                    _bookmarked, approver_role, canonical_user_id,
+                )
+                if terminal:
+                    try:
+                        from session_store import lead_sessions as _ls2
+                        _ls2.clear_last_prompted_contract(canonical_user_id)
+                    except Exception:
+                        pass
+                return message
+            # Bookmark present but stale/no-longer-live/wrong-user — clear it
+            # (nothing useful left to point at) and fall through below.
+            try:
+                from session_store import lead_sessions as _ls3
+                _ls3.clear_last_prompted_contract(canonical_user_id)
+            except Exception:
+                pass
+
         live = self.find_live_contracts(canonical_user_id)
         if len(live) == 0:
             return self.describe_no_pending_reason(canonical_user_id)
         if len(live) == 1:
-            contract = live[0]
-            # PR-0 / BUG-PENDING-APPROVAL-B: a message unrelated to this
-            # contract arrived since the preview was shown (mark_context_interrupted).
-            # The first "כן" after that must re-show the business description
-            # and require an explicit second "כן" — never silently execute a
-            # stale action (context poisoning). context_integrity_unknown is
-            # gated identically — a marking failure must never be treated as
-            # "context intact" (see _apply_ingress_context_gate in app.py).
-            if (contract.context_interrupted or contract.context_integrity_unknown) \
-                    and not contract.reconfirmation_required:
-                try:
-                    self._ledger.update_status(
-                        contract.contract_id, contract.status,
-                        reconfirmation_required=True,
-                    )
-                except ActionContractTransitionError as exc:
-                    logger.error(
-                        "[ActionGateway] durable reconfirmation update failed: "
-                        "contract=%s error=%s",
-                        contract.contract_id, exc,
-                    )
-                    return (
-                        "❌ לא ניתן לשמור את מצב האישור באופן עמיד. "
-                        "הפעולה לא בוצעה; אין לנסות שוב עד לבדיקת המערכת."
-                    )
-                desc = _describe_contract_for_reconfirmation(contract)
-                return (
-                    f"יש פעולה קודמת שממתינה לאישור: {desc}.\n"
-                    f"לאשר אותה? (כן/לא)"
-                )
-            result = self.approve(contract.contract_id, approver=canonical_user_id, approver_role=approver_role)
-            return result
+            message, _terminal = self._resolve_single_contract(live[0], approver_role, canonical_user_id)
+            return message
         # יותר מאחת — מציג רשימה ממוספרת + שומר disambiguation state
         with self._disambiguation_lock:
             self._disambiguation[canonical_user_id] = list(live)
         lines = ["יש כמה פעולות הממתינות לאישור — איזו?"]
         for i, c in enumerate(live, 1):
-            lines.append(f"• {i}. {c.tool_name} (id: {c.contract_id[:8]})")
+            # BUG-115: human-readable business description, never the raw
+            # tool_name/internal contract_id. Uses the disambiguation-
+            # specific helper (not _describe_contract_for_reconfirmation()
+            # directly) so this fix cannot change that other function's
+            # behavior at its other, unrelated call sites — see both
+            # functions' docstrings.
+            lines.append(f"• {i}. {_describe_contract_for_disambiguation(c)}")
         lines.append("\nשלח את המספר (1, 2, ...) כדי לאשר פעולה ספציפית.")
         return "\n".join(lines)
 
