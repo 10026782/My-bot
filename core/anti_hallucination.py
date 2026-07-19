@@ -534,10 +534,26 @@ _AGENT_ACTION_STATUS_PATTERN = re.compile(
 # trusted elsewhere in this module (the __approval_queued__-gated NO_TOOL_CLAIMS
 # entry below) — only the trigger differs: there it *permits* this phrasing
 # when evidenced, here it additionally flags it for Single-Speaker suppression.
+#
+# BUG-113-FU (live incident, 19/07/2026): "⏳ **העדכון ממתין לאישור:**" slipped
+# past this pattern — "ממתינ[הת]" required a feminine suffix (ה/ת), but
+# "העדכון" (the update) is grammatically masculine, so the model correctly
+# wrote the bare masculine form "ממתין". A naive "[הת]?" fix (tried first,
+# failed) doesn't work: "ממתין" ends in FINAL nun (ן, U+05DF), while the
+# pattern's base "ממתינ" uses the regular medial nun (נ, U+05E0) — a
+# different Unicode character that only appears when the word continues
+# past it (as in "ממתינה"/"ממתינת"). The bare masculine form never contains
+# that regular-nun substring at all, so an optional suffix on it can never
+# match. Fixed with an explicit alternation instead — `(?:ממתינ[הת]|ממתין)`
+# — matching "ממתינה"/"ממתינת" (regular nun + suffix) OR bare "ממתין"
+# (final nun, no suffix) as two genuinely different spellings, not one
+# spelling with an optional tail. See _strip_markdown_emphasis() below for
+# the other half of the same incident (bold-markdown wrapping around the
+# confirm word in the sibling _AGENT_APPROVAL_INVITE_PATTERN).
 _AGENT_PENDING_STATUS_PATTERN = re.compile(
-    r"(מוכנ[הת]?\s.{0,25}(לאישור|ממתינ)|ממתינ[הת]\s?(ל)?אישור|"
-    r"⏳.{0,25}(ממתינ[הת] לאישור|אישור הבעלים)|"
-    r"הפעולה ממתינה לאישור|ממתינ[הת] לאישור הבעלים|"
+    r"(מוכנ[הת]?\s.{0,25}(לאישור|ממתינ)|(?:ממתינ[הת]|ממתין)\s?(ל)?אישור|"
+    r"⏳.{0,25}((?:ממתינ[הת]|ממתין) לאישור|אישור הבעלים)|"
+    r"הפעולה ממתינה לאישור|(?:ממתינ[הת]|ממתין) לאישור הבעלים|"
     r"כשתאשר.{0,40}(תתווסף|יבוצע|תישלח|יישלח))",
     re.UNICODE,
 )
@@ -562,6 +578,25 @@ _AGENT_APPROVAL_INVITE_PATTERN = re.compile(
     r"הצעד הבא.{0,30}אשר\b)",
     re.UNICODE,
 )
+# BUG-113-FU (live incident, 19/07/2026): "שלח **מאשר** כדי לאשר..." (bold
+# Markdown, TWO asterisks) slipped past the "\*?" above, which only
+# tolerates a single optional asterisk — the original BUG-113 fix (PR #396)
+# assumed unwrapped or single-*-wrapped confirm words. Rather than special-
+# case "exactly two asterisks" (the next model output could just as easily
+# wrap it in "***מאשר***" or "_מאשר_" — the same whack-a-mole risk this
+# pattern's own comment above already warns about for wording), matching is
+# done against a copy of the text with Markdown emphasis markers stripped
+# entirely, so any amount of */​_ wrapping around the confirm word is
+# transparent to the regex. Only the text used for THIS detection is
+# stripped — the text actually shown to the user is never touched.
+_MARKDOWN_EMPHASIS_RE = re.compile(r"[*_]+")
+
+
+def _strip_markdown_emphasis(text: str) -> str:
+    """Matching-only normalization: drop Markdown emphasis markers (*, _)
+    so bold/italic wrapping around a detected word/phrase can't hide it
+    from the Single-Speaker / approval-invite pattern checks."""
+    return _MARKDOWN_EMPHASIS_RE.sub("", text)
 # Was "הפעולה התקבלה. תוצאה תישלח בנפרד." — a false continuation claim with
 # no real pending/queue behind it: when this gate fires, nothing actually
 # follows up. Same claim-without-evidence class the rest of this module
@@ -635,6 +670,10 @@ def sanitize_agent_response(agent_text: str, tool_results: list[dict],
     Replaces hallucinated text; adds a warning for mismatches.
     _gateway_active: pass True when FEATURE_ACTION_GATEWAY is on to enforce Single Speaker.
     """
+    # Matching-only, never returned to the user — see _strip_markdown_emphasis()'s
+    # docstring / the BUG-113-FU comment above _AGENT_APPROVAL_INVITE_PATTERN.
+    _norm_text = _strip_markdown_emphasis(agent_text)
+
     # Single Speaker: when Gateway is active, Agent must not emit action-status
     # text — covers both completion claims (_AGENT_ACTION_STATUS_PATTERN) and
     # pending/ready-for-approval narration (_AGENT_PENDING_STATUS_PATTERN); the
@@ -642,8 +681,8 @@ def sanitize_agent_response(agent_text: str, tool_results: list[dict],
     # above) but still a second speaker describing a status ActionGateway's own
     # pending message already covers.
     if _gateway_active and (
-        _AGENT_ACTION_STATUS_PATTERN.search(agent_text)
-        or _AGENT_PENDING_STATUS_PATTERN.search(agent_text)
+        _AGENT_ACTION_STATUS_PATTERN.search(_norm_text)
+        or _AGENT_PENDING_STATUS_PATTERN.search(_norm_text)
     ):
         # BUG-SS-FALLBACK-CONTRADICTION: if a pending-approval message was
         # already sent this turn (the __approval_queued__ sentinel — see
@@ -680,7 +719,7 @@ def sanitize_agent_response(agent_text: str, tool_results: list[dict],
     # is, correctly, still pending).
     if (
         _gateway_active
-        and _AGENT_APPROVAL_INVITE_PATTERN.search(agent_text)
+        and _AGENT_APPROVAL_INVITE_PATTERN.search(_norm_text)
         and any(r.get("tool") == "__approval_queued__" for r in tool_results)
     ):
         logger.info(
@@ -720,7 +759,7 @@ def sanitize_agent_response(agent_text: str, tool_results: list[dict],
     # is category-agnostic — it fires on ANY action-completion-shaped text
     # (_AGENT_ACTION_STATUS_PATTERN) as long as NO write tool succeeded this
     # turn, regardless of which verb/table/service was actually claimed.
-    if _AGENT_ACTION_STATUS_PATTERN.search(agent_text) and not _has_write_tool_evidence(tool_results):
+    if _AGENT_ACTION_STATUS_PATTERN.search(_norm_text) and not _has_write_tool_evidence(tool_results):
         logger.error(
             "[A32] NO-TOOL-EVIDENCE generic action-claim hallucination: "
             f"agent text matched action-status language but no successful "
@@ -736,7 +775,7 @@ def sanitize_agent_response(agent_text: str, tool_results: list[dict],
     # הוספה") without ever calling a tool this turn. Category-agnostic: fires
     # on ANY approval-invite-shaped text as long as no approval was actually
     # queued this turn, regardless of the surrounding phrasing.
-    if _AGENT_APPROVAL_INVITE_PATTERN.search(agent_text) and not _has_approval_queued_evidence(tool_results):
+    if _AGENT_APPROVAL_INVITE_PATTERN.search(_norm_text) and not _has_approval_queued_evidence(tool_results):
         logger.error(
             "[A32] NO-TOOL-EVIDENCE fake-approval-invite hallucination: "
             "agent text invites the user to confirm/approve but no "

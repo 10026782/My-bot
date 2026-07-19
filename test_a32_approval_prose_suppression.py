@@ -183,6 +183,63 @@ chk("Test 6d regression: gateway_active=False -> approval-invite text passes thr
     r6d == PROD_TEXT)
 
 
+# ══════════════════════════════════════════════════
+# BUG-113-FU (live incident, 19/07/2026) — the fix above still let a
+# duplicate through for two reasons: bold-Markdown-wrapped "**מאשר**" (the
+# original fix only tolerated a single "*") and the masculine "ממתין" form
+# (only feminine "ממתינה"/"ממתינת" were recognized). Production sample:
+# ══════════════════════════════════════════════════
+
+PROD_TEXT_2 = (
+    "✅ **סטטוס המשימה:**\n"
+    "- כותרת: בדיקת pull request 393\n"
+    "- סטטוס נוכחי: ממתין (פתוחה)\n"
+    "- תאריך יעד: 19/07/2026 (היום)\n\n"
+    "⏳ **העדכון ממתין לאישור:**\n"
+    "הוספת תיאור \"תקין\" למשימה.\n\n"
+    "שלח **מאשר** כדי לאשר את העדכון."
+)
+
+r7a = sanitize_agent_response(PROD_TEXT_2, _approval_queued_evidence, _gateway_active=True)
+chk("Test 7a: bold-markdown '**מאשר**' + masculine 'ממתין' prod text -> suppressed entirely",
+    r7a == "")
+chk("Test 7a: not the failure fallback", r7a != _SINGLE_SPEAKER_FALLBACK)
+
+# The masculine-form fix lives in _AGENT_PENDING_STATUS_PATTERN, which is
+# also checked by the ORIGINAL Single-Speaker block (not just this fix's new
+# branch) — worth confirming both gates independently catch this text.
+r7b = sanitize_agent_response(
+    "⏳ **העדכון ממתין לאישור:**\nהוספת תיאור \"תקין\" למשימה.",
+    _approval_queued_evidence, _gateway_active=True,
+)
+chk("Test 7b: masculine 'ממתין' alone (no confirm-word invite) -> suppressed by the original gate",
+    r7b == "")
+
+# Further markdown-wrapping variants beyond the exact production sample —
+# triple asterisk (bold+italic) and single/double underscore — must all be
+# caught the same way; stripping is unbounded-count, not "handle exactly two".
+for wrapped in ("*מאשר*", "**מאשר**", "***מאשר***", "_מאשר_", "__מאשר__"):
+    text = f"שלח {wrapped} כדי לאשר את העדכון."
+    r = sanitize_agent_response(text, _approval_queued_evidence, _gateway_active=True)
+    chk(f"Test 7c: confirm-word wrapped as {wrapped!r} -> suppressed entirely", r == "")
+
+# Regression: markdown-stripping must not defeat the "no real evidence"
+# block — a fabricated bold-wrapped invite with NO __approval_queued__ this
+# turn is still a hallucination, not silently suppressed.
+r7d = sanitize_agent_response("שלח **מאשר** כדי לאשר את העדכון.", [], _gateway_active=True)
+chk("Test 7d regression: bold-wrapped invite with NO approval evidence -> still blocked, not suppressed",
+    r7d != "" and r7d in (_SINGLE_SPEAKER_FALLBACK, _NO_TOOL_EVIDENCE_FALLBACK))
+
+# Regression: markdown-stripping is matching-only — the text actually
+# returned to the user (in the pass-through/no-suppression case) keeps its
+# original formatting untouched, asterisks and all.
+r7e = sanitize_agent_response(
+    "בוודאי, אשמח לעזור עם **הפרויקט** שלך.", [], _gateway_active=True,
+)
+chk("Test 7e: markdown formatting in an ordinary reply is preserved verbatim (matching-only strip)",
+    r7e == "בוודאי, אשמח לעזור עם **הפרויקט** שלך.")
+
+
 print()
 print("=" * 50)
 print(f"A32 approval-prose suppression tests: {passed} passed, {failed} failed")
