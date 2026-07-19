@@ -468,7 +468,12 @@ def _all_failed(tool_results: list[dict]) -> bool:
 
 
 def _has_data(tool_results: list[dict]) -> bool:
-    """True if any tool result contains non-error, non-empty content."""
+    """True if any tool result contains non-error, non-empty content.
+
+    BUG-107A: "📭" is the codebase-wide convention for a legitimate empty
+    result (e.g. airtable_tools.py's "📭 אין רשומות בטבלה") — it must NOT
+    count as data, same as "❌" errors don't count as data.
+    """
     for r in tool_results:
         content = r.get("content", "")
         if isinstance(content, dict):
@@ -477,7 +482,8 @@ def _has_data(tool_results: list[dict]) -> bool:
             continue
         if (isinstance(content, str)
                 and content.strip()
-                and not content.lstrip().startswith("❌")):
+                and not content.lstrip().startswith("❌")
+                and not content.lstrip().startswith("📭")):
             return True
     return False
 
