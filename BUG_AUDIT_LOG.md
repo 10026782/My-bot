@@ -2478,7 +2478,7 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 
 ---
 
-## BUG-111 — פענוח batch של לידים: מילת דומיין/prefix שולח/שורות דחוסות נלכדו כשם ליד מזויף — ✅ תוקן, לא נבדק בפרודקשן
+## BUG-111 — פענוח batch של לידים: מילת דומיין/prefix שולח/שורות דחוסות נלכדו כשם ליד מזויף — ✅ VERIFIED IN PROD
 
 - **דווח:** 18/07/2026 — דווח production ישיר: הודעת batch עם 3 מספרי טלפון יצרה ליד אמיתי אחד עם `name="דומיין גיוס"` (או, בסבב השני, `name="לידים חדשים"`) — שם מזויף שנגזר מטקסט הפקודה/הכותרת, לא משם אמיתי.
 - **מסך / מודול:** `core/ingress_classifier.py` (`_extract_lead_candidates`/`_extract_candidates_from_block`/`_extract_name_from_window`/`_classify_ingress_core` — הנתיב החי; `core/lead_candidate_handler.py`'s `parse_batch_dictation`/`parse_lead_dictation` הם dead code מאומת, ראו BUG-096) ו-`core/lead_candidate_handler.py` (`_maybe_start_lead_clarification`/`_resolve_lead_clarification`).
@@ -2507,13 +2507,13 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **בדיקות:** `test_bug111_followup_compact_text.py` — 29/29 (כולל שתי הדגימות המדויקות מ-production, worst-case header מודבק ישירות על טלפון, ורגרסיה על ליד יחיד אמיתי + batch נקי קיים).
 - **Scope confirmed:** שני הסבבים לא נגעו ב-F52/RP5/`ActionGateway`/דגלים.
 - **Merged:** כן (PR #386 + PR #390, שניהם).
-- **Deployed:** לא ידוע — דרוש בדיקה ידנית ב-Render.
-- **Verified בפרודקשן:** לא — לא נצפתה עדיין דגימת production אמיתית עוברת דרך הקוד המתוקן.
-- **סטטוס:** ✅ קוד תוקן ומאומת בבדיקות (79 checks סה"כ בין שני קבצי הבדיקה, suite מלא ירוק בשני הסבבים), ⚠️ לא verified-in-prod.
+- **Deployed:** כן.
+- **Verified בפרודקשן:** ✅ כן — דגימת production אמיתית: הודעת WhatsApp מסוג batch קומפקטי/דחוס עם 3 מספרי טלפון (`0533968395`, `0533123482`, `0534185481`) **לא** יצרה יותר ליד מזויף בשם "לידים חדשים". BOSS זיהה את **שלושת** המספרים ופנה בבקשת הבהרה לשמות (Tier 5 clarification), במקום ליצור רשומת Lead שגויה ב-Airtable — בדיוק ההתנהגות שה-safety-net החדש בסבב 2 נועד להבטיח.
+- **סטטוס:** ✅ VERIFIED IN PROD / CLOSED (79 checks סה"כ בין שני קבצי הבדיקה, suite מלא ירוק בשני הסבבים; אומת גם מול תעבורה חיה).
 
 ---
 
-## BUG-112 — Telegram approval button המשיך לבצע אחרי ה-TTL המוצהר (10 דקות) — ✅ תוקן, לא נבדק בפרודקשן
+## BUG-112 — Telegram approval button המשיך לבצע אחרי ה-TTL המוצהר (10 דקות) — ✅ VERIFIED IN PROD (מנגנון הליבה) + סבב UX נוסף
 
 - **דווח:** 18/07/2026.
 - **מסך / מודול:** `app.py` — `_handle_approval_callback_impl()` (נתיב ה-Telegram inline-button), מול `event_bus.py`'s `PendingActionsStore`.
@@ -2527,6 +2527,56 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **תוקן ב-branch:** `claude/bug-112-telegram-approval-ttl`.
 - **PR:** #387 (merge `2136a14`).
 - **Merged:** כן.
+- **Deployed:** כן.
+- **Verified בפרודקשן:** ✅ כן — לחיצה אמיתית על כפתור אישור שכבר פג תוקף הציגה:
+  ```
+  ⏰ פג תוקף
+  ...
+  ⏰ פג תוקף — הפעולה לא בוצעה
+  ```
+  הפעולה **לא** בוצעה, וכפתור האישור **נעלם** (עריכת ההודעה המקורית — `_reject_stale_telegram_approval()` הסירה את ה-reply_markup). 0 dispatch, בדיוק ההתנהגות שהתיקון נועד להבטיח.
+- **סטטוס (מנגנון ליבה):** ✅ VERIFIED IN PROD / CLOSED.
+
+### סבב 2 — UX follow-up: כפילות ניסוח בין נתיב "פג-תוקף-ידוע" לנתיב "stale/כבר-נצרך" (PR #394)
+
+- **דווח:** 19/07/2026, מדגימת production שנצפתה **לפני** מיזוג PR #394 (הדגימה עצמה היא שהובילה לתיקון).
+- **תצפית:** לחיצה חוזרת/כפולה על כפתור אישור שכבר פג תוקף הפיקה **שלושה** ניסוחי "לא בוצע" חופפים-אך-שונים על מה שהמשתמש קורא כאירוע אחד — הלחיצה הראשונה (פריט pending ידוע, פג-תוקף) לעומת לחיצה שנייה (הפריט כבר נצרך — `bus.pop()` מחזיר `None`), שנייה עברה דרך helper גנרי שהפיק ניסוח שלישי, כפול.
+- **Root Cause:** שני נתיבי callback שונים באמת: (א) `_reject_stale_telegram_approval()` (BUG-112 המקורי, סבב 1 למעלה) — פריט pending **ידוע** שנמצא אך פג-תוקף. (ב) המקרה הנפרד: `bus.pop()` לא מוצא **כלום** — TTL הפנימי הנפרד של `event_bus.py` (30 דקות) כבר חלף, או שה-callback המדויק כבר נצרך בלחיצה קודמת. נתיב (ב) נותב דרך helper גנרי לא-מותאם (`_notify_stale_or_resolved_callback()`, בנוי במקור עבור "כבר בוצעה"/"כבר בוטלה") במקום קבלת ניסוח עקבי משלו.
+- **תוקן:** `_notify_missing_or_expired_callback()` חדש (`app.py`) — ביטוי ליטרלי **אחד**, `"ℹ️ הפעולה כבר פגה או אינה קיימת, ולכן לא בוצעה."`, זהה בפופ-אפ, בהודעת ה-chat הקבועה, ובעריכת ההודעה המקורית. שני אתרי הקריאה שזקוקים לניסוח נפרד מהותית ("כבר בוצעה"/"כבר בוטלה") נשארו על `_notify_stale_or_resolved_callback()` המקורי, ללא שינוי. `_reject_stale_telegram_approval()` (נתיב א', BUG-112 המקורי) לא נגע כלל.
+- **Scope:** אין שינוי לסמנטיקת ביצוע (0 dispatch לפני ואחרי, בשני הנתיבים). אין נגיעה ב-F52/RP5, פענוח לידים (BUG-111), או `FEATURE_UNIFIED_STATUS_FORMATTER`.
+- **בדיקות:** `test_bug112_telegram_approval_ttl.py` הורחב ל-30/30 (מ-22) — Test8b-8d (לחיצה שנייה מפיקה ניסוח עקבי אחד, שונה בכוונה מהודעת הלחיצה הראשונה); סעיף 4b חדש (Tests 14-18) — callback עצמאי ל-`action_id` שמעולם לא נכנס לתור בכלל, מוכיח 0 dispatch ושלושת הבמות (פופ-אפ/הודעה קבועה/הודעה ערוכה) זהות במדויק.
+- **תוקן ב-commit:** `8ac0c93` ("BUG-112 production follow-up: normalize stale/missing-callback UX to one message").
+- **תוקן ב-branch:** `claude/bug112-stale-callback-ux-followup`.
+- **PR:** #394 (merge `ad4afc9`).
+- **Merged:** כן.
 - **Deployed:** לא ידוע — דרוש בדיקה ידנית ב-Render.
-- **Verified בפרודקשן:** לא — לא נבדק עדיין לחיצה אמיתית על כפתור שפג תוקף בפרודקשן.
-- **סטטוס:** ✅ קוד תוקן ומאומת בבדיקות, ⚠️ לא verified-in-prod.
+- **Verified בפרודקשן:** ⚠️ **לא נבדק בנפרד** — זהו **defensive/idempotency cleanup**, לא נדרש לעצם BUG-112 (שכבר VERIFIED IN PROD, ראו סבב 1 למעלה). אין עדיין דגימת "missing/already-consumed callback" מפורשת אחרי ה-deploy הזה. יתרה מכך: דגימת ה-expiry האחרונה שהוכיחה את BUG-112 (סבב 1) גם מסירה את מסלול הלחיצה-הכפולה-הרגילה, כי כפתור האישור **נעלם** מיד אחרי הלחיצה הראשונה — כך שהמקרה שהתיקון הזה מכסה עשוי להיות נדיר יותר בפועל ממה שהדגימה המקורית הראתה.
+- **סטטוס:** ✅ קוד תוקן ומאומת בבדיקות, ⚠️ לא verified-in-prod בנפרד. **אין לסמן את PR #394 כ-production-proven עד שתיצפה דגימת missing/stale-callback מפורשת אחרי deploy.**
+
+---
+
+## BUG-113 — A32 לא דיכא פרוזת approval-invite כפולה כשאישור אמיתי כבר נשלח לתור — ✅ VERIFIED IN PROD / CLOSED
+
+- **דווח:** 19/07/2026, מדגימת production ישירה (F52 PR6 כבר היה במיזוג ומאומת — זהו ממצא נפרד, לא כשל taxonomy).
+- **מסך / מודול:** `core/anti_hallucination.py::sanitize_agent_response()` — שער ה-Single-Speaker של A32.
+- **Severity:** Medium — לא כשל ביטחוני (0 dispatch כפול, ה-approval עצמו תקין), אבל שני מסרים סותרים-בפועל למשתמש/בעלים באותו turn.
+- **דגימת production (verbatim, לפני התיקון):**
+  - הודעת gateway אמיתית: `⏳ בקשת אישור` / `➕ הוסף ל-Tasks...` / `ID: ... | פג תוקף בעוד 10 דקות`.
+  - **וגם**, ללא דיכוי, פרוזת agent: `✅ המשימה מוכנה להוספה...` / `➡️ הצעד הבא... שלח מאשר...`.
+  - זה גרם ל-`[EvidenceFinalizerShadow] evidence_status=approval_pending response_claim=success mismatch=true`.
+- **Root Cause:** שער ה-Single-Speaker הקיים (`_AGENT_ACTION_STATUS_PATTERN`/`_AGENT_PENDING_STATUS_PATTERN`) לא כיסה את הניסוח הזה. `_AGENT_APPROVAL_INVITE_PATTERN` הקיים כן תואם, אבל נבדק **רק** בשער ה-NO-TOOL-EVIDENCE הנפרד, ורק כש**אין** ראיית `__approval_queued__` — ההפך המדויק מהמקרה הזה, שבו אישור אמיתי **כן** נכנס לתור.
+- **תוקן:** ענף דיכוי חדש ב-`sanitize_agent_response()` — יורה כש-`_gateway_active` **וגם** `_AGENT_APPROVAL_INVITE_PATTERN` תואם **וגם** קיימת ראיית `__approval_queued__` אמיתית — מדכא ל-`""` (לא פולבק). `_AGENT_APPROVAL_INVITE_PATTERN` הורחב עם alternative `"הצעד הבא ... אשר"`.
+- **Scope:** רק A32 (`core/anti_hallucination.py`) נגע. אין שינוי ל-BUG-111, BUG-112 TTL, F52 formatter states, סמנטיקת ביצוע של `ActionGateway`, או דגלי feature.
+- **בדיקות:** `test_a32_approval_prose_suppression.py` חדש (18 בדיקות). רגרסיה מלאה ירוקה (70/70 + 27/27 + smoke + compileall).
+- **תוקן ב-commit:** `2d86de6` ("Fix A32: suppress approval-invite prose duplicating a queued approval prompt").
+- **PR:** #396 (merge `587d1fe`).
+- **Merged:** כן.
+- **Deployed:** כן.
+- **Verified בפרודקשן:** ✅ כן — evidence מדויק מלוגים **אחרי** ה-deploy:
+  ```
+  [A32] Single-Speaker: agent emitted approval-invite prose after an approval was already queued this turn — suppressing (not replacing with fallback)
+  [TurnEnvelope] ownership_signal ... "approval_queued": true, "agent_claimed_approval": false, "reply_owner": "gateway"
+  [EvidenceFinalizerShadow] state=shadow evidence_status=approval_pending response_claim=sent_for_approval mismatch=false code=match counts={'classification': 'approval_pending', 'verified_reads': 0, 'verified_writes': 0, 'failed_calls': 0, 'outcome_unknown': 0, 'approvals_pending': 1, 'unverified_effects': 0}
+  ```
+  הפלט למשתמש הכיל רק את הודעת ה-gateway — ללא הפרוזה הכפולה.
+- **סטטוס:** ✅ VERIFIED IN PROD / CLOSED.
