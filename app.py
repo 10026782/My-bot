@@ -1735,6 +1735,54 @@ def _reject_stale_telegram_approval(
             pass
 
 
+# BUG-112 production follow-up: bus.pop() found NOTHING at all for this
+# action_id — event_bus.py's own 30-minute PendingActionsStore TTL already
+# elapsed, or this exact callback was already consumed by an earlier press
+# (Telegram can and does redeliver a callback more than once). This is a
+# DIFFERENT path from _reject_stale_telegram_approval() above (BUG-112
+# proper: a known, still-live pending item found, but past the 10-minute
+# TTL advertised on the button) — here there is no item/payload at all, so
+# there is no label, no contract fingerprint to look up, nothing to reject.
+#
+# Production evidence: a repeated/duplicate press on an already-TTL-expired
+# button landed here right after _reject_stale_telegram_approval() had
+# already fired for the first press — producing THREE overlapping-but-
+# different "this didn't happen" phrasings for what a user reads as one
+# event: the popup + persistent message here used to say "פג תוקף — הפעולה
+# לא קיימת יותר" / "פגה או כבר לא קיימת, ולכן לא בוצעה שוב." (via the
+# generic _notify_stale_or_resolved_callback() label/state_text template,
+# built for "already executed"/"already rejected" — see the two call sites
+# below this function that still legitimately use it), right after the
+# first press had already shown "⏰ פג תוקף — הפעולה לא בוצעה". Safety was
+# never in question (bus.pop() returning None already guarantees zero
+# dispatch either way) — this is a wording-only fix. Normalized to ONE
+# literal phrase, reused identically for the popup, the persistent chat
+# message, and the edited original message — never templated/combined with
+# a generic label placeholder (there is no real label to show here).
+_MISSING_OR_EXPIRED_CALLBACK_TEXT = "ℹ️ הפעולה כבר פגה או אינה קיימת, ולכן לא בוצעה."
+
+
+def _notify_missing_or_expired_callback(cq, approver_chat_id: str) -> None:
+    """See the BUG-112 follow-up comment above this function."""
+    bot.answer_callback_query(cq.id, _MISSING_OR_EXPIRED_CALLBACK_TEXT)
+    if approver_chat_id:
+        try:
+            bot.send_message(approver_chat_id, _MISSING_OR_EXPIRED_CALLBACK_TEXT)
+        except Exception as e:
+            logger.error(f"[Approval] missing-callback notify failed: {e}")
+    try:
+        bot.edit_message_text(
+            _MISSING_OR_EXPIRED_CALLBACK_TEXT,
+            cq.message.chat.id, cq.message.message_id,
+        )
+    except Exception:
+        try:
+            bot.edit_message_reply_markup(
+                cq.message.chat.id, cq.message.message_id, reply_markup=None)
+        except Exception:
+            pass
+
+
 def _handle_approval_callback_impl(cq) -> None:
     """מטפל בלחיצה על ✅/❌ של בקשת אישור."""
     from event_bus import bus
@@ -1810,14 +1858,13 @@ def _handle_approval_callback_impl(cq) -> None:
         # atomic pop — בדיקת TTL ומחיקה בצעד אחד
         item = bus.pop(action_id)
         if not item:
-            bot.answer_callback_query(cq.id, "⏰ פג תוקף — הפעולה לא קיימת יותר")
             # No payload was ever available (SB-02's own peek above would
             # have found the same nothing) — no specific action to name,
-            # but still give a persistent result, not just the popup.
-            _notify_stale_or_resolved_callback(
-                cq, notify_chat_id=approver_chat_id,
-                label="הפעולה המבוקשת", state_text="פגה או כבר לא קיימת",
-            )
+            # but still give a persistent result, not just the popup. See
+            # _notify_missing_or_expired_callback()'s own comment for why
+            # this is a dedicated single-phrase notice rather than the
+            # generic _notify_stale_or_resolved_callback() template.
+            _notify_missing_or_expired_callback(cq, approver_chat_id)
             return
 
         payload          = item["payload"]
