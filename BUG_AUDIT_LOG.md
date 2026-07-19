@@ -2620,7 +2620,7 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 
 ---
 
-## BUG-115 — "כן" נחטף לתפריט disambiguation גנרי במקום לאשר את תצוגת ה-ליד שהוצגה — ✅ תוקן ומאומת בבדיקות, לא נבדק בפרודקשן
+## BUG-115 — "כן" נחטף לתפריט disambiguation גנרי במקום לאשר את תצוגת ה-ליד שהוצגה — ✅ VERIFIED IN PROD / CLOSED
 
 - **תאריך רישום:** 19/07/2026.
 - **מקור:** דגימת production ישירה, **נושא נפרד לגמרי מ-BUG-114** (לפי בקשה מפורשת שלא לערבב) — למרות ששתיהן נובעות בסופו של דבר מאותה עובדה בסיסית: `ActionContracts` pending לא פוקעים לעולם (BUG-114 §2 שאלה 6, נשארה פתוחה במכוון).
@@ -2646,9 +2646,16 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **בדיקות:** `test_bug115_confirmation_routing_bookmark.py` חדש (22/22) — כל 5 התרחישים המתוכננים ועוד (בוקמארק פג-תוקף, בוקמארק ל-contract שכבר נפתר, בוקמארק למשתמש אחר, בוקמארק+interruption נשמר עד terminal, אינטגרציה עם `_handle_single_candidate()` בפועל). `test_bug114_context_interrupt_amplification.py` (12/12) ו-`test_bug_reconfirmation_oneshot_fsm.py` (27/27) רצו מחדש כהוכחה שלא נשברו. עוד ~28 קבצי בדיקה קיימים שנוגעים ב-`route_confirmation_word`/`route_disambiguation`/lead preview/BUG-070/074/076/111/Stage B/PR-0/F52 PR5 נבדקו ידנית ונשארו ירוקים. Suite מלא, smoke, compileall, diff-check — כולם נקיים.
 - **תוקן ב-branch:** `claude/bug115-confirmation-routing-audit` (אותו branch כמו הביקורת, PR #403).
 - **Merged:** ✅ כן — `main` `4ce2fae` (Merge pull request #403), מאומת ב-`git log`/`git merge-base --is-ancestor`.
-- **Deployed:** לא ידוע — דרוש בדיקה ידנית ב-Render לאחר מיזוג.
-- **Verified בפרודקשן:** לא — התיקון טרם נצפה פותר "כן"/"מאשר" נכון מול תעבורה חיה עם contracts ישנים.
-- **סטטוס:** ✅ קוד תוקן ומאומת בבדיקות, ⚠️ לא verified-in-prod.
+- **Deployed:** ✅ כן (נגזר מהדגימה החיה למטה).
+- **Verified בפרודקשן:** ✅ כן — דגימת production עם ראייה מפורשת של live_contracts (התנאי שהיה חסר עד עכשיו):
+  ```
+  [TurnEnvelope] case_c_signal kind=C1 detail=live_contracts=10
+  [ActionGateway] approved: contract=4c7b539b-3df4-4116-8caa-80b6b7c84843
+  Dispatch airtable_add → POST /Leads 200 OK → executed: contract=4c7b539b... external_id=rec34IdTmCFVbRABo
+  route_confirmation_word() → "✅ בוצע: יצירת ליד: יצחק גלבר, 0527696084, general"
+  ```
+  10 contracts pending בו-זמנית (כולל 9 הישנים מהדגימה הקודמת) — ולמרות זאת **לא** הוצג "יש כמה פעולות הממתינות לאישור — איזו?"; "כן" נפתר ישירות מול ה-contract הטרי (`4c7b539b...`, ה-ליד "יצחק גלבר" שהוצג הרגע ב-`_handle_single_candidate()`'s preview) בזכות הבוקמארק. זהו בדיוק התנאי שנדרש להבחין בין "הבוקמארק פתר נכון" לבין "היה רק contract חי אחד ממילא" (ראה C139/הערה קודמת) — עכשיו מסופק במפורש. **הערה מפורשת (התבקשה):** הדגימה הזו היא F52 executed-shadow נקייה (`UnifiedStatusFormatterShadow outcome=executed mapped_state=success`, `record_id_leak=False tool_name_leak=False contract_id_leak=False fallback_used=False`) — **לא** נספרת כדגימת RP5/EvidenceFinalizer, כי לא הופיעה שורת `EvidenceFinalizerShadow` תואמת לאותו turn; לא נעשה עדכון לסטטוס RP5 על סמך הדגימה הזו.
+- **סטטוס:** ✅ VERIFIED IN PROD / CLOSED.
 
 ---
 
