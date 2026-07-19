@@ -62,7 +62,11 @@ from core.anti_hallucination import (
     _SINGLE_SPEAKER_FALLBACK, _has_write_tool_evidence,
 )
 from core.turn_evidence import TurnEvidenceSummary, observe_shadow_finalizer
-from core.rp5_fault_injection import begin_turn as _rp5_begin_turn, end_turn as _rp5_end_turn
+from core.rp5_fault_injection import (
+    begin_turn as _rp5_begin_turn,
+    end_turn as _rp5_end_turn,
+    clean_text_for_routing as _rp5_clean_for_routing,
+)
 from health_monitor import get_health_status
 from feature_flags import is_enabled as _flag_enabled, get_evidence_finalizer_state
 import cost_monitor
@@ -2617,8 +2621,14 @@ def _run_agent_impl(
     # in RP5_FAULT_ALLOWLIST + user_text carries a recognized [rp5-test:...]
     # marker. Recomputed fresh every call (including the recursive
     # run_agent() call below), so this always reflects THIS turn's own text —
-    # never a stale value from a previous turn.
-    _rp5_begin_turn(identity.memory_key, user_text)
+    # never a stale value from a previous turn. Reassigns user_text to
+    # begin_turn()'s returned (marker-stripped) text — every downstream use
+    # in this function (pending-approval/confirm-word matching, lead
+    # capture, agent prompt/tool-payload construction) MUST see the cleaned
+    # text, never the raw marker-carrying one, or a valid marker either
+    # leaks into a business payload or breaks exact-match confirmation
+    # routing (BUG-RP5-MARKER-NOT-STRIPPED).
+    user_text = _rp5_begin_turn(identity.memory_key, user_text)
     if identity.role in (Role.READONLY, Role.GUEST):
         logger.warning(
             f"[Identity] LOW-PRIVILEGE request — "
@@ -4411,8 +4421,19 @@ def _webhook_telegram_impl():
             _live_contracts_for_turn = _gw_ingress.find_live_contracts(identity_for_gate.memory_key)
         except Exception:
             logger.debug("[TurnEnvelope] turn-start live-contracts prefetch failed", exc_info=True)
+        # RP5 staging-only fault injection (core/rp5_fault_injection.py):
+        # this ingress gate runs BEFORE run_agent()/begin_turn() below, so it
+        # would otherwise see the raw marker-carrying text and misclassify
+        # "מאשר [rp5-test:write-403]" as an unrelated new message (not a
+        # recognized confirm word) — marking any live pending ActionContract
+        # context_interrupted instead of letting normal confirmation routing
+        # resolve it (BUG-RP5-MARKER-NOT-STRIPPED). Stateless preview only —
+        # does NOT activate the turn's fault state (begin_turn() below still
+        # does that, exactly once); production/non-staging/ungated calls get
+        # this back byte-identical to `text`.
+        _rp5_gate_text = _rp5_clean_for_routing(identity_for_gate.memory_key, text)
         _apply_ingress_context_gate(
-            identity_for_gate, _IngressEvent(channel="telegram", kind="text", text=text),
+            identity_for_gate, _IngressEvent(channel="telegram", kind="text", text=_rp5_gate_text),
             live_contracts=_live_contracts_for_turn,
         )
 
