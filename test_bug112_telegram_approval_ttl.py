@@ -41,6 +41,31 @@ parsing, F52/agent_message_formatter, FEATURE_UNIFIED_STATUS_FORMATTER, RP5,
 and tool execution semantics for anything other than stale-approval
 blocking (a live, non-expired callback still executes exactly as before —
 see Section 1, Tests 1-2).
+
+── BUG-112 production follow-up (Section 4, Tests 8b-8d, 4b/14-18) ──
+
+A real production transcript showed a repeated/duplicate press on an
+already-TTL-expired button producing THREE overlapping-but-different
+"this didn't happen" phrasings for one event: the first press correctly
+showed "⏰ פג תוקף — הפעולה לא בוצעה" (the fix above), but the SECOND press
+(bus.pop() now returns None — item already consumed) fell through to the
+GENERIC _notify_stale_or_resolved_callback() helper (built for "already
+executed"/"already rejected", each with its own genuinely distinct
+wording) with a placeholder label and a third state_text
+("פגה או כבר לא קיימת"), producing yet another differently-worded notice
+right after the first. Safety was never in question — bus.pop() returning
+None already guarantees zero dispatch either way — this was a wording-only
+redundancy. Fixed with a new, dedicated app._notify_missing_or_expired_
+callback(), reusing ONE literal phrase
+("ℹ️ הפעולה כבר פגה או אינה קיימת, ולכן לא בוצעה.") identically across the
+popup, the persistent chat message, and the edited original message — never
+built from the generic label/state_text template. The two call sites that
+legitimately need distinct wording ("כבר בוצעה"/"כבר בוטלה") still use the
+original _notify_stale_or_resolved_callback() unchanged. The two callback
+paths remain intentionally separate (a known-and-now-expired item vs. a
+not-found/already-consumed one) — this fix does not merge their wording
+into a single shared literal, only removes the redundancy WITHIN the
+not-found path itself.
 """
 
 from __future__ import annotations
@@ -333,6 +358,71 @@ chk("Test9: after an expired press, the matching contract is durably "
     "'rejected' — re-approving it later via a different route "
     "(e.g. free-text) is no longer possible from a 'pending' state",
     contract4 is not None and contract4.status == "rejected")
+
+# BUG-112 production follow-up: the SECOND press above (already-consumed,
+# bus.pop() returns None) used to produce a differently-worded "missing"
+# notice ("⏰ פג תוקף — הפעולה לא קיימת יותר" popup + "ℹ️ הפעולה המבוקשת /
+# פגה או כבר לא קיימת, ולכן לא בוצעה שוב." persistent message) right after
+# the FIRST press had already shown "⏰ פג תוקף — הפעולה לא בוצעה" — three
+# overlapping-but-different phrasings read together as one confusing event.
+# Both presses must now use ONE single, consistent-with-itself phrase.
+chk("Test8b: the second (missing/already-consumed) press's popup uses the "
+    "single normalized phrase, not the old '...לא קיימת יותר' wording",
+    mock_bot_4b_again.answer_callback_query.called
+    and "הפעולה כבר פגה או אינה קיימת, ולכן לא בוצעה" in mock_bot_4b_again.answer_callback_query.call_args[0][1])
+chk("Test8c: the second press ALSO sends a persistent chat message with "
+    "the EXACT SAME phrase as its own popup (one consistent notice, not "
+    "two differently-worded artifacts for the same press)",
+    mock_bot_4b_again.send_message.called
+    and mock_bot_4b_again.send_message.call_args[0][1] == mock_bot_4b_again.answer_callback_query.call_args[0][1])
+chk("Test8d: the first press's message ('⏰ פג תוקף — הפעולה לא בוצעה', "
+    "captured earlier as _persistent_text_4) and the second press's message "
+    "are DIFFERENT strings from each other — the two paths stay distinct "
+    "(a genuinely-known TTL expiry vs. a not-found/already-consumed "
+    "callback), each internally single/non-redundant, not merged into one "
+    "shared literal",
+    mock_bot_4b_again.send_message.call_args[0][1] != _persistent_text_4)
+
+
+# ══════════════════════════════════════════════════════════════════
+# 4b. Standalone "missing/never-registered" callback (independent of a
+# prior press) — proves _notify_missing_or_expired_callback() directly,
+# not only via the repeated-press scenario above.
+# ══════════════════════════════════════════════════════════════════
+print()
+print("── 4b. standalone missing/unknown callback — one consistent message ──")
+
+approver6 = _identity("appr_bug112_6", Role.OWNER)
+cq_6 = _fake_cq(approver6.user_id, "approve:never-existed-action-id")
+mock_bot_6 = MagicMock()
+with patch.object(app, "bot", mock_bot_6), \
+     patch.object(app, "resolve_identity", return_value=approver6), \
+     patch("tools.dispatcher.dispatch_tool", side_effect=_ok_dispatch) as _dt_6, \
+     patch.object(app, "dispatch_tool", side_effect=_ok_dispatch) as _dt_legacy_6, \
+     patch.object(app, "_flag_enabled", side_effect=_flag_on_only), \
+     patch("feature_flags.is_enabled", side_effect=_flag_on_only):
+    app._handle_approval_callback_impl(cq_6)
+
+chk("Test14: a callback for an action_id that was never queued at all "
+    "never dispatches",
+    _dt_6.call_count == 0 and _dt_legacy_6.call_count == 0)
+chk("Test15: the popup uses the single normalized 'missing' phrase",
+    mock_bot_6.answer_callback_query.called
+    and mock_bot_6.answer_callback_query.call_args[0][1] == app._MISSING_OR_EXPIRED_CALLBACK_TEXT)
+chk("Test16: the persistent chat message is the EXACT SAME phrase as the "
+    "popup — one message, not label+state_text template combinations",
+    mock_bot_6.send_message.called
+    and mock_bot_6.send_message.call_args[0][1] == app._MISSING_OR_EXPIRED_CALLBACK_TEXT)
+chk("Test17: the original message is edited to the SAME phrase too (all "
+    "three surfaces — popup, persistent message, edited message — carry "
+    "one identical literal string, not three overlapping variants)",
+    mock_bot_6.edit_message_text.called
+    and mock_bot_6.edit_message_text.call_args[0][0] == app._MISSING_OR_EXPIRED_CALLBACK_TEXT)
+chk("Test18: the normalized phrase itself is a single, self-contained "
+    "sentence naming both facts (expired/missing AND not executed) — not "
+    "glued from a separate label + state_text pair",
+    "פגה או אינה קיימת" in app._MISSING_OR_EXPIRED_CALLBACK_TEXT
+    and "לא בוצעה" in app._MISSING_OR_EXPIRED_CALLBACK_TEXT)
 
 
 # ══════════════════════════════════════════════════════════════════
