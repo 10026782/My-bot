@@ -2652,7 +2652,7 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 
 ---
 
-## BUG-116 — `_AIRTABLE_ID_RE` ב-Tier-4 gate תופס מילים אנגליות רגילות ("recruitment") כ-Airtable ID — ✅ תוקן ומאומת בבדיקות, לא נבדק בפרודקשן
+## BUG-116 — `_AIRTABLE_ID_RE` ב-Tier-4 gate תופס מילים אנגליות רגילות ("recruitment") כ-Airtable ID — ✅ VERIFIED IN PROD / CLOSED
 
 - **תאריך רישום:** 19/07/2026.
 - **מקור:** דגימת production ישירה, **נושא נפרד לגמרי מ-BUG-114/BUG-115** — שגיאת Tier-4 ingress-classification, לא קשורה ל-ActionGateway/ActionContract routing כלל.
@@ -2675,7 +2675,17 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **Scope:** לא נוגע ב-BUG-114/BUG-115 (ActionGateway/ActionContract), לא ב-Tier-4 markers אחרים (`_TABLE_RE`/`_TIMESTAMP_RE`/`_LITERAL_MARKERS` וכו', כולם נשארו ללא שינוי), לא ב-`core/agent_message_formatter.py`.
 - **בדיקות:** `test_bug116_airtable_id_word_false_positive.py` חדש (15/15) — שחזור מדויק של דגימת production (כעת tier≠4, candidate אחד נחלץ), מילים אנגליות נוספות שמתחילות ב-rec/fld לא תואמות, כל fixture ID אמיתי בסוויטה עדיין תואם, תרחיש ID-אמיתי-מודבק מ-`test_c89_tier4_precedence.py` (`recABC1234567890`) עדיין מגיע ל-tier=4 מקצה-לקצה. `test_c89_tier4_precedence.py` (13/13, ללא שינוי) רץ מחדש — ללא רגרסיה לאף סימן Tier-4 אחר. Full regression sweep: **138/138 קבצי `test_*.py`, exit 0**. `smoke_tests.py` PASS, `compileall -q .` נקי, `git diff --check` נקי.
 - **תוקן ב-branch:** `claude/action-status-shadow-verification-m1m0ow` (ענף חדש, לאחר restart מ-`main` העדכני — הענף המיועד המקורי כבר היה ממוזג במלואו ל-`main`, per merged-branch restart protocol).
-- **Merged:** תלוי במיזוג PR (טרם נפתח בזמן כתיבת רשומה זו).
-- **Deployed:** לא.
-- **Verified בפרודקשן:** לא — התיקון טרם נצפה פותר הודעת-ליד אמיתית עם מילת-דומיין אנגלית מול תעבורה חיה.
-- **סטטוס:** ✅ קוד תוקן ומאומת בבדיקות, ⚠️ לא verified-in-prod.
+- **Merged:** ✅ כן — `main` `0ef018f` (Merge pull request #404), מאומת ב-`git fetch origin main` + `git log origin/main`.
+- **Deployed:** ✅ כן (נגזר מהדגימה החיה למטה — הפעולה בוצעה בפועל מול Airtable).
+- **Verified בפרודקשן:** ✅ כן — דגימת production ישירה, מיד אחרי המיזוג:
+  ```
+  Eli: צור ליד חדש domain recruitment
+       יונתן כהן - 0534820022
+  BOSS: 📋 זיהיתי ליד: *יונתן כהן* (0534820022)
+        לשמור? ענה *כן* לאישור או *לא* לביטול.
+  Eli: כן
+  BOSS: ✅ בוצע: יצירת ליד: יונתן כהן, 0534820022, general | מזהה: `recNhWVHDd9Noeql1`
+  ```
+  ניסוח שונה מהדגימה המקורית (`domain recruitment` באנגלית, בלי `לדומיין`/מקף) — מוודא שהתיקון כללי ולא מותאם-דיוק לניסוח הבדיקה. `_AIRTABLE_ID_RE` לא תפס `recruitment` יותר, `classify_ingress()` החזיר tier=1, שם+טלפון נחלצו נכון, תצוגת-ליד תקינה נשלחה, ולא "📄 זה נראה כמו טבלה" כמו קודם.
+  **הערה על BUG-115:** אותה דגימה מראה "כן" שנפתר ישירות ל-`✅ בוצע` בלי תפריט disambiguation — עקבי עם תיקון BUG-115, אך **לא מספיק כדי לסמן את BUG-115 כ-verified**: אין ראייה בדגימה הזו (למשל שורת `case_c_signal live_contracts=N`) שאכן היו כמה contracts pending חיים במקביל באותו רגע — בלעדיה לא ניתן להבדיל בין "הבוקמארק פתר נכון מתוך כמה" לבין "היה רק contract חי אחד ממילא" (המסלול הקודם, הלא-קשור-לבאג). BUG-115 נשאר מסומן "לא נבדק בפרודקשן" עד דגימה עם ספירת live_contracts>1 מפורשת.
+- **סטטוס:** ✅ VERIFIED IN PROD / CLOSED.
