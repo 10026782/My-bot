@@ -1374,3 +1374,39 @@ turn שמבצע גם read מאומת וגם מעלה approval מסווג `eviden
 
 **לא נוגע:** RP5, F52, C84, שום קוד production מלבד ה-`__main__` block החדש (שאין לו השפעת התנהגות — רק מפעיל assertions שכבר היו נכונות).
 **Merged:** לא עדיין (branch `claude/c81-c82-roadmap-docs-cleanup`) | **Verified בפרודקשן:** לא רלוונטי — docs-only audit + תיקון test harness, אין שינוי קוד production
+
+### C145 — RP5: staging-only fault-injection mechanism — עותק-תיעודי בלבד (הקוד לא ממוזג ל-main) (19-20/07/2026)
+קבצים בפועל (על branch `claude/rp5-staging-fault-injection-v4akit`, PR #407, **לא** ב-`main`): `core/rp5_fault_injection.py` (חדש), `tools/dispatcher.py`, `app.py`, `feature_flags.py`, `.env.example`, `test_rp5_fault_injection.py`, `test_rp5_marker_stripping.py` | קשור: RP5/F52 (שניהם נשארים shadow-only, לא נוגע ב-taxonomy)
+**רקע:** מנגנון צר, **staging-only**, מייצר דגימות RP5/F52 אמיתיות מונעות-בוט דרך שרשרת ה-runtime המלאה (Router → IngressClassifier → Lead handler → ActionGateway → A32 → EvidenceFinalizer → rendering), בלי לשנות התנהגות בפרודקשן. הפעלה מותנית בארבעה שערי בטיחות קשיחים: `APP_ENV=="staging"`, `RP5_FAULT_INJECTION_ENABLED=true`, המשתמש הקנוני ב-`RP5_FAULT_ALLOWLIST`, ומרקר מפורש `[rp5-test:<scenario>]` בהודעה — כישלון כל שער אחד משחזר בדיוק את מסלול הפרודקשן הקיים. שבעה תרחישים נתמכים: `google-401`/`write-403`/`write-validation-400`/`write-timeout`/`tool-empty-response`/`tool-malformed-response`/`connection-reset`.
+**נקודת הזרקה יחידה** ב-`tools/dispatcher.py::dispatch_tool()`, אחרי שערי identity/role/action_validator, לפני הפעלת הכלי האמיתי. מצב per-turn ב-`contextvars.ContextVar` (stack, ראו C146). לוג מובנה `[RP5FaultInjection] scenario=... user=... provider=... op=... tool=...`.
+**זהו רישום תיעודי בלבד על `main`** — הענף עצמו נשאר סגור/staging-only ולא יתמזג לעולם (החלטה מפורשת). הרישום כאן קיים כדי שהראיה/הקונטקסט לא יאבדו כשהענף יימחק (ראו C146/C147 להמשך, ו-`BUG_AUDIT_LOG.md`'s BUG-118/BUG-119 לממצאי-צד שהתגלו תוך כדי אימות).
+**Merged:** לא, ולא יתמזג בכוונה — staging-only | **Verified ב-staging:** ✅ כן, ראו C147
+
+### C146 — RP5: תיקון integration — marker לא הוסר לפני ניתוב/סיווג, nested-turn clobber (19/07/2026)
+קבצים: `core/rp5_fault_injection.py`, `app.py`, `test_rp5_marker_stripping.py` (חדש) | קשור: RP5 (staging-only, branch `claude/rp5-staging-fault-injection-v4akit`)
+**בעיה (דגימת staging חיה):** לאחר יצירת ActionContract ממתין, "מאשר [rp5-test:write-403]" **לא** זוהה כאישור בכלל — `core/action_gateway.py::is_own_resolution_event()` (נקרא לפני `run_agent()`, ב-ingress-context-gate של `app.py`'s webhook handler) וגם `app.py`'s `_CONFIRM_WORDS` בודקים exact-match מול המחרוזת השלמה, שה-marker הנספח שובר. התוצאה: ה-contract סומן `context_interrupted`, ההודעה נפלה ל-Agent הכללי, ואף `[RP5FaultInjection]`/dispatch_tool לא הופעלו.
+
+**תיקון, שני חלקים ב-`core/rp5_fault_injection.py`:** (1) `begin_turn()` מחזיר כעת את הטקסט אחרי הסרת ה-marker, בנוסף להפעלת ה-fault ממקור הטקסט הגולמי — `app.py`'s `_run_agent_impl` משבץ מחדש את `user_text` לתוצאה, כך שכל צרכן בהמשך אותו turn (אישור, lead capture, בניית payload) רואה טקסט נקי. (2) פונקציה חדשה `clean_text_for_routing()` (stateless, ללא הפעלת turn state) עבור ה-ingress gate ב-Telegram webhook handler, שרץ **לפני** `run_agent()`/`begin_turn()`.
+
+**הגנת-עומק נלווית (nested-turn clobber):** ה-contextvar per-turn הוסב ממשתנה יחיד ל-stack — קריאה מקוננת ל-`run_agent()` (הrretry של Stage-A pending-approval, קיים בקוד) הייתה מוחקת את מצב ה-fault של ה-turn החיצוני ברגע שהפנימית מסתיימת (ערך יחיד משותף), מאפשרת כתיבה אמיתית "בשקט" גם כשה-marker היה תקף. push/pop משחזר את המצב שהיה פעיל לפני הקריאה המקוננת.
+
+**בדיקות:** `test_rp5_marker_stripping.py` (11 חדשות) — marker מוסר בדיוק ל-מילת אישור; טקסט גולמי אינו תואם (מוכיח שהבאג היה קיים); `clean_text_for_routing()` תואם את `begin_turn()`; `is_own_resolution_event()` מזהה את הטקסט הנקי, לא הגולמי; זרימה אמיתית propose→"מאשר [rp5-test:write-403]"→`route_confirmation_word()`→`dispatch_tool()` אמיתי מאשרת את ה-contract אך חוסמת כתיבה אמיתית, עם הוכחה ש-`airtable_add` האמיתי אף פעם לא נקרא; marker לא מגיע ל-`normalized_payload`; production/disabled/לא-ברשימה נשארים byte-identical; stack מקונן מאומת ישירות. `test_rp5_fault_injection.py` (31/31) + כל `test_*.py` הקיימים ללא רגרסיה.
+
+**מוגבל במפורש ל-Telegram** — `_webhook_whatsapp_impl()` עדיין מעביר טקסט גולמי ל-ingress gate; כל תרחיש RP5 עם אישור חייב לרוץ בטלגרם עד הרחבה נפרדת ל-WhatsApp.
+
+**לא נוגע:** RP5/F52 taxonomy, EvidenceFinalizer, UnifiedStatusFormatter, סמנטיקת approve/reject/dispatch של ActionGateway.
+**Merged:** לא — staging-only, `claude/rp5-staging-fault-injection-v4akit`, לא ממוזג בכוונה | **Verified בפרודקשן:** לא רלוונטי (staging-only) — ראו C147 לאימות staging
+
+### C147 — RP5: אימות staging (smoke test, 19/07/2026) + BUG-119 side finding (20/07/2026)
+קבצים: `BUG_AUDIT_LOG.md` | Docs בלבד | קשור: C146
+דגימת staging ישירה (Render, `RP5_FAULT_INJECTION_ENABLED=true`) — שני smoke tests, שניהם PASS:
+- **Smoke 1 (עם marker):** "מאשר [rp5-test:write-403]" → `[RP5FaultInjection] scenario=write-403` הופעל **לפני** `airtable_add` → הביצוע נכשל במפורש → **אין** POST אמיתי ל-Tasks → אין הצלחת ביצוע.
+- **Smoke 2 (בלי marker):** אישור רגיל → **אין** שורת `[RP5FaultInjection]` → ביצוע רגיל: `Dispatch airtable_add` → `POST Tasks 200` → הביצוע הצליח → `ActionGateway` ביצע → `claim outcome=completed`.
+
+מאמת ב-staging חי, קצה-לקצה, ארבעה היבטים בו-זמנית: הפעלת marker, הסרת-marker/ניתוב-אישור (C146), חסימת כתיבה תחת marker, והתנהגות אינרטית לחלוטין בלי marker (byte-identical למסלול הרגיל).
+
+**ממצא-צד 1 (BUG-118, רשום בנפרד, לא חוסם):** תגובת ההצלחה של המסלול הישן ב-`route_confirmation_word()` עדיין מדליפה tool_name/Airtable record_id גולמיים בטקסט — במעקב תחת F52 soak, **אינו** חוסם ל-PR #407.
+
+**ממצא-צד 2 (BUG-119, רשום בנפרד, לא חוסם, לא תוקן, 20/07/2026):** turn חמישי באותה שיחת בדיקה ("😊", נטול כל tool call) קיבל claim הצלחה שהזכיר במפורש את המשימה ש-write-403 חסם turn קודם באותה שיחה — דריסה פעילה של כישלון מתועד, לא הזיה גנרית. Contract Chain אומת בקוד ישיר: `core/anti_hallucination.py`'s `_AGENT_ACTION_STATUS_PATTERN` (ה-"generic structural safety net" שאמור לתפוס בדיוק את זה) מכסה רק צורת-יחיד לשישה מתוך שבעה פעלי-השלמה, חסרה צורת ריבוי (נוצרו/בוצעו/נשלחו/נשמרו/עודכנו/הושלמו — "שתי המשימות **נוצרו**" נפל בדיוק בפער הזה). **לא קשור ל-RP5/F52 taxonomy** — פער כללי ב-A32, יחול זהה בפרודקשן תחת אותו ניסוח (סיכום עם 2+ פריטים). פרטים מלאים + הצעת תרחיש-רגרסיה (cell2b) ב-`BUG_AUDIT_LOG.md`.
+
+**Merged:** לא (docs בלבד, staging-only) | **Verified ב-staging:** ✅ כן — שני smoke tests, כל ההיבטים הנדרשים | **Verified בפרודקשן:** לא רלוונטי — הענף אינו נוגע ב-production, נשאר פתוח/לא ממוזג בכוונה

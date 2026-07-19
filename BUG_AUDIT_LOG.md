@@ -2759,3 +2759,14 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
   ```
   9 contracts ישנים היו pending (`live_contracts=9`, אותה תבנית כמו הדגימות הקודמות) ברגע שה-batch dictation נכנס — ולמרות זאת "כן" **לא** נחטף ל-disambiguation: שני הלידים אושרו ונכתבו בפועל (record ids אמיתיים). **הערת דיוק (שקיפות, לפי הסטנדרט שנשמר לאורך הסבב):** שורת `live_contracts=9` נלכדה בדיוק ל-turn של ה-batch dictation עצמו, לא ל-turn של "כן" בפני עצמו — אין שורת TurnEnvelope נפרדת עבור הודעת ה-"כן" בדגימה שסופקה. עם זאת, מדובר בשתי הודעות רצופות באותה שיחה, ותצוגת batch (Tier-2) לא יוצרת/מסירה ActionContracts כלל — כך שאין סיבה טכנית שמספר ה-contracts הישנים ישתנה בין שתי ההודעות. הראייה נחשבת מספקת לסגירה, בהינתן שהתסמין המדויק שדווח (batch + "כן" + contracts ישנים חיים ⇐ hijack) שוחזר ותוקן קצה-לקצה.
 - **סטטוס:** ✅ VERIFIED IN PROD / CLOSED.
+
+---
+
+## BUG-118 — `route_confirmation_word()`'s legacy success reply מדליף tool_name/Airtable record_id גולמיים למשתמש — 🔴 נרשם, לא תוקן (registration-only, staged-tracking)
+
+- **תאריך:** 19/07/2026.
+- **מקור:** ממצא-צד תוך כדי staging smoke test ל-PR #407 (RP5 fault-injection marker-stripping fix) — **לא** תקלה ב-RP5/dispatch/ActionGateway lifecycle עצמם, ונצפה על **Smoke 2** (הרצה ללא marker — המסלול הרגיל, לא מסלול RP5): `route_confirmation_word()`'s תשובת-ההצלחה (המסלול הישן, לפני F52/UnifiedStatusFormatter) מציגה למשתמש שם-כלי גולמי (`tool_name`) ו-Airtable `record_id` גולמי בטקסט התשובה, במקום ניסוח עסקי (בדומה לדפוס שכבר תועד/תוקן במקומות אחרים — למשל BUG-115/BUG-117's "gצריך תיאור עסקי, לא tool_name/contract_id גולמי").
+- **מקור מפורש (הוראת המשתמש):** "track separately under F52 soak, not as PR #407 blocker" — **אינו** חוסם את מיזוג/סגירת PR #407 (RP5 נשאר staging-only, לא ממוזג בכל מקרה), ואינו נחשב חלק מ-scope ה-RP5 fault-injection עצמו.
+- **קבצים לחקירה (טרם נחקרו — Contract Chain טרם בוצע):** `core/action_gateway.py::route_confirmation_word()`/`_resolve_single_contract()` (המסלול הישן שמציג את ה-tool_name/record_id הגולמיים), מול `core/agent_message_formatter.py`/`FEATURE_UNIFIED_STATUS_FORMATTER` (F52 — שכבר בתהליך shadow soak; ייתכן שהמסלול המאוחד כבר פותר את זה ב-`shadow`/`on` ולא רק ב-legacy).
+- **השערת שורש (לא מאומתת עדיין):** תגובת ה-"בוצע" הישנה (לפני F52) בונה טקסט ישירות מ-`contract.tool_name`/`external_id` ללא שכבת-תיאור עסקי, בדומה לדפוסים שכבר טופלו במקומות דומים (BUG-115/BUG-117's `_describe_contract_for_disambiguation()`), אך כאן במסלול ה-**הצלחה** (לא disambiguation).
+- **סטטוס:** 🔴 נרשם בלבד — לא נחקר לעומק, לא תוקן, לא PR. במעקב תחת F52 soak, לא כחוסם ל-PR #407.
