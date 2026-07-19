@@ -525,8 +525,8 @@ _NO_TOOL_EVIDENCE_FALLBACK = "לא ניתן לאמת כרגע את מצב הפע
 # they're common enough in negated/hedged sentences that a bare match would
 # false-positive too often; the original passive forms are left as they were.
 _AGENT_ACTION_STATUS_PATTERN = re.compile(
-    r"(?<!\?)\b(נוסף|נוספה|נוספו|בוצע|בוצעה|נשלח|נשלחה|נשמר|נשמרה|"
-    r"נוצר|נוצרה|עודכן|עודכנה|הושלם|הושלמה|"
+    r"(?<!\?)\b(נוסף|נוספה|נוספו|בוצע|בוצעה|בוצעו|נשלח|נשלחה|נשלחו|נשמר|נשמרה|נשמרו|"
+    r"נוצר|נוצרה|נוצרו|עודכן|עודכנה|עודכנו|הושלם|הושלמה|הושלמו|"
     r"מושלם|המשימה נוספה|הפעולה בוצעה|הרשומה נוצרה)\b|"
     r"(?<!לא )(?<!עדיין )\b(הוספתי|שמרתי|עדכנתי|יצרתי|שלחתי|רשמתי|ביצעתי|קבעתי|תיעדתי)\b",
     re.UNICODE,
@@ -1363,6 +1363,58 @@ def _run_tests() -> bool:
     print(f"{'✅' if okg4 else '❌'} generic guard: unenumerated passive phrasing with zero tools → blocked without a category-specific pattern")
     if not okg4:
         print(f"     got: {g4!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    # BUG-119: _AGENT_ACTION_STATUS_PATTERN only covered singular forms for
+    # 6 of 7 completion verbs (נוסף/נוספה/נוספו was the sole exception) —
+    # a plural summary of multiple completed items slipped past this whole
+    # safety net undetected. Two independent live staging incidents:
+    # (a) zero tool calls this turn, claim "שתי המשימות נוצרו בהצלחה" for
+    # two tasks including one an earlier turn's RP5 write-403 fault had
+    # just blocked; (b) a real read-only airtable_get succeeded (evidence_
+    # status=verified_read_only) but the claim was "שתי המשימות נשמרו
+    # בהצלחה" — a write claim backed by zero verified_writes.
+    print("\n── BUG-119: plural completion-verb forms ─────")
+
+    for verb in ("נוסף", "נוספה", "נוספו", "בוצע", "בוצעה", "בוצעו",
+                 "נשלח", "נשלחה", "נשלחו", "נשמר", "נשמרה", "נשמרו",
+                 "נוצר", "נוצרה", "נוצרו", "עודכן", "עודכנה", "עודכנו",
+                 "הושלם", "הושלמה", "הושלמו"):
+        matched = bool(_AGENT_ACTION_STATUS_PATTERN.search(f"המשימה {verb} בהצלחה"))
+        print(f"{'✅' if matched else '❌'} _AGENT_ACTION_STATUS_PATTERN matches {verb!r}")
+        if matched:
+            passed += 1
+        else:
+            failed += 1
+
+    g5 = sanitize_agent_response(
+        "😊 הכל בסדר! שתי המשימות נוצרו בהצלחה:\n"
+        "✅ בדיקת RP5 write 403 — תאריך יעד: 25.7.2026\n"
+        "✅ בדיקת RP5 no marker — תאריך יעד: 25.7.2026",
+        [],
+    )
+    okg5 = g5 == _NO_TOOL_EVIDENCE_FALLBACK
+    print(f"{'✅' if okg5 else '❌'} live incident #1 repro: zero-tool-call turn claiming plural 'נוצרו' → now blocked")
+    if not okg5:
+        print(f"     got: {g5!r}")
+        failed += 1
+    else:
+        passed += 1
+
+    read_only_result = [{"tool": "airtable_get", "content": "📊 Tasks — 75 רשומות", "ok": True}]
+    g6 = sanitize_agent_response(
+        "✅ שתי המשימות נשמרו בהצלחה!\n"
+        "• בדיקת RP5 write 403 — סטטוס: ממתין\n"
+        "• בדיקת RP5 no marker — סטטוס: ממתין\n"
+        "יש כרגע 75 משימות בטבלה.",
+        read_only_result,
+    )
+    okg6 = g6 == _NO_TOOL_EVIDENCE_FALLBACK
+    print(f"{'✅' if okg6 else '❌'} live incident #2 repro: read-only evidence + plural write claim 'נשמרו' → now blocked")
+    if not okg6:
+        print(f"     got: {g6!r}")
         failed += 1
     else:
         passed += 1
