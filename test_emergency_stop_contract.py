@@ -168,6 +168,44 @@ with patch(f"{MOD}.at_list_by_formula", side_effect=AirtableLookupError("down"))
     chk("adapter unavailable -> status_store reflects it", mgr.status().store_status == "unavailable")
 
 
+# ══════════════════════════════════════════════════════════════════
+# 5. End-to-end: manager.write() through the real adapter -> real gateway
+#    calls mocked, cache invalidation proven with a real subsequent read
+# ══════════════════════════════════════════════════════════════════
+print("\n── manager.write() through the real adapter ")
+
+clock4 = FakeClock()
+with patch(f"{MOD}.at_list_by_formula") as m_list, \
+     patch(f"{MOD}.at_get_by_field") as m_get, \
+     patch(f"{MOD}.airtable_patch") as m_patch:
+    m_list.side_effect = [
+        [_rec("rec1", "EMERGENCY_STOP_ALL", False)],  # pre-write hydrate
+        [_rec("rec1", "EMERGENCY_STOP_ALL", True)],   # post-write re-hydrate
+    ]
+    m_get.side_effect = [
+        _rec("rec1", "EMERGENCY_STOP_ALL", False, op_id="op-old"),  # pre-write lookup
+        _rec("rec1", "EMERGENCY_STOP_ALL", True, op_id="op-new"),   # readback
+    ]
+    m_patch.return_value = True
+
+    store = AirtableEmergencyStopStore(known_flag_names={"EMERGENCY_STOP_ALL"})
+    mgr = EmergencyStopManager(store=store, clock=clock4, ttl_seconds=7.0)
+
+    ev_before = mgr.evaluate("EMERGENCY_STOP_ALL")
+    chk("pre-write evaluate() through the real adapter -> blocked=False", ev_before.blocked is False)
+
+    wr = mgr.write(
+        "EMERGENCY_STOP_ALL", True,
+        operation_id="op-new", updated_by="owner", source="test", reason="turn it on",
+    )
+    chk("manager.write() through the real adapter -> ok=True, verified=True", wr.ok and wr.verified)
+    chk("manager.write() called the real gateway patch call", m_patch.call_count == 1)
+
+    ev_after = mgr.evaluate("EMERGENCY_STOP_ALL")
+    chk("evaluate() after write() re-reads through the real adapter", m_list.call_count == 2)
+    chk("evaluate() after write() reflects the new durable value", ev_after.blocked is True)
+
+
 print(f"\n{'='*40}")
 print(f"emergency_stop contract tests: {passed} passed, {failed} failed")
 

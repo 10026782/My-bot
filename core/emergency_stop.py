@@ -183,8 +183,10 @@ class ManagerStatus:
 
 class EmergencyStopManager:
     """
-    Read-path only in this step (Step 1) — no write()/set()/clear()
-    orchestration yet; that's an open question for Step 2 (see summary).
+    Read-path was the only thing implemented in Step 1; write() (durable
+    pass-through, Step 3/PATCH 3B) was added once feature_flags.py's
+    set_emergency_stop()/clear_emergency_stop() needed something concrete to
+    delegate to — see write()'s own docstring for its cache semantics.
 
     Precedence per evaluate(flag_name):
       1. force_stop_provider(flag_name) is True  -> blocked=True, source="env".
@@ -257,6 +259,62 @@ class EmergencyStopManager:
         with self._lock:
             self._maybe_refresh_locked()
             return self._evaluate_locked(flag_name)
+
+    def write(
+        self,
+        flag_name: str,
+        enabled: bool,
+        *,
+        operation_id: str,
+        updated_by: str,
+        source: str,
+        reason: str,
+        expected_operation_id: Optional[str] = None,
+    ) -> WriteResult:
+        """Durable write pass-through to the configured store (Step 3).
+
+        Deliberately does NOT hydrate the cache with (flag_name, enabled) on
+        a successful write — only a verified "ok" read() may ever populate
+        the cache (see class docstring / _maybe_refresh_locked). Instead, on
+        ANY write attempt — success, failure, or conflict — the cache is
+        marked stale so the next evaluate()/status() call performs a fresh,
+        verified read instead of trusting a value nobody has independently
+        confirmed durably stuck.
+
+        The store.write() call itself happens OUTSIDE the manager's lock.
+        This is unlike _maybe_refresh_locked()'s deliberate single-flight
+        read, where holding the lock across store.read() is the entire
+        point (dedupe concurrent refreshes) — serializing every write behind
+        the same lock that guards cache reads would instead stall every
+        concurrent evaluate()/status() call for as long as the durable write
+        takes, which is not a tradeoff single-flight read was ever meant to
+        impose on the write path.
+
+        Returns WriteResult(ok=False, verified=False, ...) if no store is
+        configured — this method does not raise for that case (evaluate()/
+        status() also degrade gracefully rather than raise; write() matches
+        that convention rather than being the one method on this class that
+        can throw).
+        """
+        with self._lock:
+            store = self._store
+        if store is None:
+            return WriteResult(ok=False, verified=False, error="no store configured")
+
+        result = self._safe_write(
+            store, flag_name, enabled,
+            operation_id=operation_id, updated_by=updated_by,
+            source=source, reason=reason,
+            expected_operation_id=expected_operation_id,
+        )
+
+        with self._lock:
+            # Force the next read to be fresh regardless of outcome — never
+            # keep serving a cached value from before a write we just
+            # attempted (and may or may not have actually stuck).
+            self._last_hydrated_at = None
+
+        return result
 
     def status(self) -> ManagerStatus:
         with self._lock:
@@ -353,3 +411,31 @@ class EmergencyStopManager:
             return self._store.read()
         except Exception as e:  # noqa: BLE001 — deliberately broad, see docstring
             return ReadResult(status="unavailable", error=f"store.read() raised: {e}")
+
+    @staticmethod
+    def _safe_write(
+        store: EmergencyStopStore,
+        flag_name: str,
+        enabled: bool,
+        *,
+        operation_id: str,
+        updated_by: str,
+        source: str,
+        reason: str,
+        expected_operation_id: Optional[str],
+    ) -> WriteResult:
+        """Defensive wrapper mirroring _safe_read_locked() — the Protocol
+        contract says store.write() must never raise, but write() (unlike
+        the read path) calls this without holding the lock, so an unguarded
+        exception here would propagate straight out of write() to the
+        caller. Converts an unexpected exception into a WriteResult
+        instead."""
+        try:
+            return store.write(
+                flag_name, enabled,
+                operation_id=operation_id, updated_by=updated_by,
+                source=source, reason=reason,
+                expected_operation_id=expected_operation_id,
+            )
+        except Exception as e:  # noqa: BLE001 — deliberately broad, see docstring
+            return WriteResult(ok=False, verified=False, error=f"store.write() raised: {e}")

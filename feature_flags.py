@@ -1,6 +1,11 @@
 import os
 import json
 import logging
+import threading
+from dataclasses import dataclass
+from typing import Optional
+
+from core.emergency_stop import EmergencyStopManager, FlagEvaluation, ManagerStatus, WriteResult
 
 """
 ══════════════════════════════════════════════════════════════════════
@@ -366,6 +371,193 @@ def set_flag(name: str, value: bool) -> None:
     if name in _PERSISTENT_FLAG_NAMES:
         _save_persistent()
         logger.warning(f"[FeatureFlags] persistent flag {name}={value} saved to disk")
+
+
+# ══════════════════════════════════════════════════════════════════
+# PATCH 3B Step 3 — EmergencyStopManager integration (configure hook +
+# new parallel API). NOT wired to is_enabled()/set_flag() yet — those two
+# continue exactly as above, unchanged, for EMERGENCY_STOP_* names, until
+# the atomic cutover (app.py injection + tma_api/cost_monitor migration +
+# legacy set_flag() rejection, all landing together in a later step).
+#
+# This module may import core.emergency_stop (pure, I/O-free — see that
+# module's own header). It does NOT import adapters.airtable_emergency_stop_store
+# or tools/airtable_gateway — building the concrete adapter and injecting it
+# via configure_emergency_stop_manager() is a later step's job (app.py), not
+# this module's.
+# ══════════════════════════════════════════════════════════════════
+
+class EmergencyStopNotConfigured(RuntimeError):
+    """Raised by evaluate_emergency_stop()/set_emergency_stop()/
+    clear_emergency_stop() when configure_emergency_stop_manager() has not
+    been called yet. Unrelated to, and does not affect, is_enabled()/
+    set_flag() — those never raise this."""
+
+
+class EmergencyStopManagerConflict(RuntimeError):
+    """Raised by configure_emergency_stop_manager() when a DIFFERENT manager
+    instance is already configured. Re-configuring with the SAME instance
+    (by identity) is a no-op, not an error."""
+
+
+@dataclass(frozen=True)
+class EmergencyStopStatusView:
+    """get_emergency_stop_status()'s return shape. Unlike ManagerStatus
+    (core.emergency_stop), this is safe to request at any time, configured
+    or not — configured=False + manager_status=None pre-configure, never a
+    flags dict that could be misread as "unknown = stop active"."""
+    configured: bool
+    manager_status: Optional[ManagerStatus] = None
+
+
+@dataclass(frozen=True)
+class EmergencyStopClearResult:
+    """clear_emergency_stop()'s return shape. write is the durable write
+    outcome; still_blocked_by_env is True when, even after a successful
+    durable clear, an env force-stop (see EmergencyStopManager's
+    force_stop_provider precedence) still makes the flag effectively
+    blocked — a caller must never report "cleared" from write.ok alone
+    without also checking this."""
+    write: WriteResult
+    still_blocked_by_env: bool
+
+
+_emergency_stop_manager: Optional[EmergencyStopManager] = None
+_emergency_stop_manager_lock = threading.Lock()
+
+
+def configure_emergency_stop_manager(manager: EmergencyStopManager) -> None:
+    """
+    Inject the (already-constructed, already-wired) EmergencyStopManager
+    that evaluate_emergency_stop()/get_emergency_stop_status()/
+    set_emergency_stop()/clear_emergency_stop() delegate to.
+
+    Deliberately does NOT construct a manager or a store here — no
+    adapters.airtable_emergency_stop_store import, no Airtable gateway
+    import, no network/file I/O. The caller (a later step's app.py wiring)
+    builds the manager (and its adapter) and passes the finished object in.
+
+    Thread-safe. Calling this again with the SAME instance (by identity) is
+    a no-op. Calling it with a DIFFERENT instance while one is already
+    configured raises EmergencyStopManagerConflict — there is exactly one
+    manager for the life of the process; swapping managers at runtime is
+    not a supported operation (restart the process instead).
+    """
+    if manager is None:
+        raise TypeError("manager must not be None")
+    global _emergency_stop_manager
+    with _emergency_stop_manager_lock:
+        if _emergency_stop_manager is None:
+            _emergency_stop_manager = manager
+        elif _emergency_stop_manager is not manager:
+            raise EmergencyStopManagerConflict(
+                "an EmergencyStopManager is already configured — "
+                "configure_emergency_stop_manager() does not support "
+                "swapping managers at runtime."
+            )
+        # else: same instance already configured — idempotent no-op.
+
+
+def _reset_emergency_stop_manager_for_tests() -> None:
+    """Test-only. NOT a production API — clears the configured manager so
+    each test can start from an unconfigured state. Never call this from
+    application code (no caller outside test_*.py files should ever import
+    a name prefixed with _)."""
+    global _emergency_stop_manager
+    with _emergency_stop_manager_lock:
+        _emergency_stop_manager = None
+
+
+def _get_configured_emergency_stop_manager() -> EmergencyStopManager:
+    with _emergency_stop_manager_lock:
+        manager = _emergency_stop_manager
+    if manager is None:
+        raise EmergencyStopNotConfigured(
+            "configure_emergency_stop_manager() has not been called yet — "
+            "this API has no manager to delegate to."
+        )
+    return manager
+
+
+def evaluate_emergency_stop(flag_name: str) -> FlagEvaluation:
+    """
+    New parallel read API (Step 3) — NOT yet wired to any live caller;
+    is_enabled() still governs production EMERGENCY_STOP_* behavior
+    unchanged. Raises EmergencyStopNotConfigured if
+    configure_emergency_stop_manager() hasn't been called.
+    """
+    return _get_configured_emergency_stop_manager().evaluate(flag_name)
+
+
+def get_emergency_stop_status() -> EmergencyStopStatusView:
+    """
+    New parallel status API (Step 3) — NOT yet wired to any live caller.
+    Unlike the other three new functions here, this one does NOT raise when
+    unconfigured — a health/status view must be safe to call at any time.
+    Pre-configure it returns configured=False with manager_status=None
+    (never a flags dict whose "unknown" entries could be misread as an
+    active stop).
+    """
+    with _emergency_stop_manager_lock:
+        manager = _emergency_stop_manager
+    if manager is None:
+        return EmergencyStopStatusView(configured=False, manager_status=None)
+    return EmergencyStopStatusView(configured=True, manager_status=manager.status())
+
+
+def set_emergency_stop(
+    flag_name: str,
+    enabled: bool,
+    *,
+    operation_id: str,
+    updated_by: str,
+    reason: str,
+    expected_operation_id: Optional[str] = None,
+) -> WriteResult:
+    """
+    New parallel write API (Step 3) — NOT yet wired to any live caller;
+    legacy set_flag() is untouched and still governs production
+    EMERGENCY_STOP_* behavior. Raises EmergencyStopNotConfigured if
+    unconfigured. See EmergencyStopManager.write() (core/emergency_stop.py)
+    for the underlying durable-write + cache-invalidation contract.
+    """
+    manager = _get_configured_emergency_stop_manager()
+    return manager.write(
+        flag_name, enabled,
+        operation_id=operation_id, updated_by=updated_by,
+        source="feature_flags.set_emergency_stop", reason=reason,
+        expected_operation_id=expected_operation_id,
+    )
+
+
+def clear_emergency_stop(
+    flag_name: str,
+    *,
+    operation_id: str,
+    updated_by: str,
+    reason: str,
+    expected_operation_id: Optional[str] = None,
+) -> EmergencyStopClearResult:
+    """
+    New parallel write API (Step 3) — NOT yet wired to any live caller.
+    Raises EmergencyStopNotConfigured if unconfigured.
+
+    Durable-clears (Enabled=False) the given flag, then re-evaluates it: if
+    an env force-stop is still configured for this flag (see
+    EmergencyStopManager's force_stop_provider precedence), the flag is
+    still EFFECTIVELY blocked even though the durable write succeeded.
+    still_blocked_by_env communicates that explicitly so a caller never
+    reports "cleared" when nothing observable actually changed.
+    """
+    manager = _get_configured_emergency_stop_manager()
+    write_result = manager.write(
+        flag_name, False,
+        operation_id=operation_id, updated_by=updated_by,
+        source="feature_flags.clear_emergency_stop", reason=reason,
+        expected_operation_id=expected_operation_id,
+    )
+    still_blocked_by_env = manager.evaluate(flag_name).source == "env"
+    return EmergencyStopClearResult(write=write_result, still_blocked_by_env=still_blocked_by_env)
 
 
 # Restore on import so flags survive Render restarts.
