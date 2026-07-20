@@ -1491,7 +1491,7 @@ turn שמבצע גם read מאומת וגם מעלה approval מסווג `eviden
 
 **היקף:** `app.py` בלבד. אין נגיעה ב-RP5/F52 taxonomy, ב-PA-01 flag/state, או בביצוע האישור עצמו.
 
-**Merged:** לא עדיין (branch `claude/bug121-pending-approval-queue-ux`) | **Verified בפרודקשן:** לא רלוונטי עדיין — טרם מוזג/נבדק ב-staging.
+**Merged:** ✅ `main` דרך PR #420 (commit `46efea0`) | **Verified בפרודקשן:** לא עדיין — ממתין לבדיקת המשתמש בטלגרם/WhatsApp חי.
 
 ### C153 — BUG-123: הודעת בקשת-אישור חושפת placeholder שבור ומזהים טכניים גולמיים (20/07/2026)
 קבצים: `app.py`, `event_bus.py`, `test_preview_content_fix.py` (עודכן), `test_bug123_approval_rendering_fail_closed.py` (חדש) | קשור: BUG-123 (`BUG_AUDIT_LOG.md`), BUG-118 (נתיב-קוד נפרד, לא נסגר)
@@ -1506,7 +1506,7 @@ turn שמבצע גם read מאומת וגם מעלה approval מסווג `eviden
 
 **היקף:** רינדור הודעת-אישור בלבד. אין נגיעה ב-RP5/F52, בביצוע האישור עצמו, או ב-BUG-118 (נתיב נפרד, לא נסגר על ידי זה).
 
-**Merged:** לא עדיין (branch `claude/bug121-pending-approval-queue-ux`) | **Verified בפרודקשן:** לא רלוונטי עדיין — טרם מוזג/נבדק ב-staging.
+**Merged:** ✅ `main` דרך PR #420 (commit `46efea0`) | **Verified בפרודקשן:** לא עדיין — ממתין לבדיקת המשתמש בטלגרם/WhatsApp חי.
 
 ### C154 — BUG-124: מילת-הצבעה נפוצה ("זה") הופכת הודעה רגילה לחסימת Tier-4 כוזבת (20/07/2026)
 קבצים: `app.py`, `test_bug124_context_pronoun_table_false_positive.py` (חדש) | קשור: BUG-124 (`BUG_AUDIT_LOG.md`)
@@ -1523,4 +1523,4 @@ turn שמבצע גם read מאומת וגם מעלה approval מסווג `eviden
 
 **היקף:** `app.py::resolve_context_pronouns()`/`_sanitize_for_free_text()`/`_safe_context_quote()` בלבד. אין נגיעה ב-`_is_tier4()`/`_AIRTABLE_ID_RE`/ingress_classifier עצמם.
 
-**Merged:** לא עדיין (branch `claude/bug125-context-pronoun-table-false-positive`, PR #422) | **Verified בפרודקשן:** לא רלוונטי עדיין — טרם מוזג/נבדק ב-staging.
+**Merged:** ✅ `main` דרך PR #422 (commit `5262327`) | **Verified בפרודקשן:** לא עדיין — ממתין לבדיקת המשתמש בטלגרם/WhatsApp חי.
