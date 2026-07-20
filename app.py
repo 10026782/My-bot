@@ -1667,6 +1667,27 @@ CONTEXT_PRONOUNS = {
 }
 
 
+# BUG-124: core.ingress_classifier._TABLE_RE (Tier-4 gate) treats 2+ pipe
+# characters — or even one Unicode box-drawing char — anywhere in a line as
+# a pasted table/export, no matter where they came from. The substituted
+# text below is a quoted business summary/filename, never meant to look
+# tabular, but real tool summaries commonly use " | " as a field separator
+# (e.g. "✅ בוצע: ... | מזהה: ..."). Left unsanitized, resolve_context_pronouns()
+# could splice that "| ... | ..." straight into an otherwise ordinary
+# message — so e.g. "כמה זה עולה" (a completely normal sentence, "זה" just
+# meaning "this/it", nothing to do with a prior tool result) gets its "זה"
+# replaced with a table-shaped chunk and the whole message is misclassified
+# as tier=4/table_separator, blocked before it ever reaches the Router.
+# Stripped here (not by loosening _TABLE_RE, which many unrelated real-table
+# detections rely on) since the defect is specifically this function
+# injecting table-shaped characters into free text that was never a table.
+_TABLE_TRIGGER_CHARS = str.maketrans({"|": "·", "\t": " ", "│": "", "┃": ""})
+
+
+def _sanitize_for_free_text(s: str) -> str:
+    return s.translate(_TABLE_TRIGGER_CHARS)
+
+
 def resolve_context_pronouns(text: str, chat_id: str, session: dict | None) -> str:
     """מחליף כינויי הצבעה ('זה'/'הנספח'/'הקודם' וכו') בהקשר אמיתי מה-session,
     כדי שה-Router וה-LLM יראו התייחסות מפורשת במקום לנחש. נקרא לפני intent detection.
@@ -1684,9 +1705,11 @@ def resolve_context_pronouns(text: str, chat_id: str, session: dict | None) -> s
     for pronoun, ref_type in CONTEXT_PRONOUNS.items():
         if pronoun in resolved:
             if ref_type == "last_file" and luf:
-                resolved = resolved.replace(pronoun, f"הקובץ «{luf.get('original_filename', '')}»")
+                filename = _sanitize_for_free_text(luf.get("original_filename", ""))
+                resolved = resolved.replace(pronoun, f"הקובץ «{filename}»")
             elif ref_type == "last_tool_result" and ltr:
-                resolved = resolved.replace(pronoun, f"הפעולה «{ltr.get('summary', '')}»")
+                summary = _sanitize_for_free_text(ltr.get("summary", ""))
+                resolved = resolved.replace(pronoun, f"הפעולה «{summary}»")
     return resolved
 
 
