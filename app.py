@@ -404,7 +404,17 @@ def cmd_status(msg):
     identity = resolve_identity("telegram", str(msg.from_user.id))
     if not identity or identity.role not in ("owner", "admin"):
         return
-    bot.send_message(msg.chat.id, format_startup_message(), parse_mode="Markdown")
+    text = format_startup_message()
+    try:
+        bot.send_message(msg.chat.id, text, parse_mode="Markdown")
+    except telebot.apihelper.ApiTelegramException as e:
+        # BUG-121: the message body includes raw env-var names (e.g.
+        # GOOGLE_CLIENT_ID) — Telegram's legacy Markdown parser can choke on
+        # their underscores ("Can't parse entities") and raise here. Retry
+        # once as plain text so /status still gets through instead of
+        # silently failing (previously masked entirely by BUG-120).
+        logger.warning(f"[Command] /status Markdown send failed, retrying as plain text: {e}")
+        bot.send_message(msg.chat.id, text)
 
 
 @bot.message_handler(commands=["schema"])
