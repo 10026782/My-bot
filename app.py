@@ -210,11 +210,24 @@ def log_all_exceptions(bot_instance, update):
     pass
 
 
-def handle_telebot_error(exception):
-    logger.error(f"[Telebot] unhandled: {exception}", exc_info=True)
+class _TelebotExceptionHandler(telebot.ExceptionHandler):
+    """telebot._handle_exception() calls self.exception_handler.handle(exception)
+    — it requires an OBJECT with a .handle() method, not a bare function. A
+    plain function here (the previous bug) makes that lookup itself raise
+    AttributeError: 'function' object has no attribute 'handle', which then
+    propagates in place of whatever the real original exception was —
+    masking every command-handler error with the same useless message
+    (see BUG_AUDIT_LOG.md's entry for this bug, found 20/07/2026)."""
+
+    def handle(self, exception):
+        logger.error(f"[Telebot] unhandled: {exception}", exc_info=True)
+        return False  # not "handled" -> telebot re-raises the ORIGINAL exception,
+        # so app.py's own try/except around process_new_updates() (the
+        # /command dispatch path, report_error(context="command_dispatch"))
+        # still sees and reports the real error.
 
 
-bot.exception_handler = handle_telebot_error
+bot.exception_handler = _TelebotExceptionHandler()
 
 app = Flask(__name__)
 
@@ -4089,7 +4102,7 @@ def _webhook_telegram_impl():
             try:
                 bot.process_new_updates([update])
             except Exception as e:
-                logger.error(f"[Command] dispatch error: {e}", exc_info=True)
+                logger.error(f"[Command] dispatch error: {e} | cmd={text.split()[0]!r}", exc_info=True)
                 from core.error_reporter import report_error
                 report_error(e, context="command_dispatch")
             return "", 200
