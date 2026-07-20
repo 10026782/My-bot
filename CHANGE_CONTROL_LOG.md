@@ -1436,3 +1436,20 @@ turn שמבצע גם read מאומת וגם מעלה approval מסווג `eviden
 **בדיקות:** Full `test_*.py` sweep + `smoke_tests.py` + `test_integration.py` + `core/router/test_router.py` + `compileall` — כולם נקיים.
 
 **Merged:** לא עדיין (branch `claude/n15-owner-decision-p73c3k`, commit `23c1a35`) | **Verified בפרודקשן:** לא רלוונטי עדיין — טרם מוזג.
+
+### C150 — Post-N15 Work Survey: דוח מלא + תיקון 3 פריטי drift ב-ROADMAP (20/07/2026)
+קבצים: `docs/audit/POST_N15_WORK_SURVEY_20260720.md` (חדש), `ROADMAP.md` | Docs בלבד, אין שינוי קוד production
+
+**רקע:** לקראת תכנית עבודה למספר ימים נוספים (אחרי סבב N15/BUG-110/Day-3-flags/BUG-120/BUG-121) — "כל דבר שאפשר לחזק/להשלים/לשפר, מחוץ ל-RP5/F52/כל דבר חסום". הופעלו 4 סוכני חקירה מקבילים (Explore, read-only): סקירת ROADMAP.md, סקירת BUG_AUDIT_LOG.md, סקירת feature_flags.py למועמדי הפעלה בטוחים, וסקירת חוב טכני/governance drift כללי. לכל הסוכנים ניתנה הנחיה מפורשת להוציא RP5, F52/`FEATURE_UNIFIED_STATUS_FORMATTER`, `FEATURE_ACTION_GATEWAY`, `FEATURE_PA01_ENFORCEMENT_STATE` (enforce), `FEATURE_DECISION_HUB`, `FEATURE_AUTO_CAPTURE`, `MULTITENANT` מהתוצאות.
+
+**הדוח המלא** (לא מקוצר, כדי שאף פרט לא ילך לאיבוד) נשמר ב-`docs/audit/POST_N15_WORK_SURVEY_20260720.md` — כולל: פריטי ROADMAP פתוחים (C85/C87/C88/C91/C92/N10/U1/F06/F09/F14/F15/BUG-072/ועוד), באגים פתוחים מ-BUG_AUDIT_LOG (מקובצים לפי "דורש merge"/"דורש החלטת owner"/"מתועד בלבד"/"אומת חלקית"), 7 מועמדי flag-activation בטוחים, וחוב טכני/governance drift (כולל P0 אמיתי: `EMERGENCY_STOP_*` flags נשמרים ב-`/tmp` בלבד ומתאפסים בשקט ב-restart), ותכנית מוצעת ל-5 ימים.
+
+**3 פריטי drift שנמצאו ותוקנו ב-ROADMAP.md עצמו** (הקובץ טען דבר-אחד, המציאות אחר — נמצא תוך כדי הצלבה מול עבודה מאומתת מהשבוע):
+1. **C84** — סומן "טרם ממוזג ל-main"; בפועל כבר merged (`c5c5a97`, PR #408) — אומת בסבב BUG-110 קודם השבוע (`git merge-base --is-ancestor`).
+2. **C86** — סומן "planned, not started"; בפועל `test_c86_scheduler_emergency_matrix.py::test_emergency_stop_matrix_blocks_every_registered_scheduler_job` כבר קיים ועובר — תועד בעדכון C82-FU (19/07/2026) **באותו קובץ עצמו**, סתירה פנימית שלא נתפסה.
+3. **טבלת "Known Issues"** — טענה ש-`/status` Telegram decorator הוסר ב-PR #55; בפועל קיים ורשום (`app.py:401`, תואם ל-BUG-005 הסגור). עבדנו על `/status` ישירות השבוע (BUG-120/BUG-121, כולל תיקון באג נוסף בו).
+
+כל שלושת הפריטים סומנו ✅ סגור/מתוקן בגוף ה-ROADMAP במקום התוכן המיושן.
+
+**לא נוגע:** שום קוד production, שום flag, שום PR קיים. זהו סבב תיעוד+חקירה בלבד — התכנית המוצעת בדוח עדיין לא בוצעה.
+**Merged:** לא עדיין (branch `claude/n15-owner-decision-p73c3k`) | **Verified בפרודקשן:** לא רלוונטי — docs-only.
