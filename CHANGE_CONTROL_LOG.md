@@ -1423,3 +1423,16 @@ turn שמבצע גם read מאומת וגם מעלה approval מסווג `eviden
 **בדיקות:** אין קובץ test ייעודי לשתי הפונקציות הנוגעות (`build_attribution_report`/`_parse_records`) — לא היה קיים כזה גם לפני התיקון. אומת ידנית עם תרחיש inline (ליד legacy עם `status="converted"` + ליד post-fix עם `status="done"`+`outcome=converted` — שניהם נספרים). `test_bug105_non_canonical_converted_status.py` (10/10) ו-`test_response_contract_fixes.py` (19/19) רצו ללא רגרסיה — מוודאים ש-`mark_converted()`/`lead_conversion.py` עצמם לא נגעו. Full `test_*.py` sweep (כולל 12 קבצים שדרשו התקנת `pytest` בסביבה) + `smoke_tests.py` + `test_integration.py` + `core/router/test_router.py` + `compileall` — כולם נקיים, ללא רגרסיה.
 
 **Merged:** לא עדיין (branch `claude/n15-owner-decision-p73c3k`, commit `e6efa3a`) | **Verified בפרודקשן:** לא רלוונטי עדיין — טרם מוזג ל-`main`.
+
+### C149 — Day-3 flag pre-activation prep: FEATURE_WEEKLY_SUMMARY bug fix + FEATURE_LAST_TOOL_RESULT_SHADOW tests (20/07/2026)
+קבצים: `weekly_summary.py`, `core/output_gateway.py`, `test_weekly_summary_domain_grouping.py` (חדש), `test_last_tool_result_shadow.py` (חדש) | קשור: פריטי 10/11 ב"תכנית 3-4 הימים"
+
+**FEATURE_WEEKLY_SUMMARY (פריט 10):** `_group_by_domain()` קיבץ לפי `Tags[0]`, אבל `cmd_update.py::_save_to_business_memory()` לעולם לא כותב domain ל-Tags (ראו cmd_update.py:343-349) — domain נכתב רק לשדה `Domain` הייעודי, כערך Airtable קריא-אנוש ("Real Estate", לא "real_estate"). כל רשומה קובצה בשקט לפי tag אמיתי לא-קשור, או נפלה ל-"general" (Tags ריק). תוקן: קריאה מ-`BusinessMemoryFields.DOMAIN` + נרמול ("Real Estate"→"real_estate") להתאמה למפתחות `_DOMAIN_LABELS`. `test_weekly_summary_domain_grouping.py` חדש (11 בדיקות).
+
+**FEATURE_LAST_TOOL_RESULT_SHADOW (פריט 11):** הוסף קובץ test ייעודי (לא היה קיים) המכסה את המחסן עצמו (bounded, TTL eviction, לעולם לא זורק) ואת שלוש נקודות הקריאה האמיתיות (`tools/dispatcher.py`'s `dispatch_tool()` finally-block, `tma_api.py::_shadow_record_tma()`, `core/output_gateway.py::_shadow_record_send()`) — כבוי כברירת מחדל ⇒ אפס קריאות, וגם אם `record()` עצמו זורק, ה-return value/control flow של הקורא לא מושפעים. `test_last_tool_result_shadow.py` חדש (23 בדיקות) — תפס באג אמיתי (זעיר) תוך כדי כתיבה: `_shadow_record_send()` שיבץ את ה-enum `envelope.channel` ישירות למחרוזת האבחון (`f"{envelope.channel}"` → `"OutputChannel.TWILIO_WHATSAPP"` במקום `"twilio_whatsapp"`, כי `OutputChannel(str, Enum)` לא דורס `__str__`). תוקן עם `.value`. מחרוזת אבחון בלבד, אין השפעת control-flow.
+
+**פריטים 7-9** (`FEATURE_CORE_REASONING_LEADS_STATE`, `GIT_AUDIT_SCHEDULER`, `FEATURE_TOOL_AVAILABILITY_FILTER`) — קוד מוכן מסבבים קודמים; ההפעלה עצמה היא שינוי env var ב-Render, לא שינוי קוד — נשאר להחלטת/ביצוע הבעלים.
+
+**בדיקות:** Full `test_*.py` sweep + `smoke_tests.py` + `test_integration.py` + `core/router/test_router.py` + `compileall` — כולם נקיים.
+
+**Merged:** לא עדיין (branch `claude/n15-owner-decision-p73c3k`, commit `23c1a35`) | **Verified בפרודקשן:** לא רלוונטי עדיין — טרם מוזג.
