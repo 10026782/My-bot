@@ -299,6 +299,8 @@ def airtable_patch(
     record_id: str,
     fields: dict,
     source: str = "unknown",
+    *,
+    timeout: float = 10,
 ) -> bool:
     """
     PATCH an existing Airtable record.
@@ -344,7 +346,7 @@ def airtable_patch(
             f"{_at_url(table)}/{record_id}",
             headers=_at_headers(),
             json={"fields": clean},
-            timeout=10,
+            timeout=timeout,
         )
         ok = r.status_code == 200
         _audit_log(source, table, "patch", record_id, list(clean.keys()), ok=ok)
@@ -370,6 +372,8 @@ def airtable_create(
     table: str,
     fields: dict,
     source: str = "unknown",
+    *,
+    timeout: float = 10,
 ) -> dict | None:
     """
     POST a new Airtable record.
@@ -404,7 +408,7 @@ def airtable_create(
             _at_url(table),
             headers=_at_headers(),
             json={"fields": clean},
-            timeout=10,
+            timeout=timeout,
         )
         ok = r.status_code in (200, 201)
         rec_id = r.json().get("id", "?") if ok else ""
@@ -435,7 +439,7 @@ class AirtableLookupError(Exception):
     silently treating "can't reach Airtable" the same as "genuinely not found"."""
 
 
-def at_get_by_field(table: str, field: str, value: str) -> dict | None:
+def at_get_by_field(table: str, field: str, value: str, *, timeout: float = 10) -> dict | None:
     """
     Finds a single record by an exact field match. Returns the raw Airtable
     record dict ({"id": ..., "fields": {...}}) or None if no match. Raises
@@ -450,7 +454,7 @@ def at_get_by_field(table: str, field: str, value: str) -> dict | None:
                 "filterByFormula": f"{{{field}}}='{_safe_formula_param(str(value))}'",
                 "maxRecords": 1,
             },
-            timeout=10,
+            timeout=timeout,
         )
     except Exception as e:
         raise AirtableLookupError(f"{table}/{field}={value!r}: {e}") from e
@@ -462,7 +466,9 @@ def at_get_by_field(table: str, field: str, value: str) -> dict | None:
     return records[0] if records else None
 
 
-def at_list_by_formula(table: str, formula: str, max_records: int = 100) -> list[dict]:
+def at_list_by_formula(
+    table: str, formula: str, max_records: int = 100, *, timeout: float = 10
+) -> list[dict]:
     """
     Lists records matching a caller-built filterByFormula string. The caller
     is responsible for escaping any interpolated values via
@@ -477,7 +483,7 @@ def at_list_by_formula(table: str, formula: str, max_records: int = 100) -> list
             _at_url(table),
             headers=_at_headers(),
             params={"filterByFormula": formula, "maxRecords": max_records},
-            timeout=10,
+            timeout=timeout,
         )
     except Exception as e:
         raise AirtableLookupError(f"{table} list error: {e}") from e

@@ -92,6 +92,11 @@ class Tables:
     # of it, never an independent source of approval truth. Created in the live
     # base (app4bcgoX7t0HUVnm) via Airtable MCP, 12/07/2026. ראה ActionContractsFields.
     ACTION_CONTRACTS = "ActionContracts"
+    # PATCH 3B — durable Emergency Stop persistence (Option B: dedicated table,
+    # not a reuse of Sessions). Must be created manually in Airtable before use;
+    # pre-seed with one record per known EMERGENCY_STOP_* flag name (see
+    # feature_flags.py). ראה core/emergency_stop.py / adapters/airtable_emergency_stop_store.py.
+    EMERGENCY_STOP_FLAGS = "Emergency Stop Flags"
 
 
 # ══════════════════════════════════════════════════
@@ -1362,3 +1367,27 @@ class SchemaSnapshotStatus:
     OK             = "OK"
     DRIFT_DETECTED = "Drift Detected"
     ERROR          = "Error"
+
+
+# ══════════════════════════════════════════════════
+# PATCH 3B — Emergency Stop persistence (Option B: dedicated table)
+# ══════════════════════════════════════════════════
+
+class EmergencyStopFlagFields:
+    """Tables.EMERGENCY_STOP_FLAGS — must be created manually in Airtable before use.
+
+    One record per flag name (e.g. EMERGENCY_STOP_ALL — see feature_flags.py for
+    the live list). Flag Name is a plain singleLineText primary field, NOT a
+    singleSelect — a reader must treat missing/duplicate Flag Name values across
+    records as a data-integrity error, not something the field's own type system
+    will ever catch for us. Enabled is a checkbox — Airtable omits the key
+    entirely from a record's fields when unchecked, so a reader must default
+    missing Enabled to False rather than treat it as invalid.
+    """
+    FLAG_NAME    = "Flag Name"     # singleLineText — primary field; must appear exactly once per known flag
+    ENABLED      = "Enabled"       # checkbox — absent key means False, not "invalid"
+    OPERATION_ID = "Operation ID"  # singleLineText — CAS token, see EmergencyStopStore.write()
+    UPDATED_AT   = "Updated At"    # dateTime
+    UPDATED_BY   = "Updated By"    # singleLineText
+    SOURCE       = "Source"        # singleLineText
+    REASON       = "Reason"        # multilineText
