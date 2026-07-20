@@ -7,6 +7,7 @@
 
 import logging
 import os
+import re
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -120,14 +121,24 @@ def _fetch_records_direct(formula: str) -> list[dict]:
 
 # ── עיבוד ────────────────────────────────────────────────────────
 
+def _normalize_domain_key(raw_value: str) -> str:
+    """
+    מנרמל ערך Domain גולמי מ-Airtable (למשל "Real Estate", נכתב ע"י
+    cmd_update.py::resolve_business_memory_domain()) למפתח הפנימי
+    (real_estate) שמתאים ל-_DOMAIN_LABELS. ריק/לא-מוכר → "general".
+    """
+    if not raw_value:
+        return "general"
+    return re.sub(r"\s+", "_", raw_value.strip().lower())
+
+
 def _group_by_domain(entries: list[dict]) -> dict[str, list[dict]]:
-    """מקבץ לפי domain (Tags[0])."""
+    """מקבץ לפי domain (שדה Domain הייעודי — לא Tags, ראו cmd_update.py:343-349)."""
     from airtable_schema import BusinessMemoryFields as BMF
 
     grouped: dict[str, list[dict]] = {}
     for entry in entries:
-        tags   = entry.get(BMF.TAGS, []) or []
-        domain = tags[0] if tags else "general"
+        domain = _normalize_domain_key(entry.get(BMF.DOMAIN, ""))
         grouped.setdefault(domain, []).append(entry)
     return grouped
 
