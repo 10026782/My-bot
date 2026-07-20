@@ -252,7 +252,7 @@ def _shadow_record_send(envelope: OutboundEnvelope) -> None:
     try:
         from core.last_tool_result_shadow import record as _shadow_record
         source = _SHADOW_SOURCE_BY_MODULE.get(envelope.source_module, "agent_tool")
-        _shadow_record(source=source, tool_or_action=f"send_outbound:{envelope.channel}")
+        _shadow_record(source=source, tool_or_action=f"send_outbound:{envelope.channel.value}")
     except Exception as e:
         logger.debug("[COG] shadow record failed (non-fatal): %s", e)
 
