@@ -88,7 +88,10 @@ desc = app._describe_tool_call("airtable_update", {
     "record_id": "recABC123",
     "fields": {"status": "hot", "Score": 90},
 })
-chk("airtable_update: record_id still shown", "recABC123" in desc)
+# BUG-123-FU: raw Airtable record_id must NOT appear in user-facing text
+# (technical identifiers belong only in callback_data) — this was
+# intentionally changed by the approval-message-rendering fix.
+chk("airtable_update: record_id no longer shown (BUG-123-FU)", "recABC123" not in desc)
 chk("airtable_update: changed field 'status' shown with value", "status: hot" in desc)
 chk("airtable_update: changed field 'Score' shown with value", "Score: 90" in desc)
 
@@ -111,10 +114,12 @@ except Exception as e:
     chk(f"airtable_add: non-dict 'fields' does not crash (raised {e!r})", False)
 
 # Test 5: regression — gmail_send_draft / calendar_create_event / sheets_append unchanged
+# BUG-123-FU: draft_id is a raw internal identifier — no longer shown in
+# user-facing approval text (was "📧 שלח מייל (draft: d123)" before the fix).
 chk(
-    "gmail_send_draft unchanged",
+    "gmail_send_draft: no raw draft_id shown (BUG-123-FU)",
     app._describe_tool_call("gmail_send_draft", {"draft_id": "d123"})
-    == "📧 שלח מייל (draft: d123)",
+    == "📧 שלח מייל",
 )
 chk(
     "calendar_create_event unchanged",

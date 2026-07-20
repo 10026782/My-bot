@@ -57,7 +57,10 @@ from guards          import idempotency, rate_limiter, validate_tool_output
 from config          import get_domain as _channel_domain
 from core.router     import route_request, RouteDecision, Handler
 from core.router.deterministic_denial import check_deterministic_denial
-from core.anti_hallucination import verify_execution, sanitize_agent_response
+from core.anti_hallucination import (
+    verify_execution, sanitize_agent_response,
+    _SINGLE_SPEAKER_FALLBACK, _has_write_tool_evidence,
+)
 from core.turn_evidence import TurnEvidenceSummary, observe_shadow_finalizer
 from health_monitor import get_health_status
 from feature_flags import is_enabled as _flag_enabled, get_evidence_finalizer_state
@@ -199,6 +202,16 @@ if not WEBHOOK_SECRET:
 # SAME _PENDING_APPROVAL_TTL value independently, right after popping the
 # bus item — see the "BUG-112" comment there.
 _PENDING_APPROVAL_TTL = 600
+
+# BUG-122: observational-only staleness threshold for live ActionContracts
+# (core.action_gateway's ExecutionLedger — a "pending" contract has no TTL
+# of its own; it stays live until explicitly approved/rejected/superseded).
+# Used ONLY to log stale_contracts_count for visibility into queue
+# pollution — never to auto-expire/auto-reject a contract. Mirrors C84's
+# TMA Approvals TTL (24h — asynchronous review, not a push-notification
+# button checked within minutes), the closest existing precedent for "how
+# old is too old for a pending item nobody has acted on."
+_LIVE_CONTRACT_STALE_SECONDS = 24 * 60 * 60
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=AGENT_TIMEOUT)
 telebot.apihelper.ENABLE_MIDDLEWARE = True  # נדרש לפני TeleBot() — אחרת middleware_handler לא נרשם
@@ -795,32 +808,53 @@ def _format_field_value(key: str, value) -> str:
     return s
 
 
+# BUG-123-FU (approval message rendering): shown when a business-readable
+# description cannot be safely built from the tool's inputs — fail closed
+# instead of leaking a raw "?" placeholder, tool_name, or internal dict
+# repr into user-facing approval text.
+_APPROVAL_DESCRIPTION_FALLBACK = "לא הצלחתי להכין תיאור ברור לבקשה הזו. נא לנסח את הבקשה שוב."
+
+
 def _describe_tool_call(tool_name: str, inputs: dict) -> str:
-    """תיאור קריא של קריאת כלי לכפתורי אישור."""
+    """תיאור קריא-לעסק של קריאת כלי, לכפתורי/הודעות אישור.
+
+    BUG-123-FU: לעולם לא חושף tool_name/record_id/contract_id גולמיים
+    בטקסט הפונה למשתמש (callback_data של הכפתור, לא הטקסט הגלוי, הוא
+    המקום הנכון למזהים טכניים — ראה _queue_approval_detailed_impl()).
+    אם אין מספיק מידע עסקי לבנות תיאור אמיתי (טבלה/fields חסרים או
+    מעוותים) — נכשל-סגור עם _APPROVAL_DESCRIPTION_FALLBACK, לא עם placeholder
+    ("?") שהמשתמש לא יכול להבין ממנו כלום.
+    """
     if tool_name == "gmail_send_draft":
-        return f"📧 שלח מייל (draft: {inputs.get('draft_id', '?')})"
+        return "📧 שלח מייל"
     if tool_name == "calendar_create_event":
-        start = str(inputs.get("start_time", "?"))[:16]
-        return f"📅 קבע: {inputs.get('summary', '?')} ב-{start}"
-    if tool_name == "airtable_add":
-        fields = inputs.get("fields", {})
-        if not isinstance(fields, dict):
-            return f"➕ הוסף ל-{inputs.get('table', '?')}: [?]"
+        summary = inputs.get("summary")
+        if not summary:
+            return _APPROVAL_DESCRIPTION_FALLBACK
+        start = str(inputs.get("start_time", "") or "")[:16]
+        return f"📅 קבע: {summary}" + (f" ב-{start}" if start else "")
+    if tool_name in ("airtable_add", "airtable_update"):
+        table = inputs.get("table")
+        fields = inputs.get("fields")
+        if not table or not isinstance(fields, dict) or not fields:
+            return _APPROVAL_DESCRIPTION_FALLBACK
         fields_preview = "\n".join(
             f"  • {k}: {_format_field_value(k, v)}" for k, v in fields.items()
         )
-        return f"➕ הוסף ל-{inputs.get('table', '?')}:\n{fields_preview}"
-    if tool_name == "airtable_update":
-        fields = inputs.get("fields", {})
-        if not isinstance(fields, dict):
-            return f"✏️ עדכן {inputs.get('record_id', '?')} ב-{inputs.get('table', '?')}"
-        fields_preview = "\n".join(
-            f"  • {k}: {_format_field_value(k, v)}" for k, v in fields.items()
-        )
-        return f"✏️ עדכן {inputs.get('record_id', '?')} ב-{inputs.get('table', '?')}:\n{fields_preview}"
+        if tool_name == "airtable_add":
+            return f"➕ הוסף ל-{table}:\n{fields_preview}"
+        # airtable_update: record_id is a raw Airtable identifier — never
+        # shown in user-facing text (BUG-123-FU requirement 3). The fields
+        # being changed are the meaningful business content here.
+        return f"✏️ עדכן ב-{table}:\n{fields_preview}"
     if tool_name == "sheets_append":
-        return f"📊 כתוב ל-{inputs.get('sheet_name', '?')}"
-    return f"⚡ {tool_name}: {str(inputs)[:60]}"
+        sheet = inputs.get("sheet_name")
+        if not sheet:
+            return _APPROVAL_DESCRIPTION_FALLBACK
+        return f"📊 כתוב ל-{sheet}"
+    # Unknown/uncovered tool — never leak the raw tool_name or an inputs
+    # dict repr (could contain internal keys/ids) into user-facing text.
+    return _APPROVAL_DESCRIPTION_FALLBACK
 
 
 def _write_execution_receipt(
@@ -1211,7 +1245,14 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
             telebot.types.InlineKeyboardButton("✅ אשר", callback_data=f"approve:{action_id}"),
             telebot.types.InlineKeyboardButton("❌ בטל",  callback_data=f"reject:{action_id}"),
         )
-        _legacy_pending_text = f"⏳ בקשת אישור\n\n{label}\n\nID: {action_id} | פג תוקף בעוד 10 דקות"
+        # BUG-123-FU: the raw action_id used to be shown directly in this
+        # visible text ("ID: {action_id}") — a technical identifier with no
+        # functional purpose here (routing is via the button's callback_data
+        # above, or via display-index "1"/"2" for text-based disambiguation
+        # elsewhere; nothing parses this ID back out of the message text).
+        # Dropped from user-facing text entirely — the expiry countdown is
+        # the only part of that line that's actually useful to the user.
+        _legacy_pending_text = f"⏳ בקשת אישור\n\n{label}\n\nפג תוקף בעוד 10 דקות"
         # F52 PR6: shadow-only formatter pass — off (default) returns
         # _legacy_pending_text byte-identical; shadow computes+logs the
         # unified approval_pending text alongside it (never sent); on
@@ -3293,6 +3334,64 @@ def run_agent(
             final_reply, tool_results_log,
             _gateway_active=_flag_enabled("FEATURE_ACTION_GATEWAY"),
         )
+
+        # BUG-122: pending approval queue pollution suppressing explicit new
+        # actions. Live incident: Router confidently recognized a contract-
+        # requiring intent (create_task, conf=0.95) with 5 pre-existing live
+        # ActionContracts for this identity; the agent emitted zero tool
+        # calls and queued no new approval, but its own free text happened
+        # to read as action/pending-status-shaped — Single-Speaker's blanket
+        # rule above (_gateway_active + pattern match) then replaced it with
+        # _SINGLE_SPEAKER_FALLBACK ("לא הצלחתי לבצע את הפעולה"), which is
+        # misleading here: nothing was actually attempted, so "I failed" is
+        # false, and the message gives the user no path forward. Only
+        # intervenes on that exact combination — a confidently-recognized,
+        # contract-requiring intent with zero turn activity — never touches
+        # PA-01's own flag/state (intent_requires_contract_for_success() is
+        # PA-01's existing single policy source, reused, not duplicated),
+        # RP5/F52, or approval execution. Text-only improvement.
+        try:
+            from core.router.risk_router import intent_requires_contract_for_success as _b121_contract_required
+        except Exception:
+            _b121_contract_required = None
+        _b121_intent = getattr(route, "intent", None)
+        _b121_approval_queued_this_turn = any(
+            r.get("tool") == "__approval_queued__" for r in tool_results_log
+        )
+        _b121_stale_count = sum(
+            1 for c in (_live_contracts_snapshot or [])
+            if time.time() - getattr(c, "created_at", time.time()) > _LIVE_CONTRACT_STALE_SECONDS
+        )
+        if (
+            final_reply == _SINGLE_SPEAKER_FALLBACK
+            and tool_calls_made == 0
+            and not _b121_approval_queued_this_turn
+            and _b121_contract_required is not None
+            and _b121_contract_required(_b121_intent)
+            and _live_contracts_snapshot
+        ):
+            logger.warning(
+                "[BUG-122] pending_gate_decision=ask_queue_resolution live_contracts_count=%d "
+                "stale_contracts_count=%d intent=%s user=%s",
+                len(_live_contracts_snapshot), _b121_stale_count, _b121_intent,
+                _sanitize_id(identity.memory_key),
+            )
+            final_reply = (
+                f"יש לך כרגע {len(_live_contracts_snapshot)} בקשות הממתינות לאישור. "
+                "כדי להמשיך, שלח *מאשר*/*בטל* לגבי הבקשות הקיימות, או נסח שוב את "
+                "הבקשה החדשה שלך במפורש."
+            )
+        elif (
+            tool_calls_made > 0
+            and (_b121_approval_queued_this_turn or _has_write_tool_evidence(tool_results_log))
+            and _live_contracts_snapshot
+        ):
+            logger.info(
+                "[BUG-122] pending_gate_decision=bypass_new_action live_contracts_count=%d "
+                "stale_contracts_count=%d intent=%s user=%s",
+                len(_live_contracts_snapshot), _b121_stale_count, _b121_intent,
+                _sanitize_id(identity.memory_key),
+            )
 
         # Case C2 signal (see docs/architecture/turn-coordinator/
         # CASE_C_CLARIFICATION_CONTINUITY.md) — final_reply reads as a

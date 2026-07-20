@@ -1475,3 +1475,35 @@ turn שמבצע גם read מאומת וגם מעלה approval מסווג `eviden
 **השפעה על התכנית:** יום 2 המקורי ("merge BUG-071/BATCH-DISCARD/BUG-007/BUG-049") כמעט ריק בפועל — כל הפריטים כבר ב-`main`. מה שנותר הוא production verification, לא merge. התכנית עברה ארגון-מחדש מלא ל-patch-stack לפי workstreams (ולא ימים/רשימת-באגים) — ראה תגובת session.
 
 **Merged:** לא עדיין (branch `claude/n15-owner-decision-p73c3k`) | **Verified בפרודקשן:** לא רלוונטי — docs-only, verification עצמה בוצעה מול `origin/main` ישירות (git+grep+test runs), לא בפרודקשן.
+
+### C152 — BUG-122: Pending approval queue pollution מדכא פעולות חדשות מפורשות (20/07/2026)
+קבצים: `app.py`, `test_bug122_pending_queue_ux.py` (חדש) | קשור: BUG-122 (`BUG_AUDIT_LOG.md`), PA-01 (`core/router/risk_router.py::intent_requires_contract_for_success`, נעשה בו שימוש חוזר, לא כפילות)
+
+**רקע:** דווח ע"י המשתמש (מתויג בשיחה כ-"BUG-121", אך `main` כבר החזיק BUG-120/121 בלתי-קשורים באותו רגע — נרשם כ-BUG-122 ב-`BUG_AUDIT_LOG.md` כדי למנוע התנגשות מספור, ראו הערה שם). דגימת staging: 5 `ActionContracts` חיים (`status="pending"`) קיימים לזהות; הבעלים שולח בקשת `create_task` חדשה וחד-משמעית; ה-Router מזהה בביטחון (`confidence=0.95`), אך המשתמש מקבל fallback גנרי ("לא הצלחתי לבצע את הפעולה") במקום פעולה חדשה או שאלת-resolution לתור.
+
+**Contract Chain:** אומת ישירות (לא הונח) ש-`TurnEnvelope` תצפיתי-בלבד, ש-`find_live_by_user()` כבר מסנן נכון לפי `status=="pending"`, ושששער מילות-האישור הדטרמיניסטי לא יירט את ההודעה. המנגנון האמיתי: `sanitize_agent_response()`'s Single-Speaker gate מחליף טקסט חופשי שנראה action/pending-status-shaped ב-`_SINGLE_SPEAKER_FALLBACK` גם כשלא נוסה שום דבר בפועל — מטעה כשה-Router כבר זיהה intent הדורש contract.
+
+**תוקן:** מיד אחרי `sanitize_agent_response()` ב-`run_agent()` — כש-(1) `final_reply==_SINGLE_SPEAKER_FALLBACK`, (2) `tool_calls_made==0`, (3) אין `__approval_queued__` בתור הזה, (4) `intent_requires_contract_for_success(route.intent)` אמת, (5) יש contract חי אחד לפחות — התשובה מוחלפת בהודעת queue-resolution מפורשת (מונה בקשות ממתינות, מכוונת ל-"מאשר"/"בטל" או ניסוח מפורש). לוגינג: `pending_gate_decision=ask_queue_resolution`/`bypass_new_action`, `live_contracts_count`, `stale_contracts_count` (קבוע חדש `_LIVE_CONTRACT_STALE_SECONDS=24h`, תצפיתי בלבד — אין auto-expiry).
+
+**Scope decision מדווחת (לא הוחלטה בשקט):** לא נוספה לוגינג `pending_gate_decision=intercept_confirmation` לכל אחד מהענפים המפוזרים של מילות-אישור/disambiguation הקיימים — risk/effort לא-מוצדק לתיקון הזה; הענף עצמו כן נבדק ואומת שהוא ממשיך לעבוד נכון (test (a)).
+
+**בדיקות:** `test_bug122_pending_queue_ux.py` חדש, 8/8 — (a) מילת-אישור עם contract חי אחד עדיין מגיעה ל-`approve()` (regression lock); (b) `create_task` חדש + 5 contracts חיים + 0 tool calls → הודעת queue-resolution, לא fallback; (c) `find_live_by_user()` לא סופר contracts שאינם pending; (d) ללא contracts חיים, ההתנהגות הקיימת לא משתנה (scope containment). Full `test_*.py` sweep (כל קובץ) + `compileall -q .` — נקיים.
+
+**היקף:** `app.py` בלבד. אין נגיעה ב-RP5/F52 taxonomy, ב-PA-01 flag/state, או בביצוע האישור עצמו.
+
+**Merged:** לא עדיין (branch `claude/bug121-pending-approval-queue-ux`) | **Verified בפרודקשן:** לא רלוונטי עדיין — טרם מוזג/נבדק ב-staging.
+
+### C153 — BUG-123: הודעת בקשת-אישור חושפת placeholder שבור ומזהים טכניים גולמיים (20/07/2026)
+קבצים: `app.py`, `event_bus.py`, `test_preview_content_fix.py` (עודכן), `test_bug123_approval_rendering_fail_closed.py` (חדש) | קשור: BUG-123 (`BUG_AUDIT_LOG.md`), BUG-118 (נתיב-קוד נפרד, לא נסגר)
+
+**רקע:** באותה תצפית staging של C151 — הודעת בקשת-אישור הוצגה כ-`⏳ בקשת אישור\n➕ הוסף ל-?:\nID: eeefa1d6 | פג תוקף בעוד 10 דקות`. המשתמש הבהיר במפורש: שכפול ה-ID לא היה תקלת מערכת (הודבק ידנית פעמיים בשאלה עצמה) — לא לטפל בזה כבאג. הבעיות האמיתיות: placeholder שבור ("הוסף ל-?:"), מזהה טכני גלוי (contract ID), ותוצאה — המשתמש לא יכול להבין מה הוא מאשר.
+
+**שורש:** `app.py::_describe_tool_call()`'s `inputs.get("table", "?")` (ואנלוגי בכלים אחרים) — כשל מידע עסקי הוביל ל-placeholder גולמי במקום כישלון-סגור. נמצאו גם (מעבר לדוגמה המקורית, תחת אותה מדיניות): `record_id` גולמי בענף `airtable_update`, ו-`action_id` גולמי ב-`_legacy_pending_text` — אף אחד מהם לא נדרש בפועל ל-routing (callback_data/display-index כבר עושים זאת).
+
+**תוקן:** `_describe_tool_call()` נכתב מחדש — נכשל-סגור עם `_APPROVAL_DESCRIPTION_FALLBACK` בכל שדה עסקי חסר/ריק; `record_id`/`draft_id` הוסרו מהטקסט הגלוי. `_legacy_pending_text` — הוסר `"ID: {action_id}"`, נשארה שורת פקיעת התוקף. `event_bus.py::_default_label()` נכתב מחדש באותה מדיניות (`_DEFAULT_LABEL_FALLBACK`). מזהים טכניים נשארים רק ב-`callback_data`/לוגים.
+
+**בדיקות:** `test_preview_content_fix.py` עודכן (2 בדיקות ישנות שציפו לחשיפת record_id/draft_id הוחלפו לצפות לאי-חשיפה) — 23/23. `test_bug123_approval_rendering_fail_closed.py` חדש — 20/20 (fail-closed לכל כלי, אי-חשיפת מזהים, אנלוגיה ב-`event_bus`, בדיקת מקור סטטית ל-`_legacy_pending_text`). Full `test_*.py` sweep + `compileall -q .` — נקיים.
+
+**היקף:** רינדור הודעת-אישור בלבד. אין נגיעה ב-RP5/F52, בביצוע האישור עצמו, או ב-BUG-118 (נתיב נפרד, לא נסגר על ידי זה).
+
+**Merged:** לא עדיין (branch `claude/bug121-pending-approval-queue-ux`) | **Verified בפרודקשן:** לא רלוונטי עדיין — טרם מוזג/נבדק ב-staging.

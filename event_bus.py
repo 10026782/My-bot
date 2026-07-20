@@ -376,17 +376,34 @@ class EventBus:
 
 # ── Helper ─────────────────────────────────────────
 
+_DEFAULT_LABEL_FALLBACK = "לא הצלחתי להכין תיאור ברור לבקשה הזו. נא לנסח את הבקשה שוב."
+
+
 def _default_label(action: str, payload: dict) -> str:
-    """תווית ברירת מחדל לכפתורי אישור"""
-    labels = {
-        "gmail_send_draft":       f"📧 שלח מייל ל-{payload.get('to', '?')}",
-        "calendar_create_event":  f"📅 קבע: {payload.get('summary', '?')}",
-        "airtable_add":           f"➕ הוסף ל-{payload.get('table', '?')}",
-        "airtable_update":        f"✏️ עדכן ב-{payload.get('table', '?')}",
-        "airtable_delete":        f"🗑️ מחק מ-{payload.get('table', '?')}",
-        "sheets_append":          f"📊 כתוב ל-{payload.get('sheet_name', '?')}",
-    }
-    return labels.get(action, f"⚡ {action}")
+    """תווית ברירת מחדל לכפתורי אישור.
+
+    BUG-123-FU (approval message rendering): לעולם לא placeholder גולמי
+    ("?") או tool_name/action גולמי כשחסר מידע עסקי — נכשל-סגור עם
+    _DEFAULT_LABEL_FALLBACK במקום, כדי שהמשתמש לא יראה תווית חסרת-משמעות.
+    """
+    if action == "gmail_send_draft":
+        to = payload.get("to")
+        return f"📧 שלח מייל ל-{to}" if to else "📧 שלח מייל"
+    if action == "calendar_create_event":
+        summary = payload.get("summary")
+        return f"📅 קבע: {summary}" if summary else _DEFAULT_LABEL_FALLBACK
+    if action in ("airtable_add", "airtable_update", "airtable_delete"):
+        table = payload.get("table")
+        if not table:
+            return _DEFAULT_LABEL_FALLBACK
+        icon = {"airtable_add": "➕", "airtable_update": "✏️", "airtable_delete": "🗑️"}[action]
+        verb = {"airtable_add": "הוסף ל", "airtable_update": "עדכן ב", "airtable_delete": "מחק מ"}[action]
+        return f"{icon} {verb}-{table}"
+    if action == "sheets_append":
+        sheet = payload.get("sheet_name")
+        return f"📊 כתוב ל-{sheet}" if sheet else _DEFAULT_LABEL_FALLBACK
+    # Unknown action — never leak the raw action/tool name into user text.
+    return _DEFAULT_LABEL_FALLBACK
 
 
 # ══════════════════════════════════════════════════
