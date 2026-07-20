@@ -3468,9 +3468,9 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 
 ---
 
-## BUG-147 — RP5 marker-only messages strip to empty text, reaching Anthropic as an empty user message — 🟡 קוד תוקן, נבדק, טרם נבדק ב-staging בפועל
+## BUG-148 — RP5 marker-only messages strip to empty text, reaching Anthropic as an empty user message — ✅ VERIFIED IN STAGING / CLOSED
 
-> **הערת מספור (ארבעה סבבים):** תויג מקורית "BUG-120" על ענף ה-RP5 (staging-only) לפני הרבייז הראשון; אותו מספר כבר היה תפוס ב-`main` ע"י באג בלתי-קשור (`bot.exception_handler`), אז נרשם כ-"BUG-124" ברבייז ההוא. ברבייז **השני** (20/07/2026), "BUG-124" עצמו התברר כתפוס — `main` כבר החזיק BUG-124 בלתי-קשור (מילת-הצבעה "זה"/Tier-4) שמוזג דרך PR #422 — נרשם מחדש כ-BUG-125. ברבייז **השלישי** (22/07/2026), "BUG-125" גם הוא התברר כתפוס — `main` כבר החזיק BUG-125 בלתי-קשור לחלוטין (`core/turn_evidence.py`'s `_MUTATION_SUCCESS`/✅ בודד) שמוזג בינתיים — נרשם מחדש כ-BUG-136. ברבייז **הזה, הרביעי** (24/07/2026), "BUG-136" גם הוא התברר כתפוס — `main` כבר החזיק BUG-136 בלתי-קשור לחלוטין ("בצע שוב \<קוד\>" נופל ל-Agent כשעטוף ב-markdown bold, לעיל, מ-23/07/2026) שמוזג בינתיים דרך PR #452/#456. נרשם כאן מחדש כ-**BUG-147** (המספר הפנוי הבא בפועל, אחרי BUG-146 שכבר קיים ב-`main`) — אותו דפוס בדיוק שכבר יושם ארבע פעמים בריפו הזה. **הערה נוספת:** בדיקה מקבילה, בלתי-תלויה של אותה תצפית root-cause (חוסר-כיסוי צורות-ריבוי ב-`_AGENT_ACTION_STATUS_PATTERN`, "נשמרו" בנוסף ל-"נוצרו") כבר תועדה ותוקנה בנפרד תחת BUG-119 (✅ קוד תוקן, ממוזג ל-`main` דרך PR #413) — לא כפול, לא נדרשת פעולה נוספת כאן.
+> **הערת מספור (חמישה סבבים):** תויג מקורית "BUG-120" על ענף ה-RP5 (staging-only) לפני הרבייז הראשון; אותו מספר כבר היה תפוס ב-`main` ע"י באג בלתי-קשור (`bot.exception_handler`), אז נרשם כ-"BUG-124" ברבייז ההוא. ברבייז **השני** (20/07/2026), "BUG-124" עצמו התברר כתפוס — `main` כבר החזיק BUG-124 בלתי-קשור (מילת-הצבעה "זה"/Tier-4) שמוזג דרך PR #422 — נרשם מחדש כ-BUG-125. ברבייז **השלישי** (22/07/2026), "BUG-125" גם הוא התברר כתפוס — `main` כבר החזיק BUG-125 בלתי-קשור לחלוטין (`core/turn_evidence.py`'s `_MUTATION_SUCCESS`/✅ בודד) שמוזג בינתיים — נרשם מחדש כ-BUG-136. ברבייז **הרביעי** (24/07/2026), "BUG-136" גם הוא התברר כתפוס — `main` כבר החזיק BUG-136 בלתי-קשור לחלוטין ("בצע שוב \<קוד\>" נופל ל-Agent כשעטוף ב-markdown bold, לעיל, מ-23/07/2026) שמוזג בינתיים דרך PR #452/#456 — נרשם אז כ-BUG-147. ברבייז **הזה, החמישי** (26/07/2026), "BUG-147" עצמו התברר כתפוס — `main` כבר החזיק **BUG-147 אמיתי, בלתי-קשור לחלוטין** (`dispatch_tool`'s structured-error shape על מסלול ה-validator-block, לעיל) שמוזג בינתיים דרך PR #469 (Patch A). נרשם כאן מחדש כ-**BUG-148** (המספר הפנוי הבא בפועל, אחרי BUG-147 האמיתי שכבר קיים ב-`main`) — אותו דפוס בדיוק שכבר יושם חמש פעמים בריפו הזה. **הערה נוספת:** בדיקה מקבילה, בלתי-תלויה של אותה תצפית root-cause (חוסר-כיסוי צורות-ריבוי ב-`_AGENT_ACTION_STATUS_PATTERN`, "נשמרו" בנוסף ל-"נוצרו") כבר תועדה ותוקנה בנפרד תחת BUG-119 (✅ קוד תוקן, ממוזג ל-`main` דרך PR #413) — לא כפול, לא נדרשת פעולה נוספת כאן.
 
 - **תאריך:** 20/07/2026.
 - **מקור:** דגימת staging חיה, PR #407 — קשור ישירות למנגנון RP5 marker-stripping עצמו (`core/rp5_fault_injection.py`, `BUG-RP5-MARKER-NOT-STRIPPED`'s תיקון) — **לא** ל-RP5/F52 enforcement/taxonomy.
@@ -3480,4 +3480,14 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **קבצים:** `app.py` (`_run_agent_impl`, מיד אחרי `_rp5_begin_turn`), `test_rp5_empty_after_strip.py` (חדש).
 - **בדיקות:** 6 חדשות — הודעת-marker-בלבד לעולם לא מגיעה ל-Anthropic/dispatch_tool (מוקים שמתפוצצים אם נקראים בכלל, לא assertion אחרי-מעשה); אותו דבר עם רווחים מקיפים; לוג `marker_only_empty_after_strip` (לא הגנרי); `EvidenceFinalizerShadow` מפיק `no_evidence`/`neutral`/`mismatch=false`; regression — marker על הודעה אמיתית ("מאשר [rp5-test:write-403]") לא מתרוקן ולא מושפע; ואינווריאנט כללי — הודעה ריקה גם ללא RP5/staging כלל מטופלת באותו אופן בטוח. Full `test_*.py` sweep + `smoke_tests.py` + `compileall` נקיים.
 - **היקף:** רק `app.py` — לא נוגע ב-RP5/F52 taxonomy, ב-`core/rp5_fault_injection.py` עצמו, או באכיפה.
-- **סטטוס:** 🟡 קוד תוקן ונבדק (6 בדיקות + full sweep) — **טרם נבדק ב-staging בפועל**. לפי "כלל ברזל" — לא לסמן ✅ עד אימות runtime אחרי deploy.
+- **✅ Verified ב-staging (20/07/2026), דגימה חיה מדויקת:**
+  ```
+  Eli: [rp5-test:write-validation-400]
+  bostaging: לא זיהיתי תוכן לעיבוד בהודעה. שלח בקשה או שאלה.
+
+  [RP5FaultInjection] marker_only_empty_after_strip user=b2320d31 raw='[rp5-test:write-validation-400]'
+  [EvidenceFinalizerShadow] state=shadow evidence_status=no_evidence response_claim=neutral mismatch=false code=match counts={'classification': 'no_evidence', 'verified_reads': 0, 'verified_writes': 0, 'failed_calls': 0, 'outcome_unknown': 0, 'approvals_pending': 0, 'unverified_effects': 0}
+  "POST /telegram HTTP/1.1" 200 0
+  ```
+  כל תנאי ה-fix מאומתים בו-זמנית: תשובה מקומית בטוחה (בדיוק הטקסט הצפוי), לוג `marker_only_empty_after_strip` המובחן (לא הגנרי), `EvidenceFinalizerShadow` מפיק בדיוק `no_evidence`/`neutral`/`mismatch=false` (כל המונים אפס), HTTP 200 ל-webhook, **ואין** שום קריאת `POST https://api.anthropic.com` בלוג (בניגוד לתסמין המקורי) — מוכיח שהקריאה ל-Anthropic אכן נחסמה לגמרי, לא רק שהשגיאה טופלה בדיעבד.
+- **סטטוס:** ✅ VERIFIED IN STAGING / CLOSED — קוד תוקן, 6 בדיקות + full sweep ירוקים, ועכשיו גם דגימת staging חיה מאששת כל דרישה בבת אחת.

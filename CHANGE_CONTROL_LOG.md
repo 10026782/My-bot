@@ -1965,3 +1965,18 @@ Flag: EMERGENCY_STOP_AI=False (נשמר ב-Airtable)
      (core/rp5_fault_injection.py, hook ב-tools/dispatcher.py, run_agent()→_run_agent_impl()
      wrapper) משוחזרים ללא שינוי מעל התוכן החדש. -->
 
+### C173 — BUG-148: RP5 marker-only messages stripping to empty Anthropic content — fix + staging verification (20/07/2026)
+קבצים: `app.py`, `test_rp5_empty_after_strip.py` (חדש), `BUG_AUDIT_LOG.md` | קשור: RP5 (staging-only, branch `claude/rp5-staging-fault-injection-v4akit`)
+
+**הערת מספור (חמישה סבבים):** רשומה זו תויגה מקורית "C148"/"BUG-120" על ענף ה-RP5 לפני הרבייז הראשון; שני המספרים היו תפוסים ב-`main` ע"י פריטים בלתי-קשורים, אז נרשמה כ-C154/BUG-124 ברבייז ההוא. ברבייז **השני** (20/07/2026), "C154"/"BUG-124" עצמם התבררו כתפוסים ג"כ — נרשם מחדש כ-C155/BUG-125. ברבייז **השלישי** (22/07/2026), "C155" (תפוס — Cost Telemetry) ו-"BUG-125" (תפוס — `core/turn_evidence.py`) גם הם התבררו כתפוסים ב-`main` בינתיים — נרשם כ-C169/BUG-136. ברבייז **הרביעי** (24/07/2026), "C169" (תפוס — PR #449) ו-"BUG-136" (תפוס — "בצע שוב \<קוד\>") גם הם התבררו כתפוסים ב-`main` בינתיים דרך PR #449/#452/#456 — נרשם אז כ-C172/BUG-147. ברבייז **הזה, החמישי** (26/07/2026), "C172" (תפוס — דוח בדיקות Post-Merge, לעיל) ו-"BUG-147" (תפוס — `dispatch_tool` structured-error shape, PR #469 Patch A, נושא בלתי-קשור לחלוטין) גם הם התבררו כתפוסים ב-`main` בינתיים — נרשם כאן מחדש כ-**C173/BUG-148** (המספרים הפנויים הבאים בפועל) — אותו דפוס בדיוק שכבר יושם חמש פעמים בריפו הזה.
+
+**בעיה (דגימת staging חיה):** הודעה שהיא רק ה-marker עצמו (`[rp5-test:write-validation-400]`, בלי טקסט אחר) הופכת למחרוזת ריקה אחרי `begin_turn()`'s הסרת ה-marker (C146) — שום שער לא בדק את זה, וההודעה הריקה המשיכה עד ל-`messages = history + [{"role": "user", "content": clean_msg}]`, נשלחה בפועל ל-Anthropic, ונדחתה: `Anthropic 400: messages.14: user messages must have non-empty content`.
+
+**תיקון:** בדיקה ב-`app.py`'s `_run_agent_impl()` מיד אחרי `_rp5_begin_turn()`, לפני Pending Approval Gate/confirm-word/Router/Agent loop — טקסט ריק אחרי ניקוי מחזיר תשובה מקומית בטוחה בלי לקרוא ל-Router/Context/Anthropic/dispatch_tool/ActionGateway בכלל. אינווריאנט כללי (לא RP5-ספציפי) שהיה בלתי-נגיש בפרודקשן. לוג מובחן `[RP5FaultInjection] marker_only_empty_after_strip`. `EvidenceFinalizerShadow` עדיין נקרא במפורש (`TurnEvidenceSummary()` ריק) כדי שדגימות RP5 לא יעלמו עבור ה-turn shape הזה.
+
+**בדיקות:** `test_rp5_empty_after_strip.py` (6 חדשות) — Anthropic/dispatch_tool מוקים שמתפוצצים אם נקראים בכלל (לא assertion אחרי-מעשה); לוג מובחן; `EvidenceFinalizerShadow` מפיק `no_evidence`/`neutral`/`mismatch=false`; marker על הודעה אמיתית לא מושפע; אינווריאנט כללי גם מחוץ ל-RP5/staging. Full `test_*.py` sweep + `smoke_tests.py` + `compileall` נקיים.
+
+**✅ Verified ב-staging (20/07/2026):** דגימה חיה מדויקת — "[rp5-test:write-validation-400]" → תשובה מקומית ("לא זיהיתי תוכן לעיבוד בהודעה...") + `[RP5FaultInjection] marker_only_empty_after_strip` + `[EvidenceFinalizerShadow] evidence_status=no_evidence response_claim=neutral mismatch=false` (כל המונים אפס) + HTTP 200 + **אין** קריאת Anthropic בלוג כלל. כל דרישות ה-fix מאושרות בו-זמנית מדגימה אחת.
+
+**לא נוגע:** RP5/F52 taxonomy, `core/rp5_fault_injection.py` עצמו, אכיפה.
+**Merged:** לא — staging-only, `claude/rp5-staging-fault-injection-v4akit`, לא ממוזג בכוונה | **Verified ב-staging:** ✅ כן | **Verified בפרודקשן:** לא רלוונטי — הענף אינו נוגע ב-production
