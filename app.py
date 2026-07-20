@@ -3025,7 +3025,40 @@ def _run_agent_impl(
     # text, never the raw marker-carrying one, or a valid marker either
     # leaks into a business payload or breaks exact-match confirmation
     # routing (BUG-RP5-MARKER-NOT-STRIPPED).
+    _pre_rp5_user_text = user_text
     user_text = _rp5_begin_turn(identity.memory_key, user_text)
+
+    # BUG-RP5-EMPTY-AFTER-STRIP: general invariant, not RP5-specific —
+    # Anthropic's messages[].content must never be empty (see client.
+    # messages.create below, and the recursive-history append further
+    # down). Historically user_text arriving here was never empty in
+    # production (Telegram/WhatsApp never deliver a blank text message),
+    # so this was unreachable — but begin_turn() above can now legitimately
+    # produce "" when a staging RP5 test message is ONLY the
+    # [rp5-test:<scenario>] marker with no other content. Short-circuits
+    # before router/context/tool-loop/Anthropic entirely, same as the
+    # EMERGENCY_STOP_AI short-circuit below — no model call, no tool call,
+    # no ActionGateway involvement. Still produces a real (no_evidence,
+    # neutral, non-mismatched) EvidenceFinalizerShadow sample so RP5
+    # sampling isn't silently blind to this turn shape.
+    if not user_text.strip():
+        _rp5_marker_only = bool(_pre_rp5_user_text and _pre_rp5_user_text.strip())
+        logger.info(
+            "[RP5FaultInjection] marker_only_empty_after_strip user=%s raw=%.80r"
+            if _rp5_marker_only else
+            "[Agent] empty_user_text_after_processing user=%s raw=%.80r",
+            _sanitize_id(identity.memory_key), _pre_rp5_user_text,
+        )
+        _empty_turn_evidence = TurnEvidenceSummary()
+        _empty_reply = "לא זיהיתי תוכן לעיבוד בהודעה. שלח בקשה או שאלה."
+        try:
+            _empty_reply, _ = observe_shadow_finalizer(
+                _empty_reply, _empty_turn_evidence, state=get_evidence_finalizer_state(),
+            )
+        except Exception:
+            logger.debug("[EvidenceFinalizerShadow] observer_failed (empty-text turn)", exc_info=True)
+        return _empty_reply
+
     if identity.role in (Role.READONLY, Role.GUEST):
         logger.warning(
             f"[Identity] LOW-PRIVILEGE request — "
