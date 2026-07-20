@@ -1507,3 +1507,20 @@ turn שמבצע גם read מאומת וגם מעלה approval מסווג `eviden
 **היקף:** רינדור הודעת-אישור בלבד. אין נגיעה ב-RP5/F52, בביצוע האישור עצמו, או ב-BUG-118 (נתיב נפרד, לא נסגר על ידי זה).
 
 **Merged:** לא עדיין (branch `claude/bug121-pending-approval-queue-ux`) | **Verified בפרודקשן:** לא רלוונטי עדיין — טרם מוזג/נבדק ב-staging.
+
+### C154 — BUG-124: מילת-הצבעה נפוצה ("זה") הופכת הודעה רגילה לחסימת Tier-4 כוזבת (20/07/2026)
+קבצים: `app.py`, `test_bug124_context_pronoun_table_false_positive.py` (חדש) | קשור: BUG-124 (`BUG_AUDIT_LOG.md`)
+
+**רקע:** דגימת staging חיה — "כמה זה 5 כפול 7" (שאלת חשבון רגילה) נחסמה כ-`📄 זה נראה כמו טבלה`, אחרי שנוסה שחזור ישיר של `_TABLE_RE` מול הטקסט הגולמי ולא נמצאה התאמה. חיפוש אחר כל שינוי ל-`user_text` לפני הניתוב איתר את `resolve_context_pronouns()` (C60) — עושה `text.replace("זה", f"הפעולה «{last_tool_result_summary}»")` סאב-סטרינג גולמי, וה-summary (טקסט `_tool_user_message()` אמיתי) מכיל לרוב `" | "` בפורמט הסטנדרטי של הריפו — הצבה כזו מזריקה 2+ pipes להודעה תמימה, ו-`_TABLE_RE` (Tier-4) קורא את זה כטבלה. אושש עצמאית: הודעות בלי "זה" עברו רגיל.
+
+**תוקן (גרסה ראשונית):** `resolve_context_pronouns()` מסנן את תוכן-ההצבה (`|`→`·`, `\t`→רווח, תווי-קופסה יוניקוד מוסרים) דרך `_sanitize_for_free_text()` חדשה, בשתי נקודות-ההצבה המשותפות — חל אוטומטית על **כל 7** מילות `CONTEXT_PRONOUNS`, לא רק "זה" (אומת עם `אותו`/`ההוא`/`הקודם`). `_TABLE_RE` עצמו לא שונה.
+
+**Scope decision (נשאלה מהמשתמש):** תוקנה רק חסימת ה-Tier-4 השגויה; הבעיה הסמנטית העמוקה יותר (ההצבה עדיין קורית במופעים לא-הצבעתיים של המילים האלה, למשל "אני מכיר אותו") נשארת פתוחה בכוונה — המשתמש בחר scope צר.
+
+**המשך (אותו יום, אותו ענף) — לבקשת הבעלים לתחקר היקף/נזק אמיתי:** אומת ש-`core/router/router.py`'s BUG-056 Tier-4 stop-gate חוסם **כל** הודעה מכל משתמש פנימי בכל ערוץ (טלגרם+WhatsApp, שניהם דרך `run_agent()`) ללא תלות ב-intent — כלומר החשיפה היא לכל פקודה עסקית, לא רק שאלות חשבון. יותר חשוב: `core/ingress_classifier._is_tier4()` יש לו 7 מחלקות טריגר עצמאיות; התיקון הראשוני כיסה רק את מחלקת ה-pipe/tab/box-char. אומת בפועל ש-`_AIRTABLE_ID_RE` (מחלקה נפרדת) עדיין נתפס **אחרי** התיקון הראשוני עבור summaries אמיתיים מ-`airtable_add`/`airtable_update`/`tma_write` (3 מתוך 4 הכלים ב-`_MEMORABLE_TOOLS`) — כולם מטביעים record_id גולמי (`recXXXXXXX`) בהודעת ההצלחה. **תוקן עכשיו נכון:** נוספה `_safe_context_quote()` — בודקת את המובאה המסונכרנת מול ה-`_is_tier4()` **האמיתי** לפני ההצבה, ונופלת ל-fallback גנרי ("הפעולה האחרונה שביצעת") רק כשהמובאה הייתה חוסמת כשלעצמה. עמיד מפני טריגרים עתידיים ב-`_is_tier4()`, לא רק הרשימה הידועה היום. שום מידע לא אבד — ה-LLM מקבל record_id/url/tool מלאים בנפרד דרך `_build_tool_context()` (system prompt).
+
+**בדיקות:** `test_bug124_context_pronoun_table_false_positive.py`, 28/28 (18 מקוריות + 10 חדשות: 3 תרחישי record_id אמיתיים מול ה-`_is_tier4()` האמיתי, sanity ש-summary בטוח עדיין מצוטט במלואו, 3 יחידה ל-`_safe_context_quote()`). Full `test_*.py` sweep + `compileall -q .` + `smoke_tests.py` — נקיים.
+
+**היקף:** `app.py::resolve_context_pronouns()`/`_sanitize_for_free_text()`/`_safe_context_quote()` בלבד. אין נגיעה ב-`_is_tier4()`/`_AIRTABLE_ID_RE`/ingress_classifier עצמם.
+
+**Merged:** לא עדיין (branch `claude/bug125-context-pronoun-table-false-positive`, PR #422) | **Verified בפרודקשן:** לא רלוונטי עדיין — טרם מוזג/נבדק ב-staging.
