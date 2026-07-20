@@ -2847,6 +2847,7 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **בדיקות:** `test_cmd_status_markdown_fallback.py` (חדש, 8 בדיקות) — משחזר את ה-`ApiTelegramException` המדויקת (400, "can't parse entities") מ-mock על `bot.send_message`, מוודא retry יחיד לטקסט רגיל עם אותו תוכן/chat_id; happy-path (הצלחה בפעם הראשונה → אין retry); ובדיקת end-to-end אמיתית דרך `bot.process_new_updates()` על עדכון `/status` אמיתי — מוכיחה שהדיספאץ' כבר לא זורק כלום (לפני התיקון: היה קורס, נבלע ע"י BUG-120). Full `test_*.py` sweep + `smoke_tests.py` + `test_integration.py` + `compileall` — כולם נקיים.
 - **היקף:** `app.py::cmd_status()` בלבד. `format_startup_message()`/`startup_validator.py` לא שונו (התוכן עצמו תקין — הבעיה היא רק בפרסור Markdown הישן של טלגרם, לא בתוכן). ייתכן שיש handlers נוספים ב-`app.py` עם אותה חשיפה (`bot.send_message(..., parse_mode="Markdown")` בלי try/except) — לא נסקרו כאן, מחוץ לסקופ, מומלץ audit נפרד אם רוצים לסגור את זה באופן שיטתי.
 - **סטטוס:** ✅ קוד תוקן ומאומת (reproduction אמיתי מדויק לאירוע בפרודקשן + 8/8 טסטים + full sweep) — **טרם נבדק בפרודקשן**. אחרי deploy, `/status` אמור להצליח (כטקסט רגיל, בלי עיצוב מודגש) גם אם ה-Markdown נכשל.
+- **ממוזג:** ✅ `main` דרך PR #420 (commit `46efea0`, 20/07/2026).
 
 ---
 
@@ -2867,6 +2868,7 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **בדיקות:** `test_bug122_pending_queue_ux.py` (חדש, 8 בדיקות): (a) מילת אישור עם contract חי אחד עדיין מגיעה ל-`approve()` (לא fallback גנרי, לא הודעת queue-resolution) — regression lock על התנהגות קיימת שלא נגעו בה; (b) בקשת `create_task` חדשה עם 5 contracts חיים ו-0 tool calls מקבלת הודעת queue-resolution מפורשת, לא `_SINGLE_SPEAKER_FALLBACK`; (c) `find_live_by_user()` לא סופר contracts שאינם `pending` (approved/rejected/completed) — בדיקת unit ישירה; (d) ללא contracts חיים בכלל, ההתנהגות הקיימת (`_SINGLE_SPEAKER_FALLBACK`) לא משתנה — מוודא שהתיקון לא חורג מהיקפו. Full `test_*.py` sweep (כל קובץ, כולל זה) + `compileall -q .` — נקיים.
 - **היקף:** `app.py` בלבד (הענף שאחרי `sanitize_agent_response()` ב-`run_agent()`). אין נגיעה ב-RP5/F52 taxonomy, ב-PA-01 flag/state, בלוגיקת ביצוע האישור עצמה (`ActionGateway.approve()`/`_execute_contract()`), או בהפעלת דגלי production כלשהם.
 - **סטטוס:** 🟡 קוד תוקן ונבדק (Contract Chain + fix + 8/8 טסטים ייעודיים + full sweep) — **טרם נבדק בפרודקשן/staging בפועל**. לפי "כלל ברזל" — לא לסמן ✅ עד לאימות runtime אמיתי אחרי deploy.
+- **ממוזג:** ✅ `main` דרך PR #420 (commit `46efea0`, 20/07/2026).
 
 ---
 
@@ -2890,6 +2892,7 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **בדיקות:** `test_preview_content_fix.py` (קיים, עודכן) — שתי בדיקות ישנות שציפו לחשיפת `record_id`/`draft_id` הוחלפו לצפות ל**אי**-חשיפה (ההתנהגות הישנה הייתה עצמה חלק מהבאג); 21 הבדיקות האחרות (מיסוך שדות רגישים בעברית/אנגלית, חיתוך ערכים ארוכים, `approval_response`) ללא שינוי — 23/23 עובר. `test_bug123_approval_rendering_fail_closed.py` (חדש, 20 בדיקות): fail-closed לכל שילוב שדה-עסקי-חסר בכל אחד מהכלים, אי-חשיפת `record_id`/`draft_id`/`tool_name` גולמיים, ההתנהגות המקבילה ב-`event_bus._default_label()`, ובדיקת מקור סטטית שמוודאת ש-`_legacy_pending_text`'s template כבר לא כולל `{action_id}`. Full `test_*.py` sweep (כל קובץ, כולל שני אלה) + `compileall -q .` — נקיים.
 - **היקף:** רינדור הודעת-אישור בלבד (`app.py::_describe_tool_call()`/`_legacy_pending_text`, `event_bus.py::_default_label()`). אין נגיעה ב-RP5/F52 taxonomy, בלוגיקת ביצוע האישור עצמה, או ב-BUG-118 (נתיב-קוד נפרד, לא נסגר על ידי זה).
 - **סטטוס:** 🟡 קוד תוקן ונבדק (Contract Chain + fix + 23/23 + 20/20 טסטים + full sweep) — **טרם נבדק בפרודקשן/staging בפועל**. לפי "כלל ברזל" — לא לסמן ✅ עד לאימות runtime אמיתי אחרי deploy.
+- **ממוזג:** ✅ `main` דרך PR #420 (commit `46efea0`, 20/07/2026).
 
 ---
 
@@ -2916,3 +2919,4 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **בדיקות (סה"כ אחרי ההרחבה):** 28/28 — נוספו 10: 3 תרחישי record_id אמיתיים (airtable_update/airtable_add/tma_write) שכבר לא חוסמים מול ה-`_is_tier4()` האמיתי + עדיין מבצעים הצבה; sanity שסיכום "בטוח" (בלי תוכן טריגר) עדיין מצוטט במלואו ולא מתדרדר סתם ל-fallback; 3 בדיקות יחידה ל-`_safe_context_quote()` עצמה. Full `test_*.py` sweep + `compileall -q .` + `smoke_tests.py` — נקיים.
 - **היקף:** `app.py::resolve_context_pronouns()`/`_sanitize_for_free_text()`/`_safe_context_quote()` בלבד. אין נגיעה ב-`core/ingress_classifier.py`/`_is_tier4()`/`_AIRTABLE_ID_RE` עצמם, ב-RP5/F52 taxonomy, או בלוגיקת ה-Router/Agent מעבר לקריאת `_is_tier4()` כבדיקה בלבד (read-only, לא side-effect).
 - **סטטוס:** 🟡 קוד תוקן ונבדק (Contract Chain + fix מורחב + 28/28 טסטים + full sweep + smoke) — **טרם נבדק בפרודקשן/staging בפועל**. לפי "כלל ברזל" — לא לסמן ✅ עד לאימות runtime אמיתי אחרי deploy.
+- **ממוזג:** ✅ `main` דרך PR #422 (commit `5262327`, 20/07/2026).

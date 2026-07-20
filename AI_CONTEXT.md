@@ -6,9 +6,14 @@
 > `BOSS_CURRENT_STATE.md` ארכיון היסטורי (עודכן לאחרונה 26/06/2026, `main` head שם `d249147`)
 > — **לא** מקור אמת נוכחי, מפגר בעשרות PRs; `main` + `ROADMAP.md` גוברים עליו בכל סתירה.
 > `ROADMAP.md`, `CHANGE_CONTROL_LOG.md`, `CHANGELOG.md` ו-`BUG_AUDIT_LOG.md` סונכרנו כולם עד `main`
-> `587d1fe` (PR #396) בעדכון הזה. הערת גבולות שנשארת: `CHANGELOG.md` עדיין חסר itemization נפרד
+> `587d1fe` (PR #396) בעדכון ההוא. הערת גבולות שנשארת: `CHANGELOG.md` עדיין חסר itemization נפרד
 > ל-#348–#353 (PA-01), ו-`CHANGE_CONTROL_LOG.md` עדיין חסר רשומות #327–#353 אחרי C111 — פערים
 > היסטוריים ישנים, מסומנים במפורש, לא backfilled בסבב הזה.
+> **פער נוסף, נפתח מאז ולא נסגר כאן:** §2-4 למטה (State/Completed/Priorities) לא רוענו מעבר ל-PR
+> #396 — main התקדם עשרות PRs מאז (כולל #414-419/#421 של `claude/n15-owner-decision-p73c3k`,
+> #420 BUG-121/122/123, #422 BUG-124). `BUG_AUDIT_LOG.md`/`CHANGE_CONTROL_LOG.md`/`CHANGELOG.md`
+> עצמם **כן** מעודכנים (ראו הכותרת החדשה למטה) — רק §2-4 של המסמך הזה ספציפית לא, backfill מלא
+> מחוץ לסקופ הסבב הנוכחי; לפרטי #420/#422 ראו הכותרת למטה + `CHANGE_CONTROL_LOG.md` C152-C154.
 
 > **כלל תהליך (חדש, 19/07/2026):** **Runtime evidence > main code > docs > memory.**
 > אין להסיק מצב flag פרוס/runtime מ-ברירת המחדל ב-`feature_flags.py` בלבד — ברירת מחדל בקוד
@@ -17,7 +22,11 @@
 > **shadow-observed**, גם אם ברירת המחדל בקוד היא `off`. אם התיעוד סותר לוגי production —
 > **התיעוד** מסומן stale, **לא** מורידים את סטטוס ה-runtime.
 
-**עודכן:** 20/07/2026 · **main:** `a3dce68` (אחרי מיזוג PR #411, BUG-107 verification) · **סטטוס:** BUG-115/BUG-116/BUG-117 כולם ✅ VERIFIED IN PROD / CLOSED. **PR #397 (branch `claude/docs-sync-bug-audit-roadmap-drift`) נסגר במפורש כ-superseded ע"י #398, לא מוזג במכוון.** **ענף פעיל פתוח (לא ממוזג):** `claude/c81-c82-roadmap-docs-cleanup` — ניקוי docs-only ל-C81-FU/C82-FU (שניהם נסגרו כפתורים-מראש, ראו `CHANGE_CONTROL_LOG.md` C144) + תיקון CI-silent-pass ב-`test_c81_recovery_truth.py`. **אין שינוי קוד production.** **ענף פעיל פתוח נוסף, staging-only, לא ממוזג בכוונה (PR #407):** `claude/rp5-staging-fault-injection-v4akit` — RP5 staging-only fault-injection helper, ✅ **VERIFIED ב-staging** (smoke test 19/07/2026 — ראו `CHANGE_CONTROL_LOG.md` C144/C145). **הענף עצמו (הקוד) לא ממוזג ולא יתמזג** — רק הסיכום התיעודי כאן ו-`BUG_AUDIT_LOG.md`/`CHANGE_CONTROL_LOG.md` הועתקו ל-`main` (עדכון הזה) לפני שהענף נמחק, כדי שהראיה לא תאבד.
+**עודכן:** 20/07/2026 (סבב doc-sync אחרי PR #422) · **main:** `5262327` (אחרי מיזוג PR #422) · **סטטוס:** BUG-115/BUG-116/BUG-117 כולם ✅ VERIFIED IN PROD / CLOSED. **PR #397 (branch `claude/docs-sync-bug-audit-roadmap-drift`) נסגר במפורש כ-superseded ע"י #398, לא מוזג במכוון.**
+
+**עדכון סבב זה (20/07/2026, אחרי #420-#422):** ✅ **מוזג ל-main:** PR #420 (branch `claude/bug121-pending-approval-queue-ux`) — BUG-121 (`/status` crash), BUG-122 (pending-approval queue מדכא פעולה חדשה), BUG-123 (placeholder שבור + מזהים גולמיים בהודעת אישור); PR #421 (branch `claude/n15-owner-decision-p73c3k`); PR #422 (branch `claude/bug125-context-pronoun-table-false-positive`) — BUG-124 (מילת-הצבעה "זה" חוסמת Tier-4 כוזבת) + תיקון-המשך אותו יום שסגר פער נוסף (`_AIRTABLE_ID_RE`, לא רק pipes) שהתיקון הראשוני השאיר פתוח. **כל השלושה (BUG-121/122/123/124) קוד תוקן+נבדק (full test sweep ירוק), טרם נבדק בפרודקשן/staging בפועל** — ממתין לבדיקת המשתמש בטלגרם/WhatsApp חי אחרי deploy. פרטים מלאים: `BUG_AUDIT_LOG.md` (BUG-121 עד BUG-124) + `CHANGE_CONTROL_LOG.md` (C152-C154). **C84 (TMA Approval TTL):** רשומת בדיקה קודמת נפסלה (המשתמש ערך ידנית את ActionContracts לצורך בדיקת BUG-122/123 באותו יום) — המשתמש יצר רשומת test חדשה ונקייה, ✅/❌ עדיין פתוח, ממתין לבדיקה שלו בעוד 24 שעות ממועד היצירה.
+
+**ענף פעיל פתוח (לא ממוזג):** `claude/c81-c82-roadmap-docs-cleanup` — ניקוי docs-only ל-C81-FU/C82-FU (שניהם נסגרו כפתורים-מראש, ראו `CHANGE_CONTROL_LOG.md` C144) + תיקון CI-silent-pass ב-`test_c81_recovery_truth.py`. **אין שינוי קוד production.** **ענף פעיל פתוח נוסף, staging-only, לא ממוזג בכוונה (PR #407):** `claude/rp5-staging-fault-injection-v4akit` — RP5 staging-only fault-injection helper, ✅ **VERIFIED ב-staging** (smoke test 19/07/2026 — ראו `CHANGE_CONTROL_LOG.md` C144/C145). **הענף עצמו (הקוד) לא ממוזג ולא יתמזג** — רק הסיכום התיעודי כאן ו-`BUG_AUDIT_LOG.md`/`CHANGE_CONTROL_LOG.md` הועתקו ל-`main` (עדכון הזה) לפני שהענף נמחק, כדי שהראיה לא תאבד. **עודכן כעת (20/07/2026):** הענף רוּבֵּייז מחדש על `main` `5262327` (אחרי #422) כדי לבדוק fault-injection מול הקוד החי העדכני ביותר; התרחיש הבא המוצע לבדיקה: `write-timeout`.
 
 ---
 
