@@ -1678,14 +1678,45 @@ CONTEXT_PRONOUNS = {
 # meaning "this/it", nothing to do with a prior tool result) gets its "זה"
 # replaced with a table-shaped chunk and the whole message is misclassified
 # as tier=4/table_separator, blocked before it ever reaches the Router.
-# Stripped here (not by loosening _TABLE_RE, which many unrelated real-table
-# detections rely on) since the defect is specifically this function
-# injecting table-shaped characters into free text that was never a table.
 _TABLE_TRIGGER_CHARS = str.maketrans({"|": "·", "\t": " ", "│": "", "┃": ""})
 
 
 def _sanitize_for_free_text(s: str) -> str:
     return s.translate(_TABLE_TRIGGER_CHARS)
+
+
+# BUG-124 follow-up: a char-translate table only ever covers the ONE trigger
+# class it was written for. core.ingress_classifier._is_tier4() has 7
+# independent trigger classes (table separators, timestamps, WhatsApp export
+# headers, Airtable record/field IDs, JSON blocks, CSV blocks, literal
+# system-field markers/score-like numbers, table headers, fixed-width
+# columns) — and real tool summaries defeat more than just the pipe one:
+# airtable_add ("✅ רשומה נוספה | ID: recABC123XY"), airtable_update
+# ("✅ רשומה recABC123XY עודכנה."), and tma_write ("✅ בוצע: ... | מזהה:
+# recABC123XY") — 3 of the only 4 tools _MEMORABLE_TOOLS even persists —
+# all embed the raw Airtable record_id verbatim, which still matches
+# _AIRTABLE_ID_RE even after the pipe is translated away. A follow-up like
+# "תעדכן גם את זה" right after any of these would still be silently blocked
+# with the same "📄 נראה כמו טבלה" message — this bug's exact failure mode,
+# just surfacing as a different _is_tier4() reason string.
+#
+# Fixed against the real classifier instead of another hand-picked char: the
+# quoted snippet is checked with _is_tier4() before splicing, and only falls
+# back to a plain unquoted reference if quoting would trip Tier-4 on its own.
+# Nothing is lost by dropping the quote in that case — the LLM already gets
+# the full record_id/url/tool name separately via _build_tool_context()'s
+# system-prompt injection (below); this function's only job is giving the
+# Router an explicit reference instead of a bare pronoun. Self-healing
+# against any FUTURE trigger added to _is_tier4() too, not just today's list.
+def _safe_context_quote(label: str, raw: str, fallback: str) -> str:
+    quoted = f"{label} «{_sanitize_for_free_text(raw)}»"
+    try:
+        from core.ingress_classifier import _is_tier4
+        if _is_tier4(quoted)[0]:
+            return fallback
+    except Exception:
+        pass
+    return quoted
 
 
 def resolve_context_pronouns(text: str, chat_id: str, session: dict | None) -> str:
@@ -1705,11 +1736,13 @@ def resolve_context_pronouns(text: str, chat_id: str, session: dict | None) -> s
     for pronoun, ref_type in CONTEXT_PRONOUNS.items():
         if pronoun in resolved:
             if ref_type == "last_file" and luf:
-                filename = _sanitize_for_free_text(luf.get("original_filename", ""))
-                resolved = resolved.replace(pronoun, f"הקובץ «{filename}»")
+                filename = luf.get("original_filename", "")
+                replacement = _safe_context_quote("הקובץ", filename, "הקובץ האחרון שהעלית")
+                resolved = resolved.replace(pronoun, replacement)
             elif ref_type == "last_tool_result" and ltr:
-                summary = _sanitize_for_free_text(ltr.get("summary", ""))
-                resolved = resolved.replace(pronoun, f"הפעולה «{summary}»")
+                summary = ltr.get("summary", "")
+                replacement = _safe_context_quote("הפעולה", summary, "הפעולה האחרונה שביצעת")
+                resolved = resolved.replace(pronoun, replacement)
     return resolved
 
 

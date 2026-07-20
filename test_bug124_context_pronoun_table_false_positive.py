@@ -36,6 +36,19 @@ all in every grammatical context (e.g. "אני מכיר אותו" — ordinary u
 "him", not a reference to a prior tool result) is explicitly out of scope
 for this fix — flagged to the user, narrow fix chosen over a broader
 semantic-disambiguation rework.
+
+Follow-up (same investigation, same branch): the pipe/tab/box-char
+sanitization above only covered ONE of core.ingress_classifier._is_tier4()'s
+7 trigger classes. Real _MEMORABLE_TOOLS summaries for airtable_add,
+airtable_update, and tma_write all embed the raw Airtable record_id
+verbatim (e.g. "✅ רשומה recABC123XY עודכנה.") — which still matches
+_AIRTABLE_ID_RE even after pipes are translated away, so a follow-up like
+"תעדכן גם את זה" right after any of those 3 tools was STILL silently
+blocked, just under reason=airtable_id instead of table_separator. Fixed by
+checking the actual quoted snippet against the real _is_tier4() before
+splicing it in (_safe_context_quote()), falling back to a plain reference
+with no quoted content when quoting would trip Tier-4 — self-healing
+against any future trigger _is_tier4() gains, not just today's known list.
 """
 
 from __future__ import annotations
@@ -54,6 +67,7 @@ os.environ.setdefault("RENDER_APP_URL", "https://example.com")
 os.environ.setdefault("SETUP_WEBHOOK", "0")
 
 import app  # noqa: E402  (env vars above must be set before import)
+from core.ingress_classifier import _is_tier4  # noqa: E402
 
 passed = failed = 0
 
@@ -136,6 +150,54 @@ for pronoun, ref_type in app.CONTEXT_PRONOUNS.items():
     resolved = app.resolve_context_pronouns(f"תעלה את {pronoun} בבקשה", "chat1", _LUF_SESSION)
     chk(f'"{pronoun}" (last_file) substitution with a pipe-bearing filename does not trip Tier-4',
         _TABLE_RE.search(resolved) is None)
+
+
+# ══════════════════════════════════════════════════
+# Follow-up: real _MEMORABLE_TOOLS summaries embedding raw Airtable
+# record_ids — a trigger class the pipe/tab/box-char sanitizer alone does
+# NOT cover (_AIRTABLE_ID_RE is independent of _TABLE_RE). Checked against
+# the REAL classify_ingress()/_is_tier4(), not the reproduced _TABLE_RE
+# above, since the whole point is these trip a DIFFERENT trigger.
+# ══════════════════════════════════════════════════
+
+print("\n── record_id-bearing tool summaries (airtable_add/update, tma_write) ──")
+
+_RECORD_ID_SUMMARIES = {
+    "airtable_update": "✅ רשומה recABC123XYZ עודכנה.",
+    "airtable_add":    "✅ רשומה נוספה | ID: recXYZ789ABC",
+    "tma_write":       "✅ בוצע: עדכון ליד | מזהה: recQWE456RTY",
+}
+for tool_name, summary in _RECORD_ID_SUMMARIES.items():
+    session = {"last_tool_result": {"tool": tool_name, "summary": summary}}
+    msg = "תעדכן גם את זה בבקשה"
+    resolved = app.resolve_context_pronouns(msg, "chat1", session)
+    t4, reason = _is_tier4(resolved)
+    chk(f"{tool_name} summary substitution no longer trips the real Tier-4 classifier "
+        f"(was reason=airtable_id): {resolved!r}",
+        t4 is False)
+    chk(f"{tool_name}: substitution still occurred (feature not silently disabled)",
+        resolved != msg)
+
+# Sanity: a summary with NO trigger content at all still gets quoted verbatim
+# — the fallback only kicks in when quoting would actually be unsafe.
+_safe_session = {"last_tool_result": {"tool": "calendar_create_event", "summary": "📅 אירוע נוצר בהצלחה"}}
+_safe_resolved = app.resolve_context_pronouns("תעדכן את זה", "chat1", _safe_session)
+chk("safe summary (no trigger content) is still quoted verbatim, not degraded to the generic fallback",
+    "📅 אירוע נוצר בהצלחה" in _safe_resolved)
+
+
+# ══════════════════════════════════════════════════
+# _safe_context_quote() unit checks
+# ══════════════════════════════════════════════════
+
+print("\n── _safe_context_quote() unit checks ───────────")
+
+chk("safe raw text is quoted verbatim",
+    app._safe_context_quote("הפעולה", "שלום עולם", "FALLBACK") == "הפעולה «שלום עולם»")
+chk("record_id-bearing raw text falls back instead of being quoted",
+    app._safe_context_quote("הפעולה", "✅ רשומה recABC123XYZ עודכנה.", "FALLBACK") == "FALLBACK")
+chk("pipe-bearing raw text (already sanitized away) is still quoted, not degraded",
+    app._safe_context_quote("הפעולה", "a | b | c", "FALLBACK") == "הפעולה «a · b · c»")
 
 
 # ══════════════════════════════════════════════════
