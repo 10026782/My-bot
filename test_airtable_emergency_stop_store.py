@@ -14,6 +14,7 @@ import sys
 from unittest.mock import patch
 
 from adapters.airtable_emergency_stop_store import AirtableEmergencyStopStore
+from core.emergency_stop import KNOWN_EMERGENCY_STOP_FLAG_NAMES
 from tools.airtable_gateway import AirtableLookupError
 
 passed = failed = 0
@@ -87,7 +88,19 @@ with patch(f"{MOD}.at_list_by_formula", side_effect=AirtableLookupError("boom"))
 with patch(f"{MOD}.at_list_by_formula", side_effect=RuntimeError("unexpected")):
     store = AirtableEmergencyStopStore(known_flag_names=KNOWN)
     result = store.read()
-    chk("unexpected exception -> contained, not raised, status=unavailable", result.status == "unavailable")
+    chk("unexpected exception fetching -> contained, not raised", True)  # no raise reached this line
+    chk("unexpected exception fetching -> status=invalid (NOT unavailable)", result.status == "invalid")
+    chk("unexpected exception fetching -> error carries internal_error marker",
+        result.error.startswith("internal_error:"))
+    chk("unexpected exception fetching -> error names the exception type",
+        "RuntimeError" in result.error)
+
+with patch(f"{MOD}.at_list_by_formula") as m_list:
+    m_list.return_value = "not a list"  # malformed shape from a hypothetical gateway bug
+    store = AirtableEmergencyStopStore(known_flag_names=KNOWN)
+    result = store.read()
+    chk("malformed records shape (bug in parsing, not network) -> status=invalid", result.status == "invalid")
+    chk("malformed records shape -> internal_error marker", result.error.startswith("internal_error:"))
 
 # ══════════════════════════════════════════════════════════════════
 # read() — invalid: bad type, duplicate, missing
@@ -125,12 +138,33 @@ with patch(f"{MOD}.at_list_by_formula") as m_list:
     result = store.read()
     chk("blank/missing Flag Name -> status=invalid", result.status == "invalid")
 
-# no known_flag_names supplied -> "missing" check is vacuous, a clean read still succeeds
+# no known_flag_names supplied -> defaults to the canonical 5, so a read
+# missing any of them (here, all but one) is correctly "invalid", not "ok".
 with patch(f"{MOD}.at_list_by_formula") as m_list:
     m_list.return_value = [_rec("rec1", "EMERGENCY_STOP_ALL", True)]
-    store = AirtableEmergencyStopStore()  # known_flag_names=()
+    store = AirtableEmergencyStopStore()  # known_flag_names defaults to KNOWN_EMERGENCY_STOP_FLAG_NAMES
     result = store.read()
-    chk("no known_flag_names configured -> ok (no missing-check)", result.status == "ok")
+    chk("default known_flag_names is the canonical 5, not empty", result.status == "invalid")
+    chk("default known_flag_names -> missing-check actually runs",
+        "EMERGENCY_STOP_WHATSAPP" in result.error)
+
+# a fully-populated read against all 5 canonical flags succeeds with the default
+with patch(f"{MOD}.at_list_by_formula") as m_list:
+    m_list.return_value = [
+        _rec(f"rec{i}", name, True) for i, name in enumerate(KNOWN_EMERGENCY_STOP_FLAG_NAMES)
+    ]
+    store = AirtableEmergencyStopStore()
+    result = store.read()
+    chk("default known_flag_names -> ok once all 5 canonical flags are present", result.status == "ok")
+    chk("default known_flag_names -> all 5 present in flags", set(result.flags) == KNOWN_EMERGENCY_STOP_FLAG_NAMES)
+
+# empty known_flag_names is never a valid configuration, default or explicit
+try:
+    AirtableEmergencyStopStore(known_flag_names=())
+    chk("explicit empty known_flag_names -> raises ValueError", False)
+except ValueError as e:
+    chk("explicit empty known_flag_names -> raises ValueError", True)
+    chk("ValueError message points at the canonical default", "KNOWN_EMERGENCY_STOP_FLAG_NAMES" in str(e))
 
 # ══════════════════════════════════════════════════════════════════
 # write() — success (update path) + readback verified
@@ -240,6 +274,57 @@ with patch(f"{MOD}.at_get_by_field", side_effect=AirtableLookupError("down")):
         operation_id="op-new", updated_by="owner", source="telegram", reason="test",
     )
     chk("pre-write lookup unavailable -> ok=False, verified=False", not result.ok and not result.verified)
+    chk("pre-write lookup unavailable -> error is NOT internal_error (documented failure mode)",
+        not result.error.startswith("internal_error:"))
+
+# ══════════════════════════════════════════════════════════════════
+# write() — unexpected exceptions are classified distinctly, not as a
+# generic "unavailable"-flavored failure (Step 2.5 hardening)
+# ══════════════════════════════════════════════════════════════════
+
+print("\n── write(): unexpected exceptions ───")
+
+with patch(f"{MOD}.at_get_by_field", side_effect=RuntimeError("bug in lookup")):
+    store = AirtableEmergencyStopStore()
+    result = store.write(
+        "EMERGENCY_STOP_ALL", True,
+        operation_id="op-new", updated_by="owner", source="telegram", reason="test",
+    )
+    chk("unexpected pre-write lookup exception -> ok=False, verified=False",
+        result.ok is False and result.verified is False)
+    chk("unexpected pre-write lookup exception -> internal_error marker",
+        result.error.startswith("internal_error:") and "RuntimeError" in result.error)
+
+with patch(f"{MOD}.at_get_by_field") as m_get, \
+     patch(f"{MOD}.airtable_patch", side_effect=RuntimeError("bug in gateway call")):
+    m_get.return_value = _rec("rec1", "EMERGENCY_STOP_ALL", False, op_id="op-old")
+    store = AirtableEmergencyStopStore()
+    result = store.write(
+        "EMERGENCY_STOP_ALL", True,
+        operation_id="op-new", updated_by="owner", source="telegram", reason="test",
+    )
+    chk("unexpected exception during gateway write -> ok=False, verified=False",
+        result.ok is False and result.verified is False)
+    chk("unexpected exception during gateway write -> internal_error marker",
+        result.error.startswith("internal_error:"))
+
+with patch(f"{MOD}.at_get_by_field") as m_get, \
+     patch(f"{MOD}.airtable_patch") as m_patch:
+    m_get.side_effect = [
+        _rec("rec1", "EMERGENCY_STOP_ALL", False, op_id="op-old"),
+        RuntimeError("bug in readback"),
+    ]
+    m_patch.return_value = True
+    store = AirtableEmergencyStopStore()
+    result = store.write(
+        "EMERGENCY_STOP_ALL", True,
+        operation_id="op-new", updated_by="owner", source="telegram", reason="test",
+    )
+    chk("unexpected exception during readback -> ok stays True (gateway write itself succeeded)",
+        result.ok is True)
+    chk("unexpected exception during readback -> verified=False", result.verified is False)
+    chk("unexpected exception during readback -> internal_error marker",
+        result.error.startswith("internal_error:"))
 
 # ══════════════════════════════════════════════════════════════════
 # write() — expected_operation_id CAS check (conflict)

@@ -13,6 +13,7 @@ import threading
 import time
 
 from core.emergency_stop import (
+    KNOWN_EMERGENCY_STOP_FLAG_NAMES,
     EmergencyStopManager,
     EmergencyStopStore,
     FlagEvaluation,
@@ -311,6 +312,28 @@ for t in threads:
 chk("8 concurrent evaluate() calls -> exactly 1 store.read() call", store.call_count == 1)
 chk("all 8 threads got a result", len(results) == 8)
 chk("all 8 threads agree on the value", all(r.blocked is True for r in results))
+
+
+# ══════════════════════════════════════════════════════════════════
+# 11. known_flag_names is never allowed to be empty (Step 2.5 hardening)
+# ══════════════════════════════════════════════════════════════════
+print("\n── known_flag_names is never empty ──────")
+
+chk("KNOWN_EMERGENCY_STOP_FLAG_NAMES has the 5 documented flags", KNOWN_EMERGENCY_STOP_FLAG_NAMES == {
+    "EMERGENCY_STOP_ALL", "EMERGENCY_STOP_WHATSAPP", "EMERGENCY_STOP_EMAIL",
+    "EMERGENCY_STOP_AUTOMATION", "EMERGENCY_STOP_AI",
+})
+
+mgr_default = EmergencyStopManager(store=None, clock=FakeClock())
+chk("omitting known_flag_names -> defaults to KNOWN_EMERGENCY_STOP_FLAG_NAMES",
+    mgr_default.status().flags.keys() == KNOWN_EMERGENCY_STOP_FLAG_NAMES)
+
+try:
+    EmergencyStopManager(store=None, clock=FakeClock(), known_flag_names=[])
+    chk("explicit empty known_flag_names -> raises ValueError", False)
+except ValueError as e:
+    chk("explicit empty known_flag_names -> raises ValueError", True)
+    chk("ValueError message points at the canonical default", "KNOWN_EMERGENCY_STOP_FLAG_NAMES" in str(e))
 
 
 print(f"\n{'='*40}")

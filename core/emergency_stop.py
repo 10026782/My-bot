@@ -36,6 +36,34 @@ ForceStopProvider = Callable[[str], bool]
 
 
 # ══════════════════════════════════════════════════
+# Canonical known-flag-name set (Step 2.5 hardening)
+# ══════════════════════════════════════════════════
+#
+# The concrete set of Emergency Stop flag names this system currently
+# governs. Defined once, here, so both EmergencyStopManager and any
+# EmergencyStopStore adapter (e.g. adapters/airtable_emergency_stop_store.py)
+# share one source of truth without an adapter needing to import
+# feature_flags.py (still forbidden — see module header above). feature_flags.py
+# is expected to import THIS constant once it's wired in (Step 3+), not
+# duplicate the literal list.
+#
+# known_flag_names is never allowed to be empty (see EmergencyStopManager.__init__
+# and AirtableEmergencyStopStore.__init__) — an empty set would silently make
+# status()'s health snapshot report nothing, and would silently skip the
+# adapter's missing-record integrity check entirely. Using this as the
+# default means "caller forgot to pass known_flag_names" fails safe (falls
+# back to the real 5) instead of failing open (silently accepting an empty
+# set as if that were a deliberate, valid choice).
+KNOWN_EMERGENCY_STOP_FLAG_NAMES: frozenset[str] = frozenset({
+    "EMERGENCY_STOP_ALL",
+    "EMERGENCY_STOP_WHATSAPP",
+    "EMERGENCY_STOP_EMAIL",
+    "EMERGENCY_STOP_AUTOMATION",
+    "EMERGENCY_STOP_AI",
+})
+
+
+# ══════════════════════════════════════════════════
 # Structured results — no bare bool return anywhere in this module's
 # public API. Every answer carries provenance (source/store_status/
 # cache_age) so a caller can tell "configured true" apart from
@@ -191,13 +219,21 @@ class EmergencyStopManager:
         clock: Clock = time.monotonic,
         force_stop_provider: Optional[ForceStopProvider] = None,
         ttl_seconds: float = 7.0,
-        known_flag_names: Iterable[str] = (),
+        known_flag_names: Iterable[str] = KNOWN_EMERGENCY_STOP_FLAG_NAMES,
     ) -> None:
         self._store = store
         self._clock = clock
         self._force_stop_provider = force_stop_provider
         self._ttl_seconds = ttl_seconds
         self._known_flag_names = frozenset(known_flag_names)
+        if not self._known_flag_names:
+            # Default is always non-empty (KNOWN_EMERGENCY_STOP_FLAG_NAMES) — the
+            # only way to land here is an explicit empty override, which is never
+            # a valid configuration (see the constant's docstring above).
+            raise ValueError(
+                "known_flag_names must not be empty — omit the argument to use "
+                "KNOWN_EMERGENCY_STOP_FLAG_NAMES, the canonical default."
+            )
 
         self._lock = threading.Lock()
         self._cache: dict[str, bool] = {}
