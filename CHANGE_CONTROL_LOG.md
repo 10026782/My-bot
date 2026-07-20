@@ -1453,3 +1453,25 @@ turn שמבצע גם read מאומת וגם מעלה approval מסווג `eviden
 
 **לא נוגע:** שום קוד production, שום flag, שום PR קיים. זהו סבב תיעוד+חקירה בלבד — התכנית המוצעת בדוח עדיין לא בוצעה.
 **Merged:** לא עדיין (branch `claude/n15-owner-decision-p73c3k`) | **Verified בפרודקשן:** לא רלוונטי — docs-only.
+
+### C151 — Truth Reset: אימות ישיר מול origin/main לכל פריט בתכנית העבודה (20/07/2026)
+קבצים: `BUG_AUDIT_LOG.md`, `ROADMAP.md` | Docs בלבד, אין שינוי קוד production | קשור: C150 (הדוח המקורי)
+
+**רקע:** לפני תחילת ביצוע התכנית מ-C150, הבעלים דרש שכל פריט בתכנית יאומת ישירות מול `origin/main` (commit, merge status, tests, deploy, production verification) — לא לפי מה ש-BUG_AUDIT_LOG/ROADMAP טוענים. כל פריט נבדק בפועל: `git merge-base --is-ancestor`, grep ישיר על `origin/main`, והרצת הטסט הרלוונטי על העץ הנוכחי.
+
+**ממצא מרכזי: 6 פריטים שתועדו כ"לא ממוזג"/"ממתין" התבררו כ-stale — כבר merged ופעילים ב-`main`:**
+
+1. **BUG-072** — כבר merged (`e1436e9`/`54961f1`), 7/7 tests. תיעוד היה כבר נכון (רק production verification נותרה) — אין שינוי בהערכה.
+2. **BUG-058** — `resolve_pending_lead_preview`/`set_pending_lead_preview`/`get_pending_lead_preview`/`clear_pending_lead_preview` קיימים ב-`main`, מחוברים ב-`app.py` **ללא flag gate**. `test_tier2_silent_preview.py` — 9/9. הרשומה תיעדה גם production verification אמיתי מ-10/07/2026 (ראיית לוג `[LCH] resolve_pending_lead_preview(confirm)`), אבל השורה "Merged: ממתין ל-push/PR" באותה רשומה בדיוק סתרה את זה. תוקן.
+3. **BUG-071** — `whatsapp_media_adapter.py`/`meta_whatsapp_media_adapter.py` בשורש (הועברו מ-`providers/` ב-commit `76128ba`), מחוברים ב-`_webhook_whatsapp_impl()` (מסומן בהערת קוד `BUG-071 FIX`). `test_whatsapp_media.py` — 6/6. הרשומה טענה "Merged: לא עדיין" בטעות. תוקן.
+4. **BUG-BATCH-DISCARD** — `BatchQueueStore`/`_promote_next_batch_item()` קיימים ומחוברים (5 call sites). `test_bug_batch_approval_preserved.py` — 33/33. נכנס ל-`main` ב-`ba579f2` (17/07). הרשומה כללה גם שורת "תוקן ב-commit: (למלא אחרי commit)" placeholder שלא מולא מעולם, ושורת "סטטוס" שהעתיקה תוכן ממנגנון אחר (atomic-claim, לא קשור). תוקן.
+5. **BUG-007** — `_preflight_venture(venture_id=None)` וכו' כבר תואמים לשמות ה-URL rule (אין mismatch). אומת עם Flask test client אמיתי — 204 על כל 4 הנתיבים (`/api/approvals/<id>`, `/api/assets/<id>`, `/api/ventures/<id>`, `/api/game/quests/<id>`). הרשומה טענה "Merged: לא — ממתין לאימות ידני". תוקן.
+6. **BUG-049** — `test_document_converter.py`'s `if __name__ == "__main__":` guard קיים; `python3 test_document_converter.py` מדפיס "6 passed, 0 skipped" בפועל (לא exit 0 שקט). הרשומה טענה "Merged: לא". תוקן. (BUG-050, אותו PR, עודכן בהתאם.)
+
+**פריטים נוספים שנבדקו ונמצאו מדויקים (ללא שינוי):** C85 (אין test כזה — פתוח באמת), C88 (עדיין fail-open ב-staging — פתוח באמת), F14/F15 (אין קוד כזה — פתוח באמת), BUG-105 (עדיין לא תוקן — פתוח באמת), BUG-118 ("Preview-gap") — הבהרה חשובה: הרוב כבר תוקן (רשימת disambiguation דרך `_describe_contract_for_disambiguation()`, "executed" branch דרך `_describe_contract_for_reconfirmation()`) — **רק** `route_confirmation_word()`'s legacy success reply עדיין דולף `tool_name`/`record_id` גולמיים; זה ה-scope המדויק היחיד שנותר תחת "Preview-gap", לא כל שלוש התצוגות כפי שהדוח המקורי (C150) ניסח בטעות ברוחב-יתר.
+
+**פריטי drift נוספים שנתפסו ותוקנו:** כפילות של טעות ה-`/status` decorator בטבלת "פערים ידועים" השנייה ב-ROADMAP (שורה נפרדת מזו שתוקנה ב-C150). תווית "חסום על C81-FU–C83" ב-**C87** — שלושתם (C81-FU/C82-FU/C83) כבר ✅ סגורים; C87 לא-חסום יותר טכנית, ממתין רק להחלטת owner.
+
+**השפעה על התכנית:** יום 2 המקורי ("merge BUG-071/BATCH-DISCARD/BUG-007/BUG-049") כמעט ריק בפועל — כל הפריטים כבר ב-`main`. מה שנותר הוא production verification, לא merge. התכנית עברה ארגון-מחדש מלא ל-patch-stack לפי workstreams (ולא ימים/רשימת-באגים) — ראה תגובת session.
+
+**Merged:** לא עדיין (branch `claude/n15-owner-decision-p73c3k`) | **Verified בפרודקשן:** לא רלוונטי — docs-only, verification עצמה בוצעה מול `origin/main` ישירות (git+grep+test runs), לא בפרודקשן.

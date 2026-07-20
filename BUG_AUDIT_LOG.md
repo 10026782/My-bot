@@ -89,13 +89,12 @@
 - **מסך / מודול:** `tma_api.py` — preflight stubs ל-`/api/approvals/<id>`, `/api/assets/<id>`, `/api/ventures/<id>`, `/api/game/quests/<id>`
 - **Severity:** High — חסם כתיבה (PATCH) על כל ארבעת הנתיבים, לא רק Ventures
 - **Root Cause:** לא CORS כפי שדווח — הפונקציות `_preflight_approval`/`_preflight_asset`/`_preflight_venture`/`_preflight_game_quest` קיבלו פרמטר עם `_` מוביל (למשל `_venture_id`) שלא תאם לשם המשתנה ב-URL rule (`venture_id`). Flask קורא ל-view עם `venture_id=...` כ-keyword arg, ולכן כל בקשת OPTIONS זרקה `TypeError: ... unexpected keyword argument 'venture_id'` — מטופל כ-Exception, מוחזר כ-500 שבדפדפן נראה כ-CORS preflight failure. אומת ע"י reproduction script עצמאי ב-Flask לפני ואחרי התיקון.
-- **תוקן ב-commit:** `7d5cb3a`
-- **תוקן ב-branch:** `claude/meta-whatsapp-phase-1-q6pp3e`
-- **Merged:** לא — ממתין לאימות ידני לפני merge (לפי הנחיית המשתמש)
-- **Deployed:** לא ידוע — דרוש Render deploy
-- **Verified בפרודקשן:** לא
-- **Verification ראיה:** `py_compile` עבר; Flask reproduction script אישר 500→204 לאחר התיקון. אין עדיין אימות בפרודקשן החיה.
-- **סטטוס:** 🟡 Fixed — ממתין לאימות ידני בפרודקשן (בחירת Domain ב-Venture)
+- **תוקן ב-branch (היסטורי):** `claude/meta-whatsapp-phase-1-q6pp3e` (commit `7d5cb3a` — hash לא נגיש יותר מה-sandbox, ככל הנראה squash/rebase בדרך למיזוג).
+- **עדכון (20/07/2026) — אומת ישירות מול `origin/main`, לא רק נטען:** `tma_api.py`'s ארבע פונקציות ה-preflight (`_preflight_approval(approval_id=None)`, `_preflight_asset(asset_id=None)`, `_preflight_venture(venture_id=None)`, `_preflight_game_quest(quest_id=None)`) **כבר תואמות** לשמות ה-URL rule (`<approval_id>`/`<asset_id>`/`<venture_id>`/`<quest_id>`) — אין leading underscore mismatch. Reproduction אמיתי עם Flask test client (`app.test_client().options(...)`) על כל ארבעת הנתיבים החזיר **204** (לא 500) עבור כולם.
+- **Merged:** ✅ כן — מאומת ישירות מול `origin/main`.
+- **Deployed:** לא ידוע ישירות מה-sandbox (אין גישת Render).
+- **Verified בפרודקשן:** לא עדיין — לא נצפתה בקשת OPTIONS אמיתית מוצלחת בפרודקשן.
+- **סטטוס:** ✅ תוקן ומוזג ל-main (reproduction אמיתי, 204 על כל 4 הנתיבים) — נותרה רק production verification.
 
 ### BUG-008 — Lead Business Outcome 422 (trailing space in Airtable options) — ✅ VERIFIED / CLOSED 09/07/2026
 - **דווח:** 17/06/2026 — Airtable PATCH נכשל עם `422 INVALID_MULTIPLE_CHOICE_OPTIONS`, `keys=['Business Outcome', 'status']`; ב-UI רק "סמן כמתאים" עבד, שאר כפתורי הסטטוס הציגו "update failed"
@@ -750,11 +749,12 @@
 - **שורש:** `ci.yml` מריץ בדיקות דרך `for f in test_*.py; do python "$f"; done` (מוסכמת הפרויקט — script-based, לא pytest). `test_document_converter.py` נכתב כקובץ pytest טהור (6 פונקציות `test_*` עם fixture `tmp_path`, בלי `__main__` guard). כשמורץ כ-`python3 test_document_converter.py` הפונקציות מעולם לא נקראות — הסקריפט מסתיים ב-exit 0 בלי לבצע שום assertion, ו-CI מדווח ✅ שקרי. אומת ישירות: `python3 test_document_converter.py` לפני התיקון → exit 0, אפס פלט. `pytest test_document_converter.py` באותו זמן → 6/6 עובר, מוכיח שהבדיקות עצמן תקינות והבעיה היא רק בהרצה.
 - **תיקון:** נוסף `if __name__ == "__main__"` guard בסוף הקובץ. מכיוון שכל 6 הפונקציות תלויות ב-fixture `tmp_path` (אין מקבילה ב-Python רגיל) — לא בוצע auto-collect לפי prefix; כל פונקציה נקראת במפורש עם `tempfile.mkdtemp()` שנארז ב-`Path`. `pytest.importorskip` בשתי הפונקציות (`docx`, `openpyxl`) נתפס בנפרד עם `except pytest.skip.Exception` ומדווח כ-skip ולא כשגיאה. לא נגעו ב-`ci.yml` וב-`document_converter/` עצמו — היקף מצומצם לקובץ הבדיקה בלבד.
 - **בדיקה:** `python3 test_document_converter.py` לאחר התיקון → 6/6 רצות בפועל (exit 0, "passed" מודפס לכל אחת). שבירה מכוונת (`assert False` זמני בתוך test אחד) → exit 1 עם traceback אמיתי, מוכיח שה-guard באמת בודק ולא רק מדמה. `pytest test_document_converter.py` נשאר 6/6 ללא רגרסיה. סימולציית לולאת `ci.yml` (`for f in test_*.py; do python "$f" || exit 1; done`) על גרסה נקייה → הצלחה; על גרסה שבורה במכוון → נכשל כצפוי.
-- **PR:** ממתין לפתיחה (branch: `fix/ci-silent-pass-document-converter`)
-- **Merged:** לא
-- **Deployed:** לא רלוונטי (בדיקת CI בלבד, אין נגיעה בלוגיקת production)
-- **Verified בפרודקשן:** לא — 🟡 קוד תוקן ואומת מקומית, טרם ממוזג
-- **סטטוס:** 🟡 Fixed, awaiting merge
+- **branch (היסטורי):** `fix/ci-silent-pass-document-converter`
+- **עדכון (20/07/2026) — אומת ישירות מול `origin/main`:** `test_document_converter.py`'s `if __name__ == "__main__":` guard **קיים בפועל**. `python3 test_document_converter.py` על העץ הנוכחי → "document_converter self-test OK — 6 passed, 0 skipped" (לא exit 0 שקט).
+- **Merged:** ✅ כן — מאומת ישירות מול `origin/main`.
+- **Deployed:** לא רלוונטי (בדיקת CI בלבד, אין נגיעה בלוגיקת production).
+- **Verified בפרודקשן:** לא רלוונטי — תיקון תשתית-בדיקות, אין "פרודקשן" למדוד מולו מעבר ל-CI עצמו (שכבר ירוק).
+- **סטטוס:** ✅ תוקן ומוזג ל-main — סגור במלואו.
 
 ### BUG-050 (BUG-AGENTS-RULE-NOT-FOLLOWED) — כלל "סיום סשן" ב-AGENTS.md לא יושם בפועל
 - **תאריך:** 02/07/2026
@@ -763,11 +763,11 @@
 - **שורש:** `AGENTS.md` §"סיום סשן" ("ברירת מחדל: פתח PR לפני סיום. אין צורך באישור. חריג יחיד: המשתמש אמר במפורש 'אל תפתח PR'") היה קיים בקוד **לפני** תחילת הסשן הזה (קומיט `36f2784`, 28/06/2026 — אותו קומיט שהעלה גם את `document_converter/`). בסיום עבודת BUG-049 (CI silent-pass fix) הסוכן דיווח "Not opening a PR since none was requested" — כלומר פעל בניגוד לכלל שהיה כתוב לו במפורש, במקום לפתוח PR כברירת מחדל. אין שום מנגנון שמוודא ש-`AGENTS.md` נקרא/מיושם בפועל בתחילת/סוף סשן — האכיפה תלויה כרגע רק בציות ידני/זיכרון של הסוכן, בדיוק אותו דפוס drift שכבר תועד כמה פעמים בין תיעוד לקוד/התנהגות בפועל בלוג הזה.
 - **תיקון:** לא בוצע בסשן זה — במכוון. הפעולה המתקנת המיידית הייתה בקשה מפורשת מהמשתמש לפתוח את ה-PR (ראה BUG-049), לא בניית מנגנון אכיפה. נמנע over-engineering לבעיה חד-פעמית; אם compliance אוטומטי (למשל בדיקת "PR נפתח בסיום סשן" ב-`daily_git_audit.py`/hook) יימצא שווה את המאמץ בעתיד, זה roadmap item נפרד.
 - **בדיקה:** לא רלוונטי — תיעוד בלבד, אין קוד לבדוק.
-- **PR:** נכלל באותו PR כמו BUG-049 (`fix/ci-silent-pass-document-converter`)
-- **Merged:** לא
+- **PR:** נכלל באותו PR כמו BUG-049 (`fix/ci-silent-pass-document-converter`) — **מוזג** (ראו עדכון BUG-049, 20/07/2026).
+- **Merged:** ✅ כן (אותו PR כמו BUG-049) — אך אין כאן שינוי קוד לאמת, זו תצפית תיעודית בלבד.
 - **Deployed:** לא רלוונטי
 - **Verified בפרודקשן:** לא רלוונטי
-- **סטטוס:** 🟡 Documented, no fix — פתוח כתצפית ל-roadmap עתידי
+- **סטטוס:** 🟡 Documented, no fix — פתוח כתצפית ל-roadmap עתידי (מנגנון אכיפה אוטומטי, אם ירצו בעתיד)
 
 ### BUG-051 (SPEC-1-LCH-ROUTER-BYPASS) — LeadCandidate Handler עקף את כל ה-Router (Identity→Router→Context→Agent)
 - **תאריך:** 02/07/2026
@@ -906,8 +906,8 @@
   - **Precedence decision (הקונפליקט שסומן כלא-פתור):** Tier-1 ActionGateway **מנצח תמיד** Tier-2 batch preview כששני המנגנונים חיים בו-זמנית לאותו `chat_id` — לא נבחר סתם, זו המשכיות ישירה של precedent קיים כבר בקוד (BUG-056: "check ActionGateway live contracts FIRST, regardless of FEATURE_ACTION_GATEWAY"). מומש ב-`app.py`'s section 2.55: קריאה ל-`resolve_pending_lead_preview()` נוספה **בתוך** ה-`elif _lower in _CONFIRM_WORDS:`/`elif _lower in _CANCEL_WORDS:` הקיימים, **אחרי** ש-`_gw_cw.find_live_contracts(...)`/`route_cancellation_word(...)` (Tier-1) כבר נבדקו ולא מצאו כלום — לא בנקודת כניסה נפרדת/מוקדמת יותר כפי שהוצע בטיוטת התיקון המקורית. Tier-2 resolver עצמו לא בודק Tier-1 בכלל (במפורש ב-docstring) — ה-ordering guarantee חי כולו ב-caller (`app.py`), לא בתוך `resolve_pending_lead_preview()`.
   - **בדיקה:** `test_tier2_silent_preview.py` נכתב מחדש (9/9) — הודעת Tier-2 מזמינה אישור אמיתי, `pending_lead_preview` נכתב עם `set_at`/`channel`/`domain`, "כן" כותב בפועל דרך `_handle_batch` עם channel/domain מהמאוחסן, "לא" מנקה בלי לכתוב, preview שפג תוקפו נופל דרך (`None`), אין-preview נופל דרך, לא-confirm-ולא-cancel לא צורך את ה-preview, ו-regression guard ל-Tier-1 (הודעת preview המקורית לא השתנתה). `test_c89_preview_confirmation.py`'s בדיקה סטטית (`test_app_py_confirm_word_checks_gateway_before_flag_branch`) עודכנה (חלון חיפוש הורחב מ-1200/3000 ל-3000/5000 תווים — הקוד החדש דחף את `_flag_cw(...)`/`_CANCEL_WORDS` רחוק יותר מה-marker, אך הסדר עצמו — `find_live_contracts` לפני `_flag_cw` — לא השתנה) — 9/9. אפס רגרסיה: `test_action_gateway.py` (37/37), `test_bug070_combined_wording.py` (27/27), `test_bug070_pending_approval_multi.py`, `smoke_tests.py`, `test_integration.py` (4/4), `core/router/test_router.py` (44/44), `test_c53a.py` (50/50), `test_approval_concurrency.py` (14/14), וכל שאר `test_*.py` בריפו (חוץ מ-`test_document_converter.py` — כשל קודם/לא-קשור, משוכפל זהה גם על `main` ללא נגיעה).
   - **PR:** ראה branch/PR של סבב זה (10/07/2026).
-  - **Merged:** ממתין ל-push/PR.
-  - **סטטוס:** ✅ **BUG-058 סגור במלואו** — התיקון המקורי (טקסט מטעה) + הפתרון המלא (resolver אמיתי, precedence מוכרע ומיושם) שניהם ב-main/ממתינים ל-merge. לא נותר functional gap.
+  - **Merged:** ✅ כן — אומת ישירות מול `origin/main` (20/07/2026): `resolve_pending_lead_preview`/`set_pending_lead_preview`/`get_pending_lead_preview`/`clear_pending_lead_preview` קיימים ב-`core/lead_candidate_handler.py`/`session_store.py`, מחוברים ב-`app.py` **ללא flag gate** ("Not gated by FEATURE_ACTION_GATEWAY — separate mechanism"). `test_tier2_silent_preview.py` — 9/9 עובר על העץ הנוכחי. השורה הקודמת כאן ("ממתין ל-push/PR") הייתה עצמה stale.
+  - **סטטוס:** ✅ **BUG-058 סגור במלואו** — התיקון המקורי (טקסט מטעה) + הפתרון המלא (resolver אמיתי, precedence מוכרע ומיושם) שניהם ב-`main` בפועל. הפרודקשן test ב-10/07/2026 (למטה) גם מוכיח שזה deployed וחי, לא רק merged. לא נותר functional gap ב-scope הזה.
 
 - **עדכון 10/07/2026 — בדיקה חיה בפרודקשן, תוצאה מדויקת: BUG-058 (ה-resolver עצמו) IMPLEMENTED ✅, אך PROD TEST חשף באג נפרד במעלה הזרם:**
   - **מה עבד:** הלוג `[LCH] resolve_pending_lead_preview(confirm): user=boss_hq:eliyahu` הוכיח ש-"כן" נתפס נכון ע"י ה-resolver, `pending_lead_preview` נקרא בחזרה, וה-batch בוצע בפועל (לא נפל ל-"אין פעולה שממתינה לאישור") — **בדיוק ה-gap שה-resolver נועד לסגור נסגר**, מאומת חי, לא רק בטסטים.
@@ -1121,20 +1121,18 @@
 - **Severity:** Medium — C90 לא "נשבר" ב-Telegram (עדיין באמצע אימות שם ממילא), אבל התכונה חסרה לגמרי בערוץ WhatsApp; לא רגרסיה, gap שמעולם לא נסגר.
 - **שורש (מאומת בקוד):** `_is_structured_file()`/`_process_structured_file_upload()` (C90) מחוברים **אך ורק** דרך `_handle_telegram_media()` (שורה 2381: `_handle_telegram_media(update.message)`, קרוא רק מתוך ה-Telegram document callback). גרפ מלא על `_webhook_whatsapp_impl()` (Twilio, שורות 2398-2470) מראה שהיא קוראת **רק** `request.values.get("Body", "")` — אין קריאה בשום מקום ל-`NumMedia`/`MediaUrl0`/`MediaContentType0` (שדות ה-attachment של Twilio WhatsApp). Meta WhatsApp Cloud API handler (משורה 2477) גם הוא **ללא כל טיפול media/attachment** (מאומת: `grep -n "media\|Media\|document\|attachment\|MediaUrl\|NumMedia"` על הבלוק שלו — אפס hits). המסקנה: זה לא "C90 לא מחובר ל-WhatsApp" בלבד — **אין שום טיפול media/קובץ בשום ערוץ WhatsApp כרגע** (לא רק CSV/XLSX — גם תמונה/קול/מסמך כלשהו). קובץ שמגיע ב-WhatsApp פשוט מתעלם מה-attachment ומעביר את `Body` (ריק/לא-קשור) ל-`run_agent()` כטקסט רגיל — ה-Agent, ללא הקשר לקובץ אמיתי, מנחש ומנסה `read_drive_file`/`search_drive` (הכלים היחידים שיש לו לחיפוש "קובץ" בכלל), ומקבל "not found" כי הקובץ מעולם לא הגיע ל-Drive או לשום מקום אחר בשרת.
 - **תיקון:** ✅ בוצע בעלות GitHub issue #235 (BUG-071)
-  * `providers/whatsapp_media_adapter.py` — Twilio WhatsApp media extraction (NumMedia, MediaUrl0, MediaContentType0 → בהורדה מ-signed URL; אין צורך ב-Twilio Basic Auth, Twilio מספקת URL מחתומים פומיים)
-  * `providers/meta_whatsapp_media_adapter.py` — Meta Cloud API media extraction (image/video/audio/document; media_id → URL fetch דרך Meta Media API עם access_token)
-  * `app.py._webhook_whatsapp_impl()` (שורות 2419-2467) — Twilio media handling אחרי dedup, לפני furniture funnel
-  * `app.py._normalize_meta_payload()` (שורות 222-256) — Meta media metadata extraction
-  * `app.py.webhook_meta_whatsapp()` (שורות 2582-2642) — Meta media handling אחרי dedup, לפני outbound gate
+  * `whatsapp_media_adapter.py` (בשורש, לא `providers/` — הועבר ב-`76128ba` "BUG-071: move WhatsApp media adapters from providers/ to root") — Twilio WhatsApp media extraction
+  * `meta_whatsapp_media_adapter.py` (בשורש) — Meta Cloud API media extraction (image/video/audio/document; media_id → URL fetch דרך Meta Media API עם access_token)
+  * `app.py._webhook_whatsapp_impl()` — Twilio media handling אחרי dedup, לפני furniture funnel (מסומן בקוד עצמו בהערה `# ── BUG-071 FIX: WhatsApp Media Support ──`)
+  * `app.py.webhook_meta_whatsapp()` — Meta media handling
   * שניהם מנתבים דרך `media_handler.handle_voice_note()` (audio) או `handle_file_upload()` (files/images/video)
-- **Commit:** `4f64666` ("BUG-071 fix: Unified WhatsApp media support (Twilio + Meta Cloud API)")
-- **Branch:** `claude/ic-01b-ambiguous-prefix-routing-zp109k`
-- **PR:** זמין לפתיחה עם בקשת המשתמש
-- **Merged:** לא עדיין (branch פתוח, ממתין לאישור)
-- **Tested:** smoke_tests.py ✅ | test_bug070_pending_approval_multi.py ✅ | test_whatsapp_media.py ✅ (6 tests)
-- **Deployed:** לא עדיין
-- **Verified בפרודקשן:** לא עדיין (ממתין למיזוג + Render deploy)
-- **סטטוס:** 🟡 תוקן בקוד — ממתין ל-merge ו-verification בפרודקשן.
+- **Commits:** `4f64666` (מקורי) → `76128ba` (העברת providers/→root).
+- **עדכון (20/07/2026) — הרשומה הזו עצמה הייתה stale:** אומת ישירות מול `origin/main` — `whatsapp_media_adapter.py`/`meta_whatsapp_media_adapter.py` **קיימים בשורש** (לא ב-`providers/`), `app.py` מייבא ומשתמש בהם בפועל ב-`_webhook_whatsapp_impl()` (עם ההערה `BUG-071 FIX`). `test_whatsapp_media.py` — **6/6 עובר** על העץ הנוכחי. השורות "Merged: לא עדיין"/"Deployed: לא עדיין" למטה היו שגויות — היה קיים גם commit נפרד `c65557f` ("docs: Update BUG-071 status to Fixed") שכנראה לא תפס את השורה הזו בפועל.
+- **Merged:** ✅ כן — מאומת ישירות מול `origin/main`.
+- **Tested:** `smoke_tests.py` ✅ | `test_whatsapp_media.py` ✅ (6/6, הורץ מחדש 20/07/2026).
+- **Deployed:** לא ידוע ישירות מה-sandbox (אין גישת Render), אך אם ה-merge הזה כבר עלה בשלבים קודמים, סביר שכן.
+- **Verified בפרודקשן:** לא עדיין — לא נצפתה העלאת קובץ אמיתית דרך WhatsApp שעברה בהצלחה.
+- **סטטוס:** ✅ תוקן ומוזג ל-main — נותרה רק production verification.
 
 ### BUG-072 — לוגים קיימים חושפים sender ID/מספר טלפון גולמי (לא C94) — ✅ תוקן 06/07/2026
 - **תאריך:** 05/07/2026 (דווח) → 06/07/2026 (תוקן)
@@ -2439,13 +2437,14 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - `app.py`'s `_apply_ingress_context_gate` מסמן `context_interrupted` על **כל** callback נכנס, כולל לחיצת כפתור אישור/ביטול עצמה (`kind="callback"` לעולם לא פטור, בניגוד ל-`kind="text"` דרך `is_own_resolution_event`) — עלול לגרום ל-reconfirmation מיותר על contract לא-קשור שעדיין ממתין, בכל פעם שנלחץ כפתור כלשהו.
 
 - **Severity:** גבוה — אובדן נתונים שקט (משימות שהמשתמש ביקש נעלמות בלי שום הודעת שגיאה גלויה).
-- **תוקן ב-commit:** (למלא אחרי commit)
 - **תוקן ב-branch:** `claude/single-speaker-fallback-fix`
-- **Merged:** לא עדיין
-- **Deployed:** לא
-- **Verified בפרודקשן:** לא — ממתין למיזוג ופריסה
-- **סטטוס:** תוקן ומאומת ב-suite המלא. הפריט הנפרד (ingress context gate) תועד אך לא טופל, בהתאם להוראה מפורשת שלא לחרוג מהיקף המשימה.
-- **סטטוס:** re-scope הושלם. Phase 4B0.1 (מנגנון claim אטומי אמיתי) טרם החל — נדרשת החלטת בעלים על תשתית לפני תכנון.
+- **עדכון (20/07/2026) — הרשומה הזו עצמה הייתה stale:** אומת ישירות מול `origin/main` — `event_bus.py::BatchQueueStore` ו-`app.py::_promote_next_batch_item()` **קיימים בפועל** ומחוברים (5 call sites ב-`app.py`, כולל אחרי resolution/disambiguation/combined-word/callback). `test_bug_batch_approval_preserved.py` — **33/33 עובר** על העץ הנוכחי. נכנס ל-`main` ב-`ba579f2` (17/07/2026, דרך merge PR #360). השורות "Merged: לא עדיין"/"Deployed: לא" למטה היו שגויות.
+- **Merged:** ✅ כן — `main` `ba579f2` (17/07/2026).
+- **Deployed:** לא ידוע ישירות מה-sandbox (אין גישת Render), אך אם זה כבר merged מ-17/07, סביר שכן.
+- **Verified בפרודקשן:** לא עדיין — קוד merged, לא נצפה batch אמיתי (5 משימות) שנשמר במלואו בפרודקשן.
+- **סטטוס:** ✅ תוקן ומוזג ל-main, מאומת ב-suite המלא (33/33) — נותרה רק production verification. הפריט הנפרד (ingress context gate, `context_interrupted` על כל callback) תועד אך לא טופל, בהתאם להוראה מפורשת שלא לחרוג מהיקף המשימה.
+
+**הערה:** השורה "סטטוס: re-scope הושלם. Phase 4B0.1..." שהייתה כאן קודם לא קשורה ל-BUG-BATCH-DISCARD בכלל (מדברת על atomic-claim mechanism, נושא אחר) — כנראה copy-paste artifact, הוסרה.
 
 ---
 

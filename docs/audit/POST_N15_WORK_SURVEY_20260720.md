@@ -4,6 +4,8 @@
 
 **איך זה נאסף:** 4 סוכני חקירה מקבילים (Explore, read-only), כל אחד סרק תחום נפרד — ROADMAP.md, BUG_AUDIT_LOG.md, feature_flags.py, וחוב טכני/governance drift כללי. לכל הסוכנים ניתנה הנחיה מפורשת להוציא **RP5** (`core/rp5_fault_injection.py`, staging-only), **F52** (`FEATURE_UNIFIED_STATUS_FORMATTER`/EvidenceFinalizer), **FEATURE_ACTION_GATEWAY**/PR-0C, **FEATURE_PA01_ENFORCEMENT_STATE** (enforce), **FEATURE_DECISION_HUB**, **FEATURE_AUTO_CAPTURE**, ו-**MULTITENANT** מהתוצאות.
 
+> **⚠️ עדכון "Truth Reset" (20/07/2026, ראו `CHANGE_CONTROL_LOG.md` C151):** הדוח הזה נבנה מתוך BUG_AUDIT_LOG.md/ROADMAP.md כפי שהיו כתובים באותו רגע — **לא** מול `origin/main` ישירות. אימות ישיר שבוצע אחר-כך מצא ש-**6 פריטים שתועדו כ"לא ממוזג"/"דורש merge" כבר היו בפועל ב-`main`**: BUG-058 (Tier-2 batch resolver — **סגור לגמרי, לא "עבודה חדשה" כפי שסעיף 2 למטה מרמז**), BUG-071, BUG-BATCH-DISCARD, BUG-007, BUG-049 (כולם ✅ merged, נותרה רק production verification), ו-BUG-072 (היה כבר מדויק). כמו כן הובהר ש-"Preview-gap" (מוזכר בסעיף 2) הוא בעיקר כבר-תוקן — רק `route_confirmation_word()`'s legacy success reply (BUG-118) נותר פתוח, לא כל תצוגות ה-preview. **לפני שמשתמשים בסעיפים 1-2 למטה כמקור להחלטה, ראו את הטבלה המתוקנת ב-C151 / בתגובת הסשן שהניבה את ה-patch-stack הסופי.**
+
 ---
 
 ## 0. תיקוני Drift שאותרו תוך כדי הסקירה עצמה
