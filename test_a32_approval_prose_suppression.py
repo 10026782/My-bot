@@ -18,10 +18,16 @@
 # consulted at the NO-TOOL-EVIDENCE gate, and only fires there when NO
 # approval was queued — the exact opposite of this case. So evidenced
 # approval-invite prose fell through both checks untouched, producing a
-# real, user-visible "✅ ... success-shaped" second message that
-# EvidenceFinalizerShadow correctly flagged as response_claim=success against
-# evidence_status=approval_pending (mismatch=true) — a genuine bug, not a
-# taxonomy artifact.
+# real, user-visible duplicate second message that EvidenceFinalizerShadow
+# correctly flagged as mismatching evidence_status=approval_pending
+# (mismatch=true) — a genuine bug, not a taxonomy artifact. (At the time
+# this test was written, the unsuppressed text's bare "✅" also made
+# EvidenceFinalizerShadow classify it as response_claim=success specifically;
+# BUG-125 fixed that separate over-broad-checkmark defect in
+# core.turn_evidence._MUTATION_SUCCESS, so the same unsuppressed text now
+# classifies as response_claim=neutral instead — still incompatible with
+# approval_pending, so the mismatch this test guards against is exactly as
+# real as before, see Test 4 below.)
 #
 # Fix (core/anti_hallucination.py): a new suppression branch reuses
 # _AGENT_APPROVAL_INVITE_PATTERN, gated on _gateway_active AND a real
@@ -105,15 +111,21 @@ chk("Test 3: gateway approval prompt text is non-empty and distinct from agent p
 
 evidence_pending = TurnEvidenceSummary(approvals_pending=1)
 
-# Before the fix: final_text would have been PROD_TEXT (unsuppressed),
-# classified as response_claim="success" against evidence_status=
-# "approval_pending" -> mismatch=true, a genuine bug (not a taxonomy gap).
+# Before the A32 fix: final_text would have been PROD_TEXT (unsuppressed),
+# mismatching evidence_status="approval_pending" -> mismatch=true, a genuine
+# bug (not a taxonomy gap). BUG-125 separately fixed _classify_response_claim
+# no longer treating a bare "✅" alone as a success claim, so this text's
+# claim shape changed from "success" to "neutral" (correct either way — this
+# text is not a claim of a real completed action, it's a duplicate
+# ready-to-approve invite) -- the resulting mismatch is exactly as real as
+# before, just via "neutral" (not "pending"/"sent_for_approval") now instead
+# of via "success".
 comparison_before_fix_shape = compare_shadow_final_status(
     PROD_TEXT, evidence_pending, approval_prompt_sent=True,
 )
-chk("Test 4 (documents the bug): unsuppressed prod text classifies as response_claim=success",
-    comparison_before_fix_shape.response_claim == "success")
-chk("Test 4 (documents the bug): unsuppressed prod text mismatches approval_pending evidence",
+chk("Test 4 (documents the bug): unsuppressed prod text no longer misclassifies as response_claim=success (BUG-125), now neutral",
+    comparison_before_fix_shape.response_claim == "neutral")
+chk("Test 4 (documents the bug): unsuppressed prod text still mismatches approval_pending evidence",
     comparison_before_fix_shape.mismatch is True)
 
 # After the fix: sanitize_agent_response suppresses to "", and

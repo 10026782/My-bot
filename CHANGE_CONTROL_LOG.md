@@ -1576,3 +1576,18 @@ predeploy_exit=0
 **עדיין inert:** כל הקוד הזה עדיין לא מחובר ל-`app.py`/`scheduler.py`/`tma_api.py`/`cost_monitor.py` — `configure_emergency_stop_manager()` עדיין ללא production caller. אימות ה-preflight/predeploy הוא production-verified במובן ש**הקוד עצמו** רץ בהצלחה מול Airtable חי — לא ש-EMERGENCY_STOP_* flags כבר נשלטים בפועל דרך הבסיס הזה (זה Step 5, טרם בוצע).
 
 **Merged:** ✅ `main` דרך PR #425 (commit `3ce949e`). **Verified בפרודקשן:** ✅ — preflight + predeploy הורצו בהצלחה על שירות Render החי, כולל קריאות Airtable אמיתיות (200 OK), exit 0 לשניהם.
+
+### C157 — BUG-125: `_MUTATION_SUCCESS` מסווג ✅ בודד כתביעת-הצלחה, גם ללא evidence (21/07/2026)
+קבצים: `core/turn_evidence.py`, `test_turn_evidence_shadow.py` (עודכן), `test_a32_approval_prose_suppression.py` (עודכן) | קשור: BUG-125 (`BUG_AUDIT_LOG.md`), BUG-119 (אותה משפחה — תביעת-הצלחה כוזבת — שורש שונה)
+
+**רקע:** RP5 shadow test matrix, תא 1.3 — "5 כפול 5"→"25 ✅"/"4 ועוד 4"→"8 ✅", verdict צפוי `match (OK)`. בפועל: `evidence_status=no_evidence response_claim=success mismatch=true`. שורש: `_MUTATION_SUCCESS` כלל `✅` כאלטרנטיבה עצמאית ללא תלות בפועל-השלמה — כל תשובה עובדתית עם ✅ דקורטיבי מסווגת "success".
+
+**תוקן:** הוסר `✅` הבודד מהרשימה; success דורש כעת פועל/ביטוי-השלמה אמיתי. תוך כדי בדיקת רגרסיה נגד `test_generic_success_fallback_without_evidence_is_shadow_mismatch` הקיים התגלה פגם עצמאי נוסף: פעלים המסתיימים באות סופית (ם/ן) לא תואמים כ-substring את הטיית הנקבה/רבים שלהם (`"הושלם" not in "הושלמה"`, אומת ישירות) — נוספו הצורות המפורשות (`הושלמה`/`הושלמו`/`עודכנה`/`עודכנו`) + משפחת מחיקה חדשה (`מחקתי`/`נמחק`/`נמחקה`/`נמחקו`). פעלים שמסתיימים באות לא-סופית (`נוצר`/`נשלח`/`נשמר`) כבר מכסים הטיות כ-substring, לא שונו.
+
+**בדיקה קיימת עודכנה:** `test_a32_approval_prose_suppression.py`'s Test 4 ציפה ש-`PROD_TEXT` הלא-מדוכא ("✅ המשימה מוכנה להוספה...") יסווג "success"; אחרי התיקון מתקבל "neutral" (נכון יותר — הזמנה-לאשר, לא תביעת-השלמה). `mismatch=True` עדיין מתקיים (neutral לא תואם approval_pending) — הצורך בדיכוי A32 עדיין אמיתי, רק reason שונה. Assertions עודכנו בגלוי, לא הוסתרו.
+
+**בדיקות:** `test_turn_evidence_shadow.py` — 13 חדשות (26/26): ✅ בודד→neutral, ✅+פועל→success, צורות נקבה/רבים/מחיקה→success. `test_a32_approval_prose_suppression.py` — 28/28 (עודכן). Full `test_*.py` sweep + `compileall -q .` + `smoke_tests.py` — נקיים.
+
+**היקף:** `core/turn_evidence.py::_MUTATION_SUCCESS`/`_classify_response_claim()` בלבד. אין שינוי ב-F52 rendering, בהתנהגות approval/runtime, או הפעלת אכיפה (`FEATURE_EVIDENCE_FINALIZER` נשאר `off`). `_FAILURE`/`_PENDING`/`_UNKNOWN` לא נבדקו — מחוץ לסקופ, לא הונח שהם תקינים.
+
+**Merged:** לא עדיין (branch `claude/bug125-rp5-shadow-checkmark-false-success`) | **Verified בפרודקשן:** לא רלוונטי עדיין — טרם מוזג/נבדק ב-staging. הרצה חוזרת של RP5 matrix תא 1.3 נדרשת לאימות (`no_evidence`/`neutral`/`mismatch=false`).

@@ -9,6 +9,7 @@ import pytest
 from core.dispatcher_outcome import DispatcherOutcome
 from core.turn_evidence import (
     TurnEvidenceSummary,
+    _classify_response_claim,
     compare_shadow_final_status,
     observe_shadow_finalizer,
 )
@@ -155,6 +156,43 @@ def test_evidence_finalizer_flag_defaults_off_and_accepts_rollout_states(
 
     monkeypatch.setenv("FEATURE_EVIDENCE_FINALIZER", "unexpected")
     assert get_evidence_finalizer_state() == "off"
+
+
+# BUG-125: bare ✅ alone must not be classified as a success claim — a
+# checkmark is often purely decorative on a factual/arithmetic answer with
+# no business-action content at all. See core.turn_evidence._MUTATION_SUCCESS.
+@pytest.mark.parametrize("text", ["25 ✅", "8 ✅", "נכון ✅"])
+def test_bare_checkmark_alone_is_not_a_success_claim(text: str):
+    assert _classify_response_claim(text) == "neutral"
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["✅ בוצע", "✅ שמרתי את הליד", "נשמרו 2 משימות", "נוצרו 2 משימות"],
+)
+def test_checkmark_with_a_real_completion_verb_is_still_a_success_claim(text: str):
+    assert _classify_response_claim(text) == "success"
+
+
+# Hebrew verbs ending in a final-form letter (ם/ן/ך/ף/ץ) switch to the
+# regular form once a suffix follows, so the masculine-singular form alone
+# does not match its own feminine/plural conjugation as a substring (unlike
+# "נוצר"/"נשלח"/"נשמר", which end in non-final letters and already cover
+# their conjugations this way). Covers both at-risk verbs plus the delete
+# family (not previously in the list at all).
+@pytest.mark.parametrize(
+    "text",
+    [
+        "המשימות הושלמו",
+        "✅ הרשומה עודכנה",
+        "הרשומות עודכנו",
+        "מחקתי את הרשומה",
+        "✅ הרשומה נמחקה",
+        "הרשומות נמחקו",
+    ],
+)
+def test_feminine_plural_and_delete_completion_forms_are_covered(text: str):
+    assert _classify_response_claim(text) == "success"
 
 
 if __name__ == "__main__":

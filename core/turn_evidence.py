@@ -104,9 +104,31 @@ class ShadowFinalizerComparison:
         return asdict(self)
 
 
+# BUG-125 (RP5 shadow evidence): a bare ✅ used to be sufficient on its own to
+# classify a reply as a "success" claim — but a checkmark is often purely
+# decorative (a factual/arithmetic answer like "25 ✅", or "נכון ✅") and
+# carries no business-action claim at all. Removed as a standalone trigger;
+# success now requires an actual completion/mutation verb or phrase to be
+# present (✅ next to one of those still matches immediately, no separate
+# co-occurrence check needed — the verb alone is sufficient and ✅ next to it
+# doesn't hurt).
+#
+# Hebrew verbs ending in a final-form letter (ם/ן/ך/ף/ץ) change to the
+# regular form once a suffix follows (e.g. "הושלם" -> "הושלמה"/"הושלמו",
+# "עודכן" -> "עודכנה"/"עודכנו") — the earlier single masculine-singular form
+# does NOT match as a substring of its own feminine/plural conjugation
+# (verified directly: "הושלם" is not a substring of "הושלמה" at all, they use
+# different mem characters). Same class of gap as BUG-119's missing plural
+# forms, caught here by removing the ✅ crutch that had been masking it for
+# "הושלמה" specifically (see test_generic_success_fallback_without_evidence_is_shadow_mismatch,
+# pre-existing and still expected to pass). Explicit conjugated forms added
+# for both at-risk verbs; "נוצר"/"נשלח"/"נשמר" end in non-final letters so
+# their existing single form already covers the feminine/plural conjugations
+# as substrings ("נוצרה"/"נוצרו" both contain "נוצר", etc. — verified).
 _MUTATION_SUCCESS = re.compile(
-    r"(?:✅|\b(?:done|completed|created|updated|sent|saved)\b|"
-    r"בוצע|הושלם|נוצר|עודכן|נשלח|נשמר|הוספתי|עדכנתי|יצרתי|שלחתי|שמרתי)",
+    r"(?:\b(?:done|completed|created|updated|sent|saved)\b|"
+    r"בוצע|הושלם|הושלמה|הושלמו|נוצר|עודכן|עודכנה|עודכנו|נשלח|נשמר|"
+    r"הוספתי|עדכנתי|יצרתי|שלחתי|שמרתי|מחקתי|נמחק|נמחקה|נמחקו)",
     re.IGNORECASE,
 )
 _FAILURE = re.compile(r"(?:❌|\b(?:failed|failure|error)\b|נכשל|שגיאה|לא הושלמ)", re.IGNORECASE)
