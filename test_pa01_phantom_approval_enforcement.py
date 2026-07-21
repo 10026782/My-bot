@@ -28,6 +28,9 @@ os.environ.setdefault("RENDER_APP_URL", "https://example.com")
 os.environ.setdefault("SETUP_WEBHOOK", "0")
 
 import app  # noqa: E402
+
+import emergency_stop_test_support  # noqa: E402
+emergency_stop_test_support.configure_all_clear_emergency_stop()
 import tool_registry  # noqa: E402
 from tool_registry import ToolDenied  # noqa: E402
 from tools.airtable_security import LeadsDirectWriteBlocked  # noqa: E402

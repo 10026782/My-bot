@@ -308,6 +308,36 @@ with patch("feature_flags.get_emergency_stop_status", return_value=EmergencyStop
 feature_flags._reset_emergency_stop_manager_for_tests()
 
 
+# ══════════════════════════════════════════════════════════════════
+# 8. Step 6: bootstrap wires feature_flags._env_force_stop_provider into
+# the constructed manager — not just "some" force_stop_provider, the real
+# one. Proven by actually setting an env var and observing it win over a
+# durable False through the manager bootstrap_emergency_stop() built.
+# ══════════════════════════════════════════════════════════════════
+print("\n── Step 6: bootstrap wires the real env force-stop provider ")
+
+import os as _os  # noqa: E402
+
+_old_env_all = _os.environ.pop("EMERGENCY_STOP_ALL", None)
+_os.environ["EMERGENCY_STOP_ALL"] = "true"
+try:
+    with patch(f"{ADAPTER_MOD}.at_list_by_formula") as m_list:
+        m_list.return_value = [_rec(f"rec{i}", name, False) for i, name in enumerate(sorted(KNOWN_EMERGENCY_STOP_FLAG_NAMES))]
+        bootstrap_mod.bootstrap_emergency_stop()
+
+    ev = feature_flags.evaluate_emergency_stop("EMERGENCY_STOP_ALL")
+    chk(
+        "bootstrap-constructed manager honors EMERGENCY_STOP_ALL=true env override "
+        "even though durable state says False",
+        ev.blocked is True and ev.source == "env",
+    )
+finally:
+    _os.environ.pop("EMERGENCY_STOP_ALL", None)
+    if _old_env_all is not None:
+        _os.environ["EMERGENCY_STOP_ALL"] = _old_env_all
+    feature_flags._reset_emergency_stop_manager_for_tests()
+
+
 print(f"\n{'='*40}")
 print(f"core/emergency_stop_bootstrap.py tests: {passed} passed, {failed} failed")
 

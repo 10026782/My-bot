@@ -139,7 +139,9 @@ def bootstrap_emergency_stop() -> EmergencyStopBootstrapResult:
     from core.emergency_stop import EmergencyStopManager
 
     store = AirtableEmergencyStopStore()
-    manager = EmergencyStopManager(store=store)
+    manager = EmergencyStopManager(
+        store=store, force_stop_provider=feature_flags._env_force_stop_provider,
+    )
     feature_flags.configure_emergency_stop_manager(manager)
 
     status = manager.status()  # forces the first hydration attempt, synchronously

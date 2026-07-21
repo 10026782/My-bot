@@ -13,6 +13,7 @@ import re
 import threading
 import time
 import urllib.parse
+import uuid
 from datetime import date, datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
@@ -3265,7 +3266,20 @@ def update_venture(venture_id, identity):
 
 # ══════════════════════════════════════════════════════════════════
 # WEEK 3 stubs — System Health + Emergency Stop
+# (PATCH 3B Step 6: durable, Airtable-backed via EmergencyStopManager —
+# see feature_flags.py's set_emergency_stop()/clear_emergency_stop())
 # ══════════════════════════════════════════════════════════════════
+
+# action-suffix -> canonical flag name, shared by the stop and clear
+# endpoints below (e.g. "all" -> stop_all/clear_all -> EMERGENCY_STOP_ALL).
+_EMERGENCY_FLAG_SUFFIXES: dict[str, str] = {
+    "all":        "EMERGENCY_STOP_ALL",
+    "whatsapp":   "EMERGENCY_STOP_WHATSAPP",
+    "email":      "EMERGENCY_STOP_EMAIL",
+    "automation": "EMERGENCY_STOP_AUTOMATION",
+    "ai":         "EMERGENCY_STOP_AI",
+}
+
 
 @tma_api.route("/api/health", methods=["GET"])
 @require_tma_auth
@@ -3310,17 +3324,25 @@ def system_health(identity):
     # ── Anthropic — key presence only (no paid API call) ──────────
     checks["anthropic"] = "ok" if os.environ.get("ANTHROPIC_API_KEY") else "error:key_missing"
 
-    # ── Active emergency flags ─────────────────────────────────────
-    emergency_flags = {
-        flag: ff.is_enabled(flag)
-        for flag in (
-            "EMERGENCY_STOP_ALL",
-            "EMERGENCY_STOP_WHATSAPP",
-            "EMERGENCY_STOP_EMAIL",
-            "EMERGENCY_STOP_AUTOMATION",
-        )
-    }
-    active_emergencies = [k for k, v in emergency_flags.items() if v]
+    # ── Active emergency flags — via the manager abstraction ONLY
+    # (get_emergency_stop_status(), never a direct Airtable read here) ──
+    stop_status = ff.get_emergency_stop_status()
+    emergency_flags: dict[str, dict] = {}
+    if stop_status.manager_status is not None:
+        for flag_name, ev in stop_status.manager_status.flags.items():
+            emergency_flags[flag_name] = {
+                "enabled": ev.blocked,
+                "operation_id": ev.operation_id,
+            }
+    else:
+        # Manager not configured — every canonical flag fails closed to
+        # blocked=True (matching is_enabled()'s own fail-closed contract),
+        # with no known operation_id to condition a clear on.
+        emergency_flags = {
+            name: {"enabled": True, "operation_id": None}
+            for name in _EMERGENCY_FLAG_SUFFIXES.values()
+        }
+    active_emergencies = [k for k, v in emergency_flags.items() if v["enabled"]]
 
     all_ok = all(v.startswith("ok") for v in checks.values())
     status = "ok" if all_ok else "degraded"
@@ -3340,28 +3362,51 @@ def system_health(identity):
 @require_tma_auth
 def emergency_stop(identity):
     """
-    Emergency stop — sets a runtime feature flag in feature_flags.py.
-    The bot checks these flags before executing guarded actions.
-    NOTE: flags are in-process only — reset on Render dyno restart.
-    For permanent stop, also disable the relevant env var / bot token.
+    Emergency stop — durable write via set_emergency_stop() (PATCH 3B
+    Step 6), source="tma_owner_stop". Airtable-backed — survives a Render
+    restart, unlike the legacy in-process flag this replaced.
+
+    Unconditional (no expected_operation_id/CAS) — forcing a stop is never
+    a conflict with a prior read the way a clear is; you're not trying to
+    preserve someone else's more-recent state.
     """
     if not identity.is_owner:
         return jsonify({"error": "forbidden"}), 403
 
     data   = request.get_json(force=True) or {}
     action = data.get("action", "")
-    valid  = {"stop_all", "stop_whatsapp", "stop_email", "stop_automation"}
+    valid_actions = {f"stop_{suffix}" for suffix in _EMERGENCY_FLAG_SUFFIXES}
 
-    if action not in valid:
-        return jsonify({"error": f"unknown action — must be one of {sorted(valid)}"}), 400
+    if action not in valid_actions:
+        return jsonify({"error": f"unknown action — must be one of {sorted(valid_actions)}"}), 400
+
+    suffix = action[len("stop_"):]
+    flag = _EMERGENCY_FLAG_SUFFIXES[suffix]
 
     import feature_flags as ff
-    flag = f"EMERGENCY_{action.upper()}"
+    operation_id = str(uuid.uuid4())
     try:
-        ff.set_flag(flag, True)
+        result = ff.set_emergency_stop(
+            flag, True,
+            operation_id=operation_id,
+            updated_by=identity.user_id,
+            source="tma_owner_stop",
+            reason=f"owner-triggered via TMA: {action}",
+        )
     except Exception as e:
-        logger.error(f"[Emergency] set_flag failed: {e}")
+        logger.error(f"[Emergency] set_emergency_stop failed: {e}")
         return jsonify({"error": "failed to set emergency flag"}), 500
+
+    if not (result.ok and result.verified):
+        logger.error(
+            f"[Emergency] durable write not ok+verified (ok={result.ok}, "
+            f"verified={result.verified}, error={result.error!r}) for {flag}"
+        )
+        return jsonify({
+            "ok": False, "action": action, "flag": flag,
+            "operation_id": operation_id,
+            "error": result.error or "write not verified",
+        }), 500
 
     _audit("emergency_stop", identity, details=action)
 
@@ -3370,16 +3415,107 @@ def emergency_stop(identity):
         "stop_whatsapp":   "🛑 STOP WhatsApp — הודעות WhatsApp הופסקו",
         "stop_email":      "🛑 STOP Email — שליחת מיילים הופסקה",
         "stop_automation": "🛑 STOP Automation — אוטומציות הופסקו",
+        "stop_ai":         "🛑 STOP AI — קריאות Claude API הופסקו",
     }
     _notify_owner(
         f"🚨 EMERGENCY STOP\n"
         f"{action_labels.get(action, action)}\n"
         f"על ידי: {identity.display_name or identity.user_id}\n"
-        f"Flag: {flag}=True\n"
-        f"⚠️ לביטול: הפעל מחדש את השרת או אפס ידנית."
+        f"Flag: {flag}=True (נשמר ב-Airtable, שורד restart)\n"
+        f"⚠️ לביטול: לחצן הביטול ב-TMA."
     )
 
-    return jsonify({"ok": True, "action": action, "flag": flag})
+    return jsonify({"ok": True, "action": action, "flag": flag, "operation_id": operation_id})
+
+
+@tma_api.route("/api/health/emergency/clear", methods=["POST"])
+@require_tma_auth
+def emergency_clear(identity):
+    """
+    Clear an emergency stop — durable write via clear_emergency_stop()
+    (PATCH 3B Step 6), source="tma_owner_clear".
+
+    expected_operation_id is REQUIRED (optimistic concurrency) — the caller
+    must have read the flag's current operation_id via GET /api/health
+    first. A mismatch (someone/something else changed the flag in between)
+    returns 409, not a silent overwrite. Only reports "cleared" when the
+    durable write actually came back ok=True AND verified=True.
+    """
+    if not identity.is_owner:
+        return jsonify({"error": "forbidden"}), 403
+
+    data   = request.get_json(force=True) or {}
+    action = data.get("action", "")
+    valid_actions = {f"clear_{suffix}" for suffix in _EMERGENCY_FLAG_SUFFIXES}
+
+    if action not in valid_actions:
+        return jsonify({"error": f"unknown action — must be one of {sorted(valid_actions)}"}), 400
+
+    expected_operation_id = data.get("expected_operation_id")
+    if not expected_operation_id:
+        return jsonify({"error": "expected_operation_id is required"}), 400
+
+    suffix = action[len("clear_"):]
+    flag = _EMERGENCY_FLAG_SUFFIXES[suffix]
+
+    import feature_flags as ff
+    operation_id = str(uuid.uuid4())
+    try:
+        clear_result = ff.clear_emergency_stop(
+            flag,
+            operation_id=operation_id,
+            updated_by=identity.user_id,
+            source="tma_owner_clear",
+            reason=f"owner-triggered via TMA: {action}",
+            expected_operation_id=expected_operation_id,
+        )
+    except Exception as e:
+        logger.error(f"[Emergency] clear_emergency_stop failed: {e}")
+        return jsonify({"error": "failed to clear emergency flag"}), 500
+
+    write = clear_result.write
+
+    if write.conflict:
+        return jsonify({
+            "ok": False, "action": action, "flag": flag,
+            "conflict": True, "error": write.error,
+        }), 409
+
+    if not (write.ok and write.verified):
+        logger.error(
+            f"[Emergency] clear durable write not ok+verified (ok={write.ok}, "
+            f"verified={write.verified}, error={write.error!r}) for {flag}"
+        )
+        return jsonify({
+            "ok": False, "action": action, "flag": flag,
+            "error": write.error or "write not verified",
+        }), 500
+
+    _audit("emergency_clear", identity, details=action)
+
+    action_labels = {
+        "clear_all":        "✅ CLEAR ALL",
+        "clear_whatsapp":   "✅ CLEAR WhatsApp",
+        "clear_email":      "✅ CLEAR Email",
+        "clear_automation": "✅ CLEAR Automation",
+        "clear_ai":         "✅ CLEAR AI",
+    }
+    env_warning = (
+        f"\n⚠️ עדיין חסום ע\"י env force-stop — הערך הדביק נוקה בהצלחה, "
+        f"אך ה-env var {flag} עדיין דורס אותו." if clear_result.still_blocked_by_env else ""
+    )
+    _notify_owner(
+        f"{action_labels.get(action, action)}\n"
+        f"על ידי: {identity.display_name or identity.user_id}\n"
+        f"Flag: {flag}=False (נשמר ב-Airtable)"
+        f"{env_warning}"
+    )
+
+    return jsonify({
+        "ok": True, "action": action, "flag": flag,
+        "operation_id": operation_id,
+        "still_blocked_by_env": clear_result.still_blocked_by_env,
+    })
 
 
 # ══════════════════════════════════════════════════════════════════

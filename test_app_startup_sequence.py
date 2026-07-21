@@ -204,24 +204,39 @@ feature_flags._reset_emergency_stop_manager_for_tests()
 
 
 # ══════════════════════════════════════════════════════════════════
-# 6. Existing dual-path callers remain byte-unchanged — structural proof,
-# reading the files directly rather than importing (avoids any import-
-# order/env-var fragility; also legitimately what "no caller changed"
-# means: nothing new appears in their source).
+# 6. Step 5 (as originally written): dual-path callers stayed
+# byte-unchanged — structural proof, reading the files directly rather
+# than importing (avoids any import-order/env-var fragility).
+#
+# PATCH 3B Step 6 landed the atomic cutover in the same PR this test file
+# belongs to: cost_monitor.py and tma_api.py are now EXPECTED to reference
+# the new API (that is the entire point of Step 6 — see
+# test_feature_flags_cutover.py for the fuller wiring proof). scheduler.py
+# never had a write caller — only is_enabled() reads, which the Step 6
+# cutover intercepts transparently inside feature_flags.py itself — so it
+# stays the one file with zero new-API references, same as before.
 # ══════════════════════════════════════════════════════════════════
-print("\n── dual-path: existing callers unchanged (structural) ──")
+print("\n── Step 6: cost_monitor/tma_api reference the new API, scheduler.py doesn't ──")
 
 _NEW_API_NAMES = (
     "evaluate_emergency_stop", "set_emergency_stop", "clear_emergency_stop",
     "get_emergency_stop_status", "configure_emergency_stop_manager",
 )
-for fname in ("tma_api.py", "cost_monitor.py", "scheduler.py"):
+for fname in ("tma_api.py", "cost_monitor.py"):
     with open(fname, encoding="utf-8") as f:
         src = f.read()
     chk(
-        f"{fname} does not reference the new parallel Emergency Stop API",
-        not any(name in src for name in _NEW_API_NAMES),
+        f"{fname} references the new parallel Emergency Stop API (Step 6 cutover)",
+        any(name in src for name in _NEW_API_NAMES),
     )
+
+with open("scheduler.py", encoding="utf-8") as f:
+    _scheduler_src = f.read()
+chk(
+    "scheduler.py still does not reference the new parallel Emergency Stop API "
+    "(read-only caller, unaffected by the Step 6 cutover)",
+    not any(name in _scheduler_src for name in _NEW_API_NAMES),
+)
 
 
 # ══════════════════════════════════════════════════════════════════

@@ -56,6 +56,9 @@ os.environ.setdefault("SETUP_WEBHOOK", "0")
 os.environ.setdefault("ELIYAHU_CHAT_ID", "999999999")
 
 import app  # noqa: E402
+
+import emergency_stop_test_support  # noqa: E402
+emergency_stop_test_support.configure_all_clear_emergency_stop()
 from identity import Identity, Role  # noqa: E402
 from core.action_gateway import action_gateway as _real_gw  # noqa: E402
 from event_bus import bus as _real_bus  # noqa: E402

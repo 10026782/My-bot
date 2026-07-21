@@ -71,6 +71,21 @@ KNOWN_EMERGENCY_STOP_FLAG_NAMES: frozenset[str] = frozenset({
 # ══════════════════════════════════════════════════
 
 @dataclass(frozen=True)
+class FlagRecord:
+    """One flag's durable state as read from the store (PATCH 3B Step 6).
+
+    operation_id is the durable record's current Operation ID — the same
+    value a caller must pass back as expected_operation_id on a subsequent
+    write() to detect a conflicting change (see EmergencyStopStore.write's
+    docstring). None when the store never populates it (e.g. a flag that
+    was never written yet) — a caller must treat that as "no known
+    operation_id to condition a write on", not as an error.
+    """
+    enabled: bool
+    operation_id: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class ReadResult:
     """Outcome of one attempt to read the full durable flag set.
 
@@ -85,7 +100,7 @@ class ReadResult:
     Only "ok" may ever be used by the manager to replace its cache.
     """
     status: StoreStatus
-    flags: Optional[dict[str, bool]] = None
+    flags: Optional[dict[str, FlagRecord]] = None
     error: str = ""
 
 
@@ -156,13 +171,21 @@ class EmergencyStopStore(Protocol):
 
 @dataclass(frozen=True)
 class FlagEvaluation:
-    """The manager's answer for one flag at one point in time."""
+    """The manager's answer for one flag at one point in time.
+
+    operation_id (Step 6): the durable record's Operation ID as of the last
+    successful hydrate, when this evaluation came from the cache/durable
+    source. None for source="env" (env force-stop never consults the store)
+    and source="unknown" (never successfully hydrated) — there is no
+    durable record to attribute an operation_id to in either case.
+    """
     flag_name: str
     blocked: bool
     source: EffectiveSource
     store_status: Optional[StoreStatus]
     last_hydrated_at: Optional[float]
     cache_age_seconds: Optional[float]
+    operation_id: Optional[str] = None
     error: str = ""
 
 
@@ -238,7 +261,7 @@ class EmergencyStopManager:
             )
 
         self._lock = threading.Lock()
-        self._cache: dict[str, bool] = {}
+        self._cache: dict[str, FlagRecord] = {}
         self._last_hydrated_at: Optional[float] = None
         self._last_store_status: Optional[StoreStatus] = None
         self._last_error: str = ""
@@ -347,14 +370,16 @@ class EmergencyStopManager:
             )
 
         if flag_name in self._cache:
+            record = self._cache[flag_name]
             source: EffectiveSource = "cache" if self._is_stale_locked() else "durable"
             return FlagEvaluation(
                 flag_name=flag_name,
-                blocked=self._cache[flag_name],
+                blocked=record.enabled,
                 source=source,
                 store_status=self._last_store_status,
                 last_hydrated_at=self._last_hydrated_at,
                 cache_age_seconds=self._cache_age_locked(),
+                operation_id=record.operation_id,
                 error=self._last_error,
             )
 

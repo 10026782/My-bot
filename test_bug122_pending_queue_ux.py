@@ -58,6 +58,9 @@ import app  # noqa: E402  (env vars above must be set before import)
 import feature_flags  # noqa: E402
 import session_store  # noqa: E402
 from identity import Identity, Role  # noqa: E402
+
+import emergency_stop_test_support  # noqa: E402
+emergency_stop_test_support.configure_all_clear_emergency_stop()
 from context import AgentContext  # noqa: E402
 from core.router.route_decision import RouteDecision, Intent  # noqa: E402
 from core.anti_hallucination import _SINGLE_SPEAKER_FALLBACK  # noqa: E402

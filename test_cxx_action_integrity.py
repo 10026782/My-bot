@@ -28,6 +28,9 @@ from core.request_context import RequestContext
 from identity import Identity, Role
 from tools.whatsapp_adapter import send_whatsapp
 
+import emergency_stop_test_support
+emergency_stop_test_support.configure_all_clear_emergency_stop()
+
 
 class ActionIntegrityTests(unittest.TestCase):
     def test_airtable_result_requires_structured_record_evidence(self):

@@ -14,7 +14,7 @@ import sys
 from unittest.mock import patch
 
 from adapters.airtable_emergency_stop_store import AirtableEmergencyStopStore
-from core.emergency_stop import KNOWN_EMERGENCY_STOP_FLAG_NAMES
+from core.emergency_stop import KNOWN_EMERGENCY_STOP_FLAG_NAMES, FlagRecord
 from tools.airtable_gateway import AirtableLookupError
 
 passed = failed = 0
@@ -50,16 +50,19 @@ print("\n── read(): success ────────────────
 
 with patch(f"{MOD}.at_list_by_formula") as m_list:
     m_list.return_value = [
-        _rec("rec1", "EMERGENCY_STOP_ALL", True),
-        _rec("rec2", "EMERGENCY_STOP_WHATSAPP", False),
+        _rec("rec1", "EMERGENCY_STOP_ALL", True, op_id="op-all-1"),
+        _rec("rec2", "EMERGENCY_STOP_WHATSAPP", False, op_id="op-wa-1"),
     ]
     store = AirtableEmergencyStopStore(known_flag_names=KNOWN)
     result = store.read()
     chk("status == ok", result.status == "ok")
     chk("flags populated correctly", result.flags == {
-        "EMERGENCY_STOP_ALL": True, "EMERGENCY_STOP_WHATSAPP": False,
+        "EMERGENCY_STOP_ALL": FlagRecord(enabled=True, operation_id="op-all-1"),
+        "EMERGENCY_STOP_WHATSAPP": FlagRecord(enabled=False, operation_id="op-wa-1"),
     })
     chk("no error string on success", result.error == "")
+    chk("distinct records keep distinct operation_id values (Step 6)",
+        result.flags["EMERGENCY_STOP_ALL"].operation_id != result.flags["EMERGENCY_STOP_WHATSAPP"].operation_id)
 
 with patch(f"{MOD}.at_list_by_formula") as m_list:
     # Airtable omits an unchecked checkbox key entirely.
@@ -70,7 +73,8 @@ with patch(f"{MOD}.at_list_by_formula") as m_list:
     store = AirtableEmergencyStopStore(known_flag_names=KNOWN)
     result = store.read()
     chk("missing checkbox key -> treated as False, not invalid", result.status == "ok")
-    chk("missing checkbox key -> flags[name] is False", result.flags["EMERGENCY_STOP_ALL"] is False)
+    chk("missing checkbox key -> flags[name].enabled is False", result.flags["EMERGENCY_STOP_ALL"].enabled is False)
+    chk("missing checkbox key -> operation_id still parsed", result.flags["EMERGENCY_STOP_ALL"].operation_id == "op-1")
 
 # ══════════════════════════════════════════════════════════════════
 # read() — unavailable

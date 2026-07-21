@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
 """
-test_feature_flags_emergency_stop_step3.py — PATCH 3B Step 3
+test_feature_flags_emergency_stop_step3.py — PATCH 3B Step 3 (+ Step 6 cutover)
 
-Tests feature_flags.py's new EmergencyStopManager integration:
+Tests feature_flags.py's EmergencyStopManager integration:
 configure_emergency_stop_manager() + the parallel evaluate_emergency_stop()/
 get_emergency_stop_status()/set_emergency_stop()/clear_emergency_stop() API.
-None of this is wired to is_enabled()/set_flag() yet for EMERGENCY_STOP_*
-names — a dedicated regression section proves those two stayed
-byte-for-behavior unchanged.
+
+Section 4 originally proved is_enabled()/set_flag() stayed byte-for-behavior
+unchanged for EMERGENCY_STOP_* names (Step 3 was deliberately dual-path,
+nothing wired up yet). PATCH 3B Step 6 landed the atomic cutover — is_enabled()
+now delegates to evaluate_emergency_stop() for these 5 names, and set_flag()
+raises EmergencyStopLegacyWriteBlocked for them — so section 4 now proves
+THAT instead. See test_feature_flags_cutover.py for the fuller Step 6
+end-to-end coverage (dynamic-callsite scan, cost_monitor/tma_api wiring,
+non-emergency-flag regression, etc.) — this file stays focused on the
+Step 3 manager-integration API plus the is_enabled()/set_flag() boundary.
 """
 
 from __future__ import annotations
@@ -55,11 +62,10 @@ chk(
 )
 
 import inspect  # noqa: E402
-import os  # noqa: E402
-import tempfile  # noqa: E402
 
 from core.emergency_stop import (  # noqa: E402
     EmergencyStopManager,
+    FlagRecord,
     ReadResult,
     WriteResult,
 )
@@ -106,7 +112,8 @@ except feature_flags.EmergencyStopNotConfigured:
 
 try:
     feature_flags.set_emergency_stop(
-        "EMERGENCY_STOP_ALL", True, operation_id="op-1", updated_by="owner", reason="r",
+        "EMERGENCY_STOP_ALL", True, operation_id="op-1", updated_by="owner",
+        source="test", reason="r",
     )
     chk("set_emergency_stop() raises NotConfigured pre-configure", False)
 except feature_flags.EmergencyStopNotConfigured:
@@ -114,7 +121,8 @@ except feature_flags.EmergencyStopNotConfigured:
 
 try:
     feature_flags.clear_emergency_stop(
-        "EMERGENCY_STOP_ALL", operation_id="op-1", updated_by="owner", reason="r",
+        "EMERGENCY_STOP_ALL", operation_id="op-1", updated_by="owner",
+        source="test", reason="r",
     )
     chk("clear_emergency_stop() raises NotConfigured pre-configure", False)
 except feature_flags.EmergencyStopNotConfigured:
@@ -170,7 +178,10 @@ print("\n── new API through a configured manager ─")
 feature_flags._reset_emergency_stop_manager_for_tests()
 
 store = FakeStore(
-    read_results=[ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": True, "EMERGENCY_STOP_AI": False})],
+    read_results=[ReadResult(status="ok", flags={
+        "EMERGENCY_STOP_ALL": FlagRecord(enabled=True),
+        "EMERGENCY_STOP_AI": FlagRecord(enabled=False),
+    })],
     write_results=[WriteResult(ok=True, verified=True)],
 )
 mgr = EmergencyStopManager(store=store, clock=FakeClock(), ttl_seconds=7.0)
@@ -187,7 +198,8 @@ chk("get_emergency_stop_status() -> configured=True once configured", status.con
 chk("get_emergency_stop_status() -> manager_status populated", status.manager_status is not None)
 
 wr = feature_flags.set_emergency_stop(
-    "EMERGENCY_STOP_ALL", False, operation_id="op-2", updated_by="owner", reason="turn it off",
+    "EMERGENCY_STOP_ALL", False, operation_id="op-2", updated_by="owner",
+    source="test", reason="turn it off",
 )
 chk("set_emergency_stop() delegates to manager.write() and returns its result", wr.ok is True and wr.verified is True)
 
@@ -198,7 +210,8 @@ feature_flags._reset_emergency_stop_manager_for_tests()
 feature_flags.configure_emergency_stop_manager(mgr2)
 
 clear_result = feature_flags.clear_emergency_stop(
-    "EMERGENCY_STOP_WHATSAPP", operation_id="op-3", updated_by="owner", reason="all clear",
+    "EMERGENCY_STOP_WHATSAPP", operation_id="op-3", updated_by="owner",
+    source="test", reason="all clear",
 )
 chk(
     "clear_emergency_stop() returns EmergencyStopClearResult",
@@ -220,7 +233,8 @@ mgr3 = EmergencyStopManager(
 feature_flags._reset_emergency_stop_manager_for_tests()
 feature_flags.configure_emergency_stop_manager(mgr3)
 clear_result2 = feature_flags.clear_emergency_stop(
-    "EMERGENCY_STOP_ALL", operation_id="op-4", updated_by="owner", reason="all clear",
+    "EMERGENCY_STOP_ALL", operation_id="op-4", updated_by="owner",
+    source="test", reason="all clear",
 )
 chk(
     "clear_emergency_stop() under an env force-stop -> still_blocked_by_env=True",
@@ -233,67 +247,68 @@ chk(
 
 
 # ══════════════════════════════════════════════════════════════════
-# 4. Legacy is_enabled()/set_flag() regression — byte-for-behavior
-# unchanged for EMERGENCY_STOP_* names, proving Step 3 changed nothing
-# about production behavior ahead of the (future) atomic cutover.
+# 4. is_enabled()/set_flag() cutover (Step 6) — EMERGENCY_STOP_* names are
+# now fully intercepted; every other name is completely unaffected.
 # ══════════════════════════════════════════════════════════════════
-print("\n── legacy is_enabled()/set_flag() regression ")
+print("\n── is_enabled()/set_flag() cutover (Step 6) ")
 
 name = "EMERGENCY_STOP_ALL"
-_missing = object()
 
-_old_env = os.environ.pop(name, _missing)
-_old_runtime = feature_flags._RUNTIME.pop(name, _missing)
-try:
-    chk("is_enabled() with no override/env -> False (unchanged)", feature_flags.is_enabled(name) is False)
-finally:
-    if _old_env is not _missing:
-        os.environ[name] = _old_env
-    if _old_runtime is not _missing:
-        feature_flags._RUNTIME[name] = _old_runtime
+# No manager configured at all -> is_enabled() fails closed to True (never
+# falls back to the legacy env/_RUNTIME path for this name).
+feature_flags._reset_emergency_stop_manager_for_tests()
+chk(
+    "is_enabled() with no manager configured -> True (fail-closed, not env/_RUNTIME fallback)",
+    feature_flags.is_enabled(name) is True,
+)
 
-_old_runtime2 = feature_flags._RUNTIME.pop(name, _missing)
-fd, scratch_path = tempfile.mkstemp(suffix=".json")
-os.close(fd)
-os.remove(scratch_path)  # set_flag()/_save_persistent() must create it fresh
-_old_persist_path = feature_flags._PERSIST_PATH
-try:
-    feature_flags._PERSIST_PATH = scratch_path
-    feature_flags.set_flag(name, True)
-    chk(
-        "set_flag() on an EMERGENCY_STOP_* name still updates _RUNTIME directly (unchanged)",
-        feature_flags._RUNTIME.get(name) is True,
-    )
-    chk(
-        "set_flag() on an EMERGENCY_STOP_* name still persists to disk (unchanged)",
-        os.path.exists(scratch_path),
-    )
-    chk(
-        "is_enabled() reflects the _RUNTIME override exactly as before, "
-        "manager configured or not (no coupling to the new API)",
-        feature_flags.is_enabled(name) is True,
-    )
-finally:
-    feature_flags._PERSIST_PATH = _old_persist_path
-    if _old_runtime2 is not _missing:
-        feature_flags._RUNTIME[name] = _old_runtime2
-    else:
-        feature_flags._RUNTIME.pop(name, None)
-    if os.path.exists(scratch_path):
-        os.remove(scratch_path)
+# With a configured (fake) manager, is_enabled() reflects the manager's
+# evaluate() exactly.
+store_true = FakeStore(read_results=[ReadResult(status="ok", flags={
+    n: FlagRecord(enabled=(n == name)) for n in feature_flags.KNOWN_EMERGENCY_STOP_FLAG_NAMES
+})])
+mgr4 = EmergencyStopManager(store=store_true, clock=FakeClock(), ttl_seconds=7.0)
+feature_flags.configure_emergency_stop_manager(mgr4)
+chk("is_enabled() delegates to the durable manager -> True when durably True", feature_flags.is_enabled(name) is True)
+chk(
+    "is_enabled() delegates to the durable manager -> False for a durably-False sibling flag",
+    feature_flags.is_enabled("EMERGENCY_STOP_AI") is False,
+)
 
-# Structural proof (not just behavioral): the legacy functions' source does
-# not reference the new manager state at all — there is no shared mutable
-# coupling that a future refactor could accidentally introduce unnoticed.
+# set_flag() is hard-blocked for all 5 canonical names.
+for emergency_name in feature_flags.KNOWN_EMERGENCY_STOP_FLAG_NAMES:
+    try:
+        feature_flags.set_flag(emergency_name, True)
+        chk(f"set_flag({emergency_name!r}, ...) raises EmergencyStopLegacyWriteBlocked", False)
+    except feature_flags.EmergencyStopLegacyWriteBlocked:
+        chk(f"set_flag({emergency_name!r}, ...) raises EmergencyStopLegacyWriteBlocked", True)
+
+# A non-emergency flag is completely unaffected — same _RUNTIME behavior as
+# always, no coupling to the manager at all.
+other_name = "SOME_UNRELATED_TEST_FLAG"
+feature_flags.set_flag(other_name, True)
+chk("set_flag() on a non-emergency name still works normally", feature_flags._RUNTIME.get(other_name) is True)
+chk("is_enabled() on a non-emergency name still reads _RUNTIME normally", feature_flags.is_enabled(other_name) is True)
+feature_flags._RUNTIME.pop(other_name, None)
+
+feature_flags._reset_emergency_stop_manager_for_tests()
+
+# Structural proof (not just behavioral): is_enabled()/set_flag() DO
+# reference the cutover machinery now — inverted from the old Step 3
+# "byte-for-behavior unchanged" claim, which is no longer true post-cutover.
 _is_enabled_src = inspect.getsource(feature_flags.is_enabled)
 _set_flag_src = inspect.getsource(feature_flags.set_flag)
 chk(
-    "is_enabled()'s source does not reference _emergency_stop_manager",
-    "_emergency_stop_manager" not in _is_enabled_src,
+    "is_enabled()'s source references KNOWN_EMERGENCY_STOP_FLAG_NAMES (Step 6 cutover)",
+    "KNOWN_EMERGENCY_STOP_FLAG_NAMES" in _is_enabled_src,
 )
 chk(
-    "set_flag()'s source does not reference _emergency_stop_manager",
-    "_emergency_stop_manager" not in _set_flag_src,
+    "set_flag()'s source references KNOWN_EMERGENCY_STOP_FLAG_NAMES (Step 6 cutover)",
+    "KNOWN_EMERGENCY_STOP_FLAG_NAMES" in _set_flag_src,
+)
+chk(
+    "set_flag()'s source raises EmergencyStopLegacyWriteBlocked",
+    "EmergencyStopLegacyWriteBlocked" in _set_flag_src,
 )
 
 

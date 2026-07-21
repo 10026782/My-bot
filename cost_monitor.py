@@ -7,9 +7,10 @@
 import logging
 import os
 import threading
+import uuid
 from datetime import datetime, timezone, date as _date
 
-from feature_flags import is_enabled, set_flag
+from feature_flags import is_enabled, set_emergency_stop
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +118,18 @@ def check_thresholds() -> None:
 
 
 def _trigger_daily_stop(daily_cost: float) -> None:
+    """
+    PATCH 3B Step 6: durable-writes EMERGENCY_STOP_AI via set_emergency_stop()
+    (source="cost_watchdog") instead of the removed legacy set_flag() path.
+
+    _daily_stopped is set optimistically before the write to dedupe
+    concurrent callers (matches the original design), but if the durable
+    write does NOT come back ok+verified, it is reverted to False — the
+    stop did not actually stick durably, so the next check_thresholds()
+    call (the scheduler runs this every 60 minutes) retries rather than
+    silently giving up for the rest of the day. The owner is only told
+    "AI stopped" when that claim is actually true (ok=True, verified=True).
+    """
     global _daily_stopped
     with _lock:
         if _daily_stopped:
@@ -124,7 +137,24 @@ def _trigger_daily_stop(daily_cost: float) -> None:
         _daily_stopped = True
 
     try:
-        set_flag("EMERGENCY_STOP_AI", True)
+        result = set_emergency_stop(
+            "EMERGENCY_STOP_AI", True,
+            operation_id=str(uuid.uuid4()),
+            updated_by="cost_watchdog",
+            source="cost_watchdog",
+            reason=f"daily cost ${daily_cost:.2f} exceeded limit ${COST_DAILY_LIMIT:.2f}",
+        )
+        if not (result.ok and result.verified):
+            with _lock:
+                _daily_stopped = False
+            logger.error(
+                f"[CostWatchdog] 🚨 EMERGENCY_STOP_AI durable write FAILED or UNVERIFIED "
+                f"(ok={result.ok}, verified={result.verified}, error={result.error!r}) — "
+                f"daily cost ${daily_cost:.2f} > limit ${COST_DAILY_LIMIT:.2f}. "
+                f"NOT reporting AI as stopped; will retry on the next check_thresholds() run."
+            )
+            return
+
         logger.critical(
             f"[CostWatchdog] 🚨 EMERGENCY_STOP_AI — "
             f"daily cost ${daily_cost:.2f} > limit ${COST_DAILY_LIMIT:.2f}"
@@ -132,10 +162,12 @@ def _trigger_daily_stop(daily_cost: float) -> None:
         _send_owner_message(
             f"🚨 *Cost Emergency Stop*\n"
             f"עלות יומית: *${daily_cost:.2f}* עברה את הסף *${COST_DAILY_LIMIT:.2f}*\n"
-            f"ה-AI נעצר אוטומטית. לאפשור מחדש:\n"
-            f"`/flag EMERGENCY_STOP_AI false`"
+            f"ה-AI נעצר אוטומטית (נשמר ב-Airtable, שורד restart).\n"
+            f"לאפשור מחדש: לחצן הביטול ב-TMA."
         )
     except Exception as e:
+        with _lock:
+            _daily_stopped = False
         logger.error(f"[CostWatchdog] _trigger_daily_stop error: {e}")
 
 

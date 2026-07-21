@@ -1,11 +1,16 @@
 import os
-import json
 import logging
 import threading
 from dataclasses import dataclass
 from typing import Optional
 
-from core.emergency_stop import EmergencyStopManager, FlagEvaluation, ManagerStatus, WriteResult
+from core.emergency_stop import (
+    EmergencyStopManager,
+    FlagEvaluation,
+    KNOWN_EMERGENCY_STOP_FLAG_NAMES,
+    ManagerStatus,
+    WriteResult,
+)
 
 """
 ══════════════════════════════════════════════════════════════════════
@@ -13,7 +18,12 @@ FEATURE FLAGS REGISTRY — מקור אמת יחיד
 כל flag שנבדק בקוד חייב להופיע כאן. ברירת מחדל = כבוי אלא אם צוין אחרת.
 ══════════════════════════════════════════════════════════════════════
 
-EMERGENCY (persistent — שורדים restart, נשמרים ב-/tmp/emergency_flags.json):
+EMERGENCY (PATCH 3B Step 6 — durably backed by Airtable via
+EmergencyStopManager, NOT the legacy in-memory/_tmp mechanism; survives a
+restart because the durable store does, not because of anything in this
+file. is_enabled()/set_flag() are intercepted for exactly these 5 names —
+see is_enabled()/set_flag()'s own docstrings and the
+"PATCH 3B Step 6 — atomic cutover" section below):
   EMERGENCY_STOP_ALL          - חוסם כל ביצוע tool מסוכן
   EMERGENCY_STOP_WHATSAPP     - חוסם שליחה יוצאת WhatsApp
   EMERGENCY_STOP_EMAIL        - חוסם שליחה יוצאת email
@@ -179,16 +189,15 @@ FUTURE (לא פעיל):
 
 logger = logging.getLogger(__name__)
 
-# Flags that must survive a restart (e.g. EMERGENCY_STOP_ALL).
-# Written to /tmp/emergency_flags.json on set, restored on import.
-_PERSISTENT_FLAG_NAMES = frozenset({
-    "EMERGENCY_STOP_ALL",
-    "EMERGENCY_STOP_WHATSAPP",
-    "EMERGENCY_STOP_EMAIL",
-    "EMERGENCY_STOP_AUTOMATION",
-    "EMERGENCY_STOP_AI",          # CORE_05: Cost Watchdog — חוסם קריאות Claude API
-})
-_PERSIST_PATH = "/tmp/emergency_flags.json"
+# PATCH 3B Step 6: the /tmp/emergency_flags.json persistence mechanism
+# (_PERSISTENT_FLAG_NAMES / _PERSIST_PATH / _load_persistent() /
+# _save_persistent(), restored on import, written on every set_flag() call
+# for the 5 EMERGENCY_STOP_* names) has been removed entirely. It existed
+# ONLY for those 5 names, and set_flag() now hard-blocks them (see
+# EmergencyStopLegacyWriteBlocked below) — durable persistence for these
+# flags is EmergencyStopManager's job (Airtable-backed, survives a restart
+# for real, unlike a container-local /tmp file). Nothing else in this file
+# ever used this mechanism.
 
 # Runtime overrides — in-memory, checked first.
 _RUNTIME: dict[str, bool] = {}
@@ -199,33 +208,6 @@ _DEFAULTS: dict[str, str] = {
     "IMPORT_DOMAIN": os.environ.get("IMPORT_DOMAIN", "true"),
     "FEATURE_INGRESS_ENVELOPE": os.environ.get("FEATURE_INGRESS_ENVELOPE", "true"),
 }
-
-
-def _load_persistent() -> None:
-    """Restore persistent flags from disk on startup."""
-    try:
-        with open(_PERSIST_PATH) as f:
-            data = json.load(f)
-        if isinstance(data, dict):
-            for k, v in data.items():
-                if isinstance(k, str) and isinstance(v, bool):
-                    _RUNTIME[k] = v
-            if data:
-                logger.warning(f"[FeatureFlags] restored {len(data)} persistent flags: {list(data)}")
-    except FileNotFoundError:
-        pass
-    except Exception as e:
-        logger.error(f"[FeatureFlags] failed to load {_PERSIST_PATH}: {e}")
-
-
-def _save_persistent() -> None:
-    """Write all active persistent flags to disk."""
-    try:
-        data = {k: v for k, v in _RUNTIME.items() if k in _PERSISTENT_FLAG_NAMES}
-        with open(_PERSIST_PATH, "w") as f:
-            json.dump(data, f)
-    except Exception as e:
-        logger.error(f"[FeatureFlags] failed to save {_PERSIST_PATH}: {e}")
 
 
 # PR-0C (BUG-TMA-APPROVAL-TRUTHFULNESS follow-up): EMAIL_INBOUND/ABANDONED_LEADS
@@ -244,6 +226,28 @@ _ADAPTER_GATED_FLAGS: dict[str, str] = {
 
 
 def is_enabled(name: str) -> bool:
+    """
+    PATCH 3B Step 6 cutover: for exactly the 5 canonical EMERGENCY_STOP_*
+    names (KNOWN_EMERGENCY_STOP_FLAG_NAMES), this delegates to
+    evaluate_emergency_stop() — the durable, Airtable-backed manager — and
+    NEVER consults _RUNTIME/env for those names anymore. If the manager
+    isn't configured yet (EmergencyStopNotConfigured — shouldn't happen in
+    production after app.run_startup_sequence(), but is reachable in a test
+    or a not-yet-bootstrapped context), this fails closed to True, matching
+    the manager's own "unknown -> blocked=True" convention, rather than
+    silently falling back to the legacy env/_RUNTIME path (which would
+    reintroduce exactly the dual-source-of-truth bug this cutover exists to
+    remove).
+
+    Every other flag name is completely unaffected by this branch — same
+    _RUNTIME/env lookup as always.
+    """
+    if name in KNOWN_EMERGENCY_STOP_FLAG_NAMES:
+        try:
+            return evaluate_emergency_stop(name).blocked
+        except EmergencyStopNotConfigured:
+            return True
+
     if name in _RUNTIME:
         value = _RUNTIME[name]
     else:
@@ -365,11 +369,24 @@ def get_core_reasoning_leads_state() -> str:
 
 
 def set_flag(name: str, value: bool) -> None:
-    """Set a runtime feature flag. Persistent flags are written to disk."""
+    """
+    Set a runtime feature flag.
+
+    PATCH 3B Step 6 cutover: for exactly the 5 canonical EMERGENCY_STOP_*
+    names, this raises EmergencyStopLegacyWriteBlocked instead of writing
+    to _RUNTIME — that in-memory (previously /tmp-persisted) path no longer
+    exists for these names. Use set_emergency_stop()/clear_emergency_stop()
+    instead, which write durably through the configured EmergencyStopManager.
+    Every other flag name is unaffected.
+    """
+    if name in KNOWN_EMERGENCY_STOP_FLAG_NAMES:
+        raise EmergencyStopLegacyWriteBlocked(
+            f"set_flag({name!r}, {value!r}) is blocked (PATCH 3B Step 6) — "
+            f"{name} is one of the 5 canonical Emergency Stop flags, durably "
+            "backed by Airtable via EmergencyStopManager. Use "
+            "set_emergency_stop()/clear_emergency_stop() instead."
+        )
     _RUNTIME[name] = value
-    if name in _PERSISTENT_FLAG_NAMES:
-        _save_persistent()
-        logger.warning(f"[FeatureFlags] persistent flag {name}={value} saved to disk")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -389,14 +406,25 @@ def set_flag(name: str, value: bool) -> None:
 class EmergencyStopNotConfigured(RuntimeError):
     """Raised by evaluate_emergency_stop()/set_emergency_stop()/
     clear_emergency_stop() when configure_emergency_stop_manager() has not
-    been called yet. Unrelated to, and does not affect, is_enabled()/
-    set_flag() — those never raise this."""
+    been called yet. is_enabled() (Step 6) calls evaluate_emergency_stop()
+    internally for the 5 canonical EMERGENCY_STOP_* names but always
+    CATCHES this — it never propagates out of is_enabled() itself; an
+    unconfigured manager there just means is_enabled() fails closed to
+    True instead of raising."""
 
 
 class EmergencyStopManagerConflict(RuntimeError):
     """Raised by configure_emergency_stop_manager() when a DIFFERENT manager
     instance is already configured. Re-configuring with the SAME instance
     (by identity) is a no-op, not an error."""
+
+
+class EmergencyStopLegacyWriteBlocked(RuntimeError):
+    """Raised by set_flag() (Step 6 cutover) when called with one of the 5
+    canonical EMERGENCY_STOP_* names. Those names no longer have any legacy
+    in-memory/_tmp write path — use set_emergency_stop()/
+    clear_emergency_stop() instead, which write durably through the
+    configured EmergencyStopManager."""
 
 
 @dataclass(frozen=True)
@@ -423,6 +451,40 @@ class EmergencyStopClearResult:
 
 _emergency_stop_manager: Optional[EmergencyStopManager] = None
 _emergency_stop_manager_lock = threading.Lock()
+
+
+def _env_force_stop_provider(flag_name: str) -> bool:
+    """
+    PATCH 3B Step 6: the concrete force_stop_provider wired into the
+    EmergencyStopManager constructed in core/emergency_stop_bootstrap.py —
+    a manual break-glass override read directly from os.environ (a Render
+    dashboard env var, set by hand), independent of the durable Airtable
+    state entirely.
+
+    Deliberately does NOT call is_enabled() — after this step's cutover,
+    is_enabled() for these same 5 names delegates to
+    evaluate_emergency_stop(), which calls INTO this very manager/provider;
+    routing through is_enabled() here would be circular. This reads
+    os.environ directly, exactly like is_enabled() used to for these names
+    pre-cutover, just narrower (see below).
+
+    Precedence contract (matches EmergencyStopManager.evaluate()'s own
+    docstring — force_stop_provider returning True always wins over
+    durable/cache state): returning True forces a stop unconditionally.
+    Returning False does NOT clear or override anything — it just means
+    this override isn't forcing a block right now; a durable True still
+    blocks normally through the ordinary cache/durable path. An unset env
+    var and an explicit "false" are treated identically (both -> False) —
+    neither one can ever cancel a durable stop; only a real
+    clear_emergency_stop() durable write can do that.
+
+    Only the literal string "true" (case-insensitive) forces a stop —
+    narrower than is_enabled()'s generic truthy parsing ("1"/"yes"/"on"/
+    "enabled" also count there). This is a deliberately unambiguous
+    convention for a manual emergency override, not a normal feature flag.
+    """
+    raw = os.environ.get(flag_name, "").strip().lower()
+    return raw == "true"
 
 
 def configure_emergency_stop_manager(manager: EmergencyStopManager) -> None:
@@ -510,21 +572,28 @@ def set_emergency_stop(
     *,
     operation_id: str,
     updated_by: str,
+    source: str,
     reason: str,
     expected_operation_id: Optional[str] = None,
 ) -> WriteResult:
     """
-    New parallel write API (Step 3) — NOT yet wired to any live caller;
-    legacy set_flag() is untouched and still governs production
-    EMERGENCY_STOP_* behavior. Raises EmergencyStopNotConfigured if
-    unconfigured. See EmergencyStopManager.write() (core/emergency_stop.py)
-    for the underlying durable-write + cache-invalidation contract.
+    Parallel write API (Step 3, wired to live callers as of Step 6). Raises
+    EmergencyStopNotConfigured if unconfigured. See EmergencyStopManager.write()
+    (core/emergency_stop.py) for the underlying durable-write + cache-
+    invalidation contract.
+
+    source (Step 6): the caller identifies itself explicitly — no longer
+    hardcoded to "feature_flags.set_emergency_stop". Every production caller
+    uses its own canonical value (e.g. cost_monitor.py -> "cost_watchdog",
+    tma_api.py's stop endpoint -> "tma_owner_stop") so the durable record's
+    Source field and the owner-facing notification both name who actually
+    triggered the stop, not this pass-through function.
     """
     manager = _get_configured_emergency_stop_manager()
     return manager.write(
         flag_name, enabled,
         operation_id=operation_id, updated_by=updated_by,
-        source="feature_flags.set_emergency_stop", reason=reason,
+        source=source, reason=reason,
         expected_operation_id=expected_operation_id,
     )
 
@@ -534,12 +603,13 @@ def clear_emergency_stop(
     *,
     operation_id: str,
     updated_by: str,
+    source: str,
     reason: str,
     expected_operation_id: Optional[str] = None,
 ) -> EmergencyStopClearResult:
     """
-    New parallel write API (Step 3) — NOT yet wired to any live caller.
-    Raises EmergencyStopNotConfigured if unconfigured.
+    Parallel write API (Step 3, wired to live callers as of Step 6). Raises
+    EmergencyStopNotConfigured if unconfigured.
 
     Durable-clears (Enabled=False) the given flag, then re-evaluates it: if
     an env force-stop is still configured for this flag (see
@@ -547,19 +617,20 @@ def clear_emergency_stop(
     still EFFECTIVELY blocked even though the durable write succeeded.
     still_blocked_by_env communicates that explicitly so a caller never
     reports "cleared" when nothing observable actually changed.
+
+    source (Step 6): see set_emergency_stop()'s docstring — every caller
+    identifies itself explicitly (e.g. tma_api.py's clear endpoint ->
+    "tma_owner_clear").
     """
     manager = _get_configured_emergency_stop_manager()
     write_result = manager.write(
         flag_name, False,
         operation_id=operation_id, updated_by=updated_by,
-        source="feature_flags.clear_emergency_stop", reason=reason,
+        source=source, reason=reason,
         expected_operation_id=expected_operation_id,
     )
     still_blocked_by_env = manager.evaluate(flag_name).source == "env"
     return EmergencyStopClearResult(write=write_result, still_blocked_by_env=still_blocked_by_env)
 
-
-# Restore on import so flags survive Render restarts.
-_load_persistent()
 
 ERROR_REPORTING = os.environ.get("ERROR_REPORTING", "true")

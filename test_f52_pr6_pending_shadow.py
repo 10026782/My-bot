@@ -67,6 +67,9 @@ os.environ.setdefault("ELIYAHU_CHAT_ID", "888888888")  # owner_chat_id resolves
 # notification (and therefore _render_pending_prompt()) end to end.
 
 import app  # noqa: E402
+
+import emergency_stop_test_support  # noqa: E402
+emergency_stop_test_support.configure_all_clear_emergency_stop()
 import session_store  # noqa: E402
 from identity import Identity, Role  # noqa: E402
 from core.router.route_decision import RouteDecision, Intent, Handler, RouterDomain  # noqa: E402

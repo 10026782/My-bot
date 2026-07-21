@@ -20,6 +20,9 @@ os.environ.setdefault("RENDER_APP_URL", "https://example.com")
 os.environ.setdefault("SETUP_WEBHOOK", "0")
 
 import app  # noqa: E402  (env vars above must be set before import)
+
+import emergency_stop_test_support  # noqa: E402
+emergency_stop_test_support.configure_all_clear_emergency_stop()
 from identity import Identity, Role  # noqa: E402
 from core.router.route_decision import RouteDecision  # noqa: E402
 from context import AgentContext  # noqa: E402
