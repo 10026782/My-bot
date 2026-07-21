@@ -602,6 +602,39 @@ def resolve_table_and_field_ids(table_name: str, field_name: str) -> tuple[str, 
     raise RuntimeError(f"table '{table_name}' not found via Meta API")
 
 
+def get_table_schema(table_name: str, *, timeout: float = 15) -> dict | None:
+    """
+    Fetch one table's live schema via the Meta API — same endpoint as
+    resolve_table_and_field_ids(), but returns the whole table dict
+    ({"id", "name", "fields": [{"id", "name", "type", ...}, ...]}) instead
+    of resolving a single field ID, for callers that need to validate field
+    *types*, not just existence (e.g. core/emergency_stop_preflight.py).
+
+    Returns None if no table with this name exists in the base — a clean,
+    non-error "not found" signal, distinct from a network failure. Raises
+    AirtableLookupError on a network/HTTP failure — same fail-closed
+    contract as at_get_by_field()/at_list_by_formula(). Read-only.
+    """
+    try:
+        r = httpx.get(
+            f"https://api.airtable.com/v0/meta/bases/{_at_base()}/tables",
+            headers={"Authorization": f"Bearer {_at_key()}"},
+            timeout=timeout,
+        )
+    except Exception as e:
+        raise AirtableLookupError(f"meta schema fetch for table={table_name!r}: {e}") from e
+
+    if r.status_code != 200:
+        raise AirtableLookupError(
+            f"meta schema fetch for table={table_name!r}: HTTP {r.status_code}"
+        )
+
+    for t in r.json().get("tables", []):
+        if t.get("name") == table_name:
+            return t
+    return None
+
+
 def airtable_upload_attachment(
     record_id: str,
     field_id: str,
