@@ -9,8 +9,23 @@ jobs:
   backend-ci:
     runs-on: ubuntu-latest
     env:
-      AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
-      AIRTABLE_BASE_ID: ${{ secrets.AIRTABLE_BASE_ID }}
+      # PATCH 3B Step 6 prerequisite: these are NOT real credentials. A real
+      # AIRTABLE_API_KEY/AIRTABLE_BASE_ID (secrets.*) used to be wired here,
+      # and a test-isolation bug in test_emergency_stop_bootstrap.py (fixed
+      # in commit 1967dd4) let assertions run outside their mock context —
+      # which meant those calls silently succeeded against the LIVE
+      # production Emergency Stop Flags table instead of failing loudly.
+      # Fixing that one bug isn't enough: unit CI must never hold real
+      # Airtable credentials at all, so any *future* test-isolation bug
+      # fails fast and loud (network-blocked below) instead of quietly
+      # reading/writing production data again. If a genuine live-Airtable
+      # integration test is ever needed, it belongs in its own CI job with
+      # its own secret pointing at a dedicated CI-only Airtable base —
+      # never this job, never production. (See conftest.py's
+      # airtable/live/integration pytest markers — already excluded from
+      # every CI run today; there is currently no job that runs them.)
+      AIRTABLE_API_KEY: "fake-ci-key-not-real"
+      AIRTABLE_BASE_ID: "appFAKE00000000000"
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -21,6 +36,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Block network egress to Airtable (defense-in-depth, PATCH 3B Step 6 prerequisite)
+        run: |
+          # Belt-and-braces alongside the fake credentials above: even if a
+          # future bug reintroduces an unmocked call, or someone re-adds a
+          # real secret here by mistake, it fails fast with a connection
+          # error instead of silently reaching api.airtable.com.
+          echo "127.0.0.1 api.airtable.com" | sudo tee -a /etc/hosts
 
       - name: Install dependencies
         run: pip install -r requirements.txt
