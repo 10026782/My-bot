@@ -111,7 +111,6 @@ OUTPUT GATEWAY (C52):
 GAME / SCHEDULER:
   GAME_SCHEDULER              - scheduler jobs של מערכת הגיימיפיקציה
   PAYMENT_REMINDERS           - תזכורות תשלום אוטומטיות
-  GIT_AUDIT_SCHEDULER         - הרצה יומית אוטומטית של daily_git_audit.py; default OFF (נשאר manual-only)
 
 PR3A — Airtable Schema Snapshot Archive:
   FEATURE_AIRTABLE_SCHEMA_SNAPSHOT         - scheduler job מייצר snapshot של ה-schema החי

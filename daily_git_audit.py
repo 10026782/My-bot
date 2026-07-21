@@ -2,8 +2,14 @@
 """
 Daily Git Audit — Daily Integrity Check
 בודק ענפות claude/* לא ממוזגות ל-main, פערי תיעוד מול ROADMAP, סכמות כפולות
-ו-drift בין קוד למשתני סביבה (CORS/ALLOWED) — ומדווח לאליהו בטלגרם.
-דוח בלבד — לא משנה קוד/ענפים/Airtable.
+ו-drift בין קוד למשתני סביבה (CORS/ALLOWED) — ומדפיס דוח ל-stdout.
+דוח בלבד — לא משנה קוד/ענפים/Airtable, ולא שולח שום דבר בעצמו.
+
+N16 (תיקון ארכיטקטוני, ביטול N12): קובץ זה הוא כלי repo בלבד, ואינו קשור
+עוד לתהליך ה-Python של הבוט העסקי (app.py/scheduler.py) בשום צורה — לא
+דרך scheduler, ולא דרך TELEGRAM_TOKEN. הרצה והתראה הן באחריות בלעדית של
+Claude Code Routine שמריץ אותו ומדווח לפי הפלט (stdout), כדי שגישת ה-repo
+תישאר מחוץ לתהליך הפרודקשן של הבוט. ראה ROADMAP.md N16.
 
 READ FIRST: ROADMAP.md הוא מקור האמת היחיד (ראה הכרזת הקובץ עצמו —
 "מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE"). BOSS_CURRENT_STATE.md/
@@ -13,11 +19,10 @@ ROADMAP.md לא קיים. MAIN > DOCS: ה-hash של origin/main (נבדק ב-GOV
 מוזג ל-main — זה מה ש-check_unmerged_vs_roadmap() בודק. אם לא ניתן לאמת —
 מסמנים UNVERIFIED, לא CRITICAL.
 
-רץ ידנית או מה-scheduler (לא רשום כברירת מחדל) — שער GOV-02 חוסם הרצה על מידע ישן.
+רץ ידנית או מ-Claude Code Routine — שער GOV-02 חוסם הרצה על מידע ישן.
 
 Usage: python daily_git_audit.py
 """
-import os
 import re
 import subprocess
 from collections import Counter
@@ -38,19 +43,6 @@ _STOPWORDS = {
     "fix", "add", "update", "fixed", "added", "updated", "the", "and",
     "for", "with", "this", "that", "from", "into", "also", "merge",
 }
-
-
-def _send_telegram(text: str) -> None:
-    owner_chat_id = os.environ.get("OWNER_TELEGRAM_ID", "") or os.environ.get("ELIYAHU_CHAT_ID", "")
-    token = os.environ.get("TELEGRAM_TOKEN", "")
-    if not owner_chat_id or not token:
-        print(f"[daily_git_audit] לא ניתן לשלוח טלגרם (חסר token/chat_id):\n{text}")
-        return
-    try:
-        import telebot  # type: ignore
-        telebot.TeleBot(token).send_message(int(owner_chat_id), text)
-    except Exception as e:
-        print(f"[daily_git_audit] שגיאת שליחת טלגרם: {e}")
 
 
 def _run(cmd: str) -> str:
@@ -188,11 +180,10 @@ def main():
 
     _gate = _sp.run(["python3", "audit_truth_gate.py"], capture_output=True, text=True)
     if _gate.returncode == 1:
-        # STOP mode — שלח הודעה ועצור בשקט
-        try:
-            _send_telegram("🚫 AUDIT ABORTED (GOV-02 STOP)\n" + _gate.stdout[-400:])
-        except Exception:
-            pass
+        # STOP mode — print and stop. The caller (a Claude Code Routine)
+        # reads this from stdout and decides how to notify — this script
+        # never sends anything itself (N16).
+        print("🚫 AUDIT ABORTED (GOV-02 STOP)\n" + _gate.stdout[-400:])
         return
 
     _gate_state = _json.loads(_Path("audit_gate_state.json").read_text())
@@ -251,7 +242,6 @@ def main():
     report += "\n".join(drift) if drift else "none"
 
     print(report)
-    _send_telegram(report)
 
 
 if __name__ == "__main__":

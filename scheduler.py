@@ -61,20 +61,6 @@ def _job_schema_snapshot_archive():
         logger.error(f"[Scheduler] job=schema_snapshot_archive error: {e}")
 
 
-def _job_daily_git_audit():
-    """Feature flag: GIT_AUDIT_SCHEDULER (default off) — daily_git_audit.py נשאר manual-only עד שמופעל."""
-    try:
-        from feature_flags import is_enabled
-        if not is_enabled("GIT_AUDIT_SCHEDULER"):
-            return
-        from daily_git_audit import main as run_daily_git_audit
-        run_daily_git_audit()
-    except ImportError:
-        logger.info("daily_git_audit לא קיים — דולג")
-    except Exception as e:
-        logger.error(f"daily_git_audit error: {e}")
-
-
 def _job_overdue_payments():
     try:
         from crm import crm_overdue_payments
@@ -803,7 +789,6 @@ def start_scheduler() -> threading.Thread:
     from lead_memory import job_flush_lead_memory
     from shabbat_guard import shabbat_safe
     digest_time           = os.environ.get("DIGEST_TIME",               "07:30")
-    git_audit_time        = os.environ.get("GIT_AUDIT_TIME",            "06:45")
     collector_time        = os.environ.get("COLLECTOR_TIME",            "23:00")
     cleanup_interval      = int(os.environ.get("CLEANUP_INTERVAL_MIN",  "360"))
     followup_interval     = int(os.environ.get("FOLLOWUP_INTERVAL_MIN", "60"))
@@ -823,7 +808,6 @@ def start_scheduler() -> threading.Thread:
     # daily_digest.py only shows a "Shabbat Mode" text banner, it never actually gates sending.
     # Wrapped in shabbat_safe(), same pattern already used for 6 other jobs below.
     schedule.every().day.at(digest_time).do(shabbat_safe(_automation_guard(_job_daily_digest, name="daily_digest")))
-    schedule.every().day.at(git_audit_time).do(_automation_guard(_job_daily_git_audit, name="daily_git_audit"))            # Daily Git/config integrity audit (GOV-02)
     schedule.every().day.at("03:30").do(_automation_guard(_job_schema_snapshot_archive, name="schema_snapshot_archive"))  # PR3A — flag: FEATURE_AIRTABLE_SCHEMA_SNAPSHOT
     schedule.every().day.at(collector_time).do(shabbat_safe(_automation_guard(_job_daily_collector, name="daily_collector")))
     schedule.every(cleanup_interval).minutes.do(_automation_guard(_job_cleanup_pending, name="cleanup_pending"))
@@ -847,7 +831,7 @@ def start_scheduler() -> threading.Thread:
     schedule.every().day.at("08:15").do(_automation_guard(_job_daily_usage_report, name="daily_usage_report"))                             # CORE_05 v2: count-based JSONL watchdog (08:15 — מניעת cluster עם D04+Game ב-Sunday 08:00)
 
     logger.info(
-        f"📅 Scheduler | digest={digest_time} | git_audit={git_audit_time} | collector={collector_time} | "
+        f"📅 Scheduler | digest={digest_time} | collector={collector_time} | "
         f"cleanup=every {cleanup_interval}min | followup=every {followup_interval}min | "
         f"payment={payment_reminder_time} | recovery={recovery_time} | "
         f"learning={learning_day} {learning_time} | "
