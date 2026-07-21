@@ -30,25 +30,37 @@
 # exists to fix, just for new fields instead of "Date". PR2 will verify
 # against the live Airtable Meta API before adding anything.
 #
-# The upsert (at_get_by_field lookup, then create-or-patch) is BEST-EFFORT
-# SEQUENTIAL, not atomic — there is no compare-and-set here. Two concurrent
-# daily_watchdog() runs for the same Date could both see "no existing row"
-# and both call airtable_create(), producing a duplicate (a lookup→create
-# TOCTOU window). This is sufficient today because the scheduler runs
-# in-process with WEB_CONCURRENCY=1 (one call to daily_watchdog() at a
-# time), so it prevents the duplicate this PR actually set out to fix
-# (sequential retries/double-fires) — it does NOT guarantee correctness
-# under true concurrent writers. A real fix would need either an Airtable
-# unique-field constraint (Airtable has none) or a compare-and-set primitive
-# equivalent to core/emergency_stop.py's EmergencyStopStore.write()
-# expected_operation_id pattern — out of scope here.
+# The upsert (lookup, then create-or-patch) is BEST-EFFORT SEQUENTIAL, not
+# atomic — there is no compare-and-set here. Two concurrent daily_watchdog()
+# runs for the same Date could both see "no existing row" and both call
+# airtable_create(), producing a duplicate (a lookup→create TOCTOU window).
+# This is sufficient today because the scheduler runs in-process with
+# WEB_CONCURRENCY=1 (one call to daily_watchdog() at a time), so it
+# prevents the duplicate this PR actually set out to fix (sequential
+# retries/double-fires) — it does NOT guarantee correctness under true
+# concurrent writers. A real fix would need either an Airtable unique-field
+# constraint (Airtable has none) or a compare-and-set primitive equivalent
+# to core/emergency_stop.py's EmergencyStopStore.write() expected_operation_id
+# pattern — out of scope here.
+#
+# HOTFIX (post-merge production smoke failure): the lookup originally used
+# at_get_by_field(table, "Date", date_str), which builds {Date}='YYYY-MM-DD'
+# — a plain text-equality formula. Date is an Airtable DATE field, not
+# text, so that formula never matched and every call took the create
+# branch — production smoke showed 2 runs producing 2 rows, then 4 rows on
+# a repeat. Fixed to at_list_by_formula() with
+# DATETIME_FORMAT({Date}, 'YYYY-MM-DD')='<date_str>' (converts the date
+# field to text before comparing) and max_records=2 so an already-existing
+# duplicate (e.g. from this very bug) is detected and refused rather than
+# patched arbitrarily. See _write_airtable_row()'s own docstring for the
+# full account.
 
 from __future__ import annotations
 
 import json
 import logging
 import os
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date as _date
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -153,7 +165,34 @@ def _write_airtable_row(date_str: str, counts: dict[str, int]) -> bool:
     Upserts the AI_Usage_Daily row for one date. Returns True only when
     Airtable actually confirms the write.
 
-    Two bugs this fixes vs the previous version:
+    HOTFIX (post-merge production smoke failure): the previous version
+    looked up the existing row via at_get_by_field(table, "Date", date_str),
+    which builds the formula {Date}='YYYY-MM-DD'. Date is an Airtable DATE
+    field, not text — a plain string-equality formula against a date field
+    never matches, so at_get_by_field() always returned None and every
+    single call took the create branch. Production smoke confirmed this:
+    two consecutive runs produced two rows, not one create + one patch;
+    repeating produced four. Returning True only proved each write
+    succeeded — it never proved upsert picked the right branch, which is
+    exactly the gap that let this ship broken the first time.
+
+    Fixed by:
+      - Looking up via at_list_by_formula() with a date-aware formula:
+        DATETIME_FORMAT({Date}, 'YYYY-MM-DD')='<date_str>' — converts the
+        date field to text on Airtable's side before comparing, instead of
+        comparing a date value to a text literal.
+      - Requesting max_records=2 (not 1) so a genuine duplicate — e.g. from
+        this exact bug already having run in production — is DETECTED
+        (2+ matches) rather than silently patching an arbitrary one of
+        several rows for the same date. 2+ matches refuses to write at all
+        (a data-integrity problem, not a normal upsert case) and must be
+        fixed manually in Airtable first.
+      - date_str is validated with date.fromisoformat() before any Airtable
+        call — a malformed date_str must never reach Airtable as a formula
+        fragment or silently create a row under a garbage date.
+
+    Two bugs this already fixed vs the pre-#435 version (unchanged by this
+    hotfix):
       1. It used to log "שורה יומית נכתבה ל-Airtable" unconditionally right
          after calling airtable_create(), without checking the return
          value. airtable_create() returns None (not an exception) on any
@@ -163,9 +202,8 @@ def _write_airtable_row(date_str: str, counts: dict[str, int]) -> bool:
          write sends — since fixed directly in Airtable).
       2. It always called airtable_create(), so re-running daily_watchdog()
          for a date that already has a row (a manual retry, a scheduler
-         double-fire) silently created a SECOND row for the same date
-         instead of overwriting it — "create" was doing an implicit,
-         undocumented "maybe duplicate" rather than a real upsert.
+         double-fire) used to silently create a SECOND row for the same
+         date instead of overwriting it.
 
     Writes ONLY the 5 fields that exist in the live table today. A cost
     breakdown (total_cost_usd/openai_text_cost_usd/openai_stt_cost_usd/
@@ -180,8 +218,21 @@ def _write_airtable_row(date_str: str, counts: dict[str, int]) -> bool:
     The upsert (lookup-then-create-or-patch) is best-effort SEQUENTIAL,
     not atomic — see this module's docstring for the TOCTOU caveat under
     true concurrency; it's sufficient today only because the scheduler
-    calls this one job at a time (WEB_CONCURRENCY=1).
+    calls this one job at a time (WEB_CONCURRENCY=1). This hotfix does NOT
+    make the upsert atomic — it fixes the lookup formula that was making
+    every call miss the existing row entirely, a strictly worse bug than
+    the pre-existing TOCTOU window.
     """
+    try:
+        _date.fromisoformat(date_str)
+    except (ValueError, TypeError) as e:
+        logger.error(
+            "[CostWatchdogV2] AI_Usage_Daily write REFUSED for %r — not a valid "
+            "ISO date (%s). No Airtable call made.",
+            date_str, e,
+        )
+        return False
+
     try:
         from airtable_schema import Tables
         table = getattr(Tables, "AI_USAGE_DAILY", "AI_Usage_Daily")
@@ -193,10 +244,14 @@ def _write_airtable_row(date_str: str, counts: dict[str, int]) -> bool:
             "total_units":             sum(counts.values()),
         }
 
-        from tools.airtable_gateway import airtable_create, airtable_patch, at_get_by_field, AirtableLookupError
+        from tools.airtable_gateway import (
+            airtable_create, airtable_patch, at_list_by_formula,
+            _safe_formula_param, AirtableLookupError,
+        )
 
+        formula = f"DATETIME_FORMAT({{Date}}, 'YYYY-MM-DD')='{_safe_formula_param(date_str)}'"
         try:
-            existing = at_get_by_field(table, "Date", date_str)
+            matches = at_list_by_formula(table, formula, max_records=2)
         except AirtableLookupError as e:
             logger.error(
                 "[CostWatchdogV2] AI_Usage_Daily upsert lookup FAILED for %s (%s) — "
@@ -206,8 +261,18 @@ def _write_airtable_row(date_str: str, counts: dict[str, int]) -> bool:
             )
             return False
 
-        if existing is not None:
-            record_id = existing["id"]
+        if len(matches) >= 2:
+            logger.error(
+                "[CostWatchdogV2] AI_Usage_Daily DUPLICATE-ROW INTEGRITY ERROR for %s — "
+                "%d existing rows match this date (record ids: %s). Refusing to write "
+                "(would guess which row is authoritative). Needs manual cleanup in "
+                "Airtable before this date can be updated again.",
+                date_str, len(matches), [m.get("id") for m in matches],
+            )
+            return False
+
+        if len(matches) == 1:
+            record_id = matches[0]["id"]
             write_fields = {k: v for k, v in fields.items() if k != "Date"}
             ok = airtable_patch(table, record_id, write_fields, source="cost_watchdog")
             if not ok:
@@ -219,11 +284,13 @@ def _write_airtable_row(date_str: str, counts: dict[str, int]) -> bool:
                 )
                 return False
             logger.info(
-                "[CostWatchdogV2] שורה יומית עודכנה ב-Airtable (מאומת, upsert): %s — %s",
-                date_str, fields,
+                "[CostWatchdogV2] AI_Usage_Daily upsert OK: branch=patch date=%s "
+                "record_id=%s source=cost_watchdog fields=%s",
+                date_str, record_id, fields,
             )
             return True
 
+        # len(matches) == 0
         result = airtable_create(table, fields, source="cost_watchdog")
         if result is None:
             logger.error(
@@ -234,9 +301,11 @@ def _write_airtable_row(date_str: str, counts: dict[str, int]) -> bool:
             )
             return False
 
+        record_id = result.get("id", "?")
         logger.info(
-            "[CostWatchdogV2] שורה יומית נכתבה ל-Airtable (מאומת): %s — %s",
-            date_str, fields,
+            "[CostWatchdogV2] AI_Usage_Daily upsert OK: branch=create date=%s "
+            "record_id=%s source=cost_watchdog fields=%s",
+            date_str, record_id, fields,
         )
         return True
     except Exception as e:
