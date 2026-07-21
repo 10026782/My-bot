@@ -163,10 +163,16 @@ feature_flags._reset_emergency_stop_manager_for_tests()
 
 
 # ══════════════════════════════════════════════════════════════════
-# 5. Unexpected internal error during bootstrap -> never raises, never
-#    silently looks like success ("app remains startable")
+# 5. A bug INSIDE the adapter's own read() is still a documented outcome
+#    at the bootstrap level — the adapter itself (Step 2.5 hardening)
+#    already converts an unexpected exception during hydration into
+#    ReadResult(status="invalid", error="internal_error: ..."), so it
+#    never reaches bootstrap_emergency_stop() as a raised exception at
+#    all. This is unchanged by the exception-policy fix below — it was
+#    never "contained by bootstrap" to begin with, it's handled one layer
+#    down, before bootstrap ever sees it.
 # ══════════════════════════════════════════════════════════════════
-print("\n── unexpected internal error (app must stay startable) ")
+print("\n── adapter-internal bug during hydration (documented at this layer) ")
 
 with patch(
     f"{ADAPTER_MOD}.at_list_by_formula",
@@ -174,20 +180,26 @@ with patch(
 ):
     result = bootstrap_mod.bootstrap_emergency_stop()
 
-chk("unexpected exception during hydration -> bootstrap does not raise", True)  # got here without an exception
-chk("unexpected exception during hydration -> configured=True (manager still injected)", result.configured is True)
+chk("adapter-internal bug during hydration -> bootstrap does not raise", True)  # got here without an exception
+chk("adapter-internal bug during hydration -> configured=True (manager still injected)", result.configured is True)
 chk(
-    "unexpected exception during hydration -> classified distinctly (not silently EXIT_OK-shaped)",
+    "adapter-internal bug during hydration -> classified distinctly via the adapter's own hardening",
     result.store_status == "invalid" and "internal_error" in result.error,
 )
 
 feature_flags._reset_emergency_stop_manager_for_tests()
 
-# configure_emergency_stop_manager() itself raising (e.g. a genuine TOCTOU
-# race between the idempotency check and the configure() call — not
-# reachable today with the single real caller, but the defensive try/except
-# around it must still work if a future caller ever triggers it) must be
-# contained, not propagated.
+
+# ══════════════════════════════════════════════════════════════════
+# 6. A GENUINELY unexpected failure during construction/configuration —
+#    NOT a documented outcome (Airtable unavailable / invalid data) —
+#    must PROPAGATE out of bootstrap_emergency_stop(), not be contained.
+#    An unexpected bug here must be exposed loudly, not silently folded
+#    into "just another degraded state" (see the module's exception
+#    policy in its own docstring).
+# ══════════════════════════════════════════════════════════════════
+print("\n── unexpected construction/configuration error propagates ")
+
 with patch.object(
     feature_flags,
     "configure_emergency_stop_manager",
@@ -195,11 +207,30 @@ with patch.object(
 ):
     with patch(f"{ADAPTER_MOD}.at_list_by_formula") as m_list:
         m_list.return_value = _ALL_FLAGS_OK
-        result = bootstrap_mod.bootstrap_emergency_stop()
+        try:
+            bootstrap_mod.bootstrap_emergency_stop()
+            chk("configure() raising -> propagates out of bootstrap_emergency_stop() (does not swallow it)", False)
+        except feature_flags.EmergencyStopManagerConflict as e:
+            chk("configure() raising -> propagates out of bootstrap_emergency_stop() (does not swallow it)", True)
+            chk("configure() raising -> the original exception reaches the caller intact", "simulated race" in str(e))
 
-chk("configure() raising is contained, not propagated (bootstrap does not raise)", True)
-chk("configure() raising -> configured=False", result.configured is False)
-chk("configure() raising -> error surfaced", "simulated race" in result.error)
+feature_flags._reset_emergency_stop_manager_for_tests()
+
+# Same for a bug in the adapter/manager CONSTRUCTOR itself — e.g. a
+# hypothetical future change that breaks known_flag_names validation.
+# ValueError is EmergencyStopManager's own real documented error for
+# empty known_flag_names (Step 2.5) — reused here as a stand-in for "any
+# constructor bug", since it's a real exception type that construction
+# can genuinely raise, not a contrived mock.
+with patch(f"{ADAPTER_MOD}.AirtableEmergencyStopStore.__init__", side_effect=ValueError("simulated constructor bug")):
+    try:
+        bootstrap_mod.bootstrap_emergency_stop()
+        chk("constructor raising -> propagates out of bootstrap_emergency_stop()", False)
+    except ValueError as e:
+        chk("constructor raising -> propagates out of bootstrap_emergency_stop()", True)
+        chk("constructor raising -> the original exception reaches the caller intact", "simulated constructor bug" in str(e))
+
+feature_flags._reset_emergency_stop_manager_for_tests()
 
 feature_flags._reset_emergency_stop_manager_for_tests()
 

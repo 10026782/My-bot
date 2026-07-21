@@ -1,10 +1,11 @@
 # core/emergency_stop_bootstrap.py — PATCH 3B Step 5
 #
-# The one explicit startup-path function app.py calls to construct the
-# concrete AirtableEmergencyStopStore, wrap it in an EmergencyStopManager,
-# inject it into feature_flags via configure_emergency_stop_manager(), and
-# perform one synchronous hydration attempt so the manager's cache is warm
-# (or its failure mode is known) before app.py's module load completes.
+# The one explicit startup-path function app.run_startup_sequence() calls
+# to construct the concrete AirtableEmergencyStopStore, wrap it in an
+# EmergencyStopManager, inject it into feature_flags via
+# configure_emergency_stop_manager(), and perform one synchronous
+# hydration attempt so the manager's cache is warm (or its failure mode is
+# known) before the caller starts the scheduler.
 #
 # No I/O at import time — the adapter/manager/feature_flags imports are all
 # deferred inside bootstrap_emergency_stop(); importing this module does
@@ -15,6 +16,30 @@
 # bootstraps — they all still use the legacy feature_flags path unchanged.
 # This step only makes the manager configured and hydrated; nothing
 # consults it yet. Cutover is a later, separate, atomic step.
+#
+# ══════════════════════════════════════════════════════════════════
+# Exception policy — documented outcome vs. unexpected failure
+# ══════════════════════════════════════════════════════════════════
+# Two DOCUMENTED, EXPECTED outcomes are reported as data, never as a raised
+# exception, because the adapter (Step 2/2.5) and the manager (Step 1) are
+# both already internally defensive about them:
+#   - Airtable unavailable (network/HTTP/timeout)  -> ManagerStatus.store_status="unavailable"
+#   - durable schema/data invalid                  -> ManagerStatus.store_status="invalid"
+# Both leave the manager configured and fail-closed on affected flags —
+# this function returns a result describing that, and the caller
+# (app.run_startup_sequence()) proceeds to start the scheduler regardless.
+#
+# Everything else — a bug in construction (e.g. AirtableEmergencyStopStore
+# or EmergencyStopManager raising ValueError on malformed
+# known_flag_names, which should never happen with the defaults used
+# here), an import failure, or configure_emergency_stop_manager() itself
+# raising (e.g. EmergencyStopManagerConflict from a genuine race) — is
+# UNEXPECTED, not a documented operational state, and is deliberately NOT
+# caught anywhere in this module. It propagates straight out of
+# bootstrap_emergency_stop() to the caller, which does not catch it
+# either — an unexpected bootstrap bug must be exposed loudly and prevent
+# the scheduler from starting, not be silently treated as "just another
+# degraded state."
 
 from __future__ import annotations
 
@@ -31,12 +56,14 @@ class EmergencyStopBootstrapResult:
     startup logging) and for health_monitor.py to report accurately.
 
     configured:    True once a manager is (or already was) injected via
-                   configure_emergency_stop_manager() — true even when the
-                   durable store is unavailable/invalid; only a genuinely
-                   unexpected bootstrap bug leaves this False.
-    store_status:  "ok" / "unavailable" / "invalid" / None (no store
-                   configured at all — should not happen once configured
-                   is True, since the adapter is always constructed here).
+                   configure_emergency_stop_manager(). Always True when
+                   this function returns normally — an unexpected failure
+                   during construction/configuration propagates instead of
+                   producing a configured=False result (see module
+                   docstring's exception policy).
+    store_status:  "ok" / "unavailable" / "invalid" — the two failure
+                   values are documented, expected operational states, not
+                   exceptions.
     flags_loaded:  count of flags actually hydrated into the cache — only
                    nonzero when store_status == "ok".
     """
@@ -49,80 +76,74 @@ class EmergencyStopBootstrapResult:
 def bootstrap_emergency_stop() -> EmergencyStopBootstrapResult:
     """
     Idempotent. Calling this more than once in the same process (e.g. a
-    defensive double-call from app.py, mirroring the existing
-    "scheduler thread already running -> skip" guard) detects an
-    already-configured manager via feature_flags.get_emergency_stop_status()
-    and returns its current status without constructing a second store/
-    manager or re-triggering a fresh hydration attempt.
+    defensive double-call, mirroring the existing "scheduler thread already
+    running -> skip" guard in app.py) detects an already-configured manager
+    via feature_flags.get_emergency_stop_status() and returns its current
+    status without constructing a second store/manager or re-triggering a
+    fresh hydration attempt.
 
-    Never raises. Any unexpected failure — including one from
-    configure_emergency_stop_manager() itself — is caught and reported via
-    the returned result's `error` field instead of propagating, so a bug
-    here can never crash app.py's startup (see module docstring / Step 5
-    boundary: "don't take down the whole app automatically").
+    Raises on an unexpected construction/configuration failure — see the
+    module docstring's exception policy. Never raises for Airtable being
+    unavailable or the durable schema/data being invalid; both come back as
+    a normal EmergencyStopBootstrapResult.
     """
-    try:
-        import feature_flags
+    import feature_flags
 
-        existing = feature_flags.get_emergency_stop_status()
-        if existing.configured:
-            logger.info(
-                "[EmergencyStop] bootstrap: manager already configured — skipping (idempotent)"
-            )
-            status = existing.manager_status
-            return EmergencyStopBootstrapResult(
-                configured=True,
-                store_status=status.store_status if status else None,
-                flags_loaded=(len(status.flags) if status and status.store_status == "ok" else 0),
-                error=(status.error if status else ""),
-            )
-
-        from adapters.airtable_emergency_stop_store import AirtableEmergencyStopStore
-        from core.emergency_stop import EmergencyStopManager
-
-        store = AirtableEmergencyStopStore()
-        manager = EmergencyStopManager(store=store)
-
-        try:
-            feature_flags.configure_emergency_stop_manager(manager)
-        except Exception as e:  # noqa: BLE001 — e.g. a genuine race hitting EmergencyStopManagerConflict
-            logger.error(f"[EmergencyStop] bootstrap configure() failed: {type(e).__name__}: {e}")
-            return EmergencyStopBootstrapResult(
-                configured=False, store_status=None, flags_loaded=0, error=str(e)
-            )
-
-        status = manager.status()  # forces the first hydration attempt, synchronously
-
-        if status.store_status == "ok":
-            logger.info(
-                "[EmergencyStop] bootstrap hydration OK — source=durable, %d flags loaded",
-                len(status.flags),
-            )
-        elif status.store_status == "unavailable":
-            logger.error(
-                "[EmergencyStop] bootstrap hydration UNAVAILABLE (%s) — manager stays configured; "
-                "evaluations fail closed per stale-cache/unknown policy",
-                status.error,
-            )
-        elif status.store_status == "invalid":
-            logger.error(
-                "[EmergencyStop] bootstrap hydration INVALID (%s) — schema/data problem, "
-                "durable state not trusted, evaluations fail closed",
-                status.error,
-            )
-        else:
-            logger.error(
-                "[EmergencyStop] bootstrap hydration returned unexpected store_status=%r",
-                status.store_status,
-            )
-
+    existing = feature_flags.get_emergency_stop_status()
+    if existing.configured:
+        logger.info(
+            "[EmergencyStop] bootstrap: manager already configured — skipping (idempotent)"
+        )
+        status = existing.manager_status
         return EmergencyStopBootstrapResult(
             configured=True,
-            store_status=status.store_status,
-            flags_loaded=(len(status.flags) if status.store_status == "ok" else 0),
-            error=status.error,
+            store_status=status.store_status if status else None,
+            flags_loaded=(len(status.flags) if status and status.store_status == "ok" else 0),
+            error=(status.error if status else ""),
         )
 
-    except Exception as e:  # noqa: BLE001 — must never crash app.py's startup
-        logger.error(f"[EmergencyStop] bootstrap failed with unexpected {type(e).__name__}: {e}")
-        return EmergencyStopBootstrapResult(configured=False, store_status=None, flags_loaded=0, error=str(e))
+    from adapters.airtable_emergency_stop_store import AirtableEmergencyStopStore
+    from core.emergency_stop import EmergencyStopManager
+
+    store = AirtableEmergencyStopStore()
+    manager = EmergencyStopManager(store=store)
+    feature_flags.configure_emergency_stop_manager(manager)
+
+    status = manager.status()  # forces the first hydration attempt, synchronously
+
+    if status.store_status == "ok":
+        logger.info(
+            "[EmergencyStop] bootstrap hydration OK — source=durable, %d flags loaded",
+            len(status.flags),
+        )
+    elif status.store_status == "unavailable":
+        logger.error(
+            "[EmergencyStop] bootstrap hydration UNAVAILABLE (%s) — manager stays configured; "
+            "evaluations fail closed per stale-cache/unknown policy",
+            status.error,
+        )
+    elif status.store_status == "invalid":
+        logger.error(
+            "[EmergencyStop] bootstrap hydration INVALID (%s) — schema/data problem, "
+            "durable state not trusted, evaluations fail closed",
+            status.error,
+        )
+    else:
+        # Not a documented outcome (see exception policy above) — surfaced
+        # as data here rather than raised because it comes from
+        # ManagerStatus, itself produced by the manager's own internally-
+        # defensive status() call, which by contract never raises. If this
+        # branch is ever hit it means that contract broke somewhere below
+        # us; logging loudly is the right response, not crashing the whole
+        # startup over an observability-shaped surprise.
+        logger.error(
+            "[EmergencyStop] bootstrap hydration returned unexpected store_status=%r",
+            status.store_status,
+        )
+
+    return EmergencyStopBootstrapResult(
+        configured=True,
+        store_status=status.store_status,
+        flags_loaded=(len(status.flags) if status.store_status == "ok" else 0),
+        error=status.error,
+    )
