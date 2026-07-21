@@ -232,6 +232,58 @@ with patch(f"{ADAPTER_MOD}.AirtableEmergencyStopStore.__init__", side_effect=Val
 
 feature_flags._reset_emergency_stop_manager_for_tests()
 
+
+# ══════════════════════════════════════════════════════════════════
+# 7. Step 5.1 hardening: store_status contract enforcement
+# ══════════════════════════════════════════════════════════════════
+print("\n── unexpected store_status raises (contract enforcement) ")
+
+from core.emergency_stop import EmergencyStopManager  # noqa: E402
+
+with patch.object(EmergencyStopManager, "status") as m_status:
+    m_status.return_value.store_status = "bogus_never_a_real_value"
+    m_status.return_value.flags = {}
+    m_status.return_value.error = ""
+    try:
+        bootstrap_mod.bootstrap_emergency_stop()
+        chk("unexpected store_status ('bogus_never_a_real_value') raises RuntimeError", False)
+    except RuntimeError as e:
+        chk("unexpected store_status ('bogus_never_a_real_value') raises RuntimeError", True)
+        chk("the RuntimeError names the offending value", "bogus_never_a_real_value" in str(e))
+
+feature_flags._reset_emergency_stop_manager_for_tests()
+
+with patch.object(EmergencyStopManager, "status") as m_status:
+    m_status.return_value.store_status = None
+    m_status.return_value.flags = {}
+    m_status.return_value.error = ""
+    try:
+        bootstrap_mod.bootstrap_emergency_stop()
+        chk("store_status=None raises RuntimeError (None is not a valid status either)", False)
+    except RuntimeError:
+        chk("store_status=None raises RuntimeError (None is not a valid status either)", True)
+
+feature_flags._reset_emergency_stop_manager_for_tests()
+
+print("\n── configured=True without manager_status raises ")
+
+# Simulate the idempotent-skip branch observing a contract violation: some
+# other path configured the manager, but get_emergency_stop_status()
+# reports configured=True with manager_status=None. Not reachable via
+# feature_flags' own real code today (configure always leaves a real
+# manager in place, and status() always returns a ManagerStatus) — this
+# proves bootstrap's OWN defensive check works if that contract is ever
+# violated by a future change.
+from feature_flags import EmergencyStopStatusView  # noqa: E402
+
+with patch("feature_flags.get_emergency_stop_status", return_value=EmergencyStopStatusView(configured=True, manager_status=None)):
+    try:
+        bootstrap_mod.bootstrap_emergency_stop()
+        chk("configured=True with manager_status=None raises RuntimeError", False)
+    except RuntimeError as e:
+        chk("configured=True with manager_status=None raises RuntimeError", True)
+        chk("the RuntimeError names the contract violation", "manager_status is None" in str(e))
+
 feature_flags._reset_emergency_stop_manager_for_tests()
 
 

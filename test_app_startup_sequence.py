@@ -224,6 +224,69 @@ for fname in ("tma_api.py", "cost_monitor.py", "scheduler.py"):
     )
 
 
+# ══════════════════════════════════════════════════════════════════
+# 7. Step 5.1 (P0): gunicorn.conf.py pins a single worker — scheduler.py's
+# scheduler thread (and the Step 5 bootstrap) are in-process state; the
+# "already running" dedup check in run_startup_sequence() is process-local
+# and has no visibility across worker processes, so >1 worker would start
+# >1 independent scheduler. Structural check, not a live multi-worker
+# spawn — reads the actual file gunicorn loads.
+# ══════════════════════════════════════════════════════════════════
+print("\n── gunicorn.conf.py pins workers = 1 (P0) ──")
+
+import importlib.util  # noqa: E402
+
+_spec = importlib.util.spec_from_file_location("_gunicorn_conf_under_test", "gunicorn.conf.py")
+_gunicorn_conf = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_gunicorn_conf)
+
+chk("gunicorn.conf.py defines workers", hasattr(_gunicorn_conf, "workers"))
+chk("gunicorn.conf.py pins workers == 1", getattr(_gunicorn_conf, "workers", None) == 1)
+chk("gunicorn.conf.py still defines post_worker_init", hasattr(_gunicorn_conf, "post_worker_init"))
+
+
+# ══════════════════════════════════════════════════════════════════
+# 8. Step 5.1: the two new bootstrap contract-violation cases must also
+# prevent the scheduler from starting when reached through the REAL
+# run_startup_sequence() -> bootstrap_emergency_stop() path (not just
+# proven at the bootstrap level in test_emergency_stop_bootstrap.py).
+# ══════════════════════════════════════════════════════════════════
+print("\n── contract violations block scheduler start (end-to-end) ──")
+
+from core.emergency_stop import EmergencyStopManager  # noqa: E402
+
+feature_flags._reset_emergency_stop_manager_for_tests()
+
+with patch.object(EmergencyStopManager, "status") as m_status, \
+     patch.object(app, "start_scheduler") as m_sched5:
+    m_status.return_value.store_status = "bogus_never_a_real_value"
+    m_status.return_value.flags = {}
+    m_status.return_value.error = ""
+    try:
+        app.run_startup_sequence()
+        chk("unexpected store_status -> run_startup_sequence() raises", False)
+    except RuntimeError:
+        chk("unexpected store_status -> run_startup_sequence() raises", True)
+
+chk("unexpected store_status -> start_scheduler is NEVER called", m_sched5.call_count == 0)
+
+feature_flags._reset_emergency_stop_manager_for_tests()
+
+with patch(
+    "feature_flags.get_emergency_stop_status",
+    return_value=feature_flags.EmergencyStopStatusView(configured=True, manager_status=None),
+), patch.object(app, "start_scheduler") as m_sched6:
+    try:
+        app.run_startup_sequence()
+        chk("configured=True with manager_status=None -> run_startup_sequence() raises", False)
+    except RuntimeError:
+        chk("configured=True with manager_status=None -> run_startup_sequence() raises", True)
+
+chk("configured=True with manager_status=None -> start_scheduler is NEVER called", m_sched6.call_count == 0)
+
+feature_flags._reset_emergency_stop_manager_for_tests()
+
+
 print(f"\n{'='*40}")
 print(f"app.py startup sequence tests: {passed} passed, {failed} failed")
 
