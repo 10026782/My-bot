@@ -245,8 +245,10 @@ bot.exception_handler = _TelebotExceptionHandler()
 app = Flask(__name__)
 
 # Phase 4B0.1A/B — Verify atomic claims health (migrations run via pre-deploy command)
-# Migrations are executed as Render Pre-Deploy Command: python -m core.database_migrations
-# This checks health only; actual migration execution happens before app starts.
+# Migrations are executed as Render Pre-Deploy Command: python -m core.predeploy
+# (runs database_migrations.run_migrations() then the Emergency Stop preflight —
+# see core/predeploy.py). This checks health only; actual migration execution
+# happens before app starts.
 try:
     from feature_flags import is_enabled
     if is_enabled("FEATURE_ATOMIC_CLAIMS"):
