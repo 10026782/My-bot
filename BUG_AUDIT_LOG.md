@@ -2979,4 +2979,30 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **מקור:** אותה דגימת staging (turn 1, "תראה לי משימה אחת אחרונה"). Router סיווג נכון: `intent=list_tasks confidence=0.90`. `airtable_get {'table': 'Tasks'}` **הצליח** בפועל (76 רשומות, `tools.airtable_security` audit log מלא). אך: `[A32] Single-Speaker: agent emitted action-status text, replacing` — התשובה שהוצגה למשתמש הייתה `"לא הצלחתי לבצע את הפעולה. נסה שוב או נסח אחרת."` — **הפוכה** מהאמת (`EvidenceFinalizerShadow: evidence_status=verified_read_only response_claim=neutral mismatch=false` — התשובה שהוחלפה נחשבת "neutral", לא "success", אז ה-shadow classifier עצמו לא תפס mismatch, אבל **המשתמש קיבל שקר** — "נכשלתי" כשבפועל ה-read הצליח).
 - **Contract Chain (חלקי — נדרשת השלמה):** אומת שהתשובה המקורית של ה-agent (טרם דוכאה) הותאמה ל-`_AGENT_ACTION_STATUS_PATTERN`/מנגנון-הדיכוי של A32 ב-`core/anti_hallucination.py` (אותו class-of-mechanism שתוקן ב-BUG-122 עבור turn **ללא** tool call בכלל) — **לא** אומת כאן מדויקות **איזה** regex/תנאי בדיוק גרם לדיכוי במקרה הזה שיש בו tool call אמיתי ומוצלח, ולא נבדק אם זה תואם את BUG-122's fix's `intent_requires_contract_for_success()`/`tool_calls_made` guard (list_tasks כנראה לא ברשימת ה-intents שדורשים contract, אז ה-guard של BUG-122 כנראה לא רלוונטי כאן כלל — סוג-מקרה נפרד).
 - **חשד לא-מאושר (המשתמש ציין זאת במפורש):** "עשוי לחלוק את אותה תבנית action-status/read-summary classification" עם BUG-127B — כלומר ייתכן ששני הבאגים נובעים מאותו class של regex/pattern-matching גנרי מדי ב-A32 שמזהה "טקסט בצורת סיכום-פעולה" ומדכא/מחליף אותו בלי להבחין בין "אין evidence בכלל" (BUG-122's מקרה) לבין "יש evidence אמיתי ותקין" (המקרה כאן).
-- **סטטוס:** 🔴 נרשם, root cause **חלקי** (מאומת: התשובה כן דוכאה ע"י A32; **לא** מאומת: איזה תנאי/regex ספציפי גרם לזה, והאם זה תיקון נפרד או המשך ישיר ל-BUG-122). **לא תוקן** — לפי הנחיית המשתמש, נחקר לעומק **אחרי** BUG-127B, לא לפניו/יחד איתו.
+- **סטטוס:** 🔴 נרשם, root cause **חלקי** (מאומת: התשובה כן דוכאה ע"י A32; **לא** מאומת: איזה תנאי/regex ספציפי גרם לזה, והאם זה תיקון נפרד או המשך ישיר ל-BUG-122). **לא תוקן** — לפי הנחיית המשתמש, נחקר לעומק **אחרי** BUG-127B, לא לפניו/יחד איתו. (המשך חקירה מלא + ניסיון תיקון שנדחה קיימים על ענף נפרד, `claude/bug127c-a32-suppresses-verified-read`, טרם ממוזג.)
+
+## BUG-126 — `compare_shadow_final_status()` מסמן mismatch כוזב כשתשובה מתארת נכונה כישלון היסטורי מתועד, לא כישלון של ה-turn הנוכחי — 🔴 נרשם, לא תוקן (החלטת המשתמש: תיעוד בלבד כרגע)
+
+- **תאריך:** 21/07/2026.
+- **מקור:** RP5 fault-injection shadow test matrix (המשך תא 2.3/2b — רצף connection-reset). הבעלים דיווח:
+  ```
+  evidence_status בפועל: no_evidence
+  response_claim בפועל: failure
+  mismatch / code בפועל: mismatch=true, code=status_claim_mismatch
+  ```
+  הבוט תיאר **נכון** שני כישלונות connection-reset קודמים ומתועדים (מ-turns קודמים באותה שיחה) — אין טענת-הצלחה שגויה, אין המצאת תוצאה. ה-turn הנוכחי עצמו לא ביצע tool call כלשהו (evidence_status=no_evidence), אך הטקסט מתאר כישלון (response_claim=failure) — שילוב שה-classifier תמיד מסמן כ-mismatch, ללא תלות בשאלה אם הכישלון המתואר קרה עכשיו או תועד באמת ב-turn קודם.
+- **Contract Chain (אומת ישירות בקוד):** `core/turn_evidence.py::compare_shadow_final_status()` — עבור `status=="no_evidence"`, רק `claim in ("empty","neutral")` נחשב compatible; `claim=="failure"` תמיד `mismatch=True`, ללא תלות בהקשר. אומת ישירות עם simulcation:
+  ```python
+  no_evidence_this_turn = TurnEvidenceSummary()
+  text = "כן, שני הניסיונות הקודמים לחפש את הליד נכשלו עקב תקלת חיבור (connection-reset)."
+  compare_shadow_final_status(text, no_evidence_this_turn)
+  # -> evidence_status='no_evidence' response_claim='failure' mismatch=True code='status_claim_mismatch'
+  ```
+  תוצאה זהה בין "תיאור אמיתי של כישלון קודם מתועד" לבין "המצאה מלאה של כישלון שלא קרה מעולם" — ה-classifier הוא per-turn בלבד וחסר כל מנגנון-זיכרון לקשר claim לראיה מ-turn קודם.
+- **חומרה:** shadow-only (`FEATURE_EVIDENCE_FINALIZER=off`, אין השפעה על התנהגות חיה). אבל מייצר false positive בכל תשובה שמסכמת/מזכירה כישלון קודם בלי לבצע tool call חדש באותו turn — תבנית שכיחה בשיחה טבעית ("מה קרה עם X?" אחרי כישלון-מתועד).
+- **כיווני תיקון אפשריים (לא הוחלט, נשארים פתוחים):**
+  1. מנגנון קישור claim היסטורי ל-evidence אמיתי מ-turn קודם — לדוגמה שימוש ב-`session["last_tool_result"]` הקיים (C60, `app.py::_capture_last_tool_result`) שכבר שומר `status` ("success"/"failed") מה-turn האחרון בפועל, כדי לאמת שה-failure claim אכן תואם ראיה תיעודית אמיתית — לא מנגנון-זיכרון חדש מאפס. טרם נבדק אם `compare_shadow_final_status()`'s call site נגיש ל-session.
+  2. חריגה צרה יותר, מבוססת-טקסט: זיהוי ניסוחים שמסכמים turn קודם ("קודם"/"לפני כן"/"בפעם הקודמת") ופטור אותם מה-mismatch — פשוט יותר אך חלש יותר: claim מומצא-לגמרי על "כישלון קודם" שלא קרה בכלל היה חומק גם הוא.
+- **החלטת המשתמש (נשאלה מפורשות):** תיעוד בלבד כרגע — לא לממש אף אחד מהכיוונים. ממתין להנחיה עתידית.
+- **היקף:** לא נגעתי בקוד. ממצא + Contract Chain בלבד.
+- **סטטוס:** 🔴 נרשם, Contract Chain אומת ישירות בקוד — **לא תוקן**, לפי בחירת המשתמש. אין claim על תיקון/deploy עד להנחיה נוספת.
