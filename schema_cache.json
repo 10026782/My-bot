@@ -177,6 +177,17 @@
       "Revoked At",
       "Status",
       "Window ID"
+    ],
+    "AI_Usage_Daily": [
+      "Date",
+      "claude_sonnet",
+      "claude_haiku",
+      "whatsapp_conversation",
+      "total_units",
+      "total_cost_usd",
+      "openai_text_cost_usd",
+      "openai_stt_cost_usd",
+      "unpriced_events"
     ]
   },
   "fetched_at": "seed-from-schema-py",

@@ -2,13 +2,13 @@
 
 **Purpose:** Explicit, idempotent CLI for running PostgreSQL migrations before app startup.
 
-**Status:** ✅ Implemented, used as Render Pre-Deploy Command
+**Status:** ✅ Implemented. Render's actual Pre-Deploy Command is now `python -m core.predeploy` (see `docs/PHASE_4B0_1B_STAGING_RUNBOOK.md`/`core/predeploy.py` — it runs `run_migrations()` below, then the Emergency Stop preflight, in sequence); this module remains a standalone, directly-runnable CLI and is unchanged.
 
 ---
 
 ## Overview
 
-Phase 4B0.1A atomic coordination requires PostgreSQL schema initialization (`action_execution_claims` table). Rather than running migrations as a side effect of app startup (risky, blocks startup, unclear error handling), migrations now run as an explicit CLI command in Render's **Pre-Deploy Command** phase, before the app starts.
+Phase 4B0.1A atomic coordination requires PostgreSQL schema initialization (`action_execution_claims` table). Rather than running migrations as a side effect of app startup (risky, blocks startup, unclear error handling), migrations run as an explicit CLI command, invoked by `core/predeploy.py` in Render's **Pre-Deploy Command** phase, before the app starts.
 
 **Benefits:**
 - ✅ Explicit — migrations run first, then app starts
@@ -35,10 +35,10 @@ python -m core.database_migrations
 In Render Dashboard → Settings → Build & Deploy:
 
 ```
-Pre-Deploy Command: python -m core.database_migrations
+Pre-Deploy Command: python -m core.predeploy
 ```
 
-This hook runs after `pip install -r requirements.txt` (Build Command) but before `gunicorn app:app` (Start Command).
+`core/predeploy.py` calls this module's `run_migrations()` first, then the Emergency Stop preflight — see `core/predeploy.py`'s own docstring. This hook runs after `pip install -r requirements.txt` (Build Command) but before `gunicorn app:app` (Start Command).
 
 **Render behavior:**
 - If exit code = 0: deploy proceeds, app starts
@@ -111,7 +111,7 @@ except Exception as e:
 ```
 1. Render receives push to main
 2. Build: pip install -r requirements.txt
-3. Pre-Deploy: python -m core.database_migrations
+3. Pre-Deploy: python -m core.predeploy (runs this module's migrations, then the Emergency Stop preflight)
    ✅ PostgreSQL reachable
    ✅ Ran 1 migration (001_action_execution_claims.sql)
    ✅ Exit code = 0
@@ -126,7 +126,7 @@ except Exception as e:
 ```
 1. Render receives push to main
 2. Build: pip install -r requirements.txt
-3. Pre-Deploy: python -m core.database_migrations
+3. Pre-Deploy: python -m core.predeploy (runs this module's migrations, then the Emergency Stop preflight)
    ℹ️ PostgreSQL not configured (DATABASE_URL empty)
    ✅ No-op (return 0, not an error)
 4. Start: gunicorn app:app
@@ -139,7 +139,7 @@ except Exception as e:
 ```
 1. Render receives push to main
 2. Build: pip install -r requirements.txt
-3. Pre-Deploy: python -m core.database_migrations
+3. Pre-Deploy: python -m core.predeploy (runs this module's migrations, then the Emergency Stop preflight)
    ❌ PostgreSQL unreachable (connection timeout)
    ❌ Failed to get database connection for migrations
    ❌ Exit code = 1
@@ -156,7 +156,7 @@ except Exception as e:
 ```
 1. Render receives push to main
 2. Build: pip install -r requirements.txt
-3. Pre-Deploy: python -m core.database_migrations
+3. Pre-Deploy: python -m core.predeploy (runs this module's migrations, then the Emergency Stop preflight)
    ✅ PostgreSQL reachable
    ✅ Ran 1 migration: 001_action_execution_claims.sql
       (table already exists → CREATE TABLE IF NOT EXISTS does nothing)

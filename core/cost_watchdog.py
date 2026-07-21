@@ -7,6 +7,19 @@
 # daily_watchdog() — reads last 24h, aggregates, checks thresholds, alerts + Airtable row.
 #
 # flag: COST_WATCHDOG_ENABLED (default on — "Pipes first").
+#
+# Cost Telemetry Reliability, PR1 (write-truthfulness + upsert only — no
+# usage_events, no trigger changes; those are separate PRs in the same
+# series): _write_airtable_row() now upserts by Date (find-or-create,
+# was create-only — a retry used to silently duplicate the day's row) and
+# only logs success when Airtable actually confirms the write. Previously
+# it logged "שורה יומית נכתבה ל-Airtable" unconditionally right after
+# calling airtable_create(), which returns None (not an exception) on a
+# non-2xx response — this table hit a real 422 UNKNOWN_FIELD_NAME for
+# weeks while every log line still claimed success (see _write_airtable_row's
+# own docstring). total_cost_usd/openai_text_cost_usd/openai_stt_cost_usd/
+# unpriced_events are schema-only placeholders here (always 0) — populated
+# once durable usage_events lands in a later PR in this series.
 
 from __future__ import annotations
 
@@ -113,8 +126,33 @@ def _send_owner_alert(text: str) -> None:
         logger.error("[CostWatchdogV2] _send_owner_alert error: %s", e)
 
 
-def _write_airtable_row(date_str: str, counts: dict[str, int]) -> None:
-    """כותב שורה יומית ל-Airtable AI_Usage_Daily."""
+def _write_airtable_row(date_str: str, counts: dict[str, int]) -> bool:
+    """
+    Upserts the AI_Usage_Daily row for one date. Returns True only when
+    Airtable actually confirms the write.
+
+    Two bugs this fixes vs the previous version:
+      1. It used to log "שורה יומית נכתבה ל-Airtable" unconditionally right
+         after calling airtable_create(), without checking the return
+         value. airtable_create() returns None (not an exception) on any
+         non-2xx response — e.g. the live 422 UNKNOWN_FIELD_NAME this table
+         hit for weeks while every day's log line still claimed success
+         (the field was "﻿Date", BOM-prefixed, vs the plain "Date" this
+         write sends — since fixed directly in Airtable).
+      2. It always called airtable_create(), so re-running daily_watchdog()
+         for a date that already has a row (a manual retry, a scheduler
+         double-fire) silently created a SECOND row for the same date
+         instead of overwriting it — "create" was doing an implicit,
+         undocumented "maybe duplicate" rather than a real upsert.
+
+    total_cost_usd / openai_text_cost_usd / openai_stt_cost_usd /
+    unpriced_events are schema-only placeholders in this PR (always 0) —
+    populated for real once durable per-provider usage_events lands (see
+    the cost-telemetry PR series; this table stays a projection, never a
+    source of truth). claude_sonnet/claude_haiku/whatsapp_conversation/
+    total_units keep their current (jsonl-derived) values unchanged —
+    that data source isn't touched by this change.
+    """
     try:
         from airtable_schema import Tables
         table = getattr(Tables, "AI_USAGE_DAILY", "AI_Usage_Daily")
@@ -124,13 +162,61 @@ def _write_airtable_row(date_str: str, counts: dict[str, int]) -> None:
             "claude_haiku":            counts.get("claude_haiku",           0),
             "whatsapp_conversation":   counts.get("whatsapp_conversation",  0),
             "total_units":             sum(counts.values()),
+            "total_cost_usd":          0,
+            "openai_text_cost_usd":    0,
+            "openai_stt_cost_usd":     0,
+            "unpriced_events":         0,
         }
-        from tools.airtable_gateway import airtable_create
+
+        from tools.airtable_gateway import airtable_create, airtable_patch, at_get_by_field, AirtableLookupError
+
+        try:
+            existing = at_get_by_field(table, "Date", date_str)
+        except AirtableLookupError as e:
+            logger.error(
+                "[CostWatchdogV2] AI_Usage_Daily upsert lookup FAILED for %s (%s) — "
+                "cannot tell whether a row already exists, refusing to blind-create "
+                "(would risk a duplicate). NOT logging success.",
+                date_str, e,
+            )
+            return False
+
+        if existing is not None:
+            record_id = existing["id"]
+            write_fields = {k: v for k, v in fields.items() if k != "Date"}
+            ok = airtable_patch(table, record_id, write_fields, source="cost_watchdog")
+            if not ok:
+                logger.error(
+                    "[CostWatchdogV2] AI_Usage_Daily upsert (patch) FAILED for %s "
+                    "(record %s) — see the [gateway:cost_watchdog] warning above for "
+                    "the actual HTTP status/body. NOT logging success.",
+                    date_str, record_id,
+                )
+                return False
+            logger.info(
+                "[CostWatchdogV2] שורה יומית עודכנה ב-Airtable (מאומת, upsert): %s — %s",
+                date_str, fields,
+            )
+            return True
+
         result = airtable_create(table, fields, source="cost_watchdog")
-        logger.info("[CostWatchdogV2] שורה יומית נכתבה ל-Airtable: %s — %s", date_str, fields)
-        return result
+        if result is None:
+            logger.error(
+                "[CostWatchdogV2] AI_Usage_Daily write FAILED for %s — airtable_create() "
+                "returned None (see the [gateway:cost_watchdog] warning above for the "
+                "actual HTTP status/body). NOT logging success.",
+                date_str,
+            )
+            return False
+
+        logger.info(
+            "[CostWatchdogV2] שורה יומית נכתבה ל-Airtable (מאומת): %s — %s",
+            date_str, fields,
+        )
+        return True
     except Exception as e:
         logger.error("[CostWatchdogV2] _write_airtable_row FAILED: %s", e, exc_info=True)
+        return False
 
 
 def daily_watchdog() -> None:
@@ -181,7 +267,13 @@ def daily_watchdog() -> None:
                 f"\n\n*כל השימוש היום:*\n{breakdown}"
             )
 
-        _write_airtable_row(date_str, counts)
+        saved = _write_airtable_row(date_str, counts)
+        if not saved:
+            logger.error(
+                "[CostWatchdogV2] AI_Usage_Daily projection NOT saved for %s this run — "
+                "see the _write_airtable_row error immediately above for why.",
+                date_str,
+            )
 
     except Exception as e:
         logger.error("[CostWatchdogV2] daily_watchdog error: %s", e)
