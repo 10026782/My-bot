@@ -1668,4 +1668,16 @@ predeploy_exit=0
 
 **בדיקות:** `npm run build` (`tsc && vite build`) נקי. אין קובץ backend שנגע.
 
-**Merged:** לא עדיין (PR #436, `claude/n15-owner-decision-p73c3k`) | **Verified בפרודקשן:** לא רלוונטי — frontend, אין endpoint production חדש; ה-backend מאחוריו כבר Verified (C161).
+**Merged:** ✅ `main` (PR #436) | **✅ Verified בפרודקשן ע"י הבעלים ישירות (21/07/2026, לא רק tests/local harness):** `stop_email` דרך ה-TMA החי → "🚨 חירום פעיל" עם כפתור "✅ בטל עצירת Email" מוצג נכון → לחיצה → "✅ כל המערכות תקינות" (תמונות מסך). **בהמשך אישר הבעלים במפורש** שכל 5 כפתורי ה-Stop וה-Clear המתאימים נבדקו ועובדים בפרודקשן, **כולל Stop All** — ואספק ראיה ישירה: פלט אמיתי של `_notify_owner()` מ-Telegram production עבור AI/Automation/WhatsApp/ALL (Email תועד קודם עם תמונות מסך), תואם מילה-במילה לתבנית שנכתבה ב-`tma_api.py`:
+```
+🚨 EMERGENCY STOP
+🛑 STOP AI — קריאות Claude API הופסקו
+על ידי: אליהו חזן
+Flag: EMERGENCY_STOP_AI=True (נשמר ב-Airtable, שורד restart)
+⚠️ לביטול: לחצן הביטול ב-TMA.
+
+✅ CLEAR AI
+על ידי: אליהו חזן
+Flag: EMERGENCY_STOP_AI=False (נשמר ב-Airtable)
+```
+(ואותה תבנית בדיוק, עם אותו `על ידי: אליהו חזן`, גם עבור Automation/WhatsApp/ALL — 4 round-trips נוספים). היעדר `⚠️ עדיין חסום ע"י env force-stop` בכל הודעות ה-CLEAR מוכיח גם ש-`still_blocked_by_env=False` בכל המקרים — אין env override פעיל שדרס את ה-clear. זו לא רק "הכפתור עבד" — זו הוכחה ש-`set_emergency_stop()`/`clear_emergency_stop()` רצו בפועל עם `source="tma_owner_stop"`/`"tma_owner_clear"`, כתבו ל-Airtable, ו-`identity.display_name` נפתר נכון מ-TMA auth אמיתי. שני תרחישים ספציפיים יותר נשארים לא-מאומתים במפורש (לא ממצא, רק גבול-דיוק): 409 עם `operation_id` שגוי בפרודקשן החי עצמו (רק ב-harness מקומי, לא production), ושפעולה guarded אמיתית אכן נחסמת **בזמן** ש-Stop All פעיל (לעומת רק "הכפתור עצמו מבצע round-trip").
