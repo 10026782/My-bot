@@ -2,9 +2,9 @@
 """
 test_cost_watchdog_airtable_write.py — Regression tests for
 core/cost_watchdog.py::_write_airtable_row() (Cost Telemetry Reliability
-PR series, PR1).
+PR series, PR1 + hotfix).
 
-Two bugs this guards against:
+Three bugs this guards against:
   1. "Success logged without checking the write result" — it used to log
      "שורה יומית נכתבה ל-Airtable" unconditionally right after calling
      airtable_create(), never inspecting its return value. airtable_create()
@@ -14,19 +14,30 @@ Two bugs this guards against:
   2. "Create-only instead of upsert" — it always called airtable_create(),
      so re-running daily_watchdog() for a date that already has a row (a
      manual retry, a scheduler double-fire) silently created a SECOND row
-     for the same date. It now looks up the existing row by Date first and
-     patches it if found.
+     for the same date.
+  3. HOTFIX — the upsert lookup used at_get_by_field(table, "Date",
+     date_str), building {Date}='YYYY-MM-DD': plain text equality against
+     an Airtable DATE field, which never matches. Every call took the
+     create branch — production smoke showed 2 runs producing 2 rows, then
+     4 rows on a repeat. Fixed to at_list_by_formula() with
+     DATETIME_FORMAT({Date}, 'YYYY-MM-DD')='<date_str>' and max_records=2,
+     so an existing row is actually found, and an already-existing
+     duplicate is detected (2+ matches) rather than patched arbitrarily.
 
 Verifies:
-  1. No existing row (at_get_by_field -> None) + airtable_create() -> None
-     (the live 422 case) => failure, no success log.
-  2. No existing row + airtable_create() -> a real record => success (create path).
-  3. An existing row (at_get_by_field -> a record) => airtable_patch() is
-     called with that record's id, NOT airtable_create() (no duplicate).
-  4. airtable_patch() returning False => failure, no success log.
-  5. at_get_by_field() raising AirtableLookupError (network/HTTP failure,
-     not "genuinely not found") => refuses to blind-create, failure, no
-     success log.
+  1. The lookup formula sent to at_list_by_formula() uses DATETIME_FORMAT,
+     not a bare {Date}='...' text-equality formula.
+  2. 0 matches => airtable_create() is called, airtable_patch() is not.
+  3. 1 match => airtable_patch() is called with that record's id,
+     airtable_create() is not.
+  4. 2+ matches => neither create nor patch is called; returns False (a
+     data-integrity problem, not a normal upsert case).
+  5. A lookup failure (AirtableLookupError — network/HTTP, not "genuinely
+     not found") refuses to touch Airtable further; returns False.
+  6. A malformed date_str never reaches Airtable at all (no lookup, no
+     create, no patch).
+  7. airtable_create() -> None and airtable_patch() -> False both remain
+     truthful failures (no success log, returns False).
 """
 
 from __future__ import annotations
@@ -57,7 +68,8 @@ class _CaptureHandler(logging.Handler):
         self.records.append(record.getMessage())
 
 
-def _run_write(*, existing, create_return=None, patch_return=None, lookup_raises=None):
+def _run_write(*, date_str="2026-07-21", matches=None, create_return=None,
+                patch_return=None, lookup_raises=None):
     from core.cost_watchdog import _write_airtable_row
     from tools.airtable_gateway import AirtableLookupError
 
@@ -66,58 +78,93 @@ def _run_write(*, existing, create_return=None, patch_return=None, lookup_raises
     logger.addHandler(handler)
     logger.setLevel(logging.DEBUG)
 
-    lookup_side_effect = lookup_raises if lookup_raises else None
-    lookup_kwargs = {"side_effect": lookup_side_effect} if lookup_side_effect else {"return_value": existing}
+    lookup_kwargs = (
+        {"side_effect": lookup_raises} if lookup_raises
+        else {"return_value": matches if matches is not None else []}
+    )
 
     try:
-        with patch("tools.airtable_gateway.at_get_by_field", **lookup_kwargs), \
-             patch("tools.airtable_gateway.airtable_create", return_value=create_return), \
+        with patch("tools.airtable_gateway.at_list_by_formula", **lookup_kwargs) as mock_lookup, \
+             patch("tools.airtable_gateway.airtable_create", return_value=create_return) as mock_create, \
              patch("tools.airtable_gateway.airtable_patch", return_value=patch_return) as mock_patch:
-            result = _write_airtable_row("2026-07-21", {
+            result = _write_airtable_row(date_str, {
                 "claude_sonnet": 10, "claude_haiku": 20,
                 "whatsapp_conversation": 0, "total_units": 30,
             })
     finally:
         logger.removeHandler(handler)
-    return result, handler.records, mock_patch
+    return result, handler.records, mock_lookup, mock_create, mock_patch
 
 
-print("\n── _write_airtable_row() truthfulness + upsert ────────────────")
+print("\n── _write_airtable_row() date-aware lookup + upsert branching ────────────────")
 
-# 1. No existing row, airtable_create() -> None (the live 422 case).
-result, logs, mock_patch = _run_write(existing=None, create_return=None)
-chk("no existing row + create()->None => returns False", result is False)
-chk("no 'success' log line when create actually failed",
-    not any("נכתבה" in l or "עודכנה" in l for l in logs))
-chk("patch is never called when there's no existing row", not mock_patch.called)
+# 1. The lookup formula must use DATETIME_FORMAT, not bare {Date}='...'.
+result, logs, mock_lookup, mock_create, mock_patch = _run_write(matches=[])
+formula_used = mock_lookup.call_args[0][1]
+chk("lookup uses DATETIME_FORMAT({Date}, 'YYYY-MM-DD') formula",
+    "DATETIME_FORMAT({Date}, 'YYYY-MM-DD')" in formula_used)
+chk("lookup does NOT use bare text-equality {Date}='...' formula",
+    "{Date}='2026-07-21'" not in formula_used)
+chk("lookup requests max_records=2 (to detect duplicates, not just find one)",
+    mock_lookup.call_args.kwargs.get("max_records") == 2 or
+    (len(mock_lookup.call_args[0]) > 2 and mock_lookup.call_args[0][2] == 2))
 
-# 2. No existing row, airtable_create() -> a real record => success.
+# 2. 0 matches => create only.
 fake_record = {"id": "recFAKE123", "fields": {"Date": "2026-07-21"}}
-result, logs, mock_patch = _run_write(existing=None, create_return=fake_record)
-chk("no existing row + create()->record => returns True", result is True)
-chk("success log line present on real create", any("נכתבה" in l for l in logs))
-chk("patch is never called on the create path", not mock_patch.called)
+result, logs, mock_lookup, mock_create, mock_patch = _run_write(matches=[], create_return=fake_record)
+chk("0 matches + create()->record => returns True", result is True)
+chk("0 matches => airtable_create() called", mock_create.called)
+chk("0 matches => airtable_patch() NOT called", not mock_patch.called)
+chk("success log includes branch=create", any("branch=create" in l for l in logs))
+chk("success log includes the record id", any("recFAKE123" in l for l in logs))
 
-# 3. Existing row => patch() is called with that record's id, not create().
+# 3. 1 match => patch only, with that record's id.
 existing_record = {"id": "recEXISTING456", "fields": {"Date": "2026-07-21"}}
-result, logs, mock_patch = _run_write(existing=existing_record, patch_return=True)
-chk("existing row + patch()->True => returns True", result is True)
-chk("success log line present on the patch/upsert path", any("עודכנה" in l for l in logs))
-chk("patch() called with the existing record's id (upsert, not duplicate)",
+result, logs, mock_lookup, mock_create, mock_patch = _run_write(matches=[existing_record], patch_return=True)
+chk("1 match + patch()->True => returns True", result is True)
+chk("1 match => airtable_patch() called with that record's id",
     mock_patch.called and mock_patch.call_args[0][1] == "recEXISTING456")
+chk("1 match => airtable_create() NOT called", not mock_create.called)
+chk("success log includes branch=patch", any("branch=patch" in l for l in logs))
+chk("success log includes the matched record id", any("recEXISTING456" in l for l in logs))
 
-# 4. Existing row, patch() returns False => failure, no success log.
-result, logs, mock_patch = _run_write(existing=existing_record, patch_return=False)
-chk("existing row + patch()->False => returns False", result is False)
-chk("no success log line when patch actually failed",
-    not any("נכתבה" in l or "עודכנה" in l for l in logs))
+# 4. 2+ matches => refuse entirely (duplicate-row integrity error).
+dup_a = {"id": "recDUP1", "fields": {"Date": "2026-07-21"}}
+dup_b = {"id": "recDUP2", "fields": {"Date": "2026-07-21"}}
+result, logs, mock_lookup, mock_create, mock_patch = _run_write(matches=[dup_a, dup_b])
+chk("2 matches => returns False", result is False)
+chk("2 matches => airtable_create() NOT called", not mock_create.called)
+chk("2 matches => airtable_patch() NOT called", not mock_patch.called)
+chk("2 matches => a duplicate-row integrity error is logged",
+    any("DUPLICATE-ROW" in l or "duplicate" in l.lower() for l in logs))
+chk("2 matches => no success log", not any("branch=create" in l or "branch=patch" in l for l in logs))
 
-# 5. Lookup itself fails (network/HTTP) — must not blind-create (would risk a duplicate).
+# 5. Lookup itself fails (network/HTTP) — must not touch create/patch.
 from tools.airtable_gateway import AirtableLookupError
-result, logs, mock_patch = _run_write(existing=None, lookup_raises=AirtableLookupError("boom"))
-chk("at_get_by_field() raising => returns False (refuses to guess)", result is False)
-chk("no success log line when the lookup itself failed",
-    not any("נכתבה" in l or "עודכנה" in l for l in logs))
+result, logs, mock_lookup, mock_create, mock_patch = _run_write(lookup_raises=AirtableLookupError("boom"))
+chk("lookup raising => returns False", result is False)
+chk("lookup raising => airtable_create() NOT called", not mock_create.called)
+chk("lookup raising => airtable_patch() NOT called", not mock_patch.called)
+chk("no success log when the lookup itself failed",
+    not any("branch=create" in l or "branch=patch" in l for l in logs))
+
+# 6. Malformed date_str => no Airtable call at all.
+result, logs, mock_lookup, mock_create, mock_patch = _run_write(date_str="not-a-date", matches=[])
+chk("malformed date_str => returns False", result is False)
+chk("malformed date_str => lookup NOT called", not mock_lookup.called)
+chk("malformed date_str => airtable_create() NOT called", not mock_create.called)
+chk("malformed date_str => airtable_patch() NOT called", not mock_patch.called)
+
+# 7. Truthful failures remain truthful.
+result, logs, mock_lookup, mock_create, mock_patch = _run_write(matches=[], create_return=None)
+chk("0 matches + create()->None => returns False", result is False)
+chk("no success log when create actually failed",
+    not any("branch=create" in l or "branch=patch" in l for l in logs))
+
+result, logs, mock_lookup, mock_create, mock_patch = _run_write(matches=[existing_record], patch_return=False)
+chk("1 match + patch()->False => returns False", result is False)
+chk("no success log when patch actually failed",
+    not any("branch=create" in l or "branch=patch" in l for l in logs))
 
 print(f"\n{'='*40}")
 print(f"  {passed}/{passed+failed} passed")
