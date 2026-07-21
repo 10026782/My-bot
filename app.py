@@ -651,6 +651,19 @@ else:
     except Exception as e:
         logger.error(f"Scheduler failed: {e}")
 
+# ── PATCH 3B Step 5: Emergency Stop manager bootstrap ────────────
+# Explicit startup-path construction + one synchronous hydration attempt,
+# before this module finishes loading (i.e. before the app is ready to
+# serve traffic). Still dual-path: nothing below this line — or anywhere
+# else in production — reads from the manager this configures yet;
+# is_enabled()/set_flag() and every existing EMERGENCY_STOP_* caller are
+# unchanged. Never raises — see core/emergency_stop_bootstrap.py.
+try:
+    from core.emergency_stop_bootstrap import bootstrap_emergency_stop
+    _emergency_stop_bootstrap_result = bootstrap_emergency_stop()
+except Exception as e:
+    logger.error(f"[EmergencyStop] bootstrap import/call failed: {e}")
+
 if os.environ.get("SETUP_WEBHOOK") == "1":
     try:
         bot.remove_webhook()
