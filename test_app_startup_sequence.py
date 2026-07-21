@@ -191,14 +191,14 @@ with patch(f"{ADAPTER_MOD}.at_list_by_formula") as m_list, \
     app.run_startup_sequence()
     app.run_startup_sequence()  # second explicit call, same process
 
-chk(
-    "second run_startup_sequence() call -> only ONE real Airtable read total (bootstrap idempotent)",
-    m_list.call_count == 1,
-)
-chk(
-    "second run_startup_sequence() call -> manager instance did not change across calls",
-    feature_flags.get_emergency_stop_status().configured is True,
-)
+    chk(
+        "second run_startup_sequence() call -> only ONE real Airtable read total (bootstrap idempotent)",
+        m_list.call_count == 1,
+    )
+    chk(
+        "second run_startup_sequence() call -> manager instance did not change across calls",
+        feature_flags.get_emergency_stop_status().configured is True,
+    )
 
 feature_flags._reset_emergency_stop_manager_for_tests()
 

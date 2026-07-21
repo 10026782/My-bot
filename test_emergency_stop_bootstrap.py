@@ -73,22 +73,28 @@ print("\n── successful configure + hydration ──")
 
 feature_flags._reset_emergency_stop_manager_for_tests()
 
+# Kept inside the patch context too (belt-and-braces with the note in the
+# "unavailable"/"invalid" sections below): a successful hydration keeps the
+# cache fresh for ttl_seconds, so these two calls happen to not trigger a
+# re-read today, but that's a timing coincidence, not a guarantee — no
+# reason to depend on the TTL window when staying inside the `with` costs
+# nothing.
 with patch(f"{ADAPTER_MOD}.at_list_by_formula") as m_list:
     m_list.return_value = _ALL_FLAGS_OK
     result = bootstrap_mod.bootstrap_emergency_stop()
 
-chk("successful bootstrap -> configured=True", result.configured is True)
-chk("successful bootstrap -> store_status=ok", result.store_status == "ok")
-chk("successful bootstrap -> flags_loaded=5", result.flags_loaded == 5)
-chk("successful bootstrap -> no error", result.error == "")
-chk(
-    "successful bootstrap -> feature_flags reports configured",
-    feature_flags.get_emergency_stop_status().configured is True,
-)
-chk(
-    "successful bootstrap -> evaluate_emergency_stop() works through the manager",
-    feature_flags.evaluate_emergency_stop("EMERGENCY_STOP_ALL").source == "durable",
-)
+    chk("successful bootstrap -> configured=True", result.configured is True)
+    chk("successful bootstrap -> store_status=ok", result.store_status == "ok")
+    chk("successful bootstrap -> flags_loaded=5", result.flags_loaded == 5)
+    chk("successful bootstrap -> no error", result.error == "")
+    chk(
+        "successful bootstrap -> feature_flags reports configured",
+        feature_flags.get_emergency_stop_status().configured is True,
+    )
+    chk(
+        "successful bootstrap -> evaluate_emergency_stop() works through the manager",
+        feature_flags.evaluate_emergency_stop("EMERGENCY_STOP_ALL").source == "durable",
+    )
 
 feature_flags._reset_emergency_stop_manager_for_tests()
 
@@ -100,19 +106,30 @@ print("\n── unavailable ─────────────────�
 
 from tools.airtable_gateway import AirtableLookupError  # noqa: E402
 
+# NOTE: every assertion that calls evaluate_emergency_stop()/
+# get_emergency_stop_status() must stay INSIDE this patch context. The
+# manager never successfully hydrates in this scenario, so
+# _maybe_refresh_locked() treats the cache as permanently stale and
+# re-attempts a real store read on every single evaluate()/status() call
+# (by design — that's how a transient outage recovers once the store comes
+# back). Outside this `with` block, at_list_by_formula is the real
+# function, which — under CI, where AIRTABLE_API_KEY/AIRTABLE_BASE_ID are
+# real secrets (ci.yml) — successfully reads the live Emergency Stop Flags
+# table and silently overwrites the simulated "unavailable" state with
+# real "ok" data. Caught via a real CI failure, not by inspection.
 with patch(f"{ADAPTER_MOD}.at_list_by_formula", side_effect=AirtableLookupError("down")):
     result = bootstrap_mod.bootstrap_emergency_stop()
 
-chk("unavailable -> configured=True (manager still injected)", result.configured is True)
-chk("unavailable -> store_status=unavailable", result.store_status == "unavailable")
-chk("unavailable -> flags_loaded=0", result.flags_loaded == 0)
-chk("unavailable -> error populated", "down" in result.error)
+    chk("unavailable -> configured=True (manager still injected)", result.configured is True)
+    chk("unavailable -> store_status=unavailable", result.store_status == "unavailable")
+    chk("unavailable -> flags_loaded=0", result.flags_loaded == 0)
+    chk("unavailable -> error populated", "down" in result.error)
 
-status = feature_flags.get_emergency_stop_status()
-chk("unavailable -> feature_flags still reports configured=True", status.configured is True)
-ev = feature_flags.evaluate_emergency_stop("EMERGENCY_STOP_ALL")
-chk("unavailable -> evaluate_emergency_stop() fails closed (blocked=True)", ev.blocked is True)
-chk("unavailable -> source=unknown (never hydrated, no stale cache to fall back to)", ev.source == "unknown")
+    status = feature_flags.get_emergency_stop_status()
+    chk("unavailable -> feature_flags still reports configured=True", status.configured is True)
+    ev = feature_flags.evaluate_emergency_stop("EMERGENCY_STOP_ALL")
+    chk("unavailable -> evaluate_emergency_stop() fails closed (blocked=True)", ev.blocked is True)
+    chk("unavailable -> source=unknown (never hydrated, no stale cache to fall back to)", ev.source == "unknown")
 
 feature_flags._reset_emergency_stop_manager_for_tests()
 
@@ -122,20 +139,24 @@ feature_flags._reset_emergency_stop_manager_for_tests()
 # ══════════════════════════════════════════════════════════════════
 print("\n── invalid ────────────────────────────")
 
+# Same note as the "unavailable" section above: stay inside the patch for
+# every evaluate_emergency_stop() call — the cache never hydrates here
+# either, so a call made after this `with` block exits would hit the real
+# (live, in CI) at_list_by_formula instead of the simulated invalid data.
 with patch(f"{ADAPTER_MOD}.at_list_by_formula") as m_list:
     m_list.return_value = [_rec("rec1", "EMERGENCY_STOP_ALL", True)]  # only 1 of 5 known flags
     result = bootstrap_mod.bootstrap_emergency_stop()
 
-chk("invalid -> configured=True (manager still injected)", result.configured is True)
-chk("invalid -> store_status=invalid", result.store_status == "invalid")
-chk("invalid -> flags_loaded=0", result.flags_loaded == 0)
-chk("invalid -> error names the missing flags", "EMERGENCY_STOP_WHATSAPP" in result.error)
+    chk("invalid -> configured=True (manager still injected)", result.configured is True)
+    chk("invalid -> store_status=invalid", result.store_status == "invalid")
+    chk("invalid -> flags_loaded=0", result.flags_loaded == 0)
+    chk("invalid -> error names the missing flags", "EMERGENCY_STOP_WHATSAPP" in result.error)
 
-ev = feature_flags.evaluate_emergency_stop("EMERGENCY_STOP_ALL")
-chk(
-    "invalid -> evaluate_emergency_stop() never optimistically defaults to False (fails closed)",
-    ev.blocked is True,
-)
+    ev = feature_flags.evaluate_emergency_stop("EMERGENCY_STOP_ALL")
+    chk(
+        "invalid -> evaluate_emergency_stop() never optimistically defaults to False (fails closed)",
+        ev.blocked is True,
+    )
 
 feature_flags._reset_emergency_stop_manager_for_tests()
 
