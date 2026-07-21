@@ -64,7 +64,6 @@ from core.anti_hallucination import (
 from core.turn_evidence import TurnEvidenceSummary, observe_shadow_finalizer
 from health_monitor import get_health_status
 from feature_flags import is_enabled as _flag_enabled, get_evidence_finalizer_state
-import cost_monitor
 import llm_fallback
 try:
     from ad_attribution import inject_source_to_incoming_lead as _inject_utm
@@ -3127,20 +3126,15 @@ def run_agent(
                 messages    = messages,
             )
 
-            cost_monitor.record_call(
+            from core.usage_telemetry import record_llm_usage
+            record_llm_usage(
+                source     = "run_agent",
                 model      = ctx.model,
                 tokens_in  = getattr(response.usage, "input_tokens",  0),
                 tokens_out = getattr(response.usage, "output_tokens", 0),
                 caller     = ctx.memory_key,
+                request_id = getattr(response, "id", None),
             )
-            try:
-                from core.cost_watchdog import log_usage as _cw_log
-                _src_type = "claude_sonnet" if "sonnet" in ctx.model else "claude_haiku"
-                _cw_log(_src_type,
-                        getattr(response.usage, "input_tokens", 0) + getattr(response.usage, "output_tokens", 0),
-                        {"caller": ctx.memory_key})
-            except Exception:
-                pass
 
             tool_uses   = [b for b in response.content if b.type == "tool_use"]
             text_blocks = [b for b in response.content if b.type == "text"]

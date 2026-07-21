@@ -223,6 +223,20 @@ def analyze_interaction(interaction: InteractionSchema) -> InteractionAnalysis:
             max_tokens = 700,
             messages   = [{"role":"user","content":prompt}],
         )
+        try:
+            from core.usage_telemetry import record_llm_usage
+            usage = getattr(resp, "usage", None)
+            record_llm_usage(
+                provider   = "anthropic",
+                source     = "interaction_engine",
+                model      = "claude-sonnet-4-6",
+                tokens_in  = getattr(usage, "input_tokens", 0) if usage else 0,
+                tokens_out = getattr(usage, "output_tokens", 0) if usage else 0,
+                caller     = "interaction_engine.analyze_interaction",
+                request_id = getattr(resp, "id", None),
+            )
+        except Exception as _e:
+            logger.error(f"[Interaction] usage recording failed (non-fatal): {_e}")
         parsed = _parse_json(resp.content[0].text)
         return InteractionAnalysis(
             summary    = parsed.get("summary",""),

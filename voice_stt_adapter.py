@@ -49,19 +49,46 @@ def _normalize_hebrew(text: str) -> str:
     return _WHITESPACE_RE.sub(" ", stripped).strip()
 
 
-def _transcribe_openai(path: str) -> tuple[str, str]:
-    """Returns (raw_transcript, language). Raises on failure."""
+def _transcribe_openai(path: str) -> tuple[str, str, float | None]:
+    """Returns (raw_transcript, language, duration_seconds). Raises on failure.
+
+    duration_seconds comes from OpenAI's own verbose_json response (real
+    provider-reported audio length) — never estimated from file size, so
+    STT cost (priced per minute, see core/model_pricing.py) is billed
+    against a real quantity or not recorded at all, never a guess.
+    """
     from openai import OpenAI
 
+    stt_model = os.getenv("OPENAI_STT_MODEL", "whisper-1")
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
     with open(path, "rb") as f:
         resp = client.audio.transcriptions.create(
             file=f,
-            model=os.getenv("OPENAI_STT_MODEL", "whisper-1"),
+            model=stt_model,
             language="he",
             prompt="משימה, ליד, זיכרון, רעיון, עסקה, תקבע, פגישה, תשלח, תזכיר, תעדכן, שלום, נדלן, ייבוא, כספים",
+            response_format="verbose_json",
         )
-    return (resp.text or "").strip(), "he"
+    duration = getattr(resp, "duration", None)
+
+    try:
+        from core.usage_telemetry import record_stt_usage
+        if duration is not None:
+            record_stt_usage(
+                source           = "voice_stt_adapter",
+                model            = stt_model,
+                duration_seconds = float(duration),
+                caller           = "voice_stt_adapter._transcribe_openai",
+            )
+        else:
+            logger.error(
+                "[voice_stt] OpenAI response had no duration (verbose_json expected) — "
+                "STT usage NOT recorded for this call rather than guessing a duration."
+            )
+    except Exception as e:
+        logger.error(f"[voice_stt] usage recording failed (non-fatal): {e}")
+
+    return (resp.text or "").strip(), "he", duration
 
 
 # Phase 2 upgrade (faster, not active): Groq whisper-large-v3.
@@ -107,12 +134,13 @@ def transcribe(audio_bytes: bytes, mime_type: str) -> TranscriptResult:
     try:
         if os.environ.get("OPENAI_API_KEY"):
             try:
-                raw, lang = _transcribe_openai(tmp_path)
-                logger.info("[voice_stt] provider=openai ok len=%d", len(raw))
+                raw, lang, duration = _transcribe_openai(tmp_path)
+                logger.info("[voice_stt] provider=openai ok len=%d duration_sec=%s", len(raw), duration)
                 return TranscriptResult(
                     raw_transcript=raw,
                     normalized_transcript=_normalize_hebrew(raw),
                     language=lang,
+                    duration_sec=duration,
                     provider_used="openai",
                 )
             except Exception as e:
@@ -157,7 +185,7 @@ if __name__ == "__main__":
     import sys
     from unittest.mock import patch
 
-    with patch.object(sys.modules[__name__], "_transcribe_openai", return_value=("שלום", "he")):
+    with patch.object(sys.modules[__name__], "_transcribe_openai", return_value=("שלום", "he", 1.23)):
         result = transcribe(b"fake-audio-bytes", "audio/ogg")
     assert result.ok and result.provider_used == "openai"
     if saved_openai is not None:

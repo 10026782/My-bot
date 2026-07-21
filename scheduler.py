@@ -722,7 +722,7 @@ def _job_boss_battle_check():
 
 
 def _job_cost_watchdog():
-    """CORE_05 legacy: כל 60 דקות — בודק עלות שעתית/יומית בדולרים, שולח התראה/עצירת חירום."""
+    """CORE_05: כל 60 דקות — בודק עלות שעתית בדולרים (מ-usage_events, durable), התראה בלבד."""
     try:
         from cost_monitor import job_cost_watchdog
         job_cost_watchdog()
@@ -731,7 +731,8 @@ def _job_cost_watchdog():
 
 
 def _job_daily_usage_report():
-    """CORE_05 v2: כל יום 08:00 — מסכם usage.jsonl, בודק ספי Sonnet, כותב ל-AI_Usage_Daily."""
+    """CORE_05: כל יום 08:15 — מסכם usage_events (Postgres, durable), כותב פרויקציה
+    ל-AI_Usage_Daily, ומפעיל EMERGENCY_STOP_AI אם העלות היומית האמיתית חצתה COST_DAILY_LIMIT."""
     try:
         from core.cost_watchdog import daily_watchdog
         daily_watchdog()
@@ -827,8 +828,8 @@ def start_scheduler() -> threading.Thread:
     schedule.every().day.at("07:00").do(_automation_guard(_job_daily_game_digest, name="daily_game_digest"))                            # Game digest (flag: GAME_SCHEDULER)
     getattr(schedule.every(), "sunday").at("08:00").do(_automation_guard(_job_weekly_quest_reset, name="weekly_quest_reset"))            # Game weekly reset
     getattr(schedule.every(), "friday").at("18:00").do(_automation_guard(_job_boss_battle_check, name="boss_battle_check"))             # Boss battle check
-    schedule.every(60).minutes.do(_automation_guard(_job_cost_watchdog, name="cost_watchdog"))                                       # CORE_05 legacy: dollar-based emergency stop
-    schedule.every().day.at("08:15").do(_automation_guard(_job_daily_usage_report, name="daily_usage_report"))                             # CORE_05 v2: count-based JSONL watchdog (08:15 — מניעת cluster עם D04+Game ב-Sunday 08:00)
+    schedule.every(60).minutes.do(_automation_guard(_job_cost_watchdog, name="cost_watchdog"))                                       # CORE_05: hourly $ alert (usage_events, durable)
+    schedule.every().day.at("08:15").do(_automation_guard(_job_daily_usage_report, name="daily_usage_report"))                             # CORE_05: daily projection + EMERGENCY_STOP_AI trigger (usage_events, durable; 08:15 — מניעת cluster עם D04+Game ב-Sunday 08:00)
 
     logger.info(
         f"📅 Scheduler | digest={digest_time} | collector={collector_time} | "
