@@ -57,7 +57,16 @@ def call_openai_text(
     messages: list[dict[str, Any]],
     system: str | None = None,
     temperature: float | None = None,
+    fallback_from: str | None = None,
 ) -> str:
+    """
+    fallback_from: set by call_anthropic_text() when this is an
+    Anthropic-failed fallback, purely for usage_events.meta traceability —
+    it does NOT cause a second/duplicate usage record. The failed Anthropic
+    attempt never produced a usable response, so there is nothing real to
+    record for it; this function records exactly one row for the OpenAI
+    call it actually makes, whether called directly or via fallback.
+    """
     from openai import OpenAI
 
     selected_model = model or os.getenv("OPENAI_FALLBACK_MODEL", "gpt-4o-mini")
@@ -85,6 +94,26 @@ def call_openai_text(
         kwargs["temperature"] = temperature
 
     response = client.chat.completions.create(**kwargs)
+
+    # Cost Telemetry Reliability PR2 (shadow only): durable
+    # provider/service/model-generic recording — additive, doesn't feed
+    # AI_Usage_Daily or EMERGENCY_STOP_AI yet. See core/usage_telemetry.py.
+    try:
+        from core.usage_telemetry import record_llm_usage
+        usage = getattr(response, "usage", None)
+        record_llm_usage(
+            provider   = "openai",
+            source     = source,
+            model      = selected_model,
+            tokens_in  = getattr(usage, "prompt_tokens", 0) if usage else 0,
+            tokens_out = getattr(usage, "completion_tokens", 0) if usage else 0,
+            caller     = source,
+            request_id = getattr(response, "id", None),
+            meta       = {"fallback_from": fallback_from} if fallback_from else None,
+        )
+    except Exception as e:
+        logger.error("[LLM] usage recording failed (non-fatal): %s", e)
+
     return (response.choices[0].message.content or "").strip()
 
 
@@ -122,6 +151,25 @@ def call_anthropic_text(
             kwargs["system"] = system
 
         response = client.messages.create(**kwargs)
+
+        # Cost Telemetry Reliability PR2 (shadow only): durable
+        # provider/service/model-generic recording — additive, doesn't
+        # feed AI_Usage_Daily or EMERGENCY_STOP_AI yet.
+        try:
+            from core.usage_telemetry import record_llm_usage
+            usage = getattr(response, "usage", None)
+            record_llm_usage(
+                provider   = "anthropic",
+                source     = source,
+                model      = model,
+                tokens_in  = getattr(usage, "input_tokens", 0) if usage else 0,
+                tokens_out = getattr(usage, "output_tokens", 0) if usage else 0,
+                caller     = source,
+                request_id = getattr(response, "id", None),
+            )
+        except Exception as e:
+            logger.error("[LLM] usage recording failed (non-fatal): %s", e)
+
         return _extract_text_from_anthropic(response)
     except Exception as e:
         if _fallback_enabled() and os.environ.get("OPENAI_API_KEY") and should_fallback(e):
@@ -136,5 +184,6 @@ def call_anthropic_text(
                 messages=messages,
                 system=system,
                 temperature=temperature,
+                fallback_from="anthropic",
             )
         raise

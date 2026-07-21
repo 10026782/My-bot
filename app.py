@@ -3143,6 +3143,22 @@ def run_agent(
                         {"caller": ctx.memory_key})
             except Exception:
                 pass
+            # Cost Telemetry Reliability PR2 (shadow only): durable
+            # provider/service/model-generic recording, in ADDITION to the
+            # two calls above (unchanged) — does not feed AI_Usage_Daily or
+            # EMERGENCY_STOP_AI yet. See core/usage_telemetry.py.
+            try:
+                from core.usage_telemetry import record_llm_usage
+                record_llm_usage(
+                    source     = "run_agent",
+                    model      = ctx.model,
+                    tokens_in  = getattr(response.usage, "input_tokens",  0),
+                    tokens_out = getattr(response.usage, "output_tokens", 0),
+                    caller     = ctx.memory_key,
+                    request_id = getattr(response, "id", None),
+                )
+            except Exception as e:
+                logger.error(f"[UsageTelemetry] run_agent recording failed (non-fatal): {e}", exc_info=True)
 
             tool_uses   = [b for b in response.content if b.type == "tool_use"]
             text_blocks = [b for b in response.content if b.type == "text"]

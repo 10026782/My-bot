@@ -29,6 +29,29 @@ class AnthropicLLMProvider:
 
         response = _get_client().messages.create(**kwargs)
 
+        # Cost Telemetry Reliability PR2 (shadow only): durable
+        # provider/service/model-generic recording — additive, doesn't
+        # feed AI_Usage_Daily or EMERGENCY_STOP_AI yet. This module has no
+        # live caller today (see CLAUDE.md's F13 note), but any direct
+        # provider SDK call is instrumented on principle rather than
+        # relying on "it's currently unused" staying true.
+        try:
+            from core.usage_telemetry import record_llm_usage
+            record_llm_usage(
+                provider   = "anthropic",
+                source     = "providers.anthropic_shim.AnthropicLLMProvider.generate",
+                model      = model,
+                tokens_in  = response.usage.input_tokens,
+                tokens_out = response.usage.output_tokens,
+                caller     = "anthropic_shim",
+                request_id = getattr(response, "id", None),
+            )
+        except Exception:
+            import logging
+            logging.getLogger(__name__).error(
+                "[AnthropicShim] usage recording failed (non-fatal)", exc_info=True
+            )
+
         text_blocks = [b.text for b in response.content if hasattr(b, "text")]
         tool_calls  = [
             {"name": b.name, "input": b.input}
