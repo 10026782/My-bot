@@ -27,7 +27,6 @@ import shabbat_guard
 # Airtable/network calls) and only the two jobs under test matter.
 SCHEDULER_JOB_NAMES = (
     "_job_daily_digest",
-    "_job_daily_git_audit",
     "_job_schema_snapshot_archive",
     "_job_daily_collector",
     "_job_cleanup_pending",
@@ -112,9 +111,9 @@ def test_daily_digest_and_collector_still_run_when_not_shabbat(monkeypatch):
 def test_unrelated_jobs_unaffected_by_the_shabbat_gate(monkeypatch):
     """
     Scope guard: only daily_digest/daily_collector were newly gated.
-    daily_git_audit, cleanup_pending, overdue_payments, flush_lead_memory,
-    learning_cycle, and email_inbound were never gated by shabbat_safe and
-    must remain that way — even when should_send_now() returns False.
+    cleanup_pending, overdue_payments, flush_lead_memory, learning_cycle,
+    and email_inbound were never gated by shabbat_safe and must remain that
+    way — even when should_send_now() returns False.
     """
     calls = defaultdict(int)
     monkeypatch.setattr(shabbat_guard, "should_send_now", lambda channel="default": False)
@@ -125,7 +124,7 @@ def test_unrelated_jobs_unaffected_by_the_shabbat_gate(monkeypatch):
             job.job_func()
 
         still_ungated = (
-            "_job_daily_git_audit", "_job_cleanup_pending", "_job_overdue_payments",
+            "_job_cleanup_pending", "_job_overdue_payments",
             "job_flush_lead_memory", "_job_learning_cycle", "_job_email_inbound",
             "_job_attribution_report", "_job_security_reminder", "_job_weekly_summary",
             "_job_daily_game_digest", "_job_weekly_quest_reset", "_job_boss_battle_check",

@@ -12,7 +12,6 @@ import shabbat_guard
 
 SCHEDULER_JOB_NAMES = (
     "_job_daily_digest",
-    "_job_daily_git_audit",
     "_job_schema_snapshot_archive",
     "_job_daily_collector",
     "_job_cleanup_pending",
@@ -77,7 +76,7 @@ def test_emergency_stop_matrix_blocks_every_registered_scheduler_job(monkeypatch
         registered_jobs = tuple(scheduler.schedule.jobs)
         expected_names = (*SCHEDULER_JOB_NAMES, "job_flush_lead_memory")
 
-        assert len(registered_jobs) == len(expected_names) == 23
+        assert len(registered_jobs) == len(expected_names) == 22
 
         for job in registered_jobs:
             job.job_func()

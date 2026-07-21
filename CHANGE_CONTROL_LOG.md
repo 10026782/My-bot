@@ -1524,3 +1524,25 @@ turn שמבצע גם read מאומת וגם מעלה approval מסווג `eviden
 **היקף:** `app.py::resolve_context_pronouns()`/`_sanitize_for_free_text()`/`_safe_context_quote()` בלבד. אין נגיעה ב-`_is_tier4()`/`_AIRTABLE_ID_RE`/ingress_classifier עצמם.
 
 **Merged:** ✅ `main` דרך PR #422 (commit `5262327`) | **Verified בפרודקשן:** לא עדיין — ממתין לבדיקת המשתמש בטלגרם/WhatsApp חי.
+
+### C155 — N16: ביטול N12 — Git Audit הופרד מהבוט העסקי (21/07/2026)
+קבצים: `scheduler.py`, `daily_git_audit.py`, `feature_flags.py`, `.env.example`, `test_c86_scheduler_emergency_matrix.py`, `ROADMAP.md` | קשור: N12 (בוטל, ראה למעלה), PR #108 (`c26c5e1`, המקור)
+
+**רקע:** המשתמש קיבל הודעת טלגרם "🚫 AUDIT ABORTED (GOV-02 STOP)" מהבוט העסקי ותהה למה כלי audit של repo שולח דרך הבוט. חקירה חשפה ש-N12 (PR #108) חיבר את `daily_git_audit.py` (כלי GOV-02) ל-`scheduler.py` **של הבוט העסקי עצמו** — ריצה יומית ב-06:45 (מאחורי דגל `GIT_AUDIT_SCHEDULER`, כבוי כברירת מחדל), עם שליחה ישירה דרך `TELEGRAM_TOKEN`/`ELIYAHU_CHAT_ID` של הבוט. כלומר תהליך ה-Python של הבוט ב-Render קרא Git מהעותק הפרוס אליו ושלח את התוצאה בטלגרם — למרות שקיים כבר Claude Code Routine נפרד ("Road map false positive check") שעושה בדיוק את אותה עבודה (audit קריאת-ריפו + התראה) דרך תשתית אחרת לגמרי. **לא בעיית ניסוח — כפילות ארכיטקטונית אמיתית**, ועדות ישירה שהדגל בכל זאת הודלק/הורץ ידנית בסביבה עם פרטי הטלגרם (אחרת ההודעה לא הייתה מגיעה).
+
+**החלטת בעלים:** git audit הוא אחריות בלעדית של Claude Code Routine (קורא את הריפו, מריץ GOV-02, שולח push/email). הבוט העסקי לא אמור להיות קשור לריפו/Git בשום צורה — ממשיך לשלוח רק digest והתראות עסקיות.
+
+**תוקן:**
+1. `scheduler.py` — `_job_daily_git_audit`, `git_audit_time`, ורישום ה-`schedule.every().day.at(...)` שלו **הוסרו לגמרי** (לא הושארו flag-gated — flag-off לבדו כבר לא מנע את ההודעה שהתקבלה בפועל, אז זה לא תיקון מספיק). גם הוסר מ-startup log line.
+2. `daily_git_audit.py` — `_send_telegram()` הוסרה כליל, שני call sites (GOV-02 STOP abort + דוח סופי) הוחלפו ב-`print()` בלבד. `import os` הוסר (לא נשאר שימוש). docstring עודכן לתעד במפורש: repo tool בלבד, ריצה/התראה באחריות Routine, אין קשר ל-app.py/scheduler.py/TELEGRAM_TOKEN.
+3. `feature_flags.py` — דגל `GIT_AUDIT_SCHEDULER` הוסר מהרישום (0 call sites נותרו). `.env.example` — `GIT_AUDIT_TIME` הוסר.
+4. `test_c86_scheduler_emergency_matrix.py`'s `SCHEDULER_JOB_NAMES` עודכן (הוסר `_job_daily_git_audit`).
+5. `ROADMAP.md` — N12 סומן בוטל עם הפניה לעדכון, N16 (חדש) מתעד את התיקון, changelog בראש הקובץ עודכן.
+
+**לא נגע (במפורש):** `audit_truth_gate.py` (GOV-02) — נשאר read-only tool בריפו בדיוק כפי שהיה, זמין ל-Routine להריץ ישירות. שום Routine קונפיגורציה (Claude Code Remote) לא שונה — זו תשתית מחוץ לריפו.
+
+**בדיקות:** Full `test_*.py` sweep + `smoke_tests.py` + `compileall -q .`. `python -c "import daily_git_audit"` ו-`python3 daily_git_audit.py` (ללא `TELEGRAM_TOKEN`) — מדפיס דוח, לא נכשל.
+
+**היקף:** תיקון ארכיטקטוני — הסרת חיבור, לא פיצ'ר חדש. אין שינוי ל-GOV-02 עצמו, לשאר משימות ה-scheduler, או ל-Routine.
+
+**Merged:** ⏳ קוד מוכן, tests ירוקים, טרם ממוזג — branch `claude/n16-git-audit-descope`. **Verified בפרודקשן:** לא עדיין — ממתין למיזוג + deploy + אישור שההודעה הבאה מהבוט (אם תגיע) לא תכיל יותר "AUDIT ABORTED".

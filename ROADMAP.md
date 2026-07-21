@@ -1,6 +1,7 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 20/07/2026 — **Truth Reset: אימות ישיר מול `origin/main` לכל פריט בתכנית העבודה — נמצאו 6 פריטים נוספים שה-BUG_AUDIT_LOG/ROADMAP טענו "לא ממוזג" עליהם, כשבפועל כבר ממוזגים ופעילים.** בעקבות דרישת הבעלים לתקן את התכנית עצמה לפי git reality לפני שמתחילים לבצע — כל פריט בתכנית נבדק בפועל (`git merge-base`, grep על `origin/main`, הרצת הטסט הרלוונטי), לא לפי מה שהתיעוד טוען. **ממצאים:** (1) **BUG-072** (לוגים חושפים sender ID/טלפון) — כבר merged, 7/7 טסטים עוברים, נותרה רק production verification, בדיוק כפי שנטען. (2) **BUG-058** (Tier-2 batch resolver) — **כבר merged ופעיל ללא flag gate**, אף תועד כ-production-verified ב-10/07/2026 עם ראיית לוג אמיתית — השורה "Merged: ממתין ל-push/PR" בקובץ הייתה עצמה stale; **אין כאן "עבודה חדשה", זה סגור לגמרי**. (3) **BUG-071** (WhatsApp attachments) — **כבר merged** (הקבצים עברו מ-`providers/` לשורש ב-commit נפרד, `76128ba`), 6/6 טסטים עוברים; הרשומה טענה "Merged: לא עדיין" בטעות. (4) **BUG-BATCH-DISCARD** — **כבר merged** (`ba579f2`, 17/07), 33/33 טסטים עוברים; גם כלל שורת "סטטוס" שגויה/לא-קשורה שהוסרה. (5) **BUG-007** (CORS preflight) — **כבר merged**, אומת עם Flask test client אמיתי (204 על כל 4 הנתיבים). (6) **BUG-049** (CI silent-pass) — **כבר merged**, 6/6 עובר בפועל. בנוסף: תוקן פריט drift נוסף (כפילות של אותה טעות `/status` decorator בטבלת "פערים ידועים" השנייה), ותוקנה תווית "חסום על C81-FU–C83" ב-**C87** — שלושתם כבר סגורים, C87 לא-חסום יותר. **המשמעות לתכנית:** יום 2 (merge קוד קיים) כמעט ריק — כל 6 הפריטים שסומנו "לא-ממוזג" כבר ב-`main`; מה שנותר הוא production verification בלבד, לא merge. תכנית מתוקנת מלאה + patch-stack לפי workstreams במקום ימים — ראה תגובת הסשן/הודעת commit לפירוט.
+עודכן: 21/07/2026 — **N16: תיקון ליקוי ארכיטקטוני ב-N12 — Git Audit הופרד לחלוטין מהבוט העסקי.** N12 (PR #108, `c26c5e1`) חיבר את `daily_git_audit.py` (כלי GOV-02) ל-`scheduler.py` של **הבוט העסקי** (`_job_daily_git_audit`, ריצה יומית ב-06:45) והעניק לו שליחה ישירה דרך `TELEGRAM_TOKEN`/`ELIYAHU_CHAT_ID` של הבוט עצמו — כלומר תהליך ה-Python של הבוט ב-Render קרא Git מהעותק הפרוס אליו ושלח את התוצאה בטלגרם, על אף שהבוט העסקי לא אמור להיות קשור לריפו בכלל. זו לא הייתה בעיית ניסוח/הודעה דומה — זו כפילות ארכיטקטונית אמיתית מול Claude Code Routine נפרד שכבר קיים לאותה מטרה בדיוק (audit קריאת-ריפו + התראה, ראה טריגר "Road map false positive check"). **החלטת בעלים (21/07/2026):** git audit הוא אחריות בלעדית של ה-Routine; הבוט העסקי ממשיך לשלוח רק digest והתראות עסקיות. **תוקן:** (1) `_job_daily_git_audit`/`git_audit_time`/הרשמת ה-schedule **הוסרו לגמרי** מ-`scheduler.py` (לא רק flag-gated — היה כבר `GIT_AUDIT_SCHEDULER` כבוי כברירת מחדל, וההודעה בכל זאת נשלחה, כלומר הדגל הודלק בפועל או שהסקריפט הורץ ידנית בסביבה עם פרטי הטלגרם). (2) `daily_git_audit.py`'s `_send_telegram()` הוסרה כליל (שני call sites — GOV-02 abort ודוח סופי) — הקובץ מדפיס ל-stdout בלבד, אפס תלות ב-`TELEGRAM_TOKEN`/`telebot`. (3) דגל `GIT_AUDIT_SCHEDULER` הוסר מ-`feature_flags.py` (0 call sites נותרו) ומ-`.env.example` (`GIT_AUDIT_TIME`). GOV-02 (`audit_truth_gate.py`) עצמו **לא נגע** — נשאר read-only tool בריפו, זמין ל-Routine להריץ ישירות. ראה N12 למטה (עדכון), `CHANGE_CONTROL_LOG.md`/`CHANGELOG.md` C154.
+עודכן קודם: 20/07/2026 — **Truth Reset: אימות ישיר מול `origin/main` לכל פריט בתכנית העבודה — נמצאו 6 פריטים נוספים שה-BUG_AUDIT_LOG/ROADMAP טענו "לא ממוזג" עליהם, כשבפועל כבר ממוזגים ופעילים.** בעקבות דרישת הבעלים לתקן את התכנית עצמה לפי git reality לפני שמתחילים לבצע — כל פריט בתכנית נבדק בפועל (`git merge-base`, grep על `origin/main`, הרצת הטסט הרלוונטי), לא לפי מה שהתיעוד טוען. **ממצאים:** (1) **BUG-072** (לוגים חושפים sender ID/טלפון) — כבר merged, 7/7 טסטים עוברים, נותרה רק production verification, בדיוק כפי שנטען. (2) **BUG-058** (Tier-2 batch resolver) — **כבר merged ופעיל ללא flag gate**, אף תועד כ-production-verified ב-10/07/2026 עם ראיית לוג אמיתית — השורה "Merged: ממתין ל-push/PR" בקובץ הייתה עצמה stale; **אין כאן "עבודה חדשה", זה סגור לגמרי**. (3) **BUG-071** (WhatsApp attachments) — **כבר merged** (הקבצים עברו מ-`providers/` לשורש ב-commit נפרד, `76128ba`), 6/6 טסטים עוברים; הרשומה טענה "Merged: לא עדיין" בטעות. (4) **BUG-BATCH-DISCARD** — **כבר merged** (`ba579f2`, 17/07), 33/33 טסטים עוברים; גם כלל שורת "סטטוס" שגויה/לא-קשורה שהוסרה. (5) **BUG-007** (CORS preflight) — **כבר merged**, אומת עם Flask test client אמיתי (204 על כל 4 הנתיבים). (6) **BUG-049** (CI silent-pass) — **כבר merged**, 6/6 עובר בפועל. בנוסף: תוקן פריט drift נוסף (כפילות של אותה טעות `/status` decorator בטבלת "פערים ידועים" השנייה), ותוקנה תווית "חסום על C81-FU–C83" ב-**C87** — שלושתם כבר סגורים, C87 לא-חסום יותר. **המשמעות לתכנית:** יום 2 (merge קוד קיים) כמעט ריק — כל 6 הפריטים שסומנו "לא-ממוזג" כבר ב-`main`; מה שנותר הוא production verification בלבד, לא merge. תכנית מתוקנת מלאה + patch-stack לפי workstreams במקום ימים — ראה תגובת הסשן/הודעת commit לפירוט.
 עודכן קודם: 20/07/2026 — **Post-N15 Work Survey: דוח מלא + 3 תיקוני drift ב-ROADMAP עצמו.** לקראת תכנית עבודה למספר ימים נוספים (הכל מחוץ ל-RP5/F52/FEATURE_ACTION_GATEWAY/כל דבר חסום אחר), 4 סוכני חקירה מקבילים סרקו את ROADMAP.md, BUG_AUDIT_LOG.md, feature_flags.py, וחוב טכני/governance drift כללי. הדוח המלא (לא מקוצר) נשמר ב-`docs/audit/POST_N15_WORK_SURVEY_20260720.md`. **תוך כדי הסקירה נמצאו 3 פריטים ב-ROADMAP עצמו שהתבררו כ-stale** (הקובץ טוען דבר-אחד, המציאות אחר) — תוקנו: (1) **C84** סומן "טרם ממוזג" — בפועל כבר merged (`c5c5a97`, PR #408), אומת קודם השבוע. (2) **C86** סומן "planned, not started" — בפועל `test_c86_scheduler_emergency_matrix.py` כבר קיים ועובר, תועד כבר בעדכון C82-FU (19/07) בקובץ הזה עצמו, סתירה פנימית. (3) טבלת "Known Issues" טענה ש-`/status` decorator הוסר ב-PR #55 — בפועל קיים ורשום (`app.py:401`), תואם ל-BUG-005 שכבר סגור; עבדנו על `/status` ישירות השבוע (BUG-120/BUG-121). שלושתם תוקנו בגוף הקובץ. ראה הדוח המלא לרשימת כל הפריטים הפתוחים (ROADMAP/BUGs/flags/tech-debt) והתכנית המוצעת ל-5 ימים.
 עודכן קודם: 20/07/2026 — **Day-3 flag pre-activation prep: FEATURE_WEEKLY_SUMMARY בדיקה תוקנה + FEATURE_LAST_TOOL_RESULT_SHADOW קיבל בדיקות.** (1) `weekly_summary.py::_group_by_domain()` קיבץ לפי `Tags[0]` — אבל `cmd_update.py` לעולם לא כותב domain ל-Tags, רק לשדה `Domain` הייעודי ("Real Estate" וכו') — כל רשומה קובצה בשקט לא-נכון. תוקן + `test_weekly_summary_domain_grouping.py` (11 בדיקות). (2) `FEATURE_LAST_TOOL_RESULT_SHADOW` לא היה לו קובץ test ייעודי — נוסף `test_last_tool_result_shadow.py` (23 בדיקות) המכסה את שלוש נקודות הקריאה האמיתיות; תפס באג-אבחון זעיר ב-`core/output_gateway.py::_shadow_record_send()` (enum שיבוץ שגוי במחרוזת לוג, תוקן). שני הפריטים האלה היו תנאי-סף מוצהר לפני הפעלת הדגלים — עכשיו מוכנים. פריטים 7-9 (`FEATURE_CORE_REASONING_LEADS_STATE`/`GIT_AUDIT_SCHEDULER`/`FEATURE_TOOL_AVAILABILITY_FILTER`) קוד מוכן, ההפעלה עצמה דורשת שינוי env var ב-Render — להחלטת/ביצוע הבעלים. ראה `CHANGE_CONTROL_LOG.md` C149 (branch `claude/n15-owner-decision-p73c3k`, commit `23c1a35`, **טרם ממוזג ל-main**).
 עודכן קודם: 20/07/2026 — **BUG-110 residual תוקן: read-side stale `status=="converted"` ב-`ad_attribution.py`/`audience_intelligence.py`.** BUG-110 (17/07/2026) תיקן את שני אתרי הכתיבה אבל השאיר במפורש כחוב טכני שני צרכני-קריאה שהמשיכו לבדוק את הליטרל הישן `status=="converted"` — `ad_attribution.py::build_attribution_report()` ו-`audience_intelligence.py::_parse_records()` — כך שלידים שהומרו **אחרי** התיקון (status="done"+Business Outcome="converted ") הוחסרו בשקט מדוחות attribution/segmentation. תוקן: שני הצרכנים בודקים עכשיו גם `Business Outcome == LeadOutcome.CONVERTED` (קבוע קנוני, לא ליטרל) לצד הבדיקה הישנה — OR, לא replace, אין backfill. `mark_converted()`'s gateway migration (חוב טכני נפרד מ-BUG-110) נשאר בכוונה לא-נוגע. Full `test_*.py` sweep + `smoke_tests.py` + `compileall` נקיים. ראה `BUG_AUDIT_LOG.md` BUG-110 ו-`CHANGE_CONTROL_LOG.md` C148 (branch `claude/n15-owner-decision-p73c3k`, commit `e6efa3a`, **טרם ממוזג ל-main**).
@@ -615,8 +616,15 @@ income לפי תאריך מתבצע ב-Python על תוצאת ה-formula (status
 **מצב נוכחי:** ממוזג ל-main (`tma_api.py`/`airtable_schema.py`), לפני הסשן הנוכחי —
 תועד כ-PLANNED ב-ROADMAP בטעות; תוקן כאן.
 
-### N12 — Daily Git Audit scheduler wiring ✅ הושלם, דגל כבוי (PR #108, `c26c5e1`)
-**מה:** `daily_git_audit.py` (קיים מ-GOV-02) חוּבר ל-`scheduler.py` (`_job_daily_git_audit`,
+### N12 — Daily Git Audit scheduler wiring ⚠️ בוטל (N16, 21/07/2026) — ליקוי ארכיטקטוני, ראה למעלה
+**עדכון (21/07/2026):** החיבור המתואר למטה **הוסר לגמרי**. הבעלים קבע שהבוט העסקי לא
+אמור להיות קשור לריפו/Git בשום צורה — git audit הוא אחריות בלעדית של Claude Code Routine
+נפרד. `_job_daily_git_audit`/`git_audit_time`/הרשמת ה-schedule הוסרו מ-`scheduler.py`,
+`daily_git_audit.py`'s `_send_telegram()` הוסרה כליל, דגל `GIT_AUDIT_SCHEDULER` הוסר.
+GOV-02 (`audit_truth_gate.py`) עצמו נשאר בריפו כ-read-only tool, ללא שינוי. ראה N16 (חדש)
+ו-changelog בראש הקובץ. הטקסט המקורי מתחת נשמר כתיעוד היסטורי של מה שהיה קיים.
+---
+**מה (היסטורי — כבר לא נכון, ראה עדכון למעלה):** `daily_git_audit.py` (קיים מ-GOV-02) חוּבר ל-`scheduler.py` (`_job_daily_git_audit`,
 `schedule.every().day.at(git_audit_time)`, `GIT_AUDIT_TIME` env var, ברירת מחדל `06:45`
 כדי לא להתנגש עם digest ה-game ב-07:00/digest רגיל ב-07:30). נוספו ל-`daily_git_audit.py`
 עצמו: `check_unmerged_vs_roadmap()` (משווה ענפים לא ממוזגים מול טענות ✅/DONE ב-ROADMAP.md —
@@ -629,7 +637,7 @@ income לפי תאריך מתבצע ב-Python על תוצאת ה-formula (status
 **מניע:** נמצא תוך כדי ניקוי ענפי `claude/*` ישנים — `claude/lucid-franklin-0os9ma`
 ו-`claude/tender-hypatia-h5n0d3` הכילו את המימוש הזה אבל לא מוזגו מעולם; חולץ ותוקן
 (ה-bug ב-precedence) לפני שהענפים נמחקו.
-**מצב נוכחי:** ממוזג ל-main, דגל כבוי — אין שינוי התנהגות בפרודקשן.
+**מצב נוכחי (היסטורי):** היה ממוזג ל-main, דגל כבוי. **בוטל ב-N16 (21/07/2026) — ראה עדכון למעלה.**
 
 ### N13 — Decision Hub (Stage 0 / 0.5 / 0.6) ✅ הושלם, דגל כבוי (PR #147, `4ac2a05`/`e0f0111`)
 **מה:** ליבת "החלטה" domain-agnostic (`Decision`, `decision_pipeline.py`) עם Inbox raw-first
@@ -752,6 +760,30 @@ audit, ראה `git log` על `app.py`'s tool loop לקומיט המדויק) —
 לוגיקת `Handler.RESTRICTED` במקום להשאיר שדה מת.
 **עד שמוחלט:** ה-copy בקוד (`app.py`, `core/anti_hallucination.py`) כבר לא מבטיח העברה
 שלא קיימת — זה סגר את הסיכון המיידי (claim-without-evidence), לא את שאלת המדיניות.
+
+### N16 — Git Audit descope: ביטול N12, הפרדת GOV-02 מהבוט העסקי ✅ הושלם (21/07/2026)
+**מה:** N12 (PR #108) חיבר את `daily_git_audit.py`/GOV-02 ל-`scheduler.py` של הבוט העסקי
+וזיכה אותו בשליחה ישירה דרך `TELEGRAM_TOKEN`/`ELIYAHU_CHAT_ID` — כלומר תהליך הפרודקשן של
+הבוט קרא Git ושלח לטלגרם, במקביל ל-Claude Code Routine נפרד שכבר עושה בדיוק אותה עבודה
+(audit קריאת-ריפו + התראה) דרך תשתית שונה לגמרי. כפילות ארכיטקטונית — לא רק בעיית ניסוח.
+**החלטת בעלים:** git audit הוא אחריות בלעדית של Routine; הבוט העסקי לא אמור להיות קשור
+לריפו כלל, ושולח רק digest + התראות עסקיות.
+**תוקן:**
+1. `scheduler.py` — הוסרו לגמרי `_job_daily_git_audit`, `git_audit_time`, ורישום
+   ה-`schedule.every()...do(...)` שלו (לא הושאר flag-gated — הודעת "AUDIT ABORTED" בפועל
+   בטלגרם הוכיחה ש-`GIT_AUDIT_SCHEDULER` הודלק בפועל או שהסקריפט הורץ ידנית בסביבה עם
+   פרטי הטלגרם — flag-off לבדו לא מנע את זה בעבר, ולכן לא מספיק כתיקון).
+2. `daily_git_audit.py` — `_send_telegram()` הוסרה כליל, שני call sites (GOV-02 STOP +
+   דוח סופי) הפכו ל-`print()` בלבד; הקובץ מדפיס ל-stdout, לא שולח כלום בעצמו. docstring
+   עודכן לתעד מפורשות: repo tool בלבד, ללא קשר ל-app.py/scheduler.py/TELEGRAM_TOKEN.
+3. `feature_flags.py` — דגל `GIT_AUDIT_SCHEDULER` הוסר (0 call sites נותרו אחרי #1).
+   `.env.example` — `GIT_AUDIT_TIME` הוסר (env var מת).
+4. `test_c86_scheduler_emergency_matrix.py`'s `SCHEDULER_JOB_NAMES` עודכן (הוסר
+   `_job_daily_git_audit`, שכבר לא קיים).
+**לא נגע:** `audit_truth_gate.py` (GOV-02) — נשאר בדיוק כפי שהיה, read-only tool בריפו,
+זמין ל-Routine להריץ ישירות (`python3 audit_truth_gate.py`/`python3 daily_git_audit.py`).
+**מצב נוכחי:** קוד מוכן, tests ירוקים, טרם ממוזג ל-main — ראה `CHANGE_CONTROL_LOG.md`/
+`CHANGELOG.md` C154 (branch `claude/n16-git-audit-descope`).
 
 ### F17 — Decision Hub Stage 2: Smart Trust Layer (PR #157, מוזג ל-`main`, commit `9252b1e`/merge `78f9bae`)
 **מה:** שכבת ביטחון על גבי Stage 1 — מסתכלת על ה-Decision כולו (לא Event בודד): האם
