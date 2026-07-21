@@ -264,10 +264,11 @@ def _write_airtable_row(date_str: str, counts: dict[str, int]) -> bool:
         if len(matches) >= 2:
             logger.error(
                 "[CostWatchdogV2] AI_Usage_Daily DUPLICATE-ROW INTEGRITY ERROR for %s — "
-                "%d existing rows match this date (record ids: %s). Refusing to write "
-                "(would guess which row is authoritative). Needs manual cleanup in "
+                "at least 2 matching rows for this date (record ids seen: %s; the lookup "
+                "caps at max_records=2, so the true count may be higher). Refusing to "
+                "write (would guess which row is authoritative). Needs manual cleanup in "
                 "Airtable before this date can be updated again.",
-                date_str, len(matches), [m.get("id") for m in matches],
+                date_str, [m.get("id") for m in matches],
             )
             return False
 
