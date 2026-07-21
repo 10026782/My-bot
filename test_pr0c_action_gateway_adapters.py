@@ -105,6 +105,9 @@ print("\n── Test 3: dispatcher routing ────────────�
 
 import inspect
 from tools.dispatcher import dispatch_tool
+
+import emergency_stop_test_support
+emergency_stop_test_support.configure_all_clear_emergency_stop()
 src = inspect.getsource(dispatch_tool)
 for name in ("media_save_to_memory", "send_followup", "send_recovery"):
     chk(f'dispatcher has case "{name}"', f'case "{name}"' in src)

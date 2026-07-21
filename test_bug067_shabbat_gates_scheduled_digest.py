@@ -21,6 +21,9 @@ import lead_memory
 import scheduler
 import shabbat_guard
 
+import emergency_stop_test_support
+emergency_stop_test_support.configure_all_clear_emergency_stop()
+
 # Mirrors test_c86_scheduler_emergency_matrix.py's SCHEDULER_JOB_NAMES —
 # every _job_* referenced in scheduler.py's registration block must be
 # patched so calling all registered jobs is side-effect-free (no real

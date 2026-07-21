@@ -143,6 +143,9 @@ chk("tool_registry.enforce() still raises on its own, unmodified by this change"
 # 8-12. End-to-end app.run_agent() — mocked Identity/Router/Anthropic
 # ══════════════════════════════════════════════════════════════════
 import app  # noqa: E402  (env vars above must be set before import)
+
+import emergency_stop_test_support  # noqa: E402
+emergency_stop_test_support.configure_all_clear_emergency_stop()
 from core.router.route_decision import RouteDecision, Handler  # noqa: E402
 from context import AgentContext  # noqa: E402
 

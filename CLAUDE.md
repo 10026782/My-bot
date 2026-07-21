@@ -95,7 +95,7 @@ High-risk/irreversible actions (`requires_approval=True` in the registry, e.g. `
 ## Other key modules
 
 - `event_bus.py`: pending-action store + audit/event log used by the approval flow and lead-recovery features.
-- `feature_flags.py`: runtime + env-based flags; `EMERGENCY_STOP_*` flags persist across restarts via `/tmp/emergency_flags.json`.
+- `feature_flags.py`: runtime + env-based flags; the 5 canonical `EMERGENCY_STOP_*` flags are durably backed by Airtable via `EmergencyStopManager` (PATCH 3B) and survive restarts for real — `is_enabled()`/`set_flag()` are intercepted for exactly these names (`is_enabled()` delegates to `evaluate_emergency_stop()`, `set_flag()` raises `EmergencyStopLegacyWriteBlocked`); use `set_emergency_stop()`/`clear_emergency_stop()` to write them. The old `/tmp/emergency_flags.json` in-memory persistence mechanism this replaced no longer exists.
 - `core/anti_hallucination.py`: post-hoc verification that the agent's claimed actions actually happened (`verify_execution`) and response sanitization (`sanitize_agent_response`).
 - `core/lead_recovery.py`, `lead_qualifier.py`, `lead_memory.py`, `core/lead_events.py`: the lead lifecycle — qualification state machine, long-term memory, audit log, and recovery/follow-up logic.
 - `crm.py`, `airtable_schema.py`, `airtable_tools.py`: the Airtable-backed CRM repository and table/field name constants — prefer the Hebrew table aliases defined here over hardcoded English names (see `_ALIAS_MAP` / `OLD_TABLE_NAMES` checks in `smoke_tests.py`).

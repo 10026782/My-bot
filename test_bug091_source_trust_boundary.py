@@ -36,6 +36,9 @@ from unittest.mock import patch, MagicMock
 
 from identity import Identity
 from tools.dispatcher import dispatch_tool
+
+import emergency_stop_test_support
+emergency_stop_test_support.configure_all_clear_emergency_stop()
 from tools.airtable_security import enforce_leads_write_gate, LeadsDirectWriteBlocked
 
 passed = failed = 0

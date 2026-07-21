@@ -20,7 +20,12 @@ from datetime import datetime, timezone
 from typing import Iterable, Optional
 
 from airtable_schema import EmergencyStopFlagFields, Tables
-from core.emergency_stop import KNOWN_EMERGENCY_STOP_FLAG_NAMES, ReadResult, WriteResult
+from core.emergency_stop import (
+    KNOWN_EMERGENCY_STOP_FLAG_NAMES,
+    FlagRecord,
+    ReadResult,
+    WriteResult,
+)
 from tools.airtable_gateway import (
     AirtableLookupError,
     airtable_create,
@@ -123,7 +128,7 @@ class AirtableEmergencyStopStore:
             )
 
     def _parse_records(self, records: list[dict]) -> ReadResult:
-        flags: dict[str, bool] = {}
+        flags: dict[str, FlagRecord] = {}
         duplicates: set[str] = set()
         invalid: list[str] = []
 
@@ -147,7 +152,12 @@ class AirtableEmergencyStopStore:
                 duplicates.add(name)
                 continue
 
-            flags[name] = enabled
+            # Operation ID is metadata, not part of the integrity check
+            # below — a flag record that was never written yet may
+            # legitimately have no Operation ID (None), unlike a missing or
+            # non-boolean Enabled value, which IS a data error.
+            operation_id = fields.get(_F.OPERATION_ID)
+            flags[name] = FlagRecord(enabled=enabled, operation_id=operation_id)
 
         if invalid:
             return ReadResult(status="invalid", error=f"invalid records: {invalid}")

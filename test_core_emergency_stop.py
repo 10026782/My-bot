@@ -17,6 +17,7 @@ from core.emergency_stop import (
     EmergencyStopManager,
     EmergencyStopStore,
     FlagEvaluation,
+    FlagRecord,
     ReadResult,
     WriteResult,
 )
@@ -93,7 +94,7 @@ class WriteQueueStore:
 
 class RaisingWriteStore:
     def read(self) -> ReadResult:
-        return ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": True})
+        return ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": FlagRecord(enabled=True)})
 
     def write(self, *a, **kw) -> WriteResult:
         raise RuntimeError("simulated adapter bug — Protocol says this must never happen")
@@ -140,7 +141,7 @@ chk("no store -> cache_age_seconds is None", ev.cache_age_seconds is None)
 print("\n── successful hydrate ───────────────────")
 
 clock = FakeClock()
-store = QueueStore([ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": True, "EMERGENCY_STOP_AI": False})])
+store = QueueStore([ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": FlagRecord(enabled=True), "EMERGENCY_STOP_AI": FlagRecord(enabled=False)})])
 mgr = EmergencyStopManager(store=store, clock=clock, ttl_seconds=7.0)
 
 ev_all = mgr.evaluate("EMERGENCY_STOP_ALL")
@@ -162,8 +163,8 @@ print("\n── TTL staleness ────────────────�
 
 clock = FakeClock()
 store = QueueStore([
-    ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": False}),
-    ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": True}),
+    ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": FlagRecord(enabled=False)}),
+    ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": FlagRecord(enabled=True)}),
 ])
 mgr = EmergencyStopManager(store=store, clock=clock, ttl_seconds=7.0)
 
@@ -189,7 +190,7 @@ print("\n── stale-cache fallback on refresh failure ──")
 
 clock = FakeClock()
 store = QueueStore([
-    ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": True}),
+    ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": FlagRecord(enabled=True)}),
     ReadResult(status="unavailable", error="simulated network timeout"),
 ])
 mgr = EmergencyStopManager(store=store, clock=clock, ttl_seconds=7.0)
@@ -226,8 +227,8 @@ print("\n── full-cache replacement, not merge ────")
 
 clock = FakeClock()
 store = QueueStore([
-    ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": True, "EMERGENCY_STOP_AI": True}),
-    ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": False}),  # AI dropped
+    ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": FlagRecord(enabled=True), "EMERGENCY_STOP_AI": FlagRecord(enabled=True)}),
+    ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": FlagRecord(enabled=False)}),  # AI dropped
 ])
 mgr = EmergencyStopManager(store=store, clock=clock, ttl_seconds=7.0)
 
@@ -247,7 +248,7 @@ chk("AI absent from second read -> now unknown, not stale-True",
 print("\n── env force-stop precedence ────────────")
 
 clock = FakeClock()
-store = QueueStore([ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": False})])
+store = QueueStore([ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": FlagRecord(enabled=False)})])
 mgr = EmergencyStopManager(
     store=store, clock=clock, ttl_seconds=7.0,
     force_stop_provider=lambda name: name == "EMERGENCY_STOP_ALL",
@@ -289,7 +290,7 @@ except Exception as e:
 print("\n── status() observability ───────────────")
 
 clock = FakeClock()
-store = QueueStore([ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": True, "EMERGENCY_STOP_AI": False})])
+store = QueueStore([ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": FlagRecord(enabled=True), "EMERGENCY_STOP_AI": FlagRecord(enabled=False)})])
 mgr = EmergencyStopManager(
     store=store, clock=clock, ttl_seconds=7.0,
     known_flag_names=["EMERGENCY_STOP_ALL", "EMERGENCY_STOP_AI", "EMERGENCY_STOP_EMAIL"],
@@ -314,7 +315,7 @@ chk("status() with no store -> store_configured=False", st_unconfigured.store_co
 print("\n── single-flight under concurrency ──────")
 
 clock = FakeClock()
-store = BlockingStore(ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": True}))
+store = BlockingStore(ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": FlagRecord(enabled=True)}))
 mgr = EmergencyStopManager(store=store, clock=clock, ttl_seconds=7.0)
 
 results: list[FlagEvaluation] = []
@@ -356,8 +357,8 @@ chk("write() with no store configured -> verified=False", wr.verified is False)
 clock = FakeClock()
 store = WriteQueueStore(
     read_results=[
-        ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": False}),
-        ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": True}),
+        ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": FlagRecord(enabled=False)}),
+        ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": FlagRecord(enabled=True)}),
     ],
     write_results=[WriteResult(ok=True, verified=True)],
 )
@@ -392,8 +393,8 @@ chk("evaluate() after write() reflects the new durable value", ev_after.blocked 
 clock2 = FakeClock()
 store2 = WriteQueueStore(
     read_results=[
-        ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": False}),
-        ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": False}),
+        ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": FlagRecord(enabled=False)}),
+        ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": FlagRecord(enabled=False)}),
     ],
     write_results=[WriteResult(ok=False, verified=False, error="gateway rejected it")],
 )
@@ -434,6 +435,46 @@ try:
 except ValueError as e:
     chk("explicit empty known_flag_names -> raises ValueError", True)
     chk("ValueError message points at the canonical default", "KNOWN_EMERGENCY_STOP_FLAG_NAMES" in str(e))
+
+
+# ══════════════════════════════════════════════════════════════════
+# 13. operation_id metadata propagates from ReadResult -> cache ->
+#     FlagEvaluation (Step 6) — needed so a caller (e.g. a TMA "clear"
+#     request) can discover the operation_id to condition a write on
+#     purely through the read path, without a side-channel lookup.
+# ══════════════════════════════════════════════════════════════════
+print("\n── operation_id metadata propagation (Step 6) ──")
+
+clock = FakeClock()
+store = QueueStore([ReadResult(status="ok", flags={
+    "EMERGENCY_STOP_ALL": FlagRecord(enabled=True, operation_id="op-all-1"),
+    "EMERGENCY_STOP_AI": FlagRecord(enabled=False, operation_id=None),
+})])
+mgr = EmergencyStopManager(store=store, clock=clock, ttl_seconds=7.0)
+
+ev_all = mgr.evaluate("EMERGENCY_STOP_ALL")
+chk("evaluate() surfaces the durable record's operation_id", ev_all.operation_id == "op-all-1")
+
+ev_ai = mgr.evaluate("EMERGENCY_STOP_AI")
+chk("a flag record with no operation_id yet -> FlagEvaluation.operation_id is None",
+    ev_ai.operation_id is None)
+
+st = mgr.status()
+chk("status() also exposes operation_id per flag",
+    st.flags["EMERGENCY_STOP_ALL"].operation_id == "op-all-1")
+
+ev_unknown = EmergencyStopManager(store=None, clock=FakeClock()).evaluate("EMERGENCY_STOP_ALL")
+chk("never-hydrated (source=unknown) -> operation_id is None", ev_unknown.operation_id is None)
+
+mgr_env = EmergencyStopManager(
+    store=QueueStore([ReadResult(status="ok", flags={
+        "EMERGENCY_STOP_ALL": FlagRecord(enabled=False, operation_id="op-env-1"),
+    })]),
+    clock=FakeClock(), force_stop_provider=lambda name: True,
+)
+ev_env = mgr_env.evaluate("EMERGENCY_STOP_ALL")
+chk("env force-stop (source=env) -> operation_id is None (never consults the durable record)",
+    ev_env.operation_id is None)
 
 
 print(f"\n{'='*40}")

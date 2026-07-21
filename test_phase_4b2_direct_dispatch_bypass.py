@@ -87,6 +87,9 @@ os.environ.setdefault("RENDER_APP_URL", "https://example.com")
 os.environ.setdefault("SETUP_WEBHOOK", "0")
 
 from tools.dispatcher import dispatch_tool
+
+import emergency_stop_test_support
+emergency_stop_test_support.configure_all_clear_emergency_stop()
 import tools.approval_actions as approval_actions
 from core.atomic_claim_repository import AtomicExecutionClaim, STATUS_EXECUTING, STATUS_COMPLETED
 

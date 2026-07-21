@@ -35,6 +35,9 @@ os.environ.setdefault("SETUP_WEBHOOK", "0")
 os.environ.setdefault("TELEGRAM_WEBHOOK_SECRET", "test-webhook-secret")
 
 import app  # noqa: E402  (env vars above must be set before import)
+
+import emergency_stop_test_support  # noqa: E402
+emergency_stop_test_support.configure_all_clear_emergency_stop()
 from core.action_gateway import action_gateway, ActionGateway, ExecutionLedger  # noqa: E402
 
 passed = failed = 0
