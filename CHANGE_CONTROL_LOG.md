@@ -1545,4 +1545,34 @@ turn שמבצע גם read מאומת וגם מעלה approval מסווג `eviden
 
 **היקף:** תיקון ארכיטקטוני — הסרת חיבור, לא פיצ'ר חדש. אין שינוי ל-GOV-02 עצמו, לשאר משימות ה-scheduler, או ל-Routine.
 
-**Merged:** ⏳ קוד מוכן, tests ירוקים, טרם ממוזג — branch `claude/n16-git-audit-descope`. **Verified בפרודקשן:** לא עדיין — ממתין למיזוג + deploy + אישור שההודעה הבאה מהבוט (אם תגיע) לא תכיל יותר "AUDIT ABORTED".
+**Merged:** ✅ `main` דרך PR #424 (commit `99981fb`). **Verified בפרודקשן:** לא עדיין — אין דרך פעילה לבדוק "ההודעה הבאה לא תגיע" מלבד המתנה; אין שגיאת GOV-02 חדשה שדווחה מאז.
+
+### C156 — PATCH 3B Steps 2–4: Airtable adapter + feature_flags hook + preflight/predeploy — ✅ Production Verified (21/07/2026)
+קבצים: `adapters/airtable_emergency_stop_store.py`, `core/emergency_stop.py`, `core/emergency_stop_preflight.py`, `core/predeploy.py`, `feature_flags.py`, `tools/airtable_gateway.py`, `airtable_schema.py`, + 7 קבצי test | קשור: PATCH 3B Step 1 (PR #421), Emergency Stop persistence (Truth Reset P0 finding, C150)
+
+**מה נמזג:** PR #425 (`claude/n15-owner-decision-p73c3k` → `main`, commit `3ce949e`) — Steps 2 (adapter), 2.5 (contract hardening), 3 (feature_flags configure hook, ללא wiring), 4 (preflight read-only CLI + predeploy wrapper, טרם Render Pre-Deploy Command). כל השלבים תועדו בפירוט בהודעות ה-commit של הענף עצמו; ראה גם ROADMAP.md's PATCH 3B section.
+
+**אימות production אמיתי (21/07/2026, לא רק tests):** הבעלים יצר את הטבלה `Emergency Stop Flags` ב-Airtable (`app4bcgoX7t0HUVnm`, `tblBba3rkkFcj4uuv`) עם 7 השדות הנדרשים בטיפוסים הנכונים; חמש הרשומות (`EMERGENCY_STOP_ALL`/`WHATSAPP`/`EMAIL`/`AUTOMATION`/`AI`, כולן `Enabled=false`) נזרעו — ישירות דרך Airtable MCP, בהיעדר גישת httpx ישירה לבסיס הפרודקשן מסביבת הפיתוח, ואומתו בחזרה (`list_records_for_table`: 5 רשומות, שמות ייחודיים, ללא "Enabled" key — תואם למוסכמת ה-checkbox-omission ש-`_parse_records()` מטפלת בה). לאחר מכן הבעלים הריץ בעצמו, ישירות על שירות ה-Render החי (commit `3ce949e`, אותו commit שמוזג ל-`main`):
+```
+$ python -m core.emergency_stop_preflight
+... GET https://api.airtable.com/v0/meta/bases/app4bcgoX7t0HUVnm/tables "HTTP/1.1 200 OK"
+... GET .../Emergency%20Stop%20Flags?filterByFormula=TRUE%28%29&maxRecords=100 "HTTP/1.1 200 OK"
+[emergency_stop_preflight] ok — schema valid, all 5 canonical flags present
+preflight_exit=0
+
+$ python -m core.predeploy
+[core.database_migrations] Migration succeeded: 001_action_execution_claims.sql
+[predeploy] database migrations: OK
+... (same two live Airtable calls as above) ...
+[emergency_stop_preflight] ok — schema valid, all 5 canonical flags present
+[predeploy] emergency stop preflight: OK
+[predeploy] all predeploy checks passed
+predeploy_exit=0
+```
+שני הריצות היו כנגד `AIRTABLE_API_KEY`/`AIRTABLE_BASE_ID` אמיתיים של Render — לא mock. `python -m core.predeploy` גם אימת בפועל שהוא לא שינה את סמנטיקת `python -m core.database_migrations` (המיגרציה הקיימת `001_action_execution_claims.sql` רצה והצליחה בדיוק כפי שהייתה מריצה עצמאית).
+
+**המשמעות:** שלושת התנאים שהוגדרו מראש להחלפת Render Pre-Deploy Command (`python -m core.database_migrations` → `python -m core.predeploy`) מולאו: (1) הטבלה נוצרה, (2) חמש הרשומות נזרעו לפי מצב production תצפיתי (אין אף EMERGENCY_STOP_* env var פעיל ב-Render), (3) הרצה ידנית מוצלחת אומתה — כולל דרך אותו commit שרץ בפרודקשן, לא רק מקומית. **ה-Pre-Deploy Command עצמו טרם הוחלף** (זו פעולת Render dashboard בלעדית, מחוץ לריפו) — זו החלטת הבעלים הבאה, לא נעשתה כאן.
+
+**עדיין inert:** כל הקוד הזה עדיין לא מחובר ל-`app.py`/`scheduler.py`/`tma_api.py`/`cost_monitor.py` — `configure_emergency_stop_manager()` עדיין ללא production caller. אימות ה-preflight/predeploy הוא production-verified במובן ש**הקוד עצמו** רץ בהצלחה מול Airtable חי — לא ש-EMERGENCY_STOP_* flags כבר נשלטים בפועל דרך הבסיס הזה (זה Step 5, טרם בוצע).
+
+**Merged:** ✅ `main` דרך PR #425 (commit `3ce949e`). **Verified בפרודקשן:** ✅ — preflight + predeploy הורצו בהצלחה על שירות Render החי, כולל קריאות Airtable אמיתיות (200 OK), exit 0 לשניהם.
