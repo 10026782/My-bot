@@ -197,6 +197,26 @@ export async function emergencyStop(action: string): Promise<void> {
   if (!r.ok) throw new Error(`API ${r.status}`);
 }
 
+/** Thrown by emergencyClear() on HTTP 409 — the flag's operation_id moved
+ * since this screen last loaded (someone/something else changed it).
+ * Distinguished from a generic Error so the caller can refresh + prompt
+ * instead of showing a raw "API 409" message. */
+export class EmergencyClearConflictError extends Error {
+  constructor() {
+    super("emergency-clear-conflict");
+  }
+}
+
+export async function emergencyClear(action: string, expectedOperationId: string): Promise<void> {
+  const r = await fetch(`${BASE}/api/health/emergency/clear`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ action, expected_operation_id: expectedOperationId }),
+  });
+  if (r.status === 409) throw new EmergencyClearConflictError();
+  if (!r.ok) throw new Error(`API ${r.status}`);
+}
+
 export async function fetchGameToday(): Promise<GameToday> {
   const r = await fetch(`${BASE}/api/game/today`, { headers: authHeaders() });
   if (!r.ok) throw new Error(`API ${r.status}`);

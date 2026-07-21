@@ -101,6 +101,11 @@ export interface FinancePulse {
   recent: { ref: string; amount: number; date: string; status: string }[];
 }
 
+export interface EmergencyFlagState {
+  enabled: boolean;
+  operation_id: string | null;
+}
+
 export interface SystemHealth {
   status: "ok" | "degraded" | "emergency";
   services: {
@@ -108,7 +113,7 @@ export interface SystemHealth {
     telegram:  string;
     anthropic: string;
   };
-  emergency_flags:  Record<string, boolean>;
+  emergency_flags:  Record<string, EmergencyFlagState>;
   active_emergency: string[];
   checked_at: string;
 }

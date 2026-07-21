@@ -66,8 +66,8 @@ async function loadDigestData(health: SystemHealth): Promise<DigestData> {
 
   // Derive blocker list from real emergency flags + service status
   const blockers: DigestBlocker[] = [];
-  Object.entries(health.emergency_flags || {}).forEach(([flag, active]) => {
-    if (active) blockers.push({ text: `🚨 ${flag} פעיל`, severity: "high" });
+  Object.entries(health.emergency_flags || {}).forEach(([flag, flagState]) => {
+    if (flagState.enabled) blockers.push({ text: `🚨 ${flag} פעיל`, severity: "high" });
   });
   if (health.services?.anthropic !== "ok") {
     blockers.push({ text: "Claude API לא זמין — AI במצב fallback", severity: "high" });

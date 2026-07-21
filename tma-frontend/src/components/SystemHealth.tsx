@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchHealth, emergencyStop } from "../api";
+import { fetchHealth, emergencyStop, emergencyClear, EmergencyClearConflictError } from "../api";
 import type { SystemHealth as TSystemHealth } from "../types";
 
 interface Props {
@@ -29,6 +29,7 @@ const EMERGENCY_ACTIONS: { action: string; label: string; color: string }[] = [
   { action: "stop_whatsapp",   label: "🛑 עצור WhatsApp",   color: "bg-orange-500 active:bg-orange-600" },
   { action: "stop_email",      label: "🛑 עצור Email",      color: "bg-orange-500 active:bg-orange-600" },
   { action: "stop_automation", label: "🛑 עצור Automation", color: "bg-orange-500 active:bg-orange-600" },
+  { action: "stop_ai",         label: "🛑 עצור AI",         color: "bg-orange-500 active:bg-orange-600" },
 ];
 
 const FLAG_LABELS: Record<string, string> = {
@@ -36,12 +37,25 @@ const FLAG_LABELS: Record<string, string> = {
   EMERGENCY_STOP_WHATSAPP:   "WhatsApp",
   EMERGENCY_STOP_EMAIL:      "Email",
   EMERGENCY_STOP_AUTOMATION: "Automation",
+  EMERGENCY_STOP_AI:         "AI",
+};
+
+// flag name -> clear_* action, mirrors tma_api.py's _EMERGENCY_FLAG_SUFFIXES
+const CLEAR_ACTIONS: Record<string, string> = {
+  EMERGENCY_STOP_ALL:        "clear_all",
+  EMERGENCY_STOP_WHATSAPP:   "clear_whatsapp",
+  EMERGENCY_STOP_EMAIL:      "clear_email",
+  EMERGENCY_STOP_AUTOMATION: "clear_automation",
+  EMERGENCY_STOP_AI:         "clear_ai",
 };
 
 export function SystemHealth({ onBack }: Props) {
   const [state, setState] = useState<State>({ status: "loading" });
   const [acting, setActing] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<string | null>(null);
+  const [clearingFlag, setClearingFlag] = useState<string | null>(null);
+  const [clearConfirm, setClearConfirm] = useState<string | null>(null);
+  const [conflictNotice, setConflictNotice] = useState<string | null>(null);
 
   function load() {
     setState({ status: "loading" });
@@ -62,6 +76,37 @@ export function SystemHealth({ onBack }: Props) {
       alert(`שגיאה: ${String(e)}`);
     } finally {
       setActing(null);
+    }
+  }
+
+  async function doClear(flag: string, operationId: string | null) {
+    setClearConfirm(null);
+    if (!operationId) {
+      // Nothing to condition the clear on — the health payload never gave
+      // us an operation_id for this flag (shouldn't happen for a flag
+      // reported as active, but fail safe rather than send a clear the
+      // backend would reject anyway). Refresh and let the user retry.
+      setConflictNotice("לא נמצא מזהה עדכני לדגל זה — מרענן ומנסה שוב.");
+      load();
+      return;
+    }
+    setClearingFlag(flag);
+    setConflictNotice(null);
+    try {
+      await emergencyClear(CLEAR_ACTIONS[flag], operationId);
+      load();
+    } catch (e) {
+      if (e instanceof EmergencyClearConflictError) {
+        // The flag's operation_id moved since this screen loaded — someone
+        // (or something, e.g. cost_monitor) changed it in between. Never
+        // silently overwrite; refresh and tell the user plainly.
+        setConflictNotice("המצב השתנה מאז טעינת המסך. רענן ונסה שוב.");
+        load();
+      } else {
+        alert(`שגיאה: ${String(e)}`);
+      }
+    } finally {
+      setClearingFlag(null);
     }
   }
 
@@ -120,14 +165,56 @@ export function SystemHealth({ onBack }: Props) {
               ))}
             </div>
 
-            {/* Active Emergency Flags */}
+            {/* Conflict notice — a clear was rejected because the flag's
+                state moved since this screen was loaded (HTTP 409) */}
+            {conflictNotice && (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 text-xs text-yellow-700 font-medium">
+                {conflictNotice}
+              </div>
+            )}
+
+            {/* Active Emergency Flags — each with its own Clear button.
+                Clearing is durable (Airtable-backed) and requires the
+                flag's current operation_id (optimistic concurrency) — a
+                Render restart does NOT clear a durable flag. */}
             {data.active_emergency.length > 0 && (
               <div className="bg-red-50 border border-red-200 rounded-xl p-4">
                 <p className="text-sm font-bold text-red-700 mb-2">🚨 דגלי חירום פעילים</p>
-                {data.active_emergency.map((f) => (
-                  <p key={f} className="text-xs text-red-600 font-medium">{FLAG_LABELS[f] ?? f}</p>
-                ))}
-                <p className="text-xs text-red-400 mt-2">לביטול: הפעל מחדש את השרת ב-Render</p>
+                <div className="flex flex-col gap-2">
+                  {data.active_emergency.map((f) => {
+                    const operationId = data.emergency_flags[f]?.operation_id ?? null;
+                    return (
+                      <div key={f} className="flex items-center justify-between gap-2">
+                        <p className="text-xs text-red-600 font-medium">{FLAG_LABELS[f] ?? f}</p>
+                        {clearConfirm === f ? (
+                          <div className="flex gap-1.5">
+                            <button
+                              onClick={() => doClear(f, operationId)}
+                              disabled={!!clearingFlag}
+                              className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-green-600 active:bg-green-700 disabled:opacity-50"
+                            >
+                              {clearingFlag === f ? "מבטל..." : "אשר ביטול"}
+                            </button>
+                            <button
+                              onClick={() => setClearConfirm(null)}
+                              className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-600 bg-gray-100"
+                            >
+                              חזור
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setClearConfirm(f)}
+                            disabled={!!clearingFlag}
+                            className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-green-600 active:bg-green-700 disabled:opacity-40"
+                          >
+                            ✅ בטל עצירת {FLAG_LABELS[f] ?? f}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
 
