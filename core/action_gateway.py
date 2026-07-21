@@ -23,6 +23,7 @@ from typing import Callable
 
 from core.action_contract_repository import (
     ActionContractLookupError,
+    ActionContractTransitionConflictError,
     ActionContractTransitionError,
     ActionContractTransitionPersistenceError,
 )
@@ -373,6 +374,37 @@ class ExecutionLedger:
             self._store[contract.contract_id] = contract
             self._by_fingerprint[contract.business_action_fingerprint] = contract.contract_id
 
+    def _refresh_stale_contract_cache(self, contract_id: str) -> "ActionContract | None":
+        """BUG-127A: the RAM ledger's cached version/status can drift behind
+        the durable repository (transition()'s own internal read-back always
+        sees fresh truth, but a rejected transition never reports it back to
+        the caller, and update_status() only re-caches on SUCCESS — so a
+        version conflict caused by pure RAM staleness, once it happens,
+        never self-heals on its own). Called only to recover from that
+        specific staleness before a single retry, never as a substitute for
+        the CAS check itself. Returns the refreshed contract, or None if it
+        can't be refreshed (repository unreachable, or the contract is
+        genuinely gone/expired) — callers must treat None as "give up,
+        propagate the original error," never invent a fallback state."""
+        if not self._repository:
+            return None
+        try:
+            fresh = self._repository.get(contract_id)
+        except Exception as exc:
+            logger.warning(
+                "[ActionGateway] BUG-127A stale-cache refresh failed for %s: %s",
+                contract_id, exc,
+            )
+            return None
+        if fresh is None:
+            return None
+        with self._lock:
+            cached = self._store.get(contract_id)
+            if cached is not None:
+                cached.status = fresh.status
+                cached.version = fresh.version
+        return fresh
+
     def save(self, contract: ActionContract) -> bool:
         # Phase 4B-1A: when a repository is configured it is authoritative for
         # NEW proposals. Persist before publishing the contract into RAM so a
@@ -521,6 +553,39 @@ class ExecutionLedger:
                     new_status=status,
                     updates=kwargs,
                 )
+            except ActionContractTransitionConflictError as exc:
+                # BUG-127A: this conflict can mean the RAM ledger's cached
+                # version merely drifted behind durable truth, not necessarily
+                # a real concurrent lifecycle change. Refresh from durable
+                # truth and retry ONCE with the corrected version before
+                # treating this as a genuine conflict. _cas_expected (the
+                # caller's real status requirement — require_status when
+                # given, or the RAM-captured status otherwise) is deliberately
+                # NOT refreshed — only the version is corrected, so a real
+                # status divergence (contract genuinely moved on) still fails
+                # the retry exactly like before; this only recovers from pure
+                # version staleness, never loosens the CAS check itself.
+                refreshed = self._refresh_stale_contract_cache(contract_id)
+                if refreshed is None:
+                    if require_status is not None:
+                        return False
+                    raise
+                try:
+                    persisted = self._repository.transition(
+                        contract_id,
+                        expected_status=_cas_expected,
+                        expected_version=refreshed.version,
+                        new_status=status,
+                        updates=kwargs,
+                    )
+                except ActionContractTransitionError:
+                    if require_status is not None:
+                        return False
+                    raise exc from None  # surface the ORIGINAL conflict, not the retry's
+                except Exception as retry_exc:
+                    raise ActionContractTransitionPersistenceError(
+                        f"repository lifecycle transition raised on retry: {type(retry_exc).__name__}"
+                    ) from retry_exc
             except ActionContractTransitionError:
                 if require_status is not None:
                     return False

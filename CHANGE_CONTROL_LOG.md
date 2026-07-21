@@ -1590,4 +1590,19 @@ predeploy_exit=0
 
 **היקף:** `core/turn_evidence.py::_MUTATION_SUCCESS`/`_classify_response_claim()` בלבד. אין שינוי ב-F52 rendering, בהתנהגות approval/runtime, או הפעלת אכיפה (`FEATURE_EVIDENCE_FINALIZER` נשאר `off`). `_FAILURE`/`_PENDING`/`_UNKNOWN` לא נבדקו — מחוץ לסקופ, לא הונח שהם תקינים.
 
-**Merged:** לא עדיין (branch `claude/bug125-rp5-shadow-checkmark-false-success`) | **Verified בפרודקשן:** לא רלוונטי עדיין — טרם מוזג/נבדק ב-staging. הרצה חוזרת של RP5 matrix תא 1.3 נדרשת לאימות (`no_evidence`/`neutral`/`mismatch=false`).
+**Merged:** ✅ `main` דרך PR #428 (commit `0047804`) | **Verified בפרודקשן:** לא עדיין. הרצה חוזרת של RP5 matrix תא 1.3 נדרשת לאימות (`no_evidence`/`neutral`/`mismatch=false`).
+
+### C158 — BUG-127A: Ingress Context Gate — primary+fallback נכשלים יחד על RAM cache תקוע (21/07/2026)
+קבצים: `core/action_gateway.py`, `test_bug127a_stale_lifecycle_version_retry.py` (חדש) | קשור: BUG-127A (`BUG_AUDIT_LOG.md`), רשום גם BUG-127B/BUG-127C (docs-only, לא תוקנו כאן)
+
+**רקע (safety-critical, סומן `[CRITICAL]` בלוג המקורי):** כל הודעה נכנסת קוראת ל-`ExecutionLedger.mark_context_interrupted()`, ובכשל ל-fallback `mark_context_integrity_unknown()`. שניהם נכשלו יחד, פעמיים ברצף, על אותם 4 contracts חיים: `ActionContractTransitionConflictError: stale lifecycle state: expected=pending/v1 actual=pending/v2` — ואז `[CRITICAL] ... fallback ALSO failed ... pending contracts may be silently stale-approvable`.
+
+**שורש (אומת בקוד):** `ExecutionLedger.update_status()` קורא `expected_version` מה-RAM cache **לפני** הקריאה ל-`repository.transition()`, ש-**כן** שולף מחדש מ-Airtable אך בכשל רק `raise`ת — לא מחזירה את ה-truth העדכני לקורא. `update_status()` מרענן את ה-cache **רק בהצלחה** — כך שסטייה חד-פעמית בין RAM ל-durable נשארת **לצמיתות**, וכל קריאה עתידית לאותו contract נכשלת זהה. שני מנגנוני הבטיחות (primary+fallback) קוראים מ-**אותו** RAM cache תקוע — לכן נכשלים יחד, לא כ-fallback אמיתי לסוג-הכשל הזה.
+
+**תוקן:** `_refresh_stale_contract_cache()` חדש — בכשל `ActionContractTransitionConflictError`, שולף truth עדכני (`repository.get()`), מעדכן את ה-RAM cache, ומנסה **פעם אחת** מחדש עם ה-version המתוקן. `expected_status`/`require_status` (דרישת הקורא האמיתית) **לא** משתנים — סטייה אמיתית של status עדיין נכשלת/מחזירה False כראוי (fail-closed נשמר).
+
+**בדיקות:** `test_bug127a_stale_lifecycle_version_retry.py` (10/10) — self-healing על סטיית-version טהורה, fail-closed נשמר על סטיית-status אמיתית, ה-fallback מקבל את אותו תיקון, ריענון-שנכשל לא לולאה אינסופית, ledger ללא repository לא מושפע. `test_action_gateway.py` (43/43), `test_pr0c_action_contract_repository.py` (14/14), `test_pr0_ingress_context_gate.py` (33/33) — ללא רגרסיה. Full `test_*.py` sweep + `compileall -q .` + `smoke_tests.py` — נקיים.
+
+**היקף:** `core/action_gateway.py::ExecutionLedger.update_status()` בלבד. אין נגיעה ב-`action_contract_repository.py::transition()` עצמו, ב-CAS semantics של `require_status`, או בלוגיקת approve()/reject()/execute() מעבר לתועלת המשותפת. BUG-127B/BUG-127C (נרשמו יחד, לא תוקנו כאן) נשארים פתוחים במפורש.
+
+**Merged:** לא עדיין (branch `claude/bug127-ingress-gate-stale-version-and-tool-relevance`) | **Verified בפרודקשן:** לא רלוונטי עדיין — טרם מוזג/נבדק ב-staging.
