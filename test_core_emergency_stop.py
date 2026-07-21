@@ -13,6 +13,7 @@ import threading
 import time
 
 from core.emergency_stop import (
+    KNOWN_EMERGENCY_STOP_FLAG_NAMES,
     EmergencyStopManager,
     EmergencyStopStore,
     FlagEvaluation,
@@ -70,6 +71,32 @@ class RaisingStore:
 
     def write(self, *a, **kw) -> WriteResult:
         raise NotImplementedError
+
+
+class WriteQueueStore:
+    """read() serves pre-seeded ReadResults (like QueueStore); write() serves
+    pre-seeded WriteResults and records every call's args for assertion."""
+    def __init__(self, read_results: list[ReadResult] = (), write_results: list[WriteResult] = ()):
+        self._read_results = list(read_results)
+        self._write_results = list(write_results)
+        self.read_call_count = 0
+        self.write_calls: list[tuple] = []
+
+    def read(self) -> ReadResult:
+        self.read_call_count += 1
+        return self._read_results.pop(0)
+
+    def write(self, flag_name, enabled, **kwargs) -> WriteResult:
+        self.write_calls.append((flag_name, enabled, kwargs))
+        return self._write_results.pop(0)
+
+
+class RaisingWriteStore:
+    def read(self) -> ReadResult:
+        return ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": True})
+
+    def write(self, *a, **kw) -> WriteResult:
+        raise RuntimeError("simulated adapter bug — Protocol says this must never happen")
 
 
 class BlockingStore:
@@ -311,6 +338,102 @@ for t in threads:
 chk("8 concurrent evaluate() calls -> exactly 1 store.read() call", store.call_count == 1)
 chk("all 8 threads got a result", len(results) == 8)
 chk("all 8 threads agree on the value", all(r.blocked is True for r in results))
+
+
+# ══════════════════════════════════════════════════════════════════
+# 11. write() — durable pass-through + cache invalidation (Step 3)
+# ══════════════════════════════════════════════════════════════════
+print("\n── manager.write() ───────────────────────")
+
+mgr_no_store = EmergencyStopManager(store=None, clock=FakeClock())
+wr = mgr_no_store.write(
+    "EMERGENCY_STOP_ALL", True,
+    operation_id="op-1", updated_by="owner", source="test", reason="r",
+)
+chk("write() with no store configured -> ok=False (does not raise)", wr.ok is False)
+chk("write() with no store configured -> verified=False", wr.verified is False)
+
+clock = FakeClock()
+store = WriteQueueStore(
+    read_results=[
+        ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": False}),
+        ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": True}),
+    ],
+    write_results=[WriteResult(ok=True, verified=True)],
+)
+mgr = EmergencyStopManager(store=store, clock=clock, ttl_seconds=7.0)
+
+ev_before = mgr.evaluate("EMERGENCY_STOP_ALL")
+chk("pre-write hydrate -> blocked=False, source=durable", ev_before.blocked is False and ev_before.source == "durable")
+chk("pre-write hydrate -> exactly one read", store.read_call_count == 1)
+
+wr = mgr.write(
+    "EMERGENCY_STOP_ALL", True,
+    operation_id="op-2", updated_by="owner", source="test", reason="turn it on",
+)
+chk("write() delegates to store.write() with the right args", store.write_calls == [
+    ("EMERGENCY_STOP_ALL", True, {
+        "operation_id": "op-2", "updated_by": "owner", "source": "test",
+        "reason": "turn it on", "expected_operation_id": None,
+    }),
+])
+chk("write() returns the store's WriteResult unchanged", wr.ok is True and wr.verified is True)
+chk("write() does NOT itself change the cache", store.read_call_count == 1)  # no read triggered yet
+
+# Even though evaluate() was called within TTL a moment ago, write()
+# invalidated the cache -> the NEXT evaluate() must re-read, not reuse the
+# pre-write cached value (which would now be stale/wrong).
+ev_after = mgr.evaluate("EMERGENCY_STOP_ALL")
+chk("evaluate() after write() triggers a fresh read (cache invalidated)", store.read_call_count == 2)
+chk("evaluate() after write() reflects the new durable value", ev_after.blocked is True)
+
+# Same behavior even when the write itself fails — never keep serving a
+# value from before an attempted (possibly-failed) change.
+clock2 = FakeClock()
+store2 = WriteQueueStore(
+    read_results=[
+        ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": False}),
+        ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": False}),
+    ],
+    write_results=[WriteResult(ok=False, verified=False, error="gateway rejected it")],
+)
+mgr2 = EmergencyStopManager(store=store2, clock=clock2, ttl_seconds=7.0)
+mgr2.evaluate("EMERGENCY_STOP_ALL")
+chk("failed write -> cache still invalidated (fail-safe, not fail-open)", True)
+mgr2.write("EMERGENCY_STOP_ALL", True, operation_id="op-3", updated_by="owner", source="test", reason="r")
+mgr2.evaluate("EMERGENCY_STOP_ALL")
+chk("evaluate() after a FAILED write still triggers a fresh read", store2.read_call_count == 2)
+
+# store.write() raising is contained (mirrors store.read() raising -> unavailable)
+mgr_raising = EmergencyStopManager(store=RaisingWriteStore(), clock=FakeClock())
+wr_raising = mgr_raising.write(
+    "EMERGENCY_STOP_ALL", True,
+    operation_id="op-4", updated_by="owner", source="test", reason="r",
+)
+chk("store.write() raising does not propagate out of write()", True)  # got here without an exception
+chk("store.write() raising -> ok=False, verified=False", wr_raising.ok is False and wr_raising.verified is False)
+
+
+# ══════════════════════════════════════════════════════════════════
+# 12. known_flag_names is never allowed to be empty (Step 2.5 hardening)
+# ══════════════════════════════════════════════════════════════════
+print("\n── known_flag_names is never empty ──────")
+
+chk("KNOWN_EMERGENCY_STOP_FLAG_NAMES has the 5 documented flags", KNOWN_EMERGENCY_STOP_FLAG_NAMES == {
+    "EMERGENCY_STOP_ALL", "EMERGENCY_STOP_WHATSAPP", "EMERGENCY_STOP_EMAIL",
+    "EMERGENCY_STOP_AUTOMATION", "EMERGENCY_STOP_AI",
+})
+
+mgr_default = EmergencyStopManager(store=None, clock=FakeClock())
+chk("omitting known_flag_names -> defaults to KNOWN_EMERGENCY_STOP_FLAG_NAMES",
+    mgr_default.status().flags.keys() == KNOWN_EMERGENCY_STOP_FLAG_NAMES)
+
+try:
+    EmergencyStopManager(store=None, clock=FakeClock(), known_flag_names=[])
+    chk("explicit empty known_flag_names -> raises ValueError", False)
+except ValueError as e:
+    chk("explicit empty known_flag_names -> raises ValueError", True)
+    chk("ValueError message points at the canonical default", "KNOWN_EMERGENCY_STOP_FLAG_NAMES" in str(e))
 
 
 print(f"\n{'='*40}")
