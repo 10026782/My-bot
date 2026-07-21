@@ -53,10 +53,40 @@ def _check_emergency() -> tuple[bool, str]:
         return True, f"flag check error: {e}"
 
 
+def _check_emergency_stop_manager() -> tuple[bool, str]:
+    """
+    Reflects the PATCH 3B Step 5 durable-store-backed EmergencyStopManager
+    (core/emergency_stop_bootstrap.py) — separate from, and does not
+    replace, _check_emergency()'s legacy is_enabled("EMERGENCY_STOP_ALL")
+    check above, which is unchanged and still the one that actually governs
+    production behavior (dual-path — see Step 5 boundaries). This check is
+    observability only: it must show degraded/invalid accurately even
+    though nothing is gated by the manager yet.
+    """
+    try:
+        from feature_flags import get_emergency_stop_status
+        result = get_emergency_stop_status()
+        if not result.configured:
+            return False, "not configured"
+
+        store_status = result.manager_status.store_status if result.manager_status else None
+        if store_status == "ok":
+            n = len(result.manager_status.flags)
+            return True, f"durable, {n} flags"
+        if store_status == "unavailable":
+            return False, "unavailable — stale-cache/unknown fail-closed"
+        if store_status == "invalid":
+            return False, "invalid schema/data"
+        return False, "unknown (never hydrated)"
+    except Exception as e:
+        return False, f"error: {type(e).__name__}"
+
+
 def get_health_status(scheduler=None, memory=None) -> dict:
     at_ok, at_detail       = _check_airtable()
     sched_ok, sched_detail = _check_scheduler(scheduler)
     emerg_ok, emerg_detail = _check_emergency()
+    es_mgr_ok, es_mgr_detail = _check_emergency_stop_manager()
 
     checks = {
         "app":             True,
@@ -68,6 +98,8 @@ def get_health_status(scheduler=None, memory=None) -> dict:
         "scheduler_detail": sched_detail,
         "emergency_clear": emerg_ok,
         "emergency_detail": emerg_detail,
+        "emergency_stop_manager_ok":     es_mgr_ok,
+        "emergency_stop_manager_detail": es_mgr_detail,
         "memory_entries":  len(memory._store) if memory and hasattr(memory, "_store") else 0,
     }
 
@@ -76,6 +108,7 @@ def get_health_status(scheduler=None, memory=None) -> dict:
         checks["telegram_token"],
         checks["airtable_live"],
         checks["emergency_clear"],
+        checks["emergency_stop_manager_ok"],
     ]
     status = "ok" if all(critical) else "degraded"
 
@@ -85,5 +118,7 @@ def get_health_status(scheduler=None, memory=None) -> dict:
         logger.warning(f"[Health] Scheduler: {sched_detail}")
     if not emerg_ok:
         logger.warning(f"[Health] Emergency stop active: {emerg_detail}")
+    if not es_mgr_ok:
+        logger.warning(f"[Health] EmergencyStopManager degraded: {es_mgr_detail}")
 
     return {"status": status, "checks": checks}

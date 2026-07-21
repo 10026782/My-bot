@@ -637,19 +637,67 @@ try:
 except Exception as _e:
     logger.warning(f"[C22] weekly summary registration failed: {_e}")
 
-_scheduler_thread = next(
-    (t for t in threading.enumerate() if t.name == "scheduler" and t.is_alive()),
-    None,
-)
-if _scheduler_thread:
-    logger.info("[Scheduler] Already running — skipping init")
-    _scheduler = _scheduler_thread
-else:
-    try:
-        _scheduler = start_scheduler()
-        logger.info("Scheduler OK")
-    except Exception as e:
-        logger.error(f"Scheduler failed: {e}")
+_scheduler = None  # set inside run_startup_sequence(); globals().get("_scheduler") used by /health
+
+
+def run_startup_sequence() -> None:
+    """
+    The explicit runtime startup entrypoint for this service — called once
+    by gunicorn.conf.py's post_worker_init hook in production (Start
+    Command stays `gunicorn app:app`; gunicorn auto-loads
+    ./gunicorn.conf.py with no other change needed) and by
+    `if __name__ == "__main__":` below for local/dev `python3 app.py` runs.
+
+    Deliberately NOT invoked as a side effect of merely importing this
+    module — `import app` (a test, a tool, or gunicorn loading the module
+    to grab the WSGI `app` object) must never reach Airtable or start the
+    scheduler on its own. Everything above this function definition (Flask
+    routes, Telegram command handlers, tool/registry wiring) is plain
+    Python object/decorator registration — no network I/O — and stays at
+    module level exactly as before; only the two things that actually do
+    I/O or spawn a background thread (the Emergency Stop bootstrap and the
+    scheduler) live here now.
+
+    Order is load-bearing (PATCH 3B Step 5): bootstrap_emergency_stop()
+    (construct store + manager, configure, hydrate) always runs to
+    completion — successfully or with a documented degraded outcome
+    (Airtable unavailable / durable schema-data invalid, both reported via
+    the returned result, never raised) — before start_scheduler() runs.
+    An UNEXPECTED bootstrap failure (a construction/import/configure bug —
+    not one of the two documented outcomes above) is deliberately NOT
+    caught here or inside bootstrap_emergency_stop() itself: it propagates
+    out of this function, so a real programming/configuration bug is
+    exposed loudly and the scheduler is never started. See
+    core/emergency_stop_bootstrap.py's module docstring for the exact
+    documented-vs-unexpected distinction.
+
+    Still dual-path after this step: nothing in production — no
+    is_enabled()/set_flag() caller, no tma_api/cost_monitor/scheduler
+    caller — reads from the manager bootstrap_emergency_stop() configures
+    here. Cutover is a separate, later, atomic step.
+    """
+    from core.emergency_stop_bootstrap import bootstrap_emergency_stop
+    result = bootstrap_emergency_stop()
+    logger.info(
+        "[EmergencyStop] bootstrap: configured=%s store_status=%s flags_loaded=%d",
+        result.configured, result.store_status, result.flags_loaded,
+    )
+
+    global _scheduler
+    _scheduler_thread = next(
+        (t for t in threading.enumerate() if t.name == "scheduler" and t.is_alive()),
+        None,
+    )
+    if _scheduler_thread:
+        logger.info("[Scheduler] Already running — skipping init")
+        _scheduler = _scheduler_thread
+    else:
+        try:
+            _scheduler = start_scheduler()
+            logger.info("Scheduler OK")
+        except Exception as e:
+            logger.error(f"Scheduler failed: {e}")
+
 
 if os.environ.get("SETUP_WEBHOOK") == "1":
     try:
@@ -4754,5 +4802,6 @@ def voice_step():
 
 
 if __name__ == "__main__":
+    run_startup_sequence()
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
