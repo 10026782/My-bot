@@ -16,10 +16,14 @@ The field has since been corrected manually in Airtable (BOM -> plain
 it guards against the schema regressing again:
   1. schema_cache.json has an AI_Usage_Daily entry at all (empty/missing
      is what let this slip through unnoticed).
-  2. The known field names are exactly the 9 fields
-     core/cost_watchdog.py::_write_airtable_row() writes (5 original +
-     4 new schema-only cost placeholders added in this PR), and none of
-     them contain a BOM or other non-printable character.
+  2. The known field names are exactly the 5 fields
+     core/cost_watchdog.py::_write_airtable_row() actually writes today,
+     and none of them contain a BOM or other non-printable character.
+     (A cost-breakdown extension — total_cost_usd/openai_text_cost_usd/
+     openai_stt_cost_usd/unpriced_events — was considered for this PR but
+     deferred: those fields aren't confirmed to exist in the live Airtable
+     table yet, and this test only asserts what's actually verified, not
+     what a later PR plans to add.)
   3. normalize_airtable_fields() + validate_airtable_fields() round-trip
      that exact field set with zero fields dropped (offline — no network).
 """
@@ -47,7 +51,6 @@ def chk(desc: str, cond: bool) -> None:
 TABLE = "AI_Usage_Daily"
 EXPECTED_FIELDS = {
     "Date", "claude_sonnet", "claude_haiku", "whatsapp_conversation", "total_units",
-    "total_cost_usd", "openai_text_cost_usd", "openai_stt_cost_usd", "unpriced_events",
 }
 
 with open("schema_cache.json", "r", encoding="utf-8") as f:
@@ -57,7 +60,7 @@ print("\n── AI_Usage_Daily schema regression ──────────�
 
 known = set(cache.get("tables", {}).get(TABLE, []))
 chk("schema_cache.json has an AI_Usage_Daily entry", bool(known))
-chk("known fields == expected projection fields (9 total)", known == EXPECTED_FIELDS)
+chk("known fields == expected projection fields (5 total)", known == EXPECTED_FIELDS)
 
 for field in known:
     chk(f"field name {field!r} has no BOM/control chars", field.isprintable() and not field.startswith("\ufeff"))
@@ -69,10 +72,6 @@ write_payload = {
     "claude_haiku": 200,
     "whatsapp_conversation": 0,
     "total_units": 300,
-    "total_cost_usd": 0,
-    "openai_text_cost_usd": 0,
-    "openai_stt_cost_usd": 0,
-    "unpriced_events": 0,
 }
 normalized = normalize_airtable_fields(TABLE, write_payload)
 clean, errors = validate_airtable_fields(TABLE, normalized)

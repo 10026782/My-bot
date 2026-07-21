@@ -183,11 +183,7 @@
       "claude_sonnet",
       "claude_haiku",
       "whatsapp_conversation",
-      "total_units",
-      "total_cost_usd",
-      "openai_text_cost_usd",
-      "openai_stt_cost_usd",
-      "unpriced_events"
+      "total_units"
     ]
   },
   "fetched_at": "seed-from-schema-py",

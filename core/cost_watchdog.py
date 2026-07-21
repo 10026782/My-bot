@@ -9,17 +9,39 @@
 # flag: COST_WATCHDOG_ENABLED (default on — "Pipes first").
 #
 # Cost Telemetry Reliability, PR1 (write-truthfulness + upsert only — no
-# usage_events, no trigger changes; those are separate PRs in the same
-# series): _write_airtable_row() now upserts by Date (find-or-create,
-# was create-only — a retry used to silently duplicate the day's row) and
-# only logs success when Airtable actually confirms the write. Previously
-# it logged "שורה יומית נכתבה ל-Airtable" unconditionally right after
-# calling airtable_create(), which returns None (not an exception) on a
-# non-2xx response — this table hit a real 422 UNKNOWN_FIELD_NAME for
-# weeks while every log line still claimed success (see _write_airtable_row's
-# own docstring). total_cost_usd/openai_text_cost_usd/openai_stt_cost_usd/
-# unpriced_events are schema-only placeholders here (always 0) — populated
-# once durable usage_events lands in a later PR in this series.
+# usage_events, no trigger changes, no new Airtable fields; those are
+# separate PRs in the same series): _write_airtable_row() now upserts by
+# Date (find-or-create, was create-only — a retry used to silently
+# duplicate the day's row) and only logs success when Airtable actually
+# confirms the write. Previously it logged "שורה יומית נכתבה ל-Airtable"
+# unconditionally right after calling airtable_create(), which returns
+# None (not an exception) on a non-2xx response — this table hit a real
+# 422 UNKNOWN_FIELD_NAME for weeks while every log line still claimed
+# success (see _write_airtable_row's own docstring).
+#
+# This PR writes ONLY the 5 fields that exist in the live table today
+# (Date, claude_sonnet, claude_haiku, whatsapp_conversation, total_units).
+# A cost-breakdown schema extension (total_cost_usd, openai_text_cost_usd,
+# openai_stt_cost_usd, unpriced_events) was considered for this PR but
+# deferred to PR2 in this series — schema_cache.json is a local guess
+# about what fields validate_airtable_fields() will accept, NOT proof the
+# live Airtable table actually has them; writing values for fields nobody
+# has confirmed exist would risk the exact silent-422 failure mode this PR
+# exists to fix, just for new fields instead of "Date". PR2 will verify
+# against the live Airtable Meta API before adding anything.
+#
+# The upsert (at_get_by_field lookup, then create-or-patch) is BEST-EFFORT
+# SEQUENTIAL, not atomic — there is no compare-and-set here. Two concurrent
+# daily_watchdog() runs for the same Date could both see "no existing row"
+# and both call airtable_create(), producing a duplicate (a lookup→create
+# TOCTOU window). This is sufficient today because the scheduler runs
+# in-process with WEB_CONCURRENCY=1 (one call to daily_watchdog() at a
+# time), so it prevents the duplicate this PR actually set out to fix
+# (sequential retries/double-fires) — it does NOT guarantee correctness
+# under true concurrent writers. A real fix would need either an Airtable
+# unique-field constraint (Airtable has none) or a compare-and-set primitive
+# equivalent to core/emergency_stop.py's EmergencyStopStore.write()
+# expected_operation_id pattern — out of scope here.
 
 from __future__ import annotations
 
@@ -145,13 +167,20 @@ def _write_airtable_row(date_str: str, counts: dict[str, int]) -> bool:
          instead of overwriting it — "create" was doing an implicit,
          undocumented "maybe duplicate" rather than a real upsert.
 
-    total_cost_usd / openai_text_cost_usd / openai_stt_cost_usd /
-    unpriced_events are schema-only placeholders in this PR (always 0) —
-    populated for real once durable per-provider usage_events lands (see
-    the cost-telemetry PR series; this table stays a projection, never a
-    source of truth). claude_sonnet/claude_haiku/whatsapp_conversation/
-    total_units keep their current (jsonl-derived) values unchanged —
-    that data source isn't touched by this change.
+    Writes ONLY the 5 fields that exist in the live table today. A cost
+    breakdown (total_cost_usd/openai_text_cost_usd/openai_stt_cost_usd/
+    unpriced_events) is intentionally NOT written here — those fields
+    aren't confirmed to exist in the live Airtable table yet, and writing
+    0 for a value nobody is actually measuring would itself be a
+    non-truthful placeholder (indistinguishable from "measured, zero
+    usage"). schema_cache.json making up a field name doesn't make it
+    exist in Airtable — see PR2 in the cost-telemetry series, which
+    verifies against the live Meta API before adding anything.
+
+    The upsert (lookup-then-create-or-patch) is best-effort SEQUENTIAL,
+    not atomic — see this module's docstring for the TOCTOU caveat under
+    true concurrency; it's sufficient today only because the scheduler
+    calls this one job at a time (WEB_CONCURRENCY=1).
     """
     try:
         from airtable_schema import Tables
@@ -162,10 +191,6 @@ def _write_airtable_row(date_str: str, counts: dict[str, int]) -> bool:
             "claude_haiku":            counts.get("claude_haiku",           0),
             "whatsapp_conversation":   counts.get("whatsapp_conversation",  0),
             "total_units":             sum(counts.values()),
-            "total_cost_usd":          0,
-            "openai_text_cost_usd":    0,
-            "openai_stt_cost_usd":     0,
-            "unpriced_events":         0,
         }
 
         from tools.airtable_gateway import airtable_create, airtable_patch, at_get_by_field, AirtableLookupError
