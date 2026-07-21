@@ -3157,8 +3157,8 @@ def run_agent(
                     caller     = ctx.memory_key,
                     request_id = getattr(response, "id", None),
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[UsageTelemetry] run_agent recording failed (non-fatal): {e}", exc_info=True)
 
             tool_uses   = [b for b in response.content if b.type == "tool_use"]
             text_blocks = [b for b in response.content if b.type == "text"]

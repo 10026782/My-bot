@@ -16,13 +16,21 @@
 -- new table or new columns.
 --
 -- request_id is the provider's own response/request id when available
--- (Anthropic Message.id "msg_...", OpenAI response id) — UNIQUE so the
--- same underlying API call can never be double-counted even if it's
--- observed from more than one call site (e.g. an Anthropic->OpenAI
--- fallback must record the OpenAI call once, not the Anthropic attempt
--- AND the OpenAI call). NULL is allowed (some SDK responses don't expose
--- one) and is never deduplicated against other NULLs — standard Postgres
--- NULL-not-equal-NULL semantics.
+-- (Anthropic Message.id "msg_...", OpenAI response id). Deduplicated as
+-- UNIQUE(provider, request_id), NOT a bare UNIQUE(request_id) — different
+-- providers mint ids from separate namespaces (Anthropic's "msg_..." and
+-- OpenAI's own id format aren't guaranteed disjoint against every future
+-- provider this table might grow to include), so scoping the uniqueness
+-- constraint to the provider avoids a same-string-different-provider
+-- collision silently swallowing a real, distinct call as a "duplicate".
+-- This is still exactly what prevents the same underlying API call from
+-- being double-counted even if it's observed from more than one call site
+-- (e.g. an Anthropic->OpenAI fallback must record the OpenAI call once,
+-- not the Anthropic attempt AND the OpenAI call — see
+-- core/usage_telemetry.py's module docstring). NULL request_id is allowed
+-- (some SDK responses don't expose one) and is never deduplicated against
+-- other NULLs for the same provider — standard Postgres NULL-not-equal-
+-- NULL semantics, unaffected by the two-column constraint.
 
 CREATE TABLE IF NOT EXISTS usage_events (
     id BIGSERIAL PRIMARY KEY,
@@ -37,9 +45,10 @@ CREATE TABLE IF NOT EXISTS usage_events (
     quantity_out NUMERIC NOT NULL,       -- e.g. output tokens, or STT duration_seconds — always the primary billed quantity
     cost_usd NUMERIC NOT NULL,           -- computed via core.model_pricing at write time
     cost_is_estimate BOOLEAN NOT NULL DEFAULT FALSE,  -- true when pricing hit the documented fail-safe (unrecognized model)
-    request_id TEXT UNIQUE,
+    request_id TEXT,
     meta JSONB,                          -- e.g. {"fallback_from": "anthropic", "fallback_reason": "timeout"}
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE(provider, request_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_usage_events_ts

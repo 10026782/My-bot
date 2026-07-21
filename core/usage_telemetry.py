@@ -27,9 +27,11 @@
 # a phantom row for the failed Anthropic attempt (a failed attempt never
 # produced a usable response — there is nothing real to record).
 #
-# request_id (the provider's own response id) is the de-dup key — see the
-# migration's UNIQUE constraint — as a second line of defense against the
-# same call being recorded twice.
+# (provider, request_id) is the de-dup key — see the migration's
+# UNIQUE(provider, request_id) constraint — as a second line of defense
+# against the same call being recorded twice. Scoped to provider, not a
+# bare request_id, since different providers' id namespaces aren't
+# guaranteed disjoint.
 #
 # Fail-soft by design: PostgreSQL being unavailable must never break the
 # caller's actual request (sending a Telegram reply, transcribing a voice
@@ -111,7 +113,7 @@ def record_usage(
                      quantity_in, quantity_out, cost_usd, cost_is_estimate,
                      request_id, meta)
                 VALUES (NOW(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (request_id) DO NOTHING;
+                ON CONFLICT (provider, request_id) DO NOTHING;
                 """,
                 (
                     provider, service, model, source, caller or None, unit,

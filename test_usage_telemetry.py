@@ -26,8 +26,10 @@ tests core/atomic_claim_repository.py against core.database.get_conn):
        - status="ok": the query actually ran; an empty result here really
          does mean zero usage in the window.
      And that a query failure also rolls back before releasing.
-  5. request_id dedup is expressed via ON CONFLICT (request_id) DO
-     NOTHING in the INSERT sent to the database.
+  5. (provider, request_id) dedup is expressed via
+     ON CONFLICT (provider, request_id) DO NOTHING in the INSERT sent to
+     the database — scoped to provider, not a bare request_id, since
+     different providers' id namespaces aren't guaranteed disjoint.
   6. record_llm_usage()/record_stt_usage() shortcuts set the right
      provider/service/unit defaults.
 """
@@ -142,7 +144,7 @@ with patch("core.database.get_conn", return_value=fake_conn_write_fail), \
     chk("release_conn() was still called after the failure", mock_release_conn.called)
 
 
-print("\n── record_usage() writes with ON CONFLICT(request_id) DO NOTHING ────────────────")
+print("\n── record_usage() writes with ON CONFLICT(provider, request_id) DO NOTHING ────────────────")
 
 fake_cursor2 = MagicMock()
 fake_cursor2.__enter__ = MagicMock(return_value=fake_cursor2)
@@ -161,7 +163,8 @@ with patch("core.database.get_conn", return_value=fake_conn2), \
     sql_sent = fake_cursor2.execute.call_args[0][0]
     params_sent = fake_cursor2.execute.call_args[0][1]
     chk("INSERT targets usage_events", "INSERT INTO usage_events" in sql_sent)
-    chk("dedup uses ON CONFLICT (request_id) DO NOTHING", "ON CONFLICT (request_id) DO NOTHING" in sql_sent)
+    chk("dedup uses ON CONFLICT (provider, request_id) DO NOTHING",
+        "ON CONFLICT (provider, request_id) DO NOTHING" in sql_sent)
     chk("request_id is passed through to the write", params_sent[10] == "msg_01ABC")
     chk("provider defaults to anthropic for record_llm_usage()", params_sent[0] == "anthropic")
     chk("service is 'text' for an LLM call", params_sent[1] == "text")
