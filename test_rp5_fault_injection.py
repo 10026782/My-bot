@@ -18,6 +18,13 @@ from core.turn_evidence import TurnEvidenceSummary
 from identity import Identity
 from tools.dispatcher import dispatch_tool
 
+import emergency_stop_test_support  # noqa: E402
+# PATCH 3B Step 6 (post-dates this file): is_enabled() for EMERGENCY_STOP_*
+# fails closed to blocked=True when no EmergencyStopManager is configured —
+# this suite predates that cutover and doesn't test emergency-stop behavior,
+# so it needs the same "all clear" fixture used by other pre-existing tests.
+emergency_stop_test_support.configure_all_clear_emergency_stop()
+
 
 _OWNER = Identity(
     user_id="eliyahu", role="owner", tenant_id="boss_hq",
