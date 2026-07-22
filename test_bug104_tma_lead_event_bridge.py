@@ -210,9 +210,12 @@ _orig_validate = tma_api._validate_initdata
 _orig_resolve = tma_api.resolve_identity
 _orig_at_patch = tma_api._at_patch
 _orig_at_get_record = tma_api._at_get_record
+_orig_gw_create = tma_api._gw_create
+_orig_at_list = tma_api._at_list
 
 _patch_should_fail = {"value": False}
 _events_created = []
+_interaction_log_writes = []
 
 
 def _fake_at_patch(table, record_id, fields):
@@ -223,6 +226,9 @@ def _counting_create(table, fields, source="unknown"):
     if table == Tables.LEAD_EVENTS:
         _events_created.append({"fields": fields, "source": source})
         return {"id": f"recEV{len(_events_created)}"}
+    if table == Tables.INTERACTION_LOG:
+        _interaction_log_writes.append({"fields": fields, "source": source})
+        return {"id": f"recIL{len(_interaction_log_writes)}"}
     return {"id": "recOTHER", "fields": fields}
 
 
@@ -235,37 +241,67 @@ def _domain_records(table, filter_formula=""):
 tma_api._validate_initdata = lambda s: {"id": "1"}
 tma_api.resolve_identity = lambda ch, tid: _FakeIdentity(Role.OWNER)
 tma_api._at_patch = _fake_at_patch
+# BUG-133: tma_api.py binds `_gw_create` to the real airtable_create at
+# import time (`from tools.airtable_gateway import airtable_create as
+# _gw_create`) — reassigning airtable_gateway.airtable_create (below) does
+# NOT affect that already-bound name, so tma_api._audit()'s Interaction Log
+# write (_at_post -> _gw_create) must be mocked here directly, same as
+# _at_patch above. Without this, every "success" case below made a REAL,
+# silent HTTP POST to production Airtable's Interaction Log table — see
+# BUG_AUDIT_LOG.md BUG-133 for the incident (310 real records over 6 days).
+tma_api._gw_create = _counting_create
+# GET /api/leads/<id> unconditionally builds an Interaction Log timeline via
+# tma_api._at_list() (a plain module-level function, no gateway indirection
+# to intercept) — same unmocked-real-call class as _gw_create above, but
+# read-only (returns [] on any error, see tma_api.py's own docstring), so it
+# never wrote data; still worth closing so the test makes zero real network
+# calls, matching BUG-128's precedent.
+tma_api._at_list = lambda *a, **kw: []
 airtable_gateway.airtable_create = _counting_create
 airtable_tools.airtable_get_records = _domain_records
 
 try:
     # -- owner patch success -> exactly one event --
     _events_created.clear()
+    _interaction_log_writes.clear()
     _patch_should_fail["value"] = False
     r = _client.patch("/api/leads/recLEAD001", json={"status": "active"}, headers=_HDR)
     check("owner patch success -> 200", r.status_code == 200)
     check("owner patch success -> exactly one Lead Event created", len(_events_created) == 1)
+    # BUG-133 regression: _audit()'s Interaction Log write must go through
+    # the mock (tma_api._gw_create), never a real Airtable call.
+    check("owner patch success -> audit write captured by mock, not real Airtable",
+          len(_interaction_log_writes) == 1)
 
     # -- owner patch failure -> zero events --
     _events_created.clear()
+    _interaction_log_writes.clear()
     _patch_should_fail["value"] = True
     r = _client.patch("/api/leads/recLEAD001", json={"status": "active"}, headers=_HDR)
     check("owner patch failure -> 500", r.status_code == 500)
     check("owner patch failure -> zero Lead Events created", len(_events_created) == 0)
+    check("owner patch failure -> zero audit writes (no PATCH -> no _audit call)",
+          len(_interaction_log_writes) == 0)
     _patch_should_fail["value"] = False
 
     # -- owner outcome success -> exactly one event --
     _events_created.clear()
+    _interaction_log_writes.clear()
     r = _client.post("/api/leads/recLEAD001/outcome", json={"outcome": "converted"}, headers=_HDR)
     check("owner outcome success -> 200", r.status_code == 200)
     check("owner outcome success -> exactly one Lead Event created", len(_events_created) == 1)
+    check("owner outcome success -> audit write captured by mock, not real Airtable",
+          len(_interaction_log_writes) == 1)
 
     # -- owner outcome failure -> zero events --
     _events_created.clear()
+    _interaction_log_writes.clear()
     _patch_should_fail["value"] = True
     r = _client.post("/api/leads/recLEAD001/outcome", json={"outcome": "converted"}, headers=_HDR)
     check("owner outcome failure -> 500", r.status_code == 500)
     check("owner outcome failure -> zero Lead Events created", len(_events_created) == 0)
+    check("owner outcome failure -> zero audit writes (no PATCH -> no _audit call)",
+          len(_interaction_log_writes) == 0)
     _patch_should_fail["value"] = False
 
     # -- GET lead -> no event wiring on the read path --
@@ -288,6 +324,8 @@ finally:
     tma_api.resolve_identity = _orig_resolve
     tma_api._at_patch = _orig_at_patch
     tma_api._at_get_record = _orig_at_get_record
+    tma_api._gw_create = _orig_gw_create
+    tma_api._at_list = _orig_at_list
     airtable_gateway.airtable_create = _orig_create
     airtable_tools.airtable_get_records = _orig_get_records
 
