@@ -3,36 +3,48 @@
 render_log_export.py — read-only Render log exporter + local search tool.
 
 Design source: docs/architecture/turn-coordinator/PHASE_2_SHADOW_PLANNING_GATE.md §6.
+Automated tests: test_render_log_export.py (run: python3 test_render_log_export.py).
 
-Usage:
+Canonical syntax — global flags always go AFTER the subcommand name:
     python scripts/render_log_export.py check-env
-    python scripts/render_log_export.py export --service-id srv-xxxxxxxx
-    python scripts/render_log_export.py export --service-id srv-xxxxxxxx --dry-run
+    python scripts/render_log_export.py export --owner-id <id> --service-id srv-xxxxxxxx --marker "BUG-130" --dry-run
+    python scripts/render_log_export.py export --owner-id <id> --service-id srv-xxxxxxxx --marker "BUG-130"
     python scripts/render_log_export.py search "BUG-130" --since 2026-07-01
     python scripts/render_log_export.py search "ERROR" --field message
 
-Never reads, prints, logs, or writes the API key value anywhere — only
-whether the configured environment variable is set. All network calls are
-GET-only against Render's logs endpoint; nothing in this script can deploy,
-restart, or write to the Render service, and nothing here touches Airtable
-or the live bot process.
+There is exactly one supported order. `--export-dir`/`--api-key-env` are
+defined only on each subcommand's own parser, not on the top-level parser,
+specifically to avoid a real argparse gotcha: when the same option is
+defined on both a parent parser and reused via `parents=[...]` on a
+subparser, the subparser's own default silently overwrites a value already
+set before the subcommand name, even if the user never touched that flag
+at the subcommand level. Putting `--export-dir CUSTOM export ...` before
+`export` would silently revert to the default — confirmed via a standalone
+repro before this file was written this way, not assumed.
 
-UNVERIFIED AGAINST THE LIVE RENDER API: research for the Planning Gate above
-hit HTTP 403 on every attempt to fetch Render's current API docs from that
-session. The request parameters and response-shape assumptions below
-(_fetch_log_page, _parse_log_response) are best-available knowledge, not
-confirmed live. Run `export --dry-run` first; if a real `export` run fails
-or returns an unexpected shape, the error message names the exact function
-to fix — the rest of the script (checkpointing, JSONL writing, search) does
-not depend on those assumptions being exactly right.
+Never reads, prints, logs, or writes the API key value anywhere — only
+whether the configured environment variable is set (`check-env`). All
+network calls are GET-only against Render's official Logs API
+(GET /v1/logs); nothing in this script can deploy, restart, or write to
+the Render service, and nothing here touches Airtable, app.py, or the live
+bot process.
+
+Collection is narrow by default: `export` requires an approved server-side
+marker (`--marker`, matched against each fetched entry's message text
+before anything is written — see `--allow-full-export` to override) and
+defaults to `type=app` (application logs only, not build/deploy logs).
+Only a fixed, minimal set of fields is persisted per entry (see
+_SHADOW_EVIDENCE_FIELDS) — not the raw Render response verbatim.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -46,12 +58,19 @@ DEFAULT_EXPORT_DIR = Path("render_logs")
 CHECKPOINT_NAME = ".checkpoint.json"
 PAGE_LIMIT = 100
 REQUEST_TIMEOUT_S = 30
+MAX_RETRIES_429 = 5
+BACKOFF_BASE_S = 2
+
+# Only these fields are persisted per log entry — a narrow, fixed allowlist,
+# not the raw Render response. `id` and `timestamp` are load-bearing for
+# idempotency (§ export_logs) and are validated as present before anything
+# is written, not merely copied if present.
+_SHADOW_EVIDENCE_FIELDS = ("id", "timestamp", "message", "type", "resource")
 
 
 # ── credential handling — never touches the value except in the Authorization header ──
 
 def _read_api_key(env_var: str) -> str:
-    import os
     value = os.environ.get(env_var)
     if not value:
         raise SystemExit(
@@ -63,169 +82,257 @@ def _read_api_key(env_var: str) -> str:
 
 
 def check_env(env_var: str) -> None:
-    import os
     print(f"{env_var}: {'SET' if os.environ.get(env_var) else 'NOT SET'}")
 
 
-# ── checkpoint ──
+# ── checkpoint — one per service, durable after every successfully written page ──
 
 @dataclass
 class Checkpoint:
-    last_exported_timestamp: Optional[str]
-    last_run_at: Optional[str]
+    owner_id: Optional[str]
     service_id: Optional[str]
+    last_completed_end_time: Optional[str]
+    last_run_at: Optional[str]
 
     @classmethod
     def load(cls, path: Path) -> "Checkpoint":
         if not path.exists():
-            return cls(last_exported_timestamp=None, last_run_at=None, service_id=None)
+            return cls(owner_id=None, service_id=None, last_completed_end_time=None, last_run_at=None)
         data = json.loads(path.read_text(encoding="utf-8"))
         return cls(
-            last_exported_timestamp=data.get("last_exported_timestamp"),
-            last_run_at=data.get("last_run_at"),
+            owner_id=data.get("owner_id"),
             service_id=data.get("service_id"),
+            last_completed_end_time=data.get("last_completed_end_time"),
+            last_run_at=data.get("last_run_at"),
         )
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({
-            "last_exported_timestamp": self.last_exported_timestamp,
-            "last_run_at": self.last_run_at,
+            "owner_id": self.owner_id,
             "service_id": self.service_id,
+            "last_completed_end_time": self.last_completed_end_time,
+            "last_run_at": self.last_run_at,
         }, indent=2), encoding="utf-8")
 
 
-# ── Render API access — the one place to fix if the live shape differs ──
+class ServiceMismatchError(Exception):
+    pass
+
+
+def _service_export_dir(base_export_dir: Path, service_id: str) -> Path:
+    """One subdirectory (and therefore one checkpoint) per service — the
+    primary defense against cross-service checkpoint/data mixing."""
+    return base_export_dir / service_id
+
+
+def _verify_checkpoint_identity(checkpoint: Checkpoint, owner_id: str, service_id: str) -> None:
+    """Defense-in-depth on top of the subdirectory scheme (e.g. if a
+    checkpoint file were ever copied between service directories by hand)."""
+    if checkpoint.service_id and checkpoint.service_id != service_id:
+        raise ServiceMismatchError(
+            f"Checkpoint belongs to service {checkpoint.service_id!r}, not {service_id!r}. "
+            f"Refusing to continue — this would silently mix two services' cursors/dedup state."
+        )
+    if checkpoint.owner_id and checkpoint.owner_id != owner_id:
+        raise ServiceMismatchError(
+            f"Checkpoint belongs to owner {checkpoint.owner_id!r}, not {owner_id!r}. "
+            f"Refusing to continue."
+        )
+
+
+# ── Render API access (official /v1/logs shape) ──
 
 def _fetch_log_page(
     api_key: str,
+    owner_id: str,
     service_id: str,
     start_time: str,
     end_time: str,
+    log_type: str,
     limit: int = PAGE_LIMIT,
 ) -> dict:
     """
-    Best-available-knowledge request shape for GET {RENDER_API_BASE}/logs.
-    If this returns a non-2xx status or a body that _parse_log_response()
-    can't recognize, verify the current shape at https://api-docs.render.com
-    and update this function and _parse_log_response() together — nothing
-    else in this script assumes anything about Render's response format.
+    GET {RENDER_API_BASE}/logs — official Render Logs API request shape:
+    ownerId and resource are required query parameters. Retries on HTTP 429
+    with Retry-After (falling back to exponential backoff) up to
+    MAX_RETRIES_429 times. Never prints response body content on error —
+    only status code and reason phrase.
     """
-    resp = requests.get(
-        f"{RENDER_API_BASE}/logs",
-        headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
-        params={
-            "resource": service_id,
-            "startTime": start_time,
-            "endTime": end_time,
-            "direction": "forward",
-            "limit": limit,
-        },
-        timeout=REQUEST_TIMEOUT_S,
-    )
-    if not resp.ok:
-        raise RuntimeError(
-            f"Render logs request failed: HTTP {resp.status_code} — {resp.text[:500]}\n"
-            f"If this is 401/403, the API key or its scopes are the likely cause, not this "
-            f"script's logic. If this is 404/400, the endpoint path or query parameter names "
-            f"in _fetch_log_page() likely no longer match Render's current API — verify at "
-            f"https://api-docs.render.com and update this function."
+    params = {
+        "ownerId": owner_id,
+        "resource": service_id,
+        "type": log_type,
+        "startTime": start_time,
+        "endTime": end_time,
+        "limit": limit,
+    }
+    attempt = 0
+    while True:
+        resp = requests.get(
+            f"{RENDER_API_BASE}/logs",
+            headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
+            params=params,
+            timeout=REQUEST_TIMEOUT_S,
         )
-    return resp.json()
+        if resp.status_code == 429 and attempt < MAX_RETRIES_429:
+            retry_after = resp.headers.get("Retry-After")
+            delay = float(retry_after) if retry_after else BACKOFF_BASE_S * (2 ** attempt)
+            attempt += 1
+            time.sleep(delay)
+            continue
+        if not resp.ok:
+            raise RuntimeError(
+                f"Render logs request failed: HTTP {resp.status_code} {resp.reason}. "
+                f"401/403 usually means the API key or its scopes; 400/404 usually means "
+                f"_fetch_log_page()'s request shape no longer matches the official API — "
+                f"verify at https://api-docs.render.com. (Response body intentionally not "
+                f"printed here.)"
+            )
+        return resp.json()
 
 
-def _parse_log_response(payload: dict) -> tuple[list[dict], Optional[str]]:
+def _parse_log_response(payload: dict) -> tuple[list[dict], bool, Optional[str], Optional[str]]:
     """
-    Returns (entries, next_start_time_or_None). Tries a few plausible response
-    shapes defensively (Render's exact field names were not confirmed live —
-    see module docstring) rather than assuming one specific shape silently.
+    Official response shape only — no speculative fallback key names.
+    Returns (logs, has_more, next_start_time, next_end_time).
     """
-    entries = payload.get("logs") or payload.get("data") or (
-        payload if isinstance(payload, list) else None
-    )
-    if entries is None:
+    try:
+        logs = payload["logs"]
+        has_more = payload["hasMore"]
+    except KeyError as exc:
         raise RuntimeError(
-            f"Unrecognized Render log response shape — top-level keys: "
-            f"{list(payload.keys()) if isinstance(payload, dict) else type(payload)}. "
-            f"Update _parse_log_response() to match the actual shape."
-        )
-
-    next_cursor = (
-        payload.get("nextStartTime")
-        or payload.get("nextCursor")
-        or payload.get("cursor")
-    )
-    return entries, next_cursor
+            f"Render log response missing required field {exc}. Top-level keys present: "
+            f"{sorted(payload.keys()) if isinstance(payload, dict) else type(payload)}."
+        ) from exc
+    next_start_time = payload.get("nextStartTime")
+    next_end_time = payload.get("nextEndTime")
+    return logs, has_more, next_start_time, next_end_time
 
 
-def _entry_timestamp(entry: dict) -> Optional[str]:
-    return entry.get("timestamp") or entry.get("time") or entry.get("createdAt")
+def _validate_and_project(entry: dict) -> dict:
+    """
+    Fail closed: an entry without both id and timestamp cannot be
+    deduplicated or checkpointed safely, so it is never written — this
+    raises rather than silently dropping or guessing.
+    """
+    if "id" not in entry or entry["id"] in (None, ""):
+        raise RuntimeError(f"Log entry missing required field 'id': {sorted(entry.keys())}")
+    if "timestamp" not in entry or entry["timestamp"] in (None, ""):
+        raise RuntimeError(f"Log entry missing required field 'timestamp': {sorted(entry.keys())}")
+    return {k: entry.get(k) for k in _SHADOW_EVIDENCE_FIELDS if k in entry}
+
+
+def _matches_marker(entry: dict, marker_re: Optional[re.Pattern]) -> bool:
+    if marker_re is None:
+        return True
+    return bool(marker_re.search(str(entry.get("message", ""))))
+
+
+def _existing_ids(day_file: Path) -> set:
+    if not day_file.exists():
+        return set()
+    ids = set()
+    with day_file.open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                ids.add(json.loads(line).get("id"))
+            except json.JSONDecodeError:
+                continue
+    return ids
 
 
 # ── export ──
 
 def export_logs(
     api_key_env: str,
+    owner_id: str,
     service_id: str,
-    export_dir: Path,
+    base_export_dir: Path,
     dry_run: bool,
     catch_up_days: int,
+    log_type: str,
+    marker: Optional[str],
+    allow_full_export: bool,
 ) -> None:
+    if not marker and not allow_full_export:
+        raise SystemExit(
+            "export requires --marker (a required, approved server-side text marker to "
+            "narrow what gets written) unless you explicitly pass --allow-full-export. "
+            "Exporting an entire service's logs by default is not supported."
+        )
+    marker_re = re.compile(re.escape(marker)) if marker else None
+
+    export_dir = _service_export_dir(base_export_dir, service_id)
     checkpoint_path = export_dir / CHECKPOINT_NAME
     checkpoint = Checkpoint.load(checkpoint_path)
+    _verify_checkpoint_identity(checkpoint, owner_id, service_id)
 
-    now = datetime.now(timezone.utc)
-    if checkpoint.last_exported_timestamp:
-        start_time = checkpoint.last_exported_timestamp
-    else:
-        start_time = (now - timedelta(days=catch_up_days)).isoformat()
-    end_time = now.isoformat()
+    now = datetime.now(timezone.utc).isoformat()
+    outer_start = checkpoint.last_completed_end_time or (
+        datetime.now(timezone.utc) - timedelta(days=catch_up_days)
+    ).isoformat()
+    outer_end = now
 
-    print(f"Export window: {start_time} -> {end_time} (service {service_id})")
+    print(f"Export window: {outer_start} -> {outer_end} (owner {owner_id}, service {service_id}, "
+          f"type={log_type}, marker={marker!r})")
 
     if dry_run:
         print("--dry-run: no network call made, no files written. "
-              "Set --dry-run off (omit the flag) once the window above looks right.")
+              "Omit --dry-run once the window above looks right.")
         return
 
     api_key = _read_api_key(api_key_env)
 
-    written = 0
-    latest_timestamp = checkpoint.last_exported_timestamp
-    cursor_start = start_time
+    cursor_start, cursor_end = outer_start, outer_end
+    total_written = 0
+    total_skipped_marker = 0
+    total_skipped_dup = 0
 
     while True:
-        payload = _fetch_log_page(api_key, service_id, cursor_start, end_time)
-        entries, next_cursor = _parse_log_response(payload)
-        if not entries:
-            break
+        payload = _fetch_log_page(api_key, owner_id, service_id, cursor_start, cursor_end, log_type)
+        logs, has_more, next_start_time, next_end_time = _parse_log_response(payload)
 
         by_day: dict[str, list[dict]] = {}
-        for entry in entries:
-            ts = _entry_timestamp(entry)
-            day = (ts or now.isoformat())[:10]
-            by_day.setdefault(day, []).append(entry)
-            if ts and (latest_timestamp is None or ts > latest_timestamp):
-                latest_timestamp = ts
+        for raw_entry in logs:
+            if not _matches_marker(raw_entry, marker_re):
+                total_skipped_marker += 1
+                continue
+            projected = _validate_and_project(raw_entry)  # raises on missing id/timestamp — fail closed
+            day = projected["timestamp"][:10]
+            by_day.setdefault(day, []).append(projected)
 
+        export_dir.mkdir(parents=True, exist_ok=True)
         for day, day_entries in by_day.items():
-            export_dir.mkdir(parents=True, exist_ok=True)
             day_file = export_dir / f"{day}.jsonl"
-            with day_file.open("a", encoding="utf-8") as f:
-                for entry in day_entries:
-                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-            written += len(day_entries)
+            existing_ids = _existing_ids(day_file)
+            new_entries = [e for e in day_entries if e["id"] not in existing_ids]
+            total_skipped_dup += len(day_entries) - len(new_entries)
+            if new_entries:
+                with day_file.open("a", encoding="utf-8") as f:
+                    for entry in new_entries:
+                        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                        f.flush()
+                total_written += len(new_entries)
 
-        if not next_cursor or len(entries) < PAGE_LIMIT:
+        # Checkpoint durably right after this page's writes are on disk —
+        # before requesting the next page, so a crash before the next
+        # request leaves the checkpoint at a safely-resumable boundary.
+        checkpoint.owner_id = owner_id
+        checkpoint.service_id = service_id
+        checkpoint.last_completed_end_time = next_start_time if has_more else cursor_end
+        checkpoint.last_run_at = datetime.now(timezone.utc).isoformat()
+        checkpoint.save(checkpoint_path)
+
+        if not has_more:
             break
-        cursor_start = next_cursor
+        cursor_start, cursor_end = next_start_time, next_end_time
 
-    checkpoint.last_exported_timestamp = latest_timestamp
-    checkpoint.last_run_at = now.isoformat()
-    checkpoint.service_id = service_id
-    checkpoint.save(checkpoint_path)
-
-    print(f"Wrote {written} log entries. Checkpoint updated: {checkpoint_path}")
+    print(f"Wrote {total_written} entries (skipped {total_skipped_marker} non-matching, "
+          f"{total_skipped_dup} already-present). Checkpoint: {checkpoint_path}")
 
 
 # ── local search over already-exported JSONL — the "identify relevant logs" step ──
@@ -239,7 +346,7 @@ def search_logs(
     max_results: int,
 ) -> Iterator[str]:
     regex = re.compile(pattern)
-    files = sorted(export_dir.glob("*.jsonl"))
+    files = sorted(export_dir.rglob("*.jsonl"))
     count = 0
     for path in files:
         day = path.stem
@@ -258,31 +365,36 @@ def search_logs(
                         continue
                 if regex.search(haystack):
                     count += 1
-                    yield f"{path.name}:{line_no}: {line.rstrip()}"
+                    yield f"{path.relative_to(export_dir)}:{line_no}: {line.rstrip()}"
                     if count >= max_results:
                         return
 
 
-# ── CLI ──
+# ── CLI — canonical syntax: global flags always after the subcommand (see module docstring) ──
 
-def main() -> None:
-    # Shared as a parent parser (not just top-level args) so --export-dir/
-    # --api-key-env work whether they're typed before or after the
-    # subcommand name — argparse only accepts parent-parser args before the
-    # subcommand otherwise, which is a common gotcha.
+def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--export-dir", default=str(DEFAULT_EXPORT_DIR),
                          help=f"default: {DEFAULT_EXPORT_DIR} (must stay out of git — see .gitignore)")
     common.add_argument("--api-key-env", default=DEFAULT_API_KEY_ENV,
                          help=f"name of the environment variable holding the Render API key (default: {DEFAULT_API_KEY_ENV})")
 
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter, parents=[common])
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_check = sub.add_parser("check-env", parents=[common], help="report whether the API key env var is set, without ever printing its value")
+    sub.add_parser("check-env", parents=[common],
+                    help="report whether the API key env var is set, without ever printing its value")
 
     p_export = sub.add_parser("export", parents=[common], help="fetch new log entries since the last checkpoint")
-    p_export.add_argument("--service-id", required=True, help="Render service id, e.g. srv-xxxxxxxx (see Planning Gate §13 item 2 — not documented in this repo)")
+    p_export.add_argument("--owner-id", required=True, help="Render workspace/owner id (official API requires this)")
+    p_export.add_argument("--service-id", required=True, help="Render service id, e.g. srv-xxxxxxxx")
+    p_export.add_argument("--marker", help="required approved text marker to narrow what gets written (see --allow-full-export)")
+    p_export.add_argument("--allow-full-export", action="store_true",
+                           help="override the required-marker default; exports without any text filter")
+    p_export.add_argument("--log-type", default="app", help="Render log type filter (default: app)")
     p_export.add_argument("--dry-run", action="store_true", help="print the export window and exit, no network call")
     p_export.add_argument("--catch-up-days", type=int, default=1, help="window to use on the very first run (no checkpoint yet)")
 
@@ -293,13 +405,20 @@ def main() -> None:
     p_search.add_argument("--field", help="restrict the search to one JSON field instead of the whole raw line")
     p_search.add_argument("--max-results", type=int, default=200)
 
-    args = parser.parse_args()
+    return parser
+
+
+def main() -> None:
+    args = build_parser().parse_args()
     export_dir = Path(args.export_dir)
 
     if args.command == "check-env":
         check_env(args.api_key_env)
     elif args.command == "export":
-        export_logs(args.api_key_env, args.service_id, export_dir, args.dry_run, args.catch_up_days)
+        export_logs(
+            args.api_key_env, args.owner_id, args.service_id, export_dir, args.dry_run,
+            args.catch_up_days, args.log_type, args.marker, args.allow_full_export,
+        )
     elif args.command == "search":
         for line in search_logs(export_dir, args.pattern, args.since, args.until, args.field, args.max_results):
             print(line)

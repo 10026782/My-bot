@@ -186,31 +186,64 @@ For each `TurnSignals` field (frozen contract §1): existing source, current sha
 
 ## 3. Exact Shadow Hook Point(s)
 
+**Revised (this round) — corrected module boundary and hook placement.** The original design below had the Shadow function reach directly into `_pending_approvals`/`bus`/`ActionGateway` and call `detect_intent()`/`classify_ingress()` itself from inside two hook call sites. That put decision-relevant data-gathering *inside* `core/turn_coordinator_shadow.py`, coupling it to `app.py`'s internals exactly the way the frozen contract's own §1 rule forbids the Coordinator from re-deriving signals independently. The corrected design below fixes this: **`core/turn_coordinator_shadow.py` never imports `app.py` and never reads a pending store directly — it only consumes an immutable snapshot `app.py` builds and hands to it.** `app.py` remains the sole place with I/O access to legacy state; the Shadow module is a pure function of that snapshot.
+
 ### 3.1 Why a single hook point does not exist for every turn
 
-The naive assumption — "one line in `run_agent()`, after all signals are computed, before anything irreversible happens" — does not hold, because the **Pending Approval Gate itself can return early**. If `_resolve_pending_reply()` (§1.5a, `app.py:738-764`) matches, or the "2.55" confirm-word intercept (§1.8, `app.py:2725-2905`) resolves against `ActionGateway`, the turn is fully handled and the function returns **before** `route_request()` (§1.6, `app.py:2971`) or `handle_lead_candidate()` (§1.4b, `app.py:3006-3010`) ever run. This means `intent_signal`/`capture_signal` are **not computed at all** on a genuine pending-reply turn under the current code — there is nothing to "hook after" for those signals on that turn.
+The naive assumption — "one line in `run_agent()`, after all signals are computed, before anything irreversible happens" — does not hold, because the **Pending Approval Gate itself can return early**. If `_resolve_pending_reply()` (§1.5a, `app.py:738-764`) matches, or the "2.55" confirm-word intercept (§1.8, `app.py:2725-2905`) resolves against `ActionGateway`, the turn is fully handled and the function returns **before** `route_request()` (§1.6, `app.py:2971`) ever runs. On that turn, `intent_signal`/`capture_signal` genuinely were never computed by the legacy system either — there is nothing to reconstruct, and reconstructing them defensively (the original design's approach) would mean the Shadow module doing its own classification work, which is exactly what it must not do. The corrected design below treats this as two distinct, honestly-different turn shapes, not one hook trying to cover both.
 
-This is a real structural finding, not a design nicety to gloss over: proposing a single fixed hook line would silently produce an incomplete `TurnSignals` (missing `intent_signal`/`capture_signal`) on every pending-reply turn, which is exactly the kind of turn the Shadow system most needs to observe correctly (it's the "Pending Ownership" scenario family, tagged `earliest_enforcement_phase=2→3` in the frozen contract).
+### 3.2 Corrected design: pre-handler Shadow decision, post-hoc legacy observation, correlated by `turn_id`/`decision_id`
 
-### 3.2 Proposed design: two hook call sites, one shared computation function
+**Case A — Pending Approval Gate does not match this turn (the common case).**
+1. `route_request()` returns (`app.py:2971`). At this point `RouteDecision.capture_ic`/`capture_tier` (§1.4a) already holds the capture classification — `classify_ingress()` already ran *inside* `route_request()`, so capture data is available here even though `handle_lead_candidate()` (the function that *writes*, §1.4b) has not run yet. This resolves the ordering concern cleanly: intent and capture *classification* are both available pre-handler; only capture *execution* happens later.
+2. `app.py`, using data it already has at this point (`RouteDecision`, plus a read-only pending-queue peek of the same kind it already performs for `_build_and_log_turn_envelope()` at `app.py:2635` — reused, not duplicated), builds an immutable `ShadowTurnSnapshot` (§3.3) and calls `core/turn_coordinator_shadow.py::compute_shadow_decision(snapshot)`. This call sits **before** `handle_lead_candidate()` (`app.py:3006`) and therefore far before the tool loop (`app.py:3225`) — nothing irreversible has happened yet.
+3. `compute_shadow_decision()` returns the coordinator-side fields of `ShadowDecisionRecord` (§5) — `coordinator_selected_handler`, `coordinator_reply_owner`, `reason_code`, etc. — plus a freshly-minted `decision_id`. Nothing is logged yet; `app.py` holds this in memory for the rest of the turn.
+4. The legacy turn proceeds completely unchanged: `handle_lead_candidate()` runs, the tool loop runs, a reply is sent.
+5. **After** the legacy outcome is known (post-`handle_lead_candidate()`, and/or post-tool-loop for `Handler.APPROVAL` turns), `app.py` calls a second, equally pure function — `core/turn_coordinator_shadow.py::map_legacy_outcome(...)` (§4's table, as pure functions of data `app.py` passns in, not of stores the shadow module reads itself) — to fill in `current_handler`/`current_reply_owner`/`current_active_queue_id`.
+6. `app.py` combines the step-3 result and the step-5 result into one `ShadowDecisionRecord`, sharing the *same* `turn_id` (already exists per §1) and the `decision_id` minted in step 3, and logs it once.
 
-Both call sites invoke the **same** new function, e.g. `core/turn_coordinator_shadow.py::compute_and_log_shadow_decision(identity, text, chat_id, channel, ..., legacy_outcome_hint)` — never inlined logic at either call site, so there is exactly one place that can affect behavior to review, not two.
+**Case B — Pending Approval Gate matches this turn (short-circuit).** `route_request()` never runs, so step 1-3 above cannot happen — there is no `coordinator_selected_handler` to compute, honestly. `app.py` still emits a `ShadowDecisionRecord` (same `turn_id`, a `decision_id` minted at the point of the match), but with `coordinator_selected_handler=None` and a distinct marker (e.g. `reason_code="not_computed_pending_gate_short_circuit"`) rather than a guessed or reconstructed value — the record still captures which legacy store resolved the turn (§4's Pending-Approval-Gate row), just without a Coordinator-side comparison for this turn. This keeps the Pending Ownership scenario family (§9) observable without violating the "don't re-derive signals" rule to force a comparison that isn't legitimately available.
 
-**Hook A — inside the Pending Approval Gate's early-return branch**, immediately before the `return` that ends the turn on a matched pending reply (`app.py`, inside the `app.py:2643-2723` block, at whichever exact line the existing `return`/`reply=...` happens for a match — needs the follow-up `grep` noted in §1.9 to pin exactly, since the Gate has multiple internal branches). At this point `pending_reply_signal` is fully known (the legacy code just computed it as a side effect of resolving), but `intent_signal`/`capture_signal` are not — Hook A's shared function must **explicitly call** `detect_intent()`/`classify_ingress()` itself (defensively, wrapped, read-only) to complete the `TurnSignals` record. This is calling the *existing, canonical* signal sources, not re-deriving a new parser — consistent with "the Coordinator must consume signals," since the Shadow function is a consumer of `detect_intent()`, not a reimplementation of it.
+### 3.3 Module boundary: `core/turn_coordinator_shadow.py` never reaches into legacy state itself
 
-**Hook B — after `handle_lead_candidate()` returns** (`app.py`, immediately after `app.py:3006-3010`, before the tool-use loop begins at `app.py:3225`). At this point `intent_signal` (from `route_request()`, already run at `app.py:2971`) and `capture_signal` (from `handle_lead_candidate()`, just run) are both known. `pending_reply_signal` must be computed here too (the Gate did **not** match on this turn, by construction — we only reach Hook B when Hook A's branch wasn't taken), via a read-only call into the same `_pending_approvals`/`bus`/`ActionGateway` lookups §1.5 already documents, without executing `_resolve_pending_reply()`'s consuming side effect.
+```python
+@dataclass(frozen=True)
+class ShadowTurnSnapshot:
+    """
+    Immutable, built entirely by app.py (or a small adapter app.py calls) —
+    core/turn_coordinator_shadow.py has no import of app.py, event_bus,
+    core/action_gateway, or core/ingress_classifier, and performs no I/O.
+    Every field here is data app.py already has in hand at the pre-handler
+    call point (§3.2 step 2), not fetched by the shadow module itself.
+    """
+    turn_id: str
+    channel: str
+    role: str
+    intent: Optional[str]
+    intent_confidence: float
+    intent_source: str
+    intent_classification: str            # "explicit" | "heuristic"
+    capture_present: bool
+    capture_confidence: float
+    capture_source: str
+    capture_classification: str
+    pending_queue_id: Optional[str]
+    pending_match_basis: Optional[str]
+    pending_confidence: float
+    destructive_signal_present: bool      # from the isolated §8 module — also computed by app.py, passed in, not fetched
+    destructive_signal_confidence: float
+```
 
-Both hooks sit **before** `app.py:3225`'s `enforce()` call — i.e., before the tool loop can dispatch anything, queue an approval, or send a reply. Hook A additionally sits before the Pending Approval Gate's own `return`, so it observes the *same* state the legacy path is about to act on, not a stale snapshot.
+`compute_shadow_decision(snapshot: ShadowTurnSnapshot) -> ...` and `map_legacy_outcome(...)` are both pure functions over their arguments — no global state, no imports outside the standard library and the frozen contract's own type definitions. This is what makes the module trivially safe to unit-test (§9, §5's deterministic-unit-fixtures row) without mocking `app.py`, `event_bus`, or `ActionGateway` at all.
 
-### 3.3 Non-interference proof
+### 3.4 Non-interference proof
 
-`compute_and_log_shadow_decision()` is specified as:
-1. **Pure with respect to legacy state** — every read it performs (`_pending_approvals` dict access, `bus.peek()`/`find_pending_tool_approval()`, `find_live_contracts()`, a fresh `classify_ingress()`/`detect_intent()` call) is a read-only call already proven non-mutating in §1.5/§2's failure-semantics columns (none of `.pop()`, `.request_approval()`, `.propose_action()`, `_pop_pending_approval()`, `_add_pending_approval()` are ever called from this function).
-2. **Return-value-discarding at both call sites** — the function returns `None` (or nothing at all); its only externally observable effect is a `logger.info(...)` call emitting the schema in §5, following the exact pattern `log_turn_envelope()`/`log_ownership_signal()` already establish (§1.2) as a safe, precedented "observe and log, never touch legacy variables" call shape in this exact function (`run_agent()`).
-3. **Wrapped in a blanket `try/except Exception`** at both call sites (matching `_build_and_log_turn_envelope()`'s own `app.py:1500...1607-1618` pattern) — any internal failure degrades to a `degraded/error` reason code in the logged record (§5's `error/degraded reason` field) and never propagates.
-4. **Gated by the flag from §7**, `off` by default — when `off`, the call sites are no-ops (an `if state == "off": return` guard at the top of the function, or the call sites themselves skip the call — either way, zero added work when the flag is off).
+1. **Pure with respect to legacy state** — `core/turn_coordinator_shadow.py` performs no reads of its own (§3.3); every read of legacy state happens in `app.py`, using calls already proven non-mutating in §1.5/§2 (`.peek()`, `find_live_contracts()`, dict access — never `.pop()`, `.request_approval()`, `.propose_action()`, `_pop_pending_approval()`, `_add_pending_approval()`).
+2. **Return-value-discarding, log-only** — `app.py` holds the step-3 result in a local variable and logs the combined record once in step 6; nothing is written back into `RouteDecision`, `_pending_approvals`, `bus`, or `ActionGateway`, mirroring the precedented `log_turn_envelope()`/`log_ownership_signal()` shape (§1.2).
+3. **Wrapped in a blanket `try/except Exception`** at both the pre-handler and post-hoc call sites in `app.py` (matching `_build_and_log_turn_envelope()`'s own pattern, `app.py:1500...1607-1618`) — any internal failure degrades to `error_or_degraded_reason` in the logged record and never propagates.
+4. **Gated by the flag from §7**, `off` by default — when `off`, both call sites are no-ops.
 
-Given (1)-(4): the proposed hooks cannot alter selected legacy handler, reply text, reply count, approval state, `ActionContract` state, tool execution, or Airtable writes — every one of those is owned by code that runs strictly after both hook points and reads none of the Shadow function's state (the Shadow function writes only to its own log line and, in a later phase, its own comparison record — never back into `RouteDecision`, `_pending_approvals`, `bus`, or `ActionGateway`).
+Given (1)-(4): the design cannot alter selected legacy handler, reply text, reply count, approval state, `ActionContract` state, tool execution, or Airtable writes — every one of those is owned by code that runs strictly between step 2 and step 5 above and reads none of the Shadow module's state.
 
 ---
 
@@ -292,42 +325,65 @@ Design notes:
 
 ---
 
-## 6. Render Log Export — Research & Validation (not executed)
+## 6. Render Log Export — Research, Verified API Shape, and Implementation
 
-### 6.1 Credential — cannot be verified from this session
+**Status update (this round):** the exporter is now written, tested, and committed — `scripts/render_log_export.py` + `test_render_log_export.py` (31 committed automated checks, all passing, all mocked — no real Render call has ever been made from any session). This is standalone offline tooling (like `contact_merge.py`), never imported by `app.py`, never run automatically by `scheduler.py`/`worker.py`/CI — building and testing it is not a production-runtime change. **It has still never been run against a real Render service** — no credential and no owner/service id exist in any session that produced this document or the script.
 
-This remote execution environment's full environment-variable name list (127 variables) contains **zero** Render-related names — verified via `env | cut -d= -f1 | grep -i render` (empty) and a full unfiltered listing (attached to the research transcript, not reproduced here since it's not sensitive but is irrelevant to Render). The task states the credential is "already available in the owner's Windows terminal environment" — that is a different machine from this container; nothing about it is discoverable, verifiable, or testable from here, by construction, not by omission.
+### 6.1 Credential — cannot be verified from this session; owner is handling it locally
 
-Also checked (repo-side, for any documented convention): `render.yaml` does not exist; `.env.example` has no `RENDER_API_KEY`-style entry (only `RENDER_APP_URL`, which is the app's own public ngrok/deploy URL, unrelated to the Render *management* API); `scripts/` has no existing log-export tooling; `docs/operations/DEPLOYMENT.md`/`RUNBOOK.md` reference the service only by its public URL (`my-bot-jqz2.onrender.com`), never a service ID (`srv-...`) or an API-key variable name.
+This remote execution environment's full environment-variable name list contains **zero** Render-related names (verified via `env | cut -d= -f1 | grep -i render`, empty). The owner has stated they will supply and manage the actual `RENDER_API_KEY`-equivalent credential locally, in their own VS Code/Claude Code environment — `scripts/render_log_export.py check-env` (§6.4) is the mechanism for them to confirm it's set without ever exposing the value, including to this session. Nothing in the script reads, prints, logs, or persists the credential anywhere except the outbound `Authorization` header on each request.
 
-**This is a hard, repo-unresolvable gap — see §13, item 1.** The safe next step is for the owner to run a names-only check in their own terminal (never printing the value), e.g. in PowerShell: `Get-ChildItem Env: | Where-Object Name -match 'RENDER' | Select-Object Name` — and report back only the variable *name(s)* that exist.
+### 6.2 Service identifier and owner identifier — still open
 
-### 6.2 Service identifier
+Neither is documented anywhere in the repo. The public hostname `my-bot-jqz2.onrender.com` (`docs/operations/DEPLOYMENT.md`, `RUNBOOK.md`) implies a service name, but Render's Logs API requires the service **ID** (`srv-...`) via the `resource` parameter, and — confirmed this round, not assumed — also requires an `ownerId` (workspace-level identifier) as a separate, independently-required parameter. Both values need to come from the Render Dashboard or an authenticated `GET /v1/services` call, once a credential exists to make that call at all. Still an open item — see §13.
 
-Not found documented anywhere in the repo as a `srv-...` id. The public hostname `my-bot-jqz2.onrender.com` (docs/operations/DEPLOYMENT.md, RUNBOOK.md) implies a service name, but Render's API keys logs by service **ID**, not by hostname — the exact `srv-...` value needs to come from the Render Dashboard (Settings → service info) or `GET /v1/services` filtered by name, once a credential exists to make that call at all.
+### 6.3 Supported log-query method — **now verified, official shape**
 
-### 6.3 Supported log-query method — **not verified live this session**
+`WebFetch` from this session was blocked (HTTP 403) on every attempt to reach Render's own API docs during the original planning research; the owner has since confirmed the official request/response shape directly (not re-derived from training knowledge, and not re-verified live by this session — the owner is the authoritative source here, having checked Render's actual current documentation). `scripts/render_log_export.py` implements exactly this, with no speculative fallback logic:
 
-Attempted to confirm Render's current Logs API shape directly against `api-docs.render.com`/`render.com/docs` via `WebFetch` (three URLs tried: the API reference page, the docs root, the log-streams doc page) — **all three returned HTTP 403** (the docs site's bot protection blocks this session's fetcher; not a credential or network-policy issue on this session's side, and not something a code change here can fix).
+**Request** — `GET https://api.render.com/v1/logs`
+```
+Authorization: Bearer <RENDER_API_KEY>
+Accept: application/json
 
-What follows is training-knowledge, **explicitly flagged as unverified against current live documentation** — do not treat as confirmed fact, and re-verify against `https://api-docs.render.com` directly (from a browser or an authenticated tool) before writing any exporter code: Render's REST API (`api.render.com/v1`) has historically exposed a logs-listing endpoint accepting a resource/service-id filter, a time-range window (`startTime`/`endTime`), a `limit`, and time-window-based pagination (fetch a window, use the last record's timestamp as the next window's start) rather than an opaque cursor token — authenticated via an `Authorization: Bearer <API_KEY>` header using a key generated under Account Settings → API Keys. **Exact parameter names must be confirmed live before implementation** — this is the second hard gap for §13.
+Query parameters:
+  ownerId    (required)
+  resource   (required — the service id, e.g. srv-xxxxxxxx)
+  type       (default: "app" — application logs only, not build/deploy logs)
+  startTime  (ISO-8601)
+  endTime    (ISO-8601)
+  limit      (page size)
+```
 
-### 6.4 Proposed exporter design (design only, not implemented, not executed)
+**Response**
+```json
+{
+  "logs": [ { "id": "...", "timestamp": "...", "message": "...", "type": "app", "resource": "srv-..." }, ... ],
+  "hasMore": true,
+  "nextStartTime": "...",
+  "nextEndTime": "..."
+}
+```
 
-- **Trigger**: a new standalone script, e.g. `scripts/render_log_export.py` — explicitly **not** wired into `scheduler.py`/`worker.py` in this planning-only task, and not registered anywhere that would cause it to run automatically.
-- **Read-only**: performs `GET` requests only; never calls any Render mutation endpoint (deploy, restart, env-var-write, etc.) — this satisfies "no runtime or production-service changes."
-- **Cursor**: a time-window cursor (last exported record's `timestamp`, stored in the checkpoint file below), not a byte-offset or line-count cursor — resilient to Render's own log retention/rotation, and naturally supports catch-up (a missed day just means a wider `startTime`→`now` window on the next run, still only downloading records after the last checkpoint).
-- **Storage** (outside Git, per the task's explicit requirement):
-  - Raw exports: `render_logs/YYYY-MM-DD.jsonl` — one JSON object per line, one file per calendar day (UTC), append-only within a day, new file at day rollover.
-  - Checkpoint: `render_logs/.checkpoint.json` — `{"last_exported_timestamp": "...", "last_run_at": "...", "service_id": "..."}`. A single small JSON file, not a database, so "last successful export" survives a crashed mid-export run cleanly (checkpoint is only updated after a batch is durably written).
-  - Derived database (if a future phase wants queryable storage, e.g. SQLite): `render_logs/render_logs.db` — mentioned by the task explicitly; not designed in detail here since no consumer of it exists yet in this planning-only slice.
-- **`.gitignore` additions** (proposed, not yet applied — see §11 for why this one edit is deferred to the implementation PR rather than made now):
-  ```
-  render_logs/
-  ```
-  (A directory-level ignore covers the daily JSONL files, the checkpoint, and the derived `.db` file in one line, consistent with this repo's existing `.gitignore` style of directory-level ignores like `reports/runtime/` and `output/`.)
-- **Cadence**: daily, via a manual or `cron`-triggered run (not `scheduler.py`, which runs inside the live Flask process — an export tool with its own Render API credential should not share a process/lifecycle with the production bot, to keep the credential's blast radius separate from the app's own secrets). Catch-up is a property of the cursor design (§ above), not a separate code path.
-- **Never executed in this task**: no script file has been created; this is a design for the owner to approve, per the task's own explicit constraint ("Do not execute the exporter until the owner approves the command and destination path").
+**Pagination invariant**: when `hasMore=true`, the *next* request uses `startTime=nextStartTime` **and** `endTime=nextEndTime` from the previous response — both fields, not one. `_parse_log_response()` reads `logs`/`hasMore` directly (`KeyError` on a malformed response, not a silent fallback to a guessed alternate key name — the old speculative `payload.get("logs") or payload.get("data") or ...` chain has been removed entirely). Verified by a committed test (`test_render_log_export.py` T7-T8) that a response using the old speculative `"data"` key is now rejected rather than silently accepted.
+
+### 6.4 Exporter — implemented, tested, not yet run for real
+
+`scripts/render_log_export.py`, three subcommands:
+
+- **`check-env`** — reports only whether the configured API-key env var is set (never its value).
+- **`export`** — cursor-based via the official `nextStartTime`/`nextEndTime` pair (§6.3); read-only (`GET` only, never a Render mutation endpoint); requires `--marker` (an approved server-side-evaluated text filter matched against each entry's `message` before anything is written) unless `--allow-full-export` is explicitly passed — narrows collection by default rather than exporting an entire service's logs; defaults `type=app`; persists only a fixed field allowlist per entry (`id`, `timestamp`, `message`, `type`, `resource` — not the raw Render response verbatim); retries on HTTP 429 with `Retry-After`-aware backoff (falling back to exponential) up to 5 attempts; never prints a response body on error, only the status code and reason phrase.
+- **`search`** — local regex search over already-exported JSONL, with `--since`/`--until`/`--field` scoping — the "identify relevant logs" step, entirely offline.
+
+**Checkpoint/dedup invariant** (§13's old items 4/5 in the review that produced this update — now resolved in code, not just design): one export subdirectory *and* one checkpoint file per `service_id` (`render_logs/<service_id>/...`), so two services can never share or corrupt each other's cursor state; a checkpoint's stored `owner_id`/`service_id` is verified against the current invocation's values and raises `ServiceMismatchError` on any mismatch. Deduplication is by Render's own log entry `id` — **never** by timestamp, so multiple entries sharing an identical timestamp are all preserved, not collapsed. Every fetched entry is validated to have both `id` and `timestamp` *before* anything is written; an entry missing either raises immediately and aborts that page's write entirely (fail closed — no partial, unverifiable state is ever persisted). The checkpoint is saved durably immediately after each page's writes complete, before the next page is requested, so a crash between pages leaves the checkpoint at a safely-resumable boundary; a retry that re-fetches an already-written window produces zero duplicate lines, because the day-file's existing ids are loaded and diffed before every write, independent of whether the checkpoint itself advanced.
+
+**Storage** (outside Git): `render_logs/<service_id>/YYYY-MM-DD.jsonl` (daily, append-only) + `render_logs/<service_id>/.checkpoint.json`. `.gitignore` now has a `render_logs/` entry (committed alongside the script — no longer deferred, see §11).
+
+**Committed automated tests**: `test_render_log_export.py`, 31 checks, all passing, all network-mocked. Covers: the official request shape (T1-T8), multi-page pagination using both `nextStartTime`/`nextEndTime` (T9-T11), same-timestamp preservation (T12), crash/retry idempotency via a duplicate export run producing zero extra lines (T13-T14), checkpoint service/owner mismatch rejection (T15-T17), fail-closed on missing `id`/`timestamp` including a whole-page abort (T18-T21), 429 retry-then-succeed and retry-exhaustion (T22-T24), dry-run's zero network/filesystem side effects (T25-T26), required-marker enforcement and the `--allow-full-export` override (T27-T29), and the single supported CLI argument order plus the confirmed failure of the non-canonical order (T30-T31).
+
+**Cadence**: daily, run manually or via the owner's own `cron`/scheduler outside this repo's Flask process — deliberately not wired into `scheduler.py`/`worker.py`, keeping the credential's blast radius separate from the production bot's own secrets.
+
+**Never executed against a real Render service, by any session** — verified only against mocked responses matching the shape in §6.3. The real end-to-end path (real credential, real `ownerId`/`resource`) is untested and remains the owner's own verification step.
 
 ---
 
@@ -399,20 +455,23 @@ All four new files are root-level `test_*.py`, matching the existing convention 
 
 ## 11. Implementation-Slice Plan — Exact Files Expected to Change
 
-**New files** (all additive, none modify existing behavior by themselves):
-- `core/turn_coordinator_shadow.py` — `ShadowDecisionRecord` (§5), `compute_and_log_shadow_decision()` (§3.2), the §4 legacy-normalization functions as separately-testable units (not inlined into `app.py`).
+**Already delivered, committed to this branch (not production runtime — offline tooling, never imported by `app.py`, never run automatically):**
+- `scripts/render_log_export.py` — implemented per §6.3-6.4's verified official API shape, idempotent/crash-safe, narrow-by-default.
+- `test_render_log_export.py` — 31 committed automated checks (§6.4), all passing.
+- `.gitignore` — `render_logs/` entry added (no longer deferred — the directory this ignores is exactly what the now-real exporter writes).
+
+**Still not implemented — planning/design only, no runtime code exists for these yet:**
+- `core/turn_coordinator_shadow.py` — `ShadowDecisionRecord` (§5), `ShadowTurnSnapshot` (§3.3), `compute_shadow_decision()`/`map_legacy_outcome()` (§3.2, corrected this round). Pure functions only; no import of `app.py`, `event_bus`, `core/action_gateway`, or `core/ingress_classifier` — see §3.3's module-boundary requirement.
 - `core/router/destructive_entity_signal.py` — `detect_destructive_entity_signal()` (§8), fully isolated from the live `_RULES`/`Intent` class.
 - `test_turn_coordinator_shadow_decision.py`, `test_turn_coordinator_shadow_comparison.py`, `test_turn_coordinator_shadow_noninterference.py`, `test_turn_coordinator_incident_replay.py` (§9).
+- `feature_flags.py` modification — add `FEATURE_TURN_COORDINATOR_SHADOW_STATE` to the docstring registry and `get_turn_coordinator_shadow_state()` (§7), following `get_evidence_finalizer_state()`'s exact shape.
+- `app.py` modification — the pre-handler call site (§3.2 Case A step 2, after `route_request()`, before `handle_lead_candidate()`) and the post-hoc call site (§3.2 Case A step 5, after the legacy outcome is known), plus the short-circuit call site for Case B (inside the Pending Approval Gate's early-return branch). All three are additive — no existing `app.py` line is changed, only new guarded calls added.
 
-**Modified files** (minimal, additive-only diffs):
-- `feature_flags.py` — add `FEATURE_TURN_COORDINATOR_SHADOW_STATE` to the docstring registry (per the file's own "every flag must appear here" convention) and `get_turn_coordinator_shadow_state()` (§7), following `get_evidence_finalizer_state()`'s exact shape.
-- `app.py` — two new call sites (Hook A, Hook B, §3.2), each a single guarded call to `compute_and_log_shadow_decision(...)`; no existing line in `app.py` is changed, only new lines added at the two hook points.
-
-**Explicitly deferred, not part of this slice** (flagged so a future implementer doesn't assume they're included):
-- `.gitignore` addition for `render_logs/` (§6.4) — deferred to whichever PR actually adds `scripts/render_log_export.py`, since adding an ignore rule for a directory that doesn't exist yet is harmless but premature; bundling it here would blur this slice's actual scope (Shadow decision computation) with an unrelated ops-tooling concern.
-- `scripts/render_log_export.py` itself — design only (§6.4), not written, per the task's explicit "do not execute... until the owner approves."
+**Explicitly out of scope for this slice, not deferred-by-oversight:**
 - Any change to `core/turn_envelope.py`, `route_decision.py`'s `Intent` class, or any file on the live routing/reply/approval path — none are needed for this slice, and §8's design specifically avoids needing to touch `Intent`.
 - `CapabilityScope`/`MessageKind`/`last_outbound_kind` full implementations (§2 fields 5, 7) — this slice's `ShadowDecisionRecord` (§5) does not include a `capability`/`last_outbound_kind` field precisely because no source of truth exists yet; adding placeholder/constant values for them would misrepresent the comparison as more complete than it is. Owner-decision item (§13) covers whether to build them now or defer further.
+
+**No production-bot runtime code has changed as a result of this document or this round's additions** — `app.py`, `core/turn_envelope.py`, `feature_flags.py`, and every file on the live routing/reply/approval path are byte-identical to before this task started. The only new files that exist are offline tooling (`scripts/render_log_export.py`) and its tests.
 
 ---
 
@@ -427,16 +486,15 @@ All four new files are root-level `test_*.py`, matching the existing convention 
 
 ## 13. Owner-Decision Table
 
-Only items that cannot be resolved from the repository:
+Only items that cannot be resolved from the repository. Items 1-3 from the prior round are resolved or narrowed this round (API shape is now verified, §6.3; credential handling is now the owner's own local step, §6.1) — replaced below by what's still actually open.
 
 | # | Decision needed | Why it can't be resolved here |
 |---|---|---|
-| 1 | Exact Render API credential environment-variable name, and confirmation it's set | This session has zero access to the owner's local Windows terminal environment — genuinely unreachable, not merely unsearched (§6.1). Needs the owner to run a names-only check locally and report the name(s) only. |
-| 2 | Render service ID (`srv-...`) for the `my-bot-jqz2` service | Not documented anywhere in the repo (only the public hostname is); requires either Dashboard access or an authenticated API call this session cannot make (§6.2). |
-| 3 | Exact Render Logs API query-parameter names and pagination shape | `WebFetch` was blocked (HTTP 403) on all three attempted doc URLs this session — a genuine live-verification gap, not an assumption I chose not to check (§6.3). Needs confirmation against `api-docs.render.com` before `scripts/render_log_export.py` is written. |
-| 4 | Whether `_pending_approvals`/`event_bus.PendingActionsStore`/`ActionGateway` are on a known consolidation path, or intended to coexist indefinitely | `AI_CONTEXT.md` has no note on this; `FEATURE_ACTION_GATEWAY`'s shadow-gating (`app.py:1122`) suggests `ActionGateway` is the intended eventual canonical store, but that's my inference from a flag name, not a documented decision. Affects whether §4's multi-store mapping is a permanent design or a temporary one this slice should build for. |
-| 5 | Whether to build minimal `CapabilityScope`/`last_outbound_kind` providers now (partial fidelity, e.g. hardcoded-`available` constants) or omit them from `ShadowDecisionRecord` entirely until real sources exist (§2 fields 5/7, §11) | Both are legitimate scope choices with different implementation cost and different Shadow-comparison completeness; no repo precedent settles which the owner prefers for this specific slice. |
-| 6 | Whether a non-production Render environment exists to run `shadow` mode against before touching the production flag (§12 step 2) | Not documented in `docs/operations/DEPLOYMENT.md`/`RUNBOOK.md` — those describe one Render service (`my-bot-jqz2`), no staging environment is named. |
+| 1 | Real `ownerId` and `resource` (service id) values for the `my-bot-jqz2` service | Not documented anywhere in the repo — only the public hostname is. Requires Dashboard access or an authenticated `GET /v1/services` call this session cannot make (§6.2). The exporter's request *shape* is verified (§6.3); these two *values* are not. |
+| 2 | Real `RENDER_API_KEY`-equivalent credential | Being handled by the owner locally per their own instruction — not a blocker for this PR's content, tracked here only so it isn't lost as an open item before the exporter is actually run for real. |
+| 3 | Whether `_pending_approvals`/`event_bus.PendingActionsStore`/`ActionGateway` are on a known consolidation path, or intended to coexist indefinitely | `AI_CONTEXT.md` has no note on this; `FEATURE_ACTION_GATEWAY`'s shadow-gating (`app.py:1122`) suggests `ActionGateway` is the intended eventual canonical store, but that's my inference from a flag name, not a documented decision. Affects whether §4's multi-store mapping is a permanent design or a temporary one this slice should build for. |
+| 4 | Whether to build minimal `CapabilityScope`/`last_outbound_kind` providers now (partial fidelity, e.g. hardcoded-`available` constants) or omit them from `ShadowDecisionRecord` entirely until real sources exist (§2 fields 5/7, §11) | Both are legitimate scope choices with different implementation cost and different Shadow-comparison completeness; no repo precedent settles which the owner prefers for this specific slice. |
+| 5 | Whether a non-production Render environment exists to run `shadow` mode against before touching the production flag (§12 step 2) | Not documented in `docs/operations/DEPLOYMENT.md`/`RUNBOOK.md` — those describe one Render service (`my-bot-jqz2`), no staging environment is named. |
 
 ---
 
@@ -446,4 +504,4 @@ Only items that cannot be resolved from the repository:
 READY FOR OWNER DECISION
 ```
 
-Planning and research for Phase 2 Shadow are complete and grounded (10 required research areas covered, Cross-Layer Impact Matrix filled with proof-of-non-impact/proof-of-read-only-access, implementation-slice plan names exact files, test plan maps every `earliest_enforcement_phase=2→3` scenario). This is **not** `PLANNING BLOCKED` — no Impact Matrix gap remains unfilled. It is **not** `READY FOR PHASE 2 SHADOW IMPLEMENTATION` — six genuine owner-decision items remain (§13), three of them (1-3) hard blockers for the Render log-export sub-piece specifically, and three (4-6) real design choices affecting the main Shadow-decision slice that this document deliberately did not resolve unilaterally. No runtime code, no flag change, no PR has been opened, consistent with the task's explicit constraint.
+Planning and research for Phase 2 Shadow are complete and grounded (10 required research areas covered, Cross-Layer Impact Matrix filled with proof-of-non-impact/proof-of-read-only-access, implementation-slice plan names exact files, test plan maps every `earliest_enforcement_phase=2→3` scenario). The Render log-export sub-piece has moved from design-only to implemented-and-tested this round (§6, §11) — its official API shape is now verified, not speculative, and 31 committed automated tests pass against mocked responses matching that shape. This is **not** `PLANNING BLOCKED` — no Impact Matrix gap remains unfilled. It is **not** `READY FOR PHASE 2 SHADOW IMPLEMENTATION` — the main Shadow-decision slice (`core/turn_coordinator_shadow.py`, the `app.py` hook call sites, the feature flag) still does not exist as code, and five genuine owner-decision items remain (§13): two real values needed to actually run the exporter (item 1) and the credential itself (item 2, being handled locally by the owner), plus three real design choices affecting the main slice (items 3-5) that this document deliberately did not resolve unilaterally. No production-bot runtime code has changed — see §11's closing note.
