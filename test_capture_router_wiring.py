@@ -153,7 +153,7 @@ def test_handle_lead_candidate_domain_backward_compatible():
     identity = MockIdentity(role="owner", domain_id="general")
     captured = {}
 
-    def _fake_single(identity, c, text, chat_id, channel, domain, auto_write):
+    def _fake_single(identity, c, text, chat_id, channel, domain, auto_write, intent=""):
         captured["domain"] = domain
         return "✅ mocked write"
 
@@ -171,7 +171,7 @@ def test_handle_lead_candidate_domain_from_router_overrides_guess():
     identity = MockIdentity(role="owner", domain_id="general")
     captured = {}
 
-    def _fake_single(identity, c, text, chat_id, channel, domain, auto_write):
+    def _fake_single(identity, c, text, chat_id, channel, domain, auto_write, intent=""):
         captured["domain"] = domain
         return "✅ mocked write"
 

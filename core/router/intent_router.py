@@ -58,6 +58,15 @@ _RULES: list[tuple[str, str, float]] = [
     # ── Leads / CRM ──────────────────────────────
     (r"(הוסף|תוסיף|צור|תצור|פתח|תפתח|רשום).*(ליד|lead|לקוח פוטנציאלי)", Intent.CREATE_LEAD, 0.95),
     (r"(עדכן|שנה).*(ליד|lead)", Intent.UPDATE_LEAD, 0.90),
+    # BUG-130: "תעדכן את הטלפון של X" (a field-update phrased around a
+    # PERSON, not the literal word "ליד"/"lead") fell through every rule
+    # above straight to Intent.UNKNOWN — the router never told
+    # core/lead_candidate_handler.py this was an update at all, so it had
+    # no chance to look the existing lead up by name (see BUG-130 in
+    # BUG_AUDIT_LOG.md). "של" is required to anchor the field to a person
+    # ("the PHONE OF X"), not just any sentence containing an update verb
+    # and a phone-ish noun.
+    (r"(עדכן|שנה).*(טלפון|מספר|פלאפון|נייד).*של", Intent.UPDATE_LEAD, 0.85),
     (r"(חפש|מצא|תמצא).*(ליד|lead)", Intent.FIND_LEAD, 0.90),
     (r"(כשיר|qualify|דרג).*(ליד|lead)", Intent.QUALIFY_LEAD, 0.90),
     (r"(סגור|סגירת).*(עסק|עסקה|deal)", Intent.CLOSE_DEAL, 0.90),

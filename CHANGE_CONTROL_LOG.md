@@ -1788,3 +1788,23 @@ Flag: EMERGENCY_STOP_AI=False (נשמר ב-Airtable)
 
 **Merged:** ⏳ טרם — branch `claude/zihuiti-name-extraction-22qitu`.
 **Verified בפרודקשן:** ⏳ לא עדיין — קוד תוקן ונבדק מקומית בלבד.
+
+### C169 — BUG-130: כוונת-עדכון מפורשת ("תעדכן את הטלפון של X") מוצאת עכשיו את הליד הקיים במקום ליצור חדש (22/07/2026)
+קבצים: `core/router/intent_router.py`, `core/lead_candidate_handler.py`, `test_bug130_update_lead_name_lookup.py` (חדש) | באג: BUG-130
+
+**בעיה:** "תעדכן את הטלפון של דני לוי" / "תעדכן את הטלפון של משה חביב ל-0501112222" — ציפייה לעדכון ליד קיים, אך המערכת הציגה preview של ליד **חדש** ("📋 זיהיתי ליד") במקום "📋 מצאתי ליד קיים... לעדכן אותו?".
+
+**Root cause (שני שברים עצמאיים, שניהם נדרשים):**
+1. `intent_router`'s כלל UPDATE_LEAD דרש את המילה המילולית "ליד"/"lead" — "תעדכן את הטלפון של X" (בלעדיה) נפל תמיד ל-`Intent.UNKNOWN`.
+2. גם כש-intent זוהה נכון, `handle_lead_candidate()`'s Tier-1 dispatch (`_handle_single_candidate`) השמיט את `intent` לגמרי — ולכן `_at_find_lead(name, phone)` (BUG-094: דורש התאמת-טלפון **מדויקת**) לעולם לא יכולה למצוא את הרשומה: הטלפון בהודעה הוא הערך **החדש** שרוצים לכתוב, לא מפתח-חיפוש, ולכן שונה במפורש מהטלפון הרשום.
+
+**תוקן:**
+1. `intent_router.py` — כלל UPDATE_LEAD חדש: `(עדכן|שנה).*(טלפון|מספר|פלאפון|נייד).*של` (פועל-עדכון + מילת-טלפון + "של", מעגן לאדם ספציפי — לא כל משפט).
+2. `lead_candidate_handler.py` — `intent` עובר עכשיו ל-`_handle_single_candidate()` וגם ל-`_propose_lead_write()` (הקריאה שמחליטה `airtable_update`/`airtable_add` בפועל על ה-ActionContract הנשלח). `_at_find_lead_by_name_only(name)` חדשה — fallback שנבדק **רק** כש-`intent == Intent.UPDATE_LEAD` וההתאמה-המדויקת נכשלה, ומחזירה תוצאה **רק** על התאמת-שם חד-משמעית (1 רשומה בדיוק; 0/2+ = None, לא מנחשת). הנתיב הרגיל (בלי intent מאושר) אף פעם לא קורא ל-fallback — הגנת BUG-094 שלמה לגמרי בנתיב הזה.
+
+**Out of scope:** אין disambiguation UI ל-2+ התאמות-שם (fallback בטוח ל"לא נמצא"). אין שינוי ל-Tier 2/3 batch lookup או ל-`_write_one_lead()`'s הנפרד.
+
+**בדיקות:** `test_bug130_update_lead_name_lookup.py` (19 assertions חדש). Full sweep (`test_*.py` — 167 קבצים, `smoke_tests.py`, `test_integration.py`, `core/router/test_router.py`, `compileall -q .`) — נקי. `test_capture_router_wiring.py`'s 2 fake-stubs עודכנו (`intent=""`) בהתאם לחתימה המורחבת — ללא שינוי ב-assertions. שני כשלים קיימים-מראש — לא רגרסיה.
+
+**Merged:** ⏳ טרם — branch `claude/zihuiti-name-extraction-22qitu`.
+**Verified בפרודקשן:** ⏳ לא עדיין — קוד תוקן ונבדק מקומית בלבד.

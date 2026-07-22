@@ -390,6 +390,45 @@ def _search_formulas(name: str, phone: str) -> list[str]:
     return formulas
 
 
+def _at_find_lead_by_name_only(name: str) -> Optional[str]:
+    """
+    BUG-130: explicit update-intent lookup. "תעדכן את הטלפון של X ל-Y" means
+    Y is the NEW value to WRITE, not a key to match the existing record by —
+    so _at_find_lead()'s exact-phone verification (BUG-094) can never find
+    the existing record here (the record on file still has the OLD phone).
+    Matches by name ONLY. Callers must gate this on a confirmed
+    Intent.UPDATE_LEAD from the Router — never used on the default
+    create/lookup path, so BUG-094's cross-lead-contamination guard (same
+    name, different person, wrong phone written) stays fully intact there.
+    Returns a record_id ONLY on an unambiguous single name match; 0 or 2+
+    matches return None (falls back to the existing create-preview path)
+    rather than guessing which of several same-named leads was meant.
+    """
+    import os
+    base = os.environ.get("AIRTABLE_BASE_ID", "")
+    key  = os.environ.get("AIRTABLE_API_KEY", "")
+    if not base or not key:
+        return None
+
+    from tools.airtable_gateway import _safe_formula_param
+    url     = f"https://api.airtable.com/v0/{base}/{urllib.parse.quote('Leads', safe='')}"
+    headers = {"Authorization": f"Bearer {key}"}
+    formula = f"SEARCH('{_safe_formula_param(name)}', {{Name}})"
+
+    try:
+        r = httpx.get(url, headers=headers,
+                      params={"filterByFormula": formula, "maxRecords": 5},
+                      timeout=8)
+        if r.status_code == 200:
+            records = r.json().get("records", [])
+            if len(records) == 1:
+                return records[0]["id"]
+    except Exception as exc:
+        logger.warning("[LCH] BUG-130 name-only lookup error: %s", exc)
+
+    return None
+
+
 # ══════════════════════════════════════════════════
 # Single-lead write
 # ══════════════════════════════════════════════════
@@ -587,6 +626,7 @@ def _propose_lead_write(
     text: str,
     channel: str,
     domain: str,
+    intent: str = "",
 ):
     """
     Tier 1 preview (auto_write=False): proposes a REAL pending ActionContract
@@ -602,6 +642,12 @@ def _propose_lead_write(
     controlled data if this payload ever originated from a tool_use, so it
     can no longer serve as the trust boundary).
 
+    intent (BUG-130): route.intent, reused from the Router (not re-detected
+    locally). This is THE call that decides tool_name="airtable_update" vs
+    "airtable_add" for the ActionContract that actually gets dispatched on
+    "כן" — so the BUG-130 name-only fallback below must live here, not just
+    in the caller's own (separate, preview-text-only) _at_find_lead() call.
+
     Returns the GatewayResult (ok / contract_id / user_message) from
     propose_action() — dedup (pending/already-executed) is handled entirely
     by the Gateway's business-fingerprint match, same as _write_one_lead().
@@ -611,6 +657,8 @@ def _propose_lead_write(
 
     tenant_id   = getattr(identity, "tenant_id", "default") or "default"
     existing_id = _at_find_lead(name, phone)
+    if not existing_id and intent == _Intent.UPDATE_LEAD:
+        existing_id = _at_find_lead_by_name_only(name)
     _domain_key = _lead_domain_key(domain)
 
     if existing_id:
@@ -1123,7 +1171,7 @@ def handle_lead_candidate(
         # Single high-confidence lead
         c = candidates[0]
         return _handle_single_candidate(
-            identity, c, text, chat_id, channel, domain, auto_write=auto_capture
+            identity, c, text, chat_id, channel, domain, auto_write=auto_capture, intent=intent
         )
 
     if ic.tier == 2:
@@ -1165,6 +1213,7 @@ def _handle_single_candidate(
     domain: str,
     auto_write: bool,
     clear_clarification: bool = False,
+    intent: str = "",
 ) -> Optional[str]:
     """
     Tier 1: ליד בודד high-confidence.
@@ -1178,6 +1227,15 @@ def _handle_single_candidate(
     active_lead_candidate's "needs_clarification" state, אבל **רק** אחרי
     ש-propose_action()/הכתיבה בפועל הצליחו (לא לפני) — כך שכשל משאיר את
     ה-state פעיל, ללא פעולה חלקית וללא אובדן payload (per spec).
+
+    intent (BUG-130): route.intent, reused from the Router — passed through
+    to _propose_lead_write() (the call that actually decides create-vs-
+    update for the dispatched ActionContract) so "תעדכן את הטלפון של X ל-Y"
+    can find the existing lead by name when the exact-phone match fails
+    (Y is the NEW value to write, not a lookup key). Also applied to this
+    function's OWN existing_id lookup below, so the preview text itself
+    ("מצאתי ליד קיים" vs "זיהיתי ליד" new) is consistent with what
+    _propose_lead_write() will actually do.
     """
     name  = candidate["name"]
     phone = candidate.get("phone", "")
@@ -1187,6 +1245,8 @@ def _handle_single_candidate(
         return f"כדי לשמור את {name} כליד — אשמח לקבל גם מספר טלפון. 📞"
 
     existing_id = _at_find_lead(name, phone)
+    if not existing_id and intent == _Intent.UPDATE_LEAD:
+        existing_id = _at_find_lead_by_name_only(name)
 
     if not _should_auto_write(auto_write, existing_id):
         # BUG-056: preview mode now proposes a REAL pending ActionContract
@@ -1196,7 +1256,7 @@ def _handle_single_candidate(
         # C89 UX: an existing lead (airtable_update) always goes through this
         # approval branch, even when FEATURE_AUTO_CAPTURE=true — only a
         # brand-new lead (airtable_add) can auto-write below.
-        gw_result = _propose_lead_write(identity, name, phone, text, channel, domain)
+        gw_result = _propose_lead_write(identity, name, phone, text, channel, domain, intent=intent)
         if not gw_result.ok:
             # Already-pending or duplicate-executed — Gateway's own message
             # (dedup by business fingerprint) is the correct user-facing reply.
