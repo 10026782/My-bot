@@ -297,7 +297,41 @@ _NAME_STOP = frozenset({
     # "צור ליד חדש מעוניין בדירת 4 חדרים..." would win an unintended
     # segment tie-break and be accepted as a fake name.
     "דומיין",
+    # BUG-135: the bot's OWN confirmation-template verb ("📋 זיהיתי ליד:
+    # *X* (phone)"). When inbound text quotes/forwards/echoes that template
+    # (e.g. a user pasting the bot's own prior reply back), "זיהיתי" sat
+    # right before the real name inside one contiguous _HEBREW_NAME_RE run
+    # ("זיהיתי ליד: *משה חביב* (0501112222)" → one match "זיהיתי ליד",
+    # a SECOND separate match "משה חביב"). "ליד" was already a stop-word so
+    # segmentation isolated "זיהיתי" alone as a (bogus, but >=4-char)
+    # candidate — and _extract_name_from_window() RETURNS on the first
+    # regex match that clears validation, so the second, correct match
+    # ("משה חביב") was never reached. Adding "זיהיתי" here empties that
+    # first match's only segment, so the loop correctly moves on to the
+    # real name in the second match.
+    "זיהיתי",
+    # BUG-135: delete-command verbs. Mirrors the router's own DELETE_TASK
+    # verb set (core/router/intent_router.py: r"(מחק|הסר)...") — this
+    # module has no delete-specific handling of its own, so a bare
+    # "תמחק/מחק/הסר איש קשר <phone>" (no real name, just the generic
+    # "contact" role-noun) falls through to the same generic name+phone
+    # extraction as create/update commands. Without these as stop-words,
+    # the verb survived as part of the "name" segment (e.g. "תמחק איש קשר"
+    # written as a fake lead name) instead of being stripped like the
+    # existing create-verbs (תוסיף/הוסף/תרשום/רשום) already are.
+    "תמחק", "מחק", "הסר",
 })
+
+# BUG-135: exact-phrase reject list — generic role-noun phrases that survive
+# _NAME_STOP segmentation as a >=4-char segment but are still not a name
+# (e.g. "תמחק איש קשר 0536272637": "תמחק" is a stop-word above, but "איש"/
+# "קשר" individually are NOT — deliberately, since "איש קשר X" ("contact
+# person <name>") is a legitimate way to phrase a real candidate name, e.g.
+# "תוסיף איש קשר בדיקה טלפון X" must still extract "איש קשר בדיקה" verbatim
+# (existing, working production behavior — do not regress it). Only the
+# EXACT bare phrase, with nothing else surviving alongside it, is rejected;
+# any additional surviving word (like "בדיקה" above) keeps the whole segment.
+_GENERIC_NAME_PHRASES = frozenset({"איש קשר"})
 
 _HEBREW_WORD_RE = re.compile(r"[א-ת]{2,}")
 _HEBREW_NAME_RE = re.compile(r"(?<!\w)([א-ת]{2,}(?:\s+[א-ת]{2,})+)(?!\w)")
@@ -586,6 +620,8 @@ def _extract_name_from_window(window: str, sender_names: set) -> Optional[str]:
         if not name or len(name) < 4:
             continue
         if name in sender_names:
+            continue
+        if name in _GENERIC_NAME_PHRASES:
             continue
         return name
     return None

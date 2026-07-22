@@ -1772,3 +1772,19 @@ Flag: EMERGENCY_STOP_AI=False (נשמר ב-Airtable)
 
 **Merged:** ⏳ טרם — branch `claude/bug131-test-isolation-interaction-log-leak`.
 **Verified בפרודקשן:** ⏳ לא רלוונטי עדיין — תיקון test-isolation בלבד, אין שינוי קוד production. הוכחה שהקובץ לא ימשיך לזהם תגיע מהרצת test sweep הבאה אחרי merge.
+
+### C168 — BUG-129, BUG-135: `_NAME_STOP` הרחבה — ציטוט-עצמי ופקודות-מחיקה הפיקו שם ליד מזויף (22/07/2026)
+קבצים: `core/ingress_classifier.py`, `test_bug135_command_verb_name_stop.py` (חדש) | באגים: BUG-129, BUG-135
+
+**בעיה:** הבעלים דיווח ששני באגים נפרדים חוסמים בדיקות RP5. **BUG-129** (נרשם קודם, ראה `BUG_AUDIT_LOG.md`): הדבקת התבנית העצמית של הבוט (`"📋 זיהיתי ליד: *X* (phone)"`) חילצה `"זיהיתי"` במקום השם האמיתי. **BUG-135** (חדש): `"תמחק איש קשר 0536272637"` זוהתה כליד בשם *תמחק איש קשר* — אין שם אמיתי בטקסט כלל. שתי דוגמאות production נוספות (`"תוסיף איש קשר בדיקה טלפון X"` → `איש קשר בדיקה`, `"תעדכן טלפון של ביבי נתניהו..."` → `ביבי נתניהו`) כבר עבדו נכון ומשמשות כ-regression baseline.
+
+**Root cause (משותף לשני הבאגים, תסמינים נפרדים):** `_extract_name_from_window()` חוזרת על המאץ' הראשון של `_HEBREW_NAME_RE` שעובר ולידציה — לא ממשיכה למאץ' הבא גם כשקיים שם אמיתי אחריו (BUG-129). "זיהיתי"/"תמחק"/"מחק"/"הסר" לא היו ב-`_NAME_STOP`, כך שנשארו כחלק מהסגמנט שנבחר כ"שם". אין ל-`ingress_classifier.py` טיפול ייעודי ל-delete-intent (`Intent.DELETE_TASK` היחיד שקיים ב-router מכסה רק משימות, לא contacts/leads) — טקסט מחיקה נופל לאותה חילוץ גנרית כמו יצירה/עדכון (BUG-135).
+
+**תוקן:** `_NAME_STOP` + "זיהיתי" (BUG-129) ו-3 פעלי-מחיקה "תמחק"/"מחק"/"הסר" (BUG-135, תואם לקבוצת הפעלים של `Intent.DELETE_TASK` ב-`core/router/intent_router.py`). זה לבדו השאיר "איש קשר" (ה-role-noun השורד) כמועמד שקרי — נבדק במפורש מול הבעלים (AskUserQuestion) שההתנהגות הקיימת של `"איש קשר בדיקה"` (עם מילה נוספת) **לא** אמורה להשתנות, אז "איש"/"קשר" **לא** נוספו כ-stop-words גורפים. במקום זה: `_GENERIC_NAME_PHRASES = {"איש קשר"}` — reject רק על ה-phrase המדויק, בלי מילה נוספת שורדת לצידו.
+
+**Out of scope:** התיקון הזה משנה **רק** את חילוץ-השם. הוא **לא** משנה create-vs-update routing ולא resolution של רשומה קיימת — BUG-130 (עדכון-שדה לליד קיים מנותב כיצירת ליד חדש) **נשאר פתוח**, לא נוגע בפאץ' הזה.
+
+**בדיקות:** `test_bug135_command_verb_name_stop.py` (10 assertions חדש — T1/T2 ל-BUG-129, T3/T4/T6 ל-BUG-135, T5/T7/T8 regression ל-`תעדכן`/"איש קשר בדיקה"). Full sweep (`test_*.py` — 166 קבצים, `smoke_tests.py`, `test_integration.py`, `python3 -m compileall -q .`) — נקי. שני כשלים קיימים-מראש ב-sweep (`test_bug_canonical_tool_wiring.py`, `test_pa01_phantom_approval_enforcement.py`) אומתו כקיימים גם על `main` לפני התיקון הזה (git stash + הרצה) — לא רגרסיה מהשינוי הזה.
+
+**Merged:** ⏳ טרם — branch `claude/zihuiti-name-extraction-22qitu`.
+**Verified בפרודקשן:** ⏳ לא עדיין — קוד תוקן ונבדק מקומית בלבד.
