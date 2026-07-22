@@ -361,6 +361,12 @@ def _fetch_log_page(
 def _parse_log_response(payload: dict) -> tuple[list[dict], bool, Optional[str], Optional[str]]:
     """
     Official response shape only — no speculative fallback key names.
+    Render returns `"logs": null` (not `[]`) when a window has zero
+    matching entries — confirmed against a real, successful probe
+    response, not assumed. That's normalized to an empty list here, but
+    only when hasMore is false: logs=null with hasMore=true is a
+    contradiction (more data is claimed to exist, but this page carries
+    none) and is rejected rather than silently treated as an empty page.
     Returns (logs, has_more, next_start_time, next_end_time).
     """
     try:
@@ -371,22 +377,140 @@ def _parse_log_response(payload: dict) -> tuple[list[dict], bool, Optional[str],
             f"Render log response missing required field {exc}. Top-level keys present: "
             f"{sorted(payload.keys()) if isinstance(payload, dict) else type(payload)}."
         ) from exc
+
+    if logs is None:
+        if has_more:
+            raise RuntimeError(
+                "Render log response has logs=null but hasMore=true — a page claiming more "
+                "data exists cannot have a null logs list. Refusing to continue rather than "
+                "silently treating this as an empty page."
+            )
+        logs = []
+    elif not isinstance(logs, list):
+        raise RuntimeError(f"Render log response 'logs' field is not a list or null: {type(logs)}.")
+
     next_start_time = payload.get("nextStartTime")
     next_end_time = payload.get("nextEndTime")
     return logs, has_more, next_start_time, next_end_time
 
 
-def _validate_and_project(entry: dict) -> dict:
+class EntryValidationError(RuntimeError):
     """
-    Fail closed: an entry without both id and timestamp cannot be
-    deduplicated or checkpointed safely, so it is never written — this
-    raises rather than silently dropping or guessing.
+    Raised by _validate_and_project for a single entry. Carries a short,
+    non-sensitive reason code (e.g. 'wrong_resource') so _project_page can
+    tally failures across a whole page without ever inspecting or
+    re-printing the entry's `message` field.
+    """
+    def __init__(self, reason: str, detail: str):
+        super().__init__(detail)
+        self.reason = reason
+
+
+def _extract_labels_map(entry: dict) -> dict:
+    """
+    Render's real Logs API nests service/type provenance inside
+    `labels: [{"name": ..., "value": ...}, ...]` rather than as top-level
+    fields — confirmed against a real, successful probe response, not
+    assumed (a prior version of this file only checked top-level
+    `resource`/`type` keys, which real Render responses never populate,
+    so those fields were silently persisted as absent on every export).
+    Normalizes `labels` into a flat {name: value} dict. A label name
+    appearing twice with different values is a malformed response, not
+    something to resolve by picking one — fails closed.
+    """
+    labels = entry.get("labels")
+    if not labels:
+        return {}
+    if not isinstance(labels, list):
+        raise EntryValidationError("labels_malformed", f"'labels' is not a list: {type(labels)}")
+    out: dict = {}
+    for item in labels:
+        if not isinstance(item, dict) or "name" not in item:
+            raise EntryValidationError("labels_malformed", "a 'labels' item is missing 'name'")
+        name, value = item["name"], item.get("value")
+        if name in out and out[name] != value:
+            raise EntryValidationError("labels_conflict", f"duplicate label {name!r} with differing values")
+        out[name] = value
+    return out
+
+
+def _resolve_provenance_field(entry: dict, labels: dict, field: str) -> Optional[str]:
+    """
+    resource/type may arrive as a top-level field (kept supported in case
+    Render ever adds it, or for hand-built test fixtures) or nested in
+    `labels` (the shape Render's live API actually uses). If both are
+    present and disagree, that's a genuine conflict — refuse to guess
+    which one is authoritative rather than silently preferring either.
+    """
+    top_level = entry.get(field)
+    from_labels = labels.get(field)
+    has_top = top_level not in (None, "")
+    has_labels = from_labels not in (None, "")
+    if has_top and has_labels and top_level != from_labels:
+        raise EntryValidationError(f"{field}_conflict", f"top-level {field!r} disagrees with labels {field!r}")
+    if has_top:
+        return top_level
+    if has_labels:
+        return from_labels
+    return None
+
+
+def _validate_and_project(entry: dict, expected_service_id: str, expected_log_type: str) -> dict:
+    """
+    Fail closed: an entry without id/timestamp cannot be deduplicated or
+    checkpointed safely. An entry whose resource/type provenance (from
+    either a top-level field or Render's actual `labels` array) can't be
+    proven to match what was actually requested is never written either —
+    this is what makes the per-service directory/checkpoint scoping
+    trustworthy at the individual-record level, not just at the
+    request-parameter level. Only id/timestamp/message/type/resource are
+    ever persisted — raw `labels` is never written to disk.
     """
     if "id" not in entry or entry["id"] in (None, ""):
-        raise RuntimeError(f"Log entry missing required field 'id': {sorted(entry.keys())}")
+        raise EntryValidationError("missing_id", "missing required field 'id'")
     if "timestamp" not in entry or entry["timestamp"] in (None, ""):
-        raise RuntimeError(f"Log entry missing required field 'timestamp': {sorted(entry.keys())}")
-    return {k: entry.get(k) for k in _SHADOW_EVIDENCE_FIELDS if k in entry}
+        raise EntryValidationError("missing_timestamp", "missing required field 'timestamp'")
+
+    labels = _extract_labels_map(entry)
+    resource = _resolve_provenance_field(entry, labels, "resource")
+    log_type = _resolve_provenance_field(entry, labels, "type")
+
+    if resource in (None, ""):
+        raise EntryValidationError("missing_resource", "no resource in top-level field or labels")
+    if resource != expected_service_id:
+        raise EntryValidationError("wrong_resource", "resource does not match requested service_id")
+    if log_type in (None, ""):
+        raise EntryValidationError("missing_type", "no type in top-level field or labels")
+    if log_type != expected_log_type:
+        raise EntryValidationError("wrong_type", "type does not match requested log_type")
+
+    projected = {k: entry.get(k) for k in _SHADOW_EVIDENCE_FIELDS if k in entry}
+    projected["resource"] = resource
+    projected["type"] = log_type
+    return projected
+
+
+def _project_page(entries: list[dict], expected_service_id: str, expected_log_type: str) -> list[dict]:
+    """
+    Validates every entry in a page before any of them are written — one
+    bad entry aborts the whole page, not just itself (export_logs never
+    reaches its write/checkpoint-save step if this raises). Failures are
+    reported as counts by reason code only (e.g. {'wrong_resource': 2}),
+    never by echoing any offending entry's `message` field.
+    """
+    projected = []
+    failures: dict = {}
+    for raw_entry in entries:
+        try:
+            projected.append(_validate_and_project(raw_entry, expected_service_id, expected_log_type))
+        except EntryValidationError as exc:
+            failures[exc.reason] = failures.get(exc.reason, 0) + 1
+    if failures:
+        raise RuntimeError(
+            f"Page failed validation for {sum(failures.values())} of {len(entries)} entries — "
+            f"whole page aborted, checkpoint left unchanged. Failure counts by reason: {failures}."
+        )
+    return projected
 
 
 def _matches_marker(entry: dict, marker_re: Optional[re.Pattern]) -> bool:
@@ -486,12 +610,20 @@ def export_logs(
                                    transport=resolved_transport, ssl_no_revoke=ssl_no_revoke)
         logs, has_more, next_start_time, next_end_time = _parse_log_response(payload)
 
-        by_day: dict[str, list[dict]] = {}
+        matched_entries = []
         for raw_entry in logs:
             if not _matches_marker(raw_entry, marker_re):
                 total_skipped_marker += 1
                 continue
-            projected = _validate_and_project(raw_entry)  # raises on missing id/timestamp — fail closed
+            matched_entries.append(raw_entry)
+
+        # Validates id/timestamp/resource/type for every matched entry before
+        # anything is written — one bad entry fails the whole page, and the
+        # checkpoint save below is never reached in that case.
+        projected_entries = _project_page(matched_entries, service_id, log_type)
+
+        by_day: dict[str, list[dict]] = {}
+        for projected in projected_entries:
             day = projected["timestamp"][:10]
             by_day.setdefault(day, []).append(projected)
 
