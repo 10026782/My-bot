@@ -1772,3 +1772,17 @@ Flag: EMERGENCY_STOP_AI=False (נשמר ב-Airtable)
 
 **Merged:** ⏳ טרם — branch `claude/bug131-test-isolation-interaction-log-leak`.
 **Verified בפרודקשן:** ⏳ לא רלוונטי עדיין — תיקון test-isolation בלבד, אין שינוי קוד production. הוכחה שהקובץ לא ימשיך לזהם תגיע מהרצת test sweep הבאה אחרי merge.
+
+### C168 — BUG-135: `_NAME_STOP` הרחבה — מילות פקודה/ציטוט-עצמי הפיקו שם ליד מזויף (22/07/2026)
+קבצים: `core/ingress_classifier.py`, `test_bug135_command_verb_name_stop.py` (חדש) | באג: BUG-135
+
+**בעיה:** הבעלים דיווח שהבאג חוסם בדיקות RP5, עם שלוש דוגמאות production. שתיים תקינות (`"תוסיף איש קשר בדיקה טלפון X"` → `איש קשר בדיקה`, `"תעדכן טלפון של ביבי נתניהו..."` → `ביבי נתניהו`), אחת שבורה: `"תמחק איש קשר 0536272637"` זוהתה כליד בשם *תמחק איש קשר* — אין שם אמיתי בטקסט. בנוסף, repro קודם מאותו class: הדבקת התבנית העצמית של הבוט (`"📋 זיהיתי ליד: *X* (phone)"`) חילצה `"זיהיתי"` במקום השם האמיתי.
+
+**Root cause:** `_extract_name_from_window()` חוזרת על המאץ' הראשון של `_HEBREW_NAME_RE` שעובר ולידציה — לא ממשיכה למאץ' הבא גם כשקיים שם אמיתי אחריו. "זיהיתי"/"תמחק"/"מחק"/"הסר" לא היו ב-`_NAME_STOP`, כך שנשארו כחלק מהסגמנט שנבחר כ"שם". אין ל-`ingress_classifier.py` טיפול ייעודי ל-delete-intent (`Intent.DELETE_TASK` היחיד שקיים ב-router מכסה רק משימות, לא contacts/leads) — טקסט מחיקה נופל לאותה חילוץ גנרית כמו יצירה/עדכון.
+
+**תוקן:** `_NAME_STOP` + "זיהיתי" ו-3 פעלי-מחיקה ("תמחק"/"מחק"/"הסר", תואם לקבוצת הפעלים של `Intent.DELETE_TASK` ב-`core/router/intent_router.py`). זה לבדו השאיר "איש קשר" (ה-role-noun השורד) כמועמד שקרי — נבדק במפורש מול הבעלים (AskUserQuestion) שההתנהגות הקיימת של `"איש קשר בדיקה"` (עם מילה נוספת) **לא** אמורה להשתנות, אז "איש"/"קשר" **לא** נוספו כ-stop-words גורפים. במקום זה: `_GENERIC_NAME_PHRASES = {"איש קשר"}` — reject רק על ה-phrase המדויק, בלי מילה נוספת שורדת לצידו.
+
+**בדיקות:** `test_bug135_command_verb_name_stop.py` (10 assertions חדש — שני ה-repro, שם אמיתי עדיין נשלף אחרי `תעדכן`/פועל-מחיקה, ו-regression מפורש ש-"איש קשר בדיקה" לא השתנה). Full sweep (`test_*.py` כל קובץ, `smoke_tests.py`, `test_integration.py`, `python3 -m compileall -q .`) — נקי. שתי כשלים קיימים-מראש ב-sweep (`test_bug_canonical_tool_wiring.py`, `test_pa01_phantom_approval_enforcement.py`) אומתו כקיימים גם על `main` לפני התיקון הזה (git stash + הרצה) — לא רגרסיה מהשינוי הזה.
+
+**Merged:** ⏳ טרם — branch `claude/zihuiti-name-extraction-22qitu`.
+**Verified בפרודקשן:** ⏳ לא עדיין — קוד תוקן ונבדק מקומית בלבד.
