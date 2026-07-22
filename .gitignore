@@ -13,3 +13,7 @@ schema_drift_report.json
 # Phase 4B rollout tooling — runtime-generated diagnostic reports. See
 # reports/samples/*.sample.json for deterministic fixture examples instead.
 reports/runtime/
+
+# scripts/render_log_export.py — raw log exports, checkpoint, derived DB.
+# See docs/architecture/turn-coordinator/PHASE_2_SHADOW_PLANNING_GATE.md §6.
+render_logs/
