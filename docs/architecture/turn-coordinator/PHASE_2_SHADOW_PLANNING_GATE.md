@@ -1,7 +1,7 @@
 # Phase 2 Shadow — Planning Gate & Runtime Grounding
 
 Program: TurnCoordinator (see `TURN_COORDINATOR_BEHAVIOR_CONTRACT_V1.md`, CONTRACT FREEZE / MANDATORY GATE, not yet approved).
-Status: **PLANNING AND RESEARCH ONLY.** No runtime code written, no feature flag changed, no routing/reply/tool/approval/ActionContract/Airtable behavior changed. This document itself is the only artifact this task produced.
+Status: Planning and repository research are complete. This PR also includes local, read-only Render export tooling (`scripts/render_log_export.py`) and its committed automated tests (`test_render_log_export.py`) — standalone offline tooling, never imported by `app.py` and never run automatically. No production-bot runtime code, feature flag, routing, reply, approval, tool, `ActionContract`, or Airtable behavior changed. The TurnCoordinator Shadow runtime implementation itself (`core/turn_coordinator_shadow.py`, the `app.py` hook call sites, the feature flag) is **not** included — see §11. **BUG-130 is not fixed by this PR.**
 Baseline: `claude/turn-coordinator-contract-v1` @ `eca66b5` (2026-07-22).
 Cross-Layer gate: `docs/architecture/CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` applies — §10 below is the Impact Matrix required before any implementation PR.
 Scope: Phase 2 (Shadow Decision) only, as defined in the frozen contract's "סדר היישום" — compute and log what the Coordinator *would* decide, while the legacy runtime keeps owning all real routing/replies/approvals/execution. Phases 3-7 and the RP5 gate are out of scope here (see §9's `earliest_enforcement_phase` tagging in the frozen contract).
