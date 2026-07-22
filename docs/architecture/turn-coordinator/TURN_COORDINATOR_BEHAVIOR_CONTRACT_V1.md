@@ -3,6 +3,8 @@
 **סטטוס:** CONTRACT FREEZE — חוסם תחילת Shadow Decision עד לאישור
 **תנאי מוקדם:** תשתית Phase 0 (Observation Only) כבר קיימת בפועל — `TurnEnvelope`, pending queues, `active_queue_id`, `reply_owner` כתצפית, execution-kind classification, agent availability placeholder, logging של ownership signals. מסמך זה **אינו מחליף** אותה — הוא קובע את מה שחסר בה: חוזה ההחלטה, מטריצת הקדימות, טיפוסי תוצאה, בידוד turn, וסמנטיקת כשל.
 
+**שער מחייב נוסף, קודם לאישור המסמך הזה:** `docs/architecture/CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` — TurnCoordinator (שכבה 2) הוא אחת מ-4 השכבות הסמכותיות שהמסמך ההוא מגדיר. **אישור סופי של המסמך הזה תלוי בהשלמת Cross-Layer Impact Matrix** (4 שכבות × 9 שדות, כולל proof-of-non-impact לכל שכבה שנטען שלא נוגעים בה) — לא רק באישור התוכן הפנימי כאן. ראה גם §3 באותו מסמך לדוגמה קונקרטית שכבר נמצאה: המונח "`ActionFact`/`ExecutionReceipt`" ב-§6 למטה מתנגש עם `class ActionFact` הקיימת (`core/action_gateway.py:241`, שכבה 4) — משמעות **שונה**, טרם נפתר, action item פתוח.
+
 **לא בסקופ של מסמך זה:**
 - מיקום האחסון (storage) של ה-resource claim חוצה-processes (§4ב/§7 — מסומן פתוח במפורש, לא חוסם תחילת Shadow אך כן חוסם טענה ש-"TurnCoordinator סגור")
 - מיזוג PR #445 לתוך `lead_candidate_handler` — נדחה במפורש בצורתו הנוכחית; חלקים שנשמרים ממנו מפורטים ב-§0.1
