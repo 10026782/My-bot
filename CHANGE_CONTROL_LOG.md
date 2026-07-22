@@ -1752,3 +1752,23 @@ Flag: EMERGENCY_STOP_AI=False (נשמר ב-Airtable)
 **בדיקות:** `test_model_pricing.py` (11 assertions), `test_usage_telemetry.py` (30 assertions — חיבור יחיד, סטטוס תלת-מצבי, rollback, צורת `ON CONFLICT (provider, request_id)`). Full sweep + smoke + integration + router + compileall — נקיים, הורץ שוב אחרי rebase על `main` שאחרי מיזוג #438.
 
 **Merged:** ✅ `main` (PR #439, head commit `6d4a26e`) | **✅ Verified בפרודקשן — מדווח ע"י המשתמש ישירות (לא נבדק עצמאית ע"י Claude, אין credentials חיים בסביבה זו):** `usage_events table: WORKING`; `Anthropic run_agent recording: VERIFIED`; `OpenAI Whisper recording: VERIFIED`; `runtime model matching pricing table: VERIFIED` (כלומר לא נפל ל-fail-safe ה-`$5/$25`); `exact pricing, not fallback estimate: VERIFIED`; `COST_WATCHDOG_LIVE=false: VERIFIED` (ה-trigger החי לא הושפע). **גבול-דיוק, לא ממצא:** נקודות ה-checklist E (smoke STT מלא לפני-מיזוג) ו-F (מספר הימים של השוואה מול חיוב-ספק אמיתי) לא בוצעו/לא הושלמו — **PR3 (trigger cutover) נשאר חסום במפורש**, לפי הנחיית המשתמש, עד שכמה ימי נתונים ייבדקו מול חיוב פרודקשן אמיתי.
+
+### C167 — BUG-133: test_bug104_tma_lead_event_bridge.py mock-isolation fix (21/07/2026)
+קבצים: `test_bug104_tma_lead_event_bridge.py` | באג: BUG-133
+
+> **הערת מספור:** נרשם במקור כ"C163"/"BUG-131" לפני שנודע ש-C163/BUG-131 כבר נתפסו (Cost Telemetry saga, session מקביל). שונה ל-C167/BUG-133 (הבאים הפנויים) בזמן rebase על `main`.
+
+**בעיה:** נחשף ע"י הבעלים דרך בדיקה ידנית ב-TMA/Airtable (לא CI, לא code review) — 310 מתוך 705 רשומות (43%) ב-Interaction Log הפרודקשן שייכות ל-`"recLEAD001"`, fixture ID לא-תקין (10 תווים, לא 17) מתוך קובץ הטסט הזה. חלוקה מדויקת 155/155 בין `lead_outcome`/`lead_patch`, פרוסה על 07-16 עד 07-21.
+
+**Root cause:** `tma_api.py:34` בונד את `_gw_create` ל-`airtable_gateway.airtable_create` **פעם אחת בזמן import**. הקובץ מנסה למקק כתיבות דרך `airtable_gateway.airtable_create = _counting_create` — זה דורס רק את ה-attribute על מודול `airtable_gateway`, לא את `tma_api._gw_create` הכבר-bound. `_audit()` (הנקרא מ-`set_lead_outcome`/`patch_lead` אחרי PATCH מדומה-מוצלח) המשיך לקרוא לפונקציה **האמיתית** → POST אמיתי, שקט, ל-Interaction Log הפרודקשן בכל הרצת "success case". אותה משפחת-באג בדיוק כמו BUG-128, מנגנון שונה (מיקוק היעד הלא-נכון, לא בריחה מ-`with patch()` scope).
+
+**תוקן:** `tma_api._gw_create = _counting_create` נוסף ישירות (עם restore ב-`finally`), + `tma_api._at_list` (ממצא משני נלווה — GET-lead timeline lookup, read-only, לא כתב נתונים אך גם ברח מה-mock, נצפה `403 Forbidden` בזמן ריצה). `_counting_create` עודכן לעקוב אחרי כתיבות ל-`Tables.INTERACTION_LOG` בנפרד, עם 4 assertions חדשות שמוכיחות ש-`_audit()` נתפס ע"י ה-mock.
+
+**בדיקות:** 50/50 (היה 46/46) — 4 assertions חדשות (BUG-133 regression), ואין יותר `403 Forbidden`/קריאת-רשת אמיתית בפלט. Full `test_*.py` sweep + `smoke_tests.py` + `compileall -q .` נקיים, ללא רגרסיה.
+
+**ניקוי:** 310 הרשומות המזוהמות הקיימות (`recLEAD001:*`) נמחקו ישירות מ-Airtable, מאושר במפורש ע"י הבעלים (לא חלק מהתיקון בקוד — ניקוי חד-פעמי).
+
+**לא נוגע:** שני קבצי test-BUG-104 נוספים (`test_bug104_leads_reasoning_projection.py`/`test_bug104_phase1_1_contract_hardening.py`) — נבדקו, לא קוראים ל-Flask test client ל-write endpoints, אין סיכון. `core/lead_event_writer.py`/`tools/approval_actions.py::tma_write()` — import דחוי תקין משני הצדדים, לא נגועים. שום קוד production.
+
+**Merged:** ⏳ טרם — branch `claude/bug131-test-isolation-interaction-log-leak`.
+**Verified בפרודקשן:** ⏳ לא רלוונטי עדיין — תיקון test-isolation בלבד, אין שינוי קוד production. הוכחה שהקובץ לא ימשיך לזהם תגיע מהרצת test sweep הבאה אחרי merge.
