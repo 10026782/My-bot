@@ -1681,3 +1681,74 @@ Flag: EMERGENCY_STOP_AI=True (נשמר ב-Airtable, שורד restart)
 Flag: EMERGENCY_STOP_AI=False (נשמר ב-Airtable)
 ```
 (ואותה תבנית בדיוק, עם אותו `על ידי: אליהו חזן`, גם עבור Automation/WhatsApp/ALL — 4 round-trips נוספים). היעדר `⚠️ עדיין חסום ע"י env force-stop` בכל הודעות ה-CLEAR מוכיח גם ש-`still_blocked_by_env=False` בכל המקרים — אין env override פעיל שדרס את ה-clear. זו לא רק "הכפתור עבד" — זו הוכחה ש-`set_emergency_stop()`/`clear_emergency_stop()` רצו בפועל עם `source="tma_owner_stop"`/`"tma_owner_clear"`, כתבו ל-Airtable, ו-`identity.display_name` נפתר נכון מ-TMA auth אמיתי. שני תרחישים ספציפיים יותר נשארים לא-מאומתים במפורש (לא ממצא, רק גבול-דיוק): 409 עם `operation_id` שגוי בפרודקשן החי עצמו (רק ב-harness מקומי, לא production), ושפעולה guarded אמיתית אכן נחסמת **בזמן** ש-Stop All פעיל (לעומת רק "הכפתור עצמו מבצע round-trip").
+
+### C163 — Cost Telemetry Reliability PR1: כתיבה אמיתית ל-`AI_Usage_Daily` + upsert-by-Date (21/07/2026)
+קבצים: `app.py`, `core/cost_watchdog.py`, `schema_cache.json`, `docs/PHASE_4B0_MIGRATIONS_CLI.md`, `docs/PHASE_4B_ROLLOUT_AND_CUTOVER.md`, `docs/operations/DEPLOYMENT.md`, `test_ai_usage_daily_schema.py` (חדש), `test_cost_watchdog_airtable_write.py` (חדש) | קשור: פוצל מ-#434 (נסגר בלי מיזוג — בנוי על `main` ישן, התנגש עם `EmergencyStopLegacyWriteBlocked` של PATCH 3B Step 6/C161)
+
+**רקע — לא תיאורטי, נתפס בפועל:** `AI_Usage_Daily` הכילה רשומה אחת בלבד אי-פעם, עם ערכי אפס, למרות שהלוגים הראו הצלחה יומיומית. שורש כפול: (1) השדה החי היה `"﻿Date"` (BOM-prefixed) בעוד הקוד שלח `"Date"` פשוט — כל POST קיבל 422 `UNKNOWN_FIELD_NAME`; (2) `_write_airtable_row()` רשם "שורה יומית נכתבה ל-Airtable" **ללא בדיקה** של ערך ההחזרה של `airtable_create()` — שמחזירה `None` (לא exception) על תגובה שאינה 2xx — כך שההצלחה נטענה גם כשהכתיבה נכשלה בפועל, שבועות ברציפות.
+
+**מה תוקן:** תיקון ה-BOM בוצע **ידנית ע"י הבעלים** ב-Airtable (`Date_tmp` swap) — לא תיקון קוד. בקוד: `_write_airtable_row()` מחזירה `bool` עכשיו ו-`daily_watchdog()` בודקת את זה ומתעדת מפורשות כשהפרויקציה לא נשמרה. נוסף upsert: חיפוש-לפי-Date לפני כתיבה (`at_get_by_field` בגרסה הזו — **הוחלף בהמשך ב-C164**, כי הוא סבל מבאג נפרד), `airtable_patch()` אם קיים, `airtable_create()` אם לא; כשל-lookup (שגיאת רשת/HTTP, לא "לא נמצא" אמיתי) מסרב לכתוב עיוור במקום לנחש ולשכפל.
+
+**היקף שתוקן אחרי review (`ce24605`):** גרסה ראשונה של ה-PR הוסיפה 4 שדות-עלות placeholder (`total_cost_usd` וכו') ל-`schema_cache.json`, נכתבים כ-`0`. הוסר לגמרי — כתיבת `0` לערך שלא נמדד היא עצמה לא-אמינה (לא ניתן להבחין מ"נמדד, אפס אמיתי"), ושם ב-`schema_cache.json` הוא רק ניחוש מקומי, לא הוכחה שהשדה קיים בטבלה החיה. ה-PR כותב/מאמת רק את 5 השדות המאומתים בטבלה החיה (`Date`, `claude_sonnet`, `claude_haiku`, `whatsapp_conversation`, `total_units`).
+
+**Concurrency, מתועד במפורש:** ה-upsert (lookup-then-create-or-patch) הוא **סדרתי best-effort, לא אטומי** — יש חלון TOCTOU אמיתי בין ה-lookup ל-`create`/`patch`. שני ריצות מקבילות של `daily_watchdog()` לאותו `Date` עלולות לשכפל. מקובל היום רק כי ה-scheduler קורא לג'וב הזה אחד-אחד (`WEB_CONCURRENCY=1`).
+
+**Docs:** תוקנו טענות-ישנות ש-Render's Pre-Deploy Command הוא `python -m core.database_migrations`; הערך האמיתי הוא `python -m core.predeploy` (מריץ migrations, ואז Emergency Stop preflight).
+
+**בדיקות:** `test_ai_usage_daily_schema.py` (10 assertions — 5-שדות בלבד, round-trip validation), `test_cost_watchdog_airtable_write.py` (13 assertions — create/patch/failure/lookup-failure). Full `test_*.py` sweep + `smoke_tests.py` + `test_integration.py` + `core/router/test_router.py` + `compileall -q .` — נקיים.
+
+**Merged:** ✅ `main` (PR #435, head commit `ce24605`) | **Verified בפרודקשן:** ❌ — ראה C164: smoke פרודקשן על ה-PR הזה עצמו **נכשל** (upsert לא עבד, שכפל שורות), מה שהוביל ל-hotfix מיידי.
+
+### C164 — Hotfix: lookup ל-`AI_Usage_Daily` עבר מהשוואת-טקסט ל-`DATETIME_FORMAT` (21/07/2026)
+קבצים: `core/cost_watchdog.py`, `test_cost_watchdog_airtable_write.py`, `tools/smoke_ai_usage_daily_upsert.py` (חדש) | קשור: C163 (#435), נתפס ע"י smoke פרודקשן אמיתי על #435
+
+**רקע — לא תיאורטי, נתפס בפועל ע"י המשתמש:** smoke ישיר על #435 הממוזג: הרצת `_write_airtable_row()` פעמיים לאותו תאריך הפיקה **שתי** שורות (במקום create→patch); חזרה על הריצה הפיקה **ארבע** שורות סה"כ (11/22/3/36 ו-44/55/6/105, כל אחד משוכפל). כל קריאה נפלה ל-ענף ה-create — patch מעולם לא קרה.
+
+**שורש:** `at_get_by_field(table, "Date", date_str)` בנה `{Date}='YYYY-MM-DD'` — השוואת-טקסט מול שדה מסוג **DATE**, לא טקסט. השוואה כזו **לעולם לא תואמת** שדה date-typed, כך שה-lookup תמיד החזיר "לא נמצא", וכל קריאה נפלה ל-`airtable_create()`.
+
+**תוקן:** lookup עבר ל-`at_list_by_formula()` עם `DATETIME_FORMAT({Date}, 'YYYY-MM-DD')='<date>'` (ממיר את שדה ה-date לטקסט בצד Airtable לפני ההשוואה). `max_records=2` (לא 1), עם שלושה ענפים מפורשים: 0 התאמות → create; 1 התאמה → patch; 2+ התאמות → **סירוב מוחלט**, לוג שגיאת-שלמות-נתונים (כנראה שורות שהבאג הזה עצמו כבר יצר בפרודקשן) — לא ניחוש איזו שורה סמכותית. `date.fromisoformat()` מאמת את `date_str` לפני כל קריאת Airtable. לוגי הצלחה כוללים עכשיו `branch=create|patch`, תאריך, `record_id`, `source=cost_watchdog`.
+
+**חדש:** `tools/smoke_ai_usage_daily_upsert.py` — סקריפט smoke ידני מול Airtable **חי** (לא חלק מלולאת ה-CI, כי הוא כותב לבסיס האמיתי) — בדיוק סוג הבדיקה שטסט ממוסק לא יכול לבצע structurally (הבאג המקורי היה ש-Airtable לא תואם את הפורמולה כפי שהקוד הניח, וזה רק ניתן להוכחה ע"י קריאת API אמיתית).
+
+**בדיקות:** `test_cost_watchdog_airtable_write.py` נכתב מחדש מול `at_list_by_formula` (30 assertions: צורת הפורמולה, 0/1/2+ התאמות, כשל-lookup, תאריך פגום, שני נתיבי כשל-אמיתי). Full sweep + smoke + integration + router + compileall — נקיים.
+
+**Merged:** ✅ `main` (PR #437, head commit `952ddc1`) | **Verified בפרודקשן:** 🟡 חלקי — הבאג עצמו אומת בפרודקשן ישירות (הראיה של המשתמש, ראה "רקע" למעלה); ה-**תיקון** לא אושר במפורש כ-`✅ SMOKE PASSED` באותו סבב (ה-checklist דרש הרצת `tools/smoke_ai_usage_daily_upsert.py` מול הבסיס החי לפני מיזוג — ראה C165 להמשך התיקון של הסקריפט עצמו).
+
+### C165 — Hotfix-followup: תיקון סקריפט ה-smoke עצמו (`total_units` double-count + full assertions) (21/07/2026)
+קבצים: `core/cost_watchdog.py`, `tools/smoke_ai_usage_daily_upsert.py` | קשור: C164 (#437)
+
+**רקע:** review-המשך על #437 הממוזג תפס שני באגים **בסקריפט ה-smoke עצמו** (לא בליבת ה-hotfix, שאושרה נכונה וללא שינוי כאן):
+
+1. **`total_units` double-count.** הסקריפט שלח `total_units` כחלק מ-`counts` ל-`_write_airtable_row()` — אבל הפונקציה מחשבת `total_units` בעצמה כ-`sum(counts.values())`. כלומר `counts={claude_sonnet:11, claude_haiku:22, whatsapp_conversation:3, total_units:36}` → נשמר `total_units=72`, לא 36. תוקן: הסקריפט שולח רק את 3 השדות האמיתיים, `_write_airtable_row()` מחשב את `total_units`.
+2. **הסקריפט רק הדפיס לוגים — לא אישר כלום.** נכתב מחדש כאימות מבוסס-assertions מלא: pre-check שהתאריך-יעד ריק (אחרת עוצר, כדי לא לכתוב לתוך תאריך עם נתונים אמיתיים); כתיבה #1 → מוודא בדיוק שורה אחת, לוכד `record_id`; כתיבה #2 (ערכים שונים) → מוודא עדיין שורה אחת בדיוק, לוכד `record_id` שני; מוודא ששני ה-`record_id` זהים (patch, לא שכפול); מוודא שערכי השדות הסופיים תואמים בדיוק לכתיבה #2 (`total_units=105`).
+3. **ולידציית תאריך קנונית.** `date.fromisoformat()` מקבל פורמטים לא-קנוניים (למשל `"20260721"` עובר בלי `ValueError`). נוסף `parsed.isoformat() == date_str` — רק `YYYY-MM-DD` מילולי מתקבל.
+4. **דיוק ניסוח לוג.** לוג שכפול-שורות טען מספר מדויק ("%d שורות תואמות") אך ה-lookup חסום ל-`max_records=2` — נוסח מחדש ל"לפחות 2 שורות תואמות... הספירה האמיתית עשויה להיות גבוהה יותר".
+
+**בדיקות:** `test_cost_watchdog_airtable_write.py` — 30/30 ללא שינוי נדרש (assertion בודקת substring "duplicate", לא ניסוח מדויק). Dry-run מול Airtable מדומה (mocked) לאימות שרשרת ה-assertions מקצה-לקצה. Full sweep + smoke + integration + router + compileall — נקיים.
+
+**Merged:** ✅ `main` (PR #438, head commit `fb6f8b9`) | **Verified בפרודקשן:** 🟡 לא אושר במפורש בסבב הזה עם `✅ SMOKE PASSED` מוצג — ראה גבול-דיוק תחת "עדכון סבב זה" ב-`AI_CONTEXT.md`.
+
+### C166 — Cost Telemetry Reliability PR2: `usage_events` PostgreSQL, shadow only (21/07/2026)
+קבצים: `core/usage_telemetry.py` (חדש), `core/model_pricing.py` (חדש), `core/migrations/002_usage_events.sql` (חדש), `app.py`, `llm_fallback.py`, `interaction_engine.py`, `voice_stt_adapter.py`, `providers/anthropic_shim.py`, `.env.example`, `CLAUDE.md`, `test_model_pricing.py` (חדש), `test_usage_telemetry.py` (חדש) | קשור: C163-C165 (PR1 + hotfixes), נבנה על-גבי `main` אחרי #438
+
+**מה זה:** נקודת-רישום דביקה (PostgreSQL) יחידה לכל קריאת AI בתשלום — provider/service/model-generic (לא Anthropic-token-shaped), כך שטקסט OpenAI ו-Whisper STT נכנסים בלי special-casing. **Shadow בלבד לגבי ה-trigger:** `cost_monitor.py` (ה-`EMERGENCY_STOP_AI` trigger החי, האקומולטורים והמחירון שלו) **לא נגעו**; `core/cost_watchdog.py`'s ה-jsonl `daily_watchdog()` הקיים **לא נגע**; `COST_WATCHDOG_LIVE` נשאר `false`; `cost_monitor.record_call()`/`core.cost_watchdog.log_usage()` הקיימים **לא נגעו** — זהו נתיב-רישום שני, מקביל, נוסף בלבד.
+
+**תיקוני-review שהוחלו לפני מיזוג (לא regression — נתפסו בטיוטה):**
+- `get_usage_window()` משתמש בחיבור/cursor **אחד** לכל הפעולה — לא "לבדוק זמינות עם חיבור אחד, לשחרר, לפתוח שני לשאילתה האמיתית".
+- סטטוס תלת-מצבי `"ok"|"unavailable"|"error"` — שאילתה שזורקת exception מדווחת כ-`"error"`, אף פעם לא מקופלת בשקט לתוצאה ריקה/מאופסת (בדיוק הבלבול שגרם לבאג המקורי של `AI_Usage_Daily` — "השאילתה נכשלה" מול "אירע שימוש-אפס אמיתי").
+- כל except שנוגע בחיבור קורא `conn.rollback()` לפני `release_conn(conn)`.
+
+**תיקונים נוספים מסבב-review שני, לפני שה-PR הזה עצמו מוזג:**
+- **A.** `app.py::run_agent`'s `except Exception: pass` גולמי סביב `record_llm_usage()` הוחלף בלוג ERROR (`exc_info=True`) — עדיין לא-fatal, אף פעם לא שקט.
+- **B.** dedup של `usage_events` עבר מ-`UNIQUE(request_id)` ל-`UNIQUE(provider, request_id)` (וה-`ON CONFLICT` בהתאם) — constraint גולמי על `request_id` מניח שכל מרחב-ID של כל provider זר למרחבים של providers אחרים, לא מובטח.
+- **C.** `providers/anthropic_shim.py::AnthropicLLMProvider.generate()` (F13, קריאת `client.messages.create()` ישירה, ללא caller חי — אומת ב-grep) הוכשר עם אותו חוזה `record_llm_usage()` כמו שאר 6 נקודות-הקריאה, על עיקרון (לא להסתמך על "לא בשימוש כרגע" שיישאר נכון).
+
+**נחווט ל-6 נקודות-קריאה אמיתיות + shim מת אחד:** `app.py::run_agent` (Anthropic), `llm_fallback.py::call_anthropic_text`/`call_openai_text` (Anthropic + OpenAI fallback, עם `fallback_from` ל-traceability, ללא double-record), `interaction_engine.py::analyze_interaction` (Anthropic), `voice_stt_adapter.py::_transcribe_openai` (OpenAI Whisper — **לא shadow טהור**, ראה סעיף הבא), `providers/anthropic_shim.py` (shim מת). `creative_generator.py` לא נזקק לשינוי — כבר קורא ל-`call_anthropic_text()`.
+
+**חריגה מתועדת מ"shadow בלבד" — `voice_stt_adapter.py`:** כדי לקבל `duration_seconds` אמיתי (לא ניחוש), `_transcribe_openai()` מבקש עכשיו `response_format="verbose_json"` מ-OpenAI — **שינוי אמיתי לפרמטר קריאת ה-API החי**, לא no-op. חתימת ההחזרה עברה מ-`(text, language)` ל-`(text, language, duration)`; caller יחיד + mock ה-self-test עודכנו בהתאם. התנהגות התמלול עצמה (טקסט, טיפול שגיאות) לא השתנתה, אבל זו לא no-op — צוין כאן במפורש, כפי שצוין ב-PR description אחרי תיקון-ניסוח.
+
+**E/F (smoke/production validation אמיתיים) — לא בוצעו בזמן בניית ה-PR:** נכתב במפורש ב-PR description שאין credentials חיים (Airtable/Postgres/OpenAI) בסביבה שבנתה את ה-PR — לא הועמד claim מזויף. ראה "עדכון סבב זה" ב-`AI_CONTEXT.md` להמשך: המשתמש דיווח (לא Claude) שביצע אימות פרודקשן ישיר בעצמו לאחר המיזוג.
+
+**בדיקות:** `test_model_pricing.py` (11 assertions), `test_usage_telemetry.py` (30 assertions — חיבור יחיד, סטטוס תלת-מצבי, rollback, צורת `ON CONFLICT (provider, request_id)`). Full sweep + smoke + integration + router + compileall — נקיים, הורץ שוב אחרי rebase על `main` שאחרי מיזוג #438.
+
+**Merged:** ✅ `main` (PR #439, head commit `6d4a26e`) | **✅ Verified בפרודקשן — מדווח ע"י המשתמש ישירות (לא נבדק עצמאית ע"י Claude, אין credentials חיים בסביבה זו):** `usage_events table: WORKING`; `Anthropic run_agent recording: VERIFIED`; `OpenAI Whisper recording: VERIFIED`; `runtime model matching pricing table: VERIFIED` (כלומר לא נפל ל-fail-safe ה-`$5/$25`); `exact pricing, not fallback estimate: VERIFIED`; `COST_WATCHDOG_LIVE=false: VERIFIED` (ה-trigger החי לא הושפע). **גבול-דיוק, לא ממצא:** נקודות ה-checklist E (smoke STT מלא לפני-מיזוג) ו-F (מספר הימים של השוואה מול חיוב-ספק אמיתי) לא בוצעו/לא הושלמו — **PR3 (trigger cutover) נשאר חסום במפורש**, לפי הנחיית המשתמש, עד שכמה ימי נתונים ייבדקו מול חיוב פרודקשן אמיתי.

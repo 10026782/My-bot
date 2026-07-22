@@ -3059,3 +3059,27 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **סטטוס באג:** מעולם לא היה לו מספר רשמי לפני עכשיו (נחקר, לא דווח כ-BUG-N בזמנו). נרשם עכשיו **רשמית עם מספר** לפי בקשת המשתמש. **לא תוקן** — לא הוחלט/אושר אף כיוון-תיקון.
 - **היקף:** לא נגעתי בקוד. רישום/Contract Chain בלבד.
 - **סטטוס:** 🔴 נרשם רשמית (BUG-130), Contract Chain אומת בקוד — **לא תוקן**. ממתין להחלטת המשתמש על כיוון-תיקון (וסדר-עדיפות מול BUG-127B/127C).
+
+## BUG-131 — `_write_airtable_row()` רשם הצלחה ל-`AI_Usage_Daily` בלי לבדוק את ערך ההחזרה של `airtable_create()` — כתיבות נכשלו בשקט שבועות ברציפות (BOM field mismatch) — ✅ תוקן, אומת בעקיפין בפרודקשן
+
+- **תאריך:** 21/07/2026.
+- **מקור:** `AI_Usage_Daily` הכילה רשומה אחת בלבד אי-פעם, עם ערכי אפס, למרות שהלוגים הראו "שורה יומית נכתבה ל-Airtable" בהצלחה כל יום. המשתמש הביא לוג production אמיתי: `[RuntimeSchemaProvider:SHADOW] discrepancy... provider_unknown=['Date']` וגם `422 Unprocessable Entity` / `UNKNOWN_FIELD_NAME: "Date"` ישירות מ-Airtable.
+- **שורש כפול:**
+  1. השדה החי ב-Airtable היה `"﻿Date"` (BOM-prefixed, לא נראה לעין), בעוד הקוד שלח `"Date"` פשוט — כל POST קיבל 422.
+  2. `_write_airtable_row()` רשמה הצלחה **ללא בדיקה** של ערך ההחזרה של `airtable_create()`, שמחזירה `None` (לא exception) על תגובה שאינה 2xx — כך שהכשל היה בלתי-נראה ללוגים לגמרי.
+- **תוקן:** (1) תיקון ה-BOM בוצע **ידנית ע"י הבעלים** ב-Airtable עצמו (`Date_tmp` swap) — לא תיקון קוד; (2) `_write_airtable_row()` מחזירה `bool` עכשיו, `daily_watchdog()` בודקת ומתעדת מפורשות כשל. נוסף גם regression test (`test_ai_usage_daily_schema.py`) שמוודא ש-`schema_cache.json`'s `AI_Usage_Daily` entry נקי מ-BOM/control chars, כדי שהשגיאה הזו לא תישנה בלי להיתפס.
+- **בדיקות:** `test_ai_usage_daily_schema.py` (10 assertions), `test_cost_watchdog_airtable_write.py` (13 assertions בגרסה הראשונית, הורחב ל-30 ב-BUG-132/C164).
+- **Verified בפרודקשן:** ✅ בעקיפין — ה-smoke שחשף את BUG-132 (ראה למטה) הוכיח שכתיבות **כן** מצליחות עכשיו (יצרו שורות אמיתיות, גם אם משוכפלות מסיבה אחרת) — לפני התיקון הזה שום כתיבה לא הצליחה מעולם. לא אומת עצמאית ע"י Claude (אין credentials חיים בסביבה זו) — מבוסס על ראיית production שהמשתמש הביא.
+- **Merged:** ✅ `main` (PR #435) — ראה `CHANGE_CONTROL_LOG.md` C163.
+- **סטטוס:** ✅ תוקן (קוד + תיקון ידני ב-Airtable), אומת בעקיפין בפרודקשן.
+
+## BUG-132 — lookup של `AI_Usage_Daily` השווה טקסט מול שדה מסוג DATE, לעולם לא תואם — upsert נפל תמיד ל-create, יצר שורות משוכפלות בפרודקשן — ✅ תוקן, גבול-דיוק על אימות-חוזר
+
+- **תאריך:** 21/07/2026 (נתפס מיד אחרי מיזוג PR #435 — ראה BUG-131 לעיל — ע"י smoke ישיר שהמשתמש הריץ בעצמו מול הבסיס החי).
+- **מקור:** דיווח production מפורש מהמשתמש: הרצת `_write_airtable_row()` פעמיים לאותו תאריך הפיקה **שתי** שורות (במקום create→patch); חזרה נוספת הפיקה **ארבע** שורות סה"כ (עם ערכי `11/22/3/36` ו-`44/55/6/105`, כל אחד כפול). כל קריאה נפלה ל-ענף ה-create — patch מעולם לא קרה.
+- **שורש:** `at_get_by_field(table, "Date", date_str)` בנה פורמולת השוואת-טקסט `{Date}='YYYY-MM-DD'` מול שדה `Date` מסוג **DATE** (לא טקסט) ב-Airtable. השוואת טקסט מול שדה date-typed לעולם לא תואמת — ה-lookup תמיד החזיר "לא נמצא", כל קריאה נפלה ל-`airtable_create()`.
+- **תוקן:** lookup עבר ל-`at_list_by_formula()` עם `DATETIME_FORMAT({Date}, 'YYYY-MM-DD')='<date>'`, `max_records=2`, עם 0/1/2+ handling מפורש (2+ = סירוב מוחלט + לוג שגיאת-שלמות-נתונים, לא ניחוש). `date.fromisoformat()` מאמת את הקלט לפני כל קריאה. לוגי הצלחה כוללים `branch=create|patch`, תאריך, `record_id`.
+- **בדיקות:** `test_cost_watchdog_airtable_write.py` נכתב מחדש (30 assertions). Full sweep נקי.
+- **Verified בפרודקשן:** 🟡 חלקי — עצם הבאג אומת ישירות בפרודקשן (ראיית המשתמש למעלה). ה**תיקון** לא אושר במפורש בסבב הזה עם פלט `✅ SMOKE PASSED` מוצג (ה-checklist דרש הרצת `tools/smoke_ai_usage_daily_upsert.py` מול הבסיס החי לפני מיזוג #437/#438) — אין ברשותי אישור מפורש שזה בוצע. אין לראות בכך ממצא של "עדיין שבור" — רק גבול-דיוק על מה שאומת במפורש מול מה שרק נדרש ע"י ה-checklist.
+- **Merged:** ✅ `main` (PR #437, המשך תיקון ב-#438) — ראה `CHANGE_CONTROL_LOG.md` C164/C165.
+- **סטטוס:** ✅ קוד תוקן ונבדק (unit-level), הבאג המקורי אומת ונסגר בפרודקשן — אימות-חוזר מפורש של ה-fix הספציפי (smoke PASSED) לא תועד בסבב הזה.
