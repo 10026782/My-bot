@@ -35,10 +35,10 @@ STATUS = PLANNING BLOCKED
 - **Phase 1 (Leads read-only projection)** — **קיים ב-runtime, מאומת בפרודקשן.** `core/leads_reasoning_projection.py`, מחובר ל-`GET /api/leads/<lead_id>`, מאחורי flag תלת-מצבי `FEATURE_CORE_REASONING_LEADS_STATE` (off/shadow/on, **ברירת מחדל off**). `BUG_AUDIT_LOG.md`: "BUG-104 Phase 1 runtime: VERIFIED IN PROD".
 - **Phase 2A.0 (schema canonicalization)** — **SPEC בלבד, אין קוד runtime.** מתועד ישירות (`CHANGE_CONTROL_LOG.md`: "Audit + SPEC בלבד — אין קוד/schema/frontend"; `AI_CONTEXT.md`: "Phase 2A.0 — SPEC בלבד; ניקוי שדות ... טרם בוצע").
 - **Phase 2A.1 (Current State Policy)** — **מומש ב-runtime**, לא SPEC בלבד (בניגוד לניסוח הקודם כאן): `core/adapters/leads_adapter.py::_normalise_status()` ו-`core/leads_reasoning_projection.py`'s `_LIVE_TO_ADAPTER_FIELDS`, per `docs/architecture/bug-104/PHASE_2A_CLOSEOUT.md`. עדיין תחת אותו flag (off/shadow) — קוד ממומש ובדיקות ירוקות, אך ללא ראיית-הרצה חיה מתועדת עדיין.
-- **Phase 2A.2 (Lead-specific wording)** — **סטטוס שנוי-במחלוקת בין מסמכי הריפו עצמם, לא רק כאן.** `AI_CONTEXT.md` טוען "Phase 1/1.1/2A.1/2A.2 ממוזג ומאומת ב-tests" — אבל `docs/architecture/bug-104/PHASE_2A_CLOSEOUT.md` מרשים את אותו הניסוח-הספציפי-ללידים תחת "§5 Recommended Next Options" (כלומר: הצעה עתידית, לא עבודה שהושלמה), ואין רישום תואם ב-`CHANGE_CONTROL_LOG.md`/`BUG_AUDIT_LOG.md`/`ROADMAP.md` למימוש בפועל. **פער-תיעוד פתוח בריפו עצמו** — לא נפתר במסמך הזה, מדווח כ-item פתוח (ראה דוח מלווה).
+- **Phase 2A.2 (Lead-specific wording)** — **ההכרעה, מאומתת ישירות מול `origin/main` (לא הנחה):** `IMPLEMENTED + MERGED`, `TEST/STATIC VERIFIED`, `NOT YET CLAIMED AS PRODUCTION-TRAFFIC VERIFIED`. אומת דרך GitHub API ישירות (לא cache מקומי): PR #377 ("BUG-104 Phase 2A.2: Lead-specific evidence & next_step wording") — `merged: true`, `merged_at: 2026-07-17T13:02:37Z`, בסיס `main`. `core/leads_reasoning_projection.py` ב-`main` (SHA `f607a2a`) מכיל בפועל `_apply_lead_wording()` (מיושם ב-`build_reasoning_projection()`), עם comment-block מפורש "BUG-104 Phase 2A.2". תוצאות הטסטים המדווחות ב-PR: `test_bug104_phase2a2_lead_wording.py` 37/37, וכל חמש חבילות ה-regression הקשורות (`test_bug104_phase2a1_current_state_policy.py`, `test_bug104_leads_reasoning_projection.py`, `test_bug104_phase1_1_contract_hardening.py`, `test_bug104_tma_lead_event_bridge.py`, `test_core_reasoning.py`) ירוקות וללא שינוי. **אין** ב-PR/בקוד שום ראיית-הרצה מ-production traffic חי (`FEATURE_CORE_REASONING_LEADS_STATE` נשאר off/shadow) — ומכאן ה"NOT YET CLAIMED" המפורש. `docs/architecture/bug-104/PHASE_2A_CLOSEOUT.md` תועד בטעות תחת "§5 Recommended Next Options" (מצג ישן, מלפני המיזוג) — מתוקן בעדכון מלווה לאותו קובץ. אין עוד קונפליקט-תיעוד פתוח בנקודה הזאת.
 - **בכל מקרה, בכל השלבים הממומשים (1, 2A.1):** ה-projection נשארת **read-only, flag-gated, וללא סמכות-ביצוע** — אין שום קוד תחת BUG-104 שכותב ל-Airtable או קורא ל-dispatcher/tool. **Scope מוצהר: Leads בלבד, לא Understanding Layer כללי** — הרחבה לכל תחומי העסק (U1) היא החלטה ארכיטקטונית נפרדת, עדיין פתוחה.
 
-**Gap:** "owns business state/evidence/phase/confidence" הוא היעד — המימוש בפועל הוא projection **read-only ללא סמכות-ביצוע**, flag-כבוי כברירת מחדל, תחום Leads בלבד — גם כש-Phase 2A.1 (לא רק Phase 1) כבר קוד ממומש, לא רק SPEC.
+**Gap:** "owns business state/evidence/phase/confidence" הוא היעד — המימוש בפועל הוא projection **read-only ללא סמכות-ביצוע**, flag-כבוי כברירת מחדל, תחום Leads בלבד — גם כש-Phase 2A.1 **ו-Phase 2A.2** (לא רק Phase 1) כבר קוד ממומש-ומוזג, לא רק SPEC. "ממומש" ≠ "מאומת ב-production traffic" — ההבחנה הזו נשארת לכל שלב, כולל 2A.1/2A.2.
 
 ### שכבה 2 — TurnCoordinator
 
@@ -63,6 +63,24 @@ STATUS = PLANNING BLOCKED
 **`ExecutionReceipt` — טיפול-ביושר, לא כ-מחלקה קיימת:** `"ExecutionReceipt"` הוא **מונח ארכיטקטוני בלבד** — קיים רק כתיאור-כוונה בהערה (`action_gateway.py:4`: "ExecutionReceipt הוא ההוכחה היחידה לביצוע"), **אין** בשום מקום בקוד `class ExecutionReceipt` בפועל. אסור לתאר אותו כטיפוס runtime קיים בשום מסמך — כולל כאן. **`ExecutionReceipt` קנוני עתידי (אם/כש-ימומש) חייב לעבור דרך Planning Gate ייעודי בתוך F52/Phase 4C (שכבה 3) + Cross-Layer Impact Matrix מלא** (§2 למטה) — לא להיכתב אגב-אורחא כחלק ממסמך שכבה אחרת (בדיוק הטעות שכבר קרתה, ראה §3 לפירוט המלא ולתיקון שהוחל).
 
 **נפרד לגמרי, לא לבלבל:** `class ActionFact` (`action_gateway.py:241`) **קיימת בפועל** — struct צר, scoped לקריאת-tool בודדת (`tool_name`/`contract_id`/`outcome`/`record_id`/`error_code`/`raw_tool_response`), משמש לבניית `GatewayReply` דרך `compose_status_reply()`. **שמור בלעדית לשכבה 4** — ראה §3/§4 להיסטוריית ה-collision עם TurnCoordinator ולתיקון.
+
+---
+
+## 1.5 Cross-Cutting Guard — RP5 Evidence Finalization (לא שכבה סמכותית חמישית)
+
+**מה זה, מבוסס-grep:** "RP5" = `PR-RP5` (Evidence Finalizer enforcement) מתוך תוכנית "BOSS Agent Reliability and Permission Hardening" (`BOSS_AGENT_RELIABILITY_AND_PERMISSION_HARDENING_SPEC.md` §4 R4/R5). RP4 — `core/turn_evidence.py` (PR #362, `3a3edbe`) — **code-complete, unit-tested** (`test_turn_evidence_shadow.py`), מסווג כל turn לאחד מ-9 מצבים דרך `TurnEvidenceSummary.classification()` (`no_evidence`/`verified_read_only`/`verified_write_success`/`failure`/`outcome_unknown`/`approval_pending`/`unverified_effect`/`mixed`/`mixed_with_unknown`), **shadow-only היום** — `FEATURE_EVIDENCE_FINALIZER` כבוי ב-production, `RP5_PREFLIGHT_BLOCKER.md` מתעד ש-RP5 עצמו (אכיפה בפועל על `final_reply`) **חסום** עד שנאספת ראיית-shadow מ-production. נפרד מ-`core/anti_hallucination.py` (`verify_execution`/`sanitize_agent_response`) — זה כבר **חי** ב-`run_agent()`, לא shadow-only.
+
+**למה זה guard חוצה-שכבות, לא שכבה חמישית:** RP4/RP5 **אינם** מקור-סמכות עצמאי — הם **צורכים** תוצאות שכבר חושבו ע"י שכבה 3 (C53a evidence contract, `verify_execution`) ושכבה 4 (`ActionContract.status`, `DispatcherOutcome`) ומייצרים מהן סיווג-ראיה ו-grounding-check לתשובה למשתמש. אין להם סמכות להמציא evidence, לעקוף status קנוני, או לקבוע מדיניות-אישור. בדיוק בגלל זה הם **guard**, לא שכבה: הם לא מכריעים "מה קרה", הם בודקים שהתשובה-למשתמש עקבית עם מה שהוכרע כבר.
+
+**מתי חובה לבדוק את ה-guard הזה** (בנוסף ל-4 השכבות ב-§1, לא במקומן) — כל שינוי שנוגע ב:
+- action-status claims (טענות "בוצע"/"נכשל"/"ממתין" בתשובה למשתמש)
+- tool-result evidence (C53a contract, `verify_execution`)
+- `ActionContract.status`
+- `outcome_unknown` (מצב-ביניים לא-חד-משמעי, לא success ולא failure)
+- reply grounding (האם התשובה למשתמש נתמכת ע"י evidence מאומת, לא רק טקסט שהמודל כתב)
+- ניסוח success/failure/pending הפונה למשתמש
+
+**ממצא ממשי (לא תיאורטי) מתוך המסמך הזה עצמו:** `TURN_COORDINATOR_BEHAVIOR_CONTRACT_V1.md`, משפחת "Lifecycle Fabrication" (תרחישים 14-15), מפנה ל-`validate_agent_output()` — פונקציה שמוגדרת **רק** כהצעה ב-`TURN_COORDINATOR_PROPOSAL_V2.md:309`, **אינה קיימת בקוד runtime**. אם/כש-תרחישים 14-15 ימומשו, `validate_agent_output()` **אסור** שיהפוך למנגנון-הצדקה מקביל ל-`core/anti_hallucination.py`/RP4-RP5 (בדיוק אותה קטגוריית-טעות כמו `ActionFact`, §3/§4 איסור #1) — מימוש עתידי של תרחישים 14-15 **חייב** לעבור דרך ה-guard הזה (RP4's `TurnEvidenceSummary`/`core/anti_hallucination.py`), לא להגדיר grounding-check עצמאי משלו. **מסומן כ-item פתוח, לא נפתר במסמך הזה** — דורש הכרעה מפורשת בזמן שממשים את 14-15 בפועל.
 
 ---
 
@@ -112,6 +130,13 @@ touched: [directly | indirectly | not touched]
 
 ### Proof of non-impact (חובה לכל שכבה עם touched=not touched)
 [ראה §6 — grep evidence + unchanged-tests evidence, לא הצהרה בלבד]
+
+### Cross-Cutting Guard — RP5 Evidence Finalization (§1.5)
+applies: [yes | no — עם נימוק, לא רק המילה "לא"]
+אם yes: כיצד השינוי משפיע על action-status claims / tool-result evidence /
+ActionContract.status / outcome_unknown / reply grounding / ניסוח-פונה-למשתמש,
+ואיזה מנגנון קיים (core/turn_evidence.py RP4, core/anti_hallucination.py) נצרך —
+לא מנגנון-הצדקה עצמאי חדש.
 ```
 
 ---
@@ -165,7 +190,7 @@ touched: [directly | indirectly | not touched]
 STATUS = PLANNING BLOCKED
 ```
 
-עד שה-Cross-Layer Impact Matrix (§2) הושלם במלואו (4 שכבות × 9 שדות, כולל proof-of-non-impact לכל שכבה שמסומנת "לא נוגע") — אין:
+עד שה-Cross-Layer Impact Matrix (§2) הושלם במלואו (4 שכבות × 9 שדות, כולל proof-of-non-impact לכל שכבה שמסומנת "לא נוגע", **וגם** שדה ה-applicability של ה-RP5 Evidence Finalization guard, §1.5) — אין:
 - קוד runtime חדש הנוגע לאחת מ-4 השכבות,
 - PR מימוש שממזג שינוי לאחת מ-4 השכבות,
 - הצהרת "תוקן"/"✅ Fixed"/"מוכן לאכיפה" על עבודה שנוגעת לאחת מ-4 השכבות.
