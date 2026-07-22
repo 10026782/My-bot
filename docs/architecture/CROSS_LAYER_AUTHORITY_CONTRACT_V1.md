@@ -30,9 +30,15 @@ STATUS = PLANNING BLOCKED
 
 **בעלות (יעד):** business state, evidence, phase, confidence, recommended next step.
 
-**מציאות היום:** Phase 1 בלבד — projection **read-only** על מצב Leads (`core/leads_reasoning_projection.py`), מחובר ל-`GET /api/leads/<lead_id>`, מאחורי flag תלת-מצבי `FEATURE_CORE_REASONING_LEADS_STATE` (off/shadow/on, **ברירת מחדל off**). המודולים `core/reasoning_entity.py`/`core/reasoning_engines.py` קדמו ל-BUG-104 עצמו (שם היסטורי F22/"Core Reasoning Layer"). **Scope מוצהר: Leads בלבד, לא Understanding Layer כללי** — הרחבה לכל תחומי העסק (U1) היא החלטה ארכיטקטונית נפרדת, עדיין פתוחה (`CHANGE_CONTROL_LOG.md`). Phase 2A.0/2A.1 הם SPECs בלבד, ללא קוד runtime, ממתינים לאישור בעלים.
+**מציאות היום — מדויקת יותר ממה שנרשם בסבב הקודם, לפי שלב:**
 
-**Gap:** "owns business state/evidence/phase/confidence" הוא היעד — המימוש בפועל הוא projection צר, flag-כבוי כברירת מחדל, תחום Leads בלבד.
+- **Phase 1 (Leads read-only projection)** — **קיים ב-runtime, מאומת בפרודקשן.** `core/leads_reasoning_projection.py`, מחובר ל-`GET /api/leads/<lead_id>`, מאחורי flag תלת-מצבי `FEATURE_CORE_REASONING_LEADS_STATE` (off/shadow/on, **ברירת מחדל off**). `BUG_AUDIT_LOG.md`: "BUG-104 Phase 1 runtime: VERIFIED IN PROD".
+- **Phase 2A.0 (schema canonicalization)** — **SPEC בלבד, אין קוד runtime.** מתועד ישירות (`CHANGE_CONTROL_LOG.md`: "Audit + SPEC בלבד — אין קוד/schema/frontend"; `AI_CONTEXT.md`: "Phase 2A.0 — SPEC בלבד; ניקוי שדות ... טרם בוצע").
+- **Phase 2A.1 (Current State Policy)** — **מומש ב-runtime**, לא SPEC בלבד (בניגוד לניסוח הקודם כאן): `core/adapters/leads_adapter.py::_normalise_status()` ו-`core/leads_reasoning_projection.py`'s `_LIVE_TO_ADAPTER_FIELDS`, per `docs/architecture/bug-104/PHASE_2A_CLOSEOUT.md`. עדיין תחת אותו flag (off/shadow) — קוד ממומש ובדיקות ירוקות, אך ללא ראיית-הרצה חיה מתועדת עדיין.
+- **Phase 2A.2 (Lead-specific wording)** — **סטטוס שנוי-במחלוקת בין מסמכי הריפו עצמם, לא רק כאן.** `AI_CONTEXT.md` טוען "Phase 1/1.1/2A.1/2A.2 ממוזג ומאומת ב-tests" — אבל `docs/architecture/bug-104/PHASE_2A_CLOSEOUT.md` מרשים את אותו הניסוח-הספציפי-ללידים תחת "§5 Recommended Next Options" (כלומר: הצעה עתידית, לא עבודה שהושלמה), ואין רישום תואם ב-`CHANGE_CONTROL_LOG.md`/`BUG_AUDIT_LOG.md`/`ROADMAP.md` למימוש בפועל. **פער-תיעוד פתוח בריפו עצמו** — לא נפתר במסמך הזה, מדווח כ-item פתוח (ראה דוח מלווה).
+- **בכל מקרה, בכל השלבים הממומשים (1, 2A.1):** ה-projection נשארת **read-only, flag-gated, וללא סמכות-ביצוע** — אין שום קוד תחת BUG-104 שכותב ל-Airtable או קורא ל-dispatcher/tool. **Scope מוצהר: Leads בלבד, לא Understanding Layer כללי** — הרחבה לכל תחומי העסק (U1) היא החלטה ארכיטקטונית נפרדת, עדיין פתוחה.
+
+**Gap:** "owns business state/evidence/phase/confidence" הוא היעד — המימוש בפועל הוא projection **read-only ללא סמכות-ביצוע**, flag-כבוי כברירת מחדל, תחום Leads בלבד — גם כש-Phase 2A.1 (לא רק Phase 1) כבר קוד ממומש, לא רק SPEC.
 
 ### שכבה 2 — TurnCoordinator
 
@@ -50,11 +56,13 @@ STATUS = PLANNING BLOCKED
 
 ### שכבה 4 — Durable Atomic Approval layer
 
-**בעלות (יעד):** מחזור חיים של `ActionContract`, atomic claim, ביצוע יחיד, סטטוס קנוני, `ExecutionReceipt`.
+**בעלות (יעד):** מחזור חיים של `ActionContract`, atomic claim, ביצוע יחיד, סטטוס קנוני, ו**עתידית** — `ExecutionReceipt` קנוני.
 
 **מציאות היום:** `ActionContract` (`core/action_gateway.py:136`, שדה `status` — ליטרל `draft|pending|approved|rejected|completed|failed|outcome_unknown`), `ActionContractRepository` (`core/action_contract_repository.py:167`), `ActionGateway.propose_action()` (`:811`), atomic claim דרך `execute_with_atomic_claim()` (`core/action_gateway_atomic_executor.py`, נקרא מ-`:1861`). `FEATURE_ACTION_GATEWAY`/`FEATURE_ATOMIC_CLAIMS` שני הדגלים **כבויים כברירת מחדל** — התשתית code-complete, לא live במלואה.
 
-**⚠️ ממצא-אזהרה שנתגלה תוך כדי כתיבת המסמך הזה — ראה §4 לדוגמה מלאה:** `"ExecutionReceipt"` **אינו מחלקה קיימת** בשום מקום בקוד — קיים רק כמונח מושגי בהערה (`action_gateway.py:4`: "ExecutionReceipt הוא ההוכחה היחידה לביצוע") וב-`TURN_COORDINATOR_BEHAVIOR_CONTRACT_V1.md`'s §6. **יש כן `class ActionFact` אמיתית** (`action_gateway.py:241`) — אבל היא דבר **אחר לגמרי**: struct צר, scoped לקריאת-tool בודדת (`tool_name`/`contract_id`/`outcome`/`record_id`/`error_code`/`raw_tool_response`), משמש לבניית `GatewayReply` דרך `compose_status_reply()` — **לא** הרשומה העמידה חוצת-turn שתיאור ה-TurnCoordinator contract מתכוון אליה כש-הוא כותב "`ActionFact`/`ExecutionReceipt`".
+**`ExecutionReceipt` — טיפול-ביושר, לא כ-מחלקה קיימת:** `"ExecutionReceipt"` הוא **מונח ארכיטקטוני בלבד** — קיים רק כתיאור-כוונה בהערה (`action_gateway.py:4`: "ExecutionReceipt הוא ההוכחה היחידה לביצוע"), **אין** בשום מקום בקוד `class ExecutionReceipt` בפועל. אסור לתאר אותו כטיפוס runtime קיים בשום מסמך — כולל כאן. **`ExecutionReceipt` קנוני עתידי (אם/כש-ימומש) חייב לעבור דרך Planning Gate ייעודי בתוך F52/Phase 4C (שכבה 3) + Cross-Layer Impact Matrix מלא** (§2 למטה) — לא להיכתב אגב-אורחא כחלק ממסמך שכבה אחרת (בדיוק הטעות שכבר קרתה, ראה §3 לפירוט המלא ולתיקון שהוחל).
+
+**נפרד לגמרי, לא לבלבל:** `class ActionFact` (`action_gateway.py:241`) **קיימת בפועל** — struct צר, scoped לקריאת-tool בודדת (`tool_name`/`contract_id`/`outcome`/`record_id`/`error_code`/`raw_tool_response`), משמש לבניית `GatewayReply` דרך `compose_status_reply()`. **שמור בלעדית לשכבה 4** — ראה §3/§4 להיסטוריית ה-collision עם TurnCoordinator ולתיקון.
 
 ---
 
@@ -108,16 +116,18 @@ touched: [directly | indirectly | not touched]
 
 ---
 
-## 3. דוגמה מלאה, אמיתית — למה השער הזה קיים (לא תיאורטי)
+## 3. דוגמה מלאה, אמיתית — למה השער הזה קיים (לא תיאורטי), ואיך היא נפתרה
 
-תוך כדי כתיבת המסמך הזה עצמו (§1, שכבה 4) התגלה **collision אמיתי, קיים כרגע בריפו**:
+תוך כדי כתיבת המסמך הזה עצמו (§1, שכבה 4) התגלה **collision אמיתי, שהיה קיים בריפו**:
 
-- `TURN_COORDINATOR_BEHAVIOR_CONTRACT_V1.md` §6 משתמש ב-"`ActionFact`/`ExecutionReceipt`" כמושג ל**רשומה עמידה חוצת-turn** (שמאפשרת לענות "מה עשית עכשיו" בטורן מאוחר יותר).
+- `TURN_COORDINATOR_BEHAVIOR_CONTRACT_V1.md` §6 השתמש ב-"`ActionFact`/`ExecutionReceipt`" כמושג ל**רשומה עמידה חוצת-turn** (שמאפשרת לענות "מה עשית עכשיו" בטורן מאוחר יותר).
 - אבל `core/action_gateway.py:241` **כבר מגדיר `class ActionFact`** — struct **שונה לגמרי**: scoped לקריאת-tool בודדת בתוך turn, לא עמיד חוצה-turns, ומשמש למטרה אחרת (בניית `GatewayReply` דרך `compose_status_reply()`).
 
-**אילו היה Cross-Layer Impact Matrix קיים בזמן כתיבת ה-TurnCoordinator contract**, שדה "shared identifiers" של שכבה 4 היה **חובה** לזהות את זה — לפני שהמונח "`ActionFact`" נכתב 3 פעמים במסמך חוזה קפוא, לא אחרי.
+**אילו היה Cross-Layer Impact Matrix קיים בזמן כתיבת ה-TurnCoordinator contract**, שדה "shared identifiers" של שכבה 4 היה **חובה** לזהות את זה — לפני שהמונח "`ActionFact`" נכתב 3 פעמים במסמך חוזה קפוא, לא אחרי. זו הדוגמה החיה למה השדה הזה קיים במטריצה.
 
-**Action item פתוח (לא מומש כאן — מחוץ לסקופ של המסמך הזה עצמו):** `TURN_COORDINATOR_BEHAVIOR_CONTRACT_V1.md` §6 צריך שם אחר לרשומה העמידה שהוא מתאר (למשל `TurnResultFact`/`DurableTurnReceipt`) לפני שכל מימוש שלב 4 (§6 בחוזה) מתחיל — אחרת מימוש עתידי עלול בטעות לנסות "להרחיב" את ה-`ActionFact` הקיים (שכבה 4) לתפקיד שהוא לא תוכנן אליו, או ליצור שני מושגים בשם זהה בשתי שכבות שונות.
+**✅ נפתר בסבב הבא (לא נשאר action item פתוח):**
+- `ActionFact` **שמור בלעדית** ל-`core/action_gateway.py` (שכבה 4) — TurnCoordinator (או כל שכבה אחרת) **רשאי להפנות** אליו (למשל דרך `action_contract_id` בתוך רשומת-קורלציה), אבל **אסור לו להגדיר-מחדש או לשנות את משמעותו** (ראה §4, איסור חדש).
+- `TURN_COORDINATOR_BEHAVIOR_CONTRACT_V1.md` §6 עודכן — הרשומה העמידה חוצת-ה-turn נקראת עכשיו `TurnActionReference` (שם חדש, לא שם-שאול), מוגדרת במפורש כ**מטא-דאטה של קורלציה בלבד** (`turn_id`, `decision_id`, `action_contract_id`, `execution_evidence_ref`, `created_at`) — **לא** ה-outcome הסמכותי של הפעולה. ה-outcome הסמכותי נשלף תמיד מחדש משכבה 3/4 (`action_contract_id`/`execution_evidence_ref`), לא מהרשומה עצמה.
 
 ---
 
@@ -132,7 +142,8 @@ touched: [directly | indirectly | not touched]
 5. **ביצוע בלי `TurnDecision` + הרשאת-policy** — שום handler לא מבצע tool/write בלי `TurnDecision` (שכבה 2) שמצביע עליו במפורש **וגם** אישור-policy מהתשתית של שכבה 3 (`ToolMeta`/`action_validator`) — היעדר אחד מהשניים מספיק לחסימה.
 6. **Core Reasoning מבצע פעולות** — שכבה 1 (BUG-104) קוראת/מחשבת state, evidence, phase, confidence — היא **אף פעם** לא הבעלים של ביצוע tool/write. אם קוד Core Reasoning קורא ל-dispatcher/tool ישירות, זו הפרת-שכבה.
 7. **TurnCoordinator ממציא business state או approval policy** — שכבה 2 קובעת ניתוב/בעלות-תשובה, **לא** מחליטה מהו "מצב עסקי נכון" (זו שכבה 1) ולא ממציאה כללי-אישור משלה (זו שכבה 3/4). אם TurnCoordinator מתחיל "לנחש" confidence/phase, זו הפרת-גבול.
-8. **תשובות/תוצאות לא-מקושרות בלי `turn_id` וראיית-ביצוע** — כל תשובה/tool_result חייב `turn_id` (שכבה 2, §6 ב-TurnCoordinator contract) **וגם** evidence-of-execution תואם (שכבה 3/4 — C53a contract / `ActionFact`/`ExecutionReceipt`) — אחד בלי השני אסור.
+8. **תשובות/תוצאות לא-מקושרות בלי `turn_id` וראיית-ביצוע** — כל תשובה/tool_result חייב `turn_id` (שכבה 2, §6 ב-TurnCoordinator contract) **וגם** evidence-of-execution תואם (שכבה 3/4 — C53a contract, `TurnActionReference`'s `execution_evidence_ref`, `class ActionFact` השייכת בלעדית לשכבה 4) — אחד בלי השני אסור.
+9. **שימוש-חוזר לא-מורשה בזהות קיימת (identifier squatting)** — שכבה רשאית **להפנות** למחלקה/מזהה שכבר קיימים בשכבה אחרת (למשל TurnCoordinator שמצטט `action_contract_id` השייך לשכבה 4), אבל **אסור לה להגדיר-מחדש אותו השם למושג שונה** — ראה §3 לדוגמה אמיתית (`ActionFact`) שכבר קרתה ותוקנה.
 
 ---
 
