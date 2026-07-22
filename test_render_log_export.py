@@ -42,10 +42,38 @@ def _resp(status=200, json_body=None, headers=None, reason="OK"):
     )
 
 
-ENTRY = lambda id_, ts, msg="BUG-130 shadow decision logged", extra=None: {
-    "id": id_, "timestamp": ts, "message": msg, "type": "app", "resource": "srv-1",
+ENTRY = lambda id_, ts, msg="BUG-130 shadow decision logged", resource="srv-1", type_="app", extra=None: {
+    "id": id_, "timestamp": ts, "message": msg, "type": type_, "resource": resource,
     **(extra or {}),
 }
+
+
+# ── Hermetic guard — installed BEFORE any test runs, active for the whole
+# suite. Every test block below that touches the network locally overrides
+# this via its own `with patch.object(rle.requests, "get", ...)` /
+# `patch.object(rle.subprocess, "run", ...)`, which correctly restores this
+# guard on exit. Anything NOT locally mocked falls through to here and
+# fails loudly instead of making a real request/subprocess call — this is
+# what makes the suite safe to run unmodified on a Windows machine with
+# curl.exe on PATH (see select_transport(): 'auto' picks curl there).
+def _unmocked_network_guard(*args, **kwargs):
+    raise AssertionError(
+        "requests.get was reached without being mocked in this test — the suite must "
+        "never make a real network call. Wrap this block in patch.object(rle.requests, 'get', ...)."
+    )
+
+
+def _unmocked_subprocess_guard(*args, **kwargs):
+    raise AssertionError(
+        "subprocess.run was reached without being mocked in this test — the suite must "
+        "never invoke curl.exe for real. Wrap this block in patch.object(rle.subprocess, 'run', ...)."
+    )
+
+
+_network_guard = patch.object(rle.requests, "get", side_effect=_unmocked_network_guard)
+_subprocess_guard = patch.object(rle.subprocess, "run", side_effect=_unmocked_subprocess_guard)
+_network_guard.start()
+_subprocess_guard.start()
 
 
 # ── 1. Official request shape ────────────────────────────────────────────
@@ -90,7 +118,7 @@ with tempfile.TemporaryDirectory() as td:
 
     with patch.object(rle.requests, "get", side_effect=fake_get), patch.object(rle, "_read_api_key", return_value="k"):
         rle.export_logs("ENV", "own-1", "srv-1", export_dir, dry_run=False, catch_up_days=1,
-                         log_type="app", marker="BUG-130", allow_full_export=False)
+                         log_type="app", marker="BUG-130", allow_full_export=False, transport="requests")
 
     chk("T9: exactly 2 requests made (one per page)", len(calls) == 2)
     chk("T10: second request uses BOTH nextStartTime and nextEndTime from page 1's response",
@@ -103,28 +131,29 @@ with tempfile.TemporaryDirectory() as td:
 # ── 3. Same-timestamp records are all preserved (dedup key is id, not timestamp) ──
 print("\n── Same-timestamp records preserved ──")
 same_ts_page = {"logs": [
-    ENTRY("same-ts-1", "2026-07-22T00:00:00Z", "BUG-130 first"),
-    ENTRY("same-ts-2", "2026-07-22T00:00:00Z", "BUG-130 second"),
+    ENTRY("same-ts-1", "2026-07-22T00:00:00Z", "BUG-130 first", resource="srv-2"),
+    ENTRY("same-ts-2", "2026-07-22T00:00:00Z", "BUG-130 second", resource="srv-2"),
 ], "hasMore": False}
 with tempfile.TemporaryDirectory() as td:
     export_dir = Path(td)
     with patch.object(rle.requests, "get", return_value=_resp(json_body=same_ts_page)), \
          patch.object(rle, "_read_api_key", return_value="k"):
         rle.export_logs("ENV", "own-1", "srv-2", export_dir, dry_run=False, catch_up_days=1,
-                         log_type="app", marker="BUG-130", allow_full_export=False)
+                         log_type="app", marker="BUG-130", allow_full_export=False, transport="requests")
     lines = (export_dir / "srv-2" / "2026-07-22.jsonl").read_text().splitlines()
     chk("T12: both same-timestamp, different-id entries kept, none collapsed", len(lines) == 2)
 
 
 # ── 4. Crash/retry idempotency — no duplicate JSONL records ──────────────
 print("\n── Crash/retry idempotency ──")
-retry_page = {"logs": [ENTRY("dup-1", "2026-07-22T00:00:00Z"), ENTRY("dup-2", "2026-07-22T00:00:00Z")], "hasMore": False}
+retry_page = {"logs": [ENTRY("dup-1", "2026-07-22T00:00:00Z", resource="srv-3"),
+                       ENTRY("dup-2", "2026-07-22T00:00:00Z", resource="srv-3")], "hasMore": False}
 with tempfile.TemporaryDirectory() as td:
     export_dir = Path(td)
     with patch.object(rle.requests, "get", return_value=_resp(json_body=retry_page)), \
          patch.object(rle, "_read_api_key", return_value="k"):
         rle.export_logs("ENV", "own-1", "srv-3", export_dir, dry_run=False, catch_up_days=1,
-                         log_type="app", marker="BUG-130", allow_full_export=False)
+                         log_type="app", marker="BUG-130", allow_full_export=False, transport="requests")
         first_run_lines = (export_dir / "srv-3" / "2026-07-22.jsonl").read_text().splitlines()
 
         # Simulate a naive retry re-fetching the exact same window/entries
@@ -132,7 +161,7 @@ with tempfile.TemporaryDirectory() as td:
         # the write but the checkpoint save is being re-verified) —
         # dedup-by-id must prevent duplicate lines regardless of checkpoint state.
         rle.export_logs("ENV", "own-1", "srv-3", export_dir, dry_run=False, catch_up_days=1,
-                         log_type="app", marker="BUG-130", allow_full_export=False)
+                         log_type="app", marker="BUG-130", allow_full_export=False, transport="requests")
         second_run_lines = (export_dir / "srv-3" / "2026-07-22.jsonl").read_text().splitlines()
 
     chk("T13: first run wrote both entries", len(first_run_lines) == 2)
@@ -173,25 +202,25 @@ with tempfile.TemporaryDirectory() as td:
 # ── 6. Missing id/timestamp — fail closed ─────────────────────────────────
 print("\n── Fail closed on missing id/timestamp ──")
 try:
-    rle._validate_and_project({"timestamp": "2026-07-22T00:00:00Z", "message": "x"})
+    rle._validate_and_project({"timestamp": "2026-07-22T00:00:00Z", "message": "x"}, "srv-x", "app")
     chk("T18: entry missing id raises, is not silently dropped or written", False)
 except RuntimeError:
     chk("T18: entry missing id raises, is not silently dropped or written", True)
 
 try:
-    rle._validate_and_project({"id": "abc", "message": "x"})
+    rle._validate_and_project({"id": "abc", "message": "x"}, "srv-x", "app")
     chk("T19: entry missing timestamp raises", False)
 except RuntimeError:
     chk("T19: entry missing timestamp raises", True)
 
-bad_page = {"logs": [ENTRY("ok-1", "2026-07-22T00:00:00Z"), {"id": "missing-ts", "message": "BUG-130 no timestamp"}], "hasMore": False}
+bad_page = {"logs": [ENTRY("ok-1", "2026-07-22T00:00:00Z", resource="srv-4"), {"id": "missing-ts", "message": "BUG-130 no timestamp"}], "hasMore": False}
 with tempfile.TemporaryDirectory() as td:
     export_dir = Path(td)
     with patch.object(rle.requests, "get", return_value=_resp(json_body=bad_page)), \
          patch.object(rle, "_read_api_key", return_value="k"):
         try:
             rle.export_logs("ENV", "own-1", "srv-4", export_dir, dry_run=False, catch_up_days=1,
-                             log_type="app", marker="BUG-130", allow_full_export=False)
+                             log_type="app", marker="BUG-130", allow_full_export=False, transport="requests")
             chk("T20: a page containing one malformed entry aborts the whole export call", False)
         except RuntimeError:
             chk("T20: a page containing one malformed entry aborts the whole export call", True)
@@ -229,14 +258,14 @@ with tempfile.TemporaryDirectory() as td:
 
 # ── 9. Marker filtering ───────────────────────────────────────────────────
 print("\n── Marker filtering ──")
-mixed_page = {"logs": [ENTRY("m1", "2026-07-22T00:00:00Z", "BUG-130 relevant line"),
+mixed_page = {"logs": [ENTRY("m1", "2026-07-22T00:00:00Z", "BUG-130 relevant line", resource="srv-5"),
                         ENTRY("m2", "2026-07-22T00:00:01Z", "totally unrelated line")], "hasMore": False}
 with tempfile.TemporaryDirectory() as td:
     export_dir = Path(td)
     with patch.object(rle.requests, "get", return_value=_resp(json_body=mixed_page)), \
          patch.object(rle, "_read_api_key", return_value="k"):
         rle.export_logs("ENV", "own-1", "srv-5", export_dir, dry_run=False, catch_up_days=1,
-                         log_type="app", marker="BUG-130", allow_full_export=False)
+                         log_type="app", marker="BUG-130", allow_full_export=False, transport="requests")
     lines = (export_dir / "srv-5" / "2026-07-22.jsonl").read_text().splitlines()
     chk("T27: only the marker-matching entry is written", len(lines) == 1 and "BUG-130" in lines[0])
 
@@ -334,6 +363,205 @@ with patch.object(rle.requests, "get", return_value=_resp(json_body={"logs": [],
     chk("T46: --transport requests remains fully usable end-to-end (explicit, not just auto-fallback)",
         rle._fetch_log_page("k", "own-1", "srv-1", "T0", "T1", "app", direction="forward", transport="requests") == {"logs": [], "hasMore": False})
 
+
+# ── 12. Empty/null logs response — Render returns logs=null (not []) on a zero-match page ──
+print("\n── Empty/null logs response ──")
+
+# logs=null + hasMore=false: normalized to [], page succeeds, writes zero, checkpoint advances.
+null_empty_page = {"hasMore": False, "logs": None, "nextStartTime": "NS", "nextEndTime": "NE"}
+with tempfile.TemporaryDirectory() as td:
+    export_dir = Path(td)
+    with patch.object(rle.requests, "get", return_value=_resp(json_body=null_empty_page)), \
+         patch.object(rle, "_read_api_key", return_value="k"):
+        rle.export_logs("ENV", "own-1", "srv-null-1", export_dir, dry_run=False, catch_up_days=1,
+                         log_type="app", marker="BUG-130", allow_full_export=False, transport="requests")
+    chk("T47: logs=null with hasMore=false succeeds (no exception)", True)
+    written = list((export_dir / "srv-null-1").glob("*.jsonl"))
+    chk("T48: logs=null with hasMore=false writes zero records", len(written) == 0)
+    cp = json.loads((export_dir / "srv-null-1" / rle.CHECKPOINT_NAME).read_text())
+    chk("T49: logs=null with hasMore=false advances the checkpoint", cp["last_completed_end_time"] is not None)
+
+# logs=null + hasMore=true: contradictory, fails closed, checkpoint left untouched.
+null_more_page = {"hasMore": True, "logs": None, "nextStartTime": "NS", "nextEndTime": "NE"}
+with tempfile.TemporaryDirectory() as td:
+    export_dir = Path(td)
+    with patch.object(rle.requests, "get", return_value=_resp(json_body=null_more_page)), \
+         patch.object(rle, "_read_api_key", return_value="k"):
+        try:
+            rle.export_logs("ENV", "own-1", "srv-null-2", export_dir, dry_run=False, catch_up_days=1,
+                             log_type="app", marker="BUG-130", allow_full_export=False, transport="requests")
+            chk("T50: logs=null with hasMore=true fails closed", False)
+        except RuntimeError:
+            chk("T50: logs=null with hasMore=true fails closed", True)
+    checkpoint_path = export_dir / "srv-null-2" / rle.CHECKPOINT_NAME
+    chk("T51: logs=null with hasMore=true leaves no checkpoint written", not checkpoint_path.exists())
+
+# logs=[] (already an empty list, not null) — still succeeds normally.
+empty_list_page = {"hasMore": False, "logs": []}
+with tempfile.TemporaryDirectory() as td:
+    export_dir = Path(td)
+    with patch.object(rle.requests, "get", return_value=_resp(json_body=empty_list_page)), \
+         patch.object(rle, "_read_api_key", return_value="k"):
+        rle.export_logs("ENV", "own-1", "srv-empty-list", export_dir, dry_run=False, catch_up_days=1,
+                         log_type="app", marker="BUG-130", allow_full_export=False, transport="requests")
+    chk("T52: logs=[] (already a list) still succeeds normally",
+        (export_dir / "srv-empty-list" / rle.CHECKPOINT_NAME).exists())
+
+
+# ── 13. Labels-based provenance extraction and validation ──────────────────
+print("\n── Labels-based provenance ──")
+
+def LABELED_ENTRY(id_, ts, msg="BUG-130 via labels", resource="srv-labels-1", log_type="app"):
+    return {"id": id_, "timestamp": ts, "message": msg,
+            "labels": [{"name": "resource", "value": resource}, {"name": "type", "value": log_type}]}
+
+# nested labels: resource and type are extracted and persisted onto the entry.
+labels_page = {"hasMore": False, "logs": [LABELED_ENTRY("lbl-1", "2026-07-22T00:00:00Z", resource="srv-labels-1")]}
+with tempfile.TemporaryDirectory() as td:
+    export_dir = Path(td)
+    with patch.object(rle.requests, "get", return_value=_resp(json_body=labels_page)), \
+         patch.object(rle, "_read_api_key", return_value="k"):
+        rle.export_logs("ENV", "own-1", "srv-labels-1", export_dir, dry_run=False, catch_up_days=1,
+                         log_type="app", marker="BUG-130", allow_full_export=False, transport="requests")
+    rec = json.loads((export_dir / "srv-labels-1" / "2026-07-22.jsonl").read_text().splitlines()[0])
+    chk("T53: nested-labels resource extracted and persisted", rec.get("resource") == "srv-labels-1")
+    chk("T54: nested-labels type extracted and persisted", rec.get("type") == "app")
+
+# top-level resource/type remains supported (Render supplying them directly, no labels array).
+top_level_page = {"hasMore": False, "logs": [ENTRY("tl-1", "2026-07-22T00:00:00Z", "BUG-130 top-level", resource="srv-toplevel")]}
+with tempfile.TemporaryDirectory() as td:
+    export_dir = Path(td)
+    with patch.object(rle.requests, "get", return_value=_resp(json_body=top_level_page)), \
+         patch.object(rle, "_read_api_key", return_value="k"):
+        rle.export_logs("ENV", "own-1", "srv-toplevel", export_dir, dry_run=False, catch_up_days=1,
+                         log_type="app", marker="BUG-130", allow_full_export=False, transport="requests")
+    lines = (export_dir / "srv-toplevel" / "2026-07-22.jsonl").read_text().splitlines()
+    chk("T55: top-level resource/type still supported when Render supplies them directly",
+        len(lines) == 1 and json.loads(lines[0])["resource"] == "srv-toplevel")
+
+# top-level vs labels conflict: must fail closed, not silently pick one.
+conflict_entry = {
+    "id": "conflict-1", "timestamp": "2026-07-22T00:00:00Z", "message": "BUG-130 conflict",
+    "resource": "srv-top", "type": "app",
+    "labels": [{"name": "resource", "value": "srv-different"}, {"name": "type", "value": "app"}],
+}
+conflict_page = {"hasMore": False, "logs": [conflict_entry]}
+with tempfile.TemporaryDirectory() as td:
+    export_dir = Path(td)
+    with patch.object(rle.requests, "get", return_value=_resp(json_body=conflict_page)), \
+         patch.object(rle, "_read_api_key", return_value="k"):
+        try:
+            rle.export_logs("ENV", "own-1", "srv-top", export_dir, dry_run=False, catch_up_days=1,
+                             log_type="app", marker="BUG-130", allow_full_export=False, transport="requests")
+            chk("T56: conflicting top-level vs labels resource fails closed, does not silently pick one", False)
+        except RuntimeError:
+            chk("T56: conflicting top-level vs labels resource fails closed, does not silently pick one", True)
+    chk("T57: conflicting-provenance page wrote nothing",
+        not (export_dir / "srv-top").exists() or not any((export_dir / "srv-top").glob("*.jsonl")))
+
+# missing resource entirely (no top-level, no labels): whole-page abort, zero writes —
+# including the OTHER, otherwise-valid entry on the same page.
+no_resource_entry = {"id": "no-res-1", "timestamp": "2026-07-22T00:00:00Z", "message": "BUG-130 no resource", "type": "app"}
+ok_entry_same_page = ENTRY("ok-same-page", "2026-07-22T00:00:01Z", "BUG-130 would otherwise be fine", resource="srv-missing-res")
+missing_resource_page = {"hasMore": False, "logs": [ok_entry_same_page, no_resource_entry]}
+with tempfile.TemporaryDirectory() as td:
+    export_dir = Path(td)
+    with patch.object(rle.requests, "get", return_value=_resp(json_body=missing_resource_page)), \
+         patch.object(rle, "_read_api_key", return_value="k"):
+        try:
+            rle.export_logs("ENV", "own-1", "srv-missing-res", export_dir, dry_run=False, catch_up_days=1,
+                             log_type="app", marker="BUG-130", allow_full_export=False, transport="requests")
+            chk("T58: an entry missing resource entirely aborts the whole page", False)
+        except RuntimeError:
+            chk("T58: an entry missing resource entirely aborts the whole page", True)
+    chk("T59: nothing written from that page, not even the otherwise-valid entry",
+        not (export_dir / "srv-missing-res").exists() or not any((export_dir / "srv-missing-res").glob("*.jsonl")))
+
+# wrong resource (present but does not match requested service_id): whole-page abort, zero writes.
+wrong_resource_page = {"hasMore": False, "logs": [ENTRY("wrong-res-1", "2026-07-22T00:00:00Z", "BUG-130 wrong resource", resource="srv-OTHER")]}
+with tempfile.TemporaryDirectory() as td:
+    export_dir = Path(td)
+    with patch.object(rle.requests, "get", return_value=_resp(json_body=wrong_resource_page)), \
+         patch.object(rle, "_read_api_key", return_value="k"):
+        try:
+            rle.export_logs("ENV", "own-1", "srv-wrong-res", export_dir, dry_run=False, catch_up_days=1,
+                             log_type="app", marker="BUG-130", allow_full_export=False, transport="requests")
+            chk("T60: an entry with a mismatched resource aborts the whole page", False)
+        except RuntimeError:
+            chk("T60: an entry with a mismatched resource aborts the whole page", True)
+    chk("T61: nothing written when resource mismatches the requested service_id",
+        not (export_dir / "srv-wrong-res").exists() or not any((export_dir / "srv-wrong-res").glob("*.jsonl")))
+
+# wrong type: whole-page abort, zero writes.
+wrong_type_page = {"hasMore": False, "logs": [ENTRY("wrong-type-1", "2026-07-22T00:00:00Z", "BUG-130 wrong type", resource="srv-wrong-type", type_="build")]}
+with tempfile.TemporaryDirectory() as td:
+    export_dir = Path(td)
+    with patch.object(rle.requests, "get", return_value=_resp(json_body=wrong_type_page)), \
+         patch.object(rle, "_read_api_key", return_value="k"):
+        try:
+            rle.export_logs("ENV", "own-1", "srv-wrong-type", export_dir, dry_run=False, catch_up_days=1,
+                             log_type="app", marker="BUG-130", allow_full_export=False, transport="requests")
+            chk("T62: an entry with a mismatched type aborts the whole page", False)
+        except RuntimeError:
+            chk("T62: an entry with a mismatched type aborts the whole page", True)
+    chk("T63: nothing written when type mismatches the requested log_type",
+        not (export_dir / "srv-wrong-type").exists() or not any((export_dir / "srv-wrong-type").glob("*.jsonl")))
+
+# missing type entirely: whole-page abort, zero writes.
+missing_type_entry = {"id": "no-type-1", "timestamp": "2026-07-22T00:00:00Z", "message": "BUG-130 no type", "resource": "srv-missing-type"}
+missing_type_page = {"hasMore": False, "logs": [missing_type_entry]}
+with tempfile.TemporaryDirectory() as td:
+    export_dir = Path(td)
+    with patch.object(rle.requests, "get", return_value=_resp(json_body=missing_type_page)), \
+         patch.object(rle, "_read_api_key", return_value="k"):
+        try:
+            rle.export_logs("ENV", "own-1", "srv-missing-type", export_dir, dry_run=False, catch_up_days=1,
+                             log_type="app", marker="BUG-130", allow_full_export=False, transport="requests")
+            chk("T64: an entry missing type entirely aborts the whole page", False)
+        except RuntimeError:
+            chk("T64: an entry missing type entirely aborts the whole page", True)
+
+
+# ── 14. Immediate second export with no new logs (the real-world crash scenario) ──
+print("\n── Immediate rerun, no new logs ──")
+first_page = {"hasMore": False, "logs": [ENTRY("rerun-1", "2026-07-22T00:00:00Z", "BUG-130 first run", resource="srv-rerun")]}
+second_page = {"hasMore": False, "logs": None}  # the exact real-world shape that used to crash export_logs
+with tempfile.TemporaryDirectory() as td:
+    export_dir = Path(td)
+    with patch.object(rle.requests, "get", return_value=_resp(json_body=first_page)), \
+         patch.object(rle, "_read_api_key", return_value="k"):
+        rle.export_logs("ENV", "own-1", "srv-rerun", export_dir, dry_run=False, catch_up_days=1,
+                         log_type="app", marker="BUG-130", allow_full_export=False, transport="requests")
+    lines_after_first = (export_dir / "srv-rerun" / "2026-07-22.jsonl").read_text().splitlines()
+    cp_after_first = json.loads((export_dir / "srv-rerun" / rle.CHECKPOINT_NAME).read_text())
+
+    with patch.object(rle.requests, "get", return_value=_resp(json_body=second_page)), \
+         patch.object(rle, "_read_api_key", return_value="k"):
+        rle.export_logs("ENV", "own-1", "srv-rerun", export_dir, dry_run=False, catch_up_days=1,
+                         log_type="app", marker="BUG-130", allow_full_export=False, transport="requests")
+        chk("T65: immediate rerun with logs=null exits without raising", True)
+    lines_after_second = (export_dir / "srv-rerun" / "2026-07-22.jsonl").read_text().splitlines()
+    cp_after_second = json.loads((export_dir / "srv-rerun" / rle.CHECKPOINT_NAME).read_text())
+
+    chk("T66: rerun with no new logs writes zero additional records", len(lines_after_second) == len(lines_after_first) == 1)
+    ids = [json.loads(l)["id"] for l in lines_after_second]
+    chk("T67: no duplicate ids after rerun", len(ids) == len(set(ids)))
+    chk("T68: checkpoint advances (never regresses) past the first run's boundary",
+        cp_after_second["last_completed_end_time"] >= cp_after_first["last_completed_end_time"])
+
+
+# ── 15. Hermetic guard — the whole suite above made zero real network/subprocess calls ──
+print("\n── Hermetic guard ──")
+_found_curl = rle.shutil.which("curl.exe")
+if _found_curl:
+    print(f"  curl.exe present on this machine's real PATH at {_found_curl} — every test above still ran hermetically")
+else:
+    print("  curl.exe not present on this machine's real PATH")
+chk("T69: reaching this line proves no unmocked requests.get/subprocess.run call happened above "
+    "(the outer guard installed near the top of this file raises immediately otherwise)", True)
+
+_network_guard.stop()
+_subprocess_guard.stop()
 
 print(f"\n{'='*60}")
 print(f"render_log_export.py tests: {passed} passed, {failed} failed")
