@@ -139,6 +139,7 @@ class HandlerId(Enum):
     DESTRUCTIVE_ENTITY_CLARIFICATION = "destructive_entity_clarification"  # §3.2 — DESTRUCTIVE_ENTITY_REQUEST, לעולם לא מבצע ישירות
     DETERMINISTIC_SHOW_LAST_TASK    = "deterministic:show_last_task"    # §3 כלל 3 — הדוגמה הקונקרטית היחידה שהוגדרה ב-V1
     AGENT                           = "agent"                           # §3 כלל 5 — ברירת מחדל
+    DEGRADED_SYSTEM                 = "degraded_system"                 # §7 — חדש (היה חסר; ReplyOwnerKind.DEGRADED_SYSTEM היה orphan בלי HandlerId תואם). Coordinator עצמו תקין, agent_availability=AGENTLESS — לא כשל-Coordinator (ראה חריג ה-Emergency fallback emitter, §2)
 
 
 class ReplyOwnerKind(Enum):
@@ -176,6 +177,7 @@ class DecisionReason(Enum):
     FREE_AGENT_DEFAULT          = "free_agent_default"           # §3 כלל 5 — שום דבר אחר לא תפס
     NO_BACKING_QUEUE            = "no_backing_queue"              # ראה §7, תרחיש 11/23 — phantom approval
     ALREADY_CLAIMED             = "already_claimed"                # ראה §4ב
+    AGENT_UNAVAILABLE_DEGRADED  = "agent_unavailable_degraded"     # חדש — §7, HandlerId.DEGRADED_SYSTEM: Coordinator תקין, agent_availability=AGENTLESS
 
 
 # ExecutionKind: לא מוגדר מחדש כאן — **שימוש-חוזר** ב-core/turn_envelope.py:77-80
@@ -193,6 +195,7 @@ class PayloadKind(Enum):
     DESTRUCTIVE_ENTITY_REFERENCE = "destructive_entity_reference"
     DETERMINISTIC_READ           = "deterministic_read"   # חדש — היה חסר; HandlerId.DETERMINISTIC_SHOW_LAST_TASK לא היה לו payload חוקי
     AGENT_TURN                   = "agent_turn"            # חדש — היה חסר; HandlerId.AGENT לא היה לו payload חוקי
+    DEGRADED_SYSTEM_STATE        = "degraded_system_state"  # חדש — HandlerId.DEGRADED_SYSTEM לא היה לו payload חוקי (§7)
     # מורחב רק דרך שינוי-חוזה מפורש, כמו HandlerId/DecisionReason.
 
 
@@ -266,11 +269,25 @@ class AgentTurnPayload:
     raw_text: Optional[str]
 
 
+@dataclass(frozen=True)
+class DegradedSystemPayload:
+    """
+    §7 — payload ל-HandlerId.DEGRADED_SYSTEM. Coordinator עצמו בנה TurnDecision
+    תקין; ה-"degraded" הוא עובדה-על-העולם (agent_availability=AGENTLESS,
+    TurnSignals §1), לא כשל של ה-Coordinator (זה ה-Emergency fallback emitter
+    הנפרד, ראה §2 אחרי TurnDecision). לא נושא כוונת-ביצוע — רק context
+    לתשובת degraded-mode.
+    """
+    kind: Literal[PayloadKind.DEGRADED_SYSTEM_STATE]
+    reason: str   # סיבה קריאה-לאדם ל-AGENTLESS, ל-logging ולתשובה כאחד
+
+
 # TurnPayload הוא union טיפוסי — לא dict גולמי. כל HandlerId יודע איזה
 # variant לצפות לו (התאמה 1:1 ל-PayloadKind, עכשיו עם שדה kind כ-discriminator
 # מפורש בכל variant — לא רק קונבנציה-שבעל-פה), ו-mismatch נתפס כשגיאת-
 # טיפוס בזמן import/type-check, לא כ-KeyError ב-runtime עמוק בתוך handler.
-# שלמות ה-union: 6 variants ↔ 6 HandlerId (§2) — 1:1, אין handler בלי payload.
+# שלמות ה-union: 7 variants ↔ 7 HandlerId (§2) — 1:1, אין handler בלי payload
+# (מתוקן — DEGRADED_SYSTEM נוסף כ-7-י גם ל-HandlerId וגם כאן, ראה §7).
 TurnPayload = Union[
     CaptureCandidatePayload,
     ResolutionRequestPayload,
@@ -278,11 +295,13 @@ TurnPayload = Union[
     DestructiveEntityRequestPayload,
     DeterministicReadPayload,
     AgentTurnPayload,
+    DegradedSystemPayload,
 ]
 
 
 @dataclass(frozen=True)
 class TurnDecision:
+    decision_id: str                     # מזהה-החלטה ייחודי (מתוקן — היה חסר; TurnActionReference.decision_id, §6, מצביע לכאן)
     turn_id: str
     selected_handler: HandlerId
     reply_owner: ReplyOwner              # יחיד — ראה §4א
@@ -296,6 +315,8 @@ class TurnDecision:
 ```
 
 **כלל:** שום handler לא מבצע ולא עונה בלי `TurnDecision` שמציין אותו במפורש כ-`selected_handler`+`reply_owner` לאותו `turn_id`. `contract_version`/`policy_snapshot_version` מאפשרים לזהות בדיעבד (ב-Shadow ובאכיפה כאחד) תחת איזו גרסת-חוזה ומדיניות התקבלה כל החלטה בודדת — נדרש ל-§8 (disagreement analysis לא יכול להיות משמעותי בלי לדעת אם שתי החלטות שונות פעלו תחת אותה מדיניות).
+
+**חריג יחיד ומפורש לכלל הזה:** אם ה-Coordinator עצמו נכשל **לפני** שהצליח לבנות `TurnDecision` בכלל (למשל exception בבניית `TurnEnvelope`/signals) — אין `TurnDecision`, ולכן גם לא `decision_id`/`HandlerId`/`reply_owner` רגילים. תגובת ה-degraded-mode במקרה הזה יוצאת דרך **Emergency fallback emitter** — נתיב-קוד ייעודי ונפרד, לא handler רגיל, לא `TurnDecision`, ואינו מבצע/מציע שום פעולה עסקית (§7, שתי השורות הראשונות בטבלה). זה **שונה לגמרי** מ-`HandlerId.DEGRADED_SYSTEM` (למטה) — שם ה-Coordinator **הצליח** לבנות `TurnDecision` תקין, וה-"degraded" הוא עובדה-על-העולם (agent לא זמין), לא כשל של ה-Coordinator עצמו.
 
 ## 3. מטריצת הקדימות (מלאה, סדר קנוני)
 
@@ -442,12 +463,22 @@ class TurnActionReference:
     מכילה את התשובה בעצמה. נוצרת **רק** כשיש צורך אמיתי בהפניה עתידית
     חוצה-turn (למשל "מה עשית עכשיו" בטורן מאוחר יותר) — לא כל
     tool_result הופך אוטומטית לרשומה עמידה.
+
+    Invariant (מתוקן — היה חסר): אסור ליצור TurnActionReference עם גם
+    action_contract_id=None וגם execution_evidence_ref=None בו-זמנית —
+    לפחות אחד מהשניים חייב להצביע למשהו בפועל. רשומה בלי אף הפניה אחת
+    אינה TurnActionReference תקפה: תפקידה היחיד הוא להפנות לשכבה 3/4,
+    ואם אין לאן להפנות, אין סיבה שהרשומה תיווצר בכלל.
     """
     turn_id: str
-    decision_id: str              # מזהה ה-TurnDecision שהוליד את הפעולה
+    decision_id: str              # מזהה ה-TurnDecision שהוליד את הפעולה — ראה TurnDecision.decision_id, §2
     action_contract_id: Optional[str]   # ה-contract_id בשכבה 4, אם קיים (למשל לא קיים לפעולות read-only)
     execution_evidence_ref: Optional[str]   # הפניה ל-evidence לפי C53a (שכבה 3) — לא ה-evidence עצמו, מצביע אליו
     created_at: float
+
+    # אינווריאנט (לא ניתן לבטא כ-type constraint טהור ב-Python; מתועד + נאכף
+    # ב-constructor/factory בפועל, לא רק כתיעוד): לפחות אחד מבין
+    # action_contract_id/execution_evidence_ref חייב להיות not-None.
 ```
 
 - כל `tool_result` **שנוצר בתוך אותו turn** מתויג/מקושר (correlated) ל-`turn_id` שלו — מספר קריאות tool_use בתוך turn יחיד חולקות את אותו turn_id.
@@ -459,8 +490,9 @@ class TurnActionReference:
 
 | מצב | תוצאה |
 |---|---|
-| Coordinator עצמו נכשל בבניית `TurnEnvelope`/`TurnDecision`, **ואין pending queue רלוונטי, ואין explicit operational/mutating intent מזוהה בטורן זה** (למשל שיחה חופשית) | fail-**open** ל-`free_agent`, log critical, לעולם לא להשמיט את התור בשקט |
-| Coordinator עצמו נכשל בבניית `TurnEnvelope`/`TurnDecision`, **וקיים pending queue פעיל, או ש-`intent_signal.classification == EXPLICIT` על intent תפעולי/משנה-מצב** (UPDATE_LEAD/CREATE_LEAD/CREATE_CONTACT/UPDATE_CONTACT/**DESTRUCTIVE_ENTITY_REQUEST**) | fail-**safe**: **אסור** capture/proposal/write כלשהו — **כולל** ניתוב ל-clarification הרסני (§3.2), גם אם ה-clarification עצמו "בטוח" לכאורה: אם ה-Coordinator כבר נכשל, אין לסמוך על שום החלטת-ניתוב שלו. log critical. תשובת degraded-mode מפורשת ("לא הצלחתי לעבד את הבקשה בבטחה, נסה שוב") — **לא** fail-open ל-`free_agent`, כי agent חופשי עלול לנחש/להציע פעולה על גבי מצב לא-ידוע |
+| Coordinator עצמו נכשל בבניית `TurnEnvelope`/`TurnDecision`, **ואין pending queue רלוונטי, ואין explicit operational/mutating intent מזוהה בטורן זה** (למשל שיחה חופשית) — **אין `TurnDecision`, יוצא דרך Emergency fallback emitter** (§2, החריג המפורש), לא handler רגיל | fail-**open** ל-`free_agent`, log critical, לעולם לא להשמיט את התור בשקט |
+| Coordinator עצמו נכשל בבניית `TurnEnvelope`/`TurnDecision`, **וקיים pending queue פעיל, או ש-`intent_signal.classification == EXPLICIT` על intent תפעולי/משנה-מצב** (UPDATE_LEAD/CREATE_LEAD/CREATE_CONTACT/UPDATE_CONTACT/**DESTRUCTIVE_ENTITY_REQUEST**) — **אין `TurnDecision`, יוצא דרך Emergency fallback emitter** (§2, החריג המפורש), לא handler רגיל | fail-**safe**: **אסור** capture/proposal/write כלשהו — **כולל** ניתוב ל-clarification הרסני (§3.2), גם אם ה-clarification עצמו "בטוח" לכאורה: אם ה-Coordinator כבר נכשל, אין לסמוך על שום החלטת-ניתוב שלו. log critical. תשובת degraded-mode מפורשת ("לא הצלחתי לעבד את הבקשה בבטחה, נסה שוב") — **לא** fail-open ל-`free_agent`, כי agent חופשי עלול לנחש/להציע פעולה על גבי מצב לא-ידוע |
+| Coordinator עצמו **תקין** (הצליח לבנות `TurnDecision`), אבל `agent_availability` (`TurnSignals`, §1) מדווח AGENTLESS, ואין handler-קדימות אחר שזוכה לפי §3 — **זה `TurnDecision` תקין לכל דבר, לא Emergency fallback emitter** (חדש — היה orphan, ראה §7 fix) | `selected_handler=HandlerId.DEGRADED_SYSTEM`, `reply_owner.kind=ReplyOwnerKind.DEGRADED_SYSTEM`, `reason_code=DecisionReason.AGENT_UNAVAILABLE_DEGRADED`, `payload=DegradedSystemPayload` |
 | Entity resolution → `UNAVAILABLE` | להודיע שהמאגר לא זמין, לא לבדות `NOT_FOUND` |
 | שני handlers תובעים `reply_owner` לאותו `turn_id` (**באותו turn** — bug במימוש, לא race לגיטימי) | התביעה השנייה נדחית כ-violation מבני; אין שליחה כפולה |
 | שני `turn_id` שונים תובעים resource claim לאותו `resource_id` (ActionContract/pending item — **זה** ה-race הלגיטימי, תרחיש 16) | ראה §4ב — התביעה השנייה נדחית כ-`DecisionReason.ALREADY_CLAIMED`; אין שליחה כפולה, אין fallback סותר |
@@ -470,13 +502,31 @@ class TurnActionReference:
 
 ---
 
-## Acceptance Corpus — 25 תרחישים דטרמיניסטיים, מתויגים לפי משפחה
+## Acceptance Corpus — 25 תרחישים דטרמיניסטיים, מתויגים לפי משפחה **ולפי `earliest_enforcement_phase`**
 
 כל התרחישים נגזרים מדוגמאות אמיתיות שכבר נאספו בשיחה זו. השדות `selected_handler`/`reply_owner`/`reason_code` הם הציפייה, לא בהכרח הניסוח המדויק.
 
+**תיקון-מבני (סבב זה):** לא כל 25 התרחישים ניתנים-להכרעה בשלב 2 (Shadow). תרחישים 16-17 תלויים ב-resource claim (שלב 6, §4ב) ותרחישים 14-15 תלויים ב-evidence-grounding guard (RP5, שמנגנון-החיבור שלו עדיין פתוח) — שניהם עדיין לא קיימים כתשתית. חסימת המעבר לשלב 3 על **כל** 25 התרחישים (כפי שהיה מנוסח קודם) הייתה יוצרת תלות-מעגלית: שלב 3 חסום ע"י שלבים 5-6 שטרם נבנו. לכן כל תרחיש מתויג **`earliest_enforcement_phase`** — השלב הראשון שבו יש בכלל תשתית שמאפשרת להכריע אותו; רק תרחישים בתיוג `2→3` חוסמים את המעבר משלב 2 לשלב 3 (§8 סעיף 3, מתוקן). כל 25 התרחישים נשארים בחוזה הכללי — התיוג קובע **מתי** כל אחד נאכף, לא אם הוא רלוונטי.
+
+| # | `earliest_enforcement_phase` | הערה |
+|---|---|---|
+| 1, 2, 3, 4 | `2→3` | Pending Ownership — הכרעת-ניתוב טהורה, לא תלויה בתשתית עתידית |
+| 5, 6, 7 | `2→3` | Explicit Intent vs Capture — ליבת BUG-130 |
+| 8 | `2→3` | הכרעת-ניתוב טהורה (deterministic תוך pending) |
+| 9, 10 | `4` | תלויים ב-turn-result isolation בפועל (§6, "סדר היישום" שלב 4) — לא ניתן לאכוף לפני שקושר tool_result ל-turn_id בפועל |
+| 11, 12, 13 | `2→3` | הכרעת-ניתוב טהורה (NO_BACKING_QUEUE) |
+| 14, 15 | `RP5 gate` | תלויים ב-evidence-grounding guard (RP4/RP5) — ראה תיקון תרחישים 14-15 למטה |
+| 16, 17 | `6` | תלויים ב-resource claim (§4ב) — פתוח עד שלב 6, ראה "סדר היישום" |
+| 18, 19, 20 | `2→3` | הכרעת-ניתוב טהורה (capability boundary) |
+| 21 | `2→3` | תלוי רק ב-`InputProvenance`/ingress classification — קיים ברמת ה-signal, לא תלוי בתשתית מאוחרת |
+| 22, 23, 24 | `2→3` | בדיקות-על על תרחישים שכבר `2→3` |
+| 25 | `2→3` | הכרעת-ניתוב טהורה (כמו 6) |
+
+**שים לב — שלב 5 (Reply Ownership/single speaker) אין לו כרגע תרחיש-corpus ייעודי משלו** — זו נקודה פתוחה בתיוג הזה, לא הכרעה ש"הכל מכוסה"; §7's "שני handlers תובעים reply_owner" הוא תיאור-סמנטיקה, לא תרחיש-corpus ממוספר. פער מתועד, לא נסגר בסבב הזה.
+
 ### משפחה: Pending Ownership
 
-**1.** "שמור 3" מול רשימת 5 לידים ממתינה → `selected_handler=PENDING_APPROVAL`, `active_queue_id=<batch>`, `pending_reply_signal.match_basis="expected_reply_shape_match"`, מזהה item #3 מתוך `pending_items`, לא מחפש ב-CRM.
+**1 (מתוקן — match_basis שגוי).** "שמור 3" מול רשימת 5 לידים ממתינה → `selected_handler=PENDING_APPROVAL`, `active_queue_id=<batch>`, `pending_reply_signal.match_basis="explicit_queue_reference"` (**לא** `"expected_reply_shape_match"` כפי שנוסח קודם — "שמור **3**" מציין item מפורש, לא רק תשובה תואמת-צורה; זה גם הכרחי: `PENDING_APPROVAL` הוא queue מוטציה/אישור, ו-§1.1 כלל 2 קובע ש-`expected_reply_shape_match` **לבדו אינו מספיק** לqueue מסוג הזה — הניסוח הקודם היה הופך את ה-signal ללא-תקף לפי §1.1 עצמו), מזהה item #3 מתוך `pending_items`, לא מחפש ב-CRM.
 
 **2.** 4 משימות + הבהרה על משימה 4 → תשובה → "מאשר" → חייב לפתור לאותו `active_queue_id` שנוצר ב-turn 1, לא ליצור queue מקביל (Case C, "פר 349"-adjacent). `pending_reply_signal.queue_id` של "מאשר" חייב להיות אותו queue_id, לא ניחוש.
 
@@ -488,7 +538,7 @@ class TurnActionReference:
 
 **5 (מתוקן).** "תעדכן את הטלפון של דני לוי ל-0525111122" → `intent_signal` EXPLICIT `UPDATE_LEAD` מנצח **בעלות** (§3.1); capture flow עדיין מריץ חילוץ payload (שם/טלפון) שנצרך ע"י ה-`UPDATE_LEAD` handler ל-resolution (§5) — לא כ-trigger עצמאי ולא כבעל ה-turn.
 
-**6 (מתוקן שוב — מדיניות-הרסנית חדשה, §3.2).** "תמחק איש קשר 0536272637" → `intent_signal` EXPLICIT **`DESTRUCTIVE_ENTITY_REQUEST`** מנצח בעלות (`reason_code=EXPLICIT_INTENT_PRECEDENCE`, כמו 5-7 האחרים); `capture_signal` (אם יורה) **לא נזרק**, אך בעלותו **מדוכאת** לפי §3.1 — אסור לו ליצור הצעת "לשמור?". `selected_handler=DESTRUCTIVE_ENTITY_CLARIFICATION` — **לא** מבצע מחיקה, מציג רק את 3 התוצאות הבטוחות הקפואות (ארכיון/Do Not Contact/ניקוי נתוני-בדיקה, §3.2). `reason_code` הפעם: `DESTRUCTIVE_REQUIRES_CLARIFICATION`, לא `EXPLICIT_INTENT_PRECEDENCE` לבד — שני ה-reason codes רלוונטיים כאן ברמות שונות (הבעלות-על-capture מנוצחת מסיבת EXPLICIT_INTENT_PRECEDENCE, אבל ההחלטה הסופית-שמוצגת נושאת DESTRUCTIVE_REQUIRES_CLARIFICATION כי זה הניתוב בפועל).
+**6 (מתוקן פעם שלישית — reason_code יחיד, לא כפול).** "תמחק איש קשר 0536272637" → `intent_signal` EXPLICIT **`DESTRUCTIVE_ENTITY_REQUEST`** מדכא בעלות capture (§3.1 — אותו מנגנון עקרוני כמו 5/7); `capture_signal` (אם יורה) **לא נזרק**, אך בעלותו **מדוכאת** — אסור לו ליצור הצעת "לשמור?". `selected_handler=DESTRUCTIVE_ENTITY_CLARIFICATION` — **לא** מבצע מחיקה, מציג רק את 3 התוצאות הבטוחות הקפואות (ארכיון/Do Not Contact/ניקוי נתוני-בדיקה, §3.2). **`reason_code=DecisionReason.DESTRUCTIVE_REQUIRES_CLARIFICATION` — הערך הקנוני היחיד לתרחיש הזה** (מתוקן — הניסוח הקודם טען דואליות של שני reason codes; `TurnDecision.reason_code` הוא שדה **יחיד**, §2. `EXPLICIT_INTENT_PRECEDENCE` **אינו** משמש כאן). העובדה שבעלות-capture הודחקה מסיבת נוכחות-intent מפורש נשארת נראית ב-**observability** (למשל שדה/log משני כמו "capture_suppressed_by=destructive_entity_request") — לא כ-reason_code שני על ה-`TurnDecision`.
 
 **7 (מתוקן).** "תוסיף איש קשר בדיקה טלפון 0500000000" → `intent_signal` EXPLICIT **`CREATE_CONTACT`** (לא רק "None/CREATE" כללי) מזוהה ומנצח בעלות; capture flow מספק payload (השם "איש קשר בדיקה"+טלפון) ל-handler שנבחר — capture עצמו **אינו** קובע create-vs-update (§3.1). זה שונה, ולא זהה, ל"capture פועל כרגיל" כפי שנוסח לפני התיקון.
 
@@ -510,9 +560,9 @@ class TurnActionReference:
 
 ### משפחה: Lifecycle Fabrication
 
-**14.** הסוכן כותב "אני אגיד לאליהו שיחזור אליך" בלי `Task`/`tool_result` תואם → `validate_agent_output()` מזהה כהתחייבות ללא כיסוי (log-only תחילה).
+**14 (מתוקן — לא שם-פונקציה עתידי כאילו קיים).** הסוכן כותב "אני אגיד לאליהו שיחזור אליך" בלי `Task`/`tool_result` תואם → מזוהה כהתחייבות ללא כיסוי ע"י ה-**canonical evidence-grounding guard** (RP4/RP5 — `core/turn_evidence.py`/`core/anti_hallucination.py` הקיימים, ראה `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` §1.5 — **לא** `validate_agent_output()`: זה שם-פונקציה שמופיע **רק** כהצעה ב-`TURN_COORDINATOR_PROPOSAL_V2.md:309`, אינו קוד runtime, ואסור להיכתב כאן כאילו הוא כן), log-only תחילה. **איך בדיוק** ה-guard הזה מתחבר ל-Coordinator (איזה hook, איזה שלב-ביצוע) — Planning Gate ייעודי עתידי מכריע, **לא** המסמך הזה (ראה `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` §1.5, "ממצא פתוח").
 
-**15.** ביטול/השלמת משימה מדווחת בטקסט בלי canonical status transition תואם ב-`ActionContract`/Airtable → נחסם/מסומן זהה לתרחיש 14.
+**15 (מתוקן — אותה הבהרה).** ביטול/השלמת משימה מדווחת בטקסט בלי canonical status transition תואם ב-`ActionContract`/Airtable → נחסם/מסומן ע"י **אותו** evidence-grounding guard כמו תרחיש 14 — לא מנגנון-בדיקה נפרד, לא `validate_agent_output()`.
 
 ### משפחה: Concurrency
 
@@ -544,7 +594,7 @@ class TurnActionReference:
 
 ### משפחה: Reason Code Correctness (בדיקות-על למטריצה)
 
-**22 (מתוקן).** כל תרחיש 5-7 חייב לשאת `reason_code=DecisionReason.EXPLICIT_INTENT_PRECEDENCE` כש-intent מנצח, לא ערך גנרי/string חופשי.
+**22 (מתוקן פעם שנייה — טווח מדויק, לא "5-7"):** תרחישים **5 ו-7** (**לא 6** — ראה תיקון תרחיש 6: reason_code יחיד ושונה) חייבים לשאת `reason_code=DecisionReason.EXPLICIT_INTENT_PRECEDENCE`. תרחישים **6 ו-25** חייבים לשאת `reason_code=DecisionReason.DESTRUCTIVE_REQUIRES_CLARIFICATION` בלבד. בשני המקרים: לא ערך גנרי/string חופשי, ולא value כפול על אותו `TurnDecision`.
 
 **23 (מתוקן).** כל תרחיש phantom approval (11-13) חייב לשאת `reason_code=DecisionReason.NO_BACKING_QUEUE`, לא רק "blocked" כללי.
 
@@ -561,30 +611,34 @@ class TurnActionReference:
 שלב 2 (Shadow Decision) **אינו** רשאי לעבור לשלב 3 (אכיפה ראשונה, BUG-130) עד שכל הקריטריונים המדידים הבאים מתקיימים בפועל, מתועדים — לא "נראה שזה עובד":
 
 1. **חלון תצפית מינימלי — מספרים סגורים, לא TBD:**
-   - **7 ימים רצופים** של production, עם כיסוי כל סוגי הערוצים (telegram, whatsapp, tma) וכל תפקידי הזהות הרלוונטיים (owner/partner/manager).
+   - **7 ימים רצופים** של production, עם כיסוי-ערוצים **מדורג, לא אחיד** (מתוקן — "כל סוגי הערוצים + כל התפקידים" תמיד היה בלתי-מציאותי):
+     - **Telegram ו-WhatsApp — חובה**, תעבורה חיה.
+     - **TMA — רק אם מחובר בפועל ל-Coordinator תחת V1** (אם TMA לא שולח signals ל-Coordinator ב-window הזה, הוא לא חלק מהדרישה — לא "חובה בכל מקרה").
+     - **owner — תעבורה חיה חובה.**
+     - **partner/manager — יכולים להיות מכוסים ב-replay** (Incident Replay & Classification, סעיף 4 למטה, או replay ייעודי על state היסטורי אמיתי שלהם) **כשאין תעבורה חיה** מהם ב-window — לא נדרשת תעבורה חיה מכל תפקיד כתנאי-סף.
    - **לפחות 100 `TurnDecision`** שחושבו ב-Shadow לאורך החלון.
-   - **בדיוק 20 מקרי contested-signal** (turns שבהם יותר מחוק אחד ב-§3 יכול היה תיאורטית לנצח — לא turns טריוויאליים עם signal יחיד), לפי **חלוקה מאושרת** (מתוקן — ההצעה הקודמת לא הייתה מאושרת ואף כללה `Concurrency` בטעות בתוך קריטריון-יציאה של שלב 2; הוסרה, ראה למטה):
+   - **לפחות 20 מקרי contested-signal** (מתוקן — "בדיוק 20" בוטל; תעבורה נוספת מעבר ל-20 אינה סיבת-כשל) (turns שבהם יותר מחוק אחד ב-§3 יכול היה תיאורטית לנצח — לא turns טריוויאליים עם signal יחיד), לפי **חלוקה מאושרת, כל turn נספר בקטגוריה ראשית אחת בלבד** (מתוקן — הטבלה הקודמת ספרה תרחיש 6 גם תחת Explicit Intent וגם תחת Destructive, וכללה תרחיש 4 בטעות תחת Genuine Pending Reply — 4 אין לו בכלל `PendingReplySignal` מתחרה, זו לא contested-signal case כלל):
 
      | קטגוריה | מינימום | Acceptance Corpus |
      |---|---|---|
-     | Explicit Intent vs Capture | ≥5 | תרחישים 5-7 |
+     | Non-destructive Explicit Intent vs Capture | ≥5 | תרחישים 5, 7 (**לא 6** — 6 שייך רק לקטגוריית Destructive למטה, לא כפול) |
      | Pending exists but current turn unrelated | ≥5 | תרחיש 3 |
-     | Genuine Pending Reply | ≥4 | תרחישים 1, 2, 4 |
+     | Genuine Pending Reply | ≥4 | תרחישים 1, 2 (**לא 4** — אין ב-4 שום `PendingReplySignal` מתחרה, זה capture עם flag-סבירות משני, לא contested-signal לצורך §8; 4 נשאר בקורפוס, `earliest_enforcement_phase=2→3`, פשוט לא נספר כאן) |
      | Deterministic request while pending exists | ≥3 | תרחיש 8 |
      | Destructive Request vs Capture | ≥3 | תרחישים 6, 25 |
-     | **סה"כ** | **20** | |
+     | **סה"כ** | **≥20** | |
 
      חלון שמכוסה ברובו ע"י קטגוריה אחת בלבד **אינו** מספיק, גם אם 100+ ה-`TurnDecision` הכולל מתקיים.
 
-   - **`Concurrency` הוסר מקריטריון-היציאה של שלב 2 (תיקון מפורש):** יש בו סתירה עם "סדר היישום" (למטה) שכבר ממקם resource claim/concurrency בשלב 6, אחרי שלב 3 (האכיפה הראשונה). Concurrency נשאר מכוסה כ-acceptance/replay test בתוך החוזה הכללי (תרחישים 16-17), ומקבל שער-יציאה **נפרד** משלו לפני שלב 6 — אבל **אינו** תנאי ליציאה משלב 2 לשלב 3.
+   - **`Concurrency` הוסר מקריטריון-היציאה של שלב 2 (תיקון מפורש):** יש בו סתירה עם "סדר היישום" (למטה) שכבר ממקם resource claim/concurrency בשלב 6, אחרי שלב 3 (האכיפה הראשונה). Concurrency נשאר מכוסה כ-acceptance/replay test בתוך החוזה הכללי (תרחישים 16-17, `earliest_enforcement_phase=6`), ומקבל שער-יציאה **נפרד** משלו לפני שלב 6 — אבל **אינו** תנאי ליציאה משלב 2 לשלב 3.
 2. **0 אי-הסכמות בלתי-מוסברות** בין `current_handler` (ההתנהגות הקיימת בפועל) לבין `coordinator_selected_handler` (מה ש-Shadow היה בוחר) — **כל** אי-הסכמה שנרשמה חייבת artifact מפורש (bug number, decision log) שמסביר אם ה-Coordinator צודק, הקוד הקיים צודק, או שהתרחיש עצמו לא מכוסה ב-Acceptance Corpus (ואז ה-corpus מתעדכן לפני שממשיכים).
-3. **100% מ-25 התרחישים ב-Acceptance Corpus** מניבים את `selected_handler`/`reply_owner`/`reason_code` המצופים, **בהרצה אוטומטית חוזרת** (לא רק ווידוא ידני חד-פעמי בזמן כתיבת המסמך).
-4. **Incident Replay & Classification — מחליף לגמרי את מדד ה-"0 עלייה" הפסיבי הקודם.** מדד פסיבי ("0 מקרי phantom-approval/תשובה כפולה חדשים") עלול לעבור טריוויאלית באפס נפח-משתמשים בלי להוכיח שום דבר. במקום זה: **כל** incident מתועד קיים (למשל ה-phantom-approval incident, תרחיש 11; ה-concurrency incident, תרחיש 16; BUG-129 self-output ingestion, תרחיש 21) מוזן מחדש (**replay**) דרך לוגיקת ה-Shadow Decision, על הטקסט/state המקוריים שנאספו בזמן ה-incident, ומסווג במפורש לאחד משלושה:
+3. **100% מ-19 התרחישים המתויגים `earliest_enforcement_phase=2→3`** (מתוקן — לא כל 25; ראה טבלת התיוג מעלה) מניבים את `selected_handler`/`reply_owner`/`reason_code` המצופים, **בהרצה אוטומטית חוזרת** (לא רק ווידוא ידני חד-פעמי בזמן כתיבת המסמך). תרחישים 9-10 (`4`), 14-15 (`RP5 gate`), 16-17 (`6`) **אינם** תנאי-סף לשלב 3 — כל אחד מקבל שער-יציאה משלו כשהשלב שלו מגיע (ראה "סדר היישום").
+4. **Incident Replay & Classification — מחליף לגמרי את מדד ה-"0 עלייה" הפסיבי הקודם.** מדד פסיבי ("0 מקרי phantom-approval/תשובה כפולה חדשים") עלול לעבור טריוויאלית באפס נפח-משתמשים בלי להוכיח שום דבר. במקום זה: **כל** incident מתועד ש-scenario-המקור שלו מתויג `earliest_enforcement_phase=2→3` (כלומר: ה-phantom-approval incident, תרחיש 11; BUG-129 self-output ingestion, תרחיש 21 — **לא** ה-concurrency incident, תרחיש 16, ראה מתוקן למטה) מוזן מחדש (**replay**) דרך לוגיקת ה-Shadow Decision, על הטקסט/state המקוריים שנאספו בזמן ה-incident, ומסווג במפורש לאחד משלושה:
    - **PREVENTED** — ה-Coordinator היה מונע/פותר את זה נכון.
    - **NOT_PREVENTED** — עדיין קורה תחת ה-Shadow logic.
    - **NOT_APPLICABLE** — התרחיש כבר לא רלוונטי (למשל תוקן בשכבה אחרת לגמרי, לא ע"י Coordinator).
    
-   **חובה: 100% מהתקריות המתועדות המסווגות "רלוונטי" חייבות PREVENTED.** כל NOT_PREVENTED חוסם את המעבר לשלב 3, ללא יוצא מהכלל.
+   **חובה: 100% מהתקריות ה-`2→3` המתועדות המסווגות "רלוונטי" חייבות PREVENTED.** כל NOT_PREVENTED חוסם את המעבר לשלב 3, ללא יוצא מהכלל. **מתוקן — הוסר מכאן:** ה-concurrency incident (תרחיש 16) מקבל replay/PREVENTED משלו כחלק משער-היציאה העתידי של שלב 6 (עדיין לא מפורט כאן) — כלילתו כאן הייתה יוצרת את אותה תלות-מעגלית שסעיף 3 תיקן.
 5. **Sign-off מפורש של הבעלים** על תוצאות 1–4, מתועד (תאריך + הפניה ל-artifact), לפני יצירת ה-branch של שלב 3.
 
 עד שכל 5 מתקיימים ומתועדים — "TurnCoordinator ב-Shadow" הוא הטענה המקסימלית המותרת. "TurnCoordinator מוכן לאכיפה" בלי תיעוד מפורש של 1–5 הוא claim לא-מאומת ומפר את "כלל ברזל" (`CLAUDE.md`).

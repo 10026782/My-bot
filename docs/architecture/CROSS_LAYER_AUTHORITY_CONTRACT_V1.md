@@ -36,7 +36,7 @@ STATUS = PLANNING BLOCKED
 - **Phase 2A.0 (schema canonicalization)** — **SPEC בלבד, אין קוד runtime.** מתועד ישירות (`CHANGE_CONTROL_LOG.md`: "Audit + SPEC בלבד — אין קוד/schema/frontend"; `AI_CONTEXT.md`: "Phase 2A.0 — SPEC בלבד; ניקוי שדות ... טרם בוצע").
 - **Phase 2A.1 (Current State Policy)** — **מומש ב-runtime**, לא SPEC בלבד (בניגוד לניסוח הקודם כאן): `core/adapters/leads_adapter.py::_normalise_status()` ו-`core/leads_reasoning_projection.py`'s `_LIVE_TO_ADAPTER_FIELDS`, per `docs/architecture/bug-104/PHASE_2A_CLOSEOUT.md`. עדיין תחת אותו flag (off/shadow) — קוד ממומש ובדיקות ירוקות, אך ללא ראיית-הרצה חיה מתועדת עדיין.
 - **Phase 2A.2 (Lead-specific wording)** — **ההכרעה, מאומתת ישירות מול `origin/main` (לא הנחה):** `IMPLEMENTED + MERGED`, `TEST/STATIC VERIFIED`, `NOT YET CLAIMED AS PRODUCTION-TRAFFIC VERIFIED`. אומת דרך GitHub API ישירות (לא cache מקומי): PR #377 ("BUG-104 Phase 2A.2: Lead-specific evidence & next_step wording") — `merged: true`, `merged_at: 2026-07-17T13:02:37Z`, בסיס `main`. `core/leads_reasoning_projection.py` ב-`main` (SHA `f607a2a`) מכיל בפועל `_apply_lead_wording()` (מיושם ב-`build_reasoning_projection()`), עם comment-block מפורש "BUG-104 Phase 2A.2". תוצאות הטסטים המדווחות ב-PR: `test_bug104_phase2a2_lead_wording.py` 37/37, וכל חמש חבילות ה-regression הקשורות (`test_bug104_phase2a1_current_state_policy.py`, `test_bug104_leads_reasoning_projection.py`, `test_bug104_phase1_1_contract_hardening.py`, `test_bug104_tma_lead_event_bridge.py`, `test_core_reasoning.py`) ירוקות וללא שינוי. **אין** ב-PR/בקוד שום ראיית-הרצה מ-production traffic חי (`FEATURE_CORE_REASONING_LEADS_STATE` נשאר off/shadow) — ומכאן ה"NOT YET CLAIMED" המפורש. `docs/architecture/bug-104/PHASE_2A_CLOSEOUT.md` תועד בטעות תחת "§5 Recommended Next Options" (מצג ישן, מלפני המיזוג) — מתוקן בעדכון מלווה לאותו קובץ. אין עוד קונפליקט-תיעוד פתוח בנקודה הזאת.
-- **בכל מקרה, בכל השלבים הממומשים (1, 2A.1):** ה-projection נשארת **read-only, flag-gated, וללא סמכות-ביצוע** — אין שום קוד תחת BUG-104 שכותב ל-Airtable או קורא ל-dispatcher/tool. **Scope מוצהר: Leads בלבד, לא Understanding Layer כללי** — הרחבה לכל תחומי העסק (U1) היא החלטה ארכיטקטונית נפרדת, עדיין פתוחה.
+- **בכל מקרה, בכל השלבים הממומשים (1, 2A.1, 2A.2):** ה-projection נשארת **read-only, flag-gated, וללא סמכות-ביצוע** — אין שום קוד תחת BUG-104 שכותב ל-Airtable או קורא ל-dispatcher/tool. **Scope מוצהר: Leads בלבד, לא Understanding Layer כללי** — הרחבה לכל תחומי העסק (U1) היא החלטה ארכיטקטונית נפרדת, עדיין פתוחה.
 
 **Gap:** "owns business state/evidence/phase/confidence" הוא היעד — המימוש בפועל הוא projection **read-only ללא סמכות-ביצוע**, flag-כבוי כברירת מחדל, תחום Leads בלבד — גם כש-Phase 2A.1 **ו-Phase 2A.2** (לא רק Phase 1) כבר קוד ממומש-ומוזג, לא רק SPEC. "ממומש" ≠ "מאומת ב-production traffic" — ההבחנה הזו נשארת לכל שלב, כולל 2A.1/2A.2.
 
@@ -81,6 +81,20 @@ STATUS = PLANNING BLOCKED
 - ניסוח success/failure/pending הפונה למשתמש
 
 **ממצא ממשי (לא תיאורטי) מתוך המסמך הזה עצמו:** `TURN_COORDINATOR_BEHAVIOR_CONTRACT_V1.md`, משפחת "Lifecycle Fabrication" (תרחישים 14-15), מפנה ל-`validate_agent_output()` — פונקציה שמוגדרת **רק** כהצעה ב-`TURN_COORDINATOR_PROPOSAL_V2.md:309`, **אינה קיימת בקוד runtime**. אם/כש-תרחישים 14-15 ימומשו, `validate_agent_output()` **אסור** שיהפוך למנגנון-הצדקה מקביל ל-`core/anti_hallucination.py`/RP4-RP5 (בדיוק אותה קטגוריית-טעות כמו `ActionFact`, §3/§4 איסור #1) — מימוש עתידי של תרחישים 14-15 **חייב** לעבור דרך ה-guard הזה (RP4's `TurnEvidenceSummary`/`core/anti_hallucination.py`), לא להגדיר grounding-check עצמאי משלו. **מסומן כ-item פתוח, לא נפתר במסמך הזה** — דורש הכרעה מפורשת בזמן שממשים את 14-15 בפועל.
+
+---
+
+## 1.6 מטריצת-PR קצרה — PR #446 (נבדלת מ-Impact Matrix של תוכן-החוזה, §9 ב-`TURN_COORDINATOR_BEHAVIOR_CONTRACT_V1.md`)
+
+**הבחנה מפורשת (סבב-תיקון זה):** מטריצת §9 ב-TurnCoordinator doc מתארת את ההשפעה **של תוכן-החוזה עצמו**, אם/כש-ימומש (שכבה 1 = not touched שם — נכון, מימוש עתידי של TurnCoordinator לא קורא לקוד BUG-104). אבל **PR #446 עצמו**, כ-commit קונקרטי בריפו, **גם** עורך את `docs/architecture/bug-104/PHASE_2A_CLOSEOUT.md` וקובע את סטטוס Phase 2A.2 (§1 למעלה) — זו נגיעה תיעודית ישירה בשכבה 1, נפרדת לגמרי מהשאלה על תוכן-החוזה העתידי. שתי המטריצות נכונות בו-זמנית, כל אחת עונה לשאלה אחרת:
+
+| שכבה | PR #446 |
+|---|---|
+| שכבה 1 — Core Reasoning/BUG-104 | **touched directly, documentation truth בלבד** — קביעת סטטוס Phase 2A.2 (§1 למעלה) ותיקון `PHASE_2A_CLOSEOUT.md`'s "§5 Recommended Next Options"; **אין** שינוי input/output/authority runtime — שום קובץ קוד לא שונה ב-PR הזה. |
+| שכבה 2 — TurnCoordinator | **touched directly** — זה החוזה עצמו; ראה §9 ב-`TURN_COORDINATOR_BEHAVIOR_CONTRACT_V1.md` להרחבה מלאה. |
+| שכבה 3 — F52/Phase 4C | **touched indirectly** — ראה §9 שם. |
+| שכבה 4 — Durable Atomic Approval | **touched indirectly** — ראה §9 שם. |
+| RP5 guard (§1.5) | **applies** — ראה §1.5 למעלה. |
 
 ---
 
