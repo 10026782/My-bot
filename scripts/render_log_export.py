@@ -5,12 +5,30 @@ render_log_export.py — read-only Render log exporter + local search tool.
 Design source: docs/architecture/turn-coordinator/PHASE_2_SHADOW_PLANNING_GATE.md §6.
 Automated tests: test_render_log_export.py (run: python3 test_render_log_export.py).
 
-Canonical syntax — global flags always go AFTER the subcommand name:
-    python scripts/render_log_export.py check-env
-    python scripts/render_log_export.py export --owner-id <id> --service-id srv-xxxxxxxx --marker "BUG-130" --dry-run
-    python scripts/render_log_export.py export --owner-id <id> --service-id srv-xxxxxxxx --marker "BUG-130"
-    python scripts/render_log_export.py search "BUG-130" --since 2026-07-01
-    python scripts/render_log_export.py search "ERROR" --field message
+Canonical syntax — global flags always go AFTER the subcommand name. Use
+`python3` (not `python`) on every platform this has been run on, including
+the owner's Windows machine, where `python3` is what's on PATH:
+    python3 scripts/render_log_export.py check-env
+    python3 scripts/render_log_export.py export --owner-id <id> --service-id srv-xxxxxxxx --marker "BUG-130" --dry-run
+    python3 scripts/render_log_export.py export --owner-id <id> --service-id srv-xxxxxxxx --marker "BUG-130"
+    python3 scripts/render_log_export.py search "BUG-130" --since 2026-07-01
+    python3 scripts/render_log_export.py search "ERROR" --field message
+
+Transport (`export` only — `search`/`check-env` never touch the network):
+`--transport auto` (default) picks `curl` on Windows when `curl.exe` is on
+PATH (Python's `requests`/certifi trust store has been observed to fail
+TLS verification against api.render.com on at least one Windows machine
+with `CERTIFICATE_VERIFY_FAILED`, while curl.exe/Schannel validates the
+same certificate successfully), else `requests`. `--transport requests` or
+`--transport curl` force one explicitly. Neither transport ever disables
+certificate verification — there is no `-k`/`--insecure`/`verify=False`
+anywhere in this file, and none is ever added as a fallback on failure.
+`--ssl-no-revoke` is accepted only for the Windows curl transport; it maps
+to curl's own `--ssl-no-revoke`, which disables the *revocation-status*
+check (OCSP/CRL) only — it does not weaken certificate trust-chain
+validation, and curl's own docs describe it exactly this way. This mirrors
+the flag combination that produced a real, successful, verified probe
+against the live API (see PHASE_2_SHADOW_PLANNING_GATE.md §6.3).
 
 There is exactly one supported order. `--export-dir`/`--api-key-env` are
 defined only on each subcommand's own parser, not on the top-level parser,
@@ -40,10 +58,15 @@ _SHADOW_EVIDENCE_FIELDS) — not the raw Render response verbatim.
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
+import platform
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -60,6 +83,10 @@ PAGE_LIMIT = 100
 REQUEST_TIMEOUT_S = 30
 MAX_RETRIES_429 = 5
 BACKOFF_BASE_S = 2
+
+# Transport safety invariant, checked by test_render_log_export.py: neither
+# transport implementation below may ever construct one of these.
+_FORBIDDEN_TLS_BYPASS_FLAGS = ("-k", "--insecure")
 
 # Only these fields are persisted per log entry — a narrow, fixed allowlist,
 # not the raw Render response. `id` and `timestamp` are load-bearing for
@@ -141,6 +168,133 @@ def _verify_checkpoint_identity(checkpoint: Checkpoint, owner_id: str, service_i
         )
 
 
+# ── Transport abstraction ────────────────────────────────────────────────
+#
+# _fetch_log_page() below owns retry/backoff and is transport-agnostic; it
+# calls _http_get(), which dispatches to exactly one of the two
+# implementations below based on the resolved transport. Neither
+# implementation ever disables TLS verification, and neither falls back to
+# the other (or to an insecure flag) on failure — a failure is a failure,
+# reported to the caller, full stop.
+
+@dataclass
+class HttpResponse:
+    status_code: int
+    reason: str
+    headers: dict
+    json_body: Optional[dict]
+
+
+def select_transport(requested: str) -> str:
+    """
+    'auto' resolves once per export_logs() call, not per-request — the
+    resolved transport is used for every page of a given run, never
+    re-decided mid-run.
+    """
+    if requested != "auto":
+        return requested
+    if platform.system() == "Windows" and shutil.which("curl.exe"):
+        return "curl"
+    return "requests"
+
+
+def _http_get_requests(url: str, api_key: str, params: dict, timeout: int) -> HttpResponse:
+    resp = requests.get(
+        url,
+        headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
+        params=params,
+        timeout=timeout,
+    )
+    try:
+        body = resp.json()
+    except ValueError:
+        body = None
+    return HttpResponse(resp.status_code, resp.reason, dict(resp.headers), body)
+
+
+def _http_get_curl(url: str, api_key: str, params: dict, timeout: int, ssl_no_revoke: bool) -> HttpResponse:
+    """
+    Invokes curl.exe directly (resolved via shutil.which, never the bare
+    string "curl" — on Windows that can resolve to a PowerShell alias
+    instead of the real binary; passing a fully-resolved path to
+    subprocess.run bypasses PowerShell's alias/function resolution
+    entirely, since subprocess does not go through a shell here).
+
+    The Authorization header is passed via a curl -K config file, not as a
+    command-line argument — argv is visible to other processes/process
+    listings on the same machine; a -K config file's *contents* are not.
+    The config file is written with a random temp name and deleted in a
+    finally block; its contents are never logged, printed, or included in
+    any exception message this function raises.
+    """
+    curl_path = shutil.which("curl.exe")
+    if not curl_path:
+        raise RuntimeError("--transport curl requested (or auto-selected) but curl.exe was not found on PATH.")
+
+    config_fd, config_path = tempfile.mkstemp(prefix="render_log_export_", suffix=".curlcfg")
+    body_fd, body_path = tempfile.mkstemp(prefix="render_log_export_", suffix=".body")
+    header_fd, header_path = tempfile.mkstemp(prefix="render_log_export_", suffix=".headers")
+    os.close(body_fd)
+    os.close(header_fd)
+    try:
+        with os.fdopen(config_fd, "w", encoding="utf-8") as f:
+            f.write(f'header = "Authorization: Bearer {api_key}"\n')
+            f.write('header = "Accept: application/json"\n')
+
+        argv = [curl_path, "-G", url, "-K", config_path,
+                "--max-time", str(timeout), "-D", header_path, "-o", body_path,
+                "-w", "%{http_code}", "-sS"]
+        for key, value in params.items():
+            argv += ["--data-urlencode", f"{key}={value}"]
+        if ssl_no_revoke:
+            argv.append("--ssl-no-revoke")
+
+        for forbidden in _FORBIDDEN_TLS_BYPASS_FLAGS:
+            assert forbidden not in argv, "TLS-bypass flag construction bug — must never happen"
+
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout + 5)
+        if proc.returncode != 0:
+            # proc.stderr may contain curl diagnostics but never the key —
+            # the key was never in argv, only in the (now-deleted) config file.
+            raise RuntimeError(
+                f"curl.exe exited {proc.returncode}: {proc.stderr.strip()[:500]}. "
+                f"Not retrying with an insecure flag — fix the underlying TLS/network "
+                f"issue, or confirm --ssl-no-revoke is appropriate for your network."
+            )
+
+        status_code = int(proc.stdout.strip())
+        headers = {}
+        header_text = Path(header_path).read_text(encoding="utf-8", errors="replace")
+        for line in header_text.splitlines():
+            if ":" in line:
+                k, _, v = line.partition(":")
+                headers[k.strip()] = v.strip()
+        reason = http.client.responses.get(status_code, "")
+        body_text = Path(body_path).read_text(encoding="utf-8", errors="replace")
+        try:
+            json_body = json.loads(body_text) if body_text else None
+        except json.JSONDecodeError:
+            json_body = None
+        return HttpResponse(status_code, reason, headers, json_body)
+    finally:
+        for p in (config_path, body_path, header_path):
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+
+
+def _http_get(transport: str, url: str, api_key: str, params: dict, timeout: int, ssl_no_revoke: bool) -> HttpResponse:
+    if transport == "requests":
+        if ssl_no_revoke:
+            raise SystemExit("--ssl-no-revoke is only meaningful with --transport curl on Windows; "
+                              "refusing to silently ignore it under --transport requests.")
+        return _http_get_requests(url, api_key, params, timeout)
+    if transport == "curl":
+        return _http_get_curl(url, api_key, params, timeout, ssl_no_revoke)
+    raise ValueError(f"unknown transport {transport!r}")
+
+
 # ── Render API access (official /v1/logs shape) ──
 
 def _fetch_log_page(
@@ -150,14 +304,28 @@ def _fetch_log_page(
     start_time: str,
     end_time: str,
     log_type: str,
+    direction: str,
+    text_marker: Optional[str] = None,
     limit: int = PAGE_LIMIT,
+    transport: str = "requests",
+    ssl_no_revoke: bool = False,
 ) -> dict:
     """
-    GET {RENDER_API_BASE}/logs — official Render Logs API request shape:
-    ownerId and resource are required query parameters. Retries on HTTP 429
-    with Retry-After (falling back to exponential backoff) up to
-    MAX_RETRIES_429 times. Never prints response body content on error —
-    only status code and reason phrase.
+    GET {RENDER_API_BASE}/logs — official Render Logs API request shape,
+    verified against a real, working, owner-run call (not speculative):
+    ownerId and resource are required; type/startTime/endTime/limit/
+    direction/text are all accepted. `direction` is always sent explicitly
+    (no evidence it has a safe default) — export_logs() always calls this
+    with direction="forward", since the checkpoint-advancement logic in
+    export_logs() assumes nextStartTime/nextEndTime move monotonically
+    forward in time; a caller wanting "backward" (e.g. an ad hoc "most
+    recent N matching logs" lookup) must not reuse export_logs()'s
+    checkpoint logic unmodified. Retries on HTTP 429 with Retry-After
+    (falling back to exponential backoff) up to MAX_RETRIES_429 times.
+    Never prints response body content on error — only status code and
+    reason phrase. Delegates the actual request to _http_get() (transport
+    abstraction, above); retry/backoff logic here is identical regardless
+    of which transport is in use.
     """
     params = {
         "ownerId": owner_id,
@@ -165,23 +333,21 @@ def _fetch_log_page(
         "type": log_type,
         "startTime": start_time,
         "endTime": end_time,
+        "direction": direction,
         "limit": limit,
     }
+    if text_marker:
+        params["text"] = text_marker
     attempt = 0
     while True:
-        resp = requests.get(
-            f"{RENDER_API_BASE}/logs",
-            headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
-            params=params,
-            timeout=REQUEST_TIMEOUT_S,
-        )
+        resp = _http_get(transport, f"{RENDER_API_BASE}/logs", api_key, params, REQUEST_TIMEOUT_S, ssl_no_revoke)
         if resp.status_code == 429 and attempt < MAX_RETRIES_429:
             retry_after = resp.headers.get("Retry-After")
             delay = float(retry_after) if retry_after else BACKOFF_BASE_S * (2 ** attempt)
             attempt += 1
             time.sleep(delay)
             continue
-        if not resp.ok:
+        if not (200 <= resp.status_code < 300):
             raise RuntimeError(
                 f"Render logs request failed: HTTP {resp.status_code} {resp.reason}. "
                 f"401/403 usually means the API key or its scopes; 400/404 usually means "
@@ -189,7 +355,7 @@ def _fetch_log_page(
                 f"verify at https://api-docs.render.com. (Response body intentionally not "
                 f"printed here.)"
             )
-        return resp.json()
+        return resp.json_body
 
 
 def _parse_log_response(payload: dict) -> tuple[list[dict], bool, Optional[str], Optional[str]]:
@@ -224,6 +390,15 @@ def _validate_and_project(entry: dict) -> dict:
 
 
 def _matches_marker(entry: dict, marker_re: Optional[re.Pattern]) -> bool:
+    """
+    Defense-in-depth, not the primary narrowing mechanism: the marker is
+    also sent server-side as the `text` request param (_fetch_log_page),
+    which is what actually reduces what's transferred. This local check
+    additionally guarantees nothing gets persisted unless it strictly
+    matches our own regex, independent of whatever matching semantics
+    Render's server-side `text` filter uses internally (substring, fuzzy,
+    tokenized — not confirmed, and this check doesn't need to assume).
+    """
     if marker_re is None:
         return True
     return bool(marker_re.search(str(entry.get("message", ""))))
@@ -257,6 +432,8 @@ def export_logs(
     log_type: str,
     marker: Optional[str],
     allow_full_export: bool,
+    transport: str = "auto",
+    ssl_no_revoke: bool = False,
 ) -> None:
     if not marker and not allow_full_export:
         raise SystemExit(
@@ -265,6 +442,14 @@ def export_logs(
             "Exporting an entire service's logs by default is not supported."
         )
     marker_re = re.compile(re.escape(marker)) if marker else None
+
+    resolved_transport = select_transport(transport)
+    if ssl_no_revoke and not (resolved_transport == "curl" and platform.system() == "Windows"):
+        raise SystemExit(
+            "--ssl-no-revoke is only supported for the curl transport on Windows "
+            f"(resolved transport here: {resolved_transport!r} on {platform.system()!r}). "
+            "Refusing to accept a flag that would silently have no effect."
+        )
 
     export_dir = _service_export_dir(base_export_dir, service_id)
     checkpoint_path = export_dir / CHECKPOINT_NAME
@@ -278,7 +463,7 @@ def export_logs(
     outer_end = now
 
     print(f"Export window: {outer_start} -> {outer_end} (owner {owner_id}, service {service_id}, "
-          f"type={log_type}, marker={marker!r})")
+          f"type={log_type}, marker={marker!r}, transport={resolved_transport})")
 
     if dry_run:
         print("--dry-run: no network call made, no files written. "
@@ -293,7 +478,12 @@ def export_logs(
     total_skipped_dup = 0
 
     while True:
-        payload = _fetch_log_page(api_key, owner_id, service_id, cursor_start, cursor_end, log_type)
+        # direction is fixed to "forward" here, not exposed as a CLI option
+        # for export — see _fetch_log_page()'s docstring for why "backward"
+        # would break this function's checkpoint-advancement assumption.
+        payload = _fetch_log_page(api_key, owner_id, service_id, cursor_start, cursor_end, log_type,
+                                   direction="forward", text_marker=marker,
+                                   transport=resolved_transport, ssl_no_revoke=ssl_no_revoke)
         logs, has_more, next_start_time, next_end_time = _parse_log_response(payload)
 
         by_day: dict[str, list[dict]] = {}
@@ -397,6 +587,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_export.add_argument("--log-type", default="app", help="Render log type filter (default: app)")
     p_export.add_argument("--dry-run", action="store_true", help="print the export window and exit, no network call")
     p_export.add_argument("--catch-up-days", type=int, default=1, help="window to use on the very first run (no checkpoint yet)")
+    p_export.add_argument("--transport", choices=["auto", "requests", "curl"], default="auto",
+                           help="auto (default): curl.exe on Windows if present, else requests. Never disables TLS verification.")
+    p_export.add_argument("--ssl-no-revoke", action="store_true",
+                           help="Windows curl transport only: skip the certificate REVOCATION check "
+                                "(OCSP/CRL), not certificate trust validation. Rejected under any other transport.")
 
     p_search = sub.add_parser("search", parents=[common], help="search already-exported JSONL files locally")
     p_search.add_argument("pattern", help="regex pattern to search for")
@@ -418,6 +613,7 @@ def main() -> None:
         export_logs(
             args.api_key_env, args.owner_id, args.service_id, export_dir, args.dry_run,
             args.catch_up_days, args.log_type, args.marker, args.allow_full_export,
+            args.transport, args.ssl_no_revoke,
         )
     elif args.command == "search":
         for line in search_logs(export_dir, args.pattern, args.since, args.until, args.field, args.max_results):

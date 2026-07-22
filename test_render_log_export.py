@@ -51,7 +51,7 @@ ENTRY = lambda id_, ts, msg="BUG-130 shadow decision logged", extra=None: {
 # ── 1. Official request shape ────────────────────────────────────────────
 print("── Official request shape ──")
 with patch.object(rle.requests, "get", return_value=_resp(json_body={"logs": [], "hasMore": False})) as m:
-    rle._fetch_log_page("key123", "own-1", "srv-1", "T0", "T1", "app")
+    rle._fetch_log_page("key123", "own-1", "srv-1", "T0", "T1", "app", direction="forward", text_marker="BUG-130")
     call = m.call_args
     chk("T1: hits GET /v1/logs", call.args[0] == f"{rle.RENDER_API_BASE}/logs")
     chk("T2: ownerId present and correct", call.kwargs["params"]["ownerId"] == "own-1")
@@ -59,6 +59,12 @@ with patch.object(rle.requests, "get", return_value=_resp(json_body={"logs": [],
     chk("T4: type defaults/passes through as given", call.kwargs["params"]["type"] == "app")
     chk("T5: startTime/endTime passed through", call.kwargs["params"]["startTime"] == "T0" and call.kwargs["params"]["endTime"] == "T1")
     chk("T6: Authorization header is Bearer <key>, key never logged elsewhere", call.kwargs["headers"]["Authorization"] == "Bearer key123")
+    chk("T6b: direction is sent explicitly (owner-confirmed real param, no assumed default)", call.kwargs["params"]["direction"] == "forward")
+    chk("T6c: text (server-side marker) is sent when a marker is given (owner-confirmed real param)", call.kwargs["params"]["text"] == "BUG-130")
+
+with patch.object(rle.requests, "get", return_value=_resp(json_body={"logs": [], "hasMore": False})) as m:
+    rle._fetch_log_page("key123", "own-1", "srv-1", "T0", "T1", "app", direction="forward", text_marker=None)
+    chk("T6d: text is omitted entirely (not sent as text=None) when no marker is given", "text" not in m.call_args.kwargs["params"])
 
 logs, has_more, nst, net = rle._parse_log_response({"logs": [ENTRY("a", "2026-07-22T00:00:00Z")], "hasMore": True, "nextStartTime": "NS", "nextEndTime": "NE"})
 chk("T7: response parsing reads logs/hasMore/nextStartTime/nextEndTime directly, no fallback keys", has_more is True and nst == "NS" and net == "NE" and len(logs) == 1)
@@ -197,14 +203,14 @@ with tempfile.TemporaryDirectory() as td:
 print("\n── 429 retry/backoff ──")
 with patch.object(rle.requests, "get", side_effect=[_resp(429, reason="Too Many Requests"), _resp(json_body={"logs": [], "hasMore": False})]), \
      patch.object(rle.time, "sleep") as sleep_mock:
-    result = rle._fetch_log_page("k", "own-1", "srv-1", "T0", "T1", "app")
+    result = rle._fetch_log_page("k", "own-1", "srv-1", "T0", "T1", "app", direction="forward")
     chk("T22: succeeds after one 429 retry", result == {"logs": [], "hasMore": False})
     chk("T23: backoff sleep was invoked (no real waiting in the test)", sleep_mock.called)
 
 with patch.object(rle.requests, "get", return_value=_resp(429, reason="Too Many Requests")), \
      patch.object(rle.time, "sleep"):
     try:
-        rle._fetch_log_page("k", "own-1", "srv-1", "T0", "T1", "app")
+        rle._fetch_log_page("k", "own-1", "srv-1", "T0", "T1", "app", direction="forward")
         chk("T24: exhausting all 429 retries eventually raises", False)
     except RuntimeError:
         chk("T24: exhausting all 429 retries eventually raises", True)
@@ -259,6 +265,74 @@ try:
     chk("T31: the non-canonical order (flags before subcommand) fails loudly, not silently", False)
 except SystemExit:
     chk("T31: the non-canonical order (flags before subcommand) fails loudly, not silently", True)
+
+
+# ── 11. Transport abstraction ─────────────────────────────────────────────
+print("\n── Transport abstraction ──")
+
+with patch.object(rle.platform, "system", return_value="Windows"), \
+     patch.object(rle.shutil, "which", return_value=r"C:\Windows\System32\curl.exe"):
+    chk("T32: auto chooses curl on Windows when curl.exe is on PATH", rle.select_transport("auto") == "curl")
+
+with patch.object(rle.platform, "system", return_value="Windows"), \
+     patch.object(rle.shutil, "which", return_value=None):
+    chk("T33: auto falls back to requests on Windows when curl.exe is not found", rle.select_transport("auto") == "requests")
+
+with patch.object(rle.platform, "system", return_value="Linux"):
+    chk("T34: auto uses requests on non-Windows", rle.select_transport("auto") == "requests")
+
+chk("T35: --transport requests remains selectable explicitly regardless of platform", rle.select_transport("requests") == "requests")
+chk("T36: --transport curl remains selectable explicitly regardless of platform", rle.select_transport("curl") == "curl")
+
+FAKE_KEY = "SECRET_KEY_MUST_NEVER_APPEAR_ANYWHERE_abc123"
+
+with patch.object(rle.shutil, "which", return_value="/usr/bin/curl.exe"), \
+     patch.object(rle.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout="200", stderr="")) as run_mock:
+    rle._http_get_curl("https://api.render.com/v1/logs", FAKE_KEY,
+                        {"ownerId": "own-1", "resource": "srv-1", "type": "app"}, 30, ssl_no_revoke=False)
+    argv = run_mock.call_args.args[0]
+    chk("T37: no -k/--insecure flag is ever constructed for the curl transport",
+        all(f not in argv for f in rle._FORBIDDEN_TLS_BYPASS_FLAGS))
+    chk("T38: the API key never appears anywhere in the constructed argv (it's in the -K config file, not argv)",
+        all(FAKE_KEY not in str(a) for a in argv))
+    chk("T39: curl.exe is invoked directly (resolved path), not the bare string 'curl'", argv[0] != "curl")
+
+with patch.object(rle.shutil, "which", return_value="/usr/bin/curl.exe"), \
+     patch.object(rle.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout="200", stderr="")) as run_mock:
+    rle._http_get_curl("https://api.render.com/v1/logs", FAKE_KEY,
+                        {"ownerId": "own-1", "resource": "srv-1"}, 30, ssl_no_revoke=True)
+    argv = run_mock.call_args.args[0]
+    chk("T40: --ssl-no-revoke maps to curl's own --ssl-no-revoke flag, not an insecure flag",
+        "--ssl-no-revoke" in argv and all(f not in argv for f in rle._FORBIDDEN_TLS_BYPASS_FLAGS))
+
+with patch.object(rle.shutil, "which", return_value="/usr/bin/curl.exe"), \
+     patch.object(rle.subprocess, "run", return_value=SimpleNamespace(returncode=1, stdout="", stderr="curl: (60) SSL certificate problem")) as run_mock:
+    try:
+        rle._http_get_curl("https://api.render.com/v1/logs", FAKE_KEY, {"ownerId": "own-1"}, 30, ssl_no_revoke=False)
+        chk("T41: a curl failure raises rather than succeeding", False)
+    except RuntimeError as exc:
+        chk("T41: a curl failure raises rather than succeeding", True)
+        chk("T42: curl failure does not retry with an insecure flag — subprocess.run called exactly once", run_mock.call_count == 1)
+        chk("T43: the error message never contains the API key", FAKE_KEY not in str(exc))
+
+try:
+    rle._http_get("requests", "https://api.render.com/v1/logs", "k", {}, 30, ssl_no_revoke=True)
+    chk("T44: --ssl-no-revoke under --transport requests is rejected, not silently ignored", False)
+except SystemExit:
+    chk("T44: --ssl-no-revoke under --transport requests is rejected, not silently ignored", True)
+
+with tempfile.TemporaryDirectory() as td:
+    try:
+        rle.export_logs("ENV", "own-1", "srv-9", Path(td), dry_run=False, catch_up_days=1,
+                         log_type="app", marker="x", allow_full_export=False,
+                         transport="requests", ssl_no_revoke=True)
+        chk("T45: export_logs() itself also rejects --ssl-no-revoke under a non-curl-Windows transport", False)
+    except SystemExit:
+        chk("T45: export_logs() itself also rejects --ssl-no-revoke under a non-curl-Windows transport", True)
+
+with patch.object(rle.requests, "get", return_value=_resp(json_body={"logs": [], "hasMore": False})):
+    chk("T46: --transport requests remains fully usable end-to-end (explicit, not just auto-fallback)",
+        rle._fetch_log_page("k", "own-1", "srv-1", "T0", "T1", "app", direction="forward", transport="requests") == {"logs": [], "hasMore": False})
 
 
 print(f"\n{'='*60}")

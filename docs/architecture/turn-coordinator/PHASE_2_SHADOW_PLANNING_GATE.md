@@ -327,63 +327,96 @@ Design notes:
 
 ## 6. Render Log Export — Research, Verified API Shape, and Implementation
 
-**Status update (this round):** the exporter is now written, tested, and committed — `scripts/render_log_export.py` + `test_render_log_export.py` (31 committed automated checks, all passing, all mocked — no real Render call has ever been made from any session). This is standalone offline tooling (like `contact_merge.py`), never imported by `app.py`, never run automatically by `scheduler.py`/`worker.py`/CI — building and testing it is not a production-runtime change. **It has still never been run against a real Render service** — no credential and no owner/service id exist in any session that produced this document or the script.
+**Status update (this round):** the owner ran a real, live probe against the official Render Logs API from their own Windows machine — HTTP 200, 10 matching entries, every one carrying `id`+`timestamp`. This confirms the request/response shape end-to-end against production, resolves the `ownerId`/`resource` values, and surfaced two real request parameters (`text`, `direction`) this script did not previously send. Both are now implemented. A Windows-specific TLS finding from the same probe (Python's certifi trust store failed `CERTIFICATE_VERIFY_FAILED` against `api.render.com` on that machine, while `curl.exe`/Schannel validated the same certificate successfully) is now handled by a transport abstraction (§6.5) rather than by weakening verification anywhere.
 
-### 6.1 Credential — cannot be verified from this session; owner is handling it locally
+### 6.1 Credential — verified SET by the owner locally; never seen by any session
 
-This remote execution environment's full environment-variable name list contains **zero** Render-related names (verified via `env | cut -d= -f1 | grep -i render`, empty). The owner has stated they will supply and manage the actual `RENDER_API_KEY`-equivalent credential locally, in their own VS Code/Claude Code environment — `scripts/render_log_export.py check-env` (§6.4) is the mechanism for them to confirm it's set without ever exposing the value, including to this session. Nothing in the script reads, prints, logs, or persists the credential anywhere except the outbound `Authorization` header on each request.
+The owner confirmed `RENDER_API_KEY` is set and authenticated on their machine — "never displayed, never written to any file, verified absent from every saved artifact" (their own words). No session that produced this document or this script has ever held, read, or logged the actual value; `scripts/render_log_export.py check-env` remains the mechanism to confirm presence without exposing it.
 
-### 6.2 Service identifier and owner identifier — still open
+### 6.2 Service and workspace identifiers — now confirmed real values
 
-Neither is documented anywhere in the repo. The public hostname `my-bot-jqz2.onrender.com` (`docs/operations/DEPLOYMENT.md`, `RUNBOOK.md`) implies a service name, but Render's Logs API requires the service **ID** (`srv-...`) via the `resource` parameter, and — confirmed this round, not assumed — also requires an `ownerId` (workspace-level identifier) as a separate, independently-required parameter. Both values need to come from the Render Dashboard or an authenticated `GET /v1/services` call, once a credential exists to make that call at all. Still an open item — see §13.
+| Field | Value |
+|---|---|
+| `ownerId` (workspace) | `tea-d804tr8sfn5c7398geag` |
+| workspace name | `אלי's workspace` |
+| `serviceId` (`resource`) | `srv-d80ehsf7f7vs73cq5rn0` |
+| service name | `My-bot` |
+| public URL | `https://my-bot-jqz2.onrender.com` (matches `docs/operations/DEPLOYMENT.md`) |
+| type / region | `web_service` / `virginia` |
 
-### 6.3 Supported log-query method — **now verified, official shape**
+Not secrets — these are resource identifiers passed as ordinary query parameters, not credentials, and the public URL was already documented in `DEPLOYMENT.md`/`RUNBOOK.md`. Recorded here as the confirmed values for **owner-decision item 1 in the previous round's table, now resolved.**
 
-`WebFetch` from this session was blocked (HTTP 403) on every attempt to reach Render's own API docs during the original planning research; the owner has since confirmed the official request/response shape directly (not re-derived from training knowledge, and not re-verified live by this session — the owner is the authoritative source here, having checked Render's actual current documentation). `scripts/render_log_export.py` implements exactly this, with no speculative fallback logic:
+**New finding, relevant to §13's non-production-environment item:** a second service, `my-bot-approval-staging`, exists in the same workspace — same repo, different hostname. The owner's probe correctly excluded it (it doesn't match `my-bot`'s identifying signals), so it was **not** used for the verification above. Whether it's suitable as the non-production environment for testing `shadow` mode (§12 step 2, §13) is **not** resolved by this finding alone — its exact purpose (it may relate to the F52 Unified Approval Runtime Migration's own staging needs, per `DEPLOYMENT.md`'s "For atomic claims (staging only)" note, not necessarily a general-purpose staging mirror of the whole bot) is still an open owner decision.
+
+### 6.3 Supported log-query method — verified against a real, successful, production call
+
+Request shape confirmed live (not from blocked `WebFetch` attempts, not from training knowledge — from the owner's own working probe against `api.render.com`):
 
 **Request** — `GET https://api.render.com/v1/logs`
 ```
 Authorization: Bearer <RENDER_API_KEY>
 Accept: application/json
 
-Query parameters:
-  ownerId    (required)
-  resource   (required — the service id, e.g. srv-xxxxxxxx)
-  type       (default: "app" — application logs only, not build/deploy logs)
-  startTime  (ISO-8601)
-  endTime    (ISO-8601)
-  limit      (page size)
+?ownerId=tea-d804tr8sfn5c7398geag&resource=srv-d80ehsf7f7vs73cq5rn0&type=app
+&text=%5BTurnEnvelope%5D&direction=backward&limit=20
+&startTime=2026-07-21T13:40:08Z&endTime=2026-07-22T13:40:08Z
 ```
+Result: HTTP 200, 10 matching entries, `hasMore=false`, `nextStartTime`/`nextEndTime` both present even on the final page, every entry had both `id` and `timestamp`.
+
+**Two parameters newly confirmed this round, not previously sent by this script:**
+- **`text`** — a real, working, server-side text filter. `scripts/render_log_export.py` now sends the required `--marker` value as `text=<marker>` (narrowing what Render transfers, not just what gets written locally) — the earlier design's client-side-only marker filter is kept as a secondary, defense-in-depth check (§6.4), not the primary narrowing mechanism it was forced to be before this confirmation.
+- **`direction`** — accepted, no confirmed safe default, so it is now always sent explicitly. The owner's probe used `backward` for an ad hoc "most recent N matching entries" lookup; `export_logs()`'s own calls always use `direction="forward"` instead, deliberately — its checkpoint-advancement logic (§6.4) assumes `nextStartTime`/`nextEndTime` move monotonically forward through time, which `backward` would not satisfy without separate logic this slice doesn't need.
 
 **Response**
 ```json
 {
-  "logs": [ { "id": "...", "timestamp": "...", "message": "...", "type": "app", "resource": "srv-..." }, ... ],
-  "hasMore": true,
+  "logs": [ { "id": "...", "timestamp": "...", "message": "...", "type": "app", "resource": "srv-..." } ],
+  "hasMore": false,
   "nextStartTime": "...",
   "nextEndTime": "..."
 }
 ```
-
-**Pagination invariant**: when `hasMore=true`, the *next* request uses `startTime=nextStartTime` **and** `endTime=nextEndTime` from the previous response — both fields, not one. `_parse_log_response()` reads `logs`/`hasMore` directly (`KeyError` on a malformed response, not a silent fallback to a guessed alternate key name — the old speculative `payload.get("logs") or payload.get("data") or ...` chain has been removed entirely). Verified by a committed test (`test_render_log_export.py` T7-T8) that a response using the old speculative `"data"` key is now rejected rather than silently accepted.
+`_parse_log_response()` reads `logs`/`hasMore` directly (`KeyError` on a malformed response, no fallback to a guessed alternate key name — the old speculative `payload.get("logs") or payload.get("data") or ...` chain was removed entirely last round). When `hasMore=true`, the next request uses `startTime=nextStartTime` **and** `endTime=nextEndTime` together — both fields, not one.
 
 ### 6.4 Exporter — implemented, tested, not yet run for real
 
 `scripts/render_log_export.py`, three subcommands:
 
 - **`check-env`** — reports only whether the configured API-key env var is set (never its value).
-- **`export`** — cursor-based via the official `nextStartTime`/`nextEndTime` pair (§6.3); read-only (`GET` only, never a Render mutation endpoint); requires `--marker` (an approved server-side-evaluated text filter matched against each entry's `message` before anything is written) unless `--allow-full-export` is explicitly passed — narrows collection by default rather than exporting an entire service's logs; defaults `type=app`; persists only a fixed field allowlist per entry (`id`, `timestamp`, `message`, `type`, `resource` — not the raw Render response verbatim); retries on HTTP 429 with `Retry-After`-aware backoff (falling back to exponential) up to 5 attempts; never prints a response body on error, only the status code and reason phrase.
+- **`export`** — cursor-based via `nextStartTime`/`nextEndTime` (§6.3); read-only (`GET` only, never a Render mutation endpoint); requires `--marker` (sent server-side as `text=`, §6.3, plus verified again locally against each entry's `message` before anything is written) unless `--allow-full-export` is explicit; defaults `type=app`; persists only a fixed field allowlist per entry (`id`, `timestamp`, `message`, `type`, `resource`); retries on HTTP 429 with `Retry-After`-aware backoff up to 5 attempts; never prints a response body on error, only status code and reason.
 - **`search`** — local regex search over already-exported JSONL, with `--since`/`--until`/`--field` scoping — the "identify relevant logs" step, entirely offline.
 
-**Checkpoint/dedup invariant** (§13's old items 4/5 in the review that produced this update — now resolved in code, not just design): one export subdirectory *and* one checkpoint file per `service_id` (`render_logs/<service_id>/...`), so two services can never share or corrupt each other's cursor state; a checkpoint's stored `owner_id`/`service_id` is verified against the current invocation's values and raises `ServiceMismatchError` on any mismatch. Deduplication is by Render's own log entry `id` — **never** by timestamp, so multiple entries sharing an identical timestamp are all preserved, not collapsed. Every fetched entry is validated to have both `id` and `timestamp` *before* anything is written; an entry missing either raises immediately and aborts that page's write entirely (fail closed — no partial, unverifiable state is ever persisted). The checkpoint is saved durably immediately after each page's writes complete, before the next page is requested, so a crash between pages leaves the checkpoint at a safely-resumable boundary; a retry that re-fetches an already-written window produces zero duplicate lines, because the day-file's existing ids are loaded and diffed before every write, independent of whether the checkpoint itself advanced.
+**Checkpoint/dedup invariant:** one export subdirectory *and* one checkpoint file per `service_id` (`render_logs/<service_id>/...`); a checkpoint's stored `owner_id`/`service_id` is verified against the current invocation and raises `ServiceMismatchError` on mismatch. Deduplication is by Render's own log entry `id` — **never** by timestamp, so same-timestamp entries are all preserved. Every fetched entry is validated to have both `id` and `timestamp` *before* anything is written; a missing field aborts that page's write entirely (fail closed). The checkpoint is saved durably immediately after each page's writes complete, before the next page is requested; a retry against an already-exported window produces zero duplicate lines, because existing ids are loaded and diffed before every write, independent of checkpoint timing.
 
-**Storage** (outside Git): `render_logs/<service_id>/YYYY-MM-DD.jsonl` (daily, append-only) + `render_logs/<service_id>/.checkpoint.json`. `.gitignore` now has a `render_logs/` entry (committed alongside the script — no longer deferred, see §11).
+**Storage** (outside Git): `render_logs/<service_id>/YYYY-MM-DD.jsonl` + `render_logs/<service_id>/.checkpoint.json`. `.gitignore` has a `render_logs/` entry.
 
-**Committed automated tests**: `test_render_log_export.py`, 31 checks, all passing, all network-mocked. Covers: the official request shape (T1-T8), multi-page pagination using both `nextStartTime`/`nextEndTime` (T9-T11), same-timestamp preservation (T12), crash/retry idempotency via a duplicate export run producing zero extra lines (T13-T14), checkpoint service/owner mismatch rejection (T15-T17), fail-closed on missing `id`/`timestamp` including a whole-page abort (T18-T21), 429 retry-then-succeed and retry-exhaustion (T22-T24), dry-run's zero network/filesystem side effects (T25-T26), required-marker enforcement and the `--allow-full-export` override (T27-T29), and the single supported CLI argument order plus the confirmed failure of the non-canonical order (T30-T31).
+### 6.5 Transport abstraction — Windows TLS finding, handled without weakening verification
 
-**Cadence**: daily, run manually or via the owner's own `cron`/scheduler outside this repo's Flask process — deliberately not wired into `scheduler.py`/`worker.py`, keeping the credential's blast radius separate from the production bot's own secrets.
+The owner's probe reported: `curl.exe` (Schannel) validated `api.render.com`'s certificate successfully; Python's `requests`/certifi trust store failed with `CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate` on the same machine; `curl.exe` additionally needed `--ssl-no-revoke` to skip a *revocation-status* check (OCSP/CRL) that was failing separately — not a trust-chain bypass.
 
-**Never executed against a real Render service, by any session** — verified only against mocked responses matching the shape in §6.3. The real end-to-end path (real credential, real `ownerId`/`resource`) is untested and remains the owner's own verification step.
+`scripts/render_log_export.py export` now supports `--transport {auto,requests,curl}`:
+- **`auto`** (default): picks `curl` when `platform.system() == "Windows"` and `curl.exe` is found via `shutil.which("curl.exe")` (the resolved absolute path is invoked directly via `subprocess.run`, not the bare string `"curl"` — on Windows that can resolve to a PowerShell alias/function instead of the real binary when run inside a PowerShell session; passing a fully-resolved path bypasses that entirely). Otherwise `requests`.
+- **`requests`** / **`curl`**: force one explicitly.
+- **Never** constructs `-k`/`--insecure`/`verify=False` anywhere, under any code path, on any failure — confirmed by an in-code assertion (`_FORBIDDEN_TLS_BYPASS_FLAGS`) plus a committed test inspecting the actual constructed `curl` argv.
+- **`--ssl-no-revoke`**: accepted only when the resolved transport is `curl` **and** the platform is Windows — `export_logs()` itself raises `SystemExit` if it's passed under any other combination, rather than silently having no effect. Maps 1:1 to curl's own `--ssl-no-revoke`, documented by curl itself as disabling revocation checking only, matching exactly what the owner's successful probe needed.
+- **Curl transport internals**: the `Authorization` header is written to a temporary `-K` config file (`header = "Authorization: Bearer <key>"`), never passed as a command-line argument — argv is visible to other processes/process listings on the same machine, a `-K` config file's contents are not. The temp file is deleted in a `finally` block immediately after the request. Query parameters are passed via `--data-urlencode` per parameter (the same safe-encoding mechanism the owner's own manual probe used), never hand-concatenated into the URL. A non-zero curl exit code raises immediately — there is no retry loop that adds an insecure flag or falls back to the `requests` transport; a transport failure is reported to the caller as a failure.
+- **Response parsing is shared**: both transports produce the same internal `HttpResponse` shape, which `_fetch_log_page()`'s existing retry/backoff/`_parse_log_response()` logic consumes identically — the pagination, idempotency, marker-filtering, and checkpoint guarantees in §6.4 apply exactly the same way regardless of which transport is selected.
+
+**Committed automated tests**: `test_render_log_export.py`, **49 checks, all passing, all network/subprocess-mocked** (up from 31 last round — 15 new transport tests, plus 3 for the `text`/`direction` params). Covers everything in §6.4 (T1-T31, unchanged) plus: `auto` selecting `curl` on Windows when present and falling back to `requests` when absent (T32-T34), `requests`/`curl` remaining explicitly selectable on any platform (T35-T36), no `-k`/`--insecure` ever constructed (T37), the API key never appearing anywhere in the constructed `curl` argv (T38), `curl.exe`'s resolved path being invoked directly rather than the bare string `"curl"` (T39), `--ssl-no-revoke` mapping to curl's own flag and never an insecure one (T40), a curl failure raising rather than retrying insecurely — `subprocess.run` called exactly once (T41-T42), the API key never appearing in an error message (T43), `--ssl-no-revoke` rejected outright under the `requests` transport at both the low-level (T44) and `export_logs()` (T45) level, and `--transport requests` remaining fully usable end-to-end (T46).
+
+**Cadence**: daily, run manually or via the owner's own `cron`/scheduler — deliberately not wired into `scheduler.py`/`worker.py`.
+
+**Still never executed against a real Render service by any session that produced this repository content** — verified only against mocked responses matching the shape the owner's own live probe confirmed. Committed usage examples now say `python3` (not `python`) throughout, matching what's on PATH on the owner's Windows machine.
+
+**Exact approved command for the owner's first narrow export** (matching the marker/window their probe already validated as returning real, relevant results):
+```
+python3 scripts/render_log_export.py export ^
+  --owner-id tea-d804tr8sfn5c7398geag ^
+  --service-id srv-d80ehsf7f7vs73cq5rn0 ^
+  --marker "[TurnEnvelope]" ^
+  --dry-run
+```
+Run with `--dry-run` first (prints the window and resolved transport, no network call) — remove `--dry-run` only after confirming the printed window looks right, per the task's standing instruction not to perform a real export in this round.
 
 ---
 
@@ -456,8 +489,8 @@ All four new files are root-level `test_*.py`, matching the existing convention 
 ## 11. Implementation-Slice Plan — Exact Files Expected to Change
 
 **Already delivered, committed to this branch (not production runtime — offline tooling, never imported by `app.py`, never run automatically):**
-- `scripts/render_log_export.py` — implemented per §6.3-6.4's verified official API shape, idempotent/crash-safe, narrow-by-default.
-- `test_render_log_export.py` — 31 committed automated checks (§6.4), all passing.
+- `scripts/render_log_export.py` — implemented per §6.3-6.5's verified-live official API shape (including the `text`/`direction` parameters confirmed by a real probe), idempotent/crash-safe, narrow-by-default, with a Windows-safe `requests`/`curl` transport abstraction that never disables TLS verification.
+- `test_render_log_export.py` — 49 committed automated checks (§6.4-6.5), all passing.
 - `.gitignore` — `render_logs/` entry added (no longer deferred — the directory this ignores is exactly what the now-real exporter writes).
 
 **Still not implemented — planning/design only, no runtime code exists for these yet:**
@@ -486,15 +519,15 @@ All four new files are root-level `test_*.py`, matching the existing convention 
 
 ## 13. Owner-Decision Table
 
-Only items that cannot be resolved from the repository. Items 1-3 from the prior round are resolved or narrowed this round (API shape is now verified, §6.3; credential handling is now the owner's own local step, §6.1) — replaced below by what's still actually open.
+Only items that cannot be resolved from the repository. Items 1-2 from the prior round (real `ownerId`/`resource` values, the credential itself) are **resolved this round** — the owner's live probe confirmed both (§6.1-6.2). Replaced below by what's still actually open.
 
 | # | Decision needed | Why it can't be resolved here |
 |---|---|---|
-| 1 | Real `ownerId` and `resource` (service id) values for the `my-bot-jqz2` service | Not documented anywhere in the repo — only the public hostname is. Requires Dashboard access or an authenticated `GET /v1/services` call this session cannot make (§6.2). The exporter's request *shape* is verified (§6.3); these two *values* are not. |
-| 2 | Real `RENDER_API_KEY`-equivalent credential | Being handled by the owner locally per their own instruction — not a blocker for this PR's content, tracked here only so it isn't lost as an open item before the exporter is actually run for real. |
-| 3 | Whether `_pending_approvals`/`event_bus.PendingActionsStore`/`ActionGateway` are on a known consolidation path, or intended to coexist indefinitely | `AI_CONTEXT.md` has no note on this; `FEATURE_ACTION_GATEWAY`'s shadow-gating (`app.py:1122`) suggests `ActionGateway` is the intended eventual canonical store, but that's my inference from a flag name, not a documented decision. Affects whether §4's multi-store mapping is a permanent design or a temporary one this slice should build for. |
-| 4 | Whether to build minimal `CapabilityScope`/`last_outbound_kind` providers now (partial fidelity, e.g. hardcoded-`available` constants) or omit them from `ShadowDecisionRecord` entirely until real sources exist (§2 fields 5/7, §11) | Both are legitimate scope choices with different implementation cost and different Shadow-comparison completeness; no repo precedent settles which the owner prefers for this specific slice. |
-| 5 | Whether a non-production Render environment exists to run `shadow` mode against before touching the production flag (§12 step 2) | Not documented in `docs/operations/DEPLOYMENT.md`/`RUNBOOK.md` — those describe one Render service (`my-bot-jqz2`), no staging environment is named. |
+| 1 | Whether `my-bot-approval-staging` (the second service found in the workspace, §6.2) is a suitable non-production environment to test `shadow` mode against, or serves a different, unrelated purpose | Its exact purpose isn't documented in the repo; the owner's probe correctly excluded it from the `my-bot` identification but didn't characterize what it's actually for. |
+| 2 | Whether `_pending_approvals`/`event_bus.PendingActionsStore`/`ActionGateway` are on a known consolidation path, or intended to coexist indefinitely | `AI_CONTEXT.md` has no note on this; `FEATURE_ACTION_GATEWAY`'s shadow-gating (`app.py:1122`) suggests `ActionGateway` is the intended eventual canonical store, but that's my inference from a flag name, not a documented decision. Affects whether §4's multi-store mapping is a permanent design or a temporary one this slice should build for. |
+| 3 | Whether to build minimal `CapabilityScope`/`last_outbound_kind` providers now (partial fidelity, e.g. hardcoded-`available` constants) or omit them from `ShadowDecisionRecord` entirely until real sources exist (§2 fields 5/7, §11) | Both are legitimate scope choices with different implementation cost and different Shadow-comparison completeness; no repo precedent settles which the owner prefers for this specific slice. |
+
+**Resolved this round, no longer open:** real `ownerId`/`resource` values (§6.2); the credential itself, confirmed set and authenticated by the owner (§6.1); the exact official API request/response shape including `text`/`direction` (§6.3); the Windows TLS/transport question (§6.5).
 
 ---
 
@@ -504,4 +537,4 @@ Only items that cannot be resolved from the repository. Items 1-3 from the prior
 READY FOR OWNER DECISION
 ```
 
-Planning and research for Phase 2 Shadow are complete and grounded (10 required research areas covered, Cross-Layer Impact Matrix filled with proof-of-non-impact/proof-of-read-only-access, implementation-slice plan names exact files, test plan maps every `earliest_enforcement_phase=2→3` scenario). The Render log-export sub-piece has moved from design-only to implemented-and-tested this round (§6, §11) — its official API shape is now verified, not speculative, and 31 committed automated tests pass against mocked responses matching that shape. This is **not** `PLANNING BLOCKED` — no Impact Matrix gap remains unfilled. It is **not** `READY FOR PHASE 2 SHADOW IMPLEMENTATION` — the main Shadow-decision slice (`core/turn_coordinator_shadow.py`, the `app.py` hook call sites, the feature flag) still does not exist as code, and five genuine owner-decision items remain (§13): two real values needed to actually run the exporter (item 1) and the credential itself (item 2, being handled locally by the owner), plus three real design choices affecting the main slice (items 3-5) that this document deliberately did not resolve unilaterally. No production-bot runtime code has changed — see §11's closing note.
+Planning and research for Phase 2 Shadow are complete and grounded (10 required research areas covered, Cross-Layer Impact Matrix filled with proof-of-non-impact/proof-of-read-only-access, implementation-slice plan names exact files, test plan maps every `earliest_enforcement_phase=2→3` scenario). The Render log-export sub-piece has moved from design-only, to implemented-and-tested against a verified shape, to **verified end-to-end against the live API by the owner's own real probe** across these three rounds (§6) — 49 committed automated tests pass against mocked responses matching that now-live-confirmed shape, including a Windows-safe transport that never weakens TLS verification. This is **not** `PLANNING BLOCKED` — no Impact Matrix gap remains unfilled. It is **not** `READY FOR PHASE 2 SHADOW IMPLEMENTATION` — the main Shadow-decision slice (`core/turn_coordinator_shadow.py`, the `app.py` hook call sites, the feature flag) still does not exist as code, and three genuine owner-decision items remain (§13), none of which block running the exporter for real — only the main slice's own design. No production-bot runtime code has changed — see §11's closing note. A real export has still not been run in any round, per the task's standing instruction.
