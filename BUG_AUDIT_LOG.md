@@ -3103,3 +3103,21 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **ניקוי הנתונים הקיימים:** 310 הרשומות המזויפות שכבר נכתבו ל-Interaction Log (`recLEAD001:*`) נמחקו ישירות מ-Airtable (לא ע"י קוד — פעולת ניקוי חד-פעמית, מאושרת מפורשות ע"י הבעלים). ראו לוג המחיקה למטה.
 - **Merged:** ⏳ טרם — branch `claude/bug131-test-isolation-interaction-log-leak`.
 - **סטטוס:** ✅ Fixed — קוד + tests מאומתים מקומית (50/50 + full sweep נקי). Production verification (הבעלים בודק שהקובץ לא ממשיך לזהם) ממתין להרצה עתידית של ה-test sweep אחרי merge.
+
+## BUG-134 — TTL הגנרי של `ActionContractRepository` (24h) עלול ליירט contract לפני שהלוגיקה הספציפית של C84 (reject + סנכרון Approvals projection) מספיקה לרוץ — 🔴 נרשם, לא תוקן
+
+- **תאריך:** 21/07/2026.
+- **מקור:** הבעלים ביקש לאמת את C84 (TMA Approvals TTL, ראה `CHANGE_CONTROL_LOG.md` C143) ע"י יצירת ActionContract-בדיקה נקי וחיכה 24 שעות. הביא לוג production אמיתי:
+  ```
+  [ActionContractRepository] get(1d255ed2-c837-414b-b4fa-e0fc4d6319aa) — pending contract expired (created_at=1784578007.9891315)
+  ```
+  בהתחלה נראה כאילו זה מאמת את C84 (24h TTL אכן פג) — אבל trace מדויק בקוד גילה שזה **מנגנון אחר**, לא C84 עצמו.
+- **Contract Chain (אומת ישירות בקוד):**
+  1. `core/action_contract_repository.py:84`: `CONTRACT_PENDING_TTL_SECONDS = 24 * 3600` — TTL **גנרי**, שונה ומוקדם יותר מ-`tma_api.py`'s `_TMA_APPROVAL_TTL_SECONDS` הספציפי ל-C84 (גם 24h, אך לוגיקה שונה לגמרי). `ActionContractRepository.get()` (שורות 300-321): אם `contract.status=="pending"` וגם `_is_expired(contract)` — **מחזיר `None`** (מתנהג כ"לא נמצא", לוג ה-`"pending contract expired"` שהמשתמש הביא).
+  2. `tma_api.py`'s `_claim_and_execute_approval()` קורא ל-`_gw.find_contract(contract_id)` → `ExecutionLedger.find_by_id()` (`core/action_gateway.py:432`) → cache hit מחזיר מייד מה-RAM (**לא בודק תפוגה בכלל**), cache miss נופל ל-`repository.get()` (המנגנון הגנרי שלעיל). הלוג שהמשתמש הביא **מוכיח cache miss קרה** (אחרת השורה הזו לא הייתה נרשמת כלל) — כנראה מ-restart/redeploy כלשהו בחלון 24 השעות.
+  3. כשה-repository מחזיר `None`, `_claim_and_execute_approval()` (`tma_api.py:2753-2759`) נכנס לענף **`404 "canonical ActionContract not found — orphaned projection row"`** — **לא** לענף הספציפי של C84 (`tma_api.py:2775-2829`) שעושה `_gw.reject(contract_id, rejected_by="ttl_expired")` + `_sync_approval_projection_status()` + `410 "approval expired — submit a new request"`.
+  4. **המשמעות:** כש-TTL הגנרי מיירט ראשון (cache miss + פג-תוקף), לוגיקת ה-reject/sync הספציפית של C84 **אף פעם לא רצה** — ה-Approvals row ב-Airtable עלול להישאר `status=pending` שקרי לנצח (אף אחד לא כתב אליו `rejected`), גם כשה-contract עצמו "נעלם" מבחינת ה-backend. זה בדיוק ההפך ממה ש-C84 תוכנן לפתור ("TMA UI לא ימשיך להראות 'ממתין' שקרי").
+- **לא אומת (עדיין):** האם ה-Approvals record הספציפי בדוגמה הזו אכן נשאר `pending` ב-Airtable/TMA UI בפועל — המשתמש עדיין לא בדק/דיווח את זה במפורש (רק את הלוג). לא לראות בזה "מאומת ב-100%", רק Contract Chain מלא שמסביר למה זה **סביר**.
+- **היקף:** לא נגעתי בקוד. ממצא + Contract Chain בלבד, לפי בקשת המשתמש לרשום בלבד כרגע.
+- **כיוון תיקון אפשרי (לא הוחלט, לא מומש כאן):** ה-404 "orphaned projection row" branch יכול לבדוק אם ה-Approvals projection type-appropriate ולנסות reject+sync גם שם (לא רק בענף ה-410 הספציפי) — או: לתאם בין שני ה-TTLs (24h זהים במקרה, אך מנגנונים נפרדים) כך שהגנרי לעולם לא יקדים את הספציפי. דורש בדיקה זהירה מול BUG-127A (אותו סוג conflict/cache-miss territory).
+- **סטטוס:** 🔴 נרשם, Contract Chain אומת ישירות בקוד — **לא תוקן**. ממתין להחלטת המשתמש על עדיפות/כיוון-תיקון.
