@@ -3046,7 +3046,7 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **היקף:** לא נגעתי בקוד. ממצא + Contract Chain בלבד, לפי בחירת המשתמש לרשום בלבד כרגע.
 - **תוקן:** `_NAME_STOP` (`core/ingress_classifier.py`) הורחב במילה "זיהיתי" — עם "ליד" כבר stop-word, הוספת "זיהיתי" מאפסת לגמרי את ה-segment של ההתאמה הראשונה (`"זיהיתי ליד"`), כך שהלולאה ב-`_extract_name_from_window()` ממשיכה למאץ' השני, הנכון (`"משה חביב"`), במקום לחזור מיידית על הראשון. תוקן **באותו commit/PR** שתיקן גם את BUG-135 (ראה למטה) — שני הבאגים חולקים את אותה נקודת-שורש (`_NAME_STOP` לא מכיל את כל מילות ה"רעש" שיכולות לשרוד בתוך ריצת-מילים-עבריות רציפה), אך הם תסמינים נפרדים ונרשמים בנפרד. לא נבדק אם יש תבניות-תשובה נוספות של הבוט עם אותה בעיה (למשל מילים אחרות שגם הן גוף-ראשון-פעלים בתבניות אחרות) — מעבר להיקף הסבב הזה.
 - **בדיקות:** `test_bug135_command_verb_name_stop.py` T1/T2 — הטקסט המדויק מהדגימה כאן משוחזר במפורש ומאמת ששם ה-candidate הוא `"משה חביב"`, לא `"זיהיתי"`.
-- **Merged:** ⏳ טרם — branch `claude/zihuiti-name-extraction-22qitu`.
+- **Merged:** ✅ כן — commit `9285106`, PR #444 (`3f69b1d`). **תיקון-סטטוס (23/07/2026):** השורה הזו אמרה בטעות "טרם ממוזג" — אומת ישירות מול `git merge-base --is-ancestor` שהקומיט הוא ancestor של `main`. תיקון-תיעוד בלבד.
 - **סטטוס:** ✅ קוד תוקן ונבדק מקומית (Contract Chain אומת ישירות בקוד + regression test). Production/RP5 verification ממתין להרצת הבעלים אחרי merge+deploy.
 
 ## BUG-130 — עדכון-שדה לליד קיים ("תעדכן את הטלפון של X") מנותב כיצירת ליד חדש במקום עדכון הקיים — 🔴 נרשם (רשמית, עם מספר), לא תוקן
@@ -3103,7 +3103,7 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **בדיקות:** `test_bug104_tma_lead_event_bridge.py` — 50/50 (היה 46/46 לפני 4 ה-assertions החדשות), אין עוד `403 Forbidden`/קריאת-רשת בפלט ההרצה. Full `test_*.py` sweep (כל קובץ בריפו) + `smoke_tests.py` + `compileall -q .` — נקיים, ללא רגרסיה.
 - **לא נוגע:** `test_bug104_leads_reasoning_projection.py`/`test_bug104_phase1_1_contract_hardening.py` (נבדקו ישירות — לא קוראים ל-Flask test client ל-write endpoints, משתמשים ב-`recLEAD001` רק כ-fixture dict סטטי, ללא סיכון). `tools/approval_actions.py::tma_write()` עצמו (import דחוי תקין, לא נגוע). שום קוד production — התיקון כולו בקובץ טסט אחד.
 - **ניקוי הנתונים הקיימים:** 310 הרשומות המזויפות שכבר נכתבו ל-Interaction Log (`recLEAD001:*`) נמחקו ישירות מ-Airtable (לא ע"י קוד — פעולת ניקוי חד-פעמית, מאושרת מפורשות ע"י הבעלים). ראו לוג המחיקה למטה.
-- **Merged:** ⏳ טרם — branch `claude/bug131-test-isolation-interaction-log-leak`.
+- **Merged:** ✅ כן — commit `d565cae`, PR #442. **תיקון-סטטוס (23/07/2026):** השורה הזו אמרה בטעות "טרם ממוזג" — אומת ישירות מול `git merge-base --is-ancestor` שהקומיט הוא ancestor של `main`. תיקון-תיעוד בלבד.
 - **סטטוס:** ✅ Fixed — קוד + tests מאומתים מקומית (50/50 + full sweep נקי). Production verification (הבעלים בודק שהקובץ לא ממשיך לזהם) ממתין להרצה עתידית של ה-test sweep אחרי merge.
 
 ## BUG-134 — TTL הגנרי של `ActionContractRepository` (24h) עלול ליירט contract לפני שהלוגיקה הספציפית של C84 (reject + סנכרון Approvals projection) מספיקה לרוץ — 🔴 נרשם, לא תוקן
@@ -3133,5 +3133,5 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **Out of scope:** התיקון הזה משנה **רק** את חילוץ-השם. הוא **לא** משנה create-vs-update routing ולא resolution של רשומה קיימת — BUG-130 (עדכון-שדה לליד קיים מנותב כיצירת ליד חדש) **נשאר פתוח, לא נוגע**. גם אין כאן intent/handler אמיתי ל-"מחיקת איש קשר" — הפקודה עדיין לא תבוצע בפועל בשום מסלול, רק לא תיצור עוד candidate-שם שקרי.
 - **בדיקות:** `test_bug135_command_verb_name_stop.py` (10 assertions, T3/T4/T6 רלוונטיים ל-BUG-135 הזה, T1/T2 ל-BUG-129, T5/T7/T8 regression). Full sweep (`test_*.py` — 166 קבצים, `smoke_tests.py`, `test_integration.py`, `compileall -q .`) — נקי, ללא רגרסיה (כולל `test_bug099b1_no_name_validation.py`/`test_bug099a/b/c`, `test_bug096/098/101/111/116` — כל טסטי ה-ingress_classifier הקיימים). שני קבצים כושלים ב-full sweep (`test_bug_canonical_tool_wiring.py`, `test_pa01_phantom_approval_enforcement.py`) אומתו כקיימים גם על `main` לפני התיקון (`git stash` + הרצה) — לא רגרסיה.
 - **Verified בפרודקשן:** 🟡 לא עדיין — תוקן ונבדק מקומית (unit-level, full sweep). אימות מול production/RP5 בפועל ממתין להרצת הבעלים אחרי merge+deploy.
-- **Merged:** ⏳ טרם — branch `claude/zihuiti-name-extraction-22qitu`.
+- **Merged:** ✅ כן — commit `9285106`, PR #444 (`3f69b1d`). **תיקון-סטטוס (23/07/2026):** השורה הזו אמרה בטעות "טרם ממוזג" — אומת ישירות מול `git merge-base --is-ancestor` שהקומיט הוא ancestor של `main`. תיקון-תיעוד בלבד.
 - **סטטוס:** ✅ קוד תוקן ונבדק מקומית. Production verification ממתין.

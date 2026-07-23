@@ -9,7 +9,9 @@
 > ומסמכי TurnCoordinator). מסמך זה נכתב ישירות מ-`main` (`5e691ea`) + `BUG_AUDIT_LOG.md`/`CHANGE_CONTROL_LOG.md`,
 > לא מ-`ROADMAP.md` בלבד, כדי לגשר על הפער.
 
-**עודכן:** 23/07/2026 · **main:** `5e691ea` (מיזוג PR #448)
+**עודכן:** 23/07/2026 (+ תוספת PR #449) · **main:** `e2d25af` (מיזוג PR #449)
+
+**תוספת (23/07/2026, אחרי כתיבת הבריפינג הזה):** PR #449 (branch `claude/findings-exam-wikon-25zzkm`, שני commits תיקון+review-pass) — סבב ממצאים מ-`my-bot-approval-staging` (7 ממצאים, כולל דגימת production אמיתית מהבעלים). ראו §3 למטה לפירוט מלא. **הענף `claude/rp5-staging-fault-injection-v4akit` עבר rebase על גבי `main` (כולל PR #449) והועלה מחדש (force-push) — staging מריץ עכשיו את התיקון.**
 
 ---
 
@@ -61,12 +63,21 @@
 
 **פער תיעוד היסטורי שנשאר פתוח:** `ROADMAP.md`/`CHANGE_CONTROL_LOG.md` עדיין לא סונכרנו ל-#440–448; `BUG_AUDIT_LOG.md` עדיין מציג "Merged: ⏳ טרם" שגוי ל-BUG-129/133/135.
 
+**PR #449 (23/07/2026) — סבב ממצאים מ-`my-bot-approval-staging`, 7 ממצאים, ראו `docs/architecture/action-gateway/STAGING_23JUL_TTL_DISAMBIGUATION_AUDIT.md` לכתיבה המלאה כולל Cross-Layer Impact Matrix:**
+- **תוקן (קוד+tests):** Finding #4 — `describe_pending_queue()` חדש עונה על "מה ממתין לאישור" ישירות מ-`ActionContracts` (במקום שהסוכן ינחש טבלה כמו `Tasks`) — הניסוח מצוין במפורש שהוא מכסה `ActionContracts` בלבד, לא תורי legacy נוספים (`_pending_approvals`/`event_bus.pending`). Finding #3 — `route_disambiguation()`/`route_combined_word()` מגלים עכשיו למשתמש כמה siblings נדחו אוטומטית; הספירה מבוססת על אישור-מעבר אמיתי מ-`reject()`, לא הנחה מראש (נבדק, מוגן בבדיקת רגרסיה). תוקן גם דליפת PII בלוג — שורת `describe_pending_queue()` כתבה טקסט-משתמש גולמי + תוכן-תשובה; עכשיו רק שדות מובנים (`pending_count`/`scope=action_contracts`/`result_code`).
+- **תוקן חלקית — 🟡 לא FIXED מלא:** Finding #1 — `ExecutionLedger.find_live_by_user()` (`core/action_gateway.py`) לא אכף `_is_expired()`/`CONTRACT_PENDING_TTL_SECONDS` על מסלול ה-warm-cache (רק על cold-cache/repository recovery) — עכשיו עקבי בשני המסלולים. **זה תיקון-עקביות בלבד, לא הכרעת-מדיניות** — חלון ה-24h עצמו (שהוגדר במקור עבור TMA) לא שונה, ונשאר שאלת-owner פתוחה אם הוא מתאים גם לזרימות האישור האינטראקטיביות. **קשור ל-BUG-134 (למעלה, §2) — אותו קבוע `CONTRACT_PENDING_TTL_SECONDS`/`_is_expired()`, תסמין שונה:** BUG-134 הוא מרוץ בתוך *נקודת-האכיפה הקיימת* מול C84; Finding #1 היה מסלול ש*עקף* את אותה נקודת-אכיפה לגמרי. שני הבאגים לא תוקנו יחד ולא אמורים להיות מבולבלים זה בזה. אומת עם real production data (owner-supplied `ActionContracts` export + Render logs): 3 מ-6 siblings שנדחו היו בני 27-38 שעות (מעבר ל-TTL, היו נחסמים ע"י התיקון), אבל ה-contract שבפועל בוצע היה בן 14.65 שעות — בתוך ה-TTL, לא היה נחסם. אזהרת-גיל (`⚠️ ממתין מ-N שעות`, סף שעה) נוספה כמיטיגציה מיידית, בלתי-תלויה בהכרעת-ה-TTL.
+- **תועד בכוונה, לא מומש — ממתין ל-TurnCoordinator:** Finding #2 (סמנטיקת §21 sibling-reject — עיצוב-במכוון לפרשנויות-חלופיות של בקשה אחת, לא לפריטים בלתי-קשורים שמצטברים; דורש classification signal חדש שלא קיים), Finding #6 (`DESTRUCTIVE_ENTITY_CLARIFICATION`/§3.2 בחוזה TurnCoordinator — עדיין לא ממומש), **Finding #7 (חדש, התגלה מנתוני הרשומה שבוצעה בפועל)** — "תוסיף איש קשר X" תמיד יוצר Lead (עם "איש קשר" מוטבע בשם + metadata של lead-funnel), אף ש-`intent_router.py` כבר מזהה נכון `Intent.CREATE_CONTACT` — `core/lead_candidate_handler.py` לא קורא לסיווג הזה בכלל. זו בדיוק תרחיש 7 המילולי בחוזה הקפוא (`TURN_COORDINATOR_BEHAVIOR_CONTRACT_V1.md`) — אישור-ריאלי לתרחיש שכבר תוכנן, לא ממצא חדש שדורש תכנון.
+- **manual action items שנשארו פתוחים:** רשומת `recK8RdYkdDmTGdob` (Leads, `my-bot-approval-staging`) — לא זבל, נראית כבקשת-contact לגיטימית שביצעה באיחור של 14.65 שעות; דורשת אישור-owner אם רצויה. הכרעת-owner על חלון ה-TTL (30 דק'/שעה/24h) ל-Finding #1.
+- **`claude/rp5-staging-fault-injection-v4akit` עבר rebase על `main` (כולל PR #449) והועלה מחדש (force-push)** — staging מריץ עכשיו את כל התיקונים למעלה.
+
 ---
 
 ## 4. Next Priorities
 
 1. **החלטת owner: BUG-130** — כיוון תיקון לעדכון-ליד-קיים המנותב כיצירה חדשה (מתח ארכיטקטוני מול השומר של BUG-094).
 2. **החלטת owner: BUG-134** — כיוון תיקון למרוץ ה-TTL הגנרי מול C84 (Approvals row עלול להישאר `pending` שקרי).
-3. **TurnCoordinator Phase 2 Shadow** — 3 החלטות owner פתוחות (סביבת staging, איחוד ActionGateway, scope של CapabilityScope) לפני שקוד shadow ראשון נכתב.
-4. **המשך shadow soak ל-F52/RP5** — לצבור את שאר מצבי הסיווג הנדרשים לפני שיקול הפעלת `enforce`/`on`.
-5. **סנכרון תיעוד** — לעדכן `ROADMAP.md`/`CHANGE_CONTROL_LOG.md` ל-PR #440–448 ולתקן את סטטוסי "Merged: ⏳ טרם" השגויים ב-`BUG_AUDIT_LOG.md`.
+3. **החלטת owner: Finding #1 (PR #449) — חלון TTL לאישור אינטראקטיבי** — האם 30 דק'/שעה/24h (הקיים), נפרד משאלת BUG-134.
+4. **TurnCoordinator Phase 2 Shadow** — 3 החלטות owner פתוחות (סביבת staging, איחוד ActionGateway, scope של CapabilityScope) לפני שקוד shadow ראשון נכתב. **תרחיש 7 בחוזה (CREATE_CONTACT ownership) קיבל אישור-ריאלי נוסף (Finding #7 למעלה) — עוד נימוק לתעדף.**
+5. **המשך shadow soak ל-F52/RP5** — לצבור את שאר מצבי הסיווג הנדרשים לפני שיקול הפעלת `enforce`/`on`.
+6. **סנכרון תיעוד** — לעדכן `ROADMAP.md`/`CHANGE_CONTROL_LOG.md` ל-PR #440–449 ולתקן את סטטוסי "Merged: ⏳ טרם" השגויים ב-`BUG_AUDIT_LOG.md`/`CHANGELOG.md`.
+7. **manual: `recK8RdYkdDmTGdob`** — owner לאשר אם רצוי לשמור.

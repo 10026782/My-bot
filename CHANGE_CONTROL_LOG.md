@@ -1786,5 +1786,28 @@ Flag: EMERGENCY_STOP_AI=False (נשמר ב-Airtable)
 
 **בדיקות:** `test_bug135_command_verb_name_stop.py` (10 assertions חדש — T1/T2 ל-BUG-129, T3/T4/T6 ל-BUG-135, T5/T7/T8 regression ל-`תעדכן`/"איש קשר בדיקה"). Full sweep (`test_*.py` — 166 קבצים, `smoke_tests.py`, `test_integration.py`, `python3 -m compileall -q .`) — נקי. שני כשלים קיימים-מראש ב-sweep (`test_bug_canonical_tool_wiring.py`, `test_pa01_phantom_approval_enforcement.py`) אומתו כקיימים גם על `main` לפני התיקון הזה (git stash + הרצה) — לא רגרסיה מהשינוי הזה.
 
-**Merged:** ⏳ טרם — branch `claude/zihuiti-name-extraction-22qitu`.
-**Verified בפרודקשן:** ⏳ לא עדיין — קוד תוקן ונבדק מקומית בלבד.
+**Merged:** ✅ כן — commit `9285106`, PR #444 (`3f69b1d`). **תיקון-סטטוס (23/07/2026):** השורה הזו אמרה בטעות "טרם ממוזג" — אומת ישירות מול `git merge-base --is-ancestor` ש-`9285106` הוא ancestor של `main`. תיקון-תיעוד בלבד, אין שינוי קוד.
+**Verified בפרודקשן:** ⏳ לא עדיין — קוד ממוזג, לא אומת מול תעבורת production/staging בפועל.
+
+### C169 — PR #449: warm-cache TTL consistency, sibling-rejection disclosure, pending-approval query routing (23/07/2026)
+קבצים: `core/action_gateway.py`, `app.py`, `test_staging_23jul_findings.py` (חדש), `docs/architecture/action-gateway/STAGING_23JUL_TTL_DISAMBIGUATION_AUDIT.md` (חדש) | קשור: staging findings 23/07/2026, TurnCoordinator Phase 0 (observation only, לא נוגע)
+
+**בעיה:** סבב בדיקות ידניות ב-`my-bot-approval-staging` (Telegram, `boss_hq:eliyahu@owner`) לצורך בחינת החוזה הקפוא של TurnCoordinator העלה 7 ממצאים בקוד הקיים — כולם קיימים תחת `policy_snapshot_version: phase0-static-v1`, לא תוצר של Shadow Decision.
+
+**תוקן (קוד+tests):**
+1. `ExecutionLedger.find_live_by_user()` — אכף `_is_expired()`/`CONTRACT_PENDING_TTL_SECONDS` רק במסלול cold-cache (repository recovery), לא במסלול warm-cache. עקבי עכשיו בשני המסלולים. **שם מדויק בכוונה — "warm-cache TTL consistency fix", לא "TTL enforcement fix":** לא נוגע בשאלת-המדיניות של חלון-הזמן עצמו (24h, שהוגדר במקור ל-TMA). אומת מול ActionContracts export אמיתי מהבעלים: 3 מ-6 siblings שנדחו היו בני 27-38 שעות (היו נחסמים ע"י התיקון), אבל ה-contract שבפועל בוצע (`7fed5be6`, "איש קשר דני לוי") היה בן 14.65 שעות — בתוך ה-24h, לא היה נחסם. אזהרת-גיל (`⚠️ ממתין מ-N שעות`, סף שעה) נוספה כמיטיגציה משלימה.
+2. `route_disambiguation()`/`route_combined_word()` — גילוי-מפורש כשבחירה ממוקדת דוחה siblings אחרים; הספירה מבוססת על `reject()`'s confirmed-success return, לא הנחה מראש (אומת בבדיקת רגרסיה שמדמה כשל-דחייה חלקי).
+3. `ActionGateway.describe_pending_queue()` חדש — עונה על שאלות "מה ממתין לאישור" מ-`ActionContracts` ישירות, במקום שהסוכן הכללי ינחש טבלה (`Tasks`, בפועל). התשובה מציינת במפורש שהיא מכסה `ActionContracts` בלבד — לא `_pending_approvals`/`event_bus.pending` (מנגנוני legacy נפרדים שעדיין קיימים). לוג הקריאה נכתב עם שדות מובנים בלבד (`pending_count`/`scope`/`result_code`) — לא טקסט-משתמש/תוכן-תשובה גולמי (RP5/TurnCoordinator-Shadow sampling hygiene).
+
+**תועד בכוונה, לא מומש** (דורש הכרעת-owner או אישור-חוזה TurnCoordinator, כדי לא לבנות מנגנון מקביל): §21 sibling-reject semantics (Finding #2); `DESTRUCTIVE_ENTITY_CLARIFICATION`/§3.2 בחוזה (Finding #6); Finding #7 (חדש) — "תוסיף איש קשר X" תמיד יוצר Lead, למרות ש-`intent_router.py` כבר מזהה `Intent.CREATE_CONTACT` נכון — `lead_candidate_handler.py` לא קורא לסיווג הזה. אימות-ריאלי לתרחיש 7 המילולי בחוזה הקפוא.
+
+**Manual action items:** רשומת `recK8RdYkdDmTGdob` (Leads) — לא זבל, בקשה לגיטימית שבוצעה באיחור; דורשת אישור-owner. הכרעת-owner על חלון-ה-TTL הרלוונטי לזרימות אינטראקטיביות.
+
+**בדיקות:** `test_staging_23jul_findings.py` (33 assertions חדש). Full regression (`test_action_gateway.py`/`test_bug_batch_approval_preserved.py`/`test_bug115_confirmation_routing_bookmark.py`/`test_bug117_batch_preview_precedence.py`/`test_bug070_combined_wording.py`/`test_bug070_pending_approval_multi.py`/`test_pr0c_action_contract_repository.py`/`test_pr0c_action_contracts_persistence.py`/`test_stage_b_full_suite.py`/`test_c89_preview_confirmation.py`/`test_bug114_context_interrupt_amplification.py`/`test_bug135_command_verb_name_stop.py`) + `smoke_tests.py` + `test_integration.py` + `compileall -q .` — נקי.
+
+**Cross-Layer Impact Matrix מלא:** `docs/architecture/action-gateway/STAGING_23JUL_TTL_DISAMBIGUATION_AUDIT.md` (כנדרש ע"י `docs/architecture/CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` — נגיעה ישירה בשכבה 4, בעקיפין בשכבה 2/3).
+
+**Post-merge:** `claude/rp5-staging-fault-injection-v4akit` (ענף deploy staging, בכוונה לעולם לא ממוזג ל-`main`) עבר rebase על `main` (כולל PR זה) והועלה מחדש (force-push) — staging מריץ עכשיו את התיקון.
+
+**Merged:** ✅ כן — PR #449, commit `e2d25af` (merge), `a787203`+`eab7ba5` (תוכן).
+**Verified בפרודקשן:** ⏳ לא עדיין — ממתין לדגימת staging אמיתית אחרי ה-rebase למעלה.
