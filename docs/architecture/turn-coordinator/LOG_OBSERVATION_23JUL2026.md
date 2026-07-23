@@ -57,7 +57,7 @@ Both are plain free-agent replies with no tool/approval involvement — unremark
 
 ## 5. Cross-reference
 
-- `RP5_LOG_OBSERVATION_23JUL2026.md` (this session, same staging service, same day) — 47% mismatch rate in `[EvidenceFinalizerShadow]` samples, most concentrated in a separate no-tool-call/false-failure-claim pattern (now filed as BUG-139). Both reports draw from the same underlying staging session; read together for the fuller picture.
+- `RP5_LOG_OBSERVATION_23JUL2026.md` (this session, same staging service, same day) — 47% mismatch rate in `[EvidenceFinalizerShadow]` samples, most concentrated in a separate no-tool-call/false-failure-claim pattern (now filed as BUG-139). §6 of that report also cross-references `ActionContracts`/`Approvals`/`Leads` Airtable data directly (base `app4bcgoX7t0HUVnm`) — confirming BUG-134 with dated evidence (3 `Approvals` rows stuck `pending` 4-14 days), BUG-137 with a second real occurrence, BUG-138 with the exact matching batch item, and filing a new BUG-140 (phone-collision misrouting: an explicit "add new lead" request generated an `airtable_update` against an unrelated existing lead sharing the same phone number — still `pending`, not yet approved). Both reports draw from the same underlying staging session; read together for the fuller picture.
 - `docs/architecture/action-gateway/STAGING_23JUL_TTL_DISAMBIGUATION_AUDIT.md` (PR #449, 23/07/2026) — the deep, code-level forensic analysis of the same staging session this report observed at the raw-log level (§2, §2.1 above). That doc is authoritative on root cause, fix status, and the Cross-Layer Impact Matrix; this report only confirms the raw `TurnEnvelope`/`Approval` signal matches its timeline.
 
 ## 6. Recommendation
