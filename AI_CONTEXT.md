@@ -45,6 +45,7 @@
 - BUG-134 — TTL גנרי (`ActionContractRepository`, 24h) עלול ליירט contract לפני שלוגיקת C84 מספיקה לרוץ; רשום, לא תוקן.
 - BUG-136 (חדש) — "בצע שוב `<קוד>`" עטוף ב-`*...*` (כפי שהבוט עצמו מציע) לא תואם את ה-regex המעוגן ב-`app.py`, נופל ל-Agent שמאלתר תשובה שגויה; רשום, לא תוקן.
 - BUG-137 (חדש) — `_describe_contract_for_reconfirmation()` מרכיבה domain (למשל "finance") בלי תווית לתוך הודעת "✅ בוצע: עדכון ליד"; רשום, לא תוקן.
+- BUG-138 (חדש) — כפתור אישור טלגרם לא נעלם אחרי אישור/דחייה; שש קריאות `edit_message_text()` ב-`app.py` לא מנקות `reply_markup`. השערה מבוססת-קוד בלבד, טרם אומתה מול Telegram/לוגים בפועל.
 - RP5 enforcement — shadow evidence קיים לרוב מצבי הסיווג, טרם נאסף לכל 9 המצבים.
 - WhatsApp outbound אמיתי — honest stub, ממתין ל-Meta Cloud API.
 - ענף `claude/rp5-staging-fault-injection-v4akit` — staging-only בכוונה, לעולם לא ימוזג ל-main.
