@@ -247,6 +247,27 @@ for text in (
     chk(f"does NOT match: {text!r}", app._PENDING_QUERY_RE.search(text) is None)
 
 
+# ══════════════════════════════════════════════════
+# Review finding: describe_pending_queue()'s call site must not log raw user
+# text or reply content (RP5/TurnCoordinator-Shadow sampling hygiene) —
+# structural source check, since exercising the actual logger.info() call
+# requires the full Flask/Telegram-mocked app.py request path.
+# ══════════════════════════════════════════════════
+print("\n── Review finding: describe_pending_queue() log line is PII-free ──")
+import inspect
+_app_source = inspect.getsource(app)
+_pq_log_start = _app_source.index('"[ActionGateway] describe_pending_queue:')
+_pq_log_line = _app_source[_pq_log_start:_pq_log_start + 200]
+chk("log format string does not interpolate raw user text",
+    "text=%.40r" not in _pq_log_line and "_stripped" not in _pq_log_line)
+chk("log format string does not interpolate reply content",
+    "reply=%.60s" not in _pq_log_line and "_pq_reply," not in _pq_log_line)
+chk("log format string uses the structured PII-free fields instead",
+    "pending_count=%d" in _pq_log_line
+    and "scope=action_contracts" in _pq_log_line
+    and "result_code=%s" in _pq_log_line)
+
+
 print(f"\n{'='*50}")
 print(f"Staging 23/07/2026 findings tests: {passed} passed, {failed} failed")
 sys.exit(0 if failed == 0 else 1)

@@ -181,12 +181,18 @@ Impact: none of the changes here invent a new success/failure/pending claim — 
 ## 5. Files changed
 
 - `core/action_gateway.py` — `find_live_by_user()` warm-cache TTL consistency fix; `_format_pending_age_suffix()` + age display in `route_confirmation_word()`'s listing; `describe_pending_queue()` (scoped explicitly to `ActionContracts` in its reply text); disclosure text in `route_disambiguation()`/`route_combined_word()`.
-- `app.py` — `_PENDING_QUERY_RE` + new deterministic routing branch calling `describe_pending_queue()`.
-- `test_staging_23jul_findings.py` (new) — 30 assertions covering Findings #1/#3/#4 plus the review pass's corrections.
+- `app.py` — `_PENDING_QUERY_RE` + new deterministic routing branch calling `describe_pending_queue()`, logging only structured PII-free fields (`pending_count`/`scope=action_contracts`/`result_code`) rather than raw user text or reply content.
+- `test_staging_23jul_findings.py` (new) — 33 assertions covering Findings #1/#3/#4 plus the review pass's corrections.
+
+### 6.1 Second review pass (23/07/2026) — sampling reliability re-scoped, log-hygiene finding fixed
+
+A second review confirmed the priority framework directly: Finding #1's warm-cache fix, Finding #3's disclosure, and Finding #4's `ActionContracts`-scoped answer are all genuinely required now because they each corrupt something a tester relies on while probing the frozen TurnCoordinator plan — `live_contracts` counts, disambiguation-list samples, and the operator's own trust in a "what's pending" answer, respectively. No full per-callback TTL enforcement (Layer 4 hardening) is needed yet, since sampling only goes through the existing live-list routes this fix already covers.
+
+**New finding, fixed:** the `describe_pending_queue()` call site's log line wrote raw user text (`text=%.40r`) and reply content (`reply=%.60s`, which can contain a business description with a name/phone via `_describe_contract_for_disambiguation()`) — directly into logs that are the raw material for RP5/TurnCoordinator-Shadow sampling. Fixed to log only `pending_count`, `scope=action_contracts`, and `result_code` (`found`/`empty`) — no names, phones, or raw text. Structural regression test added (`test_staging_23jul_findings.py`) since exercising the real `logger.info()` call requires the full Flask/Telegram-mocked request path, out of proportion for this fix.
 
 ## 6. Tests
 
-New: `test_staging_23jul_findings.py`, 30/30 passing (24 from the initial pass + 6 added during the review pass: 2 for Finding #4's scope-caveat wording, 4 proving Finding #3's disclosure count can't overclaim on a failed sibling-reject).
+New: `test_staging_23jul_findings.py`, 33/33 passing (24 initial + 6 from the first review pass + 3 from the second, log-hygiene review pass).
 
 Full regression (existing suites most likely to interact with this change, all re-run clean after the fix): `test_action_gateway.py` (43), `test_bug_batch_approval_preserved.py` (33), `test_bug115_confirmation_routing_bookmark.py` (22), `test_bug117_batch_preview_precedence.py` (11), `test_bug070_combined_wording.py` (27), `test_bug070_pending_approval_multi.py` (9), `test_pr0c_action_contract_repository.py` (14), `test_pr0c_action_contracts_persistence.py` (16), `test_stage_b_full_suite.py` (128/128), `test_c89_preview_confirmation.py` (9/9), `test_bug114_context_interrupt_amplification.py` (12), `test_bug135_command_verb_name_stop.py` (10). Plus `smoke_tests.py`, `test_integration.py`, `python3 -m compileall -q .`, and the full `test_*.py` sweep (168 files) — see commit for the sweep's exact pass/fail accounting.
 

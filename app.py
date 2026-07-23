@@ -2960,10 +2960,16 @@ def run_agent(
             # so a false-positive match here is harmless (worst case: shows
             # an accurate pending-list instead of routing to the Agent).
             from core.action_gateway import action_gateway as _gw_pq
+            _pq_pending_count = len(_gw_pq.find_live_contracts(identity.memory_key))
             _pq_reply = _gw_pq.describe_pending_queue(identity.memory_key)
+            # Review pass (23/07/2026), sampling-hygiene finding: this log
+            # line is raw material for RP5/TurnCoordinator-Shadow sampling —
+            # it must never carry user free-text or reply content (names/
+            # phones/business descriptions can appear in both). Structured,
+            # PII-free fields only.
             logger.info(
-                "[ActionGateway] describe_pending_queue: user=%s text=%.40r reply=%.60s",
-                identity.memory_key, _stripped, _pq_reply,
+                "[ActionGateway] describe_pending_queue: user=%s pending_count=%d scope=action_contracts result_code=%s",
+                identity.memory_key, _pq_pending_count, "found" if _pq_pending_count else "empty",
             )
             if _out_meta is not None:
                 _out_meta["source_module"] = "action_gateway"
