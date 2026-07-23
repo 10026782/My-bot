@@ -21,7 +21,7 @@
 - **Emergency Stop (PATCH 3B) הושלם ואומת בפרודקשן ישירות ע"י הבעלים** — 5 דגלי `EMERGENCY_STOP_*` דביקים ב-Airtable (שורדים restart אמיתי), TMA UI עם כפתורי Stop/Clear מלאים כולל Stop All.
 - **סבב תיקוני-באג נרחב באישור/ניתוב-הודעות (BUG-111 עד BUG-127, כולל 114/115/116/117/121-124) — כולם ✅ VERIFIED IN PROD** עם evidence מלוגים אמיתיים.
 - **Cost Telemetry Reliability (`usage_events`) — shadow בלבד.** לא מזיז את ה-trigger החי (`COST_WATCHDOG_LIVE=false`); PR3 (cutover) חסום בכוונה עד שיצטברו ימי-נתונים מול חיוב פרודקשן.
-- **שני באגים פתוחים, לא מטופלים, ממתינים להחלטת owner:** BUG-130 (עדכון-ליד קיים מנותב כיצירת-ליד חדש) ו-BUG-134 (מרוץ TTL גנרי מול C84 שעלול להשאיר Approvals row תקוע `pending` שקרי).
+- **ארבעה באגים פתוחים, לא מטופלים, ממתינים להחלטת owner:** BUG-130 (עדכון-ליד קיים מנותב כיצירת-ליד חדש — כעת נצפה פעמיים נוספות בדגימת staging נוספת, ראו §3), BUG-134 (מרוץ TTL גנרי מול C84 שעלול להשאיר Approvals row תקוע `pending` שקרי), ו-BUG-136/BUG-137 (חדשים, 23/07/2026 — "בצע שוב \<קוד\>" נופל ל-Agent כשעטוף ב-markdown bold ומקבל תשובה מומצאת; הודעת הצלחת עדכון-ליד מרכיבה domain פנימי בלי תווית לתוך הטקסט).
 - **TurnCoordinator / Cross-Layer Authority Contract V1 (PR #446/#447)** — יוזמת תכנון חדשה למיזוג BUG-104/F52/Approval layer; **תכנון בלבד, אפס קוד runtime**. Phase 2 Shadow Planning סטטוס סופי: `READY FOR OWNER DECISION` (לא לביצוע), 3 החלטות פתוחות.
 - **פער תיעוד פתוח:** `ROADMAP.md`/`CHANGE_CONTROL_LOG.md` לא עודכנו מאז 21/07/2026 למרות ~9 PRs נוספים שמוזגו מאז (#440–#448). `BUG_AUDIT_LOG.md` גם מציג "Merged: ⏳ טרם" שגוי עבור BUG-129/133/135 — כולם בפועל כבר מוזגו ל-main (מאומת ב-git log), התיעוד לא עודכן אחרי המיזוג.
 
@@ -41,8 +41,11 @@
 - TurnCoordinator Contract V1 — תכנון בלבד (`docs/architecture/CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` + `turn-coordinator/`), `PLANNING BLOCKED`/`READY FOR OWNER DECISION`, אין flag ואין קוד.
 
 **חסום / פתוח:**
-- BUG-130 — עדכון-ליד קיים מנותב ליצירת-ליד חדש; רשום, לא תוקן.
+- BUG-130 — עדכון-ליד קיים מנותב ליצירת-ליד חדש; רשום, לא תוקן. **דגימת staging נוספת (23/07/2026)** אישרה שוב את אותה תבנית פעמיים באותה שיחה (כולל על ליד שעודכן בהצלחה turn קודם), מחזקת ל-root-cause דטרמיניסטי (ראו `BUG_AUDIT_LOG.md`). סיכון collision-לפי-טלפון-בלבד (רשומה לא-קשורה עם domain שונה) נצפה גם הוא, לא אומת ישירות.
 - BUG-134 — TTL גנרי (`ActionContractRepository`, 24h) עלול ליירט contract לפני שלוגיקת C84 מספיקה לרוץ; רשום, לא תוקן.
+- BUG-136 (חדש) — "בצע שוב `<קוד>`" עטוף ב-`*...*` (כפי שהבוט עצמו מציע) לא תואם את ה-regex המעוגן ב-`app.py`, נופל ל-Agent שמאלתר תשובה שגויה; רשום, לא תוקן.
+- BUG-137 (חדש) — `_describe_contract_for_reconfirmation()` מרכיבה domain (למשל "finance") בלי תווית לתוך הודעת "✅ בוצע: עדכון ליד"; רשום, לא תוקן.
+- BUG-138 (חדש) — כפתור אישור טלגרם לא נעלם אחרי אישור/דחייה; שש קריאות `edit_message_text()` ב-`app.py` לא מנקות `reply_markup`. השערה מבוססת-קוד בלבד, טרם אומתה מול Telegram/לוגים בפועל.
 - RP5 enforcement — shadow evidence קיים לרוב מצבי הסיווג, טרם נאסף לכל 9 המצבים.
 - WhatsApp outbound אמיתי — honest stub, ממתין ל-Meta Cloud API.
 - ענף `claude/rp5-staging-fault-injection-v4akit` — staging-only בכוונה, לעולם לא ימוזג ל-main.
@@ -74,8 +77,9 @@
 
 ## 4. Next Priorities
 
-1. **החלטת owner: BUG-130** — כיוון תיקון לעדכון-ליד-קיים המנותב כיצירה חדשה (מתח ארכיטקטוני מול השומר של BUG-094).
+1. **החלטת owner: BUG-130** — כיוון תיקון לעדכון-ליד-קיים המנותב כיצירה חדשה (מתח ארכיטקטוני מול השומר של BUG-094). דגימה נוספת (23/07/2026) מחזקת עדיפות.
 2. **החלטת owner: BUG-134** — כיוון תיקון למרוץ ה-TTL הגנרי מול C84 (Approvals row עלול להישאר `pending` שקרי).
+2א. **החלטת owner: BUG-136/BUG-137 (חדשים, 23/07/2026)** — תיקון markdown-stripping ל-override regex, ותיוג שדה domain בהודעת הצלחה. שני אלה נוגעים ב-F52/Approval layer (`core/action_gateway.py`) — טעונים שער Cross-Layer Authority Contract לפני מימוש.
 3. **החלטת owner: Finding #1 (PR #449) — חלון TTL לאישור אינטראקטיבי** — האם 30 דק'/שעה/24h (הקיים), נפרד משאלת BUG-134.
 4. **TurnCoordinator Phase 2 Shadow** — 3 החלטות owner פתוחות (סביבת staging, איחוד ActionGateway, scope של CapabilityScope) לפני שקוד shadow ראשון נכתב. **תרחיש 7 בחוזה (CREATE_CONTACT ownership) קיבל אישור-ריאלי נוסף (Finding #7 למעלה) — עוד נימוק לתעדף.**
 5. **המשך shadow soak ל-F52/RP5** — לצבור את שאר מצבי הסיווג הנדרשים לפני שיקול הפעלת `enforce`/`on`.
