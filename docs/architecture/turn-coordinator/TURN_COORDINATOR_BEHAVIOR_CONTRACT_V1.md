@@ -178,6 +178,7 @@ class DecisionReason(Enum):
     NO_BACKING_QUEUE            = "no_backing_queue"              # ראה §7, תרחיש 11/23 — phantom approval
     ALREADY_CLAIMED             = "already_claimed"                # ראה §4ב
     AGENT_UNAVAILABLE_DEGRADED  = "agent_unavailable_degraded"     # חדש — §7, HandlerId.DEGRADED_SYSTEM: Coordinator תקין, agent_availability=AGENTLESS
+    STALE_QUEUE_REQUIRES_RECONFIRMATION = "stale_queue_requires_reconfirmation"  # חדש (23/07/2026) — ראה תרחיש 26. הפוך מ-NO_BACKING_QUEUE: יש queue אמיתי (לא phantom), אבל turns בלתי-קשורים עברו מאז שהוא הוצג לאחרונה — אסור resolve אוטומטי, כמו context_interrupted הקיים ל-ActionContract, אבל כרגע לא אכוף על שום queue-source אחר
 
 
 # ExecutionKind: לא מוגדר מחדש כאן — **שימוש-חוזר** ב-core/turn_envelope.py:77-80
@@ -502,9 +503,11 @@ class TurnActionReference:
 
 ---
 
-## Acceptance Corpus — 25 תרחישים דטרמיניסטיים, מתויגים לפי משפחה **ולפי `earliest_enforcement_phase`**
+## Acceptance Corpus — 27 תרחישים דטרמיניסטיים, מתויגים לפי משפחה **ולפי `earliest_enforcement_phase`**
 
 כל התרחישים נגזרים מדוגמאות אמיתיות שכבר נאספו בשיחה זו. השדות `selected_handler`/`reply_owner`/`reason_code` הם הציפייה, לא בהכרח הניסוח המדויק.
+
+**תרחישים 26-27 נוספו (23/07/2026)** — production evidence אמיתי מ-`my-bot-approval-staging`, נחקר ותועד תחילה ב-`docs/architecture/action-gateway/STAGING_23JUL_TTL_DISAMBIGUATION_AUDIT.md` (סבב-ממצאים נפרד, PR #449/#450) — ראה §"משפחה: Stale Cross-Tier Reply Resolution" ו-§"משפחה: Reply Composition Ordering (Phase 5)" למטה. שאר 25 התרחישים (1-25) נשארים **ללא שינוי בתוכן** מהסבב הקודם.
 
 **תיקון-מבני (סבב זה):** לא כל 25 התרחישים ניתנים-להכרעה בשלב 2 (Shadow). תרחישים 16-17 תלויים ב-resource claim (שלב 6, §4ב) ותרחישים 14-15 תלויים ב-evidence-grounding guard (RP5, שמנגנון-החיבור שלו עדיין פתוח) — שניהם עדיין לא קיימים כתשתית. חסימת המעבר לשלב 3 על **כל** 25 התרחישים (כפי שהיה מנוסח קודם) הייתה יוצרת תלות-מעגלית: שלב 3 חסום ע"י שלבים 5-6 שטרם נבנו. לכן כל תרחיש מתויג **`earliest_enforcement_phase`** — השלב הראשון שבו יש בכלל תשתית שמאפשרת להכריע אותו; רק תרחישים בתיוג `2→3` חוסמים את המעבר משלב 2 לשלב 3 (§8 סעיף 3, מתוקן). כל 25 התרחישים נשארים בחוזה הכללי — התיוג קובע **מתי** כל אחד נאכף, לא אם הוא רלוונטי.
 
@@ -521,8 +524,10 @@ class TurnActionReference:
 | 21 | `2→3` | תלוי רק ב-`InputProvenance`/ingress classification — קיים ברמת ה-signal, לא תלוי בתשתית מאוחרת |
 | 22, 23, 24 | `2→3` | בדיקות-על על תרחישים שכבר `2→3` |
 | 25 | `2→3` | הכרעת-ניתוב טהורה (כמו 6) |
+| 26 | `2→3` | הכרעת-ניתוב טהורה — "האם ה-queue הזה נשאר בהקשר, או שצריך reconfirmation" נקבע מ-signals קיימים (recency של `set_at`/מתי-הוצג-לאחרונה מול turns שעברו), לא תלוי בתשתית עתידית |
+| 27 | `5` | תלוי ב-Reply Ownership/send-gateway infrastructure (שלב 5, "single speaker בפועל, כולל send gateways") — שני emission points נפרדים (proactive `bot.send_message()` + הערך המוחזר הרגיל) לא ניתנים לאחד/לסדר בלי המנגנון הזה |
 
-**שים לב — שלב 5 (Reply Ownership/single speaker) אין לו כרגע תרחיש-corpus ייעודי משלו** — זו נקודה פתוחה בתיוג הזה, לא הכרעה ש"הכל מכוסה"; §7's "שני handlers תובעים reply_owner" הוא תיאור-סמנטיקה, לא תרחיש-corpus ממוספר. פער מתועד, לא נסגר בסבב הזה.
+**שלב 5 (Reply Ownership/single speaker) קיבל את תרחיש-הcorpus הייעודי הראשון שלו — תרחיש 27 (למטה, 23/07/2026), production evidence אמיתי.** לפני זה זו הייתה נקודה פתוחה בתיוג — §7's "שני handlers תובעים reply_owner" (טבלה, שורה "שני handlers תובעים reply_owner לאותו turn_id") הייתה תיאור-סמנטיקה בלבד, בלי מופע-corpus ממוספר וקונקרטי. תרחיש 27 הוא בדיוק המופע הזה, לא כלל חדש — §7's הכלל הקיים ("אין שליחה כפולה") כבר קובע את התוצאה הנדרשת.
 
 ### משפחה: Pending Ownership
 
@@ -604,6 +609,32 @@ class TurnActionReference:
 
 **25 (חדש).** "תמחק לצמיתות את הליד של דני לוי, אני בטוח" (בקשה מפורשת ל-hard delete, לא רק "תמחק") → **עדיין** מנותב ל-`DESTRUCTIVE_ENTITY_CLARIFICATION` בדיוק כמו תרחיש 6 — "לצמיתות"/"אני בטוח" **אינם** עוקפים את §3.2. ה-handler מציג **רק** את 3 התוצאות הבטוחות הקפואות; מחיקה פיזית **אינה** אחת האפשרויות המוצגות, ואין מסלול one-click-אישור שמוביל אליה — אם המשתמש מתעקש על מחיקה פיזית, התשובה היא שזה לא נתמך תחת V1 (לא ניסיון "לשכנע" את המשתמש לקבל את התחליף, ולא ביצוע חלקי/עוקף).
 
+### משפחה: Stale Cross-Tier Reply Resolution (חדש, 23/07/2026 — production evidence אמיתי)
+
+**26 (חדש).** דגימה אמיתית מ-`my-bot-approval-staging` (owner testing, לא תיאורטי): batch lead-preview ("📋 זיהיתי 5 לידים אפשריים בקבוצה... ענה כן לשמירת כולם", `pending_lead_preview`, TTL 1800s) מוצג, לא נענה מיד. המשתמש עובר לבקשה נפרדת ולגמרי לא-קשורה — batch של 4 משימות (`ActionContract`, Tier 1) — ומאשר אותן אחת-אחת עם "מאשר" חוזר (8 turns ביניים). אחרי שהמשימה הרביעית (האחרונה) מאושרת, אין יותר שום `ActionContract` חי (Tier 1 ריק). המשתמש שולח "מאשר" **נוסף, מיותר** (ללא כוונה ברורה — לא נותר שום דבר לאשר ב-Tier 1). **בפועל:** ה-"מאשר" החמישי הזה נפל דרך ל-Tier 2 (`resolve_pending_lead_preview()`, `core/lead_candidate_handler.py:1443`) ואישר **בשקט, בלי תצוגה חוזרת, בלי re-confirmation** את כל 5 הלידים מה-batch המקורי — למרות ש-8 turns בלתי-קשורים לגמרי עברו בינתיים.
+
+**Root cause (מאומת ישירות בקוד):** `mark_context_interrupted()` (`app.py:4245`, המנגנון שדואג ש-Tier-1 `ActionContract` ידרוש reconfirmation אחרי הודעה בלתי-קשורה — PR-0/BUG-PENDING-APPROVAL-B) מחווט **בלעדית** ל-`ActionGateway`. ל-Tier-2's `pending_lead_preview` (`session_store.py`) **אין שום מנגנון מקביל** — `resolve_pending_lead_preview()` בודק רק אם ה-TTL (1800s) פג, לא אם ההקשר "התערבב" מאז ההצגה האחרונה. התוצאה: queue מסוג Tier-2 יכול לשרוד כל כמות turns בלתי-קשורים (עד ל-TTL) ולהיפתר בשקט ע"י כל confirm-word "יתום" (כזה שאין לו יעד חי משלו ב-Tier 1), ללא קשר לזמן/turns שעברו.
+
+**למה זה שונה מתרחיש 11-13 (Phantom Approval):** שם — **אין** queue אמיתי במאגר בכלל (`NO_BACKING_QUEUE`). כאן — **יש** queue אמיתי, חי, לא-פג-תוקף (per its own TTL) — הבעיה היא שהוא **לא מודע** לכך שההקשר סביבו כבר לא רלוונטי. זה בדיוק ה-**הפך** מ-phantom approval, ודורש `DecisionReason` נפרד (`STALE_QUEUE_REQUIRES_RECONFIRMATION`, ראה §2 למעלה) — לא `NO_BACKING_QUEUE`.
+
+**למה זה שונה מתרחיש 1-4 (Pending Ownership):** משפחה 1-4 עוסקת בהכרעת-ניתוב בין queues שקיימים **בו-זמנית/סמוך** (turn נוכחי מול turn שקדם לו ישירות). תרחיש 26 עוסק ב-queue ש**שרד** ריבוי turns של פעילות בלתי-קשורה לגמרי (batch משימות שלם, לא הודעה בודדת) לפני שנפתר — משתמש ב-recency (`set_at`, כמו `should_prefer_batch_preview()`'s BUG-117 precedent, `core/lead_candidate_handler.py:1399`) אבל בכיוון הפוך: לא "מי טרי יותר מנצח", אלא "queue ש-turns בלתי-קשורים עברו מעליו מאז ההצגה האחרונה שלו חייב reconfirmation לפני שהוא נפתר, לא משנה כמה TTL נשאר לו".
+
+**ציפייה תחת TurnCoordinator V1:** האינווריאנט של `context_interrupted`/reconfirmation (שכבר קיים ל-Tier 1, `_resolve_single_contract()`) חייב לחול **באופן אחיד על כל queue source**, לא רק `ActionGateway` — `TurnEnvelope`'s `queue_sources` (Phase 0, כבר קיים כ-`list`, נצפה בלוג ייצור אמיתי כ-`"queue_sources": ["action_gateway"]`) כבר מזהה שיש ריבוי-מקורות ברמת ה-**תצפית**; מה שחסר הוא אכיפת אותו invariant על **כל** מקור, לא רק Tier 1. כשה-Coordinator בוחר לפתור confirm-word "יתום" (אין לו יעד חי בתור שהוא עצמו שייך אליו) מול queue ישן ממקור אחר: `selected_handler` חייב לדרוש reconfirmation מפורש (תצוגה חוזרת של תוכן ה-batch + "לשמור? ענה כן") לפני ביצוע, בדיוק כמו ש-Tier 1 כבר עושה — לא resolve שקט. `reason_code=DecisionReason.STALE_QUEUE_REQUIRES_RECONFIRMATION`. Regression test קונקרטי נדרש (טרם נכתב — כמו תרחישים 14-15/21, זה flag פתוח): batch lead-preview חי + N turns בלתי-קשורים (batch משימות שלם, לא הודעה בודדת) + confirm-word יתום → **חייב** reconfirmation prompt, **אסור** resolve שקט, ללא קשר לכמה TTL נשאר.
+
+**היקף:** לא נגעתי בקוד בסבב הזה — תיעוד-תרחיש בלבד, לפי בקשה מפורשת. ראה `docs/architecture/action-gateway/STAGING_23JUL_TTL_DISAMBIGUATION_AUDIT.md` להקשר המלא (חלק מאותו סבב-ממצאים, לא נכלל שם במקור כי התגלה בבדיקה נפרדת אחרי ה-merge).
+
+### משפחה: Reply Composition Ordering (Phase 5 — Single Speaker, corpus ראשון לשלב הזה)
+
+**27 (חדש).** אותה דגימת production (§26 למעלה, אחרי ש-4 המשימות אושרו אחת-אחת): כל הודעת "מאשר" ל-task N (N<4) הפיקה **שתי הודעות טלגרם נפרדות, בסדר הפוך למצופה** — קודם "⏳ בקשת אישור" עבור task N+1 (הפריט הבא שקודם אוטומטית מה-batch queue), ורק **אחרי כן** "✅ בוצע" עבור task N (הפריט שהמשתמש בפועל אישר הרגע). מבחינת המשתמש, כל תשובה נראית כאילו הבוט "מציג בקשה חדשה" לפני שהוא בכלל אישר שהבקשה הקודמת בוצעה.
+
+**Root cause (מאומת ישירות בקוד):** `_gateway_reply_with_promotion()` (`app.py:1469`) הוא wrapper דק סביב **כל** נקודת-רזולוציה של ActionGateway (route_confirmation_word/route_disambiguation/route_combined_word) — מריץ `_promote_next_batch_item()` (`app.py:1430`) כ-side effect, **לפני** שהוא מחזיר את ה-`reply` המקורי (למשל "✅ בוצע..."). `_promote_next_batch_item()`, כשיש פריט הבא בתור, קורא ל-`_queue_approval()` → `_queue_approval_detailed_impl()`, שבתוכה (`app.py:1345`) יש קריאה **פרואקטיבית ועצמאית** ל-`bot.send_message(owner_chat_id, _pending_text, reply_markup=kb)` — הודעת טלגרם נפרדת לגמרי, שנשלחת **מיד**, לפני שה-wrapper בכלל מחזיר את ה-`reply` המקורי שהופך אח"כ לתשובת ה-webhook הרגילה. שני emission points נפרדים לחלוטין (proactive `bot.send_message()` מול return-value של הפונקציה) עבור מה שמבחינת המשתמש הוא **turn אחד** ("מאשר" יחיד) — בדיוק תרחיש §7's "שני handlers תובעים reply_owner לאותו turn_id... אין שליחה כפולה", רק שכאן ה-"שליחה כפולה" קורית בפועל, בסדר הפוך.
+
+**למה זה שונה מ-25-26 (הכרעת-ניתוב):** 1-26 עוסקים ב**מי** מכריע/פותר את ה-turn (routing/ownership). 27 עוסק ב**כמה הודעות ובאיזה סדר** נשלחות ברגע שכבר הוכרע מה קרה — שאלת-composition, לא שאלת-ניתוב. זו הסיבה שהוא מתויג `earliest_enforcement_phase=5` (Reply Ownership/send gateways), לא `2→3` כמו רוב התרחישים האחרים — אין דרך לתקן אותו בלי איחוד/סידור נקודות-השליחה עצמן (§4א), תשתית ששלב 2 (Shadow observation) לא בונה.
+
+**ציפייה תחת TurnCoordinator V1 (שלב 5):** turn המפיק גם "אישור-פעולה-שהושלמה" וגם "בקשת-אישור-חדשה" חייב **סדר מובטח** — קודם ה-completion confirmation (מה שהמשתמש ביקש הרגע), ורק אחריו ה-new-pending-prompt (מה שקורה כתוצאה עקיפה) — לא ה-הפך, ולא בו-זמנית ללא ערבות-סדר. §4א's send-gateway אמור להיות **נקודת-המעבר היחידה** ל-outbound שליחה, כך ש-`_promote_next_batch_item()`'s פנייה הישירה ל-`bot.send_message()` (עוקפת את ה-wrapper לגמרי) הופכת בלתי-אפשרית מבנית, לא רק "לא קורית היום במקרה". לא נדרש `DecisionReason` חדש — §7's השורה הקיימת ("אין שליחה כפולה") כבר מגדירה את התוצאה הנדרשת; מה שחסר הוא האכיפה, לא ההגדרה.
+
+**היקף:** לא נגעתי בקוד בסבב הזה — תיעוד-תרחיש בלבד, לפי בקשה מפורשת (זהה ל-26).
+
 ---
 
 ## 8. קריטריוני יציאה מ-Shadow (Shadow Exit Criteria) — חוסמים מעבר לשלב 3
@@ -664,7 +695,7 @@ class TurnActionReference:
 - **invariants:** reply_owner יחיד ל-turn_id (§4א); capture ownership suppression לא discard (§3.1); PendingReplySignal validity (§1.1).
 - **failure semantics:** §7, טבלה מלאה.
 - **observability:** `turn_id`/`decision_id`/`contract_version`/`policy_snapshot_version` על כל `TurnDecision` — לא קיימים היום ב-`route_decision.py` (יש `Handler`/`Intent`/`Risk`, לא את השדות האלה). קוד runtime חדש נדרש כדי לייצר אותם — לא קיים עדיין.
-- **cross-layer tests:** אין עדיין — Acceptance Corpus (25 תרחישים) הוא ה-spec לטסטים העתידיים, לא הרצה בפועל. שלב 2 (Shadow) הוא השלב שבו הם ירוצו לראשונה.
+- **cross-layer tests:** אין עדיין — Acceptance Corpus (27 תרחישים) הוא ה-spec לטסטים העתידיים, לא הרצה בפועל. שלב 2 (Shadow) הוא השלב שבו הם ירוצו לראשונה.
 
 ### שכבה 3 — F52 / Phase 4C Action & Tool Contract
 **touched: indirectly.** Proof/פירוט:
