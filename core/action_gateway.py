@@ -26,6 +26,8 @@ from core.action_contract_repository import (
     ActionContractTransitionConflictError,
     ActionContractTransitionError,
     ActionContractTransitionPersistenceError,
+    CONTRACT_PENDING_TTL_SECONDS,
+    _is_expired as _is_contract_expired,
 )
 from tool_registry import needs_approval
 
@@ -458,7 +460,28 @@ class ExecutionLedger:
         return recovered
 
     def find_live_by_user(self, canonical_user_id: str) -> list[ActionContract]:
-        """מחזיר contracts חיים (pending) לזהות קנונית."""
+        """מחזיר contracts חיים (pending, לא פג-תוקף) לזהות קנונית.
+
+        Staging finding #1 (23/07/2026): the cold-cache/recovery path already
+        filters expired contracts via the repository's own find_pending_by_
+        canonical_user_id() (which applies _is_expired()/CONTRACT_PENDING_TTL_
+        SECONDS, same as ActionContractRepository.get()) — but once this
+        user's RAM cache is warm (has_cached_user_contract=True), the recovery
+        branch below is skipped entirely and the old code returned straight
+        from self._store without ever re-checking expiry. A "pending" contract
+        that outlives CONTRACT_PENDING_TTL_SECONDS (24h) never gets a status
+        transition on its own (nothing proactively re-visits it), so it sat in
+        _store as "pending" forever and kept showing up as a live candidate —
+        inconsistent with the exact same query answered fresh after a restart
+        (cache empty -> repository path -> expired one filtered out). Filtering
+        here makes both paths agree. This does not by itself guarantee no
+        stale-looking contract is ever shown (CONTRACT_PENDING_TTL_SECONDS is
+        24h, deliberately long for TMA approvals that can sit unopened for
+        hours — see docs/architecture/action-gateway/
+        BUG-STAGING-23JUL_TTL_AND_DISAMBIGUATION_AUDIT.md) — the per-item age
+        indicator added to the disambiguation listing is the complementary,
+        immediate mitigation for that gap.
+        """
         # Repository recovery is cache-miss only. Lifecycle transitions write
         # through before RAM changes, so the durable query is authoritative on
         # restart; avoiding a second query once this user's cache is populated
@@ -471,7 +494,9 @@ class ExecutionLedger:
                 self._cache_contract(recovered)
         return [
             c for c in self._store.values()
-            if c.canonical_user_id == canonical_user_id and c.status == "pending"
+            if c.canonical_user_id == canonical_user_id
+            and c.status == "pending"
+            and not _is_contract_expired(c)
         ]
 
     def find_most_recent_by_user(self, canonical_user_id: str) -> "ActionContract | None":
@@ -734,6 +759,32 @@ def _describe_contract_for_disambiguation(contract: ActionContract) -> str:
         preview = _first_field_preview(payload.get("fields") or {})
         return f"{verb} ב-{table}" + (f": {preview}" if preview else "")
     return _describe_contract_for_reconfirmation(contract)
+
+
+# Staging finding #1 (23/07/2026): CONTRACT_PENDING_TTL_SECONDS is 24h,
+# deliberately long (TMA approvals can sit unopened for hours) — a contract
+# well under that TTL can still be old enough that a user picking blindly
+# from a numbered list has no way to know it isn't from the current
+# conversation. This does not change what counts as "live" (find_live_by_user
+# already filters true TTL expiry) — it only makes age visible on every
+# multi-item listing so a stale-but-not-yet-expired item can't be mistaken
+# for a fresh one. Threshold is display-only, independent of the TTL itself.
+_STALE_DISPLAY_THRESHOLD_SECONDS = 3600  # 1h
+
+
+def _format_pending_age_suffix(contract: ActionContract) -> str:
+    """Returns an inline age warning (" ⚠️ ממתין מ-X שעות/דקות") for a pending
+    contract older than _STALE_DISPLAY_THRESHOLD_SECONDS, else "" — appended
+    to each line of a multi-contract listing, never changes the underlying
+    approve/reject decision."""
+    age_seconds = time.time() - contract.created_at
+    if age_seconds < _STALE_DISPLAY_THRESHOLD_SECONDS:
+        return ""
+    hours = int(age_seconds // 3600)
+    if hours >= 1:
+        return f" ⚠️ (ממתין מ-{hours} שעות)" if hours > 1 else " ⚠️ (ממתין משעה)"
+    minutes = int(age_seconds // 60)
+    return f" ⚠️ (ממתין מ-{minutes} דקות)"
 
 
 def _first_field_preview(fields: dict, *, max_len: int = 40) -> str:
@@ -1238,7 +1289,7 @@ class ActionGateway:
             # directly) so this fix cannot change that other function's
             # behavior at its other, unrelated call sites — see both
             # functions' docstrings.
-            lines.append(f"• {i}. {_describe_contract_for_disambiguation(c)}")
+            lines.append(f"• {i}. {_describe_contract_for_disambiguation(c)}{_format_pending_age_suffix(c)}")
         lines.append("\nשלח את המספר (1, 2, ...) כדי לאשר פעולה ספציפית.")
         return "\n".join(lines)
 
@@ -1550,20 +1601,32 @@ class ActionGateway:
         contract = pending_list[idx - 1]
         # §21: close all other pending contracts from the disambiguation list
         # so no sibling contracts linger after the user makes a selection.
+        rejected_siblings = 0
         for sibling in pending_list:
             if sibling.contract_id != contract.contract_id and sibling.status == "pending":
                 rejection = self.reject(sibling.contract_id, rejected_by=canonical_user_id)
                 if not rejection.startswith("🚫"):
                     return rejection
+                rejected_siblings += 1
                 logger.info(
                     "[ActionGateway] disambiguation: closing sibling contract=%s tool=%s",
                     sibling.contract_id, sibling.tool_name,
                 )
         logger.info(
-            "[ActionGateway] disambiguation: user=%s selected idx=%d contract=%s tool=%s",
-            canonical_user_id, idx, contract.contract_id, contract.tool_name,
+            "[ActionGateway] disambiguation: user=%s selected idx=%d contract=%s tool=%s rejected_siblings=%d",
+            canonical_user_id, idx, contract.contract_id, contract.tool_name, rejected_siblings,
         )
-        return self.approve(contract.contract_id, approver=canonical_user_id, approver_role=approver_role)
+        result = self.approve(contract.contract_id, approver=canonical_user_id, approver_role=approver_role)
+        # Staging finding #3 (23/07/2026): the user was never told that
+        # picking one item from the list silently rejected the others — see
+        # §21 comment above. Disclosure only, does not change what got
+        # rejected (already decided above, unconditionally, before this fix).
+        if rejected_siblings:
+            result += (
+                f"\n\nℹ️ שים לב: {rejected_siblings} פעולות נוספות שהיו ברשימה נדחו אוטומטית "
+                f"(בחירה לפי מספר מבטלת את שאר האפשרויות שהוצגו יחד)."
+            )
+        return result
 
     # ── BUG-070 gap #1 — route_combined_word ────────────────────────
     # "כן 1"/"אשר 3" (אישור ממוקד) ו-"לא 2" (דחייה ממוקדת) בהודעה אחת,
@@ -1598,20 +1661,30 @@ class ActionGateway:
 
         if action == "confirm":
             # §21 — כמו route_disambiguation: בחירה ממוקדת סוגרת siblings אחרים
+            rejected_siblings = 0
             for sibling in live:
                 if sibling.contract_id != contract.contract_id and sibling.status == "pending":
                     rejection = self.reject(sibling.contract_id, rejected_by=canonical_user_id)
                     if not rejection.startswith("🚫"):
                         return rejection
+                    rejected_siblings += 1
                     logger.info(
                         "[ActionGateway] combined_word confirm: closing sibling contract=%s tool=%s",
                         sibling.contract_id, sibling.tool_name,
                     )
             logger.info(
-                "[ActionGateway] combined_word: user=%s confirm idx=%d contract=%s tool=%s",
-                canonical_user_id, idx, contract.contract_id, contract.tool_name,
+                "[ActionGateway] combined_word: user=%s confirm idx=%d contract=%s tool=%s rejected_siblings=%d",
+                canonical_user_id, idx, contract.contract_id, contract.tool_name, rejected_siblings,
             )
-            return self.approve(contract.contract_id, approver=canonical_user_id, approver_role=approver_role)
+            result = self.approve(contract.contract_id, approver=canonical_user_id, approver_role=approver_role)
+            # Staging finding #3 (23/07/2026) — see route_disambiguation()'s
+            # identical disclosure for the full rationale.
+            if rejected_siblings:
+                result += (
+                    f"\n\nℹ️ שים לב: {rejected_siblings} פעולות נוספות שהיו ברשימה נדחו אוטומטית "
+                    f"(בחירה לפי מספר מבטלת את שאר האפשרויות שהוצגו יחד)."
+                )
+            return result
 
         # action == "cancel" — דוחה רק את הפריט שנבחר, לא נוגע בשאר הממתינים
         rejection = self.reject(contract.contract_id, rejected_by=canonical_user_id)
@@ -2220,6 +2293,27 @@ class ActionGateway:
 
     def find_contract(self, contract_id: str) -> ActionContract | None:
         return self._ledger.find_by_id(contract_id)
+
+    # Staging finding #4 (23/07/2026): a natural-language "what's pending
+    # approval?" question (e.g. "לאשר את הפעולות שממתינות לאישור") doesn't
+    # match the exact-word grammar of _CONFIRM_WORDS/route_confirmation_word,
+    # so it used to fall straight through to the general agent — which has no
+    # dedicated tool for ActionContracts and guessed at an ordinary Airtable
+    # table (observed: "Tasks") instead. Read-only: never approves/rejects
+    # anything, unlike route_confirmation_word()'s single-live-contract branch.
+    # Sets the same disambiguation state route_confirmation_word() sets, so a
+    # follow-up bare number still resolves via route_disambiguation().
+    def describe_pending_queue(self, canonical_user_id: str) -> str:
+        live = self.find_live_contracts(canonical_user_id)
+        if not live:
+            return self.describe_no_pending_reason(canonical_user_id) or "אין פעולות הממתינות לאישור כרגע."
+        with self._disambiguation_lock:
+            self._disambiguation[canonical_user_id] = list(live)
+        lines = [f"יש {len(live)} פעולות הממתינות לאישור:"]
+        for i, c in enumerate(live, 1):
+            lines.append(f"• {i}. {_describe_contract_for_disambiguation(c)}{_format_pending_age_suffix(c)}")
+        lines.append("\nשלח את המספר (1, 2, ...) כדי לאשר פעולה ספציפית, או \"בטל <מספר>\" כדי לדחות אחת.")
+        return "\n".join(lines)
 
     # ── PR-0 / BUG-PENDING-APPROVAL-B ────────────────────────────────
 

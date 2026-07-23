@@ -175,6 +175,28 @@ _CONFIRM_WORDS = frozenset({
 })
 _CANCEL_WORDS  = frozenset({"לא", "בטל", "❌", "no", "n", "ביטול", "עצור", "cancel"})
 
+# Staging finding #4 (23/07/2026): natural-language "what's waiting for
+# approval" questions (e.g. "לאשר את הפעולות שממתינות לאישור", "מה ממתין
+# לאישור") don't match _CONFIRM_WORDS' exact-word grammar, so they used to
+# fall straight through to the general agent — which has no ActionContracts
+# tool and guessed at an ordinary Airtable table (observed: airtable_get
+# table="Tasks") instead of ever finding the real pending contracts.
+# Deliberately narrow/conservative (requires both a "pending" word and either
+# an "approval" word or an interrogative nearby) so it only intercepts
+# genuine pending-approval queries, not an unrelated free-text message that
+# happens to contain one of the words alone.
+#
+# "ממתי\w*" (not "ממתינ\w*") — deliberate, mirrors PR #399/BUG-113's fix for
+# the same class of bug: "ממתין" ends in final-form nun (ן, U+05DF), a
+# different Unicode character from the regular nun (נ, U+05E0) inside
+# "ממתינה"/"ממתינות" — a literal prefix ending in the regular nun never
+# matches the bare "ממתין" form at all, regardless of a trailing \w*.
+_PENDING_QUERY_RE = re.compile(
+    r"(?:ממתי\w*|מחכ\w*).{0,20}(?:לאישור|אישור|לאשר)"
+    r"|(?:לאישור|אישור|לאשר).{0,20}(?:ממתי\w*|מחכ\w*)"
+    r"|(?:מה|אילו|איזה|רשימת).{0,15}(?:ממתי\w*|מחכ\w*)"
+)
+
 # ─── קליינטים ──────────────────────────────────────
 ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
 TELEGRAM_TOKEN     = os.environ.get("TELEGRAM_TOKEN", "")
@@ -2932,6 +2954,20 @@ def run_agent(
                 if _out_meta is not None:
                     _out_meta["source_module"] = "action_gateway"
                 return _t2_cancel_reply
+        elif _PENDING_QUERY_RE.search(_stripped):
+            # Staging finding #4 (23/07/2026) — see _PENDING_QUERY_RE's
+            # definition above. Read-only: never approves/rejects anything,
+            # so a false-positive match here is harmless (worst case: shows
+            # an accurate pending-list instead of routing to the Agent).
+            from core.action_gateway import action_gateway as _gw_pq
+            _pq_reply = _gw_pq.describe_pending_queue(identity.memory_key)
+            logger.info(
+                "[ActionGateway] describe_pending_queue: user=%s text=%.40r reply=%.60s",
+                identity.memory_key, _stripped, _pq_reply,
+            )
+            if _out_meta is not None:
+                _out_meta["source_module"] = "action_gateway"
+            return _pq_reply
 
     # ── 2.6. Context Pronoun Resolution (C60) ────────
     # "תעלה לדסישנס"/"זה הנספח" וכד' — לפני intent detection, כדי שה-Router
