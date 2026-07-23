@@ -2303,16 +2303,31 @@ class ActionGateway:
     # anything, unlike route_confirmation_word()'s single-live-contract branch.
     # Sets the same disambiguation state route_confirmation_word() sets, so a
     # follow-up bare number still resolves via route_disambiguation().
+    #
+    # Review follow-up (23/07/2026, finding #3 of the review pass): this
+    # queries ActionContracts only. Two other pending-action stores exist in
+    # this codebase and are NOT covered here — app.py's own _pending_approvals
+    # dict and event_bus.py's PendingActionsStore/bus.pending (the "Stage A"
+    # legacy approval queue documented in CLAUDE.md's approval-flow section,
+    # still live for approval paths not migrated onto ActionGateway). A
+    # aggregate-all-sources answer would require a new read-only aggregator
+    # spanning all three stores — a real design decision (how to de-duplicate/
+    # order them, whether that belongs on ActionGateway at all), not something
+    # to improvise here. Until that exists, the reply must not imply it
+    # checked everything — see the fixed final line below.
     def describe_pending_queue(self, canonical_user_id: str) -> str:
         live = self.find_live_contracts(canonical_user_id)
         if not live:
-            return self.describe_no_pending_reason(canonical_user_id) or "אין פעולות הממתינות לאישור כרגע."
+            no_pending = self.describe_no_pending_reason(canonical_user_id)
+            base = no_pending or "לא מצאתי בקשות ממתינות במערכת ActionContracts."
+            return base + "\n\n(הבדיקה מכסה את מערכת ActionContracts בלבד — לא תורי אישור legacy נוספים.)"
         with self._disambiguation_lock:
             self._disambiguation[canonical_user_id] = list(live)
-        lines = [f"יש {len(live)} פעולות הממתינות לאישור:"]
+        lines = [f"במערכת ActionContracts מצאתי {len(live)} בקשות ממתינות:"]
         for i, c in enumerate(live, 1):
             lines.append(f"• {i}. {_describe_contract_for_disambiguation(c)}{_format_pending_age_suffix(c)}")
         lines.append("\nשלח את המספר (1, 2, ...) כדי לאשר פעולה ספציפית, או \"בטל <מספר>\" כדי לדחות אחת.")
+        lines.append("\n(הבדיקה אינה כוללת כרגע תורי אישור legacy נוספים.)")
         return "\n".join(lines)
 
     # ── PR-0 / BUG-PENDING-APPROVAL-B ────────────────────────────────

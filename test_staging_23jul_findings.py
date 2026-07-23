@@ -146,13 +146,53 @@ chk("no disambiguation state left over for a single-contract resolution",
 
 
 # ══════════════════════════════════════════════════
+# Review finding #4 — disclosure count must come from CONFIRMED transitions
+# only, never a pre-loop assumption. rejected_siblings is incremented inside
+# the loop, strictly after reject()'s own "🚫" success confirmation — if any
+# single sibling rejection fails to confirm, the (pre-existing, not touched
+# by this session) `if not rejection.startswith("🚫"): return rejection`
+# guard aborts the whole call immediately: no approval, no disclosure, no
+# partial/misleading count. This test simulates that failure directly.
+# ══════════════════════════════════════════════════
+print("\n── Review finding #4: disclosure never overclaims on a failed sibling-reject ──")
+gw4b, executions4b = _make_gw()
+ra = _propose(gw4b, "boss_hq:u4b", "airtable_add")
+rb = _propose(gw4b, "boss_hq:u4b", "gmail_send_draft")
+rc = _propose(gw4b, "boss_hq:u4b", "calendar_create_event")
+gw4b.route_confirmation_word("boss_hq:u4b", approver_role="owner")
+
+# Force reject() itself to fail (durable-write failure, not a stale-status
+# skip) for exactly one sibling — a monkeypatch is the only way to reach
+# this path deterministically: mutating .status directly instead would just
+# make the pre-loop "sibling.status == 'pending'" check skip it silently
+# (a different, already-correct behavior — confirmed while writing this test).
+_real_reject = gw4b.reject
+def _flaky_reject(contract_id, rejected_by=""):
+    if contract_id == rb.contract_id:
+        return "❌ לא ניתן לשמור את ביטול הפעולה באופן עמיד. הפעולה לא סומנה כמבוטלת."
+    return _real_reject(contract_id, rejected_by=rejected_by)
+gw4b.reject = _flaky_reject
+
+reply_partial = gw4b.route_disambiguation("boss_hq:u4b", "1", approver_role="owner")
+chk("a failed sibling-reject aborts immediately — no approval happened",
+    executions4b == [])
+chk("a failed sibling-reject surfaces the raw error, not a disclosure count",
+    reply_partial is not None and "פעולות נוספות" not in reply_partial and "לא ניתן לשמור" in reply_partial)
+chk("the originally-targeted contract was never approved on partial failure",
+    gw4b.find_contract(ra.contract_id).status == "pending")
+chk("the sibling whose reject() didn't fail is untouched (no partial mutation)",
+    gw4b.find_contract(rc.contract_id).status == "pending")
+
+
+# ══════════════════════════════════════════════════
 # Finding #4 — describe_pending_queue() deterministic listing
 # ══════════════════════════════════════════════════
 print("\n── Finding #4: describe_pending_queue() read-only listing ──")
 gw7, executions7 = _make_gw()
-chk("no pending → informative empty message, not a crash",
-    "אין פעולות" in gw7.describe_pending_queue("boss_hq:u7") or
-    gw7.describe_pending_queue("boss_hq:u7") is not None)
+empty_reply = gw7.describe_pending_queue("boss_hq:u7")
+chk("no pending → informative empty message, not a crash", empty_reply is not None)
+chk("no pending → does not silently imply completeness (review finding #3)",
+    "legacy" in empty_reply or "ActionContracts בלבד" in empty_reply)
 
 r1c = _propose(gw7, "boss_hq:u7", "airtable_add")
 r2c = _propose(gw7, "boss_hq:u7", "gmail_send_draft")
@@ -162,6 +202,9 @@ chk("describe_pending_queue never executes/rejects anything", executions7 == [])
 chk("both contracts still pending after a pure listing query",
     gw7.find_contract(r1c.contract_id).status == "pending" and
     gw7.find_contract(r2c.contract_id).status == "pending")
+chk("review finding #3: reply explicitly scopes itself to ActionContracts, "
+    "never implies coverage of legacy _pending_approvals/event_bus stores",
+    "legacy" in queue_text)
 
 # A follow-up bare ordinal after the query must resolve via route_disambiguation()
 # exactly like it would after route_confirmation_word()'s own listing.
