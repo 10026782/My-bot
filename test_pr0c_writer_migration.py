@@ -85,13 +85,15 @@ with patch("feature_flags.is_enabled", return_value=True):
         tool_name="send_followup", tool_inputs={"chat_id": "owner_1", "draft": "b"},
         origin_channel="telegram", origin_chat_id="owner_1", identity=identity,
     )
-    chk("Test1: flag on, first propose -> None (proceeds)", r1 is None)
+    chk("Test1: flag on, later mutation is blocked while shadow contract is unresolved",
+        isinstance(r1, str) and bool(r1))
     r2 = gw.propose_gated(
         tenant_id="boss_hq", canonical_user_id=identity.memory_key,
         tool_name="send_followup", tool_inputs={"chat_id": "owner_1", "draft": "b"},
         origin_channel="telegram", origin_chat_id="owner_1", identity=identity,
     )
-    chk("Test1: flag on, duplicate propose -> blocked with a user message", isinstance(r2, str) and bool(r2))
+    chk("Test1: repeated later mutation remains blocked with a user message",
+        isinstance(r2, str) and bool(r2))
 
 with patch("feature_flags.is_enabled", return_value=False), \
      patch.object(gw, "propose_action", side_effect=RuntimeError("boom")):

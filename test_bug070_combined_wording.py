@@ -50,6 +50,7 @@ def _propose(gw, user_id, tool_name, chat_id="tg:1"):
         tool_name=tool_name, tool_inputs={"table": "Leads", "row": tool_name},
         origin_channel="telegram", origin_chat_id=chat_id,
         requires_approval=True,
+        trusted_source="test_harness",
     )
 
 

@@ -74,6 +74,7 @@ def _propose_lead(gw, user="boss_hq:owner_1", fields=None):
         tool_inputs=fields or {"to": "yossi@example.com", "subject": "x"},
         origin_channel="telegram", origin_chat_id="tg:111",
         requires_approval=True,
+        trusted_source="test_harness",
     )
 
 
@@ -165,9 +166,9 @@ chk("DoD5: contract status is rejected", contract.status == "rejected")
 
 
 # ══════════════════════════════════════════════════
-# DoD #6: a genuinely new action proposed while one is pending doesn't merge
+# DoD #6: a genuinely new Agent action is blocked while one is pending
 # ══════════════════════════════════════════════════
-print("\n── DoD #6: new action during pending doesn't merge with old ─")
+print("\n── DoD #6: new Agent action during pending is not retained ─")
 gw, executions = _make_gw()
 r1 = _propose_lead(gw, user="boss_hq:owner_6",
                     fields={"to": "old@x.com", "subject": "old"})
@@ -179,13 +180,12 @@ r2 = gw.propose_action(  # ...and that intervening message is itself a new reque
     origin_channel="telegram", origin_chat_id="tg:111",
     requires_approval=True,
 )
-chk("DoD6: new contract gets its own distinct id", r2.contract_id != r1.contract_id)
+chk("DoD6: later Agent proposal is blocked", not r2.ok)
+chk("DoD6: block points to the existing contract", r2.contract_id == r1.contract_id)
 c1 = gw.find_contract(r1.contract_id)
-c2 = gw.find_contract(r2.contract_id)
 chk("DoD6: old contract carries the interruption flag", c1.context_interrupted is True)
-chk("DoD6: new contract is NOT pre-marked interrupted", c2.context_interrupted is False)
-chk("DoD6: both remain live/pending independently",
-    {c.contract_id for c in gw.find_live_contracts("boss_hq:owner_6")} == {r1.contract_id, r2.contract_id})
+chk("DoD6: only the original contract remains live",
+    [c.contract_id for c in gw.find_live_contracts("boss_hq:owner_6")] == [r1.contract_id])
 
 
 # ══════════════════════════════════════════════════
@@ -202,6 +202,7 @@ r2 = gw.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:owner_7",
     tool_name="gmail_send_draft", tool_inputs={"to": "2@x.com", "subject": "b"},
     origin_channel="telegram", origin_chat_id="tg:1", requires_approval=True,
+    trusted_source="test_harness",
 )
 gw.mark_context_interrupted("boss_hq:owner_7")  # both now context_interrupted=True
 list_reply = gw.route_confirmation_word("boss_hq:owner_7", approver_role="owner")

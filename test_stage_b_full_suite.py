@@ -687,6 +687,7 @@ _p21b = _gw21.propose_action(
     tool_name="sheets_append", tool_inputs={"spreadsheet_name": "Tasks", "row_data": ["T1"]},
     origin_channel="whatsapp", origin_chat_id="972501111111", requires_approval=True,
     identity=_identity_for("boss_hq", "boss_hq:owner_21", "whatsapp"),
+    trusted_source="test_harness",
 )
 # route_confirmation_word → triggers disambiguation list (>1 pending)
 _dis_reply = _gw21.route_confirmation_word("boss_hq:owner_21", approver_role="owner")
@@ -716,6 +717,7 @@ _p22b = _gw22.propose_action(
     tool_name="sheets_append", tool_inputs={"spreadsheet_name": "Tasks", "row_data": ["T2"]},
     origin_channel="whatsapp", origin_chat_id="972501111111", requires_approval=True,
     identity=_identity_for("boss_hq", "boss_hq:owner_22", "whatsapp"),
+    trusted_source="test_harness",
 )
 # trigger disambiguation
 _gw22.route_confirmation_word("boss_hq:owner_22", approver_role="owner")

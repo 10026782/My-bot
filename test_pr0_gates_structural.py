@@ -246,6 +246,7 @@ r2 = gw.propose_action(
     tenant_id="boss_hq", canonical_user_id="gate2_user",
     tool_name="gmail_send_draft", tool_inputs={"to": "different@b.com"},
     origin_channel="telegram", origin_chat_id="tg:1", requires_approval=True,
+    trusted_source="test_harness",
 )
 chk("setup: second distinct contract proposed", r2.ok)
 chk("bare '1' IS exempt now that 2 contracts are live (matches real disambiguation)",

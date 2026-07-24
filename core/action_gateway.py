@@ -336,38 +336,69 @@ def resolve_canonical_tool(
     return tool_hint
 
 
+class CanonicalizationError(ValueError):
+    """A tool override could not produce a safe payload for its new tool."""
+
+
 def _sheets_payload_to_airtable(tool_inputs: dict) -> dict:
     """Convert a Sheets-shaped append payload into an Airtable add payload.
 
     The tool name and payload are one contract boundary: changing only the
     name leaves a contract that cannot be dispatched.  Existing Airtable-
-    shaped payloads are preserved.  Positional Sheets rows are mapped only
-    when the repository schema knows the target table and its field order.
+    shaped payloads are preserved. Positional Sheets rows are mapped only
+    when an explicit converter exists for the target table.
     """
-    payload = dict(tool_inputs or {})
-    if payload.get("table") and isinstance(payload.get("fields"), dict):
-        return payload
+    from airtable_schema import FIELD_MAP, TABLE_ALIASES, Tables, TaskFields
 
-    table = payload.get("sheet_name") or payload.get("spreadsheet_name")
+    payload = dict(tool_inputs or {})
+    table = (
+        payload.get("table")
+        or payload.get("sheet_name")
+        or payload.get("spreadsheet_name")
+    )
     row_data = payload.get("row_data")
     if not table:
-        raise ValueError("cannot canonicalize sheets_append without a target table")
+        raise CanonicalizationError(
+            "cannot canonicalize sheets_append without a target table"
+        )
 
-    if isinstance(row_data, dict) and row_data:
+    canonical_table = TABLE_ALIASES.get(str(table), str(table))
+    approved_fields = FIELD_MAP.get(canonical_table)
+    if not approved_fields:
+        raise CanonicalizationError(
+            f"cannot canonicalize sheets_append to unknown Airtable table {table!r}"
+        )
+
+    existing_fields = payload.get("fields")
+    if isinstance(existing_fields, dict):
+        fields = dict(existing_fields)
+    elif isinstance(row_data, dict):
         fields = dict(row_data)
-    elif isinstance(row_data, list) and row_data:
-        from airtable_schema import FIELD_MAP, TABLE_ALIASES
-        canonical_table = TABLE_ALIASES.get(str(table), str(table))
-        field_names = list(FIELD_MAP.get(canonical_table, {}).keys())
-        if not field_names or len(row_data) > len(field_names):
-            raise ValueError(
-                f"cannot safely map positional row_data to Airtable table {table!r}"
+    elif isinstance(row_data, list):
+        # Positional conversion is deliberately explicit and table-specific.
+        # A one-column task append is the only legacy shape currently proven.
+        if canonical_table != Tables.TASKS or len(row_data) != 1:
+            raise CanonicalizationError(
+                f"no explicit positional converter for Airtable table {table!r}"
             )
-        fields = dict(zip(field_names, row_data))
+        fields = {TaskFields.NAME: row_data[0]}
     else:
-        raise ValueError("cannot canonicalize sheets_append without row_data")
+        raise CanonicalizationError(
+            "cannot canonicalize sheets_append without fields or row_data"
+        )
 
-    return {"table": table, "fields": fields}
+    if not fields:
+        raise CanonicalizationError(
+            "cannot canonicalize sheets_append with empty Airtable fields"
+        )
+    unknown_fields = sorted(set(fields) - set(approved_fields))
+    if unknown_fields:
+        raise CanonicalizationError(
+            f"cannot canonicalize unapproved Airtable fields for {table!r}: "
+            + ", ".join(unknown_fields)
+        )
+
+    return {"table": canonical_table, "fields": fields}
 
 
 def resolve_canonical_call(
@@ -380,6 +411,13 @@ def resolve_canonical_call(
     resolved_tool = resolve_canonical_tool(tool_hint, payload, user_text)
     if tool_hint == "sheets_append" and resolved_tool == _CANONICAL_TOOL_DEFAULT:
         payload = _sheets_payload_to_airtable(payload)
+    elif (
+        tool_hint in ("drive_upload", "drive_create")
+        and resolved_tool == _CANONICAL_TOOL_DEFAULT
+    ):
+        raise CanonicalizationError(
+            f"cannot canonicalize {tool_hint} payload to airtable_add"
+        )
     return resolved_tool, payload
 
 
@@ -955,6 +993,45 @@ class ActionGateway:
         tool_name, tool_inputs = resolve_canonical_call(
             tool_name, tool_inputs, user_text
         )
+
+        # BUG-122: Router classification is advisory and can be "unknown"
+        # before the Agent emits a mutating tool call. Enforce the one-live-
+        # mutation policy again at the canonical proposal boundary, where an
+        # Agent proposal cannot bypass it by using a different fingerprint.
+        if trusted_source == "agent":
+            try:
+                live = self.find_live_contracts(canonical_user_id)
+            except ActionContractLookupError as exc:
+                logger.error(
+                    "[ActionGateway] live-contract lookup failed before Agent "
+                    "proposal: user=%s error=%s", canonical_user_id, exc,
+                )
+                return GatewayResult(
+                    ok=False,
+                    reason="לא ניתן לבדוק כרגע אם קיימת פעולה ממתינה.",
+                    user_message=(
+                        "❌ לא ניתן לבדוק כרגע את בקשות האישור. "
+                        "הפעולה החדשה לא נשמרה ולא תבוצע."
+                    ),
+                    failure_code="persistence_lookup_failed",
+                )
+            if live:
+                logger.info(
+                    "[BUG-122] proposal_boundary_blocked user=%s "
+                    "existing_contract=%s proposed_tool=%s",
+                    canonical_user_id, live[0].contract_id, tool_name,
+                )
+                return GatewayResult(
+                    ok=False,
+                    reason="קיימת פעולה לא פתורה; הצעת Agent חדשה נחסמה.",
+                    contract_id=live[0].contract_id,
+                    user_message=(
+                        "יש לך פעולה שממתינה לאישור. יש לאשר או לבטל אותה, "
+                        "ואז לשלוח מחדש את הבקשה החדשה. הפעולה החדשה לא נשמרה."
+                    ),
+                    failure_code="existing_pending_blocks_agent",
+                )
+
         normalized = self.normalize_payload(tool_inputs)
         fingerprint = self.compute_business_fingerprint(
             tenant_id, canonical_user_id, tool_name, normalized

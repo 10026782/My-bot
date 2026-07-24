@@ -91,6 +91,7 @@ def _propose(gw, user_id: str, *, table="Tasks", fields=None, tool_name="airtabl
         origin_chat_id=user_id,
         requires_approval=True,
         identity=identity,
+        trusted_source="test_harness",
     )
 
 

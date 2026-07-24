@@ -1162,6 +1162,7 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
             origin_chat_id=user_chat_id,
             requires_approval=True,
             identity=identity,
+            trusted_source="agent",
             user_text=user_text,
         )
         if not _gw_result.ok:
@@ -1184,6 +1185,15 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
                     "terminal_outcome": "APPROVAL_QUEUE_ORPHANED",
                     "action_tool": tool_name, "created_this_turn": False,
                 }
+            if _gw_result.failure_code == "existing_pending_blocks_agent":
+                return {
+                    "message": _gw_result.user_message or _gw_result.reason,
+                    "contract_id": _gw_result.contract_id,
+                    "ok": False,
+                    "terminal_outcome": "APPROVAL_BLOCKED_PENDING",
+                    "action_tool": tool_name,
+                    "created_this_turn": False,
+                }
             return {
                 "message": _gw_result.user_message or f"⏳ {_gw_result.reason}",
                 # contract_id, if present (dedup/pending/approved/executing
@@ -1197,7 +1207,8 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
                 "action_tool": tool_name, "created_this_turn": False,
             }
     else:
-        # shadow mode — log only, do not block
+        # Shadow mode records proposals without enforcement, except for the
+        # canonical BUG-122 boundary shared by both gateway modes.
         try:
             from core.action_gateway import action_gateway as _gw
             tenant_id = getattr(identity, "tenant_id", "boss_hq")
@@ -1210,6 +1221,7 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
                 origin_chat_id=user_chat_id,
                 requires_approval=True,
                 identity=identity,
+                trusted_source="agent",
                 user_text=user_text,
             )
             if _gw_result.failure_code == "persistence_lookup_failed":
@@ -1222,6 +1234,15 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
                     "message": _gw_result.user_message or f"❌ {_gw_result.reason}",
                     "contract_id": None, "ok": False, "terminal_outcome": "APPROVAL_QUEUE_ERROR",
                     "action_tool": tool_name, "created_this_turn": False,
+                }
+            if _gw_result.failure_code == "existing_pending_blocks_agent":
+                return {
+                    "message": _gw_result.user_message or _gw_result.reason,
+                    "contract_id": _gw_result.contract_id,
+                    "ok": False,
+                    "terminal_outcome": "APPROVAL_BLOCKED_PENDING",
+                    "action_tool": tool_name,
+                    "created_this_turn": False,
                 }
             if _gw_result.failure_code == "persistence_failed":
                 # Codex re-audit of 818c8a6, P1-3: acknowledgment-uncertain —
@@ -1991,9 +2012,10 @@ def _deliver_callback_final(
     callback_chat = getattr(callback_message, "chat", None)
     callback_chat_id = str(getattr(callback_chat, "id", "") or "")
     if origin_channel == "telegram":
-        if str(origin_chat_id) == callback_chat_id:
-            bot.edit_message_text(text, cq.message.chat.id, cq.message.message_id)
-        else:
+        # The callback message owns the keyboard and must always be made
+        # terminal, even when the original requester is a different chat.
+        bot.edit_message_text(text, cq.message.chat.id, cq.message.message_id)
+        if str(origin_chat_id) != callback_chat_id:
             bot.send_message(origin_chat_id, text)
         return
 

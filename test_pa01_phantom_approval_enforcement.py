@@ -526,7 +526,7 @@ reply_j2_2, _ = _run_agent(
     intent=Intent.CREATE_TASK, allowed_tool_names=("airtable_add", "sheets_append"),
     anthropic_responses=[
         _tool_use_response([{"name": "sheets_append",
-                              "input": {"table": "Tasks", "fields": {"Task": "בדיקה קנונית 2"}}}]),
+                              "input": {"table": "Tasks", "fields": {"כותרת המשימה": "בדיקה קנונית 2"}}}]),
         _text_response(_gw_echo_2),
     ],
     pa01_state="enforce",
@@ -552,7 +552,7 @@ reply_j2_3, _ = _run_agent(
     allowed_tool_names=("calendar_create_event", "sheets_append"),
     anthropic_responses=[
         _tool_use_response([{"name": "sheets_append",
-                              "input": {"table": "Tasks", "fields": {"Task": "לא רלוונטי"}}}]),
+                              "input": {"table": "Tasks", "fields": {"כותרת המשימה": "לא רלוונטי"}}}]),
         _text_response("קבעתי לך, שלח מאשר"),
     ],
     pa01_state="enforce",
@@ -572,17 +572,18 @@ chk("J2.3: that contract is NOT accepted as evidence for CREATE_EVENT -> PA-01 d
 # the terminal outcome must be found only when scoped to the expected tool.
 _dup_identity = Identity(user_id="canon_dup", role=Role.OWNER)
 _first = app._queue_approval_detailed(
-    "sheets_append", {"table": "Tasks", "fields": {"Task": "כפילות קנונית"}},
+    "sheets_append", {"table": "Tasks", "fields": {"כותרת המשימה": "כפילות קנונית"}},
     "canon_dup", "telegram", "צור לי משימה",
 )
 chk("J2.4: first call's action_tool is already canonical (airtable_add), not sheets_append",
     _first["action_tool"] == "airtable_add")
 _second = app._queue_approval_detailed(
-    "sheets_append", {"table": "Tasks", "fields": {"Task": "כפילות קנונית"}},
+    "sheets_append", {"table": "Tasks", "fields": {"כותרת המשימה": "כפילות קנונית"}},
     "canon_dup", "telegram", "צור לי משימה",
 )
-chk("J2.4: duplicate call -> APPROVAL_QUEUE_ERROR, action_tool still the canonical tool",
-    _second["terminal_outcome"] == "APPROVAL_QUEUE_ERROR" and _second["action_tool"] == "airtable_add")
+chk("J2.4: same-fingerprint duplicate -> APPROVAL_QUEUE_ERROR, action_tool still canonical",
+    _second["terminal_outcome"] == "APPROVAL_QUEUE_ERROR"
+    and _second["action_tool"] == "airtable_add")
 _dup_log = [{"tool": "__approval_queued__", "content": _second["message"], "ok": False,
              "contract_id": _second["contract_id"], "terminal_outcome": _second["terminal_outcome"],
              "action_tool": _second["action_tool"]}]
@@ -949,7 +950,7 @@ chk("P1-B (unit): _pa01_structured_terminal_outcome finds the blocked entry for 
 with patch("feature_flags.is_enabled", return_value=False), \
      patch.object(_real_bus, "request_approval", side_effect=RuntimeError("eventbus down")):
     _r4a_result = app._queue_approval_detailed(
-        "sheets_append", {"table": "Tasks", "fields": {"Task": "R4a"}},
+        "sheets_append", {"table": "Tasks", "fields": {"כותרת המשימה": "R4a"}},
         "r4a_eventbus_fail", "telegram", "צור לי משימה",
     )
 chk("P1-C / R4a: canonical tool (sheets_append -> airtable_add) was persisted, then "
