@@ -3205,7 +3205,7 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 
 ---
 
-## BUG-141 (AG-01) — שאלת pending-queue טבעית עם "?" עוקפת את `describe_pending_queue()` הדטרמיניסטי ונופלת ל-Agent — 🔴 נרשם, לא תוקן (root cause מאומת קוד+deploy, לא branch-ordering ולא regex/deploy gap)
+## BUG-141 (AG-01) — שאלת pending-queue טבעית עם "?" עוקפת את `describe_pending_queue()` הדטרמיניסטי ונופלת ל-Agent — ✅ VERIFIED IN PROD + STAGING
 
 - **תאריך:** 24/07/2026.
 - **מקור:** בדיקת staging יזומה (AG-01). הודעת משתמש: `"מה ממתין כרגע לאישור?"`.
@@ -3218,7 +3218,23 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **Test gap מאומת:** `test_staging_23jul_findings.py:233-247` (הבדיקה שליוותה את הפיצ'ר) בודקת רק `app._PENDING_QUERY_RE.search(text)` ישירות — **לא** בודקת את סדר ה-dispatch האמיתי, ואף אחת מ-4 הדוגמאות החיוביות לא מסתיימת ב-`"?"`. הרגרסיה הזו הייתה בלתי-ניתנת-לגילוי ע"י הבדיקה הקיימת.
 - **צורת תיקון מוצעת (לא בוצע קוד):** להזיז את בדיקת `_PENDING_QUERY_RE.search(_stripped)` **לפני** ה-`if "?" in _stripped:` בשרשרת (למשל בדיקה נפרדת מיד אחרי `route_combined_word`/לפני `§4 disambiguation`, לא כ-branch באותה שרשרת), כך שלא משנה אם הטקסט מכיל `"?"` — או, לחלופין, להוסיף את הבדיקה כ-branch ראשון *בתוך* ה-`if "?" in _stripped:` עצמו (לפני `_STATUS_QUERY_PATTERNS`), כדי לשמור על המבנה הקיים אך לתת לה עדיפות. יש להוסיף גם test חדש שמכסה במפורש שאלת pending-queue **עם** `"?"` בסוף — לא רק בלעדיו — כדי לסגור את פער-הבדיקה שאיפשר את הרגרסיה הזו.
 - **היקף:** לא נגעתי בקוד. ממצא מבוסס git+Render API+קריאת קוד ישירה.
-- **סטטוס:** 🔴 נרשם, root cause מאומת עד השורה, לא תוקן.
+- **תוקן:** `app.py` — `_PENDING_QUERY_RE.search(_stripped)` נבדק כעת ב-`if` עצמאי מיד לפני `if "?" in _stripped:` (לא כ-`elif` בסוף השרשרת) — שאלה עם `"?"` בסוף כבר לא נחסמת ע"י ה-branch הכללי. אין שינוי ב-regex עצמו. `elif` הישן (הפך בלתי-נגיש) הוסר. PR #457, commit `9d156d9`, ממוזג ל-`main` (`c12a19b`). 15 בדיקות חדשות (`test_bug141_pending_query_dispatch_order.py`) — מוכיחות דרך נתיב ה-dispatch האמיתי (לא רק `.search()` ישיר) ש-`describe_pending_queue()` נקרא, Agent/`dispatch_tool` לעולם לא נקראים לשאלת pending-queue, "?" ובלעדיו מתנהגים זהה. Full sweep 166/169 (3 כשלים קדם-קיימים לא-קשורים).
+- **✅ Verified בפרודקשן (24/07/2026):** אחרי deploy ל-`my-bot-jqz2` (`c12a19b`) — "מה ממתין לאישור" → `"אין פעולה שממתינה לאישור.\n\n(הבדיקה מכסה את מערכת ActionContracts בלבד — לא תורי אישור legacy נוספים.)"`, בדיוק ה-reply הדטרמיניסטי המצופה מ-`describe_pending_queue()`.
+- **✅ Verified ב-staging (24/07/2026):** אחרי deploy ידני של ה-owner ל-branch `claude/rp5-staging-fault-injection-v4akit` (מרובייז מעל `main` כולל התיקון הזה) על `my-bot-approval-staging`. דגימה חיה מלאה:
+  ```
+  Eli: מה ממתין כרגע לאישור?
+  BOSS: אין פעולה שממתינה לאישור.
+  (הבדיקה מכסה את מערכת ActionContracts בלבד — לא תורי אישור legacy נוספים.)
+
+  [identity] Resolved: boss_hq/eliyahu@owner [telegram:general]
+  [httpx] GET .../ActionContracts?filterByFormula=...canonical_user_id...pending... "200 OK"
+  [core.turn_envelope] [TurnEnvelope] user=b2320d31 {"turn_mode": "free_agent", "queue_count": 0, ...}
+  [app] [ActionGateway] describe_pending_queue: user=boss_hq:eliyahu pending_count=0 scope=action_contracts result_code=empty
+  "POST /telegram HTTP/1.1" 200 0
+  ```
+  כל דרישות ה-fix מאומתות בו-זמנית: `describe_pending_queue()` נקרא (`[ActionGateway] describe_pending_queue`), Airtable `ActionContracts` הוא מקור-האמת היחיד (2 קריאות GET, לא tool-loop כללי), **ואין שום `POST api.anthropic.com` בלוג** — ה-Agent לא נקרא כלל לשאלה הזו (בניגוד לתסמין המקורי, ששלח `airtable_get` ל-Tasks/Deals/Payments + קריאת LLM מלאה).
+- **תצפית עלות (24/07/2026, מהבעלים) — חלקית מאומתת, לא הוכחה מלאה:** הבעלים דיווח "הלוגים נקיים פתאום ואני בטוח שגם העלות ירדה". מה שכן מאומת ישירות מהלוג לעיל: ה-turn הספציפי הזה (שאלת pending-queue) לא מפעיל שום קריאת Anthropic — ירידת-עלות מבנית אמיתית **לדפוס-השאלה הזה בלבד** (לפני התיקון: tool-loop מלא + קריאת LLM על כל שאלה כזו; אחרי: 2 קריאות Airtable GET בלבד, אפס LLM). **לא אומת:** ירידת עלות כוללת/שעתית בפועל — דורש בדיקת `cost_monitor`'s hourly/daily totals בפועל (או `usage_events`) לפני קביעה כזו, לא רק תצפית איכותית על "לוגים נקיים". ראו גם הממצא התכנוני "Cost Telemetry Coverage and Per-Turn Attribution" למטה — עדיין אין breakdown פר-turn/source שהיה מאפשר לכמת את הירידה הזו במדויק.
+- **סטטוס:** ✅ VERIFIED IN PROD + STAGING (24/07/2026) — קוד תוקן, נבדק (unit+integration, 15/15 + full sweep), ומאומת runtime בשתי סביבות נפרדות עם evidence מלוגים אמיתיים. תצפית-העלות הכוללת (לא רק לדפוס-שאלה בודד) נשארת לא-מאומתת.
 
 ---
 

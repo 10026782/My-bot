@@ -1819,6 +1819,7 @@ Flag: EMERGENCY_STOP_AI=False (נשמר ב-Airtable)
 
 **PR #457 (תיקון קוד, BUG-141 בלבד):** `_PENDING_QUERY_RE` נבדק כעת ב-`if` עצמאי לפני `if "?" in _stripped:` (במקום `elif` אחרי כל שרשרת ה-if/elif) — שאלת "מה ממתין כרגע לאישור?" כבר לא נחסמת ע"י ה-`"?"` הכללי. אין שינוי ב-regex, אין נגיעה ב-BUG-142/143/144/145/122/Cost Telemetry. 15 בדיקות חדשות (`test_bug141_pending_query_dispatch_order.py`), full sweep 166/169 (3 כשלים קדם-קיימים לא-קשורים: `test_document_converter.py`, `test_google_tools.py` — `docx` חסר, `test_phase_4b0_1a_atomic_claims.py` — קידוד Windows).
 
+<<<<<<< HEAD
 **Merged:** ✅ כן — #456 commit `585a6f6`, #457 commit `c12a19b`.
 **Verified בפרודקשן:** ⏳ לא עדיין — קוד ממוזג ל-`main`, טרם אומת מול תעבורת production/staging בפועל.
 
@@ -1842,3 +1843,13 @@ Flag: EMERGENCY_STOP_AI=False (נשמר ב-Airtable)
 
 **לא נוגע:** RP5/F52 taxonomy, `core/rp5_fault_injection.py` עצמו, אכיפה.
 **Merged:** לא — staging-only, `claude/rp5-staging-fault-injection-v4akit`, לא ממוזג בכוונה | **Verified ב-staging:** ✅ כן | **Verified בפרודקשן:** לא רלוונטי — הענף אינו נוגע ב-production
+=======
+**✅ Verified בפרודקשן (24/07/2026, `my-bot-jqz2`, אחרי deploy `c12a19b`):** "מה ממתין לאישור" → `"אין פעולה שממתינה לאישור.\n\n(הבדיקה מכסה את מערכת ActionContracts בלבד...)"`.
+
+**✅ Verified ב-staging (24/07/2026, `my-bot-approval-staging`, אחרי deploy ידני ל-branch המרובייז `claude/rp5-staging-fault-injection-v4akit`):** אותה שאלה בדיוק, לוג מלא — `describe_pending_queue()` נקרא, 2 קריאות Airtable GET (`ActionContracts`), **ואין שום `POST api.anthropic.com`** — ה-Agent לא נקרא כלל. פירוט מלא ב-`BUG_AUDIT_LOG.md`'s BUG-141.
+
+**תצפית עלות (24/07/2026, מהבעלים) — חלקית מאומתת:** "הלוגים נקיים... אני בטוח שגם העלות ירדה." מאומת: turn של שאלת-pending-queue לא מפעיל LLM כלל (0 קריאות Anthropic בלוג, לעומת tool-loop מלא לפני התיקון) — ירידת-עלות מבנית אמיתית לדפוס-השאלה הזה. **לא אומת:** ירידת עלות שעתית/יומית כוללת בפועל — דורש בדיקת `cost_monitor`/`usage_events` totals, לא רק תצפית איכותית. קשור ל-"Cost Telemetry Coverage and Per-Turn Attribution" (`BUG_AUDIT_LOG.md`, ללא מספר BUG) — אין עדיין breakdown פר-turn שהיה מאפשר לכמת את זה במדויק.
+
+**Merged:** ✅ כן — #456 commit `585a6f6`, #457 commit `c12a19b`.
+**Verified בפרודקשן:** ✅ כן (24/07/2026) — ראו evidence למעלה. **Verified ב-staging:** ✅ כן (24/07/2026).
+>>>>>>> 4b3cdd2 (docs: BUG-141 VERIFIED IN PROD + STAGING, add C170/C171 change-control entry)
