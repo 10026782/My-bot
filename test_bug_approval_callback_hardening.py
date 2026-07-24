@@ -202,7 +202,54 @@ chk("callback without a linked contract: deterministic expired/already-resolved 
 
 
 # ══════════════════════════════════════════════════
-# 3. Structured duplicate/no-op result for a repeated airtable_add
+# 3. BUG-144/145: button rejection updates the canonical contract and emits
+#    exactly one persistent final response.
+# ══════════════════════════════════════════════════
+print("\n── BUG-144/145: canonical reject + one final response ─────────")
+
+requester4 = _identity("owner-hard-4", Role.OWNER)
+reject_inputs = {"table": "Tasks", "fields": {"Task": "reject canonical"}}
+reject_proposal = _real_gw.propose_action(
+    tenant_id="boss_hq", canonical_user_id=requester4.memory_key,
+    tool_name="airtable_add", tool_inputs=reject_inputs,
+    origin_channel="telegram", origin_chat_id=requester4.user_id,
+    requires_approval=True, identity=requester4, trusted_source="agent",
+)
+reject_action_id, _ = _real_bus.request_approval(
+    action="airtable_add",
+    payload={
+        "tool_name": "airtable_add", "tool_inputs": reject_inputs,
+        "origin_channel": "telegram", "origin_chat_id": requester4.user_id,
+        "canonical_user_id": requester4.memory_key,
+        "user_chat_id": requester4.user_id, "channel": "telegram",
+    },
+    chat_id=requester4.user_id, label="reject canonical",
+)
+reject_cq = SimpleNamespace(
+    id="cbq-reject", data=f"reject:{reject_action_id}",
+    from_user=SimpleNamespace(id=requester4.user_id),
+    message=SimpleNamespace(
+        chat=SimpleNamespace(id=requester4.user_id), message_id=44,
+    ),
+)
+reject_bot = MagicMock()
+with patch.object(app, "bot", reject_bot), \
+     patch.object(app, "resolve_identity", return_value=requester4), \
+     patch.object(app, "_flag_enabled", side_effect=_flag_on), \
+     patch("feature_flags.is_enabled", side_effect=_flag_on):
+    app._handle_approval_callback_impl(reject_cq)
+
+reject_contract = _real_gw.find_contract(reject_proposal.contract_id)
+chk("button reject durably marks the canonical ActionContract rejected",
+    reject_contract is not None and reject_contract.status == "rejected")
+chk("same-chat callback sends no additional Telegram message",
+    reject_bot.send_message.call_count == 0)
+chk("same-chat callback edits exactly one persistent final response",
+    reject_bot.edit_message_text.call_count == 1)
+
+
+# ══════════════════════════════════════════════════
+# 4. Structured duplicate/no-op result for a repeated airtable_add
 # ══════════════════════════════════════════════════
 print("\n── Fix 3: duplicate airtable_add returns structured already_exists ──")
 
@@ -242,13 +289,11 @@ chk("A32 verify_execution accepts the structured duplicate result as ok "
 
 
 # ══════════════════════════════════════════════════
-# 4. BatchQueue promotion and per-item approval remain unchanged (sanity
-# check that the hardening above didn't disturb PR #345's behavior).
+# 5. BUG-122 policy: deferred items are discarded, never promoted.
 # ══════════════════════════════════════════════════
-print("\n── Fix regression: BatchQueue promotion still works ────────────")
-print("(full coverage already in test_bug_batch_approval_preserved.py — "
-      "re-run as part of the full suite, not duplicated here)")
-chk("placeholder — see test_bug_batch_approval_preserved.py for full batch coverage", True)
+print("\n── BUG-122 regression: BatchQueue promotion is disabled ────────")
+chk("dedicated BUG-122 batch policy coverage remains in place",
+    callable(app._promote_next_batch_item))
 
 
 # ══════════════════════════════════════════════════

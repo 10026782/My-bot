@@ -52,6 +52,7 @@ from identity import Identity, Role  # noqa: E402
 from core.action_gateway import (  # noqa: E402
     ActionGateway,
     ExecutionLedger,
+    resolve_canonical_call,
     resolve_canonical_tool,
 )
 from event_bus import bus as _real_bus  # noqa: E402
@@ -130,6 +131,19 @@ propose3 = gw.propose_action(
 contract3 = gw.find_contract(propose3.contract_id)
 chk("airtable_add hint (already canonical): passes through unchanged",
     contract3 is not None and contract3.tool_name == "airtable_add")
+
+resolved_name, resolved_payload = resolve_canonical_call(
+    "sheets_append",
+    {"sheet_name": "Tasks", "row_data": ["לבדוק מה קורה עם אבי"]},
+    "צור משימה לבדוק מה קורה עם אבי",
+)
+chk("Sheets-shaped task call: tool converts to airtable_add",
+    resolved_name == "airtable_add")
+chk("Sheets-shaped task call: payload converts with the tool",
+    resolved_payload == {
+        "table": "Tasks",
+        "fields": {"כותרת המשימה": "לבדוק מה קורה עם אבי"},
+    })
 
 
 # ══════════════════════════════════════════════════
