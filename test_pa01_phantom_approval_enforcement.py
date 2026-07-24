@@ -881,15 +881,13 @@ chk("...and no EventBus pending representation was created for this identity eit
 
 # --- P1-B / R3-real: mixed batch -- a real, live contract is created for an
 # UNRELATED tool (calendar_create_event, tool call #1 this turn), and the
-# intent's own expected tool (airtable_add, tool call #2) is genuinely
-# deferred to batch_queue by the pre-existing BUG-BATCH-DISCARD mechanism.
-# Pre-fix, the deferred call left NO tool_results_log entry at all, so PA-01
-# saw "no contract, no outcome" for airtable_add and fell through to the
-# Phantom fallback -- a false claim, since the action IS queued (just not
-# yet promoted into its own live contract).
+# intent's own expected tool (airtable_add, tool call #2) is blocked by the
+# BUG-122 single-unresolved-action policy. It is not retained for promotion.
 _r3real_inputs = {"table": "Tasks", "fields": {"Task": "P1B"}}
-_r3real_expected_label = app._describe_tool_call("airtable_add", _r3real_inputs)
-_r3real_expected_deferred_msg = f"⏳ נשמר בתור לאישור אחרי הפעולה הראשונה: {_r3real_expected_label}"
+_r3real_expected_blocked_msg = (
+    "⛔ הפעולה הנוספת לא נשמרה. יש לפתור את הפעולה "
+    "הממתינה ואז לשלוח את הבקשה מחדש."
+)
 
 reply_r3real, _ = _run_agent(
     "r3real_mixed_batch", "קבע לי פגישה וגם צור משימה", role=Role.OWNER,
@@ -908,36 +906,35 @@ _r3real_contracts = _canon_gw.find_live_contracts("boss_hq:r3real_mixed_batch")
 chk("P1-B / R3-real: a real contract WAS created -- for calendar_create_event (the FIRST "
     "mutating call this turn), not airtable_add",
     len(_r3real_contracts) == 1 and _r3real_contracts[0].tool_name == "calendar_create_event")
-chk("P1-B / R3-real: airtable_add (the expected tool for CREATE_TASK) was durably deferred "
-    "to batch_queue, not discarded and not silently promoted this turn",
-    _real_batch_queue.count_pending("boss_hq:r3real_mixed_batch") == 1)
+chk("P1-B / R3-real: airtable_add was not retained in batch_queue",
+    _real_batch_queue.count_pending("boss_hq:r3real_mixed_batch") == 0)
 chk("P1-B / R3-real: row 2 does NOT fire (no __approval_queued__ sentinel for airtable_add "
-    "this turn) and the Phantom fallback does NOT fire either -- final_reply is the real, "
-    "structured deferred-batch message",
-    reply_r3real == _r3real_expected_deferred_msg)
+    "this turn) and the Phantom fallback does NOT fire either -- final_reply is the "
+    "structured pending-policy block",
+    reply_r3real == _r3real_expected_blocked_msg)
 chk("P1-B / R3-real: the wrong-tool contract (calendar_create_event) is not mistaken for "
     "evidence about airtable_add, and the raw agent reply is not left standing either",
     reply_r3real != PHANTOM and reply_r3real != "קבעתי וגם אוסיף את המשימה")
 
 # Unit-level pin on the scoped lookup itself (mirrors R3's own unit/
-# integration split above): a deferred-batch entry for a DIFFERENT tool must
+# integration split above): a blocked entry for a DIFFERENT tool must
 # not satisfy the expected tool's lookup, and an entry for the actual
 # expected tool must be found regardless of position in the log.
 _r3real_log = [
     {"tool": "__approval_queued__", "content": "irrelevant", "ok": True,
      "contract_id": "c-1", "terminal_outcome": None, "action_tool": "calendar_create_event",
      "created_this_turn": True},
-    {"tool": "__approval_deferred_batch__", "content": _r3real_expected_deferred_msg,
-     "ok": False, "contract_id": None, "terminal_outcome": "APPROVAL_DEFERRED_BATCH",
+    {"tool": "__approval_blocked_pending__", "content": _r3real_expected_blocked_msg,
+     "ok": False, "contract_id": None, "terminal_outcome": "APPROVAL_BLOCKED_PENDING",
      "action_tool": "airtable_add", "created_this_turn": False},
 ]
 chk("P1-B (unit): _pa01_contract_created_for_expected_tool is False for airtable_add "
-    "(it was deferred, never a live contract this turn)",
+    "(it was blocked, never a live contract this turn)",
     app._pa01_contract_created_for_expected_tool(_r3real_log, "airtable_add") is False)
-chk("P1-B (unit): _pa01_structured_terminal_outcome finds the deferred-batch entry for "
+chk("P1-B (unit): _pa01_structured_terminal_outcome finds the blocked entry for "
     "airtable_add, scanning past the unrelated calendar_create_event entry first",
     app._pa01_structured_terminal_outcome(_r3real_log, "airtable_add")
-    == ("APPROVAL_DEFERRED_BATCH", _r3real_expected_deferred_msg))
+    == ("APPROVAL_BLOCKED_PENDING", _r3real_expected_blocked_msg))
 
 
 # --- P1-C / R4: a canonical tool's ActionContract IS durably persisted, but

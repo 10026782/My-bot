@@ -327,15 +327,60 @@ def resolve_canonical_tool(
             return "sheets_append"
         if tool_hint in ("drive_upload", "drive_create") and any(k in lower for k in _DRIVE_KEYWORDS):
             return tool_hint
-        # hint was sheets/drive but user didn't explicitly ask — fall back to Airtable
         logger.info(
             "[ActionGateway] resolve_canonical_tool: overriding %s → %s "
             "(no explicit Sheets/Drive request in user_text)",
             tool_hint, _CANONICAL_TOOL_DEFAULT,
         )
         return _CANONICAL_TOOL_DEFAULT
-    # all other tools: trust the caller
     return tool_hint
+
+
+def _sheets_payload_to_airtable(tool_inputs: dict) -> dict:
+    """Convert a Sheets-shaped append payload into an Airtable add payload.
+
+    The tool name and payload are one contract boundary: changing only the
+    name leaves a contract that cannot be dispatched.  Existing Airtable-
+    shaped payloads are preserved.  Positional Sheets rows are mapped only
+    when the repository schema knows the target table and its field order.
+    """
+    payload = dict(tool_inputs or {})
+    if payload.get("table") and isinstance(payload.get("fields"), dict):
+        return payload
+
+    table = payload.get("sheet_name") or payload.get("spreadsheet_name")
+    row_data = payload.get("row_data")
+    if not table:
+        raise ValueError("cannot canonicalize sheets_append without a target table")
+
+    if isinstance(row_data, dict) and row_data:
+        fields = dict(row_data)
+    elif isinstance(row_data, list) and row_data:
+        from airtable_schema import FIELD_MAP, TABLE_ALIASES
+        canonical_table = TABLE_ALIASES.get(str(table), str(table))
+        field_names = list(FIELD_MAP.get(canonical_table, {}).keys())
+        if not field_names or len(row_data) > len(field_names):
+            raise ValueError(
+                f"cannot safely map positional row_data to Airtable table {table!r}"
+            )
+        fields = dict(zip(field_names, row_data))
+    else:
+        raise ValueError("cannot canonicalize sheets_append without row_data")
+
+    return {"table": table, "fields": fields}
+
+
+def resolve_canonical_call(
+    tool_hint: str,
+    tool_inputs: dict,
+    user_text: str = "",
+) -> tuple[str, dict]:
+    """Resolve the canonical tool and its matching payload atomically."""
+    payload = dict(tool_inputs or {})
+    resolved_tool = resolve_canonical_tool(tool_hint, payload, user_text)
+    if tool_hint == "sheets_append" and resolved_tool == _CANONICAL_TOOL_DEFAULT:
+        payload = _sheets_payload_to_airtable(payload)
+    return resolved_tool, payload
 
 
 def _hash_challenge(code: str) -> str:
@@ -907,7 +952,9 @@ class ActionGateway:
         point, so every caller is protected uniformly; a no-op for every
         current caller that never passes a sheets/drive tool_hint.
         """
-        tool_name = resolve_canonical_tool(tool_name, tool_inputs, user_text)
+        tool_name, tool_inputs = resolve_canonical_call(
+            tool_name, tool_inputs, user_text
+        )
         normalized = self.normalize_payload(tool_inputs)
         fingerprint = self.compute_business_fingerprint(
             tenant_id, canonical_user_id, tool_name, normalized

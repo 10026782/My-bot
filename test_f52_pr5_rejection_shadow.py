@@ -272,32 +272,24 @@ chk("T5b: unified combined-cancel text has no raw contract id", cid5b not in out
 
 
 # ══════════════════════════════════════════════════
-# 6. Telegram callback reject path: documented as separate, not covered
+# 6. Telegram callback reject path: canonical lifecycle wiring
 # ══════════════════════════════════════════════════
 print()
-print("── 6. Telegram callback reject path: confirmed separate, not covered ──")
+print("── 6. Telegram callback reject path: canonical rejection wired ──")
 
 import inspect
 import app as _app
 
 _full_src = inspect.getsource(_app._handle_approval_callback_impl)
 _reject_branch_src = _full_src[_full_src.index('elif action == "reject":'):]
-# Strip comment lines before checking for a real .reject()/compose_status_reply()
-# call — the in-line documentation note added by this PR mentions those
-# names IN PROSE, which would otherwise false-positive this check.
 _reject_branch_code_only = "\n".join(
     line for line in _reject_branch_src.splitlines()
     if not line.strip().startswith("#")
 )
-chk("T6: app.py's Telegram callback reject branch does not call "
-    "ActionGateway.reject()/compose_status_reply()/_render_rejection_reply() "
-    "-- confirms it is genuinely a separate, undocumented-no-longer gap, "
-    "not silently missed",
-    "compose_status_reply" not in _reject_branch_code_only
-    and "_render_rejection_reply" not in _reject_branch_code_only
-    and ".reject(" not in _reject_branch_code_only)
-chk("T6: the gap is explicitly documented in-line in app.py",
-    "F52 PR5" in _reject_branch_src)
+chk("T6: Telegram reject calls ActionGateway.reject()",
+    ".reject(" in _reject_branch_code_only)
+chk("T6: Telegram reject verifies the durable rejected status",
+    '_reject_after.status != "rejected"' in _reject_branch_code_only)
 
 
 # ══════════════════════════════════════════════════

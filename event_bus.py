@@ -179,27 +179,16 @@ class PendingActionsStore:
 
 
 # ══════════════════════════════════════════════════
-# Batch Queue Store — BUG-BATCH-DISCARD
+# Batch Queue Store — legacy in-memory quarantine
 # ══════════════════════════════════════════════════
-# A single agent turn may contain several mutating tool calls (e.g. a user
-# asking to create 5 tasks in one message). Only the FIRST becomes a live
-# ActionContract + sends a Telegram notification this turn — the rest are
-# held here, per canonical_user_id, and promoted one at a time by
-# app.py's _promote_next_batch_item() only once no contract is currently
-# live for that identity. This deliberately avoids letting >1 contract be
-# simultaneously "pending" for the same identity: ActionGateway's existing
-# len(live)>1 disambiguation (route_disambiguation/route_combined_word)
-# closes sibling contracts when one is selected (§21, commit 6752ec0) — that
-# semantic is for choosing among alternative interpretations of ONE request,
-# not preserving independent batch items, so batch items must never reach
-# "pending" status more than one at a time.
-# In-memory only, same volatility class as PendingActionsStore (no DB/
-# Airtable persistence — a restart loses queued-but-not-yet-proposed items,
-# same as any other in-flight conversational state today).
+# BUG-122 policy no longer enqueues or promotes deferred mutations.  This
+# in-memory store remains temporarily for compatibility and for discarding
+# items left by an older process during resolution/turn-start cleanup.  It is
+# never persisted to Airtable; process restart is therefore also proof of an
+# empty queue.
 
 class BatchQueueStore:
-    """Holds mutating tool calls deferred from a multi-task turn, per
-    canonical_user_id, until it's safe to promote the next one."""
+    """Legacy in-memory deferred-item store; current runtime only clears it."""
 
     def __init__(self):
         self._queues: dict[str, list[dict]] = defaultdict(list)

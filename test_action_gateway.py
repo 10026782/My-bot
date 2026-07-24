@@ -70,6 +70,7 @@ r1 = gw.propose_action(
     tool_inputs={"spreadsheet_name": "Sales", "row": "VIP"},
     origin_channel="whatsapp", origin_chat_id="wa:97250",
     requires_approval=True,
+    user_text="add VIP to Google Sheets",
 )
 chk("DoD11: first propose → ok=True", r1.ok)
 chk("DoD11: first propose → contract_id assigned", r1.contract_id is not None)
@@ -80,6 +81,7 @@ r2 = gw.propose_action(
     tool_inputs={"row": "VIP", "spreadsheet_name": "Sales"},  # רשימה שונה, payload זהה
     origin_channel="telegram", origin_chat_id="tg:7228089151",
     requires_approval=True,
+    user_text="add VIP to Google Sheets",
 )
 chk("DoD11: duplicate propose → ok=False (pending exists)", not r2.ok)
 chk("DoD11: duplicate propose → same contract_id returned", r2.contract_id == r1.contract_id)
@@ -123,6 +125,7 @@ r = gw.propose_action(
     tool_name="sheets_append", tool_inputs={"spreadsheet_name": "X", "row": "1"},
     origin_channel="telegram", origin_chat_id="tg:1",
     requires_approval=True,
+    user_text="add row to Google Sheets",
 )
 obs = gw.record_agent_observation(r.contract_id, "uncertainty", "Agent חש אי-ודאות בשם הגיליון")
 chk("DoD13: AgentObservation kind=uncertainty", obs.kind == "uncertainty")
@@ -133,6 +136,7 @@ gw_result_text = gw.propose_action(
     tool_name="sheets_append", tool_inputs={"spreadsheet_name": "Y", "row": "2"},
     origin_channel="telegram", origin_chat_id="tg:2",
     requires_approval=True,
+    user_text="add row to Google Sheets",
 )
 chk("DoD13: GatewayResult does not expose AgentObservation text", "uncertainty" not in (gw_result_text.user_message or ""))
 
@@ -235,6 +239,7 @@ r5 = gw5.propose_action(
     tool_name="sheets_append", tool_inputs=original_inputs,
     origin_channel="telegram", origin_chat_id="tg:1",
     requires_approval=True,
+    user_text="add 2026 to Google Sheets",
 )
 gw5.approve(r5.contract_id, approver="boss_hq:owner_1", approver_role="owner")
 chk("DoD6: exactly one execution", len(executed_payloads) == 1)
@@ -346,6 +351,7 @@ r_override = gw_bug077.propose_action(
     tool_inputs={"spreadsheet_name": "Sales", "row": "test"},
     origin_channel="telegram", origin_chat_id="tg:bug077a",
     requires_approval=False,  # caller under-declares
+    user_text="add test to Google Sheets",
 )
 contract_override = gw_bug077.find_contract(r_override.contract_id)
 chk("BUG-077: contract forced to pending when registry requires approval",
@@ -360,6 +366,7 @@ r_match = gw_bug077b.propose_action(
     tool_inputs={"spreadsheet_name": "Sales", "row": "test2"},
     origin_channel="telegram", origin_chat_id="tg:bug077b",
     requires_approval=True,  # caller correctly declares — no change expected
+    user_text="add test2 to Google Sheets",
 )
 contract_match = gw_bug077b.find_contract(r_match.contract_id)
 chk("BUG-077: no behavior change when caller already declares True",
