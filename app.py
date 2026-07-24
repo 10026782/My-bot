@@ -2798,6 +2798,35 @@ def run_agent(
                     _out_meta["source_module"] = "action_gateway"
                 return _gateway_reply_with_promotion(_disambig_reply, identity.memory_key)
 
+        # BUG-141 (AG-01) — natural-language pending-queue questions ("מה
+        # ממתין כרגע לאישור?") must route to the deterministic
+        # describe_pending_queue() regardless of a trailing "?". Checked
+        # BEFORE the general "?" status-query branch below: that branch used
+        # to unconditionally capture any "?"-containing text (its own
+        # _STATUS_QUERY_PATTERNS only covers past-tense completion verbs,
+        # not "ממתין"), so _PENDING_QUERY_RE never ran for such questions.
+        # Not gated by FEATURE_ACTION_GATEWAY — matches the elif branch this
+        # replaces, which also ran unconditionally. Read-only: never
+        # approves/rejects anything, so a false-positive match here is
+        # harmless (worst case: shows an accurate pending-list instead of
+        # routing to the Agent).
+        if _PENDING_QUERY_RE.search(_stripped):
+            from core.action_gateway import action_gateway as _gw_pq
+            _pq_pending_count = len(_gw_pq.find_live_contracts(identity.memory_key))
+            _pq_reply = _gw_pq.describe_pending_queue(identity.memory_key)
+            # Review pass (23/07/2026), sampling-hygiene finding: this log
+            # line is raw material for RP5/TurnCoordinator-Shadow sampling —
+            # it must never carry user free-text or reply content (names/
+            # phones/business descriptions can appear in both). Structured,
+            # PII-free fields only.
+            logger.info(
+                "[ActionGateway] describe_pending_queue: user=%s pending_count=%d scope=action_contracts result_code=%s",
+                identity.memory_key, _pq_pending_count, "found" if _pq_pending_count else "empty",
+            )
+            if _out_meta is not None:
+                _out_meta["source_module"] = "action_gateway"
+            return _pq_reply
+
         # §8 — שאלות סטטוס ("?", "נכשל?", "אושר?") לא מהוות אישור לעולם.
         # §7 §20 — שאלות "נוספה?" / "הצליח?" נענות מה-ExecutionLedger בלבד, לא מטקסט Agent.
         if "?" in _stripped:
@@ -2954,26 +2983,6 @@ def run_agent(
                 if _out_meta is not None:
                     _out_meta["source_module"] = "action_gateway"
                 return _t2_cancel_reply
-        elif _PENDING_QUERY_RE.search(_stripped):
-            # Staging finding #4 (23/07/2026) — see _PENDING_QUERY_RE's
-            # definition above. Read-only: never approves/rejects anything,
-            # so a false-positive match here is harmless (worst case: shows
-            # an accurate pending-list instead of routing to the Agent).
-            from core.action_gateway import action_gateway as _gw_pq
-            _pq_pending_count = len(_gw_pq.find_live_contracts(identity.memory_key))
-            _pq_reply = _gw_pq.describe_pending_queue(identity.memory_key)
-            # Review pass (23/07/2026), sampling-hygiene finding: this log
-            # line is raw material for RP5/TurnCoordinator-Shadow sampling —
-            # it must never carry user free-text or reply content (names/
-            # phones/business descriptions can appear in both). Structured,
-            # PII-free fields only.
-            logger.info(
-                "[ActionGateway] describe_pending_queue: user=%s pending_count=%d scope=action_contracts result_code=%s",
-                identity.memory_key, _pq_pending_count, "found" if _pq_pending_count else "empty",
-            )
-            if _out_meta is not None:
-                _out_meta["source_module"] = "action_gateway"
-            return _pq_reply
 
     # ── 2.6. Context Pronoun Resolution (C60) ────────
     # "תעלה לדסישנס"/"זה הנספח" וכד' — לפני intent detection, כדי שה-Router
