@@ -182,11 +182,9 @@ calls_mutating, reply_mutating = _run_agent_counting_live_contract_reads(
     anthropic_responses=_mutating_responses,
 )
 chk(
-    "a turn that creates a new ActionContract (via _queue_approval) still "
-    "makes 0 additional find_live_contracts calls — the C2 check uses "
-    "tool_results_log's __approval_queued__ sentinel (local state), not a "
-    "second query",
-    len(calls_mutating) == 0,
+    "a turn that creates a new ActionContract performs exactly 1 proposal-"
+    "boundary read to enforce BUG-122 before persistence",
+    len(calls_mutating) == 1,
 )
 chk("the mutating turn's reply reflects the queued approval (sanity check, not a hallucination)",
     "ממתין" in reply_mutating or "⏳" in reply_mutating)

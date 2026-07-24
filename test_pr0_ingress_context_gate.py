@@ -71,6 +71,7 @@ def _fresh_contract():
         tool_name="gmail_send_draft", tool_inputs={"to": "x@y.com", "subject": uuid.uuid4().hex},
         origin_channel="telegram", origin_chat_id="tg:1",
         requires_approval=True,
+        trusted_source="test_harness",
     )
     assert r.ok, f"setup: propose_action failed: {r.reason}"
     return r.contract_id
