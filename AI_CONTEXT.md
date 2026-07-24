@@ -3,15 +3,13 @@
 > קרא אותי לפני כל דבר אחר. זהו מסמך תדרוך (briefing) תמציתי, לא תיעוד מלא.
 > למקור אמת מלא: `ROADMAP.md` (מתוכנן), `BUG_AUDIT_LOG.md`, `CHANGE_CONTROL_LOG.md`.
 > `CANONICAL_STATE.md` **לא קיים** בריפו. `BOSS_CURRENT_STATE.md` ארכיון היסטורי (עודכן לאחרונה
-> 26/06/2026) — **לא** מקור אמת נוכחי. **main גובר על כל מסמך תכנון בכל סתירה.**
-> **פער תיעוד ידוע:** `ROADMAP.md`/`CHANGE_CONTROL_LOG.md` לא עודכנו מאז 21/07/2026 (עד N16/PATCH
-> 3B), אך `main` התקדם משמעותית מעבר לזה (PR #440–#448, כולל Cost Telemetry, BUG-129/130/133/134/135,
-> ומסמכי TurnCoordinator). מסמך זה נכתב ישירות מ-`main` (`5e691ea`) + `BUG_AUDIT_LOG.md`/`CHANGE_CONTROL_LOG.md`,
-> לא מ-`ROADMAP.md` בלבד, כדי לגשר על הפער.
+> 26/06/2026, כחודש ישן) — **לא** מקור אמת נוכחי. **main גובר על כל מסמך תכנון בכל סתירה.**
+> **פער תיעוד ידוע:** `ROADMAP.md` עודכן לאחרונה 21/07/2026; `CHANGELOG.md`/`CHANGE_CONTROL_LOG.md`
+> מסונכרנים רק עד PR #449. `main` בפועל התקדם 5 PRs נוספים (#450–#454, כולם עדכוני-תיעוד/רישום-באגים
+> בלבד — אין קוד production שהשתנה בהם). מסמך זה נכתב ישירות מ-`main` (`5491de3`) +
+> `BUG_AUDIT_LOG.md`/`CHANGE_CONTROL_LOG.md`, לא מ-`ROADMAP.md` בלבד, כדי לגשר על הפער.
 
-**עודכן:** 23/07/2026 (+ תוספת PR #449) · **main:** `e2d25af` (מיזוג PR #449)
-
-**תוספת (23/07/2026, אחרי כתיבת הבריפינג הזה):** PR #449 (branch `claude/findings-exam-wikon-25zzkm`, שני commits תיקון+review-pass) — סבב ממצאים מ-`my-bot-approval-staging` (7 ממצאים, כולל דגימת production אמיתית מהבעלים). ראו §3 למטה לפירוט מלא. **הענף `claude/rp5-staging-fault-injection-v4akit` עבר rebase על גבי `main` (כולל PR #449) והועלה מחדש (force-push) — staging מריץ עכשיו את התיקון.**
+**עודכן:** 24/07/2026 · **main:** `5491de3` (מיזוג PR #454, מאומת מול `origin/main`)
 
 ---
 
@@ -19,11 +17,11 @@
 
 - הבוט חי בפרודקשן (Telegram + WhatsApp/Twilio), Identity→Router→Context→Agent, Airtable כ-CRM יחיד — ללא שינוי במסלול הזה בסבב הזה.
 - **Emergency Stop (PATCH 3B) הושלם ואומת בפרודקשן ישירות ע"י הבעלים** — 5 דגלי `EMERGENCY_STOP_*` דביקים ב-Airtable (שורדים restart אמיתי), TMA UI עם כפתורי Stop/Clear מלאים כולל Stop All.
-- **סבב תיקוני-באג נרחב באישור/ניתוב-הודעות (BUG-111 עד BUG-127, כולל 114/115/116/117/121-124) — כולם ✅ VERIFIED IN PROD** עם evidence מלוגים אמיתיים.
-- **Cost Telemetry Reliability (`usage_events`) — shadow בלבד.** לא מזיז את ה-trigger החי (`COST_WATCHDOG_LIVE=false`); PR3 (cutover) חסום בכוונה עד שיצטברו ימי-נתונים מול חיוב פרודקשן.
-- **ארבעה באגים פתוחים, לא מטופלים, ממתינים להחלטת owner:** BUG-130 (עדכון-ליד קיים מנותב כיצירת-ליד חדש — כעת נצפה פעמיים נוספות בדגימת staging נוספת, ראו §3), BUG-134 (מרוץ TTL גנרי מול C84 שעלול להשאיר Approvals row תקוע `pending` שקרי — **24/07/2026: אומת ישירות מ-Airtable, 3 רשומות תקועות 4-14 ימים**), ו-BUG-136/BUG-137 (חדשים, 23/07/2026 — "בצע שוב \<קוד\>" נופל ל-Agent כשעטוף ב-markdown bold ומקבל תשובה מומצאת; הודעת הצלחת עדכון-ליד מרכיבה domain פנימי בלי תווית לתוך הטקסט). **בנוסף, 24/07/2026:** BUG-139 (RP5 shadow false-failure-claim, 47% mismatch rate) ו-BUG-140 (בקשת-ליד-חדש מנותבת כ-update נגד ליד לא-קשור עם טלפון משותף — contract עדיין pending, טרם אושר) — שניהם חדשים, מאומתים מלוגים/Airtable אמיתיים, לא תוקנו.
-- **TurnCoordinator / Cross-Layer Authority Contract V1 (PR #446/#447)** — יוזמת תכנון חדשה למיזוג BUG-104/F52/Approval layer; **תכנון בלבד, אפס קוד runtime**. Phase 2 Shadow Planning סטטוס סופי: `READY FOR OWNER DECISION` (לא לביצוע), 3 החלטות פתוחות.
-- **פער תיעוד פתוח:** `ROADMAP.md`/`CHANGE_CONTROL_LOG.md` לא עודכנו מאז 21/07/2026 למרות ~9 PRs נוספים שמוזגו מאז (#440–#448). `BUG_AUDIT_LOG.md` גם מציג "Merged: ⏳ טרם" שגוי עבור BUG-129/133/135 — כולם בפועל כבר מוזגו ל-main (מאומת ב-git log), התיעוד לא עודכן אחרי המיזוג.
+- **סבב תיקוני-באג נרחב באישור/ניתוב-הודעות (BUG-111 עד BUG-127, כולל BUG-129/131/132/133/135) — כולם ✅ VERIFIED IN PROD** עם evidence מלוגים אמיתיים.
+- **Cost Telemetry (`usage_events`) — shadow בלבד**, לא מזיז את ה-trigger החי (`COST_WATCHDOG_LIVE=false`); cutover ל-trigger חסום בכוונה עד שיצטברו ימי-נתונים מול חיוב פרודקשן אמיתי.
+- **שישה באגים פתוחים, לא מטופלים, ממתינים להחלטת owner:** BUG-130, BUG-134, BUG-136, BUG-137, BUG-138, BUG-139, BUG-140 — פירוט מלא בסעיף 2.
+- **TurnCoordinator / Cross-Layer Authority Contract V1 (#446/#447/#451)** — יוזמת תכנון למיזוג שכבות BUG-104/TurnCoordinator/F52/Approval; **תכנון בלבד, אפס קוד runtime**. Phase 2 Shadow: `READY FOR OWNER DECISION`, 3 החלטות פתוחות; תרחיש 7 בחוזה (CREATE_CONTACT ownership) קיבל אישור-ריאלי נוסף.
+- **פער תיעוד פתוח:** `ROADMAP.md`/`CHANGELOG.md`/`CHANGE_CONTROL_LOG.md` לא סונכרנו מעבר ל-PR #449, למרות 5 PRs נוספים שמוזגו מאז (#450–#454, כולם docs-only).
 
 ---
 
@@ -31,59 +29,56 @@
 
 **עובד בפרודקשן, מאומת:**
 - Identity→Router→Context→Agent; Airtable Gateway כנתיב-כתיבה יחיד (fail-closed).
-- Approval flow: TTL אכיפה בטלגרם (BUG-112) ו-TMA (C84, 24h); תיקוני BUG-111/114/115/116/117/121-124 (batch/domain lead-parsing, confirm-word hijack ע"י contracts ישנים, Tier-4 false-positive, context-interrupt amplification, `/status` crash, pending-approval UX) — כולם עם evidence production.
-- Emergency Stop: 5 דגלים דביקים ב-Airtable, `is_enabled()`/`set_flag()` מיירטים אותם, מנגנון `/tmp` הישן הוסר לגמרי. TMA Stop/Clear מלא.
-- F52 Unified Status Formatter + RP5 Evidence Finalizer — **shadow logging פעיל בפרודקשן בפועל** (evidence בלוגים אמיתיים לרוב מצבי הסיווג); `enforce`/`on` **לא** הופעלו.
+- Approval flow: TTL אכיפה בטלגרם (BUG-112) ו-TMA (C84, 24h); תיקוני BUG-111/114-117/121-124 — כולם עם evidence production.
+- Emergency Stop: 5 דגלים דביקים ב-Airtable, `is_enabled()`/`set_flag()` מיירטים אותם. TMA Stop/Clear מלא.
+- F52 Unified Status Formatter + RP5 Evidence Finalizer — shadow logging פעיל בפרודקשן; `enforce`/`on` לא הופעלו.
+- PR #449 (warm-cache TTL consistency, sibling-rejection disclosure, `describe_pending_queue()`) — ממוזג ומבודק, staging (`rp5-staging-fault-injection-v4akit`) הועלה מחדש עם התיקון.
 
 **מיושם חלקית / flag off / shadow:**
-- Cost Telemetry (`core/usage_telemetry.py`, PostgreSQL `usage_events`) — shadow-only, מחווט ל-6 נקודות-קריאה אמיתיות (Anthropic + OpenAI Whisper), לא מניע את ה-trigger החי. PR3 (cutover מ-`cost_monitor.py`) לא נפתח.
-- BUG-104 Core Reasoning (Phases 1/1.1/2A.1/2A.2) — ממוזג ומאומת ב-tests, `FEATURE_CORE_REASONING_LEADS_STATE` off/shadow. Phase 2A.0 (ניקוי סכמה) עדיין SPEC-בלבד.
-- TurnCoordinator Contract V1 — תכנון בלבד (`docs/architecture/CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` + `turn-coordinator/`), `PLANNING BLOCKED`/`READY FOR OWNER DECISION`, אין flag ואין קוד.
+- Cost Telemetry (`core/usage_telemetry.py`, PostgreSQL `usage_events`) — shadow-only, מחווט ל-6 נקודות-קריאה אמיתיות, לא מניע את ה-trigger החי.
+- BUG-104 Core Reasoning — ממוזג ומאומת ב-tests, `FEATURE_CORE_REASONING_LEADS_STATE` off/shadow. Phase 2A.0 (ניקוי סכמה) עדיין SPEC-בלבד.
+- TurnCoordinator Contract V1 — תכנון בלבד, `PLANNING BLOCKED`/`READY FOR OWNER DECISION`, אין flag ואין קוד. תרחישים 26-27 נוספו מדגימת staging שנייה (#451).
 
 **חסום / פתוח:**
-- BUG-130 — עדכון-ליד קיים מנותב ליצירת-ליד חדש; רשום, לא תוקן. **דגימת staging נוספת (23/07/2026)** אישרה שוב את אותה תבנית פעמיים באותה שיחה (כולל על ליד שעודכן בהצלחה turn קודם), מחזקת ל-root-cause דטרמיניסטי (ראו `BUG_AUDIT_LOG.md`). סיכון collision-לפי-טלפון-בלבד (רשומה לא-קשורה עם domain שונה) נצפה גם הוא, לא אומת ישירות.
-- BUG-134 — TTL גנרי (`ActionContractRepository`, 24h) עלול ליירט contract לפני שלוגיקת C84 מספיקה לרוץ; רשום, לא תוקן. **עדכון 24/07/2026:** אומת ישירות מ-Airtable (טבלת `Approvals`) — 3 מ-4 הרשומות בטבלה כולה תקועות `pending` 4-14 ימים (`recyoMWRE2Lv8Fzvk`, `recnFF6VCBVcR8apL`, `rec9VBFoLUoEX71bD`), כולן מאושרות בנפרד כ-404/409 בלוגי production. כבר לא "סביר" בלבד — מאומת עם ראיה ישירה.
-- BUG-136 (חדש) — "בצע שוב `<קוד>`" עטוף ב-`*...*` (כפי שהבוט עצמו מציע) לא תואם את ה-regex המעוגן ב-`app.py`, נופל ל-Agent שמאלתר תשובה שגויה; רשום, לא תוקן.
-- BUG-137 (חדש) — `_describe_contract_for_reconfirmation()` מרכיבה domain (למשל "finance") בלי תווית לתוך הודעת "✅ בוצע: עדכון ליד"; רשום, לא תוקן.
-- BUG-138 (חדש) — כפתור אישור טלגרם לא נעלם אחרי אישור/דחייה; שש קריאות `edit_message_text()` ב-`app.py` לא מנקות `reply_markup`. השערה מבוססת-קוד בלבד, טרם אומתה מול Telegram/לוגים בפועל.
-- BUG-139 (חדש, 24/07/2026) — RP5 shadow: `response_claim=failure`/`mixed` כשאין שום tool call בתור כלל (`evidence_status=no_evidence`); נמצא מלוגי staging אמיתיים (5/15 דגימות היום, 47% mismatch rate כולל), נשלל במפורש כארטיפקט של RP5 fault-injection (0 אירועי `[RP5FaultInjection]` באותו חלון). Root cause בקוד עדיין לא אותר. ראו `RP5_LOG_OBSERVATION_23JUL2026.md`.
-- BUG-140 (חדש, 24/07/2026) — בקשה מפורשת ל"ליד חדש" (דנה כהן) יוצרה כ-`airtable_update` נגד ליד קיים ולא-קשור (ישראל כהן), ככל הנראה collision-לפי-טלפון-בלבד — בדיוק הסיכון שתועד תחת BUG-130 בלי אישור, עכשיו עם מופע קונקרטי. Contract `0e8a155c-...` עדיין `pending` (לא אושר, לא בוצע נזק) — מומלץ דחייה ידנית. אומת ישירות מ-Airtable.
-- RP5 enforcement — shadow evidence קיים לרוב מצבי הסיווג (5/9 אומתו מלוגי staging אמיתיים היום, ראו BUG-139), טרם נאסף לכל 9 המצבים.
+- **BUG-130** — עדכון-ליד קיים מנותב ליצירת-ליד חדש; לא תוקן. אושרר שוב פעמיים בדגימות staging נוספות (23-24/07), כולל סיכון collision-לפי-טלפון-בלבד — עכשיו עם מופע קונקרטי (ראו BUG-140).
+- **BUG-134** — TTL גנרי (`ActionContractRepository`, 24h) עלול ליירט contract לפני שלוגיקת C84 מספיקה לרוץ; **אומת ישירות מ-Airtable (24/07)** — 3 מ-4 הרשומות בטבלת `Approvals` תקועות `pending` 4-14 ימים.
+- **BUG-136** (חדש) — "בצע שוב `<קוד>`" עטוף ב-`*...*` (כפי שהבוט עצמו מציע) לא תואם את ה-regex המעוגן ב-`app.py`, נופל ל-Agent שמאלתר תשובה שגויה.
+- **BUG-137** (חדש) — הודעת "✅ בוצע: עדכון ליד" מרכיבה domain פנימי (למשל "finance") בלי תווית לתוך הטקסט.
+- **BUG-138** (חדש) — כפתור אישור טלגרם לא נעלם אחרי אישור/דחייה (`edit_message_text()` לא מנקה `reply_markup`). השערה מבוססת-קוד בלבד, טרם אומתה מול Telegram/לוגים בפועל.
+- **BUG-139** (חדש) — RP5 shadow: `response_claim=failure/mixed` כשאין tool call בתור כלל; נמצא מלוגי staging אמיתיים (47% mismatch rate), נשלל כארטיפקט fault-injection. Root cause בקוד עדיין לא אותר.
+- **BUG-140** (חדש) — בקשה מפורשת ל"ליד חדש" יוצרה כ-`airtable_update` נגד ליד קיים ולא-קשור (collision-לפי-טלפון). Contract עדיין `pending`, לא בוצע נזק; מומלץ דחייה ידנית. אומת ישירות מ-Airtable.
+- RP5 enforcement — shadow evidence ל-5/9 מצבי סיווג, טרם הושלם לכל 9.
 - WhatsApp outbound אמיתי — honest stub, ממתין ל-Meta Cloud API.
-- ענף `claude/rp5-staging-fault-injection-v4akit` — staging-only בכוונה, לעולם לא ימוזג ל-main.
+- `claude/rp5-staging-fault-injection-v4akit` — staging-only בכוונה, לעולם לא ימוזג ל-main.
 
 ---
 
 ## 3. Completed Since Last Update
 
-*(מקבץ PR #397–#448; לפירוט מלא ראה `BUG_AUDIT_LOG.md`/`CHANGE_CONTROL_LOG.md` C156–C168)*
+*(מקבץ PR #440–#454; לפירוט מלא ראה `BUG_AUDIT_LOG.md`/`CHANGE_CONTROL_LOG.md` C160–C169)*
 
-- **תיקוני אישור/ניתוב (BUG-111 עד BUG-127):** סדרת תיקונים ל-`ActionGateway`/`core/ingress_classifier.py`/`app.py` — חטיפת confirm-word ע"י contracts ישנים, false-positive של Tier-4 על מילים אנגליות, הכפלת burst קריאות Airtable, קריסת `/status`, חסימת פעולה חדשה ע"י תור אישורים ישן, false-positive של פסוקית הקשר. כולם ✅ VERIFIED IN PROD עם evidence מדויק מלוגים.
-- **PATCH 3B הושלם:** Steps 2–6 + prerequisite (הקשחת CI מפני credentials חיים) + TMA frontend (#425, #427, #432, #433, #436) — Emergency Stop דביק לגמרי, אומת בפרודקשן כולל restart אמיתי.
-- **Cost Telemetry Reliability:** PR1 (#435, תיקון BUG-131 — כתיבה שקטה שנכשלה) → hotfix (#437, תיקון BUG-132 — השוואת טקסט מול שדה DATE) → hotfix-followup (#438, תיקון smoke script) → PR2 (#439, `usage_events` חדש, shadow טהור).
-- **BUG-129/131/132/133/135 תוקנו:** self-quote ("זיהיתי") ופקודת-מחיקה שהפיקו שם-ליד מזויף (#444); כתיבה שקטה ל-`AI_Usage_Daily` (#435); השוואת טקסט/DATE שגויה (#437); test שדלף 310 רשומות אמיתיות ל-Interaction Log בפרודקשן — תוקן + הרשומות נמחקו ע"י הבעלים (#442).
-- **N16:** Git Audit הוצא לגמרי מהבוט העסקי (היה כפילות מול ה-Routine) — הבוט כבר לא נוגע ב-git כלל.
-- **TurnCoordinator / Cross-Layer Authority Contract V1 (#446, #447):** מסמכי תכנון חדשים — שער חובה למניעת שינוי לא-מתואם בין 4 שכבות (Core Reasoning/TurnCoordinator/F52/Approval). נמצאה והוסרה התנגשות שם (`ActionFact`). Phase 2 Shadow תוכנן במלואו, מחכה להחלטת owner — **אין קוד production שהשתנה**.
-- **`scripts/render_log_export.py` (#448):** כלי דיאגנוסטיקה אופליין לחילוץ/חיפוש לוגי Render — לא מיובא ע"י `app.py`, אין סיכון production.
+- **תיקוני אישור/ניתוב (BUG-111 עד BUG-127):** סדרת תיקונים ל-`ActionGateway`/`core/ingress_classifier.py`/`app.py` — כולם ✅ VERIFIED IN PROD עם evidence מדויק מלוגים.
+- **PATCH 3B הושלם:** Emergency Stop דביק לגמרי, אומת בפרודקשן כולל restart אמיתי, TMA frontend (#425–#436).
+- **Cost Telemetry Reliability:** PR1 (#435) → hotfix (#437, BUG-132) → hotfix-followup (#438) → PR2 (#439, `usage_events` חדש, shadow טהור).
+- **BUG-129/131/132/133/135 תוקנו** — self-quote/מחיקה שהפיקו שם-ליד מזויף (#444); כתיבה שקטה ל-`AI_Usage_Daily` (#435); test שדלף 310 רשומות אמיתיות ל-Interaction Log — תוקן + נמחקו (#442).
+- **N16:** Git Audit הוצא לגמרי מהבוט העסקי.
+- **TurnCoordinator Contract V1 (#446/#447):** שער חובה למניעת שינוי לא-מתואם בין 4 שכבות. **#451:** תרחישים 26-27 נוספו מדגימת staging שנייה.
+- **`scripts/render_log_export.py` (#448):** כלי דיאגנוסטיקה אופליין, לא מיובא ע"י `app.py`.
+- **PR #449 (23/07):** warm-cache TTL consistency, sibling-rejection disclosure, `describe_pending_queue()` — אומת מול ActionContracts export אמיתי + Render logs. Finding #7 (CREATE_CONTACT תמיד יוצר Lead) תועד, לא תוקן — ממתין ל-TurnCoordinator.
+- **#452 (23/07):** BUG-136/BUG-137 נרשמו; ראיית BUG-130 חוזקה (2 מופעים נוספים).
+- **#453 (23-24/07):** BUG-139 נרשם + דוחות log-observation ל-RP5/TurnCoordinator.
+- **#454 (24/07):** BUG-140 נרשם; BUG-134/137/138 נבדקו ישירות מול Airtable — BUG-134 אומת עם 3 רשומות תקועות בפועל.
 
-**פער תיעוד היסטורי שנשאר פתוח:** `ROADMAP.md`/`CHANGE_CONTROL_LOG.md` עדיין לא סונכרנו ל-#440–448; `BUG_AUDIT_LOG.md` עדיין מציג "Merged: ⏳ טרם" שגוי ל-BUG-129/133/135.
-
-**PR #449 (23/07/2026) — סבב ממצאים מ-`my-bot-approval-staging`, 7 ממצאים, ראו `docs/architecture/action-gateway/STAGING_23JUL_TTL_DISAMBIGUATION_AUDIT.md` לכתיבה המלאה כולל Cross-Layer Impact Matrix:**
-- **תוקן (קוד+tests):** Finding #4 — `describe_pending_queue()` חדש עונה על "מה ממתין לאישור" ישירות מ-`ActionContracts` (במקום שהסוכן ינחש טבלה כמו `Tasks`) — הניסוח מצוין במפורש שהוא מכסה `ActionContracts` בלבד, לא תורי legacy נוספים (`_pending_approvals`/`event_bus.pending`). Finding #3 — `route_disambiguation()`/`route_combined_word()` מגלים עכשיו למשתמש כמה siblings נדחו אוטומטית; הספירה מבוססת על אישור-מעבר אמיתי מ-`reject()`, לא הנחה מראש (נבדק, מוגן בבדיקת רגרסיה). תוקן גם דליפת PII בלוג — שורת `describe_pending_queue()` כתבה טקסט-משתמש גולמי + תוכן-תשובה; עכשיו רק שדות מובנים (`pending_count`/`scope=action_contracts`/`result_code`).
-- **תוקן חלקית — 🟡 לא FIXED מלא:** Finding #1 — `ExecutionLedger.find_live_by_user()` (`core/action_gateway.py`) לא אכף `_is_expired()`/`CONTRACT_PENDING_TTL_SECONDS` על מסלול ה-warm-cache (רק על cold-cache/repository recovery) — עכשיו עקבי בשני המסלולים. **זה תיקון-עקביות בלבד, לא הכרעת-מדיניות** — חלון ה-24h עצמו (שהוגדר במקור עבור TMA) לא שונה, ונשאר שאלת-owner פתוחה אם הוא מתאים גם לזרימות האישור האינטראקטיביות. **קשור ל-BUG-134 (למעלה, §2) — אותו קבוע `CONTRACT_PENDING_TTL_SECONDS`/`_is_expired()`, תסמין שונה:** BUG-134 הוא מרוץ בתוך *נקודת-האכיפה הקיימת* מול C84; Finding #1 היה מסלול ש*עקף* את אותה נקודת-אכיפה לגמרי. שני הבאגים לא תוקנו יחד ולא אמורים להיות מבולבלים זה בזה. אומת עם real production data (owner-supplied `ActionContracts` export + Render logs): 3 מ-6 siblings שנדחו היו בני 27-38 שעות (מעבר ל-TTL, היו נחסמים ע"י התיקון), אבל ה-contract שבפועל בוצע היה בן 14.65 שעות — בתוך ה-TTL, לא היה נחסם. אזהרת-גיל (`⚠️ ממתין מ-N שעות`, סף שעה) נוספה כמיטיגציה מיידית, בלתי-תלויה בהכרעת-ה-TTL.
-- **תועד בכוונה, לא מומש — ממתין ל-TurnCoordinator:** Finding #2 (סמנטיקת §21 sibling-reject — עיצוב-במכוון לפרשנויות-חלופיות של בקשה אחת, לא לפריטים בלתי-קשורים שמצטברים; דורש classification signal חדש שלא קיים), Finding #6 (`DESTRUCTIVE_ENTITY_CLARIFICATION`/§3.2 בחוזה TurnCoordinator — עדיין לא ממומש), **Finding #7 (חדש, התגלה מנתוני הרשומה שבוצעה בפועל)** — "תוסיף איש קשר X" תמיד יוצר Lead (עם "איש קשר" מוטבע בשם + metadata של lead-funnel), אף ש-`intent_router.py` כבר מזהה נכון `Intent.CREATE_CONTACT` — `core/lead_candidate_handler.py` לא קורא לסיווג הזה בכלל. זו בדיוק תרחיש 7 המילולי בחוזה הקפוא (`TURN_COORDINATOR_BEHAVIOR_CONTRACT_V1.md`) — אישור-ריאלי לתרחיש שכבר תוכנן, לא ממצא חדש שדורש תכנון.
-- **manual action items שנשארו פתוחים:** רשומת `recK8RdYkdDmTGdob` (Leads, `my-bot-approval-staging`) — לא זבל, נראית כבקשת-contact לגיטימית שביצעה באיחור של 14.65 שעות; דורשת אישור-owner אם רצויה. הכרעת-owner על חלון ה-TTL (30 דק'/שעה/24h) ל-Finding #1.
-- **`claude/rp5-staging-fault-injection-v4akit` עבר rebase על `main` (כולל PR #449) והועלה מחדש (force-push)** — staging מריץ עכשיו את כל התיקונים למעלה.
+**פער תיעוד היסטורי שנשאר פתוח:** `ROADMAP.md`/`CHANGELOG.md`/`CHANGE_CONTROL_LOG.md` עדיין לא סונכרנו ל-#450–454 (docs-only, אין סיכון קוד).
 
 ---
 
 ## 4. Next Priorities
 
-1. **החלטת owner: BUG-130** — כיוון תיקון לעדכון-ליד-קיים המנותב כיצירה חדשה (מתח ארכיטקטוני מול השומר של BUG-094). דגימה נוספת (23/07/2026) מחזקת עדיפות.
-2. **החלטת owner: BUG-134** — כיוון תיקון למרוץ ה-TTL הגנרי מול C84 (Approvals row עלול להישאר `pending` שקרי).
-2א. **החלטת owner: BUG-136/BUG-137 (חדשים, 23/07/2026)** — תיקון markdown-stripping ל-override regex, ותיוג שדה domain בהודעת הצלחה. שני אלה נוגעים ב-F52/Approval layer (`core/action_gateway.py`) — טעונים שער Cross-Layer Authority Contract לפני מימוש.
-3. **החלטת owner: Finding #1 (PR #449) — חלון TTL לאישור אינטראקטיבי** — האם 30 דק'/שעה/24h (הקיים), נפרד משאלת BUG-134.
-4. **TurnCoordinator Phase 2 Shadow** — 3 החלטות owner פתוחות (סביבת staging, איחוד ActionGateway, scope של CapabilityScope) לפני שקוד shadow ראשון נכתב. **תרחיש 7 בחוזה (CREATE_CONTACT ownership) קיבל אישור-ריאלי נוסף (Finding #7 למעלה) — עוד נימוק לתעדף.**
-5. **המשך shadow soak ל-F52/RP5** — לצבור את שאר מצבי הסיווג הנדרשים לפני שיקול הפעלת `enforce`/`on`.
-6. **סנכרון תיעוד** — לעדכן `ROADMAP.md`/`CHANGE_CONTROL_LOG.md` ל-PR #440–449 ולתקן את סטטוסי "Merged: ⏳ טרם" השגויים ב-`BUG_AUDIT_LOG.md`/`CHANGELOG.md`.
-7. **manual: `recK8RdYkdDmTGdob`** — owner לאשר אם רצוי לשמור.
+1. **החלטת owner: BUG-130** — כיוון תיקון לעדכון-ליד-קיים המנותב כיצירה חדשה (מתח מול השומר של BUG-094). מחוזק ע"י 2 דגימות נוספות + מופע קונקרטי (BUG-140).
+2. **החלטת owner: BUG-134** — כיוון תיקון למרוץ ה-TTL הגנרי מול C84; כעת עם ראיה ישירה (3 רשומות תקועות ב-Airtable).
+3. **החלטת owner: BUG-136/BUG-137** — נוגעים ב-F52/Approval layer (`core/action_gateway.py`) — טעונים שער Cross-Layer Authority Contract לפני מימוש.
+4. **TurnCoordinator Phase 2 Shadow** — 3 החלטות owner פתוחות (סביבת staging, איחוד ActionGateway, scope של CapabilityScope) לפני קוד shadow ראשון.
+5. **סנכרון תיעוד** — לעדכן `ROADMAP.md`/`CHANGELOG.md`/`CHANGE_CONTROL_LOG.md` ל-PR #450–454.
+6. **אימות BUG-138/BUG-139** — שניהם ממתינים לאימות ישיר נוסף מול Telegram/לוגי production (BUG-138 השערת-קוד בלבד; BUG-139 root-cause טרם אותר).
+7. **manual:** רשומת `recK8RdYkdDmTGdob` (Leads) — owner לאשר אם רצוי לשמור; contract `0e8a155c-...` (BUG-140) — מומלץ דחייה ידנית.
