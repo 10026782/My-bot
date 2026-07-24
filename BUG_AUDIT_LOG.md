@@ -2865,6 +2865,7 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
   4. המנגנון האמיתי: `core.anti_hallucination.sanitize_agent_response()`'s Single-Speaker gate. ה-agent turn לא ביצע שום tool call ולא תור שום approval חדש, אך הטקסט החופשי שהמודל הפיק נראה מבחינת-regex כמו הצהרת סטטוס-פעולה/ממתין (`_AGENT_ACTION_STATUS_PATTERN`/`_AGENT_PENDING_STATUS_PATTERN`). כלל הבלוקט הגורף של Single-Speaker (`_gateway_active` + regex match, ללא `__approval_queued__` sentinel) **תמיד** מחליף טקסט כזה ב-`_SINGLE_SPEAKER_FALLBACK` ("לא הצלחתי לבצע את הפעולה. נסה שוב או נסח אחרת.") — מטעה כאן במפורש: שום דבר לא באמת נוסה, כך ש"נכשלתי" הוא שקר, וההודעה לא נותנת למשתמש שום דרך המשך.
 - **תוקן (`app.py`, מיד אחרי קריאת `sanitize_agent_response()`):** כשמתקיים **כל** אחד מהתנאים הבאים בו-זמנית — (1) `final_reply == _SINGLE_SPEAKER_FALLBACK`, (2) `tool_calls_made == 0`, (3) שום `__approval_queued__` בתור הזה, (4) `core.router.risk_router.intent_requires_contract_for_success(route.intent)` מחזיר `True` (PA-01's own single policy source — נעשה שימוש חוזר, לא כפילות), (5) יש לפחות contract חי אחד — התשובה מוחלפת בהודעת resolution מפורשת שמונה את מספר הבקשות הממתינות ומכוונת את המשתמש ל-"מאשר"/"בטל" או לניסוח מפורש מחדש. לוגינג חדש: `pending_gate_decision=ask_queue_resolution` (כשההחלפה קורית) ו-`pending_gate_decision=bypass_new_action` (כש-tool call אמיתי כן קרה תוך כדי שיש contracts חיים — מקרה תקין, מתועד ל-observability). קבוע חדש `_LIVE_CONTRACT_STALE_SECONDS` (24 שעות) — **תצפיתי בלבד**, מחושב ומתועד כ-`stale_contracts_count` בלוג, **אינו** פוקע/דוחה contracts בפועל (אין auto-expiry ל-ActionContract "pending" בליבה, בניגוד ל-TTL הספציפי-ל-TMA של C84).
 - **החלטת scope מפורשת שלא בוצעה (מדווחת כאן במפורש למשתמש, לא הוחלט חד-צדדית בשקט):** לא נוספה לוגינג `pending_gate_decision=intercept_confirmation` בכל אחד מהענפים המפוזרים של מילות-אישור/disambiguation הקיימות ב-`app.py` (`_CONFIRM_WORDS`, `route_confirmation_word`, `route_disambiguation`, `route_combined_word` וכו') — יש עשרות נקודות-קריאה כאלה, וההוספה בכל אחת נראתה risk/effort לא-מוצדק לתיקון הזה. הענף הזה עצמו (יירוט מילת-אישור) **כן** נבדק ישירות ומאומת שהוא ממשיך לעבוד נכון (test (a) למטה) — רק הלוגינג הספציפי הזה לא נוסף בכל מקום.
+- **עדכון ראיות (24/07/2026, CB-01/CB-02 staging — מוזג מ-BUG-146, ראו רשומת ההיסטוריה שם):** ה-scope decision ש-`bypass_new_action` הוא observability-בלבד קיבל ראיה קונקרטית לנזק מצטבר: BUG-143 (2 `ActionContracts` פגומים, `ee5ffb68-...`/`00b84046-...`) ו-BUG-144 (contract `0ce5b20e-...` שנשאר `pending` אחרי שהמשתמש קיבל אישור-ביטול) שניהם הצטברו כ-`live_contracts` בזמן שה-gate ב-`app.py:3548-3558` לא חסם יצירת contracts נוספים (`tool_calls_made>0` עוקף את הענף `ask_queue_resolution` לחלוטין). ממליץ לשקול מחדש בין (א) לחסום/לבקש resolution גם כש-`tool_calls_made>0`, או (ב) sibling-auto-reject דטרמיניסטי — דורש החלטת-מדיניות מהבעלים לפני מימוש (ראו PR/Fix 5 בתוכנית התיקונים).
 - **בדיקות:** `test_bug122_pending_queue_ux.py` (חדש, 8 בדיקות): (a) מילת אישור עם contract חי אחד עדיין מגיעה ל-`approve()` (לא fallback גנרי, לא הודעת queue-resolution) — regression lock על התנהגות קיימת שלא נגעו בה; (b) בקשת `create_task` חדשה עם 5 contracts חיים ו-0 tool calls מקבלת הודעת queue-resolution מפורשת, לא `_SINGLE_SPEAKER_FALLBACK`; (c) `find_live_by_user()` לא סופר contracts שאינם `pending` (approved/rejected/completed) — בדיקת unit ישירה; (d) ללא contracts חיים בכלל, ההתנהגות הקיימת (`_SINGLE_SPEAKER_FALLBACK`) לא משתנה — מוודא שהתיקון לא חורג מהיקפו. Full `test_*.py` sweep (כל קובץ, כולל זה) + `compileall -q .` — נקיים.
 - **היקף:** `app.py` בלבד (הענף שאחרי `sanitize_agent_response()` ב-`run_agent()`). אין נגיעה ב-RP5/F52 taxonomy, ב-PA-01 flag/state, בלוגיקת ביצוע האישור עצמה (`ActionGateway.approve()`/`_execute_contract()`), או בהפעלת דגלי production כלשהם.
 - **סטטוס:** 🟡 קוד תוקן ונבדק (Contract Chain + fix + 8/8 טסטים ייעודיים + full sweep) — **טרם נבדק בפרודקשן/staging בפועל**. לפי "כלל ברזל" — לא לסמן ✅ עד לאימות runtime אמיתי אחרי deploy.
@@ -3201,3 +3202,119 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **לא אומת:** קוד ה-matching/dedup המדויק (`contact_resolver.py`? `lead_candidate_handler.py`?) שהוביל להחלטה הזו — לא נקרא בסבב הזה, רק תוצאת ה-Airtable data עצמה.
 - **היקף:** לא נגעתי בקוד, לא באישרתי/דחיתי את ה-contract. ממצא מבוסס-Airtable בלבד.
 - **סטטוס:** 🔴 נרשם, מאומת ישירות מ-Airtable — **contract עדיין pending, לא אושר, לא תוקן**. מומלץ: הבעלים ישקול לדחות את ה-contract הזה ידנית (למנוע דריסה בטעות) לפני שממשיכים לחקור root cause.
+
+---
+
+## BUG-141 (AG-01) — שאלת pending-queue טבעית עם "?" עוקפת את `describe_pending_queue()` הדטרמיניסטי ונופלת ל-Agent — 🔴 נרשם, לא תוקן (root cause מאומת קוד+deploy, לא branch-ordering ולא regex/deploy gap)
+
+- **תאריך:** 24/07/2026.
+- **מקור:** בדיקת staging יזומה (AG-01). הודעת משתמש: `"מה ממתין כרגע לאישור?"`.
+- **Expected:** ניתוב דטרמיניסטי ל-`ActionGateway.describe_pending_queue()`, תשובה מבוססת `ActionContracts` בלבד.
+- **Actual:** ההודעה נפלה ל-Agent, שביצע `airtable_get` על `Tasks`/`Deals`/`Payments`, קיבל `422` על חלק מהקריאות (Deals/Payments), ו-A32 (`sanitize_agent_response`) החליף את התשובה הסופית ב-`"לא הצלחתי לבצע את הפעולה. נסה שוב או נסח אחרת."`. `EvidenceFinalizerShadow` תיעד evidence מעורב: 3 קריאות מאומתות + 2 כשלונות.
+- **Contract Chain (אומת ישירות, לא הונח):**
+  1. `_PENDING_QUERY_RE` (`app.py:194-198`) **כן** תואם את הטקסט — אומת ישירות: alt 3 (`(?:מה|אילו|איזה|רשימת).{0,15}(?:ממתי\w*|מחכ\w*)`) תואם "מה"…"ממתין", ו-alt 1 תואם באופן עצמאי גם כן. **לא בעיית regex.**
+  2. Deploy: אומת ישירות מול Render API (`/v1/services/srv-d99uq63eo5us73967cj0/deploys`) — ה-deploy החי כרגע (`dep-d9h0krnlk1mc738qasu0`, commit `40116da9`) **מכיל** את `_PENDING_QUERY_RE`/`describe_pending_queue()` (אומת עם `git show 40116da9:app.py`, שורות 199/3038-3052 בקומיט הזה; `git merge-base --is-ancestor eab7ba5 40116da9` → כן). **לא בעיית deploy.**
+  3. **שורש אמיתי — branch-ordering ב-`app.py`:** בתוך `if pending_entry is None:` (`app.py:2752`) קיימת שרשרת `if/elif/elif/elif` יחידה: `if "?" in _stripped:` (`app.py:2803`) → `elif _lower in _CONFIRM_WORDS:` (`2824`) → `elif _lower in _CANCEL_WORDS:` (`2927`) → `elif _PENDING_QUERY_RE.search(_stripped):` (`2957`). מכיוון שהטקסט מכיל `"?"`, ה-branch הראשון (`2803`) תמיד תופס אותו קודם, ו-`_PENDING_QUERY_RE` **לעולם לא נבדק** — ללא תלות אם היה מתאים. בתוך ה-branch של `"?"`, הבדיקה היחידה (`_STATUS_QUERY_PATTERNS`, `app.py:2807-2811`) מכסה רק פעלי-השלמה בעבר (`נוספה`/`בוצע`/`הצליח`/`נשלח` וכו') — "ממתין" (הווה) לא ברשימה, ה-`any(...)` מחזיר `False`, ו-`pass` (`2823`) נופל ל-Agent.
+- **Test gap מאומת:** `test_staging_23jul_findings.py:233-247` (הבדיקה שליוותה את הפיצ'ר) בודקת רק `app._PENDING_QUERY_RE.search(text)` ישירות — **לא** בודקת את סדר ה-dispatch האמיתי, ואף אחת מ-4 הדוגמאות החיוביות לא מסתיימת ב-`"?"`. הרגרסיה הזו הייתה בלתי-ניתנת-לגילוי ע"י הבדיקה הקיימת.
+- **צורת תיקון מוצעת (לא בוצע קוד):** להזיז את בדיקת `_PENDING_QUERY_RE.search(_stripped)` **לפני** ה-`if "?" in _stripped:` בשרשרת (למשל בדיקה נפרדת מיד אחרי `route_combined_word`/לפני `§4 disambiguation`, לא כ-branch באותה שרשרת), כך שלא משנה אם הטקסט מכיל `"?"` — או, לחלופין, להוסיף את הבדיקה כ-branch ראשון *בתוך* ה-`if "?" in _stripped:` עצמו (לפני `_STATUS_QUERY_PATTERNS`), כדי לשמור על המבנה הקיים אך לתת לה עדיפות. יש להוסיף גם test חדש שמכסה במפורש שאלת pending-queue **עם** `"?"` בסוף — לא רק בלעדיו — כדי לסגור את פער-הבדיקה שאיפשר את הרגרסיה הזו.
+- **היקף:** לא נגעתי בקוד. ממצא מבוסס git+Render API+קריאת קוד ישירה.
+- **סטטוס:** 🔴 נרשם, root cause מאומת עד השורה, לא תוקן.
+
+---
+
+## BUG-142 — Linked-record ישן וsale (`current_lead_record_id`) ב-`Sessions.State JSON` תוקע לצמיתות את ה-sync של אותו sender — 🔴 נרשם, לא תוקן (מאומת ישירות מ-Airtable)
+
+- **תאריך:** 24/07/2026.
+- **מקור:** תלונת PATCH כשל: `Sessions/rec3YS5Zcr2FenX7z` נכשל עם `ROW_DOES_NOT_EXIST` על linked record `rec1XZQnIOSiE1Ig5`.
+- **ממצא מאומת מ-Airtable:**
+  - `rec1XZQnIOSiE1Ig5` **לא קיים** בטבלת `Leads` (שאילתה ישירה על ה-record ID — 0 תוצאות) — עקבי עם המחיקה הידנית של טבלת ה-Leads שהמשתמש ביצע במהלך הסשן ("לידס מחקתי הכל") ואת השחזור החלקי שאחריה ("שחזרתי את טבלת הלידס").
+  - `Sessions/rec3YS5Zcr2FenX7z`'s שדה `Linked Lead` (linked-record אמיתי, `fldaGbWJUeUtPZa64`) **ריק כרגע** — Airtable מנקה אוטומטית שדות `multipleRecordLinks` כשהרשומה המקושרת נמחקת. אבל שדה `State JSON` (טקסט חופשי, `fld0ebfybGzlb5XFg`) עדיין מכיל `"current_lead_record_id": "rec1XZQnIOSiE1Ig5"` ו-`"active_lead_candidate": {"record_id": "rec1XZQnIOSiE1Ig5", ...}` — Airtable לא יודע שהטקסט החופשי מכיל רפרנס למשהו שנמחק, אז הוא לא מנקה שם.
+  - **אימות שדות נוסף (24/07/2026, שאילתת Airtable ישירה עם מיפוי field-ID→name מאומת דרך `get_table_schema`, לא הונח מהקשר):** `Channel` (`fld900OKlGM8dS3Zl`) `= "whatsapp"` — ערך מפורש בשדה עצמו, מאשר את הסיווג הקיים בדוח. `Sender ID` (`fldyCswBwX333LIxG`) `= "7228089151"` — תואם. `Context Type` (`fldOhFqtt4JfK3Uw8`, singleSelect) `= "lead"` — לא צוין בדיווח המקורי, מוסבר מדוע `active_lead_candidate`/`current_lead_record_id` קיימים ב-state של סשן זה. לא משנה את שורש הבעיה.
+- **שורש (אומת בקוד ישיר):**
+  1. `session_store.py:648` — `_load_from_db()` משחזר `current_lead_record_id` ישירות מתוך ה-`State JSON` בלי שום בדיקת-קיום מול Airtable.
+  2. `session_store.py:491-493` — `_sync_to_db()` בונה מחדש `fields[SF.LINKED_LEAD] = [_linked_lead]` מאותו ערך לא-מאומת, בכל כתיבה עתידית.
+  3. `tools/airtable_tools.py:366-369` — `airtable_update()` שולח `State JSON` + `Linked Lead` (וכל שדה אחר שהשתנה) יחד ב-PATCH אחד, אטומי, דרך `airtable_patch()`. Airtable דוחה את ה-PATCH **כולו** על ID לא-תקף — לא רק את השדה הבעייתי.
+- **השפעה:** ברגע ש-`current_lead_record_id` מצביע על ליד שנמחק, **כל** קריאת `_sync_to_db()` עתידית עבור אותו session record נכשלת כולה — לא רק ה-linked field, אלא גם `State JSON` עצמו (step/answers/last_tool_result וכו') מפסיק להישמר עבור אותו sender, עד שהערך המיושן ינוקה.
+- **צורת תיקון מוצעת (לא בוצע קוד):** לפני בניית `fields[SF.LINKED_LEAD]` ב-`_sync_to_db()`, לאמת שה-`record_id` עדיין קיים (למשל `airtable_get_records`/`GET` ממוקד), ואם לא — לא לשלוח את `Linked Lead` בכלל, ולסמן/לנקות את הערך המיושן בתוך ה-state (`current_lead_record_id=""`/`active_lead_candidate=None`) כדי שלא ינסה שוב בכל כתיבה עתידית. חלופה זולה יותר: לתפוס ספציפית שגיאת `ROW_DOES_NOT_EXIST`/`INVALID_RECORD_ID` ב-`airtable_update()`/`_sync_to_db()` ולנסות שוב פעם אחת בלי שדה ה-linked record.
+- **היקף:** לא נגעתי בקוד. ממצא מבוסס Airtable+קריאת קוד ישירה.
+- **סטטוס:** 🔴 נרשם, root cause מאומת עד השורה, לא תוקן.
+
+---
+
+## BUG-143 (CB-02A) — `resolve_canonical_tool()` מחליף `sheets_append`→`airtable_add` בלי להמיר payload, יוצר ActionContract פגום — 🔴 נרשם, לא תוקן (2 מופעים חיים, `pending`)
+
+- **תאריך:** 24/07/2026.
+- **מקור:** בדיקת CB-02 (שלב A — malformed sample), חוזרת פעמיים.
+- **ממצא מאומת מ-Airtable (`ActionContracts`, בסיס `app4bcgoX7t0HUVnm`):**
+  - `ee5ffb68-7a10-475d-bc7b-3dfa1f01fa38` (`recaj8Mme0Vasu7PH`, נוצר 24/07 00:27:56Z) — `tool_name=airtable_add`, `normalized_payload={"row_data": ["CB02 — בדוק כפתור אישור", "ממתין", "2026-07-25", "בדיקה מחר"], "sheet_name": "Tasks"}`, `status=pending`.
+  - `00b84046-8fe6-408b-be55-f0c69ecf009b` (`recFc4x9JGCDVPRQ6`, נוצר 24/07 00:38:43Z) — אותו דפוס בדיוק: `tool_name=airtable_add` עם `row_data`/`sheet_name` (צורת Sheets), `status=pending`.
+  - שני ה-payloads הם צורת `sheets_append` (`row_data`/`sheet_name`, ראה `action_validator.py:22`) — לא צורת `airtable_add` התקנית (`table`/`fields`).
+- **שורש (אומת בקוד ישיר):** `core/action_gateway.py::resolve_canonical_tool()` (שורות 314-338) — כשה-hint המקורי הוא `sheets_append` וללא בקשת-Sheets מפורשת בטקסט המשתמש, הפונקציה **מחזירה** `tool_name` חדש (`airtable_add`, שורה 336) אבל **אף פעם לא נוגעת ב-`tool_inputs`**. הקריאה היחידה למקום הזה (`app.py:1104`, `_queue_approval_detailed_impl()`) משתמשת בערך המוחזר בתור `tool_name` החדש, אבל ממשיכה עם אותו `tool_inputs` המקורי (עדיין בצורת Sheets) הלאה ליצירת ה-fingerprint/contract.
+- **השפעה:** נוצר `ActionContract` שנראה כמו פעולת Airtable תקנית (`tool_name=airtable_add`) אך ה-payload שלו לא מכיל `table`/`fields` תקינים — אם ה-contract הזה יאושר, הביצוע בפועל (`dispatch_tool`/`airtable_add`) צפוי להיכשל או להתנהג לא-צפוי (payload לא תואם schema). **אומת: אף אחד משני ה-contracts לא אושר עדיין** — טבלת `Tasks` נבדקה ישירות ולא מכילה "CB02 — בדוק כפתור אישור" או "CB-22" — אין נזק נתונים בפועל עדיין.
+- **צורת תיקון מוצעת (לא בוצע קוד):** אם `resolve_canonical_tool()` משנה tool_name, היא (או הקורא ב-`app.py:1104`) חייבת גם להמיר את ה-payload לסכמה של הכלי החדש (Sheets `row_data`/`sheet_name` → Airtable `table`/`fields`). אם ההמרה לא ניתנת לביצוע בוודאות (מיפוי עמודות לא ידוע) — עדיף **לא** ליצור ActionContract בכלל, ולהחזיר בקשת-הבהרה/כישלון-סגור למשתמש, במקום ליצור contract "תקין-למראה" עם payload שבור.
+- **היקף:** לא נגעתי בקוד, לא אישרתי/דחיתי אף contract. ממצא מבוסס Airtable+קריאת קוד ישירה.
+- **סטטוס:** 🔴 נרשם, root cause מאומת עד השורה, לא תוקן. שני ה-contracts עדיין `pending` — ראו המלצת ניקוי ידנית.
+
+---
+
+## BUG-144 (CB-02B) — כפתור דחייה בטלגרם לא סוגר את `ActionContracts.status` — מקור-האמת נשאר `pending` אחרי שהמשתמש קיבל אישור-ביטול — 🔴 נרשם, לא תוקן (queue drift מאומת ישירות)
+
+- **תאריך:** 24/07/2026.
+- **מקור:** בדיקת CB-02 (שלב B — clean reject sample). הודעת משתמש: `"תוסיף משימה לראות מה קורה עם אוטומציית הלוגים מחר"`.
+- **Expected:** ActionContract תקין, כפתור דחייה, לחיצה → אין כתיבה ל-Tasks, `ActionContracts.status=rejected`.
+- **Actual:** הכפתור עבד ברמת Telegram UI, המשתמש קיבל `"🚫 בוטל"` (popup) ואז הודעה נוספת "🚫 הפעולה בוטלה: {label}" — אך `ActionContracts` הראה עדיין `pending`.
+- **ממצא מאומת מ-Airtable:** `0ce5b20e-33ea-4fe5-aeca-3d3911debe0c` (`recCKbg1fH2HaXwo5`, נוצר 24/07 00:39:30Z, `tool_name=airtable_add`, payload תקין — `{"table": "Tasks", "fields": {"כותרת המשימה": "לראות מה קורה עם אוטומציית הלוגים", "סטטוס": "ממתין", "תאריך יעד": "2026-07-25"}}`) — `status=pending`, **לא** `rejected`, למרות שהמשתמש לחץ דחייה וקיבל אישור-ביטול. `Tasks` נבדק ישירות — לא נוצרה שורה, כך שאין נזק-נתונים, אבל מקור-האמת (`ActionContracts`) לא סונכרן.
+- **שורש (אומת בקוד ישיר):** `app.py:2409-2449` (`elif action == "reject":` ב-`_handle_approval_callback_impl()`) — התגובה הזו כבר מתועדת בהערת קוד קיימת (`app.py:2409-2421`, מפנה ל-`docs/architecture/f52-unified-approval-runtime/PR5_REJECTION_CANCELLATION_SHADOW.md`): ה-branch הזה קורא רק ל-`bus.pop(action_id)` (`2422`, event_bus בלבד) ובונה טקסט-ביטול ידנית — **הוא אף פעם לא קורא ל-`ActionGateway.reject(contract_id)`** (`core/action_gateway.py:1298`) או לכל lifecycle transition שקול. ה-`ActionContract` המתאים ב-Airtable נשאר `pending` כי שום דבר לא סימן אותו `rejected`.
+- **השפעה:** המשתמש חושב שהפעולה בוטלה (מקבל שתי הודעות אישור-ביטול), אבל מקור-האמת (`ActionContracts`) עדיין חי — גורם ל-`live_contracts`/`find_live_by_user()` לגדול ולזהם דגימות עתידיות (BUG-122's `multi_contract_conflict`, RP5 sampling).
+- **צורת תיקון מוצעת (לא בוצע קוד):** ה-`reject` callback חייב לקרוא ל-`ActionGateway.reject(contract_id)` (או ל-lifecycle transition שקול) לפני/יחד עם בניית הטקסט למשתמש — לא להסתפק ב-`event_bus.pop()`. יש למצוא את ה-contract המתאים לפי fingerprint (כמו שנעשה כבר בענף ה-approve, `app.py:2159-2187`) לפני הודעת "בוטל".
+- **היקף:** לא נגעתי בקוד. ממצא מבוסס Airtable+קריאת קוד ישירה.
+- **סטטוס:** 🔴 נרשם, root cause מאומת עד השורה (כולל הערת-קוד קיימת שכבר מתעדת את הפער כ"ידוע"), לא תוקן. Contract עדיין `pending` — ראו המלצת ניקוי ידנית.
+
+---
+
+## BUG-145 (CB-01 + CB-02B) — Approval/rejection callback שולח שתי הודעות סופיות למשתמש על אותה פעולה — 🔴 נרשם, לא תוקן (root cause מאומת בשני הענפים)
+
+- **תאריך:** 24/07/2026.
+- **מקור:** CB-01 (approve) — שתי הודעות הצלחה על אותה פעולה. CB-02B (reject) — "🚫 בוטל" ואז הודעת ביטול נוספת עם פירוט הפעולה.
+- **שורש (אומת בקוד ישיר, שני הענפים ב-`_handle_approval_callback_impl()`):**
+  - **Approve:** `app.py:2385-2400` — `bot.send_message(origin_chat_id, user_notify_text)` (`2388`, הודעת צ'אט חדשה: "✅ הפעולה בוצעה:\n{result}") **וגם** `bot.edit_message_text(f"✅ אושר ובוצע\n{item['label']}", ...)` (`2397-2400`, עריכת ההודעה המקורית) — כשה-`origin_chat_id` זהה לצ'אט של הכפתור (המקרה השכיח), המשתמש רואה שתי בועות-הצלחה נפרדות (בנוסף ל-popup `answer_callback_query`, `2403`, שהוא ephemeral ולא נספר כ"הודעה" בהיסטוריה).
+  - **Reject:** `app.py:2426-2442` — `bot.send_message(user_chat_id, f"🚫 הפעולה בוטלה: {item['label']}")` (`2430`) **וגם** `bot.edit_message_text("🚫 *בוטל*", ...)` (`2436-2439`) — אותו דפוס כפול בדיוק.
+- **השפעה:** המשתמש מקבל הודעות כפולות (ולפעמים נראות כסותרות, למשל אם אחת מהן נכשלת/מתעכבת) על כל פעולת approve/reject.
+- **צורת תיקון מוצעת (לא בוצע קוד):** לקבוע exactly-one final user-facing message לכל turn של approve/reject בבעלות ה-gateway — למשל, לוותר על `bot.send_message()` הנפרד ולהסתפק בעריכת ההודעה המקורית (`edit_message_text`) כערוץ הסופי היחיד, כשמדובר באותו chat; לשמור על `send_message` נפרד רק כש-`origin_chat_id != cq.message.chat.id` (ערוץ אחר לגמרי מזה שבו נלחץ הכפתור).
+- **היקף:** לא נגעתי בקוד. ממצא מבוסס תצפית משתמש ישירה + קריאת קוד לאימות.
+- **סטטוס:** 🔴 נרשם, root cause מאומת עד השורה בשני הענפים, לא תוקן.
+
+---
+
+## BUG-146 — `bypass_new_action` enforcement gap — ⚪ Merged into BUG-122 (24/07/2026)
+
+> **Merged into BUG-122 — evidence expansion, not a separate defect.**
+>
+> נשמר כאן כרשומת היסטוריה בלבד. המנגנון (`app.py:3548-3558`), הראיות (CB-01/CB-02, contracts `ee5ffb68-...`/`00b84046-...`/`0ce5b20e-...`) והצעת התיקון הועברו במלואן לסעיף **"עדכון ראיות (24/07/2026, CB-01/CB-02 staging)"** בתוך BUG-122 לעיל. הסיבה: אותו קובץ/שורה בדיוק, אותו מנגנון (`bypass_new_action`, כבר מתועד ב-BUG-122 כ-"מקרה תקין, מתועד ל-observability"), אותה הצעת-תיקון — אין אחריות/שכבת-קוד/expected-behavior נפרדים מהותית שמצדיקים מספר-באג עצמאי. המספור (BUG-146) נשאר תפוס ולא נמחק; אין לפתוח PR/fix תחת המספר הזה — הפניה ל-BUG-122.
+- **תאריך מיזוג:** 24/07/2026.
+- **סטטוס:** ⚪ Merged into BUG-122 — evidence expansion, not a separate defect.
+
+---
+
+## ממצא תכנוני (ללא מספר BUG) — Cost Telemetry Coverage and Per-Turn Attribution
+
+> ממצא-תשתית (coverage gap במדידת עלות), לא regression בהתנהגות קיימת ולא סיווג-באג — נשאר ללא מספור עד להחלטה על תוכנית מימוש. נפרד לחלוטין מ-BUG-141 ומ-PR של approval callbacks (BUG-144/145/122).
+
+- **תאריך:** 24/07/2026.
+- **מקור:** Cost Watchdog הפיק את התראת-ה-runtime החיה הראשונה שלו לאחר תיקון השבוע (`⚠️ Cost Alert — עלות שעה: $0.78 עברה את הסף $0.25`).
+- **Positive finding (runtime PASS):** `cost_monitor.py`'s `check_thresholds()`/`_send_hourly_alert()` מאומתים כעובדים כמתוכנן — אוספים עלות, משווים לסף, מפיקים התראה למשתמש, **לא** עוצרים מיד את השירות (`_trigger_daily_stop()` נפרד לגמרי, לא הופעל). `COST_HOURLY_LIMIT` ברירת המחדל הוא `$5.0` (`cost_monitor.py:27`) — הסף `$0.25` שנצפה מרמז על override מכוון ב-staging (סף נמוך לבדיקת המנגנון עצמו).
+- **Risk finding (amplification, לא מכומת עדיין ברמת הודעה בודדת):** `cost_monitor.record_call()` — הפונקציה היחידה שמזינה את ה-live accumulator שהפיק את ההתראה — נקראת ממקום יחיד בכל הריפו: `app.py:3174`, בתוך ה-`while True:` tool-loop של `run_agent()` (עד `MAX_TOOL_TURNS=3`, `app.py:77`). מכאן שני ממצאים מאומתים:
+  1. turn יחיד יכול להפיק עד 3 קריאות Claude נפרדות ומתומחרות-במלואן, כולן נספרות לאותו hourly bucket ללא קיבוץ לפי turn.
+  2. `daily_collector.py` (`llm_fallback.call_anthropic_text`) ו-`interaction_engine.py:232` (`record_llm_usage()` ישיר) **לא** קוראים ל-`cost_monitor.record_call()` בכלל (אומת בגריפ, 0 תוצאות) — עלותם מגיעה רק ל-`core/usage_telemetry.py`'s `usage_events`, שהוא **shadow-only** במפורש (nothing reads from it yet). מסקנה: התראת ה-`$0.78` היא 100% עלות `run_agent()` (Daily Collector נשלל כתורם להתראה הזו ספציפית), אך אותה סיבה הופכת את Daily Collector לבלתי-נראה גם ל-daily Emergency Stop.
+  3. `caller` (`app.py:3178`) מועבר ל-`record_call()` אך מגיע רק ל-`logger.debug()` — `_hourly_cost`/`_daily_cost` הם float גלובלי בודד ללא breakdown לפי source/model/turn.
+- **אין לקבוע** ש-TurnCoordinator לבדו יפתור את בעיית העלות — הוא עשוי לצמצם כפילות-turn וניתוב שגוי, אך אינו מודד או מתקן context loading (Business Memory), retries, או עלות scheduler/collector tools.
+- **Fix shape עתידי בלבד (הצעה, ללא מימוש):**
+  1. correlation ID (`turn_id`/`job_id`) משותף לכל קריאות ה-LLM/tools של אותו turn/job.
+  2. accumulator משותף לכל מסלולי LLM (כיום שלושה מסלולי רישום נפרדים ב-`run_agent()` בלבד, ומסלול חלקי דרך `llm_fallback.py`).
+  3. breakdown לפי source/model/turn ב-`cost_monitor.py`'s ה-accumulator החי (לא רק ב-`usage_telemetry`'s shadow table).
+  4. מדדי `llm_calls_per_turn`/`tool_calls_per_turn`/`cost_per_turn` (הבסיס `tool_calls_made` כבר קיים מקומית ב-`run_agent()`).
+  5. התראה עם top-3 turns/jobs יקרים בחלון (דורש buckets פר-turn, לא קיימים כיום).
+  6. guard נגד מספר חריג של LLM/tool calls באותו turn (`MAX_TOOL_TURNS=3` הוא תקרה טכנית קיימת, לא אות-חריגה נפרד).
+  7. הפרדת עלות Staging sampling מתעבורה אורגנית (אין תיוג `source`/`meta` שמבדיל כיום — כל תעבורת בדיקות staging נספרת זהה ל-production).
+- **היקף:** לא נגעתי בקוד. ממצא מבוסס קריאת קוד ישירה (`cost_monitor.py`, `core/usage_telemetry.py`, `app.py`, `daily_collector.py`, `llm_fallback.py`, `interaction_engine.py`).
+- **סטטוס:** ממצא תכנוני, ללא מספר BUG. ממתין להחלטה אם למספר כבאג רשמי או להשאיר כתוכנית-תשתית עד לעיצוב מימוש.
