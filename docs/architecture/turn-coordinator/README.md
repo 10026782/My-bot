@@ -40,6 +40,17 @@ starting a new full-system audit.
   `CASE_C_CLARIFICATION_CONTINUITY.md`'s Case C are not the same scenario —
   flagged in both documents, not resolved by either; owner decision needed
   on final naming.
+- `PERFORMANCE_CALL_VOLUME_AUDIT.md` — read-only audit, no runtime code
+  changed, not a Planning Gate: external-call-volume (Anthropic/Airtable/
+  Telegram) map of the Telegram create-task→approve→execute lifecycle. Its
+  headline finding is TurnCoordinator-relevant: a plain "מאשר" approval can
+  resolve via either the legacy `_pending_approvals` dict (which recursively
+  re-invokes `run_agent()`, costing 2 extra Anthropic calls) or the
+  `ActionGateway` path (0 Anthropic calls), depending on which store queued
+  the action — the same class of "multiple non-unified pending-state
+  stores" gap `PHASE_2_SHADOW_PLANNING_GATE.md` §1.5 already documents
+  structurally, now with a cost dimension attached. Ends with an explicit
+  requirement for whichever phase is implemented next (see Status below).
 
 ## Status
 
@@ -55,3 +66,13 @@ cross-request concurrency race) — see that doc's §1.4. Phase 1 (structural
 enforcement) not started; no code changes have been made based on that
 research yet — it is research only, pending owner decisions listed in its
 Summary section.
+
+**Added requirement (this round):** `PERFORMANCE_CALL_VOLUME_AUDIT.md`'s
+closing section requires that whichever phase is implemented next (Phase 2
+Shadow runtime completion, or Phase 3, per owner decision on sequencing)
+also close the Flow 4 recursion gap it identifies, record which
+pending-state store resolved an approval-reply turn (and that turn's
+Anthropic-call count) as a Shadow-decision observability field, and lazily
+load Business Memory / the turn-start session snapshot behind the handler
+decision. This is a requirement to carry forward, not an implementation —
+no code has been written for it yet.
