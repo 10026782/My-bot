@@ -1811,3 +1811,19 @@ Flag: EMERGENCY_STOP_AI=False (נשמר ב-Airtable)
 
 **Merged:** ✅ כן — PR #449, commit `e2d25af` (merge), `a787203`+`eab7ba5` (תוכן).
 **Verified בפרודקשן:** ⏳ לא עדיין — ממתין לדגימת staging אמיתית אחרי ה-rebase למעלה.
+
+### C170/C171 — PR #456/#457: BUG-141..146 documentation + BUG-141 dispatch-order fix (24/07/2026)
+קבצים: `BUG_AUDIT_LOG.md`, `app.py`, `test_bug141_pending_query_dispatch_order.py` (חדש) | קשור: staging findings 24/07/2026 (AG-01/CB-01/CB-02)
+
+**PR #456 (תיעוד בלבד):** נרשמו BUG-141 (AG-01), BUG-142 (Sessions stale linked-lead sync), BUG-143 (CB-02A `resolve_canonical_tool` payload mismatch), BUG-144 (CB-02B reject לא סוגר `ActionContracts.status`), BUG-145 (הודעות כפולות approve/reject) — כולם documented-only. BUG-146 מוזג לתוך BUG-122's `bypass_new_action` scope decision (אותו קוד/מנגנון, ראיות CB-01/CB-02 מצטברות). נוסף ממצא תכנוני ללא מספר BUG: "Cost Telemetry Coverage and Per-Turn Attribution".
+
+**PR #457 (תיקון קוד, BUG-141 בלבד):** `_PENDING_QUERY_RE` נבדק כעת ב-`if` עצמאי לפני `if "?" in _stripped:` (במקום `elif` אחרי כל שרשרת ה-if/elif) — שאלת "מה ממתין כרגע לאישור?" כבר לא נחסמת ע"י ה-`"?"` הכללי. אין שינוי ב-regex, אין נגיעה ב-BUG-142/143/144/145/122/Cost Telemetry. 15 בדיקות חדשות (`test_bug141_pending_query_dispatch_order.py`), full sweep 166/169 (3 כשלים קדם-קיימים לא-קשורים: `test_document_converter.py`, `test_google_tools.py` — `docx` חסר, `test_phase_4b0_1a_atomic_claims.py` — קידוד Windows).
+
+**✅ Verified בפרודקשן (24/07/2026, `my-bot-jqz2`, אחרי deploy `c12a19b`):** "מה ממתין לאישור" → `"אין פעולה שממתינה לאישור.\n\n(הבדיקה מכסה את מערכת ActionContracts בלבד...)"`.
+
+**✅ Verified ב-staging (24/07/2026, `my-bot-approval-staging`, אחרי deploy ידני ל-branch המרובייז `claude/rp5-staging-fault-injection-v4akit`):** אותה שאלה בדיוק, לוג מלא — `describe_pending_queue()` נקרא, 2 קריאות Airtable GET (`ActionContracts`), **ואין שום `POST api.anthropic.com`** — ה-Agent לא נקרא כלל. פירוט מלא ב-`BUG_AUDIT_LOG.md`'s BUG-141.
+
+**תצפית עלות (24/07/2026, מהבעלים) — חלקית מאומתת:** "הלוגים נקיים... אני בטוח שגם העלות ירדה." מאומת: turn של שאלת-pending-queue לא מפעיל LLM כלל (0 קריאות Anthropic בלוג, לעומת tool-loop מלא לפני התיקון) — ירידת-עלות מבנית אמיתית לדפוס-השאלה הזה. **לא אומת:** ירידת עלות שעתית/יומית כוללת בפועל — דורש בדיקת `cost_monitor`/`usage_events` totals, לא רק תצפית איכותית. קשור ל-"Cost Telemetry Coverage and Per-Turn Attribution" (`BUG_AUDIT_LOG.md`, ללא מספר BUG) — אין עדיין breakdown פר-turn שהיה מאפשר לכמת את זה במדויק.
+
+**Merged:** ✅ כן — #456 commit `585a6f6`, #457 commit `c12a19b`.
+**Verified בפרודקשן:** ✅ כן (24/07/2026) — ראו evidence למעלה. **Verified ב-staging:** ✅ כן (24/07/2026).

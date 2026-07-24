@@ -2866,6 +2866,7 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **תוקן (`app.py`, מיד אחרי קריאת `sanitize_agent_response()`):** כשמתקיים **כל** אחד מהתנאים הבאים בו-זמנית — (1) `final_reply == _SINGLE_SPEAKER_FALLBACK`, (2) `tool_calls_made == 0`, (3) שום `__approval_queued__` בתור הזה, (4) `core.router.risk_router.intent_requires_contract_for_success(route.intent)` מחזיר `True` (PA-01's own single policy source — נעשה שימוש חוזר, לא כפילות), (5) יש לפחות contract חי אחד — התשובה מוחלפת בהודעת resolution מפורשת שמונה את מספר הבקשות הממתינות ומכוונת את המשתמש ל-"מאשר"/"בטל" או לניסוח מפורש מחדש. לוגינג חדש: `pending_gate_decision=ask_queue_resolution` (כשההחלפה קורית) ו-`pending_gate_decision=bypass_new_action` (כש-tool call אמיתי כן קרה תוך כדי שיש contracts חיים — מקרה תקין, מתועד ל-observability). קבוע חדש `_LIVE_CONTRACT_STALE_SECONDS` (24 שעות) — **תצפיתי בלבד**, מחושב ומתועד כ-`stale_contracts_count` בלוג, **אינו** פוקע/דוחה contracts בפועל (אין auto-expiry ל-ActionContract "pending" בליבה, בניגוד ל-TTL הספציפי-ל-TMA של C84).
 - **החלטת scope מפורשת שלא בוצעה (מדווחת כאן במפורש למשתמש, לא הוחלט חד-צדדית בשקט):** לא נוספה לוגינג `pending_gate_decision=intercept_confirmation` בכל אחד מהענפים המפוזרים של מילות-אישור/disambiguation הקיימות ב-`app.py` (`_CONFIRM_WORDS`, `route_confirmation_word`, `route_disambiguation`, `route_combined_word` וכו') — יש עשרות נקודות-קריאה כאלה, וההוספה בכל אחת נראתה risk/effort לא-מוצדק לתיקון הזה. הענף הזה עצמו (יירוט מילת-אישור) **כן** נבדק ישירות ומאומת שהוא ממשיך לעבוד נכון (test (a) למטה) — רק הלוגינג הספציפי הזה לא נוסף בכל מקום.
 - **עדכון ראיות (24/07/2026, CB-01/CB-02 staging — מוזג מ-BUG-146, ראו רשומת ההיסטוריה שם):** ה-scope decision ש-`bypass_new_action` הוא observability-בלבד קיבל ראיה קונקרטית לנזק מצטבר: BUG-143 (2 `ActionContracts` פגומים, `ee5ffb68-...`/`00b84046-...`) ו-BUG-144 (contract `0ce5b20e-...` שנשאר `pending` אחרי שהמשתמש קיבל אישור-ביטול) שניהם הצטברו כ-`live_contracts` בזמן שה-gate ב-`app.py:3548-3558` לא חסם יצירת contracts נוספים (`tool_calls_made>0` עוקף את הענף `ask_queue_resolution` לחלוטין). ממליץ לשקול מחדש בין (א) לחסום/לבקש resolution גם כש-`tool_calls_made>0`, או (ב) sibling-auto-reject דטרמיניסטי — דורש החלטת-מדיניות מהבעלים לפני מימוש (ראו PR/Fix 5 בתוכנית התיקונים).
+- **עדכון ראיות נוסף (24/07/2026, AG-03 — תור עם 3 חוזים):** מופע שלישי נצפה של אותו דפוס — לוג `pending_gate_decision=bypass_new_action`, `live_contracts_count=2`, כשחוזה חדש (השלישי, הפגום — ראה BUG-143) נוצר בזמן ששני חוזים חיים כבר קיימים. עקבי לחלוטין עם ה-gap שכבר תועד (`tool_calls_made>0` עוקף את `ask_queue_resolution`) — לא מנגנון חדש, רק דגימה נוספת שמחזקת את התדירות.
 - **בדיקות:** `test_bug122_pending_queue_ux.py` (חדש, 8 בדיקות): (a) מילת אישור עם contract חי אחד עדיין מגיעה ל-`approve()` (לא fallback גנרי, לא הודעת queue-resolution) — regression lock על התנהגות קיימת שלא נגעו בה; (b) בקשת `create_task` חדשה עם 5 contracts חיים ו-0 tool calls מקבלת הודעת queue-resolution מפורשת, לא `_SINGLE_SPEAKER_FALLBACK`; (c) `find_live_by_user()` לא סופר contracts שאינם `pending` (approved/rejected/completed) — בדיקת unit ישירה; (d) ללא contracts חיים בכלל, ההתנהגות הקיימת (`_SINGLE_SPEAKER_FALLBACK`) לא משתנה — מוודא שהתיקון לא חורג מהיקפו. Full `test_*.py` sweep (כל קובץ, כולל זה) + `compileall -q .` — נקיים.
 - **היקף:** `app.py` בלבד (הענף שאחרי `sanitize_agent_response()` ב-`run_agent()`). אין נגיעה ב-RP5/F52 taxonomy, ב-PA-01 flag/state, בלוגיקת ביצוע האישור עצמה (`ActionGateway.approve()`/`_execute_contract()`), או בהפעלת דגלי production כלשהם.
 - **סטטוס:** 🟡 קוד תוקן ונבדק (Contract Chain + fix + 8/8 טסטים ייעודיים + full sweep) — **טרם נבדק בפרודקשן/staging בפועל**. לפי "כלל ברזל" — לא לסמן ✅ עד לאימות runtime אמיתי אחרי deploy.
@@ -3205,7 +3206,7 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 
 ---
 
-## BUG-141 (AG-01) — שאלת pending-queue טבעית עם "?" עוקפת את `describe_pending_queue()` הדטרמיניסטי ונופלת ל-Agent — 🔴 נרשם, לא תוקן (root cause מאומת קוד+deploy, לא branch-ordering ולא regex/deploy gap)
+## BUG-141 (AG-01) — שאלת pending-queue טבעית עם "?" עוקפת את `describe_pending_queue()` הדטרמיניסטי ונופלת ל-Agent — ✅ VERIFIED IN PROD + STAGING
 
 - **תאריך:** 24/07/2026.
 - **מקור:** בדיקת staging יזומה (AG-01). הודעת משתמש: `"מה ממתין כרגע לאישור?"`.
@@ -3218,7 +3219,24 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **Test gap מאומת:** `test_staging_23jul_findings.py:233-247` (הבדיקה שליוותה את הפיצ'ר) בודקת רק `app._PENDING_QUERY_RE.search(text)` ישירות — **לא** בודקת את סדר ה-dispatch האמיתי, ואף אחת מ-4 הדוגמאות החיוביות לא מסתיימת ב-`"?"`. הרגרסיה הזו הייתה בלתי-ניתנת-לגילוי ע"י הבדיקה הקיימת.
 - **צורת תיקון מוצעת (לא בוצע קוד):** להזיז את בדיקת `_PENDING_QUERY_RE.search(_stripped)` **לפני** ה-`if "?" in _stripped:` בשרשרת (למשל בדיקה נפרדת מיד אחרי `route_combined_word`/לפני `§4 disambiguation`, לא כ-branch באותה שרשרת), כך שלא משנה אם הטקסט מכיל `"?"` — או, לחלופין, להוסיף את הבדיקה כ-branch ראשון *בתוך* ה-`if "?" in _stripped:` עצמו (לפני `_STATUS_QUERY_PATTERNS`), כדי לשמור על המבנה הקיים אך לתת לה עדיפות. יש להוסיף גם test חדש שמכסה במפורש שאלת pending-queue **עם** `"?"` בסוף — לא רק בלעדיו — כדי לסגור את פער-הבדיקה שאיפשר את הרגרסיה הזו.
 - **היקף:** לא נגעתי בקוד. ממצא מבוסס git+Render API+קריאת קוד ישירה.
-- **סטטוס:** 🔴 נרשם, root cause מאומת עד השורה, לא תוקן.
+- **תוקן:** `app.py` — `_PENDING_QUERY_RE.search(_stripped)` נבדק כעת ב-`if` עצמאי מיד לפני `if "?" in _stripped:` (לא כ-`elif` בסוף השרשרת) — שאלה עם `"?"` בסוף כבר לא נחסמת ע"י ה-branch הכללי. אין שינוי ב-regex עצמו. `elif` הישן (הפך בלתי-נגיש) הוסר. PR #457, commit `9d156d9`, ממוזג ל-`main` (`c12a19b`). 15 בדיקות חדשות (`test_bug141_pending_query_dispatch_order.py`) — מוכיחות דרך נתיב ה-dispatch האמיתי (לא רק `.search()` ישיר) ש-`describe_pending_queue()` נקרא, Agent/`dispatch_tool` לעולם לא נקראים לשאלת pending-queue, "?" ובלעדיו מתנהגים זהה. Full sweep 166/169 (3 כשלים קדם-קיימים לא-קשורים).
+- **✅ Verified בפרודקשן (24/07/2026):** אחרי deploy ל-`my-bot-jqz2` (`c12a19b`) — "מה ממתין לאישור" → `"אין פעולה שממתינה לאישור.\n\n(הבדיקה מכסה את מערכת ActionContracts בלבד — לא תורי אישור legacy נוספים.)"`, בדיוק ה-reply הדטרמיניסטי המצופה מ-`describe_pending_queue()`.
+- **✅ Verified ב-staging (24/07/2026):** אחרי deploy ידני של ה-owner ל-branch `claude/rp5-staging-fault-injection-v4akit` (מרובייז מעל `main` כולל התיקון הזה) על `my-bot-approval-staging`. דגימה חיה מלאה:
+  ```
+  Eli: מה ממתין כרגע לאישור?
+  BOSS: אין פעולה שממתינה לאישור.
+  (הבדיקה מכסה את מערכת ActionContracts בלבד — לא תורי אישור legacy נוספים.)
+
+  [identity] Resolved: boss_hq/eliyahu@owner [telegram:general]
+  [httpx] GET .../ActionContracts?filterByFormula=...canonical_user_id...pending... "200 OK"
+  [core.turn_envelope] [TurnEnvelope] user=b2320d31 {"turn_mode": "free_agent", "queue_count": 0, ...}
+  [app] [ActionGateway] describe_pending_queue: user=boss_hq:eliyahu pending_count=0 scope=action_contracts result_code=empty
+  "POST /telegram HTTP/1.1" 200 0
+  ```
+  כל דרישות ה-fix מאומתות בו-זמנית: `describe_pending_queue()` נקרא (`[ActionGateway] describe_pending_queue`), Airtable `ActionContracts` הוא מקור-האמת היחיד (2 קריאות GET, לא tool-loop כללי), **ואין שום `POST api.anthropic.com` בלוג** — ה-Agent לא נקרא כלל לשאלה הזו (בניגוד לתסמין המקורי, ששלח `airtable_get` ל-Tasks/Deals/Payments + קריאת LLM מלאה).
+- **תצפית עלות (24/07/2026, מהבעלים) — חלקית מאומתת, לא הוכחה מלאה:** הבעלים דיווח "הלוגים נקיים פתאום ואני בטוח שגם העלות ירדה". מה שכן מאומת ישירות מהלוג לעיל: ה-turn הספציפי הזה (שאלת pending-queue) לא מפעיל שום קריאת Anthropic — ירידת-עלות מבנית אמיתית **לדפוס-השאלה הזה בלבד** (לפני התיקון: tool-loop מלא + קריאת LLM על כל שאלה כזו; אחרי: 2 קריאות Airtable GET בלבד, אפס LLM). **לא אומת:** ירידת עלות כוללת/שעתית בפועל — דורש בדיקת `cost_monitor`'s hourly/daily totals בפועל (או `usage_events`) לפני קביעה כזו, לא רק תצפית איכותית על "לוגים נקיים". ראו גם הממצא התכנוני "Cost Telemetry Coverage and Per-Turn Attribution" למטה — עדיין אין breakdown פר-turn/source שהיה מאפשר לכמת את הירידה הזו במדויק.
+- **✅ AG-03 — הרחבת אימות ל-multiple pending contracts (24/07/2026, staging):** בדיקה ייעודית עם תור של 3 `ActionContracts` חיים — `describe_pending_queue()` הציג ספירה נכונה (3), ומספר כל פעולה דטרמיניסטית (1/2/3), ללא נפילה ל-Agent. **סוגר את שלושת תרחישי-הליבה של BUG-141: תור ריק, חוזה יחיד, מספר חוזים — שלושתם מאומתים ב-staging בפועל.** **לא נבדק עדיין:** בחירה ממוקדת לפי מספר (למשל שליחת "2" כדי לאשר/לדחות פעולה ספציפית מתוך הרשימה הממוספרת) — פריט פתוח, לא כשל, סתם לא נבדק בסבב הזה. **תסמין נלווה שהתגלה (לא ב-BUG-141 עצמו):** החוזה השלישי בתור היה פגום (ראה BUG-143's עדכון-ראיות) והוצג עם label גנרי "airtable_add" במקום תיאור עסקי — `describe_pending_queue()` עצמו התנהג נכון (לא נפל ל-Agent, ספר נכון), אבל התוכן שהוא הציג היה חלקית לא-קריא בגלל BUG-143.
+- **סטטוס:** ✅ VERIFIED IN PROD + STAGING (24/07/2026), כולל multi-contract queue (AG-03). קוד תוקן, נבדק (unit+integration, 15/15 + full sweep), ומאומת runtime בשתי סביבות נפרדות עם evidence מלוגים אמיתיים. תצפית-העלות הכוללת (לא רק לדפוס-שאלה בודד) נשארת לא-מאומתת. בחירה ממוספרת מתוך תור מרובה — לא נבדקה.
 
 ---
 
@@ -3241,7 +3259,7 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 
 ---
 
-## BUG-143 (CB-02A) — `resolve_canonical_tool()` מחליף `sheets_append`→`airtable_add` בלי להמיר payload, יוצר ActionContract פגום — 🔴 נרשם, לא תוקן (2 מופעים חיים, `pending`)
+## BUG-143 (CB-02A) — `resolve_canonical_tool()` מחליף `sheets_append`→`airtable_add` בלי להמיר payload, יוצר ActionContract פגום — 🔴 נרשם, לא תוקן (3 מופעים חיים, `pending`)
 
 - **תאריך:** 24/07/2026.
 - **מקור:** בדיקת CB-02 (שלב A — malformed sample), חוזרת פעמיים.
@@ -3252,8 +3270,9 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **שורש (אומת בקוד ישיר):** `core/action_gateway.py::resolve_canonical_tool()` (שורות 314-338) — כשה-hint המקורי הוא `sheets_append` וללא בקשת-Sheets מפורשת בטקסט המשתמש, הפונקציה **מחזירה** `tool_name` חדש (`airtable_add`, שורה 336) אבל **אף פעם לא נוגעת ב-`tool_inputs`**. הקריאה היחידה למקום הזה (`app.py:1104`, `_queue_approval_detailed_impl()`) משתמשת בערך המוחזר בתור `tool_name` החדש, אבל ממשיכה עם אותו `tool_inputs` המקורי (עדיין בצורת Sheets) הלאה ליצירת ה-fingerprint/contract.
 - **השפעה:** נוצר `ActionContract` שנראה כמו פעולת Airtable תקנית (`tool_name=airtable_add`) אך ה-payload שלו לא מכיל `table`/`fields` תקינים — אם ה-contract הזה יאושר, הביצוע בפועל (`dispatch_tool`/`airtable_add`) צפוי להיכשל או להתנהג לא-צפוי (payload לא תואם schema). **אומת: אף אחד משני ה-contracts לא אושר עדיין** — טבלת `Tasks` נבדקה ישירות ולא מכילה "CB02 — בדוק כפתור אישור" או "CB-22" — אין נזק נתונים בפועל עדיין.
 - **צורת תיקון מוצעת (לא בוצע קוד):** אם `resolve_canonical_tool()` משנה tool_name, היא (או הקורא ב-`app.py:1104`) חייבת גם להמיר את ה-payload לסכמה של הכלי החדש (Sheets `row_data`/`sheet_name` → Airtable `table`/`fields`). אם ההמרה לא ניתנת לביצוע בוודאות (מיפוי עמודות לא ידוע) — עדיף **לא** ליצור ActionContract בכלל, ולהחזיר בקשת-הבהרה/כישלון-סגור למשתמש, במקום ליצור contract "תקין-למראה" עם payload שבור.
+- **עדכון ראיות (24/07/2026, AG-03 — pending-queue עם 3 חוזים):** בדיקת `describe_pending_queue()` על תור עם 3 `ActionContracts` חיים חשפה תסמין נוסף מאותו שורש: החוזה השלישי (מופע נוסף של הבאג הזה — `tool_name=airtable_add`, canonical tool הוחלף מ-`sheets_append`, שדה הטבלה ריק) הוצג בתור עם label גנרי "airtable_add" בלבד — כי `_describe_contract_for_disambiguation()` (המשמשת את `describe_pending_queue()`) לא הצליחה לבנות תיאור עסקי קריא מ-payload פגום, ונפלה חזרה לשם ה-tool הגולמי. כלומר הבאג לא רק מסכן ביצוע שגוי (כפי שתועד למעלה) — הוא גם פוגע ב-**קריאוּת התור עצמו** למשתמש שמנסה לבדוק מה ממתין (BUG-141's `describe_pending_queue()`).
 - **היקף:** לא נגעתי בקוד, לא אישרתי/דחיתי אף contract. ממצא מבוסס Airtable+קריאת קוד ישירה.
-- **סטטוס:** 🔴 נרשם, root cause מאומת עד השורה, לא תוקן. שני ה-contracts עדיין `pending` — ראו המלצת ניקוי ידנית.
+- **סטטוס:** 🔴 נרשם, root cause מאומת עד השורה, לא תוקן. שלושת ה-contracts עדיין `pending` — ראו המלצת ניקוי ידנית.
 
 ---
 
@@ -3281,8 +3300,9 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
   - **Reject:** `app.py:2426-2442` — `bot.send_message(user_chat_id, f"🚫 הפעולה בוטלה: {item['label']}")` (`2430`) **וגם** `bot.edit_message_text("🚫 *בוטל*", ...)` (`2436-2439`) — אותו דפוס כפול בדיוק.
 - **השפעה:** המשתמש מקבל הודעות כפולות (ולפעמים נראות כסותרות, למשל אם אחת מהן נכשלת/מתעכבת) על כל פעולת approve/reject.
 - **צורת תיקון מוצעת (לא בוצע קוד):** לקבוע exactly-one final user-facing message לכל turn של approve/reject בבעלות ה-gateway — למשל, לוותר על `bot.send_message()` הנפרד ולהסתפק בעריכת ההודעה המקורית (`edit_message_text`) כערוץ הסופי היחיד, כשמדובר באותו chat; לשמור על `send_message` נפרד רק כש-`origin_chat_id != cq.message.chat.id` (ערוץ אחר לגמרי מזה שבו נלחץ הכפתור).
+- **עדכון ראיות (24/07/2026, AG-03 — תור עם 3 חוזים, החוזה השלישי פגום/BUG-143):** בתור ה-approval turn של החוזה הפגום, נצפה `agent_spoke_in_gateway_owned_approval_turn` (סימן turn-ownership) יחד עם RP5 evidence `approval_pending` + user-facing text שמכיל טענת-כישלון, ו-`status_claim_mismatch` (RP5/F52 shadow). **הערת-זהירות:** זה כנראה אותה משפחת-תופעה (יותר מ"קול" אחד סמכותי למשתמש באותו turn של אישור) — אבל דרך מנגנון שונה (Agent מדבר בתוך turn שאמור להיות בבעלות ה-gateway, מזוהה ע"י RP5/turn-ownership shadow) מזה שכבר תועד למעלה (`send_message`+`edit_message_text` כפולים ב-`_handle_approval_callback_impl()`). **לא אומת** שזה אותו code path בדיוק — ייתכן שמדובר בסימפטום נוסף/נפרד שרק במקרה שייך לאותה קטגוריה. דורש קריאת קוד נפרדת (`core/turn_envelope.py`'s ownership signal + RP5's `status_claim_mismatch` classification) לפני שקובעים אם זה תיקון-אחד או שניים.
 - **היקף:** לא נגעתי בקוד. ממצא מבוסס תצפית משתמש ישירה + קריאת קוד לאימות.
-- **סטטוס:** 🔴 נרשם, root cause מאומת עד השורה בשני הענפים, לא תוקן.
+- **סטטוס:** 🔴 נרשם, root cause מאומת עד השורה בשני הענפים המקוריים, לא תוקן. תופעה נוספת (agent-spoke-in-gateway-turn) נצפתה ב-AG-03, קשר מדויק ל-root cause הקיים טרם אומת.
 
 ---
 
