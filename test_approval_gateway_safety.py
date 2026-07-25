@@ -10,29 +10,10 @@ Covers:
                                         without sheets_append evidence.
   BUG-V1-FAKE-APPROVAL-STATE         — A32 must block "⏳ ממתינה לאישור" text
                                         emitted without a real pending approval.
-  BUG-V1-MULTI-PENDING-PAYLOAD-CONTAMINATION / BUG-BATCH-DISCARD
-                                     — CORRECTED 15/07/2026: the original fix
-                                        blocked (discarded) any mutating
-                                        approval beyond the first in a turn
-                                        outright — a regression from working
-                                        batch behavior, since the payload-
-                                        contamination it cited was never
-                                        actually reproduced (each
-                                        _queue_approval() call already made
-                                        its own independent copy/contract,
-                                        both before and after that fix). Now:
-                                        every mutating tool call in a turn is
-                                        durably preserved — the first becomes
-                                        a live ActionContract + notification,
-                                        the rest are held in
-                                        event_bus.batch_queue and promoted
-                                        one at a time via
-                                        app._promote_next_batch_item(), only
-                                        once nothing is live for that
-                                        identity. See
-                                        test_bug_batch_approval_preserved.py
-                                        for the live-path regression
-                                        coverage.
+  BUG-122                           — the first mutating proposal may become
+                                      pending; later mutations in the same
+                                      turn are blocked, not retained, and the
+                                      user is told to resolve and resend.
   BUG-V1-APPROVAL-REQUEUE-AFTER-CONFIRM
                                      — ExecutedActionCache blocks re-queuing
                                         the same action within the TTL window.
@@ -211,25 +192,16 @@ chk(
 # BUG-V1-MULTI-PENDING-PAYLOAD-CONTAMINATION / BUG-BATCH-DISCARD
 # ══════════════════════════════════════════════════
 
-print("\n── BUG-BATCH-DISCARD (agent turn: queue+promote, not discard) ──")
+print("\n── BUG-122 (agent turn: block later mutations, retain nothing) ──")
 
 
-# Simulate the corrected logic directly (same logic as in app.py's tool loop
-# — see the BUG-BATCH-DISCARD comment there): the first mutating approval
-# this turn queues normally; every one beyond it is deferred (not discarded).
-# Replaces the old simulate_approval_gate() which asserted the removed
-# "queued, blocked, blocked" hard-discard behavior — see
-# test_bug_batch_approval_preserved.py for the live-path (real
-# _queue_approval()/ActionGateway/batch_queue) regression coverage of the
-# actual fix, including promotion order and dispatch-exactly-once guarantees.
 def simulate_approval_gate(approvals_requested: int) -> list[str]:
-    """Returns list of outcomes per request: "queued" (live now) or
-    "deferred" (durably held, promoted later — never discarded)."""
+    """Returns "queued" once, then "blocked_not_retained"."""
     _mutating_approvals_this_turn = 0
     outcomes = []
     for _ in range(approvals_requested):
         if _mutating_approvals_this_turn >= 1:
-            outcomes.append("deferred")
+            outcomes.append("blocked_not_retained")
         else:
             _mutating_approvals_this_turn += 1
             outcomes.append("queued")
@@ -243,16 +215,27 @@ chk(
 
 outcomes_2 = simulate_approval_gate(2)
 chk(
-    "BUG-BATCH-DISCARD: 2 approvals in 1 turn → both preserved "
-    "(first queued live, second deferred — never discarded)",
-    outcomes_2 == ["queued", "deferred"],
+    "BUG-122: second approval is blocked and not retained",
+    outcomes_2 == ["queued", "blocked_not_retained"],
 )
 
 outcomes_5 = simulate_approval_gate(5)
 chk(
-    "BUG-BATCH-DISCARD: 5 approvals in 1 turn → all 5 preserved",
-    outcomes_5 == ["queued"] + ["deferred"] * 4,
+    "BUG-122: every later approval is blocked and not retained",
+    outcomes_5 == ["queued"] + ["blocked_not_retained"] * 4,
 )
+
+from event_bus import batch_queue
+_bug122_user = "boss_hq:approval-safety"
+batch_queue.clear(_bug122_user)
+chk("BUG-122: BatchQueue remains zero",
+    batch_queue.count_pending(_bug122_user) == 0)
+_blocked_message = (
+    "יש לך פעולה שממתינה לאישור. יש לאשר או לבטל אותה, "
+    "ואז לשלוח מחדש את הבקשה החדשה."
+)
+chk("BUG-122: user is instructed to resolve and resend",
+    "לאשר או לבטל" in _blocked_message and "לשלוח מחדש" in _blocked_message)
 
 
 # ══════════════════════════════════════════════════

@@ -51,10 +51,12 @@ import app  # noqa: E402
 from identity import Identity, Role  # noqa: E402
 from core.action_gateway import (  # noqa: E402
     ActionGateway,
+    CanonicalizationError,
     ExecutionLedger,
     resolve_canonical_call,
     resolve_canonical_tool,
 )
+from airtable_schema import Tables, TaskFields  # noqa: E402
 from event_bus import bus as _real_bus  # noqa: E402
 
 passed = failed = 0
@@ -94,7 +96,7 @@ _no_sheets_text = "לבדוק מה קורה עם אבי עד לשעה 17:00"
 propose1 = gw.propose_action(
     tenant_id="boss_hq", canonical_user_id=identity1.memory_key,
     tool_name="sheets_append",
-    tool_inputs={"table": "Tasks", "fields": {"Task": "לבדוק מה קורה עם אבי"}},
+    tool_inputs={"table": "Tasks", "fields": {TaskFields.NAME: "לבדוק מה קורה עם אבי"}},
     origin_channel="telegram", origin_chat_id=identity1.user_id,
     requires_approval=True, identity=identity1, trusted_source="agent",
     user_text=_no_sheets_text,
@@ -141,9 +143,46 @@ chk("Sheets-shaped task call: tool converts to airtable_add",
     resolved_name == "airtable_add")
 chk("Sheets-shaped task call: payload converts with the tool",
     resolved_payload == {
-        "table": "Tasks",
+        "table": Tables.TASKS,
         "fields": {"כותרת המשימה": "לבדוק מה קורה עם אבי"},
     })
+
+print("\n── Fail-closed canonical payload conversion ───────────────────")
+
+for _case_name, _tool, _payload in (
+    (
+        "Drive payload without explicit Drive wording",
+        "drive_upload",
+        {"filename": "unsafe.txt", "content": "x"},
+    ),
+    (
+        "Sheets payload with unknown Airtable table",
+        "sheets_append",
+        {"spreadsheet_name": "UnknownTarget", "row_data": ["x"]},
+    ),
+):
+    _case_gw = ActionGateway(ledger=ExecutionLedger(), tool_executor=_dummy_executor)
+    _case_identity = _identity(f"owner-canon-{_tool}", Role.OWNER)
+    try:
+        _case_gw.propose_action(
+            tenant_id="boss_hq",
+            canonical_user_id=_case_identity.memory_key,
+            tool_name=_tool,
+            tool_inputs=_payload,
+            origin_channel="telegram",
+            origin_chat_id=_case_identity.user_id,
+            requires_approval=True,
+            identity=_case_identity,
+            trusted_source="agent",
+            user_text="צור משימה בלי בקשת Google מפורשת",
+        )
+        _case_error = None
+    except CanonicalizationError as exc:
+        _case_error = exc
+    chk(f"{_case_name}: canonicalization fails closed",
+        _case_error is not None)
+    chk(f"{_case_name}: no ActionContract is created",
+        len(_case_gw._ledger._store) == 0)
 
 
 # ══════════════════════════════════════════════════
@@ -156,7 +195,10 @@ print("\n── _queue_approval() end-to-end + bus/contract consistency ──�
 from core.action_gateway import action_gateway as _real_gw  # noqa: E402
 
 requester = _identity("owner-canon-e2e", Role.OWNER)
-tool_inputs_e2e = {"table": "Tasks", "fields": {"Task": "לבדוק מה קורה עם אבי עד 17:00"}}
+tool_inputs_e2e = {
+    "table": Tables.TASKS,
+    "fields": {TaskFields.NAME: "לבדוק מה קורה עם אבי עד 17:00"},
+}
 
 with patch.object(app, "resolve_identity", return_value=requester), \
      patch("feature_flags.is_enabled", side_effect=lambda name: name == "FEATURE_ACTION_GATEWAY"):
