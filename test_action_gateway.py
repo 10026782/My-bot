@@ -44,17 +44,17 @@ def _make_gw() -> ActionGateway:
 print("\n── DoD §1: cross-channel fingerprint equality ───────────────")
 gw = _make_gw()
 fp_wa = gw.compute_business_fingerprint(
-    "boss_hq", "boss_hq:user_42", "sheets_append",
-    gw.normalize_payload({"spreadsheet_name": "Sales", "row": "VIP"}),
+    "boss_hq", "boss_hq:user_42", "airtable_add",
+    gw.normalize_payload({"table": "Tasks", "fields": {"כותרת המשימה": "VIP"}}),
 )
 fp_tg = gw.compute_business_fingerprint(
-    "boss_hq", "boss_hq:user_42", "sheets_append",
-    gw.normalize_payload({"row": "VIP", "spreadsheet_name": "Sales"}),
+    "boss_hq", "boss_hq:user_42", "airtable_add",
+    gw.normalize_payload({"fields": {"כותרת המשימה": "VIP"}, "table": "Tasks"}),
 )
 chk("DoD1: WhatsApp fingerprint == Telegram fingerprint (same canonical user)", fp_wa == fp_tg)
 fp_other = gw.compute_business_fingerprint(
-    "boss_hq", "boss_hq:user_99", "sheets_append",
-    gw.normalize_payload({"spreadsheet_name": "Sales", "row": "VIP"}),
+    "boss_hq", "boss_hq:user_99", "airtable_add",
+    gw.normalize_payload({"table": "Tasks", "fields": {"כותרת המשימה": "VIP"}}),
 )
 chk("DoD1: different canonical_user_id → different fingerprint", fp_wa != fp_other)
 
@@ -66,8 +66,8 @@ print("\n── DoD §11: one pending per business fingerprint ─────�
 gw = _make_gw()
 r1 = gw.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:user_42",
-    tool_name="sheets_append",
-    tool_inputs={"spreadsheet_name": "Sales", "row": "VIP"},
+    tool_name="airtable_add",
+    tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "VIP"}},
     origin_channel="whatsapp", origin_chat_id="wa:97250",
     requires_approval=True,
 )
@@ -76,8 +76,8 @@ chk("DoD11: first propose → contract_id assigned", r1.contract_id is not None)
 
 r2 = gw.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:user_42",
-    tool_name="sheets_append",
-    tool_inputs={"row": "VIP", "spreadsheet_name": "Sales"},  # רשימה שונה, payload זהה
+    tool_name="airtable_add",
+    tool_inputs={"fields": {"כותרת המשימה": "VIP"}, "table": "Tasks"},  # רשימה שונה, payload זהה
     origin_channel="telegram", origin_chat_id="tg:7228089151",
     requires_approval=True,
 )
@@ -120,7 +120,7 @@ print("\n── DoD §13: AgentObservation stored, not user-facing ────�
 gw = _make_gw()
 r = gw.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:user_1",
-    tool_name="sheets_append", tool_inputs={"spreadsheet_name": "X", "row": "1"},
+    tool_name="airtable_add", tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "X"}},
     origin_channel="telegram", origin_chat_id="tg:1",
     requires_approval=True,
 )
@@ -130,7 +130,7 @@ chk("DoD13: AgentObservation stored on contract", len(gw.find_contract(r.contrac
 # AgentObservation.text לא אמור להגיע ישירות כתוצאה של approve/propose
 gw_result_text = gw.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:user_2",
-    tool_name="sheets_append", tool_inputs={"spreadsheet_name": "Y", "row": "2"},
+    tool_name="airtable_add", tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "Y"}},
     origin_channel="telegram", origin_chat_id="tg:2",
     requires_approval=True,
 )
@@ -229,10 +229,10 @@ def _capturing_exec(tool_name, tool_inputs, contract_id):
 
 gw5 = _make_gw()
 gw5._tool_executor = _capturing_exec
-original_inputs = {"spreadsheet_name": "Budget", "row": "2026"}
+original_inputs = {"table": "Tasks", "fields": {"כותרת המשימה": "Budget", "תיאור": "2026"}}
 r5 = gw5.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:owner_1",
-    tool_name="sheets_append", tool_inputs=original_inputs,
+    tool_name="airtable_add", tool_inputs=original_inputs,
     origin_channel="telegram", origin_chat_id="tg:1",
     requires_approval=True,
 )
@@ -342,8 +342,8 @@ print("\n── BUG-077: propose_action() overrides caller-declared requires_app
 gw_bug077 = _make_gw()
 r_override = gw_bug077.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:user_bug077a",
-    tool_name="sheets_append",  # registry: requires_approval=True
-    tool_inputs={"spreadsheet_name": "Sales", "row": "test"},
+    tool_name="airtable_add",  # registry: requires_approval=True
+    tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "test"}},
     origin_channel="telegram", origin_chat_id="tg:bug077a",
     requires_approval=False,  # caller under-declares
 )
@@ -356,8 +356,8 @@ chk("BUG-077: contract.requires_approval overridden to True",
 gw_bug077b = _make_gw()
 r_match = gw_bug077b.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:user_bug077b",
-    tool_name="sheets_append",
-    tool_inputs={"spreadsheet_name": "Sales", "row": "test2"},
+    tool_name="airtable_add",
+    tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "test2"}},
     origin_channel="telegram", origin_chat_id="tg:bug077b",
     requires_approval=True,  # caller correctly declares — no change expected
 )
