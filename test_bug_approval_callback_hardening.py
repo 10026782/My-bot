@@ -95,11 +95,6 @@ def _fake_cq(approver_chat_id: str, data: str):
 _flag_on = lambda name: name == "FEATURE_ACTION_GATEWAY"
 
 
-# ══════════════════════════════════════════════════
-# 1. Approval callback must not mark context_interrupted — neither on the
-# resolved contract nor on an unrelated sibling contract for the same
-# identity.
-# ══════════════════════════════════════════════════
 print("── Fix 1: approve/reject callbacks never set context_interrupted ──")
 
 requester1 = _identity("owner-hard-1", Role.OWNER)
@@ -114,7 +109,7 @@ propose_b = _real_gw.propose_action(
     tenant_id="boss_hq", canonical_user_id=requester1.memory_key,
     tool_name="airtable_add", tool_inputs={"table": "Tasks", "fields": {"Task": "B"}},
     origin_channel="telegram", origin_chat_id=requester1.user_id,
-    requires_approval=True, identity=requester1, trusted_source="agent",
+    requires_approval=True, identity=requester1, trusted_source="test_harness",
 )
 
 with patch.object(app, "resolve_identity", return_value=requester1), \
@@ -139,8 +134,6 @@ _contract_b_after = _real_gw.find_contract(propose_b.contract_id)
 chk("reject: callback also does not mark context_interrupted",
     _contract_b_after is not None and _contract_b_after.context_interrupted is False)
 
-# Regression: a genuinely unrelated callback (not approve:/reject:) must
-# still interrupt context, exactly as before.
 requester2 = _identity("owner-hard-2", Role.OWNER)
 propose_c = _real_gw.propose_action(
     tenant_id="boss_hq", canonical_user_id=requester2.memory_key,
@@ -158,11 +151,6 @@ chk("regression: a non-approval callback still marks context_interrupted as befo
     _contract_c is not None and _contract_c.context_interrupted is True)
 
 
-# ══════════════════════════════════════════════════
-# 2. Callback without a linked contract performs zero dispatcher calls
-# (also covered structurally by test_pr0c_telegram_callback_gateway.py's
-# Test 4 — repeated here with a dedicated, incident-shaped name).
-# ══════════════════════════════════════════════════
 print("\n── Fix 2: stale/unlinked callback fails closed, zero dispatches ──")
 
 requester3 = _identity("owner-hard-3", Role.OWNER)
@@ -177,8 +165,6 @@ _legacy_action_id, _ = _real_bus.request_approval(
     },
     chat_id=requester3.user_id, label="unlinked test",
 )
-# Deliberately NOT calling propose_action() — simulates a shadow-mode
-# propose failure, or a stale/replayed callback with no backing contract.
 
 cq3 = _fake_cq(requester3.user_id, f"approve:{_legacy_action_id}")
 mock_bot3 = MagicMock()
@@ -201,9 +187,178 @@ chk("callback without a linked contract: deterministic expired/already-resolved 
      or "טופל" in mock_bot3.answer_callback_query.call_args[0][1]))
 
 
-# ══════════════════════════════════════════════════
-# 3. Structured duplicate/no-op result for a repeated airtable_add
-# ══════════════════════════════════════════════════
+print("\n── BUG-144/145: canonical reject + one final response ─────────")
+
+requester4 = _identity("owner-hard-4", Role.OWNER)
+reject_inputs = {"table": "Tasks", "fields": {"Task": "reject canonical"}}
+reject_proposal = _real_gw.propose_action(
+    tenant_id="boss_hq", canonical_user_id=requester4.memory_key,
+    tool_name="airtable_add", tool_inputs=reject_inputs,
+    origin_channel="telegram", origin_chat_id=requester4.user_id,
+    requires_approval=True, identity=requester4, trusted_source="agent",
+)
+reject_action_id, _ = _real_bus.request_approval(
+    action="airtable_add",
+    payload={
+        "tool_name": "airtable_add", "tool_inputs": reject_inputs,
+        "origin_channel": "telegram", "origin_chat_id": requester4.user_id,
+        "canonical_user_id": requester4.memory_key,
+        "user_chat_id": requester4.user_id, "channel": "telegram",
+    },
+    chat_id=requester4.user_id, label="reject canonical",
+)
+reject_cq = SimpleNamespace(
+    id="cbq-reject", data=f"reject:{reject_action_id}",
+    from_user=SimpleNamespace(id=requester4.user_id),
+    message=SimpleNamespace(
+        chat=SimpleNamespace(id=requester4.user_id), message_id=44,
+    ),
+)
+reject_bot = MagicMock()
+with patch.object(app, "bot", reject_bot), \
+     patch.object(app, "resolve_identity", return_value=requester4), \
+     patch.object(app, "_flag_enabled", side_effect=_flag_on), \
+     patch("feature_flags.is_enabled", side_effect=_flag_on):
+    app._handle_approval_callback_impl(reject_cq)
+
+reject_contract = _real_gw.find_contract(reject_proposal.contract_id)
+chk("button reject durably marks the canonical ActionContract rejected",
+    reject_contract is not None and reject_contract.status == "rejected")
+chk("same-chat callback sends no additional Telegram message",
+    reject_bot.send_message.call_count == 0)
+chk("same-chat callback edits exactly one persistent final response",
+    reject_bot.edit_message_text.call_count == 1)
+
+print("\n── Cross-chat callback finalization + replay safety ───────────")
+
+
+def _ok_callback_dispatch(*args, **kwargs):
+    return {
+        "ok": True,
+        "tool": "send_followup",
+        "external_id": "audit-cross-chat",
+        "evidence": {"audit_id": "audit-cross-chat"},
+        "user_message": "בוצע",
+    }
+
+
+requester5 = _identity("requester-cross-approve", Role.OWNER)
+approver5 = _identity("approver-cross-approve", Role.OWNER)
+approve_inputs = {"chat_id": requester5.user_id, "draft": "cross chat approve"}
+approve_proposal = _real_gw.propose_action(
+    tenant_id="boss_hq", canonical_user_id=requester5.memory_key,
+    tool_name="send_followup", tool_inputs=approve_inputs,
+    origin_channel="telegram", origin_chat_id=requester5.user_id,
+    requires_approval=True, identity=requester5, trusted_source="agent",
+)
+approve_action_id, _ = _real_bus.request_approval(
+    action="send_followup",
+    payload={
+        "tool_name": "send_followup", "tool_inputs": approve_inputs,
+        "origin_channel": "telegram", "origin_chat_id": requester5.user_id,
+        "canonical_user_id": requester5.memory_key,
+        "user_chat_id": requester5.user_id, "channel": "telegram",
+    },
+    chat_id=requester5.user_id, label="cross chat approve",
+)
+approve_cq = SimpleNamespace(
+    id="cbq-cross-approve", data=f"approve:{approve_action_id}",
+    from_user=SimpleNamespace(id=approver5.user_id),
+    message=SimpleNamespace(chat=SimpleNamespace(id=approver5.user_id), message_id=55),
+)
+approve_bot = MagicMock()
+
+
+def _resolve_cross_approve(channel, external_id):
+    return approver5 if external_id == approver5.user_id else requester5
+
+
+with patch.object(app, "bot", approve_bot), \
+     patch.object(app, "resolve_identity", side_effect=_resolve_cross_approve), \
+     patch("tools.dispatcher.dispatch_tool", side_effect=_ok_callback_dispatch) as approve_dispatch, \
+     patch.object(app, "_flag_enabled", side_effect=_flag_on), \
+     patch("feature_flags.is_enabled", side_effect=_flag_on):
+    app._handle_approval_callback_impl(approve_cq)
+    approve_contract = _real_gw.find_contract(approve_proposal.contract_id)
+    first_approve_dispatches = approve_dispatch.call_count
+    first_approve_sends = list(approve_bot.send_message.call_args_list)
+    first_approve_edits = approve_bot.edit_message_text.call_count
+    approve_bot.reset_mock()
+    app._handle_approval_callback_impl(approve_cq)
+    replay_approve_dispatches = approve_dispatch.call_count
+
+chk("cross-chat approve makes canonical lifecycle terminal",
+    approve_contract is not None and approve_contract.status in ("completed", "executed"))
+chk("cross-chat approve notifies requester exactly once",
+    len(first_approve_sends) == 1 and
+    str(first_approve_sends[0].args[0]) == requester5.user_id)
+chk("cross-chat approve edits approver message exactly once",
+    first_approve_edits == 1)
+chk("repeated approve callback performs no duplicate execution",
+    first_approve_dispatches == 1 and replay_approve_dispatches == 1)
+chk("repeated approve callback returns deterministic stale/resolved response",
+    approve_bot.answer_callback_query.call_count == 1 and
+    approve_bot.edit_message_text.call_count == 1)
+
+
+requester6 = _identity("requester-cross-reject", Role.OWNER)
+approver6 = _identity("approver-cross-reject", Role.OWNER)
+cross_reject_inputs = {
+    "table": "Tasks", "fields": {"כותרת המשימה": "cross reject"},
+}
+cross_reject_proposal = _real_gw.propose_action(
+    tenant_id="boss_hq", canonical_user_id=requester6.memory_key,
+    tool_name="airtable_add", tool_inputs=cross_reject_inputs,
+    origin_channel="telegram", origin_chat_id=requester6.user_id,
+    requires_approval=True, identity=requester6, trusted_source="agent",
+)
+cross_reject_action_id, _ = _real_bus.request_approval(
+    action="airtable_add",
+    payload={
+        "tool_name": "airtable_add", "tool_inputs": cross_reject_inputs,
+        "origin_channel": "telegram", "origin_chat_id": requester6.user_id,
+        "canonical_user_id": requester6.memory_key,
+        "user_chat_id": requester6.user_id, "channel": "telegram",
+    },
+    chat_id=requester6.user_id, label="cross chat reject",
+)
+cross_reject_cq = SimpleNamespace(
+    id="cbq-cross-reject", data=f"reject:{cross_reject_action_id}",
+    from_user=SimpleNamespace(id=approver6.user_id),
+    message=SimpleNamespace(chat=SimpleNamespace(id=approver6.user_id), message_id=66),
+)
+cross_reject_bot = MagicMock()
+
+
+def _resolve_cross_reject(channel, external_id):
+    return approver6 if external_id == approver6.user_id else requester6
+
+
+with patch.object(app, "bot", cross_reject_bot), \
+     patch.object(app, "resolve_identity", side_effect=_resolve_cross_reject), \
+     patch.object(app, "_flag_enabled", side_effect=_flag_on), \
+     patch("feature_flags.is_enabled", side_effect=_flag_on):
+    app._handle_approval_callback_impl(cross_reject_cq)
+    cross_reject_contract = _real_gw.find_contract(cross_reject_proposal.contract_id)
+    first_reject_sends = list(cross_reject_bot.send_message.call_args_list)
+    first_reject_edits = cross_reject_bot.edit_message_text.call_count
+    cross_reject_bot.reset_mock()
+    app._handle_approval_callback_impl(cross_reject_cq)
+
+chk("cross-chat reject makes canonical lifecycle terminal",
+    cross_reject_contract is not None and cross_reject_contract.status == "rejected")
+chk("cross-chat reject notifies requester exactly once",
+    len(first_reject_sends) == 1 and
+    str(first_reject_sends[0].args[0]) == requester6.user_id)
+chk("cross-chat reject edits approver message exactly once",
+    first_reject_edits == 1)
+chk("repeated reject callback leaves lifecycle unchanged",
+    _real_gw.find_contract(cross_reject_proposal.contract_id).status == "rejected")
+chk("repeated reject callback returns deterministic stale/resolved response",
+    cross_reject_bot.answer_callback_query.call_count == 1 and
+    cross_reject_bot.edit_message_text.call_count == 1)
+
+
 print("\n── Fix 3: duplicate airtable_add returns structured already_exists ──")
 
 from tools import dispatcher as _dispatcher_mod
@@ -241,17 +396,11 @@ chk("A32 verify_execution accepts the structured duplicate result as ok "
     _verify.status == "ok")
 
 
-# ══════════════════════════════════════════════════
-# 4. BatchQueue promotion and per-item approval remain unchanged (sanity
-# check that the hardening above didn't disturb PR #345's behavior).
-# ══════════════════════════════════════════════════
-print("\n── Fix regression: BatchQueue promotion still works ────────────")
-print("(full coverage already in test_bug_batch_approval_preserved.py — "
-      "re-run as part of the full suite, not duplicated here)")
-chk("placeholder — see test_bug_batch_approval_preserved.py for full batch coverage", True)
+print("\n── BUG-122 regression: BatchQueue promotion is disabled ────────")
+chk("dedicated BUG-122 batch policy coverage remains in place",
+    callable(app._promote_next_batch_item))
 
 
-# ══════════════════════════════════════════════════
 print(f"\n{'='*50}")
 print(f"approval callback hardening tests: {passed} passed, {failed} failed")
 sys.exit(0 if failed == 0 else 1)

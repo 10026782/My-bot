@@ -126,7 +126,11 @@ def _pa01_structured_terminal_outcome(
         # the pre-existing "__approval_queued__" case just below.
         entry_tool = (
             r.get("action_tool")
-            if r.get("tool") in ("__approval_queued__", "__approval_deferred_batch__")
+            if r.get("tool") in (
+                "__approval_queued__",
+                "__approval_deferred_batch__",
+                "__approval_blocked_pending__",
+            )
             else r.get("tool")
         )
         if entry_tool == expected_tool:
@@ -1180,6 +1184,15 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
                     "terminal_outcome": "APPROVAL_QUEUE_ORPHANED",
                     "action_tool": tool_name, "created_this_turn": False,
                 }
+            if _gw_result.failure_code == "existing_pending_blocks_agent":
+                return {
+                    "message": _gw_result.user_message or _gw_result.reason,
+                    "contract_id": _gw_result.contract_id,
+                    "ok": False,
+                    "terminal_outcome": "APPROVAL_BLOCKED_PENDING",
+                    "action_tool": tool_name,
+                    "created_this_turn": False,
+                }
             return {
                 "message": _gw_result.user_message or f"⏳ {_gw_result.reason}",
                 # contract_id, if present (dedup/pending/approved/executing
@@ -1227,6 +1240,15 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
                     "contract_id": None, "ok": False,
                     "terminal_outcome": "APPROVAL_QUEUE_ORPHANED",
                     "action_tool": tool_name, "created_this_turn": False,
+                }
+            if _gw_result.failure_code == "existing_pending_blocks_agent":
+                return {
+                    "message": _gw_result.user_message or _gw_result.reason,
+                    "contract_id": _gw_result.contract_id,
+                    "ok": False,
+                    "terminal_outcome": "APPROVAL_BLOCKED_PENDING",
+                    "action_tool": tool_name,
+                    "created_this_turn": False,
                 }
             # Shadow mode does not early-return on _gw_result.ok == False for
             # any other reason (dedup/pending/approved found) — by design, it
@@ -1433,50 +1455,56 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
 
 
 def _promote_next_batch_item(canonical_user_id: str) -> None:
-    """
-    BUG-BATCH-DISCARD: after any approval-resolution attempt (confirm word,
-    disambiguation, combined word, cancellation, or the Telegram callback),
-    check whether this identity has batch items deferred by the tool loop
-    (event_bus.batch_queue) and — only if no ActionContract is currently
-    live for them — promote the next one into a real, notified contract via
-    the exact same _queue_approval() path the first task used.
-
-    Safe to call unconditionally, including after a resolution attempt that
-    didn't actually resolve anything (e.g. route_combined_word() returning
-    None): find_live_contracts() being non-empty is the guard, so nothing
-    is promoted while something for this identity is still pending.
-    """
+    """Discard legacy deferred items; automatic promotion is forbidden."""
     if not canonical_user_id:
         return
     try:
-        from core.action_gateway import action_gateway as _gw_promote
         from event_bus import batch_queue as _batch_queue
-        if _gw_promote.find_live_contracts(canonical_user_id):
-            return
-        item = _batch_queue.pop_next(canonical_user_id)
-        if not item:
-            return
+        queued = _batch_queue.count_pending(canonical_user_id)
+        _batch_queue.clear(canonical_user_id)
         logger.info(
-            "[BatchQueue] promoting next queued item for user=%s | tool=%s",
-            _sanitize_id(canonical_user_id), item["tool_name"],
-        )
-        _queue_approval(
-            item["tool_name"], item["tool_inputs"], item["user_chat_id"],
-            item["channel"], item.get("user_text", ""),
+            "[BatchQueue] resolution_cleanup user=%s queue_count_before=%d "
+            "queue_count_after=0 action=discard_no_promotion",
+            _sanitize_id(canonical_user_id), queued,
         )
     except Exception as exc:
         logger.error(
-            "[BatchQueue] promotion failed for user=%s: %s",
+            "[BatchQueue] resolution cleanup failed for user=%s: %s",
             _sanitize_id(canonical_user_id), exc, exc_info=True,
         )
 
 
 def _gateway_reply_with_promotion(reply, canonical_user_id: str):
-    """Thin wrapper: runs _promote_next_batch_item() as a side effect, then
-    returns reply unchanged — lets every ActionGateway resolution call site
-    opt into batch promotion with a one-line change."""
+    """Compatibility wrapper: discard legacy deferred items after resolution."""
     _promote_next_batch_item(canonical_user_id)
     return reply
+
+
+def _deliver_callback_final(
+    cq,
+    *,
+    origin_channel: str,
+    origin_chat_id: str,
+    canonical_user_id: str,
+    action_id: str,
+    tool_name: str,
+    text: str,
+) -> None:
+    """Deliver one persistent final response for a Telegram callback."""
+    callback_message = getattr(cq, "message", None)
+    callback_chat = getattr(callback_message, "chat", None)
+    callback_chat_id = str(getattr(callback_chat, "id", "") or "")
+    if origin_channel == "telegram":
+        bot.edit_message_text(text, cq.message.chat.id, cq.message.message_id)
+        if str(origin_chat_id) != callback_chat_id:
+            bot.send_message(origin_chat_id, text)
+        return
+
+    _write_execution_receipt(
+        canonical_user_id, origin_channel, origin_chat_id,
+        action_id, tool_name, text,
+    )
+    bot.edit_message_text(text, cq.message.chat.id, cq.message.message_id)
 
 
 def _build_and_log_turn_envelope(
@@ -2412,46 +2440,81 @@ def _handle_approval_callback_impl(cq) -> None:
         _promote_next_batch_item(canonical_user_id)
 
     elif action == "reject":
-        # F52 PR5 note: this legacy button-reject path builds its own
-        # cancellation text directly and never calls ActionGateway.reject()/
-        # compose_status_reply() at all (same pre-existing gap the
-        # BUG-BATCH-DISCARD comment below already documents for the
-        # ActionContract sync side) — so it is NOT covered by
-        # FEATURE_UNIFIED_STATUS_FORMATTER shadow/on and never emits a
-        # [UnifiedStatusFormatterShadow] line. Explicitly left as a
-        # separate, undocumented-no-longer gap rather than folded into PR5 —
-        # wiring it in would mean first deciding whether/how this path
-        # should sync-cancel the matching contract at all, which is a bigger
-        # change than a shadow-observability addition. See
-        # docs/architecture/f52-unified-approval-runtime/PR5_REJECTION_CANCELLATION_SHADOW.md.
         item = bus.pop(action_id)
-        if item:
-            logger.info("🚫 Rejected: %s | %s", action_id, item.get("label", item.get("action", "")))
+        if not item:
+            _notify_missing_or_expired_callback(cq, approver_chat_id)
+            return
 
-        if item:
-            user_chat_id = item["payload"].get("user_chat_id", "")
-            if user_chat_id:
+        payload = item.get("payload", {})
+        tool_name = payload.get("tool_name", "")
+        tool_inputs = payload.get("tool_inputs", {})
+        user_chat_id = payload.get("user_chat_id", item.get("chat_id", ""))
+        channel = payload.get("channel", "telegram")
+        origin_channel = payload.get("origin_channel", channel)
+        origin_chat_id = payload.get("origin_chat_id", user_chat_id)
+        canonical_user_id = payload.get("canonical_user_id", "")
+        label = item.get("label") or _describe_tool_call(tool_name, tool_inputs)
+
+        if tool_name and _flag_enabled("FEATURE_ACTION_GATEWAY"):
+            requester_identity = resolve_identity(channel, user_chat_id)
+            from core.action_gateway import action_gateway as _gw_reject
+            _reject_fp = _gw_reject.compute_business_fingerprint(
+                getattr(requester_identity, "tenant_id", "boss_hq"),
+                canonical_user_id or requester_identity.memory_key,
+                tool_name, _gw_reject.normalize_payload(tool_inputs),
+            )
+            _reject_contract = _gw_reject._ledger.find_by_fingerprint(_reject_fp)
+            if not _reject_contract:
+                logger.warning(
+                    "[ActionGateway] reject callback has no canonical contract "
+                    "action_id=%s tool=%s", action_id, tool_name,
+                )
+                bot.answer_callback_query(cq.id, "⏰ הפעולה פגה או כבר טופלה.")
+                _notify_stale_or_resolved_callback(
+                    cq, notify_chat_id=approver_chat_id, label=label,
+                    state_text="כבר טופלה או שאין לה רישום אישור פעיל",
+                )
+                return
+            _reject_reply = _gw_reject.reject(
+                _reject_contract.contract_id,
+                rejected_by=approver_identity.memory_key or approver_identity.user_id,
+            )
+            _reject_after = _gw_reject._ledger.find_by_id(_reject_contract.contract_id)
+            if not _reject_after or _reject_after.status != "rejected":
+                logger.error(
+                    "[ActionGateway] reject callback durable transition failed "
+                    "action_id=%s contract=%s",
+                    action_id, _reject_contract.contract_id,
+                )
                 try:
-                    bot.send_message(user_chat_id, f"🚫 הפעולה בוטלה: {item['label']}")
+                    _deliver_callback_final(
+                        cq, origin_channel=origin_channel,
+                        origin_chat_id=origin_chat_id,
+                        canonical_user_id=canonical_user_id,
+                        action_id=action_id, tool_name=tool_name,
+                        text=_reject_reply,
+                    )
                 except Exception:
                     pass
+                bot.answer_callback_query(cq.id, "❌ הביטול לא נשמר")
+                return
 
+        logger.info(
+            "🚫 Rejected: %s | %s | canonical_user=%s",
+            action_id, label, _sanitize_id(canonical_user_id),
+        )
         try:
-            bot.edit_message_text(
-                "🚫 *בוטל*",
-                cq.message.chat.id, cq.message.message_id,
-                parse_mode="Markdown",
+            _deliver_callback_final(
+                cq, origin_channel=origin_channel,
+                origin_chat_id=origin_chat_id,
+                canonical_user_id=canonical_user_id,
+                action_id=action_id, tool_name=tool_name,
+                text=f"🚫 הפעולה בוטלה: {label}",
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error("[Approval] final callback delivery failed: %s", e)
         bot.answer_callback_query(cq.id, "🚫 בוטל")
-        # BUG-BATCH-DISCARD: same as the approve branch above — this is the
-        # legacy button-reject path, which (pre-existing, out of scope here)
-        # does not sync-cancel the corresponding ActionContract, so
-        # find_live_contracts() may still show it live and correctly defer
-        # promotion until that's resolved through another path.
-        if item:
-            _promote_next_batch_item(item["payload"].get("canonical_user_id", ""))
+        _promote_next_batch_item(canonical_user_id)
 
     else:
         bot.answer_callback_query(cq.id, "⚠️ פעולה לא מוכרת")
@@ -3411,67 +3474,35 @@ def _run_agent_impl(
                     # than one pending action per turn", silently discarding
                     # every task beyond the first in a multi-task request.
                     #
-                    # BUG-BATCH-DISCARD fix: every mutating tool call this
-                    # turn is now durably preserved. The first still queues
-                    # normally (live ActionContract + Telegram notification).
-                    # The rest are held in batch_queue (event_bus.py) rather
-                    # than also becoming live contracts — ActionGateway's
-                    # existing len(live)>1 disambiguation closes sibling
-                    # contracts when one is picked (§21, commit 6752ec0),
-                    # which is correct for choosing among alternative
-                    # interpretations of ONE request but would silently
-                    # reject the other batch items here, and would also
-                    # break the current single-contract direct-approval UX
-                    # the moment >1 contract is simultaneously live. Each
-                    # queued item is promoted into its own live contract +
-                    # notification one at a time, only once nothing is live
-                    # for this identity — see _promote_next_batch_item().
+                    # BUG-122: once this turn has created an unresolved
+                    # contract, later mutations are neither contracted nor
+                    # retained. The user must resolve the existing action and
+                    # resend the remaining request.
                     if _mutating_approvals_this_turn >= 1:
-                        from event_bus import batch_queue as _batch_queue
-                        _batch_queue.enqueue(identity.memory_key, {
-                            "tool_name":   tu.name,
-                            "tool_inputs": dict(tu.input),
-                            "user_chat_id": chat_id,
-                            "channel":     channel,
-                            "user_text":   user_text,
-                        })
-                        _label = _describe_tool_call(tu.name, dict(tu.input))
                         logger.info(
-                            f"[BatchQueue] deferred (turn already has 1 approval queued): "
-                            f"{tu.name} | user={_sanitize_id(chat_id)}"
+                            "[BUG-122] same_turn_mutation_blocked tool=%s "
+                            "user=%s batch_queue_count=0",
+                            tu.name, _sanitize_id(chat_id),
                         )
-                        _deferred_content = f"⏳ נשמר בתור לאישור אחרי הפעולה הראשונה: {_label}"
+                        _deferred_content = (
+                            "⛔ הפעולה הנוספת לא נשמרה. יש לפתור את הפעולה "
+                            "הממתינה ואז לשלוח את הבקשה מחדש."
+                        )
                         tool_results.append({
                             "type": "tool_result", "tool_use_id": tu.id,
                             "content": _deferred_content,
                         })
-                        # P1-B re-audit: a deferred batch item is a real,
-                        # tracked outcome for this turn — the previous code
-                        # left NO tool_results_log entry for it at all, so a
-                        # deferred expected-tool call was structurally
-                        # invisible to PA-01. Without this, a mixed batch
-                        # (unrelated tool's contract created first, expected
-                        # tool deferred second) fell all the way through to
-                        # the Phantom fallback — a false claim that "no
-                        # action was created" when in fact one is genuinely
-                        # queued for the next promotion. Canonicalized here
-                        # (same resolve_canonical_tool() the real queue call
-                        # will use once promoted — see
-                        # _promote_next_batch_item()/_queue_approval_detailed_impl())
-                        # so PA-01's expected-tool scoping matches correctly
-                        # regardless of any Sheets/Drive rewrite.
                         from core.action_gateway import resolve_canonical_tool as _resolve_deferred_tool
                         _deferred_action_tool = _resolve_deferred_tool(tu.name, dict(tu.input), user_text)
                         tool_results_log.append({
-                            "tool": "__approval_deferred_batch__",
+                            "tool": "__approval_blocked_pending__",
                             "content": _deferred_content,
                             "ok": False,
                             "contract_id": None,
-                            "terminal_outcome": "APPROVAL_DEFERRED_BATCH",
+                            "terminal_outcome": "APPROVAL_BLOCKED_PENDING",
                             "action_tool": _deferred_action_tool,
                             "created_this_turn": False,
                         })
-                        turn_evidence.record_approval_pending()
                         continue
                     _approval_outcome = _queue_approval_detailed(
                         tu.name, dict(tu.input), chat_id, channel, user_text
