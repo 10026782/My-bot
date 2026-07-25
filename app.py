@@ -1293,6 +1293,7 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
             payload = {
                 "tool_name":         tool_name,
                 "tool_inputs":       tool_inputs,
+                "contract_id":       _gw_result.contract_id if _gw_result else None,
                 "origin_channel":    channel,
                 "origin_chat_id":    user_chat_id,
                 "canonical_user_id": identity.memory_key,
@@ -2442,19 +2443,42 @@ def _handle_approval_callback_impl(cq) -> None:
 
         # BUG-144: the button and ActionContract are one lifecycle. Reject
         # the canonical contract before reporting cancellation.
-        if tool_name and _flag_enabled("FEATURE_ACTION_GATEWAY"):
+        #
+        # Preferred linkage is the exact contract_id proven at queue time.
+        # Fingerprint rediscovery remains only as a backwards-compatible
+        # fallback for older pending items that predate that payload field.
+        _reject_contract_id = payload.get("contract_id", "") or ""
+        if tool_name or _reject_contract_id:
             requester_identity = resolve_identity(channel, user_chat_id)
             from core.action_gateway import action_gateway as _gw_reject
-            _reject_fp = _gw_reject.compute_business_fingerprint(
-                getattr(requester_identity, "tenant_id", "boss_hq"),
-                canonical_user_id or requester_identity.memory_key,
-                tool_name, _gw_reject.normalize_payload(tool_inputs),
-            )
-            _reject_contract = _gw_reject._ledger.find_by_fingerprint(_reject_fp)
+            _reject_contract = None
+            if _reject_contract_id:
+                _reject_contract = _gw_reject._ledger.find_by_id(_reject_contract_id)
+                if (
+                    _reject_contract is not None
+                    and canonical_user_id
+                    and _reject_contract.canonical_user_id != canonical_user_id
+                ):
+                    logger.error(
+                        "[ActionGateway] reject callback contract/canonical mismatch "
+                        "action_id=%s contract=%s payload_user=%s contract_user=%s",
+                        action_id, _reject_contract_id,
+                        _sanitize_id(canonical_user_id),
+                        _sanitize_id(_reject_contract.canonical_user_id),
+                    )
+                    _reject_contract = None
+            elif tool_name and _flag_enabled("FEATURE_ACTION_GATEWAY"):
+                _reject_fp = _gw_reject.compute_business_fingerprint(
+                    getattr(requester_identity, "tenant_id", "boss_hq"),
+                    canonical_user_id or requester_identity.memory_key,
+                    tool_name, _gw_reject.normalize_payload(tool_inputs),
+                )
+                _reject_contract = _gw_reject._ledger.find_by_fingerprint(_reject_fp)
             if not _reject_contract:
                 logger.warning(
                     "[ActionGateway] reject callback has no canonical contract "
-                    "action_id=%s tool=%s", action_id, tool_name,
+                    "action_id=%s tool=%s contract_id=%s",
+                    action_id, tool_name, _reject_contract_id or "none",
                 )
                 bot.answer_callback_query(cq.id, "⏰ הפעולה פגה או כבר טופלה.")
                 _notify_stale_or_resolved_callback(

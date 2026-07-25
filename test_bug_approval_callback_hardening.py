@@ -218,6 +218,7 @@ reject_proposal = _real_gw.propose_action(
 reject_action_id, _ = _real_bus.request_approval(
     action="airtable_add",
     payload={
+        "contract_id": reject_proposal.contract_id,
         "tool_name": "airtable_add", "tool_inputs": reject_inputs,
         "origin_channel": "telegram", "origin_chat_id": requester4.user_id,
         "canonical_user_id": requester4.memory_key,
@@ -248,6 +249,49 @@ chk("same-chat callback edits exactly one persistent final response",
     reject_bot.edit_message_text.call_count == 1)
 
 print("\n── Cross-chat callback finalization + replay safety ───────────")
+
+
+print("\nBUG-144: contract-bound reject still works with FEATURE_ACTION_GATEWAY off")
+
+requester4b = _identity("owner-hard-4b", Role.OWNER)
+reject_inputs_4b = {"table": "Tasks", "fields": {"Task": "reject via contract id"}}
+reject_proposal_4b = _real_gw.propose_action(
+    tenant_id="boss_hq", canonical_user_id=requester4b.memory_key,
+    tool_name="airtable_add", tool_inputs=reject_inputs_4b,
+    origin_channel="telegram", origin_chat_id=requester4b.user_id,
+    requires_approval=True, identity=requester4b, trusted_source="agent",
+)
+reject_action_id_4b, _ = _real_bus.request_approval(
+    action="airtable_add",
+    payload={
+        "contract_id": reject_proposal_4b.contract_id,
+        "tool_name": "airtable_add", "tool_inputs": reject_inputs_4b,
+        "origin_channel": "telegram", "origin_chat_id": requester4b.user_id,
+        "canonical_user_id": requester4b.memory_key,
+        "user_chat_id": requester4b.user_id, "channel": "telegram",
+    },
+    chat_id=requester4b.user_id, label="reject canonical flag off",
+)
+reject_cq_4b = SimpleNamespace(
+    id="cbq-reject-flag-off", data=f"reject:{reject_action_id_4b}",
+    from_user=SimpleNamespace(id=requester4b.user_id),
+    message=SimpleNamespace(
+        chat=SimpleNamespace(id=requester4b.user_id), message_id=45,
+    ),
+)
+reject_bot_4b = MagicMock()
+_flag_off = lambda name: False
+with patch.object(app, "bot", reject_bot_4b), \
+     patch.object(app, "resolve_identity", return_value=requester4b), \
+     patch.object(app, "_flag_enabled", side_effect=_flag_off), \
+     patch("feature_flags.is_enabled", side_effect=_flag_off):
+    app._handle_approval_callback_impl(reject_cq_4b)
+
+reject_contract_4b = _real_gw.find_contract(reject_proposal_4b.contract_id)
+chk("button reject uses payload contract_id even when FEATURE_ACTION_GATEWAY is off",
+    reject_contract_4b is not None and reject_contract_4b.status == "rejected")
+chk("flag-off contract-bound reject still edits exactly one persistent final response",
+    reject_bot_4b.edit_message_text.call_count == 1)
 
 
 def _ok_callback_dispatch(*args, **kwargs):
@@ -333,6 +377,7 @@ cross_reject_proposal = _real_gw.propose_action(
 cross_reject_action_id, _ = _real_bus.request_approval(
     action="airtable_add",
     payload={
+        "contract_id": cross_reject_proposal.contract_id,
         "tool_name": "airtable_add", "tool_inputs": cross_reject_inputs,
         "origin_channel": "telegram", "origin_chat_id": requester6.user_id,
         "canonical_user_id": requester6.memory_key,
