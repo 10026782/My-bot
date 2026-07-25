@@ -1827,3 +1827,21 @@ Flag: EMERGENCY_STOP_AI=False (נשמר ב-Airtable)
 
 **Merged:** ✅ כן — #456 commit `585a6f6`, #457 commit `c12a19b`.
 **Verified בפרודקשן:** ✅ כן (24/07/2026) — ראו evidence למעלה. **Verified ב-staging:** ✅ כן (24/07/2026).
+
+### C172 — תיעוד-בלבד: דוח בדיקות Post-Merge (תרחישים 1–5) על BUG-143/144/145 + BUG-147 חדש (25/07/2026)
+קבצים: `BUG_AUDIT_LOG.md` | קשור: BUG-143 (CB-02A), BUG-144 (CB-02B), BUG-145 (הודעות כפולות), BUG-147 (חדש)
+
+**מקור:** דוח בדיקות ידניות של הבעלים ("PM460-POSTMERGE", תרחישים 1–5) על מסלול ה-Approve/Reject של `ActionContract`/`ActionGateway`. סיכום הבעלים: NO-GO למסלול Approve בפרודקשן.
+
+**נרשם (תיעוד-בלבד, ללא שינוי קוד):**
+1. **BUG-143** — עדכון ראיות: מופע רביעי חי (`contract_id=aa74244a-...`, "PM460-POSTMERGE-CANONICAL") של אותו payload-shape mismatch הרשום.
+2. **BUG-144** — עדכון ראיות **סותר לכאורה**: הדוח מציג תרחישי-דחייה (2, 4) שבהם ה-`ActionContract` הקנוני כן עבר `rejected` כראוי. קריאת קוד ישירה מאשרת ש-`app.py:2409-2449` (כפתור-דחייה inline) **עדיין** לא קורא ל-`ActionGateway.reject()` — הפער הרשום נשאר בעינו שם. נמצא מסלול-דחייה שני, נפרד (מילות-ביטול חופשיות → `route_confirmation_word`/`route_cancellation_word` → `self.reject()`), שכן עובד נכון — סביר שהדוח תרגל את המסלול הזה ולא את הכפתור. **לא הוכרע** — נדרש בירור עם הבעלים אילו פעולות בדיוק בוצעו לפני שינוי סטטוס BUG-144.
+3. **BUG-145** — עדכון ראיות: כפל-ההודעות המתועד (עד כה רק בענף הצלחה) נצפה עכשיו גם בענף **כישלון-ביצוע** (`contract_id=81528313-...`, "PM460-POSTMERGE-CB-APPROVE") — אותו root cause (`app.py:2385-2400`), scope מורחב.
+4. **BUG-147 (חדש)** — `tools/dispatcher.py`'s `case "airtable_add"` מחזיר `str(e)` גולמי (לא מבנה `{ok,...}`) בשני מסלולי-חסימה (`LeadsDirectWriteBlocked`, שורה 261; `TenantScopeViolation`, שורה 319) — משחזר עצמאית את התסמין "expected structured result dict; got plain string" שהדוח דיווח עליו בתרחיש 5. לא אומת שזו בהכרח נקודת ההפעלה המדויקת של הדגימה הספציפית מהדוח.
+
+**שיטה:** אין ריצת-בדיקות/reproduction עצמאית בסבב הזה — כל הממצאים מבוססים על (א) הדוח שהבעלים סיפק, (ב) קריאת קוד ישירה לאימות/הרחבת root cause. שום contract לא אושר/נדחה, שום קוד לא שונה.
+
+**Cross-Layer Authority Contract gate:** לא רלוונטי לסבב הזה — תיעוד-בלבד, אין קוד runtime. יידרש לפני כל PR מימוש עתידי ל-BUG-143/145/147 (נגיעה ישירה ב-`ActionContract`/`ActionGateway`, שכבה 4).
+
+**Merged:** ✅ כן — commit ישירות ל-`claude/telegram-task-approval-audit-il29sj`.
+**Verified בפרודקשן:** לא רלוונטי (אין שינוי קוד).

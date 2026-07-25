@@ -13,6 +13,8 @@
 
 **תוספת (23/07/2026, אחרי כתיבת הבריפינג הזה):** PR #449 (branch `claude/findings-exam-wikon-25zzkm`, שני commits תיקון+review-pass) — סבב ממצאים מ-`my-bot-approval-staging` (7 ממצאים, כולל דגימת production אמיתית מהבעלים). ראו §3 למטה לפירוט מלא. **הענף `claude/rp5-staging-fault-injection-v4akit` עבר rebase על גבי `main` (כולל PR #449) והועלה מחדש (force-push) — staging מריץ עכשיו את התיקון.**
 
+**תוספת (25/07/2026):** BUG-141..146 (24/07/2026, ראו `BUG_AUDIT_LOG.md`) עדיין לא משוקפים למעלה — הבריפינג הזה לא עודכן מאז. בנוסף, דוח בדיקות Post-Merge של הבעלים (תרחישים 1–5, `claude/telegram-task-approval-audit-il29sj`) הוסיף: עדכון-ראיות ל-BUG-143 (מופע רביעי) ול-BUG-145 (כפל-הודעות נצפה גם בענף כישלון, לא רק הצלחה); ראיה **סותרת-לכאורה** ל-BUG-144 (תרחיש-דחייה עבר `rejected` כראוי — אבל קריאת קוד מאשרת שכפתור-הדחייה של Telegram, `app.py:2409-2449`, עדיין לא תוקן; סביר שהדוח תרגל מסלול-ביטול-מילולי נפרד שכבר עובד — לא הוכרע, דורש בירור); ו-**BUG-147 חדש** — `tools/dispatcher.py`'s `airtable_add` מחזיר מחרוזת גולמית (לא dict מובנה) בשני מסלולי-חסימה, משחזר עצמאית את "expected structured result dict; got plain string". תיעוד-בלבד, אין קוד runtime שהשתנה — ראו BUG_AUDIT_LOG.md/CHANGE_CONTROL_LOG.md C172.
+
 ---
 
 ## 1. Executive Summary
