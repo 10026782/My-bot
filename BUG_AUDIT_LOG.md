@@ -2762,14 +2762,16 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 
 ---
 
-## BUG-118 — `route_confirmation_word()`'s legacy success reply מדליף tool_name/Airtable record_id גולמיים למשתמש — 🔴 נרשם, לא תוקן (registration-only, staged-tracking)
+## BUG-118 — `route_confirmation_word()`'s legacy success reply מדליף tool_name/Airtable record_id גולמיים למשתמש — 🟡 מומש ומוזג, טרם אומת ב-staging/production
 
 - **תאריך:** 19/07/2026.
 - **מקור:** ממצא-צד תוך כדי staging smoke test ל-PR #407 (RP5 fault-injection marker-stripping fix) — **לא** תקלה ב-RP5/dispatch/ActionGateway lifecycle עצמם, ונצפה על **Smoke 2** (הרצה ללא marker — המסלול הרגיל, לא מסלול RP5): `route_confirmation_word()`'s תשובת-ההצלחה (המסלול הישן, לפני F52/UnifiedStatusFormatter) מציגה למשתמש שם-כלי גולמי (`tool_name`) ו-Airtable `record_id` גולמי בטקסט התשובה, במקום ניסוח עסקי (בדומה לדפוס שכבר תועד/תוקן במקומות אחרים — למשל BUG-115/BUG-117's "gצריך תיאור עסקי, לא tool_name/contract_id גולמי").
 - **מקור מפורש (הוראת המשתמש):** "track separately under F52 soak, not as PR #407 blocker" — **אינו** חוסם את מיזוג/סגירת PR #407 (RP5 נשאר staging-only, לא ממוזג בכל מקרה), ואינו נחשב חלק מ-scope ה-RP5 fault-injection עצמו.
 - **קבצים לחקירה (טרם נחקרו — Contract Chain טרם בוצע):** `core/action_gateway.py::route_confirmation_word()`/`_resolve_single_contract()` (המסלול הישן שמציג את ה-tool_name/record_id הגולמיים), מול `core/agent_message_formatter.py`/`FEATURE_UNIFIED_STATUS_FORMATTER` (F52 — שכבר בתהליך shadow soak; ייתכן שהמסלול המאוחד כבר פותר את זה ב-`shadow`/`on` ולא רק ב-legacy).
 - **השערת שורש (לא מאומתת עדיין):** תגובת ה-"בוצע" הישנה (לפני F52) בונה טקסט ישירות מ-`contract.tool_name`/`external_id` ללא שכבת-תיאור עסקי, בדומה לדפוסים שכבר טופלו במקומות דומים (BUG-115/BUG-117's `_describe_contract_for_disambiguation()`), אך כאן במסלול ה-**הצלחה** (לא disambiguation).
-- **סטטוס:** 🔴 נרשם בלבד — לא נחקר לעומק, לא תוקן, לא PR. במעקב תחת F52 soak, לא כחוסם ל-PR #407.
+- **עדכון מימוש (27/07/2026, PR #471):** נבנה renderer קנוני מבוסס `ApprovalLifecycleResult` ותיאור עסקי fail-closed. redaction של `tool_name`, UUID/contract ID, ActionContract record ID ו-Airtable business record ID מתבצע ללא תלות ב-`FEATURE_SINGLE_SPEAKER_APPROVAL_UX`, ולכן נשאר פעיל גם ב-rollout flag off. נוספה בדיקת regression מפורשת ל-flag-off שמוכיחה שה-routing הישן חוזר אך המזהים אינם נחשפים. אין תלות ב-F52 cutover לצורך ההגנה הזו.
+- **ממוזג:** ✅ `main` דרך PR #471 (`5e2c244` + תיקון CI `dadf851`, merge `c64da20`, 27/07/2026).
+- **סטטוס:** 🟡 Implemented but not yet verified — מומש ומוזג ועבר CI, אך טרם אומת בפועל ב-staging/production אחרי deploy.
 
 ---
 
@@ -3277,7 +3279,7 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 
 ---
 
-## BUG-144 (CB-02B) — כפתור דחייה בטלגרם לא סוגר את `ActionContracts.status` — מקור-האמת נשאר `pending` אחרי שהמשתמש קיבל אישור-ביטול — 🔴 נרשם, לא תוקן (queue drift מאומת ישירות)
+## BUG-144 (CB-02B) — כפתור דחייה בטלגרם לא סוגר את `ActionContracts.status` — מקור-האמת נשאר `pending` אחרי שהמשתמש קיבל אישור-ביטול — 🟡 מומש ומוזג, טרם אומת ב-staging/production
 
 - **תאריך:** 24/07/2026.
 - **מקור:** בדיקת CB-02 (שלב B — clean reject sample). הודעת משתמש: `"תוסיף משימה לראות מה קורה עם אוטומציית הלוגים מחר"`.
@@ -3290,10 +3292,13 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **היקף:** לא נגעתי בקוד. ממצא מבוסס Airtable+קריאת קוד ישירה.
 - **סטטוס:** 🔴 נרשם, root cause מאומת עד השורה (כולל הערת-קוד קיימת שכבר מתעדת את הפער כ"ידוע"), לא תוקן. Contract עדיין `pending` — ראו המלצת ניקוי ידנית.
 - **עדכון ראיות (25/07/2026, דוח בדיקות Post-Merge של הבעלים, תרחישים 2/4 — לכאורה סותר, דורש בירור):** דוח הבדיקות מדווח **PASS**/**PASS חלקי** על שני תרחישי-דחייה — `contract_id=96ab2a59-4ab1-453f-b56f-b7bdeefbad00` (תרחיש 4, "callback הדחייה") עבר בפועל ל-`rejected` (`version: 2`), ו-`PM460-POSTMERGE-122-B` (תרחיש 2) לא יצר רשומת Task בטבלת היעד. זה **נראה סותר** את הסטטוס הרשום למעלה. **קריאת קוד ישירה בסבב הזה מאשרת שה-gap התיעודי עדיין קיים במדויק** ב-`app.py:2409-2449` (`elif action == "reject":` ב-`_handle_approval_callback_impl()` — הענף הזה עדיין רק קורא `bus.pop(action_id)`, אף פעם לא `ActionGateway.reject()`; הערת-הקוד הקיימת שם עדיין מתעדת את זה כפער ידוע, ללא שינוי). **אבל** נמצא בקוד מסלול-דחייה **שני**, נפרד לגמרי — מילות-ביטול בשפה חופשית (`_CANCEL_WORDS`, `app.py:176`) המנותבות דרך `core/action_gateway.py`'s `route_confirmation_word()`/`route_cancellation_word()`, אשר **כן** קוראות ל-`self.reject(contract.contract_id, ...)` (למשל `core/action_gateway.py:1690`, `1607`, `1517`) — מסלול הזה מעדכן את ה-`ActionContract` הקנוני נכון. **מסקנה זהירה, לא סופית:** ייתכן שדוח ה-Post-Merge בפועל תרגל את מסלול מילת-הביטול בשפה חופשית (שכבר עובד נכון) ולא את כפתור-הדחייה של Telegram (`_handle_approval_callback_impl`, שעדיין שבור) — הדוח לא מפרט אילו לחיצות/מילים בדיוק שימשו. **דורש בירור מפורש לפני שינוי סטטוס BUG-144:** אם הבדיקה בפועל לחצה על כפתור inline, זו ראיה חדשה שסותרת את הרישום למעלה וצריכה חקירה נפרדת; אם היא הקלידה מילת-ביטול חופשית, הדוח פשוט אימת מסלול-דחייה *אחר* מזה שה-BUG הזה מתעד, וסטטוס BUG-144 (כפתור inline) נשאר ללא שינוי. לא אומת ישירות מול Airtable/לוגים אמיתיים על ידי (Claude) בסבב הזה.
+- **עדכון מימוש (27/07/2026, PR #471):** callback reject מקושר כעת ל-ActionContract המדויק דרך correlation קנוני וקורא ל-`reject_with_lifecycle_result()` במקום להסתפק ב-`event_bus.pop()`. בדיקות callback hardening מאמתות מעבר durable ל-`rejected`, replay ללא שינוי lifecycle, ואפס dispatch. `ActionContracts` נשאר מקור האמת היחיד; לא נוסף state ל-Sessions או correlation store. payloads נכשלים במפורש מעל 64 bytes ואינם מקצרים contract ID.
+- **ממוזג:** ✅ `main` דרך PR #471 (`5e2c244` + תיקון CI `dadf851`, merge `c64da20`, 27/07/2026).
+- **סטטוס:** 🟡 Implemented but not yet verified — מומש ומוזג ועבר CI, אך טרם אומת בפועל בכפתור Telegram ב-staging/production אחרי deploy.
 
 ---
 
-## BUG-145 (CB-01 + CB-02B) — Approval/rejection callback שולח שתי הודעות סופיות למשתמש על אותה פעולה — 🔴 נרשם, לא תוקן (root cause מאומת בשני הענפים)
+## BUG-145 (CB-01 + CB-02B) — Approval/rejection callback שולח שתי הודעות סופיות למשתמש על אותה פעולה — 🟡 מומש ומוזג, טרם אומת ב-staging/production
 
 - **תאריך:** 24/07/2026.
 - **מקור:** CB-01 (approve) — שתי הודעות הצלחה על אותה פעולה. CB-02B (reject) — "🚫 בוטל" ואז הודעת ביטול נוספת עם פירוט הפעולה.
@@ -3306,6 +3311,9 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **היקף:** לא נגעתי בקוד. ממצא מבוסס תצפית משתמש ישירה + קריאת קוד לאימות.
 - **סטטוס:** 🔴 נרשם, root cause מאומת עד השורה בשני הענפים המקוריים, לא תוקן. תופעה נוספת (agent-spoke-in-gateway-turn) נצפתה ב-AG-03, קשר מדויק ל-root cause הקיים טרם אומת.
 - **עדכון ראיות (25/07/2026, דוח בדיקות Post-Merge של הבעלים, תרחיש 5 — "PM460-POSTMERGE-CB-APPROVE"):** מרחיב את ה-scope הרשום — עד כה תועד כפל-הודעות רק בענף **הצלחה**; הדוח מדווח כפל זהה גם בענף **כישלון-ביצוע**: `contract_id=81528313-9168-4820-bd9d-1ff1810e931b` עבר `approved`→`failed` (`version: 3`, `approved_by: boss_hq:eliyahu`), ואותה הודעת-כישלון נשלחה למשתמש **פעמיים**. עקבי עם ה-root cause הרשום למעלה (`app.py:2385-2400`): הענף שולח דרך `bot.send_message()`+`bot.edit_message_text()` ללא הבחנה בין success/failure ב-`result` — כך שהכפילות משוכפלת בדיוק גם כש-`result` מכיל טקסט-כישלון. **לא אומת ישירות מול לוגים/Airtable על ידי (Claude) בסבב הזה** — מבוסס על דוח הבעלים בלבד.
+- **עדכון מימוש (27/07/2026, PR #471):** callback acknowledgment מוגדר non-final. באותו chat, ההודעה המקורית נערכת והיא המשטח הסופי היחיד; ב-cross-chat נשמרת הודעת requester יחידה וה-keyboard של approver בלבד מוסר. `ApprovalLifecycleResult.final_response_count=1` ו-Gateway ownership מונעים fallback/retry/action-status/duplicate success של Agent לאחר handoff. בדיקות approve/reject/replay/stale/cross-chat מאמתות surface סופי יחיד.
+- **ממוזג:** ✅ `main` דרך PR #471 (`5e2c244` + תיקון CI `dadf851`, merge `c64da20`, 27/07/2026).
+- **סטטוס:** 🟡 Implemented but not yet verified — מומש ומוזג ועבר CI, אך טרם אומת בפועל ב-staging/production אחרי deploy.
 
 ---
 

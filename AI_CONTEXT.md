@@ -9,7 +9,9 @@
 > ומסמכי TurnCoordinator). מסמך זה נכתב ישירות מ-`main` (`5e691ea`) + `BUG_AUDIT_LOG.md`/`CHANGE_CONTROL_LOG.md`,
 > לא מ-`ROADMAP.md` בלבד, כדי לגשר על הפער.
 
-**עודכן:** 23/07/2026 (+ תוספת PR #449) · **main:** `e2d25af` (מיזוג PR #449)
+**עודכן:** 27/07/2026 (+ תוספת PR #471) · **main:** `c64da20` (מיזוג PR #471)
+
+**תוספת (27/07/2026):** PR #471 — Single-Speaker Approval UX Base — מוזג ל-`main`. `ApprovalLifecycleResult` הוא תוצאת ה-UX הקנונית למסלולי approval; Gateway מקבל בעלות על התשובה כשהדגל מופעל וה-Agent נעצר לאחר handoff. BUG-144 (reject callback שלא סגר `ActionContract`), BUG-145 (שתי הודעות סופיות) ו-BUG-118 (חשיפת tool/contract/record identifiers בתשובות הצלחה) מיושמים וממוזגים. Redaction של מזהים הוא בלתי-מותנה גם כשהדגל כבוי. `ActionContracts` נשאר מקור האמת היחיד. `FEATURE_SINGLE_SPEAKER_APPROVAL_UX=false` בקוד וב-`.env.example`; לא הופעל ב-staging/production. callback payload מקסימלי שנבדק: 53 bytes מתוך 64. `backend-ci`/`frontend-ci` עברו על `dadf851`. **אין עדיין staging/production verification**, ולכן אין לסמן את העבודה כ-Production Verified. deterministic cost cuts והיקפי PR2 נשארו במפורש מחוץ ל-PR הזה.
 
 **תוספת (23/07/2026, אחרי כתיבת הבריפינג הזה):** PR #449 (branch `claude/findings-exam-wikon-25zzkm`, שני commits תיקון+review-pass) — סבב ממצאים מ-`my-bot-approval-staging` (7 ממצאים, כולל דגימת production אמיתית מהבעלים). ראו §3 למטה לפירוט מלא. **הענף `claude/rp5-staging-fault-injection-v4akit` עבר rebase על גבי `main` (כולל PR #449) והועלה מחדש (force-push) — staging מריץ עכשיו את התיקון.**
 
