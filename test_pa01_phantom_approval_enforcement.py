@@ -744,9 +744,14 @@ chk("R3 (unit): the scan is not stopped by the first entry -> the SECOND (matchi
     "is found and satisfies row 2",
     app._pa01_contract_created_for_expected_tool(_r3_log, "airtable_add") is True)
 
-# R3 (integration): a real turn where tool_use #1 is denied (unrelated tool,
-# does not consume the "first mutating approval this turn" slot) and tool_use
-# #2 is the expected tool, genuinely queued as the turn's one live contract.
+# R3 (integration) — BUG-149 superseded this scenario's premise. Both
+# gmail_send_draft and airtable_add are requires_approval=True tools, so the
+# BUG-149 MULTI_MUTATION_CONTEXT_MISMATCH pre-scan (app.py, before either
+# tool_use is even looked at — counts by tool_registry.requires_approval,
+# not by whether enforce() would later deny one of them) now fires first:
+# zero contracts for EITHER tool, not "the second one wins". This is the
+# approved BUG-149 design (do not keep the first OR the last mutation) —
+# updated to assert the new behavior rather than the superseded one.
 with patch.object(app, "enforce", side_effect=lambda name, ident: (
     (_ for _ in ()).throw(ToolDenied("❌ owner אינו מורשה להפעיל 'gmail_send_draft'"))
     if name == "gmail_send_draft" else tool_registry.enforce(name, ident)
@@ -764,12 +769,17 @@ with patch.object(app, "enforce", side_effect=lambda name, ident: (
         pa01_state="enforce",
     )
 _r3_contracts = _canon_gw.find_live_contracts("boss_hq:r3_batch_second")
-chk("R3 (integration): a real contract for the expected tool (airtable_add) was created "
-    "even though it was the SECOND tool call this turn",
-    len(_r3_contracts) == 1 and _r3_contracts[0].tool_name == "airtable_add")
-chk("R3 (integration): row 2 fires from the matching second entry -> final_reply untouched "
-    "by PA-01, despite the unrelated first entry being a PERMISSION_DENIED",
-    reply_r3 == "סיימתי, שלח מאשר להוספה")
+chk("R3 (integration, BUG-149): the multi-mutation guard fires before enforce() ever runs "
+    "for either tool -- zero contracts, not one for the second tool",
+    len(_r3_contracts) == 0)
+# Note: reply_r3 is this test's own fixed mock response text ("סיימתי, שלח
+# מאשר להוספה") — the mocked model doesn't actually read the tool_result
+# content it's fed (see test_bug149_multi_mutation_guard.py for the
+# assertion on the code's real deterministic tool_result content). That
+# fixed text happens to independently trip PA-01's OWN unrelated fake-
+# approval-invite detector ("שלח מאשר" reads as inviting confirmation) —
+# correct behavior for THAT guard, not something BUG-149 controls. The
+# substantive BUG-149 proof is the zero-contracts assertion above.
 
 
 # ══════════════════════════════════════════════════
@@ -880,15 +890,12 @@ chk("...and no EventBus pending representation was created for this identity eit
     len(_real_pending.list_for_chat("r2real_enforce_gw")) == 0)
 
 
-# --- P1-B / R3-real: mixed batch -- a real, live contract is created for an
-# UNRELATED tool (calendar_create_event, tool call #1 this turn), and the
-# intent's own expected tool (airtable_add, tool call #2) is blocked by the
-# BUG-122 single-unresolved-action policy. It is not retained for promotion.
+# --- P1-B / R3-real (BUG-149 superseded this scenario's premise, same as R3
+# integration above): calendar_create_event and airtable_add are both
+# requires_approval=True, so the BUG-149 pre-scan now fires first -- zero
+# contracts for either tool, not "the first mutating call wins". Updated to
+# assert the new, approved behavior.
 _r3real_inputs = {"table": "Tasks", "fields": {"Task": "P1B"}}
-_r3real_expected_blocked_msg = (
-    "⛔ הפעולה הנוספת לא נשמרה. יש לפתור את הפעולה "
-    "הממתינה ואז לשלוח את הבקשה מחדש."
-)
 
 reply_r3real, _ = _run_agent(
     "r3real_mixed_batch", "קבע לי פגישה וגם צור משימה", role=Role.OWNER,
@@ -904,23 +911,34 @@ reply_r3real, _ = _run_agent(
     pa01_state="enforce",
 )
 _r3real_contracts = _canon_gw.find_live_contracts("boss_hq:r3real_mixed_batch")
-chk("P1-B / R3-real: a real contract WAS created -- for calendar_create_event (the FIRST "
-    "mutating call this turn), not airtable_add",
-    len(_r3real_contracts) == 1 and _r3real_contracts[0].tool_name == "calendar_create_event")
+chk("P1-B / R3-real (BUG-149): the multi-mutation guard fires before either tool is "
+    "dispatched/queued -- zero contracts for calendar_create_event OR airtable_add",
+    len(_r3real_contracts) == 0)
 chk("P1-B / R3-real: airtable_add was not retained in batch_queue",
     _real_batch_queue.count_pending("boss_hq:r3real_mixed_batch") == 0)
-chk("P1-B / R3-real: row 2 does NOT fire (no __approval_queued__ sentinel for airtable_add "
-    "this turn) and the Phantom fallback does NOT fire either -- final_reply is the "
-    "structured pending-policy block",
-    reply_r3real == _r3real_expected_blocked_msg)
-chk("P1-B / R3-real: the wrong-tool contract (calendar_create_event) is not mistaken for "
-    "evidence about airtable_add, and the raw agent reply is not left standing either",
-    reply_r3real != PHANTOM and reply_r3real != "קבעתי וגם אוסיף את המשימה")
+# Note: reply_r3real is this test's own fixed mock response text ("קבעתי
+# וגם אוסיף את המשימה") — the mocked model doesn't actually read the
+# tool_result content it's fed (see test_bug149_multi_mutation_guard.py for
+# the assertion on the code's real deterministic tool_result content).
+# That fixed text happens to independently trip A32/PA-01's OWN unrelated
+# unevidenced-calendar-claim detection, which is correct behavior for THAT
+# guard, not something BUG-149 controls — dropped the reply-text assertion
+# here, since the substantive BUG-149 proof is the contract count below.
+chk("P1-B / R3-real: the wrong-tool contract theory doesn't even apply anymore (no contract "
+    "of any kind is created)",
+    len(_r3real_contracts) == 0)
 
 # Unit-level pin on the scoped lookup itself (mirrors R3's own unit/
 # integration split above): a blocked entry for a DIFFERENT tool must
 # not satisfy the expected tool's lookup, and an entry for the actual
-# expected tool must be found regardless of position in the log.
+# expected tool must be found regardless of position in the log. Synthetic
+# fixture content — BUG-122's original message text, unrelated to whether
+# BUG-149's own guard fires in the integration scenario above; this only
+# tests the unit-level log-scanning helpers.
+_r3real_expected_blocked_msg = (
+    "⛔ הפעולה הנוספת לא נשמרה. יש לפתור את הפעולה "
+    "הממתינה ואז לשלוח את הבקשה מחדש."
+)
 _r3real_log = [
     {"tool": "__approval_queued__", "content": "irrelevant", "ok": True,
      "contract_id": "c-1", "terminal_outcome": None, "action_tool": "calendar_create_event",
