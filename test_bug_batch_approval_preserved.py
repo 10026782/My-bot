@@ -55,7 +55,12 @@ promotion_src = inspect.getsource(app._promote_next_batch_item)
 chk("resolution cleanup contains no queue pop", ".pop_next(" not in promotion_src)
 chk("resolution cleanup contains no approval creation", "_queue_approval(" not in promotion_src)
 
-run_agent_src = inspect.getsource(app.run_agent)
+# RP5 staging fault-injection (core/rp5_fault_injection.py) wraps the real
+# tool loop in a thin run_agent() -> _run_agent_impl() indirection so turn
+# state always gets cleared. Inspect whichever one actually holds the tool
+# loop, so this check is correct with or without that wrapper present.
+run_agent_impl = getattr(app, "_run_agent_impl", app.run_agent)
+run_agent_src = inspect.getsource(run_agent_impl)
 chk("tool loop no longer enqueues deferred items", ".enqueue(" not in run_agent_src)
 chk("same-turn second mutation is classified as blocked", "APPROVAL_BLOCKED_PENDING" in run_agent_src)
 chk("blocked mutation tells the user to resend", "לשלוח את הבקשה מחדש" in run_agent_src)
