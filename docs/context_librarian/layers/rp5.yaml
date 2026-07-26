@@ -1,0 +1,56 @@
+{
+  "schema_version": "1.0",
+  "layer_id": "rp5",
+  "nodes": [{
+    "id": "layer.rp5",
+    "name": "RP5 Evidence Finalizer",
+    "type": "layer",
+    "status": "shadow",
+    "authority_level": "canonical_contract",
+    "source_of_truth": {
+      "is_authority": false,
+      "scope": "evidence-derived final response classification and claim comparison",
+      "precedence": "consumes verified tool/approval outcomes; never creates execution or lifecycle truth"
+    },
+    "owner": "rp5",
+    "code_paths": [
+      "core/turn_evidence.py",
+      "core/anti_hallucination.py",
+      "core/dispatcher_outcome.py",
+      "app.py"
+    ],
+    "test_paths": [
+      "test_turn_evidence_shadow.py",
+      "test_f52_pr6_pending_shadow.py",
+      "test_a32_enforcement.py",
+      "test_a32_approval_prose_suppression.py",
+      "test_bug123_approval_rendering_fail_closed.py"
+    ],
+    "canonical_docs": [
+      {"path": "BOSS_AGENT_RELIABILITY_AND_PERMISSION_HARDENING_SPEC.md", "role": "R4/R5 evidence finalization contract", "status": "active"},
+      {"path": "RP5_PREFLIGHT_BLOCKER.md", "role": "RP5 blocker and sequencing decisions", "status": "planning_only"},
+      {"path": "docs/architecture/f52-unified-approval-runtime/spec/UNIFIED_MESSAGE_UX_STANDARD.md", "role": "relationship to UX rendering", "status": "active"}
+    ],
+    "production_evidence": [
+      {"path": "RP5_LOG_OBSERVATION_23JUL2026.md", "observed_on": "2026-07-23", "scope": "staging shadow sample checkpoint; not enforcement proof", "status": "checkpoint"}
+    ],
+    "feature_flags": [
+      {"name": "FEATURE_EVIDENCE_FINALIZER", "default_state": "off", "documented_state": "off/shadow/enforce, but enforce remains comparison-only on current main", "evidence_scope": "code accessor and preflight blocker"}
+    ],
+    "valid_from": "2026-07-23",
+    "last_verified_commit": "59e74be",
+    "confidence": 0.92,
+    "notes": [
+      "The current implementation compares claims and always returns user text unchanged in shadow/enforce states.",
+      "No completion claim is supported by read-only evidence or model prose.",
+      "Historical mismatch samples do not override later verified evidence."
+    ],
+    "extensions": {"boss.layer_aliases": ["supporting-layer", "EvidenceFinalizer", "RP4-RP5"]}
+  }],
+  "edges": [
+    {"from": "layer.rp5", "to": "layer.tools", "type": "depends_on", "notes": "Classification consumes structured dispatcher and verifier outcomes."},
+    {"from": "layer.rp5", "to": "layer.approvals", "type": "depends_on", "notes": "Approval pending/completion states consume canonical contract facts."},
+    {"from": "layer.rp5", "to": "layer.ux_f52", "type": "proposes_to", "notes": "Evidence status informs UX rendering without owning wording."},
+    {"from": "layer.rp5", "to": "decision.production_verification", "type": "governed_by", "notes": "Shadow comparison is not production enforcement verification."}
+  ]
+}

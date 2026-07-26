@@ -1,0 +1,58 @@
+{
+  "schema_version": "1.0",
+  "layer_id": "core_reasoning",
+  "nodes": [{
+    "id": "layer.core_reasoning",
+    "name": "Core Reasoning / U1 / BUG-104",
+    "type": "layer",
+    "status": "shadow",
+    "authority_level": "runtime_main",
+    "source_of_truth": {
+      "is_authority": true,
+      "scope": "read-only lead reasoning projection and business-state interpretation",
+      "precedence": "current main code and executable tests override planning specifications"
+    },
+    "owner": "core_reasoning",
+    "code_paths": [
+      "core/leads_reasoning_projection.py",
+      "core/adapters/leads_adapter.py",
+      "core/reasoning_engines.py",
+      "core/reasoning_entity.py",
+      "core/reasoning_ports.py",
+      "tma_api.py"
+    ],
+    "test_paths": [
+      "test_core_reasoning.py",
+      "test_bug104_leads_reasoning_projection.py",
+      "test_bug104_phase1_1_contract_hardening.py",
+      "test_bug104_phase2a1_current_state_policy.py",
+      "test_bug104_phase2a2_lead_wording.py",
+      "test_bug104_tma_lead_event_bridge.py"
+    ],
+    "canonical_docs": [
+      {"path": "docs/architecture/bug-104/PHASE_2A_CLOSEOUT.md", "role": "current closeout", "status": "active"},
+      {"path": "docs/architecture/bug-104/PHASE_2A0_LEADS_SCHEMA_CANONICALIZATION_SPEC.md", "role": "input canonicalization specification", "status": "planning_only"},
+      {"path": "docs/architecture/bug-104/PHASE_2A1_CURRENT_STATE_POLICY_SPEC.md", "role": "state policy specification", "status": "planning_only"}
+    ],
+    "production_evidence": [
+      {"path": "docs/architecture/bug-104/PHASE_2A_CLOSEOUT.md", "observed_on": "2026-07-17", "scope": "operator-provided Render shadow excerpts; repository tests remain independently reproducible evidence", "status": "limited"}
+    ],
+    "feature_flags": [
+      {"name": "FEATURE_CORE_REASONING_LEADS_STATE", "default_state": "off", "documented_state": "off/shadow by environment; never infer on", "evidence_scope": "repository documentation, not a current environment read"}
+    ],
+    "valid_from": "2026-07-17",
+    "last_verified_commit": "59e74be",
+    "confidence": 0.93,
+    "notes": [
+      "Read-only projection; must not own tool execution or writes.",
+      "Phase 2A.0 remains specification-only; Phase 2A.1/2A.2 code is merged but rollout is flag-gated.",
+      "Do not automatically load approval history for a Core Reasoning-only task."
+    ],
+    "extensions": {"boss.layer_aliases": ["U1", "BUG-104", "layer-1"]}
+  }],
+  "edges": [
+    {"from": "layer.core_reasoning", "to": "decision.cross_layer_authority", "type": "governed_by", "notes": "Cross-layer impact rules constrain authority changes."},
+    {"from": "layer.core_reasoning", "to": "layer.turn_coordinator", "type": "proposes_to", "notes": "Reasoning supplies business-state signals; it does not route or execute."},
+    {"from": "layer.core_reasoning", "to": "layer.tools", "type": "must_not_own", "notes": "Core Reasoning must never dispatch tools or writes."}
+  ]
+}

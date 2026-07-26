@@ -1,0 +1,173 @@
+{
+  "schema_version": "1.0",
+  "nodes": [
+    {
+      "id": "decision.main_overrides_planning",
+      "name": "Main overrides planning documents",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "canonical_contract",
+      "source_of_truth": {"is_authority": true, "scope": "repository reality precedence", "precedence": "current main code and tests first"},
+      "owner": "governance",
+      "code_paths": [],
+      "test_paths": [],
+      "canonical_docs": [
+        {"path": "GOVERNANCE_RULES.md", "role": "Rule 13 Main Is Reality", "status": "active"},
+        {"path": "AI_CONTEXT.md", "role": "current briefing with explicit main precedence", "status": "active"}
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-06-30",
+      "last_verified_commit": "59e74be",
+      "confidence": 1.0,
+      "notes": ["A generated bundle or planning document cannot override main."]
+    },
+    {
+      "id": "decision.actioncontracts_authority",
+      "name": "ActionContracts is canonical for approval lifecycle",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "canonical_contract",
+      "source_of_truth": {"is_authority": true, "scope": "approval lifecycle", "precedence": "canonical ActionContract state over legacy queues and presentation state"},
+      "owner": "action_contracts",
+      "code_paths": ["core/action_gateway.py", "core/action_contract_repository.py"],
+      "test_paths": ["test_pr0c_action_contract_repository.py", "test_pr0c_action_contracts_persistence.py"],
+      "canonical_docs": [
+        {"path": "docs/architecture/f52-unified-approval-runtime/decisions/DECISION_LOG.md", "role": "closed F52 lifecycle decisions", "status": "active"},
+        {"path": "docs/architecture/CROSS_LAYER_AUTHORITY_CONTRACT_V1.md", "role": "cross-layer ownership boundary", "status": "active"}
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-07-23",
+      "last_verified_commit": "59e74be",
+      "confidence": 1.0,
+      "notes": ["Legacy IDs may resolve an existing contract but never create, infer, or repair one."]
+    },
+    {
+      "id": "decision.no_new_source_of_truth",
+      "name": "No new source of truth",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "canonical_contract",
+      "source_of_truth": {"is_authority": true, "scope": "cross-layer architecture", "precedence": "existing domain owners retain authority"},
+      "owner": "governance",
+      "code_paths": [],
+      "test_paths": [],
+      "canonical_docs": [
+        {"path": "docs/architecture/CROSS_LAYER_AUTHORITY_CONTRACT_V1.md", "role": "parallel source-of-truth prohibition", "status": "active"},
+        {"path": "GOVERNANCE_RULES.md", "role": "Rule 17 Single Source of Status", "status": "active"}
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-07-23",
+      "last_verified_commit": "59e74be",
+      "confidence": 1.0,
+      "notes": ["The Context Librarian is metadata and references only."]
+    },
+    {
+      "id": "decision.shadow_not_active",
+      "name": "Shadow, flag-off, and planning-only are not production-active",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "canonical_contract",
+      "source_of_truth": {"is_authority": true, "scope": "rollout status interpretation", "precedence": "verified environment and behavior evidence over code defaults"},
+      "owner": "governance",
+      "code_paths": ["feature_flags.py"],
+      "test_paths": ["test_feature_flags_cutover.py"],
+      "canonical_docs": [
+        {"path": "BOSS_AGENT_RELIABILITY_AND_PERMISSION_HARDENING_SPEC.md", "role": "rollout gates", "status": "active"}
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-07-23",
+      "last_verified_commit": "59e74be",
+      "confidence": 1.0,
+      "notes": ["A code default is not evidence of the current deployed environment."]
+    },
+    {
+      "id": "decision.production_verification",
+      "name": "Completion claims require production verification",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "canonical_contract",
+      "source_of_truth": {"is_authority": true, "scope": "completion status claims", "precedence": "merge plus deployment plus live verification"},
+      "owner": "governance",
+      "code_paths": [],
+      "test_paths": [],
+      "canonical_docs": [
+        {"path": "GOVERNANCE_RULES.md", "role": "Rule 15 No Claim Without Verification", "status": "active"},
+        {"path": "AGENTS.md", "role": "post-merge verification procedure", "status": "active"}
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-06-30",
+      "last_verified_commit": "59e74be",
+      "confidence": 1.0,
+      "notes": ["Without all three gates report Implemented but not yet verified."]
+    },
+    {
+      "id": "decision.historical_evidence_precedence",
+      "name": "Later verified evidence overrides historical failures",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "canonical_contract",
+      "source_of_truth": {"is_authority": true, "scope": "evidence chronology", "precedence": "later verified main/production evidence over older observations"},
+      "owner": "governance",
+      "code_paths": [],
+      "test_paths": [],
+      "canonical_docs": [
+        {"path": "AI_CONTEXT.md", "role": "dated evidence and staleness guidance", "status": "active"}
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-07-23",
+      "last_verified_commit": "59e74be",
+      "confidence": 0.98,
+      "notes": ["Preserve historical failures as evidence, but do not treat them as current state without re-verification."]
+    },
+    {
+      "id": "decision.ux_no_internal_ids",
+      "name": "UX must not expose internal IDs or tool names",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "canonical_contract",
+      "source_of_truth": {"is_authority": true, "scope": "user-facing message safety", "precedence": "business descriptions and safe display payloads only"},
+      "owner": "ux_f52",
+      "code_paths": ["core/agent_message_formatter.py", "core/action_gateway.py"],
+      "test_paths": ["test_agent_message_formatter_display_payload.py", "test_f52_status_reply_reconciliation.py"],
+      "canonical_docs": [
+        {"path": "docs/architecture/f52-unified-approval-runtime/spec/UNIFIED_MESSAGE_UX_STANDARD.md", "role": "UX source of truth", "status": "active"}
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-07-23",
+      "last_verified_commit": "59e74be",
+      "confidence": 1.0,
+      "notes": ["Do not expose record IDs, contract IDs, payloads, credentials, or internal tool names."]
+    },
+    {
+      "id": "decision.cross_layer_authority",
+      "name": "Cross-layer authority matrix is mandatory",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "canonical_contract",
+      "source_of_truth": {"is_authority": true, "scope": "changes spanning reasoning, routing, approvals, tools, UX, or evidence", "precedence": "complete impact matrix and proof of non-impact before implementation"},
+      "owner": "governance",
+      "code_paths": [],
+      "test_paths": [],
+      "canonical_docs": [
+        {"path": "docs/architecture/CROSS_LAYER_AUTHORITY_CONTRACT_V1.md", "role": "cross-layer authority contract", "status": "active"}
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-07-23",
+      "last_verified_commit": "59e74be",
+      "confidence": 1.0,
+      "notes": ["Layer numbering aliases must not overwrite semantic ownership boundaries."]
+    }
+  ],
+  "edges": [
+    {"from": "decision.actioncontracts_authority", "to": "decision.no_new_source_of_truth", "type": "governed_by", "notes": "Approval lifecycle cannot be duplicated."},
+    {"from": "decision.ux_no_internal_ids", "to": "decision.production_verification", "type": "governed_by", "notes": "Safe wording still requires live verification before completion claims."}
+  ]
+}

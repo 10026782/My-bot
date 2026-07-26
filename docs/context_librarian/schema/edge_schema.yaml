@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0",
+  "kind": "context_librarian_edge_schema",
+  "required": ["from", "to", "type", "notes"],
+  "edge_types": [
+    "depends_on",
+    "calls",
+    "proposes_to",
+    "executes_via",
+    "requires_approval_via",
+    "source_of_truth_for",
+    "must_not_own",
+    "verified_by",
+    "rendered_by",
+    "supersedes",
+    "conflicts_with",
+    "governed_by",
+    "blocked_by"
+  ],
+  "generic_relationships": "forbidden",
+  "traversal_rule": "an edge is traversable only when its type is listed by the selected task profile",
+  "extension_policy": {
+    "unknown_edge_fields": "rejected",
+    "namespaced_extensions": "allowed only inside the extensions object",
+    "new_edge_types": "require a schema minor version and explicit profile opt-in"
+  }
+}

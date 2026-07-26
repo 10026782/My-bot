@@ -1,0 +1,58 @@
+{
+  "schema_version": "1.0",
+  "layer_id": "turn_coordinator",
+  "nodes": [{
+    "id": "layer.turn_coordinator",
+    "name": "Turn Coordinator",
+    "type": "layer",
+    "status": "shadow",
+    "authority_level": "canonical_contract",
+    "source_of_truth": {
+      "is_authority": true,
+      "scope": "planned turn routing, precedence, and reply ownership contract",
+      "precedence": "observation code is current; frozen decision contract is planning-only until approved"
+    },
+    "owner": "turn_coordinator",
+    "code_paths": [
+      "core/turn_envelope.py",
+      "core/router/router.py",
+      "core/router/route_decision.py",
+      "core/lead_candidate_handler.py",
+      "app.py"
+    ],
+    "test_paths": [
+      "test_turn_envelope.py",
+      "test_pa01_phantom_approval_enforcement.py",
+      "test_pr0_ingress_context_gate.py",
+      "test_pr0_pending_approval_context_safety.py",
+      "test_bug114_context_interrupt_amplification.py",
+      "test_bug115_confirmation_routing_bookmark.py"
+    ],
+    "canonical_docs": [
+      {"path": "docs/architecture/turn-coordinator/README.md", "role": "program index and current phase description", "status": "active"},
+      {"path": "docs/architecture/turn-coordinator/TURN_COORDINATOR_BEHAVIOR_CONTRACT_V1.md", "role": "frozen behavior contract", "status": "planning_only"},
+      {"path": "docs/architecture/turn-coordinator/PHASE_2_SHADOW_PLANNING_GATE.md", "role": "shadow planning gate", "status": "planning_only"}
+    ],
+    "production_evidence": [
+      {"path": "docs/architecture/turn-coordinator/LOG_OBSERVATION_23JUL2026.md", "observed_on": "2026-07-23", "scope": "staging observation of TurnEnvelope/ownership signals", "status": "checkpoint"}
+    ],
+    "feature_flags": [
+      {"name": "FEATURE_PA01_ENFORCEMENT_STATE", "default_state": "off", "documented_state": "separate off/shadow/enforce guard; not a TurnCoordinator activation flag", "evidence_scope": "code accessor"}
+    ],
+    "valid_from": "2026-07-23",
+    "last_verified_commit": "59e74be",
+    "confidence": 0.91,
+    "notes": [
+      "No class TurnCoordinator exists on main; Phase 0 TurnEnvelope instrumentation is observation-only.",
+      "route_request and handle_lead_candidate are current de-facto routing/ownership surfaces.",
+      "The coordinator consumes typed signals and must not invent business state or approval policy."
+    ],
+    "extensions": {"boss.layer_aliases": ["layer-2", "routing", "reply-ownership"]}
+  }],
+  "edges": [
+    {"from": "layer.turn_coordinator", "to": "layer.approvals", "type": "requires_approval_via", "notes": "Routing may select an approval path but cannot create approval truth."},
+    {"from": "layer.turn_coordinator", "to": "layer.tools", "type": "proposes_to", "notes": "A future decision selects a handler; execution stays downstream."},
+    {"from": "layer.turn_coordinator", "to": "decision.cross_layer_authority", "type": "governed_by", "notes": "The behavior contract is blocked on the cross-layer matrix."},
+    {"from": "layer.turn_coordinator", "to": "decision.actioncontracts_authority", "type": "must_not_own", "notes": "Turn state cannot replace approval lifecycle authority."}
+  ]
+}

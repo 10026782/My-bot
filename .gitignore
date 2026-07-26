@@ -17,3 +17,6 @@ reports/runtime/
 # scripts/render_log_export.py — raw log exports, checkpoint, derived DB.
 # See docs/architecture/turn-coordinator/PHASE_2_SHADOW_PLANNING_GATE.md §6.
 render_logs/
+
+# Context Librarian bundles are disposable navigation artifacts.
+docs/context_librarian/generated/*.md
