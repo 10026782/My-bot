@@ -286,8 +286,8 @@ _reject_branch_code_only = "\n".join(
     line for line in _reject_branch_src.splitlines()
     if not line.strip().startswith("#")
 )
-chk("T6: Telegram reject calls ActionGateway.reject()",
-    ".reject(" in _reject_branch_code_only)
+chk("T6: Telegram reject uses the canonical ActionGateway rejection boundary",
+    ".reject_with_lifecycle_result(" in _reject_branch_code_only)
 chk("T6: Telegram reject verifies the durable rejected status",
     '_reject_after.status != "rejected"' in _reject_branch_code_only)
 

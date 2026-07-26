@@ -87,7 +87,7 @@ r = _propose_lead(gw)
 chk("DoD1: propose ok", r.ok)
 reply = gw.route_confirmation_word("boss_hq:owner_1", approver_role="owner")
 chk("DoD1: executed immediately", len(executions) == 1)
-chk("DoD1: reply reports success", "בוצע" in reply)
+chk("DoD1: reply reports canonical success", "הפעולה הושלמה" in reply)
 
 
 # ══════════════════════════════════════════════════
@@ -145,7 +145,7 @@ reply2 = gw.route_confirmation_word("boss_hq:owner_4", approver_role="owner")  #
 chk("DoD4: executed exactly once after second כן", len(executions) == 1)
 chk("DoD4: executed the original payload unchanged",
     executions[0] == ("gmail_send_draft", {"to": "a@b.com", "subject": "q"}))
-chk("DoD4: reply reports success", "בוצע" in reply2)
+chk("DoD4: reply reports canonical success", "הפעולה הושלמה" in reply2)
 
 
 # ══════════════════════════════════════════════════
@@ -207,11 +207,11 @@ r2 = gw.propose_action(
 gw.mark_context_interrupted("boss_hq:owner_7")  # both now context_interrupted=True
 list_reply = gw.route_confirmation_word("boss_hq:owner_7", approver_role="owner")
 chk("DoD7: shows numbered disambiguation list, not a reconfirm prompt",
-    "איזו" in list_reply and "לאשר אותה" not in list_reply)
+    "יש כמה פעולות שממתינות לאישור" in list_reply and "לאשר אותה" not in list_reply)
 chk("DoD7: nothing executed yet", len(executions) == 0)
 pick_reply = gw.route_disambiguation("boss_hq:owner_7", "1", approver_role="owner")
 chk("DoD7: disambiguation pick executes directly (unaffected by interruption flag)",
-    len(executions) == 1 and "בוצע" in pick_reply)
+    len(executions) == 1 and "הפעולה הושלמה" in pick_reply)
 
 
 # ══════════════════════════════════════════════════

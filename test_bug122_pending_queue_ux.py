@@ -172,8 +172,10 @@ with patch.object(session_store.lead_sessions, "get_last_prompted_contract", ret
 
 chk(
     "confirm word with exactly one live contract reaches approve() "
-    "(executor-missing fail-closed reply, not a permission denial)",
-    "Gateway executor" in _reply_a,
+    "(canonical fail-closed reply, not a permission denial)",
+    "הפעולה לא הושלמה" in _reply_a
+    and "אישור בעלים" not in _reply_a
+    and "Gateway" not in _reply_a,
 )
 chk("confirm word reply is not the generic queue-resolution message",
     "בקשות הממתינות לאישור" not in _reply_a)

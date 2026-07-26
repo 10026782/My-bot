@@ -122,7 +122,7 @@ reply1 = gw1.route_confirmation_word(USER, approver_role="owner")
 chk("Test 1: 6 old unrelated contracts don't prevent direct resolution of the bookmarked one",
     ex1 == [("airtable_add", fresh.contract_id)])
 chk("Test 1: reply reports success, not a disambiguation menu",
-    "בוצע" in reply1 and "איזו" not in reply1)
+    "הפעולה הושלמה" in reply1 and "יש כמה פעולות" not in reply1)
 chk("Test 1: the 6 old contracts are all still untouched/pending",
     all(gw1.find_contract(cid).status == "pending" for cid in old_ids))
 
@@ -139,7 +139,7 @@ c2b = _propose(gw2, USER, table="Tasks", fields={"b": 2})
 
 reply2 = gw2.route_confirmation_word(USER, approver_role="owner")
 chk("Test 2: no bookmark + 2 live contracts -> generic disambiguation shown",
-    "יש כמה פעולות הממתינות לאישור" in reply2)
+    "יש כמה פעולות שממתינות לאישור" in reply2)
 chk("Test 2: nothing executed yet (still ambiguous)", ex2 == [])
 chk("Test 2: disambiguation text does NOT contain the raw tool name 'airtable_update'",
     "airtable_update" not in reply2)
@@ -162,7 +162,7 @@ _sess["last_prompted_contract"]["set_at"] = time.time() - 700
 
 reply3 = gw3.route_confirmation_word(USER, approver_role="owner")
 chk("Test 3: expired bookmark (>600s) falls through to generic disambiguation",
-    "יש כמה פעולות הממתינות לאישור" in reply3)
+    "יש כמה פעולות שממתינות לאישור" in reply3)
 chk("Test 3: nothing executed (fell through, still ambiguous)", ex3 == [])
 
 # ══════════════════════════════════════════════════

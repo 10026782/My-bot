@@ -28,9 +28,9 @@ approval execution logic change.
 
 from __future__ import annotations
 
-import inspect
 import os
 import sys
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -43,6 +43,7 @@ os.environ.setdefault("SETUP_WEBHOOK", "0")
 
 import app  # noqa: E402  (env vars above must be set before import)
 import event_bus  # noqa: E402
+from core.action_gateway import build_approval_lifecycle_result  # noqa: E402
 
 passed = failed = 0
 
@@ -145,25 +146,26 @@ chk("gmail_send_draft with a recipient -> real business label including the reci
 
 
 # ══════════════════════════════════════════════════
-# app._legacy_pending_text — no raw contract/action_id in visible text
-# (static source check: the live prompt-building code path requires a real
-# telebot bot + owner chat id + ActionGateway wiring to exercise end-to-end;
-# the f-string template itself is what BUG-123-FU changed, so this asserts
-# directly on that template rather than reconstructing the whole send flow)
+# Canonical pending lifecycle rendering — no raw contract/action_id in visible
+# text. PR1 replaced the former app._legacy_pending_text template with this
+# structured projection, so test the active renderer rather than dead source.
 # ══════════════════════════════════════════════════
 
-print("\n── app._legacy_pending_text template: no raw action_id ─")
+print("\n── canonical pending renderer: no raw action_id ─")
 
-_src = inspect.getsource(app)
-_template_line = next(
-    (line for line in _src.splitlines() if "_legacy_pending_text = f" in line), None,
-)
-chk("_legacy_pending_text template found in app.py", _template_line is not None)
-if _template_line is not None:
-    chk('_legacy_pending_text template no longer interpolates "{action_id}"',
-        "{action_id}" not in _template_line)
-    chk('_legacy_pending_text template still shows the expiry countdown',
-        "פג תוקף" in _template_line)
+_action_id = "123e4567-e89b-12d3-a456-426614174000"
+_pending_result = build_approval_lifecycle_result(SimpleNamespace(
+    contract_id=_action_id,
+    status="pending",
+    tool_name="airtable_add",
+    normalized_payload={"table": "Tasks", "fields": {"Name": "Follow up"}},
+))
+chk("canonical pending renderer returns the pending lifecycle state",
+    _pending_result.canonical_state == "pending")
+chk("canonical pending renderer does not expose the raw action/contract id",
+    _action_id not in _pending_result.safe_user_message)
+chk("canonical pending renderer does not expose the raw tool name",
+    "airtable_add" not in _pending_result.safe_user_message)
 
 
 # ══════════════════════════════════════════════════

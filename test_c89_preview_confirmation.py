@@ -104,7 +104,8 @@ def test_confirm_yes_resolves_via_gateway_and_writes():
         confirm_reply = gw.route_confirmation_word(identity.memory_key, approver_role=identity.role)
 
     assert confirm_reply is not None
-    assert "בוצע" in confirm_reply or VALID_REC_ID in confirm_reply, f"confirm_reply={confirm_reply!r}"
+    assert "הפעולה הושלמה" in confirm_reply, f"confirm_reply={confirm_reply!r}"
+    assert VALID_REC_ID not in confirm_reply, f"confirm_reply exposed record id: {confirm_reply!r}"
     live_after = gw.find_live_contracts(identity.memory_key)
     assert len(live_after) == 0, "contract must no longer be pending after execution"
     contract = gw.find_contract(live_before[0].contract_id)
@@ -132,7 +133,7 @@ def test_cancel_no_clears_pending_no_write():
         cancel_reply = gw.route_cancellation_word(identity.memory_key)
 
     assert cancel_reply is not None
-    assert "בוטל" in cancel_reply, f"cancel_reply={cancel_reply!r}"
+    assert cancel_reply == "🚫 הפעולה בוטלה.", f"cancel_reply={cancel_reply!r}"
     live_after = gw.find_live_contracts(identity.memory_key)
     assert len(live_after) == 0, "no contract should remain pending after cancel"
     contract = gw.find_contract(live_before[0].contract_id)
@@ -140,7 +141,7 @@ def test_cancel_no_clears_pending_no_write():
     # Confirming afterward must find nothing pending (no accidental write).
     with patch("core.action_gateway.action_gateway", gw):
         confirm_after_cancel = gw.route_confirmation_word(identity.memory_key, approver_role=identity.role)
-    assert confirm_after_cancel == "אין פעולה שממתינה לאישור.", f"got={confirm_after_cancel!r}"
+    assert confirm_after_cancel == "הפעולה כבר נדחתה", f"got={confirm_after_cancel!r}"
     return "OK"
 
 

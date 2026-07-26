@@ -1179,7 +1179,10 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
     from feature_flags import is_enabled as _flag
     _gw_result = None  # PA-01: keep defined even if the shadow-mode try/except below never assigns it
     if _flag("FEATURE_ACTION_GATEWAY"):
-        from core.action_gateway import action_gateway as _gw
+        from core.action_gateway import (
+            action_gateway as _gw,
+            build_approval_lifecycle_result,
+        )
         tenant_id = getattr(identity, "tenant_id", "boss_hq")
         _gw_result = _gw.propose_action(
             tenant_id=tenant_id,
@@ -1214,12 +1217,15 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
                     "action_tool": tool_name, "created_this_turn": False,
                 }
             if _gw_result.failure_code == "existing_pending_blocks_agent":
-                _pending_lifecycle = _gw.lifecycle_result(_gw_result.contract_id)
+                _pending_lifecycle = build_approval_lifecycle_result(
+                    _gw.find_contract(_gw_result.contract_id),
+                    canonical_state="pending_conflict",
+                )
                 return {
                     "message": _pending_lifecycle.safe_user_message,
                     "contract_id": _gw_result.contract_id,
-                    "ok": True,
-                    "terminal_outcome": None,
+                    "ok": False,
+                    "terminal_outcome": "APPROVAL_QUEUE_ERROR",
                     "action_tool": tool_name,
                     "created_this_turn": False,
                     "owner_notified": False,
@@ -1243,7 +1249,10 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
         # Shadow mode records proposals without enforcement, except for the
         # canonical BUG-122 boundary shared by both gateway modes.
         try:
-            from core.action_gateway import action_gateway as _gw
+            from core.action_gateway import (
+                action_gateway as _gw,
+                build_approval_lifecycle_result,
+            )
             tenant_id = getattr(identity, "tenant_id", "boss_hq")
             _gw_result = _gw.propose_action(
                 tenant_id=tenant_id,
@@ -1269,12 +1278,15 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
                     "action_tool": tool_name, "created_this_turn": False,
                 }
             if _gw_result.failure_code == "existing_pending_blocks_agent":
-                _pending_lifecycle = _gw.lifecycle_result(_gw_result.contract_id)
+                _pending_lifecycle = build_approval_lifecycle_result(
+                    _gw.find_contract(_gw_result.contract_id),
+                    canonical_state="pending_conflict",
+                )
                 return {
                     "message": _pending_lifecycle.safe_user_message,
                     "contract_id": _gw_result.contract_id,
-                    "ok": True,
-                    "terminal_outcome": None,
+                    "ok": False,
+                    "terminal_outcome": "APPROVAL_QUEUE_ERROR",
                     "action_tool": tool_name,
                     "created_this_turn": False,
                     "owner_notified": False,

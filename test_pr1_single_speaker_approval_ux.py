@@ -40,6 +40,9 @@ def test_state_to_message_mapping_and_single_owner():
         _contract(status="rejected"), repeated=True,
     )
     missing = build_approval_lifecycle_result(canonical_state="no_contract")
+    pending_conflict = build_approval_lifecycle_result(
+        _contract(), canonical_state="pending_conflict",
+    )
 
     assert pending.safe_user_message.startswith("יש פעולה שממתינה לאישור:")
     assert completed.safe_user_message.startswith("הפעולה הושלמה:")
@@ -47,7 +50,13 @@ def test_state_to_message_mapping_and_single_owner():
     assert rejected.safe_user_message.startswith("הפעולה נדחתה:")
     assert repeated_rejected.safe_user_message == "הפעולה כבר נדחתה"
     assert missing.safe_user_message == "אין פעולה שממתינה לאישור"
-    for result in (pending, completed, repeated_completed, rejected, repeated_rejected, missing):
+    assert "לשלוח מחדש" in pending_conflict.safe_user_message
+    assert "לא נשמרה" in pending_conflict.safe_user_message
+    assert pending_conflict.should_remove_keyboard is False
+    for result in (
+        pending, pending_conflict, completed, repeated_completed,
+        rejected, repeated_rejected, missing,
+    ):
         assert result.reply_owner == "gateway"
         assert result.is_final is True
         assert result.final_response_required is True
@@ -65,6 +74,20 @@ def test_identifiers_and_tool_names_are_never_user_visible():
     assert "airtable_add" not in result.safe_user_message
     assert contract.contract_id not in result.safe_user_message
     assert "recABCDEFGHIJKLMN" not in result.safe_user_message
+
+
+def test_authorization_denial_keeps_pending_contract_actionable_for_owner():
+    contract = _contract()
+    result = build_approval_lifecycle_result(
+        contract, canonical_state="authorization_denied",
+    )
+    assert result.safe_user_message == "⛔ הפעולה דורשת אישור בעלים."
+    assert result.reply_owner == "gateway"
+    assert result.final_response_count == 1
+    assert result.should_remove_keyboard is False
+    assert contract.status == "pending"
+    assert contract.tool_name not in result.safe_user_message
+    assert contract.contract_id not in result.safe_user_message
 
 
 def test_telegram_and_whatsapp_share_the_same_semantics():

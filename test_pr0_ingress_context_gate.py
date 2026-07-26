@@ -476,7 +476,10 @@ chk("T12: not executed — integrity-unknown contract requires reconfirmation to
     len(executions) == 0)
 chk("T12: reply asks for reconfirmation, same as a real interruption", "לאשר אותה" in reply)
 reply2 = _gw2.route_confirmation_word("boss_hq:t12_user", approver_role="owner")
-chk("T12: second כן executes normally once reconfirmed", len(executions) == 1 and "בוצע" in reply2)
+chk(
+    "T12: second כן executes normally once reconfirmed",
+    len(executions) == 1 and "הפעולה הושלמה" in reply2,
+)
 
 
 # ══════════════════════════════════════════════════

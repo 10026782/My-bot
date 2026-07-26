@@ -56,6 +56,9 @@ def _has_approval_authority(role: str) -> bool:
     return role == Role.OWNER or "actions.approve" in ROLE_PERMISSIONS.get(role, set())
 
 
+_APPROVAL_AUTHORIZATION_DENIED_MESSAGE = "⛔ הפעולה דורשת אישור בעלים."
+
+
 def _is_internal_role(role: str) -> bool:
     from identity import Role
     return role in (Role.OWNER, Role.PARTNER, Role.MANAGER, Role.EMPLOYEE)
@@ -881,11 +884,19 @@ _UUID_RE = re.compile(
 def _redact_approval_identifiers(text: str, contract_id: str | None = None) -> str:
     """Remove transport/provider identifiers from approval-facing text."""
     safe = str(text or "")
-    if contract_id:
+    if isinstance(contract_id, str) and contract_id:
         safe = safe.replace(contract_id, "")
     safe = _AIRTABLE_RECORD_ID_RE.sub("", safe)
     safe = _UUID_RE.sub("", safe)
     return re.sub(r"\s{2,}", " ", safe).strip(" /:|-\n")
+
+
+def _remove_raw_approval_tool_name(text: str, contract: object | None) -> str:
+    """Remove a concrete tool name without trusting mock/dynamic attributes."""
+    tool_name = getattr(contract, "tool_name", "") if contract is not None else ""
+    if isinstance(tool_name, str) and tool_name:
+        return text.replace(tool_name, "").strip(" /:|-")
+    return text
 
 
 def _safe_contract_business_description(contract: ActionContract | None) -> str:
@@ -894,7 +905,8 @@ def _safe_contract_business_description(contract: ActionContract | None) -> str:
         return "הפעולה המבוקשת"
 
     payload = contract.normalized_payload or {}
-    tool_name = contract.tool_name
+    raw_tool_name = getattr(contract, "tool_name", "")
+    tool_name = raw_tool_name if isinstance(raw_tool_name, str) else ""
     table = str(payload.get("table") or payload.get("spreadsheet_name") or "").strip()
     fields = payload.get("fields") if isinstance(payload.get("fields"), dict) else {}
     preview = _first_field_preview(fields)
@@ -921,7 +933,7 @@ def _safe_contract_business_description(contract: ActionContract | None) -> str:
         description, getattr(contract, "contract_id", None),
     )
     # Defense in depth: a business field must never echo the raw tool name.
-    safe = safe.replace(tool_name, "") if tool_name else safe
+    safe = _remove_raw_approval_tool_name(safe, contract)
     return safe.strip(" /:|-") or "הפעולה המבוקשת"
 
 
@@ -958,6 +970,11 @@ def build_approval_lifecycle_result(
     description = _safe_contract_business_description(contract)
     if canonical_state == "pending":
         message = f"יש פעולה שממתינה לאישור: {description}"
+    elif canonical_state == "pending_conflict":
+        message = (
+            "יש לך פעולה שממתינה לאישור. יש לאשר או לבטל אותה, "
+            "ואז לשלוח מחדש את הבקשה החדשה. הפעולה החדשה לא נשמרה."
+        )
     elif canonical_state == "completed":
         message = "הפעולה כבר הושלמה" if repeated else f"הפעולה הושלמה: {description}"
     elif canonical_state == "rejected":
@@ -967,10 +984,11 @@ def build_approval_lifecycle_result(
     elif canonical_state == "failed":
         message = "הפעולה לא הושלמה"
         approved_reason = _redact_approval_identifiers(safe_reason, getattr(contract, "contract_id", None))
-        if contract is not None and getattr(contract, "tool_name", ""):
-            approved_reason = approved_reason.replace(contract.tool_name, "").strip(" /:|-")
+        approved_reason = _remove_raw_approval_tool_name(approved_reason, contract)
         if approved_reason:
             message += f": {approved_reason}"
+    elif canonical_state == "authorization_denied":
+        message = _APPROVAL_AUTHORIZATION_DENIED_MESSAGE
     elif canonical_state == "multiple_pending":
         lines = ["יש כמה פעולות שממתינות לאישור:"]
         for index, pending in enumerate(multiple, 1):
@@ -994,7 +1012,10 @@ def build_approval_lifecycle_result(
         safe_user_message=message,
         contract_id=getattr(contract, "contract_id", None),
         is_final=True,
-        should_remove_keyboard=canonical_state not in ("pending", "multiple_pending"),
+        should_remove_keyboard=canonical_state not in (
+            "pending", "pending_conflict", "multiple_pending",
+            "authorization_denied",
+        ),
         final_response_required=True,
         final_response_count=1,
     )
@@ -1532,11 +1553,17 @@ class ActionGateway:
         if before.status != "pending":
             return build_approval_lifecycle_result(before, repeated=True)
 
-        self.approve(contract_id, approver=approver, approver_role=approver_role)
+        approval_message = self.approve(
+            contract_id, approver=approver, approver_role=approver_role,
+        )
         after = self._ledger.find_by_id(contract_id)
         if after is None:
             return build_approval_lifecycle_result(canonical_state="no_contract")
         if after.status == "pending":
+            if approval_message == _APPROVAL_AUTHORIZATION_DENIED_MESSAGE:
+                return build_approval_lifecycle_result(
+                    after, canonical_state="authorization_denied",
+                )
             return build_approval_lifecycle_result(after, canonical_state="failed")
         return build_approval_lifecycle_result(after, repeated=False)
 
@@ -1895,7 +1922,10 @@ class ActionGateway:
             if recent is not None and recent.status in ("completed", "executed", "rejected"):
                 return build_approval_lifecycle_result(recent, repeated=True).safe_user_message
             return None
-        rendered = "הפעולה נדחתה"
+        from feature_flags import is_enabled
+
+        single_speaker = is_enabled("FEATURE_SINGLE_SPEAKER_APPROVAL_UX")
+        rendered = "🚫 הפעולה בוטלה."
         for c in live:
             result = self.reject(c.contract_id, rejected_by=canonical_user_id)
             if not result.startswith("🚫"):
@@ -1904,9 +1934,14 @@ class ActionGateway:
             # unified) only on confirmed success — reject()'s own return
             # contract above is untouched, so the "🚫" check stays valid
             # regardless of formatter state.
-            rendered = build_approval_lifecycle_result(
-                c, canonical_state="rejected",
-            ).safe_user_message
+            if single_speaker:
+                rendered = build_approval_lifecycle_result(
+                    c, canonical_state="rejected",
+                ).safe_user_message
+            else:
+                rendered = self._render_rejection_reply(c, result)
+            rendered = _redact_approval_identifiers(rendered, c.contract_id)
+            rendered = _remove_raw_approval_tool_name(rendered, c).strip()
         return rendered
 
     # ── disambiguation ordinal resolver ─────────────────────────────
@@ -2088,16 +2123,29 @@ class ActionGateway:
             canonical_user_id, idx, contract.contract_id, contract.tool_name,
         )
         remaining = len(live) - 1
-        if remaining > 0:
-            legacy_text = (
-                f"הפעולה נדחתה: {_safe_contract_business_description(contract)}. "
-                f"נשארו {remaining} פעולות ממתינות."
-            )
+        from feature_flags import is_enabled
+
+        if is_enabled("FEATURE_SINGLE_SPEAKER_APPROVAL_UX"):
+            if remaining > 0:
+                rendered = (
+                    f"הפעולה נדחתה: {_safe_contract_business_description(contract)}. "
+                    f"נשארו {remaining} פעולות ממתינות."
+                )
+            else:
+                rendered = build_approval_lifecycle_result(
+                    contract, canonical_state="rejected",
+                ).safe_user_message
         else:
-            legacy_text = build_approval_lifecycle_result(
-                contract, canonical_state="rejected",
-            ).safe_user_message
-        return _redact_approval_identifiers(legacy_text, contract.contract_id)
+            if remaining > 0:
+                legacy_text = (
+                    f"🚫 פעולה מספר {idx} ({contract.tool_name}) בוטלה. "
+                    f"נשארו {remaining} פעולות ממתינות."
+                )
+            else:
+                legacy_text = f"🚫 פעולה מספר {idx} בוטלה."
+            rendered = self._render_rejection_reply(contract, legacy_text)
+        rendered = _redact_approval_identifiers(rendered, contract.contract_id)
+        return _remove_raw_approval_tool_name(rendered, contract).strip()
 
     # ── §10 — route_override_word ────────────────────────────────────
 
@@ -2191,7 +2239,7 @@ class ActionGateway:
                 "contract=%s tool=%s approver=%s role=%r requester=%s",
                 policy, contract_id, contract.tool_name, approver, approver_role, contract.canonical_user_id,
             )
-            return "⛔ הפעולה דורשת אישור בעלים."
+            return _APPROVAL_AUTHORIZATION_DENIED_MESSAGE
 
         # §§3/#6 fail-closed: without executor no execution can be verified
         if not self._tool_executor:
