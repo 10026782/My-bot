@@ -79,6 +79,10 @@ INTEGRATIONS:
 APPROVAL POLICY:
   EMERGENCY_WINDOW             - מאפשר הפעלת חריג זמני ל-High מהטלפון (core/emergency_window.py, כבוי כברירת מחדל)
   FEATURE_ACTION_GATEWAY       - ActionContract + Action Gateway (Stage B) — מרכז כל mutation תחת חוזה; default OFF
+  FEATURE_SINGLE_SPEAKER_APPROVAL_UX - PR1 response-routing cutover for approval
+                                 turns. false (default): legacy delivery routing;
+                                 true: Gateway owns the one final response. Identifier
+                                 redaction is unconditional and is not rolled back.
   FEATURE_ACTION_CONTRACT_PERSISTENCE - durable new proposals + proposal recovery lookups (Phase 4B-1A); default OFF
   FEATURE_ATOMIC_CLAIMS        - PostgreSQL atomic coordination for contract execution (Phase 4B0.1A); default OFF
   FEATURE_PA01_ENFORCEMENT_STATE - שלוש מצבים (לא boolean רגיל): "off" (ברירת מחדל,
@@ -207,6 +211,9 @@ _RUNTIME: dict[str, bool] = {}
 _DEFAULTS: dict[str, str] = {
     "IMPORT_DOMAIN": os.environ.get("IMPORT_DOMAIN", "true"),
     "FEATURE_INGRESS_ENVELOPE": os.environ.get("FEATURE_INGRESS_ENVELOPE", "true"),
+    "FEATURE_SINGLE_SPEAKER_APPROVAL_UX": os.environ.get(
+        "FEATURE_SINGLE_SPEAKER_APPROVAL_UX", "false",
+    ),
 }
 
 

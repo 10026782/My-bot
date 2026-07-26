@@ -265,6 +265,27 @@ class GatewayReply:
 
 
 @dataclass(frozen=True)
+class ApprovalLifecycleResult:
+    """Single-speaker, user-safe projection of one ActionContract lifecycle.
+
+    ``contract_id`` is transport correlation only.  Callers may place it in
+    callback data or logs, but must never interpolate it into
+    ``safe_user_message``.  The remaining fields make reply ownership and
+    final-delivery intent explicit instead of inferring them from prose.
+    """
+
+    canonical_state: str
+    reply_owner: str
+    safe_business_description: str
+    safe_user_message: str
+    contract_id: str | None
+    is_final: bool
+    should_remove_keyboard: bool
+    final_response_required: bool
+    final_response_count: int = 1
+
+
+@dataclass(frozen=True)
 class AgentReply:
     """טקסט חופשי, טון, אישיות, שיחה.
     לעולם לא כולל ניסוח מצב פעולה בהקשר ActionContract."""
@@ -850,6 +871,135 @@ def _describe_contract_for_disambiguation(contract: ActionContract) -> str:
     return _describe_contract_for_reconfirmation(contract)
 
 
+_AIRTABLE_RECORD_ID_RE = re.compile(r"(?<![A-Za-z0-9])rec[A-Za-z0-9]{14,}(?![A-Za-z0-9])")
+_UUID_RE = re.compile(
+    r"(?<![A-Fa-f0-9])[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[1-5][A-Fa-f0-9]{3}-"
+    r"[89ABab][A-Fa-f0-9]{3}-[A-Fa-f0-9]{12}(?![A-Fa-f0-9])"
+)
+
+
+def _redact_approval_identifiers(text: str, contract_id: str | None = None) -> str:
+    """Remove transport/provider identifiers from approval-facing text."""
+    safe = str(text or "")
+    if contract_id:
+        safe = safe.replace(contract_id, "")
+    safe = _AIRTABLE_RECORD_ID_RE.sub("", safe)
+    safe = _UUID_RE.sub("", safe)
+    return re.sub(r"\s{2,}", " ", safe).strip(" /:|-\n")
+
+
+def _safe_contract_business_description(contract: ActionContract | None) -> str:
+    """Return business wording without raw tool names or technical IDs."""
+    if contract is None:
+        return "הפעולה המבוקשת"
+
+    payload = contract.normalized_payload or {}
+    tool_name = contract.tool_name
+    table = str(payload.get("table") or payload.get("spreadsheet_name") or "").strip()
+    fields = payload.get("fields") if isinstance(payload.get("fields"), dict) else {}
+    preview = _first_field_preview(fields)
+
+    if tool_name in ("airtable_add", "airtable_update"):
+        verb = "הוספה" if tool_name == "airtable_add" else "עדכון"
+        if table:
+            description = f"{verb} ב-{table}" + (f": {preview}" if preview else "")
+        else:
+            description = "הוספת רשומה" if tool_name == "airtable_add" else "עדכון רשומה"
+    elif tool_name == "calendar_create_event":
+        summary = str(payload.get("summary") or "").strip()
+        description = "קביעת אירוע" + (f": {summary}" if summary else "")
+    elif tool_name == "gmail_send_draft":
+        description = "שליחת הודעת דוא״ל"
+    elif tool_name in ("sheets_append", "sheets_update"):
+        description = "כתיבה לגיליון" + (f": {table}" if table else "")
+    elif tool_name in ("send_followup", "send_recovery"):
+        description = "שליחת הודעת המשך"
+    else:
+        description = "הפעולה המבוקשת"
+
+    safe = _redact_approval_identifiers(
+        description, getattr(contract, "contract_id", None),
+    )
+    # Defense in depth: a business field must never echo the raw tool name.
+    safe = safe.replace(tool_name, "") if tool_name else safe
+    return safe.strip(" /:|-") or "הפעולה המבוקשת"
+
+
+def build_approval_lifecycle_result(
+    contract: ActionContract | None = None,
+    *,
+    canonical_state: str | None = None,
+    repeated: bool = False,
+    contracts: list[ActionContract] | None = None,
+    safe_reason: str = "",
+) -> ApprovalLifecycleResult:
+    """Map canonical lifecycle state to one Gateway-owned semantic response."""
+    multiple = list(contracts or [])
+    if canonical_state is None:
+        if len(multiple) > 1:
+            canonical_state = "multiple_pending"
+        elif contract is None:
+            canonical_state = "no_contract"
+        elif contract.status == "pending":
+            canonical_state = "pending"
+        elif contract.status in ("completed", "executed"):
+            canonical_state = "completed"
+        elif contract.status == "rejected":
+            canonical_state = "rejected"
+        elif contract.status in ("approved", "executing"):
+            canonical_state = "approved_processing"
+        elif contract.status == "failed":
+            canonical_state = "failed"
+        elif contract.status == "outcome_unknown":
+            canonical_state = "outcome_unknown"
+        else:
+            canonical_state = "no_contract"
+
+    description = _safe_contract_business_description(contract)
+    if canonical_state == "pending":
+        message = f"יש פעולה שממתינה לאישור: {description}"
+    elif canonical_state == "completed":
+        message = "הפעולה כבר הושלמה" if repeated else f"הפעולה הושלמה: {description}"
+    elif canonical_state == "rejected":
+        message = "הפעולה כבר נדחתה" if repeated else f"הפעולה נדחתה: {description}"
+    elif canonical_state in ("approved_processing", "outcome_unknown"):
+        message = "הפעולה אושרה, אך התוצאה עדיין אינה סופית"
+    elif canonical_state == "failed":
+        message = "הפעולה לא הושלמה"
+        approved_reason = _redact_approval_identifiers(safe_reason, getattr(contract, "contract_id", None))
+        if contract is not None and getattr(contract, "tool_name", ""):
+            approved_reason = approved_reason.replace(contract.tool_name, "").strip(" /:|-")
+        if approved_reason:
+            message += f": {approved_reason}"
+    elif canonical_state == "multiple_pending":
+        lines = ["יש כמה פעולות שממתינות לאישור:"]
+        for index, pending in enumerate(multiple, 1):
+            lines.append(
+                f"{index}. {_safe_contract_business_description(pending)}"
+                f"{_format_pending_age_suffix(pending)}"
+            )
+        lines.append("שלח מספר כדי לבחור פעולה אחת.")
+        message = "\n".join(lines)
+        description = ""
+    else:
+        canonical_state = "no_contract"
+        message = "אין פעולה שממתינה לאישור"
+        description = ""
+
+    message = _redact_approval_identifiers(message, getattr(contract, "contract_id", None))
+    return ApprovalLifecycleResult(
+        canonical_state=canonical_state,
+        reply_owner="gateway",
+        safe_business_description=description,
+        safe_user_message=message,
+        contract_id=getattr(contract, "contract_id", None),
+        is_final=True,
+        should_remove_keyboard=canonical_state not in ("pending", "multiple_pending"),
+        final_response_required=True,
+        final_response_count=1,
+    )
+
+
 # Staging finding #1 (23/07/2026): CONTRACT_PENDING_TTL_SECONDS is 24h,
 # deliberately long (TMA approvals can sit unopened for hours) — a contract
 # well under that TTL can still be old enough that a user picking blindly
@@ -1352,13 +1502,61 @@ class ActionGateway:
 
     def describe_no_pending_reason(self, canonical_user_id: str) -> str:
         recent = self._ledger.find_most_recent_by_user(canonical_user_id)
+        if recent and recent.status in (
+            "completed", "executed", "rejected", "approved", "executing",
+            "failed", "outcome_unknown",
+        ):
+            return build_approval_lifecycle_result(recent, repeated=True).safe_user_message
         if recent and recent.status == "superseded":
             desc = _describe_contract_for_reconfirmation(recent)
             return (
                 f"הפעולה הקודמת בוטלה כי התחלת פעולה אחרת: {desc}.\n"
                 f"כדי לבצע אותה, שלח את הבקשה מחדש."
             )
-        return "אין פעולה שממתינה לאישור."
+        return build_approval_lifecycle_result(canonical_state="no_contract").safe_user_message
+
+    def lifecycle_result(
+        self, contract_id: str | None, *, repeated: bool = False,
+    ) -> ApprovalLifecycleResult:
+        """Resolve one exact ActionContract into the canonical UX projection."""
+        contract = self._ledger.find_by_id(contract_id) if contract_id else None
+        return build_approval_lifecycle_result(contract, repeated=repeated)
+
+    def approve_with_lifecycle_result(
+        self, contract_id: str, *, approver: str, approver_role: str,
+    ) -> ApprovalLifecycleResult:
+        """Approve through the existing lifecycle boundary, then render safely."""
+        before = self._ledger.find_by_id(contract_id)
+        if before is None:
+            return build_approval_lifecycle_result(canonical_state="no_contract")
+        if before.status != "pending":
+            return build_approval_lifecycle_result(before, repeated=True)
+
+        self.approve(contract_id, approver=approver, approver_role=approver_role)
+        after = self._ledger.find_by_id(contract_id)
+        if after is None:
+            return build_approval_lifecycle_result(canonical_state="no_contract")
+        if after.status == "pending":
+            return build_approval_lifecycle_result(after, canonical_state="failed")
+        return build_approval_lifecycle_result(after, repeated=False)
+
+    def reject_with_lifecycle_result(
+        self, contract_id: str, *, rejected_by: str,
+    ) -> ApprovalLifecycleResult:
+        """Reject through the existing lifecycle boundary, then render safely."""
+        before = self._ledger.find_by_id(contract_id)
+        if before is None:
+            return build_approval_lifecycle_result(canonical_state="no_contract")
+        if before.status != "pending":
+            return build_approval_lifecycle_result(before, repeated=True)
+
+        self.reject(contract_id, rejected_by=rejected_by)
+        after = self._ledger.find_by_id(contract_id)
+        if after is None:
+            return build_approval_lifecycle_result(canonical_state="no_contract")
+        if after.status == "pending":
+            return build_approval_lifecycle_result(after, canonical_state="failed")
+        return build_approval_lifecycle_result(after, repeated=False)
 
     # ── §4 — route_confirmation_word ────────────────────────────────
 
@@ -1408,8 +1606,12 @@ class ActionGateway:
                 f"יש פעולה קודמת שממתינה לאישור: {desc}.\n"
                 f"לאשר אותה? (כן/לא)"
             ), False
-        result = self.approve(contract.contract_id, approver=canonical_user_id, approver_role=approver_role)
-        return result, True
+        result = self.approve_with_lifecycle_result(
+            contract.contract_id,
+            approver=canonical_user_id,
+            approver_role=approver_role,
+        )
+        return result.safe_user_message, True
 
     def route_confirmation_word(self, canonical_user_id: str, approver_role: str = "") -> str:
         """
@@ -1468,17 +1670,7 @@ class ActionGateway:
         # יותר מאחת — מציג רשימה ממוספרת + שומר disambiguation state
         with self._disambiguation_lock:
             self._disambiguation[canonical_user_id] = list(live)
-        lines = ["יש כמה פעולות הממתינות לאישור — איזו?"]
-        for i, c in enumerate(live, 1):
-            # BUG-115: human-readable business description, never the raw
-            # tool_name/internal contract_id. Uses the disambiguation-
-            # specific helper (not _describe_contract_for_reconfirmation()
-            # directly) so this fix cannot change that other function's
-            # behavior at its other, unrelated call sites — see both
-            # functions' docstrings.
-            lines.append(f"• {i}. {_describe_contract_for_disambiguation(c)}{_format_pending_age_suffix(c)}")
-        lines.append("\nשלח את המספר (1, 2, ...) כדי לאשר פעולה ספציפית.")
-        return "\n".join(lines)
+        return build_approval_lifecycle_result(contracts=live).safe_user_message
 
     # ── BUG-056 — route_cancellation_word ───────────────────────────
 
@@ -1699,8 +1891,11 @@ class ActionGateway:
         """
         live = self.find_live_contracts(canonical_user_id)
         if not live:
+            recent = self._ledger.find_most_recent_by_user(canonical_user_id)
+            if recent is not None and recent.status in ("completed", "executed", "rejected"):
+                return build_approval_lifecycle_result(recent, repeated=True).safe_user_message
             return None
-        rendered = "🚫 הפעולה בוטלה."
+        rendered = "הפעולה נדחתה"
         for c in live:
             result = self.reject(c.contract_id, rejected_by=canonical_user_id)
             if not result.startswith("🚫"):
@@ -1709,7 +1904,9 @@ class ActionGateway:
             # unified) only on confirmed success — reject()'s own return
             # contract above is untouched, so the "🚫" check stays valid
             # regardless of formatter state.
-            rendered = self._render_rejection_reply(c, result)
+            rendered = build_approval_lifecycle_result(
+                c, canonical_state="rejected",
+            ).safe_user_message
         return rendered
 
     # ── disambiguation ordinal resolver ─────────────────────────────
@@ -1728,7 +1925,7 @@ class ActionGateway:
         "כן", "אשר", "מאשר", "מאשרת", "אוקי", "בצע", "קדימה", "yes", "y", "ok",
     })
     _CANCEL_KEYWORDS = frozenset({
-        "לא", "בטל", "ביטול", "עצור", "cancel", "no", "n",
+        "לא", "בטל", "ביטול", "עצור", "דוחה", "cancel", "no", "n",
     })
 
     @classmethod
@@ -1804,7 +2001,11 @@ class ActionGateway:
             "[ActionGateway] disambiguation: user=%s selected idx=%d contract=%s tool=%s rejected_siblings=%d",
             canonical_user_id, idx, contract.contract_id, contract.tool_name, rejected_siblings,
         )
-        result = self.approve(contract.contract_id, approver=canonical_user_id, approver_role=approver_role)
+        result = self.approve_with_lifecycle_result(
+            contract.contract_id,
+            approver=canonical_user_id,
+            approver_role=approver_role,
+        ).safe_user_message
         # Staging finding #3 (23/07/2026): the user was never told that
         # picking one item from the list silently rejected the others — see
         # §21 comment above. Disclosure only, does not change what got
@@ -1864,7 +2065,11 @@ class ActionGateway:
                 "[ActionGateway] combined_word: user=%s confirm idx=%d contract=%s tool=%s rejected_siblings=%d",
                 canonical_user_id, idx, contract.contract_id, contract.tool_name, rejected_siblings,
             )
-            result = self.approve(contract.contract_id, approver=canonical_user_id, approver_role=approver_role)
+            result = self.approve_with_lifecycle_result(
+                contract.contract_id,
+                approver=canonical_user_id,
+                approver_role=approver_role,
+            ).safe_user_message
             # Staging finding #3 (23/07/2026) — see route_disambiguation()'s
             # identical disclosure for the full rationale.
             if rejected_siblings:
@@ -1884,16 +2089,15 @@ class ActionGateway:
         )
         remaining = len(live) - 1
         if remaining > 0:
-            legacy_text = f"🚫 פעולה מספר {idx} ({contract.tool_name}) בוטלה. נשארו {remaining} פעולות ממתינות."
+            legacy_text = (
+                f"הפעולה נדחתה: {_safe_contract_business_description(contract)}. "
+                f"נשארו {remaining} פעולות ממתינות."
+            )
         else:
-            legacy_text = f"🚫 פעולה מספר {idx} בוטלה."
-        # F52 PR5: same off/shadow/on rendering as route_cancellation_word()
-        # above. Note (pre-existing, not introduced or fixed here): the
-        # legacy_text branch above already embeds contract.tool_name — a
-        # leak that predates this PR and is intentionally left as-is (legacy
-        # output must stay byte-identical); only the unified/shadow text this
-        # renders is guaranteed tool-name-free.
-        return self._render_rejection_reply(contract, legacy_text)
+            legacy_text = build_approval_lifecycle_result(
+                contract, canonical_state="rejected",
+            ).safe_user_message
+        return _redact_approval_identifiers(legacy_text, contract.contract_id)
 
     # ── §10 — route_override_word ────────────────────────────────────
 
@@ -2387,26 +2591,20 @@ class ActionGateway:
     def _compose_status_reply_legacy(self, fact: ActionFact) -> GatewayReply:
         """Pre-F52 status wording. Retained only as the FEATURE_UNIFIED_STATUS_
         FORMATTER=off fallback; do not add new call sites."""
-        if fact.outcome in ("completed", "executed"):
-            # BUG-PENDING-APPROVAL-B follow-up: reuse the frozen contract's
-            # business description (e.g. "יצירת ליד: יוסי כהן, ...") instead
-            # of the bare tool_name — the payload never changes between
-            # proposal and execution (approved_payload == executed_payload),
-            # so the description computed at reconfirmation time is exactly
-            # what was actually written.
-            contract = self._ledger.find_by_id(fact.contract_id)
-            label = _describe_contract_for_reconfirmation(contract) if contract else fact.tool_name
-            rid = f" | מזהה: `{fact.record_id}`" if fact.record_id else ""
-            text = f"✅ בוצע: {label}{rid}"
-        elif fact.outcome == "failed":
-            ec = f" ({fact.error_code})" if fact.error_code else ""
-            text = f"❌ נכשל: {fact.tool_name}{ec}"
-        elif fact.outcome == "pending":
-            text = f"⏳ ממתין לאישור: {fact.tool_name}"
-        elif fact.outcome == "rejected":
-            text = f"⚠️ נדחה: {fact.tool_name}"
-        else:
-            text = f"ℹ️ {fact.tool_name}: {fact.outcome}"
+        contract = self._ledger.find_by_id(fact.contract_id) if fact.contract_id else None
+        state = {
+            "completed": "completed",
+            "executed": "completed",
+            "pending": "pending",
+            "rejected": "rejected",
+            "failed": "failed",
+            "approved": "approved_processing",
+            "executing": "approved_processing",
+            "outcome_unknown": "outcome_unknown",
+        }.get(fact.outcome, "outcome_unknown")
+        text = build_approval_lifecycle_result(
+            contract, canonical_state=state,
+        ).safe_user_message
         return GatewayReply(text=text, fact=fact)
 
     def _action_fact_to_message(self, fact: ActionFact) -> tuple[str, dict]:
@@ -2417,7 +2615,7 @@ class ActionGateway:
         variants (spec); an unrecognized outcome is outcome_unknown, never
         success."""
         contract = self._ledger.find_by_id(fact.contract_id) if fact.contract_id else None
-        label = _describe_contract_for_reconfirmation(contract) if contract else ""
+        label = _safe_contract_business_description(contract) if contract else ""
 
         if fact.outcome in ("completed", "executed"):
             return "success", {"human_summary": label}
@@ -2461,16 +2659,18 @@ class ActionGateway:
             # BUG-SB-03: check for pending contracts before returning None
             live = self.find_live_contracts(canonical_user_id)
             if live:
-                label = live[0].tool_name
-                return f"⏳ יש בקשת אישור פתוחה: {label}"
+                if len(live) > 1:
+                    return build_approval_lifecycle_result(contracts=live).safe_user_message
+                return build_approval_lifecycle_result(live[0]).safe_user_message
             return None
         latest = max(candidates, key=lambda c: c.created_at)
         if time.time() - latest.created_at > window_seconds:
             # still check pending before giving up
             live = self.find_live_contracts(canonical_user_id)
             if live:
-                label = live[0].tool_name
-                return f"⏳ יש בקשת אישור פתוחה: {label}"
+                if len(live) > 1:
+                    return build_approval_lifecycle_result(contracts=live).safe_user_message
+                return build_approval_lifecycle_result(live[0]).safe_user_message
             return None
         ext_id = None
         if isinstance(latest.agent_observations, list):

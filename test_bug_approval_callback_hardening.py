@@ -60,7 +60,10 @@ import app  # noqa: E402
 import emergency_stop_test_support  # noqa: E402
 emergency_stop_test_support.configure_all_clear_emergency_stop()
 from identity import Identity, Role  # noqa: E402
-from core.action_gateway import action_gateway as _real_gw  # noqa: E402
+from core.action_gateway import (  # noqa: E402
+    action_gateway as _real_gw,
+    build_approval_lifecycle_result,
+)
 from event_bus import bus as _real_bus  # noqa: E402
 
 passed = failed = 0
@@ -92,7 +95,106 @@ def _fake_cq(approver_chat_id: str, data: str):
     )
 
 
-_flag_on = lambda name: name == "FEATURE_ACTION_GATEWAY"
+_flag_on = lambda name: name in {
+    "FEATURE_ACTION_GATEWAY", "FEATURE_SINGLE_SPEAKER_APPROVAL_UX",
+}
+
+
+print("\n── Telegram callback_data byte limits ─────────────────────")
+_MAX_EVENTBUS_ID = "a1b2c3d4"
+_CANONICAL_CONTRACT_ID = "123e4567-e89b-12d3-a456-426614174000"
+_callback_payloads = {
+    "approve_correlated": app._approval_callback_data(
+        "approve", _MAX_EVENTBUS_ID, _CANONICAL_CONTRACT_ID,
+    ),
+    "reject_correlated": app._approval_callback_data(
+        "reject", _MAX_EVENTBUS_ID, _CANONICAL_CONTRACT_ID,
+    ),
+    "approve_backward_compatible": app._approval_callback_data(
+        "approve", _MAX_EVENTBUS_ID,
+    ),
+    "reject_backward_compatible": app._approval_callback_data(
+        "reject", _MAX_EVENTBUS_ID,
+    ),
+}
+for _payload_name, _payload in _callback_payloads.items():
+    chk(
+        f"{_payload_name}: complete callback payload is <= 64 UTF-8 bytes",
+        len(_payload.encode("utf-8")) <= 64,
+    )
+chk("longest supported prefix/separator payload is approve + EventBus + ActionContract",
+    max(_callback_payloads.values(), key=lambda value: len(value.encode("utf-8")))
+    == _callback_payloads["approve_correlated"])
+chk("maximum generated callback payload is exactly 53 UTF-8 bytes",
+    max(len(value.encode("utf-8")) for value in _callback_payloads.values()) == 53)
+chk("canonical ActionContract correlation is preserved without truncation",
+    _callback_payloads["approve_correlated"].endswith(_CANONICAL_CONTRACT_ID))
+try:
+    app._approval_callback_data(
+        "approve", "a" * 20, _CANONICAL_CONTRACT_ID,
+    )
+    _oversized_rejected = False
+except ValueError as _oversized_error:
+    _oversized_rejected = "bytes=65" in str(_oversized_error)
+chk("oversized callback correlation fails explicitly instead of truncating",
+    _oversized_rejected)
+
+
+print("\n── Flag-off rollback keeps unconditional redaction ─────────")
+import feature_flags as _feature_flags  # noqa: E402
+chk("repository default for single-speaker rollout is false",
+    _feature_flags._DEFAULTS["FEATURE_SINGLE_SPEAKER_APPROVAL_UX"] == "false")
+_rollback_contract = SimpleNamespace(
+    contract_id=_CANONICAL_CONTRACT_ID,
+    tool_name="airtable_add",
+    normalized_payload={
+        "table": "Tasks",
+        "fields": {
+            "Task": "בדיקת rollback",
+            "ActionContractRecord": "recACTIONCONTRACT01",
+            "BusinessRecord": "recBUSINESSRECORD01",
+        },
+    },
+    status="failed",
+)
+_rollback_result = build_approval_lifecycle_result(
+    _rollback_contract,
+    canonical_state="failed",
+    safe_reason=(
+        "airtable_add " + _CANONICAL_CONTRACT_ID
+        + " recACTIONCONTRACT01 recBUSINESSRECORD01"
+    ),
+)
+_rollback_bot = MagicMock()
+_rollback_cq = _fake_cq("approver-rollback", "approve:legacy123")
+with patch.object(app, "bot", _rollback_bot), \
+     patch.object(app, "_flag_enabled", return_value=False):
+    _rollback_emissions = app._deliver_callback_final(
+        _rollback_cq,
+        origin_channel="telegram",
+        origin_chat_id="requester-rollback",
+        canonical_user_id="boss_hq:rollback",
+        action_id="legacy123",
+        tool_name="airtable_add",
+        text=_rollback_result.safe_user_message,
+    )
+chk("flag off restores legacy cross-chat edit + send routing",
+    _rollback_emissions == 2
+    and _rollback_bot.edit_message_text.call_count == 1
+    and _rollback_bot.send_message.call_count == 1)
+_rollback_visible_texts = [
+    _rollback_bot.edit_message_text.call_args.args[0],
+    _rollback_bot.send_message.call_args.args[1],
+]
+chk("flag-off legacy routing still exposes no technical identifiers",
+    all(
+        forbidden not in visible
+        for visible in _rollback_visible_texts
+        for forbidden in (
+            "airtable_add", _CANONICAL_CONTRACT_ID,
+            "recACTIONCONTRACT01", "recBUSINESSRECORD01",
+        )
+    ))
 
 
 # ══════════════════════════════════════════════════
@@ -276,11 +378,12 @@ approve_action_id, _ = _real_bus.request_approval(
         "origin_channel": "telegram", "origin_chat_id": requester5.user_id,
         "canonical_user_id": requester5.memory_key,
         "user_chat_id": requester5.user_id, "channel": "telegram",
+        "contract_id": approve_proposal.contract_id,
     },
     chat_id=requester5.user_id, label="cross chat approve",
 )
 approve_cq = SimpleNamespace(
-    id="cbq-cross-approve", data=f"approve:{approve_action_id}",
+    id="cbq-cross-approve", data=f"approve:{approve_action_id}:{approve_proposal.contract_id}",
     from_user=SimpleNamespace(id=approver5.user_id),
     message=SimpleNamespace(chat=SimpleNamespace(id=approver5.user_id), message_id=55),
 )
@@ -301,6 +404,7 @@ with patch.object(app, "bot", approve_bot), \
     first_approve_dispatches = approve_dispatch.call_count
     first_approve_sends = list(approve_bot.send_message.call_args_list)
     first_approve_edits = approve_bot.edit_message_text.call_count
+    first_approve_markup_removals = approve_bot.edit_message_reply_markup.call_count
     approve_bot.reset_mock()
     app._handle_approval_callback_impl(approve_cq)
     replay_approve_dispatches = approve_dispatch.call_count
@@ -310,13 +414,20 @@ chk("cross-chat approve makes canonical lifecycle terminal",
 chk("cross-chat approve notifies requester exactly once",
     len(first_approve_sends) == 1 and
     str(first_approve_sends[0].args[0]) == requester5.user_id)
-chk("cross-chat approve edits approver message exactly once",
-    first_approve_edits == 1)
+chk("cross-chat approve only retires the approver keyboard",
+    first_approve_edits == 0 and first_approve_markup_removals == 1)
+chk("cross-chat approve emits one safe final response",
+    len(first_approve_sends) == 1 and
+    first_approve_sends[0].args[1].startswith("הפעולה הושלמה:") and
+    "send_followup" not in first_approve_sends[0].args[1])
 chk("repeated approve callback performs no duplicate execution",
     first_approve_dispatches == 1 and replay_approve_dispatches == 1)
 chk("repeated approve callback returns deterministic stale/resolved response",
     approve_bot.answer_callback_query.call_count == 1 and
-    approve_bot.edit_message_text.call_count == 1)
+    approve_bot.send_message.call_count == 1 and
+    approve_bot.send_message.call_args.args[1] == "הפעולה כבר הושלמה" and
+    approve_bot.edit_message_text.call_count == 0 and
+    approve_bot.edit_message_reply_markup.call_count == 1)
 
 
 requester6 = _identity("requester-cross-reject", Role.OWNER)
@@ -337,11 +448,12 @@ cross_reject_action_id, _ = _real_bus.request_approval(
         "origin_channel": "telegram", "origin_chat_id": requester6.user_id,
         "canonical_user_id": requester6.memory_key,
         "user_chat_id": requester6.user_id, "channel": "telegram",
+        "contract_id": cross_reject_proposal.contract_id,
     },
     chat_id=requester6.user_id, label="cross chat reject",
 )
 cross_reject_cq = SimpleNamespace(
-    id="cbq-cross-reject", data=f"reject:{cross_reject_action_id}",
+    id="cbq-cross-reject", data=f"reject:{cross_reject_action_id}:{cross_reject_proposal.contract_id}",
     from_user=SimpleNamespace(id=approver6.user_id),
     message=SimpleNamespace(chat=SimpleNamespace(id=approver6.user_id), message_id=66),
 )
@@ -360,6 +472,7 @@ with patch.object(app, "bot", cross_reject_bot), \
     cross_reject_contract = _real_gw.find_contract(cross_reject_proposal.contract_id)
     first_reject_sends = list(cross_reject_bot.send_message.call_args_list)
     first_reject_edits = cross_reject_bot.edit_message_text.call_count
+    first_reject_markup_removals = cross_reject_bot.edit_message_reply_markup.call_count
     cross_reject_bot.reset_mock()
     app._handle_approval_callback_impl(cross_reject_cq)
 
@@ -368,13 +481,16 @@ chk("cross-chat reject makes canonical lifecycle terminal",
 chk("cross-chat reject notifies requester exactly once",
     len(first_reject_sends) == 1 and
     str(first_reject_sends[0].args[0]) == requester6.user_id)
-chk("cross-chat reject edits approver message exactly once",
-    first_reject_edits == 1)
+chk("cross-chat reject only retires the approver keyboard",
+    first_reject_edits == 0 and first_reject_markup_removals == 1)
 chk("repeated reject callback leaves lifecycle unchanged",
     _real_gw.find_contract(cross_reject_proposal.contract_id).status == "rejected")
 chk("repeated reject callback returns deterministic stale/resolved response",
     cross_reject_bot.answer_callback_query.call_count == 1 and
-    cross_reject_bot.edit_message_text.call_count == 1)
+    cross_reject_bot.send_message.call_count == 1 and
+    cross_reject_bot.send_message.call_args.args[1] == "הפעולה כבר נדחתה" and
+    cross_reject_bot.edit_message_text.call_count == 0 and
+    cross_reject_bot.edit_message_reply_markup.call_count == 1)
 
 
 # ══════════════════════════════════════════════════
