@@ -175,7 +175,7 @@ _pending_approvals_lock = threading.Lock()
 _CONFIRM_WORDS = frozenset({
     "כן", "אשר", "מאשר", "מאשרת", "✅", "yes", "y", "ok", "אוקי", "בצע", "קדימה",
 })
-_CANCEL_WORDS  = frozenset({"לא", "בטל", "❌", "no", "n", "ביטול", "עצור", "cancel"})
+_CANCEL_WORDS  = frozenset({"לא", "בטל", "דוחה", "❌", "no", "n", "ביטול", "עצור", "cancel"})
 
 # Staging finding #4 (23/07/2026): natural-language "what's waiting for
 # approval" questions (e.g. "לאשר את הפעולות שממתינות לאישור", "מה ממתין
@@ -1110,6 +1110,29 @@ def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
         return _orphan_cleanup_failure_response(_canonical_tool_name, None)
 
 
+_TELEGRAM_CALLBACK_DATA_MAX_BYTES = 64
+
+
+def _approval_callback_data(
+    action: str, action_id: str, contract_id: str | None = None,
+) -> str:
+    """Build the exact Telegram callback payload without truncating IDs."""
+    if action not in ("approve", "reject"):
+        raise ValueError(f"unsupported approval callback action: {action}")
+    if not action_id:
+        raise ValueError("approval callback requires an EventBus action_id")
+    payload = f"{action}:{action_id}"
+    if contract_id:
+        payload += f":{contract_id}"
+    payload_bytes = len(payload.encode("utf-8"))
+    if payload_bytes > _TELEGRAM_CALLBACK_DATA_MAX_BYTES:
+        raise ValueError(
+            f"approval callback_data exceeds Telegram limit: "
+            f"bytes={payload_bytes} payload={payload!r}"
+        )
+    return payload
+
+
 def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
                                   user_chat_id: str, channel: str, user_text: str = "") -> dict:
     from core.action_gateway import resolve_canonical_call
@@ -1156,7 +1179,10 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
     from feature_flags import is_enabled as _flag
     _gw_result = None  # PA-01: keep defined even if the shadow-mode try/except below never assigns it
     if _flag("FEATURE_ACTION_GATEWAY"):
-        from core.action_gateway import action_gateway as _gw
+        from core.action_gateway import (
+            action_gateway as _gw,
+            build_approval_lifecycle_result,
+        )
         tenant_id = getattr(identity, "tenant_id", "boss_hq")
         _gw_result = _gw.propose_action(
             tenant_id=tenant_id,
@@ -1191,13 +1217,21 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
                     "action_tool": tool_name, "created_this_turn": False,
                 }
             if _gw_result.failure_code == "existing_pending_blocks_agent":
+                _pending_lifecycle = build_approval_lifecycle_result(
+                    _gw.find_contract(_gw_result.contract_id),
+                    canonical_state="pending_conflict",
+                )
                 return {
-                    "message": _gw_result.user_message or _gw_result.reason,
+                    "message": _pending_lifecycle.safe_user_message,
                     "contract_id": _gw_result.contract_id,
                     "ok": False,
-                    "terminal_outcome": "APPROVAL_BLOCKED_PENDING",
+                    "terminal_outcome": "APPROVAL_QUEUE_ERROR",
                     "action_tool": tool_name,
                     "created_this_turn": False,
+                    "owner_notified": False,
+                    "reply_owner": "gateway",
+                    "lifecycle_result": _pending_lifecycle,
+                    "final_response_count": 1,
                 }
             return {
                 "message": _gw_result.user_message or f"⏳ {_gw_result.reason}",
@@ -1215,7 +1249,10 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
         # Shadow mode records proposals without enforcement, except for the
         # canonical BUG-122 boundary shared by both gateway modes.
         try:
-            from core.action_gateway import action_gateway as _gw
+            from core.action_gateway import (
+                action_gateway as _gw,
+                build_approval_lifecycle_result,
+            )
             tenant_id = getattr(identity, "tenant_id", "boss_hq")
             _gw_result = _gw.propose_action(
                 tenant_id=tenant_id,
@@ -1241,13 +1278,21 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
                     "action_tool": tool_name, "created_this_turn": False,
                 }
             if _gw_result.failure_code == "existing_pending_blocks_agent":
+                _pending_lifecycle = build_approval_lifecycle_result(
+                    _gw.find_contract(_gw_result.contract_id),
+                    canonical_state="pending_conflict",
+                )
                 return {
-                    "message": _gw_result.user_message or _gw_result.reason,
+                    "message": _pending_lifecycle.safe_user_message,
                     "contract_id": _gw_result.contract_id,
                     "ok": False,
-                    "terminal_outcome": "APPROVAL_BLOCKED_PENDING",
+                    "terminal_outcome": "APPROVAL_QUEUE_ERROR",
                     "action_tool": tool_name,
                     "created_this_turn": False,
+                    "owner_notified": False,
+                    "reply_owner": "gateway",
+                    "lifecycle_result": _pending_lifecycle,
+                    "final_response_count": 1,
                 }
             if _gw_result.failure_code == "persistence_failed":
                 # Codex re-audit of 818c8a6, P1-3: acknowledgment-uncertain —
@@ -1303,6 +1348,7 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
                 "canonical_user_id": identity.memory_key,
                 "user_chat_id":      user_chat_id,
                 "channel":           channel,
+                "contract_id":       getattr(_gw_result, "contract_id", None),
             },
             chat_id = user_chat_id,
             label   = label,
@@ -1347,10 +1393,23 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
     # Single-Speaker gate correctly returns "" for the agent's own text.
     _owner_notified = False
     if owner_chat_id:
+        from core.action_gateway import action_gateway as _approval_gateway
+        _lifecycle_result = _approval_gateway.lifecycle_result(
+            getattr(_gw_result, "contract_id", None),
+        )
+        _callback_contract_id = _lifecycle_result.contract_id or ""
         kb = telebot.types.InlineKeyboardMarkup()
         kb.add(
-            telebot.types.InlineKeyboardButton("✅ אשר", callback_data=f"approve:{action_id}"),
-            telebot.types.InlineKeyboardButton("❌ בטל",  callback_data=f"reject:{action_id}"),
+            telebot.types.InlineKeyboardButton(
+                "✅ אשר", callback_data=_approval_callback_data(
+                    "approve", action_id, _callback_contract_id,
+                ),
+            ),
+            telebot.types.InlineKeyboardButton(
+                "❌ בטל", callback_data=_approval_callback_data(
+                    "reject", action_id, _callback_contract_id,
+                ),
+            ),
         )
         # BUG-123-FU: the raw action_id used to be shown directly in this
         # visible text ("ID: {action_id}") — a technical identifier with no
@@ -1359,7 +1418,7 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
         # elsewhere; nothing parses this ID back out of the message text).
         # Dropped from user-facing text entirely — the expiry countdown is
         # the only part of that line that's actually useful to the user.
-        _legacy_pending_text = f"⏳ בקשת אישור\n\n{label}\n\nפג תוקף בעוד 10 דקות"
+        _legacy_pending_text = _lifecycle_result.safe_user_message
         # F52 PR6: shadow-only formatter pass — off (default) returns
         # _legacy_pending_text byte-identical; shadow computes+logs the
         # unified approval_pending text alongside it (never sent); on
@@ -1446,8 +1505,10 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
     # even though shadow mode falls through to this same success return.
     _created_this_turn = bool(_gw_result and getattr(_gw_result, "ok", False))
     _contract_id = _gw_result.contract_id if _gw_result else None
+    from core.action_gateway import action_gateway as _approval_gateway
+    _lifecycle_result = _approval_gateway.lifecycle_result(_contract_id)
     return {
-        "message": f"⏳ הפעולה ממתינה לאישור: {label}\nשלח *מאשר* כדי לאשר (בכל ערוץ).",
+        "message": _lifecycle_result.safe_user_message,
         "contract_id": _contract_id,
         "ok": _created_this_turn,
         "terminal_outcome": None if _created_this_turn else "APPROVAL_QUEUE_ERROR",
@@ -1459,6 +1520,9 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
         # .get("owner_notified", False), which is correctly False for all
         # of them (none actually sent the owner a message).
         "owner_notified": _owner_notified,
+        "reply_owner": _lifecycle_result.reply_owner,
+        "lifecycle_result": _lifecycle_result,
+        "final_response_count": 1,
     }
 
 
@@ -1876,7 +1940,7 @@ def _notify_stale_or_resolved_callback(
     dispatcher calls, zero new Atomic Claims, and zero writes — never
     dispatches or claims anything itself.
     """
-    if notify_chat_id:
+    if notify_chat_id and not _flag_enabled("FEATURE_SINGLE_SPEAKER_APPROVAL_UX"):
         try:
             bot.send_message(notify_chat_id, f"ℹ️ {label}\n\n{state_text}, ולכן לא בוצעה שוב.")
         except Exception as e:
@@ -1955,6 +2019,17 @@ def _reject_stale_telegram_approval(
     )
 
     bot.answer_callback_query(cq.id, "⏰ פג תוקף — הפעולה לא בוצעה")
+    if _flag_enabled("FEATURE_SINGLE_SPEAKER_APPROVAL_UX"):
+        _deliver_callback_final(
+            cq,
+            origin_channel=payload.get("origin_channel", payload.get("channel", "telegram")),
+            origin_chat_id=payload.get("origin_chat_id", payload.get("user_chat_id", approver_chat_id)),
+            canonical_user_id=canonical_user_id,
+            action_id=action_id,
+            tool_name=tool_name or "",
+            text="⏰ פג תוקף — הפעולה לא בוצעה",
+        )
+        return
     if approver_chat_id:
         try:
             bot.send_message(approver_chat_id, "⏰ פג תוקף — הפעולה לא בוצעה")
@@ -2004,7 +2079,7 @@ _MISSING_OR_EXPIRED_CALLBACK_TEXT = "ℹ️ הפעולה כבר פגה או אי
 def _notify_missing_or_expired_callback(cq, approver_chat_id: str) -> None:
     """See the BUG-112 follow-up comment above this function."""
     bot.answer_callback_query(cq.id, _MISSING_OR_EXPIRED_CALLBACK_TEXT)
-    if approver_chat_id:
+    if approver_chat_id and not _flag_enabled("FEATURE_SINGLE_SPEAKER_APPROVAL_UX"):
         try:
             bot.send_message(approver_chat_id, _MISSING_OR_EXPIRED_CALLBACK_TEXT)
         except Exception as e:
@@ -2031,24 +2106,39 @@ def _deliver_callback_final(
     action_id: str,
     tool_name: str,
     text: str,
-) -> None:
+) -> int:
     """Deliver one persistent final response for a Telegram callback."""
     callback_message = getattr(cq, "message", None)
     callback_chat = getattr(callback_message, "chat", None)
     callback_chat_id = str(getattr(callback_chat, "id", "") or "")
     if origin_channel == "telegram":
-        # The callback message owns the keyboard and must always be made
-        # terminal, even when the original requester is a different chat.
-        bot.edit_message_text(text, cq.message.chat.id, cq.message.message_id)
-        if str(origin_chat_id) != callback_chat_id:
+        if (
+            _flag_enabled("FEATURE_SINGLE_SPEAKER_APPROVAL_UX")
+            and str(origin_chat_id) != callback_chat_id
+        ):
+            # Cross-chat approval: the requester owns the final response.
+            # The approver's keyboard is only retired, not turned into a
+            # second user-facing status message.
+            bot.edit_message_reply_markup(
+                cq.message.chat.id, cq.message.message_id, reply_markup=None,
+            )
             bot.send_message(origin_chat_id, text)
-        return
+            return 1
+        bot.edit_message_text(text, cq.message.chat.id, cq.message.message_id)
+        if (
+            not _flag_enabled("FEATURE_SINGLE_SPEAKER_APPROVAL_UX")
+            and str(origin_chat_id) != callback_chat_id
+        ):
+            bot.send_message(origin_chat_id, text)
+            return 2
+        return 1
 
     _write_execution_receipt(
         canonical_user_id, origin_channel, origin_chat_id,
         action_id, tool_name, text,
     )
     bot.edit_message_text(text, cq.message.chat.id, cq.message.message_id)
+    return 1
 
 
 def _handle_approval_callback_impl(cq) -> None:
@@ -2060,7 +2150,10 @@ def _handle_approval_callback_impl(cq) -> None:
         bot.answer_callback_query(cq.id, "⚠️ נתוני callback לא תקינים")
         return
 
-    action, action_id = data.split(":", 1)
+    callback_parts = data.split(":", 2)
+    action = callback_parts[0]
+    action_id = callback_parts[1]
+    callback_contract_id = callback_parts[2] if len(callback_parts) == 3 else ""
 
     if action in ("approve", "reject"):
         approver_chat_id = str(getattr(cq.from_user, "id", "") or "")
@@ -2072,6 +2165,28 @@ def _handle_approval_callback_impl(cq) -> None:
             )
             bot.answer_callback_query(cq.id, "⛔ אין לך הרשאה לאשר פעולה זו")
             return
+
+        # New PR1 buttons carry the exact ActionContract id. This makes a
+        # replay resolvable after the one-shot EventBus item has been popped,
+        # without inventing Session state or guessing by fingerprint.
+        if callback_contract_id and _flag_enabled("FEATURE_ACTION_GATEWAY"):
+            from core.action_gateway import action_gateway as _callback_gateway
+            _callback_result = _callback_gateway.lifecycle_result(
+                callback_contract_id, repeated=True,
+            )
+            if _callback_result.canonical_state != "pending":
+                _callback_contract = _callback_gateway.find_contract(callback_contract_id)
+                bot.answer_callback_query(cq.id, _callback_result.safe_user_message)
+                _deliver_callback_final(
+                    cq,
+                    origin_channel=getattr(_callback_contract, "origin_channel", "telegram"),
+                    origin_chat_id=getattr(_callback_contract, "origin_chat_id", approver_chat_id),
+                    canonical_user_id=getattr(_callback_contract, "canonical_user_id", ""),
+                    action_id=action_id,
+                    tool_name=getattr(_callback_contract, "tool_name", ""),
+                    text=_callback_result.safe_user_message,
+                )
+                return
 
     if action == "approve":
         # BUG-SB-02: peek the bus item (without consuming) to resolve fingerprint →
@@ -2226,21 +2341,29 @@ def _handle_approval_callback_impl(cq) -> None:
             if _flag_enabled("FEATURE_ACTION_GATEWAY"):
                 try:
                     from core.action_gateway import action_gateway as _gw_exec
-                    _fp_exec = _gw_exec.compute_business_fingerprint(
-                        getattr(identity, "tenant_id", "boss_hq"),
-                        canonical_user_id or identity.memory_key, tool_name,
-                        _gw_exec.normalize_payload(tool_inputs),
+                    _contract_exec = _gw_exec.find_contract(
+                        callback_contract_id or payload.get("contract_id", "")
                     )
-                    _contract_exec = _gw_exec._ledger.find_by_fingerprint(_fp_exec)
+                    if _contract_exec is None:
+                        _fp_exec = _gw_exec.compute_business_fingerprint(
+                            getattr(identity, "tenant_id", "boss_hq"),
+                            canonical_user_id or identity.memory_key, tool_name,
+                            _gw_exec.normalize_payload(tool_inputs),
+                        )
+                        _contract_exec = _gw_exec._ledger.find_by_fingerprint(_fp_exec)
                     if _contract_exec:
                         if _contract_exec.status == "pending":
                             _gw_contract_id = _contract_exec.contract_id
                         elif _contract_exec.status in ("completed", "executed"):
-                            _gw_terminal_reply = "✅ פעולה זו כבר בוצעה."
+                            _gw_terminal_reply = _gw_exec.lifecycle_result(
+                                _contract_exec.contract_id, repeated=True,
+                            ).safe_user_message
                             _gw_terminal_contract_id = _contract_exec.contract_id
                             _gw_terminal_status = _contract_exec.status
                         elif _contract_exec.status == "rejected":
-                            _gw_terminal_reply = "❌ פעולה זו כבר בוטלה."
+                            _gw_terminal_reply = _gw_exec.lifecycle_result(
+                                _contract_exec.contract_id, repeated=True,
+                            ).safe_user_message
                             _gw_terminal_contract_id = _contract_exec.contract_id
                             _gw_terminal_status = _contract_exec.status
                 except Exception as _gw_lookup_exc:
@@ -2277,11 +2400,12 @@ def _handle_approval_callback_impl(cq) -> None:
 
             if _gw_contract_id:
                 from core.action_gateway import action_gateway as _gw_exec
-                result = _gw_exec.approve(
+                _gw_approval_result = _gw_exec.approve_with_lifecycle_result(
                     _gw_contract_id,
                     approver=approver_identity.memory_key or approver_identity.user_id,
                     approver_role=approver_identity.role,
                 )
+                result = _gw_approval_result.safe_user_message
                 _contract_after = _gw_exec._ledger.find_by_id(_gw_contract_id)
                 exec_failed = not (
                     _contract_after and _contract_after.status in ("completed", "executed")
@@ -2470,12 +2594,16 @@ def _handle_approval_callback_impl(cq) -> None:
         if tool_name and _flag_enabled("FEATURE_ACTION_GATEWAY"):
             requester_identity = resolve_identity(channel, user_chat_id)
             from core.action_gateway import action_gateway as _gw_reject
-            _reject_fp = _gw_reject.compute_business_fingerprint(
-                getattr(requester_identity, "tenant_id", "boss_hq"),
-                canonical_user_id or requester_identity.memory_key,
-                tool_name, _gw_reject.normalize_payload(tool_inputs),
+            _reject_contract = _gw_reject.find_contract(
+                callback_contract_id or payload.get("contract_id", "")
             )
-            _reject_contract = _gw_reject._ledger.find_by_fingerprint(_reject_fp)
+            if _reject_contract is None:
+                _reject_fp = _gw_reject.compute_business_fingerprint(
+                    getattr(requester_identity, "tenant_id", "boss_hq"),
+                    canonical_user_id or requester_identity.memory_key,
+                    tool_name, _gw_reject.normalize_payload(tool_inputs),
+                )
+                _reject_contract = _gw_reject._ledger.find_by_fingerprint(_reject_fp)
             if not _reject_contract:
                 logger.warning(
                     "[ActionGateway] reject callback has no canonical contract "
@@ -2487,10 +2615,11 @@ def _handle_approval_callback_impl(cq) -> None:
                     state_text="כבר טופלה או שאין לה רישום אישור פעיל",
                 )
                 return
-            _reject_reply = _gw_reject.reject(
+            _reject_result = _gw_reject.reject_with_lifecycle_result(
                 _reject_contract.contract_id,
                 rejected_by=approver_identity.memory_key or approver_identity.user_id,
             )
+            _reject_reply = _reject_result.safe_user_message
             _reject_after = _gw_reject._ledger.find_by_id(_reject_contract.contract_id)
             if not _reject_after or _reject_after.status != "rejected":
                 logger.error(
@@ -2521,7 +2650,10 @@ def _handle_approval_callback_impl(cq) -> None:
                 origin_chat_id=origin_chat_id,
                 canonical_user_id=canonical_user_id,
                 action_id=action_id, tool_name=tool_name,
-                text=f"🚫 הפעולה בוטלה: {label}",
+                text=(
+                    _reject_reply if tool_name and _flag_enabled("FEATURE_ACTION_GATEWAY")
+                    else "הפעולה נדחתה"
+                ),
             )
         except Exception as e:
             logger.error("[Approval] final callback delivery failed: %s", e)
@@ -3566,6 +3698,9 @@ def run_agent(
                         # shapes that don't set this key read as "not proven
                         # sent," never as a silent KeyError or a false True.
                         "owner_notified": _approval_outcome.get("owner_notified", False),
+                        "reply_owner": _approval_outcome.get("reply_owner"),
+                        "lifecycle_result": _approval_outcome.get("lifecycle_result"),
+                        "final_response_count": _approval_outcome.get("final_response_count", 0),
                     })
                     if _approval_outcome["created_this_turn"]:
                         turn_evidence.record_approval_pending()
@@ -3622,6 +3757,66 @@ def run_agent(
                 })
                 # C60: זיכרון בין סבבים — "תעלה לדסישנס" אחרי כלי קודם יזהה שהוא רץ
                 _capture_last_tool_result(chat_id, tu.name, result, tu.input, exec_check.status != "failed")
+
+            # PR1 single-speaker boundary: once a real approval turn is owned
+            # by the Gateway, do not call the Agent again and do not let any
+            # fallback/status/success text escape from this function. The
+            # Gateway prompt was either already delivered directly, or its
+            # one safe message is returned for the channel adapter to send.
+            _gateway_owned = next((
+                entry for entry in reversed(tool_results_log)
+                if entry.get("tool") == "__approval_queued__"
+                and entry.get("reply_owner") == "gateway"
+            ), None)
+            if (
+                _gateway_owned is not None
+                and _flag_enabled("FEATURE_SINGLE_SPEAKER_APPROVAL_UX")
+            ):
+                _lifecycle = _gateway_owned.get("lifecycle_result")
+                try:
+                    from core.turn_envelope import build_ownership_signal, log_ownership_signal
+                    _ownership_signal = build_ownership_signal(
+                        recognized_intent=getattr(route, "intent", "unknown"),
+                        selected_handler=getattr(route, "handler", "unknown"),
+                        tool_use_emitted=True,
+                        approval_queued=True,
+                        final_reply="",
+                        reply_owner="gateway",
+                    )
+                    log_ownership_signal(
+                        _ownership_signal, canonical_user_id=identity.memory_key,
+                    )
+                except Exception:
+                    logger.debug(
+                        "[TurnEnvelope] gateway ownership signal skipped due to error",
+                        exc_info=True,
+                    )
+                try:
+                    _ignored_text, _evidence_comparison = observe_shadow_finalizer(
+                        "",
+                        turn_evidence,
+                        state=get_evidence_finalizer_state(),
+                        approval_prompt_sent=bool(_gateway_owned.get("owner_notified")),
+                    )
+                    if _out_meta is not None and _evidence_comparison is not None:
+                        _out_meta["evidence_finalizer_shadow"] = {
+                            **_evidence_comparison.safe_record(),
+                            "evidence": turn_evidence.safe_record(),
+                        }
+                except Exception:
+                    logger.debug(
+                        "[EvidenceFinalizerShadow] gateway-owned observation skipped",
+                        exc_info=True,
+                    )
+                if _out_meta is not None:
+                    _out_meta.update({
+                        "reply_owner": "gateway",
+                        "final_response_count": 1,
+                        "canonical_state": getattr(_lifecycle, "canonical_state", None),
+                    })
+                return "" if _gateway_owned.get("owner_notified") else getattr(
+                    _lifecycle, "safe_user_message", _gateway_owned.get("content", "")
+                )
 
             tool_calls_made += 1
 

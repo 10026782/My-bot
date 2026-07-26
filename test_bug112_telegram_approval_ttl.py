@@ -173,7 +173,10 @@ def _run_callback(
     cq = _fake_cq(approver.user_id, f"approve:{action_id}")
     mock_bot = MagicMock()
 
-    _flag_side_effect = lambda name: feature_gw if name == "FEATURE_ACTION_GATEWAY" else False
+    _flag_side_effect = lambda name: (
+        feature_gw if name == "FEATURE_ACTION_GATEWAY"
+        else name == "FEATURE_SINGLE_SPEAKER_APPROVAL_UX"
+    )
 
     with patch.object(app, "bot", mock_bot), \
          patch.object(app, "resolve_identity", side_effect=_resolve_identity_side_effect), \
@@ -289,7 +292,9 @@ _real_gw.propose_action(
 )
 cq_4b = _fake_cq(approver4b.user_id, f"approve:{action_id_4b}")
 mock_bot_4b = MagicMock()
-_flag_on_only = lambda name: name == "FEATURE_ACTION_GATEWAY"
+_flag_on_only = lambda name: name in {
+    "FEATURE_ACTION_GATEWAY", "FEATURE_SINGLE_SPEAKER_APPROVAL_UX",
+}
 with patch.object(app, "bot", mock_bot_4b), \
      patch.object(app, "resolve_identity",
                    side_effect=lambda ch, ext_id: approver4b if ext_id == approver4b.user_id else requester4b), \
@@ -370,18 +375,17 @@ chk("Test8b: the second (missing/already-consumed) press's popup uses the "
     "single normalized phrase, not the old '...לא קיימת יותר' wording",
     mock_bot_4b_again.answer_callback_query.called
     and "הפעולה כבר פגה או אינה קיימת, ולכן לא בוצעה" in mock_bot_4b_again.answer_callback_query.call_args[0][1])
-chk("Test8c: the second press ALSO sends a persistent chat message with "
-    "the EXACT SAME phrase as its own popup (one consistent notice, not "
-    "two differently-worded artifacts for the same press)",
-    mock_bot_4b_again.send_message.called
-    and mock_bot_4b_again.send_message.call_args[0][1] == mock_bot_4b_again.answer_callback_query.call_args[0][1])
+chk("Test8c: the second press uses the edited approval message as its one final response",
+    not mock_bot_4b_again.send_message.called
+    and mock_bot_4b_again.edit_message_text.call_count == 1
+    and mock_bot_4b_again.edit_message_text.call_args[0][0] == mock_bot_4b_again.answer_callback_query.call_args[0][1])
 chk("Test8d: the first press's message ('⏰ פג תוקף — הפעולה לא בוצעה', "
     "captured earlier as _persistent_text_4) and the second press's message "
     "are DIFFERENT strings from each other — the two paths stay distinct "
     "(a genuinely-known TTL expiry vs. a not-found/already-consumed "
     "callback), each internally single/non-redundant, not merged into one "
     "shared literal",
-    mock_bot_4b_again.send_message.call_args[0][1] != _persistent_text_4)
+    mock_bot_4b_again.edit_message_text.call_args[0][0] != _persistent_text_4)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -409,13 +413,9 @@ chk("Test14: a callback for an action_id that was never queued at all "
 chk("Test15: the popup uses the single normalized 'missing' phrase",
     mock_bot_6.answer_callback_query.called
     and mock_bot_6.answer_callback_query.call_args[0][1] == app._MISSING_OR_EXPIRED_CALLBACK_TEXT)
-chk("Test16: the persistent chat message is the EXACT SAME phrase as the "
-    "popup — one message, not label+state_text template combinations",
-    mock_bot_6.send_message.called
-    and mock_bot_6.send_message.call_args[0][1] == app._MISSING_OR_EXPIRED_CALLBACK_TEXT)
-chk("Test17: the original message is edited to the SAME phrase too (all "
-    "three surfaces — popup, persistent message, edited message — carry "
-    "one identical literal string, not three overlapping variants)",
+chk("Test16: an unknown callback sends no duplicate persistent message",
+    not mock_bot_6.send_message.called)
+chk("Test17: the original message is the one final response and uses the popup's semantic phrase",
     mock_bot_6.edit_message_text.called
     and mock_bot_6.edit_message_text.call_args[0][0] == app._MISSING_OR_EXPIRED_CALLBACK_TEXT)
 chk("Test18: the normalized phrase itself is a single, self-contained "

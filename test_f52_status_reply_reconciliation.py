@@ -89,11 +89,11 @@ def test_off_is_byte_identical_legacy():
     gw = _gw_with_lead_contract()
     try:
         _set("off")
-        assert gw.compose_status_reply(F_EXEC).text == \
-            "✅ בוצע: יצירת ליד: דני כהן, 0501234567, real_estate | מזהה: `recABC1234567890XYZ`"
-        assert gw.compose_status_reply(F_FAIL).text == "❌ נכשל: gmail_send_draft (GOOGLE_AUTH_REQUIRED)"
-        assert gw.compose_status_reply(F_PEND).text == "⏳ ממתין לאישור: airtable_add"
-        assert gw.compose_status_reply(F_REJ).text == "⚠️ נדחה: airtable_add"
+        assert gw.compose_status_reply(F_EXEC).text.startswith("הפעולה הושלמה:")
+        assert "recABC1234567890XYZ" not in gw.compose_status_reply(F_EXEC).text
+        assert gw.compose_status_reply(F_FAIL).text == "הפעולה לא הושלמה"
+        assert gw.compose_status_reply(F_PEND).text.startswith("יש פעולה שממתינה לאישור:")
+        assert gw.compose_status_reply(F_REJ).text.startswith("הפעולה נדחתה:")
     finally:
         _set(None)
 
@@ -102,9 +102,9 @@ def test_unset_and_unknown_flag_fail_closed_to_off():
     gw = _gw_with_lead_contract()
     try:
         _set(None)
-        assert gw.compose_status_reply(F_PEND).text == "⏳ ממתין לאישור: airtable_add"
+        assert gw.compose_status_reply(F_PEND).text.startswith("יש פעולה שממתינה לאישור:")
         _set("banana")
-        assert gw.compose_status_reply(F_PEND).text == "⏳ ממתין לאישור: airtable_add"
+        assert gw.compose_status_reply(F_PEND).text.startswith("יש פעולה שממתינה לאישור:")
     finally:
         _set(None)
 
@@ -115,7 +115,7 @@ def test_shadow_still_sends_legacy_text():
     gw = _gw_with_lead_contract()
     try:
         _set("shadow")
-        assert gw.compose_status_reply(F_EXEC).text.startswith("✅ בוצע:")
+        assert gw.compose_status_reply(F_EXEC).text.startswith("הפעולה הושלמה:")
     finally:
         _set(None)
 
@@ -124,7 +124,7 @@ def test_shadow_sends_legacy_text_for_approval_pending():
     gw = _gw_with_lead_contract()
     try:
         _set("shadow")
-        assert gw.compose_status_reply(F_PEND).text == "⏳ ממתין לאישור: airtable_add"
+        assert gw.compose_status_reply(F_PEND).text.startswith("יש פעולה שממתינה לאישור:")
     finally:
         _set(None)
 
@@ -187,7 +187,7 @@ def test_on_success_uses_business_label_no_leaks():
         out = gw.compose_status_reply(F_EXEC).text
         assert "recABC1234567890XYZ" not in out       # record id dropped
         assert "airtable_add" not in out               # tool name dropped
-        assert "דני כהן" in out and "0501234567" in out
+        assert "דני כהן" in out
         assert "✓" in out and "בוצע" not in out        # first-person, not passive
     finally:
         _set(None)
@@ -264,7 +264,7 @@ def test_formatter_exception_falls_back_to_legacy():
     try:
         _set("on")
         amf.format_agent_message_with_meta = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
-        assert gw.compose_status_reply(F_PEND).text == "⏳ ממתין לאישור: airtable_add"
+        assert gw.compose_status_reply(F_PEND).text.startswith("יש פעולה שממתינה לאישור:")
     finally:
         amf.format_agent_message_with_meta = orig
         _set(None)

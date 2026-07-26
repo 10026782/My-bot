@@ -66,7 +66,7 @@ def _fake_cq(approver_chat_id: str, data: str):
         id="cbq1",
         data=data,
         from_user=SimpleNamespace(id=approver_chat_id),
-        message=SimpleNamespace(chat=SimpleNamespace(id="chat1"), message_id=1),
+        message=SimpleNamespace(chat=SimpleNamespace(id=approver_chat_id), message_id=1),
     )
 
 
@@ -77,7 +77,9 @@ def _tracking_bot() -> MagicMock:
     return MagicMock()
 
 
-_flag_on = lambda name: name == "FEATURE_ACTION_GATEWAY"
+_flag_on = lambda name: name in {
+    "FEATURE_ACTION_GATEWAY", "FEATURE_SINGLE_SPEAKER_APPROVAL_UX",
+}
 _TASK_TITLE = "הכנת הרכב לקיץ"
 
 
@@ -109,7 +111,7 @@ _legacy_action_id_a, _ = _real_bus.request_approval(
     },
     chat_id=requester_a.user_id, label=f"➕ הוסף ל-Tasks:\n• Task: {_TASK_TITLE}",
 )
-_real_gw.propose_action(
+_proposal_a = _real_gw.propose_action(
     tenant_id="boss_hq", canonical_user_id=requester_a.memory_key,
     tool_name="airtable_add", tool_inputs=tool_inputs_a,
     origin_channel="telegram", origin_chat_id=requester_a.user_id,
@@ -119,7 +121,10 @@ with patch("tools.dispatcher.dispatch_tool", side_effect=_ok_dispatch), \
      patch("feature_flags.is_enabled", side_effect=_flag_on):
     _real_gw.route_confirmation_word(requester_a.memory_key, approver_role="owner")
 
-cq_a = _fake_cq(requester_a.user_id, f"approve:{_legacy_action_id_a}")
+cq_a = _fake_cq(
+    requester_a.user_id,
+    f"approve:{_legacy_action_id_a}:{_proposal_a.contract_id}",
+)
 mock_bot_a = _tracking_bot()
 
 with patch.object(app, "bot", mock_bot_a), \
@@ -134,19 +139,13 @@ chk("A: stale callback produces zero dispatcher calls",
     _dt_a.call_count == 0 and _dt_legacy_a.call_count == 0)
 chk("A: answer_callback_query popup was sent (immediate ack)",
     mock_bot_a.answer_callback_query.called)
-chk("A: callback popup is NOT the only response — a persistent send_message also occurred",
-    mock_bot_a.send_message.called)
-_persistent_text_a = mock_bot_a.send_message.call_args[0][1]
-chk("A: persistent response identifies the relevant action (task title present)",
-    _TASK_TITLE in _persistent_text_a)
-chk("A: persistent response confirms no duplicate execution",
-    "לא בוצעה שוב" in _persistent_text_a)
+chk("A: same-chat callback emits no separate persistent send_message",
+    not mock_bot_a.send_message.called)
 chk("A: original approval message was edited (final state shown, button removed)",
-    mock_bot_a.edit_message_text.called)
+    mock_bot_a.edit_message_text.call_count == 1)
 _edited_text_a = mock_bot_a.edit_message_text.call_args[0][0]
-chk("A: edited message no longer implies an active button is expected "
-    "(shows final state text, not the original pending prompt)",
-    "כבר בוצעה" in _edited_text_a)
+chk("A: the one final response uses the exact repeated-completion message",
+    _edited_text_a == "הפעולה כבר הושלמה")
 
 
 # ══════════════════════════════════════════════════
@@ -169,7 +168,7 @@ _legacy_action_id_b, _ = _real_bus.request_approval(
     },
     chat_id=requester_b.user_id, label=f"➕ הוסף ל-Tasks:\n• Task: {_TASK_TITLE}",
 )
-_real_gw.propose_action(
+_proposal_b = _real_gw.propose_action(
     tenant_id="boss_hq", canonical_user_id=requester_b.memory_key,
     tool_name="airtable_add", tool_inputs=tool_inputs_b,
     origin_channel="telegram", origin_chat_id=requester_b.user_id,
@@ -196,11 +195,10 @@ with patch.object(app, "bot", mock_bot_b), \
 
 chk("B: stale callback produces zero dispatcher calls",
     _dt_b.call_count == 0 and _dt_legacy_b.call_count == 0)
-chk("B: callback popup is not the only response", mock_bot_b.send_message.called)
-_persistent_text_b = mock_bot_b.send_message.call_args[0][1]
-chk("B: persistent response identifies the relevant action", _TASK_TITLE in _persistent_text_b)
-chk("B: persistent response confirms no duplicate execution", "לא בוצעה שוב" in _persistent_text_b)
-chk("B: original approval message edited to final state", mock_bot_b.edit_message_text.called)
+chk("B: same-chat callback sends no duplicate persistent message",
+    not mock_bot_b.send_message.called)
+chk("B: original approval message is the one final response",
+    mock_bot_b.edit_message_text.call_count == 1)
 
 
 # ══════════════════════════════════════════════════
@@ -211,7 +209,10 @@ chk("B: original approval message edited to final state", mock_bot_b.edit_messag
 # ══════════════════════════════════════════════════
 print("\n── Scenario C: repeated press cannot create another write ──────")
 
-cq_a2 = _fake_cq(requester_a.user_id, f"approve:{_legacy_action_id_a}")
+cq_a2 = _fake_cq(
+    requester_a.user_id,
+    f"approve:{_legacy_action_id_a}:{_proposal_a.contract_id}",
+)
 mock_bot_a2 = _tracking_bot()
 with patch.object(app, "bot", mock_bot_a2), \
      patch.object(app, "resolve_identity", return_value=requester_a), \
@@ -223,8 +224,10 @@ with patch.object(app, "bot", mock_bot_a2), \
 
 chk("C: pressing the same already-resolved button again still dispatches zero times",
     _dt_a2.call_count == 0 and _dt_legacy_a2.call_count == 0)
-chk("C: repeated press still gets a persistent, action-identifying response",
-    mock_bot_a2.send_message.called and _TASK_TITLE in mock_bot_a2.send_message.call_args[0][1])
+chk("C: repeated press still gets exactly one final response",
+    not mock_bot_a2.send_message.called and
+    mock_bot_a2.edit_message_text.call_count == 1 and
+    mock_bot_a2.edit_message_text.call_args[0][0] == "הפעולה כבר הושלמה")
 
 
 # ══════════════════════════════════════════════════

@@ -129,7 +129,10 @@ def test_success_through_real_dispatch_executor_no_unhashable_crash():
 
     chk("no unhashable-Identity crash — a real reply was returned", isinstance(result, str))
     chk("real provider (airtable_patch) called exactly once", mock_patch.call_count == 1)
-    chk("success reply reported to user", "בוצע" in result)
+    chk(
+        "canonical success reply reported without a record id",
+        "הפעולה הושלמה" in result and "recXOW7FBZQZcNdw1" not in result,
+    )
     completed_calls = [c for c in mock_update_status.call_args_list if c.args[1] == "completed"]
     chk("claim transitioned to completed", len(completed_calls) == 1)
     failed_calls = [c for c in mock_update_status.call_args_list if c.args[1] == "failed"]

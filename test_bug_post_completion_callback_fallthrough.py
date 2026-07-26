@@ -153,7 +153,8 @@ with patch("tools.dispatcher.dispatch_tool", side_effect=_ok_dispatch) as _dt_fi
     first_reply = _real_gw.route_confirmation_word(requester.memory_key, approver_role="owner")
 
 chk("first confirmation dispatches exactly once", _dt_first.call_count == 1)
-chk("first confirmation reports success", "✅" in first_reply and "בוצע" in first_reply)
+chk("first confirmation reports canonical success",
+    first_reply.startswith("הפעולה הושלמה:"))
 
 _contract_after_first = _real_gw._ledger.find_by_id(contract_id)
 chk("contract reached a terminal success status after first confirmation",

@@ -199,7 +199,7 @@ dup2 = store.is_duplicate("telegram", str(TEST_SENDER), "8002:8002")
 chk("second כן (different event id) not falsely blocked despite identical text", not dup2)
 reply2 = gw.route_confirmation_word(user, approver_role="owner")
 chk("second כן executes exactly once", len(executions) == 1)
-chk("second כן reply reports success", "בוצע" in reply2)
+chk("second כן reply reports canonical success", "הפעולה הושלמה" in reply2)
 
 # Replaying the exact same second update again (retry) — this one SHOULD be blocked
 dup2_retry = store.is_duplicate("telegram", str(TEST_SENDER), "8002:8002")

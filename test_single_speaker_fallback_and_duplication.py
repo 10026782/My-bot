@@ -185,13 +185,14 @@ chk("pending contract status is 'pending' before approval", pending_contract.sta
 reply = gw.route_confirmation_word("boss_hq:owner-1", approver_role="owner")
 
 chk("approval performs exactly one dispatch", _dispatched == ["airtable_add"])
-chk("final reply reports success ('✅ בוצע')", "✅ בוצע" in reply)
-chk("final reply contains exactly one success statement (single ✅ occurrence)",
-    reply.count("✅") == 1)
+chk("final reply reports one canonical business success",
+    reply.startswith("הפעולה הושלמה:"))
+chk("final reply contains exactly one success statement",
+    reply.count("הפעולה הושלמה") == 1)
 chk("final reply does NOT also contain the executor's own success text",
     "רשומה נוספה" not in reply)
-chk("record ID appears in the reply", RECORD_ID in reply)
-chk("record ID appears exactly once (no duplication)", reply.count(RECORD_ID) == 1)
+chk("record ID is not exposed in the reply", RECORD_ID not in reply)
+chk("tool name is not exposed in the reply", "airtable_add" not in reply)
 
 approved_contract = gw.find_contract(propose_result.contract_id)
 chk("contract reached a terminal success status", approved_contract.status in ("completed", "executed"))
@@ -224,7 +225,7 @@ chk("executor's external_id remains available internally via ActionFact.raw_tool
 chk("but the executor's user_message text is not repeated in the outgoing GatewayReply.text",
     "רשומה נוספה" not in audit_reply.text)
 chk("the outgoing GatewayReply.text still carries the canonical single success statement",
-    audit_reply.text.count("✅") == 1)
+    audit_reply.text.count("הפעולה הושלמה") == 1)
 
 
 # ══════════════════════════════════════════════════

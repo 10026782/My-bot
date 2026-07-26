@@ -422,11 +422,12 @@ def _run_agent(chat_id: str, user_text: str, *, anthropic_responses):
     ownership_signals = []
     out_meta: dict = {}
 
+    create_mock = MagicMock(side_effect=anthropic_responses)
     patches = [
         patch.object(app, "resolve_identity", return_value=identity),
         patch.object(app, "_safe_route", return_value=route),
         patch.object(app, "build_context", return_value=fake_ctx),
-        patch.object(app.client.messages, "create", side_effect=anthropic_responses),
+        patch.object(app.client.messages, "create", create_mock),
         patch.object(session_store.lead_sessions, "get", return_value=None),
         patch.object(app, "bot", mock_bot),
         patch(
@@ -439,7 +440,7 @@ def _run_agent(chat_id: str, user_text: str, *, anthropic_responses):
             user_text, chat_id, channel="telegram",
             _live_contracts_snapshot=[], _out_meta=out_meta,
         )
-    return reply, out_meta, ownership_signals, mock_bot
+    return reply, out_meta, ownership_signals, mock_bot, create_mock.call_count
 
 
 _TURN = [
@@ -454,11 +455,13 @@ _TURN = [
 _old_gw   = os.environ.get("FEATURE_ACTION_GATEWAY")
 _old_fmt  = os.environ.get("FEATURE_UNIFIED_STATUS_FORMATTER")
 _old_fin  = os.environ.get("FEATURE_EVIDENCE_FINALIZER")
+_old_single_speaker = os.environ.get("FEATURE_SINGLE_SPEAKER_APPROVAL_UX")
 try:
     _set_env("FEATURE_ACTION_GATEWAY", "true")
+    _set_env("FEATURE_SINGLE_SPEAKER_APPROVAL_UX", "true")
     _set_env("FEATURE_UNIFIED_STATUS_FORMATTER", None)
     _set_env("FEATURE_EVIDENCE_FINALIZER", "shadow")
-    (reply4a, meta4a, sig4a, bot4a), log4a = _with_capture(
+    (reply4a, meta4a, sig4a, bot4a, calls4a), log4a = _with_capture(
         "core.action_gateway",
         lambda: _run_agent("pr6_e2e_off", "צור לי משימה לבדוק F52 PR6", anthropic_responses=list(_TURN)),
     )
@@ -466,15 +469,33 @@ finally:
     _set_env("FEATURE_ACTION_GATEWAY", _old_gw)
     _set_env("FEATURE_UNIFIED_STATUS_FORMATTER", _old_fmt)
     _set_env("FEATURE_EVIDENCE_FINALIZER", _old_fin)
+    _set_env("FEATURE_SINGLE_SPEAKER_APPROVAL_UX", _old_single_speaker)
 
 chk("T4a: A32 still suppresses the agent's own pending-status text -> final_reply == \"\"",
     reply4a == "")
 chk("T4a: owner WAS notified — bot.send_message called exactly once",
     bot4a.send_message.call_count == 1)
+chk("T4a: Gateway ownership prevents a second Agent call", calls4a == 1)
+chk("T4a: the covered approval turn has exactly one final response",
+    meta4a.get("final_response_count") == 1)
 if bot4a.send_message.call_count == 1:
     _sent_text_4a = bot4a.send_message.call_args.args[1]
-    chk("T4a: sent text is the legacy '⏳ בקשת אישור' prompt (flag off -> byte-identical)",
-        _sent_text_4a.startswith("⏳ בקשת אישור"))
+    chk("T4a: sent text is the canonical safe pending prompt",
+        _sent_text_4a.startswith("יש פעולה שממתינה לאישור:"))
+    _sent_markup_4a = bot4a.send_message.call_args.kwargs["reply_markup"]
+    _sent_callbacks_4a = [
+        button.callback_data
+        for row in _sent_markup_4a.keyboard
+        for button in row
+    ]
+    chk("T4a: both generated Telegram approval callbacks are present",
+        {payload.split(":", 1)[0] for payload in _sent_callbacks_4a}
+        == {"approve", "reject"})
+    chk("T4a: every callback_data actually sent is <= 64 UTF-8 bytes",
+        all(len(payload.encode("utf-8")) <= 64 for payload in _sent_callbacks_4a))
+    chk("T4a: sent callbacks carry full EventBus and ActionContract correlation",
+        all(len(payload.split(":")) == 3 and len(payload.split(":")[2]) == 36
+            for payload in _sent_callbacks_4a))
 chk("T4a: flag off -> no [UnifiedStatusFormatterShadow] line emitted",
     not any("UnifiedStatusFormatterShadow" in m for m in log4a))
 chk("T4a: ownership_signal.reply_owner == 'gateway' (not 'agent') when an "
@@ -501,9 +522,10 @@ chk("T4a: EvidenceFinalizerShadow evidence classification is approval_pending",
 # 4a), but a [UnifiedStatusFormatterShadow] comparison IS now logged.
 try:
     _set_env("FEATURE_ACTION_GATEWAY", "true")
+    _set_env("FEATURE_SINGLE_SPEAKER_APPROVAL_UX", "true")
     _set_env("FEATURE_UNIFIED_STATUS_FORMATTER", "shadow")
     _set_env("FEATURE_EVIDENCE_FINALIZER", None)
-    (reply4b, meta4b, sig4b, bot4b), log4b = _with_capture(
+    (reply4b, meta4b, sig4b, bot4b, calls4b), log4b = _with_capture(
         "core.action_gateway",
         lambda: _run_agent("pr6_e2e_shadow", "צור לי משימה לבדוק F52 PR6 שוב", anthropic_responses=list(_TURN)),
     )
@@ -511,14 +533,14 @@ finally:
     _set_env("FEATURE_ACTION_GATEWAY", _old_gw)
     _set_env("FEATURE_UNIFIED_STATUS_FORMATTER", _old_fmt)
     _set_env("FEATURE_EVIDENCE_FINALIZER", _old_fin)
+    _set_env("FEATURE_SINGLE_SPEAKER_APPROVAL_UX", _old_single_speaker)
 
 chk("T4b: shadow mode -> owner still notified exactly once",
     bot4b.send_message.call_count == 1)
 if bot4b.send_message.call_count == 1 and bot4a.send_message.call_count == 1:
     _sent_text_4b = bot4b.send_message.call_args.args[1]
-    chk("T4b: shadow mode -> the ACTUAL sent text is unchanged vs. flag-off "
-        "(same legacy prompt shape, never the unified text)",
-        _sent_text_4b.startswith("⏳ בקשת אישור"))
+    chk("T4b: shadow mode -> the ACTUAL sent text remains the canonical safe prompt",
+        _sent_text_4b.startswith("יש פעולה שממתינה לאישור:"))
 _shadow_lines_4b = [m for m in log4b if "UnifiedStatusFormatterShadow" in m]
 chk("T4b: shadow mode -> exactly one [UnifiedStatusFormatterShadow] line for "
     "the pending prompt this turn",
@@ -537,7 +559,7 @@ print("── 5. regression: plain conversational turn keeps reply_owner='agent'
 
 try:
     _set_env("FEATURE_ACTION_GATEWAY", "true")
-    reply5, meta5, sig5, bot5 = _run_agent(
+    reply5, meta5, sig5, bot5, calls5 = _run_agent(
         "pr6_e2e_no_approval", "שלום, מה שלומך?",
         anthropic_responses=[_text_response("שלום! הכל טוב.")],
     )

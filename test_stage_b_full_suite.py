@@ -641,16 +641,16 @@ _fact_ex = ActionFact(tool_name="airtable_add", contract_id="c1", outcome="execu
                       record_id=VALID_REC_ID, error_code=None, raw_tool_response={})
 _gr = _gw18.compose_status_reply(_fact_ex)
 chk("DoD18/23: compose_status_reply returns GatewayReply", isinstance(_gr, GatewayReply))
-chk("DoD18/23: GatewayReply.text contains ✅", "✅" in _gr.text)
-chk("DoD18/23: GatewayReply.text contains tool_name", "airtable_add" in _gr.text)
+chk("DoD18/23: GatewayReply.text contains canonical success", "הפעולה הושלמה" in _gr.text)
+chk("DoD18/23: GatewayReply.text hides tool_name", "airtable_add" not in _gr.text)
 chk("DoD18/23: GatewayReply.fact is the same ActionFact", _gr.fact is _fact_ex)
-chk("DoD18/23: GatewayReply.text contains record_id", VALID_REC_ID in _gr.text)
+chk("DoD18/23: GatewayReply.text hides record_id", VALID_REC_ID not in _gr.text)
 
 _fact_fail = ActionFact(tool_name="airtable_add", contract_id="c2", outcome="failed",
                         record_id=None, error_code="422", raw_tool_response={})
 _gr_fail = _gw18.compose_status_reply(_fact_fail)
-chk("DoD18/23: failed fact → GatewayReply with ❌", "❌" in _gr_fail.text)
-chk("DoD18/23: failed fact → error_code in text", "422" in _gr_fail.text)
+chk("DoD18/23: failed fact → safe failure text", "הפעולה לא הושלמה" in _gr_fail.text)
+chk("DoD18/23: failed fact → raw error_code hidden", "422" not in _gr_fail.text)
 
 # AgentReply has text + optional contract_id, no status
 _ar = AgentReply(text="מעולה, טיפלתי בזה!", contract_id="c1")
@@ -664,13 +664,13 @@ _p20 = _gw20.propose_action(**_BASE_PROPOSE)
 # nothing executed yet, but pending contract exists → SB-03 returns pending message
 _pre_exec_reply = _gw20.query_execution_status("boss_hq:owner_1")
 chk("DoD20: no execution yet, pending contract → query returns pending message",
-    _pre_exec_reply is not None and "פתוחה" in _pre_exec_reply)
+    _pre_exec_reply is not None and "ממתינה לאישור" in _pre_exec_reply)
 # approve (executes via _ok_executor)
 _gw20.approve(_p20.contract_id, approver="boss_hq:owner_1", approver_role="owner")
 _sq_reply = _gw20.query_execution_status("boss_hq:owner_1")
 chk("DoD20: after execution → query returns non-None", _sq_reply is not None)
-chk("DoD20: query reply contains ✅ (executed)", _sq_reply is not None and "✅" in _sq_reply)
-chk("DoD20: query reply contains tool_name", _sq_reply is not None and "airtable_add" in _sq_reply)
+chk("DoD20: query reply contains canonical success", _sq_reply is not None and "הפעולה הושלמה" in _sq_reply)
+chk("DoD20: query reply hides tool_name", _sq_reply is not None and "airtable_add" not in _sq_reply)
 
 # ── Item 21: sibling contracts closed on disambiguation selection ──
 
@@ -870,7 +870,7 @@ gw_sb03.propose_action(
 )
 _status_reply = gw_sb03.query_execution_status("u_sb03")
 chk("SB-03: query_execution_status returns pending reply when contract is pending",
-    _status_reply is not None and "ממתין" in _status_reply or (_status_reply is not None and "פתוחה" in _status_reply))
+    _status_reply is not None and "ממתינה לאישור" in _status_reply)
 
 # No contract at all → None
 gw_sb03_empty = ActionGateway(tool_executor=_ok_executor)
@@ -889,9 +889,9 @@ _fact_sb04 = ActionFact(
 )
 _reply_sb04 = _gw_singleton.compose_status_reply(_fact_sb04)
 chk("SB-04: compose_status_reply wraps ActionFact into GatewayReply",
-    _reply_sb04 is not None and hasattr(_reply_sb04, "text") and "בוצע" in _reply_sb04.text)
-chk("SB-04: GatewayReply.text contains record_id",
-    "recXOW7FBZQZcNdw1" in _reply_sb04.text)
+    _reply_sb04 is not None and hasattr(_reply_sb04, "text") and "הפעולה הושלמה" in _reply_sb04.text)
+chk("SB-04: GatewayReply.text hides record_id",
+    "recXOW7FBZQZcNdw1" not in _reply_sb04.text)
 chk("SB-04: GatewayReply.fact === original ActionFact",
     _reply_sb04.fact is _fact_sb04)
 
@@ -902,8 +902,8 @@ _fact_fail = ActionFact(
     error_code="TIMEOUT", raw_tool_response={},
 )
 _reply_fail = _gw_singleton.compose_status_reply(_fact_fail)
-chk("SB-04: failed ActionFact → GatewayReply contains error_code",
-    "TIMEOUT" in _reply_fail.text)
+chk("SB-04: failed ActionFact → GatewayReply hides raw error_code",
+    "TIMEOUT" not in _reply_fail.text and "הפעולה לא הושלמה" in _reply_fail.text)
 
 # BUG-SB-05: A32 fallback must be neutral — no "לא ביצעתי שינוי"
 from core.anti_hallucination import _NO_TOOL_EVIDENCE_FALLBACK

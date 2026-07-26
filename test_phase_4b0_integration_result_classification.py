@@ -286,8 +286,8 @@ def test_explicit_success_claim_completed():
 
                 # Verify user result indicates success
                 chk(
-                    "User-facing result indicates success",
-                    "בוצע" in result or "✅" in result
+                    "User-facing result indicates canonical success",
+                    "הפעולה הושלמה" in result
                 )
 
 

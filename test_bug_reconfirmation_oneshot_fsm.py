@@ -94,7 +94,7 @@ chk("A: reconfirmation_required now True", contract.reconfirmation_required is T
 
 reply2 = gw.route_confirmation_word("boss_hq:oneshot_a", approver_role="owner")
 chk("A: second כן executes exactly once", len(executions) == 1)
-chk("A: second כן reply reports success", "בוצע" in reply2)
+chk("A: second כן reply reports canonical success", "הפעולה הושלמה" in reply2)
 
 
 # ══════════════════════════════════════════════════
@@ -146,7 +146,10 @@ r3 = _propose_lead(gw3, "boss_hq:oneshot_d")
 gw3.mark_context_interrupted("boss_hq:oneshot_d")
 gw3.route_confirmation_word("boss_hq:oneshot_d", approver_role="owner")  # re-show
 cancel_reply = gw3.route_cancellation_word("boss_hq:oneshot_d")
-chk("D: cancellation reply returned", cancel_reply is not None and "בוטלה" in cancel_reply)
+chk(
+    "D: legacy rejection reply returned while rollout flag is off",
+    cancel_reply == "🚫 הפעולה בוטלה.",
+)
 chk("D: never executed", executions3 == [])
 contract_d = gw3.find_contract(r3.contract_id)
 chk("D: contract status is rejected (not superseded)", contract_d.status == "rejected")
@@ -177,21 +180,21 @@ r5 = _propose_lead(gw5, "boss_hq:oneshot_f")
 reply5 = gw5.route_confirmation_word("boss_hq:oneshot_f", approver_role="owner")  # direct כן, no interruption
 chk("F: executed", len(executions5) == 1)
 chk("F: receipt shows the lead's name (business description)", "מני חזי" in reply5)
-chk("F: receipt shows the phone", "050-9998877" in reply5)
-chk("F: receipt still includes the record id", "recTEST123456789A" in reply5)
+chk("F: compact receipt does not echo unrelated personal fields", "050-9998877" not in reply5)
+chk("F: receipt redacts the business record id", "recTEST123456789A" not in reply5)
 chk("F: receipt no longer shows the bare tool name alone",
     reply5 != f"✅ בוצע: airtable_add | מזהה: `recTEST123456789A`")
 
-# Non-table tools (e.g. gmail_send_draft) are unaffected — falls back to
-# tool_name exactly as before, since there is no business description to show.
+# Non-table tools (e.g. gmail_send_draft) use a safe business description and
+# never expose the raw tool_name.
 r5b = gw5.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:oneshot_f2",
     tool_name="gmail_send_draft", tool_inputs={"to": "a@b.com"},
     origin_channel="telegram", origin_chat_id="tg:1", requires_approval=True,
 )
 reply5b = gw5.route_confirmation_word("boss_hq:oneshot_f2", approver_role="owner")
-chk("F: non-table tool receipt unchanged (still shows tool_name)",
-    reply5b.startswith("✅ בוצע: gmail_send_draft"))
+chk("F: non-table tool receipt uses canonical success without tool_name",
+    "הפעולה הושלמה" in reply5b and "gmail_send_draft" not in reply5b)
 
 
 print(f"\n{'='*60}\nOne-shot reconfirmation FSM: {passed} passed, {failed} failed\n{'='*60}")
