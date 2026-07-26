@@ -709,6 +709,16 @@ def run_startup_sequence() -> None:
         result.configured, result.store_status, result.flags_loaded,
     )
 
+    # BUG-149: wire the ActionResolutionEvent projection once at real
+    # startup, not at import time — same "never a side effect of merely
+    # importing this module" rule as everything else in this function.
+    # Local import, matching every other core.action_gateway reference in
+    # this file (module-level import here would risk the exact circular-
+    # import this file has consistently avoided).
+    from core.action_gateway import action_gateway as _startup_gw
+    from core.action_resolution_projection import project_resolution_event_to_memory
+    _startup_gw.set_resolution_sink(project_resolution_event_to_memory)
+
     global _scheduler
     _scheduler_thread = next(
         (t for t in threading.enumerate() if t.name == "scheduler" and t.is_alive()),
@@ -1730,6 +1740,26 @@ def _build_tool_context(chat_id: str, session: dict | None) -> str:
     if not parts:
         return ""
     return "\n🔧 הקשר כלים:\n" + "\n".join(f"• {p}" for p in parts)
+
+
+def _build_action_resolution_context(memory_key: str) -> str:
+    """BUG-149: injects the outcome of actions proposed earlier in this
+    conversation into the system prompt — a distinct channel from
+    _build_tool_context() above (which only reflects the last DISPATCHED
+    tool, not an approval/rejection outcome) and from memory.get_for_claude()
+    (ordinary user/assistant history, which never carried this signal —
+    that gap is exactly BUG-149's root cause). See memory_store.py's
+    add_context_event()/get_context_events_for_claude() docstrings for why
+    this is a separate channel rather than a synthetic message pair spliced
+    into history.
+
+    NON-DURABLE, best-effort — see MemoryStore's class docstring. This is a
+    mitigation on top of the deterministic MULTI_MUTATION_CONTEXT_MISMATCH
+    guard in the tool loop below, not a substitute for it."""
+    events = memory.get_context_events_for_claude(memory_key)
+    if not events:
+        return ""
+    return "\n📌 סטטוס פעולות קודמות בשיחה זו:\n" + "\n".join(events)
 
 
 CONTEXT_PRONOUNS = {
@@ -3218,6 +3248,8 @@ def run_agent(
         )
         # C60: הזרקת "הקשר כלים" — מה רץ בסבב הקודם — ל-system prompt
         ctx.system_prompt += _build_tool_context(chat_id, session=_session_snapshot)
+        # BUG-149: outcome of earlier-proposed actions — see docstring above.
+        ctx.system_prompt += _build_action_resolution_context(ctx.memory_key)
         history = memory.get_for_claude(ctx.memory_key)
 
         # C4.1: trim history if too large — prevents silent context overflow
@@ -3344,7 +3376,52 @@ def run_agent(
 
             # ── Tool Loop ────────────────────────
             tool_results = []
-            for tu in tool_uses:
+            # BUG-149: pre-scan for 2+ mutating tool_use blocks in ONE model
+            # response, BEFORE any of them is dispatched/queued. Root cause:
+            # the Agent's own conversation memory never learned the outcome
+            # of an earlier-proposed action (see _build_action_resolution_
+            # context() above — BUG-149's actual mitigation for that), so a
+            # later unrelated turn could see it as still-open and re-propose
+            # it alongside the real current request. The existing
+            # _mutating_approvals_this_turn>=1 gate below only blocks the
+            # SECOND-and-later mutation, keeping the first — which, for a
+            # response combining a stale proposal with the current one, can
+            # be the STALE one, silently discarding the user's actual
+            # current request. This pre-scan fails the entire response
+            # closed instead: zero ActionContracts created, zero dispatcher/
+            # tool_executor/pending-event calls, for any of them — keeping
+            # neither the first nor the last. `_mutating_approvals_this_turn`
+            # remains as a second, independent guard for mutations spread
+            # across multiple round-trips within one turn (a different
+            # shape this pre-scan does not cover, since it only inspects one
+            # response at a time).
+            _mutating_tool_uses = [
+                tu for tu in tool_uses
+                if getattr(get_tool_meta(tu.name), "requires_approval", False)
+            ]
+            _multi_mutation_mismatch = route.tool_allowed and len(_mutating_tool_uses) >= 2
+            if _multi_mutation_mismatch:
+                logger.warning(
+                    "[BUG-149] MULTI_MUTATION_CONTEXT_MISMATCH turn user=%s count=%d tools=%s",
+                    _sanitize_id(chat_id), len(_mutating_tool_uses),
+                    [tu.name for tu in _mutating_tool_uses],
+                )
+                _mismatch_text = (
+                    "⛔ הבקשה כללה כמה פעולות-כתיבה בו-זמנית ולא נשמרה אף אחת מהן. "
+                    "אנא שלח מחדש בקשה אחת בלבד."
+                )
+                for tu in tool_uses:
+                    tool_results.append({
+                        "type": "tool_result", "tool_use_id": tu.id, "content": _mismatch_text,
+                    })
+                tool_results_log.append({
+                    "tool": "__multi_mutation_context_mismatch__",
+                    "content": _mismatch_text, "ok": False, "contract_id": None,
+                    "terminal_outcome": "MULTI_MUTATION_CONTEXT_MISMATCH",
+                    "created_this_turn": False,
+                })
+                turn_evidence.record_verification("failed", read_only=False)
+            for tu in ([] if _multi_mutation_mismatch else tool_uses):
                 if not route.tool_allowed:
                     logger.info(f"[Tool] Silently blocked by route (restricted): {tu.name}")
                     # Was "הבקשה התקבלה ותועבר לטיפול." — no forwarding mechanism

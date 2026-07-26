@@ -29,6 +29,12 @@ from core.action_contract_repository import (
     CONTRACT_PENDING_TTL_SECONDS,
     _is_expired as _is_contract_expired,
 )
+# BUG-149: dependency-free event type only — no memory_store import here.
+# See core/action_resolution_event.py's module docstring for the boundary
+# rule this enforces (Layer 4 emits events; a separate adapter, wired in via
+# set_resolution_sink(), is the only thing allowed to know about
+# memory_store).
+from core.action_resolution_event import ActionResolutionEvent, ActionResolutionOutcome
 from tool_registry import needs_approval
 
 logger = logging.getLogger(__name__)
@@ -903,6 +909,7 @@ class ActionGateway:
         self,
         ledger: ExecutionLedger | None = None,
         tool_executor: Callable | None = None,
+        resolution_sink: Callable[[ActionResolutionEvent], None] | None = None,
     ):
         self._ledger = ledger or ExecutionLedger()
         self._tool_executor = tool_executor
@@ -913,6 +920,62 @@ class ActionGateway:
         # cleared on next route_disambiguation() call regardless of outcome.
         self._disambiguation: dict[str, list[ActionContract]] = {}
         self._disambiguation_lock = threading.Lock()
+        # BUG-149: same dependency-injection pattern as tool_executor above —
+        # keeps this module free of any memory_store import. None (the
+        # default) means "no projection wired" — _emit_resolution() is then
+        # a complete no-op, never affecting the durable transition either
+        # way. See core/action_resolution_projection.py for the real
+        # implementation, wired in once from app.py at startup.
+        self._resolution_sink = resolution_sink
+
+    def set_resolution_sink(self, sink: Callable[[ActionResolutionEvent], None] | None) -> None:
+        """Late-binding setter, mirroring the module-level singleton wiring
+        pattern _make_dispatch_executor() already uses for tool_executor —
+        app.py calls this once at startup rather than this module importing
+        memory_store/app.py itself (would be a real import cycle risk and,
+        per BUG-149's design review, a boundary this layer must not cross
+        directly)."""
+        self._resolution_sink = sink
+
+    def _emit_resolution(self, contract_id: str, outcome: ActionResolutionOutcome) -> None:
+        """BUG-149: best-effort, observational only. Re-fetches the contract
+        by id rather than trusting a pre-transition local reference — under
+        a durable repository, update_status() replaces the cached object
+        (_cache_contract()), so a reference captured before the transition
+        would report a stale contract_version here otherwise. Never raises;
+        a failure here can NEVER affect the durable lifecycle transition
+        that already happened by the time this is called (both call sites
+        invoke this strictly after their own update_status()/
+        _persist_execution_status() call already succeeded)."""
+        if not self._resolution_sink:
+            return
+        fresh = self._ledger.find_by_id(contract_id)
+        if not fresh:
+            return
+        try:
+            self._resolution_sink(ActionResolutionEvent(
+                contract_id=fresh.contract_id,
+                routing_key=fresh.canonical_user_id,
+                tenant_id=fresh.tenant_id,
+                tool_name=fresh.tool_name,
+                outcome=outcome,
+                terminal=True,
+                action_summary=_describe_contract_for_reconfirmation(fresh),
+                contract_version=fresh.version,
+            ))
+        except Exception as exc:
+            # WARNING, not DEBUG (BUG-149 design review point 3) — no
+            # sensitive payload: contract_id/outcome/exception TYPE name
+            # only, never str(exc) (could echo business content) and never
+            # tool_inputs/normalized_payload. No dedicated counter/metrics
+            # mechanism exists in this codebase for arbitrary named events
+            # (verified: cost_monitor.py/core/usage_telemetry.py are
+            # Anthropic/OpenAI-call-specific, not general-purpose) — this
+            # log line is the observable signal.
+            logger.warning(
+                "[ActionGateway] resolution_sink failed: contract=%s outcome=%s error_type=%s",
+                contract_id, outcome.value, type(exc).__name__,
+            )
 
     # ── §3.2 — fingerprint ──────────────────────────────────────────
 
@@ -1441,6 +1504,7 @@ class ActionGateway:
             "[ActionGateway] rejected: contract=%s tool=%s by=%s",
             contract_id, contract.tool_name, rejected_by,
         )
+        self._emit_resolution(contract_id, ActionResolutionOutcome.REJECTED)
         return "🚫 הפעולה בוטלה."
 
     # ── F52 PR5 — rejection/cancellation shadow verification ────────
@@ -1985,6 +2049,13 @@ class ActionGateway:
         """
         from feature_flags import is_enabled
 
+        _EXECUTION_OUTCOME_MAP = {
+            "completed":       ActionResolutionOutcome.COMPLETED,
+            "executed":        ActionResolutionOutcome.COMPLETED,  # legacy RAM-only alias, not a 5th outcome
+            "failed":          ActionResolutionOutcome.FAILED,
+            "outcome_unknown": ActionResolutionOutcome.OUTCOME_UNKNOWN,
+        }
+
         def _persist_execution_status(status: str) -> bool:
             try:
                 persisted = self._ledger.update_status(contract.contract_id, status)
@@ -2002,6 +2073,13 @@ class ActionGateway:
                     contract.contract_id, status,
                 )
                 return False
+            # BUG-149: single choke point — every completed/executed/failed/
+            # outcome_unknown transition reached during execution (7 call
+            # sites below all funnel through this one closure) emits here,
+            # exactly once, rather than duplicating the call at each site.
+            _outcome = _EXECUTION_OUTCOME_MAP.get(status)
+            if _outcome is not None:
+                self._emit_resolution(contract.contract_id, _outcome)
             return True
 
         # Phase 4B0 atomic claim gate (if flag enabled)
