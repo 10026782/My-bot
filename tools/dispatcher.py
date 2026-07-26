@@ -18,7 +18,7 @@ from .drive_tools    import search_drive, read_drive_file
 from .calendar_tools import calendar_get_events, calendar_create_event
 from .gmail_tools    import gmail_draft, gmail_send_draft, gmail_read
 from .sheets_tools   import sheets_append
-from .airtable_tools    import airtable_get, airtable_add, airtable_update, airtable_get_schema, search_lead
+from .airtable_tools    import airtable_get, airtable_add, airtable_update, airtable_get_schema, search_lead, _tool_result
 from .airtable_security import TenantScopeViolation, LeadsDirectWriteBlocked, audit_log_airtable, enforce_tenant_scope, enforce_leads_write_gate
 try:
     from core.lead_buffer import save_blocked_payload as _save_lead_buffer
@@ -29,6 +29,9 @@ from . import approval_actions
 
 from tool_registry import enforce, ToolDenied
 import feature_flags as _ff
+# BUG-147/Patch A — set of tools whose result must always be the C53-A
+# structured dict (see the ActionBlocked branch in dispatch_tool() below).
+from core.anti_hallucination import _EVIDENCE_VALIDATORS as _STRUCTURED_WRITE_TOOLS
 
 if TYPE_CHECKING:
     from identity import Identity
@@ -159,6 +162,21 @@ def dispatch_tool(
             f"[Dispatch] blocked by action_validator | "
             f"tool={name} tenant={tenant_id} user={user_id} reason={validation.reason}"
         )
+        # BUG-147/Patch A (actual root cause, corrected from an earlier
+        # narrower hypothesis — see BUG_AUDIT_LOG.md): for a structured
+        # write tool (C53-A contract, core.anti_hallucination._EVIDENCE_
+        # VALIDATORS — airtable_add included), validation.reason is a bare
+        # string (e.g. presence-check questions like "לאיזו טבלה?", no ❌
+        # prefix) — verify_execution() misclassifies that as "expected
+        # structured result dict with ok=true; got plain string" instead of
+        # surfacing the real validation reason. This is exactly what a
+        # BUG-143 malformed payload (row_data/sheet_name instead of table/
+        # fields — missing both required airtable_add params) hits at
+        # execution time. Read-only/unregistered tools keep the existing
+        # plain-string behavior — verify_execution() already accepts a
+        # non-empty plain string for those.
+        if name in _STRUCTURED_WRITE_TOOLS:
+            return _tool_result(ok=False, tool=name, user_message=str(validation.reason))
         return validation.reason
 
     try:
@@ -258,7 +276,13 @@ def dispatch_tool(
                             _save_lead_buffer(fields, source=_write_source)
                         except Exception as _buf_err:
                             logger.debug(f"[LeadBuffer] save failed (non-critical): {_buf_err}")
-                    return str(e)
+                    # BUG-147/Patch A: airtable_add is a structured write tool
+                    # (C53-A contract) — a raw str(e) here was misclassified by
+                    # verify_execution() as "expected structured result dict;
+                    # got plain string" instead of the real blocked-write
+                    # reason. This is always a block/failure, never a success —
+                    # ok=False only.
+                    return _tool_result(ok=False, tool="airtable_add", user_message=str(e))
 
                 # Fix 1: dedup — מניעת רשומות כפולות
                 real_t      = _ALIAS_MAP.get(table, table)
@@ -316,7 +340,10 @@ def dispatch_tool(
                     enforce_tenant_scope("airtable_add", identity, {"table": table})
                 except TenantScopeViolation as e:
                     audit_log_airtable("airtable_add", identity, {"table": table}, f"blocked: {e}")
-                    return str(e)
+                    # BUG-147/Patch A: same structured-shape fix as the
+                    # LeadsDirectWriteBlocked branch above — always a
+                    # blocked-write failure, never ok=True.
+                    return _tool_result(ok=False, tool="airtable_add", user_message=str(e))
 
                 result = airtable_add(table, fields)
                 audit_log_airtable("airtable_add", identity, {"table": table, "fields_keys": list(fields.keys())}, result)
