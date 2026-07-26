@@ -1845,3 +1845,24 @@ Flag: EMERGENCY_STOP_AI=False (נשמר ב-Airtable)
 
 **Merged:** ✅ כן — commit ישירות ל-`claude/telegram-task-approval-audit-il29sj`.
 **Verified בפרודקשן:** לא רלוונטי (אין שינוי קוד).
+
+### C173 — PM460: BUG-147 root-cause fix (Patch A) + closure audit for BUG-143/144/145 (already fixed by PR #460/#461) (26/07/2026)
+קבצים: `tools/dispatcher.py`, `test_bug147_dispatcher_structured_error_shape.py` (חדש), `docs/architecture/action-gateway/PM460_POSTMERGE_MINIMAL_PATCH_GATE.md` (חדש), `BUG_AUDIT_LOG.md` | קשור: BUG-143, BUG-144, BUG-145, BUG-147
+
+**רקע:** בעקבות C172's דוח Post-Merge, הבעלים ביקש תיקון-זמני מינימלי (Patch A/B/C). לפני מימוש נכתב Cross-Layer Impact Matrix מלא (`PM460_POSTMERGE_MINIMAL_PATCH_GATE.md`). תוך כדי עבודה התגלה ש-`main` כבר התקדם משמעותית מאז שהענף הזה נוצר — שני PRs נפרדים (לא מהסבב הזה) כבר סגרו את BUG-143/144/145 בפועל:
+
+- **PR #460 (`codex/july24-sampling-blockers`, `006506d`, ממוזג `0c06f4c`):** שיכתב את ענף ה-reject ב-`_handle_approval_callback_impl()` לקרוא ל-`ActionGateway.reject()` בפועל (**סוגר BUG-144**), והוסיף helper אחיד להודעה-סופית-יחידה (approve **וגם** reject, לפי השוואת `origin_chat_id`/`cq.message.chat.id` — **סוגר BUG-145**, מקיף יותר מהתיקון שתוכנן בהתחלה לתרחיש הזה).
+- **PR #461 (`codex/pm460-drive-fail-closed`, `70093f0`, ממוזג `719bb86`):** מימש המרה אמיתית של Sheets-payload ל-Airtable (`_sheets_payload_to_airtable()`, עם field-allowlist ו-`CanonicalizationError` fail-closed) — **סוגר BUG-143** ברמת root-cause, לא רק מיטיגציה.
+
+כתוצאה מכך, **Patch B ו-Patch C (מתוכננים במקור) ירדו מהיקף הענף הזה** — היו מיותרים/עלולים להתנגש עם התיקונים המלאים יותר שכבר קיימים ב-`main`. **הענף אותחל מחדש (`git checkout -B` על `origin/main`)** לפני שהמשך העבודה, בהתאם לפרוטוקול "PR ממוזג = לא לבנות מעליו" (הקומיט הקודם של הענף הזה, עם BUG_AUDIT_LOG evidence-only, כבר מוזג בעצמו דרך PR #467 לפני שהמשך-העבודה החל).
+
+**מה נשאר בהיקף — Patch A בלבד (BUG-147):** `tools/dispatcher.py` **לא** נגוע ע"י אף PR אחר (מאומת: `git log --oneline -- tools/dispatcher.py`) — אין חפיפה. תוך כדי מימוש התגלה שה-root cause שנרשם ב-C172 עבור BUG-147 היה **שגוי** (שני מסלולי `str(e)` שנחשדו כבר היו "❌"-prefixed, מסווגים נכון). השורש האמיתי: `dispatch_tool()`'s gate הכללי אחרי `action_validator.validate_action()` — מחזיר `validation.reason` גולמי (בלי "❌") ל-structured write tools, בדיוק מה ש-BUG-143-כמו payload (חסר `table`/`fields`) מייצר. תוקן: tools ב-`_EVIDENCE_VALIDATORS` מקבלים `{ok: False, tool, user_message}` במקום מחרוזת; tools אחרים ללא שינוי. ראו BUG_AUDIT_LOG.md's BUG-147 לפירוט המלא כולל התיקון-העצמי של ה-root-cause.
+
+**גם תוקן/סגור (audit-only, לא קוד חדש שלי):** BUG-143/144/145 עודכנו ב-`BUG_AUDIT_LOG.md` ל-✅ תוקן, עם הפניה מדויקת ל-commit/PR שסגר כל אחד — השלמת-תיעוד ל-PRs שלא נגעו בקבצי governance בעצמם.
+
+**בדיקות:** `test_bug147_dispatcher_structured_error_shape.py` (8/8, חדש) + `python3 -m py_compile tools/dispatcher.py`. Patch B/C's regression tests (`test_bug143_legacy_payload_fail_closed.py`, `test_bug145_approve_single_final_message.py`) נכתבו בסבב קודם על בסיס לא-מעודכן ונמחקו יחד עם הענף-שאותחל — הכיסוי המקביל כבר קיים ב-PR #460/#461's own test changes (`test_bug_approval_callback_hardening.py`, `test_bug_canonical_tool_wiring.py`, ועוד — ראו `git show 006506d/70093f0 --stat`).
+
+**Cross-Layer Impact Matrix:** `docs/architecture/action-gateway/PM460_POSTMERGE_MINIMAL_PATCH_GATE.md` — מעודכן להיקף Patch A בלבד, עם תיעוד מפורש שסטטוס B/C הוא "superseded", לא "בוצע".
+
+**Merged:** ⏳ ראו evidence למטה (git log/push בפועל).
+**Verified בפרודקשן:** ❌ לא — קוד רץ מקומית/בדיקות בלבד, לא נפרס.
