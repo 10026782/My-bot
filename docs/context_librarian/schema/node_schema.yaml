@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "kind": "context_librarian_node_schema",
+  "required": [
+    "id", "name", "type", "status", "authority_level",
+    "source_of_truth", "owner", "code_paths", "test_paths",
+    "canonical_docs", "production_evidence", "feature_flags",
+    "valid_from", "last_verified_commit", "confidence", "notes"
+  ],
+  "types": [
+    "layer", "component", "document", "decision", "feature_flag",
+    "test_suite", "evidence"
+  ],
+  "statuses": [
+    "active", "shadow", "flag_off", "planning_only",
+    "superseded", "historical", "candidate"
+  ],
+  "authority_levels": [
+    "runtime_main", "canonical_contract", "verified_audit",
+    "implementation_note", "planning", "historical_evidence"
+  ],
+  "source_of_truth_required": ["is_authority", "scope", "precedence"],
+  "reference_required": ["path", "role", "status"],
+  "production_evidence_required": ["path", "observed_on", "scope", "status"],
+  "feature_flag_required": ["name", "default_state", "documented_state", "evidence_scope"],
+  "confidence_range": [0.0, 1.0],
+  "commit_pattern": "^[0-9a-f]{7,40}$",
+  "extension_policy": {
+    "catalog_discovery": "all docs/context_librarian/layers/*.yaml files",
+    "new_layers": "allowed without a schema change",
+    "unknown_node_fields": "rejected",
+    "namespaced_extensions": "allowed only inside the extensions object",
+    "compatibility": "readers must reject unsupported major schema versions"
+  }
+}

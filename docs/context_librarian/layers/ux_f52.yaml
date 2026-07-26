@@ -1,0 +1,59 @@
+{
+  "schema_version": "1.0",
+  "layer_id": "ux_f52",
+  "nodes": [{
+    "id": "layer.ux_f52",
+    "name": "UX / F52 Unified Messages",
+    "type": "layer",
+    "status": "shadow",
+    "authority_level": "canonical_contract",
+    "source_of_truth": {
+      "is_authority": true,
+      "scope": "user-message semantic contract, formatting, and channel rendering",
+      "precedence": "verified internal state/evidence drives presentation; presentation never becomes execution truth"
+    },
+    "owner": "ux_f52",
+    "code_paths": [
+      "core/agent_message_formatter.py",
+      "core/action_gateway.py",
+      "app.py",
+      "tma-frontend/src/components/Approvals.tsx"
+    ],
+    "test_paths": [
+      "test_agent_message_formatter.py",
+      "test_agent_message_formatter_display_payload.py",
+      "test_f52_status_reply_reconciliation.py",
+      "test_f52_pr5_rejection_shadow.py",
+      "test_f52_pr6_pending_shadow.py",
+      "test_response_contract_fixes.py",
+      "test_bug122_pending_queue_ux.py"
+    ],
+    "canonical_docs": [
+      {"path": "docs/architecture/f52-unified-approval-runtime/spec/UNIFIED_MESSAGE_UX_STANDARD.md", "role": "UX source of truth", "status": "active"},
+      {"path": "docs/architecture/f52-unified-approval-runtime/spec/F52_UNIFIED_APPROVAL_RUNTIME_SPEC.md", "role": "program implementation specification", "status": "planning_only"},
+      {"path": "docs/architecture/f52-unified-approval-runtime/PR1_MESSAGE_CONTRACT_FOUNDATION.md", "role": "message contract implementation note", "status": "active"},
+      {"path": "docs/architecture/f52-unified-approval-runtime/decisions/DECISION_LOG.md", "role": "closed design decisions", "status": "active"}
+    ],
+    "production_evidence": [
+      {"path": "docs/architecture/f52-unified-approval-runtime/PR4_ACTION_STATUS_SHADOW_VERIFICATION.md", "observed_on": "2026-07-23", "scope": "shadow verification procedure and dated observations", "status": "shadow"},
+      {"path": "docs/architecture/f52-unified-approval-runtime/PR6_APPROVAL_PENDING_SHADOW.md", "observed_on": "2026-07-26", "scope": "approval-pending shadow coverage and production-observed follow-up", "status": "shadow"}
+    ],
+    "feature_flags": [
+      {"name": "FEATURE_UNIFIED_STATUS_FORMATTER", "default_state": "off", "documented_state": "off/shadow/on; dated evidence reports shadow samples", "evidence_scope": "code accessor plus implementation notes"}
+    ],
+    "valid_from": "2026-07-23",
+    "last_verified_commit": "59e74be",
+    "confidence": 0.94,
+    "notes": [
+      "display_payload is the canonical user-message payload contract in F52 planning decisions.",
+      "User messages must not expose record IDs, contract IDs, or internal tool names.",
+      "RP5 is loaded for UX tasks only when evidence/completion claims are relevant."
+    ],
+    "extensions": {"boss.layer_aliases": ["F52", "supporting-layer", "message-contract"]}
+  }],
+  "edges": [
+    {"from": "layer.ux_f52", "to": "layer.approvals", "type": "depends_on", "notes": "Approval messages consume canonical lifecycle facts."},
+    {"from": "layer.ux_f52", "to": "layer.rp5", "type": "depends_on", "notes": "Evidence-aware wording depends on RP5 only for evidence/completion claims."},
+    {"from": "layer.ux_f52", "to": "decision.ux_no_internal_ids", "type": "governed_by", "notes": "Presentation must hide internal identifiers and tool names."}
+  ]
+}

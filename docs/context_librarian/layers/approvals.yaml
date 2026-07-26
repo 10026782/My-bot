@@ -1,0 +1,65 @@
+{
+  "schema_version": "1.0",
+  "layer_id": "approvals",
+  "nodes": [{
+    "id": "layer.approvals",
+    "name": "Approvals / ActionContracts",
+    "type": "layer",
+    "status": "active",
+    "authority_level": "runtime_main",
+    "source_of_truth": {
+      "is_authority": true,
+      "scope": "approval proposal, lifecycle, durable lookup, claim, and resolution",
+      "precedence": "ActionContracts and its canonical repository/gateway state are sole lifecycle authority"
+    },
+    "owner": "action_contracts",
+    "code_paths": [
+      "core/action_gateway.py",
+      "core/action_contract_repository.py",
+      "core/action_gateway_atomic_executor.py",
+      "core/approvals_projection.py",
+      "core/action_resolution_projection.py",
+      "app.py",
+      "tma_api.py"
+    ],
+    "test_paths": [
+      "test_action_gateway.py",
+      "test_pr0c_action_contract_repository.py",
+      "test_pr0c_action_contracts_persistence.py",
+      "test_pr0c_action_gateway_adapters.py",
+      "test_phase_4b0_1a_atomic_claims.py",
+      "test_phase_4b_1b_durable_lifecycle.py",
+      "test_approval_concurrency.py",
+      "test_bug_approval_callback_hardening.py"
+    ],
+    "canonical_docs": [
+      {"path": "docs/architecture/f52-unified-approval-runtime/audits/phase-4c/CURRENT_STATE_MAP.md", "role": "latest verified runtime audit", "status": "active"},
+      {"path": "docs/architecture/f52-unified-approval-runtime/audits/phase-4c/GAP_AND_RISK_REPORT.md", "role": "current risk authority", "status": "active"},
+      {"path": "docs/PHASE_4B_ROLLOUT_AND_CUTOVER.md", "role": "durable approval rollout authority", "status": "planning_only"},
+      {"path": "docs/architecture/f52-unified-approval-runtime/decisions/DECISION_LOG.md", "role": "approval/F52 decision history", "status": "active"}
+    ],
+    "production_evidence": [
+      {"path": "docs/architecture/action-gateway/STAGING_23JUL_TTL_DISAMBIGUATION_AUDIT.md", "observed_on": "2026-07-23", "scope": "staging and operator-supplied ActionContracts lifecycle evidence", "status": "mixed_verified_and_deferred"}
+    ],
+    "feature_flags": [
+      {"name": "FEATURE_ACTION_GATEWAY", "default_state": "off", "documented_state": "environment-dependent; repository alone is not current production proof", "evidence_scope": "code default plus dated audits"},
+      {"name": "FEATURE_ACTION_CONTRACT_PERSISTENCE", "default_state": "off", "documented_state": "flag-gated durable proposals/recovery", "evidence_scope": "code default"},
+      {"name": "FEATURE_ATOMIC_CLAIMS", "default_state": "off", "documented_state": "deployment documentation may require true; verify environment", "evidence_scope": "code default and deployment docs"}
+    ],
+    "valid_from": "2026-07-23",
+    "last_verified_commit": "59e74be",
+    "confidence": 0.96,
+    "notes": [
+      "ActionContracts remains the sole source of truth for approval lifecycle.",
+      "Legacy IDs may resolve an existing unambiguous canonical contract but may never create or infer one.",
+      "Approval state, presentation state, and execution evidence are distinct."
+    ],
+    "extensions": {"boss.layer_aliases": ["layer-3", "durable-approval", "ActionGateway"]}
+  }],
+  "edges": [
+    {"from": "layer.approvals", "to": "decision.actioncontracts_authority", "type": "source_of_truth_for", "notes": "Canonical lifecycle ownership."},
+    {"from": "layer.approvals", "to": "layer.tools", "type": "executes_via", "notes": "Approved contracts execute through registered adapters/dispatcher paths."},
+    {"from": "layer.approvals", "to": "layer.ux_f52", "type": "rendered_by", "notes": "Lifecycle facts are rendered through the message contract; text is not lifecycle truth."},
+    {"from": "layer.approvals", "to": "layer.rp5", "type": "verified_by", "notes": "Completion claims require execution evidence, not approval alone."}
+  ]
+}
