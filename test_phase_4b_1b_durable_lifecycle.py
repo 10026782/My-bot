@@ -127,7 +127,7 @@ def test_approve_persists_actor_then_explicit_success_persists_completed():
         ("pending", "approved"), ("approved", "completed"),
     ]
     assert executor.call_count == 1
-    assert "✅" in reply
+    assert "הפעולה הושלמה" in reply
 
 
 def test_reject_persists_rejected_and_never_dispatches():

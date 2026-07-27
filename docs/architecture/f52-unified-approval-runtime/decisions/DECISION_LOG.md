@@ -93,3 +93,23 @@ This log records planning decisions for the F52 program. It is not runtime imple
 - Affected documents: `spec/UNIFIED_MESSAGE_UX_STANDARD.md`,
   `audits/phase-4c/AGENT_MESSAGE_OUTPUT_MAP.md`,
   `rollout/UNIFIED_MESSAGE_IMPLEMENTATION_PLAN.md`.
+
+## D-011 — Erratum: PR #471 added a parallel approval-lifecycle formatter, not an extension of D-010's boundary
+
+- Date: 27/07/2026 (added by a Context Librarian metadata audit, not a new owner decision)
+- Status: Open — flags a drift from D-010, does not resolve it
+- Observation: PR #471 (`c64da20`, merged 27/07/2026) introduced `ApprovalLifecycleResult`
+  (`core/action_gateway.py`), built by `build_approval_lifecycle_result()` and consumed by
+  `approve_with_lifecycle_result()`/`reject_with_lifecycle_result()`, as the canonical
+  renderer for approval-lifecycle turns under `FEATURE_SINGLE_SPEAKER_APPROVAL_UX`
+  (default off). This is a second formatter alongside `GatewayReply`/
+  `compose_status_reply()`, not an extension of that existing boundary as D-010
+  requires ("The existing `compose_status_reply()` / `GatewayReply` boundary is
+  extended rather than creating a parallel formatter").
+- Rationale for recording rather than fixing: this audit is a read-only Context
+  Librarian metadata refresh; changing runtime code or resolving the formatter
+  duplication is out of its scope and requires an owner decision (reconcile
+  `ApprovalLifecycleResult` into `compose_status_reply()`, or formally supersede
+  D-010's single-API requirement for the approval-lifecycle subset).
+- Affected documents: `spec/UNIFIED_MESSAGE_UX_STANDARD.md`,
+  `docs/context_librarian/layers/ux_f52.yaml`.

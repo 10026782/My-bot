@@ -10,7 +10,7 @@
     "source_of_truth": {
       "is_authority": true,
       "scope": "planned turn routing, precedence, and reply ownership contract",
-      "precedence": "observation code is current; frozen decision contract is planning-only until approved"
+      "precedence": "observation code is current; frozen decision contract is planning-only until approved; PR #471's conditional Gateway reply-ownership handoff is real code on main, not the same as a formal TurnCoordinator/reply_owner claim"
     },
     "owner": "turn_coordinator",
     "code_paths": [
@@ -26,7 +26,9 @@
       "test_pr0_ingress_context_gate.py",
       "test_pr0_pending_approval_context_safety.py",
       "test_bug114_context_interrupt_amplification.py",
-      "test_bug115_confirmation_routing_bookmark.py"
+      "test_bug115_confirmation_routing_bookmark.py",
+      "test_pr1_single_speaker_approval_ux.py",
+      "test_single_speaker_fallback_and_duplication.py"
     ],
     "canonical_docs": [
       {"path": "docs/architecture/turn-coordinator/README.md", "role": "program index and current phase description", "status": "active"},
@@ -37,15 +39,18 @@
       {"path": "docs/architecture/turn-coordinator/LOG_OBSERVATION_23JUL2026.md", "observed_on": "2026-07-23", "scope": "staging observation of TurnEnvelope/ownership signals", "status": "checkpoint"}
     ],
     "feature_flags": [
-      {"name": "FEATURE_PA01_ENFORCEMENT_STATE", "default_state": "off", "documented_state": "separate off/shadow/enforce guard; not a TurnCoordinator activation flag", "evidence_scope": "code accessor"}
+      {"name": "FEATURE_PA01_ENFORCEMENT_STATE", "default_state": "off", "documented_state": "separate off/shadow/enforce guard; not a TurnCoordinator activation flag", "evidence_scope": "code accessor"},
+      {"name": "FEATURE_SINGLE_SPEAKER_APPROVAL_UX", "default_state": "off", "documented_state": "PR #471; when on, run_agent() (app.py:3761-3819) treats a Gateway-owned approval-queuing turn as an early-return boundary: it does not call the Agent's LLM again and returns only the Gateway's own ApprovalLifecycleResult text for that turn", "evidence_scope": "code (app.py's PR1 single-speaker boundary) plus CHANGELOG.md PR #471 entry"}
     ],
-    "valid_from": "2026-07-23",
-    "last_verified_commit": "59e74be",
-    "confidence": 0.91,
+    "valid_from": "2026-07-27",
+    "last_verified_commit": "a885561d",
+    "confidence": 0.85,
     "notes": [
       "No class TurnCoordinator exists on main; Phase 0 TurnEnvelope instrumentation is observation-only.",
       "route_request and handle_lead_candidate are current de-facto routing/ownership surfaces.",
-      "The coordinator consumes typed signals and must not invent business state or approval policy."
+      "The coordinator consumes typed signals and must not invent business state or approval policy.",
+      "PR #471 changed who legitimately owns a turn's final reply, not just how routing is observed: when FEATURE_SINGLE_SPEAKER_APPROVAL_UX is on and this turn queued an approval, run_agent() hands the reply to the Gateway (reply_owner=\"gateway\") and returns immediately without a further Agent turn (app.py:3761). This is a conditional, code-level ownership assignment for approval-queuing turns specifically — it does not create a general reply_owner claim mechanism and does not resolve the concurrency race (a callback and a concurrent text turn for the same identity) described in docs/architecture/turn-coordinator/REPLY_OWNERSHIP_AND_APPROVAL_AUTHORITY_RESEARCH.md §1.3c, which remains unmitigated and research-only.",
+      "The same handoff path still invokes the RP5 shadow observer (observe_shadow_finalizer, app.py:3795) on the Gateway-owned reply before returning — RP5's classification runs even though the Agent's own LLM text is never produced for that turn; see layer.rp5's notes."
     ],
     "extensions": {"boss.layer_aliases": ["layer-2", "routing", "reply-ownership"]}
   }],
@@ -53,6 +58,7 @@
     {"from": "layer.turn_coordinator", "to": "layer.approvals", "type": "requires_approval_via", "notes": "Routing may select an approval path but cannot create approval truth."},
     {"from": "layer.turn_coordinator", "to": "layer.tools", "type": "proposes_to", "notes": "A future decision selects a handler; execution stays downstream."},
     {"from": "layer.turn_coordinator", "to": "decision.cross_layer_authority", "type": "governed_by", "notes": "The behavior contract is blocked on the cross-layer matrix."},
-    {"from": "layer.turn_coordinator", "to": "decision.actioncontracts_authority", "type": "must_not_own", "notes": "Turn state cannot replace approval lifecycle authority."}
+    {"from": "layer.turn_coordinator", "to": "decision.actioncontracts_authority", "type": "must_not_own", "notes": "Turn state cannot replace approval lifecycle authority."},
+    {"from": "layer.turn_coordinator", "to": "layer.rp5", "type": "depends_on", "notes": "PR #471: the Gateway-owned approval-turn early-return path in run_agent() still invokes RP5's shadow observer before returning, so RP5 is reachable from this layer even when no Agent text is produced."}
   ]
 }

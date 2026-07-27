@@ -5,6 +5,8 @@ Historical identifier: Phase 4C
 Status: Planning-gate input; documentation only
 Evidence baseline: `origin/main` `96cf6430ec8d6018742fdf8042f0146873071cfd` (17/07/2026)
 
+**Erratum (27/07/2026, PR #471, `c64da20`, added by a Context Librarian metadata audit):** the "Public message API" section below anticipates PR 1 extending/adapting `ActionGateway.compose_status_reply()`/`GatewayReply` into the one channel-neutral formatter. What actually landed in PR #471 is a second, narrower canonical renderer, `ApprovalLifecycleResult` (`core/action_gateway.py`), produced by `build_approval_lifecycle_result()` and consumed by `approve_with_lifecycle_result()`/`reject_with_lifecycle_result()` — specifically for approval-lifecycle turns (queued/approved/rejected/completed/failed/multiple-pending), gated by `FEATURE_SINGLE_SPEAKER_APPROVAL_UX` (default off). It sits alongside `GatewayReply`/`compose_status_reply()` rather than replacing or being built from it; `display_payload` (`core/agent_message_formatter.py`) remains a separate, third contract for non-approval-lifecycle status turns. This document's "one public message-composition API" principle is not yet met as of `a885561d` — there are now two canonical approval-facing renderers, not one. Identifier/tool-name redaction in the new path is unconditional (BUG-118) and holds regardless of the flag.
+
 ## Scope
 
 This standard governs only the conversion of verified internal state into text

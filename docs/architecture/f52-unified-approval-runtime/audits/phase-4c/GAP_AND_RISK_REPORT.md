@@ -7,6 +7,8 @@ Status: Verified research baseline
 
 Baseline: `origin/main` `4d3787e6e6fcbc93bd5a30f62f0834136b706f06`. Finding counts are **P0: 5, P1: 13, P2: 8**. Severity means architectural exposure in reachable code, not proof that a default-off or environment-gated path is active in production.
 
+**Erratum (27/07/2026, PR #471, `c64da20`, added by a Context Librarian metadata audit — findings below are not renumbered or re-severity-scored):** the callback-correlation gap named in item 3 below ("Callback correlation recomputes a fingerprint instead of carrying AC ID") is now partially addressed — `_approval_callback_data()` (`app.py:1116`) embeds the exact `contract_id` in Telegram `callback_data`, and `_handle_approval_callback_impl()` resolves that exact contract first, falling back to recomputed-fingerprint matching only when no `contract_id` is present (e.g. buttons issued before this change) or `FEATURE_ACTION_GATEWAY` is off. This does not by itself close P0-1 (the direct-dispatch fallback this report treats as current intended legacy behavior still exists when no contract is found/the gateway flag is off) — re-verify P0-1 and item 3 against current `app.py` before relying on either as still-open exactly as described.
+
 ## P0 — approval-required mutation can bypass durable authorization
 
 ### P0-1 — Telegram approval callback explicitly fails open to direct dispatch
