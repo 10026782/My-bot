@@ -1,3 +1,66 @@
+## CONTEXT LIBRARIAN BOOTSTRAP — canonical manual gate
+
+This section is the canonical Context Librarian bootstrap for every development
+agent. Follow it before research, planning, fixing, implementation, or review
+that concerns Core Reasoning, Turn Coordinator/routing, approvals or
+ActionContracts, tools/execution, F52/UX, RP5/evidence, cross-layer authority,
+or a claim about production state.
+
+Commands below use `python3`, as required by this repository's VM guidance. An
+active repository virtual-environment interpreter is the Windows equivalent.
+
+1. Run the deterministic suggestion command with the complete task description
+   and show every result and score:
+
+   ```powershell
+   python3 -m tools.context_librarian suggest-profile --query "<task>" --all
+   ```
+
+2. Suggestions are advisory. Manual selection always wins. `score=0` is not a
+   recommendation, a tie is never resolved automatically, and a cross-layer
+   task is never selected from keyword counts alone. State the choice exactly:
+
+   ```text
+   Selected profile: <profile_id>
+   ```
+
+3. Only after that explicit statement, build the bundle with the selected
+   profile. Add `--production-claim` when evaluating or making an operational
+   production-state claim:
+
+   ```powershell
+   python3 -m tools.context_librarian build --task-type <profile_id> --query "<task>"
+   ```
+
+   A production-claim build remains `STOP` until the agent directly verifies a
+   selected evidence source against the exact environment, date, scope, and
+   claim, then rebuilds with `--verified-production-evidence <selected-path>`.
+   The flag is a recorded manual attestation, never keyword-based validation.
+
+4. Read the entire bundle, including authority boundaries, `Do Not Assume`,
+   `Out of Scope`, and `Agent Workflow Gate`. Then directly open the material
+   cited code, tests, canonical documents, and production evidence. A bundle is
+   a navigation index and mandatory minimum context, never a source of truth or
+   a reading ceiling.
+5. Stop before planning or changing code when the workflow gate reports stale
+   nodes, mandatory authority below 100%, missing qualifying evidence for a
+   production claim, an unresolved source conflict, or excluded-layer leakage.
+   Stale bundles must still be built and read so they can identify what needs
+   direct re-verification.
+   A stale STOP permits only direct source re-verification and a separately
+   reviewed metadata-refresh task after the source is verified on `main`; it
+   does not permit planning or implementation of the original task. Resume the
+   original task only from a newly built bundle whose gate can proceed.
+6. If an import, caller, callee, schema, flag, shared identifier, contract, test
+   dependency, execution/evidence path, or authority boundary is not covered
+   sufficiently, expand the reading and record a `context expansion` with the
+   source, discovery path, reason, necessity, and whether it has recurred.
+   Never suppress a material dependency to meet a token or document budget.
+
+`build` never chooses a profile. No agent may silently select one. Tasks outside
+the trigger scope above may record the bootstrap as not applicable and proceed
+under the repository's other instructions.
+
 ## PRE-SESSION GATE — חובה לפני כל ענף חדש
 
 לפני `git checkout -b` בכל סשן:

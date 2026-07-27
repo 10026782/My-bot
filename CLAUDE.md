@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Most comments, log messages, and docstrings in this codebase are in **Hebrew** — match that convention when editing existing files.
 
-**Before doing anything else**, read `AI_CONTEXT.md` — it's the live "what's actually true in production right now" doc (system state, last-verified features, known gaps, open risks). It's updated per-session and is not duplicated here. If it's stale (>7 days per its own header), refresh it as part of your session rather than trusting memory.
+**Before doing task work**, read and follow the canonical Context Librarian bootstrap in `AGENTS.md` when its trigger scope applies. Do not duplicate or reinterpret that contract here. Read `AI_CONTEXT.md` only when the selected bundle cites it, the selected profile requires it, or an operational-state claim cannot be resolved from other current evidence. If `AI_CONTEXT.md` is stale (>7 days per its own header), do not trust it as production proof.
 
 **Before opening a new branch**, run `bash pre_session_gate.sh "<task description>"` (see `AGENTS.md`). It blocks (`exit 1`) if there are unmerged `claude/*` branches against `origin/main`, to stop work from fragmenting across abandoned branches. Only pass `--force` if the user has explicitly approved opening a new branch anyway.
 

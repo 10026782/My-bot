@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .librarian import (
     ContextLibrarianError,
+    assess_profile_suggestions,
     build_bundle,
     load_catalog,
     suggest_profiles,
@@ -29,6 +30,15 @@ def _parser() -> argparse.ArgumentParser:
     build.add_argument("--max-tokens", type=int)
     build.add_argument("--max-documents", type=int)
     build.add_argument("--output", type=Path)
+    build.add_argument(
+        "--production-claim",
+        action="store_true",
+        help="Require qualifying production evidence in the workflow gate",
+    )
+    build.add_argument(
+        "--verified-production-evidence",
+        help="Explicitly attest a selected evidence path after direct review",
+    )
 
     suggest = sub.add_parser(
         "suggest-profile",
@@ -36,6 +46,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     suggest.add_argument("--query", required=True)
     suggest.add_argument("--limit", type=int, default=3)
+    suggest.add_argument(
+        "--all",
+        action="store_true",
+        help="Show every profile while preserving the Phase 0 default limit",
+    )
 
     sub.add_parser("validate", help="Validate schemas, catalogs, edges, and paths")
     return parser
@@ -54,9 +69,17 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "suggest-profile":
             ranked = suggest_profiles(catalog, args.query)
-            for item in ranked[: max(1, args.limit)]:
+            visible = ranked if args.all else ranked[: max(1, args.limit)]
+            for item in visible:
                 terms = ", ".join(item["matched_terms"]) or "none"
                 print(f"{item['profile_id']}\tscore={item['score']}\tmatched={terms}")
+            assessment = assess_profile_suggestions(ranked)
+            candidates = ", ".join(assessment["candidates"]) or "none"
+            print(
+                f"Selection status: {assessment['status']}; "
+                f"top_score={assessment['top_score']}; candidates={candidates}; "
+                "automatic_selection=false"
+            )
             print("Suggestion only: pass an explicit --task-type to build.")
             return 0
 
@@ -66,6 +89,8 @@ def main(argv: list[str] | None = None) -> int:
             query=args.query,
             max_tokens=args.max_tokens,
             max_documents=args.max_documents,
+            production_claim=args.production_claim,
+            verified_production_evidence=args.verified_production_evidence,
         )
         if args.output:
             output = args.output

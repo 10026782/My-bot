@@ -33,8 +33,35 @@ to choose for `build`:
 
 ```text
 python -m tools.context_librarian suggest-profile \
-  --query "approval prompt claims completion without evidence"
+  --query "approval prompt claims completion without evidence" \
+  --all
 ```
+
+The command reports `no_match` for a zero-score ranking and `tie` when more than
+one profile shares the top score. Neither status selects a profile. Even a
+unique suggestion is advisory; record `Selected profile: <profile_id>` before
+running `build`.
+
+For an operational production-state claim, make the evidence requirement
+explicit:
+
+```text
+python -m tools.context_librarian build \
+  --task-type rp5_evidence_mismatch \
+  --query "is the completion claim live in production?" \
+  --production-claim
+```
+
+That first production-claim bundle normally remains `STOP`. After directly
+reading a selected evidence source and verifying that its environment, date,
+scope, and state match the exact claim, rebuild with
+`--verified-production-evidence <selected-path>`. The option is an explicit
+agent attestation, not automatic evidence validation.
+
+Every bundle contains an `Agent Workflow Gate`. `STOP` blocks planning and code
+changes but intentionally does not block bundle creation. The bundle is a
+mandatory minimum context, not a reading ceiling; record material sources found
+outside it as context expansions.
 
 ## Selection model
 

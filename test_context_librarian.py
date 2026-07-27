@@ -10,7 +10,9 @@ import pytest
 from tools.context_librarian import librarian
 from tools.context_librarian.librarian import (
     ContextLibrarianError,
+    assess_profile_suggestions,
     build_bundle,
+    evaluate_workflow_gate,
     load_catalog,
     suggest_profiles,
 )
@@ -291,3 +293,160 @@ def test_profile_suggestion_is_explainable_and_does_not_build(catalog):
 def test_unknown_profile_is_rejected(catalog):
     with pytest.raises(ContextLibrarianError, match="unknown task type"):
         build_bundle(catalog, task_type="automatic_magic", query="anything")
+
+
+def test_zero_score_is_not_a_valid_recommendation(catalog):
+    assessment = assess_profile_suggestions(suggest_profiles(catalog, "fix bug"))
+    assert assessment == {
+        "status": "no_match",
+        "top_score": 0,
+        "candidates": [],
+        "suggested_profile": None,
+        "automatic_selection": False,
+    }
+
+
+def test_tie_is_not_automatically_selected():
+    ranked = [
+        {"profile_id": "approval_ux", "score": 2, "matched_terms": ["approval"]},
+        {"profile_id": "tool_execution", "score": 2, "matched_terms": ["tool"]},
+    ]
+    assessment = assess_profile_suggestions(ranked)
+    assert assessment["status"] == "tie"
+    assert assessment["suggested_profile"] is None
+    assert assessment["automatic_selection"] is False
+
+
+def test_explicit_manual_profile_overrides_suggestion(catalog):
+    ranked = suggest_profiles(catalog, "approval callback message")
+    assert ranked[0]["profile_id"] == "approval_ux"
+    bundle = build_bundle(
+        catalog,
+        task_type="core_reasoning_change",
+        query="approval callback message",
+    )
+    assert bundle.startswith("# BOSS Context Bundle — core_reasoning_change")
+
+
+def test_stale_node_reports_stop_without_blocking_bundle(catalog, monkeypatch):
+    monkeypatch.setattr(
+        librarian,
+        "_git_changed_paths",
+        lambda _root, _commit: {"tools/dispatcher.py"},
+    )
+    bundle = build_bundle(
+        catalog,
+        task_type="tool_execution",
+        query="dispatcher evidence",
+    )
+    assert "## Agent Workflow Gate" in bundle
+    assert "- status: STOP" in bundle
+    assert "- reasons: ['stale_nodes']" in bundle
+    assert "- stale_nodes: 1 ['layer.tools']" in bundle
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "reason"),
+    [
+        ({"mandatory_authority_coverage": 0.75}, "mandatory_authority_incomplete"),
+        (
+            {"production_claim": True, "qualifying_production_evidence": 0},
+            "production_evidence_missing",
+        ),
+        (
+            {"unresolved_conflicts": ["decision.a -> decision.b"]},
+            "unresolved_source_conflict",
+        ),
+        ({"excluded_layer_leakage": ["core_reasoning"]}, "excluded_layer_leakage"),
+    ],
+)
+def test_workflow_gate_stop_conditions_use_fixtures(kwargs, reason):
+    gate = evaluate_workflow_gate(**kwargs)
+    assert gate["status"] == "STOP"
+    assert reason in gate["reasons"]
+
+
+def test_qualifying_production_evidence_allows_explicit_claim_gate():
+    gate = evaluate_workflow_gate(
+        production_claim=True,
+        qualifying_production_evidence=1,
+    )
+    assert gate["status"] == "PROCEED"
+    assert gate["reasons"] == []
+
+
+def test_production_evidence_requires_exact_manual_attestation():
+    reference = {
+        "path": "evidence/live-check.md",
+        "status": "production_verified",
+        "scope": "production state for the selected layer and claim",
+    }
+    assert librarian._qualifies_as_production_evidence(reference, None) is False
+    assert (
+        librarian._qualifies_as_production_evidence(reference, "evidence/other.md")
+        is False
+    )
+    assert (
+        librarian._qualifies_as_production_evidence(
+            reference, "evidence/live-check.md"
+        )
+        is True
+    )
+
+
+def test_verified_production_evidence_requires_claim_mode(catalog):
+    with pytest.raises(ContextLibrarianError, match="requires --production-claim"):
+        build_bundle(
+            catalog,
+            task_type="rp5_evidence_mismatch",
+            query="evidence",
+            verified_production_evidence="evidence/live-check.md",
+        )
+
+
+def test_suggestion_assessment_is_deterministic(catalog):
+    query = "dispatcher approval evidence message"
+    first = suggest_profiles(catalog, query)
+    second = suggest_profiles(catalog, query)
+    assert first == second
+    assert assess_profile_suggestions(first) == assess_profile_suggestions(second)
+
+
+def test_phase0_cli_commands_remain_compatible(capsys):
+    from tools.context_librarian.__main__ import main
+
+    assert main(["suggest-profile", "--query", "approval callback"]) == 0
+    suggestion_output = capsys.readouterr().out
+    assert "approval_ux\tscore=" in suggestion_output
+    assert "Suggestion only: pass an explicit --task-type to build." in suggestion_output
+
+    assert (
+        main(
+            [
+                "build",
+                "--task-type",
+                "core_reasoning_change",
+                "--query",
+                "lead state",
+            ]
+        )
+        == 0
+    )
+    build_output = capsys.readouterr().out
+    assert build_output.startswith("# BOSS Context Bundle — core_reasoning_change")
+
+
+def test_agent_bootstrap_is_canonical_and_claude_only_references_it():
+    agents = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    claude = (REPO_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+
+    assert "## CONTEXT LIBRARIAN BOOTSTRAP" in agents
+    assert "suggest-profile --query \"<task>\" --all" in agents
+    assert "Selected profile: <profile_id>" in agents
+    assert "mandatory minimum context" in agents
+    assert "context expansion" in agents
+    assert "A stale STOP permits only direct source re-verification" in agents
+
+    assert "canonical Context Librarian bootstrap in `AGENTS.md`" in claude
+    assert "suggest-profile" not in claude
+    assert "**Before doing anything else**, read `AI_CONTEXT.md`" not in claude
