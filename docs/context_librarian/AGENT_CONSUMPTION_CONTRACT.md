@@ -4,14 +4,27 @@ This contract governs how coding agents consume Context Librarian bundles.
 
 ## Before coding
 
-1. Choose an explicit task profile. Phase 0 never silently chooses one.
-2. Build a fresh bundle from the current checkout and read the whole bundle.
-3. Open the cited code, tests, canonical documents, and production evidence that
+1. Run `suggest-profile --all` with the complete task description. Display the
+   ranking, scores, and matched terms before choosing anything.
+2. Choose an explicit task profile and record `Selected profile: <profile_id>`.
+   Suggestions are advisory: manual selection wins, `score=0` is not a valid
+   recommendation, ties are unresolved, and cross-layer tasks require explicit
+   architectural judgment. No phase silently chooses a profile.
+3. Build a fresh bundle from the current checkout only after selection and read
+   the whole bundle. Use `--production-claim` for an operational-state claim.
+4. Open the cited code, tests, canonical documents, and production evidence that
    are material to the change. A bundle is an index, not a substitute for them.
-4. Treat every node marked stale as requiring direct re-verification. Staleness
+5. Treat every node marked stale as requiring direct re-verification. Staleness
    is detected from code changes since `last_verified_commit`, not merely from
    path existence.
-5. Follow the bundle's `Do Not Assume` and `Out of Scope` sections.
+6. Follow the bundle's `Agent Workflow Gate`, `Do Not Assume`, and `Out of
+   Scope` sections.
+
+The bundle is mandatory minimum context, not a reading ceiling. When an import,
+caller, callee, schema, flag, shared identifier, contract, test dependency,
+execution path, evidence path, or authority boundary reveals material context
+outside the bundle, open it and record a `context expansion`. Token and document
+budgets never justify ignoring a dependency.
 
 ## Authority and safety
 
@@ -25,13 +38,34 @@ This contract governs how coding agents consume Context Librarian bundles.
 
 ## Agent stop conditions
 
-Stop and inspect the cited source directly when:
+Stop before planning or changing code when:
 
 - a selected node is stale;
 - mandatory authority coverage is below 100%;
 - an excluded layer leaks into the selection;
 - production evidence is absent for a production claim;
 - two sources conflict and current `main` does not resolve the conflict.
+
+Bundle generation itself remains available when a node is stale so the bundle
+can explain the drift and point to the sources that require re-verification.
+A stale STOP allows only direct source re-verification. Refresh verification
+metadata in a separate reviewed task after the source is verified on `main`,
+then rebuild; never continue the original task by treating inspection as an
+implicit override.
+Production evidence only qualifies when its status and scope prove the claim;
+`shadow`, `checkpoint`, `stale_briefing`, and planning evidence do not prove a
+live production state. The agent must first read the exact evidence, verify
+that its environment, observation date, scope, and represented state match the
+claim, and then explicitly identify that evidence when rebuilding. Metadata or
+keyword matching alone never validates a production claim.
+
+## Context expansion record
+
+Record the task, selected profile, source opened, reason, discovery path,
+whether it was required for the solution, and whether the same dependency has
+appeared in earlier tasks. A recurring expansion is a possible profile, edge,
+node-metadata, mandatory-decision, or coverage gap. Record it during Phase 1;
+do not change the catalog as part of the experiment.
 
 ## After coding
 

@@ -19,6 +19,9 @@ from typing import Any, Iterable
 SUPPORTED_SCHEMA_MAJOR = 1
 CATALOG_RELATIVE_ROOT = Path("docs/context_librarian")
 DEFAULT_EXCLUDED_STATUSES = frozenset({"historical", "superseded"})
+QUALIFYING_PRODUCTION_EVIDENCE_STATUSES = frozenset(
+    {"live", "production_verified"}
+)
 NODE_FIELDS = frozenset(
     {
         "id",
@@ -331,6 +334,81 @@ def suggest_profiles(catalog: Catalog, query: str) -> list[dict[str, Any]]:
     return sorted(ranked, key=lambda item: (-item["score"], item["profile_id"]))
 
 
+def assess_profile_suggestions(
+    ranked: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Describe suggestion confidence without selecting a build profile."""
+    if not ranked or ranked[0]["score"] == 0:
+        return {
+            "status": "no_match",
+            "top_score": 0,
+            "candidates": [],
+            "suggested_profile": None,
+            "automatic_selection": False,
+        }
+
+    top_score = ranked[0]["score"]
+    candidates = [
+        item["profile_id"] for item in ranked if item["score"] == top_score
+    ]
+    if len(candidates) > 1:
+        return {
+            "status": "tie",
+            "top_score": top_score,
+            "candidates": candidates,
+            "suggested_profile": None,
+            "automatic_selection": False,
+        }
+    return {
+        "status": "unique_suggestion",
+        "top_score": top_score,
+        "candidates": candidates,
+        "suggested_profile": candidates[0],
+        "automatic_selection": False,
+    }
+
+
+def evaluate_workflow_gate(
+    *,
+    stale_node_ids: Iterable[str] = (),
+    mandatory_authority_coverage: float = 1.0,
+    production_claim: bool = False,
+    qualifying_production_evidence: int = 0,
+    unresolved_conflicts: Iterable[str] = (),
+    excluded_layer_leakage: Iterable[str] = (),
+) -> dict[str, Any]:
+    """Return the manual agent-bootstrap stop decision and its reasons.
+
+    This gate is reported inside a bundle. It deliberately does not prevent a
+    stale bundle from being rendered, because agents need the bundle to learn
+    what changed and which sources require direct verification.
+    """
+    stale = sorted(set(stale_node_ids))
+    conflicts = sorted(set(unresolved_conflicts))
+    leakage = sorted(set(excluded_layer_leakage))
+    reasons: list[str] = []
+    if stale:
+        reasons.append("stale_nodes")
+    if mandatory_authority_coverage < 1.0:
+        reasons.append("mandatory_authority_incomplete")
+    if production_claim and qualifying_production_evidence == 0:
+        reasons.append("production_evidence_missing")
+    if conflicts:
+        reasons.append("unresolved_source_conflict")
+    if leakage:
+        reasons.append("excluded_layer_leakage")
+    return {
+        "status": "STOP" if reasons else "PROCEED",
+        "reasons": reasons,
+        "stale_nodes": stale,
+        "mandatory_authority_coverage": mandatory_authority_coverage,
+        "production_claim": production_claim,
+        "qualifying_production_evidence": qualifying_production_evidence,
+        "unresolved_conflicts": conflicts,
+        "excluded_layer_leakage": leakage,
+    }
+
+
 def _conditional_layers(profile: dict[str, Any], query: str) -> set[str]:
     normalised = _normalise_query(query)
     result: set[str] = set()
@@ -509,6 +587,17 @@ def _approx_tokens(text: str) -> int:
     return math.ceil(len(text) / 4)
 
 
+def _qualifies_as_production_evidence(
+    reference: dict[str, Any], verified_path: str | None
+) -> bool:
+    return (
+        bool(verified_path)
+        and reference.get("path") == verified_path
+        and reference.get("status") in QUALIFYING_PRODUCTION_EVIDENCE_STATUSES
+        and "production" in reference.get("scope", "").casefold()
+    )
+
+
 def _path_tokens(repo_root: Path, references: Iterable[tuple[str, dict[str, Any]]]) -> int:
     total = 0
     seen: set[str] = set()
@@ -533,6 +622,8 @@ def _render(
     freshness: dict[str, dict[str, Any]],
     max_documents: int,
     max_tokens: int,
+    production_claim: bool,
+    verified_production_evidence: str | None,
 ) -> str:
     decision_nodes = [node for node in nodes if node["type"] == "decision"]
     layer_nodes = [node for node in nodes if node["type"] == "layer"]
@@ -567,6 +658,26 @@ def _render(
     )
     provenance_completeness = provenance_present / max(1, provenance_slots)
     leakage = sorted(selected_layer_ids & set(profile["excluded_areas"]))
+    stale_node_ids = sorted(
+        node["id"] for node in layer_nodes if freshness[node["id"]]["stale"]
+    )
+    conflict_edges = sorted(
+        f"{edge['from']} -> {edge['to']}"
+        for edge in traversed
+        if edge["type"] == "conflicts_with"
+    )
+    qualifying_evidence = sum(
+        _qualifies_as_production_evidence(ref, verified_production_evidence)
+        for _, ref in evidence
+    )
+    workflow_gate = evaluate_workflow_gate(
+        stale_node_ids=stale_node_ids,
+        mandatory_authority_coverage=authority_coverage,
+        production_claim=production_claim,
+        qualifying_production_evidence=qualifying_evidence,
+        unresolved_conflicts=conflict_edges,
+        excluded_layer_leakage=leakage,
+    )
     normalised_query = _normalise_query(query)
     matched_layers = sum(
         1
@@ -590,6 +701,19 @@ def _render(
         "",
         "Use an explicit profile, read this bundle fully, inspect cited sources, and stop on stale nodes or incomplete authority coverage.",
         "Contract: `docs/context_librarian/AGENT_CONSUMPTION_CONTRACT.md`",
+        "",
+        "## Agent Workflow Gate",
+        "",
+        f"- status: {workflow_gate['status']}",
+        f"- reasons: {workflow_gate['reasons']}",
+        f"- stale_nodes: {len(stale_node_ids)} {stale_node_ids}",
+        f"- mandatory_authority_coverage: {authority_coverage:.0%}",
+        f"- production_claim: {str(production_claim).lower()}",
+        f"- verified_production_evidence: {verified_production_evidence or 'none'}",
+        f"- qualifying_production_evidence: {qualifying_evidence}",
+        f"- unresolved_source_conflicts: {len(conflict_edges)} {conflict_edges}",
+        f"- excluded_layer_leakage: {len(leakage)} {leakage}",
+        "- A STOP status blocks planning and code changes, not bundle creation.",
         "",
         "## Canonical Decisions",
         "",
@@ -733,6 +857,8 @@ def build_bundle(
     query: str = "",
     max_tokens: int | None = None,
     max_documents: int | None = None,
+    production_claim: bool = False,
+    verified_production_evidence: str | None = None,
 ) -> str:
     if task_type not in catalog.profiles:
         available = ", ".join(sorted(catalog.profiles))
@@ -750,6 +876,10 @@ def build_bundle(
     )
     if token_budget <= 0 or document_budget <= 0:
         raise ContextLibrarianError("token and document budgets must be positive")
+    if verified_production_evidence and not production_claim:
+        raise ContextLibrarianError(
+            "--verified-production-evidence requires --production-claim"
+        )
 
     nodes, roles, traversed = _select_nodes(catalog, profile, query)
     freshness = _freshness(catalog, nodes)
@@ -763,6 +893,8 @@ def build_bundle(
         freshness,
         document_budget,
         token_budget,
+        production_claim,
+        verified_production_evidence,
     )
     actual_tokens = _approx_tokens(bundle)
     if actual_tokens > token_budget:
