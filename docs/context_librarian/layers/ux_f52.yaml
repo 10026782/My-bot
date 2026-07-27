@@ -26,7 +26,10 @@
       "test_f52_pr5_rejection_shadow.py",
       "test_f52_pr6_pending_shadow.py",
       "test_response_contract_fixes.py",
-      "test_bug122_pending_queue_ux.py"
+      "test_bug122_pending_queue_ux.py",
+      "test_pr1_single_speaker_approval_ux.py",
+      "test_bug_stale_callback_ux.py",
+      "test_bug_post_completion_callback_fallthrough.py"
     ],
     "canonical_docs": [
       {"path": "docs/architecture/f52-unified-approval-runtime/spec/UNIFIED_MESSAGE_UX_STANDARD.md", "role": "UX source of truth", "status": "active"},
@@ -39,15 +42,18 @@
       {"path": "docs/architecture/f52-unified-approval-runtime/PR6_APPROVAL_PENDING_SHADOW.md", "observed_on": "2026-07-26", "scope": "approval-pending shadow coverage and production-observed follow-up", "status": "shadow"}
     ],
     "feature_flags": [
-      {"name": "FEATURE_UNIFIED_STATUS_FORMATTER", "default_state": "off", "documented_state": "off/shadow/on; dated evidence reports shadow samples", "evidence_scope": "code accessor plus implementation notes"}
+      {"name": "FEATURE_UNIFIED_STATUS_FORMATTER", "default_state": "off", "documented_state": "off/shadow/on; dated evidence reports shadow samples", "evidence_scope": "code accessor plus implementation notes"},
+      {"name": "FEATURE_SINGLE_SPEAKER_APPROVAL_UX", "default_state": "off", "documented_state": "PR #471; gates which component owns final approval-turn wording (Gateway vs legacy routing). Identifier/tool-name redaction in build_approval_lifecycle_result()/_safe_contract_business_description() is unconditional and applies even when this flag is off (BUG-118)", "evidence_scope": "code default (feature_flags.py) plus CHANGELOG.md PR #471 entry"}
     ],
-    "valid_from": "2026-07-23",
-    "last_verified_commit": "59e74be",
-    "confidence": 0.94,
+    "valid_from": "2026-07-27",
+    "last_verified_commit": "a885561d",
+    "confidence": 0.88,
     "notes": [
       "display_payload is the canonical user-message payload contract in F52 planning decisions.",
       "User messages must not expose record IDs, contract IDs, or internal tool names.",
-      "RP5 is loaded for UX tasks only when evidence/completion claims are relevant."
+      "RP5 is loaded for UX tasks only when evidence/completion claims are relevant.",
+      "PR #471 added ApprovalLifecycleResult (core/action_gateway.py) as a second, narrower canonical renderer specifically for approval lifecycle turns: build_approval_lifecycle_result() maps an ActionContract's canonical_state to one fixed, redacted safe_user_message. It sits alongside, and is not a replacement for, GatewayReply/compose_status_reply() and display_payload/agent_message_formatter.py's own contract; UNIFIED_MESSAGE_UX_STANDARD.md does not yet describe ApprovalLifecycleResult as of a885561d.",
+      "Redaction (raw tool_name, ActionContract UUID, ActionContract record ID, Airtable business record ID) in the ApprovalLifecycleResult path is unconditional — it does not depend on FEATURE_SINGLE_SPEAKER_APPROVAL_UX or FEATURE_UNIFIED_STATUS_FORMATTER being on."
     ],
     "extensions": {"boss.layer_aliases": ["F52", "supporting-layer", "message-contract"]}
   }],

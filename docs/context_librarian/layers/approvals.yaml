@@ -30,7 +30,12 @@
       "test_phase_4b0_1a_atomic_claims.py",
       "test_phase_4b_1b_durable_lifecycle.py",
       "test_approval_concurrency.py",
-      "test_bug_approval_callback_hardening.py"
+      "test_bug_approval_callback_hardening.py",
+      "test_pr1_single_speaker_approval_ux.py",
+      "test_bug_stale_callback_ux.py",
+      "test_bug112_telegram_approval_ttl.py",
+      "test_single_speaker_fallback_and_duplication.py",
+      "test_bug_post_completion_callback_fallthrough.py"
     ],
     "canonical_docs": [
       {"path": "docs/architecture/f52-unified-approval-runtime/audits/phase-4c/CURRENT_STATE_MAP.md", "role": "latest verified runtime audit", "status": "active"},
@@ -44,15 +49,20 @@
     "feature_flags": [
       {"name": "FEATURE_ACTION_GATEWAY", "default_state": "off", "documented_state": "environment-dependent; repository alone is not current production proof", "evidence_scope": "code default plus dated audits"},
       {"name": "FEATURE_ACTION_CONTRACT_PERSISTENCE", "default_state": "off", "documented_state": "flag-gated durable proposals/recovery", "evidence_scope": "code default"},
-      {"name": "FEATURE_ATOMIC_CLAIMS", "default_state": "off", "documented_state": "deployment documentation may require true; verify environment", "evidence_scope": "code default and deployment docs"}
+      {"name": "FEATURE_ATOMIC_CLAIMS", "default_state": "off", "documented_state": "deployment documentation may require true; verify environment", "evidence_scope": "code default and deployment docs"},
+      {"name": "FEATURE_SINGLE_SPEAKER_APPROVAL_UX", "default_state": "off", "documented_state": "PR #471 (merge c64da20); off = legacy delivery routing, on = Gateway owns the one final response for an approval-queuing turn; identifier redaction in build_approval_lifecycle_result() is unconditional regardless of this flag", "evidence_scope": "code default (feature_flags.py) plus CHANGELOG.md PR #471 entry; no staging/production activation evidence exists"}
     ],
-    "valid_from": "2026-07-23",
-    "last_verified_commit": "59e74be",
-    "confidence": 0.96,
+    "valid_from": "2026-07-27",
+    "last_verified_commit": "a885561d",
+    "confidence": 0.9,
     "notes": [
       "ActionContracts remains the sole source of truth for approval lifecycle.",
       "Legacy IDs may resolve an existing unambiguous canonical contract but may never create or infer one.",
-      "Approval state, presentation state, and execution evidence are distinct."
+      "Approval state, presentation state, and execution evidence are distinct.",
+      "PR #471: Telegram approve/reject callback_data now carries an optional trailing contract_id (_approval_callback_data(), app.py:1116); when present and FEATURE_ACTION_GATEWAY is on, the callback resolves the exact ActionContract via lifecycle_result() before falling back to fingerprint matching.",
+      "PR #471 (BUG-144): the reject callback now resolves and closes the canonical ActionContract (reject_with_lifecycle_result()) before reporting cancellation to the user, not just the legacy EventBus item.",
+      "ApprovalLifecycleResult (core/action_gateway.py) is the single-speaker, user-safe projection of one ActionContract lifecycle; approve_with_lifecycle_result()/reject_with_lifecycle_result() are the canonical entry points that produce it. This is layered on top of, not a replacement for, ActionContracts as lifecycle authority.",
+      "This node's metadata was refreshed by a read-only Context Librarian audit against a885561d; production evidence entries above still predate that audit and are not re-verified by it."
     ],
     "extensions": {"boss.layer_aliases": ["layer-3", "durable-approval", "ActionGateway"]}
   }],

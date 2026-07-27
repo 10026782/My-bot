@@ -67,6 +67,20 @@ enforcement) not started; no code changes have been made based on that
 research yet — it is research only, pending owner decisions listed in its
 Summary section.
 
+**Erratum (27/07/2026, PR #471, `c64da20`, added by a Context Librarian
+metadata audit):** the paragraph above is still accurate for the *formal*
+`reply_owner` claim mechanism this research proposes (§1.5 Alternative A) —
+that remains unbuilt, and PR #471 was not derived from this research doc.
+But PR #471 did independently ship a narrower, code-level conditional
+ownership assignment for one specific case: when `FEATURE_SINGLE_SPEAKER_APPROVAL_UX`
+is on and a turn queues an approval, `run_agent()` hands the reply to the
+Gateway (`reply_owner="gateway"`) and returns without a further Agent turn
+(`app.py:3761-3819`). Read "no code changes have been made based on that
+research" as scoped to *this specific research document's recommendations*,
+not as "reply ownership is entirely unimplemented in any form" — it no
+longer is, for the approval-queuing case. The cross-request concurrency race
+(§1.3c) this research names is unaffected by PR #471 and remains open.
+
 **Added requirement (this round):** `PERFORMANCE_CALL_VOLUME_AUDIT.md`'s
 closing section requires that whichever phase is implemented next (Phase 2
 Shadow runtime completion, or Phase 3, per owner decision on sequencing)

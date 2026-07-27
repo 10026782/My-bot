@@ -7,7 +7,7 @@
       "primary_layers": ["approvals", "ux_f52"],
       "required_dependency_layers": ["turn_coordinator"],
       "optional_evidence": ["rp5"],
-      "conditional_optional_evidence": [{"layer": "rp5", "query_terms": ["evidence", "claim", "completion", "success", "verified", "mismatch"]}],
+      "conditional_optional_evidence": [{"layer": "rp5", "query_terms": ["evidence", "claim", "completion", "success", "verified", "mismatch", "gateway owned", "single speaker", "reply owner"]}],
       "excluded_areas": ["core_reasoning"],
       "maximum_documents": 14,
       "maximum_approximate_token_budget": 4000,
@@ -38,12 +38,13 @@
       "description": "Turn precedence, handler selection, pending reply, or reply ownership",
       "primary_layers": ["turn_coordinator"],
       "required_dependency_layers": ["approvals", "core_reasoning"],
-      "optional_evidence": ["tools", "ux_f52"],
+      "optional_evidence": ["tools", "ux_f52", "rp5"],
       "conditional_optional_evidence": [
         {"layer": "tools", "query_terms": ["execute", "tool", "handler", "ביצוע", "כלי"]},
-        {"layer": "ux_f52", "query_terms": ["reply", "message", "speaker", "תשובה", "הודעה"]}
+        {"layer": "ux_f52", "query_terms": ["reply", "message", "speaker", "תשובה", "הודעה"]},
+        {"layer": "rp5", "query_terms": ["evidence", "gateway owned", "single speaker", "approval turn", "ראיה", "בעלות"]}
       ],
-      "excluded_areas": ["rp5"],
+      "excluded_areas": [],
       "maximum_documents": 16,
       "maximum_approximate_token_budget": 4500,
       "mandatory_canonical_decisions": ["main_overrides_planning", "actioncontracts_authority", "no_new_source_of_truth", "shadow_not_active", "production_verification", "cross_layer_authority"],

@@ -35,15 +35,17 @@
       {"path": "RP5_LOG_OBSERVATION_23JUL2026.md", "observed_on": "2026-07-23", "scope": "staging shadow sample checkpoint; not enforcement proof", "status": "checkpoint"}
     ],
     "feature_flags": [
-      {"name": "FEATURE_EVIDENCE_FINALIZER", "default_state": "off", "documented_state": "off/shadow/enforce, but enforce remains comparison-only on current main", "evidence_scope": "code accessor and preflight blocker"}
+      {"name": "FEATURE_EVIDENCE_FINALIZER", "default_state": "off", "documented_state": "off/shadow/enforce, but enforce remains comparison-only on current main", "evidence_scope": "code accessor and preflight blocker"},
+      {"name": "FEATURE_SINGLE_SPEAKER_APPROVAL_UX", "default_state": "off", "documented_state": "PR #471; when on, gates whether run_agent()'s Gateway-owned early return (app.py:3771-3773) still calls observe_shadow_finalizer() before returning — this flag does not change RP5's own classification logic, only whether this particular call site is reached", "evidence_scope": "code (app.py's PR1 single-speaker boundary) plus CHANGELOG.md PR #471 entry"}
     ],
-    "valid_from": "2026-07-23",
-    "last_verified_commit": "59e74be",
-    "confidence": 0.92,
+    "valid_from": "2026-07-27",
+    "last_verified_commit": "a885561d",
+    "confidence": 0.88,
     "notes": [
       "The current implementation compares claims and always returns user text unchanged in shadow/enforce states.",
       "No completion claim is supported by read-only evidence or model prose.",
-      "Historical mismatch samples do not override later verified evidence."
+      "Historical mismatch samples do not override later verified evidence.",
+      "PR #471: when FEATURE_SINGLE_SPEAKER_APPROVAL_UX is on and a turn's reply is Gateway-owned, run_agent() still calls observe_shadow_finalizer() (app.py:3795) before its early return, passing an empty agent-text string and approval_prompt_sent derived from the Gateway's own owner_notified flag. RP5's evidence classification is therefore exercised on Gateway-owned approval turns too, not only on Agent-authored text turns — task profiles that treat RP5 as irrelevant whenever an approval/turn-ownership query is in scope (e.g. turn_coordinator_routing's exclusion) should be read as a scoping simplification, not proof RP5 is never invoked on that path."
     ],
     "extensions": {"boss.layer_aliases": ["supporting-layer", "EvidenceFinalizer", "RP4-RP5"]}
   }],
