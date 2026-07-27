@@ -1,6 +1,8 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 27/07/2026 — **PR #471, Single-Speaker Approval UX Base, מוזג ל-`main` (`c64da20`). הקוד ו-CI אומתו; הדגל נשאר כבוי כברירת מחדל ולא בוצע אימות staging/production.** עדכון PATCH 3B הקודם נשמר בהמשך.
+עודכן: 27/07/2026 — **N17 נוסף: Context Librarian Follow-up Hardening & Verification Backlog (6 נקודות המשך + סדר עבודה מחייב), בעקבות PR #475 (Re-verification Alignment, `89e2b4e`, ראה למטה). אין ליישום עדיין.** עדכון PR #471 הקודם נשמר בהמשך.
+
+**Context Librarian Re-verification Alignment — PR #475 (`e4d29d0`+`34e31a4`, merge `89e2b4e`):** תיעוד/מטא-דאטה בלבד, ללא שינוי runtime. יישר את ארבעת ה-context-librarian nodes (`approvals`, `turn_coordinator`, `ux_f52`, `rp5`) מול PR #471 — נוסף `FEATURE_SINGLE_SPEAKER_APPROVAL_UX` לארבעתם, תועדו ה-callback עם `contract_id`, BUG-144 reject, ה-Gateway reply-ownership handoff המותנה, ו-RP5 שממשיך לרוץ במסלול ה-Gateway-owned. `task_profiles/profiles.yaml`'s `turn_coordinator_routing` כבר לא חוסם rp5 באופן גורף. תוקן assertion ישן ב-`test_phase_4b_1b_durable_lifecycle.py` (נוסח ✅ הישן). נוספו erratum notes ל-5 מסמכים קנוניים + רשומת `DECISION_LOG.md` D-011 (מתעדת שנוצר renderer מקביל, `ApprovalLifecycleResult`, במקום הרחבת `compose_status_reply()` לפי D-010 — ממצא פתוח, לא תוקן). `last_verified_commit` רוענן ל-`a885561d` רק אחרי ש-30/30 test_paths עברו, `validate`/`test_context_librarian.py` נקיים, וחמשת ה-pilot bundles נבנו פעמיים כל אחד (STOP→PROCEED, hash דטרמיניסטי). Post-merge verification בוצע ישירות על `main` (`89e2b4e`) — כל הסמלים אומתו ב-grep, כל חמשת ה-pilot bundles PROCEED. **אין אימות production/staging.** ראו N17 למטה להמשך המחייב.
 
 **Single-Speaker Approval UX Base — PR #471 (`5e2c244` + תיקון CI `dadf851`, merge `c64da20`):** נוסף `ApprovalLifecycleResult` כתוצאת UX קנונית למחזור חיי אישור; Gateway הוא בעל התשובה במסלולי approval כשהדגל מופעל, וה-Agent נעצר אחרי בחירת בעלות Gateway. Telegram ו-WhatsApp ממפים אותו lifecycle state לאותה משמעות. callback approve/reject, דחייה טקסטואלית, repeated completion/rejection, pending/no-pending ו-cross-chat delivery מכוסים ברגרסיות. BUG-144 (callback reject לא סגר את `ActionContract`) ו-BUG-145 (שתי הודעות סופיות לאותו callback) מיושמים וממוזגים; BUG-118 נסגר ברמת הקוד באמצעות redaction בלתי-מותנה של `tool_name`, UUID/contract ID, ActionContract record ID ו-business record ID. `ActionContracts` נשאר מקור האמת היחיד; לא נוסף state ל-Sessions או store חלופי. `FEATURE_SINGLE_SPEAKER_APPROVAL_UX=false` בקוד וב-`.env.example`; staging/production דורשים הפעלה מפורשת לאחר acceptance. payload ה-callback הארוך ביותר שנבדק הוא 53 bytes מתוך מגבלת Telegram של 64, ללא truncation. CI לאחר תיקון סמכות-אישור: `backend-ci` ו-`frontend-ci` עברו. **סטטוס אמת:** ממוזג ונבדק ב-CI, טרם אומת ב-staging/production; אין לסמן Production Verified. **נדחה במפורש:** deterministic approval cost cuts, per-turn counters, queue redesign, Sessions/Business Memory, RP5, CETERRA, durable memory ו-full formatter migration.
 
@@ -802,6 +804,82 @@ audit, ראה `git log` על `app.py`'s tool loop לקומיט המדויק) —
 **מצב נוכחי:** ✅ ממוזג ל-`main` (PR #424, commit `99981fb`). Production verified: לא עדיין
 דווח בפירוש (אין דרך אקטיבית לבדוק "היעדר הודעה עתידית"; אין תקלת GOV-02 חדשה מאז).
 ראה `CHANGE_CONTROL_LOG.md`/`CHANGELOG.md` C155.
+
+### N17 — Context Librarian: Follow-up Hardening & Verification Backlog 🔲 PLANNED (נרשם 27/07/2026)
+
+**הקשר:** PR #475 (Re-verification Alignment, `89e2b4e`) יישר את `docs/context_librarian/`
+מול PR #471 עבור ארבעת ה-nodes (`approvals`, `turn_coordinator`, `ux_f52`, `rp5`) — תיעוד/מטא-דאטה
+בלבד, ללא שינוי runtime. במהלך אותו audit נמצאו שש נקודות המשך מחייבות שלא טופלו בכוונה
+באותו PR. **אין לממש את כולן באותו PR; אין לערבב runtime, catalog hardening, production
+verification ו-multi-session orchestration באותו PR.**
+
+**1. Token estimation hardening — לא בוצע.**
+המימוש הנוכחי (`tools/context_librarian/librarian.py`) משתמש ב-`ceil(len(text) / 4)` כאומדן
+טוקנים — לא שמרני מספיק לעברית, קוד וטקסט מעורב. PR נפרד נדרש:
+- לשנות את שם המדד כך שיהיה ברור שאינו token count אמיתי (למשל `approximate_char_estimate`);
+- להריץ benchmark על bundles אמיתיים בעברית, אנגלית וקוד;
+- להגדיר estimation mode שמרני;
+- לא להוסיף dependency כבדה ללא צורך;
+- לא לטעון לחיסכון בטוקנים על סמך `chars / 4` בלבד.
+
+**2. Catalog format hardening — לא בוצע.**
+קובצי הקטלוג נקראים `.yaml` אך נטענים בפועל עם `json.loads()` (JSON-compatible YAML). זה
+עובד כרגע אך הסיומת מטעה — סוכן או מפתח עלול לכתוב YAML רגיל (הערות, multi-line strings,
+anchors) וישבור את הטעינה בשקט. אחרי ה-hardening PR: להעדיף migration מסודר ל-`.json`, אלא
+אם audit נפרד יוכיח סיבה ממשית להוסיף parser YAML תקני.
+
+**3. Query and profile-selection hardening — לא בוצע.**
+ה-profile המפורש חייב להישאר מקור הבחירה המרכזי. ה-query החופשי רשאי להציע profile,
+להוסיף optional evidence, ולעזור בהרחבת context — **אינו** רשאי להשמיט authority, required
+dependency, safety layer, evidence dependency מהותי, או cross-layer dependency ידוע. PR נפרד
+צריך לבדוק: aliases ו-controlled vocabulary; dependencies קבועות דרך profiles ו-edges
+(לא query); שה-query משפיע רק על הרחבה ולא על הליבה; fixture tests לניסוחים חלופיים בעלי
+אותה משמעות (לוודא שאין ניסוח תקין שמשמיט primary/required layer).
+
+**4. Live production verification — לא בוצע. אין להסיק מצב production מהקוד/מה-flag/מבדיקות.**
+נדרשת הכנת Production Verification Plan נפרד עבור:
+- האם `FEATURE_SINGLE_SPEAKER_APPROVAL_UX` פעיל ב-staging/production בפועל;
+- האם מתקבלת תשובה סופית אחת בלבד בפועל;
+- האם callback עם `action_id:contract_id` עובד end-to-end;
+- האם identifiers פנימיים אינם מופיעים בתעבורה חיה;
+- האם RP5 מסווג נכון Gateway-owned approval turns;
+- האם replay/stale callback אינם גורמים לביצוע נוסף.
+
+לכל טענה: required evidence, why required, environment, test date, exact scope, supplied
+evidence, missing evidence, allowed status. **אין לעדכן את הספרן ל-`production_verified` ללא
+ראיה ישירה.**
+
+**5. Multi-session coordination — טרם תוכנן, לא בוצע.**
+ארכיטקטורה עתידית שבה Session A (research/librarian verification) ו-Session B
+(implementation/review) עובדים במקביל ללא דריסה, כששני הסוכנים חולקים context קנוני זהה
+מהספרן, וTurn Coordinator/שכבת coordination מנהלים ownership. הפתרון העתידי צריך לכלול:
+session identifier; task/branch ownership; claimed files/claimed architectural areas; selected
+profile; bundle hash; current gate; handoff status; stale detection; conflict detection לפני
+שינוי; איסור על שני סוכנים שמשנים אותו ownership area ללא הכרעה. **אין להשתמש בזיכרון
+process-local כמקור אמת לתיאום בין סשנים.** יש לתכנן זאת בנפרד לפני implementation.
+
+**6. Context Librarian dogfooding — טרם תוכנן, לא בוצע.**
+הספרן צריך בהמשך לנהל גם ידע על עצמו — nodes/claims עבור: catalog loader; schemas; profiles;
+bundle builder; workflow gate; freshness; token estimation; verification process; CI
+validation; known limitations; current rollout status. המטרה: השאלה "מה בנוי בספרן, מה אומת,
+מה חסר ומה השלב הבא?" תיענה על ידי הספרן עצמו (עם מקורות וסטטוס), לא מזיכרון של סוכן.
+בהמשך יש לבחון שימוש רחב יותר בספרן כבסיס ידע אמיתי למערכת, תוך שמירה על ההבחנה: **הספרן
+הוא index ו-governance layer; הקוד, הנתונים והראיות נשארים מקורות האמת; bundle הוא mandatory
+minimum context, לא תחליף למקורות; אין להפוך את הספרן למקור אמת מקביל.**
+
+**סדר עבודה מחייב:**
+1. ✅ להשלים ולמזג Re-verification Alignment (PR #475, `89e2b4e`).
+2. ✅ להריץ מחדש את חמש משימות ה-pilot על `main` — כולן `PROCEED`.
+3. 🔲 להשלים Production Verification Plan (סעיף 4 לעיל).
+4. 🔲 לפתוח PR נפרד ל-Librarian Hardening: token estimation (סעיף 1); catalog format (סעיף 2);
+   query/profile hardening (סעיף 3); CI validation.
+5. 🔲 להשלים non-inferiority pilot (`docs/context_librarian/PHASE1_NON_INFERIORITY_PILOT.md`).
+6. 🔲 לתכנן Multi-session Coordination (סעיף 5) — תכנון בלבד לפני implementation.
+7. 🔲 לתכנן Context Librarian Dogfooding ו-Verification Coverage Model (סעיף 6) — תכנון בלבד
+   לפני implementation.
+
+**קבצים:** `docs/context_librarian/` (הספרן עצמו), `tools/context_librarian/librarian.py`
+(token estimation, catalog loading), `docs/context_librarian/PHASE1_NON_INFERIORITY_PILOT.md`.
 
 ### F17 — Decision Hub Stage 2: Smart Trust Layer (PR #157, מוזג ל-`main`, commit `9252b1e`/merge `78f9bae`)
 **מה:** שכבת ביטחון על גבי Stage 1 — מסתכלת על ה-Decision כולו (לא Event בודד): האם
