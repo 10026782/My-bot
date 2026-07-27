@@ -2246,6 +2246,14 @@ def _handle_approval_callback_impl(cq) -> None:
     action_id = callback_parts[1]
     callback_contract_id = callback_parts[2] if len(callback_parts) == 3 else ""
 
+    # TEMP-DIAG-CLAIM3 — staging-only, to be reverted immediately after capture.
+    # See docs/architecture/f52-unified-approval-runtime/rollout/
+    # SINGLE_SPEAKER_APPROVAL_UX_PRODUCTION_VERIFICATION_PLAN.md Claim 3.
+    logger.info(
+        "[TEMP-DIAG-CLAIM3] parts=%d action=%s action_id=%s has_contract_id=%s",
+        len(callback_parts), action, action_id, bool(callback_contract_id),
+    )
+
     if action in ("approve", "reject"):
         approver_chat_id = str(getattr(cq.from_user, "id", "") or "")
         approver_identity = resolve_identity("telegram", approver_chat_id)
