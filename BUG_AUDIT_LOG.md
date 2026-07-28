@@ -3344,6 +3344,81 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 
 ---
 
+> **הערת redaction (BUG-148, BUG-150):** בעקבות security review על PR #477, מזהים תפעוליים גולמיים (Render service ID, contract UUIDs, Airtable record IDs, event-bus action_id, טלגרם handle של הבעלים) הוחלפו כאן ב-aliases יציבים (`RENDER_SERVICE_STAGING`, `CONTRACT_4`, `AIRTABLE_RECORD_3`, `ACTION_ID_3`, `NOTIFY_ID_1`, `FINGERPRINT_1`, `TELEGRAM_CHAT_ID_1`, `TELEGRAM_OWNER_HANDLE`) — אותם aliases בדיוק כמו ב-`SINGLE_SPEAKER_APPROVAL_UX_PRODUCTION_VERIFICATION_PLAN.md`, כך ש-`CONTRACT_4`/`AIRTABLE_RECORD_3` שם ופה מתייחסים לאותה ישות אמיתית. שמות tool (למשל `airtable_add`) לא הוחלפו — הם קבועי קוד פומביים ממילא, וזה בדיוק הממצא של BUG-148. **מגבלה ידועה:** ה-redaction חל על תוכן הקובץ הנוכחי בלבד; הערכים הגולמיים כבר נדחפו להיסטוריית ה-git של הענף הזה בקומיטים קודמים — שכתוב היסטוריה (force-push) לא בוצע כאן ללא אישור מפורש של הבעלים. המיפוי alias↔ערך אמיתי והראיות הגולמיות שמורים אך ורק בקובץ מקומי, git-ignored, שלא שורד מעבר לסשן sandbox זה — הבעלים צריך להחליט היכן לשמר את הראיות הגולמיות לטווח ארוך אם יידרש שחזור.
+
+## BUG-148 — `_describe_contract_for_reconfirmation()` דולפת `tool_name` גולמי ו-Airtable record ID ישירות למשתמש בהודעת reconfirmation ובטקסט-סטטוס legacy — 🔴 נרשם, לא תוקן
+
+- **תאריך:** 27/07/2026.
+- **מקור:** בדיקה חיה על staging (`RENDER_SERVICE_STAGING`), לפני שהענף רובייס מול `main` (ראו `docs/architecture/f52-unified-approval-runtime/rollout/SINGLE_SPEAKER_APPROVAL_UX_PRODUCTION_VERIFICATION_PLAN.md` Claim 4). ציטוט מדויק מטלגרם אמיתי: `"יש פעולה קודמת שממתינה לאישור: airtable_add / Tasks. לאשר אותה? (כן/לא)"` וכן `"✅ בוצע: airtable_add / Tasks | מזהה: AIRTABLE_RECORD_3"` (וכנ"ל עבור `AIRTABLE_RECORD_1`, `AIRTABLE_RECORD_2`) — שם ה-tool הגולמי (`airtable_add`) ומזהה הרשומה הגולמי ב-Airtable (`rec...`) מופיעים ישירות בטקסט למשתמש.
+- **Contract Chain (אומת ישירות בקוד, כולל על `main`):** `core/action_gateway.py::_describe_contract_for_reconfirmation()` (שורות 821-847), המשמשת גם את פרומפט ה-reconfirmation של `route_confirmation_word()` וגם את טקסט הסטטוס הישן `"✅ בוצע: {label}"` (לפי ה-docstring של הפונקציה עצמה — נסמכת ע"י `test_stage_b_full_suite.py`'s DoD20). עבור כל `tool_name`/`table` שאינו המקרה המיוחד של Leads-capture, הפונקציה מחזירה **`f"{contract.tool_name} / {table}"` גולמי** — ללא שום redaction. זהו fallback **מכוון**, לא תקלה: ה-docstring קובע במפורש "Unchanged by BUG-115... Generalizing this shared function's fallback instead of adding a separate one was tried first and reverted — it silently changed that unrelated, already-tested behavior too." כלומר ניסיון קודם לתקן את זה כבר בוטל בגלל תלות של DoD20 בפורמט הגולמי.
+  זהו נתיב **שונה** מזה ש-BUG-118 תיקן (`_safe_contract_business_description()`/`build_approval_lifecycle_result()`, PR #471) — הפונקציה הדולפת קיימת גם **לפני** וגם **אחרי** PR #471, ללא שינוי (`git show <pre-#471-commit>:core/action_gateway.py` מול `main` — זהה byte-for-byte).
+- **חומרה:** זהו דליפת מזהה טכני-פנימי אמיתי (raw tool_name + Airtable record ID) — בדיוק סוג הדליפה ש-BUG-118 טוען לסגור "באופן בלתי-מותנה" (`CHANGELOG.md`'s PR #471 entry: "unconditionally removes raw tool names, contract UUIDs, ActionContract record IDs and Airtable business record IDs, including while the rollout flag is off"). הטענה הזו **אינה נכונה** עבור נתיב ה-reconfirmation/legacy-status — סתירה ישירה, לא רק פער-כיסוי.
+- **לא אומת:** האם התרחיש (reconfirmation על contract קיים-ותקוע) קורה גם ב-production בפועל — לא נבדק שם ישירות (ה-3 בדיקות שנעשו ב-production לא נתקלו בתרחיש reconfirmation), אבל הקוד זהה, כך שסביר מאוד שאותה דליפה תשוחזר שם אם יקרה אותו תרחיש.
+- **כיוון תיקון אפשרי (לא הוחלט, לא מומש כאן):** להעביר את `_describe_contract_for_reconfirmation()`'s ה-fallback דרך `_safe_contract_business_description()` (או `_redact_approval_identifiers()`/`_remove_raw_approval_tool_name()`, שכבר קיימות ומטפלות בדיוק בזה) — דורש קודם לעדכן/לתאם עם `test_stage_b_full_suite.py`'s DoD20 שתלוי כרגע בפורמט הגולמי (ראו ה-docstring שמזהיר מפני זה במפורש).
+- **היקף:** לא נגעתי בקוד. ממצא + Contract Chain אומתו ישירות בקוד וב-transcript אמיתי.
+- **סטטוס:** 🔴 נרשם, Contract Chain אומת ישירות בקוד (כולל אישור זהות בין staging הישן ל-`main`) — **לא תוקן**. ממתין להחלטת הבעלים על עדיפות מול DoD20.
+
+---
+
+## BUG-150 — אישור תקף בן שניות דווח כ"פג/לא קיים" מיד לאחר יצירתו, ונשאר תקוע `pending` כ-14 שעות בלי שאף מנגנון ידע להתריע — 🔴 נרשם, לא תוקן
+
+- **תאריך:** 27/07/2026.
+- **מקור:** לוגים אמיתיים מ-staging (`RENDER_SERVICE_STAGING`) + תיאור חי מהבעלים, שניהם מסופקים ישירות ע"י הבעלים — לא נמשכו ע"י sandbox זה (אין לו גישת Render).
+- **מה שהבעלים חווה בפועל (בזמן אמת, לא שחזור):** ביקש ליצור משימה ("צור משימה באיירטאבל לפרסם בפייסבוק את המיטות והגיוס"). ה-Agent שאל שאלת הבהרה חופשית (האם "הגיוס" משימה נפרדת או חלק מ"המיטות") — טקסט חופשי בלבד, ללא tool call, ללא contract. הבעלים ענה "משימה אחת". התשובה הזו יצרה בהצלחה `ActionContract` וכפתורי אישור/דחייה אמיתיים נשלחו. **הבעלים ניסה לאשר כמעט מיד** (תוך פחות מדקה) וקיבל: `"ℹ️ הפעולה כבר פגה או אינה קיימת, ולכן לא בוצעה."` — נראה כאילו הפעולה כולה נכשלה/לא קיימת.
+- **הרצף המלא בלוגים (מאומת, timestamps אמיתיים):**
+  ```text
+  2026-07-27 10:33:36 [INFO] core.router.router: [Route] ... intent=create_task ... handler=agent
+  2026-07-27 10:33:40 [INFO] core.turn_envelope: [TurnEnvelope] ownership_signal ...
+    "tool_use_emitted": false, "reply_owner": "agent", "final_reply_nonempty": true
+    # ↑ שאלת ההבהרה — טקסט בלבד, שום contract עדיין
+  2026-07-27 10:34:17 [INFO] core.router.router: [Route] ... intent=unknown ... handler=agent
+    # ↑ "משימה אחת" — ה-Router לא זיהה אותה כפקודה, נפלה ל-Agent בכל זאת
+  2026-07-27 10:34:20 [INFO] core.action_gateway: [ActionGateway] propose_action:
+    contract=CONTRACT_4 fingerprint=FINGERPRINT_1
+    tool=airtable_add table=Tasks provider=airtable channel=telegram
+    status=pending user=TELEGRAM_OWNER_HANDLE
+  2026-07-27 10:34:20 [INFO] event_bus: 📥 Pending action registered: ACTION_ID_3 | airtable_add | chat=TELEGRAM_CHAT_ID_1
+  2026-07-27 10:34:20 [INFO] app: [Approval] ✅ sent to owner NOTIFY_ID_1 | ACTION_ID_3
+  2026-07-27 10:34:20 [INFO] core.turn_envelope: [TurnEnvelope] ownership_signal ...
+    "approval_queued": true, "reply_owner": "gateway", "final_reply_nonempty": false
+  2026-07-27 10:34:41 [INFO] httpx: HTTP Request: GET .../Emergency%20Stop%20Flags... "200 OK"
+    # ↑ ההעדפה: זו התחלת event נכנס חדש (כל handler מתחיל בבדיקת Emergency Stop Flags) —
+    # 21 שניות בלבד אחרי שהכפתורים נשלחו, תואם לזמן שלקח לבעלים ללחוץ אשר.
+  # --- שום שורת log נוספת (INFO/WARNING) אחרי זה, עד routine UptimeRobot pings ואז
+  #     event אמיתי הבא ב-10:44:43 — פער של כ-10 דקות ---
+  ```
+  `10:34:20`/`10:34:41` הם זמן מקומי (ישראל, UTC+3) = `07:34:20Z`/`07:34:41Z` — תואם במדויק את ה-`contract_id` שכבר תועד ב-`docs/architecture/f52-unified-approval-runtime/rollout/SINGLE_SPEAKER_APPROVAL_UX_PRODUCTION_VERIFICATION_PLAN.md`'s Claim 2.
+- **ההוכחה שהאישור מעולם לא נפתר בפועל בניסיון של הבעלים:** אותו מסמך verification plan מתעד שה-contract `CONTRACT_4` בוצע בפועל (עם `external_id=AIRTABLE_RECORD_3` אמיתי) רק ב-`21:40:10Z` — **על ידי session נפרד**, כ-11 שעות אחרי ניסיון הבעלים. מעבר lifecycle מ-`pending` ל-`completed` לא יכול לעבור דרך "בוטל" — כלומר הלחיצה של הבעלים ב-`10:34:41` **לא שינתה את סטטוס ה-contract בכלל**. הוא נשאר `pending`, בלתי-פתור, כשהבעלים קיבל הודעה שגויה שאומרת שאין יותר מה לאשר.
+- **למה אין שום שורת log בין `10:34:41` ל-`10:44:43`, אומת בקוד:** `_notify_missing_or_expired_callback()` (`app.py:2079-2090`) — הפונקציה היחידה שמייצרת את הטקסט המדויק הזה — **לא קוראת ל-`logger.info`/`logger.warning` בכלל בנתיב ההצלחה שלה**, רק ל-Telegram API ישירות (`bot.answer_callback_query`/`bot.send_message`/`bot.edit_message_text`). כלומר אם זה הנתיב שרץ, השקט בלוגים הוא **צפוי**, לא ראיה לתקיעה/hang — אבל זה בעצמו ממצא-משנה: הנתיב הזה בלתי-נראה לחלוטין לצורך אבחון עתידי.
+- **מנגנון ה-miss עצמו — לא סופי, שתי השערות מבוססות-קוד בלבד:** `event_bus.py`'s `PendingActionsStore` הוא RAM-בלבד (`self._store: dict`), ללא backing חיצוני. שקלתי ונשללה השערת ריבוי-workers: `gunicorn.conf.py` נועל `workers=1`, **מאומת אמפירית** (הרצת `workers=3` אמיתית הראתה 3 workers בפועל, ואז revert) ו**מאומת בפרודקשן** (`WEB_CONCURRENCY=1`, `CHANGE_CONTROL_LOG.md` C159-162) — אין בידוד RAM בין-תהליכי אפשרי כאן מבנית. שתי השערות שנותרות פתוחות:
+  1. **Restart/redeploy של staging בדיוק בחלון `10:34:20`-`10:34:41`** — `PendingActionsStore` הוא RAM-בלבד; restart מוחק אותו לגמרי בלי קשר ל-TTL.
+  2. **Telegram webhook retry/race** — אם התגובה הראשונה הייתה איטית, Telegram יכול לשלוח שוב את אותו update; שני invocations חופפים של ה-approve handler יכולים להסביר גם את ההודעה השגויה שהבעלים ראה (ה-invocation השני, שמצא שאין מה ל-pop) וגם למה ה-contract נשאר תקוע `pending` (ה-invocation הראשון, החבוי, אולי pop-אה את ה-item ואז נכשל/נעצר באמצע הביצוע בלי לעדכן status).
+  אף אחת מהשתיים לא אושרה — דורש בדיקת deploy/restart history של Render לאותו staging service בחלון הזמן המדויק, שרק session עם גישת Render יכול למשוך.
+- **Contract Chain (TTL, מאומת ישירות בקוד):** `core/action_gateway.py`'s `find_live_by_user()` (שורות 575-613) מתעד ש-`CONTRACT_PENDING_TTL_SECONDS` הוא 24 שעות במכוון — לא רלוונטי כהסבר ל-miss אחרי 21 שניות, אבל כן מסביר למה שום דבר לא ניקה את ה-contract התקוע באופן אוטומטי במשך 14 השעות שאחרי. גריפ מקיף אחר מנגנון תזכורת יזום (`scheduler.py`, `feature_flags.py`, `core/action_gateway.py`, `app.py`) **לא העלה שום job/flag reminder/nudge לאישורים תלויים**, בניגוד ל-`payment_reminder.py`'s `PAYMENT_REMINDERS` המקביל. ה-mitigation היחיד הקיים (`_format_pending_age_suffix()`, PR #449) פסיבי בלבד — מוצג רק כשמסתכלים על רשימת disambiguation מרובת-פריטים, לא דוחף שום דבר.
+- **חומרה:** זה לא "אף אחד לא הזכיר" — הבעלים **ניסה באופן פעיל** לפתור את זה תוך דקה, קיבל מידע שקרי שהפעולה לא קיימת, והפעולה נשארה תקועה בלי שום דרך לדעת זאת עד שסשן נפרד גילה את זה 11 שעות אחר כך. זה חמור משמעותית מפער-תזכורת גרידא.
+- **לא אומת (במקור):** מנגנון ה-miss המדויק (restart מול race — שתי ההשערות לעיל); האם זה משוחזר ב-production; האם זה קורה שוב בתדירות כלשהי.
+- **כיוון תיקון אפשרי (לא הוחלט, לא מומש כאן):** (1) לזהות ולסגור את מנגנון ה-miss המדויק ברגע שיש evidence — לא ניתן לתקן root cause לא-מאומת; (2) להוסיף `logger.warning` ל-`_notify_missing_or_expired_callback()` כדי שהמקרה הבא יהיה נראה בלוגים; (3) job מתוזמן שמתריע יזומה כש-pending contract עובר סף גיל קצר בהרבה מ-24 שעות — דורש החלטת בעלים על סף/UX.
+- **היקף:** לא נגעתי בקוד. ממצא + Contract Chain אומתו ישירות בקוד; הלוגים והתיאור החי סופקו ישירות ע"י הבעלים, לא נמשכו עצמאית מ-Render בסשן הזה.
+
+- **עדכון (27/07/2026, סשן עם גישת Render) — מנגנון ה-miss נחקר ישירות:**
+
+  1. **השערה #1 (restart/redeploy בחלון) — נשללה בוודאות.** `GET /v1/services/{id}/events` (Render API) מראה פער נקי, ללא שום `deploy_started`/`deploy_ended`/`build_started`/`build_ended`/`server_restarted`, מ-`2026-07-26T15:01:41Z` ועד `2026-07-27T21:15:54Z` — כ-6 שעות **לפני** החלון וכ-13 שעות **אחריו**, ללא אירוע יחיד. אומת גם ישירות מול deploy history: commit `67c595d5a128541dc4b29db1482e1eb236289016` היה `live` ברציפות דרך כל התקרית.
+
+  2. **תיקון קריטי לעוגן-הזמן שהתיעוד המקורי הסתמך עליו:** השורה `07:34:41Z [INFO] httpx: GET .../Emergency Stop Flags...` **אינה** קשורה בפועל ללחיצת הבעלים — זו הרצה שגרתית של `scheduler.py`'s `_job_interaction_scan()` (D06, "כל 15 דקות" לפי ה-docstring שלה, `scheduler.py:433-437`). הוכחה: אותו זוג-שורות מדויק (GET ל-Emergency Stop Flags ואחריו `[D06] interaction intelligence disabled by env`, `scheduler.py:437`) חוזר ב-`07:04:35Z`, `07:19:40Z`, `07:34:41Z`, `07:49:46Z` — כל 15 דקות בדיוק, ללא שום קשר לפעילות אישורים. כלומר **אין בידינו יותר את התזמון המדויק** של לחיצת הבעלים — רק את ההערכה שלו עצמו ("ניסה לאשר כמעט מיד", תוך פחות מדקה).
+
+  3. **סריקת לוגים מלאה ולא-מסוננת של השעה כולה (`07:00:00Z`-`08:00:00Z`, כל type=app log) לא מעלה שום עקבה** — לא רק להיעדר-הלוג הידוע כבר של `_notify_missing_or_expired_callback()`'s success path, אלא **גם** להיעדר כל עקבה חלופית: קריאה מוצלחת ל-`EventBus.confirm()` הייתה מייצרת `"✅ Confirmed and executed: {action_id} | {action}"` (`event_bus.py:317`, בקוד שהיה live באותו רגע) — שורה כזו **לא קיימת** בשום מקום בשעה כולה. אם ה-item אכן נצרך ע"י משהו, גם הצריכה עצמה בלתי-נראית.
+
+  4. **שלושה מנגנוני-miss נוספים (מעבר לשתי ההשערות המקוריות) נבדקו ונשללו ישירות מהקוד שהיה live בפועל** (`git show 67c595d5a1:event_bus.py`/`scheduler.py`/`gunicorn.conf.py`):
+     - **פקיעת TTL:** `PENDING_TTL_MINUTES = 30` (`event_bus.py:26`) — הרבה מעבר לחלון של כ-דקה; ופקיעה-ב-pop מייצרת שורת log ייעודית משלה (`"⏰ Pending action expired at pop"`, `event_bus.py:78`) שלא הופיעה.
+     - **פינוי לפי קיבולת (LRU/max-size):** לא קיים — `PendingActionsStore._store` הוא `dict` לא-חסום ללא מגבלת גודל.
+     - **job הניקוי המתוזמן** (`_job_cleanup_pending`, כל `CLEANUP_INTERVAL_MIN`=360 דק' כברירת מחדל, `scheduler.py:20-25,813`): שומר על בדיקת TTL תקינה ומייצר `"🧹 Cleaned N expired pending actions"` (`event_bus.py:178`) כשהוא בפועל מנקה משהו — שורה כזו לא הופיעה בשעה כולה.
+     - **race בין-thread-י בתוך התהליך:** `gunicorn.conf.py` נועל `workers = 1` **וללא** override ל-`threads`/`worker_class` — כלומר worker סינכרוני ברירת-מחדל, single-threaded לגמרי. שני invocations חופפים באותו RAM אינם אפשריים מבנית תחת התצורה הזו.
+  5. **`getWebhookInfo`** (Telegram Bot API, נבדק בפועל עם ה-token האמיתי של staging) מראה `last_error_date=None`/`pending_update_count=0` — אך זה **לא-קונקלוסיבי** לחלון ההיסטורי: Telegram שומר רק את השגיאה **האחרונה**, ומאז החלון עברו עשרות deploys/בדיקות נוספות שהיו יכולות לדרוס כל שגיאה קודמת.
+- **לא אומת (עדכני):** לאחר שלילת חמשת המנגנונים לעיל (restart, TTL, קיבולת, cleanup job, race בין-thread-י), ה**השערה היחידה שנותרה סבירה בעיני exclusion היא Telegram webhook retry/duplicate delivery** (השערה #2 המקורית) — אך היא נותרת בלתי-ניתנת-לאישור מה-sandbox הזה: `GET /v1/logs` של Render חושף רק `type=app` לשירות הזה; `type=request` (ונסיונות `type` אחרים) מחזיר תגובה ריקה (`{"hasMore":false,"logs":null}`) ולא שגיאה — כלומר אין access-log/HTTP-level log stream נפרד חשוף ב-API הזה לאימות ישיר של POST כפול. אישור סופי ידרוש שחזור-חי מבוקר עם diagnostic זמני (לוג ל-`update.update_id` הגולמי של כל POST נכנס, בדומה לדפוס ה-temp-diagnostic-reviewed-and-reverted ששימש לאימות Claim 3 במסמך ה-verification plan) — לא בוצע כאן ללא אישור בעלים מפורש.
+- **סטטוס:** 🔴 נרשם, Contract Chain אומת ישירות בקוד, evidence חי ומתוארך קיים. **חמישה מנגנוני-miss אפשריים נבדקו ונשללו ישירות מהקוד/מ-Render API בפועל (restart, פקיעת TTL, פינוי-קיבולת, cleanup job, race בין-thread-י)** — נותרה השערה אחת בלבד (Telegram webhook retry/duplicate), בלתי-מאושרת אך הסבירה היחידה שנותרה. עוגן-הזמן `07:34:41Z` המקורי תוקן — אינו קשור בפועל לתקרית. **לא תוקן, root cause הסופי (אישור Telegram-side) עדיין פתוח**, ממתין להחלטת בעלים על שחזור-חי מבוקר אם רוצים סגירה מלאה.
+
+---
+
 ## ממצא תכנוני (ללא מספר BUG) — Cost Telemetry Coverage and Per-Turn Attribution
 
 > ממצא-תשתית (coverage gap במדידת עלות), לא regression בהתנהגות קיימת ולא סיווג-באג — נשאר ללא מספור עד להחלטה על תוכנית מימוש. נפרד לחלוטין מ-BUG-141 ומ-PR של approval callbacks (BUG-144/145/122).

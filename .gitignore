@@ -20,3 +20,10 @@ render_logs/
 
 # Context Librarian bundles are disposable navigation artifacts.
 docs/context_librarian/generated/*.md
+
+# Local, access-restricted retention of raw evidence + alias mapping for
+# redacted operational evidence in committed docs (PR #477 security review).
+# Never commit this — see the redaction notes in
+# docs/architecture/f52-unified-approval-runtime/rollout/SINGLE_SPEAKER_APPROVAL_UX_PRODUCTION_VERIFICATION_PLAN.md
+# and BUG_AUDIT_LOG.md's BUG-148/BUG-150 entries.
+**/.evidence/
