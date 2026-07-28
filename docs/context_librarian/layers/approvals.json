@@ -52,17 +52,18 @@
       {"name": "FEATURE_ATOMIC_CLAIMS", "default_state": "off", "documented_state": "deployment documentation may require true; verify environment", "evidence_scope": "code default and deployment docs"},
       {"name": "FEATURE_SINGLE_SPEAKER_APPROVAL_UX", "default_state": "off", "documented_state": "PR #471 (merge c64da20); off = legacy delivery routing, on = Gateway owns the one final response for an approval-queuing turn; identifier redaction in build_approval_lifecycle_result() is unconditional regardless of this flag", "evidence_scope": "code default (feature_flags.py) plus CHANGELOG.md PR #471 entry; no staging/production activation evidence exists"}
     ],
-    "valid_from": "2026-07-27",
-    "last_verified_commit": "a885561d",
+    "valid_from": "2026-07-28",
+    "last_verified_commit": "ffa678a7",
     "confidence": 0.9,
     "notes": [
       "ActionContracts remains the sole source of truth for approval lifecycle.",
       "Legacy IDs may resolve an existing unambiguous canonical contract but may never create or infer one.",
       "Approval state, presentation state, and execution evidence are distinct.",
-      "PR #471: Telegram approve/reject callback_data now carries an optional trailing contract_id (_approval_callback_data(), app.py:1116); when present and FEATURE_ACTION_GATEWAY is on, the callback resolves the exact ActionContract via lifecycle_result() before falling back to fingerprint matching.",
+      "PR #471: Telegram approve/reject callback_data now carries an optional trailing contract_id (_approval_callback_data(), app.py:1128); when present and FEATURE_ACTION_GATEWAY is on, the callback resolves the exact ActionContract via lifecycle_result() before falling back to fingerprint matching.",
       "PR #471 (BUG-144): the reject callback now resolves and closes the canonical ActionContract (reject_with_lifecycle_result()) before reporting cancellation to the user, not just the legacy EventBus item.",
       "ApprovalLifecycleResult (core/action_gateway.py) is the single-speaker, user-safe projection of one ActionContract lifecycle; approve_with_lifecycle_result()/reject_with_lifecycle_result() are the canonical entry points that produce it. This is layered on top of, not a replacement for, ActionContracts as lifecycle authority.",
-      "This node's metadata was refreshed by a read-only Context Librarian audit against a885561d; production evidence entries above still predate that audit and are not re-verified by it."
+      "PR #479/#480 (merged, N17 re-verification): changed only the rendered wording of build_approval_lifecycle_result() and _describe_tool_call() (rejected-state phrasing normalized to 'בוטלה', task-creation gets dedicated business wording, raw Airtable table names no longer leak into any approval message) — no lifecycle, callback-resolution, or authority change. Architectural claims in this node were directly re-verified against ffa678a7 and remain accurate; only code line-number citations shifted.",
+      "This node's metadata was refreshed by a read-only Context Librarian audit against ffa678a7 (direct source re-verification, N17 non-inferiority pilot advancement); production evidence entries above still predate that audit and are not re-verified by it."
     ],
     "extensions": {"boss.layer_aliases": ["layer-3", "durable-approval", "ActionGateway"]}
   }],

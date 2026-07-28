@@ -155,3 +155,340 @@ branch regressions. All Context Librarian tests passed.
 
 Phase 1 acceptance is not established. Do not bypass a real STOP merely to
 complete the pilot or expose savings metrics.
+
+### 2026-07-28 non-inferiority pilot advancement
+
+This run advances the 27/07 preflight from "4/5 STOP, 1/5 preliminary" to "5/5
+PROCEED, 5/5 with an independent Gold Set, a completed Librarian-track
+investigation, and an independent blind review of that investigation." It
+does **not** establish Phase 1 acceptance — see "What remains unproven" below.
+
+**Commit/branch correction (raised by the blind reviewer on
+`rp5_evidence_mismatch`, Critical severity, accepted as correct):** the five
+bundles built for this run were generated from this branch's working tree,
+whose `HEAD` was `17b0a67` ("direct source re-verification of 4 stale N17
+nodes," a commit that exists **only** on
+`claude/context-librarian-non-inferiority-pilot`, not on `main`) — not from
+`main` at `ffa678a7` as the review packets stated. The four-node
+re-verification that flips all five gates from STOP to PROCEED is real and
+was independently re-checked in this session (see "Direct source
+re-verification" above and each Librarian-track record below), but as of this
+writing it is **not yet merged to main** — a bundle built directly against
+`origin/main` today would still show the 27/07 STOP results for four of the
+five tasks. This is corrected here rather than in the review packets
+themselves, which are left as-generated for the audit trail.
+
+**Independence model used (per explicit user instruction — "use an
+independent subagent" — this session's closest achievable approximation of
+the pilot doc's independence requirement):** for each of the 5 tasks, a fresh
+`Agent` subagent with no access to this conversation, the Librarian bundle,
+or any other task's materials produced the Authority Gold Set from blind
+repository exploration alone. Claude Code (this session) then ran the
+Librarian track: explicit profile selection, bundle build, workflow-gate
+check, and its own source verification. A second fresh `Agent` subagent per
+task then blind-reviewed the Librarian-track investigation against that
+task's Gold Set, with read access to the live repository to independently
+check any claim rather than trust either party. This is not the pilot doc's
+literal "independent full-repository review... blind to the track" (there is
+only one track run here, not a Baseline-vs-Librarian comparison per task),
+and it does not satisfy the dual-vendor Codex/Claude-Code bundle-hash-equality
+condition — both remain open per "What remains unproven."
+
+**No runtime or production change was made in this run for any of the 5
+tasks** — three tasks surfaced real, gold-set-confirmed defects
+(`approval_ux`, `tool_execution`, `turn_coordinator_routing`), all three
+sitting inside territory `docs/architecture/CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`
+gates as mandatory (Durable Atomic Approval / `ActionContract`/`ActionGateway`
+layer, directly or via `core/lead_candidate_handler.py`'s real contract
+creation). None has a completed Cross-Layer Impact Matrix. Per that contract
+and per this pilot doc's own instruction not to bypass a real STOP to
+complete the pilot, no fix was implemented for any of them in this PR — each
+is recorded below as "confirmed, real, implementation correctly blocked."
+
+#### Per-run records
+
+**Task 1 — `approval_ux` ("Repeated approval returns the wrong message.")**
+- Profile: `approval_ux` (unique_suggestion, score=2, matched: approval,
+  message). Gate: PROCEED, 0 stale nodes (as of branch `HEAD` `17b0a67`, not
+  yet on `main` — see correction above).
+- Gold Set verdict: REAL DEFECT — BUG-150 (`BUG_AUDIT_LOG.md:3387`, 🔴 open):
+  a duplicate/retried approval-callback delivery can make
+  `app.py::_notify_missing_or_expired_callback()` falsely tell the user an
+  action "no longer exists" while the `ActionContract` was still genuinely
+  `pending`; root cause narrowed to one unconfirmed hypothesis (Telegram
+  webhook retry). A deliberate second press is unaffected — already correct,
+  ~180 passing assertions across 7 test files.
+- Librarian-track investigation: confirmed the exact code (no
+  `logger.info`/`logger.warning` on the success path) and the bug-log entry
+  directly. Narrower than the Gold Set — verified only the BUG-150 half, not
+  the "deliberate second press already works" half.
+- Functional defects found: 0 new (BUG-150 already registered).
+- Gold-set misses (blind review, PASS WITH FINDINGS): **High** — entirely
+  missed the Gold Set's parallel-sources-of-truth structural finding (4
+  coexisting approval mechanisms, 2 live in-memory pending stores, 3
+  different TTL clocks governing the same user-visible approval). **Medium**
+  — quoted `_MISSING_OR_EXPIRED_CALLBACK_TEXT` as evidence without noticing
+  the exact string was replaced same-day by PR #479, diverging from the
+  original incident's quoted text (the underlying defect is unchanged; the
+  citation practice is the issue). **Medium** — omitted
+  `FEATURE_SINGLE_SPEAKER_APPROVAL_UX` despite it appearing in the exact code
+  block read. **Medium** — the "did not verify the majority reading" caveat
+  was disclosed but not carried into the stated conclusion.
+- Architecture defects: none Critical; High per above.
+- Context expansions: `app.py` (`_MISSING_OR_EXPIRED_CALLBACK_TEXT` +
+  function body), `BUG_AUDIT_LOG.md` (BUG-150 entry) — both necessity:
+  required to confirm the Gold Set's central claim; recurrence: first time
+  this session for this task.
+- First-pass result: conclusion matched Gold Set; investigation coverage did
+  not.
+
+**Task 2 — `tool_execution` ("Dispatcher reports success without execution
+evidence.")**
+- Profile: `tool_execution` (unique_suggestion, score=4). Gate: PROCEED, 0
+  stale nodes (same branch-HEAD caveat as above).
+- Gold Set verdict: AMBIGUOUS — no reproducible false-success case in
+  currently-wired evidence gates, but two real structural gaps: (1) a
+  fail-open `except Exception` around `verify_execution()` in
+  `core/action_gateway.py::_execute_contract()` (lines 2554-2569); (2) no
+  automated check that `core.anti_hallucination._EVIDENCE_VALIDATORS` stays
+  in sync with `tool_registry.py`'s `requires_approval`/`high_risk` tools.
+- Librarian-track investigation: confirmed both via direct code read plus a
+  programmatic extraction of `tool_registry.py`'s 11 gated tools vs.
+  `_EVIDENCE_VALIDATORS`'s 13 keys, surfacing a bonus finding beyond the Gold
+  Set — `drive_create`/`drive_upload` are orphaned validator entries for
+  tools that don't exist anywhere in `tool_registry.py`/`tools/` at all,
+  direct proof the manual sync has already drifted once (harmlessly).
+- Functional defects found: 0 new (both gaps already found by the Gold Set;
+  Librarian-track added corroborating evidence, not a new defect class).
+- Gold-set misses (blind review, **PASS — non-inferior**): **Medium** — both
+  the Gold Set and the Librarian-track investigation undercounted
+  `verify_execution()`'s call sites (missed a 4th, in
+  `core/action_gateway_atomic_executor.py:179`, which is correctly
+  fail-closed) — tracing it surfaced a genuine duplicate-ownership /
+  parallel-source-of-truth finding neither prior investigation caught: the
+  same evidence check is implemented correctly in one function and
+  fail-open ~100 lines away in a sibling function. **Low** — neither report
+  states both approval-gating flags default off, slightly overstating
+  production immediacy by omission.
+- Architecture defects: Medium (duplicate evidence-check ownership); no
+  Critical/High.
+- The blind reviewer explicitly assessed the "gate blocks implementation"
+  decision against `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md §0`'s literal text
+  and confirmed it is a correct, literal application (the gate's forbidden
+  list is runtime code / implementation PRs / "fixed" claims, not
+  investigation/reporting) — not a dodge.
+- Context expansions: `core/action_gateway.py` (2540-2598),
+  `tool_registry.py` (full registry entries, regex-extracted),
+  `core.anti_hallucination` module import (live key comparison),
+  repo-wide grep for `drive_create`/`drive_upload`, `smoke_tests.py` grep.
+  Necessity: each step directly tested a specific Gold Set claim; recurrence:
+  first time this session.
+- First-pass result: matched Gold Set and independently verified PASS by
+  blind review — the strongest of the 5 results this run.
+
+**Task 3 — `turn_coordinator_routing` ("An explicit request routes to the
+wrong handler.")**
+- Profile: `turn_coordinator_routing` (unique_suggestion, score=2). Gate:
+  PROCEED, 0 stale nodes (same branch-HEAD caveat as above).
+- Gold Set verdict: AMBIGUOUS — under the strict `Handler` enum reading,
+  no defect (44/44 + 4/4 router tests pass; the one suspicious
+  confidence&lt;0.85 branch is dead code for the current rule table); under
+  the natural "whatever actually handles the request" reading, a real open
+  defect — `core/lead_candidate_handler.py`'s Tier-1 branch
+  (`_handle_single_candidate()` line 1189, via `_at_find_lead()`'s
+  exact-phone-match requirement) ignores the Router's correctly-detected
+  `UPDATE_LEAD` intent and routes "update phone of X" to the create-new-lead
+  path instead (BUG-130, registered, unfixed).
+- Librarian-track investigation: confirmed BUG-130's mechanism directly (the
+  exact-match code plus the bug-log entry). Did not independently re-verify
+  the Handler-enum reading — relied on the Gold Set's self-reported test
+  counts for that half.
+- Functional defects found: 0 new (BUG-130 already registered).
+- Gold-set misses (blind review, **NOT NON-INFERIOR**): **High** — the
+  investigation never mentions **BUG-140**, a live, still-`pending`
+  `ActionContract` sitting a few lines below BUG-130 in the same bug-log file
+  the investigator already grepped, with a genuine, currently-actionable
+  data-corruption risk (an unrelated lead's record could be overwritten if
+  approved) — more urgent than the general routing-confidence framing the
+  investigation settled on. The reviewer also corrected the Gold Set itself:
+  BUG-140's likely mechanism (a phone-only collision via `_search_formulas()`
+  matching an unrelated record) is a distinguishable code path from BUG-130
+  (exact-match failing to find a real match), not "this exact mechanism" as
+  the Gold Set phrased it. **Medium** — neither document raised that
+  `_should_auto_write()` = `auto_capture and not existing_id` means BUG-130,
+  under `FEATURE_AUTO_CAPTURE=ON`, silently takes the **no-approval
+  direct-write branch** — turning a routing bug into a genuine approval-bypass
+  bug, violating the C89 invariant documented in the same function's own
+  docstring. **Medium** — relying on the Gold Set's self-reported test
+  results instead of independently re-running them, though the reviewer's own
+  reproduction confirmed the same result. **Low-Medium** — the bundle's
+  Feature Flags section omits `FEATURE_AUTO_CAPTURE`, the one flag actually
+  governing the Tier-1 branch; the Gold Set found it anyway by reading code
+  directly, which the bundle's PROCEED/100%-coverage claim should have
+  covered.
+- Architecture defects: High (BUG-140 miss); Medium (unflagged approval-bypass
+  path).
+- Context expansions: `core/lead_candidate_handler.py` (1160-1234, 341-378),
+  `BUG_AUDIT_LOG.md` (BUG-130 entry). Necessity: required to confirm the
+  Gold Set's Reading-B claim; recurrence: first time this session.
+- First-pass result: matched Gold Set on the object-level defect it settled
+  on, but missed a more urgent sibling defect the reviewer found by reading
+  slightly further in a file the investigation had already opened — this
+  run's clearest illustration of scope-narrowing risk.
+
+**Task 4 — `core_reasoning_change` ("Business Outcome maps to the wrong
+reasoning state.")**
+- Profile: `core_reasoning_change` (unique_suggestion, score=2). Gate:
+  PROCEED, 0 stale nodes — unchanged from the 27/07 preflight (this node was
+  never stale).
+- Gold Set verdict: NOT REPRODUCIBLE / ALREADY CORRECT — terminal
+  Business-Outcome precedence in `core/adapters/leads_adapter.py::_normalise_status()`
+  is implemented correctly and matches its own governing spec; 367 test
+  assertions across 7 suites pass. One pre-flagged, non-live-affecting
+  ambiguity (`decision_orchestrator.py` reuses `PHASE_CLOSED` for both
+  Decision-cancellation and Lead administrative-closure — an open SPEC
+  question, not a coding error).
+- Librarian-track investigation: verified the two decisive functions
+  (`_normalise_status`/`_normalise_business_outcome`) plus the schema
+  trailing-space fact directly, and ran `test_bug104_phase2a1_current_state_policy.py`
+  (52/52) live.
+- Functional defects found: 0.
+- Gold-set misses (blind review, **REVISE — Medium-High**): the investigation
+  verified only ~2 of the Gold Set's 6+ material files/layers. It never
+  opened `core/leads_reasoning_projection.py` (the actual field-normalization
+  entry point between the live caller and the adapter — **Medium**), never
+  opened `core/reasoning_engines.py`/`decision_orchestrator.py` (the two hops
+  from the adapter's output to the final `phase` — **Medium**), and
+  critically never opened `tma_api.py` (the *only* live caller and also the
+  **write side**, `patch_lead()`/`_OUTCOME_STATUS_MAP` — **High**, since a
+  "wrong reasoning state" symptom could plausibly originate in the write path
+  just as easily as the read/normalization path actually checked). It also
+  never identified `FEATURE_CORE_REASONING_LEADS_STATE`, the flag gating the
+  entire feature (**Medium-High** in isolation). It did not open the
+  CLAUDE.md-mandated `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` gate document —
+  a process-compliance gap distinct from the coverage gap.
+- Architecture defects: none found by either party; the reviewer's finding is
+  about investigation coverage, not a code defect.
+- The reviewer explicitly separated the two questions: the Gold Set's
+  decisive claims are independently confirmed accurate (no fabrication), and
+  the Librarian-track's conclusion happens to be correct — but the
+  investigation's own evidence base does not, on its own, rule out a defect
+  in the 4+ files it never opened. Verdict: matches by the underlying reality
+  being benign everywhere, not because the investigation checked enough of it
+  to know that.
+- Context expansions: `core/adapters/leads_adapter.py` (254-327),
+  `airtable_schema.py` (353-382, `LeadOutcome`),
+  `test_bug104_phase2a1_current_state_policy.py` (executed). Necessity:
+  confirmed the one function both prior runs (27/07 preflight and today)
+  identified as decisive; recurrence: this task's core logic was already
+  read in the 27/07 preflight, so this session's read was a re-verification,
+  not first discovery.
+- First-pass result: this run's weakest coverage-to-conclusion ratio of the
+  5 tasks by the reviewer's own account.
+
+**Task 5 — `rp5_evidence_mismatch` ("A completion claim conflicts with
+available evidence.")**
+- Profile: `rp5_evidence_mismatch` (unique_suggestion, score=2). Gate:
+  PROCEED as generated (branch `HEAD`) — **see the Critical commit/branch
+  correction at the top of this section; this is the finding that produced
+  it.**
+- Gold Set verdict: NOT REPRODUCIBLE / ALREADY CORRECT —
+  `core/turn_evidence.py::compare_shadow_final_status()` already correctly
+  flags a completion claim against `no_evidence` as `mismatch=True`; the
+  separate, already-enforcing A32 layer (`core/anti_hallucination.py`)
+  already rewrites such text before it reaches the user. The one real,
+  narrower, currently-open instance in this territory is the already-filed
+  BUG-139 (inverse claim direction, shadow-log-only, no user-facing effect).
+- Librarian-track investigation: confirmed `compare_shadow_final_status()`
+  directly and ran `test_turn_evidence_shadow.py` (26 passed) live; relied on
+  an earlier, out-of-band verification of A32 from the `tool_execution` task
+  rather than re-reading it here.
+- Functional defects found: 0 new.
+- Gold-set misses (blind review, **REVISE — Critical**): beyond the
+  commit/branch mislabeling above (Critical — the reviewer traced it to
+  `git merge-base --is-ancestor` proof that `17b0a67` is not an ancestor of
+  `ffa678a7`, i.e. not on `main`), the reviewer found a **High**-severity
+  shared miss: `task_profiles/profiles.json`'s own `rp5_evidence_mismatch`
+  profile declares `required_dependency_layers: ["tools", "ux_f52"]`, and
+  neither the Gold Set nor the Librarian-track investigation opened either
+  dependency layer or `core/last_tool_result_shadow.py` — a **third**,
+  previously-unaccounted-for passive evidence-shadow mechanism (flag
+  `FEATURE_LAST_TOOL_RESULT_SHADOW`) wired into `tools/dispatcher.py` and
+  `core/output_gateway.py`. Both parties framed this as a two-layer
+  landscape (A32 vs. RP4/RP5); it is at least three. **Medium** — the
+  Librarian-track's citation of an out-of-band prior verification (from a
+  different task, not shown in this task's own evidence trail) is a weak
+  citation practice on principle, independent of it happening to be
+  accurate. **Low** — the Gold Set itself miscounted
+  `test_turn_evidence_shadow.py`'s function count (11 vs. the actual 14,
+  5 parametrized to 26 collected items); the Librarian-track noticed the
+  discrepancy but did not resolve it.
+- Architecture defects: Critical (unsupported gate-status claim); High
+  (missed third evidence-shadow layer / required-dependency layers never
+  opened).
+- The reviewer explicitly separated the object-level engineering question
+  (independently re-confirmed correct — `observe_shadow_finalizer()` really
+  is a no-op on final text in every state) from the meta-level claim about
+  what state the catalog/tooling itself is in (false as stated) — this is
+  precisely the "claim conflicts with available evidence" failure mode the
+  task text names, reproduced one level up in the pilot's own tooling.
+- Context expansions: `core/turn_evidence.py` (169-229),
+  `test_turn_evidence_shadow.py` (executed). Necessity: confirmed the Gold
+  Set's central comparator claim; recurrence: none — narrowest investigation
+  of the 5 tasks by the Librarian-track's own account.
+- First-pass result: correct object-level conclusion; the run's most serious
+  process failure (an inaccurate claim about the catalog's own verification
+  state, self-caught only by independent blind review, not by this session).
+
+#### Aggregate quality-gate evaluation (per the doc's own evaluation order)
+
+- Tests/architecture gates first: all cited test files that were re-run this
+  session passed live (`test_bug104_phase2a1_current_state_policy.py` 52/52,
+  `test_turn_evidence_shadow.py` 26/26); no test was broken by this run (no
+  code changed).
+- Functional defects: 0 new defects found beyond what each task's Gold Set
+  already surfaced (all pre-existing, already registered where applicable:
+  BUG-150, BUG-130/BUG-140, BUG-139).
+- Gold-set misses / cross-file misses: present in **4 of 5** tasks
+  (`approval_ux`, `turn_coordinator_routing`, `core_reasoning_change`,
+  `rp5_evidence_mismatch`), ranging Medium to Critical. Only `tool_execution`
+  came back a clean PASS.
+- Architecture defects by severity: 1 Critical (`rp5_evidence_mismatch`'s
+  commit/branch mislabeling), 2 High (`turn_coordinator_routing`'s BUG-140
+  miss; `rp5_evidence_mismatch`'s missed third evidence-shadow layer), the
+  remainder Medium/Low.
+- Per the doc's own acceptance bar ("zero material authority misses; zero
+  Critical/High architecture defects... independent review of every
+  solution"): **this run does not meet acceptance.** It is not intended to —
+  see "What remains unproven."
+
+#### What remains unproven (unchanged in kind from 27/07, now with more data)
+
+- **Codex/Claude-Code dual-vendor bundle-hash equality**: still not
+  attempted. This session used Claude Code only; no Codex run exists for
+  today's bundles.
+- **Baseline-track comparison**: today's run is Librarian-track only for all
+  5 tasks (the 27/07 preflight's one Baseline-vs-Librarian comparison, for
+  `core_reasoning_change`, is the only Baseline data point that exists across
+  both sessions).
+- **"Blind to the track" independent review**: satisfied in spirit (each
+  blind reviewer had no access to this conversation and had to independently
+  verify or refute both the Gold Set and the investigation using its own
+  repository reads) but not in the doc's literal sense, since there is only
+  one track per task here.
+- Five tasks, one session, one vendor: per the doc's own words, this "permits
+  only a cautious manual rollout, not a general statistical quality claim,"
+  and today's results — 1 clean pass, 1 Critical process failure, 2 High
+  misses, several Medium findings — argue for more caution, not less, before
+  any wider rollout of the Librarian track without a mandatory independent
+  review step.
+
+**Phase 1 acceptance is still not established.** The honest summary of this
+run: the Librarian track's object-level technical conclusions were correct in
+5/5 tasks (independently re-confirmed by blind review in every case), but its
+own investigation coverage was insufficient to reliably reach that conclusion
+unassisted in at least 3/5 tasks, and produced one Critical, self-referential
+process error (asserting a catalog verification state that was not yet true
+of `main`). The blind-review step is not an optional nicety this data set —
+it is the thing that caught every High/Critical finding above; none of them
+were self-caught.
