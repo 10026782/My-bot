@@ -1845,3 +1845,29 @@ Flag: EMERGENCY_STOP_AI=False (נשמר ב-Airtable)
 
 **Merged:** ✅ כן — commit ישירות ל-`claude/telegram-task-approval-audit-il29sj`.
 **Verified בפרודקשן:** לא רלוונטי (אין שינוי קוד).
+
+### C173 — PR #469: BUG-147 root-cause fix (Patch A) (26/07/2026)
+קבצים: `tools/dispatcher.py`, `test_bug147_dispatcher_structured_error_shape.py` (חדש) | קשור: BUG-147
+
+**PR #469 (`claude/bug147-dispatcher-structured-error`, commit `3b111f6`, ממוזג `e946225`):** תוקן ב-audit קודם ש-BUG-147's root cause שנרשם ב-C172 היה שגוי — השורש האמיתי הוא `dispatch_tool()`'s gate הכללי אחרי `action_validator.validate_action()`, שהחזיר `validation.reason` גולמי (בלי "❌") ל-structured write tools. תיקון: tools ב-`core.anti_hallucination._EVIDENCE_VALIDATORS` (כולל `airtable_add`) מקבלים `{ok: False, tool, user_message}` במקום מחרוזת. PR ממוקד קוד+test בלבד, ללא נגיעה ב-`app.py`/`core/action_gateway.py` (מאומת: BUG-143/144/145 לא כפולים בדיף). נוצר על ענף טרי מ-`origin/main`, לא נבנה מעל branch קודם — ראה `docs/architecture/action-gateway/PM460_POSTMERGE_MINIMAL_PATCH_GATE.md` להיקף המקורי.
+
+**בדיקות:** `test_bug147_dispatcher_structured_error_shape.py` (10/10, חדש) — 3 קבוצות בדיקה: ActionBlocked מוחזר כ-structured failure; `core.action_gateway._make_dispatch_executor()`'s tool_executor boundary (הפונקציה האמיתית ש-ActionGateway קורא לה בפרודקשן, לא מוקית) מקבל dict לא מחרוזת; `verify_execution()` לעולם לא מסווג ככשל-חסום כהצלחה. Full sweep 170/170, `smoke_tests.py` ירוק.
+
+**✅ Verified ב-staging (26/07/2026):** `claude/rp5-staging-fault-injection-v4akit` עבר rebase מעל `main` (כולל PR #469, ו-PR #460/#461/#467 שכבר תועדו) והועלה מחדש (force-push, commit `da7a8ab`). `PM460-RETEST-APPROVE` (סבב הבדיקה החוזרת של הבעלים) אישר במפורש: "BUG-147 לא חזר... לא הופיעה השגיאה expected structured result dict".
+
+**Merged:** ✅ כן — PR #469 commit `3b111f6`, ממוזג `e946225`.
+**Verified בפרודקשן:** ⏳ לא עדיין — קוד ממוזג ל-`main`, נבדק רק ב-staging. **Verified ב-staging:** ✅ כן (26/07/2026).
+
+### C174 — PR #470: BUG-149 fix — action-resolution context events + deterministic multi-mutation guard (26/07/2026)
+קבצים: `app.py`, `core/action_gateway.py`, `core/action_resolution_event.py` (חדש), `core/action_resolution_projection.py` (חדש), `core_knowledge.py`, `memory_store.py`, `test_bug149_action_resolution_projection.py` (חדש), `test_bug149_multi_mutation_guard.py` (חדש), `test_pa01_phantom_approval_enforcement.py` | קשור: BUG-149, BUG-122 (superseded ל-multi-mutation case)
+
+**מקור:** סבב הבדיקה החוזרת השני של הבעלים (אחרי deploy PR #469 + rebase staging), תרחיש 5 — payload ישן/כבר-נדחה בוצע במקום הבקשה הנוכחית. פירוט מלא ב-BUG_AUDIT_LOG.md's BUG-149.
+
+**PR #470 (`claude/bug149-action-resolution-context`, commit `ceb9148`, ממוזג `59e74be`):** תוכנן ואושר דרך סבב-תכנון ייעודי הכולל Cross-Layer Impact Matrix מלא (`CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`) לפני מימוש, per **10 תיקוני-עיצוב** שנדרשו ואושרו במפורש: (1) אירועי-context נפרדים לחלוטין מהיסטוריית שיחה רגילה, לא הודעת user/assistant סינתטית; (2) idempotency דטרמיניסטי (`contract_id+outcome+version`); (3) כשל-הזרקה לא-חוסם ל-lifecycle הדורש, לוג WARNING ללא payload רגיש; (4) תיעוד מפורש ש-`memory_store` הוא process-local/non-durable, לא מקור-אמת; (5) ה-pre-scan סופר רק tool_use מוטטים, ומחסום את **כל** התגובה (0 contracts/dispatch/executor/pending-event) על 2+ — לא שומר ראשון/אחרון; (6) כשל-projection לעולם לא משנה את ה-lifecycle הדורש, אבל השער הדטרמיניסטי ממשיך להגן גם אם ה-projection שבור לגמרי; (7) 7 סוגי-בדיקות דטרמיניסטיות ספציפיות; (8) סקירת כל terminal outcomes וזיהוי נקודת-הפליטה המוסמכת לכל אחד (גילוי: `expired`/`cancelled` אינם קיימים כ-status אמיתי בקוד היום, לא כלולים); (9) Cross-Layer Matrix מעודכן — שכבה 4 הופכת ל-producer מוסמך של אירועי-lifecycle גלויים-למודל, מתועד כגבול-אירוע חדש ולא "ללא השפעה"; (10) הנחיית system-prompt כ-defense-in-depth.
+
+**בדיקות:** `test_bug149_action_resolution_projection.py` (23, חדש) + `test_bug149_multi_mutation_guard.py` (15, חדש). שני test blocks ב-`test_pa01_phantom_approval_enforcement.py` (R3 integration, P1-B/R3-real) הניחו את התנהגות-BUG-122 הישנה ("הראשון מנצח" בתגובה עם 2 mutating tool_use) — עודכנו לשקף את ההתנהגות החדשה (אפס contracts). Full sweep 172/172, `smoke_tests.py` ירוק.
+
+**🟡 Staging rebase בוצע, טרם verified (26/07/2026):** `claude/rp5-staging-fault-injection-v4akit` עבר rebase נוסף מעל `main` (כולל PR #470, commit `59e74be`) והועלה מחדש (force-push, commit `67c595d`). Rebase נקי לחלוטין — 0 קונפליקטים (RP5 hooks ו-BUG-149 נוגעים באזורים שונים ב-`app.py`). שימור מלא של RP5-only hooks (`core/rp5_fault_injection.py`, hook ב-`tools/dispatcher.py`, `run_agent()`→`_run_agent_impl()` wrapper) ואי-שחזור מכוון של commit-ה-PM460 העצמאי הישן. Full sweep על הענף המרובייז: 175/175 ירוק. **טרם בוצע deploy ידני + re-run של תרחיש 5 נגד ה-commit הזה ספציפית** — נדרש לפני שניתן לקבוע "VERIFIED IN STAGING" במלואו לפי "כלל ברזל".
+
+**Merged:** ✅ כן — PR #470 commit `ceb9148`, ממוזג `59e74be`.
+**Verified בפרודקשן:** ⏳ לא עדיין — לא נפרס. **Verified ב-staging:** 🟡 קוד מרובייז ומוכן, retest חי טרם בוצע.
