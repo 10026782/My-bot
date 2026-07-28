@@ -68,10 +68,17 @@ PROFILE_FIELDS = frozenset(
         "maximum_traversal_depth",
         "allowed_statuses",
         "selection_terms",
+        "bounded_local_expansions",
         "extensions",
     }
 )
 PROFILE_REQUIRED_FIELDS = PROFILE_FIELDS - {"extensions"}
+BOUNDED_LOCAL_EXPANSION_FIELDS = frozenset({"path", "anchor", "window_lines", "role"})
+# תקרה קשיחה, לא ברירת מחדל: הרחבה מוגבלת חייבת להישאר חלון-קטע קטן וקבוע-גודל
+# סביב anchor שמוגדר ב-profile. זו לא תכונת חיפוש והיא לעולם לא מונעת ע"י
+# free-text query, ולכן לא יכולה לגדול מניסוח ה-query (N17 pilot Task 3:
+# "query must not inflate context unnecessarily").
+MAXIMUM_LOCAL_EXPANSION_WINDOW_LINES = 200
 SAFETY_RULES = (
     "main overrides planning documents and generated bundles.",
     "ActionContracts is canonical for approval lifecycle.",
@@ -196,7 +203,11 @@ def _validate_node(
 
 
 def _validate_profile(
-    profile: dict[str, Any], edge_types: set[str], layer_ids: set[str], label: str
+    profile: dict[str, Any],
+    edge_types: set[str],
+    layer_ids: set[str],
+    repo_root: Path,
+    label: str,
 ) -> None:
     _require_fields(profile, PROFILE_REQUIRED_FIELDS, PROFILE_FIELDS, label)
     layer_fields = (
@@ -231,6 +242,57 @@ def _validate_profile(
         raise ContextLibrarianError(
             f"{label}: maximum_approximate_token_budget must be positive"
         )
+    if not isinstance(profile["bounded_local_expansions"], list):
+        raise ContextLibrarianError(f"{label}: bounded_local_expansions must be a list")
+    resolved_repo_root = repo_root.resolve()
+    for expansion in profile["bounded_local_expansions"]:
+        # isinstance נבדק ראשון: set() על ערך שאינו iterable (למשל JSON null)
+        # מעלה TypeError גולמי במקום כשל-סגור מבוקר.
+        if not isinstance(expansion, dict) or set(expansion) != BOUNDED_LOCAL_EXPANSION_FIELDS:
+            raise ContextLibrarianError(
+                f"{label}: bounded_local_expansions entry must be an object with "
+                f"exactly {sorted(BOUNDED_LOCAL_EXPANSION_FIELDS)}"
+            )
+        if not isinstance(expansion["anchor"], str) or not expansion["anchor"]:
+            raise ContextLibrarianError(
+                f"{label}: bounded_local_expansions anchor must be a non-empty string"
+            )
+        if not isinstance(expansion["role"], str) or not expansion["role"]:
+            raise ContextLibrarianError(
+                f"{label}: bounded_local_expansions role must be a non-empty string"
+            )
+        window_lines = expansion["window_lines"]
+        if (
+            not isinstance(window_lines, int)
+            or isinstance(window_lines, bool)
+            or not 0 < window_lines <= MAXIMUM_LOCAL_EXPANSION_WINDOW_LINES
+        ):
+            raise ContextLibrarianError(
+                f"{label}: bounded_local_expansions window_lines must be an int in "
+                f"1..{MAXIMUM_LOCAL_EXPANSION_WINDOW_LINES}"
+            )
+        raw_path = expansion["path"]
+        if not isinstance(raw_path, str) or not raw_path:
+            raise ContextLibrarianError(
+                f"{label}: bounded_local_expansions path must be a non-empty string"
+            )
+        if Path(raw_path).is_absolute():
+            raise ContextLibrarianError(
+                f"{label}: bounded_local_expansions path must be relative: {raw_path}"
+            )
+        # resolve() + relative_to(): חוסם ".." traversal ונתיבים מוחלטים כאחד,
+        # כדי ש-_local_expansions() לא יוכל לחשוף קובץ שרירותי מחוץ לריפו.
+        resolved_path = (repo_root / raw_path).resolve()
+        try:
+            resolved_path.relative_to(resolved_repo_root)
+        except ValueError:
+            raise ContextLibrarianError(
+                f"{label}: bounded_local_expansions path escapes repo root: {raw_path}"
+            ) from None
+        if not resolved_path.exists():
+            raise ContextLibrarianError(
+                f"{label}: bounded_local_expansions path does not exist: {raw_path}"
+            )
 
 
 def load_catalog(repo_root: Path | str) -> Catalog:
@@ -293,7 +355,7 @@ def load_catalog(repo_root: Path | str) -> Catalog:
             raise ContextLibrarianError("profile must be an object")
         profile_id = profile.get("id", "<missing>")
         _validate_profile(
-            profile, edge_types, set(layer_nodes), f"profile:{profile_id}"
+            profile, edge_types, set(layer_nodes), repo_root, f"profile:{profile_id}"
         )
         if profile_id in profiles:
             raise ContextLibrarianError(f"duplicate profile id {profile_id}")
@@ -517,6 +579,49 @@ def _git_changed_paths(repo_root: Path, commit: str) -> set[str]:
     return {line.strip().replace("\\", "/") for line in completed.stdout.splitlines() if line.strip()}
 
 
+_MAIN_REF_CANDIDATES = ("origin/main", "main")
+
+
+def _git_provenance(repo_root: Path) -> dict[str, str]:
+    """מדווח את ה-commit/branch המדויקים שמהם נבנה bundle, והאם ה-commit הזה
+    הגיע בפועל ל-`main` — לעולם לא בהנחה משם branch או ממי שכותב על ה-bundle
+    בדיעבד.
+
+    מתקן את הממצא ה-Critical של פיילוט N17 מ-28/07/2026: bundle שנבנה מענף
+    לא-ממוזג (`17b0a67`, קיים רק על `claude/context-librarian-non-inferiority-pilot`)
+    תואר ב-review packet כמשקף את `main` ב-`ffa678a7`. `on_main` הוא "yes"
+    רק כאשר ה-commit הבנוי מוכח כ-ancestor של (או שווה ל-) `main` ref שניתן
+    לפתור; "no" כאשר מוכח שאינו כזה; "unknown" כאשר אף אחד מהשניים לא ניתן
+    לקביעה (למשל אין `origin` remote מוגדר) — "unknown" לעולם לא מטופל כ-
+    "yes" ע"י הקוראים.
+    """
+
+    def _run(args: list[str]) -> tuple[int, str]:
+        try:
+            completed = subprocess.run(
+                args, cwd=repo_root, capture_output=True, text=True, encoding="utf-8"
+            )
+        except OSError:
+            return 1, ""
+        return completed.returncode, completed.stdout.strip()
+
+    commit_code, commit = _run(["git", "rev-parse", "HEAD"])
+    if commit_code != 0 or not commit:
+        return {"commit": "unknown", "branch": "unknown", "on_main": "unknown"}
+    branch_code, branch = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+    branch = branch if branch_code == 0 and branch else "unknown"
+
+    on_main = "unknown"
+    for main_ref in _MAIN_REF_CANDIDATES:
+        ref_code, _ = _run(["git", "rev-parse", "--verify", "--quiet", main_ref])
+        if ref_code != 0:
+            continue
+        ancestor_code, _ = _run(["git", "merge-base", "--is-ancestor", commit, main_ref])
+        on_main = "yes" if ancestor_code == 0 else "no"
+        break
+    return {"commit": commit, "branch": branch, "on_main": on_main}
+
+
 def _matches_tracked_path(changed: str, tracked: str) -> bool:
     tracked = tracked.replace("\\", "/")
     return changed == tracked or fnmatch.fnmatch(changed, tracked) or changed.startswith(
@@ -591,6 +696,54 @@ def _unique_references(
     return result
 
 
+def _local_expansions(
+    repo_root: Path, profile: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """חלונות-קטע דטרמיניסטיים, מוגדרי-profile, סביב anchor קבוע.
+
+    בניגוד לכל מה ש-_select_nodes()/_render() מושכים בדרך כלל, זו לא הפניה
+    לנתיב-קובץ שהסוכן צריך לפתוח בנפרד — החלון המותאם משוקע ישירות בתוך ה-
+    bundle. הפונקציה קיימת עבור מצב-הכשל הספציפי שפיילוט N17 מ-28/07/2026
+    מצא ב-`turn_coordinator_routing`: באג (BUG-140) שיושב מרחק קצר מתחת לבאג
+    אחר (BUG-130) באותו קובץ-לוג גדול שהחקירה כבר פתחה, אך לא נקרא עד שם.
+    ההרחבה מוגדרת-profile, לא query-driven, ומוגבלת-קשיח ע"י `window_lines`
+    (<= MAXIMUM_LOCAL_EXPANSION_WINDOW_LINES) — ניסוח query חופשי לא יכול
+    לגדל או להפעיל את הסעיף הזה, ולכן לא יכול לנפח context בדרך שהרחבה
+    לא-מוגבלת ומונעת-query הייתה יכולה.
+    """
+    results: list[dict[str, Any]] = []
+    for expansion in profile["bounded_local_expansions"]:
+        path = repo_root / expansion["path"]
+        try:
+            source_lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError) as exc:
+            raise ContextLibrarianError(
+                f"cannot read bounded_local_expansions path {expansion['path']}: {exc}"
+            ) from exc
+        anchor = expansion["anchor"]
+        match_index = next(
+            (index for index, line in enumerate(source_lines) if anchor in line),
+            None,
+        )
+        if match_index is None:
+            raise ContextLibrarianError(
+                f"bounded_local_expansions anchor {anchor!r} not found in "
+                f"{expansion['path']}; the profile is stale — update or remove "
+                "this entry rather than let it silently stop expanding"
+            )
+        window = source_lines[match_index : match_index + expansion["window_lines"]]
+        results.append(
+            {
+                "path": expansion["path"],
+                "anchor": anchor,
+                "matched_line": match_index + 1,
+                "role": expansion["role"],
+                "excerpt": "\n".join(window),
+            }
+        )
+    return results
+
+
 def _approximate_char_estimate(text: str) -> int:
     """פרוקסי מבוסס-ספירת-תווים לשימוש בטוקנים — NOT a real tokenizer
     count. `ceil(len(text) / _CHARS_PER_APPROXIMATE_TOKEN)` היא היוריסטיקה
@@ -648,6 +801,8 @@ def _render(
     max_tokens: int,
     production_claim: bool,
     verified_production_evidence: str | None,
+    git_provenance: dict[str, str],
+    expansions: list[dict[str, Any]],
 ) -> str:
     decision_nodes = [node for node in nodes if node["type"] == "decision"]
     layer_nodes = [node for node in nodes if node["type"] == "layer"]
@@ -714,6 +869,7 @@ def _render(
     )
     query_precision = matched_layers / max(1, len(layer_nodes))
 
+    on_main = git_provenance["on_main"]
     lines: list[str] = [
         f"# BOSS Context Bundle — {profile['id']}",
         "",
@@ -721,29 +877,47 @@ def _render(
         f"Profile: {profile['description']}",
         "Authority: navigation metadata only; inspect cited sources before coding.",
         "",
-        "## Agent Consumption Contract",
+        "## Bundle Provenance",
         "",
-        "Use an explicit profile, read this bundle fully, inspect cited sources, and stop on stale nodes or incomplete authority coverage.",
-        "Contract: `docs/context_librarian/AGENT_CONSUMPTION_CONTRACT.md`",
-        "",
-        "## Agent Workflow Gate",
-        "",
-        f"- status: {workflow_gate['status']}",
-        f"- reasons: {workflow_gate['reasons']}",
-        f"- stale_nodes: {len(stale_node_ids)} {stale_node_ids}",
-        f"- mandatory_authority_coverage: {authority_coverage:.0%}",
-        f"- production_claim: {str(production_claim).lower()}",
-        f"- verified_production_evidence: {verified_production_evidence or 'none'}",
-        f"- qualifying_production_evidence: {qualifying_evidence}",
-        f"- unresolved_source_conflicts: {len(conflict_edges)} {conflict_edges}",
-        f"- excluded_layer_leakage: {len(leakage)} {leakage}",
-        "- A STOP status blocks planning and code changes, not bundle creation.",
-        "",
-        "## Canonical Decisions",
-        "",
+        f"- generated_commit: `{git_provenance['commit']}`",
+        f"- generated_branch: `{git_provenance['branch']}`",
+        f"- on_main: {on_main}",
     ]
+    if on_main != "yes":
+        lines.append(
+            "- WARNING: this bundle was NOT built from a commit proven to be on "
+            "`main` (on_main != yes). Do not describe its findings as "
+            "reflecting `main`'s current state; cite `generated_commit` and "
+            "`generated_branch` instead."
+        )
+    lines.extend(
+        [
+            "",
+            "## Agent Consumption Contract",
+            "",
+            "Use an explicit profile, read this bundle fully, inspect cited sources, and stop on stale nodes or incomplete authority coverage.",
+            "Contract: `docs/context_librarian/AGENT_CONSUMPTION_CONTRACT.md`",
+            "",
+            "## Agent Workflow Gate",
+            "",
+            f"- status: {workflow_gate['status']}",
+            f"- reasons: {workflow_gate['reasons']}",
+            f"- stale_nodes: {len(stale_node_ids)} {stale_node_ids}",
+            f"- mandatory_authority_coverage: {authority_coverage:.0%}",
+            f"- production_claim: {str(production_claim).lower()}",
+            f"- verified_production_evidence: {verified_production_evidence or 'none'}",
+            f"- qualifying_production_evidence: {qualifying_evidence}",
+            f"- unresolved_source_conflicts: {len(conflict_edges)} {conflict_edges}",
+            f"- excluded_layer_leakage: {len(leakage)} {leakage}",
+            "- A STOP status blocks planning and code changes, not bundle creation.",
+            "",
+            "## Canonical Decisions",
+            "",
+        ]
+    )
     for node in decision_nodes:
         lines.append(f"- `{node['id']}` — {node['name']}: {node['notes'][0]}")
+        lines.extend(f"    - {extra_note}" for extra_note in node["notes"][1:])
 
     lines.extend(["", "## Selected Layers", ""])
     for node in layer_nodes:
@@ -753,6 +927,12 @@ def _render(
         lines.append(
             f"- `{layer_id}` ({roles[layer_id]}, {node['status']}, {stale_label}) — {node['notes'][0]}"
         )
+        # notes[0] הוא הכותרת; כל כותב-קטלוג הסתמך על כך שהיא תוצג כאן, אבל
+        # notes[1:] נשמטו בשקט מכל bundle שנבנה אי-פעם עד לתיקון הזה (פיילוט
+        # N17, 28/07/2026: בדיוק אותה מחלקת-פער כמו ממצאי core_reasoning_change/
+        # approval_ux של הפיילוט — קיום הערה בקטלוג אינו זהה להגעתה בפועל
+        # ל-bundle של סוכן).
+        lines.extend(f"    - {extra_note}" for extra_note in node["notes"][1:])
 
     lines.extend(["", "## Canonical Documents", ""])
     lines.extend(
@@ -808,6 +988,22 @@ def _render(
         )
     else:
         lines.append("- No additional allowed edge was traversed.")
+
+    lines.extend(["", "## Local Context Expansion", ""])
+    if expansions:
+        lines.append(
+            "Deterministic, profile-defined excerpt windows around a fixed "
+            "anchor — bounded by `window_lines`, not query-driven, so "
+            "free-text query wording cannot grow or trigger this section."
+        )
+        for item in expansions:
+            lines.append(
+                f"- `{item['path']}` around {item['anchor']!r} "
+                f"(matched at line {item['matched_line']}, {item['role']}):"
+            )
+            lines.extend(f"    {excerpt_line}" for excerpt_line in item["excerpt"].splitlines())
+    else:
+        lines.append("- None configured for this profile.")
 
     lines.extend(["", "## Do Not Assume", ""])
     lines.extend(f"- {rule}" for rule in SAFETY_RULES)
@@ -885,6 +1081,7 @@ def build_bundle(
     max_documents: int | None = None,
     production_claim: bool = False,
     verified_production_evidence: str | None = None,
+    assert_main: bool = False,
 ) -> str:
     if task_type not in catalog.profiles:
         available = ", ".join(sorted(catalog.profiles))
@@ -907,8 +1104,19 @@ def build_bundle(
             "--verified-production-evidence requires --production-claim"
         )
 
+    git_provenance = _git_provenance(catalog.repo_root)
+    if assert_main and git_provenance["on_main"] != "yes":
+        raise ContextLibrarianError(
+            "--assert-main was passed but generated_commit "
+            f"{git_provenance['commit']!r} on branch "
+            f"{git_provenance['branch']!r} is not a proven ancestor of main "
+            f"(on_main={git_provenance['on_main']}); refusing to generate a "
+            "bundle that would claim to reflect main's current state"
+        )
+
     nodes, roles, traversed = _select_nodes(catalog, profile, query)
     freshness = _freshness(catalog, nodes)
+    expansions = _local_expansions(catalog.repo_root, profile)
     bundle = _render(
         catalog,
         profile,
@@ -921,6 +1129,8 @@ def build_bundle(
         token_budget,
         production_claim,
         verified_production_evidence,
+        git_provenance,
+        expansions,
     )
     actual_tokens = _approximate_char_estimate(bundle)
     if actual_tokens > token_budget:

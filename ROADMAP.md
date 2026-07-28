@@ -1,5 +1,28 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
+עודכן: 28/07/2026 — **N17 עדכון: Context Librarian Pilot Findings Remediation — PR #485
+נפתח, טרם מוזג, טרם אומת** (ענף `claude/librarian-pilot-remediation`). **Implemented but
+not yet verified** — לפי כלל התיעוד של הריפו (אין לטעון "תוקן"/"הושלם" לפני מיזוג ל-`main`
+ואימות), הפסקה הזו מתארת מה מיושם על ענף ה-PR, לא מצב מאומת. מיישם ישירות תיקון לארבעה
+מתוך חמשת ה-gaps שהפיילוט (28/07, ראו למטה) מצא בספרן עצמו — לא בבאגי runtime שהפיילוט
+חשף: (1) `core_reasoning_change` כולל עכשיו את `core/adapters/decision_adapter.py` (המודול
+החי במקום `decision_orchestrator.py` שכבר לא קיים) והערה על `tma_api.py` כצד-כתיבה; (2)
+`approval_ux` מתעד עכשיו את 4 מנגנוני האישור המקבילים (`ActionContract`,
+`event_bus.PendingActionsStore`, `app.py._pending_approvals`, TMA Approvals) עם קבצים/TTL
+מדויקים; (3) פיצ'ר חדש `bounded_local_expansions` — חלון-הקשר קבוע-גודל, מוגדר-פרופיל, לא
+query-driven — גורם ל-`turn_coordinator_routing` bundle לכלול תמיד את BUG-140 יחד עם
+BUG-130; (4) `## Bundle Provenance` חדש בכל bundle מדווח `generated_commit`/
+`generated_branch`/`on_main` בפועל (במקום שמישהו יצטרך לנחש), ו-`--assert-main` חדש נכשל-
+סגור אם commit לא מוכח כ-ancestor של `main` — מטפל ישירות בטעות ה-Critical של הפיילוט
+(bundle מענף לא-ממוזג תואר כ-`main`). תוך כדי נמצא ויושם תיקון גם לבאג נפרד ומהותי יותר:
+`_render()` הציג רק `notes[0]` של כל node, כל ההערות הנוספות (עד 9 ב-`layer.approvals`)
+מעולם לא הופיעו באף bundle שנבנה אי-פעם — יושם תיקון לכל ה-notes, עם regression test ייעודי.
+סעיף 6 בסקופ המקורי (BUG-140/BUG-150/fail-open ב-ActionGateway) **לא נגע ולא יושם** ב-PR
+הזה — עדיין חסום ע"י `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`, לפי אותה החלטה כמו בפיילוט
+עצמו. 17 בדיקות regression חדשות (כולל ארבע שנוספו בעקבות ביקורת CodeRabbit — notes[1:] ייעודי,
+path traversal, absolute path, malformed entry), `test_context_librarian.py` המלא
+(62 בדיקות) ירוק, כל 7 ה-profiles נבנים בהצלחה ודטרמיניסטית — הכל על ענף ה-PR, לא עדיין
+מאומת על `main`.
 עודכן: 28/07/2026 — **N17 עדכון: non-inferiority pilot advancement (סעיף 5) מוזג ל-`main`**
 (PR #483, ענף `claude/context-librarian-non-inferiority-pilot`, merge `51d370b`). אומת ב-grep
 ישירות על `origin/main`: `docs/context_librarian/PHASE1_NON_INFERIORITY_PILOT.md`'s
@@ -959,7 +982,10 @@ ActionContract), ואין Cross-Layer Impact Matrix שלם לאף אחת — **�
    VERIFICATION בוצע ישירות על `origin/main` (`AGENTS.md`) — כל הסמלים אומתו ב-grep.
 5. 🟡 non-inferiority pilot — **✅ PR #483 מוזג ל-`main` (`51d370b`), התקדמות ממשית, לא
    הושלם.** 5/5 משימות עם Gold Set + מחקר + סקירה עצמאית. Phase 1 acceptance עדיין לא
-   מבוסס — ראו עדכון 28/07 לעיל ואת המסמך המלא.
+   מבוסס — ראו עדכון 28/07 לעיל ואת המסמך המלא. **🟡 Pilot Findings Remediation PR נפתח
+   (ענף `claude/librarian-pilot-remediation`, טרם מוזג)** — מתקן 4 מ-5 ה-gaps שהפיילוט מצא
+   בספרן עצמו (ראו עדכון 28/07 לעיל); לא מוכיח מחדש את הפיילוט ולא מטפל בשלושת הבאגים
+   האמיתיים (BUG-150/BUG-130/BUG-140, fail-open) — עדיין חסומים ע"י CROSS_LAYER_AUTHORITY_CONTRACT_V1.md.
 6. 🔲 לתכנן Multi-session Coordination (סעיף 5) — תכנון בלבד לפני implementation.
 7. ✅ VCM plan מוזג ל-`main` (PR #482, merge `ffa678a`) — תכנון בלבד, אין implementation.
    Dogfooding (כתיבת nodes על הספרן עצמו) עדיין טרם תוכנן.

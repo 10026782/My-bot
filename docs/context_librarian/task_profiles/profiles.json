@@ -10,12 +10,13 @@
       "conditional_optional_evidence": [{"layer": "rp5", "query_terms": ["evidence", "claim", "completion", "success", "verified", "mismatch", "gateway owned", "single speaker", "reply owner"]}],
       "excluded_areas": ["core_reasoning"],
       "maximum_documents": 14,
-      "maximum_approximate_token_budget": 4000,
+      "maximum_approximate_token_budget": 5200,
       "mandatory_canonical_decisions": ["main_overrides_planning", "actioncontracts_authority", "no_new_source_of_truth", "shadow_not_active", "production_verification", "ux_no_internal_ids"],
       "allowed_edge_types": ["depends_on", "requires_approval_via", "rendered_by", "verified_by", "governed_by", "source_of_truth_for"],
       "maximum_traversal_depth": 1,
       "allowed_statuses": ["active", "shadow", "flag_off", "planning_only", "candidate"],
-      "selection_terms": ["approval", "approve", "reject", "callback", "pending", "message", "ux", "אישור", "דחייה", "הודעה"]
+      "selection_terms": ["approval", "approve", "reject", "callback", "pending", "message", "ux", "אישור", "דחייה", "הודעה"],
+      "bounded_local_expansions": []
     },
     {
       "id": "tool_execution",
@@ -31,7 +32,8 @@
       "allowed_edge_types": ["depends_on", "executes_via", "requires_approval_via", "verified_by", "governed_by"],
       "maximum_traversal_depth": 1,
       "allowed_statuses": ["active", "shadow", "flag_off", "planning_only", "candidate"],
-      "selection_terms": ["tool", "dispatch", "dispatcher", "registry", "provider", "result", "execution", "evidence", "כלי", "ביצוע"]
+      "selection_terms": ["tool", "dispatch", "dispatcher", "registry", "provider", "result", "execution", "evidence", "כלי", "ביצוע"],
+      "bounded_local_expansions": []
     },
     {
       "id": "turn_coordinator_routing",
@@ -46,12 +48,20 @@
       ],
       "excluded_areas": [],
       "maximum_documents": 16,
-      "maximum_approximate_token_budget": 4500,
+      "maximum_approximate_token_budget": 15500,
       "mandatory_canonical_decisions": ["main_overrides_planning", "actioncontracts_authority", "no_new_source_of_truth", "shadow_not_active", "production_verification", "cross_layer_authority"],
       "allowed_edge_types": ["depends_on", "proposes_to", "requires_approval_via", "must_not_own", "governed_by", "blocked_by"],
       "maximum_traversal_depth": 1,
       "allowed_statuses": ["active", "shadow", "flag_off", "planning_only", "candidate"],
-      "selection_terms": ["turn", "route", "routing", "handler", "reply owner", "pending reply", "coordinator", "ניתוב", "בעלות תשובה"]
+      "selection_terms": ["turn", "route", "routing", "handler", "reply owner", "pending reply", "coordinator", "ניתוב", "בעלות תשובה"],
+      "bounded_local_expansions": [
+        {
+          "path": "BUG_AUDIT_LOG.md",
+          "anchor": "BUG-130",
+          "window_lines": 160,
+          "role": "2026-07-28 N17 pilot Task 3 fix: BUG-140 (unrelated-lead overwrite risk, still pending) sits 142 lines below BUG-130 (create-vs-update misroute) in the same log section; the pilot's Librarian-track investigation grepped BUG-130 and never read this far. This window inlines both entries so the adjacent defect cannot be missed by stopping at the first match."
+        }
+      ]
     },
     {
       "id": "core_reasoning_change",
@@ -67,7 +77,8 @@
       "allowed_edge_types": ["governed_by", "must_not_own"],
       "maximum_traversal_depth": 1,
       "allowed_statuses": ["active", "shadow", "flag_off", "planning_only", "candidate"],
-      "selection_terms": ["reasoning", "lead state", "business outcome", "confidence", "next step", "bug-104", "u1", "מצב ליד", "היגיון"]
+      "selection_terms": ["reasoning", "lead state", "business outcome", "confidence", "next step", "bug-104", "u1", "מצב ליד", "היגיון"],
+      "bounded_local_expansions": []
     },
     {
       "id": "rp5_evidence_mismatch",
@@ -83,7 +94,8 @@
       "allowed_edge_types": ["depends_on", "proposes_to", "verified_by", "rendered_by", "governed_by"],
       "maximum_traversal_depth": 1,
       "allowed_statuses": ["active", "shadow", "flag_off", "planning_only", "candidate"],
-      "selection_terms": ["rp5", "evidence", "finalizer", "mismatch", "claim", "success", "failure", "unknown", "ראיה", "טענה"]
+      "selection_terms": ["rp5", "evidence", "finalizer", "mismatch", "claim", "success", "failure", "unknown", "ראיה", "טענה"],
+      "bounded_local_expansions": []
     },
     {
       "id": "ux_f52_message",
@@ -94,12 +106,13 @@
       "conditional_optional_evidence": [{"layer": "rp5", "query_terms": ["evidence", "claim", "completion", "success", "failure", "verified", "mismatch", "ראיה", "הושלם"]}],
       "excluded_areas": ["core_reasoning", "turn_coordinator", "tools"],
       "maximum_documents": 12,
-      "maximum_approximate_token_budget": 3500,
+      "maximum_approximate_token_budget": 4800,
       "mandatory_canonical_decisions": ["main_overrides_planning", "actioncontracts_authority", "no_new_source_of_truth", "shadow_not_active", "production_verification", "ux_no_internal_ids"],
       "allowed_edge_types": ["depends_on", "rendered_by", "governed_by"],
       "maximum_traversal_depth": 1,
       "allowed_statuses": ["active", "shadow", "flag_off", "planning_only", "candidate"],
-      "selection_terms": ["ux", "message", "formatter", "wording", "display payload", "telegram", "whatsapp", "הודעה", "ניסוח"]
+      "selection_terms": ["ux", "message", "formatter", "wording", "display payload", "telegram", "whatsapp", "הודעה", "ניסוח"],
+      "bounded_local_expansions": []
     },
     {
       "id": "cross_layer_architecture",
@@ -115,7 +128,8 @@
       "allowed_edge_types": ["depends_on", "calls", "proposes_to", "executes_via", "requires_approval_via", "source_of_truth_for", "must_not_own", "verified_by", "rendered_by", "supersedes", "conflicts_with", "governed_by", "blocked_by"],
       "maximum_traversal_depth": 2,
       "allowed_statuses": ["active", "shadow", "flag_off", "planning_only", "candidate"],
-      "selection_terms": ["architecture", "cross layer", "authority", "ownership", "source of truth", "ארכיטקטורה", "סמכות", "בעלות"]
+      "selection_terms": ["architecture", "cross layer", "authority", "ownership", "source of truth", "ארכיטקטורה", "סמכות", "בעלות"],
+      "bounded_local_expansions": []
     }
   ]
 }
