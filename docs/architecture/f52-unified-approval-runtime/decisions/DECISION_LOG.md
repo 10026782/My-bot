@@ -113,3 +113,71 @@ This log records planning decisions for the F52 program. It is not runtime imple
   D-010's single-API requirement for the approval-lifecycle subset).
 - Affected documents: `spec/UNIFIED_MESSAGE_UX_STANDARD.md`,
   `docs/context_librarian/layers/ux_f52.yaml`.
+
+## D-012 — `MessageContract` is the sole canonical presentation contract; D-011 closed by reconciliation
+
+- Date: 28/07/2026
+- Status: Closed for planning; implementation not authorized
+- Decision (owner-approved, resolving D-011):
+  1. **Canonical public UX contract.** `MessageContract`
+     (`spec/MESSAGE_CONTRACT_ENVELOPE_CONTRACT_V1.md`) is approved as the sole
+     canonical input to the final UX formatter
+     (`core/agent_message_formatter.py::format_agent_message()`). This does
+     not immediately replace `ApprovalLifecycleResult`, `GatewayReply`, or
+     `ActionFact` — all three remain valid internal fact/result contracts.
+     They must reach the formatter only through adapters that produce
+     `MessageContract`. The approved architecture is **reconciliation, not
+     immediate deletion or supersession**. D-011 is closed conceptually:
+     multiple internal fact/result contracts are allowed; exactly one public
+     presentation contract is allowed; the UX formatter consumes
+     `MessageContract` only.
+  2. **TurnCoordinator sequencing.** `MessageContract` v1 does not block on
+     the (unimplemented) `TurnCoordinator`. `turn_id` is nullable;
+     `reply_owner` remains required where currently known; a new
+     `turn_context_source` field (`turn_coordinator` | `legacy_ingress` |
+     `unavailable`) records provenance. No canonical `turn_id` is ever
+     synthesized from `chat_id`, session ID, `contract_id`, or channel
+     message ID — when no authoritative turn id exists, `turn_id=None`. A
+     future schema version may make `turn_id` mandatory once TurnCoordinator
+     is live.
+  3. **`MessageState` registry** keeps `approval_pending_batch`, `mixed`, and
+     `mixed_with_unknown` as full v1 states — never collapsed into `neutral`
+     or `outcome_unknown`.
+  4. **Adapter sequence** is three separate PRs, never combined: PR A
+     (envelope, registry, validation, schema versioning, observability,
+     wrapper around the existing `display_payload` formatter path, no wording
+     changes), PR B (`ApprovalLifecycleResult` → `MessageContract` adapter,
+     preserving single-speaker/callback-delivery behavior, no `GatewayReply`
+     migration yet), PR C (`ActionFact`/`GatewayReply` → `MessageContract`
+     adapter, deprecating direct formatter access from that surface). See
+     `rollout/MESSAGE_CONTRACT_ENVELOPE_MIGRATION_PLAN.md`.
+  5. **`evidence_ref` authority.** Must be supplied by the evidence/execution
+     authority; the builder may only copy it — never derive it from
+     `contract_id`, hash an internal identifier, store an Airtable record ID,
+     embed provider evidence, or invent a local token. `evidence_ref=None`
+     when no canonical evidence reference exists.
+  6. **Evidence/lifecycle precedence** is fixed by an explicit table (see
+     `spec/MESSAGE_CONTRACT_ENVELOPE_CONTRACT_V1.md` §6): pending lifecycle →
+     `approval_pending`; rejected lifecycle → `cancelled`/`already_cancelled`;
+     verified execution success → `success`; a completed lifecycle without
+     verified evidence never automatically becomes `success`;
+     `outcome_unknown`/`unverified_effect` are never upgraded to `success`;
+     stale or unrelated evidence never overrides the current `ActionContract`
+     lifecycle; the formatter never changes state.
+- Rationale: PR #471 (D-011) left the repo with two canonical approval-facing
+  renderers and no owner ruling on which one wins. Rather than deleting either
+  (high-risk, touches live approval UX) or leaving the drift open indefinitely,
+  the owner chose the reconciliation path: freeze one new public contract that
+  every existing internal result type adapts *into*, so the internal contracts
+  keep their current, already-tested responsibilities (single-speaker
+  enforcement, callback delivery, structural tool-result shape) while the
+  formatter boundary itself stops being ambiguous.
+- Affected documents: `spec/MESSAGE_CONTRACT_ENVELOPE_CONTRACT_V1.md` (new),
+  `rollout/MESSAGE_CONTRACT_ENVELOPE_MIGRATION_PLAN.md` (new),
+  `spec/UNIFIED_MESSAGE_UX_STANDARD.md` (forward-reference erratum), root
+  `CLAUDE.md` (planning-conventions pointer).
+- Remaining non-blocking open questions: exact interim `reply_owner`
+  representation when `turn_context_source="unavailable"`; per-adapter
+  `evidence_ref` source for PR B/PR C; `turn_context_source` type
+  (str literal vs. `Enum`) — none block PR A. See
+  `spec/MESSAGE_CONTRACT_ENVELOPE_CONTRACT_V1.md` §12 for the full list.
