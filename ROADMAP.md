@@ -1,5 +1,25 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
+עודכן: 28/07/2026 — **N17 עדכון: rerun ממוקד — האם התיקונים סגרו את 4 הכשלים שהפיילוט
+מצא?** (על `origin/main` ב-`ffde1d6`, אחרי PR #485+#486; לא ריצה חוזרת של הפיילוט — אין
+Gold Set חדש, אין blind review). לכל אחת מ-4 המשימות (לא `tool_execution` — PASS נקי):
+נבנה bundle טרי, ונבדק ב-grep ישיר על הפלט האם התוכן החסר שהממצא ציין קיים עכשיו בפועל.
+**תוצאה: 2/4 סגורים structurally** (לא תלוי-משקיע) — `turn_coordinator_routing`'s BUG-140
+(מאומת: טקסט האירוע המלא, כולל `recLwJhPNh4EDbw56`/"דנה כהן", משוקע ב-bundle תמיד) ו-
+`rp5_evidence_mismatch`'s Critical mislabeling (מאומת דו-כיווני: `--assert-main` על `main`
+אמיתי → הצליח, `on_main: yes`; על commit סינתטי על branch לא-ממוזג → נכשל-סגור, exit 2).
+**2/4 תוקנו חלקית בלבד** — ב-`approval_ux` וב-`core_reasoning_change`, רוב הפריטים
+שהחקירה החמיצה כבר היו קיימים ב-bundle *לפני* PR #485 (למשל `core/leads_reasoning_projection.py`,
+`tma_api.py`, `FEATURE_CORE_REASONING_LEADS_STATE` — כולם כבר שם); הפער האמיתי היחיד היה
+`core/adapters/decision_adapter.py` (עכשיו תוקן) ב-`core_reasoning_change`, ותיעוד
+parallel-sources-of-truth (עכשיו תוקן) ב-`approval_ux` — אבל הגורם-שורש הדומיננטי בשניהם
+היה משמעת-קריאה של החקירה, לא כיסוי-קטלוג, ותיקון-קטלוג לא יכול לאכוף קריאה. שני פערים
+קטנים יותר אושרו כפתוחים ומחוץ לסקופ PR #485 במכוון: `FEATURE_AUTO_CAPTURE` עדיין חסר
+מ-Feature Flags של `turn_coordinator`; שכבת ה-evidence-shadow השלישית ב-rp5 מעולם לא הייתה
+פער-קטלוג (הקובץ וה-flag כבר היו רשומים תחת `required_dependency_layers`). **קביעה: Phase 1
+non-inferiority עדיין לא מבוסס** — וה-rerun הזה לא נועד לבסס אותו; זה דורש ריצה מלאה מחדש
+של הפיילוט (Gold Sets עצמאיים טריים + blind review). פירוט מלא ב-
+`docs/context_librarian/PHASE1_NON_INFERIORITY_PILOT.md`, סעיף "2026-07-28 targeted rerun".
 עודכן: 28/07/2026 — **N17 עדכון: Context Librarian Pilot Findings Remediation — ✅ PR #485
 מוזג ל-`main`** (merge `4e12bf5`, ענף `claude/librarian-pilot-remediation`). אומת ישירות:
 נבדק checkout נקי של `origin/main` ב-`4e12bf5` — `python -m tools.context_librarian
