@@ -1,5 +1,8 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
+עודכן: 28/07/2026 — **N17 עדכון: Verification Coverage Model plan (חצי מסעיף 6, תכנון בלבד)
+נכתב על ענף `claude/context-librarian-vcm-plan` — טרם מוזג. ראה N17 למטה לפירוט. אין
+implementation, אין nodes חדשים.**
 עודכן: 27/07/2026 — **N17 נוסף: Context Librarian Follow-up Hardening & Verification Backlog (6 נקודות המשך + סדר עבודה מחייב), בעקבות PR #475 (Re-verification Alignment, `89e2b4e`, ראה למטה). אין ליישום עדיין.** עדכון PR #471 הקודם נשמר בהמשך.
 
 **Context Librarian Re-verification Alignment — PR #475 (`e4d29d0`+`34e31a4`, merge `89e2b4e`):** תיעוד/מטא-דאטה בלבד, ללא שינוי runtime. יישר את ארבעת ה-context-librarian nodes (`approvals`, `turn_coordinator`, `ux_f52`, `rp5`) מול PR #471 — נוסף `FEATURE_SINGLE_SPEAKER_APPROVAL_UX` לארבעתם, תועדו ה-callback עם `contract_id`, BUG-144 reject, ה-Gateway reply-ownership handoff המותנה, ו-RP5 שממשיך לרוץ במסלול ה-Gateway-owned. `task_profiles/profiles.yaml`'s `turn_coordinator_routing` כבר לא חוסם rp5 באופן גורף. תוקן assertion ישן ב-`test_phase_4b_1b_durable_lifecycle.py` (נוסח ✅ הישן). נוספו erratum notes ל-5 מסמכים קנוניים + רשומת `DECISION_LOG.md` D-011 (מתעדת שנוצר renderer מקביל, `ApprovalLifecycleResult`, במקום הרחבת `compose_status_reply()` לפי D-010 — ממצא פתוח, לא תוקן). `last_verified_commit` רוענן ל-`a885561d` רק אחרי ש-30/30 test_paths עברו, `validate`/`test_context_librarian.py` נקיים, וחמשת ה-pilot bundles נבנו פעמיים כל אחד (STOP→PROCEED, hash דטרמיניסטי). Post-merge verification בוצע ישירות על `main` (`89e2b4e`) — כל הסמלים אומתו ב-grep, כל חמשת ה-pilot bundles PROCEED. **אין אימות production/staging.** ראו N17 למטה להמשך המחייב.
@@ -867,6 +870,16 @@ validation; known limitations; current rollout status. המטרה: השאלה "�
 הוא index ו-governance layer; הקוד, הנתונים והראיות נשארים מקורות האמת; bundle הוא mandatory
 minimum context, לא תחליף למקורות; אין להפוך את הספרן למקור אמת מקביל.**
 
+**עדכון 28/07/2026 — Verification Coverage Model plan (חצי מסעיף 6, תכנון בלבד), ענף
+`claude/context-librarian-vcm-plan`, טרם מוזג:** נכתב
+`docs/context_librarian/VERIFICATION_COVERAGE_MODEL_PLAN.md` — מגדיר 6 ממדי coverage
+(schema conformance; freshness; production-evidence coverage; test-path coverage כולל
+pass/fail — הממד היחיד שדורש מנגנון חדש; authority-level justification; confidence
+justification), איך זה יחושב דטרמיניסטית מה-catalog הקיים בלי runtime/מקור אמת חדש, הקשר
+ל-Dogfooding (אותו מנגנון גנרי ישרת גם nodes על הספרן עצמו כשייכתבו), ו-non-goals מפורשים
+(אין implementation, אין nodes חדשים, אין כתיבה אוטומטית ל-metadata). Dogfooding עצמו (כתיבת
+ה-nodes) נשאר משימה נפרדת עתידית — מסמך זה מכסה את חצי ה-VCM של סעיף 6 בלבד.
+
 **סדר עבודה מחייב:**
 1. ✅ להשלים ולמזג Re-verification Alignment (PR #475, `89e2b4e`).
 2. ✅ להריץ מחדש את חמש משימות ה-pilot על `main` — כולן `PROCEED`.
@@ -875,8 +888,8 @@ minimum context, לא תחליף למקורות; אין להפוך את הספר
    query/profile hardening (סעיף 3); CI validation.
 5. 🔲 להשלים non-inferiority pilot (`docs/context_librarian/PHASE1_NON_INFERIORITY_PILOT.md`).
 6. 🔲 לתכנן Multi-session Coordination (סעיף 5) — תכנון בלבד לפני implementation.
-7. 🔲 לתכנן Context Librarian Dogfooding ו-Verification Coverage Model (סעיף 6) — תכנון בלבד
-   לפני implementation.
+7. 🔲 VCM plan פתוח (ענף `claude/context-librarian-vcm-plan`, טרם מוזג) — תכנון בלבד, אין
+   implementation. Dogfooding (כתיבת nodes על הספרן עצמו) עדיין טרם תוכנן.
 
 **קבצים:** `docs/context_librarian/` (הספרן עצמו), `tools/context_librarian/librarian.py`
 (token estimation, catalog loading), `docs/context_librarian/PHASE1_NON_INFERIORITY_PILOT.md`.
