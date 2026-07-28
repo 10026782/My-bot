@@ -943,7 +943,10 @@ ActionContract), ואין Cross-Layer Impact Matrix שלם לאף אחת — **�
 
 **סדר עבודה מחייב:**
 1. ✅ להשלים ולמזג Re-verification Alignment (PR #475, `89e2b4e`).
-2. ✅ להריץ מחדש את חמש משימות ה-pilot על `main` — כולן `PROCEED`.
+2. ✅ (היסטורי, `89e2b4e`) — נכון רק נכון לזמן המיזוג ההוא. עריכות ניסוח לא-קשורות ב-`app.py`
+   (PR #479/#480) הפכו שוב 4 מ-5 ה-nodes ל-stale לאחר מכן; `main` **לא** מציג כרגע חמש
+   PROCEED — ריענון ה-nodes קיים רק על ענף ה-pilot (`claude/context-librarian-non-inferiority-pilot`,
+   טרם מוזג, ראו סעיף 5 להלן). אין להסתמך על השורה הזו כראיה למצב `main` הנוכחי.
 3. 🔲 להשלים Production Verification Plan (סעיף 4 לעיל).
 4. ✅ Librarian Hardening מוזג ל-`main` (PR #481): token estimation (סעיף 1); catalog
    format (סעיף 2); query/profile hardening (סעיף 3); CI validation. POST-MERGE
