@@ -912,7 +912,6 @@ def _render(
         "",
         f"- generated_commit: `{git_provenance['commit']}`",
         f"- generated_branch: `{git_provenance['branch']}`",
-        f"- on_main: {on_main}",
         f"- on_main_history: {on_main}",
         f"- at_origin_main_tip: {at_origin_main_tip}",
     ]
@@ -922,6 +921,12 @@ def _render(
             "`main` (on_main != yes). Do not describe its findings as "
             "reflecting `main`'s current state; cite `generated_commit` and "
             "`generated_branch` instead."
+        )
+    elif at_origin_main_tip == "no":
+        lines.append(
+            "- WARNING: this commit is in `origin/main` history but is not the "
+            "local `origin/main` tip; do not describe this bundle as reflecting "
+            "the latest origin/main state."
         )
     lines.extend(
         [
