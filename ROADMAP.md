@@ -1,5 +1,18 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
+עודכן: 29/07/2026 — **N17 עדכון: Consumption Enforcement PR #488 מוזג ל-`main`** (commit
+`abf2804`, אומת ב-grep ישיר על `origin/main`) — סעיף 8 עבר מ-`PLANNING APPROVED BY OWNER`
+ל-✅ מוזג. **Phase 1 implementation נפתח כ-PR נפרד** (עדיין לא מוזג): `consumption_checklist()`
+וסעיף `## Consumption Checklist` חדש בכל bundle (5.1); ולידציה מלאה ל-Consumption Ledger
+ופונקציית `verify_consumption()` (5.2/5.3); תת-פקודת CLI חדשה `verify-consumption`; שדה
+אופציונלי, backward-compatible `required_for_conclusion` על `bounded_local_expansions` (5.5);
+21 בדיקות רגרסיה חדשות (96/96 עוברות, `validate`/`smoke_tests.py` נקיים). הסעיף החדש הגדיל
+את גודל ה-bundle במידה שחייבה עדכון `maximum_approximate_token_budget` בחמישה profiles
+(`approval_ux`, `tool_execution`, `turn_coordinator_routing`, `ux_f52_message`,
+`cross_layer_architecture`) — שינוי נתוני-profile בלבד, לא שינוי סכימה/התנהגות. **Phase 3
+(CI blocking gate + hard-must ב-`AGENT_CONSUMPTION_CONTRACT.md`) לא מיושם כאן** — לפי התכנית
+עצמה (סעיף 8, שלב Phase 3) הוא ממתין לשימוש ראשון אמיתי ב-Phase 1, ולא נפתח כאן. ראה N17
+למטה, סעיפים 8/10.
 עודכן: 28/07/2026 — **N17 עדכון: Consumption Enforcement — `STATUS: PLANNING APPROVED
 BY OWNER` (סעיף 8), אין implementation, אין שינוי runtime.** נכתב על `origin/main` לאחר
 PR #485+#487+#489. מטרה: איך למנוע מצב שבו מקור חובה כבר ב-bundle אך הסוכן מגיע למסקנה
@@ -1033,15 +1046,14 @@ ActionContract), ואין Cross-Layer Impact Matrix שלם לאף אחת — **�
 6. 🔲 לתכנן Multi-session Coordination (סעיף 5) — תכנון בלבד לפני implementation.
 7. ✅ VCM plan מוזג ל-`main` (PR #482, merge `ffa678a`) — תכנון בלבד, אין implementation.
    Dogfooding (כתיבת nodes על הספרן עצמו) עדיין טרם תוכנן.
-8. 🟢 Consumption Enforcement — **`STATUS: PLANNING APPROVED BY OWNER`, PR #488 פתוח,
-   לא מוזג עדיין.** מסמך התכנון (`docs/context_librarian/CONSUMPTION_ENFORCEMENT_PLAN.md`)
+8. ✅ Consumption Enforcement planning — **PR #488 מוזג ל-`main`** (commit `abf2804`, אומת
+   ב-grep ישיר על `origin/main`). מסמך התכנון (`docs/context_librarian/CONSUMPTION_ENFORCEMENT_PLAN.md`)
    עונה על הפער ש-PR #487 מצא (investigation discipline, לא קטלוג). 5 הערות סקירה
    (CodeRabbit) נפתרו + Cross-Layer Impact Matrix נוסף (ללא cross-layer risk) + כל החלטות
    ה-owner אושרו: מודל שכבתי (ledger + independent review חובה); waiver דורש independent
    approval ופג-תוקף בשינוי commit/profile/query; ledger disposable מקומית, מועלה כ-CI
-   artifact (לא committed — היפוך החלטה קודמת); Option C נדחה לפרופוזל נפרד. **אין
-   implementation ב-PR הזה. אין לפתוח PR implementation לפני שה-PR המתוקן הזה עצמו נסקר
-   ומוזג** — תנאי מפורש מהמשתמש.
+   artifact (לא committed — היפוך החלטה קודמת); Option C נדחה לפרופוזל נפרד. PR #488 עצמו
+   לא הכיל implementation.
 9. ✅ N17 Context Librarian remediation (audit עצמאי של Codex) מוזג ל-`main` (PR #489,
    ענף `codex/context-librarian-audit-remediation`, merge `20914f2`) — סוגר את שני ה-gaps
    הקטנים שנשארו פתוחים מהעדכון הקודם: `FEATURE_AUTO_CAPTURE` ממופה עכשיו ב-
@@ -1049,12 +1061,35 @@ ActionContract), ואין Cross-Layer Impact Matrix שלם לאף אחת — **�
    (POSIX/Windows); provenance מבחין `on_main_history`/`at_origin_main_tip`. Codex הסיר
    בעצמו את הצעת-התכנון המקבילה שלו (`SOURCE_CONSUMPTION_GATE_PLAN.md`) לפני המיזוג,
    ונדחה במפורש ל-PR #488 כמסמך הקנוני — אין כפילות תכנון.
+10. 🟡 Consumption Enforcement Phase 1 implementation — **PR נפתח, עדיין לא מוזג.** מיישם
+    בדיוק את סעיפים 5.1–5.3 + 5.5 (החלק האופציונלי `required_for_conclusion`) + בדיקות
+    הרגרסיה של סעיף 7 מהתכנית המאושרת (item 8), כפי שהתכנית עצמה קבעה כ-Phase 1 (סעיף 8
+    ברשימת ה-rollout): `consumption_checklist()` וסעיף `## Consumption Checklist` חדש
+    בכל bundle; ולידציה מלאה ל-Consumption Ledger (identity ברמת top-level וגם per-item,
+    waiver עם `approved_by`/`approved_at` שונה מ-`reviewed_by`, דחיית שדות מחושבים
+    מזויפים כמו `unreviewed_sources`); `verify_consumption()` שמחשב `unreviewed_sources`
+    בעצמו בלבד ומחזיר `CONSUMPTION: COMPLETE`/`CONCLUSION_BLOCKED`; תת-פקודת CLI חדשה
+    `python -m tools.context_librarian verify-consumption`; שדה אופציונלי,
+    backward-compatible `required_for_conclusion` על `bounded_local_expansions`
+    (ברירת מחדל `true`, לא משנה שום bundle קיים); 21 בדיקות רגרסיה חדשות (96/96 עוברות
+    בסה"כ, `validate`/`smoke_tests.py` נקיים). **תופעת-לוואי אמיתית שטופלה:** הסעיף החדש
+    מגדיל bundle במידה שחרגה מ-`maximum_approximate_token_budget` הקיים בחמישה profiles —
+    עודכנו (רק המספר, לא מבנה ה-JSON): `approval_ux` 5200→7000, `tool_execution`
+    4000→6000, `turn_coordinator_routing` 15500→18500, `ux_f52_message` 4800→5500,
+    `cross_layer_architecture` 7000→9000. **Phase 3 (CI blocking gate שמריץ
+    `verify-consumption` בפועל + hard-must ב-`AGENT_CONSUMPTION_CONTRACT.md`) לא מיושם
+    כאן** — לפי סעיף 8 של התכנית עצמה, Phase 3 ממתין לשימוש ראשון אמיתי ב-Phase 1
+    (task אמיתי), ולא נפתח בסבב הזה. Phase 2 (`FEATURE_AUTO_CAPTURE`) כבר נסגר עצמאית
+    ב-item 9 לעיל.
 
 **קבצים:** `docs/context_librarian/` (הספרן עצמו, כולל `TOKEN_ESTIMATION_BENCHMARK.md` החדש),
-`tools/context_librarian/librarian.py` (token estimation, catalog loading),
+`tools/context_librarian/librarian.py` (token estimation, catalog loading,
+`consumption_checklist()`, `verify_consumption()`),
+`tools/context_librarian/__main__.py` (`verify-consumption` CLI),
 `tools/context_librarian/benchmark_token_estimate.py` (חדש), `test_context_librarian.py`,
 `.github/workflows/ci.yml`, `docs/context_librarian/PHASE1_NON_INFERIORITY_PILOT.md`,
-`docs/context_librarian/CONSUMPTION_ENFORCEMENT_PLAN.md` (חדש, סעיף 8, תכנון בלבד).
+`docs/context_librarian/CONSUMPTION_ENFORCEMENT_PLAN.md` (סעיף 8, תכנון בלבד — item 10
+מיישם רק את מה שהתכנית הזו כבר אישרה).
 
 ### F17 — Decision Hub Stage 2: Smart Trust Layer (PR #157, מוזג ל-`main`, commit `9252b1e`/merge `78f9bae`)
 **מה:** שכבת ביטחון על גבי Stage 1 — מסתכלת על ה-Decision כולו (לא Event בודד): האם

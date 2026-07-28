@@ -73,7 +73,13 @@ PROFILE_FIELDS = frozenset(
     }
 )
 PROFILE_REQUIRED_FIELDS = PROFILE_FIELDS - {"extensions"}
-BOUNDED_LOCAL_EXPANSION_FIELDS = frozenset({"path", "anchor", "window_lines", "role"})
+BOUNDED_LOCAL_EXPANSION_REQUIRED_FIELDS = frozenset({"path", "anchor", "window_lines", "role"})
+# אופציונלי, additive, ברירת מחדל True (5.5 של CONSUMPTION_ENFORCEMENT_PLAN.md):
+# מסמן אם ההרחבה חובה לפני מסקנה סופית (נצרך ע"י consumption_checklist()).
+BOUNDED_LOCAL_EXPANSION_OPTIONAL_FIELDS = frozenset({"required_for_conclusion"})
+BOUNDED_LOCAL_EXPANSION_FIELDS = (
+    BOUNDED_LOCAL_EXPANSION_REQUIRED_FIELDS | BOUNDED_LOCAL_EXPANSION_OPTIONAL_FIELDS
+)
 # תקרה קשיחה, לא ברירת מחדל: הרחבה מוגבלת חייבת להישאר חלון-קטע קטן וקבוע-גודל
 # סביב anchor שמוגדר ב-profile. זו לא תכונת חיפוש והיא לעולם לא מונעת ע"י
 # free-text query, ולכן לא יכולה לגדול מניסוח ה-query (N17 pilot Task 3:
@@ -248,10 +254,21 @@ def _validate_profile(
     for expansion in profile["bounded_local_expansions"]:
         # isinstance נבדק ראשון: set() על ערך שאינו iterable (למשל JSON null)
         # מעלה TypeError גולמי במקום כשל-סגור מבוקר.
-        if not isinstance(expansion, dict) or set(expansion) != BOUNDED_LOCAL_EXPANSION_FIELDS:
+        if not isinstance(expansion, dict) or not (
+            BOUNDED_LOCAL_EXPANSION_REQUIRED_FIELDS
+            <= set(expansion)
+            <= BOUNDED_LOCAL_EXPANSION_FIELDS
+        ):
             raise ContextLibrarianError(
                 f"{label}: bounded_local_expansions entry must be an object with "
-                f"exactly {sorted(BOUNDED_LOCAL_EXPANSION_FIELDS)}"
+                f"exactly {sorted(BOUNDED_LOCAL_EXPANSION_REQUIRED_FIELDS)} and "
+                f"optionally {sorted(BOUNDED_LOCAL_EXPANSION_OPTIONAL_FIELDS)}"
+            )
+        if "required_for_conclusion" in expansion and not isinstance(
+            expansion["required_for_conclusion"], bool
+        ):
+            raise ContextLibrarianError(
+                f"{label}: bounded_local_expansions required_for_conclusion must be a bool"
             )
         if not isinstance(expansion["anchor"], str) or not expansion["anchor"]:
             raise ContextLibrarianError(
@@ -772,6 +789,289 @@ def _local_expansions(
     return results
 
 
+def consumption_checklist(
+    catalog: Catalog, profile: dict[str, Any], production_claim: bool = False
+) -> list[str]:
+    """Mandatory-tier item ids for this profile (CONSUMPTION_ENFORCEMENT_PLAN.md 5.1).
+
+    Deliberately narrower than everything `_select_nodes()` may pull into a
+    bundle: only primary/required-dependency layers, mandatory canonical
+    decisions, and expansions marked `required_for_conclusion` are mandatory.
+    `optional_evidence`/`conditional_optional_evidence` stay query-triggered
+    and advisory — they are never added here, so the checklist cannot grow
+    the bundle or force reading of non-material sources.
+    """
+    mandatory_layer_names = dict.fromkeys(
+        list(profile["primary_layers"]) + list(profile["required_dependency_layers"])
+    )
+    layer_nodes = [
+        catalog.nodes[catalog.layer_nodes[name]]
+        for name in mandatory_layer_names
+        if name in catalog.layer_nodes
+    ]
+    decision_nodes = [
+        catalog.nodes[f"decision.{decision}"]
+        for decision in profile["mandatory_canonical_decisions"]
+        if f"decision.{decision}" in catalog.nodes
+    ]
+
+    def _current_docs(node: dict[str, Any]) -> list[str]:
+        # Mirrors _unique_references()'s own historical/superseded exclusion —
+        # a superseded document is not mandatory reading, it is why the
+        # bundle excludes it everywhere else too.
+        return [
+            ref["path"]
+            for ref in node["canonical_docs"]
+            if ref.get("status") not in DEFAULT_EXCLUDED_STATUSES
+        ]
+
+    items: set[str] = set()
+    for node in layer_nodes:
+        items.update(f"code:{path}" for path in node["code_paths"])
+        items.update(f"test:{path}" for path in node["test_paths"])
+        items.update(f"doc:{path}" for path in _current_docs(node))
+        if production_claim:
+            items.update(f"evidence:{ref['path']}" for ref in node["production_evidence"])
+    for node in decision_nodes:
+        items.update(f"doc:{path}" for path in _current_docs(node))
+    items.update(
+        f"decision:{decision}" for decision in profile["mandatory_canonical_decisions"]
+    )
+    for expansion in profile["bounded_local_expansions"]:
+        if expansion.get("required_for_conclusion", True):
+            items.add(f"expansion:{expansion['path']}#{expansion['anchor']}")
+    return sorted(items)
+
+
+REVIEW_RECEIPT_REQUIRED_FIELDS = frozenset(
+    {
+        "item_id",
+        "path",
+        "commit",
+        "branch",
+        "profile",
+        "query",
+        "reviewed_by",
+        "reviewed_at",
+        "reason",
+        "evidence_reference",
+    }
+)
+WAIVED_SOURCE_REQUIRED_FIELDS = REVIEW_RECEIPT_REQUIRED_FIELDS | {
+    "approved_by",
+    "approved_at",
+}
+LEDGER_TOP_LEVEL_REQUIRED_FIELDS = frozenset(
+    {
+        "schema_version",
+        "task_type",
+        "profile",
+        "query",
+        "bundle_generated_commit",
+        "bundle_generated_branch",
+        "required_sources",
+        "review_receipts",
+        "waived_sources",
+    }
+)
+# case-insensitive, stripped — a "placeholder-looking" waiver reason (5.3) is
+# rejected the same as an empty one; this is a small, explicit denylist, not
+# an attempt at general prose-quality detection.
+_PLACEHOLDER_REASON_STRINGS = frozenset(
+    {"todo", "tbd", "n/a", "na", "placeholder", "...", "-", "reason", "waived", "skip"}
+)
+
+
+def _looks_like_placeholder_reason(reason: str) -> bool:
+    return reason.strip().casefold() in _PLACEHOLDER_REASON_STRINGS
+
+
+@dataclass(frozen=True)
+class ConsumptionVerificationResult:
+    status: str
+    exit_code: int
+    blocked_reasons: tuple[str, ...]
+    unreviewed_sources: tuple[str, ...]
+    warnings: tuple[str, ...]
+
+
+def _validate_ledger_entry(
+    entry: Any,
+    required_fields: frozenset[str],
+    ledger: dict[str, Any],
+    kind: str,
+    reasons: list[str],
+) -> tuple[str | None, bool]:
+    if not isinstance(entry, dict):
+        reasons.append(f"{kind} entry must be an object")
+        return None, False
+    item_id = entry.get("item_id")
+    missing = sorted(required_fields - set(entry))
+    extra = sorted(set(entry) - required_fields)
+    if missing:
+        reasons.append(
+            f"{kind} entry {item_id or '<missing item_id>'} missing fields: "
+            f"{', '.join(missing)}"
+        )
+    if extra:
+        reasons.append(
+            f"{kind} entry {item_id or '<missing item_id>'} has unknown fields: "
+            f"{', '.join(extra)}"
+        )
+    if missing or extra:
+        return item_id, False
+
+    valid = True
+    for field in ("reason", "evidence_reference"):
+        if not str(entry[field]).strip():
+            reasons.append(f"{kind} entry {item_id} has empty {field}")
+            valid = False
+    if (
+        kind == "waived_sources"
+        and str(entry["reason"]).strip()
+        and _looks_like_placeholder_reason(str(entry["reason"]))
+    ):
+        reasons.append(f"{kind} entry {item_id} has a placeholder-looking reason")
+        valid = False
+
+    entry_identity = (
+        entry["commit"],
+        entry["branch"],
+        entry["profile"],
+        _normalise_query(entry["query"]),
+    )
+    top_identity = (
+        ledger["bundle_generated_commit"],
+        ledger["bundle_generated_branch"],
+        ledger["profile"],
+        _normalise_query(ledger["query"]),
+    )
+    if entry_identity != top_identity:
+        reasons.append(
+            f"{kind} entry {item_id} identity (commit/branch/profile/query) does not "
+            "match the ledger's own top-level identity"
+        )
+        valid = False
+
+    if kind == "waived_sources" and entry["approved_by"] == entry["reviewed_by"]:
+        reasons.append(
+            f"waived_sources entry {item_id} is self-approved "
+            "(approved_by equals reviewed_by; independent approval is required)"
+        )
+        valid = False
+
+    return item_id, valid
+
+
+def verify_consumption(
+    catalog: Catalog,
+    *,
+    task_type: str,
+    query: str,
+    ledger: dict[str, Any],
+    production_claim: bool = False,
+) -> ConsumptionVerificationResult:
+    """Fail-closed check: every mandatory-tier item is reviewed or waived.
+
+    Proves accounting completeness only — that every `consumption_checklist()`
+    item has a `review_receipts`/`waived_sources` entry with a genuine,
+    live-matching identity — never comprehension or correctness (Section 4/
+    9 of CONSUMPTION_ENFORCEMENT_PLAN.md). `unreviewed_sources` and pass/fail
+    are always computed here, never accepted from the ledger itself.
+    """
+    if task_type not in catalog.profiles:
+        available = ", ".join(sorted(catalog.profiles))
+        raise ContextLibrarianError(
+            f"unknown task type {task_type!r}; choose one of: {available}"
+        )
+    profile = catalog.profiles[task_type]
+
+    if not isinstance(ledger, dict):
+        raise ContextLibrarianError("ledger must be a JSON object")
+    missing_top = sorted(LEDGER_TOP_LEVEL_REQUIRED_FIELDS - set(ledger))
+    forged = sorted(set(ledger) - LEDGER_TOP_LEVEL_REQUIRED_FIELDS)
+    if missing_top:
+        raise ContextLibrarianError(
+            f"ledger missing top-level fields: {', '.join(missing_top)}"
+        )
+    if forged:
+        raise ContextLibrarianError(
+            "ledger has forged/unknown top-level fields (unreviewed_sources and "
+            f"any pass/fail field must never be written by hand): {', '.join(forged)}"
+        )
+    for field in ("required_sources", "review_receipts", "waived_sources"):
+        if not isinstance(ledger[field], list):
+            raise ContextLibrarianError(f"ledger {field} must be a list")
+
+    reasons: list[str] = []
+    warnings: list[str] = []
+
+    live = _git_provenance(catalog.repo_root)
+    top_identity_ok = (
+        ledger["bundle_generated_commit"] == live["commit"]
+        and ledger["bundle_generated_branch"] == live["branch"]
+        and ledger["profile"] == task_type
+        and ledger["task_type"] == task_type
+        and _normalise_query(ledger["query"]) == _normalise_query(query)
+    )
+    if not top_identity_ok:
+        reasons.append(
+            "ledger top-level identity (commit/branch/profile/query) does not "
+            "match a bundle recomputable right now for this exact profile+query "
+            "— treat this the same as an expired waiver"
+        )
+
+    required_sources = consumption_checklist(catalog, profile, production_claim=production_claim)
+
+    accounted_ids: set[str] = set()
+    duplicate_groups: dict[tuple[str, str], list[str]] = {}
+    for entry in ledger["review_receipts"]:
+        item_id, valid = _validate_ledger_entry(
+            entry, REVIEW_RECEIPT_REQUIRED_FIELDS, ledger, "review_receipts", reasons
+        )
+        if valid and item_id:
+            accounted_ids.add(item_id)
+            duplicate_groups.setdefault(
+                (entry["reason"], entry["evidence_reference"]), []
+            ).append(item_id)
+    for entry in ledger["waived_sources"]:
+        item_id, valid = _validate_ledger_entry(
+            entry, WAIVED_SOURCE_REQUIRED_FIELDS, ledger, "waived_sources", reasons
+        )
+        if valid and item_id:
+            accounted_ids.add(item_id)
+            duplicate_groups.setdefault(
+                (entry["reason"], entry["evidence_reference"]), []
+            ).append(item_id)
+
+    unreviewed = sorted(set(required_sources) - accounted_ids)
+    if unreviewed:
+        reasons.append(f"unreviewed_sources: {unreviewed}")
+
+    for item_ids in duplicate_groups.values():
+        if len(item_ids) > 1:
+            warnings.append(
+                "duplicate reason/evidence_reference across items: "
+                f"{sorted(item_ids)} — verify these are genuinely distinct reviews"
+            )
+
+    if reasons:
+        return ConsumptionVerificationResult(
+            status="CONCLUSION_BLOCKED",
+            exit_code=2,
+            blocked_reasons=tuple(reasons),
+            unreviewed_sources=tuple(unreviewed),
+            warnings=tuple(warnings),
+        )
+    return ConsumptionVerificationResult(
+        status="CONSUMPTION: COMPLETE",
+        exit_code=0,
+        blocked_reasons=(),
+        unreviewed_sources=(),
+        warnings=tuple(warnings),
+    )
+
+
 def _approximate_char_estimate(text: str) -> int:
     """פרוקסי מבוסס-ספירת-תווים לשימוש בטוקנים — NOT a real tokenizer
     count. `ceil(len(text) / _CHARS_PER_APPROXIMATE_TOKEN)` היא היוריסטיקה
@@ -935,6 +1235,26 @@ def _render(
             "",
             "Use an explicit profile, read this bundle fully, inspect cited sources, and stop on stale nodes or incomplete authority coverage.",
             "Contract: `docs/context_librarian/AGENT_CONSUMPTION_CONTRACT.md`",
+            "",
+            "## Consumption Checklist",
+            "",
+            "Mandatory-tier sources (primary/required-dependency code and tests, "
+            "mandatory canonical documents and decisions, expansions marked "
+            "`required_for_conclusion`, and production evidence only when a "
+            "production claim is made) that must be reviewed or explicitly "
+            "waived — with independent-reviewer approval — before a final "
+            "conclusion. Verify with `verify-consumption`; see "
+            "`docs/context_librarian/AGENT_CONSUMPTION_CONTRACT.md`.",
+            "",
+        ]
+    )
+    checklist_items = consumption_checklist(catalog, profile, production_claim)
+    if checklist_items:
+        lines.extend(f"- `{item_id}`" for item_id in checklist_items)
+    else:
+        lines.append("- None.")
+    lines.extend(
+        [
             "",
             "## Agent Workflow Gate",
             "",

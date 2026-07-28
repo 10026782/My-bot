@@ -13,9 +13,11 @@ from tools.context_librarian.librarian import (
     ContextLibrarianError,
     assess_profile_suggestions,
     build_bundle,
+    consumption_checklist,
     evaluate_workflow_gate,
     load_catalog,
     suggest_profiles,
+    verify_consumption,
 )
 
 
@@ -42,6 +44,110 @@ def _read_json(path: Path) -> dict:
 def _write_json(path: Path, value: dict) -> None:
     path.write_text(
         json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+
+
+_FIXED_PROVENANCE = {
+    "commit": "deadbee",
+    "branch": "claude/test-branch",
+    "on_main": "yes",
+    "on_main_history": "yes",
+    "at_origin_main_tip": "yes",
+}
+
+
+def _receipt(
+    item_id: str,
+    *,
+    commit: str,
+    branch: str,
+    profile: str,
+    query: str,
+    reason: str | None = None,
+    evidence_reference: str | None = None,
+) -> dict:
+    return {
+        "item_id": item_id,
+        "path": None,
+        "commit": commit,
+        "branch": branch,
+        "profile": profile,
+        "query": query,
+        "reviewed_by": "claude-sonnet-5 / session-test",
+        "reviewed_at": "2026-07-28T20:00:00Z",
+        "reason": reason or f"reviewed {item_id} directly",
+        "evidence_reference": evidence_reference or f"inspected {item_id}",
+    }
+
+
+def _waiver(
+    item_id: str,
+    *,
+    commit: str,
+    branch: str,
+    profile: str,
+    query: str,
+    reviewed_by: str = "claude-sonnet-5 / session-test",
+    approved_by: str = "independent-reviewer-agent / session-test",
+    reason: str | None = None,
+    evidence_reference: str | None = None,
+) -> dict:
+    entry = _receipt(
+        item_id,
+        commit=commit,
+        branch=branch,
+        profile=profile,
+        query=query,
+        reason=reason,
+        evidence_reference=evidence_reference,
+    )
+    entry["reviewed_by"] = reviewed_by
+    entry["approved_by"] = approved_by
+    entry["approved_at"] = "2026-07-28T20:05:00Z"
+    return entry
+
+
+def _ledger(
+    *,
+    task_type: str,
+    profile: str,
+    query: str,
+    commit: str,
+    branch: str,
+    required_sources: list,
+    review_receipts: list | None = None,
+    waived_sources: list | None = None,
+) -> dict:
+    return {
+        "schema_version": "1.0",
+        "task_type": task_type,
+        "profile": profile,
+        "query": query,
+        "bundle_generated_commit": commit,
+        "bundle_generated_branch": branch,
+        "required_sources": list(required_sources),
+        "review_receipts": list(review_receipts or []),
+        "waived_sources": list(waived_sources or []),
+    }
+
+
+def _fully_reviewed_ledger(
+    catalog, task_type: str, query: str, *, commit: str = "deadbee", branch: str = "claude/test-branch"
+) -> dict:
+    profile = catalog.profiles[task_type]
+    items = consumption_checklist(catalog, profile)
+    receipts = [
+        _receipt(item_id, commit=commit, branch=branch, profile=task_type, query=query)
+        for item_id in items
+    ]
+    return _ledger(
+        task_type=task_type,
+        profile=task_type,
+        query=query,
+        commit=commit,
+        branch=branch,
+        required_sources=items,
+        review_receipts=receipts,
     )
 
 
@@ -166,7 +272,7 @@ def test_output_is_deterministic(catalog):
     kwargs = {
         "task_type": "approval_ux",
         "query": "repeated approval returns wrong message",
-        "max_tokens": 5000,
+        "max_tokens": 7000,
     }
     assert build_bundle(catalog, **kwargs) == build_bundle(catalog, **kwargs)
 
@@ -921,3 +1027,397 @@ def test_bounded_local_expansion_accepts_relative_path(tmp_path, monkeypatch):
     isolated_catalog = load_catalog(REPO_ROOT)
     bundle = build_bundle(isolated_catalog, task_type="approval_ux", query="approval")
     assert "relative path regression" in bundle
+
+
+# --- Consumption Enforcement (CONSUMPTION_ENFORCEMENT_PLAN.md, Phase 1) ---
+
+
+def test_consumption_checklist_lists_exactly_the_mandatory_tier(catalog):
+    profile = catalog.profiles["approval_ux"]
+    items = set(consumption_checklist(catalog, profile))
+
+    mandatory_layers = list(
+        dict.fromkeys(profile["primary_layers"] + profile["required_dependency_layers"])
+    )
+    def _current_docs(node):
+        return [
+            ref["path"]
+            for ref in node["canonical_docs"]
+            if ref.get("status") not in librarian.DEFAULT_EXCLUDED_STATUSES
+        ]
+
+    expected: set[str] = set()
+    for layer in mandatory_layers:
+        node = catalog.nodes[catalog.layer_nodes[layer]]
+        expected.update(f"code:{path}" for path in node["code_paths"])
+        expected.update(f"test:{path}" for path in node["test_paths"])
+        expected.update(f"doc:{path}" for path in _current_docs(node))
+    for decision in profile["mandatory_canonical_decisions"]:
+        node = catalog.nodes[f"decision.{decision}"]
+        expected.update(f"doc:{path}" for path in _current_docs(node))
+        expected.add(f"decision:{decision}")
+    for expansion in profile["bounded_local_expansions"]:
+        if expansion.get("required_for_conclusion", True):
+            expected.add(f"expansion:{expansion['path']}#{expansion['anchor']}")
+
+    assert items == expected
+    assert not any(item.startswith("evidence:") for item in items), (
+        "no production claim was made; evidence must not be mandatory"
+    )
+
+
+def test_consumption_checklist_item_ids_are_stable_and_deterministic(catalog):
+    profile = catalog.profiles["turn_coordinator_routing"]
+    first = consumption_checklist(catalog, profile, production_claim=True)
+    second = consumption_checklist(catalog, profile, production_claim=True)
+    assert first == second == sorted(first)
+
+
+@pytest.mark.parametrize(
+    "profile_id",
+    [
+        "approval_ux",
+        "tool_execution",
+        "turn_coordinator_routing",
+        "core_reasoning_change",
+        "rp5_evidence_mismatch",
+        "ux_f52_message",
+        "cross_layer_architecture",
+    ],
+)
+def test_optional_and_conditional_evidence_never_appear_in_consumption_checklist(
+    catalog, profile_id
+):
+    profile = catalog.profiles[profile_id]
+    mandatory_layers = set(profile["primary_layers"]) | set(profile["required_dependency_layers"])
+    optional_layers = (
+        set(profile["optional_evidence"])
+        | {condition["layer"] for condition in profile["conditional_optional_evidence"]}
+    ) - mandatory_layers
+
+    # A path shared between an optional layer and a mandatory one is fine —
+    # it is mandatory because of the mandatory layer, not despite it. What
+    # must never happen is a path *unique* to the optional/conditional layer
+    # leaking into the mandatory tier.
+    mandatory_code = {
+        path
+        for layer in mandatory_layers
+        for path in catalog.nodes[catalog.layer_nodes[layer]]["code_paths"]
+    }
+    mandatory_test = {
+        path
+        for layer in mandatory_layers
+        for path in catalog.nodes[catalog.layer_nodes[layer]]["test_paths"]
+    }
+    mandatory_evidence = {
+        ref["path"]
+        for layer in mandatory_layers
+        for ref in catalog.nodes[catalog.layer_nodes[layer]]["production_evidence"]
+    }
+
+    # production_claim=True is the maximum-exposure case (also pulls in
+    # evidence:*) — even then, a strictly-optional/conditional layer's own
+    # paths must never appear, since the checklist doesn't even accept a
+    # query argument to be driven by.
+    items = set(consumption_checklist(catalog, profile, production_claim=True))
+    for layer in optional_layers:
+        node = catalog.nodes[catalog.layer_nodes[layer]]
+        for path in node["code_paths"]:
+            if path not in mandatory_code:
+                assert f"code:{path}" not in items
+        for path in node["test_paths"]:
+            if path not in mandatory_test:
+                assert f"test:{path}" not in items
+        for ref in node["production_evidence"]:
+            if ref["path"] not in mandatory_evidence:
+                assert f"evidence:{ref['path']}" not in items
+
+
+def test_production_evidence_only_required_with_production_claim(catalog):
+    profile = catalog.profiles["approval_ux"]
+    without_claim = consumption_checklist(catalog, profile, production_claim=False)
+    with_claim = consumption_checklist(catalog, profile, production_claim=True)
+    assert not any(item.startswith("evidence:") for item in without_claim)
+    evidence_items = [item for item in with_claim if item.startswith("evidence:")]
+    assert evidence_items
+    assert (
+        "evidence:docs/architecture/action-gateway/STAGING_23JUL_TTL_DISAMBIGUATION_AUDIT.md"
+        in with_claim
+    )
+
+
+def test_bounded_local_expansion_required_for_conclusion_field_is_additive_and_backward_compatible(
+    tmp_path, monkeypatch
+):
+    root = _isolated_catalog(tmp_path, monkeypatch)
+    path = root / "task_profiles/profiles.json"
+    data = _read_json(path)
+    profile = next(p for p in data["profiles"] if p["id"] == "turn_coordinator_routing")
+
+    before = build_bundle(
+        load_catalog(REPO_ROOT), task_type="turn_coordinator_routing", query="routing"
+    )
+
+    for expansion in profile["bounded_local_expansions"]:
+        expansion["required_for_conclusion"] = True
+    _write_json(path, data)
+    after_catalog = load_catalog(REPO_ROOT)
+    after = build_bundle(after_catalog, task_type="turn_coordinator_routing", query="routing")
+    assert before == after
+
+    checklist_profile = after_catalog.profiles["turn_coordinator_routing"]
+    items = consumption_checklist(after_catalog, checklist_profile)
+    assert any(item.startswith("expansion:") for item in items)
+
+    for expansion in profile["bounded_local_expansions"]:
+        expansion["required_for_conclusion"] = False
+    _write_json(path, data)
+    opt_out_catalog = load_catalog(REPO_ROOT)
+    opt_out_items = consumption_checklist(
+        opt_out_catalog, opt_out_catalog.profiles["turn_coordinator_routing"]
+    )
+    assert not any(item.startswith("expansion:") for item in opt_out_items)
+    # required_for_conclusion only scopes the checklist — it must not remove
+    # the expansion from the rendered bundle itself.
+    opt_out_bundle = build_bundle(
+        opt_out_catalog, task_type="turn_coordinator_routing", query="routing"
+    )
+    assert "BUG-130" in opt_out_bundle
+
+
+def test_verify_consumption_succeeds_when_all_mandatory_items_accounted_for(catalog, monkeypatch):
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    ledger = _fully_reviewed_ledger(catalog, "approval_ux", "test query")
+    result = verify_consumption(
+        catalog, task_type="approval_ux", query="test query", ledger=ledger
+    )
+    assert result.status == "CONSUMPTION: COMPLETE"
+    assert result.exit_code == 0
+    assert not result.unreviewed_sources
+    assert not result.blocked_reasons
+
+
+def test_verify_consumption_fails_closed_on_missing_item(catalog, monkeypatch):
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    ledger = _fully_reviewed_ledger(catalog, "approval_ux", "test query")
+    dropped = ledger["review_receipts"].pop()
+    result = verify_consumption(
+        catalog, task_type="approval_ux", query="test query", ledger=ledger
+    )
+    assert result.status == "CONCLUSION_BLOCKED"
+    assert result.exit_code == 2
+    assert result.unreviewed_sources == (dropped["item_id"],)
+
+
+def test_verify_consumption_fails_closed_on_empty_waiver_reason(catalog, monkeypatch):
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    profile = catalog.profiles["approval_ux"]
+    items = consumption_checklist(catalog, profile)
+    receipts = [
+        _receipt(item_id, commit="deadbee", branch="claude/test-branch", profile="approval_ux", query="q")
+        for item_id in items[1:]
+    ]
+    waived = _waiver(
+        items[0], commit="deadbee", branch="claude/test-branch", profile="approval_ux", query="q",
+        reason="   ",
+    )
+    ledger = _ledger(
+        task_type="approval_ux", profile="approval_ux", query="q",
+        commit="deadbee", branch="claude/test-branch",
+        required_sources=items, review_receipts=receipts, waived_sources=[waived],
+    )
+    result = verify_consumption(catalog, task_type="approval_ux", query="q", ledger=ledger)
+    assert result.status == "CONCLUSION_BLOCKED"
+    assert items[0] in result.unreviewed_sources
+
+
+def test_verify_consumption_fails_closed_on_missing_evidence_reference(catalog, monkeypatch):
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    ledger = _fully_reviewed_ledger(catalog, "approval_ux", "q")
+    ledger["review_receipts"][0]["evidence_reference"] = "  "
+    result = verify_consumption(catalog, task_type="approval_ux", query="q", ledger=ledger)
+    assert result.status == "CONCLUSION_BLOCKED"
+    assert ledger["review_receipts"][0]["item_id"] in result.unreviewed_sources
+
+
+@pytest.mark.parametrize("field", ["commit", "branch", "profile", "query"])
+def test_verify_consumption_fails_closed_on_bundle_field_mismatch(catalog, monkeypatch, field):
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    ledger = _fully_reviewed_ledger(catalog, "approval_ux", "q")
+    mismatched_item = ledger["review_receipts"][0]["item_id"]
+    ledger["review_receipts"][0][field] = "something-else-entirely"
+    result = verify_consumption(catalog, task_type="approval_ux", query="q", ledger=ledger)
+    assert result.status == "CONCLUSION_BLOCKED"
+    assert mismatched_item in result.unreviewed_sources
+
+
+def test_verify_consumption_rejects_forged_unreviewed_sources_field(catalog, monkeypatch):
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    ledger = _fully_reviewed_ledger(catalog, "approval_ux", "q")
+    ledger["unreviewed_sources"] = []
+    with pytest.raises(ContextLibrarianError, match="forged"):
+        verify_consumption(catalog, task_type="approval_ux", query="q", ledger=ledger)
+
+
+def test_verify_consumption_fails_closed_on_missing_waiver_approval(catalog, monkeypatch):
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    profile = catalog.profiles["approval_ux"]
+    items = consumption_checklist(catalog, profile)
+    receipts = [
+        _receipt(item_id, commit="deadbee", branch="claude/test-branch", profile="approval_ux", query="q")
+        for item_id in items[1:]
+    ]
+    missing_approval = _receipt(
+        items[0], commit="deadbee", branch="claude/test-branch", profile="approval_ux", query="q"
+    )
+    ledger = _ledger(
+        task_type="approval_ux", profile="approval_ux", query="q",
+        commit="deadbee", branch="claude/test-branch",
+        required_sources=items, review_receipts=receipts, waived_sources=[missing_approval],
+    )
+    result = verify_consumption(catalog, task_type="approval_ux", query="q", ledger=ledger)
+    assert result.status == "CONCLUSION_BLOCKED"
+    assert items[0] in result.unreviewed_sources
+
+
+def test_verify_consumption_fails_closed_on_self_approved_waiver(catalog, monkeypatch):
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    profile = catalog.profiles["approval_ux"]
+    items = consumption_checklist(catalog, profile)
+    receipts = [
+        _receipt(item_id, commit="deadbee", branch="claude/test-branch", profile="approval_ux", query="q")
+        for item_id in items[1:]
+    ]
+    same_identity = "claude-sonnet-5 / session-test"
+    self_approved = _waiver(
+        items[0], commit="deadbee", branch="claude/test-branch", profile="approval_ux", query="q",
+        reviewed_by=same_identity, approved_by=same_identity,
+    )
+    ledger = _ledger(
+        task_type="approval_ux", profile="approval_ux", query="q",
+        commit="deadbee", branch="claude/test-branch",
+        required_sources=items, review_receipts=receipts, waived_sources=[self_approved],
+    )
+    result = verify_consumption(catalog, task_type="approval_ux", query="q", ledger=ledger)
+    assert result.status == "CONCLUSION_BLOCKED"
+    assert items[0] in result.unreviewed_sources
+
+
+def test_verify_consumption_treats_identity_change_as_waiver_expiry(catalog, monkeypatch):
+    profile = catalog.profiles["approval_ux"]
+    items = consumption_checklist(catalog, profile)
+    receipts = [
+        _receipt(item_id, commit="deadbee", branch="claude/test-branch", profile="approval_ux", query="q")
+        for item_id in items[1:]
+    ]
+    waived = _waiver(
+        items[0], commit="deadbee", branch="claude/test-branch", profile="approval_ux", query="q"
+    )
+    ledger = _ledger(
+        task_type="approval_ux", profile="approval_ux", query="q",
+        commit="deadbee", branch="claude/test-branch",
+        required_sources=items, review_receipts=receipts, waived_sources=[waived],
+    )
+
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    ok = verify_consumption(catalog, task_type="approval_ux", query="q", ledger=ledger)
+    assert ok.status == "CONSUMPTION: COMPLETE"
+
+    monkeypatch.setattr(
+        librarian, "_git_provenance", lambda _root: {**_FIXED_PROVENANCE, "commit": "newcommit"}
+    )
+    expired = verify_consumption(catalog, task_type="approval_ux", query="q", ledger=ledger)
+    assert expired.status == "CONCLUSION_BLOCKED"
+    assert expired.exit_code == 2
+    assert any("top-level identity" in reason for reason in expired.blocked_reasons)
+
+
+def test_verify_consumption_warns_on_duplicate_boilerplate_evidence_across_items(
+    catalog, monkeypatch
+):
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    profile = catalog.profiles["approval_ux"]
+    items = consumption_checklist(catalog, profile)
+    shared_reason = "reviewed as part of batch review"
+    shared_evidence = "grep confirmed presence across the batch"
+    receipts = [
+        _receipt(
+            item_id, commit="deadbee", branch="claude/test-branch", profile="approval_ux", query="q",
+            reason=shared_reason, evidence_reference=shared_evidence,
+        )
+        for item_id in items
+    ]
+    ledger = _ledger(
+        task_type="approval_ux", profile="approval_ux", query="q",
+        commit="deadbee", branch="claude/test-branch",
+        required_sources=items, review_receipts=receipts,
+    )
+    result = verify_consumption(catalog, task_type="approval_ux", query="q", ledger=ledger)
+    assert result.status == "CONSUMPTION: COMPLETE"
+    assert result.exit_code == 0
+    assert result.warnings
+    assert "duplicate" in result.warnings[0]
+
+
+def test_verify_consumption_validates_top_level_identity_independently_of_per_item(
+    catalog, monkeypatch
+):
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    ledger = _fully_reviewed_ledger(
+        catalog, "approval_ux", "q", commit="stale-commit-no-longer-current", branch="claude/test-branch"
+    )
+    result = verify_consumption(catalog, task_type="approval_ux", query="q", ledger=ledger)
+    assert result.status == "CONCLUSION_BLOCKED"
+    assert not result.unreviewed_sources
+    assert any("top-level identity" in reason for reason in result.blocked_reasons)
+
+
+def test_cli_verify_consumption_subcommand_exists_and_is_wired(tmp_path, monkeypatch, capsys):
+    from tools.context_librarian.__main__ import main
+
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    catalog = load_catalog(REPO_ROOT)
+    ledger = _fully_reviewed_ledger(catalog, "approval_ux", "q")
+    ledger_path = tmp_path / "ledger.json"
+    _write_json(ledger_path, ledger)
+    exit_code = main(
+        [
+            "verify-consumption",
+            "--task-type",
+            "approval_ux",
+            "--query",
+            "q",
+            "--ledger",
+            str(ledger_path),
+        ]
+    )
+    assert exit_code == 0
+    assert "CONSUMPTION: COMPLETE" in capsys.readouterr().out
+
+
+def test_cli_verify_consumption_fails_closed_and_lists_unreviewed_sources(
+    tmp_path, monkeypatch, capsys
+):
+    from tools.context_librarian.__main__ import main
+
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    catalog = load_catalog(REPO_ROOT)
+    ledger = _fully_reviewed_ledger(catalog, "approval_ux", "q")
+    ledger["review_receipts"].pop()
+    ledger_path = tmp_path / "ledger.json"
+    _write_json(ledger_path, ledger)
+    exit_code = main(
+        [
+            "verify-consumption",
+            "--task-type",
+            "approval_ux",
+            "--query",
+            "q",
+            "--ledger",
+            str(ledger_path),
+        ]
+    )
+    assert exit_code == 2
+    out = capsys.readouterr().out
+    assert "CONCLUSION_BLOCKED" in out
+    assert "unreviewed_sources" in out
