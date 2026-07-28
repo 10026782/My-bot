@@ -113,6 +113,52 @@ try:
 except Exception as e:
     chk(f"airtable_add: non-dict 'fields' does not crash (raised {e!r})", False)
 
+# ══════════════════════════════════════════════════════════════════
+# Follow-up UX patch: the initial approval prompt must never expose a raw
+# Airtable table name either (only tool_name/record_id/contract_id were
+# covered by BUG-123-FU) — task creation/update against the Tasks table
+# gets business wording, everything else falls back to a table-agnostic
+# generic phrase. Business fields (incl. the task title) must still show.
+# ══════════════════════════════════════════════════════════════════
+
+desc = app._describe_tool_call("airtable_add", {
+    "table": "Tasks", "fields": {"Task": "להתקשר ללקוח"},
+})
+chk("task creation prompt contains 'יצירת משימה'", "יצירת משימה" in desc)
+chk("task creation prompt contains the task title", "להתקשר ללקוח" in desc)
+chk("task creation prompt contains no raw table name",
+    "Tasks" not in desc and "משימות (Tasks)" not in desc)
+
+# Same table, canonical Hebrew form (as a direct-Python caller might pass it
+# already-resolved) — must be recognized as a task write too.
+desc = app._describe_tool_call("airtable_add", {
+    "table": "משימות (Tasks)", "fields": {"Task": "להתקשר ללקוח"},
+})
+chk("task creation prompt (canonical table name) contains 'יצירת משימה'",
+    "יצירת משימה" in desc)
+chk("task creation prompt (canonical table name) contains no raw table name",
+    "Tasks" not in desc and "משימות (Tasks)" not in desc)
+
+desc = app._describe_tool_call("airtable_update", {
+    "table": "Tasks", "record_id": "recTASKUPDATE01", "fields": {"Status": "בוצע"},
+})
+chk("task update prompt contains 'עדכון משימה'", "עדכון משימה" in desc)
+chk("task update prompt contains no raw table name",
+    "Tasks" not in desc and "משימות (Tasks)" not in desc)
+
+desc = app._describe_tool_call("airtable_add", {
+    "table": "ActionContracts", "fields": {"Name": "בדיקה"},
+})
+chk("non-task airtable_add falls back to generic 'הוספת רשומה'", "הוספת רשומה" in desc)
+chk("non-task airtable_add prompt contains no raw table name",
+    "ActionContracts" not in desc)
+
+desc = app._describe_tool_call("airtable_update", {
+    "table": "Leads", "record_id": "recLEADUPDATE01", "fields": {"Status": "hot"},
+})
+chk("non-task airtable_update falls back to generic 'עדכון רשומה'", "עדכון רשומה" in desc)
+chk("non-task airtable_update prompt contains no raw table name", "Leads" not in desc)
+
 # Test 5: regression — gmail_send_draft / calendar_create_event / sheets_append unchanged
 # BUG-123-FU: draft_id is a raw internal identifier — no longer shown in
 # user-facing approval text (was "📧 שלח מייל (draft: d123)" before the fix).

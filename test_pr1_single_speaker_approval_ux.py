@@ -7,6 +7,8 @@ from core.action_gateway import (
     ActionGateway,
     ExecutionLedger,
     build_approval_lifecycle_result,
+    _describe_contract_for_disambiguation,
+    _describe_contract_for_reconfirmation,
 )
 
 
@@ -183,3 +185,45 @@ def test_non_task_airtable_actions_never_expose_the_raw_table_name():
     for result in (pending, completed, rejected):
         assert "Leads" not in result.safe_user_message
         assert "ActionContracts" not in result.safe_user_message
+
+
+# ── Round 2: reconfirmation / disambiguation renderers hide table names ────
+
+def test_reconfirmation_description_hides_table_names():
+    title = "לסדר את המחסן"
+    task_desc = _describe_contract_for_reconfirmation(_task_contract(title=title))
+    assert task_desc == f"יצירת משימה: {title}"
+    assert "Tasks" not in task_desc and "משימות (Tasks)" not in task_desc
+
+    lead_desc = _describe_contract_for_reconfirmation(_contract())
+    assert lead_desc.startswith("יצירת ליד")
+    assert "Leads" not in lead_desc
+
+    generic_desc = _describe_contract_for_reconfirmation(
+        ActionContract(
+            contract_id="323e4567-e89b-12d3-a456-426614174099",
+            tenant_id="boss_hq",
+            canonical_user_id="boss_hq:owner",
+            tool_name="airtable_add",
+            normalized_payload={"table": "ActionContracts", "fields": {"Name": "בדיקה"}},
+            business_action_fingerprint="generic-fp",
+            origin_channel="telegram",
+            origin_chat_id="requester-chat",
+            requires_approval=True,
+            status="pending",
+            created_at=time.time(),
+        )
+    )
+    assert generic_desc.startswith("הוספת רשומה")
+    assert "ActionContracts" not in generic_desc
+
+
+def test_disambiguation_description_matches_reconfirmation_and_hides_table_names():
+    title = "לסדר את המחסן"
+    task_contract = _task_contract(title=title)
+    lead_contract = _contract()
+    for contract in (task_contract, lead_contract):
+        assert _describe_contract_for_disambiguation(contract) == \
+            _describe_contract_for_reconfirmation(contract)
+    disambig_desc = _describe_contract_for_disambiguation(task_contract)
+    assert "Tasks" not in disambig_desc and "משימות (Tasks)" not in disambig_desc

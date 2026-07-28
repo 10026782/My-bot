@@ -908,6 +908,16 @@ def _describe_tool_call(tool_name: str, inputs: dict) -> str:
     אם אין מספיק מידע עסקי לבנות תיאור אמיתי (טבלה/fields חסרים או
     מעוותים) — נכשל-סגור עם _APPROVAL_DESCRIPTION_FALLBACK, לא עם placeholder
     ("?") שהמשתמש לא יכול להבין ממנו כלום.
+
+    Follow-up UX patch: never shows the raw Airtable table name either
+    (only tool_name/record_id/contract_id were covered before) — a Tasks
+    write gets its own business wording ("יצירת משימה"/"עדכון משימה"),
+    everything else falls back to a generic, table-agnostic phrase
+    ("הוספת רשומה"/"עדכון רשומה"). The header names the ACTION, not the
+    business content itself — the field-by-field breakdown right below it
+    (unchanged) already shows every business field, including whichever one
+    would otherwise be duplicated as a header preview, so the header
+    intentionally does not repeat it a second time.
     """
     if tool_name == "gmail_send_draft":
         return "📧 שלח מייל"
@@ -925,12 +935,16 @@ def _describe_tool_call(tool_name: str, inputs: dict) -> str:
         fields_preview = "\n".join(
             f"  • {k}: {_format_field_value(k, v)}" for k, v in fields.items()
         )
-        if tool_name == "airtable_add":
-            return f"➕ הוסף ל-{table}:\n{fields_preview}"
+        from core.action_gateway import is_task_table
+        icon = "➕" if tool_name == "airtable_add" else "✏️"
+        if is_task_table(table):
+            header = "יצירת משימה" if tool_name == "airtable_add" else "עדכון משימה"
+        else:
+            header = "הוספת רשומה" if tool_name == "airtable_add" else "עדכון רשומה"
         # airtable_update: record_id is a raw Airtable identifier — never
         # shown in user-facing text (BUG-123-FU requirement 3). The fields
         # being changed are the meaningful business content here.
-        return f"✏️ עדכן ב-{table}:\n{fields_preview}"
+        return f"{icon} {header}:\n{fields_preview}"
     if tool_name == "sheets_append":
         sheet = inputs.get("sheet_name")
         if not sheet:

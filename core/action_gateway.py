@@ -820,15 +820,15 @@ class ExecutionLedger:
 # ══════════════════════════════════════════════════
 
 def _describe_contract_for_reconfirmation(contract: ActionContract) -> str:
-    """Unchanged by BUG-115 — this helper's fallback (raw "tool_name / table")
-    is relied on by other, pre-existing call sites outside the disambiguation
-    list (e.g. _compose_status_reply_legacy()'s "✅ בוצע: {label}" executed-
-    status text, asserted by test_stage_b_full_suite.py's DoD20 to contain
-    the tool name). Generalizing this shared function's fallback instead of
-    adding a separate one was tried first and reverted — it silently changed
-    that unrelated, already-tested behavior too. See
-    _describe_contract_for_disambiguation() below for the BUG-115-specific
-    version, used only by the multi-contract list."""
+    """Business-readable label for reconfirmation prompts, the multi-pending
+    disambiguation list (via _describe_contract_for_disambiguation() below),
+    and the ActionResolutionEvent context projection. Table names
+    (Tasks/משימות (Tasks)/Leads/anything else) are never included — Leads
+    and Tasks get their own dedicated business wording; every other
+    airtable_add/airtable_update falls back to a generic, table-agnostic
+    phrase. Only the true catch-all for non-airtable tool types (which have
+    no table to leak in the first place) still names the tool — unchanged,
+    since no table-name exposure is possible there."""
     payload = contract.normalized_payload or {}
     if contract.tool_name in ("airtable_add", "airtable_update") and payload.get("table") == _LEAD_CAPTURE_TABLE:
         fields = payload.get("fields") or {}
@@ -844,34 +844,26 @@ def _describe_contract_for_reconfirmation(contract: ActionContract) -> str:
         parts = [p for p in parts if p]
         verb = "יצירת ליד" if contract.tool_name == "airtable_add" else "עדכון ליד"
         return f"{verb}: {', '.join(parts)}" if parts else verb
+    if contract.tool_name in ("airtable_add", "airtable_update") and is_task_table(payload.get("table")):
+        preview = _first_field_preview(payload.get("fields") or {})
+        verb = "יצירת משימה" if contract.tool_name == "airtable_add" else "עדכון משימה"
+        return f"{verb}: {preview}" if preview else verb
+    if contract.tool_name in ("airtable_add", "airtable_update"):
+        preview = _first_field_preview(payload.get("fields") or {})
+        verb = "הוספת רשומה" if contract.tool_name == "airtable_add" else "עדכון רשומה"
+        return f"{verb}: {preview}" if preview else verb
     table = payload.get("table") or payload.get("spreadsheet_name") or ""
     return f"{contract.tool_name} / {table}" if table else contract.tool_name
 
 
 def _describe_contract_for_disambiguation(contract: ActionContract) -> str:
-    """BUG-115: human-readable label for ActionGateway's multi-contract
-    disambiguation list ONLY — deliberately a separate function from
-    _describe_contract_for_reconfirmation() above, not a generalization of
-    it, so this fix cannot change that other function's behavior at its
-    other call sites (tried, reverted — see its docstring). Reuses the same
-    Leads-specific branch (identical business description either way), but
-    generalizes the *fallback* to any table for airtable_add/airtable_update
-    — production evidence showed every disambiguation-list item was exactly
-    this shape (airtable_add/airtable_update against non-Leads tables like
-    Tasks), which the shared helper's raw "tool_name / table" fallback would
-    still leak the tool name for. Other tool types (gmail_send_draft/
-    calendar_create_event/etc.) fall back to the shared helper's own
-    behavior unchanged — production reports never exercise them here, and
-    app.py's _describe_tool_call() already owns richer per-tool copy for
-    the initial approval prompt itself."""
-    payload = contract.normalized_payload or {}
-    if contract.tool_name in ("airtable_add", "airtable_update") and payload.get("table") == _LEAD_CAPTURE_TABLE:
-        return _describe_contract_for_reconfirmation(contract)
-    table = payload.get("table") or payload.get("spreadsheet_name") or ""
-    if table and contract.tool_name in ("airtable_add", "airtable_update"):
-        verb = "הוספה" if contract.tool_name == "airtable_add" else "עדכון"
-        preview = _first_field_preview(payload.get("fields") or {})
-        return f"{verb} ב-{table}" + (f": {preview}" if preview else "")
+    """BUG-115 (historical): originally a separate function from
+    _describe_contract_for_reconfirmation() above, so a disambiguation-list
+    fix could land without touching that shared helper's own fallback
+    (relied on at other call sites at the time). The follow-up UX patch
+    fixed that shared fallback directly (no more table-name leakage for any
+    airtable_add/airtable_update), so there is no remaining behavioral
+    difference to keep separate — this now simply reuses it."""
     return _describe_contract_for_reconfirmation(contract)
 
 
@@ -915,6 +907,15 @@ def _task_creation_table_names() -> frozenset[str]:
     return frozenset(names)
 
 
+def is_task_table(table: str | None) -> bool:
+    """Public: True for either form a Tasks-table write may name ("Tasks"
+    alias or the canonical "משימות (Tasks)"). Shared by this module's own
+    lifecycle wording below and by app.py's initial-approval-prompt
+    rendering (_describe_tool_call), so both surfaces agree on what counts
+    as a task write without duplicating the alias/canonical logic."""
+    return str(table or "").strip() in _task_creation_table_names()
+
+
 def _is_task_creation_contract(contract: ActionContract | None) -> bool:
     """True only for a new-task creation (airtable_add against the Tasks
     table) — the one action with its own dedicated business wording
@@ -926,8 +927,7 @@ def _is_task_creation_contract(contract: ActionContract | None) -> bool:
     if tool_name != "airtable_add":
         return False
     payload = contract.normalized_payload or {}
-    table = str(payload.get("table") or "").strip()
-    return table in _task_creation_table_names()
+    return is_task_table(payload.get("table"))
 
 
 def _safe_task_title(contract: ActionContract | None) -> str:
@@ -2103,7 +2103,7 @@ class ActionGateway:
         # rejected (already decided above, unconditionally, before this fix).
         if rejected_siblings:
             result += (
-                f"\n\nℹ️ שים לב: {rejected_siblings} פעולות נוספות שהיו ברשימה נדחו אוטומטית "
+                f"\n\nℹ️ שים לב: {rejected_siblings} פעולות נוספות שהיו ברשימה בוטלו אוטומטית "
                 f"(בחירה לפי מספר מבטלת את שאר האפשרויות שהוצגו יחד)."
             )
         return result
@@ -2165,7 +2165,7 @@ class ActionGateway:
             # identical disclosure for the full rationale.
             if rejected_siblings:
                 result += (
-                    f"\n\nℹ️ שים לב: {rejected_siblings} פעולות נוספות שהיו ברשימה נדחו אוטומטית "
+                    f"\n\nℹ️ שים לב: {rejected_siblings} פעולות נוספות שהיו ברשימה בוטלו אוטומטית "
                     f"(בחירה לפי מספר מבטלת את שאר האפשרויות שהוצגו יחד)."
                 )
             return result
