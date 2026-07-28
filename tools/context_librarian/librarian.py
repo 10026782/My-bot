@@ -15,7 +15,7 @@ import math
 import re
 import subprocess
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Iterable
 
 
@@ -276,7 +276,13 @@ def _validate_profile(
             raise ContextLibrarianError(
                 f"{label}: bounded_local_expansions path must be a non-empty string"
             )
-        if Path(raw_path).is_absolute():
+        # Accept both platform spellings so catalog validation has the same
+        # result on Windows and POSIX hosts.
+        if (
+            Path(raw_path).is_absolute()
+            or PurePosixPath(raw_path).is_absolute()
+            or PureWindowsPath(raw_path).is_absolute()
+        ):
             raise ContextLibrarianError(
                 f"{label}: bounded_local_expansions path must be relative: {raw_path}"
             )
@@ -607,19 +613,41 @@ def _git_provenance(repo_root: Path) -> dict[str, str]:
 
     commit_code, commit = _run(["git", "rev-parse", "HEAD"])
     if commit_code != 0 or not commit:
-        return {"commit": "unknown", "branch": "unknown", "on_main": "unknown"}
+        return {
+            "commit": "unknown",
+            "branch": "unknown",
+            "on_main": "unknown",
+            "on_main_history": "unknown",
+            "at_origin_main_tip": "unknown",
+        }
     branch_code, branch = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
     branch = branch if branch_code == 0 and branch else "unknown"
 
-    on_main = "unknown"
+    origin_main_code, origin_main = _run(
+        ["git", "rev-parse", "--verify", "--quiet", "origin/main"]
+    )
+    at_origin_main_tip = (
+        "yes" if origin_main_code == 0 and commit == origin_main else "no"
+        if origin_main_code == 0
+        else "unknown"
+    )
+
+    on_main_history = "unknown"
     for main_ref in _MAIN_REF_CANDIDATES:
         ref_code, _ = _run(["git", "rev-parse", "--verify", "--quiet", main_ref])
         if ref_code != 0:
             continue
         ancestor_code, _ = _run(["git", "merge-base", "--is-ancestor", commit, main_ref])
-        on_main = "yes" if ancestor_code == 0 else "no"
+        on_main_history = "yes" if ancestor_code == 0 else "no"
         break
-    return {"commit": commit, "branch": branch, "on_main": on_main}
+    return {
+        "commit": commit,
+        "branch": branch,
+        # Backward-compatible alias retained for existing callers/bundles.
+        "on_main": on_main_history,
+        "on_main_history": on_main_history,
+        "at_origin_main_tip": at_origin_main_tip,
+    }
 
 
 def _matches_tracked_path(changed: str, tracked: str) -> bool:
@@ -869,7 +897,10 @@ def _render(
     )
     query_precision = matched_layers / max(1, len(layer_nodes))
 
-    on_main = git_provenance["on_main"]
+    on_main = git_provenance.get(
+        "on_main_history", git_provenance.get("on_main", "unknown")
+    )
+    at_origin_main_tip = git_provenance.get("at_origin_main_tip", "unknown")
     lines: list[str] = [
         f"# BOSS Context Bundle — {profile['id']}",
         "",
@@ -881,7 +912,8 @@ def _render(
         "",
         f"- generated_commit: `{git_provenance['commit']}`",
         f"- generated_branch: `{git_provenance['branch']}`",
-        f"- on_main: {on_main}",
+        f"- on_main_history: {on_main}",
+        f"- at_origin_main_tip: {at_origin_main_tip}",
     ]
     if on_main != "yes":
         lines.append(
@@ -889,6 +921,12 @@ def _render(
             "`main` (on_main != yes). Do not describe its findings as "
             "reflecting `main`'s current state; cite `generated_commit` and "
             "`generated_branch` instead."
+        )
+    elif at_origin_main_tip == "no":
+        lines.append(
+            "- WARNING: this commit is in `origin/main` history but is not the "
+            "local `origin/main` tip; do not describe this bundle as reflecting "
+            "the latest origin/main state."
         )
     lines.extend(
         [
@@ -962,9 +1000,15 @@ def _render(
     lines.extend(["", "## Feature Flags", ""])
     for node in layer_nodes:
         for flag in node["feature_flags"]:
+            code_reference = (
+                f"; code: `{flag['code_reference']}`"
+                if flag.get("code_reference")
+                else ""
+            )
             lines.append(
                 f"- `{flag['name']}` — default `{flag['default_state']}`; "
                 f"documented: {flag['documented_state']}; scope: {flag['evidence_scope']}"
+                f"{code_reference}"
             )
     if not any(node["feature_flags"] for node in layer_nodes):
         lines.append("- None selected.")
@@ -1082,6 +1126,8 @@ def build_bundle(
     production_claim: bool = False,
     verified_production_evidence: str | None = None,
     assert_main: bool = False,
+    assert_on_main_history: bool = False,
+    assert_at_origin_main_tip: bool = False,
 ) -> str:
     if task_type not in catalog.profiles:
         available = ", ".join(sorted(catalog.profiles))
@@ -1105,13 +1151,25 @@ def build_bundle(
         )
 
     git_provenance = _git_provenance(catalog.repo_root)
-    if assert_main and git_provenance["on_main"] != "yes":
+    history_asserted = assert_main or assert_on_main_history
+    on_main_history = git_provenance.get(
+        "on_main_history", git_provenance.get("on_main", "unknown")
+    )
+    at_origin_main_tip = git_provenance.get("at_origin_main_tip", "unknown")
+    if history_asserted and on_main_history != "yes":
         raise ContextLibrarianError(
-            "--assert-main was passed but generated_commit "
+            "--assert-main/--assert-on-main-history was passed but generated_commit "
             f"{git_provenance['commit']!r} on branch "
-            f"{git_provenance['branch']!r} is not a proven ancestor of main "
-            f"(on_main={git_provenance['on_main']}); refusing to generate a "
+            f"{git_provenance['branch']!r} is not a proven ancestor of origin/main "
+            f"(on_main_history={on_main_history}); refusing to generate a "
             "bundle that would claim to reflect main's current state"
+        )
+    if assert_at_origin_main_tip and at_origin_main_tip != "yes":
+        raise ContextLibrarianError(
+            "--assert-at-origin-main-tip was passed but generated_commit "
+            f"{git_provenance['commit']!r} does not equal origin/main "
+            f"(at_origin_main_tip={at_origin_main_tip}); refusing to generate "
+            "a bundle that would claim to reflect origin/main's tip"
         )
 
     nodes, roles, traversed = _select_nodes(catalog, profile, query)

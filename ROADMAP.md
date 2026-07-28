@@ -1,5 +1,15 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
+עודכן: 28/07/2026 — **N17 Context Librarian remediation follow-up (focused branch):**
+cross-platform bounded-local-expansion path validation now treats POSIX and
+Windows absolute paths consistently and keeps relative paths valid;
+`FEATURE_AUTO_CAPTURE` is mapped in `layer.turn_coordinator` with its code
+reference and evidence scope; provenance distinguishes `on_main_history` from
+`at_origin_main_tip` while retaining the internal `on_main` compatibility alias.
+The provenance checks use the local `origin/main` ref only (no automatic fetch);
+missing `origin/main` yields `unknown` and the corresponding assertion fails
+closed. Source Consumption Enforcement remains planned canonically in PR #488;
+no duplicate plan is added here.
 עודכן: 28/07/2026 — **N17 עדכון: rerun ממוקד — האם התיקונים סגרו את 4 הכשלים שהפיילוט
 מצא?** (על `origin/main` ב-`ffde1d6`, אחרי PR #485+#486; לא ריצה חוזרת של הפיילוט — אין
 Gold Set חדש, אין blind review). לכל אחת מ-4 המשימות (לא `tool_execution` — PASS נקי):

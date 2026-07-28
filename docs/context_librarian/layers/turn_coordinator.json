@@ -41,7 +41,8 @@
     ],
     "feature_flags": [
       {"name": "FEATURE_PA01_ENFORCEMENT_STATE", "default_state": "off", "documented_state": "separate off/shadow/enforce guard; not a TurnCoordinator activation flag", "evidence_scope": "code accessor"},
-      {"name": "FEATURE_SINGLE_SPEAKER_APPROVAL_UX", "default_state": "off", "documented_state": "PR #471; when on, run_agent() (app.py:3779-3835 as of ffa678a7, exact lines drift with unrelated edits) treats a Gateway-owned approval-queuing turn as an early-return boundary: it does not call the Agent's LLM again and returns only the Gateway's own ApprovalLifecycleResult text for that turn", "evidence_scope": "code (app.py's PR1 single-speaker boundary) plus CHANGELOG.md PR #471 entry"}
+      {"name": "FEATURE_SINGLE_SPEAKER_APPROVAL_UX", "default_state": "off", "documented_state": "PR #471; when on, run_agent() (app.py:3779-3835 as of ffa678a7, exact lines drift with unrelated edits) treats a Gateway-owned approval-queuing turn as an early-return boundary: it does not call the Agent's LLM again and returns only the Gateway's own ApprovalLifecycleResult text for that turn", "evidence_scope": "code (app.py's PR1 single-speaker boundary) plus CHANGELOG.md PR #471 entry"},
+      {"name": "FEATURE_AUTO_CAPTURE", "default_state": "off", "documented_state": "Tier-1/2 lead auto-write routing; when on, new leads may write through the Gateway without confirmation, while existing leads still require approval", "code_reference": "feature_flags.py:98; core/lead_candidate_handler.py:1118-1156", "evidence_scope": "code accessor plus lead routing implementation; repository state is not runtime activation evidence"}
     ],
     "valid_from": "2026-07-28",
     "last_verified_commit": "2f5c577",
