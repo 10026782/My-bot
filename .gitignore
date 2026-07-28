@@ -27,3 +27,7 @@ docs/context_librarian/generated/*.md
 # docs/architecture/f52-unified-approval-runtime/rollout/SINGLE_SPEAKER_APPROVAL_UX_PRODUCTION_VERIFICATION_PLAN.md
 # and BUG_AUDIT_LOG.md's BUG-148/BUG-150 entries.
 **/.evidence/
+
+# Isolated git worktrees created by Agent tool calls with isolation:"worktree"
+# (e.g. background subagent runs) — transient local checkouts, never repo content.
+.claude/worktrees/
