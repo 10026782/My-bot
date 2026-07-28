@@ -40,11 +40,25 @@ into Telegram or WhatsApp action-status messages.
 
 ## Public message API
 
-F52 will expose one public message-composition API. The existing
+**Superseded by D-012 (28/07/2026) — see the 28/07/2026 erratum above.** The
+paragraph below is retained for history only; do not follow it for new work.
+
+~~F52 will expose one public message-composition API. The existing
 `ActionGateway.compose_status_reply()` is the preferred extension point because
 `GatewayReply` already establishes a single-speaker boundary. PR 1 must first
 extract or adapt this function into a channel-neutral formatter; it must not
-introduce a competing formatter.
+introduce a competing formatter.~~
+
+**Current guidance (D-012):** the one public presentation contract is
+`MessageContract` (`spec/MESSAGE_CONTRACT_ENVELOPE_CONTRACT_V1.md`), consumed
+only by `format_agent_message()` (the "Semantic Formatter" stage). `Action
+Gateway.compose_status_reply()`/`GatewayReply`, `ActionFact`, and
+`ApprovalLifecycleResult` are internal fact/result contracts, not public
+extension points — they reach the formatter only through adapters that
+produce a `MessageContract` (planned as separate PR B / PR C in
+`rollout/MESSAGE_CONTRACT_ENVELOPE_MIGRATION_PLAN.md`). `compose_status_reply()`
+itself is not deleted or rewritten by this decision; it becomes
+adapter/internal-only once PR C lands, not before.
 
 Internal state-specific handlers or a formatter registry are allowed behind the
 single public API.

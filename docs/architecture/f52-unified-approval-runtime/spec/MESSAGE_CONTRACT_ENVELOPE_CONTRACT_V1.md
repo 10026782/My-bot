@@ -4,11 +4,9 @@
 a Planning Gate document touching tools/actions, approvals, and execution
 presentation (Layer 3/F52 and the RP5 guard). Per that document's §7 standing
 rule it opens with this reference and does not proceed past a completed
-Cross-Layer Impact Matrix. See the companion research turn for the full matrix;
-summary: Layer 1 (Core Reasoning/BUG-104) not touched; Layer 2 (TurnCoordinator)
-touched indirectly, forward-reference only (§2 below); Layer 3 (F52) touched
-directly, this **is** an F52 document; Layer 4 (ActionContracts) touched
-indirectly, read-only; RP5 guard applies, read-only (§6).
+Cross-Layer Impact Matrix — the full matrix (all 4 layers × 9 required fields,
+plus proof-of-non-impact and RP5-applicability) is recorded in-repo in §0.1
+immediately below, not only summarized.
 
 **Status:** `PLANNING COMPLETE — OWNER DECISIONS RECORDED. IMPLEMENTATION NOT
 AUTHORIZED.` Owner decisions recorded 28/07/2026 (see
@@ -29,6 +27,140 @@ truth, D-010/D-011), `PR1_MESSAGE_CONTRACT_FOUNDATION.md`
 (`ActionContract`, `ActionFact`, `GatewayReply`, `ApprovalLifecycleResult`),
 `core/turn_evidence.py` (RP4), `docs/architecture/turn-coordinator/
 TURN_COORDINATOR_BEHAVIOR_CONTRACT_V1.md` (frozen, unimplemented).
+
+---
+
+## 0.1 Cross-Layer Impact Matrix (mandatory, `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` §2)
+
+Recorded in-repo per that document's §5 "Proof of Non-Impact" requirement — a
+summary or a pointer to an external conversation is not sufficient; grep
+evidence, unchanged-tests evidence, and no-new-coupling evidence are stated
+explicitly below for every layer marked "not touched."
+
+### Layer 1 — Core Reasoning / BUG-104
+- **touched:** not touched
+- **input impact:** none
+- **output impact:** none
+- **authority impact:** none — `MessageContract` never computes business
+  phase/confidence/next-step; those enter only via a pre-computed
+  `semantic_payload` input, per the field-ownership matrix (§5 below:
+  "Layer 1, only where required").
+- **shared identifiers:** none — no identifier from this contract
+  (`MessageContract`, `DisplayPayload`, `MessageState`,
+  `build_message_contract`) appears in `core/leads_reasoning_projection.py`,
+  `core/adapters/leads_adapter.py`, or any `docs/architecture/bug-104/` doc.
+- **invariants:** unaffected — Layer 1 stays read-only, flag-gated,
+  execution-authority-free, exactly as before.
+- **failure semantics:** n/a — no coupling exists to fail.
+- **observability:** no new Layer 1 logging.
+- **cross-layer tests:** none apply; no Layer 1 test file imports anything
+  from this spec's scope.
+- **proof of non-impact:**
+  1. *grep evidence:* `git grep -n "MessageContract\|DisplayPayload\|build_message_contract" -- 'core/leads_reasoning_projection.py' 'core/adapters/leads_adapter.py'` → no matches (spec-only at this stage; no code exists to grep yet, so this is re-verified against the Layer 1 file set directly).
+  2. *unchanged-tests evidence:* no code changed in this PR (documentation only), so `test_bug104_*` suites are untouched by construction.
+  3. *no-new-coupling evidence:* no import statement was added anywhere — this PR contains zero `.py` changes.
+
+### Layer 2 — TurnCoordinator
+- **touched:** indirectly (forward-reference only, not a live coupling)
+- **input impact:** the builder's `turn_decision` parameter is typed against
+  `TurnCoordinator`'s frozen (unapproved, unimplemented) `TurnDecision` —
+  specifically `.turn_id`/`.reply_owner`. Since `TurnCoordinator` has no
+  implementation (`grep -rl "class TurnCoordinator"` → zero files), this
+  spec's schema makes `turn_id` **nullable** and adds `turn_context_source`
+  (§3) precisely so the contract does not assume a producer that doesn't
+  exist yet (decision D-012 #2).
+- **output impact:** none — this spec produces no `TurnDecision`/
+  `TurnActionReference` fields.
+- **authority impact:** none — `MessageContract.reply_owner` is a verbatim
+  copy of whatever reply-owner value the (current de-facto or future formal)
+  Layer 2 owner already decided; it is never recomputed here.
+- **shared identifiers:** `turn_id`, `reply_owner` — referenced, not
+  redefined (satisfies the identifier-squatting prohibition, §4 #9 of the
+  authority contract).
+- **invariants:** the Reply-Owner Invariant (`TURN_COORDINATOR_BEHAVIOR_CONTRACT_V1.md`
+  §4a — singular per `turn_id`, decided before the handler runs) is preserved
+  by copy-only semantics.
+- **failure semantics:** when no real `TurnDecision` exists (today, always),
+  `turn_id=None` and `turn_context_source` records `legacy_ingress` or
+  `unavailable` — an explicit degraded state, never a fabricated value (§3).
+- **observability:** `turn_context_source` is itself a new observability
+  field recording this exact gap (§10).
+- **cross-layer tests:** none exist yet; deferred to when a real
+  `TurnDecision` producer exists (`spec` §12 OQ list).
+
+### Layer 3 — F52 / Phase 4C Action & Tool Contract
+- **touched:** directly
+- **input impact:** consumes `action_contract` (read-only field access only)
+  and the C53a `{ok, tool, external_id, evidence, user_message}` result
+  contract.
+- **output impact:** `MessageContract` is designed to become the sole input
+  to `format_agent_message()` (`core/agent_message_formatter.py`), extending
+  PR1 rather than replacing it — this is the direct D-010/D-011
+  reconciliation target (see D-012, `decisions/DECISION_LOG.md`).
+  `tool_registry.py`, `tools/dispatcher.py`, `action_validator.py` are
+  untouched.
+- **authority impact:** none — this contract never decides approval policy,
+  tool permission, or dispatch routing; it is a read-only downstream
+  projection (field-ownership matrix, §5).
+- **shared identifiers:** `reason_code`, `occurred_at`, `execution_verified`,
+  `display_payload` — all already live on `core/agent_message_formatter.py`'s
+  existing contract; this spec aligns with, not redefines, their meaning
+  (§2 schema note).
+- **invariants:** `UNIFIED_MESSAGE_UX_STANDARD.md`'s locked principles all
+  still hold, in particular principle 2 (success only with
+  `execution_verified=true`) and principle 6 (missing/unsafe data → neutral
+  fallback).
+- **failure semantics:** unknown/malformed state still fails closed to a
+  neutral message (`core/agent_message_formatter.py:508-512`) — §8/§11
+  preserve this guarantee unchanged.
+- **observability:** extends, not duplicates, the existing
+  `format_agent_message_with_meta()` record (§10).
+- **cross-layer tests:** `test_agent_message_formatter.py` (28 checks) and
+  `test_agent_message_formatter_display_payload.py` must stay green
+  unmodified — this PR contains zero changes to
+  `core/agent_message_formatter.py`.
+- **proof of non-impact:** n/a — this layer is marked "touched directly," so
+  proof-of-non-impact does not apply here; the constraint instead is proof of
+  *bounded* impact, satisfied by the unchanged-tests requirement above.
+
+### Layer 4 — Durable Atomic Approval (ActionContract)
+- **touched:** indirectly
+- **input impact:** `action_contract` parameter reads `ActionContract.status`
+  read-only.
+- **output impact:** none — no write path to `ActionContract`,
+  `ActionContractRepository`, or `execute_with_atomic_claim()` exists in this
+  contract.
+- **authority impact:** none — canonical approval-lifecycle status remains
+  exclusively owned by Layer 4 (§5 field-ownership matrix states this
+  explicitly).
+- **shared identifiers:** none of this schema's field names collide with
+  `ActionContract`'s fields; `contract_id`/Airtable record IDs are explicitly
+  forbidden from ever reaching `DisplayPayload` (§2).
+- **invariants:** "no two components may independently decide success"
+  (authority contract §4 #1) is the organizing constraint of the whole
+  builder design (§9).
+- **failure semantics:** unchanged — Layer 4's atomic-claim/fail-closed
+  behavior is untouched.
+- **observability:** no new Layer 4 logging.
+- **cross-layer tests:** Layer 4 regression suites
+  (`test_approval_concurrency.py`, `test_cxx_action_integrity.py`) are
+  unaffected — zero Layer 4 code changes in this PR.
+- **proof of non-impact:**
+  1. *grep evidence:* zero `.py` files changed in this documentation-only PR — `git diff --stat` against `core/action_gateway.py`, `core/action_contract_repository.py`, `core/action_gateway_atomic_executor.py` shows no changes.
+  2. *unchanged-tests evidence:* `test_approval_concurrency.py`/`test_cxx_action_integrity.py` untouched by construction (no code changed).
+  3. *no-new-coupling evidence:* no new import added anywhere in this PR.
+
+### Cross-Cutting Guard — RP5 Evidence Finalization (§1.5 of the authority contract)
+- **applies:** yes
+- **how:** `execution_verified` and the `outcome_unknown`/`unverified_effect`
+  mappings (§6) are populated **exclusively** from
+  `core/turn_evidence.py::TurnEvidenceSummary.classification()` and/or
+  `core/anti_hallucination.py::verify_execution()`. No independent grounding
+  check is introduced — this satisfies the standing warning in the authority
+  contract §1.5 against a second `validate_agent_output()`-style mechanism.
+  RP4 remains shadow-only (`FEATURE_EVIDENCE_FINALIZER` off); RP5 enforcement
+  remains blocked per `RP5_PREFLIGHT_BLOCKER.md`. This spec changes neither
+  flag.
 
 ---
 
