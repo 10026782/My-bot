@@ -1,15 +1,17 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 28/07/2026 — **N17 עדכון: Consumption Enforcement — תכנון בלבד (סעיף 8), אין
-implementation, אין שינוי runtime.** נכתב על `origin/main` לאחר PR #485+#487. מטרה: איך
-למנוע מצב שבו מקור חובה כבר ב-bundle אך הסוכן מגיע למסקנה בלי לפתוח אותו — בדיוק הפער
-ש-PR #487 מצא ("investigation discipline... a catalog fix cannot structurally guarantee").
-ראה `docs/context_librarian/CONSUMPTION_ENFORCEMENT_PLAN.md` לפירוט מלא (9 סעיפים: הבעיה,
-root cause, design options, החלטה מומלצת, schema/CLI מוצע, failure modes, regression tests,
-rollout plan, מה מחייב owner; כולל Cross-Layer Impact Matrix ו-`STATUS: PLANNING BLOCKED`
-עד להכרעת owner). **אין תיקון ל-BUG-130/BUG-140/BUG-150/fail-open; אין ריצה חוזרת של
-הפיילוט. אין לפתוח PR implementation לפני קבלת ובדיקת audit בלתי-תלוי של Codex** — תנאי
-מפורש מהמשתמש.
+עודכן: 28/07/2026 — **N17 עדכון: Consumption Enforcement — `STATUS: PLANNING APPROVED
+BY OWNER` (סעיף 8), אין implementation, אין שינוי runtime.** נכתב על `origin/main` לאחר
+PR #485+#487+#489. מטרה: איך למנוע מצב שבו מקור חובה כבר ב-bundle אך הסוכן מגיע למסקנה
+בלי לפתוח אותו — בדיוק הפער ש-PR #487 מצא. ראה
+`docs/context_librarian/CONSUMPTION_ENFORCEMENT_PLAN.md` לפירוט מלא — כולל Cross-Layer
+Impact Matrix (ללא cross-layer risk) והחלטות owner מלאות: מודל שכבתי (self-attested ledger
+לכל משימה + independent review חובה על production claim/Cross-Layer/waiver כלשהו); כל
+waiver דורש independent reviewer approval ופג-תוקף בשינוי commit/profile/query; ה-ledger
+disposable מקומית ומועלה כ-CI artifact (לא committed); Option C (harness-level tracking)
+נדחה לפרופוזל נפרד. **אין תיקון ל-BUG-130/BUG-140/BUG-150/fail-open; אין ריצה חוזרת של
+הפיילוט. אין לפתוח PR implementation לפני שה-PR המתוקן הזה עצמו נסקר ומוזג** — תנאי מפורש
+מהמשתמש.
 עודכן: 28/07/2026 — **N17 Context Librarian remediation — ✅ מוזג ל-`main`** (PR #489,
 ענף `codex/context-librarian-audit-remediation`, מיזוג `20914f2`): cross-platform
 bounded-local-expansion path validation מטפל עכשיו עקבית בנתיבי POSIX ו-Windows מוחלטים
@@ -1031,14 +1033,15 @@ ActionContract), ואין Cross-Layer Impact Matrix שלם לאף אחת — **�
 6. 🔲 לתכנן Multi-session Coordination (סעיף 5) — תכנון בלבד לפני implementation.
 7. ✅ VCM plan מוזג ל-`main` (PR #482, merge `ffa678a`) — תכנון בלבד, אין implementation.
    Dogfooding (כתיבת nodes על הספרן עצמו) עדיין טרם תוכנן.
-8. 🟡 Consumption Enforcement — **תכנון בלבד, PR #488 פתוח, לא מוזג.** ✅ Verification
-   rerun PR #487 מוזג ל-`main` (`a205dea`) — אישר: 2/4 gaps נסגרו מבנית (BUG-140 inline,
-   `--assert-main`), 2/4 רק חלקית (רוב מה שנמצא היה כבר ב-bundle לפני PR #485 — הבעיה
-   האמיתית היא investigation discipline, לא קטלוג). מסמך התכנון
-   (`docs/context_librarian/CONSUMPTION_ENFORCEMENT_PLAN.md`) עונה בדיוק על הפער הזה —
-   כולל Cross-Layer Impact Matrix ו-`STATUS: PLANNING BLOCKED` עד להכרעת owner (5 הערות
-   סקירה נפתרו). **אין implementation ב-PR הזה. אין לפתוח PR implementation לפני קבלת
-   ובדיקת audit בלתי-תלוי של Codex** — תנאי מפורש מהמשתמש.
+8. 🟢 Consumption Enforcement — **`STATUS: PLANNING APPROVED BY OWNER`, PR #488 פתוח,
+   לא מוזג עדיין.** מסמך התכנון (`docs/context_librarian/CONSUMPTION_ENFORCEMENT_PLAN.md`)
+   עונה על הפער ש-PR #487 מצא (investigation discipline, לא קטלוג). 5 הערות סקירה
+   (CodeRabbit) נפתרו + Cross-Layer Impact Matrix נוסף (ללא cross-layer risk) + כל החלטות
+   ה-owner אושרו: מודל שכבתי (ledger + independent review חובה); waiver דורש independent
+   approval ופג-תוקף בשינוי commit/profile/query; ledger disposable מקומית, מועלה כ-CI
+   artifact (לא committed — היפוך החלטה קודמת); Option C נדחה לפרופוזל נפרד. **אין
+   implementation ב-PR הזה. אין לפתוח PR implementation לפני שה-PR המתוקן הזה עצמו נסקר
+   ומוזג** — תנאי מפורש מהמשתמש.
 9. ✅ N17 Context Librarian remediation (audit עצמאי של Codex) מוזג ל-`main` (PR #489,
    ענף `codex/context-librarian-audit-remediation`, merge `20914f2`) — סוגר את שני ה-gaps
    הקטנים שנשארו פתוחים מהעדכון הקודם: `FEATURE_AUTO_CAPTURE` ממופה עכשיו ב-

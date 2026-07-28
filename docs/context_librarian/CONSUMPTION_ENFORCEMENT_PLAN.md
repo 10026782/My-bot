@@ -1,22 +1,20 @@
 # Context Librarian — Consumption Enforcement: Plan (N17 item 8)
 
 **Mandatory gate for this document:** `docs/architecture/CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`
-— this plan's recommended trigger rule (Section 4) references production
+— this plan's owner-approved trigger rule (Section 4) references production
 claims and the Durable Atomic Approval layer's own gate, so it is a Planning
 Gate document under that contract's §0. See "Cross-Layer Impact Matrix"
 below for the required 4-layer analysis.
 
-**STATUS: PLANNING BLOCKED.** Not because the Cross-Layer Impact Matrix found
-unresolved cross-layer risk — it did not; all four layers are either
-untouched or touched only by reference/illustrative catalog metadata, with
-explicit proof below. It is blocked because Section 9's owner-decisions
-(design approval, escalation-trigger tuning, `FEATURE_AUTO_CAPTURE`
-sequencing, and others) remain open, and because — per explicit instruction
-for this planning cycle — no implementation PR may open until the owner
-resolves those decisions **and** confirms the parallel, independent Codex
-audit has been received and checked. Completing the matrix is a necessary
-condition for this document to ever leave `PLANNING BLOCKED`; it is not by
-itself a sufficient one.
+**STATUS: PLANNING APPROVED BY OWNER — implementation still blocked until
+this corrected PR is reviewed and merged.** The Cross-Layer Impact Matrix
+found no unresolved cross-layer risk — all four layers are either untouched
+or touched only by reference/illustrative catalog metadata, with explicit
+proof below. Section 9's owner-decisions are now resolved (see below for
+each); the parallel, independent Codex audit has been received, reviewed,
+and merged as PR #489. The remaining gate is procedural, not substantive:
+per explicit instruction for this planning cycle, no implementation PR may
+open until this corrected planning PR itself has been reviewed and merged.
 
 **Nothing in this document is implemented.** No code changed, no CLI command
 added, no catalog node or schema field added, no runtime change. Written
@@ -164,27 +162,32 @@ Already shown insufficient: 2 of the 4 gaps the pilot found were pure
 investigation-discipline failures that a catalog fix could not close
 (Section 1).
 
-## 4. Recommended decision
+## 4. Decision — approved by owner
 
-**Layer Option A (always, cheap, structural) with Option B (risk-gated,
-expensive, the only thing that catches dishonesty) — not Option A alone, and
-not an attempt to solve everything with automation.** Option C is real but
-is recommended against **for this phase**; it changes a different system
-(the harness) with a different review surface and should be its own,
-separately-scoped future proposal (Section 9), not bundled into this one.
+**Layer Option A (self-attested Consumption Ledger, for every governed
+task) with Option B (mandatory independent review, risk-triggered) — not
+Option A alone, and not an attempt to solve everything with automation.**
+Option C is deferred to a separate, future, separately-scoped proposal
+(Section 9) — approved as deferred, not merely "recommended against."
 
-Proposed trigger rule for when Option B (independent review) is mandatory
-rather than optional — reusing gates that already exist elsewhere in this
-catalog rather than inventing a new one:
+Approved trigger rule for when Option B (independent review) is mandatory:
 
-- the task uses `--production-claim`, or
+- the task makes a production claim, or
 - the task's selected profile includes a layer or
   `mandatory_canonical_decisions` entry that
   `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` already gates, or
-- **any mandatory item in the ledger is `waived` rather than covered by a
-  review receipt** — a waiver is precisely the situation self-attestation
-  alone cannot make trustworthy, so a waiver on a consequential task should
-  itself escalate to review, not be accepted at face value.
+- **any mandatory source is waived** — a waiver is precisely the situation
+  self-attestation alone cannot make trustworthy.
+
+**Waivers, approved rule:** every waiver requires both a specific,
+checkable reason (Section 6) **and** independent reviewer approval — a
+self-attested waiver alone is never sufficient, on any task, regardless of
+risk tier; the independent-review trigger above exists specifically so a
+waiver is never accepted at face value. **A waiver expires** the moment the
+bundle's `commit`, `profile`, or `query` changes — it is scoped to the
+exact task identity it was reviewed against (5.2/5.3's identity fields),
+not to the task in the abstract; a changed identity requires a fresh
+waiver and fresh independent approval, not a carried-over one.
 
 For everything else — routine, low-risk, investigation-only tasks with no
 completion claim and no waivers — Option A's self-attested, internally-
@@ -192,6 +195,14 @@ verified ledger is proportionate and sufficient. This mirrors the existing
 risk-proportionate philosophy already in the catalog: production claims need
 qualifying evidence; cross-layer changes need a Cross-Layer Impact Matrix
 (this document's own, below); routine reads need neither.
+
+**Consumption verification proves completeness of accounting, not truth or
+comprehension** — `verify-consumption` reporting `CONSUMPTION: COMPLETE`
+means every mandatory source has a receipt or an approved, unexpired
+waiver; it never means the agent understood what it read correctly. This
+is why risk-triggered independent review remains required regardless of
+how clean a ledger looks — it is the only check in this design that
+verifies substance, not just accounting.
 
 This rule is itself the reason this document is a Planning Gate document
 under `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` — it references, and depends
@@ -231,8 +242,8 @@ bounded by the same `maximum_documents` budget already enforced, and adds
 only a compact list of ids for sources already named elsewhere in the
 bundle.
 
-**5.2 New artifact — Consumption Ledger (JSON), committed to the PR, not
-the catalog.**
+**5.2 New artifact — Consumption Ledger (JSON), disposable and local, not
+part of the catalog.**
 
 Converges with the independent Codex audit's own
 `SOURCE_CONSUMPTION_GATE_PLAN.md` (proposed on `codex/context-librarian-audit-remediation`
@@ -293,7 +304,9 @@ Illustrative shape:
       "reviewed_by": "claude-sonnet-5 / session <id>",
       "reviewed_at": "2026-07-28T15:00:00Z",
       "reason": "no ActionContract/ActionGateway import or shared identifier touched by this task; confirmed by grep of the changed files",
-      "evidence_reference": "grep output: zero matches for ActionContract|ActionGateway in the changed files"
+      "evidence_reference": "grep output: zero matches for ActionContract|ActionGateway in the changed files",
+      "approved_by": "independent-reviewer-agent / session <id>",
+      "approved_at": "2026-07-28T15:04:00Z"
     }
   ]
 }
@@ -307,7 +320,11 @@ canonical-decision entry has no literal file path to key on. Each
 `path` (the literal file path when the item is a real path; `null` for
 `decision:*` entries) — together with the full field set: `commit`,
 `branch`, `profile`, `query`, `reviewed_by`, `reviewed_at`, `reason`,
-`evidence_reference`.
+`evidence_reference`. **Every `waived_sources` entry additionally requires
+`approved_by`/`approved_at`** — a distinct independent reviewer's identity
+and timestamp, never the same identity as `reviewed_by` — per Section 4's
+approved rule that self-attestation alone is never sufficient for a
+waiver.
 
 `unreviewed_sources` and the overall pass/fail status are **never written
 by the agent** — they are computed exclusively by `verify-consumption`
@@ -316,27 +333,45 @@ specifically so an agent cannot self-report an empty `unreviewed_sources`
 list. A ledger that includes either field by hand is itself a
 `verify-consumption` failure (a forged computed field).
 
-**Ledger location — resolved, not left open.** The ledger is a small JSON
-file **committed to the PR branch** under
-`docs/context_librarian/consumption/<task_type>-<short_commit>.json`,
-reviewed as part of the PR diff, and readable by CI directly from the
-checked-out branch — the same way `test_context_librarian.py` itself is.
-It is explicitly **not** treated like a generated bundle
-(`docs/context_librarian/generated/*.md`, git-ignored, freely regenerable,
-disposable), because a CI check that needs to inspect it (5.7) cannot read
-a file that was never committed or transmitted into the workflow run —
-there is no other mechanism in this repository's CI for an agent to hand a
-pre-existing local file to a GitHub Actions job. Being committed does not
-make it a new source of truth: it is never read back by `build_bundle()`,
-`_select_nodes()`, or the freshness/staleness computation; it carries no
-authority over `main`, no runtime behavior, and no claim beyond "this
-specific review action happened, attested by this agent, on this commit" —
-the same category of append-only, non-authoritative evidence as
-`BUG_AUDIT_LOG.md`/`CHANGE_CONTROL_LOG.md`, just JSON-structured so
-`verify-consumption` can check it mechanically instead of a human re-reading
-prose. This resolves the earlier draft's contradiction between
-"disposable/git-ignored" and "CI needs to see it" by dropping the
-git-ignored framing, not the CI requirement.
+**Waiver expiry** is not a separate stored field — it falls directly out
+of the identity check `verify-consumption` already performs (5.3): a
+waiver's `commit`/`branch`/`profile`/`query` must match a bundle actually
+recomputable right now for that exact profile+query. The moment any of
+those four change, the existing waiver no longer matches and
+`verify-consumption` reports `CONCLUSION_BLOCKED` for that item — the same
+mechanism that catches a stale receipt also expires a stale waiver; no new
+mechanism is needed.
+
+**Ledger location — approved by owner, resolved.** The ledger is a small
+JSON file, **disposable and local** — never committed to the repository,
+treated the same way as a generated bundle
+(`docs/context_librarian/generated/*.md`, already git-ignored) — and is
+**uploaded as a CI artifact** (via `actions/upload-artifact`, scoped to the
+workflow run that produced it) rather than committed. The PR body records
+only the verification result (`CONSUMPTION: COMPLETE` or
+`CONCLUSION_BLOCKED` plus the blocked item ids) and a reference to that
+artifact (the workflow run URL and artifact name) — never the ledger's
+full content. This reverses an earlier draft of this section, which had
+resolved the same contradiction by committing the ledger instead; the
+owner's approved resolution keeps the ledger disposable and moves the
+CI-discoverability burden onto artifact upload instead. **One mechanical
+detail is left to the Phase 1 implementation PR, not decided here:**
+exactly how the ledger's content reaches the CI run that uploads it as an
+artifact, since a GitHub Actions job only sees the checked-out git tree by
+default, not an agent's local disk. Two workable approaches, either
+acceptable:
+(a) the agent includes the ledger in a commit that opens or updates the
+PR (so the normal `pull_request`-triggered CI run can read it from the
+checkout and archive it as an artifact), then removes it in a later,
+pre-merge commit so it never persists in the merged history; or
+(b) the agent triggers a dedicated `workflow_dispatch` run, passing the
+ledger's content as a workflow input, and that run's own
+`verify-consumption` step uploads the artifact. Either way, the ledger
+itself is never read back by `build_bundle()`, `_select_nodes()`, or the
+freshness/staleness computation, carries no authority over `main`, and
+makes no claim beyond "this specific review action happened, attested by
+this agent, on this commit" — consistent with
+`decision.no_new_source_of_truth`.
 
 **5.3 New CLI subcommand:**
 `python -m tools.context_librarian verify-consumption --task-type <id> --query <q> --ledger <path>`
@@ -349,24 +384,31 @@ git-ignored framing, not the CI requirement.
 - Reports `CONCLUSION_BLOCKED` (exit 2) and lists `unreviewed_sources` by
   name when that set is non-empty, or when: a `review_receipts`/
   `waived_sources` entry is missing `commit`/`branch`/`profile`/`query`/
-  `reviewed_by`/`reviewed_at`/`reason`/`evidence_reference`; any of the four
-  identity fields (`commit`/`branch`/`profile`/`query`) does not match a
-  bundle actually recomputable right now for that exact profile+query (same
-  spirit as `--assert-main` — a ledger cannot be checked in against a
-  bundle it wasn't actually produced from); a waiver's `reason` is empty or
-  placeholder-looking; or the ledger sets `unreviewed_sources` or a
-  pass/fail field directly (a forged computed field, rejected outright).
+  `reviewed_by`/`reviewed_at`/`reason`/`evidence_reference`; a
+  `waived_sources` entry is additionally missing `approved_by`/
+  `approved_at`, or `approved_by` equals `reviewed_by` (self-approval is
+  not independent approval); any of the four identity fields
+  (`commit`/`branch`/`profile`/`query`) does not match a bundle actually
+  recomputable right now for that exact profile+query — this is also how a
+  waiver expires (Section 4/5.2): a changed identity field means the
+  approved waiver no longer applies, same as a stale receipt; a waiver's
+  `reason` is empty or placeholder-looking; or the ledger sets
+  `unreviewed_sources` or a pass/fail field directly (a forged computed
+  field, rejected outright).
 - Reports `CONSUMPTION: COMPLETE` (exit 0) only when `unreviewed_sources`
   is empty and every receipt/waiver's identity fields match the
   live-recomputed bundle.
 
 **5.4 `AGENT_CONSUMPTION_CONTRACT.md` changes:** a new "Consumption Ledger"
 section between the existing "Context expansion record" and "After coding"
-sections, stating: the ledger is mandatory before a final conclusion; the
-fail-closed rule ("no final conclusion is permitted while
-`verify-consumption` reports `CONCLUSION_BLOCKED` for the active bundle");
-the waiver bar (a specific, checkable reason — not a generic phrase); and
-the review-escalation rule from Section 4.
+sections, stating: the ledger is mandatory before a final conclusion, for
+every governed task; the fail-closed rule ("no final conclusion is
+permitted while `verify-consumption` reports `CONCLUSION_BLOCKED` for the
+active bundle"); the waiver bar (a specific, checkable reason **and**
+independent reviewer approval — never self-attested alone — expiring the
+moment commit/profile/query changes); the mandatory-review trigger rule
+from Section 4; and the explicit caveat that a clean ledger proves
+accounting completeness, never comprehension or correctness.
 
 **5.5 Schema changes: none required as new *node* fields.** The checklist
 is fully derivable from fields the schema already requires
@@ -416,19 +458,28 @@ was first drafted, not assumed from any prior document. PR #488 itself
 still applies none of this — the fix landed via PR #489, a separate,
 already-merged PR, not this planning document.
 
-**5.7 CI:** since the ledger is committed to the PR (5.2), CI can run
-`verify-consumption` directly against any
-`docs/context_librarian/consumption/*.json` file changed or added by the
-PR, for the profile/query/commit it declares — no artifact-upload
-mechanism needed, since the file is already part of the checked-out branch.
-Phase 1 (Section 8) only adds the CLI command; CI does not call it yet.
-Phase 3 (Section 8) wires an actual CI step that runs `verify-consumption`
-against every ledger file the PR touches and **fails the step** (not merely
-warns) if any reports `CONCLUSION_BLOCKED` — a real, blocking gate once
-wired, not an "informational check that a ledger exists."
+**5.7 CI:** per 5.2's approved ledger-location decision, CI runs
+`verify-consumption` as part of the same job that receives the ledger
+(via a transient PR commit or a `workflow_dispatch` input — 5.2's two
+candidate mechanisms), then uploads the ledger as a build artifact via
+`actions/upload-artifact`, scoped to that workflow run. The PR body is
+updated with only the verification result and a link to that artifact —
+never the ledger's full content. Phase 1 (Section 8) only adds the CLI
+command; CI does not call it yet. Phase 3 (Section 8) wires an actual CI
+step that runs `verify-consumption`, uploads the artifact, and **fails the
+step** (not merely warns) if the result is `CONCLUSION_BLOCKED` — a real,
+blocking gate once wired, not an "informational check that a ledger
+exists."
 
 ## 6. Failure modes
 
+- **Self-approved waiver** — an agent labeling itself as both `reviewed_by`
+  and `approved_by` to satisfy the independent-approval requirement (5.2)
+  without genuine independence. `verify-consumption` structurally rejects
+  identical `reviewed_by`/`approved_by` strings (5.3), but cannot detect
+  the same underlying human or agent operating under two different labels
+  — that remains a process/organizational control, not a machine-checkable
+  one; flagged explicitly rather than oversold as solved.
 - **Rubber-stamp ledger** — every item covered by a receipt with an
   identical, non-specific `reason`/`evidence_reference` ("reviewed the
   file"). Mitigation: `verify-consumption` can reject empty, too-short, or
@@ -443,10 +494,10 @@ wired, not an "informational check that a ledger exists."
   excluding `optional_evidence`/`conditional_optional_evidence` from the
   checklist (5.1); those remain query-triggered and advisory, unchanged.
 - **Waiver abuse** (waiving everything to avoid reading anything) —
-  mitigated by requiring a specific, checkable `reason` per waiver, and by
-  the review-escalation rule making any waiver on a consequential task
-  trigger mandatory independent review rather than accepting it at face
-  value.
+  mitigated by requiring a specific, checkable `reason` **and** independent
+  `approved_by`/`approved_at` on every waiver, with no exception for
+  low-risk tasks (Section 4's approved rule) — self-attestation alone is
+  never sufficient for any waiver, not just consequential ones.
 - **Forged computed fields** — a ledger that writes `unreviewed_sources` or
   a pass/fail status directly, instead of leaving them for
   `verify-consumption` to compute, is rejected outright (5.2/5.3). An agent
@@ -457,19 +508,22 @@ wired, not an "informational check that a ledger exists."
   `AGENT_CONSUMPTION_CONTRACT.md` itself, not just this plan, precisely
   because it is the overclaim risk that would make Option A alone
   dangerous if presented as sufficient.
-- **Ledger accumulation in the repository** — since 5.2 resolves the
-  location question by committing ledgers (not git-ignoring them), a real
-  new failure mode is unbounded growth over time. Mitigation: ledgers are
-  small, per-PR, append-only evidence — the same pattern
-  `BUG_AUDIT_LOG.md`/`CHANGE_CONTROL_LOG.md` already sustain at scale; if
-  volume becomes a real problem, pruning/archiving old ledgers is a later
-  owner decision, not something this plan needs to solve now.
-- **Multi-session/parallel-agent races on a shared ledger path** — reduced
-  by the `<task_type>-<short_commit>.json` naming scheme (5.2), though not
-  eliminated for two sessions working the same task at the same commit
-  simultaneously. Not a fix for Multi-session Coordination (N17 item 6),
-  which remains separately unplanned; this design does not make that
-  problem worse.
+- **CI artifact retention/discoverability** — since 5.2 resolves the
+  location question by keeping ledgers disposable and uploading them as CI
+  artifacts rather than committing them, a real failure mode is that
+  GitHub Actions artifacts expire after a retention period (default 90
+  days, configurable). Mitigation: the PR body's recorded verification
+  *result* (`CONSUMPTION: COMPLETE`/`CONCLUSION_BLOCKED`) is the permanent
+  record; the artifact is transient supporting evidence, consistent with
+  the ledger being disposable by design — if a longer-lived audit trail is
+  ever needed, that is a later owner decision (e.g. a longer retention
+  policy for consumption artifacts specifically), not something this plan
+  needs to solve now.
+- **Multi-session/parallel-agent races on a shared ledger path** — since
+  the ledger is disposable and local (5.2), this is the same low risk as
+  any other locally-generated, non-shared file; not a fix for
+  Multi-session Coordination (N17 item 6), which remains separately
+  unplanned, but this design does not make that problem worse.
 - **Backward compatibility** — `verify-consumption` must be strictly
   additive/opt-in. None of the 69 currently-passing tests in
   `test_context_librarian.py` (62 when this plan was first drafted; now 69
@@ -519,6 +573,17 @@ Following the existing house test-naming convention in
 - `test_verify_consumption_rejects_forged_unreviewed_sources_field(tmp_path)` —
   a ledger that writes `unreviewed_sources` (or any pass/fail field)
   directly is rejected regardless of its content.
+- `test_verify_consumption_fails_closed_on_missing_waiver_approval(tmp_path)` —
+  a `waived_sources` entry missing `approved_by`/`approved_at` reports
+  `CONCLUSION_BLOCKED`.
+- `test_verify_consumption_fails_closed_on_self_approved_waiver(tmp_path)` —
+  a `waived_sources` entry whose `approved_by` equals its `reviewed_by`
+  reports `CONCLUSION_BLOCKED`.
+- `test_verify_consumption_treats_identity_change_as_waiver_expiry(tmp_path)` —
+  a previously-valid waiver's `profile` (or `commit`/`branch`/`query`)
+  no longer matches a freshly-recomputed bundle and reports
+  `CONCLUSION_BLOCKED` for that item, confirming Section 4/5.2's waiver-
+  expiry rule is enforced by the same identity check as a stale receipt.
 - `test_verify_consumption_succeeds_when_all_mandatory_items_accounted_for(tmp_path)` —
   a fully valid ledger exits 0 and prints `CONSUMPTION: COMPLETE`.
 - `test_verify_consumption_flags_duplicate_boilerplate_evidence_across_items(tmp_path)` —
@@ -546,28 +611,32 @@ Following the existing house test-naming convention in
 ## 8. Rollout plan
 
 - **Phase 0 (this PR):** planning only. No code, no catalog change, no CLI
-  change. `STATUS: PLANNING BLOCKED` (top of document) — gated on this
-  document being reviewed, on Section 9's owner-decisions being resolved,
-  and on the parallel, independent Codex audit being received and checked
-  — explicit precondition from the requester, not clearable by this
-  document.
+  change. `STATUS: PLANNING APPROVED BY OWNER` (top of document) — Section
+  9's owner-decisions are resolved and the parallel, independent Codex
+  audit has been received and checked (merged as PR #489). The only
+  remaining gate is procedural: no implementation PR opens until this
+  corrected planning PR is itself reviewed and merged.
 - **Phase 1 (separate, reviewed implementation PR):** 5.1–5.3 (checklist
-  rendering, ledger format, `verify-consumption` CLI) plus the Section 7
-  regression tests. Strictly additive/opt-in — no existing command's
-  behavior changes.
-- **Phase 2 (separate PR, does not depend on Phase 1):** apply the
-  `FEATURE_AUTO_CAPTURE` catalog patch (5.6) as its own small, low-risk,
-  catalog-only change. Could land before, after, or independently of Phase
-  1 — sequencing is an owner choice (Section 9), not decided here.
+  rendering, ledger format, `verify-consumption` CLI, including the
+  waiver-approval and waiver-expiry checks from Section 4) plus the
+  Section 7 regression tests. Strictly additive/opt-in — no existing
+  command's behavior changes.
+- **Phase 2:** the `FEATURE_AUTO_CAPTURE` catalog patch (5.6) — already
+  resolved by events; PR #489 merged it independently of this rollout,
+  exactly as anticipated when this phase was first sequenced. No action
+  needed here.
 - **Phase 3 (separate PR, only after Phase 1 has been used at least once
-  for a real task):** promote the review-escalation rule (Section 4) from
-  this plan into a hard "must" in `AGENT_CONSUMPTION_CONTRACT.md`, and wire
-  the CI step (5.7) to actually run `verify-consumption` against committed
-  ledgers and fail on `CONCLUSION_BLOCKED`.
-- **Phase 4 (future, explicitly deferred, owner decision):** evaluate
-  Option C (harness-level hook tracking) as its own separately-scoped
-  proposal, informed by whether Phases 1–3 show the rubber-stamp failure
-  mode (Section 6) actually occurring in practice.
+  for a real task):** promote the approved mandatory-review trigger rule
+  (Section 4) into a hard "must" in `AGENT_CONSUMPTION_CONTRACT.md`, and
+  wire the CI step (5.7) that runs `verify-consumption`, uploads the
+  ledger as a build artifact, and fails on `CONCLUSION_BLOCKED`. Whether
+  this CI step is blocking from day one or starts as a warn-only bake-in
+  period remains open (Section 9) — the owner approved the overall design,
+  not this specific rollout-timing detail.
+- **Phase 4 (deferred, per owner decision):** evaluate Option C
+  (harness-level hook tracking) as its own separately-scoped proposal,
+  informed by whether Phases 1–3 show the rubber-stamp or self-approved-
+  waiver failure modes (Section 6) actually occurring in practice.
 
 ### Acceptance criteria for a new pilot on new tasks (after Phase 1 ships — not this pilot, not a re-run of the 28/07 pilot)
 
@@ -580,8 +649,9 @@ in the 28/07 pilot, should require, per task:
 - the ledger's `required_sources` enumerates 100% of the mandatory tier for
   the selected profile (verified by `verify-consumption` reporting
   `CONSUMPTION: COMPLETE`);
-- zero mandatory items in `waived_sources` without the review-escalation
-  rule (Section 4) having actually fired when a waiver occurred;
+- zero mandatory items in `waived_sources` without a genuine, distinct
+  `approved_by` independent reviewer (Section 4) — self-approval or a
+  missing approval is a hard failure for this criterion, not a soft one;
 - zero receipts with generic/duplicated `reason`/`evidence_reference`
   strings across the ledger (the weak heuristic in Section 7 catching what
   it can);
@@ -598,40 +668,66 @@ in the 28/07 pilot, should require, per task:
   architecture defects, etc.) is a separate, larger bar this narrower pilot
   does not attempt to establish by itself.
 
-## 9. What requires an owner decision
+## 9. Owner decisions
 
-- Approve, reject, or amend the overall layered design (Option A always +
-  risk-gated Option B; Option C deferred) — Section 4.
-- ~~Where the Consumption Ledger physically lives per PR~~ — **resolved**
-  (5.2): committed to the PR under `docs/context_librarian/consumption/`,
-  not git-ignored, because CI (5.7) cannot inspect a file it never received.
-- The exact trigger conditions for mandatory independent review (Section
-  4's drafted rule: `--production-claim` OR a Cross-Layer-Authority-gated
-  layer/decision OR any waived mandatory item) — owner may want to broaden
-  or narrow this.
-- Whether CI's `verify-consumption` step (5.7) should be blocking from the
-  moment it is wired (Phase 3) or start as informational/warning-only for
-  a bake-in period first.
-- ~~Sequencing of the `FEATURE_AUTO_CAPTURE` catalog patch (5.6)~~ —
-  **resolved by events, not by this plan**: PR #489 merged it to `main`
-  independently of Phase 1/2 sequencing, exactly as the "depends on nothing
-  else in this plan" framing anticipated.
+Resolved:
+
+- ✅ **Overall layered design approved:** self-attested Consumption Ledger
+  for every governed task, plus mandatory independent review for
+  risk-triggered tasks (Section 4).
+- ✅ **Mandatory-review trigger conditions approved as drafted:** a
+  production claim, a Cross-Layer-Authority-gated layer/decision, or any
+  waived mandatory source (Section 4).
+- ✅ **Mandatory-source categories approved as drafted:** primary/
+  required-dependency code, required tests, mandatory canonical documents,
+  production evidence only for production claims, and expansions marked
+  `required_for_conclusion` (5.1).
+- ✅ **Waiver rules approved and strengthened:** every waiver requires a
+  specific reason **and** independent reviewer approval (`approved_by` ≠
+  `reviewed_by`), with no low-risk exception; a waiver expires the moment
+  the bundle's commit, profile, or query changes (Section 4/5.2).
+- ✅ **Ledger location approved, reversing an earlier draft:** disposable
+  and local, uploaded as a CI artifact rather than committed; the PR body
+  records only the verification result and an artifact reference (5.2).
+  The exact mechanism for transmitting the ledger's content into the CI
+  run that uploads it (a transient pre-merge commit vs. a
+  `workflow_dispatch` input — 5.2) is left to the Phase 1 implementation
+  PR as a mechanical detail, not an open policy question.
+- ✅ **Scope of consumption verification approved:** it proves completeness
+  of accounting, never truth or comprehension; risk-triggered independent
+  review remains required regardless (Section 4/6).
+- ✅ **Option C (harness-level tool-call tracking) deferred** to a separate,
+  future, separately-scoped proposal (Section 3/8, Phase 4).
+- ✅ **Parallel, independent Codex audit received and reviewed** — merged as
+  PR #489, its content independently reviewed earlier in this session, its
+  fixes cross-referenced throughout this document (Section 2, 5.6, Cross-
+  Layer Impact Matrix).
+- ✅ **`FEATURE_AUTO_CAPTURE` sequencing** — resolved by events; PR #489
+  merged it independently of this plan's own rollout (5.6, Section 8 Phase
+  2).
+
+Still open (narrower, mechanical, deferred to the Phase 1 implementation PR):
+
+- Whether CI's `verify-consumption` step (5.7) is blocking from the moment
+  it is wired (Phase 3) or starts as a warn-only bake-in period first —
+  the owner approved the overall design, not this specific rollout-timing
+  detail.
 - Whether the optional `bounded_local_expansions` `item_id` and
   `required_for_conclusion` fields (5.5) should be added ahead of Phase 1
-  as their own small, additive schema change, or deferred to land together
-  with Phase 1.
-- **Confirmation that the parallel, independent Codex audit has been
-  received and reviewed before any Phase 1 implementation PR is opened** —
-  an explicit precondition stated for this planning cycle; this document
-  cannot self-clear it.
+  as their own small, additive schema change, or land together with
+  Phase 1.
+
+**No implementation PR opens until this corrected planning PR is itself
+reviewed and merged** — the one remaining gate, procedural rather than
+substantive, per explicit instruction for this planning cycle.
 
 ## Cross-Layer Impact Matrix (required by `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` §0/§2)
 
 This is the grep-based matrix for this document's own proposed mechanism
 (Sections 3–8), not a fill-in-later template. Without it, status would stay
-`PLANNING BLOCKED` for cross-layer-risk reasons in addition to the
-owner-decision reasons already stated at the top; with it, the remaining
-block is only the owner-decision gate.
+`PLANNING BLOCKED` for cross-layer-risk reasons; with it — and with
+Section 9's owner-decisions now resolved — the only remaining gate is this
+corrected planning PR's own review and merge.
 
 ### Layer 1 — Core Reasoning / BUG-104
 **touched: not touched.** Proof of non-impact:
@@ -698,11 +794,13 @@ via this document. Proof, for completeness:
 
 ### Layer 4 — Durable Atomic Approval (ActionContract/ActionGateway)
 **touched: indirectly, by reference/deference only — not redefinition.**
-- **input impact:** Section 4's recommended trigger rule for mandatory
-  independent review references `--production-claim` and "a layer/decision
+- **input impact:** Section 4's owner-approved trigger rule for mandatory
+  independent review references a production claim and "a layer/decision
   `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` already gates" as an escalation
   input — it consumes Layer 4's existing authority as a trigger condition;
-  it does not define new Layer 4 semantics.
+  it does not define new Layer 4 semantics. The waiver-approval and
+  waiver-expiry rules (Section 4) are likewise process controls over the
+  ledger itself, not new Layer 4 semantics.
 - **output impact:** none — no proposed change to `ActionContract`,
   `ActionGateway`, `ExecutionLedger`, or any of their outputs.
 - **authority impact:** **none.** The whole design explicitly defers to
@@ -743,7 +841,9 @@ evidence-shadow layer miss). The proposed mechanism does not touch
   `FEATURE_AUTO_CAPTURE` catalog entry are closed **by this PR** — all
   three are real code, now merged to `main` via the separate, independent
   PR #489, not by anything in PR #488 or this document.
-- No PR implementing any part of Sections 5–8 until (a) this plan is
-  reviewed and Section 9's owner-decisions are resolved, and (b) the
-  parallel, independent Codex audit is received and checked, per explicit
-  instruction for this planning cycle.
+- No PR implementing any part of Sections 5–8 until this corrected
+  planning PR is itself reviewed and merged — Section 9's owner-decisions
+  are resolved and the parallel, independent Codex audit has been received
+  and checked (merged as PR #489), but that does not itself authorize
+  implementation; the review-and-merge step is still required, per
+  explicit instruction for this planning cycle.
