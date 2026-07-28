@@ -26,7 +26,7 @@
   "confidence_range": [0.0, 1.0],
   "commit_pattern": "^[0-9a-f]{7,40}$",
   "extension_policy": {
-    "catalog_discovery": "all docs/context_librarian/layers/*.yaml files",
+    "catalog_discovery": "all docs/context_librarian/layers/*.json files",
     "new_layers": "allowed without a schema change",
     "unknown_node_fields": "rejected",
     "namespaced_extensions": "allowed only inside the extensions object",
