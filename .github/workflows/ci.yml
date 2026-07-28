@@ -31,7 +31,17 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
     steps:
+      # fetch-depth: 0 (full history) — required by
+      # tools/context_librarian/librarian.py's freshness check, which runs
+      # `git diff --name-only <last_verified_commit> --` against arbitrary
+      # historical commits recorded in the catalog. The default shallow
+      # clone (fetch-depth: 1) doesn't contain those commits, so `git diff`
+      # fails with exit 128 ("unknown revision") — this is exactly the
+      # failure the new "pytest context librarian" step below caught on its
+      # first real CI run.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
