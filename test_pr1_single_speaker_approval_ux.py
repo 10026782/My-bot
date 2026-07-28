@@ -29,6 +29,25 @@ def _contract(*, status="pending", channel="telegram", suffix="1"):
     )
 
 
+def _task_contract(*, status="pending", channel="telegram", suffix="1", title="להתקשר ללקוח"):
+    return ActionContract(
+        contract_id=f"223e4567-e89b-12d3-a456-42661417400{suffix}",
+        tenant_id="boss_hq",
+        canonical_user_id="boss_hq:owner",
+        tool_name="airtable_add",
+        normalized_payload={
+            "table": "Tasks",
+            "fields": {"Task": title, "record_id": "recABCDEFGHIJKLMN"},
+        },
+        business_action_fingerprint=f"task-fingerprint-{suffix}",
+        origin_channel=channel,
+        origin_chat_id="requester-chat",
+        requires_approval=True,
+        status=status,
+        created_at=time.time(),
+    )
+
+
 def test_state_to_message_mapping_and_single_owner():
     pending = build_approval_lifecycle_result(_contract())
     completed = build_approval_lifecycle_result(_contract(status="completed"))
@@ -47,8 +66,8 @@ def test_state_to_message_mapping_and_single_owner():
     assert pending.safe_user_message.startswith("יש פעולה שממתינה לאישור:")
     assert completed.safe_user_message.startswith("הפעולה הושלמה:")
     assert repeated_completed.safe_user_message == "הפעולה כבר הושלמה"
-    assert rejected.safe_user_message.startswith("הפעולה נדחתה:")
-    assert repeated_rejected.safe_user_message == "הפעולה כבר נדחתה"
+    assert rejected.safe_user_message.startswith("הפעולה בוטלה:")
+    assert repeated_rejected.safe_user_message == "הפעולה כבר בוטלה"
     assert missing.safe_user_message == "אין פעולה שממתינה לאישור"
     assert "לשלוח מחדש" in pending_conflict.safe_user_message
     assert "לא נשמרה" in pending_conflict.safe_user_message
@@ -119,4 +138,48 @@ def test_repeated_text_resolution_uses_recent_terminal_contract():
     rejected = _contract(status="rejected", suffix="2")
     rejected.created_at += 1
     ledger.save(rejected)
-    assert gateway.route_cancellation_word("boss_hq:owner") == "הפעולה כבר נדחתה"
+    assert gateway.route_cancellation_word("boss_hq:owner") == "הפעולה כבר בוטלה"
+
+
+# ── Follow-up UX patch: business-facing wording, table names hidden ────────
+
+def test_task_creation_uses_dedicated_business_wording():
+    title = "להתקשר ללקוח"
+    pending = build_approval_lifecycle_result(_task_contract(title=title))
+    completed = build_approval_lifecycle_result(_task_contract(status="completed", title=title))
+    repeated_completed = build_approval_lifecycle_result(
+        _task_contract(status="completed", title=title), repeated=True,
+    )
+    rejected = build_approval_lifecycle_result(_task_contract(status="rejected", title=title))
+    repeated_rejected = build_approval_lifecycle_result(
+        _task_contract(status="rejected", title=title), repeated=True,
+    )
+
+    assert pending.safe_user_message == f"יש משימה שממתינה לאישור: {title}"
+    assert completed.safe_user_message == f"המשימה נוצרה: {title}"
+    assert repeated_completed.safe_user_message == "המשימה כבר נוצרה"
+    assert rejected.safe_user_message == f"יצירת המשימה בוטלה: {title}"
+    assert repeated_rejected.safe_user_message == "יצירת המשימה כבר בוטלה"
+
+    for result in (pending, completed, repeated_completed, rejected, repeated_rejected):
+        assert "Tasks" not in result.safe_user_message
+        assert "airtable_add" not in result.safe_user_message
+        assert "recABCDEFGHIJKLMN" not in result.safe_user_message
+
+
+def test_task_creation_wording_same_on_telegram_and_whatsapp():
+    telegram = build_approval_lifecycle_result(_task_contract(channel="telegram"))
+    whatsapp = build_approval_lifecycle_result(_task_contract(channel="whatsapp"))
+    assert telegram.safe_user_message == whatsapp.safe_user_message
+
+
+def test_non_task_airtable_actions_never_expose_the_raw_table_name():
+    # Leads (and any other table) must never appear literally in the
+    # rendered business description — only the generic, table-agnostic
+    # fallback phrase, per the "no raw Airtable table names" rule.
+    pending = build_approval_lifecycle_result(_contract())
+    completed = build_approval_lifecycle_result(_contract(status="completed"))
+    rejected = build_approval_lifecycle_result(_contract(status="rejected"))
+    for result in (pending, completed, rejected):
+        assert "Leads" not in result.safe_user_message
+        assert "ActionContracts" not in result.safe_user_message

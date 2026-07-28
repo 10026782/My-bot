@@ -2073,7 +2073,14 @@ def _reject_stale_telegram_approval(
 # literal phrase, reused identically for the popup, the persistent chat
 # message, and the edited original message — never templated/combined with
 # a generic label placeholder (there is no real label to show here).
-_MISSING_OR_EXPIRED_CALLBACK_TEXT = "ℹ️ הפעולה כבר פגה או אינה קיימת, ולכן לא בוצעה."
+#
+# Follow-up UX patch: the original phrasing ("הפעולה כבר פגה או אינה
+# קיימת") duplicated the same meaning twice ("expired" and "doesn't exist"
+# read as the same thing to a business user) and leaned on implementation
+# language ("קיימת" — exists — describes internal record state, not a
+# business outcome). Reworded to a single, non-redundant, business-facing
+# statement: the action/link is simply no longer available.
+_MISSING_OR_EXPIRED_CALLBACK_TEXT = "ℹ️ הפעולה כבר אינה זמינה, ולכן לא בוצעה."
 
 
 def _notify_missing_or_expired_callback(cq, approver_chat_id: str) -> None:
@@ -2652,7 +2659,7 @@ def _handle_approval_callback_impl(cq) -> None:
                 action_id=action_id, tool_name=tool_name,
                 text=(
                     _reject_reply if tool_name and _flag_enabled("FEATURE_ACTION_GATEWAY")
-                    else "הפעולה נדחתה"
+                    else "הפעולה בוטלה"
                 ),
             )
         except Exception as e:

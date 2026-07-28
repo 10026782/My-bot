@@ -481,7 +481,7 @@ chk("T4a: the covered approval turn has exactly one final response",
 if bot4a.send_message.call_count == 1:
     _sent_text_4a = bot4a.send_message.call_args.args[1]
     chk("T4a: sent text is the canonical safe pending prompt",
-        _sent_text_4a.startswith("יש פעולה שממתינה לאישור:"))
+        _sent_text_4a.startswith("יש משימה שממתינה לאישור:"))
     _sent_markup_4a = bot4a.send_message.call_args.kwargs["reply_markup"]
     _sent_callbacks_4a = [
         button.callback_data
@@ -540,7 +540,7 @@ chk("T4b: shadow mode -> owner still notified exactly once",
 if bot4b.send_message.call_count == 1 and bot4a.send_message.call_count == 1:
     _sent_text_4b = bot4b.send_message.call_args.args[1]
     chk("T4b: shadow mode -> the ACTUAL sent text remains the canonical safe prompt",
-        _sent_text_4b.startswith("יש פעולה שממתינה לאישור:"))
+        _sent_text_4b.startswith("יש משימה שממתינה לאישור:"))
 _shadow_lines_4b = [m for m in log4b if "UnifiedStatusFormatterShadow" in m]
 chk("T4b: shadow mode -> exactly one [UnifiedStatusFormatterShadow] line for "
     "the pending prompt this turn",

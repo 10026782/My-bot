@@ -186,9 +186,9 @@ reply = gw.route_confirmation_word("boss_hq:owner-1", approver_role="owner")
 
 chk("approval performs exactly one dispatch", _dispatched == ["airtable_add"])
 chk("final reply reports one canonical business success",
-    reply.startswith("הפעולה הושלמה:"))
+    reply.startswith("המשימה נוצרה:"))
 chk("final reply contains exactly one success statement",
-    reply.count("הפעולה הושלמה") == 1)
+    reply.count("המשימה נוצרה") == 1)
 chk("final reply does NOT also contain the executor's own success text",
     "רשומה נוספה" not in reply)
 chk("record ID is not exposed in the reply", RECORD_ID not in reply)

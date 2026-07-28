@@ -154,7 +154,7 @@ with patch("tools.dispatcher.dispatch_tool", side_effect=_ok_dispatch) as _dt_fi
 
 chk("first confirmation dispatches exactly once", _dt_first.call_count == 1)
 chk("first confirmation reports canonical success",
-    first_reply.startswith("הפעולה הושלמה:"))
+    first_reply.startswith("המשימה נוצרה:"))
 
 _contract_after_first = _real_gw._ledger.find_by_id(contract_id)
 chk("contract reached a terminal success status after first confirmation",

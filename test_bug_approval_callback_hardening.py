@@ -488,7 +488,7 @@ chk("repeated reject callback leaves lifecycle unchanged",
 chk("repeated reject callback returns deterministic stale/resolved response",
     cross_reject_bot.answer_callback_query.call_count == 1 and
     cross_reject_bot.send_message.call_count == 1 and
-    cross_reject_bot.send_message.call_args.args[1] == "הפעולה כבר נדחתה" and
+    cross_reject_bot.send_message.call_args.args[1] == "יצירת המשימה כבר בוטלה" and
     cross_reject_bot.edit_message_text.call_count == 0 and
     cross_reject_bot.edit_message_reply_markup.call_count == 1)
 

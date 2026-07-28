@@ -87,6 +87,7 @@ APPROVAL_POLICY_APPROVAL     = "approval"
 APPROVAL_POLICY_SELF_CONFIRM = "self_confirm"
 
 _LEAD_CAPTURE_TABLE = "Leads"
+_TASK_CREATION_TABLE = "Tasks"
 
 
 def _lead_safe_fields() -> tuple[frozenset, frozenset]:
@@ -899,8 +900,54 @@ def _remove_raw_approval_tool_name(text: str, contract: object | None) -> str:
     return text
 
 
+def _task_creation_table_names() -> frozenset[str]:
+    """Both forms a Tasks-table write may arrive as: the alias Claude's tool
+    schema/dispatcher advertise ("Tasks", see tools/dispatcher.py's
+    _ALIAS_MAP) and the canonical Airtable table name a direct-Python caller
+    may pass already-resolved. Lazy import mirrors _lead_safe_fields()'s
+    avoidance of module-load-order coupling to airtable_schema."""
+    names = {_TASK_CREATION_TABLE}
+    try:
+        from airtable_schema import Tables
+        names.add(Tables.TASKS)
+    except Exception:
+        pass
+    return frozenset(names)
+
+
+def _is_task_creation_contract(contract: ActionContract | None) -> bool:
+    """True only for a new-task creation (airtable_add against the Tasks
+    table) — the one action with its own dedicated business wording
+    (pending/completed/rejected). Everything else uses the generic,
+    table-name-free business description below."""
+    if contract is None:
+        return False
+    tool_name = getattr(contract, "tool_name", "")
+    if tool_name != "airtable_add":
+        return False
+    payload = contract.normalized_payload or {}
+    table = str(payload.get("table") or "").strip()
+    return table in _task_creation_table_names()
+
+
+def _safe_task_title(contract: ActionContract | None) -> str:
+    """Business-safe task title only — never a table name, tool name, or id."""
+    if contract is None:
+        return ""
+    payload = contract.normalized_payload or {}
+    fields = payload.get("fields") if isinstance(payload.get("fields"), dict) else {}
+    title = _first_field_preview(fields)
+    title = _redact_approval_identifiers(title, getattr(contract, "contract_id", None))
+    title = _remove_raw_approval_tool_name(title, contract)
+    return title.strip(" /:|-")
+
+
 def _safe_contract_business_description(contract: ActionContract | None) -> str:
-    """Return business wording without raw tool names or technical IDs."""
+    """Return business wording without raw tool names, table names, or
+    technical IDs. Table names (Tasks/Leads/ActionContracts/etc.) are
+    intentionally never included — a generic, table-agnostic phrase covers
+    every table other than the Tasks-specific wording built separately in
+    build_approval_lifecycle_result()."""
     if contract is None:
         return "הפעולה המבוקשת"
 
@@ -912,11 +959,9 @@ def _safe_contract_business_description(contract: ActionContract | None) -> str:
     preview = _first_field_preview(fields)
 
     if tool_name in ("airtable_add", "airtable_update"):
-        verb = "הוספה" if tool_name == "airtable_add" else "עדכון"
-        if table:
-            description = f"{verb} ב-{table}" + (f": {preview}" if preview else "")
-        else:
-            description = "הוספת רשומה" if tool_name == "airtable_add" else "עדכון רשומה"
+        description = "הוספת רשומה" if tool_name == "airtable_add" else "עדכון רשומה"
+        if preview:
+            description += f": {preview}"
     elif tool_name == "calendar_create_event":
         summary = str(payload.get("summary") or "").strip()
         description = "קביעת אירוע" + (f": {summary}" if summary else "")
@@ -968,17 +1013,28 @@ def build_approval_lifecycle_result(
             canonical_state = "no_contract"
 
     description = _safe_contract_business_description(contract)
+    is_task_creation = _is_task_creation_contract(contract)
+    task_title = _safe_task_title(contract) if is_task_creation else ""
     if canonical_state == "pending":
-        message = f"יש פעולה שממתינה לאישור: {description}"
+        if is_task_creation:
+            message = "יש משימה שממתינה לאישור" + (f": {task_title}" if task_title else "")
+        else:
+            message = f"יש פעולה שממתינה לאישור: {description}"
     elif canonical_state == "pending_conflict":
         message = (
             "יש לך פעולה שממתינה לאישור. יש לאשר או לבטל אותה, "
             "ואז לשלוח מחדש את הבקשה החדשה. הפעולה החדשה לא נשמרה."
         )
     elif canonical_state == "completed":
-        message = "הפעולה כבר הושלמה" if repeated else f"הפעולה הושלמה: {description}"
+        if is_task_creation:
+            message = "המשימה כבר נוצרה" if repeated else "המשימה נוצרה" + (f": {task_title}" if task_title else "")
+        else:
+            message = "הפעולה כבר הושלמה" if repeated else f"הפעולה הושלמה: {description}"
     elif canonical_state == "rejected":
-        message = "הפעולה כבר נדחתה" if repeated else f"הפעולה נדחתה: {description}"
+        if is_task_creation:
+            message = "יצירת המשימה כבר בוטלה" if repeated else "יצירת המשימה בוטלה" + (f": {task_title}" if task_title else "")
+        else:
+            message = "הפעולה כבר בוטלה" if repeated else f"הפעולה בוטלה: {description}"
     elif canonical_state in ("approved_processing", "outcome_unknown"):
         message = "הפעולה אושרה, אך התוצאה עדיין אינה סופית"
     elif canonical_state == "failed":
@@ -2128,7 +2184,7 @@ class ActionGateway:
         if is_enabled("FEATURE_SINGLE_SPEAKER_APPROVAL_UX"):
             if remaining > 0:
                 rendered = (
-                    f"הפעולה נדחתה: {_safe_contract_business_description(contract)}. "
+                    f"הפעולה בוטלה: {_safe_contract_business_description(contract)}. "
                     f"נשארו {remaining} פעולות ממתינות."
                 )
             else:
@@ -2675,7 +2731,7 @@ class ActionGateway:
             return "failure", {"reason_code": fact.error_code}
         if fact.outcome == "rejected":
             return "failure", {"reason_code": "ACTION_REJECTED",
-                               "reason": "הפעולה נדחתה."}
+                               "reason": "הפעולה בוטלה."}
         return "outcome_unknown", {}
 
     def _compose_status_reply_unified(self, fact: ActionFact) -> tuple[str, dict]:
