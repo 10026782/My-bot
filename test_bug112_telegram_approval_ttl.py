@@ -66,14 +66,13 @@ not-found/already-consumed one) — this fix does not merge their wording
 into a single shared literal, only removes the redundancy WITHIN the
 not-found path itself.
 
-── Follow-up UX patch (business-facing wording pass) ──
+── Follow-up UX patch (סבב ניסוח פונה-לעסק) ──
 
-The original single literal phrase ("ℹ️ הפעולה כבר פגה או אינה קיימת, ולכן
-לא בוצעה.") still had its own internal redundancy — "פגה" (expired) and
-"אינה קיימת" (doesn't exist) read as the same thing to a business user, and
-"קיימת" describes internal record state rather than a business outcome.
-Reworded to app._MISSING_OR_EXPIRED_CALLBACK_TEXT = "ℹ️ הפעולה כבר אינה
-זמינה, ולכן לא בוצעה." — one non-redundant, business-facing statement.
+למשפט הליטרלי היחיד המקורי ("ℹ️ הפעולה כבר פגה או אינה קיימת, ולכן לא
+בוצעה.") הייתה כפילות פנימית משלו — "פגה" ו"אינה קיימת" נקראים כאותו דבר
+מבחינת משתמש עסקי, ו"קיימת" מתארת מצב רשומה פנימי ולא תוצאה עסקית.
+נוסח מחדש ל-app._MISSING_OR_EXPIRED_CALLBACK_TEXT = "ℹ️ הפעולה כבר אינה
+זמינה, ולכן לא בוצעה." — משפט יחיד, לא-כפול, פונה-לעסק.
 """
 
 from __future__ import annotations

@@ -114,11 +114,11 @@ except Exception as e:
     chk(f"airtable_add: non-dict 'fields' does not crash (raised {e!r})", False)
 
 # ══════════════════════════════════════════════════════════════════
-# Follow-up UX patch: the initial approval prompt must never expose a raw
-# Airtable table name either (only tool_name/record_id/contract_id were
-# covered by BUG-123-FU) — task creation/update against the Tasks table
-# gets business wording, everything else falls back to a table-agnostic
-# generic phrase. Business fields (incl. the task title) must still show.
+# Follow-up UX patch: גם הודעת האישור הראשונית לעולם לא חושפת שם טבלה
+# גולמי ב-Airtable (רק tool_name/record_id/contract_id כוסו ב-BUG-123-FU)
+# — יצירת/עדכון משימה מול טבלת Tasks מקבלת ניסוח עסקי, וכל השאר נופל
+# לניסוח גנרי, שאינו תלוי-טבלה. שדות עסקיים (כולל כותרת המשימה) עדיין
+# חייבים להופיע.
 # ══════════════════════════════════════════════════════════════════
 
 desc = app._describe_tool_call("airtable_add", {

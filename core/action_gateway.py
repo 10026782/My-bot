@@ -820,15 +820,14 @@ class ExecutionLedger:
 # ══════════════════════════════════════════════════
 
 def _describe_contract_for_reconfirmation(contract: ActionContract) -> str:
-    """Business-readable label for reconfirmation prompts, the multi-pending
-    disambiguation list (via _describe_contract_for_disambiguation() below),
-    and the ActionResolutionEvent context projection. Table names
-    (Tasks/משימות (Tasks)/Leads/anything else) are never included — Leads
-    and Tasks get their own dedicated business wording; every other
-    airtable_add/airtable_update falls back to a generic, table-agnostic
-    phrase. Only the true catch-all for non-airtable tool types (which have
-    no table to leak in the first place) still names the tool — unchanged,
-    since no table-name exposure is possible there."""
+    """תווית קריאה-עסקית להודעות אישור-מחדש, לרשימת ה-disambiguation
+    (דרך _describe_contract_for_disambiguation() למטה), ול-projection של
+    ActionResolutionEvent. שמות טבלה (Tasks/משימות (Tasks)/Leads/כל אחר)
+    לעולם אינם נכללים — ל-Leads ול-Tasks יש ניסוח עסקי ייעודי משלהם; כל
+    airtable_add/airtable_update אחר נופל לניסוח גנרי, שאינו תלוי-טבלה.
+    רק ה-fallback הכללי האמיתי עבור סוגי כלים שאינם Airtable (שאין להם
+    טבלה לחשוף מלכתחילה) עדיין מציין את שם הכלי — ללא שינוי, מכיוון
+    שאין שם חשיפת טבלה אפשרית שם."""
     payload = contract.normalized_payload or {}
     if contract.tool_name in ("airtable_add", "airtable_update") and payload.get("table") == _LEAD_CAPTURE_TABLE:
         fields = payload.get("fields") or {}
@@ -857,14 +856,28 @@ def _describe_contract_for_reconfirmation(contract: ActionContract) -> str:
 
 
 def _describe_contract_for_disambiguation(contract: ActionContract) -> str:
-    """BUG-115 (historical): originally a separate function from
-    _describe_contract_for_reconfirmation() above, so a disambiguation-list
-    fix could land without touching that shared helper's own fallback
-    (relied on at other call sites at the time). The follow-up UX patch
-    fixed that shared fallback directly (no more table-name leakage for any
-    airtable_add/airtable_update), so there is no remaining behavioral
-    difference to keep separate — this now simply reuses it."""
+    """BUG-115 (היסטורי): במקור פונקציה נפרדת מ-
+    _describe_contract_for_reconfirmation() למעלה, כדי שתיקון רשימת
+    ה-disambiguation יוכל לעלות בלי לגעת ב-fallback של הפונקציה
+    המשותפת (שהיה בשימוש במקומות קריאה אחרים באותה עת). ה-patch
+    העוקב של UX תיקן את ה-fallback המשותף ישירות (אין יותר חשיפת שם
+    טבלה בשום airtable_add/airtable_update), כך שאין הבדל התנהגותי
+    שנותר להשאיר נפרד — הפונקציה כעת פשוט משתמשת בו."""
     return _describe_contract_for_reconfirmation(contract)
+
+
+def _sibling_auto_cancel_disclosure(count: int) -> str:
+    """הודעת גילוי פונה-לעסק שפעולות ממתינות נוספות בוטלו אוטומטית כאשר
+    המשתמש פתר אחת מהן לפי מספר — הסכמה דקדוקית יחיד/רבים (עבור count=1
+    הניסוח "1 פעולות" שגוי דקדוקית, ולכן יחיד מטופל בנפרד)."""
+    if count == 1:
+        body = "פעולה נוספת אחת שהייתה ברשימה בוטלה אוטומטית"
+    else:
+        body = f"{count} פעולות נוספות שהיו ברשימה בוטלו אוטומטית"
+    return (
+        f"\n\nℹ️ שים לב: {body} "
+        f"(בחירה לפי מספר מבטלת את שאר האפשרויות שהוצגו יחד)."
+    )
 
 
 _AIRTABLE_RECORD_ID_RE = re.compile(r"(?<![A-Za-z0-9])rec[A-Za-z0-9]{14,}(?![A-Za-z0-9])")
@@ -893,11 +906,11 @@ def _remove_raw_approval_tool_name(text: str, contract: object | None) -> str:
 
 
 def _task_creation_table_names() -> frozenset[str]:
-    """Both forms a Tasks-table write may arrive as: the alias Claude's tool
-    schema/dispatcher advertise ("Tasks", see tools/dispatcher.py's
-    _ALIAS_MAP) and the canonical Airtable table name a direct-Python caller
-    may pass already-resolved. Lazy import mirrors _lead_safe_fields()'s
-    avoidance of module-load-order coupling to airtable_schema."""
+    """שתי הצורות שבהן כתיבה לטבלת Tasks עשויה להגיע: ה-alias שסכימת
+    הכלי/ה-dispatcher של Claude מפרסמים ("Tasks", ראו _ALIAS_MAP ב-
+    tools/dispatcher.py) ושם הטבלה הקנוני ב-Airtable שקוד Python ישיר
+    עשוי להעביר כבר-פתור. ה-import העצל משקף את ההימנעות של
+    _lead_safe_fields() מצימוד לסדר-טעינת-המודולים מול airtable_schema."""
     names = {_TASK_CREATION_TABLE}
     try:
         from airtable_schema import Tables
@@ -908,19 +921,18 @@ def _task_creation_table_names() -> frozenset[str]:
 
 
 def is_task_table(table: str | None) -> bool:
-    """Public: True for either form a Tasks-table write may name ("Tasks"
-    alias or the canonical "משימות (Tasks)"). Shared by this module's own
-    lifecycle wording below and by app.py's initial-approval-prompt
-    rendering (_describe_tool_call), so both surfaces agree on what counts
-    as a task write without duplicating the alias/canonical logic."""
+    """ציבורי: True עבור כל אחת מהצורות שבהן כתיבה לטבלת Tasks עשויה
+    להיקרא ("Tasks" ה-alias, או השם הקנוני "משימות (Tasks)"). משותף בין
+    ניסוח מחזור-החיים של המודול הזה למטה לבין רינדור הודעת האישור
+    הראשונית ב-app.py (_describe_tool_call), כך ששני המשטחים מסכימים
+    על מה נחשב לכתיבת משימה בלי לשכפל את לוגיקת ה-alias/הקנוני."""
     return str(table or "").strip() in _task_creation_table_names()
 
 
 def _is_task_creation_contract(contract: ActionContract | None) -> bool:
-    """True only for a new-task creation (airtable_add against the Tasks
-    table) — the one action with its own dedicated business wording
-    (pending/completed/rejected). Everything else uses the generic,
-    table-name-free business description below."""
+    """True רק עבור יצירת משימה חדשה (airtable_add מול טבלת Tasks) —
+    הפעולה היחידה עם ניסוח עסקי ייעודי משלה (ממתין/הושלם/נדחה). כל
+    השאר משתמש בתיאור העסקי הגנרי, נטול-שם-הטבלה, למטה."""
     if contract is None:
         return False
     tool_name = getattr(contract, "tool_name", "")
@@ -931,7 +943,7 @@ def _is_task_creation_contract(contract: ActionContract | None) -> bool:
 
 
 def _safe_task_title(contract: ActionContract | None) -> str:
-    """Business-safe task title only — never a table name, tool name, or id."""
+    """כותרת משימה בטוחה-עסקית בלבד — לעולם לא שם טבלה, שם כלי, או מזהה."""
     if contract is None:
         return ""
     payload = contract.normalized_payload or {}
@@ -943,11 +955,10 @@ def _safe_task_title(contract: ActionContract | None) -> str:
 
 
 def _safe_contract_business_description(contract: ActionContract | None) -> str:
-    """Return business wording without raw tool names, table names, or
-    technical IDs. Table names (Tasks/Leads/ActionContracts/etc.) are
-    intentionally never included — a generic, table-agnostic phrase covers
-    every table other than the Tasks-specific wording built separately in
-    build_approval_lifecycle_result()."""
+    """מחזיר ניסוח עסקי ללא שמות כלים גולמיים, שמות טבלאות, או מזהים
+    טכניים. שמות טבלאות (Tasks/Leads/ActionContracts/וכו') לעולם אינם
+    נכללים בכוונה תחילה — ניסוח גנרי, שאינו תלוי-טבלה, מכסה כל טבלה
+    פרט לניסוח הייעודי ל-Tasks שנבנה בנפרד ב-build_approval_lifecycle_result()."""
     if contract is None:
         return "הפעולה המבוקשת"
 
@@ -2102,10 +2113,7 @@ class ActionGateway:
         # §21 comment above. Disclosure only, does not change what got
         # rejected (already decided above, unconditionally, before this fix).
         if rejected_siblings:
-            result += (
-                f"\n\nℹ️ שים לב: {rejected_siblings} פעולות נוספות שהיו ברשימה בוטלו אוטומטית "
-                f"(בחירה לפי מספר מבטלת את שאר האפשרויות שהוצגו יחד)."
-            )
+            result += _sibling_auto_cancel_disclosure(rejected_siblings)
         return result
 
     # ── BUG-070 gap #1 — route_combined_word ────────────────────────
@@ -2164,10 +2172,7 @@ class ActionGateway:
             # Staging finding #3 (23/07/2026) — see route_disambiguation()'s
             # identical disclosure for the full rationale.
             if rejected_siblings:
-                result += (
-                    f"\n\nℹ️ שים לב: {rejected_siblings} פעולות נוספות שהיו ברשימה בוטלו אוטומטית "
-                    f"(בחירה לפי מספר מבטלת את שאר האפשרויות שהוצגו יחד)."
-                )
+                result += _sibling_auto_cancel_disclosure(rejected_siblings)
             return result
 
         # action == "cancel" — דוחה רק את הפריט שנבחר, לא נוגע בשאר הממתינים

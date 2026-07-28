@@ -143,7 +143,7 @@ def test_repeated_text_resolution_uses_recent_terminal_contract():
     assert gateway.route_cancellation_word("boss_hq:owner") == "הפעולה כבר בוטלה"
 
 
-# ── Follow-up UX patch: business-facing wording, table names hidden ────────
+# ── Follow-up UX patch: ניסוח פונה-לעסק, שמות טבלה מוסתרים ─────────────────
 
 def test_task_creation_uses_dedicated_business_wording():
     title = "להתקשר ללקוח"
@@ -176,9 +176,9 @@ def test_task_creation_wording_same_on_telegram_and_whatsapp():
 
 
 def test_non_task_airtable_actions_never_expose_the_raw_table_name():
-    # Leads (and any other table) must never appear literally in the
-    # rendered business description — only the generic, table-agnostic
-    # fallback phrase, per the "no raw Airtable table names" rule.
+    # Leads (וכל טבלה אחרת) לעולם לא אמורות להופיע כמחרוזת גולמית
+    # בתיאור העסקי המוצג — רק הניסוח הגנרי, שאינו תלוי-טבלה, לפי הכלל
+    # "אין שמות טבלה גולמיים ב-Airtable".
     pending = build_approval_lifecycle_result(_contract())
     completed = build_approval_lifecycle_result(_contract(status="completed"))
     rejected = build_approval_lifecycle_result(_contract(status="rejected"))
@@ -187,7 +187,7 @@ def test_non_task_airtable_actions_never_expose_the_raw_table_name():
         assert "ActionContracts" not in result.safe_user_message
 
 
-# ── Round 2: reconfirmation / disambiguation renderers hide table names ────
+# ── סבב 2: מרנדרי אישור-מחדש / disambiguation מסתירים שמות טבלה ───────────
 
 def test_reconfirmation_description_hides_table_names():
     title = "לסדר את המחסן"
