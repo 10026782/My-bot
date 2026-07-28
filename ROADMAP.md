@@ -2,17 +2,25 @@
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
 עודכן: 29/07/2026 — **N17 עדכון: Consumption Enforcement PR #488 מוזג ל-`main`** (commit
 `abf2804`, אומת ב-grep ישיר על `origin/main`) — סעיף 8 עבר מ-`PLANNING APPROVED BY OWNER`
-ל-✅ מוזג. **Phase 1 implementation נפתח כ-PR נפרד** (עדיין לא מוזג): `consumption_checklist()`
-וסעיף `## Consumption Checklist` חדש בכל bundle (5.1); ולידציה מלאה ל-Consumption Ledger
-ופונקציית `verify_consumption()` (5.2/5.3); תת-פקודת CLI חדשה `verify-consumption`; שדה
-אופציונלי, backward-compatible `required_for_conclusion` על `bounded_local_expansions` (5.5);
-21 בדיקות רגרסיה חדשות (96/96 עוברות, `validate`/`smoke_tests.py` נקיים). הסעיף החדש הגדיל
-את גודל ה-bundle במידה שחייבה עדכון `maximum_approximate_token_budget` בחמישה profiles
-(`approval_ux`, `tool_execution`, `turn_coordinator_routing`, `ux_f52_message`,
-`cross_layer_architecture`) — שינוי נתוני-profile בלבד, לא שינוי סכימה/התנהגות. **Phase 3
-(CI blocking gate + hard-must ב-`AGENT_CONSUMPTION_CONTRACT.md`) לא מיושם כאן** — לפי התכנית
-עצמה (סעיף 8, שלב Phase 3) הוא ממתין לשימוש ראשון אמיתי ב-Phase 1, ולא נפתח כאן. ראה N17
-למטה, סעיפים 8/10.
+ל-✅ מוזג. **Phase 1 implementation נפתח כ-PR נפרד** (PR #490, עדיין לא מוזג):
+`consumption_checklist()` וסעיף `## Consumption Checklist` חדש בכל bundle (5.1) — **תוכן
+ה-bundle, לא flag-gated: מתווסף לכל build קיים, לא "opt-in"** (ניסוח מוקדם ב-PR body תוקן);
+ולידציה מלאה ל-Consumption Ledger ופונקציית `verify_consumption()` (5.2/5.3); תת-פקודת CLI
+חדשה, opt-in, `verify-consumption`; שדה אופציונלי, backward-compatible
+`required_for_conclusion` על `bounded_local_expansions` (5.5). **סקירה עצמאית על הענף לפני
+מיזוג** מצאה 4 פערים ממשיים ב-`verify_consumption()` המקורי ותוקנו באותו PR: (1) `path` של
+receipt/waiver לא נבדק מול ה-`item_id` בפועל — אפשר היה לטעון "נבדק" תוך הפניה לקובץ אחר
+לגמרי; (2) `production_claim` לא היה חלק מזהות ה-ledger — ledger שנוצר עבור production claim
+יכול היה לעבור בלי `--production-claim` ולדלג בשקט על evidence; (3) `required_sources`
+ב-ledger לא הושווה לעולם ל-checklist המחושב בפועל; (4) item_id לא-מוכר/כפול (כולל receipt+waiver
+לאותו item) התקבלו בלי בדיקת קונפליקט. גם תוקן: `reason`/`evidence_reference` לא-string (למשל
+list) היה גורם ל-`TypeError` לא-מטופל במקום כשל-סגור. 35 בדיקות רגרסיה חדשות (112/112
+עוברות, `validate`/`smoke_tests.py` נקיים). הסעיף החדש הגדיל את גודל ה-bundle במידה שחייבה
+עדכון `maximum_approximate_token_budget` בחמישה profiles (`approval_ux`, `tool_execution`,
+`turn_coordinator_routing`, `ux_f52_message`, `cross_layer_architecture`) — שינוי נתוני-profile
+בלבד, לא שינוי סכימה. **Phase 3 (CI blocking gate + hard-must ב-`AGENT_CONSUMPTION_CONTRACT.md`)
+לא מיושם כאן** — לפי התכנית עצמה (סעיף 8, שלב Phase 3) הוא ממתין לשימוש ראשון אמיתי ב-Phase 1,
+ולא נפתח כאן. ראה N17 למטה, סעיפים 8/10.
 עודכן: 28/07/2026 — **N17 עדכון: Consumption Enforcement — `STATUS: PLANNING APPROVED
 BY OWNER` (סעיף 8), אין implementation, אין שינוי runtime.** נכתב על `origin/main` לאחר
 PR #485+#487+#489. מטרה: איך למנוע מצב שבו מקור חובה כבר ב-bundle אך הסוכן מגיע למסקנה
@@ -1061,21 +1069,29 @@ ActionContract), ואין Cross-Layer Impact Matrix שלם לאף אחת — **�
    (POSIX/Windows); provenance מבחין `on_main_history`/`at_origin_main_tip`. Codex הסיר
    בעצמו את הצעת-התכנון המקבילה שלו (`SOURCE_CONSUMPTION_GATE_PLAN.md`) לפני המיזוג,
    ונדחה במפורש ל-PR #488 כמסמך הקנוני — אין כפילות תכנון.
-10. 🟡 Consumption Enforcement Phase 1 implementation — **PR נפתח, עדיין לא מוזג.** מיישם
-    בדיוק את סעיפים 5.1–5.3 + 5.5 (החלק האופציונלי `required_for_conclusion`) + בדיקות
-    הרגרסיה של סעיף 7 מהתכנית המאושרת (item 8), כפי שהתכנית עצמה קבעה כ-Phase 1 (סעיף 8
-    ברשימת ה-rollout): `consumption_checklist()` וסעיף `## Consumption Checklist` חדש
-    בכל bundle; ולידציה מלאה ל-Consumption Ledger (identity ברמת top-level וגם per-item,
-    waiver עם `approved_by`/`approved_at` שונה מ-`reviewed_by`, דחיית שדות מחושבים
-    מזויפים כמו `unreviewed_sources`); `verify_consumption()` שמחשב `unreviewed_sources`
-    בעצמו בלבד ומחזיר `CONSUMPTION: COMPLETE`/`CONCLUSION_BLOCKED`; תת-פקודת CLI חדשה
-    `python -m tools.context_librarian verify-consumption`; שדה אופציונלי,
-    backward-compatible `required_for_conclusion` על `bounded_local_expansions`
-    (ברירת מחדל `true`, לא משנה שום bundle קיים); 21 בדיקות רגרסיה חדשות (96/96 עוברות
-    בסה"כ, `validate`/`smoke_tests.py` נקיים). **תופעת-לוואי אמיתית שטופלה:** הסעיף החדש
-    מגדיל bundle במידה שחרגה מ-`maximum_approximate_token_budget` הקיים בחמישה profiles —
-    עודכנו (רק המספר, לא מבנה ה-JSON): `approval_ux` 5200→7000, `tool_execution`
-    4000→6000, `turn_coordinator_routing` 15500→18500, `ux_f52_message` 4800→5500,
+10. 🟡 Consumption Enforcement Phase 1 implementation — **PR #490 נפתח, עדיין לא מוזג.**
+    מיישם בדיוק את סעיפים 5.1–5.3 + 5.5 (החלק האופציונלי `required_for_conclusion`) +
+    בדיקות הרגרסיה של סעיף 7 מהתכנית המאושרת (item 8), כפי שהתכנית עצמה קבעה כ-Phase 1
+    (סעיף 8 ברשימת ה-rollout): `consumption_checklist()` וסעיף `## Consumption Checklist`
+    חדש בכל bundle — **תוכן ה-bundle עצמו, לא flag-gated: מתווסף אוטומטית לכל `build`
+    קיים.** (תת-פקודת ה-CLI `verify-consumption` וה-ledger format כן opt-in — שום דבר
+    לא קורא להם עדיין.) ולידציה מלאה ל-Consumption Ledger (identity ברמת top-level וגם
+    per-item כולל `production_claim`, waiver עם `approved_by`/`approved_at` שונה מ-
+    `reviewed_by`, דחיית שדות מחושבים מזויפים כמו `unreviewed_sources`, קישור `path` בפועל
+    ל-`item_id`, דחיית item_id לא-מוכר/כפול); `verify_consumption()` שמחשב
+    `unreviewed_sources` בעצמו בלבד ומחזיר `CONSUMPTION: COMPLETE`/`CONCLUSION_BLOCKED`;
+    תת-פקודת CLI חדשה `python -m tools.context_librarian verify-consumption`; שדה
+    אופציונלי, backward-compatible `required_for_conclusion` על `bounded_local_expansions`
+    (ברירת מחדל `true`, לא משנה שום bundle קיים). **סקירה עצמאית על הענף לפני מיזוג** מצאה
+    4 פערים ממשיים ב-`verify_consumption()` המקורי (path לא נבדק מול item_id;
+    `production_claim` לא היה חלק מזהות ה-ledger וניתן היה לעקוף דרישת evidence;
+    `required_sources` לא הושווה ל-checklist המחושב; item_id לא-מוכר/כפול התקבל) — כולם
+    תוקנו באותו PR, plus תיקון ל-`TypeError` לא-מטופל על `reason`/`evidence_reference`
+    לא-string. 35 בדיקות רגרסיה חדשות (112/112 עוברות בסה"כ, `validate`/`smoke_tests.py`
+    נקיים). **תופעת-לוואי אמיתית שטופלה:** הסעיף החדש מגדיל bundle במידה שחרגה
+    מ-`maximum_approximate_token_budget` הקיים בחמישה profiles — עודכנו (רק המספר, לא
+    מבנה ה-JSON): `approval_ux` 5200→7000, `tool_execution` 4000→6000,
+    `turn_coordinator_routing` 15500→18500, `ux_f52_message` 4800→5500,
     `cross_layer_architecture` 7000→9000. **Phase 3 (CI blocking gate שמריץ
     `verify-consumption` בפועל + hard-must ב-`AGENT_CONSUMPTION_CONTRACT.md`) לא מיושם
     כאן** — לפי סעיף 8 של התכנית עצמה, Phase 3 ממתין לשימוש ראשון אמיתי ב-Phase 1
