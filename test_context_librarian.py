@@ -56,6 +56,18 @@ _FIXED_PROVENANCE = {
 }
 
 
+_UNSET = object()
+
+
+def _path_for_item_id(item_id: str) -> str | None:
+    prefix, _, rest = item_id.partition(":")
+    if prefix == "decision":
+        return None
+    if prefix == "expansion":
+        return rest.partition("#")[0]
+    return rest
+
+
 def _receipt(
     item_id: str,
     *,
@@ -63,12 +75,13 @@ def _receipt(
     branch: str,
     profile: str,
     query: str,
+    path=_UNSET,
     reason: str | None = None,
     evidence_reference: str | None = None,
 ) -> dict:
     return {
         "item_id": item_id,
-        "path": None,
+        "path": _path_for_item_id(item_id) if path is _UNSET else path,
         "commit": commit,
         "branch": branch,
         "profile": profile,
@@ -87,6 +100,7 @@ def _waiver(
     branch: str,
     profile: str,
     query: str,
+    path=_UNSET,
     reviewed_by: str = "claude-sonnet-5 / session-test",
     approved_by: str = "independent-reviewer-agent / session-test",
     reason: str | None = None,
@@ -98,6 +112,7 @@ def _waiver(
         branch=branch,
         profile=profile,
         query=query,
+        path=path,
         reason=reason,
         evidence_reference=evidence_reference,
     )
@@ -115,6 +130,7 @@ def _ledger(
     commit: str,
     branch: str,
     required_sources: list,
+    production_claim: bool = False,
     review_receipts: list | None = None,
     waived_sources: list | None = None,
 ) -> dict:
@@ -123,6 +139,7 @@ def _ledger(
         "task_type": task_type,
         "profile": profile,
         "query": query,
+        "production_claim": production_claim,
         "bundle_generated_commit": commit,
         "bundle_generated_branch": branch,
         "required_sources": list(required_sources),
@@ -132,10 +149,11 @@ def _ledger(
 
 
 def _fully_reviewed_ledger(
-    catalog, task_type: str, query: str, *, commit: str = "deadbee", branch: str = "claude/test-branch"
+    catalog, task_type: str, query: str, *,
+    commit: str = "deadbee", branch: str = "claude/test-branch", production_claim: bool = False,
 ) -> dict:
     profile = catalog.profiles[task_type]
-    items = consumption_checklist(catalog, profile)
+    items = consumption_checklist(catalog, profile, production_claim=production_claim)
     receipts = [
         _receipt(item_id, commit=commit, branch=branch, profile=task_type, query=query)
         for item_id in items
@@ -146,6 +164,7 @@ def _fully_reviewed_ledger(
         query=query,
         commit=commit,
         branch=branch,
+        production_claim=production_claim,
         required_sources=items,
         review_receipts=receipts,
     )
@@ -1273,6 +1292,131 @@ def test_verify_consumption_rejects_forged_unreviewed_sources_field(catalog, mon
     ledger["unreviewed_sources"] = []
     with pytest.raises(ContextLibrarianError, match="forged"):
         verify_consumption(catalog, task_type="approval_ux", query="q", ledger=ledger)
+
+
+def test_verify_consumption_fails_closed_on_path_item_id_mismatch(catalog, monkeypatch):
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    ledger = _fully_reviewed_ledger(catalog, "approval_ux", "q")
+    mismatched_item = ledger["review_receipts"][0]["item_id"]
+    ledger["review_receipts"][0]["path"] = "some/completely/unrelated/file.py"
+    result = verify_consumption(catalog, task_type="approval_ux", query="q", ledger=ledger)
+    assert result.status == "CONCLUSION_BLOCKED"
+    assert mismatched_item in result.unreviewed_sources
+
+
+def test_verify_consumption_fails_closed_on_decision_item_with_non_null_path(
+    catalog, monkeypatch
+):
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    ledger = _fully_reviewed_ledger(catalog, "approval_ux", "q")
+    decision_receipt = next(
+        r for r in ledger["review_receipts"] if r["item_id"].startswith("decision:")
+    )
+    decision_receipt["path"] = "not/actually/null.md"
+    result = verify_consumption(catalog, task_type="approval_ux", query="q", ledger=ledger)
+    assert result.status == "CONCLUSION_BLOCKED"
+    assert decision_receipt["item_id"] in result.unreviewed_sources
+
+
+def test_verify_consumption_fails_closed_on_unknown_item_id(catalog, monkeypatch):
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    ledger = _fully_reviewed_ledger(catalog, "approval_ux", "q")
+    # An extra receipt for an item that isn't in this profile's mandatory
+    # tier at all must not be silently accepted.
+    ledger["review_receipts"].append(
+        _receipt(
+            "code:totally/not/a/real/mandatory/path.py",
+            commit="deadbee", branch="claude/test-branch", profile="approval_ux", query="q",
+        )
+    )
+    result = verify_consumption(catalog, task_type="approval_ux", query="q", ledger=ledger)
+    assert result.status == "CONCLUSION_BLOCKED"
+
+
+def test_verify_consumption_fails_closed_on_duplicate_item_id_across_entries(
+    catalog, monkeypatch
+):
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    ledger = _fully_reviewed_ledger(catalog, "approval_ux", "q")
+    duplicated_item = ledger["review_receipts"][0]["item_id"]
+    # Same item covered by a second receipt — ambiguous, not "extra diligence".
+    ledger["review_receipts"].append(
+        _receipt(
+            duplicated_item, commit="deadbee", branch="claude/test-branch",
+            profile="approval_ux", query="q",
+        )
+    )
+    result = verify_consumption(catalog, task_type="approval_ux", query="q", ledger=ledger)
+    assert result.status == "CONCLUSION_BLOCKED"
+    assert duplicated_item in result.unreviewed_sources
+
+
+def test_verify_consumption_fails_closed_on_item_id_in_both_receipt_and_waiver(
+    catalog, monkeypatch
+):
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    profile = catalog.profiles["approval_ux"]
+    items = consumption_checklist(catalog, profile)
+    receipts = [
+        _receipt(item_id, commit="deadbee", branch="claude/test-branch", profile="approval_ux", query="q")
+        for item_id in items
+    ]
+    conflicting_waiver = _waiver(
+        items[0], commit="deadbee", branch="claude/test-branch", profile="approval_ux", query="q"
+    )
+    ledger = _ledger(
+        task_type="approval_ux", profile="approval_ux", query="q",
+        commit="deadbee", branch="claude/test-branch",
+        required_sources=items, review_receipts=receipts, waived_sources=[conflicting_waiver],
+    )
+    result = verify_consumption(catalog, task_type="approval_ux", query="q", ledger=ledger)
+    assert result.status == "CONCLUSION_BLOCKED"
+    assert items[0] in result.unreviewed_sources
+
+
+def test_verify_consumption_fails_closed_on_required_sources_mismatch(catalog, monkeypatch):
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    ledger = _fully_reviewed_ledger(catalog, "approval_ux", "q")
+    ledger["required_sources"] = ledger["required_sources"][:-1]
+    result = verify_consumption(catalog, task_type="approval_ux", query="q", ledger=ledger)
+    assert result.status == "CONCLUSION_BLOCKED"
+    assert any("required_sources does not match" in reason for reason in result.blocked_reasons)
+
+
+def test_verify_consumption_fails_closed_on_production_claim_mismatch(catalog, monkeypatch):
+    # A ledger authored for a production claim, verified without
+    # --production-claim, must not silently shrink the mandatory tier and
+    # pass — that would let evidence review go unverified.
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    ledger = _fully_reviewed_ledger(catalog, "approval_ux", "q", production_claim=True)
+    result = verify_consumption(
+        catalog, task_type="approval_ux", query="q", ledger=ledger, production_claim=False
+    )
+    assert result.status == "CONCLUSION_BLOCKED"
+    assert any("production_claim" in reason for reason in result.blocked_reasons)
+
+
+def test_verify_consumption_succeeds_with_matching_production_claim(catalog, monkeypatch):
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    ledger = _fully_reviewed_ledger(catalog, "approval_ux", "q", production_claim=True)
+    result = verify_consumption(
+        catalog, task_type="approval_ux", query="q", ledger=ledger, production_claim=True
+    )
+    assert result.status == "CONSUMPTION: COMPLETE"
+    assert any(item_id.startswith("evidence:") for item_id in ledger["required_sources"])
+
+
+@pytest.mark.parametrize(
+    "field", ["commit", "branch", "profile", "query", "reviewed_by", "reviewed_at"]
+)
+def test_verify_consumption_fails_closed_on_empty_attribution_field(catalog, monkeypatch, field):
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    ledger = _fully_reviewed_ledger(catalog, "approval_ux", "q")
+    mismatched_item = ledger["review_receipts"][0]["item_id"]
+    ledger["review_receipts"][0][field] = ""
+    result = verify_consumption(catalog, task_type="approval_ux", query="q", ledger=ledger)
+    assert result.status == "CONCLUSION_BLOCKED"
+    assert mismatched_item in result.unreviewed_sources
 
 
 def test_verify_consumption_fails_closed_on_missing_waiver_approval(catalog, monkeypatch):

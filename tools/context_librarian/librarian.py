@@ -867,6 +867,7 @@ LEDGER_TOP_LEVEL_REQUIRED_FIELDS = frozenset(
         "task_type",
         "profile",
         "query",
+        "production_claim",
         "bundle_generated_commit",
         "bundle_generated_branch",
         "required_sources",
@@ -874,6 +875,34 @@ LEDGER_TOP_LEVEL_REQUIRED_FIELDS = frozenset(
         "waived_sources",
     }
 )
+# Fields whose only requirement is "present and a non-empty string" — every
+# required field except item_id/path, which get their own dedicated checks
+# (item_id against required_sources, path against item_id).
+_ATTRIBUTION_STRING_FIELDS = frozenset(
+    {
+        "commit",
+        "branch",
+        "profile",
+        "query",
+        "reviewed_by",
+        "reviewed_at",
+        "approved_by",
+        "approved_at",
+    }
+)
+
+
+def _expected_path_for_item(item_id: str) -> str | None:
+    """The path implied by an item id — the single source of truth a
+    receipt's own `path` field must agree with, so a receipt cannot claim
+    review of one item while its evidence actually points at another file.
+    """
+    prefix, _, rest = item_id.partition(":")
+    if prefix == "decision":
+        return None
+    if prefix == "expansion":
+        return rest.partition("#")[0]
+    return rest
 # case-insensitive, stripped — a "placeholder-looking" waiver reason (5.3) is
 # rejected the same as an empty one; this is a small, explicit denylist, not
 # an attempt at general prose-quality detection.
@@ -900,6 +929,7 @@ def _validate_ledger_entry(
     required_fields: frozenset[str],
     ledger: dict[str, Any],
     kind: str,
+    required_sources: set[str],
     reasons: list[str],
 ) -> tuple[str | None, bool]:
     if not isinstance(entry, dict):
@@ -922,12 +952,33 @@ def _validate_ledger_entry(
         return item_id, False
 
     valid = True
+    if not isinstance(item_id, str) or item_id not in required_sources:
+        reasons.append(
+            f"{kind} entry has item_id {item_id!r}, which is not in this "
+            "profile+query's mandatory tier (required_sources) right now"
+        )
+        # No expected path to check against an unrecognised item_id — bail
+        # out of this entry's remaining checks, it cannot be counted anyway.
+        return item_id, False
+
+    expected_path = _expected_path_for_item(item_id)
+    if entry["path"] != expected_path:
+        reasons.append(
+            f"{kind} entry {item_id} has path {entry['path']!r}, expected "
+            f"{expected_path!r} (path must match the item_id it claims to review)"
+        )
+        valid = False
+
     for field in ("reason", "evidence_reference"):
         if not isinstance(entry[field], str):
             reasons.append(f"{kind} entry {item_id} {field} must be a string")
             valid = False
         elif not entry[field].strip():
             reasons.append(f"{kind} entry {item_id} has empty {field}")
+            valid = False
+    for field in sorted(_ATTRIBUTION_STRING_FIELDS & required_fields):
+        if not isinstance(entry[field], str) or not entry[field].strip():
+            reasons.append(f"{kind} entry {item_id} {field} must be a non-empty string")
             valid = False
     if not valid:
         # reason/evidence_reference are used as a dict key below (duplicate
@@ -1015,6 +1066,17 @@ def verify_consumption(
     warnings: list[str] = []
 
     live = _git_provenance(catalog.repo_root)
+    declared_production_claim = ledger.get("production_claim")
+    if not isinstance(declared_production_claim, bool):
+        reasons.append("ledger production_claim must be a boolean")
+    elif declared_production_claim != production_claim:
+        reasons.append(
+            f"ledger production_claim ({declared_production_claim}) does not match "
+            f"the --production-claim this verification was run with ({production_claim}) "
+            "— a ledger authored for a production claim must be verified with "
+            "--production-claim, and vice versa, or evidence review can be silently "
+            "skipped"
+        )
     top_identity_ok = (
         ledger["bundle_generated_commit"] == live["commit"]
         and ledger["bundle_generated_branch"] == live["branch"]
@@ -1030,29 +1092,56 @@ def verify_consumption(
         )
 
     required_sources = consumption_checklist(catalog, profile, production_claim=production_claim)
+    required_sources_set = set(required_sources)
+
+    declared_required = ledger["required_sources"]
+    if not all(isinstance(item, str) for item in declared_required):
+        reasons.append("ledger required_sources must be a list of strings")
+    elif set(declared_required) != required_sources_set:
+        reasons.append(
+            "ledger required_sources does not match the live-recomputed mandatory "
+            f"tier for this profile+query: missing_from_ledger="
+            f"{sorted(required_sources_set - set(declared_required))}, "
+            f"extra_in_ledger={sorted(set(declared_required) - required_sources_set)}"
+        )
+
+    all_entries = list(ledger["review_receipts"]) + list(ledger["waived_sources"])
+    item_id_counts: dict[str, int] = {}
+    for entry in all_entries:
+        if isinstance(entry, dict) and isinstance(entry.get("item_id"), str):
+            item_id_counts[entry["item_id"]] = item_id_counts.get(entry["item_id"], 0) + 1
+    duplicated_item_ids = {item_id for item_id, count in item_id_counts.items() if count > 1}
+    if duplicated_item_ids:
+        reasons.append(
+            "item_id appears in more than one review_receipts/waived_sources entry "
+            f"combined (exactly one entry per item is required): "
+            f"{sorted(duplicated_item_ids)}"
+        )
 
     accounted_ids: set[str] = set()
     duplicate_groups: dict[tuple[str, str], list[str]] = {}
     for entry in ledger["review_receipts"]:
         item_id, valid = _validate_ledger_entry(
-            entry, REVIEW_RECEIPT_REQUIRED_FIELDS, ledger, "review_receipts", reasons
+            entry, REVIEW_RECEIPT_REQUIRED_FIELDS, ledger, "review_receipts",
+            required_sources_set, reasons,
         )
-        if valid and item_id:
+        if valid and item_id and item_id not in duplicated_item_ids:
             accounted_ids.add(item_id)
             duplicate_groups.setdefault(
                 (entry["reason"], entry["evidence_reference"]), []
             ).append(item_id)
     for entry in ledger["waived_sources"]:
         item_id, valid = _validate_ledger_entry(
-            entry, WAIVED_SOURCE_REQUIRED_FIELDS, ledger, "waived_sources", reasons
+            entry, WAIVED_SOURCE_REQUIRED_FIELDS, ledger, "waived_sources",
+            required_sources_set, reasons,
         )
-        if valid and item_id:
+        if valid and item_id and item_id not in duplicated_item_ids:
             accounted_ids.add(item_id)
             duplicate_groups.setdefault(
                 (entry["reason"], entry["evidence_reference"]), []
             ).append(item_id)
 
-    unreviewed = sorted(set(required_sources) - accounted_ids)
+    unreviewed = sorted(required_sources_set - accounted_ids)
     if unreviewed:
         reasons.append(f"unreviewed_sources: {unreviewed}")
 
