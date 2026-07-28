@@ -184,10 +184,11 @@ checkable reason (Section 6) **and** independent reviewer approval — a
 self-attested waiver alone is never sufficient, on any task, regardless of
 risk tier; the independent-review trigger above exists specifically so a
 waiver is never accepted at face value. **A waiver expires** the moment the
-bundle's `commit`, `profile`, or `query` changes — it is scoped to the
-exact task identity it was reviewed against (5.2/5.3's identity fields),
-not to the task in the abstract; a changed identity requires a fresh
-waiver and fresh independent approval, not a carried-over one.
+bundle's `commit`, `branch`, `profile`, or `query` changes — it is scoped
+to the exact task identity it was reviewed against (5.2/5.3's four
+identity fields), not to the task in the abstract; a changed identity
+requires a fresh waiver and fresh independent approval, not a carried-over
+one.
 
 For everything else — routine, low-risk, investigation-only tasks with no
 completion claim and no waivers — Option A's self-attested, internally-
@@ -303,8 +304,8 @@ Illustrative shape:
       "query": "lead routing",
       "reviewed_by": "claude-sonnet-5 / session <id>",
       "reviewed_at": "2026-07-28T15:00:00Z",
-      "reason": "no ActionContract/ActionGateway import or shared identifier touched by this task; confirmed by grep of the changed files",
-      "evidence_reference": "grep output: zero matches for ActionContract|ActionGateway in the changed files",
+      "reason": "core/lead_candidate_handler.py mentions ActionContract/ActionGateway only in comments/docstrings/log strings, never as an import or a class/function-level dependency — confirmed the distinction actually holds before using it as an illustrative example, not a claim about this planning document, which discusses those identifiers narratively throughout",
+      "evidence_reference": "grep -n '^import\\|^from' core/lead_candidate_handler.py -> no ActionContract/ActionGateway import; grep -n 'class ActionContract\\|class ActionGateway' core/lead_candidate_handler.py -> zero matches (illustrative; scoped to import/class-level coupling, not textual mentions)",
       "approved_by": "independent-reviewer-agent / session <id>",
       "approved_at": "2026-07-28T15:04:00Z"
     }
@@ -325,6 +326,19 @@ canonical-decision entry has no literal file path to key on. Each
 and timestamp, never the same identity as `reviewed_by` — per Section 4's
 approved rule that self-attestation alone is never sufficient for a
 waiver.
+
+**Top-level vs. per-item identity — both validated, not just one.** The
+ledger's top-level `bundle_generated_commit`/`bundle_generated_branch`/
+`profile`/`query` are the single canonical identity for the whole ledger;
+`verify-consumption` (5.3) checks that tuple against a bundle actually
+recomputable right now. Every `review_receipts`/`waived_sources` entry's
+own `commit`/`branch`/`profile`/`query` fields must then equal that
+top-level tuple exactly — an entry that disagrees with its own ledger's
+declared identity is rejected the same as one that disagrees with the live
+bundle, since disagreeing with the (now-validated) top level transitively
+means disagreeing with the live bundle too. This closes a real gap: without
+this check, a ledger could carry a correct top-level identity while one
+entry silently carried a stale or forged identity of its own.
 
 `unreviewed_sources` and the overall pass/fail status are **never written
 by the agent** — they are computed exclusively by `verify-consumption`
@@ -376,28 +390,55 @@ this agent, on this commit" — consistent with
 **5.3 New CLI subcommand:**
 `python -m tools.context_librarian verify-consumption --task-type <id> --query <q> --ledger <path>`
 
+- **Canonical checkout identity, specified explicitly (closes a real CI
+  ambiguity):** `verify-consumption` compares the ledger's recorded
+  `commit` against the **PR head SHA**
+  (`github.event.pull_request.head.sha`), never the default
+  `pull_request`-event checkout, which is a synthetic merge ref/detached
+  `HEAD` that does not equal the commit the agent actually worked from.
+  Any CI job that runs `verify-consumption` must check out that exact SHA
+  explicitly (`actions/checkout@v4` with `ref:
+  ${{ github.event.pull_request.head.sha }}`), not rely on the workflow's
+  default ref — otherwise every ledger would spuriously mismatch in CI
+  regardless of correctness. Outside CI (local runs), `commit` is simply
+  `git rev-parse HEAD`.
 - Recomputes the same `required_sources` set 5.1 defines for that exact
   profile, query, and current commit — reusing `_select_nodes()` and the
   profile fields directly; no parallel selection logic.
 - Computes `unreviewed_sources = required_sources − (item_ids in
   review_receipts ∪ item_ids in waived_sources)`.
+- Validates the ledger's **top-level** `bundle_generated_commit`/
+  `bundle_generated_branch`/`profile`/`query` against the live-recomputed
+  bundle first (per 5.2's top-level-vs-per-item note), then validates
+  every `review_receipts`/`waived_sources` entry's own identity fields
+  against that same top-level tuple — both checks must pass, not just one.
 - Reports `CONCLUSION_BLOCKED` (exit 2) and lists `unreviewed_sources` by
   name when that set is non-empty, or when: a `review_receipts`/
   `waived_sources` entry is missing `commit`/`branch`/`profile`/`query`/
   `reviewed_by`/`reviewed_at`/`reason`/`evidence_reference`; a
   `waived_sources` entry is additionally missing `approved_by`/
   `approved_at`, or `approved_by` equals `reviewed_by` (self-approval is
-  not independent approval); any of the four identity fields
-  (`commit`/`branch`/`profile`/`query`) does not match a bundle actually
-  recomputable right now for that exact profile+query — this is also how a
-  waiver expires (Section 4/5.2): a changed identity field means the
-  approved waiver no longer applies, same as a stale receipt; a waiver's
-  `reason` is empty or placeholder-looking; or the ledger sets
-  `unreviewed_sources` or a pass/fail field directly (a forged computed
-  field, rejected outright).
+  not independent approval); the ledger's top-level identity, or any
+  entry's identity, does not match a bundle actually recomputable right
+  now for that exact profile+query — this is also how a waiver expires
+  (Section 4/5.2): a changed identity field means the approved waiver no
+  longer applies, same as a stale receipt; a waiver's `reason` is empty or
+  placeholder-looking; or the ledger sets `unreviewed_sources` or a
+  pass/fail field directly (a forged computed field, rejected outright).
+- **Duplicate/boilerplate evidence — deterministic, non-blocking outcome
+  (resolves an earlier draft's ambiguity):** identical `reason`/
+  `evidence_reference` strings repeated across items produce a `WARNING`
+  line naming the affected items, printed alongside a `CONSUMPTION:
+  COMPLETE` result — exit code and pass/fail status are unaffected. This
+  is deliberately a warning, not `CONCLUSION_BLOCKED`, because the
+  heuristic (string equality) can have legitimate false positives (two
+  genuinely-reviewed items can honestly share similar phrasing); it exists
+  to surface a smell for human/reviewer attention, not to fail a ledger
+  outright the way a missing or forged field does.
 - Reports `CONSUMPTION: COMPLETE` (exit 0) only when `unreviewed_sources`
-  is empty and every receipt/waiver's identity fields match the
-  live-recomputed bundle.
+  is empty and every identity check (top-level and per-item) passes —
+  optionally with a `WARNING` line for duplicate evidence, which does not
+  change the exit code.
 
 **5.4 `AGENT_CONSUMPTION_CONTRACT.md` changes:** a new "Consumption Ledger"
 section between the existing "Context expansion record" and "After coding"
@@ -406,7 +447,7 @@ every governed task; the fail-closed rule ("no final conclusion is
 permitted while `verify-consumption` reports `CONCLUSION_BLOCKED` for the
 active bundle"); the waiver bar (a specific, checkable reason **and**
 independent reviewer approval — never self-attested alone — expiring the
-moment commit/profile/query changes); the mandatory-review trigger rule
+moment commit/branch/profile/query changes); the mandatory-review trigger rule
 from Section 4; and the explicit caveat that a clean ledger proves
 accounting completeness, never comprehension or correctness.
 
@@ -482,10 +523,13 @@ exists."
   one; flagged explicitly rather than oversold as solved.
 - **Rubber-stamp ledger** — every item covered by a receipt with an
   identical, non-specific `reason`/`evidence_reference` ("reviewed the
-  file"). Mitigation: `verify-consumption` can reject empty, too-short, or
-  duplicated-across-items `reason`/`evidence_reference` strings as a weak
-  heuristic (Section 7); the real backstop is the risk-gated mandatory
-  review in Section 4, which does not trust the ledger's content at all.
+  file"). `verify-consumption` rejects empty `reason`/`evidence_reference`
+  outright (a hard `CONCLUSION_BLOCKED`, not a heuristic), and prints a
+  non-blocking `WARNING` for duplicated-across-items strings (5.3) — a
+  weak heuristic by design, since it can false-positive on genuinely
+  similar legitimate phrasing. The real backstop is the risk-gated
+  mandatory review in Section 4, which does not trust the ledger's
+  content at all.
 - **Ledger built against the wrong bundle** (different commit, branch,
   profile, or query) — mitigated by the live commit/branch/profile/query
   cross-check in 5.3, exercised by four separate regression tests (Section
@@ -586,9 +630,16 @@ Following the existing house test-naming convention in
   expiry rule is enforced by the same identity check as a stale receipt.
 - `test_verify_consumption_succeeds_when_all_mandatory_items_accounted_for(tmp_path)` —
   a fully valid ledger exits 0 and prints `CONSUMPTION: COMPLETE`.
-- `test_verify_consumption_flags_duplicate_boilerplate_evidence_across_items(tmp_path)` —
-  every item sharing the exact same `reason`/`evidence_reference` is
-  flagged (documented as a weak heuristic, not a strong guarantee).
+- `test_verify_consumption_warns_on_duplicate_boilerplate_evidence_across_items(tmp_path)` —
+  every item sharing the exact same `reason`/`evidence_reference` prints a
+  `WARNING` line naming them, but still exits 0 with `CONSUMPTION:
+  COMPLETE` — confirms the deterministic warn-only (not blocking) outcome
+  (5.3), a weak heuristic by design.
+- `test_verify_consumption_validates_top_level_identity_independently_of_per_item(tmp_path)` —
+  a ledger whose top-level `bundle_generated_commit`/`branch`/`profile`/
+  `query` mismatches the live bundle reports `CONCLUSION_BLOCKED` even
+  when every per-item entry's own identity fields look internally
+  consistent with each other (5.2/5.3's top-level-vs-per-item check).
 - `test_cli_verify_consumption_subcommand_exists_and_is_wired(capsys)` —
   mirrors `test_phase0_cli_commands_remain_compatible`.
 - `test_bounded_local_expansion_gains_stable_item_id_and_required_for_conclusion_without_changing_existing_output(catalog)` —
@@ -629,10 +680,9 @@ Following the existing house test-naming convention in
   for a real task):** promote the approved mandatory-review trigger rule
   (Section 4) into a hard "must" in `AGENT_CONSUMPTION_CONTRACT.md`, and
   wire the CI step (5.7) that runs `verify-consumption`, uploads the
-  ledger as a build artifact, and fails on `CONCLUSION_BLOCKED`. Whether
-  this CI step is blocking from day one or starts as a warn-only bake-in
-  period remains open (Section 9) — the owner approved the overall design,
-  not this specific rollout-timing detail.
+  ledger as a build artifact, and **fails the job** on
+  `CONCLUSION_BLOCKED` — blocking from day one, decided (Section 9), not
+  a warn-only bake-in period.
 - **Phase 4 (deferred, per owner decision):** evaluate Option C
   (harness-level hook tracking) as its own separately-scoped proposal,
   informed by whether Phases 1–3 show the rubber-stamp or self-approved-
@@ -685,7 +735,7 @@ Resolved:
 - ✅ **Waiver rules approved and strengthened:** every waiver requires a
   specific reason **and** independent reviewer approval (`approved_by` ≠
   `reviewed_by`), with no low-risk exception; a waiver expires the moment
-  the bundle's commit, profile, or query changes (Section 4/5.2).
+  the bundle's commit, branch, profile, or query changes (Section 4/5.2).
 - ✅ **Ledger location approved, reversing an earlier draft:** disposable
   and local, uploaded as a CI artifact rather than committed; the PR body
   records only the verification result and an artifact reference (5.2).
@@ -706,12 +756,16 @@ Resolved:
   merged it independently of this plan's own rollout (5.6, Section 8 Phase
   2).
 
+- ✅ **CI enforcement mode decided: blocking from the start, not a
+  warn-only bake-in.** (Resolves an earlier draft's self-contradiction
+  between 5.7 and this section.) Once Phase 3 wires the CI step, it fails
+  the job on `CONCLUSION_BLOCKED` — consistent with `CONCLUSION_BLOCKED`
+  being a hard, fail-closed gate everywhere else in this design (mirroring
+  `--assert-main`'s existing fail-closed precedent), not a soft advisory
+  status. There is no separate warn-only phase to design or remove later.
+
 Still open (narrower, mechanical, deferred to the Phase 1 implementation PR):
 
-- Whether CI's `verify-consumption` step (5.7) is blocking from the moment
-  it is wired (Phase 3) or starts as a warn-only bake-in period first —
-  the owner approved the overall design, not this specific rollout-timing
-  detail.
 - Whether the optional `bounded_local_expansions` `item_id` and
   `required_for_conclusion` fields (5.5) should be added ahead of Phase 1
   as their own small, additive schema change, or land together with

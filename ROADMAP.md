@@ -20,8 +20,8 @@ code reference ו-evidence scope; provenance מבחין בין `on_main_history`
 `at_origin_main_tip` תוך שמירת ה-alias התואם-לאחור `on_main`. בדיקות ה-provenance
 משתמשות רק ב-`origin/main` המקומי (ללא fetch אוטומטי); היעדר `origin/main` מחזיר
 `unknown` וה-assertion המתאים נכשל-סגור. **Codex הסיר בעצמו את
-`SOURCE_CONSUMPTION_GATE_PLAN.md` (הצעת-תכנון מקבילה) לפני המיזוג**, ונדחה במפורש ל-PR
-#488 כמסמך-תכנון הקנוני היחיד — ללא כפילות.
+`SOURCE_CONSUMPTION_GATE_PLAN.md` (הצעת-תכנון מקבילה) לפני המיזוג**, ונדחה במפורש
+ל-`#488` כמסמך-תכנון הקנוני היחיד — ללא כפילות.
 עודכן: 28/07/2026 — **N17 עדכון: rerun ממוקד — האם התיקונים סגרו את 4 הכשלים שהפיילוט
 מצא?** (על `origin/main` ב-`ffde1d6`, אחרי PR #485+#486; לא ריצה חוזרת של הפיילוט — אין
 Gold Set חדש, אין blind review). לכל אחת מ-4 המשימות (לא `tool_execution` — PASS נקי):
