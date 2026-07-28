@@ -242,6 +242,16 @@ def test_approval_profile_includes_actioncontracts_and_turn_coordinator(catalog)
     assert "ActionContracts remains the sole source of truth" in bundle
 
 
+def test_turn_coordinator_bundle_maps_auto_capture_flag(catalog):
+    bundle = build_bundle(
+        catalog,
+        task_type="turn_coordinator_routing",
+        query="lead routing",
+    )
+    assert "FEATURE_AUTO_CAPTURE" in bundle
+    assert "feature_flags.py:98" in bundle
+
+
 def test_ux_profile_adds_rp5_only_for_evidence_claims(catalog):
     ordinary = build_bundle(
         catalog,
@@ -712,8 +722,45 @@ def test_assert_main_succeeds_when_proven_on_main(catalog, monkeypatch):
 
 def test_git_provenance_returns_known_shape(catalog):
     result = librarian._git_provenance(catalog.repo_root)
-    assert set(result) == {"commit", "branch", "on_main"}
+    assert {
+        "commit",
+        "branch",
+        "on_main",
+        "on_main_history",
+        "at_origin_main_tip",
+    } <= set(result)
     assert result["on_main"] in {"yes", "no", "unknown"}
+    assert result["on_main_history"] in {"yes", "no", "unknown"}
+    assert result["at_origin_main_tip"] in {"yes", "no", "unknown"}
+
+
+def test_provenance_distinguishes_history_from_origin_tip(catalog, monkeypatch):
+    monkeypatch.setattr(
+        librarian,
+        "_git_provenance",
+        lambda _root: {
+            "commit": "oldcommit",
+            "branch": "feature-x",
+            "on_main": "yes",
+            "on_main_history": "yes",
+            "at_origin_main_tip": "no",
+        },
+    )
+    historical = build_bundle(
+        catalog,
+        task_type="rp5_evidence_mismatch",
+        query="evidence mismatch",
+        assert_on_main_history=True,
+    )
+    assert "on_main_history: yes" in historical
+    assert "at_origin_main_tip: no" in historical
+    with pytest.raises(ContextLibrarianError, match="origin-main-tip"):
+        build_bundle(
+            catalog,
+            task_type="rp5_evidence_mismatch",
+            query="evidence mismatch",
+            assert_at_origin_main_tip=True,
+        )
 
 
 def test_output_is_deterministic_including_provenance_and_expansion(catalog):
