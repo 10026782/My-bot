@@ -1,14 +1,17 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 28/07/2026 — **N17 עדכון: non-inferiority pilot advancement (סעיף 5) — 5/5 משימות
-עם Gold Set בלתי-תלוי + מחקר Librarian-track + סקירה עצמאית, ענף
-`claude/context-librarian-non-inferiority-pilot`, טרם מוזג. התקדמות ממשית, לא acceptance —
-1/5 PASS נקי, 4/5 עם ממצאי גילוי-חסר עד Critical. אין implementation לשלושת הבאגים האמיתיים
-שנחשפו (BUG-150, fail-open ב-ActionGateway, BUG-130/140) — חסומים ע"י
-CROSS_LAYER_AUTHORITY_CONTRACT_V1.md. ראה N17 למטה לפירוט.**
+עודכן: 28/07/2026 — **N17 עדכון: non-inferiority pilot advancement (סעיף 5) מוזג ל-`main`**
+(PR #483, ענף `claude/context-librarian-non-inferiority-pilot`, merge `51d370b`). אומת ב-grep
+ישירות על `origin/main`: `docs/context_librarian/PHASE1_NON_INFERIORITY_PILOT.md`'s
+"2026-07-28 non-inferiority pilot advancement" section, וארבעת ה-catalog nodes
+(`approvals`/`turn_coordinator`/`ux_f52`/`rp5`) עם `last_verified_commit: ffa678a7` — קיימים
+בפועל ב-`main`. **התקדמות ממשית, לא acceptance** — 1/5 PASS נקי, 4/5 עם ממצאי גילוי-חסר עד
+Critical. אין implementation לשלושת הבאגים האמיתיים שנחשפו (BUG-150, fail-open ב-ActionGateway,
+BUG-130/140) — חסומים ע"י CROSS_LAYER_AUTHORITY_CONTRACT_V1.md. ראה N17 למטה לפירוט.**
 עודכן: 28/07/2026 — **N17 עדכון: Verification Coverage Model plan (חצי מסעיף 6, תכנון בלבד)
-נכתב על ענף `claude/context-librarian-vcm-plan` — טרם מוזג. ראה N17 למטה לפירוט. אין
-implementation, אין nodes חדשים.**
+מוזג ל-`main`** (PR #482, ענף `claude/context-librarian-vcm-plan`, merge `ffa678a`). אומת
+ב-grep: `docs/context_librarian/VERIFICATION_COVERAGE_MODEL_PLAN.md` קיים ב-`origin/main`.
+ראה N17 למטה לפירוט. אין implementation, אין nodes חדשים.**
 עודכן: 28/07/2026 — **N17 עדכון: Librarian Hardening PR (סעיפים 1-3 + CI validation, סדר
 עבודה מחייב שלב 4) מוזג ל-`main` (PR #481, ענף `claude/context-librarian-hardening-n17`).
 אומת ב-grep ישירות על `origin/main`: `.json` catalog (10 קבצים), `_load_catalog_json`,
@@ -910,8 +913,8 @@ validation; known limitations; current rollout status. המטרה: השאלה "�
 הוא index ו-governance layer; הקוד, הנתונים והראיות נשארים מקורות האמת; bundle הוא mandatory
 minimum context, לא תחליף למקורות; אין להפוך את הספרן למקור אמת מקביל.**
 
-**עדכון 28/07/2026 — Verification Coverage Model plan (חצי מסעיף 6, תכנון בלבד), ענף
-`claude/context-librarian-vcm-plan`, טרם מוזג:** נכתב
+**עדכון 28/07/2026 — Verification Coverage Model plan (חצי מסעיף 6, תכנון בלבד) — ✅ מוזג
+ל-`main` (PR #482, merge `ffa678a`), אומת ב-grep:** נכתב
 `docs/context_librarian/VERIFICATION_COVERAGE_MODEL_PLAN.md` — מגדיר 6 ממדי coverage
 (schema conformance; freshness; production-evidence coverage; test-path coverage כולל
 pass/fail — הממד היחיד שדורש מנגנון חדש; authority-level justification; confidence
@@ -920,8 +923,9 @@ justification), איך זה יחושב דטרמיניסטית מה-catalog הק�
 (אין implementation, אין nodes חדשים, אין כתיבה אוטומטית ל-metadata). Dogfooding עצמו (כתיבת
 ה-nodes) נשאר משימה נפרדת עתידית — מסמך זה מכסה את חצי ה-VCM של סעיף 6 בלבד.
 
-**עדכון 28/07/2026 — non-inferiority pilot advancement (סעיף 5), ענף
-`claude/context-librarian-non-inferiority-pilot`, טרם מוזג — התקדמות ממשית, לא acceptance:**
+**עדכון 28/07/2026 — non-inferiority pilot advancement (סעיף 5) — ✅ מוזג ל-`main`** (PR #483,
+ענף `claude/context-librarian-non-inferiority-pilot`, merge `51d370b`), אומת ב-grep ישירות על
+`origin/main` **— התקדמות ממשית, לא acceptance:**
 תוקנו ישירות (grep+Read מול הקוד החי, לא הוסק מהמסמכים) ארבעת ה-nodes שהיו stale ב-preflight
 27/07 (`approvals`, `turn_coordinator`, `ux_f52`, `rp5` — `last_verified_commit`/`valid_from`
 רועננו, תוקנו ציטוטי שורה שסחפו). על בסיס זה, לכל חמש משימות ה-pilot: נבנה Authority Gold
@@ -930,8 +934,10 @@ Set בלתי-תלוי (subagent נפרד, ללא גישה לספרן/לשיחה 
 בחמישתן), בוצע מחקר Librarian-track עצמאי (פתיחת מקורות מצוטטים, הרצת בדיקות), ולבסוף
 subagent שני בלתי-תלוי סקר את המחקר מול ה-Gold Set. תוצאה: 1/5 (`tool_execution`) PASS
 נקי; 4/5 עם ממצאי גילוי-חסר בדרגות Medium עד **Critical** (כולל תיוג שגוי של commit/branch
-ב-`rp5_evidence_mismatch` — ה-`PROCEED` נכון רק לענף הזה, `main` עדיין לא כולל את ריענון
-ה-nodes). שלוש משימות חשפו באג אמיתי, מאושר-Gold-Set (`approval_ux`→BUG-150; `tool_execution`→
+ב-`rp5_evidence_mismatch` שהתגלה בזמן כתיבת ה-packet — באותו רגע ה-`PROCEED` היה נכון רק
+לענף ה-pilot, לא ל-`main`; לאחר מיזוג PR #483 גם `main` עצמו מציג כעת את אותם ארבעת nodes
+מרועננים, `last_verified_commit: ffa678a7`, אומת ב-grep). שלוש משימות חשפו באג אמיתי,
+מאושר-Gold-Set (`approval_ux`→BUG-150; `tool_execution`→
 fail-open ב-`_execute_contract`; `turn_coordinator_routing`→BUG-130/BUG-140) — כולן בתחום ש-
 `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` מגדיר כ-mandatory gate (Durable Atomic Approval /
 ActionContract), ואין Cross-Layer Impact Matrix שלם לאף אחת — **לא בוצע implementation לאף
@@ -943,20 +949,20 @@ ActionContract), ואין Cross-Layer Impact Matrix שלם לאף אחת — **�
 
 **סדר עבודה מחייב:**
 1. ✅ להשלים ולמזג Re-verification Alignment (PR #475, `89e2b4e`).
-2. ✅ (היסטורי, `89e2b4e`) — נכון רק נכון לזמן המיזוג ההוא. עריכות ניסוח לא-קשורות ב-`app.py`
-   (PR #479/#480) הפכו שוב 4 מ-5 ה-nodes ל-stale לאחר מכן; `main` **לא** מציג כרגע חמש
-   PROCEED — ריענון ה-nodes קיים רק על ענף ה-pilot (`claude/context-librarian-non-inferiority-pilot`,
-   טרם מוזג, ראו סעיף 5 להלן). אין להסתמך על השורה הזו כראיה למצב `main` הנוכחי.
+2. ✅ (היסטורי, `89e2b4e`) — התקף מחדש לאחר מיזוג PR #483. עריכות ניסוח לא-קשורות ב-`app.py`
+   (PR #479/#480) הפכו שוב 4 מ-5 ה-nodes ל-stale זמנית; ריענון ה-nodes (PR #483, merge
+   `51d370b`) עכשיו על `main` עצמו — אומת ב-grep. `main` שוב מציג חמש PROCEED, לא רק ענף
+   ה-pilot.
 3. 🔲 להשלים Production Verification Plan (סעיף 4 לעיל).
 4. ✅ Librarian Hardening מוזג ל-`main` (PR #481): token estimation (סעיף 1); catalog
    format (סעיף 2); query/profile hardening (סעיף 3); CI validation. POST-MERGE
    VERIFICATION בוצע ישירות על `origin/main` (`AGENTS.md`) — כל הסמלים אומתו ב-grep.
-5. 🟡 non-inferiority pilot — **התקדמות ממשית, לא הושלם.** 5/5 משימות עם Gold Set +
-   מחקר + סקירה עצמאית (ענף `claude/context-librarian-non-inferiority-pilot`, טרם מוזג).
-   Phase 1 acceptance לא מבוסס — ראו עדכון 28/07 לעיל ואת המסמך המלא.
+5. 🟡 non-inferiority pilot — **✅ PR #483 מוזג ל-`main` (`51d370b`), התקדמות ממשית, לא
+   הושלם.** 5/5 משימות עם Gold Set + מחקר + סקירה עצמאית. Phase 1 acceptance עדיין לא
+   מבוסס — ראו עדכון 28/07 לעיל ואת המסמך המלא.
 6. 🔲 לתכנן Multi-session Coordination (סעיף 5) — תכנון בלבד לפני implementation.
-7. 🔲 VCM plan פתוח (ענף `claude/context-librarian-vcm-plan`, טרם מוזג) — תכנון בלבד, אין
-   implementation. Dogfooding (כתיבת nodes על הספרן עצמו) עדיין טרם תוכנן.
+7. ✅ VCM plan מוזג ל-`main` (PR #482, merge `ffa678a`) — תכנון בלבד, אין implementation.
+   Dogfooding (כתיבת nodes על הספרן עצמו) עדיין טרם תוכנן.
 
 **קבצים:** `docs/context_librarian/` (הספרן עצמו, כולל `TOKEN_ESTIMATION_BENCHMARK.md` החדש),
 `tools/context_librarian/librarian.py` (token estimation, catalog loading),
