@@ -7,6 +7,8 @@ Evidence baseline: `origin/main` `96cf6430ec8d6018742fdf8042f0146873071cfd` (17/
 
 **Erratum (27/07/2026, PR #471, `c64da20`, added by a Context Librarian metadata audit):** the "Public message API" section below anticipates PR 1 extending/adapting `ActionGateway.compose_status_reply()`/`GatewayReply` into the one channel-neutral formatter. What actually landed in PR #471 is a second, narrower canonical renderer, `ApprovalLifecycleResult` (`core/action_gateway.py`), produced by `build_approval_lifecycle_result()` and consumed by `approve_with_lifecycle_result()`/`reject_with_lifecycle_result()` — specifically for approval-lifecycle turns (queued/approved/rejected/completed/failed/multiple-pending), gated by `FEATURE_SINGLE_SPEAKER_APPROVAL_UX` (default off). It sits alongside `GatewayReply`/`compose_status_reply()` rather than replacing or being built from it; `display_payload` (`core/agent_message_formatter.py`) remains a separate, third contract for non-approval-lifecycle status turns. This document's "one public message-composition API" principle is not yet met as of `a885561d` — there are now two canonical approval-facing renderers, not one. Identifier/tool-name redaction in the new path is unconditional (BUG-118) and holds regardless of the flag.
 
+**Erratum (28/07/2026, D-012, planning-gate resolution — not yet implemented):** the two-canonical-renderers drift noted above is now formally closed at the planning level by `spec/MESSAGE_CONTRACT_ENVELOPE_CONTRACT_V1.md` ("Unified Message Contract Envelope — Behavior Contract V1") and `decisions/DECISION_LOG.md` D-012. The resolution is reconciliation, not deletion: `GatewayReply`/`ActionFact`, `ApprovalLifecycleResult`, and this document's `display_payload` all remain valid internal contracts, but going forward exactly one public presentation contract — `MessageContract` — is the sole input the UX formatter (`format_agent_message()`, still this document's "Semantic Formatter" stage) consumes; `display_payload` becomes `MessageContract.display_payload` verbatim, unchanged in shape. `ApprovalLifecycleResult` and `ActionFact`/`GatewayReply` reach `MessageContract` only through adapters (planned as separate PR B / PR C in `rollout/MESSAGE_CONTRACT_ENVELOPE_MIGRATION_PLAN.md`). This is a planning decision only — no code in this document's scope has changed, and PR #471's `ApprovalLifecycleResult` behavior is unmodified until PR B actually lands.
+
 ## Scope
 
 This standard governs only the conversion of verified internal state into text
@@ -38,11 +40,25 @@ into Telegram or WhatsApp action-status messages.
 
 ## Public message API
 
-F52 will expose one public message-composition API. The existing
+**Superseded by D-012 (28/07/2026) — see the 28/07/2026 erratum above.** The
+paragraph below is retained for history only; do not follow it for new work.
+
+~~F52 will expose one public message-composition API. The existing
 `ActionGateway.compose_status_reply()` is the preferred extension point because
 `GatewayReply` already establishes a single-speaker boundary. PR 1 must first
 extract or adapt this function into a channel-neutral formatter; it must not
-introduce a competing formatter.
+introduce a competing formatter.~~
+
+**Current guidance (D-012):** the one public presentation contract is
+`MessageContract` (`spec/MESSAGE_CONTRACT_ENVELOPE_CONTRACT_V1.md`), consumed
+only by `format_agent_message()` (the "Semantic Formatter" stage). `Action
+Gateway.compose_status_reply()`/`GatewayReply`, `ActionFact`, and
+`ApprovalLifecycleResult` are internal fact/result contracts, not public
+extension points — they reach the formatter only through adapters that
+produce a `MessageContract` (planned as separate PR B / PR C in
+`rollout/MESSAGE_CONTRACT_ENVELOPE_MIGRATION_PLAN.md`). `compose_status_reply()`
+itself is not deleted or rewritten by this decision; it becomes
+adapter/internal-only once PR C lands, not before.
 
 Internal state-specific handlers or a formatter registry are allowed behind the
 single public API.
