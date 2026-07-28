@@ -688,6 +688,35 @@ Following the existing house test-naming convention in
   informed by whether Phases 1–3 show the rubber-stamp or self-approved-
   waiver failure modes (Section 6) actually occurring in practice.
 
+### Phase 4 pilot cohort — use the Phase C backlog
+
+The Phase 4 pilot may use five representative tasks from the existing
+Phase C backlog as its real-task cohort. This reuses already-approved work;
+it does not merge the Phase C backlog into this planning document's
+implementation scope and does not authorize runtime or CLI changes.
+
+For each selected Phase C task, the agent must:
+
+1. declare the task, branch, mode, and planned paths before work;
+2. check open PRs, branches, and canonical documents for overlap;
+3. stop before creating a duplicate canonical artifact;
+4. update the declaration before a material scope expansion; and
+5. compare declared paths with the actual diff before commit.
+
+The pilot records:
+
+- overlaps detected before writing;
+- duplicate canonical artifacts avoided;
+- scope updates;
+- declared-path versus actual-diff mismatches;
+- review requests; and
+- coordination time and false-positive warnings.
+
+The Phase C task remains governed by its own ROADMAP item and acceptance
+criteria. This section only supplies a realistic pilot cohort for the
+lightweight coordination check; it does not replace the independent review
+and consumption-verification criteria below.
+
 ### Acceptance criteria for a new pilot on new tasks (after Phase 1 ships — not this pilot, not a re-run of the 28/07 pilot)
 
 A future pilot validating Consumption Enforcement itself, on tasks not used
