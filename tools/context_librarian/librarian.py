@@ -923,13 +923,21 @@ def _validate_ledger_entry(
 
     valid = True
     for field in ("reason", "evidence_reference"):
-        if not str(entry[field]).strip():
+        if not isinstance(entry[field], str):
+            reasons.append(f"{kind} entry {item_id} {field} must be a string")
+            valid = False
+        elif not entry[field].strip():
             reasons.append(f"{kind} entry {item_id} has empty {field}")
             valid = False
+    if not valid:
+        # reason/evidence_reference are used as a dict key below (duplicate
+        # detection) — a non-string value (e.g. a list) is unhashable, so a
+        # malformed entry must be rejected here, before it can reach that.
+        return item_id, False
     if (
         kind == "waived_sources"
-        and str(entry["reason"]).strip()
-        and _looks_like_placeholder_reason(str(entry["reason"]))
+        and entry["reason"].strip()
+        and _looks_like_placeholder_reason(entry["reason"])
     ):
         reasons.append(f"{kind} entry {item_id} has a placeholder-looking reason")
         valid = False

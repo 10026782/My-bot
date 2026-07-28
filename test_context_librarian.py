@@ -1231,6 +1231,22 @@ def test_verify_consumption_fails_closed_on_empty_waiver_reason(catalog, monkeyp
     assert items[0] in result.unreviewed_sources
 
 
+@pytest.mark.parametrize("field", ["reason", "evidence_reference"])
+def test_verify_consumption_fails_closed_on_non_string_reason_or_evidence(
+    catalog, monkeypatch, field
+):
+    # A non-string reason/evidence_reference (e.g. a list) must fail closed
+    # with a controlled CONCLUSION_BLOCKED, not crash — it is later used as a
+    # dict key for duplicate detection, where an unhashable type would raise
+    # an uncaught TypeError instead.
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    ledger = _fully_reviewed_ledger(catalog, "approval_ux", "q")
+    ledger["review_receipts"][0][field] = ["not", "a", "string"]
+    result = verify_consumption(catalog, task_type="approval_ux", query="q", ledger=ledger)
+    assert result.status == "CONCLUSION_BLOCKED"
+    assert ledger["review_receipts"][0]["item_id"] in result.unreviewed_sources
+
+
 def test_verify_consumption_fails_closed_on_missing_evidence_reference(catalog, monkeypatch):
     monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
     ledger = _fully_reviewed_ledger(catalog, "approval_ux", "q")
