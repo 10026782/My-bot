@@ -109,6 +109,18 @@ Bundles display four separate provenance sections:
 - test paths;
 - production evidence.
 
+Bundle provenance reports both `on_main_history` (the generated commit is an
+ancestor of `origin/main`) and `at_origin_main_tip` (the generated commit is
+exactly the current `origin/main` tip). `--assert-main` remains a backward-
+compatible alias for the history assertion; use `--assert-on-main-history` or
+`--assert-at-origin-main-tip` when the distinction matters.
+
+These checks use the repository's local `origin/main` ref only; the librarian
+does not run `git fetch` automatically. If that ref is unavailable,
+`at_origin_main_tip` is `unknown` and `--assert-at-origin-main-tip` fails
+closed. History assertion likewise fails closed when no usable main ref can be
+resolved.
+
 Repository code defaults are not production configuration proof. Production
 evidence entries always include a date, scope, status, and source path.
 

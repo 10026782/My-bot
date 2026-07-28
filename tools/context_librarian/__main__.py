@@ -43,10 +43,18 @@ def _parser() -> argparse.ArgumentParser:
         "--assert-main",
         action="store_true",
         help=(
-            "Fail closed unless generated_commit is a proven ancestor of "
-            "main; use when a claim about main's current state depends on "
-            "this bundle"
+            "Backward-compatible alias for --assert-on-main-history"
         ),
+    )
+    build.add_argument(
+        "--assert-on-main-history",
+        action="store_true",
+        help="Fail closed unless generated_commit is an ancestor of origin/main",
+    )
+    build.add_argument(
+        "--assert-at-origin-main-tip",
+        action="store_true",
+        help="Fail closed unless generated_commit equals origin/main",
     )
 
     suggest = sub.add_parser(
@@ -101,6 +109,8 @@ def main(argv: list[str] | None = None) -> int:
             production_claim=args.production_claim,
             verified_production_evidence=args.verified_production_evidence,
             assert_main=args.assert_main,
+            assert_on_main_history=args.assert_on_main_history,
+            assert_at_origin_main_tip=args.assert_at_origin_main_tip,
         )
         if args.output:
             output = args.output

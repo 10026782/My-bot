@@ -242,6 +242,16 @@ def test_approval_profile_includes_actioncontracts_and_turn_coordinator(catalog)
     assert "ActionContracts remains the sole source of truth" in bundle
 
 
+def test_turn_coordinator_bundle_maps_auto_capture_flag(catalog):
+    bundle = build_bundle(
+        catalog,
+        task_type="turn_coordinator_routing",
+        query="lead routing",
+    )
+    assert "FEATURE_AUTO_CAPTURE" in bundle
+    assert "feature_flags.py:98" in bundle
+
+
 def test_ux_profile_adds_rp5_only_for_evidence_claims(catalog):
     ordinary = build_bundle(
         catalog,
@@ -662,7 +672,7 @@ def test_bundle_provenance_reports_commit_branch_and_warns_off_main(catalog, mon
     )
     assert "generated_commit: `abc1234`" in bundle
     assert "generated_branch: `feature-x`" in bundle
-    assert "- on_main: no" in bundle
+    assert "- on_main_history: no" in bundle
     assert "WARNING: this bundle was NOT built from a commit proven to be on `main`" in bundle
 
 
@@ -675,7 +685,7 @@ def test_bundle_provenance_omits_warning_when_on_main(catalog, monkeypatch):
     bundle = build_bundle(
         catalog, task_type="rp5_evidence_mismatch", query="evidence mismatch"
     )
-    assert "- on_main: yes" in bundle
+    assert "- on_main_history: yes" in bundle
     assert "WARNING" not in bundle
 
 
@@ -707,13 +717,92 @@ def test_assert_main_succeeds_when_proven_on_main(catalog, monkeypatch):
         query="evidence mismatch",
         assert_main=True,
     )
-    assert "- on_main: yes" in bundle
+    assert "- on_main_history: yes" in bundle
 
 
 def test_git_provenance_returns_known_shape(catalog):
     result = librarian._git_provenance(catalog.repo_root)
-    assert set(result) == {"commit", "branch", "on_main"}
+    assert {
+        "commit",
+        "branch",
+        "on_main",
+        "on_main_history",
+        "at_origin_main_tip",
+    } <= set(result)
     assert result["on_main"] in {"yes", "no", "unknown"}
+    assert result["on_main_history"] in {"yes", "no", "unknown"}
+    assert result["at_origin_main_tip"] in {"yes", "no", "unknown"}
+
+
+def test_provenance_distinguishes_history_from_origin_tip(catalog, monkeypatch):
+    monkeypatch.setattr(
+        librarian,
+        "_git_provenance",
+        lambda _root: {
+            "commit": "oldcommit",
+            "branch": "feature-x",
+            "on_main": "yes",
+            "on_main_history": "yes",
+            "at_origin_main_tip": "no",
+        },
+    )
+    historical = build_bundle(
+        catalog,
+        task_type="rp5_evidence_mismatch",
+        query="evidence mismatch",
+        assert_on_main_history=True,
+    )
+    assert "on_main_history: yes" in historical
+    assert "at_origin_main_tip: no" in historical
+    assert "\n- on_main:" not in historical
+    with pytest.raises(ContextLibrarianError, match="origin-main-tip"):
+        build_bundle(
+            catalog,
+            task_type="rp5_evidence_mismatch",
+            query="evidence mismatch",
+            assert_at_origin_main_tip=True,
+        )
+
+
+def test_provenance_warns_when_history_is_current_but_tip_is_old(catalog, monkeypatch):
+    monkeypatch.setattr(
+        librarian,
+        "_git_provenance",
+        lambda _root: {
+            "commit": "oldcommit",
+            "branch": "feature-x",
+            "on_main": "yes",
+            "on_main_history": "yes",
+            "at_origin_main_tip": "no",
+        },
+    )
+    bundle = build_bundle(
+        catalog,
+        task_type="rp5_evidence_mismatch",
+        query="evidence mismatch",
+    )
+    assert "not the local `origin/main` tip" in bundle
+
+
+def test_origin_main_tip_assert_fails_closed_when_ref_is_missing(catalog, monkeypatch):
+    monkeypatch.setattr(
+        librarian,
+        "_git_provenance",
+        lambda _root: {
+            "commit": "oldcommit",
+            "branch": "feature-x",
+            "on_main": "yes",
+            "on_main_history": "yes",
+            "at_origin_main_tip": "unknown",
+        },
+    )
+    with pytest.raises(ContextLibrarianError, match="at-origin-main-tip"):
+        build_bundle(
+            catalog,
+            task_type="rp5_evidence_mismatch",
+            query="evidence mismatch",
+            assert_at_origin_main_tip=True,
+        )
 
 
 def test_output_is_deterministic_including_provenance_and_expansion(catalog):
@@ -792,3 +881,43 @@ def test_bounded_local_expansion_rejects_paths_outside_repo_root(
     _write_json(path, data)
     with pytest.raises(ContextLibrarianError, match=expected_message):
         load_catalog(REPO_ROOT)
+
+
+@pytest.mark.parametrize("absolute_path", ["/etc/passwd", "C:/etc/passwd"])
+def test_bounded_local_expansion_rejects_posix_and_windows_absolute_paths(
+    tmp_path, monkeypatch, absolute_path
+):
+    root = _isolated_catalog(tmp_path, monkeypatch)
+    path = root / "task_profiles/profiles.json"
+    data = _read_json(path)
+    profile = next(p for p in data["profiles"] if p["id"] == "approval_ux")
+    profile["bounded_local_expansions"] = [
+        {
+            "path": absolute_path,
+            "anchor": "root",
+            "window_lines": 5,
+            "role": "absolute path regression",
+        }
+    ]
+    _write_json(path, data)
+    with pytest.raises(ContextLibrarianError, match="must be relative"):
+        load_catalog(REPO_ROOT)
+
+
+def test_bounded_local_expansion_accepts_relative_path(tmp_path, monkeypatch):
+    root = _isolated_catalog(tmp_path, monkeypatch)
+    path = root / "task_profiles/profiles.json"
+    data = _read_json(path)
+    profile = next(p for p in data["profiles"] if p["id"] == "approval_ux")
+    profile["bounded_local_expansions"] = [
+        {
+            "path": "BUG_AUDIT_LOG.md",
+            "anchor": "BUG-130",
+            "window_lines": 5,
+            "role": "relative path regression",
+        }
+    ]
+    _write_json(path, data)
+    isolated_catalog = load_catalog(REPO_ROOT)
+    bundle = build_bundle(isolated_catalog, task_type="approval_ux", query="approval")
+    assert "relative path regression" in bundle

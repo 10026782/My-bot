@@ -109,10 +109,13 @@ Confirmed directly against `main` at `a205dea`:
 the `_should_auto_write()` function at lines 1150-1156
 (`return auto_capture and not existing_id` — the exact line the 28/07 pilot
 found turns BUG-130 into a silent, no-approval direct-write path when the
-flag is on). PR #487 confirmed by direct grep this is still absent. This is
-a distinct, smaller gap from the consumption-enforcement problem, but it is
-listed in this same plan because a checklist built today, before this one
-catalog fix, would silently under-list the mandatory set for this profile.
+flag is on). PR #487 confirmed by direct grep this was still absent as of
+`a205dea`. **Update:** this has since been fixed on `main` by the separate,
+independent PR #489 (merge `20914f2`) — not by this plan or PR #488. It
+remains described here, historically, because a checklist built before
+that catalog fix would have silently under-listed the mandatory set for
+this profile; the same reasoning is the general argument for Section 3's
+design options, independent of this one instance now being resolved.
 
 ## 3. Design options
 
@@ -232,17 +235,21 @@ bundle.
 the catalog.**
 
 Converges with the independent Codex audit's own
-`SOURCE_CONSUMPTION_GATE_PLAN.md` (same base commit, `origin/main` at
+`SOURCE_CONSUMPTION_GATE_PLAN.md` (proposed on `codex/context-librarian-audit-remediation`
+at commit `1e4be33`, same base commit as this PR, `origin/main` at
 `a205dea`), which independently proposed the same shape under the names
 `required_sources`/`review_receipt`/`waived_sources`/`unreviewed_sources`.
 This section adopts that vocabulary so the two independent plans converge
 on one model instead of diverging over naming — an encouraging cross-check,
 since two independent authors reached the same receipt-based structure.
-**This convergence is planning-only.** The actual code on
-`codex/context-librarian-audit-remediation` (the `on_main_history`/
+Codex itself removed that file before merging (PR #489, merge `20914f2`),
+explicitly deferring to this document as the canonical plan — there is no
+longer a duplicate planning doc on `main`. **This convergence is
+planning-only.** The rest of that same PR's code (the `on_main_history`/
 `at_origin_main_tip` provenance split, the `FEATURE_AUTO_CAPTURE` catalog
-entry, and a POSIX/Windows path-validation fix) is separate, real, unmerged
-code on a different branch — not part of PR #488, not applied by this
+entry, and a POSIX/Windows path-validation fix) **is now merged to `main`**
+(PR #489) — real, live code, but still not part of PR #488, not applied by
+this
 document, and nothing below should be read as claiming any of it is closed
 here.
 
@@ -376,8 +383,20 @@ additions under consideration:
   (5.1), defaulting to `true` for backward compatibility with every
   existing entry.
 
-**5.6 `turn_coordinator` `FEATURE_AUTO_CAPTURE` catalog gap — proposed
-patch (illustrative diff; NOT applied in this PR):**
+**5.6 `turn_coordinator` `FEATURE_AUTO_CAPTURE` catalog gap — RESOLVED
+elsewhere, kept here only as historical reasoning, not a pending action.**
+
+This gap (Section 2, "Secondary") was independently identified and fixed as
+real code on `codex/context-librarian-audit-remediation`, and that fix is
+now merged to `main` via PR #489 (`20914f2`) — `turn_coordinator.json`'s
+`feature_flags` list now includes `FEATURE_AUTO_CAPTURE` with
+`feature_flags.py:98`/`core/lead_candidate_handler.py:1118-1156` as its
+`code_reference`. The illustrative diff originally drafted here (before
+PR #489 merged) is kept below only so 5.1's checklist-scope reasoning
+stays self-contained and auditable against what this document originally
+identified — **it is no longer a proposal; it is a record of what this
+plan asked for and what PR #489 independently delivered, outside PR #488's
+own scope:**
 
 ```diff
    "feature_flags": [
@@ -392,14 +411,10 @@ patch (illustrative diff; NOT applied in this PR):**
    ]
 ```
 
-Confirmed via direct grep against current `main` (`a205dea`) before drafting
-this patch, not assumed from any prior document. **Note:** this exact
-catalog entry was independently identified and already applied as real,
-unmerged code on the separate `codex/context-librarian-audit-remediation`
-branch — not part of PR #488, not merged to `main`. The copy above remains
-illustrative and unapplied here, kept only so 5.1's checklist-scope
-reasoning is self-contained; it is not a claim that this fix is done by
-this document.
+Confirmed via direct grep against `main` (`a205dea`) at the time this plan
+was first drafted, not assumed from any prior document. PR #488 itself
+still applies none of this — the fix landed via PR #489, a separate,
+already-merged PR, not this planning document.
 
 **5.7 CI:** since the ledger is committed to the PR (5.2), CI can run
 `verify-consumption` directly against any
@@ -456,11 +471,12 @@ wired, not an "informational check that a ledger exists."
   which remains separately unplanned; this design does not make that
   problem worse.
 - **Backward compatibility** — `verify-consumption` must be strictly
-  additive/opt-in. None of the 62 currently-passing tests in
-  `test_context_librarian.py` (64 as of `codex/context-librarian-audit-remediation`,
-  unmerged), nor `build`/`suggest-profile`/`validate`'s existing output,
-  should need to change for this design to be implementable — a
-  de-risking property worth verifying explicitly in the implementation PR,
+  additive/opt-in. None of the 69 currently-passing tests in
+  `test_context_librarian.py` (62 when this plan was first drafted; now 69
+  on `main` after PR #489's merge), nor `build`/`suggest-profile`/
+  `validate`'s existing output, should need to change for this design to be
+  implementable — a de-risking property worth verifying explicitly in the
+  implementation PR,
   not assumed here.
 
 ## 7. Regression tests required (for the eventual implementation PR — none exist yet, none run now)
@@ -520,10 +536,12 @@ Following the existing house test-naming convention in
 - `test_production_evidence_only_required_with_production_claim(catalog)` —
   the same profile's checklist includes `evidence:*` ids with
   `--production-claim` and excludes them without it.
-- `test_turn_coordinator_feature_flags_includes_auto_capture(catalog)` — a
-  small regression test locking in the 5.6 patch once it is actually
-  applied in a future implementation PR; not part of this planning PR, and
-  the patch itself is not applied here either.
+- `test_turn_coordinator_feature_flags_includes_auto_capture(catalog)` —
+  originally proposed to lock in 5.6's patch; the underlying fix is now
+  merged via PR #489 (separate from this plan), so this specific test may
+  already be redundant with whatever regression coverage that PR added —
+  the implementation PR for this plan should check before adding a
+  duplicate.
 
 ## 8. Rollout plan
 
@@ -594,10 +612,10 @@ in the 28/07 pilot, should require, per task:
 - Whether CI's `verify-consumption` step (5.7) should be blocking from the
   moment it is wired (Phase 3) or start as informational/warning-only for
   a bake-in period first.
-- Sequencing of the `FEATURE_AUTO_CAPTURE` catalog patch (5.6): bundle with
-  Phase 1, or land immediately as its own tiny, independent PR — it depends
-  on nothing else in this plan, and an equivalent patch already exists as
-  real code on the separate Codex remediation branch.
+- ~~Sequencing of the `FEATURE_AUTO_CAPTURE` catalog patch (5.6)~~ —
+  **resolved by events, not by this plan**: PR #489 merged it to `main`
+  independently of Phase 1/2 sequencing, exactly as the "depends on nothing
+  else in this plan" framing anticipated.
 - Whether the optional `bounded_local_expansions` `item_id` and
   `required_for_conclusion` fields (5.5) should be added ahead of Phase 1
   as their own small, additive schema change, or deferred to land together
@@ -635,17 +653,20 @@ block is only the owner-decision gate.
    dependency on any Layer 1 module.
 
 ### Layer 2 — TurnCoordinator
-**touched: indirectly, narrowly, as illustrative catalog metadata only —
-not runtime.**
-- **input impact:** none — the proposed mechanism reads
-  `turn_coordinator.json`'s existing declared fields (`code_paths`,
-  `feature_flags`) the same way `build_bundle()` already does; it adds no
-  new required input to the profile.
-- **output impact:** 5.6 proposes (illustrative diff, **not applied**)
-  adding a `FEATURE_AUTO_CAPTURE` entry to `turn_coordinator`'s
-  `feature_flags` list — pure catalog metadata describing an **existing**
-  flag (`feature_flags.py:98`), not a new flag, not a behavior change to
-  `core/lead_candidate_handler.py` itself.
+**touched: not touched by this document at all** — this document adds no
+code, no catalog change, no schema change (unchanged from the top-of-file
+status). Historical note only: Section 5.6 originally proposed an
+illustrative, unapplied `FEATURE_AUTO_CAPTURE` catalog patch; that exact
+patch has since landed as real, merged code via the separate PR #489, not
+via this document. Proof, for completeness:
+- **input impact:** none — this document reads no catalog file at all; it
+  is prose only.
+- **output impact:** none from this document itself. The
+  `FEATURE_AUTO_CAPTURE` entry now on `main` (`turn_coordinator.json`,
+  post PR #489) is pure catalog metadata describing an **existing** flag
+  (`feature_flags.py:98`), not a new flag, not a behavior change to
+  `core/lead_candidate_handler.py` — and it was authored and merged outside
+  this document's own change set.
 - **authority impact:** none — this document does not change
   `_should_auto_write()`'s behavior and does not touch BUG-130/BUG-140's
   actual routing logic; both are explicit non-goals.
@@ -656,9 +677,11 @@ not runtime.**
 - **failure semantics:** n/a — no runtime path exercises this document's
   proposals yet.
 - **observability:** none added.
-- **cross-layer tests:** `test_turn_coordinator_feature_flags_includes_auto_capture`
-  (Section 7) is proposed for the future implementation PR that applies
-  5.6 — not run by this planning PR.
+- **cross-layer tests:** Section 7 originally proposed
+  `test_turn_coordinator_feature_flags_includes_auto_capture` to lock in
+  5.6's patch once applied; that test's subject matter is now real on
+  `main` via PR #489, though the specific test itself is not part of this
+  planning PR either way.
 
 ### Layer 3 — F52 / Phase 4C Action & Tool Contract
 **touched: not touched.** Proof of non-impact:
@@ -716,11 +739,10 @@ evidence-shadow layer miss). The proposed mechanism does not touch
   remains not established, unchanged from
   `PHASE1_NON_INFERIORITY_PILOT.md`'s existing determination.
 - No claim that the cross-platform path-validation fix, the
-  `on_main_history`/`at_origin_main_tip` provenance split, or the applied
-  `FEATURE_AUTO_CAPTURE` catalog entry are closed by this PR — all three
-  are real, unmerged code on the separate
-  `codex/context-librarian-audit-remediation` branch, outside this
-  document's scope.
+  `on_main_history`/`at_origin_main_tip` provenance split, or the
+  `FEATURE_AUTO_CAPTURE` catalog entry are closed **by this PR** — all
+  three are real code, now merged to `main` via the separate, independent
+  PR #489, not by anything in PR #488 or this document.
 - No PR implementing any part of Sections 5–8 until (a) this plan is
   reviewed and Section 9's owner-decisions are resolved, and (b) the
   parallel, independent Codex audit is received and checked, per explicit

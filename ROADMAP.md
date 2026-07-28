@@ -6,9 +6,20 @@ implementation, אין שינוי runtime.** נכתב על `origin/main` לאח�
 ש-PR #487 מצא ("investigation discipline... a catalog fix cannot structurally guarantee").
 ראה `docs/context_librarian/CONSUMPTION_ENFORCEMENT_PLAN.md` לפירוט מלא (9 סעיפים: הבעיה,
 root cause, design options, החלטה מומלצת, schema/CLI מוצע, failure modes, regression tests,
-rollout plan, מה מחייב owner). **אין תיקון ל-BUG-130/BUG-140/BUG-150/fail-open; אין ריצה
-חוזרת של הפיילוט. אין לפתוח PR implementation לפני קבלת ובדיקת audit בלתי-תלוי של Codex
-שמתבצע במקביל** — תנאי מפורש מהמשתמש.
+rollout plan, מה מחייב owner; כולל Cross-Layer Impact Matrix ו-`STATUS: PLANNING BLOCKED`
+עד להכרעת owner). **אין תיקון ל-BUG-130/BUG-140/BUG-150/fail-open; אין ריצה חוזרת של
+הפיילוט. אין לפתוח PR implementation לפני קבלת ובדיקת audit בלתי-תלוי של Codex** — תנאי
+מפורש מהמשתמש.
+עודכן: 28/07/2026 — **N17 Context Librarian remediation — ✅ מוזג ל-`main`** (PR #489,
+ענף `codex/context-librarian-audit-remediation`, מיזוג `20914f2`): cross-platform
+bounded-local-expansion path validation מטפל עכשיו עקבית בנתיבי POSIX ו-Windows מוחלטים
+ושומר נתיבים יחסיים תקינים; `FEATURE_AUTO_CAPTURE` ממופה ב-`layer.turn_coordinator` עם
+code reference ו-evidence scope; provenance מבחין בין `on_main_history` ל-
+`at_origin_main_tip` תוך שמירת ה-alias התואם-לאחור `on_main`. בדיקות ה-provenance
+משתמשות רק ב-`origin/main` המקומי (ללא fetch אוטומטי); היעדר `origin/main` מחזיר
+`unknown` וה-assertion המתאים נכשל-סגור. **Codex הסיר בעצמו את
+`SOURCE_CONSUMPTION_GATE_PLAN.md` (הצעת-תכנון מקבילה) לפני המיזוג**, ונדחה במפורש ל-PR
+#488 כמסמך-תכנון הקנוני היחיד — ללא כפילות.
 עודכן: 28/07/2026 — **N17 עדכון: rerun ממוקד — האם התיקונים סגרו את 4 הכשלים שהפיילוט
 מצא?** (על `origin/main` ב-`ffde1d6`, אחרי PR #485+#486; לא ריצה חוזרת של הפיילוט — אין
 Gold Set חדש, אין blind review). לכל אחת מ-4 המשימות (לא `tool_execution` — PASS נקי):
@@ -1020,14 +1031,21 @@ ActionContract), ואין Cross-Layer Impact Matrix שלם לאף אחת — **�
 6. 🔲 לתכנן Multi-session Coordination (סעיף 5) — תכנון בלבד לפני implementation.
 7. ✅ VCM plan מוזג ל-`main` (PR #482, merge `ffa678a`) — תכנון בלבד, אין implementation.
    Dogfooding (כתיבת nodes על הספרן עצמו) עדיין טרם תוכנן.
-8. 🟡 Consumption Enforcement — **תכנון בלבד, PR פתוח, לא מוזג.** ✅ Verification rerun
-   PR #487 מוזג ל-`main` (`a205dea`) — אישר: 2/4 gaps נסגרו מבנית (BUG-140 inline,
+8. 🟡 Consumption Enforcement — **תכנון בלבד, PR #488 פתוח, לא מוזג.** ✅ Verification
+   rerun PR #487 מוזג ל-`main` (`a205dea`) — אישר: 2/4 gaps נסגרו מבנית (BUG-140 inline,
    `--assert-main`), 2/4 רק חלקית (רוב מה שנמצא היה כבר ב-bundle לפני PR #485 — הבעיה
-   האמיתית היא investigation discipline, לא קטלוג), 2 gaps נוספים נשארו פתוחים
-   (`FEATURE_AUTO_CAPTURE` חסר מ-`turn_coordinator`; "third evidence-shadow layer" מעולם
-   לא היה catalog gap). מסמך התכנון (`docs/context_librarian/CONSUMPTION_ENFORCEMENT_PLAN.md`)
-   עונה בדיוק על הפער הזה. **אין implementation ב-PR הזה. אין לפתוח PR implementation לפני
-   קבלת ובדיקת audit בלתי-תלוי של Codex שרץ במקביל** — תנאי מפורש מהמשתמש.
+   האמיתית היא investigation discipline, לא קטלוג). מסמך התכנון
+   (`docs/context_librarian/CONSUMPTION_ENFORCEMENT_PLAN.md`) עונה בדיוק על הפער הזה —
+   כולל Cross-Layer Impact Matrix ו-`STATUS: PLANNING BLOCKED` עד להכרעת owner (5 הערות
+   סקירה נפתרו). **אין implementation ב-PR הזה. אין לפתוח PR implementation לפני קבלת
+   ובדיקת audit בלתי-תלוי של Codex** — תנאי מפורש מהמשתמש.
+9. ✅ N17 Context Librarian remediation (audit עצמאי של Codex) מוזג ל-`main` (PR #489,
+   ענף `codex/context-librarian-audit-remediation`, merge `20914f2`) — סוגר את שני ה-gaps
+   הקטנים שנשארו פתוחים מהעדכון הקודם: `FEATURE_AUTO_CAPTURE` ממופה עכשיו ב-
+   `layer.turn_coordinator`; תיקון cross-platform לבדיקת נתיב מוחלט
+   (POSIX/Windows); provenance מבחין `on_main_history`/`at_origin_main_tip`. Codex הסיר
+   בעצמו את הצעת-התכנון המקבילה שלו (`SOURCE_CONSUMPTION_GATE_PLAN.md`) לפני המיזוג,
+   ונדחה במפורש ל-PR #488 כמסמך הקנוני — אין כפילות תכנון.
 
 **קבצים:** `docs/context_librarian/` (הספרן עצמו, כולל `TOKEN_ESTIMATION_BENCHMARK.md` החדש),
 `tools/context_librarian/librarian.py` (token estimation, catalog loading),
