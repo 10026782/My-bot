@@ -492,3 +492,27 @@ process error (asserting a catalog verification state that was not yet true
 of `main`). The blind-review step is not an optional nicety this data set —
 it is the thing that caught every High/Critical finding above; none of them
 were self-caught.
+
+#### 2026-07-28 pilot findings remediation (`claude/librarian-pilot-remediation`)
+
+A follow-up PR fixes the librarian-tooling gaps this run found, without
+re-running the pilot: `core_reasoning_change` now includes
+`core/adapters/decision_adapter.py`; `approval_ux` now documents the 4
+parallel approval mechanisms found for Task 1; `turn_coordinator_routing` now
+carries a `bounded_local_expansions` entry that inlines BUG-140 alongside
+BUG-130; every bundle now renders a `## Bundle Provenance` section
+(`generated_commit`/`generated_branch`/`on_main`) plus an opt-in
+`--assert-main` that fails closed off `main`, fixing this run's Critical
+commit/branch mislabeling at the tool level instead of relying on whoever
+writes about a bundle afterwards to get it right. It also fixes an unrelated,
+more consequential bug found while making these changes: `_render()` only
+ever emitted `notes[0]` for every node — every note past the first was
+silently dropped from every bundle ever built, for every layer (6/6 layer
+nodes had more than one note; up to 9 on `layer.approvals`). This is a
+distinct, more general instance of the same failure class as the Critical
+finding above: catalog content existing is not the same as it reaching an
+agent's bundle. This
+remediation does **not** re-establish Phase 1 acceptance, does not re-run the
+5-task pilot, and does not implement BUG-150, BUG-130/BUG-140, or the
+ActionGateway fail-open — those remain gated by
+`CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`, unchanged from above.

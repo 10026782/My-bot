@@ -39,6 +39,15 @@ def _parser() -> argparse.ArgumentParser:
         "--verified-production-evidence",
         help="Explicitly attest a selected evidence path after direct review",
     )
+    build.add_argument(
+        "--assert-main",
+        action="store_true",
+        help=(
+            "Fail closed unless generated_commit is a proven ancestor of "
+            "main; use when a claim about main's current state depends on "
+            "this bundle"
+        ),
+    )
 
     suggest = sub.add_parser(
         "suggest-profile",
@@ -91,6 +100,7 @@ def main(argv: list[str] | None = None) -> int:
             max_documents=args.max_documents,
             production_claim=args.production_claim,
             verified_production_evidence=args.verified_production_evidence,
+            assert_main=args.assert_main,
         )
         if args.output:
             output = args.output

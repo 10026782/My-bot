@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -165,7 +166,7 @@ def test_output_is_deterministic(catalog):
     kwargs = {
         "task_type": "approval_ux",
         "query": "repeated approval returns wrong message",
-        "max_tokens": 4000,
+        "max_tokens": 5000,
     }
     assert build_bundle(catalog, **kwargs) == build_bundle(catalog, **kwargs)
 
@@ -547,3 +548,197 @@ def test_agent_bootstrap_is_canonical_and_claude_only_references_it():
     assert "canonical Context Librarian bootstrap in `AGENTS.md`" in claude
     assert "suggest-profile" not in claude
     assert "**Before doing anything else**, read `AI_CONTEXT.md`" not in claude
+
+
+# --- N17 pilot findings remediation (2026-07-28) ---
+#
+# Each test below regresses one of the five concrete gaps the 2026-07-28
+# non-inferiority pilot found (docs/context_librarian/PHASE1_NON_INFERIORITY_PILOT.md,
+# "2026-07-28 non-inferiority pilot advancement" section): core_reasoning_change
+# missing a mandatory authority source, approval_ux missing the parallel
+# sources-of-truth structural finding, turn_coordinator_routing missing an
+# adjacent bug-log entry, and the rp5 task's commit/branch mislabeling.
+
+
+def test_core_reasoning_profile_includes_decision_adapter_and_write_side_note(catalog):
+    bundle = build_bundle(
+        catalog,
+        task_type="core_reasoning_change",
+        query="business outcome maps to wrong reasoning state",
+    )
+    assert "`core/adapters/decision_adapter.py`" in bundle
+    assert "decision_orchestrator.py no longer exists on main" in bundle
+    assert "tma_api.py is listed above as both the only live caller" in bundle
+
+
+def test_approval_ux_profile_surfaces_parallel_sources_of_truth(catalog):
+    bundle = build_bundle(
+        catalog,
+        task_type="approval_ux",
+        query="repeated approval returns the wrong message",
+    )
+    assert "PARALLEL SOURCES OF TRUTH" in bundle
+    assert "`event_bus.py`" in bundle
+    assert "PendingActionsStore" in bundle
+
+
+def test_turn_coordinator_routing_expansion_surfaces_adjacent_bug(catalog):
+    bundle = build_bundle(
+        catalog,
+        task_type="turn_coordinator_routing",
+        query="explicit request routes to wrong handler",
+    )
+    assert "## Local Context Expansion" in bundle
+    assert "BUG-130" in bundle
+    assert "BUG-140" in bundle
+
+
+def test_bounded_local_expansion_is_not_query_driven(catalog):
+    def expansion_section(bundle: str) -> str:
+        match = re.search(
+            r"## Local Context Expansion\n\n(.*?)\n\n## Do Not Assume", bundle, re.S
+        )
+        assert match, "Local Context Expansion section missing"
+        return match.group(1)
+
+    first = build_bundle(
+        catalog, task_type="turn_coordinator_routing", query="zzz unrelated wording"
+    )
+    second = build_bundle(
+        catalog,
+        task_type="turn_coordinator_routing",
+        query="a completely different phrasing with no bug numbers at all",
+    )
+    assert expansion_section(first) == expansion_section(second)
+
+
+def test_bounded_local_expansion_window_lines_is_capped(tmp_path, monkeypatch):
+    root = _isolated_catalog(tmp_path, monkeypatch)
+    path = root / "task_profiles/profiles.json"
+    data = _read_json(path)
+    profile = next(p for p in data["profiles"] if p["id"] == "approval_ux")
+    profile["bounded_local_expansions"] = [
+        {
+            "path": "BUG_AUDIT_LOG.md",
+            "anchor": "BUG-130",
+            "window_lines": librarian.MAXIMUM_LOCAL_EXPANSION_WINDOW_LINES + 1,
+            "role": "too large",
+        }
+    ]
+    _write_json(path, data)
+    with pytest.raises(ContextLibrarianError, match="window_lines"):
+        load_catalog(REPO_ROOT)
+
+
+def test_bounded_local_expansion_fails_closed_when_anchor_missing(tmp_path, monkeypatch):
+    root = _isolated_catalog(tmp_path, monkeypatch)
+    path = root / "task_profiles/profiles.json"
+    data = _read_json(path)
+    profile = next(p for p in data["profiles"] if p["id"] == "approval_ux")
+    profile["bounded_local_expansions"] = [
+        {
+            "path": "BUG_AUDIT_LOG.md",
+            "anchor": "NO-SUCH-ANCHOR-STRING-XYZ",
+            "window_lines": 10,
+            "role": "will not match anything",
+        }
+    ]
+    _write_json(path, data)
+    isolated_catalog = load_catalog(REPO_ROOT)
+    with pytest.raises(ContextLibrarianError, match="not found"):
+        build_bundle(isolated_catalog, task_type="approval_ux", query="approval message")
+
+
+def test_bundle_provenance_reports_commit_branch_and_warns_off_main(catalog, monkeypatch):
+    monkeypatch.setattr(
+        librarian,
+        "_git_provenance",
+        lambda _root: {"commit": "abc1234", "branch": "feature-x", "on_main": "no"},
+    )
+    bundle = build_bundle(
+        catalog, task_type="rp5_evidence_mismatch", query="evidence mismatch"
+    )
+    assert "generated_commit: `abc1234`" in bundle
+    assert "generated_branch: `feature-x`" in bundle
+    assert "- on_main: no" in bundle
+    assert "WARNING: this bundle was NOT built from a commit proven to be on `main`" in bundle
+
+
+def test_bundle_provenance_omits_warning_when_on_main(catalog, monkeypatch):
+    monkeypatch.setattr(
+        librarian,
+        "_git_provenance",
+        lambda _root: {"commit": "deadbee", "branch": "main", "on_main": "yes"},
+    )
+    bundle = build_bundle(
+        catalog, task_type="rp5_evidence_mismatch", query="evidence mismatch"
+    )
+    assert "- on_main: yes" in bundle
+    assert "WARNING" not in bundle
+
+
+@pytest.mark.parametrize("on_main", ["no", "unknown"])
+def test_assert_main_fails_closed_unless_proven(catalog, monkeypatch, on_main):
+    monkeypatch.setattr(
+        librarian,
+        "_git_provenance",
+        lambda _root: {"commit": "abc1234", "branch": "feature-x", "on_main": on_main},
+    )
+    with pytest.raises(ContextLibrarianError, match="assert-main"):
+        build_bundle(
+            catalog,
+            task_type="rp5_evidence_mismatch",
+            query="evidence mismatch",
+            assert_main=True,
+        )
+
+
+def test_assert_main_succeeds_when_proven_on_main(catalog, monkeypatch):
+    monkeypatch.setattr(
+        librarian,
+        "_git_provenance",
+        lambda _root: {"commit": "deadbee", "branch": "main", "on_main": "yes"},
+    )
+    bundle = build_bundle(
+        catalog,
+        task_type="rp5_evidence_mismatch",
+        query="evidence mismatch",
+        assert_main=True,
+    )
+    assert "- on_main: yes" in bundle
+
+
+def test_git_provenance_returns_known_shape(catalog):
+    result = librarian._git_provenance(catalog.repo_root)
+    assert set(result) == {"commit", "branch", "on_main"}
+    assert result["on_main"] in {"yes", "no", "unknown"}
+
+
+def test_output_is_deterministic_including_provenance_and_expansion(catalog):
+    kwargs = {
+        "task_type": "turn_coordinator_routing",
+        "query": "explicit request routes to wrong handler",
+    }
+    assert build_bundle(catalog, **kwargs) == build_bundle(catalog, **kwargs)
+
+
+def test_cli_assert_main_flag_fails_closed_off_main(monkeypatch, capsys):
+    from tools.context_librarian.__main__ import main
+
+    monkeypatch.setattr(
+        librarian,
+        "_git_provenance",
+        lambda _root: {"commit": "abc1234", "branch": "feature-x", "on_main": "no"},
+    )
+    exit_code = main(
+        [
+            "build",
+            "--task-type",
+            "rp5_evidence_mismatch",
+            "--query",
+            "evidence",
+            "--assert-main",
+        ]
+    )
+    assert exit_code == 2
+    assert "assert-main" in capsys.readouterr().err

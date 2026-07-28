@@ -33,7 +33,8 @@
     "canonical_docs": [
       {"path": "docs/architecture/turn-coordinator/README.md", "role": "program index and current phase description", "status": "active"},
       {"path": "docs/architecture/turn-coordinator/TURN_COORDINATOR_BEHAVIOR_CONTRACT_V1.md", "role": "frozen behavior contract", "status": "planning_only"},
-      {"path": "docs/architecture/turn-coordinator/PHASE_2_SHADOW_PLANNING_GATE.md", "role": "shadow planning gate", "status": "planning_only"}
+      {"path": "docs/architecture/turn-coordinator/PHASE_2_SHADOW_PLANNING_GATE.md", "role": "shadow planning gate", "status": "planning_only"},
+      {"path": "BUG_AUDIT_LOG.md", "role": "registered routing/lead-handling defects (e.g. BUG-130, BUG-140); added 2026-07-28 after the N17 pilot found this layer never referenced it", "status": "active"}
     ],
     "production_evidence": [
       {"path": "docs/architecture/turn-coordinator/LOG_OBSERVATION_23JUL2026.md", "observed_on": "2026-07-23", "scope": "staging observation of TurnEnvelope/ownership signals", "status": "checkpoint"}
@@ -43,9 +44,10 @@
       {"name": "FEATURE_SINGLE_SPEAKER_APPROVAL_UX", "default_state": "off", "documented_state": "PR #471; when on, run_agent() (app.py:3779-3835 as of ffa678a7, exact lines drift with unrelated edits) treats a Gateway-owned approval-queuing turn as an early-return boundary: it does not call the Agent's LLM again and returns only the Gateway's own ApprovalLifecycleResult text for that turn", "evidence_scope": "code (app.py's PR1 single-speaker boundary) plus CHANGELOG.md PR #471 entry"}
     ],
     "valid_from": "2026-07-28",
-    "last_verified_commit": "ffa678a7",
+    "last_verified_commit": "2f5c577",
     "confidence": 0.85,
     "notes": [
+      "BUG_AUDIT_LOG.md added as a canonical doc 2026-07-28 (N17 pilot Task 3 fix): BUG-130 (line 3056, create-vs-update misroute in core/lead_candidate_handler.py) and BUG-140 (line 3198, unrelated-lead overwrite risk, still pending) are both registered, unfixed, and 142 lines apart in the same log section — the pilot's Librarian-track investigation grepped BUG-130 and never read far enough to find BUG-140. See task_profiles/profiles.json's `turn_coordinator_routing.bounded_local_expansions`, which now inlines both entries into the bundle so this cannot be missed by stopping at the first match.",
       "No class TurnCoordinator exists on main; Phase 0 TurnEnvelope instrumentation is observation-only.",
       "route_request and handle_lead_candidate are current de-facto routing/ownership surfaces.",
       "The coordinator consumes typed signals and must not invent business state or approval policy.",
