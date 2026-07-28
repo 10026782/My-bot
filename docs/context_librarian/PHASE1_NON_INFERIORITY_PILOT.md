@@ -493,10 +493,13 @@ of `main`). The blind-review step is not an optional nicety this data set —
 it is the thing that caught every High/Critical finding above; none of them
 were self-caught.
 
-#### 2026-07-28 pilot findings remediation (PR #485, `claude/librarian-pilot-remediation`, implemented but not yet merged/verified)
+#### 2026-07-28 pilot findings remediation (PR #485, merged to `main` as `4e12bf5`)
 
-PR #485 implements fixes for the librarian-tooling gaps this run found,
-without re-running the pilot: `core_reasoning_change` now includes
+PR #485 fixes the librarian-tooling gaps this run found, without re-running
+the pilot; merged and directly re-verified against `origin/main` at `4e12bf5`
+(clean checkout, `validate` + full `pytest test_context_librarian.py`, 62/62,
+on that exact commit — not inferred from merge metadata): `core_reasoning_change`
+now includes
 `core/adapters/decision_adapter.py`; `approval_ux` now documents the 4
 parallel approval mechanisms found for Task 1; `turn_coordinator_routing` now
 carries a `bounded_local_expansions` entry that inlines BUG-140 alongside
@@ -511,12 +514,11 @@ first was silently dropped from every bundle ever built, for every layer (6/6
 layer nodes had more than one note; up to 9 on `layer.approvals`). This is a
 distinct, more general instance of the same failure class as the Critical
 finding above: catalog content existing is not the same as it reaching an
-agent's bundle. All of the above is implemented on the PR #485 branch and
-covered by new regression tests, but per this repo's own completion-claim
-rule it is **not** "fixed" until merged to `main`, deployed, and production
-(or in this dev-tooling case, direct source) verification has succeeded —
-see `ROADMAP.md`'s N17 section for current merge status. This remediation
-does **not** re-establish Phase 1 acceptance, does not re-run the 5-task
+agent's bundle. All of the above is merged to `main` and covered by new
+regression tests, directly re-verified above rather than assumed from
+merge status alone — see `ROADMAP.md`'s N17 section for the same
+verification recorded in context. This remediation does **not** re-establish
+Phase 1 acceptance, does not re-run the 5-task
 pilot, and does not implement BUG-150, BUG-130/BUG-140, or the ActionGateway
 fail-open — those remain gated by `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`,
 unchanged from above.
