@@ -1,15 +1,27 @@
 # Context Librarian — Consumption Enforcement: Plan (N17 item 8)
 
-**Status: planning only. Nothing in this document is implemented.** No code
-changed, no CLI command added, no catalog node or schema field added, no
-runtime change. Written against `origin/main` at `a205dea` (post PR #485 —
-pilot-findings remediation — and PR #487 — targeted rerun verification).
+**Mandatory gate for this document:** `docs/architecture/CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`
+— this plan's recommended trigger rule (Section 4) references production
+claims and the Durable Atomic Approval layer's own gate, so it is a Planning
+Gate document under that contract's §0. See "Cross-Layer Impact Matrix"
+below for the required 4-layer analysis.
 
-Explicit precondition before any implementation PR for this plan: an
-independent Codex audit of this same problem is running in parallel. No
-implementation PR for anything in this document may open until that audit is
-received and checked against this plan. This document does not, and cannot,
-clear that precondition itself.
+**STATUS: PLANNING BLOCKED.** Not because the Cross-Layer Impact Matrix found
+unresolved cross-layer risk — it did not; all four layers are either
+untouched or touched only by reference/illustrative catalog metadata, with
+explicit proof below. It is blocked because Section 9's owner-decisions
+(design approval, escalation-trigger tuning, `FEATURE_AUTO_CAPTURE`
+sequencing, and others) remain open, and because — per explicit instruction
+for this planning cycle — no implementation PR may open until the owner
+resolves those decisions **and** confirms the parallel, independent Codex
+audit has been received and checked. Completing the matrix is a necessary
+condition for this document to ever leave `PLANNING BLOCKED`; it is not by
+itself a sufficient one.
+
+**Nothing in this document is implemented.** No code changed, no CLI command
+added, no catalog node or schema field added, no runtime change. Written
+against `origin/main` at `a205dea` (post PR #485 — pilot-findings
+remediation — and PR #487 — targeted rerun verification).
 
 ## 1. The problem
 
@@ -69,8 +81,8 @@ possible:
 1. **Self-attestation** — the agent declares, in a checkable, structured
    format, what it did with each mandatory item. Checkable for internal
    consistency (every item accounted for, no empty waivers) but never for
-   truth (an agent could still declare "reviewed" without having read
-   anything).
+   truth (an agent could still declare a source reviewed without having
+   read anything).
 2. **External/independent verification** — a second party (human or an
    independent subagent with its own repository access) checks the first
    party's actual sources-opened and conclusion against the bundle's
@@ -106,16 +118,16 @@ catalog fix, would silently under-list the mandatory set for this profile.
 
 **Option A — Self-attested Consumption Ledger, verified for internal
 completeness by a new CLI subcommand (fail-closed).**
-The agent produces a structured ledger declaring a status
-(`opened`/`reviewed`/`waived`) for every mandatory item; a new
-`verify-consumption` command recomputes the same mandatory set
-`build_bundle()` would produce and fails closed if any item is missing, has
-an invalid status, or (for a waiver) an empty reason. Fully inside the
-librarian's existing architectural boundary — deterministic, no LLM, no
-runtime, same "fail closed absent an explicit attestation" pattern already
-used by `--assert-main`. Cannot detect a false or lazy attestation: an agent
-that skips reading a file can also skip honestly reporting that it skipped
-it, and nothing here can force honesty. Does not, by itself, reproduce what
+The agent produces a structured ledger declaring receipts and waivers for
+every mandatory item; a new `verify-consumption` command recomputes the
+same mandatory set `build_bundle()` would produce and reports
+`CONCLUSION_BLOCKED` if any item is unaccounted for, or a receipt/waiver is
+missing required fields or an empty reason. Fully inside the librarian's
+existing architectural boundary — deterministic, no LLM, no runtime, same
+"fail closed absent an explicit attestation" pattern already used by
+`--assert-main`. Cannot detect a false or lazy attestation: an agent that
+skips reading a file can also skip honestly reporting that it skipped it,
+and nothing here can force honesty. Does not, by itself, reproduce what
 actually caught the pilot's misses.
 
 **Option B — Mandatory independent blind review for any task making a
@@ -143,10 +155,11 @@ owner and review path, and a mechanism for the librarian to publish "here is
 the current bundle's mandatory list" to a side-channel the hook can read.
 Real value, but a materially larger and differently-scoped change.
 
-**Option D — Status quo:** rely on the existing prose contract plus PR #485/
-#487's catalog-completeness fixes, with no further mechanism. Already shown
-insufficient: 2 of the 4 gaps the pilot found were pure investigation-
-discipline failures that a catalog fix could not close (Section 1).
+**Option D — Status quo:** rely on the existing prose contract plus
+PR #485/#487's catalog-completeness fixes, with no further mechanism.
+Already shown insufficient: 2 of the 4 gaps the pilot found were pure
+investigation-discipline failures that a catalog fix could not close
+(Section 1).
 
 ## 4. Recommended decision
 
@@ -165,29 +178,48 @@ catalog rather than inventing a new one:
 - the task's selected profile includes a layer or
   `mandatory_canonical_decisions` entry that
   `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` already gates, or
-- **any mandatory item in the ledger is `waived` rather than
-  `opened`/`reviewed`** — a waiver is precisely the situation
-  self-attestation alone cannot make trustworthy, so a waiver on a
-  consequential task should itself escalate to review, not be accepted at
-  face value.
+- **any mandatory item in the ledger is `waived` rather than covered by a
+  review receipt** — a waiver is precisely the situation self-attestation
+  alone cannot make trustworthy, so a waiver on a consequential task should
+  itself escalate to review, not be accepted at face value.
 
 For everything else — routine, low-risk, investigation-only tasks with no
 completion claim and no waivers — Option A's self-attested, internally-
 verified ledger is proportionate and sufficient. This mirrors the existing
 risk-proportionate philosophy already in the catalog: production claims need
-qualifying evidence; cross-layer changes need a Cross-Layer Impact Matrix;
-routine reads need neither.
+qualifying evidence; cross-layer changes need a Cross-Layer Impact Matrix
+(this document's own, below); routine reads need neither.
+
+This rule is itself the reason this document is a Planning Gate document
+under `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` — it references, and depends
+on, that contract's authority over the Durable Atomic Approval layer without
+redefining it. See the Cross-Layer Impact Matrix for the explicit proof.
 
 ## 5. Proposed schema/CLI changes (illustrative — none applied in this PR)
 
 **5.1 Bundle format addition — new `## Consumption Checklist` section.**
-Enumerates one row per mandatory item with a stable, deterministic
-`item_id`:
+Enumerates one row per `required_sources` entry (terminology adopted from
+the independent Codex audit's `SOURCE_CONSUMPTION_GATE_PLAN.md` — see 5.2)
+with a stable, deterministic `item_id`, across exactly these categories:
 
 - `code:<path>` and `test:<path>` for every path in the primary layer(s)'
-  and required-dependency layers' `code_paths`/`test_paths`;
+  and required-dependency layers' `code_paths`/`test_paths` — **primary/
+  required code and required tests**;
+- `doc:<path>` for every `canonical_docs` entry reachable via a
+  `mandatory_canonical_decisions` entry, a primary layer, or a
+  required-dependency layer — **mandatory canonical documents**;
+- `evidence:<path>` for every `production_evidence` entry, **but only when
+  `--production-claim` is set** — without a production claim, no evidence
+  entry is mandatory, mirroring `build_bundle()`'s own existing
+  `evidence_budget` logic, which already allocates zero evidence budget
+  without a claim;
 - `decision:<id>` for every entry in `mandatory_canonical_decisions`;
-- `expansion:<path>#<anchor>` for every `bounded_local_expansions` entry.
+- `expansion:<path>#<anchor>` for every `bounded_local_expansions` entry
+  **marked `required_for_conclusion: true`** — a new, optional, additive
+  profile field proposed in 5.5. Every currently-existing
+  `bounded_local_expansions` entry (e.g. the BUG-140 window in
+  `turn_coordinator_routing`) would default to `true`, since each was added
+  specifically to force a miss-prone read.
 
 `optional_evidence` and `conditional_optional_evidence` are **not** included
 — they stay query-triggered and advisory exactly as today, so the checklist
@@ -196,84 +228,156 @@ bounded by the same `maximum_documents` budget already enforced, and adds
 only a compact list of ids for sources already named elsewhere in the
 bundle.
 
-**5.2 New artifact — Consumption Ledger (JSON), not part of the catalog, not
-committed as durable state.** Illustrative shape:
+**5.2 New artifact — Consumption Ledger (JSON), committed to the PR, not
+the catalog.**
+
+Converges with the independent Codex audit's own
+`SOURCE_CONSUMPTION_GATE_PLAN.md` (same base commit, `origin/main` at
+`a205dea`), which independently proposed the same shape under the names
+`required_sources`/`review_receipt`/`waived_sources`/`unreviewed_sources`.
+This section adopts that vocabulary so the two independent plans converge
+on one model instead of diverging over naming — an encouraging cross-check,
+since two independent authors reached the same receipt-based structure.
+**This convergence is planning-only.** The actual code on
+`codex/context-librarian-audit-remediation` (the `on_main_history`/
+`at_origin_main_tip` provenance split, the `FEATURE_AUTO_CAPTURE` catalog
+entry, and a POSIX/Windows path-validation fix) is separate, real, unmerged
+code on a different branch — not part of PR #488, not applied by this
+document, and nothing below should be read as claiming any of it is closed
+here.
+
+Illustrative shape:
 
 ```json
 {
   "schema_version": "1.0",
   "task_type": "turn_coordinator_routing",
+  "profile": "turn_coordinator_routing",
+  "query": "lead routing",
   "bundle_generated_commit": "a205dea...",
   "bundle_generated_branch": "claude/...",
-  "items": [
+  "required_sources": [
+    "code:core/lead_candidate_handler.py",
+    "decision:cross_layer_authority",
+    "expansion:BUG_AUDIT_LOG.md#BUG-130"
+  ],
+  "review_receipts": [
     {
       "item_id": "code:core/lead_candidate_handler.py",
-      "status": "reviewed",
-      "evidence_quote_or_line_range": "lines 1189-1234, _handle_single_candidate()",
-      "reviewed_at": "2026-07-28T15:00:00Z",
-      "reviewer": "claude-sonnet-5 / session <id>",
+      "path": "core/lead_candidate_handler.py",
+      "commit": "a205dea...",
       "branch": "claude/...",
-      "commit": "a205dea..."
-    },
+      "profile": "turn_coordinator_routing",
+      "query": "lead routing",
+      "reviewed_by": "claude-sonnet-5 / session <id>",
+      "reviewed_at": "2026-07-28T15:00:00Z",
+      "reason": "confirmed _handle_single_candidate() lines 1189-1234, exact-match phone lookup at _at_find_lead()",
+      "evidence_reference": "lines 1189-1234, 341-378"
+    }
+  ],
+  "waived_sources": [
     {
       "item_id": "decision:cross_layer_authority",
-      "status": "waived",
-      "waiver_reason": "no ActionContract/ActionGateway import or shared identifier touched by this task; confirmed by grep of the changed files",
+      "path": null,
+      "commit": "a205dea...",
+      "branch": "claude/...",
+      "profile": "turn_coordinator_routing",
+      "query": "lead routing",
+      "reviewed_by": "claude-sonnet-5 / session <id>",
       "reviewed_at": "2026-07-28T15:00:00Z",
-      "reviewer": "claude-sonnet-5 / session <id>"
+      "reason": "no ActionContract/ActionGateway import or shared identifier touched by this task; confirmed by grep of the changed files",
+      "evidence_reference": "grep output: zero matches for ActionContract|ActionGateway in the changed files"
     }
   ]
 }
 ```
 
-Treated as disposable, like generated bundles
-(`docs/context_librarian/generated/*.md`, already git-ignored) — e.g.
-`docs/context_librarian/generated/consumption/<task>.json`, git-ignored. No
-historical ledger accumulates in the repository; the durable trace of a
-given PR's consumption record is whatever the PR body (or this document's
-own "Per-run record" convention, already used in
-`PHASE1_NON_INFERIORITY_PILOT.md`) chooses to echo. This explicitly avoids
-creating a new persistent source of truth (`decision.no_new_source_of_truth`).
+Field reconciliation: `required_sources` entries use the `item_id` scheme
+from 5.1 uniformly (code/test/doc/evidence/decision/expansion), since a
+canonical-decision entry has no literal file path to key on. Each
+`review_receipts`/`waived_sources` entry therefore carries **both**
+`item_id` (always present, the join key against `required_sources`) **and**
+`path` (the literal file path when the item is a real path; `null` for
+`decision:*` entries) — together with the full field set: `commit`,
+`branch`, `profile`, `query`, `reviewed_by`, `reviewed_at`, `reason`,
+`evidence_reference`.
+
+`unreviewed_sources` and the overall pass/fail status are **never written
+by the agent** — they are computed exclusively by `verify-consumption`
+(5.3) as `required_sources − (review_receipts ∪ waived_sources)`,
+specifically so an agent cannot self-report an empty `unreviewed_sources`
+list. A ledger that includes either field by hand is itself a
+`verify-consumption` failure (a forged computed field).
+
+**Ledger location — resolved, not left open.** The ledger is a small JSON
+file **committed to the PR branch** under
+`docs/context_librarian/consumption/<task_type>-<short_commit>.json`,
+reviewed as part of the PR diff, and readable by CI directly from the
+checked-out branch — the same way `test_context_librarian.py` itself is.
+It is explicitly **not** treated like a generated bundle
+(`docs/context_librarian/generated/*.md`, git-ignored, freely regenerable,
+disposable), because a CI check that needs to inspect it (5.7) cannot read
+a file that was never committed or transmitted into the workflow run —
+there is no other mechanism in this repository's CI for an agent to hand a
+pre-existing local file to a GitHub Actions job. Being committed does not
+make it a new source of truth: it is never read back by `build_bundle()`,
+`_select_nodes()`, or the freshness/staleness computation; it carries no
+authority over `main`, no runtime behavior, and no claim beyond "this
+specific review action happened, attested by this agent, on this commit" —
+the same category of append-only, non-authoritative evidence as
+`BUG_AUDIT_LOG.md`/`CHANGE_CONTROL_LOG.md`, just JSON-structured so
+`verify-consumption` can check it mechanically instead of a human re-reading
+prose. This resolves the earlier draft's contradiction between
+"disposable/git-ignored" and "CI needs to see it" by dropping the
+git-ignored framing, not the CI requirement.
 
 **5.3 New CLI subcommand:**
 `python -m tools.context_librarian verify-consumption --task-type <id> --query <q> --ledger <path>`
 
-- Recomputes the same mandatory-item set `build_bundle()` would produce for
-  that exact profile, query, and current commit — reusing `_select_nodes()`
-  and the profile fields directly; no parallel selection logic.
-- Fails closed (non-zero exit) when: any mandatory `item_id` is absent from
-  the ledger; any item's `status` is missing or not one of
-  `opened`/`reviewed`/`waived`; a `waived` item has an empty or
-  placeholder-looking `waiver_reason`; an `opened`/`reviewed` item is
-  missing `evidence_quote_or_line_range` or it is empty; the ledger's
-  `bundle_generated_commit`/`bundle_generated_branch` does not match a
-  bundle actually recomputable right now for that profile+query (same spirit
-  as `--assert-main` — a ledger cannot be checked in against a bundle it
-  wasn't actually produced from).
-- Exit 0 with `CONSUMPTION: COMPLETE` only when every mandatory item is
-  accounted for.
+- Recomputes the same `required_sources` set 5.1 defines for that exact
+  profile, query, and current commit — reusing `_select_nodes()` and the
+  profile fields directly; no parallel selection logic.
+- Computes `unreviewed_sources = required_sources − (item_ids in
+  review_receipts ∪ item_ids in waived_sources)`.
+- Reports `CONCLUSION_BLOCKED` (exit 2) and lists `unreviewed_sources` by
+  name when that set is non-empty, or when: a `review_receipts`/
+  `waived_sources` entry is missing `commit`/`branch`/`profile`/`query`/
+  `reviewed_by`/`reviewed_at`/`reason`/`evidence_reference`; any of the four
+  identity fields (`commit`/`branch`/`profile`/`query`) does not match a
+  bundle actually recomputable right now for that exact profile+query (same
+  spirit as `--assert-main` — a ledger cannot be checked in against a
+  bundle it wasn't actually produced from); a waiver's `reason` is empty or
+  placeholder-looking; or the ledger sets `unreviewed_sources` or a
+  pass/fail field directly (a forged computed field, rejected outright).
+- Reports `CONSUMPTION: COMPLETE` (exit 0) only when `unreviewed_sources`
+  is empty and every receipt/waiver's identity fields match the
+  live-recomputed bundle.
 
 **5.4 `AGENT_CONSUMPTION_CONTRACT.md` changes:** a new "Consumption Ledger"
 section between the existing "Context expansion record" and "After coding"
 sections, stating: the ledger is mandatory before a final conclusion; the
-fail-closed rule ("no final conclusion is permitted until
-`verify-consumption` reports `COMPLETE` for the active bundle"); the waiver
-bar (a specific, checkable reason — not a generic phrase); and the
-review-escalation rule from Section 4.
+fail-closed rule ("no final conclusion is permitted while
+`verify-consumption` reports `CONCLUSION_BLOCKED` for the active bundle");
+the waiver bar (a specific, checkable reason — not a generic phrase); and
+the review-escalation rule from Section 4.
 
-**5.5 Schema changes: none required as new *node* fields.** The checklist is
-fully derivable from fields the schema already requires
+**5.5 Schema changes: none required as new *node* fields.** The checklist
+is fully derivable from fields the schema already requires
 (`primary_layers`, `required_dependency_layers`,
 `mandatory_canonical_decisions`, `bounded_local_expansions`, `code_paths`,
 `test_paths`) — same "derived, not stored" philosophy as
-`VERIFICATION_COVERAGE_MODEL_PLAN.md`. One optional, backward-compatible
-addition under consideration: a stable `item_id` field on
-`bounded_local_expansions` entries (currently addressed only by
-`path`+`anchor`), to make checklist ids stable without re-deriving them from
-free text.
+`VERIFICATION_COVERAGE_MODEL_PLAN.md`. Two optional, backward-compatible
+additions under consideration:
 
-**5.6 `turn_coordinator` `FEATURE_AUTO_CAPTURE` catalog gap — proposed patch
-(illustrative diff; NOT applied in this PR):**
+- a stable `item_id` field on `bounded_local_expansions` entries (currently
+  addressed only by `path`+`anchor`), to make checklist ids stable without
+  re-deriving them from free text;
+- a `required_for_conclusion` boolean on `bounded_local_expansions` entries
+  (5.1), defaulting to `true` for backward compatibility with every
+  existing entry.
+
+**5.6 `turn_coordinator` `FEATURE_AUTO_CAPTURE` catalog gap — proposed
+patch (illustrative diff; NOT applied in this PR):**
 
 ```diff
    "feature_flags": [
@@ -289,50 +393,75 @@ free text.
 ```
 
 Confirmed via direct grep against current `main` (`a205dea`) before drafting
-this patch, not assumed from any prior document. Presented here as a
-ready-to-apply patch for a future implementation PR — not applied now.
+this patch, not assumed from any prior document. **Note:** this exact
+catalog entry was independently identified and already applied as real,
+unmerged code on the separate `codex/context-librarian-audit-remediation`
+branch — not part of PR #488, not merged to `main`. The copy above remains
+illustrative and unapplied here, kept only so 5.1's checklist-scope
+reasoning is self-contained; it is not a claim that this fix is done by
+this document.
 
-**5.7 CI:** a non-blocking, informational check (mirroring the existing
-warning-only audit-style steps in `.github/workflows/ci.yml`) noting whether
-a PR touching `docs/context_librarian/` for a production-claim task included
-a consumption ledger. Explicitly **not** a hard gate in this phase — making
-it one requires deciding where a ledger is discoverable in CI, deferred to
-Section 9.
+**5.7 CI:** since the ledger is committed to the PR (5.2), CI can run
+`verify-consumption` directly against any
+`docs/context_librarian/consumption/*.json` file changed or added by the
+PR, for the profile/query/commit it declares — no artifact-upload
+mechanism needed, since the file is already part of the checked-out branch.
+Phase 1 (Section 8) only adds the CLI command; CI does not call it yet.
+Phase 3 (Section 8) wires an actual CI step that runs `verify-consumption`
+against every ledger file the PR touches and **fails the step** (not merely
+warns) if any reports `CONCLUSION_BLOCKED` — a real, blocking gate once
+wired, not an "informational check that a ledger exists."
 
 ## 6. Failure modes
 
-- **Rubber-stamp ledger** — every item marked `reviewed` with an identical,
-  non-specific `evidence_quote_or_line_range` ("reviewed the file").
-  Mitigation: `verify-consumption` can reject empty, too-short, or
-  duplicated-across-items evidence strings as a weak heuristic (Section 7);
-  the real backstop is the risk-gated mandatory review in Section 4, which
-  does not trust the ledger's content at all.
-- **Ledger built against the wrong bundle** (stale commit, different query
-  or profile) — mitigated by the live commit/branch cross-check in 5.3.
+- **Rubber-stamp ledger** — every item covered by a receipt with an
+  identical, non-specific `reason`/`evidence_reference` ("reviewed the
+  file"). Mitigation: `verify-consumption` can reject empty, too-short, or
+  duplicated-across-items `reason`/`evidence_reference` strings as a weak
+  heuristic (Section 7); the real backstop is the risk-gated mandatory
+  review in Section 4, which does not trust the ledger's content at all.
+- **Ledger built against the wrong bundle** (different commit, branch,
+  profile, or query) — mitigated by the live commit/branch/profile/query
+  cross-check in 5.3, exercised by four separate regression tests (Section
+  7), not just a commit check.
 - **Checklist scope creep enlarging the bundle** — mitigated by strictly
   excluding `optional_evidence`/`conditional_optional_evidence` from the
   checklist (5.1); those remain query-triggered and advisory, unchanged.
 - **Waiver abuse** (waiving everything to avoid reading anything) —
-  mitigated by requiring a specific, checkable reason per waiver, and by the
-  review-escalation rule making any waiver on a consequential task trigger
-  mandatory independent review rather than accepting it at face value.
+  mitigated by requiring a specific, checkable `reason` per waiver, and by
+  the review-escalation rule making any waiver on a consequential task
+  trigger mandatory independent review rather than accepting it at face
+  value.
+- **Forged computed fields** — a ledger that writes `unreviewed_sources` or
+  a pass/fail status directly, instead of leaving them for
+  `verify-consumption` to compute, is rejected outright (5.2/5.3). An agent
+  cannot self-report a clean bill of health.
 - **False sense of security** — a `CONSUMPTION: COMPLETE` result proves
   *process compliance* (every mandatory item was attested), never
   *comprehension* or *correctness*. This must be stated in
   `AGENT_CONSUMPTION_CONTRACT.md` itself, not just this plan, precisely
   because it is the overclaim risk that would make Option A alone
   dangerous if presented as sufficient.
-- **Multi-session/parallel-agent races on a shared ledger path** — avoided
-  by design: the ledger is per-task, per-session, disposable, never a
-  shared mutable file. Not a fix for Multi-session Coordination (N17 item
-  6), which remains separately unplanned; this design does not make that
+- **Ledger accumulation in the repository** — since 5.2 resolves the
+  location question by committing ledgers (not git-ignoring them), a real
+  new failure mode is unbounded growth over time. Mitigation: ledgers are
+  small, per-PR, append-only evidence — the same pattern
+  `BUG_AUDIT_LOG.md`/`CHANGE_CONTROL_LOG.md` already sustain at scale; if
+  volume becomes a real problem, pruning/archiving old ledgers is a later
+  owner decision, not something this plan needs to solve now.
+- **Multi-session/parallel-agent races on a shared ledger path** — reduced
+  by the `<task_type>-<short_commit>.json` naming scheme (5.2), though not
+  eliminated for two sessions working the same task at the same commit
+  simultaneously. Not a fix for Multi-session Coordination (N17 item 6),
+  which remains separately unplanned; this design does not make that
   problem worse.
 - **Backward compatibility** — `verify-consumption` must be strictly
   additive/opt-in. None of the 62 currently-passing tests in
-  `test_context_librarian.py`, nor `build`/`suggest-profile`/`validate`'s
-  existing output, should need to change for this design to be
-  implementable — a de-risking property worth verifying explicitly in the
-  implementation PR, not assumed here.
+  `test_context_librarian.py` (64 as of `codex/context-librarian-audit-remediation`,
+  unmerged), nor `build`/`suggest-profile`/`validate`'s existing output,
+  should need to change for this design to be implementable — a
+  de-risking property worth verifying explicitly in the implementation PR,
+  not assumed here.
 
 ## 7. Regression tests required (for the eventual implementation PR — none exist yet, none run now)
 
@@ -340,38 +469,57 @@ Following the existing house test-naming convention in
 `test_context_librarian.py`:
 
 - `test_consumption_checklist_lists_exactly_the_mandatory_tier(catalog)` —
-  for a known profile, checklist items equal primary/required-dependency
-  code+test paths, mandatory canonical decisions, and bounded local
-  expansions; excludes optional/conditional evidence even when the query
-  matches their trigger terms.
+  for a known profile, checklist `required_sources` equal
+  primary/required-dependency code+test paths, mandatory canonical
+  documents, mandatory canonical decisions, and bounded local expansions
+  marked `required_for_conclusion`; excludes optional/conditional evidence
+  even when the query matches their trigger terms; excludes production
+  evidence when no production claim is made.
 - `test_consumption_checklist_item_ids_are_stable_and_deterministic(catalog)` —
   same profile+query+commit produces identical item ids across repeated
   builds (mirrors the existing
   `test_output_is_deterministic_including_provenance_and_expansion`).
 - `test_verify_consumption_fails_closed_on_missing_item(tmp_path)` — a
-  ledger missing one mandatory item id exits non-zero and names the missing
-  id.
+  ledger missing one `required_sources` item from both `review_receipts`
+  and `waived_sources` reports `CONCLUSION_BLOCKED` and names the missing
+  id in `unreviewed_sources`.
 - `test_verify_consumption_fails_closed_on_empty_waiver_reason(tmp_path)` —
-  a waived item with an empty or whitespace-only reason exits non-zero.
-- `test_verify_consumption_fails_closed_on_missing_evidence_for_reviewed_item(tmp_path)` —
-  a reviewed item with empty `evidence_quote_or_line_range` exits non-zero.
+  a waived item with an empty or whitespace-only `reason` reports
+  `CONCLUSION_BLOCKED`.
+- `test_verify_consumption_fails_closed_on_missing_evidence_reference(tmp_path)` —
+  a review receipt with empty `evidence_reference` reports
+  `CONCLUSION_BLOCKED`.
 - `test_verify_consumption_fails_closed_on_bundle_commit_mismatch(tmp_path, monkeypatch)` —
-  ledger's recorded commit doesn't match a bundle rebuilt live for the same
+  a receipt's `commit` doesn't match a bundle rebuilt live for the same
   profile+query (mirrors `test_assert_main_fails_closed_unless_proven`'s
   pattern).
+- `test_verify_consumption_fails_closed_on_bundle_branch_mismatch(tmp_path, monkeypatch)` —
+  same pattern, `branch` mismatch only, all other identity fields matching.
+- `test_verify_consumption_fails_closed_on_bundle_profile_mismatch(tmp_path)` —
+  same pattern, `profile` mismatch only.
+- `test_verify_consumption_fails_closed_on_bundle_query_mismatch(tmp_path)` —
+  same pattern, `query` mismatch only — confirms a ledger cannot be reused
+  across a differently-worded task on the same profile/commit.
+- `test_verify_consumption_rejects_forged_unreviewed_sources_field(tmp_path)` —
+  a ledger that writes `unreviewed_sources` (or any pass/fail field)
+  directly is rejected regardless of its content.
 - `test_verify_consumption_succeeds_when_all_mandatory_items_accounted_for(tmp_path)` —
   a fully valid ledger exits 0 and prints `CONSUMPTION: COMPLETE`.
 - `test_verify_consumption_flags_duplicate_boilerplate_evidence_across_items(tmp_path)` —
-  every item sharing the exact same evidence string is flagged (documented
-  as a weak heuristic, not a strong guarantee).
+  every item sharing the exact same `reason`/`evidence_reference` is
+  flagged (documented as a weak heuristic, not a strong guarantee).
 - `test_cli_verify_consumption_subcommand_exists_and_is_wired(capsys)` —
   mirrors `test_phase0_cli_commands_remain_compatible`.
-- `test_bounded_local_expansion_gains_stable_item_id_without_changing_existing_output(catalog)` —
-  confirms the optional schema addition in 5.5 is additive and does not
-  perturb any of the 62 existing tests' expected output.
+- `test_bounded_local_expansion_gains_stable_item_id_and_required_for_conclusion_without_changing_existing_output(catalog)` —
+  confirms the optional schema additions in 5.5 are additive and do not
+  perturb any of the 62 (64 on the Codex branch) existing tests' expected
+  output.
 - `test_optional_and_conditional_evidence_never_appear_in_consumption_checklist(catalog)` —
   parametrized across all 7 profiles (mirrors the existing
   `test_query_cannot_pull_in_an_excluded_layer_via_matching_terms` pattern).
+- `test_production_evidence_only_required_with_production_claim(catalog)` —
+  the same profile's checklist includes `evidence:*` ids with
+  `--production-claim` and excludes them without it.
 - `test_turn_coordinator_feature_flags_includes_auto_capture(catalog)` — a
   small regression test locking in the 5.6 patch once it is actually
   applied in a future implementation PR; not part of this planning PR, and
@@ -380,9 +528,11 @@ Following the existing house test-naming convention in
 ## 8. Rollout plan
 
 - **Phase 0 (this PR):** planning only. No code, no catalog change, no CLI
-  change. Gated on this document being reviewed and on the parallel,
-  independent Codex audit being received and checked — explicit
-  precondition from the requester, not clearable by this document.
+  change. `STATUS: PLANNING BLOCKED` (top of document) — gated on this
+  document being reviewed, on Section 9's owner-decisions being resolved,
+  and on the parallel, independent Codex audit being received and checked
+  — explicit precondition from the requester, not clearable by this
+  document.
 - **Phase 1 (separate, reviewed implementation PR):** 5.1–5.3 (checklist
   rendering, ledger format, `verify-consumption` CLI) plus the Section 7
   regression tests. Strictly additive/opt-in — no existing command's
@@ -394,7 +544,8 @@ Following the existing house test-naming convention in
 - **Phase 3 (separate PR, only after Phase 1 has been used at least once
   for a real task):** promote the review-escalation rule (Section 4) from
   this plan into a hard "must" in `AGENT_CONSUMPTION_CONTRACT.md`, and wire
-  the CI informational check (5.7).
+  the CI step (5.7) to actually run `verify-consumption` against committed
+  ledgers and fail on `CONCLUSION_BLOCKED`.
 - **Phase 4 (future, explicitly deferred, owner decision):** evaluate
   Option C (harness-level hook tracking) as its own separately-scoped
   proposal, informed by whether Phases 1–3 show the rubber-stamp failure
@@ -408,12 +559,14 @@ in the 28/07 pilot, should require, per task:
 - an independent blind Gold Set and independent blind review, as in the
   28/07 pilot (Section 2 of `PHASE1_NON_INFERIORITY_PILOT.md`'s existing
   protocol — reused, not reinvented);
-- the ledger enumerates 100% of the mandatory tier for the selected profile
-  (verified by `verify-consumption` reporting `COMPLETE`);
-- zero mandatory items waived without the review-escalation rule (Section
-  4) having actually fired when a waiver occurred;
-- zero `reviewed` items with generic/duplicated evidence strings across the
-  ledger (the weak heuristic in Section 7 catching what it can);
+- the ledger's `required_sources` enumerates 100% of the mandatory tier for
+  the selected profile (verified by `verify-consumption` reporting
+  `CONSUMPTION: COMPLETE`);
+- zero mandatory items in `waived_sources` without the review-escalation
+  rule (Section 4) having actually fired when a waiver occurred;
+- zero receipts with generic/duplicated `reason`/`evidence_reference`
+  strings across the ledger (the weak heuristic in Section 7 catching what
+  it can);
 - **the specific failure mode this mechanism targets — a mandatory,
   already-included source never opened before a conclusion — has a measured
   miss rate of zero** across the new tasks, evaluated by the independent
@@ -431,27 +584,125 @@ in the 28/07 pilot, should require, per task:
 
 - Approve, reject, or amend the overall layered design (Option A always +
   risk-gated Option B; Option C deferred) — Section 4.
-- Where the Consumption Ledger physically lives per PR: git-ignored local
-  file only, versus also echoed into the PR body as a fenced block
-  (matching the existing "Per-run record" convention already used in
-  `PHASE1_NON_INFERIORITY_PILOT.md`) — affects auditability versus repo
-  cleanliness.
+- ~~Where the Consumption Ledger physically lives per PR~~ — **resolved**
+  (5.2): committed to the PR under `docs/context_librarian/consumption/`,
+  not git-ignored, because CI (5.7) cannot inspect a file it never received.
 - The exact trigger conditions for mandatory independent review (Section
   4's drafted rule: `--production-claim` OR a Cross-Layer-Authority-gated
   layer/decision OR any waived mandatory item) — owner may want to broaden
   or narrow this.
-- Whether CI's informational consumption-ledger check (5.7) should ever
-  become a hard gate, and for which class of PR.
+- Whether CI's `verify-consumption` step (5.7) should be blocking from the
+  moment it is wired (Phase 3) or start as informational/warning-only for
+  a bake-in period first.
 - Sequencing of the `FEATURE_AUTO_CAPTURE` catalog patch (5.6): bundle with
   Phase 1, or land immediately as its own tiny, independent PR — it depends
-  on nothing else in this plan.
-- Whether the optional `bounded_local_expansions` `item_id` field (5.5)
-  should be added ahead of Phase 1 as its own small, additive schema
-  change, or deferred to land together with Phase 1.
+  on nothing else in this plan, and an equivalent patch already exists as
+  real code on the separate Codex remediation branch.
+- Whether the optional `bounded_local_expansions` `item_id` and
+  `required_for_conclusion` fields (5.5) should be added ahead of Phase 1
+  as their own small, additive schema change, or deferred to land together
+  with Phase 1.
 - **Confirmation that the parallel, independent Codex audit has been
   received and reviewed before any Phase 1 implementation PR is opened** —
   an explicit precondition stated for this planning cycle; this document
   cannot self-clear it.
+
+## Cross-Layer Impact Matrix (required by `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` §0/§2)
+
+This is the grep-based matrix for this document's own proposed mechanism
+(Sections 3–8), not a fill-in-later template. Without it, status would stay
+`PLANNING BLOCKED` for cross-layer-risk reasons in addition to the
+owner-decision reasons already stated at the top; with it, the remaining
+block is only the owner-decision gate.
+
+### Layer 1 — Core Reasoning / BUG-104
+**touched: not touched.** Proof of non-impact:
+1. **grep evidence:** the only Layer 1 identifiers in this document
+   (`decision_adapter.py`, `FEATURE_CORE_REASONING_LEADS_STATE`,
+   `tma_api.py`, the reasoning-engine/orchestrator chain) appear solely in
+   Section 1 as narrative evidence of the 28/07 pilot's own
+   `core_reasoning_change` finding — not as a proposed change to that
+   layer's code or catalog entry.
+2. **unchanged-tests evidence:** none of the `test_bug104_*.py` suites are
+   referenced by Section 7's proposed regression tests; the proposed
+   mechanism operates generically over profile metadata
+   (`primary_layers`/`required_dependency_layers`/
+   `mandatory_canonical_decisions`/`bounded_local_expansions`), never over
+   Layer 1's own runtime code.
+3. **no-new-coupling evidence:** the proposed `verify-consumption`
+   subcommand (5.3) reuses `_select_nodes()` — the same selection logic
+   `build_bundle()` already runs — and introduces no new import of or
+   dependency on any Layer 1 module.
+
+### Layer 2 — TurnCoordinator
+**touched: indirectly, narrowly, as illustrative catalog metadata only —
+not runtime.**
+- **input impact:** none — the proposed mechanism reads
+  `turn_coordinator.json`'s existing declared fields (`code_paths`,
+  `feature_flags`) the same way `build_bundle()` already does; it adds no
+  new required input to the profile.
+- **output impact:** 5.6 proposes (illustrative diff, **not applied**)
+  adding a `FEATURE_AUTO_CAPTURE` entry to `turn_coordinator`'s
+  `feature_flags` list — pure catalog metadata describing an **existing**
+  flag (`feature_flags.py:98`), not a new flag, not a behavior change to
+  `core/lead_candidate_handler.py` itself.
+- **authority impact:** none — this document does not change
+  `_should_auto_write()`'s behavior and does not touch BUG-130/BUG-140's
+  actual routing logic; both are explicit non-goals.
+- **shared identifiers:** `FEATURE_AUTO_CAPTURE` is not new (already
+  defined in `feature_flags.py`); the illustrative catalog entry only
+  documents it, using the existing `feature_flag_required` schema fields.
+- **invariants:** none asserted or modified.
+- **failure semantics:** n/a — no runtime path exercises this document's
+  proposals yet.
+- **observability:** none added.
+- **cross-layer tests:** `test_turn_coordinator_feature_flags_includes_auto_capture`
+  (Section 7) is proposed for the future implementation PR that applies
+  5.6 — not run by this planning PR.
+
+### Layer 3 — F52 / Phase 4C Action & Tool Contract
+**touched: not touched.** Proof of non-impact:
+1. **grep evidence:** no mention of `ToolMeta`/`tool_registry`/
+   `dispatch_tool`/`action_validator`/`_EVIDENCE_VALIDATORS` anywhere in
+   this document.
+2. **unchanged-tests evidence:** none of
+   `test_bug_canonical_tool_wiring.py`/`test_a32_enforcement.py`/
+   `test_c53a.py` are referenced by Section 7's proposed tests.
+3. **no-new-coupling evidence:** the proposed Consumption Ledger/checklist
+   mechanism has no dependency on the tool-dispatch pipeline — it is an
+   investigation-discipline mechanism, not an execution-evidence mechanism
+   (that remains RP4/RP5/A32's job, explicitly out of scope here).
+
+### Layer 4 — Durable Atomic Approval (ActionContract/ActionGateway)
+**touched: indirectly, by reference/deference only — not redefinition.**
+- **input impact:** Section 4's recommended trigger rule for mandatory
+  independent review references `--production-claim` and "a layer/decision
+  `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` already gates" as an escalation
+  input — it consumes Layer 4's existing authority as a trigger condition;
+  it does not define new Layer 4 semantics.
+- **output impact:** none — no proposed change to `ActionContract`,
+  `ActionGateway`, `ExecutionLedger`, or any of their outputs.
+- **authority impact:** **none.** The whole design explicitly defers to
+  `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`'s own gate rather than creating a
+  competing one; Section 6's "False sense of security" caveat and the
+  Explicit Non-Goals both state this mechanism proves process compliance,
+  never a completion/production claim, and the 3 real defects the pilot
+  found in this territory (BUG-150, BUG-130/BUG-140, the ActionGateway
+  fail-open) are explicitly listed as untouched.
+- **shared identifiers:** none created; `ActionContract`/`ActionGateway`
+  are named only in Section 4's trigger rule as a reference to the
+  existing gate, never redefined.
+- **invariants:** none asserted.
+- **failure semantics:** n/a.
+- **observability:** none added.
+- **cross-layer tests:** n/a — no runtime code proposed.
+
+### Cross-Cutting Guard — RP5 Evidence Finalization
+**applies: no.** `rp5_evidence_mismatch` is named in Section 1 only as
+narrative evidence of the 28/07 pilot's own finding (the third
+evidence-shadow layer miss). The proposed mechanism does not touch
+`core/turn_evidence.py`, `core/anti_hallucination.py`, or
+`core/last_tool_result_shadow.py`.
 
 ## Explicit non-goals for this document and phase
 
@@ -464,6 +715,13 @@ in the 28/07 pilot, should require, per task:
 - No re-run of the non-inferiority pilot (old or new). Phase 1 acceptance
   remains not established, unchanged from
   `PHASE1_NON_INFERIORITY_PILOT.md`'s existing determination.
+- No claim that the cross-platform path-validation fix, the
+  `on_main_history`/`at_origin_main_tip` provenance split, or the applied
+  `FEATURE_AUTO_CAPTURE` catalog entry are closed by this PR — all three
+  are real, unmerged code on the separate
+  `codex/context-librarian-audit-remediation` branch, outside this
+  document's scope.
 - No PR implementing any part of Sections 5–8 until (a) this plan is
-  reviewed and (b) the parallel, independent Codex audit is received and
-  checked, per explicit instruction for this planning cycle.
+  reviewed and Section 9's owner-decisions are resolved, and (b) the
+  parallel, independent Codex audit is received and checked, per explicit
+  instruction for this planning cycle.
