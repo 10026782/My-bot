@@ -522,3 +522,104 @@ Phase 1 acceptance, does not re-run the 5-task
 pilot, and does not implement BUG-150, BUG-130/BUG-140, or the ActionGateway
 fail-open — those remain gated by `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`,
 unchanged from above.
+
+#### 2026-07-28 targeted rerun: did the remediation actually close the four gaps? (post-merge, `origin/main` at `ffde1d6`)
+
+This rerun does **not** repeat the pilot (no fresh Gold Sets, no blind
+review) — it directly checks, task by task, whether the specific gap each
+of the 4 non-clean tasks surfaced is now closed, using a fresh clean
+`git worktree` on `origin/main` (both PR #485 and PR #486 merged) rather than
+the working branch. `tool_execution` (the 5th task) is excluded — it was
+the one clean PASS and is unaffected.
+
+**Method:** rebuilt each of the 4 bundles fresh (`build --task-type <id>`) on
+`origin/main` at `ffde1d6`, then grepped the actual rendered output for the
+exact content each Gold-Set/blind-review finding said was missing — not
+re-derived from memory of what the fix was supposed to do.
+
+- **`approval_ux`** — Gold-Set miss was the parallel-sources-of-truth
+  structural finding (4 approval mechanisms, 2 in-memory stores, TTL
+  clocks). **Closed at the catalog level**: the bundle now contains the
+  `PARALLEL SOURCES OF TRUTH` note in full, with `event_bus.py`,
+  `PendingActionsStore`, `_pending_approvals`, the TMA Approvals-table flow,
+  and all 4 TTL constants (`CONTRACT_PENDING_TTL_SECONDS`,
+  `PENDING_TTL_MINUTES`, `_PENDING_APPROVAL_TTL`,
+  `_TMA_APPROVAL_TTL_SECONDS`) verified present by direct grep of the
+  rendered bundle. The other cited miss (`FEATURE_SINGLE_SPEAKER_APPROVAL_UX`
+  "omitted... despite it appearing in the exact code block read") was
+  already present in the bundle's Feature Flags section *before* PR #485 —
+  that specific miss was an investigator-reading gap, not a catalog gap, and
+  is not something a catalog-only fix can close.
+- **`turn_coordinator_routing`** — Gold-Set/review miss was never mentioning
+  BUG-140. **Closed and structurally guaranteed, not investigator-dependent**:
+  the bundle's `## Local Context Expansion` section now inlines the full
+  BUG-140 entry (verified the actual incident text — record ID
+  `recLwJhPNh4EDbw56`, the name "דנה כהן" — is present, not just the bug
+  number) unconditionally, every time this profile is built, regardless of
+  query wording. This is the strongest fix of the four: it cannot be skipped
+  by not reading far enough, because the tool itself inlines it.
+  **Confirmed still open** (correctly out of PR #485's declared scope):
+  `FEATURE_AUTO_CAPTURE` — the flag the review said actually governs the
+  Tier-1 branch and turns BUG-130 into an approval-bypass risk — is still
+  absent from `turn_coordinator`'s Feature Flags. Grepped for it directly;
+  zero occurrences.
+- **`core_reasoning_change`** — Gold-Set/review miss was ~4-5 files/flags the
+  investigation never opened: `core/leads_reasoning_projection.py`,
+  `core/reasoning_engines.py`/`decision_orchestrator.py`, `tma_api.py`,
+  `FEATURE_CORE_REASONING_LEADS_STATE`, and
+  `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`. Direct grep of the rebuilt bundle
+  found **all of these already present before PR #485** except one:
+  `decision_orchestrator.py` never existed on `main` under that name (its
+  role moved to `core/adapters/decision_adapter.py`, confirmed by that
+  file's own header comment) — that is the one genuine catalog gap, and it
+  is now fixed (`core/adapters/decision_adapter.py` is in `code_paths`,
+  verified present in the rebuilt bundle). The other four items were already
+  listed in the bundle before this PR; the pilot's finding was that the
+  investigation didn't open them despite that. **This is the weakest-covered
+  of the 4 tasks**: only 1 of ~5 missed items was a catalog gap this kind of
+  PR could fix. The dominant failure mode — an agent not reading everything
+  a bundle already lists — is an investigation-discipline problem, not
+  something `docs/context_librarian/` content can structurally prevent.
+- **`rp5_evidence_mismatch`** — the Critical finding (this PR's namesake
+  motivation) was the commit/branch mislabeling itself. **Closed and
+  directly re-verified as a hard gate, both directions, on real git state**
+  (not mocked): built with `--assert-main` on an actual commit on `main` →
+  succeeded, bundle shows `on_main: yes`. Built with `--assert-main` on a
+  synthetic commit on a throwaway unmerged branch → failed closed with exit
+  code 2 and an explicit error naming the commit, branch, and `on_main=no`,
+  refusing to render. The separate High finding (missed third
+  evidence-shadow layer, `core/last_tool_result_shadow.py`) turned out, on
+  inspection, to have **never been a catalog gap**: `layer.tools` already
+  listed that file and `FEATURE_LAST_TOOL_RESULT_SHADOW`, and
+  `rp5_evidence_mismatch`'s `required_dependency_layers` already declared
+  `tools` as required — both parties simply didn't open a dependency layer
+  the profile already pulled in. Same failure mode as `core_reasoning_change`
+  above: catalog was already correct; nothing to fix there.
+
+**Determination: Phase 1 non-inferiority is not re-established by this
+remediation, and this rerun was never going to establish it** — that would
+require repeating the actual pilot cycle (fresh independent Gold Sets, a
+completed Librarian-track investigation, and independent blind review, ideally
+dual-vendor) not performed here. What this rerun does establish, with direct
+evidence rather than an inferred claim:
+
+- **2 of 4 failure modes are now structurally closed** — `turn_coordinator_routing`'s
+  BUG-140 miss and `rp5_evidence_mismatch`'s Critical commit/branch
+  mislabeling can no longer recur *in that exact form*, because the tool
+  itself now guarantees the content (inlined excerpt; hard-gated provenance
+  check), independent of investigator diligence.
+- **2 of 4 failure modes are only partially addressed** — `approval_ux` and
+  `core_reasoning_change`'s dominant root cause, in both cases, was an
+  investigation not reading content the bundle *already* listed before this
+  PR, not missing catalog content. This PR closed the one genuinely-missing
+  item in each (parallel-sources-of-truth documentation; `decision_adapter.py`),
+  which narrows what could go wrong, but cannot force a future investigation
+  to actually read everything a bundle lists — that remains an open process
+  risk this kind of PR cannot close by itself.
+- **2 additional, smaller, legitimate gaps remain confirmed open** and
+  correctly out of PR #485's declared scope: `FEATURE_AUTO_CAPTURE` missing
+  from `turn_coordinator`'s Feature Flags, and the general
+  investigation-discipline gap around required-dependency layers (rp5's
+  third evidence-shadow layer, and `core_reasoning_change`'s four
+  already-listed-but-unread sources) — both are candidates for a future,
+  separately-scoped PR, not something to retrofit into this one.
