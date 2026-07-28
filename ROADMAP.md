@@ -1,15 +1,27 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 28/07/2026 — **N17 Context Librarian remediation follow-up (focused branch):**
-cross-platform bounded-local-expansion path validation now treats POSIX and
-Windows absolute paths consistently and keeps relative paths valid;
-`FEATURE_AUTO_CAPTURE` is mapped in `layer.turn_coordinator` with its code
-reference and evidence scope; provenance distinguishes `on_main_history` from
-`at_origin_main_tip` while retaining the internal `on_main` compatibility alias.
-The provenance checks use the local `origin/main` ref only (no automatic fetch);
-missing `origin/main` yields `unknown` and the corresponding assertion fails
-closed. Source Consumption Enforcement remains planned canonically in PR #488;
-no duplicate plan is added here.
+עודכן: 28/07/2026 — **N17 עדכון: Consumption Enforcement — `STATUS: PLANNING APPROVED
+BY OWNER` (סעיף 8), אין implementation, אין שינוי runtime.** נכתב על `origin/main` לאחר
+PR #485+#487+#489. מטרה: איך למנוע מצב שבו מקור חובה כבר ב-bundle אך הסוכן מגיע למסקנה
+בלי לפתוח אותו — בדיוק הפער ש-PR #487 מצא. ראה
+`docs/context_librarian/CONSUMPTION_ENFORCEMENT_PLAN.md` לפירוט מלא — כולל Cross-Layer
+Impact Matrix (ללא cross-layer risk) והחלטות owner מלאות: מודל שכבתי (self-attested ledger
+לכל משימה + independent review חובה על production claim/Cross-Layer/waiver כלשהו); כל
+waiver דורש independent reviewer approval ופג-תוקף בשינוי commit/profile/query; ה-ledger
+disposable מקומית ומועלה כ-CI artifact (לא committed); Option C (harness-level tracking)
+נדחה לפרופוזל נפרד. **אין תיקון ל-BUG-130/BUG-140/BUG-150/fail-open; אין ריצה חוזרת של
+הפיילוט. אין לפתוח PR implementation לפני שה-PR המתוקן הזה עצמו נסקר ומוזג** — תנאי מפורש
+מהמשתמש.
+עודכן: 28/07/2026 — **N17 Context Librarian remediation — ✅ מוזג ל-`main`** (PR #489,
+ענף `codex/context-librarian-audit-remediation`, מיזוג `20914f2`): cross-platform
+bounded-local-expansion path validation מטפל עכשיו עקבית בנתיבי POSIX ו-Windows מוחלטים
+ושומר נתיבים יחסיים תקינים; `FEATURE_AUTO_CAPTURE` ממופה ב-`layer.turn_coordinator` עם
+code reference ו-evidence scope; provenance מבחין בין `on_main_history` ל-
+`at_origin_main_tip` תוך שמירת ה-alias התואם-לאחור `on_main`. בדיקות ה-provenance
+משתמשות רק ב-`origin/main` המקומי (ללא fetch אוטומטי); היעדר `origin/main` מחזיר
+`unknown` וה-assertion המתאים נכשל-סגור. **Codex הסיר בעצמו את
+`SOURCE_CONSUMPTION_GATE_PLAN.md` (הצעת-תכנון מקבילה) לפני המיזוג**, ונדחה במפורש
+ל-`#488` כמסמך-תכנון הקנוני היחיד — ללא כפילות.
 עודכן: 28/07/2026 — **N17 עדכון: rerun ממוקד — האם התיקונים סגרו את 4 הכשלים שהפיילוט
 מצא?** (על `origin/main` ב-`ffde1d6`, אחרי PR #485+#486; לא ריצה חוזרת של הפיילוט — אין
 Gold Set חדש, אין blind review). לכל אחת מ-4 המשימות (לא `tool_execution` — PASS נקי):
@@ -1021,11 +1033,28 @@ ActionContract), ואין Cross-Layer Impact Matrix שלם לאף אחת — **�
 6. 🔲 לתכנן Multi-session Coordination (סעיף 5) — תכנון בלבד לפני implementation.
 7. ✅ VCM plan מוזג ל-`main` (PR #482, merge `ffa678a`) — תכנון בלבד, אין implementation.
    Dogfooding (כתיבת nodes על הספרן עצמו) עדיין טרם תוכנן.
+8. 🟢 Consumption Enforcement — **`STATUS: PLANNING APPROVED BY OWNER`, PR #488 פתוח,
+   לא מוזג עדיין.** מסמך התכנון (`docs/context_librarian/CONSUMPTION_ENFORCEMENT_PLAN.md`)
+   עונה על הפער ש-PR #487 מצא (investigation discipline, לא קטלוג). 5 הערות סקירה
+   (CodeRabbit) נפתרו + Cross-Layer Impact Matrix נוסף (ללא cross-layer risk) + כל החלטות
+   ה-owner אושרו: מודל שכבתי (ledger + independent review חובה); waiver דורש independent
+   approval ופג-תוקף בשינוי commit/profile/query; ledger disposable מקומית, מועלה כ-CI
+   artifact (לא committed — היפוך החלטה קודמת); Option C נדחה לפרופוזל נפרד. **אין
+   implementation ב-PR הזה. אין לפתוח PR implementation לפני שה-PR המתוקן הזה עצמו נסקר
+   ומוזג** — תנאי מפורש מהמשתמש.
+9. ✅ N17 Context Librarian remediation (audit עצמאי של Codex) מוזג ל-`main` (PR #489,
+   ענף `codex/context-librarian-audit-remediation`, merge `20914f2`) — סוגר את שני ה-gaps
+   הקטנים שנשארו פתוחים מהעדכון הקודם: `FEATURE_AUTO_CAPTURE` ממופה עכשיו ב-
+   `layer.turn_coordinator`; תיקון cross-platform לבדיקת נתיב מוחלט
+   (POSIX/Windows); provenance מבחין `on_main_history`/`at_origin_main_tip`. Codex הסיר
+   בעצמו את הצעת-התכנון המקבילה שלו (`SOURCE_CONSUMPTION_GATE_PLAN.md`) לפני המיזוג,
+   ונדחה במפורש ל-PR #488 כמסמך הקנוני — אין כפילות תכנון.
 
 **קבצים:** `docs/context_librarian/` (הספרן עצמו, כולל `TOKEN_ESTIMATION_BENCHMARK.md` החדש),
 `tools/context_librarian/librarian.py` (token estimation, catalog loading),
 `tools/context_librarian/benchmark_token_estimate.py` (חדש), `test_context_librarian.py`,
-`.github/workflows/ci.yml`, `docs/context_librarian/PHASE1_NON_INFERIORITY_PILOT.md`.
+`.github/workflows/ci.yml`, `docs/context_librarian/PHASE1_NON_INFERIORITY_PILOT.md`,
+`docs/context_librarian/CONSUMPTION_ENFORCEMENT_PLAN.md` (חדש, סעיף 8, תכנון בלבד).
 
 ### F17 — Decision Hub Stage 2: Smart Trust Layer (PR #157, מוזג ל-`main`, commit `9252b1e`/merge `78f9bae`)
 **מה:** שכבת ביטחון על גבי Stage 1 — מסתכלת על ה-Decision כולו (לא Event בודד): האם
