@@ -550,14 +550,16 @@ def test_agent_bootstrap_is_canonical_and_claude_only_references_it():
     assert "**Before doing anything else**, read `AI_CONTEXT.md`" not in claude
 
 
-# --- N17 pilot findings remediation (2026-07-28) ---
+# --- N17 pilot findings remediation (PR #485, 2026-07-28) ---
 #
-# Each test below regresses one of the five concrete gaps the 2026-07-28
-# non-inferiority pilot found (docs/context_librarian/PHASE1_NON_INFERIORITY_PILOT.md,
-# "2026-07-28 non-inferiority pilot advancement" section): core_reasoning_change
-# missing a mandatory authority source, approval_ux missing the parallel
-# sources-of-truth structural finding, turn_coordinator_routing missing an
-# adjacent bug-log entry, and the rp5 task's commit/branch mislabeling.
+# הבדיקות למטה מגנות-רגרסיה על ארבעה מתוך חמשת הממצאים שפיילוט ה-non-inferiority
+# מ-28/07/2026 מצא (docs/context_librarian/PHASE1_NON_INFERIORITY_PILOT.md, סעיף
+# "2026-07-28 non-inferiority pilot advancement"): core_reasoning_change חסר
+# מקור-סמכות מחייב, approval_ux חסר את ממצא-מקורות-האמת-המקבילים, turn_coordinator_routing
+# חסר רשומת bug-log סמוכה, ו-commit/branch mislabeling של משימת ה-rp5. בדיקה חמישית
+# מגנה על באג נפרד, לא-מהפיילוט, שנמצא תוך כדי התיקון: _render() הציג רק notes[0] של
+# כל node. שתי הבדיקות האחרונות בקובץ מגנות על ממצאי CodeRabbit על ה-PR הזה עצמו
+# (path traversal, ערך expansion פגום).
 
 
 def test_core_reasoning_profile_includes_decision_adapter_and_write_side_note(catalog):
@@ -742,3 +744,51 @@ def test_cli_assert_main_flag_fails_closed_off_main(monkeypatch, capsys):
     )
     assert exit_code == 2
     assert "assert-main" in capsys.readouterr().err
+
+
+def test_layer_notes_beyond_the_first_are_rendered_not_dropped(catalog):
+    node = catalog.nodes["layer.core_reasoning"]
+    assert len(node["notes"]) > 1, "fixture must exercise notes[1:], not just notes[0]"
+    bundle = build_bundle(
+        catalog, task_type="core_reasoning_change", query="lead reasoning"
+    )
+    for note in node["notes"]:
+        assert note in bundle
+
+
+def test_bounded_local_expansion_rejects_non_object_entry(tmp_path, monkeypatch):
+    root = _isolated_catalog(tmp_path, monkeypatch)
+    path = root / "task_profiles/profiles.json"
+    data = _read_json(path)
+    profile = next(p for p in data["profiles"] if p["id"] == "approval_ux")
+    profile["bounded_local_expansions"] = [None]
+    _write_json(path, data)
+    with pytest.raises(ContextLibrarianError, match="bounded_local_expansions"):
+        load_catalog(REPO_ROOT)
+
+
+@pytest.mark.parametrize(
+    ("bad_path", "expected_message"),
+    [
+        ("../../../etc/passwd", "escapes repo root"),
+        ("/etc/passwd", "must be relative"),
+    ],
+)
+def test_bounded_local_expansion_rejects_paths_outside_repo_root(
+    tmp_path, monkeypatch, bad_path, expected_message
+):
+    root = _isolated_catalog(tmp_path, monkeypatch)
+    path = root / "task_profiles/profiles.json"
+    data = _read_json(path)
+    profile = next(p for p in data["profiles"] if p["id"] == "approval_ux")
+    profile["bounded_local_expansions"] = [
+        {
+            "path": bad_path,
+            "anchor": "root",
+            "window_lines": 5,
+            "role": "escape attempt",
+        }
+    ]
+    _write_json(path, data)
+    with pytest.raises(ContextLibrarianError, match=expected_message):
+        load_catalog(REPO_ROOT)

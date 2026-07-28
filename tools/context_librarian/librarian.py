@@ -74,10 +74,10 @@ PROFILE_FIELDS = frozenset(
 )
 PROFILE_REQUIRED_FIELDS = PROFILE_FIELDS - {"extensions"}
 BOUNDED_LOCAL_EXPANSION_FIELDS = frozenset({"path", "anchor", "window_lines", "role"})
-# Hard cap, not a default: a bounded expansion must stay a small, fixed-size
-# excerpt window around a profile-declared anchor. It is not a search feature
-# and it is never driven by the free-text query, so it cannot grow from query
-# wording (N17 pilot Task 3 fix: "query must not inflate context unnecessarily").
+# תקרה קשיחה, לא ברירת מחדל: הרחבה מוגבלת חייבת להישאר חלון-קטע קטן וקבוע-גודל
+# סביב anchor שמוגדר ב-profile. זו לא תכונת חיפוש והיא לעולם לא מונעת ע"י
+# free-text query, ולכן לא יכולה לגדול מניסוח ה-query (N17 pilot Task 3:
+# "query must not inflate context unnecessarily").
 MAXIMUM_LOCAL_EXPANSION_WINDOW_LINES = 200
 SAFETY_RULES = (
     "main overrides planning documents and generated bundles.",
@@ -244,15 +244,22 @@ def _validate_profile(
         )
     if not isinstance(profile["bounded_local_expansions"], list):
         raise ContextLibrarianError(f"{label}: bounded_local_expansions must be a list")
+    resolved_repo_root = repo_root.resolve()
     for expansion in profile["bounded_local_expansions"]:
-        if set(expansion) != BOUNDED_LOCAL_EXPANSION_FIELDS:
+        # isinstance נבדק ראשון: set() על ערך שאינו iterable (למשל JSON null)
+        # מעלה TypeError גולמי במקום כשל-סגור מבוקר.
+        if not isinstance(expansion, dict) or set(expansion) != BOUNDED_LOCAL_EXPANSION_FIELDS:
             raise ContextLibrarianError(
-                f"{label}: bounded_local_expansions entry must have exactly "
-                f"{sorted(BOUNDED_LOCAL_EXPANSION_FIELDS)}"
+                f"{label}: bounded_local_expansions entry must be an object with "
+                f"exactly {sorted(BOUNDED_LOCAL_EXPANSION_FIELDS)}"
             )
         if not isinstance(expansion["anchor"], str) or not expansion["anchor"]:
             raise ContextLibrarianError(
                 f"{label}: bounded_local_expansions anchor must be a non-empty string"
+            )
+        if not isinstance(expansion["role"], str) or not expansion["role"]:
+            raise ContextLibrarianError(
+                f"{label}: bounded_local_expansions role must be a non-empty string"
             )
         window_lines = expansion["window_lines"]
         if (
@@ -264,10 +271,27 @@ def _validate_profile(
                 f"{label}: bounded_local_expansions window_lines must be an int in "
                 f"1..{MAXIMUM_LOCAL_EXPANSION_WINDOW_LINES}"
             )
-        if not (repo_root / expansion["path"]).exists():
+        raw_path = expansion["path"]
+        if not isinstance(raw_path, str) or not raw_path:
             raise ContextLibrarianError(
-                f"{label}: bounded_local_expansions path does not exist: "
-                f"{expansion['path']}"
+                f"{label}: bounded_local_expansions path must be a non-empty string"
+            )
+        if Path(raw_path).is_absolute():
+            raise ContextLibrarianError(
+                f"{label}: bounded_local_expansions path must be relative: {raw_path}"
+            )
+        # resolve() + relative_to(): חוסם ".." traversal ונתיבים מוחלטים כאחד,
+        # כדי ש-_local_expansions() לא יוכל לחשוף קובץ שרירותי מחוץ לריפו.
+        resolved_path = (repo_root / raw_path).resolve()
+        try:
+            resolved_path.relative_to(resolved_repo_root)
+        except ValueError:
+            raise ContextLibrarianError(
+                f"{label}: bounded_local_expansions path escapes repo root: {raw_path}"
+            ) from None
+        if not resolved_path.exists():
+            raise ContextLibrarianError(
+                f"{label}: bounded_local_expansions path does not exist: {raw_path}"
             )
 
 
@@ -559,18 +583,17 @@ _MAIN_REF_CANDIDATES = ("origin/main", "main")
 
 
 def _git_provenance(repo_root: Path) -> dict[str, str]:
-    """Report the exact commit/branch a bundle was built from, and whether
-    that commit has actually reached `main` — never assumed from a branch
-    name or from whoever writes about the bundle afterwards.
+    """מדווח את ה-commit/branch המדויקים שמהם נבנה bundle, והאם ה-commit הזה
+    הגיע בפועל ל-`main` — לעולם לא בהנחה משם branch או ממי שכותב על ה-bundle
+    בדיעבד.
 
-    Fixes the 2026-07-28 N17 pilot's Critical finding: a bundle built from an
-    unmerged branch (`17b0a67`, only ever on
-    `claude/context-librarian-non-inferiority-pilot`) was described in a
-    review packet as reflecting `main` at `ffa678a7`. `on_main` is "yes" only
-    when the built commit is a proven ancestor of (or equal to) a resolvable
-    `main` ref; "no" when it is proven not to be; "unknown" when neither can
-    be established (e.g. no `origin` remote configured) — "unknown" is never
-    treated as "yes" by callers.
+    מתקן את הממצא ה-Critical של פיילוט N17 מ-28/07/2026: bundle שנבנה מענף
+    לא-ממוזג (`17b0a67`, קיים רק על `claude/context-librarian-non-inferiority-pilot`)
+    תואר ב-review packet כמשקף את `main` ב-`ffa678a7`. `on_main` הוא "yes"
+    רק כאשר ה-commit הבנוי מוכח כ-ancestor של (או שווה ל-) `main` ref שניתן
+    לפתור; "no" כאשר מוכח שאינו כזה; "unknown" כאשר אף אחד מהשניים לא ניתן
+    לקביעה (למשל אין `origin` remote מוגדר) — "unknown" לעולם לא מטופל כ-
+    "yes" ע"י הקוראים.
     """
 
     def _run(args: list[str]) -> tuple[int, str]:
@@ -676,18 +699,17 @@ def _unique_references(
 def _local_expansions(
     repo_root: Path, profile: dict[str, Any]
 ) -> list[dict[str, Any]]:
-    """Deterministic, profile-defined excerpt windows around a fixed anchor.
+    """חלונות-קטע דטרמיניסטיים, מוגדרי-profile, סביב anchor קבוע.
 
-    Unlike everything else _select_nodes()/_render() pull in, this is not a
-    file-path reference the agent must separately open — the matched window is
-    inlined directly into the bundle. It exists for the specific failure mode
-    the 2026-07-28 N17 pilot found on `turn_coordinator_routing`: a defect
-    (BUG-140) sitting a short distance below another defect (BUG-130) in the
-    same large log file the investigation had already opened, but was never
-    read that far. It is profile-configured, not query-driven, and hard-capped
-    by `window_lines` (<= MAXIMUM_LOCAL_EXPANSION_WINDOW_LINES) — free-text
-    query wording cannot grow or trigger this section, so it cannot inflate
-    context the way an unbounded query-driven expansion could.
+    בניגוד לכל מה ש-_select_nodes()/_render() מושכים בדרך כלל, זו לא הפניה
+    לנתיב-קובץ שהסוכן צריך לפתוח בנפרד — החלון המותאם משוקע ישירות בתוך ה-
+    bundle. הפונקציה קיימת עבור מצב-הכשל הספציפי שפיילוט N17 מ-28/07/2026
+    מצא ב-`turn_coordinator_routing`: באג (BUG-140) שיושב מרחק קצר מתחת לבאג
+    אחר (BUG-130) באותו קובץ-לוג גדול שהחקירה כבר פתחה, אך לא נקרא עד שם.
+    ההרחבה מוגדרת-profile, לא query-driven, ומוגבלת-קשיח ע"י `window_lines`
+    (<= MAXIMUM_LOCAL_EXPANSION_WINDOW_LINES) — ניסוח query חופשי לא יכול
+    לגדל או להפעיל את הסעיף הזה, ולכן לא יכול לנפח context בדרך שהרחבה
+    לא-מוגבלת ומונעת-query הייתה יכולה.
     """
     results: list[dict[str, Any]] = []
     for expansion in profile["bounded_local_expansions"]:
@@ -905,12 +927,11 @@ def _render(
         lines.append(
             f"- `{layer_id}` ({roles[layer_id]}, {node['status']}, {stale_label}) — {node['notes'][0]}"
         )
-        # notes[0] is the headline; every catalog author has relied on it being
-        # rendered here, but notes[1:] were silently dropped from every bundle
-        # ever built until this fix (2026-07-28 N17 pilot: this is exactly the
-        # class of gap the pilot's core_reasoning_change/approval_ux findings
-        # needed fixed — a note existing in the catalog is not the same as it
-        # reaching an agent's bundle).
+        # notes[0] הוא הכותרת; כל כותב-קטלוג הסתמך על כך שהיא תוצג כאן, אבל
+        # notes[1:] נשמטו בשקט מכל bundle שנבנה אי-פעם עד לתיקון הזה (פיילוט
+        # N17, 28/07/2026: בדיוק אותה מחלקת-פער כמו ממצאי core_reasoning_change/
+        # approval_ux של הפיילוט — קיום הערה בקטלוג אינו זהה להגעתה בפועל
+        # ל-bundle של סוכן).
         lines.extend(f"    - {extra_note}" for extra_note in node["notes"][1:])
 
     lines.extend(["", "## Canonical Documents", ""])
