@@ -31,7 +31,18 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
     steps:
+      # fetch-depth: 0 (full history) — required by
+      # tools/context_librarian/librarian.py's freshness check, which runs
+      # `git diff --name-only <last_verified_commit> --` against arbitrary
+      # historical commits recorded in the catalog. The default shallow
+      # clone (fetch-depth: 1) doesn't contain those commits, so `git diff`
+      # fails with exit 128 ("unknown revision") — this is exactly the
+      # failure the new "pytest context librarian" step below caught on its
+      # first real CI run.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:
@@ -56,6 +67,9 @@ jobs:
 
       - name: Core import check
         run: python -c "import app; import tma_api; import tools.dispatcher"
+
+      - name: Context Librarian catalog validation (N17 item 4 — CI drift detection)
+        run: python -m tools.context_librarian validate
 
       - name: Run test_*.py scripts
         run: |
@@ -104,6 +118,14 @@ jobs:
             -x \
             --tb=short \
             -q
+
+      # N17 item 4 — CI drift fix: test_context_librarian.py uses pytest
+      # fixtures/parametrize with no `if __name__` runner, so the plain
+      # "Run test_*.py scripts" loop above silently executes it as a no-op
+      # (exits 0 having run zero of its tests). This step is what actually
+      # exercises the librarian's own test suite in CI.
+      - name: pytest context librarian
+        run: python -m pytest test_context_librarian.py -x --tb=short -q
 
   frontend-ci:
     runs-on: ubuntu-latest

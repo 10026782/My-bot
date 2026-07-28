@@ -3,6 +3,13 @@
 עודכן: 28/07/2026 — **N17 עדכון: Verification Coverage Model plan (חצי מסעיף 6, תכנון בלבד)
 נכתב על ענף `claude/context-librarian-vcm-plan` — טרם מוזג. ראה N17 למטה לפירוט. אין
 implementation, אין nodes חדשים.**
+עודכן: 28/07/2026 — **N17 עדכון: Librarian Hardening PR (סעיפים 1-3 + CI validation, סדר
+עבודה מחייב שלב 4) מוזג ל-`main` (PR #481, ענף `claude/context-librarian-hardening-n17`).
+אומת ב-grep ישירות על `origin/main`: `.json` catalog (10 קבצים), `_load_catalog_json`,
+`_approximate_char_estimate`, `_CHARS_PER_APPROXIMATE_TOKEN`, ושלושת ה-CI steps
+(`fetch-depth: 0`, `persist-credentials: false`, `pytest context librarian`) — כולם קיימים
+בפועל. **אין אימות production/staging** (dev tooling בלבד, לא רלוונטי). ראה N17 למטה
+לפירוט מלא.**
 עודכן: 27/07/2026 — **N17 נוסף: Context Librarian Follow-up Hardening & Verification Backlog (6 נקודות המשך + סדר עבודה מחייב), בעקבות PR #475 (Re-verification Alignment, `89e2b4e`, ראה למטה). אין ליישום עדיין.** עדכון PR #471 הקודם נשמר בהמשך.
 
 **Context Librarian Re-verification Alignment — PR #475 (`e4d29d0`+`34e31a4`, merge `89e2b4e`):** תיעוד/מטא-דאטה בלבד, ללא שינוי runtime. יישר את ארבעת ה-context-librarian nodes (`approvals`, `turn_coordinator`, `ux_f52`, `rp5`) מול PR #471 — נוסף `FEATURE_SINGLE_SPEAKER_APPROVAL_UX` לארבעתם, תועדו ה-callback עם `contract_id`, BUG-144 reject, ה-Gateway reply-ownership handoff המותנה, ו-RP5 שממשיך לרוץ במסלול ה-Gateway-owned. `task_profiles/profiles.yaml`'s `turn_coordinator_routing` כבר לא חוסם rp5 באופן גורף. תוקן assertion ישן ב-`test_phase_4b_1b_durable_lifecycle.py` (נוסח ✅ הישן). נוספו erratum notes ל-5 מסמכים קנוניים + רשומת `DECISION_LOG.md` D-011 (מתעדת שנוצר renderer מקביל, `ApprovalLifecycleResult`, במקום הרחבת `compose_status_reply()` לפי D-010 — ממצא פתוח, לא תוקן). `last_verified_commit` רוענן ל-`a885561d` רק אחרי ש-30/30 test_paths עברו, `validate`/`test_context_librarian.py` נקיים, וחמשת ה-pilot bundles נבנו פעמיים כל אחד (STOP→PROCEED, hash דטרמיניסטי). Post-merge verification בוצע ישירות על `main` (`89e2b4e`) — כל הסמלים אומתו ב-grep, כל חמשת ה-pilot bundles PROCEED. **אין אימות production/staging.** ראו N17 למטה להמשך המחייב.
@@ -816,28 +823,55 @@ audit, ראה `git log` על `app.py`'s tool loop לקומיט המדויק) —
 באותו PR. **אין לממש את כולן באותו PR; אין לערבב runtime, catalog hardening, production
 verification ו-multi-session orchestration באותו PR.**
 
-**1. Token estimation hardening — לא בוצע.**
-המימוש הנוכחי (`tools/context_librarian/librarian.py`) משתמש ב-`ceil(len(text) / 4)` כאומדן
-טוקנים — לא שמרני מספיק לעברית, קוד וטקסט מעורב. PR נפרד נדרש:
-- לשנות את שם המדד כך שיהיה ברור שאינו token count אמיתי (למשל `approximate_char_estimate`);
-- להריץ benchmark על bundles אמיתיים בעברית, אנגלית וקוד;
-- להגדיר estimation mode שמרני;
-- לא להוסיף dependency כבדה ללא צורך;
-- לא לטעון לחיסכון בטוקנים על סמך `chars / 4` בלבד.
+**עדכון 28/07/2026 — Librarian Hardening PR (סדר עבודה מחייב שלב 4) מוזג ל-`main`**
+(PR #481, ענף `claude/context-librarian-hardening-n17`). אומת ב-grep ישירות על
+`origin/main` לאחר המיזוג: `.json` catalog (10 קבצים), `_load_catalog_json`,
+`_approximate_char_estimate`, `_CHARS_PER_APPROXIMATE_TOKEN`, ושלושת ה-CI steps
+(`fetch-depth: 0`, `persist-credentials: false`, `pytest context librarian`) — כולם
+קיימים בפועל ב-`main`. CodeRabbit על ה-PR: 5 ממצאים, 4 תוקנו (ניסוח README
+לא-שמרני, תרגום הערות לעברית, `_path_char_estimate` שספר bytes במקום תווים,
+`persist-credentials: false` — ממצא אבטחה אמיתי מ-zizmor), 1 נדחה כ-false positive
+(דרישת ניתוב benchmark script דרך dispatcher — לא רלוונטי לסקריפט dev-only ללא
+identity/tenant, אותה קטגוריה כמו `llm_fallback.py`; CodeRabbit אימת ומשך את
+הממצא בעצמו).
 
-**2. Catalog format hardening — לא בוצע.**
-קובצי הקטלוג נקראים `.yaml` אך נטענים בפועל עם `json.loads()` (JSON-compatible YAML). זה
-עובד כרגע אך הסיומת מטעה — סוכן או מפתח עלול לכתוב YAML רגיל (הערות, multi-line strings,
-anchors) וישבור את הטעינה בשקט. אחרי ה-hardening PR: להעדיף migration מסודר ל-`.json`, אלא
-אם audit נפרד יוכיח סיבה ממשית להוסיף parser YAML תקני.
+**1. Token estimation hardening — ✅ מוזג ל-main, אומת.**
+`_approx_tokens` שונה ל-`_approximate_char_estimate` (+ `_path_char_estimate` לגודל קובץ על
+דיסק), עם הבהרה מפורשת בקוד/README/AGENT_CONSUMPTION_CONTRACT.md שזהו אומדן תווים, לא
+token count אמיתי. הדיווח בבundle שונה מ-`approximate_token_budget` ל-
+`approximate_char_estimate_budget` (+ תווית "NOT a real tokenizer count"). נכתב
+`tools/context_librarian/benchmark_token_estimate.py` — משווה `chars/4` מול token count אמיתי
+דרך `anthropic` SDK's `messages.count_tokens` (כבר תלות קיימת, לא נוספה תלות כבדה) על bundle
+אמיתי לכל אחד מ-7 הפרופילים. **ה-benchmark לא הורץ** — סביבת הפיתוח הזו חסרת
+`ANTHROPIC_API_KEY`, והסקריפט נכשל-סגור במקום להמציא מספרים. `_CHARS_PER_APPROXIMATE_TOKEN`
+נשאר `4` ללא שינוי, לפי Rule 15 (אין טענה בלי אימות) — שינוי מקדם דורש קודם להריץ את ה-
+benchmark ולתעד תוצאות אמיתיות ב-`docs/context_librarian/TOKEN_ESTIMATION_BENCHMARK.md`.
+לא שונה שם ה-schema field הציבורי `maximum_approximate_token_budget` — נמנע breaking change
+ל-schema 1.0 בכוונה (הוחלט מול המשתמש).
 
-**3. Query and profile-selection hardening — לא בוצע.**
-ה-profile המפורש חייב להישאר מקור הבחירה המרכזי. ה-query החופשי רשאי להציע profile,
-להוסיף optional evidence, ולעזור בהרחבת context — **אינו** רשאי להשמיט authority, required
-dependency, safety layer, evidence dependency מהותי, או cross-layer dependency ידוע. PR נפרד
-צריך לבדוק: aliases ו-controlled vocabulary; dependencies קבועות דרך profiles ו-edges
-(לא query); שה-query משפיע רק על הרחבה ולא על הליבה; fixture tests לניסוחים חלופיים בעלי
-אותה משמעות (לוודא שאין ניסוח תקין שמשמיט primary/required layer).
+**2. Catalog format hardening — ✅ מוזג ל-main, אומת.**
+כל 10 קובצי הקטלוג (`schema/*.yaml`, `layers/*.yaml`×6, `task_profiles/profiles.yaml`,
+`decisions/canonical_boundaries.yaml`) שונו בפועל ל-`.json` (`git mv`, תוכן זהה בייט-לבייט —
+כבר היה JSON תקני). `librarian.py`'s `_load_json_yaml`→`_load_catalog_json`, glob
+`*.yaml`→`*.json`, כל ה-path strings עודכנו. עודכנו גם `README.md`,
+`node_schema.json`'s `catalog_discovery` string, ורפרנס פנימי אחד בתוך `rp5.json`'s notes.
+עודכנו גם שני רפרנסים חיצוניים ישנים ל-`.yaml` שנמצאו ב-
+`SINGLE_SPEAKER_APPROVAL_UX_PRODUCTION_VERIFICATION_PLAN.md` ו-`DECISION_LOG.md`.
+`validate` + מלוא `test_context_librarian.py` (44 בדיקות, כולל 6 חדשות) ירוקים.
+
+**3. Query and profile-selection hardening — ✅ מוזג ל-main, אומת.**
+הקוד כבר הבטיח את האינווריאנט structurally (`_selection_roles`/`_conditional_layers` — query
+יכול רק להוסיף conditional evidence, לעולם לא להשמיט primary/required/mandatory). נוספו
+regression tests מפורשים: garbage/ריק query על פני כל 7 הפרופילים לא משמיט אף primary/
+required/mandatory node; query עוין הבנוי מ-`selection_terms` של layers מוחרגים לא מדליף
+אותם (`core_reasoning_change`); ניסוחים שווי-משמעות בעברית/אנגלית מפעילים אותו conditional
+evidence. תועד `selection_terms`/`query_terms` כ-controlled vocabulary יחיד ב-README.
+
+**CI validation (חלק משלב 4) — ✅ מוזג ל-main, אומת.** נמצא ממצא קונקרטי: `test_context_librarian.py`
+הוא pytest-only (אין `if __name__`), ולולאת ה-CI הקיימת `for f in test_*.py; do python "$f"; done`
+מריצה אותו כ-no-op שקט (exit 0, אפס בדיקות בפועל) — 44 הבדיקות של הספרן מעולם לא רצו ב-CI.
+נוספו שני steps ב-`.github/workflows/ci.yml`: `python -m tools.context_librarian validate`
+ו-`pytest test_context_librarian.py` ייעודי.
 
 **4. Live production verification — לא בוצע. אין להסיק מצב production מהקוד/מה-flag/מבדיקות.**
 נדרשת הכנת Production Verification Plan נפרד עבור:
@@ -884,15 +918,18 @@ justification), איך זה יחושב דטרמיניסטית מה-catalog הק�
 1. ✅ להשלים ולמזג Re-verification Alignment (PR #475, `89e2b4e`).
 2. ✅ להריץ מחדש את חמש משימות ה-pilot על `main` — כולן `PROCEED`.
 3. 🔲 להשלים Production Verification Plan (סעיף 4 לעיל).
-4. 🔲 לפתוח PR נפרד ל-Librarian Hardening: token estimation (סעיף 1); catalog format (סעיף 2);
-   query/profile hardening (סעיף 3); CI validation.
+4. ✅ Librarian Hardening מוזג ל-`main` (PR #481): token estimation (סעיף 1); catalog
+   format (סעיף 2); query/profile hardening (סעיף 3); CI validation. POST-MERGE
+   VERIFICATION בוצע ישירות על `origin/main` (`AGENTS.md`) — כל הסמלים אומתו ב-grep.
 5. 🔲 להשלים non-inferiority pilot (`docs/context_librarian/PHASE1_NON_INFERIORITY_PILOT.md`).
 6. 🔲 לתכנן Multi-session Coordination (סעיף 5) — תכנון בלבד לפני implementation.
 7. 🔲 VCM plan פתוח (ענף `claude/context-librarian-vcm-plan`, טרם מוזג) — תכנון בלבד, אין
    implementation. Dogfooding (כתיבת nodes על הספרן עצמו) עדיין טרם תוכנן.
 
-**קבצים:** `docs/context_librarian/` (הספרן עצמו), `tools/context_librarian/librarian.py`
-(token estimation, catalog loading), `docs/context_librarian/PHASE1_NON_INFERIORITY_PILOT.md`.
+**קבצים:** `docs/context_librarian/` (הספרן עצמו, כולל `TOKEN_ESTIMATION_BENCHMARK.md` החדש),
+`tools/context_librarian/librarian.py` (token estimation, catalog loading),
+`tools/context_librarian/benchmark_token_estimate.py` (חדש), `test_context_librarian.py`,
+`.github/workflows/ci.yml`, `docs/context_librarian/PHASE1_NON_INFERIORITY_PILOT.md`.
 
 ### F17 — Decision Hub Stage 2: Smart Trust Layer (PR #157, מוזג ל-`main`, commit `9252b1e`/merge `78f9bae`)
 **מה:** שכבת ביטחון על גבי Stage 1 — מסתכלת על ה-Decision כולו (לא Event בודד): האם

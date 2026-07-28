@@ -112,7 +112,7 @@ This log records planning decisions for the F52 program. It is not runtime imple
   `ApprovalLifecycleResult` into `compose_status_reply()`, or formally supersede
   D-010's single-API requirement for the approval-lifecycle subset).
 - Affected documents: `spec/UNIFIED_MESSAGE_UX_STANDARD.md`,
-  `docs/context_librarian/layers/ux_f52.yaml`.
+  `docs/context_librarian/layers/ux_f52.json`.
 
 ## D-012 — `MessageContract` is the sole canonical presentation contract; D-011 closed by reconciliation
 
