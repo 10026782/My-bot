@@ -1,5 +1,11 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
+עודכן: 28/07/2026 — **N17 עדכון: non-inferiority pilot advancement (סעיף 5) — 5/5 משימות
+עם Gold Set בלתי-תלוי + מחקר Librarian-track + סקירה עצמאית, ענף
+`claude/context-librarian-non-inferiority-pilot`, טרם מוזג. התקדמות ממשית, לא acceptance —
+1/5 PASS נקי, 4/5 עם ממצאי גילוי-חסר עד Critical. אין implementation לשלושת הבאגים האמיתיים
+שנחשפו (BUG-150, fail-open ב-ActionGateway, BUG-130/140) — חסומים ע"י
+CROSS_LAYER_AUTHORITY_CONTRACT_V1.md. ראה N17 למטה לפירוט.**
 עודכן: 28/07/2026 — **N17 עדכון: Verification Coverage Model plan (חצי מסעיף 6, תכנון בלבד)
 נכתב על ענף `claude/context-librarian-vcm-plan` — טרם מוזג. ראה N17 למטה לפירוט. אין
 implementation, אין nodes חדשים.**
@@ -914,6 +920,27 @@ justification), איך זה יחושב דטרמיניסטית מה-catalog הק�
 (אין implementation, אין nodes חדשים, אין כתיבה אוטומטית ל-metadata). Dogfooding עצמו (כתיבת
 ה-nodes) נשאר משימה נפרדת עתידית — מסמך זה מכסה את חצי ה-VCM של סעיף 6 בלבד.
 
+**עדכון 28/07/2026 — non-inferiority pilot advancement (סעיף 5), ענף
+`claude/context-librarian-non-inferiority-pilot`, טרם מוזג — התקדמות ממשית, לא acceptance:**
+תוקנו ישירות (grep+Read מול הקוד החי, לא הוסק מהמסמכים) ארבעת ה-nodes שהיו stale ב-preflight
+27/07 (`approvals`, `turn_coordinator`, `ux_f52`, `rp5` — `last_verified_commit`/`valid_from`
+רועננו, תוקנו ציטוטי שורה שסחפו). על בסיס זה, לכל חמש משימות ה-pilot: נבנה Authority Gold
+Set בלתי-תלוי (subagent נפרד, ללא גישה לספרן/לשיחה — לפי הנחיית המשתמש המפורשת "תשתמש
+בסאב-אייגנט בלתי-תלוי"), נבנה bundle מפורש (`Selected profile:` + `build`, gate `PROCEED`
+בחמישתן), בוצע מחקר Librarian-track עצמאי (פתיחת מקורות מצוטטים, הרצת בדיקות), ולבסוף
+subagent שני בלתי-תלוי סקר את המחקר מול ה-Gold Set. תוצאה: 1/5 (`tool_execution`) PASS
+נקי; 4/5 עם ממצאי גילוי-חסר בדרגות Medium עד **Critical** (כולל תיוג שגוי של commit/branch
+ב-`rp5_evidence_mismatch` — ה-`PROCEED` נכון רק לענף הזה, `main` עדיין לא כולל את ריענון
+ה-nodes). שלוש משימות חשפו באג אמיתי, מאושר-Gold-Set (`approval_ux`→BUG-150; `tool_execution`→
+fail-open ב-`_execute_contract`; `turn_coordinator_routing`→BUG-130/BUG-140) — כולן בתחום ש-
+`CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` מגדיר כ-mandatory gate (Durable Atomic Approval /
+ActionContract), ואין Cross-Layer Impact Matrix שלם לאף אחת — **לא בוצע implementation לאף
+אחת מהן ב-PR הזה**, לפי אותו gate ולפי כלל ה-pilot עצמו לא לעקוף STOP אמיתי. פירוט מלא
+(per-run records, חומרות, ציטוטים) ב-`docs/context_librarian/PHASE1_NON_INFERIORITY_PILOT.md`
+תחת "2026-07-28 non-inferiority pilot advancement". **Phase 1 acceptance עדיין לא
+מבוסס** — Codex/Claude-Code dual-vendor bundle-hash equality לא בוצע; 4/5 משימות נכשלות
+בקריטריון "zero material authority misses / zero Critical/High architecture defects".
+
 **סדר עבודה מחייב:**
 1. ✅ להשלים ולמזג Re-verification Alignment (PR #475, `89e2b4e`).
 2. ✅ להריץ מחדש את חמש משימות ה-pilot על `main` — כולן `PROCEED`.
@@ -921,7 +948,9 @@ justification), איך זה יחושב דטרמיניסטית מה-catalog הק�
 4. ✅ Librarian Hardening מוזג ל-`main` (PR #481): token estimation (סעיף 1); catalog
    format (סעיף 2); query/profile hardening (סעיף 3); CI validation. POST-MERGE
    VERIFICATION בוצע ישירות על `origin/main` (`AGENTS.md`) — כל הסמלים אומתו ב-grep.
-5. 🔲 להשלים non-inferiority pilot (`docs/context_librarian/PHASE1_NON_INFERIORITY_PILOT.md`).
+5. 🟡 non-inferiority pilot — **התקדמות ממשית, לא הושלם.** 5/5 משימות עם Gold Set +
+   מחקר + סקירה עצמאית (ענף `claude/context-librarian-non-inferiority-pilot`, טרם מוזג).
+   Phase 1 acceptance לא מבוסס — ראו עדכון 28/07 לעיל ואת המסמך המלא.
 6. 🔲 לתכנן Multi-session Coordination (סעיף 5) — תכנון בלבד לפני implementation.
 7. 🔲 VCM plan פתוח (ענף `claude/context-librarian-vcm-plan`, טרם מוזג) — תכנון בלבד, אין
    implementation. Dogfooding (כתיבת nodes על הספרן עצמו) עדיין טרם תוכנן.
