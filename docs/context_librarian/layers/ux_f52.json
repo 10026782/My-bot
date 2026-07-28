@@ -45,15 +45,16 @@
       {"name": "FEATURE_UNIFIED_STATUS_FORMATTER", "default_state": "off", "documented_state": "off/shadow/on; dated evidence reports shadow samples", "evidence_scope": "code accessor plus implementation notes"},
       {"name": "FEATURE_SINGLE_SPEAKER_APPROVAL_UX", "default_state": "off", "documented_state": "PR #471; gates which component owns final approval-turn wording (Gateway vs legacy routing). Identifier/tool-name redaction in build_approval_lifecycle_result()/_safe_contract_business_description() is unconditional and applies even when this flag is off (BUG-118)", "evidence_scope": "code default (feature_flags.py) plus CHANGELOG.md PR #471 entry"}
     ],
-    "valid_from": "2026-07-27",
-    "last_verified_commit": "a885561d",
+    "valid_from": "2026-07-28",
+    "last_verified_commit": "ffa678a7",
     "confidence": 0.88,
     "notes": [
       "display_payload is the canonical user-message payload contract in F52 planning decisions.",
       "User messages must not expose record IDs, contract IDs, or internal tool names.",
       "RP5 is loaded for UX tasks only when evidence/completion claims are relevant.",
       "PR #471 added ApprovalLifecycleResult (core/action_gateway.py) as a second, narrower canonical renderer specifically for approval lifecycle turns: build_approval_lifecycle_result() maps an ActionContract's canonical_state to one fixed, redacted safe_user_message. It sits alongside, and is not a replacement for, GatewayReply/compose_status_reply() and display_payload/agent_message_formatter.py's own contract; UNIFIED_MESSAGE_UX_STANDARD.md now records this renderer drift via an erratum note (added by this same audit), while the document's own 'one public message-composition API' principle remains unmet as of a885561d.",
-      "Redaction (raw tool_name, ActionContract UUID, ActionContract record ID, Airtable business record ID) in the ApprovalLifecycleResult path is unconditional — it does not depend on FEATURE_SINGLE_SPEAKER_APPROVAL_UX or FEATURE_UNIFIED_STATUS_FORMATTER being on."
+      "Redaction (raw tool_name, ActionContract UUID, ActionContract record ID, Airtable business record ID) in the ApprovalLifecycleResult path is unconditional — it does not depend on FEATURE_SINGLE_SPEAKER_APPROVAL_UX or FEATURE_UNIFIED_STATUS_FORMATTER being on.",
+      "PR #479/#480 (merged): the 'no internal tool names' rule above is now also enforced against raw Airtable table names, which previously leaked in several approval-message renderers (_safe_contract_business_description(), _describe_tool_call(), _describe_contract_for_reconfirmation()/_for_disambiguation()) — e.g. 'הוספה ב-Tasks: ...' became 'יצירת משימה: ...' for the Tasks table and a generic table-agnostic phrase for every other table. Rejected-state wording was also normalized from 'נדחתה' to 'בוטלה' throughout build_approval_lifecycle_result(). Both are rendering-only changes; ApprovalLifecycleResult's canonical_state mapping and redaction conditionality are unchanged. Re-verified directly against ffa678a7."
     ],
     "extensions": {"boss.layer_aliases": ["F52", "supporting-layer", "message-contract"]}
   }],
