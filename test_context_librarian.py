@@ -59,7 +59,7 @@ def test_catalog_and_all_seven_profiles_validate(catalog):
 
 def test_unknown_status_is_rejected(tmp_path, monkeypatch):
     root = _isolated_catalog(tmp_path, monkeypatch)
-    path = root / "layers/core_reasoning.yaml"
+    path = root / "layers/core_reasoning.json"
     data = _read_json(path)
     data["nodes"][0]["status"] = "mystery"
     _write_json(path, data)
@@ -69,7 +69,7 @@ def test_unknown_status_is_rejected(tmp_path, monkeypatch):
 
 def test_unknown_edge_is_rejected(tmp_path, monkeypatch):
     root = _isolated_catalog(tmp_path, monkeypatch)
-    path = root / "layers/tools.yaml"
+    path = root / "layers/tools.json"
     data = _read_json(path)
     data["edges"][0]["type"] = "related_to"
     _write_json(path, data)
@@ -79,7 +79,7 @@ def test_unknown_edge_is_rejected(tmp_path, monkeypatch):
 
 def test_unknown_node_field_is_rejected(tmp_path, monkeypatch):
     root = _isolated_catalog(tmp_path, monkeypatch)
-    path = root / "layers/rp5.yaml"
+    path = root / "layers/rp5.json"
     data = _read_json(path)
     data["nodes"][0]["ad_hoc_field"] = True
     _write_json(path, data)
@@ -89,7 +89,7 @@ def test_unknown_node_field_is_rejected(tmp_path, monkeypatch):
 
 def test_schema_can_add_a_seventh_layer_without_code_change(tmp_path, monkeypatch):
     root = _isolated_catalog(tmp_path, monkeypatch)
-    source = _read_json(root / "layers/rp5.yaml")
+    source = _read_json(root / "layers/rp5.json")
     node = copy.deepcopy(source["nodes"][0])
     node.update(
         {
@@ -105,7 +105,7 @@ def test_schema_can_add_a_seventh_layer_without_code_change(tmp_path, monkeypatc
         "nodes": [node],
         "edges": [],
     }
-    _write_json(root / "layers/future_observability.yaml", data)
+    _write_json(root / "layers/future_observability.json", data)
     loaded = load_catalog(REPO_ROOT)
     assert loaded.layer_nodes["future_observability"] == "layer.future_observability"
 
@@ -123,7 +123,7 @@ def test_status_filter_excludes_historical_and_superseded(catalog):
 
 def test_superseded_document_is_excluded(tmp_path, monkeypatch):
     root = _isolated_catalog(tmp_path, monkeypatch)
-    path = root / "layers/core_reasoning.yaml"
+    path = root / "layers/core_reasoning.json"
     data = _read_json(path)
     superseded_path = data["nodes"][0]["canonical_docs"][1]["path"]
     data["nodes"][0]["canonical_docs"][1]["status"] = "superseded"
@@ -190,6 +190,34 @@ def test_document_budget_is_enforced(catalog):
     assert "document_budget: 3/3" in bundle
 
 
+def test_token_estimate_labels_are_honest_about_being_a_char_proxy(catalog):
+    # N17 item 1: the estimate must never present itself as a real
+    # tokenizer count. This is deliberately a labeling/wording test, not a
+    # token-accuracy test — accuracy requires TOKEN_ESTIMATION_BENCHMARK.md.
+    bundle = build_bundle(
+        catalog,
+        task_type="approval_ux",
+        query="approval message",
+    )
+    assert "approximate_char_estimate_budget" in bundle
+    assert "NOT a real tokenizer count" in bundle
+    assert "TOKEN_ESTIMATION_BENCHMARK.md" in bundle
+    assert "referenced_source_to_bundle_char_estimate_savings" in bundle
+
+
+def test_approximate_char_estimate_matches_chars_divided_by_constant():
+    from tools.context_librarian.librarian import (
+        _CHARS_PER_APPROXIMATE_TOKEN,
+        _approximate_char_estimate,
+    )
+    import math
+
+    sample = "x" * 37
+    assert _approximate_char_estimate(sample) == math.ceil(
+        len(sample) / _CHARS_PER_APPROXIMATE_TOKEN
+    )
+
+
 def test_mandatory_decisions_are_included(catalog):
     bundle = build_bundle(
         catalog,
@@ -243,6 +271,75 @@ def test_no_excluded_layer_leakage(catalog):
     for profile_id in catalog.profiles:
         bundle = build_bundle(catalog, task_type=profile_id, query="ordinary task")
         assert "excluded_layer_leakage: 0 []" in bundle
+
+
+# ── N17 item 3: query/profile-selection hardening ──────────────────────────
+# The explicit profile must remain the sole source of primary/required/
+# mandatory selection. Free text may only ever *add* profile-declared
+# conditional evidence — it can never drop or override core selection. These
+# tests make that guarantee explicit and regression-proof rather than
+# implicit in _select_nodes()'s structure.
+
+@pytest.mark.parametrize(
+    "query",
+    ["", "zzz qqq unrelated gibberish 12345", "לא קשור בכלל מילים אקראיות לגמרי"],
+)
+def test_garbage_query_never_drops_primary_required_or_mandatory_selection(catalog, query):
+    for profile_id, profile in catalog.profiles.items():
+        bundle = build_bundle(catalog, task_type=profile_id, query=query)
+        for layer in profile["primary_layers"]:
+            assert f"`{layer}` (primary" in bundle, (
+                f"{profile_id}: lost primary layer {layer} for query={query!r}"
+            )
+        for layer in profile["required_dependency_layers"]:
+            assert f"`{layer}` (required_dependency" in bundle, (
+                f"{profile_id}: lost required_dependency layer {layer} for query={query!r}"
+            )
+        for decision in profile["mandatory_canonical_decisions"]:
+            assert f"`decision.{decision}`" in bundle, (
+                f"{profile_id}: lost mandatory decision {decision} for query={query!r}"
+            )
+
+
+def test_query_cannot_pull_in_an_excluded_layer_via_matching_terms(catalog):
+    # core_reasoning_change excludes approvals/ux_f52/rp5. An adversarial
+    # query built from those layers' own selection_terms must still not
+    # leak them in — only the explicit profile controls exclusions.
+    adversarial_query = (
+        "approval reject callback pending message rp5 evidence claim "
+        "completion mismatch ux formatter wording telegram whatsapp"
+    )
+    bundle = build_bundle(
+        catalog, task_type="core_reasoning_change", query=adversarial_query
+    )
+    assert "excluded_layer_leakage: 0 []" in bundle
+    assert "`approvals` (" not in bundle
+    assert "`rp5` (" not in bundle
+    assert "`ux_f52` (" not in bundle
+
+
+def test_conditional_evidence_trigger_is_stable_across_hebrew_and_english_phrasing(catalog):
+    english = build_bundle(
+        catalog,
+        task_type="ux_f52_message",
+        query="message wording mismatch with the evidence",
+    )
+    hebrew = build_bundle(
+        catalog,
+        task_type="ux_f52_message",
+        query="ניסוח ההודעה לא תואם לראיה",
+    )
+    assert "`rp5` (conditional_evidence" in english
+    assert "`rp5` (conditional_evidence" in hebrew
+
+
+def test_query_only_ranks_never_selects_for_suggest_profile(catalog):
+    # suggest-profile is explainable ranking only; build() never consults it.
+    # A garbage query must never silently resolve to automatic_selection.
+    ranked = suggest_profiles(catalog, "zzz qqq unrelated gibberish 12345")
+    assessment = assess_profile_suggestions(ranked)
+    assert assessment["automatic_selection"] is False
+    assert assessment["status"] == "no_match"
 
 
 def test_code_tests_and_production_evidence_are_separate(catalog):

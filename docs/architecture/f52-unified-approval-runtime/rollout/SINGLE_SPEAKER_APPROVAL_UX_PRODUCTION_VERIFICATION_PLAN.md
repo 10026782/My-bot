@@ -43,7 +43,7 @@ live durably (e.g. an internal ops vault) if this needs to be re-derivable later
 2. **Every claim below must be filled in with:** required evidence, why it's required,
    environment, test date, exact scope, supplied evidence, missing evidence, and allowed
    status. An empty or partially-filled row is `NOT VERIFIED`, not "probably fine."
-3. **Do not update `docs/context_librarian/layers/*.yaml`'s `production_evidence` or
+3. **Do not update `docs/context_librarian/layers/*.json`'s `production_evidence` or
    any node's status to `production_verified`-equivalent as part of executing this plan.**
    That is a separate, follow-up documentation change made only after this plan's rows
    are filled in with real, dated evidence — and it should cite this document by path.
@@ -694,7 +694,7 @@ transcripts.
 
 ## After this plan is executed
 
-1. Do **not** hand-edit `docs/context_librarian/layers/*.yaml`'s `production_evidence`
+1. Do **not** hand-edit `docs/context_librarian/layers/*.json`'s `production_evidence`
    directly as part of filling in this plan. Once real evidence exists, open a small,
    separate documentation PR that adds a `production_evidence` entry citing this
    document's path, the `test_date`, and the `allowed_status` per claim — following the

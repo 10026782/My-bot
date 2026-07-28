@@ -1,7 +1,10 @@
 """Deterministic metadata loader and context-bundle builder.
 
 This module is developer tooling only. It has no production imports and uses
-only the Python standard library. The .yaml files are JSON-compatible YAML.
+only the Python standard library. The catalog is plain `.json` (N17 item 2 —
+previously `.yaml`-named but always loaded with `json.loads()`; renamed to
+its real format so a real YAML feature — comments, multi-line strings,
+anchors — can no longer silently break loading).
 """
 
 from __future__ import annotations
@@ -18,6 +21,11 @@ from typing import Any, Iterable
 
 SUPPORTED_SCHEMA_MAJOR = 1
 CATALOG_RELATIVE_ROOT = Path("docs/context_librarian")
+# Unvalidated character-count heuristic, not a real Anthropic tokenizer
+# count. Single source of truth for the divisor so a future change (after
+# TOKEN_ESTIMATION_BENCHMARK.md has real data) touches one constant. See
+# _approximate_char_estimate()'s docstring for the full caveat.
+_CHARS_PER_APPROXIMATE_TOKEN = 4
 DEFAULT_EXCLUDED_STATUSES = frozenset({"historical", "superseded"})
 QUALIFYING_PRODUCTION_EVIDENCE_STATUSES = frozenset(
     {"live", "production_verified"}
@@ -91,7 +99,7 @@ class Catalog:
     layer_nodes: dict[str, str]
 
 
-def _load_json_yaml(path: Path) -> dict[str, Any]:
+def _load_catalog_json(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -228,19 +236,19 @@ def _validate_profile(
 def load_catalog(repo_root: Path | str) -> Catalog:
     repo_root = Path(repo_root).resolve()
     catalog_root = repo_root / CATALOG_RELATIVE_ROOT
-    node_schema = _load_json_yaml(catalog_root / "schema/node_schema.yaml")
-    edge_schema = _load_json_yaml(catalog_root / "schema/edge_schema.yaml")
-    _validate_version(node_schema.get("schema_version"), catalog_root / "schema/node_schema.yaml")
-    _validate_version(edge_schema.get("schema_version"), catalog_root / "schema/edge_schema.yaml")
+    node_schema = _load_catalog_json(catalog_root / "schema/node_schema.json")
+    edge_schema = _load_catalog_json(catalog_root / "schema/edge_schema.json")
+    _validate_version(node_schema.get("schema_version"), catalog_root / "schema/node_schema.json")
+    _validate_version(edge_schema.get("schema_version"), catalog_root / "schema/edge_schema.json")
     edge_types = set(edge_schema["edge_types"])
 
     nodes: dict[str, dict[str, Any]] = {}
     edges: list[dict[str, Any]] = []
     layer_nodes: dict[str, str] = {}
-    catalog_files = sorted((catalog_root / "layers").glob("*.yaml"))
-    catalog_files.append(catalog_root / "decisions/canonical_boundaries.yaml")
+    catalog_files = sorted((catalog_root / "layers").glob("*.json"))
+    catalog_files.append(catalog_root / "decisions/canonical_boundaries.json")
     for path in catalog_files:
-        data = _load_json_yaml(path)
+        data = _load_catalog_json(path)
         _validate_version(data.get("schema_version"), path)
         if "layer_id" in data:
             layer_id = data["layer_id"]
@@ -275,9 +283,9 @@ def load_catalog(repo_root: Path | str) -> Catalog:
                 f"edge target missing: {edge['from']} -> {edge['to']}"
             )
 
-    profiles_data = _load_json_yaml(catalog_root / "task_profiles/profiles.yaml")
+    profiles_data = _load_catalog_json(catalog_root / "task_profiles/profiles.json")
     _validate_version(
-        profiles_data.get("schema_version"), catalog_root / "task_profiles/profiles.yaml"
+        profiles_data.get("schema_version"), catalog_root / "task_profiles/profiles.json"
     )
     profiles: dict[str, dict[str, Any]] = {}
     for profile in profiles_data.get("profiles", []):
@@ -583,8 +591,15 @@ def _unique_references(
     return result
 
 
-def _approx_tokens(text: str) -> int:
-    return math.ceil(len(text) / 4)
+def _approximate_char_estimate(text: str) -> int:
+    """Character-count-based proxy for token usage — NOT a real tokenizer
+    count. `ceil(len(text) / _CHARS_PER_APPROXIMATE_TOKEN)` is an
+    unvalidated heuristic; see
+    `docs/context_librarian/TOKEN_ESTIMATION_BENCHMARK.md` for the pending
+    benchmark against real Anthropic token counts and why the divisor has
+    not been changed without that data. Callers must not present this value
+    as an accurate token count or claim token savings from it alone."""
+    return math.ceil(len(text) / _CHARS_PER_APPROXIMATE_TOKEN)
 
 
 def _qualifies_as_production_evidence(
@@ -598,7 +613,9 @@ def _qualifies_as_production_evidence(
     )
 
 
-def _path_tokens(repo_root: Path, references: Iterable[tuple[str, dict[str, Any]]]) -> int:
+def _path_char_estimate(repo_root: Path, references: Iterable[tuple[str, dict[str, Any]]]) -> int:
+    """Same unvalidated chars/4 proxy as _approximate_char_estimate(), applied
+    to on-disk source file sizes rather than in-memory text."""
     total = 0
     seen: set[str] = set()
     for _, ref in references:
@@ -606,7 +623,9 @@ def _path_tokens(repo_root: Path, references: Iterable[tuple[str, dict[str, Any]
             continue
         seen.add(ref["path"])
         try:
-            total += math.ceil((repo_root / ref["path"]).stat().st_size / 4)
+            total += math.ceil(
+                (repo_root / ref["path"]).stat().st_size / _CHARS_PER_APPROXIMATE_TOKEN
+            )
         except OSError:
             continue
     return total
@@ -802,7 +821,7 @@ def _render(
         ]
     )
 
-    source_tokens = _path_tokens(catalog.repo_root, docs + evidence)
+    source_tokens = _path_char_estimate(catalog.repo_root, docs + evidence)
     lines.extend(
         [
             "",
@@ -815,8 +834,10 @@ def _render(
             f"- excluded_layer_leakage: {len(leakage)} {leakage}",
             f"- query_match_precision_proxy: {query_precision:.0%}",
             f"- document_budget: {len(docs) + len(evidence)}/{max_documents}",
-            "- approximate_token_budget: __TOKEN_COUNT__/" + str(max_tokens),
-            "- referenced_source_to_bundle_token_savings: __TOKEN_SAVINGS__",
+            "- approximate_char_estimate_budget (chars/4 proxy, NOT a real "
+            "tokenizer count — see TOKEN_ESTIMATION_BENCHMARK.md): "
+            "__TOKEN_COUNT__/" + str(max_tokens),
+            "- referenced_source_to_bundle_char_estimate_savings: __TOKEN_SAVINGS__",
             "",
             "## Selection Manifest",
             "",
@@ -834,7 +855,7 @@ def _render(
         rendered = template.replace("__TOKEN_COUNT__", str(token_count)).replace(
             "__TOKEN_SAVINGS__", savings_text
         )
-        new_token_count = _approx_tokens(rendered)
+        new_token_count = _approximate_char_estimate(rendered)
         savings = (
             0.0
             if source_tokens == 0
@@ -896,10 +917,10 @@ def build_bundle(
         production_claim,
         verified_production_evidence,
     )
-    actual_tokens = _approx_tokens(bundle)
+    actual_tokens = _approximate_char_estimate(bundle)
     if actual_tokens > token_budget:
         raise ContextLibrarianError(
-            f"required context needs approximately {actual_tokens} tokens, "
-            f"exceeding the {token_budget}-token budget"
+            f"required context needs approximately {actual_tokens} "
+            f"chars/4-estimated tokens, exceeding the {token_budget} budget"
         )
     return bundle

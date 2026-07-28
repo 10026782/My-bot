@@ -70,13 +70,28 @@ evidence, exclusions, mandatory decisions, allowed edge types, and budgets.
 The query only ranks already-allowed nodes using explicit terms. It cannot
 override a status filter, exclusion, mandatory decision, or traversal rule.
 
+Each profile's `selection_terms` and `conditional_optional_evidence[].
+query_terms` (`task_profiles/profiles.json`) are the sole controlled
+vocabulary the free-text query is matched against, by plain substring
+containment — no fuzzy matching, no synonyms beyond what is explicitly
+listed. Free text can only ever *add* a profile-declared conditional layer;
+it can never drop a primary layer, a required dependency layer, or a
+mandatory canonical decision, and it cannot pull in an excluded layer no
+matter what terms it contains (N17 item 3 — see the query/profile-selection
+hardening tests in `test_context_librarian.py` for the regression fixtures,
+including adversarial and Hebrew/English-equivalent-phrasing cases).
+
 Output order is deterministic: mandatory decisions, primary layers, required
 dependencies, then optional evidence; ties are resolved by status, verification
 date/commit, and node ID. Historical and superseded nodes are excluded by
 default. Planning-only material must be explicitly allowed by the profile.
 
-Approximate tokens are `ceil(characters / 4)`. Safety text and mandatory
-decisions reserve budget first. If they cannot fit, the command fails closed.
+The token budget is enforced with `ceil(characters / 4)` — a character-count
+proxy, not a real Anthropic tokenizer count. This heuristic has not yet been
+benchmarked against real token counts; see
+`TOKEN_ESTIMATION_BENCHMARK.md` before relying on it for anything beyond a
+rough, conservative ceiling. Safety text and mandatory decisions reserve
+budget first. If they cannot fit, the command fails closed.
 
 ## Freshness and evidence
 
@@ -98,7 +113,7 @@ evidence entries always include a date, scope, status, and source path.
 
 ## Quality metrics
 
-Every bundle reports more than token savings:
+Every bundle reports more than the character-estimate savings figure:
 
 - primary/dependency layer coverage;
 - mandatory authority coverage;
@@ -106,23 +121,25 @@ Every bundle reports more than token savings:
 - provenance completeness;
 - excluded-layer leakage count;
 - query-match precision proxy;
-- document and token budget utilization.
+- document and approximate-char-estimate budget utilization.
 
 These metrics are deterministic selection diagnostics, not proof that an
-engineering decision is correct.
+engineering decision is correct. The char-estimate savings figure in
+particular is not a validated token-savings claim — see
+`TOKEN_ESTIMATION_BENCHMARK.md`.
 
 ## Adding or changing knowledge
 
 Add a candidate as concise metadata with references and a confidence score.
 It becomes canonical only after the repository's normal review/merge process
-establishes authority; changing a YAML status does not make it canonical.
+establishes authority; changing a catalog status does not make it canonical.
 Mark stale or replaced knowledge with `superseded`/`historical` and a typed
 `supersedes` edge. Never delete useful historical evidence merely to improve a
 freshness score.
 
 ## Extending to more layers
 
-Catalog discovery loads every `layers/*.yaml` file. Layer IDs and owners are
+Catalog discovery loads every `layers/*.json` file. Layer IDs and owners are
 not hard-coded to the initial six. A new layer uses schema version 1.x, unique
 node IDs, the existing edge vocabulary, and an explicit profile opt-in. New
 metadata belongs under a namespaced `extensions` object. Breaking changes
