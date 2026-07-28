@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from .librarian import (
     build_bundle,
     load_catalog,
     suggest_profiles,
+    verify_consumption,
 )
 
 
@@ -70,6 +72,22 @@ def _parser() -> argparse.ArgumentParser:
     )
 
     sub.add_parser("validate", help="Validate schemas, catalogs, edges, and paths")
+
+    verify = sub.add_parser(
+        "verify-consumption",
+        help=(
+            "Fail-closed check that every mandatory-tier source for a profile+query "
+            "was reviewed or explicitly (independently-approved) waived"
+        ),
+    )
+    verify.add_argument("--task-type", required=True)
+    verify.add_argument("--query", default="")
+    verify.add_argument("--ledger", required=True, type=Path)
+    verify.add_argument(
+        "--production-claim",
+        action="store_true",
+        help="Include production evidence in the mandatory tier (mirrors build's --production-claim)",
+    )
     return parser
 
 
@@ -83,6 +101,30 @@ def main(argv: list[str] | None = None) -> int:
                 f"{len(catalog.edges)} edges, {len(catalog.profiles)} profiles"
             )
             return 0
+
+        if args.command == "verify-consumption":
+            ledger_path = args.ledger
+            if not ledger_path.is_absolute():
+                ledger_path = _repo_root() / ledger_path
+            try:
+                ledger_data = json.loads(ledger_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ContextLibrarianError(
+                    f"cannot load ledger {ledger_path}: {exc}"
+                ) from exc
+            result = verify_consumption(
+                catalog,
+                task_type=args.task_type,
+                query=args.query,
+                ledger=ledger_data,
+                production_claim=args.production_claim,
+            )
+            print(result.status)
+            for reason in result.blocked_reasons:
+                print(f"- {reason}")
+            for warning in result.warnings:
+                print(f"WARNING: {warning}")
+            return result.exit_code
 
         if args.command == "suggest-profile":
             ranked = suggest_profiles(catalog, args.query)
