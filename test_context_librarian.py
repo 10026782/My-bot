@@ -191,9 +191,9 @@ def test_document_budget_is_enforced(catalog):
 
 
 def test_token_estimate_labels_are_honest_about_being_a_char_proxy(catalog):
-    # N17 item 1: the estimate must never present itself as a real
-    # tokenizer count. This is deliberately a labeling/wording test, not a
-    # token-accuracy test — accuracy requires TOKEN_ESTIMATION_BENCHMARK.md.
+    # N17 סעיף 1: האומדן לעולם אינו אמור להציג את עצמו כתוצאה של tokenizer
+    # אמיתי. זו בכוונה בדיקת ניסוח/תיוג, לא בדיקת דיוק-טוקנים — דיוק דורש
+    # את TOKEN_ESTIMATION_BENCHMARK.md.
     bundle = build_bundle(
         catalog,
         task_type="approval_ux",
@@ -273,12 +273,12 @@ def test_no_excluded_layer_leakage(catalog):
         assert "excluded_layer_leakage: 0 []" in bundle
 
 
-# ── N17 item 3: query/profile-selection hardening ──────────────────────────
-# The explicit profile must remain the sole source of primary/required/
-# mandatory selection. Free text may only ever *add* profile-declared
-# conditional evidence — it can never drop or override core selection. These
-# tests make that guarantee explicit and regression-proof rather than
-# implicit in _select_nodes()'s structure.
+# ── N17 סעיף 3: הקשחת בחירת query/profile ───────────────────────────────────
+# ה-profile המפורש חייב להישאר המקור היחיד לבחירת primary/required/
+# mandatory. טקסט חופשי רשאי רק *להוסיף* conditional evidence שהוגדר
+# ב-profile — לעולם לא להשמיט או לדרוס את הבחירה הליבתית. הבדיקות האלו
+# הופכות את ההבטחה הזו למפורשת ומוגנת-רגרסיה, במקום שתישאר משתמעת במבנה
+# של _select_nodes().
 
 @pytest.mark.parametrize(
     "query",
@@ -302,9 +302,9 @@ def test_garbage_query_never_drops_primary_required_or_mandatory_selection(catal
 
 
 def test_query_cannot_pull_in_an_excluded_layer_via_matching_terms(catalog):
-    # core_reasoning_change excludes approvals/ux_f52/rp5. An adversarial
-    # query built from those layers' own selection_terms must still not
-    # leak them in — only the explicit profile controls exclusions.
+    # core_reasoning_change מחריג approvals/ux_f52/rp5. query עוין הבנוי
+    # מ-selection_terms של אותן שכבות עדיין לא אמור לגרום לדליפה שלהן —
+    # רק ה-profile המפורש שולט בהחרגות.
     adversarial_query = (
         "approval reject callback pending message rp5 evidence claim "
         "completion mismatch ux formatter wording telegram whatsapp"
@@ -334,8 +334,8 @@ def test_conditional_evidence_trigger_is_stable_across_hebrew_and_english_phrasi
 
 
 def test_query_only_ranks_never_selects_for_suggest_profile(catalog):
-    # suggest-profile is explainable ranking only; build() never consults it.
-    # A garbage query must never silently resolve to automatic_selection.
+    # suggest-profile הוא דירוג הניתן-להסבר בלבד; build() לעולם לא
+    # מתייעץ בו. query זבל לעולם לא אמור להיפתר בשקט ל-automatic_selection.
     ranked = suggest_profiles(catalog, "zzz qqq unrelated gibberish 12345")
     assessment = assess_profile_suggestions(ranked)
     assert assessment["automatic_selection"] is False

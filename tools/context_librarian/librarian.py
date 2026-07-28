@@ -1,10 +1,10 @@
 """Deterministic metadata loader and context-bundle builder.
 
 This module is developer tooling only. It has no production imports and uses
-only the Python standard library. The catalog is plain `.json` (N17 item 2 —
-previously `.yaml`-named but always loaded with `json.loads()`; renamed to
-its real format so a real YAML feature — comments, multi-line strings,
-anchors — can no longer silently break loading).
+only the Python standard library. הקטלוג הוא `.json` פשוט (N17 סעיף 2 —
+בעבר נקרא `.yaml` אך תמיד נטען עם `json.loads()`; שונה לפורמט האמיתי שלו
+כך שתכונת YAML אמיתית — הערות, multi-line strings, anchors — לא תוכל
+יותר לשבור את הטעינה בשקט).
 """
 
 from __future__ import annotations
@@ -21,10 +21,10 @@ from typing import Any, Iterable
 
 SUPPORTED_SCHEMA_MAJOR = 1
 CATALOG_RELATIVE_ROOT = Path("docs/context_librarian")
-# Unvalidated character-count heuristic, not a real Anthropic tokenizer
-# count. Single source of truth for the divisor so a future change (after
-# TOKEN_ESTIMATION_BENCHMARK.md has real data) touches one constant. See
-# _approximate_char_estimate()'s docstring for the full caveat.
+# היוריסטיקה לא-מאומתת של ספירת-תווים, לא token count אמיתי של Anthropic.
+# מקור אמת יחיד עבור המקדם כך ששינוי עתידי (אחרי ש-
+# TOKEN_ESTIMATION_BENCHMARK.md יכיל נתונים אמיתיים) יגע רק בקבוע אחד.
+# ראו את ה-docstring של _approximate_char_estimate() להסתייגות המלאה.
 _CHARS_PER_APPROXIMATE_TOKEN = 4
 DEFAULT_EXCLUDED_STATUSES = frozenset({"historical", "superseded"})
 QUALIFYING_PRODUCTION_EVIDENCE_STATUSES = frozenset(
@@ -592,13 +592,13 @@ def _unique_references(
 
 
 def _approximate_char_estimate(text: str) -> int:
-    """Character-count-based proxy for token usage — NOT a real tokenizer
-    count. `ceil(len(text) / _CHARS_PER_APPROXIMATE_TOKEN)` is an
-    unvalidated heuristic; see
-    `docs/context_librarian/TOKEN_ESTIMATION_BENCHMARK.md` for the pending
-    benchmark against real Anthropic token counts and why the divisor has
-    not been changed without that data. Callers must not present this value
-    as an accurate token count or claim token savings from it alone."""
+    """פרוקסי מבוסס-ספירת-תווים לשימוש בטוקנים — NOT a real tokenizer
+    count. `ceil(len(text) / _CHARS_PER_APPROXIMATE_TOKEN)` היא היוריסטיקה
+    לא-מאומתת; ראו את
+    `docs/context_librarian/TOKEN_ESTIMATION_BENCHMARK.md` ל-benchmark
+    הממתין מול token counts אמיתיים של Anthropic, ולמה המקדם לא שונה בלי
+    הנתונים האלו. קוראים לפונקציה אסור שיציגו את הערך הזה כ-token count
+    מדויק או יטענו לחיסכון בטוקנים על סמכו בלבד."""
     return math.ceil(len(text) / _CHARS_PER_APPROXIMATE_TOKEN)
 
 
@@ -614,8 +614,12 @@ def _qualifies_as_production_evidence(
 
 
 def _path_char_estimate(repo_root: Path, references: Iterable[tuple[str, dict[str, Any]]]) -> int:
-    """Same unvalidated chars/4 proxy as _approximate_char_estimate(), applied
-    to on-disk source file sizes rather than in-memory text."""
+    """אותה היוריסטיקה לא-מאומתת chars/4 כמו _approximate_char_estimate(),
+    מיושמת על קבצי מקור בדיסק. קוראת את הטקסט בפועל ומשתמשת ב-len() —
+    ולא ב-stat().st_size — מכיוון שספירת bytes וספירת תווים מתפצלות
+    עבור תוכן UTF-8 רב-בייטי (עברית בפרט), מה שהיה מנפח את האומדן הזה
+    ביחס לספירת התווים הזיכרונית של _approximate_char_estimate() עבור
+    אותו תוכן."""
     total = 0
     seen: set[str] = set()
     for _, ref in references:
@@ -624,9 +628,10 @@ def _path_char_estimate(repo_root: Path, references: Iterable[tuple[str, dict[st
         seen.add(ref["path"])
         try:
             total += math.ceil(
-                (repo_root / ref["path"]).stat().st_size / _CHARS_PER_APPROXIMATE_TOKEN
+                len((repo_root / ref["path"]).read_text(encoding="utf-8"))
+                / _CHARS_PER_APPROXIMATE_TOKEN
             )
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             continue
     return total
 

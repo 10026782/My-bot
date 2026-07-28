@@ -88,10 +88,11 @@ default. Planning-only material must be explicitly allowed by the profile.
 
 The token budget is enforced with `ceil(characters / 4)` — a character-count
 proxy, not a real Anthropic tokenizer count. This heuristic has not yet been
-benchmarked against real token counts; see
-`TOKEN_ESTIMATION_BENCHMARK.md` before relying on it for anything beyond a
-rough, conservative ceiling. Safety text and mandatory decisions reserve
-budget first. If they cannot fit, the command fails closed.
+benchmarked against real token counts, so it must not be treated as a
+conservative (i.e. never-understating) ceiling; see
+`TOKEN_ESTIMATION_BENCHMARK.md` for the pending measurement before relying on
+it for anything beyond a rough estimate. Safety text and mandatory decisions
+reserve budget first. If they cannot fit, the command fails closed.
 
 ## Freshness and evidence
 
