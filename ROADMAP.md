@@ -1,5 +1,14 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
+עודכן: 28/07/2026 — **N17 עדכון: Consumption Enforcement — תכנון בלבד (סעיף 8), אין
+implementation, אין שינוי runtime.** נכתב על `origin/main` לאחר PR #485+#487. מטרה: איך
+למנוע מצב שבו מקור חובה כבר ב-bundle אך הסוכן מגיע למסקנה בלי לפתוח אותו — בדיוק הפער
+ש-PR #487 מצא ("investigation discipline... a catalog fix cannot structurally guarantee").
+ראה `docs/context_librarian/CONSUMPTION_ENFORCEMENT_PLAN.md` לפירוט מלא (9 סעיפים: הבעיה,
+root cause, design options, החלטה מומלצת, schema/CLI מוצע, failure modes, regression tests,
+rollout plan, מה מחייב owner). **אין תיקון ל-BUG-130/BUG-140/BUG-150/fail-open; אין ריצה
+חוזרת של הפיילוט. אין לפתוח PR implementation לפני קבלת ובדיקת audit בלתי-תלוי של Codex
+שמתבצע במקביל** — תנאי מפורש מהמשתמש.
 עודכן: 28/07/2026 — **N17 עדכון: rerun ממוקד — האם התיקונים סגרו את 4 הכשלים שהפיילוט
 מצא?** (על `origin/main` ב-`ffde1d6`, אחרי PR #485+#486; לא ריצה חוזרת של הפיילוט — אין
 Gold Set חדש, אין blind review). לכל אחת מ-4 המשימות (לא `tool_execution` — PASS נקי):
@@ -1011,11 +1020,20 @@ ActionContract), ואין Cross-Layer Impact Matrix שלם לאף אחת — **�
 6. 🔲 לתכנן Multi-session Coordination (סעיף 5) — תכנון בלבד לפני implementation.
 7. ✅ VCM plan מוזג ל-`main` (PR #482, merge `ffa678a`) — תכנון בלבד, אין implementation.
    Dogfooding (כתיבת nodes על הספרן עצמו) עדיין טרם תוכנן.
+8. 🟡 Consumption Enforcement — **תכנון בלבד, PR פתוח, לא מוזג.** ✅ Verification rerun
+   PR #487 מוזג ל-`main` (`a205dea`) — אישר: 2/4 gaps נסגרו מבנית (BUG-140 inline,
+   `--assert-main`), 2/4 רק חלקית (רוב מה שנמצא היה כבר ב-bundle לפני PR #485 — הבעיה
+   האמיתית היא investigation discipline, לא קטלוג), 2 gaps נוספים נשארו פתוחים
+   (`FEATURE_AUTO_CAPTURE` חסר מ-`turn_coordinator`; "third evidence-shadow layer" מעולם
+   לא היה catalog gap). מסמך התכנון (`docs/context_librarian/CONSUMPTION_ENFORCEMENT_PLAN.md`)
+   עונה בדיוק על הפער הזה. **אין implementation ב-PR הזה. אין לפתוח PR implementation לפני
+   קבלת ובדיקת audit בלתי-תלוי של Codex שרץ במקביל** — תנאי מפורש מהמשתמש.
 
 **קבצים:** `docs/context_librarian/` (הספרן עצמו, כולל `TOKEN_ESTIMATION_BENCHMARK.md` החדש),
 `tools/context_librarian/librarian.py` (token estimation, catalog loading),
 `tools/context_librarian/benchmark_token_estimate.py` (חדש), `test_context_librarian.py`,
-`.github/workflows/ci.yml`, `docs/context_librarian/PHASE1_NON_INFERIORITY_PILOT.md`.
+`.github/workflows/ci.yml`, `docs/context_librarian/PHASE1_NON_INFERIORITY_PILOT.md`,
+`docs/context_librarian/CONSUMPTION_ENFORCEMENT_PLAN.md` (חדש, סעיף 8, תכנון בלבד).
 
 ### F17 — Decision Hub Stage 2: Smart Trust Layer (PR #157, מוזג ל-`main`, commit `9252b1e`/merge `78f9bae`)
 **מה:** שכבת ביטחון על גבי Stage 1 — מסתכלת על ה-Decision כולו (לא Event בודד): האם
