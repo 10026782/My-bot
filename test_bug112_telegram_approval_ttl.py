@@ -56,16 +56,23 @@ wording) with a placeholder label and a third state_text
 right after the first. Safety was never in question — bus.pop() returning
 None already guarantees zero dispatch either way — this was a wording-only
 redundancy. Fixed with a new, dedicated app._notify_missing_or_expired_
-callback(), reusing ONE literal phrase
-("ℹ️ הפעולה כבר פגה או אינה קיימת, ולכן לא בוצעה.") identically across the
-popup, the persistent chat message, and the edited original message — never
-built from the generic label/state_text template. The two call sites that
+callback(), reusing ONE literal phrase identically across the popup, the
+persistent chat message, and the edited original message — never built
+from the generic label/state_text template. The two call sites that
 legitimately need distinct wording ("כבר בוצעה"/"כבר בוטלה") still use the
 original _notify_stale_or_resolved_callback() unchanged. The two callback
 paths remain intentionally separate (a known-and-now-expired item vs. a
 not-found/already-consumed one) — this fix does not merge their wording
 into a single shared literal, only removes the redundancy WITHIN the
 not-found path itself.
+
+── Follow-up UX patch (סבב ניסוח פונה-לעסק) ──
+
+למשפט הליטרלי היחיד המקורי ("ℹ️ הפעולה כבר פגה או אינה קיימת, ולכן לא
+בוצעה.") הייתה כפילות פנימית משלו — "פגה" ו"אינה קיימת" נקראים כאותו דבר
+מבחינת משתמש עסקי, ו"קיימת" מתארת מצב רשומה פנימי ולא תוצאה עסקית.
+נוסח מחדש ל-app._MISSING_OR_EXPIRED_CALLBACK_TEXT = "ℹ️ הפעולה כבר אינה
+זמינה, ולכן לא בוצעה." — משפט יחיד, לא-כפול, פונה-לעסק.
 """
 
 from __future__ import annotations
@@ -374,7 +381,7 @@ chk("Test9: after an expired press, the matching contract is durably "
 chk("Test8b: the second (missing/already-consumed) press's popup uses the "
     "single normalized phrase, not the old '...לא קיימת יותר' wording",
     mock_bot_4b_again.answer_callback_query.called
-    and "הפעולה כבר פגה או אינה קיימת, ולכן לא בוצעה" in mock_bot_4b_again.answer_callback_query.call_args[0][1])
+    and "הפעולה כבר אינה זמינה, ולכן לא בוצעה" in mock_bot_4b_again.answer_callback_query.call_args[0][1])
 chk("Test8c: the second press uses the edited approval message as its one final response",
     not mock_bot_4b_again.send_message.called
     and mock_bot_4b_again.edit_message_text.call_count == 1
@@ -419,10 +426,13 @@ chk("Test17: the original message is the one final response and uses the popup's
     mock_bot_6.edit_message_text.called
     and mock_bot_6.edit_message_text.call_args[0][0] == app._MISSING_OR_EXPIRED_CALLBACK_TEXT)
 chk("Test18: the normalized phrase itself is a single, self-contained "
-    "sentence naming both facts (expired/missing AND not executed) — not "
-    "glued from a separate label + state_text pair",
-    "פגה או אינה קיימת" in app._MISSING_OR_EXPIRED_CALLBACK_TEXT
-    and "לא בוצעה" in app._MISSING_OR_EXPIRED_CALLBACK_TEXT)
+    "sentence naming both facts (no longer available AND not executed) — "
+    "not glued from a separate label + state_text pair, and no longer "
+    "duplicates the same meaning twice ('expired' vs. 'doesn't exist')",
+    "אינה זמינה" in app._MISSING_OR_EXPIRED_CALLBACK_TEXT
+    and "לא בוצעה" in app._MISSING_OR_EXPIRED_CALLBACK_TEXT
+    and "פגה" not in app._MISSING_OR_EXPIRED_CALLBACK_TEXT
+    and "קיימת" not in app._MISSING_OR_EXPIRED_CALLBACK_TEXT)
 
 
 # ══════════════════════════════════════════════════════════════════

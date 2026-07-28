@@ -908,6 +908,14 @@ def _describe_tool_call(tool_name: str, inputs: dict) -> str:
     אם אין מספיק מידע עסקי לבנות תיאור אמיתי (טבלה/fields חסרים או
     מעוותים) — נכשל-סגור עם _APPROVAL_DESCRIPTION_FALLBACK, לא עם placeholder
     ("?") שהמשתמש לא יכול להבין ממנו כלום.
+
+    Follow-up UX patch: לעולם לא חושף גם את שם הטבלה הגולמי ב-Airtable
+    (רק tool_name/record_id/contract_id כוסו קודם) — כתיבה לטבלת Tasks
+    מקבלת ניסוח עסקי משלה ("יצירת משימה"/"עדכון משימה"), וכל השאר נופל
+    לניסוח גנרי, שאינו תלוי-טבלה ("הוספת רשומה"/"עדכון רשומה"). הכותרת
+    מציינת את הפעולה עצמה, לא את התוכן העסקי — פירוט השדות מיד מתחתיה
+    (ללא שינוי) כבר מציג כל שדה עסקי, כולל זה שהיה משוכפל כתצוגה
+    מקדימה בכותרת, ולכן הכותרת בכוונה לא חוזרת עליו פעם נוספת.
     """
     if tool_name == "gmail_send_draft":
         return "📧 שלח מייל"
@@ -925,12 +933,16 @@ def _describe_tool_call(tool_name: str, inputs: dict) -> str:
         fields_preview = "\n".join(
             f"  • {k}: {_format_field_value(k, v)}" for k, v in fields.items()
         )
-        if tool_name == "airtable_add":
-            return f"➕ הוסף ל-{table}:\n{fields_preview}"
-        # airtable_update: record_id is a raw Airtable identifier — never
-        # shown in user-facing text (BUG-123-FU requirement 3). The fields
-        # being changed are the meaningful business content here.
-        return f"✏️ עדכן ב-{table}:\n{fields_preview}"
+        from core.action_gateway import is_task_table
+        icon = "➕" if tool_name == "airtable_add" else "✏️"
+        if is_task_table(table):
+            header = "יצירת משימה" if tool_name == "airtable_add" else "עדכון משימה"
+        else:
+            header = "הוספת רשומה" if tool_name == "airtable_add" else "עדכון רשומה"
+        # airtable_update: record_id הוא מזהה גולמי ב-Airtable — לעולם לא
+        # מוצג בטקסט הפונה למשתמש (BUG-123-FU requirement 3). השדות
+        # המשתנים הם התוכן העסקי המשמעותי כאן.
+        return f"{icon} {header}:\n{fields_preview}"
     if tool_name == "sheets_append":
         sheet = inputs.get("sheet_name")
         if not sheet:
@@ -2073,7 +2085,13 @@ def _reject_stale_telegram_approval(
 # literal phrase, reused identically for the popup, the persistent chat
 # message, and the edited original message — never templated/combined with
 # a generic label placeholder (there is no real label to show here).
-_MISSING_OR_EXPIRED_CALLBACK_TEXT = "ℹ️ הפעולה כבר פגה או אינה קיימת, ולכן לא בוצעה."
+#
+# Follow-up UX patch: הניסוח המקורי ("הפעולה כבר פגה או אינה קיימת")
+# כפל את אותה משמעות פעמיים ("פגה" ו"אינה קיימת" נקראים כאותו דבר
+# מבחינת משתמש עסקי) והתבסס על שפה יישומית ("קיימת" מתארת מצב רשומה
+# פנימי, לא תוצאה עסקית). נוסח מחדש למשפט יחיד, לא-כפול, פונה-לעסק:
+# הפעולה/הקישור פשוט אינם זמינים יותר.
+_MISSING_OR_EXPIRED_CALLBACK_TEXT = "ℹ️ הפעולה כבר אינה זמינה, ולכן לא בוצעה."
 
 
 def _notify_missing_or_expired_callback(cq, approver_chat_id: str) -> None:
@@ -2652,7 +2670,7 @@ def _handle_approval_callback_impl(cq) -> None:
                 action_id=action_id, tool_name=tool_name,
                 text=(
                     _reject_reply if tool_name and _flag_enabled("FEATURE_ACTION_GATEWAY")
-                    else "הפעולה נדחתה"
+                    else "הפעולה בוטלה"
                 ),
             )
         except Exception as e:

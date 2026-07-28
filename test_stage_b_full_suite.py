@@ -669,7 +669,7 @@ chk("DoD20: no execution yet, pending contract → query returns pending message
 _gw20.approve(_p20.contract_id, approver="boss_hq:owner_1", approver_role="owner")
 _sq_reply = _gw20.query_execution_status("boss_hq:owner_1")
 chk("DoD20: after execution → query returns non-None", _sq_reply is not None)
-chk("DoD20: query reply contains canonical success", _sq_reply is not None and "הפעולה הושלמה" in _sq_reply)
+chk("DoD20: query reply contains canonical success", _sq_reply is not None and "המשימה נוצרה" in _sq_reply)
 chk("DoD20: query reply hides tool_name", _sq_reply is not None and "airtable_add" not in _sq_reply)
 
 # ── Item 21: sibling contracts closed on disambiguation selection ──

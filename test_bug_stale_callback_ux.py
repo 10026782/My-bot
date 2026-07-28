@@ -145,7 +145,7 @@ chk("A: original approval message was edited (final state shown, button removed)
     mock_bot_a.edit_message_text.call_count == 1)
 _edited_text_a = mock_bot_a.edit_message_text.call_args[0][0]
 chk("A: the one final response uses the exact repeated-completion message",
-    _edited_text_a == "הפעולה כבר הושלמה")
+    _edited_text_a == "המשימה כבר נוצרה")
 
 
 # ══════════════════════════════════════════════════
@@ -227,7 +227,7 @@ chk("C: pressing the same already-resolved button again still dispatches zero ti
 chk("C: repeated press still gets exactly one final response",
     not mock_bot_a2.send_message.called and
     mock_bot_a2.edit_message_text.call_count == 1 and
-    mock_bot_a2.edit_message_text.call_args[0][0] == "הפעולה כבר הושלמה")
+    mock_bot_a2.edit_message_text.call_args[0][0] == "המשימה כבר נוצרה")
 
 
 # ══════════════════════════════════════════════════

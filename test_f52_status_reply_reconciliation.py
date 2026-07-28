@@ -93,7 +93,7 @@ def test_off_is_byte_identical_legacy():
         assert "recABC1234567890XYZ" not in gw.compose_status_reply(F_EXEC).text
         assert gw.compose_status_reply(F_FAIL).text == "הפעולה לא הושלמה"
         assert gw.compose_status_reply(F_PEND).text.startswith("יש פעולה שממתינה לאישור:")
-        assert gw.compose_status_reply(F_REJ).text.startswith("הפעולה נדחתה:")
+        assert gw.compose_status_reply(F_REJ).text.startswith("הפעולה בוטלה:")
     finally:
         _set(None)
 
@@ -212,7 +212,7 @@ def test_on_pending_and_rejected_and_unknown():
         pend = gw.compose_status_reply(F_PEND).text
         assert "אישור" in pend and "airtable_add" not in pend
         rej = gw.compose_status_reply(F_REJ).text
-        assert "✓" not in rej and "airtable_add" not in rej and "נדחת" in rej   # failure-family
+        assert "✓" not in rej and "airtable_add" not in rej and "בוטל" in rej   # failure-family
         unk = gw.compose_status_reply(F_UNK).text
         assert unk and "✓" not in unk and "✅" not in unk                        # never success
     finally:

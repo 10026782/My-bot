@@ -125,14 +125,18 @@ gw4.route_confirmation_word("boss_hq:u4", approver_role="owner")
 reply = gw4.route_disambiguation("boss_hq:u4", "2", approver_role="owner")
 chk("route_disambiguation: targeted contract executed", executions4 == ["gmail_send_draft"])
 chk("route_disambiguation: disclosure mentions the 2 auto-rejected siblings",
-    reply is not None and "2 פעולות נוספות" in reply and "נדחו אוטומטית" in reply)
+    reply is not None and "2 פעולות נוספות" in reply and "בוטלו אוטומטית" in reply)
 
 gw5, executions5 = _make_gw()
 r1b = _propose(gw5, "boss_hq:u5", "airtable_add")
 r2b = _propose(gw5, "boss_hq:u5", "gmail_send_draft")
 reply_combined = gw5.route_combined_word("boss_hq:u5", "כן 1", approver_role="owner")
-chk("route_combined_word confirm: disclosure mentions the 1 auto-rejected sibling",
-    reply_combined is not None and "1 פעולות נוספות" in reply_combined and "נדחו אוטומטית" in reply_combined)
+chk("route_combined_word confirm: disclosure mentions the 1 auto-rejected "
+    "sibling with correct singular Hebrew grammar (not '1 פעולות')",
+    reply_combined is not None
+    and "פעולה נוספת אחת" in reply_combined
+    and "בוטלה אוטומטית" in reply_combined
+    and "1 פעולות" not in reply_combined)
 
 # Single live contract (no siblings) must NOT get a disclosure suffix.
 gw6, _ = _make_gw()
@@ -212,8 +216,9 @@ chk("review finding #3: reply explicitly scopes itself to ActionContracts, "
 follow_up = gw7.route_disambiguation("boss_hq:u7", "2", approver_role="owner")
 chk("follow-up '2' after describe_pending_queue() resolves the right contract",
     executions7 == ["gmail_send_draft"])
-chk("follow-up disclosure mentions the 1 auto-rejected sibling",
-    follow_up is not None and "1 פעולות נוספות" in follow_up)
+chk("follow-up disclosure mentions the 1 auto-rejected sibling with "
+    "correct singular Hebrew grammar (not '1 פעולות')",
+    follow_up is not None and "פעולה נוספת אחת" in follow_up and "1 פעולות" not in follow_up)
 
 
 # ══════════════════════════════════════════════════

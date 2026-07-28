@@ -209,8 +209,10 @@ with patch.object(app, "resolve_identity", return_value=requester), \
 
 chk("_queue_approval reply does not reference Sheets/Google",
     "שיטס" not in reply and "Sheets" not in reply and "גיליון" not in reply)
-chk("_queue_approval reply references adding to Tasks without exposing a tool name",
-    "הוספה ב-" in reply and "Tasks" in reply and "airtable_add" not in reply)
+chk("_queue_approval reply references creating a task without exposing a "
+    "tool name or a raw table name",
+    "משימה" in reply and "airtable_add" not in reply
+    and "Tasks" not in reply and "משימות (Tasks)" not in reply)
 
 _normalized_e2e = _real_gw.normalize_payload(tool_inputs_e2e)
 _fp_airtable = _real_gw.compute_business_fingerprint(

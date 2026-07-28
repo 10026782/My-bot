@@ -81,6 +81,7 @@ _REASON_TEXT = {
     "GOOGLE_AUTH_REQUIRED":     "צריך לחבר מחדש את חשבון Google כדי להמשיך.",
     "STRUCTURED_RESULT_INVALID":"התקבלה תשובה לא תקינה מהמערכת.",
     "PERMISSION_DENIED":        "אין הרשאה לבצע את הפעולה הזאת.",
+    "ACTION_REJECTED":          "הפעולה בוטלה.",
     "ACTION_EXPIRED":           "בקשת האישור פגה. צריך להתחיל מחדש.",
     "EXECUTION_NOT_VERIFIED":   "לא ניתן לאמת שהפעולה בוצעה.",
     "PROVIDER_UNAVAILABLE":     "השירות אינו זמין כרגע.",

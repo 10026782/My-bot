@@ -87,6 +87,7 @@ APPROVAL_POLICY_APPROVAL     = "approval"
 APPROVAL_POLICY_SELF_CONFIRM = "self_confirm"
 
 _LEAD_CAPTURE_TABLE = "Leads"
+_TASK_CREATION_TABLE = "Tasks"
 
 
 def _lead_safe_fields() -> tuple[frozenset, frozenset]:
@@ -819,15 +820,14 @@ class ExecutionLedger:
 # ══════════════════════════════════════════════════
 
 def _describe_contract_for_reconfirmation(contract: ActionContract) -> str:
-    """Unchanged by BUG-115 — this helper's fallback (raw "tool_name / table")
-    is relied on by other, pre-existing call sites outside the disambiguation
-    list (e.g. _compose_status_reply_legacy()'s "✅ בוצע: {label}" executed-
-    status text, asserted by test_stage_b_full_suite.py's DoD20 to contain
-    the tool name). Generalizing this shared function's fallback instead of
-    adding a separate one was tried first and reverted — it silently changed
-    that unrelated, already-tested behavior too. See
-    _describe_contract_for_disambiguation() below for the BUG-115-specific
-    version, used only by the multi-contract list."""
+    """תווית קריאה-עסקית להודעות אישור-מחדש, לרשימת ה-disambiguation
+    (דרך _describe_contract_for_disambiguation() למטה), ול-projection של
+    ActionResolutionEvent. שמות טבלה (Tasks/משימות (Tasks)/Leads/כל אחר)
+    לעולם אינם נכללים — ל-Leads ול-Tasks יש ניסוח עסקי ייעודי משלהם; כל
+    airtable_add/airtable_update אחר נופל לניסוח גנרי, שאינו תלוי-טבלה.
+    רק ה-fallback הכללי האמיתי עבור סוגי כלים שאינם Airtable (שאין להם
+    טבלה לחשוף מלכתחילה) עדיין מציין את שם הכלי — ללא שינוי, מכיוון
+    שאין שם חשיפת טבלה אפשרית שם."""
     payload = contract.normalized_payload or {}
     if contract.tool_name in ("airtable_add", "airtable_update") and payload.get("table") == _LEAD_CAPTURE_TABLE:
         fields = payload.get("fields") or {}
@@ -843,35 +843,41 @@ def _describe_contract_for_reconfirmation(contract: ActionContract) -> str:
         parts = [p for p in parts if p]
         verb = "יצירת ליד" if contract.tool_name == "airtable_add" else "עדכון ליד"
         return f"{verb}: {', '.join(parts)}" if parts else verb
+    if contract.tool_name in ("airtable_add", "airtable_update") and is_task_table(payload.get("table")):
+        preview = _first_field_preview(payload.get("fields") or {})
+        verb = "יצירת משימה" if contract.tool_name == "airtable_add" else "עדכון משימה"
+        return f"{verb}: {preview}" if preview else verb
+    if contract.tool_name in ("airtable_add", "airtable_update"):
+        preview = _first_field_preview(payload.get("fields") or {})
+        verb = "הוספת רשומה" if contract.tool_name == "airtable_add" else "עדכון רשומה"
+        return f"{verb}: {preview}" if preview else verb
     table = payload.get("table") or payload.get("spreadsheet_name") or ""
     return f"{contract.tool_name} / {table}" if table else contract.tool_name
 
 
 def _describe_contract_for_disambiguation(contract: ActionContract) -> str:
-    """BUG-115: human-readable label for ActionGateway's multi-contract
-    disambiguation list ONLY — deliberately a separate function from
-    _describe_contract_for_reconfirmation() above, not a generalization of
-    it, so this fix cannot change that other function's behavior at its
-    other call sites (tried, reverted — see its docstring). Reuses the same
-    Leads-specific branch (identical business description either way), but
-    generalizes the *fallback* to any table for airtable_add/airtable_update
-    — production evidence showed every disambiguation-list item was exactly
-    this shape (airtable_add/airtable_update against non-Leads tables like
-    Tasks), which the shared helper's raw "tool_name / table" fallback would
-    still leak the tool name for. Other tool types (gmail_send_draft/
-    calendar_create_event/etc.) fall back to the shared helper's own
-    behavior unchanged — production reports never exercise them here, and
-    app.py's _describe_tool_call() already owns richer per-tool copy for
-    the initial approval prompt itself."""
-    payload = contract.normalized_payload or {}
-    if contract.tool_name in ("airtable_add", "airtable_update") and payload.get("table") == _LEAD_CAPTURE_TABLE:
-        return _describe_contract_for_reconfirmation(contract)
-    table = payload.get("table") or payload.get("spreadsheet_name") or ""
-    if table and contract.tool_name in ("airtable_add", "airtable_update"):
-        verb = "הוספה" if contract.tool_name == "airtable_add" else "עדכון"
-        preview = _first_field_preview(payload.get("fields") or {})
-        return f"{verb} ב-{table}" + (f": {preview}" if preview else "")
+    """BUG-115 (היסטורי): במקור פונקציה נפרדת מ-
+    _describe_contract_for_reconfirmation() למעלה, כדי שתיקון רשימת
+    ה-disambiguation יוכל לעלות בלי לגעת ב-fallback של הפונקציה
+    המשותפת (שהיה בשימוש במקומות קריאה אחרים באותה עת). ה-patch
+    העוקב של UX תיקן את ה-fallback המשותף ישירות (אין יותר חשיפת שם
+    טבלה בשום airtable_add/airtable_update), כך שאין הבדל התנהגותי
+    שנותר להשאיר נפרד — הפונקציה כעת פשוט משתמשת בו."""
     return _describe_contract_for_reconfirmation(contract)
+
+
+def _sibling_auto_cancel_disclosure(count: int) -> str:
+    """הודעת גילוי פונה-לעסק שפעולות ממתינות נוספות בוטלו אוטומטית כאשר
+    המשתמש פתר אחת מהן לפי מספר — הסכמה דקדוקית יחיד/רבים (עבור count=1
+    הניסוח "1 פעולות" שגוי דקדוקית, ולכן יחיד מטופל בנפרד)."""
+    if count == 1:
+        body = "פעולה נוספת אחת שהייתה ברשימה בוטלה אוטומטית"
+    else:
+        body = f"{count} פעולות נוספות שהיו ברשימה בוטלו אוטומטית"
+    return (
+        f"\n\nℹ️ שים לב: {body} "
+        f"(בחירה לפי מספר מבטלת את שאר האפשרויות שהוצגו יחד)."
+    )
 
 
 _AIRTABLE_RECORD_ID_RE = re.compile(r"(?<![A-Za-z0-9])rec[A-Za-z0-9]{14,}(?![A-Za-z0-9])")
@@ -899,8 +905,60 @@ def _remove_raw_approval_tool_name(text: str, contract: object | None) -> str:
     return text
 
 
+def _task_creation_table_names() -> frozenset[str]:
+    """שתי הצורות שבהן כתיבה לטבלת Tasks עשויה להגיע: ה-alias שסכימת
+    הכלי/ה-dispatcher של Claude מפרסמים ("Tasks", ראו _ALIAS_MAP ב-
+    tools/dispatcher.py) ושם הטבלה הקנוני ב-Airtable שקוד Python ישיר
+    עשוי להעביר כבר-פתור. ה-import העצל משקף את ההימנעות של
+    _lead_safe_fields() מצימוד לסדר-טעינת-המודולים מול airtable_schema."""
+    names = {_TASK_CREATION_TABLE}
+    try:
+        from airtable_schema import Tables
+        names.add(Tables.TASKS)
+    except Exception:
+        pass
+    return frozenset(names)
+
+
+def is_task_table(table: str | None) -> bool:
+    """ציבורי: True עבור כל אחת מהצורות שבהן כתיבה לטבלת Tasks עשויה
+    להיקרא ("Tasks" ה-alias, או השם הקנוני "משימות (Tasks)"). משותף בין
+    ניסוח מחזור-החיים של המודול הזה למטה לבין רינדור הודעת האישור
+    הראשונית ב-app.py (_describe_tool_call), כך ששני המשטחים מסכימים
+    על מה נחשב לכתיבת משימה בלי לשכפל את לוגיקת ה-alias/הקנוני."""
+    return str(table or "").strip() in _task_creation_table_names()
+
+
+def _is_task_creation_contract(contract: ActionContract | None) -> bool:
+    """True רק עבור יצירת משימה חדשה (airtable_add מול טבלת Tasks) —
+    הפעולה היחידה עם ניסוח עסקי ייעודי משלה (ממתין/הושלם/נדחה). כל
+    השאר משתמש בתיאור העסקי הגנרי, נטול-שם-הטבלה, למטה."""
+    if contract is None:
+        return False
+    tool_name = getattr(contract, "tool_name", "")
+    if tool_name != "airtable_add":
+        return False
+    payload = contract.normalized_payload or {}
+    return is_task_table(payload.get("table"))
+
+
+def _safe_task_title(contract: ActionContract | None) -> str:
+    """כותרת משימה בטוחה-עסקית בלבד — לעולם לא שם טבלה, שם כלי, או מזהה."""
+    if contract is None:
+        return ""
+    payload = contract.normalized_payload or {}
+    fields = payload.get("fields") if isinstance(payload.get("fields"), dict) else {}
+    title = _first_field_preview(fields)
+    title = _redact_approval_identifiers(title, getattr(contract, "contract_id", None))
+    title = _remove_raw_approval_tool_name(title, contract)
+    return title.strip(" /:|-")
+
+
 def _safe_contract_business_description(contract: ActionContract | None) -> str:
-    """Return business wording without raw tool names or technical IDs."""
+    """מחזיר ניסוח עסקי ללא שמות כלים גולמיים, שמות טבלאות, או מזהים
+    טכניים. שמות טבלאות (Tasks/Leads/ActionContracts/וכו') לעולם אינם
+    נכללים בכוונה תחילה — ניסוח גנרי, שאינו תלוי-טבלה, מכסה כל טבלה
+    פרט לניסוח הייעודי ל-Tasks שנבנה בנפרד ב-build_approval_lifecycle_result()."""
     if contract is None:
         return "הפעולה המבוקשת"
 
@@ -912,11 +970,9 @@ def _safe_contract_business_description(contract: ActionContract | None) -> str:
     preview = _first_field_preview(fields)
 
     if tool_name in ("airtable_add", "airtable_update"):
-        verb = "הוספה" if tool_name == "airtable_add" else "עדכון"
-        if table:
-            description = f"{verb} ב-{table}" + (f": {preview}" if preview else "")
-        else:
-            description = "הוספת רשומה" if tool_name == "airtable_add" else "עדכון רשומה"
+        description = "הוספת רשומה" if tool_name == "airtable_add" else "עדכון רשומה"
+        if preview:
+            description += f": {preview}"
     elif tool_name == "calendar_create_event":
         summary = str(payload.get("summary") or "").strip()
         description = "קביעת אירוע" + (f": {summary}" if summary else "")
@@ -968,17 +1024,28 @@ def build_approval_lifecycle_result(
             canonical_state = "no_contract"
 
     description = _safe_contract_business_description(contract)
+    is_task_creation = _is_task_creation_contract(contract)
+    task_title = _safe_task_title(contract) if is_task_creation else ""
     if canonical_state == "pending":
-        message = f"יש פעולה שממתינה לאישור: {description}"
+        if is_task_creation:
+            message = "יש משימה שממתינה לאישור" + (f": {task_title}" if task_title else "")
+        else:
+            message = f"יש פעולה שממתינה לאישור: {description}"
     elif canonical_state == "pending_conflict":
         message = (
             "יש לך פעולה שממתינה לאישור. יש לאשר או לבטל אותה, "
             "ואז לשלוח מחדש את הבקשה החדשה. הפעולה החדשה לא נשמרה."
         )
     elif canonical_state == "completed":
-        message = "הפעולה כבר הושלמה" if repeated else f"הפעולה הושלמה: {description}"
+        if is_task_creation:
+            message = "המשימה כבר נוצרה" if repeated else "המשימה נוצרה" + (f": {task_title}" if task_title else "")
+        else:
+            message = "הפעולה כבר הושלמה" if repeated else f"הפעולה הושלמה: {description}"
     elif canonical_state == "rejected":
-        message = "הפעולה כבר נדחתה" if repeated else f"הפעולה נדחתה: {description}"
+        if is_task_creation:
+            message = "יצירת המשימה כבר בוטלה" if repeated else "יצירת המשימה בוטלה" + (f": {task_title}" if task_title else "")
+        else:
+            message = "הפעולה כבר בוטלה" if repeated else f"הפעולה בוטלה: {description}"
     elif canonical_state in ("approved_processing", "outcome_unknown"):
         message = "הפעולה אושרה, אך התוצאה עדיין אינה סופית"
     elif canonical_state == "failed":
@@ -2046,10 +2113,7 @@ class ActionGateway:
         # §21 comment above. Disclosure only, does not change what got
         # rejected (already decided above, unconditionally, before this fix).
         if rejected_siblings:
-            result += (
-                f"\n\nℹ️ שים לב: {rejected_siblings} פעולות נוספות שהיו ברשימה נדחו אוטומטית "
-                f"(בחירה לפי מספר מבטלת את שאר האפשרויות שהוצגו יחד)."
-            )
+            result += _sibling_auto_cancel_disclosure(rejected_siblings)
         return result
 
     # ── BUG-070 gap #1 — route_combined_word ────────────────────────
@@ -2108,10 +2172,7 @@ class ActionGateway:
             # Staging finding #3 (23/07/2026) — see route_disambiguation()'s
             # identical disclosure for the full rationale.
             if rejected_siblings:
-                result += (
-                    f"\n\nℹ️ שים לב: {rejected_siblings} פעולות נוספות שהיו ברשימה נדחו אוטומטית "
-                    f"(בחירה לפי מספר מבטלת את שאר האפשרויות שהוצגו יחד)."
-                )
+                result += _sibling_auto_cancel_disclosure(rejected_siblings)
             return result
 
         # action == "cancel" — דוחה רק את הפריט שנבחר, לא נוגע בשאר הממתינים
@@ -2128,7 +2189,7 @@ class ActionGateway:
         if is_enabled("FEATURE_SINGLE_SPEAKER_APPROVAL_UX"):
             if remaining > 0:
                 rendered = (
-                    f"הפעולה נדחתה: {_safe_contract_business_description(contract)}. "
+                    f"הפעולה בוטלה: {_safe_contract_business_description(contract)}. "
                     f"נשארו {remaining} פעולות ממתינות."
                 )
             else:
@@ -2675,7 +2736,7 @@ class ActionGateway:
             return "failure", {"reason_code": fact.error_code}
         if fact.outcome == "rejected":
             return "failure", {"reason_code": "ACTION_REJECTED",
-                               "reason": "הפעולה נדחתה."}
+                               "reason": "הפעולה בוטלה."}
         return "outcome_unknown", {}
 
     def _compose_status_reply_unified(self, fact: ActionFact) -> tuple[str, dict]:

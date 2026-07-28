@@ -141,7 +141,7 @@ def test_cancel_no_clears_pending_no_write():
     # Confirming afterward must find nothing pending (no accidental write).
     with patch("core.action_gateway.action_gateway", gw):
         confirm_after_cancel = gw.route_confirmation_word(identity.memory_key, approver_role=identity.role)
-    assert confirm_after_cancel == "הפעולה כבר נדחתה", f"got={confirm_after_cancel!r}"
+    assert confirm_after_cancel == "הפעולה כבר בוטלה", f"got={confirm_after_cancel!r}"
     return "OK"
 
 
