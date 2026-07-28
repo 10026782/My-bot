@@ -688,14 +688,23 @@ Following the existing house test-naming convention in
   informed by whether Phases 1–3 show the rubber-stamp or self-approved-
   waiver failure modes (Section 6) actually occurring in practice.
 
-### Phase 4 pilot cohort — use the Phase C backlog
+### Phase 4 pilot cohort — reuse the 5 tasks from `PHASE1_NON_INFERIORITY_PILOT.md`
 
-The Phase 4 pilot may use five representative tasks from the existing
-Phase C backlog as its real-task cohort. This reuses already-approved work;
-it does not merge the Phase C backlog into this planning document's
-implementation scope and does not authorize runtime or CLI changes.
+The Phase 4 pilot (evaluating Option C, harness-level tool-call tracking)
+may use the same 5 real tasks already documented in
+`docs/context_librarian/PHASE1_NON_INFERIORITY_PILOT.md`'s 28/07
+non-inferiority pilot (`approval_ux`/BUG-150, `tool_execution`/the
+`ActionGateway` fail-open, `turn_coordinator_routing`/BUG-130+BUG-140,
+`core_reasoning_change`, `rp5_evidence_mismatch`) as its real-task cohort —
+that pilot did not establish Phase 1 acceptance the first time, and its own
+"What remains unproven" section already calls for exactly this kind of
+follow-up. This reuses already-investigated, already-approved-scope work;
+it does **not** merge those 5 tasks' own real fixes (still gated by
+`CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`, still not implemented anywhere) into
+this planning document's implementation scope, and does not authorize
+runtime or CLI changes.
 
-For each selected Phase C task, the agent must:
+For each selected task, the agent must:
 
 1. declare the task, branch, mode, and planned paths before work;
 2. check open PRs, branches, and canonical documents for overlap;
@@ -712,10 +721,13 @@ The pilot records:
 - review requests; and
 - coordination time and false-positive warnings.
 
-The Phase C task remains governed by its own ROADMAP item and acceptance
-criteria. This section only supplies a realistic pilot cohort for the
-lightweight coordination check; it does not replace the independent review
-and consumption-verification criteria below.
+Each task remains governed by `PHASE1_NON_INFERIORITY_PILOT.md`'s own
+determination and by `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`'s existing gate
+on BUG-150/BUG-130/BUG-140/the fail-open — not by this document. This
+section only supplies a realistic pilot cohort for the lightweight
+coordination check; it does not replace the independent review and
+consumption-verification criteria below, and it does not authorize
+implementing any of those 3 real defects.
 
 ### Acceptance criteria for a new pilot on new tasks (after Phase 1 ships — not this pilot, not a re-run of the 28/07 pilot)
 
