@@ -1151,6 +1151,17 @@ chk("P2-3: cancel() raising is not silently swallowed -- the return signals the 
 # BEFORE propose_action() is ever reached (no contract could possibly exist
 # yet) -- this is a pure "outer wrapper's own return value" bug, independent
 # of P2-1/2/3's contract-cleanup concerns.
+#
+# PR Hotfix A correction (29/07/2026): the mocked executed_action_cache.compute()
+# failure is never actually reached here -- {"Task": "P2-4"} is not an
+# approved Hebrew Tasks field name, so _sheets_payload_to_airtable() raises a
+# genuine CanonicalizationError first (same class of bug this hotfix's fix #1
+# addresses). That is now caught by _queue_approval_detailed()'s dedicated
+# CanonicalizationError handler, which reports the more precise
+# APPROVAL_QUEUE_NEVER_ATTEMPTED state (provably no persistence was ever
+# attempted) instead of the generic ORPHANED state (merely unattributable) --
+# the entire reason that distinct state was introduced. action_tool must
+# still be canonical either way, which was the actual gap this test caught.
 with patch.object(_real_eac, "compute", side_effect=RuntimeError("cache compute broken")):
     _p2_4_result = app._queue_approval_detailed(
         "sheets_append", {"table": "Tasks", "fields": {"Task": "P2-4"}},
@@ -1162,11 +1173,12 @@ chk("P2-4: action_tool is CANONICAL (airtable_add, not the raw sheets_append) ev
     _p2_4_result["action_tool"] == "airtable_add")
 chk("P2-4: no contract exists either way (the crash predates propose_action() entirely)",
     len(_canon_gw.find_live_contracts("boss_hq:p2_4_canonical_action_tool")) == 0)
-chk("P1-2 (Codex re-audit of 818c8a6): the outer wrapper never attempts a fingerprint "
-    "lookup for this unattributed exception -- return is the conservative ORPHANED state "
-    "with contract_id=None (unattributable, not 'verified absent'), not APPROVAL_QUEUE_ERROR",
+chk("P1-2 (Codex re-audit of 818c8a6, refined by PR Hotfix A): the outer wrapper never "
+    "attempts a fingerprint lookup for this unattributed exception -- return is the "
+    "precise NEVER_ATTEMPTED state (provably no persistence was ever attempted) with "
+    "contract_id=None, not APPROVAL_QUEUE_ERROR",
     _p2_4_result["contract_id"] is None
-    and _p2_4_result["terminal_outcome"] == "APPROVAL_QUEUE_ORPHANED"
+    and _p2_4_result["terminal_outcome"] == "APPROVAL_QUEUE_NEVER_ATTEMPTED"
     and _p2_4_result["ok"] is False and _p2_4_result["created_this_turn"] is False)
 
 with patch("core.action_gateway.resolve_canonical_tool", side_effect=RuntimeError("canonicalization itself broke")):

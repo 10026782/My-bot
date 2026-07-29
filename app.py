@@ -1112,6 +1112,17 @@ def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
             "[Approval] _queue_approval_detailed canonicalization failed: tool=%s reason=%s",
             tool_name, exc,
         )
+        # action_tool must stay canonical here too, for the same reason as
+        # the generic except below: _impl's own canonicalized local variable
+        # is lost when its frame unwinds on this exception — this handler
+        # only ever sees ITS OWN parameter, the raw pre-canonicalization
+        # name. resolve_canonical_tool() is pure/idempotent, so recomputing
+        # it once here is safe and correct.
+        try:
+            from core.action_gateway import resolve_canonical_tool as _resolve_for_canon_error
+            _canonical_tool_name = _resolve_for_canon_error(tool_name, tool_inputs, user_text)
+        except Exception:
+            _canonical_tool_name = tool_name
         return {
             "message": (
                 "❌ לא הצלחתי להמיר את הבקשה הזו לפעולת Airtable תקינה. "
@@ -1120,7 +1131,7 @@ def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
             ),
             "contract_id": None, "ok": False,
             "terminal_outcome": "APPROVAL_QUEUE_NEVER_ATTEMPTED",
-            "action_tool": tool_name, "created_this_turn": False,
+            "action_tool": _canonical_tool_name, "created_this_turn": False,
         }
     except Exception as exc:
         # Fail-closed, uniform shape (decision 5 in this program's
