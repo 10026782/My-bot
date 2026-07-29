@@ -199,6 +199,14 @@ _PENDING_QUERY_RE = re.compile(
     r"|(?:מה|אילו|איזה|רשימת).{0,15}(?:ממתי\w*|מחכ\w*)"
 )
 
+# PR2 בכוונה צר יותר מהדקדוק הישן, הרפוי, של שאילתות-סטטוס. הביטויים
+# האלה מעוגנים לשאלת lifecycle-אישור; אסור להם להפוך טקסט עסקי רגיל
+# שמכיל את אותן מילים לפקודת gateway.
+_PR2_PENDING_EXISTENCE_RE = re.compile(
+    r"^\s*(?=.*\b(?:יש|קיימ\w*)\b)(?=.*(?:ממתי\w*|מחכ\w*)\b).{1,80}\?\s*$"
+)
+_PR2_CREATED_QUERY_RE = re.compile(r"^\s*יצרת\?\s*$", re.IGNORECASE)
+
 # ─── קליינטים ──────────────────────────────────────
 ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
 TELEGRAM_TOKEN     = os.environ.get("TELEGRAM_TOKEN", "")
@@ -2126,37 +2134,55 @@ def _deliver_callback_final(
     text: str,
 ) -> int:
     """Deliver one persistent final response for a Telegram callback."""
-    callback_message = getattr(cq, "message", None)
-    callback_chat = getattr(callback_message, "chat", None)
-    callback_chat_id = str(getattr(callback_chat, "id", "") or "")
-    if origin_channel == "telegram":
-        if (
-            _flag_enabled("FEATURE_SINGLE_SPEAKER_APPROVAL_UX")
-            and str(origin_chat_id) != callback_chat_id
-        ):
-            # Cross-chat approval: the requester owns the final response.
-            # The approver's keyboard is only retired, not turned into a
-            # second user-facing status message.
-            bot.edit_message_reply_markup(
-                cq.message.chat.id, cq.message.message_id, reply_markup=None,
-            )
-            bot.send_message(origin_chat_id, text)
-            return 1
-        bot.edit_message_text(text, cq.message.chat.id, cq.message.message_id)
-        if (
-            not _flag_enabled("FEATURE_SINGLE_SPEAKER_APPROVAL_UX")
-            and str(origin_chat_id) != callback_chat_id
-        ):
-            bot.send_message(origin_chat_id, text)
-            return 2
-        return 1
+    from core.approval_turn_metrics import begin, end, record_final_response
+    _callback_metrics, _callback_token = begin()
+    # פתרון ה-callback עשוי לבצע חיפושי lifecycle/replay, אך נשאר מוגבל
+    # ולעולם לא סופר את אישור ה-popup של טלגרם כתשובה סופית.
+    _callback_metrics.action_contract_read_count = 1
 
-    _write_execution_receipt(
-        canonical_user_id, origin_channel, origin_chat_id,
-        action_id, tool_name, text,
-    )
-    bot.edit_message_text(text, cq.message.chat.id, cq.message.message_id)
-    return 1
+    def _metric_return(count: int) -> int:
+        # מגיע לכאן רק אחרי מסירה מוצלחת למטה — exception מדלג על זה,
+        # כך שמסירה שנכשלה לעולם לא נספרת כתשובה סופית, בעוד ש-end()
+        # למטה עדיין תמיד מופעל.
+        record_final_response(deterministic=True)
+        return count
+
+    try:
+        callback_message = getattr(cq, "message", None)
+        callback_chat = getattr(callback_message, "chat", None)
+        callback_chat_id = str(getattr(callback_chat, "id", "") or "")
+        if origin_channel == "telegram":
+            if (
+                _flag_enabled("FEATURE_SINGLE_SPEAKER_APPROVAL_UX")
+                and str(origin_chat_id) != callback_chat_id
+            ):
+                # Cross-chat approval: the requester owns the final response.
+                # The approver's keyboard is only retired, not turned into a
+                # second user-facing status message.
+                bot.edit_message_reply_markup(
+                    cq.message.chat.id, cq.message.message_id, reply_markup=None,
+                )
+                bot.send_message(origin_chat_id, text)
+                return _metric_return(1)
+            bot.edit_message_text(text, cq.message.chat.id, cq.message.message_id)
+            if (
+                not _flag_enabled("FEATURE_SINGLE_SPEAKER_APPROVAL_UX")
+                and str(origin_chat_id) != callback_chat_id
+            ):
+                bot.send_message(origin_chat_id, text)
+                return _metric_return(2)
+            return _metric_return(1)
+
+        _write_execution_receipt(
+            canonical_user_id, origin_channel, origin_chat_id,
+            action_id, tool_name, text,
+        )
+        bot.edit_message_text(text, cq.message.chat.id, cq.message.message_id)
+        return _metric_return(1)
+    finally:
+        # תמיד רץ, הצלחה או exception, כדי שה-ContextVar לעולם לא ידלוף
+        # לעבודה לא-קשורה על אותו worker.
+        end(_callback_token, "callback")
 
 
 def _handle_approval_callback_impl(cq) -> None:
@@ -2777,6 +2803,91 @@ def _action_result_to_a32_entry(result) -> "dict | None":
     }
 
 
+def _resolve_pr2_deterministic_approval(
+    *, user_text: str, identity, live_contracts: list, out_meta: dict | None,
+) -> str | None:
+    """פותר את דקדוק ה-lifecycle הצר של PR2 לפני כל עבודה אחרת בטורן.
+
+    הקורא מספק את ה-snapshot הקנוני היחיד של ActionContracts. הפונקציה
+    הזו בכוונה לא קוראת ל-Session, Router, Business Memory, או ל-Agent,
+    ונופלת דרך ללא שינוי עבור קלט לא-מזוהה.
+    """
+    from feature_flags import is_enabled
+    if not (
+        is_enabled("FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS")
+        and is_enabled("FEATURE_ACTION_GATEWAY")
+    ):
+        return None
+
+    text = user_text.strip()
+    lower = text.lower()
+    # PR2 חייב להשתמש כאן רק בדקדוק המעוגן שלו, לעולם לא ב-
+    # _PENDING_QUERY_RE.search() הישן והלא-מעוגן — זה pattern של חיפוש-
+    # substring שנועד לנקודה מאוחרת ונמוכת-סיכון יותר בטורן (אחרי Router),
+    # ואחרת היה מאפשר לטקסט עסקי רגיל כמו "הלקוח מחכה לאישור התקציב?"
+    # לעקוף את Router/Agent לגמרי מכאן.
+    is_pending_query = bool(_PR2_PENDING_EXISTENCE_RE.fullmatch(text))
+    is_created_query = bool(_PR2_CREATED_QUERY_RE.fullmatch(text))
+    is_confirm = lower in _CONFIRM_WORDS
+    is_cancel = lower in _CANCEL_WORDS
+    if not (is_pending_query or is_created_query or is_confirm or is_cancel):
+        return None
+
+    from core.action_gateway import action_gateway as gateway, build_approval_lifecycle_result
+    from core.approval_turn_metrics import begin, end, record_final_response
+    metrics, token = begin()
+    # The snapshot is loaded before calling us. Count it once for this
+    # resolver, regardless of whether the backing ledger was warm or durable.
+    metrics.action_contract_read_count = 1
+    try:
+        recent = gateway.find_recent_terminal_by_user(
+            identity.memory_key, max_age_seconds=_LIVE_CONTRACT_STALE_SECONDS,
+        )
+        if is_pending_query:
+            reply = gateway.describe_pending_queue(
+                identity.memory_key, live_contracts=live_contracts,
+            )
+        elif is_created_query:
+            if live_contracts:
+                reply = (
+                    build_approval_lifecycle_result(live_contracts[0])
+                    if len(live_contracts) == 1
+                    else build_approval_lifecycle_result(contracts=live_contracts)
+                ).safe_user_message
+            elif recent is not None:
+                reply = build_approval_lifecycle_result(recent, repeated=True).safe_user_message
+            else:
+                reply = "לא מצאתי פעולה אחרונה ב־24 השעות האחרונות."
+        elif is_confirm:
+            if live_contracts:
+                reply = gateway.route_confirmation_word(
+                    identity.memory_key, approver_role=identity.role,
+                    live_contracts=live_contracts, use_session_bookmark=False,
+                )
+            elif recent is not None:
+                reply = build_approval_lifecycle_result(recent, repeated=True).safe_user_message
+            else:
+                # אין live contract ואין terminal כשיר (<=24h): לענות
+                # ישירות במקום להאציל ל-describe_no_pending_reason(), שחוזר
+                # ושואל היסטוריה בלתי-מוגבלת ובכך היה מבטל בשקט את הגבלת
+                # ה-24h על replay.
+                reply = build_approval_lifecycle_result(canonical_state="no_contract").safe_user_message
+        else:
+            # PR2 only reaches the no-mutation multi-contract branch while its
+            # own flag is on; the legacy route below remains byte-for-byte
+            # available when the flag is off.
+            reply = gateway.route_cancellation_word(
+                identity.memory_key, live_contracts=live_contracts,
+                recent_terminal=recent, safe_multiple=True,
+            ) or "לא מצאתי פעולה ממתינה לביטול."
+        if out_meta is not None:
+            out_meta["source_module"] = "action_gateway"
+        record_final_response(deterministic=True)
+        return reply
+    finally:
+        end(token, "text")
+
+
 def run_agent(
     user_text:           str,
     chat_id:             str,
@@ -2817,6 +2928,32 @@ def run_agent(
             f"channel={channel} id={_sanitize_id(chat_id)} role={identity.role} "
             f"msg='{user_text[:60]}'"
         )
+
+    # PR2 קובע את ה-snapshot הקנוני של ActionContracts לפני כל עבודת lead
+    # capture, Session, Router, Business Memory, או Agent. מסלולים ישנים
+    # משתמשים חוזר באותו snapshot בהמשך הטורן.
+    _snapshot_fetch_failed = False
+    if _live_contracts_snapshot is None:
+        try:
+            from core.action_gateway import action_gateway as _gw_snapshot
+            _live_contracts_snapshot = _gw_snapshot.find_live_contracts(identity.memory_key)
+        except Exception:
+            # Fallback ישן, ללא שינוי, לכל מסלול מתחת ל-PR2. PR2 עצמו
+            # אסור לו להתייחס לחיפוש שנכשל כ"אין ממתין" (זו הייתה תשובה
+            # בטוחה-ומוטעית בזמן תקלה אמיתית) — הוא פשוט לא מיירט את
+            # הטורן הזה, ראו _snapshot_fetch_failed למטה.
+            _live_contracts_snapshot = []
+            _snapshot_fetch_failed = True
+    _pr2_reply = None
+    if not _snapshot_fetch_failed:
+        _pr2_reply = _resolve_pr2_deterministic_approval(
+            user_text=user_text,
+            identity=identity,
+            live_contracts=_live_contracts_snapshot,
+            out_meta=_out_meta,
+        )
+    if _pr2_reply is not None:
+        return _gateway_reply_with_promotion(_pr2_reply, identity.memory_key)
 
     # ── 1.5. WhatsApp Lead Capture (W0) ───────────
     # W0/N02: capture inbound WhatsApp leads and optionally score them.
@@ -2859,12 +2996,6 @@ def run_agent(
     # everything below in this turn (Pending Approval Gate at 2.55,
     # build_turn_envelope() at 1.7, and the Case C2 signal after the tool
     # loop) — never refetched within this call, never cached across turns.
-    if _live_contracts_snapshot is None:
-        try:
-            from core.action_gateway import action_gateway as _gw_snapshot
-            _live_contracts_snapshot = _gw_snapshot.find_live_contracts(identity.memory_key)
-        except Exception:
-            _live_contracts_snapshot = []
     # Turn-start batch_queue count (RAM-only, not an Airtable read — no
     # amplification concern, captured here purely so the Case C2 check below
     # uses the same turn-start moment as build_turn_envelope() rather than a
@@ -3441,6 +3572,8 @@ def run_agent(
             )
 
         while True:
+            from core.approval_turn_metrics import record_agent_call
+            record_agent_call()
             response = client.messages.create(
                 model       = ctx.model,
                 max_tokens  = ctx.max_tokens,

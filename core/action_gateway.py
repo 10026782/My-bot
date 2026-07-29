@@ -1098,6 +1098,12 @@ def build_approval_lifecycle_result(
 # for a fresh one. Threshold is display-only, independent of the TTL itself.
 _STALE_DISPLAY_THRESHOLD_SECONDS = 3600  # 1h
 
+# PR2: מבדיל בין "recent_terminal לא נמסר בכלל" (הקורא הישן, ללא הגבלת-זמן)
+# לבין "נמסר במפורש None" (החיפוש המוגבל-24h של PR2 לא מצא תוצאה כשירה).
+# None רגיל לא יכול לשמש כאן: `recent_terminal or fallback` היה מחזיר לחיפוש
+# ההיסטורי הבלתי-מוגבל בדיוק במקרה שה-24h bound נועד למנוע.
+_TERMINAL_LOOKUP_UNSET = object()
+
 
 def _format_pending_age_suffix(contract: ActionContract) -> str:
     """Returns an inline age warning (" ⚠️ ממתין מ-X שעות/דקות") for a pending
@@ -1707,7 +1713,11 @@ class ActionGateway:
         )
         return result.safe_user_message, True
 
-    def route_confirmation_word(self, canonical_user_id: str, approver_role: str = "") -> str:
+    def route_confirmation_word(
+        self, canonical_user_id: str, approver_role: str = "", *,
+        live_contracts: list["ActionContract"] | None = None,
+        use_session_bookmark: bool = True,
+    ) -> str:
         """
         מיירט מילת אישור חופשית (כמו "מאשר") לפני שמגיעה ל-Agent.
         מחזיר תשובה ישירה למשתמש.
@@ -1725,11 +1735,13 @@ class ActionGateway:
         לפי כמות). ראה docs/architecture/action-gateway/
         BUG-115_CONFIRMATION_ROUTING_HIJACK_AUDIT.md.
         """
-        try:
-            from session_store import lead_sessions as _ls
-            _bookmark = _ls.get_last_prompted_contract(canonical_user_id)
-        except Exception:
-            _bookmark = None
+        _bookmark = None
+        if use_session_bookmark:
+            try:
+                from session_store import lead_sessions as _ls
+                _bookmark = _ls.get_last_prompted_contract(canonical_user_id)
+            except Exception:
+                _bookmark = None
         if _bookmark:
             _bookmarked = self._ledger.find_by_id(_bookmark.get("contract_id", ""))
             if (
@@ -1755,7 +1767,7 @@ class ActionGateway:
             except Exception:
                 pass
 
-        live = self.find_live_contracts(canonical_user_id)
+        live = live_contracts if live_contracts is not None else self.find_live_contracts(canonical_user_id)
         if len(live) == 0:
             return self.describe_no_pending_reason(canonical_user_id)
         if len(live) == 1:
@@ -1977,18 +1989,31 @@ class ActionGateway:
             )
             return False
 
-    def route_cancellation_word(self, canonical_user_id: str) -> str | None:
+    def route_cancellation_word(
+        self, canonical_user_id: str, *,
+        live_contracts: list["ActionContract"] | None = None,
+        recent_terminal: "ActionContract | None" = _TERMINAL_LOOKUP_UNSET,
+        safe_multiple: bool = False,
+    ) -> str | None:
         """
         מיירט מילת ביטול חופשית ("לא") לפני שמגיעה ל-Agent.
         מחזיר None אם אין contracts חיים (ממשיך לזרימה הקיימת/ל-Agent),
         אחרת מבטל את כל ה-contracts החיים ומחזיר תשובת ביטול.
         """
-        live = self.find_live_contracts(canonical_user_id)
+        live = live_contracts if live_contracts is not None else self.find_live_contracts(canonical_user_id)
         if not live:
-            recent = self._ledger.find_most_recent_by_user(canonical_user_id)
+            recent = (
+                self._ledger.find_most_recent_by_user(canonical_user_id)
+                if recent_terminal is _TERMINAL_LOOKUP_UNSET
+                else recent_terminal
+            )
             if recent is not None and recent.status in ("completed", "executed", "rejected"):
                 return build_approval_lifecycle_result(recent, repeated=True).safe_user_message
             return None
+        if safe_multiple and len(live) > 1:
+            with self._disambiguation_lock:
+                self._disambiguation[canonical_user_id] = list(live)
+            return build_approval_lifecycle_result(contracts=live).safe_user_message
         from feature_flags import is_enabled
 
         single_speaker = is_enabled("FEATURE_SINGLE_SPEAKER_APPROVAL_UX")
@@ -2752,7 +2777,8 @@ class ActionGateway:
     # לעולם לא מסתמך על טקסט שיחה או קלט Agent.
 
     def query_execution_status(
-        self, canonical_user_id: str, window_seconds: int = 600
+        self, canonical_user_id: str, window_seconds: int = 600,
+        *, live_contracts: list[ActionContract] | None = None,
     ) -> str | None:
         """
         מחזיר תשובת סטטוס לשאלה "נוספה?"/"הצליח?" — מה-Ledger בלבד.
@@ -2766,7 +2792,7 @@ class ActionGateway:
         ]
         if not candidates:
             # BUG-SB-03: check for pending contracts before returning None
-            live = self.find_live_contracts(canonical_user_id)
+            live = live_contracts if live_contracts is not None else self.find_live_contracts(canonical_user_id)
             if live:
                 if len(live) > 1:
                     return build_approval_lifecycle_result(contracts=live).safe_user_message
@@ -2775,7 +2801,7 @@ class ActionGateway:
         latest = max(candidates, key=lambda c: c.created_at)
         if time.time() - latest.created_at > window_seconds:
             # still check pending before giving up
-            live = self.find_live_contracts(canonical_user_id)
+            live = live_contracts if live_contracts is not None else self.find_live_contracts(canonical_user_id)
             if live:
                 if len(live) > 1:
                     return build_approval_lifecycle_result(contracts=live).safe_user_message
@@ -2826,8 +2852,10 @@ class ActionGateway:
     # order them, whether that belongs on ActionGateway at all), not something
     # to improvise here. Until that exists, the reply must not imply it
     # checked everything — see the fixed final line below.
-    def describe_pending_queue(self, canonical_user_id: str) -> str:
-        live = self.find_live_contracts(canonical_user_id)
+    def describe_pending_queue(
+        self, canonical_user_id: str, *, live_contracts: list[ActionContract] | None = None,
+    ) -> str:
+        live = live_contracts if live_contracts is not None else self.find_live_contracts(canonical_user_id)
         if not live:
             no_pending = self.describe_no_pending_reason(canonical_user_id)
             base = no_pending or "לא מצאתי בקשות ממתינות במערכת ActionContracts."
@@ -2840,6 +2868,23 @@ class ActionGateway:
         lines.append("\nשלח את המספר (1, 2, ...) כדי לאשר פעולה ספציפית, או \"בטל <מספר>\" כדי לדחות אחת.")
         lines.append("\n(הבדיקה אינה כוללת כרגע תורי אישור legacy נוספים.)")
         return "\n".join(lines)
+
+    def find_recent_terminal_by_user(
+        self, canonical_user_id: str, *, max_age_seconds: int,
+    ) -> "ActionContract | None":
+        """מחזיר contract טרמינלי אחרון בלבד, ל-replay של PR2.
+
+        זו בכוונה לא alias ל-find_most_recent_by_user(): הפונקציה הישנה
+        ההיא ללא הגבלת-זמן, ולכן לא בטוחה ל-replay דטרמיניסטי.
+        """
+        now = time.time()
+        candidates = [
+            c for c in self._ledger._store.values()
+            if c.canonical_user_id == canonical_user_id
+            and c.status in ("completed", "executed", "rejected", "failed", "outcome_unknown")
+            and now - c.created_at <= max_age_seconds
+        ]
+        return max(candidates, key=lambda c: c.created_at) if candidates else None
 
     # ── PR-0 / BUG-PENDING-APPROVAL-B ────────────────────────────────
 

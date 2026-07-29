@@ -83,6 +83,9 @@ APPROVAL POLICY:
                                  turns. false (default): legacy delivery routing;
                                  true: Gateway owns the one final response. Identifier
                                  redaction is unconditional and is not rolled back.
+  FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS - PR2, resolver דטרמיניסטי מוקדם
+                                 לאישורים. כבוי כברירת מחדל, ופעיל רק כש-
+                                 FEATURE_SINGLE_SPEAKER_APPROVAL_UX מופעל.
   FEATURE_ACTION_CONTRACT_PERSISTENCE - durable new proposals + proposal recovery lookups (Phase 4B-1A); default OFF
   FEATURE_ATOMIC_CLAIMS        - PostgreSQL atomic coordination for contract execution (Phase 4B0.1A); default OFF
   FEATURE_PA01_ENFORCEMENT_STATE - שלוש מצבים (לא boolean רגיל): "off" (ברירת מחדל,
@@ -214,6 +217,9 @@ _DEFAULTS: dict[str, str] = {
     "FEATURE_SINGLE_SPEAKER_APPROVAL_UX": os.environ.get(
         "FEATURE_SINGLE_SPEAKER_APPROVAL_UX", "false",
     ),
+    "FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS": os.environ.get(
+        "FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS", "false",
+    ),
 }
 
 
@@ -272,6 +278,11 @@ def is_enabled(name: str) -> bool:
                 "tests) before enabling this flag.", name, required_tool,
             )
             return False
+
+    # PR2 אסור שישנה בעלות-תשובה באופן עצמאי — לכן ה-resolver המוקדם שלו
+    # כבוי מבחינה אפקטיבית אלא אם גם מעבר-הבעלות של PR1 מופעל.
+    if name == "FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS" and value:
+        return is_enabled("FEATURE_SINGLE_SPEAKER_APPROVAL_UX")
 
     return value
 
