@@ -14,14 +14,20 @@
 **עודכן:** 27/07/2026 (+ תוספת PR #471, + תוספת 29/07/2026 ל-approval/Context-Librarian
 track בלבד — ראו למטה) · **main:** `186832a` (מיזוג PR #494)
 
-**תוספת (27/07/2026):** PR #471 — Single-Speaker Approval UX Base — מוזג ל-`main`. `ApprovalLifecycleResult` הוא תוצאת ה-UX הקנונית למסלולי approval; Gateway מקבל בעלות על התשובה כשהדגל מופעל וה-Agent נעצר לאחר handoff. BUG-144 (reject callback שלא סגר `ActionContract`), BUG-145 (שתי הודעות סופיות) ו-BUG-118 (חשיפת tool/contract/record identifiers בתשובות הצלחה) מיושמים וממוזגים. Redaction של מזהים הוא בלתי-מותנה גם כשהדגל כבוי. `ActionContracts` נשאר מקור האמת היחיד. `FEATURE_SINGLE_SPEAKER_APPROVAL_UX=false` בקוד וב-`.env.example`; לא הופעל ב-staging/production. callback payload מקסימלי שנבדק: 53 bytes מתוך 64. `backend-ci`/`frontend-ci` עברו על `dadf851`. **אין עדיין staging/production verification**, ולכן אין לסמן את העבודה כ-Production Verified. deterministic cost cuts והיקפי PR2 נשארו במפורש מחוץ ל-PR הזה.
+**תוספת (27/07/2026):** PR #471 — Single-Speaker Approval UX Base — מוזג ל-`main`. `ApprovalLifecycleResult` הוא תוצאת ה-UX הקנונית למסלולי approval; Gateway מקבל בעלות על התשובה כשהדגל מופעל וה-Agent נעצר לאחר handoff. BUG-144 (reject callback שלא סגר `ActionContract`), BUG-145 (שתי הודעות סופיות) ו-BUG-118 (חשיפת tool/contract/record identifiers בתשובות הצלחה) מיושמים וממוזגים. Redaction של מזהים הוא בלתי-מותנה גם כשהדגל כבוי. `ActionContracts` נשאר מקור האמת היחיד. `FEATURE_SINGLE_SPEAKER_APPROVAL_UX=false` בקוד וב-`.env.example`; לא הופעל ב-staging/production. callback payload מקסימלי שנבדק: 53 bytes מתוך 64. `backend-ci`/`frontend-ci` עברו על `dadf851`. **סטטוס אימות, מדויק לפי סביבה (עודכן 29/07/2026,
+ראו `CHANGE_CONTROL_LOG.md` C175):** staging — 🟡 **חלקית** מאומת (Telegram/owner-role בלבד,
+לאחר rebase; ראו `SINGLE_SPEAKER_APPROVAL_UX_PRODUCTION_VERIFICATION_PLAN.md`). production —
+⏳ **לא** מאומת, `FEATURE_SINGLE_SPEAKER_APPROVAL_UX=false` שם. אימות-staging חלקי אינו אימות-
+production — אין לסמן את העבודה כ-Production Verified. deterministic cost cuts והיקפי PR2
+נשארו במפורש מחוץ ל-PR הזה.
 
 **תוספת (23/07/2026, אחרי כתיבת הבריפינג הזה):** PR #449 (branch `claude/findings-exam-wikon-25zzkm`, שני commits תיקון+review-pass) — סבב ממצאים מ-`my-bot-approval-staging` (7 ממצאים, כולל דגימת production אמיתית מהבעלים). ראו §3 למטה לפירוט מלא. **הענף `claude/rp5-staging-fault-injection-v4akit` עבר rebase על גבי `main` (כולל PR #449) והועלה מחדש (force-push) — staging מריץ עכשיו את התיקון.**
 
 **תוספת (25/07/2026):** BUG-141..146 (24/07/2026, ראו `BUG_AUDIT_LOG.md`) עדיין לא משוקפים למעלה — הבריפינג הזה לא עודכן מאז. בנוסף, דוח בדיקות Post-Merge של הבעלים (תרחישים 1–5, `claude/telegram-task-approval-audit-il29sj`) הוסיף: עדכון-ראיות ל-BUG-143 (מופע רביעי) ול-BUG-145 (כפל-הודעות נצפה גם בענף כישלון, לא רק הצלחה); ראיה **סותרת-לכאורה** ל-BUG-144 (תרחיש-דחייה עבר `rejected` כראוי — אבל קריאת קוד מאשרת שכפתור-הדחייה של Telegram, `app.py:2409-2449`, עדיין לא תוקן; סביר שהדוח תרגל מסלול-ביטול-מילולי נפרד שכבר עובד — לא הוכרע, דורש בירור); ו-**BUG-147 חדש** — `tools/dispatcher.py`'s `airtable_add` מחזיר מחרוזת גולמית (לא dict מובנה) בשני מסלולי-חסימה, משחזר עצמאית את "expected structured result dict; got plain string". תיעוד-בלבד, אין קוד runtime שהשתנה — ראו BUG_AUDIT_LOG.md/CHANGE_CONTROL_LOG.md C172.
 
 **תוספת (29/07/2026) — פער-תיעוד גדל, לא נסגר: עודכן רק מה שאומת ישירות בסבב הזה.**
-הבריפינג הזה (הכותרת למעלה, `main: c64da20`) עדיין לא זז מ-27/07/2026 עבור רוב הנושאים —
+גוף הבריפינג הזה (§1–4 למטה, לא הכותרת למעלה — ראו שם את ה-commit העדכני) עדיין לא זז
+מ-27/07/2026 עבור רוב הנושאים —
 BUG-130/134/136-140, TurnCoordinator, Cost Telemetry — **אף אחד מאלה לא נבדק/עודכן בסבב
 הזה**, אל תניחו שהם נפתרו או השתנו. מה שכן אומת ישירות ב-`origin/main` (grep, לא רק PR
 status) ועודכן כאן:
