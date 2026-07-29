@@ -1939,3 +1939,28 @@ Flag: EMERGENCY_STOP_AI=False (נשמר ב-Airtable)
 
 **Merged:** ✅ כן — PR #492, commit `db51afc`, אומת ב-grep ישיר על `origin/main`.
 **Verified בפרודקשן:** ⏳ לא עדיין — `FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS`/`FEATURE_SINGLE_SPEAKER_APPROVAL_UX` שניהם כבויים כברירת מחדל; אין claim ל-staging/production verification.
+
+### C181 — PR #494: PR Hotfix A — Tasks positional canonicalization + confirmation replay guard (29/07/2026)
+קבצים: `app.py`, `core/action_gateway.py`, `test_bug_canonical_tool_wiring.py`, `test_pa01_phantom_approval_enforcement.py`, `test_pr2_deterministic_approval_cost_cuts.py`, `docs/architecture/f52-unified-approval-runtime/audits/PR_HOTFIX_A_CROSS_LAYER_IMPACT_MATRIX.md` (חדש) | קשור: PR #492 (C180), staging acceptance audit של PR2
+
+**מקור:** תרחיש staging אמיתי (29/07/2026) שנתפס תוך כדי audit קבלה ל-PR2 — root-caused מלוגי Render בפועל + רשומות `ActionContracts` בבסיס Airtable הראשי, מתואם turn-by-turn.
+
+**PR #494 (`claude/pr2-staging-acceptance-audit-7n9f2p`, ממוזג `186832a`):** שלושה תיקונים ממוקדים. (1) `_sheets_payload_to_airtable()` תמך רק בערך positional אחד ל-Tasks (כותרת) — payload אמיתי עם 2 ערכים (כותרת+תאריך יעד) גרם ל-`CanonicalizationError` שהרג את כל ה-turn בלי ליצור contract; הורחב ל-1 או 2 ערכים. (2) הכשל הזה עדיין נספר נגד תקציב ה-mutation של BUG-122, וחסם ניסיון-חוזר לגיטימי (tool אחר) באותו turn — `_queue_approval_detailed()` תופס `CanonicalizationError` בנפרד (`terminal_outcome=APPROVAL_QUEUE_NEVER_ATTEMPTED`), וה-tool loop לא סופר את זה. (3) `_resolve_pr2_deterministic_approval()`'s בענפי "כן"/"אשר"/"לא"/"דוחה"/"מבטל" עם ללא live contract השתמשו ב-`find_recent_terminal_by_user()` (בהתחלה 24h, בתיקון-ביניים צומצם ל-10 דק') — עדיין שיחזר contract לא-קשור בן ~20 שניות בלבד. תוקן סופית: recency אינה correlation בשום חלון — הענפים האלה לא קוראים ל-`find_recent_terminal_by_user()` כלל יותר; "יצרת?" (שאילתת סטטוס מפורשת) נשאר ב-24h ללא שינוי.
+
+**CI correction (באותו PR, לפני מיזוג):** ה-push הראשון נכשל ב-`backend-ci` — `test_pa01_phantom_approval_enforcement.py` 106/108. שורש: ה-handler החדש ל-`CanonicalizationError` החזיר את שם הכלי הגולמי (טרום-קנוניזציה) במקום לחשב מחדש את השם הקנוני, בניגוד ל-handler הגנרי הסמוך שכבר עושה זאת. אומת כרגרסיה אמיתית (לא קיימת ב-`origin/main`) ע"י הרצת אותו קובץ טסט מול worktree מבודד. תוקן; assertion אחד (P1-2) עודכן לצפות ל-`APPROVAL_QUEUE_NEVER_ATTEMPTED` המדויק יותר במקום ה-`APPROVAL_QUEUE_ORPHANED` הישן.
+
+**Cross-Layer Authority Contract gate:** מלא — `PR_HOTFIX_A_CROSS_LAYER_IMPACT_MATRIX.md` נכתב אחרי המיזוג (4 שכבות × 9 שדות, proof-of-non-impact לשכבות 1/3, וסעיף RP5 guard — ממצא: `CanonicalizationError` מסווג כעת `record_verification("failed",...)` במקום `record_unverified_effect()` ב-`core/turn_evidence.py`'s shadow classification — מדויק יותר, לא רגרסיה; `core/turn_evidence.py` עצמו לא עושה pattern-match על מחרוזות `terminal_outcome`, מאומת ב-grep).
+
+**בדיקות (לפני המיזוג):** 175/175 `test_*.py`, `smoke_tests.py`, `test_integration.py`, `core/router/test_router.py` (44/44), `py_compile` — כולם ירוקים.
+
+**CodeRabbit (סבב נוסף, לא תוקן ב-PR זה):** ממצא actionable אחד — מסלול cancel ישן (`app.py:3391`, BUG-056, פעיל כברירת מחדל כש-PR2 כבוי) עדיין לא מעביר `recent_terminal=None`, אותה מחלקת-באג בדיוק. Nitpick אחד — ולידציית פורמט תאריך-יעד חסרה. שניהם נדחו במכוון לפר הבא, יחד עם Router regex ל"תייצר", אכיפת Single-Speaker בפועל (`is_gateway_owned_leak` היום log-only), והסתרת `sheets_append`/`drive_*` מרשימת הכלים כברירת מחדל.
+
+**✅ Verified ב-staging (29/07/2026, `my-bot-jqz2.onrender.com`, contract `a428e48b-3b57-473a-b647-e8225e08d3b6`, 14:25–14:29):** נבדק ידנית ע"י הבעלים עם `FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS`/`FEATURE_SINGLE_SPEAKER_APPROVAL_UX` מופעלים ידנית. **חשוב — זו לא שחזור מדויק של האירוע המקורי, אלא רצף קרוב-אך-שונה, ומתועד ככזה:**
+
+- **הרצף המקורי (29/07/2026 10:49–10:53, המתועד ב-C181's root cause למעלה):** `CanonicalizationError` → **אף `ActionContract` לא נוצר בכלל** → אין live contract, אין גם terminal contract חדש → "כן" בלי live contract חייב לא לשחזר contract ישן/לא-קשור. זה מה שתיקון #1+#3 נועדו למנוע.
+- **הרצף שנבדק עכשיו (14:25–14:29):** בקשת "צור משימה לא באיירטאבל" → ה-Agent בחר `calendar_create_event` (לא `airtable_add`/`sheets_append` — לא אותו קוד-נתיב של תיקון #1 בכלל) → `ActionContract` **כן נוצר** (`a428e48b`, status=pending) → אושר ע"י הבעלים → **הביצוע עצמו נכשל** (`❌ חסרים פרטי Google OAuth` — סביבה בלי OAuth מוגדר, לא קשור לקוד) → status סופי = `failed`. בקשת "כן" הבאה, בלי live contract (כי `failed` הוא terminal, לא live), החזירה נכון "אין פעולה שממתינה לאישור" — **לא שחזרה את ה-contract הכושל**.
+
+מה שהרצף הזה **כן** מאמת: אינווריאנט תיקון #3 (bare "כן" בלי live contract לעולם לא משחזר terminal contract, יהיה מקור הכשל אשר יהיה — `CanonicalizationError`/`failed`/כל דבר אחר) — זה בדיוק ההתנהגות שנבדקה, בנתיב-כשל **שונה** מהמקורי אבל תחת אותו contract שנבדק (`build_approval_lifecycle_result(canonical_state="no_contract")`). מה שהרצף הזה **לא** מאמת עצמאית: תיקון #1 הספציפי (positional canonicalization ל-Tasks עם 2 ערכים) — לא נצפה `CanonicalizationError` ברצף הזה כי ה-Agent כלל לא בחר `sheets_append`/`airtable_add` הפעם.
+
+**Merged:** ✅ כן — PR #494, commit `186832a`, אומת ב-grep ישיר על `origin/main` (`APPROVAL_QUEUE_NEVER_ATTEMPTED`, `len(row_data) not in (1, 2)`).
+**Verified בפרודקשן:** ⏳ לא — לא נפרס לפרודקשן במובן של flag-on קבוע. **Verified ב-staging:** ✅ כן, לתיקון #3 (guard ה-replay) — ראו הבחנת-הנתיבים למעלה. תיקון #1 (positional canonicalization) עדיין ⏳ לא אומת חי בנתיב-כשל תואם — נדרש תרחיש שבאמת יגרום ל-`CanonicalizationError` (למשל: לבקש משימה עם תאריך יעד דרך תיאור שיגרום ל-Agent לבחור `sheets_append` עם 2+ ערכים positional) כדי לסגור את הפער הזה.
