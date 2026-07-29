@@ -67,6 +67,15 @@ chk("'תייצר ליד חדש' -> NOT CREATE_TASK", _intent != Intent.CREATE_TA
 _intent, _conf, _rule = detect_intent("תייצר סיכום")
 chk("'תייצר סיכום' -> NOT CREATE_TASK", _intent != Intent.CREATE_TASK)
 
+# ── CodeRabbit finding on PR #498: "exact verb only" must be enforced by
+#    the regex itself, not just claimed in a comment — "תייצר" as a bare
+#    substring also matched longer conjugated forms like "תייצרי". Fixed
+#    with \b around the new verb only (the other four verbs in the group
+#    are untouched — no broader conjugation sweep). ─────────────────────
+_intent, _conf, _rule = detect_intent("תייצרי משימה להיום")
+chk("'תייצרי משימה להיום' -> NOT CREATE_TASK (exact verb boundary enforced)",
+    _intent != Intent.CREATE_TASK)
+
 # ── 5a. Existing CREATE_EVENT phrasing unchanged ────────────────────────
 _intent, _conf, _rule = detect_intent("קבע פגישה עם הספק מחר")
 chk("'קבע פגישה עם הספק מחר' -> CREATE_EVENT (unchanged)",
