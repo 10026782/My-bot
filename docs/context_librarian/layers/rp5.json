@@ -39,14 +39,15 @@
       {"name": "FEATURE_SINGLE_SPEAKER_APPROVAL_UX", "default_state": "off", "documented_state": "PR #471; when on, gates whether run_agent()'s Gateway-owned early return (flag check at app.py:3791 as of ffa678a7, exact lines drift with unrelated edits) still calls observe_shadow_finalizer() before returning — this flag does not change RP5's own classification logic, only whether this particular call site is reached", "evidence_scope": "code (app.py's PR1 single-speaker boundary) plus CHANGELOG.md PR #471 entry"}
     ],
     "valid_from": "2026-07-28",
-    "last_verified_commit": "ffa678a7",
+    "last_verified_commit": "a89fc67105f6b310efde498498a3f6f8c9038250",
     "confidence": 0.88,
     "notes": [
       "The current implementation compares claims and always returns user text unchanged in shadow/enforce states.",
       "No completion claim is supported by read-only evidence or model prose.",
       "Historical mismatch samples do not override later verified evidence.",
       "PR #471: when FEATURE_SINGLE_SPEAKER_APPROVAL_UX is on and a turn's reply is Gateway-owned, run_agent() still calls observe_shadow_finalizer() (app.py:3813 as of ffa678a7) before its early return, passing an empty agent-text string and approval_prompt_sent derived from the Gateway's own owner_notified flag. RP5's evidence classification is therefore exercised on Gateway-owned approval turns too, not only on Agent-authored text turns. This audit updated turn_coordinator_routing to carry rp5 as conditional optional evidence instead of hard-excluding it (task_profiles/profiles.json) precisely because of this reachability; treat any remaining profile that still hard-excludes rp5 from an approval/turn-ownership-scoped task as a scoping simplification to re-check, not proof RP5 is never invoked on that path.",
-      "N17 non-inferiority pilot advancement re-verification (ffa678a7): this layer's code_paths were flagged stale only because app.py changed (PR #479/#480, wording-only edits to approval-message rendering elsewhere in the same file) — RP5's own classification code (core/turn_evidence.py, core/anti_hallucination.py, core/dispatcher_outcome.py) was not touched. Claims above re-verified accurate; only the observe_shadow_finalizer() line citation shifted."
+      "N17 non-inferiority pilot advancement re-verification (ffa678a7): this layer's code_paths were flagged stale only because app.py changed (PR #479/#480, wording-only edits to approval-message rendering elsewhere in the same file) — RP5's own classification code (core/turn_evidence.py, core/anti_hallucination.py, core/dispatcher_outcome.py) was not touched. Claims above re-verified accurate; only the observe_shadow_finalizer() line citation shifted.",
+      "Reverified at a89fc67: RP5 core code is unchanged; app.py still calls the comparison-only observer."
     ],
     "extensions": {"boss.layer_aliases": ["supporting-layer", "EvidenceFinalizer", "RP4-RP5"]}
   }],
