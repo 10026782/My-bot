@@ -9,11 +9,14 @@ import time
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(__file__))
-os.environ.setdefault("ANTHROPIC_API_KEY", "sk-pr2-test")
-os.environ.setdefault("TELEGRAM_TOKEN", "123456789:PR2_TEST_TOKEN")
-os.environ.setdefault("AIRTABLE_API_KEY", "patPr2Test")
-os.environ.setdefault("AIRTABLE_BASE_ID", "appPr2Test")
-os.environ.setdefault("SETUP_WEBHOOK", "0")
+# Force (not setdefault) — app.py has import-time TeleBot/webhook side
+# effects; an ambient real TELEGRAM_TOKEN/SETUP_WEBHOOK in the shell or CI
+# environment must never leak into this "no network" script.
+os.environ["ANTHROPIC_API_KEY"] = "sk-pr2-test"
+os.environ["TELEGRAM_TOKEN"] = "123456789:PR2_TEST_TOKEN"
+os.environ["AIRTABLE_API_KEY"] = "patPr2Test"
+os.environ["AIRTABLE_BASE_ID"] = "appPr2Test"
+os.environ["SETUP_WEBHOOK"] = "0"
 
 import app  # noqa: E402
 import feature_flags  # noqa: E402
@@ -66,6 +69,13 @@ def main() -> None:
             # the legacy cancellation route (including its mutate-all behavior).
             feature_flags.set_flag("FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS", False)
             assert resolve("לא", [one, two], identity) is None
+            # Prove the legacy route itself still mutates both contracts —
+            # not just that the new resolver stays out of the way.
+            legacy_reply = gateway.route_cancellation_word(
+                identity.memory_key, live_contracts=[one, two],
+            )
+            assert legacy_reply is not None
+            assert one.status == "rejected" and two.status == "rejected"
             feature_flags.set_flag("FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS", True)
 
             # "must not intercept" grammar corpus (reading-pack §7): anchored
@@ -92,6 +102,30 @@ def main() -> None:
             replay_gateway._ledger.save(fresh)
             fresh_reply = resolve("יצרת?", [], identity)
             assert fresh_reply != "לא מצאתי פעולה אחרונה ב־24 השעות האחרונות."
+
+        # Exact boundary, with a controlled clock (not wall-clock timing, so
+        # "exactly at the limit" can't flake): just-over is excluded,
+        # exactly-at and just-under are both included.
+        fixed_now = 1_800_000_000.0
+        limit = app._LIVE_CONTRACT_STALE_SECONDS
+        boundary_gateway = ActionGateway(ledger=ExecutionLedger())
+        for suffix, age, expect_found in (
+            ("over", limit + 1, False),
+            ("at", limit, True),
+            ("under", limit - 1, True),
+        ):
+            c = contract(f"pr2-boundary-{suffix}", identity.memory_key)
+            c.status = "completed"
+            c.created_at = fixed_now - age
+            boundary_gateway._ledger.save(c)
+            with patch("core.action_gateway.time.time", return_value=fixed_now):
+                found = boundary_gateway.find_recent_terminal_by_user(
+                    identity.memory_key, max_age_seconds=limit,
+                )
+            if expect_found:
+                assert found is not None and found.contract_id == f"pr2-boundary-{suffix}", suffix
+            else:
+                assert found is None, suffix
     finally:
         feature_flags.set_flag("FEATURE_ACTION_GATEWAY", False)
         feature_flags.set_flag("FEATURE_SINGLE_SPEAKER_APPROVAL_UX", False)

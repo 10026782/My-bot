@@ -1098,6 +1098,12 @@ def build_approval_lifecycle_result(
 # for a fresh one. Threshold is display-only, independent of the TTL itself.
 _STALE_DISPLAY_THRESHOLD_SECONDS = 3600  # 1h
 
+# PR2: מבדיל בין "recent_terminal לא נמסר בכלל" (הקורא הישן, ללא הגבלת-זמן)
+# לבין "נמסר במפורש None" (החיפוש המוגבל-24h של PR2 לא מצא תוצאה כשירה).
+# None רגיל לא יכול לשמש כאן: `recent_terminal or fallback` היה מחזיר לחיפוש
+# ההיסטורי הבלתי-מוגבל בדיוק במקרה שה-24h bound נועד למנוע.
+_TERMINAL_LOOKUP_UNSET = object()
+
 
 def _format_pending_age_suffix(contract: ActionContract) -> str:
     """Returns an inline age warning (" ⚠️ ממתין מ-X שעות/דקות") for a pending
@@ -1986,7 +1992,7 @@ class ActionGateway:
     def route_cancellation_word(
         self, canonical_user_id: str, *,
         live_contracts: list["ActionContract"] | None = None,
-        recent_terminal: "ActionContract | None" = None,
+        recent_terminal: "ActionContract | None" = _TERMINAL_LOOKUP_UNSET,
         safe_multiple: bool = False,
     ) -> str | None:
         """
@@ -1996,7 +2002,11 @@ class ActionGateway:
         """
         live = live_contracts if live_contracts is not None else self.find_live_contracts(canonical_user_id)
         if not live:
-            recent = recent_terminal or self._ledger.find_most_recent_by_user(canonical_user_id)
+            recent = (
+                self._ledger.find_most_recent_by_user(canonical_user_id)
+                if recent_terminal is _TERMINAL_LOOKUP_UNSET
+                else recent_terminal
+            )
             if recent is not None and recent.status in ("completed", "executed", "rejected"):
                 return build_approval_lifecycle_result(recent, repeated=True).safe_user_message
             return None
@@ -2862,11 +2872,10 @@ class ActionGateway:
     def find_recent_terminal_by_user(
         self, canonical_user_id: str, *, max_age_seconds: int,
     ) -> "ActionContract | None":
-        """Return only a recent terminal contract for PR2 replay.
+        """מחזיר contract טרמינלי אחרון בלבד, ל-replay של PR2.
 
-        This deliberately is not an alias for find_most_recent_by_user(): that
-        legacy helper is unrestricted and therefore unsafe for deterministic
-        replay.
+        זו בכוונה לא alias ל-find_most_recent_by_user(): הפונקציה הישנה
+        ההיא ללא הגבלת-זמן, ולכן לא בטוחה ל-replay דטרמיניסטי.
         """
         now = time.time()
         candidates = [

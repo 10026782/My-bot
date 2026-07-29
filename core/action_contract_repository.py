@@ -324,8 +324,8 @@ class ActionContractRepository:
         """Durable equivalent of ExecutionLedger.find_live_by_user() — used to
         recover a user's live pending contracts if the cache was lost
         (restart) before they act on it."""
-        # Metrics are request-local observability only.  Import lazily so the
-        # repository remains usable in its standalone maintenance scripts.
+        # מטריקות הן observability מקומי-לבקשה בלבד. import עצל כדי שה-
+        # repository יישאר שמיש גם בסקריפטי-התחזוקה העצמאיים שלו.
         from core.approval_turn_metrics import record_action_contract_read
         record_action_contract_read()
         formula = (
