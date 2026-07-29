@@ -4,18 +4,43 @@
 > למקור אמת מלא: `ROADMAP.md` (מתוכנן), `BUG_AUDIT_LOG.md`, `CHANGE_CONTROL_LOG.md`.
 > `CANONICAL_STATE.md` **לא קיים** בריפו. `BOSS_CURRENT_STATE.md` ארכיון היסטורי (עודכן לאחרונה
 > 26/06/2026) — **לא** מקור אמת נוכחי. **main גובר על כל מסמך תכנון בכל סתירה.**
-> **פער תיעוד ידוע:** `ROADMAP.md`/`CHANGE_CONTROL_LOG.md` לא עודכנו מאז 21/07/2026 (עד N16/PATCH
-> 3B), אך `main` התקדם משמעותית מעבר לזה (PR #440–#448, כולל Cost Telemetry, BUG-129/130/133/134/135,
-> ומסמכי TurnCoordinator). מסמך זה נכתב ישירות מ-`main` (`5e691ea`) + `BUG_AUDIT_LOG.md`/`CHANGE_CONTROL_LOG.md`,
-> לא מ-`ROADMAP.md` בלבד, כדי לגשר על הפער.
+> **פער תיעוד ידוע, מעודכן 29/07/2026:** `CHANGE_CONTROL_LOG.md`/`CHANGELOG.md` היו לא-מעודכנים
+> מ-PR #471 (27/07) ועד PR #492 — נסגר עכשיו (C175–C180, ראו התוספת מ-29/07/2026 למטה).
+> **הפער שעדיין פתוח:** הגוף הראשי של המסמך הזה (§1–§4 למטה) עדיין לא זז מ-27/07/2026 —
+> BUG-130/134/136-140, TurnCoordinator, Cost Telemetry לא נבדקו/עודכנו מאז. אל תניחו שהם
+> נפתרו. ראו `ROADMAP.md`/`CHANGE_CONTROL_LOG.md` (מקור-אמת מלא ומעודכן) לפני כל טענה
+> על נושאים שאינם ה-approval/Context-Librarian track.
 
-**עודכן:** 27/07/2026 (+ תוספת PR #471) · **main:** `c64da20` (מיזוג PR #471)
+**עודכן:** 27/07/2026 (+ תוספת PR #471, + תוספת 29/07/2026 ל-approval/Context-Librarian
+track בלבד — ראו למטה) · **main:** `db51afc` (מיזוג PR #492)
 
 **תוספת (27/07/2026):** PR #471 — Single-Speaker Approval UX Base — מוזג ל-`main`. `ApprovalLifecycleResult` הוא תוצאת ה-UX הקנונית למסלולי approval; Gateway מקבל בעלות על התשובה כשהדגל מופעל וה-Agent נעצר לאחר handoff. BUG-144 (reject callback שלא סגר `ActionContract`), BUG-145 (שתי הודעות סופיות) ו-BUG-118 (חשיפת tool/contract/record identifiers בתשובות הצלחה) מיושמים וממוזגים. Redaction של מזהים הוא בלתי-מותנה גם כשהדגל כבוי. `ActionContracts` נשאר מקור האמת היחיד. `FEATURE_SINGLE_SPEAKER_APPROVAL_UX=false` בקוד וב-`.env.example`; לא הופעל ב-staging/production. callback payload מקסימלי שנבדק: 53 bytes מתוך 64. `backend-ci`/`frontend-ci` עברו על `dadf851`. **אין עדיין staging/production verification**, ולכן אין לסמן את העבודה כ-Production Verified. deterministic cost cuts והיקפי PR2 נשארו במפורש מחוץ ל-PR הזה.
 
 **תוספת (23/07/2026, אחרי כתיבת הבריפינג הזה):** PR #449 (branch `claude/findings-exam-wikon-25zzkm`, שני commits תיקון+review-pass) — סבב ממצאים מ-`my-bot-approval-staging` (7 ממצאים, כולל דגימת production אמיתית מהבעלים). ראו §3 למטה לפירוט מלא. **הענף `claude/rp5-staging-fault-injection-v4akit` עבר rebase על גבי `main` (כולל PR #449) והועלה מחדש (force-push) — staging מריץ עכשיו את התיקון.**
 
 **תוספת (25/07/2026):** BUG-141..146 (24/07/2026, ראו `BUG_AUDIT_LOG.md`) עדיין לא משוקפים למעלה — הבריפינג הזה לא עודכן מאז. בנוסף, דוח בדיקות Post-Merge של הבעלים (תרחישים 1–5, `claude/telegram-task-approval-audit-il29sj`) הוסיף: עדכון-ראיות ל-BUG-143 (מופע רביעי) ול-BUG-145 (כפל-הודעות נצפה גם בענף כישלון, לא רק הצלחה); ראיה **סותרת-לכאורה** ל-BUG-144 (תרחיש-דחייה עבר `rejected` כראוי — אבל קריאת קוד מאשרת שכפתור-הדחייה של Telegram, `app.py:2409-2449`, עדיין לא תוקן; סביר שהדוח תרגל מסלול-ביטול-מילולי נפרד שכבר עובד — לא הוכרע, דורש בירור); ו-**BUG-147 חדש** — `tools/dispatcher.py`'s `airtable_add` מחזיר מחרוזת גולמית (לא dict מובנה) בשני מסלולי-חסימה, משחזר עצמאית את "expected structured result dict; got plain string". תיעוד-בלבד, אין קוד runtime שהשתנה — ראו BUG_AUDIT_LOG.md/CHANGE_CONTROL_LOG.md C172.
+
+**תוספת (29/07/2026) — פער-תיעוד גדל, לא נסגר: עודכן רק מה שאומת ישירות בסבב הזה.**
+הבריפינג הזה (הכותרת למעלה, `main: c64da20`) עדיין לא זז מ-27/07/2026 עבור רוב הנושאים —
+BUG-130/134/136-140, TurnCoordinator, Cost Telemetry — **אף אחד מאלה לא נבדק/עודכן בסבב
+הזה**, אל תניחו שהם נפתרו או השתנו. מה שכן אומת ישירות ב-`origin/main` (grep, לא רק PR
+status) ועודכן כאן:
+- **PR #479** (ממוזג `e663818`) — סוגר בפועל את הפער שנמצא ב-claim 4 של
+  `SINGLE_SPEAKER_APPROVAL_UX_PRODUCTION_VERIFICATION_PLAN.md`: `_describe_contract_for_reconfirmation()`
+  כבר לא חושף שם-טבלה גולמי ב-fallback הכללי. אומת ישירות מקריאת הפונקציה על `main`.
+- **PR #480** (ממוזג `11e58df`) — D-012: `MessageContract` מאושר כקלט הפורמטר הקנוני היחיד,
+  סוגר את D-011 (drift מ-PR #471) בפיוס לא מחיקה. תיעוד-תכנון בלבד, implementation לא מאושר.
+- **PR #488–#491** (Context Librarian: תכנון Consumption Enforcement + audit-remediation +
+  PR2 preflight) — תיעוד-תכנון בלבד, מתועד במלואו ב-`ROADMAP.md`'s N17.
+- **PR #490** (ממוזג `7ee5c5b`) — Consumption Enforcement Phase 1 מיושם: `consumption_checklist()`,
+  `verify-consumption` CLI, Consumption Ledger. Phase 3 (CI gate) במפורש לא מיושם עדיין.
+- **PR #492** (ממוזג `db51afc`) — PR2 (Deterministic Approval Cost Cuts) מיושם: resolver
+  דטרמיניסטי מוקדם ל-approve/reject/pending-query/`יצרת?`, מאחורי `FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS`
+  (כבוי כברירת מחדל, דורש `FEATURE_SINGLE_SPEAKER_APPROVAL_UX`). ריויו רב-שכבתי (Claude + CodeRabbit)
+  מצא ותיקן 10 ממצאים אמיתיים לפני מיזוג — כולל אחד שביטל בשקט את הגבלת ה-24h על terminal
+  replay. **אין claim ל-staging/production verification** — שני הדגלים כבויים.
+- פירוט מלא של כל אלה: `ROADMAP.md` (N17 items 8–11), `CHANGELOG.md`, `CHANGE_CONTROL_LOG.md`
+  C175–C180.
 
 **תוספת (26/07/2026) — BUG-143/144/145/147 כולם ✅ תוקנו בפועל ומאומתים חי ב-staging, ו-BUG-149 חדש נמצא ותוקן:**
 - **BUG-143** (PR #461, `70093f0`/`719bb86`), **BUG-144+145** (PR #460, `006506d`/`0c06f4c`), **BUG-147** (PR #469 "Patch A", `3b111f6`/`e946225`) — כולם ממוזגים ל-`main`, ו**מאומתים חי ב-staging** דרך סבב הבדיקה החוזרת של הבעלים (PM460-RETEST, 26/07/2026): תרחיש 3 (canonicalization) ✅ PASS, תרחיש 4 (reject lifecycle, כולל כפתור inline עצמו — פותר סופית את אי-הוודאות שנרשמה ב-BUG-144) ✅ PASS, תרחיש 5 — BUG-147 עצמו לא חזר (✅), אבל נחשף **BUG-149 חדש** באותו תרחיש. פירוט מלא + git evidence: `BUG_AUDIT_LOG.md`, `CHANGE_CONTROL_LOG.md` C173.

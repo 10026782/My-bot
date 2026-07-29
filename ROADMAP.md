@@ -1,6 +1,11 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 29/07/2026 — **N17 עדכון: Consumption Enforcement PR #488 מוזג ל-`main`** (commit
+עודכן: 29/07/2026 — **PR2 (Deterministic Approval Cost Cuts) מוזג ל-`main`** —
+PR #491 (preflight, `12e2a45`) + PR #492 (implementation, `db51afc`), שניהם אומתו
+ב-grep ישיר. תיקון סטטוס נלווה: item 10 (Consumption Enforcement Phase 1, PR #490)
+תוקן מ-"PR נפתח, טרם מוזג" ל-✅ מוזג — הסטטוס הקודם היה טעות-רישום, ה-PR כבר היה
+ממוזג. ראו N17 למטה, item 11 לפירוט המלא.
+עודכן קודם: 29/07/2026 — **N17 עדכון: Consumption Enforcement PR #488 מוזג ל-`main`** (commit
 `abf2804`, אומת ב-grep ישיר על `origin/main`) — סעיף 8 עבר מ-`PLANNING APPROVED BY OWNER`
 ל-✅ מוזג. **Phase 1 implementation נפתח כ-PR נפרד** (PR #490, עדיין לא מוזג):
 `consumption_checklist()` וסעיף `## Consumption Checklist` חדש בכל bundle (5.1) — **תוכן
@@ -1069,8 +1074,8 @@ ActionContract), ואין Cross-Layer Impact Matrix שלם לאף אחת — **�
    (POSIX/Windows); provenance מבחין `on_main_history`/`at_origin_main_tip`. Codex הסיר
    בעצמו את הצעת-התכנון המקבילה שלו (`SOURCE_CONSUMPTION_GATE_PLAN.md`) לפני המיזוג,
    ונדחה במפורש ל-PR #488 כמסמך הקנוני — אין כפילות תכנון.
-10. 🟡 Consumption Enforcement Phase 1 implementation — **PR #490 נפתח, עדיין לא מוזג.**
-    מיישם בדיוק את סעיפים 5.1–5.3 + 5.5 (החלק האופציונלי `required_for_conclusion`) +
+10. ✅ Consumption Enforcement Phase 1 implementation — **PR #490 מוזג ל-`main`**
+    (commit `7ee5c5b`, אומת ב-grep ישיר על `origin/main`). מיישם בדיוק את סעיפים 5.1–5.3 + 5.5 (החלק האופציונלי `required_for_conclusion`) +
     בדיקות הרגרסיה של סעיף 7 מהתכנית המאושרת (item 8), כפי שהתכנית עצמה קבעה כ-Phase 1
     (סעיף 8 ברשימת ה-rollout): `consumption_checklist()` וסעיף `## Consumption Checklist`
     חדש בכל bundle — **תוכן ה-bundle עצמו, לא flag-gated: מתווסף אוטומטית לכל `build`
@@ -1097,6 +1102,23 @@ ActionContract), ואין Cross-Layer Impact Matrix שלם לאף אחת — **�
     כאן** — לפי סעיף 8 של התכנית עצמה, Phase 3 ממתין לשימוש ראשון אמיתי ב-Phase 1
     (task אמיתי), ולא נפתח בסבב הזה. Phase 2 (`FEATURE_AUTO_CAPTURE`) כבר נסגר עצמאית
     ב-item 9 לעיל.
+11. ✅ PR2 — Deterministic Approval Cost Cuts (תוכנית F52 — Unified Approval
+    Runtime, לא N17 עצמו; מוזכר כאן כי הוא המשימה האמיתית הראשונה שהשתמשה במשמעת
+    שה-Context Librarian/Consumption Enforcement נועד לאכוף — פירוט מלא ב-
+    `CHANGE_CONTROL_LOG.md`/`CHANGELOG.md`, לא בסעיף F52 נפרד כאן): **PR #491**
+    (preflight audit, `12e2a45`) + **PR #492** (implementation,
+    `db51afc`) שניהם מוזגו ל-`main`, אומתו ב-grep ישיר. משתמש לראשונה במשמעת שה-Context
+    Librarian/Consumption Enforcement (item 8-10 לעיל) נועד לאכוף — reading pack קנוני
+    נבנה ידנית (`docs/architecture/f52-unified-approval-runtime/audits/PR2_READING_PACK.md`)
+    מהמסמך הקנוני + מקורות תומכים מזוהים במפורש, כולל Cross-Layer Impact Matrix שהיה
+    חסר ב-preflight ותוקן/אושר עם ה-owner. **הערה כנה:** ה-CLI בפועל (`verify-consumption`,
+    Consumption Ledger) לא הופעל בסבב הזה — המשמעת יושמה ידנית, לא דרך הכלי הפורמלי;
+    "השימוש הראשון האמיתי" ש-Phase 3 ממתין לו (item 10) עדיין לא קרה במובן המדויק.
+    ריויו רב-שכבתי אימת את עצמו בפועל: הריויו שלי על ה-implementation תפס 3 סטיות
+    מאילוצים מחייבים ותיקן אותן; CodeRabbit על ה-PR עצמו תפס עוד 7 באגים אמיתיים שהריויו
+    הידני פספס — כולל אחד שביטל בשקט בדיוק את תיקון ה-24h bound שכבר אושר (`recent_terminal
+    or find_most_recent_by_user()` נופל בחזרה להיסטוריה בלתי-מוגבלת כש-`recent_terminal`
+    הוא `None` מפורש). כל 10 הממצאים (3+7) תוקנו ואומתו מחדש עצמאית לפני המיזוג.
 
 **קבצים:** `docs/context_librarian/` (הספרן עצמו, כולל `TOKEN_ESTIMATION_BENCHMARK.md` החדש),
 `tools/context_librarian/librarian.py` (token estimation, catalog loading,

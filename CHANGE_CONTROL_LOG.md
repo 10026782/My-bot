@@ -1871,3 +1871,71 @@ Flag: EMERGENCY_STOP_AI=False (נשמר ב-Airtable)
 
 **Merged:** ✅ כן — PR #470 commit `ceb9148`, ממוזג `59e74be`.
 **Verified בפרודקשן:** ⏳ לא עדיין — לא נפרס. **Verified ב-staging:** 🟡 קוד מרובייז ומוכן, retest חי טרם בוצע.
+
+### C175 — PR #471: Single-Speaker Approval UX Base (27/07/2026)
+קבצים: `app.py`, `core/action_gateway.py`, `feature_flags.py`, `.env.example`, `test_pr1_single_speaker_approval_ux.py` (חדש), מספר `test_*.py` קיימים | קשור: BUG-144, BUG-145, BUG-118, F52 Unified Approval Runtime
+
+**PR #471 (`5e2c244` + תיקון CI `dadf851`, ממוזג `c64da20`):** `ApprovalLifecycleResult` כתוצאת UX קנונית חדשה למחזור-חיי אישור, מאחורי `FEATURE_SINGLE_SPEAKER_APPROVAL_UX` (כבוי כברירת מחדל בקוד וב-`.env.example`). כש-מופעל, Gateway הוא בעל-התשובה במסלולי approval וה-Agent נעצר לאחר בחירת בעלות. Telegram ו-WhatsApp ממפים אותו lifecycle state לאותה משמעות. BUG-144 (callback reject לא סגר את ה-`ActionContract` הקנוני) ו-BUG-145 (שתי הודעות סופיות סותרות לאותו callback) מיושמים. BUG-118 (חשיפת tool_name/UUID/record ID) נסגר ברמת-קוד ע"י redaction בלתי-מותנה — **פעיל גם כשהדגל כבוי**. `ActionContracts` נשאר מקור-האמת היחיד; לא נוסף state ל-Sessions/store חלופי. callback payload מקסימלי שנבדק: 53/64 bytes, ללא truncation.
+
+**D-011 (drift מ-D-010, לא נפתר ב-PR הזה):** `ApprovalLifecycleResult` הוא renderer מקביל ל-`GatewayReply`/`compose_status_reply()`, לא הרחבה שלו כפי ש-D-010 דרש — תועד ב-`DECISION_LOG.md` ע"י audit נפרד של Context Librarian (27/07), נפתר בהמשך ע"י D-012/PR #480 (ראה C177 למטה).
+
+**בדיקות:** `test_pr1_single_speaker_approval_ux.py` (11, חדש). callback approve/reject, דחייה טקסטואלית, repeated completion/rejection, pending/no-pending, cross-chat delivery מכוסים ברגרסיות. `backend-ci`/`frontend-ci` עברו לאחר תיקון-CI ששימר owner-only denial ו-legacy rejection rendering כשהדגל כבוי.
+
+**🟡 Production Verification Plan בוצע חלקית (27/07/2026):** `docs/architecture/f52-unified-approval-runtime/rollout/SINGLE_SPEAKER_APPROVAL_UX_PRODUCTION_VERIFICATION_PLAN.md` — 6 טענות נבדקו נגד staging (אחרי rebase) ו-production. תוצאה מעורבת: claim 1 (דגל פעיל) VERIFIED; claim 2 (הודעה סופית יחידה) PARTIALLY_VERIFIED (Telegram/owner-role/staging בלבד); claim 3 (callback עם contract_id מדויק) VERIFIED; **claim 4 (אין חשיפת מזהים) FALSIFIED** — `_describe_contract_for_reconfirmation()` עדיין חשף שם-טבלה גולמי במסלול ה-reconfirmation, מסלול **שונה** ממה ש-BUG-118 תיקן — נסגר בהמשך ע"י PR #479 (ראה C176 למטה); claim 5 PARTIALLY_VERIFIED; claim 6 VERIFIED.
+
+**Merged:** ✅ כן — PR #471, commit `c64da20`.
+**Verified בפרודקשן:** ⏳ לא — `FEATURE_SINGLE_SPEAKER_APPROVAL_UX=false` בפרודקשן נכון ל-28/07/2026. **Verified ב-staging:** 🟡 חלקית, ראו לעיל.
+
+### C176 — PR #479: תיקון wording עסקי, redaction שם-טבלה ב-Airtable (28/07/2026)
+קבצים: `app.py`, `core/action_gateway.py`, `core/agent_message_formatter.py`, מספר `test_*.py` | קשור: PR #471 claim 4 (FALSIFIED), F52
+
+**PR #479 (`claude/approval-ux-wording-patch`, ממוזג `e663818`):** סוגר את הפער שנמצא ב-C175/claim 4 — `_describe_contract_for_reconfirmation()` (`core/action_gateway.py`) כבר לא כולל שם-טבלה גולמי ב-fallback הכללי של `airtable_add`/`airtable_update`; רק fallback אמיתי של כלי-שאינו-Airtable עדיין מציין את שם הכלי (אין שם-טבלה לחשוף שם מלכתחילה). אומת ישירות מול `main` הנוכחי (לא רק מהכותרת) — הפונקציה בפועל תואמת את התיקון המתואר.
+
+**Merged:** ✅ כן — PR #479, commit `e663818`.
+**Verified בפרודקשן:** לא רלוונטי לתיקון-wording זה בפני עצמו — כפוף לאותה מדיניות rollout כמו PR #471.
+
+### C177 — PR #480: D-012, קיבוע MessageContract Envelope V1 לתכנון (28/07/2026)
+קבצים: `docs/architecture/f52-unified-approval-runtime/decisions/DECISION_LOG.md`, `spec/MESSAGE_CONTRACT_ENVELOPE_CONTRACT_V1.md` (חדש), `rollout/MESSAGE_CONTRACT_ENVELOPE_MIGRATION_PLAN.md` (חדש) | קשור: D-010, D-011 (נסגר), F52
+
+**Cross-Layer Authority Contract gate:** רלוונטי — מסמך Planning Gate הנוגע ב-approvals/execution presentation (שכבה 3/RP5 guard), פותח בהפניה מפורשת ל-`CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` ומכיל Cross-Layer Impact Matrix מלא ב-§0.1 של המסמך עצמו.
+
+**PR #480 (`claude/message-contract-foundation-quarmf`, ממוזג `11e58df`):** תיעוד-בלבד, אין קוד runtime. D-012 (owner-approved) סוגר את D-011 בדרך של **פיוס, לא מחיקה**: `MessageContract` מאושר כקלט הקנוני היחיד ל-formatter הסופי (`core/agent_message_formatter.py::format_agent_message()`); `ApprovalLifecycleResult`/`GatewayReply`/`ActionFact` נשארים חוזי-fact/result פנימיים תקפים, מגיעים ל-formatter רק דרך adapters. `turn_id` אופציונלי (`None` כברירת מחדל, לעולם לא מסונתז מ-`chat_id`/session/`contract_id`). rollout מתוכנן כ-3 PR נפרדים (PR A/B/C), לעולם לא משולבים.
+
+**Merged:** ✅ כן — PR #480, commit `11e58df`.
+**Verified בפרודקשן:** לא רלוונטי — תיעוד-תכנון בלבד, implementation לא מאושר.
+
+### C178 — PR #488–#491: Context Librarian Consumption Enforcement — תכנון + audit-remediation + preflight PR2 (28–29/07/2026)
+קבצים: ראו `ROADMAP.md`'s N17 section לרשימה המלאה | קשור: N17, F52 (PR2 preflight)
+
+תיעוד-תכנון בלבד, ללא קוד runtime, עבור ארבעה PR: **#488** (`CONSUMPTION_ENFORCEMENT_PLAN.md`, תכנון Phase 1, `abf2804`), **#489** (audit עצמאי של Codex — provenance/`FEATURE_AUTO_CAPTURE`/path-validation fixes, `20914f2`), **#491** (`PR2_DETERMINISTIC_APPROVAL_COST_CUTS_PREFLIGHT.md`, `12e2a45`). מתועד במלואו, כולל Cross-Layer Impact Matrix ו-owner decisions, ב-`ROADMAP.md`'s N17 section (items 8–9) — לא משוכפל כאן כדי למנוע היסטוריה כפולה. `core/action_gateway.py`/`app.py` לא שונו ב-PR-ים האלה.
+
+**Merged:** ✅ כן — כל השלושה, מספרי commit לעיל.
+**Verified בפרודקשן:** לא רלוונטי — תיעוד/תכנון בלבד.
+
+### C179 — PR #490: Context Librarian Consumption Enforcement, Phase 1 implementation (29/07/2026)
+קבצים: `tools/context_librarian/librarian.py`, `tools/context_librarian/__main__.py`, `test_context_librarian.py`, `docs/context_librarian/task_profiles/profiles.json` | קשור: N17 item 10, C178
+
+**Cross-Layer Authority Contract gate:** לא רלוונטי — dev tooling בלבד (`tools/context_librarian/`), ללא production imports, ללא נגיעה בשכבות 1–4.
+
+**PR #490 (ממוזג `7ee5c5b`):** מיישם בדיוק את סעיפים 5.1–5.3+5.5 מהתכנית המאושרת (C178/PR #488): `consumption_checklist()` + סעיף `## Consumption Checklist` חדש בכל bundle; `verify_consumption()` + תת-פקודת CLI `verify-consumption` — fail-closed, מחשב `unreviewed_sources` בעצמו, מוודא identity ברמת top-level+per-item (כולל `production_claim`), דוחה waiver מאושר-עצמית ו-item_id מזויף/כפול/לא-מוכר. שדה אופציונלי `required_for_conclusion`. חמישה profiles קיבלו עדכון `maximum_approximate_token_budget` (מספר בלבד) כדי להכיל את הסעיף החדש. **סקירה עצמאית לפני מיזוג** מצאה ותיקנה 4 פערים אמיתיים ב-`verify_consumption()` המקורי (path/item_id לא-מקושרים, `production_claim` ניתן-לעקיפה, `required_sources` לא-מאומת, item_id לא-מוכר/כפול מתקבל).
+
+**בדיקות:** 35 חדשות (112/112 בסה"כ), `validate`/`smoke_tests.py` נקיים.
+
+**Phase 3 (CI blocking gate + hard-must ב-`AGENT_CONSUMPTION_CONTRACT.md`) במפורש לא מיושם** — ממתין לשימוש ראשון אמיתי ב-Phase 1 לפי סדר ה-rollout של התכנית עצמה.
+
+**Merged:** ✅ כן — PR #490, commit `7ee5c5b`, אומת ב-grep ישיר על `origin/main`.
+**Verified בפרודקשן:** לא רלוונטי — dev tooling, לא production runtime.
+
+### C180 — PR #492: PR2 — Deterministic Approval Cost Cuts, implementation (29/07/2026)
+קבצים: `app.py`, `core/action_gateway.py`, `core/action_contract_repository.py`, `core/approval_turn_metrics.py` (חדש), `feature_flags.py`, `.env.example`, `test_pr2_deterministic_approval_cost_cuts.py` (חדש), `docs/architecture/f52-unified-approval-runtime/audits/PR2_IMPLEMENTATION_CROSS_LAYER_IMPACT_MATRIX.md` (חדש) | קשור: PR #491 (C178), N17 items 8–10 (C179), F52
+
+**Cross-Layer Authority Contract gate:** רלוונטי — נוגע ישירות בשכבה 4 (Durable Atomic Approval) ובעקיפין בשכבה 2 (TurnCoordinator's de-facto owners, `router.py`/`lead_candidate_handler.py`). Cross-Layer Impact Matrix מלא נכתב, נסקר שכבה-שכבה עם ה-owner, ותועד ב-`PR2_IMPLEMENTATION_CROSS_LAYER_IMPACT_MATRIX.md`.
+
+**PR #492 (`codex/pr2-deterministic-approval-cost-cuts`, ממוזג `db51afc`):** `_resolve_pr2_deterministic_approval()` פותר callback-free approve/reject/pending-query/`יצרת?` לפני Lead Capture, Session, Router, Business Memory, או Agent — snapshot קנוני יחיד של `ActionContracts` שכבר מוקם בתחילת `run_agent`. דקדוק מעוגן חדש (`fullmatch`/lookahead בלבד, לעולם לא substring). דגל חדש `FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS`, כבוי כברירת מחדל, מורכב עם `FEATURE_SINGLE_SPEAKER_APPROVAL_UX` כך ש-PR2 לעולם לא משנה בעלות-תשובה עצמאית. `route_confirmation_word()`/`route_cancellation_word()` קיבלו פרמטרים keyword-only עם ברירת-מחדל משמרת-התנהגות — כל נקודות-הקריאה הישנות לא מעבירות אותם, כך שההתנהגות הישנה (כולל ביטול-כל-האצווה ב-reject עם מספר contracts) נשמרת מבנית ללא תלות בדגל. `find_recent_terminal_by_user(max_age_seconds=...)` מגביל replay ל-24h (`_LIVE_CONTRACT_STALE_SECONDS`), בכוונה לא ל-alias של `find_most_recent_by_user()` הבלתי-מוגבל. `core/approval_turn_metrics.py` חדש — מטריקות request-local (contextvars), observability בלבד.
+
+**תהליך הריויו (ראה `ROADMAP.md` N17 item 11 לפירוט מלא):** נבנה מ-reading pack שנבנה ידנית (לא דרך ה-CLI של C179), נבדק ע"י Claude (3 סטיות מאילוצים מחייבים נמצאו ותוקנו לפני commit), עלה כ-PR, ואז CodeRabbit מצא **7 באגים אמיתיים נוספים** — כולל אחד שביטל בשקט את ה-24h bound עצמו (`recent_terminal or find_most_recent_by_user()` נופל להיסטוריה בלתי-מוגבלת כש-`recent_terminal` הוא `None` מפורש, לא "לא נמסר") — תוקן עם sentinel מפורש (`_TERMINAL_LOOKUP_UNSET`). כל 10 הממצאים תוקנו ואומתו מחדש עצמאית (הרצת טסטים בפועל, לא רק קריאת דוח) לפני המיזוג.
+
+**בדיקות:** `test_pr2_deterministic_approval_cost_cuts.py` (חדש, כולל exact-boundary test עם שעון מבוקר). 10 סוויטות רגרסיה קיימות (confirmation/cancellation/pending-queue/callback/session/PA-01/F52-status/reconfirmation) + `smoke_tests.py` — כולן ירוקות, ללא רגרסיה.
+
+**Merged:** ✅ כן — PR #492, commit `db51afc`, אומת ב-grep ישיר על `origin/main`.
+**Verified בפרודקשן:** ⏳ לא עדיין — `FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS`/`FEATURE_SINGLE_SPEAKER_APPROVAL_UX` שניהם כבויים כברירת מחדל; אין claim ל-staging/production verification.
