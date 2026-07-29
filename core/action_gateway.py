@@ -407,12 +407,19 @@ def _sheets_payload_to_airtable(tool_inputs: dict) -> dict:
         fields = dict(row_data)
     elif isinstance(row_data, list):
         # Positional conversion is deliberately explicit and table-specific.
-        # A one-column task append is the only legacy shape currently proven.
-        if canonical_table != Tables.TASKS or len(row_data) != 1:
+        # Tasks supports two proven shapes: title only, or title + due date
+        # (in that order) — the second is what the model's sheets_append
+        # payload actually sends for "create a task due <date>" requests
+        # (PR2 staging acceptance incident, 29/07/2026: a 2-element row_data
+        # hit this exact branch and raised, with no positional converter for
+        # it, killing the whole turn). Anything else stays unsupported.
+        if canonical_table != Tables.TASKS or len(row_data) not in (1, 2):
             raise CanonicalizationError(
                 f"no explicit positional converter for Airtable table {table!r}"
             )
         fields = {TaskFields.NAME: row_data[0]}
+        if len(row_data) == 2:
+            fields[TaskFields.DUE_DATE] = row_data[1]
     else:
         raise CanonicalizationError(
             "cannot canonicalize sheets_append without fields or row_data"

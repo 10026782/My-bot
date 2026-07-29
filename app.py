@@ -245,6 +245,18 @@ _PENDING_APPROVAL_TTL = 600
 # old is too old for a pending item nobody has acted on."
 _LIVE_CONTRACT_STALE_SECONDS = 24 * 60 * 60
 
+# PR2 confirmation replay guard (PR2 staging acceptance incident,
+# 29/07/2026): how recent a terminal ActionContract must be to plausibly be
+# what a bare "כן"/"לא" (no live contract) is replying to. Deliberately much
+# narrower than _LIVE_CONTRACT_STALE_SECONDS — a bare confirm/cancel word is
+# normally an immediate reply to something the bot just said, not a status
+# lookup. Mirrors _PENDING_APPROVAL_TTL's scale (also 10 minutes) for the
+# same "how long is a reply still about the same thing" judgment call. Only
+# used in _resolve_pr2_deterministic_approval's is_confirm/is_cancel
+# branches — is_created_query ("יצרת?") keeps the full 24h window, since
+# that is an explicit status question, not a bare reply.
+_CONFIRM_REPLAY_RECENCY_SECONDS = 10 * 60
+
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=AGENT_TIMEOUT)
 telebot.apihelper.ENABLE_MIDDLEWARE = True  # נדרש לפני TeleBot() — אחרת middleware_handler לא נרשם
 bot    = telebot.TeleBot(TELEGRAM_TOKEN, threaded=False)  # webhook mode — handlers ירוצו סינכרונית, לפני שה-response חוזר
@@ -1089,8 +1101,39 @@ def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
     callback fallthrough (the button would fall through to a legacy dispatch
     of the wrong tool).
     """
+    from core.action_gateway import CanonicalizationError
     try:
         return _queue_approval_detailed_impl(tool_name, tool_inputs, user_chat_id, channel, user_text)
+    except CanonicalizationError as exc:
+        # PR2 staging acceptance incident, 29/07/2026: resolve_canonical_call()
+        # raises this BEFORE any propose_action()/persistence call is ever
+        # made — "no contract exists" is a verified fact here, not a guess,
+        # unlike the generic except below. Distinct terminal_outcome so the
+        # tool loop's BUG-122 same-turn-mutation accounting (app.py, the
+        # _mutating_approvals_this_turn increment) can tell this apart from a
+        # real (or merely unverified) queued attempt and NOT consume this
+        # turn's one-mutation slot for it — otherwise a legitimate,
+        # differently-shaped retry in the same turn (e.g. the model falling
+        # back from sheets_append to airtable_add directly) gets wrongly
+        # blocked for a slot nothing ever actually occupied. The message is
+        # also deliberately specific ("couldn't convert this request") rather
+        # than the generic orphan-cleanup wording below, which describes a
+        # different failure shape (something WAS queued and cleanup failed)
+        # that never applies here.
+        logger.error(
+            "[Approval] _queue_approval_detailed canonicalization failed: tool=%s reason=%s",
+            tool_name, exc,
+        )
+        return {
+            "message": (
+                "❌ לא הצלחתי להמיר את הבקשה הזו לפעולת Airtable תקינה. "
+                "נסה לנסח מחדש את הבקשה (למשל בלי לציין Sheets), או פנה "
+                "למנהל המערכת אם זה חוזר על עצמו."
+            ),
+            "contract_id": None, "ok": False,
+            "terminal_outcome": "APPROVAL_QUEUE_NEVER_ATTEMPTED",
+            "action_tool": tool_name, "created_this_turn": False,
+        }
     except Exception as exc:
         # Fail-closed, uniform shape (decision 5 in this program's
         # fail-safe-degraded policy, extended here to _queue_approval_detailed
@@ -2843,6 +2886,24 @@ def _resolve_pr2_deterministic_approval(
         recent = gateway.find_recent_terminal_by_user(
             identity.memory_key, max_age_seconds=_LIVE_CONTRACT_STALE_SECONDS,
         )
+        # Confirmation replay guard (PR2 staging acceptance incident,
+        # 29/07/2026): a bare "כן"/"לא" with no live contract is answered by
+        # replaying the most recent terminal contract — but the full 24h
+        # window used for an explicit status query ("יצרת?") is wrong for
+        # this case. "יצרת?" is the user actively asking "what's the state",
+        # so a day-old answer is still a real answer. A bare confirm/cancel
+        # word is normally a reply to something the bot just asked — if the
+        # only terminal contract around is hours old and about an unrelated
+        # action (the incident: a completed lead from ~4h earlier got
+        # replayed as "already done" for an unrelated task confirmation),
+        # replaying it is actively misleading, not helpful. Narrow window,
+        # confirm/cancel only — is_created_query's 24h behavior is untouched.
+        recent_for_bare_reply = (
+            recent
+            if recent is not None
+            and (time.time() - recent.created_at) <= _CONFIRM_REPLAY_RECENCY_SECONDS
+            else None
+        )
         if is_pending_query:
             reply = gateway.describe_pending_queue(
                 identity.memory_key, live_contracts=live_contracts,
@@ -2864,21 +2925,22 @@ def _resolve_pr2_deterministic_approval(
                     identity.memory_key, approver_role=identity.role,
                     live_contracts=live_contracts, use_session_bookmark=False,
                 )
-            elif recent is not None:
-                reply = build_approval_lifecycle_result(recent, repeated=True).safe_user_message
+            elif recent_for_bare_reply is not None:
+                reply = build_approval_lifecycle_result(recent_for_bare_reply, repeated=True).safe_user_message
             else:
-                # אין live contract ואין terminal כשיר (<=24h): לענות
+                # אין live contract ואין terminal כשיר בחלון הצר הזה: לענות
                 # ישירות במקום להאציל ל-describe_no_pending_reason(), שחוזר
                 # ושואל היסטוריה בלתי-מוגבלת ובכך היה מבטל בשקט את הגבלת
-                # ה-24h על replay.
+                # ה-replay.
                 reply = build_approval_lifecycle_result(canonical_state="no_contract").safe_user_message
         else:
             # PR2 only reaches the no-mutation multi-contract branch while its
             # own flag is on; the legacy route below remains byte-for-byte
-            # available when the flag is off.
+            # available when the flag is off. Same narrow replay window as
+            # is_confirm — bare "לא" carries the identical risk.
             reply = gateway.route_cancellation_word(
                 identity.memory_key, live_contracts=live_contracts,
-                recent_terminal=recent, safe_multiple=True,
+                recent_terminal=recent_for_bare_reply, safe_multiple=True,
             ) or "לא מצאתי פעולה ממתינה לביטול."
         if out_meta is not None:
             out_meta["source_module"] = "action_gateway"
@@ -3812,7 +3874,15 @@ def run_agent(
                         tu.name, dict(tu.input), chat_id, channel, user_text
                     )
                     result = _approval_outcome["message"]
-                    _mutating_approvals_this_turn += 1
+                    # BUG-122 accounting fix (PR2 staging acceptance incident,
+                    # 29/07/2026): a provably contract-less failure — payload
+                    # canonicalization rejected the request before any
+                    # persistence attempt — must not consume this turn's
+                    # one-mutation slot. Every other outcome (real contract
+                    # created, or a genuinely pre-existing/pending one found)
+                    # still counts, preserving BUG-122's original intent.
+                    if _approval_outcome.get("terminal_outcome") != "APPROVAL_QUEUE_NEVER_ATTEMPTED":
+                        _mutating_approvals_this_turn += 1
                     tool_results.append({
                         "type": "tool_result", "tool_use_id": tu.id, "content": result
                     })

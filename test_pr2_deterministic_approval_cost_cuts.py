@@ -103,6 +103,54 @@ def main() -> None:
             fresh_reply = resolve("יצרת?", [], identity)
             assert fresh_reply != "לא מצאתי פעולה אחרונה ב־24 השעות האחרונות."
 
+        # Confirmation replay guard (PR2 staging acceptance incident,
+        # 29/07/2026): a bare "כן" with no live contract must NOT replay a
+        # terminal contract that is recent enough for the 24h is_created_query
+        # window but well outside the much narrower bare-confirm window — the
+        # incident's own shape (a completed, unrelated lead replayed hours
+        # later as "already done" for a completely different task). "יצרת?"
+        # keeps the full 24h behavior (already proven above); "כן" must not.
+        confirm_gateway = ActionGateway(ledger=ExecutionLedger())
+        old_unrelated = terminal_contract(
+            "pr2-old-unrelated", identity.memory_key, status="completed",
+            age_seconds=app._CONFIRM_REPLAY_RECENCY_SECONDS + 60,  # just outside the narrow window
+        )
+        with patch.object(action_gateway_module, "action_gateway", confirm_gateway):
+            confirm_gateway._ledger.save(old_unrelated)
+            bare_yes_reply = resolve("כן", [], identity)
+            assert bare_yes_reply == "אין פעולה שממתינה לאישור", bare_yes_reply
+            # Same contract still answers the explicit status question — the
+            # narrow window is scoped to bare confirm/cancel only.
+            created_query_reply = resolve("יצרת?", [], identity)
+            assert created_query_reply != "לא מצאתי פעולה אחרונה ב־24 השעות האחרונות.", created_query_reply
+
+        recent_gateway = ActionGateway(ledger=ExecutionLedger())
+        recent_match = terminal_contract(
+            "pr2-recent-match", identity.memory_key, status="completed",
+            age_seconds=app._CONFIRM_REPLAY_RECENCY_SECONDS - 60,  # just inside the narrow window
+        )
+        with patch.object(action_gateway_module, "action_gateway", recent_gateway):
+            recent_gateway._ledger.save(recent_match)
+            recent_yes_reply = resolve("כן", [], identity)
+            # contract() helper (used by terminal_contract()) always builds a
+            # Tasks-table airtable_add contract, so the task-creation wording
+            # applies here — the incident's own reply ("הפעולה כבר הושלמה")
+            # came from a Leads-table contract, covered by is_task_creation's
+            # own dedicated tests elsewhere (build_approval_lifecycle_result).
+            assert recent_yes_reply == "המשימה כבר נוצרה", recent_yes_reply
+
+        # Same guard applies to bare "לא" via route_cancellation_word's
+        # recent_terminal param.
+        cancel_gateway = ActionGateway(ledger=ExecutionLedger())
+        old_unrelated_rejected = terminal_contract(
+            "pr2-old-unrelated-cancel", identity.memory_key, status="rejected",
+            age_seconds=app._CONFIRM_REPLAY_RECENCY_SECONDS + 60,
+        )
+        with patch.object(action_gateway_module, "action_gateway", cancel_gateway):
+            cancel_gateway._ledger.save(old_unrelated_rejected)
+            bare_no_reply = resolve("לא", [], identity)
+            assert bare_no_reply == "לא מצאתי פעולה ממתינה לביטול.", bare_no_reply
+
         # Exact boundary, with a controlled clock (not wall-clock timing, so
         # "exactly at the limit" can't flake): just-over is excluded,
         # exactly-at and just-under are both included.
