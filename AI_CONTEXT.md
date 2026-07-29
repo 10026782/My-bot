@@ -23,9 +23,11 @@ track בלבד — ראו למטה) · **main:** `b872e46` (מיזוג PR #499)
   לאישור" הקנוני, `agent_calls=0` `deterministic=True`. פרטים: `CHANGE_CONTROL_LOG.md` C183.
 - **Hotfix C (PR #498+#499) ✅ Verified בפרודקשן** — "תייצר משימה..." זוהה נכון כ-CREATE_TASK
   דרך הכלל עם ה-`\b` (מוודא שגרסת PR #499 היא הפרוסה, לא רק #498). פרטים: C184.
-- **BUG-151 Fix #1+#2 (המסלול העסקי) ✅ Verified בפרודקשן** — יצירת Tasks עם תאריך יעד עברה
-  קצה-לקצה, ללא `CanonicalizationError`. **נשאר פתוח:** הממיר הספציפי `sheets_append→airtable_add`
-  (Fix #1 בבידוד) עדיין לא נצפה חי — ה-Agent בחר `airtable_add` ישירות בשני סבבי הבדיקה
+- **BUG-151 — היכולת העסקית הכללית ✅ Verified בפרודקשן** — יצירת Tasks עם תאריך יעד עברה
+  קצה-לקצה, ללא `CanonicalizationError`. **חשוב לדייק בהיקף:** זו **לא** אימות של Fix #1
+  (הממיר `sheets_append→airtable_add`) ולא של Fix #2 (חריגת ה-mutation-budget עבור
+  `CanonicalizationError`) — שניהם דורשים ש-`CanonicalizationError` יקרה בפועל כדי להיבדק,
+  וזה לא קרה כאן: ה-Agent בחר `airtable_add` ישירות בשני סבבי הבדיקה
   (29/07, 30/07). נשאר מאומת בבדיקת יחידה בלבד. פרטים: BUG-151 תוספת, C181 תוספת.
 - **Hotfix B (PR #496)** — לא ניתן לאימות חי במצב-הדגלים הנוכחי: המסלול הישן ב-`app.py:3391`
   רדום כש-PR2 דלוק (`_resolve_pr2_deterministic_approval()` מיירט קודם). Verified by test בלבד.

@@ -1,8 +1,9 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
 עודכן: 30/07/2026 — **PR2 staging acceptance audit — סבב אימות חי בפרודקשן** (Hotfix B/#496,
-E/#497, C/#498+#499 כולם מוזגו; E ו-C אומתו חי בפרודקשן, B רדום כש-PR2 דלוק, BUG-151
-Fix #1 המסלול העסקי אומת חי אך הממיר הספציפי עדיין לא). ראו N17 item 11 לפירוט המלא ו-
+E/#497, C/#498+#499 כולם מוזגו; E ו-C אומתו חי בפרודקשן, B רדום כש-PR2 דלוק, BUG-151's
+יכולת עסקית כללית אומתה חי אך תיקון #1 [הממיר]/#2 [חריגת mutation-budget] עדיין לא —
+שניהם דורשים `CanonicalizationError` בפועל, שלא קרה בסבב הזה). ראו N17 item 11 לפירוט המלא ו-
 `AI_CONTEXT.md`/`CHANGE_CONTROL_LOG.md` C182–C184 להוכחות.
 עודכן קודם: 29/07/2026 — **PR2 (Deterministic Approval Cost Cuts) מוזג ל-`main`** —
 PR #491 (preflight, `12e2a45`) + PR #492 (implementation, `db51afc`), שניהם אומתו
@@ -1127,9 +1128,11 @@ ActionContract), ואין Cross-Layer Impact Matrix שלם לאף אחת — **�
     Hotfix A/#494 (BUG-151, מתועד ב-C181), Hotfix B/#496 (legacy cancel-word guard, C182),
     Hotfix E/#497 (shared replay-policy, C183), Hotfix C/#498+#499 ("תייצר" verb, C184) —
     כולם מוזגו ל-`main`. סבב אימות חי בפרודקשן (30/07/2026, שלושת הדגלים `true`) אישר:
-    Hotfix E ✅, Hotfix C ✅, BUG-151's המסלול העסקי ✅ — כולם Verified בפרודקשן. שני פערים
-    נשארו פתוחים: הממיר הספציפי `sheets_append→airtable_add` (BUG-151 Fix #1 בבידוד) עדיין
-    לא נצפה חי; Hotfix B רדום כל עוד PR2 דלוק (verified by test בלבד). ראו
+    Hotfix E ✅, Hotfix C ✅, BUG-151's היכולת העסקית הכללית ✅ — כולם Verified בפרודקשן
+    (האחרון: המסלול העסקי בלבד, **לא** תיקון #1/#2 עצמם — שניהם דורשים `CanonicalizationError`
+    בפועל שלא קרה). שני פערים נשארו פתוחים: הממיר הספציפי `sheets_append→airtable_add`
+    (BUG-151 Fix #1 בבידוד) עדיין לא נצפה חי; Hotfix B רדום כל עוד PR2 דלוק (verified by
+    test בלבד). ראו
     `AI_CONTEXT.md`/`CHANGE_CONTROL_LOG.md` C182–C184 להוכחות מלאות. ממצא חדש לא-קשור נפתח
     כ-BUG-152 (בקשה חוזרת נעצרה פעם אחת, לא root-caused).
 
