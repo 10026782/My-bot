@@ -103,53 +103,117 @@ def main() -> None:
             fresh_reply = resolve("יצרת?", [], identity)
             assert fresh_reply != "לא מצאתי פעולה אחרונה ב־24 השעות האחרונות."
 
-        # Confirmation replay guard (PR2 staging acceptance incident,
-        # 29/07/2026): a bare "כן" with no live contract must NOT replay a
-        # terminal contract that is recent enough for the 24h is_created_query
-        # window but well outside the much narrower bare-confirm window — the
-        # incident's own shape (a completed, unrelated lead replayed hours
-        # later as "already done" for a completely different task). "יצרת?"
-        # keeps the full 24h behavior (already proven above); "כן" must not.
-        confirm_gateway = ActionGateway(ledger=ExecutionLedger())
-        old_unrelated = terminal_contract(
-            "pr2-old-unrelated", identity.memory_key, status="completed",
-            age_seconds=app._CONFIRM_REPLAY_RECENCY_SECONDS + 60,  # just outside the narrow window
+        # Confirmation replay guard, corrected (PR2 staging acceptance
+        # incident, 29/07/2026): a bare confirm/cancel word with no live
+        # contract must NEVER replay find_recent_terminal_by_user() by
+        # recency, at ANY age — the first version of this guard used a
+        # 10-minute window, which would still have reproduced the incident
+        # (the unrelated completed lead contract was only ~20 seconds old).
+        # "יצרת?" (explicit status query) keeps the full 24h behavior,
+        # proven above and unaffected by this guard.
+        _NO_PENDING = "אין פעולה שממתינה לאישור"
+        _NO_PENDING_CANCEL = "לא מצאתי פעולה ממתינה לביטול."
+
+        for _word, _expected in (("כן", _NO_PENDING), ("לא", _NO_PENDING_CANCEL)):
+            for _age_label, _age_seconds in (
+                ("5s", 5), ("20s", 20), ("9min", 9 * 60),
+            ):
+                aged_gateway = ActionGateway(ledger=ExecutionLedger())
+                unrelated = terminal_contract(
+                    f"pr2-unrelated-{_word}-{_age_label}", identity.memory_key,
+                    status="completed", age_seconds=_age_seconds,
+                )
+                with patch.object(action_gateway_module, "action_gateway", aged_gateway):
+                    aged_gateway._ledger.save(unrelated)
+                    reply = resolve(_word, [], identity)
+                assert reply == _expected, (_word, _age_label, reply)
+                # Not replayed = not mutated.
+                assert unrelated.status == "completed", (_word, _age_label)
+
+        # Same unrelated contract still answers the explicit status question
+        # regardless of age (within 24h) — the guard is scoped to bare
+        # confirm/cancel only, proven separately from the sweep above.
+        created_query_gateway = ActionGateway(ledger=ExecutionLedger())
+        created_query_contract = terminal_contract(
+            "pr2-created-query-unaffected", identity.memory_key,
+            status="completed", age_seconds=20,
         )
-        with patch.object(action_gateway_module, "action_gateway", confirm_gateway):
-            confirm_gateway._ledger.save(old_unrelated)
-            bare_yes_reply = resolve("כן", [], identity)
-            assert bare_yes_reply == "אין פעולה שממתינה לאישור", bare_yes_reply
-            # Same contract still answers the explicit status question — the
-            # narrow window is scoped to bare confirm/cancel only.
+        with patch.object(action_gateway_module, "action_gateway", created_query_gateway):
+            created_query_gateway._ledger.save(created_query_contract)
             created_query_reply = resolve("יצרת?", [], identity)
-            assert created_query_reply != "לא מצאתי פעולה אחרונה ב־24 השעות האחרונות.", created_query_reply
+        assert created_query_reply != "לא מצאתי פעולה אחרונה ב־24 השעות האחרונות.", created_query_reply
 
-        recent_gateway = ActionGateway(ledger=ExecutionLedger())
-        recent_match = terminal_contract(
-            "pr2-recent-match", identity.memory_key, status="completed",
-            age_seconds=app._CONFIRM_REPLAY_RECENCY_SECONDS - 60,  # just inside the narrow window
-        )
-        with patch.object(action_gateway_module, "action_gateway", recent_gateway):
-            recent_gateway._ledger.save(recent_match)
-            recent_yes_reply = resolve("כן", [], identity)
-            # contract() helper (used by terminal_contract()) always builds a
-            # Tasks-table airtable_add contract, so the task-creation wording
-            # applies here — the incident's own reply ("הפעולה כבר הושלמה")
-            # came from a Leads-table contract, covered by is_task_creation's
-            # own dedicated tests elsewhere (build_approval_lifecycle_result).
-            assert recent_yes_reply == "המשימה כבר נוצרה", recent_yes_reply
+        # ── Full incident reproduction (29/07/2026) ─────────────────────
+        # 1. unrelated lead contract completed; 2. task canonicalization
+        # fails before contract creation; 3. bare "כן" arrives 20s later;
+        # 4. no live contract exists; 5. response is no-pending; 6. the
+        # completed lead contract is not replayed; 7. no mutation;
+        # 8. agent_call_count == 0; 9. final_response_count == 1.
+        def lead_contract(contract_id: str, user: str, *, age_seconds: float) -> ActionContract:
+            c = ActionContract(
+                contract_id=contract_id, tenant_id="boss_hq", canonical_user_id=user,
+                tool_name="airtable_add", normalized_payload={"table": "Leads", "fields": {}},
+                business_action_fingerprint=f"fp-{contract_id}", origin_channel="telegram",
+                origin_chat_id="pr2", requires_approval=True, status="completed",
+                created_at=time.time() - age_seconds,
+            )
+            return c
 
-        # Same guard applies to bare "לא" via route_cancellation_word's
-        # recent_terminal param.
-        cancel_gateway = ActionGateway(ledger=ExecutionLedger())
-        old_unrelated_rejected = terminal_contract(
-            "pr2-old-unrelated-cancel", identity.memory_key, status="rejected",
-            age_seconds=app._CONFIRM_REPLAY_RECENCY_SECONDS + 60,
+        incident_identity = Identity(user_id="pr2-incident-owner", role=Role.OWNER)
+        incident_gateway = ActionGateway(ledger=ExecutionLedger())
+
+        # 1. unrelated lead contract completed ~20s before the "כן".
+        unrelated_lead = lead_contract(
+            "pr2-incident-lead", incident_identity.memory_key, age_seconds=20,
         )
-        with patch.object(action_gateway_module, "action_gateway", cancel_gateway):
-            cancel_gateway._ledger.save(old_unrelated_rejected)
-            bare_no_reply = resolve("לא", [], identity)
-            assert bare_no_reply == "לא מצאתי פעולה ממתינה לביטול.", bare_no_reply
+        incident_gateway._ledger.save(unrelated_lead)
+
+        # 2. task canonicalization fails before any contract is created —
+        # reproducing the real CanonicalizationError, not just asserting the
+        # end state.
+        from core.action_gateway import (
+            CanonicalizationError as _IncidentCanonError,
+            resolve_canonical_call as _incident_resolve_canonical_call,
+        )
+        try:
+            _incident_resolve_canonical_call(
+                "sheets_append", {"table": "Tasks", "row_data": ["a", "b", "c"]}, "",
+            )
+            _incident_canon_failed = False
+        except _IncidentCanonError:
+            _incident_canon_failed = True
+        assert _incident_canon_failed
+        # 4. no live contract exists (the failed attempt created none; the
+        # lead contract is terminal, not live).
+        assert incident_gateway.find_live_contracts(incident_identity.memory_key) == []
+
+        # 3. bare "כן" arrives 20 seconds later, with metrics captured.
+        import core.approval_turn_metrics as approval_turn_metrics_module
+        _captured = {}
+        _real_metrics_end = approval_turn_metrics_module.end
+
+        def _capturing_end(token, ingress):
+            m = approval_turn_metrics_module.current()
+            if m is not None:
+                _captured["agent_call_count"] = m.agent_call_count
+                _captured["final_response_count"] = m.final_response_count
+                _captured["deterministic_path_used"] = m.deterministic_path_used
+            _real_metrics_end(token, ingress)
+
+        with patch.object(action_gateway_module, "action_gateway", incident_gateway), \
+             patch.object(approval_turn_metrics_module, "end", _capturing_end):
+            incident_reply = resolve("כן", [], incident_identity)
+
+        # 5. response is the canonical no-pending response.
+        assert incident_reply == _NO_PENDING, incident_reply
+        # 6. the completed lead contract is not referenced/replayed.
+        assert "הושלמה" not in incident_reply and "נוצרה" not in incident_reply
+        # 7. no mutation — the lead contract's status is untouched.
+        assert incident_gateway.find_contract("pr2-incident-lead").status == "completed"
+        # 8. zero Agent calls. 9. exactly one final response.
+        assert _captured["agent_call_count"] == 0, _captured
+        assert _captured["final_response_count"] == 1, _captured
+        assert _captured["deterministic_path_used"] is True, _captured
 
         # Exact boundary, with a controlled clock (not wall-clock timing, so
         # "exactly at the limit" can't flake): just-over is excluded,

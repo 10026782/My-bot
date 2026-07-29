@@ -245,18 +245,6 @@ _PENDING_APPROVAL_TTL = 600
 # old is too old for a pending item nobody has acted on."
 _LIVE_CONTRACT_STALE_SECONDS = 24 * 60 * 60
 
-# PR2 confirmation replay guard (PR2 staging acceptance incident,
-# 29/07/2026): how recent a terminal ActionContract must be to plausibly be
-# what a bare "כן"/"לא" (no live contract) is replying to. Deliberately much
-# narrower than _LIVE_CONTRACT_STALE_SECONDS — a bare confirm/cancel word is
-# normally an immediate reply to something the bot just said, not a status
-# lookup. Mirrors _PENDING_APPROVAL_TTL's scale (also 10 minutes) for the
-# same "how long is a reply still about the same thing" judgment call. Only
-# used in _resolve_pr2_deterministic_approval's is_confirm/is_cancel
-# branches — is_created_query ("יצרת?") keeps the full 24h window, since
-# that is an explicit status question, not a bare reply.
-_CONFIRM_REPLAY_RECENCY_SECONDS = 10 * 60
-
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=AGENT_TIMEOUT)
 telebot.apihelper.ENABLE_MIDDLEWARE = True  # נדרש לפני TeleBot() — אחרת middleware_handler לא נרשם
 bot    = telebot.TeleBot(TELEGRAM_TOKEN, threaded=False)  # webhook mode — handlers ירוצו סינכרונית, לפני שה-response חוזר
@@ -2883,27 +2871,21 @@ def _resolve_pr2_deterministic_approval(
     # resolver, regardless of whether the backing ledger was warm or durable.
     metrics.action_contract_read_count = 1
     try:
-        recent = gateway.find_recent_terminal_by_user(
-            identity.memory_key, max_age_seconds=_LIVE_CONTRACT_STALE_SECONDS,
-        )
-        # Confirmation replay guard (PR2 staging acceptance incident,
-        # 29/07/2026): a bare "כן"/"לא" with no live contract is answered by
-        # replaying the most recent terminal contract — but the full 24h
-        # window used for an explicit status query ("יצרת?") is wrong for
-        # this case. "יצרת?" is the user actively asking "what's the state",
-        # so a day-old answer is still a real answer. A bare confirm/cancel
-        # word is normally a reply to something the bot just asked — if the
-        # only terminal contract around is hours old and about an unrelated
-        # action (the incident: a completed lead from ~4h earlier got
-        # replayed as "already done" for an unrelated task confirmation),
-        # replaying it is actively misleading, not helpful. Narrow window,
-        # confirm/cancel only — is_created_query's 24h behavior is untouched.
-        recent_for_bare_reply = (
-            recent
-            if recent is not None
-            and (time.time() - recent.created_at) <= _CONFIRM_REPLAY_RECENCY_SECONDS
-            else None
-        )
+        # Confirmation replay guard, corrected (PR2 staging acceptance
+        # incident, 29/07/2026 — the first version of this guard used a
+        # 10-minute recency window, which would still have reproduced the
+        # incident: the unrelated completed lead contract was only ~20
+        # seconds old). Recency is not correlation, at any window size. A
+        # bare confirm/cancel word ("כן"/"אשר"/"לא"/"דוחה"/"מבטל"/...) with no
+        # live contract NEVER replays find_recent_terminal_by_user() — not at
+        # 24h, not at 10 minutes, not at 5 seconds. There is no signal in a
+        # bare confirm/cancel word alone that ties it to any specific past
+        # contract; only an explicit canonical correlation (a live contract)
+        # or an explicit status query ("יצרת?") may use terminal replay.
+        # is_created_query is the ONLY branch that still calls
+        # find_recent_terminal_by_user() — the user is actively asking "what
+        # happened", so a 24h-old answer is still a real answer to that
+        # question, unlike a bare "כן" answering nothing in particular.
         if is_pending_query:
             reply = gateway.describe_pending_queue(
                 identity.memory_key, live_contracts=live_contracts,
@@ -2915,32 +2897,33 @@ def _resolve_pr2_deterministic_approval(
                     if len(live_contracts) == 1
                     else build_approval_lifecycle_result(contracts=live_contracts)
                 ).safe_user_message
-            elif recent is not None:
-                reply = build_approval_lifecycle_result(recent, repeated=True).safe_user_message
             else:
-                reply = "לא מצאתי פעולה אחרונה ב־24 השעות האחרונות."
+                recent = gateway.find_recent_terminal_by_user(
+                    identity.memory_key, max_age_seconds=_LIVE_CONTRACT_STALE_SECONDS,
+                )
+                if recent is not None:
+                    reply = build_approval_lifecycle_result(recent, repeated=True).safe_user_message
+                else:
+                    reply = "לא מצאתי פעולה אחרונה ב־24 השעות האחרונות."
         elif is_confirm:
             if live_contracts:
                 reply = gateway.route_confirmation_word(
                     identity.memory_key, approver_role=identity.role,
                     live_contracts=live_contracts, use_session_bookmark=False,
                 )
-            elif recent_for_bare_reply is not None:
-                reply = build_approval_lifecycle_result(recent_for_bare_reply, repeated=True).safe_user_message
             else:
-                # אין live contract ואין terminal כשיר בחלון הצר הזה: לענות
-                # ישירות במקום להאציל ל-describe_no_pending_reason(), שחוזר
-                # ושואל היסטוריה בלתי-מוגבלת ובכך היה מבטל בשקט את הגבלת
-                # ה-replay.
+                # No live contract: the canonical no-pending response, no
+                # terminal replay, no mutation, no Agent call.
                 reply = build_approval_lifecycle_result(canonical_state="no_contract").safe_user_message
         else:
             # PR2 only reaches the no-mutation multi-contract branch while its
             # own flag is on; the legacy route below remains byte-for-byte
-            # available when the flag is off. Same narrow replay window as
-            # is_confirm — bare "לא" carries the identical risk.
+            # available when the flag is off. recent_terminal=None always —
+            # same rule as is_confirm: a bare cancel word never replays by
+            # recency.
             reply = gateway.route_cancellation_word(
                 identity.memory_key, live_contracts=live_contracts,
-                recent_terminal=recent_for_bare_reply, safe_multiple=True,
+                recent_terminal=None, safe_multiple=True,
             ) or "לא מצאתי פעולה ממתינה לביטול."
         if out_meta is not None:
             out_meta["source_module"] = "action_gateway"
