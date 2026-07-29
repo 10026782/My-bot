@@ -42,11 +42,12 @@ _RULES: list[tuple[str, str, float]] = [
     (r"(בדוק|תבדוק|תבדקי).*(חיבור|gmail|calendar|airtable|מערכת)", Intent.SYSTEM_STATUS, 0.95),
 
     # ── Tasks ────────────────────────────────────
-    # Hotfix C: "תייצר" (imperative "you will create" / colloquial "create")
-    # was previously absent from the verb group, so "תייצר משימה..." fell
-    # through to Intent.UNKNOWN instead of CREATE_TASK. Added as an exact
-    # verb only — no broader conjugation sweep (that's a separate decision).
-    (r"(פתח|צור|תייצר|הוסף|תוסיף).*(משימ|טאסק|task)", Intent.CREATE_TASK, 0.95),
+    # Hotfix C: הפועל "תייצר" לא הופיע בקבוצת הפעלים, ולכן "תייצר משימה..."
+    # נפל ל-Intent.UNKNOWN במקום להיות מזוהה כ-CREATE_TASK. נוסף כפועל מדויק
+    # בלבד (\b משני הצדדים, כדי לא לתפוס נטיות ארוכות יותר כמו "תייצרי") —
+    # בלי הרחבת נטיות נוספות (זו החלטה נפרדת). ה-\b חל רק על התוספת החדשה,
+    # לא על שאר הפעלים הקיימים בקבוצה, כדי לא לשנות את התנהגותם.
+    (r"(פתח|צור|\bתייצר\b|הוסף|תוסיף).*(משימ|טאסק|task)", Intent.CREATE_TASK, 0.95),
     (r"(עדכן|שנה|תעדכן).*(משימ|טאסק|task)", Intent.UPDATE_TASK, 0.95),
     (r"(סגור|סיים|סמן.*סיים|complete).*(משימ|טאסק|task)", Intent.COMPLETE_TASK, 0.95),
     (r"(מחק|הסר).*(משימ|טאסק|task)", Intent.DELETE_TASK, 0.90),
