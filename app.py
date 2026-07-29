@@ -3388,7 +3388,17 @@ def run_agent(
             # behavior: only the _pending_approvals dict block above handles
             # cancel words; this elif is a no-op passthrough to Agent otherwise).
             from core.action_gateway import action_gateway as _gw_cancel
-            _cancel_reply = _gw_cancel.route_cancellation_word(identity.memory_key)
+            # PR Hotfix B (CodeRabbit finding on PR #494): this legacy call
+            # site left recent_terminal at its sentinel default, which falls
+            # back to find_most_recent_by_user() — an UNBOUNDED-age lookup,
+            # not even the 24h-bounded one. Same bug class BUG-151 fixed for
+            # the PR2 deterministic resolver's confirm/cancel branches: a
+            # bare "לא" with no live contract must never replay a terminal
+            # contract by recency alone. This path runs by default whenever
+            # PR2's flag is off, so it was the live, unguarded exposure.
+            _cancel_reply = _gw_cancel.route_cancellation_word(
+                identity.memory_key, recent_terminal=None,
+            )
             if _cancel_reply is not None:
                 logger.info(
                     "[ActionGateway] route_cancellation_word: user=%s reply=%.60s",

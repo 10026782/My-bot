@@ -419,6 +419,14 @@ def _sheets_payload_to_airtable(tool_inputs: dict) -> dict:
             )
         fields = {TaskFields.NAME: row_data[0]}
         if len(row_data) == 2:
+            # PR Hotfix B (CodeRabbit finding on PR #494): fail fast here,
+            # before the user ever approves anything, rather than letting a
+            # malformed date surface only as an Airtable write failure after
+            # approval (FIELD_MAP's own hint for this field is "YYYY-MM-DD").
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(row_data[1])):
+                raise CanonicalizationError(
+                    f"cannot canonicalize sheets_append due date {row_data[1]!r} for Tasks"
+                )
             fields[TaskFields.DUE_DATE] = row_data[1]
     else:
         raise CanonicalizationError(
