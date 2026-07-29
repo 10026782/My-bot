@@ -419,15 +419,25 @@ def _sheets_payload_to_airtable(tool_inputs: dict) -> dict:
             )
         fields = {TaskFields.NAME: row_data[0]}
         if len(row_data) == 2:
-            # PR Hotfix B (CodeRabbit finding on PR #494): fail fast here,
-            # before the user ever approves anything, rather than letting a
-            # malformed date surface only as an Airtable write failure after
-            # approval (FIELD_MAP's own hint for this field is "YYYY-MM-DD").
-            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(row_data[1])):
+            # PR Hotfix B (ממצא CodeRabbit על PR #494): נכשל מוקדם כאן, לפני
+            # שהמשתמש בכלל מאשר משהו, במקום לתת לתאריך פגום להתגלות רק
+            # ככשל-כתיבה ל-Airtable אחרי האישור (הרמז של FIELD_MAP לשדה הזה
+            # הוא "YYYY-MM-DD"). שני שלבים: קודם צורה מדויקת (regex), ואז
+            # תקפות-לוח-שנה אמיתית (date.fromisoformat דוחה 2026-02-31 וכו',
+            # מה שה-regex לבדו לא תופס) — הערך הנשמר הוא ה-ISO המנורמל.
+            _due_date_raw = str(row_data[1])
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", _due_date_raw):
                 raise CanonicalizationError(
                     f"cannot canonicalize sheets_append due date {row_data[1]!r} for Tasks"
                 )
-            fields[TaskFields.DUE_DATE] = row_data[1]
+            from datetime import date as _date
+            try:
+                _due_date = _date.fromisoformat(_due_date_raw)
+            except ValueError:
+                raise CanonicalizationError(
+                    f"cannot canonicalize sheets_append due date {row_data[1]!r} for Tasks"
+                ) from None
+            fields[TaskFields.DUE_DATE] = _due_date.isoformat()
     else:
         raise CanonicalizationError(
             "cannot canonicalize sheets_append without fields or row_data"

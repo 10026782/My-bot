@@ -233,6 +233,27 @@ except CanonicalizationError as exc:
 chk("3-element row_data still fails closed (no converter beyond 1 or 2)",
     _three_elem_error is not None)
 
+# PR Hotfix B (CodeRabbit finding on PR #494): due date must be a real
+# calendar date, not merely YYYY-MM-DD shaped — date.fromisoformat() catches
+# what the format regex alone cannot (e.g. February 31st).
+_valid_due_tool, _valid_due_payload = resolve_canonical_call(
+    "sheets_append", {"table": "Tasks", "row_data": ["x", "2026-07-29"]}, "",
+)
+chk("valid YYYY-MM-DD due date resolves to airtable_add",
+    _valid_due_tool == "airtable_add")
+chk("valid due date is stored as its normalized ISO string",
+    _valid_due_payload["fields"][TaskFields.DUE_DATE] == "2026-07-29")
+
+for _bad_date in ("2026-02-31", "29/07/2026", "2026-13-01", "not-a-date"):
+    try:
+        resolve_canonical_call(
+            "sheets_append", {"table": "Tasks", "row_data": ["x", _bad_date]}, "",
+        )
+        _bad_date_error = None
+    except CanonicalizationError as exc:
+        _bad_date_error = exc
+    chk(f"invalid due date {_bad_date!r} fails closed", _bad_date_error is not None)
+
 
 # ══════════════════════════════════════════════════
 # 1c. Mutation-accounting fix — a provably contract-less canonicalization

@@ -32,9 +32,9 @@ This file proves two things:
 
 from __future__ import annotations
 
+import ast
 import inspect
 import os
-import re
 import sys
 import time
 
@@ -93,15 +93,38 @@ for age_seconds, label in ((20, "20s old"), (7 * 24 * 3600, "7 days old")):
         old_buggy_reply is not None and "הושלמה" in old_buggy_reply)
 
 
-# ── 3: wiring check on app.py's own source ──────────────────────────────
-_source = inspect.getsource(app)
-_legacy_call_pattern = re.compile(
-    r"_gw_cancel\.route_cancellation_word\(\s*"
-    r"identity\.memory_key,\s*recent_terminal=None,?\s*\)",
-    re.DOTALL,
-)
-chk("app.py's legacy BUG-056 cancel-word call site passes recent_terminal=None explicitly",
-    bool(_legacy_call_pattern.search(_source)))
+# ── 3: wiring check on app.py's own source (AST-based, not regex — a
+# regex can't tell a real call from the same text inside a comment/string,
+# and is sensitive to harmless reformatting) ────────────────────────────
+_tree = ast.parse(inspect.getsource(app))
+
+
+def _is_legacy_cancel_call(node: ast.AST) -> bool:
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    return (
+        isinstance(func, ast.Attribute)
+        and func.attr == "route_cancellation_word"
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "_gw_cancel"
+    )
+
+
+_legacy_call_nodes = [n for n in ast.walk(_tree) if _is_legacy_cancel_call(n)]
+chk("exactly one _gw_cancel.route_cancellation_word(...) call site exists in app.py",
+    len(_legacy_call_nodes) == 1)
+
+_recent_terminal_is_none_constant = False
+if _legacy_call_nodes:
+    for kw in _legacy_call_nodes[0].keywords:
+        if kw.arg == "recent_terminal":
+            _recent_terminal_is_none_constant = (
+                isinstance(kw.value, ast.Constant) and kw.value.value is None
+            )
+chk("app.py's legacy BUG-056 cancel-word call site passes recent_terminal=None explicitly "
+    "(AST-verified keyword value, not a text match)",
+    _recent_terminal_is_none_constant)
 
 
 print(f"\n{'='*50}")
