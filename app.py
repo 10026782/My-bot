@@ -3388,7 +3388,17 @@ def run_agent(
             # behavior: only the _pending_approvals dict block above handles
             # cancel words; this elif is a no-op passthrough to Agent otherwise).
             from core.action_gateway import action_gateway as _gw_cancel
-            _cancel_reply = _gw_cancel.route_cancellation_word(identity.memory_key)
+            # PR Hotfix B (ממצא CodeRabbit על PR #494): נקודת-הקריאה הישנה
+            # הזו השאירה את recent_terminal בברירת-המחדל sentinel שלו, שנופלת
+            # ל-find_most_recent_by_user() — חיפוש בלתי-מוגבל בגיל, אפילו לא
+            # ה-24h-מוגבל. אותה מחלקת-באג ש-BUG-151 תיקן לענפי confirm/cancel
+            # של ה-resolver הדטרמיניסטי של PR2: "לא" חופשי בלי live contract
+            # אסור לו לעולם לשחזר contract טרמינלי לפי recency בלבד. המסלול
+            # הזה רץ כברירת מחדל תמיד כשהדגל של PR2 כבוי — זו הייתה החשיפה
+            # החיה, הלא-מוגנת.
+            _cancel_reply = _gw_cancel.route_cancellation_word(
+                identity.memory_key, recent_terminal=None,
+            )
             if _cancel_reply is not None:
                 logger.info(
                     "[ActionGateway] route_cancellation_word: user=%s reply=%.60s",
