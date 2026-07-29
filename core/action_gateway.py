@@ -1123,6 +1123,16 @@ def build_approval_lifecycle_result(
 # for a fresh one. Threshold is display-only, independent of the TTL itself.
 _STALE_DISPLAY_THRESHOLD_SECONDS = 3600  # 1h
 
+# CodeRabbit finding on PR #497 (Hotfix E): describe_superseded_reason()
+# below looked up the most recent contract with no age bound at all, so an
+# old supersede event with no newer contract since would keep resurfacing
+# on every future bare confirm word — the same "recency is not correlation"
+# bug class this hotfix otherwise removes, just scoped to one status
+# instead of eliminated. Bounded to the same 24h horizon already used for
+# the explicit bounded-terminal-lookup path (_LIVE_CONTRACT_STALE_SECONDS
+# in app.py, via find_recent_terminal_by_user()).
+_SUPERSEDED_REASON_MAX_AGE_SECONDS = 24 * 60 * 60  # 24h
+
 # PR2: מבדיל בין "recent_terminal לא נמסר בכלל" (הקורא הישן, ללא הגבלת-זמן)
 # לבין "נמסר במפורש None" (החיפוש המוגבל-24h של PR2 לא מצא תוצאה כשירה).
 # None רגיל לא יכול לשמש כאן: `recent_terminal or fallback` היה מחזיר לחיפוש
@@ -1633,15 +1643,22 @@ class ActionGateway:
     # a silent dead end — the production bug this fixed. Deliberately kept
     # separate from describe_no_pending_reason() (Hotfix E split): this is a
     # narrow, same-turn, single-status lookup (only ever returns non-None
-    # for status=="superseded", set moments earlier in the same control
-    # flow by mark_context_interrupted()), not a general history replay —
-    # callers must call this FIRST and fall back to
+    # for status=="superseded" AND within _SUPERSEDED_REASON_MAX_AGE_SECONDS
+    # of being set by mark_context_interrupted()), not a general history
+    # replay — callers must call this FIRST and fall back to
     # describe_no_pending_reason() when it returns None. Not called from
     # describe_pending_queue() — a pending-list/status query is not a
-    # request for why a specific confirm word didn't resolve.
+    # request for why a specific confirm word didn't resolve. The age bound
+    # (CodeRabbit finding on PR #497) stops an old, no-longer-relevant
+    # supersede event from resurfacing indefinitely on later, unrelated
+    # bare confirm words when no newer contract has been created since.
     def describe_superseded_reason(self, canonical_user_id: str) -> str | None:
         recent = self._ledger.find_most_recent_by_user(canonical_user_id)
-        if recent and recent.status == "superseded":
+        if (
+            recent
+            and recent.status == "superseded"
+            and time.time() - recent.created_at <= _SUPERSEDED_REASON_MAX_AGE_SECONDS
+        ):
             desc = _describe_contract_for_reconfirmation(recent)
             return (
                 f"הפעולה הקודמת בוטלה כי התחלת פעולה אחרת: {desc}.\n"

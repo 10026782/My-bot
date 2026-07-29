@@ -39,6 +39,11 @@ This file proves:
   6. "יצרת?" (explicit status query) is unaffected — still uses the bounded
      24h find_recent_terminal_by_user() policy, unchanged from BUG-151.
   7. No Session-bookmark authority in the no-pending outcome.
+  8. CodeRabbit finding on PR #497: describe_superseded_reason() itself is
+     bounded by _SUPERSEDED_REASON_MAX_AGE_SECONDS (24h) — an old superseded
+     contract with no newer contract since must NOT keep resurfacing on
+     later, unrelated bare confirm words; it falls through to the canonical
+     no-pending response once stale, same as any other history status.
 """
 
 from __future__ import annotations
@@ -126,6 +131,21 @@ _sup_gw._ledger.save(_historical_contract("hfe-superseded", "boss_hq:hfe-owner3"
 _sup_reply = _sup_gw.describe_superseded_reason("boss_hq:hfe-owner3")
 chk("describe_superseded_reason() fires for status='superseded'",
     _sup_reply is not None and "בוטלה" in _sup_reply and "פעולה אחרת" in _sup_reply)
+
+# CodeRabbit finding on PR #497: a superseded contract older than the
+# bound must NOT resurface — falls through to canonical no-pending, same
+# as any other stale history status.
+_stale_max_age = action_gateway_module._SUPERSEDED_REASON_MAX_AGE_SECONDS
+_stale_sup_gw = ActionGateway(ledger=ExecutionLedger())
+_stale_sup_gw._ledger.save(_historical_contract(
+    "hfe-superseded-stale", "boss_hq:hfe-owner4", "superseded",
+    age_seconds=_stale_max_age + 60,
+))
+chk("describe_superseded_reason() returns None for a superseded contract past the age bound",
+    _stale_sup_gw.describe_superseded_reason("boss_hq:hfe-owner4") is None)
+chk("route_confirmation_word() no live + stale superseded -> canonical no-pending (not the supersede message)",
+    _stale_sup_gw.route_confirmation_word("boss_hq:hfe-owner4", approver_role="owner")
+    == _CANONICAL_NO_PENDING)
 
 
 # ══════════════════════════════════════════════════
