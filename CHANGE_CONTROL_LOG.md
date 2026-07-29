@@ -1964,5 +1964,45 @@ PR #490 (בטווח המספרים בין אלה) **אינו** חלק מהרשו
 
 מה שהרצף הזה **כן** מאמת: אינווריאנט תיקון #3 (bare "כן" בלי live contract לעולם לא משחזר terminal contract, יהיה מקור הכשל אשר יהיה — `CanonicalizationError`/`failed`/כל דבר אחר) — זה בדיוק ההתנהגות שנבדקה, בנתיב-כשל **שונה** מהמקורי אבל תחת אותו contract שנבדק (`build_approval_lifecycle_result(canonical_state="no_contract")`). מה שהרצף הזה **לא** מאמת עצמאית: תיקון #1 הספציפי (positional canonicalization ל-Tasks עם 2 ערכים) — לא נצפה `CanonicalizationError` ברצף הזה כי ה-Agent כלל לא בחר `sheets_append`/`airtable_add` הפעם.
 
+**תוספת (30/07/2026) — אימות חי נוסף, שלושת הדגלים (`FEATURE_SINGLE_SPEAKER_APPROVAL_UX`/`FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS`/`FEATURE_ACTION_GATEWAY`) פעילים בפרודקשן:** בקשה אמיתית — "צור משימה באיירטאבל: להתקשר לספק, עד יום חמישי" — יצרה `ActionContract` (`tool=airtable_add`, `table=Tasks`, `status=pending`) עם כותרת ותאריך יעד נכונים, **ללא `CanonicalizationError`**. המסלול העסקי המלא (זיהוי כוונה → יצירת contract → אישור/ביטול) עבר קצה-לקצה בפרודקשן בפעם הראשונה. **הפער שנשאר פתוח, זהה במהותו לזה שתועד ב-29/07:** ה-Agent בחר `airtable_add` ישירות ולא `sheets_append`, כך שתיקון #1 הספציפי (`_sheets_payload_to_airtable()`'s תמיכת 1-או-2-ערכים positional) עדיין לא נצפה חי בנתיב-הקוד המדויק שלו — נשאר מאומת בבדיקת יחידה בלבד. פירוט מלא: `BUG_AUDIT_LOG.md` BUG-151 (תוספת 30/07/2026).
+
+**ממצא נלווה (לא מתוקן, לא באחריות PR זה):** לאחר ביטול המשימה בסבב הבדיקה הזה, בקשה חדשה דומה נעצרה פעם אחת ע"י ה-Agent ורק בשליחה חוזרת נוצר כרטיס אישור. נרשם בנפרד — ראו `BUG_AUDIT_LOG.md` BUG-152 (חדש, 🔴 לא root-caused).
+
 **Merged:** ✅ כן — PR #494, commit `186832a`, אומת ב-grep ישיר על `origin/main` (`APPROVAL_QUEUE_NEVER_ATTEMPTED`, `len(row_data) not in (1, 2)`).
-**Verified בפרודקשן:** ⏳ לא — לא נפרס לפרודקשן במובן של flag-on קבוע. **Verified ב-staging:** ✅ כן, לתיקון #3 (guard ה-replay) — ראו הבחנת-הנתיבים למעלה. תיקון #1 (positional canonicalization) עדיין ⏳ לא אומת חי בנתיב-כשל תואם — נדרש תרחיש שבאמת יגרום ל-`CanonicalizationError` (למשל: לבקש משימה עם תאריך יעד דרך תיאור שיגרום ל-Agent לבחור `sheets_append` עם 2+ ערכים positional) כדי לסגור את הפער הזה.
+**Verified בפרודקשן:** חלקי — עודכן 30/07/2026. תיקון #3 (guard ה-replay) ✅ אומת בפרודקשן (ראו BUG-151 תוספת, וגם C183 למטה). תיקון #1+#2 (המסלול העסקי — יצירת Tasks עם תאריך יעד, ללא `CanonicalizationError`, ללא חסימת mutation budget) ✅ אומת בפרודקשן 30/07/2026 (תוספת למעלה). **הפער היחיד שנשאר:** הממיר `_sheets_payload_to_airtable()`'s תמיכת 1-או-2-ערכים positional (תיקון #1 בבידוד המדויק) לא נצפה חי — ה-Agent לא בחר `sheets_append` באף אחד משני סבבי הבדיקה (29/07, 30/07). נשאר מאומת בבדיקת יחידה בלבד עד שתרחיש חי יגרום ל-Agent לבחור `sheets_append` בפועל.
+
+### C182 — PR #496: Hotfix B — legacy cancel-word replay guard + due-date validation (29/07/2026)
+קבצים: `app.py`, `core/action_gateway.py`, `test_*.py` (רגרסיה) | קשור: PR #494 (C181), staging acceptance audit של PR2
+
+**PR #496 (ממוזג `3dcf0ab`):** שני תיקונים שנדחו במכוון מ-PR #494 (C181) לפר נפרד. (1) ממצא CodeRabbit — מסלול cancel ישן (`app.py:3391`, BUG-056) השאיר את `recent_terminal` בברירת-המחדל שלו, שנופל ל-`find_most_recent_by_user()` הבלתי-מוגבל — אותה מחלקת-באג בדיוק ש-BUG-151/PR #494 תיקן לענפי הרזולבר הדטרמיניסטי של PR2. תוקן: `recent_terminal=None` מועבר במפורש. (2) nitpick — ולידציית פורמט תאריך-יעד חסרה ב-`_sheets_payload_to_airtable()`.
+
+**הערה חשובה, זוהתה 30/07/2026 בעת סבב אימות חי:** המסלול הישן ב-`app.py:3391` נגיש **רק** כש-`FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS` ו/או `FEATURE_ACTION_GATEWAY` כבויים — `_resolve_pr2_deterministic_approval()` (`app.py:2858-2860`) מיירט כל מילת אישור/ביטול חופשית *לפני* המסלול הישן כששני הדגלים דלוקים, כפי שהם היום בפרודקשן. כלומר התיקון הזה הוא **fallback רדום** במצב הדגלים הנוכחי — אינו ניתן לאימות חי במובן משמעותי בלי לכבות דגל זמנית.
+
+**בדיקות:** `test_bug056_legacy_cancel_replay_guard.py` (חדש) — מכסה ישירות את נקודת-הקריאה הזו. Full sweep ירוק.
+
+**Merged:** ✅ כן — PR #496, commit `3dcf0ab`, אומת ב-grep ישיר על `origin/main`.
+**Verified בפרודקשן:** לא רלוונטי כרגע — המסלול רדום כל עוד `FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS`/`FEATURE_ACTION_GATEWAY` דלוקים (מצב נוכחי, אומת ע"י הבעלים 30/07/2026). **Verified by test:** ✅ כן.
+
+### C183 — PR #497: Hotfix E — shared replay-policy correction (29/07/2026), ✅ Verified בפרודקשן (30/07/2026)
+קבצים: `core/action_gateway.py`, `app.py`, `test_hotfix_e_shared_replay_policy.py` (חדש) | קשור: PR #494 (C181), PR #496 (C182)
+
+**PR #497 (ממוזג `7dd64a1`):** `describe_no_pending_reason()` הצטמצם ל-אחריות יחידה — תשובת no-pending קנונית, אפס שאילתת ledger. `describe_superseded_reason()` (חדש, צר) שימר את BUG-PENDING-APPROVAL-B's "הפעולה הקודמת בוטלה כי התחלת פעולה אחרת" — נקרא מפורשות ע"י שני קוראים (Stage A fallback, `route_confirmation_word()`), עם fallback ל-`describe_no_pending_reason()`. שלושת הקוראים (`route_confirmation_word()`, `describe_pending_queue()`, Stage A fallback) עברו audit מלא לפני commit, כולל דוח "Return before commit" בן 7 סעיפים לפי דרישת הבעלים.
+
+**CodeRabbit (באותו PR, לפני מיזוג):** מצא ותיקן ממצא Major אמיתי — `describe_superseded_reason()` עצמו היה ללא הגבלת-גיל (unbounded), אותה מחלקת-באג בדיוק ש-Hotfix E כולו נועד לבטל, רק ממוקדת בסטטוס אחד. תוקן: `_SUPERSEDED_REASON_MAX_AGE_SECONDS = 24h`.
+
+**בדיקות:** `test_hotfix_e_shared_replay_policy.py` — 56/56. Full sweep ירוק.
+
+**Merged:** ✅ כן — PR #497, commit `7dd64a1`, אומת ב-grep ישיר על `origin/main`.
+**✅ Verified בפרודקשן (30/07/2026):** הבעלים שלח "כן" בלי live contract — תשובה: "אין פעולה שממתינה לאישור" (המחרוזת הקנונית המדויקת), עם הוכחות לוג: `contract_reads=1`, `agent_calls=0`, `deterministic=True`, `action=discard_no_promotion`. מאמת ישירות את הפירוק ל-`describe_no_pending_reason()` ההיסטוריה-עיוורת — אין שחזור של contract ישן/לא-קשור.
+
+### C184 — PR #498 + PR #499: Hotfix C — "תייצר" verb recognition for CREATE_TASK, ✅ Verified בפרודקשן (30/07/2026)
+קבצים: `core/router/intent_router.py`, `test_hotfix_c_create_task_verb.py` (חדש) | קשור: staging acceptance audit של PR2 ("פתוח לפר הבא" ב-C181)
+
+**PR #498 (ממוזג `850a575`):** הוסיף את הפועל "תייצר" לקבוצת הפעלים של כלל ה-CREATE_TASK ב-`intent_router.py` — "תייצר משימה..." היה נופל ל-`Intent.UNKNOWN` קודם. שינוי מכוון (regex יחיד + הערה), ללא הרחבת נטיות נוספות, ללא נגיעה ב-CREATE_EVENT/CREATE_LEAD/tool exposure/ActionGateway.
+
+**PR #499 (ממוזג `b872e46`, follow-up לממצאי CodeRabbit על PR #498 שהגיעו אחרי המיזוג):** שני תיקונים — (1) תרגום ההערה החדשה לעברית (מוסכמת המאגר). (2) ממצא Functional Correctness אמיתי — "תייצר" ללא `\b` תפס גם נטיות ארוכות יותר ("תייצרי") בניגוד ל"exact verb only" שהתגובה טענה. תוקן: `\b` סביב "תייצר" בלבד (לא סביב שאר ארבעת הפעלים בקבוצה — שומר על ההתנהגות הקיימת שלהם ללא שינוי).
+
+**בדיקות:** `test_hotfix_c_create_task_verb.py` — 12/12 (11 + בדיקת ה-`\b`). `core/router/test_router.py` — 44/44 (רגרסיה). Full sweep ירוק שני הפעמים.
+
+**Merged:** ✅ כן — PR #498 (`850a575`) + PR #499 (`b872e46`), שניהם אומתו ב-grep ישיר על `origin/main`.
+**✅ Verified בפרודקשן (30/07/2026):** הבעלים שלח "תייצר משימה לבדוק את הדוח החודשי" — לוג הראה `intent=create_task confidence=0.95` דרך הכלל `(פתח|צור|\bתייצר\b|הוסף|תוסיף).*(משימ|טאסק|task)` (מוודא שהגרסה הפרוסה היא זו של PR #499, עם ה-`\b`, לא רק PR #498), ונוצר `ActionContract` תקין (`tool=airtable_add`, `table=Tasks`, `status=pending`).

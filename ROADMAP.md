@@ -1,6 +1,10 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 29/07/2026 — **PR2 (Deterministic Approval Cost Cuts) מוזג ל-`main`** —
+עודכן: 30/07/2026 — **PR2 staging acceptance audit — סבב אימות חי בפרודקשן** (Hotfix B/#496,
+E/#497, C/#498+#499 כולם מוזגו; E ו-C אומתו חי בפרודקשן, B רדום כש-PR2 דלוק, BUG-151
+Fix #1 המסלול העסקי אומת חי אך הממיר הספציפי עדיין לא). ראו N17 item 11 לפירוט המלא ו-
+`AI_CONTEXT.md`/`CHANGE_CONTROL_LOG.md` C182–C184 להוכחות.
+עודכן קודם: 29/07/2026 — **PR2 (Deterministic Approval Cost Cuts) מוזג ל-`main`** —
 PR #491 (preflight, `12e2a45`) + PR #492 (implementation, `db51afc`), שניהם אומתו
 ב-grep ישיר. תיקון סטטוס נלווה: item 10 (Consumption Enforcement Phase 1, PR #490)
 תוקן מ-"PR נפתח, טרם מוזג" ל-✅ מוזג — הסטטוס הקודם היה טעות-רישום, ה-PR כבר היה
@@ -1119,6 +1123,15 @@ ActionContract), ואין Cross-Layer Impact Matrix שלם לאף אחת — **�
     הידני פספס — כולל אחד שביטל בשקט בדיוק את תיקון ה-24h bound שכבר אושר (`recent_terminal
     or find_most_recent_by_user()` נופל בחזרה להיסטוריה בלתי-מוגבלת כש-`recent_terminal`
     הוא `None` מפורש). כל 10 הממצאים (3+7) תוקנו ואומתו מחדש עצמאית לפני המיזוג.
+    **עדכון 30/07/2026:** staging acceptance audit של PR2 (המשך item 11) הוליד 4 hotfixes —
+    Hotfix A/#494 (BUG-151, מתועד ב-C181), Hotfix B/#496 (legacy cancel-word guard, C182),
+    Hotfix E/#497 (shared replay-policy, C183), Hotfix C/#498+#499 ("תייצר" verb, C184) —
+    כולם מוזגו ל-`main`. סבב אימות חי בפרודקשן (30/07/2026, שלושת הדגלים `true`) אישר:
+    Hotfix E ✅, Hotfix C ✅, BUG-151's המסלול העסקי ✅ — כולם Verified בפרודקשן. שני פערים
+    נשארו פתוחים: הממיר הספציפי `sheets_append→airtable_add` (BUG-151 Fix #1 בבידוד) עדיין
+    לא נצפה חי; Hotfix B רדום כל עוד PR2 דלוק (verified by test בלבד). ראו
+    `AI_CONTEXT.md`/`CHANGE_CONTROL_LOG.md` C182–C184 להוכחות מלאות. ממצא חדש לא-קשור נפתח
+    כ-BUG-152 (בקשה חוזרת נעצרה פעם אחת, לא root-caused).
 
 **קבצים:** `docs/context_librarian/` (הספרן עצמו, כולל `TOKEN_ESTIMATION_BENCHMARK.md` החדש),
 `tools/context_librarian/librarian.py` (token estimation, catalog loading,

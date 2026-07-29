@@ -12,7 +12,36 @@
 > על נושאים שאינם ה-approval/Context-Librarian track.
 
 **עודכן:** 27/07/2026 (+ תוספת PR #471, + תוספת 29/07/2026 ל-approval/Context-Librarian
-track בלבד — ראו למטה) · **main:** `186832a` (מיזוג PR #494)
+track בלבד — ראו למטה) · **main:** `b872e46` (מיזוג PR #499)
+
+**תוספת (30/07/2026) — סבב אימות חי בפרודקשן, PR2 staging acceptance audit נסגר ברובו:**
+הבעלים אישר: `FEATURE_SINGLE_SPEAKER_APPROVAL_UX`, `FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS`,
+ו-`FEATURE_ACTION_GATEWAY` **שלושתם `true` בפרודקשן כרגע** (לא רק staging) — זה משנה את
+הקביעה הקודמת ("שני הדגלים כבויים") שהייתה נכונה בזמן כתיבתה (29/07 מוקדם) ולא מאז. 4 בדיקות
+חיות רצו (`my-bot-jqz2.onrender.com`, Telegram, 30/07/2026):
+- **Hotfix E (PR #497) ✅ Verified בפרודקשן** — "כן" בלי live contract → "אין פעולה שממתינה
+  לאישור" הקנוני, `agent_calls=0` `deterministic=True`. פרטים: `CHANGE_CONTROL_LOG.md` C183.
+- **Hotfix C (PR #498+#499) ✅ Verified בפרודקשן** — "תייצר משימה..." זוהה נכון כ-CREATE_TASK
+  דרך הכלל עם ה-`\b` (מוודא שגרסת PR #499 היא הפרוסה, לא רק #498). פרטים: C184.
+- **BUG-151 Fix #1+#2 (המסלול העסקי) ✅ Verified בפרודקשן** — יצירת Tasks עם תאריך יעד עברה
+  קצה-לקצה, ללא `CanonicalizationError`. **נשאר פתוח:** הממיר הספציפי `sheets_append→airtable_add`
+  (Fix #1 בבידוד) עדיין לא נצפה חי — ה-Agent בחר `airtable_add` ישירות בשני סבבי הבדיקה
+  (29/07, 30/07). נשאר מאומת בבדיקת יחידה בלבד. פרטים: BUG-151 תוספת, C181 תוספת.
+- **Hotfix B (PR #496)** — לא ניתן לאימות חי במצב-הדגלים הנוכחי: המסלול הישן ב-`app.py:3391`
+  רדום כש-PR2 דלוק (`_resolve_pr2_deterministic_approval()` מיירט קודם). Verified by test בלבד.
+  פרטים: C182.
+
+**ממצא חדש, לא מתוקן (BUG-152):** תוך כדי בדיקת BUG-151, בקשה חדשה דומה (אחרי ביטול משימה)
+נעצרה פעם אחת ע"י ה-Agent ורק בשליחה חוזרת נוצר כרטיס אישור. לא root-caused — 3 השערות
+פתוחות (השפעת היסטוריית-שיחה / שער דדופ-fingerprint / race זמנים). דורש שחזור מבוקר עם לוג
+מלא. פרטים: `BUG_AUDIT_LOG.md` BUG-152.
+
+**נפרד, לא קשור לסבב הזה, נצפה באותה שיחה:** בקשה ל"לידים בענף גיוס" נכשלה כי ה-Agent ניחש
+`domain='hr'` בפילטר Airtable — הערך הקנוני האמיתי (`airtable_schema.py:917`) הוא `recruitment`.
+שורש כפול: (1) `tools/schemas.py`'s `airtable_get` לא חושף למודל אף enum של ערכי-שדה תקפים,
+כך שהוא מנחש בלי עוגן; (2) שאילתת Business Memory מוגבלת-domain (התאמה לפי domain של הטורן
+הנוכחי) יכולה "לשכוח" עובדות-מילון שנלמדו תחת domain אחר. **לא תוקן, לא דחוף** — הבעלים ביקש
+לטפל בזה במסגרת תכנית ה-4-layers (Agent Surface Reduction / grounding), לא כ-hotfix נפרד.
 
 **תוספת (27/07/2026):** PR #471 — Single-Speaker Approval UX Base — מוזג ל-`main`. `ApprovalLifecycleResult` הוא תוצאת ה-UX הקנונית למסלולי approval; Gateway מקבל בעלות על התשובה כשהדגל מופעל וה-Agent נעצר לאחר handoff. BUG-144 (reject callback שלא סגר `ActionContract`), BUG-145 (שתי הודעות סופיות) ו-BUG-118 (חשיפת tool/contract/record identifiers בתשובות הצלחה) מיושמים וממוזגים. Redaction של מזהים הוא בלתי-מותנה גם כשהדגל כבוי. `ActionContracts` נשאר מקור האמת היחיד. `FEATURE_SINGLE_SPEAKER_APPROVAL_UX=false` בקוד וב-`.env.example`; לא הופעל ב-staging/production. callback payload מקסימלי שנבדק: 53 bytes מתוך 64. `backend-ci`/`frontend-ci` עברו על `dadf851`. **סטטוס אימות, מדויק לפי סביבה (עודכן 29/07/2026,
 ראו `CHANGE_CONTROL_LOG.md` C175):** staging — 🟡 **חלקית** מאומת (Telegram/owner-role בלבד,
