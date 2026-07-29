@@ -3380,7 +3380,13 @@ def run_agent(
                     # actually hit by default (FEATURE_ACTION_GATEWAY off) —
                     # must also surface a specific "superseded" message
                     # instead of looking identical to "nothing ever happened".
-                    return _gw_cw.describe_no_pending_reason(identity.memory_key)
+                    # Hotfix E: describe_superseded_reason() first (narrow,
+                    # same-turn), describe_no_pending_reason() (now history-
+                    # free — no stale/unrelated contract replay) otherwise.
+                    return (
+                        _gw_cw.describe_superseded_reason(identity.memory_key)
+                        or _gw_cw.describe_no_pending_reason(identity.memory_key)
+                    )
         elif _lower in _CANCEL_WORDS:
             # BUG-056: same reasoning as _CONFIRM_WORDS above — LCH's Tier-1
             # preview may have a live ActionGateway contract regardless of

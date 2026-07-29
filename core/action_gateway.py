@@ -1610,29 +1610,44 @@ class ActionGateway:
             return True
         return False
 
-    # ── bounded one-shot reconfirmation — "no pending" reason ────────
-    # BUG-PENDING-APPROVAL-B follow-up: when nothing is live, distinguish
-    # "there genuinely was never anything pending" (unchanged wording, relied
-    # on by existing tests) from "the last contract was superseded by a
-    # second interruption" — the latter gets a specific, actionable message
-    # instead of a silent dead end (the exact production bug reported: a
-    # bare כן after a supersede must never look identical to "nothing ever
-    # happened").
-
+    # ── "no pending" reason — canonical, history-free (Hotfix E) ─────
+    # PR2 staging acceptance incident + CodeRabbit finding on PR #494
+    # (BUG-151): this function used to call find_most_recent_by_user() (an
+    # UNBOUNDED-age lookup across ALL statuses) and replay whatever it found
+    # — a stale, unrelated completed/rejected/approved/executing/failed/
+    # outcome_unknown contract's own wording, misattributed to the current
+    # bare confirm-word turn. This function now has exactly one job: report
+    # that no live approval exists, via the canonical no-pending response.
+    # It never queries ActionContracts history and never calls
+    # find_most_recent_by_user() — recency is not correlation, at any
+    # window. See describe_superseded_reason() below for the one case that
+    # still legitimately needs same-turn history (kept as a separate,
+    # narrow method, not folded back in here).
     def describe_no_pending_reason(self, canonical_user_id: str) -> str:
+        return build_approval_lifecycle_result(canonical_state="no_contract").safe_user_message
+
+    # ── bounded one-shot reconfirmation — supersede reason (Hotfix E) ─
+    # BUG-PENDING-APPROVAL-B: when a bare confirm word's contract was closed
+    # by mark_context_interrupted() a second time (superseded) rather than
+    # executed/cancelled by the user, a generic "nothing pending" message is
+    # a silent dead end — the production bug this fixed. Deliberately kept
+    # separate from describe_no_pending_reason() (Hotfix E split): this is a
+    # narrow, same-turn, single-status lookup (only ever returns non-None
+    # for status=="superseded", set moments earlier in the same control
+    # flow by mark_context_interrupted()), not a general history replay —
+    # callers must call this FIRST and fall back to
+    # describe_no_pending_reason() when it returns None. Not called from
+    # describe_pending_queue() — a pending-list/status query is not a
+    # request for why a specific confirm word didn't resolve.
+    def describe_superseded_reason(self, canonical_user_id: str) -> str | None:
         recent = self._ledger.find_most_recent_by_user(canonical_user_id)
-        if recent and recent.status in (
-            "completed", "executed", "rejected", "approved", "executing",
-            "failed", "outcome_unknown",
-        ):
-            return build_approval_lifecycle_result(recent, repeated=True).safe_user_message
         if recent and recent.status == "superseded":
             desc = _describe_contract_for_reconfirmation(recent)
             return (
                 f"הפעולה הקודמת בוטלה כי התחלת פעולה אחרת: {desc}.\n"
                 f"כדי לבצע אותה, שלח את הבקשה מחדש."
             )
-        return build_approval_lifecycle_result(canonical_state="no_contract").safe_user_message
+        return None
 
     def lifecycle_result(
         self, contract_id: str | None, *, repeated: bool = False,
@@ -1794,7 +1809,10 @@ class ActionGateway:
 
         live = live_contracts if live_contracts is not None else self.find_live_contracts(canonical_user_id)
         if len(live) == 0:
-            return self.describe_no_pending_reason(canonical_user_id)
+            # Hotfix E: superseded-specific message first (narrow, same-turn
+            # lookup), canonical no-pending otherwise — never a general
+            # history replay.
+            return self.describe_superseded_reason(canonical_user_id) or self.describe_no_pending_reason(canonical_user_id)
         if len(live) == 1:
             message, _terminal = self._resolve_single_contract(live[0], approver_role, canonical_user_id)
             return message

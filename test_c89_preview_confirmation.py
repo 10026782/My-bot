@@ -139,9 +139,15 @@ def test_cancel_no_clears_pending_no_write():
     contract = gw.find_contract(live_before[0].contract_id)
     assert contract.status == "rejected", f"status={contract.status}"
     # Confirming afterward must find nothing pending (no accidental write).
+    # Hotfix E: describe_no_pending_reason() no longer replays the most
+    # recent terminal contract's own status (here: "rejected" ->
+    # "הפעולה כבר בוטלה") -- that was exactly the recency-as-correlation
+    # pattern removed across the codebase. A bare confirm word with no live
+    # contract always gets the canonical no-pending response now, even
+    # immediately after this same test's own cancel.
     with patch("core.action_gateway.action_gateway", gw):
         confirm_after_cancel = gw.route_confirmation_word(identity.memory_key, approver_role=identity.role)
-    assert confirm_after_cancel == "הפעולה כבר בוטלה", f"got={confirm_after_cancel!r}"
+    assert confirm_after_cancel == "אין פעולה שממתינה לאישור", f"got={confirm_after_cancel!r}"
     return "OK"
 
 
@@ -251,12 +257,16 @@ def test_app_py_confirm_word_checks_gateway_before_flag_branch():
     # further still. The invariant being asserted (find_live_contracts()
     # textually precedes the FEATURE_ACTION_GATEWAY flag branch) is
     # unchanged — only the window size needed to see both.
+    # Hotfix E: widened once more — describe_superseded_reason() was added
+    # alongside the Stage A describe_no_pending_reason() fallback (inside the
+    # confirm-word block, before the _CANCEL_WORDS marker), pushing that
+    # marker further from the start. Same invariant, same window-only fix.
     block = src[idx: idx + 5000]
     gw_check_idx = block.index("find_live_contracts")
     flag_check_idx = block.index('_flag_cw("FEATURE_ACTION_GATEWAY")')
     assert gw_check_idx < flag_check_idx, \
         "find_live_contracts() check must come before the FEATURE_ACTION_GATEWAY flag branch"
-    assert "_CANCEL_WORDS" in src[idx: idx + 6500], "cancel-word branch must exist alongside confirm-word"
+    assert "_CANCEL_WORDS" in src[idx: idx + 7500], "cancel-word branch must exist alongside confirm-word"
     return "OK"
 
 
