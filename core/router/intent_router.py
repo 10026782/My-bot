@@ -42,7 +42,11 @@ _RULES: list[tuple[str, str, float]] = [
     (r"(בדוק|תבדוק|תבדקי).*(חיבור|gmail|calendar|airtable|מערכת)", Intent.SYSTEM_STATUS, 0.95),
 
     # ── Tasks ────────────────────────────────────
-    (r"(פתח|צור|הוסף|תוסיף).*(משימ|טאסק|task)", Intent.CREATE_TASK, 0.95),
+    # Hotfix C: "תייצר" (imperative "you will create" / colloquial "create")
+    # was previously absent from the verb group, so "תייצר משימה..." fell
+    # through to Intent.UNKNOWN instead of CREATE_TASK. Added as an exact
+    # verb only — no broader conjugation sweep (that's a separate decision).
+    (r"(פתח|צור|תייצר|הוסף|תוסיף).*(משימ|טאסק|task)", Intent.CREATE_TASK, 0.95),
     (r"(עדכן|שנה|תעדכן).*(משימ|טאסק|task)", Intent.UPDATE_TASK, 0.95),
     (r"(סגור|סיים|סמן.*סיים|complete).*(משימ|טאסק|task)", Intent.COMPLETE_TASK, 0.95),
     (r"(מחק|הסר).*(משימ|טאסק|task)", Intent.DELETE_TASK, 0.90),
