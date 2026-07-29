@@ -1089,8 +1089,50 @@ def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
     callback fallthrough (the button would fall through to a legacy dispatch
     of the wrong tool).
     """
+    from core.action_gateway import CanonicalizationError
     try:
         return _queue_approval_detailed_impl(tool_name, tool_inputs, user_chat_id, channel, user_text)
+    except CanonicalizationError as exc:
+        # PR2 staging acceptance incident, 29/07/2026: resolve_canonical_call()
+        # raises this BEFORE any propose_action()/persistence call is ever
+        # made — "no contract exists" is a verified fact here, not a guess,
+        # unlike the generic except below. Distinct terminal_outcome so the
+        # tool loop's BUG-122 same-turn-mutation accounting (app.py, the
+        # _mutating_approvals_this_turn increment) can tell this apart from a
+        # real (or merely unverified) queued attempt and NOT consume this
+        # turn's one-mutation slot for it — otherwise a legitimate,
+        # differently-shaped retry in the same turn (e.g. the model falling
+        # back from sheets_append to airtable_add directly) gets wrongly
+        # blocked for a slot nothing ever actually occupied. The message is
+        # also deliberately specific ("couldn't convert this request") rather
+        # than the generic orphan-cleanup wording below, which describes a
+        # different failure shape (something WAS queued and cleanup failed)
+        # that never applies here.
+        logger.error(
+            "[Approval] _queue_approval_detailed canonicalization failed: tool=%s reason=%s",
+            tool_name, exc,
+        )
+        # action_tool must stay canonical here too, for the same reason as
+        # the generic except below: _impl's own canonicalized local variable
+        # is lost when its frame unwinds on this exception — this handler
+        # only ever sees ITS OWN parameter, the raw pre-canonicalization
+        # name. resolve_canonical_tool() is pure/idempotent, so recomputing
+        # it once here is safe and correct.
+        try:
+            from core.action_gateway import resolve_canonical_tool as _resolve_for_canon_error
+            _canonical_tool_name = _resolve_for_canon_error(tool_name, tool_inputs, user_text)
+        except Exception:
+            _canonical_tool_name = tool_name
+        return {
+            "message": (
+                "❌ לא הצלחתי להמיר את הבקשה הזו לפעולת Airtable תקינה. "
+                "נסה לנסח מחדש את הבקשה (למשל בלי לציין Sheets), או פנה "
+                "למנהל המערכת אם זה חוזר על עצמו."
+            ),
+            "contract_id": None, "ok": False,
+            "terminal_outcome": "APPROVAL_QUEUE_NEVER_ATTEMPTED",
+            "action_tool": _canonical_tool_name, "created_this_turn": False,
+        }
     except Exception as exc:
         # Fail-closed, uniform shape (decision 5 in this program's
         # fail-safe-degraded policy, extended here to _queue_approval_detailed
@@ -2840,9 +2882,21 @@ def _resolve_pr2_deterministic_approval(
     # resolver, regardless of whether the backing ledger was warm or durable.
     metrics.action_contract_read_count = 1
     try:
-        recent = gateway.find_recent_terminal_by_user(
-            identity.memory_key, max_age_seconds=_LIVE_CONTRACT_STALE_SECONDS,
-        )
+        # Confirmation replay guard, corrected (PR2 staging acceptance
+        # incident, 29/07/2026 — the first version of this guard used a
+        # 10-minute recency window, which would still have reproduced the
+        # incident: the unrelated completed lead contract was only ~20
+        # seconds old). Recency is not correlation, at any window size. A
+        # bare confirm/cancel word ("כן"/"אשר"/"לא"/"דוחה"/"מבטל"/...) with no
+        # live contract NEVER replays find_recent_terminal_by_user() — not at
+        # 24h, not at 10 minutes, not at 5 seconds. There is no signal in a
+        # bare confirm/cancel word alone that ties it to any specific past
+        # contract; only an explicit canonical correlation (a live contract)
+        # or an explicit status query ("יצרת?") may use terminal replay.
+        # is_created_query is the ONLY branch that still calls
+        # find_recent_terminal_by_user() — the user is actively asking "what
+        # happened", so a 24h-old answer is still a real answer to that
+        # question, unlike a bare "כן" answering nothing in particular.
         if is_pending_query:
             reply = gateway.describe_pending_queue(
                 identity.memory_key, live_contracts=live_contracts,
@@ -2854,31 +2908,33 @@ def _resolve_pr2_deterministic_approval(
                     if len(live_contracts) == 1
                     else build_approval_lifecycle_result(contracts=live_contracts)
                 ).safe_user_message
-            elif recent is not None:
-                reply = build_approval_lifecycle_result(recent, repeated=True).safe_user_message
             else:
-                reply = "לא מצאתי פעולה אחרונה ב־24 השעות האחרונות."
+                recent = gateway.find_recent_terminal_by_user(
+                    identity.memory_key, max_age_seconds=_LIVE_CONTRACT_STALE_SECONDS,
+                )
+                if recent is not None:
+                    reply = build_approval_lifecycle_result(recent, repeated=True).safe_user_message
+                else:
+                    reply = "לא מצאתי פעולה אחרונה ב־24 השעות האחרונות."
         elif is_confirm:
             if live_contracts:
                 reply = gateway.route_confirmation_word(
                     identity.memory_key, approver_role=identity.role,
                     live_contracts=live_contracts, use_session_bookmark=False,
                 )
-            elif recent is not None:
-                reply = build_approval_lifecycle_result(recent, repeated=True).safe_user_message
             else:
-                # אין live contract ואין terminal כשיר (<=24h): לענות
-                # ישירות במקום להאציל ל-describe_no_pending_reason(), שחוזר
-                # ושואל היסטוריה בלתי-מוגבלת ובכך היה מבטל בשקט את הגבלת
-                # ה-24h על replay.
+                # No live contract: the canonical no-pending response, no
+                # terminal replay, no mutation, no Agent call.
                 reply = build_approval_lifecycle_result(canonical_state="no_contract").safe_user_message
         else:
             # PR2 only reaches the no-mutation multi-contract branch while its
             # own flag is on; the legacy route below remains byte-for-byte
-            # available when the flag is off.
+            # available when the flag is off. recent_terminal=None always —
+            # same rule as is_confirm: a bare cancel word never replays by
+            # recency.
             reply = gateway.route_cancellation_word(
                 identity.memory_key, live_contracts=live_contracts,
-                recent_terminal=recent, safe_multiple=True,
+                recent_terminal=None, safe_multiple=True,
             ) or "לא מצאתי פעולה ממתינה לביטול."
         if out_meta is not None:
             out_meta["source_module"] = "action_gateway"
@@ -3812,7 +3868,15 @@ def run_agent(
                         tu.name, dict(tu.input), chat_id, channel, user_text
                     )
                     result = _approval_outcome["message"]
-                    _mutating_approvals_this_turn += 1
+                    # BUG-122 accounting fix (PR2 staging acceptance incident,
+                    # 29/07/2026): a provably contract-less failure — payload
+                    # canonicalization rejected the request before any
+                    # persistence attempt — must not consume this turn's
+                    # one-mutation slot. Every other outcome (real contract
+                    # created, or a genuinely pre-existing/pending one found)
+                    # still counts, preserving BUG-122's original intent.
+                    if _approval_outcome.get("terminal_outcome") != "APPROVAL_QUEUE_NEVER_ATTEMPTED":
+                        _mutating_approvals_this_turn += 1
                     tool_results.append({
                         "type": "tool_result", "tool_use_id": tu.id, "content": result
                     })

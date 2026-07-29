@@ -186,6 +186,86 @@ for _case_name, _tool, _payload in (
 
 
 # ══════════════════════════════════════════════════
+# 1b. Positional Tasks canonicalization — PR2 staging acceptance incident,
+# 29/07/2026: a sheets_append call with a 2-element row_data (title + due
+# date) hit "no explicit positional converter for Airtable table 'Tasks'"
+# and killed the whole turn, twice, with no ActionContract ever created.
+# ══════════════════════════════════════════════════
+print("\n── Positional Tasks canonicalization (title, and title+due date) ──")
+
+_name_only_tool, _name_only_payload = resolve_canonical_call(
+    "sheets_append",
+    {"table": "Tasks", "row_data": ["לבדוק מה קורה עם אבי"]},
+    "צור משימה לבדוק מה קורה עם אבי",
+)
+chk("1-element row_data (title only) still resolves to airtable_add",
+    _name_only_tool == "airtable_add")
+chk("1-element row_data (title only) maps to NAME field alone",
+    _name_only_payload == {
+        "table": Tables.TASKS,
+        "fields": {TaskFields.NAME: "לבדוק מה קורה עם אבי"},
+    })
+
+_with_due_tool, _with_due_payload = resolve_canonical_call(
+    "sheets_append",
+    {"table": "Tasks", "row_data": ["לחזור לכל הלידים בענף גיוס", "2026-07-29"]},
+    "תייצר משימה באיירטאבל להיום לחזור לכל הלידים בענף גיוס",
+)
+chk("2-element row_data (title + due date) resolves to airtable_add "
+    "(regression: previously raised CanonicalizationError)",
+    _with_due_tool == "airtable_add")
+chk("2-element row_data maps title to NAME and second value to DUE_DATE",
+    _with_due_payload == {
+        "table": Tables.TASKS,
+        "fields": {
+            TaskFields.NAME: "לחזור לכל הלידים בענף גיוס",
+            TaskFields.DUE_DATE: "2026-07-29",
+        },
+    })
+
+try:
+    resolve_canonical_call(
+        "sheets_append", {"table": "Tasks", "row_data": ["a", "b", "c"]}, "",
+    )
+    _three_elem_error = None
+except CanonicalizationError as exc:
+    _three_elem_error = exc
+chk("3-element row_data still fails closed (no converter beyond 1 or 2)",
+    _three_elem_error is not None)
+
+
+# ══════════════════════════════════════════════════
+# 1c. Mutation-accounting fix — a provably contract-less canonicalization
+# failure must be reported with terminal_outcome=APPROVAL_QUEUE_NEVER_
+# ATTEMPTED, never counted as a "real" queue attempt, so the tool loop's
+# BUG-122 same-turn-mutation guard doesn't block a legitimate differently-
+# shaped retry (e.g. the model falling back to airtable_add directly) for a
+# slot nothing ever actually occupied.
+# ══════════════════════════════════════════════════
+print("\n── Mutation accounting: canonicalization failure never queued ─────")
+
+_never_attempted_identity = _identity("owner-canon-never-attempted", Role.OWNER)
+with patch.object(app, "resolve_identity", return_value=_never_attempted_identity), \
+     patch("feature_flags.is_enabled", side_effect=lambda name: name == "FEATURE_ACTION_GATEWAY"):
+    _never_attempted_outcome = app._queue_approval_detailed(
+        "sheets_append",
+        {"table": "Tasks", "row_data": ["a", "b", "c"]},
+        _never_attempted_identity.user_id, "telegram",
+        user_text="צור משימה עם שלושה ערכים",
+    )
+chk("canonicalization failure returns ok=False",
+    _never_attempted_outcome["ok"] is False)
+chk("canonicalization failure returns terminal_outcome=APPROVAL_QUEUE_NEVER_ATTEMPTED",
+    _never_attempted_outcome["terminal_outcome"] == "APPROVAL_QUEUE_NEVER_ATTEMPTED")
+chk("canonicalization failure returns created_this_turn=False",
+    _never_attempted_outcome["created_this_turn"] is False)
+chk("canonicalization failure returns contract_id=None (nothing was ever attempted)",
+    _never_attempted_outcome["contract_id"] is None)
+chk("canonicalization failure message describes conversion, not a stuck/cleanup failure",
+    "להמיר" in _never_attempted_outcome["message"])
+
+
+# ══════════════════════════════════════════════════
 # 2. End-to-end via app.py's _queue_approval() — the actual live incident's
 # entry point (the raw Agent tool_use loop) — and consistency between the
 # durable contract and the legacy event_bus item/button label.
