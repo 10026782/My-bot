@@ -1904,10 +1904,12 @@ Flag: EMERGENCY_STOP_AI=False (נשמר ב-Airtable)
 **Merged:** ✅ כן — PR #480, commit `11e58df`.
 **Verified בפרודקשן:** לא רלוונטי — תיעוד-תכנון בלבד, implementation לא מאושר.
 
-### C178 — PR #488–#491: Context Librarian Consumption Enforcement — תכנון + audit-remediation + preflight PR2 (28–29/07/2026)
-קבצים: ראו `ROADMAP.md`'s N17 section לרשימה המלאה | קשור: N17, F52 (PR2 preflight)
+### C178 — PR #488/#489/#491: Context Librarian Consumption Enforcement — תכנון + audit-remediation + preflight PR2 (28–29/07/2026)
+קבצים: ראו `ROADMAP.md`'s N17 section לרשימה המלאה | קשור: N17, F52 (PR2 preflight). **הערה:**
+PR #490 (בטווח המספרים בין אלה) **אינו** חלק מהרשומה הזו — הוא Phase 1 implementation אמיתי,
+מתועד בנפרד תחת C179 למטה.
 
-תיעוד-תכנון בלבד, ללא קוד runtime, עבור ארבעה PR: **#488** (`CONSUMPTION_ENFORCEMENT_PLAN.md`, תכנון Phase 1, `abf2804`), **#489** (audit עצמאי של Codex — provenance/`FEATURE_AUTO_CAPTURE`/path-validation fixes, `20914f2`), **#491** (`PR2_DETERMINISTIC_APPROVAL_COST_CUTS_PREFLIGHT.md`, `12e2a45`). מתועד במלואו, כולל Cross-Layer Impact Matrix ו-owner decisions, ב-`ROADMAP.md`'s N17 section (items 8–9) — לא משוכפל כאן כדי למנוע היסטוריה כפולה. `core/action_gateway.py`/`app.py` לא שונו ב-PR-ים האלה.
+תיעוד-תכנון בלבד, ללא קוד runtime, עבור שלושה PR: **#488** (`CONSUMPTION_ENFORCEMENT_PLAN.md`, תכנון Phase 1, `abf2804`), **#489** (audit עצמאי של Codex — provenance/`FEATURE_AUTO_CAPTURE`/path-validation fixes, `20914f2`), **#491** (`PR2_DETERMINISTIC_APPROVAL_COST_CUTS_PREFLIGHT.md`, `12e2a45`). מתועד במלואו, כולל Cross-Layer Impact Matrix ו-owner decisions, ב-`ROADMAP.md`'s N17 section (items 8–9) — לא משוכפל כאן כדי למנוע היסטוריה כפולה. `core/action_gateway.py`/`app.py` לא שונו ב-PR-ים האלה.
 
 **Merged:** ✅ כן — כל השלושה, מספרי commit לעיל.
 **Verified בפרודקשן:** לא רלוונטי — תיעוד/תכנון בלבד.
