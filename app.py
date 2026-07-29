@@ -199,6 +199,15 @@ _PENDING_QUERY_RE = re.compile(
     r"|(?:מה|אילו|איזה|רשימת).{0,15}(?:ממתי\w*|מחכ\w*)"
 )
 
+# PR2 is deliberately narrower than the legacy loose status-query grammar.
+# These expressions are anchored to an approval-lifecycle question; they must
+# never turn ordinary business text containing the same words into a gateway
+# command.
+_PR2_PENDING_EXISTENCE_RE = re.compile(
+    r"^\s*(?=.*\b(?:יש|קיימ\w*)\b)(?=.*(?:ממתי\w*|מחכ\w*)\b).{1,80}\?\s*$"
+)
+_PR2_CREATED_QUERY_RE = re.compile(r"^\s*יצרת\?\s*$", re.IGNORECASE)
+
 # ─── קליינטים ──────────────────────────────────────
 ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
 TELEGRAM_TOKEN     = os.environ.get("TELEGRAM_TOKEN", "")
@@ -2126,6 +2135,17 @@ def _deliver_callback_final(
     text: str,
 ) -> int:
     """Deliver one persistent final response for a Telegram callback."""
+    from core.approval_turn_metrics import begin, end, record_final_response
+    _callback_metrics, _callback_token = begin()
+    # Callback resolution may perform lifecycle/replay lookups, but remains
+    # bounded and never counts Telegram's popup acknowledgement as final.
+    _callback_metrics.action_contract_read_count = 1
+
+    def _metric_return(count: int) -> int:
+        record_final_response(deterministic=True)
+        end(_callback_token, "callback")
+        return count
+
     callback_message = getattr(cq, "message", None)
     callback_chat = getattr(callback_message, "chat", None)
     callback_chat_id = str(getattr(callback_chat, "id", "") or "")
@@ -2141,22 +2161,22 @@ def _deliver_callback_final(
                 cq.message.chat.id, cq.message.message_id, reply_markup=None,
             )
             bot.send_message(origin_chat_id, text)
-            return 1
+            return _metric_return(1)
         bot.edit_message_text(text, cq.message.chat.id, cq.message.message_id)
         if (
             not _flag_enabled("FEATURE_SINGLE_SPEAKER_APPROVAL_UX")
             and str(origin_chat_id) != callback_chat_id
         ):
             bot.send_message(origin_chat_id, text)
-            return 2
-        return 1
+            return _metric_return(2)
+        return _metric_return(1)
 
     _write_execution_receipt(
         canonical_user_id, origin_channel, origin_chat_id,
         action_id, tool_name, text,
     )
     bot.edit_message_text(text, cq.message.chat.id, cq.message.message_id)
-    return 1
+    return _metric_return(1)
 
 
 def _handle_approval_callback_impl(cq) -> None:
@@ -2777,6 +2797,80 @@ def _action_result_to_a32_entry(result) -> "dict | None":
     }
 
 
+def _resolve_pr2_deterministic_approval(
+    *, user_text: str, identity, live_contracts: list, out_meta: dict | None,
+) -> str | None:
+    """Resolve the narrowly-defined PR2 lifecycle grammar before all turn work.
+
+    The caller supplies the one canonical ActionContracts snapshot.  This
+    helper intentionally does not read Session, Router, Business Memory, or
+    the Agent, and falls through unchanged for non-recognized input.
+    """
+    from feature_flags import is_enabled
+    if not (
+        is_enabled("FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS")
+        and is_enabled("FEATURE_ACTION_GATEWAY")
+    ):
+        return None
+
+    text = user_text.strip()
+    lower = text.lower()
+    is_pending_query = bool(_PENDING_QUERY_RE.search(text) or _PR2_PENDING_EXISTENCE_RE.fullmatch(text))
+    is_created_query = bool(_PR2_CREATED_QUERY_RE.fullmatch(text))
+    is_confirm = lower in _CONFIRM_WORDS
+    is_cancel = lower in _CANCEL_WORDS
+    if not (is_pending_query or is_created_query or is_confirm or is_cancel):
+        return None
+
+    from core.action_gateway import action_gateway as gateway, build_approval_lifecycle_result
+    from core.approval_turn_metrics import begin, end, record_final_response
+    metrics, token = begin()
+    # The snapshot is loaded before calling us. Count it once for this
+    # resolver, regardless of whether the backing ledger was warm or durable.
+    metrics.action_contract_read_count = 1
+    try:
+        recent = gateway.find_recent_terminal_by_user(
+            identity.memory_key, max_age_seconds=_LIVE_CONTRACT_STALE_SECONDS,
+        )
+        if is_pending_query:
+            reply = gateway.describe_pending_queue(
+                identity.memory_key, live_contracts=live_contracts,
+            )
+        elif is_created_query:
+            if live_contracts:
+                reply = (
+                    build_approval_lifecycle_result(live_contracts[0])
+                    if len(live_contracts) == 1
+                    else build_approval_lifecycle_result(contracts=live_contracts)
+                ).safe_user_message
+            elif recent is not None:
+                reply = build_approval_lifecycle_result(recent, repeated=True).safe_user_message
+            else:
+                reply = "לא מצאתי פעולה אחרונה ב־24 השעות האחרונות."
+        elif is_confirm:
+            if not live_contracts and recent is not None:
+                reply = build_approval_lifecycle_result(recent, repeated=True).safe_user_message
+            else:
+                reply = gateway.route_confirmation_word(
+                    identity.memory_key, approver_role=identity.role,
+                    live_contracts=live_contracts, use_session_bookmark=False,
+                )
+        else:
+            # PR2 only reaches the no-mutation multi-contract branch while its
+            # own flag is on; the legacy route below remains byte-for-byte
+            # available when the flag is off.
+            reply = gateway.route_cancellation_word(
+                identity.memory_key, live_contracts=live_contracts,
+                recent_terminal=recent, safe_multiple=True,
+            ) or "לא מצאתי פעולה ממתינה לביטול."
+        if out_meta is not None:
+            out_meta["source_module"] = "action_gateway"
+        record_final_response(deterministic=True)
+        return reply
+    finally:
+        end(token, "text")
+
+
 def run_agent(
     user_text:           str,
     chat_id:             str,
@@ -2817,6 +2911,24 @@ def run_agent(
             f"channel={channel} id={_sanitize_id(chat_id)} role={identity.role} "
             f"msg='{user_text[:60]}'"
         )
+
+    # PR2 establishes the canonical ActionContracts snapshot before any lead
+    # capture, Session, Router, Business Memory, or Agent work.  Legacy paths
+    # reuse the same snapshot later in the turn.
+    if _live_contracts_snapshot is None:
+        try:
+            from core.action_gateway import action_gateway as _gw_snapshot
+            _live_contracts_snapshot = _gw_snapshot.find_live_contracts(identity.memory_key)
+        except Exception:
+            _live_contracts_snapshot = []
+    _pr2_reply = _resolve_pr2_deterministic_approval(
+        user_text=user_text,
+        identity=identity,
+        live_contracts=_live_contracts_snapshot,
+        out_meta=_out_meta,
+    )
+    if _pr2_reply is not None:
+        return _gateway_reply_with_promotion(_pr2_reply, identity.memory_key)
 
     # ── 1.5. WhatsApp Lead Capture (W0) ───────────
     # W0/N02: capture inbound WhatsApp leads and optionally score them.
@@ -2859,12 +2971,6 @@ def run_agent(
     # everything below in this turn (Pending Approval Gate at 2.55,
     # build_turn_envelope() at 1.7, and the Case C2 signal after the tool
     # loop) — never refetched within this call, never cached across turns.
-    if _live_contracts_snapshot is None:
-        try:
-            from core.action_gateway import action_gateway as _gw_snapshot
-            _live_contracts_snapshot = _gw_snapshot.find_live_contracts(identity.memory_key)
-        except Exception:
-            _live_contracts_snapshot = []
     # Turn-start batch_queue count (RAM-only, not an Airtable read — no
     # amplification concern, captured here purely so the Case C2 check below
     # uses the same turn-start moment as build_turn_envelope() rather than a
@@ -3441,6 +3547,8 @@ def run_agent(
             )
 
         while True:
+            from core.approval_turn_metrics import record_agent_call
+            record_agent_call()
             response = client.messages.create(
                 model       = ctx.model,
                 max_tokens  = ctx.max_tokens,
