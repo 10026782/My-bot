@@ -166,11 +166,12 @@ python3 -m tools.context_librarian.pilot_preflight \
 It reuses `load_catalog()` and `consumption_checklist()` directly (read-only, no re-derivation of mandatory-tier logic, so it cannot drift from what `verify-consumption` itself computes) to check, before step 5 of §3 may begin:
 
 - the bundle file exists and is non-empty (exit `1` if not);
+- the bundle's own title line and `## Consumption Checklist` section are bound to the selected `--task-type` and the **live-recomputed** `consumption_checklist()` output for that profile+claim (exit `1` if not — catches a stale, wrong-profile, or hand-written bundle; fixed post-review, see the `## Post-review corrections` entry below);
 - the ledger file exists, is valid JSON, and has every `LEDGER_TOP_LEVEL_REQUIRED_FIELDS` top-level field (exit `2` if not);
-- the ledger's declared `task_type`/`production_claim` match the ones passed on the command line (exit `2` if not);
-- the ledger's `required_sources` set exactly equals the **live-recomputed** `consumption_checklist()` output for that profile+claim (exit `3` if not, printing the missing/extra ids).
+- the ledger's declared `task_type`/`production_claim` match the ones passed on the command line, and `required_sources` is a list of strings, not e.g. objects or nested lists (exit `2` if not — the string-type check is also a post-review fix, same entry below);
+- the ledger's `required_sources` set exactly equals the same live-recomputed `consumption_checklist()` output (exit `3` if not, printing the missing/extra ids).
 
-Exit `0` prints a line starting `PROCEED:`. This is **not** a replacement for `verify-consumption` (§1/§5) — it only proves the ledger skeleton is correctly shaped and complete *before* the task starts consuming sources; `verify-consumption` is still required afterward to prove every item ended up with a genuine receipt or approved waiver.
+Exit `0` prints a line starting `PROCEED:`. This is **not** a replacement for `verify-consumption` (§1/§5) — it only proves the bundle matches the selected profile/live tier and the ledger skeleton is correctly shaped and complete *before* the task starts consuming sources; `verify-consumption` is still required afterward to prove every item ended up with a genuine receipt or approved waiver, checked against exact commit/branch/query identity.
 
 **What this preflight deliberately does not do (Phase 2 follow-up, not implemented here):**
 
@@ -180,16 +181,19 @@ Exit `0` prints a line starting `PROCEED:`. This is **not** a replacement for `v
 
 ### Tests
 
-`test_pilot_preflight.py` (new file, plain-script convention per `CLAUDE.md`, run via `python3 test_pilot_preflight.py`) covers, against the real `approval_ux` profile (no mocking of `librarian.py`):
+`test_pilot_preflight.py` (new file, plain-script convention per `CLAUDE.md`, run via `python3 test_pilot_preflight.py`) covers, against real `approval_ux`/`tool_execution` profiles and real bundles produced by `build_bundle()` (no mocking of `librarian.py`):
 
 1. missing bundle → exit `1`;
-2. bundle present, ledger missing → exit `2`;
-3. ledger present but `required_sources` doesn't match the live-recomputed tier → exit `3`;
-4. ledger's declared `task_type` disagrees with `--task-type` → exit `2`;
-5. fully matching skeleton → exit `0` with a `PROCEED:` message;
-6. invalid JSON ledger → exit `2` (fails closed, does not crash).
+2. hand-written/fake bundle (non-empty, no real checklist section) → exit `1`;
+3. real bundle built for a different profile than `--task-type` → exit `1`;
+4. bundle present and valid, ledger missing → exit `2`;
+5. ledger present but `required_sources` doesn't match the live-recomputed tier → exit `3`;
+6. ledger's declared `task_type` disagrees with `--task-type` → exit `2`;
+7. `required_sources` containing a malformed (non-string) entry → exit `2`, does not raise `TypeError`;
+8. fully matching skeleton → exit `0` with a `PROCEED:` message;
+9. invalid JSON ledger → exit `2` (fails closed, does not crash).
 
-All 7 assertions passed when run in this session (§9).
+All 11 assertions passed when run in this session (§9), including after the post-review corrections below.
 
 ---
 
@@ -203,23 +207,38 @@ All 7 assertions passed when run in this session (§9).
 
 ---
 
+## Post-review corrections (CodeRabbit, PR #501)
+
+CodeRabbit reviewed `tools/context_librarian/pilot_preflight.py` and opened two threads, both verified against the actual code in this session and fixed:
+
+1. **Bundle provenance/profile binding (Major).** The original preflight only checked that the bundle file existed and was non-empty — a stale bundle, a bundle built for the wrong profile, or a hand-written file (the review's own example: a file containing just `# fake bundle`) would satisfy the gate and let step 5 begin against context that doesn't actually match the selected task. **Fixed:** `run_preflight()` now also checks the bundle's title line against the exact `# BOSS Context Bundle — <task_type>` format `_render()` produces, and parses the bundle's own `## Consumption Checklist` section, requiring its item-id set to exactly equal the live-recomputed `consumption_checklist()` output for the same profile+production-claim. Both checks fail closed with exit `1`. Regression tests: "hand-written bundle → exit 1" and "wrong-profile bundle → exit 1" in `test_pilot_preflight.py`, using a real second bundle built via `build_bundle(task_type="tool_execution", ...)` rather than a synthetic fixture.
+2. **`required_sources` type validation (Major/quick win).** `set(ledger["required_sources"])` was called without first checking that every element was a string; a syntactically valid JSON list containing an object or nested list (e.g. `{}`) is unhashable and raised an uncaught `TypeError` inside `main()`, instead of the documented fail-closed exit `2`. **Fixed:** added `elif not all(isinstance(item, str) for item in required_sources): messages.append(...)`, per CodeRabbit's own suggested diff, before `required_sources` is ever passed to `set()`. Regression test: "malformed required_sources entry does not crash" / "-> exit 2" in `test_pilot_preflight.py`, using `list(live_required) + [{}]` exactly as CodeRabbit's comment requested.
+
+Both findings were real (confirmed by reproducing the crash/gap locally before fixing), not false positives. No other CodeRabbit findings were open on this PR at the time of this correction.
+
+---
+
 ## 9. Test results (this session)
 
 ```
 $ python3 -m pytest test_context_librarian.py -q
-112 passed in 1.86s
+112 passed in 1.88s
 
 $ python3 test_pilot_preflight.py
 === pilot_preflight smoke tests ===
   [PASS] missing bundle -> exit 1
+  [PASS] hand-written bundle -> exit 1
+  [PASS] wrong-profile bundle -> exit 1
   [PASS] missing ledger -> exit 2
   [PASS] required_sources mismatch -> exit 3
   [PASS] task_type mismatch -> exit 2
+  [PASS] malformed required_sources entry does not crash
+  [PASS] malformed required_sources entry -> exit 2
   [PASS] matching skeleton -> exit 0 (PROCEED)
   [PASS] PROCEED message present
   [PASS] invalid JSON ledger -> exit 2
 
-✅ 7/7 passed
+✅ 11/11 passed
 ```
 
 Both suites were executed directly in this session against the current branch, not assumed from a prior run.

@@ -41,6 +41,40 @@ def _resolve(path: Path, repo_root: Path) -> Path:
     return path if path.is_absolute() else repo_root / path
 
 
+def _bundle_title_line(task_type: str) -> str:
+    # Must match _render()'s own f"# BOSS Context Bundle — {profile['id']}"
+    # exactly (tools/context_librarian/librarian.py) — duplicated as a
+    # literal here rather than imported, since _render() has no public
+    # "title for this profile" helper to reuse.
+    return f"# BOSS Context Bundle — {task_type}"
+
+
+def _bundle_checklist_items(bundle_text: str) -> list[str] | None:
+    """Item ids under the bundle's own "## Consumption Checklist" section.
+
+    Returns None when the section is missing or its expected item-list/"None"
+    marker never appears — i.e. the file is not a real generated bundle
+    (hand-written, truncated, or built by a different/older code path).
+    """
+    lines = bundle_text.splitlines()
+    try:
+        start = lines.index("## Consumption Checklist")
+    except ValueError:
+        return None
+    items: list[str] = []
+    found_marker = False
+    for line in lines[start + 1 :]:
+        if line.startswith("## "):
+            break
+        if line == "- None.":
+            found_marker = True
+            continue
+        if line.startswith("- `") and line.endswith("`"):
+            items.append(line[3:-1])
+            found_marker = True
+    return items if found_marker else None
+
+
 def run_preflight(
     *,
     repo_root: Path,
@@ -50,15 +84,59 @@ def run_preflight(
     ledger_path: Path,
 ) -> tuple[int, list[str]]:
     """Returns (exit_code, messages). 0 means the pilot task may proceed."""
-    messages: list[str] = []
-
     bundle_path = _resolve(bundle_path, repo_root)
     ledger_path = _resolve(ledger_path, repo_root)
 
-    if not bundle_path.is_file() or not bundle_path.read_text(encoding="utf-8").strip():
+    catalog = load_catalog(repo_root)
+    if task_type not in catalog.profiles:
+        available = ", ".join(sorted(catalog.profiles))
+        return 2, [f"BLOCKED: unknown task type {task_type!r}; choose one of: {available}"]
+    profile = catalog.profiles[task_type]
+    live_required = set(
+        consumption_checklist(catalog, profile, production_claim=production_claim)
+    )
+
+    if not bundle_path.is_file():
         return 1, [
-            f"BLOCKED: bundle not found or empty at {bundle_path} — run "
+            f"BLOCKED: bundle not found at {bundle_path} — run "
             "`python -m tools.context_librarian build` first (pilot steps 1-2)."
+        ]
+    bundle_text = bundle_path.read_text(encoding="utf-8")
+    if not bundle_text.strip():
+        return 1, [
+            f"BLOCKED: bundle at {bundle_path} is empty — run "
+            "`python -m tools.context_librarian build` first (pilot steps 1-2)."
+        ]
+
+    # Bind the bundle to the selected profile and the live mandatory tier —
+    # file existence/non-emptiness alone lets a stale, wrong-profile, or
+    # hand-written bundle satisfy this gate (CodeRabbit PR #501 review).
+    bundle_lines = bundle_text.splitlines()
+    expected_title = _bundle_title_line(task_type)
+    if not bundle_lines or bundle_lines[0] != expected_title:
+        return 1, [
+            f"BLOCKED: bundle at {bundle_path} was not built for task-type "
+            f"{task_type!r} (expected first line {expected_title!r}, got "
+            f"{bundle_lines[0] if bundle_lines else ''!r}) — rebuild with "
+            f"`--task-type {task_type}`."
+        ]
+    bundle_checklist = _bundle_checklist_items(bundle_text)
+    if bundle_checklist is None:
+        return 1, [
+            f"BLOCKED: bundle at {bundle_path} has no recognizable "
+            "'## Consumption Checklist' section — it is not a bundle produced "
+            "by `python -m tools.context_librarian build`; rebuild it."
+        ]
+    bundle_checklist_set = set(bundle_checklist)
+    if bundle_checklist_set != live_required:
+        missing = sorted(live_required - bundle_checklist_set)
+        extra = sorted(bundle_checklist_set - live_required)
+        return 1, [
+            f"BLOCKED: bundle at {bundle_path}'s Consumption Checklist does not "
+            f"match the live-recomputed mandatory tier for {task_type!r} "
+            f"(production_claim={production_claim}) — the bundle is stale or was "
+            f"built with a different --production-claim; rebuild it: "
+            f"missing_from_bundle={missing}, extra_in_bundle={extra}."
         ]
 
     if not ledger_path.is_file():
@@ -79,6 +157,7 @@ def run_preflight(
             f"BLOCKED: ledger missing top-level fields: {', '.join(missing_top)}."
         ]
 
+    messages: list[str] = []
     if ledger.get("task_type") != task_type:
         messages.append(
             f"BLOCKED: ledger task_type {ledger.get('task_type')!r} does not "
@@ -89,20 +168,21 @@ def run_preflight(
             f"BLOCKED: ledger production_claim {ledger.get('production_claim')!r} "
             f"does not match --production-claim ({production_claim})."
         )
-    if not isinstance(ledger.get("required_sources"), list):
+    required_sources = ledger.get("required_sources")
+    if not isinstance(required_sources, list):
         messages.append("BLOCKED: ledger required_sources must be a list.")
+    elif not all(isinstance(item, str) for item in required_sources):
+        # A syntactically valid JSON list may still hold objects/nested lists —
+        # set() over those raises TypeError before a message could ever be
+        # printed, crashing main() instead of failing closed (CodeRabbit PR
+        # #501 review).
+        messages.append(
+            "BLOCKED: ledger required_sources must contain only string item ids."
+        )
     if messages:
         return 2, messages
 
-    catalog = load_catalog(repo_root)
-    if task_type not in catalog.profiles:
-        available = ", ".join(sorted(catalog.profiles))
-        return 2, [f"BLOCKED: unknown task type {task_type!r}; choose one of: {available}"]
-    profile = catalog.profiles[task_type]
-    live_required = set(
-        consumption_checklist(catalog, profile, production_claim=production_claim)
-    )
-    declared_required = set(ledger["required_sources"])
+    declared_required = set(required_sources)
     if declared_required != live_required:
         missing = sorted(live_required - declared_required)
         extra = sorted(declared_required - live_required)
@@ -113,9 +193,9 @@ def run_preflight(
         ]
 
     return 0, [
-        "PROCEED: bundle exists and the ledger skeleton's required_sources "
-        "matches the live mandatory tier. Steps 1-4 are done — the pilot task "
-        "(step 5) may begin.",
+        "PROCEED: bundle matches the selected profile and live mandatory tier, "
+        "and the ledger skeleton's required_sources matches it too. Steps 1-4 "
+        "are done — the pilot task (step 5) may begin.",
     ]
 
 
