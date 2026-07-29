@@ -12,7 +12,7 @@
 > על נושאים שאינם ה-approval/Context-Librarian track.
 
 **עודכן:** 27/07/2026 (+ תוספת PR #471, + תוספת 29/07/2026 ל-approval/Context-Librarian
-track בלבד — ראו למטה) · **main:** `db51afc` (מיזוג PR #492)
+track בלבד — ראו למטה) · **main:** `186832a` (מיזוג PR #494)
 
 **תוספת (27/07/2026):** PR #471 — Single-Speaker Approval UX Base — מוזג ל-`main`. `ApprovalLifecycleResult` הוא תוצאת ה-UX הקנונית למסלולי approval; Gateway מקבל בעלות על התשובה כשהדגל מופעל וה-Agent נעצר לאחר handoff. BUG-144 (reject callback שלא סגר `ActionContract`), BUG-145 (שתי הודעות סופיות) ו-BUG-118 (חשיפת tool/contract/record identifiers בתשובות הצלחה) מיושמים וממוזגים. Redaction של מזהים הוא בלתי-מותנה גם כשהדגל כבוי. `ActionContracts` נשאר מקור האמת היחיד. `FEATURE_SINGLE_SPEAKER_APPROVAL_UX=false` בקוד וב-`.env.example`; לא הופעל ב-staging/production. callback payload מקסימלי שנבדק: 53 bytes מתוך 64. `backend-ci`/`frontend-ci` עברו על `dadf851`. **אין עדיין staging/production verification**, ולכן אין לסמן את העבודה כ-Production Verified. deterministic cost cuts והיקפי PR2 נשארו במפורש מחוץ ל-PR הזה.
 
@@ -41,6 +41,27 @@ status) ועודכן כאן:
   replay. **אין claim ל-staging/production verification** — שני הדגלים כבויים.
 - פירוט מלא של כל אלה: `ROADMAP.md` (N17 items 8–11), `CHANGELOG.md`, `CHANGE_CONTROL_LOG.md`
   C175–C180.
+
+**תוספת (29/07/2026, המשך אותו יום) — PR #494 (Hotfix A) מוזג, BUG-151 (חדש) ✅ תוקן ומאומת
+ב-staging עם הסתייגות מדויקת:** תוך כדי audit קבלה ל-PR2 עצמו נתפס תרחיש staging אמיתי (לוגי
+Render + רשומות `ActionContracts` בפועל): בקשת "צור משימה באיירטאבל" נכשלה פעמיים
+(`CanonicalizationError` — הממיר ה-positional ל-Tasks תמך בערך אחד בלבד, ה-payload בפועל כלל 2),
+בלי שנוצר `ActionContract` כלשהו; "כן" הבא (בלי live contract) שיחזר `ActionContract` **לא-קשור**
+(ליד שהושלם ~4 שעות קודם) ודיווח "הפעולה כבר הושלמה" — לא נוצרה שום משימה. **PR #494 (ממוזג
+`186832a`)** תיקן שלושה דברים: (1) הממיר תומך עכשיו ב-1 או 2 ערכים positional ל-Tasks; (2) כשל
+canonicalization לא נספר יותר נגד תקציב ה-mutation של BUG-122; (3) `_resolve_pr2_deterministic_
+approval()`'s ענפי "כן"/"לא" בלי live contract כבר לא קוראים ל-`find_recent_terminal_by_user()`
+בכלל — recency אינה correlation, בשום חלון (חלון-ביניים של 10 דק' עדיין נכשל בבדיקה עצמאית). Full
+sweep 175/175 + `smoke_tests.py`/`test_integration.py`/`core/router/test_router.py` לפני המיזוג.
+**✅ Verified ב-staging בפועל** (contract `a428e48b`, 14:25–14:29) — **אך בנתיב-כשל שונה** מהמקורי:
+`ActionContract` כן נוצר הפעם (calendar_create_event, לא sheets_append/airtable_add), נכשל בביצוע
+(Google OAuth חסר — פער-סביבה, לא קוד), "כן" הבא נכון החזיר "אין פעולה שממתינה לאישור" ולא שחזר את
+ה-contract הכושל — מאמת את אינווריאנט תיקון #3, **לא** מאמת עצמאית את תיקון #1 (positional
+canonicalization) בנתיב-הכשל המקורי המדויק. פירוט מלא: `BUG_AUDIT_LOG.md` BUG-151,
+`CHANGE_CONTROL_LOG.md` C181, `docs/architecture/f52-unified-approval-runtime/audits/
+PR_HOTFIX_A_CROSS_LAYER_IMPACT_MATRIX.md`. פתוח לפר הבא: Router regex ל-"תייצר", אכיפת
+Single-Speaker בפועל (כרגע log-only), הסתרת sheets_append/drive_* מהכלים כברירת מחדל, מסלול cancel
+ישן (`app.py:3391`) שעדיין לא מעביר `recent_terminal=None` (ממצא CodeRabbit).
 
 **תוספת (26/07/2026) — BUG-143/144/145/147 כולם ✅ תוקנו בפועל ומאומתים חי ב-staging, ו-BUG-149 חדש נמצא ותוקן:**
 - **BUG-143** (PR #461, `70093f0`/`719bb86`), **BUG-144+145** (PR #460, `006506d`/`0c06f4c`), **BUG-147** (PR #469 "Patch A", `3b111f6`/`e946225`) — כולם ממוזגים ל-`main`, ו**מאומתים חי ב-staging** דרך סבב הבדיקה החוזרת של הבעלים (PM460-RETEST, 26/07/2026): תרחיש 3 (canonicalization) ✅ PASS, תרחיש 4 (reject lifecycle, כולל כפתור inline עצמו — פותר סופית את אי-הוודאות שנרשמה ב-BUG-144) ✅ PASS, תרחיש 5 — BUG-147 עצמו לא חזר (✅), אבל נחשף **BUG-149 חדש** באותו תרחיש. פירוט מלא + git evidence: `BUG_AUDIT_LOG.md`, `CHANGE_CONTROL_LOG.md` C173.
