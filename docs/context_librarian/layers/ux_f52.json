@@ -15,6 +15,7 @@
     "owner": "ux_f52",
     "code_paths": [
       "core/message_contract.py",
+      "core/approval_lifecycle_message_adapter.py",
       "core/agent_message_formatter.py",
       "core/action_gateway.py",
       "core/approval_turn_metrics.py",
@@ -23,6 +24,7 @@
     ],
     "test_paths": [
       "test_message_contract.py",
+      "test_approval_lifecycle_message_adapter.py",
       "test_agent_message_formatter.py",
       "test_agent_message_formatter_display_payload.py",
       "test_f52_status_reply_reconciliation.py",
@@ -38,7 +40,8 @@
       {"path": "docs/architecture/f52-unified-approval-runtime/spec/UNIFIED_MESSAGE_UX_STANDARD.md", "role": "UX source of truth", "status": "active"},
       {"path": "docs/architecture/f52-unified-approval-runtime/spec/F52_UNIFIED_APPROVAL_RUNTIME_SPEC.md", "role": "program implementation specification", "status": "planning_only"},
       {"path": "docs/architecture/f52-unified-approval-runtime/PR1_MESSAGE_CONTRACT_FOUNDATION.md", "role": "message contract implementation note", "status": "active"},
-      {"path": "docs/architecture/f52-unified-approval-runtime/decisions/DECISION_LOG.md", "role": "closed design decisions (D-012, D-013)", "status": "active"}
+      {"path": "docs/architecture/f52-unified-approval-runtime/decisions/DECISION_LOG.md", "role": "closed design decisions (D-012, D-013)", "status": "active"},
+      {"path": "docs/architecture/message_contract/APPROVAL_LIFECYCLE_RESULT_ADAPTER_SPEC.md", "role": "PR B pure ApprovalLifecycleResult adapter specification", "status": "active"}
     ],
     "production_evidence": [
       {"path": "docs/architecture/f52-unified-approval-runtime/PR4_ACTION_STATUS_SHADOW_VERIFICATION.md", "observed_on": "2026-07-23", "scope": "shadow verification procedure and dated observations", "status": "shadow"},
@@ -49,10 +52,10 @@
       {"name": "FEATURE_SINGLE_SPEAKER_APPROVAL_UX", "default_state": "off", "documented_state": "PR #471; gates which component owns final approval-turn wording (Gateway vs legacy routing). Identifier/tool-name redaction in build_approval_lifecycle_result()/_safe_contract_business_description() is unconditional and applies even when this flag is off (BUG-118)", "evidence_scope": "code default (feature_flags.py) plus CHANGELOG.md PR #471 entry"}
     ],
     "valid_from": "2026-07-30",
-    "last_verified_commit": "6201e868c5ecafa51bed1132ccbbf68be0f39eb6",
+    "last_verified_commit": "9a572581eaf6e952d035f2b2704501db7981934e",
     "confidence": 0.9,
     "notes": [
-      "Stage 3A merged, PR #506 (6201e86): core/message_contract.py is the canonical MessageContract (15 states); test_message_contract.py is the test authority. D-013 ratifies evidence_status as non-authoritative metadata. Pure, unwired, no output change. PR B/C pending.",
+      "Stage 3A merged, PR #506 (6201e86): core/message_contract.py is the canonical MessageContract (15 states); test_message_contract.py is the foundation test authority. D-013 ratifies evidence_status as non-authoritative metadata. PR B adds only the pure, unwired ApprovalLifecycleResult adapter and its focused tests; PR C remains pending.",
       "display_payload is the canonical user-message payload contract in F52 planning decisions.",
       "User messages must not expose record IDs, contract IDs, or internal tool names.",
       "RP5 is loaded for UX tasks only when evidence/completion claims are relevant.",
