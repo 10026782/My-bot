@@ -1,6 +1,13 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 30/07/2026 — **PR2 staging acceptance audit — סבב אימות חי בפרודקשן** (Hotfix B/#496,
+עודכן: 30/07/2026 — **PR #504 מוזג ל-`main`** (commit `55312ab`, אומת ב-grep ישיר):
+Multi-layer alignment stages 3-5 — first real Consumption Enforcement pilot
+(`cross_layer_architecture` profile) + catalog completeness fix (0 removed, 10 added;
+רה-verify: `CONSUMPTION: COMPLETE`). Planning-only, אין שינוי runtime/CI. Verdict נשאר
+`PASS_WITH_GAPS`; Phase 3 נשאר NOT READY. ראו N17 item 12 ל-backlog הממוקד שנפתח בעקבות
+זה, ו-`docs/governance/librarian/FIRST_REAL_CONSUMPTION_PILOT.md`/
+`docs/architecture/multilayer/BOSS_MULTILAYER_ALIGNMENT_PLAN.md` לפירוט המלא.
+עודכן קודם: 30/07/2026 — **PR2 staging acceptance audit — סבב אימות חי בפרודקשן** (Hotfix B/#496,
 E/#497, C/#498+#499 כולם מוזגו; E ו-C אומתו חי בפרודקשן, B רדום כש-PR2 דלוק, BUG-151's
 יכולת עסקית כללית אומתה חי אך תיקון #1 [הממיר]/#2 [חריגת mutation-budget] עדיין לא —
 שניהם דורשים `CanonicalizationError` בפועל, שלא קרה בסבב הזה). ראו N17 item 11 לפירוט המלא ו-
@@ -1135,6 +1142,33 @@ ActionContract), ואין Cross-Layer Impact Matrix שלם לאף אחת — **�
     test בלבד). ראו
     `AI_CONTEXT.md`/`CHANGE_CONTROL_LOG.md` C182–C184 להוכחות מלאות. ממצא חדש לא-קשור נפתח
     כ-BUG-152 (בקשה חוזרת נעצרה פעם אחת, לא root-caused).
+12. ✅ Multi-layer alignment (stages 3-5) — first real Consumption Enforcement pilot +
+    catalog completeness fix — **PR #504 מוזג ל-`main`** (commit `55312ab`, אומת ב-grep
+    ישיר). Run 1: פרופיל `cross_layer_architecture`, `PROCEED`/`CONSUMPTION: COMPLETE`;
+    independent review מצא פער coverage אמיתי (Business Intent, Planning Gate, Master
+    Plan, ROADMAP, Change Control Log, Message Contract V1/migration/implementation —
+    חסרים מה-mandatory tier). Run 2: הפער נסגר בקטלוג (0 removed, 10 added), רה-verify:
+    `CONSUMPTION: COMPLETE`. **Verdict נשאר `PASS_WITH_GAPS`** — סגירת הפער הנקודתי אינה
+    independent review מלא וטרי על כל 117 הפריטים. **Phase 3 (CI-blocking gate) נשאר NOT
+    READY** — פרופיל יחיד נבדק, בלי sample size מוגדר. ראו
+    `docs/governance/librarian/FIRST_REAL_CONSUMPTION_PILOT.md` (§10, "Phase 3 readiness
+    decision") ו-`docs/architecture/multilayer/BOSS_MULTILAYER_ALIGNMENT_PLAN.md`.
+
+    **Backlog ממוקד לספרן, שנפתח על ידי הפיילוט הזה (רישום בלבד — אין implementation כאן):**
+    - בדיקת פרופילים נוספים (מעבר ל-`cross_layer_architecture`) בפיילוט עתידי אמיתי.
+    - קביעת sample size מפורש (כמה profiles/משימות אמיתיות) לפני שמוכנות Phase 3 יכולה
+      להיטען.
+    - מדדי recall/noise/token-budget כמותיים לפיילוט, לא רק קריטריוני קבלה איכותיים (§6
+      של המסמך).
+    - final-commit verification invariant — לוודא שזהות ה-ledger (commit/branch) נבדקת
+      גם מול ה-commit הסופי לאחר merge, לא רק מול ה-branch tip בזמן בניית ה-ledger.
+    - אכיפת independent-review trigger בכלי (לא רק כלל self-applied) — פער כבר מתועד
+      ב-§1/§8 של המסמך.
+    - Phase 3 owner gate מפורש — צ'קפוינט חתימת owner ייעודי לפני הפעלת ה-flag, נפרד
+      מעמידה בקריטריונים הטכניים.
+
+    אף אחד מהפריטים האלה אינו דורש שינוי runtime/CI/profile/pilot חדש כרגע — נרשם
+    כ-backlog בלבד עד החלטת owner.
 
 **קבצים:** `docs/context_librarian/` (הספרן עצמו, כולל `TOKEN_ESTIMATION_BENCHMARK.md` החדש),
 `tools/context_librarian/librarian.py` (token estimation, catalog loading,
