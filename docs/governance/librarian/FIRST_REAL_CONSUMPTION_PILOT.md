@@ -317,3 +317,42 @@ Reviewer: `metadata_review` independent sub-agent. It checked included sources, 
 **`PASS_WITH_GAPS`.** The complete CLI/enforcement chain ran, sources were mostly relevant, output reduced reading and full checklist traceability exists. `PASS` is not justified because the generated bundle missed critical sources that materially affected both stage boundaries and the next-PR DoD. Recommended Librarian follow-up: add explicit authority/status edges for Business Intent → Planning Gate/Master Plan/ROADMAP/CHANGE_CONTROL_LOG and include active frozen Message Contract specs in `cross_layer_architecture` retrieval.
 
 **Planning verdict produced by the pilot:** `PROCEED_WITH_CONDITIONS`; only the pure existing Message Contract PR A is recommended next, subject to the owner decisions recorded in the alignment plan.
+
+### Run 2 — Catalog completeness fix + coverage re-verification (30/07/2026)
+
+**What this run is, precisely:** a targeted fix for the exact omission Run 1's independent review found, plus a re-verification that the fix closes it — **not** a second full independent-review pass from scratch. The 8 previously-missing documents were, per Run 1's own "Context expansion record," already read and consumed manually during Run 1; this run formalizes that already-completed review into the mechanized ledger/checklist rather than repeating the reading. A genuinely fresh independent review (blind gold-set style, per `PHASE1_NON_INFERIORITY_PILOT.md`'s protocol) of the *entire* 117-item tier was judged disproportionate to re-run here and is not claimed.
+
+**Catalog fix:** added two new decision nodes to `docs/context_librarian/decisions/canonical_boundaries.json` and registered both in `cross_layer_architecture`'s `mandatory_canonical_decisions` (`docs/context_librarian/task_profiles/profiles.json`):
+
+- `decision.business_intent_and_planning_authority` — `docs/governance/BOSS_BUSINESS_INTENT.md`, `docs/governance/PLANNING_GATE.md`, `docs/governance/BOSS_UNIFIED_MASTER_PLAN.md`, `ROADMAP.md`, `CHANGE_CONTROL_LOG.md`.
+- `decision.message_contract_envelope_authority` — `spec/MESSAGE_CONTRACT_ENVELOPE_CONTRACT_V1.md`, `rollout/MESSAGE_CONTRACT_ENVELOPE_MIGRATION_PLAN.md`, `rollout/UNIFIED_MESSAGE_IMPLEMENTATION_PLAN.md`.
+
+`docs/architecture/f52-unified-approval-runtime/decisions/DECISION_LOG.md` — also named in Run 1's expansion record — was checked first and found **already present** in the mandatory tier via the pre-existing `decision.actioncontracts_authority`; it was not a catalog gap, so nothing was added for it. This matches the exact class of false-positive-omission the original `CONSUMPTION_ENFORCEMENT_PLAN.md` pilot found (Section 2: most "misses" were investigation-discipline, not catalog gaps) — worth checking explicitly rather than assumed.
+
+`cross_layer_architecture`'s budget (`maximum_documents: 24 → 36`, `maximum_approximate_token_budget: 9000 → 12000`) was raised in the same change — the prior budget was already at 97% utilization (8,709/9,000) before adding 8 mandatory documents, and the unmodified full test suite immediately confirmed this by failing 4 tests with `ContextLibrarianError: required context needs approximately 9178 ... exceeding the 9000 budget`. Post-fix utilization: 9,676/12,000 tokens (81%), 30/36 documents (83%) — comfortable headroom, not inflated.
+
+**Verification, not assumption:**
+
+- `python -m tools.context_librarian validate`: `16 nodes, 24 edges, 7 profiles` — valid.
+- `python -m pytest test_context_librarian.py -q`: `112 passed` (0 regressions after the budget fix; 4 failures observed and fixed before this line was true).
+- Diffed `consumption_checklist()` before/after the catalog change: **0 removed, 10 added** (`decision:business_intent_and_planning_authority`, `decision:message_contract_envelope_authority`, and 8 `doc:` entries) — confirmed no existing mandatory item was silently dropped by the fix.
+- Rebuilt the bundle at the current commit; the previously-missing 8 documents now appear under `## Consumption Checklist` and `## Canonical Documents`.
+- Built a new 117-item ledger: the 107 original receipts carried forward unchanged (same commit, same conclusions — nothing about them needed re-review), plus 10 new receipts, each citing a specific section/line actually read in this run (not boilerplate) — see the ledger JSON for the full text.
+- `pilot_preflight` on the new bundle+ledger: `PROCEED`.
+- `verify-consumption` on the new ledger: `CONSUMPTION: COMPLETE`.
+- `python3 test_pilot_preflight.py`: `11/11 passed`.
+
+**Updated verdict:** the specific, named coverage gap Run 1 found is closed and independently re-verifiable (not merely re-asserted) — this alone does not upgrade the overall pilot verdict from `PASS_WITH_GAPS` to `PASS`, since that requires a fresh independent review of the full tier, which this run explicitly did not perform. Treat Run 2 as **necessary but not sufficient** for a `PASS` upgrade.
+
+### Phase 3 readiness decision (30/07/2026)
+
+**Not ready. Phase 3 (CI-blocking `verify-consumption`) should stay off.** Reasoning, not just a restated rule:
+
+- The one coverage gap that is closed was found by a human/independent-reviewer catching a checklist miss — exactly the failure mode Phase 3 would need to already be closed *before* a hard gate depends on the checklist being complete. One fixed instance is evidence the fix mechanism works, not evidence the catalog has no other unknown gaps for other profiles/tasks.
+- Every profile besides `cross_layer_architecture` has never been pilot-tested against a real task at all — a global CI gate would apply the same untested assumption of completeness to `approval_ux`, `tool_execution`, `turn_coordinator_routing`, `core_reasoning_change`, `rp5_evidence_mismatch`, and `ux_f52_message` with zero real-task evidence for any of them.
+- Run 2 deliberately did not re-run a fresh independent review of the full 117-item tier (see above) — so even for `cross_layer_architecture` specifically, "no further gap exists" is not established, only "the one named gap is closed."
+- This matches `CONSUMPTION_ENFORCEMENT_PLAN.md`'s own Section 8 sequencing: Phase 3 is explicitly gated on Phase 1 having been "used at least once for a real task," not on the first use finding zero issues — a first real pilot finding and fixing a genuine gap is the expected, healthy outcome of that gate, not a blocker to it, but it is also not itself the sufficiency bar for Phase 3.
+
+**What would change this recommendation:** a second pilot task (ideally on a different profile, to test catalog completeness outside `cross_layer_architecture`) that runs the full sequence — including a genuinely fresh, blind independent review — and finds zero coverage misses. Per `CONSUMPTION_ENFORCEMENT_PLAN.md`'s own acceptance criteria for a new pilot (Section 8), that is the actual bar, not this run.
+
+**No CI/workflow file was touched by Run 2 or this decision.**

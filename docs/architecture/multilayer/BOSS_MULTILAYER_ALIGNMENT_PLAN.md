@@ -4,17 +4,19 @@
 
 **Baseline:** `origin/main` at `a89fc67105f6b310efde498498a3f6f8c9038250`
 
-**Pilot bundle:** `docs/context_librarian/generated/pilot_stage3_5_scoping.md` (generated at `9eba0ef3ba08df659fa9353033442f44060874d9`)
+**Pilot bundle:** `docs/context_librarian/generated/pilot_stage3_5_scoping.md` (generated at `f10eea105407ef694d278a22b668b1a19263adc9`; rebuilt from the identical `9eba0ef...` catalog state to keep the ledger's commit identity reproducible on the branch tip — no source content changed, see §5)
 
 **Authority:** `docs/governance/BOSS_BUSINESS_INTENT.md`
+
+**Owner decisions:** all five resolved 30/07/2026 — see §15.
 
 ## 1. Executive summary
 
 הכביש האחד צריך להיבנות בסדר הבא: עובדות פעולה קנוניות, state סמנטי אחד, ניסוח טהור, owner אחד לתגובה, ורק אז סיווג claim מול evidence ואכיפה. אין צורך להמציא Response State Contract חדש: `MESSAGE_CONTRACT_ENVELOPE_CONTRACT_V1.md` ו־D-012 כבר מקפיאים את אותו חוזה ואת אותו owner. ה־PR הבא המומלץ הוא לכן foundation טהור בלבד: `MessageState` + `MessageContract` + builder precedence + unit tests, ללא wiring.
 
-המשך הדרך מותנה בשתי הכרעות owner: (1) האם resolver דטרמיניסטי של approval לפני ה־router הוא request classification מותר או הפרה של Planning Gate; (2) מהו רצף האישור בין Message Contract לבין TurnCoordinator frozen contract. עד להכרעה הראשונה אין להרחיב את ה־pre-router path.
+כל חמש הכרעות ה־owner (§15) הוכרעו ב־30/07/2026: ה־resolver הדטרמיניסטי לפני ה־router מותר רק כ־normalizer/recovery ואסור כ־router או owner מקביל; Stage 3A מאושר כמימוש PR A הקיים בלבד, ללא חוזה state מקביל; רצף Message Contract לפני TurnCoordinator מאושר בתנאי שאין wiring או שינוי output; TTL/already-resolved/legacy queues נדחו במפורש ל־PR B; ספי RP5/TurnCoordinator shadow נדחו לשער rollout ייעודי. שתי ההכרעות הנדחות (4–5) אינן מתירות מימוש בפועל תחת התוכנית הזו — הן קובעות רק *איפה* תתקבל ההכרעה בהמשך.
 
-**Planning verdict: `PROCEED_WITH_CONDITIONS`.**
+**Planning verdict: `PROCEED_WITH_CONDITIONS`** — התנאים הם דיוק ההכרעות ב־§15, לא עוד המתנה להכרעה.
 
 **Librarian pilot verdict: `PASS_WITH_GAPS`.** ה־CLI, bundle, checklist, ledger, preflight ו־verify הופעלו; ה־bundle חסך קריאה והיה ברובו רלוונטי, אך החמיץ מקורות קריטיים שנוספו ידנית (Business Intent, Planning Gate, Master Plan, Message Contract specs/migration), ולכן אינו זכאי ל־PASS מלא.
 
@@ -168,13 +170,22 @@ Global exclusions: no new source of truth, no direct Formatter reads, no RP5-gen
 
 ## 15. Owner decisions required
 
+All five resolved by owner, 30/07/2026. Each question is kept verbatim for the audit trail, followed by the owner's ruling.
+
 1. Is the PR2 pre-router approval resolver permitted request classification, requiring a narrow governance clarification, or must future ownership move behind router? Until answered: freeze expansion.
+   **Owner decision:** Permitted only as a deterministic normalizer/recovery step — never as a router and never as a parallel owner. This approval does not extend to giving the resolver routing or ownership authority; any such extension requires a new owner decision and a Cross-Layer Impact Matrix.
 2. Approve Stage 3A as implementation of existing Message Contract PR A—not a parallel Response State Contract.
+   **Owner decision:** Approved as the existing PR A implementation. No parallel state contract is authorized.
 3. Approve sequencing: Message Contract foundation may ship before TurnCoordinator; TurnCoordinator fields remain nullable.
+   **Owner decision:** Approved, on condition that Stage 3A ships with no wiring and no output change (per §16/§17's exclusions and DoD). The condition is a hard boundary of this approval, not a preference — a version of Stage 3A that adds wiring or changes output is not covered by it.
 4. Select retention/TTL and migration target for already-resolved receipts and the legacy EventBus/`_pending_approvals`/TMA queue surfaces.
+   **Owner decision:** Deferred to PR B. Not decided here — Stage 4C may not select or implement a TTL/retention value or a legacy-queue migration target under this plan.
 5. Define quantitative acceptance thresholds for RP5/TurnCoordinator shadow and which production deployment supplies evidence.
+   **Owner decision:** Deferred to a dedicated rollout gate. Not decided here — Stage 4A/5B may not set or assume acceptance thresholds under this plan; a separate, dedicated rollout-gate document owns that decision.
 
 ## 16. Recommended next PR
+
+Owner-approved per §15 decisions 2–3 — no longer conditional on a future ruling.
 
 **PR: Message Contract Envelope Foundation (Stage 3A / existing Migration PR A).** Add the pure contract/builder module, tests, and its approved thin pure formatter wrapper. The wrapper has no production caller wiring. Do not touch `app.py`, ActionGateway lifecycle, router, TurnCoordinator, RP5, Formatter wording/call sites, queues, flags or channel adapters. The PR closes no runtime bug and changes no user output.
 
@@ -195,12 +206,14 @@ The next PR has no runtime wiring; rollback is removal of the new pure module/te
 
 ## 19. Librarian pilot verdict
 
-**`PASS_WITH_GAPS`.** Relevance was high for mandatory sources, false positives were manageable, and traceability reached every checklist item. The bundle reduced discovery effort substantially and correctly exposed stale metadata as a hard gate. It nevertheless omitted the named business authority and the active Message Contract/Planning Gate sources that materially changed the recommendation. Those omissions were caught by manual expansion and independent review, so the planning output is usable but the retrieval profile needs ADAPT: include explicit query-path authorities, Planning Gate, current master plan, and active/frozen cross-layer specs.
+**`PASS_WITH_GAPS`** (Run 1, 30/07/2026). Relevance was high for mandatory sources, false positives were manageable, and traceability reached every checklist item. The bundle reduced discovery effort substantially and correctly exposed stale metadata as a hard gate. It nevertheless omitted the named business authority and the active Message Contract/Planning Gate sources that materially changed the recommendation. Those omissions were caught by manual expansion and independent review, so the planning output is usable but the retrieval profile needed ADAPT: include explicit query-path authorities, Planning Gate, current master plan, and active/frozen cross-layer specs.
+
+**ADAPT applied (Run 2, 30/07/2026):** `cross_layer_architecture`'s mandatory tier now includes two new catalog decisions covering exactly the omitted sources; the fix and its re-verification (0 removed, 10 added, `CONSUMPTION: COMPLETE`) are recorded in `docs/governance/librarian/FIRST_REAL_CONSUMPTION_PILOT.md`'s "Run 2" entry. This closes the specific named gap; it is not itself a fresh full independent review and does not upgrade the verdict below to `PASS` — see that same document's Phase 3 readiness decision for why, and what would.
 
 ### Verdict separation
 
-- **Planning:** `PROCEED_WITH_CONDITIONS`—proceed only with Stage 3A foundation after owner confirms decisions 1–3; no ownership/queue enforcement.
-- **Librarian:** `PASS_WITH_GAPS`—end-to-end enforcement completed, but critical retrieval omissions prevent PASS.
+- **Planning:** `PROCEED_WITH_CONDITIONS`—all five owner decisions in §15 are now resolved (30/07/2026). Stage 3A foundation may proceed under decisions 2–3's terms (existing PR A only; no wiring; no output/wording change); the pre-router resolver stays a deterministic normalizer/recovery step only, per decision 1; TTL/legacy-queue migration (decision 4) and RP5/TurnCoordinator shadow acceptance thresholds (decision 5) remain deferred, not decided, and must not be implemented or assumed under this plan. No ownership/queue enforcement.
+- **Librarian:** `PASS_WITH_GAPS`—end-to-end enforcement completed, but critical retrieval omissions prevent PASS. The named omissions are closed as of Run 2 (30/07/2026); the verdict itself is unchanged, pending a fresh full independent review (Phase 3 remains not ready — see the pilot doc's Phase 3 readiness decision).
 
 ### Context expansion record
 
@@ -212,5 +225,5 @@ Reviewer: `metadata_review` (independent sub-agent), after `CONSUMPTION: COMPLET
 
 - **Accepted:** Stage 3A MERGE into existing PR A; TurnCoordinator is Phase-0 observation rather than active decision runtime; RP5 classifies and returns unchanged text; no unsupported runtime-current claim was found.
 - **Accepted and corrected:** removed PR-B `repeated` adapter semantics from PR-A DoD; restored PR A's pure formatter wrapper while keeping zero caller wiring; assigned atomic cross-turn resource claim explicitly to Layer 4/PostgreSQL; consumed and recorded `ROADMAP.md` and `CHANGE_CONTROL_LOG.md`.
-- **Rejected findings:** none. **Requires owner decision:** the pre-router governance conflict and the five decisions in §15 remain open by design.
+- **Rejected findings:** none. **Owner decisions:** all five in §15, including the pre-router governance conflict, were resolved 30/07/2026 — none remain open.
 - **Final re-review:** `PASS`; all four corrections were verified and no new runtime/production overclaim was found.
