@@ -185,7 +185,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-30",
-      "last_verified_commit": "f10eea1",
+      "last_verified_commit": "55312ab2096786f2892853d8b2f6d477b6e1cf12",
       "confidence": 1.0,
       "notes": [
         "Added after the first real Consumption Enforcement pilot (docs/governance/librarian/FIRST_REAL_CONSUMPTION_PILOT.md) found these five sources missing from cross_layer_architecture's mandatory tier despite being materially load-bearing for the recommendation.",
@@ -210,7 +210,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-30",
-      "last_verified_commit": "f10eea1",
+      "last_verified_commit": "55312ab2096786f2892853d8b2f6d477b6e1cf12",
       "confidence": 1.0,
       "notes": [
         "Added after the first real Consumption Enforcement pilot found these three sources missing from cross_layer_architecture's mandatory tier, despite Stage 3A's own recommendation resting on this exact contract.",
