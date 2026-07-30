@@ -127,6 +127,27 @@ jobs:
       - name: pytest context librarian
         run: python -m pytest test_context_librarian.py -x --tb=short -q
 
+      - name: pytest context librarian freshness automation
+        run: python -m pytest test_refresh_after_merge.py -x --tb=short -q
+
+      # Verification only — never mutates the catalog in CI. Reports whether
+      # any file this PR touched is registered somewhere in the Context
+      # Librarian catalog but wasn't re-verified (or is a new file the
+      # catalog already claims the directory of, or a broken edge/stale
+      # reference at load time). Warning-only on first rollout, matching
+      # every other new governance check introduced in this job
+      # (schema_governance.py, audit_gateway_bypass.py, etc.) — flip to
+      # blocking once it's proven out across a few real PRs.
+      - name: Context Librarian freshness check (verification only, warning-only rollout)
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            echo "no comparable base commit (new branch or first push) -- skipping"
+          else
+            python -m tools.context_librarian.refresh_after_merge --check --base "$BASE_SHA" --head "${{ github.sha }}" || true
+          fi
+
   frontend-ci:
     runs-on: ubuntu-latest
     steps:
