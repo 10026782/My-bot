@@ -215,15 +215,14 @@ def _replace_nodes(catalog: Catalog, nodes: dict[str, dict[str, Any]]) -> Catalo
 
 
 def _check_budget_overflow(candidate_catalog: Catalog) -> list[ReviewItem]:
-    """Dry-run-estimates every profile against the post-refresh catalog.
+    """מבצעת dry-run-estimate לכל profile מול הקטלוג אחרי הרענון.
 
-    Uses `estimate_bundle()` (the same render/measure `build_bundle()` uses,
-    just non-raising) so a budget miss is a structured `fits=False` result
-    rather than something parsed back out of an exception message. A
-    structural failure (broken reference, bad git state) still raises from
-    `estimate_bundle()` itself and is reported here too — a
-    freshness/validation failure on the refreshed data is exactly the kind
-    of thing a mechanical refresh must never silently swallow.
+    משתמשת ב-`estimate_bundle()` (אותו render/measure ש-`build_bundle()`
+    משתמש בו, רק שלא זורק שגיאה) כך שחריגת תקציב היא תוצאת `fits=False`
+    מובנית ולא משהו שמפורש חזרה מתוך טקסט חריגה. כשל מבני (reference
+    שבור, מצב git לא תקין) עדיין זורק שגיאה מ-`estimate_bundle()` עצמו
+    ומדווח גם כן כאן — כשל freshness/validation על הנתונים המרועננים
+    הוא בדיוק סוג הדבר שרענון מכני אסור לו לבלוע בשקט.
     """
     items: list[ReviewItem] = []
     for profile_id in sorted(candidate_catalog.profiles):
