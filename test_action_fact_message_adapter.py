@@ -121,6 +121,12 @@ def test_reason_code_mapping():
     executed = from_action_fact(_fact(outcome="executed"))
     assert executed.reason_code is None
 
+    # Formatter-facing metadata is carried in the public display payload too;
+    # otherwise MessageContract's canonical formatter wrapper cannot preserve
+    # the existing failed-action wording.
+    assert failed.display_payload.reason_code == "GOOGLE_AUTH_REQUIRED"
+    assert rejected.display_payload.reason_code == "ACTION_REJECTED"
+
 
 def test_non_string_error_code_is_rejected():
     with pytest.raises(MessageContractValidationError, match="error_code must be a string or None"):
@@ -264,11 +270,14 @@ def test_adapter_module_has_no_side_effect_authority_imports_or_calls():
     })
 
 
-def test_no_production_module_imports_the_adapter():
-    """Zero-caller boundary (SPEC §1.8): confirm this PR does not wire the
-    adapter into app.py, tma_api.py, or core/action_gateway.py."""
+def test_only_action_gateway_imports_the_adapter_for_pr_d_runtime():
+    """PR D scope guard: exactly one production module owns the first wire."""
     repo_root = Path(__file__).parent
-    for filename in ("app.py", "tma_api.py", "core/action_gateway.py"):
+    for filename in ("app.py", "tma_api.py"):
         content = (repo_root / filename).read_text(encoding="utf-8")
         assert "action_fact_message_adapter" not in content
         assert "from_action_fact" not in content
+
+    gateway_content = (repo_root / "core/action_gateway.py").read_text(encoding="utf-8")
+    assert gateway_content.count("from core.action_fact_message_adapter import from_action_fact") == 1
+    assert gateway_content.count("from_action_fact(fact, description=description)") == 1
