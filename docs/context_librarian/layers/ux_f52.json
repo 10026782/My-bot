@@ -16,6 +16,7 @@
     "code_paths": [
       "core/message_contract.py",
       "core/approval_lifecycle_message_adapter.py",
+      "core/action_fact_message_adapter.py",
       "core/agent_message_formatter.py",
       "core/action_gateway.py",
       "core/approval_turn_metrics.py",
@@ -25,6 +26,7 @@
     "test_paths": [
       "test_message_contract.py",
       "test_approval_lifecycle_message_adapter.py",
+      "test_action_fact_message_adapter.py",
       "test_agent_message_formatter.py",
       "test_agent_message_formatter_display_payload.py",
       "test_f52_status_reply_reconciliation.py",
@@ -41,7 +43,8 @@
       {"path": "docs/architecture/f52-unified-approval-runtime/spec/F52_UNIFIED_APPROVAL_RUNTIME_SPEC.md", "role": "program implementation specification", "status": "planning_only"},
       {"path": "docs/architecture/f52-unified-approval-runtime/PR1_MESSAGE_CONTRACT_FOUNDATION.md", "role": "message contract implementation note", "status": "active"},
       {"path": "docs/architecture/f52-unified-approval-runtime/decisions/DECISION_LOG.md", "role": "closed design decisions (D-012, D-013)", "status": "active"},
-      {"path": "docs/architecture/message_contract/APPROVAL_LIFECYCLE_RESULT_ADAPTER_SPEC.md", "role": "PR B pure ApprovalLifecycleResult adapter specification", "status": "active"}
+      {"path": "docs/architecture/message_contract/APPROVAL_LIFECYCLE_RESULT_ADAPTER_SPEC.md", "role": "PR B pure ApprovalLifecycleResult adapter specification", "status": "active"},
+      {"path": "docs/architecture/message_contract/ACTION_FACT_GATEWAY_REPLY_ADAPTER_SPEC.md", "role": "PR C pure ActionFact adapter specification", "status": "active"}
     ],
     "production_evidence": [
       {"path": "docs/architecture/f52-unified-approval-runtime/PR4_ACTION_STATUS_SHADOW_VERIFICATION.md", "observed_on": "2026-07-23", "scope": "shadow verification procedure and dated observations", "status": "shadow"},
@@ -55,7 +58,7 @@
     "last_verified_commit": "1c51570196c4660980546bdcf8dc337353489be8",
     "confidence": 0.9,
     "notes": [
-      "Stage 3A merged, PR #506 (6201e86): core/message_contract.py is the canonical MessageContract (15 states); test_message_contract.py is the foundation test authority. D-013 ratifies evidence_status as non-authoritative metadata. PR B (#509, merge 1c51570) adds only the pure, unwired ApprovalLifecycleResult adapter and its focused tests; PR C remains pending.",
+      "Stage 3A merged, PR #506 (6201e86): core/message_contract.py is the canonical MessageContract (15 states); test_message_contract.py is the foundation test authority. D-013 ratifies evidence_status as non-authoritative metadata. PR B (#509, merge 1c51570) adds only the pure, unwired ApprovalLifecycleResult adapter and its focused tests. PR C (branch codex/action-fact-gateway-reply-message-adapter, not yet merged as of this entry) adds the analogous pure, unwired ActionFact adapter (core/action_fact_message_adapter.py) delegating state resolution entirely to core/message_contract.py's existing _state_from_lifecycle() rather than a new table; last_verified_commit below is not bumped until PR C actually merges, to avoid re-introducing the dangling-squash-merge-commit bug class already fixed twice for this layer (PR #504->#505, PR #509->#510).",
       "display_payload is the canonical user-message payload contract in F52 planning decisions.",
       "User messages must not expose record IDs, contract IDs, or internal tool names.",
       "RP5 is loaded for UX tasks only when evidence/completion claims are relevant.",
