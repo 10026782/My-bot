@@ -92,16 +92,16 @@ def test_executed_with_mismatched_evidence_pairing_raises_never_silently_succeed
 
 
 def test_invalid_outcome_is_rejected():
-    with pytest.raises(MessageContractValidationError, match="unsupported ActionFact.outcome"):
+    with pytest.raises(MessageContractValidationError, match=r"unsupported ActionFact\.outcome"):
         from_action_fact(_fact(outcome="invented"))
-    with pytest.raises(MessageContractValidationError, match="unsupported ActionFact.outcome"):
+    with pytest.raises(MessageContractValidationError, match=r"unsupported ActionFact\.outcome"):
         from_action_fact(_fact(outcome=""))
     # ActionFact.outcome values that ARE valid for the broader lifecycle_state
     # vocabulary but are NOT part of ActionFact's own closed 4-value contract
     # must still be rejected here (ActionFact never legitimately carries them).
-    with pytest.raises(MessageContractValidationError, match="unsupported ActionFact.outcome"):
+    with pytest.raises(MessageContractValidationError, match=r"unsupported ActionFact\.outcome"):
         from_action_fact(_fact(outcome="completed"))
-    with pytest.raises(MessageContractValidationError, match="unsupported ActionFact.outcome"):
+    with pytest.raises(MessageContractValidationError, match=r"unsupported ActionFact\.outcome"):
         from_action_fact(_fact(outcome="approved"))
 
 
