@@ -2828,6 +2828,27 @@ class ActionGateway:
         """Returns (text, meta). meta is the formatter's own observability
         record (message_state, formatter_version, fallback_used,
         redaction_count) — safe to log as-is, never contains raw text/ids."""
+        # PR D intentionally wires exactly one live outcome first.  Failed
+        # ActionFacts need no evidence-state upgrade, so they can cross the
+        # MessageContract boundary without changing evidence authority.  The
+        # other outcomes retain their existing path until separately reviewed.
+        if fact.outcome == "failed":
+            from core.action_fact_message_adapter import from_action_fact
+            from core.message_contract import format_message_contract_with_meta
+
+            contract = self._ledger.find_by_id(fact.contract_id) if fact.contract_id else None
+            description = _safe_contract_business_description(contract) if contract else None
+            message = from_action_fact(fact, description=description)
+            text, contract_meta = format_message_contract_with_meta(message)
+            # Keep the existing private helper's observability shape stable;
+            # MessageContract metadata remains available at its own boundary.
+            return text, {
+                "message_state": contract_meta["formatter_state"],
+                "formatter_version": contract_meta["formatter_version"],
+                "fallback_used": contract_meta["fallback_used"],
+                "redaction_count": contract_meta["redaction_count"],
+            }
+
         from core.agent_message_formatter import format_agent_message_with_meta
         state, payload = self._action_fact_to_message(fact)
         return format_agent_message_with_meta(state, payload)

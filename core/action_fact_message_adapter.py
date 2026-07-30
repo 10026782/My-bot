@@ -74,7 +74,12 @@ def from_action_fact(
     return build_message_contract(
         lifecycle_state=outcome,
         multiple_pending=False,
-        display_payload={"entity_name": entity_name},
+        display_payload={
+            "entity_name": entity_name,
+            "reason_code": reason_code,
+            "execution_verified": execution_verified,
+            "occurred_at": occurred_at,
+        },
         reply_owner=_REPLY_OWNER,
         turn_context_source=TurnContextSource.LEGACY_INGRESS,
         source_module=ADAPTER_SOURCE_MODULE,

@@ -205,6 +205,47 @@ def test_on_failure_maps_code_to_human_text():
         _set(None)
 
 
+def test_failed_runtime_message_contract_path_is_byte_identical_to_old_path(monkeypatch):
+    """PR D: the single wired outcome preserves the pre-wiring formatter bytes."""
+    from core.agent_message_formatter import format_agent_message_with_meta
+    import core.action_fact_message_adapter as adapter_module
+
+    gw = _gw_with_lead_contract()
+    old_state, old_payload = gw._action_fact_to_message(F_FAIL)
+    old_result = format_agent_message_with_meta(old_state, old_payload)
+    calls = []
+    original = adapter_module.from_action_fact
+
+    def recording_adapter(*args, **kwargs):
+        calls.append((args, kwargs))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(adapter_module, "from_action_fact", recording_adapter)
+    new_result = gw._compose_status_reply_unified(F_FAIL)
+
+    assert len(calls) == 1
+    assert new_result == old_result
+
+
+def test_only_failed_outcome_uses_message_contract_runtime_adapter(monkeypatch):
+    """PR D scope guard: all other ActionFact outcomes stay on the old path."""
+    import core.action_fact_message_adapter as adapter_module
+
+    gw = _gw_with_lead_contract()
+    calls = []
+    original = adapter_module.from_action_fact
+
+    def recording_adapter(*args, **kwargs):
+        calls.append(args[0].outcome)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(adapter_module, "from_action_fact", recording_adapter)
+    for fact in (F_EXEC, F_FAIL, F_PEND, F_REJ, F_UNK):
+        gw._compose_status_reply_unified(fact)
+
+    assert calls == ["failed"]
+
+
 def test_on_pending_and_rejected_and_unknown():
     gw = _gw_with_lead_contract()
     try:
