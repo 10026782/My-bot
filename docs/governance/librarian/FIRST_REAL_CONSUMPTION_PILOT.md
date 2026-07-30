@@ -247,4 +247,73 @@ Both suites were executed directly in this session against the current branch, n
 
 ## 10. Results
 
-*(Not yet populated — append here after the pilot task in §2 actually runs, per §3 step 10 and §6.)*
+### Run 1 — Multi-layer alignment, stages 3–5 (30/07/2026)
+
+**Task:** unify and scope stages 3–5 of the multi-layer plan against `BOSS_BUSINESS_INTENT.md`; planning only, no runtime change.
+
+**Branch:** `codex/multilayer-alignment-consumption-pilot`
+
+**Main baseline:** `a89fc67105f6b310efde498498a3f6f8c9038250`
+
+**Profile:** `cross_layer_architecture` (manual selection after CLI no-match; task explicitly crosses routing, ownership, evidence and presentation layers).
+
+**Bundle:** `docs/context_librarian/generated/pilot_stage3_5_scoping.md`
+
+**Ledger:** `docs/context_librarian/generated/pilot_stage3_5_scoping.ledger.json` (generated/ignored artifact).
+
+#### Commands and captured outputs
+
+```text
+python3 -m tools.context_librarian suggest-profile --query "unify and scope stages 3-5 of the multi-layer plan against BOSS_BUSINESS_INTENT.md" --all
+→ all profiles score=0 / matched=none; no_match; automatic_selection=false
+
+Selected profile: cross_layer_architecture
+
+python3 -m tools.context_librarian build --task-type cross_layer_architecture --query "unify and scope stages 3-5 of the multi-layer plan against BOSS_BUSINESS_INTENT.md" --output docs/context_librarian/generated/pilot_stage3_5_scoping.md
+→ initial bundle: STOP; stale_nodes=4; mandatory_authority_coverage=100%; freshness=33%
+→ after directly verified, independently reviewed metadata refresh and rebuild:
+   PROCEED; stale_nodes=0; mandatory_authority_coverage=100%; freshness=100%;
+   documentation budget=24/24; estimated tokens=8709/9000; estimated savings=92%
+
+python3 -m tools.context_librarian.pilot_preflight --task-type cross_layer_architecture --bundle docs/context_librarian/generated/pilot_stage3_5_scoping.md --ledger docs/context_librarian/generated/pilot_stage3_5_scoping.ledger.json
+→ PROCEED: bundle matches the selected profile and live mandatory tier, and the ledger skeleton's required_sources matches it too. Steps 1-4 are done — the pilot task (step 5) may begin.
+
+python3 -m tools.context_librarian verify-consumption --task-type cross_layer_architecture --query "unify and scope stages 3-5 of the multi-layer plan against BOSS_BUSINESS_INTENT.md" --ledger docs/context_librarian/generated/pilot_stage3_5_scoping.ledger.json
+→ CONSUMPTION: COMPLETE
+```
+
+#### Consumption and tests
+
+- Checklist/manifest: 31 code paths, 8 decisions, 20 documents, 45 test files; every mandatory item has a receipt and there are no waivers.
+- All 45 checklist test scripts: `45/45 exit 0` when run directly in their repository-native script form.
+- `python3 -m pytest test_context_librarian.py -q`: `112 passed`.
+- `python3 test_pilot_preflight.py`: `11/11 passed`.
+- Focused PR2/approval/session/replay suites passed. A repository-wide `pytest -q` is not a valid aggregate harness because several script-style regression files call `sys.exit()` during collection; this was recorded rather than misreported as runtime failure.
+
+#### Quality dimensions
+
+| Dimension | Result |
+|---|---|
+| Relevance | High for mandatory sources; approval/ownership/evidence/formatter sources directly supported the decision. |
+| Coverage | Sufficient after context expansion; incomplete in the generated mandatory tier alone. |
+| False positives | Low-to-moderate; Bug-104 and broader reasoning sources were mostly peripheral but supplied useful authority boundaries. |
+| Omissions | Critical named authorities/specs were omitted: Business Intent, Planning Gate, Master Plan, Message Contract V1/migration/D-012, ROADMAP and CHANGE_CONTROL_LOG. All were consumed manually after bundle-first work. |
+| Overhead | Useful hard gate but one metadata-remediation cycle was required; final bundle reduced the reading estimate by 92%. |
+| Usability | Good after stale metadata was repaired; no-match profile selection still required human judgment. |
+| Traceability | Complete for the mandatory checklist through receipts plus explicit context-expansion record in the plan. |
+
+#### Independent review
+
+Reviewer: `metadata_review` independent sub-agent. It checked included sources, searched omissions, validated three headline conclusions, checked ownership conflicts/runtime claims, and audited the next-PR boundary.
+
+- **Accepted:** Stage 3A must merge into the existing Message Contract PR A; TurnCoordinator remains Phase-0 observation/unimplemented decision runtime; RP5 classifies evidence/claim and returns unchanged text; no unsupported current-production claim was found.
+- **Accepted and corrected:** PR-B repeated/replay synthesis was removed from PR-A DoD; PR A's thin pure formatter wrapper was restored without production caller wiring; atomic cross-turn resource claim was assigned to Layer 4/PostgreSQL, not TurnCoordinator; `ROADMAP.md` and `CHANGE_CONTROL_LOG.md` were added to the source record.
+- **Requires owner decision:** the pre-router PR2 resolver versus Planning Gate rule, plus sequencing/retention/shadow-threshold decisions listed in the plan.
+- **Rejected:** none of the review findings were rejected by the author.
+- **Final re-review:** `PASS`; the reviewer verified all four corrections and found no new runtime/production overclaim.
+
+#### Pilot verdict
+
+**`PASS_WITH_GAPS`.** The complete CLI/enforcement chain ran, sources were mostly relevant, output reduced reading and full checklist traceability exists. `PASS` is not justified because the generated bundle missed critical sources that materially affected both stage boundaries and the next-PR DoD. Recommended Librarian follow-up: add explicit authority/status edges for Business Intent → Planning Gate/Master Plan/ROADMAP/CHANGE_CONTROL_LOG and include active frozen Message Contract specs in `cross_layer_architecture` retrieval.
+
+**Planning verdict produced by the pilot:** `PROCEED_WITH_CONDITIONS`; only the pure existing Message Contract PR A is recommended next, subject to the owner decisions recorded in the alignment plan.
