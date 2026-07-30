@@ -214,12 +214,12 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-30",
-      "last_verified_commit": "9a572581eaf6e952d035f2b2704501db7981934e",
+      "last_verified_commit": "1c51570196c4660980546bdcf8dc337353489be8",
       "confidence": 1.0,
       "notes": [
         "Added after the first real Consumption Enforcement pilot found these sources missing from cross_layer_architecture's mandatory tier, despite Stage 3A's own recommendation resting on this exact contract.",
         "Stage 3A (PR #506, merge 6201e86) implements this decision: core/message_contract.py is the canonical MessageContract (15 MessageState values, frozen V1/D-012 schema); D-013 ratifies evidence_status as optional non-authoritative metadata (never determines/upgrades MessageState, fails closed on unknown values); build_message_contract() and the formatter wrapper are pure with zero production imports/callers/wiring/output change. test_message_contract.py is the test authority (41/41 passing).",
-        "PR B registers a pure, unwired ApprovalLifecycleResult adapter that delegates to the canonical builder; PR C (ActionFact/GatewayReply adapter) remains pending."
+        "PR B (#509, merge 1c51570) registers a pure, unwired ApprovalLifecycleResult adapter that delegates to the canonical builder; PR C (ActionFact/GatewayReply adapter) remains pending."
       ]
     }
   ],
