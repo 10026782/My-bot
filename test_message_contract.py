@@ -119,6 +119,14 @@ def test_success_is_rejected_without_matching_verified_evidence():
         )
 
 
+def test_unknown_evidence_status_is_rejected_for_direct_non_success_state():
+    with pytest.raises(MessageContractValidationError, match="unsupported evidence_status"):
+        _build(
+            state=MessageState.FAILURE,
+            evidence_status="invented_evidence_classification",
+        )
+
+
 def test_verified_success_is_constructible():
     contract = _build(
         state=MessageState.SUCCESS,

@@ -72,6 +72,10 @@ _COMPLETED_EVIDENCE_STATES = frozenset({
     "mixed_with_unknown",
     "no_evidence",
 })
+_CANONICAL_EVIDENCE_STATUSES = frozenset({
+    *_COMPLETED_EVIDENCE_STATES,
+    "approval_pending",
+})
 
 
 def _optional_string(value: Any, field_name: str) -> str | None:
@@ -274,6 +278,11 @@ class MessageContract:
             _optional_string(getattr(self, field_name), field_name)
         if self.execution_verified is not None and not isinstance(self.execution_verified, bool):
             raise MessageContractValidationError("execution_verified must be bool or None")
+        if (
+            self.evidence_status is not None
+            and self.evidence_status not in _CANONICAL_EVIDENCE_STATUSES
+        ):
+            raise MessageContractValidationError("unsupported evidence_status")
         if self.state is MessageState.SUCCESS and (
             self.execution_verified is not True
             or self.evidence_status not in _VERIFIED_SUCCESS_EVIDENCE
