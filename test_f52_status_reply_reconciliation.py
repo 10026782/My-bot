@@ -178,6 +178,40 @@ def test_shadow_log_never_leaks_raw_text_for_pending():
     assert "c3" not in line   # contract_id
 
 
+def test_failed_shadow_log_proves_message_contract_path_without_identifier_leaks():
+    gw = _gw_with_lead_contract()
+    fact = ActionFact(
+        "secret_internal_tool", "secret-contract-id", "failed",
+        "recSECRET1234567890XYZ", "GOOGLE_AUTH_REQUIRED",
+        {"payload_secret": "must-not-leak"},
+    )
+    line = _shadow_log_line(gw, fact)
+
+    assert "outcome=failed" in line
+    assert "mapped_state=failure" in line
+    assert "contract_path=message_contract" in line
+    assert "contract_version=1.0" in line
+    assert "source_component=core.action_fact_message_adapter" in line
+    assert "record_id_leak=False" in line
+    assert "tool_name_leak=False" in line
+    assert "contract_id_leak=False" in line
+    for forbidden in (
+        "secret_internal_tool", "secret-contract-id", "recSECRET1234567890XYZ",
+        "payload_secret", "must-not-leak", "GOOGLE_AUTH_REQUIRED",
+    ):
+        assert forbidden not in line
+
+
+def test_non_failed_shadow_logs_are_legacy_not_message_contract():
+    gw = _gw_with_lead_contract()
+    for fact in (F_EXEC, F_PEND, F_REJ, F_UNK):
+        line = _shadow_log_line(gw, fact)
+        assert "contract_path=legacy" in line
+        assert "contract_path=message_contract" not in line
+        assert "contract_version=" not in line
+        assert "source_component=" not in line
+
+
 # ── 3. on = unified formatter, no leaks ───────────────────────────────────────
 
 def test_on_success_uses_business_label_no_leaks():
@@ -203,6 +237,51 @@ def test_on_failure_maps_code_to_human_text():
         assert "✅" not in out and "✓" not in out       # not a success
     finally:
         _set(None)
+
+
+def test_failed_runtime_message_contract_path_is_byte_identical_to_old_path():
+    """PR D: ה-outcome היחיד שחווט משמר את בייטי ה-formatter מלפני החיווט."""
+    from unittest.mock import patch
+    from core.agent_message_formatter import format_agent_message_with_meta
+    import core.action_fact_message_adapter as adapter_module
+
+    gw = _gw_with_lead_contract()
+    old_state, old_payload = gw._action_fact_to_message(F_FAIL)
+    old_result = format_agent_message_with_meta(old_state, old_payload)
+    calls = []
+    original = adapter_module.from_action_fact
+
+    def recording_adapter(*args, **kwargs):
+        calls.append((args, kwargs))
+        return original(*args, **kwargs)
+
+    with patch.object(adapter_module, "from_action_fact", recording_adapter):
+        new_result = gw._compose_status_reply_unified(F_FAIL)
+
+    assert len(calls) == 1
+    assert new_result[0] == old_result[0]
+    for key in ("message_state", "formatter_version", "fallback_used", "redaction_count"):
+        assert new_result[1][key] == old_result[1][key]
+
+
+def test_only_failed_outcome_uses_message_contract_runtime_adapter():
+    """שער scope של PR D: כל שאר ה-ActionFact outcomes נשארים במסלול הישן."""
+    from unittest.mock import patch
+    import core.action_fact_message_adapter as adapter_module
+
+    gw = _gw_with_lead_contract()
+    calls = []
+    original = adapter_module.from_action_fact
+
+    def recording_adapter(*args, **kwargs):
+        calls.append(args[0].outcome)
+        return original(*args, **kwargs)
+
+    with patch.object(adapter_module, "from_action_fact", recording_adapter):
+        for fact in (F_EXEC, F_FAIL, F_PEND, F_REJ, F_UNK):
+            gw._compose_status_reply_unified(fact)
+
+    assert calls == ["failed"]
 
 
 def test_on_pending_and_rejected_and_unknown():
@@ -268,6 +347,35 @@ def test_formatter_exception_falls_back_to_legacy():
     finally:
         amf.format_agent_message_with_meta = orig
         _set(None)
+
+
+def test_failed_message_contract_exception_logs_distinct_fallback_and_keeps_output():
+    import core.action_gateway as ag_module
+    import core.agent_message_formatter as amf
+
+    gw = _gw_with_lead_contract()
+    cap = _LogCapture()
+    orig_logger = ag_module.logger
+    orig_formatter = amf.format_agent_message_with_meta
+    legacy = gw._compose_status_reply_legacy(F_FAIL).text
+    try:
+        _set("shadow")
+        ag_module.logger = cap
+        amf.format_agent_message_with_meta = lambda *a, **k: (
+            _ for _ in ()
+        ).throw(RuntimeError("safe-test-failure"))
+        result = gw.compose_status_reply(F_FAIL).text
+    finally:
+        amf.format_agent_message_with_meta = orig_formatter
+        ag_module.logger = orig_logger
+        _set(None)
+
+    assert result == legacy
+    warnings = [message for level, message in cap.records if level == "warning"]
+    assert len(warnings) == 1
+    assert "contract_path=message_contract_fallback" in warnings[0]
+    for forbidden in (F_FAIL.tool_name, F_FAIL.contract_id, "GOOGLE_AUTH_REQUIRED"):
+        assert forbidden not in warnings[0]
 
 
 # ── 4b. verified status correctness (outcome -> state mapping) ────────────────

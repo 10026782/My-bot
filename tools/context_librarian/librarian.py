@@ -1533,19 +1533,29 @@ def _render(
     )
 
 
-def build_bundle(
+def _build_bundle_unchecked(
     catalog: Catalog,
     *,
     task_type: str,
-    query: str = "",
-    max_tokens: int | None = None,
-    max_documents: int | None = None,
-    production_claim: bool = False,
-    verified_production_evidence: str | None = None,
-    assert_main: bool = False,
-    assert_on_main_history: bool = False,
-    assert_at_origin_main_tip: bool = False,
-) -> str:
+    query: str,
+    max_tokens: int | None,
+    max_documents: int | None,
+    production_claim: bool,
+    verified_production_evidence: str | None,
+    assert_main: bool,
+    assert_on_main_history: bool,
+    assert_at_origin_main_tip: bool,
+) -> tuple[str, int, int]:
+    """הליבה המשותפת של `build_bundle()`/`estimate_bundle()`: מאמתת קלט,
+    פותרת git provenance, בוחרת nodes, ומרנדרת את טקסט ה-bundle.
+
+    מחזירה `(bundle_text, actual_tokens, token_budget)` בלי לבדוק אם
+    `actual_tokens` נכנס בתוך `token_budget` — ההחלטה הזו (לזרוק שגיאה
+    או לדווח) שייכת לקורא, לעולם לא לפונקציה הזו. כל כשל אחר כאן (task
+    type לא ידוע, תקציבים לא-חוקיים, git provenance שלא הוכח כשנדרש)
+    הוא שגיאת קלט/מבנה, לא שאלת תקציב, וזורק שגיאה תמיד עבור שני
+    הקוראים.
+    """
     if task_type not in catalog.profiles:
         available = ", ".join(sorted(catalog.profiles))
         raise ContextLibrarianError(
@@ -1608,9 +1618,125 @@ def build_bundle(
         expansions,
     )
     actual_tokens = _approximate_char_estimate(bundle)
+    return bundle, actual_tokens, token_budget
+
+
+def build_bundle(
+    catalog: Catalog,
+    *,
+    task_type: str,
+    query: str = "",
+    max_tokens: int | None = None,
+    max_documents: int | None = None,
+    production_claim: bool = False,
+    verified_production_evidence: str | None = None,
+    assert_main: bool = False,
+    assert_on_main_history: bool = False,
+    assert_at_origin_main_tip: bool = False,
+) -> str:
+    bundle, actual_tokens, token_budget = _build_bundle_unchecked(
+        catalog,
+        task_type=task_type,
+        query=query,
+        max_tokens=max_tokens,
+        max_documents=max_documents,
+        production_claim=production_claim,
+        verified_production_evidence=verified_production_evidence,
+        assert_main=assert_main,
+        assert_on_main_history=assert_on_main_history,
+        assert_at_origin_main_tip=assert_at_origin_main_tip,
+    )
     if actual_tokens > token_budget:
         raise ContextLibrarianError(
             f"required context needs approximately {actual_tokens} "
             f"chars/4-estimated tokens, exceeding the {token_budget} budget"
         )
     return bundle
+
+
+@dataclass(frozen=True)
+class BundleEstimate:
+    """תוצאת dry-run שלא זורקת שגיאה, עבור profile+query בודדים.
+
+    `actual_tokens`/`token_budget` הם בדיוק אותם מספרים ש-`build_bundle()`
+    היה משתמש בהם כדי להחליט אם לזרוק שגיאה — זה לא קירוב נפרד וזול
+    שמחושב מתת-קבוצה של שדות (code_paths/test_paths/canonical_docs/notes
+    בלבד היו מפספסים את באנר ה-git-provenance, את טקסט ה-mandatory-
+    decisions, ואת קטעי ה-edges/freshness — כולם נספרים לתקציב האמיתי).
+    `fits` הוא בדיוק `actual_tokens <= token_budget`.
+    """
+
+    task_type: str
+    query: str
+    fits: bool
+    actual_tokens: int
+    token_budget: int
+
+
+def estimate_bundle(
+    catalog: Catalog,
+    *,
+    task_type: str,
+    query: str = "",
+    max_tokens: int | None = None,
+    max_documents: int | None = None,
+    production_claim: bool = False,
+    verified_production_evidence: str | None = None,
+) -> BundleEstimate:
+    """dry run של `build_bundle()`: אותה לוגיקת selection/render/measure,
+    בשימוש חוזר ולא בכפילות, אבל מדווחת חריגת תקציב כ-
+    `BundleEstimate(fits=False, ...)` שמוחזר במקום לזרוק שגיאה.
+
+    מיועדת לבדיקת עריכת קטלוג מועמדת — למשל `load_catalog()` ואז שינוי
+    `catalog.nodes[...]` בזיכרון בלבד — מול כל profile מושפע *לפני*
+    כתיבה לדיסק, כך שקונפליקט תקציב הוא מספר מדווח אחד במקום לולאת
+    edit/test/edit בניסוי וטעייה. git provenance עדיין נאסף ונכלל
+    ברינדור (ה-banner משפיע על actual_tokens בדיוק כמו ב-build_bundle()),
+    אבל בדיקות ה-assertion בסגנון `--assert-main`/`--assert-on-main-history`
+    לעולם לא נאכפות כאן — provenance שלא הוכח כ-main לעולם לא זורק שגיאה
+    מ-estimate_bundle(), רק ההיטל שלו על actual_tokens נכנס לחישוב. ולעולם
+    לא כותבת שום דבר.
+
+    שגיאות מבניות (task type לא ידוע, תקציבים לא-חוקיים, `--production-
+    claim` חסר) גם הן לא שאלות תקציב וזורקות שגיאה בכל זאת, בדיוק כמו
+    `build_bundle()`.
+    """
+    bundle, actual_tokens, token_budget = _build_bundle_unchecked(
+        catalog,
+        task_type=task_type,
+        query=query,
+        max_tokens=max_tokens,
+        max_documents=max_documents,
+        production_claim=production_claim,
+        verified_production_evidence=verified_production_evidence,
+        assert_main=False,
+        assert_on_main_history=False,
+        assert_at_origin_main_tip=False,
+    )
+    del bundle  # dry run: טקסט ה-bundle המרונדר עצמו לא מעניין את הקורא
+    return BundleEstimate(
+        task_type=task_type,
+        query=query,
+        fits=actual_tokens <= token_budget,
+        actual_tokens=actual_tokens,
+        token_budget=token_budget,
+    )
+
+
+def estimate_all_profiles(
+    catalog: Catalog, *, query: str = ""
+) -> tuple[BundleEstimate, ...]:
+    """`estimate_bundle()` עבור כל profile בקטלוג, ממוין לפי id.
+
+    נוחות לתרחיש הנפוץ: בדיקת כל הפרופילים ללא צורך בטיפול פר-פרופיל
+    בשגיאות מבניות. `_check_budget_overflow()` ב-`refresh_after_merge.py`
+    שומרת בכוונה על הלולאה הפרטית שלה במקום להשתמש בפונקציה הזו — היא
+    צריכה ללכוד שגיאה מבנית לכל profile בנפרד ולהמשיך לפרופיל הבא, בעוד
+    `estimate_all_profiles()` הייתה זורקת שגיאה בפרופיל הראשון שנכשל
+    ועוצרת שם. שתיהן, לעומת זאת, קוראות ל-`estimate_bundle()` המשותף
+    ולא לגרסה כפולה של לוגיקת ה-render/measure עצמה.
+    """
+    return tuple(
+        estimate_bundle(catalog, task_type=task_type, query=query)
+        for task_type in sorted(catalog.profiles)
+    )

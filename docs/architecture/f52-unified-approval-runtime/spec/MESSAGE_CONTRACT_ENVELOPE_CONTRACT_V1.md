@@ -239,6 +239,8 @@ class MessageContract:
     reason_code: str | None
     execution_verified: bool | None
     source_module: str
+    evidence_status: str | None      # optional copy of the canonical evidence
+                                      # classification — §2.1
     evidence_ref: str | None         # copied only from the evidence/execution
                                       # authority — never derived — §7
     occurred_at: str | None
@@ -250,6 +252,15 @@ existing contract (`action`, `entity_type`, `entity_name`, `key_fields`,
 forbidden-field list (no raw tool names, table names, provider responses,
 internal exception text, contract UUIDs, Airtable record IDs,
 implementation-specific identifiers).
+
+### 2.1 V1 addendum — `evidence_status` metadata
+
+`evidence_status` is optional metadata copied from the canonical evidence
+classification. It does not determine or upgrade `MessageState`, is not a new
+source of truth, and has no runtime ownership or enforcement authority.
+Unknown or absent values must fail closed or remain `None`, according to the
+existing schema rules. This addendum ratifies schema metadata only and does not
+change runtime behavior.
 
 ---
 

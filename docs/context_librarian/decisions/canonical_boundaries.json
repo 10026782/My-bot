@@ -200,21 +200,26 @@
       "authority_level": "canonical_contract",
       "source_of_truth": {"is_authority": true, "scope": "unified message state/lifecycle contract consumed across TurnCoordinator, RP5, and the UX Formatter", "precedence": "MESSAGE_CONTRACT_ENVELOPE_CONTRACT_V1.md defines the frozen contract; the rollout/migration/implementation plans define its sequencing, not a competing contract"},
       "owner": "ux_f52",
-      "code_paths": [],
-      "test_paths": [],
+      "code_paths": ["core/message_contract.py", "core/approval_lifecycle_message_adapter.py"],
+      "test_paths": ["test_message_contract.py", "test_approval_lifecycle_message_adapter.py"],
       "canonical_docs": [
-        {"path": "docs/architecture/f52-unified-approval-runtime/spec/MESSAGE_CONTRACT_ENVELOPE_CONTRACT_V1.md", "role": "frozen cross-layer message contract (D-012)", "status": "active"},
-        {"path": "docs/architecture/f52-unified-approval-runtime/rollout/MESSAGE_CONTRACT_ENVELOPE_MIGRATION_PLAN.md", "role": "migration sequencing for the envelope contract", "status": "active"},
-        {"path": "docs/architecture/f52-unified-approval-runtime/rollout/UNIFIED_MESSAGE_IMPLEMENTATION_PLAN.md", "role": "PR sequence implementing the unified message standard", "status": "active"}
+        {"path": "docs/architecture/f52-unified-approval-runtime/spec/MESSAGE_CONTRACT_ENVELOPE_CONTRACT_V1.md", "role": "frozen cross-layer message contract (D-012, D-013 evidence_status addendum)", "status": "active"},
+        {"path": "docs/architecture/f52-unified-approval-runtime/decisions/DECISION_LOG.md", "role": "D-012 (MessageContract canonical) and D-013 (evidence_status ratified as non-authoritative metadata)", "status": "active"},
+        {"path": "docs/architecture/message_contract/MESSAGE_CONTRACT_ENVELOPE_FOUNDATION_SPEC.md", "role": "Stage 3A foundation SPEC implementing this decision", "status": "active"},
+        {"path": "docs/architecture/message_contract/APPROVAL_LIFECYCLE_RESULT_ADAPTER_SPEC.md", "role": "PR B pure ApprovalLifecycleResult adapter SPEC", "status": "active"},
+        {"path": "docs/architecture/f52-unified-approval-runtime/rollout/MESSAGE_CONTRACT_ENVELOPE_MIGRATION_PLAN.md", "role": "migration sequencing for the envelope contract (PR A merged, PR B/C pending)", "status": "active"},
+        {"path": "docs/architecture/f52-unified-approval-runtime/rollout/UNIFIED_MESSAGE_IMPLEMENTATION_PLAN.md", "role": "PR sequence implementing the unified message standard", "status": "active"},
+        {"path": "docs/architecture/multilayer/BOSS_MULTILAYER_ALIGNMENT_PLAN.md", "role": "owner-approved Stage 3A scope/DoD (§16-17); PR B boundary and repeated/already_cancelled deferral (§17)", "status": "active"}
       ],
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-30",
-      "last_verified_commit": "55312ab2096786f2892853d8b2f6d477b6e1cf12",
+      "last_verified_commit": "1c51570196c4660980546bdcf8dc337353489be8",
       "confidence": 1.0,
       "notes": [
-        "Added after the first real Consumption Enforcement pilot found these three sources missing from cross_layer_architecture's mandatory tier, despite Stage 3A's own recommendation resting on this exact contract.",
-        "docs/architecture/f52-unified-approval-runtime/decisions/DECISION_LOG.md was found already present in the mandatory tier via decision.actioncontracts_authority — not duplicated here."
+        "Added after the first real Consumption Enforcement pilot found these sources missing from cross_layer_architecture's mandatory tier, despite Stage 3A's own recommendation resting on this exact contract.",
+        "Stage 3A (PR #506, merge 6201e86) implements this decision: core/message_contract.py is the canonical MessageContract (15 MessageState values, frozen V1/D-012 schema); D-013 ratifies evidence_status as optional non-authoritative metadata (never determines/upgrades MessageState, fails closed on unknown values); build_message_contract() and the formatter wrapper are pure with zero production imports/callers/wiring/output change. test_message_contract.py is the test authority (41/41 passing).",
+        "PR B (#509, merge 1c51570) registers a pure, unwired ApprovalLifecycleResult adapter that delegates to the canonical builder; PR C (ActionFact/GatewayReply adapter) remains pending."
       ]
     }
   ],

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import re
 import shutil
 from pathlib import Path
@@ -10,10 +11,13 @@ import pytest
 
 from tools.context_librarian import librarian
 from tools.context_librarian.librarian import (
+    BundleEstimate,
     ContextLibrarianError,
     assess_profile_suggestions,
     build_bundle,
     consumption_checklist,
+    estimate_all_profiles,
+    estimate_bundle,
     evaluate_workflow_gate,
     load_catalog,
     suggest_profiles,
@@ -304,6 +308,77 @@ def test_token_budget_fails_closed(catalog):
             query="approval message",
             max_tokens=100,
         )
+
+
+def test_estimate_bundle_matches_build_bundle_when_it_fits(catalog):
+    kwargs = {"task_type": "approval_ux", "query": "approval message"}
+    bundle = build_bundle(catalog, **kwargs)
+    result = estimate_bundle(catalog, **kwargs)
+    assert result.fits is True
+    assert result.actual_tokens == math.ceil(len(bundle) / 4)
+    assert result.task_type == "approval_ux"
+    assert result.query == "approval message"
+
+
+def test_estimate_bundle_reports_overflow_without_raising(catalog):
+    result = estimate_bundle(
+        catalog, task_type="approval_ux", query="approval message", max_tokens=100
+    )
+    assert result.fits is False
+    assert result.token_budget == 100
+    assert result.actual_tokens > 100
+
+
+def test_estimate_bundle_actual_tokens_matches_build_bundle_raised_value(catalog):
+    with pytest.raises(ContextLibrarianError) as excinfo:
+        build_bundle(
+            catalog, task_type="approval_ux", query="approval message", max_tokens=100
+        )
+    raised_tokens = int(re.search(r"approximately (\d+)", str(excinfo.value)).group(1))
+    result = estimate_bundle(
+        catalog, task_type="approval_ux", query="approval message", max_tokens=100
+    )
+    assert result.actual_tokens == raised_tokens
+
+
+def test_estimate_bundle_still_raises_on_structural_errors(catalog):
+    with pytest.raises(ContextLibrarianError, match="unknown task type"):
+        estimate_bundle(catalog, task_type="not_a_real_profile")
+
+
+def test_estimate_bundle_ignores_off_main_state_unlike_assert_on_main_history(
+    catalog, monkeypatch
+):
+    off_main = {
+        "commit": "abc1234",
+        "branch": "feature-x",
+        "on_main": "no",
+        "on_main_history": "no",
+        "at_origin_main_tip": "no",
+    }
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: off_main)
+
+    with pytest.raises(ContextLibrarianError, match="assert-main"):
+        build_bundle(
+            catalog,
+            task_type="approval_ux",
+            query="approval message",
+            assert_on_main_history=True,
+        )
+
+    # ל-estimate_bundle אין פרמטר assert_on_main_history/assert_main בכלל —
+    # החלטת provenance אורתוגונלית ל"האם זה נכנס בתקציב."
+    result = estimate_bundle(catalog, task_type="approval_ux", query="approval message")
+    assert isinstance(result, BundleEstimate)
+
+
+def test_estimate_all_profiles_covers_every_profile_sorted(catalog):
+    results = estimate_all_profiles(catalog, query="approval message")
+    assert [r.task_type for r in results] == sorted(catalog.profiles)
+    assert len(results) == len(catalog.profiles)
+    for r in results:
+        assert isinstance(r, BundleEstimate)
+        assert r.fits == (r.actual_tokens <= r.token_budget)
 
 
 def test_document_budget_is_enforced(catalog):
@@ -1530,6 +1605,69 @@ def test_verify_consumption_validates_top_level_identity_independently_of_per_it
     assert result.status == "CONCLUSION_BLOCKED"
     assert not result.unreviewed_sources
     assert any("top-level identity" in reason for reason in result.blocked_reasons)
+
+
+def test_cli_estimate_single_profile_fits(monkeypatch, capsys):
+    from tools.context_librarian.__main__ import main
+
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    exit_code = main(
+        ["estimate", "--task-type", "approval_ux", "--query", "approval message"]
+    )
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "approval_ux\tFITS\t" in out
+
+
+def test_cli_estimate_single_profile_over_budget_does_not_raise(monkeypatch, capsys):
+    from tools.context_librarian.__main__ import main
+
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    exit_code = main(
+        [
+            "estimate",
+            "--task-type",
+            "approval_ux",
+            "--query",
+            "approval message",
+            "--max-tokens",
+            "100",
+        ]
+    )
+    assert exit_code == 2
+    out = capsys.readouterr().out
+    assert "approval_ux\tOVER_BUDGET\t" in out
+
+
+def test_cli_estimate_all_profiles(catalog, monkeypatch, capsys):
+    from tools.context_librarian.__main__ import main
+
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    # query שנבחר בכוונה כך שהוא מושך מספיק conditional optional evidence
+    # כדי לחרוג באופן לגיטימי בפרופיל אמיתי אחד לפחות (rp5_evidence_mismatch)
+    # -- בודק ש---all-profiles מדווח את התוצאה האמיתית של כל פרופיל
+    # (תמהיל FITS/OVER_BUDGET) במקום להניח התאמה אוניברסלית ל-query
+    # משותף שרירותי.
+    exit_code = main(["estimate", "--all-profiles", "--query", "approval message"])
+    out = capsys.readouterr().out
+    lines = [line for line in out.splitlines() if line.strip()]
+    assert len(lines) == len(catalog.profiles)
+    reported = {line.split("\t")[0] for line in lines}
+    assert reported == set(catalog.profiles)
+    any_over_budget = any("OVER_BUDGET" in line for line in lines)
+    assert any_over_budget, (
+        "test query no longer overflows any profile — pick a new query that "
+        "legitimately overflows at least one, so this test still exercises "
+        "the mixed FITS/OVER_BUDGET reporting path"
+    )
+    assert exit_code == 2
+
+
+def test_cli_estimate_requires_task_type_or_all_profiles():
+    from tools.context_librarian.__main__ import main
+
+    with pytest.raises(SystemExit):
+        main(["estimate", "--query", "q"])
 
 
 def test_cli_verify_consumption_subcommand_exists_and_is_wired(tmp_path, monkeypatch, capsys):

@@ -51,7 +51,10 @@ text stays byte-identical throughout).
 **Acceptance:** see `spec/MESSAGE_CONTRACT_ENVELOPE_CONTRACT_V1.md` §12 and the
 prior spec turn's proposed test matrix (builder purity, no-upgrade, mapping
 table coverage, forbidden-field fuzzing, missing-data policy, unknown-state
-fail-safe, `already_completed`/`already_cancelled` synthesis, observability).
+fail-safe, direct state coverage, observability). PR A does not require
+`already_completed`/`already_cancelled` synthesis; that synthesis is explicitly
+deferred to PR B according to
+`docs/architecture/multilayer/BOSS_MULTILAYER_ALIGNMENT_PLAN.md` §17.
 
 ---
 
