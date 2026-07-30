@@ -1546,15 +1546,15 @@ def _build_bundle_unchecked(
     assert_on_main_history: bool,
     assert_at_origin_main_tip: bool,
 ) -> tuple[str, int, int]:
-    """Shared core of `build_bundle()`/`estimate_bundle()`: validates inputs,
-    resolves git provenance, selects nodes, and renders the bundle text.
+    """הליבה המשותפת של `build_bundle()`/`estimate_bundle()`: מאמתת קלט,
+    פותרת git provenance, בוחרת nodes, ומרנדרת את טקסט ה-bundle.
 
-    Returns `(bundle_text, actual_tokens, token_budget)` WITHOUT checking
-    whether `actual_tokens` fits `token_budget` — that decision (raise vs.
-    report) belongs to the caller, never to this function. Every other
-    failure here (unknown task type, bad budgets, unproven git provenance
-    when asserted) is a structural/input error, not a budget question, and
-    always raises for both callers.
+    מחזירה `(bundle_text, actual_tokens, token_budget)` בלי לבדוק אם
+    `actual_tokens` נכנס בתוך `token_budget` — ההחלטה הזו (לזרוק שגיאה
+    או לדווח) שייכת לקורא, לעולם לא לפונקציה הזו. כל כשל אחר כאן (task
+    type לא ידוע, תקציבים לא-חוקיים, git provenance שלא הוכח כשנדרש)
+    הוא שגיאת קלט/מבנה, לא שאלת תקציב, וזורק שגיאה תמיד עבור שני
+    הקוראים.
     """
     if task_type not in catalog.profiles:
         available = ", ".join(sorted(catalog.profiles))
@@ -1656,15 +1656,14 @@ def build_bundle(
 
 @dataclass(frozen=True)
 class BundleEstimate:
-    """Non-raising dry-run result for one profile+query.
+    """תוצאת dry-run שלא זורקת שגיאה, עבור profile+query בודדים.
 
-    `actual_tokens`/`token_budget` are the exact same numbers `build_bundle()`
-    would use to decide whether to raise — this is not a separate, cheaper
-    approximation computed from a subset of fields (code_paths/test_paths/
-    canonical_docs/notes alone would miss the git-provenance banner, the
-    mandatory-decisions text, and the edges/freshness sections, all of which
-    count toward the real budget). `fits` is exactly `actual_tokens <=
-    token_budget`.
+    `actual_tokens`/`token_budget` הם בדיוק אותם מספרים ש-`build_bundle()`
+    היה משתמש בהם כדי להחליט אם לזרוק שגיאה — זה לא קירוב נפרד וזול
+    שמחושב מתת-קבוצה של שדות (code_paths/test_paths/canonical_docs/notes
+    בלבד היו מפספסים את באנר ה-git-provenance, את טקסט ה-mandatory-
+    decisions, ואת קטעי ה-edges/freshness — כולם נספרים לתקציב האמיתי).
+    `fits` הוא בדיוק `actual_tokens <= token_budget`.
     """
 
     task_type: str
@@ -1684,20 +1683,23 @@ def estimate_bundle(
     production_claim: bool = False,
     verified_production_evidence: str | None = None,
 ) -> BundleEstimate:
-    """Dry run of `build_bundle()`: same selection/render/measure logic,
-    reused rather than duplicated, but reports a budget miss as a returned
-    `BundleEstimate(fits=False, ...)` instead of raising.
+    """dry run של `build_bundle()`: אותה לוגיקת selection/render/measure,
+    בשימוש חוזר ולא בכפילות, אבל מדווחת חריגת תקציב כ-
+    `BundleEstimate(fits=False, ...)` שמוחזר במקום לזרוק שגיאה.
 
-    Intended for checking a candidate catalog edit — e.g. `load_catalog()`
-    then mutate `catalog.nodes[...]` in memory — against every affected
-    profile *before* writing anything to disk, so a budget conflict is a
-    single reported number instead of an edit/test/edit trial-and-error
-    loop. Never asserts git provenance (`--assert-main` and friends are a
-    provenance question, not a budget one) and never writes anything.
+    מיועדת לבדיקת עריכת קטלוג מועמדת — למשל `load_catalog()` ואז שינוי
+    `catalog.nodes[...]` בזיכרון בלבד — מול כל profile מושפע *לפני*
+    כתיבה לדיסק, כך שקונפליקט תקציב הוא מספר מדווח אחד במקום לולאת
+    edit/test/edit בניסוי וטעייה. git provenance עדיין נאסף ונכלל
+    ברינדור (ה-banner משפיע על actual_tokens בדיוק כמו ב-build_bundle()),
+    אבל בדיקות ה-assertion בסגנון `--assert-main`/`--assert-on-main-history`
+    לעולם לא נאכפות כאן — provenance שלא הוכח כ-main לעולם לא זורק שגיאה
+    מ-estimate_bundle(), רק ההיטל שלו על actual_tokens נכנס לחישוב. ולעולם
+    לא כותבת שום דבר.
 
-    Structural errors (unknown task type, non-positive budgets, missing
-    `--production-claim`) are not budget questions either and still raise,
-    identically to `build_bundle()`.
+    שגיאות מבניות (task type לא ידוע, תקציבים לא-חוקיים, `--production-
+    claim` חסר) גם הן לא שאלות תקציב וזורקות שגיאה בכל זאת, בדיוק כמו
+    `build_bundle()`.
     """
     bundle, actual_tokens, token_budget = _build_bundle_unchecked(
         catalog,
@@ -1711,7 +1713,7 @@ def estimate_bundle(
         assert_on_main_history=False,
         assert_at_origin_main_tip=False,
     )
-    del bundle  # dry run: the rendered text itself is not the caller's concern
+    del bundle  # dry run: טקסט ה-bundle המרונדר עצמו לא מעניין את הקורא
     return BundleEstimate(
         task_type=task_type,
         query=query,
@@ -1724,12 +1726,15 @@ def estimate_bundle(
 def estimate_all_profiles(
     catalog: Catalog, *, query: str = ""
 ) -> tuple[BundleEstimate, ...]:
-    """`estimate_bundle()` for every profile in the catalog, sorted by id.
+    """`estimate_bundle()` עבור כל profile בקטלוג, ממוין לפי id.
 
-    The same "rebuild every profile against a candidate catalog" idiom
-    `refresh_after_merge.py`'s `_check_budget_overflow()` already used
-    privately for its own narrower mechanical refreshes — exposed here as a
-    reusable, public building block instead of staying duplicated.
+    נוחות לתרחיש הנפוץ: בדיקת כל הפרופילים ללא צורך בטיפול פר-פרופיל
+    בשגיאות מבניות. `_check_budget_overflow()` ב-`refresh_after_merge.py`
+    שומרת בכוונה על הלולאה הפרטית שלה במקום להשתמש בפונקציה הזו — היא
+    צריכה ללכוד שגיאה מבנית לכל profile בנפרד ולהמשיך לפרופיל הבא, בעוד
+    `estimate_all_profiles()` הייתה זורקת שגיאה בפרופיל הראשון שנכשל
+    ועוצרת שם. שתיהן, לעומת זאת, קוראות ל-`estimate_bundle()` המשותף
+    ולא לגרסה כפולה של לוגיקת ה-render/measure עצמה.
     """
     return tuple(
         estimate_bundle(catalog, task_type=task_type, query=query)

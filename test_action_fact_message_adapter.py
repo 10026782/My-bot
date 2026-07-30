@@ -121,9 +121,9 @@ def test_reason_code_mapping():
     executed = from_action_fact(_fact(outcome="executed"))
     assert executed.reason_code is None
 
-    # Formatter-facing metadata is carried in the public display payload too;
-    # otherwise MessageContract's canonical formatter wrapper cannot preserve
-    # the existing failed-action wording.
+    # metadata שפונה ל-formatter נישא גם ב-display payload הציבורי;
+    # אחרת ה-wrapper הקנוני של MessageContract לא יכול לשמר את הניסוח
+    # הקיים של פעולה שנכשלה.
     assert failed.display_payload.reason_code == "GOOGLE_AUTH_REQUIRED"
     assert rejected.display_payload.reason_code == "ACTION_REJECTED"
 
@@ -271,7 +271,7 @@ def test_adapter_module_has_no_side_effect_authority_imports_or_calls():
 
 
 def test_only_action_gateway_imports_the_adapter_for_pr_d_runtime():
-    """PR D scope guard: exactly one production module owns the first wire."""
+    """שער scope של PR D: מודול production יחיד בדיוק מחזיק בחיווט הראשון."""
     repo_root = Path(__file__).parent
     for filename in ("app.py", "tma_api.py"):
         content = (repo_root / filename).read_text(encoding="utf-8")

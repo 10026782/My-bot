@@ -366,8 +366,8 @@ def test_estimate_bundle_ignores_off_main_state_unlike_assert_on_main_history(
             assert_on_main_history=True,
         )
 
-    # estimate_bundle takes no assert_on_main_history/assert_main parameter at
-    # all -- a provenance decision is orthogonal to "would this fit its budget."
+    # ל-estimate_bundle אין פרמטר assert_on_main_history/assert_main בכלל —
+    # החלטת provenance אורתוגונלית ל"האם זה נכנס בתקציב."
     result = estimate_bundle(catalog, task_type="approval_ux", query="approval message")
     assert isinstance(result, BundleEstimate)
 
@@ -1643,11 +1643,11 @@ def test_cli_estimate_all_profiles(catalog, monkeypatch, capsys):
     from tools.context_librarian.__main__ import main
 
     monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
-    # Deliberately a query that pulls in enough conditional optional evidence
-    # to legitimately overflow at least one real profile (rp5_evidence_mismatch)
-    # -- exercising that --all-profiles reports every profile's real outcome
-    # (mixed FITS/OVER_BUDGET) rather than assuming a universal fit for an
-    # arbitrary shared query.
+    # query שנבחר בכוונה כך שהוא מושך מספיק conditional optional evidence
+    # כדי לחרוג באופן לגיטימי בפרופיל אמיתי אחד לפחות (rp5_evidence_mismatch)
+    # -- בודק ש---all-profiles מדווח את התוצאה האמיתית של כל פרופיל
+    # (תמהיל FITS/OVER_BUDGET) במקום להניח התאמה אוניברסלית ל-query
+    # משותף שרירותי.
     exit_code = main(["estimate", "--all-profiles", "--query", "approval message"])
     out = capsys.readouterr().out
     lines = [line for line in out.splitlines() if line.strip()]
@@ -1655,7 +1655,12 @@ def test_cli_estimate_all_profiles(catalog, monkeypatch, capsys):
     reported = {line.split("\t")[0] for line in lines}
     assert reported == set(catalog.profiles)
     any_over_budget = any("OVER_BUDGET" in line for line in lines)
-    assert exit_code == (2 if any_over_budget else 0)
+    assert any_over_budget, (
+        "test query no longer overflows any profile — pick a new query that "
+        "legitimately overflows at least one, so this test still exercises "
+        "the mixed FITS/OVER_BUDGET reporting path"
+    )
+    assert exit_code == 2
 
 
 def test_cli_estimate_requires_task_type_or_all_profiles():
