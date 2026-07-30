@@ -158,3 +158,31 @@ node IDs, the existing edge vocabulary, and an explicit profile opt-in. New
 metadata belongs under a namespaced `extensions` object. Breaking changes
 require a new schema major version; new edge types require a schema minor
 version plus explicit traversal approval.
+
+## Freshness automation
+
+`tools/context_librarian/refresh_after_merge.py` mechanically bumps
+`last_verified_commit` for nodes whose already-registered code_paths/
+test_paths/canonical_docs changed between two commits — nothing more. It
+never adds, removes, or edits a canonical_docs/code_paths/edges/budget
+entry; anything that would require that (a changed file the catalog doesn't
+already claim, a broken edge or stale reference caught at load time, or a
+refresh that would blow a profile's token budget) comes back as a
+`REVIEW_REQUIRED`/`ERROR` item for a human to look at, never applied
+automatically.
+
+- `python -m tools.context_librarian.refresh_after_merge --check --base <ref> --head <ref>` —
+  read-only; exit 0 (`OK`), 1 (`REVIEW_REQUIRED`), or 2 (`ERROR`). This is
+  what CI runs (warning-only on introduction — see `.github/workflows/ci.yml`).
+- `--apply` instead of `--check` — writes the mechanical bumps to disk; used
+  by the versioned `.githooks/post-merge` hook after a local merge/pull.
+  Never auto-commits; the developer reviews and commits the refreshed JSON
+  like any other change.
+- `python -m tools.context_librarian.manage_hooks install` — points this
+  repo's (local only, never `--global`) `core.hooksPath` at `.githooks/` so
+  the post-merge hook actually runs. `... check` reports whether it's wired
+  up correctly.
+
+See `test_refresh_after_merge.py` for the full behavior contract (commit
+refresh, stale reference, unknown new canonical file, broken edge,
+token-budget overflow, hook install/check, and CLI exit codes).

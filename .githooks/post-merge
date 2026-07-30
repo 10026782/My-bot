@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Versioned Context Librarian post-merge hook.
+#
+# Installed via: python -m tools.context_librarian.manage_hooks install
+# Checked via:   python -m tools.context_librarian.manage_hooks check
+#
+# Applies a MECHANICAL catalog refresh only -- last_verified_commit bumps
+# for nodes whose already-registered paths changed in the merge. Never
+# invents new catalog entries, never auto-commits (the developer reviews
+# and commits the refreshed JSON like any other change), and never blocks
+# the merge that already happened -- a post-merge hook cannot undo it.
+# REVIEW_REQUIRED/ERROR output is printed for a human to act on before the
+# next commit; this hook always exits 0 so it never breaks `git merge`/
+# `git pull` itself.
+set -uo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+cd "$REPO_ROOT" || exit 0
+
+PREV_HEAD="$(git rev-parse ORIG_HEAD 2>/dev/null || echo "")"
+NEW_HEAD="$(git rev-parse HEAD 2>/dev/null || echo "")"
+
+if [ -z "$PREV_HEAD" ] || [ -z "$NEW_HEAD" ] || [ "$PREV_HEAD" = "$NEW_HEAD" ]; then
+  exit 0
+fi
+
+python3 -m tools.context_librarian.refresh_after_merge \
+  --apply --base "$PREV_HEAD" --head "$NEW_HEAD"
+status=$?
+
+if [ "$status" -eq 1 ]; then
+  echo "[context-librarian] REVIEW_REQUIRED above needs a human decision before your next commit."
+elif [ "$status" -eq 2 ]; then
+  echo "[context-librarian] catalog error above -- the merge itself is unaffected, but please investigate."
+fi
+
+exit 0
