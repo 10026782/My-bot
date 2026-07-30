@@ -52,10 +52,10 @@
       {"name": "FEATURE_SINGLE_SPEAKER_APPROVAL_UX", "default_state": "off", "documented_state": "PR #471; gates which component owns final approval-turn wording (Gateway vs legacy routing). Identifier/tool-name redaction in build_approval_lifecycle_result()/_safe_contract_business_description() is unconditional and applies even when this flag is off (BUG-118)", "evidence_scope": "code default (feature_flags.py) plus CHANGELOG.md PR #471 entry"}
     ],
     "valid_from": "2026-07-30",
-    "last_verified_commit": "9a572581eaf6e952d035f2b2704501db7981934e",
+    "last_verified_commit": "1c51570196c4660980546bdcf8dc337353489be8",
     "confidence": 0.9,
     "notes": [
-      "Stage 3A merged, PR #506 (6201e86): core/message_contract.py is the canonical MessageContract (15 states); test_message_contract.py is the foundation test authority. D-013 ratifies evidence_status as non-authoritative metadata. PR B adds only the pure, unwired ApprovalLifecycleResult adapter and its focused tests; PR C remains pending.",
+      "Stage 3A merged, PR #506 (6201e86): core/message_contract.py is the canonical MessageContract (15 states); test_message_contract.py is the foundation test authority. D-013 ratifies evidence_status as non-authoritative metadata. PR B (#509, merge 1c51570) adds only the pure, unwired ApprovalLifecycleResult adapter and its focused tests; PR C remains pending.",
       "display_payload is the canonical user-message payload contract in F52 planning decisions.",
       "User messages must not expose record IDs, contract IDs, or internal tool names.",
       "RP5 is loaded for UX tasks only when evidence/completion claims are relevant.",
