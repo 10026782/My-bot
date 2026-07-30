@@ -181,3 +181,19 @@ This log records planning decisions for the F52 program. It is not runtime imple
   `evidence_ref` source for PR B/PR C; `turn_context_source` type
   (str literal vs. `Enum`) — none block PR A. See
   `spec/MESSAGE_CONTRACT_ENVELOPE_CONTRACT_V1.md` §12 for the full list.
+
+## D-013 — Ratify `evidence_status` as optional V1 metadata
+
+- Date: 30/07/2026
+- Status: Closed for the V1 metadata contract; no runtime behavior change
+- Decision: `MessageContract.evidence_status` is optional metadata copied from
+  the canonical evidence classification. It does not determine or upgrade
+  `MessageState`, is not a new source of truth, and has no runtime ownership or
+  enforcement authority. Unknown or absent values must fail closed or remain
+  `None`, according to the existing schema rules.
+- Rationale: Stage 3A carries the already-supplied evidence classification for
+  audit and round-trip observability. Explicit ratification keeps that metadata
+  subordinate to the existing evidence authority and the frozen state
+  precedence rules.
+- Affected document:
+  `spec/MESSAGE_CONTRACT_ENVELOPE_CONTRACT_V1.md` §2.1.

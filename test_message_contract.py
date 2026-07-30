@@ -199,6 +199,58 @@ def test_serialization_round_trip_is_json_compatible():
     assert restored.evidence_ref == "evidence-123"
 
 
+@pytest.mark.parametrize(
+    "state",
+    (
+        MessageState.NEEDS_INPUT,
+        MessageState.ALREADY_COMPLETED,
+        MessageState.ALREADY_CANCELLED,
+        MessageState.NEUTRAL,
+    ),
+)
+def test_direct_state_contract_round_trip_formatting_and_input_purity(state):
+    original_input = {
+        "action": "create",
+        "entity_type": "task",
+        "entity_name": "מעקב ספק",
+        "key_fields": [{"label": "תאריך", "value": "01/08/2026"}],
+        "count": 1,
+        "items": [{"entity_name": "פריט בטוח"}],
+        "reason_code": None,
+        "execution_verified": None,
+        "occurred_at": None,
+    }
+    input_snapshot = json.loads(json.dumps(original_input, ensure_ascii=False))
+
+    contract = MessageContract(
+        version=MESSAGE_CONTRACT_VERSION,
+        state=state,
+        display_payload=DisplayPayload.from_mapping(original_input),
+        reply_owner="gateway",
+        turn_context_source=TurnContextSource.LEGACY_INGRESS,
+        source_module="test_message_contract",
+    )
+    assert contract.state is state
+    assert contract.display_payload.entity_name == "מעקב ספק"
+
+    serialized = contract.to_dict()
+    assert serialized["state"] == state.value
+    serialized_snapshot = json.loads(json.dumps(serialized, ensure_ascii=False))
+    restored = MessageContract.from_dict(serialized)
+    assert restored == contract
+    assert restored.to_dict() == serialized_snapshot
+
+    contract_snapshot = contract.to_dict()
+    text, meta = format_message_contract_with_meta(contract)
+    assert text == format_agent_message(state.value, contract.display_payload.to_dict())
+    assert meta["state"] == state.value
+    assert meta["formatter_state"] == "unrecognized"
+    assert meta["fallback_used"] is True
+    assert contract.to_dict() == contract_snapshot
+    assert serialized == serialized_snapshot
+    assert original_input == input_snapshot
+
+
 def test_deserialization_rejects_unknown_state_and_fields():
     data = _build().to_dict()
     data["state"] = "bogus"
