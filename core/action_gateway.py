@@ -2738,7 +2738,7 @@ class ActionGateway:
                 "message_contract_fallback" if fact.outcome == "failed" else "legacy"
             )
             logger.warning(
-                "[ActionGateway] unified status formatter failed: "
+                "[ActionGateway] unified status formatter נכשל: "
                 "error_type=%s contract_path=%s",
                 type(exc).__name__, contract_path,
             )
@@ -2842,10 +2842,10 @@ class ActionGateway:
         """Returns (text, meta). meta is the formatter's own observability
         record (message_state, formatter_version, fallback_used,
         redaction_count) — safe to log as-is, never contains raw text/ids."""
-        # PR D intentionally wires exactly one live outcome first.  Failed
-        # ActionFacts need no evidence-state upgrade, so they can cross the
-        # MessageContract boundary without changing evidence authority.  The
-        # other outcomes retain their existing path until separately reviewed.
+        # PR D מחווט בכוונה outcome חי אחד בדיוק, בשלב ראשון. ActionFact-ים
+        # מסוג failed לא צריכים שדרוג evidence-state, כך שהם יכולים לחצות
+        # את גבול ה-MessageContract בלי לשנות evidence authority. שאר
+        # ה-outcomes נשארים במסלול הקיים שלהם עד סקירה נפרדת.
         if fact.outcome == "failed":
             from core.action_fact_message_adapter import from_action_fact
             from core.message_contract import format_message_contract_with_meta
@@ -2854,8 +2854,8 @@ class ActionGateway:
             description = _safe_contract_business_description(contract) if contract else None
             message = from_action_fact(fact, description=description)
             text, contract_meta = format_message_contract_with_meta(message)
-            # Keep the existing private helper's observability shape stable;
-            # MessageContract metadata remains available at its own boundary.
+            # שומר על צורת ה-observability של ה-helper הפרטי הקיים יציבה;
+            # metadata של MessageContract נשאר זמין בגבול שלו.
             return text, {
                 "message_state": contract_meta["formatter_state"],
                 "formatter_version": contract_meta["formatter_version"],

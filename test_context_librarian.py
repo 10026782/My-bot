@@ -1655,7 +1655,12 @@ def test_cli_estimate_all_profiles(catalog, monkeypatch, capsys):
     reported = {line.split("\t")[0] for line in lines}
     assert reported == set(catalog.profiles)
     any_over_budget = any("OVER_BUDGET" in line for line in lines)
-    assert exit_code == (2 if any_over_budget else 0)
+    assert any_over_budget, (
+        "test query no longer overflows any profile — pick a new query that "
+        "legitimately overflows at least one, so this test still exercises "
+        "the mixed FITS/OVER_BUDGET reporting path"
+    )
+    assert exit_code == 2
 
 
 def test_cli_estimate_requires_task_type_or_all_profiles():

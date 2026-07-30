@@ -1690,8 +1690,11 @@ def estimate_bundle(
     מיועדת לבדיקת עריכת קטלוג מועמדת — למשל `load_catalog()` ואז שינוי
     `catalog.nodes[...]` בזיכרון בלבד — מול כל profile מושפע *לפני*
     כתיבה לדיסק, כך שקונפליקט תקציב הוא מספר מדווח אחד במקום לולאת
-    edit/test/edit בניסוי וטעייה. לעולם לא בודקת git provenance
-    (`--assert-main` וכדומה היא שאלת provenance, לא שאלת תקציב) ולעולם
+    edit/test/edit בניסוי וטעייה. git provenance עדיין נאסף ונכלל
+    ברינדור (ה-banner משפיע על actual_tokens בדיוק כמו ב-build_bundle()),
+    אבל בדיקות ה-assertion בסגנון `--assert-main`/`--assert-on-main-history`
+    לעולם לא נאכפות כאן — provenance שלא הוכח כ-main לעולם לא זורק שגיאה
+    מ-estimate_bundle(), רק ההיטל שלו על actual_tokens נכנס לחישוב. ולעולם
     לא כותבת שום דבר.
 
     שגיאות מבניות (task type לא ידוע, תקציבים לא-חוקיים, `--production-
@@ -1725,10 +1728,13 @@ def estimate_all_profiles(
 ) -> tuple[BundleEstimate, ...]:
     """`estimate_bundle()` עבור כל profile בקטלוג, ממוין לפי id.
 
-    אותו אידיום של "בנייה מחדש של כל profile מול קטלוג מועמד" ש-
-    `_check_budget_overflow()` ב-`refresh_after_merge.py` כבר השתמש בו
-    באופן פרטי לרענונים המכניים הצרים שלו — חשוף כאן כאבן בניין ציבורית
-    לשימוש חוזר במקום להישאר בכפילות.
+    נוחות לתרחיש הנפוץ: בדיקת כל הפרופילים ללא צורך בטיפול פר-פרופיל
+    בשגיאות מבניות. `_check_budget_overflow()` ב-`refresh_after_merge.py`
+    שומרת בכוונה על הלולאה הפרטית שלה במקום להשתמש בפונקציה הזו — היא
+    צריכה ללכוד שגיאה מבנית לכל profile בנפרד ולהמשיך לפרופיל הבא, בעוד
+    `estimate_all_profiles()` הייתה זורקת שגיאה בפרופיל הראשון שנכשל
+    ועוצרת שם. שתיהן, לעומת זאת, קוראות ל-`estimate_bundle()` המשותף
+    ולא לגרסה כפולה של לוגיקת ה-render/measure עצמה.
     """
     return tuple(
         estimate_bundle(catalog, task_type=task_type, query=query)

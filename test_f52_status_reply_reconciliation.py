@@ -240,7 +240,7 @@ def test_on_failure_maps_code_to_human_text():
 
 
 def test_failed_runtime_message_contract_path_is_byte_identical_to_old_path():
-    """PR D: the single wired outcome preserves the pre-wiring formatter bytes."""
+    """PR D: ה-outcome היחיד שחווט משמר את בייטי ה-formatter מלפני החיווט."""
     from unittest.mock import patch
     from core.agent_message_formatter import format_agent_message_with_meta
     import core.action_fact_message_adapter as adapter_module
@@ -265,7 +265,7 @@ def test_failed_runtime_message_contract_path_is_byte_identical_to_old_path():
 
 
 def test_only_failed_outcome_uses_message_contract_runtime_adapter():
-    """PR D scope guard: all other ActionFact outcomes stay on the old path."""
+    """שער scope של PR D: כל שאר ה-ActionFact outcomes נשארים במסלול הישן."""
     from unittest.mock import patch
     import core.action_fact_message_adapter as adapter_module
 

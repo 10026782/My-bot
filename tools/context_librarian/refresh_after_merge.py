@@ -223,6 +223,11 @@ def _check_budget_overflow(candidate_catalog: Catalog) -> list[ReviewItem]:
     שבור, מצב git לא תקין) עדיין זורק שגיאה מ-`estimate_bundle()` עצמו
     ומדווח גם כן כאן — כשל freshness/validation על הנתונים המרועננים
     הוא בדיוק סוג הדבר שרענון מכני אסור לו לבלוע בשקט.
+
+    בכוונה לא משתמשת ב-`estimate_all_profiles()`: הפונקציה הזו צריכה
+    ללכוד שגיאה מבנית לכל profile בנפרד ולהמשיך לפרופיל הבא, בעוד
+    `estimate_all_profiles()` הייתה זורקת שגיאה בפרופיל הראשון שנכשל
+    ועוצרת שם — מה שהיה מונע דיווח על שאר הפרופילים.
     """
     items: list[ReviewItem] = []
     for profile_id in sorted(candidate_catalog.profiles):
