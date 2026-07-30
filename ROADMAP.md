@@ -1,6 +1,8 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 30/07/2026 — **PR #504 מוזג ל-`main`** (commit `55312ab`, אומת ב-grep ישיר):
+עודכן: 30/07/2026 — **PR #515 מוזג ל-`main`** (commit `15fe851`, אומת ב-grep ישיר):
+Non-raising dry-run estimation mode for Context Librarian (`estimate_bundle()` + `estimate_all_profiles()` + CLI `estimate` subcommand). Hebrew translation fixes from PR #513. All docstrings translated to Hebrew. 104/104 tests passing. Feature-flag-off by default (no production wiring). Addresses need for dry-run estimation without side effects in refresh-after-merge tool and planning gates (Phase 2 enablement + consumption gating deferred).
+עודכן קודם: 30/07/2026 — **PR #504 מוזג ל-`main`** (commit `55312ab`, אומת ב-grep ישיר):
 Multi-layer alignment stages 3-5 — first real Consumption Enforcement pilot
 (`cross_layer_architecture` profile) + catalog completeness fix (0 removed, 10 added;
 רה-verify: `CONSUMPTION: COMPLETE`). Planning-only, אין שינוי runtime/CI. Verdict נשאר
