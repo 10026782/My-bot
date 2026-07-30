@@ -2,9 +2,13 @@
 
 **Status:** `PLANNING GATE — PROCEED FOR PURE, UNWIRED ADAPTER ONLY`
 
-**Baseline:** `origin/main` at `fd1d559acb419f651cec870d5c305ee08a534795`.
+**Baseline:** `origin/main` at `3824869d9f694f14649d55b0523663a2dfb49c95`.
 
-**Authority:** D-012 and D-013 in `docs/architecture/f52-unified-approval-runtime/decisions/DECISION_LOG.md`, Message Contract V1, its migration plan, and the merged PR A foundation in `core/message_contract.py`.
+**Authority:** `docs/architecture/CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`;
+D-012 and D-013 in
+`docs/architecture/f52-unified-approval-runtime/decisions/DECISION_LOG.md`;
+Message Contract V1, its migration plan, and the merged PR A foundation in
+`core/message_contract.py`.
 
 This SPEC authorizes one pure adapter from the existing internal `ApprovalLifecycleResult` projection to the existing canonical `MessageContract`. It does not authorize a second builder, runtime wiring, formatting, delivery, lifecycle mutation, ownership enforcement, queue policy, RP5 integration, flags, routing, or output changes.
 
@@ -109,6 +113,19 @@ No runtime callers or production wiring; no formatting or output changes; no mod
 - repository search proves zero production callers;
 - existing `test_message_contract.py`, formatter suites, and single-speaker suite remain unchanged and pass;
 - `git diff --check`.
+
+The exact unchanged Single-Speaker regression proofs are:
+
+- `test_pr1_single_speaker_approval_ux.py::test_state_to_message_mapping_and_single_owner`
+  — verifies Gateway reply ownership, finality, and exactly one final response;
+- `test_pr1_single_speaker_approval_ux.py::test_authorization_denial_keeps_pending_contract_actionable_for_owner`
+  — verifies the same ownership/count contract on the authorization-denied path;
+- `test_single_speaker_fallback_and_duplication.py` — executable regression
+  assertions for suppression after `__approval_queued__`, exactly one canonical
+  final success statement, and no second dispatch on repeated confirmation;
+- `test_pr2_deterministic_approval_cost_cuts.py::main` — executable flag-on
+  regression asserting `agent_call_count == 0` and
+  `final_response_count == 1`, plus its flag-off fallthrough assertion.
 
 ## 9. Rollback boundary and exact file scope
 
