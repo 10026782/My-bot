@@ -31,7 +31,7 @@ from typing import Any
 from tools.context_librarian.librarian import (
     Catalog,
     ContextLibrarianError,
-    build_bundle,
+    estimate_bundle,
     load_catalog,
 )
 
@@ -215,22 +215,37 @@ def _replace_nodes(catalog: Catalog, nodes: dict[str, dict[str, Any]]) -> Catalo
 
 
 def _check_budget_overflow(candidate_catalog: Catalog) -> list[ReviewItem]:
-    """Rebuilds every profile against the post-refresh catalog.
+    """Dry-run-estimates every profile against the post-refresh catalog.
 
-    Reports *any* `ContextLibrarianError` here, not only budget ones — a
+    Uses `estimate_bundle()` (the same render/measure `build_bundle()` uses,
+    just non-raising) so a budget miss is a structured `fits=False` result
+    rather than something parsed back out of an exception message. A
+    structural failure (broken reference, bad git state) still raises from
+    `estimate_bundle()` itself and is reported here too — a
     freshness/validation failure on the refreshed data is exactly the kind
     of thing a mechanical refresh must never silently swallow.
     """
     items: list[ReviewItem] = []
     for profile_id in sorted(candidate_catalog.profiles):
         try:
-            build_bundle(candidate_catalog, task_type=profile_id, query="")
+            result = estimate_bundle(candidate_catalog, task_type=profile_id, query="")
         except ContextLibrarianError as exc:
-            category = "budget_overflow" if "budget" in str(exc) else "post_refresh_build_error"
             items.append(
                 ReviewItem(
-                    category=category,
+                    category="post_refresh_build_error",
                     detail=f"profile {profile_id!r} fails to build after refresh: {exc}",
+                )
+            )
+            continue
+        if not result.fits:
+            items.append(
+                ReviewItem(
+                    category="budget_overflow",
+                    detail=(
+                        f"profile {profile_id!r} needs approximately "
+                        f"{result.actual_tokens} tokens after refresh, exceeding "
+                        f"its {result.token_budget} budget"
+                    ),
                 )
             )
     return items

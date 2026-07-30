@@ -9,6 +9,7 @@ from .librarian import (
     ContextLibrarianError,
     assess_profile_suggestions,
     build_bundle,
+    estimate_bundle,
     load_catalog,
     suggest_profiles,
     verify_consumption,
@@ -57,6 +58,35 @@ def _parser() -> argparse.ArgumentParser:
         "--assert-at-origin-main-tip",
         action="store_true",
         help="Fail closed unless generated_commit equals origin/main",
+    )
+
+    estimate = sub.add_parser(
+        "estimate",
+        help=(
+            "Non-raising dry run: report whether a bundle would fit its token "
+            "budget without building/writing anything. Use before editing "
+            "docs/context_librarian/*.json to see the exact honest number for "
+            "every affected profile in one call, instead of an edit/test loop."
+        ),
+    )
+    estimate_target = estimate.add_mutually_exclusive_group(required=True)
+    estimate_target.add_argument("--task-type", help="Single profile to estimate")
+    estimate_target.add_argument(
+        "--all-profiles",
+        action="store_true",
+        help="Estimate every profile in the catalog, not just one",
+    )
+    estimate.add_argument("--query", default="")
+    estimate.add_argument("--max-tokens", type=int)
+    estimate.add_argument("--max-documents", type=int)
+    estimate.add_argument(
+        "--production-claim",
+        action="store_true",
+        help="Require qualifying production evidence in the workflow gate",
+    )
+    estimate.add_argument(
+        "--verified-production-evidence",
+        help="Explicitly attest a selected evidence path after direct review",
     )
 
     suggest = sub.add_parser(
@@ -125,6 +155,31 @@ def main(argv: list[str] | None = None) -> int:
             for warning in result.warnings:
                 print(f"WARNING: {warning}")
             return result.exit_code
+
+        if args.command == "estimate":
+            task_types = sorted(catalog.profiles) if args.all_profiles else [args.task_type]
+            results = [
+                estimate_bundle(
+                    catalog,
+                    task_type=task_type,
+                    query=args.query,
+                    max_tokens=args.max_tokens,
+                    max_documents=args.max_documents,
+                    production_claim=args.production_claim,
+                    verified_production_evidence=args.verified_production_evidence,
+                )
+                for task_type in task_types
+            ]
+            all_fit = True
+            for result in results:
+                status = "FITS" if result.fits else "OVER_BUDGET"
+                if not result.fits:
+                    all_fit = False
+                print(
+                    f"{result.task_type}\t{status}\t"
+                    f"{result.actual_tokens}/{result.token_budget} tokens"
+                )
+            return 0 if all_fit else 2
 
         if args.command == "suggest-profile":
             ranked = suggest_profiles(catalog, args.query)

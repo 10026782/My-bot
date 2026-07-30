@@ -1533,19 +1533,29 @@ def _render(
     )
 
 
-def build_bundle(
+def _build_bundle_unchecked(
     catalog: Catalog,
     *,
     task_type: str,
-    query: str = "",
-    max_tokens: int | None = None,
-    max_documents: int | None = None,
-    production_claim: bool = False,
-    verified_production_evidence: str | None = None,
-    assert_main: bool = False,
-    assert_on_main_history: bool = False,
-    assert_at_origin_main_tip: bool = False,
-) -> str:
+    query: str,
+    max_tokens: int | None,
+    max_documents: int | None,
+    production_claim: bool,
+    verified_production_evidence: str | None,
+    assert_main: bool,
+    assert_on_main_history: bool,
+    assert_at_origin_main_tip: bool,
+) -> tuple[str, int, int]:
+    """Shared core of `build_bundle()`/`estimate_bundle()`: validates inputs,
+    resolves git provenance, selects nodes, and renders the bundle text.
+
+    Returns `(bundle_text, actual_tokens, token_budget)` WITHOUT checking
+    whether `actual_tokens` fits `token_budget` — that decision (raise vs.
+    report) belongs to the caller, never to this function. Every other
+    failure here (unknown task type, bad budgets, unproven git provenance
+    when asserted) is a structural/input error, not a budget question, and
+    always raises for both callers.
+    """
     if task_type not in catalog.profiles:
         available = ", ".join(sorted(catalog.profiles))
         raise ContextLibrarianError(
@@ -1608,9 +1618,120 @@ def build_bundle(
         expansions,
     )
     actual_tokens = _approximate_char_estimate(bundle)
+    return bundle, actual_tokens, token_budget
+
+
+def build_bundle(
+    catalog: Catalog,
+    *,
+    task_type: str,
+    query: str = "",
+    max_tokens: int | None = None,
+    max_documents: int | None = None,
+    production_claim: bool = False,
+    verified_production_evidence: str | None = None,
+    assert_main: bool = False,
+    assert_on_main_history: bool = False,
+    assert_at_origin_main_tip: bool = False,
+) -> str:
+    bundle, actual_tokens, token_budget = _build_bundle_unchecked(
+        catalog,
+        task_type=task_type,
+        query=query,
+        max_tokens=max_tokens,
+        max_documents=max_documents,
+        production_claim=production_claim,
+        verified_production_evidence=verified_production_evidence,
+        assert_main=assert_main,
+        assert_on_main_history=assert_on_main_history,
+        assert_at_origin_main_tip=assert_at_origin_main_tip,
+    )
     if actual_tokens > token_budget:
         raise ContextLibrarianError(
             f"required context needs approximately {actual_tokens} "
             f"chars/4-estimated tokens, exceeding the {token_budget} budget"
         )
     return bundle
+
+
+@dataclass(frozen=True)
+class BundleEstimate:
+    """Non-raising dry-run result for one profile+query.
+
+    `actual_tokens`/`token_budget` are the exact same numbers `build_bundle()`
+    would use to decide whether to raise — this is not a separate, cheaper
+    approximation computed from a subset of fields (code_paths/test_paths/
+    canonical_docs/notes alone would miss the git-provenance banner, the
+    mandatory-decisions text, and the edges/freshness sections, all of which
+    count toward the real budget). `fits` is exactly `actual_tokens <=
+    token_budget`.
+    """
+
+    task_type: str
+    query: str
+    fits: bool
+    actual_tokens: int
+    token_budget: int
+
+
+def estimate_bundle(
+    catalog: Catalog,
+    *,
+    task_type: str,
+    query: str = "",
+    max_tokens: int | None = None,
+    max_documents: int | None = None,
+    production_claim: bool = False,
+    verified_production_evidence: str | None = None,
+) -> BundleEstimate:
+    """Dry run of `build_bundle()`: same selection/render/measure logic,
+    reused rather than duplicated, but reports a budget miss as a returned
+    `BundleEstimate(fits=False, ...)` instead of raising.
+
+    Intended for checking a candidate catalog edit — e.g. `load_catalog()`
+    then mutate `catalog.nodes[...]` in memory — against every affected
+    profile *before* writing anything to disk, so a budget conflict is a
+    single reported number instead of an edit/test/edit trial-and-error
+    loop. Never asserts git provenance (`--assert-main` and friends are a
+    provenance question, not a budget one) and never writes anything.
+
+    Structural errors (unknown task type, non-positive budgets, missing
+    `--production-claim`) are not budget questions either and still raise,
+    identically to `build_bundle()`.
+    """
+    bundle, actual_tokens, token_budget = _build_bundle_unchecked(
+        catalog,
+        task_type=task_type,
+        query=query,
+        max_tokens=max_tokens,
+        max_documents=max_documents,
+        production_claim=production_claim,
+        verified_production_evidence=verified_production_evidence,
+        assert_main=False,
+        assert_on_main_history=False,
+        assert_at_origin_main_tip=False,
+    )
+    del bundle  # dry run: the rendered text itself is not the caller's concern
+    return BundleEstimate(
+        task_type=task_type,
+        query=query,
+        fits=actual_tokens <= token_budget,
+        actual_tokens=actual_tokens,
+        token_budget=token_budget,
+    )
+
+
+def estimate_all_profiles(
+    catalog: Catalog, *, query: str = ""
+) -> tuple[BundleEstimate, ...]:
+    """`estimate_bundle()` for every profile in the catalog, sorted by id.
+
+    The same "rebuild every profile against a candidate catalog" idiom
+    `refresh_after_merge.py`'s `_check_budget_overflow()` already used
+    privately for its own narrower mechanical refreshes — exposed here as a
+    reusable, public building block instead of staying duplicated.
+    """
+    return tuple(
+        estimate_bundle(catalog, task_type=task_type, query=query)
+        for task_type in sorted(catalog.profiles)
+    )
