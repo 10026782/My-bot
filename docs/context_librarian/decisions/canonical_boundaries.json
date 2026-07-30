@@ -164,6 +164,58 @@
       "last_verified_commit": "59e74be",
       "confidence": 1.0,
       "notes": ["Layer numbering aliases must not overwrite semantic ownership boundaries."]
+    },
+    {
+      "id": "decision.business_intent_and_planning_authority",
+      "name": "Business Intent and Planning Gate govern scope, sequencing, and status authority",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "canonical_contract",
+      "source_of_truth": {"is_authority": true, "scope": "business intent, feature-scoping rationale, planning sequencing, and merged-change/status history", "precedence": "BOSS_BUSINESS_INTENT.md for why/for whom; PLANNING_GATE.md for the mandatory pre-implementation gate; BOSS_UNIFIED_MASTER_PLAN.md for Horizon sequencing; ROADMAP.md for what is planned; CHANGE_CONTROL_LOG.md for what already merged"},
+      "owner": "governance",
+      "code_paths": [],
+      "test_paths": [],
+      "canonical_docs": [
+        {"path": "docs/governance/BOSS_BUSINESS_INTENT.md", "role": "owner-authored business intent, single source of truth for why/for whom", "status": "active"},
+        {"path": "docs/governance/PLANNING_GATE.md", "role": "mandatory technical planning gate before any SPEC or code change", "status": "active"},
+        {"path": "docs/governance/BOSS_UNIFIED_MASTER_PLAN.md", "role": "planning super-layer, Horizon sequencing, does not replace ROADMAP.md", "status": "active"},
+        {"path": "ROADMAP.md", "role": "single source of truth for planned work", "status": "active"},
+        {"path": "CHANGE_CONTROL_LOG.md", "role": "append-only record of merged changes", "status": "active"}
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-07-30",
+      "last_verified_commit": "f10eea1",
+      "confidence": 1.0,
+      "notes": [
+        "Added after the first real Consumption Enforcement pilot (docs/governance/librarian/FIRST_REAL_CONSUMPTION_PILOT.md) found these five sources missing from cross_layer_architecture's mandatory tier despite being materially load-bearing for the recommendation.",
+        "Scope is deliberately narrow to cross_layer_architecture's mandatory_canonical_decisions, not every profile — a single-layer task does not need the full business/planning chain as a hard gate."
+      ]
+    },
+    {
+      "id": "decision.message_contract_envelope_authority",
+      "name": "Message Contract Envelope V1/D-012 governs cross-layer message state and its migration path",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "canonical_contract",
+      "source_of_truth": {"is_authority": true, "scope": "unified message state/lifecycle contract consumed across TurnCoordinator, RP5, and the UX Formatter", "precedence": "MESSAGE_CONTRACT_ENVELOPE_CONTRACT_V1.md defines the frozen contract; the rollout/migration/implementation plans define its sequencing, not a competing contract"},
+      "owner": "ux_f52",
+      "code_paths": [],
+      "test_paths": [],
+      "canonical_docs": [
+        {"path": "docs/architecture/f52-unified-approval-runtime/spec/MESSAGE_CONTRACT_ENVELOPE_CONTRACT_V1.md", "role": "frozen cross-layer message contract (D-012)", "status": "active"},
+        {"path": "docs/architecture/f52-unified-approval-runtime/rollout/MESSAGE_CONTRACT_ENVELOPE_MIGRATION_PLAN.md", "role": "migration sequencing for the envelope contract", "status": "active"},
+        {"path": "docs/architecture/f52-unified-approval-runtime/rollout/UNIFIED_MESSAGE_IMPLEMENTATION_PLAN.md", "role": "PR sequence implementing the unified message standard", "status": "active"}
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-07-30",
+      "last_verified_commit": "f10eea1",
+      "confidence": 1.0,
+      "notes": [
+        "Added after the first real Consumption Enforcement pilot found these three sources missing from cross_layer_architecture's mandatory tier, despite Stage 3A's own recommendation resting on this exact contract.",
+        "docs/architecture/f52-unified-approval-runtime/decisions/DECISION_LOG.md was found already present in the mandatory tier via decision.actioncontracts_authority — not duplicated here."
+      ]
     }
   ],
   "edges": [
