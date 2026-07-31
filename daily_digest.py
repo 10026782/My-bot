@@ -1,4 +1,3 @@
-# daily_digest.py
 # דוח בוקר יומי — נשלח ב-08:00 לאליהו בטלגרם.
 # scheduler.py מנסה לייבא send_daily_digest — חובה שיהיה קיים.
 
@@ -236,7 +235,7 @@ def _upcoming_payments(errors: list) -> str:
 
 
 def _lead_temperature_counts(records: list) -> tuple[int, int, int]:
-    """Return HOT/WARM/COLD counts using the canonical lead score bands."""
+    """מחזיר ספירות HOT/WARM/COLD לפי טווחי ציון הלידים הקנוניים."""
     hot = warm = cold = 0
     for record in records:
         raw_score = record.get("fields", {}).get(LeadFields.SCORE, 0)
@@ -244,7 +243,7 @@ def _lead_temperature_counts(records: list) -> tuple[int, int, int]:
             score = int(raw_score or 0)
         except (TypeError, ValueError):
             score = 0
-        if score >= 50:  # HOT and ULTRA_HOT are one digest bucket.
+        if score >= 50:  # HOT ו-ULTRA_HOT נכללים באותה קטגוריית סיכום.
             hot += 1
         elif score >= 25:
             warm += 1
@@ -254,7 +253,7 @@ def _lead_temperature_counts(records: list) -> tuple[int, int, int]:
 
 
 def _leads_scoring_summary(errors: list) -> str:
-    """Summarize every lead by its HOT/WARM/COLD score band."""
+    """מסכם את כל הלידים לפי קבוצת טמפרטורה HOT/WARM/COLD."""
     try:
         hot, warm, cold = _lead_temperature_counts(_fetch("Leads", "", max_rec=0))
         total = hot + warm + cold
