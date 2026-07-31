@@ -2734,7 +2734,15 @@ class ActionGateway:
             unified_text, meta = self._compose_status_reply_unified(fact)
         except Exception as exc:
             # The live status path must never break because of the formatter.
-            logger.warning("[ActionGateway] unified status formatter failed: %s", exc)
+            contract_path = (
+                "message_contract_fallback"
+                if fact.outcome in ("failed", "pending") else "legacy"
+            )
+            logger.warning(
+                "[ActionGateway] unified status formatter נכשל: "
+                "error_type=%s contract_path=%s",
+                type(exc).__name__, contract_path,
+            )
             return legacy
 
         if state == "shadow":
@@ -2764,15 +2772,22 @@ class ActionGateway:
         self, fact: ActionFact, legacy_text: str, unified_text: str, meta: dict,
     ) -> None:
         leaks = self._shadow_leak_flags(fact, unified_text)
+        contract_path = meta.get("contract_path", "legacy")
+        contract_details = "contract_path=%s" % contract_path
+        if contract_path == "message_contract":
+            contract_details += " contract_version=%s source_component=%s" % (
+                meta.get("contract_version"), meta.get("source_component"),
+            )
         logger.info(
             "[UnifiedStatusFormatterShadow] outcome=%s mapped_state=%s text_differs=%s "
             "record_id_leak=%s tool_name_leak=%s contract_id_leak=%s "
             "redaction_count=%d fallback_used=%s formatter_version=%s "
-            "legacy_len=%d unified_len=%d",
+            "legacy_len=%d unified_len=%d %s",
             fact.outcome, meta.get("message_state"), legacy_text != unified_text,
             leaks["record_id_leak"], leaks["tool_name_leak"], leaks["contract_id_leak"],
             meta.get("redaction_count", 0), meta.get("fallback_used", False),
             meta.get("formatter_version"), len(legacy_text), len(unified_text),
+            contract_details,
         )
         if any(leaks.values()):
             logger.warning(
@@ -2828,9 +2843,35 @@ class ActionGateway:
         """Returns (text, meta). meta is the formatter's own observability
         record (message_state, formatter_version, fallback_used,
         redaction_count) — safe to log as-is, never contains raw text/ids."""
+        # PR D/PR E חיווטים בכוונה שני outcomes בלבד: failed (PR D) ו-pending
+        # (PR E). שניהם יכולים לחצות את גבול ה-MessageContract בלי לשנות
+        # evidence authority. שאר ה-outcomes נשארים במסלול הקיים שלהם עד
+        # סקירה נפרדת.
+        if fact.outcome in ("failed", "pending"):
+            from core.action_fact_message_adapter import from_action_fact
+            from core.message_contract import format_message_contract_with_meta
+
+            contract = self._ledger.find_by_id(fact.contract_id) if fact.contract_id else None
+            description = _safe_contract_business_description(contract) if contract else None
+            message = from_action_fact(fact, description=description)
+            text, contract_meta = format_message_contract_with_meta(message)
+            # שומר על צורת ה-observability של ה-helper הפרטי הקיים יציבה;
+            # metadata של MessageContract נשאר זמין בגבול שלו.
+            return text, {
+                "message_state": contract_meta["formatter_state"],
+                "formatter_version": contract_meta["formatter_version"],
+                "fallback_used": contract_meta["fallback_used"],
+                "redaction_count": contract_meta["redaction_count"],
+                "contract_path": "message_contract",
+                "contract_version": contract_meta["version"],
+                "source_component": contract_meta["source_component"],
+            }
+
         from core.agent_message_formatter import format_agent_message_with_meta
         state, payload = self._action_fact_to_message(fact)
-        return format_agent_message_with_meta(state, payload)
+        text, meta = format_agent_message_with_meta(state, payload)
+        meta["contract_path"] = "legacy"
+        return text, meta
 
     # ── §7 §20 — query_execution_status ─────────────────────────────
     # עונה לשאלות סטטוס ("נוספה?") אך ורק מה-ExecutionLedger.

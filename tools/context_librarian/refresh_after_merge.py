@@ -31,7 +31,7 @@ from typing import Any
 from tools.context_librarian.librarian import (
     Catalog,
     ContextLibrarianError,
-    build_bundle,
+    estimate_bundle,
     load_catalog,
 )
 
@@ -215,22 +215,41 @@ def _replace_nodes(catalog: Catalog, nodes: dict[str, dict[str, Any]]) -> Catalo
 
 
 def _check_budget_overflow(candidate_catalog: Catalog) -> list[ReviewItem]:
-    """Rebuilds every profile against the post-refresh catalog.
+    """מבצעת dry-run-estimate לכל profile מול הקטלוג אחרי הרענון.
 
-    Reports *any* `ContextLibrarianError` here, not only budget ones — a
-    freshness/validation failure on the refreshed data is exactly the kind
-    of thing a mechanical refresh must never silently swallow.
+    משתמשת ב-`estimate_bundle()` (אותו render/measure ש-`build_bundle()`
+    משתמש בו, רק שלא זורק שגיאה) כך שחריגת תקציב היא תוצאת `fits=False`
+    מובנית ולא משהו שמפורש חזרה מתוך טקסט חריגה. כשל מבני (reference
+    שבור, מצב git לא תקין) עדיין זורק שגיאה מ-`estimate_bundle()` עצמו
+    ומדווח גם כן כאן — כשל freshness/validation על הנתונים המרועננים
+    הוא בדיוק סוג הדבר שרענון מכני אסור לו לבלוע בשקט.
+
+    בכוונה לא משתמשת ב-`estimate_all_profiles()`: הפונקציה הזו צריכה
+    ללכוד שגיאה מבנית לכל profile בנפרד ולהמשיך לפרופיל הבא, בעוד
+    `estimate_all_profiles()` הייתה זורקת שגיאה בפרופיל הראשון שנכשל
+    ועוצרת שם — מה שהיה מונע דיווח על שאר הפרופילים.
     """
     items: list[ReviewItem] = []
     for profile_id in sorted(candidate_catalog.profiles):
         try:
-            build_bundle(candidate_catalog, task_type=profile_id, query="")
+            result = estimate_bundle(candidate_catalog, task_type=profile_id, query="")
         except ContextLibrarianError as exc:
-            category = "budget_overflow" if "budget" in str(exc) else "post_refresh_build_error"
             items.append(
                 ReviewItem(
-                    category=category,
+                    category="post_refresh_build_error",
                     detail=f"profile {profile_id!r} fails to build after refresh: {exc}",
+                )
+            )
+            continue
+        if not result.fits:
+            items.append(
+                ReviewItem(
+                    category="budget_overflow",
+                    detail=(
+                        f"profile {profile_id!r} needs approximately "
+                        f"{result.actual_tokens} tokens after refresh, exceeding "
+                        f"its {result.token_budget} budget"
+                    ),
                 )
             )
     return items
