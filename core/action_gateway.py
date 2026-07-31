@@ -2735,7 +2735,8 @@ class ActionGateway:
         except Exception as exc:
             # The live status path must never break because of the formatter.
             contract_path = (
-                "message_contract_fallback" if fact.outcome == "failed" else "legacy"
+                "message_contract_fallback"
+                if fact.outcome in ("failed", "pending") else "legacy"
             )
             logger.warning(
                 "[ActionGateway] unified status formatter נכשל: "
@@ -2842,11 +2843,11 @@ class ActionGateway:
         """Returns (text, meta). meta is the formatter's own observability
         record (message_state, formatter_version, fallback_used,
         redaction_count) — safe to log as-is, never contains raw text/ids."""
-        # PR D מחווט בכוונה outcome חי אחד בדיוק, בשלב ראשון. ActionFact-ים
-        # מסוג failed לא צריכים שדרוג evidence-state, כך שהם יכולים לחצות
-        # את גבול ה-MessageContract בלי לשנות evidence authority. שאר
-        # ה-outcomes נשארים במסלול הקיים שלהם עד סקירה נפרדת.
-        if fact.outcome == "failed":
+        # PR D/PR E חיווטים בכוונה שני outcomes בלבד: failed (PR D) ו-pending
+        # (PR E). שניהם יכולים לחצות את גבול ה-MessageContract בלי לשנות
+        # evidence authority. שאר ה-outcomes נשארים במסלול הקיים שלהם עד
+        # סקירה נפרדת.
+        if fact.outcome in ("failed", "pending"):
             from core.action_fact_message_adapter import from_action_fact
             from core.message_contract import format_message_contract_with_meta
 
