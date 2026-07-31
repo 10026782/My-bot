@@ -710,13 +710,17 @@ def _freshness(
 
 
 def _unique_references(
-    nodes: list[dict[str, Any]], field: str, maximum_documents: int
+    nodes: list[dict[str, Any]], field: str
 ) -> list[tuple[str, dict[str, Any]]]:
-    """Round-robin references so every selected node gets provenance first."""
+    """Return every current reference in deterministic round-robin order.
+
+    Budget enforcement belongs to ``build_bundle``. This helper must never
+    turn a budget into an implicit source-selection policy.
+    """
     result: list[tuple[str, dict[str, Any]]] = []
     seen: set[str] = set()
     depth = 0
-    while len(result) < maximum_documents:
+    while True:
         added = False
         for node in nodes:
             references = [
@@ -733,9 +737,17 @@ def _unique_references(
             seen.add(ref["path"])
             result.append((node["id"], ref))
             added = True
-            if len(result) >= maximum_documents:
-                break
-        if not added and all(depth >= len(node[field]) - 1 for node in nodes):
+        if not added and all(
+            depth >= len(
+                [
+                    ref
+                    for ref in node[field]
+                    if field != "canonical_docs"
+                    or ref.get("status") not in DEFAULT_EXCLUDED_STATUSES
+                ]
+            ) - 1
+            for node in nodes
+        ):
             break
         depth += 1
     return result
@@ -1231,16 +1243,8 @@ def _render(
 ) -> str:
     decision_nodes = [node for node in nodes if node["type"] == "decision"]
     layer_nodes = [node for node in nodes if node["type"] == "layer"]
-    evidence_budget = min(
-        sum(bool(node["production_evidence"]) for node in layer_nodes),
-        max_documents // 3,
-    )
-    docs = _unique_references(
-        nodes, "canonical_docs", max_documents - evidence_budget
-    )
-    evidence = _unique_references(
-        layer_nodes, "production_evidence", evidence_budget
-    )
+    docs = _unique_references(nodes, "canonical_docs")
+    evidence = _unique_references(layer_nodes, "production_evidence")
 
     selected_layer_ids = {node["id"].split(".", 1)[1] for node in layer_nodes}
     expected_layers = set(profile["primary_layers"]) | set(
@@ -1371,23 +1375,22 @@ def _render(
         ]
     )
     for node in decision_nodes:
-        lines.append(f"- `{node['id']}` — {node['name']}: {node['notes'][0]}")
-        lines.extend(f"    - {extra_note}" for extra_note in node["notes"][1:])
+        notes = iter(node["notes"])
+        first_note = next(notes)
+        lines.append(f"- `{node['id']}` — {node['name']}: {first_note}")
+        lines.extend(f"    - {extra_note}" for extra_note in notes)
 
     lines.extend(["", "## Selected Layers", ""])
     for node in layer_nodes:
         layer_id = node["id"].split(".", 1)[1]
         fresh = freshness[node["id"]]
         stale_label = "STALE: code changed" if fresh["stale"] else "fresh against tracked code"
+        notes = iter(node["notes"])
+        first_note = next(notes)
         lines.append(
-            f"- `{layer_id}` ({roles[layer_id]}, {node['status']}, {stale_label}) — {node['notes'][0]}"
+            f"- `{layer_id}` ({roles[layer_id]}, {node['status']}, {stale_label}) — {first_note}"
         )
-        # notes[0] הוא הכותרת; כל כותב-קטלוג הסתמך על כך שהיא תוצג כאן, אבל
-        # notes[1:] נשמטו בשקט מכל bundle שנבנה אי-פעם עד לתיקון הזה (פיילוט
-        # N17, 28/07/2026: בדיוק אותה מחלקת-פער כמו ממצאי core_reasoning_change/
-        # approval_ux של הפיילוט — קיום הערה בקטלוג אינו זהה להגעתה בפועל
-        # ל-bundle של סוכן).
-        lines.extend(f"    - {extra_note}" for extra_note in node["notes"][1:])
+        lines.extend(f"    - {extra_note}" for extra_note in notes)
 
     lines.extend(["", "## Canonical Documents", ""])
     lines.extend(
@@ -1533,6 +1536,67 @@ def _render(
     )
 
 
+def _budget_breakdown(
+    nodes: list[dict[str, Any]],
+    docs: list[tuple[str, dict[str, Any]]],
+    evidence: list[tuple[str, dict[str, Any]]],
+) -> list[str]:
+    """Describe the candidate's measurable metadata by node and source."""
+    breakdown: list[str] = []
+    for node in nodes:
+        metadata = "\n".join(
+            [*node["notes"], *node["code_paths"], *node["test_paths"]]
+        )
+        if metadata:
+            breakdown.append(
+                f"{node['id']} (metadata): {_approximate_char_estimate(metadata)}"
+            )
+    for node_id, reference in [*docs, *evidence]:
+        source = reference["path"]
+        breakdown.append(
+            f"{node_id} -> {source}: {_approximate_char_estimate(source)}"
+        )
+    return sorted(breakdown)
+
+
+def _format_budget_overflow(
+    *, estimated_tokens: int, budget: int, breakdown: list[str]
+) -> str:
+    overflow = estimated_tokens - budget
+    details = "\n".join(f"  - {item} estimated tokens" for item in breakdown)
+    return (
+        "context budget overflow: "
+        f"estimated_tokens={estimated_tokens}, budget={budget}, overflow={overflow}\n"
+        "breakdown by node/source:\n"
+        f"{details}"
+    )
+
+
+def _format_document_overflow(
+    *,
+    estimated_tokens: int,
+    token_budget: int,
+    selected_documents: int,
+    budget: int,
+    references: list[tuple[str, dict[str, Any]]],
+    breakdown: list[str],
+) -> str:
+    sources = ", ".join(
+        f"{node_id}:{reference['path']}" for node_id, reference in references
+    )
+    details = "\n".join(f"  - {item} estimated tokens" for item in breakdown)
+    return (
+        "context document budget overflow: "
+        f"estimated_tokens={estimated_tokens}, budget={token_budget}, "
+        f"overflow={estimated_tokens - token_budget}; "
+        f"selected_documents={selected_documents}, budget={budget}, "
+        f"overflow={selected_documents - budget}; no source was omitted; "
+        f"sources={sources}\n"
+        "breakdown by node/source:\n"
+        f"{details}"
+    )
+
+
 def _build_bundle_unchecked(
     catalog: Catalog,
     *,
@@ -1545,7 +1609,7 @@ def _build_bundle_unchecked(
     assert_main: bool,
     assert_on_main_history: bool,
     assert_at_origin_main_tip: bool,
-) -> tuple[str, int, int]:
+) -> tuple[str, int, int, list[str]]:
     """הליבה המשותפת של `build_bundle()`/`estimate_bundle()`: מאמתת קלט,
     פותרת git provenance, בוחרת nodes, ומרנדרת את טקסט ה-bundle.
 
@@ -1618,7 +1682,26 @@ def _build_bundle_unchecked(
         expansions,
     )
     actual_tokens = _approximate_char_estimate(bundle)
-    return bundle, actual_tokens, token_budget
+    docs = _unique_references(nodes, "canonical_docs")
+    evidence = _unique_references(
+        [node for node in nodes if node["type"] == "layer"],
+        "production_evidence",
+    )
+    references = [*docs, *evidence]
+    selected_documents = len({reference["path"] for _, reference in references})
+    breakdown = _budget_breakdown(nodes, docs, evidence)
+    if selected_documents > document_budget:
+        raise ContextLibrarianError(
+            _format_document_overflow(
+                estimated_tokens=actual_tokens,
+                token_budget=token_budget,
+                selected_documents=selected_documents,
+                budget=document_budget,
+                references=references,
+                breakdown=breakdown,
+            )
+        )
+    return bundle, actual_tokens, token_budget, breakdown
 
 
 def build_bundle(
@@ -1634,7 +1717,7 @@ def build_bundle(
     assert_on_main_history: bool = False,
     assert_at_origin_main_tip: bool = False,
 ) -> str:
-    bundle, actual_tokens, token_budget = _build_bundle_unchecked(
+    bundle, actual_tokens, token_budget, breakdown = _build_bundle_unchecked(
         catalog,
         task_type=task_type,
         query=query,
@@ -1648,8 +1731,11 @@ def build_bundle(
     )
     if actual_tokens > token_budget:
         raise ContextLibrarianError(
-            f"required context needs approximately {actual_tokens} "
-            f"chars/4-estimated tokens, exceeding the {token_budget} budget"
+            _format_budget_overflow(
+                estimated_tokens=actual_tokens,
+                budget=token_budget,
+                breakdown=breakdown,
+            )
         )
     return bundle
 
@@ -1701,7 +1787,7 @@ def estimate_bundle(
     claim` חסר) גם הן לא שאלות תקציב וזורקות שגיאה בכל זאת, בדיוק כמו
     `build_bundle()`.
     """
-    bundle, actual_tokens, token_budget = _build_bundle_unchecked(
+    bundle, actual_tokens, token_budget, _ = _build_bundle_unchecked(
         catalog,
         task_type=task_type,
         query=query,
