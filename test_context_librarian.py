@@ -297,7 +297,7 @@ def test_output_is_deterministic(catalog):
 
 
 def test_token_budget_fails_closed(catalog):
-    with pytest.raises(ContextLibrarianError, match="exceeding"):
+    with pytest.raises(ContextLibrarianError, match="estimated_tokens=.*budget=.*overflow="):
         build_bundle(
             catalog,
             task_type="approval_ux",
@@ -307,13 +307,50 @@ def test_token_budget_fails_closed(catalog):
 
 
 def test_document_budget_is_enforced(catalog):
+    with pytest.raises(ContextLibrarianError) as excinfo:
+        build_bundle(
+            catalog,
+            task_type="core_reasoning_change",
+            query="lead reasoning",
+            max_documents=3,
+        )
+    message = str(excinfo.value)
+    assert "document budget overflow" in message
+    assert "no source was omitted" in message
+    assert "PHASE_2A1_CURRENT_STATE_POLICY_SPEC.md" in message
+
+
+def test_token_overflow_reports_estimate_budget_overflow_and_node_source_breakdown(
+    catalog,
+):
+    with pytest.raises(ContextLibrarianError) as excinfo:
+        build_bundle(
+            catalog,
+            task_type="approval_ux",
+            query="approval message",
+            max_tokens=100,
+        )
+    message = str(excinfo.value)
+    assert "estimated_tokens=" in message
+    assert "budget=100" in message
+    assert "overflow=" in message
+    assert "breakdown by node/source:" in message
+    assert "layer.approvals" in message
+    assert "CURRENT_STATE_MAP.md" in message
+
+
+def test_full_metadata_is_rendered_without_truncation(catalog):
+    node = catalog.nodes["layer.core_reasoning"]
     bundle = build_bundle(
         catalog,
         task_type="core_reasoning_change",
         query="lead reasoning",
-        max_documents=3,
     )
-    assert "document_budget: 3/3" in bundle
+    for value in node["notes"] + node["code_paths"] + node["test_paths"]:
+        assert value in bundle
+    for reference in node["canonical_docs"]:
+        if reference.get("status") not in {"historical", "superseded"}:
+            assert reference["path"] in bundle
 
 
 def test_token_estimate_labels_are_honest_about_being_a_char_proxy(catalog):
