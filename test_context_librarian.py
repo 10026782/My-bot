@@ -729,7 +729,7 @@ def test_agent_bootstrap_is_canonical_and_claude_only_references_it():
 # "2026-07-28 non-inferiority pilot advancement"): core_reasoning_change חסר
 # מקור-סמכות מחייב, approval_ux חסר את ממצא-מקורות-האמת-המקבילים, turn_coordinator_routing
 # חסר רשומת bug-log סמוכה, ו-commit/branch mislabeling של משימת ה-rp5. בדיקה חמישית
-# מגנה על באג נפרד, לא-מהפיילוט, שנמצא תוך כדי התיקון: _render() הציג רק notes[0] של
+# מגנה על באג נפרד, לא-מהפיילוט, שנמצא תוך כדי התיקון: _render() הציג רק את ההערה הראשונה של
 # כל node. שתי הבדיקות האחרונות בקובץ מגנות על ממצאי CodeRabbit על ה-PR הזה עצמו
 # (path traversal, ערך expansion פגום).
 
@@ -999,12 +999,38 @@ def test_cli_assert_main_flag_fails_closed_off_main(monkeypatch, capsys):
 
 def test_layer_notes_beyond_the_first_are_rendered_not_dropped(catalog):
     node = catalog.nodes["layer.core_reasoning"]
-    assert len(node["notes"]) > 1, "fixture must exercise notes[1:], not just notes[0]"
+    assert len(node["notes"]) > 1, "fixture must exercise multiple notes in order"
     bundle = build_bundle(
         catalog, task_type="core_reasoning_change", query="lead reasoning"
     )
+    note_positions = []
     for note in node["notes"]:
         assert note in bundle
+        note_positions.append(bundle.index(note))
+    assert note_positions == sorted(note_positions)
+
+
+def test_single_layer_note_is_rendered_without_truncation(catalog):
+    isolated = copy.deepcopy(catalog)
+    isolated.nodes["layer.core_reasoning"]["notes"] = ["single fixture note"]
+    bundle = build_bundle(
+        isolated, task_type="core_reasoning_change", query="lead reasoning"
+    )
+    assert "single fixture note" in bundle
+
+
+def test_layer_notes_fixture_rendering_matches_existing_format(catalog):
+    node = catalog.nodes["layer.core_reasoning"]
+    notes = iter(node["notes"])
+    first_note = next(notes)
+    expected_lines = [
+        f"- `core_reasoning` (primary, shadow, fresh against tracked code) — {first_note}"
+    ]
+    expected_lines.extend(f"    - {note}" for note in notes)
+    bundle = build_bundle(
+        catalog, task_type="core_reasoning_change", query="lead reasoning"
+    )
+    assert "\n".join(expected_lines) in bundle
 
 
 def test_bounded_local_expansion_rejects_non_object_entry(tmp_path, monkeypatch):

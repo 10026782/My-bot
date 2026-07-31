@@ -1376,23 +1376,22 @@ def _render(
         ]
     )
     for node in decision_nodes:
-        lines.append(f"- `{node['id']}` — {node['name']}: {node['notes'][0]}")
-        lines.extend(f"    - {extra_note}" for extra_note in node["notes"][1:])
+        notes = iter(node["notes"])
+        first_note = next(notes)
+        lines.append(f"- `{node['id']}` — {node['name']}: {first_note}")
+        lines.extend(f"    - {extra_note}" for extra_note in notes)
 
     lines.extend(["", "## Selected Layers", ""])
     for node in layer_nodes:
         layer_id = node["id"].split(".", 1)[1]
         fresh = freshness[node["id"]]
         stale_label = "STALE: code changed" if fresh["stale"] else "fresh against tracked code"
+        notes = iter(node["notes"])
+        first_note = next(notes)
         lines.append(
-            f"- `{layer_id}` ({roles[layer_id]}, {node['status']}, {stale_label}) — {node['notes'][0]}"
+            f"- `{layer_id}` ({roles[layer_id]}, {node['status']}, {stale_label}) — {first_note}"
         )
-        # notes[0] הוא הכותרת; כל כותב-קטלוג הסתמך על כך שהיא תוצג כאן, אבל
-        # notes[1:] נשמטו בשקט מכל bundle שנבנה אי-פעם עד לתיקון הזה (פיילוט
-        # N17, 28/07/2026: בדיוק אותה מחלקת-פער כמו ממצאי core_reasoning_change/
-        # approval_ux של הפיילוט — קיום הערה בקטלוג אינו זהה להגעתה בפועל
-        # ל-bundle של סוכן).
-        lines.extend(f"    - {extra_note}" for extra_note in node["notes"][1:])
+        lines.extend(f"    - {extra_note}" for extra_note in notes)
 
     lines.extend(["", "## Canonical Documents", ""])
     lines.extend(
