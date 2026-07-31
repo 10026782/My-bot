@@ -204,12 +204,21 @@ def test_failed_shadow_log_proves_message_contract_path_without_identifier_leaks
 
 def test_non_failed_shadow_logs_are_legacy_not_message_contract():
     gw = _gw_with_lead_contract()
-    for fact in (F_EXEC, F_PEND, F_REJ, F_UNK):
+    for fact in (F_EXEC, F_REJ, F_UNK):
         line = _shadow_log_line(gw, fact)
         assert "contract_path=legacy" in line
         assert "contract_path=message_contract" not in line
         assert "contract_version=" not in line
         assert "source_component=" not in line
+
+
+def test_pending_shadow_log_proves_message_contract_path():
+    gw = _gw_with_lead_contract()
+    line = _shadow_log_line(gw, F_PEND)
+    assert "outcome=pending" in line
+    assert "contract_path=message_contract" in line
+    assert "contract_version=1.0" in line
+    assert "source_component=core.action_fact_message_adapter" in line
 
 
 # ── 3. on = unified formatter, no leaks ───────────────────────────────────────
@@ -264,8 +273,44 @@ def test_failed_runtime_message_contract_path_is_byte_identical_to_old_path():
         assert new_result[1][key] == old_result[1][key]
 
 
-def test_only_failed_outcome_uses_message_contract_runtime_adapter():
-    """שער scope של PR D: כל שאר ה-ActionFact outcomes נשארים במסלול הישן."""
+def test_pending_runtime_message_contract_path_is_byte_identical_to_old_path():
+    """PR E: pending מקבל את אותו output של המסלול הישן של ה-formatter."""
+    from unittest.mock import patch
+    from core.agent_message_formatter import format_agent_message_with_meta
+    import core.action_fact_message_adapter as adapter_module
+
+    gw = _gw_with_lead_contract()
+    old_state, old_payload = gw._action_fact_to_message(F_PEND)
+    old_result = format_agent_message_with_meta(old_state, old_payload)
+    calls = []
+    original = adapter_module.from_action_fact
+
+    def recording_adapter(*args, **kwargs):
+        calls.append((args, kwargs))
+        return original(*args, **kwargs)
+
+    with patch.object(adapter_module, "from_action_fact", recording_adapter):
+        new_result = gw._compose_status_reply_unified(F_PEND)
+
+    assert len(calls) == 1
+    assert new_result[0] == old_result[0]
+    for key in ("message_state", "formatter_version", "fallback_used", "redaction_count"):
+        assert new_result[1][key] == old_result[1][key]
+    assert new_result[1]["contract_path"] == "message_contract"
+    assert new_result[1]["source_component"] == "core.action_fact_message_adapter"
+
+
+def test_pending_message_contract_observability_is_explicit():
+    gw = _gw_with_lead_contract()
+    text, meta = gw._compose_status_reply_unified(F_PEND)
+    assert text
+    assert meta["contract_path"] == "message_contract"
+    assert meta["source_component"] == "core.action_fact_message_adapter"
+    assert F_PEND.outcome == "pending"
+
+
+def test_only_failed_and_pending_outcomes_use_message_contract_runtime_adapter():
+    """PR D + PR E scope: only failed/pending leave the legacy path."""
     from unittest.mock import patch
     import core.action_fact_message_adapter as adapter_module
 
@@ -281,7 +326,27 @@ def test_only_failed_outcome_uses_message_contract_runtime_adapter():
         for fact in (F_EXEC, F_FAIL, F_PEND, F_REJ, F_UNK):
             gw._compose_status_reply_unified(fact)
 
-    assert calls == ["failed"]
+    assert calls == ["failed", "pending"]
+
+
+def test_failed_remains_pr_d_path_and_other_outcomes_remain_legacy():
+    """The PR E expansion must not broaden the existing PR D boundary."""
+    from unittest.mock import patch
+    import core.action_fact_message_adapter as adapter_module
+
+    gw = _gw_with_lead_contract()
+    calls = []
+    original = adapter_module.from_action_fact
+
+    def recording_adapter(*args, **kwargs):
+        calls.append(args[0].outcome)
+        return original(*args, **kwargs)
+
+    with patch.object(adapter_module, "from_action_fact", recording_adapter):
+        for fact in (F_FAIL, F_PEND, F_EXEC, F_REJ, F_UNK):
+            gw._compose_status_reply_unified(fact)
+
+    assert calls == ["failed", "pending"]
 
 
 def test_on_pending_and_rejected_and_unknown():
@@ -375,6 +440,35 @@ def test_failed_message_contract_exception_logs_distinct_fallback_and_keeps_outp
     assert len(warnings) == 1
     assert "contract_path=message_contract_fallback" in warnings[0]
     for forbidden in (F_FAIL.tool_name, F_FAIL.contract_id, "GOOGLE_AUTH_REQUIRED"):
+        assert forbidden not in warnings[0]
+
+
+def test_pending_message_contract_exception_logs_distinct_fallback_and_keeps_output():
+    import core.action_gateway as ag_module
+    import core.agent_message_formatter as amf
+
+    gw = _gw_with_lead_contract()
+    cap = _LogCapture()
+    orig_logger = ag_module.logger
+    orig_formatter = amf.format_agent_message_with_meta
+    legacy = gw._compose_status_reply_legacy(F_PEND).text
+    try:
+        _set("shadow")
+        ag_module.logger = cap
+        amf.format_agent_message_with_meta = lambda *a, **k: (
+            _ for _ in ()
+        ).throw(RuntimeError("safe-test-pending-failure"))
+        result = gw.compose_status_reply(F_PEND).text
+    finally:
+        amf.format_agent_message_with_meta = orig_formatter
+        ag_module.logger = orig_logger
+        _set(None)
+
+    assert result == legacy
+    warnings = [message for level, message in cap.records if level == "warning"]
+    assert len(warnings) == 1
+    assert "contract_path=message_contract_fallback" in warnings[0]
+    for forbidden in (F_PEND.tool_name, F_PEND.contract_id):
         assert forbidden not in warnings[0]
 
 
