@@ -69,3 +69,24 @@ def test_fetch_without_limit_follows_airtable_offsets(monkeypatch):
 
     assert records == [{"id": "one"}, {"id": "two"}]
     assert seen_params == [{}, {"offset": "next-page"}]
+def test_fetch_with_limit_ignores_offset_and_returns_first_page(monkeypatch):
+    class Response:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"records": [{"id": "one"}], "offset": "next-page"}
+
+    seen_params = []
+
+    def fake_get(*_args, **kwargs):
+        seen_params.append(dict(kwargs["params"]))
+        return Response()
+
+    monkeypatch.setenv("AIRTABLE_BASE_ID", "base")
+    monkeypatch.setenv("AIRTABLE_API_KEY", "key")
+    with patch("httpx.get", side_effect=fake_get):
+        records = daily_digest._fetch("Leads", max_rec=1)
+
+    assert records == [{"id": "one"}]
+    assert seen_params == [{"maxRecords": 1}]
