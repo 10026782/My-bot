@@ -55,8 +55,8 @@
       {"path": "docs/architecture/f52-unified-approval-runtime/audits/PR_HOTFIX_A_CROSS_LAYER_IMPACT_MATRIX.md", "role": "post-PR2 canonicalization and no-live replay correction evidence", "status": "active"}
     ],
     "production_evidence": [
-      {"path": "docs/architecture/action-gateway/STAGING_23JUL_TTL_DISAMBIGUATION_AUDIT.md", "observed_on": "2026-07-23", "scope": "staging and operator-supplied ActionContracts lifecycle evidence", "status": "mixed_verified_and_deferred"},
-      {"path": "AI_CONTEXT.md", "observed_on": "2026-07-30", "scope": "owner-reported live production checks with ActionGateway, single-speaker, and deterministic approval flags enabled; canonical no-pending and end-to-end task creation observed, while exact sheets canonicalization branch remains test-only", "status": "partial_production_verification"}
+      {"path": "docs/architecture/action-gateway/PRODUCTION_30JUL2026_RENDER_VERIFICATION.md", "observed_on": "2026-07-31", "scope": "read-only Render production verification of live deploy identity, three approval feature flags, and ActionContract runtime activity; exact sheets canonicalization branch remains test-only", "status": "production_verified"},
+      {"path": "docs/architecture/action-gateway/STAGING_23JUL_TTL_DISAMBIGUATION_AUDIT.md", "observed_on": "2026-07-23", "scope": "staging and operator-supplied ActionContracts lifecycle evidence", "status": "mixed_verified_and_deferred"}
     ],
     "feature_flags": [
       {"name": "FEATURE_ACTION_GATEWAY", "default_state": "off", "documented_state": "environment-dependent; repository alone is not current production proof", "evidence_scope": "code default plus dated audits"},
