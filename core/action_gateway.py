@@ -848,11 +848,14 @@ def _describe_contract_for_reconfirmation(contract: ActionContract) -> str:
     """תווית קריאה-עסקית להודעות אישור-מחדש, לרשימת ה-disambiguation
     (דרך _describe_contract_for_disambiguation() למטה), ול-projection של
     ActionResolutionEvent. שמות טבלה (Tasks/משימות (Tasks)/Leads/כל אחר)
-    לעולם אינם נכללים — ל-Leads ול-Tasks יש ניסוח עסקי ייעודי משלהם; כל
-    airtable_add/airtable_update אחר נופל לניסוח גנרי, שאינו תלוי-טבלה.
-    רק ה-fallback הכללי האמיתי עבור סוגי כלים שאינם Airtable (שאין להם
-    טבלה לחשוף מלכתחילה) עדיין מציין את שם הכלי — ללא שינוי, מכיוון
-    שאין שם חשיפת טבלה אפשרית שם."""
+    לעולם אינם נכללים — ל-Leads ול-Tasks יש ניסוח עסקי ייעודי משלהם, עשיר
+    יותר מהניסוח הגנרי; כל airtable_add/airtable_update אחר נופל לניסוח
+    גנרי, שאינו תלוי-טבלה. כלים שאינם Airtable (calendar/gmail/sheets/
+    followup/recovery/וכו') מואצלים ל-_safe_contract_business_description()
+    — שם כבר קיים מיפוי-פועל בטוח לכל 11 הכלים ב-tool_registry.py עם
+    requires_approval=True, כולל fallback גנרי בטוח ("הפעולה המבוקשת")
+    שלעולם אינו חושף tool_name גולמי. מקור אמת יחיד למיפוי הזה — לא
+    שכפול (Reconfirmation tool_name leak fix)."""
     payload = contract.normalized_payload or {}
     if contract.tool_name in ("airtable_add", "airtable_update") and payload.get("table") == _LEAD_CAPTURE_TABLE:
         fields = payload.get("fields") or {}
@@ -876,8 +879,7 @@ def _describe_contract_for_reconfirmation(contract: ActionContract) -> str:
         preview = _first_field_preview(payload.get("fields") or {})
         verb = "הוספת רשומה" if contract.tool_name == "airtable_add" else "עדכון רשומה"
         return f"{verb}: {preview}" if preview else verb
-    table = payload.get("table") or payload.get("spreadsheet_name") or ""
-    return f"{contract.tool_name} / {table}" if table else contract.tool_name
+    return _safe_contract_business_description(contract)
 
 
 def _describe_contract_for_disambiguation(contract: ActionContract) -> str:

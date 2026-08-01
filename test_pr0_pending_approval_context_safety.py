@@ -108,7 +108,9 @@ contract = gw.find_contract(contract_id)
 chk("DoD2: contract still pending (not consumed)", contract.status == "pending")
 chk("DoD2: reconfirmation_required now True", contract.reconfirmation_required is True)
 chk("DoD3/9: reply is a readable description, not only the contract_id",
-    contract_id not in reply and "gmail_send_draft" in reply)
+    contract_id not in reply and "שליחת הודעת דוא״ל" in reply)
+chk("DoD3/9: reply never leaks the raw tool_name (Reconfirmation tool_name leak fix)",
+    "gmail_send_draft" not in reply)
 chk("DoD3: reply asks for explicit reconfirmation", "לאשר אותה" in reply)
 
 
