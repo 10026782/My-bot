@@ -594,10 +594,10 @@ def test_query_execution_status_single_pending_uses_new_helper():
     assert "mapped_state=approval_pending_query" in shadow_lines[0]
 
 
-def test_query_execution_status_multi_pending_unchanged():
-    """Regression guard: the multi-contract branch (len(live) > 1) is
-    unaffected — still the existing build_approval_lifecycle_result(contracts=...)
-    list rendering, not routed through the new single-contract helper."""
+def test_query_execution_status_multi_pending_off_unchanged():
+    """off must stay byte-identical to the pre-D-017 legacy text — the
+    multi-contract branch's own build_approval_lifecycle_result(contracts=...)
+    rendering, untouched."""
     gw, fake1 = _gw_with_task_contract("חזרה לספק")
     fake2 = types.SimpleNamespace(
         tool_name="airtable_add", contract_id="c-task-2", created_at=time.time(),
@@ -605,11 +605,150 @@ def test_query_execution_status_multi_pending_unchanged():
     )
     gw._ledger._store = {}
     try:
-        _set("on")
+        _set(None)
         out = gw.query_execution_status("u1", live_contracts=[fake1, fake2])
     finally:
         _set(None)
     assert out == build_approval_lifecycle_result(contracts=[fake1, fake2]).safe_user_message
+
+
+# ── 3e. Approval Pending Batch Migration (F52 D-017) ───────────────────────────
+# Owner decisions: count=0 -> clean "nothing pending" (idle); count=1 ->
+# singular approval_pending_query wording (D-016), no list; count>=2 -> a
+# shared STATE_APPROVAL_PENDING_BATCH renderer, used by BOTH
+# describe_pending_queue() and query_execution_status()'s multi-contract
+# branch (OQ5: they converge). "ActionContracts"/legacy-queue naming is
+# dropped entirely from the target (shadow/on) text; off stays byte-identical
+# to today's production text, unconditionally, regardless of count.
+
+def test_describe_pending_queue_off_unchanged_for_every_count():
+    """off must remain byte-identical to pre-D-017 production text at every
+    count — including the ActionContracts naming and the count=1 grammar
+    quirk ("1 בקשות ממתינות") — none of that changes unless the flag moves."""
+    gw, fake1 = _gw_with_task_contract("חזרה לספק")
+    try:
+        _set(None)
+        empty = gw.describe_pending_queue("u1", live_contracts=[])
+        single = gw.describe_pending_queue("u1", live_contracts=[fake1])
+    finally:
+        _set(None)
+    assert "ActionContracts" in empty
+    assert "ActionContracts" in single
+    assert "1 בקשות ממתינות" in single
+    assert single.startswith("במערכת ActionContracts מצאתי 1")
+
+
+def test_describe_pending_queue_count_zero_on_is_clean_idle_message():
+    gw = ActionGateway()
+    try:
+        _set("on")
+        out = gw.describe_pending_queue("u1", live_contracts=[])
+    finally:
+        _set(None)
+    assert "ActionContracts" not in out
+    assert "legacy" not in out
+    assert out == "אין כרגע פעולה שממתינה. אפשר להמשיך."
+
+
+def test_describe_pending_queue_count_one_on_uses_singular_wording_no_list():
+    """OQ1: count=1 must NOT be a numbered list once the flag is on — no
+    '1.'/bullet, no 'שלח מספר'. describe_pending_queue() is a STATUS QUERY
+    surface (D-015), so it renders the SAME singular approval_pending_query
+    wording D-016 already defined for query_execution_status()'s
+    single-contract case — never the NEW-PROMPT wording."""
+    gw, fake1 = _gw_with_task_contract("חזרה לספק")
+    try:
+        _set("on")
+        out = gw.describe_pending_queue("u1", live_contracts=[fake1])
+    finally:
+        _set(None)
+    assert "ActionContracts" not in out
+    assert "בקשות ממתינות" not in out
+    assert "שלח" not in out and "מספר" not in out
+    assert out.startswith("יש משימה שממתינה לאישור:")
+    assert "חזרה לספק" in out
+    assert "כדי ליצור" not in out  # not the new-prompt wording
+
+
+def test_describe_pending_queue_count_two_on_uses_shared_batch_wording():
+    gw, fake1 = _gw_with_task_contract("חזרה לספק")
+    fake2 = types.SimpleNamespace(
+        tool_name="airtable_add", contract_id="c-task-2", created_at=time.time(),
+        normalized_payload={"table": _LEAD_CAPTURE_TABLE, "fields": {
+            LeadFields.NAME: "דני כהן", LeadFields.PHONE: "0501234567"}},
+    )
+    try:
+        _set("on")
+        out = gw.describe_pending_queue("u1", live_contracts=[fake1, fake2])
+    finally:
+        _set(None)
+    assert "ActionContracts" not in out
+    assert "legacy" not in out
+    assert out.startswith("יש 2 פעולות שממתינות לאישור:")
+    assert "חזרה לספק" in out and "דני כהן" in out
+    assert "שלח מספר כדי לבחור." in out
+
+
+def test_describe_pending_queue_shadow_returns_legacy_and_logs_batch_state():
+    import core.action_gateway as ag_module
+    gw, fake1 = _gw_with_task_contract("חזרה לספק")
+    fake2 = types.SimpleNamespace(
+        tool_name="airtable_add", contract_id="c-task-2", created_at=time.time(),
+        normalized_payload={"table": _TASK_CREATION_TABLE, "fields": {"Name": "עוד משימה"}},
+    )
+    cap = _LogCapture()
+    orig_logger = ag_module.logger
+    try:
+        _set("shadow")
+        ag_module.logger = cap
+        out = gw.describe_pending_queue("u1", live_contracts=[fake1, fake2])
+    finally:
+        ag_module.logger = orig_logger
+        _set(None)
+    assert "ActionContracts" in out  # shadow still SENDS legacy text
+    shadow_lines = [m for lvl, m in cap.records
+                     if lvl == "info" and "UnifiedStatusFormatterShadow" in m]
+    assert len(shadow_lines) == 1
+    assert "mapped_state=approval_pending_batch" in shadow_lines[0]
+    assert "record_id_leak=False" in shadow_lines[0]
+    assert "contract_id_leak=False" in shadow_lines[0]
+
+
+def test_query_execution_status_multi_pending_converges_with_describe_pending_queue():
+    """OQ5: query_execution_status()'s multi-contract branch and
+    describe_pending_queue()'s count>=2 branch must render the SAME target
+    text for the same contracts once the flag is on — no more divergence
+    between the two 'what's pending' surfaces."""
+    gw, fake1 = _gw_with_task_contract("חזרה לספק")
+    fake2 = types.SimpleNamespace(
+        tool_name="airtable_add", contract_id="c-task-2", created_at=time.time(),
+        normalized_payload={"table": _LEAD_CAPTURE_TABLE, "fields": {
+            LeadFields.NAME: "דני כהן", LeadFields.PHONE: "0501234567"}},
+    )
+    gw._ledger._store = {}
+    try:
+        _set("on")
+        from_status = gw.query_execution_status("u1", live_contracts=[fake1, fake2])
+        from_queue = gw.describe_pending_queue("u1", live_contracts=[fake1, fake2])
+    finally:
+        _set(None)
+    assert from_status == from_queue
+    assert "ActionContracts" not in from_status
+
+
+def test_pending_batch_never_leaks_representative_contract_id_or_tool_name():
+    gw, fake1 = _gw_with_task_contract("חזרה לספק")
+    fake2 = types.SimpleNamespace(
+        tool_name="airtable_add", contract_id="c-task-2", created_at=time.time(),
+        normalized_payload={"table": _TASK_CREATION_TABLE, "fields": {"Name": "עוד משימה"}},
+    )
+    try:
+        _set("on")
+        out = gw.describe_pending_queue("u1", live_contracts=[fake1, fake2])
+    finally:
+        _set(None)
+    assert fake1.contract_id not in out and fake2.contract_id not in out
+    assert "airtable_add" not in out
 
 
 # ── 4. formatter exception never breaks the live path ─────────────────────────

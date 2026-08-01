@@ -375,3 +375,75 @@ This log records planning decisions for the F52 program. It is not runtime imple
 - Affected documents: this log. (`UNIFIED_MESSAGE_UX_STANDARD.md`'s D-015
   canonical patterns already describe the wording this wires in; no further
   spec edit needed.)
+
+## D-017 — Approval Pending Batch Migration: OQ1-OQ5 resolved, implemented
+
+- Date: 02/08/2026
+- Status: Closed for the wording/formatter-copy question below; does not
+  itself authorize `FEATURE_UNIFIED_STATUS_FORMATTER=on`; no approval logic,
+  ownership, queue, evidence authority, or routing changed
+- Trigger: owner resolution of the five open questions in
+  `spec/APPROVAL_PENDING_BATCH_MIGRATION_SCOPE_V1.md` §6.
+- Decision (verbatim owner resolution):
+  - **count=0:** a clean message that nothing is pending.
+  - **count=1:** singular wording, no list, no number-selection affordance
+    (resolves OQ1 — collapses to `_render_pending_query_reply()`'s existing
+    `approval_pending_query` wording, D-016, rather than staying a
+    one-item list).
+  - **count>=2:** numbered list.
+  - **OQ2/OQ3:** `"ActionContracts"` and every "legacy queue" reference are
+    removed entirely from the target text — no replacement internal-system
+    naming.
+  - **OQ5:** `describe_pending_queue()` and `query_execution_status()`'s
+    multi-contract branch converge on the same `STATE_APPROVAL_PENDING_BATCH`
+    renderer — one target wording for both surfaces.
+  - **OQ4:** the raw `tool_name` fallback in
+    `_describe_contract_for_reconfirmation()` (non-Airtable, non-table
+    tools) remains a **separate, still-open follow-up**, explicitly marked
+    as a BEFORE-FLAG-ON blocker — not fixed by this decision, not silently
+    treated as already safe.
+- Implementation (content/copy only, off/shadow/on, per owner-specified
+  scope):
+  - `core/action_gateway.py`: two new helpers mirroring D-016's
+    `_render_pending_query_reply()` pattern exactly — `_render_pending_empty_reply()`
+    (count=0, renders the existing `STATE_IDLE`/`"idle"` wording — an
+    already-safe state, no new one invented) and `_render_pending_batch_reply()`
+    (count>=2, renders `STATE_APPROVAL_PENDING_BATCH`/`"approval_pending_batch"`
+    via a direct `format_agent_message_with_meta()` call, items built from
+    `_describe_contract_for_reconfirmation()` — the same per-item
+    task/lead/generic-aware business description the legacy list already
+    uses). Both: `off` returns the caller's own existing legacy text
+    byte-identical; `shadow` computes+logs, still returns legacy; `on`
+    returns the unified text.
+  - `describe_pending_queue()`: legacy list construction is completely
+    UNCHANGED (still the `"ActionContracts"`-naming, `"1 בקשות ממתינות"`
+    text for `off`) — only the return path changed, branching on
+    `len(live)` to `_render_pending_empty_reply()` / `_render_pending_query_reply()`
+    (reused from D-016, count=1) / `_render_pending_batch_reply()`
+    (count>=2).
+  - `query_execution_status()`'s two multi-contract occurrences (`len(live) > 1`)
+    now call `_render_pending_batch_reply()` instead of returning
+    `build_approval_lifecycle_result(contracts=live).safe_user_message`
+    directly — `off` still returns that exact legacy text; `on` now
+    produces the SAME text `describe_pending_queue()` produces for the same
+    contracts (verified by test, not just asserted).
+- Explicitly out of scope (per owner instruction, unchanged): approval
+  logic, ownership, queue, evidence authority, routing, `MessageContract`
+  schema/wiring, `self._disambiguation` selection-state semantics, and OQ4
+  (tracked separately, before-flag-on).
+- Tests: `test_f52_status_reply_reconciliation.py` gained off/shadow/on
+  coverage for both new helpers, per-count integration checks against
+  `describe_pending_queue()` (count=0 clean idle text, count=1 singular
+  wording with no list markers, count=2 batch wording with no
+  `"ActionContracts"`/`"legacy"` text), an explicit convergence check that
+  `query_execution_status()`'s multi-contract branch and
+  `describe_pending_queue()` render identical text for the same contracts,
+  and a no-leaked-identifier check across a two-item batch.
+  `test_bug141_pending_query_dispatch_order.py` (which uses the
+  `"ActionContracts"` string as an off-state routing fingerprint, flagged
+  as a known future risk in the scope doc) was run and confirmed still
+  green, unmodified — `off` text is unchanged, so the fingerprint still
+  matches; redesigning that test is deferred to when the flag actually
+  moves past `off`, not before.
+- Affected documents: this log. (`spec/APPROVAL_PENDING_BATCH_MIGRATION_SCOPE_V1.md`
+  §6's OQ1-OQ5 are now resolved here, not re-litigated in that document.)

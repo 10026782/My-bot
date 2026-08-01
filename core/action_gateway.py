@@ -2076,6 +2076,111 @@ class ActionGateway:
         # state == "on"
         return unified_text
 
+    # ── F52 D-017 — Approval Pending Batch Migration ──────────────────────
+    # Owner decisions (Decision Log D-017), resolving the open questions in
+    # APPROVAL_PENDING_BATCH_MIGRATION_SCOPE_V1.md:
+    #   count=0  -> a clean "nothing pending" message (STATE_IDLE — an
+    #               existing, already-safe state; no new one invented).
+    #   count=1  -> the SAME singular approval_pending_query wording
+    #               _render_pending_query_reply() already renders (D-016) —
+    #               no list, no "send a number" affordance.
+    #   count>=2 -> a numbered list via STATE_APPROVAL_PENDING_BATCH,
+    #               shared by describe_pending_queue() AND
+    #               query_execution_status()'s multi-contract branch (OQ5:
+    #               both converge on the same target renderer).
+    # "ActionContracts" / "תורי אישור legacy" are dropped entirely from the
+    # target text (OQ2/OQ3) — off (legacy) text is UNCHANGED (still contains
+    # them, exactly as today) until the flag actually moves past off.
+    # The raw tool_name fallback in _describe_contract_for_reconfirmation()
+    # (non-Airtable tools) is a KNOWN, separate, NOT-yet-fixed leak —
+    # explicitly out of scope here, tracked as a BEFORE-FLAG-ON blocker
+    # (OQ4), not silently relied upon as already-safe.
+
+    def _render_pending_empty_reply(self, legacy_text: str) -> str:
+        """count=0: off returns legacy_text (the caller's own existing
+        "no pending" text, e.g. describe_pending_queue()'s ActionContracts-
+        naming fallback, UNCHANGED) byte-identical; shadow/on render the
+        existing, already-safe STATE_IDLE wording instead."""
+        try:
+            from feature_flags import get_unified_status_formatter_state
+            state = get_unified_status_formatter_state()
+        except Exception:
+            state = "off"
+
+        if state == "off":
+            return legacy_text
+
+        from core.agent_message_formatter import format_agent_message_with_meta
+
+        try:
+            unified_text, meta = format_agent_message_with_meta("idle", {})
+        except Exception as exc:
+            logger.warning("[ActionGateway] unified pending-empty formatter failed: %s", exc)
+            return legacy_text
+        meta["contract_path"] = "agent_message_formatter_direct"
+
+        fact = ActionFact(
+            tool_name="", contract_id="", outcome="pending",
+            record_id=None, error_code=None, raw_tool_response={},
+        )
+        if state == "shadow":
+            self._log_shadow_comparison(fact, legacy_text, unified_text, meta)
+            return legacy_text
+
+        # state == "on"
+        return unified_text
+
+    def _render_pending_batch_reply(
+        self, contracts: list["ActionContract"], legacy_text: str,
+    ) -> str:
+        """count>=2: off returns legacy_text (the caller's own existing
+        numbered-list text, UNCHANGED) byte-identical; shadow/on render
+        STATE_APPROVAL_PENDING_BATCH instead — same per-item business
+        description (_describe_contract_for_reconfirmation(), already
+        task/lead/generic-aware, already redaction-safe) as the legacy list
+        uses, just without the "ActionContracts"/legacy-queue framing.
+
+        Leak-check caveat: _shadow_leak_flags() (reused as-is, never
+        duplicated) only checks ONE representative ActionFact's identifiers
+        against the unified text — for a multi-contract list it cannot, by
+        construction, verify every item's own tool_name/contract_id is
+        absent. The one KNOWN way an item's raw tool_name can still leak is
+        the pre-existing, separately-tracked fallback in
+        _describe_contract_for_reconfirmation() (OQ4) — not newly
+        introduced here, not silently assumed safe either."""
+        try:
+            from feature_flags import get_unified_status_formatter_state
+            state = get_unified_status_formatter_state()
+        except Exception:
+            state = "off"
+
+        if state == "off":
+            return legacy_text
+
+        from core.agent_message_formatter import format_agent_message_with_meta
+
+        items = [{"human_summary": _describe_contract_for_reconfirmation(c)} for c in contracts]
+        payload = {"items": items, "count": len(contracts)}
+        try:
+            unified_text, meta = format_agent_message_with_meta("approval_pending_batch", payload)
+        except Exception as exc:
+            logger.warning("[ActionGateway] unified pending-batch formatter failed: %s", exc)
+            return legacy_text
+        meta["contract_path"] = "agent_message_formatter_direct"
+
+        representative = contracts[0] if contracts else None
+        fact = ActionFact(
+            tool_name=getattr(representative, "tool_name", "") or "",
+            contract_id=getattr(representative, "contract_id", "") or "",
+            outcome="pending", record_id=None, error_code=None, raw_tool_response={},
+        )
+        if state == "shadow":
+            self._log_shadow_comparison(fact, legacy_text, unified_text, meta)
+            return legacy_text
+
+        # state == "on"
+        return unified_text
+
     def reject_if_pending(self, contract_id: str, rejected_by: str = "") -> bool:
         """
         Atomic conditional cancel (Codex re-audit of 818c8a6 — TOCTOU race
@@ -2991,7 +3096,8 @@ class ActionGateway:
             live = live_contracts if live_contracts is not None else self.find_live_contracts(canonical_user_id)
             if live:
                 if len(live) > 1:
-                    return build_approval_lifecycle_result(contracts=live).safe_user_message
+                    legacy_text = build_approval_lifecycle_result(contracts=live).safe_user_message
+                    return self._render_pending_batch_reply(live, legacy_text)
                 single = live[0]
                 legacy_text = build_approval_lifecycle_result(single).safe_user_message
                 return self._render_pending_query_reply(single, legacy_text)
@@ -3002,7 +3108,8 @@ class ActionGateway:
             live = live_contracts if live_contracts is not None else self.find_live_contracts(canonical_user_id)
             if live:
                 if len(live) > 1:
-                    return build_approval_lifecycle_result(contracts=live).safe_user_message
+                    legacy_text = build_approval_lifecycle_result(contracts=live).safe_user_message
+                    return self._render_pending_batch_reply(live, legacy_text)
                 single = live[0]
                 legacy_text = build_approval_lifecycle_result(single).safe_user_message
                 return self._render_pending_query_reply(single, legacy_text)
@@ -3059,7 +3166,8 @@ class ActionGateway:
         if not live:
             no_pending = self.describe_no_pending_reason(canonical_user_id)
             base = no_pending or "לא מצאתי בקשות ממתינות במערכת ActionContracts."
-            return base + "\n\n(הבדיקה מכסה את מערכת ActionContracts בלבד — לא תורי אישור legacy נוספים.)"
+            legacy_text = base + "\n\n(הבדיקה מכסה את מערכת ActionContracts בלבד — לא תורי אישור legacy נוספים.)"
+            return self._render_pending_empty_reply(legacy_text)
         with self._disambiguation_lock:
             self._disambiguation[canonical_user_id] = list(live)
         lines = [f"במערכת ActionContracts מצאתי {len(live)} בקשות ממתינות:"]
@@ -3067,7 +3175,15 @@ class ActionGateway:
             lines.append(f"• {i}. {_describe_contract_for_disambiguation(c)}{_format_pending_age_suffix(c)}")
         lines.append("\nשלח את המספר (1, 2, ...) כדי לאשר פעולה ספציפית, או \"בטל <מספר>\" כדי לדחות אחת.")
         lines.append("\n(הבדיקה אינה כוללת כרגע תורי אישור legacy נוספים.)")
-        return "\n".join(lines)
+        legacy_text = "\n".join(lines)
+        # F52 D-017: off keeps this exact list, unconditionally, even for
+        # count=1 — the byte-identical legacy behavior invariant this whole
+        # program depends on. shadow/on render the owner-decided target
+        # instead: count=1 collapses to the singular approval_pending_query
+        # wording (D-016), count>=2 uses the shared batch renderer.
+        if len(live) == 1:
+            return self._render_pending_query_reply(live[0], legacy_text)
+        return self._render_pending_batch_reply(live, legacy_text)
 
     def find_recent_terminal_by_user(
         self, canonical_user_id: str, *, max_age_seconds: int,
