@@ -317,3 +317,61 @@ This log records planning decisions for the F52 program. It is not runtime imple
   wording.
 - Affected documents: `spec/UNIFIED_MESSAGE_UX_STANDARD.md` (canonical
   patterns split into "NEW prompt" and "STATUS QUERY" sections), this log.
+
+## D-016 — Wire `query_execution_status()`'s single-pending-contract case onto `approval_pending_query`
+
+- Date: 02/08/2026
+- Status: Closed for the wording/formatter-copy question below; does not
+  itself authorize `FEATURE_UNIFIED_STATUS_FORMATTER=on`; no approval logic,
+  ownership, queue, evidence authority, routing, or `MessageContract`
+  wiring/schema changed
+- Trigger: owner follow-up, prompted by a live shadow log
+  (`legacy_len=56, unified_len=70`) confirming PR #522's content fix is
+  correct in production, plus a direct request: `describe_pending_queue()`/
+  `query_execution_status()` — the actual STATUS QUERY surfaces (e.g.
+  "האם הפעולה ממתינה לאישור?") — had zero `FEATURE_UNIFIED_STATUS_FORMATTER`
+  shadow coverage at all, the same shape of gap PR4/PR5/PR6 each closed for
+  their own surface. D-015 had explicitly left both out of scope; this entry
+  narrows that back in for one of the two, not both (see below).
+- Decision: `query_execution_status()`'s single-pending-contract branches
+  (both occurrences — the no-completed/failed-candidates case and the
+  stale-latest-with-still-pending case) now render through a new
+  `ActionGateway._render_pending_query_reply()` helper, using the same
+  off/shadow/on `FEATURE_UNIFIED_STATUS_FORMATTER` pattern PR4/PR5/PR6/D-015
+  already established: `off` (default) returns the caller's own
+  `build_approval_lifecycle_result(contract).safe_user_message` byte-
+  identical; `shadow` computes the `approval_pending_query` unified text
+  (task-noun-aware, per D-015) and logs the same safe `_log_shadow_
+  comparison()` record, still returning legacy text; `on` returns the
+  unified text. Rendered via a **direct** `format_agent_message_with_meta(
+  "approval_pending_query", ...)` call, not through the `ActionFact`/
+  `MessageContract` adapter — a synthetic `ActionFact(outcome="pending", ...)`
+  is still built, but only as input to the already-shared, unmodified
+  `_log_shadow_comparison()`/`_shadow_leak_flags()` safe-logging helpers,
+  exactly mirroring `_render_pending_prompt()`'s and `_render_rejection_
+  reply()`'s own pattern. No `MessageContract`/`MessageState` schema change.
+- `describe_pending_queue()` is explicitly **NOT** wired by this decision —
+  it always renders a numbered list (even for exactly one pending contract,
+  since the "send a number to select" affordance must stay consistent
+  regardless of count), which is `STATE_APPROVAL_PENDING_BATCH`'s shape
+  (`_render_approval_pending_batch()`), not the singular `approval_pending_
+  query` state D-015 defined. It also has a separate, already-flagged
+  internal-name leak (`"ActionContracts"` in its user-facing text — see
+  the mid-session finding this same day, not yet fixed). Wiring
+  `describe_pending_queue()` onto `STATE_APPROVAL_PENDING_BATCH` — and, as a
+  natural side effect, eliminating that leak once the flag reaches `on` — is
+  a distinct, still-open follow-up, not decided here.
+- `query_execution_status()`'s multi-contract branch (`len(live) > 1`) is
+  similarly **NOT** wired — same batch-shape reasoning as
+  `describe_pending_queue()` above.
+- Tests: `test_f52_status_reply_reconciliation.py` gained off/shadow/on unit
+  coverage for `_render_pending_query_reply()` (byte-identical legacy off,
+  correct `mapped_state=approval_pending_query` shadow log with no leaked
+  identifiers, task-noun-aware `on` output), an explicit check that the
+  new-prompt and status-query wordings never converge for the same
+  contract, an integration test proving `query_execution_status()`'s
+  single-contract branch actually calls the new helper, and a regression
+  guard that the multi-contract branch is unchanged.
+- Affected documents: this log. (`UNIFIED_MESSAGE_UX_STANDARD.md`'s D-015
+  canonical patterns already describe the wording this wires in; no further
+  spec edit needed.)

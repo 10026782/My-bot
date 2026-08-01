@@ -282,7 +282,11 @@ def test_only_action_gateway_imports_the_adapter_for_pr_d_runtime():
     assert gateway_content.count("from core.action_fact_message_adapter import from_action_fact") == 1
     # F52 D-014: this call site gained an entity_type= kwarg (task-noun
     # awareness) — still the single call site, just a wider legitimate shape.
+    # (F52 D-015 added a prose *mention* of from_action_fact() elsewhere, in a
+    # comment explaining why _render_pending_query_reply() deliberately does
+    # NOT call it — that's not a second call site, so it's excluded by
+    # requiring the actual argument list, not just the bare function name.)
     assert gateway_content.count(
         "from_action_fact(fact, description=description, entity_type=entity_type)",
     ) == 1
-    assert gateway_content.count("from_action_fact(") == 1
+    assert gateway_content.count("from_action_fact(fact") == 1

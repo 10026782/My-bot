@@ -1999,6 +1999,83 @@ class ActionGateway:
         # state == "on"
         return unified_text
 
+    # ── F52 D-015 follow-up — status-query shadow rendering ──────────────
+    # Production finding (02/08/2026): the "new approval prompt" surface
+    # (_render_pending_prompt() above) and the "status query" surface
+    # (query_execution_status()'s single-pending-contract branches, called
+    # e.g. for "האם הפעולה ממתינה לאישור?") never agreed on wording, and the
+    # status-query surface had zero FEATURE_UNIFIED_STATUS_FORMATTER
+    # visibility — same shape of gap PR4/PR5/PR6 each closed for their own
+    # surface. This closes it for query_execution_status()'s single-contract
+    # case specifically, using STATE_APPROVAL_PENDING_QUERY (F52 D-015),
+    # never STATE_APPROVAL_PENDING (the new-prompt state) — that distinction
+    # is the entire point of D-015.
+    #
+    # Rendered via a DIRECT format_agent_message_with_meta() call, not
+    # through the ActionFact/MessageContract adapter: ActionFact is scoped
+    # to a single tool-call's outcome (D-002/D-012), not to "the ledger was
+    # asked a question about an existing contract" — inventing a fact shape
+    # for that would be new MessageContract wiring, which D-015 explicitly
+    # ruled out. A synthetic ActionFact(outcome="pending", ...) is still
+    # built here, but ONLY as the shared, already-safe input to
+    # _log_shadow_comparison()/_shadow_leak_flags() (reused as-is, exactly
+    # like _render_pending_prompt() and _render_rejection_reply() already
+    # do) — never passed to from_action_fact()/build_message_contract().
+    #
+    # off (default): returns the caller's own legacy_text (build_approval_
+    # lifecycle_result(contract).safe_user_message) byte-identical.
+    # shadow: computes the unified approval_pending_query text, logs the
+    # SAME safe comparison record, still returns legacy_text. on: returns
+    # the unified text.
+    #
+    # describe_pending_queue() is NOT wired here — its output is always a
+    # numbered list (even for exactly one pending contract, since the same
+    # "send a number to select" affordance must stay consistent regardless
+    # of count), which is STATE_APPROVAL_PENDING_BATCH's shape, not this
+    # singular state. Wiring that surface (and its separate, already-flagged
+    # "ActionContracts" internal-name leak) is a distinct follow-up.
+    def _render_pending_query_reply(self, contract: "ActionContract", legacy_text: str) -> str:
+        """Renders a single-pending-contract STATUS QUERY reply through the
+        same off/shadow/on FEATURE_UNIFIED_STATUS_FORMATTER path the other
+        pending-adjacent surfaces use. legacy_text is the caller's own
+        pre-existing build_approval_lifecycle_result(contract).safe_user_
+        message — returned unchanged unless the flag is 'on'."""
+        try:
+            from feature_flags import get_unified_status_formatter_state
+            state = get_unified_status_formatter_state()
+        except Exception:
+            state = "off"
+
+        if state == "off":
+            return legacy_text
+
+        from core.agent_message_formatter import format_agent_message_with_meta
+
+        is_task = _is_task_creation_contract(contract)
+        description = _safe_task_title(contract) if is_task else _safe_contract_business_description(contract)
+        payload = {
+            "entity_name": description or None,
+            "entity_type": "task" if is_task else None,
+        }
+        try:
+            unified_text, meta = format_agent_message_with_meta("approval_pending_query", payload)
+        except Exception as exc:
+            # A status-query reply must never break because of the formatter.
+            logger.warning("[ActionGateway] unified pending-query formatter failed: %s", exc)
+            return legacy_text
+        meta["contract_path"] = "agent_message_formatter_direct"
+
+        fact = ActionFact(
+            tool_name=contract.tool_name, contract_id=contract.contract_id,
+            outcome="pending", record_id=None, error_code=None, raw_tool_response={},
+        )
+        if state == "shadow":
+            self._log_shadow_comparison(fact, legacy_text, unified_text, meta)
+            return legacy_text
+
+        # state == "on"
+        return unified_text
+
     def reject_if_pending(self, contract_id: str, rejected_by: str = "") -> bool:
         """
         Atomic conditional cancel (Codex re-audit of 818c8a6 — TOCTOU race
@@ -2915,7 +2992,9 @@ class ActionGateway:
             if live:
                 if len(live) > 1:
                     return build_approval_lifecycle_result(contracts=live).safe_user_message
-                return build_approval_lifecycle_result(live[0]).safe_user_message
+                single = live[0]
+                legacy_text = build_approval_lifecycle_result(single).safe_user_message
+                return self._render_pending_query_reply(single, legacy_text)
             return None
         latest = max(candidates, key=lambda c: c.created_at)
         if time.time() - latest.created_at > window_seconds:
@@ -2924,7 +3003,9 @@ class ActionGateway:
             if live:
                 if len(live) > 1:
                     return build_approval_lifecycle_result(contracts=live).safe_user_message
-                return build_approval_lifecycle_result(live[0]).safe_user_message
+                single = live[0]
+                legacy_text = build_approval_lifecycle_result(single).safe_user_message
+                return self._render_pending_query_reply(single, legacy_text)
             return None
         ext_id = None
         if isinstance(latest.agent_observations, list):
