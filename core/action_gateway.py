@@ -2000,7 +2000,7 @@ class ActionGateway:
         return unified_text
 
     # ── F52 D-015 follow-up — status-query shadow rendering ──────────────
-    # Production finding (02/08/2026): the "new approval prompt" surface
+    # Production finding (01/08/2026): the "new approval prompt" surface
     # (_render_pending_prompt() above) and the "status query" surface
     # (query_execution_status()'s single-pending-contract branches, called
     # e.g. for "האם הפעולה ממתינה לאישור?") never agreed on wording, and the

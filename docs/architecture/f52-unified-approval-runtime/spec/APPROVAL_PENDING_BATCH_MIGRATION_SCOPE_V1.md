@@ -40,7 +40,7 @@ those surfaces render today.
    `approval_pending_query`-shaped" — this is that deferred follow-up.
 2. Mid-session production transcript (this same day) surfaced the live
    symptom directly:
-   ```
+   ```text
    Eli: האם הפעולה ממתינה לאישור?
    BOSS: במערכת ActionContracts מצאתי 1 בקשות ממתינות:
    • 1. יצירת משימה: בדיקת PR E pending verification

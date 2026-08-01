@@ -200,7 +200,7 @@ This log records planning decisions for the F52 program. It is not runtime imple
 
 ## D-014 — Ratify the text-based "לאשר? כן / לא" confirmation as canonical, cross-channel
 
-- Date: 02/08/2026
+- Date: 01/08/2026
 - Status: Closed for the wording question below; does not itself authorize
   `FEATURE_UNIFIED_STATUS_FORMATTER=on`
 - Trigger: a production `[UnifiedStatusFormatterShadow]` sample for
@@ -249,7 +249,7 @@ This log records planning decisions for the F52 program. It is not runtime imple
 
 ## D-015 — Split `approval_pending` wording by context: new prompt vs. status query, with task-noun awareness
 
-- Date: 02/08/2026
+- Date: 01/08/2026
 - Status: Closed for the wording/formatter-copy question below; does not
   itself authorize `FEATURE_UNIFIED_STATUS_FORMATTER=on`; no approval logic,
   ownership, queue, evidence authority, routing, or `MessageContract`
@@ -320,7 +320,7 @@ This log records planning decisions for the F52 program. It is not runtime imple
 
 ## D-016 — Wire `query_execution_status()`'s single-pending-contract case onto `approval_pending_query`
 
-- Date: 02/08/2026
+- Date: 01/08/2026
 - Status: Closed for the wording/formatter-copy question below; does not
   itself authorize `FEATURE_UNIFIED_STATUS_FORMATTER=on`; no approval logic,
   ownership, queue, evidence authority, routing, or `MessageContract`
@@ -378,7 +378,7 @@ This log records planning decisions for the F52 program. It is not runtime imple
 
 ## D-017 — Approval Pending Batch Migration: OQ1-OQ5 resolved, implemented
 
-- Date: 02/08/2026
+- Date: 01/08/2026
 - Status: Closed for the wording/formatter-copy question below; does not
   itself authorize `FEATURE_UNIFIED_STATUS_FORMATTER=on`; no approval logic,
   ownership, queue, evidence authority, or routing changed
