@@ -143,6 +143,61 @@ def test_approval_pending_uses_business_summary_not_tool_name():
     _assert_no_tool_names(out)
 
 
+# ── 3b. approval_pending: new-prompt vs. status-query wording (F52 D-015) ──────
+# D-015 (F52 Decision Log): a NEW approval prompt (right after the user's
+# request is queued) and a STATUS QUERY about an already-pending action need
+# distinct framing. "approval_pending" (STATE_APPROVAL_PENDING) renders the
+# new-prompt wording — it is the only state reachable via the MessageContract
+# crossing (ActionGateway._render_pending_prompt(), the live pending caller).
+# "approval_pending_query" (STATE_APPROVAL_PENDING_QUERY) renders the
+# status-query wording — not part of core.message_contract.MessageState, not
+# reachable via MessageContract, only via a direct format_agent_message_*()
+# call. No live call site uses it yet (see core/agent_message_formatter.py).
+
+def test_approval_pending_new_prompt_wording_distinct_from_status_query():
+    new_prompt = fmt("approval_pending", {"human_summary": "יצירת ליד עבור דני כהן"})
+    status_query = fmt("approval_pending_query", {"human_summary": "יצירת ליד עבור דני כהן"})
+    assert new_prompt.startswith("כדי לבצע את הפעולה הזו נדרש אישור:")
+    assert status_query.startswith("יש פעולה שממתינה לאישור:")
+    assert new_prompt != status_query
+    for out in (new_prompt, status_query):
+        assert "לאשר" in out and "כן" in out and "לא" in out
+        assert "דני כהן" in out
+
+
+def test_approval_pending_task_noun_new_prompt_vs_status_query():
+    task_new_prompt = fmt("approval_pending", {"entity_name": "חזרה לספק", "entity_type": "task"})
+    task_status_query = fmt("approval_pending_query", {"entity_name": "חזרה לספק", "entity_type": "task"})
+    assert task_new_prompt.startswith("כדי ליצור את המשימה הזו נדרש אישור:")
+    assert task_status_query.startswith("יש משימה שממתינה לאישור:")
+    assert "חזרה לספק" in task_new_prompt and "חזרה לספק" in task_status_query
+
+
+def test_approval_pending_non_task_entity_type_keeps_generic_noun():
+    out_new = fmt("approval_pending", {"entity_name": "פגישה עם רונית", "entity_type": "meeting"})
+    out_query = fmt("approval_pending_query", {"entity_name": "פגישה עם רונית", "entity_type": "meeting"})
+    assert out_new.startswith("כדי לבצע את הפעולה הזו נדרש אישור:")
+    assert out_query.startswith("יש פעולה שממתינה לאישור:")
+
+
+def test_approval_pending_missing_data_fallback_differs_new_prompt_vs_query():
+    new_fallback = fmt("approval_pending", {})
+    query_fallback = fmt("approval_pending_query", {})
+    assert new_fallback != query_fallback
+    assert "אישור" in new_fallback and "אישור" in query_fallback
+    _assert_no_success_marker(new_fallback)
+    _assert_no_success_marker(query_fallback)
+
+
+def test_approval_pending_query_state_not_in_message_contract_schema():
+    """F52 D-015: approval_pending_query must stay reachable only via a direct
+    format_agent_message_*() call, never via the MessageContract crossing —
+    no MessageContract/MessageState schema change for this decision."""
+    from core.message_contract import MessageState
+    assert "approval_pending_query" not in {s.value for s in MessageState}
+    assert "approval_pending_query" in CANONICAL_STATES
+
+
 # ── 4. approval_pending_batch ─────────────────────────────────────────────────
 
 def test_approval_pending_batch_uses_business_summaries_not_tool_names():
