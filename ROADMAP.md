@@ -1,6 +1,24 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 30/07/2026 — **PR #515 מוזג ל-`main`** (commit `15fe851`, אומת ב-grep ישיר):
+עודכן: 01/08/2026 — **תיעוד PR #517–#520 (פער-תיעוד, נסגר ישירות מ-`git log origin/main`,
+לא הועלה כ-PR נפרד ע"י מי שביצע אותם):** ארבעה PRs מוזגו ל-`main` בין 30/07–31/07/2026 בלי
+עדכון ROADMAP/CHANGELOG נלווה — תוקן כאן, אומת ישירות ב-`git show`/`git log` על `origin/main`
+(`9f203f4`), לא לפי claim. **PR #517** (`9184834`+`c5f5516`+`dd63c4a`, merge `0ddd91c`) —
+`daily_digest.py`: `_lead_temperature_counts()`/`_leads_scoring_summary()` חדשים, מוסיפים שורת
+"📊 לידים: HOT/WARM/COLD" לדוח היומי; אין flag, קוד תמיד פעיל ברגע שפרוס. Force-gate override
+אושר במפורש ע"י המשתמש (ענפי `claude/*` לא-ממוזגים היו פתוחים באותו רגע). **טרם פרוס** — deploy
+החי המתועד האחרון (`5ec37b8`) קודם ל-commit הזה. **PR #518** ("PR E", `4e52561`, merge `952bb02`)
+— `core/action_gateway.py`'s `_compose_status_reply_unified()`: outcome `pending` (בנוסף ל-`failed`
+הקיים מ-PR D) עובר עכשיו גם הוא דרך `MessageContract`/`ActionFact` adapter; עדיין מאחורי
+`FEATURE_UNIFIED_STATUS_FORMATTER` (shadow/comparison), אין שינוי ל-evidence/approval authority.
+Force-gate override אושר במפורש (חמישה ענפי `claude/*` לא-ממוזגים היו פתוחים). **PR #519**
+(`82df448`, merge `49d6af8`) — רגנרציית `AI_CONTEXT.md` קודמת; הוחלפה ברגנרציה הנוכחית (01/08).
+**PR #520** (`ae7aaba`+`b700fa4`, merge `9f203f4`) — Context Librarian: תיקון אכיפת token-budget
+ב-`librarian.py` + `profiles.json`, ו-refactor ל-rendering של notes בלי slicing; dev tooling
+בלבד, אין שינוי runtime לבוט העסקי. Force-gate override אושר במפורש (אותה סיבה). **כל ארבעת
+ה-PRs מוזגו בפועל ואומתו ב-`git log origin/main`; אף אחד מהם לא שינה ברירת-מחדל של הבוט
+העסקי.** ראו `AI_CONTEXT.md` (01/08/2026) לתמונת מצב מלאה.
+עודכן קודם: 30/07/2026 — **PR #515 מוזג ל-`main`** (commit `15fe851`, אומת ב-grep ישיר):
 Non-raising dry-run estimation mode for Context Librarian (`estimate_bundle()` + `estimate_all_profiles()` + CLI `estimate` subcommand). Hebrew translation fixes from PR #513. All docstrings translated to Hebrew. 104/104 tests passing. Feature-flag-off by default (no production wiring). Addresses need for dry-run estimation without side effects in refresh-after-merge tool and planning gates (Phase 2 enablement + consumption gating deferred).
 עודכן קודם: 30/07/2026 — **PR #504 מוזג ל-`main`** (commit `55312ab`, אומת ב-grep ישיר):
 Multi-layer alignment stages 3-5 — first real Consumption Enforcement pilot
