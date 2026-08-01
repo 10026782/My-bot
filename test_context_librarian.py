@@ -13,9 +13,13 @@ from tools.context_librarian.librarian import (
     ContextLibrarianError,
     assess_profile_suggestions,
     build_bundle,
+    classify_new_sources,
     consumption_checklist,
+    discover_new_sources,
     evaluate_workflow_gate,
     load_catalog,
+    refresh_after_merge,
+    refresh_proposal,
     suggest_profiles,
     verify_consumption,
 )
@@ -561,7 +565,7 @@ def test_explicit_manual_profile_overrides_suggestion(catalog):
     assert bundle.startswith("# BOSS Context Bundle — core_reasoning_change")
 
 
-def test_stale_node_reports_stop_without_blocking_bundle(catalog, monkeypatch):
+def test_stale_node_is_warning_and_does_not_block_bundle(catalog, monkeypatch):
     monkeypatch.setattr(
         librarian,
         "_git_changed_paths",
@@ -573,9 +577,19 @@ def test_stale_node_reports_stop_without_blocking_bundle(catalog, monkeypatch):
         query="dispatcher evidence",
     )
     assert "## Agent Workflow Gate" in bundle
-    assert "- status: STOP" in bundle
-    assert "- reasons: ['stale_nodes']" in bundle
+    assert "- status: REVIEW_REQUIRED" in bundle
+    assert "stale_nodes" in bundle
     assert "- stale_nodes: 1 ['layer.tools']" in bundle
+
+
+def test_direct_verification_allows_planning_with_ledger(catalog, monkeypatch):
+    monkeypatch.setattr(librarian, "_git_changed_paths", lambda _root, _commit: {"tools/dispatcher.py"})
+    bundle = build_bundle(
+        catalog, task_type="tool_execution", query="dispatcher evidence",
+        direct_source_reverified=True, verification_ledger=["tools/dispatcher.py@main"],
+    )
+    assert "- status: WARNING" in bundle
+    assert "tools/dispatcher.py@main" in bundle
 
 
 @pytest.mark.parametrize(
@@ -678,7 +692,7 @@ def test_agent_bootstrap_is_canonical_and_claude_only_references_it():
     assert "Selected profile: <profile_id>" in agents
     assert "mandatory minimum context" in agents
     assert "context expansion" in agents
-    assert "A stale STOP permits only direct source re-verification" in agents
+    assert "Stale nodes alone never stop" in agents
 
     assert "canonical Context Librarian bootstrap in `AGENTS.md`" in claude
     assert "suggest-profile" not in claude
@@ -798,7 +812,7 @@ def test_bundle_provenance_reports_commit_branch_and_warns_off_main(catalog, mon
     assert "generated_commit: `abc1234`" in bundle
     assert "generated_branch: `feature-x`" in bundle
     assert "- on_main_history: no" in bundle
-    assert "WARNING: this bundle was NOT built from a commit proven to be on `main`" in bundle
+    assert "WARNING: commit is not proven on `main`" in bundle
 
 
 def test_bundle_provenance_omits_warning_when_on_main(catalog, monkeypatch):
@@ -1581,3 +1595,70 @@ def test_cli_verify_consumption_fails_closed_and_lists_unreviewed_sources(
     out = capsys.readouterr().out
     assert "CONCLUSION_BLOCKED" in out
     assert "unreviewed_sources" in out
+
+
+def test_gate_policy_classifies_github_activity_as_warning_not_stop():
+    gate = evaluate_workflow_gate(github_activity=["PR #500", "commit abc"])
+    assert gate["status"] == "WARNING"
+    assert gate["planning_allowed"] is True
+    assert gate["reasons"] == []
+
+
+def test_gate_policy_stops_on_authority_conflict_and_stale_runtime_change():
+    assert evaluate_workflow_gate(unresolved_conflicts=["a -> b"])["status"] == "STOP"
+    gate = evaluate_workflow_gate(stale_authority_runtime_changes=["core/approval.py"])
+    assert gate["status"] == "STOP"
+
+
+def test_new_source_classification_never_auto_registers(catalog):
+    result = classify_new_sources(
+        catalog,
+        ["test_new.py", "docs/new-planning.md", "core/new_runtime.py", "core/authority.py"],
+    )
+    by_path = {item["path"]: item["classification"] for item in result}
+    assert by_path["test_new.py"] == "WARNING"
+    assert by_path["docs/new-planning.md"] == "WARNING"
+    assert by_path["core/new_runtime.py"] == "REVIEW_REQUIRED"
+    assert by_path["core/authority.py"] == "STOP"
+
+
+@pytest.mark.parametrize("merge_shape", ["normal", "squash"])
+def test_refresh_reconciles_provenance_to_canonical_main_sha(catalog, monkeypatch, merge_shape):
+    canonical = "normal-main-sha" if merge_shape == "normal" else "squash-main-sha"
+    monkeypatch.setattr(
+        librarian, "_git_output",
+        lambda _root, args: canonical if args[:2] == ["rev-parse", "--verify"] else "",
+    )
+    monkeypatch.setattr(
+        librarian, "_node_changed_between",
+        lambda _catalog, node, _sha: {"tracked.py"} if node["id"] == "layer.tools" else set(),
+    )
+    monkeypatch.setattr(librarian, "discover_new_sources", lambda *_args, **_kwargs: [])
+    proposal = refresh_proposal(catalog)
+    update = next(item for item in proposal["updates"] if item["node_id"] == "layer.tools")
+    assert update["to"] == canonical
+    assert update["to"] != "feature-branch-sha"
+
+
+def test_refresh_noop_reports_ok_without_updates(catalog, monkeypatch):
+    monkeypatch.setattr(librarian, "_git_output", lambda _root, _args: "main-sha")
+    monkeypatch.setattr(librarian, "_node_changed_between", lambda *_args: set())
+    monkeypatch.setattr(librarian, "discover_new_sources", lambda *_args, **_kwargs: [])
+    proposal = refresh_after_merge(catalog)
+    assert proposal["status"] == "OK"
+    assert proposal["updates"] == []
+
+
+def test_budget_overflow_is_reported_before_output_write(catalog, tmp_path):
+    output = tmp_path / "bundle.md"
+    with pytest.raises(ContextLibrarianError, match="exceeding"):
+        build_bundle(catalog, task_type="rp5_evidence_mismatch", query="evidence", max_tokens=1)
+    assert not output.exists()
+
+
+def test_bundle_reports_budget_breakdown(catalog):
+    bundle = build_bundle(
+        catalog, task_type="tool_execution", query="dispatcher", max_documents=1, max_tokens=6000
+    )
+    assert "budget: estimated=" in bundle
+    assert "budget_breakdown_by_node" in bundle

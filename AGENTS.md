@@ -42,20 +42,34 @@ active repository virtual-environment interpreter is the Windows equivalent.
    cited code, tests, canonical documents, and production evidence. A bundle is
    a navigation index and mandatory minimum context, never a source of truth or
    a reading ceiling.
-5. Stop before planning or changing code when the workflow gate reports stale
-   nodes, mandatory authority below 100%, missing qualifying evidence for a
-   production claim, an unresolved source conflict, or excluded-layer leakage.
-   Stale bundles must still be built and read so they can identify what needs
-   direct re-verification.
-   A stale STOP permits only direct source re-verification and a separately
-   reviewed metadata-refresh task after the source is verified on `main`; it
-   does not permit planning or implementation of the original task. Resume the
-   original task only from a newly built bundle whose gate can proceed.
+5. Apply the workflow gate policy in
+   `docs/context_librarian/PLANNING_GATE.md`. Stale nodes alone never stop
+   planning/research/scoping/decomposition. After direct source
+   re-verification, continue with an explicit verification ledger. STOP only
+   for missing authority, canonical conflict/undetermined state, stale
+   authority behind a runtime/write/approval/ownership/queue/evidence change,
+   or an unregistered authority-changing source.
 6. If an import, caller, callee, schema, flag, shared identifier, contract, test
    dependency, execution/evidence path, or authority boundary is not covered
    sufficiently, expand the reading and record a `context expansion` with the
    source, discovery path, reason, necessity, and whether it has recurred.
    Never suppress a material dependency to meet a token or document budget.
+
+7. After a real merge on `main` (including squash merges), run the separate
+   refresh workflow in `docs/context_librarian/POST_MERGE_REFRESH.md`.
+   `refresh-after-merge --check` is deterministic and a no-op reports `OK`.
+   Only the canonical SHA resolved from `main` may be written to
+   `last_verified_commit`; a branch SHA is never canonical. CI on push to
+   `main` is authoritative. The local hook is advisory only.
+
+8. New sources are proposals, never silent registrations. Runtime/authority
+   sources are `REVIEW_REQUIRED`; tests/docs/changelog/audit/planning are
+   `WARNING`; an unregistered source that changes authority is `STOP`.
+
+9. Budget handling is estimate-before-write. Report estimated tokens, budget,
+   overflow, and a node/source breakdown. Never truncate metadata or silently
+   drop a source. On overflow, raise the budget, remove a whole source, or
+   explicitly make a source optional; do not rewrite repeatedly to fit.
 
 `build` never chooses a profile. No agent may silently select one. Tasks outside
 the trigger scope above may record the bootstrap as not applicable and proceed

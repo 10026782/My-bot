@@ -12,8 +12,10 @@ from __future__ import annotations
 import fnmatch
 import json
 import math
+import os
 import re
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Iterable
@@ -469,6 +471,14 @@ def evaluate_workflow_gate(
     qualifying_production_evidence: int = 0,
     unresolved_conflicts: Iterable[str] = (),
     excluded_layer_leakage: Iterable[str] = (),
+    direct_source_reverified: bool = False,
+    verification_ledger: Iterable[str] = (),
+    authority_missing: Iterable[str] = (),
+    canonical_state_undetermined: Iterable[str] = (),
+    stale_authority_runtime_changes: Iterable[str] = (),
+    new_authority_sources: Iterable[str] = (),
+    authority_changing_unregistered_sources: Iterable[str] = (),
+    github_activity: Iterable[str] = (),
 ) -> dict[str, Any]:
     """Return the manual agent-bootstrap stop decision and its reasons.
 
@@ -479,21 +489,53 @@ def evaluate_workflow_gate(
     stale = sorted(set(stale_node_ids))
     conflicts = sorted(set(unresolved_conflicts))
     leakage = sorted(set(excluded_layer_leakage))
+    missing = sorted(set(authority_missing))
+    undetermined = sorted(set(canonical_state_undetermined))
+    stale_runtime = sorted(set(stale_authority_runtime_changes))
+    new_authority = sorted(set(new_authority_sources))
+    unregistered_authority = sorted(set(authority_changing_unregistered_sources))
+    activity = sorted(set(github_activity))
     reasons: list[str] = []
-    if stale:
-        reasons.append("stale_nodes")
-    if mandatory_authority_coverage < 1.0:
+    warnings: list[str] = []
+    review_required: list[str] = []
+    if missing or mandatory_authority_coverage < 1.0:
         reasons.append("mandatory_authority_incomplete")
     if production_claim and qualifying_production_evidence == 0:
         reasons.append("production_evidence_missing")
     if conflicts:
         reasons.append("unresolved_source_conflict")
+    if undetermined:
+        reasons.append("canonical_state_undetermined")
+    if stale_runtime:
+        reasons.append("stale_authority_runtime_change")
+    if unregistered_authority:
+        reasons.append("unregistered_authority_change")
     if leakage:
         reasons.append("excluded_layer_leakage")
+    if stale:
+        warnings.append("stale_nodes_after_direct_verification" if direct_source_reverified else "stale_nodes")
+    if activity:
+        warnings.append("github_activity")
+    if new_authority:
+        review_required.extend(f"new_authority_source:{path}" for path in new_authority)
+    if stale and not direct_source_reverified:
+        review_required.append("direct_source_reverification")
+    status = "STOP" if reasons else "REVIEW_REQUIRED" if review_required else "WARNING" if warnings else "PROCEED"
     return {
-        "status": "STOP" if reasons else "PROCEED",
+        "status": status,
+        "planning_allowed": not reasons,
         "reasons": reasons,
+        "warnings": warnings,
+        "review_required": sorted(review_required),
         "stale_nodes": stale,
+        "direct_source_reverified": direct_source_reverified,
+        "verification_ledger": sorted(set(verification_ledger)),
+        "authority_missing": missing,
+        "canonical_state_undetermined": undetermined,
+        "stale_authority_runtime_changes": stale_runtime,
+        "new_authority_sources": new_authority,
+        "unregistered_authority_changes": unregistered_authority,
+        "github_activity": activity,
         "mandatory_authority_coverage": mandatory_authority_coverage,
         "production_claim": production_claim,
         "qualifying_production_evidence": qualifying_production_evidence,
@@ -600,6 +642,160 @@ def _git_changed_paths(repo_root: Path, commit: str) -> set[str]:
             f"cannot compare last_verified_commit {commit} to checkout: {exc}"
         ) from exc
     return {line.strip().replace("\\", "/") for line in completed.stdout.splitlines() if line.strip()}
+
+
+def _git_output(repo_root: Path, args: list[str]) -> str:
+    try:
+        completed = subprocess.run(
+            ["git", *args], cwd=repo_root, check=True, capture_output=True,
+            text=True, encoding="utf-8"
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise ContextLibrarianError(f"git {' '.join(args)} failed: {exc}") from exc
+    return completed.stdout.strip()
+
+
+def _catalog_node_files(catalog: Catalog) -> dict[str, Path]:
+    result: dict[str, Path] = {}
+    paths = sorted((catalog.catalog_root / "layers").glob("*.json"))
+    paths.append(catalog.catalog_root / "decisions/canonical_boundaries.json")
+    for path in paths:
+        data = _load_catalog_json(path)
+        for node in data.get("nodes", []):
+            result[node["id"]] = path
+    return result
+
+
+def _catalog_referenced_paths(catalog: Catalog) -> set[str]:
+    paths: set[str] = set()
+    for node in catalog.nodes.values():
+        paths.update(node["code_paths"])
+        paths.update(node["test_paths"])
+        paths.update(ref["path"] for ref in node["canonical_docs"])
+        paths.update(ref["path"] for ref in node["production_evidence"])
+    return {path.replace("\\", "/") for path in paths}
+
+
+_AUTHORITY_TERMS = frozenset({
+    "authority", "approval", "action_contract", "action_gateway", "ownership",
+    "queue", "evidence", "canonical", "source_of_truth",
+})
+
+
+def classify_new_sources(
+    catalog: Catalog, paths: Iterable[str]
+) -> list[dict[str, str]]:
+    """Classify unregistered files without registering their meaning."""
+    registered = _catalog_referenced_paths(catalog)
+    result: list[dict[str, str]] = []
+    for raw_path in sorted({path.replace("\\", "/") for path in paths} - registered):
+        lower = raw_path.casefold()
+        name = PurePosixPath(lower).name
+        if name.startswith("test_") or "/test" in lower or lower.startswith("test"):
+            classification, reason = "WARNING", "new test source"
+        elif lower.endswith((".md", ".rst", ".txt")) or any(
+            term in lower for term in ("changelog", "audit", "planning")
+        ):
+            classification, reason = "WARNING", "new documentation/audit/planning source"
+        elif lower.endswith((".py", ".js", ".ts", ".tsx")):
+            classification, reason = "REVIEW_REQUIRED", "new runtime source"
+        else:
+            classification, reason = "REVIEW_REQUIRED", "new source with unknown role"
+        if classification != "WARNING" and any(term in name or term in lower for term in _AUTHORITY_TERMS):
+            classification, reason = "STOP", "unregistered source may change authority"
+        result.append({"path": raw_path, "classification": classification, "reason": reason})
+    return result
+
+
+def discover_new_sources(
+    catalog: Catalog, *, changed_paths: Iterable[str] | None = None,
+    main_ref: str = "origin/main"
+) -> list[dict[str, str]]:
+    if changed_paths is None:
+        main_sha = _git_output(catalog.repo_root, ["rev-parse", "--verify", main_ref])
+        parent = _git_output(catalog.repo_root, ["rev-parse", f"{main_sha}^"])
+        changed_paths = _git_output(
+            catalog.repo_root, ["diff", "--diff-filter=A", "--name-only", parent, main_sha]
+        ).splitlines()
+    return classify_new_sources(catalog, changed_paths)
+
+
+def _node_changed_between(catalog: Catalog, node: dict[str, Any], main_sha: str) -> set[str]:
+    old = node["last_verified_commit"]
+    if old == main_sha:
+        changed = set()
+    else:
+        changed = set(_git_output(catalog.repo_root, ["diff", "--name-only", old, main_sha]).splitlines())
+    tracked = (
+        node["code_paths"] + node["test_paths"]
+        + [ref["path"] for ref in node["canonical_docs"]]
+        + [ref["path"] for ref in node["production_evidence"]]
+    )
+    return {path for path in changed if any(_matches_tracked_path(path, item) for item in tracked)}
+
+
+def refresh_proposal(catalog: Catalog, *, main_ref: str = "origin/main") -> dict[str, Any]:
+    """Compute a mechanical refresh proposal against a canonical main SHA."""
+    main_sha = _git_output(catalog.repo_root, ["rev-parse", "--verify", main_ref])
+    updates: list[dict[str, Any]] = []
+    for node in sorted(catalog.nodes.values(), key=lambda item: item["id"]):
+        changed = sorted(_node_changed_between(catalog, node, main_sha))
+        if changed:
+            updates.append({
+                "node_id": node["id"],
+                "from": node["last_verified_commit"],
+                "to": main_sha,
+                "changed_paths": changed,
+            })
+    new_sources = discover_new_sources(catalog, main_ref=main_ref)
+    return {
+        "status": "CHANGES_REQUIRED" if updates or new_sources else "OK",
+        "main_ref": main_ref,
+        "canonical_main_sha": main_sha,
+        "updates": updates,
+        "new_sources": new_sources,
+        "authority_review_required": any(item["classification"] != "WARNING" for item in new_sources),
+    }
+
+
+def refresh_after_merge(
+    catalog: Catalog, *, main_ref: str = "origin/main", write: bool = False
+) -> dict[str, Any]:
+    """Apply only mechanical provenance updates; authority classification stays reviewed."""
+    proposal = refresh_proposal(catalog, main_ref=main_ref)
+    if not write or proposal["status"] == "OK":
+        return proposal
+    live = _git_provenance(catalog.repo_root)
+    if live["branch"] != "main" or live["commit"] != proposal["canonical_main_sha"]:
+        raise ContextLibrarianError(
+            "refresh write requires checkout branch main at the canonical main SHA; "
+            "local hooks are advisory and must not write branch provenance"
+        )
+    files = _catalog_node_files(catalog)
+    original: dict[Path, str] = {}
+    data_by_file: dict[Path, dict[str, Any]] = {}
+    for update in proposal["updates"]:
+        path = files[update["node_id"]]
+        if path not in data_by_file:
+            original[path] = path.read_text(encoding="utf-8")
+            data_by_file[path] = _load_catalog_json(path)
+        for node in data_by_file[path]["nodes"]:
+            if node["id"] == update["node_id"]:
+                node["last_verified_commit"] = proposal["canonical_main_sha"]
+    try:
+        for path, data in data_by_file.items():
+            payload = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+            with tempfile.NamedTemporaryFile("w", encoding="utf-8", newline="\n", dir=path.parent, delete=False) as handle:
+                handle.write(payload)
+                temporary = Path(handle.name)
+            os.replace(temporary, path)
+        load_catalog(catalog.repo_root)
+    except Exception:
+        for path, text in original.items():
+            path.write_text(text, encoding="utf-8", newline="\n")
+        raise
+    proposal["status"] = "REFRESHED"
+    return proposal
 
 
 _MAIN_REF_CANDIDATES = ("origin/main", "main")
@@ -1228,6 +1424,8 @@ def _render(
     verified_production_evidence: str | None,
     git_provenance: dict[str, str],
     expansions: list[dict[str, Any]],
+    direct_source_reverified: bool,
+    verification_ledger: Iterable[str],
 ) -> str:
     decision_nodes = [node for node in nodes if node["type"] == "decision"]
     layer_nodes = [node for node in nodes if node["type"] == "layer"]
@@ -1235,12 +1433,23 @@ def _render(
         sum(bool(node["production_evidence"]) for node in layer_nodes),
         max_documents // 3,
     )
+    all_docs = _unique_references(nodes, "canonical_docs", 10**9)
+    all_evidence = _unique_references(layer_nodes, "production_evidence", 10**9)
     docs = _unique_references(
         nodes, "canonical_docs", max_documents - evidence_budget
     )
     evidence = _unique_references(
         layer_nodes, "production_evidence", evidence_budget
     )
+    selected_source_paths = {ref["path"] for _, ref in docs + evidence}
+    omitted_sources = sorted(
+        {ref["path"] for _, ref in all_docs + all_evidence} - selected_source_paths
+    )
+    budget_breakdown = {
+        node_id: _path_char_estimate(catalog.repo_root, refs)
+        for node_id in sorted({node_id for node_id, _ in docs + evidence})
+        for refs in [[(item_node, ref) for item_node, ref in docs + evidence if item_node == node_id]]
+    }
 
     selected_layer_ids = {node["id"].split(".", 1)[1] for node in layer_nodes}
     expected_layers = set(profile["primary_layers"]) | set(
@@ -1281,6 +1490,8 @@ def _render(
         qualifying_production_evidence=qualifying_evidence,
         unresolved_conflicts=conflict_edges,
         excluded_layer_leakage=leakage,
+        direct_source_reverified=direct_source_reverified,
+        verification_ledger=verification_ledger,
     )
     normalised_query = _normalise_query(query)
     matched_layers = sum(
@@ -1313,12 +1524,7 @@ def _render(
         f"- at_origin_main_tip: {at_origin_main_tip}",
     ]
     if on_main != "yes":
-        lines.append(
-            "- WARNING: this bundle was NOT built from a commit proven to be on "
-            "`main` (on_main != yes). Do not describe its findings as "
-            "reflecting `main`'s current state; cite `generated_commit` and "
-            "`generated_branch` instead."
-        )
+        lines.append("- WARNING: commit is not proven on `main`; cite generated_commit/branch.")
     elif at_origin_main_tip == "no":
         lines.append(
             "- WARNING: this commit is in `origin/main` history but is not the "
@@ -1330,7 +1536,7 @@ def _render(
             "",
             "## Agent Consumption Contract",
             "",
-            "Use an explicit profile, read this bundle fully, inspect cited sources, and stop on stale nodes or incomplete authority coverage.",
+            "Use an explicit profile and inspect cited sources; stop only on STOP.",
             "Contract: `docs/context_librarian/AGENT_CONSUMPTION_CONTRACT.md`",
             "",
             "## Consumption Checklist",
@@ -1357,6 +1563,7 @@ def _render(
             "",
             f"- status: {workflow_gate['status']}",
             f"- reasons: {workflow_gate['reasons']}",
+            f"- verification_ledger: {workflow_gate['verification_ledger']}",
             f"- stale_nodes: {len(stale_node_ids)} {stale_node_ids}",
             f"- mandatory_authority_coverage: {authority_coverage:.0%}",
             f"- production_claim: {str(production_claim).lower()}",
@@ -1364,7 +1571,7 @@ def _render(
             f"- qualifying_production_evidence: {qualifying_evidence}",
             f"- unresolved_source_conflicts: {len(conflict_edges)} {conflict_edges}",
             f"- excluded_layer_leakage: {len(leakage)} {leakage}",
-            "- A STOP status blocks planning and code changes, not bundle creation.",
+            "- STOP blocks planning/code changes; stale alone is not STOP.",
             "",
             "## Canonical Decisions",
             "",
@@ -1396,6 +1603,8 @@ def _render(
     )
     if not docs:
         lines.append("- None selected.")
+    if omitted_sources:
+        lines.append(f"- omitted_whole_sources_by_budget: {omitted_sources}")
 
     lines.extend(["", "## Code", ""])
     for node in layer_nodes:
@@ -1496,6 +1705,8 @@ def _render(
             f"- excluded_layer_leakage: {len(leakage)} {leakage}",
             f"- query_match_precision_proxy: {query_precision:.0%}",
             f"- document_budget: {len(docs) + len(evidence)}/{max_documents}",
+            f"- budget: estimated=__TOKEN_COUNT__ limit={max_tokens} overflow=__TOKEN_OVERFLOW__",
+            f"- budget_breakdown_by_node: {json.dumps(budget_breakdown, ensure_ascii=False, sort_keys=True, separators=(',', ':'))}",
             "- approximate_char_estimate_budget (chars/4 proxy, NOT a real "
             "tokenizer count — see TOKEN_ESTIMATION_BENCHMARK.md): "
             "__TOKEN_COUNT__/" + str(max_tokens),
@@ -1516,7 +1727,7 @@ def _render(
     for _ in range(5):
         rendered = template.replace("__TOKEN_COUNT__", str(token_count)).replace(
             "__TOKEN_SAVINGS__", savings_text
-        )
+        ).replace("__TOKEN_OVERFLOW__", str(max(0, token_count - max_tokens)))
         new_token_count = _approximate_char_estimate(rendered)
         savings = (
             0.0
@@ -1530,7 +1741,7 @@ def _render(
         savings_text = new_savings_text
     return template.replace("__TOKEN_COUNT__", str(token_count)).replace(
         "__TOKEN_SAVINGS__", savings_text
-    )
+    ).replace("__TOKEN_OVERFLOW__", str(max(0, token_count - max_tokens)))
 
 
 def build_bundle(
@@ -1545,6 +1756,8 @@ def build_bundle(
     assert_main: bool = False,
     assert_on_main_history: bool = False,
     assert_at_origin_main_tip: bool = False,
+    direct_source_reverified: bool = False,
+    verification_ledger: Iterable[str] = (),
 ) -> str:
     if task_type not in catalog.profiles:
         available = ", ".join(sorted(catalog.profiles))
@@ -1606,6 +1819,8 @@ def build_bundle(
         verified_production_evidence,
         git_provenance,
         expansions,
+        direct_source_reverified,
+        verification_ledger,
     )
     actual_tokens = _approximate_char_estimate(bundle)
     if actual_tokens > token_budget:
