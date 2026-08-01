@@ -197,3 +197,48 @@ This log records planning decisions for the F52 program. It is not runtime imple
   precedence rules.
 - Affected document:
   `spec/MESSAGE_CONTRACT_ENVELOPE_CONTRACT_V1.md` §2.1.
+
+## D-014 — Ratify the text-based "לאשר? כן / לא" confirmation as canonical, cross-channel
+
+- Date: 02/08/2026
+- Status: Closed for the wording question below; does not itself authorize
+  `FEATURE_UNIFIED_STATUS_FORMATTER=on`
+- Trigger: a production `[UnifiedStatusFormatterShadow]` sample for
+  `outcome=pending` on a Task-creation contract showed `text_differs=True`
+  (`legacy_len=56`, `unified_len=83`). Investigation (see PR #522,
+  `baabd46`/`ef55cd9`) found two independent contributors: (1) an
+  unintentional content bug — the MessageContract adapter used the generic,
+  table-agnostic business description instead of the task's own title for
+  Task-creation contracts (fixed in PR #522, no product decision needed) —
+  and (2) an intentional structural difference — the unified renderer always
+  appends `"\nלאשר? כן / לא"` even when the same message ships with inline
+  Telegram approve/reject buttons, which the legacy pending prompt never did.
+  (2) was left open as a required product decision; this entry closes it.
+- Decision: **Option B — keep the text-based `"לאשר? כן / לא"` confirmation
+  as the canonical approval_pending wording**, unconditionally, regardless of
+  whether inline buttons are also present on a given channel/message.
+  `core/agent_message_formatter.py::_render_approval_pending()` already ships
+  this (`f"יש פעולה שממתינה לאישור:\n{desc}\nלאשר? כן / לא"`, from PR1 /
+  `spec/UNIFIED_MESSAGE_UX_STANDARD.md`'s canonical pattern) — **no code
+  change required** for this decision; it only unblocks the open question
+  that was withholding shadow→on sign-off on this specific point.
+- Rationale (owner): the assistant must produce one clear answer with one
+  clear next action independent of channel. Telegram inline buttons are not
+  available on WhatsApp or on any other button-less surface the same
+  approval flow may reach; a canonical wording that silently depends on a
+  channel affordance would fork the UX per channel. A redundant text prompt
+  alongside a working inline button is an acceptable, bounded cost against
+  that guarantee.
+- Open, NOT resolved by this decision: the owner's example wording for a
+  Task-creation contract used **"יש משימה שממתינה לאישור"** (task-specific
+  noun), not the renderer's actual, always-generic **"יש פעולה שממתינה
+  לאישור"**. Whether `_render_approval_pending()` should gain noun-awareness
+  (a Task-creation contract renders "משימה", everything else renders
+  "פעולה" — mirroring `build_approval_lifecycle_result()`'s existing
+  legacy-side distinction) is a **separate, still-open** product question,
+  not decided here. `_render_approval_pending()` is shared foundation for
+  every `approval_pending` caller (Layer 3/F52), not scoped to
+  `ActionGateway`'s pending surface alone, so resolving it is its own
+  Cross-Layer-gated change, tracked separately from this entry.
+- Affected documents: `spec/UNIFIED_MESSAGE_UX_STANDARD.md` (canonical
+  pattern already matches this decision, no edit needed), this log.
