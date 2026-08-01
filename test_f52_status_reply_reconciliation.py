@@ -28,7 +28,10 @@ import os
 import sys
 import types
 
-from core.action_gateway import ActionGateway, ActionFact, _LEAD_CAPTURE_TABLE
+from core.action_gateway import (
+    ActionGateway, ActionFact, _LEAD_CAPTURE_TABLE, _TASK_CREATION_TABLE,
+    build_approval_lifecycle_result,
+)
 from airtable_schema import LeadFields
 
 
@@ -74,6 +77,18 @@ def _gw_with_lead_contract():
     )
     gw._ledger.find_by_id = lambda cid: fake
     return gw
+
+
+def _gw_with_task_contract(title="להתקשר לספק ולתאם משלוח"):
+    gw = ActionGateway()
+    fake = types.SimpleNamespace(
+        tool_name="airtable_add",
+        contract_id="c-task-1",
+        status="pending",
+        normalized_payload={"table": _TASK_CREATION_TABLE, "fields": {"Name": title}},
+    )
+    gw._ledger.find_by_id = lambda cid: fake
+    return gw, fake
 
 
 F_EXEC = ActionFact("airtable_add", "c1", "executed", "recABC1234567890XYZ", None, {})
@@ -397,6 +412,48 @@ def test_approval_pending_unified_output_never_exposes_tool_name_record_or_contr
         assert "internal-contract-id-9999" not in out
     finally:
         _set(None)
+
+
+def test_pending_task_creation_uses_task_title_not_generic_record_description():
+    """Production parity gap (PR E probe, 01/08/2026): a real
+    [UnifiedStatusFormatterShadow] pending line showed text_differs=True
+    (legacy_len=56, unified_len=83). Root cause — _compose_status_reply_
+    unified()'s MessageContract crossing described EVERY pending contract
+    with the generic, table-agnostic _safe_contract_business_description()
+    ("הוספת רשומה: ..."), while the real send site (app.py's
+    _queue_approval_detailed_impl(), via build_approval_lifecycle_result()
+    .safe_user_message) already special-cases Task-creation contracts to
+    show the task's own title instead. This proves the unified path now
+    carries the same task-aware content as the legacy formatter for a
+    Task-creation pending contract — an output-content fix only. The
+    surrounding phrasing (newline layout, the "לאשר? כן / לא" prompt) is an
+    intentional UNIFIED_MESSAGE_UX_STANDARD.md difference and is left
+    untouched — still text_differs by design, not a bug."""
+    gw, fake = _gw_with_task_contract("להתקשר לספק ולתאם משלוח")
+    fact = ActionFact("airtable_add", fake.contract_id, "pending", None, None, {})
+
+    legacy_text = build_approval_lifecycle_result(
+        fake, canonical_state="pending",
+    ).safe_user_message
+    unified_text, _meta = gw._compose_status_reply_unified(fact)
+
+    assert "להתקשר לספק ולתאם משלוח" in legacy_text
+    assert "להתקשר לספק ולתאם משלוח" in unified_text
+    assert "הוספת רשומה" not in legacy_text
+    assert "הוספת רשומה" not in unified_text
+
+
+def test_pending_non_task_record_still_uses_generic_business_description():
+    """Regression guard: the task-title fix above must stay scoped to actual
+    Task-creation contracts. A non-Task airtable_add (e.g. a Lead) must keep
+    using the same generic _safe_contract_business_description() wording on
+    both the legacy and unified paths, unchanged."""
+    gw = _gw_with_lead_contract()
+    old_state, old_payload = gw._action_fact_to_message(F_PEND)
+    assert old_payload["human_summary"].startswith("הוספת רשומה")
+
+    unified_text, _meta = gw._compose_status_reply_unified(F_PEND)
+    assert "דני כהן" in unified_text
 
 
 # ── 4. formatter exception never breaks the live path ─────────────────────────

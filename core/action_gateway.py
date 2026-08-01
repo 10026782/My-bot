@@ -2852,7 +2852,18 @@ class ActionGateway:
             from core.message_contract import format_message_contract_with_meta
 
             contract = self._ledger.find_by_id(fact.contract_id) if fact.contract_id else None
-            description = _safe_contract_business_description(contract) if contract else None
+            # PR E parity fix: a still-pending Task-creation contract must
+            # describe itself the same way build_approval_lifecycle_result()
+            # already does at the real send site (app.py's
+            # _queue_approval_detailed_impl(), via ApprovalLifecycleResult.
+            # safe_user_message) — the task's own title, not the generic
+            # table-agnostic "הוספת רשומה: ..." business description. Scoped
+            # to the same is_task_creation check that helper already uses;
+            # no new task-detection rule invented here.
+            if contract is not None and _is_task_creation_contract(contract):
+                description = _safe_task_title(contract) or None
+            else:
+                description = _safe_contract_business_description(contract) if contract else None
             message = from_action_fact(fact, description=description)
             text, contract_meta = format_message_contract_with_meta(message)
             # שומר על צורת ה-observability של ה-helper הפרטי הקיים יציבה;
