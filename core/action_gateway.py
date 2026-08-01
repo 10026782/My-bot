@@ -2860,11 +2860,18 @@ class ActionGateway:
             # table-agnostic "הוספת רשומה: ..." business description. Scoped
             # to the same is_task_creation check that helper already uses;
             # no new task-detection rule invented here.
-            if contract is not None and _is_task_creation_contract(contract):
+            is_task = contract is not None and _is_task_creation_contract(contract)
+            if is_task:
                 description = _safe_task_title(contract) or None
             else:
                 description = _safe_contract_business_description(contract) if contract else None
-            message = from_action_fact(fact, description=description)
+            # D-014 (F52 Decision Log): entity_type="task" lets the shared
+            # formatter's approval_pending renderer say "משימה" instead of
+            # the generic "פעולה" for a Task-creation contract, mirroring
+            # build_approval_lifecycle_result()'s existing noun distinction.
+            # No effect on "failed" (_render_failure ignores entity_type).
+            entity_type = "task" if is_task else None
+            message = from_action_fact(fact, description=description, entity_type=entity_type)
             text, contract_meta = format_message_contract_with_meta(message)
             # שומר על צורת ה-observability של ה-helper הפרטי הקיים יציבה;
             # metadata של MessageContract נשאר זמין בגבול שלו.

@@ -58,6 +58,7 @@ def from_action_fact(
     fact: ActionFactLike,
     *,
     description: str | None = None,
+    entity_type: str | None = None,
     evidence_status: str | None = None,
     execution_verified: bool | None = None,
     occurred_at: str | None = None,
@@ -67,6 +68,8 @@ def from_action_fact(
         raise MessageContractValidationError("unsupported ActionFact.outcome")
     if description is not None and not isinstance(description, str):
         raise MessageContractValidationError("description must be a string or None")
+    if entity_type is not None and not isinstance(entity_type, str):
+        raise MessageContractValidationError("entity_type must be a string or None")
 
     reason_code = _reason_code_for(outcome, fact.error_code)
     entity_name = description if (description and description.strip()) else None
@@ -76,6 +79,7 @@ def from_action_fact(
         multiple_pending=False,
         display_payload={
             "entity_name": entity_name,
+            "entity_type": entity_type,
             "reason_code": reason_code,
             "execution_verified": execution_verified,
             "occurred_at": occurred_at,

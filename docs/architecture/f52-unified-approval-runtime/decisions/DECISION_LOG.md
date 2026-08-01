@@ -240,5 +240,80 @@ This log records planning decisions for the F52 program. It is not runtime imple
   every `approval_pending` caller (Layer 3/F52), not scoped to
   `ActionGateway`'s pending surface alone, so resolving it is its own
   Cross-Layer-gated change, tracked separately from this entry.
+- **Resolved by D-015 below** — the owner's follow-up decision both adds the
+  noun-awareness this entry left open AND further splits the wording by
+  *when* it renders (new prompt vs. status query), which this entry did not
+  anticipate.
 - Affected documents: `spec/UNIFIED_MESSAGE_UX_STANDARD.md` (canonical
   pattern already matches this decision, no edit needed), this log.
+
+## D-015 — Split `approval_pending` wording by context: new prompt vs. status query, with task-noun awareness
+
+- Date: 02/08/2026
+- Status: Closed for the wording/formatter-copy question below; does not
+  itself authorize `FEATURE_UNIFIED_STATUS_FORMATTER=on`; no approval logic,
+  ownership, queue, evidence authority, routing, or `MessageContract`
+  wiring/schema changed
+- Trigger: follow-up to D-014. The owner's recommended canonical wording used
+  the task-specific noun ("יש משימה שממתינה לאישור") that
+  `_render_approval_pending()` did not actually render (it always said
+  "פעולה"). On closer inspection, the owner further distinguished **two
+  contexts** that a single "approval_pending" wording cannot correctly cover:
+  a **new approval prompt** (rendered right after the user's request is
+  queued — nothing was "already" pending from their point of view) vs. a
+  **status query** (the user asking about an action that is already
+  pending). D-014's ratified wording ("יש פעולה/משימה שממתינה לאישור...")
+  is actually the *status-query* framing; the live call site it was tested
+  against (`ActionGateway._render_pending_prompt()`) is a *new-prompt* call
+  site, not a status query — so D-014 alone would have shipped the wrong
+  framing to the one surface that is actually live today.
+- Decision: two distinct canonical wordings, chosen by context, both
+  task-noun-aware:
+  1. **New approval prompt** (generic): `"כדי לבצע את הפעולה הזו נדרש
+     אישור:\n<description>\nלאשר? כן / לא"`; (task-creation): `"כדי ליצור את
+     המשימה הזו נדרש אישור:\n<task_title>\nלאשר? כן / לא"`.
+  2. **Status query** (generic): `"יש פעולה שממתינה לאישור:\n<description>\n
+     לאשר? כן / לא"`; (task-creation): `"יש משימה שממתינה לאישור:\n
+     <task_title>\nלאשר? כן / לא"`.
+  Task-creation contracts use the task's own title in both contexts, never
+  the generic table-agnostic business description (already true since
+  PR #522; reconfirmed here for both wordings).
+- Implementation (content/copy only, per owner-specified scope):
+  - `core/agent_message_formatter.py`: `_render_approval_pending()` (the
+    renderer wired to `STATE_APPROVAL_PENDING`/`"approval_pending"` — the
+    only state reachable through the `MessageContract` crossing) now renders
+    the **new-prompt** wording, since `ActionGateway._render_pending_prompt()`
+    is its only live caller. A new function `_render_approval_pending_query()`
+    renders the **status-query** wording, registered under a new state
+    constant `STATE_APPROVAL_PENDING_QUERY = "approval_pending_query"` —
+    deliberately **not** added to `core.message_contract.MessageState` (no
+    `MessageContract` schema change), so it is reachable only via a direct
+    `format_agent_message_with_meta("approval_pending_query", ...)` call,
+    never via the `MessageContract` adapter. No live call site uses it yet;
+    it exists as the tested, canonical target wording for if/when
+    `describe_pending_queue()`/`query_execution_status()` (which still render
+    their own legacy text directly and unconditionally, untouched here) are
+    migrated onto the shared formatter.
+  - `core/action_fact_message_adapter.py::from_action_fact()` gained an
+    `entity_type` parameter (already an existing `DisplayPayload` field —
+    no schema change), threaded through from
+    `core/action_gateway.py::_compose_status_reply_unified()` as
+    `entity_type="task"` for a Task-creation contract (same
+    `_is_task_creation_contract()` check `build_approval_lifecycle_result()`
+    already uses), so the noun choice is data-driven, not hardcoded per call
+    site.
+- Explicitly out of scope (per owner instruction, unchanged): approval
+  logic, ownership, queue, evidence authority, routing, and the shadow
+  observability added in prior PRs. `describe_pending_queue()`/
+  `query_execution_status()` are not rewired to the unified formatter — they
+  keep rendering their own unconditional legacy text.
+- Tests: `test_agent_message_formatter.py` gained direct unit coverage
+  distinguishing the two states/wordings (generic and task-noun, including
+  the missing-data fallback for each) and a schema-boundary check that
+  `"approval_pending_query"` is not a `core.message_contract.MessageState`
+  member. `test_f52_status_reply_reconciliation.py` gained an integration
+  check that `ActionGateway._compose_status_reply_unified()` (the live
+  pending path) renders the new-prompt wording, never the status-query
+  wording.
+- Affected documents: `spec/UNIFIED_MESSAGE_UX_STANDARD.md` (canonical
+  patterns split into "NEW prompt" and "STATUS QUERY" sections), this log.

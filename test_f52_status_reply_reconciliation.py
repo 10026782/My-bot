@@ -456,6 +456,29 @@ def test_pending_non_task_record_still_uses_generic_business_description():
     assert "דני כהן" in unified_text
 
 
+# ── 3c. new-prompt vs. status-query wording, at the live call site (F52 D-015) ─
+
+def test_pending_unified_text_uses_new_prompt_wording_not_status_query():
+    """F52 D-015: ActionGateway._render_pending_prompt() (via
+    _compose_status_reply_unified()) is the only live 'pending' caller — the
+    MessageContract crossing must render the NEW-approval-prompt wording
+    ('כדי לבצע ... נדרש אישור'), never the STATUS-QUERY wording ('יש פעולה
+    שממתינה לאישור') that _render_approval_pending() used before D-015."""
+    gw = _gw_with_lead_contract()
+    text, _meta = gw._compose_status_reply_unified(F_PEND)
+    assert text.startswith("כדי לבצע את הפעולה הזו נדרש אישור:")
+    assert not text.startswith("יש פעולה שממתינה לאישור")
+
+
+def test_pending_task_unified_text_uses_new_prompt_task_wording():
+    gw, fake = _gw_with_task_contract("חזרה לספק")
+    fact = ActionFact("airtable_add", fake.contract_id, "pending", None, None, {})
+    text, _meta = gw._compose_status_reply_unified(fact)
+    assert text.startswith("כדי ליצור את המשימה הזו נדרש אישור:")
+    assert "חזרה לספק" in text
+    assert not text.startswith("יש משימה שממתינה לאישור")
+
+
 # ── 4. formatter exception never breaks the live path ─────────────────────────
 
 def test_formatter_exception_falls_back_to_legacy():

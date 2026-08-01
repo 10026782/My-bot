@@ -280,4 +280,9 @@ def test_only_action_gateway_imports_the_adapter_for_pr_d_runtime():
 
     gateway_content = (repo_root / "core/action_gateway.py").read_text(encoding="utf-8")
     assert gateway_content.count("from core.action_fact_message_adapter import from_action_fact") == 1
-    assert gateway_content.count("from_action_fact(fact, description=description)") == 1
+    # F52 D-014: this call site gained an entity_type= kwarg (task-noun
+    # awareness) — still the single call site, just a wider legitimate shape.
+    assert gateway_content.count(
+        "from_action_fact(fact, description=description, entity_type=entity_type)",
+    ) == 1
+    assert gateway_content.count("from_action_fact(") == 1
