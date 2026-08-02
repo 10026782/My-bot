@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from core.action_gateway import ActionGateway, ExecutionLedger
+from core.action_gateway import ActionGateway, ExecutionLedger, _canonical_business_text
+
+
+def test_business_text_normalization_repeats_after_wrapper_and_punctuation_removal():
+    assert _canonical_business_text('(\"task\").') == "task"
 
 
 def _gateway() -> ActionGateway:

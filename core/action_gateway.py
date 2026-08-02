@@ -49,25 +49,25 @@ _BUSINESS_TEXT_WRAPPERS = {
 
 
 def _canonical_business_text(value: str) -> str:
-    """Canonicalize user-visible business text for action identity only."""
+    """מנרמל טקסט עסקי גלוי לצורך זהות הפעולה בלבד."""
     text = unicodedata.normalize("NFKC", str(value or ""))
     text = _BUSINESS_TEXT_ZERO_WIDTH_RE.sub("", text)
     text = text.replace("\u00a0", " ")
     text = " ".join(text.split())
-    text = re.sub(r"^>\s*", "", text)
-    changed = True
-    while changed and len(text) >= 2:
-        changed = False
+    previous = None
+    while text != previous:
+        previous = text
+        text = re.sub(r"^>\s*", "", text).strip()
+        text = text.rstrip(_BUSINESS_TEXT_TRAILING_PUNCTUATION).strip()
         for opening, closing in _BUSINESS_TEXT_WRAPPERS:
             if text.startswith(opening) and text.endswith(closing):
                 text = text[1:-1].strip()
-                changed = True
                 break
-    return text.rstrip(_BUSINESS_TEXT_TRAILING_PUNCTUATION).strip()
+    return text
 
 
 def _canonical_task_payload(payload: dict) -> dict:
-    """Normalize task business fields without changing non-text structure."""
+    """מנרמל שדות עסקיים של משימה בלי לשנות את המבנה שאינו טקסטואלי."""
     result = dict(payload or {})
     fields = result.get("fields")
     if isinstance(fields, dict):

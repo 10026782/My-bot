@@ -18,6 +18,7 @@ import app  # noqa: E402
 from airtable_schema import Tables, TaskFields  # noqa: E402
 from core.action_gateway import action_gateway  # noqa: E402
 from core.router import Handler, Intent, route_request  # noqa: E402
+from core.router.router import deterministic_create_task_title  # noqa: E402
 from identity import Identity, Role  # noqa: E402
 
 
@@ -32,6 +33,10 @@ def _owner(user_id: str = "owner-deterministic-create-task") -> Identity:
         channel="telegram",
         external_id="owner-deterministic-create-task",
     )
+
+
+def test_structured_create_task_rejects_whitespace_only_title():
+    assert deterministic_create_task_title("צור משימה ") is None
 
 
 @pytest.mark.parametrize(
