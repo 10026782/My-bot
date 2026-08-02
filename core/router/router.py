@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 INTENT_CONFIDENCE_THRESHOLD = 0.75
 
 _STRUCTURED_CREATE_TASK_RE = re.compile(
-    r"^\s*(?:צור|תיצור)\s+משימה\s*:\s*(?P<title>.+?)\s*$"
+    r"^\s*(?:צור|תיצור)\s+משימה\s*:?\s*(?P<title>.+?)\s*$"
 )
 
 

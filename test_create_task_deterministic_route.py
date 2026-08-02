@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import logging
+import pytest
 from unittest.mock import patch
 
 os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-create-task-test")
@@ -20,10 +21,10 @@ from core.router import Handler, Intent, route_request  # noqa: E402
 from identity import Identity, Role  # noqa: E402
 
 
-def _owner() -> Identity:
+def _owner(user_id: str = "owner-deterministic-create-task") -> Identity:
     """יוצר זהות owner מבודדת לבדיקות המסלול הדטרמיניסטי."""
     return Identity(
-        user_id="owner-deterministic-create-task",
+        user_id=user_id,
         role=Role.OWNER,
         display_name="owner-deterministic-create-task",
         tenant_id="boss_hq",
@@ -33,10 +34,17 @@ def _owner() -> Identity:
     )
 
 
-def test_structured_create_task_is_gateway_owned_without_agent_call():
+@pytest.mark.parametrize(
+    ("case_id", "text", "expected_title"),
+    [
+        ("colon", "צור משימה: X", "X"),
+        ("no-colon", "צור משימה X", "X"),
+        ("date", "צור משימה X עד לתאריך Y", "X עד לתאריך Y"),
+    ],
+)
+def test_structured_create_task_is_gateway_owned_without_agent_call(case_id, text, expected_title):
     """מוודא שבקשה מובנית יוצרת contract ממתין בלי קריאת Agent."""
-    identity = _owner()
-    text = "צור משימה: X"
+    identity = _owner(user_id=f"owner-deterministic-create-task-{case_id}")
     route = route_request(text, "telegram", identity)
     assert route.intent == Intent.CREATE_TASK
     assert route.handler == Handler.TOOL
@@ -65,7 +73,7 @@ def test_structured_create_task_is_gateway_owned_without_agent_call():
         item for item in contract
         if item.tool_name == "airtable_add"
         and item.normalized_payload.get("table") == Tables.TASKS
-        and item.normalized_payload.get("fields", {}).get(TaskFields.NAME) == "X"
+        and item.normalized_payload.get("fields", {}).get(TaskFields.NAME) == expected_title
     ]
     assert len(task_contracts) == 1
     assert task_contracts[0].status == "pending"
