@@ -49,7 +49,7 @@ the integration owner approve the seam.
 | New tests required | Exact callback-to-contract resolution; stale/expired/terminal/duplicate callbacks; callback/text race; restart and multi-instance ownership; every approval-required direct dispatcher path; evidence `completed` vs `outcome_unknown`; one final responder. |
 | Entry criteria | Fresh `turn_coordinator_routing` plus `approval_ux` coverage; ActionLifecycleResult/EvidenceResult freeze; Workstream 1 proposal seam frozen; no direct-fallback authority exception. |
 | Exit criteria | Lifecycle and execution claims are canonical and durable; callback/text races are bounded; no tool call is reported as verified completion without evidence; reply owner is explicit. |
-| Dependencies | Contract freeze; Workstream 1 `CanonicalActionProposal` seam for new mutations; Workstream 3 MessageContract adapter seam for final lifecycle replies. |
+| Dependencies | Contract freeze; Workstream 1 `CanonicalActionProposal` seam for new mutations. Workstream 3 MessageContract adapter is a downstream integration seam, not a hard dependency for WS2 development or merge. |
 | Expected commits | `tc5: lifecycle resolver`; `tc6: reply ownership`; `tc7: evidence/dispatcher proof`; `tc8: durable turn concurrency`. |
 | Rollback strategy | Disable only the new lifecycle integration path; never restore direct execution fallback; retain canonical contract history and fail closed on ambiguous state. |
 | Feature flag strategy | No flag edits. Existing flags remain unchanged and are evaluated only by current policy until a separately approved rollout. |
