@@ -135,7 +135,12 @@ def test_repeated_text_resolution_uses_recent_terminal_contract():
     gateway = ActionGateway(ledger=ledger)
     completed = _contract(status="completed")
     ledger.save(completed)
-    assert gateway.route_confirmation_word("boss_hq:owner") == "הפעולה כבר הושלמה"
+    assert (
+        gateway.route_confirmation_word(
+            "boss_hq:owner", use_session_bookmark=False,
+        )
+        == "אין פעולה שממתינה לאישור"
+    )
 
     rejected = _contract(status="rejected", suffix="2")
     rejected.created_at += 1
