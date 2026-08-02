@@ -1,7 +1,9 @@
 import pytest
 
 from core.router.ownership_contracts import (
+    ActionLifecycleResult,
     CanonicalActionProposal,
+    EvidenceResult,
     IntentOwnershipDecision,
     IntentOwnershipRegistry,
     ResolverResult,
@@ -44,3 +46,29 @@ def test_action_proposal_copies_fields_and_resolver_requires_unique_reference():
 def test_contracts_reject_invalid_required_values(factory):
     with pytest.raises(ValueError):
         factory()
+
+
+def test_ws2_lifecycle_and_evidence_contracts_are_frozen_and_validated():
+    lifecycle = ActionLifecycleResult(
+        contract_ref="contract-123",
+        lifecycle_state="pending",
+        approval_state="awaiting_approval",
+        execution_state="not_started",
+        reply_owner="gateway",
+    )
+    evidence = EvidenceResult(
+        result="completed",
+        evidence_ref="evidence-456",
+        provider_result="ok",
+        verified=True,
+    )
+
+    assert lifecycle.contract_ref == "contract-123"
+    assert evidence.verified is True
+    assert evidence.outcome_unknown is False
+
+    with pytest.raises(ValueError):
+        ActionLifecycleResult("", "pending", "awaiting_approval", "not_started", "gateway")
+
+    with pytest.raises(ValueError):
+        EvidenceResult("", "", "", False)

@@ -73,6 +73,48 @@ class ResolverResult:
 
 
 @dataclass(frozen=True)
+class ActionLifecycleResult:
+    """Frozen WS2 lifecycle projection for an approval contract."""
+
+    contract_ref: str
+    lifecycle_state: str
+    approval_state: str
+    execution_state: str
+    reply_owner: str = "gateway"
+    error_replay_classification: str = ""
+
+    def __post_init__(self) -> None:
+        for attr_name in ("contract_ref", "lifecycle_state", "approval_state", "execution_state", "reply_owner"):
+            value = getattr(self, attr_name)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{attr_name} is required")
+        for attr_name in ("error_replay_classification",):
+            value = getattr(self, attr_name)
+            if not isinstance(value, str):
+                raise ValueError(f"{attr_name} must be a string")
+
+
+@dataclass(frozen=True)
+class EvidenceResult:
+    """Frozen WS2 evidence projection for a completed or failed execution."""
+
+    result: str
+    evidence_ref: str = ""
+    provider_result: str = ""
+    verified: bool = False
+    outcome_unknown: bool = False
+    error: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.result, str) or not self.result.strip():
+            raise ValueError("result is required")
+        for attr_name in ("evidence_ref", "provider_result", "error"):
+            value = getattr(self, attr_name)
+            if not isinstance(value, str):
+                raise ValueError(f"{attr_name} must be a string")
+
+
+@dataclass(frozen=True)
 class IntentOwnershipRegistry:
     """Immutable intent-to-owner registry; duplicate intents are impossible."""
 
