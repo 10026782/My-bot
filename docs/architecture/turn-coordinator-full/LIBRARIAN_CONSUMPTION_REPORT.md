@@ -3,7 +3,7 @@
 ## Run identity
 
 - Planning base commit: `fb4ab4af57d8e5986a06219638e1145af019cf6e`
-- Bundle generated commit: `9fd88ca881678896e7e8ea48f64120e214e259fe`
+- Bundle generated commit: `fd1623e4f28da73326b48c500b6da741ffd825d2`
 - Branch: `codex/turn-coordinator-full-planning`
 - Query: complete current/target Turn Coordinator plan covering ownership,
   deterministic routing, Agent admission, builders, resolvers,
@@ -21,7 +21,7 @@
 - Provenance: generated from the current planning checkout; `on_main_history=false` and `at_origin_main_tip=false` because the planning commit is documentation-only and is not on main.
 - Bundle builds: PASS, byte-identical; same SHA-256, source ordering, node
   ordering, mandatory checklist, and token estimate.
-- Bundle size: 89,024 bytes; SHA-256 `96d679f94cb3f39c73d3eb782064c14c9fc1f534de81d87693387a8b4718f531`; estimate 18,268/19,000 approximate tokens.
+- Bundle size: 89,024 bytes; SHA-256 `c6f58c5265f7ee516e8a7cc7c43dcaf2e7f53d2ff1ccec6907e3124f1e08a1c7`; estimate 18,268/19,000 approximate tokens.
 - Mandatory source count: 75 checklist items.
 - Mandatory authority coverage: 100%.
 - Workflow status: `REVIEW_REQUIRED`; stale nodes are approvals,

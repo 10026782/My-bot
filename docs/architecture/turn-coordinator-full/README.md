@@ -36,7 +36,7 @@ reply composer.
 |---|---|
 | Librarian validation | PASS: 16 nodes, 24 edges, 7 profiles |
 | Profile selection | `turn_coordinator_routing`, unique suggestion; secondary coverage: `approval_ux`, `core_reasoning_change`, `tool_execution` |
-| Bundle build | PASS: two byte-identical 89,024-byte current-checkout bundles; SHA-256 `96d679f94cb3f39c73d3eb782064c14c9fc1f534de81d87693387a8b4718f531` |
+| Bundle build | PASS: two byte-identical 89,024-byte current-checkout bundles; SHA-256 `c6f58c5265f7ee516e8a7cc7c43dcaf2e7f53d2ff1ccec6907e3124f1e08a1c7` |
 | Authority coverage | 100% |
 | Workflow gate | `REVIEW_REQUIRED`; 4 stale nodes, no STOP reason |
 | Consumption verifier | `CONCLUSION_PROCEED` after 75 direct receipts; current-checkout provenance warning is documented |

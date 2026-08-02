@@ -4,7 +4,7 @@
   "profile": "turn_coordinator_routing",
   "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
   "production_claim": false,
-  "bundle_generated_commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+  "bundle_generated_commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
   "bundle_generated_branch": "codex/turn-coordinator-full-planning",
   "required_sources": [
     "code:app.py",
@@ -87,7 +87,7 @@
     {
       "item_id": "code:app.py",
       "path": "app.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -99,7 +99,7 @@
     {
       "item_id": "code:core/action_contract_repository.py",
       "path": "core/action_contract_repository.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -111,7 +111,7 @@
     {
       "item_id": "code:core/action_gateway.py",
       "path": "core/action_gateway.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -123,7 +123,7 @@
     {
       "item_id": "code:core/action_resolution_projection.py",
       "path": "core/action_resolution_projection.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -135,7 +135,7 @@
     {
       "item_id": "code:core/lead_candidate_handler.py",
       "path": "core/lead_candidate_handler.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -147,7 +147,7 @@
     {
       "item_id": "code:core/router/route_decision.py",
       "path": "core/router/route_decision.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -159,7 +159,7 @@
     {
       "item_id": "code:core/router/router.py",
       "path": "core/router/router.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -171,7 +171,7 @@
     {
       "item_id": "code:core/turn_envelope.py",
       "path": "core/turn_envelope.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -183,7 +183,7 @@
     {
       "item_id": "code:event_bus.py",
       "path": "event_bus.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -195,7 +195,7 @@
     {
       "item_id": "code:feature_flags.py",
       "path": "feature_flags.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -207,7 +207,7 @@
     {
       "item_id": "decision:actioncontracts_authority",
       "path": null,
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -219,7 +219,7 @@
     {
       "item_id": "decision:cross_layer_authority",
       "path": null,
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -231,7 +231,7 @@
     {
       "item_id": "doc:docs/architecture/turn-coordinator/README.md",
       "path": "docs/architecture/turn-coordinator/README.md",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -243,7 +243,7 @@
     {
       "item_id": "doc:docs/architecture/turn-coordinator/TURN_COORDINATOR_BEHAVIOR_CONTRACT_V1.md",
       "path": "docs/architecture/turn-coordinator/TURN_COORDINATOR_BEHAVIOR_CONTRACT_V1.md",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -255,7 +255,7 @@
     {
       "item_id": "doc:docs/architecture/turn-coordinator/PHASE_2_SHADOW_PLANNING_GATE.md",
       "path": "docs/architecture/turn-coordinator/PHASE_2_SHADOW_PLANNING_GATE.md",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -267,7 +267,7 @@
     {
       "item_id": "doc:docs/architecture/CROSS_LAYER_AUTHORITY_CONTRACT_V1.md",
       "path": "docs/architecture/CROSS_LAYER_AUTHORITY_CONTRACT_V1.md",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -279,7 +279,7 @@
     {
       "item_id": "doc:BUG_AUDIT_LOG.md",
       "path": "BUG_AUDIT_LOG.md",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -291,7 +291,7 @@
     {
       "item_id": "test:test_action_gateway.py",
       "path": "test_action_gateway.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -303,7 +303,7 @@
     {
       "item_id": "test:test_approval_concurrency.py",
       "path": "test_approval_concurrency.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -315,7 +315,7 @@
     {
       "item_id": "test:test_bug056_legacy_cancel_replay_guard.py",
       "path": "test_bug056_legacy_cancel_replay_guard.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -327,7 +327,7 @@
     {
       "item_id": "code:core/action_gateway_atomic_executor.py",
       "path": "core/action_gateway_atomic_executor.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -339,7 +339,7 @@
     {
       "item_id": "code:core/adapters/decision_adapter.py",
       "path": "core/adapters/decision_adapter.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -351,7 +351,7 @@
     {
       "item_id": "code:core/adapters/leads_adapter.py",
       "path": "core/adapters/leads_adapter.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -363,7 +363,7 @@
     {
       "item_id": "code:core/approval_turn_metrics.py",
       "path": "core/approval_turn_metrics.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -375,7 +375,7 @@
     {
       "item_id": "code:core/approvals_projection.py",
       "path": "core/approvals_projection.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -387,7 +387,7 @@
     {
       "item_id": "code:core/leads_reasoning_projection.py",
       "path": "core/leads_reasoning_projection.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -399,7 +399,7 @@
     {
       "item_id": "code:core/reasoning_engines.py",
       "path": "core/reasoning_engines.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -411,7 +411,7 @@
     {
       "item_id": "code:core/reasoning_entity.py",
       "path": "core/reasoning_entity.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -423,7 +423,7 @@
     {
       "item_id": "code:core/reasoning_ports.py",
       "path": "core/reasoning_ports.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -435,7 +435,7 @@
     {
       "item_id": "code:tma_api.py",
       "path": "tma_api.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -447,7 +447,7 @@
     {
       "item_id": "decision:main_overrides_planning",
       "path": null,
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -459,7 +459,7 @@
     {
       "item_id": "decision:no_new_source_of_truth",
       "path": null,
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -471,7 +471,7 @@
     {
       "item_id": "decision:production_verification",
       "path": null,
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -483,7 +483,7 @@
     {
       "item_id": "decision:shadow_not_active",
       "path": null,
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -495,7 +495,7 @@
     {
       "item_id": "doc:AGENTS.md",
       "path": "AGENTS.md",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -507,7 +507,7 @@
     {
       "item_id": "doc:AI_CONTEXT.md",
       "path": "AI_CONTEXT.md",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -519,7 +519,7 @@
     {
       "item_id": "doc:BOSS_AGENT_RELIABILITY_AND_PERMISSION_HARDENING_SPEC.md",
       "path": "BOSS_AGENT_RELIABILITY_AND_PERMISSION_HARDENING_SPEC.md",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -531,7 +531,7 @@
     {
       "item_id": "doc:GOVERNANCE_RULES.md",
       "path": "GOVERNANCE_RULES.md",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -543,7 +543,7 @@
     {
       "item_id": "doc:docs/PHASE_4B_ROLLOUT_AND_CUTOVER.md",
       "path": "docs/PHASE_4B_ROLLOUT_AND_CUTOVER.md",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -555,7 +555,7 @@
     {
       "item_id": "doc:docs/architecture/bug-104/PHASE_2A0_LEADS_SCHEMA_CANONICALIZATION_SPEC.md",
       "path": "docs/architecture/bug-104/PHASE_2A0_LEADS_SCHEMA_CANONICALIZATION_SPEC.md",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -567,7 +567,7 @@
     {
       "item_id": "doc:docs/architecture/bug-104/PHASE_2A1_CURRENT_STATE_POLICY_SPEC.md",
       "path": "docs/architecture/bug-104/PHASE_2A1_CURRENT_STATE_POLICY_SPEC.md",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -579,7 +579,7 @@
     {
       "item_id": "doc:docs/architecture/bug-104/PHASE_2A_CLOSEOUT.md",
       "path": "docs/architecture/bug-104/PHASE_2A_CLOSEOUT.md",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -591,7 +591,7 @@
     {
       "item_id": "doc:docs/architecture/f52-unified-approval-runtime/audits/PR2_DETERMINISTIC_APPROVAL_COST_CUTS_PREFLIGHT.md",
       "path": "docs/architecture/f52-unified-approval-runtime/audits/PR2_DETERMINISTIC_APPROVAL_COST_CUTS_PREFLIGHT.md",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -603,7 +603,7 @@
     {
       "item_id": "doc:docs/architecture/f52-unified-approval-runtime/audits/PR_HOTFIX_A_CROSS_LAYER_IMPACT_MATRIX.md",
       "path": "docs/architecture/f52-unified-approval-runtime/audits/PR_HOTFIX_A_CROSS_LAYER_IMPACT_MATRIX.md",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -615,7 +615,7 @@
     {
       "item_id": "doc:docs/architecture/f52-unified-approval-runtime/audits/phase-4c/CURRENT_STATE_MAP.md",
       "path": "docs/architecture/f52-unified-approval-runtime/audits/phase-4c/CURRENT_STATE_MAP.md",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -627,7 +627,7 @@
     {
       "item_id": "doc:docs/architecture/f52-unified-approval-runtime/audits/phase-4c/GAP_AND_RISK_REPORT.md",
       "path": "docs/architecture/f52-unified-approval-runtime/audits/phase-4c/GAP_AND_RISK_REPORT.md",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -639,7 +639,7 @@
     {
       "item_id": "doc:docs/architecture/f52-unified-approval-runtime/decisions/DECISION_LOG.md",
       "path": "docs/architecture/f52-unified-approval-runtime/decisions/DECISION_LOG.md",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -651,7 +651,7 @@
     {
       "item_id": "expansion:BUG_AUDIT_LOG.md#BUG-130",
       "path": "BUG_AUDIT_LOG.md",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -663,7 +663,7 @@
     {
       "item_id": "test:test_bug104_leads_reasoning_projection.py",
       "path": "test_bug104_leads_reasoning_projection.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -675,7 +675,7 @@
     {
       "item_id": "test:test_bug104_phase1_1_contract_hardening.py",
       "path": "test_bug104_phase1_1_contract_hardening.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -687,7 +687,7 @@
     {
       "item_id": "test:test_bug104_phase2a1_current_state_policy.py",
       "path": "test_bug104_phase2a1_current_state_policy.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -699,7 +699,7 @@
     {
       "item_id": "test:test_bug104_phase2a2_lead_wording.py",
       "path": "test_bug104_phase2a2_lead_wording.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -711,7 +711,7 @@
     {
       "item_id": "test:test_bug104_tma_lead_event_bridge.py",
       "path": "test_bug104_tma_lead_event_bridge.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -723,7 +723,7 @@
     {
       "item_id": "test:test_bug112_telegram_approval_ttl.py",
       "path": "test_bug112_telegram_approval_ttl.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -735,7 +735,7 @@
     {
       "item_id": "test:test_bug114_context_interrupt_amplification.py",
       "path": "test_bug114_context_interrupt_amplification.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -747,7 +747,7 @@
     {
       "item_id": "test:test_bug115_confirmation_routing_bookmark.py",
       "path": "test_bug115_confirmation_routing_bookmark.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -759,7 +759,7 @@
     {
       "item_id": "test:test_bug_approval_callback_hardening.py",
       "path": "test_bug_approval_callback_hardening.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -771,7 +771,7 @@
     {
       "item_id": "test:test_bug_canonical_tool_wiring.py",
       "path": "test_bug_canonical_tool_wiring.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -783,7 +783,7 @@
     {
       "item_id": "test:test_bug_post_completion_callback_fallthrough.py",
       "path": "test_bug_post_completion_callback_fallthrough.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -795,7 +795,7 @@
     {
       "item_id": "test:test_bug_stale_callback_ux.py",
       "path": "test_bug_stale_callback_ux.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -807,7 +807,7 @@
     {
       "item_id": "test:test_core_reasoning.py",
       "path": "test_core_reasoning.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -819,7 +819,7 @@
     {
       "item_id": "test:test_hotfix_e_shared_replay_policy.py",
       "path": "test_hotfix_e_shared_replay_policy.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -831,7 +831,7 @@
     {
       "item_id": "test:test_pa01_phantom_approval_enforcement.py",
       "path": "test_pa01_phantom_approval_enforcement.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -843,7 +843,7 @@
     {
       "item_id": "test:test_pending_contract_read_amplification.py",
       "path": "test_pending_contract_read_amplification.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -855,7 +855,7 @@
     {
       "item_id": "test:test_phase_4b0_1a_atomic_claims.py",
       "path": "test_phase_4b0_1a_atomic_claims.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -867,7 +867,7 @@
     {
       "item_id": "test:test_phase_4b_1b_durable_lifecycle.py",
       "path": "test_phase_4b_1b_durable_lifecycle.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -879,7 +879,7 @@
     {
       "item_id": "test:test_pr0_ingress_context_gate.py",
       "path": "test_pr0_ingress_context_gate.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -891,7 +891,7 @@
     {
       "item_id": "test:test_pr0_pending_approval_context_safety.py",
       "path": "test_pr0_pending_approval_context_safety.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -903,7 +903,7 @@
     {
       "item_id": "test:test_pr0c_action_contract_repository.py",
       "path": "test_pr0c_action_contract_repository.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -915,7 +915,7 @@
     {
       "item_id": "test:test_pr0c_action_contracts_persistence.py",
       "path": "test_pr0c_action_contracts_persistence.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -927,7 +927,7 @@
     {
       "item_id": "test:test_pr0c_action_gateway_adapters.py",
       "path": "test_pr0c_action_gateway_adapters.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -939,7 +939,7 @@
     {
       "item_id": "test:test_pr1_single_speaker_approval_ux.py",
       "path": "test_pr1_single_speaker_approval_ux.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -951,7 +951,7 @@
     {
       "item_id": "test:test_pr2_deterministic_approval_cost_cuts.py",
       "path": "test_pr2_deterministic_approval_cost_cuts.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -963,7 +963,7 @@
     {
       "item_id": "test:test_single_speaker_fallback_and_duplication.py",
       "path": "test_single_speaker_fallback_and_duplication.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
@@ -975,7 +975,7 @@
     {
       "item_id": "test:test_turn_envelope.py",
       "path": "test_turn_envelope.py",
-      "commit": "9fd88ca881678896e7e8ea48f64120e214e259fe",
+      "commit": "fd1623e4f28da73326b48c500b6da741ffd825d2",
       "branch": "codex/turn-coordinator-full-planning",
       "profile": "turn_coordinator_routing",
       "query": "Build a complete current-state and target-state plan for Turn Coordinator intent ownership, deterministic routing, Agent admission, canonical builders, resolvers, approval/evidence policy, reply ownership and implementation sequencing.",
