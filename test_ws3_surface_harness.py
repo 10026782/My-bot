@@ -17,6 +17,7 @@ from core.message_surface_harness import (
 
 
 def _contract(state=MessageState.APPROVAL_PENDING, **overrides):
+    """Build a representative public contract for harness scenarios."""
     values = {
         "state": state,
         "reply_owner": "gateway",
@@ -47,6 +48,7 @@ def _contract(state=MessageState.APPROVAL_PENDING, **overrides):
     ],
 )
 def test_every_public_state_has_cross_surface_parity(state):
+    """Every formatter-supported state must remain identical across surfaces."""
     if state is MessageState.SUCCESS:
         contract = _contract(
             state,
@@ -68,6 +70,7 @@ def test_every_public_state_has_cross_surface_parity(state):
 
 
 def test_internal_identifiers_and_tool_names_never_reach_any_surface():
+    """Redaction must remove technical identifiers from every surface output."""
     contract = _contract(
         display_payload={
             "action": "create",
@@ -88,6 +91,7 @@ def test_internal_identifiers_and_tool_names_never_reach_any_surface():
 
 
 def test_completed_without_evidence_is_outcome_unknown_on_every_surface():
+    """Completion without evidence must remain outcome-unknown everywhere."""
     contract = _contract(state=None, lifecycle_state="completed")
     verification = assert_surface_ready(contract)
     assert {render.state for render in verification.renders} == {MessageState.OUTCOME_UNKNOWN.value}
@@ -95,6 +99,7 @@ def test_completed_without_evidence_is_outcome_unknown_on_every_surface():
 
 
 def test_readiness_fails_closed_for_leak_and_surface_mismatch_inputs():
+    """Readiness validation must reject unsupported or duplicate surfaces."""
     contract = _contract()
     with pytest.raises(ValueError, match="unsupported surface"):
         verify_surface_parity(contract, surfaces=("telegram", "sms"))
@@ -103,6 +108,7 @@ def test_readiness_fails_closed_for_leak_and_surface_mismatch_inputs():
 
 
 def test_harness_is_pure_and_does_not_touch_runtime_surfaces():
+    """The harness must stay independent of app runtime wiring."""
     module_path = Path(__file__).parent / "core" / "message_surface_harness.py"
     tree = ast.parse(module_path.read_text(encoding="utf-8"))
     imports = {
