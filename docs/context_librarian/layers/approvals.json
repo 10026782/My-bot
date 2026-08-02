@@ -19,6 +19,8 @@
       "core/action_gateway_atomic_executor.py",
       "core/approvals_projection.py",
       "core/action_resolution_projection.py",
+      "core/approval_turn_metrics.py",
+      "feature_flags.py",
       "app.py",
       "tma_api.py",
       "event_bus.py"
@@ -36,25 +38,35 @@
       "test_bug_stale_callback_ux.py",
       "test_bug112_telegram_approval_ttl.py",
       "test_single_speaker_fallback_and_duplication.py",
-      "test_bug_post_completion_callback_fallthrough.py"
+      "test_bug_post_completion_callback_fallthrough.py",
+      "test_pr2_deterministic_approval_cost_cuts.py",
+      "test_pending_contract_read_amplification.py",
+      "test_bug056_legacy_cancel_replay_guard.py",
+      "test_bug_canonical_tool_wiring.py",
+      "test_hotfix_e_shared_replay_policy.py"
     ],
     "canonical_docs": [
       {"path": "docs/architecture/f52-unified-approval-runtime/audits/phase-4c/CURRENT_STATE_MAP.md", "role": "latest verified runtime audit", "status": "active"},
       {"path": "docs/architecture/f52-unified-approval-runtime/audits/phase-4c/GAP_AND_RISK_REPORT.md", "role": "current risk authority", "status": "active"},
       {"path": "docs/PHASE_4B_ROLLOUT_AND_CUTOVER.md", "role": "durable approval rollout authority", "status": "planning_only"},
-      {"path": "docs/architecture/f52-unified-approval-runtime/decisions/DECISION_LOG.md", "role": "approval/F52 decision history", "status": "active"}
+      {"path": "docs/architecture/f52-unified-approval-runtime/decisions/DECISION_LOG.md", "role": "approval/F52 decision history", "status": "active"},
+      {"path": "docs/architecture/f52-unified-approval-runtime/audits/PR2_DETERMINISTIC_APPROVAL_COST_CUTS_PREFLIGHT.md", "role": "deterministic approval cost-cut boundary and acceptance matrix", "status": "active"},
+      {"path": "docs/architecture/f52-unified-approval-runtime/audits/PR2_IMPLEMENTATION_CROSS_LAYER_IMPACT_MATRIX.md", "role": "historical PR2-at-merge cross-layer impact evidence; later replay semantics are superseded by hotfix evidence", "status": "historical"},
+      {"path": "docs/architecture/f52-unified-approval-runtime/audits/PR_HOTFIX_A_CROSS_LAYER_IMPACT_MATRIX.md", "role": "post-PR2 canonicalization and no-live replay correction evidence", "status": "active"}
     ],
     "production_evidence": [
+      {"path": "docs/architecture/action-gateway/PRODUCTION_30JUL2026_RENDER_VERIFICATION.md", "observed_on": "2026-07-31", "scope": "read-only Render production verification of live deploy identity, three approval feature flags, and ActionContract runtime activity; exact sheets canonicalization branch remains test-only", "status": "production_verified"},
       {"path": "docs/architecture/action-gateway/STAGING_23JUL_TTL_DISAMBIGUATION_AUDIT.md", "observed_on": "2026-07-23", "scope": "staging and operator-supplied ActionContracts lifecycle evidence", "status": "mixed_verified_and_deferred"}
     ],
     "feature_flags": [
       {"name": "FEATURE_ACTION_GATEWAY", "default_state": "off", "documented_state": "environment-dependent; repository alone is not current production proof", "evidence_scope": "code default plus dated audits"},
       {"name": "FEATURE_ACTION_CONTRACT_PERSISTENCE", "default_state": "off", "documented_state": "flag-gated durable proposals/recovery", "evidence_scope": "code default"},
       {"name": "FEATURE_ATOMIC_CLAIMS", "default_state": "off", "documented_state": "deployment documentation may require true; verify environment", "evidence_scope": "code default and deployment docs"},
-      {"name": "FEATURE_SINGLE_SPEAKER_APPROVAL_UX", "default_state": "off", "documented_state": "PR #471 (merge c64da20); off = legacy delivery routing, on = Gateway owns the one final response for an approval-queuing turn; identifier redaction in build_approval_lifecycle_result() is unconditional regardless of this flag", "evidence_scope": "code default (feature_flags.py) plus CHANGELOG.md PR #471 entry; no staging/production activation evidence exists"}
+      {"name": "FEATURE_SINGLE_SPEAKER_APPROVAL_UX", "default_state": "off", "documented_state": "PR #471 (merge c64da20); off = legacy delivery routing, on = Gateway owns the one final response for an approval-queuing turn; identifier redaction is unconditional; owner reported the flag enabled in production on 2026-07-30", "evidence_scope": "code default plus dated owner-supplied production observations in AI_CONTEXT.md/CHANGE_CONTROL_LOG.md; not a current environment read"},
+      {"name": "FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS", "default_state": "off", "documented_state": "PR2 deterministic lifecycle resolver; effective only when FEATURE_SINGLE_SPEAKER_APPROVAL_UX is also enabled; owner reported both enabled in production on 2026-07-30", "evidence_scope": "repository code/tests plus dated partial production verification; exact canonicalization branch remains test-only"}
     ],
     "valid_from": "2026-07-28",
-    "last_verified_commit": "2f5c577",
+    "last_verified_commit": "a89fc67105f6b310efde498498a3f6f8c9038250",
     "confidence": 0.9,
     "notes": [
       "PARALLEL SOURCES OF TRUTH (2026-07-28 N17 pilot Task 1 finding, directly re-verified): ActionContracts is the canonical lifecycle authority, but 4 coexisting, independently-reachable approve/reject mechanisms are live on main, not 1: (1) ActionContract/ActionGateway itself — durable, `ActionContractRepository` (core/action_contract_repository.py), TTL `CONTRACT_PENDING_TTL_SECONDS=24h` (core/action_contract_repository.py:84); (2) EventBus's `PendingActionsStore` — pure in-memory dict, no durable backing, class at event_bus.py:28, TTL `PENDING_TTL_MINUTES=30` (event_bus.py:26); populated unconditionally from `_queue_approval_detailed_impl` even when the Gateway already approved, i.e. it runs alongside (1), not instead of it; (3) app.py's router-level `_pending_approvals` dict — a second, separate pure in-memory store (app.py:170, lock at app.py:174), TTL `_PENDING_APPROVAL_TTL=600s` (app.py:228), drives the text-based כן/לא confirmation flow; (4) the TMA dashboard's Airtable-backed Approvals-table flow (tma_api.py, routes registered app.py:427) with its own TTL `_TMA_APPROVAL_TTL_SECONDS=24h` (tma_api.py:2162), though execution is delegated back to ActionGateway. A symptom like 'repeated approval returns the wrong message' can originate in any of these four, not only in ActionContract state. `core/approvals_projection.py`'s own module docstring says it is unwired/dead code; it is not a 5th live mechanism. `session_store.py`'s `pending_lead_preview` is a separate lead-classification confirmation flow, not an approval mechanism — easy to conflate with the four above, but out of this layer's scope.",
@@ -65,7 +77,8 @@
       "PR #471 (BUG-144): the reject callback now resolves and closes the canonical ActionContract (reject_with_lifecycle_result()) before reporting cancellation to the user, not just the legacy EventBus item.",
       "ApprovalLifecycleResult (core/action_gateway.py) is the single-speaker, user-safe projection of one ActionContract lifecycle; approve_with_lifecycle_result()/reject_with_lifecycle_result() are the canonical entry points that produce it. This is layered on top of, not a replacement for, ActionContracts as lifecycle authority.",
       "PR #479/#480 (merged, N17 re-verification): changed only the rendered wording of build_approval_lifecycle_result() and _describe_tool_call() (rejected-state phrasing normalized to 'בוטלה', task-creation gets dedicated business wording, raw Airtable table names no longer leak into any approval message) — no lifecycle, callback-resolution, or authority change. Architectural claims in this node were directly re-verified against ffa678a7 and remain accurate; only code line-number citations shifted.",
-      "This node's metadata was refreshed by a read-only Context Librarian audit against ffa678a7 (direct source re-verification, N17 non-inferiority pilot advancement); production evidence entries above still predate that audit and are not re-verified by it."
+      "The 2026-07-23 staging evidence predates the ffa678a7 audit; the separately scoped 2026-07-30 owner-reported evidence was added during the a89fc67 refresh.",
+      "First real consumption pilot re-verification against a89fc67: PR2 added a narrow early deterministic lifecycle resolver, request-local observability counters, a single supplied live-contract snapshot, and a default-off dependent flag. Subsequent hotfixes narrowed replay and canonicalization behavior. ActionContracts remains lifecycle authority; metrics are observation-only. Focused PR2, read-amplification, session, pending-query, single-speaker, callback, and replay-policy suites passed locally."
     ],
     "extensions": {"boss.layer_aliases": ["layer-3", "durable-approval", "ActionGateway"]}
   }],

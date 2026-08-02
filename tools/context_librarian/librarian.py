@@ -906,13 +906,17 @@ def _freshness(
 
 
 def _unique_references(
-    nodes: list[dict[str, Any]], field: str, maximum_documents: int
+    nodes: list[dict[str, Any]], field: str
 ) -> list[tuple[str, dict[str, Any]]]:
-    """Round-robin references so every selected node gets provenance first."""
+    """Return every current reference in deterministic round-robin order.
+
+    Budget enforcement belongs to ``build_bundle``. This helper must never
+    turn a budget into an implicit source-selection policy.
+    """
     result: list[tuple[str, dict[str, Any]]] = []
     seen: set[str] = set()
     depth = 0
-    while len(result) < maximum_documents:
+    while True:
         added = False
         for node in nodes:
             references = [
@@ -929,9 +933,17 @@ def _unique_references(
             seen.add(ref["path"])
             result.append((node["id"], ref))
             added = True
-            if len(result) >= maximum_documents:
-                break
-        if not added and all(depth >= len(node[field]) - 1 for node in nodes):
+        if not added and all(
+            depth >= len(
+                [
+                    ref
+                    for ref in node[field]
+                    if field != "canonical_docs"
+                    or ref.get("status") not in DEFAULT_EXCLUDED_STATUSES
+                ]
+            ) - 1
+            for node in nodes
+        ):
             break
         depth += 1
     return result
@@ -1429,27 +1441,8 @@ def _render(
 ) -> str:
     decision_nodes = [node for node in nodes if node["type"] == "decision"]
     layer_nodes = [node for node in nodes if node["type"] == "layer"]
-    evidence_budget = min(
-        sum(bool(node["production_evidence"]) for node in layer_nodes),
-        max_documents // 3,
-    )
-    all_docs = _unique_references(nodes, "canonical_docs", 10**9)
-    all_evidence = _unique_references(layer_nodes, "production_evidence", 10**9)
-    docs = _unique_references(
-        nodes, "canonical_docs", max_documents - evidence_budget
-    )
-    evidence = _unique_references(
-        layer_nodes, "production_evidence", evidence_budget
-    )
-    selected_source_paths = {ref["path"] for _, ref in docs + evidence}
-    omitted_sources = sorted(
-        {ref["path"] for _, ref in all_docs + all_evidence} - selected_source_paths
-    )
-    budget_breakdown = {
-        node_id: _path_char_estimate(catalog.repo_root, refs)
-        for node_id in sorted({node_id for node_id, _ in docs + evidence})
-        for refs in [[(item_node, ref) for item_node, ref in docs + evidence if item_node == node_id]]
-    }
+    docs = _unique_references(nodes, "canonical_docs")
+    evidence = _unique_references(layer_nodes, "production_evidence")
 
     selected_layer_ids = {node["id"].split(".", 1)[1] for node in layer_nodes}
     expected_layers = set(profile["primary_layers"]) | set(
@@ -1578,23 +1571,22 @@ def _render(
         ]
     )
     for node in decision_nodes:
-        lines.append(f"- `{node['id']}` — {node['name']}: {node['notes'][0]}")
-        lines.extend(f"    - {extra_note}" for extra_note in node["notes"][1:])
+        notes = iter(node["notes"])
+        first_note = next(notes)
+        lines.append(f"- `{node['id']}` — {node['name']}: {first_note}")
+        lines.extend(f"    - {extra_note}" for extra_note in notes)
 
     lines.extend(["", "## Selected Layers", ""])
     for node in layer_nodes:
         layer_id = node["id"].split(".", 1)[1]
         fresh = freshness[node["id"]]
         stale_label = "STALE: code changed" if fresh["stale"] else "fresh against tracked code"
+        notes = iter(node["notes"])
+        first_note = next(notes)
         lines.append(
-            f"- `{layer_id}` ({roles[layer_id]}, {node['status']}, {stale_label}) — {node['notes'][0]}"
+            f"- `{layer_id}` ({roles[layer_id]}, {node['status']}, {stale_label}) — {first_note}"
         )
-        # notes[0] הוא הכותרת; כל כותב-קטלוג הסתמך על כך שהיא תוצג כאן, אבל
-        # notes[1:] נשמטו בשקט מכל bundle שנבנה אי-פעם עד לתיקון הזה (פיילוט
-        # N17, 28/07/2026: בדיוק אותה מחלקת-פער כמו ממצאי core_reasoning_change/
-        # approval_ux של הפיילוט — קיום הערה בקטלוג אינו זהה להגעתה בפועל
-        # ל-bundle של סוכן).
-        lines.extend(f"    - {extra_note}" for extra_note in node["notes"][1:])
+        lines.extend(f"    - {extra_note}" for extra_note in notes)
 
     lines.extend(["", "## Canonical Documents", ""])
     lines.extend(
@@ -1603,8 +1595,6 @@ def _render(
     )
     if not docs:
         lines.append("- None selected.")
-    if omitted_sources:
-        lines.append(f"- omitted_whole_sources_by_budget: {omitted_sources}")
 
     lines.extend(["", "## Code", ""])
     for node in layer_nodes:
@@ -1705,8 +1695,6 @@ def _render(
             f"- excluded_layer_leakage: {len(leakage)} {leakage}",
             f"- query_match_precision_proxy: {query_precision:.0%}",
             f"- document_budget: {len(docs) + len(evidence)}/{max_documents}",
-            f"- budget: estimated=__TOKEN_COUNT__ limit={max_tokens} overflow=__TOKEN_OVERFLOW__",
-            f"- budget_breakdown_by_node: {json.dumps(budget_breakdown, ensure_ascii=False, sort_keys=True, separators=(',', ':'))}",
             "- approximate_char_estimate_budget (chars/4 proxy, NOT a real "
             "tokenizer count — see TOKEN_ESTIMATION_BENCHMARK.md): "
             "__TOKEN_COUNT__/" + str(max_tokens),
@@ -1727,7 +1715,7 @@ def _render(
     for _ in range(5):
         rendered = template.replace("__TOKEN_COUNT__", str(token_count)).replace(
             "__TOKEN_SAVINGS__", savings_text
-        ).replace("__TOKEN_OVERFLOW__", str(max(0, token_count - max_tokens)))
+        )
         new_token_count = _approximate_char_estimate(rendered)
         savings = (
             0.0
@@ -1741,24 +1729,95 @@ def _render(
         savings_text = new_savings_text
     return template.replace("__TOKEN_COUNT__", str(token_count)).replace(
         "__TOKEN_SAVINGS__", savings_text
-    ).replace("__TOKEN_OVERFLOW__", str(max(0, token_count - max_tokens)))
+    )
 
 
-def build_bundle(
+def _budget_breakdown(
+    nodes: list[dict[str, Any]],
+    docs: list[tuple[str, dict[str, Any]]],
+    evidence: list[tuple[str, dict[str, Any]]],
+) -> list[str]:
+    """Describe the candidate's measurable metadata by node and source."""
+    breakdown: list[str] = []
+    for node in nodes:
+        metadata = "\n".join(
+            [*node["notes"], *node["code_paths"], *node["test_paths"]]
+        )
+        if metadata:
+            breakdown.append(
+                f"{node['id']} (metadata): {_approximate_char_estimate(metadata)}"
+            )
+    for node_id, reference in [*docs, *evidence]:
+        source = reference["path"]
+        breakdown.append(
+            f"{node_id} -> {source}: {_approximate_char_estimate(source)}"
+        )
+    return sorted(breakdown)
+
+
+def _format_budget_overflow(
+    *, estimated_tokens: int, budget: int, breakdown: list[str]
+) -> str:
+    overflow = estimated_tokens - budget
+    details = "\n".join(f"  - {item} estimated tokens" for item in breakdown)
+    return (
+        "context budget overflow: "
+        f"estimated_tokens={estimated_tokens}, budget={budget}, overflow={overflow}\n"
+        "breakdown by node/source:\n"
+        f"{details}"
+    )
+
+
+def _format_document_overflow(
+    *,
+    estimated_tokens: int,
+    token_budget: int,
+    selected_documents: int,
+    budget: int,
+    references: list[tuple[str, dict[str, Any]]],
+    breakdown: list[str],
+) -> str:
+    sources = ", ".join(
+        f"{node_id}:{reference['path']}" for node_id, reference in references
+    )
+    details = "\n".join(f"  - {item} estimated tokens" for item in breakdown)
+    return (
+        "context document budget overflow: "
+        f"estimated_tokens={estimated_tokens}, budget={token_budget}, "
+        f"overflow={estimated_tokens - token_budget}; "
+        f"selected_documents={selected_documents}, budget={budget}, "
+        f"overflow={selected_documents - budget}; no source was omitted; "
+        f"sources={sources}\n"
+        "breakdown by node/source:\n"
+        f"{details}"
+    )
+
+
+def _build_bundle_unchecked(
     catalog: Catalog,
     *,
     task_type: str,
-    query: str = "",
-    max_tokens: int | None = None,
-    max_documents: int | None = None,
-    production_claim: bool = False,
-    verified_production_evidence: str | None = None,
-    assert_main: bool = False,
-    assert_on_main_history: bool = False,
-    assert_at_origin_main_tip: bool = False,
+    query: str,
+    max_tokens: int | None,
+    max_documents: int | None,
+    production_claim: bool,
+    verified_production_evidence: str | None,
+    assert_main: bool,
+    assert_on_main_history: bool,
+    assert_at_origin_main_tip: bool,
     direct_source_reverified: bool = False,
     verification_ledger: Iterable[str] = (),
-) -> str:
+) -> tuple[str, int, int, list[str]]:
+    """הליבה המשותפת של `build_bundle()`/`estimate_bundle()`: מאמתת קלט,
+    פותרת git provenance, בוחרת nodes, ומרנדרת את טקסט ה-bundle.
+
+    מחזירה `(bundle_text, actual_tokens, token_budget)` בלי לבדוק אם
+    `actual_tokens` נכנס בתוך `token_budget` — ההחלטה הזו (לזרוק שגיאה
+    או לדווח) שייכת לקורא, לעולם לא לפונקציה הזו. כל כשל אחר כאן (task
+    type לא ידוע, תקציבים לא-חוקיים, git provenance שלא הוכח כשנדרש)
+    הוא שגיאת קלט/מבנה, לא שאלת תקציב, וזורק שגיאה תמיד עבור שני
+    הקוראים.
+    """
     if task_type not in catalog.profiles:
         available = ", ".join(sorted(catalog.profiles))
         raise ContextLibrarianError(
@@ -1823,9 +1882,151 @@ def build_bundle(
         verification_ledger,
     )
     actual_tokens = _approximate_char_estimate(bundle)
+    docs = _unique_references(nodes, "canonical_docs")
+    evidence = _unique_references(
+        [node for node in nodes if node["type"] == "layer"],
+        "production_evidence",
+    )
+    references = [*docs, *evidence]
+    selected_documents = len({reference["path"] for _, reference in references})
+    breakdown = _budget_breakdown(nodes, docs, evidence)
+    if selected_documents > document_budget:
+        raise ContextLibrarianError(
+            _format_document_overflow(
+                estimated_tokens=actual_tokens,
+                token_budget=token_budget,
+                selected_documents=selected_documents,
+                budget=document_budget,
+                references=references,
+                breakdown=breakdown,
+            )
+        )
+    return bundle, actual_tokens, token_budget, breakdown
+
+
+def build_bundle(
+    catalog: Catalog,
+    *,
+    task_type: str,
+    query: str = "",
+    max_tokens: int | None = None,
+    max_documents: int | None = None,
+    production_claim: bool = False,
+    verified_production_evidence: str | None = None,
+    assert_main: bool = False,
+    assert_on_main_history: bool = False,
+    assert_at_origin_main_tip: bool = False,
+    direct_source_reverified: bool = False,
+    verification_ledger: Iterable[str] = (),
+) -> str:
+    bundle, actual_tokens, token_budget, breakdown = _build_bundle_unchecked(
+        catalog,
+        task_type=task_type,
+        query=query,
+        max_tokens=max_tokens,
+        max_documents=max_documents,
+        production_claim=production_claim,
+        verified_production_evidence=verified_production_evidence,
+        assert_main=assert_main,
+        assert_on_main_history=assert_on_main_history,
+        assert_at_origin_main_tip=assert_at_origin_main_tip,
+        direct_source_reverified=direct_source_reverified,
+        verification_ledger=verification_ledger,
+    )
     if actual_tokens > token_budget:
         raise ContextLibrarianError(
-            f"required context needs approximately {actual_tokens} "
-            f"chars/4-estimated tokens, exceeding the {token_budget} budget"
+            _format_budget_overflow(
+                estimated_tokens=actual_tokens,
+                budget=token_budget,
+                breakdown=breakdown,
+            )
         )
     return bundle
+
+
+@dataclass(frozen=True)
+class BundleEstimate:
+    """תוצאת dry-run שלא זורקת שגיאה, עבור profile+query בודדים.
+
+    `actual_tokens`/`token_budget` הם בדיוק אותם מספרים ש-`build_bundle()`
+    היה משתמש בהם כדי להחליט אם לזרוק שגיאה — זה לא קירוב נפרד וזול
+    שמחושב מתת-קבוצה של שדות (code_paths/test_paths/canonical_docs/notes
+    בלבד היו מפספסים את באנר ה-git-provenance, את טקסט ה-mandatory-
+    decisions, ואת קטעי ה-edges/freshness — כולם נספרים לתקציב האמיתי).
+    `fits` הוא בדיוק `actual_tokens <= token_budget`.
+    """
+
+    task_type: str
+    query: str
+    fits: bool
+    actual_tokens: int
+    token_budget: int
+
+
+def estimate_bundle(
+    catalog: Catalog,
+    *,
+    task_type: str,
+    query: str = "",
+    max_tokens: int | None = None,
+    max_documents: int | None = None,
+    production_claim: bool = False,
+    verified_production_evidence: str | None = None,
+) -> BundleEstimate:
+    """dry run של `build_bundle()`: אותה לוגיקת selection/render/measure,
+    בשימוש חוזר ולא בכפילות, אבל מדווחת חריגת תקציב כ-
+    `BundleEstimate(fits=False, ...)` שמוחזר במקום לזרוק שגיאה.
+
+    מיועדת לבדיקת עריכת קטלוג מועמדת — למשל `load_catalog()` ואז שינוי
+    `catalog.nodes[...]` בזיכרון בלבד — מול כל profile מושפע *לפני*
+    כתיבה לדיסק, כך שקונפליקט תקציב הוא מספר מדווח אחד במקום לולאת
+    edit/test/edit בניסוי וטעייה. git provenance עדיין נאסף ונכלל
+    ברינדור (ה-banner משפיע על actual_tokens בדיוק כמו ב-build_bundle()),
+    אבל בדיקות ה-assertion בסגנון `--assert-main`/`--assert-on-main-history`
+    לעולם לא נאכפות כאן — provenance שלא הוכח כ-main לעולם לא זורק שגיאה
+    מ-estimate_bundle(), רק ההיטל שלו על actual_tokens נכנס לחישוב. ולעולם
+    לא כותבת שום דבר.
+
+    שגיאות מבניות (task type לא ידוע, תקציבים לא-חוקיים, `--production-
+    claim` חסר) גם הן לא שאלות תקציב וזורקות שגיאה בכל זאת, בדיוק כמו
+    `build_bundle()`.
+    """
+    bundle, actual_tokens, token_budget, _ = _build_bundle_unchecked(
+        catalog,
+        task_type=task_type,
+        query=query,
+        max_tokens=max_tokens,
+        max_documents=max_documents,
+        production_claim=production_claim,
+        verified_production_evidence=verified_production_evidence,
+        assert_main=False,
+        assert_on_main_history=False,
+        assert_at_origin_main_tip=False,
+    )
+    del bundle  # dry run: טקסט ה-bundle המרונדר עצמו לא מעניין את הקורא
+    return BundleEstimate(
+        task_type=task_type,
+        query=query,
+        fits=actual_tokens <= token_budget,
+        actual_tokens=actual_tokens,
+        token_budget=token_budget,
+    )
+
+
+def estimate_all_profiles(
+    catalog: Catalog, *, query: str = ""
+) -> tuple[BundleEstimate, ...]:
+    """`estimate_bundle()` עבור כל profile בקטלוג, ממוין לפי id.
+
+    נוחות לתרחיש הנפוץ: בדיקת כל הפרופילים ללא צורך בטיפול פר-פרופיל
+    בשגיאות מבניות. `_check_budget_overflow()` ב-`refresh_after_merge.py`
+    שומרת בכוונה על הלולאה הפרטית שלה במקום להשתמש בפונקציה הזו — היא
+    צריכה ללכוד שגיאה מבנית לכל profile בנפרד ולהמשיך לפרופיל הבא, בעוד
+    `estimate_all_profiles()` הייתה זורקת שגיאה בפרופיל הראשון שנכשל
+    ועוצרת שם. שתיהן, לעומת זאת, קוראות ל-`estimate_bundle()` המשותף
+    ולא לגרסה כפולה של לוגיקת ה-render/measure עצמה.
+    """
+    return tuple(
+        estimate_bundle(catalog, task_type=task_type, query=query)
+        for task_type in sorted(catalog.profiles)
+    )

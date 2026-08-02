@@ -181,3 +181,315 @@ This log records planning decisions for the F52 program. It is not runtime imple
   `evidence_ref` source for PR B/PR C; `turn_context_source` type
   (str literal vs. `Enum`) — none block PR A. See
   `spec/MESSAGE_CONTRACT_ENVELOPE_CONTRACT_V1.md` §12 for the full list.
+
+## D-013 — Ratify `evidence_status` as optional V1 metadata
+
+- Date: 30/07/2026
+- Status: Closed for the V1 metadata contract; no runtime behavior change
+- Decision: `MessageContract.evidence_status` is optional metadata copied from
+  the canonical evidence classification. It does not determine or upgrade
+  `MessageState`, is not a new source of truth, and has no runtime ownership or
+  enforcement authority. Unknown or absent values must fail closed or remain
+  `None`, according to the existing schema rules.
+- Rationale: Stage 3A carries the already-supplied evidence classification for
+  audit and round-trip observability. Explicit ratification keeps that metadata
+  subordinate to the existing evidence authority and the frozen state
+  precedence rules.
+- Affected document:
+  `spec/MESSAGE_CONTRACT_ENVELOPE_CONTRACT_V1.md` §2.1.
+
+## D-014 — Ratify the text-based "לאשר? כן / לא" confirmation as canonical, cross-channel
+
+- Date: 01/08/2026
+- Status: Closed for the wording question below; does not itself authorize
+  `FEATURE_UNIFIED_STATUS_FORMATTER=on`
+- Trigger: a production `[UnifiedStatusFormatterShadow]` sample for
+  `outcome=pending` on a Task-creation contract showed `text_differs=True`
+  (`legacy_len=56`, `unified_len=83`). Investigation (see PR #522,
+  `baabd46`/`ef55cd9`) found two independent contributors: (1) an
+  unintentional content bug — the MessageContract adapter used the generic,
+  table-agnostic business description instead of the task's own title for
+  Task-creation contracts (fixed in PR #522, no product decision needed) —
+  and (2) an intentional structural difference — the unified renderer always
+  appends `"\nלאשר? כן / לא"` even when the same message ships with inline
+  Telegram approve/reject buttons, which the legacy pending prompt never did.
+  (2) was left open as a required product decision; this entry closes it.
+- Decision: **Option B — keep the text-based `"לאשר? כן / לא"` confirmation
+  as the canonical approval_pending wording**, unconditionally, regardless of
+  whether inline buttons are also present on a given channel/message.
+  `core/agent_message_formatter.py::_render_approval_pending()` already ships
+  this (`f"יש פעולה שממתינה לאישור:\n{desc}\nלאשר? כן / לא"`, from PR1 /
+  `spec/UNIFIED_MESSAGE_UX_STANDARD.md`'s canonical pattern) — **no code
+  change required** for this decision; it only unblocks the open question
+  that was withholding shadow→on sign-off on this specific point.
+- Rationale (owner): the assistant must produce one clear answer with one
+  clear next action independent of channel. Telegram inline buttons are not
+  available on WhatsApp or on any other button-less surface the same
+  approval flow may reach; a canonical wording that silently depends on a
+  channel affordance would fork the UX per channel. A redundant text prompt
+  alongside a working inline button is an acceptable, bounded cost against
+  that guarantee.
+- Open, NOT resolved by this decision: the owner's example wording for a
+  Task-creation contract used **"יש משימה שממתינה לאישור"** (task-specific
+  noun), not the renderer's actual, always-generic **"יש פעולה שממתינה
+  לאישור"**. Whether `_render_approval_pending()` should gain noun-awareness
+  (a Task-creation contract renders "משימה", everything else renders
+  "פעולה" — mirroring `build_approval_lifecycle_result()`'s existing
+  legacy-side distinction) is a **separate, still-open** product question,
+  not decided here. `_render_approval_pending()` is shared foundation for
+  every `approval_pending` caller (Layer 3/F52), not scoped to
+  `ActionGateway`'s pending surface alone, so resolving it is its own
+  Cross-Layer-gated change, tracked separately from this entry.
+- **Resolved by D-015 below** — the owner's follow-up decision both adds the
+  noun-awareness this entry left open AND further splits the wording by
+  *when* it renders (new prompt vs. status query), which this entry did not
+  anticipate.
+- Affected documents: `spec/UNIFIED_MESSAGE_UX_STANDARD.md` (canonical
+  pattern already matches this decision, no edit needed), this log.
+
+## D-015 — Split `approval_pending` wording by context: new prompt vs. status query, with task-noun awareness
+
+- Date: 01/08/2026
+- Status: Closed for the wording/formatter-copy question below; does not
+  itself authorize `FEATURE_UNIFIED_STATUS_FORMATTER=on`; no approval logic,
+  ownership, queue, evidence authority, routing, or `MessageContract`
+  wiring/schema changed
+- Trigger: follow-up to D-014. The owner's recommended canonical wording used
+  the task-specific noun ("יש משימה שממתינה לאישור") that
+  `_render_approval_pending()` did not actually render (it always said
+  "פעולה"). On closer inspection, the owner further distinguished **two
+  contexts** that a single "approval_pending" wording cannot correctly cover:
+  a **new approval prompt** (rendered right after the user's request is
+  queued — nothing was "already" pending from their point of view) vs. a
+  **status query** (the user asking about an action that is already
+  pending). D-014's ratified wording ("יש פעולה/משימה שממתינה לאישור...")
+  is actually the *status-query* framing; the live call site it was tested
+  against (`ActionGateway._render_pending_prompt()`) is a *new-prompt* call
+  site, not a status query — so D-014 alone would have shipped the wrong
+  framing to the one surface that is actually live today.
+- Decision: two distinct canonical wordings, chosen by context, both
+  task-noun-aware:
+  1. **New approval prompt** (generic): `"כדי לבצע את הפעולה הזו נדרש
+     אישור:\n<description>\nלאשר? כן / לא"`; (task-creation): `"כדי ליצור את
+     המשימה הזו נדרש אישור:\n<task_title>\nלאשר? כן / לא"`.
+  2. **Status query** (generic): `"יש פעולה שממתינה לאישור:\n<description>\n
+     לאשר? כן / לא"`; (task-creation): `"יש משימה שממתינה לאישור:\n
+     <task_title>\nלאשר? כן / לא"`.
+  Task-creation contracts use the task's own title in both contexts, never
+  the generic table-agnostic business description (already true since
+  PR #522; reconfirmed here for both wordings).
+- Implementation (content/copy only, per owner-specified scope):
+  - `core/agent_message_formatter.py`: `_render_approval_pending()` (the
+    renderer wired to `STATE_APPROVAL_PENDING`/`"approval_pending"` — the
+    only state reachable through the `MessageContract` crossing) now renders
+    the **new-prompt** wording, since `ActionGateway._render_pending_prompt()`
+    is its only live caller. A new function `_render_approval_pending_query()`
+    renders the **status-query** wording, registered under a new state
+    constant `STATE_APPROVAL_PENDING_QUERY = "approval_pending_query"` —
+    deliberately **not** added to `core.message_contract.MessageState` (no
+    `MessageContract` schema change), so it is reachable only via a direct
+    `format_agent_message_with_meta("approval_pending_query", ...)` call,
+    never via the `MessageContract` adapter. No live call site uses it yet;
+    it exists as the tested, canonical target wording for if/when
+    `describe_pending_queue()`/`query_execution_status()` (which still render
+    their own legacy text directly and unconditionally, untouched here) are
+    migrated onto the shared formatter.
+  - `core/action_fact_message_adapter.py::from_action_fact()` gained an
+    `entity_type` parameter (already an existing `DisplayPayload` field —
+    no schema change), threaded through from
+    `core/action_gateway.py::_compose_status_reply_unified()` as
+    `entity_type="task"` for a Task-creation contract (same
+    `_is_task_creation_contract()` check `build_approval_lifecycle_result()`
+    already uses), so the noun choice is data-driven, not hardcoded per call
+    site.
+- Explicitly out of scope (per owner instruction, unchanged): approval
+  logic, ownership, queue, evidence authority, routing, and the shadow
+  observability added in prior PRs. `describe_pending_queue()`/
+  `query_execution_status()` are not rewired to the unified formatter — they
+  keep rendering their own unconditional legacy text.
+- Tests: `test_agent_message_formatter.py` gained direct unit coverage
+  distinguishing the two states/wordings (generic and task-noun, including
+  the missing-data fallback for each) and a schema-boundary check that
+  `"approval_pending_query"` is not a `core.message_contract.MessageState`
+  member. `test_f52_status_reply_reconciliation.py` gained an integration
+  check that `ActionGateway._compose_status_reply_unified()` (the live
+  pending path) renders the new-prompt wording, never the status-query
+  wording.
+- Affected documents: `spec/UNIFIED_MESSAGE_UX_STANDARD.md` (canonical
+  patterns split into "NEW prompt" and "STATUS QUERY" sections), this log.
+
+## D-016 — Wire `query_execution_status()`'s single-pending-contract case onto `approval_pending_query`
+
+- Date: 01/08/2026
+- Status: Closed for the wording/formatter-copy question below; does not
+  itself authorize `FEATURE_UNIFIED_STATUS_FORMATTER=on`; no approval logic,
+  ownership, queue, evidence authority, routing, or `MessageContract`
+  wiring/schema changed
+- Trigger: owner follow-up, prompted by a live shadow log
+  (`legacy_len=56, unified_len=70`) confirming PR #522's content fix is
+  correct in production, plus a direct request: `describe_pending_queue()`/
+  `query_execution_status()` — the actual STATUS QUERY surfaces (e.g.
+  "האם הפעולה ממתינה לאישור?") — had zero `FEATURE_UNIFIED_STATUS_FORMATTER`
+  shadow coverage at all, the same shape of gap PR4/PR5/PR6 each closed for
+  their own surface. D-015 had explicitly left both out of scope; this entry
+  narrows that back in for one of the two, not both (see below).
+- Decision: `query_execution_status()`'s single-pending-contract branches
+  (both occurrences — the no-completed/failed-candidates case and the
+  stale-latest-with-still-pending case) now render through a new
+  `ActionGateway._render_pending_query_reply()` helper, using the same
+  off/shadow/on `FEATURE_UNIFIED_STATUS_FORMATTER` pattern PR4/PR5/PR6/D-015
+  already established: `off` (default) returns the caller's own
+  `build_approval_lifecycle_result(contract).safe_user_message` byte-
+  identical; `shadow` computes the `approval_pending_query` unified text
+  (task-noun-aware, per D-015) and logs the same safe `_log_shadow_
+  comparison()` record, still returning legacy text; `on` returns the
+  unified text. Rendered via a **direct** `format_agent_message_with_meta(
+  "approval_pending_query", ...)` call, not through the `ActionFact`/
+  `MessageContract` adapter — a synthetic `ActionFact(outcome="pending", ...)`
+  is still built, but only as input to the already-shared, unmodified
+  `_log_shadow_comparison()`/`_shadow_leak_flags()` safe-logging helpers,
+  exactly mirroring `_render_pending_prompt()`'s and `_render_rejection_
+  reply()`'s own pattern. No `MessageContract`/`MessageState` schema change.
+- `describe_pending_queue()` is explicitly **NOT** wired by this decision —
+  it always renders a numbered list (even for exactly one pending contract,
+  since the "send a number to select" affordance must stay consistent
+  regardless of count), which is `STATE_APPROVAL_PENDING_BATCH`'s shape
+  (`_render_approval_pending_batch()`), not the singular `approval_pending_
+  query` state D-015 defined. It also has a separate, already-flagged
+  internal-name leak (`"ActionContracts"` in its user-facing text — see
+  the mid-session finding this same day, not yet fixed). Wiring
+  `describe_pending_queue()` onto `STATE_APPROVAL_PENDING_BATCH` — and, as a
+  natural side effect, eliminating that leak once the flag reaches `on` — is
+  a distinct, still-open follow-up, not decided here.
+- `query_execution_status()`'s multi-contract branch (`len(live) > 1`) is
+  similarly **NOT** wired — same batch-shape reasoning as
+  `describe_pending_queue()` above.
+- Tests: `test_f52_status_reply_reconciliation.py` gained off/shadow/on unit
+  coverage for `_render_pending_query_reply()` (byte-identical legacy off,
+  correct `mapped_state=approval_pending_query` shadow log with no leaked
+  identifiers, task-noun-aware `on` output), an explicit check that the
+  new-prompt and status-query wordings never converge for the same
+  contract, an integration test proving `query_execution_status()`'s
+  single-contract branch actually calls the new helper, and a regression
+  guard that the multi-contract branch is unchanged.
+- Affected documents: this log. (`UNIFIED_MESSAGE_UX_STANDARD.md`'s D-015
+  canonical patterns already describe the wording this wires in; no further
+  spec edit needed.)
+
+## D-017 — Approval Pending Batch Migration: OQ1-OQ5 resolved, implemented
+
+- Date: 01/08/2026
+- Status: Closed for the wording/formatter-copy question below; does not
+  itself authorize `FEATURE_UNIFIED_STATUS_FORMATTER=on`; no approval logic,
+  ownership, queue, evidence authority, or routing changed
+- Trigger: owner resolution of the five open questions in
+  `spec/APPROVAL_PENDING_BATCH_MIGRATION_SCOPE_V1.md` §6.
+- Decision (verbatim owner resolution):
+  - **count=0:** a clean message that nothing is pending.
+  - **count=1:** singular wording, no list, no number-selection affordance
+    (resolves OQ1 — collapses to `_render_pending_query_reply()`'s existing
+    `approval_pending_query` wording, D-016, rather than staying a
+    one-item list).
+  - **count>=2:** numbered list.
+  - **OQ2/OQ3:** `"ActionContracts"` and every "legacy queue" reference are
+    removed entirely from the target text — no replacement internal-system
+    naming.
+  - **OQ5:** `describe_pending_queue()` and `query_execution_status()`'s
+    multi-contract branch converge on the same `STATE_APPROVAL_PENDING_BATCH`
+    renderer — one target wording for both surfaces.
+  - **OQ4:** the raw `tool_name` fallback in
+    `_describe_contract_for_reconfirmation()` (non-Airtable, non-table
+    tools) remains a **separate, still-open follow-up**, explicitly marked
+    as a BEFORE-FLAG-ON blocker — not fixed by this decision, not silently
+    treated as already safe.
+- Implementation (content/copy only, off/shadow/on, per owner-specified
+  scope):
+  - `core/action_gateway.py`: two new helpers mirroring D-016's
+    `_render_pending_query_reply()` pattern exactly — `_render_pending_empty_reply()`
+    (count=0, renders the existing `STATE_IDLE`/`"idle"` wording — an
+    already-safe state, no new one invented) and `_render_pending_batch_reply()`
+    (count>=2, renders `STATE_APPROVAL_PENDING_BATCH`/`"approval_pending_batch"`
+    via a direct `format_agent_message_with_meta()` call, items built from
+    `_describe_contract_for_reconfirmation()` — the same per-item
+    task/lead/generic-aware business description the legacy list already
+    uses). Both: `off` returns the caller's own existing legacy text
+    byte-identical; `shadow` computes+logs, still returns legacy; `on`
+    returns the unified text.
+  - `describe_pending_queue()`: legacy list construction is completely
+    UNCHANGED (still the `"ActionContracts"`-naming, `"1 בקשות ממתינות"`
+    text for `off`) — only the return path changed, branching on
+    `len(live)` to `_render_pending_empty_reply()` / `_render_pending_query_reply()`
+    (reused from D-016, count=1) / `_render_pending_batch_reply()`
+    (count>=2).
+  - `query_execution_status()`'s two multi-contract occurrences (`len(live) > 1`)
+    now call `_render_pending_batch_reply()` instead of returning
+    `build_approval_lifecycle_result(contracts=live).safe_user_message`
+    directly — `off` still returns that exact legacy text; `on` now
+    produces the SAME text `describe_pending_queue()` produces for the same
+    contracts (verified by test, not just asserted).
+- Explicitly out of scope (per owner instruction, unchanged): approval
+  logic, ownership, queue, evidence authority, routing, `MessageContract`
+  schema/wiring, `self._disambiguation` selection-state semantics, and OQ4
+  (tracked separately, before-flag-on).
+- Tests: `test_f52_status_reply_reconciliation.py` gained off/shadow/on
+  coverage for both new helpers, per-count integration checks against
+  `describe_pending_queue()` (count=0 clean idle text, count=1 singular
+  wording with no list markers, count=2 batch wording with no
+  `"ActionContracts"`/`"legacy"` text), an explicit convergence check that
+  `query_execution_status()`'s multi-contract branch and
+  `describe_pending_queue()` render identical text for the same contracts,
+  and a no-leaked-identifier check across a two-item batch.
+  `test_bug141_pending_query_dispatch_order.py` (which uses the
+  `"ActionContracts"` string as an off-state routing fingerprint, flagged
+  as a known future risk in the scope doc) was run and confirmed still
+  green, unmodified — `off` text is unchanged, so the fingerprint still
+  matches; redesigning that test is deferred to when the flag actually
+  moves past `off`, not before.
+- Affected documents: this log. (`spec/APPROVAL_PENDING_BATCH_MIGRATION_SCOPE_V1.md`
+  §6's OQ1-OQ5 are now resolved here, not re-litigated in that document.)
+
+## D-018 — Reconfirmation tool_name leak fix (D-017's OQ4, implemented)
+
+- Date: 02/08/2026
+- Status: Closed, implemented. **Not flag-gated** — unlike D-014→D-017,
+  this changes text that is already live in production, unconditionally;
+  effective immediately on merge.
+- Trigger: owner authorization to implement
+  `spec/RECONFIRMATION_TOOL_NAME_LEAK_FIX_SCOPE_V1.md` (itself split out of
+  D-017's OQ4).
+- Decision: `_describe_contract_for_reconfirmation()` (`core/action_gateway.py`)
+  no longer falls back to `f"{contract.tool_name} / {table}"` for any
+  non-Airtable tool. The Lead-specific and Task-specific branches (richer
+  than the generic mapping) are unchanged. The final fallback now delegates
+  to `_safe_contract_business_description()`, which already has full,
+  already-tested coverage for all 11 `requires_approval=True` tools
+  (`tool_registry.py`) plus a safe generic fallback ("הפעולה המבוקשת") that
+  never echoes a raw tool name — single source of truth for "what does this
+  tool mean in business terms," no duplicated mapping.
+- Verified blast radius (all three already-live, unconditional, no flag):
+  `describe_pending_queue()`'s numbered-list items (via
+  `_describe_contract_for_disambiguation()`), `describe_superseded_reason()`
+  (Hotfix E), and `_resolve_single_contract()`'s reconfirmation prompt
+  (`route_confirmation_word`, BUG-PENDING-APPROVAL-B) — each independently
+  exercised end-to-end and confirmed leak-free for a representative
+  non-Airtable contract (`calendar_create_event`, `gmail_send_draft`,
+  `sheets_append` respectively).
+- One stale test assertion found and fixed as a direct consequence:
+  `test_pr0_pending_approval_context_safety.py`'s DoD3/9 check used
+  `"gmail_send_draft" in reply` as a proxy for "reply is a readable
+  description, not just the contract_id" — that proxy asserted the leak
+  itself. Replaced with a check for the new safe text
+  (`"שליחת הודעת דוא״ל"`) plus an explicit assertion that the raw tool name
+  is now absent.
+- Tests: `test_pr1_single_speaker_approval_ux.py` gained direct coverage —
+  all 9 previously-leaking tools produce no raw `tool_name` in their
+  reconfirmation description and match `_safe_contract_business_description()`'s
+  output exactly (single-source-of-truth check); a regression guard that
+  Lead/Task branches are unchanged; and a check that
+  `_describe_contract_for_disambiguation()` inherits the fix.
+- Explicitly out of scope (per the split scope doc, unchanged): approval
+  logic, ownership, queue, evidence authority, routing;
+  `_safe_contract_business_description()` itself; the Lead/Task-specific
+  branches.
+- Affected documents: this log; `spec/RECONFIRMATION_TOOL_NAME_LEAK_FIX_SCOPE_V1.md`
+  (scope now implemented, not re-litigated).

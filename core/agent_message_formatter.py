@@ -43,6 +43,19 @@ FORMATTER_VERSION = 1
 STATE_SUCCESS                 = "success"
 STATE_FAILURE                 = "failure"
 STATE_APPROVAL_PENDING        = "approval_pending"
+# F52 D-015: a NEW approval prompt (right after the user's request is queued)
+# and a STATUS QUERY about an already-pending action need distinct wording —
+# "כדי לבצע/ליצור ... נדרש אישור" vs. "יש פעולה/משימה שממתינה לאישור". This
+# state is intentionally NOT part of core.message_contract.MessageState (no
+# MessageContract schema/wiring change) — it is reachable only by a caller
+# invoking format_agent_message_with_meta() directly with this state string,
+# never via the MessageContract crossing (ActionGateway._render_pending_prompt(),
+# the only live pending caller today, keeps using STATE_APPROVAL_PENDING —
+# see _render_approval_pending() below). No live call site uses this state
+# yet; it exists so the status-query wording is defined and independently
+# testable ahead of a future migration of describe_pending_queue()/
+# query_execution_status() onto the shared formatter.
+STATE_APPROVAL_PENDING_QUERY  = "approval_pending_query"
 STATE_APPROVAL_PENDING_BATCH  = "approval_pending_batch"
 STATE_CLARIFICATION_NEEDED    = "clarification_needed"
 STATE_IDLE                    = "idle"
@@ -53,6 +66,7 @@ STATE_MIXED_WITH_UNKNOWN      = "mixed_with_unknown"
 
 CANONICAL_STATES = frozenset({
     STATE_SUCCESS, STATE_FAILURE, STATE_APPROVAL_PENDING,
+    STATE_APPROVAL_PENDING_QUERY,
     STATE_APPROVAL_PENDING_BATCH, STATE_CLARIFICATION_NEEDED, STATE_IDLE,
     STATE_OUTCOME_UNKNOWN, STATE_UNVERIFIED_EFFECT, STATE_MIXED,
     STATE_MIXED_WITH_UNKNOWN,
@@ -384,11 +398,41 @@ def _render_failure(norm: dict, redactor: _Redactor) -> str:
 
 
 def _render_approval_pending(norm: dict, redactor: _Redactor) -> str:
+    """NEW approval prompt — rendered immediately after the user's request is
+    queued for approval (F52 D-015). The only live caller today is
+    ActionGateway._render_pending_prompt(), at the moment propose_action()
+    just queued the contract — nothing was "already" pending from the user's
+    point of view, so the framing is forward-looking ("כדי ... נדרש אישור"),
+    not a status report. See _render_approval_pending_query() below for the
+    "already pending, user is asking" wording."""
+    is_task = norm.get("entity_type") == "task"
+    if is_task:
+        intro = "כדי ליצור את המשימה הזו נדרש אישור"
+        fallback = "כדי ליצור משימה זו נדרש אישור. חסר לי מידע כדי להציג אותה בצורה בטוחה."
+    else:
+        intro = "כדי לבצע את הפעולה הזו נדרש אישור"
+        fallback = "כדי לבצע פעולה זו נדרש אישור. חסר לי מידע כדי להציג אותה בצורה בטוחה."
+    desc = _descriptor(norm, redactor)
+    if not desc:
+        # Safe missing-contract fallback (spec) — same framing, no business data.
+        return fallback
+    return f"{intro}:\n{desc}\nלאשר? כן / לא"
+
+
+def _render_approval_pending_query(norm: dict, redactor: _Redactor) -> str:
+    """STATUS QUERY wording — rendered when the user asks about an action/task
+    that is ALREADY pending approval (F52 D-015). Distinct from
+    _render_approval_pending() above, which is the new-prompt wording. Not
+    wired to a live call site yet (describe_pending_queue()/
+    query_execution_status() still render their own legacy text directly,
+    unconditionally, ahead of any flag) — this exists as the tested, canonical
+    definition for when/if that surface is migrated onto the shared formatter."""
+    noun = "משימה" if norm.get("entity_type") == "task" else "פעולה"
     desc = _descriptor(norm, redactor)
     if not desc:
         # Safe missing-contract fallback (spec).
-        return "יש פעולה שממתינה לאישור. חסר לי מידע כדי להציג אותה בצורה בטוחה."
-    return f"יש פעולה שממתינה לאישור:\n{desc}\nלאשר? כן / לא"
+        return f"יש {noun} שממתינה לאישור. חסר לי מידע כדי להציג אותה בצורה בטוחה."
+    return f"יש {noun} שממתינה לאישור:\n{desc}\nלאשר? כן / לא"
 
 
 def _render_approval_pending_batch(norm: dict, redactor: _Redactor) -> str:
@@ -459,6 +503,7 @@ _RENDERERS = {
     STATE_SUCCESS:                _render_success,
     STATE_FAILURE:                _render_failure,
     STATE_APPROVAL_PENDING:       _render_approval_pending,
+    STATE_APPROVAL_PENDING_QUERY: _render_approval_pending_query,
     STATE_APPROVAL_PENDING_BATCH: _render_approval_pending_batch,
     STATE_CLARIFICATION_NEEDED:   _render_clarification,
     STATE_IDLE:                   _render_idle,

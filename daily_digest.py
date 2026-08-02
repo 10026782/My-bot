@@ -1,4 +1,3 @@
-# daily_digest.py
 # דוח בוקר יומי — נשלח ב-08:00 לאליהו בטלגרם.
 # scheduler.py מנסה לייבא send_daily_digest — חובה שיהיה קיים.
 
@@ -29,15 +28,22 @@ def _fetch(table_real: str, formula: str = "", max_rec: int = 20) -> list:
     if max_rec:
         params["maxRecords"] = max_rec
     encoded = urllib.parse.quote(table_real, safe="")
-    r = httpx.get(
-        f"https://api.airtable.com/v0/{base}/{encoded}",
-        headers={"Authorization": f"Bearer {key}"},
-        params=params,
-        timeout=10,
-    )
-    if r.status_code != 200:
-        raise RuntimeError(f"Airtable {r.status_code}: {r.text[:120]}")
-    return r.json().get("records", [])
+    records = []
+    while True:
+        r = httpx.get(
+            f"https://api.airtable.com/v0/{base}/{encoded}",
+            headers={"Authorization": f"Bearer {key}"},
+            params=params,
+            timeout=10,
+        )
+        if r.status_code != 200:
+            raise RuntimeError(f"Airtable {r.status_code}: {r.text[:120]}")
+        payload = r.json()
+        records.extend(payload.get("records", []))
+        offset = payload.get("offset")
+        if max_rec or not offset:
+            return records
+        params["offset"] = offset
 
 
 def _fmt(iso: str) -> str:
@@ -228,6 +234,38 @@ def _upcoming_payments(errors: list) -> str:
         return "💰 *תשלומים קרובים:* שגיאה"
 
 
+def _lead_temperature_counts(records: list) -> tuple[int, int, int]:
+    """מחזיר ספירות HOT/WARM/COLD לפי טווחי ציון הלידים הקנוניים."""
+    hot = warm = cold = 0
+    for record in records:
+        raw_score = record.get("fields", {}).get(LeadFields.SCORE, 0)
+        try:
+            score = int(raw_score or 0)
+        except (TypeError, ValueError):
+            score = 0
+        if score >= 50:  # HOT ו-ULTRA_HOT נכללים באותה קטגוריית סיכום.
+            hot += 1
+        elif score >= 25:
+            warm += 1
+        else:
+            cold += 1
+    return hot, warm, cold
+
+
+def _leads_scoring_summary(errors: list) -> str:
+    """מסכם את כל הלידים לפי קבוצת טמפרטורה HOT/WARM/COLD."""
+    try:
+        hot, warm, cold = _lead_temperature_counts(_fetch("Leads", "", max_rec=0))
+        total = hot + warm + cold
+        return (
+            f"📊 *לידים:* 🔥 {hot} HOT | 🌤️ {warm} WARM | "
+            f"❄️ {cold} COLD | סה\"כ {total}"
+        )
+    except Exception as e:
+        errors.append(f"סיכום לידים: {e}")
+        return "📊 *לידים:* שגיאה"
+
+
 def _yesterday_changes(errors: list) -> str:
     """🧠 מה השתנה אתמול — לידים חדשים, עסקאות חדשות, משימות שהושלמו"""
     try:
@@ -304,6 +342,7 @@ def build_digest() -> str:
         pass
 
     sections = [
+        _leads_scoring_summary(errors),
         _hot_leads(errors),
         _followups_today(errors),
         _roadmap_tasks_today(errors),

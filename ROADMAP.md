@@ -1,6 +1,38 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 29/07/2026 — **PR2 (Deterministic Approval Cost Cuts) מוזג ל-`main`** —
+עודכן: 01/08/2026 — **תיעוד PR #517–#520 (פער-תיעוד, נסגר ישירות מ-`git log origin/main`,
+לא הועלה כ-PR נפרד ע"י מי שביצע אותם):** ארבעה PRs מוזגו ל-`main` בין 30/07–31/07/2026 בלי
+עדכון ROADMAP/CHANGELOG נלווה — תוקן כאן, אומת ישירות ב-`git show`/`git log` על `origin/main`
+(`9f203f4`), לא לפי claim. **PR #517** (`9184834`+`c5f5516`+`dd63c4a`, merge `0ddd91c`) —
+`daily_digest.py`: `_lead_temperature_counts()`/`_leads_scoring_summary()` חדשים, מוסיפים שורת
+"📊 לידים: HOT/WARM/COLD" לדוח היומי; אין flag, קוד תמיד פעיל ברגע שפרוס. Force-gate override
+אושר במפורש ע"י המשתמש (ענפי `claude/*` לא-ממוזגים היו פתוחים באותו רגע). **טרם פרוס** — deploy
+החי המתועד האחרון (`5ec37b8`) קודם ל-commit הזה. **PR #518** ("PR E", `4e52561`, merge `952bb02`)
+— `core/action_gateway.py`'s `_compose_status_reply_unified()`: outcome `pending` (בנוסף ל-`failed`
+הקיים מ-PR D) עובר עכשיו גם הוא דרך `MessageContract`/`ActionFact` adapter; עדיין מאחורי
+`FEATURE_UNIFIED_STATUS_FORMATTER` (shadow/comparison), אין שינוי ל-evidence/approval authority.
+Force-gate override אושר במפורש (חמישה ענפי `claude/*` לא-ממוזגים היו פתוחים). **PR #519**
+(`82df448`, merge `49d6af8`) — רגנרציית `AI_CONTEXT.md` קודמת; הוחלפה ברגנרציה הנוכחית (01/08).
+**PR #520** (`ae7aaba`+`b700fa4`, merge `9f203f4`) — Context Librarian: תיקון אכיפת token-budget
+ב-`librarian.py` + `profiles.json`, ו-refactor ל-rendering של notes בלי slicing; dev tooling
+בלבד, אין שינוי runtime לבוט העסקי. Force-gate override אושר במפורש (אותה סיבה). **כל ארבעת
+ה-PRs מוזגו בפועל ואומתו ב-`git log origin/main`; אף אחד מהם לא שינה ברירת-מחדל של הבוט
+העסקי.** ראו `AI_CONTEXT.md` (01/08/2026) לתמונת מצב מלאה.
+עודכן קודם: 30/07/2026 — **PR #515 מוזג ל-`main`** (commit `15fe851`, אומת ב-grep ישיר):
+Non-raising dry-run estimation mode for Context Librarian (`estimate_bundle()` + `estimate_all_profiles()` + CLI `estimate` subcommand). Hebrew translation fixes from PR #513. All docstrings translated to Hebrew. 104/104 tests passing. Feature-flag-off by default (no production wiring). Addresses need for dry-run estimation without side effects in refresh-after-merge tool and planning gates (Phase 2 enablement + consumption gating deferred).
+עודכן קודם: 30/07/2026 — **PR #504 מוזג ל-`main`** (commit `55312ab`, אומת ב-grep ישיר):
+Multi-layer alignment stages 3-5 — first real Consumption Enforcement pilot
+(`cross_layer_architecture` profile) + catalog completeness fix (0 removed, 10 added;
+רה-verify: `CONSUMPTION: COMPLETE`). Planning-only, אין שינוי runtime/CI. Verdict נשאר
+`PASS_WITH_GAPS`; Phase 3 נשאר NOT READY. ראו N17 item 12 ל-backlog הממוקד שנפתח בעקבות
+זה, ו-`docs/governance/librarian/FIRST_REAL_CONSUMPTION_PILOT.md`/
+`docs/architecture/multilayer/BOSS_MULTILAYER_ALIGNMENT_PLAN.md` לפירוט המלא.
+עודכן קודם: 30/07/2026 — **PR2 staging acceptance audit — סבב אימות חי בפרודקשן** (Hotfix B/#496,
+E/#497, C/#498+#499 כולם מוזגו; E ו-C אומתו חי בפרודקשן, B רדום כש-PR2 דלוק, BUG-151's
+יכולת עסקית כללית אומתה חי אך תיקון #1 [הממיר]/#2 [חריגת mutation-budget] עדיין לא —
+שניהם דורשים `CanonicalizationError` בפועל, שלא קרה בסבב הזה). ראו N17 item 11 לפירוט המלא ו-
+`AI_CONTEXT.md`/`CHANGE_CONTROL_LOG.md` C182–C184 להוכחות.
+עודכן קודם: 29/07/2026 — **PR2 (Deterministic Approval Cost Cuts) מוזג ל-`main`** —
 PR #491 (preflight, `12e2a45`) + PR #492 (implementation, `db51afc`), שניהם אומתו
 ב-grep ישיר. תיקון סטטוס נלווה: item 10 (Consumption Enforcement Phase 1, PR #490)
 תוקן מ-"PR נפתח, טרם מוזג" ל-✅ מוזג — הסטטוס הקודם היה טעות-רישום, ה-PR כבר היה
@@ -1119,6 +1151,44 @@ ActionContract), ואין Cross-Layer Impact Matrix שלם לאף אחת — **�
     הידני פספס — כולל אחד שביטל בשקט בדיוק את תיקון ה-24h bound שכבר אושר (`recent_terminal
     or find_most_recent_by_user()` נופל בחזרה להיסטוריה בלתי-מוגבלת כש-`recent_terminal`
     הוא `None` מפורש). כל 10 הממצאים (3+7) תוקנו ואומתו מחדש עצמאית לפני המיזוג.
+    **עדכון 30/07/2026:** staging acceptance audit של PR2 (המשך item 11) הוליד 4 hotfixes —
+    Hotfix A/#494 (BUG-151, מתועד ב-C181), Hotfix B/#496 (legacy cancel-word guard, C182),
+    Hotfix E/#497 (shared replay-policy, C183), Hotfix C/#498+#499 ("תייצר" verb, C184) —
+    כולם מוזגו ל-`main`. סבב אימות חי בפרודקשן (30/07/2026, שלושת הדגלים `true`) אישר:
+    Hotfix E ✅, Hotfix C ✅, BUG-151's היכולת העסקית הכללית ✅ — כולם Verified בפרודקשן
+    (האחרון: המסלול העסקי בלבד, **לא** תיקון #1/#2 עצמם — שניהם דורשים `CanonicalizationError`
+    בפועל שלא קרה). שני פערים נשארו פתוחים: הממיר הספציפי `sheets_append→airtable_add`
+    (BUG-151 Fix #1 בבידוד) עדיין לא נצפה חי; Hotfix B רדום כל עוד PR2 דלוק (verified by
+    test בלבד). ראו
+    `AI_CONTEXT.md`/`CHANGE_CONTROL_LOG.md` C182–C184 להוכחות מלאות. ממצא חדש לא-קשור נפתח
+    כ-BUG-152 (בקשה חוזרת נעצרה פעם אחת, לא root-caused).
+12. ✅ Multi-layer alignment (stages 3-5) — first real Consumption Enforcement pilot +
+    catalog completeness fix — **PR #504 מוזג ל-`main`** (commit `55312ab`, אומת ב-grep
+    ישיר). Run 1: פרופיל `cross_layer_architecture`, `PROCEED`/`CONSUMPTION: COMPLETE`;
+    independent review מצא פער coverage אמיתי (Business Intent, Planning Gate, Master
+    Plan, ROADMAP, Change Control Log, Message Contract V1/migration/implementation —
+    חסרים מה-mandatory tier). Run 2: הפער נסגר בקטלוג (0 removed, 10 added), רה-verify:
+    `CONSUMPTION: COMPLETE`. **Verdict נשאר `PASS_WITH_GAPS`** — סגירת הפער הנקודתי אינה
+    independent review מלא וטרי על כל 117 הפריטים. **Phase 3 (CI-blocking gate) נשאר NOT
+    READY** — פרופיל יחיד נבדק, בלי sample size מוגדר. ראו
+    `docs/governance/librarian/FIRST_REAL_CONSUMPTION_PILOT.md` (§10, "Phase 3 readiness
+    decision") ו-`docs/architecture/multilayer/BOSS_MULTILAYER_ALIGNMENT_PLAN.md`.
+
+    **Backlog ממוקד לספרן, שנפתח על ידי הפיילוט הזה (רישום בלבד — אין implementation כאן):**
+    - בדיקת פרופילים נוספים (מעבר ל-`cross_layer_architecture`) בפיילוט עתידי אמיתי.
+    - קביעת sample size מפורש (כמה profiles/משימות אמיתיות) לפני שמוכנות Phase 3 יכולה
+      להיטען.
+    - מדדי recall/noise/token-budget כמותיים לפיילוט, לא רק קריטריוני קבלה איכותיים (§6
+      של המסמך).
+    - final-commit verification invariant — לוודא שזהות ה-ledger (commit/branch) נבדקת
+      גם מול ה-commit הסופי לאחר merge, לא רק מול ה-branch tip בזמן בניית ה-ledger.
+    - אכיפת independent-review trigger בכלי (לא רק כלל self-applied) — פער כבר מתועד
+      ב-§1/§8 של המסמך.
+    - Phase 3 owner gate מפורש — צ'קפוינט חתימת owner ייעודי לפני הפעלת ה-flag, נפרד
+      מעמידה בקריטריונים הטכניים.
+
+    אף אחד מהפריטים האלה אינו דורש שינוי runtime/CI/profile/pilot חדש כרגע — נרשם
+    כ-backlog בלבד עד החלטת owner.
 
 **קבצים:** `docs/context_librarian/` (הספרן עצמו, כולל `TOKEN_ESTIMATION_BENCHMARK.md` החדש),
 `tools/context_librarian/librarian.py` (token estimation, catalog loading,

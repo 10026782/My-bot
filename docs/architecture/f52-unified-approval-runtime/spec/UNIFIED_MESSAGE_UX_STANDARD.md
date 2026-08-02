@@ -196,10 +196,6 @@ Examples are illustrative; the formatter owns final wording.
 ```text
 ✓ שמרתי את דני כהן (0501234567)
 
-יש פעולה שממתינה לאישור:
-יצירת ליד עבור דני כהן (0501234567)
-לאשר? כן / לא
-
 יש 3 פעולות שממתינות לאישור:
 1. יצירת ליד עבור דני כהן
 2. עדכון משימה: חזרה לספק
@@ -207,7 +203,49 @@ Examples are illustrative; the formatter owns final wording.
 שלח מספר כדי לבחור.
 ```
 
-Safe missing-contract fallback:
+**`approval_pending` — NEW prompt (F52 D-015).** Rendered immediately after
+the user's request is queued for approval — nothing was "already" pending
+from the user's point of view, so the framing is forward-looking, not a
+status report. This is the only wording reachable via the MessageContract
+crossing today (`ActionGateway._render_pending_prompt()`):
+
+```text
+כדי לבצע את הפעולה הזו נדרש אישור:
+יצירת ליד עבור דני כהן (0501234567)
+לאשר? כן / לא
+
+כדי ליצור את המשימה הזו נדרש אישור:
+חזרה לספק
+לאשר? כן / לא
+```
+
+Safe missing-contract fallback (new prompt):
+
+```text
+כדי לבצע פעולה זו נדרש אישור. חסר לי מידע כדי להציג אותה בצורה בטוחה.
+```
+
+**`approval_pending_query` — STATUS QUERY (F52 D-015).** Rendered when the
+user asks about an action/task that is *already* pending — not reachable via
+the MessageContract crossing (no `MessageState` member exists for it; see
+`core/agent_message_formatter.py`'s `STATE_APPROVAL_PENDING_QUERY`). Not
+wired to a live call site yet — `describe_pending_queue()`/
+`query_execution_status()` still render their own legacy text directly,
+unconditionally, ahead of any flag. Defined here as the tested, canonical
+target wording for if/when that surface is migrated onto the shared
+formatter:
+
+```text
+יש פעולה שממתינה לאישור:
+יצירת ליד עבור דני כהן (0501234567)
+לאשר? כן / לא
+
+יש משימה שממתינה לאישור:
+חזרה לספק
+לאשר? כן / לא
+```
+
+Safe missing-contract fallback (status query):
 
 ```text
 יש פעולה שממתינה לאישור. חסר לי מידע כדי להציג אותה בצורה בטוחה.

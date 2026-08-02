@@ -227,3 +227,80 @@ def test_disambiguation_description_matches_reconfirmation_and_hides_table_names
             _describe_contract_for_reconfirmation(contract)
     disambig_desc = _describe_contract_for_disambiguation(task_contract)
     assert "Tasks" not in disambig_desc and "משימות (Tasks)" not in disambig_desc
+
+
+# ── סבב 3: תיקון דליפת tool_name ב-reconfirmation (Reconfirmation
+# tool_name Leak Fix — RECONFIRMATION_TOOL_NAME_LEAK_FIX_SCOPE_V1.md) ──────
+# _describe_contract_for_reconfirmation() נפל בעבר ל-f"{tool_name} / {table}"
+# עבור כל כלי שאינו airtable_add/airtable_update — דליפת מזהה טכני גולמי,
+# חיה בפרודקשן ללא תלות ב-flag, ב-describe_pending_queue(),
+# describe_superseded_reason(), ו-_resolve_single_contract(). התיקון מאציל
+# ל-_safe_contract_business_description() עבור כל כלי שאינו Airtable —
+# ראה core/action_gateway.py.
+
+def _non_airtable_contract(*, tool_name: str, suffix: str = "9", payload: dict | None = None):
+    return ActionContract(
+        contract_id=f"423e4567-e89b-12d3-a456-42661417{suffix}00",
+        tenant_id="boss_hq",
+        canonical_user_id="boss_hq:owner",
+        tool_name=tool_name,
+        normalized_payload=payload or {},
+        business_action_fingerprint=f"non-airtable-fp-{suffix}",
+        origin_channel="telegram",
+        origin_chat_id="requester-chat",
+        requires_approval=True,
+        status="pending",
+        created_at=time.time(),
+    )
+
+
+_PREVIOUSLY_LEAKING_TOOLS = [
+    "calendar_create_event", "gmail_draft", "gmail_send_draft", "sheets_append",
+    "crm_mark_payment_paid", "media_save_to_memory", "send_followup",
+    "send_recovery", "tma_write",
+]
+
+
+def test_reconfirmation_description_never_leaks_raw_tool_name_for_non_airtable_tools():
+    """Reconfirmation tool_name leak fix: none of the 9 non-Airtable
+    requires_approval=True tools may leak their raw tool_name — was the
+    unconditional fallback before this fix, for every one of them."""
+    for i, tool_name in enumerate(_PREVIOUSLY_LEAKING_TOOLS):
+        contract = _non_airtable_contract(tool_name=tool_name, suffix=str(i))
+        desc = _describe_contract_for_reconfirmation(contract)
+        assert tool_name not in desc, f"{tool_name} leaked into {desc!r}"
+        assert desc, f"{tool_name} produced an empty description"
+
+
+def test_reconfirmation_description_matches_safe_business_description_for_non_airtable_tools():
+    """Single source of truth: the reconfirmation description must be
+    identical to _safe_contract_business_description()'s output for every
+    non-Airtable tool — no duplicated/drifting mapping."""
+    from core.action_gateway import _safe_contract_business_description
+    for i, tool_name in enumerate(_PREVIOUSLY_LEAKING_TOOLS):
+        contract = _non_airtable_contract(
+            tool_name=tool_name, suffix=str(10 + i),
+            payload={"summary": "פגישה", "spreadsheet_name": "Sales"},
+        )
+        assert _describe_contract_for_reconfirmation(contract) == \
+            _safe_contract_business_description(contract)
+
+
+def test_reconfirmation_lead_and_task_branches_unchanged_by_leak_fix():
+    """Regression guard: the fix only touches the non-Airtable fallback —
+    Lead/Task-specific (richer) descriptions are untouched."""
+    title = "לסדר את המחסן"
+    task_desc = _describe_contract_for_reconfirmation(_task_contract(title=title))
+    assert task_desc == f"יצירת משימה: {title}"
+
+    lead_desc = _describe_contract_for_reconfirmation(_contract())
+    assert lead_desc.startswith("יצירת ליד")
+
+
+def test_disambiguation_description_also_leak_free_for_non_airtable_tools():
+    """describe_pending_queue()'s list rendering calls
+    _describe_contract_for_disambiguation() per item — must inherit the fix."""
+    contract = _non_airtable_contract(tool_name="calendar_create_event", suffix="8")
+    desc = _describe_contract_for_disambiguation(contract)
+    assert "calendar_create_event" not in desc
+    assert desc == _describe_contract_for_reconfirmation(contract)

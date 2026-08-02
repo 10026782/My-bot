@@ -18,6 +18,7 @@
       "core/router/router.py",
       "core/router/route_decision.py",
       "core/lead_candidate_handler.py",
+      "feature_flags.py",
       "app.py"
     ],
     "test_paths": [
@@ -28,13 +29,19 @@
       "test_bug114_context_interrupt_amplification.py",
       "test_bug115_confirmation_routing_bookmark.py",
       "test_pr1_single_speaker_approval_ux.py",
-      "test_single_speaker_fallback_and_duplication.py"
+      "test_single_speaker_fallback_and_duplication.py",
+      "test_pr2_deterministic_approval_cost_cuts.py",
+      "test_pending_contract_read_amplification.py",
+      "test_bug056_legacy_cancel_replay_guard.py",
+      "test_hotfix_e_shared_replay_policy.py"
     ],
     "canonical_docs": [
       {"path": "docs/architecture/turn-coordinator/README.md", "role": "program index and current phase description", "status": "active"},
       {"path": "docs/architecture/turn-coordinator/TURN_COORDINATOR_BEHAVIOR_CONTRACT_V1.md", "role": "frozen behavior contract", "status": "planning_only"},
       {"path": "docs/architecture/turn-coordinator/PHASE_2_SHADOW_PLANNING_GATE.md", "role": "shadow planning gate", "status": "planning_only"},
-      {"path": "BUG_AUDIT_LOG.md", "role": "registered routing/lead-handling defects (e.g. BUG-130, BUG-140); added 2026-07-28 after the N17 pilot found this layer never referenced it", "status": "active"}
+      {"path": "BUG_AUDIT_LOG.md", "role": "registered routing/lead-handling defects (e.g. BUG-130, BUG-140); added 2026-07-28 after the N17 pilot found this layer never referenced it", "status": "active"},
+      {"path": "docs/architecture/f52-unified-approval-runtime/audits/PR2_IMPLEMENTATION_CROSS_LAYER_IMPACT_MATRIX.md", "role": "historical PR2-at-merge fast-path boundary evidence", "status": "historical"},
+      {"path": "docs/architecture/f52-unified-approval-runtime/audits/PR_HOTFIX_A_CROSS_LAYER_IMPACT_MATRIX.md", "role": "current no-live replay and failure-classification correction evidence", "status": "active"}
     ],
     "production_evidence": [
       {"path": "docs/architecture/turn-coordinator/LOG_OBSERVATION_23JUL2026.md", "observed_on": "2026-07-23", "scope": "staging observation of TurnEnvelope/ownership signals", "status": "checkpoint"}
@@ -42,10 +49,11 @@
     "feature_flags": [
       {"name": "FEATURE_PA01_ENFORCEMENT_STATE", "default_state": "off", "documented_state": "separate off/shadow/enforce guard; not a TurnCoordinator activation flag", "evidence_scope": "code accessor"},
       {"name": "FEATURE_SINGLE_SPEAKER_APPROVAL_UX", "default_state": "off", "documented_state": "PR #471; when on, run_agent() (app.py:3779-3835 as of ffa678a7, exact lines drift with unrelated edits) treats a Gateway-owned approval-queuing turn as an early-return boundary: it does not call the Agent's LLM again and returns only the Gateway's own ApprovalLifecycleResult text for that turn", "evidence_scope": "code (app.py's PR1 single-speaker boundary) plus CHANGELOG.md PR #471 entry"},
-      {"name": "FEATURE_AUTO_CAPTURE", "default_state": "off", "documented_state": "Tier-1/2 lead auto-write routing; when on, new leads may write through the Gateway without confirmation, while existing leads still require approval", "code_reference": "feature_flags.py:98; core/lead_candidate_handler.py:1118-1156", "evidence_scope": "code accessor plus lead routing implementation; repository state is not runtime activation evidence"}
+      {"name": "FEATURE_AUTO_CAPTURE", "default_state": "off", "documented_state": "Tier-1/2 lead auto-write routing; when on, new leads may write through the Gateway without confirmation, while existing leads still require approval", "code_reference": "feature_flags.py:98; core/lead_candidate_handler.py:1118-1156", "evidence_scope": "code accessor plus lead routing implementation; repository state is not runtime activation evidence"},
+      {"name": "FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS", "default_state": "off", "documented_state": "anchored approval-lifecycle intents may short-circuit before lead capture, Session, router, memory, and Agent; requires single-speaker flag", "evidence_scope": "repository code and focused tests; not a general TurnCoordinator activation flag"}
     ],
     "valid_from": "2026-07-28",
-    "last_verified_commit": "2f5c577",
+    "last_verified_commit": "a89fc67105f6b310efde498498a3f6f8c9038250",
     "confidence": 0.85,
     "notes": [
       "BUG_AUDIT_LOG.md added as a canonical doc 2026-07-28 (N17 pilot Task 3 fix): BUG-130 (line 3056, create-vs-update misroute in core/lead_candidate_handler.py) and BUG-140 (line 3198, unrelated-lead overwrite risk, still pending) are both registered, unfixed, and 142 lines apart in the same log section — the pilot's Librarian-track investigation grepped BUG-130 and never read far enough to find BUG-140. See task_profiles/profiles.json's `turn_coordinator_routing.bounded_local_expansions`, which now inlines both entries into the bundle so this cannot be missed by stopping at the first match.",
@@ -53,7 +61,8 @@
       "route_request and handle_lead_candidate are current de-facto routing/ownership surfaces.",
       "The coordinator consumes typed signals and must not invent business state or approval policy.",
       "PR #471 changed who legitimately owns a turn's final reply, not just how routing is observed: when FEATURE_SINGLE_SPEAKER_APPROVAL_UX is on and this turn queued an approval, run_agent() hands the reply to the Gateway (reply_owner=\"gateway\") and returns immediately without a further Agent turn (app.py:3802 as of ffa678a7; line drifts with unrelated wording-only edits elsewhere in the file, e.g. PR #479/#480 — re-verified this audit that the boundary logic itself is unchanged). This is a conditional, code-level ownership assignment for approval-queuing turns specifically — it does not create a general reply_owner claim mechanism and does not resolve the concurrency race (a callback and a concurrent text turn for the same identity) described in docs/architecture/turn-coordinator/REPLY_OWNERSHIP_AND_APPROVAL_AUTHORITY_RESEARCH.md §1.3c, which remains unmitigated and research-only.",
-      "The same handoff path still invokes the RP5 shadow observer (observe_shadow_finalizer, app.py:3813 as of ffa678a7) on the Gateway-owned reply before returning — RP5's classification runs even though the Agent's own LLM text is never produced for that turn; see layer.rp5's notes."
+      "The same handoff path still invokes the RP5 shadow observer (observe_shadow_finalizer, app.py:3813 as of ffa678a7) on the Gateway-owned reply before returning — RP5's classification runs even though the Agent's own LLM text is never produced for that turn; see layer.rp5's notes.",
+      "First real consumption pilot re-verification against a89fc67: PR2 added an early, anchored approval-lifecycle resolver ahead of lead capture, Session, Router, Business Memory, and Agent. It is a specialized deterministic bypass, not a general TurnCoordinator implementation. Unrecognized text falls through to the existing route; the formal coordinator remains planning-only."
     ],
     "extensions": {"boss.layer_aliases": ["layer-2", "routing", "reply-ownership"]}
   }],

@@ -168,6 +168,7 @@ npm run preview
 
 ## Planning & docs conventions
 
+- `docs/governance/BOSS_BUSINESS_INTENT.md` is the owner-authored, single source of truth for business *intent* (what BOSS is for, the golden-rule test before any feature, the agent's allowed/forbidden scope, the Librarian's role) — not for implementation status. Changing it requires an explicit owner decision (see its own "Change policy"). `ROADMAP.md` and `docs/governance/BOSS_UNIFIED_MASTER_PLAN.md` govern *what's being built and when*; this document governs *why and for whom*.
 - `ROADMAP.md` is **the single source of truth** for planned work — "every batch starts by reading the ROADMAP, not from memory." Other planning docs (`BOSS_MASTER_PLAN_*.md` in `archive/`, `BOSS_CURRENT_STATE.md`, `boss_bot_summary.md`) are archives/snapshots, not authoritative. A `ROADMAP.md` change isn't done until the `עודכן:` date at the top of the file is also bumped (see `AGENTS.md`).
 - `AI_CONTEXT.md` is the live production-state doc (see top of this file) — read it before trusting any "is X live/active" assumption.
 - `docs/governance/SECURITY_CHECKLIST.md` defines when a security review is required (new file touching `dispatcher`/`crm`/`identity`/`auth`, new tool, new role, new endpoint) and the manual checklist + grep patterns to run before merging to main — consult it whenever touching identity, tenancy, registry, or endpoint auth.

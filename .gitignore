@@ -21,6 +21,12 @@ render_logs/
 # Context Librarian bundles are disposable navigation artifacts.
 docs/context_librarian/generated/*.md
 
+# Consumption Ledgers (CONSUMPTION_ENFORCEMENT_PLAN.md 5.2) are disposable
+# and local by owner decision — never committed, uploaded as a CI artifact
+# once Phase 3 wires that in. See
+# docs/governance/librarian/FIRST_REAL_CONSUMPTION_PILOT.md.
+docs/context_librarian/generated/*.json
+
 # Local, access-restricted retention of raw evidence + alias mapping for
 # redacted operational evidence in committed docs (PR #477 security review).
 # Never commit this — see the redaction notes in

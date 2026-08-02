@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import re
 import shutil
 from pathlib import Path
@@ -10,12 +11,15 @@ import pytest
 
 from tools.context_librarian import librarian
 from tools.context_librarian.librarian import (
+    BundleEstimate,
     ContextLibrarianError,
     assess_profile_suggestions,
     build_bundle,
     classify_new_sources,
     consumption_checklist,
     discover_new_sources,
+    estimate_all_profiles,
+    estimate_bundle,
     evaluate_workflow_gate,
     load_catalog,
     refresh_after_merge,
@@ -295,13 +299,13 @@ def test_output_is_deterministic(catalog):
     kwargs = {
         "task_type": "approval_ux",
         "query": "repeated approval returns wrong message",
-        "max_tokens": 7000,
+        "max_tokens": 7500,
     }
     assert build_bundle(catalog, **kwargs) == build_bundle(catalog, **kwargs)
 
 
 def test_token_budget_fails_closed(catalog):
-    with pytest.raises(ContextLibrarianError, match="exceeding"):
+    with pytest.raises(ContextLibrarianError, match="estimated_tokens=.*budget=.*overflow="):
         build_bundle(
             catalog,
             task_type="approval_ux",
@@ -310,14 +314,124 @@ def test_token_budget_fails_closed(catalog):
         )
 
 
+def test_estimate_bundle_matches_build_bundle_when_it_fits(catalog):
+    kwargs = {"task_type": "approval_ux", "query": "approval message"}
+    bundle = build_bundle(catalog, **kwargs)
+    result = estimate_bundle(catalog, **kwargs)
+    assert result.fits is True
+    assert result.actual_tokens == math.ceil(len(bundle) / 4)
+    assert result.task_type == "approval_ux"
+    assert result.query == "approval message"
+
+
+def test_estimate_bundle_reports_overflow_without_raising(catalog):
+    result = estimate_bundle(
+        catalog, task_type="approval_ux", query="approval message", max_tokens=100
+    )
+    assert result.fits is False
+    assert result.token_budget == 100
+    assert result.actual_tokens > 100
+
+
+def test_estimate_bundle_actual_tokens_matches_build_bundle_raised_value(catalog):
+    with pytest.raises(ContextLibrarianError) as excinfo:
+        build_bundle(
+            catalog, task_type="approval_ux", query="approval message", max_tokens=100
+        )
+    raised_tokens = int(
+        re.search(r"estimated_tokens=(\d+)", str(excinfo.value)).group(1)
+    )
+    result = estimate_bundle(
+        catalog, task_type="approval_ux", query="approval message", max_tokens=100
+    )
+    assert result.actual_tokens == raised_tokens
+
+
+def test_estimate_bundle_still_raises_on_structural_errors(catalog):
+    with pytest.raises(ContextLibrarianError, match="unknown task type"):
+        estimate_bundle(catalog, task_type="not_a_real_profile")
+
+
+def test_estimate_bundle_ignores_off_main_state_unlike_assert_on_main_history(
+    catalog, monkeypatch
+):
+    off_main = {
+        "commit": "abc1234",
+        "branch": "feature-x",
+        "on_main": "no",
+        "on_main_history": "no",
+        "at_origin_main_tip": "no",
+    }
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: off_main)
+
+    with pytest.raises(ContextLibrarianError, match="assert-main"):
+        build_bundle(
+            catalog,
+            task_type="approval_ux",
+            query="approval message",
+            assert_on_main_history=True,
+        )
+
+    # ל-estimate_bundle אין פרמטר assert_on_main_history/assert_main בכלל —
+    # החלטת provenance אורתוגונלית ל"האם זה נכנס בתקציב."
+    result = estimate_bundle(catalog, task_type="approval_ux", query="approval message")
+    assert isinstance(result, BundleEstimate)
+
+
+def test_estimate_all_profiles_covers_every_profile_sorted(catalog):
+    results = estimate_all_profiles(catalog, query="approval message")
+    assert [r.task_type for r in results] == sorted(catalog.profiles)
+    assert len(results) == len(catalog.profiles)
+    for r in results:
+        assert isinstance(r, BundleEstimate)
+        assert r.fits == (r.actual_tokens <= r.token_budget)
+
+
 def test_document_budget_is_enforced(catalog):
+    with pytest.raises(ContextLibrarianError) as excinfo:
+        build_bundle(
+            catalog,
+            task_type="core_reasoning_change",
+            query="lead reasoning",
+            max_documents=3,
+        )
+    message = str(excinfo.value)
+    assert "document budget overflow" in message
+    assert "no source was omitted" in message
+    assert "PHASE_2A1_CURRENT_STATE_POLICY_SPEC.md" in message
+
+
+def test_token_overflow_reports_estimate_budget_overflow_and_node_source_breakdown(
+    catalog,
+):
+    with pytest.raises(ContextLibrarianError) as excinfo:
+        build_bundle(
+            catalog,
+            task_type="approval_ux",
+            query="approval message",
+            max_tokens=100,
+        )
+    message = str(excinfo.value)
+    assert "estimated_tokens=" in message
+    assert "budget=100" in message
+    assert "overflow=" in message
+    assert "breakdown by node/source:" in message
+    assert "layer.approvals" in message
+    assert "CURRENT_STATE_MAP.md" in message
+
+
+def test_full_metadata_is_rendered_without_truncation(catalog):
+    node = catalog.nodes["layer.core_reasoning"]
     bundle = build_bundle(
         catalog,
         task_type="core_reasoning_change",
         query="lead reasoning",
-        max_documents=3,
     )
-    assert "document_budget: 3/3" in bundle
+    for value in node["notes"] + node["code_paths"] + node["test_paths"]:
+        assert value in bundle
+    for reference in node["canonical_docs"]:
+        if reference.get("status") not in {"historical", "superseded"}:
+            assert reference["path"] in bundle
 
 
 def test_token_estimate_labels_are_honest_about_being_a_char_proxy(catalog):
@@ -706,7 +820,7 @@ def test_agent_bootstrap_is_canonical_and_claude_only_references_it():
 # "2026-07-28 non-inferiority pilot advancement"): core_reasoning_change חסר
 # מקור-סמכות מחייב, approval_ux חסר את ממצא-מקורות-האמת-המקבילים, turn_coordinator_routing
 # חסר רשומת bug-log סמוכה, ו-commit/branch mislabeling של משימת ה-rp5. בדיקה חמישית
-# מגנה על באג נפרד, לא-מהפיילוט, שנמצא תוך כדי התיקון: _render() הציג רק notes[0] של
+# מגנה על באג נפרד, לא-מהפיילוט, שנמצא תוך כדי התיקון: _render() הציג רק את ההערה הראשונה של
 # כל node. שתי הבדיקות האחרונות בקובץ מגנות על ממצאי CodeRabbit על ה-PR הזה עצמו
 # (path traversal, ערך expansion פגום).
 
@@ -976,12 +1090,38 @@ def test_cli_assert_main_flag_fails_closed_off_main(monkeypatch, capsys):
 
 def test_layer_notes_beyond_the_first_are_rendered_not_dropped(catalog):
     node = catalog.nodes["layer.core_reasoning"]
-    assert len(node["notes"]) > 1, "fixture must exercise notes[1:], not just notes[0]"
+    assert len(node["notes"]) > 1, "fixture must exercise multiple notes in order"
     bundle = build_bundle(
         catalog, task_type="core_reasoning_change", query="lead reasoning"
     )
+    note_positions = []
     for note in node["notes"]:
         assert note in bundle
+        note_positions.append(bundle.index(note))
+    assert note_positions == sorted(note_positions)
+
+
+def test_single_layer_note_is_rendered_without_truncation(catalog):
+    isolated = copy.deepcopy(catalog)
+    isolated.nodes["layer.core_reasoning"]["notes"] = ["single fixture note"]
+    bundle = build_bundle(
+        isolated, task_type="core_reasoning_change", query="lead reasoning"
+    )
+    assert "single fixture note" in bundle
+
+
+def test_layer_notes_fixture_rendering_matches_existing_format(catalog):
+    node = catalog.nodes["layer.core_reasoning"]
+    notes = iter(node["notes"])
+    first_note = next(notes)
+    expected_lines = [
+        f"- `core_reasoning` (primary, shadow, fresh against tracked code) — {first_note}"
+    ]
+    expected_lines.extend(f"    - {note}" for note in notes)
+    bundle = build_bundle(
+        catalog, task_type="core_reasoning_change", query="lead reasoning"
+    )
+    assert "\n".join(expected_lines) in bundle
 
 
 def test_bounded_local_expansion_rejects_non_object_entry(tmp_path, monkeypatch):
@@ -1546,6 +1686,78 @@ def test_verify_consumption_validates_top_level_identity_independently_of_per_it
     assert any("top-level identity" in reason for reason in result.blocked_reasons)
 
 
+def test_cli_estimate_single_profile_fits(monkeypatch, capsys):
+    from tools.context_librarian.__main__ import main
+
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    exit_code = main(
+        ["estimate", "--task-type", "approval_ux", "--query", "approval message"]
+    )
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "approval_ux\tFITS\t" in out
+
+
+def test_cli_estimate_single_profile_over_budget_does_not_raise(monkeypatch, capsys):
+    from tools.context_librarian.__main__ import main
+
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    exit_code = main(
+        [
+            "estimate",
+            "--task-type",
+            "approval_ux",
+            "--query",
+            "approval message",
+            "--max-tokens",
+            "100",
+        ]
+    )
+    assert exit_code == 2
+    out = capsys.readouterr().out
+    assert "approval_ux\tOVER_BUDGET\t" in out
+
+
+def test_cli_estimate_all_profiles(catalog, monkeypatch, capsys):
+    from tools.context_librarian.__main__ import main
+
+    monkeypatch.setattr(librarian, "_git_provenance", lambda _root: _FIXED_PROVENANCE)
+    # query שנבחר בכוונה כך שהוא מושך מספיק conditional optional evidence
+    # כדי לחרוג באופן לגיטימי בפרופיל אמיתי אחד לפחות (rp5_evidence_mismatch)
+    # -- בודק ש---all-profiles מדווח את התוצאה האמיתית של כל פרופיל
+    # (תמהיל FITS/OVER_BUDGET) במקום להניח התאמה אוניברסלית ל-query
+    # משותף שרירותי.
+    exit_code = main(
+        [
+            "estimate",
+            "--all-profiles",
+            "--query",
+            "approval message",
+            "--max-tokens",
+            "100",
+        ]
+    )
+    out = capsys.readouterr().out
+    lines = [line for line in out.splitlines() if line.strip()]
+    assert len(lines) == len(catalog.profiles)
+    reported = {line.split("\t")[0] for line in lines}
+    assert reported == set(catalog.profiles)
+    any_over_budget = any("OVER_BUDGET" in line for line in lines)
+    assert any_over_budget, (
+        "test query no longer overflows any profile — pick a new query that "
+        "legitimately overflows at least one, so this test still exercises "
+        "the mixed FITS/OVER_BUDGET reporting path"
+    )
+    assert exit_code == 2
+
+
+def test_cli_estimate_requires_task_type_or_all_profiles():
+    from tools.context_librarian.__main__ import main
+
+    with pytest.raises(SystemExit):
+        main(["estimate", "--query", "q"])
+
+
 def test_cli_verify_consumption_subcommand_exists_and_is_wired(tmp_path, monkeypatch, capsys):
     from tools.context_librarian.__main__ import main
 
@@ -1651,14 +1863,17 @@ def test_refresh_noop_reports_ok_without_updates(catalog, monkeypatch):
 
 def test_budget_overflow_is_reported_before_output_write(catalog, tmp_path):
     output = tmp_path / "bundle.md"
-    with pytest.raises(ContextLibrarianError, match="exceeding"):
+    with pytest.raises(ContextLibrarianError, match="context budget overflow"):
         build_bundle(catalog, task_type="rp5_evidence_mismatch", query="evidence", max_tokens=1)
     assert not output.exists()
 
 
 def test_bundle_reports_budget_breakdown(catalog):
-    bundle = build_bundle(
-        catalog, task_type="tool_execution", query="dispatcher", max_documents=1, max_tokens=6000
+    estimate = estimate_bundle(
+        catalog, task_type="tool_execution", query="dispatcher", max_tokens=1
     )
-    assert "budget: estimated=" in bundle
-    assert "budget_breakdown_by_node" in bundle
+    assert estimate.fits is False
+    with pytest.raises(ContextLibrarianError, match="breakdown by node/source"):
+        build_bundle(
+            catalog, task_type="tool_execution", query="dispatcher", max_tokens=1
+        )
