@@ -18,7 +18,10 @@ import app  # noqa: E402
 from airtable_schema import Tables, TaskFields  # noqa: E402
 from core.action_gateway import action_gateway  # noqa: E402
 from core.router import Handler, Intent, route_request  # noqa: E402
-from core.router.router import deterministic_create_task_title  # noqa: E402
+from core.router.router import (  # noqa: E402
+    deterministic_create_task_title,
+    parse_deterministic_create_task,
+)
 from identity import Identity, Role  # noqa: E402
 
 
@@ -37,6 +40,73 @@ def _owner(user_id: str = "owner-deterministic-create-task") -> Identity:
 
 def test_structured_create_task_rejects_whitespace_only_title():
     assert deterministic_create_task_title("צור משימה ") is None
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "> Eli: צור משימה: X",
+        '"צור משימה X"',
+        "> [צור משימה X]",
+        "> Eli: > Eli: צור משימה X",
+    ],
+)
+def test_create_task_prefix_and_reply_wrappers_are_normalized(text):
+    assert deterministic_create_task_title(text) == "X"
+
+
+def test_create_task_parser_builds_structured_business_identity():
+    parsed = parse_deterministic_create_task(
+        "צור משימה פרסום מודעות עד לחמישי הקרוב 6/8/26 בשעה19:00"
+    )
+    assert parsed.certain is True
+    assert parsed.title == "פרסום מודעות"
+    assert parsed.due_date == "2026-08-06"
+    assert parsed.due_time == "19:00"
+    assert parsed.business_identity() == {
+        "table": "Tasks",
+        "fields": {
+            "title": "פרסום מודעות",
+            "due_date": "2026-08-06",
+            "due_time": "19:00",
+        },
+    }
+
+
+def test_malformed_date_clarifies_before_agent_or_contract():
+    identity = _owner(user_id="owner-deterministic-create-task-uncertain")
+    route = route_request("צור משימה X עד 31/02/26", "telegram", identity)
+    assert route.handler == Handler.CLARIFY
+    assert route.tool_allowed is False
+    assert route.needs_approval is False
+
+
+def test_malformed_time_clarifies_before_agent_or_contract():
+    identity = _owner(user_id="owner-deterministic-create-task-uncertain-time")
+    route = route_request("צור משימה X עד 31/08/26 בשעה 19:0", "telegram", identity)
+    assert route.handler == Handler.CLARIFY
+    assert route.tool_allowed is False
+    assert route.needs_approval is False
+
+
+def test_deterministic_pending_reply_is_suppressed_when_owner_was_notified():
+    identity = _owner(user_id="owner-deterministic-create-task-single-speaker")
+    with patch.dict(os.environ, {"OWNER_TELEGRAM_ID": identity.user_id}, clear=False), \
+         patch.object(
+             app,
+             "_queue_approval_detailed",
+             return_value={
+                 "message": "יש משימה שממתינה לאישור",
+                 "owner_notified": True,
+                 "created_this_turn": True,
+                 "contract_id": "contract-1",
+                 "reply_owner": "gateway",
+                 "action_tool": "airtable_add",
+             },
+         ):
+        assert app._queue_deterministic_create_task(
+            "X", identity.user_id, "telegram", "צור משימה X", identity,
+        ) == ""
 
 
 @pytest.mark.parametrize(

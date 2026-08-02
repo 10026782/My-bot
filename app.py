@@ -56,7 +56,10 @@ from tools           import dispatch_tool
 from tools.airtable_security import enforce_leads_write_gate, LeadsDirectWriteBlocked
 from guards          import idempotency, rate_limiter, validate_tool_output
 from config          import get_domain as _channel_domain
-from core.router     import route_request, RouteDecision, Handler, deterministic_create_task_title
+from core.router     import (
+    route_request, RouteDecision, Handler, deterministic_create_task_title,
+    parse_deterministic_create_task,
+)
 from core.router.deterministic_denial import check_deterministic_denial
 from core.anti_hallucination import (
     verify_execution, sanitize_agent_response,
@@ -962,7 +965,7 @@ def approval_response(route: RouteDecision, original_text: str, chat_id: str,
 
 def _queue_deterministic_create_task(
     title: str, chat_id: str, channel: str, user_text: str,
-    identity, out_meta: dict | None = None,
+    identity, out_meta: dict | None = None, task_parse=None,
 ) -> str:
     """מתזמן בקשת יצירת משימה מלאה בלי להפעיל את הסוכן."""
     try:
@@ -976,11 +979,23 @@ def _queue_deterministic_create_task(
 
     from airtable_schema import TaskFields
     from core.turn_coordinator_runtime import queue_task_request
+    fingerprint_payload = {"table": "Tasks", "fields": {"title": title}}
+    task_fields = {}
+    if task_parse is not None:
+        fingerprint_payload = task_parse.business_identity()
+        if task_parse.due_date:
+            task_fields[TaskFields.DUE_DATE] = task_parse.due_date
+
+    def _queue_task(tool, payload):
+        return _queue_approval_detailed(
+            tool, payload, chat_id, channel, user_text,
+            fingerprint_payload=fingerprint_payload,
+        )
+
     outcome = queue_task_request(
         intent="create_task", scope=getattr(identity, "memory_key", ""), title=title,
-        queue=lambda tool, payload: _queue_approval_detailed(
-            tool, payload, chat_id, channel, user_text,
-        ),
+        fields=task_fields,
+        queue=_queue_task,
     )
     _contract_queued = bool(
         outcome.get("created_this_turn") and outcome.get("contract_id")
@@ -995,6 +1010,17 @@ def _queue_deterministic_create_task(
         outcome.get("action_tool"), outcome.get("created_this_turn"),
         outcome.get("reply_owner") if _contract_queued else None,
     )
+    owner_chat_id = (
+        os.environ.get("OWNER_TELEGRAM_ID", "") or
+        os.environ.get("ELIYAHU_CHAT_ID", "") or
+        os.environ.get("DIGEST_CHAT_ID", "")
+    )
+    if outcome.get("owner_notified") and str(owner_chat_id) == str(chat_id):
+        logger.info(
+            "[DeterministicCreateTask] duplicate_reply_suppressed=true "
+            "reason=owner_notification_already_sent"
+        )
+        return ""
     return outcome.get("message") or "לא הצלחתי להכניס את המשימה לאישור."
 
 
@@ -1173,7 +1199,8 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
 
 
 def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
-                             user_chat_id: str, channel: str, user_text: str = "") -> dict:
+                             user_chat_id: str, channel: str, user_text: str = "",
+                             fingerprint_payload: dict | None = None) -> dict:
     """
     Same behavior as _queue_approval() (see that docstring), but returns a
     structured outcome instead of just the model-facing message:
@@ -1257,7 +1284,10 @@ def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
     """
     from core.action_gateway import CanonicalizationError
     try:
-        return _queue_approval_detailed_impl(tool_name, tool_inputs, user_chat_id, channel, user_text)
+        return _queue_approval_detailed_impl(
+            tool_name, tool_inputs, user_chat_id, channel, user_text,
+            fingerprint_payload=fingerprint_payload,
+        )
     except CanonicalizationError as exc:
         # PR2 staging acceptance incident, 29/07/2026: resolve_canonical_call()
         # raises this BEFORE any propose_action()/persistence call is ever
@@ -1362,7 +1392,8 @@ def _approval_callback_data(
 
 
 def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
-                                  user_chat_id: str, channel: str, user_text: str = "") -> dict:
+                                  user_chat_id: str, channel: str, user_text: str = "",
+                                  fingerprint_payload: dict | None = None) -> dict:
     from core.action_gateway import resolve_canonical_call
     tool_name, tool_inputs = resolve_canonical_call(
         tool_name, tool_inputs, user_text
@@ -1423,6 +1454,7 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
             identity=identity,
             trusted_source="agent",
             user_text=user_text,
+            fingerprint_payload=fingerprint_payload,
         )
         if not _gw_result.ok:
             logger.info(
@@ -1493,6 +1525,7 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
                 identity=identity,
                 trusted_source="agent",
                 user_text=user_text,
+                fingerprint_payload=fingerprint_payload,
             )
             if _gw_result.failure_code == "persistence_lookup_failed":
                 # Structurally provable clean: this failure happens on the
@@ -3795,10 +3828,11 @@ def run_agent(
     # בעלות Turn Coordinator: בקשת יצירת משימה מלאה היא בקשת mutation שלמה.
     # מתזמנים כאן את ה-contract הקנוני, אחרי שער התור/האישור ולפני Agent או LCH.
     if route.handler == Handler.TOOL and route.intent == "create_task":
-        _task_title = deterministic_create_task_title(user_text)
-        if _task_title is not None:
+        _task_parse = parse_deterministic_create_task(user_text)
+        if _task_parse.certain:
             return _queue_deterministic_create_task(
-                _task_title, chat_id, channel, user_text, identity, _out_meta,
+                _task_parse.title, chat_id, channel, user_text, identity, _out_meta,
+                task_parse=_task_parse,
             )
     if route.handler == Handler.TOOL and route.intent in {"update_task", "complete_task"}:
         return _queue_deterministic_task_update(

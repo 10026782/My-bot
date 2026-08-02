@@ -1374,6 +1374,7 @@ class ActionGateway:
         identity=None,
         trusted_source: str = "agent",
         user_text: str = "",
+        fingerprint_payload: dict | None = None,
     ) -> GatewayResult:
         """
         מציע פעולה חדשה ל-Gateway.
@@ -1456,8 +1457,13 @@ class ActionGateway:
             normalized.get("table")
         ):
             normalized = _canonical_task_payload(normalized)
+        fingerprint_basis = normalized if fingerprint_payload is None else self.normalize_payload(fingerprint_payload)
+        if tool_name in ("airtable_add", "airtable_update") and is_task_table(
+            fingerprint_basis.get("table")
+        ):
+            fingerprint_basis = _canonical_task_payload(fingerprint_basis)
         fingerprint = self.compute_business_fingerprint(
-            tenant_id, canonical_user_id, tool_name, normalized
+            tenant_id, canonical_user_id, tool_name, fingerprint_basis
         )
 
         # The durable lookup happens before generating any contract identity.
