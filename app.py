@@ -927,14 +927,17 @@ def _queue_deterministic_create_task(
         channel,
         user_text,
     )
-    if out_meta is not None:
+    _contract_queued = bool(
+        outcome.get("created_this_turn") and outcome.get("contract_id")
+    )
+    if out_meta is not None and _contract_queued:
         out_meta["source_module"] = "action_gateway"
-        out_meta["reply_owner"] = outcome.get("reply_owner", "gateway")
+        out_meta["reply_owner"] = outcome.get("reply_owner") or "gateway"
     logger.info(
         "[DeterministicCreateTask] coordinator_owned=True agent_calls=0 "
         "action_tool=%s created_this_turn=%s reply_owner=%s",
         outcome.get("action_tool"), outcome.get("created_this_turn"),
-        outcome.get("reply_owner", "gateway"),
+        outcome.get("reply_owner") if _contract_queued else None,
     )
     return outcome.get("message") or "לא הצלחתי להכניס את המשימה לאישור."
 

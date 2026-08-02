@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import logging
 from unittest.mock import patch
 
 os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-create-task-test")
@@ -67,3 +68,32 @@ def test_structured_create_task_is_gateway_owned_without_agent_call():
     assert len(task_contracts) == 1
     assert task_contracts[0].status == "pending"
     assert all(item.tool_name != "sheets_append" for item in task_contracts)
+
+
+def test_unsupported_three_value_tasks_row_fails_closed_with_diagnostic(caplog):
+    identity = _owner()
+    caplog.set_level(logging.WARNING, logger="core.action_gateway")
+    with patch.object(app, "resolve_identity", return_value=identity), \
+         patch.object(app, "dispatch_tool", side_effect=AssertionError("must not execute")), \
+         patch(
+             "feature_flags.is_enabled",
+             side_effect=lambda name: name == "FEATURE_ACTION_GATEWAY",
+         ):
+        outcome = app._queue_approval_detailed(
+            "sheets_append",
+            {"table": "Tasks", "row_data": ["Task text", "", "General"]},
+            identity.user_id,
+            "telegram",
+            user_text="צור משימה: legacy payload",
+        )
+
+    assert outcome["ok"] is False
+    assert outcome["contract_id"] is None
+    assert outcome["created_this_turn"] is False
+    assert outcome["terminal_outcome"] == "APPROVAL_QUEUE_NEVER_ATTEMPTED"
+    assert "נוצרה" not in outcome["message"]
+    assert "[CanonicalizationDiagnostic]" in caplog.text
+    assert "values_length=3" in caplog.text
+    assert "row_count=1" in caplog.text
+    assert "column_count=3" in caplog.text
+    assert "converter_reason=unsupported_tasks_positional_shape" in caplog.text
