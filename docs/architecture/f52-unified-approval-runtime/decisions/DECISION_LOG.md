@@ -447,3 +447,49 @@ This log records planning decisions for the F52 program. It is not runtime imple
   moves past `off`, not before.
 - Affected documents: this log. (`spec/APPROVAL_PENDING_BATCH_MIGRATION_SCOPE_V1.md`
   §6's OQ1-OQ5 are now resolved here, not re-litigated in that document.)
+
+## D-018 — Reconfirmation tool_name leak fix (D-017's OQ4, implemented)
+
+- Date: 02/08/2026
+- Status: Closed, implemented. **Not flag-gated** — unlike D-014→D-017,
+  this changes text that is already live in production, unconditionally;
+  effective immediately on merge.
+- Trigger: owner authorization to implement
+  `spec/RECONFIRMATION_TOOL_NAME_LEAK_FIX_SCOPE_V1.md` (itself split out of
+  D-017's OQ4).
+- Decision: `_describe_contract_for_reconfirmation()` (`core/action_gateway.py`)
+  no longer falls back to `f"{contract.tool_name} / {table}"` for any
+  non-Airtable tool. The Lead-specific and Task-specific branches (richer
+  than the generic mapping) are unchanged. The final fallback now delegates
+  to `_safe_contract_business_description()`, which already has full,
+  already-tested coverage for all 11 `requires_approval=True` tools
+  (`tool_registry.py`) plus a safe generic fallback ("הפעולה המבוקשת") that
+  never echoes a raw tool name — single source of truth for "what does this
+  tool mean in business terms," no duplicated mapping.
+- Verified blast radius (all three already-live, unconditional, no flag):
+  `describe_pending_queue()`'s numbered-list items (via
+  `_describe_contract_for_disambiguation()`), `describe_superseded_reason()`
+  (Hotfix E), and `_resolve_single_contract()`'s reconfirmation prompt
+  (`route_confirmation_word`, BUG-PENDING-APPROVAL-B) — each independently
+  exercised end-to-end and confirmed leak-free for a representative
+  non-Airtable contract (`calendar_create_event`, `gmail_send_draft`,
+  `sheets_append` respectively).
+- One stale test assertion found and fixed as a direct consequence:
+  `test_pr0_pending_approval_context_safety.py`'s DoD3/9 check used
+  `"gmail_send_draft" in reply` as a proxy for "reply is a readable
+  description, not just the contract_id" — that proxy asserted the leak
+  itself. Replaced with a check for the new safe text
+  (`"שליחת הודעת דוא״ל"`) plus an explicit assertion that the raw tool name
+  is now absent.
+- Tests: `test_pr1_single_speaker_approval_ux.py` gained direct coverage —
+  all 9 previously-leaking tools produce no raw `tool_name` in their
+  reconfirmation description and match `_safe_contract_business_description()`'s
+  output exactly (single-source-of-truth check); a regression guard that
+  Lead/Task branches are unchanged; and a check that
+  `_describe_contract_for_disambiguation()` inherits the fix.
+- Explicitly out of scope (per the split scope doc, unchanged): approval
+  logic, ownership, queue, evidence authority, routing;
+  `_safe_contract_business_description()` itself; the Lead/Task-specific
+  branches.
+- Affected documents: this log; `spec/RECONFIRMATION_TOOL_NAME_LEAK_FIX_SCOPE_V1.md`
+  (scope now implemented, not re-litigated).
