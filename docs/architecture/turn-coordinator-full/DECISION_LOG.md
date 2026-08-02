@@ -22,3 +22,11 @@
 9. Review found a planning defect in `IMPLEMENTATION_SEQUENCE.md`: it listed
    PRs without explicit dependencies. The table now declares and topologically
    orders the DAG (`TC1 → TC2 → TC3 → TC5 → TC4 → TC6 → TC7/TC8 → TC9 → TC10`).
+10. The implementation is partitioned into exactly three workstreams. TC1–TC4
+    are internal milestones of Workstream 1, TC5–TC8 of Workstream 2, and
+    TC9–TC10 of Workstream 3; merge order remains WS1 → WS2 → WS3.
+11. `app.py` has one integration owner. The agents may submit isolated patches,
+    but no two workstreams may edit it concurrently.
+12. The planned contracts absent from current runtime are
+    `PRE_PARALLEL_BLOCKER`s. Agents may draft and test them independently, but
+    authority-changing parallel implementation cannot start until the freeze.

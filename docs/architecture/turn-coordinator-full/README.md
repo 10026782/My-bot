@@ -52,3 +52,9 @@ named tests/gap records. Catalog changes and runtime changes are out of scope.
 
 See the companion matrices for the canonical inventory, target routing,
 builder/resolver designs, gaps, and implementation sequence.
+
+The parallel execution pack, three agent prompts, file ownership map, frozen
+contracts, integration seams, and merge/rollback plan are in
+`PARALLEL_IMPLEMENTATION_WORKSTREAMS.md` and
+`INTEGRATION_AND_MERGE_PLAN.md`. Future agents must use those documents before
+implementation; this branch itself remains planning-only.

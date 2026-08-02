@@ -1,5 +1,10 @@
 # Implementation Sequence
 
+This is an internal milestone view of exactly three implementation
+workstreams—not ten independent tracks: TC1–TC4 belong to Workstream 1,
+TC5–TC8 to Workstream 2, and TC9–TC10 to Workstream 3. Development may run in
+parallel after contract freeze; merge order is WS1 → WS2 → WS3.
+
 | PR | Scope | Depends on | Likely files/tests | Dependency/flag | Entry/exit | Rollback/not included | Librarian gate |
 |---|---|---|---|---|---|---|---|
 | TC1 | intent ownership registry and typed decision | — | router, new planning-owned registry, router tests | off/shadow | inventory validated; no behavior change | delete registry; no handlers | `turn_coordinator_routing`, receipts |
