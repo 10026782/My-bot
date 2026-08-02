@@ -988,6 +988,7 @@ def _queue_deterministic_create_task(
     if out_meta is not None and _contract_queued:
         out_meta["source_module"] = "action_gateway"
         out_meta["reply_owner"] = outcome.get("reply_owner") or "gateway"
+        out_meta["final_response_count"] = outcome.get("final_response_count", 1)
     logger.info(
         "[DeterministicCreateTask] בעלות_coordinator=True agent_calls=0 "
         "action_tool=%s created_this_turn=%s reply_owner=%s",
@@ -1001,28 +1002,37 @@ def _queue_deterministic_task_update(
     intent: str, user_text: str, chat_id: str, channel: str, identity,
     out_meta: dict | None = None,
 ) -> str:
-    """Route entity-dependent task writes through resolver + Gateway only."""
+    """מנתב כתיבות משימה תלויות-ישות דרך ה-resolver וה-Gateway בלבד."""
     try:
         enforce("airtable_update", identity)
     except ToolDenied as exc:
+        logger.warning(
+            "[DeterministicTaskUpdate] נדחה לפני queue role=%s reason=%s",
+            getattr(identity, "role", "unknown"), type(exc).__name__,
+        )
         return str(exc)
     from core.turn_coordinator_runtime import queue_task_request
     query = re.sub(r"^(?:עדכן|שנה|סגור|סיים|complete)\s+משימ(?:ה|ת)\s*", "", user_text, flags=re.I).strip()
     fields = None
     if intent == "update_task":
-        match = re.match(r"^(.*?)(?:\s*:\s*|\s+לשדה\s+)(.+)$", query)
+        match = re.match(r"^(.*?)\s*:\s*(.+)$", query)
         if not match:
             return "נא לציין גם מה לעדכן במשימה."
         query, value = match.groups()
         from airtable_schema import TaskFields
         fields = {TaskFields.DESCRIPTION: value.strip()}
-    return queue_task_request(
+    outcome = queue_task_request(
         intent=intent, scope=getattr(identity, "memory_key", ""), query=query,
         fields=fields,
         queue=lambda tool, payload: _queue_approval_detailed(
             tool, payload, chat_id, channel, user_text,
         ),
     )
+    if out_meta is not None and outcome.get("created_this_turn"):
+        out_meta["source_module"] = outcome.get("source_module") or "action_gateway"
+        out_meta["reply_owner"] = outcome.get("reply_owner") or "gateway"
+        out_meta["final_response_count"] = outcome.get("final_response_count", 1)
+    return outcome.get("message") or "לא הצלחתי להעביר את הפעולה לאישור."
 
 
 # ══════════════════════════════════════════════════

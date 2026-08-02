@@ -40,7 +40,9 @@ def gateway_call(proposal: CanonicalActionProposal) -> tuple[str, dict]:
         return "airtable_add", {"table": proposal.resource, "fields": dict(proposal.fields)}
     if proposal.canonical_tool in {"task_update", "task_complete"}:
         fields = dict(proposal.fields)
-        record_id = fields.pop("record_id", "")
+        record_id = str(fields.pop("record_id", "") or "").strip()
+        if not record_id:
+            raise ValueError("task update requires a stable record_id")
         return "airtable_update", {
             "table": proposal.resource, "record_id": record_id, "fields": fields,
         }
@@ -66,9 +68,10 @@ def prepare_task_gateway_call(
 
 def airtable_task_lookup(query: str, scope: str, limit: int):
     """Return at most resolver-limit+1 matching task records."""
+    from tools.airtable_gateway import _safe_formula_param
     from tools.airtable_tools import airtable_get_records
 
-    escaped = str(query).replace("'", "\\'")
+    escaped = _safe_formula_param(str(query).replace("\\", "\\\\"))
     formula = f"SEARCH('{escaped}', {{{TaskFields.NAME}}})"
     return airtable_get_records(Tables.TASKS, formula, max_records=limit + 1)
 
@@ -81,18 +84,21 @@ def queue_task_request(
     query: str = "",
     fields: Mapping[str, object] | None = None,
     queue: Callable[[str, dict], dict],
-) -> str:
+) -> dict:
     """Prepare, fail closed on resolution, then use the existing queue."""
-    result = prepare_task_gateway_call(
-        intent, scope=scope, lookup=airtable_task_lookup,
-        query=query, title=title, fields=fields,
-    )
-    if isinstance(result, ResolverResult):
-        return (
-            "לא מצאתי משימה מתאימה."
-            if result.match_count == 0 else
-            "מצאתי כמה משימות מתאימות. נא לציין משימה אחת בלבד."
+    try:
+        result = prepare_task_gateway_call(
+            intent, scope=scope, lookup=airtable_task_lookup,
+            query=query, title=title, fields=fields,
         )
+    except ValueError as exc:
+        return {"message": str(exc), "created_this_turn": False}
+    if isinstance(result, ResolverResult):
+        message = "לא מצאתי משימה מתאימה." if result.match_count == 0 else "מצאתי כמה משימות מתאימות. נא לציין משימה אחת בלבד."
+        return {"message": message, "created_this_turn": False, "resolver_result": result}
     tool, payload = result
     outcome = queue(tool, payload)
-    return outcome.get("message") or "לא הצלחתי להעביר את הפעולה לאישור."
+    return {
+        **outcome,
+        "message": outcome.get("message") or "לא הצלחתי להעביר את הפעולה לאישור.",
+    }

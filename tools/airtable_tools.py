@@ -254,12 +254,16 @@ def _base() -> str:
 def airtable_get_records(
     table: str, filter_formula: str = "", max_records: int | None = None,
 ) -> list[dict]:
-    """Return all matching records using a structured internal contract.
+    """Return matching records, optionally bounded by max_records.
 
-    This read path is for application code. It never formats or truncates the
-    result, and follows Airtable pagination until every record is collected.
-    Contract and HTTP failures raise so callers can fail closed.
+    Unbounded reads follow Airtable pagination; bounded reads stop once the
+    requested number of records is collected. Contract and HTTP failures raise.
     """
+    if max_records is not None:
+        if max_records < 0:
+            raise ValueError("max_records cannot be negative")
+        if max_records == 0:
+            return []
     real_table = _resolve_table(table)
     records: list[dict] = []
     offset = ""
@@ -267,7 +271,8 @@ def airtable_get_records(
 
     with with_airtable_breaker():
         while True:
-            params: dict[str, object] = {"pageSize": 100}
+            remaining = None if max_records is None else max_records - len(records)
+            params: dict[str, object] = {"pageSize": min(100, remaining) if remaining is not None else 100}
             if filter_formula:
                 params["filterByFormula"] = filter_formula
             if offset:
@@ -284,8 +289,8 @@ def airtable_get_records(
             page = payload.get("records")
             if not isinstance(page, list):
                 raise RuntimeError("Airtable records response is not a list")
-            records.extend(page[:max_records - len(records)] if max_records else page)
-            if max_records and len(records) >= max_records:
+            records.extend(page if max_records is None else page[:remaining])
+            if max_records is not None and len(records) >= max_records:
                 break
 
             next_offset = payload.get("offset")
