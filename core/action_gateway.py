@@ -503,9 +503,9 @@ class ExecutionLedger:
     def __init__(self, airtable_writer: Callable | None = None, repository=None):
         self._store: dict[str, ActionContract] = {}    # contract_id → contract (CACHE, not source of truth)
         self._by_fingerprint: dict[str, str] = {}      # fingerprint → contract_id
-        # Bounded status reads: keep a cache-local identity index so a status
-        # question never scans every cached ActionContract.  This is an index
-        # over the existing authority, not a lifecycle source of truth.
+        # קריאות סטטוס תחומות: אינדקס זהות מקומי ל-cache מונע משאלת סטטוס
+        # לסרוק את כל ה-ActionContracts השמורים. זהו אינדקס מעל הסמכות
+        # הקיימת, ולא מקור אמת חדש למחזור החיים.
         self._by_user: dict[str, dict[str, ActionContract]] = {}
         self._lock = threading.Lock()
         self._airtable_writer = airtable_writer        # callable(contract) → None — legacy best-effort mirror (Phase 4A)
@@ -523,7 +523,7 @@ class ExecutionLedger:
             ] = contract
 
     def contracts_for_user(self, canonical_user_id: str) -> list[ActionContract]:
-        """Return only this identity's cache entries (D-018 bounded read)."""
+        """מחזיר רק רשומות cache של זהות זו (קריאה תחומה לפי D-018)."""
         with self._lock:
             return [
                 contract
@@ -3107,7 +3107,9 @@ class ActionGateway:
         records_scanned = len(user_contracts)
         candidates = [
             c for c in user_contracts
-            if c.status in ("completed", "executed", "failed", "outcome_unknown")
+            if c.status in (
+                "completed", "executed", "rejected", "failed", "outcome_unknown",
+            )
         ]
         logger.info(
             "[ActionGatewayStatusRoute] status_route_owner=approval_runtime "

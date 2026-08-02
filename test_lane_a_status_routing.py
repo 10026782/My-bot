@@ -65,7 +65,8 @@ def test_query_execution_status_reads_only_identity_index(caplog):
     assert "status_route_owner=approval_runtime" in caplog.text
 
 
-def test_generic_status_question_never_invokes_agent_and_has_safe_fallback():
+@pytest.mark.parametrize("query", ["מה מצב הפעולה?", "מה מצב הפעולה"])
+def test_generic_status_question_never_invokes_agent_and_has_safe_fallback(query):
     identity = Identity(user_id="lane-a", role=Role.OWNER)
     meta = {}
     with patch.object(app, "resolve_identity", return_value=identity), \
@@ -74,7 +75,7 @@ def test_generic_status_question_never_invokes_agent_and_has_safe_fallback():
          patch.object(app, "_safe_route") as router_call, \
          patch.object(app.client.messages, "create") as agent_call:
         reply = app.run_agent(
-            "מה מצב הפעולה?", "lane-a", channel="telegram", _out_meta=meta,
+            query, "lane-a", channel="telegram", _out_meta=meta,
         )
 
     assert reply == "לא מצאתי מידע עדכני על הפעולה."
@@ -101,6 +102,18 @@ def test_pending_query_precedes_generic_status_route_and_reuses_snapshot():
     status_query.assert_not_called()
     router_call.assert_not_called()
     agent_call.assert_not_called()
+
+
+def test_recent_rejected_contract_returns_cancellation_status():
+    ledger = ExecutionLedger()
+    ledger.save(_contract("rejected-own", "target-user", "rejected", time.time()))
+    gateway = ActionGateway(ledger=ledger, tool_executor=lambda **_: {})
+
+    reply = gateway.query_execution_status("target-user", live_contracts=[])
+    assert "בוטלה" in reply
+    assert "rejected" not in reply
+    assert "rejected-own" not in reply
+    assert "airtable_add" not in reply
 
 
 def test_pending_lock_expiry_cleanup_and_duplicate_release(caplog):

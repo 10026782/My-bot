@@ -199,13 +199,12 @@ _PENDING_QUERY_RE = re.compile(
     r"|(?:מה|אילו|איזה|רשימת).{0,15}(?:ממתי\w*|מחכ\w*)"
 )
 
-# D-018: anchored lifecycle-status intent.  This deliberately excludes broad
-# business uses of "מצב" and only captures a question about the user's action
-# or its execution.  It is evaluated after approval resolution commands but
-# before Router/Agent work, and consumes the turn's single bounded snapshot.
+# D-018: כוונת סטטוס מחזור-חיים מעוגנת. הביטוי מוציא שימושים עסקיים
+# כלליים במילה "מצב" ולוכד רק שאלה על פעולת המשתמש או על ביצועה. הוא
+# נבדק לפני עבודת Router/Agent וצורך את ה-snapshot התחום היחיד של הטורן.
 _EXECUTION_STATUS_QUERY_RE = re.compile(
-    r"^\s*(?:מה\s+)?(?:המצב|מצב)\s+(?:של\s+)?(?:הפעולה|הביצוע)(?:\s+שלי)?\s*\?\s*$"
-    r"|^\s*(?:מה\s+קרה\s+עם|איפה\s+עומדת)\s+הפעולה(?:\s+שלי)?\s*\?\s*$",
+    r"^\s*(?:מה\s+)?(?:המצב|מצב)\s+(?:של\s+)?(?:הפעולה|הביצוע)(?:\s+שלי)?(?:\s*\?)?\s*$"
+    r"|^\s*(?:מה\s+קרה\s+עם|איפה\s+עומדת)\s+הפעולה(?:\s+שלי)?(?:\s*\?)?\s*$",
     re.IGNORECASE,
 )
 
@@ -842,7 +841,7 @@ def _pop_pending_approval(
 
 
 def _release_expired_pending_approvals(chat_id: str, *, now: float | None = None) -> int:
-    """Release expired legacy pending locks under the caller-held lock."""
+    """משחרר נעילות pending שפגו תחת הנעילה שכבר מוחזקת בידי הקורא."""
     current = time.time() if now is None else now
     bucket = _pending_approvals.get(chat_id, {})
     expired = [
@@ -3038,11 +3037,10 @@ def run_agent(
             _live_contracts_snapshot = []
             _snapshot_fetch_failed = True
 
-    # D-018 runs immediately after the single ActionContract snapshot and
-    # before lead capture, Session, Router, Business Memory, or Agent work.
-    # The older lower-priority intercepts remain as compatibility guards for
-    # broader legacy wording, but these anchored status intents always return
-    # here and therefore have deterministic ownership.
+    # D-018 רץ מיד לאחר ה-snapshot היחיד של ActionContract ולפני lead
+    # capture, Session, Router, Business Memory או Agent. היירוטים הישנים
+    # נשארים כשומרי תאימות לניסוחים רחבים יותר, אך כוונות הסטטוס המעוגנות
+    # חוזרות תמיד מכאן ולכן הבעלות עליהן דטרמיניסטית.
     _d018_text = user_text.strip()
     _d018_pending_intent = (
         len(_d018_text) <= 80 and bool(_PENDING_QUERY_RE.fullmatch(_d018_text))
