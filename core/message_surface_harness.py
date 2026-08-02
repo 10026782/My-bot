@@ -42,10 +42,12 @@ class SurfaceVerification:
 
     @property
     def ready(self) -> bool:
+        """Whether all selected surfaces are identical and leak-free."""
         return bool(self.renders) and not self.leaks and len({r.text for r in self.renders}) == 1
 
 
 def _validate_surfaces(surfaces: Iterable[str]) -> tuple[str, ...]:
+    """Validate and normalize the closed list of supported public surfaces."""
     selected = tuple(surfaces)
     if not selected:
         raise ValueError("at least one surface is required")
