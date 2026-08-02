@@ -8,6 +8,11 @@ from .ownership_contracts import (
     IntentOwnershipRegistry,
     ResolverResult,
 )
+from .task_builders import (
+    build_complete_task_proposal,
+    build_create_task_proposal,
+    build_update_task_proposal,
+)
 
 __all__ = [
     "route_request",
@@ -16,4 +21,6 @@ __all__ = [
     "Channel",
     "IntentOwnershipDecision", "CanonicalActionProposal", "ResolverResult",
     "IntentOwnershipRegistry",
+    "build_create_task_proposal", "build_update_task_proposal",
+    "build_complete_task_proposal",
 ]
