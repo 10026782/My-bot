@@ -251,7 +251,9 @@ def _base() -> str:
     return base
 
 
-def airtable_get_records(table: str, filter_formula: str = "") -> list[dict]:
+def airtable_get_records(
+    table: str, filter_formula: str = "", max_records: int | None = None,
+) -> list[dict]:
     """Return all matching records using a structured internal contract.
 
     This read path is for application code. It never formats or truncates the
@@ -282,7 +284,9 @@ def airtable_get_records(table: str, filter_formula: str = "") -> list[dict]:
             page = payload.get("records")
             if not isinstance(page, list):
                 raise RuntimeError("Airtable records response is not a list")
-            records.extend(page)
+            records.extend(page[:max_records - len(records)] if max_records else page)
+            if max_records and len(records) >= max_records:
+                break
 
             next_offset = payload.get("offset")
             if not next_offset:
