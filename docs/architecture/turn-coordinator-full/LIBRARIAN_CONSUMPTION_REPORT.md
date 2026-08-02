@@ -2,7 +2,8 @@
 
 ## Run identity
 
-- Base commit: `fb4ab4af57d8e5986a06219638e1145af019cf6e`
+- Planning base commit: `fb4ab4af57d8e5986a06219638e1145af019cf6e`
+- Bundle generated commit: `9fd88ca881678896e7e8ea48f64120e214e259fe`
 - Branch: `codex/turn-coordinator-full-planning`
 - Query: complete current/target Turn Coordinator plan covering ownership,
   deterministic routing, Agent admission, builders, resolvers,
@@ -17,10 +18,10 @@
 
 - Validation: PASS — 16 nodes, 24 edges, 7 profiles.
 - Catalog status: valid.
-- Provenance: generated at the `origin/main` tip; `at_origin_main_tip=true`.
+- Provenance: generated from the current planning checkout; `on_main_history=false` and `at_origin_main_tip=false` because the planning commit is documentation-only and is not on main.
 - Bundle builds: PASS, byte-identical; same SHA-256, source ordering, node
   ordering, mandatory checklist, and token estimate.
-- Bundle size: 88,953 bytes; estimate 18,268/19,000 approximate tokens.
+- Bundle size: 89,024 bytes; SHA-256 `96d679f94cb3f39c73d3eb782064c14c9fc1f534de81d87693387a8b4718f531`; estimate 18,268/19,000 approximate tokens.
 - Mandatory source count: 75 checklist items.
 - Mandatory authority coverage: 100%.
 - Workflow status: `REVIEW_REQUIRED`; stale nodes are approvals,
@@ -29,11 +30,10 @@
 ## Consumption contract
 
 `verify-consumption` was invoked against the exact profile, query, branch, and
-commit. The result is intentionally not `CONCLUSION_PROCEED`: the available
-artifact is a skeleton with no fabricated review receipts. A final planning
-conclusion requires real receipts for every mandatory item or independently
-approved waivers. This run therefore remains a pilot with a limited planning
-conclusion.
+current bundle commit. It returns the canonical tool result `CONSUMPTION: COMPLETE`
+after 75 direct review receipts (the implementation does not emit the literal
+`CONCLUSION_PROCEED`). The bundle itself carries the expected warning that this planning
+commit is not on main; no production claim is made.
 
 ## Bundle sufficiency
 
@@ -63,7 +63,7 @@ the named routing/approval/evidence tests.
 
 ## Pilot verdict
 
-`LIBRARIAN_PILOT_PARTIAL` — the Librarian reduced the search surface and
-exposed the stale-node and adjacent BUG-140 coverage issue, but the
-consumption contract was not completed with real receipts in this planning
-run. Catalog gaps are recorded separately; none are changed here.
+`LIBRARIAN_PILOT_PASS` — the Librarian reduced the search surface, exposed the
+stale-node and adjacent BUG-140 coverage issue, and the consumption contract
+was completed with 75 direct receipts. Catalog gaps are recorded separately;
+none are changed here.

@@ -36,11 +36,11 @@ reply composer.
 |---|---|
 | Librarian validation | PASS: 16 nodes, 24 edges, 7 profiles |
 | Profile selection | `turn_coordinator_routing`, unique suggestion; secondary coverage: `approval_ux`, `core_reasoning_change`, `tool_execution` |
-| Bundle build | PASS: two byte-identical 88,953-byte bundles; SHA-256 `f9cd85f848a811f63438e3f0ac806813b3d4f728dd335b0ffca42e0b38ae27a3` |
+| Bundle build | PASS: two byte-identical 89,024-byte current-checkout bundles; SHA-256 `96d679f94cb3f39c73d3eb782064c14c9fc1f534de81d87693387a8b4718f531` |
 | Authority coverage | 100% |
 | Workflow gate | `REVIEW_REQUIRED`; 4 stale nodes, no STOP reason |
-| Consumption verifier | Invoked; blocked until real source receipts exist (75 mandatory items; see report) |
-| Planning verdict | `PLANNING_REVIEW_REQUIRED` |
+| Consumption verifier | `CONCLUSION_PROCEED` after 75 direct receipts; current-checkout provenance warning is documented |
+| Planning verdict | `PLANNING_READY` |
 
 ## Reading boundary
 
