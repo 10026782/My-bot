@@ -116,6 +116,65 @@ def test_recent_rejected_contract_returns_cancellation_status():
     assert "airtable_add" not in reply
 
 
+def test_rejected_status_is_not_lost_after_status_window():
+    ledger = ExecutionLedger()
+    rejected = _contract(
+        "rejected-aged", "target-user-aged", "rejected", time.time() - 601,
+    )
+    ledger.save(rejected)
+    gateway = ActionGateway(ledger=ledger, tool_executor=lambda **_: {})
+
+    reply = gateway.query_execution_status("target-user-aged", live_contracts=[])
+
+    assert reply == "הפעולה בוטלה."
+    assert rejected.status == "rejected"
+
+
+def test_cancel_word_replays_only_latest_rejected_terminal_without_mutation():
+    ledger = ExecutionLedger()
+    rejected = _contract(
+        "rejected-replay", "target-user-replay", "rejected", time.time(),
+    )
+    ledger.save(rejected)
+    gateway = ActionGateway(ledger=ledger, tool_executor=lambda **_: {})
+
+    reply = gateway.route_cancellation_word(
+        "target-user-replay", live_contracts=[], recent_terminal=rejected,
+    )
+
+    assert reply == "הפעולה כבר בוטלה"
+    assert rejected.status == "rejected"
+
+
+def test_pr2_cancel_path_supplies_bounded_rejected_terminal_replay():
+    identity = Identity(user_id="lane-a-replay", role=Role.OWNER)
+    rejected = _contract(
+        "rejected-pr2", identity.memory_key, "rejected", time.time(),
+    )
+    with patch("feature_flags.is_enabled", return_value=True), \
+         patch.object(action_gateway, "find_recent_terminal_by_user", return_value=rejected) as recent_lookup, \
+         patch.object(
+             action_gateway,
+             "route_cancellation_word",
+             return_value="הפעולה כבר בוטלה",
+         ) as cancel_route:
+        reply = app._resolve_pr2_deterministic_approval(
+            user_text="לא",
+            identity=identity,
+            live_contracts=[],
+            out_meta={},
+        )
+
+    assert reply == "הפעולה כבר בוטלה"
+    recent_lookup.assert_called_once()
+    cancel_route.assert_called_once_with(
+        identity.memory_key,
+        live_contracts=[],
+        recent_terminal=rejected,
+        safe_multiple=True,
+    )
+
+
 def test_pending_lock_expiry_cleanup_and_duplicate_release(caplog):
     chat_id = "lane-a-expired-lock"
     with app._pending_approvals_lock:
