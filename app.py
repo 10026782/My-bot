@@ -199,6 +199,15 @@ _PENDING_QUERY_RE = re.compile(
     r"|(?:מה|אילו|איזה|רשימת).{0,15}(?:ממתי\w*|מחכ\w*)"
 )
 
+# D-018: כוונת סטטוס מחזור-חיים מעוגנת. הביטוי מוציא שימושים עסקיים
+# כלליים במילה "מצב" ולוכד רק שאלה על פעולת המשתמש או על ביצועה. הוא
+# נבדק לפני עבודת Router/Agent וצורך את ה-snapshot התחום היחיד של הטורן.
+_EXECUTION_STATUS_QUERY_RE = re.compile(
+    r"^\s*(?:מה\s+)?(?:המצב|מצב)\s+(?:של\s+)?(?:הפעולה|הביצוע)(?:\s+שלי)?(?:\s*\?)?\s*$"
+    r"|^\s*(?:מה\s+קרה\s+עם|איפה\s+עומדת)\s+הפעולה(?:\s+שלי)?(?:\s*\?)?\s*$",
+    re.IGNORECASE,
+)
+
 # PR2 בכוונה צר יותר מהדקדוק הישן, הרפוי, של שאילתות-סטטוס. הביטויים
 # האלה מעוגנים לשאלת lifecycle-אישור; אסור להם להפוך טקסט עסקי רגיל
 # שמכיל את אותן מילים לפקודת gateway.
@@ -774,6 +783,11 @@ def _add_pending_approval(chat_id: str, entry: dict) -> str:
     bucket = _pending_approvals.setdefault(chat_id, {})
     entry["display_index"] = len(bucket) + 1
     bucket[approval_id] = entry
+    logger.info(
+        "[PendingApprovalLock] event=acquire lock_acquire_reason=approval_required "
+        "pending_count=%d stuck_lock_age_seconds=0 user=%s",
+        len(bucket), _sanitize_id(chat_id),
+    )
     return approval_id
 
 
@@ -806,7 +820,9 @@ def _resolve_pending_reply(chat_id: str, user_text: str) -> tuple[str, dict] | N
     return None  # כמה ממתינים, אין מספר -> דורשים הבהרה, לא מנחשים
 
 
-def _pop_pending_approval(chat_id: str, approval_id: str) -> dict | None:
+def _pop_pending_approval(
+    chat_id: str, approval_id: str, *, release_reason: str = "explicit_cleanup",
+) -> dict | None:
     """מסיר approval ספציפי בלי לגעת בשאר הממתינים לאותו chat_id."""
     bucket = _pending_approvals.get(chat_id)
     if not bucket:
@@ -814,7 +830,27 @@ def _pop_pending_approval(chat_id: str, approval_id: str) -> dict | None:
     entry = bucket.pop(approval_id, None)
     if not bucket:
         _pending_approvals.pop(chat_id, None)
+    if entry is not None:
+        age = max(0, int(time.time() - entry.get("created_at", time.time())))
+        logger.info(
+            "[PendingApprovalLock] event=release lock_release_reason=%s "
+            "stuck_lock_age_seconds=%d pending_count=%d user=%s",
+            release_reason, age, len(bucket), _sanitize_id(chat_id),
+        )
     return entry
+
+
+def _release_expired_pending_approvals(chat_id: str, *, now: float | None = None) -> int:
+    """משחרר נעילות pending שפגו תחת הנעילה שכבר מוחזקת בידי הקורא."""
+    current = time.time() if now is None else now
+    bucket = _pending_approvals.get(chat_id, {})
+    expired = [
+        approval_id for approval_id, entry in bucket.items()
+        if current - entry.get("created_at", 0) > _PENDING_APPROVAL_TTL
+    ]
+    for approval_id in expired:
+        _pop_pending_approval(chat_id, approval_id, release_reason="expired")
+    return len(expired)
 
 
 def _pending_clarification_message(chat_id: str) -> str:
@@ -3000,6 +3036,60 @@ def run_agent(
             # הטורן הזה, ראו _snapshot_fetch_failed למטה.
             _live_contracts_snapshot = []
             _snapshot_fetch_failed = True
+
+    # D-018 רץ מיד לאחר ה-snapshot היחיד של ActionContract ולפני lead
+    # capture, Session, Router, Business Memory או Agent. היירוטים הישנים
+    # נשארים כשומרי תאימות לניסוחים רחבים יותר, אך כוונות הסטטוס המעוגנות
+    # חוזרות תמיד מכאן ולכן הבעלות עליהן דטרמיניסטית.
+    _d018_text = user_text.strip()
+    _d018_pending_intent = (
+        len(_d018_text) <= 80 and bool(_PENDING_QUERY_RE.fullmatch(_d018_text))
+    )
+    _d018_execution_intent = bool(
+        _EXECUTION_STATUS_QUERY_RE.fullmatch(_d018_text)
+    )
+    if _snapshot_fetch_failed and (_d018_pending_intent or _d018_execution_intent):
+        logger.warning(
+            "[ActionGatewayStatusRoute] status_route_owner=approval_runtime "
+            "route_kind=unavailable records_scanned=0 fallback_used=True",
+        )
+        if _out_meta is not None:
+            _out_meta["source_module"] = "action_gateway"
+            _out_meta["status_route_owner"] = "approval_runtime"
+        return "לא ניתן לבדוק כרגע את מצב הפעולה."
+    if not _snapshot_fetch_failed:
+        if _d018_pending_intent:
+            from core.action_gateway import action_gateway as _gw_d018_pending
+            _d018_reply = _gw_d018_pending.describe_pending_queue(
+                identity.memory_key, live_contracts=_live_contracts_snapshot,
+            )
+            logger.info(
+                "[ActionGatewayStatusRoute] status_route_owner=approval_runtime "
+                "route_kind=pending records_scanned=%d fallback_used=False",
+                len(_live_contracts_snapshot),
+            )
+            if _out_meta is not None:
+                _out_meta["source_module"] = "action_gateway"
+                _out_meta["status_route_owner"] = "approval_runtime"
+            return _d018_reply
+        if _d018_execution_intent:
+            from core.action_gateway import action_gateway as _gw_d018_status
+            _d018_reply = _gw_d018_status.query_execution_status(
+                identity.memory_key, live_contracts=_live_contracts_snapshot,
+            )
+            _d018_fallback = _d018_reply is None
+            if _d018_fallback:
+                _d018_reply = "לא מצאתי מידע עדכני על הפעולה."
+            logger.info(
+                "[ActionGatewayStatusRoute] status_route_owner=approval_runtime "
+                "route_kind=execution records_scanned_scope=canonical_user "
+                "fallback_used=%s",
+                _d018_fallback,
+            )
+            if _out_meta is not None:
+                _out_meta["source_module"] = "action_gateway"
+                _out_meta["status_route_owner"] = "approval_runtime"
+            return _d018_reply
     _pr2_reply = None
     if not _snapshot_fetch_failed:
         _pr2_reply = _resolve_pr2_deterministic_approval(
@@ -3109,6 +3199,9 @@ def run_agent(
     pending_ambiguous = False
 
     with _pending_approvals_lock:
+        # Stale-lock recovery runs on every turn for this chat, not only when
+        # the user happens to send a confirmation word after expiry.
+        _release_expired_pending_approvals(chat_id)
         bucket = _pending_approvals.get(chat_id)
         if bucket:
             stripped = user_text.strip()
@@ -3146,11 +3239,17 @@ def run_agent(
                 if time.time() - pending_entry.get("created_at", 0) > _PENDING_APPROVAL_TTL:
                     logger.info("[PendingApproval] expired (>%ss) for %s",
                                 _PENDING_APPROVAL_TTL, chat_id)
-                    _pop_pending_approval(chat_id, pending_id)
+                    _pop_pending_approval(chat_id, pending_id, release_reason="expired")
                     pending_entry = None
                     pending_action = None
                 else:
-                    _pop_pending_approval(chat_id, pending_id)
+                    _pop_pending_approval(
+                        chat_id, pending_id,
+                        release_reason=(
+                            "confirmed_for_dispatch"
+                            if pending_action == "confirm" else "cancelled"
+                        ),
+                    )
 
     if pending_ambiguous:
         return _pending_clarification_message(chat_id)
@@ -3240,8 +3339,10 @@ def run_agent(
         # routing to the Agent).
         if _PENDING_QUERY_RE.search(_stripped):
             from core.action_gateway import action_gateway as _gw_pq
-            _pq_pending_count = len(_gw_pq.find_live_contracts(identity.memory_key))
-            _pq_reply = _gw_pq.describe_pending_queue(identity.memory_key)
+            _pq_pending_count = len(_live_contracts_snapshot)
+            _pq_reply = _gw_pq.describe_pending_queue(
+                identity.memory_key, live_contracts=_live_contracts_snapshot,
+            )
             # Review pass (23/07/2026), sampling-hygiene finding: this log
             # line is raw material for RP5/TurnCoordinator-Shadow sampling —
             # it must never carry user free-text or reply content (names/

@@ -503,6 +503,10 @@ class ExecutionLedger:
     def __init__(self, airtable_writer: Callable | None = None, repository=None):
         self._store: dict[str, ActionContract] = {}    # contract_id → contract (CACHE, not source of truth)
         self._by_fingerprint: dict[str, str] = {}      # fingerprint → contract_id
+        # קריאות סטטוס תחומות: אינדקס זהות מקומי ל-cache מונע משאלת סטטוס
+        # לסרוק את כל ה-ActionContracts השמורים. זהו אינדקס מעל הסמכות
+        # הקיימת, ולא מקור אמת חדש למחזור החיים.
+        self._by_user: dict[str, dict[str, ActionContract]] = {}
         self._lock = threading.Lock()
         self._airtable_writer = airtable_writer        # callable(contract) → None — legacy best-effort mirror (Phase 4A)
         # ActionContractRepository | None. When set, reads recover through it
@@ -514,6 +518,20 @@ class ExecutionLedger:
         with self._lock:
             self._store[contract.contract_id] = contract
             self._by_fingerprint[contract.business_action_fingerprint] = contract.contract_id
+            self._by_user.setdefault(contract.canonical_user_id, {})[
+                contract.contract_id
+            ] = contract
+
+    def contracts_for_user(self, canonical_user_id: str) -> list[ActionContract]:
+        """מחזיר רק רשומות cache של זהות זו (קריאה תחומה לפי D-018)."""
+        with self._lock:
+            return [
+                contract
+                for contract_id, contract in self._by_user.get(
+                    canonical_user_id, {}
+                ).items()
+                if self._store.get(contract_id) is contract
+            ]
 
     def _refresh_stale_contract_cache(self, contract_id: str) -> "ActionContract | None":
         """BUG-127A: the RAM ledger's cached version/status can drift behind
@@ -625,16 +643,13 @@ class ExecutionLedger:
         # through before RAM changes, so the durable query is authoritative on
         # restart; avoiding a second query once this user's cache is populated
         # also keeps one request path internally consistent.
-        has_cached_user_contract = any(
-            c.canonical_user_id == canonical_user_id for c in self._store.values()
-        )
+        has_cached_user_contract = bool(self.contracts_for_user(canonical_user_id))
         if self._repository and not has_cached_user_contract:
             for recovered in self._repository.find_pending_by_canonical_user(canonical_user_id):
                 self._cache_contract(recovered)
         return [
-            c for c in self._store.values()
-            if c.canonical_user_id == canonical_user_id
-            and c.status == "pending"
+            c for c in self.contracts_for_user(canonical_user_id)
+            if c.status == "pending"
             and not _is_contract_expired(c)
         ]
 
@@ -643,7 +658,7 @@ class ExecutionLedger:
         a specific "your previous action was superseded" message instead of a
         generic "nothing pending" when the most recent contract was closed by
         a second interruption rather than executed/cancelled by the user."""
-        candidates = [c for c in self._store.values() if c.canonical_user_id == canonical_user_id]
+        candidates = self.contracts_for_user(canonical_user_id)
         if not candidates:
             return None
         return max(candidates, key=lambda c: c.created_at)
@@ -3088,11 +3103,19 @@ class ActionGateway:
         None = אין ביצוע אחרון רלוונטי בחלון הזמן.
         BUG-SB-03: אם אין executed/failed, מחפש pending contracts ומדווח עליהם.
         """
+        user_contracts = self._ledger.contracts_for_user(canonical_user_id)
+        records_scanned = len(user_contracts)
         candidates = [
-            c for c in self._ledger._store.values()
-            if c.canonical_user_id == canonical_user_id
-            and c.status in ("completed", "executed", "failed", "outcome_unknown")
+            c for c in user_contracts
+            if c.status in (
+                "completed", "executed", "rejected", "failed", "outcome_unknown",
+            )
         ]
+        logger.info(
+            "[ActionGatewayStatusRoute] status_route_owner=approval_runtime "
+            "records_scanned=%d read_scope=canonical_user outcome_candidates=%d",
+            records_scanned, len(candidates),
+        )
         if not candidates:
             # BUG-SB-03: check for pending contracts before returning None
             live = live_contracts if live_contracts is not None else self.find_live_contracts(canonical_user_id)
@@ -3197,9 +3220,8 @@ class ActionGateway:
         """
         now = time.time()
         candidates = [
-            c for c in self._ledger._store.values()
-            if c.canonical_user_id == canonical_user_id
-            and c.status in ("completed", "executed", "rejected", "failed", "outcome_unknown")
+            c for c in self._ledger.contracts_for_user(canonical_user_id)
+            if c.status in ("completed", "executed", "rejected", "failed", "outcome_unknown")
             and now - c.created_at <= max_age_seconds
         ]
         return max(candidates, key=lambda c: c.created_at) if candidates else None
