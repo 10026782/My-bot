@@ -284,7 +284,8 @@ chk("simple create-task request creates a contract this turn",
     and _simple_task_outcome["contract_id"] is not None)
 chk("simple create-task approval reply belongs to the Gateway",
     _simple_task_outcome["reply_owner"] == "gateway")
-_simple_task_contract = _real_gw.find_contract(_simple_task_outcome["contract_id"])
+from core.action_gateway import action_gateway as _simple_task_gw  # noqa: E402
+_simple_task_contract = _simple_task_gw.find_contract(_simple_task_outcome["contract_id"])
 chk("simple create-task contract is pending and canonical",
     _simple_task_contract is not None
     and _simple_task_contract.status == "pending"
