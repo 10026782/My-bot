@@ -6,6 +6,8 @@ import logging
 import os
 from unittest.mock import patch
 
+import pytest
+
 os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-cancelled-status-test")
 os.environ.setdefault("TELEGRAM_TOKEN", "123456789:cancelled-status-test")
 os.environ.setdefault("AIRTABLE_API_KEY", "patCancelledStatusTest")
@@ -108,5 +110,66 @@ def test_cancelled_status_without_proof_is_deterministic_and_does_not_guess():
         reply = app.run_agent("הפעולה בוטלה?", identity.user_id, "telegram", _out_meta=metadata)
 
     assert reply == "לא מצאתי פעולה אחרונה שבוטלה."
+    assert metadata["status_route_owner"] == "approval_runtime"
+    assert agent_call.call_count == 0
+
+
+@pytest.mark.parametrize(
+    "raw_text",
+    [
+        "\u00a0מה\u00a0מצב\u00a0הפעולה?\u00a0",
+        "\u200bמה מצב הפעולה?\u200b",
+        "> מה מצב הפעולה?",
+        "↪️ מה מצב הפעולה?",
+        "תגובה: מה מצב הפעולה?",
+        "Maayan: מה מצב הפעולה?",
+        "הודעה מצוטטת\n> Maayan: הפעולה בוטלה?",
+        "> Maayan: הפעולה כבר בוטלה",
+        "↪️ האם\u200f הפעולה בוטלה?",
+        "תגובה: זה כבר בוטל?",
+    ],
+)
+def test_status_route_normalizes_transport_wrappers_before_agent(raw_text):
+    """All unambiguous status text stays in approval_runtime after ingress wrapping."""
+    identity = Identity(
+        user_id=f"owner-status-normalization-{abs(hash(raw_text))}",
+        role=Role.OWNER,
+        display_name="owner-status-normalization",
+        tenant_id="boss_hq",
+        domain_id="general",
+        channel="telegram",
+        external_id=f"owner-status-normalization-{abs(hash(raw_text))}",
+    )
+    _seed_cancelled_contract(identity)
+    metadata = {}
+    with patch.object(app, "resolve_identity", return_value=identity), \
+         patch.object(app, "dispatch_tool", side_effect=AssertionError("no tool execution")) as dispatch, \
+         patch.object(
+             app.client.messages,
+             "create",
+             side_effect=AssertionError("status route must not call Agent"),
+         ) as agent_call:
+        reply = app.run_agent(raw_text, identity.user_id, "telegram", _out_meta=metadata)
+
+    assert reply
+    assert metadata["status_route_owner"] == "approval_runtime"
+    assert dispatch.call_count == 0
+    assert agent_call.call_count == 0
+
+
+def test_cancelled_status_snapshot_failure_still_fails_closed():
+    """A contract-read failure cannot hand a cancelled-status turn to Agent."""
+    identity = _cancelled_identity()
+    metadata = {}
+    with patch.object(app, "resolve_identity", return_value=identity), \
+         patch.object(
+             action_gateway,
+             "find_live_contracts",
+             side_effect=RuntimeError("repository unavailable"),
+         ), \
+         patch.object(app.client.messages, "create", side_effect=AssertionError("no Agent")) as agent_call:
+        reply = app.run_agent("↪️ הפעולה כבר בוטלה", identity.user_id, "telegram", _out_meta=metadata)
+
+    assert reply == "לא ניתן לבדוק כרגע את מצב הפעולה."
     assert metadata["status_route_owner"] == "approval_runtime"
     assert agent_call.call_count == 0
