@@ -1,6 +1,35 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 01/08/2026 — **תיעוד PR #517–#520 (פער-תיעוד, נסגר ישירות מ-`git log origin/main`,
+עודכן: 02/08/2026 — **תיעוד PR #521–#524 (פער-תיעוד, נסגר ישירות מ-`git log origin/main`,
+לא הועלה כ-PR נפרד ע"י מי שביצע אותם):** ארבעה PRs נוספים מוזגו ל-`main` ב-01/08/2026 בלי
+עדכון ROADMAP/CHANGELOG נלווה — תוקן כאן, אומת ישירות ב-`git show`/`git log` על `origin/main`
+(`7c3833a`), לא לפי claim. **PR #521** (`271b293`, merge `a2be204`) — רגנרציית `AI_CONTEXT.md`
+הקודמת (סגרה את פער PR #517–#520; הוחלפה ברגנרציה מ-02/08). **PR #522** (`baabd46`, merge
+`ef55cd9`) — תיקון פער parity ב-shadow: `_compose_status_reply_unified()` תיאר כל pending
+contract גנרית ("הוספת רשומה: ...") גם כש-Task-creation contracts אמורים להציג את כותרת
+המשימה עצמה (כפי שהמסלול החי, `build_approval_lifecycle_result()`, כבר עושה) — נסגר;
+`FEATURE_UNIFIED_STATUS_FORMATTER` נשאר כבוי, אין שינוי ל-approval logic/ownership/routing.
+**PR #523** (`093a46c`+`4569e7e`+`ce7cee8`+`713ca5c`+`bd25327`+`c5bd7f8`+`86b6e58`, merge
+`96a8313`) — F52 D-014 עד D-017: (D-014) הבעלים אישר Option B — "לאשר? כן / לא" נשאר הניסוח
+הקנוני חוצה-ערוצים; (D-015) פיצול ניסוח בין prompt-חדש (מיד אחרי שבקשה נכנסת לתור) לבין
+status-query (שאלה על פעולה שכבר ממתינה), שניהם task-noun-aware ("משימה" מול "פעולה");
+(D-016) `query_execution_status()`'s מקרה יחיד-ב-queue מחווט ל-renderer החדש; (D-017) פתרון
+5 השאלות הפתוחות (OQ1–OQ5) של Approval Pending Batch Migration — count=0 מציג "אין כלום
+ממתין" (STATE_IDLE הקיים), count=1 מציג ניסוח יחיד (D-016), count≥2 מתכנס ל-
+`STATE_APPROVAL_PENDING_BATCH` המשותף, שם "ActionContracts"/ניסוח legacy יורד לגמרי מהטקסט
+היעד; דליפת `tool_name` גולמי (OQ4) הופרדה במפורש כמעקב-המשך נפרד (ראה D-018). כולל שני
+מסמכי scope תכנוניים (`APPROVAL_PENDING_BATCH_MIGRATION_SCOPE_V1.md`,
+`RECONFIRMATION_TOOL_NAME_LEAK_FIX_SCOPE_V1.md`) ותיקון תאריכי ratification + markdownlint
+בעקבות ביקורת CodeRabbit. כל D-014–D-017 עדיין מאחורי `FEATURE_UNIFIED_STATUS_FORMATTER`
+(shadow/כבוי) — אין שינוי runtime חי. **PR #524** (`76c08f3`, merge `7c3833a`) — D-018: תיקון
+דליפת `tool_name` גולמי ב-`_describe_contract_for_reconfirmation()` בשלושה מסלולים חיים
+(`describe_pending_queue()`, `describe_superseded_reason()`, פרומפט reconfirmation ב-
+`_resolve_single_contract()`) שהיו חשופים ל-9 מתוך 11 tools עם `requires_approval=True`.
+**זהו היחיד מבין ארבעת ה-PRs שאינו מאחורי flag** — הטקסט משתנה בפועל ברגע ה-deploy הבא, לא
+shadow. תיקן גם assertion ישן שהתבסס על הדליפה. **כל ארבעת ה-PRs מוזגו בפועל ואומתו ב-`git
+log origin/main`; פרט ל-D-018, אף אחד מהם לא שינה טקסט/התנהגות חיה של הבוט העסקי.** ראו
+`AI_CONTEXT.md` (02/08/2026) לתמונת מצב מלאה.
+עודכן קודם: 01/08/2026 — **תיעוד PR #517–#520 (פער-תיעוד, נסגר ישירות מ-`git log origin/main`,
 לא הועלה כ-PR נפרד ע"י מי שביצע אותם):** ארבעה PRs מוזגו ל-`main` בין 30/07–31/07/2026 בלי
 עדכון ROADMAP/CHANGELOG נלווה — תוקן כאן, אומת ישירות ב-`git show`/`git log` על `origin/main`
 (`9f203f4`), לא לפי claim. **PR #517** (`9184834`+`c5f5516`+`dd63c4a`, merge `0ddd91c`) —
