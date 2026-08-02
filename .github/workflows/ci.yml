@@ -71,6 +71,10 @@ jobs:
       - name: Context Librarian catalog validation (N17 item 4 — CI drift detection)
         run: python -m tools.context_librarian validate
 
+      - name: Context Librarian authoritative post-merge refresh check
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: python -m tools.context_librarian refresh-after-merge --check
+
       - name: Run test_*.py scripts
         run: |
           set -e

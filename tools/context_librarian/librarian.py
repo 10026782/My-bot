@@ -12,8 +12,10 @@ from __future__ import annotations
 import fnmatch
 import json
 import math
+import os
 import re
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Iterable
@@ -469,6 +471,14 @@ def evaluate_workflow_gate(
     qualifying_production_evidence: int = 0,
     unresolved_conflicts: Iterable[str] = (),
     excluded_layer_leakage: Iterable[str] = (),
+    direct_source_reverified: bool = False,
+    verification_ledger: Iterable[str] = (),
+    authority_missing: Iterable[str] = (),
+    canonical_state_undetermined: Iterable[str] = (),
+    stale_authority_runtime_changes: Iterable[str] = (),
+    new_authority_sources: Iterable[str] = (),
+    authority_changing_unregistered_sources: Iterable[str] = (),
+    github_activity: Iterable[str] = (),
 ) -> dict[str, Any]:
     """Return the manual agent-bootstrap stop decision and its reasons.
 
@@ -477,23 +487,61 @@ def evaluate_workflow_gate(
     what changed and which sources require direct verification.
     """
     stale = sorted(set(stale_node_ids))
+    ledger = sorted(set(verification_ledger))
+    verified_with_record = direct_source_reverified and bool(ledger)
     conflicts = sorted(set(unresolved_conflicts))
     leakage = sorted(set(excluded_layer_leakage))
+    missing = sorted(set(authority_missing))
+    undetermined = sorted(set(canonical_state_undetermined))
+    stale_runtime = sorted(set(stale_authority_runtime_changes))
+    new_authority = sorted(set(new_authority_sources))
+    unregistered_authority = sorted(set(authority_changing_unregistered_sources))
+    activity = sorted(set(github_activity))
     reasons: list[str] = []
-    if stale:
-        reasons.append("stale_nodes")
-    if mandatory_authority_coverage < 1.0:
+    warnings: list[str] = []
+    review_required: list[str] = []
+    if missing or mandatory_authority_coverage < 1.0:
         reasons.append("mandatory_authority_incomplete")
     if production_claim and qualifying_production_evidence == 0:
         reasons.append("production_evidence_missing")
     if conflicts:
         reasons.append("unresolved_source_conflict")
+    if undetermined:
+        reasons.append("canonical_state_undetermined")
+    if stale_runtime:
+        reasons.append("stale_authority_runtime_change")
+    if unregistered_authority:
+        reasons.append("unregistered_authority_change")
     if leakage:
         reasons.append("excluded_layer_leakage")
+    if stale:
+        warnings.append(
+            "stale_nodes_after_direct_verification"
+            if verified_with_record
+            else "stale_nodes"
+        )
+    if activity:
+        warnings.append("github_activity")
+    if new_authority:
+        review_required.extend(f"new_authority_source:{path}" for path in new_authority)
+    if stale and not verified_with_record:
+        review_required.append("direct_source_reverification")
+    status = "STOP" if reasons else "REVIEW_REQUIRED" if review_required else "WARNING" if warnings else "PROCEED"
     return {
-        "status": "STOP" if reasons else "PROCEED",
+        "status": status,
+        "planning_allowed": not reasons,
         "reasons": reasons,
+        "warnings": warnings,
+        "review_required": sorted(review_required),
         "stale_nodes": stale,
+        "direct_source_reverified": direct_source_reverified,
+        "verification_ledger": ledger,
+        "authority_missing": missing,
+        "canonical_state_undetermined": undetermined,
+        "stale_authority_runtime_changes": stale_runtime,
+        "new_authority_sources": new_authority,
+        "unregistered_authority_changes": unregistered_authority,
+        "github_activity": activity,
         "mandatory_authority_coverage": mandatory_authority_coverage,
         "production_claim": production_claim,
         "qualifying_production_evidence": qualifying_production_evidence,
@@ -600,6 +648,173 @@ def _git_changed_paths(repo_root: Path, commit: str) -> set[str]:
             f"cannot compare last_verified_commit {commit} to checkout: {exc}"
         ) from exc
     return {line.strip().replace("\\", "/") for line in completed.stdout.splitlines() if line.strip()}
+
+
+def _git_output(repo_root: Path, args: list[str]) -> str:
+    """מריצה פקודת git ומחזירה פלט נקי או שגיאת provenance ברורה."""
+    try:
+        completed = subprocess.run(
+            ["git", *args], cwd=repo_root, check=True, capture_output=True,
+            text=True, encoding="utf-8"
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise ContextLibrarianError(f"git {' '.join(args)} failed: {exc}") from exc
+    return completed.stdout.strip()
+
+
+def _catalog_node_files(catalog: Catalog) -> dict[str, Path]:
+    """ממפה node לקובץ הקטלוג שמכיל אותו לצורך כתיבה מכנית."""
+    result: dict[str, Path] = {}
+    paths = sorted((catalog.catalog_root / "layers").glob("*.json"))
+    paths.append(catalog.catalog_root / "decisions/canonical_boundaries.json")
+    for path in paths:
+        data = _load_catalog_json(path)
+        for node in data.get("nodes", []):
+            result[node["id"]] = path
+    return result
+
+
+def _catalog_referenced_paths(catalog: Catalog) -> set[str]:
+    """מחזירה את כל הנתיבים שכבר רשומים במקורות הקטלוג."""
+    paths: set[str] = set()
+    for node in catalog.nodes.values():
+        paths.update(node["code_paths"])
+        paths.update(node["test_paths"])
+        paths.update(ref["path"] for ref in node["canonical_docs"])
+        paths.update(ref["path"] for ref in node["production_evidence"])
+    return {path.replace("\\", "/") for path in paths}
+
+
+_AUTHORITY_TERMS = frozenset({
+    "authority", "approval", "action_contract", "action_gateway", "ownership",
+    "queue", "evidence", "canonical", "source_of_truth",
+})
+
+
+def classify_new_sources(
+    catalog: Catalog, paths: Iterable[str]
+) -> list[dict[str, str]]:
+    """מסווגת קבצים לא-רשומים בלי לרשום אוטומטית את משמעותם."""
+    registered = _catalog_referenced_paths(catalog)
+    result: list[dict[str, str]] = []
+    for raw_path in sorted({path.replace("\\", "/") for path in paths} - registered):
+        lower = raw_path.casefold()
+        name = PurePosixPath(lower).name
+        if name.startswith("test_") or "/test" in lower or lower.startswith("test"):
+            classification, reason = "WARNING", "new test source"
+        elif lower.endswith((".md", ".rst", ".txt")) or any(
+            term in lower for term in ("changelog", "audit", "planning")
+        ):
+            classification, reason = "WARNING", "new documentation/audit/planning source"
+        elif lower.endswith((".py", ".js", ".ts", ".tsx")):
+            classification, reason = "REVIEW_REQUIRED", "new runtime source"
+        else:
+            classification, reason = "REVIEW_REQUIRED", "new source with unknown role"
+        if classification != "WARNING" and any(term in name or term in lower for term in _AUTHORITY_TERMS):
+            classification, reason = "STOP", "unregistered source may change authority"
+        result.append({"path": raw_path, "classification": classification, "reason": reason})
+    return result
+
+
+def discover_new_sources(
+    catalog: Catalog, *, changed_paths: Iterable[str] | None = None,
+    main_ref: str = "origin/main"
+) -> list[dict[str, str]]:
+    """מזהה קבצים חדשים מאז עוגן ה-refresh הקנוני ומסווגת אותם לבדיקה."""
+    if changed_paths is None:
+        main_sha = _git_output(catalog.repo_root, ["rev-parse", "--verify", main_ref])
+        anchors = sorted({
+            node["last_verified_commit"]
+            for node in catalog.nodes.values()
+            if node.get("last_verified_commit")
+        })
+        base = (
+            _git_output(catalog.repo_root, ["merge-base", "--octopus", *anchors])
+            if anchors
+            else _git_output(catalog.repo_root, ["rev-parse", f"{main_sha}^"])
+        )
+        changed_paths = _git_output(
+            catalog.repo_root, ["diff", "--diff-filter=A", "--name-only", base, main_sha]
+        ).splitlines()
+    return classify_new_sources(catalog, changed_paths)
+
+
+def _node_changed_between(catalog: Catalog, node: dict[str, Any], main_sha: str) -> set[str]:
+    old = node["last_verified_commit"]
+    if old == main_sha:
+        changed = set()
+    else:
+        changed = set(_git_output(catalog.repo_root, ["diff", "--name-only", old, main_sha]).splitlines())
+    tracked = (
+        node["code_paths"] + node["test_paths"]
+        + [ref["path"] for ref in node["canonical_docs"]]
+        + [ref["path"] for ref in node["production_evidence"]]
+    )
+    return {path for path in changed if any(_matches_tracked_path(path, item) for item in tracked)}
+
+
+def refresh_proposal(catalog: Catalog, *, main_ref: str = "origin/main") -> dict[str, Any]:
+    """מחשבת הצעת refresh מכנית מול SHA קנוני של main."""
+    main_sha = _git_output(catalog.repo_root, ["rev-parse", "--verify", main_ref])
+    updates: list[dict[str, Any]] = []
+    for node in sorted(catalog.nodes.values(), key=lambda item: item["id"]):
+        changed = sorted(_node_changed_between(catalog, node, main_sha))
+        if changed:
+            updates.append({
+                "node_id": node["id"],
+                "from": node["last_verified_commit"],
+                "to": main_sha,
+                "changed_paths": changed,
+            })
+    new_sources = discover_new_sources(catalog, main_ref=main_ref)
+    return {
+        "status": "CHANGES_REQUIRED" if updates or new_sources else "OK",
+        "main_ref": main_ref,
+        "canonical_main_sha": main_sha,
+        "updates": updates,
+        "new_sources": new_sources,
+        "authority_review_required": any(item["classification"] != "WARNING" for item in new_sources),
+    }
+
+
+def refresh_after_merge(
+    catalog: Catalog, *, main_ref: str = "origin/main", write: bool = False
+) -> dict[str, Any]:
+    """מיישמת רק עדכוני provenance מכניים; סיווג authority נשאר לבדיקה."""
+    proposal = refresh_proposal(catalog, main_ref=main_ref)
+    if not write or proposal["status"] == "OK":
+        return proposal
+    live = _git_provenance(catalog.repo_root)
+    if live["branch"] != "main" or live["commit"] != proposal["canonical_main_sha"]:
+        raise ContextLibrarianError(
+            "refresh write requires checkout branch main at the canonical main SHA; "
+            "local hooks are advisory and must not write branch provenance"
+        )
+    files = _catalog_node_files(catalog)
+    original: dict[Path, str] = {}
+    data_by_file: dict[Path, dict[str, Any]] = {}
+    for update in proposal["updates"]:
+        path = files[update["node_id"]]
+        if path not in data_by_file:
+            original[path] = path.read_text(encoding="utf-8")
+            data_by_file[path] = _load_catalog_json(path)
+        for node in data_by_file[path]["nodes"]:
+            if node["id"] == update["node_id"]:
+                node["last_verified_commit"] = proposal["canonical_main_sha"]
+    try:
+        for path, data in data_by_file.items():
+            payload = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+            with tempfile.NamedTemporaryFile("w", encoding="utf-8", newline="\n", dir=path.parent, delete=False) as handle:
+                handle.write(payload)
+                temporary = Path(handle.name)
+            os.replace(temporary, path)
+        load_catalog(catalog.repo_root)
+    except Exception:
+        for path, text in original.items():
+            path.write_text(text, encoding="utf-8", newline="\n")
+        raise
+    proposal["status"] = "REFRESHED"
+    return proposal
 
 
 _MAIN_REF_CANDIDATES = ("origin/main", "main")
@@ -712,10 +927,9 @@ def _freshness(
 def _unique_references(
     nodes: list[dict[str, Any]], field: str
 ) -> list[tuple[str, dict[str, Any]]]:
-    """Return every current reference in deterministic round-robin order.
+    """מחזירה את כל המקורות בסדר round-robin דטרמיניסטי.
 
-    Budget enforcement belongs to ``build_bundle``. This helper must never
-    turn a budget into an implicit source-selection policy.
+    אכיפת תקציב שייכת ל-``build_bundle``; הפונקציה אינה משמיטה מקור בשקט.
     """
     result: list[tuple[str, dict[str, Any]]] = []
     seen: set[str] = set()
@@ -1240,6 +1454,8 @@ def _render(
     verified_production_evidence: str | None,
     git_provenance: dict[str, str],
     expansions: list[dict[str, Any]],
+    direct_source_reverified: bool,
+    verification_ledger: Iterable[str],
 ) -> str:
     decision_nodes = [node for node in nodes if node["type"] == "decision"]
     layer_nodes = [node for node in nodes if node["type"] == "layer"]
@@ -1285,6 +1501,8 @@ def _render(
         qualifying_production_evidence=qualifying_evidence,
         unresolved_conflicts=conflict_edges,
         excluded_layer_leakage=leakage,
+        direct_source_reverified=direct_source_reverified,
+        verification_ledger=verification_ledger,
     )
     normalised_query = _normalise_query(query)
     matched_layers = sum(
@@ -1317,12 +1535,7 @@ def _render(
         f"- at_origin_main_tip: {at_origin_main_tip}",
     ]
     if on_main != "yes":
-        lines.append(
-            "- WARNING: this bundle was NOT built from a commit proven to be on "
-            "`main` (on_main != yes). Do not describe its findings as "
-            "reflecting `main`'s current state; cite `generated_commit` and "
-            "`generated_branch` instead."
-        )
+        lines.append("- WARNING: commit is not proven on `main`; cite generated_commit/branch.")
     elif at_origin_main_tip == "no":
         lines.append(
             "- WARNING: this commit is in `origin/main` history but is not the "
@@ -1334,7 +1547,7 @@ def _render(
             "",
             "## Agent Consumption Contract",
             "",
-            "Use an explicit profile, read this bundle fully, inspect cited sources, and stop on stale nodes or incomplete authority coverage.",
+            "Use an explicit profile and inspect cited sources; stop only on STOP.",
             "Contract: `docs/context_librarian/AGENT_CONSUMPTION_CONTRACT.md`",
             "",
             "## Consumption Checklist",
@@ -1361,6 +1574,7 @@ def _render(
             "",
             f"- status: {workflow_gate['status']}",
             f"- reasons: {workflow_gate['reasons']}",
+            f"- verification_ledger: {workflow_gate['verification_ledger']}",
             f"- stale_nodes: {len(stale_node_ids)} {stale_node_ids}",
             f"- mandatory_authority_coverage: {authority_coverage:.0%}",
             f"- production_claim: {str(production_claim).lower()}",
@@ -1368,7 +1582,7 @@ def _render(
             f"- qualifying_production_evidence: {qualifying_evidence}",
             f"- unresolved_source_conflicts: {len(conflict_edges)} {conflict_edges}",
             f"- excluded_layer_leakage: {len(leakage)} {leakage}",
-            "- A STOP status blocks planning and code changes, not bundle creation.",
+            "- STOP blocks planning/code changes; stale alone is not STOP.",
             "",
             "## Canonical Decisions",
             "",
@@ -1541,7 +1755,7 @@ def _budget_breakdown(
     docs: list[tuple[str, dict[str, Any]]],
     evidence: list[tuple[str, dict[str, Any]]],
 ) -> list[str]:
-    """Describe the candidate's measurable metadata by node and source."""
+    """מתארת את metadata של המועמד לפי node ומקור לצורך breakdown."""
     breakdown: list[str] = []
     for node in nodes:
         metadata = "\n".join(
@@ -1609,11 +1823,13 @@ def _build_bundle_unchecked(
     assert_main: bool,
     assert_on_main_history: bool,
     assert_at_origin_main_tip: bool,
-) -> tuple[str, int, int, list[str]]:
+    direct_source_reverified: bool = False,
+    verification_ledger: Iterable[str] = (),
+) -> tuple[str, int, int, list[str], int, int, list[tuple[str, dict[str, Any]]]]:
     """הליבה המשותפת של `build_bundle()`/`estimate_bundle()`: מאמתת קלט,
     פותרת git provenance, בוחרת nodes, ומרנדרת את טקסט ה-bundle.
 
-    מחזירה `(bundle_text, actual_tokens, token_budget)` בלי לבדוק אם
+    מחזירה bundle, מדדי token/document ו-breakdown בלי לבדוק אם
     `actual_tokens` נכנס בתוך `token_budget` — ההחלטה הזו (לזרוק שגיאה
     או לדווח) שייכת לקורא, לעולם לא לפונקציה הזו. כל כשל אחר כאן (task
     type לא ידוע, תקציבים לא-חוקיים, git provenance שלא הוכח כשנדרש)
@@ -1680,6 +1896,8 @@ def _build_bundle_unchecked(
         verified_production_evidence,
         git_provenance,
         expansions,
+        direct_source_reverified,
+        verification_ledger,
     )
     actual_tokens = _approximate_char_estimate(bundle)
     docs = _unique_references(nodes, "canonical_docs")
@@ -1690,18 +1908,10 @@ def _build_bundle_unchecked(
     references = [*docs, *evidence]
     selected_documents = len({reference["path"] for _, reference in references})
     breakdown = _budget_breakdown(nodes, docs, evidence)
-    if selected_documents > document_budget:
-        raise ContextLibrarianError(
-            _format_document_overflow(
-                estimated_tokens=actual_tokens,
-                token_budget=token_budget,
-                selected_documents=selected_documents,
-                budget=document_budget,
-                references=references,
-                breakdown=breakdown,
-            )
-        )
-    return bundle, actual_tokens, token_budget, breakdown
+    return (
+        bundle, actual_tokens, token_budget, breakdown,
+        selected_documents, document_budget, references,
+    )
 
 
 def build_bundle(
@@ -1716,8 +1926,13 @@ def build_bundle(
     assert_main: bool = False,
     assert_on_main_history: bool = False,
     assert_at_origin_main_tip: bool = False,
+    direct_source_reverified: bool = False,
+    verification_ledger: Iterable[str] = (),
 ) -> str:
-    bundle, actual_tokens, token_budget, breakdown = _build_bundle_unchecked(
+    (
+        bundle, actual_tokens, token_budget, breakdown,
+        selected_documents, document_budget, references,
+    ) = _build_bundle_unchecked(
         catalog,
         task_type=task_type,
         query=query,
@@ -1728,7 +1943,20 @@ def build_bundle(
         assert_main=assert_main,
         assert_on_main_history=assert_on_main_history,
         assert_at_origin_main_tip=assert_at_origin_main_tip,
+        direct_source_reverified=direct_source_reverified,
+        verification_ledger=verification_ledger,
     )
+    if selected_documents > document_budget:
+        raise ContextLibrarianError(
+            _format_document_overflow(
+                estimated_tokens=actual_tokens,
+                token_budget=token_budget,
+                selected_documents=selected_documents,
+                budget=document_budget,
+                references=references,
+                breakdown=breakdown,
+            )
+        )
     if actual_tokens > token_budget:
         raise ContextLibrarianError(
             _format_budget_overflow(
@@ -1749,7 +1977,7 @@ class BundleEstimate:
     שמחושב מתת-קבוצה של שדות (code_paths/test_paths/canonical_docs/notes
     בלבד היו מפספסים את באנר ה-git-provenance, את טקסט ה-mandatory-
     decisions, ואת קטעי ה-edges/freshness — כולם נספרים לתקציב האמיתי).
-    `fits` הוא בדיוק `actual_tokens <= token_budget`.
+    `fits` דורש שגם תקציב ה-token וגם תקציב המסמכים יעמדו במגבלה.
     """
 
     task_type: str
@@ -1757,6 +1985,9 @@ class BundleEstimate:
     fits: bool
     actual_tokens: int
     token_budget: int
+    selected_documents: int = 0
+    document_budget: int = 0
+    document_fits: bool = True
 
 
 def estimate_bundle(
@@ -1768,6 +1999,8 @@ def estimate_bundle(
     max_documents: int | None = None,
     production_claim: bool = False,
     verified_production_evidence: str | None = None,
+    direct_source_reverified: bool = False,
+    verification_ledger: Iterable[str] = (),
 ) -> BundleEstimate:
     """dry run של `build_bundle()`: אותה לוגיקת selection/render/measure,
     בשימוש חוזר ולא בכפילות, אבל מדווחת חריגת תקציב כ-
@@ -1787,7 +2020,10 @@ def estimate_bundle(
     claim` חסר) גם הן לא שאלות תקציב וזורקות שגיאה בכל זאת, בדיוק כמו
     `build_bundle()`.
     """
-    bundle, actual_tokens, token_budget, _ = _build_bundle_unchecked(
+    (
+        bundle, actual_tokens, token_budget, _,
+        selected_documents, document_budget, _,
+    ) = _build_bundle_unchecked(
         catalog,
         task_type=task_type,
         query=query,
@@ -1798,14 +2034,19 @@ def estimate_bundle(
         assert_main=False,
         assert_on_main_history=False,
         assert_at_origin_main_tip=False,
+        direct_source_reverified=direct_source_reverified,
+        verification_ledger=verification_ledger,
     )
     del bundle  # dry run: טקסט ה-bundle המרונדר עצמו לא מעניין את הקורא
     return BundleEstimate(
         task_type=task_type,
         query=query,
-        fits=actual_tokens <= token_budget,
+        fits=actual_tokens <= token_budget and selected_documents <= document_budget,
         actual_tokens=actual_tokens,
         token_budget=token_budget,
+        selected_documents=selected_documents,
+        document_budget=document_budget,
+        document_fits=selected_documents <= document_budget,
     )
 
 

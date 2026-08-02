@@ -11,6 +11,8 @@ from .librarian import (
     build_bundle,
     estimate_bundle,
     load_catalog,
+    discover_new_sources,
+    refresh_after_merge,
     suggest_profiles,
     verify_consumption,
 )
@@ -59,6 +61,14 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Fail closed unless generated_commit equals origin/main",
     )
+    build.add_argument(
+        "--direct-source-reverified", action="store_true",
+        help="Allow planning after stale-node direct source re-verification",
+    )
+    build.add_argument(
+        "--verification-ledger", action="append", default=[],
+        help="Record a directly re-verified source in the bundle ledger",
+    )
 
     estimate = sub.add_parser(
         "estimate",
@@ -103,6 +113,17 @@ def _parser() -> argparse.ArgumentParser:
 
     sub.add_parser("validate", help="Validate schemas, catalogs, edges, and paths")
 
+    refresh = sub.add_parser(
+        "refresh-after-merge",
+        help="Reconcile mechanical provenance against canonical main",
+    )
+    refresh.add_argument("--main-ref", default="origin/main")
+    refresh.add_argument("--check", action="store_true", help="Report only; never write")
+    refresh.add_argument("--write", action="store_true", help="Apply mechanical updates")
+
+    discover = sub.add_parser("discover-sources", help="Classify new unregistered sources")
+    discover.add_argument("--main-ref", default="origin/main")
+
     verify = sub.add_parser(
         "verify-consumption",
         help=(
@@ -130,6 +151,32 @@ def main(argv: list[str] | None = None) -> int:
                 f"Context Librarian catalog valid: {len(catalog.nodes)} nodes, "
                 f"{len(catalog.edges)} edges, {len(catalog.profiles)} profiles"
             )
+            return 0
+
+        if args.command == "refresh-after-merge":
+            if args.check and args.write:
+                raise ContextLibrarianError("choose only one of --check or --write")
+            proposal = refresh_after_merge(
+                catalog, main_ref=args.main_ref, write=args.write
+            )
+            print(json.dumps(proposal, ensure_ascii=False, indent=2, sort_keys=True))
+            if proposal["status"] == "OK":
+                print("OK: refresh is a no-op; catalog unchanged")
+                return 0
+            if args.check:
+                print(
+                    "CHANGES_REQUIRED: catalog provenance is stale or has "
+                    "unregistered sources; review before merge",
+                    file=sys.stderr,
+                )
+                return 1
+            return 0
+
+        if args.command == "discover-sources":
+            print(json.dumps(
+                discover_new_sources(catalog, main_ref=args.main_ref),
+                ensure_ascii=False, indent=2, sort_keys=True,
+            ))
             return 0
 
         if args.command == "verify-consumption":
@@ -208,6 +255,8 @@ def main(argv: list[str] | None = None) -> int:
             assert_main=args.assert_main,
             assert_on_main_history=args.assert_on_main_history,
             assert_at_origin_main_tip=args.assert_at_origin_main_tip,
+            direct_source_reverified=args.direct_source_reverified,
+            verification_ledger=args.verification_ledger,
         )
         if args.output:
             output = args.output
