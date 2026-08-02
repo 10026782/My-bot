@@ -163,6 +163,9 @@ def main(argv: list[str] | None = None) -> int:
             if proposal["status"] == "OK":
                 print("OK: refresh is a no-op; catalog unchanged")
                 return 0
+            if proposal["status"] == "WARNING":
+                print("WARNING: refresh has non-blocking warning-only sources")
+                return 0
             if args.check:
                 print(
                     "CHANGES_REQUIRED: catalog provenance is stale or has "

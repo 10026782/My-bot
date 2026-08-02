@@ -7,20 +7,43 @@
       "type": "decision",
       "status": "active",
       "authority_level": "canonical_contract",
-      "source_of_truth": {"is_authority": true, "scope": "repository reality precedence", "precedence": "current main code and tests first"},
+      "source_of_truth": {
+        "is_authority": true,
+        "scope": "repository reality precedence",
+        "precedence": "current main code and tests first"
+      },
       "owner": "governance",
       "code_paths": [],
       "test_paths": [],
       "canonical_docs": [
-        {"path": "GOVERNANCE_RULES.md", "role": "Rule 13 Main Is Reality", "status": "active"},
-        {"path": "AI_CONTEXT.md", "role": "current briefing with explicit main precedence", "status": "active"}
+        {
+          "path": "GOVERNANCE_RULES.md",
+          "role": "Rule 13 Main Is Reality",
+          "status": "active"
+        },
+        {
+          "path": "AI_CONTEXT.md",
+          "role": "current briefing with explicit main precedence",
+          "status": "active"
+        }
       ],
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-06-30",
-      "last_verified_commit": "59e74be",
+      "last_verified_commit": "7f4f0e80317fc1b8b43ccb097ec3e75e1a054d90",
       "confidence": 1.0,
-      "notes": ["A generated bundle or planning document cannot override main."]
+      "notes": [
+        "A generated bundle or planning document cannot override main."
+      ],
+      "extensions": {
+        "context_librarian.registration": {
+          "classification": "REGISTER_SUPPORTING",
+          "role": "supporting_metadata",
+          "authority": false,
+          "purpose": "maps canonical boundaries and points to existing authority sources",
+          "runtime_consumed": false
+        }
+      }
     },
     {
       "id": "decision.actioncontracts_authority",
@@ -28,20 +51,40 @@
       "type": "decision",
       "status": "active",
       "authority_level": "canonical_contract",
-      "source_of_truth": {"is_authority": true, "scope": "approval lifecycle", "precedence": "canonical ActionContract state over legacy queues and presentation state"},
+      "source_of_truth": {
+        "is_authority": true,
+        "scope": "approval lifecycle",
+        "precedence": "canonical ActionContract state over legacy queues and presentation state"
+      },
       "owner": "action_contracts",
-      "code_paths": ["core/action_gateway.py", "core/action_contract_repository.py"],
-      "test_paths": ["test_pr0c_action_contract_repository.py", "test_pr0c_action_contracts_persistence.py"],
+      "code_paths": [
+        "core/action_gateway.py",
+        "core/action_contract_repository.py"
+      ],
+      "test_paths": [
+        "test_pr0c_action_contract_repository.py",
+        "test_pr0c_action_contracts_persistence.py"
+      ],
       "canonical_docs": [
-        {"path": "docs/architecture/f52-unified-approval-runtime/decisions/DECISION_LOG.md", "role": "closed F52 lifecycle decisions", "status": "active"},
-        {"path": "docs/architecture/CROSS_LAYER_AUTHORITY_CONTRACT_V1.md", "role": "cross-layer ownership boundary", "status": "active"}
+        {
+          "path": "docs/architecture/f52-unified-approval-runtime/decisions/DECISION_LOG.md",
+          "role": "closed F52 lifecycle decisions",
+          "status": "active"
+        },
+        {
+          "path": "docs/architecture/CROSS_LAYER_AUTHORITY_CONTRACT_V1.md",
+          "role": "cross-layer ownership boundary",
+          "status": "active"
+        }
       ],
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-23",
-      "last_verified_commit": "59e74be",
+      "last_verified_commit": "7f4f0e80317fc1b8b43ccb097ec3e75e1a054d90",
       "confidence": 1.0,
-      "notes": ["Legacy IDs may resolve an existing contract but never create, infer, or repair one."]
+      "notes": [
+        "Legacy IDs may resolve an existing contract but never create, infer, or repair one."
+      ]
     },
     {
       "id": "decision.no_new_source_of_truth",
@@ -49,20 +92,34 @@
       "type": "decision",
       "status": "active",
       "authority_level": "canonical_contract",
-      "source_of_truth": {"is_authority": true, "scope": "cross-layer architecture", "precedence": "existing domain owners retain authority"},
+      "source_of_truth": {
+        "is_authority": true,
+        "scope": "cross-layer architecture",
+        "precedence": "existing domain owners retain authority"
+      },
       "owner": "governance",
       "code_paths": [],
       "test_paths": [],
       "canonical_docs": [
-        {"path": "docs/architecture/CROSS_LAYER_AUTHORITY_CONTRACT_V1.md", "role": "parallel source-of-truth prohibition", "status": "active"},
-        {"path": "GOVERNANCE_RULES.md", "role": "Rule 17 Single Source of Status", "status": "active"}
+        {
+          "path": "docs/architecture/CROSS_LAYER_AUTHORITY_CONTRACT_V1.md",
+          "role": "parallel source-of-truth prohibition",
+          "status": "active"
+        },
+        {
+          "path": "GOVERNANCE_RULES.md",
+          "role": "Rule 17 Single Source of Status",
+          "status": "active"
+        }
       ],
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-23",
       "last_verified_commit": "59e74be",
       "confidence": 1.0,
-      "notes": ["The Context Librarian is metadata and references only."]
+      "notes": [
+        "The Context Librarian is metadata and references only."
+      ]
     },
     {
       "id": "decision.shadow_not_active",
@@ -70,19 +127,33 @@
       "type": "decision",
       "status": "active",
       "authority_level": "canonical_contract",
-      "source_of_truth": {"is_authority": true, "scope": "rollout status interpretation", "precedence": "verified environment and behavior evidence over code defaults"},
+      "source_of_truth": {
+        "is_authority": true,
+        "scope": "rollout status interpretation",
+        "precedence": "verified environment and behavior evidence over code defaults"
+      },
       "owner": "governance",
-      "code_paths": ["feature_flags.py"],
-      "test_paths": ["test_feature_flags_cutover.py"],
+      "code_paths": [
+        "feature_flags.py"
+      ],
+      "test_paths": [
+        "test_feature_flags_cutover.py"
+      ],
       "canonical_docs": [
-        {"path": "BOSS_AGENT_RELIABILITY_AND_PERMISSION_HARDENING_SPEC.md", "role": "rollout gates", "status": "active"}
+        {
+          "path": "BOSS_AGENT_RELIABILITY_AND_PERMISSION_HARDENING_SPEC.md",
+          "role": "rollout gates",
+          "status": "active"
+        }
       ],
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-23",
-      "last_verified_commit": "59e74be",
+      "last_verified_commit": "7f4f0e80317fc1b8b43ccb097ec3e75e1a054d90",
       "confidence": 1.0,
-      "notes": ["A code default is not evidence of the current deployed environment."]
+      "notes": [
+        "A code default is not evidence of the current deployed environment."
+      ]
     },
     {
       "id": "decision.production_verification",
@@ -90,20 +161,34 @@
       "type": "decision",
       "status": "active",
       "authority_level": "canonical_contract",
-      "source_of_truth": {"is_authority": true, "scope": "completion status claims", "precedence": "merge plus deployment plus live verification"},
+      "source_of_truth": {
+        "is_authority": true,
+        "scope": "completion status claims",
+        "precedence": "merge plus deployment plus live verification"
+      },
       "owner": "governance",
       "code_paths": [],
       "test_paths": [],
       "canonical_docs": [
-        {"path": "GOVERNANCE_RULES.md", "role": "Rule 15 No Claim Without Verification", "status": "active"},
-        {"path": "AGENTS.md", "role": "post-merge verification procedure", "status": "active"}
+        {
+          "path": "GOVERNANCE_RULES.md",
+          "role": "Rule 15 No Claim Without Verification",
+          "status": "active"
+        },
+        {
+          "path": "AGENTS.md",
+          "role": "post-merge verification procedure",
+          "status": "active"
+        }
       ],
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-06-30",
-      "last_verified_commit": "59e74be",
+      "last_verified_commit": "7f4f0e80317fc1b8b43ccb097ec3e75e1a054d90",
       "confidence": 1.0,
-      "notes": ["Without all three gates report Implemented but not yet verified."]
+      "notes": [
+        "Without all three gates report Implemented but not yet verified."
+      ]
     },
     {
       "id": "decision.historical_evidence_precedence",
@@ -111,19 +196,29 @@
       "type": "decision",
       "status": "active",
       "authority_level": "canonical_contract",
-      "source_of_truth": {"is_authority": true, "scope": "evidence chronology", "precedence": "later verified main/production evidence over older observations"},
+      "source_of_truth": {
+        "is_authority": true,
+        "scope": "evidence chronology",
+        "precedence": "later verified main/production evidence over older observations"
+      },
       "owner": "governance",
       "code_paths": [],
       "test_paths": [],
       "canonical_docs": [
-        {"path": "AI_CONTEXT.md", "role": "dated evidence and staleness guidance", "status": "active"}
+        {
+          "path": "AI_CONTEXT.md",
+          "role": "dated evidence and staleness guidance",
+          "status": "active"
+        }
       ],
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-23",
-      "last_verified_commit": "59e74be",
+      "last_verified_commit": "7f4f0e80317fc1b8b43ccb097ec3e75e1a054d90",
       "confidence": 0.98,
-      "notes": ["Preserve historical failures as evidence, but do not treat them as current state without re-verification."]
+      "notes": [
+        "Preserve historical failures as evidence, but do not treat them as current state without re-verification."
+      ]
     },
     {
       "id": "decision.ux_no_internal_ids",
@@ -131,19 +226,35 @@
       "type": "decision",
       "status": "active",
       "authority_level": "canonical_contract",
-      "source_of_truth": {"is_authority": true, "scope": "user-facing message safety", "precedence": "business descriptions and safe display payloads only"},
+      "source_of_truth": {
+        "is_authority": true,
+        "scope": "user-facing message safety",
+        "precedence": "business descriptions and safe display payloads only"
+      },
       "owner": "ux_f52",
-      "code_paths": ["core/agent_message_formatter.py", "core/action_gateway.py"],
-      "test_paths": ["test_agent_message_formatter_display_payload.py", "test_f52_status_reply_reconciliation.py"],
+      "code_paths": [
+        "core/agent_message_formatter.py",
+        "core/action_gateway.py"
+      ],
+      "test_paths": [
+        "test_agent_message_formatter_display_payload.py",
+        "test_f52_status_reply_reconciliation.py"
+      ],
       "canonical_docs": [
-        {"path": "docs/architecture/f52-unified-approval-runtime/spec/UNIFIED_MESSAGE_UX_STANDARD.md", "role": "UX source of truth", "status": "active"}
+        {
+          "path": "docs/architecture/f52-unified-approval-runtime/spec/UNIFIED_MESSAGE_UX_STANDARD.md",
+          "role": "UX source of truth",
+          "status": "active"
+        }
       ],
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-23",
-      "last_verified_commit": "59e74be",
+      "last_verified_commit": "7f4f0e80317fc1b8b43ccb097ec3e75e1a054d90",
       "confidence": 1.0,
-      "notes": ["Do not expose record IDs, contract IDs, payloads, credentials, or internal tool names."]
+      "notes": [
+        "Do not expose record IDs, contract IDs, payloads, credentials, or internal tool names."
+      ]
     },
     {
       "id": "decision.cross_layer_authority",
@@ -151,19 +262,29 @@
       "type": "decision",
       "status": "active",
       "authority_level": "canonical_contract",
-      "source_of_truth": {"is_authority": true, "scope": "changes spanning reasoning, routing, approvals, tools, UX, or evidence", "precedence": "complete impact matrix and proof of non-impact before implementation"},
+      "source_of_truth": {
+        "is_authority": true,
+        "scope": "changes spanning reasoning, routing, approvals, tools, UX, or evidence",
+        "precedence": "complete impact matrix and proof of non-impact before implementation"
+      },
       "owner": "governance",
       "code_paths": [],
       "test_paths": [],
       "canonical_docs": [
-        {"path": "docs/architecture/CROSS_LAYER_AUTHORITY_CONTRACT_V1.md", "role": "cross-layer authority contract", "status": "active"}
+        {
+          "path": "docs/architecture/CROSS_LAYER_AUTHORITY_CONTRACT_V1.md",
+          "role": "cross-layer authority contract",
+          "status": "active"
+        }
       ],
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-23",
       "last_verified_commit": "59e74be",
       "confidence": 1.0,
-      "notes": ["Layer numbering aliases must not overwrite semantic ownership boundaries."]
+      "notes": [
+        "Layer numbering aliases must not overwrite semantic ownership boundaries."
+      ]
     },
     {
       "id": "decision.business_intent_and_planning_authority",
@@ -171,21 +292,45 @@
       "type": "decision",
       "status": "active",
       "authority_level": "canonical_contract",
-      "source_of_truth": {"is_authority": true, "scope": "business intent, feature-scoping rationale, planning sequencing, and merged-change/status history", "precedence": "BOSS_BUSINESS_INTENT.md for why/for whom; PLANNING_GATE.md for the mandatory pre-implementation gate; BOSS_UNIFIED_MASTER_PLAN.md for Horizon sequencing; ROADMAP.md for what is planned; CHANGE_CONTROL_LOG.md for what already merged"},
+      "source_of_truth": {
+        "is_authority": true,
+        "scope": "business intent, feature-scoping rationale, planning sequencing, and merged-change/status history",
+        "precedence": "BOSS_BUSINESS_INTENT.md for why/for whom; PLANNING_GATE.md for the mandatory pre-implementation gate; BOSS_UNIFIED_MASTER_PLAN.md for Horizon sequencing; ROADMAP.md for what is planned; CHANGE_CONTROL_LOG.md for what already merged"
+      },
       "owner": "governance",
       "code_paths": [],
       "test_paths": [],
       "canonical_docs": [
-        {"path": "docs/governance/BOSS_BUSINESS_INTENT.md", "role": "owner-authored business intent, single source of truth for why/for whom", "status": "active"},
-        {"path": "docs/governance/PLANNING_GATE.md", "role": "mandatory technical planning gate before any SPEC or code change", "status": "active"},
-        {"path": "docs/governance/BOSS_UNIFIED_MASTER_PLAN.md", "role": "planning super-layer, Horizon sequencing, does not replace ROADMAP.md", "status": "active"},
-        {"path": "ROADMAP.md", "role": "single source of truth for planned work", "status": "active"},
-        {"path": "CHANGE_CONTROL_LOG.md", "role": "append-only record of merged changes", "status": "active"}
+        {
+          "path": "docs/governance/BOSS_BUSINESS_INTENT.md",
+          "role": "owner-authored business intent, single source of truth for why/for whom",
+          "status": "active"
+        },
+        {
+          "path": "docs/governance/PLANNING_GATE.md",
+          "role": "mandatory technical planning gate before any SPEC or code change",
+          "status": "active"
+        },
+        {
+          "path": "docs/governance/BOSS_UNIFIED_MASTER_PLAN.md",
+          "role": "planning super-layer, Horizon sequencing, does not replace ROADMAP.md",
+          "status": "active"
+        },
+        {
+          "path": "ROADMAP.md",
+          "role": "single source of truth for planned work",
+          "status": "active"
+        },
+        {
+          "path": "CHANGE_CONTROL_LOG.md",
+          "role": "append-only record of merged changes",
+          "status": "active"
+        }
       ],
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-30",
-      "last_verified_commit": "55312ab2096786f2892853d8b2f6d477b6e1cf12",
+      "last_verified_commit": "7f4f0e80317fc1b8b43ccb097ec3e75e1a054d90",
       "confidence": 1.0,
       "notes": [
         "Added after the first real Consumption Enforcement pilot (docs/governance/librarian/FIRST_REAL_CONSUMPTION_PILOT.md) found these five sources missing from cross_layer_architecture's mandatory tier despite being materially load-bearing for the recommendation.",
@@ -198,23 +343,61 @@
       "type": "decision",
       "status": "active",
       "authority_level": "canonical_contract",
-      "source_of_truth": {"is_authority": true, "scope": "unified message state/lifecycle contract consumed across TurnCoordinator, RP5, and the UX Formatter", "precedence": "MESSAGE_CONTRACT_ENVELOPE_CONTRACT_V1.md defines the frozen contract; the rollout/migration/implementation plans define its sequencing, not a competing contract"},
+      "source_of_truth": {
+        "is_authority": true,
+        "scope": "unified message state/lifecycle contract consumed across TurnCoordinator, RP5, and the UX Formatter",
+        "precedence": "MESSAGE_CONTRACT_ENVELOPE_CONTRACT_V1.md defines the frozen contract; the rollout/migration/implementation plans define its sequencing, not a competing contract"
+      },
       "owner": "ux_f52",
-      "code_paths": ["core/message_contract.py", "core/approval_lifecycle_message_adapter.py"],
-      "test_paths": ["test_message_contract.py", "test_approval_lifecycle_message_adapter.py"],
+      "code_paths": [
+        "core/message_contract.py",
+        "core/approval_lifecycle_message_adapter.py"
+      ],
+      "test_paths": [
+        "test_message_contract.py",
+        "test_approval_lifecycle_message_adapter.py"
+      ],
       "canonical_docs": [
-        {"path": "docs/architecture/f52-unified-approval-runtime/spec/MESSAGE_CONTRACT_ENVELOPE_CONTRACT_V1.md", "role": "frozen cross-layer message contract (D-012, D-013 evidence_status addendum)", "status": "active"},
-        {"path": "docs/architecture/f52-unified-approval-runtime/decisions/DECISION_LOG.md", "role": "D-012 (MessageContract canonical) and D-013 (evidence_status ratified as non-authoritative metadata)", "status": "active"},
-        {"path": "docs/architecture/message_contract/MESSAGE_CONTRACT_ENVELOPE_FOUNDATION_SPEC.md", "role": "Stage 3A foundation SPEC implementing this decision", "status": "active"},
-        {"path": "docs/architecture/message_contract/APPROVAL_LIFECYCLE_RESULT_ADAPTER_SPEC.md", "role": "PR B pure ApprovalLifecycleResult adapter SPEC", "status": "active"},
-        {"path": "docs/architecture/f52-unified-approval-runtime/rollout/MESSAGE_CONTRACT_ENVELOPE_MIGRATION_PLAN.md", "role": "migration sequencing for the envelope contract (PR A merged, PR B/C pending)", "status": "active"},
-        {"path": "docs/architecture/f52-unified-approval-runtime/rollout/UNIFIED_MESSAGE_IMPLEMENTATION_PLAN.md", "role": "PR sequence implementing the unified message standard", "status": "active"},
-        {"path": "docs/architecture/multilayer/BOSS_MULTILAYER_ALIGNMENT_PLAN.md", "role": "owner-approved Stage 3A scope/DoD (§16-17); PR B boundary and repeated/already_cancelled deferral (§17)", "status": "active"}
+        {
+          "path": "docs/architecture/f52-unified-approval-runtime/spec/MESSAGE_CONTRACT_ENVELOPE_CONTRACT_V1.md",
+          "role": "frozen cross-layer message contract (D-012, D-013 evidence_status addendum)",
+          "status": "active"
+        },
+        {
+          "path": "docs/architecture/f52-unified-approval-runtime/decisions/DECISION_LOG.md",
+          "role": "D-012 (MessageContract canonical) and D-013 (evidence_status ratified as non-authoritative metadata)",
+          "status": "active"
+        },
+        {
+          "path": "docs/architecture/message_contract/MESSAGE_CONTRACT_ENVELOPE_FOUNDATION_SPEC.md",
+          "role": "Stage 3A foundation SPEC implementing this decision",
+          "status": "active"
+        },
+        {
+          "path": "docs/architecture/message_contract/APPROVAL_LIFECYCLE_RESULT_ADAPTER_SPEC.md",
+          "role": "PR B pure ApprovalLifecycleResult adapter SPEC",
+          "status": "active"
+        },
+        {
+          "path": "docs/architecture/f52-unified-approval-runtime/rollout/MESSAGE_CONTRACT_ENVELOPE_MIGRATION_PLAN.md",
+          "role": "migration sequencing for the envelope contract (PR A merged, PR B/C pending)",
+          "status": "active"
+        },
+        {
+          "path": "docs/architecture/f52-unified-approval-runtime/rollout/UNIFIED_MESSAGE_IMPLEMENTATION_PLAN.md",
+          "role": "PR sequence implementing the unified message standard",
+          "status": "active"
+        },
+        {
+          "path": "docs/architecture/multilayer/BOSS_MULTILAYER_ALIGNMENT_PLAN.md",
+          "role": "owner-approved Stage 3A scope/DoD (§16-17); PR B boundary and repeated/already_cancelled deferral (§17)",
+          "status": "active"
+        }
       ],
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-30",
-      "last_verified_commit": "1c51570196c4660980546bdcf8dc337353489be8",
+      "last_verified_commit": "7f4f0e80317fc1b8b43ccb097ec3e75e1a054d90",
       "confidence": 1.0,
       "notes": [
         "Added after the first real Consumption Enforcement pilot found these sources missing from cross_layer_architecture's mandatory tier, despite Stage 3A's own recommendation resting on this exact contract.",
@@ -224,7 +407,17 @@
     }
   ],
   "edges": [
-    {"from": "decision.actioncontracts_authority", "to": "decision.no_new_source_of_truth", "type": "governed_by", "notes": "Approval lifecycle cannot be duplicated."},
-    {"from": "decision.ux_no_internal_ids", "to": "decision.production_verification", "type": "governed_by", "notes": "Safe wording still requires live verification before completion claims."}
+    {
+      "from": "decision.actioncontracts_authority",
+      "to": "decision.no_new_source_of_truth",
+      "type": "governed_by",
+      "notes": "Approval lifecycle cannot be duplicated."
+    },
+    {
+      "from": "decision.ux_no_internal_ids",
+      "to": "decision.production_verification",
+      "type": "governed_by",
+      "notes": "Safe wording still requires live verification before completion claims."
+    }
   ]
 }

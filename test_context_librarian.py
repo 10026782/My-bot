@@ -844,13 +844,13 @@ def test_core_reasoning_profile_includes_decision_adapter_and_write_side_note(ca
     assert "tma_api.py is listed above as both the only live caller" in bundle
 
 
-def test_approval_ux_profile_surfaces_parallel_sources_of_truth(catalog):
+def test_approval_ux_profile_surfaces_parallel_approval_mechanisms(catalog):
     bundle = build_bundle(
         catalog,
         task_type="approval_ux",
         query="repeated approval returns the wrong message",
     )
-    assert "PARALLEL SOURCES OF TRUTH" in bundle
+    assert "PARALLEL APPROVAL MECHANISMS" in bundle
     assert "`event_bus.py`" in bundle
     assert "PendingActionsStore" in bundle
 
@@ -1842,6 +1842,36 @@ def test_new_source_classification_never_auto_registers(catalog):
     assert by_path["core/authority.py"] == "STOP"
 
 
+def test_catalog_metadata_files_are_not_classified_as_new_sources(catalog):
+    result = classify_new_sources(
+        catalog,
+        [
+            "docs/context_librarian/decisions/canonical_boundaries.json",
+            "docs/context_librarian/layers/approvals.json",
+        ],
+    )
+    assert result == []
+
+
+def test_librarian_infrastructure_files_are_not_domain_sources(catalog):
+    infrastructure = [
+        ".githooks/post-merge",
+        "docs/context_librarian/generated/.gitkeep",
+        "docs/context_librarian/schema/edge_schema.json",
+        "docs/context_librarian/schema/node_schema.json",
+        "docs/context_librarian/task_profiles/profiles.json",
+        "tools/context_librarian/__init__.py",
+        "tools/context_librarian/__main__.py",
+        "tools/context_librarian/benchmark_token_estimate.py",
+        "tools/context_librarian/librarian.py",
+        "tools/context_librarian/local_post_merge_check.sh",
+        "tools/context_librarian/manage_hooks.py",
+        "tools/context_librarian/pilot_preflight.py",
+        "tools/context_librarian/refresh_after_merge.py",
+    ]
+    assert classify_new_sources(catalog, infrastructure) == []
+
+
 @pytest.mark.parametrize("merge_shape", ["normal", "squash"])
 def test_refresh_reconciles_provenance_to_canonical_main_sha(catalog, monkeypatch, merge_shape):
     canonical = "normal-main-sha" if merge_shape == "normal" else "squash-main-sha"
@@ -1867,6 +1897,21 @@ def test_refresh_noop_reports_ok_without_updates(catalog, monkeypatch):
     proposal = refresh_after_merge(catalog)
     assert proposal["status"] == "OK"
     assert proposal["updates"] == []
+
+
+def test_refresh_warning_only_is_non_blocking(catalog, monkeypatch):
+    monkeypatch.setattr(librarian, "_git_output", lambda _root, _args: "main-sha")
+    monkeypatch.setattr(librarian, "_node_changed_between", lambda *_args: set())
+    monkeypatch.setattr(
+        librarian,
+        "discover_new_sources",
+        lambda *_args, **_kwargs: [
+            {"path": "test_new.py", "classification": "WARNING", "reason": "new test source"}
+        ],
+    )
+    proposal = refresh_proposal(catalog)
+    assert proposal["status"] == "WARNING"
+    assert proposal["authority_review_required"] is False
 
 
 def test_budget_overflow_is_reported_before_output_write(catalog, tmp_path):

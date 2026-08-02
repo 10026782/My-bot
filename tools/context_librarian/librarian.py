@@ -682,6 +682,36 @@ def _catalog_referenced_paths(catalog: Catalog) -> set[str]:
         paths.update(node["test_paths"])
         paths.update(ref["path"] for ref in node["canonical_docs"])
         paths.update(ref["path"] for ref in node["production_evidence"])
+    # Catalog files are the Librarian's own metadata infrastructure. They are
+    # registered by the catalog loader itself, not by a domain node's
+    # code_paths/canonical_docs. Treating them as unregistered domain sources
+    # would turn every catalog file into a false authority STOP.
+    catalog_files = sorted((catalog.catalog_root / "layers").glob("*.json"))
+    catalog_files.append(catalog.catalog_root / "decisions/canonical_boundaries.json")
+    paths.update(
+        str(path.relative_to(catalog.repo_root)).replace("\\", "/")
+        for path in catalog_files
+    )
+    # These files are the Librarian's own versioned infrastructure rather than
+    # domain sources. Keep the list explicit so a genuinely new tooling file
+    # still reaches source discovery for review instead of being auto-accepted.
+    paths.update(
+        {
+            ".githooks/post-merge",
+            "docs/context_librarian/generated/.gitkeep",
+            "docs/context_librarian/schema/edge_schema.json",
+            "docs/context_librarian/schema/node_schema.json",
+            "docs/context_librarian/task_profiles/profiles.json",
+            "tools/context_librarian/__init__.py",
+            "tools/context_librarian/__main__.py",
+            "tools/context_librarian/benchmark_token_estimate.py",
+            "tools/context_librarian/librarian.py",
+            "tools/context_librarian/local_post_merge_check.sh",
+            "tools/context_librarian/manage_hooks.py",
+            "tools/context_librarian/pilot_preflight.py",
+            "tools/context_librarian/refresh_after_merge.py",
+        }
+    )
     return {path.replace("\\", "/") for path in paths}
 
 
@@ -767,8 +797,18 @@ def refresh_proposal(catalog: Catalog, *, main_ref: str = "origin/main") -> dict
                 "changed_paths": changed,
             })
     new_sources = discover_new_sources(catalog, main_ref=main_ref)
+    has_blocking_new_sources = any(
+        item["classification"] != "WARNING" for item in new_sources
+    )
+    status = (
+        "CHANGES_REQUIRED"
+        if updates or has_blocking_new_sources
+        else "WARNING"
+        if new_sources
+        else "OK"
+    )
     return {
-        "status": "CHANGES_REQUIRED" if updates or new_sources else "OK",
+        "status": status,
         "main_ref": main_ref,
         "canonical_main_sha": main_sha,
         "updates": updates,
