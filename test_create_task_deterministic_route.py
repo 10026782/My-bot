@@ -39,7 +39,7 @@ def _owner(user_id: str = "owner-deterministic-create-task") -> Identity:
     [
         ("colon", "צור משימה: X", "X"),
         ("no-colon", "צור משימה X", "X"),
-        ("date", "צור משימה X עד לתאריך Y", "X עד לתאריך Y"),
+        ("date-time", "צור משימה X עד לתאריך Y בשעה Z", "X עד לתאריך Y בשעה Z"),
     ],
 )
 def test_structured_create_task_is_gateway_owned_without_agent_call(case_id, text, expected_title):

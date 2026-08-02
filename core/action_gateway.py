@@ -17,6 +17,7 @@ import random
 import re
 import threading
 import time
+import unicodedata
 import uuid
 from dataclasses import dataclass, field
 from typing import Callable
@@ -38,6 +39,43 @@ from core.action_resolution_event import ActionResolutionEvent, ActionResolution
 from tool_registry import needs_approval
 
 logger = logging.getLogger(__name__)
+
+_BUSINESS_TEXT_ZERO_WIDTH_RE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060\ufeff]")
+_BUSINESS_TEXT_TRAILING_PUNCTUATION = " .,!?:;،؛。！？"
+_BUSINESS_TEXT_WRAPPERS = {
+    ('"', '"'), ("'", "'"), ("“", "”"), ("‘", "’"),
+    ("(", ")"), ("[", "]"), ("{", "}"),
+}
+
+
+def _canonical_business_text(value: str) -> str:
+    """Canonicalize user-visible business text for action identity only."""
+    text = unicodedata.normalize("NFKC", str(value or ""))
+    text = _BUSINESS_TEXT_ZERO_WIDTH_RE.sub("", text)
+    text = text.replace("\u00a0", " ")
+    text = " ".join(text.split())
+    text = re.sub(r"^>\s*", "", text)
+    changed = True
+    while changed and len(text) >= 2:
+        changed = False
+        for opening, closing in _BUSINESS_TEXT_WRAPPERS:
+            if text.startswith(opening) and text.endswith(closing):
+                text = text[1:-1].strip()
+                changed = True
+                break
+    return text.rstrip(_BUSINESS_TEXT_TRAILING_PUNCTUATION).strip()
+
+
+def _canonical_task_payload(payload: dict) -> dict:
+    """Normalize task business fields without changing non-text structure."""
+    result = dict(payload or {})
+    fields = result.get("fields")
+    if isinstance(fields, dict):
+        result["fields"] = {
+            key: _canonical_business_text(value) if isinstance(value, str) else value
+            for key, value in fields.items()
+        }
+    return result
 
 
 # ══════════════════════════════════════════════════
@@ -1411,6 +1449,10 @@ class ActionGateway:
                 )
 
         normalized = self.normalize_payload(tool_inputs)
+        if tool_name in ("airtable_add", "airtable_update") and is_task_table(
+            normalized.get("table")
+        ):
+            normalized = _canonical_task_payload(normalized)
         fingerprint = self.compute_business_fingerprint(
             tenant_id, canonical_user_id, tool_name, normalized
         )
@@ -1444,6 +1486,16 @@ class ActionGateway:
                 )
             if existing.status in ("completed", "executed"):
                 return self._handle_duplicate_executed(existing, canonical_user_id)
+            if existing.status == "rejected":
+                repeated = build_approval_lifecycle_result(
+                    existing, canonical_state="rejected", repeated=True,
+                )
+                return GatewayResult(
+                    ok=False,
+                    reason="business action already rejected",
+                    contract_id=existing.contract_id,
+                    user_message=repeated.safe_user_message,
+                )
             if existing.status in ("approved", "executing", "outcome_unknown"):
                 return GatewayResult(
                     ok=False,
