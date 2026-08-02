@@ -162,6 +162,14 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(proposal, ensure_ascii=False, indent=2, sort_keys=True))
             if proposal["status"] == "OK":
                 print("OK: refresh is a no-op; catalog unchanged")
+                return 0
+            if args.check:
+                print(
+                    "CHANGES_REQUIRED: catalog provenance is stale or has "
+                    "unregistered sources; review before merge",
+                    file=sys.stderr,
+                )
+                return 1
             return 0
 
         if args.command == "discover-sources":

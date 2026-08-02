@@ -706,6 +706,14 @@ def test_direct_verification_allows_planning_with_ledger(catalog, monkeypatch):
     assert "tools/dispatcher.py@main" in bundle
 
 
+def test_direct_verification_without_ledger_still_requires_review():
+    gate = evaluate_workflow_gate(
+        stale_node_ids=["layer.tools"], direct_source_reverified=True
+    )
+    assert gate["status"] == "REVIEW_REQUIRED"
+    assert "direct_source_reverification" in gate["review_required"]
+
+
 @pytest.mark.parametrize(
     ("kwargs", "reason"),
     [
@@ -1862,9 +1870,13 @@ def test_refresh_noop_reports_ok_without_updates(catalog, monkeypatch):
 
 
 def test_budget_overflow_is_reported_before_output_write(catalog, tmp_path):
+    from tools.context_librarian.__main__ import main as cli_main
+
     output = tmp_path / "bundle.md"
-    with pytest.raises(ContextLibrarianError, match="context budget overflow"):
-        build_bundle(catalog, task_type="rp5_evidence_mismatch", query="evidence", max_tokens=1)
+    assert cli_main([
+        "build", "--task-type", "rp5_evidence_mismatch", "--query", "evidence",
+        "--max-tokens", "1", "--output", str(output),
+    ]) == 2
     assert not output.exists()
 
 

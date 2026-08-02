@@ -487,6 +487,8 @@ def evaluate_workflow_gate(
     what changed and which sources require direct verification.
     """
     stale = sorted(set(stale_node_ids))
+    ledger = sorted(set(verification_ledger))
+    verified_with_record = direct_source_reverified and bool(ledger)
     conflicts = sorted(set(unresolved_conflicts))
     leakage = sorted(set(excluded_layer_leakage))
     missing = sorted(set(authority_missing))
@@ -513,12 +515,16 @@ def evaluate_workflow_gate(
     if leakage:
         reasons.append("excluded_layer_leakage")
     if stale:
-        warnings.append("stale_nodes_after_direct_verification" if direct_source_reverified else "stale_nodes")
+        warnings.append(
+            "stale_nodes_after_direct_verification"
+            if verified_with_record
+            else "stale_nodes"
+        )
     if activity:
         warnings.append("github_activity")
     if new_authority:
         review_required.extend(f"new_authority_source:{path}" for path in new_authority)
-    if stale and not direct_source_reverified:
+    if stale and not verified_with_record:
         review_required.append("direct_source_reverification")
     status = "STOP" if reasons else "REVIEW_REQUIRED" if review_required else "WARNING" if warnings else "PROCEED"
     return {
@@ -529,7 +535,7 @@ def evaluate_workflow_gate(
         "review_required": sorted(review_required),
         "stale_nodes": stale,
         "direct_source_reverified": direct_source_reverified,
-        "verification_ledger": sorted(set(verification_ledger)),
+        "verification_ledger": ledger,
         "authority_missing": missing,
         "canonical_state_undetermined": undetermined,
         "stale_authority_runtime_changes": stale_runtime,
@@ -645,6 +651,7 @@ def _git_changed_paths(repo_root: Path, commit: str) -> set[str]:
 
 
 def _git_output(repo_root: Path, args: list[str]) -> str:
+    """מריצה פקודת git ומחזירה פלט נקי או שגיאת provenance ברורה."""
     try:
         completed = subprocess.run(
             ["git", *args], cwd=repo_root, check=True, capture_output=True,
@@ -656,6 +663,7 @@ def _git_output(repo_root: Path, args: list[str]) -> str:
 
 
 def _catalog_node_files(catalog: Catalog) -> dict[str, Path]:
+    """ממפה node לקובץ הקטלוג שמכיל אותו לצורך כתיבה מכנית."""
     result: dict[str, Path] = {}
     paths = sorted((catalog.catalog_root / "layers").glob("*.json"))
     paths.append(catalog.catalog_root / "decisions/canonical_boundaries.json")
@@ -667,6 +675,7 @@ def _catalog_node_files(catalog: Catalog) -> dict[str, Path]:
 
 
 def _catalog_referenced_paths(catalog: Catalog) -> set[str]:
+    """מחזירה את כל הנתיבים שכבר רשומים במקורות הקטלוג."""
     paths: set[str] = set()
     for node in catalog.nodes.values():
         paths.update(node["code_paths"])
@@ -685,7 +694,7 @@ _AUTHORITY_TERMS = frozenset({
 def classify_new_sources(
     catalog: Catalog, paths: Iterable[str]
 ) -> list[dict[str, str]]:
-    """Classify unregistered files without registering their meaning."""
+    """מסווגת קבצים לא-רשומים בלי לרשום אוטומטית את משמעותם."""
     registered = _catalog_referenced_paths(catalog)
     result: list[dict[str, str]] = []
     for raw_path in sorted({path.replace("\\", "/") for path in paths} - registered):
@@ -711,11 +720,21 @@ def discover_new_sources(
     catalog: Catalog, *, changed_paths: Iterable[str] | None = None,
     main_ref: str = "origin/main"
 ) -> list[dict[str, str]]:
+    """מזהה קבצים חדשים מאז עוגן ה-refresh הקנוני ומסווגת אותם לבדיקה."""
     if changed_paths is None:
         main_sha = _git_output(catalog.repo_root, ["rev-parse", "--verify", main_ref])
-        parent = _git_output(catalog.repo_root, ["rev-parse", f"{main_sha}^"])
+        anchors = sorted({
+            node["last_verified_commit"]
+            for node in catalog.nodes.values()
+            if node.get("last_verified_commit")
+        })
+        base = (
+            _git_output(catalog.repo_root, ["merge-base", "--octopus", *anchors])
+            if anchors
+            else _git_output(catalog.repo_root, ["rev-parse", f"{main_sha}^"])
+        )
         changed_paths = _git_output(
-            catalog.repo_root, ["diff", "--diff-filter=A", "--name-only", parent, main_sha]
+            catalog.repo_root, ["diff", "--diff-filter=A", "--name-only", base, main_sha]
         ).splitlines()
     return classify_new_sources(catalog, changed_paths)
 
@@ -735,7 +754,7 @@ def _node_changed_between(catalog: Catalog, node: dict[str, Any], main_sha: str)
 
 
 def refresh_proposal(catalog: Catalog, *, main_ref: str = "origin/main") -> dict[str, Any]:
-    """Compute a mechanical refresh proposal against a canonical main SHA."""
+    """מחשבת הצעת refresh מכנית מול SHA קנוני של main."""
     main_sha = _git_output(catalog.repo_root, ["rev-parse", "--verify", main_ref])
     updates: list[dict[str, Any]] = []
     for node in sorted(catalog.nodes.values(), key=lambda item: item["id"]):
@@ -761,7 +780,7 @@ def refresh_proposal(catalog: Catalog, *, main_ref: str = "origin/main") -> dict
 def refresh_after_merge(
     catalog: Catalog, *, main_ref: str = "origin/main", write: bool = False
 ) -> dict[str, Any]:
-    """Apply only mechanical provenance updates; authority classification stays reviewed."""
+    """מיישמת רק עדכוני provenance מכניים; סיווג authority נשאר לבדיקה."""
     proposal = refresh_proposal(catalog, main_ref=main_ref)
     if not write or proposal["status"] == "OK":
         return proposal
@@ -908,10 +927,9 @@ def _freshness(
 def _unique_references(
     nodes: list[dict[str, Any]], field: str
 ) -> list[tuple[str, dict[str, Any]]]:
-    """Return every current reference in deterministic round-robin order.
+    """מחזירה את כל המקורות בסדר round-robin דטרמיניסטי.
 
-    Budget enforcement belongs to ``build_bundle``. This helper must never
-    turn a budget into an implicit source-selection policy.
+    אכיפת תקציב שייכת ל-``build_bundle``; הפונקציה אינה משמיטה מקור בשקט.
     """
     result: list[tuple[str, dict[str, Any]]] = []
     seen: set[str] = set()
@@ -1737,7 +1755,7 @@ def _budget_breakdown(
     docs: list[tuple[str, dict[str, Any]]],
     evidence: list[tuple[str, dict[str, Any]]],
 ) -> list[str]:
-    """Describe the candidate's measurable metadata by node and source."""
+    """מתארת את metadata של המועמד לפי node ומקור לצורך breakdown."""
     breakdown: list[str] = []
     for node in nodes:
         metadata = "\n".join(
@@ -1807,11 +1825,11 @@ def _build_bundle_unchecked(
     assert_at_origin_main_tip: bool,
     direct_source_reverified: bool = False,
     verification_ledger: Iterable[str] = (),
-) -> tuple[str, int, int, list[str]]:
+) -> tuple[str, int, int, list[str], int, int, list[tuple[str, dict[str, Any]]]]:
     """הליבה המשותפת של `build_bundle()`/`estimate_bundle()`: מאמתת קלט,
     פותרת git provenance, בוחרת nodes, ומרנדרת את טקסט ה-bundle.
 
-    מחזירה `(bundle_text, actual_tokens, token_budget)` בלי לבדוק אם
+    מחזירה bundle, מדדי token/document ו-breakdown בלי לבדוק אם
     `actual_tokens` נכנס בתוך `token_budget` — ההחלטה הזו (לזרוק שגיאה
     או לדווח) שייכת לקורא, לעולם לא לפונקציה הזו. כל כשל אחר כאן (task
     type לא ידוע, תקציבים לא-חוקיים, git provenance שלא הוכח כשנדרש)
@@ -1890,18 +1908,10 @@ def _build_bundle_unchecked(
     references = [*docs, *evidence]
     selected_documents = len({reference["path"] for _, reference in references})
     breakdown = _budget_breakdown(nodes, docs, evidence)
-    if selected_documents > document_budget:
-        raise ContextLibrarianError(
-            _format_document_overflow(
-                estimated_tokens=actual_tokens,
-                token_budget=token_budget,
-                selected_documents=selected_documents,
-                budget=document_budget,
-                references=references,
-                breakdown=breakdown,
-            )
-        )
-    return bundle, actual_tokens, token_budget, breakdown
+    return (
+        bundle, actual_tokens, token_budget, breakdown,
+        selected_documents, document_budget, references,
+    )
 
 
 def build_bundle(
@@ -1919,7 +1929,10 @@ def build_bundle(
     direct_source_reverified: bool = False,
     verification_ledger: Iterable[str] = (),
 ) -> str:
-    bundle, actual_tokens, token_budget, breakdown = _build_bundle_unchecked(
+    (
+        bundle, actual_tokens, token_budget, breakdown,
+        selected_documents, document_budget, references,
+    ) = _build_bundle_unchecked(
         catalog,
         task_type=task_type,
         query=query,
@@ -1933,6 +1946,17 @@ def build_bundle(
         direct_source_reverified=direct_source_reverified,
         verification_ledger=verification_ledger,
     )
+    if selected_documents > document_budget:
+        raise ContextLibrarianError(
+            _format_document_overflow(
+                estimated_tokens=actual_tokens,
+                token_budget=token_budget,
+                selected_documents=selected_documents,
+                budget=document_budget,
+                references=references,
+                breakdown=breakdown,
+            )
+        )
     if actual_tokens > token_budget:
         raise ContextLibrarianError(
             _format_budget_overflow(
@@ -1953,7 +1977,7 @@ class BundleEstimate:
     שמחושב מתת-קבוצה של שדות (code_paths/test_paths/canonical_docs/notes
     בלבד היו מפספסים את באנר ה-git-provenance, את טקסט ה-mandatory-
     decisions, ואת קטעי ה-edges/freshness — כולם נספרים לתקציב האמיתי).
-    `fits` הוא בדיוק `actual_tokens <= token_budget`.
+    `fits` דורש שגם תקציב ה-token וגם תקציב המסמכים יעמדו במגבלה.
     """
 
     task_type: str
@@ -1961,6 +1985,9 @@ class BundleEstimate:
     fits: bool
     actual_tokens: int
     token_budget: int
+    selected_documents: int = 0
+    document_budget: int = 0
+    document_fits: bool = True
 
 
 def estimate_bundle(
@@ -1972,6 +1999,8 @@ def estimate_bundle(
     max_documents: int | None = None,
     production_claim: bool = False,
     verified_production_evidence: str | None = None,
+    direct_source_reverified: bool = False,
+    verification_ledger: Iterable[str] = (),
 ) -> BundleEstimate:
     """dry run של `build_bundle()`: אותה לוגיקת selection/render/measure,
     בשימוש חוזר ולא בכפילות, אבל מדווחת חריגת תקציב כ-
@@ -1991,7 +2020,10 @@ def estimate_bundle(
     claim` חסר) גם הן לא שאלות תקציב וזורקות שגיאה בכל זאת, בדיוק כמו
     `build_bundle()`.
     """
-    bundle, actual_tokens, token_budget, _ = _build_bundle_unchecked(
+    (
+        bundle, actual_tokens, token_budget, _,
+        selected_documents, document_budget, _,
+    ) = _build_bundle_unchecked(
         catalog,
         task_type=task_type,
         query=query,
@@ -2002,14 +2034,19 @@ def estimate_bundle(
         assert_main=False,
         assert_on_main_history=False,
         assert_at_origin_main_tip=False,
+        direct_source_reverified=direct_source_reverified,
+        verification_ledger=verification_ledger,
     )
     del bundle  # dry run: טקסט ה-bundle המרונדר עצמו לא מעניין את הקורא
     return BundleEstimate(
         task_type=task_type,
         query=query,
-        fits=actual_tokens <= token_budget,
+        fits=actual_tokens <= token_budget and selected_documents <= document_budget,
         actual_tokens=actual_tokens,
         token_budget=token_budget,
+        selected_documents=selected_documents,
+        document_budget=document_budget,
+        document_fits=selected_documents <= document_budget,
     )
 
 
