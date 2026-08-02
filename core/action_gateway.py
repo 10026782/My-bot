@@ -414,6 +414,25 @@ def _sheets_payload_to_airtable(tool_inputs: dict) -> dict:
         # hit this exact branch and raised, with no positional converter for
         # it, killing the whole turn). Anything else stays unsupported.
         if canonical_table != Tables.TASKS or len(row_data) not in (1, 2):
+            _row_count = (
+                len(row_data)
+                if row_data and all(isinstance(item, list) for item in row_data)
+                else (1 if row_data else 0)
+            )
+            _column_count = (
+                max((len(item) for item in row_data), default=0)
+                if row_data and all(isinstance(item, list) for item in row_data)
+                else len(row_data)
+            )
+            logger.warning(
+                "[CanonicalizationDiagnostic] כשל המרת payload: "
+                "original_tool=sheets_append "
+                "canonical_tool=airtable_add input_keys=%s table=%s "
+                "values_type=%s values_length=%d row_count=%d column_count=%d "
+                "converter_reason=unsupported_tasks_positional_shape",
+                sorted(payload.keys()), str(table), type(row_data).__name__,
+                len(row_data), _row_count, _column_count,
+            )
             raise CanonicalizationError(
                 f"no explicit positional converter for Airtable table {table!r}"
             )

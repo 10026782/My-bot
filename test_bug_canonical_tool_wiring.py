@@ -256,6 +256,53 @@ for _bad_date in ("2026-02-31", "29/07/2026", "2026-13-01", "not-a-date"):
 
 
 # ══════════════════════════════════════════════════
+# 1c. רגרסיית runtime ישירה — בקשת יצירת משימה פשוטה חייבת להיכנס דרך
+# מסלול ActionGateway הקנוני, בלי lookup ל-Leads ובלי כשל positional.
+# ══════════════════════════════════════════════════
+print("\n── Direct runtime regression: צור משימה: X ────────────────")
+
+_simple_task_identity = _identity("owner-canon-simple-task", Role.OWNER)
+_simple_task_inputs = {"table": "Tasks", "row_data": ["X"]}
+
+with patch.object(app, "resolve_identity", return_value=_simple_task_identity), \
+     patch("feature_flags.is_enabled", side_effect=lambda name: name == "FEATURE_ACTION_GATEWAY"):
+    _simple_task_outcome = app._queue_approval_detailed(
+        "sheets_append",
+        _simple_task_inputs,
+        _simple_task_identity.user_id,
+        "telegram",
+        user_text="צור משימה: X",
+    )
+
+chk("simple create-task request queues successfully",
+    _simple_task_outcome["ok"] is True)
+chk("simple create-task request resolves to airtable_add",
+    _simple_task_outcome["action_tool"] == "airtable_add")
+chk("simple create-task request creates a contract this turn",
+    _simple_task_outcome["created_this_turn"] is True
+    and _simple_task_outcome["contract_id"] is not None)
+chk("simple create-task approval reply belongs to the Gateway",
+    _simple_task_outcome["reply_owner"] == "gateway")
+from core.action_gateway import action_gateway as _simple_task_gw  # noqa: E402
+_simple_task_contract = _simple_task_gw.find_contract(_simple_task_outcome["contract_id"])
+chk("simple create-task contract is pending and canonical",
+    _simple_task_contract is not None
+    and _simple_task_contract.status == "pending"
+    and _simple_task_contract.tool_name == "airtable_add")
+_simple_task_bus_item = _real_bus.find_pending_by_business_fingerprint(
+    canonical_user_id=_simple_task_identity.memory_key,
+    tool_name="airtable_add",
+    normalized_inputs={
+        "table": Tables.TASKS,
+        "fields": {TaskFields.NAME: "X"},
+    },
+)
+chk("simple create-task EventBus item matches the Gateway contract",
+    _simple_task_bus_item is not None
+    and _simple_task_bus_item.get("payload", {}).get("tool_name") == "airtable_add")
+
+
+# ══════════════════════════════════════════════════
 # 1c. Mutation-accounting fix — a provably contract-less canonicalization
 # failure must be reported with terminal_outcome=APPROVAL_QUEUE_NEVER_
 # ATTEMPTED, never counted as a "real" queue attempt, so the tool loop's

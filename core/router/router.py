@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 import logging
+import re
 from typing import TYPE_CHECKING
 
 from .route_decision  import RouteDecision, Intent, Handler, Risk, RouterDomain
@@ -18,6 +19,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 INTENT_CONFIDENCE_THRESHOLD = 0.75
+
+_STRUCTURED_CREATE_TASK_RE = re.compile(
+    r"^\s*(?:צור|תיצור)\s+משימה\s*:\s*(?P<title>.+?)\s*$"
+)
+
+
+def deterministic_create_task_title(text: str) -> str | None:
+    """מחזיר את כותרת המשימה עבור פקודת יצירה חד-משמעית ומצומצמת."""
+    match = _STRUCTURED_CREATE_TASK_RE.fullmatch(text or "")
+    return match.group("title").strip() if match else None
 
 
 def route_request(
@@ -77,6 +88,15 @@ def route_request(
             role   = identity.role,
             domain = domain,
         )
+
+    # פקודות משימה מובנות שלמות מספיקות ל-Coordinator כדי לבנות contract אישור.
+    # ניסוחים רחבים יותר נשארים במסלול Agent; זהו שער דטרמיניסטי ומצומצם בכוונה.
+    if (
+        intent == Intent.CREATE_TASK
+        and deterministic_create_task_title(text) is not None
+        and identity.role not in ("lead", "guest", "readonly")
+    ):
+        risk, handler, needs_approval = Risk.NEEDS_APPROVAL, Handler.TOOL, True
 
     # 4b. Capture Policy (Stage 3 / C89 integration) — observability only.
     # Gate is identity.is_internal alone, with NO intent filter — this must
