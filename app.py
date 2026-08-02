@@ -55,7 +55,7 @@ from tools           import dispatch_tool
 from tools.airtable_security import enforce_leads_write_gate, LeadsDirectWriteBlocked
 from guards          import idempotency, rate_limiter, validate_tool_output
 from config          import get_domain as _channel_domain
-from core.router     import route_request, RouteDecision, Handler
+from core.router     import route_request, RouteDecision, Handler, deterministic_create_task_title
 from core.router.deterministic_denial import check_deterministic_denial
 from core.anti_hallucination import (
     verify_execution, sanitize_agent_response,
@@ -903,6 +903,40 @@ def approval_response(route: RouteDecision, original_text: str, chat_id: str,
         f"ענה *כן* לביצוע או *לא* לביטול."
         f"{CONFIRMATION_SUFFIX}"
     )
+
+
+def _queue_deterministic_create_task(
+    title: str, chat_id: str, channel: str, user_text: str,
+    identity, out_meta: dict | None = None,
+) -> str:
+    """Queue a complete create-task command without invoking the Agent."""
+    try:
+        enforce("airtable_add", identity)
+    except ToolDenied as exc:
+        logger.warning(
+            "[DeterministicCreateTask] denied before queue role=%s reason=%s",
+            getattr(identity, "role", "unknown"), type(exc).__name__,
+        )
+        return str(exc)
+
+    from airtable_schema import Tables, TaskFields
+    outcome = _queue_approval_detailed(
+        "airtable_add",
+        {"table": Tables.TASKS, "fields": {TaskFields.NAME: title}},
+        chat_id,
+        channel,
+        user_text,
+    )
+    if out_meta is not None:
+        out_meta["source_module"] = "action_gateway"
+        out_meta["reply_owner"] = outcome.get("reply_owner", "gateway")
+    logger.info(
+        "[DeterministicCreateTask] coordinator_owned=True agent_calls=0 "
+        "action_tool=%s created_this_turn=%s reply_owner=%s",
+        outcome.get("action_tool"), outcome.get("created_this_turn"),
+        outcome.get("reply_owner", "gateway"),
+    )
+    return outcome.get("message") or "לא הצלחתי להכניס את המשימה לאישור."
 
 
 # ══════════════════════════════════════════════════
@@ -3591,6 +3625,16 @@ def run_agent(
     resolved_route_domain = getattr(route.domain, "value", str(route.domain))
     if _resolved_domain is not None:
         _resolved_domain["domain"] = resolved_route_domain
+
+    # Turn Coordinator ownership: a fully specified create-task command is
+    # already a complete mutation request. Queue its canonical contract here,
+    # after the turn envelope/pending gate and before LeadCandidate or Agent.
+    if route.handler == Handler.TOOL and route.intent == "create_task":
+        _task_title = deterministic_create_task_title(user_text)
+        if _task_title is not None:
+            return _queue_deterministic_create_task(
+                _task_title, chat_id, channel, user_text, identity, _out_meta,
+            )
 
     # BUG-122: an unresolved canonical action owns the mutation slot.  A new
     # contract-required request must stop before LeadCandidate/approval/Agent
