@@ -20,7 +20,16 @@
       "valid_from": "2026-06-30",
       "last_verified_commit": "59e74be",
       "confidence": 1.0,
-      "notes": ["A generated bundle or planning document cannot override main."]
+      "notes": ["A generated bundle or planning document cannot override main."],
+      "extensions": {
+        "context_librarian.registration": {
+          "classification": "REGISTER_SUPPORTING",
+          "role": "supporting_metadata",
+          "authority": false,
+          "purpose": "maps canonical boundaries and points to existing authority sources",
+          "runtime_consumed": false
+        }
+      }
     },
     {
       "id": "decision.actioncontracts_authority",

@@ -844,13 +844,13 @@ def test_core_reasoning_profile_includes_decision_adapter_and_write_side_note(ca
     assert "tma_api.py is listed above as both the only live caller" in bundle
 
 
-def test_approval_ux_profile_surfaces_parallel_sources_of_truth(catalog):
+def test_approval_ux_profile_surfaces_parallel_approval_mechanisms(catalog):
     bundle = build_bundle(
         catalog,
         task_type="approval_ux",
         query="repeated approval returns the wrong message",
     )
-    assert "PARALLEL SOURCES OF TRUTH" in bundle
+    assert "PARALLEL APPROVAL MECHANISMS" in bundle
     assert "`event_bus.py`" in bundle
     assert "PendingActionsStore" in bundle
 
@@ -1840,6 +1840,17 @@ def test_new_source_classification_never_auto_registers(catalog):
     assert by_path["docs/new-planning.md"] == "WARNING"
     assert by_path["core/new_runtime.py"] == "REVIEW_REQUIRED"
     assert by_path["core/authority.py"] == "STOP"
+
+
+def test_catalog_metadata_files_are_not_classified_as_new_sources(catalog):
+    result = classify_new_sources(
+        catalog,
+        [
+            "docs/context_librarian/decisions/canonical_boundaries.json",
+            "docs/context_librarian/layers/approvals.json",
+        ],
+    )
+    assert result == []
 
 
 @pytest.mark.parametrize("merge_shape", ["normal", "squash"])

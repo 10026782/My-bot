@@ -682,6 +682,16 @@ def _catalog_referenced_paths(catalog: Catalog) -> set[str]:
         paths.update(node["test_paths"])
         paths.update(ref["path"] for ref in node["canonical_docs"])
         paths.update(ref["path"] for ref in node["production_evidence"])
+    # Catalog files are the Librarian's own metadata infrastructure. They are
+    # registered by the catalog loader itself, not by a domain node's
+    # code_paths/canonical_docs. Treating them as unregistered domain sources
+    # would turn every catalog file into a false authority STOP.
+    catalog_files = sorted((catalog.catalog_root / "layers").glob("*.json"))
+    catalog_files.append(catalog.catalog_root / "decisions/canonical_boundaries.json")
+    paths.update(
+        str(path.relative_to(catalog.repo_root)).replace("\\", "/")
+        for path in catalog_files
+    )
     return {path.replace("\\", "/") for path in paths}
 
 
