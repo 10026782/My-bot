@@ -1,5 +1,13 @@
 # Decision Log
 
+## Implementation status update — 2026-08-02
+
+13. WS1 foundation contracts were merged through PR #536. PR #545's narrow
+    runtime integration, head `1d117ab`, was merged as `46db9af`; follow-up
+    PR #546 is also merged. Local focused/standalone verification passed. The
+    approved sequence remains WS1 → WS2 → WS3, with staging still required
+    before rollout claims.
+
 1. The selected primary profile is `turn_coordinator_routing`; selection was
    unique, not name-based.
 2. The coordinator is an owner selector, not a new execution, approval,

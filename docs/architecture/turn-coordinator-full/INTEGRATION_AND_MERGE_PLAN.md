@@ -1,5 +1,15 @@
 # Integration and Merge Plan
 
+## Current execution status — 2026-08-02
+
+- WS1 contract foundation: merged via PR #536.
+- Current narrow integration: PR #545, source head `1d117ab`, merged as
+  `46db9af`; follow-up PR #546 is also merged.
+- The merge does not constitute staging or production acceptance. Those gates
+  remain separately required and must use the exact deployed merge candidate.
+- Local focused and standalone regression gates passed before merge.
+- Do not claim WS2/WS3 rollout readiness until the ordered staging gates pass.
+
 ## Ownership
 
 The integrator owns `app.py`, shared-contract approval, integration commits,

@@ -1,5 +1,13 @@
 # Parallel Implementation Workstreams
 
+## Current execution status — 2026-08-02
+
+The frozen WS1 contracts are available after PR #536. The single-integrator
+runtime integration in PR #545 (head `1d117ab`) was merged as `46db9af`, and
+follow-up PR #546 is also merged. WS2 and WS3 remain downstream workstreams;
+they must use the frozen contracts and pass their staging gates. `app.py`
+continues to have one integrator owner.
+
 Planning-only execution pack for three independent agents. Base every future
 branch on the canonical `origin/main` commit recorded by the fresh Librarian
 bundle. Current planning base: `fb4ab4af57d8e5986a06219638e1145af019cf6e`.

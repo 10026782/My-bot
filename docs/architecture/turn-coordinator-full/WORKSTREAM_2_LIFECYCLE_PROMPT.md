@@ -1,5 +1,11 @@
 # Agent Prompt — Workstream 2: Approval, Lifecycle, Evidence and Concurrency
 
+## Current execution note — 2026-08-02
+
+WS2 remains downstream of the merged PR #545 integration (`46db9af`, source
+head `1d117ab`). Do not begin authority-changing WS2 rollout until its own
+review, CI, and staging gates pass.
+
 ## Base and Librarian gate
 
 Branch from the canonical current `origin/main` SHA. Run the full Librarian
