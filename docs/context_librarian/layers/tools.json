@@ -1,63 +1,117 @@
 {
   "schema_version": "1.0",
   "layer_id": "tools",
-  "nodes": [{
-    "id": "layer.tools",
-    "name": "Tools",
-    "type": "layer",
-    "status": "active",
-    "authority_level": "runtime_main",
-    "source_of_truth": {
-      "is_authority": true,
-      "scope": "tool identity, policy metadata, dispatch, provider result normalization, and evidence validation",
-      "precedence": "tool_registry policy plus dispatcher/provider code and executable tests on main"
-    },
-    "owner": "tools",
-    "code_paths": [
-      "tool_registry.py",
-      "action_validator.py",
-      "context.py",
-      "tools/dispatcher.py",
-      "tools/schemas.py",
-      "core/anti_hallucination.py",
-      "core/dispatcher_outcome.py",
-      "core/last_tool_result_shadow.py"
-    ],
-    "test_paths": [
-      "test_tool_registry_invariants.py",
-      "test_tool_availability_shadow.py",
-      "test_bug_canonical_tool_wiring.py",
-      "test_c53a.py",
-      "test_a32_enforcement.py",
-      "test_action_gateway.py",
-      "test_last_tool_result_shadow.py"
-    ],
-    "canonical_docs": [
-      {"path": "BOSS_AGENT_RELIABILITY_AND_PERMISSION_HARDENING_SPEC.md", "role": "tool/evidence hardening contract", "status": "active"},
-      {"path": "docs/architecture/f52-unified-approval-runtime/audits/original/F52_CURRENT_TOOL_MAP.md", "role": "historical tool baseline", "status": "historical"},
-      {"path": "docs/architecture/f52-unified-approval-runtime/audits/original/F52_BYPASS_MAP.md", "role": "historical bypass evidence", "status": "historical"},
-      {"path": "docs/governance/MODULE_RULES.md", "role": "module ownership rules", "status": "active"}
-    ],
-    "production_evidence": [
-      {"path": "AI_CONTEXT.md", "observed_on": "2026-07-23", "scope": "dated repository briefing of tool/evidence behavior; current production mode must be rechecked", "status": "stale_briefing"}
-    ],
-    "feature_flags": [
-      {"name": "FEATURE_TOOL_AVAILABILITY_FILTER", "default_state": "off", "documented_state": "off/shadow/enforce", "evidence_scope": "code accessor"},
-      {"name": "FEATURE_LAST_TOOL_RESULT_SHADOW", "default_state": "off", "documented_state": "passive RAM-only observation", "evidence_scope": "code default"}
-    ],
-    "valid_from": "2026-07-23",
-    "last_verified_commit": "59e74be",
-    "confidence": 0.94,
-    "notes": [
-      "Permission, availability, dispatch, approval, and evidence validation are separate boundaries.",
-      "Unknown or ambiguous tool identity must fail closed.",
-      "A display string is never execution evidence."
-    ],
-    "extensions": {"boss.layer_aliases": ["layer-4", "tool-registry", "dispatcher"]}
-  }],
+  "nodes": [
+    {
+      "id": "layer.tools",
+      "name": "Tools",
+      "type": "layer",
+      "status": "active",
+      "authority_level": "runtime_main",
+      "source_of_truth": {
+        "is_authority": true,
+        "scope": "tool identity, policy metadata, dispatch, provider result normalization, and evidence validation",
+        "precedence": "tool_registry policy plus dispatcher/provider code and executable tests on main"
+      },
+      "owner": "tools",
+      "code_paths": [
+        "tool_registry.py",
+        "action_validator.py",
+        "context.py",
+        "tools/dispatcher.py",
+        "tools/schemas.py",
+        "core/anti_hallucination.py",
+        "core/dispatcher_outcome.py",
+        "core/last_tool_result_shadow.py"
+      ],
+      "test_paths": [
+        "test_tool_registry_invariants.py",
+        "test_tool_availability_shadow.py",
+        "test_bug_canonical_tool_wiring.py",
+        "test_c53a.py",
+        "test_a32_enforcement.py",
+        "test_action_gateway.py",
+        "test_last_tool_result_shadow.py"
+      ],
+      "canonical_docs": [
+        {
+          "path": "BOSS_AGENT_RELIABILITY_AND_PERMISSION_HARDENING_SPEC.md",
+          "role": "tool/evidence hardening contract",
+          "status": "active"
+        },
+        {
+          "path": "docs/architecture/f52-unified-approval-runtime/audits/original/F52_CURRENT_TOOL_MAP.md",
+          "role": "historical tool baseline",
+          "status": "historical"
+        },
+        {
+          "path": "docs/architecture/f52-unified-approval-runtime/audits/original/F52_BYPASS_MAP.md",
+          "role": "historical bypass evidence",
+          "status": "historical"
+        },
+        {
+          "path": "docs/governance/MODULE_RULES.md",
+          "role": "module ownership rules",
+          "status": "active"
+        }
+      ],
+      "production_evidence": [
+        {
+          "path": "AI_CONTEXT.md",
+          "observed_on": "2026-07-23",
+          "scope": "dated repository briefing of tool/evidence behavior; current production mode must be rechecked",
+          "status": "stale_briefing"
+        }
+      ],
+      "feature_flags": [
+        {
+          "name": "FEATURE_TOOL_AVAILABILITY_FILTER",
+          "default_state": "off",
+          "documented_state": "off/shadow/enforce",
+          "evidence_scope": "code accessor"
+        },
+        {
+          "name": "FEATURE_LAST_TOOL_RESULT_SHADOW",
+          "default_state": "off",
+          "documented_state": "passive RAM-only observation",
+          "evidence_scope": "code default"
+        }
+      ],
+      "valid_from": "2026-07-23",
+      "last_verified_commit": "7f4f0e80317fc1b8b43ccb097ec3e75e1a054d90",
+      "confidence": 0.94,
+      "notes": [
+        "Permission, availability, dispatch, approval, and evidence validation are separate boundaries.",
+        "Unknown or ambiguous tool identity must fail closed.",
+        "A display string is never execution evidence."
+      ],
+      "extensions": {
+        "boss.layer_aliases": [
+          "layer-4",
+          "tool-registry",
+          "dispatcher"
+        ]
+      }
+    }
+  ],
   "edges": [
-    {"from": "layer.tools", "to": "layer.approvals", "type": "requires_approval_via", "notes": "Registry policy identifies approval-required tools; lifecycle stays in ActionContracts."},
-    {"from": "layer.tools", "to": "layer.rp5", "type": "verified_by", "notes": "Structured outcomes feed evidence classification."},
-    {"from": "layer.tools", "to": "decision.no_new_source_of_truth", "type": "governed_by", "notes": "Tool metadata cannot become business or approval truth."}
+    {
+      "from": "layer.tools",
+      "to": "layer.approvals",
+      "type": "requires_approval_via",
+      "notes": "Registry policy identifies approval-required tools; lifecycle stays in ActionContracts."
+    },
+    {
+      "from": "layer.tools",
+      "to": "layer.rp5",
+      "type": "verified_by",
+      "notes": "Structured outcomes feed evidence classification."
+    },
+    {
+      "from": "layer.tools",
+      "to": "decision.no_new_source_of_truth",
+      "type": "governed_by",
+      "notes": "Tool metadata cannot become business or approval truth."
+    }
   ]
 }

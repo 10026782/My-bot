@@ -1,100 +1,189 @@
 {
   "schema_version": "1.0",
   "layer_id": "approvals",
-  "nodes": [{
-    "id": "layer.approvals",
-    "name": "Approvals / ActionContracts",
-    "type": "layer",
-    "status": "active",
-    "authority_level": "runtime_main",
-    "source_of_truth": {
-      "is_authority": true,
-      "scope": "approval proposal, lifecycle, durable lookup, claim, and resolution",
-      "precedence": "ActionContracts and its canonical repository/gateway state are sole lifecycle authority"
-    },
-    "owner": "action_contracts",
-    "code_paths": [
-      "core/action_gateway.py",
-      "core/action_contract_repository.py",
-      "core/action_gateway_atomic_executor.py",
-      "core/approvals_projection.py",
-      "core/action_resolution_projection.py",
-      "core/approval_turn_metrics.py",
-      "feature_flags.py",
-      "app.py",
-      "tma_api.py",
-      "event_bus.py"
-    ],
-    "test_paths": [
-      "test_action_gateway.py",
-      "test_pr0c_action_contract_repository.py",
-      "test_pr0c_action_contracts_persistence.py",
-      "test_pr0c_action_gateway_adapters.py",
-      "test_phase_4b0_1a_atomic_claims.py",
-      "test_phase_4b_1b_durable_lifecycle.py",
-      "test_approval_concurrency.py",
-      "test_bug_approval_callback_hardening.py",
-      "test_pr1_single_speaker_approval_ux.py",
-      "test_bug_stale_callback_ux.py",
-      "test_bug112_telegram_approval_ttl.py",
-      "test_single_speaker_fallback_and_duplication.py",
-      "test_bug_post_completion_callback_fallthrough.py",
-      "test_pr2_deterministic_approval_cost_cuts.py",
-      "test_pending_contract_read_amplification.py",
-      "test_bug056_legacy_cancel_replay_guard.py",
-      "test_bug_canonical_tool_wiring.py",
-      "test_hotfix_e_shared_replay_policy.py"
-    ],
-    "canonical_docs": [
-      {"path": "docs/architecture/f52-unified-approval-runtime/audits/phase-4c/CURRENT_STATE_MAP.md", "role": "latest verified runtime audit", "status": "active"},
-      {"path": "docs/architecture/f52-unified-approval-runtime/audits/phase-4c/GAP_AND_RISK_REPORT.md", "role": "current risk authority", "status": "active"},
-      {"path": "docs/PHASE_4B_ROLLOUT_AND_CUTOVER.md", "role": "durable approval rollout authority", "status": "planning_only"},
-      {"path": "docs/architecture/f52-unified-approval-runtime/decisions/DECISION_LOG.md", "role": "approval/F52 decision history", "status": "active"},
-      {"path": "docs/architecture/f52-unified-approval-runtime/audits/PR2_DETERMINISTIC_APPROVAL_COST_CUTS_PREFLIGHT.md", "role": "deterministic approval cost-cut boundary and acceptance matrix", "status": "active"},
-      {"path": "docs/architecture/f52-unified-approval-runtime/audits/PR2_IMPLEMENTATION_CROSS_LAYER_IMPACT_MATRIX.md", "role": "historical PR2-at-merge cross-layer impact evidence; later replay semantics are superseded by hotfix evidence", "status": "historical"},
-      {"path": "docs/architecture/f52-unified-approval-runtime/audits/PR_HOTFIX_A_CROSS_LAYER_IMPACT_MATRIX.md", "role": "post-PR2 canonicalization and no-live replay correction evidence", "status": "active"}
-    ],
-    "production_evidence": [
-      {"path": "docs/architecture/action-gateway/PRODUCTION_30JUL2026_RENDER_VERIFICATION.md", "observed_on": "2026-07-31", "scope": "read-only Render production verification of live deploy identity, three approval feature flags, and ActionContract runtime activity; exact sheets canonicalization branch remains test-only", "status": "production_verified"},
-      {"path": "docs/architecture/action-gateway/STAGING_23JUL_TTL_DISAMBIGUATION_AUDIT.md", "observed_on": "2026-07-23", "scope": "staging and operator-supplied ActionContracts lifecycle evidence", "status": "mixed_verified_and_deferred"}
-    ],
-    "feature_flags": [
-      {"name": "FEATURE_ACTION_GATEWAY", "default_state": "off", "documented_state": "environment-dependent; repository alone is not current production proof", "evidence_scope": "code default plus dated audits"},
-      {"name": "FEATURE_ACTION_CONTRACT_PERSISTENCE", "default_state": "off", "documented_state": "flag-gated durable proposals/recovery", "evidence_scope": "code default"},
-      {"name": "FEATURE_ATOMIC_CLAIMS", "default_state": "off", "documented_state": "deployment documentation may require true; verify environment", "evidence_scope": "code default and deployment docs"},
-      {"name": "FEATURE_SINGLE_SPEAKER_APPROVAL_UX", "default_state": "off", "documented_state": "PR #471 (merge c64da20); off = legacy delivery routing, on = Gateway owns the one final response for an approval-queuing turn; identifier redaction is unconditional; owner reported the flag enabled in production on 2026-07-30", "evidence_scope": "code default plus dated owner-supplied production observations in AI_CONTEXT.md/CHANGE_CONTROL_LOG.md; not a current environment read"},
-      {"name": "FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS", "default_state": "off", "documented_state": "PR2 deterministic lifecycle resolver; effective only when FEATURE_SINGLE_SPEAKER_APPROVAL_UX is also enabled; owner reported both enabled in production on 2026-07-30", "evidence_scope": "repository code/tests plus dated partial production verification; exact canonicalization branch remains test-only"}
-    ],
-    "valid_from": "2026-07-28",
-    "last_verified_commit": "a89fc67105f6b310efde498498a3f6f8c9038250",
-    "confidence": 0.9,
-    "notes": [
-      "PARALLEL APPROVAL MECHANISMS (2026-07-28 N17 pilot Task 1 finding, directly re-verified): ActionContracts is the canonical lifecycle authority, but 4 coexisting, independently-reachable approve/reject mechanisms are live on main, not 1: (1) ActionContract/ActionGateway itself — durable, `ActionContractRepository` (core/action_contract_repository.py), TTL `CONTRACT_PENDING_TTL_SECONDS=24h` (core/action_contract_repository.py:84); (2) EventBus's `PendingActionsStore` — pure in-memory dict, no durable backing, class at event_bus.py:28, TTL `PENDING_TTL_MINUTES=30` (event_bus.py:26); populated unconditionally from `_queue_approval_detailed_impl` even when the Gateway already approved, i.e. it runs alongside (1), not instead of it; (3) app.py's router-level `_pending_approvals` dict — a second, separate pure in-memory store (app.py:170, lock at app.py:174), TTL `_PENDING_APPROVAL_TTL=600s` (app.py:228), drives the text-based כן/לא confirmation flow; (4) the TMA dashboard's Airtable-backed Approvals-table flow (tma_api.py, routes registered app.py:427) with its own TTL `_TMA_APPROVAL_TTL_SECONDS=24h` (tma_api.py:2162), though execution is delegated back to ActionGateway. A symptom like 'repeated approval returns the wrong message' can originate in any of these four, not only in ActionContract state. `core/approvals_projection.py`'s own module docstring says it is unwired/dead code; it is not a 5th live mechanism. `session_store.py`'s `pending_lead_preview` is a separate lead-classification confirmation flow, not an approval mechanism — easy to conflate with the four above, but out of this layer's scope.",
-      "ActionContracts remains the sole source of truth for approval lifecycle.",
-      "Legacy IDs may resolve an existing unambiguous canonical contract but may never create or infer one.",
-      "Approval state, presentation state, and execution evidence are distinct.",
-      "PR #471: Telegram approve/reject callback_data now carries an optional trailing contract_id (_approval_callback_data(), app.py:1128); when present and FEATURE_ACTION_GATEWAY is on, the callback resolves the exact ActionContract via lifecycle_result() before falling back to fingerprint matching.",
-      "PR #471 (BUG-144): the reject callback now resolves and closes the canonical ActionContract (reject_with_lifecycle_result()) before reporting cancellation to the user, not just the legacy EventBus item.",
-      "ApprovalLifecycleResult (core/action_gateway.py) is the single-speaker, user-safe projection of one ActionContract lifecycle; approve_with_lifecycle_result()/reject_with_lifecycle_result() are the canonical entry points that produce it. This is layered on top of, not a replacement for, ActionContracts as lifecycle authority.",
-      "PR #479/#480 (merged, N17 re-verification): changed only the rendered wording of build_approval_lifecycle_result() and _describe_tool_call() (rejected-state phrasing normalized to 'בוטלה', task-creation gets dedicated business wording, raw Airtable table names no longer leak into any approval message) — no lifecycle, callback-resolution, or authority change. Architectural claims in this node were directly re-verified against ffa678a7 and remain accurate; only code line-number citations shifted.",
-      "The 2026-07-23 staging evidence predates the ffa678a7 audit; the separately scoped 2026-07-30 owner-reported evidence was added during the a89fc67 refresh.",
-      "First real consumption pilot re-verification against a89fc67: PR2 added a narrow early deterministic lifecycle resolver, request-local observability counters, a single supplied live-contract snapshot, and a default-off dependent flag. Subsequent hotfixes narrowed replay and canonicalization behavior. ActionContracts remains lifecycle authority; metrics are observation-only. Focused PR2, read-amplification, session, pending-query, single-speaker, callback, and replay-policy suites passed locally."
-    ],
-    "extensions": {
-      "boss.layer_aliases": ["layer-3", "durable-approval", "ActionGateway"],
-      "context_librarian.registration": {
-        "classification": "REGISTER_SUPPORTING",
-        "role": "supporting_layer_map",
-        "authority": false,
-        "purpose": "maps approval mechanisms and existing ActionContract authority",
-        "runtime_consumed": false
+  "nodes": [
+    {
+      "id": "layer.approvals",
+      "name": "Approvals / ActionContracts",
+      "type": "layer",
+      "status": "active",
+      "authority_level": "runtime_main",
+      "source_of_truth": {
+        "is_authority": true,
+        "scope": "approval proposal, lifecycle, durable lookup, claim, and resolution",
+        "precedence": "ActionContracts and its canonical repository/gateway state are sole lifecycle authority"
+      },
+      "owner": "action_contracts",
+      "code_paths": [
+        "core/action_gateway.py",
+        "core/action_contract_repository.py",
+        "core/action_gateway_atomic_executor.py",
+        "core/approvals_projection.py",
+        "core/action_resolution_projection.py",
+        "core/approval_turn_metrics.py",
+        "feature_flags.py",
+        "app.py",
+        "tma_api.py",
+        "event_bus.py"
+      ],
+      "test_paths": [
+        "test_action_gateway.py",
+        "test_pr0c_action_contract_repository.py",
+        "test_pr0c_action_contracts_persistence.py",
+        "test_pr0c_action_gateway_adapters.py",
+        "test_phase_4b0_1a_atomic_claims.py",
+        "test_phase_4b_1b_durable_lifecycle.py",
+        "test_approval_concurrency.py",
+        "test_bug_approval_callback_hardening.py",
+        "test_pr1_single_speaker_approval_ux.py",
+        "test_bug_stale_callback_ux.py",
+        "test_bug112_telegram_approval_ttl.py",
+        "test_single_speaker_fallback_and_duplication.py",
+        "test_bug_post_completion_callback_fallthrough.py",
+        "test_pr2_deterministic_approval_cost_cuts.py",
+        "test_pending_contract_read_amplification.py",
+        "test_bug056_legacy_cancel_replay_guard.py",
+        "test_bug_canonical_tool_wiring.py",
+        "test_hotfix_e_shared_replay_policy.py"
+      ],
+      "canonical_docs": [
+        {
+          "path": "docs/architecture/f52-unified-approval-runtime/audits/phase-4c/CURRENT_STATE_MAP.md",
+          "role": "latest verified runtime audit",
+          "status": "active"
+        },
+        {
+          "path": "docs/architecture/f52-unified-approval-runtime/audits/phase-4c/GAP_AND_RISK_REPORT.md",
+          "role": "current risk authority",
+          "status": "active"
+        },
+        {
+          "path": "docs/PHASE_4B_ROLLOUT_AND_CUTOVER.md",
+          "role": "durable approval rollout authority",
+          "status": "planning_only"
+        },
+        {
+          "path": "docs/architecture/f52-unified-approval-runtime/decisions/DECISION_LOG.md",
+          "role": "approval/F52 decision history",
+          "status": "active"
+        },
+        {
+          "path": "docs/architecture/f52-unified-approval-runtime/audits/PR2_DETERMINISTIC_APPROVAL_COST_CUTS_PREFLIGHT.md",
+          "role": "deterministic approval cost-cut boundary and acceptance matrix",
+          "status": "active"
+        },
+        {
+          "path": "docs/architecture/f52-unified-approval-runtime/audits/PR2_IMPLEMENTATION_CROSS_LAYER_IMPACT_MATRIX.md",
+          "role": "historical PR2-at-merge cross-layer impact evidence; later replay semantics are superseded by hotfix evidence",
+          "status": "historical"
+        },
+        {
+          "path": "docs/architecture/f52-unified-approval-runtime/audits/PR_HOTFIX_A_CROSS_LAYER_IMPACT_MATRIX.md",
+          "role": "post-PR2 canonicalization and no-live replay correction evidence",
+          "status": "active"
+        }
+      ],
+      "production_evidence": [
+        {
+          "path": "docs/architecture/action-gateway/PRODUCTION_30JUL2026_RENDER_VERIFICATION.md",
+          "observed_on": "2026-07-31",
+          "scope": "read-only Render production verification of live deploy identity, three approval feature flags, and ActionContract runtime activity; exact sheets canonicalization branch remains test-only",
+          "status": "production_verified"
+        },
+        {
+          "path": "docs/architecture/action-gateway/STAGING_23JUL_TTL_DISAMBIGUATION_AUDIT.md",
+          "observed_on": "2026-07-23",
+          "scope": "staging and operator-supplied ActionContracts lifecycle evidence",
+          "status": "mixed_verified_and_deferred"
+        }
+      ],
+      "feature_flags": [
+        {
+          "name": "FEATURE_ACTION_GATEWAY",
+          "default_state": "off",
+          "documented_state": "environment-dependent; repository alone is not current production proof",
+          "evidence_scope": "code default plus dated audits"
+        },
+        {
+          "name": "FEATURE_ACTION_CONTRACT_PERSISTENCE",
+          "default_state": "off",
+          "documented_state": "flag-gated durable proposals/recovery",
+          "evidence_scope": "code default"
+        },
+        {
+          "name": "FEATURE_ATOMIC_CLAIMS",
+          "default_state": "off",
+          "documented_state": "deployment documentation may require true; verify environment",
+          "evidence_scope": "code default and deployment docs"
+        },
+        {
+          "name": "FEATURE_SINGLE_SPEAKER_APPROVAL_UX",
+          "default_state": "off",
+          "documented_state": "PR #471 (merge c64da20); off = legacy delivery routing, on = Gateway owns the one final response for an approval-queuing turn; identifier redaction is unconditional; owner reported the flag enabled in production on 2026-07-30",
+          "evidence_scope": "code default plus dated owner-supplied production observations in AI_CONTEXT.md/CHANGE_CONTROL_LOG.md; not a current environment read"
+        },
+        {
+          "name": "FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS",
+          "default_state": "off",
+          "documented_state": "PR2 deterministic lifecycle resolver; effective only when FEATURE_SINGLE_SPEAKER_APPROVAL_UX is also enabled; owner reported both enabled in production on 2026-07-30",
+          "evidence_scope": "repository code/tests plus dated partial production verification; exact canonicalization branch remains test-only"
+        }
+      ],
+      "valid_from": "2026-07-28",
+      "last_verified_commit": "7f4f0e80317fc1b8b43ccb097ec3e75e1a054d90",
+      "confidence": 0.9,
+      "notes": [
+        "PARALLEL APPROVAL MECHANISMS (2026-07-28 N17 pilot Task 1 finding, directly re-verified): ActionContracts is the canonical lifecycle authority, but 4 coexisting, independently-reachable approve/reject mechanisms are live on main, not 1: (1) ActionContract/ActionGateway itself — durable, `ActionContractRepository` (core/action_contract_repository.py), TTL `CONTRACT_PENDING_TTL_SECONDS=24h` (core/action_contract_repository.py:84); (2) EventBus's `PendingActionsStore` — pure in-memory dict, no durable backing, class at event_bus.py:28, TTL `PENDING_TTL_MINUTES=30` (event_bus.py:26); populated unconditionally from `_queue_approval_detailed_impl` even when the Gateway already approved, i.e. it runs alongside (1), not instead of it; (3) app.py's router-level `_pending_approvals` dict — a second, separate pure in-memory store (app.py:170, lock at app.py:174), TTL `_PENDING_APPROVAL_TTL=600s` (app.py:228), drives the text-based כן/לא confirmation flow; (4) the TMA dashboard's Airtable-backed Approvals-table flow (tma_api.py, routes registered app.py:427) with its own TTL `_TMA_APPROVAL_TTL_SECONDS=24h` (tma_api.py:2162), though execution is delegated back to ActionGateway. A symptom like 'repeated approval returns the wrong message' can originate in any of these four, not only in ActionContract state. `core/approvals_projection.py`'s own module docstring says it is unwired/dead code; it is not a 5th live mechanism. `session_store.py`'s `pending_lead_preview` is a separate lead-classification confirmation flow, not an approval mechanism — easy to conflate with the four above, but out of this layer's scope.",
+        "ActionContracts remains the sole source of truth for approval lifecycle.",
+        "Legacy IDs may resolve an existing unambiguous canonical contract but may never create or infer one.",
+        "Approval state, presentation state, and execution evidence are distinct.",
+        "PR #471: Telegram approve/reject callback_data now carries an optional trailing contract_id (_approval_callback_data(), app.py:1128); when present and FEATURE_ACTION_GATEWAY is on, the callback resolves the exact ActionContract via lifecycle_result() before falling back to fingerprint matching.",
+        "PR #471 (BUG-144): the reject callback now resolves and closes the canonical ActionContract (reject_with_lifecycle_result()) before reporting cancellation to the user, not just the legacy EventBus item.",
+        "ApprovalLifecycleResult (core/action_gateway.py) is the single-speaker, user-safe projection of one ActionContract lifecycle; approve_with_lifecycle_result()/reject_with_lifecycle_result() are the canonical entry points that produce it. This is layered on top of, not a replacement for, ActionContracts as lifecycle authority.",
+        "PR #479/#480 (merged, N17 re-verification): changed only the rendered wording of build_approval_lifecycle_result() and _describe_tool_call() (rejected-state phrasing normalized to 'בוטלה', task-creation gets dedicated business wording, raw Airtable table names no longer leak into any approval message) — no lifecycle, callback-resolution, or authority change. Architectural claims in this node were directly re-verified against ffa678a7 and remain accurate; only code line-number citations shifted.",
+        "The 2026-07-23 staging evidence predates the ffa678a7 audit; the separately scoped 2026-07-30 owner-reported evidence was added during the a89fc67 refresh.",
+        "First real consumption pilot re-verification against a89fc67: PR2 added a narrow early deterministic lifecycle resolver, request-local observability counters, a single supplied live-contract snapshot, and a default-off dependent flag. Subsequent hotfixes narrowed replay and canonicalization behavior. ActionContracts remains lifecycle authority; metrics are observation-only. Focused PR2, read-amplification, session, pending-query, single-speaker, callback, and replay-policy suites passed locally."
+      ],
+      "extensions": {
+        "boss.layer_aliases": [
+          "layer-3",
+          "durable-approval",
+          "ActionGateway"
+        ],
+        "context_librarian.registration": {
+          "classification": "REGISTER_SUPPORTING",
+          "role": "supporting_layer_map",
+          "authority": false,
+          "purpose": "maps approval mechanisms and existing ActionContract authority",
+          "runtime_consumed": false
+        }
       }
     }
-  }],
+  ],
   "edges": [
-    {"from": "layer.approvals", "to": "decision.actioncontracts_authority", "type": "source_of_truth_for", "notes": "Canonical lifecycle ownership."},
-    {"from": "layer.approvals", "to": "layer.tools", "type": "executes_via", "notes": "Approved contracts execute through registered adapters/dispatcher paths."},
-    {"from": "layer.approvals", "to": "layer.ux_f52", "type": "rendered_by", "notes": "Lifecycle facts are rendered through the message contract; text is not lifecycle truth."},
-    {"from": "layer.approvals", "to": "layer.rp5", "type": "verified_by", "notes": "Completion claims require execution evidence, not approval alone."}
+    {
+      "from": "layer.approvals",
+      "to": "decision.actioncontracts_authority",
+      "type": "source_of_truth_for",
+      "notes": "Canonical lifecycle ownership."
+    },
+    {
+      "from": "layer.approvals",
+      "to": "layer.tools",
+      "type": "executes_via",
+      "notes": "Approved contracts execute through registered adapters/dispatcher paths."
+    },
+    {
+      "from": "layer.approvals",
+      "to": "layer.ux_f52",
+      "type": "rendered_by",
+      "notes": "Lifecycle facts are rendered through the message contract; text is not lifecycle truth."
+    },
+    {
+      "from": "layer.approvals",
+      "to": "layer.rp5",
+      "type": "verified_by",
+      "notes": "Completion claims require execution evidence, not approval alone."
+    }
   ]
 }
