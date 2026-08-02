@@ -64,6 +64,31 @@ STATE_UNVERIFIED_EFFECT       = "unverified_effect"
 STATE_MIXED                   = "mixed"
 STATE_MIXED_WITH_UNKNOWN      = "mixed_with_unknown"
 
+# D-019 context-free vocabulary.  These summaries do not replace the richer
+# surface renderers governed by D-014 through D-017.
+BASELINE_STATUS_SUMMARIES = {
+    STATE_APPROVAL_PENDING: "הפעולה ממתינה לאישור.",
+    STATE_FAILURE: "הפעולה לא הושלמה.",
+    "cancelled": "הפעולה בוטלה.",
+    STATE_SUCCESS: "הפעולה הושלמה.",
+}
+
+
+def format_baseline_status_summary(
+    state: str, *, execution_verified: bool | None = None,
+) -> str:
+    """Render D-019's baseline summary without inferring business state.
+
+    Success fails closed unless its caller explicitly supplies verified
+    execution evidence.  Surface-specific renderers do not call this helper
+    automatically, preserving D-014 through D-017.
+    """
+    if state not in BASELINE_STATUS_SUMMARIES:
+        raise ValueError("unsupported baseline status state")
+    if state == STATE_SUCCESS and execution_verified is not True:
+        return "לא ניתן לאמת שהפעולה הושלמה."
+    return BASELINE_STATUS_SUMMARIES[state]
+
 CANONICAL_STATES = frozenset({
     STATE_SUCCESS, STATE_FAILURE, STATE_APPROVAL_PENDING,
     STATE_APPROVAL_PENDING_QUERY,

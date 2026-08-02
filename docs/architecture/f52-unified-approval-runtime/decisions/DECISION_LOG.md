@@ -493,3 +493,45 @@ This log records planning decisions for the F52 program. It is not runtime imple
   branches.
 - Affected documents: this log; `spec/RECONFIRMATION_TOOL_NAME_LEAK_FIX_SCOPE_V1.md`
   (scope now implemented, not re-litigated).
+
+## D-018 — Deterministic Status Routing
+
+- Date: 02/08/2026
+- Status: Closed for Lane A implementation; does not authorize a feature-flag
+  change or alter approval, queue, or evidence authority.
+- Decision: pending and execution-status questions are owned by Approval
+  Runtime and must never fall through to the Agent. A status intent routes to
+  `query_execution_status()`; a pending intent routes to the canonical
+  pending-query path. Both reuse the request's single ActionContract snapshot.
+- Read boundary: status lookup is indexed by canonical user and may inspect
+  only that identity's cached contracts plus the existing bounded durable
+  pending lookup. It must not enumerate unrelated contracts, Airtable task
+  records, or a broad task collection.
+- Safe absence: no relevant ActionContract produces a deterministic,
+  non-technical response rather than Agent invocation.
+- Observability: record the status-route owner and records scanned without
+  logging user text, rendered replies, contract IDs, tool names, or payloads.
+- Unchanged authority: ActionContracts remains lifecycle authority; routing
+  does not approve, reject, execute, infer evidence, or change queue ownership.
+
+## D-019 — Canonical User-Facing Status Vocabulary
+
+- Date: 02/08/2026
+- Status: Closed for baseline vocabulary; does not authorize
+  `FEATURE_UNIFIED_STATUS_FORMATTER=on`.
+- Decision: MessageContract / the unified formatter owns these context-free
+  baseline state summaries:
+  - pending: `הפעולה ממתינה לאישור.`
+  - failed: `הפעולה לא הושלמה.`
+  - cancelled: `הפעולה בוטלה.`
+  - completed: `הפעולה הושלמה.`
+- Boundary: these summaries do not automatically replace approval prompts,
+  batch-pending replies, contextual execution replies, or wording governed by
+  D-014 through D-017. The existing surface-specific decision remains
+  authoritative.
+- Evidence: the completed summary is fail-closed and may be emitted only when
+  verified execution evidence is supplied; formatter code must not infer or
+  upgrade evidence.
+- Leak policy: user output must not expose ActionContracts, legacy
+  terminology, tool names, IDs, queue names, internal state names, or
+  implementation details.
