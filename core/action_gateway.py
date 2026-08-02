@@ -3120,6 +3120,34 @@ class ActionGateway:
     # עונה לשאלות סטטוס ("נוספה?") אך ורק מה-ExecutionLedger.
     # לעולם לא מסתמך על טקסט שיחה או קלט Agent.
 
+    def query_cancellation_status(
+        self, canonical_user_id: str,
+    ) -> str | None:
+        """מחזיר ``cancelled`` רק כשהחוזה הטרמינלי האחרון נדחה בפועל."""
+        contracts = self._ledger.contracts_for_user(canonical_user_id)
+        candidates = [
+            contract for contract in contracts
+            if contract.status in (
+                "completed", "executed", "rejected", "failed", "outcome_unknown",
+            )
+        ]
+        logger.info(
+            "[ActionGatewayStatusRoute] status_route_owner=approval_runtime "
+            "route_kind=cancelled records_scanned=%d read_scope=canonical_user",
+            len(contracts),
+        )
+        if not candidates:
+            return None
+        latest = max(candidates, key=lambda contract: contract.created_at)
+        if latest.status != "rejected":
+            return None
+        logger.info(
+            "[ActionGatewayStatusRoute] terminal_rejection_status=cancelled "
+            "canonical_user=%s",
+            canonical_user_id,
+        )
+        return "cancelled"
+
     def query_execution_status(
         self, canonical_user_id: str, window_seconds: int = 600,
         *, live_contracts: list[ActionContract] | None = None,
