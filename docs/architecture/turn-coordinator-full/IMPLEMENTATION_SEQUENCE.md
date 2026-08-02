@@ -1,5 +1,12 @@
 # Implementation Sequence
 
+## Current execution note — 2026-08-02
+
+WS1 foundation work is merged through PR #536. The narrow runtime integration
+PR #545 was merged as `46db9af` from head `1d117ab`; follow-up PR #546 is also
+merged. Staging and rollout gates remain mandatory before claiming readiness
+for the next WS2/WS3 step. The merge order remains WS1 → WS2 → WS3.
+
 This is an internal milestone view of exactly three implementation
 workstreams—not ten independent tracks: TC1–TC4 belong to Workstream 1,
 TC5–TC8 to Workstream 2, and TC9–TC10 to Workstream 3. Development may run in

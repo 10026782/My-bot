@@ -1,5 +1,11 @@
 # Agent Prompt — Workstream 3: MessageContract, Surfaces and Verification Harness
 
+## Current execution note — 2026-08-02
+
+WS3 remains downstream of WS2 and the merged PR #545 integration (`46db9af`,
+source head `1d117ab`). Do not begin surface integration or rollout work until
+the ordered WS1/WS2 gates and staging verification pass.
+
 ## Base and Librarian gate
 
 Branch from the canonical current `origin/main` SHA. Run full profile

@@ -1,6 +1,22 @@
 # Turn Coordinator — Full Planning
 
-Status: planning only. Base: `fb4ab4af57d8e5986a06219638e1145af019cf6e` (`origin/main`).
+Status: planning baseline plus implementation review. Planning base:
+`fb4ab4af57d8e5986a06219638e1145af019cf6e`.
+
+## Current implementation status — 2026-08-02
+
+- WS1 foundation contracts are merged (`PR #536`).
+- PR #545 was merged via `46db9af` (source head `1d117ab`).
+- Follow-up PR #546 is also merged into `main`.
+- The PR diff is limited to `app.py`,
+  `core/turn_coordinator_runtime.py`, `tools/airtable_tools.py`, and its
+  integration test file.
+- Local verification is green: 252 focused tests, all 11 standalone suites,
+  compileall, and `git diff --check`.
+- The implementation PR is closed; this branch contains documentation-only
+  status alignment. Staging/production verification remains a separate gate.
+- The next controlled step is the ordered WS2/WS3 review and staging plan. Do
+  not infer production readiness from the merge alone.
 
 This plan defines a future ownership boundary for turns. It does not create a
 `TurnCoordinator`, change routing, enable flags, alter handlers, or change
@@ -57,4 +73,6 @@ The parallel execution pack, three agent prompts, file ownership map, frozen
 contracts, integration seams, and merge/rollback plan are in
 `PARALLEL_IMPLEMENTATION_WORKSTREAMS.md` and
 `INTEGRATION_AND_MERGE_PLAN.md`. Future agents must use those documents before
-implementation; this branch itself remains planning-only.
+implementation. The planning artifacts remain authoritative after PR #545's
+merge; they do not authorize production activation without separate staging
+and rollout gates.

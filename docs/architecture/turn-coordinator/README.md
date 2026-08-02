@@ -1,5 +1,13 @@
 # TurnCoordinator + TurnEnvelope
 
+## Current implementation status — 2026-08-02
+
+The architecture documents remain the authority for the staged Turn
+Coordinator plan. WS1 foundation contracts were merged in PR #536. The narrow
+runtime integration PR #545, head `1d117ab`, was merged as `46db9af`; follow-up
+PR #546 is also merged. WS2 and WS3 remain downstream; the approved order is
+WS1 → WS2 → WS3, with staging and rollout gates still required.
+
 ## Purpose
 
 Architectural proposal for a `TurnCoordinator` that owns per-turn context

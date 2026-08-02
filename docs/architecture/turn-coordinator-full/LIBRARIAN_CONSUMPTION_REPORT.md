@@ -1,5 +1,14 @@
 # Librarian Consumption Report
 
+## Subsequent implementation status — 2026-08-02
+
+This report records the planning bundle and is not a production-readiness
+claim. Since that bundle, WS1 foundation contracts were merged through PR
+#536. PR #545 was the narrow integration at head `1d117ab`, merged as
+`46db9af`; follow-up PR #546 is also merged. Local verification was green.
+This historical report is not a staging/production acceptance report. Fresh
+Librarian consumption is required for any new planning or implementation PR.
+
 ## Run identity
 
 - Planning base commit: `fb4ab4af57d8e5986a06219638e1145af019cf6e`

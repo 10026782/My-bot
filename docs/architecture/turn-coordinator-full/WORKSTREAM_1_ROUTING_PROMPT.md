@@ -1,5 +1,12 @@
 # Agent Prompt — Workstream 1: Routing, Builders and Resolvers
 
+## Current execution note — 2026-08-02
+
+The WS1 foundation contracts have already merged in PR #536. The
+single-integrator runtime integration PR #545 was merged as `46db9af` from
+head `1d117ab`; follow-up PR #546 is also merged. Do not start a parallel
+implementation branch from the historical PR branch.
+
 ## Base and Librarian gate
 
 Branch from the canonical current `origin/main` SHA. Do not branch from
