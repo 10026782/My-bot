@@ -12,6 +12,7 @@ import hmac
 import hashlib
 import logging
 import threading
+import unicodedata
 from flask import Flask, request, Response, abort, jsonify
 
 logging.basicConfig(
@@ -218,6 +219,49 @@ _CANCELLED_STATUS_ASSERTION_RE = re.compile(
     r"^\s*הפעולה\s+כבר\s+בוטלה\s*$"
     r"|^\s*זה\s+כבר\s+בוטל\s*$",
 )
+
+_STATUS_ROUTE_ZERO_WIDTH_RE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060\ufeff]")
+_STATUS_ROUTE_REPLY_PREFIX_RE = re.compile(
+    r"^(?:[>»]|↪\ufe0f?|↩\ufe0f?|תגובה(?: ל| על)?|reply(?: to)?)[\s:：-]*",
+    re.IGNORECASE,
+)
+_STATUS_ROUTE_KNOWN_TEXT_RE = re.compile(
+    r"^(?:מה\s+מצב\s+הפעולה|מה\s+קרה\s+עם\s+הפעולה|איפה\s+עומדת\s+הפעולה|"
+    r"הפעולה(?:\s+כבר)?\s+בוטלה|האם\s+הפעולה\s+בוטלה|זה\s+כבר\s+בוטל)"
+)
+
+
+def _normalize_status_route_text(raw_text: str) -> str:
+    """Normalize transport wrappers before deterministic status matching.
+
+    This is intentionally limited to routing metadata: Unicode compatibility
+    normalization, invisible formatting controls, whitespace, and common
+    Telegram reply/sender prefixes. The original user text remains unchanged
+    for memory, auditing, and Agent fallback paths.
+    """
+    text = unicodedata.normalize("NFKC", str(raw_text or ""))
+    text = _STATUS_ROUTE_ZERO_WIDTH_RE.sub("", text)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = [" ".join(line.split()) for line in text.split("\n") if line.strip()]
+    if not lines:
+        return ""
+
+    candidates = []
+    for line in lines:
+        candidate = _STATUS_ROUTE_REPLY_PREFIX_RE.sub("", line).strip()
+        # A quoted sender label can be injected by adapters as "Sender: text".
+        if ":" in candidate or "：" in candidate:
+            _, possible_text = re.split(r"[:：]", candidate, maxsplit=1)
+            if _STATUS_ROUTE_KNOWN_TEXT_RE.match(possible_text.strip()):
+                candidate = possible_text.strip()
+        candidates.append(candidate)
+
+    # A reply wrapper may contain the quoted message followed by the actual
+    # user message. Prefer the last line only when it is status-shaped.
+    for candidate in reversed(candidates):
+        if _STATUS_ROUTE_KNOWN_TEXT_RE.match(candidate):
+            return candidate
+    return " ".join(candidates).strip()
 
 # PR2 בכוונה צר יותר מהדקדוק הישן, הרפוי, של שאילתות-סטטוס. הביטויים
 # האלה מעוגנים לשאלת lifecycle-אישור; אסור להם להפוך טקסט עסקי רגיל
@@ -3058,14 +3102,28 @@ def run_agent(
     # capture, Session, Router, Business Memory או Agent. היירוטים הישנים
     # נשארים כשומרי תאימות לניסוחים רחבים יותר, אך כוונות הסטטוס המעוגנות
     # חוזרות תמיד מכאן ולכן הבעלות עליהן דטרמיניסטית.
-    _d018_text = user_text.strip()
+    _d018_text = _normalize_status_route_text(user_text)
+    _d018_wrapper_stripped = _d018_text != str(user_text or "").strip()
+    _d018_zero_width_removed = bool(_STATUS_ROUTE_ZERO_WIDTH_RE.search(str(user_text or "")))
+    logger.info(
+        "[ActionGatewayStatusRouteInput] raw_length=%d normalized_length=%d "
+        "wrapper_stripped=%s zero_width_removed=%s line_count=%d",
+        len(str(user_text or "")), len(_d018_text), _d018_wrapper_stripped,
+        _d018_zero_width_removed, len(str(user_text or "").splitlines()) or 1,
+    )
     _d018_pending_intent = (
         len(_d018_text) <= 80 and bool(_PENDING_QUERY_RE.fullmatch(_d018_text))
     )
     _d018_execution_intent = bool(
         _EXECUTION_STATUS_QUERY_RE.fullmatch(_d018_text)
     )
-    if _snapshot_fetch_failed and (_d018_pending_intent or _d018_execution_intent):
+    _d018_cancelled_intent = bool(
+        _CANCELLED_STATUS_QUESTION_RE.fullmatch(_d018_text)
+        or _CANCELLED_STATUS_ASSERTION_RE.fullmatch(_d018_text)
+    )
+    if _snapshot_fetch_failed and (
+        _d018_pending_intent or _d018_execution_intent or _d018_cancelled_intent
+    ):
         logger.warning(
             "[ActionGatewayStatusRoute] status_route_owner=approval_runtime "
             "route_kind=unavailable records_scanned=0 fallback_used=True",
