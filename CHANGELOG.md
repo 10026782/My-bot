@@ -10,9 +10,11 @@ All notable repository-level changes should be recorded here.
   — documented prefix/wrapper normalization, structured title/date/time
   identity, clarification-before-Agent behavior for uncertain input, and
   single-speaker suppression when pending was already sent to the same chat.
-  Exact rejected canonical actions remain rejected; materially changed task
-  details receive a new fingerprint. Turn Coordinator documentation is
-  intentionally excluded because it was updated separately.
+  It also records the policy gap introduced by PR #540: autonomous rejected
+  replay must remain blocked, but an explicit new create request should get a
+  new approval attempt while the rejected contract stays immutable. Turn
+  Coordinator documentation is intentionally excluded because it was updated
+  separately.
 
 > **Note:** PRs #348–#353 (PA-01 saga — see `ROADMAP.md`'s 16/07/2026 entry) are not yet itemized here individually; this is a known, separate documentation gap, not addressed in this update.
 > **Note:** PRs #472–#478, #481–#489, #491 (Context Librarian planning/hardening/Consumption-Enforcement-planning trail) are documentation/tooling-planning only and are tracked exhaustively in `ROADMAP.md`'s N17 section rather than itemized here individually — same batching convention as the PA-01 note above.
