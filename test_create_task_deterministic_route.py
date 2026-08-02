@@ -1,4 +1,4 @@
-"""Regression for Coordinator ownership of a structured create-task turn."""
+"""בדיקות רגרסיה לבעלות ה-Coordinator על תור יצירת משימה מובנה."""
 
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ from identity import Identity, Role  # noqa: E402
 
 
 def _owner() -> Identity:
+    """יוצר זהות owner מבודדת לבדיקות המסלול הדטרמיניסטי."""
     return Identity(
         user_id="owner-deterministic-create-task",
         role=Role.OWNER,
@@ -33,6 +34,7 @@ def _owner() -> Identity:
 
 
 def test_structured_create_task_is_gateway_owned_without_agent_call():
+    """מוודא שבקשה מובנית יוצרת contract ממתין בלי קריאת Agent."""
     identity = _owner()
     text = "צור משימה: X"
     route = route_request(text, "telegram", identity)
@@ -71,6 +73,7 @@ def test_structured_create_task_is_gateway_owned_without_agent_call():
 
 
 def test_unsupported_three_value_tasks_row_fails_closed_with_diagnostic(caplog):
+    """מוודא ש-row לא נתמך נכשל בסגירה ומפיק diagnostic מבני."""
     identity = _owner()
     caplog.set_level(logging.WARNING, logger="core.action_gateway")
     with patch.object(app, "resolve_identity", return_value=identity), \

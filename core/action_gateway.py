@@ -425,7 +425,8 @@ def _sheets_payload_to_airtable(tool_inputs: dict) -> dict:
                 else len(row_data)
             )
             logger.warning(
-                "[CanonicalizationDiagnostic] original_tool=sheets_append "
+                "[CanonicalizationDiagnostic] כשל המרת payload: "
+                "original_tool=sheets_append "
                 "canonical_tool=airtable_add input_keys=%s table=%s "
                 "values_type=%s values_length=%d row_count=%d column_count=%d "
                 "converter_reason=unsupported_tasks_positional_shape",

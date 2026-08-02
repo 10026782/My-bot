@@ -256,9 +256,8 @@ for _bad_date in ("2026-02-31", "29/07/2026", "2026-13-01", "not-a-date"):
 
 
 # ══════════════════════════════════════════════════
-# 1c. Direct runtime regression — simple create-task request must queue through
-# the canonical ActionGateway path without a Leads lookup or positional
-# canonicalization failure.
+# 1c. רגרסיית runtime ישירה — בקשת יצירת משימה פשוטה חייבת להיכנס דרך
+# מסלול ActionGateway הקנוני, בלי lookup ל-Leads ובלי כשל positional.
 # ══════════════════════════════════════════════════
 print("\n── Direct runtime regression: צור משימה: X ────────────────")
 

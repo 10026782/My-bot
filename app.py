@@ -909,12 +909,12 @@ def _queue_deterministic_create_task(
     title: str, chat_id: str, channel: str, user_text: str,
     identity, out_meta: dict | None = None,
 ) -> str:
-    """Queue a complete create-task command without invoking the Agent."""
+    """מתזמן בקשת יצירת משימה מלאה בלי להפעיל את הסוכן."""
     try:
         enforce("airtable_add", identity)
     except ToolDenied as exc:
         logger.warning(
-            "[DeterministicCreateTask] denied before queue role=%s reason=%s",
+            "[DeterministicCreateTask] נדחה לפני queue role=%s reason=%s",
             getattr(identity, "role", "unknown"), type(exc).__name__,
         )
         return str(exc)
@@ -934,7 +934,7 @@ def _queue_deterministic_create_task(
         out_meta["source_module"] = "action_gateway"
         out_meta["reply_owner"] = outcome.get("reply_owner") or "gateway"
     logger.info(
-        "[DeterministicCreateTask] coordinator_owned=True agent_calls=0 "
+        "[DeterministicCreateTask] בעלות_coordinator=True agent_calls=0 "
         "action_tool=%s created_this_turn=%s reply_owner=%s",
         outcome.get("action_tool"), outcome.get("created_this_turn"),
         outcome.get("reply_owner") if _contract_queued else None,
@@ -3629,16 +3629,6 @@ def run_agent(
     if _resolved_domain is not None:
         _resolved_domain["domain"] = resolved_route_domain
 
-    # Turn Coordinator ownership: a fully specified create-task command is
-    # already a complete mutation request. Queue its canonical contract here,
-    # after the turn envelope/pending gate and before LeadCandidate or Agent.
-    if route.handler == Handler.TOOL and route.intent == "create_task":
-        _task_title = deterministic_create_task_title(user_text)
-        if _task_title is not None:
-            return _queue_deterministic_create_task(
-                _task_title, chat_id, channel, user_text, identity, _out_meta,
-            )
-
     # BUG-122: an unresolved canonical action owns the mutation slot.  A new
     # contract-required request must stop before LeadCandidate/approval/Agent
     # code can create another contract or retain deferred work.  Resolution
@@ -3665,6 +3655,15 @@ def run_agent(
             "שלח *מאשר* או *בטל* כדי לפתור את הפעולה הקיימת, ואז שלח מחדש "
             "את הבקשה החדשה."
         )
+
+    # בעלות Turn Coordinator: בקשת יצירת משימה מלאה היא בקשת mutation שלמה.
+    # מתזמנים כאן את ה-contract הקנוני, אחרי שער התור/האישור ולפני Agent או LCH.
+    if route.handler == Handler.TOOL and route.intent == "create_task":
+        _task_title = deterministic_create_task_title(user_text)
+        if _task_title is not None:
+            return _queue_deterministic_create_task(
+                _task_title, chat_id, channel, user_text, identity, _out_meta,
+            )
 
     # ── 3.6. LeadCandidate Handler (Section 4B / BUG-NEW-10) ──────
     # בעל הבית מכתיב ליד ("משה יצחקוב 050... תשמור") — short-circuit לפני agent.

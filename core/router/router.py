@@ -26,7 +26,7 @@ _STRUCTURED_CREATE_TASK_RE = re.compile(
 
 
 def deterministic_create_task_title(text: str) -> str | None:
-    """Return the title for the narrow, unambiguous create-task command."""
+    """מחזיר את כותרת המשימה עבור פקודת יצירה חד-משמעית ומצומצמת."""
     match = _STRUCTURED_CREATE_TASK_RE.fullmatch(text or "")
     return match.group("title").strip() if match else None
 
@@ -89,9 +89,8 @@ def route_request(
             domain = domain,
         )
 
-    # Structured task commands are complete enough for the Coordinator to
-    # build the approval contract itself.  Keep broader task language on the
-    # existing Agent route; this is deliberately a narrow, deterministic gate.
+    # פקודות משימה מובנות שלמות מספיקות ל-Coordinator כדי לבנות contract אישור.
+    # ניסוחים רחבים יותר נשארים במסלול Agent; זהו שער דטרמיניסטי ומצומצם בכוונה.
     if (
         intent == Intent.CREATE_TASK
         and deterministic_create_task_title(text) is not None

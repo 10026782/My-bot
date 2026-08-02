@@ -84,7 +84,7 @@ TOOL_SCHEMAS = [
     },
     {
         "name": "sheets_append",
-        "description": "הוספת שורה ל-Google Sheets. ליצירת משימה עדיף להשתמש ב-airtable_add; אם נשלחת שורת Tasks דרך Sheets, היא חייבת להכיל כותרת בלבד או כותרת ותאריך יעד ISO.",
+        "description": "הוספת שורה ל-Google Sheets. ליצירת משימה עדיף להשתמש ב-airtable_add; אם נשלחת שורת Tasks דרך Sheets, היא חייבת להכיל כותרת בלבד או כותרת ותאריך יעד בפורמט YYYY-MM-DD בלבד.",
         "input_schema": {
             "type": "object",
             "properties": {
