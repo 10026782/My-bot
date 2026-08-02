@@ -974,13 +974,13 @@ def _queue_deterministic_create_task(
         )
         return str(exc)
 
-    from airtable_schema import Tables, TaskFields
-    outcome = _queue_approval_detailed(
-        "airtable_add",
-        {"table": Tables.TASKS, "fields": {TaskFields.NAME: title}},
-        chat_id,
-        channel,
-        user_text,
+    from airtable_schema import TaskFields
+    from core.turn_coordinator_runtime import queue_task_request
+    outcome = queue_task_request(
+        intent="create_task", scope=getattr(identity, "memory_key", ""), title=title,
+        queue=lambda tool, payload: _queue_approval_detailed(
+            tool, payload, chat_id, channel, user_text,
+        ),
     )
     _contract_queued = bool(
         outcome.get("created_this_turn") and outcome.get("contract_id")
@@ -988,6 +988,7 @@ def _queue_deterministic_create_task(
     if out_meta is not None and _contract_queued:
         out_meta["source_module"] = "action_gateway"
         out_meta["reply_owner"] = outcome.get("reply_owner") or "gateway"
+        out_meta["final_response_count"] = outcome.get("final_response_count", 1)
     logger.info(
         "[DeterministicCreateTask] בעלות_coordinator=True agent_calls=0 "
         "action_tool=%s created_this_turn=%s reply_owner=%s",
@@ -995,6 +996,43 @@ def _queue_deterministic_create_task(
         outcome.get("reply_owner") if _contract_queued else None,
     )
     return outcome.get("message") or "לא הצלחתי להכניס את המשימה לאישור."
+
+
+def _queue_deterministic_task_update(
+    intent: str, user_text: str, chat_id: str, channel: str, identity,
+    out_meta: dict | None = None,
+) -> str:
+    """מנתב כתיבות משימה תלויות-ישות דרך ה-resolver וה-Gateway בלבד."""
+    try:
+        enforce("airtable_update", identity)
+    except ToolDenied as exc:
+        logger.warning(
+            "[DeterministicTaskUpdate] נדחה לפני queue role=%s reason=%s",
+            getattr(identity, "role", "unknown"), type(exc).__name__,
+        )
+        return str(exc)
+    from core.turn_coordinator_runtime import queue_task_request
+    query = re.sub(r"^(?:עדכן|שנה|סגור|סיים|complete)\s+משימ(?:ה|ת)\s*", "", user_text, flags=re.I).strip()
+    fields = None
+    if intent == "update_task":
+        match = re.match(r"^(.*?)\s*:\s*(.+)$", query)
+        if not match:
+            return "נא לציין גם מה לעדכן במשימה."
+        query, value = match.groups()
+        from airtable_schema import TaskFields
+        fields = {TaskFields.DESCRIPTION: value.strip()}
+    outcome = queue_task_request(
+        intent=intent, scope=getattr(identity, "memory_key", ""), query=query,
+        fields=fields,
+        queue=lambda tool, payload: _queue_approval_detailed(
+            tool, payload, chat_id, channel, user_text,
+        ),
+    )
+    if out_meta is not None and outcome.get("created_this_turn"):
+        out_meta["source_module"] = outcome.get("source_module") or "action_gateway"
+        out_meta["reply_owner"] = outcome.get("reply_owner") or "gateway"
+        out_meta["final_response_count"] = outcome.get("final_response_count", 1)
+    return outcome.get("message") or "לא הצלחתי להעביר את הפעולה לאישור."
 
 
 # ══════════════════════════════════════════════════
@@ -3762,6 +3800,10 @@ def run_agent(
             return _queue_deterministic_create_task(
                 _task_title, chat_id, channel, user_text, identity, _out_meta,
             )
+    if route.handler == Handler.TOOL and route.intent in {"update_task", "complete_task"}:
+        return _queue_deterministic_task_update(
+            route.intent, user_text, chat_id, channel, identity, _out_meta,
+        )
 
     # ── 3.6. LeadCandidate Handler (Section 4B / BUG-NEW-10) ──────
     # בעל הבית מכתיב ליד ("משה יצחקוב 050... תשמור") — short-circuit לפני agent.
