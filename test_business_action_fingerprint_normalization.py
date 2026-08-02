@@ -15,7 +15,7 @@ def _gateway() -> ActionGateway:
     return ActionGateway(ledger=ExecutionLedger())
 
 
-def _propose(gateway: ActionGateway, title: str):
+def _propose(gateway: ActionGateway, title: str, fingerprint_payload: dict | None = None):
     return gateway.propose_action(
         tenant_id="boss_hq",
         canonical_user_id="boss_hq:fingerprint-test",
@@ -25,6 +25,7 @@ def _propose(gateway: ActionGateway, title: str):
         origin_chat_id="fingerprint-test",
         requires_approval=True,
         user_text=f"צור משימה {title}",
+        fingerprint_payload=fingerprint_payload,
     )
 
 
@@ -63,3 +64,30 @@ def test_materially_changed_task_time_gets_new_fingerprint():
     assert changed.ok is True
     assert changed.contract_id != first.contract_id
     assert len(gateway._ledger.contracts_for_user("boss_hq:fingerprint-test")) == 2
+
+
+def test_structured_identity_ignores_raw_wrapper_but_keeps_date_and_time():
+    gateway = _gateway()
+    identity = {
+        "table": "Tasks",
+        "fields": {
+            "title": "פרסום מודעות",
+            "due_date": "2026-08-06",
+            "due_time": "19:00",
+        },
+    }
+    first = _propose(
+        gateway,
+        "פרסום מודעות עד לחמישי הקרוב 6/8/26 בשעה 19:00",
+        fingerprint_payload=identity,
+    )
+    assert first.ok is True
+    assert gateway.reject(first.contract_id, rejected_by="boss_hq:fingerprint-test")
+
+    replay = _propose(
+        gateway,
+        "> Eli: \u00a0פרסום  מודעות עד 06.08.2026 בשעה19:00.",
+        fingerprint_payload=identity,
+    )
+    assert replay.ok is False
+    assert replay.contract_id == first.contract_id
