@@ -36,6 +36,9 @@ from core.action_contract_repository import (
 # set_resolution_sink(), is the only thing allowed to know about
 # memory_store).
 from core.action_resolution_event import ActionResolutionEvent, ActionResolutionOutcome
+from core.evidence_projection import build_evidence_result
+from core.lifecycle_projection import build_action_lifecycle_result
+from core.router.ownership_contracts import ActionLifecycleResult, EvidenceResult
 from tool_registry import needs_approval
 
 logger = logging.getLogger(__name__)
@@ -3172,6 +3175,45 @@ class ActionGateway:
     # עונה לשאלות סטטוס ("נוספה?") אך ורק מה-ExecutionLedger.
     # לעולם לא מסתמך על טקסט שיחה או קלט Agent.
 
+    def approval_status(
+        self, canonical_user_id: str, *, live_contracts: list[ActionContract] | None = None,
+    ) -> ActionLifecycleResult | None:
+        """Read-only WS2 projection for the current approval lifecycle."""
+        live = list(live_contracts) if live_contracts is not None else self.find_live_contracts(canonical_user_id)
+        if live:
+            latest = max(live, key=lambda contract: contract.created_at)
+            return build_action_lifecycle_result(latest, reply_owner="gateway")
+        latest = self._ledger.find_most_recent_by_user(canonical_user_id)
+        if latest is None:
+            return None
+        return build_action_lifecycle_result(latest, reply_owner="gateway")
+
+    def execution_status(self, canonical_user_id: str) -> EvidenceResult | None:
+        """Read-only WS2 projection for the latest evidence state."""
+        latest = self._ledger.find_most_recent_by_user(canonical_user_id)
+        if latest is None:
+            return None
+        return build_evidence_result(latest)
+
+    def pending_queue_query(self, canonical_user_id: str) -> list[ActionLifecycleResult]:
+        """Return the WS2 lifecycle projections for all pending contracts."""
+        return [
+            build_action_lifecycle_result(contract, reply_owner="gateway")
+            for contract in self.find_live_contracts(canonical_user_id)
+        ]
+
+    def terminal_status(self, canonical_user_id: str) -> EvidenceResult | None:
+        """Return the terminal evidence projection for the latest terminal contract."""
+        contracts = self._ledger.contracts_for_user(canonical_user_id)
+        terminals = [
+            contract for contract in contracts
+            if contract.status in ("completed", "executed", "rejected", "failed", "outcome_unknown")
+        ]
+        if not terminals:
+            return None
+        latest = max(terminals, key=lambda contract: contract.created_at)
+        return build_evidence_result(latest)
+
     def query_cancellation_status(
         self, canonical_user_id: str,
     ) -> str | None:
@@ -3226,6 +3268,7 @@ class ActionGateway:
             # BUG-SB-03: check for pending contracts before returning None
             live = live_contracts if live_contracts is not None else self.find_live_contracts(canonical_user_id)
             if live:
+                self.approval_status(canonical_user_id, live_contracts=live)
                 if len(live) > 1:
                     legacy_text = build_approval_lifecycle_result(contracts=live).safe_user_message
                     return self._render_pending_batch_reply(live, legacy_text)
@@ -3252,6 +3295,7 @@ class ActionGateway:
             # still check pending before giving up
             live = live_contracts if live_contracts is not None else self.find_live_contracts(canonical_user_id)
             if live:
+                self.approval_status(canonical_user_id, live_contracts=live)
                 if len(live) > 1:
                     legacy_text = build_approval_lifecycle_result(contracts=live).safe_user_message
                     return self._render_pending_batch_reply(live, legacy_text)
