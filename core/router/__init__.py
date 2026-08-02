@@ -13,6 +13,7 @@ from .task_builders import (
     build_create_task_proposal,
     build_update_task_proposal,
 )
+from .task_resolvers import resolve_task
 
 __all__ = [
     "route_request",
@@ -23,4 +24,5 @@ __all__ = [
     "IntentOwnershipRegistry",
     "build_create_task_proposal", "build_update_task_proposal",
     "build_complete_task_proposal",
+    "resolve_task",
 ]
