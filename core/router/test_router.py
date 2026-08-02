@@ -46,7 +46,7 @@ TESTS = [
     ("אירוע יומן",            "קבע פגישה עם הספק מחר",   "whatsapp",  "manager",  "",             Intent.CREATE_EVENT,     RouterDomain.IMPORT,      Handler.AGENT),
 
     # ── Risk × Domain ────────────────────────────────────────────────────────
-    ("finance + manager → ok",  "צור משימה בנושא תזרים", "telegram",  "manager",  "finance",      Intent.CREATE_TASK,      RouterDomain.FINANCE,     Handler.APPROVAL),
+    ("finance + manager → ok",  "צור משימה בנושא תזרים", "telegram",  "manager",  "finance",      Intent.CREATE_TASK,      RouterDomain.FINANCE,     Handler.TOOL),
     ("crm + employee → ok",     "תוסיף ליד חדש",          "whatsapp",  "employee", "crm",          Intent.CREATE_LEAD,      RouterDomain.CRM,         Handler.AGENT),
     ("finance + employee → approval", "תוסיף ליד",         "whatsapp",  "employee", "finance",      Intent.CREATE_LEAD,      RouterDomain.FINANCE,     Handler.APPROVAL),
 

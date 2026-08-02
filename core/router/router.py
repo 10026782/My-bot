@@ -21,14 +21,15 @@ logger = logging.getLogger(__name__)
 INTENT_CONFIDENCE_THRESHOLD = 0.75
 
 _STRUCTURED_CREATE_TASK_RE = re.compile(
-    r"^\s*(?:צור|תיצור)\s+משימה\s*:\s*(?P<title>.+?)\s*$"
+    r"^\s*(?:צור|תיצור)\s+משימה\s*:?\s*(?P<title>.+?)\s*$"
 )
 
 
 def deterministic_create_task_title(text: str) -> str | None:
     """מחזיר את כותרת המשימה עבור פקודת יצירה חד-משמעית ומצומצמת."""
     match = _STRUCTURED_CREATE_TASK_RE.fullmatch(text or "")
-    return match.group("title").strip() if match else None
+    title = match.group("title").strip() if match else None
+    return title or None
 
 
 def route_request(
