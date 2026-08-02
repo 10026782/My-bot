@@ -208,6 +208,17 @@ _EXECUTION_STATUS_QUERY_RE = re.compile(
     re.IGNORECASE,
 )
 
+# שאלות וחיוויים חד-משמעיים על ביטול הפעולה האחרונה. המסלול צר בכוונה:
+# הוא אינו תופס טקסט עסקי כללי שמכיל את המילה "בוטלה".
+_CANCELLED_STATUS_QUESTION_RE = re.compile(
+    r"^\s*(?:האם\s+)?הפעולה(?:\s+כבר)?\s+בוטלה\s*\?\s*$"
+    r"|^\s*זה\s+כבר\s+בוטל\s*\?\s*$",
+)
+_CANCELLED_STATUS_ASSERTION_RE = re.compile(
+    r"^\s*הפעולה\s+כבר\s+בוטלה\s*$"
+    r"|^\s*זה\s+כבר\s+בוטל\s*$",
+)
+
 # PR2 בכוונה צר יותר מהדקדוק הישן, הרפוי, של שאילתות-סטטוס. הביטויים
 # האלה מעוגנים לשאלת lifecycle-אישור; אסור להם להפוך טקסט עסקי רגיל
 # שמכיל את אותן מילים לפקודת gateway.
@@ -3064,6 +3075,35 @@ def run_agent(
             _out_meta["status_route_owner"] = "approval_runtime"
         return "לא ניתן לבדוק כרגע את מצב הפעולה."
     if not _snapshot_fetch_failed:
+        _cancelled_status_kind = None
+        if _CANCELLED_STATUS_QUESTION_RE.fullmatch(_d018_text):
+            _cancelled_status_kind = "question"
+        elif _CANCELLED_STATUS_ASSERTION_RE.fullmatch(_d018_text):
+            _cancelled_status_kind = "assertion"
+        if _cancelled_status_kind is not None:
+            from core.action_gateway import action_gateway as _gw_cancelled_status
+            _cancelled_status = _gw_cancelled_status.query_cancellation_status(
+                identity.memory_key,
+            )
+            _cancelled_known = _cancelled_status == "cancelled"
+            if _cancelled_known:
+                _cancelled_reply = (
+                    "כן, הפעולה בוטלה."
+                    if _cancelled_status_kind == "question"
+                    else "נכון, הפעולה כבר בוטלה."
+                )
+            else:
+                _cancelled_reply = "לא מצאתי פעולה אחרונה שבוטלה."
+            logger.info(
+                "[ActionGatewayStatusRoute] status_route_owner=approval_runtime "
+                "route_kind=cancelled terminal_rejection_status=%s agent_calls=0 "
+                "fallback_used=False",
+                "cancelled" if _cancelled_known else "none",
+            )
+            if _out_meta is not None:
+                _out_meta["source_module"] = "action_gateway"
+                _out_meta["status_route_owner"] = "approval_runtime"
+            return _cancelled_reply
         if _d018_pending_intent:
             from core.action_gateway import action_gateway as _gw_d018_pending
             _d018_reply = _gw_d018_pending.describe_pending_queue(
