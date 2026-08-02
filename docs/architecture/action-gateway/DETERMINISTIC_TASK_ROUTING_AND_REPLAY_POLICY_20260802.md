@@ -1,8 +1,8 @@
 # Deterministic task routing and replay policy
 
-**Date:** 02/08/2026  
+**Date:** 02/08/2026
 **Scope:** deterministic create-task routing, ActionGateway business identity,
-pending delivery, and rejection replay.  
+pending delivery, and rejection replay.
 **Explicitly out of scope:** Turn Coordinator implementation and its separate
 documentation update.
 
