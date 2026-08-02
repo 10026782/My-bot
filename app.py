@@ -2965,12 +2965,18 @@ def _resolve_pr2_deterministic_approval(
         else:
             # PR2 only reaches the no-mutation multi-contract branch while its
             # own flag is on; the legacy route below remains byte-for-byte
-            # available when the flag is off. recent_terminal=None always —
-            # same rule as is_confirm: a bare cancel word never replays by
-            # recency.
+            # available when the flag is off. A bare cancel word may replay
+            # only the latest bounded rejected terminal presentation. It must
+            # never replay completed/failed state and never mutate a terminal
+            # contract.
+            recent_rejected = gateway.find_recent_terminal_by_user(
+                identity.memory_key, max_age_seconds=_LIVE_CONTRACT_STALE_SECONDS,
+            )
+            if recent_rejected is not None and recent_rejected.status != "rejected":
+                recent_rejected = None
             reply = gateway.route_cancellation_word(
                 identity.memory_key, live_contracts=live_contracts,
-                recent_terminal=None, safe_multiple=True,
+                recent_terminal=recent_rejected, safe_multiple=True,
             ) or "לא מצאתי פעולה ממתינה לביטול."
         if out_meta is not None:
             out_meta["source_module"] = "action_gateway"

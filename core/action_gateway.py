@@ -2267,6 +2267,13 @@ class ActionGateway:
                 else recent_terminal
             )
             if recent is not None and recent.status in ("completed", "executed", "rejected"):
+                if recent.status == "rejected":
+                    # A repeated cancellation is context-free presentation;
+                    # do not leak the old task/entity description or imply a
+                    # new transition. The canonical contract remains rejected.
+                    return build_approval_lifecycle_result(
+                        canonical_state="rejected", repeated=True,
+                    ).safe_user_message
                 return build_approval_lifecycle_result(recent, repeated=True).safe_user_message
             return None
         if safe_multiple and len(live) > 1:
@@ -3128,6 +3135,20 @@ class ActionGateway:
                 return self._render_pending_query_reply(single, legacy_text)
             return None
         latest = max(candidates, key=lambda c: c.created_at)
+        if latest.status == "rejected":
+            # Rejection is a canonical terminal user outcome, not an execution
+            # claim. Preserve it beyond the generic recent-status window so a
+            # status query cannot turn a known cancellation into a misleading
+            # no-information fallback. This is presentation-only: the
+            # ActionContract remains rejected and no replay or mutation occurs.
+            from core.agent_message_formatter import format_baseline_status_summary
+
+            logger.info(
+                "[ActionGatewayStatusRoute] terminal_rejection_status="
+                "cancelled canonical_user=%s",
+                canonical_user_id,
+            )
+            return format_baseline_status_summary("cancelled")
         if time.time() - latest.created_at > window_seconds:
             # still check pending before giving up
             live = live_contracts if live_contracts is not None else self.find_live_contracts(canonical_user_id)
