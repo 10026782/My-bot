@@ -3784,7 +3784,31 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
   final_responses=1
   ```
   או לוג שקול
-- **סטטוס:** ⏸️ בדיקה חסרה, דורשת fault injection
+- **נסגר (04/08/2026) — ללא צורך ב-`STAGING_FAIL_FIRST_APPROVAL_NOTIFICATION`
+  או קוד production חדש:** `app._queue_approval_detailed_impl()`'s `bot.send_message(
+  owner_chat_id, ...)` כבר עטוף ב-try/except ("BOSS NEVER FAKES" block) שמבצע,
+  על כשל: ביטול מאומת של ה-EventBus pending item (`_cancel_and_verify_pending()`)
+  וביטול מאומת (revoke) של ה-ActionContract שזה עתה נוצר
+  (`_revoke_and_verify_contract()`) — שני helpers קיימים ונבדקים בנפרד
+  ב-`core/approval_queue_recovery.py` — ומחזיר dict מובנה עם `ok=False`,
+  ללא מפתח `owner_notified` (falsy), הודעת שגיאה יחידה. נבדק ישירות עם
+  `bot.send_message` שמדומה לזרוק exception (ללא fault-injection env var
+  ייעודי — mocking סטנדרטי ב-unit test מספיק) על event_bus/ActionGateway
+  אמיתיים.
+- **בדיקות:** `test_first_pending_notification_failure_suppression.py`
+  (חדש, 11/11) — מאמת: `send_message` נקרא בדיוק פעם אחת (אין retry
+  שקט/loop), `ok=False`, `owner_notified` falsy, `terminal_outcome=
+  APPROVAL_QUEUE_ERROR`, הודעה ציבורית **אחת** לא-ריקה מוחזרת,
+  `created_this_turn=False`, אין `ActionContract` חי שנשאר, אין
+  `EventBus` pending item שנשאר — כל הקריטריונים שהתבקשו (`owner_notification_
+  sent=false`, `duplicate_reply_suppressed=false`, `final_responses=1`)
+  מתקיימים. Regression מוודא ששליחה תקינה (לא-נכשלת) עדיין מדווחת
+  `owner_notified=True` ונשלחת פעם אחת בלבד. `smoke_tests.py`,
+  `test_integration.py`, `test_bug112_telegram_approval_ttl.py` (30/30),
+  `test_bug_stale_callback_ux.py` (10/10) — כולם ירוקים, לא נגעתי בקוד
+  production כלל.
+- **סטטוס:** ✅ בדיקה נוספה ואומתה — הקוד הקיים כבר עומד בכל הדרישות,
+  ללא צורך בתיקון. **לא מוזג עדיין** (הבדיקה עצמה טרם רצה ב-CI/production).
 
 ---
 
