@@ -3520,7 +3520,39 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
   - בקשת create חדשה ומפורשת יוצרת `ActionContract` חדש בstatus `pending`
   - autonomous replay עדיין חסום
   - אותו fingerprint נשמר (לא משתנה כדי לעקוף את ההגנה)
-- **סטטוס:** 🔴 נרשם, לא תוקן
+- **חשוב — קונפליקט עם תיעוד קיים, נמצא ב-04/08/2026:** `docs/architecture/
+  action-gateway/DETERMINISTIC_TASK_ROUTING_AND_REPLAY_POLICY_20260802.md`
+  (מוזג עם PR #546 עצמו) קובע במפורש שה-blocking **מכוון** ("must not weaken
+  fingerprint deduplication"), ושפתיחה-מחדש דורשת "a separately approved
+  reconfirmation policy" שמעולם לא עוצבה. הועלה ל-owner (04/08/2026) —
+  ההחלטה: **לעצב policy כזו** (לא Won't-Fix, לא רק לתעד).
+- **עיצוב + תיקון (04/08/2026):** ראה
+  `docs/architecture/action-gateway/BUG-153_CREATE_TASK_EXPLICIT_RECONFIRMATION_POLICY_20260804.md`
+  ל-Cross-Layer Impact Matrix מלא. תמצית: ערך `trusted_source` חדש
+  (`"deterministic_create_task"`) מוגדר ב-`_queue_deterministic_create_task()`
+  בלבד (Python קוד מהימן, לעולם לא מ-tool_inputs/טקסט משתמש) — `propose_action()`'s
+  ה-rejected-branch מבחין בין `trusted_source == "deterministic_create_task"`
+  (מותר, פותח contract חדש; ה-contract הישן נשאר `rejected` ללא שינוי) לבין
+  כל trusted_source אחר, **כולל `"agent"`** (autonomous replay — ממשיך
+  להיחסם ללא תנאי, בדיוק כמו היום). בטוח כי: (1) idempotency guard קיים
+  כבר במעלה הזרימה (`app.py:5247`) מסנן webhook redelivery לפני
+  `route_request()`; (2) המסלול הדטרמיניסטי לא יכול "להחליט" לבד לחזור על
+  עצמו (regex על טקסט נכנס של ה-turn הנוכחי בלבד, לא Agent tool_use loop);
+  (3) ה-fingerprint עצמו לא משתנה. `_queue_deterministic_task_update()`
+  (UPDATE_TASK/COMPLETE_TASK) **לא** כלול ב-carve-out — scope מוצהר,
+  create_task בלבד.
+- **בדיקות:** `test_bug153_create_task_reconfirmation_after_rejection.py`
+  (חדש, 11/11 — כולל regression מפורש ש-`trusted_source="agent"` ו-כל
+  trusted_source אחר נשארים חסומים), `test_create_task_deterministic_route.py`
+  (13/13, ללא שינוי), `test_bug_canonical_tool_wiring.py` (52/52, ללא שינוי),
+  `test_bug091_source_trust_boundary.py` (10/10, ללא שינוי),
+  `core/router/test_router.py` (44/44, ללא שינוי), `smoke_tests.py`,
+  `test_integration.py` (4/4) — כולם ירוקים.
+- **Merged:** לא עדיין
+- **Deployed:** לא
+- **Verified בפרודקשן:** לא
+- **סטטוס:** 🟡 עיצוב אושר ע"י owner, קוד מומש ונבדק מקומית — **לא מוזג, לא
+  deployed, לא verified בפרודקשן**
 
 ---
 

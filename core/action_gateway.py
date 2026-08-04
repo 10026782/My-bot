@@ -1495,7 +1495,22 @@ class ActionGateway:
                 )
             if existing.status in ("completed", "executed"):
                 return self._handle_duplicate_executed(existing, canonical_user_id)
-            if existing.status == "rejected":
+            if existing.status == "rejected" and trusted_source != "deterministic_create_task":
+                # Autonomous replay guard (unchanged) — blocks the Agent
+                # tool_use loop, and every other trusted_source, from
+                # re-proposing an action whose canonical business identity
+                # was already rejected. BUG-153: an explicit, deterministic
+                # create_task request (trusted_source ==
+                # "deterministic_create_task" — never the raw Agent loop,
+                # always a direct consequence of THIS turn's inbound text,
+                # already protected from webhook-redelivery duplicates
+                # upstream) is the one carved-out exception, handled below by
+                # simply not returning here — see docs/architecture/
+                # action-gateway/BUG-153_CREATE_TASK_EXPLICIT_RECONFIRMATION_
+                # POLICY_20260804.md for the full design and Cross-Layer
+                # Impact Matrix. `existing` (the rejected contract) is never
+                # mutated; it stays "rejected" and independently retrievable
+                # by its own contract_id.
                 repeated = build_approval_lifecycle_result(
                     existing, canonical_state="rejected", repeated=True,
                 )
@@ -1504,6 +1519,14 @@ class ActionGateway:
                     reason="business action already rejected",
                     contract_id=existing.contract_id,
                     user_message=repeated.safe_user_message,
+                )
+            if existing.status == "rejected":
+                logger.info(
+                    "[ActionGateway] BUG-153 explicit reconfirmation: "
+                    "opening a new contract for a deterministic create_task "
+                    "request whose fingerprint matches a rejected contract="
+                    "%s fingerprint=%.12s user=%s.",
+                    existing.contract_id, fingerprint, canonical_user_id,
                 )
             if existing.status in ("approved", "executing", "outcome_unknown"):
                 return GatewayResult(

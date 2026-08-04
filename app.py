@@ -990,6 +990,15 @@ def _queue_deterministic_create_task(
         return _queue_approval_detailed(
             tool, payload, chat_id, channel, user_text,
             fingerprint_payload=fingerprint_payload,
+            # BUG-153: identifies this proposal as originating from the
+            # deterministic create_task router match for THIS turn's inbound
+            # text (agent_calls=0, never the Agent tool_use loop's own
+            # initiative) — see docs/architecture/action-gateway/
+            # BUG-153_CREATE_TASK_EXPLICIT_RECONFIRMATION_POLICY_20260804.md.
+            # Lets propose_action() distinguish an explicit new user request
+            # from autonomous replay when the business fingerprint matches an
+            # already-rejected contract.
+            trusted_source="deterministic_create_task",
         )
 
     outcome = queue_task_request(
@@ -1200,7 +1209,8 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
 
 def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
                              user_chat_id: str, channel: str, user_text: str = "",
-                             fingerprint_payload: dict | None = None) -> dict:
+                             fingerprint_payload: dict | None = None,
+                             trusted_source: str = "agent") -> dict:
     """
     Same behavior as _queue_approval() (see that docstring), but returns a
     structured outcome instead of just the model-facing message:
@@ -1287,6 +1297,7 @@ def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
         return _queue_approval_detailed_impl(
             tool_name, tool_inputs, user_chat_id, channel, user_text,
             fingerprint_payload=fingerprint_payload,
+            trusted_source=trusted_source,
         )
     except CanonicalizationError as exc:
         # PR2 staging acceptance incident, 29/07/2026: resolve_canonical_call()
@@ -1393,7 +1404,8 @@ def _approval_callback_data(
 
 def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
                                   user_chat_id: str, channel: str, user_text: str = "",
-                                  fingerprint_payload: dict | None = None) -> dict:
+                                  fingerprint_payload: dict | None = None,
+                                  trusted_source: str = "agent") -> dict:
     from core.action_gateway import resolve_canonical_call
     tool_name, tool_inputs = resolve_canonical_call(
         tool_name, tool_inputs, user_text
@@ -1452,7 +1464,7 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
             origin_chat_id=user_chat_id,
             requires_approval=True,
             identity=identity,
-            trusted_source="agent",
+            trusted_source=trusted_source,
             user_text=user_text,
             fingerprint_payload=fingerprint_payload,
         )
@@ -1523,7 +1535,7 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
                 origin_chat_id=user_chat_id,
                 requires_approval=True,
                 identity=identity,
-                trusted_source="agent",
+                trusted_source=trusted_source,
                 user_text=user_text,
                 fingerprint_payload=fingerprint_payload,
             )
