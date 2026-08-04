@@ -11,6 +11,13 @@
 (עודכנו לאחרונה עד PR #517–#520) — נכתב כאן ובקטע ה-catch-up ישירות מ-`git log`/`git show`
 על `origin/main`, לא מהמסמכים. תואם הנחיית "MAIN > DOCS".
 
+**עדכון (04/08/2026):** ארבעה באגים חדשים נרשמו מאימות Staging ל־PR #546 (Turn Coordinator) ב־03/08/2026:
+- **BUG-153** — בקשת create חדשה אחרי rejection נחסמת (גבוה)
+- **BUG-154** — ניסוח "ל־תאריך" מפיל את parser (גבוה)
+- **BUG-155** — TTL expiry אינו סוגר את ה־ActionContract (קריטי)
+- **BUG-156** — השעה משתתפת בזהות אך אינה נשמרת בכתיבה (בינוני-גבוה)
+כולם רשומים ב-`BUG_AUDIT_LOG.md` עם פרטים מלאים. בנוסף דורשת בדיקה: fault injection ל-suppression fallback כשל בשליחת notification ראשונה.
+
 ## 1. Executive Summary
 
 - הבוט חי בפרודקשן (Telegram + WhatsApp/Twilio), Identity→Router→Context→Agent, Airtable כ-CRM.
