@@ -38,6 +38,7 @@ This test proves:
 from __future__ import annotations
 
 import os
+from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-bug153-test")
 os.environ.setdefault("TELEGRAM_TOKEN", "123456789:BUG153_TEST_TOKEN")
@@ -46,8 +47,12 @@ os.environ.setdefault("AIRTABLE_BASE_ID", "appBug153Test")
 os.environ.setdefault("RENDER_APP_URL", "https://example.com")
 os.environ.setdefault("SETUP_WEBHOOK", "0")
 
+import app  # noqa: E402
 from core.action_gateway import action_gateway as _real_gw  # noqa: E402
+from core.router.router import parse_deterministic_create_task  # noqa: E402
+from event_bus import bus as _real_bus  # noqa: E402
 from identity import Identity, Role  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
 
 passed = failed = 0
 
@@ -144,6 +149,103 @@ for other_source in ("lead_capture", "tma_api", "followup_engine", "test_harness
         trusted_source=other_source,
     )
     chk(f"trusted_source={other_source!r} is still blocked after rejection", not retry3.ok)
+
+
+# ══════════════════════════════════════════════════════════════════
+# CodeRabbit follow-up: sections 1-3 above call ActionGateway.propose_action()
+# directly with an explicit trusted_source="deterministic_create_task" — they
+# do not prove app._queue_deterministic_create_task() actually FORWARDS that
+# exact value through _queue_approval_detailed()/_queue_approval_detailed_impl().
+# If that forwarding regressed back to the "agent" default, this whole test
+# file would stay green while BUG-153 silently returned in production. This
+# section drives the REAL end-to-end queue path instead.
+# ══════════════════════════════════════════════════════════════════
+print("\n── 4. end-to-end: app._queue_deterministic_create_task() forwards "
+      "trusted_source correctly through the real queue chain ──")
+
+identity4 = _identity("req_bug153_4")
+title4 = "לבדוק את התקדמות הפרויקט"
+task_parse4 = parse_deterministic_create_task(f"צור משימה {title4}")
+assert task_parse4.certain
+
+mock_bot4 = MagicMock()
+
+
+def _resolve_identity4(channel, ext_id):
+    return identity4
+
+
+with patch.object(app, "bot", mock_bot4), \
+     patch.object(app, "resolve_identity", side_effect=_resolve_identity4), \
+     patch.dict(os.environ, {"OWNER_TELEGRAM_ID": identity4.user_id}, clear=False), \
+     patch("feature_flags.is_enabled", side_effect=lambda name: name == "FEATURE_ACTION_GATEWAY"):
+    first_outcome = app._queue_deterministic_create_task(
+        title4, identity4.user_id, "telegram", f"צור משימה {title4}", identity4,
+        task_parse=task_parse4,
+    )
+
+chk("end-to-end: first request creates a live contract",
+    len(_real_gw.find_live_contracts(identity4.memory_key)) == 1)
+first_contract4 = _real_gw.find_live_contracts(identity4.memory_key)[0]
+
+# Reject through the REAL production callback path (_handle_approval_callback_
+# impl(), action="reject") rather than calling ActionGateway.reject() directly
+# — the latter only clears the ActionGateway contract and leaves the separate
+# EventBus pending item (created by the same _queue_deterministic_create_task()
+# call above) live, which would then make the second request below hit
+# EventBus's OWN "כבר ממתינה לאישור הבעלים" cross-channel-duplicate guard
+# before it ever reaches propose_action()'s BUG-153 branch at all — a false
+# pass/fail that wouldn't reflect how a real Telegram "❌ בטל" press behaves.
+_pending_action_id4 = next(
+    action_id for action_id, entry in _real_bus._pending._store.items()
+    if entry.get("chat_id") == identity4.user_id
+)
+_reject_cq4 = SimpleNamespace(
+    id="cbq-bug153-4",
+    data=f"reject:{_pending_action_id4}:{first_contract4.contract_id}",
+    from_user=SimpleNamespace(id=identity4.user_id),
+    message=SimpleNamespace(chat=SimpleNamespace(id="chat-bug153-4"), message_id=1),
+)
+with patch.object(app, "bot", MagicMock()), \
+     patch.object(app, "resolve_identity", side_effect=_resolve_identity4), \
+     patch.object(app, "_flag_enabled", side_effect=lambda name: name == "FEATURE_ACTION_GATEWAY"), \
+     patch("feature_flags.is_enabled", side_effect=lambda name: name == "FEATURE_ACTION_GATEWAY"):
+    app._handle_approval_callback_impl(_reject_cq4)
+
+chk(
+    "end-to-end: setup rejection (real callback path) leaves the contract "
+    "'rejected'",
+    _real_gw.find_contract(first_contract4.contract_id).status == "rejected",
+)
+
+mock_bot4b = MagicMock()
+with patch.object(app, "bot", mock_bot4b), \
+     patch.object(app, "resolve_identity", side_effect=_resolve_identity4), \
+     patch.dict(os.environ, {"OWNER_TELEGRAM_ID": identity4.user_id}, clear=False), \
+     patch("feature_flags.is_enabled", side_effect=lambda name: name == "FEATURE_ACTION_GATEWAY"):
+    second_outcome = app._queue_deterministic_create_task(
+        title4, identity4.user_id, "telegram", f"צור משימה {title4}", identity4,
+        task_parse=task_parse4,
+    )
+
+live_after4 = _real_gw.find_live_contracts(identity4.memory_key)
+chk(
+    "end-to-end: the identical request, resent through the real deterministic "
+    "queue path after rejection, opens a NEW live (pending) contract — proves "
+    "trusted_source='deterministic_create_task' actually reaches "
+    "propose_action() through _queue_approval_detailed()/_impl(), not just "
+    "when set directly in a unit test",
+    len(live_after4) == 1 and live_after4[0].contract_id != first_contract4.contract_id,
+)
+chk(
+    "end-to-end: the old rejected contract is still 'rejected', untouched",
+    _real_gw.find_contract(first_contract4.contract_id).status == "rejected",
+)
+chk(
+    "end-to-end: the second (post-rejection) response never claims the "
+    "action was already cancelled/blocked",
+    "כבר בוטלה" not in (second_outcome or ""),
+)
 
 
 print()

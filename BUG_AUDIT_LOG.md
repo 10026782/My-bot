@@ -1667,7 +1667,7 @@
 לפני ה-bridge: `events.count = 0` (כל ליד, ללא יוצא מן הכלל — אין Lead Event אחד שנוצר אי-פעם מ-TMA).
 
 אחרי ה-bridge, לאחר `patch_lead`/`set_lead_outcome` אמיתיים על הליד הזה מה-TMA:
-```
+```text
 events.available = true
 events.count = 2
 engine.degraded = false
@@ -2085,7 +2085,7 @@ confidence = 0.2
 
 המשתמש הציע תחילה מודל "context generation/version" (increment בכל הפרעה, השוואת version-at-proposal מול version-at-reconfirm) שמאפשר שרשרת בלתי-מוגבלת של re-displays. **באותה הודעה** המשתמש תיקן/הידק את המדיניות במפורש למודל **חסום, לא-רקורסיבי**: אחרי re-display אחד, כל אירוע נוסף (לא "כן"/"לא") **סוגר** את ה-contract לגמרי (SUPERSEDED), לא פותח סיבוב שני. ה-FSM הסופי המחייב:
 
-```
+```text
 PENDING
   ├─ כן              → EXECUTED
   ├─ לא              → CANCELLED
@@ -3562,16 +3562,21 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **סביבה:** Staging — `my-bot-approval-staging`, בסיס `בסיס עיקרי`
 - **מסך / מודול:** `core/router/router.py`, פונקציה `parse_deterministic_create_task()`
 - **קלט ששיחזר את הבאג:**
-  ```
+  ```text
   צור משימה לבדוק את אימות 546 המעודכן, ל־5/8/26 בשעה 10:30
   ```
 - **הרצף שנצפה:**
   - התנהגות צפויה: parsing דטרמיניסטי תקין, `intent=create_task`, `handler=tool`, CanonicalActionProposal תקין, ActionContract בstatus `pending`
   - התנהגות בפועל: Parser קרס עם `AttributeError: 'NoneType' object has no attribute 'start'`
   - Stack trace: `parse_deterministic_create_task` → `if date_marker.start() > date_match.start():`
-- **Root Cause:** `date_match` נמצא בקלט, אך `date_marker` (marker ל-"ל־") הוא `None`. הקוד קורא ל-`date_marker.start()` ללא בדיקת `None` קודם.
+- **Root Cause:** `date_marker` הוא תוצאה של `re.search(r"\bעד\b", body)` —
+  מחפש את מילת-הסימון "עד" בלבד, לא "ל־". הקלט משתמש ב-"ל־" כמסמן-תאריך
+  במקום "עד", ולכן `date_marker` הוא `None`, בעוד `date_match` (שמזהה את
+  צורת התאריך `5/8/26` עצמה, ללא תלות ב-marker) כן נמצא. `parse_
+  deterministic_create_task()` קורא ל-`date_marker.start()` בלי לבדוק
+  קודם שהוא לא `None`.
 - **Fallback לאחר ההקרסה:** המערכת עברה ל-fallback: `intent=unknown`, `handler=approval`, `confidence=0.00`, rule='fallback'. מציגה approval כללי ללא details:
-  ```
+  ```text
   הפרטים המדויקים ייקבעו כשאכין את הפעולה בפועל
   ```
   זה אינו CanonicalActionProposal תקין.
@@ -3643,7 +3648,10 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
   - callback נוסף אינו מבצע פעולה
 - **קריטריוני סגירה:**
   - expiry מעביר contract ל-terminal status
-  - live contract count יורד לאפס
+  - ה-contract שפג נעדר מ-`find_live_contracts()` (contract-scoped — הספירה
+    הכוללת של live contracts יורדת בדיוק באחד, לא נדרשת ל-0 גלובלית; ל-
+    identity יכולים להיות live contracts אחרים, לא-קשורים, שלא אמורים
+    להיפגע)
   - בקשה חדשה אינה נחסמת
   - approval מאוחר אינו אפשרי
   - callback כפול אינו מבצע
@@ -3683,7 +3691,7 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **סביבה:** Staging — `my-bot-approval-staging`, בסיס `בסיס עיקרי`
 - **מסך / מודול:** canonical create-task payload, mapping ל-Airtable fields, schema של `משימות (Tasks)`
 - **קלט:**
-  ```
+  ```text
   צור משימה לבדוק את אימות 546 המעודכן עד 5/8/26 בשעה 10:30
   ```
 - **מה אומת:**
@@ -3778,7 +3786,7 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
   - gateway
   - fallback send
 - **תוצאה צפויה:**
-  ```
+  ```text
   owner_notification_sent=false
   duplicate_reply_suppressed=false
   final_responses=1

@@ -25,9 +25,18 @@ crash.
 
 from __future__ import annotations
 
+from core.router import Handler, route_request
 from core.router.router import parse_deterministic_create_task
+from identity import Identity, Role
 
 passed = failed = 0
+
+
+def _owner(user_id: str) -> Identity:
+    return Identity(
+        user_id=user_id, role=Role.OWNER, display_name=user_id,
+        tenant_id="boss_hq", domain_id="general", channel="telegram", external_id=user_id,
+    )
 
 
 def chk(desc: str, cond: bool) -> None:
@@ -56,8 +65,8 @@ chk("due_time parsed correctly", r1.due_time == "10:30")
 print("\n── 2. Unicode variants of the '-' after ל ──")
 for label, dash in (
     ("plain hyphen", "-"),
-    ("en dash", "–"),
-    ("em dash", "—"),
+    ("en dash", "\u2013"),
+    ("em dash", "\u2014"),
 ):
     r = parse_deterministic_create_task(f"צור משימה X ל{dash}5/8/26 בשעה 10:30")
     chk(f"'{label}' variant parses as certain", r.certain and r.due_date == "2026-08-05")
@@ -89,6 +98,39 @@ chk(
     "as a date marker -> still uncertain (fail-closed), not a false-certain parse",
     r_no_dash.matched and r_no_dash.uncertain,
 )
+
+
+# ══════════════════════════════════════════════════════════════════
+# CodeRabbit follow-up: sections 1-5 above call parse_deterministic_
+# create_task() directly — they don't prove route_request() itself (the
+# actual caller in production, via app.py) reaches the canonical
+# deterministic TOOL path for the exact staging input, or CLARIFY (not the
+# generic APPROVAL fallback) for a genuinely unrecognized marker. This
+# section drives route_request() end-to-end for both cases.
+# ══════════════════════════════════════════════════════════════════
+print("\n── 6. route_request(): exact staging input reaches the deterministic TOOL path ──")
+_owner_identity = _owner("owner-bug154-route")
+route_certain = route_request(
+    "צור משימה לבדוק את אימות 546 המעודכן, ל־5/8/26 בשעה 10:30",
+    "telegram", _owner_identity,
+)
+chk("route_request(): handler is TOOL (deterministic), not a fallback",
+    route_certain.handler == Handler.TOOL)
+chk("route_request(): needs_approval is True (real ActionContract path)",
+    route_certain.needs_approval is True)
+
+print("\n── 7. route_request(): a date-shaped token with no recognized marker "
+      "reaches CLARIFY, not the generic non-canonical APPROVAL fallback ──")
+route_uncertain = route_request(
+    "צור משימה X 5/8/26 בשעה 10:30", "telegram", _owner_identity,
+)
+chk("route_request(): handler is CLARIFY, not APPROVAL",
+    route_uncertain.handler == Handler.CLARIFY)
+chk("route_request(): tool_allowed is False for the clarification path",
+    route_uncertain.tool_allowed is False)
+chk("route_request(): confidence is not the generic fallback's 0.0 "
+    "(this is a real router decision, not _safe_route()'s exception fallback)",
+    route_uncertain.confidence != 0.0 or route_uncertain.matched_rule != "fallback")
 
 
 print()

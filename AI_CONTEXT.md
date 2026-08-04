@@ -11,12 +11,24 @@
 (עודכנו לאחרונה עד PR #517–#520) — נכתב כאן ובקטע ה-catch-up ישירות מ-`git log`/`git show`
 על `origin/main`, לא מהמסמכים. תואם הנחיית "MAIN > DOCS".
 
-**עדכון (04/08/2026):** ארבעה באגים חדשים נרשמו מאימות Staging ל־PR #546 (Turn Coordinator) ב־03/08/2026:
-- **BUG-153** — בקשת create חדשה אחרי rejection נחסמת (גבוה)
-- **BUG-154** — ניסוח "ל־תאריך" מפיל את parser (גבוה)
-- **BUG-155** — TTL expiry אינו סוגר את ה־ActionContract (קריטי)
-- **BUG-156** — השעה משתתפת בזהות אך אינה נשמרת בכתיבה (בינוני-גבוה)
-כולם רשומים ב-`BUG_AUDIT_LOG.md` עם פרטים מלאים. בנוסף דורשת בדיקה: fault injection ל-suppression fallback כשל בשליחת notification ראשונה.
+**עדכון (04/08/2026):** ארבעה באגים נרשמו מאימות Staging ל-PR #546 (מסלול
+create_task דטרמיניסטי) ב-03/08/2026, ותוקנו באותו יום (branch
+`claude/pr-546-turn-coordinator-bugs-jhdrtl`, PR #550). **חשוב — לכל
+אחד משני מצבים נפרדים, אל תערבבו:**
+
+| באג | staging-verified (הבאג עצמו) | קוד תוקן מקומית | Merged | Deployed | Production-verified |
+|---|---|---|---|---|---|
+| BUG-153 — create אחרי rejection נחסם | כן (03/08) | כן (04/08) | לא | לא | לא |
+| BUG-154 — "ל־תאריך" מפיל parser | כן (03/08) | כן (04/08) | לא | לא | לא |
+| BUG-155 — TTL expiry לא סוגר contract | כן (03/08) | כן (04/08) | לא | לא | לא |
+| BUG-156 — שעה לא נשמרת ב-Airtable | כן (03/08) | כן (04/08, Option B) | לא | לא | לא |
+| Fault injection suppression (missing test) | לא רלוונטי — פער-בדיקה, לא באג | בדיקה נוספה (04/08) — קוד production לא שונה | לא | לא | לא |
+
+כל ארבעת התיקונים ובדיקת ה-suppression מתועדים במלואם ב-`BUG_AUDIT_LOG.md`
+(כולל Cross-Layer Impact Matrix לכל תיקון תחת `docs/architecture/action-gateway/`).
+**"staging-verified" מתייחס לדיווח המקורי של הבאג — לא לאימות שהתיקון עצמו
+פתר אותו ב-staging/production.** עד למיזוג+deploy+אימות production, הסטטוס
+נשאר 🟡 (קוד מומש ונבדק מקומית בלבד) לפי כלל-הברזל.
 
 ## 1. Executive Summary
 

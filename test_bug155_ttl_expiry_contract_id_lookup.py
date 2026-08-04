@@ -142,10 +142,9 @@ def _resolve_identity_side_effect(channel, ext_id):
 cq = _fake_cq(approver.user_id, f"approve:{action_id}")
 mock_bot = MagicMock()
 
-_flag_side_effect = lambda name: (
-    True if name == "FEATURE_ACTION_GATEWAY"
-    else name == "FEATURE_SINGLE_SPEAKER_APPROVAL_UX"
-)
+
+def _flag_side_effect(name):
+    return name in ("FEATURE_ACTION_GATEWAY", "FEATURE_SINGLE_SPEAKER_APPROVAL_UX")
 
 with patch.object(app, "bot", mock_bot), \
      patch.object(app, "resolve_identity", side_effect=_resolve_identity_side_effect), \
@@ -202,10 +201,21 @@ action_id2, _ = _real_bus.request_approval(
 backdated2 = (datetime.now() - timedelta(seconds=700)).isoformat()
 _real_bus._pending._store[action_id2]["created"] = backdated2
 
+
+def _resolve_identity_side_effect2(channel, ext_id):
+    # Own resolver for scenario 2 — deliberately does not fall back to
+    # scenario 1's module-scope requester/approver (CodeRabbit follow-up:
+    # the original shared _resolve_identity_side_effect() resolved any
+    # ext_id other than scenario 1's approver.user_id to scenario 1's
+    # requester, silently misresolving scenario 2's identities whenever
+    # this flow ever legitimately depends on resolve_identity()'s result).
+    return approver2 if ext_id == approver2.user_id else requester2
+
+
 cq2 = _fake_cq(approver2.user_id, f"approve:{action_id2}")
 mock_bot2 = MagicMock()
 with patch.object(app, "bot", mock_bot2), \
-     patch.object(app, "resolve_identity", side_effect=_resolve_identity_side_effect), \
+     patch.object(app, "resolve_identity", side_effect=_resolve_identity_side_effect2), \
      patch("tools.dispatcher.dispatch_tool", side_effect=_ok_dispatch), \
      patch.object(app, "dispatch_tool", side_effect=_ok_dispatch), \
      patch.object(app, "_flag_enabled", side_effect=_flag_side_effect), \

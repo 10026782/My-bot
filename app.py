@@ -987,11 +987,10 @@ def _queue_deterministic_create_task(
         if task_parse.due_date:
             task_fields[TaskFields.DUE_DATE] = task_parse.due_date
         if task_parse.due_time:
-            # BUG-156: the Tasks table's due-date field is Airtable type
-            # "date" — no live field persists a time value, so due_time is
-            # parsed/validated but never written. Told explicitly here
-            # rather than silently approving a payload that promises more
-            # than the write actually saves.
+            # BUG-156: שדה תאריך היעד בטבלת Tasks הוא מסוג Airtable "date" —
+            # אין שדה חי ששומר ערך שעה, אז due_time מנותח ומאומת אך לעולם
+            # לא נכתב. מדווח כאן במפורש במקום לאשר בשקט payload שמבטיח יותר
+            # ממה שהכתיבה בפועל שומרת.
             due_time_note = (
                 f"⚠️ שים לב: השעה שצוינה ({task_parse.due_time}) לא תישמר "
                 f"ברשומה — רק התאריך יישמר."
@@ -1001,14 +1000,13 @@ def _queue_deterministic_create_task(
         return _queue_approval_detailed(
             tool, payload, chat_id, channel, user_text,
             fingerprint_payload=fingerprint_payload,
-            # BUG-153: identifies this proposal as originating from the
-            # deterministic create_task router match for THIS turn's inbound
-            # text (agent_calls=0, never the Agent tool_use loop's own
-            # initiative) — see docs/architecture/action-gateway/
+            # BUG-153: מזהה את ה-proposal הזה כמקורו במסלול הראוטר הדטרמיניסטי
+            # ל-create_task, עבור טקסט נכנס של ה-turn הנוכחי בלבד (agent_calls=0,
+            # לעולם לא יוזמה עצמאית של ה-Agent tool_use loop) — ראה
+            # docs/architecture/action-gateway/
             # BUG-153_CREATE_TASK_EXPLICIT_RECONFIRMATION_POLICY_20260804.md.
-            # Lets propose_action() distinguish an explicit new user request
-            # from autonomous replay when the business fingerprint matches an
-            # already-rejected contract.
+            # מאפשר ל-propose_action() להבחין בין בקשת משתמש חדשה ומפורשת
+            # לבין replay אוטונומי כש-fingerprint עסקי תואם contract שכבר נדחה.
             trusted_source="deterministic_create_task",
             extra_note=due_time_note,
         )
@@ -1724,10 +1722,10 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
             )
             _pending_text = _legacy_pending_text
         if extra_note:
-            # BUG-156: e.g. the create_task due-time-not-persisted notice —
-            # appended after the F52 formatter runs, on the actual text about
-            # to be sent, so it survives regardless of which formatter state
-            # (off/shadow/on) rendered _pending_text.
+            # BUG-156: למשל הודעת "השעה לא תישמר" של create_task — מצורף
+            # אחרי שה-formatter של F52 רץ, על הטקסט בפועל שעומד להישלח, כדי
+            # שישרוד ללא תלות באיזה מצב formatter (off/shadow/on) עיצב את
+            # _pending_text.
             _pending_text = f"{_pending_text}\n\n{extra_note}"
         try:
             bot.send_message(
@@ -1803,9 +1801,9 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
     _lifecycle_result = _approval_gateway.lifecycle_result(_contract_id)
     _final_message = _lifecycle_result.safe_user_message
     if extra_note:
-        # BUG-156: same note appended to the owner-facing pending prompt
-        # above — also applied here so a non-owner requester (whose reply
-        # isn't suppressed the way the owner's own is) sees it too.
+        # BUG-156: אותה הודעה שמצורפת ל-pending prompt הפונה ל-owner למעלה —
+        # מוחלת גם כאן כדי שגם requester שאינו ה-owner (שהתשובה שלו לא
+        # מדוכאת כמו זו של ה-owner עצמו) יראה אותה.
         _final_message = f"{_final_message}\n\n{extra_note}"
     return {
         "message": _final_message,
@@ -2295,23 +2293,21 @@ def _reject_stale_telegram_approval(
                 from core.action_gateway import action_gateway as _gw_stale
                 _contract_stale = None
                 if stored_contract_id:
-                    # BUG-155: look the contract up by the id already saved
-                    # on the bus payload at propose time (app.py's
-                    # bus.request_approval() call), instead of recomputing
-                    # business_action_fingerprint from tool_inputs alone.
-                    # A recomputed fingerprint silently diverges from the
-                    # contract's REAL fingerprint whenever propose_action()
-                    # was called with a fingerprint_payload distinct from
-                    # tool_inputs — e.g. deterministic create_task, whose
-                    # fingerprint includes due_time (BUG-156) while
-                    # tool_inputs/task_fields does not. That mismatch made
-                    # find_by_fingerprint() return nothing, silently skipping
-                    # reject() below while still telling the user "expired" —
-                    # the contract stayed live and pending indefinitely.
+                    # BUG-155: מאתרים את ה-contract לפי ה-id ששמור כבר על
+                    # payload ה-bus מרגע ה-propose (הקריאה ל-bus.request_approval()
+                    # ב-app.py), במקום לחשב מחדש business_action_fingerprint
+                    # מתוך tool_inputs בלבד. חישוב-מחדש של fingerprint סוטה
+                    # בשקט מה-fingerprint האמיתי בכל פעם ש-propose_action()
+                    # נקרא עם fingerprint_payload שונה מ-tool_inputs — למשל
+                    # יצירת משימה דטרמיניסטית, שה-fingerprint שלה כולל due_time
+                    # (BUG-156) בעוד tool_inputs/task_fields לא. אי-ההתאמה הזו
+                    # גרמה ל-find_by_fingerprint() להחזיר כלום, ולדלג בשקט על
+                    # reject() למטה בזמן שהמשתמש עדיין מקבל "פג תוקף" — ה-contract
+                    # נשאר חי ו-pending ללא הגבלת זמן.
                     _contract_stale = _gw_stale._ledger.find_by_id(stored_contract_id)
                 if _contract_stale is None and not stored_contract_id:
-                    # Fallback for payloads with no stored contract_id (older
-                    # items / non-Gateway-tracked paths) — best effort only.
+                    # Fallback לפריטים ללא contract_id שמור (פריטים ישנים /
+                    # מסלולים שלא עברו דרך ה-Gateway) — best effort בלבד.
                     _fp_stale = _gw_stale.compute_business_fingerprint(
                         tenant_id, canonical_user_id, tool_name,
                         _gw_stale.normalize_payload(payload.get("tool_inputs", {})),

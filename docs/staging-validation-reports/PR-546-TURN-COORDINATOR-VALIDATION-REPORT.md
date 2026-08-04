@@ -16,7 +16,11 @@
 - חסימת קלט תאריך או שעה פגומים.
 - הפרדה בין `fingerprint_payload` לבין payload הכתיבה.
 - מניעת תשובות כפולות.
-- אימות חלקי של מסלול Turn Coordinator החי.
+- אימות חלקי של המסלול הדטרמיניסטי ל־create_task (`core/router/router.py`
+  + `core/turn_coordinator_runtime.py::queue_task_request()`) — **לא** של
+  מחלקת `TurnCoordinator` פורמלית, שאינה קיימת בקוד (`grep -rl "class
+  TurnCoordinator"` מחזיר אפס תוצאות; ראו
+  `docs/architecture/CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` §1, שכבה 2).
 
 ---
 
@@ -25,7 +29,7 @@
 ### 2.1 — Prefix אינו מפיל ל־Agent
 
 **בקשה:**
-```
+```text
 Eli: צור משימה לבדוק משהו
 ```
 
@@ -46,12 +50,12 @@ Eli: צור משימה לבדוק משהו
 ### 2.2 — קלט תאריך פגום
 
 **בקשה:**
-```
+```text
 צור משימה לבדוק תאריך פגום עד 35/8/26 בשעה 19:00
 ```
 
 **תשובת הבוט:**
-```
+```text
 לא בטוח שהבנתי את כותרת המשימה או את התאריך/שעה. נא לנסח מחדש, בלי תיקון אוטומטי של שגיאות כתיב.
 ```
 
@@ -70,7 +74,7 @@ Eli: צור משימה לבדוק משהו
 ### 2.3 — קלט שעה פגומה
 
 **בקשה:**
-```
+```text
 צור משימה לבדוק שעה פגומה עד 9/8/26 בשעה 29:00
 ```
 
@@ -83,18 +87,18 @@ Eli: צור משימה לבדוק משהו
 ### 2.4 — שינוי אמיתי בכותרת מייצר זהות חדשה
 
 **בקשה 1:**
-```
+```text
 צור משימה לבדוק את אימות 546
 ```
 
 **בקשה 2:**
-```
+```text
 צור משימה לבדוק את אימות 546 המעודכן
 ```
 
 **תוצאה:**
-- fingerprint חדש נוצר ליישק אחד
-- `ActionContract` חדש בstatus `pending`
+- בקשה 2 (עם "המעודכן" בכותרת) קיבלה `business_action_fingerprint` שונה מזה של בקשה 1 — לא זוהתה כאותה זהות עסקית
+- נוצר `ActionContract` **חדש** עבור בקשה 2, בstatus `pending` (לא נחסמה כ-duplicate)
 
 **סטטוס:** ✅ עבר
 
@@ -125,17 +129,17 @@ Eli: צור משימה לבדוק משהו
 ### 2.7 — NBSP ורווחים שונים מנורמלים לאותה זהות
 
 **נוסח רגיל:**
-```
+```text
 צור משימה הדבקת מודעות לביקוש נרחב בכל נושא התשתיות עד 9/8/26 בשעה 19:00
 ```
 
 **נוסח עם NBSP, רווחים כפולים:**
-```
+```text
 צור משימה הדבקת מודעות לביקוש נרחב בכל נושא התשתיות עד  9/8/26  בשעה19:00
 ```
 
 **תוצאה:** לאחר ביטול הראשון, השני זוהה כאותה פעולה:
-```
+```text
 יצירת המשימה כבר בוטלה
 ```
 
@@ -157,7 +161,7 @@ Eli: צור משימה לבדוק משהו
 ### 2.9 — Suppression של תשובה כפולה
 
 **לוג:**
-```
+```text
 duplicate_reply_suppressed=true reason=owner_notification_already_sent
 ```
 
@@ -170,7 +174,7 @@ duplicate_reply_suppressed=true reason=owner_notification_already_sent
 ### 2.10 — הפרדת fingerprint מ־payload הכתיבה
 
 **בזמן approval:**
-```
+```text
 payload_keys=['fields', 'table']
 ```
 
@@ -189,12 +193,21 @@ payload_keys=['fields', 'table']
 
 ---
 
-## 3. אימות Turn Coordinator — create_task E2E
+## 3. אימות המסלול הדטרמיניסטי ל-create_task E2E
+
+**הבהרה (נוספה 04/08/2026 בעקבות ביקורת CodeRabbit):** "Turn Coordinator"
+כאן, ובלוגים המצוטטים (`בעלות_coordinator=True`), **אינו** מחלקת
+`TurnCoordinator` פורמלית — זו אינה קיימת בקוד. מה שאומת בפועל הוא
+`core/router/router.py::route_request()` (קביעת `Handler.TOOL`) +
+`core/turn_coordinator_runtime.py::queue_task_request()` (בניית ה-proposal
+הקנוני והעברתו ל-ActionGateway) — ראו
+`docs/architecture/CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` §1 שכבה 2, שמגדיר
+את אלה כ"de-facto owner" של תפקיד ה-TurnCoordinator, לא כמימוש פורמלי שלו.
 
 **מסלול מלא שאומת:**
-```
+```text
 בקשה
-→ ownership של Turn Coordinator
+→ route_request() קובע Handler.TOOL (המסלול הדטרמיניסטי, לא Agent)
 → agent_calls=0
 → ActionContract pending
 → approval
@@ -206,7 +219,9 @@ payload_keys=['fields', 'table']
 ```
 
 **הוכחות:**
-- `בעלות_coordinator=True`
+- `בעלות_coordinator=True` (לוג מ-`_queue_deterministic_create_task()` —
+  מציין שהמסלול הדטרמיניסטי, לא ה-Agent, בעל התשובה; לא ראיה למחלקת
+  TurnCoordinator פורמלית)
 - `agent_calls=0`
 - `reply_owner=gateway`
 - `Claim acquired`
@@ -217,7 +232,7 @@ payload_keys=['fields', 'table']
 
 **הרשומה שנוצרה:** `recJHmybGqfR3tq3G`
 
-**סטטוס:** ✅ עבר — מסלול create_task E2E עבד
+**סטטוס:** ✅ עבר — המסלול הדטרמיניסטי ל-create_task E2E עבד
 
 ---
 
@@ -226,7 +241,7 @@ payload_keys=['fields', 'table']
 ### BUG-153 — בקשת create חדשה אחרי rejection נחסמת
 
 **תיאור:** לאחר rejection של פעולה, בקשת create חדשה ומפורשת עם אותו תוכן נחסמת:
-```
+```text
 [ActionGateway] propose blocked: business action already rejected
 ```
 
@@ -243,12 +258,12 @@ payload_keys=['fields', 'table']
 ### BUG-154 — ניסוח "ל־תאריך" מפיל את parser
 
 **בקשה:**
-```
+```text
 צור משימה ... ל־5/8/26 בשעה 10:30
 ```
 
 **שגיאה:**
-```
+```text
 AttributeError: 'NoneType' object has no attribute 'start'
 ```
 
@@ -272,7 +287,7 @@ AttributeError: 'NoneType' object has no attribute 'start'
 - חזר ל־reconfirmation
 - היה ניתן לאשר ולבצע מאוחר יותר
 
-**סתירה:** UI הצגה מצב terminal, אך backend הישאיר pending
+**סתירה:** UI הציג מצב terminal, אך backend השאיר pending
 
 **חומרה:** קריטית/גבוהה מאוד
 
@@ -283,7 +298,7 @@ AttributeError: 'NoneType' object has no attribute 'start'
 ### BUG-156 — השעה אינה נשמרת ב־Airtable
 
 **בקשה:**
-```
+```text
 צור משימה לבדוק את אימות 546 המעודכן עד 5/8/26 בשעה 10:30
 ```
 
@@ -331,7 +346,7 @@ AttributeError: 'NoneType' object has no attribute 'start'
 - אין write לפני approval
 - Payload הכתיבה אינו מזוהם
 - תשובה ציבורית אחת במסלול התקין
-- Turn Coordinator create_task E2E — עד completion
+- המסלול הדטרמיניסטי ל-create_task E2E (§3, לא מחלקת TurnCoordinator פורמלית) — עד completion
 
 ### 🔴 נמצאו באגים
 
@@ -356,5 +371,5 @@ AttributeError: 'NoneType' object has no attribute 'start'
 
 ---
 
-**דוח זה היא תיעוד מלא של אימות Staging ל־PR #546.**
+**דוח זה הוא תיעוד מלא של אימות Staging ל־PR #546.**
 **ראו `BUG_AUDIT_LOG.md` לפרטים ושדות נוספים של כל באג.**
