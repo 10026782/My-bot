@@ -2247,17 +2247,37 @@ def _reject_stale_telegram_approval(
     tool_name = payload.get("tool_name")
     canonical_user_id = payload.get("canonical_user_id", "")
     tenant_id = payload.get("tenant_id", "boss_hq")
+    stored_contract_id = payload.get("contract_id")
 
     if tool_name and canonical_user_id:
         try:
             from feature_flags import is_enabled as _flag_stale
             if _flag_stale("FEATURE_ACTION_GATEWAY"):
                 from core.action_gateway import action_gateway as _gw_stale
-                _fp_stale = _gw_stale.compute_business_fingerprint(
-                    tenant_id, canonical_user_id, tool_name,
-                    _gw_stale.normalize_payload(payload.get("tool_inputs", {})),
-                )
-                _contract_stale = _gw_stale._ledger.find_by_fingerprint(_fp_stale)
+                _contract_stale = None
+                if stored_contract_id:
+                    # BUG-155: look the contract up by the id already saved
+                    # on the bus payload at propose time (app.py's
+                    # bus.request_approval() call), instead of recomputing
+                    # business_action_fingerprint from tool_inputs alone.
+                    # A recomputed fingerprint silently diverges from the
+                    # contract's REAL fingerprint whenever propose_action()
+                    # was called with a fingerprint_payload distinct from
+                    # tool_inputs — e.g. deterministic create_task, whose
+                    # fingerprint includes due_time (BUG-156) while
+                    # tool_inputs/task_fields does not. That mismatch made
+                    # find_by_fingerprint() return nothing, silently skipping
+                    # reject() below while still telling the user "expired" —
+                    # the contract stayed live and pending indefinitely.
+                    _contract_stale = _gw_stale._ledger.find_by_id(stored_contract_id)
+                if _contract_stale is None and not stored_contract_id:
+                    # Fallback for payloads with no stored contract_id (older
+                    # items / non-Gateway-tracked paths) — best effort only.
+                    _fp_stale = _gw_stale.compute_business_fingerprint(
+                        tenant_id, canonical_user_id, tool_name,
+                        _gw_stale.normalize_payload(payload.get("tool_inputs", {})),
+                    )
+                    _contract_stale = _gw_stale._ledger.find_by_fingerprint(_fp_stale)
                 if _contract_stale is not None and _contract_stale.status == "pending":
                     _gw_stale.reject(_contract_stale.contract_id, rejected_by="ttl_expired")
                     _verify_stale = _gw_stale._ledger.find_by_id(_contract_stale.contract_id)
@@ -2268,6 +2288,13 @@ def _reject_stale_telegram_approval(
                             _contract_stale.contract_id,
                             getattr(_verify_stale, "status", None),
                         )
+                elif _contract_stale is None and stored_contract_id:
+                    logger.error(
+                        "[Approval] TTL-expired callback: contract_id=%s from "
+                        "bus payload not found in ledger — pending contract "
+                        "(if any) may remain live.",
+                        stored_contract_id,
+                    )
         except Exception as _stale_exc:
             logger.warning(
                 "[Approval] TTL-expired callback: contract cleanup failed "

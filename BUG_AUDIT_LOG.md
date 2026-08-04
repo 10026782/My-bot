@@ -3599,7 +3599,33 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
   - בקשה חדשה אינה נחסמת
   - approval מאוחר אינו אפשרי
   - callback כפול אינו מבצע
-- **סטטוס:** 🔴 נרשם, לא תוקן
+- **Root Cause המדויק (אומת בקוד, 04/08/2026):** `_reject_stale_telegram_approval()`
+  (`app.py:2223`) זיהה את ה-contract לדחייה ע"י **חישוב מחדש** של
+  `business_action_fingerprint` מתוך `payload.get("tool_inputs", {})` בלבד —
+  אבל `propose_action()` מחשב את ה-fingerprint המקורי מתוך `fingerprint_payload`
+  (למשל `task_parse.business_identity()` הכולל `due_time`) כשהוא מועבר בנפרד
+  מ-`tool_inputs`/`task_fields` (payload הכתיבה, ללא `due_time` — ראה BUG-156).
+  לכל משימה עם שעה, ה-fingerprint המחושב-מחדש שונה מהאמיתי, `find_by_fingerprint()`
+  מחזיר `None`, `reject()` לעולם לא נקרא — אך הקוד ממשיך כרגיל ומודיע "פג תוקף".
+  `payload["contract_id"]` כבר נשמר על אותו payload (`app.py:1612`) ומעולם לא
+  נעשה בו שימוש בנתיב הזה.
+- **תוקן ב-commit:** ממתין ל-commit (עבודה בענף `claude/pr-546-turn-coordinator-bugs-jhdrtl`)
+- **תיקון:** `_reject_stale_telegram_approval()` משתמש כעת ב-`payload.get("contract_id")`
+  ל-lookup ישיר דרך `find_by_id()`, במקום recompute של fingerprint. הlookup
+  הישן (fingerprint recompute) נשמר כ-fallback רק לפריטים ללא contract_id שמור.
+  **לא הוצג status חדש ("expired")** — `reject(rejected_by="ttl_expired")` הקיים
+  כבר מעביר למצב terminal `"rejected"` הנתמך במלואו (מספיק לכל קריטריוני הסגירה).
+  ראה `docs/architecture/action-gateway/BUG-155_TTL_EXPIRY_CONTRACT_LOOKUP_FIX_20260804.md`
+  ל-Cross-Layer Impact Matrix מלא (נדרש לפי `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`).
+- **בדיקות:** `test_bug155_ttl_expiry_contract_id_lookup.py` (חדש — משחזר את
+  התרחיש המדויק, נכשל על הקוד הישן [3/5], עובר על הקוד המתוקן [5/5]),
+  `test_bug112_telegram_approval_ttl.py` (30/30, ללא שינוי), `test_bug_stale_callback_ux.py`
+  (10/10, ללא שינוי), `smoke_tests.py`, `test_integration.py` (4/4) — כולם ירוקים.
+- **Merged:** לא עדיין
+- **Deployed:** לא
+- **Verified בפרודקשן:** לא
+- **סטטוס:** 🟡 קוד תוקן ונבדק מקומית — **לא מוזג, לא deployed, לא verified בפרודקשן**
+  (לפי "כלל ברזל" ב-CLAUDE.md, לא ✅ עד commit+push+deploy+production verification)
 
 ---
 
