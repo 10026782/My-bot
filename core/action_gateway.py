@@ -1503,7 +1503,7 @@ class ActionGateway:
                 # "deterministic_create_task" — לעולם לא ה-Agent loop הגולמי,
                 # תמיד תוצאה ישירה של טקסט נכנס של ה-turn הנוכחי, כבר מוגנת
                 # מ-webhook-redelivery duplicates במעלה הזרימה) היא היוצא-מן-
-                # הכלל היחיד, מטופל למטה ע"י פשוט לא לחזור כאן — ראה
+                # הכלל היחיד, מטופל למטה על ידי פשוט לא לחזור כאן — ראה
                 # docs/architecture/action-gateway/BUG-153_CREATE_TASK_EXPLICIT_
                 # RECONFIRMATION_POLICY_20260804.md לעיצוב המלא ול-Cross-Layer
                 # Impact Matrix. `existing` (ה-contract שנדחה) לעולם לא משתנה;

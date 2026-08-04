@@ -327,7 +327,17 @@ AttributeError: 'NoneType' object has no attribute 'start'
 
 **דרוש:** Fault injection זמני ב־staging שיפיל רק את ניסיון השליחה הראשון
 
-**סטטוס:** ⏸️ לא השלים — דורש fault injection
+**סטטוס (בזמן הדוח, 03/08/2026):** ⏸️ לא השלים — דורש fault injection
+
+**עדכון (04/08/2026):** נסגר — `test_first_pending_notification_failure_suppression.py`
+נוסף והורץ (14/14 ירוק). התברר שלא היה צורך ב-fault-injection env var או
+בקוד production חדש כלל: `app._queue_approval_detailed_impl()`'s try/except
+הקיים סביב `bot.send_message()` כבר מבטל בפועל את ה-EventBus pending item
+ואת ה-ActionContract שזה עתה נוצר, ומחזיר תגובת כשל מובנית ללא claim
+`owner_notified`. אומת גם דרך `_queue_approval_detailed()` הישיר וגם דרך
+`app._queue_deterministic_create_task()` (מסלול create_task האמיתי) — שני
+המסלולים מפיקים בדיוק תשובה ציבורית אחת, ללא retry, ללא contract חי שנשאר.
+ראו `BUG_AUDIT_LOG.md` (בדיקה שהייתה חסרה) לפרטים המלאים.
 
 **ראו:** `BUG_AUDIT_LOG.md` בדיקה חסרה
 
@@ -355,7 +365,7 @@ AttributeError: 'NoneType' object has no attribute 'start'
 3. **BUG-155** — TTL expiry אינו סוגר את pending (קריטי)
 4. **BUG-156** — שעה משתתפת בזהות אך אינה נשמרת ב־Airtable
 
-### ⏸️ בדיקה חסרה
+### ⏸️ בדיקה חסרה (בזמן הדוח — נסגרה 04/08/2026, ראו §5)
 
 - Fault injection ל־suppression fallback כשל בשליחת notification ראשונה
 

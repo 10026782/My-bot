@@ -121,6 +121,50 @@ chk("send_message was called exactly once for the successful case too",
 
 
 print()
+print("── Same fault, driven through the real create_task caller "
+      "(app._queue_deterministic_create_task(), not just the lower-level "
+      "_queue_approval_detailed()) ──")
+
+from core.router.router import parse_deterministic_create_task  # noqa: E402
+from identity import Identity, Role  # noqa: E402
+
+user_id3 = "req_fault_inject_3"
+identity3 = Identity(
+    user_id=user_id3, role=Role.OWNER, display_name=user_id3,
+    tenant_id="boss_hq", domain_id="general", channel="telegram", external_id=user_id3,
+)
+task_parse3 = parse_deterministic_create_task("צור משימה בדיקת כשל דרך create_task עד 5/8/26")
+assert task_parse3.certain
+
+mock_bot3 = MagicMock()
+mock_bot3.send_message.side_effect = RuntimeError("simulated Telegram send failure")
+
+with patch.object(app, "bot", mock_bot3), \
+     patch.dict(os.environ, {"OWNER_TELEGRAM_ID": user_id3}, clear=False), \
+     patch("feature_flags.is_enabled", side_effect=lambda name: name == "FEATURE_ACTION_GATEWAY"):
+    deterministic_message = app._queue_deterministic_create_task(
+        task_parse3.title, user_id3, "telegram",
+        "צור משימה בדיקת כשל דרך create_task עד 5/8/26", identity3,
+        task_parse=task_parse3,
+    )
+
+chk("create_task path: send_message attempted exactly once (no retry)",
+    mock_bot3.send_message.call_count == 1)
+chk(
+    "create_task path: the public response is non-empty and contains "
+    "exactly one fallback failure reply (never suppressed as duplicate, "
+    "never silently empty)",
+    bool(deterministic_message)
+    and deterministic_message.count("לא הצלחתי לשלוח") == 1,
+)
+chk(
+    "create_task path: no live ActionContract left behind (same cleanup "
+    "as the lower-level path)",
+    len(_real_gw.find_live_contracts(identity3.memory_key)) == 0,
+)
+
+
+print()
 print("=" * 50)
 print(f"First-pending-notification-failure suppression tests: {passed} passed, {failed} failed")
 if failed:
