@@ -62,13 +62,21 @@ def test_create_task_parser_builds_structured_business_identity():
     assert parsed.certain is True
     assert parsed.title == "פרסום מודעות"
     assert parsed.due_date == "2026-08-06"
+    # due_time is still parsed/validated even though it's excluded from the
+    # identity below (BUG-156) — a malformed time must still fail-closed.
     assert parsed.due_time == "19:00"
+    # BUG-156: due_time is deliberately excluded from business_identity() —
+    # the Tasks table's due-date field is Airtable type "date", not
+    # "dateTime", so no write ever persists a time value. Including it in
+    # the identity/fingerprint would distinguish two requests whose actual
+    # Airtable write ends up byte-identical. See
+    # docs/architecture/action-gateway/
+    # BUG-156_DUE_TIME_FINGERPRINT_VS_PERSISTENCE_FIX_20260804.md.
     assert parsed.business_identity() == {
         "table": "Tasks",
         "fields": {
             "title": "פרסום מודעות",
             "due_date": "2026-08-06",
-            "due_time": "19:00",
         },
     }
 

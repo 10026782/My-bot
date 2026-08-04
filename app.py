@@ -981,10 +981,21 @@ def _queue_deterministic_create_task(
     from core.turn_coordinator_runtime import queue_task_request
     fingerprint_payload = {"table": "Tasks", "fields": {"title": title}}
     task_fields = {}
+    due_time_note = None
     if task_parse is not None:
         fingerprint_payload = task_parse.business_identity()
         if task_parse.due_date:
             task_fields[TaskFields.DUE_DATE] = task_parse.due_date
+        if task_parse.due_time:
+            # BUG-156: the Tasks table's due-date field is Airtable type
+            # "date" — no live field persists a time value, so due_time is
+            # parsed/validated but never written. Told explicitly here
+            # rather than silently approving a payload that promises more
+            # than the write actually saves.
+            due_time_note = (
+                f"⚠️ שים לב: השעה שצוינה ({task_parse.due_time}) לא תישמר "
+                f"ברשומה — רק התאריך יישמר."
+            )
 
     def _queue_task(tool, payload):
         return _queue_approval_detailed(
@@ -999,6 +1010,7 @@ def _queue_deterministic_create_task(
             # from autonomous replay when the business fingerprint matches an
             # already-rejected contract.
             trusted_source="deterministic_create_task",
+            extra_note=due_time_note,
         )
 
     outcome = queue_task_request(
@@ -1210,7 +1222,8 @@ def _queue_approval(tool_name: str, tool_inputs: dict,
 def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
                              user_chat_id: str, channel: str, user_text: str = "",
                              fingerprint_payload: dict | None = None,
-                             trusted_source: str = "agent") -> dict:
+                             trusted_source: str = "agent",
+                             extra_note: str | None = None) -> dict:
     """
     Same behavior as _queue_approval() (see that docstring), but returns a
     structured outcome instead of just the model-facing message:
@@ -1298,6 +1311,7 @@ def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
             tool_name, tool_inputs, user_chat_id, channel, user_text,
             fingerprint_payload=fingerprint_payload,
             trusted_source=trusted_source,
+            extra_note=extra_note,
         )
     except CanonicalizationError as exc:
         # PR2 staging acceptance incident, 29/07/2026: resolve_canonical_call()
@@ -1405,7 +1419,8 @@ def _approval_callback_data(
 def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
                                   user_chat_id: str, channel: str, user_text: str = "",
                                   fingerprint_payload: dict | None = None,
-                                  trusted_source: str = "agent") -> dict:
+                                  trusted_source: str = "agent",
+                                  extra_note: str | None = None) -> dict:
     from core.action_gateway import resolve_canonical_call
     tool_name, tool_inputs = resolve_canonical_call(
         tool_name, tool_inputs, user_text
@@ -1708,6 +1723,12 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
                 exc_info=True,
             )
             _pending_text = _legacy_pending_text
+        if extra_note:
+            # BUG-156: e.g. the create_task due-time-not-persisted notice —
+            # appended after the F52 formatter runs, on the actual text about
+            # to be sent, so it survives regardless of which formatter state
+            # (off/shadow/on) rendered _pending_text.
+            _pending_text = f"{_pending_text}\n\n{extra_note}"
         try:
             bot.send_message(
                 owner_chat_id,
@@ -1780,8 +1801,14 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
     _contract_id = _gw_result.contract_id if _gw_result else None
     from core.action_gateway import action_gateway as _approval_gateway
     _lifecycle_result = _approval_gateway.lifecycle_result(_contract_id)
+    _final_message = _lifecycle_result.safe_user_message
+    if extra_note:
+        # BUG-156: same note appended to the owner-facing pending prompt
+        # above — also applied here so a non-owner requester (whose reply
+        # isn't suppressed the way the owner's own is) sees it too.
+        _final_message = f"{_final_message}\n\n{extra_note}"
     return {
-        "message": _lifecycle_result.safe_user_message,
+        "message": _final_message,
         "contract_id": _contract_id,
         "ok": _created_this_turn,
         "terminal_outcome": None if _created_this_turn else "APPROVAL_QUEUE_ERROR",

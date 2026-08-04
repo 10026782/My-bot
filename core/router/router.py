@@ -52,12 +52,22 @@ class DeterministicTaskParse:
         return self.matched and not self.uncertain and bool(self.title)
 
     def business_identity(self) -> dict:
-        """Identity-only payload; it is not written to Airtable."""
+        """Identity-only payload; it is not written to Airtable.
+
+        BUG-156: due_time is deliberately excluded here. The Tasks table's
+        due-date field is Airtable type "date", not "dateTime" — no live
+        field persists a time value, so a fingerprint that included due_time
+        would distinguish two requests (e.g. same title/date, different
+        time) whose actual Airtable write ends up byte-identical, promising
+        more identity/dedup precision than the write payload can honor.
+        due_time is still parsed and validated (parse_deterministic_create_
+        task() still fail-closes on a malformed time) and still shown to the
+        user before approval (see app.py's _queue_deterministic_create_task()
+        due-time note) — it's excluded from the identity/fingerprint only.
+        """
         fields = {"title": self.title or ""}
         if self.due_date:
             fields["due_date"] = self.due_date
-        if self.due_time:
-            fields["due_time"] = self.due_time
         return {"table": "Tasks", "fields": fields}
 
 

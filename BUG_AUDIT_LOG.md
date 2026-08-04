@@ -3727,7 +3727,34 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
   - נדחית מפורשות עם clarification/cancel
   - payload מאושר וה-write payload עקביים
   - fingerprint אינו מכיל מידע שאובד בכתיבה
-- **סטטוס:** 🔴 נרשם, לא תוקן
+- **החלטת owner (04/08/2026, AskUserQuestion):** אפשרות ב — "stop promising
+  the time." קוד-בלבד, ללא נגיעה בסכמת Airtable החיה.
+- **תוקן (04/08/2026):** `DeterministicTaskParse.business_identity()`
+  (`core/router/router.py`) כבר לא כולל `due_time` ב-fields — שתי בקשות
+  זהות בכותרת+תאריך, שונות רק בשעה, מייצרות כעת את אותו fingerprint
+  (במקום fingerprints שונים). `due_time` עדיין מנותח ומאומת (שעה פגומה
+  עדיין fail-closes ל-clarification) — רק לא חלק מהזהות. בנוסף,
+  `_queue_deterministic_create_task()` בונה הודעה מפורשת ("⚠️ שים לב: השעה
+  שצוינה ({HH:MM}) לא תישמר ברשומה — רק התאריך יישמר") ומעביר אותה דרך
+  פרמטר חדש `extra_note` ב-`_queue_approval_detailed()`/`_queue_approval_
+  detailed_impl()` — מוצגת הן ל-owner (בהודעת ה-pending עם כפתורי אישור),
+  הן לקורא לא-owner (בתשובה המוחזרת). ראה
+  `docs/architecture/action-gateway/BUG-156_DUE_TIME_FINGERPRINT_VS_PERSISTENCE_FIX_20260804.md`
+  ל-Cross-Layer Impact Matrix.
+- **בדיקות:** `test_bug156_due_time_note_and_fingerprint_exclusion.py`
+  (חדש, 8/8 — כולל אימות שהזהות זהה עבור שעות שונות, ושה-note מכיל את
+  השעה המדויקת ומילת "לא תישמר"), `test_create_task_deterministic_route.py`
+  (13/13 — אחד עודכן במכוון לשקף את ההתנהגות החדשה),
+  `test_business_action_fingerprint_normalization.py` (8/8, ללא שינוי),
+  `test_bug155_ttl_expiry_contract_id_lookup.py` (5/5, ללא שינוי),
+  `test_bug153_create_task_reconfirmation_after_rejection.py` (11/11, ללא
+  שינוי), `core/router/test_router.py` (44/44, ללא שינוי), `smoke_tests.py`,
+  `test_integration.py` (4/4) — כולם ירוקים.
+- **Merged:** לא עדיין
+- **Deployed:** לא
+- **Verified בפרודקשן:** לא
+- **סטטוס:** 🟡 עיצוב אושר ע"י owner (אפשרות ב), קוד תוקן ונבדק מקומית —
+  **לא מוזג, לא deployed, לא verified בפרודקשן**
 
 ---
 
