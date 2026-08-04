@@ -3586,7 +3586,23 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
   - אין AttributeError
   - אין generic approval fallback
   - parse failure אמיתי מחזיר clarification בלבד
-- **סטטוס:** 🔴 נרשם, לא תוקן
+- **תוקן (04/08/2026):** `date_marker` נבדק כעת גם מול `None` בלי exception,
+  ונוסף מסמן חלופי — "ל" + מקף עברי/hyphen/en-dash/em-dash, נבדק **רק** צמוד
+  (עם רווח אופציונלי) ממש לפני `date_match.start()` עצמו, לא חיפוש גלובלי
+  (ש"ל" הוא אות עברית נפוצה מדי). אם לא נמצא שום marker — `uncertain=True`
+  (fail-closed, clarification), לא crash. ראה
+  `docs/architecture/action-gateway/BUG-154_CREATE_TASK_DATE_MARKER_PARSER_CRASH_FIX_20260804.md`
+  ל-Cross-Layer Impact Matrix.
+- **בדיקות:** `test_bug154_date_marker_prefix_parser.py` (חדש, 15/15 —
+  כולל שחזור מדויק של ה-crash [נכשל על הקוד הישן], גרסאות Unicode
+  ל-hyphen/en-dash/em-dash, regression ל-"עד" הקיים, ו-fail-closed
+  ל-date-shaped-token-בלי-marker), `core/router/test_router.py` (44/44,
+  ללא שינוי), `test_create_task_deterministic_route.py` (13/13, ללא
+  שינוי), `smoke_tests.py`, `test_integration.py` (4/4) — כולם ירוקים.
+- **Merged:** לא עדיין
+- **Deployed:** לא
+- **Verified בפרודקשן:** לא
+- **סטטוס:** 🟡 קוד תוקן ונבדק מקומית — **לא מוזג, לא deployed, לא verified בפרודקשן**
 
 ---
 

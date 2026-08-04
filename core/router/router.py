@@ -29,6 +29,13 @@ _STRUCTURED_CREATE_TASK_RE = re.compile(
 _CREATE_TASK_DATE_RE = re.compile(r"(?P<date>\d{1,2}[./-]\d{1,2}[./-]\d{2,4})")
 _CREATE_TASK_TIME_RE = re.compile(r"בשעה\s*(?P<hour>\d{1,2})\s*:\s*(?P<minute>\d{2})")
 _CREATE_TASK_PREFIX_RE = re.compile(r"^(?:>\s*)?(?:Eli|אלי)\s*:\s*", re.IGNORECASE)
+_CREATE_TASK_DATE_WORD_MARKER_RE = re.compile(r"\bעד\b")
+# BUG-154: "ל־5/8/26"-style prefix — ל followed directly (optional trailing
+# whitespace) by a maqaf/hyphen/en-dash/em-dash, immediately before the date
+# itself. Only ever searched within the substring preceding date_match.start()
+# and anchored with $, never over the whole body — "ל" alone is far too
+# common a Hebrew letter/prefix to treat as a marker on its own.
+_CREATE_TASK_DATE_PREFIX_MARKER_RE = re.compile(r"ל[־\-–—]\s*$")
 _CREATE_TASK_QUOTE_PAIRS = (("\"", "\""), ("'", "'"), ("(", ")"), ("[", "]"), ("{", "}"))
 
 
@@ -86,8 +93,17 @@ def parse_deterministic_create_task(text: str) -> DeterministicTaskParse:
     if not body:
         return DeterministicTaskParse(matched=True, uncertain=True)
 
-    date_marker = re.search(r"\bעד\b", body)
     date_match = _CREATE_TASK_DATE_RE.search(body)
+    date_marker = _CREATE_TASK_DATE_WORD_MARKER_RE.search(body)
+    if date_marker is None and date_match is not None:
+        # BUG-154: "ל־5/8/26"-style marker — only checked immediately before
+        # the date itself (never a whole-body search; see the constant's own
+        # comment for why). None here means no recognized marker at all —
+        # falls through to the uncertain=True guard below, same fail-closed
+        # outcome as any other unrecognized date-marker shape.
+        date_marker = _CREATE_TASK_DATE_PREFIX_MARKER_RE.search(
+            body[:date_match.start()]
+        )
     time_marker = re.search(r"בשעה", body)
     time_match = _CREATE_TASK_TIME_RE.search(body)
     uncertain = False
@@ -112,7 +128,7 @@ def parse_deterministic_create_task(text: str) -> DeterministicTaskParse:
             due_date = _date(year, month, day).isoformat()
         except ValueError:
             uncertain = True
-        if date_marker.start() > date_match.start():
+        if date_marker is None or date_marker.start() > date_match.start():
             uncertain = True
     if time_match:
         hour = int(time_match.group("hour"))
