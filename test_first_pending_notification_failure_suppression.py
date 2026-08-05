@@ -32,6 +32,11 @@ os.environ.setdefault("AIRTABLE_API_KEY", "patFaultInjectionTest")
 os.environ.setdefault("AIRTABLE_BASE_ID", "appFaultInjectionTest")
 os.environ.setdefault("RENDER_APP_URL", "https://example.com")
 os.environ.setdefault("SETUP_WEBHOOK", "0")
+# CodeRabbit follow-up: assignment (not setdefault) so an inherited/ambient
+# value can never leave this test writing through to a real Airtable base —
+# core/action_gateway.py's module-level singleton reads this flag once, at
+# import time, to decide whether to wire a real ActionContractRepository.
+os.environ["FEATURE_ACTION_CONTRACT_PERSISTENCE"] = "false"
 
 import app  # noqa: E402
 from core.action_gateway import action_gateway as _real_gw  # noqa: E402
