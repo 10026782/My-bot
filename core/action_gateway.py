@@ -1495,7 +1495,19 @@ class ActionGateway:
                 )
             if existing.status in ("completed", "executed"):
                 return self._handle_duplicate_executed(existing, canonical_user_id)
-            if existing.status == "rejected":
+            if existing.status == "rejected" and trusted_source != "deterministic_create_task":
+                # הגנת replay אוטונומי (ללא שינוי) — חוסמת את ה-Agent
+                # tool_use loop, וכל trusted_source אחר, מלהציע מחדש פעולה
+                # שהזהות העסקית הקנונית שלה כבר נדחתה. BUG-153: בקשת
+                # create_task דטרמיניסטית ומפורשת (trusted_source ==
+                # "deterministic_create_task" — לעולם לא ה-Agent loop הגולמי,
+                # תמיד תוצאה ישירה של טקסט נכנס של ה-turn הנוכחי, כבר מוגנת
+                # מ-webhook-redelivery duplicates במעלה הזרימה) היא היוצא-מן-
+                # הכלל היחיד, מטופל למטה על ידי פשוט לא לחזור כאן — ראה
+                # docs/architecture/action-gateway/BUG-153_CREATE_TASK_EXPLICIT_
+                # RECONFIRMATION_POLICY_20260804.md לעיצוב המלא ול-Cross-Layer
+                # Impact Matrix. `existing` (ה-contract שנדחה) לעולם לא משתנה;
+                # נשאר "rejected" וניתן-לאחזור עצמאית לפי contract_id שלו.
                 repeated = build_approval_lifecycle_result(
                     existing, canonical_state="rejected", repeated=True,
                 )
@@ -1504,6 +1516,14 @@ class ActionGateway:
                     reason="business action already rejected",
                     contract_id=existing.contract_id,
                     user_message=repeated.safe_user_message,
+                )
+            if existing.status == "rejected":
+                logger.info(
+                    "[ActionGateway] BUG-153 reconfirmation מפורש: "
+                    "פותח contract חדש לבקשת create_task דטרמיניסטית "
+                    "ש-fingerprint שלה תואם contract שנדחה=%s "
+                    "fingerprint=%.12s user=%s.",
+                    existing.contract_id, fingerprint, canonical_user_id,
                 )
             if existing.status in ("approved", "executing", "outcome_unknown"):
                 return GatewayResult(

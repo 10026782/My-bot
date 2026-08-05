@@ -29,6 +29,15 @@ _STRUCTURED_CREATE_TASK_RE = re.compile(
 _CREATE_TASK_DATE_RE = re.compile(r"(?P<date>\d{1,2}[./-]\d{1,2}[./-]\d{2,4})")
 _CREATE_TASK_TIME_RE = re.compile(r"בשעה\s*(?P<hour>\d{1,2})\s*:\s*(?P<minute>\d{2})")
 _CREATE_TASK_PREFIX_RE = re.compile(r"^(?:>\s*)?(?:Eli|אלי)\s*:\s*", re.IGNORECASE)
+_CREATE_TASK_DATE_WORD_MARKER_RE = re.compile(r"\bעד\b")
+# BUG-154: מסמן-קידומת בסגנון "ל־5/8/26" — ל ואחריו ישירות (עם רווח סופי
+# אופציונלי) מקף עברי/hyphen/en-dash/em-dash, ממש לפני התאריך עצמו. נבדק
+# רק בתוך המחרוזת שקודמת ל-date_match.start(), עם עוגן $, לעולם לא חיפוש
+# על כל הטקסט — "ל" לבדה היא אות/קידומת עברית נפוצה מדי לשמש כמסמן עצמאי.
+# מקף עברי (maqaf, U+05BE)/en-dash (U+2013)/em-dash (U+2014) מקודדים כ-\uXXXX
+# (לא הליטרלים עצמם) כדי למנוע בלבול חזותי/mojibake בקוד המקור; "-" (hyphen,
+# ASCII) נשאר ליטרל רגיל.
+_CREATE_TASK_DATE_PREFIX_MARKER_RE = re.compile(r"ל[\u05be\-\u2013\u2014]\s*$")
 _CREATE_TASK_QUOTE_PAIRS = (("\"", "\""), ("'", "'"), ("(", ")"), ("[", "]"), ("{", "}"))
 
 
@@ -45,12 +54,22 @@ class DeterministicTaskParse:
         return self.matched and not self.uncertain and bool(self.title)
 
     def business_identity(self) -> dict:
-        """Identity-only payload; it is not written to Airtable."""
+        """Identity-only payload; it is not written to Airtable.
+
+        BUG-156: due_time is deliberately excluded here. The Tasks table's
+        due-date field is Airtable type "date", not "dateTime" — no live
+        field persists a time value, so a fingerprint that included due_time
+        would distinguish two requests (e.g. same title/date, different
+        time) whose actual Airtable write ends up byte-identical, promising
+        more identity/dedup precision than the write payload can honor.
+        due_time is still parsed and validated (parse_deterministic_create_
+        task() still fail-closes on a malformed time) and still shown to the
+        user before approval (see app.py's _queue_deterministic_create_task()
+        due-time note) — it's excluded from the identity/fingerprint only.
+        """
         fields = {"title": self.title or ""}
         if self.due_date:
             fields["due_date"] = self.due_date
-        if self.due_time:
-            fields["due_time"] = self.due_time
         return {"table": "Tasks", "fields": fields}
 
 
@@ -86,8 +105,17 @@ def parse_deterministic_create_task(text: str) -> DeterministicTaskParse:
     if not body:
         return DeterministicTaskParse(matched=True, uncertain=True)
 
-    date_marker = re.search(r"\bעד\b", body)
     date_match = _CREATE_TASK_DATE_RE.search(body)
+    date_marker = _CREATE_TASK_DATE_WORD_MARKER_RE.search(body)
+    if date_marker is None and date_match is not None:
+        # BUG-154: "ל־5/8/26"-style marker — only checked immediately before
+        # the date itself (never a whole-body search; see the constant's own
+        # comment for why). None here means no recognized marker at all —
+        # falls through to the uncertain=True guard below, same fail-closed
+        # outcome as any other unrecognized date-marker shape.
+        date_marker = _CREATE_TASK_DATE_PREFIX_MARKER_RE.search(
+            body[:date_match.start()]
+        )
     time_marker = re.search(r"בשעה", body)
     time_match = _CREATE_TASK_TIME_RE.search(body)
     uncertain = False
@@ -112,7 +140,7 @@ def parse_deterministic_create_task(text: str) -> DeterministicTaskParse:
             due_date = _date(year, month, day).isoformat()
         except ValueError:
             uncertain = True
-        if date_marker.start() > date_match.start():
+        if date_marker is None or date_marker.start() > date_match.start():
             uncertain = True
     if time_match:
         hour = int(time_match.group("hour"))

@@ -1667,7 +1667,7 @@
 לפני ה-bridge: `events.count = 0` (כל ליד, ללא יוצא מן הכלל — אין Lead Event אחד שנוצר אי-פעם מ-TMA).
 
 אחרי ה-bridge, לאחר `patch_lead`/`set_lead_outcome` אמיתיים על הליד הזה מה-TMA:
-```
+```text
 events.available = true
 events.count = 2
 engine.degraded = false
@@ -2085,7 +2085,7 @@ confidence = 0.2
 
 המשתמש הציע תחילה מודל "context generation/version" (increment בכל הפרעה, השוואת version-at-proposal מול version-at-reconfirm) שמאפשר שרשרת בלתי-מוגבלת של re-displays. **באותה הודעה** המשתמש תיקן/הידק את המדיניות במפורש למודל **חסום, לא-רקורסיבי**: אחרי re-display אחד, כל אירוע נוסף (לא "כן"/"לא") **סוגר** את ה-contract לגמרי (SUPERSEDED), לא פותח סיבוב שני. ה-FSM הסופי המחייב:
 
-```
+```text
 PENDING
   ├─ כן              → EXECUTED
   ├─ לא              → CANCELLED
@@ -3498,3 +3498,371 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **היקף:** לא נגעתי בקוד. תיעוד בלבד לפי בקשת הבעלים — "מומלץ לתעד זאת כממצא נפרד".
 - **דרוש כדי לתקדם:** שחזור מבוקר (לוג Render מלא של שני ה-turns — הביטול והבקשה החדשה שנעצרה — לא רק דיווח מסוכם), כדי לקבוע אם מדובר בהתנהגות #1/#2/#3 לעיל או במשהו אחר לגמרי.
 - **סטטוס:** 🔴 נרשם, לא תוקן, לא root-caused. אין מספר PR/commit משויך.
+
+---
+
+## BUG-153 — בקשת create חדשה אחרי rejection נחסמת
+
+- **דווח:** 3 באוגוסט 2026
+- **סביבה:** Staging — `my-bot-approval-staging`, בסיס `בסיס עיקרי`
+- **מסך / מודול:** `core/action_gateway.py` — `propose_action()`, rejected replay guard, lookup לפי business_action_fingerprint
+- **הרצף שנצפה:** לאחר שהמשתמש ביטל (דחה) פעולה, שליחה חדשה ומפורשת של אותה בקשה (בקשת "create" חדשה ומפורשת מהמשתמש) נחסמה שוב ושוב.
+  - תשובת הבוט: "יצירת המשימה כבר בוטלה"
+  - לוג: `[ActionGateway] propose blocked: business action already rejected contract=665a3d2d-acf8-45f9-af0e-84abc1d03b75`
+  - בהמשך: `[DeterministicCreateTask] created_this_turn=False reply_owner=None`
+- **Severity:** גבוהה
+- **Root Cause:** `ActionGateway` משתמש ב-`business_action_fingerprint` של ה-contract שנדחה כדי לחסום כל ניסיון עתידי זהה. אין הבחנה בין:
+  - replay אוטונומי (צריך להישאר חסום)
+  - turn חדש שמכיל בקשת create מפורשת מהמשתמש (צריך ליצור contract חדש)
+- **דרישת תיקון:** יש לשמר את אותו fingerprint, אך להוסיף הבחנה בין autonomous replay לבין explicit new user request. בקשת משתמש חדשה ומפורשת צריכה ליצור contract חדש (`ActionContract.status = pending`), בעוד ה-contract הישן נשאר terminal (`status = rejected`).
+- **קריטריוני סגירה:**
+  - contract שנדחה נשאר ב-status `rejected`
+  - בקשת create חדשה ומפורשת יוצרת `ActionContract` חדש בstatus `pending`
+  - autonomous replay עדיין חסום
+  - אותו fingerprint נשמר (לא משתנה כדי לעקוף את ההגנה)
+- **חשוב — קונפליקט עם תיעוד קיים, נמצא ב-04/08/2026:** `docs/architecture/
+  action-gateway/DETERMINISTIC_TASK_ROUTING_AND_REPLAY_POLICY_20260802.md`
+  (מוזג עם PR #546 עצמו) קובע במפורש שה-blocking **מכוון** ("must not weaken
+  fingerprint deduplication"), ושפתיחה-מחדש דורשת "a separately approved
+  reconfirmation policy" שמעולם לא עוצבה. הועלה ל-owner (04/08/2026) —
+  ההחלטה: **לעצב policy כזו** (לא Won't-Fix, לא רק לתעד).
+- **עיצוב + תיקון (04/08/2026):** ראה
+  `docs/architecture/action-gateway/BUG-153_CREATE_TASK_EXPLICIT_RECONFIRMATION_POLICY_20260804.md`
+  ל-Cross-Layer Impact Matrix מלא. תמצית: ערך `trusted_source` חדש
+  (`"deterministic_create_task"`) מוגדר ב-`_queue_deterministic_create_task()`
+  בלבד (Python קוד מהימן, לעולם לא מ-tool_inputs/טקסט משתמש) — `propose_action()`'s
+  ה-rejected-branch מבחין בין `trusted_source == "deterministic_create_task"`
+  (מותר, פותח contract חדש; ה-contract הישן נשאר `rejected` ללא שינוי) לבין
+  כל trusted_source אחר, **כולל `"agent"`** (autonomous replay — ממשיך
+  להיחסם ללא תנאי, בדיוק כמו היום). בטוח כי: (1) idempotency guard קיים
+  כבר במעלה הזרימה (`app.py:5247`) מסנן webhook redelivery לפני
+  `route_request()`; (2) המסלול הדטרמיניסטי לא יכול "להחליט" לבד לחזור על
+  עצמו (regex על טקסט נכנס של ה-turn הנוכחי בלבד, לא Agent tool_use loop);
+  (3) ה-fingerprint עצמו לא משתנה. `_queue_deterministic_task_update()`
+  (UPDATE_TASK/COMPLETE_TASK) **לא** כלול ב-carve-out — scope מוצהר,
+  create_task בלבד.
+- **בדיקות:** `test_bug153_create_task_reconfirmation_after_rejection.py`
+  (חדש, 11/11 — כולל regression מפורש ש-`trusted_source="agent"` ו-כל
+  trusted_source אחר נשארים חסומים), `test_create_task_deterministic_route.py`
+  (13/13, ללא שינוי), `test_bug_canonical_tool_wiring.py` (52/52, ללא שינוי),
+  `test_bug091_source_trust_boundary.py` (10/10, ללא שינוי),
+  `core/router/test_router.py` (44/44, ללא שינוי), `smoke_tests.py`,
+  `test_integration.py` (4/4) — כולם ירוקים.
+- **Merged:** לא עדיין
+- **Deployed:** לא
+- **Verified בפרודקשן:** לא
+- **סטטוס:** 🟡 עיצוב אושר ע"י owner, קוד מומש ונבדק מקומית — **לא מוזג, לא
+  deployed, לא verified בפרודקשן**
+
+---
+
+## BUG-154 — ניסוח "ל־תאריך" מפיל את parser
+
+- **דווח:** 3 באוגוסט 2026
+- **סביבה:** Staging — `my-bot-approval-staging`, בסיס `בסיס עיקרי`
+- **מסך / מודול:** `core/router/router.py`, פונקציה `parse_deterministic_create_task()`
+- **קלט ששיחזר את הבאג:**
+  ```text
+  צור משימה לבדוק את אימות 546 המעודכן, ל־5/8/26 בשעה 10:30
+  ```
+- **הרצף שנצפה:**
+  - התנהגות צפויה: parsing דטרמיניסטי תקין, `intent=create_task`, `handler=tool`, CanonicalActionProposal תקין, ActionContract בstatus `pending`
+  - התנהגות בפועל: Parser קרס עם `AttributeError: 'NoneType' object has no attribute 'start'`
+  - Stack trace: `parse_deterministic_create_task` → `if date_marker.start() > date_match.start():`
+- **Root Cause:** `date_marker` הוא תוצאה של `re.search(r"\bעד\b", body)` —
+  מחפש את מילת-הסימון "עד" בלבד, לא "ל־". הקלט משתמש ב-"ל־" כמסמן-תאריך
+  במקום "עד", ולכן `date_marker` הוא `None`, בעוד `date_match` (שמזהה את
+  צורת התאריך `5/8/26` עצמה, ללא תלות ב-marker) כן נמצא. `parse_
+  deterministic_create_task()` קורא ל-`date_marker.start()` בלי לבדוק
+  קודם שהוא לא `None`.
+- **Fallback לאחר ההקרסה:** המערכת עברה ל-fallback: `intent=unknown`, `handler=approval`, `confidence=0.00`, rule='fallback'. מציגה approval כללי ללא details:
+  ```text
+  הפרטים המדויקים ייקבעו כשאכין את הפעולה בפועל
+  ```
+  זה אינו CanonicalActionProposal תקין.
+- **Severity:** גבוהה
+- **דרישת תיקון:**
+  - להגן על שימוש ב-`date_marker.start()` עם בדיקת None
+  - לתמוך ב-"ל־5/8/26" ובגרסאות Unicode דומות
+  - במקרה parse failure יש להחזיר clarification בלבד, לא generic approval
+  - זה fail-closed requirement: create_task צריך להיות בטוח או clarification, לעולם לא fallback approval לא-בטוח
+- **קריטריוני סגירה:**
+  - "ל־5/8/26" עובר parse תקין ללא exception
+  - אין AttributeError
+  - אין generic approval fallback
+  - parse failure אמיתי מחזיר clarification בלבד
+- **תוקן (04/08/2026):** `date_marker` נבדק כעת גם מול `None` בלי exception,
+  ונוסף מסמן חלופי — "ל" + מקף עברי/hyphen/en-dash/em-dash, נבדק **רק** צמוד
+  (עם רווח אופציונלי) ממש לפני `date_match.start()` עצמו, לא חיפוש גלובלי
+  (ש"ל" הוא אות עברית נפוצה מדי). אם לא נמצא שום marker — `uncertain=True`
+  (fail-closed, clarification), לא crash. ראה
+  `docs/architecture/action-gateway/BUG-154_CREATE_TASK_DATE_MARKER_PARSER_CRASH_FIX_20260804.md`
+  ל-Cross-Layer Impact Matrix.
+- **בדיקות:** `test_bug154_date_marker_prefix_parser.py` (חדש, 15/15 —
+  כולל שחזור מדויק של ה-crash [נכשל על הקוד הישן], גרסאות Unicode
+  ל-hyphen/en-dash/em-dash, regression ל-"עד" הקיים, ו-fail-closed
+  ל-date-shaped-token-בלי-marker), `core/router/test_router.py` (44/44,
+  ללא שינוי), `test_create_task_deterministic_route.py` (13/13, ללא
+  שינוי), `smoke_tests.py`, `test_integration.py` (4/4) — כולם ירוקים.
+- **Merged:** לא עדיין
+- **Deployed:** לא
+- **Verified בפרודקשן:** לא
+- **סטטוס:** 🟡 קוד תוקן ונבדק מקומית — **לא מוזג, לא deployed, לא verified בפרודקשן**
+
+---
+
+## BUG-155 — TTL expiry אינו סוגר את ה־ActionContract
+
+- **דווח:** 3 באוגוסט 2026
+- **סביבה:** Staging — `my-bot-approval-staging`, בסיס `בסיס עיקרי`
+- **מסך / מודול:** TTL callback handler, ActionContract lifecycle transition
+- **הרצף שנצפה:**
+  - התנהגות צפויה: כאשר approval פג תוקף:
+    - המשתמש מקבל הודעת expiry
+    - ה-ActionContract עובר למצב terminal כגון `expired`
+    - הוא אינו נספר כ-live contract
+    - הוא אינו חוסם פעולות חדשות
+    - לא ניתן לאשר אותו מאוחר יותר
+  - התנהגות בפועל:
+    - המשתמש קיבל: `פג תוקף — הפעולה לא בוצעה`
+    - לוג: `[Approval] TTL-expired Telegram callback: action_id=513fbb08 tool=airtable_add — not executed`
+    - אבל ה-contract נשאר חי (`pending`)
+    - `pending_gate_decision=block_new_action` ו-`live_contracts_count=1`
+    - בקשה חדשה נחסמה: `יש לך כרגע 1 בקשות הממתינות לאישור`
+    - לאחר מכן ה-contract הישן חזר ל-reconfirmation ובסופו בוצע
+    - אותו contract (ID: 71443fe1-0f94-44a3-986e-54b506f0759d) עבר: `approved` → `Claim acquired` → `Execution succeeded` → `outcome=completed`
+- **Root Cause:** מסלול expiry משפיע על callback או UI בלבד, אך אינו מבצע transition מלא של ה-ActionContract למצב terminal. סתירה:
+  - למשתמש נאמר שהפעולה אינה זמינה
+  - backend ממשיך להתייחס אליה כ-pending
+- **Severity:** קריטית או גבוהה מאוד
+- **אזורים חשודים:**
+  - TTL callback handler
+  - ActionContract lifecycle transition
+  - pending contract query בתוך live contracts
+  - live contract count calculation
+  - pending lock cleanup
+- **דרישת תיקון:** ב-TTL expiry יש לבצע transition אטומי: `pending → expired`, ולוודא:
+  - removal מ-live contracts collection
+  - cleanup של pending lock
+  - אי־אפשרות reconfirmation
+  - callback נוסף אינו מבצע פעולה
+- **קריטריוני סגירה:**
+  - expiry מעביר contract ל-terminal status
+  - ה-contract שפג נעדר מ-`find_live_contracts()` (contract-scoped — הספירה
+    הכוללת של live contracts יורדת בדיוק באחד, לא נדרשת ל-0 גלובלית; ל-
+    identity יכולים להיות live contracts אחרים, לא-קשורים, שלא אמורים
+    להיפגע)
+  - בקשה חדשה אינה נחסמת
+  - approval מאוחר אינו אפשרי
+  - callback כפול אינו מבצע
+- **Root Cause המדויק (אומת בקוד, 04/08/2026):** `_reject_stale_telegram_approval()`
+  (`app.py:2223`) זיהה את ה-contract לדחייה ע"י **חישוב מחדש** של
+  `business_action_fingerprint` מתוך `payload.get("tool_inputs", {})` בלבד —
+  אבל `propose_action()` מחשב את ה-fingerprint המקורי מתוך `fingerprint_payload`
+  (למשל `task_parse.business_identity()` הכולל `due_time`) כשהוא מועבר בנפרד
+  מ-`tool_inputs`/`task_fields` (payload הכתיבה, ללא `due_time` — ראה BUG-156).
+  לכל משימה עם שעה, ה-fingerprint המחושב-מחדש שונה מהאמיתי, `find_by_fingerprint()`
+  מחזיר `None`, `reject()` לעולם לא נקרא — אך הקוד ממשיך כרגיל ומודיע "פג תוקף".
+  `payload["contract_id"]` כבר נשמר על אותו payload (`app.py:1612`) ומעולם לא
+  נעשה בו שימוש בנתיב הזה.
+- **תוקן ב-commit:** ממתין ל-commit (עבודה בענף `claude/pr-546-turn-coordinator-bugs-jhdrtl`)
+- **תיקון:** `_reject_stale_telegram_approval()` משתמש כעת ב-`payload.get("contract_id")`
+  ל-lookup ישיר דרך `find_by_id()`, במקום recompute של fingerprint. הlookup
+  הישן (fingerprint recompute) נשמר כ-fallback רק לפריטים ללא contract_id שמור.
+  **לא הוצג status חדש ("expired")** — `reject(rejected_by="ttl_expired")` הקיים
+  כבר מעביר למצב terminal `"rejected"` הנתמך במלואו (מספיק לכל קריטריוני הסגירה).
+  ראה `docs/architecture/action-gateway/BUG-155_TTL_EXPIRY_CONTRACT_LOOKUP_FIX_20260804.md`
+  ל-Cross-Layer Impact Matrix מלא (נדרש לפי `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`).
+- **בדיקות:** `test_bug155_ttl_expiry_contract_id_lookup.py` (חדש — משחזר את
+  התרחיש המדויק, נכשל על הקוד הישן [3/5], עובר על הקוד המתוקן [5/5]),
+  `test_bug112_telegram_approval_ttl.py` (30/30, ללא שינוי), `test_bug_stale_callback_ux.py`
+  (10/10, ללא שינוי), `smoke_tests.py`, `test_integration.py` (4/4) — כולם ירוקים.
+- **Merged:** לא עדיין
+- **Deployed:** לא
+- **Verified בפרודקשן:** לא
+- **סטטוס:** 🟡 קוד תוקן ונבדק מקומית — **לא מוזג, לא deployed, לא verified בפרודקשן**
+  (לפי "כלל ברזל" ב-CLAUDE.md, לא ✅ עד commit+push+deploy+production verification)
+
+---
+
+## BUG-156 — השעה משתתפת בזהות אך אינה נשמרת בכתיבה
+
+- **דווח:** 3 באוגוסט 2026
+- **סביבה:** Staging — `my-bot-approval-staging`, בסיס `בסיס עיקרי`
+- **מסך / מודול:** canonical create-task payload, mapping ל-Airtable fields, schema של `משימות (Tasks)`
+- **קלט:**
+  ```text
+  צור משימה לבדוק את אימות 546 המעודכן עד 5/8/26 בשעה 10:30
+  ```
+- **מה אומת:**
+  - שינוי שעה משנה fingerprint
+  - 19:00 → fingerprint=3e79afbdc541...
+  - 20:00 → fingerprint=76e5eb2f8e74...
+  - כלומר, השעה היא חלק מהזהות העסקית (`business_action_fingerprint`)
+- **מה נכתב בפועל:**
+  - הרשומה שנוצרה: recJHmybGqfR3tq3G
+  - בטבלת `משימות (Tasks)`:
+    - כותרת המשימה: `לבדוק את אימות 546 המעודכן`
+    - תאריך יעד: `2026-08-05`
+  - **לא נשמרה שעה**
+- **Proof סכמה:**
+  - השדה `תאריך יעד` הוא מסוג `date` (לא `dateTime`)
+- **Root Cause:** המערכת משתמשת בשעה לצורך:
+  - canonical identity
+  - fingerprint
+  - duplicate detection
+  - אבל payload הכתיבה מכיל רק: כותרת המשימה ותאריך יעד
+  - לכן השעה אובדת
+- **Severity:** בינונית עד גבוהה
+- **דרישת תיקון:** צריך להחליט חוזית על אחת משתי אפשרויות:
+
+  **אפשרות א — השעה היא חלק מהמשימה:**
+  - להפוך את השדה ל-`dateTime`, או
+  - להוסיף שדה שעה נפרד
+  - לוודא שה-write payload שומר את השעה
+
+  **אפשרות ב — השעה אינה נתמכת:**
+  - לא לכלול אותה ב-fingerprint
+  - להחזיר clarification או הודעה מפורשת שהשעה אינה נשמרת
+  - לא לאשר payload שמבטיח יותר ממה שנכתב
+- **השפעה:**
+  - שתי משימות זהות באותו תאריך ובשעות שונות מקבלות identities שונות
+  - לאחר execution שתיהן עלולות להיכתב באופן זהה ב-Airtable
+  - המידע שאושר אינו נשמר במלואו
+  - completion עלול להציג הצלחה אף שחלק מהבקשה לא נשמר
+- **קריטריוני סגירה:**
+  - שעה נשמרת בפועל בAirtable, או
+  - נדחית מפורשות עם clarification/cancel
+  - payload מאושר וה-write payload עקביים
+  - fingerprint אינו מכיל מידע שאובד בכתיבה
+- **החלטת owner (04/08/2026, AskUserQuestion):** אפשרות ב — "stop promising
+  the time." קוד-בלבד, ללא נגיעה בסכמת Airtable החיה.
+- **תוקן (04/08/2026):** `DeterministicTaskParse.business_identity()`
+  (`core/router/router.py`) כבר לא כולל `due_time` ב-fields — שתי בקשות
+  זהות בכותרת+תאריך, שונות רק בשעה, מייצרות כעת את אותו fingerprint
+  (במקום fingerprints שונים). `due_time` עדיין מנותח ומאומת (שעה פגומה
+  עדיין fail-closes ל-clarification) — רק לא חלק מהזהות. בנוסף,
+  `_queue_deterministic_create_task()` בונה הודעה מפורשת ("⚠️ שים לב: השעה
+  שצוינה ({HH:MM}) לא תישמר ברשומה — רק התאריך יישמר") ומעביר אותה דרך
+  פרמטר חדש `extra_note` ב-`_queue_approval_detailed()`/`_queue_approval_
+  detailed_impl()` — מוצגת הן ל-owner (בהודעת ה-pending עם כפתורי אישור),
+  הן לקורא לא-owner (בתשובה המוחזרת). ראה
+  `docs/architecture/action-gateway/BUG-156_DUE_TIME_FINGERPRINT_VS_PERSISTENCE_FIX_20260804.md`
+  ל-Cross-Layer Impact Matrix.
+- **בדיקות:** `test_bug156_due_time_note_and_fingerprint_exclusion.py`
+  (חדש, 8/8 — כולל אימות שהזהות זהה עבור שעות שונות, ושה-note מכיל את
+  השעה המדויקת ומילת "לא תישמר"), `test_create_task_deterministic_route.py`
+  (13/13 — אחד עודכן במכוון לשקף את ההתנהגות החדשה),
+  `test_business_action_fingerprint_normalization.py` (8/8, ללא שינוי),
+  `test_bug155_ttl_expiry_contract_id_lookup.py` (5/5, ללא שינוי),
+  `test_bug153_create_task_reconfirmation_after_rejection.py` (11/11, ללא
+  שינוי), `core/router/test_router.py` (44/44, ללא שינוי), `smoke_tests.py`,
+  `test_integration.py` (4/4) — כולם ירוקים.
+- **Merged:** לא עדיין
+- **Deployed:** לא
+- **Verified בפרודקשן:** לא
+- **סטטוס:** 🟡 עיצוב אושר ע"י owner (אפשרות ב), קוד תוקן ונבדק מקומית —
+  **לא מוזג, לא deployed, לא verified בפרודקשן**
+
+---
+
+## בדיקה חסרה — כשל בשליחת הודעת pending ראשונה + suppression fallback
+
+- **דווח:** 3 באוגוסט 2026
+- **סביבה:** Staging — `my-bot-approval-staging`
+- **מטרת הבדיקה:** לוודא כי אם שליחת הודעת ה-pending הראשונה נכשלת (network error, rate limit, טעות בשרת Telegram וכו'):
+  - `duplicate_reply_suppressed=true` אינו מעלים גם את הודעת ה-fallback
+  - המשתמש מקבל הודעה ציבורית אחת
+  - לא מתקבלות אפס תשובות
+  - לא מתקבלות שתי תשובות
+- **הסדר הנבדק:** בעלים שולח בקשה → ActionContract נוצר → שליחת הודעת pending ראשונה נכשלת (via fault injection) → fallback notification משדר (חיוור/ייזום) → owner_notification_sent מתעדכן
+- **דרוש:** Fault injection זמני ב-staging:
+  ```bash
+  export STAGING_FAIL_FIRST_APPROVAL_NOTIFICATION=true
+  ```
+  ה-fault צריך להפיל רק את ניסיון השליחה הראשון, בלי לפגוע ב:
+  - יצירת ActionContract
+  - routing
+  - gateway
+  - fallback send
+- **תוצאה צפויה:**
+  ```text
+  owner_notification_sent=false
+  duplicate_reply_suppressed=false
+  final_responses=1
+  ```
+  או לוג שקול
+- **נסגר (04/08/2026) — ללא צורך ב-`STAGING_FAIL_FIRST_APPROVAL_NOTIFICATION`
+  או קוד production חדש:** `app._queue_approval_detailed_impl()`'s `bot.send_message(
+  owner_chat_id, ...)` כבר עטוף ב-try/except ("BOSS NEVER FAKES" block) שמבצע,
+  על כשל: ביטול מאומת של ה-EventBus pending item (`_cancel_and_verify_pending()`)
+  וביטול מאומת (revoke) של ה-ActionContract שזה עתה נוצר
+  (`_revoke_and_verify_contract()`) — שני helpers קיימים ונבדקים בנפרד
+  ב-`core/approval_queue_recovery.py` — ומחזיר dict מובנה עם `ok=False`,
+  ללא מפתח `owner_notified` (falsy), הודעת שגיאה יחידה. נבדק ישירות עם
+  `bot.send_message` שמדומה לזרוק exception (ללא fault-injection env var
+  ייעודי — mocking סטנדרטי ב-unit test מספיק) על event_bus/ActionGateway
+  אמיתיים.
+- **בדיקות:** `test_first_pending_notification_failure_suppression.py`
+  (חדש, 11/11) — מאמת: `send_message` נקרא בדיוק פעם אחת (אין retry
+  שקט/loop), `ok=False`, `owner_notified` falsy, `terminal_outcome=
+  APPROVAL_QUEUE_ERROR`, הודעה ציבורית **אחת** לא-ריקה מוחזרת,
+  `created_this_turn=False`, אין `ActionContract` חי שנשאר, אין
+  `EventBus` pending item שנשאר — כל הקריטריונים שהתבקשו (`owner_notification_
+  sent=false`, `duplicate_reply_suppressed=false`, `final_responses=1`)
+  מתקיימים. Regression מוודא ששליחה תקינה (לא-נכשלת) עדיין מדווחת
+  `owner_notified=True` ונשלחת פעם אחת בלבד. `smoke_tests.py`,
+  `test_integration.py`, `test_bug112_telegram_approval_ttl.py` (30/30),
+  `test_bug_stale_callback_ux.py` (10/10) — כולם ירוקים, לא נגעתי בקוד
+  production כלל.
+- **סטטוס:** ✅ בדיקה נוספה ואומתה — הקוד הקיים כבר עומד בכל הדרישות,
+  ללא צורך בתיקון. **לא מוזג עדיין** (הבדיקה עצמה טרם רצה ב-CI/production).
+
+---
+
+## BUG-157 — propose_action() אינו אטומי סביב fingerprint lookup+save (concurrency)
+
+- **דווח:** 04/08/2026, ע"י ביקורת CodeRabbit על PR #550 (לא תרחיש production
+  שנצפה בפועל)
+- **סביבה:** לא רלוונטי — ממצא סטטי מבוסס-קוד, לא production incident
+- **מסך / מודול:** `core/action_gateway.py::ActionGateway.propose_action()`
+  (שורות 1498-1526 בזמן הביקורת)
+- **תיאור:** `propose_action()` מבצע `find_by_fingerprint()` ואז `save()`
+  כשני צעדים נפרדים, ללא atomic uniqueness constraint ברמת ה-DB.
+  תיאורטית, שתי בקשות **מקבילות באמת** עם אותו fingerprint עסקי יכולות
+  כל אחת ליצור contract pending משלה לאותה זהות עסקית.
+- **Root Cause:** תבנית check-then-act לא-אטומית ב-`propose_action()` —
+  קיימת עבור **כל** יצירת contract חדש, לא רק ל-carve-out החדש של BUG-153.
+  `ActionContractRepository` לא מספק שום compare-and-set/unique-constraint
+  ברמת האחסון.
+- **אומת (04/08/2026):** זה **לא** תרחיש שדווח מ-production — אומת סטטית
+  מקריאת קוד בלבד. `gunicorn.conf.py` נועל `workers = 1` ללא override
+  ל-`threads`/`worker_class` (מתועד שם במפורש כדי לשמור על in-process
+  state יחיד, כמו ה-scheduler) — Flask מטפל בבקשה אחת בזמן נתון, בסינכרון
+  מלא, תחת ה-deployment הנוכחי. שתי קריאות `propose_action()` מקבילות
+  באמת **אינן אפשריות** מבנית תחת התצורה הנוכחית. הסיכון הוא **latent**
+  — הופך אמיתי רק אם workers/threads יורחבו אי-פעם בלי טיפול מקביל בבאג הזה.
+- **Severity:** גבוהה (לפי CodeRabbit — "Major"), אך לא-נגישה כרגע
+  (currently unreachable) תחת ה-deployment הקיים.
+- **החלטת owner (04/08/2026, AskUserQuestion):** להשאיר ל-PR נפרד — לא
+  לתקן בתוך PR #550 (בג-פיקס ממוקד). דורש עיצוב עצמאי (atomic DB
+  constraint או lock ב-`ActionContractRepository`) + Cross-Layer Impact
+  Matrix מלא לפי `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` (נוגע ישירות
+  בשכבה 4 — Durable Atomic Approval).
+- **דרישת תיקון (לPR עתידי):** atomic fingerprint claim — או
+  serialize של ה-lookup+save, או compare-and-set/unique constraint אמיתי
+  ב-`ActionContractRepository`, כולל טיפול נכון ב"הפסיד" של הבקשה
+  המקבילה (reuse/return של ה-contract הקיים, לא duplicate).
+- **תגובה ב-PR:** https://github.com/10026782/My-bot/pull/550#issuecomment-5189294142
+- **סטטוס:** 🔴 נרשם, לא תוקן — ממתין ל-PR נפרד + עיצוב
+
+---
+
+## סדר עדיפות מומלץ לתיקונים
+
+1. **BUG-155** — TTL expiry משאיר pending חי (קריטי) — 🟡 קוד תוקן
+2. **BUG-153** — create חדש אחרי rejection נחסם (גבוה) — 🟡 קוד תוקן
+3. **BUG-154** — parser crash בניסוח "ל־תאריך" (גבוה) — 🟡 קוד תוקן
+4. **BUG-156** — שעה אינה נשמרת (בינוני-גבוה) — 🟡 קוד תוקן
+5. **בדיקת suppression fallback** — ✅ נסגר, 04/08/2026 (לא נדרש fault injection)
+6. **BUG-157** — `propose_action()` לא-אטומי (concurrency, latent) — 🔴 לPR נפרד
