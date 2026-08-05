@@ -37,13 +37,22 @@ materially different title/date/time values map to a new identity.
 
 ## Rejection and replay semantics
 
-An exact canonical business action that reached `rejected` remains rejected on
-replay. A repeated request must not silently reopen an action the owner
-cancelled. A genuinely changed title, date, or time creates a new fingerprint
-and may enter approval again.
+PR #540 (merge `6779c03`, 02/08/2026) tightened rejected-action replay after
+the earlier behavior had allowed a repeated explicit create request to produce
+a new approval attempt. The intended business rule is narrower than the
+current guard:
 
-An explicit retry of the same rejected identity would require a separately
-approved reconfirmation policy; it must not weaken fingerprint deduplication.
+- autonomous or implicit replay of a rejected action remains blocked;
+- an explicit new create request from the user may create a new approval
+  attempt, while the previously rejected contract remains immutable;
+- a materially changed title, date, or time is also a new business action.
+
+The fingerprint remains the business identity. The explicit-retry policy needs
+an attempt-level proposal path at the ActionGateway boundary; it must not be
+implemented by changing the canonical payload or mutating the rejected record.
+Until that policy fix is shipped, identical explicit requests remain blocked by
+the current PR #540 guard. This document records the gap rather than claiming
+the runtime already supports the intended retry behavior.
 
 ## Single-speaker pending delivery
 
