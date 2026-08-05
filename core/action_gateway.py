@@ -568,16 +568,64 @@ class ExecutionLedger:
         # הקיימת, ולא מקור אמת חדש למחזור החיים.
         self._by_user: dict[str, dict[str, ActionContract]] = {}
         self._lock = threading.Lock()
+        # BUG-157: fingerprints "claimed" by a proposer that has passed the
+        # existing-contract dedup check but not yet completed save() — closes
+        # the race where two threads in the same process (e.g. scheduler.py's
+        # background thread calling propose_action() via lead_recovery.py/
+        # followup_engine.py, concurrently with the main request thread) both
+        # see "no blocking existing contract" before either has saved, and
+        # both create a live contract for the identical business fingerprint.
+        # See claim_fingerprint_cas()/release_fingerprint_claim() and
+        # docs/architecture/action-gateway/BUG-157_ATOMIC_FINGERPRINT_CLAIM_20260805.md.
+        self._claimed_fingerprints: set[str] = set()
         self._airtable_writer = airtable_writer        # callable(contract) → None — legacy best-effort mirror (Phase 4A)
         # ActionContractRepository | None. When set, reads recover through it
         # and lifecycle updates persist there before the RAM cache changes.
         # PostgreSQL remains the separate atomic execution-claim owner.
         self._repository = repository
 
+    def claim_fingerprint_cas(
+        self, fingerprint: str, expected_contract_id: str | None,
+    ) -> bool:
+        """BUG-157: atomic compare-and-set claim on a business fingerprint.
+
+        `expected_contract_id` is the contract_id the caller's own prior
+        find_by_fingerprint() call observed for this fingerprint (or None if
+        it observed no contract at all). Returns True — claim granted, the
+        caller now owns this fingerprint and MUST follow up with exactly one
+        of save() (via _cache_contract(), which releases the claim
+        automatically) or release_fingerprint_claim() — only if BOTH:
+          1. _by_fingerprint[fingerprint] is still exactly what the caller
+             observed (nothing else has completed a save() for this
+             fingerprint since), and
+          2. no other proposer's claim on this exact fingerprint is already
+             in flight.
+        Returns False (race lost) otherwise — the caller must re-run its
+        lookup and react to the now-current state, never proceed to save()
+        as if this were still "no existing contract."
+        """
+        with self._lock:
+            current_cid = self._by_fingerprint.get(fingerprint)
+            if current_cid != expected_contract_id:
+                return False
+            if fingerprint in self._claimed_fingerprints:
+                return False
+            self._claimed_fingerprints.add(fingerprint)
+            return True
+
+    def release_fingerprint_claim(self, fingerprint: str) -> None:
+        """Releases a claim_fingerprint_cas() reservation without a save() —
+        used when the proposal attempt aborts after claiming (e.g. a
+        persistence failure). Idempotent (safe even if already released by
+        _cache_contract() or a prior call)."""
+        with self._lock:
+            self._claimed_fingerprints.discard(fingerprint)
+
     def _cache_contract(self, contract: ActionContract) -> None:
         with self._lock:
             self._store[contract.contract_id] = contract
             self._by_fingerprint[contract.business_action_fingerprint] = contract.contract_id
+            self._claimed_fingerprints.discard(contract.business_action_fingerprint)
             self._by_user.setdefault(contract.canonical_user_id, {})[
                 contract.contract_id
             ] = contract
@@ -1466,75 +1514,114 @@ class ActionGateway:
             tenant_id, canonical_user_id, tool_name, fingerprint_basis
         )
 
-        # The durable lookup happens before generating any contract identity.
-        # An unavailable store is not evidence that the action is absent.
-        try:
-            existing = self._ledger.find_by_fingerprint(fingerprint)
-        except ActionContractLookupError as exc:
+        # BUG-157: the existing-contract lookup, its status-branch decision
+        # (unchanged from before this fix), and the fingerprint claim below
+        # must be retried together as one unit if a concurrent proposer in
+        # the same process — e.g. scheduler.py's background thread calling
+        # propose_action() via lead_recovery.py/followup_engine.py while the
+        # main request thread also proposes — wins the fingerprint between
+        # this attempt's lookup and its save(). A bounded retry (not
+        # unbounded): each loss means a genuine concurrent writer just
+        # finished, which self-resolves on the very next lookup — sustained
+        # contention on one exact business fingerprint is not an expected
+        # real workload. See docs/architecture/action-gateway/
+        # BUG-157_ATOMIC_FINGERPRINT_CLAIM_20260805.md.
+        _CLAIM_MAX_ATTEMPTS = 5
+        existing: ActionContract | None = None
+        for _claim_attempt in range(_CLAIM_MAX_ATTEMPTS):
+            # The durable lookup happens before generating any contract
+            # identity. An unavailable store is not evidence the action is
+            # absent.
+            try:
+                existing = self._ledger.find_by_fingerprint(fingerprint)
+            except ActionContractLookupError as exc:
+                logger.error(
+                    "[ActionGateway] durable fingerprint lookup failed: tool=%s "
+                    "fingerprint=%.12s user=%s error=%s",
+                    tool_name, fingerprint, canonical_user_id, exc,
+                )
+                return GatewayResult(
+                    ok=False,
+                    reason="לא ניתן לבדוק אם בקשת הפעולה כבר קיימת.",
+                    user_message=(
+                        "❌ לא ניתן לבדוק כרגע את מאגר בקשות האישור. "
+                        "הפעולה לא הועברה לאישור ולא תבוצע."
+                    ),
+                    failure_code="persistence_lookup_failed",
+                )
+            if existing:
+                if existing.status == "pending":
+                    return GatewayResult(
+                        ok=False,
+                        reason="כבר קיימת בקשת אישור פתוחה לפעולה הזו.",
+                        contract_id=existing.contract_id,
+                        user_message="⏳ כבר יש בקשת אישור פתוחה לפעולה זו. שלח *מאשר* כדי לאשר.",
+                    )
+                if existing.status in ("completed", "executed"):
+                    return self._handle_duplicate_executed(existing, canonical_user_id)
+                if existing.status == "rejected" and trusted_source != "deterministic_create_task":
+                    # הגנת replay אוטונומי (ללא שינוי) — חוסמת את ה-Agent
+                    # tool_use loop, וכל trusted_source אחר, מלהציע מחדש פעולה
+                    # שהזהות העסקית הקנונית שלה כבר נדחתה. BUG-153: בקשת
+                    # create_task דטרמיניסטית ומפורשת (trusted_source ==
+                    # "deterministic_create_task" — לעולם לא ה-Agent loop הגולמי,
+                    # תמיד תוצאה ישירה של טקסט נכנס של ה-turn הנוכחי, כבר מוגנת
+                    # מ-webhook-redelivery duplicates במעלה הזרימה) היא היוצא-מן-
+                    # הכלל היחיד, מטופל למטה על ידי פשוט לא לחזור כאן — ראה
+                    # docs/architecture/action-gateway/BUG-153_CREATE_TASK_EXPLICIT_
+                    # RECONFIRMATION_POLICY_20260804.md לעיצוב המלא ול-Cross-Layer
+                    # Impact Matrix. `existing` (ה-contract שנדחה) לעולם לא משתנה;
+                    # נשאר "rejected" וניתן-לאחזור עצמאית לפי contract_id שלו.
+                    repeated = build_approval_lifecycle_result(
+                        existing, canonical_state="rejected", repeated=True,
+                    )
+                    return GatewayResult(
+                        ok=False,
+                        reason="business action already rejected",
+                        contract_id=existing.contract_id,
+                        user_message=repeated.safe_user_message,
+                    )
+                if existing.status == "rejected":
+                    logger.info(
+                        "[ActionGateway] BUG-153 reconfirmation מפורש: "
+                        "פותח contract חדש לבקשת create_task דטרמיניסטית "
+                        "ש-fingerprint שלה תואם contract שנדחה=%s "
+                        "fingerprint=%.12s user=%s.",
+                        existing.contract_id, fingerprint, canonical_user_id,
+                    )
+                if existing.status in ("approved", "executing", "outcome_unknown"):
+                    return GatewayResult(
+                        ok=False,
+                        reason=f"הפעולה כבר קיימת במצב {existing.status}.",
+                        contract_id=existing.contract_id,
+                        user_message=(
+                            "⚠️ הפעולה כבר אושרה או שתוצאתה אינה סופית. "
+                            "אין ליצור אותה מחדש אוטומטית."
+                        ),
+                    )
+
+            expected_prior_contract_id = existing.contract_id if existing else None
+            if self._ledger.claim_fingerprint_cas(fingerprint, expected_prior_contract_id):
+                break
+            logger.info(
+                "[ActionGateway] BUG-157 fingerprint claim race lost "
+                "(attempt=%d/%d), retrying lookup: fingerprint=%.12s user=%s",
+                _claim_attempt + 1, _CLAIM_MAX_ATTEMPTS, fingerprint, canonical_user_id,
+            )
+        else:
             logger.error(
-                "[ActionGateway] durable fingerprint lookup failed: tool=%s "
-                "fingerprint=%.12s user=%s error=%s",
-                tool_name, fingerprint, canonical_user_id, exc,
+                "[ActionGateway] BUG-157 fingerprint claim exhausted %d "
+                "attempts under sustained contention: fingerprint=%.12s user=%s",
+                _CLAIM_MAX_ATTEMPTS, fingerprint, canonical_user_id,
             )
             return GatewayResult(
                 ok=False,
-                reason="לא ניתן לבדוק אם בקשת הפעולה כבר קיימת.",
+                reason="לא ניתן היה להבטיח בלעדיות על הפעולה תחת עומס מקביל.",
                 user_message=(
-                    "❌ לא ניתן לבדוק כרגע את מאגר בקשות האישור. "
-                    "הפעולה לא הועברה לאישור ולא תבוצע."
+                    "❌ יש כרגע עומס גבוה על מערכת האישורים. נסה שוב בעוד רגע."
                 ),
                 failure_code="persistence_lookup_failed",
             )
-        if existing:
-            if existing.status == "pending":
-                return GatewayResult(
-                    ok=False,
-                    reason="כבר קיימת בקשת אישור פתוחה לפעולה הזו.",
-                    contract_id=existing.contract_id,
-                    user_message="⏳ כבר יש בקשת אישור פתוחה לפעולה זו. שלח *מאשר* כדי לאשר.",
-                )
-            if existing.status in ("completed", "executed"):
-                return self._handle_duplicate_executed(existing, canonical_user_id)
-            if existing.status == "rejected" and trusted_source != "deterministic_create_task":
-                # הגנת replay אוטונומי (ללא שינוי) — חוסמת את ה-Agent
-                # tool_use loop, וכל trusted_source אחר, מלהציע מחדש פעולה
-                # שהזהות העסקית הקנונית שלה כבר נדחתה. BUG-153: בקשת
-                # create_task דטרמיניסטית ומפורשת (trusted_source ==
-                # "deterministic_create_task" — לעולם לא ה-Agent loop הגולמי,
-                # תמיד תוצאה ישירה של טקסט נכנס של ה-turn הנוכחי, כבר מוגנת
-                # מ-webhook-redelivery duplicates במעלה הזרימה) היא היוצא-מן-
-                # הכלל היחיד, מטופל למטה על ידי פשוט לא לחזור כאן — ראה
-                # docs/architecture/action-gateway/BUG-153_CREATE_TASK_EXPLICIT_
-                # RECONFIRMATION_POLICY_20260804.md לעיצוב המלא ול-Cross-Layer
-                # Impact Matrix. `existing` (ה-contract שנדחה) לעולם לא משתנה;
-                # נשאר "rejected" וניתן-לאחזור עצמאית לפי contract_id שלו.
-                repeated = build_approval_lifecycle_result(
-                    existing, canonical_state="rejected", repeated=True,
-                )
-                return GatewayResult(
-                    ok=False,
-                    reason="business action already rejected",
-                    contract_id=existing.contract_id,
-                    user_message=repeated.safe_user_message,
-                )
-            if existing.status == "rejected":
-                logger.info(
-                    "[ActionGateway] BUG-153 reconfirmation מפורש: "
-                    "פותח contract חדש לבקשת create_task דטרמיניסטית "
-                    "ש-fingerprint שלה תואם contract שנדחה=%s "
-                    "fingerprint=%.12s user=%s.",
-                    existing.contract_id, fingerprint, canonical_user_id,
-                )
-            if existing.status in ("approved", "executing", "outcome_unknown"):
-                return GatewayResult(
-                    ok=False,
-                    reason=f"הפעולה כבר קיימת במצב {existing.status}.",
-                    contract_id=existing.contract_id,
-                    user_message=(
-                        "⚠️ הפעולה כבר אושרה או שתוצאתה אינה סופית. "
-                        "אין ליצור אותה מחדש אוטומטית."
-                    ),
-                )
 
         # BUG-076: classified from the actual normalized payload that will
         # be dispatched — never trusted from the caller.
@@ -1585,6 +1672,14 @@ class ActionGateway:
         try:
             self._ledger.save(contract)
         except ActionContractPersistenceError as exc:
+            # BUG-157: save() failed — the fingerprint claim from above was
+            # never fulfilled by _cache_contract() (which only releases it
+            # on a successful save), so it must be released explicitly here.
+            # Otherwise this fingerprint would stay permanently claimed —
+            # every future proposal attempt for the identical business
+            # action would loop through _CLAIM_MAX_ATTEMPTS and fail, even
+            # though no live contract actually exists for it.
+            self._ledger.release_fingerprint_claim(fingerprint)
             logger.error(
                 "[ActionGateway] durable proposal persistence failed: tool=%s "
                 "fingerprint=%.12s user=%s error=%s",

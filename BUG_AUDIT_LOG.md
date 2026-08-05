@@ -3837,24 +3837,52 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
   ברמת האחסון.
 - **אומת (04/08/2026):** זה **לא** תרחיש שדווח מ-production — אומת סטטית
   מקריאת קוד בלבד. `gunicorn.conf.py` נועל `workers = 1` ללא override
-  ל-`threads`/`worker_class` (מתועד שם במפורש כדי לשמור על in-process
-  state יחיד, כמו ה-scheduler) — Flask מטפל בבקשה אחת בזמן נתון, בסינכרון
-  מלא, תחת ה-deployment הנוכחי. שתי קריאות `propose_action()` מקבילות
-  באמת **אינן אפשריות** מבנית תחת התצורה הנוכחית. הסיכון הוא **latent**
-  — הופך אמיתי רק אם workers/threads יורחבו אי-פעם בלי טיפול מקביל בבאג הזה.
-- **Severity:** גבוהה (לפי CodeRabbit — "Major"), אך לא-נגישה כרגע
-  (currently unreachable) תחת ה-deployment הקיים.
+  ל-`threads`/`worker_class` — Flask מטפל בבקשה אחת בזמן נתון בתוך אותו
+  worker, בסינכרון מלא. **תיקון להערכה הקודמת (05/08/2026):** ה-workers=1
+  שולל ריבוי **processes**, אך **לא** שולל ריבוי **threads** בתוך אותו
+  process — `scheduler.py:844` (`threading.Thread(target=_run_scheduler,
+  daemon=True, name="scheduler")`) מריץ thread נפרד לגמרי, שרץ **בו-זמנית**
+  עם ה-thread הראשי שמטפל בבקשות webhook. `core/lead_recovery.py:257`
+  ו-`followup_engine.py:212` שניהם קוראים ל-`propose_gated()` (→
+  `propose_action()`) **מה-scheduler thread**. כלומר שתי thread אמיתיות
+  יכולות לקרוא ל-`propose_action()` בו-זמנית תחת ה-deployment הנוכחי —
+  הסיכון **אינו** רק latent, הוא נגיש כבר היום (גם אם נדיר בפועל, תלוי
+  תזמון scheduler מול webhook).
+- **Severity:** גבוהה (לפי CodeRabbit — "Major") — נגיש בפועל (לא רק latent).
 - **החלטת owner (04/08/2026, AskUserQuestion):** להשאיר ל-PR נפרד — לא
-  לתקן בתוך PR #550 (בג-פיקס ממוקד). דורש עיצוב עצמאי (atomic DB
-  constraint או lock ב-`ActionContractRepository`) + Cross-Layer Impact
+  לתקן בתוך PR #550 (בג-פיקס ממוקד). דורש עיצוב עצמאי + Cross-Layer Impact
   Matrix מלא לפי `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` (נוגע ישירות
   בשכבה 4 — Durable Atomic Approval).
-- **דרישת תיקון (לPR עתידי):** atomic fingerprint claim — או
-  serialize של ה-lookup+save, או compare-and-set/unique constraint אמיתי
-  ב-`ActionContractRepository`, כולל טיפול נכון ב"הפסיד" של הבקשה
-  המקבילה (reuse/return של ה-contract הקיים, לא duplicate).
-- **תגובה ב-PR:** https://github.com/10026782/My-bot/pull/550#issuecomment-5189294142
-- **סטטוס:** 🔴 נרשם, לא תוקן — ממתין ל-PR נפרד + עיצוב
+- **תגובה ב-PR #550:** https://github.com/10026782/My-bot/pull/550#issuecomment-5189294142
+- **תוקן (05/08/2026):** CAS (compare-and-set) אטומי חדש על אינדקס
+  `_by_fingerprint` הקיים ב-RAM, תחת `ExecutionLedger._lock` הקיים —
+  `claim_fingerprint_cas(fingerprint, expected_contract_id)`/
+  `release_fingerprint_claim(fingerprint)` חדשים. `propose_action()`
+  עוטף את רצף lookup→status-branch-checks (ללא שינוי בהתנהגות)→claim
+  בלולאת retry חסומה (5 ניסיונות) — אם ה-claim נכשל (race הפסיד), חוזר
+  ל-lookup טרי שרואה את מה שה-thread המנצח שמר, ומחזיר תגובת dedup נכונה
+  במקום כפילות. ללא שינוי בהתנהגות תחת single-caller (המקרה הנפוץ) — הclaim
+  תמיד מצליח בניסיון הראשון. ראו
+  `docs/architecture/action-gateway/BUG-157_ATOMIC_FINGERPRINT_CLAIM_20260805.md`
+  ל-Cross-Layer Impact Matrix מלא.
+- **בדיקות:** `test_bug157_atomic_fingerprint_claim.py` (חדש, 18/18) —
+  כולל race אמיתי עם 8 threads בו-זמנית (barrier), אימות דטרמיניסטי
+  (interleave ידני של check-then-act, מוכיח שהקוד הישן יצר 2 contracts
+  לאותו fingerprint ב-100% מהריצות, לעומת הקוד המתוקן שחוסם duplicate
+  ב-100% מהריצות), 5 קריאות `propose_action()` מקבילות אמיתיות (5/5
+  הצליחו לחזור, 1 בלבד ok=True, contract חי אחד בלבד לbecome N),
+  ו-regression ל-single-caller (ללא race, ללא שינוי התנהגות).
+  `test_action_gateway.py` (43/43, ללא שינוי), `test_business_action_
+  fingerprint_normalization.py` (8/8, ללא שינוי), `test_bug153` (16/16),
+  `test_bug155` (5/5), `test_bug156` (11/11), `test_pr0c_action_gateway_
+  adapters.py` (34/34), `test_phase_4b_1a_durable_proposals.py` (11/11),
+  `test_phase_4b_1a_lookup_correctness.py`, `core/router/test_router.py`
+  (44/44), `smoke_tests.py`, `test_integration.py` (4/4) — כולם ירוקים.
+- **Merged:** לא עדיין
+- **Deployed:** לא
+- **Verified בפרודקשן:** לא
+- **סטטוס:** 🟡 קוד תוקן ונבדק מקומית (כולל race אמיתי + אימות דטרמיניסטי) —
+  **לא מוזג, לא deployed, לא verified בפרודקשן**
 
 ---
 
