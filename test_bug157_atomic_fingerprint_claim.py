@@ -233,6 +233,84 @@ final5 = gw5.find_contract(result5.contract_id)
 chk("baseline contract status is 'pending'", final5 is not None and final5.status == "pending")
 
 
+# ══════════════════════════════════════════════════════════════════
+# CodeRabbit round 2 (05/08/2026): a losing attempt must not immediately
+# burn through _CLAIM_MAX_ATTEMPTS while the winner is still mid-save()
+# (relevant when FEATURE_ACTION_CONTRACT_PERSISTENCE does real repository
+# I/O with non-trivial latency) — it must WAIT for the in-flight claim to
+# release, then see the winner's actual contract, not report a false
+# "persistence_lookup_failed" load-shed failure.
+print("\n── 6. delayed save(): a losing caller waits for the winner's "
+      "in-flight claim instead of exhausting retries ──")
+
+import time as _time  # noqa: E402 (test-only, deliberately after main tests)
+
+gw6 = ActionGateway(ledger=ExecutionLedger())
+identity6 = _identity("req_bug157_delayed_save")
+barrier6 = threading.Barrier(2)
+_save_delay_seconds = 0.5
+_real_save6 = gw6._ledger.save
+
+
+def _delayed_save6(contract):
+    _time.sleep(_save_delay_seconds)
+    return _real_save6(contract)
+
+
+gw6._ledger.save = _delayed_save6
+results6: dict[str, object] = {}
+results6_lock = threading.Lock()
+
+
+def _propose_worker6(label: str):
+    barrier6.wait()
+    result = gw6.propose_action(
+        tenant_id="boss_hq", canonical_user_id=identity6.memory_key,
+        tool_name="airtable_add",
+        tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "בדיקת delayed save"}},
+        origin_channel="telegram", origin_chat_id=identity6.user_id,
+        requires_approval=True, identity=identity6, trusted_source="agent",
+    )
+    with results6_lock:
+        results6[label] = result
+
+
+threads6 = [
+    threading.Thread(target=_propose_worker6, args=("a",)),
+    threading.Thread(target=_propose_worker6, args=("b",)),
+]
+_start6 = _time.monotonic()
+for t in threads6:
+    t.start()
+for t in threads6:
+    t.join()
+_elapsed6 = _time.monotonic() - _start6
+
+winners6 = [r for r in results6.values() if r.ok]
+losers6 = [r for r in results6.values() if not r.ok]
+
+chk("both concurrent calls returned (no deadlock/hang)", len(results6) == 2)
+chk("exactly one call won and created the contract", len(winners6) == 1)
+chk("exactly one call lost", len(losers6) == 1)
+if losers6:
+    loser6 = losers6[0]
+    chk(
+        "the loser waited for the winner's contract instead of reporting a "
+        "false 'load too high' exhaustion failure",
+        loser6.failure_code != "persistence_lookup_failed",
+    )
+    chk(
+        "the loser's response correctly points at the winner's own "
+        "contract_id (real dedup, not a generic failure)",
+        winners6 and loser6.contract_id == winners6[0].contract_id,
+    )
+chk(
+    f"total race time (~{_elapsed6:.2f}s) is bounded by the winner's single "
+    f"save() delay ({_save_delay_seconds}s), not multiplied by retries",
+    _elapsed6 < _save_delay_seconds + 1.0,
+)
+
+
 print()
 print("=" * 50)
 print(f"BUG-157 (atomic fingerprint claim) tests: {passed} passed, {failed} failed")

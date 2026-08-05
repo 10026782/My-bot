@@ -144,21 +144,70 @@ applies: yes — נוגע ב-`ActionContract` lifecycle (יצירת contract). *
 `GatewayResult` הם מקור האמת היחיד. ה-claim הוא מנגנון concurrency-safety
 פנימי בתוך שכבה 4, לא evidence/status claim כלפי המשתמש.
 
+## עדכון (05/08/2026) — סבב ביקורת שני של CodeRabbit: המתנה ל-claim משתחרר
+
+**רקע:** PR #552 (הגרסה המקורית של תיקון זה — retry ללא המתנה) מוזג
+ל-`main` (`c5dbe86`). בסבב ביקורת שני על אותו PR, **אחרי** המיזוג,
+CodeRabbit העלה ממצא Major נוסף שלא הספיק להיכלל ב-#552: ה-retry loop
+היה "מפסיד → lookup טרי מייד" ללא שום המתנה. תחת `FEATURE_ACTION_
+CONTRACT_PERSISTENCE=on` (כתיבה עמידה אמיתית עם latency לא-טריוויאלי
+ב-`save()`), מפסיד יכול היה למצות את כל 5 ניסיונות ה-retry בזמן
+שהמנצח עדיין באמצע כתיבה ל-repository, ולקבל תגובת כשל "עומס גבוה"
+שגויה — במקום להמתין ולקבל את תגובת ה-dedup הנכונה מול ה-contract
+שהמנצח בפועל יצר. **זהו PR נפרד חדש** (לא #552 שנסגר עם המיזוג) —
+אושר במפורש ע"י ה-owner להמשך יישום.
+
+### התיקון הנוסף
+
+1. **`ExecutionLedger`**: `self._claim_released_condition =
+   threading.Condition(self._lock)` — Condition על אותו lock קיים, לא
+   מנגנון נעילה נפרד.
+2. **`claim_fingerprint_cas(fingerprint, expected_contract_id, *,
+   wait_timeout: float = 0.0)`** — פרמטר חדש, ברירת מחדל `0.0`
+   (התנהגות זהה למקור אם לא מועבר במפורש). אם ה-claim נכשל **ספציפית**
+   כי claim מתחרה כרגע בתהליך (לא כי `_by_fingerprint` כבר מצביע על
+   מצב סופי שונה — שם המתנה לא עוזרת) — ממתין עד `wait_timeout` שניות
+   ל-`notify_all()` מ-`release_fingerprint_claim()`/`_cache_contract()`,
+   בודק מחדש, חוזר עד שה-timeout חולף.
+3. **`propose_action()`**: `_CLAIM_TOTAL_WAIT_BUDGET_SECONDS = 2.0` —
+   תקציב המתנה **כולל** (לא per-attempt) על פני כל 5 הניסיונות יחד;
+   מחושב `deadline` פעם אחת לפני הלולאה, וכל ניסיון מעביר את הזמן
+   שנותר (`wait_timeout=_remaining_wait`, יורד עם כל סיבוב). בתנאי
+   ללא-race — ההמתנה אף פעם לא מופעלת בפועל (ה-claim תמיד מצליח
+   בניסיון הראשון, `wait_timeout` לא נוגע).
+
+### בדיקה חדשה — section 6 ב-`test_bug157_atomic_fingerprint_claim.py`
+
+מדמה `save()` איטי (delay מלאכותי 0.5s, מונקי-פאץ' על ה-instance
+`ledger.save`) עם 2 threads מקבילים על אותו fingerprint. מוודא:
+- שני הקריאות חוזרות (אין deadlock/תקיעה).
+- המפסיד מקבל את ה-contract_id **של המנצח** (dedup אמיתי), **לא**
+  `failure_code="persistence_lookup_failed"`.
+- הזמן הכולל של המרוץ חסום ע"י delay ה-save היחיד של המנצח (~0.5s),
+  לא מוכפל ע"י ניסיונות retry חוזרים.
+
+24/24 (היה 18/18) — 6 בדיקות חדשות, כל הקיימות ללא שינוי-אחורה.
+
 ## Verification
 
 - `python3 -m py_compile core/action_gateway.py`
-- `python3 test_bug157_atomic_fingerprint_claim.py` (חדש — כולל threading
-  אמיתי, לא רק mock)
+- `python3 test_bug157_atomic_fingerprint_claim.py` — 24/24 (כולל
+  section 6 החדש, threading אמיתי לא רק mock)
 - `python3 test_action_gateway.py` — 43/43, ללא שינוי
 - `python3 test_business_action_fingerprint_normalization.py` — 8/8, ללא שינוי
 - `python3 test_bug153_create_task_reconfirmation_after_rejection.py` — 16/16, ללא שינוי
 - `python3 test_bug155_ttl_expiry_contract_id_lookup.py` — 5/5, ללא שינוי
 - `python3 test_bug156_due_time_note_and_fingerprint_exclusion.py` — 11/11, ללא שינוי
+- `python3 test_first_pending_notification_failure_suppression.py` — 14/14, ללא שינוי
 - `python3 core/router/test_router.py` — 44/44, ללא שינוי
 - `python3 smoke_tests.py` / `test_integration.py` — ירוק
 
 ## סטטוס
 
-עיצוב אושר ע"י owner (04/08/2026 AskUserQuestion — "Leave it for a
-separate PR"; זהו אותו PR). קוד מומש ונבדק מקומית. **לא מוזג, לא
-deployed, לא verified בפרודקשן.**
+**חלק 1 (retry loop בסיסי, ללא המתנה):** מוזג ל-`main` ב-PR #552
+(`c5dbe86`), 05/08/2026. **Production-verified: לא בוצע** (אין עדיין
+הוכחת deploy+prod evidence לפי כלל הברזל).
+
+**חלק 2 (המתנה ל-claim משתחרר, מסמך זה):** עיצוב אושר ע"י owner
+(05/08/2026). קוד מומש ונבדק מקומית (24/24). **לא מוזג (PR נפרד חדש,
+טרם נפתח בזמן כתיבת שורות אלו), לא deployed, לא verified בפרודקשן.**

@@ -568,16 +568,24 @@ class ExecutionLedger:
         # הקיימת, ולא מקור אמת חדש למחזור החיים.
         self._by_user: dict[str, dict[str, ActionContract]] = {}
         self._lock = threading.Lock()
-        # BUG-157: fingerprints "claimed" by a proposer that has passed the
-        # existing-contract dedup check but not yet completed save() — closes
-        # the race where two threads in the same process (e.g. scheduler.py's
-        # background thread calling propose_action() via lead_recovery.py/
-        # followup_engine.py, concurrently with the main request thread) both
-        # see "no blocking existing contract" before either has saved, and
-        # both create a live contract for the identical business fingerprint.
-        # See claim_fingerprint_cas()/release_fingerprint_claim() and
-        # docs/architecture/action-gateway/BUG-157_ATOMIC_FINGERPRINT_CLAIM_20260805.md.
+        # BUG-157: fingerprints ש"נתפסו" ע"י proposer שעבר את בדיקת ה-dedup
+        # מול contract קיים אך טרם השלים save() — סוגר את ה-race שבו שתי
+        # thread באותו process (למשל ה-thread הרקעי של scheduler.py, שקורא
+        # ל-propose_action() דרך lead_recovery.py/followup_engine.py, במקביל
+        # ל-thread הראשי שמטפל בבקשה) שתיהן רואות "אין contract קיים חוסם"
+        # לפני ששתיהן סיימו save(), וכל אחת יוצרת contract חי לאותו
+        # fingerprint עסקי. ראה claim_fingerprint_cas()/release_fingerprint_
+        # claim() ו-docs/architecture/action-gateway/
+        # BUG-157_ATOMIC_FINGERPRINT_CLAIM_20260805.md.
         self._claimed_fingerprints: set[str] = set()
+        # Condition על אותו self._lock (לא lock נפרד) — מאפשר ל-claim
+        # שהפסיד ב-race להמתין (עם timeout חסום) עד ש-claim מתחרה משתחרר,
+        # במקום לנסות שוב מייד. חיוני כש-save() כולל I/O עמיד אמיתי
+        # (FEATURE_ACTION_CONTRACT_PERSISTENCE=on): בלי המתנה, מפסיד יכול
+        # למצות את כל ניסיונות ה-retry בזמן שהמנצח עדיין באמצע כתיבה
+        # ל-repository, ולקבל כשל "עומס גבוה" שגוי במקום להמתין ולראות
+        # את ה-contract שהמנצח באמת יצר.
+        self._claim_released_condition = threading.Condition(self._lock)
         self._airtable_writer = airtable_writer        # callable(contract) → None — legacy best-effort mirror (Phase 4A)
         # ActionContractRepository | None. When set, reads recover through it
         # and lifecycle updates persist there before the RAM cache changes.
@@ -586,46 +594,56 @@ class ExecutionLedger:
 
     def claim_fingerprint_cas(
         self, fingerprint: str, expected_contract_id: str | None,
+        *, wait_timeout: float = 0.0,
     ) -> bool:
-        """BUG-157: atomic compare-and-set claim on a business fingerprint.
+        """BUG-157: atomic compare-and-set claim על fingerprint עסקי.
 
-        `expected_contract_id` is the contract_id the caller's own prior
-        find_by_fingerprint() call observed for this fingerprint (or None if
-        it observed no contract at all). Returns True — claim granted, the
-        caller now owns this fingerprint and MUST follow up with exactly one
-        of save() (via _cache_contract(), which releases the claim
-        automatically) or release_fingerprint_claim() — only if BOTH:
-          1. _by_fingerprint[fingerprint] is still exactly what the caller
-             observed (nothing else has completed a save() for this
-             fingerprint since), and
-          2. no other proposer's claim on this exact fingerprint is already
-             in flight.
-        Returns False (race lost) otherwise — the caller must re-run its
-        lookup and react to the now-current state, never proceed to save()
-        as if this were still "no existing contract."
+        `expected_contract_id` הוא ה-contract_id שקריאת find_by_fingerprint()
+        הקודמת של הקורא ראתה עבור fingerprint זה (או None אם לא נראה שום
+        contract). מחזיר True — claim הוענק, הקורא כעת בעלים של ה-fingerprint
+        הזה וחייב להמשיך עם אחד משני: save() (דרך _cache_contract(), שמשחרר
+        את ה-claim אוטומטית) או release_fingerprint_claim() — רק אם:
+          1. _by_fingerprint[fingerprint] עדיין בדיוק מה שהקורא ראה (שום דבר
+             אחר לא השלים save() ל-fingerprint הזה מאז), וגם
+          2. אין claim מתחרה שכבר בתהליך על אותו fingerprint בדיוק.
+
+        `wait_timeout`: אם ה-claim נכשל **ספציפית** כי claim מתחרה כרגע
+        בתהליך (לא כי _by_fingerprint כבר הצביע על משהו שונה ממה שהקורא
+        ציפה — שם המתנה לא עוזרת, כי המצב כבר סופי ושונה, וצריך lookup טרי)
+        — ממתין עד `wait_timeout` שניות ל-claim המתחרה שישוחרר, בודק מחדש,
+        וחוזר על עצמו עד שה-timeout חולף. מחזיר False אם התנאי לא התקיים
+        עד שה-timeout חולף, או אם ה-lookup חוזר מיד עם "מצב שונה סופית".
         """
-        with self._lock:
-            current_cid = self._by_fingerprint.get(fingerprint)
-            if current_cid != expected_contract_id:
-                return False
-            if fingerprint in self._claimed_fingerprints:
-                return False
-            self._claimed_fingerprints.add(fingerprint)
-            return True
+        deadline = time.monotonic() + wait_timeout
+        with self._claim_released_condition:
+            while True:
+                current_cid = self._by_fingerprint.get(fingerprint)
+                if current_cid != expected_contract_id:
+                    return False
+                if fingerprint not in self._claimed_fingerprints:
+                    self._claimed_fingerprints.add(fingerprint)
+                    return True
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self._claim_released_condition.wait(timeout=remaining)
 
     def release_fingerprint_claim(self, fingerprint: str) -> None:
-        """Releases a claim_fingerprint_cas() reservation without a save() —
-        used when the proposal attempt aborts after claiming (e.g. a
-        persistence failure). Idempotent (safe even if already released by
-        _cache_contract() or a prior call)."""
-        with self._lock:
+        """משחרר claim_fingerprint_cas() reservation בלי save() — למקרה
+        שניסיון ה-proposal מבוטל אחרי ה-claim (למשל כשל persistence).
+        Idempotent (בטוח גם אם כבר שוחרר ע"י _cache_contract() או קריאה
+        קודמת). מעיר (notify_all) כל claim_fingerprint_cas() שממתין
+        ל-fingerprint הזה."""
+        with self._claim_released_condition:
             self._claimed_fingerprints.discard(fingerprint)
+            self._claim_released_condition.notify_all()
 
     def _cache_contract(self, contract: ActionContract) -> None:
-        with self._lock:
+        with self._claim_released_condition:
             self._store[contract.contract_id] = contract
             self._by_fingerprint[contract.business_action_fingerprint] = contract.contract_id
             self._claimed_fingerprints.discard(contract.business_action_fingerprint)
+            self._claim_released_condition.notify_all()
             self._by_user.setdefault(contract.canonical_user_id, {})[
                 contract.contract_id
             ] = contract
@@ -1526,7 +1544,17 @@ class ActionGateway:
         # contention on one exact business fingerprint is not an expected
         # real workload. See docs/architecture/action-gateway/
         # BUG-157_ATOMIC_FINGERPRINT_CLAIM_20260805.md.
+        #
+        # BUG-157 המשך (סבב ביקורת שני של CodeRabbit): ניסיון שהפסיד ב-race
+        # אסור שיחזור מייד ל-lookup וימצה את _CLAIM_MAX_ATTEMPTS בזמן
+        # שהמנצח עדיין באמצע save() — רלוונטי במיוחד כש-FEATURE_ACTION_
+        # CONTRACT_PERSISTENCE מופעל ו-save() מבצע I/O עמיד אמיתי עם
+        # latency לא-טריוויאלי. _CLAIM_TOTAL_WAIT_BUDGET_SECONDS הוא תקציב
+        # ההמתנה ה-**כולל** לשחרור claim מתחרה על פני כל הניסיונות (לא
+        # per-attempt) — יורד עם כל ניסיון כדי שהלולאה עדיין תסתיים מהר.
         _CLAIM_MAX_ATTEMPTS = 5
+        _CLAIM_TOTAL_WAIT_BUDGET_SECONDS = 2.0
+        _claim_wait_deadline = time.monotonic() + _CLAIM_TOTAL_WAIT_BUDGET_SECONDS
         existing: ActionContract | None = None
         for _claim_attempt in range(_CLAIM_MAX_ATTEMPTS):
             # The durable lookup happens before generating any contract
@@ -1601,7 +1629,10 @@ class ActionGateway:
                     )
 
             expected_prior_contract_id = existing.contract_id if existing else None
-            if self._ledger.claim_fingerprint_cas(fingerprint, expected_prior_contract_id):
+            _remaining_wait = max(0.0, _claim_wait_deadline - time.monotonic())
+            if self._ledger.claim_fingerprint_cas(
+                fingerprint, expected_prior_contract_id, wait_timeout=_remaining_wait,
+            ):
                 break
             logger.info(
                 "[ActionGateway] BUG-157 fingerprint claim race lost "
