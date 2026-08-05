@@ -3820,10 +3820,49 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 
 ---
 
+## BUG-157 — propose_action() אינו אטומי סביב fingerprint lookup+save (concurrency)
+
+- **דווח:** 04/08/2026, ע"י ביקורת CodeRabbit על PR #550 (לא תרחיש production
+  שנצפה בפועל)
+- **סביבה:** לא רלוונטי — ממצא סטטי מבוסס-קוד, לא production incident
+- **מסך / מודול:** `core/action_gateway.py::ActionGateway.propose_action()`
+  (שורות 1498-1526 בזמן הביקורת)
+- **תיאור:** `propose_action()` מבצע `find_by_fingerprint()` ואז `save()`
+  כשני צעדים נפרדים, ללא atomic uniqueness constraint ברמת ה-DB.
+  תיאורטית, שתי בקשות **מקבילות באמת** עם אותו fingerprint עסקי יכולות
+  כל אחת ליצור contract pending משלה לאותה זהות עסקית.
+- **Root Cause:** תבנית check-then-act לא-אטומית ב-`propose_action()` —
+  קיימת עבור **כל** יצירת contract חדש, לא רק ל-carve-out החדש של BUG-153.
+  `ActionContractRepository` לא מספק שום compare-and-set/unique-constraint
+  ברמת האחסון.
+- **אומת (04/08/2026):** זה **לא** תרחיש שדווח מ-production — אומת סטטית
+  מקריאת קוד בלבד. `gunicorn.conf.py` נועל `workers = 1` ללא override
+  ל-`threads`/`worker_class` (מתועד שם במפורש כדי לשמור על in-process
+  state יחיד, כמו ה-scheduler) — Flask מטפל בבקשה אחת בזמן נתון, בסינכרון
+  מלא, תחת ה-deployment הנוכחי. שתי קריאות `propose_action()` מקבילות
+  באמת **אינן אפשריות** מבנית תחת התצורה הנוכחית. הסיכון הוא **latent**
+  — הופך אמיתי רק אם workers/threads יורחבו אי-פעם בלי טיפול מקביל בבאג הזה.
+- **Severity:** גבוהה (לפי CodeRabbit — "Major"), אך לא-נגישה כרגע
+  (currently unreachable) תחת ה-deployment הקיים.
+- **החלטת owner (04/08/2026, AskUserQuestion):** להשאיר ל-PR נפרד — לא
+  לתקן בתוך PR #550 (בג-פיקס ממוקד). דורש עיצוב עצמאי (atomic DB
+  constraint או lock ב-`ActionContractRepository`) + Cross-Layer Impact
+  Matrix מלא לפי `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` (נוגע ישירות
+  בשכבה 4 — Durable Atomic Approval).
+- **דרישת תיקון (לPR עתידי):** atomic fingerprint claim — או
+  serialize של ה-lookup+save, או compare-and-set/unique constraint אמיתי
+  ב-`ActionContractRepository`, כולל טיפול נכון ב"הפסיד" של הבקשה
+  המקבילה (reuse/return של ה-contract הקיים, לא duplicate).
+- **תגובה ב-PR:** https://github.com/10026782/My-bot/pull/550#issuecomment-5189294142
+- **סטטוס:** 🔴 נרשם, לא תוקן — ממתין ל-PR נפרד + עיצוב
+
+---
+
 ## סדר עדיפות מומלץ לתיקונים
 
-1. **BUG-155** — TTL expiry משאיר pending חי (קריטי)
-2. **BUG-153** — create חדש אחרי rejection נחסם (גבוה)
-3. **BUG-154** — parser crash בניסוח "ל־תאריך" (גבוה)
-4. **BUG-156** — שעה אינה נשמרת (בינוני-גבוה)
-5. **בדיקת suppression fallback** — דורשת fault injection (medium)
+1. **BUG-155** — TTL expiry משאיר pending חי (קריטי) — 🟡 קוד תוקן
+2. **BUG-153** — create חדש אחרי rejection נחסם (גבוה) — 🟡 קוד תוקן
+3. **BUG-154** — parser crash בניסוח "ל־תאריך" (גבוה) — 🟡 קוד תוקן
+4. **BUG-156** — שעה אינה נשמרת (בינוני-גבוה) — 🟡 קוד תוקן
+5. **בדיקת suppression fallback** — ✅ נסגר, 04/08/2026 (לא נדרש fault injection)
+6. **BUG-157** — `propose_action()` לא-אטומי (concurrency, latent) — 🔴 לPR נפרד
