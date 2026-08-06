@@ -4,6 +4,38 @@ All notable repository-level changes should be recorded here.
 
 ## Unreleased
 
+- **PR #552 — BUG-157: atomic fingerprint claim in `ActionGateway.propose_action()`**
+  (`core/action_gateway.py`; documentation:
+  `docs/architecture/action-gateway/BUG-157_ATOMIC_FINGERPRINT_CLAIM_20260805.md`)
+  — `propose_action()` performed fingerprint lookup and save as two
+  non-atomic steps; a scheduler-thread caller (`lead_recovery.py`/
+  `followup_engine.py`) racing a webhook-thread caller on the same business
+  fingerprint could each create their own pending contract. Fixed with a new
+  compare-and-set (`claim_fingerprint_cas`/`release_fingerprint_claim`) under
+  the existing `ExecutionLedger._lock`, with a bounded retry loop on claim
+  loss. No behavior change under single-caller (the common case). 18/18 new
+  tests including an 8-thread barrier race. **Not flag-gated** — merged to
+  `main`, not yet deployed or production-verified.
+- **PR #550 — BUG-153/154/155/156: PR #546 staging validation fixes**
+  (`core/router/router.py`, `core/action_gateway.py`, `app.py`; four
+  documentation files under `docs/architecture/action-gateway/`) — four bugs
+  found during PR #546 staging validation (03/08/2026), fixed the same day:
+  explicit `create_task` retry after rejection now opens a new contract
+  instead of being blocked as replay (BUG-153); `date_marker.start()` guarded
+  against `None`, supporting "ל-\<date\>" phrasing without crashing (BUG-154);
+  TTL-expired callback now looks up the `ActionContract` by `contract_id`
+  instead of a recomputed fingerprint (BUG-155); `due_time` excluded from the
+  `create_task` business-identity fingerprint and the user is now told the
+  time wasn't saved, Option B (BUG-156). All four fixes touch the same
+  unflagged, always-on `parse_deterministic_create_task()` routing path.
+  **Not flag-gated** — merged to `main`, not yet deployed or
+  production-verified.
+- **PR #549 — docs: clarify explicit retry versus rejected replay**
+  (`CHANGELOG.md`,
+  `DETERMINISTIC_TASK_ROUTING_AND_REPLAY_POLICY_20260802.md`) —
+  documentation-only follow-up distinguishing an explicit new create request
+  (should get a new approval attempt) from autonomous replay of an already-
+  rejected contract (must remain blocked).
 - **PR #546 follow-up — deterministic task routing and replay policy**
   (`core/router/router.py`, `core/action_gateway.py`, `app.py`; documentation:
   `docs/architecture/action-gateway/DETERMINISTIC_TASK_ROUTING_AND_REPLAY_POLICY_20260802.md`)
