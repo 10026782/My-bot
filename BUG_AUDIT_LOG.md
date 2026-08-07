@@ -3734,11 +3734,29 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
   (כדי להפעיל את ה-fingerprint-recompute שהיה שגוי), שה-Telegram inline
   button שלה פג בחלון ה-10-30-דקות הספציפי (log line `TTL-expired
   Telegram callback`), לא חלון ה-30-דקות של EventBus.
-- **Verified בפרודקשן:** לא (התרחיש הספציפי של הבאג הזה — `TTL-expired
-  Telegram callback` על משימה עם שעה — עדיין לא נבדק ישירות; ראו תיקון
-  תיוג-הראיות למעלה)
-- **סטטוס:** 🟡 מוזג ל-`main` + deployed (עקיף/ancestor) — **production
-  verification ישיר לתרחיש הזה עדיין לא בוצע**
+- **Verified בפרודקשן (07/08/2026 15:03, owner, `my-bot-approval-staging`
+  Render logs) — התרחיש הנכון הפעם:** ✅ **כן.** לחיצת ✅ (approve, לא
+  ❌) יותר מ-10 דקות אחרי יצירת המשימה — בדיוק התנאי ב-`app.py:2680`
+  (`if _age_seconds > _PENDING_APPROVAL_TTL`) שקורא בפועל ל-
+  `_reject_stale_telegram_approval()`. הלוג:
+  ```
+  [ActionGateway] rejected: contract=123fc26c-412e-4415-9637-ff3d4bd54728
+  tool=airtable_add by=ttl_expired
+  [Approval] TTL-expired Telegram callback: action_id=f090cc12
+  tool=airtable_add — not executed
+  ```
+  **אומת בקוד (07/08/2026):** `rejected_by="ttl_expired"` מופיע במקום
+  **יחיד** בכל הריפו (`app.py:2317`) — בתוך הענף שמשתמש ב-
+  `stored_contract_id` ל-`find_by_id()` ישיר (השורות 2295-2307,
+  ה-branch שהתיקון של BUG-155 הוסיף), **לא** בענף ה-fallback של
+  fingerprint-recompute (שמופעל רק `if not stored_contract_id`). כלומר
+  הלוג הזה לא יכול להיווצר אלא דרך הנתיב המתוקן בדיוק. ה-contract
+  אכן נמצא (`status=pending` לפני), עבר `reject()`, ואומת שוב כ-
+  `rejected` — לא נשאר תקוע `pending` כמו בהתנהגות המקורית של הבאג.
+- **סטטוס:** ✅ **VERIFIED IN PROD** — merged (`e26de4a`→`44fe0fb`) +
+  deployed (Render, 07/08/2026 11:34) + production-verified (owner,
+  07/08/2026 15:03, לוג אמיתי מצוטט למעלה, אומת מול הקוד כתואם לנתיב
+  המתוקן ולא ל-fallback)
 
 ---
 
@@ -4380,20 +4398,24 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
 BUG-155 (`_reject_stale_telegram_approval()`'s contract_id lookup);
 BUG-157 (concurrency race) עדיין רק test-evidence, לא production.
 
-### PR #546 — סטטוס closure מתוקן (07/08/2026)
+### PR #546 — סטטוס closure מתוקן (07/08/2026, עודכן שוב 15:03)
 
-**לא "CLOSED / VERIFIED" גורף** כפי שהוצע — 5 מתוך 7 הבאגים+ה-invariants
-המרכזיים אכן VERIFIED IN PROD (153, 154, 156, 158, 159, וגם duplicate-
-suppression + deterministic-routing-ללא-Agent שנצפו בכל אחת מהבדיקות
-החיות). BUG-155 ו-BUG-157 נשארים 🟡 deployed-בלבד — לא בגלל שלא נוסה
-לב, אלא כי הראיה שסופקה ל-BUG-155 בפועל שייכת ל-BUG-158 (ראו התיקון
-המפורש בבלוק של BUG-155). **בנוסף**, אימות ה-production הזה עצמו חשף
-3 באגים חדשים (BUG-160/161/162, למטה) בנתיב ה-fallback ל-Agent — לא
-חלק מ-#546 המקורי, אך מספיק קרובים ארכיטקטונית (אותו turn/reply-
-ownership contract) שסגירה "סופית" ראויה להמתין לפחות להכרעת owner על
-BUG-161 (מדיניות reconfirmation ב-Agent path).
+**כמעט "CLOSED / VERIFIED" — 6 מתוך 7 הבאגים+ה-invariants המרכזיים כן
+VERIFIED IN PROD** (153, 154, 155, 156, 158, 159, וגם duplicate-suppression
++ deterministic-routing-ללא-Agent שנצפו בכל אחת מהבדיקות החיות). BUG-155
+נדרשה עוד סבב אחד: הראיה הראשונה שסופקה (13:24) הייתה בפועל אותה ראיה
+של BUG-158 (ראו התיקון המפורש בבלוק של BUG-155); הראיה השנייה (15:03,
+לחיצת ✅ אחרי >10 דק') כן פגעה בדיוק ב-`_reject_stale_telegram_approval()`
+— אומת מול הקוד (`rejected_by="ttl_expired"` ייחודי בריפו לנתיב המתוקן)
+— **BUG-155 עכשיו VERIFIED IN PROD.** **BUG-157 בלבד נשאר 🟡**
+deployed-בלבד — race מקביל, אין ערך מעשי בניסיון שחזור ידני, test
+evidence (34/34) נחשב closure evidence מספק. **בנוסף**, אימות ה-
+production הזה עצמו חשף 3 באגים חדשים (BUG-160/161/162, למטה) בנתיב
+ה-fallback ל-Agent — לא חלק מ-#546 המקורי, אך מספיק קרובים ארכיטקטונית
+(אותו turn/reply-ownership contract) שסגירה "סופית" ראויה להמתין
+לפחות להכרעת owner על BUG-161 (מדיניות reconfirmation ב-Agent path).
 
-1. **BUG-155** — TTL expiry משאיר pending חי (קריטי) — ✅ מוזג + deployed ל-main (PR #550), **Verified בפרודקשן: לא (ראו תיקון תיוג-ראיות)**
+1. **BUG-155** — TTL expiry משאיר pending חי (קריטי) — ✅ מוזג + deployed + **VERIFIED IN PROD** (PR #550)
 2. **BUG-153** — create חדש אחרי rejection נחסם (גבוה) — ✅ מוזג + deployed + **VERIFIED IN PROD** (PR #550)
 3. **BUG-154** — parser crash בניסוח "ל־תאריך" (גבוה) — ✅ מוזג + deployed + **VERIFIED IN PROD** (PR #550)
 4. **BUG-156** — שעה אינה נשמרת (בינוני-גבוה) — ✅ מוזג + deployed + **VERIFIED IN PROD** (PR #550)
