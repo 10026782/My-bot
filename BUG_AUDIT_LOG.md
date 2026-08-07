@@ -4358,9 +4358,37 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
   ל-`route_request()`/`queue_task_request()`), **או** (2) להחזיר
   תשובה אמיתית שאין אישור ממתין — **לא** לנסח הזמנה ל"אשר בבירור" ולא
   לדמות reconfirmation semantics שה-runtime לא תומך בהם בפועל.
-- **סטטוס:** 🟡 root cause מאומת + **מדיניות הוכרעה** — ממתין למימוש קוד
-  (Cross-Layer Impact Matrix נדרש, נוגע ישירות ל-TurnCoordinator/Agent
-  boundary לפי `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`).
+- **Cross-Layer Impact Matrix הושלם (07/08/2026):**
+  `docs/architecture/action-gateway/BUG-161_162_163_TURN_COORDINATOR_
+  FALLBACK_AUTHORITY_PLANNING_GATE_20260807.md` — נכתב יחד עם BUG-162/163
+  לפי בקשת ה-owner ("כאן ממילא פותחים אותה אז אל תשכח את שלושתם"). שכבה 2
+  (TurnCoordinator) touched directly; שכבה 4 (Durable Atomic Approval)
+  touched indirectly (תלות סמנטית חדשה, לא code coupling — מתועדת
+  במפורש); שכבות 1/3 not touched (grep=0 מאומת). RP5 guard: applies=yes,
+  מנגנון-קיים בלבד (STATIC_MANIFEST honesty rules, לא classifier חדש).
+- **מומש חלקית (07/08/2026) — רק החלק שאינו תלוי ב-BUG-162:** נוסף כלל-
+  כנות חדש ב-`core_knowledge.py`'s `STATIC_MANIFEST` (אותו בלוק "חוקי
+  כנות" שכבר מכיל את הכלל הקיים על אישור-Telegram-בלבד): מניעה **מראש**
+  של Agent מלהציע "אשר בבירור"/reconfirmation בטקסט חופשי לפעולה שכבר
+  נדחתה. **למה ברמת prompt ולא regex/classifier:** ה"הבטחה" היא טקסט
+  חופשי לפני כל tool_use — בדיוק קטגוריית-הבעיה שכבר נחקרה ונדחתה
+  ב-BUG-126/BUG-127C ("A32/regex הוא כנראה השכבה הלא-נכונה"). ה-backstop
+  הדטרמיניסטי הקיים (`core/action_gateway.py:1622-1643`, חוסם
+  `trusted_source != "deterministic_create_task"` נגד fingerprint שנדחה)
+  **לא שונה** — אומת ישירות שהוא עדיין אמיתי ולא-ממציא
+  ("יצירת המשימה כבר בוטלה", `reply_owner=gateway`).
+- **המגבלה שנשארת (למה עדיין 🟡, לא ✅):** `reply_owner=gateway` על
+  תוצאת ה-block הזו הוא **shadow-בלבד** (זהה ל-BUG-162) — אין אכיפה
+  שמונעת מה-Agent "לדבר" סביב תוצאת tool_use גם אחרי שכלל-הכנות מנסה
+  למנוע את ההבטחה **מראש**. סגירה מלאה של BUG-161 תלויה במנגנון-
+  enforcement של BUG-162.
+- **בדיקות:** `test_bug161_agent_no_reconfirmation_promise.py` (חדש,
+  7/7) — מאמת מיקום/ניסוח הכלל בפרומפט **וגם** את תקינות ה-Gateway
+  backstop (`build_approval_lifecycle_result`) שהכלל נשען עליו, כ-cross-
+  layer test מפורש בין שכבה 2 לשכבה 4.
+- **סטטוס:** 🟡 CODE DONE (חלקית — מניעה ברמת prompt בלבד), **לא**
+  VERIFIED — תלוי בהכרעת-enforcement של BUG-162 לסגירה מלאה. לא נדחף/
+  נפרס עדיין.
 
 ---
 
@@ -4415,9 +4443,17 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
   redirect אוטומטי לגייטווי?). זו עדיין החלטת ארכיטקטורה נפרדת,
   ספציפית, שדורשת Cross-Layer Impact Matrix משלה לפני מימוש —
   ה-direction אינו תחליף למנגנון.
+- **Cross-Layer Impact Matrix (planning-level, 07/08/2026):** מולא יחד
+  עם BUG-161/163 ב-`docs/architecture/action-gateway/BUG-161_162_163_
+  TURN_COORDINATOR_FALLBACK_AUTHORITY_PLANNING_GATE_20260807.md` — אך
+  **אין קוד runtime** שנכתב עבור BUG-162 עצמו בסבב הזה. חשוב: מטריצה
+  מלאה מסירה את חסם "אין מטריצה" (`CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`
+  §6), **אינה** תחליף להחלטת-owner המפורשת שעדיין חסרה (מנגנון ה-
+  enforcement הקונקרטי) — נשאר `PLANNING BLOCKED` על הסעיף הזה בלבד.
 - **סטטוס:** 🟡 root cause מאומת בקוד (shadow-only) + **כיוון מדיניות
-  ניתן** (BUG-161's decision מרחיב לכאן) — ממתין להכרעת enforcement
-  קונקרטית + Cross-Layer Impact Matrix לפני כל שינוי קוד.
+  ניתן** (BUG-161's decision מרחיב לכאן) + **Cross-Layer Impact Matrix
+  הושלם** — ממתין **רק** להכרעת-owner על מנגנון ה-enforcement הקונקרטי
+  (silence/clarify/redirect) לפני כל קוד.
 
 ---
 
@@ -4511,7 +4547,7 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
   (shadow-only, אין תיקון בטוח ברמת ה-regex, ממתין להחלטת owner על כיוון).
 - **סטטוס:** 🔴 (ירושה מ-BUG-126/BUG-127C) — לא שונה ע"י הממצא הזה.
 
-### BUG-163 (TC-02) — כיסוי intent חסר ל-complete_task/update_task בניסוחים טבעיים — 🔴 נרשם, root cause מאומת בקוד, לא תוקן
+### BUG-163 (TC-02) — כיסוי intent חסר ל-complete_task/update_task בניסוחים טבעיים — ✅ תוקן ומאומת (טרם deployed/verified בפרודקשן)
 
 - **דווח:** 07/08/2026, ע"י owner — נצפה תוך כדי אותה סבב בדיקות E2E
 - **סביבה:** Production — `my-bot-approval-staging`
@@ -4549,9 +4585,28 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
 - **תלות:** משלים את ממצא 1 — גם אחרי ש-PA-01 ייסגר וייתן `Handler.TOOL`
   ל-update/complete, בקשות שמלכתחילה מסווגות `intent=unknown` לא יגיעו
   לשם בכלל. תיקון BUG-163 נדרש **בנוסף**, לא כתחליף.
-- **סטטוס:** 🔴 נרשם, root cause מאומת בקוד (ניתוח regex ישיר מול שני
-  התרחישים שנצפו), לא תוקן. תיקון צר ומבודד ב-`intent_router.py` בלבד —
-  סיכון נמוך יחסית, דומה בהיקפו ל-BUG-159/160.
+- **תוקן (07/08/2026):** נוסף הפועל `השלם` לקבוצת-הפעלים הקיימת של
+  `COMPLETE_TASK` (verb-then-target, ללא שינוי מבני), ונוספה תבנית שנייה
+  נפרדת `(סמן|mark).{0,40}(משימ|טאסק|task).{0,20}(כבוצע|בוצעה|done|
+  complete)` — ממוקדת ל-"סמן"/"mark" בלבד כדי לא להתנגש עם `LIST_TASKS`
+  ("אילו משימות כבר בוצעו"). תיקון מוגבל ל-`core/router/intent_router.py`
+  בלבד, כפי שתוכנן — לא נוגע ב-`Handler`/routing logic (זה עדיין PA-01,
+  לא נסגר כאן).
+- **Cross-Layer Impact Matrix:** מולא ב-`docs/architecture/action-gateway/
+  BUG-161_162_163_TURN_COORDINATOR_FALLBACK_AUTHORITY_PLANNING_GATE_
+  20260807.md` (נכתב יחד עם BUG-161/162 לפי בקשת ה-owner) — שכבה 2
+  (TurnCoordinator, `intent_router.py` נצרך ישירות ע"י `router.py`)
+  touched directly; שכבות 1/3 not touched (grep=0 מאומת); שכבה 4 not
+  touched כלל (אין ActionContract/Gateway בסקופ).
+- **בדיקות:** `test_bug163_complete_task_intent_coverage.py` (חדש, 12/12
+  — כולל שני התרחישים המדויקים מהלוג, אי-שינוי ל-UPDATE_TASK/CREATE_TASK/
+  DELETE_TASK, ובדיקת אי-התנגשות מפורשת עם `LIST_TASKS`) +
+  `core/router/test_router.py` (44/44, ללא regression) + `smoke_tests.py`
+  (PASS).
+- **סטטוס:** ✅ CODE DONE, מאומת מקומית (טסטים חדשים + regression מלא) —
+  **לא** נדחף/נפרס עדיין (ראה EVIDENCE בסוף הבלוק "אימות Turn Coordinator
+  E2E" למעלה). לא VERIFIED IN PROD עד push+deploy+אימות production בפועל,
+  לפי כלל הברזל.
 
 ### TC-12 (duplicate callback) — לא באג, פער testability
 
@@ -4616,13 +4671,16 @@ production הזה עצמו חשף 3 באגים חדשים (BUG-160/161/162, למ
 9. **BUG-160** — מרכאה לא מאוזנת עוקפת את המסלול הדטרמיניסטי (גבוה) —
    🔴 נרשם, root cause מאומת בקוד, לא תוקן
 10. **BUG-161** — reconfirmation לא עקבי בין המסלול הדטרמיניסטי ל-Agent
-    (גבוה) — 🟡 root cause מאומת + **מדיניות owner הוכרעה** (07/08/2026,
-    ראו בלוק מלא למעלה), ממתין למימוש (Cross-Layer Impact Matrix נדרש)
+    (גבוה) — 🟡 **Cross-Layer Impact Matrix הושלם** + מומש חלקית
+    (`core_knowledge.py` honesty rule, מונע הבטחה מראש) — סגירה מלאה
+    תלויה בהכרעת-enforcement של BUG-162, ראו בלוק מלא למעלה
 11. **BUG-162** — הפרת turn-ownership: Agent מדבר ב-turn של gateway
-    (בינוני-גבוה) — 🟡 root cause מאומת (shadow-only) + **כיוון מדיניות
-    ניתן** (מרחיב מ-BUG-161), enforcement מנגנון עדיין לא הוכרע
+    (בינוני-גבוה) — 🟡 **Cross-Layer Impact Matrix הושלם**, אך `PLANNING
+    BLOCKED` על סעיף יחיד שנשאר: הכרעת-owner על מנגנון ה-enforcement
+    הקונקרטי (silence/clarify/redirect) — אין קוד runtime עדיין
 12. **BUG-163** — כיסוי intent חסר ל-complete_task/update_task ("השלם",
-    "סמן...כבוצע/ה") (גבוה) — 🔴 נרשם, root cause מאומת בקוד, לא תוקן
+    "סמן...כבוצע/ה") (גבוה) — ✅ **תוקן ומאומת** (12/12 טסטים חדשים,
+    44/44 regression) — טרם deployed/verified בפרודקשן
 
 **עדכון מסגור (07/08/2026, אימות Turn Coordinator E2E):** דוח בדיקות E2E
 נוסף (12 תרחישים על Update/Complete task) נבדק מול הקוד ושולב — ראו הבלוק
