@@ -3567,9 +3567,15 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
   (`status=pending`), בעוד ה-contract הישן (`2b5a0c55-...`) נשאר
   `rejected` — בדיוק ההתנהגות שהתיקון מבטיח: explicit reconfirmation
   נפתח, autonomous replay עדיין נחסם.
+- **אימות עצמאי שני (07/08/2026 13:58):** אותה תופעה שוחזרה בתרחיש נפרד —
+  `contract=389acb7a-df6f-43b6-afdf-d0a9ed547bbd` נדחה (13:58:21),
+  אותה בקשה נשלחה שוב, `fingerprint=ef2894380762` — אותו לוג "BUG-153
+  reconfirmation מפורש", contract חדש `35fae4fe-cc0e-4d42-9600-
+  5297406a505a` נפתח. שני מופעים עצמאיים, שני fingerprints שונים.
 - **סטטוס:** ✅ **VERIFIED IN PROD** — merged (`e26de4a`→`44fe0fb`) +
   deployed (Render, 07/08/2026 11:34) + production-verified (owner,
-  07/08/2026 14:23, לוג אמיתי מצוטט למעלה)
+  שני מופעים עצמאיים: 07/08/2026 13:58 ו-14:23, לוגים אמיתיים מצוטטים
+  למעלה)
 
 ---
 
@@ -3623,12 +3629,19 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
   שינוי), `smoke_tests.py`, `test_integration.py` (4/4) — כולם ירוקים.
 - **Merged:** ✅ כן — PR #550, מוזג ל-`origin/main` (`e26de4a`) (עודכן
   07/08/2026)
-- **Deployed:** ✅ כן (עקיף) — Render: "Deploy live for `44fe0fb`"
-  (07/08/2026, 11:34); `e26de4a` הוא ancestor מאומת — **לא נבדק ישירות
-  בפרודקשן בסבב האימות הזה**
-- **Verified בפרודקשן:** לא (התרחיש הספציפי לא נבדק ישירות)
-- **סטטוס:** 🟡 מוזג ל-`main` + deployed (עקיף/ancestor) — **production
-  verification ישיר לתרחיש הזה עדיין לא בוצע**
+- **Deployed:** ✅ כן — Render: "Deploy live for `44fe0fb`" (07/08/2026,
+  11:34); `e26de4a` הוא ancestor מאומת.
+- **Verified בפרודקשן (07/08/2026 13:59, owner, `my-bot-approval-staging`
+  Render logs):** ✅ **כן.** נשלח "צור משימה בדיקת 154 ל־12/8/26" — בדיוק
+  הצורה שגרמה במקור ל-`AttributeError` (מרקר "ל־" בלי "עד", עם תבנית
+  תאריך `12/8/26`). הלוג: `intent=create_task risk=needs_approval
+  handler=tool`, ActionContract חדש נוצר (`56e0a99a-ff29-41f7-a1a2-
+  026bcfa336de`, `status=pending`), ו-`[DeterministicCreateTask]
+  agent_calls=0 created_this_turn=True reply_owner=gateway` — אין
+  exception, אין נפילה ל-fallback כללי.
+- **סטטוס:** ✅ **VERIFIED IN PROD** — merged (`e26de4a`→`44fe0fb`) +
+  deployed (Render, 07/08/2026 11:34) + production-verified (owner,
+  07/08/2026 13:59, לוג אמיתי מצוטט למעלה)
 
 ---
 
@@ -3701,15 +3714,31 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **Merged:** ✅ כן — PR #550, מוזג ל-`origin/main` (`e26de4a`) (עודכן
   07/08/2026)
 - **Deployed:** ✅ כן (עקיף) — Render: "Deploy live for `44fe0fb`"
-  (07/08/2026, 11:34); `e26de4a` הוא ancestor מאומת — **לא נבדק ישירות
-  בפרודקשן בסבב האימות הזה** (הבדיקה שכן בוצעה, 07/08 13:24, עברה דרך
-  מסלול BUG-158 — item שפג לגמרי מ-EventBus, לא ה-10-30-דקות window
-  הספציפי ש-BUG-155 מטפל בו)
-- **Verified בפרודקשן:** לא (התרחיש הספציפי של הבאג הזה לא נבדק ישירות)
+  (07/08/2026, 11:34); `e26de4a` הוא ancestor מאומת.
+- **⚠️ תיקון תיוג-ראיות (07/08/2026, אחרי דוח closure של ה-owner):** דוח
+  ה-closure שהעביר ה-owner ל-#546 ייחס ל-BUG-155 את הלוג של 13:24
+  (`contract=ab02671f...`, `Pending action expired at pop`, `BUG-158 שוחזר
+  contract pending אחרי פקיעת item ב-EventBus`) — אבל זו **אותה ראיה
+  בדיוק** שכבר תועדה תחת BUG-158 למעלה (אותו contract ID, אותו timestamp).
+  הלוג המצוטט מכיל את המחרוזת המילולית "BUG-158" כי הוא נוצר ע"י
+  `_recover_pending_item_from_contract()` — הפונקציה ש-BUG-158 (לא
+  BUG-155) הוסיף. **זו אינה בדיקה של המנגנון של BUG-155** —
+  `_reject_stale_telegram_approval()` (`app.py:2223`, ה-contract_id-lookup
+  שמחליף recompute-fingerprint שגוי) — אלא של המנגנון הנפרד לגמרי
+  שמטפל ב-`bus.pop()` שמחזיר `None` אחרי פקיעת ה-TTL הפנימי של
+  EventBus (~30 דק'). שני המנגנונים מטפלים בתסמין דומה ("כפתור/פעולה
+  שפג" + contract עדיין pending) אך דרך code paths נפרדים לגמרי, עם
+  triggers נפרדים (`TTL-expired Telegram callback` בלוג עבור BUG-155,
+  לעומת `Pending action expired at pop` עבור BUG-158). **לכן BUG-155
+  נשאר לא-מאומת-ישירות** — דורש תרחיש נפרד: משימה עם `due_time`
+  (כדי להפעיל את ה-fingerprint-recompute שהיה שגוי), שה-Telegram inline
+  button שלה פג בחלון ה-10-30-דקות הספציפי (log line `TTL-expired
+  Telegram callback`), לא חלון ה-30-דקות של EventBus.
+- **Verified בפרודקשן:** לא (התרחיש הספציפי של הבאג הזה — `TTL-expired
+  Telegram callback` על משימה עם שעה — עדיין לא נבדק ישירות; ראו תיקון
+  תיוג-הראיות למעלה)
 - **סטטוס:** 🟡 מוזג ל-`main` + deployed (עקיף/ancestor) — **production
   verification ישיר לתרחיש הזה עדיין לא בוצע**
-  עדיין לא בוצעו/הוצגו** (לפי "כלל ברזל" ב-CLAUDE.md, לא ✅ עד commit+push+
-  deploy+production verification)
 
 ---
 
@@ -4194,27 +4223,192 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
 
 ---
 
+## BUG-160 — מרכאה לא מאוזנת עוקפת את המסלול הדטרמיניסטי של create_task
+
+- **דווח:** 07/08/2026, ע"י owner — נחשף תוך כדי אימות production של #546
+- **סביבה:** Production — `my-bot-approval-staging` (Render)
+- **מסך / מודול:** `core/router/router.py` —
+  `_normalize_create_task_input()` + `_STRUCTURED_CREATE_TASK_RE.fullmatch()`
+- **קלט:**
+  ```text
+  "צור משימה בדיקת PR546 עד תאריך 12-08-26 בשעה 14:54
+  ```
+  (מרכאה פותחת (`"`) בלבד — אין מרכאה סוגרת בסוף ההודעה)
+- **התנהגות בפועל (מהלוג):**
+  ```text
+  wrapper_stripped=False
+  intent=create_task
+  risk=normal
+  handler=agent
+  ```
+  ואז קריאת Anthropic אמיתית (`POST https://api.anthropic.com/v1/messages`).
+- **Root Cause (אומת בקוד, 07/08/2026):**
+  `_normalize_create_task_input()` (`core/router/router.py:76-95`) מסיר
+  זוג-מרכאות **רק אם שניהם קיימים** —
+  `value.startswith(opening) and value.endswith(closing)` (שורות 82-84).
+  מרכאה פותחת בלי מרכאה סוגרת תואמת לא מקיימת את התנאי, ולכן **לעולם
+  לא מוסרת** — נשארת כחלק מהמחרוזת. `_STRUCTURED_CREATE_TASK_RE.fullmatch()`
+  (שורה 100) דורש שהמחרוזת המנורמלת תתחיל (אחרי `\s*`) ישירות באחד
+  הפעלים (`צור`/`תיצור`/`הוסף`/`תוסיף`) — מרכאה תקועה בתחילת המחרוזת
+  שוברת את ה-`fullmatch` לגמרי. `parse_deterministic_create_task()`
+  מחזיר `DeterministicTaskParse()` המחדל (`matched=False`) — לא
+  `.certain` ולא `.uncertain` — כך ש-`route_request()` נופל דרך לניתוב
+  הכללי מבוסס-`intent_router.py` (`Handler.AGENT`), בדיוק כמו הפער
+  המקורי שתועד ב-BUG-159, אך כאן הסיבה היא פיסוק לא-מאוזן ולא צורת
+  פועל/שם-עצם חסרה.
+- **Severity:** גבוהה — bypass שקט של המסלול הדטרמיניסטי: `agent_calls>0`
+  במקום `0`, סמנטיקת approval שונה (Agent tool-use loop, לא
+  `queue_task_request()` הקנוני), ו-`trusted_source="agent"` (לא
+  `"deterministic_create_task"`) — כלומר גם ה-carve-out של BUG-153
+  לא בהכרח יחול אם הבקשה הזו תידחה ותישלח שוב במרכאות.
+- **קריטריוני סגירה:**
+  - מרכאה פותחת בלי סוגרת תואמת (וההפך) אינה מפילה את הבקשה מהמסלול
+    הדטרמיניסטי — או שהיא מנוקה (strip חד-צדדי בטוח), או שה-clarify
+    fail-closed המפורש (התבנית הקיימת ל-`uncertain`) מופעל במקום נפילה
+    שקטה ל-Agent
+  - `agent_calls=0` נשמר לכל קלט שהיה עובר כ-`.certain` אלמלא הפיסוק
+    הבלתי-תקין
+  - אין regression לניקוי הקיים של מרכאות מאוזנות/prefix של "Eli:"/">"
+- **סטטוס:** 🔴 נרשם, root cause מאומת בקוד, לא תוקן.
+
+---
+
+## BUG-161 — reconfirmation מפורש לא עקבי בין המסלול הדטרמיניסטי למסלול Agent
+
+- **דווח:** 07/08/2026, ע"י owner — המשך ישיר לתרחיש BUG-160 (נפילה
+  ל-Agent גרמה לחשיפת הפער הזה)
+- **סביבה:** Production — `my-bot-approval-staging`
+- **הרצף שנצפה:** אחרי ש-BUG-160 הפיל בקשת create_task למסלול Agent,
+  ה-Agent (לא ה-gateway הדטרמיניסטי) ניסה להציע את הפעולה מול contract
+  שכבר נדחה בעבר. תשובת ה-Agent למשתמש:
+  ```text
+  אם אתה רוצה ליצור משימה זו בכל זאת — אנא אשר זאת בבירור.
+  ```
+  המשתמש כתב `מאשר` — תגובה: `אין פעולה שממתינה לאישור` (אין contract
+  pending שממתין ל-callback הזה בפועל). המשתמש כתב אז במפורש `צור
+  משימה ... למרות שנדחתה בעבר` — ה-Agent ניסה tool-use, וה-Gateway חסם:
+  ```text
+  [ActionGateway] propose blocked: business action already rejected
+  ```
+- **Root Cause (עקבי עם התיעוד הקיים, לא נדרש grep נוסף לאישור):**
+  BUG-153's carve-out (`BUG-153_CREATE_TASK_EXPLICIT_RECONFIRMATION_POLICY_20260804.md`)
+  מוגדר **במפורש ובכוונה** בהיקף צר: רק `trusted_source ==
+  "deterministic_create_task"` — ערך שנקבע **רק** בתוך
+  `_queue_deterministic_create_task()` (קוד מהימן, לא tool_inputs/טקסט
+  משתמש). "**כולל `\"agent\"`** (autonomous replay — ממשיך להיחסם ללא
+  תנאי, בדיוק כמו היום)" — כלומר ה-Gateway חוסם את ה-Agent path **לפי
+  עיצוב**, לא כתקלה. הפער האמיתי הוא **UX/policy**, לא Gateway logic:
+  ה-Agent מציע למשתמש אפשרות ("אשר בבירור") שה-runtime מבנית לא יכול
+  לספק — אין נתיב שממיר "מאשר"/"בכל זאת" שנאמר ל-Agent לבקשת
+  `deterministic_create_task` חדשה עם ה-trusted_source הנכון.
+- **Severity:** גבוהה — הבטחה שקרית למשתמש מפי ה-Agent (הזמנה לפעולה
+  שהמערכת חוסמת בהמשך), לא רק חוסר-נוחות
+- **קריטריוני סגירה (טרם הוחלט — דורש הכרעת owner):**
+  - אפשרות א: Agent אסור לו להציע "אשר בבירור" למשתמש כשה-contract
+    האחרון הרלוונטי הוא `rejected` — יכוון את המשתמש לנסח בקשת create
+    חדשה מפורשת (המסלול הדטרמיניסטי, אם BUG-160 ייסגר, יתפוס את זה
+    ישירות)
+  - אפשרות ב: להרחיב את carve-out של BUG-153 כך שגם path מסוים
+    שמקורו ב-Agent (עם אימות דומה ל-`trusted_source`) יוכל לפתוח
+    reconfirmation — משנה scope שכבר הוחלט במפורש כצר בכוונה, דורש
+    Cross-Layer Impact Matrix חדש לפני כל שינוי קוד
+  - בכל מקרה: אין הבטחה מ-Agent שה-runtime לא יכול לקיים
+- **תלות:** קשור ישירות ל-BUG-160 — אם BUG-160 ייסגר (מרכאות לא-מאוזנות
+  לא מפילות ל-Agent), חלק ניכר מהחשיפה בפועל לתרחיש הזה קטן, אך הפער
+  העקרוני (Agent path אינו תומך reconfirmation) נשאר קיים לכל נפילה
+  אחרת ל-Agent.
+- **סטטוס:** 🔴 נרשם, root cause עקבי עם תיעוד קיים, לא תוקן — דורש
+  הכרעת owner על אפשרות א/ב לפני תיקון קוד.
+
+---
+
+## BUG-162 — הפרת turn-ownership: Agent מדבר ב-turn שבבעלות ה-gateway
+
+- **דווח:** 07/08/2026, ע"י owner — נצפה באותו flow של BUG-160/161
+- **סביבה:** Production — `my-bot-approval-staging`
+- **מסך / מודול:** `core/turn_envelope.py` — `TurnOwnershipShadow`
+  (`OwnershipSignal.is_gateway_owned_leak`, שורה ~559)
+- **הרצף שנצפה:** באותו turn שבו ה-Agent ניסה להציע reconfirmation
+  (ראו BUG-161), נרשם:
+  ```text
+  [TurnOwnershipShadow] violation=agent_spoke_in_gateway_owned_approval_turn
+  ```
+- **הבהרה חשובה (אומת בקוד, 07/08/2026):** זהו סיגנל **shadow-בלבד**
+  — התיעוד הקיים ב-`core/turn_envelope.py` (שורות 362-367, הפונקציה
+  `_classify_agent_leak_pattern()`) קובע במפורש: "purely observational,
+  never used to suppress/alter text". כלומר המנגנון **זיהה נכון** את
+  ההפרה (זו הוכחה שה-monitoring עובד), אך שום דבר לא חסם את ה-leak
+  עצמו בפועל — ה-Agent שלח את התשובה למשתמש כרגיל.
+- **Root Cause:** אותה שרשרת שגרמה ל-BUG-160/161 — נפילה למסלול Agent
+  עבור בקשה שה-`reply_owner` הרשמי שלה אמור להיות `gateway` (לפי
+  ה-invariant של `turn_envelope.py`) גורמת ל-Agent "לדבר" ב-turn
+  שאינו בבעלותו. ה-shadow signal קיים כדי **לזהות** בדיוק את המקרה
+  הזה, ועשה זאת נכון — הפער הוא שאין enforcement, רק תיעוד.
+- **Severity:** בינונית-גבוהה — לא נזק ישיר בפני עצמו (התשובה שנשלחה
+  לא בהכרח שגויה תוכנית — ראו BUG-161), אלא **הפרת invariant ארכיטקטוני
+  מתועד** (`reply_owner=gateway` אמור להבטיח קול סמכותי יחיד לתשובת
+  approval) שכרגע לא נאכף, רק נצפה.
+- **קריטריוני סגירה:**
+  - להחליט (owner) האם `TurnOwnershipShadow` צריך לעבור מ-shadow
+    ל-enforce עבור התבנית הזו הספציפית (חסימת/דיכוי תשובת Agent כש-
+    `reply_owner=gateway` כבר נקבע), בדומה למודל shadow→enforce
+    שקיים כבר בפייצ'רים אחרים בריפו (ראו `FEATURE_AIRTABLE_RUNTIME_
+    SCHEMA_PROVIDER_STATE`, `FEATURE_AIRTABLE_SELECT_VALUE_VALIDATION_STATE`)
+  - אם מוחלט על enforce: להגדיר מה קורה בפועל כשה-Agent "רוצה לדבר"
+    ב-turn כזה — clarify? silence? redirect לגייטווי?
+  - Cross-Layer Impact Matrix מלא נדרש לפני כל שינוי enforcement
+    (נוגע ישירות ל-TurnCoordinator/reply-ownership contract לפי
+    `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`)
+- **תלות:** אותו trigger כמו BUG-160/161 — סגירת BUG-160 מצמצמת את
+  התדירות בפועל אך לא סוגרת את הפער העקרוני ב-enforcement.
+- **סטטוס:** 🔴 נרשם, root cause מאומת בקוד (shadow-only, purely
+  observational — מצוטט ישירות מהערת הקוד), לא תוקן — דורש הכרעת owner
+  + Cross-Layer Impact Matrix לפני כל שינוי enforcement.
+
+---
+
 ## סדר עדיפות מומלץ לתיקונים
 
 כל הפריטים למטה **מוזגים ל-`main`** (אומת 07/08/2026 ע"י `git merge-base
 --is-ancestor <commit> origin/main` על כל אחד), וכולם **גם Deployed
 מאומת** (Render: "Deploy live for `44fe0fb`", 07/08/2026 11:34 — `44fe0fb`
 עצמו הוא הקומיט הפרוס, וכל שאר ה-commits ברשימה הם ancestors מאומתים
-שלו). **BUG-158 ו-BUG-159 בלבד גם Verified בפרודקשן ישירות** (owner,
-07/08/2026 13:24 — ראו הבלוקים המלאים למעלה); BUG-153 עד BUG-157 נשארים
-🟡 deployed אך לא נבדקו ישירות בתרחיש הספציפי שלהם בפרודקשן (ראו כל בלוק
-בנפרד לפירוט מדויק של מה כן/לא נבדק).
+שלו). **BUG-153, 154, 156, 158, 159 גם Verified בפרודקשן ישירות** (owner,
+07/08/2026 13:24-14:23 — ראו הבלוקים המלאים למעלה). **BUG-155 ו-BUG-157
+נשארים 🟡** — ראו התיקון המפורש בבלוק של BUG-155 למעלה: הראיה שסופקה
+ל-closure אכן אימתה מנגנון אחר (BUG-158), לא את המנגנון הספציפי של
+BUG-155 (`_reject_stale_telegram_approval()`'s contract_id lookup);
+BUG-157 (concurrency race) עדיין רק test-evidence, לא production.
 
-1. **BUG-155** — TTL expiry משאיר pending חי (קריטי) — ✅ מוזג + deployed ל-main (PR #550)
+### PR #546 — סטטוס closure מתוקן (07/08/2026)
+
+**לא "CLOSED / VERIFIED" גורף** כפי שהוצע — 5 מתוך 7 הבאגים+ה-invariants
+המרכזיים אכן VERIFIED IN PROD (153, 154, 156, 158, 159, וגם duplicate-
+suppression + deterministic-routing-ללא-Agent שנצפו בכל אחת מהבדיקות
+החיות). BUG-155 ו-BUG-157 נשארים 🟡 deployed-בלבד — לא בגלל שלא נוסה
+לב, אלא כי הראיה שסופקה ל-BUG-155 בפועל שייכת ל-BUG-158 (ראו התיקון
+המפורש בבלוק של BUG-155). **בנוסף**, אימות ה-production הזה עצמו חשף
+3 באגים חדשים (BUG-160/161/162, למטה) בנתיב ה-fallback ל-Agent — לא
+חלק מ-#546 המקורי, אך מספיק קרובים ארכיטקטונית (אותו turn/reply-
+ownership contract) שסגירה "סופית" ראויה להמתין לפחות להכרעת owner על
+BUG-161 (מדיניות reconfirmation ב-Agent path).
+
+1. **BUG-155** — TTL expiry משאיר pending חי (קריטי) — ✅ מוזג + deployed ל-main (PR #550), **Verified בפרודקשן: לא (ראו תיקון תיוג-ראיות)**
 2. **BUG-153** — create חדש אחרי rejection נחסם (גבוה) — ✅ מוזג + deployed + **VERIFIED IN PROD** (PR #550)
-3. **BUG-154** — parser crash בניסוח "ל־תאריך" (גבוה) — ✅ מוזג + deployed ל-main (PR #550)
+3. **BUG-154** — parser crash בניסוח "ל־תאריך" (גבוה) — ✅ מוזג + deployed + **VERIFIED IN PROD** (PR #550)
 4. **BUG-156** — שעה אינה נשמרת (בינוני-גבוה) — ✅ מוזג + deployed + **VERIFIED IN PROD** (PR #550)
 5. **בדיקת suppression fallback** — ✅ נסגר, מוזג + deployed (PR #550)
 6. **BUG-157** — `propose_action()` לא-אטומי (concurrency, **נגיש בפועל** —
    לא latent, ראה "Root Cause" למעלה: scheduler thread + webhook thread
    יכולים לקרוא במקביל תחת ה-deployment הנוכחי) — ✅ מוזג + deployed ל-main
-   (PR #552, PR #555)
+   (PR #552, PR #555), **Verified בפרודקשן: לא (test evidence בלבד)**
 7. **BUG-158** — כפתור שפג מדווח "אינה זמינה" גם כש-contract עדיין pending
    (גבוה) — ✅ מוזג + deployed + **VERIFIED IN PROD** (PR #556)
 8. **BUG-159** — פרסר create_task לא מזהה "משימת"/הוסף/תוסיף (בינוני-גבוה)
    — ✅ מוזג + deployed + **VERIFIED IN PROD** (PR #557)
+9. **BUG-160** — מרכאה לא מאוזנת עוקפת את המסלול הדטרמיניסטי (גבוה) —
+   🔴 נרשם, root cause מאומת בקוד, לא תוקן
+10. **BUG-161** — reconfirmation לא עקבי בין המסלול הדטרמיניסטי ל-Agent
+    (גבוה) — 🔴 נרשם, דורש הכרעת owner (אפשרות א/ב), לא תוקן
+11. **BUG-162** — הפרת turn-ownership: Agent מדבר ב-turn של gateway
+    (בינוני-גבוה) — 🔴 נרשם, shadow-only מאומת בקוד, לא תוקן
