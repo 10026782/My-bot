@@ -10,6 +10,17 @@ duplicate authority, dead/bypassed mechanisms — מול הקוד הנוכחי, 
 domain). לא סוקר את כל 70+ הממצאים של F52 Phase 4C — רק את אלה הרלוונטיים
 ישירות לשאלה הזו.
 
+**עדכון קריטי (07/08/2026, אחרי בדיקה נוספת של ה-owner):** נמצא ש-קיימת
+תכנית WS1/WS2/WS3 מסודרת יותר (`docs/architecture/turn-coordinator-full/`,
+נפרדת מהתיקייה `docs/architecture/turn-coordinator/` שהמסמך הזה במקור
+הסתמך עליה) שבה **TC6 ("explicit reply ownership"), Workstream 2, הוא
+בדיוק ה-item שאמור לסגור את הפער הזה** — ומתועד בכנות כ-
+`NEXT_IMPLEMENTATION`, לא Done. §5 (חדש) למטה מתעד את הממצא הזה במלואו,
+כולל את הסיווג המתוקן של תיקון-הקוד כאן כ-**interim tactical patch**,
+לא כמימוש TC6. ראו גם `docs/architecture/turn-coordinator-full/
+DECISION_LOG.md` entries 14-15 ו-`BUG_AUDIT_LOG.md`'s עדכון-סיווג
+תואם.
+
 ---
 
 ## 1. איפה ה-DoD בפועל, ולמה הוא לא נאכף כאן
@@ -189,3 +200,64 @@ BUG-153 בודד, אלא **enumeration ממצה** על כל 6 ערכי `existing
 כ"informal Phase 3 precursor already in production" — כדי שהפעם הבאה שמישהו
 בודק "האם Phase 3 הושלם", התשובה לא תהיה "לא התחיל רשמית" תוך התעלמות מקוד
 שכבר רץ ומשרת בפועל את אותה מטרה.
+
+---
+
+## 5. תיקון-מסגור (07/08/2026) — WS1/WS2/WS3 ולא רק "Gate C תיאורטי"
+
+ה-owner הצביע על עובדה שהמסמך למעלה לא כלל: קיימת סבב-עבודה מסודר יותר
+מ-"Gate C תיאורטי בלבד" — `docs/architecture/turn-coordinator-full/`
+(תוכנית WS1/WS2/WS3, נפרדת מ-`docs/architecture/turn-coordinator/`
+שהמסמך הזה במקור הסתמך עליה). זה משנה את הכרונולוגיה המדויקת:
+
+**הכרונולוגיה המתוקנת:** Turn Coordinator original plan → PR #471 מממש
+מנגנון single-speaker מוקדם וחלקי → (הרבה זמן אחר כך) WS1/WS2/WS3 —
+audit+implementation מסודר, עם שלושה סוכנים, שנועד **גם** לבדוק ולהכניס
+מנגנוני legacy קיימים תחת החוזה החדש — → branch חסר ב-#471 נשאר לא-מזוהה
+→ staging E2E חושף אותו **אחרי** שכבר החל הסבב.
+
+**התשובה לשאלה הממוקדת שנשאלה — "באיזה WS ובאיזה item":**
+
+**Workstream 2, item TC6 ("explicit reply ownership")** —
+`docs/architecture/turn-coordinator-full/IMPLEMENTATION_SEQUENCE.md`
+ו-`GAP_ANALYSIS.md` מגדירים את זה במפורש. `GAP_ANALYSIS.md`'s שורה
+הרלוונטית ("reply ownership is conditional and renderer paths drift" —
+בדיוק תיאור הפער של PR #471) ממופה ל-TC6.
+
+**והתשובה לחלק השני — "האם זה סומן Done בטעות?" — לא.** `GAP_ANALYSIS.md`
+מתייג את TC6 כ-**`NEXT_IMPLEMENTATION`** (לא `Done`), בכנות. `turn-
+coordinator-full/README.md`/`DECISION_LOG.md`/`INTEGRATION_AND_MERGE_
+PLAN.md` (כולם 2026-08-02) מאשרים ש-רק WS1 מוזג עד אז. אומת גם ישירות
+בקוד (לא רק בתיעוד): `ActionGateway.approval_status()`/`execution_
+status()` (WS2's projection methods) **קיימות** (`core/action_gateway.py:
+3366,3379`), אבל **תוצאתן נזרקת בפועל** בשתי נקודות-הקריאה
+(`core/action_gateway.py:3459,3486`) — `build_approval_lifecycle_result()`
+(המנגנון הישן) עדיין מייצר את הטקסט בפועל בכל מקום, כולל בדיוק שם
+שהבאג חי. **זה לא "חור ב-audit שכבר נסגר" ולא "פריט שסומן Done מוקדם
+מדי" — זה item שתוכנן נכון, שויך נכון ל-WS2, ותועד בכנות כטרם-בוצע.
+הפער האמיתי הוא תזמון**: incident חי בפרודקשן (BUG-153/161/162) נחשף
+בדיוק בקוד ש-TC6 מיועד להחליף, ואף מנגנון לא סימן "יש כאן incident חי,
+צריך להעלות עדיפות ל-TC6" — TC6 פשוט המתין לתורו ברצף WS1→WS2→WS3
+הרגיל, כמו כל item אחר.
+
+**החלטה + תיקון (07/08/2026):**
+1. **תיקון-הקוד ל-BUG-162 סווג מחדש כ-interim tactical patch, לא TC6.**
+   מתועד ב-`turn-coordinator-full/GAP_ANALYSIS.md` (הערה מעל הטבלה
+   ובשורת TC6 עצמה), `IMPLEMENTATION_SEQUENCE.md` (הערת-סטטוס חדשה),
+   `PARALLEL_IMPLEMENTATION_WORKSTREAMS.md` (שורת ה-gap table), ו-
+   `DECISION_LOG.md` (entry 14) — כולל הערה מפורשת ש-ה-patch נכתב כעריכה
+   ישירה ל-`app.py` **מחוץ** לתהליך ה-WS2 (integrator-only file,
+   `PARALLEL_IMPLEMENTATION_WORKSTREAMS.md`'s file ownership map), כדי
+   ש-מימוש TC6 העתידי ימצא את זה בכוונה ויסקור/יאחד או יחליף אותו
+   במפורש, לא יגלה סחיפה לא-מוסברת.
+2. **מקור-אמת יחיד לטורן קואורדינטור.** `turn-coordinator/` ו-
+   `turn-coordinator-full/` לא הפנו זו לזו לפני הסבב הזה — בדיוק דוגמה
+   חיה ל-"parallel sources of truth" שהריפו הזה כבר מזהיר מפניה
+   (F52 Contract Coverage Map). תוקן: שני ה-README's מפנים זה לזה
+   במפורש (`turn-coordinator/README.md` קנוני לסטטוס-מיזוג נוכחי;
+   `turn-coordinator-full/` קנוני לפירוק TC1-TC10 ובעלות-פערים) — ראו
+   `DECISION_LOG.md` entry 15. **תוקן גם ב-`docs/context_librarian/
+   layers/turn_coordinator.json`'s `canonical_docs`** — שכלל עד עכשיו
+   רק את `turn-coordinator/`, כך ש-bundles עתידיים (בדיוק המנגנון
+   שאמור למנוע את הסוג הזה של פספוס) לא היו רואים את `turn-coordinator-
+   full/` בכלל. זה תוקן, לא רק תועד — עדכון-קטלוג ממשי, לא רק הערה.

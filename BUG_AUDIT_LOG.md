@@ -4607,15 +4607,44 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
      שני מקורות-אמת נפרדים, יכולים להתפצל. **מתועד, לא מומש** —
      איחוד לשני המקורות דורש Cross-Layer Impact Matrix משלו אם/כש-owner
      יחליט לטפל בזה.
-- **סטטוס:** 🟡→ קרוב יותר ל-סגירה אמיתית: **root cause אמיתי אותר ותוקן
-  בקוד, closure audit מלא בוצע** (לא רק "ממתין להפעלת flag" — זו הייתה
-  מסקנה שגויה שתוקנה כאן; ולא רק "תוקן מקרה אחד" — כל 11 exit-paths
-  אומתו). נותר: (1) אימות-production חוזר לתרחיש BUG-161/162 המקורי אחרי
-  push+deploy (2) מימוש נפרד ל"Clarification כסוג-הודעה של Coordinator"
-  עבור התרחיש-הראשון (Agent מבטיח מראש, בלי tool_use כלל) — עדיין לא
-  מכוסה (3) duplicate-authority finding — מתועד, לא מומש, ממתין להחלטת
-  owner אם/מתי לטפל. **לא claim "✅ Fixed" עד אימות production**, לפי
-  כלל הברזל.
+- **⚠️ סיווג מתוקן (07/08/2026, אחרי איתור TC6):** התיקון ב-`app.py` הוא
+  **interim tactical patch, לא מימוש TC6** ("explicit reply ownership",
+  Workstream 2 — `docs/architecture/turn-coordinator-full/GAP_ANALYSIS.md`,
+  עדיין `NEXT_IMPLEMENTATION`). אומת ישירות בקוד: `ActionGateway.approval_
+  status()`/`execution_status()` (WS2's projection methods) **כן קיימות**
+  (`core/action_gateway.py:3366,3379`) **אך תוצאתן נזרקת בפועל** בשתי
+  נקודות-הקריאה (`core/action_gateway.py:3459,3486` — נקראות בלי `=`) —
+  `build_approval_lifecycle_result()` (המנגנון הישן, בדיוק איפה שהבאג חי)
+  הוא עדיין מה שמייצר את הטקסט בפועל לכל מקרה. ה-patch תוקן **בתוך**
+  המנגנון הישן הזה — לא ביצע cutover ל-WS2's projections, ולא סוגר את
+  TC6. תועד גם ש-ה-patch נכתב כעריכה ישירה ל-`app.py` **מחוץ** לתהליך
+  ה-WS2 agent-prompt/Librarian-bundle/integrator-review (`app.py` מוגדר
+  "Integrator only" ב-`PARALLEL_IMPLEMENTATION_WORKSTREAMS.md`'s file
+  ownership map) — נרשם במפורש ב-`turn-coordinator-full/DECISION_LOG.md`
+  entry 14 כדי שמימוש TC6 העתידי ימצא את זה בכוונה, לא כסחיפה לא-מוסברת,
+  ויסקור/יאחד או יחליף אותו במפורש.
+- **Single source of truth (07/08/2026):** התגלה תוך כדי החקירה ש-
+  `docs/architecture/turn-coordinator/` (המעודכן שוטף) ו-`docs/
+  architecture/turn-coordinator-full/` (תוכנית ה-WS1/WS2/WS3, TC1-TC10)
+  הן שתי תיקיות **נפרדות** שתיארו אותה תוכנית, בלי הפניה הדדית — עד
+  עכשיו. תוקן: שני ה-README's מפנים זה לזה במפורש (`turn-coordinator/
+  README.md` קנוני לסטטוס-מיזוג נוכחי; `turn-coordinator-full/` קנוני
+  לפירוק-המשימות TC1-TC10 ולבעלות-פערים). `docs/context_librarian/
+  layers/turn_coordinator.json`'s `canonical_docs` — שכלל רק את התיקייה
+  הראשונה — עודכן להכיל גם את המסמכים המרכזיים של `turn-coordinator-full/`,
+  כדי ש-bundles עתידיים לא יפספסו את פירוק ה-TC1-TC10 כמו שקרה כאן.
+- **סטטוס:** 🟡→ קרוב יותר ל-סגירה אמיתית: **root cause אמיתי אותר,
+  interim patch תוקן ונבדק בקוד, closure audit מלא בוצע, TC6 סומן נכון
+  כ-NEXT_IMPLEMENTATION (לא Done, לא נסגר ע"י ה-patch)** (לא רק "ממתין
+  להפעלת flag" — זו הייתה מסקנה שגויה שתוקנה כאן; ולא רק "תוקן מקרה
+  אחד" — כל 11 exit-paths אומתו). נותר: (1) אימות-production חוזר
+  לתרחיש BUG-161/162 המקורי אחרי push+deploy (2) מימוש נפרד ל-
+  "Clarification כסוג-הודעה של Coordinator" עבור התרחיש-הראשון (Agent
+  מבטיח מראש, בלי tool_use כלל) — עדיין לא מכוסה (3) duplicate-authority
+  finding — מתועד, לא מומש, ממתין להחלטת owner אם/מתי לטפל (4) **TC6
+  עצמו** — המימוש הפורמלי, כשיגיע בתורו ב-WS2, צריך לסקור/לאחד את ה-
+  interim patch הזה, לא להשאיר side-patch נפרד לצמיתות. **לא claim
+  "✅ Fixed" עד אימות production**, לפי כלל הברזל.
 
 ---
 
@@ -4839,7 +4868,8 @@ production הזה עצמו חשף 3 באגים חדשים (BUG-160/161/162, למ
     enforcement (BUG-162) תוקנה בקוד** — סגירה מלאה תלויה באימות-
     production חוזר
 11. **BUG-162** — הפרת turn-ownership: Agent מדבר ב-turn של gateway
-    (בינוני-גבוה) — 🟡 **תוקן בקוד (07/08/2026):** ⚠️ המסקנה הקודמת
+    (בינוני-גבוה) — 🟡 **interim patch תוקן בקוד (07/08/2026, לא TC6
+    עצמו — ראו סיווג מתוקן בבלוק המלא למעלה):** ⚠️ המסקנה הקודמת
     ("ממתין רק להפעלת flag") הייתה **שגויה** — ה-owner הראה שהדגל
     כבר `true` ב-Render ובכל זאת הבאג קרה. ה-root cause האמיתי:
     `_queue_approval_detailed_impl()`'s בלוק ה-block הגנרי (זה שבפועל

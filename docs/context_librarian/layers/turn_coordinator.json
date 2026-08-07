@@ -53,6 +53,31 @@
           "status": "planning_only"
         },
         {
+          "path": "docs/architecture/turn-coordinator-full/README.md",
+          "role": "WS1/WS2/WS3 parallel-execution plan index — canonical for task breakdown (TC1-TC10) and gap-to-workstream ownership, NOT for current merge status (see turn-coordinator/README.md's 'Single source of truth' section, added 2026-08-07 after this catalog gap caused a duplicate-planning-directory near-miss during BUG-162's investigation)",
+          "status": "active"
+        },
+        {
+          "path": "docs/architecture/turn-coordinator-full/PARALLEL_IMPLEMENTATION_WORKSTREAMS.md",
+          "role": "WS1/WS2/WS3 scope, file ownership map, and existing-gap-to-workstream table",
+          "status": "active"
+        },
+        {
+          "path": "docs/architecture/turn-coordinator-full/GAP_ANALYSIS.md",
+          "role": "gap class/status/owning-workstream/internal-milestone table (TC1-TC10); the authoritative place to check whether a TC item is actually Done",
+          "status": "active"
+        },
+        {
+          "path": "docs/architecture/turn-coordinator-full/IMPLEMENTATION_SEQUENCE.md",
+          "role": "TC1-TC10 dependency-ordered implementation sequence",
+          "status": "active"
+        },
+        {
+          "path": "docs/architecture/turn-coordinator-full/DECISION_LOG.md",
+          "role": "append-only workstream decision log, including cross-directory single-source-of-truth resolution (entry 15) and the BUG-162 interim-patch decision (entry 14)",
+          "status": "active"
+        },
+        {
           "path": "BUG_AUDIT_LOG.md",
           "role": "registered routing/lead-handling defects (e.g. BUG-130, BUG-140); added 2026-07-28 after the N17 pilot found this layer never referenced it",
           "status": "active"
@@ -113,7 +138,8 @@
         "The coordinator consumes typed signals and must not invent business state or approval policy.",
         "PR #471 changed who legitimately owns a turn's final reply, not just how routing is observed: when FEATURE_SINGLE_SPEAKER_APPROVAL_UX is on and this turn queued an approval, run_agent() hands the reply to the Gateway (reply_owner=\"gateway\") and returns immediately without a further Agent turn (app.py:3802 as of ffa678a7; line drifts with unrelated wording-only edits elsewhere in the file, e.g. PR #479/#480 — re-verified this audit that the boundary logic itself is unchanged). This is a conditional, code-level ownership assignment for approval-queuing turns specifically — it does not create a general reply_owner claim mechanism and does not resolve the concurrency race (a callback and a concurrent text turn for the same identity) described in docs/architecture/turn-coordinator/REPLY_OWNERSHIP_AND_APPROVAL_AUTHORITY_RESEARCH.md §1.3c, which remains unmitigated and research-only.",
         "The same handoff path still invokes the RP5 shadow observer (observe_shadow_finalizer, app.py:3813 as of ffa678a7) on the Gateway-owned reply before returning — RP5's classification runs even though the Agent's own LLM text is never produced for that turn; see layer.rp5's notes.",
-        "First real consumption pilot re-verification against a89fc67: PR2 added an early, anchored approval-lifecycle resolver ahead of lead capture, Session, Router, Business Memory, and Agent. It is a specialized deterministic bypass, not a general TurnCoordinator implementation. Unrecognized text falls through to the existing route; the formal coordinator remains planning-only."
+        "First real consumption pilot re-verification against a89fc67: PR2 added an early, anchored approval-lifecycle resolver ahead of lead capture, Session, Router, Business Memory, and Agent. It is a specialized deterministic bypass, not a general TurnCoordinator implementation. Unrecognized text falls through to the existing route; the formal coordinator remains planning-only.",
+        "docs/architecture/turn-coordinator-full/ (WS1/WS2/WS3 parallel-execution plan, TC1-TC10) added as canonical docs 2026-08-07: this catalog previously listed only docs/architecture/turn-coordinator/ (a separate, older directory describing the same program), so any bundle built before this fix never surfaced the WS1/WS2/WS3 task breakdown, the file ownership map, or GAP_ANALYSIS.md's TC6 ('explicit reply ownership') status at all -- discovered while investigating BUG-162 (Agent spoke in a Gateway-owned turn), whose root gap is exactly TC6, still NEXT_IMPLEMENTATION. An interim tactical patch was applied to the legacy branch pending TC6's own implementation; see BUG_AUDIT_LOG.md and docs/architecture/action-gateway/BUG-162_SINGLE_SPEAKER_CLOSURE_AUDIT_20260807.md. turn-coordinator/README.md is canonical for current merge status; turn-coordinator-full/ is canonical for the TC1-TC10 task breakdown -- see either README's 'Single source of truth' section."
       ],
       "extensions": {
         "boss.layer_aliases": [

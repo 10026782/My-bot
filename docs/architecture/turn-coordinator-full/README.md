@@ -3,6 +3,18 @@
 Status: planning baseline plus implementation review. Planning base:
 `fb4ab4af57d8e5986a06219638e1145af019cf6e`.
 
+**Single source of truth (added 07/08/2026):** this directory and
+`../turn-coordinator/` (the original Turn Coordinator proposal/status
+directory) describe the same program. **For current merge/implementation
+status, `../turn-coordinator/README.md` is canonical** — it is actively kept
+current and is the file registered in `docs/context_librarian/layers/
+turn_coordinator.json`'s `canonical_docs`; this directory's own status notes
+(dated 2026-08-02 below) are a snapshot, not a live feed, and can drift. **This
+directory remains canonical for the WS1/WS2/WS3 task breakdown, DoD items
+(TC1–TC10), and gap-to-workstream ownership** (`GAP_ANALYSIS.md`,
+`IMPLEMENTATION_SEQUENCE.md`, `PARALLEL_IMPLEMENTATION_WORKSTREAMS.md`). See
+`DECISION_LOG.md` entry 15 for the full cross-reference.
+
 ## Current implementation status — 2026-08-02
 
 - WS1 foundation contracts are merged (`PR #536`).
