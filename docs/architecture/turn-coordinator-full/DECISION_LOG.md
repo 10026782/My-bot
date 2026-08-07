@@ -38,3 +38,60 @@
 12. The planned contracts absent from current runtime are
     `PRE_PARALLEL_BLOCKER`s. Agents may draft and test them independently, but
     authority-changing parallel implementation cannot start until the freeze.
+
+## Implementation status update — 2026-08-07
+
+14. Production staging E2E surfaced a live "reply ownership is conditional"
+    incident (BUG-160/161/162/163, `BUG_AUDIT_LOG.md`) — the Agent spoke in a
+    Gateway-owned turn because one exit branch of the legacy
+    `_queue_approval_detailed_impl()` (`app.py`) never set `reply_owner`.
+    Closure audit (`docs/architecture/action-gateway/BUG-162_SINGLE_SPEAKER_
+    CLOSURE_AUDIT_20260807.md`) confirmed this is exactly the gap TC6 exists
+    to close (`GAP_ANALYSIS.md`'s "reply ownership is conditional" row,
+    `NEXT_IMPLEMENTATION`), and that TC6 has genuinely not been implemented —
+    `ActionGateway.approval_status()`/`execution_status()` exist but their
+    return value is discarded at both call sites; the legacy path this
+    incident lived in remains the sole live authority for reply text.
+    Decision: apply a narrow, well-tested **interim tactical patch** to the
+    legacy branch rather than block on TC6's full sequence position — a
+    live, user-facing defect does not wait for its formal turn when the fix
+    is small and additive. Precisely: it does not change ActionContract
+    lifecycle authority (still owned by `core/action_gateway.py`, untouched
+    by this patch) — it extends the existing Gateway reply-ownership signal
+    (`reply_owner`/`lifecycle_result`, already set by the sibling branch) to
+    this one previously-inconsistent branch, which does affect which
+    component's text wins at the Gateway/Agent reply-selection boundary.
+    This patch is explicitly **not** TC6 and does not reduce TC6's remaining
+    scope. It was applied as a direct `app.py` edit, outside the WS2
+    agent-prompt/Librarian-bundle/integrator-review workflow this plan
+    defines (`app.py` is "Integrator only" per the file ownership map) —
+    recorded here so TC6's eventual implementer finds it deliberately, not
+    as unexplained drift, and is expected to review/absorb or explicitly
+    supersede it during TC6's own implementation.
+15. `docs/architecture/turn-coordinator/` (the older, still-actively-updated
+    Turn Coordinator directory referenced directly by `CLAUDE.md` and by
+    `docs/context_librarian/layers/turn_coordinator.json`'s `canonical_docs`)
+    and this directory (`turn-coordinator-full/`, the WS1/WS2/WS3 execution
+    plan) are **two separate documents describing the same program**, last
+    updated on different dates, and until this entry neither one referenced
+    the other. This is exactly the "parallel sources of truth" pattern
+    `docs/architecture/f52-unified-approval-runtime/audits/original/
+    F52_CONTRACT_COVERAGE_MAP.md`-class documents warn against generally.
+    Resolved (see both READMEs): `docs/architecture/turn-coordinator/
+    README.md` is the canonical index for **current merge/implementation
+    status** (it is actively kept current and is the one wired into the
+    Librarian's `canonical_docs`); this directory remains authoritative for
+    the **WS1/WS2/WS3 task breakdown, DoD items (TC1–TC10), and gap
+    ownership** — not for current merge-status facts, which drift here
+    between updates. Neither directory supersedes the other's own domain.
+
+    **Addendum (07/08/2026, same day):** an attempt to also add this
+    directory's key docs to `turn_coordinator.json`'s `canonical_docs` was
+    reverted — the catalog is calibrated tightly against several different
+    token/document-count budgets (`test_context_librarian.py`,
+    `test_pilot_preflight.py`), and even a minimal, trimmed addition broke
+    5 unrelated profile-query tests. The single-source-of-truth fix above
+    stands on the README cross-reference alone; the Librarian's automatic
+    bundle-building still does not surface this directory. A future fix
+    would need to work the token/document budgets across every affected
+    profile query deliberately, not as a side effect of an unrelated PR.

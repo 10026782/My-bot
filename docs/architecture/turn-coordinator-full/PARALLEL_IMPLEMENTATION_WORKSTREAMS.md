@@ -173,7 +173,7 @@ may continue only with frozen contracts and no edits to its owned/shared files.
 | dispatcher approval metadata bypass | Workstream 2 |
 | canonical builders | Workstream 1 |
 | entity resolver divergence | Workstream 1 |
-| conditional reply ownership | Workstream 2 |
+| conditional reply ownership | Workstream 2 (TC6, still `NEXT_IMPLEMENTATION` as of 07/08/2026 — one specific instance received an interim tactical patch, BUG-162, not a TC6 implementation; see `GAP_ANALYSIS.md`) |
 | Evidence Finalizer missing | Workstream 2 |
 | surface rendering drift | Workstream 3 |
 | batch/session preview lifecycle | Workstream 1 |

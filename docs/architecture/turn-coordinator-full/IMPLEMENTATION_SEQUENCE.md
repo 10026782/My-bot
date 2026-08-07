@@ -7,6 +7,29 @@ PR #545 was merged as `46db9af` from head `1d117ab`; follow-up PR #546 is also
 merged. Staging and rollout gates remain mandatory before claiming readiness
 for the next WS2/WS3 step. The merge order remains WS1 → WS2 → WS3.
 
+**TC6 status update (07/08/2026):** TC6 ("explicit reply ownership") itself
+has **not** been implemented — still `NEXT_IMPLEMENTATION` per
+`GAP_ANALYSIS.md`. `ActionGateway.approval_status()`/`execution_status()`
+(WS2's own projection methods) exist in code but their return value is
+discarded at both call sites (`core/action_gateway.py:3459,3486`) — the
+legacy `build_approval_lifecycle_result()` path still produces the actual
+user-facing text everywhere, confirmed by direct code read, not just prose.
+An **interim, narrowly-scoped tactical patch** was applied directly to that
+legacy path (`app.py::_queue_approval_detailed_impl()`'s generic ok=False
+branch, BUG-162, 07/08/2026) to close one specific missing-`reply_owner`
+defect discovered in production staging — see
+`docs/architecture/action-gateway/BUG-162_SINGLE_SPEAKER_CLOSURE_AUDIT_20260807.md`.
+This patch does **not** constitute TC6 and does not reduce TC6's scope when
+it is eventually implemented — TC6 must still perform the full cutover to
+WS2's `ActionLifecycleResult` projection as an explicit reply-ownership
+authority, and must review/absorb or explicitly supersede this interim
+patch at that time, not leave it as a permanent parallel mechanism. The
+patch was also applied as a direct `app.py` edit outside the WS2
+agent-prompt/Librarian-bundle/integrator-review workflow this plan defines
+(`app.py` is "Integrator only" per `PARALLEL_IMPLEMENTATION_WORKSTREAMS.md`'s
+file ownership map) — flagged here so TC6's actual implementer is aware of
+it and does not discover it as an unexplained drift later.
+
 This is an internal milestone view of exactly three implementation
 workstreams—not ten independent tracks: TC1–TC4 belong to Workstream 1,
 TC5–TC8 to Workstream 2, and TC9–TC10 to Workstream 3. Development may run in

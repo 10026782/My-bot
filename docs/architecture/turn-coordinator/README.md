@@ -26,6 +26,31 @@ tests. The approved rollout order (WS1 → WS2 → WS3, staging and rollout
 gates required) is unchanged; this update only corrects what "merged" means
 for each workstream today.
 
+## Single source of truth (added 07/08/2026)
+
+Two directories describe the same Turn Coordinator program and, until this
+note, did not reference each other: this one, and
+`../turn-coordinator-full/` (the WS1/WS2/WS3 parallel-execution plan — task
+breakdown TC1–TC10, file ownership map, gap analysis, agent prompts).
+**This file (`turn-coordinator/README.md`) is canonical for current merge/
+implementation status** — it is actively kept current (as of the date above)
+and is the file wired into `docs/context_librarian/layers/turn_coordinator.
+json`'s `canonical_docs`. **`turn-coordinator-full/` is canonical for the
+WS1/WS2/WS3 task breakdown, DoD items (TC1–TC10), and gap-to-workstream
+ownership** — read it for "which item owns this gap," not for "is it merged
+yet," since its own status notes drift between updates (see its
+`DECISION_LOG.md` entry 15 for the same cross-reference in the other
+direction). Neither directory supersedes the other's own domain.
+
+**BUG-162 note:** WS2's TC6 ("explicit reply ownership") is what generalizes
+PR #471's conditional mechanism described below — it remains
+`NEXT_IMPLEMENTATION` (`turn-coordinator-full/GAP_ANALYSIS.md`), not done. A
+narrow **interim tactical patch** (not TC6 itself) was applied 07/08/2026 to
+the legacy `_queue_approval_detailed_impl()` path this file already
+describes as still authoritative for reply text — see
+`docs/architecture/action-gateway/BUG-162_SINGLE_SPEAKER_CLOSURE_AUDIT_20260807.md`
+and `turn-coordinator-full/DECISION_LOG.md` entry 14.
+
 ## Purpose
 
 Architectural proposal for a `TurnCoordinator` that owns per-turn context
