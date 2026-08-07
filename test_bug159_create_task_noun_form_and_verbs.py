@@ -149,7 +149,7 @@ os.environ["FEATURE_ACTION_CONTRACT_PERSISTENCE"] = "false"
 import app  # noqa: E402
 from core.action_gateway import action_gateway as _real_gw  # noqa: E402
 
-for text, expected_title in [_VARIANTS[1], _VARIANTS[4]]:  # "משימת" and "הוסף משימת"
+for text, _expected_title in [_VARIANTS[1], _VARIANTS[4]]:  # "משימת" and "הוסף משימת"
     requester = _owner(f"owner-bug159-e2e-{abs(hash(text))}")
     parsed = parse_deterministic_create_task(text)
     with _mock.patch.object(app, "bot", _mock.MagicMock()):
@@ -164,6 +164,52 @@ for text, expected_title in [_VARIANTS[1], _VARIANTS[4]]:  # "משימת" and "�
         chk(f"'{text}': trusted_source is 'deterministic_create_task' — "
             "the same BUG-153 carve-out 'משימה'-phrased requests get",
             live[0].trusted_source == "deterministic_create_task")
+
+
+# ══════════════════════════════════════════════════════════════════
+# CodeRabbit (07/08/2026): section 6 above proves parse_deterministic_
+# create_task() + route_request() + _queue_deterministic_create_task()
+# individually compose correctly, by calling _queue_deterministic_
+# create_task() directly with pre-parsed arguments — it does not prove the
+# actual production inbound-message entry point (app.run_agent(), the real
+# function the Telegram/WhatsApp webhook handlers call with raw user_text)
+# reaches this path for the NEW phrasings, nor that zero Claude API calls
+# happen along the way. This section drives app.run_agent() itself — the
+# real top-level entry point, called with raw text exactly as a webhook
+# would — with the Anthropic client call site patched to fail loudly if
+# ever invoked, proving both claims for real rather than by composition.
+print("\n── 7. true end-to-end: app.run_agent() (the real inbound-message "
+      "entry point) reaches the deterministic path for the NEW phrasings "
+      "— zero Anthropic calls, exactly one ActionContract created ──")
+
+for text, expected_title in [_VARIANTS[1], _VARIANTS[4]]:  # "משימת" and "הוסף משימת"
+    requester = _owner(f"owner-bug159-run-agent-{abs(hash(text))}")
+    mock_bot7 = _mock.MagicMock()
+    mock_anthropic_create = _mock.MagicMock(
+        side_effect=AssertionError(
+            "Anthropic client was called — the deterministic create_task "
+            "path was bypassed for a 'certain' parse."
+        )
+    )
+    with _mock.patch.object(app, "bot", mock_bot7), \
+         _mock.patch.object(app, "resolve_identity", return_value=requester), \
+         _mock.patch.object(app.client.messages, "create", mock_anthropic_create):
+        app.run_agent(text, requester.user_id, channel="telegram")
+
+    chk(f"'{text}': app.run_agent() never called the Anthropic client "
+        "(agent_calls=0, proven not just logged)",
+        mock_anthropic_create.call_count == 0)
+    live7 = _real_gw.find_live_contracts(requester.memory_key)
+    chk(f"'{text}': app.run_agent() created exactly one live ActionContract",
+        len(live7) == 1)
+    if live7:
+        chk(f"'{text}': trusted_source is 'deterministic_create_task' via "
+            "the real inbound-message entry point",
+            live7[0].trusted_source == "deterministic_create_task")
+        chk(f"'{text}': title parsed correctly through the full "
+            "run_agent() → route_request() → _queue_deterministic_"
+            "create_task() chain",
+            expected_title in live7[0].normalized_payload.get("fields", {}).values())
 
 
 print()

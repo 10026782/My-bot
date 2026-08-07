@@ -4085,22 +4085,29 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
   BUG-159_CREATE_TASK_NOUN_FORM_PARSER_GAP_20260807.md` ל-Cross-Layer
   Impact Matrix מלא.
 - **בדיקות:** `test_bug159_create_task_noun_form_and_verbs.py` (חדש,
-  44/44) — כל 6 הניסוחים מקריטריוני הסגירה של ה-owner (`צור משימה`/
+  **52/52**) — כל 6 הניסוחים מקריטריוני הסגירה של ה-owner (`צור משימה`/
   `צור משימת`/`צור משימת בדיקה`/`תיצור משימת בדיקה`/`הוסף משימת בדיקה`/
   `תוסיף משימת בדיקה`) מגיעים ל-`intent=create_task, risk=needs_approval,
   handler=tool`; `business_identity()` שקול (fingerprint) בין כל
   הניסוחים לתוכן זהה; "משימות" (רבים, לא נתמך) **לא** תואם — מוכיח
-  שהתיקון מצומצם ולא `\w+` רחב; end-to-end אמיתי (לא רק ברמת router) —
-  `app._queue_deterministic_create_task()` נקרא בפועל, `agent_calls=0`
-  (מאומת בלוג), `trusted_source="deterministic_create_task"` זהה
-  לניסוחי "משימה". regression מלא ירוק: `core/router/test_router.py`
-  (44/44), `test_bug153` (16/16), `test_bug154` (20/20), `test_bug155`
-  (5/5), `test_bug156` (11/11), `smoke_tests.py`, `test_integration.py`
+  שהתיקון מצומצם ולא `\w+` רחב; section 6 — `app._queue_
+  deterministic_create_task()` נקרא ישירות עם ארגומנטים מפורסרים
+  (composition-level proof); **section 7 (CodeRabbit, 07/08/2026)**
+  — end-to-end אמיתי דרך `app.run_agent()` עצמו (נקודת הכניסה
+  האמיתית שה-webhook קורא לה עם טקסט גולמי) — `app.client.messages.
+  create` מוחלף ב-mock שזורק `AssertionError` אם נקרא בכלל, מוכיח
+  `agent_calls=0` **בפועל, לא רק מלוג** — יחד עם contract חי יחיד,
+  `trusted_source` נכון, ו-title נכון, דרך השרשרת המלאה `run_agent()`
+  → `route_request()` → `_queue_deterministic_create_task()`.
+  regression מלא ירוק: `core/router/test_router.py` (44/44),
+  `test_bug153` (16/16), `test_bug154` (20/20), `test_bug155` (5/5),
+  `test_bug156` (11/11), `smoke_tests.py`, `test_integration.py`
   (4/4).
 - **Merged:** לא עדיין
 - **Deployed:** לא
 - **Verified בפרודקשן:** לא
-- **סטטוס:** 🟡 קוד תוקן ונבדק מקומית (44/44 + regression מלא) — **לא
+- **סטטוס:** 🟡 קוד תוקן ונבדק מקומית (52/52, כולל end-to-end אמיתי דרך
+  `run_agent()` + regression מלא) — **לא
   מוזג, לא deployed, לא verified בפרודקשן**
 
 ---
