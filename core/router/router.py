@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 INTENT_CONFIDENCE_THRESHOLD = 0.75
 
 _STRUCTURED_CREATE_TASK_RE = re.compile(
-    r"^\s*(?:צור|תיצור)\s+משימה\s*:?\s*(?P<title>.+?)\s*$"
+    r"^\s*(?:צור|תיצור|הוסף|תוסיף)\s+משימ(?:ה|ת)\s*:?\s*(?P<title>.+?)\s*$"
 )
 _CREATE_TASK_DATE_RE = re.compile(r"(?P<date>\d{1,2}[./-]\d{1,2}[./-]\d{2,4})")
 _CREATE_TASK_TIME_RE = re.compile(r"בשעה\s*(?P<hour>\d{1,2})\s*:\s*(?P<minute>\d{2})")

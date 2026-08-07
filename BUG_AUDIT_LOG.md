@@ -4047,11 +4047,68 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
   transport/UI לעולם אסור לו לדרוס או לדווח בטעות את מצב ה-ActionContract
   החי — בכל פקיעת cache/event, ה-resolution חייב לחזור ל-`contract_id`
   ול-lifecycle של ה-ActionContract עצמו.
+- **Merged:** ✅ כן — PR #556, מוזג ל-`origin/main` (`00ad6f1`), 07/08/2026
+- **Deployed:** לא אומת
+- **Verified בפרודקשן:** לא
+- **סטטוס:** 🟡 קוד מוזג ל-`main` (11/11 + regression מלא + מיפוי TTL מלא)
+  — **deploy+production verification עדיין לא בוצעו/הוצגו**
+
+---
+
+## BUG-159 — הפרסר הדטרמיניסטי של create_task לא מזהה "משימת" (סמיכות) ו-הוסף/תוסיף
+
+- **דווח:** 07/08/2026, ע"י owner — בדיקת staging ידנית, ניתוח מדויק מול
+  הקוד (`core/router/router.py`)
+- **סביבה:** Staging — `my-bot-approval-staging`
+- **מסך / מודול:** `core/router/router.py:26-28`
+  (`_STRUCTURED_CREATE_TASK_RE`)
+- **תיאור:** "צור משימה בדיקת באג 153" (משימה, צורת יסוד) עבר במסלול
+  הדטרמיניסטי (`risk=needs_approval handler=tool`), בעוד "צור משימ**ת**
+  בדיקת באג 155" (צורת סמיכות, ניסוח עברי טבעי לגמרי) נפל דרך ל-Agent
+  loop הכללי (`risk=normal handler=agent`, קריאת Claude אמיתית). בנוסף,
+  "הוסף"/"תוסיף" — פעלים ש-`detect_intent()` כבר מזהה כ-create_task ברמת
+  ה-intent — לא נתמכו בפרסר הדטרמיניסטי כלל, גם עם "משימה" תקנית.
+- **Root Cause (אומת בקוד):** `_STRUCTURED_CREATE_TASK_RE = re.compile(
+  r"^\s*(?:צור|תיצור)\s+משימה\s*:?\s*(?P<title>.+?)\s*$")` — דרש בדיוק
+  "משימה" ורק "צור"/"תיצור". "משימת" לא תואם `fullmatch()` →
+  `DeterministicTaskParse()` ברירת מחדל (`matched=False`) — לא `certain`
+  וגם לא `uncertain` במפורש → נופל ל-`detect_risk()` הגנרי.
+- **Severity:** בינונית-גבוהה — ניסוח עברי טבעי (לא שגיאת קלט) קובע
+  routing/מדיניות אישור שונה; BUG-153's `trusted_source=
+  "deterministic_create_task"` carve-out לא חל על הניסוחים שנפלו דרך.
+- **תוקן (07/08/2026):** `_STRUCTURED_CREATE_TASK_RE = re.compile(
+  r"^\s*(?:צור|תיצור|הוסף|תוסיף)\s+משימ(?:ה|ת)\s*:?\s*(?P<title>.+?)\s*$")`
+  — owner אישר `משימ(?:ה|ת)` (מצומצם) ודחה `\bמשימ\w?` (רחב מדי, עלול
+  לתפוס צורות לא רצויות). שאר `parse_deterministic_create_task()`
+  (תאריך/שעה/title extraction, BUG-154/156) ללא שינוי. ראה
+  `docs/architecture/action-gateway/
+  BUG-159_CREATE_TASK_NOUN_FORM_PARSER_GAP_20260807.md` ל-Cross-Layer
+  Impact Matrix מלא.
+- **בדיקות:** `test_bug159_create_task_noun_form_and_verbs.py` (חדש,
+  **52/52**) — כל 6 הניסוחים מקריטריוני הסגירה של ה-owner (`צור משימה`/
+  `צור משימת`/`צור משימת בדיקה`/`תיצור משימת בדיקה`/`הוסף משימת בדיקה`/
+  `תוסיף משימת בדיקה`) מגיעים ל-`intent=create_task, risk=needs_approval,
+  handler=tool`; `business_identity()` שקול (fingerprint) בין כל
+  הניסוחים לתוכן זהה; "משימות" (רבים, לא נתמך) **לא** תואם — מוכיח
+  שהתיקון מצומצם ולא `\w+` רחב; section 6 — `app._queue_
+  deterministic_create_task()` נקרא ישירות עם ארגומנטים מפורסרים
+  (composition-level proof); **section 7 (CodeRabbit, 07/08/2026)**
+  — end-to-end אמיתי דרך `app.run_agent()` עצמו (נקודת הכניסה
+  האמיתית שה-webhook קורא לה עם טקסט גולמי) — `app.client.messages.
+  create` מוחלף ב-mock שזורק `AssertionError` אם נקרא בכלל, מוכיח
+  `agent_calls=0` **בפועל, לא רק מלוג** — יחד עם contract חי יחיד,
+  `trusted_source` נכון, ו-title נכון, דרך השרשרת המלאה `run_agent()`
+  → `route_request()` → `_queue_deterministic_create_task()`.
+  regression מלא ירוק: `core/router/test_router.py` (44/44),
+  `test_bug153` (16/16), `test_bug154` (20/20), `test_bug155` (5/5),
+  `test_bug156` (11/11), `smoke_tests.py`, `test_integration.py`
+  (4/4).
 - **Merged:** לא עדיין
 - **Deployed:** לא
 - **Verified בפרודקשן:** לא
-- **סטטוס:** 🟡 קוד תוקן ונבדק מקומית (11/11 + regression מלא + מיפוי
-  TTL מלא) — **לא מוזג, לא deployed, לא verified בפרודקשן**
+- **סטטוס:** 🟡 קוד תוקן ונבדק מקומית (52/52, כולל end-to-end אמיתי דרך
+  `run_agent()` + regression מלא) — **לא
+  מוזג, לא deployed, לא verified בפרודקשן**
 
 ---
 
@@ -4064,7 +4121,9 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
 5. **בדיקת suppression fallback** — ✅ נסגר, 04/08/2026 (לא נדרש fault injection)
 6. **BUG-157** — `propose_action()` לא-אטומי (concurrency, **נגיש בפועל** —
    לא latent, ראה "Root Cause" למעלה: scheduler thread + webhook thread
-   יכולים לקרוא במקביל תחת ה-deployment הנוכחי) — ✅ מוזג ל-main
-   (PR #552, PR #555)
+   יכולים לקרוא במקביל תחת ה-deployment הנוכחי) — ✅ מוזג ל-main (PR #552,
+   PR #555)
 7. **BUG-158** — כפתור שפג מדווח "אינה זמינה" גם כש-contract עדיין pending
-   (גבוה) — 🟡 קוד תוקן, PR #556 פתוח
+   (גבוה) — ✅ מוזג ל-main (PR #556)
+8. **BUG-159** — פרסר create_task לא מזהה "משימת"/הוסף/תוסיף (בינוני-גבוה)
+   — 🟡 קוד תוקן, PR #557 פתוח
