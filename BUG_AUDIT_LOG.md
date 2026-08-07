@@ -4472,10 +4472,61 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
   מלאה מסירה את חסם "אין מטריצה" (`CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`
   §6), **אינה** תחליף להחלטת-owner המפורשת שעדיין חסרה (מנגנון ה-
   enforcement הקונקרטי) — נשאר `PLANNING BLOCKED` על הסעיף הזה בלבד.
-- **סטטוס:** 🟡 root cause מאומת בקוד (shadow-only) + **כיוון מדיניות
-  ניתן** (BUG-161's decision מרחיב לכאן) + **Cross-Layer Impact Matrix
-  הושלם** — ממתין **רק** להכרעת-owner על מנגנון ה-enforcement הקונקרטי
-  (silence/clarify/redirect) לפני כל קוד.
+- **החלטת enforcement קונקרטית (owner, 07/08/2026, verbatim):**
+  > "Single final speaker: Gateway. Agent may produce internal
+  > reasoning/tool intent, but never a competing final response.
+  > Clarification is an explicit Coordinator-owned message kind rendered
+  > by Gateway, not an Agent-owned reply."
+
+  זו הכרעה חד-משמעית לטובת **redirect אוטומטי לגייטווי** מבין שלוש
+  האופציות שהוצגו — לא silence גנרי ולא clarify גנרי: Agent מותר לו
+  reasoning/tool-calls פנימיים, אך **אף פעם** לא תשובה סופית מתחרה;
+  clarification עצמו הופך לסוג-הודעה שבבעלות ה-Coordinator/Gateway,
+  לא ניסוח חופשי של Agent.
+
+- **ממצא קריטי (אומת בקוד, 07/08/2026) — המנגנון הזה כבר קיים, בנוי
+  ונבדק, פשוט כבוי:** `app.py:4437-4494` ("PR1 single-speaker boundary",
+  קומנט מפורש בקוד) מיישם **בדיוק** את מה שההחלטה מתארת: כש-`tool_
+  results_log` מכיל רשומת `__approval_queued__` עם `reply_owner==
+  "gateway"` (מאומת שזה קורה **גם** במסלול ה-block/rejected, לא רק
+  בהצלחה — `_queue_approval_detailed_impl()` שורה 1821 קורא
+  `_lifecycle_result = action_gateway.lifecycle_result(_contract_id)`
+  ומגדיר `"reply_owner": _lifecycle_result.reply_owner`, ו-
+  `build_approval_lifecycle_result()` קובע `reply_owner="gateway"`
+  **ללא תנאי** על כל ה-canonical_state branches, כולל `rejected`) —
+  ה-turn מסתיים מיד עם `_lifecycle.safe_user_message` (או `""` אם כבר
+  נשלח דרך side-channel), **בלי לקרוא ל-Agent שוב בכלל**. זה בדיוק
+  "Agent... never a competing final response".
+  **אבל:** כל המנגנון הזה נעול מאחורי `FEATURE_SINGLE_SPEAKER_APPROVAL_
+  UX` — **כבוי כברירת מחדל** (`feature_flags.py:217-218`,
+  `os.environ.get("FEATURE_SINGLE_SPEAKER_APPROVAL_UX", "false")`),
+  ומתועד כ-"PR1 response-routing cutover" — כלומר rollout מדורג שטרם
+  הופעל, לא קוד חדש שצריך להיכתב. יש כיסוי-טסטים קיים ב-7 קבצי טסט
+  (`test_bug112_telegram_approval_ttl.py`, `test_bug155_ttl_expiry_
+  contract_id_lookup.py`, `test_bug_approval_callback_hardening.py`,
+  `test_bug_stale_callback_ux.py`, `test_f52_pr6_pending_shadow.py`,
+  `test_hotfix_e_shared_replay_policy.py`, `test_pr2_deterministic_
+  approval_cost_cuts.py`).
+- **מגבלה חשובה שגם הפעלת הדגל לא סוגרת:** המנגנון הזה תלוי בכך
+  שנוצרה **רשומת** `__approval_queued__` באותו turn — כלומר, הוא פועל
+  רק **אחרי** שה-Agent בפועל ניסה tool_use שהגיע ל-Gateway (המקרה השני
+  בתרחיש BUG-161 שנצפה). את המקרה **הראשון** (Agent מבטיח "אשר בבירור"
+  **מראש**, בלי לנסות tool_use כלל — turn ריק מ-tool_results) המנגנון
+  הזה **לא** יכול לתפוס מבנית, כי אין תוצאת-Gateway להעדיף על פני טקסט
+  ה-Agent. זה נשאר מטופל רק ע"י כלל-הכנות ב-`STATIC_MANIFEST` שכבר
+  נוסף ב-BUG-161 (מניעה ברמת prompt, לא אכיפה מבנית) — "Clarification
+  is an explicit Coordinator-owned message kind" (חלק ב' של ההחלטה)
+  מכסה תיאורטית גם את המקרה הזה, אך מימושו דורש שינוי גדול יותר
+  (Agent לא מייצר טקסט חופשי לקריאה-לbהבהרה כלל — סוג-הודעה נפרד
+  שה-Coordinator עצמו בונה) שלא מומש בסבב הזה — נשאר סעיף פתוח.
+- **סטטוס:** 🟡 root cause מאומת בקוד (shadow-only) + **מדיניות
+  enforcement הוכרעה במפורש** + **Cross-Layer Impact Matrix הושלם** +
+  **המנגנון הנדרש כבר קיים וקודם, ממתין רק להפעלת flag** — לא
+  `PLANNING BLOCKED` יותר על "אין מנגנון". נותר: (1) הפעלת
+  `FEATURE_SINGLE_SPEAKER_APPROVAL_UX` (שינוי-דיפולט קוד ו/או Render env
+  — טרם בוצע, ממתין לאישור-owner מפורש לפני שינוי התנהגות production
+  רחב-היקף), (2) מימוש נפרד ל"Clarification כסוג-הודעה של Coordinator"
+  עבור המקרה-הראשון (טרם החל).
 
 ---
 
