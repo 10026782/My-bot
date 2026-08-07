@@ -153,6 +153,34 @@ applies: yes — נוגע ב-approve/reject lifecycle. **איך:** משחזר it
 - `python3 test_bug158_approval_callback_eventbus_ttl_recovery.py` (חדש)
 - `python3 smoke_tests.py` / `test_integration.py`
 
+## מיפוי TTL — כל ה-TTL-ים הקשורים לאישור, ומי הבעלים של כל אחד (07/08/2026)
+
+לפני מיזוג, ה-owner ביקש לוודא שאין עוד TTL קצר-חיים (transport/UI) מלבד
+זה שכבר תוקן, שעלול "לתקוע" או לדווח בטעות מצב שגוי על ActionContract
+שעדיין חי. מיפוי מלא של כל קבועי ה-TTL הקשורים לאישור בקוד:
+
+| TTL | ערך | שכבה | מצב |
+|---|---|---|---|
+| `core/action_contract_repository.py::CONTRACT_PENDING_TTL_SECONDS` | **24h** | ה-ActionContract עצמו — מקור האמת האמיתי | ✅ נקודת הייחוס |
+| `tma_api.py::_TMA_APPROVAL_TTL_SECONDS` | **24h** | אישורי Telegram Mini App | ✅ **כבר תואם בדיוק** את ה-TTL של ה-ActionContract עצמו — בכוונה, לפי ההערה הקיימת בקוד ("the contract is the source of truth for how old this proposal really is"). אין פער. |
+| `app.py::_PENDING_APPROVAL_TTL` | 10 דק' | כפתור טלגרם — תוקף **מוצהר** למשתמש | ✅ כבר מטופל נכון: כשחוצים את הסף, `_reject_stale_telegram_approval()` (BUG-112) דוחה בפועל, עם וידוא, את ה-ActionContract האמיתי — לא רק את ה-UI |
+| `event_bus.py::PENDING_TTL_MINUTES` | 30 דק' | ה-item הפנימי של EventBus מאחורי כפתור טלגרם | ✅ **זה היה הפער האמיתי — בדיוק מה ש-BUG-158 מתקן** |
+| `event_bus.py::_EXECUTED_FINGERPRINT_TTL` | 10 דק' | cache למניעת ביצוע כפול אחרי execution | מנגנון שונה — מונע הרצה חוזרת של פעולה שכבר בוצעה, לא דיווח סטטוס-pending. לא אותה מחלקת באג. |
+| `core/otp.py::OTP_TTL_MINUTES` | 5 דק' | תוקף קוד OTP (שער אסקלציה פיננסית) | לא קשור — תוקף של קוד עצמו, לא מצב pending של פעולה |
+| `core/emergency_window.py` window TTL | configurable | חלון override זמני למדיניות אישור | מנגנון נפרד, flag-gated |
+| WhatsApp | — | אין שכבת כפתור/TTL קצר בכלל — עובר דרך אותה זרימת אישור-בטקסט (`route_confirmation_word()`) כמו כל ערוץ, ישירות מול ה-ActionContract | אין סיכון |
+| `voice_adapter.py` session TTL | 30 דק' | מצב session של שיחת IVR | אין עדות שהוא מדווח סטטוס pending של ActionContract בכלל |
+
+**מסקנת closure מפורשת:** State קצר-חיים של transport/UI לעולם אסור לו
+לדרוס או לדווח בטעות את מצב ה-ActionContract החי. בכל פקיעת cache/event —
+הפתרון (resolution) חייב לחזור ל-`contract_id` ול-lifecycle של
+ה-ActionContract עצמו. זה בדיוק העיקרון ש-BUG-158 אוכף עכשיו בפועל
+(`_recover_pending_item_from_contract()`), ומהמיפוי למעלה — הוא כבר
+מיושם נכון בכל שאר השכבות (TMA תואם 24h בכוונה, כפתור טלגרם ב-10 דק'
+דוחה בפועל את ה-contract, WhatsApp כלל לא עובר דרך cache ביניים). אין
+פער נוסף שהתגלה שדורש תיקון קוד נפרד — המיפוי עצמו הוא ה-evidence
+לסגירה, לא PR נוסף.
+
 ## סטטוס
 
 עיצוב אושר ע"י owner (07/08/2026 — אפשרות ב', "רק הכפתור פג, הפעולה עדיין

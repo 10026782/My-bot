@@ -4036,11 +4036,22 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
   `test_bug122_pending_queue_ux.py` (8/8),
   `test_approval_gateway_safety.py` (27/27), `smoke_tests.py`,
   `test_integration.py` (4/4) — כולם ירוקים.
+- **מיפוי TTL לפני מיזוג (07/08/2026, לבקשת owner):** נבדקו כל קבועי
+  ה-TTL הקשורים לאישור בקוד (`event_bus.py`, `app.py`, `tma_api.py`,
+  `core/otp.py`, `core/emergency_window.py`, WhatsApp, `voice_adapter.py`)
+  — טבלה מלאה ב-`docs/architecture/action-gateway/
+  BUG-158_APPROVAL_CANCELLATION_EXPIRY_CANONICALIZATION_20260807.md`.
+  **תוצאה: `event_bus.py::PENDING_TTL_MINUTES` (30 דק') היה הפער היחיד**
+  — בדיוק מה שתוקן כאן. TMA כבר תואם 24h בכוונה; שאר המנגנונים לא
+  קשורים לאותה מחלקת באג. **מסקנת closure:** state קצר-חיים של
+  transport/UI לעולם אסור לו לדרוס או לדווח בטעות את מצב ה-ActionContract
+  החי — בכל פקיעת cache/event, ה-resolution חייב לחזור ל-`contract_id`
+  ול-lifecycle של ה-ActionContract עצמו.
 - **Merged:** לא עדיין
 - **Deployed:** לא
 - **Verified בפרודקשן:** לא
-- **סטטוס:** 🟡 קוד תוקן ונבדק מקומית (11/11 + regression מלא) — **לא
-  מוזג, לא deployed, לא verified בפרודקשן**
+- **סטטוס:** 🟡 קוד תוקן ונבדק מקומית (11/11 + regression מלא + מיפוי
+  TTL מלא) — **לא מוזג, לא deployed, לא verified בפרודקשן**
 
 ---
 
