@@ -55,8 +55,12 @@
     Decision: apply a narrow, well-tested **interim tactical patch** to the
     legacy branch rather than block on TC6's full sequence position — a
     live, user-facing defect does not wait for its formal turn when the fix
-    is small, additive, and does not touch authority (only adds the
-    `reply_owner`/`lifecycle_result` fields the sibling branch already set).
+    is small and additive. Precisely: it does not change ActionContract
+    lifecycle authority (still owned by `core/action_gateway.py`, untouched
+    by this patch) — it extends the existing Gateway reply-ownership signal
+    (`reply_owner`/`lifecycle_result`, already set by the sibling branch) to
+    this one previously-inconsistent branch, which does affect which
+    component's text wins at the Gateway/Agent reply-selection boundary.
     This patch is explicitly **not** TC6 and does not reduce TC6's remaining
     scope. It was applied as a direct `app.py` edit, outside the WS2
     agent-prompt/Librarian-bundle/integrator-review workflow this plan
@@ -80,3 +84,14 @@
     the **WS1/WS2/WS3 task breakdown, DoD items (TC1–TC10), and gap
     ownership** — not for current merge-status facts, which drift here
     between updates. Neither directory supersedes the other's own domain.
+
+    **Addendum (07/08/2026, same day):** an attempt to also add this
+    directory's key docs to `turn_coordinator.json`'s `canonical_docs` was
+    reverted — the catalog is calibrated tightly against several different
+    token/document-count budgets (`test_context_librarian.py`,
+    `test_pilot_preflight.py`), and even a minimal, trimmed addition broke
+    5 unrelated profile-query tests. The single-source-of-truth fix above
+    stands on the README cross-reference alone; the Librarian's automatic
+    bundle-building still does not surface this directory. A future fix
+    would need to work the token/document budgets across every affected
+    profile query deliberately, not as a side effect of an unrelated PR.

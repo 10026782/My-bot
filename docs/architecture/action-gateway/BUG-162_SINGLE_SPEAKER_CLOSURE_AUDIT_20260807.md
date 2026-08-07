@@ -190,7 +190,7 @@ BUG-153 בודד, אלא **enumeration ממצה** על כל 6 ערכי `existing
 | שאלה | תשובה |
 |---|---|
 | האם `build_approval_lifecycle_result()` (הבסיס ל-Gate C) תקין? | ✅ כן, תמיד היה — נבדק ומאומת |
-| האם ה-producer (`_queue_approval_detailed_impl()`) עקבי מול הבסיס הזה? | 🔴 היה לא-עקבי ב-1 מתוך 11 exit paths — **עכשיו תוקן ומאומת ב-11/11** |
+| האם ה-producer (`_queue_approval_detailed_impl()`) עקבי מול הבסיס הזה? | 🔴 היה לא-עקבי ב-1 מתוך 11 exit paths — **כל 11 נסקרו (audit coverage), ה-branch הבעייתי תוקן; שאר ה-10 אומתו כנכונים-בעיצוב (§2.2) — לא כולם "מסמנים reply_owner", אלא כולם תואמים את החוזה: מסומן כש-יש contract אמיתי-וסופי, לא-מסומן בכוונה כש-אין (duplicate/unknown/revoked/failed-cleanup וכו')** |
 | האם קיים duplicate authority לא-פתור? | 🟡 כן — שני מנגנונים עצמאיים (§2.4), **מתועד כפתוח, לא תוקן** לפי הנחיה |
 | האם Gate C (Phase 3) עצמו "הושלם"? | ❌ לא — עדיין `PLANNING ONLY` רשמית, למרות שחלק ממנו (PR #471) כבר בפרודקשן |
 | האם יש עכשיו טסט מבני שהיה תופס את BUG-162 מראש? | ✅ כן — `test_bug162_gateway_reply_owner_on_generic_block.py`, 32/32, ממצה על כל הסטטוסים הרלוונטיים |
@@ -250,14 +250,21 @@ status()` (WS2's projection methods) **קיימות** (`core/action_gateway.py:
    `PARALLEL_IMPLEMENTATION_WORKSTREAMS.md`'s file ownership map), כדי
    ש-מימוש TC6 העתידי ימצא את זה בכוונה ויסקור/יאחד או יחליף אותו
    במפורש, לא יגלה סחיפה לא-מוסברת.
-2. **מקור-אמת יחיד לטורן קואורדינטור.** `turn-coordinator/` ו-
-   `turn-coordinator-full/` לא הפנו זו לזו לפני הסבב הזה — בדיוק דוגמה
-   חיה ל-"parallel sources of truth" שהריפו הזה כבר מזהיר מפניה
-   (F52 Contract Coverage Map). תוקן: שני ה-README's מפנים זה לזה
-   במפורש (`turn-coordinator/README.md` קנוני לסטטוס-מיזוג נוכחי;
-   `turn-coordinator-full/` קנוני לפירוק TC1-TC10 ובעלות-פערים) — ראו
-   `DECISION_LOG.md` entry 15. **תוקן גם ב-`docs/context_librarian/
-   layers/turn_coordinator.json`'s `canonical_docs`** — שכלל עד עכשיו
-   רק את `turn-coordinator/`, כך ש-bundles עתידיים (בדיוק המנגנון
-   שאמור למנוע את הסוג הזה של פספוס) לא היו רואים את `turn-coordinator-
-   full/` בכלל. זה תוקן, לא רק תועד — עדכון-קטלוג ממשי, לא רק הערה.
+2. **מקור-אמת יחיד לטורן קואורדינטור — תוקן חלקית.** `turn-coordinator/`
+   ו-`turn-coordinator-full/` לא הפנו זו לזו לפני הסבב הזה — בדיוק
+   דוגמה חיה ל-"parallel sources of truth" שהריפו הזה כבר מזהיר מפניה
+   (F52 Contract Coverage Map). תוקן ברמת התיעוד: שני ה-README's מפנים
+   זה לזה במפורש (`turn-coordinator/README.md` קנוני לסטטוס-מיזוג
+   נוכחי; `turn-coordinator-full/` קנוני לפירוק TC1-TC10 ובעלות-פערים)
+   — ראו `DECISION_LOG.md` entry 15.
+   **⚠️ ניסיון לתקן גם ב-`docs/context_librarian/layers/turn_coordinator.
+   json`'s `canonical_docs` נדחה בחזרה (revert).** גילינו ש-catalog הזה
+   מכויל בצמצום קיצוני מול תקציבי token/document-count של
+   `test_context_librarian.py`/`test_pilot_preflight.py` — אפילו תוספת
+   מינימלית (2 קבצים, טקסט מקוצר) שברה 5 טסטים שונים בסוויטה המלאה,
+   לא רק את זה שנכשל תחילה ב-CI. **מקור-האמת היחיד נשען כרגע רק על
+   ההפניה בין שני ה-README's** — לא על הקטלוג האוטומטי, שנשאר ללא
+   `turn-coordinator-full/`. זה נשאר פער פתוח: bundle עתידי עדיין עלול
+   לפספס את `turn-coordinator-full/` אם לא ייקרא ה-README הראשי ידנית.
+   תיקון-קטלוג עתידי דורש עבודה ממוקדת על תקציבי כל ה-profile queries
+   הרלוונטיים, לא side-fix אגבי.

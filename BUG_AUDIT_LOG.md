@@ -4629,10 +4629,21 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
   הן שתי תיקיות **נפרדות** שתיארו אותה תוכנית, בלי הפניה הדדית — עד
   עכשיו. תוקן: שני ה-README's מפנים זה לזה במפורש (`turn-coordinator/
   README.md` קנוני לסטטוס-מיזוג נוכחי; `turn-coordinator-full/` קנוני
-  לפירוק-המשימות TC1-TC10 ולבעלות-פערים). `docs/context_librarian/
-  layers/turn_coordinator.json`'s `canonical_docs` — שכלל רק את התיקייה
-  הראשונה — עודכן להכיל גם את המסמכים המרכזיים של `turn-coordinator-full/`,
-  כדי ש-bundles עתידיים לא יפספסו את פירוק ה-TC1-TC10 כמו שקרה כאן.
+  לפירוק-המשימות TC1-TC10 ולבעלות-פערים).
+  **⚠️ תיקון (07/08/2026, אחרי CI):** ניסיון לעדכן גם את
+  `docs/context_librarian/layers/turn_coordinator.json`'s
+  `canonical_docs` (להוסיף את `turn-coordinator-full/`) **נדחה בחזרה
+  (revert מלא)** — גילינו ש-catalog הזה מכויל בצמצוד קיצוני מול תקציבי
+  token/document-count מרובים ושונים (`test_context_librarian.py`,
+  `test_pilot_preflight.py`), וגם תוספת מינימלית (2 קבצים, טקסט מקוצר)
+  שברה 5 טסטים שונים בסוויטה המלאה (לא רק את הטסט שנכשל ב-CI תחילה).
+  **מקור-האמת היחיד ל-Turn Coordinator נשען כרגע רק על הפניה בין שני
+  ה-README's עצמם** (רמת התיעוד) — **לא** על הקטלוג האוטומטי של
+  ה-Librarian, שנשאר כפי שהיה (ללא `turn-coordinator-full/`). זה פער
+  שנשאר פתוח במפורש: bundle עתידי עדיין עלול לפספס את `turn-coordinator-
+  full/` אם לא ייקרא ה-README הראשי ידנית. תיקון קטלוג עתידי (אם ירצה
+  ה-owner) דורש עבודה נפרדת, ממוקדת, על תקציבי-הטוקן/מסמכים של כל
+  ה-profile queries הרלוונטיים — לא side-fix אגבי כמו שנוסה כאן.
 - **סטטוס:** 🟡→ קרוב יותר ל-סגירה אמיתית: **root cause אמיתי אותר,
   interim patch תוקן ונבדק בקוד, closure audit מלא בוצע, TC6 סומן נכון
   כ-NEXT_IMPLEMENTATION (לא Done, לא נסגר ע"י ה-patch)** (לא רק "ממתין
