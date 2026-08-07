@@ -169,7 +169,7 @@ for text, _expected_title in [_VARIANTS[1], _VARIANTS[4]]:  # "משימת" and "
 # ══════════════════════════════════════════════════════════════════
 # CodeRabbit (07/08/2026): section 6 למעלה מוכיח ש-parse_deterministic_
 # create_task() + route_request() + _queue_deterministic_create_task()
-# מתחברים נכון זה לזה, ע"י קריאה ישירה ל-_queue_deterministic_
+# מתחברים נכון זה לזה, באמצעות קריאה ישירה ל-_queue_deterministic_
 # create_task() עם ארגומנטים מפורסרים מראש — הוא לא מוכיח שנקודת
 # הכניסה האמיתית של הודעה נכנסת בפרודקשן (app.run_agent(), הפונקציה
 # האמיתית שה-webhook handlers של טלגרם/וואטסאפ קוראים לה עם טקסט גולמי)
@@ -177,7 +177,7 @@ for text, _expected_title in [_VARIANTS[1], _VARIANTS[4]]:  # "משימת" and "
 # בדרך. הסקשן הזה מפעיל את app.run_agent() עצמו — נקודת הכניסה האמיתית,
 # נקראת עם טקסט גולמי בדיוק כמו webhook — עם ה-call site של Anthropic
 # client מוחלף כך שייכשל בקול רם אם ייקרא בכלל, מוכיח את שתי הטענות
-# באמת ולא רק ע"י הרכבה (composition).
+# באמת ולא רק באמצעות הרכבה (composition).
 print("\n── 7. true end-to-end: app.run_agent() (the real inbound-message "
       "entry point) reaches the deterministic path for the NEW phrasings "
       "— zero Anthropic calls, exactly one ActionContract created ──")
