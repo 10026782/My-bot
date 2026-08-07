@@ -167,17 +167,17 @@ for text, _expected_title in [_VARIANTS[1], _VARIANTS[4]]:  # "משימת" and "
 
 
 # ══════════════════════════════════════════════════════════════════
-# CodeRabbit (07/08/2026): section 6 above proves parse_deterministic_
+# CodeRabbit (07/08/2026): section 6 למעלה מוכיח ש-parse_deterministic_
 # create_task() + route_request() + _queue_deterministic_create_task()
-# individually compose correctly, by calling _queue_deterministic_
-# create_task() directly with pre-parsed arguments — it does not prove the
-# actual production inbound-message entry point (app.run_agent(), the real
-# function the Telegram/WhatsApp webhook handlers call with raw user_text)
-# reaches this path for the NEW phrasings, nor that zero Claude API calls
-# happen along the way. This section drives app.run_agent() itself — the
-# real top-level entry point, called with raw text exactly as a webhook
-# would — with the Anthropic client call site patched to fail loudly if
-# ever invoked, proving both claims for real rather than by composition.
+# מתחברים נכון זה לזה, ע"י קריאה ישירה ל-_queue_deterministic_
+# create_task() עם ארגומנטים מפורסרים מראש — הוא לא מוכיח שנקודת
+# הכניסה האמיתית של הודעה נכנסת בפרודקשן (app.run_agent(), הפונקציה
+# האמיתית שה-webhook handlers של טלגרם/וואטסאפ קוראים לה עם טקסט גולמי)
+# מגיעה למסלול הזה עבור הניסוחים החדשים, וגם לא שאין קריאות Claude API
+# בדרך. הסקשן הזה מפעיל את app.run_agent() עצמו — נקודת הכניסה האמיתית,
+# נקראת עם טקסט גולמי בדיוק כמו webhook — עם ה-call site של Anthropic
+# client מוחלף כך שייכשל בקול רם אם ייקרא בכלל, מוכיח את שתי הטענות
+# באמת ולא רק ע"י הרכבה (composition).
 print("\n── 7. true end-to-end: app.run_agent() (the real inbound-message "
       "entry point) reaches the deterministic path for the NEW phrasings "
       "— zero Anthropic calls, exactly one ActionContract created ──")
