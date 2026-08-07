@@ -2427,21 +2427,18 @@ def _notify_missing_or_expired_callback(cq, approver_chat_id: str) -> None:
 
 
 def _recover_pending_item_from_contract(contract_id: str) -> dict | None:
-    """BUG-158: bus.pop() only reflects event_bus.py's own internal TTL
-    (~30 min, PendingActionsStore) — a much shorter, separate clock than the
-    ActionContract's real 24h pending lifetime (core/action_contract_
-    repository.py's CONTRACT_PENDING_TTL_SECONDS). A still-live contract
-    must never be reported to the user as "no longer available" just
-    because this legacy cache's copy of it already aged out.
+    """BUG-158: bus.pop() משקף רק את ה-TTL הפנימי של event_bus.py (~30 דק',
+    PendingActionsStore) — שעון הרבה יותר קצר ונפרד מ-24h TTL האמיתי של
+    ה-ActionContract (core/action_contract_repository.py's
+    CONTRACT_PENDING_TTL_SECONDS). contract שעדיין חי לעולם אסור שיידווח
+    למשתמש כ"לא זמין יותר" רק כי העותק של ה-cache הישן הזה כבר פג.
 
-    New-format (PR1) buttons carry the canonical contract_id directly in
-    callback_data — independent of the EventBus item. When bus.pop() finds
-    nothing, this reconstructs an EventBus-shaped item straight from the
-    ActionContract itself (already the authoritative source for every one
-    of these fields), so the existing approve/reject code below runs
-    completely unchanged. Returns None — the caller's existing "not
-    available" fallback is still correct — when the contract is missing or
-    no longer pending.
+    כפתורים בפורמט חדש (PR1) נושאים את ה-contract_id הקנוני ישירות
+    ב-callback_data — עצמאי מ-item ה-EventBus. כש-bus.pop() לא מוצא כלום,
+    הפונקציה הזו משחזרת item בצורת EventBus ישירות מתוך ה-ActionContract
+    עצמו (כבר המקור הסמכותי לכל אחד מהשדות האלה), כך שהקוד הקיים למטה
+    (approve/reject) רץ ללא שינוי כלל. מחזירה `None` — ה-fallback הקיים
+    של הקורא ("לא זמין") עדיין נכון — כש-ה-contract חסר או כבר לא pending.
     """
     if not (contract_id and _flag_enabled("FEATURE_ACTION_GATEWAY")):
         return None
@@ -2450,8 +2447,8 @@ def _recover_pending_item_from_contract(contract_id: str) -> dict | None:
     if contract is None or contract.status != "pending":
         return None
     logger.info(
-        "[Approval] BUG-158 recovered pending contract after EventBus item "
-        "expiry: contract=%s tool=%s", contract.contract_id, contract.tool_name,
+        "[Approval] BUG-158 שוחזר contract pending אחרי פקיעת item ב-EventBus: "
+        "contract=%s tool=%s", contract.contract_id, contract.tool_name,
     )
     return {
         "payload": {
@@ -2634,11 +2631,11 @@ def _handle_approval_callback_impl(cq) -> None:
         # atomic pop — בדיקת TTL ומחיקה בצעד אחד
         item = bus.pop(action_id)
         if not item:
-            # BUG-158: before declaring "not available", check whether the
-            # button's own callback_contract_id still resolves to a live
-            # pending ActionContract — see _recover_pending_item_from_
-            # contract()'s docstring for why this bus-only check used to be
-            # wrong.
+            # BUG-158: לפני שמכריזים "אינה זמינה", בודקים אם ה-
+            # callback_contract_id של הכפתור עצמו עדיין מצביע על
+            # ActionContract חי ו-pending — ראו את ה-docstring של
+            # _recover_pending_item_from_contract() להסבר למה הבדיקה
+            # שמבוססת רק על EventBus הייתה שגויה.
             item = _recover_pending_item_from_contract(callback_contract_id)
         if not item:
             # No payload was ever available (SB-02's own peek above would
@@ -2976,10 +2973,10 @@ def _handle_approval_callback_impl(cq) -> None:
     elif action == "reject":
         item = bus.pop(action_id)
         if not item:
-            # BUG-158: same recovery as the "approve" branch above — a
-            # still-pending ActionContract, resolvable via the button's own
-            # callback_contract_id, must not be reported as "not available"
-            # just because the EventBus copy already aged out.
+            # BUG-158: אותו שחזור כמו ב-branch "approve" למעלה — contract
+            # שעדיין pending, ניתן-לפתרון דרך ה-callback_contract_id של
+            # הכפתור עצמו, אסור שיידווח כ"אינה זמינה" רק כי העותק ב-
+            # EventBus כבר פג.
             item = _recover_pending_item_from_contract(callback_contract_id)
         if not item:
             _notify_missing_or_expired_callback(cq, approver_chat_id)
