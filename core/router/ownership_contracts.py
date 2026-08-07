@@ -1,7 +1,11 @@
 """Frozen WS1 contracts for ownership, proposals, and bounded resolution.
 
-These types are additive.  They are deliberately not wired into the live
-router until the TC1 integration seam is reviewed.
+These types are additive. ``core/router/router.py`` itself does not import
+this module: the live wiring runs through the separate
+``core/turn_coordinator_runtime.py`` seam (``queue_task_request()``), called
+from ``app.py``'s ``run_agent()`` for deterministic create/update/complete-task
+routing. See ``docs/architecture/turn-coordinator/README.md`` for current
+wiring status.
 """
 
 from __future__ import annotations

@@ -1,12 +1,30 @@
 # TurnCoordinator + TurnEnvelope
 
-## Current implementation status — 2026-08-02
+## Current implementation status — 2026-08-07
 
 The architecture documents remain the authority for the staged Turn
 Coordinator plan. WS1 foundation contracts were merged in PR #536. The narrow
 runtime integration PR #545, head `1d117ab`, was merged as `46db9af`; follow-up
-PR #546 is also merged. WS2 and WS3 remain downstream; the approved order is
-WS1 → WS2 → WS3, with staging and rollout gates still required.
+PR #546 is also merged. WS1 is live and unflagged: `app.py`'s `run_agent()`
+calls `core/turn_coordinator_runtime.py`'s `queue_task_request()` directly for
+deterministic create/update/complete-task routing — `core/router/router.py`
+itself never imports `ownership_contracts.py`/`task_builders.py`/
+`task_resolvers.py`; that module's own docstring previously said "not wired
+into the live router," which described a state that had already changed.
+
+"WS2 and WS3 remain downstream" undersold what's actually merged, so it's
+being corrected here rather than repeated: both landed as code in PRs
+#537–#544, but neither affects user-facing output today. WS2
+(`lifecycle_projection.py`/`evidence_projection.py`, via
+`ActionGateway.approval_status()`/`execution_status()`) is imported and
+called from `core/action_gateway.py`'s deterministic status-query path, but
+its return value is discarded at both call sites — the actual reply text
+still comes from the older `build_approval_lifecycle_result()` path. WS3
+(`lifecycle_message_adapter.py`/`evidence_message_adapter.py`/
+`message_surface_harness.py`) is pure and unwired — imported only by its own
+tests. The approved rollout order (WS1 → WS2 → WS3, staging and rollout
+gates required) is unchanged; this update only corrects what "merged" means
+for each workstream today.
 
 ## Purpose
 
