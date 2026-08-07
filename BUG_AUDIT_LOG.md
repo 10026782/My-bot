@@ -3550,13 +3550,26 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
   `test_integration.py` (4/4) — כולם ירוקים.
 - **Merged:** ✅ כן — PR #550, מוזג ל-`origin/main` (`e26de4a`) (עודכן
   07/08/2026 — אומת: `git merge-base --is-ancestor e26de4a origin/main`)
-- **Deployed:** ✅ כן (עקיף) — Render: "Deploy live for `44fe0fb`"
-  (07/08/2026, 11:34); `e26de4a` הוא ancestor מאומת (`git merge-base
-  --is-ancestor e26de4a 44fe0fb`) — **לא נבדק ישירות בפרודקשן בסבב
-  האימות הזה** (owner בדק ישירות רק BUG-158/159)
-- **Verified בפרודקשן:** לא (התרחיש הספציפי של הבאג הזה לא נבדק ישירות)
-- **סטטוס:** 🟡 מוזג ל-`main` + deployed (עקיף/ancestor) — **production
-  verification ישיר לתרחיש הזה עדיין לא בוצע**
+- **Deployed:** ✅ כן — Render: "Deploy live for `44fe0fb`" (07/08/2026,
+  11:34); `e26de4a` הוא ancestor מאומת (`git merge-base --is-ancestor
+  e26de4a 44fe0fb`)
+- **Verified בפרודקשן (07/08/2026 14:22-14:23, owner, `my-bot-approval-
+  staging` Render logs):** ✅ **כן.** נשלח "צור משימה בדיקת 156 עד
+  12-08-26 בשעה 14:54" בטלגרם, נדחה (14:23:17), ואז נשלחה **אותה בקשה
+  בדיוק** שוב (14:23:23). הלוג מצטט במפורש:
+  ```
+  [ActionGateway] BUG-153 reconfirmation מפורש: פותח contract חדש לבקשת
+  create_task דטרמיניסטית ש-fingerprint שלה תואם contract שנדחה=
+  2b5a0c55-62db-43c4-9faf-a9222c03638a fingerprint=26195bce6309
+  user=boss_hq:eliyahu.
+  ```
+  contract חדש (`47d6b0b7-0571-4e3f-b7ea-aeee6a6164bb`) נפתח מיד
+  (`status=pending`), בעוד ה-contract הישן (`2b5a0c55-...`) נשאר
+  `rejected` — בדיוק ההתנהגות שהתיקון מבטיח: explicit reconfirmation
+  נפתח, autonomous replay עדיין נחסם.
+- **סטטוס:** ✅ **VERIFIED IN PROD** — merged (`e26de4a`→`44fe0fb`) +
+  deployed (Render, 07/08/2026 11:34) + production-verified (owner,
+  07/08/2026 14:23, לוג אמיתי מצוטט למעלה)
 
 ---
 
@@ -3773,11 +3786,26 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
   `test_bug153_create_task_reconfirmation_after_rejection.py` (11/11, ללא
   שינוי), `core/router/test_router.py` (44/44, ללא שינוי), `smoke_tests.py`,
   `test_integration.py` (4/4) — כולם ירוקים.
-- **Merged:** לא עדיין
-- **Deployed:** לא
-- **Verified בפרודקשן:** לא
-- **סטטוס:** 🟡 עיצוב אושר ע"י owner (אפשרות ב), קוד תוקן ונבדק מקומית —
-  **לא מוזג, לא deployed, לא verified בפרודקשן**
+- **Merged:** ✅ כן — PR #550, commit `4337abe`, מוזג ל-`origin/main`
+  (`e26de4a`) (עודכן 07/08/2026 — אומת: `git merge-base --is-ancestor
+  4337abe origin/main`)
+- **Deployed:** ✅ כן — Render: "Deploy live for `44fe0fb`" (07/08/2026,
+  11:34); `4337abe` הוא ancestor מאומת (`git merge-base --is-ancestor
+  4337abe 44fe0fb`)
+- **Verified בפרודקשן (07/08/2026 14:22, owner, `my-bot-approval-staging`
+  Render logs):** ✅ **כן.** נשלח "צור משימה בדיקת 156 עד 12-08-26 בשעה
+  14:54" בטלגרם. הבוט החזיר בפועל:
+  ```
+  יש משימה שממתינה לאישור: בדיקת 156
+
+  ⚠️ שים לב: השעה שצוינה (14:54) לא תישמר ברשומה — רק התאריך יישמר.
+  ```
+  ניסוח מדויק, זהה ל-`extra_note` שנבנה ב-`app.py:995` — מוכיח שה-warning
+  המפורש (אפשרות ב שה-owner בחר) אכן מוצג בפרודקשן במקום להבטיח בשקט
+  שמירת שעה שלא נשמרת.
+- **סטטוס:** ✅ **VERIFIED IN PROD** — merged (`4337abe`→`44fe0fb`) +
+  deployed (Render, 07/08/2026 11:34) + production-verified (owner,
+  07/08/2026 14:22, לוג אמיתי מצוטט למעלה)
 
 ---
 
@@ -4178,9 +4206,9 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
 בנפרד לפירוט מדויק של מה כן/לא נבדק).
 
 1. **BUG-155** — TTL expiry משאיר pending חי (קריטי) — ✅ מוזג + deployed ל-main (PR #550)
-2. **BUG-153** — create חדש אחרי rejection נחסם (גבוה) — ✅ מוזג + deployed ל-main (PR #550)
+2. **BUG-153** — create חדש אחרי rejection נחסם (גבוה) — ✅ מוזג + deployed + **VERIFIED IN PROD** (PR #550)
 3. **BUG-154** — parser crash בניסוח "ל־תאריך" (גבוה) — ✅ מוזג + deployed ל-main (PR #550)
-4. **BUG-156** — שעה אינה נשמרת (בינוני-גבוה) — ✅ מוזג + deployed ל-main (PR #550)
+4. **BUG-156** — שעה אינה נשמרת (בינוני-גבוה) — ✅ מוזג + deployed + **VERIFIED IN PROD** (PR #550)
 5. **בדיקת suppression fallback** — ✅ נסגר, מוזג + deployed (PR #550)
 6. **BUG-157** — `propose_action()` לא-אטומי (concurrency, **נגיש בפועל** —
    לא latent, ראה "Root Cause" למעלה: scheduler thread + webhook thread
