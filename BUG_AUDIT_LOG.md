@@ -4519,14 +4519,27 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
   מכסה תיאורטית גם את המקרה הזה, אך מימושו דורש שינוי גדול יותר
   (Agent לא מייצר טקסט חופשי לקריאה-לbהבהרה כלל — סוג-הודעה נפרד
   שה-Coordinator עצמו בונה) שלא מומש בסבב הזה — נשאר סעיף פתוח.
+- **החלטת owner על אופן ההפעלה (07/08/2026):** נשאלה מפורשות בין שלוש
+  אופציות (שינוי דיפולט בקוד / השארה כבוי כרגע / הפעלה ידנית ב-Render
+  env) — **נבחרה האופציה השלישית**: ה-owner יפעיל את
+  `FEATURE_SINGLE_SPEAKER_APPROVAL_UX` **ידנית ב-Render environment**
+  (staging/production), **לא** דרך שינוי הדיפולט ב-`feature_flags.py`.
+  **שום קוד לא שונה** בעקבות ההחלטה הזו — הדיפולט ב-`feature_flags.py`
+  נשאר `"false"` במכוון, כפי שהוא, כדי שסביבות ללא env var מפורש
+  (למשל CI/טסטים מקומיים) לא ישתנו. הפעלה בפועל = פעולת-owner ב-Render
+  dashboard, מחוץ להיקף session זה — **אין claim על deploy/activation
+  בפועל עד שה-owner יאשר שה-env var אכן הוגדר וש-behavior אומת
+  ב-production**, לפי כלל הברזל.
 - **סטטוס:** 🟡 root cause מאומת בקוד (shadow-only) + **מדיניות
   enforcement הוכרעה במפורש** + **Cross-Layer Impact Matrix הושלם** +
   **המנגנון הנדרש כבר קיים וקודם, ממתין רק להפעלת flag** — לא
-  `PLANNING BLOCKED` יותר על "אין מנגנון". נותר: (1) הפעלת
-  `FEATURE_SINGLE_SPEAKER_APPROVAL_UX` (שינוי-דיפולט קוד ו/או Render env
-  — טרם בוצע, ממתין לאישור-owner מפורש לפני שינוי התנהגות production
-  רחב-היקף), (2) מימוש נפרד ל"Clarification כסוג-הודעה של Coordinator"
-  עבור המקרה-הראשון (טרם החל).
+  `PLANNING BLOCKED` יותר על "אין מנגנון" (הוחלף ב-🟡 "ממתין להפעלה
+  תפעולית + לאימות בפועל"). נותר: (1) ה-owner יפעיל את
+  `FEATURE_SINGLE_SPEAKER_APPROVAL_UX` ב-Render env ידנית (לא קוד),
+  ואז נדרש אימות-production חוזר לתרחיש BUG-161/162 המקורי כדי לסגור
+  בפועל; (2) מימוש נפרד ל"Clarification כסוג-הודעה של Coordinator"
+  עבור התרחיש-הראשון (Agent מבטיח מראש, בלי tool_use) — טרם החל,
+  נשאר סעיף פתוח נפרד.
 
 ---
 
@@ -4747,11 +4760,17 @@ production הזה עצמו חשף 3 באגים חדשים (BUG-160/161/162, למ
 10. **BUG-161** — reconfirmation לא עקבי בין המסלול הדטרמיניסטי ל-Agent
     (גבוה) — 🟡 **Cross-Layer Impact Matrix הושלם** + מומש חלקית
     (`core_knowledge.py` honesty rule, מונע הבטחה מראש) — סגירה מלאה
-    תלויה בהכרעת-enforcement של BUG-162, ראו בלוק מלא למעלה
+    תלויה בהפעלת `FEATURE_SINGLE_SPEAKER_APPROVAL_UX` (ראו BUG-162) +
+    אימות production
 11. **BUG-162** — הפרת turn-ownership: Agent מדבר ב-turn של gateway
-    (בינוני-גבוה) — 🟡 **Cross-Layer Impact Matrix הושלם**, אך `PLANNING
-    BLOCKED` על סעיף יחיד שנשאר: הכרעת-owner על מנגנון ה-enforcement
-    הקונקרטי (silence/clarify/redirect) — אין קוד runtime עדיין
+    (בינוני-גבוה) — 🟡 **מדיניות enforcement הוכרעה במפורש** ("Single
+    final speaker: Gateway") + **המנגנון כבר קיים בקוד** (`app.py:4437-
+    4494`, "PR1 single-speaker boundary"), נעול מאחורי
+    `FEATURE_SINGLE_SPEAKER_APPROVAL_UX` (כבוי כברירת-מחדל) — owner
+    יפעיל ידנית ב-Render env (לא שינוי-דיפולט קוד); ממתין להפעלה
+    תפעולית + אימות-production חוזר לסגירה סופית. חלק ב' של ההחלטה
+    ("Clarification כסוג-הודעה של Coordinator", מכסה את תרחיש-ה-
+    Agent-מבטיח-מראש) עדיין לא מומש — סעיף פתוח נפרד
 12. **BUG-163** — כיסוי intent חסר ל-complete_task/update_task ("השלם",
     "סמן...כבוצע/ה") (גבוה) — ✅ **תוקן ומאומת** (12/12 טסטים חדשים,
     44/44 regression) — טרם deployed/verified בפרודקשן
