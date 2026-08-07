@@ -568,16 +568,30 @@ class ExecutionLedger:
         # הקיימת, ולא מקור אמת חדש למחזור החיים.
         self._by_user: dict[str, dict[str, ActionContract]] = {}
         self._lock = threading.Lock()
-        # BUG-157: fingerprints "claimed" by a proposer that has passed the
-        # existing-contract dedup check but not yet completed save() — closes
-        # the race where two threads in the same process (e.g. scheduler.py's
-        # background thread calling propose_action() via lead_recovery.py/
-        # followup_engine.py, concurrently with the main request thread) both
-        # see "no blocking existing contract" before either has saved, and
-        # both create a live contract for the identical business fingerprint.
-        # See claim_fingerprint_cas()/release_fingerprint_claim() and
-        # docs/architecture/action-gateway/BUG-157_ATOMIC_FINGERPRINT_CLAIM_20260805.md.
-        self._claimed_fingerprints: set[str] = set()
+        # BUG-157: fingerprints ש"נתפסו" ע"י proposer שעבר את בדיקת ה-dedup
+        # מול contract קיים אך טרם השלים save() — סוגר את ה-race שבו שתי
+        # thread באותו process (למשל ה-thread הרקעי של scheduler.py, שקורא
+        # ל-propose_action() דרך lead_recovery.py/followup_engine.py, במקביל
+        # ל-thread הראשי שמטפל בבקשה) שתיהן רואות "אין contract קיים חוסם"
+        # לפני ששתיהן סיימו save(), וכל אחת יוצרת contract חי לאותו
+        # fingerprint עסקי. ראה claim_fingerprint_cas()/release_fingerprint_
+        # claim() ו-docs/architecture/action-gateway/
+        # BUG-157_ATOMIC_FINGERPRINT_CLAIM_20260805.md.
+        # BUG-157 round 2 (CodeRabbit): a plain dict מ-fingerprint ל-token
+        # אטום, לא רק set — כדי ש-_cache_contract() (הנקרא גם מנתיבי read-
+        # path בלבד — find_by_id()/find_by_fingerprint()/find_live_by_user()/
+        # update_status() שמחממים cache מה-repository, לא מ-caller שבאמת
+        # claim-ם) לעולם לא ישחרר claim ששייך למישהו אחר. רק בעל ה-token
+        # שהוחזר לו מ-claim_fingerprint_cas() רשאי לשחרר.
+        self._claim_tokens: dict[str, str] = {}
+        # Condition על אותו self._lock (לא lock נפרד) — מאפשר ל-claim
+        # שהפסיד ב-race להמתין (עם timeout חסום) עד ש-claim מתחרה משתחרר,
+        # במקום לנסות שוב מייד. חיוני כש-save() כולל I/O עמיד אמיתי
+        # (FEATURE_ACTION_CONTRACT_PERSISTENCE=on): בלי המתנה, מפסיד יכול
+        # למצות את כל ניסיונות ה-retry בזמן שהמנצח עדיין באמצע כתיבה
+        # ל-repository, ולקבל כשל "עומס גבוה" שגוי במקום להמתין ולראות
+        # את ה-contract שהמנצח באמת יצר.
+        self._claim_released_condition = threading.Condition(self._lock)
         self._airtable_writer = airtable_writer        # callable(contract) → None — legacy best-effort mirror (Phase 4A)
         # ActionContractRepository | None. When set, reads recover through it
         # and lifecycle updates persist there before the RAM cache changes.
@@ -586,46 +600,81 @@ class ExecutionLedger:
 
     def claim_fingerprint_cas(
         self, fingerprint: str, expected_contract_id: str | None,
-    ) -> bool:
-        """BUG-157: atomic compare-and-set claim on a business fingerprint.
+        *, wait_timeout: float = 0.0,
+    ) -> str | None:
+        """BUG-157: atomic compare-and-set claim על fingerprint עסקי.
 
-        `expected_contract_id` is the contract_id the caller's own prior
-        find_by_fingerprint() call observed for this fingerprint (or None if
-        it observed no contract at all). Returns True — claim granted, the
-        caller now owns this fingerprint and MUST follow up with exactly one
-        of save() (via _cache_contract(), which releases the claim
-        automatically) or release_fingerprint_claim() — only if BOTH:
-          1. _by_fingerprint[fingerprint] is still exactly what the caller
-             observed (nothing else has completed a save() for this
-             fingerprint since), and
-          2. no other proposer's claim on this exact fingerprint is already
-             in flight.
-        Returns False (race lost) otherwise — the caller must re-run its
-        lookup and react to the now-current state, never proceed to save()
-        as if this were still "no existing contract."
+        `expected_contract_id` הוא ה-contract_id שקריאת find_by_fingerprint()
+        הקודמת של הקורא ראתה עבור fingerprint זה (או None אם לא נראה שום
+        contract). מחזיר **token** אטום (str) — claim הוענק, הקורא כעת בעלים
+        של ה-fingerprint הזה וחייב להמשיך עם אחד משני, **עם אותו token
+        בדיוק**: save() (מעביר `claim_token=`, ראה _cache_contract()) או
+        release_fingerprint_claim(fingerprint, token). מחזיר `None` (claim
+        לא הוענק) רק אם:
+          1. _by_fingerprint[fingerprint] כבר שונה ממה שהקורא ראה (מישהו
+             אחר השלים save() ל-fingerprint הזה מאז), או
+          2. יש claim מתחרה שכבר בתהליך על אותו fingerprint בדיוק (ולא
+             שוחרר עד שה-wait_timeout חלף).
+
+        `wait_timeout`: אם ה-claim נכשל **ספציפית** כי claim מתחרה כרגע
+        בתהליך (לא כי _by_fingerprint כבר הצביע על משהו שונה ממה שהקורא
+        ציפה — שם המתנה לא עוזרת, כי המצב כבר סופי ושונה, וצריך lookup טרי)
+        — ממתין עד `wait_timeout` שניות ל-claim המתחרה שישוחרר, בודק מחדש,
+        וחוזר על עצמו עד שה-timeout חולף.
+
+        BUG-157 round 2 (CodeRabbit, 07/08/2026): לפני התוספת הזו,
+        `_cache_contract()` היה משחרר claim על fingerprint ללא בדיקה שהוא
+        אכן שייך לו — כולל כשהוא נקרא מנתיב **read-path בלבד**
+        (find_by_id()/find_by_fingerprint()/find_live_by_user() שמחממים את
+        ה-cache מה-repository, לא caller שבאמת claim-ם). caller B שרק
+        *קורא* fingerprint (למשל find_by_fingerprint() תוך כדי retry loop
+        משלו) יכול היה בטעות לשחרר claim פעיל של caller A, ולזכות ב-claim
+        השני בעצמו — שני callers חושבים ששניהם הבעלים החוקיים, שניהם
+        עוברים ל-save(), שני contracts נוצרים לאותו fingerprint (בדיוק
+        ה-race המקורי ש-BUG-157 נועד לסגור). ה-token האטום סוגר את זה:
+        רק מי שהחזיק בפועל את ה-token שהוענק לו רשאי לשחרר.
         """
-        with self._lock:
-            current_cid = self._by_fingerprint.get(fingerprint)
-            if current_cid != expected_contract_id:
-                return False
-            if fingerprint in self._claimed_fingerprints:
-                return False
-            self._claimed_fingerprints.add(fingerprint)
-            return True
+        deadline = time.monotonic() + wait_timeout
+        with self._claim_released_condition:
+            while True:
+                current_cid = self._by_fingerprint.get(fingerprint)
+                if current_cid != expected_contract_id:
+                    return None
+                if fingerprint not in self._claim_tokens:
+                    token = uuid.uuid4().hex
+                    self._claim_tokens[fingerprint] = token
+                    return token
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                self._claim_released_condition.wait(timeout=remaining)
 
-    def release_fingerprint_claim(self, fingerprint: str) -> None:
-        """Releases a claim_fingerprint_cas() reservation without a save() —
-        used when the proposal attempt aborts after claiming (e.g. a
-        persistence failure). Idempotent (safe even if already released by
-        _cache_contract() or a prior call)."""
-        with self._lock:
-            self._claimed_fingerprints.discard(fingerprint)
+    def release_fingerprint_claim(self, fingerprint: str, token: str) -> None:
+        """משחרר claim_fingerprint_cas() reservation בלי save() — למקרה
+        שניסיון ה-proposal מבוטל אחרי ה-claim (למשל כשל persistence).
+        Idempotent (בטוח גם אם כבר שוחרר) — **ורק אם `token` תואם בדיוק**
+        את ה-token הפעיל כרגע על ה-fingerprint הזה (BUG-157 round 2 — אחרת
+        קריאה כפולה/מאוחרת הייתה יכולה לשחרר claim חדש של מישהו אחר). מעיר
+        (notify_all) רק כשבאמת שוחרר claim."""
+        with self._claim_released_condition:
+            if self._claim_tokens.get(fingerprint) == token:
+                del self._claim_tokens[fingerprint]
+                self._claim_released_condition.notify_all()
 
-    def _cache_contract(self, contract: ActionContract) -> None:
-        with self._lock:
+    def _cache_contract(self, contract: ActionContract, *, claim_token: str | None = None) -> None:
+        """`claim_token`: מועבר **רק** ע"י save() של הקורא שבאמת מחזיק claim
+        פעיל על ה-fingerprint הזה (מ-propose_action(), אחרי claim_fingerprint_
+        cas() מוצלח). קריאות read-path-בלבד (find_by_id()/find_by_fingerprint()/
+        find_live_by_user()/update_status() שמחממות cache מה-repository)
+        **חייבות** להשאיר את זה `None` — אחרת הן עלולות לשחרר claim פעיל
+        שאינו שלהן (BUG-157 round 2, ראה claim_fingerprint_cas())."""
+        with self._claim_released_condition:
             self._store[contract.contract_id] = contract
-            self._by_fingerprint[contract.business_action_fingerprint] = contract.contract_id
-            self._claimed_fingerprints.discard(contract.business_action_fingerprint)
+            fp = contract.business_action_fingerprint
+            self._by_fingerprint[fp] = contract.contract_id
+            if claim_token is not None and self._claim_tokens.get(fp) == claim_token:
+                del self._claim_tokens[fp]
+                self._claim_released_condition.notify_all()
             self._by_user.setdefault(contract.canonical_user_id, {})[
                 contract.contract_id
             ] = contract
@@ -672,7 +721,7 @@ class ExecutionLedger:
                 cached.version = fresh.version
         return fresh
 
-    def save(self, contract: ActionContract) -> bool:
+    def save(self, contract: ActionContract, *, claim_token: str | None = None) -> bool:
         # Phase 4B-1A: when a repository is configured it is authoritative for
         # NEW proposals. Persist before publishing the contract into RAM so a
         # failed durable write can never leave an actionable RAM-only contract.
@@ -688,7 +737,7 @@ class ExecutionLedger:
             if persisted is not True:
                 raise ActionContractPersistenceError("repository save returned non-True")
 
-        self._cache_contract(contract)
+        self._cache_contract(contract, claim_token=claim_token)
         if self._airtable_writer:
             try:
                 self._airtable_writer(contract)
@@ -1526,7 +1575,18 @@ class ActionGateway:
         # contention on one exact business fingerprint is not an expected
         # real workload. See docs/architecture/action-gateway/
         # BUG-157_ATOMIC_FINGERPRINT_CLAIM_20260805.md.
+        #
+        # BUG-157 המשך (סבב ביקורת שני של CodeRabbit): ניסיון שהפסיד ב-race
+        # אסור שיחזור מייד ל-lookup וימצה את _CLAIM_MAX_ATTEMPTS בזמן
+        # שהמנצח עדיין באמצע save() — רלוונטי במיוחד כש-FEATURE_ACTION_
+        # CONTRACT_PERSISTENCE מופעל ו-save() מבצע I/O עמיד אמיתי עם
+        # latency לא-טריוויאלי. _CLAIM_TOTAL_WAIT_BUDGET_SECONDS הוא תקציב
+        # ההמתנה ה-**כולל** לשחרור claim מתחרה על פני כל הניסיונות (לא
+        # per-attempt) — יורד עם כל ניסיון כדי שהלולאה עדיין תסתיים מהר.
         _CLAIM_MAX_ATTEMPTS = 5
+        _CLAIM_TOTAL_WAIT_BUDGET_SECONDS = 2.0
+        _claim_wait_deadline = time.monotonic() + _CLAIM_TOTAL_WAIT_BUDGET_SECONDS
+        _claim_token: str | None = None
         existing: ActionContract | None = None
         for _claim_attempt in range(_CLAIM_MAX_ATTEMPTS):
             # The durable lookup happens before generating any contract
@@ -1601,7 +1661,11 @@ class ActionGateway:
                     )
 
             expected_prior_contract_id = existing.contract_id if existing else None
-            if self._ledger.claim_fingerprint_cas(fingerprint, expected_prior_contract_id):
+            _remaining_wait = max(0.0, _claim_wait_deadline - time.monotonic())
+            _claim_token = self._ledger.claim_fingerprint_cas(
+                fingerprint, expected_prior_contract_id, wait_timeout=_remaining_wait,
+            )
+            if _claim_token is not None:
                 break
             logger.info(
                 "[ActionGateway] BUG-157 fingerprint claim race lost "
@@ -1670,7 +1734,7 @@ class ActionGateway:
             contract.status = "approved"
 
         try:
-            self._ledger.save(contract)
+            self._ledger.save(contract, claim_token=_claim_token)
         except ActionContractPersistenceError as exc:
             # BUG-157: save() failed — the fingerprint claim from above was
             # never fulfilled by _cache_contract() (which only releases it
@@ -1678,8 +1742,11 @@ class ActionGateway:
             # Otherwise this fingerprint would stay permanently claimed —
             # every future proposal attempt for the identical business
             # action would loop through _CLAIM_MAX_ATTEMPTS and fail, even
-            # though no live contract actually exists for it.
-            self._ledger.release_fingerprint_claim(fingerprint)
+            # though no live contract actually exists for it. Passes the
+            # same token claim_fingerprint_cas() returned (BUG-157 round 2)
+            # so a stale/duplicate release can never clear someone else's
+            # claim on this fingerprint.
+            self._ledger.release_fingerprint_claim(fingerprint, _claim_token)
             logger.error(
                 "[ActionGateway] durable proposal persistence failed: tool=%s "
                 "fingerprint=%.12s user=%s error=%s",
