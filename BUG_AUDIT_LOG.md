@@ -3970,11 +3970,61 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
   `test_pr0c_action_contracts_persistence.py` (16/16),
   `core/router/test_router.py` (44/44), `smoke_tests.py`,
   `test_integration.py` (4/4) — כולם ירוקים.
-- **Merged:** לא — כלול ב-PR #555 (עדיין פתוח)
+- **Merged:** ✅ כן — PR #555, מוזג ל-`origin/main` (`bf9b670`), 07/08/2026
+- **Deployed:** לא אומת
+- **Verified בפרודקשן:** לא
+- **סטטוס:** 🟡 קוד מוזג ל-`main` — **deploy+production verification
+  עדיין לא בוצעו/הוצגו**
+
+---
+
+## BUG-159 — הפרסר הדטרמיניסטי של create_task לא מזהה "משימת" (סמיכות) ו-הוסף/תוסיף
+
+- **דווח:** 07/08/2026, ע"י owner — בדיקת staging ידנית, ניתוח מדויק מול
+  הקוד (`core/router/router.py`)
+- **סביבה:** Staging — `my-bot-approval-staging`
+- **מסך / מודול:** `core/router/router.py:26-28`
+  (`_STRUCTURED_CREATE_TASK_RE`)
+- **תיאור:** "צור משימה בדיקת באג 153" (משימה, צורת יסוד) עבר במסלול
+  הדטרמיניסטי (`risk=needs_approval handler=tool`), בעוד "צור משימ**ת**
+  בדיקת באג 155" (צורת סמיכות, ניסוח עברי טבעי לגמרי) נפל דרך ל-Agent
+  loop הכללי (`risk=normal handler=agent`, קריאת Claude אמיתית). בנוסף,
+  "הוסף"/"תוסיף" — פעלים ש-`detect_intent()` כבר מזהה כ-create_task ברמת
+  ה-intent — לא נתמכו בפרסר הדטרמיניסטי כלל, גם עם "משימה" תקנית.
+- **Root Cause (אומת בקוד):** `_STRUCTURED_CREATE_TASK_RE = re.compile(
+  r"^\s*(?:צור|תיצור)\s+משימה\s*:?\s*(?P<title>.+?)\s*$")` — דרש בדיוק
+  "משימה" ורק "צור"/"תיצור". "משימת" לא תואם `fullmatch()` →
+  `DeterministicTaskParse()` ברירת מחדל (`matched=False`) — לא `certain`
+  וגם לא `uncertain` במפורש → נופל ל-`detect_risk()` הגנרי.
+- **Severity:** בינונית-גבוהה — ניסוח עברי טבעי (לא שגיאת קלט) קובע
+  routing/מדיניות אישור שונה; BUG-153's `trusted_source=
+  "deterministic_create_task"` carve-out לא חל על הניסוחים שנפלו דרך.
+- **תוקן (07/08/2026):** `_STRUCTURED_CREATE_TASK_RE = re.compile(
+  r"^\s*(?:צור|תיצור|הוסף|תוסיף)\s+משימ(?:ה|ת)\s*:?\s*(?P<title>.+?)\s*$")`
+  — owner אישר `משימ(?:ה|ת)` (מצומצם) ודחה `\bמשימ\w?` (רחב מדי, עלול
+  לתפוס צורות לא רצויות). שאר `parse_deterministic_create_task()`
+  (תאריך/שעה/title extraction, BUG-154/156) ללא שינוי. ראה
+  `docs/architecture/action-gateway/
+  BUG-159_CREATE_TASK_NOUN_FORM_PARSER_GAP_20260807.md` ל-Cross-Layer
+  Impact Matrix מלא.
+- **בדיקות:** `test_bug159_create_task_noun_form_and_verbs.py` (חדש,
+  44/44) — כל 6 הניסוחים מקריטריוני הסגירה של ה-owner (`צור משימה`/
+  `צור משימת`/`צור משימת בדיקה`/`תיצור משימת בדיקה`/`הוסף משימת בדיקה`/
+  `תוסיף משימת בדיקה`) מגיעים ל-`intent=create_task, risk=needs_approval,
+  handler=tool`; `business_identity()` שקול (fingerprint) בין כל
+  הניסוחים לתוכן זהה; "משימות" (רבים, לא נתמך) **לא** תואם — מוכיח
+  שהתיקון מצומצם ולא `\w+` רחב; end-to-end אמיתי (לא רק ברמת router) —
+  `app._queue_deterministic_create_task()` נקרא בפועל, `agent_calls=0`
+  (מאומת בלוג), `trusted_source="deterministic_create_task"` זהה
+  לניסוחי "משימה". regression מלא ירוק: `core/router/test_router.py`
+  (44/44), `test_bug153` (16/16), `test_bug154` (20/20), `test_bug155`
+  (5/5), `test_bug156` (11/11), `smoke_tests.py`, `test_integration.py`
+  (4/4).
+- **Merged:** לא עדיין
 - **Deployed:** לא
 - **Verified בפרודקשן:** לא
-- **סטטוס:** 🟡 קוד תוקן ונבדק מקומית (34/34) — **לא מוזג, לא deployed,
-  לא verified בפרודקשן**
+- **סטטוס:** 🟡 קוד תוקן ונבדק מקומית (44/44 + regression מלא) — **לא
+  מוזג, לא deployed, לא verified בפרודקשן**
 
 ---
 
@@ -3987,6 +4037,9 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
 5. **בדיקת suppression fallback** — ✅ נסגר, 04/08/2026 (לא נדרש fault injection)
 6. **BUG-157** — `propose_action()` לא-אטומי (concurrency, **נגיש בפועל** —
    לא latent, ראה "Root Cause" למעלה: scheduler thread + webhook thread
-   יכולים לקרוא במקביל תחת ה-deployment הנוכחי) — ✅ core מוזג ל-main
-   (PR #552); המשך (wait-for-claim-release + claim-ownership token) —
-   🟡 קוד תוקן, PR #555 פתוח, טרם מוזג
+   יכולים לקרוא במקביל תחת ה-deployment הנוכחי) — ✅ מוזג ל-main (PR #552,
+   PR #555)
+7. **BUG-158** — כפתור שפג מדווח "אינה זמינה" גם כש-contract עדיין pending
+   (גבוה) — 🟡 קוד תוקן, PR #556 פתוח
+8. **BUG-159** — פרסר create_task לא מזהה "משימת"/הוסף/תוסיף (בינוני-גבוה)
+   — 🟡 קוד תוקן, PR נפרד
