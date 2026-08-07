@@ -2426,6 +2426,52 @@ def _notify_missing_or_expired_callback(cq, approver_chat_id: str) -> None:
             pass
 
 
+def _recover_pending_item_from_contract(contract_id: str) -> dict | None:
+    """BUG-158: bus.pop() only reflects event_bus.py's own internal TTL
+    (~30 min, PendingActionsStore) — a much shorter, separate clock than the
+    ActionContract's real 24h pending lifetime (core/action_contract_
+    repository.py's CONTRACT_PENDING_TTL_SECONDS). A still-live contract
+    must never be reported to the user as "no longer available" just
+    because this legacy cache's copy of it already aged out.
+
+    New-format (PR1) buttons carry the canonical contract_id directly in
+    callback_data — independent of the EventBus item. When bus.pop() finds
+    nothing, this reconstructs an EventBus-shaped item straight from the
+    ActionContract itself (already the authoritative source for every one
+    of these fields), so the existing approve/reject code below runs
+    completely unchanged. Returns None — the caller's existing "not
+    available" fallback is still correct — when the contract is missing or
+    no longer pending.
+    """
+    if not (contract_id and _flag_enabled("FEATURE_ACTION_GATEWAY")):
+        return None
+    from core.action_gateway import action_gateway as _gw_recover
+    contract = _gw_recover.find_contract(contract_id)
+    if contract is None or contract.status != "pending":
+        return None
+    logger.info(
+        "[Approval] BUG-158 recovered pending contract after EventBus item "
+        "expiry: contract=%s tool=%s", contract.contract_id, contract.tool_name,
+    )
+    return {
+        "payload": {
+            "tool_name": contract.tool_name,
+            "tool_inputs": contract.normalized_payload,
+            "user_chat_id": contract.origin_chat_id,
+            "channel": contract.origin_channel,
+            "origin_channel": contract.origin_channel,
+            "origin_chat_id": contract.origin_chat_id,
+            "canonical_user_id": contract.canonical_user_id,
+            "contract_id": contract.contract_id,
+            "tenant_id": contract.tenant_id,
+        },
+        "label": _describe_tool_call(contract.tool_name, contract.normalized_payload),
+        "action": "",
+        "chat_id": contract.origin_chat_id,
+        "created": None,
+    }
+
+
 def _deliver_callback_final(
     cq,
     *,
@@ -2587,6 +2633,13 @@ def _handle_approval_callback_impl(cq) -> None:
 
         # atomic pop — בדיקת TTL ומחיקה בצעד אחד
         item = bus.pop(action_id)
+        if not item:
+            # BUG-158: before declaring "not available", check whether the
+            # button's own callback_contract_id still resolves to a live
+            # pending ActionContract — see _recover_pending_item_from_
+            # contract()'s docstring for why this bus-only check used to be
+            # wrong.
+            item = _recover_pending_item_from_contract(callback_contract_id)
         if not item:
             # No payload was ever available (SB-02's own peek above would
             # have found the same nothing) — no specific action to name,
@@ -2922,6 +2975,12 @@ def _handle_approval_callback_impl(cq) -> None:
 
     elif action == "reject":
         item = bus.pop(action_id)
+        if not item:
+            # BUG-158: same recovery as the "approve" branch above — a
+            # still-pending ActionContract, resolvable via the button's own
+            # callback_contract_id, must not be reported as "not available"
+            # just because the EventBus copy already aged out.
+            item = _recover_pending_item_from_contract(callback_contract_id)
         if not item:
             _notify_missing_or_expired_callback(cq, approver_chat_id)
             return
