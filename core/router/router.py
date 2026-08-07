@@ -91,6 +91,23 @@ def _normalize_create_task_input(text: str) -> str:
         if value.startswith(">"):
             value = value[1:].strip()
             continue
+        # BUG-160: an unbalanced leading quote/bracket — its matching closer
+        # never appears anywhere in the rest of the text — is message-
+        # wrapping noise (copy-paste artifact, a stray typed quote), not
+        # content. Strip only the single leading character; never assume a
+        # matching close exists elsewhere and strip both sides. Deliberately
+        # narrower than the balanced-pair case above: if the closing char
+        # DOES appear somewhere later (just not at the exact end), that
+        # shape is genuinely ambiguous and is left untouched — same
+        # unmatched-fallthrough behavior as before this fix.
+        if len(value) >= 2:
+            for opening, closing in _CREATE_TASK_QUOTE_PAIRS:
+                if value.startswith(opening) and closing not in value[1:]:
+                    value = value[1:].strip()
+                    break
+            else:
+                break
+            continue
         break
     return " ".join(value.split())
 

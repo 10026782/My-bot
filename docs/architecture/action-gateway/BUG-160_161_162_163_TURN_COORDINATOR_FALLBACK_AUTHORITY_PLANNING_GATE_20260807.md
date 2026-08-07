@@ -1,24 +1,59 @@
-# BUG-161/162/163 — Turn-Coordinator-Adjacent Fallback Authority Planning Gate
+# BUG-160/161/162/163 — Turn-Coordinator-Adjacent Fallback Authority Planning Gate
 
 **תאריך:** 07/08/2026
 **שער מחייב:** מסמך זה נכתב לפי `docs/architecture/CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`
 (§7) — כל מסמך Planning Gate הנוגע ב-reasoning/routing/tools/actions/approvals/execution
 חייב לפתוח בהפניה מפורשת לשער הזה ולא להתקדם בלי Cross-Layer Impact Matrix מלא
 (§2 שם). Baseline: `main` `e54f9f0` (07/08/2026).
-**היקף:** שלושת הבאגים נפתחו יחד באותו סבב אימות (Turn Coordinator E2E,
-07/08/2026, ראו `BUG_AUDIT_LOG.md`), וה-owner ביקש במפורש לפתוח את המטריצה
-עבור שלושתם יחד ולא לדחות אף אחד מהם בנפרד — גם אם רמת-המימוש שלהם שונה
-(ראו §0 למטה).
+**היקף:** ארבעת הבאגים נפתחו יחד באותו סבב אימות (Turn Coordinator E2E,
+07/08/2026, ראו `BUG_AUDIT_LOG.md`) — BUG-160 היה קיים ורשום עוד לפני
+הסבב הזה (staging validation, 03-07/08/2026) אך נשכח מהמטריצה בכתיבה
+הראשונה; ה-owner ביקש במפורש לתקן זאת ("שכחתי את באג 160 בתוך הלייר")
+ולפתוח את המטריצה עבור **ארבעתם** יחד, לא לדחות אף אחד בנפרד — גם אם
+רמת-המימוש שלהם שונה (ראו §0 למטה). כל ארבעת הבאגים שייכים לאותה שרשרת
+תצפית אחת: BUG-160 הוא ה-trigger הקונקרטי (מרכאה לא-מאוזנת מפילה
+create_task למסלול Agent) שממנו נחשפו BUG-161/162 (מה ה-Agent עושה
+כשהוא מגיע לשם) — BUG-163 נתגלה בנפרד, באותו סבב, בתרחישי update/complete
+task.
 
 ---
 
-## 0. סטטוס מימוש בפועל של כל אחד משלושת הבאגים (לפני המטריצה)
+## 0. סטטוס מימוש בפועל של כל אחד מארבעת הבאגים (לפני המטריצה)
 
 | באג | מדיניות הוכרעה? | קוד שונה בסבב הזה? | סטטוס אחרי הסבב |
 |---|---|---|---|
+| **BUG-160** | לא נדרשה — תיקון parser צר | ✅ כן — `core/router/router.py` | 🟢 מומש, בדוק |
 | **BUG-163** | לא נדרשה — תיקון parser צר | ✅ כן — `core/router/intent_router.py` | 🟢 מומש, בדוק |
 | **BUG-161** | ✅ כן (owner, 07/08/2026 — אופציה א') | ✅ חלקית — `core_knowledge.py` (system-prompt honesty rule) | 🟡 מומש חלקית — ראה §0.2 למגבלה |
 | **BUG-162** | ❌ לא — מנגנון ה-enforcement עצמו עדיין לא הוכרע | ❌ לא | 🔴 עדיין PLANNING BLOCKED על החלטת owner נפרדת |
+
+### 0.0 BUG-160 — מה בדיוק מומש
+
+`core/router/router.py::_normalize_create_task_input()` — לפני התיקון,
+זוג-מרכאות/סוגריים הוסר **רק** אם גם הפתיחה וגם הסגירה קיימות
+(`value.startswith(opening) and value.endswith(closing)`). מרכאה פותחת
+בודדת ללא סוגרת תואמת (למשל `"צור משימה ... 14:54` — התחלה עם `"`, בלי
+`"` נוסף בהמשך כלל) נשארה לעולם לא-מוסרת, ושברה את
+`_STRUCTURED_CREATE_TASK_RE.fullmatch()` (דורש שהמחרוזת תתחיל ישירות
+בפועל-הטריגר) — נפילה שקטה למסלול Agent, בדיוק כמו BUG-159 אך מסיבה
+שונה (פיסוק, לא צורת-פועל).
+
+**התיקון:** נוסף מקרה שלישי, צר, ללולאת ה-strip הקיימת והחסומה
+(`for _ in range(4)`): אם הערך מתחיל בתו-פתיחה מתוך `_CREATE_TASK_QUOTE_
+PAIRS` **וה-תו-הסגירה התואם לא מופיע בשום מקום בהמשך המחרוזת** — מוסר
+**רק** תו-הפתיחה הבודד (לא מניחים סגירה-שקיימת-איפשהו ומורידים גם
+אותה). אם תו-הסגירה **כן** מופיע במקום כלשהו (רק לא בדיוק בסוף) — הצורה
+נשארת מכוונת-לא-ברורה ולא-מטופלת, בדיוק כמו לפני התיקון (אין stripping
+חדש למקרה עמום). מאומת ב-`test_bug160_unbalanced_quote_create_task.py`
+(15/15) — כולל בדיקה מפורשת שהמקרה העמום (`"say hi" צור משימה...`)
+נשאר לא-תואם, ושכל ה-stripping הקיים (זוגות מאוזנים, `>`, `Eli:`/`אלי:`)
+לא השתנה.
+
+**חשוב להיות מדויקים (אותה הערה כמו BUG-163):** זה מתקן פרסור/נירמול
+בלבד — לא נוגע ב-`Handler`/authority. הבקשה שהייתה נופלת בעבר ל-Agent
+בגלל המרכאה השבורה עכשיו מגיעה ל-`Handler.TOOL` **הקיים כבר** ל-
+`CREATE_TASK` (`router.py:234-239`, לא שונה כאן) — משלים תיקון-parser,
+לא פותח נתיב-authority חדש.
 
 ### 0.1 BUG-163 — מה בדיוק מומש
 
@@ -102,49 +137,77 @@ block — אין היום אכיפה שתמנע ממנו "לדבר" ב-turn שא
 
 ### שכבה 1 — Core Reasoning / BUG-104
 **touched: not touched.**
-1. **grep evidence:** `git diff -- core/router/intent_router.py core_knowledge.py | grep -c "BUG-104\|leads_reasoning_projection\|FEATURE_CORE_REASONING_LEADS_STATE"` → **0**.
+1. **grep evidence:** `git diff -- core/router/router.py core/router/intent_router.py core_knowledge.py | grep -c "BUG-104\|leads_reasoning_projection\|FEATURE_CORE_REASONING_LEADS_STATE"` → **0**.
 2. **unchanged-tests evidence:** `test_bug104_*.py` (5 חבילות) לא נוגעות
    בשום קובץ ששונה בסבב הזה — לא הורצו כי אין תלות; `smoke_tests.py`
    (הכולל import-sanity לכל המודולים) ירוק לפני ואחרי.
 3. **no-new-coupling evidence:** אין `import` חדש ל-`core.leads_reasoning_
-   projection`/`core.adapters.leads_adapter` באף אחד משני הקבצים ששונו.
+   projection`/`core.adapters.leads_adapter` באף אחד משלושת הקבצים ששונו.
 
 ### שכבה 2 — TurnCoordinator (de-facto: `router.py::route_request()` + `intent_router.py` + Agent free-text, per `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` §1 שכבה 2)
-**touched: directly** (BUG-163 — `intent_router.py`, נצרך ישירות ע"י
+**touched: directly** (BUG-160 — `router.py::_normalize_create_task_input()`,
+נצרך ישירות ע"י `parse_deterministic_create_task()`→`route_request()`)
+**וגם directly** (BUG-163 — `intent_router.py`, נצרך ישירות ע"י
 `router.py:193`'s `detect_intent(text)`) **וגם directly** (BUG-161 —
 `core_knowledge.py`, קובע את הטקסט שה-Agent מייצר בזמן ש-Handler.AGENT
 הוא בעל ה-turn).
-- **input impact:** BUG-163 — אותו `text` input ל-`detect_intent()`, אין
-  שינוי סוג/מקור/סמנטיקה של signal — רק הרחבת כיסוי-regex. BUG-161 —
-  אין input חדש; system prompt static, לא תלוי ב-per-turn state.
-- **output impact:** BUG-163 — `route.intent` עכשיו `complete_task` (היה
-  `unknown`) לשתי הניסוחים החדשות בלבד; `route.handler` **לא** משתנה
-  (נשאר `Handler.AGENT` — PA-01's גap לא נסגר כאן, ראה §0.1). BUG-161 —
-  אין output-signal חדש; רק תוכן הטקסט שה-Agent עשוי לחבר.
-- **authority impact:** **אין לאף אחד מהשניים.** BUG-163 לא נותן
-  `Handler.TOOL` לאף intent חדש. BUG-161 לא משנה מי מחליט `reply_owner`
-  (זה עדיין shadow-only, ללא אכיפה — ראה §0.2).
-- **shared identifiers:** `Intent.COMPLETE_TASK`/`Intent.UPDATE_TASK` —
-  נצרכים, לא מוגדרים-מחדש. אין identifier חדש נוסף בשכבה הזו.
-- **invariants:** "ספציפי לפני כללי" (סדר ה-`_RULES` list) נשמר — הכללים
-  החדשים נוספו ליד הכלל הקיים של `COMPLETE_TASK`, עדיין לפני `DELETE_TASK`/
-  `LIST_TASKS`; מאומת ב-regression (`LIST_TASKS` על "אילו משימות כבר
-  בוצעו" עדיין נכון, לא נחטף ע"י התבנית החדשה).
-- **failure semantics:** ללא שינוי-חומרה. סיווג-שגוי היפותטי של intent
-  עדיין נופל ל-`Handler.AGENT` (בדיוק כמו `unknown` היה נופל) — אין נתיב
-  `Handler.TOOL` חדש שסיווג שגוי יכול "לפתוח" בטעות (PA-01 עדיין לא
-  קיים). ה-blast radius חסום כרגע בבנייה, לא בזכות התיקון הזה.
-- **observability:** `route.to_log()`'s `intent=complete_task` (היה
+- **input impact:** BUG-160 — אותו `text` input ל-`_normalize_create_task_
+  input()`, אין שינוי סוג/מקור/סמנטיקה — רק הרחבת מקרה-strip נוסף, צר.
+  BUG-163 — אותו `text` input ל-`detect_intent()`, אין שינוי סוג/מקור/
+  סמנטיקה של signal — רק הרחבת כיסוי-regex. BUG-161 — אין input חדש;
+  system prompt static, לא תלוי ב-per-turn state.
+- **output impact:** BUG-160 — `parse_deterministic_create_task().certain`
+  עובר `False→True` (ו-`Handler.TOOL` **הקיים כבר** ל-`CREATE_TASK` נבחר
+  בפועל, לא נוצר) רק למחרוזות עם מרכאה/סוגריים פותחים בלתי-מאוזנים
+  שהתו-הסוגר שלהם לא מופיע בשום מקום אחר במחרוזת. BUG-163 — `route.intent`
+  עכשיו `complete_task` (היה `unknown`) לשתי הניסוחים החדשות בלבד;
+  `route.handler` **לא** משתנה (נשאר `Handler.AGENT` — PA-01's גap לא
+  נסגר כאן, ראה §0.1). BUG-161 — אין output-signal חדש; רק תוכן הטקסט
+  שה-Agent עשוי לחבר.
+- **authority impact:** **אין לאף אחד מהשלושה.** BUG-160 לא יוצר נתיב-
+  authority חדש — `Handler.TOOL` ל-`CREATE_TASK` כבר קיים ומוגדר
+  (`router.py:234-239`, לא שונה), רק מספר יותר בקשות מגיעות אליו בפועל.
+  BUG-163 לא נותן `Handler.TOOL` לאף intent חדש. BUG-161 לא משנה מי
+  מחליט `reply_owner` (זה עדיין shadow-only, ללא אכיפה — ראה §0.2).
+- **shared identifiers:** `Intent.CREATE_TASK`/`Intent.COMPLETE_TASK`/
+  `Intent.UPDATE_TASK` — נצרכים, לא מוגדרים-מחדש. אין identifier חדש
+  נוסף בשכבה הזו.
+- **invariants:** "ספציפי לפני כללי" (סדר ה-`_RULES` list, ל-BUG-163)
+  נשמר — הכללים החדשים נוספו ליד הכלל הקיים של `COMPLETE_TASK`, עדיין
+  לפני `DELETE_TASK`/`LIST_TASKS`; מאומת ב-regression (`LIST_TASKS` על
+  "אילו משימות כבר בוצעו" עדיין נכון, לא נחטף ע"י התבנית החדשה).
+  BUG-160's invariant: stripping חד-צדדי קורה **רק** כשאין תו-סגירה
+  תואם בשום מקום אחר במחרוזת — מקרה עמום (סוגר מופיע, לא בסוף) נשאר
+  לא-מטופל, אין הרחבת-כיסוי-יתר; מאומת ישירות בטסט (`"say hi" צור
+  משימה...` נשאר unmatched).
+- **failure semantics:** ללא שינוי-חומרה בשני המקרים. BUG-160 — worst
+  case: מחרוזת עם מרכאה-פותחת-בלתי-מאוזנת שהייתה נופלת ל-Agent ממשיכה
+  ליפול ל-Agent אם התו-הסוגר כן מופיע איפשהו (מקרה עמום, לא מטופל
+  בכוונה) — שום מחרוזת חדשה לא מתחילה "לזלוג" תוכן שלא היה חלק מהכותרת
+  המקורית. BUG-163 — סיווג-שגוי היפותטי של intent עדיין נופל ל-
+  `Handler.AGENT` (בדיוק כמו `unknown` היה נופל) — אין נתיב `Handler.TOOL`
+  חדש שסיווג שגוי יכול "לפתוח" בטעות (PA-01 עדיין לא קיים). ה-blast
+  radius חסום כרגע בבנייה, לא בזכות התיקון הזה.
+- **observability:** BUG-160 — `route.to_log()`'s `handler=tool
+  intent=create_task` (היה `handler=agent`) למחרוזות עם מרכאה-בלתי-
+  מאוזנת שהתו-הסוגר שלהן לא מופיע בהמשך — נראה בלוג הקיים, אין שדה
+  חדש. BUG-163 — `route.to_log()`'s `intent=complete_task` (היה
   `unknown`) לשתי הניסוחים החדשות — נראה בלוג הקיים, אין שדה חדש.
-- **cross-layer tests:** `test_bug163_complete_task_intent_coverage.py`
-  (12/12, כולל בדיקת אי-התנגשות מפורשת עם `LIST_TASKS`) +
-  `core/router/test_router.py` (44/44, ללא regression) +
-  `test_bug161_agent_no_reconfirmation_promise.py` (7/7 — מוודא את
-  מיקום/ניסוח כלל-הכנות + את תקינות ה-Gateway backstop שהכלל נשען עליו).
+- **cross-layer tests:** `test_bug160_unbalanced_quote_create_task.py`
+  (15/15, כולל בדיקת שהמקרה העמום נשאר unmatched ושה-stripping הקיים
+  לא השתנה) + `test_bug163_complete_task_intent_coverage.py` (12/12,
+  כולל בדיקת אי-התנגשות מפורשת עם `LIST_TASKS`) + `core/router/
+  test_router.py` (44/44, ללא regression) + `test_bug153_create_task_
+  reconfirmation_after_rejection.py` (16/16, ללא regression) +
+  `test_bug159_create_task_noun_form_and_verbs.py` (52/52, ללא
+  regression) + `test_hotfix_c_create_task_verb.py` (12/12, ללא
+  regression) + `test_bug161_agent_no_reconfirmation_promise.py` (7/7
+  — מוודא את מיקום/ניסוח כלל-הכנות + את תקינות ה-Gateway backstop
+  שהכלל נשען עליו).
 
 ### שכבה 3 — F52 / Phase 4C Action & Tool Contract
 **touched: not touched.**
-1. **grep evidence:** `git diff -- core/router/intent_router.py core_knowledge.py | grep -c "ToolMeta\|tool_registry\|dispatch_tool\|action_validator\|tools/schemas\|tools\.dispatcher"` → **0**.
+1. **grep evidence:** `git diff -- core/router/router.py core/router/intent_router.py core_knowledge.py | grep -c "ToolMeta\|tool_registry\|dispatch_tool\|action_validator\|tools/schemas\|tools\.dispatcher"` → **0**.
 2. **unchanged-tests evidence:** לא נוגע ב-`tool_registry.py`/`tools/
    dispatcher.py`/`action_validator.py` — אין נתיב שיכול לשבור טסטים של
    השכבה הזו; `smoke_tests.py`'s "Tool registry / dispatcher sanity"
@@ -152,8 +215,10 @@ block — אין היום אכיפה שתמנע ממנו "לדבר" ב-turn שא
 3. **no-new-coupling evidence:** אין `import` חדש ממודול בשכבה 3.
 
 ### שכבה 4 — Durable Atomic Approval
-**touched: indirectly** (BUG-161 בלבד; BUG-163 לא נוגע כלל).
-- **grep evidence (זיהוי):** `git diff -- core/router/intent_router.py core_knowledge.py | grep -c "ActionContract\|ActionGateway\|action_gateway\.py\|propose_action"` → **0** — כלומר **אין** קריאה/הפניה **ישירה בקוד** לזהויות של שכבה 4. הנגיעה היא **התנהגותית**, לא-מזוהה ב-grep, ולכן חייבת להיות מתועדת במפורש כאן (לא רק "0 → not touched"):
+**touched: indirectly** (BUG-161 בלבד; BUG-160/163 לא נוגעים כלל — BUG-160
+משנה רק את סיווג ה-parser, לא נוגע ב-ActionContract/Gateway; מאומת
+ב-grep מתחת).
+- **grep evidence (זיהוי):** `git diff -- core/router/router.py core/router/intent_router.py core_knowledge.py | grep -c "ActionContract\|ActionGateway\|action_gateway\.py\|propose_action"` → **0** — כלומר **אין** קריאה/הפניה **ישירה בקוד** לזהויות של שכבה 4, בשום אחד משלושת הקבצים ששונו. הנגיעה (של BUG-161 בלבד) היא **התנהגותית**, לא-מזוהה ב-grep, ולכן חייבת להיות מתועדת במפורש כאן (לא רק "0 → not touched"):
 - **input impact:** אין — `core_knowledge.py`'s prompt לא קורא ל-Gateway.
 - **output impact:** אין ישיר — אבל כלל-הכנות **מניח (assumes)** שהתנהגות
   ה-block הקיימת ב-`core/action_gateway.py:1622-1643`
@@ -194,8 +259,8 @@ block — אין היום אכיפה שתמנע ממנו "לדבר" ב-turn שא
 
 ## 2. Cross-Cutting Guard — RP5 Evidence Finalization (§1.5 ב-`CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`)
 
-**applies: yes**, ל-BUG-161 בלבד. BUG-163 (סיווג intent גרידא, לפני כל
-tool_use/evidence) — **לא applies**, `grep` על diff-163 מול
+**applies: yes**, ל-BUG-161 בלבד. BUG-160/163 (שניהם פרסור/סיווג גרידא,
+לפני כל tool_use/evidence) — **לא applies**, `grep` על diff-160/163 מול
 "action-status\|tool-result evidence\|ActionContract.status\|outcome_
 unknown\|reply grounding" → 0 matches, אין נגיעה ב-claim-classification.
 
@@ -224,24 +289,32 @@ unknown\|reply grounding" → 0 matches, אין נגיעה ב-claim-classificati
 ## 4. הרצות אימות שבוצעו (07/08/2026)
 
 ```text
-python3 test_bug163_complete_task_intent_coverage.py   → 12/12 passed
-python3 test_bug161_agent_no_reconfirmation_promise.py → 7/7 passed
-python3 core/router/test_router.py                     → 44/44 passed
-python3 smoke_tests.py                                  → PASS (all checks)
-python3 -m py_compile core_knowledge.py core/router/intent_router.py → OK
+python3 test_bug160_unbalanced_quote_create_task.py     → 15/15 passed
+python3 test_bug163_complete_task_intent_coverage.py    → 12/12 passed
+python3 test_bug161_agent_no_reconfirmation_promise.py  → 7/7 passed
+python3 core/router/test_router.py                      → 44/44 passed
+python3 test_bug153_create_task_reconfirmation_after_rejection.py → 16/16 passed
+python3 test_bug159_create_task_noun_form_and_verbs.py  → 52/52 passed
+python3 test_hotfix_c_create_task_verb.py               → 12/12 passed
+python3 smoke_tests.py                                   → PASS (all checks)
+python3 -m py_compile core_knowledge.py core/router/router.py core/router/intent_router.py → OK
 ```
 
 `test_turn_coordinator_task_runtime_integration.py::test_app_create_
-consumer_receives_gateway_mapping` נכשל גם **לפני** הסבב הזה (אומת עם
-`git stash` — כשל זהה על `main`/הענף הנוכחי ללא השינויים) — כשל
-לא-קשור, קיים-מראש, לא נגרם ולא הוחמר ע"י BUG-161/163.
+consumer_receives_gateway_mapping` נכשל גם **לפני** הסבב הזה (אומת פעמיים
+עם `git stash` — פעם ראשונה אחרי BUG-161/163, פעם שנייה שוב אחרי BUG-160
+— כשל זהה בשני המקרים על הענף ללא השינויים) — כשל לא-קשור, קיים-מראש,
+לא נגרם ולא הוחמר ע"י אף אחד מארבעת הבאגים בסבב הזה.
 
 ---
 
 ## 5. מסקנה ומצב-סגירה
 
+- **BUG-160:** 🟢 מומש, בדוק, ללא regression מאומת (כולל regression מלא
+  על כל סוויטות ה-create_task הקיימות: BUG-153/159, Hotfix C). ניתן
+  לסגור בעצמאות — אינו תלוי ב-BUG-161/162/163.
 - **BUG-163:** 🟢 מומש, בדוק, ללא regression מאומת. ניתן לסגור בעצמאות —
-  אינו תלוי ב-BUG-161/162.
+  אינו תלוי ב-BUG-160/161/162.
 - **BUG-161:** 🟡 מומש חלקית (המניעה המונעת-מראש, ברמת prompt) —
   **לא** ניתן לסגור סופית ("✅ Fixed") לפי כלל-הברזל, כי הסגירה המלאה
   תלויה במנגנון-enforcement שעדיין לא קיים (BUG-162). מצב מדויק:

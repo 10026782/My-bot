@@ -4241,7 +4241,7 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
 
 ---
 
-## BUG-160 — מרכאה לא מאוזנת עוקפת את המסלול הדטרמיניסטי של create_task
+## BUG-160 — מרכאה לא מאוזנת עוקפת את המסלול הדטרמיניסטי של create_task — ✅ תוקן ומאומת (טרם deployed/verified בפרודקשן)
 
 - **דווח:** 07/08/2026, ע"י owner — נחשף תוך כדי אימות production של #546
 - **סביבה:** Production — `my-bot-approval-staging` (Render)
@@ -4287,7 +4287,29 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
   - `agent_calls=0` נשמר לכל קלט שהיה עובר כ-`.certain` אלמלא הפיסוק
     הבלתי-תקין
   - אין regression לניקוי הקיים של מרכאות מאוזנות/prefix של "Eli:"/">"
-- **סטטוס:** 🔴 נרשם, root cause מאומת בקוד, לא תוקן.
+- **תוקן (07/08/2026):** נוסף מקרה שלישי, צר, ללולאת ה-strip הקיימת
+  והחסומה של `_normalize_create_task_input()`: מרכאה/סוגר פותח שהתו-
+  הסוגר התואם שלו **לא מופיע בשום מקום אחר במחרוזת** — מוסר רק תו-הפתיחה
+  הבודד (לא מניחים שקיימת סגירה איפשהו ומורידים גם אותה). מקרה עמום
+  (התו-הסוגר כן מופיע, רק לא בדיוק בסוף) נשאר **במכוון** לא-מטופל — אין
+  stripping חדש למקרה לא-חד-משמעי, בהתאם לקריטריון-הסגירה השני
+  ("clarify fail-closed" נשמר כברירת-מחדל לכל מה שלא-ודאי). אופציית-
+  הסגירה שנבחרה היא (a) מהקריטריונים למעלה — strip חד-צדדי בטוח, לא (b).
+- **Cross-Layer Impact Matrix:** מולא ב-`docs/architecture/action-gateway/
+  BUG-160_161_162_163_TURN_COORDINATOR_FALLBACK_AUTHORITY_PLANNING_GATE_
+  20260807.md` (נכתב יחד עם BUG-161/162/163 לפי בקשת ה-owner — "שכחתי את
+  באג 160 בתוך הלייר"). שכבה 2 (TurnCoordinator) touched directly; שכבות
+  1/3/4 not touched (grep=0 מאומת בכל שלושתן).
+- **בדיקות:** `test_bug160_unbalanced_quote_create_task.py` (חדש, 15/15
+  — כולל התרחיש המדויק מהלוג, ה-due_date שמנותח נכון, כל ה-stripping
+  הקיים ללא regression, והמקרה העמום שנשאר במכוון unmatched) +
+  `core/router/test_router.py` (44/44) + `test_bug153_create_task_
+  reconfirmation_after_rejection.py` (16/16) + `test_bug159_create_
+  task_noun_form_and_verbs.py` (52/52) + `test_hotfix_c_create_task_
+  verb.py` (12/12) — כולם ללא regression, ו-`smoke_tests.py` (PASS).
+- **סטטוס:** ✅ CODE DONE, מאומת מקומית (טסט חדש + regression מלא על כל
+  סוויטות ה-create_task). **לא** נדחף/נפרס עדיין — לא VERIFIED IN PROD
+  עד push+deploy+אימות production בפועל, לפי כלל הברזל.
 
 ---
 
@@ -4359,7 +4381,7 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
   תשובה אמיתית שאין אישור ממתין — **לא** לנסח הזמנה ל"אשר בבירור" ולא
   לדמות reconfirmation semantics שה-runtime לא תומך בהם בפועל.
 - **Cross-Layer Impact Matrix הושלם (07/08/2026):**
-  `docs/architecture/action-gateway/BUG-161_162_163_TURN_COORDINATOR_
+  `docs/architecture/action-gateway/BUG-160_161_162_163_TURN_COORDINATOR_
   FALLBACK_AUTHORITY_PLANNING_GATE_20260807.md` — נכתב יחד עם BUG-162/163
   לפי בקשת ה-owner ("כאן ממילא פותחים אותה אז אל תשכח את שלושתם"). שכבה 2
   (TurnCoordinator) touched directly; שכבה 4 (Durable Atomic Approval)
@@ -4593,7 +4615,7 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
   בלבד, כפי שתוכנן — לא נוגע ב-`Handler`/routing logic (זה עדיין PA-01,
   לא נסגר כאן).
 - **Cross-Layer Impact Matrix:** מולא ב-`docs/architecture/action-gateway/
-  BUG-161_162_163_TURN_COORDINATOR_FALLBACK_AUTHORITY_PLANNING_GATE_
+  BUG-160_161_162_163_TURN_COORDINATOR_FALLBACK_AUTHORITY_PLANNING_GATE_
   20260807.md` (נכתב יחד עם BUG-161/162 לפי בקשת ה-owner) — שכבה 2
   (TurnCoordinator, `intent_router.py` נצרך ישירות ע"י `router.py`)
   touched directly; שכבות 1/3 not touched (grep=0 מאומת); שכבה 4 not
@@ -4669,7 +4691,8 @@ production הזה עצמו חשף 3 באגים חדשים (BUG-160/161/162, למ
 8. **BUG-159** — פרסר create_task לא מזהה "משימת"/הוסף/תוסיף (בינוני-גבוה)
    — ✅ מוזג + deployed + **VERIFIED IN PROD** (PR #557)
 9. **BUG-160** — מרכאה לא מאוזנת עוקפת את המסלול הדטרמיניסטי (גבוה) —
-   🔴 נרשם, root cause מאומת בקוד, לא תוקן
+   ✅ **תוקן ומאומת** (15/15 טסטים חדשים, regression מלא ירוק) — טרם
+   deployed/verified בפרודקשן
 10. **BUG-161** — reconfirmation לא עקבי בין המסלול הדטרמיניסטי ל-Agent
     (גבוה) — 🟡 **Cross-Layer Impact Matrix הושלם** + מומש חלקית
     (`core_knowledge.py` honesty rule, מונע הבטחה מראש) — סגירה מלאה
