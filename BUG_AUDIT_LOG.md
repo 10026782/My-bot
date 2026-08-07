@@ -4530,16 +4530,56 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
   dashboard, מחוץ להיקף session זה — **אין claim על deploy/activation
   בפועל עד שה-owner יאשר שה-env var אכן הוגדר וש-behavior אומת
   ב-production**, לפי כלל הברזל.
-- **סטטוס:** 🟡 root cause מאומת בקוד (shadow-only) + **מדיניות
-  enforcement הוכרעה במפורש** + **Cross-Layer Impact Matrix הושלם** +
-  **המנגנון הנדרש כבר קיים וקודם, ממתין רק להפעלת flag** — לא
-  `PLANNING BLOCKED` יותר על "אין מנגנון" (הוחלף ב-🟡 "ממתין להפעלה
-  תפעולית + לאימות בפועל"). נותר: (1) ה-owner יפעיל את
-  `FEATURE_SINGLE_SPEAKER_APPROVAL_UX` ב-Render env ידנית (לא קוד),
-  ואז נדרש אימות-production חוזר לתרחיש BUG-161/162 המקורי כדי לסגור
-  בפועל; (2) מימוש נפרד ל"Clarification כסוג-הודעה של Coordinator"
-  עבור התרחיש-הראשון (Agent מבטיח מראש, בלי tool_use) — טרם החל,
-  נשאר סעיף פתוח נפרד.
+- **⚠️ תיקון-מסקנה קריטי (07/08/2026, אחרי צילום-מסך אמיתי מ-Render מה-owner):**
+  ה-owner הראה בפועל ש-`FEATURE_SINGLE_SPEAKER_APPROVAL_UX` **כבר `true`**
+  ב-environment (לא כבוי כפי שהונח למעלה) — **ובכל זאת** נצפה ה-violation
+  המקורי. זו סתירה ישירה למסקנה הקודמת ("ממתין רק להפעלת flag") — המסקנה
+  ההיא הייתה **שגויה**, לא רק לא-שלמה. נחקר מחדש מאפס במקום לנחש.
+- **Root Cause האמיתי (אומת בקוד, 07/08/2026):** `app.py::
+  _queue_approval_detailed_impl()` — הבלוק ל-`failure_code ==
+  "existing_pending_blocks_agent"` (שורות ~1504-1520) קובע במפורש
+  `"reply_owner": "gateway"` ו-`"lifecycle_result"` בתוצאה שהוא מחזיר. אבל
+  הבלוק **הגנרי** מיד אחריו (שורות ~1521-1532 לפני התיקון) — שהוא **זה
+  שבפועל מטפל** ב-block של BUG-153 ("business action already rejected"),
+  ובכל דחיית-dedup/pending/approved/executing/completed אחרת שנמצאת
+  ע"י `propose_action()` — **לא הגדיר את שני השדות האלה בכלל**. כתוצאה:
+  ה-lookup ב-tool-use loop (`_gateway_owned = next((entry for entry in
+  reversed(tool_results_log) if entry.get("tool")=="__approval_queued__"
+  and entry.get("reply_owner")=="gateway"), None)`) **לעולם לא מצא
+  התאמה** לתרחיש הזה — **ללא קשר בכלל** לערך של
+  `FEATURE_SINGLE_SPEAKER_APPROVAL_UX`. הדגל לא היה הבעיה; ה-signal
+  שהמנגנון מחפש פשוט לא הופק במקום הנכון.
+- **תוקן (07/08/2026):** הבלוק הגנרי בונה עכשיו `ApprovalLifecycleResult`
+  אמיתי (`build_approval_lifecycle_result()`, אותו מנגנון בדיוק כמו הבלוק
+  השכן) בכל פעם שיש `contract_id` — ומסמן `reply_owner="gateway"` +
+  `lifecycle_result`, בדיוק כמו הבלוק השכן. הגנתי: אם `find_contract()`
+  לא מוצא רשומה (לא אמור לקרות בפועל — אותה קריאה סינכרונית שהחזירה
+  את ה-id לפני רגע), נשאר בהתנהגות הישנה (לא מסמן reply_owner) במקום
+  לתאר "no_contract" לא-נכון על contract שכן קיים. **תוכן ההודעה
+  (`safe_user_message`) לא השתנה** — התיקון רק מוסיף את ה-signal
+  החסר, לא משנה מה נאמר למשתמש.
+- **בדיקות (חדש):** `test_bug162_gateway_reply_owner_on_generic_block.py`
+  (10/10) — מדמה בדיוק את תרחיש BUG-153 (Agent גולמי, `trusted_source=
+  "agent"`, fingerprint שנדחה) ומוודא `reply_owner=="gateway"` +
+  `lifecycle_result` מאוכלס + תוכן ההודעה נשאר "בוטלה" (לא "אשר") +
+  ה-contract הישן נשאר `rejected` ולא נגוע. בדיקה שנייה מוודאת שגם
+  dedup-על-pending (סיבה שונה, אותו בלוק גנרי) מקבל `reply_owner=
+  "gateway"`. **Regression מלא**: `test_bug153_...py` (16/16),
+  `test_bug161_...py` (7/7), ו-9 קבצי טסט נוספים שמפעילים
+  `_queue_approval_detailed` (`test_bug115`, `test_bug155`, `test_bug156`,
+  `test_bug_batch_approval_preserved`, `test_bug_canonical_tool_wiring`,
+  `test_create_task_deterministic_route`, `test_first_pending_
+  notification_failure_suppression`, `test_pa01_phantom_approval_
+  enforcement`, `test_f52_pr6_pending_shadow`, `test_f52_status_reply_
+  reconciliation`) — כולם ירוקים, ללא regression.
+- **סטטוס:** 🟡→ קרוב יותר ל-סגירה אמיתית: **root cause אמיתי אותר ותוקן
+  בקוד** (לא רק "ממתין להפעלת flag" — זו הייתה מסקנה שגויה שתוקנה כאן).
+  נותר: (1) אימות-production חוזר לתרחיש BUG-161/162 המקורי אחרי
+  push+deploy, כדי לוודא שהתשובה בפועל היא אכן רק `safe_user_message`
+  ולא טקסט-Agent נוסף (2) מימוש נפרד ל"Clarification כסוג-הודעה של
+  Coordinator" עבור התרחיש-הראשון (Agent מבטיח מראש, בלי tool_use כלל)
+  — עדיין לא מכוסה ע"י התיקון הזה, נשאר סעיף פתוח נפרד. **לא claim
+  "✅ Fixed" עד אימות production**, לפי כלל הברזל.
 
 ---
 
@@ -4759,18 +4799,21 @@ production הזה עצמו חשף 3 באגים חדשים (BUG-160/161/162, למ
    deployed/verified בפרודקשן
 10. **BUG-161** — reconfirmation לא עקבי בין המסלול הדטרמיניסטי ל-Agent
     (גבוה) — 🟡 **Cross-Layer Impact Matrix הושלם** + מומש חלקית
-    (`core_knowledge.py` honesty rule, מונע הבטחה מראש) — סגירה מלאה
-    תלויה בהפעלת `FEATURE_SINGLE_SPEAKER_APPROVAL_UX` (ראו BUG-162) +
-    אימות production
+    (`core_knowledge.py` honesty rule, מונע הבטחה מראש) + **תלות ה-
+    enforcement (BUG-162) תוקנה בקוד** — סגירה מלאה תלויה באימות-
+    production חוזר
 11. **BUG-162** — הפרת turn-ownership: Agent מדבר ב-turn של gateway
-    (בינוני-גבוה) — 🟡 **מדיניות enforcement הוכרעה במפורש** ("Single
-    final speaker: Gateway") + **המנגנון כבר קיים בקוד** (`app.py:4437-
-    4494`, "PR1 single-speaker boundary"), נעול מאחורי
-    `FEATURE_SINGLE_SPEAKER_APPROVAL_UX` (כבוי כברירת-מחדל) — owner
-    יפעיל ידנית ב-Render env (לא שינוי-דיפולט קוד); ממתין להפעלה
-    תפעולית + אימות-production חוזר לסגירה סופית. חלק ב' של ההחלטה
-    ("Clarification כסוג-הודעה של Coordinator", מכסה את תרחיש-ה-
-    Agent-מבטיח-מראש) עדיין לא מומש — סעיף פתוח נפרד
+    (בינוני-גבוה) — 🟡 **תוקן בקוד (07/08/2026):** ⚠️ המסקנה הקודמת
+    ("ממתין רק להפעלת flag") הייתה **שגויה** — ה-owner הראה שהדגל
+    כבר `true` ב-Render ובכל זאת הבאג קרה. ה-root cause האמיתי:
+    `_queue_approval_detailed_impl()`'s בלוק ה-block הגנרי (זה שבפועל
+    מטפל ב-BUG-153's rejected-block) פשוט לא הגדיר `reply_owner`/
+    `lifecycle_result` בכלל — ללא קשר לדגל. תוקן: 10/10 טסטים חדשים
+    (`test_bug162_gateway_reply_owner_on_generic_block.py`) + regression
+    מלא (11 קבצי טסט נוספים, כולם ירוקים). נותר: אימות-production
+    חוזר לתרחיש המקורי; חלק ב' של ההחלטה ("Clarification כסוג-הודעה
+    של Coordinator", מכסה את תרחיש-ה-Agent-מבטיח-מראש בלי tool_use)
+    עדיין לא מומש — סעיף פתוח נפרד
 12. **BUG-163** — כיסוי intent חסר ל-complete_task/update_task ("השלם",
     "סמן...כבוצע/ה") (גבוה) — ✅ **תוקן ומאומת** (12/12 טסטים חדשים,
     44/44 regression) — טרם deployed/verified בפרודקשן

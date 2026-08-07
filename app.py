@@ -1518,17 +1518,60 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
                     "lifecycle_result": _pending_lifecycle,
                     "final_response_count": 1,
                 }
+            # BUG-162: this is the generic ok=False fallback — it is what
+            # actually fires for BUG-153's "business action already
+            # rejected" block (and every other dedup/pending/approved/
+            # executing/completed contract found by propose_action()), not
+            # just the two failure_codes special-cased above. It was
+            # missing "reply_owner"/"lifecycle_result" entirely, so the
+            # single-speaker override at the tool-use loop's "_gateway_
+            # owned" lookup (searches tool_results_log for reply_owner==
+            # "gateway") could never match this branch — regardless of
+            # FEATURE_SINGLE_SPEAKER_APPROVAL_UX's value, since the signal
+            # it depends on was never produced here. Verified in production
+            # (07/08/2026): the flag was already true and the Agent still
+            # spoke in a gateway-owned turn — this branch, not the flag,
+            # was the actual gap. Fixed the same way as the sibling
+            # existing_pending_blocks_agent branch immediately above: build
+            # the real lifecycle result when a contract_id is present (the
+            # common case for every reason that reaches here) and mark
+            # reply_owner="gateway" — never leave it unset when a real,
+            # canonical Gateway-authored outcome exists to point to.
+            _generic_contract_id = getattr(_gw_result, "contract_id", None)
+            _generic_found_contract = (
+                _gw.find_contract(_generic_contract_id) if _generic_contract_id else None
+            )
+            # Defensive: only build a lifecycle result (and claim
+            # reply_owner="gateway") when the contract was actually found —
+            # a contract_id with no matching record (should not happen in
+            # practice; same synchronous call that just returned it) must
+            # not fall back to build_approval_lifecycle_result(None, ...)'s
+            # "no_contract" wording, which would misdescribe a real
+            # rejected/pending/completed contract as if none existed.
+            _generic_lifecycle = (
+                build_approval_lifecycle_result(_generic_found_contract, repeated=True)
+                if _generic_found_contract else None
+            )
             return {
-                "message": _gw_result.user_message or f"⏳ {_gw_result.reason}",
+                "message": (
+                    _generic_lifecycle.safe_user_message if _generic_lifecycle
+                    else _gw_result.user_message or f"⏳ {_gw_result.reason}"
+                ),
                 # contract_id, if present (dedup/pending/approved/executing
                 # found, or persistence_lookup_failed which never attempts a
                 # save at all), points at an EXISTING contract this call did
                 # NOT create, or is None because nothing was ever attempted —
                 # both are verified, not guessed. Kept here for telemetry
                 # only; created_this_turn=False is what actually gates row 2.
-                "contract_id": getattr(_gw_result, "contract_id", None),
+                "contract_id": _generic_contract_id,
                 "ok": False, "terminal_outcome": "APPROVAL_QUEUE_ERROR",
                 "action_tool": tool_name, "created_this_turn": False,
+                **({
+                    "owner_notified": False,
+                    "reply_owner": "gateway",
+                    "lifecycle_result": _generic_lifecycle,
+                    "final_response_count": 1,
+                } if _generic_lifecycle else {}),
             }
     else:
         # Shadow mode records proposals without enforcement, except for the
