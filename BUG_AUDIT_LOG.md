@@ -4335,8 +4335,32 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
   לא מפילות ל-Agent), חלק ניכר מהחשיפה בפועל לתרחיש הזה קטן, אך הפער
   העקרוני (Agent path אינו תומך reconfirmation) נשאר קיים לכל נפילה
   אחרת ל-Agent.
-- **סטטוס:** 🔴 נרשם, root cause עקבי עם תיעוד קיים, לא תוקן — דורש
-  הכרעת owner על אפשרות א/ב לפני תיקון קוד.
+- **החלטת owner (07/08/2026) — אפשרות א' אושרה, אפשרות ב' נדחתה
+  במפורש:**
+  > BUG-161 policy decision: do not expand Agent reconfirmation.
+  > create_task reconfirmation remains owned by the Turn Coordinator /
+  > deterministic ActionGateway path. Agent must not promise or
+  > simulate reconfirmation. If a create_task request reaches Agent
+  > due to fallback, it must defer/route back to the canonical
+  > coordinator path or return a truthful non-approval response.
+
+  ותוספת עברית מה-owner, המרחיבה את העיקרון גם ל-BUG-162 (ראו שם):
+  "אנחנו רוצים במסגרת Turn Coordinator לצמצם את סמכויות הסוכן, לא
+  להרחיב — רק צריך לוודא שלא יובטחו הבטחות שאין בהן ממש, ולא תילקח
+  בעלות שלא כדין, גם עם fallback-ים שונים."
+
+  **המשמעות המעשית לתיקון (טרם מומש — Cross-Layer Impact Matrix נדרש
+  לפני קוד):** ה-carve-out של BUG-153 **נשאר בהיקפו הצר הנוכחי**
+  (`trusted_source == "deterministic_create_task"` בלבד) — **לא**
+  יורחב ל-Agent. במקום זאת, כשבקשת `create_task` מגיעה ל-Agent path
+  (בין אם דרך BUG-160 או fallback אחר כלשהו), ה-Agent צריך לזהות
+  מצב כזה ו: (1) להפנות/להחזיר את המשתמש למסלול הקנוני (route back
+  ל-`route_request()`/`queue_task_request()`), **או** (2) להחזיר
+  תשובה אמיתית שאין אישור ממתין — **לא** לנסח הזמנה ל"אשר בבירור" ולא
+  לדמות reconfirmation semantics שה-runtime לא תומך בהם בפועל.
+- **סטטוס:** 🟡 root cause מאומת + **מדיניות הוכרעה** — ממתין למימוש קוד
+  (Cross-Layer Impact Matrix נדרש, נוגע ישירות ל-TurnCoordinator/Agent
+  boundary לפי `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`).
 
 ---
 
@@ -4379,9 +4403,21 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
     `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`)
 - **תלות:** אותו trigger כמו BUG-160/161 — סגירת BUG-160 מצמצמת את
   התדירות בפועל אך לא סוגרת את הפער העקרוני ב-enforcement.
-- **סטטוס:** 🔴 נרשם, root cause מאומת בקוד (shadow-only, purely
-  observational — מצוטט ישירות מהערת הקוד), לא תוקן — דורש הכרעת owner
-  + Cross-Layer Impact Matrix לפני כל שינוי enforcement.
+- **החלטת owner (07/08/2026) — כיוון מדיניות ניתן, מנגנון enforcement
+  ספציפי עדיין לא הוכרע:** אותה החלטה שנרשמה תחת BUG-161 מרחיבה
+  במפורש גם לכאן: "אנחנו רוצים במסגרת Turn Coordinator לצמצם את
+  סמכויות הסוכן, לא להרחיב — רק צריך לוודא שלא יובטחו הבטחות שאין
+  בהן ממש, ולא תילקח בעלות שלא כדין, גם עם fallback-ים שונים." זה
+  קובע **כיוון ברור** (Agent אסור לו "לקחת בעלות" ב-turn שאמור
+  להיות `reply_owner=gateway`, בשום fallback) — אך **לא** מכריע עדיין
+  את שאלת ה-enforcement הקונקרטית מה"קריטריוני סגירה" למעלה (מה
+  בדיוק קורה כש-Agent "רוצה לדבר" ב-turn כזה: silence? clarify?
+  redirect אוטומטי לגייטווי?). זו עדיין החלטת ארכיטקטורה נפרדת,
+  ספציפית, שדורשת Cross-Layer Impact Matrix משלה לפני מימוש —
+  ה-direction אינו תחליף למנגנון.
+- **סטטוס:** 🟡 root cause מאומת בקוד (shadow-only) + **כיוון מדיניות
+  ניתן** (BUG-161's decision מרחיב לכאן) — ממתין להכרעת enforcement
+  קונקרטית + Cross-Layer Impact Matrix לפני כל שינוי קוד.
 
 ---
 
@@ -4391,12 +4427,10 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
 --is-ancestor <commit> origin/main` על כל אחד), וכולם **גם Deployed
 מאומת** (Render: "Deploy live for `44fe0fb`", 07/08/2026 11:34 — `44fe0fb`
 עצמו הוא הקומיט הפרוס, וכל שאר ה-commits ברשימה הם ancestors מאומתים
-שלו). **BUG-153, 154, 156, 158, 159 גם Verified בפרודקשן ישירות** (owner,
-07/08/2026 13:24-14:23 — ראו הבלוקים המלאים למעלה). **BUG-155 ו-BUG-157
-נשארים 🟡** — ראו התיקון המפורש בבלוק של BUG-155 למעלה: הראיה שסופקה
-ל-closure אכן אימתה מנגנון אחר (BUG-158), לא את המנגנון הספציפי של
-BUG-155 (`_reject_stale_telegram_approval()`'s contract_id lookup);
-BUG-157 (concurrency race) עדיין רק test-evidence, לא production.
+שלו). **BUG-153, 154, 155, 156, 158, 159 גם Verified בפרודקשן ישירות**
+(owner, 07/08/2026 13:24-15:03 — ראו הבלוקים המלאים למעלה, כולל התיקון
+של הראיה השגויה שסופקה בהתחלה ל-BUG-155). **BUG-157 בלבד נשאר 🟡** —
+concurrency race, test-evidence (34/34) בלבד, לא production.
 
 ### PR #546 — סטטוס closure מתוקן (07/08/2026, עודכן שוב 15:03)
 
