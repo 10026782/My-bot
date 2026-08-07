@@ -48,6 +48,7 @@ This file proves:
 from __future__ import annotations
 
 import os
+import time
 from unittest.mock import patch
 
 os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-bug162-test")
@@ -59,7 +60,7 @@ os.environ.setdefault("SETUP_WEBHOOK", "0")
 os.environ["FEATURE_ACTION_CONTRACT_PERSISTENCE"] = "false"
 
 import app  # noqa: E402
-from core.action_gateway import action_gateway as _real_gw  # noqa: E402
+from core.action_gateway import ActionContract, action_gateway as _real_gw  # noqa: E402
 from identity import Identity, Role  # noqa: E402
 
 passed = failed = 0
@@ -134,31 +135,69 @@ chk("the OLD contract is untouched — still 'rejected' (this fix never mutates 
 
 
 # ══════════════════════════════════════════════════════════════════
-print("\n── 2. every other blocked-with-existing-contract reason also gets reply_owner=gateway ──")
-identity2 = _identity("req_bug162_2")
-propose2 = _real_gw.propose_action(
-    tenant_id="boss_hq", canonical_user_id=identity2.memory_key,
-    tool_name="airtable_add",
-    tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "משימה שנייה ל-162"}},
-    origin_channel="telegram", origin_chat_id=identity2.user_id,
-    requires_approval=True, identity=identity2, trusted_source="agent",
-)
-assert propose2.ok
+# EXHAUSTIVE producer-exit-path coverage — the actual gap this bug exposed.
+#
+# A single scenario (rejected-block) was not enough: it happened to pass
+# through the same generic branch as every other status
+# propose_action()'s fingerprint dedup (core/action_gateway.py:1613-1661)
+# can return via that branch — pending, completed/executed (routed through
+# _handle_duplicate_executed()), rejected (agent path), approved,
+# executing, outcome_unknown. Only the BUG-122 pre-scan
+# ("existing_pending_blocks_agent") and BUG-153's deterministic_create_task
+# carve-out (which opens a NEW contract, not a block) are excluded — both
+# already covered above/in test_bug153. This loop proves reply_owner is
+# set for EVERY status that reaches the generic branch, not just one
+# example of it — the exact class of gap a single-scenario test cannot
+# close, per the closure-audit finding recorded in BUG_AUDIT_LOG.md.
+# ══════════════════════════════════════════════════════════════════
+print("\n── 2. EXHAUSTIVE: every existing.status reaching the generic block branch gets reply_owner=gateway ──")
 
-with patch("feature_flags.is_enabled", side_effect=lambda name: name == "FEATURE_ACTION_GATEWAY"), \
-     patch.object(app, "resolve_identity", side_effect=lambda channel, ext_id: identity2):
-    # A second, identical proposal while the first is still "pending" —
-    # dedup found by propose_action(), also reaches the generic branch.
-    outcome2 = app._queue_approval_detailed(
-        "airtable_add",
-        {"table": "Tasks", "fields": {"כותרת המשימה": "משימה שנייה ל-162"}},
-        identity2.user_id, "telegram", "צור שוב את אותה משימה",
-        trusted_source="agent",
+_STATUSES_REACHING_GENERIC_BLOCK = [
+    "pending", "completed", "rejected", "approved", "executing", "outcome_unknown",
+]
+
+
+def _seed_contract(identity, tool_inputs, status, suffix):
+    normalized = _real_gw.normalize_payload(tool_inputs)
+    fingerprint = _real_gw.compute_business_fingerprint(
+        "boss_hq", identity.memory_key, "airtable_add", normalized,
     )
+    contract = ActionContract(
+        contract_id=f"seed-bug162-{suffix}",
+        tenant_id="boss_hq",
+        canonical_user_id=identity.memory_key,
+        tool_name="airtable_add",
+        normalized_payload=normalized,
+        business_action_fingerprint=fingerprint,
+        origin_channel="telegram",
+        origin_chat_id=identity.user_id,
+        requires_approval=True,
+        status=status,
+        created_at=time.time(),
+    )
+    _real_gw._ledger.save(contract)
+    return contract
 
-chk("duplicate-pending dedup also blocked (ok=False)", outcome2["ok"] is False)
-chk("duplicate-pending dedup also carries reply_owner='gateway'",
-    outcome2.get("reply_owner") == "gateway")
+
+for _status in _STATUSES_REACHING_GENERIC_BLOCK:
+    _identity_n = _identity(f"req_bug162_exhaustive_{_status}")
+    _inputs_n = {"table": "Tasks", "fields": {"כותרת המשימה": f"בדיקת סטטוס {_status}"}}
+    _seed_contract(_identity_n, _inputs_n, _status, _status)
+
+    with patch("feature_flags.is_enabled", side_effect=lambda name: name == "FEATURE_ACTION_GATEWAY"), \
+         patch.object(app, "resolve_identity", side_effect=lambda channel, ext_id, _id=_identity_n: _id):
+        outcome_n = app._queue_approval_detailed(
+            "airtable_add", _inputs_n, _identity_n.user_id, "telegram",
+            f"צור שוב את המשימה {_status}", trusted_source="agent",
+        )
+
+    chk(f"status={_status!r}: blocked (ok=False)", outcome_n["ok"] is False)
+    chk(f"status={_status!r}: reply_owner == 'gateway'",
+        outcome_n.get("reply_owner") == "gateway")
+    chk(f"status={_status!r}: lifecycle_result populated",
+        outcome_n.get("lifecycle_result") is not None)
+    chk(f"status={_status!r}: message is non-empty and not a fabricated invitation",
+        bool(outcome_n.get("message")) and "אשר בבירור" not in outcome_n["message"])
 
 
 print()

@@ -4558,28 +4558,64 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
   לתאר "no_contract" לא-נכון על contract שכן קיים. **תוכן ההודעה
   (`safe_user_message`) לא השתנה** — התיקון רק מוסיף את ה-signal
   החסר, לא משנה מה נאמר למשתמש.
-- **בדיקות (חדש):** `test_bug162_gateway_reply_owner_on_generic_block.py`
-  (10/10) — מדמה בדיוק את תרחיש BUG-153 (Agent גולמי, `trusted_source=
-  "agent"`, fingerprint שנדחה) ומוודא `reply_owner=="gateway"` +
-  `lifecycle_result` מאוכלס + תוכן ההודעה נשאר "בוטלה" (לא "אשר") +
-  ה-contract הישן נשאר `rejected` ולא נגוע. בדיקה שנייה מוודאת שגם
-  dedup-על-pending (סיבה שונה, אותו בלוק גנרי) מקבל `reply_owner=
-  "gateway"`. **Regression מלא**: `test_bug153_...py` (16/16),
-  `test_bug161_...py` (7/7), ו-9 קבצי טסט נוספים שמפעילים
+- **בדיקות (חדש, הורחב ל-exhaustive):** `test_bug162_gateway_reply_owner_
+  on_generic_block.py` (**32/32**) — לא רק תרחיש BUG-153 בודד: enumeration
+  ממצה על **כל 6 ערכי `existing.status`** שמגיעים ל-branch הגנרי
+  (pending/completed/rejected/approved/executing/outcome_unknown), כל אחד
+  נבדק בנפרד עבור `reply_owner=="gateway"` + `lifecycle_result` מאוכלס +
+  תוכן-הודעה אמיתי ולא-ממציא. **Regression מלא**: `test_bug153_...py`
+  (16/16), `test_bug161_...py` (7/7), ו-9 קבצי טסט נוספים שמפעילים
   `_queue_approval_detailed` (`test_bug115`, `test_bug155`, `test_bug156`,
   `test_bug_batch_approval_preserved`, `test_bug_canonical_tool_wiring`,
   `test_create_task_deterministic_route`, `test_first_pending_
   notification_failure_suppression`, `test_pa01_phantom_approval_
   enforcement`, `test_f52_pr6_pending_shadow`, `test_f52_status_reply_
   reconciliation`) — כולם ירוקים, ללא regression.
+- **Closure Audit מלא (07/08/2026, בעקבות בקשת ה-owner "איך קרתה תקלה כזו
+  ואיך נמנעים מלחזור עליה"):** `docs/architecture/action-gateway/BUG-162_
+  SINGLE_SPEAKER_CLOSURE_AUDIT_20260807.md`. תמצית:
+  1. **מיפוי exit-path מלא** — כל 11 ה-return branches של
+     `_queue_approval_detailed_impl()` נבדקו ידנית מול ה-contract
+     (`reply_owner` נדרש כש-יש contract אמיתי וסופי; לא נדרש כש-אין
+     contract/מצב לא-מאומת). **רק branch אחד (הגנרי) היה שגוי** — שאר
+     ה-10 היו נכונים-בעיצוב מלכתחילה. התיקון סוגר את כל הפער בפונקציה
+     הזו, לא רק מופע יחיד.
+  2. **למה זה קרה למרות ה-DoD:** `TURN_COORDINATOR_PROPOSAL_V2.md`'s
+     Gate C דורש במפורש regression-coverage מלא ל-"reply ownership"
+     — אבל חל פורמלית רק על Phase 3 ("Reply Ownership"), שלפי
+     `docs/architecture/turn-coordinator/README.md` **מעולם לא נפתח
+     רשמית** ("Phase 1 not started"). PR #471 שלח מימוש-מקדים,
+     לא-רשמי, של אותו מנגנון עצמו לפרודקשן — בלי לעבור מול ה-DoD
+     שנכתב בשבילו, כי הוא לא נקרא רשמית "Phase 3". `docs/context_
+     librarian/layers/turn_coordinator.json`'s notes תיעדו את הפער
+     הזה בכנות מראש ("a conditional... not a general reply_owner claim
+     mechanism") — אבל אף Gate לא חייב שקוד-מקדים כזה יעבור מול ה-DoD
+     של המטרה שהוא בפועל משרת. **זה פער תהליכי, לא רק טכני.**
+  3. **ראיה שזה נחזה מראש:** `docs/architecture/f52-unified-approval-
+     runtime/audits/phase-4c/TURN_OWNERSHIP_EXTENSION.md` (נכתב
+     ~15/07/2026, 3 שבועות לפני הדיווח), Finding 3, כבר קבע במפורש
+     שהמנגנון-אז-הקיים הוא "stopgap"/"suppression patch, not a
+     reply_owner field" — וש-Phase 3 הוא ה-generalization הנדרש.
+     המסמך לא יכול היה לחזות שגם ה-generalization עצמו (PR #471)
+     ייצא לא-שלם.
+  4. **Duplicate authority — ממצא פתוח, לא תוקן (לפי הנחיה מפורשת):**
+     שני מנגנונים עצמאיים מחשבים "האם ה-turn שייך ל-gateway" —
+     מנגנון-האכיפה (`_gateway_owned`, דורש `reply_owner=="gateway"`)
+     ומנגנון ה-shadow-observation (`_approval_queued_this_turn`, דורש
+     רק נוכחות `__approval_queued__`, לא בודק `reply_owner` בכלל). זו
+     בדיוק הסיבה שה-shadow log תפס את ההפרה נכון בזמן שהאכיפה נכשלה —
+     שני מקורות-אמת נפרדים, יכולים להתפצל. **מתועד, לא מומש** —
+     איחוד לשני המקורות דורש Cross-Layer Impact Matrix משלו אם/כש-owner
+     יחליט לטפל בזה.
 - **סטטוס:** 🟡→ קרוב יותר ל-סגירה אמיתית: **root cause אמיתי אותר ותוקן
-  בקוד** (לא רק "ממתין להפעלת flag" — זו הייתה מסקנה שגויה שתוקנה כאן).
-  נותר: (1) אימות-production חוזר לתרחיש BUG-161/162 המקורי אחרי
-  push+deploy, כדי לוודא שהתשובה בפועל היא אכן רק `safe_user_message`
-  ולא טקסט-Agent נוסף (2) מימוש נפרד ל"Clarification כסוג-הודעה של
-  Coordinator" עבור התרחיש-הראשון (Agent מבטיח מראש, בלי tool_use כלל)
-  — עדיין לא מכוסה ע"י התיקון הזה, נשאר סעיף פתוח נפרד. **לא claim
-  "✅ Fixed" עד אימות production**, לפי כלל הברזל.
+  בקוד, closure audit מלא בוצע** (לא רק "ממתין להפעלת flag" — זו הייתה
+  מסקנה שגויה שתוקנה כאן; ולא רק "תוקן מקרה אחד" — כל 11 exit-paths
+  אומתו). נותר: (1) אימות-production חוזר לתרחיש BUG-161/162 המקורי אחרי
+  push+deploy (2) מימוש נפרד ל"Clarification כסוג-הודעה של Coordinator"
+  עבור התרחיש-הראשון (Agent מבטיח מראש, בלי tool_use כלל) — עדיין לא
+  מכוסה (3) duplicate-authority finding — מתועד, לא מומש, ממתין להחלטת
+  owner אם/מתי לטפל. **לא claim "✅ Fixed" עד אימות production**, לפי
+  כלל הברזל.
 
 ---
 
@@ -4808,12 +4844,22 @@ production הזה עצמו חשף 3 באגים חדשים (BUG-160/161/162, למ
     כבר `true` ב-Render ובכל זאת הבאג קרה. ה-root cause האמיתי:
     `_queue_approval_detailed_impl()`'s בלוק ה-block הגנרי (זה שבפועל
     מטפל ב-BUG-153's rejected-block) פשוט לא הגדיר `reply_owner`/
-    `lifecycle_result` בכלל — ללא קשר לדגל. תוקן: 10/10 טסטים חדשים
-    (`test_bug162_gateway_reply_owner_on_generic_block.py`) + regression
-    מלא (11 קבצי טסט נוספים, כולם ירוקים). נותר: אימות-production
-    חוזר לתרחיש המקורי; חלק ב' של ההחלטה ("Clarification כסוג-הודעה
-    של Coordinator", מכסה את תרחיש-ה-Agent-מבטיח-מראש בלי tool_use)
-    עדיין לא מומש — סעיף פתוח נפרד
+    `lifecycle_result` בכלל — ללא קשר לדגל. תוקן: **32/32 טסטים חדשים**
+    (`test_bug162_gateway_reply_owner_on_generic_block.py`, כולל
+    enumeration ממצה על כל 6 ערכי `existing.status` שמגיעים ל-branch
+    הזה) + regression מלא (11 קבצי טסט נוספים, כולם ירוקים). **Closure
+    audit מלא בוצע** — ראו `docs/architecture/action-gateway/BUG-162_
+    SINGLE_SPEAKER_CLOSURE_AUDIT_20260807.md`: מיפוי כל 11 exit-paths של
+    הפרודיוסר (רק זה היה שגוי, שאר ה-10 נכונים-בעיצוב), הסבר תהליכי
+    מדויק ל"למה זה קרה למרות ה-DoD" (Gate C ב-`TURN_COORDINATOR_
+    PROPOSAL_V2.md` מחייב regression-coverage מלא, אבל חל רק על "Phase 3
+    הרשמי" שמעולם לא נפתח — PR #471 שלח מימוש-מקדים לא-רשמי של אותו
+    מנגנון בלי לעבור מול ה-DoD הזה), וממצא "duplicate authority" פתוח
+    (שני מנגנונים עצמאיים לחישוב "turn שייך ל-gateway" — אחד לאכיפה,
+    אחד ל-shadow — לא תוקן, רק מתועד, לפי הנחיה מפורשת שלא לתכנן מנגנון
+    חדש). נותר: אימות-production חוזר לתרחיש המקורי; חלק ב' של ההחלטה
+    ("Clarification כסוג-הודעה של Coordinator", מכסה את תרחיש-ה-
+    Agent-מבטיח-מראש בלי tool_use) עדיין לא מומש — סעיף פתוח נפרד
 12. **BUG-163** — כיסוי intent חסר ל-complete_task/update_task ("השלם",
     "סמן...כבוצע/ה") (גבוה) — ✅ **תוקן ומאומת** (12/12 טסטים חדשים,
     44/44 regression) — טרם deployed/verified בפרודקשן
