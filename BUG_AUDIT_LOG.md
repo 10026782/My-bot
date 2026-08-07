@@ -3878,11 +3878,103 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
   adapters.py` (34/34), `test_phase_4b_1a_durable_proposals.py` (11/11),
   `test_phase_4b_1a_lookup_correctness.py`, `core/router/test_router.py`
   (44/44), `smoke_tests.py`, `test_integration.py` (4/4) — כולם ירוקים.
-- **Merged:** לא עדיין
+- **Merged:** ✅ כן — PR #552, commit `c5dbe86` על `origin/main` (אומת
+  05/08/2026: `git merge-base --is-ancestor f75f095 origin/main` → YES)
+- **Deployed:** לא אומת (אין evidence commit hash מול Render dashboard —
+  לפי כלל הברזל, לא נטען כ-✅ עד שיוצג)
+- **Verified בפרודקשן:** לא
+- **סטטוס:** 🟡 קוד מוזג ל-`main` (PR #552) — **deploy+production
+  verification עדיין לא בוצעו/הוצגו**
+
+### המשך (05/08/2026) — סבב ביקורת שני של CodeRabbit: המתנה ל-claim משתחרר
+
+לאחר מיזוג PR #552, CodeRabbit העלה בסבב ביקורת שני על אותו PR (שכבר
+נסגר עם המיזוג) ממצא Major נוסף שלא הספיק להיכלל: ה-retry loop
+המקורי היה "הפסד claim → lookup טרי מייד", ללא שום המתנה לשחרור
+claim מתחרה. תחת `FEATURE_ACTION_CONTRACT_PERSISTENCE=on` (כתיבה
+עמידה אמיתית, latency לא-טריוויאלי ב-`save()`), מפסיד יכול היה למצות
+את כל 5 ניסיונות ה-retry בזמן שהמנצח עדיין באמצע כתיבה ל-repository,
+ולקבל `failure_code="persistence_lookup_failed"` שגוי ("עומס גבוה")
+במקום את תגובת ה-dedup הנכונה מול ה-contract שהמנצח בפועל יצר.
+
+- **תוקן (05/08/2026, המשך, PR נפרד חדש — לא #552 שנסגר):**
+  `ExecutionLedger.__init__` מקבל `self._claim_released_condition =
+  threading.Condition(self._lock)` (Condition על אותו lock קיים).
+  `claim_fingerprint_cas()` מקבל פרמטר חדש `wait_timeout: float = 0.0`
+  (ברירת מחדל שומרת התנהגות זהה אם לא מועבר) — אם ה-claim הפסיד
+  **ספציפית** כי claim מתחרה בתהליך (לא כי המצב כבר סופי ושונה),
+  ממתין (עם timeout) ל-`notify_all()` מ-`release_fingerprint_claim()`/
+  `_cache_contract()` לפני שהוא בודק שוב. `propose_action()` מחשב
+  `_CLAIM_TOTAL_WAIT_BUDGET_SECONDS = 2.0` כתקציב-המתנה **כולל** על
+  פני כל 5 הניסיונות (לא per-attempt), ומעביר את הזמן שנותר לכל
+  ניסיון. בתנאי ללא-race — ההמתנה לעולם לא מופעלת בפועל.
+- **בדיקות:** `test_bug157_atomic_fingerprint_claim.py` הורחב ל-24/24
+  (מ-18/18) — section 6 חדשה מדמה `save()` איטי (delay מלאכותי 0.5s
+  על ה-instance) עם 2 threads מקבילים על אותו fingerprint, מוודאת:
+  שתי הקריאות חוזרות (אין תקיעה), המפסיד מקבל dedup נכון מול
+  ה-contract_id של המנצח (**לא** `persistence_lookup_failed`), והזמן
+  הכולל חסום ע"י ה-delay היחיד של המנצח ולא מוכפל ע"י retries.
+  regression מלא ירוק: `test_action_gateway.py` (43/43),
+  `test_business_action_fingerprint_normalization.py` (8/8),
+  `test_bug153` (16/16), `test_bug155` (5/5), `test_bug156` (11/11),
+  `test_first_pending_notification_failure_suppression.py` (14/14),
+  `core/router/test_router.py` (44/44), `smoke_tests.py`,
+  `test_integration.py` (4/4).
+- **Merged:** לא (עודכן 07/08/2026) — PR **#555**, commit `96e45a08cccc7b10675a9a11496cecd08cbdd367`,
+  ענף `claude/pr-546-turn-coordinator-bugs-jhdrtl`, נפתח מול `origin/main`
+  אחרי מיזוג PR #552 (`c5dbe86`). **טרם מוזג ל-`origin/main`** — לא לבלבל
+  עם "טרם נפתח" (הניסוח הקודם, שהיה נכון רק לפני 07/08/2026).
 - **Deployed:** לא
 - **Verified בפרודקשן:** לא
-- **סטטוס:** 🟡 קוד תוקן ונבדק מקומית (כולל race אמיתי + אימות דטרמיניסטי) —
+- **סטטוס:** 🟡 קוד תוקן ונבדק מקומית (24/24 בזמן הפתיחה) — PR פתוח,
   **לא מוזג, לא deployed, לא verified בפרודקשן**
+
+### המשך שני (07/08/2026) — CodeRabbit על PR #555: bounded claim-ownership token
+
+ביקורת CodeRabbit על PR #555 עצמו העלתה ממצא Major/Heavy-lift נוסף:
+`_cache_contract()` היה משחרר כל claim על fingerprint **ללא בדיקת בעלות** —
+כולל כשנקרא מנתיב **read-path בלבד** (`find_by_id()`/`find_by_fingerprint()`/
+`find_live_by_user()` שמחממים cache מה-repository, לא caller שבאמת claim-ם).
+תרחיש קונקרטי: שתי הצעות `deterministic_create_task` שקוראות במקביל
+fingerprint עם contract קיים שנדחה ("rejected", carve-out של BUG-153) —
+caller A זוכה ב-claim; caller B, שרק *קורא* (cold-cache hydration) את אותו
+contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A ע"י `_cache_contract()`
+הישן; caller B יכול היה אז לזכות ב-claim בעצמו; שני callers היו יכולים
+לשמור contract חלופי לאותו fingerprint — בדיוק ה-duplicate ש-BUG-157 המקורי
+נועד לסגור.
+
+- **תוקן (07/08/2026):** `claim_fingerprint_cas()` מחזיר עכשיו **token
+  אטום** (`str`, לא `bool`) במקום פשוט `True`. `release_fingerprint_claim(
+  fingerprint, token)` ו-`_cache_contract(contract, *, claim_token=None)`
+  משחררים claim **רק אם ה-token תואם בדיוק**. קריאות read-path-בלבד
+  (4 call sites: `find_by_id()`, `find_by_fingerprint()`,
+  `find_live_by_user()`, `update_status()`) משאירות `claim_token=None`
+  במפורש — לעולם לא יכולות לשחרר claim של מישהו אחר. `propose_action()`
+  מעביר את ה-token שקיבל מ-`claim_fingerprint_cas()` ל-`save()` ול-
+  `release_fingerprint_claim()` בנתיב הכשל.
+- **בדיקות:** `test_bug157_atomic_fingerprint_claim.py` הורחב ל-**34/34**
+  (מ-24/24) — section 2b חדשה (cache-warm לא גונב claim פעיל), section 7
+  חדשה (שחזור מדויק של התרחיש שהעלה CodeRabbit: cold-cache re-hydration
+  של contract שנדחה תוך כדי claim פעיל — מוכיח contract יחיד נשמר, לא
+  שניים). גם תוקן: sections 1/2/3 עודכנו ל-API החדש (token במקום bool),
+  section 6 קיבל daemon threads + bounded join (לא unbounded `.join()` —
+  תיקון נוסף של CodeRabbit, מונע תלייה שקטה של הטסט אם regression יחזור).
+  regression מלא ירוק: `test_action_gateway.py` (43/43),
+  `test_business_action_fingerprint_normalization.py` (8/8), `test_bug153`
+  (16/16), `test_bug155` (5/5), `test_bug156` (11/11),
+  `test_first_pending_notification_failure_suppression.py` (14/14),
+  `test_pr0c_action_gateway_adapters.py` (34/34),
+  `test_phase_4b_1a_durable_proposals.py` (11/11),
+  `test_phase_4b_1a_lookup_correctness.py`,
+  `test_p0_unhashable_identity_atomic_wrapper.py` (18/18),
+  `test_pr0c_action_contracts_persistence.py` (16/16),
+  `core/router/test_router.py` (44/44), `smoke_tests.py`,
+  `test_integration.py` (4/4) — כולם ירוקים.
+- **Merged:** ✅ כן — PR #555, מוזג ל-`origin/main` (`bf9b670`), 07/08/2026
+- **Deployed:** לא אומת
+- **Verified בפרודקשן:** לא
+- **סטטוס:** 🟡 קוד מוזג ל-`main` — **deploy+production verification
+  עדיין לא בוצעו/הוצגו**
 
 ---
 
@@ -3959,6 +4051,9 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 3. **BUG-154** — parser crash בניסוח "ל־תאריך" (גבוה) — 🟡 קוד תוקן
 4. **BUG-156** — שעה אינה נשמרת (בינוני-גבוה) — 🟡 קוד תוקן
 5. **בדיקת suppression fallback** — ✅ נסגר, 04/08/2026 (לא נדרש fault injection)
-6. **BUG-157** — `propose_action()` לא-אטומי (concurrency, latent) — 🔴 לPR נפרד
+6. **BUG-157** — `propose_action()` לא-אטומי (concurrency, **נגיש בפועל** —
+   לא latent, ראה "Root Cause" למעלה: scheduler thread + webhook thread
+   יכולים לקרוא במקביל תחת ה-deployment הנוכחי) — ✅ מוזג ל-main
+   (PR #552, PR #555)
 7. **BUG-158** — כפתור שפג מדווח "אינה זמינה" גם כש-contract עדיין pending
-   (גבוה) — 🟡 קוד תוקן, PR נפרד
+   (גבוה) — 🟡 קוד תוקן, PR #556 פתוח
