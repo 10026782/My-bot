@@ -3978,6 +3978,83 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
 
 ---
 
+## BUG-158 — כפתור אישור/ביטול שפג ב-EventBus מדווח "לא זמין" גם כש-ActionContract עדיין pending
+
+- **דווח:** 05-07/08/2026, ע"י owner — בדיקה ידנית על `my-bot-approval-staging`
+  (Render), נותח לוגים מלאים + צילומי מסך Telegram מול הקוד ב-`main`
+- **סביבה:** Staging — `my-bot-approval-staging`
+- **מסך / מודול:** `app.py::_handle_approval_callback_impl()`
+  (`action=="approve"`, שורה ~2538; `action=="reject"`, שורה ~2923)
+- **תיאור:** לחיצה על כפתור טלגרם (✅/❌) לאחר שה-item המתאים ב-`event_bus.py`'s
+  `PendingActionsStore` כבר פג (TTL הפנימי של EventBus, ~30 דקות — נפרד
+  לגמרי מ-24h TTL של ה-`ActionContract` עצמו, `CONTRACT_PENDING_TTL_SECONDS`
+  ב-`core/action_contract_repository.py:84`) מחזירה למשתמש "ℹ️ הפעולה כבר
+  אינה זמינה, ולכן לא בוצעה" — ניסוח שמשתמע ממנו שאין יותר שום פעולה קיימת.
+  בפועל, ה-`ActionContract` יכול להישאר pending וחי לגמרי, ולחזור מאוחר
+  יותר (reconfirmation, או "מאשר"/"כן" בטקסט) — מה שהמשתמש כבר האמין
+  שבוטל/לא קיים מבצע בפועל.
+- **Root Cause (אומת בקוד, 07/08/2026):** שני ה-branches (`approve`,
+  `reject`) קוראים ל-`bus.pop(action_id)`; אם מחזיר `None` (item פג ב-TTL
+  הפנימי של EventBus) — שניהם קוראים מיד ל-`_notify_missing_or_expired_
+  callback()` ומחזירים, **בלי לבדוק את מצב ה-`ActionContract`**. זה סותר
+  קוד קיים **באותה פונקציה, מוקדם יותר** (שורות ~2519-2536): בדיקה מבוססת
+  `callback_contract_id` (מוטמע ב-callback_data של הכפתור עצמו, עצמאי
+  מ-EventBus) שכבר קיימת — אך רק חוסמת כשה-contract כבר terminal; כשהוא
+  עדיין pending, נופלת דרך על הנחה שה-`bus.pop()` יטפל בזה כרגיל. ההנחה
+  שוברת בדיוק כש-`bus.pop()` נכשל.
+- **Severity:** גבוהה — "שקר תפעולי" למשתמש (owner: "המשתמש חושב שהפעולה
+  איננה קיימת, בעוד שהמערכת עדיין מחזיקה אותה חיה")
+- **המדיניות שנבחרה (owner, 07/08/2026):** "רק הכפתור פג, הפעולה עדיין
+  pending" (לא "פקיעת הכפתור מבטלת גם את הפעולה") — ה-`ActionContract`
+  (24h TTL, מכוון) הוא מקור האמת; אין הצדקה לבטל פעולה אמיתית רק כי
+  עותק-cache פנימי (EventBus, 30 דק') פג.
+- **תוקן (07/08/2026):** פונקציית עזר חדשה `app._recover_pending_item_
+  from_contract(contract_id)` — משחזרת מבנה `item` זהה-בצורתו ל-item רגיל
+  של `bus.pop()`, ישירות מתוך ה-`ActionContract` (`tool_name`,
+  `normalized_payload`, `origin_channel`, `origin_chat_id`,
+  `canonical_user_id`) — שדות סמכותיים קיימים על ה-contract, לא צריך
+  עותק EventBus כדי לדעת אותם. מחזירה `None` אם ה-contract לא נמצא או
+  כבר לא pending — במקרה הזה ההתנהגות הקיימת (`_notify_missing_or_
+  expired_callback`) ממשיכה ללא שינוי. בשני ה-branches, כש-`bus.pop()`
+  מחזיר `None`: מנסה את `_recover_pending_item_from_contract()` לפני
+  שהוא נכנע ל"אינה זמינה". שאר הקוד הקיים רץ ללא שינוי — reuse מלא של
+  `approve_with_lifecycle_result()`/`reject_with_lifecycle_result()`.
+  ראה `docs/architecture/action-gateway/
+  BUG-158_APPROVAL_CANCELLATION_EXPIRY_CANONICALIZATION_20260807.md`
+  ל-Cross-Layer Impact Matrix מלא.
+- **בדיקות:** `test_bug158_approval_callback_eventbus_ttl_recovery.py`
+  (חדש, 11/11) — approve משוחזר ומבוצע, reject משוחזר ומבטל, baseline
+  (item קיים) ללא שינוי, contract שכבר terminal לא "קם לתחייה" ע"י
+  השחזור, ו-callback ישן ללא contract_id עדיין נופל ל"אינה זמינה"
+  (fallback ללא שינוי). regression מלא ירוק: `test_bug112_telegram_
+  approval_ttl.py` (30/30), `test_bug153` (16/16), `test_bug155` (5/5),
+  `test_bug156` (11/11), `test_first_pending_notification_failure_
+  suppression.py` (14/14), `test_pa01_phantom_approval_enforcement.py`
+  (108/108), `test_pending_contract_read_amplification.py` (6/6),
+  `test_bug_approval_callback_hardening.py` (39/39),
+  `test_bug_batch_approval_preserved.py` (13/13),
+  `test_bug122_pending_queue_ux.py` (8/8),
+  `test_approval_gateway_safety.py` (27/27), `smoke_tests.py`,
+  `test_integration.py` (4/4) — כולם ירוקים.
+- **מיפוי TTL לפני מיזוג (07/08/2026, לבקשת owner):** נבדקו כל קבועי
+  ה-TTL הקשורים לאישור בקוד (`event_bus.py`, `app.py`, `tma_api.py`,
+  `core/otp.py`, `core/emergency_window.py`, WhatsApp, `voice_adapter.py`)
+  — טבלה מלאה ב-`docs/architecture/action-gateway/
+  BUG-158_APPROVAL_CANCELLATION_EXPIRY_CANONICALIZATION_20260807.md`.
+  **תוצאה: `event_bus.py::PENDING_TTL_MINUTES` (30 דק') היה הפער היחיד**
+  — בדיוק מה שתוקן כאן. TMA כבר תואם 24h בכוונה; שאר המנגנונים לא
+  קשורים לאותה מחלקת באג. **מסקנת closure:** state קצר-חיים של
+  transport/UI לעולם אסור לו לדרוס או לדווח בטעות את מצב ה-ActionContract
+  החי — בכל פקיעת cache/event, ה-resolution חייב לחזור ל-`contract_id`
+  ול-lifecycle של ה-ActionContract עצמו.
+- **Merged:** ✅ כן — PR #556, מוזג ל-`origin/main` (`00ad6f1`), 07/08/2026
+- **Deployed:** לא אומת
+- **Verified בפרודקשן:** לא
+- **סטטוס:** 🟡 קוד מוזג ל-`main` (11/11 + regression מלא + מיפוי TTL מלא)
+  — **deploy+production verification עדיין לא בוצעו/הוצגו**
+
+---
+
 ## BUG-159 — הפרסר הדטרמיניסטי של create_task לא מזהה "משימת" (סמיכות) ו-הוסף/תוסיף
 
 - **דווח:** 07/08/2026, ע"י owner — בדיקת staging ידנית, ניתוח מדויק מול
@@ -4040,6 +4117,6 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
    יכולים לקרוא במקביל תחת ה-deployment הנוכחי) — ✅ מוזג ל-main (PR #552,
    PR #555)
 7. **BUG-158** — כפתור שפג מדווח "אינה זמינה" גם כש-contract עדיין pending
-   (גבוה) — 🟡 קוד תוקן, PR #556 פתוח
+   (גבוה) — ✅ מוזג ל-main (PR #556)
 8. **BUG-159** — פרסר create_task לא מזהה "משימת"/הוסף/תוסיף (בינוני-גבוה)
-   — 🟡 קוד תוקן, PR נפרד
+   — 🟡 קוד תוקן, PR #557 פתוח

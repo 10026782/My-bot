@@ -1,6 +1,21 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 02/08/2026 — **תיעוד PR #521–#524 (פער-תיעוד, נסגר ישירות מ-`git log origin/main`,
+עודכן: 07/08/2026 — **תיעוד PR #525–#552 (פער-תיעוד, נסגר ישירות מ-`git log origin/main`,
+לא הועלה כ-PR נפרד ע"י מי שביצע אותם):** 28 PRs נוספים מוזגו ל-`main` בין 05–06/08/2026 בלי
+עדכון ROADMAP נלווה — אומת ישירות ב-`git log`/`git merge-base --is-ancestor` על `origin/main`
+(`c5dbe86`), לא לפי claim. תמצית (לפירוט מלא ראו `AI_CONTEXT.md`, 06/08/2026): Context
+Librarian automation hardening (#525/#526/#534, dev tooling בלבד); status-routing/terminal-
+replay bug fixes (#528–#533, חיים ללא flag); TurnCoordinator Phase 2 WS1–WS3 (#536–#544, WS1
+מוזג ומחווט חלקית, WS2/WS3 מוזגים כמודולים עצמאיים לא-מחווטים); אינטגרציית runtime צרה +
+תיקון fingerprint (#545/#546, follow-up #547/#548/#549 — תיעוד בלבד ב-#549); ארבעה תיקוני
+באג מאימות Staging ל-PR #546 — BUG-153/154/155/156 (#550, ללא flag, מוזגים אך **טרם deployed
+ו-טרם verified בפרודקשן**); BUG-157 concurrency race ב-`propose_action()` שנמצא ע"י CodeRabbit
+על PR #550, תוקן עם CAS אטומי (#552, מוזג אך **טרם deployed**); שתי רגנרציות `AI_CONTEXT.md`
+(#551 ו-#553). **`BUG_AUDIT_LOG.md` מסמן את חמשת התיקונים הללו כ-"Merged: לא עדיין" — שדה
+זה לא עודכן אחרי המיזוג בפועל; אומת ב-ancestry-check שהם כן מוזגים.** אף אחד מהם לא רשם flag
+חדש ב-`feature_flags.py`. הפער ל-deploy החי (`5ec37b8`, PR #516) המשיך לגדול — 36 PRs
+(#517–#552) עדיין לא אומתו כפרוסים.
+עודכן קודם: 02/08/2026 — **תיעוד PR #521–#524 (פער-תיעוד, נסגר ישירות מ-`git log origin/main`,
 לא הועלה כ-PR נפרד ע"י מי שביצע אותם):** ארבעה PRs נוספים מוזגו ל-`main` ב-01/08/2026 בלי
 עדכון ROADMAP/CHANGELOG נלווה — תוקן כאן, אומת ישירות ב-`git show`/`git log` על `origin/main`
 (`7c3833a`), לא לפי claim. **PR #521** (`271b293`, merge `a2be204`) — רגנרציית `AI_CONTEXT.md`
