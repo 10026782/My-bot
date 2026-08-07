@@ -3550,10 +3550,13 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
   `test_integration.py` (4/4) — כולם ירוקים.
 - **Merged:** ✅ כן — PR #550, מוזג ל-`origin/main` (`e26de4a`) (עודכן
   07/08/2026 — אומת: `git merge-base --is-ancestor e26de4a origin/main`)
-- **Deployed:** לא אומת
-- **Verified בפרודקשן:** לא
-- **סטטוס:** 🟡 קוד מוזג ל-`main` — **deploy+production verification
-  עדיין לא בוצעו/הוצגו**
+- **Deployed:** ✅ כן (עקיף) — Render: "Deploy live for `44fe0fb`"
+  (07/08/2026, 11:34); `e26de4a` הוא ancestor מאומת (`git merge-base
+  --is-ancestor e26de4a 44fe0fb`) — **לא נבדק ישירות בפרודקשן בסבב
+  האימות הזה** (owner בדק ישירות רק BUG-158/159)
+- **Verified בפרודקשן:** לא (התרחיש הספציפי של הבאג הזה לא נבדק ישירות)
+- **סטטוס:** 🟡 מוזג ל-`main` + deployed (עקיף/ancestor) — **production
+  verification ישיר לתרחיש הזה עדיין לא בוצע**
 
 ---
 
@@ -3607,10 +3610,12 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
   שינוי), `smoke_tests.py`, `test_integration.py` (4/4) — כולם ירוקים.
 - **Merged:** ✅ כן — PR #550, מוזג ל-`origin/main` (`e26de4a`) (עודכן
   07/08/2026)
-- **Deployed:** לא אומת
-- **Verified בפרודקשן:** לא
-- **סטטוס:** 🟡 קוד מוזג ל-`main` — **deploy+production verification
-  עדיין לא בוצעו/הוצגו**
+- **Deployed:** ✅ כן (עקיף) — Render: "Deploy live for `44fe0fb`"
+  (07/08/2026, 11:34); `e26de4a` הוא ancestor מאומת — **לא נבדק ישירות
+  בפרודקשן בסבב האימות הזה**
+- **Verified בפרודקשן:** לא (התרחיש הספציפי לא נבדק ישירות)
+- **סטטוס:** 🟡 מוזג ל-`main` + deployed (עקיף/ancestor) — **production
+  verification ישיר לתרחיש הזה עדיין לא בוצע**
 
 ---
 
@@ -3682,9 +3687,14 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
   (10/10, ללא שינוי), `smoke_tests.py`, `test_integration.py` (4/4) — כולם ירוקים.
 - **Merged:** ✅ כן — PR #550, מוזג ל-`origin/main` (`e26de4a`) (עודכן
   07/08/2026)
-- **Deployed:** לא אומת
-- **Verified בפרודקשן:** לא
-- **סטטוס:** 🟡 קוד מוזג ל-`main` — **deploy+production verification
+- **Deployed:** ✅ כן (עקיף) — Render: "Deploy live for `44fe0fb`"
+  (07/08/2026, 11:34); `e26de4a` הוא ancestor מאומת — **לא נבדק ישירות
+  בפרודקשן בסבב האימות הזה** (הבדיקה שכן בוצעה, 07/08 13:24, עברה דרך
+  מסלול BUG-158 — item שפג לגמרי מ-EventBus, לא ה-10-30-דקות window
+  הספציפי ש-BUG-155 מטפל בו)
+- **Verified בפרודקשן:** לא (התרחיש הספציפי של הבאג הזה לא נבדק ישירות)
+- **סטטוס:** 🟡 מוזג ל-`main` + deployed (עקיף/ancestor) — **production
+  verification ישיר לתרחיש הזה עדיין לא בוצע**
   עדיין לא בוצעו/הוצגו** (לפי "כלל ברזל" ב-CLAUDE.md, לא ✅ עד commit+push+
   deploy+production verification)
 
@@ -3823,8 +3833,10 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
 - **סטטוס:** ✅ בדיקה נוספה ואומתה — הקוד הקיים כבר עומד בכל הדרישות,
   ללא צורך בתיקון. **Merged:** ✅ כן — PR #550, מוזג ל-`origin/main`
   (`e26de4a`) (עודכן 07/08/2026, אומת: `test_first_pending_notification_
-  failure_suppression.py` קיים ב-`origin/main`). **Deployed:** לא אומת.
-  **Verified בפרודקשן:** לא.
+  failure_suppression.py` קיים ב-`origin/main`). **Deployed:** ✅ כן
+  (עקיף) — Render: "Deploy live for `44fe0fb`" (07/08/2026, 11:34);
+  `e26de4a` הוא ancestor מאומת. **Verified בפרודקשן:** לא (אין קוד
+  production שהשתנה כאן מלכתחילה — לא רלוונטי).
 
 ---
 
@@ -3888,11 +3900,14 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
   (44/44), `smoke_tests.py`, `test_integration.py` (4/4) — כולם ירוקים.
 - **Merged:** ✅ כן — PR #552, commit `c5dbe86` על `origin/main` (אומת
   05/08/2026: `git merge-base --is-ancestor f75f095 origin/main` → YES)
-- **Deployed:** לא אומת (אין evidence commit hash מול Render dashboard —
-  לפי כלל הברזל, לא נטען כ-✅ עד שיוצג)
-- **Verified בפרודקשן:** לא
-- **סטטוס:** 🟡 קוד מוזג ל-`main` (PR #552) — **deploy+production
-  verification עדיין לא בוצעו/הוצגו**
+- **Deployed:** ✅ כן (עקיף) — Render: "Deploy live for `44fe0fb`"
+  (07/08/2026, 11:34); `c5dbe86` הוא ancestor מאומת
+  (`git merge-base --is-ancestor c5dbe86 44fe0fb`)
+- **Verified בפרודקשן:** לא — תרחיש ה-race המקביל הספציפי (שני threads
+  על אותו fingerprint) לא נבדק ישירות בפרודקשן; הבדיקה שבוצעה (07/08
+  13:24) עברה במסלול BUG-158/EventBus-recovery, לא במסלול claim-race הזה
+- **סטטוס:** 🟡 מוזג ל-`main` (PR #552) + deployed (עקיף/ancestor) —
+  **production verification ישיר לתרחיש ה-race עדיין לא בוצע**
 
 ### המשך (05/08/2026) — סבב ביקורת שני של CodeRabbit: המתנה ל-claim משתחרר
 
@@ -3932,8 +3947,12 @@ claim מתחרה. תחת `FEATURE_ACTION_CONTRACT_PERSISTENCE=on` (כתיבה
   ל-`origin/main` (`bf9b670`) יחד עם ה"המשך שני" למטה (אותו PR, אותו
   branch) — ראו את בלוק ה-"סטטוס" המעודכן בסוף "המשך שני" למטה, שהוא
   הסטטוס הסופי המדויק של כל PR #555.
-- **Deployed:** לא אומת
-- **Verified בפרודקשן:** לא
+- **Deployed:** ✅ כן (עקיף) — Render: "Deploy live for `44fe0fb`"
+  (07/08/2026, 11:34); `bf9b670` הוא ancestor מאומת
+  (`git merge-base --is-ancestor bf9b670 44fe0fb`)
+- **Verified בפרודקשן:** לא — תרחיש ההמתנה-לשחרור-claim הספציפי לא נבדק
+  ישירות בפרודקשן; הבדיקה שבוצעה (07/08 13:24) עברה במסלול
+  BUG-158/EventBus-recovery
 
 ### המשך שני (07/08/2026) — CodeRabbit על PR #555: bounded claim-ownership token
 
@@ -3977,10 +3996,14 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
   `core/router/test_router.py` (44/44), `smoke_tests.py`,
   `test_integration.py` (4/4) — כולם ירוקים.
 - **Merged:** ✅ כן — PR #555, מוזג ל-`origin/main` (`bf9b670`), 07/08/2026
-- **Deployed:** לא אומת
-- **Verified בפרודקשן:** לא
-- **סטטוס:** 🟡 קוד מוזג ל-`main` — **deploy+production verification
-  עדיין לא בוצעו/הוצגו**
+- **Deployed:** ✅ כן (עקיף) — Render: "Deploy live for `44fe0fb`"
+  (07/08/2026, 11:34); `bf9b670` הוא ancestor מאומת
+  (`git merge-base --is-ancestor bf9b670 44fe0fb`)
+- **Verified בפרודקשן:** לא — תרחיש ה-claim-ownership token הספציפי
+  (cold-cache re-hydration תוך כדי claim פעיל) לא נבדק ישירות בפרודקשן;
+  הבדיקה שבוצעה (07/08 13:24) עברה במסלול BUG-158/EventBus-recovery
+- **סטטוס:** 🟡 מוזג ל-`main` (PR #555) + deployed (עקיף/ancestor) —
+  **production verification ישיר לתרחיש ה-claim-ownership עדיין לא בוצע**
 
 ---
 
@@ -4054,10 +4077,27 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
   החי — בכל פקיעת cache/event, ה-resolution חייב לחזור ל-`contract_id`
   ול-lifecycle של ה-ActionContract עצמו.
 - **Merged:** ✅ כן — PR #556, מוזג ל-`origin/main` (`00ad6f1`), 07/08/2026
-- **Deployed:** לא אומת
-- **Verified בפרודקשן:** לא
-- **סטטוס:** 🟡 קוד מוזג ל-`main` (11/11 + regression מלא + מיפוי TTL מלא)
-  — **deploy+production verification עדיין לא בוצעו/הוצגו**
+- **Deployed:** ✅ כן — Render: "Deploy live for `44fe0fb`" (07/08/2026,
+  11:34), `00ad6f1` הוא ancestor מאומת של `44fe0fb`
+  (`git merge-base --is-ancestor 00ad6f1 44fe0fb`)
+- **Verified בפרודקשן (07/08/2026, 13:24, owner):** ✅ **כן — תרחיש מדויק
+  שוחזר בפרודקשן בפועל.** Contract נוצר ב-11:54, עדיין pending ב-13:24
+  (90 דקות — מעל ה-TTL הפנימי של EventBus, 30 דקות). Owner לחץ על כפתור
+  *בטל* הישן. לוג Render בפועל:
+  ```text
+  [INFO] event_bus: ⏰ Pending action expired at pop: 44325224
+  [INFO] app: [Approval] BUG-158 שוחזר contract pending אחרי פקיעת item
+  ב-EventBus: contract=ab02671f-c7e0-4987-ab30-887b5a829fa8 tool=airtable_add
+  [INFO] core.action_gateway: [ActionGateway] rejected:
+  contract=ab02671f-c7e0-4987-ab30-887b5a829fa8 tool=airtable_add by=boss_hq:eliyahu
+  [INFO] app: 🚫 Rejected: 44325224 | ➕ יצירת משימה: • כותרת המשימה: ...
+  ```
+  `_recover_pending_item_from_contract()` אכן הופעל, מצא את ה-contract
+  עדיין pending, וביצע דחייה אמיתית ומאומתת — **לא** "ℹ️ הפעולה כבר אינה
+  זמינה" הכוזב שהיה קורה לפני התיקון.
+- **סטטוס:** ✅ **VERIFIED IN PROD** — merged (`00ad6f1`→`44fe0fb`) +
+  deployed (Render, 07/08/2026 11:34) + production-verified (owner,
+  07/08/2026 13:24, לוג אמיתי מצוטט למעלה)
 
 ---
 
@@ -4111,31 +4151,42 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
   (4/4).
 - **Merged:** ✅ כן — PR #557, מוזג ל-`origin/main` (`44fe0fb`), 07/08/2026
   (אומת: `git merge-base --is-ancestor 44fe0fb origin/main`)
-- **Deployed:** לא אומת
-- **Verified בפרודקשן:** לא
-- **סטטוס:** 🟡 קוד מוזג ל-`main` (52/52, כולל end-to-end אמיתי דרך
-  `run_agent()` + regression מלא) — **deploy+production verification
-  עדיין לא בוצעו/הוצגו**
+- **Deployed:** ✅ כן — Render: "Deploy live for `44fe0fb`: Merge pull
+  request #557 ... fix(BUG-159)" (07/08/2026, 11:34) — commit ה-PR עצמו,
+  לא רק ancestor
+- **Verified בפרודקשן (07/08/2026, owner):** ✅ **כן.** נשלח בפועל בטלגרם:
+  "צור משימ**ת** בדיקת באג 159" (צורת סמיכות — בדיוק הפער שתוקן, לא
+  "משימה"). תגובת הבוט: "יש משימה שממתינה לאישור: בדיקת באג 159" — תבנית
+  התגובה הדטרמיניסטית המדויקת (לא תגובת Agent חופשית), מוכיחה שהניסוח
+  הגיע למסלול המהיר ולא ל-Agent loop. (מבוסס על צורת התגובה בפועל —
+  לא צוטט כאן לוג גולמי ייעודי לשורה הזו, בשונה מ-BUG-158 למעלה.)
+- **סטטוס:** ✅ **VERIFIED IN PROD** — merged (`44fe0fb`) + deployed
+  (Render, 07/08/2026 11:34) + production-verified (owner, 07/08/2026,
+  ניסוח "משימת" הגיע לתגובה הדטרמיניסטית הנכונה)
 
 ---
 
 ## סדר עדיפות מומלץ לתיקונים
 
 כל הפריטים למטה **מוזגים ל-`main`** (אומת 07/08/2026 ע"י `git merge-base
---is-ancestor <commit> origin/main` על כל אחד). **אף אחד מהם עדיין לא
-Deployed מאומת ולא Verified בפרודקשן** — ראו "מה נותר לאמת" ב-session
-summary; זו הפעולה הבאה הנדרשת, לא תיקון קוד נוסף.
+--is-ancestor <commit> origin/main` על כל אחד), וכולם **גם Deployed
+מאומת** (Render: "Deploy live for `44fe0fb`", 07/08/2026 11:34 — `44fe0fb`
+עצמו הוא הקומיט הפרוס, וכל שאר ה-commits ברשימה הם ancestors מאומתים
+שלו). **BUG-158 ו-BUG-159 בלבד גם Verified בפרודקשן ישירות** (owner,
+07/08/2026 13:24 — ראו הבלוקים המלאים למעלה); BUG-153 עד BUG-157 נשארים
+🟡 deployed אך לא נבדקו ישירות בתרחיש הספציפי שלהם בפרודקשן (ראו כל בלוק
+בנפרד לפירוט מדויק של מה כן/לא נבדק).
 
-1. **BUG-155** — TTL expiry משאיר pending חי (קריטי) — ✅ מוזג ל-main (PR #550)
-2. **BUG-153** — create חדש אחרי rejection נחסם (גבוה) — ✅ מוזג ל-main (PR #550)
-3. **BUG-154** — parser crash בניסוח "ל־תאריך" (גבוה) — ✅ מוזג ל-main (PR #550)
-4. **BUG-156** — שעה אינה נשמרת (בינוני-גבוה) — ✅ מוזג ל-main (PR #550)
-5. **בדיקת suppression fallback** — ✅ נסגר ומוזג (PR #550)
+1. **BUG-155** — TTL expiry משאיר pending חי (קריטי) — ✅ מוזג + deployed ל-main (PR #550)
+2. **BUG-153** — create חדש אחרי rejection נחסם (גבוה) — ✅ מוזג + deployed ל-main (PR #550)
+3. **BUG-154** — parser crash בניסוח "ל־תאריך" (גבוה) — ✅ מוזג + deployed ל-main (PR #550)
+4. **BUG-156** — שעה אינה נשמרת (בינוני-גבוה) — ✅ מוזג + deployed ל-main (PR #550)
+5. **בדיקת suppression fallback** — ✅ נסגר, מוזג + deployed (PR #550)
 6. **BUG-157** — `propose_action()` לא-אטומי (concurrency, **נגיש בפועל** —
    לא latent, ראה "Root Cause" למעלה: scheduler thread + webhook thread
-   יכולים לקרוא במקביל תחת ה-deployment הנוכחי) — ✅ מוזג ל-main (PR #552,
-   PR #555)
+   יכולים לקרוא במקביל תחת ה-deployment הנוכחי) — ✅ מוזג + deployed ל-main
+   (PR #552, PR #555)
 7. **BUG-158** — כפתור שפג מדווח "אינה זמינה" גם כש-contract עדיין pending
-   (גבוה) — ✅ מוזג ל-main (PR #556)
+   (גבוה) — ✅ מוזג + deployed + **VERIFIED IN PROD** (PR #556)
 8. **BUG-159** — פרסר create_task לא מזהה "משימת"/הוסף/תוסיף (בינוני-גבוה)
-   — ✅ מוזג ל-main (PR #557)
+   — ✅ מוזג + deployed + **VERIFIED IN PROD** (PR #557)
