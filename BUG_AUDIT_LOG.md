@@ -3548,11 +3548,12 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
   `test_bug091_source_trust_boundary.py` (10/10, ללא שינוי),
   `core/router/test_router.py` (44/44, ללא שינוי), `smoke_tests.py`,
   `test_integration.py` (4/4) — כולם ירוקים.
-- **Merged:** לא עדיין
-- **Deployed:** לא
+- **Merged:** ✅ כן — PR #550, מוזג ל-`origin/main` (`e26de4a`) (עודכן
+  07/08/2026 — אומת: `git merge-base --is-ancestor e26de4a origin/main`)
+- **Deployed:** לא אומת
 - **Verified בפרודקשן:** לא
-- **סטטוס:** 🟡 עיצוב אושר ע"י owner, קוד מומש ונבדק מקומית — **לא מוזג, לא
-  deployed, לא verified בפרודקשן**
+- **סטטוס:** 🟡 קוד מוזג ל-`main` — **deploy+production verification
+  עדיין לא בוצעו/הוצגו**
 
 ---
 
@@ -3604,10 +3605,12 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
   ל-date-shaped-token-בלי-marker), `core/router/test_router.py` (44/44,
   ללא שינוי), `test_create_task_deterministic_route.py` (13/13, ללא
   שינוי), `smoke_tests.py`, `test_integration.py` (4/4) — כולם ירוקים.
-- **Merged:** לא עדיין
-- **Deployed:** לא
+- **Merged:** ✅ כן — PR #550, מוזג ל-`origin/main` (`e26de4a`) (עודכן
+  07/08/2026)
+- **Deployed:** לא אומת
 - **Verified בפרודקשן:** לא
-- **סטטוס:** 🟡 קוד תוקן ונבדק מקומית — **לא מוזג, לא deployed, לא verified בפרודקשן**
+- **סטטוס:** 🟡 קוד מוזג ל-`main` — **deploy+production verification
+  עדיין לא בוצעו/הוצגו**
 
 ---
 
@@ -3677,11 +3680,13 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
   התרחיש המדויק, נכשל על הקוד הישן [3/5], עובר על הקוד המתוקן [5/5]),
   `test_bug112_telegram_approval_ttl.py` (30/30, ללא שינוי), `test_bug_stale_callback_ux.py`
   (10/10, ללא שינוי), `smoke_tests.py`, `test_integration.py` (4/4) — כולם ירוקים.
-- **Merged:** לא עדיין
-- **Deployed:** לא
+- **Merged:** ✅ כן — PR #550, מוזג ל-`origin/main` (`e26de4a`) (עודכן
+  07/08/2026)
+- **Deployed:** לא אומת
 - **Verified בפרודקשן:** לא
-- **סטטוס:** 🟡 קוד תוקן ונבדק מקומית — **לא מוזג, לא deployed, לא verified בפרודקשן**
-  (לפי "כלל ברזל" ב-CLAUDE.md, לא ✅ עד commit+push+deploy+production verification)
+- **סטטוס:** 🟡 קוד מוזג ל-`main` — **deploy+production verification
+  עדיין לא בוצעו/הוצגו** (לפי "כלל ברזל" ב-CLAUDE.md, לא ✅ עד commit+push+
+  deploy+production verification)
 
 ---
 
@@ -3816,7 +3821,10 @@ RECONFIRM_REQUIRED (ה-prompt כבר הוצג פעם אחת)
   `test_bug_stale_callback_ux.py` (10/10) — כולם ירוקים, לא נגעתי בקוד
   production כלל.
 - **סטטוס:** ✅ בדיקה נוספה ואומתה — הקוד הקיים כבר עומד בכל הדרישות,
-  ללא צורך בתיקון. **לא מוזג עדיין** (הבדיקה עצמה טרם רצה ב-CI/production).
+  ללא צורך בתיקון. **Merged:** ✅ כן — PR #550, מוזג ל-`origin/main`
+  (`e26de4a`) (עודכן 07/08/2026, אומת: `test_first_pending_notification_
+  failure_suppression.py` קיים ב-`origin/main`). **Deployed:** לא אומת.
+  **Verified בפרודקשן:** לא.
 
 ---
 
@@ -3920,14 +3928,12 @@ claim מתחרה. תחת `FEATURE_ACTION_CONTRACT_PERSISTENCE=on` (כתיבה
   `test_first_pending_notification_failure_suppression.py` (14/14),
   `core/router/test_router.py` (44/44), `smoke_tests.py`,
   `test_integration.py` (4/4).
-- **Merged:** לא (עודכן 07/08/2026) — PR **#555**, commit `96e45a08cccc7b10675a9a11496cecd08cbdd367`,
-  ענף `claude/pr-546-turn-coordinator-bugs-jhdrtl`, נפתח מול `origin/main`
-  אחרי מיזוג PR #552 (`c5dbe86`). **טרם מוזג ל-`origin/main`** — לא לבלבל
-  עם "טרם נפתח" (הניסוח הקודם, שהיה נכון רק לפני 07/08/2026).
-- **Deployed:** לא
+- **Merged:** ✅ כן (עודכן 07/08/2026, שוב) — כלול ב-PR #555, מוזג
+  ל-`origin/main` (`bf9b670`) יחד עם ה"המשך שני" למטה (אותו PR, אותו
+  branch) — ראו את בלוק ה-"סטטוס" המעודכן בסוף "המשך שני" למטה, שהוא
+  הסטטוס הסופי המדויק של כל PR #555.
+- **Deployed:** לא אומת
 - **Verified בפרודקשן:** לא
-- **סטטוס:** 🟡 קוד תוקן ונבדק מקומית (24/24 בזמן הפתיחה) — PR פתוח,
-  **לא מוזג, לא deployed, לא verified בפרודקשן**
 
 ### המשך שני (07/08/2026) — CodeRabbit על PR #555: bounded claim-ownership token
 
@@ -4103,22 +4109,28 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
   `test_bug153` (16/16), `test_bug154` (20/20), `test_bug155` (5/5),
   `test_bug156` (11/11), `smoke_tests.py`, `test_integration.py`
   (4/4).
-- **Merged:** לא עדיין
-- **Deployed:** לא
+- **Merged:** ✅ כן — PR #557, מוזג ל-`origin/main` (`44fe0fb`), 07/08/2026
+  (אומת: `git merge-base --is-ancestor 44fe0fb origin/main`)
+- **Deployed:** לא אומת
 - **Verified בפרודקשן:** לא
-- **סטטוס:** 🟡 קוד תוקן ונבדק מקומית (52/52, כולל end-to-end אמיתי דרך
-  `run_agent()` + regression מלא) — **לא
-  מוזג, לא deployed, לא verified בפרודקשן**
+- **סטטוס:** 🟡 קוד מוזג ל-`main` (52/52, כולל end-to-end אמיתי דרך
+  `run_agent()` + regression מלא) — **deploy+production verification
+  עדיין לא בוצעו/הוצגו**
 
 ---
 
 ## סדר עדיפות מומלץ לתיקונים
 
-1. **BUG-155** — TTL expiry משאיר pending חי (קריטי) — 🟡 קוד תוקן
-2. **BUG-153** — create חדש אחרי rejection נחסם (גבוה) — 🟡 קוד תוקן
-3. **BUG-154** — parser crash בניסוח "ל־תאריך" (גבוה) — 🟡 קוד תוקן
-4. **BUG-156** — שעה אינה נשמרת (בינוני-גבוה) — 🟡 קוד תוקן
-5. **בדיקת suppression fallback** — ✅ נסגר, 04/08/2026 (לא נדרש fault injection)
+כל הפריטים למטה **מוזגים ל-`main`** (אומת 07/08/2026 ע"י `git merge-base
+--is-ancestor <commit> origin/main` על כל אחד). **אף אחד מהם עדיין לא
+Deployed מאומת ולא Verified בפרודקשן** — ראו "מה נותר לאמת" ב-session
+summary; זו הפעולה הבאה הנדרשת, לא תיקון קוד נוסף.
+
+1. **BUG-155** — TTL expiry משאיר pending חי (קריטי) — ✅ מוזג ל-main (PR #550)
+2. **BUG-153** — create חדש אחרי rejection נחסם (גבוה) — ✅ מוזג ל-main (PR #550)
+3. **BUG-154** — parser crash בניסוח "ל־תאריך" (גבוה) — ✅ מוזג ל-main (PR #550)
+4. **BUG-156** — שעה אינה נשמרת (בינוני-גבוה) — ✅ מוזג ל-main (PR #550)
+5. **בדיקת suppression fallback** — ✅ נסגר ומוזג (PR #550)
 6. **BUG-157** — `propose_action()` לא-אטומי (concurrency, **נגיש בפועל** —
    לא latent, ראה "Root Cause" למעלה: scheduler thread + webhook thread
    יכולים לקרוא במקביל תחת ה-deployment הנוכחי) — ✅ מוזג ל-main (PR #552,
@@ -4126,4 +4138,4 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
 7. **BUG-158** — כפתור שפג מדווח "אינה זמינה" גם כש-contract עדיין pending
    (גבוה) — ✅ מוזג ל-main (PR #556)
 8. **BUG-159** — פרסר create_task לא מזהה "משימת"/הוסף/תוסיף (בינוני-גבוה)
-   — 🟡 קוד תוקן, PR #557 פתוח
+   — ✅ מוזג ל-main (PR #557)
