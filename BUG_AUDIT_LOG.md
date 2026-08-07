@@ -3920,10 +3920,60 @@ claim מתחרה. תחת `FEATURE_ACTION_CONTRACT_PERSISTENCE=on` (כתיבה
   `test_first_pending_notification_failure_suppression.py` (14/14),
   `core/router/test_router.py` (44/44), `smoke_tests.py`,
   `test_integration.py` (4/4).
-- **Merged:** לא עדיין (PR נפרד חדש, טרם נפתח בזמן כתיבת שורות אלו)
+- **Merged:** לא (עודכן 07/08/2026) — PR **#555**, commit `96e45a08cccc7b10675a9a11496cecd08cbdd367`,
+  ענף `claude/pr-546-turn-coordinator-bugs-jhdrtl`, נפתח מול `origin/main`
+  אחרי מיזוג PR #552 (`c5dbe86`). **טרם מוזג ל-`origin/main`** — לא לבלבל
+  עם "טרם נפתח" (הניסוח הקודם, שהיה נכון רק לפני 07/08/2026).
 - **Deployed:** לא
 - **Verified בפרודקשן:** לא
-- **סטטוס:** 🟡 קוד תוקן ונבדק מקומית (24/24) — **לא מוזג, לא deployed,
+- **סטטוס:** 🟡 קוד תוקן ונבדק מקומית (24/24 בזמן הפתיחה) — PR פתוח,
+  **לא מוזג, לא deployed, לא verified בפרודקשן**
+
+### המשך שני (07/08/2026) — CodeRabbit על PR #555: bounded claim-ownership token
+
+ביקורת CodeRabbit על PR #555 עצמו העלתה ממצא Major/Heavy-lift נוסף:
+`_cache_contract()` היה משחרר כל claim על fingerprint **ללא בדיקת בעלות** —
+כולל כשנקרא מנתיב **read-path בלבד** (`find_by_id()`/`find_by_fingerprint()`/
+`find_live_by_user()` שמחממים cache מה-repository, לא caller שבאמת claim-ם).
+תרחיש קונקרטי: שתי הצעות `deterministic_create_task` שקוראות במקביל
+fingerprint עם contract קיים שנדחה ("rejected", carve-out של BUG-153) —
+caller A זוכה ב-claim; caller B, שרק *קורא* (cold-cache hydration) את אותו
+contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A ע"י `_cache_contract()`
+הישן; caller B יכול היה אז לזכות ב-claim בעצמו; שני callers היו יכולים
+לשמור contract חלופי לאותו fingerprint — בדיוק ה-duplicate ש-BUG-157 המקורי
+נועד לסגור.
+
+- **תוקן (07/08/2026):** `claim_fingerprint_cas()` מחזיר עכשיו **token
+  אטום** (`str`, לא `bool`) במקום פשוט `True`. `release_fingerprint_claim(
+  fingerprint, token)` ו-`_cache_contract(contract, *, claim_token=None)`
+  משחררים claim **רק אם ה-token תואם בדיוק**. קריאות read-path-בלבד
+  (4 call sites: `find_by_id()`, `find_by_fingerprint()`,
+  `find_live_by_user()`, `update_status()`) משאירות `claim_token=None`
+  במפורש — לעולם לא יכולות לשחרר claim של מישהו אחר. `propose_action()`
+  מעביר את ה-token שקיבל מ-`claim_fingerprint_cas()` ל-`save()` ול-
+  `release_fingerprint_claim()` בנתיב הכשל.
+- **בדיקות:** `test_bug157_atomic_fingerprint_claim.py` הורחב ל-**34/34**
+  (מ-24/24) — section 2b חדשה (cache-warm לא גונב claim פעיל), section 7
+  חדשה (שחזור מדויק של התרחיש שהעלה CodeRabbit: cold-cache re-hydration
+  של contract שנדחה תוך כדי claim פעיל — מוכיח contract יחיד נשמר, לא
+  שניים). גם תוקן: sections 1/2/3 עודכנו ל-API החדש (token במקום bool),
+  section 6 קיבל daemon threads + bounded join (לא unbounded `.join()` —
+  תיקון נוסף של CodeRabbit, מונע תלייה שקטה של הטסט אם regression יחזור).
+  regression מלא ירוק: `test_action_gateway.py` (43/43),
+  `test_business_action_fingerprint_normalization.py` (8/8), `test_bug153`
+  (16/16), `test_bug155` (5/5), `test_bug156` (11/11),
+  `test_first_pending_notification_failure_suppression.py` (14/14),
+  `test_pr0c_action_gateway_adapters.py` (34/34),
+  `test_phase_4b_1a_durable_proposals.py` (11/11),
+  `test_phase_4b_1a_lookup_correctness.py`,
+  `test_p0_unhashable_identity_atomic_wrapper.py` (18/18),
+  `test_pr0c_action_contracts_persistence.py` (16/16),
+  `core/router/test_router.py` (44/44), `smoke_tests.py`,
+  `test_integration.py` (4/4) — כולם ירוקים.
+- **Merged:** לא — כלול ב-PR #555 (עדיין פתוח)
+- **Deployed:** לא
+- **Verified בפרודקשן:** לא
+- **סטטוס:** 🟡 קוד תוקן ונבדק מקומית (34/34) — **לא מוזג, לא deployed,
   לא verified בפרודקשן**
 
 ---
@@ -3935,5 +3985,8 @@ claim מתחרה. תחת `FEATURE_ACTION_CONTRACT_PERSISTENCE=on` (כתיבה
 3. **BUG-154** — parser crash בניסוח "ל־תאריך" (גבוה) — 🟡 קוד תוקן
 4. **BUG-156** — שעה אינה נשמרת (בינוני-גבוה) — 🟡 קוד תוקן
 5. **בדיקת suppression fallback** — ✅ נסגר, 04/08/2026 (לא נדרש fault injection)
-6. **BUG-157** — `propose_action()` לא-אטומי (concurrency, latent) — ✅ core
-   מוזג ל-main (PR #552); המשך (wait-for-claim-release) — 🟡 קוד תוקן, PR נפרד טרם נפתח
+6. **BUG-157** — `propose_action()` לא-אטומי (concurrency, **נגיש בפועל** —
+   לא latent, ראה "Root Cause" למעלה: scheduler thread + webhook thread
+   יכולים לקרוא במקביל תחת ה-deployment הנוכחי) — ✅ core מוזג ל-main
+   (PR #552); המשך (wait-for-claim-release + claim-ownership token) —
+   🟡 קוד תוקן, PR #555 פתוח, טרם מוזג

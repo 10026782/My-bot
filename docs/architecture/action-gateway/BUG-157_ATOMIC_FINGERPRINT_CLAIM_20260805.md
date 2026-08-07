@@ -202,12 +202,31 @@ CONTRACT_PERSISTENCE=on` (כתיבה עמידה אמיתית עם latency לא-�
 - `python3 core/router/test_router.py` — 44/44, ללא שינוי
 - `python3 smoke_tests.py` / `test_integration.py` — ירוק
 
+## עדכון שני (07/08/2026) — CodeRabbit על PR #555: bounded claim-ownership token
+
+ביקורת CodeRabbit על PR #555 עצמו (לא #552) העלתה ממצא Major/Heavy-lift:
+`_cache_contract()` שחרר claim על fingerprint ללא בדיקת בעלות — כולל
+כשנקרא מנתיב read-path-בלבד (`find_by_id()`/`find_by_fingerprint()`/
+`find_live_by_user()` שמחממים cache מה-repository). תרחיש: שתי הצעות
+`deterministic_create_task` שקוראות במקביל fingerprint עם contract שנדחה
+(carve-out BUG-153) — caller A זוכה ב-claim; caller B, שרק *קורא* (cold-
+cache hydration) את אותו contract שנדחה, היה בעבר משחרר בטעות את ה-claim
+של A; caller B יכול היה לזכות ב-claim בעצמו; שני callers עלולים לשמור
+contract חלופי לאותו fingerprint. תוקן: `claim_fingerprint_cas()` מחזיר
+עכשיו **token אטום** (`str | None`, לא `bool`); `release_fingerprint_
+claim()`/`_cache_contract()` משחררים רק אם ה-token תואם. קריאות read-path
+(4 call sites) משאירות `claim_token=None` — לעולם לא משחררות claim של
+מישהו אחר. נבדק ב-section 2b/7 חדשות ב-`test_bug157_atomic_fingerprint_
+claim.py` — 34/34 (מ-24/24), כולל שחזור מדויק של התרחיש.
+
 ## סטטוס
 
 **חלק 1 (retry loop בסיסי, ללא המתנה):** מוזג ל-`main` ב-PR #552
 (`c5dbe86`), 05/08/2026. **Production-verified: לא בוצע** (אין עדיין
 הוכחת deploy+prod evidence לפי כלל הברזל).
 
-**חלק 2 (המתנה ל-claim משתחרר, מסמך זה):** עיצוב אושר ע"י owner
-(05/08/2026). קוד מומש ונבדק מקומית (24/24). **לא מוזג (PR נפרד חדש,
-טרם נפתח בזמן כתיבת שורות אלו), לא deployed, לא verified בפרודקשן.**
+**חלק 2+3 (המתנה ל-claim משתחרר + claim-ownership token, מסמך זה):**
+עיצוב אושר ע"י owner (05/08/2026, 07/08/2026). קוד מומש ונבדק מקומית
+(34/34, כולל regression מלא). **PR #555, commit
+`96e45a08cccc7b10675a9a11496cecd08cbdd367`, פתוח מ-07/08/2026 — טרם
+מוזג ל-`origin/main`, לא deployed, לא verified בפרודקשן.**
