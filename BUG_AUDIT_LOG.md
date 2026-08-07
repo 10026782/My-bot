@@ -4558,13 +4558,17 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
   לתאר "no_contract" לא-נכון על contract שכן קיים. **תוכן ההודעה
   (`safe_user_message`) לא השתנה** — התיקון רק מוסיף את ה-signal
   החסר, לא משנה מה נאמר למשתמש.
-- **בדיקות (חדש, הורחב ל-exhaustive):** `test_bug162_gateway_reply_owner_
-  on_generic_block.py` (**32/32**) — לא רק תרחיש BUG-153 בודד: enumeration
-  ממצה על **כל 6 ערכי `existing.status`** שמגיעים ל-branch הגנרי
-  (pending/completed/rejected/approved/executing/outcome_unknown), כל אחד
-  נבדק בנפרד עבור `reply_owner=="gateway"` + `lifecycle_result` מאוכלס +
-  תוכן-הודעה אמיתי ולא-ממציא. **Regression מלא**: `test_bug153_...py`
-  (16/16), `test_bug161_...py` (7/7), ו-9 קבצי טסט נוספים שמפעילים
+- **בדיקות (חדש, הורחב ל-exhaustive; הורחב שוב ב-code review, 07/08/2026):**
+  `test_bug162_gateway_reply_owner_on_generic_block.py` (**57/57**) — לא רק
+  תרחיש BUG-153 בודד: enumeration ממצה על **7 ערכי `existing.status`**
+  שמגיעים ל-branch הגנרי (pending/completed/executed/rejected/approved/
+  executing/outcome_unknown — "executed" נוסף ב-code review כי
+  `_handle_duplicate_executed()` מקבץ אותו יחד עם "completed" ולא היה
+  מכוסה קודם), כל אחד נבדק בנפרד עבור `reply_owner=="gateway"` +
+  `lifecycle_result` מאוכלס + תוכן-הודעה אמיתי ולא-ממציא + (תוספת code
+  review) קישור מפורש ל-contract_id שנזרע ול-canonical_state הספציפי
+  לסטטוס, לא רק "lifecycle_result לא None". **Regression מלא**:
+  `test_bug153_...py` (16/16), `test_bug161_...py` (7/7), ו-10 קבצי טסט נוספים שמפעילים
   `_queue_approval_detailed` (`test_bug115`, `test_bug155`, `test_bug156`,
   `test_bug_batch_approval_preserved`, `test_bug_canonical_tool_wiring`,
   `test_create_task_deterministic_route`, `test_first_pending_

@@ -152,9 +152,26 @@ chk("the OLD contract is untouched — still 'rejected' (this fix never mutates 
 # ══════════════════════════════════════════════════════════════════
 print("\n── 2. EXHAUSTIVE: every existing.status reaching the generic block branch gets reply_owner=gateway ──")
 
-_STATUSES_REACHING_GENERIC_BLOCK = [
-    "pending", "completed", "rejected", "approved", "executing", "outcome_unknown",
-]
+# status -> expected ApprovalLifecycleResult.canonical_state
+# (build_approval_lifecycle_result() maps "completed"/"executed" to the same
+# "completed" canonical_state, and "approved"/"executing" to the same
+# "approved_processing" canonical_state — see core/action_gateway.py.)
+# "pending" is the one exception: propose_action()'s BUG-122 pre-scan
+# ("existing_pending_blocks_agent") intercepts it BEFORE the generic branch
+# and returns canonical_state="pending_conflict" via a distinct code path —
+# verified by direct trace, contradicting this file's own header comment
+# which listed "pending" as reaching the generic branch. Kept in the loop
+# (reply_owner/contract binding still hold here too), but with the real
+# canonical_state, not the generic-branch one.
+_STATUSES_REACHING_GENERIC_BLOCK = {
+    "pending": "pending_conflict",
+    "completed": "completed",
+    "executed": "completed",
+    "rejected": "rejected",
+    "approved": "approved_processing",
+    "executing": "approved_processing",
+    "outcome_unknown": "outcome_unknown",
+}
 
 
 def _seed_contract(identity, tool_inputs, status, suffix):
@@ -179,10 +196,10 @@ def _seed_contract(identity, tool_inputs, status, suffix):
     return contract
 
 
-for _status in _STATUSES_REACHING_GENERIC_BLOCK:
+for _status, _expected_canonical_state in _STATUSES_REACHING_GENERIC_BLOCK.items():
     _identity_n = _identity(f"req_bug162_exhaustive_{_status}")
     _inputs_n = {"table": "Tasks", "fields": {"כותרת המשימה": f"בדיקת סטטוס {_status}"}}
-    _seed_contract(_identity_n, _inputs_n, _status, _status)
+    _seeded_contract_n = _seed_contract(_identity_n, _inputs_n, _status, _status)
 
     with patch("feature_flags.is_enabled", side_effect=lambda name: name == "FEATURE_ACTION_GATEWAY"), \
          patch.object(app, "resolve_identity", side_effect=lambda channel, ext_id, _id=_identity_n: _id):
@@ -191,13 +208,23 @@ for _status in _STATUSES_REACHING_GENERIC_BLOCK:
             f"צור שוב את המשימה {_status}", trusted_source="agent",
         )
 
+    _lifecycle_n = outcome_n.get("lifecycle_result")
     chk(f"status={_status!r}: blocked (ok=False)", outcome_n["ok"] is False)
     chk(f"status={_status!r}: reply_owner == 'gateway'",
         outcome_n.get("reply_owner") == "gateway")
     chk(f"status={_status!r}: lifecycle_result populated",
-        outcome_n.get("lifecycle_result") is not None)
+        _lifecycle_n is not None)
     chk(f"status={_status!r}: message is non-empty and not a fabricated invitation",
         bool(outcome_n.get("message")) and "אשר בבירור" not in outcome_n["message"])
+    # Bind the outcome to the exact seeded contract — not just "some" contract
+    # reached the generic branch — and require the status-specific lifecycle
+    # classification, not merely a non-null lifecycle_result.
+    chk(f"status={_status!r}: outcome bound to the seeded contract_id",
+        outcome_n.get("contract_id") == _seeded_contract_n.contract_id)
+    chk(f"status={_status!r}: lifecycle_result.contract_id matches the seeded contract",
+        getattr(_lifecycle_n, "contract_id", None) == _seeded_contract_n.contract_id)
+    chk(f"status={_status!r}: lifecycle_result.canonical_state == {_expected_canonical_state!r}",
+        getattr(_lifecycle_n, "canonical_state", None) == _expected_canonical_state)
 
 
 print()

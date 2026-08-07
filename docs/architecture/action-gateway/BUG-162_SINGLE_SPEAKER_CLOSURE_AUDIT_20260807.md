@@ -169,13 +169,24 @@ violation=agent_spoke_in_gateway_owned_approval_turn") בזמן שמנגנון-�
 
 ## 3. הטסט המבני שסוגר את המחלקה הזו (לא מנגנון runtime חדש)
 
-`test_bug162_gateway_reply_owner_on_generic_block.py` (32/32) — לא רק תרחיש
-BUG-153 בודד, אלא **enumeration ממצה** על כל 6 ערכי `existing.status` שמגיעים
-ל-branch #5 (pending/completed/rejected/approved/executing/outcome_unknown),
-כל אחד נבדק בנפרד עבור `reply_owner=="gateway"` + `lifecycle_result` מאוכלס +
-תוכן-הודעה לא-ממציא. זה סוגר בדיוק את הפער ש-§2.3 מתעד — הפעם הבאה ש-branch
-בפונקציה הזו (או branch חדש דומה שיתווסף) ישכח `reply_owner`, הטסט הזה נכשל
-מיידית, לא רק כש-owner יבחין בזה ידנית בפרודקשן.
+`test_bug162_gateway_reply_owner_on_generic_block.py` (57/57, לאחר תוספת
+code-review, 07/08/2026) — לא רק תרחיש BUG-153 בודד, אלא **enumeration
+ממצה** על 7 ערכי `existing.status` שמגיעים ל-branch #5 (pending/completed/
+executed/rejected/approved/executing/outcome_unknown — "executed" נוסף
+בסבב הזה כי `propose_action()` מקבץ אותו יחד עם "completed" באותו
+`_handle_duplicate_executed()`, ולא היה מכוסה קודם), כל אחד נבדק בנפרד עבור
+`reply_owner=="gateway"` + `lifecycle_result` מאוכלס + תוכן-הודעה לא-ממציא
++ (תוספת code-review) קישור מפורש ל-contract שנזרע — `outcome.contract_id`
+ו-`lifecycle_result.contract_id` שווים ל-contract_id שנזרע, ו-
+`lifecycle_result.canonical_state` תואם את הערך הצפוי הספציפי לסטטוס (לא
+רק "lifecycle_result לא None"). תיעוד לוואי: "pending" מתברר, לפי trace
+ישיר, שמגיע דרך ה-BUG-122 pre-scan (`existing_pending_blocks_agent`,
+canonical_state="pending_conflict") ולא דרך ה-branch הגנרי עצמו — הטסט
+עדיין בודק אותו (ה-binding עדיין תקף שם), אבל עם ה-canonical_state
+האמיתי, לא הגנרי; זה סתר את התיעוד המקורי בראש קובץ הטסט, שתוקן בהתאם. זה
+סוגר בדיוק את הפער ש-§2.3 מתעד — הפעם הבאה ש-branch בפונקציה הזו (או branch
+חדש דומה שיתווסף) ישכח `reply_owner`, הטסט הזה נכשל מיידית, לא רק כש-owner
+יבחין בזה ידנית בפרודקשן.
 
 **זה טסט, לא ארכיטקטורה חדשה** — עונה במפורש על הדרישה "BUG-162 הוא דוגמת כשל
 שחייב להיות נתפס על ידי gate קיים או test structural חדש": ה-gate הקיים
@@ -193,7 +204,7 @@ BUG-153 בודד, אלא **enumeration ממצה** על כל 6 ערכי `existing
 | האם ה-producer (`_queue_approval_detailed_impl()`) עקבי מול הבסיס הזה? | 🔴 היה לא-עקבי ב-1 מתוך 11 exit paths — **כל 11 נסקרו (audit coverage), ה-branch הבעייתי תוקן; שאר ה-10 אומתו כנכונים-בעיצוב (§2.2) — לא כולם "מסמנים reply_owner", אלא כולם תואמים את החוזה: מסומן כש-יש contract אמיתי-וסופי, לא-מסומן בכוונה כש-אין (duplicate/unknown/revoked/failed-cleanup וכו')** |
 | האם קיים duplicate authority לא-פתור? | 🟡 כן — שני מנגנונים עצמאיים (§2.4), **מתועד כפתוח, לא תוקן** לפי הנחיה |
 | האם Gate C (Phase 3) עצמו "הושלם"? | ❌ לא — עדיין `PLANNING ONLY` רשמית, למרות שחלק ממנו (PR #471) כבר בפרודקשן |
-| האם יש עכשיו טסט מבני שהיה תופס את BUG-162 מראש? | ✅ כן — `test_bug162_gateway_reply_owner_on_generic_block.py`, 32/32, ממצה על כל הסטטוסים הרלוונטיים |
+| האם יש עכשיו טסט מבני שהיה תופס את BUG-162 מראש? | ✅ כן — `test_bug162_gateway_reply_owner_on_generic_block.py`, 57/57, ממצה על כל 7 הסטטוסים הרלוונטיים, כולל קישור ל-contract שנזרע |
 
 **המלצה אחת בלבד (לא מימוש, החלטת owner):** Gate C's DoD checklist
 (`TURN_COORDINATOR_PROPOSAL_V2.md` §Gate C) צריך לצטט במפורש את PR #471

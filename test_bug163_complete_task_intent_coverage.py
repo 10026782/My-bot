@@ -114,6 +114,30 @@ _intent, _conf, _rule = detect_intent("רשימת משימות")
 chk("'רשימת משימות' -> LIST_TASKS (unchanged)",
     _intent == Intent.LIST_TASKS)
 
+# ── 5. Code-review addendum (07/08/2026): word-boundary + negation guard
+#      false positives — "complete"/"done" matched as a substring inside
+#      "incomplete", and negated phrasings ("do not mark ... done") were
+#      wrongly accepted as COMPLETE_TASK. ────────────────────────────────
+_intent, _conf, _rule = detect_intent("mark task X incomplete")
+chk("'mark task X incomplete' -> not COMPLETE_TASK ('complete' substring guard)",
+    _intent != Intent.COMPLETE_TASK)
+
+_intent, _conf, _rule = detect_intent("incomplete task X")
+chk("'incomplete task X' -> not COMPLETE_TASK ('complete' substring guard)",
+    _intent != Intent.COMPLETE_TASK)
+
+_intent, _conf, _rule = detect_intent("do not mark task X done")
+chk("'do not mark task X done' -> not COMPLETE_TASK (negation guard)",
+    _intent != Intent.COMPLETE_TASK)
+
+_intent, _conf, _rule = detect_intent("don't mark task X done")
+chk("\"don't mark task X done\" -> not COMPLETE_TASK (negation guard)",
+    _intent != Intent.COMPLETE_TASK)
+
+_intent, _conf, _rule = detect_intent("mark task X done")
+chk("'mark task X done' -> COMPLETE_TASK (valid phrasing still matches)",
+    _intent == Intent.COMPLETE_TASK)
+
 print(f"\n{'═'*45}")
 print(f"  {passed}/{passed+failed} passed")
 

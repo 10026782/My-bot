@@ -91,15 +91,13 @@ def _normalize_create_task_input(text: str) -> str:
         if value.startswith(">"):
             value = value[1:].strip()
             continue
-        # BUG-160: an unbalanced leading quote/bracket — its matching closer
-        # never appears anywhere in the rest of the text — is message-
-        # wrapping noise (copy-paste artifact, a stray typed quote), not
-        # content. Strip only the single leading character; never assume a
-        # matching close exists elsewhere and strip both sides. Deliberately
-        # narrower than the balanced-pair case above: if the closing char
-        # DOES appear somewhere later (just not at the exact end), that
-        # shape is genuinely ambiguous and is left untouched — same
-        # unmatched-fallthrough behavior as before this fix.
+        # BUG-160: מרכאה/סוגר פותח לא-מאוזן — הסוגר המתאים לו לא מופיע בכלל
+        # בהמשך הטקסט — הוא רעש של עטיפת-הודעה (ארטיפקט העתק-הדבק, מרכאה
+        # תועה), לא תוכן. מוסרים רק את התו הפותח היחיד; לעולם לא מניחים
+        # שקיים סוגר תואם במקום אחר ומסירים משני הצדדים. מכוון בכוונה יותר
+        # צר מהמקרה המאוזן למעלה: אם תו-הסגירה כן מופיע מאוחר יותר (רק לא
+        # בדיוק בסוף), הצורה הזו עדיין דו-משמעית באמת, ונשארת ללא שינוי —
+        # אותה התנהגות של נפילה-ללא-התאמה כמו לפני התיקון הזה.
         if len(value) >= 2:
             for opening, closing in _CREATE_TASK_QUOTE_PAIRS:
                 if value.startswith(opening) and closing not in value[1:]:

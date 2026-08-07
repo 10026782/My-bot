@@ -131,7 +131,8 @@ result = build_approval_lifecycle_result(
 chk(
     "Gateway's rejected/repeated block message is truthful ('כבר בוטלה'), "
     "not a fabricated reconfirmation invitation — unmodified backstop",
-    "בוטלה" in result.safe_user_message and "אשר" not in result.safe_user_message,
+    result.safe_user_message.startswith("יצירת המשימה כבר בוטלה")
+    and "אשר" not in result.safe_user_message,
 )
 chk(
     "Gateway's block message declares reply_owner=gateway (single-speaker "
