@@ -54,27 +54,12 @@
         },
         {
           "path": "docs/architecture/turn-coordinator-full/README.md",
-          "role": "WS1/WS2/WS3 parallel-execution plan index — canonical for task breakdown (TC1-TC10) and gap-to-workstream ownership, NOT for current merge status (see turn-coordinator/README.md's 'Single source of truth' section, added 2026-08-07 after this catalog gap caused a duplicate-planning-directory near-miss during BUG-162's investigation)",
-          "status": "active"
-        },
-        {
-          "path": "docs/architecture/turn-coordinator-full/PARALLEL_IMPLEMENTATION_WORKSTREAMS.md",
-          "role": "WS1/WS2/WS3 scope, file ownership map, and existing-gap-to-workstream table",
+          "role": "WS1/WS2/WS3 parallel-execution plan index — canonical for task breakdown (TC1-TC10) and gap-to-workstream ownership, NOT for current merge status (see turn-coordinator/README.md's 'Single source of truth' section, added 2026-08-07 after this catalog gap caused a duplicate-planning-directory near-miss during BUG-162's investigation). Its own body links PARALLEL_IMPLEMENTATION_WORKSTREAMS.md/INTEGRATION_AND_MERGE_PLAN.md/DECISION_LOG.md directly — those are not separately catalogued here to stay within this layer's bundle document-count budget (see test_pilot_preflight.py); read this file first, it points onward.",
           "status": "active"
         },
         {
           "path": "docs/architecture/turn-coordinator-full/GAP_ANALYSIS.md",
           "role": "gap class/status/owning-workstream/internal-milestone table (TC1-TC10); the authoritative place to check whether a TC item is actually Done",
-          "status": "active"
-        },
-        {
-          "path": "docs/architecture/turn-coordinator-full/IMPLEMENTATION_SEQUENCE.md",
-          "role": "TC1-TC10 dependency-ordered implementation sequence",
-          "status": "active"
-        },
-        {
-          "path": "docs/architecture/turn-coordinator-full/DECISION_LOG.md",
-          "role": "append-only workstream decision log, including cross-directory single-source-of-truth resolution (entry 15) and the BUG-162 interim-patch decision (entry 14)",
           "status": "active"
         },
         {
