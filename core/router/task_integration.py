@@ -19,6 +19,18 @@ from core.router.task_resolvers import TaskLookup, resolve_task
 
 TaskIntegrationResult = CanonicalActionProposal | ResolverResult
 
+# The WS1 ownership contract requires every owned intent to have one target
+# owner (IntentOwnershipDecision.owner is the typed owner-selection result).
+# resolver_required alone does not prove the registered owner is the right
+# one for this intent -- a registry entry could have the correct
+# resolver_required value with the wrong owner string. These constants match
+# the live, wired TASK_OWNERSHIP registry (core/turn_coordinator_runtime.py)
+# exactly -- verified directly against that module, not assumed -- and are
+# validated in addition to, not instead of, the existing resolver_required
+# check below.
+_TASK_BUILDER_OWNER = "task_builder"
+_TASK_RESOLVER_OWNER = "task_resolver"
+
 
 def prepare_task_proposal(
     intent: str,
@@ -34,7 +46,9 @@ def prepare_task_proposal(
     """Select the registered owner, resolve when required, then build.
 
     This returns a ResolverResult for zero/multiple matches instead of picking
-    a task. It creates no ActionContract and performs no execution.
+    a task. It creates no ActionContract and performs no execution. Fails
+    closed, before any proposal construction or lookup, when the registered
+    decision's ``owner`` does not match the expected owner for this intent.
     """
     decision = registry.require(intent)
     needs_resolution = intent in {Intent.UPDATE_TASK, Intent.COMPLETE_TASK}
@@ -42,9 +56,13 @@ def prepare_task_proposal(
         raise ValueError(f"resolver policy mismatch for intent: {intent}")
 
     if intent == Intent.CREATE_TASK:
+        if decision.owner != _TASK_BUILDER_OWNER:
+            raise ValueError(f"owner mismatch for intent: {intent}")
         return build_create_task_proposal(title, **dict(fields or {}))
     if intent not in {Intent.UPDATE_TASK, Intent.COMPLETE_TASK}:
         raise ValueError(f"unsupported task integration intent: {intent}")
+    if decision.owner != _TASK_RESOLVER_OWNER:
+        raise ValueError(f"owner mismatch for intent: {intent}")
     if lookup is None:
         raise ValueError(f"lookup is required for intent: {intent}")
 
