@@ -18,6 +18,7 @@ from unittest.mock import patch
 logging.basicConfig(level=logging.WARNING)
 
 from airtable_schema import LeadFields, LeadStatus, LeadOutcome
+from crm import ContactResult
 
 passed = failed = 0
 
@@ -50,7 +51,8 @@ _lead_record = {
 with patch("lead_conversion.is_enabled", return_value=True), \
      patch("tma_api._at_list", return_value=[_lead_record]), \
      patch("tma_api._at_patch", return_value=True) as mock_patch, \
-     patch("lead_conversion.crm_add_contact", return_value="✅ נוצר: recCONTACT1"), \
+     patch("lead_conversion.crm_add_contact",
+           return_value=ContactResult("created", record_id="recCONTACT1")), \
      patch("tools.airtable_security.audit_log_airtable"):
 
     ok, msg = lead_conversion.convert_lead_to_contact("Test Lead")

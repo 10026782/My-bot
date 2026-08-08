@@ -13,7 +13,6 @@
 # TODO (future): migrate to gateway when crm.py is refactored.
 
 import logging
-import re
 from datetime import datetime, timezone
 
 from feature_flags import is_enabled
@@ -67,8 +66,14 @@ def convert_lead_to_contact(query: str) -> tuple[bool, str]:
 
     contact_result = crm_add_contact(name=name, phone=phone, notes=notes,
                                       lead_source_id=lead["id"])
-    if "❌" in contact_result:
-        return False, f"❌ יצירת איש קשר נכשלה: {contact_result}"
+    if contact_result.status not in ("created", "existing"):
+        messages = {
+            "ambiguous": "⚠️ נמצאו כמה אנשי קשר תואמים; ההמרה נעצרה.",
+            "invalid": "❌ מספר הטלפון חסר או אינו תקין; ההמרה נעצרה.",
+            "lookup_error": "❌ לא ניתן לאמת את איש הקשר; ההמרה נעצרה.",
+        }
+        return False, messages.get(contact_result.status,
+                                   "❌ יצירת איש קשר נכשלה; ההמרה נעצרה.")
 
     try:
         from tools.airtable_security import audit_log_airtable
@@ -87,8 +92,7 @@ def convert_lead_to_contact(query: str) -> tuple[bool, str]:
     except Exception as _audit_err:
         logger.warning(f"[LeadConversion] audit log failed (non-fatal): {_audit_err}")
 
-    rec_m      = re.search(r'rec\w+', contact_result)
-    contact_id = rec_m.group(0) if rec_m else ""
+    contact_id = contact_result.record_id
 
     patched = _at_patch(Tables.LEADS, lead["id"], {
         LeadFields.STATUS:       LeadStatus.DONE,
@@ -96,7 +100,8 @@ def convert_lead_to_contact(query: str) -> tuple[bool, str]:
         LeadFields.CONVERTED_AT: datetime.now(tz=timezone.utc).isoformat(),
     })
 
-    msg = f"✅ הליד *{name}* הומר לאיש קשר חדש.\n{contact_result}"
+    contact_kind = "חדש" if contact_result.status == "created" else "קיים"
+    msg = f"✅ הליד *{name}* הומר לאיש קשר {contact_kind}."
     if not patched:
         msg += "\n⚠️ (סטטוס/Business Outcome של הליד לא עודכנו — בדוק ידנית ב-Airtable)"
 

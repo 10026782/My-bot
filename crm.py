@@ -205,27 +205,17 @@ def find_or_create_contact(phone, name, *, email="", company="",
 def crm_add_contact(name: str, phone: str = "", email: str = "",
                     contact_type: str = ContactType.CLIENT,
                     company: str = "", notes: str = "",
-                    lead_source_id: str = "") -> str:
-    if not _creds_ok():
-        return "❌ חסרים מפתחות Airtable"
-    if not name:
-        return "❌ שם הוא שדה חובה"
-    try:
-        fields = {
-            ContactFields.NAME:         name,
-            ContactFields.STATUS:       ContactStatus.ACTIVE,
-        }
-        if phone:           fields[ContactFields.PHONE]       = phone
-        if email:           fields[ContactFields.EMAIL]       = email
-        if company:         fields[ContactFields.COMPANY]     = company
-        if contact_type:    fields[ContactFields.ROLE_CATEGORY] = contact_type
-        if lead_source_id:  fields[ContactFields.ORIGIN_LEAD] = [lead_source_id]
-
-        rec = _post(Tables.CONTACTS, fields)
-        return f"✅ איש קשר נוסף: *{name}* | ID: `{rec['id']}`"
-    except Exception as e:
-        logger.error(f"crm_add_contact: {e}")
-        return f"❌ שגיאה בהוספת איש קשר: {e}"
+                    lead_source_id: str = "") -> ContactResult:
+    """Find or create a Contact through the canonical deduplication gate."""
+    return find_or_create_contact(
+        phone, name,
+        email=email,
+        company=company,
+        contact_type=contact_type,
+        notes=notes,
+        lead_source_id=lead_source_id,
+        source="crm_add_contact",
+    )
 
 
 def crm_find_contact(query: str, identity=None) -> str:
