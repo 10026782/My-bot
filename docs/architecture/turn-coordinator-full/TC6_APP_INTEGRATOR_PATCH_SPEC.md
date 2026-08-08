@@ -1,13 +1,289 @@
 # TC6 — `app.py` Integrator Patch Spec
 
-**Status:** spec only, not applied. `app.py` is Integrator-only per
-`PARALLEL_IMPLEMENTATION_WORKSTREAMS.md`'s file ownership map — the TC6 WS2
-branch (`claude/tc6-explicit-reply-ownership`) does not edit this file
-directly. This document is the isolated patch spec the integrator applies
-against `app.py`, once WS2's `core/action_gateway.py` change
-(`reply_ownership_for_contract()`) has landed.
+**Status:** implemented, **not yet merged to `origin/main`** (CodeRabbit
+review round, PR #569 — do not read this as "applied in production"; per
+this repo's own Rule 15/GOVERNANCE_RULES.md, that claim requires merge +
+deploy + production verification, none of which have happened yet).
+`app.py` is Integrator-only per `PARALLEL_IMPLEMENTATION_WORKSTREAMS.md`'s
+file ownership map — the TC6 WS2 branch (`claude/tc6-explicit-reply-
+ownership`, merged as PR #566) did not edit this file directly. This
+document was the isolated patch spec; the integrator cutover implementing
+it against `app.py` is Draft PR #569
+(`claude/tc6-integrator-app-cutover`), based on `origin/main` `e60d9ce`
+(after PR #566/#567), once WS2's `core/action_gateway.py` change
+(`reply_ownership_for_contract()`) had already merged. Kept as the design
+record — the code blocks below reflect the as-implemented shape on that
+open PR (including the round-3 telemetry correction just below and the
+round-4 rollback/CodeRabbit fixes), not merely a proposal — but "as-
+implemented" here means "in PR #569's branch," not "on `origin/main`."
 
-**Base:** `origin/main` `38d9226` (same base as the WS2 branch).
+**Base:** `origin/main` `38d9226` (original spec-authoring base, same as
+the WS2 branch). The integrator cutover itself is based on the later
+`e60d9ce` tip — see Status above.
+
+**Cross-Layer Authority Contract gate:** this document is subject to
+`docs/architecture/CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` — the mandatory
+gate for any change touching TurnCoordinator, the F52/Phase 4C Action &
+Tool Contract layer, or the Durable Atomic Approval layer
+(`ActionContract`/`ActionGateway`), directly or indirectly. See §0 below
+for the completed Cross-Layer Impact Matrix (added on PR #569's
+CodeRabbit review round, per explicit owner instruction — "write the full
+Impact Matrix now" — after the gap was flagged by an automated review;
+this gate had not been checked against this specific document on any
+earlier TC6 round).
+
+---
+
+## 0. Cross-Layer Impact Matrix (`CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` §2)
+
+Scope of this matrix: the integrator cutover itself — commits `d58f018`
+(initial cutover) through the latest CodeRabbit-review commit on PR #569
+(`claude/tc6-integrator-app-cutover`). Diff footprint: `app.py`,
+`test_tc6_app_reply_ownership.py`, this document. No other file is part of
+this PR's diff (verified: `git diff --name-only origin/main...HEAD` on the
+PR branch lists exactly these three paths).
+
+### שכבה 1 — Core Reasoning / BUG-104
+
+**touched:** not touched.
+
+- **input impact:** none — this PR reads no BUG-104 output (no
+  `leads_reasoning_projection`/`FEATURE_CORE_REASONING_LEADS_STATE`/
+  `leads_adapter` symbol appears anywhere in the diff).
+- **output impact:** none — this PR produces no signal Layer 1 consumes.
+- **authority impact:** none — Layer 1's ownership of business
+  state/evidence/phase/confidence is untouched; this PR only ever reads/
+  writes approval-lifecycle (`ActionLifecycleResult`) and reply-ownership
+  state, a Layer 4/Layer 2 concern, never Layer 1's.
+- **shared identifiers:** none found.
+- **invariants:** n/a — no Layer 1 invariant is read or relied on by this
+  change.
+- **failure semantics:** n/a — Layer 1 cannot fail as a result of this
+  change; it is never called.
+- **observability:** n/a.
+- **cross-layer tests:** n/a — no cross-layer coupling to prove.
+
+**Proof of non-impact:**
+1. **grep evidence:** `git diff origin/main -- app.py test_tc6_app_reply_ownership.py | grep -iE "leads_reasoning_projection|FEATURE_CORE_REASONING_LEADS_STATE|leads_adapter|core_reasoning|BUG-104|build_reasoning_projection"` → no output.
+2. **unchanged-tests evidence:** `core/` pytest suite (includes the BUG-104
+   test families — `test_bug104_*.py` live at repo root, not under `core/`,
+   but were included unmodified in the full root `test_*.py` sweep both
+   before and after this PR's commits) — 189/189 `core/` pytest cases pass
+   unchanged; root-sweep result for the `test_bug104_*.py` files:
+   unchanged pass/fail status pre- and post-PR (all passing, none of them
+   is among the 3 pre-existing/unrelated failures documented in the PR's
+   Test Results section).
+3. **no-new-coupling evidence:** `app.py`'s diff adds zero new `import`
+   statements referencing `core/leads_reasoning_projection.py`,
+   `core/adapters/leads_adapter.py`, or any other BUG-104 module.
+
+### שכבה 2 — TurnCoordinator
+
+**touched:** indirectly.
+
+- **input impact:** none directly — this PR does not read from any
+  `TurnCoordinator`-owned signal (there is no `class TurnCoordinator` in
+  the repo — `grep -rl "class TurnCoordinator"` returns zero files, per
+  `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` §1's own finding, unchanged by
+  this PR). The de-facto owners of turn precedence/routing today —
+  `core/router/router.py::route_request()` and
+  `core/lead_candidate_handler.py::handle_lead_candidate()` — are not
+  touched by this diff at all.
+- **output impact:** yes, indirectly. This PR changes the **value**
+  passed into an *existing, pre-existing* call to
+  `core.turn_envelope.build_ownership_signal(..., reply_owner=...)` (the
+  call site itself, and the import line, are unchanged by this diff — only
+  what feeds its `reply_owner` argument changes, from a sentinel-presence
+  boolean to a typed-projection-derived value, see §3). It similarly
+  changes the value of the pre-existing `_out_meta["reply_owner"]`/
+  `_out_meta["canonical_state"]` telemetry keys that `run_agent()` already
+  populated before this PR (Branch A's shape is unchanged; Branch B is new
+  — see "shared identifiers" below). Both are read by whatever downstream
+  observability/telemetry consumers (`tma_api.py` panels, logs) already
+  consumed those exact keys before this PR — no new consumer, no new key
+  shape *added by this PR* to `OwnershipSignal` itself.
+- **authority impact:** none on the *formal* layer (there is nothing to
+  affect — no `TurnCoordinator` class exists). On the **interim,
+  de-facto** turn-scoped reply-ownership mechanism this PR modifies (the
+  `_gateway_owned`/single-speaker early-return inside `run_agent()`, gated
+  by `FEATURE_SINGLE_SPEAKER_APPROVAL_UX`, pre-existing since before TC6):
+  authority *narrows*, it does not expand — Branch A can now only claim
+  ownership from a real, exact-contract-projected `ActionLifecycleResult`
+  (never a bare sentinel-presence heuristic, closing BUG-162 §2.4's
+  duplicate-authority gap), and the new Branch B explicitly claims **no**
+  authority at all (a safety stop, never `reply_owner="gateway"`). No new
+  parallel authority is introduced — this PR's whole design correction
+  (§ above) exists specifically to prevent exactly that.
+- **shared identifiers:** `_out_meta["canonical_state"]` — pre-existing
+  key (Branch A: already existed before this PR, populated from the real
+  `ApprovalLifecycleResult.canonical_state` value, a Layer 4 enum: e.g.
+  `"pending"`/`"completed"`/`"rejected"`/`"approved_processing"`/
+  `"pending_conflict"`/`"no_contract"`/`"multiple_pending"`, see
+  `core/action_gateway.py` `build_approval_lifecycle_result()`). Branch B
+  (new, this PR) sets the **same `_out_meta` key** to a new, app.py-local
+  string value, `"ownership_verification_failed"` — verified via grep
+  (`grep -n 'canonical_state' core/action_gateway.py`) to **not** collide
+  with any existing Layer-4 `canonical_state` enum member. This is a
+  same-name, disjoint-value-space reuse (not a true collision today), but
+  it is exactly the kind of ambiguity this gate's "shared identifiers"
+  field exists to surface: a future reader could reasonably assume
+  `_out_meta["canonical_state"]` is always a Layer-4
+  `ApprovalLifecycleResult.canonical_state` echo, and Branch B's value
+  breaks that assumption. **Flagged, not renamed** — renaming `_out_meta`'s
+  schema is out of this PR's narrow rollback-fix/CodeRabbit-fix scope, but
+  should be considered before any future consumer starts pattern-matching
+  on this field. No other shared identifier (class name, field name, table
+  name, flag name) crosses a layer boundary in this diff.
+- **invariants:** the interim mechanism's own invariant — "the Agent never
+  becomes final speaker for a Gateway-owned or ownership-unverifiable
+  turn" — is preserved and, for the Branch B case, newly established (it
+  did not exist before this PR; a projection-read failure previously had
+  undefined tool-loop behavior). Verified by `test_tc6_app_reply_
+  ownership.py` tests 1-2 (Branch A) and 7-8 (Branch B): exactly one Claude
+  API call, hard early return, before `tool_calls_made` increments.
+- **failure semantics:** Branch B **is** the newly-defined failure
+  semantics for this exact case (ownership-projection read failure) — see
+  Layer 4 below for what "failure" means at its source. At this layer, a
+  Layer-4 read failure now fails **closed** (safety stop, no Agent
+  continuation) rather than previously-undefined behavior.
+- **observability:** `logger.warning("[TC6] ownership_verification=failed
+  ...")` (new, this PR's CodeRabbit-round fix) plus the pre-existing
+  `OwnershipSignal`/`evidence_finalizer_shadow` mechanisms, now also
+  invoked on the Branch B path (also new, same round — see the RP5 guard
+  section below for why).
+- **cross-layer tests:** `test_tc6_app_reply_ownership.py` — the entire
+  file is a Layer 2/Layer 4 boundary test: it proves the interim
+  reply-ownership mechanism (Layer 2 concern) correctly derives its
+  decision from, and only from, a real Layer-4 `ActionLifecycleResult`,
+  never inventing one (test 16, structural grep guard) and never
+  substituting sentinel presence for it (test 13).
+
+### שכבה 3 — F52 / Phase 4C Action & Tool Contract
+
+**touched:** not touched.
+
+- **input impact:** none — this PR reads `ToolMeta`/`enforce()`/
+  `get_tool_meta()` only through pre-existing, unmodified call sites
+  (`meta.requires_approval` checks already existed before this PR).
+- **output impact:** none — no change to tool definitions, capabilities,
+  policy, handler/tool mapping, or the C53a result contract
+  (`{ok, tool, external_id, evidence, user_message}`).
+- **authority impact:** none — this PR does not touch `tool_registry.py`,
+  `tools/schemas.py`, `tools/dispatcher.py`, `compose_status_reply()`, or
+  `FEATURE_UNIFIED_STATUS_FORMATTER`.
+- **shared identifiers:** none found.
+- **invariants:** n/a.
+- **failure semantics:** n/a.
+- **observability:** n/a.
+- **cross-layer tests:** n/a.
+
+**Proof of non-impact:**
+1. **grep evidence:** `git diff origin/main -- app.py test_tc6_app_reply_ownership.py | grep -iE "tool_registry\.py|tools/schemas\.py|tools/dispatcher\.py|compose_status_reply|FEATURE_UNIFIED_STATUS_FORMATTER|ToolMeta\("` → no output.
+2. **unchanged-tests evidence:** `test_action_gateway.py` (43/43,
+   unchanged), `smoke_tests.py`'s "Tool registry / dispatcher sanity"
+   check (unchanged pass) — both exercise Layer 3 surface area and stay
+   green, byte-identical result before/after this PR's commits.
+3. **no-new-coupling evidence:** zero new imports from `tool_registry.py`,
+   `tools/schemas.py`, or `tools/dispatcher.py` in this diff.
+
+### שכבה 4 — Durable Atomic Approval
+
+**touched:** indirectly.
+
+- **input impact:** this PR's producer (`_queue_approval_detailed_impl()`)
+  now additionally *reads* `ActionGateway.reply_ownership_for_contract
+  (contract_id)` — a method that already existed, merged, tested (19/19)
+  on PR #566 — gated behind `FEATURE_SINGLE_SPEAKER_APPROVAL_UX` (this
+  PR's rollback fix). No new input signal is defined; an existing one is
+  newly consumed, conditionally.
+- **output impact:** none on Layer 4 itself — `ActionContract.status`,
+  the atomic-claim mechanism, and `ActionGateway`'s own return contracts
+  are all unchanged (verified: `core/action_gateway.py`,
+  `core/action_contract_repository.py`,
+  `core/action_gateway_atomic_executor.py`,
+  `core/router/ownership_contracts.py` all show zero diff against
+  `origin/main` — `git diff --stat origin/main -- <those four files>` is
+  empty). Layer 4 CONSUMES nothing new from this PR either.
+- **authority impact:** none — `ActionContract`'s lifecycle, the
+  single-live-contract invariant, and atomic-claim exclusivity are all
+  unchanged. This PR only ever *reads* Layer 4's canonical projection; it
+  never writes an `ActionContract`, never mutates `status`, never
+  fabricates an `ActionLifecycleResult` in `app.py` (test 16, structural
+  grep proof: `"ActionLifecycleResult(" not in <app.py source>`).
+- **shared identifiers:** `ActionLifecycleResult`/`ActionContract` names
+  are referenced (imported/read) but never redefined — no identifier-
+  squatting (prohibition #9). See Layer 2's "shared identifiers" entry
+  above for the one same-name/disjoint-value `_out_meta["canonical_state"]`
+  note (an app.py-local telemetry key, not a Layer 4 class attribute).
+- **invariants:** "`ActionLifecycleResult` only ever comes from a real
+  `ActionContract` through the canonical WS2 projection, never fabricated"
+  — this PR's own central design rule, verified structurally (test 16)
+  and behaviorally (tests 7-8, 14: a read failure/unexpected `None`
+  propagates as `None`, never a synthetic result). "Exact-contract
+  correlation, never inferred from latest-contract-for-user" — verified
+  by test 6 (stale/unrelated contract cannot own the current turn).
+- **failure semantics:** a `reply_ownership_for_contract()` read failure
+  (exception or unexpected `None`) is Layer 4's own, pre-existing failure
+  mode (unchanged by this PR — `ExecutionLedger.find_by_id()`'s "lookup
+  failures propagate, clean not-found returns `None`" contract, from
+  WS2/PR #566, is not touched here). What's new in **this** PR is purely
+  how Layer 2 *reacts* to that pre-existing failure mode (Branch B) — the
+  failure semantics of Layer 4 itself are unchanged. Notably (raised by
+  this matrix, not previously documented): Branch B does **not**
+  revoke/cancel the underlying `ActionContract` it couldn't verify
+  ownership for — the contract remains live/`pending` in the ledger,
+  untouched. This is intentional (a read/verification failure is not
+  evidence the contract itself is invalid — see the in-code comment added
+  this round, and `test_tc6_app_reply_ownership.py`'s R1-on assertions,
+  which confirm the returned `contract_id` still resolves to a real,
+  still-`pending` contract with no cleanup performed).
+- **observability:** new, this round: the `logger.warning("[TC6]
+  ownership_verification=failed contract=%s ...")` line and the
+  RP4 `observe_shadow_finalizer()` call newly added to the Branch B path
+  (see RP5 guard below) both surface the `contract_id` this failure
+  occurred against — closing the "Branch B is invisible in production"
+  gap CodeRabbit flagged.
+- **cross-layer tests:** same as Layer 2's entry — `test_tc6_app_reply_
+  ownership.py` is the boundary test for this exact Layer 2/Layer 4
+  relationship. Additionally, `core/test_tc6_reply_ownership.py` (WS2,
+  unchanged by this PR, 19/19 passing) is the boundary test for Layer 4's
+  own `reply_ownership_for_contract()` method in isolation.
+
+### Proof of non-impact (Layers 1 and 3)
+
+See each layer's own "Proof of non-impact" block above (Layer 1, Layer 3)
+— both provide grep evidence, unchanged-tests evidence, and no-new-
+coupling evidence, per §5 of the gate.
+
+### Cross-Cutting Guard — RP5 Evidence Finalization (§1.5)
+
+**applies:** yes. This PR's Branch A/Branch B early returns both produce
+user-facing "action-status"-adjacent text (a pending/conflict/rejection/
+completion message, or the Branch B safety-stop message) and both are, by
+construction, exempt from the normal `sanitize_agent_response()`/RP4
+evidence-classification path that runs later in `run_agent()` (the early
+`return` happens before that code is ever reached) — squarely the
+"reply grounding" and "ניסוח success/failure/pending הפונה למשתמש"
+triggers listed in §1.5.
+
+**How this PR interacts with the guard:** it does not invent a new
+grounding-check or evidence classifier — it reuses the existing,
+shadow-only, non-blocking RP4 mechanism (`core.turn_evidence.
+observe_shadow_finalizer()`, already called by Branch A before this PR).
+**Finding surfaced while completing this matrix (fixed this round, not
+merely documented):** before this fix, Branch B's early return skipped
+`observe_shadow_finalizer()` entirely (unlike Branch A) — meaning Branch B
+turns were completely invisible to RP4's shadow evidence-classification
+population, the exact anomaly-case population RP4/RP5 exist to eventually
+measure and (once un-blocked) enforce against. Fixed by adding the
+identical `observe_shadow_finalizer(..., approval_prompt_sent=bool(
+_ownership_verification_failed_entry.get("owner_notified")))` call to the
+Branch B path, writing into the same `_out_meta["evidence_finalizer_
+shadow"]` key Branch A already used — no new mechanism, no new
+`_out_meta` shape, RP4/RP5 remain shadow-only and non-blocking exactly as
+before this PR.
+
+---
 
 **Design correction this spec implements** (owner-approved, supersedes the
 TC6 preflight's original §E, which proposed `ActionGateway.approval_status()`
@@ -366,6 +642,15 @@ same early, structural, already-established mechanism — **not** PA-01's
 separate, later, text-pattern-based mechanism near the end of `run_agent()`,
 which this invariant must not depend on):
 
+**Telemetry correction (round 3, applied in the actual implementation):**
+the block below originally set `_out_meta["reply_owner"] = "unverified"`.
+This was rejected — `"unverified"` is not an owner, and `_out_meta`'s
+`reply_owner` key must only ever carry a real, positive ownership claim
+(`"gateway"`, as Branch A sets it) or be absent entirely. Branch B omits
+`reply_owner` from `_out_meta` altogether and reports the read failure via
+a separate, explicitly non-ownership field, `ownership_verification:
+"failed"`, instead:
+
 ```python
 if _flag_enabled("FEATURE_SINGLE_SPEAKER_APPROVAL_UX"):
     if _ownership_verification_failed_entry is not None:
@@ -377,9 +662,13 @@ if _flag_enabled("FEATURE_SINGLE_SPEAKER_APPROVAL_UX"):
         # שכבר נמסרה (הגרסה של מסלול-ההצלחה ב-§1c) לעולם לא תוכפל.
         if _out_meta is not None:
             _out_meta.update({
-                "reply_owner": "unverified",  # שונה מ-"gateway"/"agent" — עובדה, לא טענת-בעלות
+                # במכוון בלי מפתח "reply_owner" — "unverified" אינו בעלים,
+                # ו-reply_owner חייב לשאת רק טענת-בעלות חיובית אמיתית
+                # ("gateway") או להיעדר לגמרי. ownership_verification="failed"
+                # הוא שדה-תצפית נפרד, לא טענת-בעלות.
                 "final_response_count": 1,
                 "canonical_state": "ownership_verification_failed",
+                "ownership_verification": "failed",
             })
         return (
             "" if _ownership_verification_failed_entry.get("owner_notified")

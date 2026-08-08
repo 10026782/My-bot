@@ -1199,6 +1199,39 @@ from core.approval_queue_recovery import (  # noqa: E402
 )
 
 
+# TC6 (app.py integrator) — סמן terminal_outcome פנימי-בלבד, נוסף לסמנים
+# הקיימים APPROVAL_QUEUE_ERROR / APPROVAL_QUEUE_ORPHANED /
+# APPROVAL_QUEUE_NEVER_ATTEMPTED. לעולם לא מעוצב ישירות למשתמש — המפתח
+# "message" נושא תמיד את הטקסט הבטוח הקיים בפועל; הסמן הזה נקרא רק
+# על-ידי לוגיקת ה-tool-loop (run_agent(), ראו Branch A/Branch B למטה)
+# כדי להחליט על בעלות-תשובה, בדיוק כמו שהסמנים הקיימים כבר נקראים
+# על-ידי הנהלת-החשבונות של BUG-122 וחיפוש-התוצאה של PA-01.
+_APPROVAL_OWNERSHIP_VERIFICATION_FAILED = "APPROVAL_OWNERSHIP_VERIFICATION_FAILED"
+
+
+def _ownership_for_contract_or_none(gateway, contract_id: str | None):
+    """TC6 (app.py integrator): גוזרת את ה-ActionLifecycleResult הקנוני לפי
+    contract מדויק, עבור contract_id שהקריאה הזו כבר יודעת שהוא אמיתי (הוא
+    זה עתה נוצר/נמצא ע"י propose_action() באותה הפונקציה).
+
+    מחזירה ``None`` — לעולם לא ``ActionLifecycleResult`` מומצא — בכל כשל
+    קריאה. קוראים חייבים להתייחס ל-``None`` כ"החזר את הטקסט הבטוח
+    כבר-מחושב של הקריאה הזו עצמה, מתויג עם
+    ``_APPROVAL_OWNERSHIP_VERIFICATION_FAILED``", לעולם לא כרישיון להמציא
+    מצב מחזור-חיים/אישור/ביצוע סינתטי, ולעולם לא כרישיון ליפול בשקט
+    לבעלות-תשובה של ה-Agent (עקרון-העיצוב של TC6: אין המצאה, אין
+    ברירת-מחדל שקטה ל-Agent, אין סמכות בעלות שנייה ב-app.py).
+    """
+    try:
+        return gateway.reply_ownership_for_contract(contract_id)
+    except Exception:
+        logger.warning(
+            "[ActionGateway] קריאת בעלות TC6 לפי contract מדויק נכשלה "
+            "עבור contract=%s.", contract_id, exc_info=True,
+        )
+        return None
+
+
 def _queue_approval(tool_name: str, tool_inputs: dict,
                     user_chat_id: str, channel: str, user_text: str = "") -> str:
     """
@@ -1505,6 +1538,57 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
                     _gw.find_contract(_gw_result.contract_id),
                     canonical_state="pending_conflict",
                 )
+                # TC6 (app.py integrator) — rollback fix: הקרנת-הבעלות
+                # הקנונית לפי contract מדויק מופעלת רק כש-
+                # FEATURE_SINGLE_SPEAKER_APPROVAL_UX פעיל. כשהדגל כבוי, ה-
+                # producer חייב לשמר את ההתנהגות המדויקת שהייתה לפני TC6 —
+                # כשל קריאת-בעלות אסור שישנה ok/created_this_turn/
+                # terminal_outcome, ואסור שיפיק APPROVAL_OWNERSHIP_
+                # VERIFICATION_FAILED — אחרת דגל כבוי כבר לא שומר על
+                # רולבק אמיתי.
+                if _flag("FEATURE_SINGLE_SPEAKER_APPROVAL_UX"):
+                    _action_lifecycle_result = _ownership_for_contract_or_none(
+                        _gw, _gw_result.contract_id,
+                    )
+                    if _action_lifecycle_result is None:
+                        # Branch B: contract אמיתי (הידוע-כאמיתי — _pending_
+                        # lifecycle כבר נבנה ממנו למעלה) נגע ב-turn הזה, אך
+                        # סמכות-הבעלות עצמה לא ניתנה לאישור. לא משתמשים כאן
+                        # ב-_orphan_cleanup_failure_response() — הניסוח שלה
+                        # ("אירעה שגיאה בעת ניסיון לבטל בקשת אישור") שגוי
+                        # סמנטית למקרה הזה (שום דבר מעולם לא בוטל). מחזירים
+                        # את אותו טקסט ישן כבר-מחושב וכבר-בטוח
+                        # (safe_user_message) יחד עם סמן terminal_outcome
+                        # פנימי-בלבד, כדי שה-tool loop (run_agent()) יזהה זאת
+                        # כ-"turn מתואם של אישור, בעלות לא-ניתנת-לאימות" ויכשל
+                        # בסגירה לפני סבב Agent נוסף — לעולם לא
+                        # ActionLifecycleResult מומצא, לעולם לא
+                        # reply_owner="gateway" מומצא, לעולם לא נפילה שקטה
+                        # לבעלות Agent.
+                        return {
+                            "message": _pending_lifecycle.safe_user_message,
+                            "contract_id": _gw_result.contract_id,
+                            "ok": False,
+                            "terminal_outcome": _APPROVAL_OWNERSHIP_VERIFICATION_FAILED,
+                            "action_tool": tool_name,
+                            "created_this_turn": False,
+                            "owner_notified": False,
+                            "final_response_count": 1,
+                        }
+                    return {
+                        "message": _pending_lifecycle.safe_user_message,
+                        "contract_id": _gw_result.contract_id,
+                        "ok": False,
+                        "terminal_outcome": "APPROVAL_QUEUE_ERROR",
+                        "action_tool": tool_name,
+                        "created_this_turn": False,
+                        "owner_notified": False,
+                        "reply_owner": _action_lifecycle_result.reply_owner,
+                        "lifecycle_result": _pending_lifecycle,
+                        "action_lifecycle_result": _action_lifecycle_result,
+                        "final_response_count": 1,
+                    }
+                # דגל כבוי — התנהגות legacy מדויקת, ללא הקרנת-בעלות חדשה.
                 return {
                     "message": _pending_lifecycle.safe_user_message,
                     "contract_id": _gw_result.contract_id,
@@ -1551,6 +1635,40 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
                 build_approval_lifecycle_result(_generic_found_contract, repeated=True)
                 if _generic_found_contract else None
             )
+            # TC6 (app.py integrator): כשקיים contract אמיתי, סמכות-הבעלות
+            # הקנונית נגזרת לפי contract מדויק — לעולם לא
+            # reply_owner="gateway" מוצפן-קשיח באופן עצמאי — אבל רק כש-
+            # FEATURE_SINGLE_SPEAKER_APPROVAL_UX פעיל (תיקון-רולבק): כשהדגל
+            # כבוי, ה-producer חייב לשמר את ההתנהגות המדויקת שהייתה לפני
+            # TC6 (reply_owner="gateway" מוצפן-קשיח, ללא ניסיון הקרנה, ללא
+            # APPROVAL_OWNERSHIP_VERIFICATION_FAILED אפשרי) — אחרת כשל
+            # קריאת-בעלות יכול לשנות ok/created_this_turn גם כשהדגל כבוי,
+            # מה שמפר את דרישת הרולבק.
+            _generic_action_lifecycle_result = None
+            if _generic_lifecycle and _flag("FEATURE_SINGLE_SPEAKER_APPROVAL_UX"):
+                _generic_action_lifecycle_result = _ownership_for_contract_or_none(
+                    _gw, _generic_contract_id,
+                )
+                if _generic_action_lifecycle_result is None:
+                    # Branch B: אותו כלל fail-closed כמו בענפי
+                    # existing_pending_blocks_agent למעלה — קיים contract
+                    # מאומת (_generic_found_contract), אך סמכות-הבעלות עצמה
+                    # לא ניתנה לאישור. לעולם לא להמציא, לעולם לא ליפול
+                    # לבעלות Agent, לעולם לא _orphan_cleanup_failure_
+                    # response() (ניסוח שגוי למקרה הזה — ראו ההערה
+                    # המפורטת למעלה). משתמשת חוזרת באותו
+                    # _generic_lifecycle.safe_user_message כבר-מחושב
+                    # וכבר-בטוח.
+                    return {
+                        "message": _generic_lifecycle.safe_user_message,
+                        "contract_id": _generic_contract_id,
+                        "ok": False,
+                        "terminal_outcome": _APPROVAL_OWNERSHIP_VERIFICATION_FAILED,
+                        "action_tool": tool_name,
+                        "created_this_turn": False,
+                        "owner_notified": False,
+                        "final_response_count": 1,
+                    }
             return {
                 "message": (
                     _generic_lifecycle.safe_user_message if _generic_lifecycle
@@ -1567,8 +1685,17 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
                 "action_tool": tool_name, "created_this_turn": False,
                 **({
                     "owner_notified": False,
-                    "reply_owner": "gateway",
+                    "reply_owner": (
+                        _generic_action_lifecycle_result.reply_owner
+                        if _generic_action_lifecycle_result is not None
+                        # דגל כבוי — התנהגות legacy מדויקת.
+                        else "gateway"
+                    ),
                     "lifecycle_result": _generic_lifecycle,
+                    **(
+                        {"action_lifecycle_result": _generic_action_lifecycle_result}
+                        if _generic_action_lifecycle_result is not None else {}
+                    ),
                     "final_response_count": 1,
                 } if _generic_lifecycle else {}),
             }
@@ -1610,6 +1737,42 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
                     _gw.find_contract(_gw_result.contract_id),
                     canonical_state="pending_conflict",
                 )
+                # TC6 (app.py integrator) — אותו תיקון כמו הענף התאום ב-
+                # מצב enforce למעלה: סמכות-הבעלות הקנונית נגזרת לפי contract
+                # מדויק, לא reply_owner="gateway" מוצפן-קשיח, ורק כש-
+                # FEATURE_SINGLE_SPEAKER_APPROVAL_UX פעיל (תיקון-רולבק —
+                # ראו ההערה המפורטת בענף התאום ב-mode enforce למעלה).
+                if _flag("FEATURE_SINGLE_SPEAKER_APPROVAL_UX"):
+                    _action_lifecycle_result = _ownership_for_contract_or_none(
+                        _gw, _gw_result.contract_id,
+                    )
+                    if _action_lifecycle_result is None:
+                        # Branch B — ראו את ההערה המפורטת בענף התאום ב-mode
+                        # enforce למעלה לנימוק המלא.
+                        return {
+                            "message": _pending_lifecycle.safe_user_message,
+                            "contract_id": _gw_result.contract_id,
+                            "ok": False,
+                            "terminal_outcome": _APPROVAL_OWNERSHIP_VERIFICATION_FAILED,
+                            "action_tool": tool_name,
+                            "created_this_turn": False,
+                            "owner_notified": False,
+                            "final_response_count": 1,
+                        }
+                    return {
+                        "message": _pending_lifecycle.safe_user_message,
+                        "contract_id": _gw_result.contract_id,
+                        "ok": False,
+                        "terminal_outcome": "APPROVAL_QUEUE_ERROR",
+                        "action_tool": tool_name,
+                        "created_this_turn": False,
+                        "owner_notified": False,
+                        "reply_owner": _action_lifecycle_result.reply_owner,
+                        "lifecycle_result": _pending_lifecycle,
+                        "action_lifecycle_result": _action_lifecycle_result,
+                        "final_response_count": 1,
+                    }
+                # דגל כבוי — התנהגות legacy מדויקת, ללא הקרנת-בעלות חדשה.
                 return {
                     "message": _pending_lifecycle.safe_user_message,
                     "contract_id": _gw_result.contract_id,
@@ -1847,6 +2010,58 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
         # מוחלת גם כאן כדי שגם requester שאינו ה-owner (שהתשובה שלו לא
         # מדוכאת כמו זו של ה-owner עצמו) יראה אותה.
         _final_message = f"{_final_message}\n\n{extra_note}"
+    # TC6 (app.py integrator): סמכות-הבעלות הקנונית נגזרת לפי contract
+    # מדויק — לעולם לא מ-_lifecycle_result.reply_owner (הישן) בלבד — אבל
+    # רק כש-FEATURE_SINGLE_SPEAKER_APPROVAL_UX פעיל (תיקון-רולבק): כשהדגל
+    # כבוי, ה-producer חייב לשמר את ההתנהגות המדויקת שהייתה לפני TC6
+    # (reply_owner מ-_lifecycle_result הישן, ללא ניסיון הקרנה, ללא
+    # APPROVAL_OWNERSHIP_VERIFICATION_FAILED אפשרי) — אחרת כשל
+    # קריאת-בעלות יכול לשנות ok/created_this_turn גם כשהדגל כבוי, מה
+    # שמפר את דרישת הרולבק.
+    if _flag("FEATURE_SINGLE_SPEAKER_APPROVAL_UX"):
+        _action_lifecycle_result = _ownership_for_contract_or_none(
+            _approval_gateway, _contract_id,
+        )
+        if _action_lifecycle_result is None:
+            # Branch B: contract אמיתי (ידוע-כאמיתי כאן — זהו מסלול
+            # ההצלחה), אך סמכות-הבעלות עצמה לא ניתנה לאישור. לעולם לא
+            # להמציא, לעולם לא ליפול לבעלות Agent, לעולם לא
+            # _orphan_cleanup_failure_response() (ניסוח שגוי — שום דבר לא
+            # בוטל). משתמשת חוזרת באותו _final_message כבר-מחושב.
+            #
+            # CodeRabbit round: ה-contract עצמו (contract_id למעלה) נשאר
+            # חי/pending ב-ledger ב-מכוון — Branch B הוא עצירת-בטיחות של
+            # קריאת-הבעלות בלבד, לא קביעה שה-contract לא-תקין, ולכן אין
+            # כאן revoke/cancel כלשהו. "created_this_turn": False כאן
+            # אומר רק "אל תשתמש בזה כראיית-PA-01 ליצירה מאומתת" — לא
+            # "אין contract". contract_id שמוחזר עדיין פותר ל-contract
+            # אמיתי ופעיל (ראו core/test_tc6_reply_ownership.py ו-
+            # test_tc6_app_reply_ownership.py R1-on לאימות).
+            return {
+                "message": _final_message,
+                "contract_id": _contract_id,
+                "ok": False,
+                "terminal_outcome": _APPROVAL_OWNERSHIP_VERIFICATION_FAILED,
+                "action_tool": tool_name,
+                "created_this_turn": False,
+                "owner_notified": _owner_notified,
+                "final_response_count": 1,
+            }
+        return {
+            "message": _final_message,
+            "contract_id": _contract_id,
+            "ok": _created_this_turn,
+            "terminal_outcome": None if _created_this_turn else "APPROVAL_QUEUE_ERROR",
+            "action_tool": tool_name,
+            "created_this_turn": _created_this_turn,
+            "owner_notified": _owner_notified,
+            "reply_owner": _action_lifecycle_result.reply_owner,
+            "lifecycle_result": _lifecycle_result,
+            "action_lifecycle_result": _action_lifecycle_result,
+            "final_response_count": 1,
+        }
+    # דגל כבוי — התנהגות legacy מדויקת: reply_owner מגיע מה-
+    # ApprovalLifecycleResult הישן, ללא ניסיון הקרנה קנונית.
     return {
         "message": _final_message,
         "contract_id": _contract_id,
@@ -4418,6 +4633,11 @@ def run_agent(
                         "owner_notified": _approval_outcome.get("owner_notified", False),
                         "reply_owner": _approval_outcome.get("reply_owner"),
                         "lifecycle_result": _approval_outcome.get("lifecycle_result"),
+                        # TC6 (app.py integrator): ה-ActionLifecycleResult
+                        # הקנוני, מוקרן לפי contract מדויק — סמכות
+                        # בעלות-התשובה של Branch A/Branch B ב-run_agent()
+                        # למטה, לא ה-scalar "reply_owner" התאם-לאחור בלבד.
+                        "action_lifecycle_result": _approval_outcome.get("action_lifecycle_result"),
                         "final_response_count": _approval_outcome.get("final_response_count", 0),
                     })
                     if _approval_outcome["created_this_turn"]:
@@ -4481,11 +4701,102 @@ def run_agent(
             # fallback/status/success text escape from this function. The
             # Gateway prompt was either already delivered directly, or its
             # one safe message is returned for the channel adapter to send.
-            _gateway_owned = next((
+            # TC6 (app.py integrator): Branch A (בעלות Gateway קנונית) ו-
+            # Branch B (turn מתואם, בעלות לא-ניתנת-לאימות) נגזרות שתיהן
+            # מאותה רשומת tool_results_log מתואמת — לא משני היגדים
+            # בלתי-תלויים על אותו log (סוגר את הפער-כפול-סמכות שתועד
+            # ב-BUG-162_SINGLE_SPEAKER_CLOSURE_AUDIT_20260807.md §2.4).
+            # נוכחות ה-sentinel לבדה לעולם אינה מספיקה — רק
+            # action_lifecycle_result.reply_owner=="gateway" האמיתי, המוקרן
+            # לפי contract מדויק, קובע.
+            _gateway_owned = None
+            _ownership_verification_failed_entry = None
+            _correlated_approval_entry = next((
                 entry for entry in reversed(tool_results_log)
                 if entry.get("tool") == "__approval_queued__"
-                and entry.get("reply_owner") == "gateway"
             ), None)
+            if _correlated_approval_entry is not None:
+                if _correlated_approval_entry.get("terminal_outcome") == _APPROVAL_OWNERSHIP_VERIFICATION_FAILED:
+                    # Branch B: contract אמיתי נגע ב-turn הזה, אך הקרנת
+                    # הבעלות שלו לפי contract מדויק לא ניתנה לאישור.
+                    _ownership_verification_failed_entry = _correlated_approval_entry
+                else:
+                    _entry_action_lifecycle_result = _correlated_approval_entry.get("action_lifecycle_result")
+                    if (
+                        _entry_action_lifecycle_result is not None
+                        and getattr(_entry_action_lifecycle_result, "reply_owner", None) == "gateway"
+                    ):
+                        # Branch A: בעלות Gateway קנונית, מאושרת.
+                        _gateway_owned = _correlated_approval_entry
+
+            if (
+                _ownership_verification_failed_entry is not None
+                and _flag_enabled("FEATURE_SINGLE_SPEAKER_APPROVAL_UX")
+            ):
+                # Branch B — עצירת-בטיחות, לא סמכות בעלות-תשובה שנייה. שום
+                # ActionLifecycleResult (אמיתי או מומצא) לא עומד מאחורי
+                # הענף הזה; שום reply_owner="gateway" לא נטען; ה-Agent
+                # לעולם לא מקבל סבב נוסף ב-turn הזה. משקף בדיוק את הצורה
+                # של owner_notified/final_response_count של Branch A, כדי
+                # שהודעה שכבר נמסרה לעולם לא תוכפל. הערת-תיקון טלמטריה:
+                # לא reply_owner="unverified" — "unverified" אינו בעלים;
+                # ownership_verification="failed" הוא שדה-תצפית נפרד,
+                # לא טענת-בעלות.
+                #
+                # CodeRabbit round: זהו בדיוק מקרה-הקצה שהמנגנון הזה נועד
+                # לזהות — בלי log ייעודי הוא בלתי-נצפה לחלוטין בפרודקשן
+                # (Branch A רושם OwnershipSignal+evidence-finalizer;
+                # Branch B חוזר לפני שניהם). רושמת log מובנה יחיד, לפני
+                # ה-return.
+                logger.warning(
+                    "[TC6] ownership_verification=failed contract=%s "
+                    "owner_notified=%s intent=%s user=%s — עצירת-בטיחות "
+                    "(Branch B), לא סמכות בעלות שנייה",
+                    _ownership_verification_failed_entry.get("contract_id"),
+                    bool(_ownership_verification_failed_entry.get("owner_notified")),
+                    getattr(route, "intent", "unknown"),
+                    _sanitize_id(identity.memory_key),
+                )
+                # Cross-Layer Impact Matrix (RP5 guard, §1.5): Branch A כבר
+                # צורכת את RP4's shadow evidence classifier
+                # (observe_shadow_finalizer) כדי ש-turn_evidence.
+                # safe_record() יכלול גם turns בבעלות-Gateway — Branch B
+                # היה מדלג על זה במלואו (אף תצפית-shadow, לא רק אף
+                # OwnershipSignal), מה שהיה משאיר בדיוק את מקרה-הקצה
+                # שה-guard נועד לתפוס בלתי-נראה לחלוטין ל-RP4/RP5. לא
+                # מנגנון-הצדקה עצמאי חדש — אותה קריאה קיימת בדיוק ל-RP4's
+                # observe_shadow_finalizer(), shadow-only, לעולם לא חוסמת.
+                try:
+                    _ignored_text, _evidence_comparison = observe_shadow_finalizer(
+                        "",
+                        turn_evidence,
+                        state=get_evidence_finalizer_state(),
+                        approval_prompt_sent=bool(
+                            _ownership_verification_failed_entry.get("owner_notified"),
+                        ),
+                    )
+                    if _out_meta is not None and _evidence_comparison is not None:
+                        _out_meta["evidence_finalizer_shadow"] = {
+                            **_evidence_comparison.safe_record(),
+                            "evidence": turn_evidence.safe_record(),
+                        }
+                except Exception:
+                    logger.debug(
+                        "[EvidenceFinalizerShadow] ownership-verification-failed "
+                        "observation skipped",
+                        exc_info=True,
+                    )
+                if _out_meta is not None:
+                    _out_meta.update({
+                        "final_response_count": 1,
+                        "canonical_state": "ownership_verification_failed",
+                        "ownership_verification": "failed",
+                    })
+                return (
+                    "" if _ownership_verification_failed_entry.get("owner_notified")
+                    else _ownership_verification_failed_entry.get("content", "")
+                )
+
             if (
                 _gateway_owned is not None
                 and _flag_enabled("FEATURE_SINGLE_SPEAKER_APPROVAL_UX")
@@ -4651,22 +4962,48 @@ def run_agent(
         # run_agent() code path.
         try:
             from core.turn_envelope import build_ownership_signal, log_ownership_signal
+            # TC6 (app.py integrator): reply_owner כאן נגזר מאותה
+            # action_lifecycle_result מתואמת-מדויקת שגם Branch A למעלה
+            # קורא — לא עוד ניבוי-נוכחות-בלבד עצמאי על אותו
+            # tool_results_log (סוגר את הפער-כפול-סמכות שתועד
+            # ב-BUG-162_SINGLE_SPEAKER_CLOSURE_AUDIT_20260807.md §2.4).
+            # מגיע לכאן רק כשה-early-return של Branch A/Branch B למעלה לא
+            # הופעל (הדגל כבוי, או שאף ענף לא תאם) — לכן לא יכול לסתור
+            # אותם מבנית, ששניהם קוראים את אותה הרשומה באותו אופן.
+            _signal_correlated_entry = next((
+                entry for entry in reversed(tool_results_log)
+                if entry.get("tool") == "__approval_queued__"
+            ), None)
+            _signal_action_lifecycle_result = (
+                _signal_correlated_entry.get("action_lifecycle_result")
+                if _signal_correlated_entry is not None else None
+            )
+            if _flag_enabled("FEATURE_SINGLE_SPEAKER_APPROVAL_UX"):
+                _signal_reply_owner = (
+                    "gateway"
+                    if (
+                        _signal_action_lifecycle_result is not None
+                        and getattr(_signal_action_lifecycle_result, "reply_owner", None) == "gateway"
+                    )
+                    else "agent"
+                )
+            else:
+                # תיקון-רולבק (סבב CodeRabbit): כשהדגל כבוי, ה-producer
+                # (_queue_approval_detailed_impl) לעולם לא מצרף
+                # action_lifecycle_result (ראו השערים על _flag בפונקציה
+                # ההיא) — לכן ההיגד לעיל תמיד היה נופל ל-"agent" גם עבור
+                # turn שבו אישור אכן נוצר, מה שהופך כל turn כזה תחת דגל
+                # כבוי מ-"gateway" (ה-legacy) ל-"agent" בשקט. משמרת כאן את
+                # ניבוי-הנוכחות-בלבד המדויק שהיה קיים לפני TC6, כדי
+                # שהתצפית תישאר זהה-בייט כשה-producer עצמו לא השתנה.
+                _signal_reply_owner = "gateway" if _approval_queued_this_turn else "agent"
             _ownership_signal = build_ownership_signal(
                 recognized_intent=getattr(route, "intent", "unknown"),
                 selected_handler=getattr(route, "handler", "unknown"),
                 tool_use_emitted=tool_calls_made > 0,
                 approval_queued=_approval_queued_this_turn,
                 final_reply=final_reply,
-                # F52 PR6: build_ownership_signal()'s own reply_owner default
-                # ("agent") was never overridden here, so a turn where a real
-                # approval was queued this turn — and the agent's own text was
-                # correctly suppressed by A32's Single-Speaker gate — still
-                # logged reply_owner="agent", contradicting agent_claimed_
-                # approval=False/tool_use_emitted=true right next to it in the
-                # same record. "gateway" matches the label build_turn_envelope()
-                # already uses for this exact situation (live_contract_reply_
-                # owner="gateway") — no new vocabulary introduced.
-                reply_owner="gateway" if _approval_queued_this_turn else "agent",
+                reply_owner=_signal_reply_owner,
             )
             log_ownership_signal(_ownership_signal, canonical_user_id=identity.memory_key)
         except Exception:
