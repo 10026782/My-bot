@@ -3,10 +3,12 @@
 Covers 0/1/many outcomes, bounded consumption, identity-scope isolation,
 fail-closed behavior on missing scope, determinism, the absence of any
 mutation/write or second resolver implementation, and (review follow-up on
-PR #562) that action_contract/session/callback structurally require an
-explicit, entity-specific source-policy declaration instead of accepting any
-generic lookup callable — across every entity kind named in
-docs/architecture/turn-coordinator-full/RESOLVER_MAP.md.
+PR #562, twice) that action_contract/session/callback structurally require
+an explicit, entity-specific source-policy declaration instead of accepting
+any generic lookup callable — and that the declaration itself has no
+policy-granting default, so merely instantiating the wrapper class cannot
+silently create a canonical/durable lookup source — across every entity kind
+named in docs/architecture/turn-coordinator-full/RESOLVER_MAP.md.
 """
 
 import ast
@@ -44,9 +46,9 @@ ALL_RESOLVERS = {
 # sharper, entity-specific source policy (durable-source, TTL-scoped,
 # durable-AC-first) and require an explicit typed *LookupSource wrapper.
 POLICY_WRAPPERS = {
-    "action_contract": lambda lookup: ActionContractLookupSource(lookup),
+    "action_contract": lambda lookup: ActionContractLookupSource(lookup, durable_source=True),
     "session": lambda lookup: SessionLookupSource(lookup, ttl_seconds=1800),
-    "callback": lambda lookup: CallbackLookupSource(lookup),
+    "callback": lambda lookup: CallbackLookupSource(lookup, source_policy="durable_ac_first"),
 }
 
 
@@ -234,9 +236,17 @@ def test_action_contract_resolver_rejects_a_bare_callable():
         resolve_action_contract("x", _lookup([{"id": "rec1"}]), scope="tenant:u1")
 
 
+def test_action_contract_lookup_source_requires_the_declaration_be_explicit():
+    """Omitting durable_source entirely must fail closed at construction —
+    merely instantiating the wrapper class must not silently grant the
+    canonical/durable policy."""
+    with pytest.raises(TypeError):
+        ActionContractLookupSource(_lookup([{"id": "rec1"}]))
+
+
 def test_action_contract_resolver_requires_durable_source_true():
-    """A non-durable declaration must fail closed at construction time,
-    before it can ever reach the resolver."""
+    """An explicit-but-false declaration must also fail closed at
+    construction time, before it can ever reach the resolver."""
     with pytest.raises(ValueError):
         ActionContractLookupSource(_lookup([{"id": "rec1"}]), durable_source=False)
 
@@ -244,7 +254,7 @@ def test_action_contract_resolver_requires_durable_source_true():
 def test_action_contract_resolver_accepts_a_valid_durable_declaration():
     seen = []
     result = resolve_action_contract(
-        "AC-1", ActionContractLookupSource(_lookup([{"id": "rec1"}], seen)),
+        "AC-1", ActionContractLookupSource(_lookup([{"id": "rec1"}], seen), durable_source=True),
         scope="tenant:u1",
     )
     assert result.match_count == 1
@@ -257,9 +267,15 @@ def test_session_resolver_rejects_a_bare_callable():
         resolve_session("x", _lookup([{"id": "rec1"}]), scope="tenant:u1")
 
 
+def test_session_lookup_source_requires_ttl_be_explicit():
+    """Omitting ttl_seconds entirely must fail closed at construction."""
+    with pytest.raises(TypeError):
+        SessionLookupSource(_lookup([{"id": "rec1"}]))
+
+
 @pytest.mark.parametrize("bad_ttl", [0, -1, -3600])
 def test_session_resolver_requires_positive_ttl(bad_ttl):
-    """Zero/negative TTL must fail closed at construction time."""
+    """An explicit-but-non-positive TTL must fail closed at construction time."""
     with pytest.raises(ValueError):
         SessionLookupSource(_lookup([{"id": "rec1"}]), ttl_seconds=bad_ttl)
 
@@ -278,20 +294,28 @@ def test_callback_resolver_rejects_a_bare_callable():
         resolve_callback("x", _lookup([{"id": "rec1"}]), scope="tenant:u1")
 
 
-def test_callback_resolver_requires_ac_first_or_explicit_migration_declaration():
-    """A callback lookup that is neither AC-first nor an explicitly declared
-    legacy-pointer migration must fail closed at construction time -- a
-    caller cannot silently wire a legacy-pointer lookup as if it were
-    durable-AC-first."""
+def test_callback_lookup_source_requires_the_declaration_be_explicit():
+    """Omitting source_policy entirely must fail closed at construction —
+    merely instantiating the wrapper class must not silently grant the
+    canonical durable-AC-first policy."""
+    with pytest.raises(TypeError):
+        CallbackLookupSource(_lookup([{"id": "rec1"}]))
+
+
+@pytest.mark.parametrize("bad_policy", ["", "ac_first", "cache", "legacy"])
+def test_callback_resolver_rejects_an_unrecognized_source_policy(bad_policy):
+    """An explicit-but-invalid source_policy value must fail closed at
+    construction time -- only the two RESOLVER_MAP.md-recognized policies
+    are accepted."""
     with pytest.raises(ValueError):
-        CallbackLookupSource(
-            _lookup([{"id": "rec1"}]), ac_first=False, legacy_pointer_migration=False,
-        )
+        CallbackLookupSource(_lookup([{"id": "rec1"}]), source_policy=bad_policy)
 
 
-def test_callback_resolver_accepts_ac_first_declaration():
+def test_callback_resolver_accepts_durable_ac_first_declaration():
     result = resolve_callback(
-        "cb-1", CallbackLookupSource(_lookup([{"id": "rec1"}])), scope="tenant:u1",
+        "cb-1",
+        CallbackLookupSource(_lookup([{"id": "rec1"}]), source_policy="durable_ac_first"),
+        scope="tenant:u1",
     )
     assert result.match_count == 1
     assert result.stable_reference == "rec1"
@@ -302,9 +326,7 @@ def test_callback_resolver_accepts_explicit_legacy_pointer_migration_declaration
     a migration path -- never as a silent default."""
     result = resolve_callback(
         "cb-legacy-1",
-        CallbackLookupSource(
-            _lookup([{"id": "rec1"}]), ac_first=False, legacy_pointer_migration=True,
-        ),
+        CallbackLookupSource(_lookup([{"id": "rec1"}]), source_policy="legacy_pointer_migration"),
         scope="tenant:u1",
     )
     assert result.match_count == 1
@@ -314,9 +336,9 @@ def test_callback_resolver_accepts_explicit_legacy_pointer_migration_declaration
 @pytest.mark.parametrize(
     "wrapper_cls,kwargs",
     [
-        (ActionContractLookupSource, {}),
+        (ActionContractLookupSource, {"durable_source": True}),
         (SessionLookupSource, {"ttl_seconds": 1800}),
-        (CallbackLookupSource, {}),
+        (CallbackLookupSource, {"source_policy": "durable_ac_first"}),
     ],
 )
 def test_policy_wrappers_reject_a_non_callable_lookup(wrapper_cls, kwargs):

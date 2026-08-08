@@ -33,7 +33,7 @@ matches — 0/1/many is always explicit, never silent.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import islice
 
 from core.router.ownership_contracts import ResolverResult
@@ -48,26 +48,33 @@ ActionContractLookup = EntityLookup
 SessionLookup = EntityLookup
 CallbackLookup = EntityLookup
 
+# The only two callback source policies RESOLVER_MAP.md recognizes:
+# "durable AC first", or an explicitly declared legacy-pointer migration path.
+_CALLBACK_SOURCE_POLICIES = frozenset({"durable_ac_first", "legacy_pointer_migration"})
+
 
 @dataclass(frozen=True)
 class ActionContractLookupSource:
     """An ActionContract lookup callable plus its required durable-source
     declaration (RESOLVER_MAP.md: "durable source").
 
-    This does not import or couple to ``ActionContractRepository`` itself —
-    that would be concrete runtime wiring outside TC5's scope. It requires
-    whoever wires a resolver to make the source-policy declaration explicit
-    and auditable in code, instead of any anonymous callable silently
-    qualifying as canonical. ``ActionContractRepository`` remains the sole
+    ``durable_source`` has no default: merely instantiating this class must
+    not silently grant the canonical/durable policy — the caller wiring a
+    resolver has to type ``durable_source=True`` explicitly, or construction
+    fails closed. This does not import or couple to
+    ``ActionContractRepository`` itself — that would be concrete runtime
+    wiring outside TC5's scope. ``ActionContractRepository`` remains the sole
     lifecycle authority; this is a read-only reference lookup only.
     """
 
     lookup: ActionContractLookup
-    durable_source: bool = True
+    durable_source: bool = field(kw_only=True)
 
     def __post_init__(self) -> None:
         if not callable(self.lookup):
             raise TypeError("lookup must be callable")
+        if not isinstance(self.durable_source, bool):
+            raise TypeError("durable_source must be an explicit bool")
         if not self.durable_source:
             raise ValueError(
                 "ActionContract resolution requires durable_source=True — "
@@ -81,10 +88,10 @@ class SessionLookupSource:
     """A session lookup callable plus its required identity/chat scope + TTL
     declaration (RESOLVER_MAP.md: "identity/chat scope + TTL").
 
-    ``ttl_seconds`` must be declared and positive. This does not enforce the
-    TTL against the underlying store (no concrete ``session_store.py``
-    coupling) — it forces an explicit, testable TTL declaration instead of
-    an unscoped lookup.
+    ``ttl_seconds`` has no default and must be positive. This does not
+    enforce the TTL against the underlying store (no concrete
+    ``session_store.py`` coupling) — it forces an explicit, testable TTL
+    declaration instead of an unscoped lookup.
     """
 
     lookup: SessionLookup
@@ -99,26 +106,27 @@ class SessionLookupSource:
 
 @dataclass(frozen=True)
 class CallbackLookupSource:
-    """A callback lookup callable plus its required durable-AC-first
-    declaration (RESOLVER_MAP.md: "callback payload -> exact AC ID, legacy
-    pointer only as migration"; "durable AC first").
+    """A callback lookup callable plus its required source-policy declaration
+    (RESOLVER_MAP.md: "callback payload -> exact AC ID, legacy pointer only
+    as migration"; "durable AC first").
 
-    A legacy-pointer lookup may only be used when explicitly declared as a
-    migration path (``legacy_pointer_migration=True``) — it is never the
-    silent default.
+    ``source_policy`` has no default and must be exactly
+    ``"durable_ac_first"`` or ``"legacy_pointer_migration"`` — merely
+    instantiating this class must not silently grant the canonical
+    durable-AC-first policy. A legacy-pointer lookup is only accepted when
+    explicitly declared as a migration path, never as a fallback default.
     """
 
     lookup: CallbackLookup
-    ac_first: bool = True
-    legacy_pointer_migration: bool = False
+    source_policy: str = field(kw_only=True)
 
     def __post_init__(self) -> None:
         if not callable(self.lookup):
             raise TypeError("lookup must be callable")
-        if not self.ac_first and not self.legacy_pointer_migration:
+        if self.source_policy not in _CALLBACK_SOURCE_POLICIES:
             raise ValueError(
-                "callback resolution requires ac_first=True, or an explicit "
-                "legacy_pointer_migration=True declaration"
+                "callback resolution requires an explicit source_policy of "
+                f"{sorted(_CALLBACK_SOURCE_POLICIES)!r}, got {self.source_policy!r}"
             )
 
 
