@@ -3,6 +3,7 @@
 עודכן: 09/08/2026 — **תיעוד F14/BUG-105 (docs-only):**
 BUG-105 אומת מחדש מול `origin/main` (`38d9226`) וכבר מכוסה שם — אין שינוי קוד פתוח.
 נשמרו ראיות BUG-101 ושאר משפחת ה-regressions ב-`BUG_AUDIT_LOG.md`.
+BUG-105: לא בוצע שינוי קוד; regex לפני/אחרי זהה; 204 suites ועוד 11 בדיקות מטריצת פורמטים עברו.
 F14 עבר Discovery/Planning בלבד: נמצאו שני נתיבי Contact creation בפועל
 (`crm_add_contact` legacy וה-generic `airtable_add`), ללא Contact phone dedup;
 import scripts מייצרים CSV בלבד, ו-`session_store.py`/`contact_resolver.py` אינם
