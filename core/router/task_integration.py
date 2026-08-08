@@ -19,6 +19,16 @@ from core.router.task_resolvers import TaskLookup, resolve_task
 
 TaskIntegrationResult = CanonicalActionProposal | ResolverResult
 
+# חוזה הבעלות של WS1 מחייב שלכל intent בבעלות יהיה owner יעד יחיד
+# (IntentOwnershipDecision.owner הוא תוצאת בחירת-הבעלים המוקלדת). resolver_required
+# בלבד לא מוכיח שה-owner הרשום הוא הנכון לintent הזה -- רשומת-registry יכולה
+# להכיל ערך resolver_required נכון עם מחרוזת-owner שגויה. הקבועים האלה תואמים
+# בדיוק ל-registry החי והמחווט TASK_OWNERSHIP (core/turn_coordinator_runtime.py)
+# -- אומת ישירות מול המודול הזה, לא הונח -- ומאומתים בנוסף לבדיקת
+# resolver_required הקיימת, לא במקומה.
+_TASK_BUILDER_OWNER = "task_builder"
+_TASK_RESOLVER_OWNER = "task_resolver"
+
 
 def prepare_task_proposal(
     intent: str,
@@ -35,6 +45,8 @@ def prepare_task_proposal(
 
     This returns a ResolverResult for zero/multiple matches instead of picking
     a task. It creates no ActionContract and performs no execution.
+    נכשל בסגירה, לפני כל בניית proposal או lookup, כאשר ה-``owner`` של ההחלטה
+    הרשומה לא תואם ל-owner הצפוי עבור ה-intent הזה.
     """
     decision = registry.require(intent)
     needs_resolution = intent in {Intent.UPDATE_TASK, Intent.COMPLETE_TASK}
@@ -42,9 +54,13 @@ def prepare_task_proposal(
         raise ValueError(f"resolver policy mismatch for intent: {intent}")
 
     if intent == Intent.CREATE_TASK:
+        if decision.owner != _TASK_BUILDER_OWNER:
+            raise ValueError(f"owner mismatch for intent: {intent}")
         return build_create_task_proposal(title, **dict(fields or {}))
     if intent not in {Intent.UPDATE_TASK, Intent.COMPLETE_TASK}:
         raise ValueError(f"unsupported task integration intent: {intent}")
+    if decision.owner != _TASK_RESOLVER_OWNER:
+        raise ValueError(f"owner mismatch for intent: {intent}")
     if lookup is None:
         raise ValueError(f"lookup is required for intent: {intent}")
 
