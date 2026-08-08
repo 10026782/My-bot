@@ -3,9 +3,11 @@
 # כל פונקציה מחזירה string מוכן לשליחה בטלגרם
 
 import os
+import re
 import httpx
 import logging
 import urllib.parse
+from dataclasses import dataclass
 from datetime import datetime, date, timedelta
 
 from airtable_schema import (
@@ -96,6 +98,109 @@ def _fmt_date(iso: str) -> str:
 # ══════════════════════════════════════════════════
 # CONTACTS
 # ══════════════════════════════════════════════════
+
+@dataclass(frozen=True)
+class ContactResult:
+    status: str
+    record_id: str = ""
+    normalized_phone: str = ""
+    matches: tuple = ()
+    error: str = ""
+
+
+def _normalize_contact_phone(phone) -> str:
+    """Return the exact Contact lookup/write representation, or empty if invalid."""
+    if phone is None:
+        return ""
+    raw = str(phone).strip()
+    if not raw or not re.fullmatch(r"[+\d\s().-]+", raw):
+        return ""
+    if "+" in raw[1:]:
+        return ""
+
+    has_plus = raw.startswith("+")
+    digits = re.sub(r"[\s().-]", "", raw[1:] if has_plus else raw)
+    if not digits.isdigit():
+        return ""
+    if digits.startswith("00972"):
+        digits = digits[2:]
+
+    if digits.startswith("972"):
+        return f"+{digits}" if re.fullmatch(r"972\d{9}", digits) else ""
+    if not has_plus and re.fullmatch(r"0\d{8,9}", digits):
+        return f"+972{digits[1:]}"
+    if has_plus and re.fullmatch(r"\d{8,15}", digits):
+        return f"+{digits}"
+    return ""
+
+
+def _contact_phone_equivalents(normalized: str) -> tuple:
+    """Return the bounded exact-lookup set for one canonical phone."""
+    if normalized.startswith("+972"):
+        national = normalized[4:]
+        return (normalized, normalized[1:], f"00{normalized[1:]}", f"0{national}")
+    return (normalized,)
+
+
+def find_or_create_contact(phone, name, *, email="", company="",
+                           contact_type="Client", notes="", lead_source_id="",
+                           identity=None, source="") -> ContactResult:
+    """Find exactly by canonical phone, creating only when lookup is empty."""
+    normalized = _normalize_contact_phone(phone)
+    if not normalized or not name:
+        return ContactResult("invalid")
+    if not _creds_ok():
+        return ContactResult("lookup_error", normalized_phone=normalized,
+                             error="missing Airtable credentials")
+
+    records_by_id = {}
+    lookup_error = ""
+    for equivalent in _contact_phone_equivalents(normalized):
+        formula = f"{{{ContactFields.PHONE}}} = '{equivalent}'"
+        try:
+            records = _get(Tables.CONTACTS, formula, identity=identity)
+        except Exception as exc:
+            lookup_error = str(exc)
+            continue
+        for record in records:
+            record_id = record.get("id")
+            if record_id:
+                records_by_id[record_id] = record
+    if lookup_error:
+        return ContactResult("lookup_error", normalized_phone=normalized,
+                             error=lookup_error)
+    records = tuple(records_by_id.values())
+
+    if len(records) > 1:
+        matches = tuple({"record_id": record.get("id", "")} for record in records)
+        return ContactResult("ambiguous", normalized_phone=normalized, matches=matches)
+    if records:
+        return ContactResult("existing", record_id=records[0].get("id", ""),
+                             normalized_phone=normalized)
+
+    fields = {
+        ContactFields.NAME: name,
+        ContactFields.PHONE: normalized,
+        ContactFields.STATUS: ContactStatus.ACTIVE,
+    }
+    if email:
+        fields[ContactFields.EMAIL] = email
+    if company:
+        fields[ContactFields.COMPANY] = company
+    if contact_type:
+        fields[ContactFields.ROLE_CATEGORY] = contact_type
+    if lead_source_id:
+        fields[ContactFields.ORIGIN_LEAD] = [lead_source_id]
+    try:
+        record_id = _post(Tables.CONTACTS, fields).get("id", "")
+    except Exception as exc:
+        return ContactResult("lookup_error", normalized_phone=normalized,
+                             error=str(exc))
+    if not record_id:
+        return ContactResult("lookup_error", normalized_phone=normalized,
+                             error="Contact create returned no record id")
+    return ContactResult("created", record_id=record_id,
+                         normalized_phone=normalized)
 
 def crm_add_contact(name: str, phone: str = "", email: str = "",
                     contact_type: str = ContactType.CLIENT,
