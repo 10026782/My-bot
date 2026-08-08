@@ -410,8 +410,10 @@ assert _propose14.ok, f"setup propose failed: {_propose14.reason}"
 _reject14 = _real_gw.reject(_propose14.contract_id, rejected_by="test_user")
 assert _reject14.startswith("🚫"), f"setup reject failed: {_reject14}"
 
-with patch("feature_flags.is_enabled", side_effect=lambda name: name == "FEATURE_ACTION_GATEWAY"), \
-     patch.object(app, "resolve_identity", side_effect=lambda channel, ext_id: _identity14):
+with patch(
+    "feature_flags.is_enabled",
+    side_effect=lambda name: name in ("FEATURE_ACTION_GATEWAY", "FEATURE_SINGLE_SPEAKER_APPROVAL_UX"),
+), patch.object(app, "resolve_identity", side_effect=lambda channel, ext_id: _identity14):
     _outcome14 = app._queue_approval_detailed(
         "airtable_add", {"table": "Tasks", "fields": {"כותרת המשימה": "TC6-14"}},
         _identity14.user_id, "telegram", "נסה שוב", trusted_source="agent",
@@ -491,6 +493,162 @@ chk("18a. flag ON + Branch A -> exactly one Claude call, Gateway text returned",
     _mock_18a.call_count == 1 and _reply_18a == "D18A-TEXT")
 chk("18b. flag ON + Branch B -> exactly one Claude call, safety-stop text returned",
     _mock_18b.call_count == 1 and _reply_18b == "D18B-TEXT")
+
+
+# ══════════════════════════════════════════════════════════════════
+# E. Producer-level rollback — real _queue_approval_detailed_impl(),
+#    real ActionGateway, no mocked/pre-built outcome dict.
+#
+# PR #569 review finding: the tool-loop-level flag gating (Branch A/B in
+# run_agent(), sections A-D above) is correct, but before this fix the
+# PRODUCER (_queue_approval_detailed_impl()) called
+# _ownership_for_contract_or_none() UNCONDITIONALLY in every Gateway-owned
+# branch — so an ownership-projection read failure could still flip ok/
+# created_this_turn/terminal_outcome to the Branch B shape even with
+# FEATURE_SINGLE_SPEAKER_APPROVAL_UX OFF, before run_agent() ever reached
+# the flag-gated logic. That violated the rollback invariant. Fixed by
+# gating the producer's own ownership-projection call behind the same
+# flag. These tests drive the REAL _queue_approval_detailed()/_impl()
+# path (real ActionGateway, only reply_ownership_for_contract() itself
+# mocked to raise) so a mocked pre-built outcome cannot hide producer
+# drift, per the review's explicit requirement.
+# ══════════════════════════════════════════════════════════════════
+print("\n── E. Producer-level rollback (real _queue_approval_detailed_impl) ──")
+
+
+def _flags(*on_names):
+    on = set(on_names)
+    return lambda name: name in on
+
+
+# ---- R1: success branch -------------------------------------------------
+
+_identity_r1_off = _identity_owner("tc6_rollback_r1_off")
+with patch("feature_flags.is_enabled", side_effect=_flags("FEATURE_ACTION_GATEWAY")), \
+     patch.object(app, "resolve_identity", side_effect=lambda channel, ext_id: _identity_r1_off), \
+     patch.object(ActionGateway, "reply_ownership_for_contract", side_effect=RuntimeError("boom")):
+    _outcome_r1_off = app._queue_approval_detailed(
+        "airtable_add", {"table": "Tasks", "fields": {"כותרת המשימה": "Rollback-R1-off"}},
+        _identity_r1_off.user_id, "telegram", "test", trusted_source="agent",
+    )
+chk("R1 (flag OFF): success branch + projection raises -> legacy success "
+    "semantics preserved (ok=True, created_this_turn=True)",
+    _outcome_r1_off.get("ok") is True and _outcome_r1_off.get("created_this_turn") is True)
+chk("R1 (flag OFF): terminal_outcome stays None (success), never "
+    "APPROVAL_OWNERSHIP_VERIFICATION_FAILED",
+    _outcome_r1_off.get("terminal_outcome") is None)
+chk("R1 (flag OFF): reply_owner is the legacy hardcoded 'gateway', no "
+    "action_lifecycle_result key (ownership projection never even called)",
+    _outcome_r1_off.get("reply_owner") == "gateway"
+    and "action_lifecycle_result" not in _outcome_r1_off)
+
+_identity_r1_on = _identity_owner("tc6_rollback_r1_on")
+with patch("feature_flags.is_enabled",
+           side_effect=_flags("FEATURE_ACTION_GATEWAY", "FEATURE_SINGLE_SPEAKER_APPROVAL_UX")), \
+     patch.object(app, "resolve_identity", side_effect=lambda channel, ext_id: _identity_r1_on), \
+     patch.object(ActionGateway, "reply_ownership_for_contract", side_effect=RuntimeError("boom")):
+    _outcome_r1_on = app._queue_approval_detailed(
+        "airtable_add", {"table": "Tasks", "fields": {"כותרת המשימה": "Rollback-R1-on"}},
+        _identity_r1_on.user_id, "telegram", "test", trusted_source="agent",
+    )
+chk("R1 (flag ON): success branch + projection raises -> Branch B marker produced",
+    _outcome_r1_on.get("terminal_outcome") == app._APPROVAL_OWNERSHIP_VERIFICATION_FAILED
+    and _outcome_r1_on.get("ok") is False and _outcome_r1_on.get("created_this_turn") is False)
+chk("R1 (flag ON): no reply_owner/action_lifecycle_result claim on the Branch B outcome",
+    "reply_owner" not in _outcome_r1_on and "action_lifecycle_result" not in _outcome_r1_on)
+
+# ---- R2: existing_pending_blocks_agent branch ----------------------------
+
+
+def _seed_live_pending(identity, suffix):
+    with patch("feature_flags.is_enabled", side_effect=_flags("FEATURE_ACTION_GATEWAY")), \
+         patch.object(app, "resolve_identity", side_effect=lambda channel, ext_id: identity):
+        app._queue_approval_detailed(
+            "airtable_add", {"table": "Tasks", "fields": {"כותרת המשימה": f"Rollback-seed-{suffix}"}},
+            identity.user_id, "telegram", "test", trusted_source="deterministic_create_task",
+        )
+
+
+_identity_r2_off = _identity_owner("tc6_rollback_r2_off")
+_seed_live_pending(_identity_r2_off, "r2-off")
+with patch("feature_flags.is_enabled", side_effect=_flags("FEATURE_ACTION_GATEWAY")), \
+     patch.object(app, "resolve_identity", side_effect=lambda channel, ext_id: _identity_r2_off), \
+     patch.object(ActionGateway, "reply_ownership_for_contract", side_effect=RuntimeError("boom")):
+    _outcome_r2_off = app._queue_approval_detailed(
+        "airtable_add", {"table": "Tasks", "fields": {"כותרת המשימה": "Rollback-R2-off-agent"}},
+        _identity_r2_off.user_id, "telegram", "test", trusted_source="agent",
+    )
+chk("R2 (flag OFF): existing_pending_blocks_agent + projection raises -> "
+    "legacy pending-conflict terminal_outcome unchanged (APPROVAL_QUEUE_ERROR)",
+    _outcome_r2_off.get("terminal_outcome") == "APPROVAL_QUEUE_ERROR")
+chk("R2 (flag OFF): reply_owner is the legacy hardcoded 'gateway', no "
+    "action_lifecycle_result key",
+    _outcome_r2_off.get("reply_owner") == "gateway"
+    and "action_lifecycle_result" not in _outcome_r2_off)
+
+_identity_r2_on = _identity_owner("tc6_rollback_r2_on")
+_seed_live_pending(_identity_r2_on, "r2-on")
+with patch("feature_flags.is_enabled",
+           side_effect=_flags("FEATURE_ACTION_GATEWAY", "FEATURE_SINGLE_SPEAKER_APPROVAL_UX")), \
+     patch.object(app, "resolve_identity", side_effect=lambda channel, ext_id: _identity_r2_on), \
+     patch.object(ActionGateway, "reply_ownership_for_contract", side_effect=RuntimeError("boom")):
+    _outcome_r2_on = app._queue_approval_detailed(
+        "airtable_add", {"table": "Tasks", "fields": {"כותרת המשימה": "Rollback-R2-on-agent"}},
+        _identity_r2_on.user_id, "telegram", "test", trusted_source="agent",
+    )
+chk("R2 (flag ON): existing_pending_blocks_agent + projection raises -> Branch B marker produced",
+    _outcome_r2_on.get("terminal_outcome") == app._APPROVAL_OWNERSHIP_VERIFICATION_FAILED
+    and _outcome_r2_on.get("ok") is False and _outcome_r2_on.get("created_this_turn") is False)
+
+# ---- R3: BUG-162 generic real-contract (rejected) branch -----------------
+
+_identity_r3_off = _identity_owner("tc6_rollback_r3_off")
+_propose_r3_off = _real_gw.propose_action(
+    tenant_id="boss_hq", canonical_user_id=_identity_r3_off.memory_key,
+    tool_name="airtable_add", tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "Rollback-R3-off"}},
+    origin_channel="telegram", origin_chat_id=_identity_r3_off.user_id,
+    requires_approval=True, identity=_identity_r3_off, trusted_source="agent",
+)
+assert _propose_r3_off.ok, f"setup propose failed: {_propose_r3_off.reason}"
+assert _real_gw.reject(_propose_r3_off.contract_id, rejected_by="test_user").startswith("🚫")
+with patch("feature_flags.is_enabled", side_effect=_flags("FEATURE_ACTION_GATEWAY")), \
+     patch.object(app, "resolve_identity", side_effect=lambda channel, ext_id: _identity_r3_off), \
+     patch.object(ActionGateway, "reply_ownership_for_contract", side_effect=RuntimeError("boom")):
+    _outcome_r3_off = app._queue_approval_detailed(
+        "airtable_add", {"table": "Tasks", "fields": {"כותרת המשימה": "Rollback-R3-off"}},
+        _identity_r3_off.user_id, "telegram", "test", trusted_source="agent",
+    )
+chk("R3 (flag OFF): BUG-162 generic (rejected-contract) branch + projection "
+    "raises -> legacy generic outcome unchanged (APPROVAL_QUEUE_ERROR)",
+    _outcome_r3_off.get("terminal_outcome") == "APPROVAL_QUEUE_ERROR")
+chk("R3 (flag OFF): reply_owner is the legacy hardcoded 'gateway', no "
+    "action_lifecycle_result key",
+    _outcome_r3_off.get("reply_owner") == "gateway"
+    and "action_lifecycle_result" not in _outcome_r3_off)
+
+_identity_r3_on = _identity_owner("tc6_rollback_r3_on")
+_propose_r3_on = _real_gw.propose_action(
+    tenant_id="boss_hq", canonical_user_id=_identity_r3_on.memory_key,
+    tool_name="airtable_add", tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "Rollback-R3-on"}},
+    origin_channel="telegram", origin_chat_id=_identity_r3_on.user_id,
+    requires_approval=True, identity=_identity_r3_on, trusted_source="agent",
+)
+assert _propose_r3_on.ok, f"setup propose failed: {_propose_r3_on.reason}"
+assert _real_gw.reject(_propose_r3_on.contract_id, rejected_by="test_user").startswith("🚫")
+with patch("feature_flags.is_enabled",
+           side_effect=_flags("FEATURE_ACTION_GATEWAY", "FEATURE_SINGLE_SPEAKER_APPROVAL_UX")), \
+     patch.object(app, "resolve_identity", side_effect=lambda channel, ext_id: _identity_r3_on), \
+     patch.object(ActionGateway, "reply_ownership_for_contract", side_effect=RuntimeError("boom")):
+    _outcome_r3_on = app._queue_approval_detailed(
+        "airtable_add", {"table": "Tasks", "fields": {"כותרת המשימה": "Rollback-R3-on"}},
+        _identity_r3_on.user_id, "telegram", "test", trusted_source="agent",
+    )
+chk("R3 (flag ON): BUG-162 generic (rejected-contract) branch + projection "
+    "raises -> Branch B marker produced",
+    _outcome_r3_on.get("terminal_outcome") == app._APPROVAL_OWNERSHIP_VERIFICATION_FAILED
+    and _outcome_r3_on.get("ok") is False and _outcome_r3_on.get("created_this_turn") is False)
+chk("R3 (flag ON): no reply_owner/action_lifecycle_result claim on the Branch B outcome",
+    "reply_owner" not in _outcome_r3_on and "action_lifecycle_result" not in _outcome_r3_on)
 
 
 print()
