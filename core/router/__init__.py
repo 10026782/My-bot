@@ -31,6 +31,11 @@ from .entity_resolvers import (
     resolve_lead,
     resolve_session,
 )
+from .lead_builders import (
+    build_create_lead_proposal,
+    build_update_lead_proposal,
+)
+from .lead_integration import prepare_lead_proposal
 
 __all__ = [
     "route_request",
@@ -48,4 +53,6 @@ __all__ = [
     "resolve_action_contract", "resolve_session", "resolve_callback",
     "ActionContractLookupSource", "SessionLookupSource", "CallbackLookupSource",
     "prepare_task_proposal",
+    "build_create_lead_proposal", "build_update_lead_proposal",
+    "prepare_lead_proposal",
 ]
