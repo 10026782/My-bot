@@ -32,6 +32,8 @@ from .entity_resolvers import (
     resolve_session,
 )
 from .lead_builders import (
+    CapturePolicy,
+    LeadIdentityPrecondition,
     build_create_lead_proposal,
     build_update_lead_proposal,
 )
@@ -54,5 +56,6 @@ __all__ = [
     "ActionContractLookupSource", "SessionLookupSource", "CallbackLookupSource",
     "prepare_task_proposal",
     "build_create_lead_proposal", "build_update_lead_proposal",
+    "CapturePolicy", "LeadIdentityPrecondition",
     "prepare_lead_proposal",
 ]

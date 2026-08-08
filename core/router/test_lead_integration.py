@@ -3,9 +3,12 @@ import inspect
 import pytest
 
 from airtable_schema import LeadFields
+from core.router.lead_builders import CapturePolicy, LeadIdentityPrecondition
 from core.router.lead_integration import prepare_lead_proposal
 from core.router.ownership_contracts import IntentOwnershipDecision, IntentOwnershipRegistry
 from core.router.route_decision import Intent
+
+_VALID_IDENTITY = LeadIdentityPrecondition(valid=True, is_duplicate=False)
 
 
 def _registry():
@@ -21,10 +24,53 @@ def _registry():
 
 def test_integration_builds_create_without_lookup():
     proposal = prepare_lead_proposal(
-        Intent.CREATE_LEAD, _registry(), scope="tenant:u1", name="Dana Cohen"
+        Intent.CREATE_LEAD, _registry(), scope="tenant:u1", name="Dana Cohen",
+        capture_policy=CapturePolicy.AUTO_WRITE, identity_precondition=_VALID_IDENTITY,
     )
     assert proposal.intent == Intent.CREATE_LEAD
     assert proposal.fields[LeadFields.NAME] == "Dana Cohen"
+
+
+def test_integration_create_requires_capture_policy():
+    with pytest.raises(ValueError):
+        prepare_lead_proposal(
+            Intent.CREATE_LEAD, _registry(), scope="tenant:u1", name="Dana Cohen",
+            identity_precondition=_VALID_IDENTITY,
+        )
+
+
+def test_integration_create_requires_identity_precondition():
+    with pytest.raises(ValueError):
+        prepare_lead_proposal(
+            Intent.CREATE_LEAD, _registry(), scope="tenant:u1", name="Dana Cohen",
+            capture_policy=CapturePolicy.AUTO_WRITE,
+        )
+
+
+def test_integration_create_missing_scope_fails_closed():
+    with pytest.raises(ValueError):
+        prepare_lead_proposal(
+            Intent.CREATE_LEAD, _registry(), scope="", name="Dana Cohen",
+            capture_policy=CapturePolicy.AUTO_WRITE, identity_precondition=_VALID_IDENTITY,
+        )
+
+
+def test_integration_create_invalid_identity_fails_closed():
+    invalid = LeadIdentityPrecondition(valid=False, is_duplicate=False)
+    with pytest.raises(ValueError):
+        prepare_lead_proposal(
+            Intent.CREATE_LEAD, _registry(), scope="tenant:u1", name="Dana Cohen",
+            capture_policy=CapturePolicy.AUTO_WRITE, identity_precondition=invalid,
+        )
+
+
+def test_integration_create_duplicate_identity_fails_closed():
+    duplicate = LeadIdentityPrecondition(valid=True, is_duplicate=True)
+    with pytest.raises(ValueError):
+        prepare_lead_proposal(
+            Intent.CREATE_LEAD, _registry(), scope="tenant:u1", name="Dana Cohen",
+            capture_policy=CapturePolicy.AUTO_WRITE, identity_precondition=duplicate,
+        )
 
 
 def test_integration_resolves_then_builds_update():
