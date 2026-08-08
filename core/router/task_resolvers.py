@@ -1,9 +1,9 @@
-"""Bounded, side-effect-free task reference resolution.
+"""פתרון שם/רפרנס משימה, מוגבל וללא תופעות לוואי (bounded, side-effect-free).
 
-TC5 generalized this module's original bounded-resolve implementation into
-``core/router/entity_resolvers.py``'s shared framework. ``TaskLookup`` and
-``resolve_task`` are re-exported here unchanged so existing callers/tests do
-not need to change their import path or observe any behavior difference.
+TC5 הכליל את המימוש המקורי של המודול הזה לתוך ה-framework המשותף ב-
+``core/router/entity_resolvers.py``. ``TaskLookup`` ו-``resolve_task``
+מיוצאים מחדש כאן ללא שינוי כדי שקוד/טסטים קיימים לא יצטרכו לשנות את נתיב
+ה-import שלהם או להבחין בהבדל התנהגות כלשהו.
 """
 
 from __future__ import annotations

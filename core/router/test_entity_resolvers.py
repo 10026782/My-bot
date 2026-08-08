@@ -178,7 +178,13 @@ def test_no_mutation_or_write_or_dispatch_import():
 def test_no_agent_call_where_tc5_owns_resolution(entity_kind, resolver):
     """The resolver never invents/guesses a match — it either resolves exactly
     one stable reference or reports 0/many, with no code path that could call
-    out to an Agent/LLM."""
-    source = inspect.getsource(resolver)
+    out to an Agent/LLM. Inspects the shared bounded-resolve core too, not
+    just the thin per-entity wrapper, since every resolver executes it."""
+    import core.router.entity_resolvers as module
+
+    source = "\n".join((
+        inspect.getsource(resolver),
+        inspect.getsource(module._resolve_bounded_entity),
+    ))
     for banned in ("agent", "anthropic", "claude", "llm"):
         assert banned not in source.lower()
