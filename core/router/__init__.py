@@ -20,6 +20,14 @@ from .task_builders import (
 )
 from .task_resolvers import resolve_task
 from .task_integration import prepare_task_proposal
+from .entity_resolvers import (
+    resolve_action_contract,
+    resolve_callback,
+    resolve_contact,
+    resolve_deal,
+    resolve_lead,
+    resolve_session,
+)
 
 __all__ = [
     "route_request",
@@ -33,5 +41,7 @@ __all__ = [
     "build_create_task_proposal", "build_update_task_proposal",
     "build_complete_task_proposal",
     "resolve_task",
+    "resolve_lead", "resolve_contact", "resolve_deal",
+    "resolve_action_contract", "resolve_session", "resolve_callback",
     "prepare_task_proposal",
 ]
