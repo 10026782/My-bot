@@ -3,11 +3,11 @@ from core.router.route_decision import Intent
 from core.router.task_integration import prepare_task_proposal
 from airtable_schema import TaskFields
 
-# Owner strings match the live, wired TASK_OWNERSHIP registry
-# (core/turn_coordinator_runtime.py) exactly -- this fixture previously used
-# "TASK_BUILDER"/"RESOLVER" (uppercase, generic), which never matched
-# production's "task_builder"/"task_resolver" and would have masked an owner
-# mismatch bug instead of catching one.
+# מחרוזות ה-owner תואמות בדיוק ל-registry החי והמחווט TASK_OWNERSHIP
+# (core/turn_coordinator_runtime.py) -- ה-fixture הזה השתמש קודם ב-
+# "TASK_BUILDER"/"RESOLVER" (אותיות גדולות, גנרי), שמעולם לא תאם לערכי
+# הפרודקשן "task_builder"/"task_resolver" והיה מסתיר באג של owner שגוי
+# במקום לתפוס אותו.
 _TASK_BUILDER_OWNER = "task_builder"
 _TASK_RESOLVER_OWNER = "task_resolver"
 
@@ -67,13 +67,13 @@ def test_integration_rejects_registry_policy_mismatch():
         raise AssertionError("policy mismatch was accepted")
 
 
-# --- Hardening follow-up (post-PR #564): owner validation supplements resolver_required ---
+# --- המשך-hardening (אחרי PR #564): אימות owner משלים את resolver_required ---
 
 
 def test_integration_create_rejects_wrong_owner_even_with_correct_resolver_required():
-    """resolver_required=False matches CREATE_TASK's expected policy, but the
-    registered owner is not task_builder -- this must still fail closed,
-    before any proposal is constructed."""
+    """resolver_required=False תואם למדיניות הצפויה של CREATE_TASK, אבל
+    ה-owner הרשום אינו task_builder -- זה חייב עדיין להיכשל בסגירה,
+    לפני כל בניית proposal."""
     registry = IntentOwnershipRegistry({
         Intent.CREATE_TASK: IntentOwnershipDecision(
             Intent.CREATE_TASK, _TASK_RESOLVER_OWNER, "wrong owner for create", 1.0, False,
@@ -88,9 +88,9 @@ def test_integration_create_rejects_wrong_owner_even_with_correct_resolver_requi
 
 
 def test_integration_update_rejects_wrong_owner_before_lookup_runs():
-    """resolver_required=True matches UPDATE_TASK's expected policy, but the
-    registered owner is not task_resolver -- this must fail closed before the
-    lookup callable is ever invoked."""
+    """resolver_required=True תואם למדיניות הצפויה של UPDATE_TASK, אבל
+    ה-owner הרשום אינו task_resolver -- זה חייב להיכשל בסגירה לפני
+    שה-lookup נקרא בכלל."""
     registry = IntentOwnershipRegistry({
         Intent.UPDATE_TASK: IntentOwnershipDecision(
             Intent.UPDATE_TASK, _TASK_BUILDER_OWNER, "wrong owner for update", 1.0, True,
@@ -115,12 +115,12 @@ def test_integration_update_rejects_wrong_owner_before_lookup_runs():
 
 
 def test_live_task_ownership_registry_satisfies_owner_validation():
-    """Regression guard: the live, wired TASK_OWNERSHIP registry
-    (core/turn_coordinator_runtime.py) must keep passing this module's owner
-    validation. This is exactly the drift this hardening PR found and fixed
-    (the pre-existing test fixture used owner strings that never matched
-    production) -- this test makes a future re-drift fail loudly here
-    instead of only being caught deep in the runtime integration suite."""
+    """שומר-רגרסיה: ה-registry החי והמחווט TASK_OWNERSHIP
+    (core/turn_coordinator_runtime.py) חייב להמשיך לעבור את אימות ה-owner
+    של המודול הזה. זה בדיוק ה-drift שה-PR הזה של hardening מצא ותיקן
+    (ה-fixture הקודם של הטסט השתמש במחרוזות owner שמעולם לא תאמו
+    לפרודקשן) -- הטסט הזה גורם ל-drift חוזר להיכשל בקול רם כאן, במקום
+    להיתפס רק עמוק בתוך ה-runtime integration suite."""
     from core.turn_coordinator_runtime import TASK_OWNERSHIP
 
     create_proposal = prepare_task_proposal(

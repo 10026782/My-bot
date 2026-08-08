@@ -19,15 +19,13 @@ from core.router.task_resolvers import TaskLookup, resolve_task
 
 TaskIntegrationResult = CanonicalActionProposal | ResolverResult
 
-# The WS1 ownership contract requires every owned intent to have one target
-# owner (IntentOwnershipDecision.owner is the typed owner-selection result).
-# resolver_required alone does not prove the registered owner is the right
-# one for this intent -- a registry entry could have the correct
-# resolver_required value with the wrong owner string. These constants match
-# the live, wired TASK_OWNERSHIP registry (core/turn_coordinator_runtime.py)
-# exactly -- verified directly against that module, not assumed -- and are
-# validated in addition to, not instead of, the existing resolver_required
-# check below.
+# חוזה הבעלות של WS1 מחייב שלכל intent בבעלות יהיה owner יעד יחיד
+# (IntentOwnershipDecision.owner הוא תוצאת בחירת-הבעלים המוקלדת). resolver_required
+# בלבד לא מוכיח שה-owner הרשום הוא הנכון לintent הזה -- רשומת-registry יכולה
+# להכיל ערך resolver_required נכון עם מחרוזת-owner שגויה. הקבועים האלה תואמים
+# בדיוק ל-registry החי והמחווט TASK_OWNERSHIP (core/turn_coordinator_runtime.py)
+# -- אומת ישירות מול המודול הזה, לא הונח -- ומאומתים בנוסף לבדיקת
+# resolver_required הקיימת, לא במקומה.
 _TASK_BUILDER_OWNER = "task_builder"
 _TASK_RESOLVER_OWNER = "task_resolver"
 
@@ -46,9 +44,9 @@ def prepare_task_proposal(
     """Select the registered owner, resolve when required, then build.
 
     This returns a ResolverResult for zero/multiple matches instead of picking
-    a task. It creates no ActionContract and performs no execution. Fails
-    closed, before any proposal construction or lookup, when the registered
-    decision's ``owner`` does not match the expected owner for this intent.
+    a task. It creates no ActionContract and performs no execution.
+    נכשל בסגירה, לפני כל בניית proposal או lookup, כאשר ה-``owner`` של ההחלטה
+    הרשומה לא תואם ל-owner הצפוי עבור ה-intent הזה.
     """
     decision = registry.require(intent)
     needs_resolution = intent in {Intent.UPDATE_TASK, Intent.COMPLETE_TASK}
