@@ -408,16 +408,15 @@ def set_flag(name: str, value: bool) -> None:
 
 
 # ══════════════════════════════════════════════════════════════════
-# PATCH 3B Step 3 — EmergencyStopManager integration (configure hook +
-# new parallel API). NOT wired to is_enabled()/set_flag() yet — those two
-# continue exactly as above, unchanged, for EMERGENCY_STOP_* names, until
-# the atomic cutover (app.py injection + tma_api/cost_monitor migration +
-# legacy set_flag() rejection, all landing together in a later step).
+# PATCH 3B — EmergencyStopManager integration and completed cutover.
+# is_enabled() delegates the canonical emergency names to the manager;
+# set_flag() rejects legacy writes. TMA and cost-monitor writes use the
+# durable APIs below.
 #
 # This module may import core.emergency_stop (pure, I/O-free — see that
 # module's own header). It does NOT import adapters.airtable_emergency_stop_store
 # or tools/airtable_gateway — building the concrete adapter and injecting it
-# via configure_emergency_stop_manager() is a later step's job (app.py), not
+# via configure_emergency_stop_manager() remains app.py's startup job, not
 # this module's.
 # ══════════════════════════════════════════════════════════════════
 
@@ -560,9 +559,8 @@ def _get_configured_emergency_stop_manager() -> EmergencyStopManager:
 
 def evaluate_emergency_stop(flag_name: str) -> FlagEvaluation:
     """
-    New parallel read API (Step 3) — NOT yet wired to any live caller;
-    is_enabled() still governs production EMERGENCY_STOP_* behavior
-    unchanged. Raises EmergencyStopNotConfigured if
+    Manager-backed read API used by is_enabled() for the canonical
+    EMERGENCY_STOP_* names. Raises EmergencyStopNotConfigured if
     configure_emergency_stop_manager() hasn't been called.
     """
     return _get_configured_emergency_stop_manager().evaluate(flag_name)
@@ -570,8 +568,8 @@ def evaluate_emergency_stop(flag_name: str) -> FlagEvaluation:
 
 def get_emergency_stop_status() -> EmergencyStopStatusView:
     """
-    New parallel status API (Step 3) — NOT yet wired to any live caller.
-    Unlike the other three new functions here, this one does NOT raise when
+    Manager-backed status API used by startup/health code. Unlike the other
+    three functions here, this one does NOT raise when
     unconfigured — a health/status view must be safe to call at any time.
     Pre-configure it returns configured=False with manager_status=None
     (never a flags dict whose "unknown" entries could be misread as an

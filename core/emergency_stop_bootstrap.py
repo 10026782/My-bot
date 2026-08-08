@@ -11,11 +11,10 @@
 # deferred inside bootstrap_emergency_stop(); importing this module does
 # nothing but define the function and the result dataclass.
 #
-# Still dual-path after this step: no production caller (is_enabled(),
-# set_flag(), tma_api, cost_monitor, scheduler) reads from the manager this
-# bootstraps — they all still use the legacy feature_flags path unchanged.
-# This step only makes the manager configured and hydrated; nothing
-# consults it yet. Cutover is a later, separate, atomic step.
+# Production EMERGENCY_STOP_* reads and writes use this manager after startup:
+# feature_flags.is_enabled() delegates reads here, while tma_api and
+# cost_monitor use the durable write API. Normal feature flags remain on their
+# legacy in-memory/env path.
 #
 # ══════════════════════════════════════════════════════════════════
 # Exception policy — documented outcome vs. unexpected failure
