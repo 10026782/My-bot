@@ -6,98 +6,94 @@
 > `BOSS_CURRENT_STATE.md` עודכן לאחרונה ב-26/06/2026 והוא ארכיון היסטורי בלבד.
 > **main גובר על מסמכי תכנון בכל סתירה. "תוקן" ≠ "מאומת בפרודקשן".**
 
-**עודכן:** 06/08/2026 · **origin/main:** `c5dbe86` (PR #552)
-**פער תיעוד ממשיך לגדול:** `ROADMAP.md`/`CHANGELOG.md` מעודכנים רק עד PR #524
-(02/08/2026). `origin/main` כעת כולל 28 PRs נוספים (#525–#552) שלא תועדו
-ב-ROADMAP; CHANGELOG מתעד רק PR #521–#524 בפירוט ורמז חלקי אחד ל-PR #546/#549
-תחת "Unreleased". הסעיפים למטה נבנו ישירות מ-`git log`/`git show`/grep על
-`origin/main` והשוואה מול טקסט `BUG_AUDIT_LOG.md` עצמו — תואם "MAIN > DOCS".
+**עודכן:** 08/08/2026 · **origin/main:** `e9525b5` (PR #560)
+**פער תיעוד:** `ROADMAP.md`/`CHANGELOG.md` מעודכנים רק עד PR #552 (07/08/2026).
+8 PRs נוספים (#553–#560) מוזגו מאז ולא תועדו שם. הסעיף למטה נבנה ישירות
+מ-`git log`/`BUG_AUDIT_LOG.md` על `origin/main` — תואם "MAIN > DOCS".
 
 ## 1. Executive Summary
 
 - הבוט חי בפרודקשן (Telegram + WhatsApp/Twilio), Identity→Router→Context→Agent, Airtable כ-CRM.
-- **תיקון סתירת תיעוד:** `BUG_AUDIT_LOG.md` מתאר את BUG-153/154/155/156/157
-  (מסלול create_task דטרמיניסטי + concurrency) כ**"לא מוזג עדיין"** בטקסט הפנימי
-  של כל סעיף — אך `git log origin/main` מוכיח שכל חמשת התיקונים **כן מוזגו**
-  (PR #550 עבור 153/154/155/156, PR #552 עבור 157). הטקסט הפנימי לא עודכן
-  לאחר המיזוג בפועל. לפי "MAIN > DOCS": **מוזג = כן, פרוס = לא, מאומת
-  בפרודקשן = לא** לכל החמישה (אין hash חדש שאומת ב-Render).
-- כל חמשת התיקונים נוגעים לאותו קוד ראוטינג ללא-flag (`parse_deterministic_create_task()`
-  ב-`core/router/router.py`, `core/action_gateway.py`) שכבר סומן בעדכון הקודם
-  כמשנה התנהגות/טקסט חי בלי מנגנון rollback — המשמעות: ברגע ה-deploy הבא הם
-  ישפיעו על production מיידית, ללא flag.
-- BUG-157 (race condition ב-`propose_action()` בין scheduler thread לבין
-  webhook thread — לא latent, נגיש בפועל תחת `workers=1`) נסגר ב-CAS אטומי
-  חדש על אינדקס fingerprint; 18/18 בדיקות חדשות כולל race אמיתי עם 8 threads.
-- פער deploy: ה-deploy החי המתועד האחרון הוא `5ec37b8` (עד PR #516); `origin/main`
-  כעת (`c5dbe86`) כולל 36+ PRs נוספים (#517–#552) שטרם אומתו כפרוסים.
-- TurnCoordinator WS2/WS3 ו-F52 D-014–D-017 — ללא שינוי מהעדכון הקודם, נשארים
-  לא מחווטים ל-runtime החי / מאחורי `FEATURE_UNIFIED_STATUS_FORMATTER` (כבוי).
-- BUG-152 — עדיין פתוח, לא root-caused, ללא PR/commit משויך (ללא שינוי בטווח הזה).
+- שרשרת התיקונים סביב PR #546 (BUG-153/154/155/156/158/159) — כולם ✅
+  **מוזגו + פרוסו + VERIFIED IN PROD** (ראיות לוג אמיתיות מ-owner).
+- BUG-157 (race ב-`propose_action()`, לא latent — נגיש בין scheduler
+  thread ל-webhook thread) — מוזג + פרוס, אך production-verified רק
+  ב-test evidence (34/34), לא בתרחיש race אמיתי.
+- אימות ה-production של BUG-157 חשף 3 באגים חדשים סביב Agent fallback
+  ל-approval turn (BUG-160/161/162), פלוס באג נפרד שנמצא ב-E2E נוסף
+  (BUG-163). כולם **קוד תוקן ונבדק (PR #560), מוזג ל-`main` היום —
+  אך טרם deployed/verified בפרודקשן.**
+- ממצא ארכיטקטוני קריטי (לא באג חדש): `Handler.TOOL` דטרמיניסטי קיים
+  רק ל-`CREATE_TASK`, לא ל-`UPDATE_TASK`/`COMPLETE_TASK` — למרות
+  שה-resolver/gateway המלא כבר בנוי ומחובר. זה בדיוק הפער ש-**PA-01
+  (עדיין PLANNING ONLY, אין קוד)** נועד לסגור; 8 מתוך 12 ממצאי E2E
+  שסיפק ה-owner הם אישוש-production לפער הזה, לא באגים נפרדים.
+- פער deploy: אחרון-פרוס מאומת הוא `44fe0fb` (07/08 11:34, כולל עד
+  PR #557); PR #559–#560 מוזגים ל-`main` אך טרם אומתו כפרוסים.
+- BUG-152 — עדיין פתוח, לא root-caused (ללא שינוי בטווח הזה).
 
 ## 2. Current System State
 
 **תפעולי (מאומת ב-grep/`git show` על `main`):**
 
-- ActionContracts הוא מקור האמת היחיד למחזור חיי approval; מסלולי legacy
-  (`app.py` `_pending_approvals`) ו-TMA קיימים במקביל.
-- `parse_deterministic_create_task()` — פרסור עברי דטרמיניסטי ל-"צור משימה",
-  רץ ללא flag לכל `Intent.CREATE_TASK`. חמשת התיקונים (BUG-153–157) עכשיו
-  מוזגים לתוכו/סביבו: reconfirmation אחרי rejection, פרסור תאריך "ל-", TTL
-  expiry contract lookup, שמירת/אי-שמירת שעה, ו-atomic fingerprint claim.
-- Airtable Gateway (`tools/airtable_gateway.py`) הוא נתיב הכתיבה היחיד ל-Airtable — ללא שינוי.
-- Lead Capture / Scoring / Memory / Followup — קיימים בקוד, כולם flag-gated וכבויים כברירת מחדל.
-- `feature_flags.py` — אין flag חדש נרשם בטווח `9a62e6f..HEAD` (verified: `git diff` ריק על הקובץ).
+- ActionContracts הוא מקור האמת היחיד למחזור-חיי approval; `_recover_pending_item_from_contract()`
+  (BUG-158) כעת מונע "הפעולה אינה זמינה" כוזב כש-contract עדיין pending — **VERIFIED IN PROD**.
+- `parse_deterministic_create_task()` — כולל כעת גם "משימת"/הוסף/תוסיף (BUG-159, VERIFIED IN PROD)
+  וגם strip בטוח למרכאה לא-מאוזנת (BUG-160, מוזג היום, טרם deployed).
+- `claim_fingerprint_cas()`/`release_fingerprint_claim()` — CAS אטומי עם claim-ownership token
+  סוגר את מרוץ ה-fingerprint (BUG-157); production-verified רק חלקית.
+- Airtable Gateway (`tools/airtable_gateway.py`) — נתיב הכתיבה היחיד ל-Airtable, ללא שינוי.
+- `feature_flags.py` — אין flag חדש נרשם; `FEATURE_SINGLE_SPEAKER_APPROVAL_UX`
+  ו-`FEATURE_PA01_ENFORCEMENT_STATE` (three-state) קיימים אך כבויים כברירת מחדל בקוד.
 
 **מיושם חלקית / לא production-active:**
 
-- TurnCoordinator WS2/WS3 (lifecycle/evidence projections, MessageContract
-  adapters) — מוזגו כקוד עצמאי, לא מחווטים לנתיב runtime החי.
-- F52 Unified Status Formatter (D-014–D-017) — shadow/comparison בלבד, מאחורי flag כבוי.
-- BUG-153/154/155/156/157 — **קוד מוזג ל-`main`, לא פרוס, לא מאומת בפרודקשן** (ראו טבלה).
+- **PA-01** (Phantom Approval / Handler.TOOL ל-update/complete task) — **PLANNING ONLY**, אין
+  קוד runtime. גורם היום להתנהגות לא-דטרמיניסטית אמיתית ב-update/complete task (Agent-driven).
+- BUG-161/162 (Agent reconfirmation promise + turn-ownership) — root cause אותר, interim patch
+  תוקן (honesty rule ב-`core_knowledge.py` + `reply_owner` fix בבלוק הגנרי), **לא** TC6 הרשמי
+  (עדיין `NEXT_IMPLEMENTATION` ב-TurnCoordinator WS2). "Duplicate authority" (שני מנגנונים
+  נפרדים לחישוב gateway-ownership) מתועד, לא אוחד.
+- TurnCoordinator WS2/WS3 — מוזגו כקוד עצמאי, לא מחווטים לנתיב runtime חי.
+- F52 Unified Status Formatter — shadow/comparison בלבד, מאחורי flag כבוי.
 
-**חסום:**
-
-- BUG-130/134/136/137/140/150/152 (וכן BUG-126/127B/127C/138/139/142/148) —
-  ממתינים להחלטת owner או חקירה נוספת; חלקם חסומים ע"י `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`.
+**חסום:** BUG-130/134/136/137/140/150/152 (וכן 126/127B/127C/138/139/142/148) —
+ממתינים להחלטת owner; חלקם חסומים ע"י `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`.
 
 | באג | Severity | קוד מוזג ל-main | Deployed | Production-verified |
 |---|---|---|---|---|
-| BUG-153 — create חדש אחרי rejection נחסם | גבוה | ✅ (PR #550) | ❌ | ❌ |
-| BUG-154 — "ל-תאריך" מפיל parser | גבוה | ✅ (PR #550) | ❌ | ❌ |
-| BUG-155 — TTL expiry לא סוגר contract | קריטי | ✅ (PR #550) | ❌ | ❌ |
-| BUG-156 — שעה לא נשמרת ב-Airtable | בינוני-גבוה | ✅ (PR #550) | ❌ | ❌ |
-| BUG-157 — propose_action() לא-אטומי (race) | גבוה, נגיש בפועל | ✅ (PR #552) | ❌ | ❌ |
+| BUG-153/154/155/156 | גבוה/קריטי | ✅ (PR #550) | ✅ | ✅ |
+| BUG-157 | גבוה, נגיש בפועל | ✅ (PR #552/#555) | ✅ | ❌ (test-only) |
+| BUG-158 | גבוה | ✅ (PR #556) | ✅ | ✅ |
+| BUG-159 | בינוני-גבוה | ✅ (PR #557) | ✅ | ✅ |
+| BUG-160 — מרכאה לא מאוזנת | גבוה | ✅ (PR #560) | ❌ | ❌ |
+| BUG-161 — reconfirmation לא עקבי | גבוה | 🟡 חלקי (PR #560) | ❌ | ❌ |
+| BUG-162 — turn-ownership violation | בינוני-גבוה | 🟡 interim patch (PR #560) | ❌ | ❌ |
+| BUG-163 — intent coverage complete/update | גבוה | ✅ (PR #560) | ❌ | ❌ |
 
-## 3. Completed Since Last Update (מאז 05/08/2026, `9a62e6f..c5dbe86`, PR #549–#552)
+## 3. Completed Since Last Update (מאז 06/08/2026, `c5dbe86..e9525b5`, PR #553–#560)
 
-- **PR #550 — BUG-153/154/155/156 fixes** (`core/router/router.py`,
-  `core/action_gateway.py`, `app.py`) — ארבעת התיקונים שאותרו באימות Staging
-  ל-PR #546 ב-03/08 מומשו ונבדקו מקומית (11–15 בדיקות חדשות כל אחד, כולן
-  ירוקות), כולל Cross-Layer Impact Matrix מלא לכל אחד תחת
-  `docs/architecture/action-gateway/`. **מוזג בפועל.**
-- **PR #552 — BUG-157 atomic fingerprint claim** (`core/action_gateway.py`)
-  — CAS חדש (`claim_fingerprint_cas`/`release_fingerprint_claim`) סוגר race
-  אמיתי בין scheduler thread ל-webhook thread סביב `propose_action()`; 18/18
-  בדיקות חדשות כולל race עם 8 threads בו-זמנית. **מוזג בפועל.**
-- **PR #549 — תיקון תיעוד** (`CHANGELOG.md`,
-  `DETERMINISTIC_TASK_ROUTING_AND_REPLAY_POLICY_20260802.md`) — מבהיר את
-  ההבדל בין retry מפורש (מותר, contract חדש) לבין replay אוטומטי של פעולה
-  שנדחתה (עדיין חסום). דוקומנטציה בלבד.
-- **PR #551 — רגנרציית `AI_CONTEXT.md`** (עד PR #548) — הקודמת למסמך הנוכחי.
-- אין flag חדש נרשם; `BUG_AUDIT_LOG.md` גדל (+400 שורות) עם תיעוד מלא לחמשת
-  התיקונים אך שדות "Merged" בתוך הטקסט הפנימי של כל סעיף נשארו לא-מעודכנים
-  (ראו §1 — פער בין main לתוכן הטקסט של הדוח עצמו).
+- **PR #553/#555 — BUG-157 hardening (סבב 2/3)** — המתנה ל-claim משתחרר
+  + claim-ownership token אטום (מונע read-path משחרר claim פעיל של caller אחר). 34/34 טסטים.
+- **PR #556 — BUG-158** — שחזור item מה-`ActionContract` כש-EventBus TTL (30 דק') פג לפני
+  ה-contract עצמו (24h). **VERIFIED IN PROD** עם לוג אמיתי מ-owner.
+- **PR #557 — BUG-159** — הרחבת הפרסר הדטרמיניסטי ל"משימת"/הוסף/תוסיף. **VERIFIED IN PROD**.
+- **PR #558 — תיעוד**: קטלוג ROADMAP ל-PR #525–#552 + תיקון סטטוס TurnCoordinator WS1/WS2/WS3.
+- **PR #559 — ביקורת post-merge**: תיקון שדות "Merged" מיושנים ב-`BUG_AUDIT_LOG.md` עצמו
+  (BUG-153–159) + אימות production נוסף ל-BUG-153/155/156/158/159.
+- **PR #560 — BUG-160/161/162/163 + Turn Coordinator E2E audit**: תיקון מרכאה לא-מאוזנת,
+  כלל-כנות למניעת הבטחת-reconfirmation, root-cause fix ל-`reply_owner` בבלוק הגנרי, הרחבת
+  intent regex ל-complete/update_task. שילוב 12 ממצאי E2E מה-owner — 8 מהם אישוש-production
+  לפער PA-01 הקיים (לא באגים חדשים), אחד חדש (BUG-163), שניים ירושה מ-BUG-126/127C, אחד
+  פער-testability. **כל התיקונים מוזגים ל-`main`, טרם deployed.**
 
 ## 4. Next Priorities
 
-1. **אישור owner נדרש לפני deploy** — BUG-153/154/155/156/157 מוזגים ל-`main`
-   וכולם ללא flag; ה-deploy הבא ישנה התנהגות routing/approval חיה מיידית.
-   מומלץ סקירה מפורשת + עדכון `BUG_AUDIT_LOG.md`'s "Merged" fields לפני deploy.
-2. סגור את פער התיעוד — 28 PRs (#525–#552) לא תועדו ב-`ROADMAP.md` (רק חלק
-   קטן ב-`CHANGELOG.md`); דורש הצעת catch-up כמו ש-PR #521 עשה בעבר.
-3. סגור את פער ה-deploy המתרחב — `origin/main` כעת 36+ PRs לפני ה-deploy החי
-   האחרון (`5ec37b8`); לאמת hash נוכחי מול Render.
-4. חקור את BUG-152 עם Render logs ותרחיש מבודד (עדיין לא root-caused).
-5. קבל החלטות owner ל-BUG-130/134, לחיווט TurnCoordinator WS2/WS3 לנתיב
-   runtime (staging/rollout gates), ולשאר הבאגים החסומים.
+1. **Deploy + אימות production** ל-PR #560 (BUG-160/161/162/163) — הפער בין `main` (`e9525b5`)
+   לבין ה-deploy החי האחרון המאומת (`44fe0fb`) גדל; לאמת commit נוכחי מול Render.
+2. **תעדוף מימוש PA-01** (`Handler.TOOL` ל-`UPDATE_TASK`/`COMPLETE_TASK`) — הפער אושש חי
+   ב-production (8/12 ממצאי E2E), לא רק תיאורטי; המסמך עצמו כבר קיים ומוכן ל-Cross-Layer Matrix.
+3. **סגור את פער התיעוד** — 8 PRs (#553–#560) לא תועדו ב-`ROADMAP.md`/`CHANGELOG.md`.
+4. **החלטת owner** על "duplicate authority" ב-BUG-162 (שני מנגנונים לחישוב gateway-ownership)
+   ועל תזמון מימוש TC6 הרשמי (WS2) שיחליף את ה-interim patch.
+5. חקור את BUG-152 (עדיין לא root-caused) ואת שאר הבאגים החסומים (130/134/136/137/140).
