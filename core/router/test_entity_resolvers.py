@@ -1,9 +1,12 @@
 """TC5 verification: bounded entity resolver framework.
 
 Covers 0/1/many outcomes, bounded consumption, identity-scope isolation,
-fail-closed behavior on missing scope, determinism, and the absence of any
-mutation/write or second resolver implementation, across every entity kind
-named in docs/architecture/turn-coordinator-full/RESOLVER_MAP.md.
+fail-closed behavior on missing scope, determinism, the absence of any
+mutation/write or second resolver implementation, and (review follow-up on
+PR #562) that action_contract/session/callback structurally require an
+explicit, entity-specific source-policy declaration instead of accepting any
+generic lookup callable — across every entity kind named in
+docs/architecture/turn-coordinator-full/RESOLVER_MAP.md.
 """
 
 import ast
@@ -12,6 +15,9 @@ import inspect
 import pytest
 
 from core.router.entity_resolvers import (
+    ActionContractLookupSource,
+    CallbackLookupSource,
+    SessionLookupSource,
     resolve_action_contract,
     resolve_callback,
     resolve_contact,
@@ -32,6 +38,24 @@ ALL_RESOLVERS = {
     "callback": resolve_callback,
 }
 
+# task/lead/contact/deal require RESOLVER_MAP.md's plain "durable read"
+# policy, already precedented by the frozen TC3 task resolver -- they take a
+# bare lookup callable directly. action_contract/session/callback carry a
+# sharper, entity-specific source policy (durable-source, TTL-scoped,
+# durable-AC-first) and require an explicit typed *LookupSource wrapper.
+POLICY_WRAPPERS = {
+    "action_contract": lambda lookup: ActionContractLookupSource(lookup),
+    "session": lambda lookup: SessionLookupSource(lookup, ttl_seconds=1800),
+    "callback": lambda lookup: CallbackLookupSource(lookup),
+}
+
+
+def _invoke(entity_kind, resolver, query, lookup, **kwargs):
+    """Call a resolver with whatever calling convention its entity kind uses."""
+    wrap = POLICY_WRAPPERS.get(entity_kind)
+    argument = wrap(lookup) if wrap else lookup
+    return resolver(query, argument, **kwargs)
+
 
 def _lookup(records, seen=None):
     def lookup(query, scope, limit):
@@ -43,7 +67,7 @@ def _lookup(records, seen=None):
 
 @pytest.mark.parametrize("entity_kind,resolver", ALL_RESOLVERS.items())
 def test_zero_matches_returns_no_reference(entity_kind, resolver):
-    result = resolver("missing", _lookup([]), scope="tenant:u1", limit=2)
+    result = _invoke(entity_kind, resolver, "missing", _lookup([]), scope="tenant:u1", limit=2)
     assert result.entity_kind == entity_kind
     assert result.match_count == 0
     assert result.stable_reference == ""
@@ -51,7 +75,7 @@ def test_zero_matches_returns_no_reference(entity_kind, resolver):
 
 @pytest.mark.parametrize("entity_kind,resolver", ALL_RESOLVERS.items())
 def test_exactly_one_match_returns_stable_reference(entity_kind, resolver):
-    result = resolver("call supplier", _lookup([{"id": "rec1"}]), scope="tenant:u1")
+    result = _invoke(entity_kind, resolver, "call supplier", _lookup([{"id": "rec1"}]), scope="tenant:u1")
     assert result.entity_kind == entity_kind
     assert result.match_count == 1
     assert result.stable_reference == "rec1"
@@ -59,8 +83,9 @@ def test_exactly_one_match_returns_stable_reference(entity_kind, resolver):
 
 @pytest.mark.parametrize("entity_kind,resolver", ALL_RESOLVERS.items())
 def test_multiple_matches_never_picks_silently(entity_kind, resolver):
-    result = resolver(
-        "call", _lookup([{"id": "rec1"}, {"id": "rec2"}]), scope="tenant:u1", limit=1,
+    result = _invoke(
+        entity_kind, resolver, "call", _lookup([{"id": "rec1"}, {"id": "rec2"}]),
+        scope="tenant:u1", limit=1,
     )
     assert result.match_count == 2
     assert result.stable_reference == ""
@@ -75,7 +100,7 @@ def test_bounded_query_consumes_at_most_limit_plus_one(entity_kind, resolver):
             consumed.append(number)
             yield {"id": f"rec{number}"}
 
-    result = resolver("call", lookup, scope="tenant:u1", limit=3)
+    result = _invoke(entity_kind, resolver, "call", lookup, scope="tenant:u1", limit=3)
     assert result.match_count == 4
     assert consumed == [0, 1, 2, 3]
 
@@ -84,24 +109,24 @@ def test_bounded_query_consumes_at_most_limit_plus_one(entity_kind, resolver):
 def test_rejects_missing_query_and_invalid_limit(entity_kind, resolver):
     lookup = _lookup([])
     with pytest.raises(ValueError):
-        resolver("", lookup, scope="tenant:u1", limit=5)
+        _invoke(entity_kind, resolver, "", lookup, scope="tenant:u1", limit=5)
     with pytest.raises(ValueError):
-        resolver("x", lookup, scope="tenant:u1", limit=0)
+        _invoke(entity_kind, resolver, "x", lookup, scope="tenant:u1", limit=0)
 
 
 @pytest.mark.parametrize("entity_kind,resolver", ALL_RESOLVERS.items())
 def test_missing_scope_fails_closed_before_any_lookup(entity_kind, resolver):
     seen = []
     with pytest.raises(ValueError):
-        resolver("x", _lookup([{"id": "rec1"}], seen), scope="")
+        _invoke(entity_kind, resolver, "x", _lookup([{"id": "rec1"}], seen), scope="")
     assert seen == [], "lookup must not run when identity scope is missing"
 
 
 @pytest.mark.parametrize("entity_kind,resolver", ALL_RESOLVERS.items())
 def test_identity_scope_isolation_is_passed_through_to_lookup(entity_kind, resolver):
     seen = []
-    resolver("x", _lookup([{"id": "rec1"}], seen), scope="tenant:a", limit=3)
-    resolver("x", _lookup([{"id": "rec1"}], seen), scope="tenant:b", limit=3)
+    _invoke(entity_kind, resolver, "x", _lookup([{"id": "rec1"}], seen), scope="tenant:a", limit=3)
+    _invoke(entity_kind, resolver, "x", _lookup([{"id": "rec1"}], seen), scope="tenant:b", limit=3)
     scopes_seen = {call[1] for call in seen}
     assert scopes_seen == {"tenant:a", "tenant:b"}
 
@@ -109,14 +134,14 @@ def test_identity_scope_isolation_is_passed_through_to_lookup(entity_kind, resol
 @pytest.mark.parametrize("entity_kind,resolver", ALL_RESOLVERS.items())
 def test_deterministic_repeatable_result(entity_kind, resolver):
     lookup = _lookup([{"id": "rec1"}])
-    first = resolver("call", lookup, scope="tenant:u1", limit=3)
-    second = resolver("call", lookup, scope="tenant:u1", limit=3)
+    first = _invoke(entity_kind, resolver, "call", lookup, scope="tenant:u1", limit=3)
+    second = _invoke(entity_kind, resolver, "call", lookup, scope="tenant:u1", limit=3)
     assert first == second
 
 
 @pytest.mark.parametrize("entity_kind,resolver", ALL_RESOLVERS.items())
 def test_result_is_the_frozen_resolver_result_contract(entity_kind, resolver):
-    result = resolver("call", _lookup([{"id": "rec1"}]), scope="tenant:u1")
+    result = _invoke(entity_kind, resolver, "call", _lookup([{"id": "rec1"}]), scope="tenant:u1")
     assert isinstance(result, ResolverResult)
 
 
@@ -132,6 +157,15 @@ def test_no_regression_to_the_already_live_tc3_task_path():
     assert result.match_count == 1
     assert result.stable_reference == "rec1"
     assert seen == [("call supplier", "tenant:u1", 6)]
+
+
+def test_plain_resolvers_still_accept_a_bare_callable():
+    """task/lead/contact/deal keep the original, simpler calling convention —
+    only action_contract/session/callback require a typed source wrapper."""
+    for entity_kind in ("task", "lead", "contact", "deal"):
+        resolver = ALL_RESOLVERS[entity_kind]
+        result = resolver("call supplier", _lookup([{"id": "rec1"}]), scope="tenant:u1")
+        assert result.match_count == 1
 
 
 def test_single_shared_bounded_core_backs_every_resolver():
@@ -188,3 +222,105 @@ def test_no_agent_call_where_tc5_owns_resolution(entity_kind, resolver):
     ))
     for banned in ("agent", "anthropic", "claude", "llm"):
         assert banned not in source.lower()
+
+
+# --- Review follow-up (PR #562): entity-specific source-policy enforcement ---
+
+
+def test_action_contract_resolver_rejects_a_bare_callable():
+    """A caller cannot supply a raw lookup for ActionContract resolution —
+    the durable-source declaration is required, not optional."""
+    with pytest.raises(TypeError):
+        resolve_action_contract("x", _lookup([{"id": "rec1"}]), scope="tenant:u1")
+
+
+def test_action_contract_resolver_requires_durable_source_true():
+    """A non-durable declaration must fail closed at construction time,
+    before it can ever reach the resolver."""
+    with pytest.raises(ValueError):
+        ActionContractLookupSource(_lookup([{"id": "rec1"}]), durable_source=False)
+
+
+def test_action_contract_resolver_accepts_a_valid_durable_declaration():
+    seen = []
+    result = resolve_action_contract(
+        "AC-1", ActionContractLookupSource(_lookup([{"id": "rec1"}], seen)),
+        scope="tenant:u1",
+    )
+    assert result.match_count == 1
+    assert result.stable_reference == "rec1"
+    assert seen  # the underlying lookup did run once correctly declared
+
+
+def test_session_resolver_rejects_a_bare_callable():
+    with pytest.raises(TypeError):
+        resolve_session("x", _lookup([{"id": "rec1"}]), scope="tenant:u1")
+
+
+@pytest.mark.parametrize("bad_ttl", [0, -1, -3600])
+def test_session_resolver_requires_positive_ttl(bad_ttl):
+    """Zero/negative TTL must fail closed at construction time."""
+    with pytest.raises(ValueError):
+        SessionLookupSource(_lookup([{"id": "rec1"}]), ttl_seconds=bad_ttl)
+
+
+def test_session_resolver_accepts_a_valid_ttl_declaration():
+    result = resolve_session(
+        "sess-1", SessionLookupSource(_lookup([{"id": "rec1"}]), ttl_seconds=1800),
+        scope="chat:c1",
+    )
+    assert result.match_count == 1
+    assert result.stable_reference == "rec1"
+
+
+def test_callback_resolver_rejects_a_bare_callable():
+    with pytest.raises(TypeError):
+        resolve_callback("x", _lookup([{"id": "rec1"}]), scope="tenant:u1")
+
+
+def test_callback_resolver_requires_ac_first_or_explicit_migration_declaration():
+    """A callback lookup that is neither AC-first nor an explicitly declared
+    legacy-pointer migration must fail closed at construction time -- a
+    caller cannot silently wire a legacy-pointer lookup as if it were
+    durable-AC-first."""
+    with pytest.raises(ValueError):
+        CallbackLookupSource(
+            _lookup([{"id": "rec1"}]), ac_first=False, legacy_pointer_migration=False,
+        )
+
+
+def test_callback_resolver_accepts_ac_first_declaration():
+    result = resolve_callback(
+        "cb-1", CallbackLookupSource(_lookup([{"id": "rec1"}])), scope="tenant:u1",
+    )
+    assert result.match_count == 1
+    assert result.stable_reference == "rec1"
+
+
+def test_callback_resolver_accepts_explicit_legacy_pointer_migration_declaration():
+    """A legacy-pointer lookup is only accepted when explicitly opted into as
+    a migration path -- never as a silent default."""
+    result = resolve_callback(
+        "cb-legacy-1",
+        CallbackLookupSource(
+            _lookup([{"id": "rec1"}]), ac_first=False, legacy_pointer_migration=True,
+        ),
+        scope="tenant:u1",
+    )
+    assert result.match_count == 1
+    assert result.stable_reference == "rec1"
+
+
+@pytest.mark.parametrize(
+    "wrapper_cls,kwargs",
+    [
+        (ActionContractLookupSource, {}),
+        (SessionLookupSource, {"ttl_seconds": 1800}),
+        (CallbackLookupSource, {}),
+    ],
+)
+def test_policy_wrappers_reject_a_non_callable_lookup(wrapper_cls, kwargs):
+    """The lookup field itself must be callable -- a structural guard against
+    wiring mistakes, independent of the source-policy declaration."""
+    with pytest.raises(TypeError):
+        wrapper_cls("not-a-callable", **kwargs)
