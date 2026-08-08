@@ -24,6 +24,16 @@ from core.router.route_decision import Intent
 
 LeadIntegrationResult = CanonicalActionProposal | ResolverResult
 
+# The WS1 ownership contract requires every owned intent to have one target
+# owner (IntentOwnershipDecision.owner is the typed owner-selection result).
+# resolver_required alone does not prove the registered owner is the right
+# one for this intent -- a registry entry could have the correct
+# resolver_required value with the wrong owner string. These constants are
+# validated in addition to, not instead of, the existing resolver_required
+# check below.
+_LEAD_BUILDER_OWNER = "LEAD_BUILDER"
+_LEAD_RESOLVER_OWNER = "RESOLVER"
+
 
 def prepare_lead_proposal(
     intent: str,
@@ -45,7 +55,9 @@ def prepare_lead_proposal(
     ``capture_policy``/``identity_precondition`` are required for
     ``create_lead`` and threaded straight through to
     ``build_create_lead_proposal`` -- this seam does not decide or default
-    either of them itself.
+    either of them itself. Fails closed, before any proposal construction or
+    lookup, when the registered decision's ``owner`` does not match the
+    expected owner for this intent.
     """
     decision = registry.require(intent)
     needs_resolution = intent == Intent.UPDATE_LEAD
@@ -53,6 +65,8 @@ def prepare_lead_proposal(
         raise ValueError(f"resolver policy mismatch for intent: {intent}")
 
     if intent == Intent.CREATE_LEAD:
+        if decision.owner != _LEAD_BUILDER_OWNER:
+            raise ValueError(f"owner mismatch for intent: {intent}")
         if capture_policy is None:
             raise ValueError("capture_policy is required for intent: create_lead")
         if identity_precondition is None:
@@ -63,6 +77,8 @@ def prepare_lead_proposal(
         )
     if intent != Intent.UPDATE_LEAD:
         raise ValueError(f"unsupported lead integration intent: {intent}")
+    if decision.owner != _LEAD_RESOLVER_OWNER:
+        raise ValueError(f"owner mismatch for intent: {intent}")
     if lookup is None:
         raise ValueError(f"lookup is required for intent: {intent}")
 

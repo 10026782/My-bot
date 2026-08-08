@@ -136,6 +136,56 @@ def test_integration_rejects_unsupported_intent():
         raise AssertionError("unsupported intent was accepted")
 
 
+# --- Review follow-up (PR #564): owner validation supplements resolver_required ---
+
+
+def test_integration_create_rejects_wrong_owner_even_with_correct_resolver_required():
+    """resolver_required=False matches CREATE_LEAD's expected policy, but the
+    registered owner is not LEAD_BUILDER -- this must still fail closed,
+    before any proposal is constructed."""
+    registry = IntentOwnershipRegistry({
+        Intent.CREATE_LEAD: IntentOwnershipDecision(
+            Intent.CREATE_LEAD, "RESOLVER", "wrong owner for create", 1.0, False,
+        ),
+    })
+    try:
+        prepare_lead_proposal(
+            Intent.CREATE_LEAD, registry, scope="tenant:u1", name="Dana Cohen",
+            capture_policy=CapturePolicy.AUTO_WRITE, identity_precondition=_VALID_IDENTITY,
+        )
+    except ValueError as error:
+        assert "owner mismatch" in str(error)
+    else:
+        raise AssertionError("wrong owner was accepted for create_lead")
+
+
+def test_integration_update_rejects_wrong_owner_before_lookup_runs():
+    """resolver_required=True matches UPDATE_LEAD's expected policy, but the
+    registered owner is not RESOLVER -- this must fail closed before the
+    lookup callable is ever invoked."""
+    registry = IntentOwnershipRegistry({
+        Intent.UPDATE_LEAD: IntentOwnershipDecision(
+            Intent.UPDATE_LEAD, "LEAD_BUILDER", "wrong owner for update", 1.0, True,
+        ),
+    })
+    lookup_calls = []
+
+    def tracking_lookup(query, scope, limit):
+        lookup_calls.append((query, scope, limit))
+        return [{"id": "rec1"}]
+
+    try:
+        prepare_lead_proposal(
+            Intent.UPDATE_LEAD, registry, scope="tenant:u1", query="Dana Cohen",
+            lookup=tracking_lookup,
+        )
+    except ValueError as error:
+        assert "owner mismatch" in str(error)
+    else:
+        raise AssertionError("wrong owner was accepted for update_lead")
+    assert lookup_calls == [], "lookup must not run when the registered owner is wrong"
+
+
 def test_lead_integration_never_calls_agent():
     """The integration seam only selects/resolves/builds -- no Agent/LLM call."""
     import core.router.lead_integration as module
