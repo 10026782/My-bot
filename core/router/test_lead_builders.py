@@ -1,5 +1,6 @@
 import ast
 import inspect
+from types import SimpleNamespace
 
 import pytest
 
@@ -161,6 +162,19 @@ def test_lead_identity_precondition_requires_explicit_booleans():
         LeadIdentityPrecondition(valid=True)
     with pytest.raises(TypeError):
         LeadIdentityPrecondition(is_duplicate=False)
+
+
+def test_create_lead_rejects_a_duck_typed_identity_precondition():
+    """A caller cannot bypass LeadIdentityPrecondition's own __post_init__
+    validation by passing a lookalike object that merely exposes
+    valid/is_duplicate attributes -- the builder must check isinstance
+    before ever reading those attributes."""
+    deceptive = SimpleNamespace(valid=True, is_duplicate=False)
+    with pytest.raises(TypeError):
+        build_create_lead_proposal(
+            "Dana Cohen", scope="tenant:u1", capture_policy=CapturePolicy.AUTO_WRITE,
+            identity_precondition=deceptive,
+        )
 
 
 def test_create_lead_valid_scoped_create_still_builds():

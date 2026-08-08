@@ -139,7 +139,10 @@ def build_create_lead_proposal(
     ``capture_policy`` is missing, not one of ``CapturePolicy.ALL``, or is
     ``CapturePolicy.NEEDS_REVIEW`` (that outcome is never turned into a
     write proposal by this builder -- approval must be explicit, never
-    silently defaulted or inferred); or ``identity_precondition`` says the
+    silently defaulted or inferred); ``identity_precondition`` is not
+    actually a ``LeadIdentityPrecondition`` (a duck-typed object exposing
+    ``valid``/``is_duplicate`` attributes must not bypass the frozen
+    contract's own validation); or ``identity_precondition`` says the
     identity is invalid or a known duplicate.
     """
     if not scope or not str(scope).strip():
@@ -153,6 +156,8 @@ def build_create_lead_proposal(
             "capture_policy=needs_review cannot produce a canonical lead-create "
             "proposal -- this outcome requires review outside TC4's scope"
         )
+    if not isinstance(identity_precondition, LeadIdentityPrecondition):
+        raise TypeError("identity_precondition must be a LeadIdentityPrecondition")
     if not identity_precondition.valid:
         raise ValueError("lead creation requires a valid identity")
     if identity_precondition.is_duplicate:
