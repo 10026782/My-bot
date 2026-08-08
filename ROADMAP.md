@@ -4,12 +4,12 @@
 BUG-105 אומת מחדש מול `origin/main` (`38d9226`) וכבר מכוסה שם — אין שינוי קוד פתוח.
 נשמרו ראיות BUG-101 ושאר משפחת ה-regressions ב-`BUG_AUDIT_LOG.md`.
 BUG-105: לא בוצע שינוי קוד; regex לפני/אחרי זהה; 204 suites ועוד 11 בדיקות מטריצת פורמטים עברו.
-F14 עבר Discovery/Planning בלבד: נמצאו שני נתיבי Contact creation בפועל
-(`crm_add_contact` legacy וה-generic `airtable_add`), ללא Contact phone dedup;
-import scripts מייצרים CSV בלבד, ו-`session_store.py`/`contact_resolver.py` אינם
-Contact creation gates. `crm_*` של Contacts מופיעים ב-validator אך אינם ממומשים
-כ-cases ב-dispatcher. אין קוד או schema שנכתבו במסגרת האודיט; ראו את מפת הכתיבה
-והחוזה המוצע בדוח הסשן.
+F14 Discovery/Planning הוא תיעוד היסטורי של מפת נתיבי הכתיבה: נמצאו שני נתיבי
+Contact creation בפועל (`crm_add_contact` legacy וה-generic `airtable_add`), ללא
+Contact phone dedup; import scripts מייצרים CSV בלבד, ו-`session_store.py`/
+`contact_resolver.py` אינם Contact creation gates. מאז, F14-A מוזג ב-PR #568
+ו-F14-B1 מעביר את `crm_add_contact()` ואת `lead_conversion.py::convert_lead_to_contact()`
+דרך אותו gate. F14-B2 עדיין לא התחיל; אין להסיק מהתיעוד ההיסטורי ש-F14 planning-only.
 
 עודכן קודם: 07/08/2026 — **תיעוד PR #525–#552 (פער-תיעוד, נסגר ישירות מ-`git log origin/main`,
 לא הועלה כ-PR נפרד ע"י מי שביצע אותם):** 28 PRs נוספים מוזגו ל-`main` בין 05–06/08/2026 בלי
