@@ -62,7 +62,7 @@ independently hardcoded.
 ### 1a. `existing_pending_blocks_agent` (enforce branch, current `app.py:1504-1520`, and shadow branch `app.py:1609-1625`)
 
 ```python
-# BEFORE (both branches, unchanged shape today):
+# לפני (שני הענפים, צורה ללא שינוי כיום):
 _pending_lifecycle = build_approval_lifecycle_result(
     _gw.find_contract(_gw_result.contract_id),
     canonical_state="pending_conflict",
@@ -75,33 +75,32 @@ return {
     "action_tool": tool_name,
     "created_this_turn": False,
     "owner_notified": False,
-    "reply_owner": "gateway",              # <- independently hardcoded
+    "reply_owner": "gateway",              # <- מוצפן-קשיח באופן עצמאי
     "lifecycle_result": _pending_lifecycle,
     "final_response_count": 1,
 }
 ```
 
 ```python
-# AFTER:
+# אחרי:
 _pending_lifecycle = build_approval_lifecycle_result(
     _gw.find_contract(_gw_result.contract_id),
     canonical_state="pending_conflict",
 )
 _action_lifecycle_result = _ownership_for_contract_or_none(_gw, _gw_result.contract_id)
 if _action_lifecycle_result is None:
-    # TC6 review fix round 2 (Branch B): the ownership authority itself
-    # could not be confirmed for a contract_id this call already believes
-    # is real. Do NOT use _orphan_cleanup_failure_response() here — its
-    # wording ("an error occurred while trying to CANCEL an approval
-    # request") is semantically false for this case (nothing was ever
-    # cancelled). Instead return the SAME already-computed, already-safe
-    # legacy text (_pending_lifecycle.safe_user_message, independent of
-    # whether the NEW canonical check succeeded) paired with a distinct,
-    # internal-only terminal_outcome marker so the tool loop (§2) can
-    # recognize this as "correlated approval turn, ownership unverifiable"
-    # and fail closed BEFORE another Agent round — never a fabricated
-    # ActionLifecycleResult, never an invented reply_owner="gateway", never
-    # a silent fall-through to Agent ownership.
+    # תיקון-סקירה TC6 סבב 2 (Branch B): סמכות הבעלות עצמה לא ניתנה
+    # לאישור עבור contract_id שהקריאה הזו כבר מאמינה שהוא אמיתי. אין
+    # להשתמש כאן ב-_orphan_cleanup_failure_response() — הניסוח שלה
+    # ("אירעה שגיאה בעת ניסיון לבטל בקשת אישור") שגוי סמנטית למקרה הזה
+    # (שום דבר מעולם לא בוטל). במקום זאת, מחזירים את אותו טקסט ישן
+    # כבר-מחושב וכבר-בטוח (_pending_lifecycle.safe_user_message, ללא
+    # תלות בהצלחת הבדיקה הקנונית החדשה) יחד עם סמן terminal_outcome
+    # פנימי-בלבד ומובחן, כדי של-tool loop (§2) יוכל לזהות את זה
+    # כ"turn מתואם של אישור, בעלות לא-ניתנת-לאימות" ולהיכשל-בסגירה
+    # לפני סבב Agent נוסף — לעולם לא ActionLifecycleResult מומצא,
+    # לעולם לא reply_owner="gateway" מומצא, לעולם לא נפילה שקטה
+    # לבעלות Agent.
     return {
         "message": _pending_lifecycle.safe_user_message,
         "contract_id": _gw_result.contract_id,
@@ -111,8 +110,8 @@ if _action_lifecycle_result is None:
         "created_this_turn": False,
         "owner_notified": False,
         "final_response_count": 1,
-        # deliberately NO "reply_owner" / "action_lifecycle_result" keys —
-        # see §1d/§2 for how the tool loop reacts to this marker.
+        # במכוון בלי מפתחות "reply_owner" / "action_lifecycle_result" —
+        # ראו §1d/§2 לאיך ה-tool loop מגיב לסמן הזה.
     }
 return {
     "message": _pending_lifecycle.safe_user_message,
@@ -122,9 +121,9 @@ return {
     "action_tool": tool_name,
     "created_this_turn": False,
     "owner_notified": False,
-    "reply_owner": _action_lifecycle_result.reply_owner,   # derived, not hardcoded
-    "lifecycle_result": _pending_lifecycle,                 # UNCHANGED — legacy text source
-    "action_lifecycle_result": _action_lifecycle_result,    # NEW — TC6 canonical ownership
+    "reply_owner": _action_lifecycle_result.reply_owner,   # נגזר, לא מוצפן-קשיח
+    "lifecycle_result": _pending_lifecycle,                 # ללא שינוי — מקור הטקסט הישן
+    "action_lifecycle_result": _action_lifecycle_result,    # חדש — בעלות קנונית של TC6
     "final_response_count": 1,
 }
 ```
@@ -132,7 +131,7 @@ return {
 ### 1b. Generic `ok=False` (BUG-162 branch, current `app.py:1521-1575`)
 
 ```python
-# BEFORE (relevant excerpt):
+# לפני (קטע רלוונטי):
 _generic_lifecycle = (
     build_approval_lifecycle_result(_generic_found_contract, repeated=True)
     if _generic_found_contract else None
@@ -144,7 +143,7 @@ return {
     "action_tool": tool_name, "created_this_turn": False,
     **({
         "owner_notified": False,
-        "reply_owner": "gateway",             # <- independently hardcoded
+        "reply_owner": "gateway",             # <- מוצפן-קשיח באופן עצמאי
         "lifecycle_result": _generic_lifecycle,
         "final_response_count": 1,
     } if _generic_lifecycle else {}),
@@ -152,7 +151,7 @@ return {
 ```
 
 ```python
-# AFTER:
+# אחרי:
 _generic_lifecycle = (
     build_approval_lifecycle_result(_generic_found_contract, repeated=True)
     if _generic_found_contract else None
@@ -162,12 +161,12 @@ if _generic_lifecycle:
         _gw, _generic_contract_id,
     )
     if _generic_action_lifecycle_result is None:
-        # Same Branch B fail-closed rule as §1a: a verified contract exists
-        # (_generic_found_contract), but the ownership authority itself
-        # could not be confirmed — never fabricate, never default to Agent,
-        # never _orphan_cleanup_failure_response() (wrong wording for this
-        # case — see §1a's comment). Reuses the same already-computed,
-        # already-safe _generic_lifecycle.safe_user_message.
+        # אותו כלל fail-closed של Branch B כמו §1a: קיים contract מאומת
+        # (_generic_found_contract), אך סמכות הבעלות עצמה לא ניתנה
+        # לאישור — לעולם לא להמציא, לעולם לא ליפול לבעלות Agent, לעולם
+        # לא _orphan_cleanup_failure_response() (ניסוח שגוי למקרה הזה —
+        # ראו הערת §1a). משתמשת חוזרת באותו
+        # _generic_lifecycle.safe_user_message כבר-מחושב וכבר-בטוח.
         return {
             "message": _generic_lifecycle.safe_user_message,
             "contract_id": _generic_contract_id,
@@ -196,30 +195,30 @@ return {
 ### 1c. Success branch (current `app.py:1841-1867`)
 
 ```python
-# BEFORE:
+# לפני:
 _lifecycle_result = _approval_gateway.lifecycle_result(_contract_id)
 _final_message = _lifecycle_result.safe_user_message
 ...
 return {
     ...,
-    "reply_owner": _lifecycle_result.reply_owner,   # from the LEGACY ApprovalLifecycleResult
+    "reply_owner": _lifecycle_result.reply_owner,   # מה-ApprovalLifecycleResult הישן
     "lifecycle_result": _lifecycle_result,
     "final_response_count": 1,
 }
 ```
 
 ```python
-# AFTER:
+# אחרי:
 _lifecycle_result = _approval_gateway.lifecycle_result(_contract_id)
 _final_message = _lifecycle_result.safe_user_message
 _action_lifecycle_result = _ownership_for_contract_or_none(_approval_gateway, _contract_id)
 if _action_lifecycle_result is None:
-    # Same Branch B fail-closed rule as §1a/§1b: a real contract was just
-    # created (_contract_id is known-real here — this is the success
-    # path), but the ownership authority itself could not be confirmed.
-    # Never fabricate, never default to Agent, never
-    # _orphan_cleanup_failure_response() (wrong wording — nothing was
-    # cancelled). Reuses the same already-computed _final_message.
+    # אותו כלל fail-closed של Branch B כמו §1a/§1b: contract אמיתי
+    # זה עתה נוצר (_contract_id ידוע-כאמיתי כאן — זה מסלול ההצלחה),
+    # אך סמכות הבעלות עצמה לא ניתנה לאישור. לעולם לא להמציא, לעולם
+    # לא ליפול לבעלות Agent, לעולם לא _orphan_cleanup_failure_response()
+    # (ניסוח שגוי — שום דבר לא בוטל). משתמשת חוזרת באותו _final_message
+    # כבר-מחושב.
     return {
         "message": _final_message,
         "contract_id": _contract_id,
@@ -233,9 +232,9 @@ if _action_lifecycle_result is None:
 ...
 return {
     ...,
-    "reply_owner": _action_lifecycle_result.reply_owner,   # from the NEW canonical projection
-    "lifecycle_result": _lifecycle_result,                  # UNCHANGED — legacy text source
-    "action_lifecycle_result": _action_lifecycle_result,    # NEW
+    "reply_owner": _action_lifecycle_result.reply_owner,   # מההקרנה הקנונית החדשה
+    "lifecycle_result": _lifecycle_result,                  # ללא שינוי — מקור הטקסט הישן
+    "action_lifecycle_result": _action_lifecycle_result,    # חדש
     "final_response_count": 1,
 }
 ```
@@ -269,35 +268,35 @@ before another Agent round can run — not merely a caller-local failure
 response.
 
 ```python
-# New sibling to the existing APPROVAL_QUEUE_ERROR / APPROVAL_QUEUE_ORPHANED
-# / APPROVAL_QUEUE_NEVER_ATTEMPTED terminal_outcome markers — internal-only,
-# never rendered to the user directly (the "message" key carries the real,
-# already-existing safe text; this marker is read only by §2's tool-loop
-# logic to decide reply ownership, exactly like the existing markers are
-# already read by BUG-122's accounting and PA-01's outcome lookup).
+# אח חדש לסמני terminal_outcome הקיימים APPROVAL_QUEUE_ERROR /
+# APPROVAL_QUEUE_ORPHANED / APPROVAL_QUEUE_NEVER_ATTEMPTED — פנימי-בלבד,
+# לעולם לא מעוצב ישירות למשתמש (המפתח "message" נושא את הטקסט הבטוח
+# הקיים בפועל; הסמן הזה נקרא רק על-ידי הלוגיקה של ה-tool-loop ב-§2
+# כדי להחליט על בעלות-תשובה, בדיוק כמו שהסמנים הקיימים כבר נקראים
+# על-ידי הנהלת-החשבונות של BUG-122 וחיפוש-התוצאה של PA-01).
 _APPROVAL_OWNERSHIP_VERIFICATION_FAILED = "APPROVAL_OWNERSHIP_VERIFICATION_FAILED"
 
 
 def _ownership_for_contract_or_none(gateway, contract_id: str):
-    """TC6: derive the canonical exact-contract ActionLifecycleResult for a
-    contract_id THIS call already knows to be real (it was just
-    created/found by propose_action() in this same function).
+    """TC6: נגזרת את ה-ActionLifecycleResult הקנוני לפי contract מדויק
+    עבור contract_id שהקריאה הזו כבר יודעת שהוא אמיתי (הוא זה עתה
+    נוצר/נמצא ע"י propose_action() באותה הפונקציה).
 
-    Returns ``None`` — never a fabricated ``ActionLifecycleResult`` — on
-    any read failure. Callers MUST treat ``None`` as "return this call's
-    own already-computed safe text, tagged with
-    ``_APPROVAL_OWNERSHIP_VERIFICATION_FAILED``" (see §1a/§1b/§1c), never
-    as license to invent a synthetic lifecycle/approval/execution state,
-    and never as license to silently default reply ownership to the Agent
-    (design correction requirements 10-11: no fabrication, no silent Agent
-    default, no second ownership authority in app.py).
+    מחזירה ``None`` — לעולם לא ``ActionLifecycleResult`` מומצא — בכל
+    כשל קריאה. קוראים חייבים להתייחס ל-``None`` כ"החזר את הטקסט הבטוח
+    כבר-מחושב של הקריאה הזו עצמה, מתויג עם
+    ``_APPROVAL_OWNERSHIP_VERIFICATION_FAILED``" (ראו §1a/§1b/§1c),
+    לעולם לא כרישיון להמציא מצב מחזור-חיים/אישור/ביצוע סינתטי, ולעולם
+    לא כרישיון ליפול בשקט לבעלות-תשובה של ה-Agent (דרישות 10-11 של
+    תיקון-העיצוב: אין המצאה, אין ברירת-מחדל שקטה ל-Agent, אין סמכות
+    בעלות שנייה ב-app.py).
     """
     try:
         return gateway.reply_ownership_for_contract(contract_id)
     except Exception:
         logger.warning(
-            "[ActionGateway] TC6 exact-contract ownership read failed for "
-            "contract=%s.", contract_id, exc_info=True,
+            "[ActionGateway] קריאת בעלות TC6 לפי contract מדויק נכשלה "
+            "עבור contract=%s.", contract_id, exc_info=True,
         )
         return None
 ```
@@ -320,7 +319,7 @@ failure case (see the round-2 correction above for why).
 ## 2. `_gateway_owned` lookup — `run_agent()`, current `app.py:4485-4489`
 
 ```python
-# BEFORE:
+# לפני:
 _gateway_owned = next((
     entry for entry in reversed(tool_results_log)
     if entry.get("tool") == "__approval_queued__"
@@ -329,8 +328,8 @@ _gateway_owned = next((
 ```
 
 ```python
-# AFTER — derives BOTH Branch A (canonical Gateway ownership) and Branch B
-# (correlated turn, ownership unverifiable) from the SAME correlated entry:
+# אחרי — נגזרת גם Branch A (בעלות Gateway קנונית) וגם Branch B (turn
+# מתואם, בעלות לא-ניתנת-לאימות) מאותה רשומה מתואמת:
 _gateway_owned = None
 _ownership_verification_failed_entry = None
 _correlated_approval_entry = next((
@@ -339,8 +338,8 @@ _correlated_approval_entry = next((
 ), None)
 if _correlated_approval_entry is not None:
     if _correlated_approval_entry.get("terminal_outcome") == "APPROVAL_OWNERSHIP_VERIFICATION_FAILED":
-        # Branch B: a real contract was touched this turn, but its exact-
-        # contract ownership projection could not be confirmed (§1a/§1b/§1c).
+        # Branch B: contract אמיתי נגע ב-turn הזה, אך הקרנת הבעלות שלו
+        # לפי contract מדויק לא ניתנה לאישור (§1a/§1b/§1c).
         _ownership_verification_failed_entry = _correlated_approval_entry
     else:
         _entry_action_lifecycle_result = _correlated_approval_entry.get("action_lifecycle_result")
@@ -348,7 +347,7 @@ if _correlated_approval_entry is not None:
             _entry_action_lifecycle_result is not None
             and getattr(_entry_action_lifecycle_result, "reply_owner", None) == "gateway"
         ):
-            # Branch A: canonical Gateway ownership, confirmed.
+            # Branch A: בעלות Gateway קנונית, מאושרת.
             _gateway_owned = _correlated_approval_entry
 ```
 
@@ -370,15 +369,15 @@ which this invariant must not depend on):
 ```python
 if _flag_enabled("FEATURE_SINGLE_SPEAKER_APPROVAL_UX"):
     if _ownership_verification_failed_entry is not None:
-        # Branch B — a safety stop, not a second reply-ownership authority.
-        # No ActionLifecycleResult (real or fabricated) backs this branch;
-        # no reply_owner="gateway" is claimed; the Agent is never given
-        # another round for this turn. Mirrors Branch A's owner_notified/
-        # final_response_count shape exactly, so an already-delivered
-        # message (§1c's success-path variant) is never duplicated.
+        # Branch B — עצירת-בטיחות, לא סמכות בעלות-תשובה שנייה. שום
+        # ActionLifecycleResult (אמיתי או מומצא) לא עומד מאחורי הענף
+        # הזה; שום reply_owner="gateway" לא נטען; ה-Agent לעולם לא
+        # מקבל סבב נוסף ב-turn הזה. משקף בדיוק את הצורה של
+        # owner_notified/final_response_count של Branch A, כדי שהודעה
+        # שכבר נמסרה (הגרסה של מסלול-ההצלחה ב-§1c) לעולם לא תוכפל.
         if _out_meta is not None:
             _out_meta.update({
-                "reply_owner": "unverified",  # distinct from "gateway"/"agent" — a fact, not an ownership claim
+                "reply_owner": "unverified",  # שונה מ-"gateway"/"agent" — עובדה, לא טענת-בעלות
                 "final_response_count": 1,
                 "canonical_state": "ownership_verification_failed",
             })
@@ -387,7 +386,7 @@ if _flag_enabled("FEATURE_SINGLE_SPEAKER_APPROVAL_UX"):
             else _ownership_verification_failed_entry.get("content", "")
         )
     if _gateway_owned is not None:
-        # Branch A — existing shape, unchanged (see above).
+        # Branch A — צורה קיימת, ללא שינוי (ראו למעלה).
         ...
 ```
 
@@ -418,16 +417,16 @@ only the second is in TC6's scope:
   `action_lifecycle_result`, not from sentinel presence alone.
 
 ```python
-# BEFORE (app.py:4670, inside the build_ownership_signal(...) call):
+# לפני (app.py:4670, בתוך הקריאה ל-build_ownership_signal(...)):
 reply_owner="gateway" if _approval_queued_this_turn else "agent",
 ```
 
 ```python
-# AFTER — compute once, reuse the same correlation as §2 (if this code path
-# runs after an early return in §2 already fired, this recomputation is
-# only reached when it did NOT — i.e. FEATURE_SINGLE_SPEAKER_APPROVAL_UX is
-# off, or _gateway_owned was None — so it cannot disagree with §2 by
-# construction, since both read the same entry the same way):
+# אחרי — מחשבת פעם אחת, משתמשת חוזרת באותה קורלציה כמו §2 (אם הקוד
+# הזה רץ אחרי שהחזרה-מוקדמת ב-§2 כבר הופעלה, החישוב-מחדש הזה מגיע רק
+# כשהיא לא הופעלה — כלומר FEATURE_SINGLE_SPEAKER_APPROVAL_UX כבוי, או
+# _gateway_owned היה None — כך שהוא לא יכול לסתור את §2 מבנית, מכיוון
+# ששניהם קוראים את אותה רשומה באותו אופן):
 _signal_correlated_entry = next((
     entry for entry in reversed(tool_results_log)
     if entry.get("tool") == "__approval_queued__"
@@ -445,7 +444,7 @@ _signal_reply_owner = (
     else "agent"
 )
 ...
-reply_owner=_signal_reply_owner,   # was: "gateway" if _approval_queued_this_turn else "agent"
+reply_owner=_signal_reply_owner,   # היה: "gateway" if _approval_queued_this_turn else "agent"
 ```
 
 This closes exactly the duplicate-authority finding from

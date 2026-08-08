@@ -99,15 +99,15 @@ def _has_approval_authority(role: str) -> bool:
 
 _APPROVAL_AUTHORIZATION_DENIED_MESSAGE = "⛔ הפעולה דורשת אישור בעלים."
 
-# TC6 review fix (round 2): the canonical WS2 ownership/lifecycle
-# projection could not be confirmed for a pending status query — this must
-# fail closed WITHOUT inventing new TC6 wording. Reuses, verbatim, the
-# existing deterministic status-fallback text app.py's own D018
-# execution-status route already returns when query_execution_status()
-# yields no usable answer (app.py:3455, `_d018_reply = "לא מצאתי מידע עדכני
-# על הפעולה."` when `_d018_reply is None`). TC6 owns reply AUTHORITY here
-# (whether the legacy pending renderer may run), not new user-facing UX
-# copy — reusing this exact literal keeps that boundary honest.
+# תיקון-סקירה TC6 (סבב 2): הקרנת ה-WS2 של בעלות/מחזור-חיים לא ניתנה
+# לאישור עבור שאילתת סטטוס ממתין — זה חייב להיכשל-בסגירה בלי להמציא
+# ניסוח חדש של TC6. משתמש, מילה במילה, בטקסט-הכשל הדטרמיניסטי הקיים
+# שמסלול ה-D018 (execution-status) של app.py עצמו כבר מחזיר כש-
+# query_execution_status() לא מניב תשובה שמישה (app.py:3455,
+# `_d018_reply = "לא מצאתי מידע עדכני על הפעולה."` כש-`_d018_reply is
+# None`). TC6 בעלים כאן על סמכות-התשובה (האם מותר למעצב הישן של
+# "ממתין" לרוץ), לא על ניסוח UX חדש למשתמש — שימוש חוזר במחרוזת
+# המדויקת הזו שומר על הגבול הזה כן.
 _PENDING_STATUS_UNVERIFIABLE_MESSAGE = "לא מצאתי מידע עדכני על הפעולה."
 
 
@@ -3484,36 +3484,35 @@ class ActionGateway:
     def _pending_lifecycle_ownership_or_none(
         self, canonical_user_id: str, live: list["ActionContract"],
     ) -> ActionLifecycleResult | None:
-        """TC6 review fix: the canonical WS2 projection must actually GATE
-        the legacy pending renderer, not just be logged alongside it (the
-        exact gap BUG-162_SINGLE_SPEAKER_CLOSURE_AUDIT_20260807.md documented
-        at this call site — ActionLifecycleResult computed then discarded).
+        """תיקון-סקירה TC6: הקרנת ה-WS2 הקנונית חייבת בפועל לשלוט (GATE)
+        במעצב הישן של "ממתין", לא רק להירשם ללוג לצידו (הפער המדויק
+        ש-BUG-162_SINGLE_SPEAKER_CLOSURE_AUDIT_20260807.md תיעד בנקודת-
+        הקריאה הזו — ActionLifecycleResult מחושב ואז נזרק).
 
-        Returns the canonical ``ActionLifecycleResult`` only when it was
-        read successfully AND it claims Gateway ownership
-        (``reply_owner == "gateway"``) for these live contracts. Returns
-        ``None`` on any read failure, an unexpected missing projection, or a
-        non-gateway-owned projection — callers MUST treat ``None`` as "do
-        not render the legacy pending text," never as license to render it
-        anyway. The ActionLifecycleResult decides lifecycle/reply-policy
-        semantics here; the legacy ApprovalLifecycleResult (rendered only
-        after this check succeeds) continues to decide wording only.
+        מחזירה את ה-``ActionLifecycleResult`` הקנוני רק כשהוא נקרא
+        בהצלחה וגם טוען לבעלות Gateway (``reply_owner == "gateway"``)
+        עבור ה-contracts החיים האלה. מחזירה ``None`` בכל כשל קריאה,
+        הקרנה חסרה בלתי-צפויה, או הקרנה שאינה-בבעלות-gateway — קוראים
+        חייבים להתייחס ל-``None`` כ"אל תעצב את טקסט ה-'ממתין' הישן",
+        לעולם לא כרישיון לעצב אותו בכל זאת. ה-ActionLifecycleResult
+        קובע כאן סמנטיקת מחזור-חיים/מדיניות-תשובה; ה-ApprovalLifecycleResult
+        הישן (מעוצב רק אחרי שהבדיקה הזו הצליחה) ממשיך לקבוע ניסוח בלבד.
         """
         try:
             projection = self.approval_status(canonical_user_id, live_contracts=live)
         except Exception:
             logger.warning(
-                "[ActionGatewayStatusRoute] pending lifecycle projection read "
-                "failed — refusing to render legacy pending text without "
-                "canonical ownership confirmation.",
+                "[ActionGatewayStatusRoute] קריאת הקרנת מחזור-חיים ממתין "
+                "נכשלה — מסרבת לעצב את טקסט ה'ממתין' הישן ללא אישור "
+                "בעלות קנוני.",
                 exc_info=True,
             )
             return None
         if projection is None or projection.reply_owner != "gateway":
             logger.warning(
-                "[ActionGatewayStatusRoute] pending lifecycle projection "
-                "missing or non-gateway-owned (reply_owner=%s) — refusing "
-                "to render legacy pending text.",
+                "[ActionGatewayStatusRoute] הקרנת מחזור-חיים ממתין חסרה או "
+                "אינה-בבעלות-gateway (reply_owner=%s) — מסרבת לעצב את "
+                "טקסט ה'ממתין' הישן.",
                 getattr(projection, "reply_owner", None),
             )
             return None
