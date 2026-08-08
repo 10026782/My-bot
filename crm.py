@@ -206,6 +206,7 @@ def crm_add_contact(name: str, phone: str = "", email: str = "",
                     contact_type: str = ContactType.CLIENT,
                     company: str = "", notes: str = "",
                     lead_source_id: str = "") -> ContactResult:
+    """Find or create a Contact through the canonical deduplication gate."""
     return find_or_create_contact(
         phone, name,
         email=email,
