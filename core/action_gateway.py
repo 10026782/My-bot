@@ -99,17 +99,16 @@ def _has_approval_authority(role: str) -> bool:
 
 _APPROVAL_AUTHORIZATION_DENIED_MESSAGE = "⛔ הפעולה דורשת אישור בעלים."
 
-# TC6 review fix: an existing, deterministic, non-Agent fallback for "the
-# canonical WS2 ownership/lifecycle projection could not be confirmed right
-# now" — reuses this file's own established "cannot verify"/"cannot check
-# right now, try again" vocabulary (see _APPROVAL_AUTHORIZATION_DENIED_MESSAGE
-# above, and the identical phrasing already used in propose_action()'s
-# ActionContractLookupError branch / the atomic-claim contention branch)
-# rather than inventing a new canonical state or claiming the pending
-# action's status either way when the projection itself is unverifiable.
-_PENDING_STATUS_UNVERIFIABLE_MESSAGE = (
-    "❌ לא ניתן לאמת כרגע את הסטטוס של הפעולה הממתינה לאישור. נסה שוב בעוד רגע."
-)
+# TC6 review fix (round 2): the canonical WS2 ownership/lifecycle
+# projection could not be confirmed for a pending status query — this must
+# fail closed WITHOUT inventing new TC6 wording. Reuses, verbatim, the
+# existing deterministic status-fallback text app.py's own D018
+# execution-status route already returns when query_execution_status()
+# yields no usable answer (app.py:3455, `_d018_reply = "לא מצאתי מידע עדכני
+# על הפעולה."` when `_d018_reply is None`). TC6 owns reply AUTHORITY here
+# (whether the legacy pending renderer may run), not new user-facing UX
+# copy — reusing this exact literal keeps that boundary honest.
+_PENDING_STATUS_UNVERIFIABLE_MESSAGE = "לא מצאתי מידע עדכני על הפעולה."
 
 
 def _is_internal_role(role: str) -> bool:
