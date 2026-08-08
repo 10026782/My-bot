@@ -3376,6 +3376,45 @@ class ActionGateway:
             return None
         return build_action_lifecycle_result(latest, reply_owner="gateway")
 
+    # ── TC6 — סמכות בעלות-תשובה לפי contract מדויק ────────────────────
+    # approval_status() למעלה תחום-משתמש: הוא עונה על "מהו ה-contract
+    # החי/האחרון של הזהות הזו" — השאלה הנכונה לשאילתת-סטטוס, אך השאלה
+    # השגויה להחלטה מי רשאי להשיב ב-turn הזה. "contract אחרון" תחום-משתמש
+    # עלול להצביע בשקט על contract שונה מזה שה-turn הזה נגע בו בפועל
+    # (contract ישן שממתין, אחד שנוצר במקביל וכו') — ופוגע בקורלציה
+    # המדויקת בין turn ל-contract. reply_ownership_for_contract() עונה
+    # במקום זאת על שאלה צרה יותר, בטוחה-ל-turn: "עבור ה-contract_id
+    # המדויק הזה, מה ה-Gateway אומר על בעלות-התשובה" — הקורא אחראי לספק
+    # את ה-contract_id המדויק שהראיה של ה-turn הזה עצמו
+    # (__approval_queued__/callback) נוקבת בו, לעולם לא contract
+    # שאותר-מחדש/אחרון.
+
+    def reply_ownership_for_contract(self, contract_id: str | None) -> ActionLifecycleResult | None:
+        """הקרנת בעלות-תשובה של WS2 לפי contract מדויק.
+
+        מחזירה ``None`` עבור ``contract_id`` ריק/חסר, או כזה שאין לו
+        ``ActionContract`` תואם — שני המקרים אומרים "אין כאן טענת-בעלות
+        לפי contract מדויק", לעולם לא "ה-Agent הוא בעל התשובה". קוראים
+        אסור להם להתייחס ל-``None`` כהוכחה שה-Agent רשאי לדבר; זה רק
+        אומר שלפונקציה הזו אין מה לומר, כך שברירת-המחדל של הקורא עצמו
+        (שנכשלת-בסגירה) חלה.
+
+        במכוון לא תופסת exceptions מ-``self._ledger.find_by_id``: הפונקציה
+        הזו כבר מבדילה בין "לא נמצא" אמיתי (``None`` נקי) לבין כשל קריאה
+        מה-repository (מעבירה את ה-exception הלאה, ראו את ה-docstring/
+        הערה שלה) — בליעת ההבחנה הזו כאן הייתה הופכת בשקט "אנחנו לא
+        יודעים" ל"אין contract", מה שקורא היה עלול לפרש בטעות כרישיון
+        לתת ל-Agent לדבר. קוראים חייבים לתפוס כל exception מהפונקציה הזו
+        בעצמם ולהיכשל-בסגירה לתשובה דטרמיניסטית שאינה-Agent, לעולם לא
+        לבעלות-Agent.
+        """
+        if not contract_id:
+            return None
+        contract = self._ledger.find_by_id(contract_id)
+        if contract is None:
+            return None
+        return build_action_lifecycle_result(contract, reply_owner="gateway")
+
     def execution_status(self, canonical_user_id: str) -> EvidenceResult | None:
         """Read-only WS2 projection for the latest evidence state."""
         latest = self._ledger.find_most_recent_by_user(canonical_user_id)
@@ -3430,6 +3469,32 @@ class ActionGateway:
         )
         return "cancelled"
 
+    def _log_pending_lifecycle_projection(
+        self, canonical_user_id: str, live: list["ActionContract"],
+    ) -> None:
+        """TC6: צורכת בפועל את הקרנת ה-WS2 של approval_status() כאן
+        במקום לחשב-ולזרוק (הפער המדויק ש-
+        BUG-162_SINGLE_SPEAKER_CLOSURE_AUDIT_20260807.md תיעד בנקודת-
+        הקריאה הזו בדיוק). במכוון observability-בלבד — רושמת ללוג את
+        ה-lifecycle_state/reply_owner הקנוניים עבור אותם contracts חיים
+        שהקורא עומד לעצב דרך המסלול הישן של
+        build_approval_lifecycle_result(), בלי להזין את ההקרנה הזו לתוך
+        הטקסט המעוצב עצמו (עיצוב נשאר תפקידה של WS3/TC9; TC6 בעלים על
+        מי משיב, לא על הניסוח).
+        """
+        try:
+            _pending_lifecycle = self.approval_status(canonical_user_id, live_contracts=live)
+            logger.info(
+                "[ActionGatewayStatusRoute] pending_lifecycle_state=%s pending_reply_owner=%s",
+                getattr(_pending_lifecycle, "lifecycle_state", None),
+                getattr(_pending_lifecycle, "reply_owner", None),
+            )
+        except Exception:
+            logger.debug(
+                "[ActionGatewayStatusRoute] pending lifecycle projection failed (non-blocking)",
+                exc_info=True,
+            )
+
     def query_execution_status(
         self, canonical_user_id: str, window_seconds: int = 600,
         *, live_contracts: list[ActionContract] | None = None,
@@ -3456,7 +3521,7 @@ class ActionGateway:
             # BUG-SB-03: check for pending contracts before returning None
             live = live_contracts if live_contracts is not None else self.find_live_contracts(canonical_user_id)
             if live:
-                self.approval_status(canonical_user_id, live_contracts=live)
+                self._log_pending_lifecycle_projection(canonical_user_id, live)
                 if len(live) > 1:
                     legacy_text = build_approval_lifecycle_result(contracts=live).safe_user_message
                     return self._render_pending_batch_reply(live, legacy_text)
@@ -3483,7 +3548,7 @@ class ActionGateway:
             # still check pending before giving up
             live = live_contracts if live_contracts is not None else self.find_live_contracts(canonical_user_id)
             if live:
-                self.approval_status(canonical_user_id, live_contracts=live)
+                self._log_pending_lifecycle_projection(canonical_user_id, live)
                 if len(live) > 1:
                     legacy_text = build_approval_lifecycle_result(contracts=live).safe_user_message
                     return self._render_pending_batch_reply(live, legacy_text)
