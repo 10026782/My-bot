@@ -1,6 +1,16 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 07/08/2026 — **תיעוד PR #525–#552 (פער-תיעוד, נסגר ישירות מ-`git log origin/main`,
+עודכן: 09/08/2026 — **תיעוד F14/BUG-105 (docs-only):**
+BUG-105 אומת מחדש מול `origin/main` (`38d9226`) וכבר מכוסה שם — אין שינוי קוד פתוח.
+נשמרו ראיות BUG-101 ושאר משפחת ה-regressions ב-`BUG_AUDIT_LOG.md`.
+F14 עבר Discovery/Planning בלבד: נמצאו שני נתיבי Contact creation בפועל
+(`crm_add_contact` legacy וה-generic `airtable_add`), ללא Contact phone dedup;
+import scripts מייצרים CSV בלבד, ו-`session_store.py`/`contact_resolver.py` אינם
+Contact creation gates. `crm_*` של Contacts מופיעים ב-validator אך אינם ממומשים
+כ-cases ב-dispatcher. אין קוד או schema שנכתבו במסגרת האודיט; ראו את מפת הכתיבה
+והחוזה המוצע בדוח הסשן.
+
+עודכן קודם: 07/08/2026 — **תיעוד PR #525–#552 (פער-תיעוד, נסגר ישירות מ-`git log origin/main`,
 לא הועלה כ-PR נפרד ע"י מי שביצע אותם):** 28 PRs נוספים מוזגו ל-`main` בין 05–06/08/2026 בלי
 עדכון ROADMAP נלווה — אומת ישירות ב-`git log`/`git merge-base --is-ancestor` על `origin/main`
 (`c5dbe86`), לא לפי claim. תמצית (לפירוט מלא ראו `AI_CONTEXT.md`, 06/08/2026): Context
@@ -1555,9 +1565,9 @@ agent: `last_tool_result` נשמר ב-session אחרי כל tool dispatch אמי
 ### F14 — Contact Gate: find_or_create_contact()
 מה: פונקציה יחידה ב-`crm.py` — בודקת קיום איש קשר לפי טלפון לפני כל כתיבה.
 סיבה: התכונה "חפש לפי טלפון" נדרשת בשלושה מקומות: import ידני, `crm_add_contact`, המרת ליד→contact (עתידי). ללא gate — כפילויות בלתי נמנעות.
-ממשק: `find_or_create_contact(phone, name, **fields) → (record_id, created: bool)`
-Piggyback trigger: כשמחברים המרת ליד → contact (אחרי N04).
-קבצים: crm.py
+ממשק: `find_or_create_contact(phone, name, **fields) → ContactResult` עם `created | existing | ambiguous | invalid | lookup_error`.
+F14-A מוזג ב-PR #568. F14-B1 מעביר את `crm_add_contact()` ואת `lead_conversion.py::convert_lead_to_contact()` דרך אותו gate; `ambiguous`, `invalid` ו-`lookup_error` נעצרים fail-closed.
+קבצים: crm.py, lead_conversion.py
 
 ### F15 — crm.py → airtable_gateway (write path migration)
 מה: החלפת `_post` / `_patch` הישירים ב-`crm.py` בקריאות ל-`airtable_gateway.upsert()`.
