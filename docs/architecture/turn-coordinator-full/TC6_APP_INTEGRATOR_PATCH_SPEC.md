@@ -1,13 +1,19 @@
 # TC6 — `app.py` Integrator Patch Spec
 
-**Status:** spec only, not applied. `app.py` is Integrator-only per
+**Status:** applied. `app.py` is Integrator-only per
 `PARALLEL_IMPLEMENTATION_WORKSTREAMS.md`'s file ownership map — the TC6 WS2
-branch (`claude/tc6-explicit-reply-ownership`) does not edit this file
-directly. This document is the isolated patch spec the integrator applies
-against `app.py`, once WS2's `core/action_gateway.py` change
-(`reply_ownership_for_contract()`) has landed.
+branch (`claude/tc6-explicit-reply-ownership`, merged as PR #566) did not
+edit this file directly. This document was the isolated patch spec; the
+integrator cutover implementing it against `app.py` landed on
+`claude/tc6-integrator-app-cutover`, based on `origin/main` `e60d9ce`
+(after PR #566/#567), once WS2's `core/action_gateway.py` change
+(`reply_ownership_for_contract()`) had already merged. Kept as the design
+record — the code blocks below reflect the as-implemented shape (including
+the round-3 telemetry correction just below), not merely a proposal.
 
-**Base:** `origin/main` `38d9226` (same base as the WS2 branch).
+**Base:** `origin/main` `38d9226` (original spec-authoring base, same as
+the WS2 branch). The integrator cutover itself is based on the later
+`e60d9ce` tip — see Status above.
 
 **Design correction this spec implements** (owner-approved, supersedes the
 TC6 preflight's original §E, which proposed `ActionGateway.approval_status()`
@@ -366,6 +372,15 @@ same early, structural, already-established mechanism — **not** PA-01's
 separate, later, text-pattern-based mechanism near the end of `run_agent()`,
 which this invariant must not depend on):
 
+**Telemetry correction (round 3, applied in the actual implementation):**
+the block below originally set `_out_meta["reply_owner"] = "unverified"`.
+This was rejected — `"unverified"` is not an owner, and `_out_meta`'s
+`reply_owner` key must only ever carry a real, positive ownership claim
+(`"gateway"`, as Branch A sets it) or be absent entirely. Branch B omits
+`reply_owner` from `_out_meta` altogether and reports the read failure via
+a separate, explicitly non-ownership field, `ownership_verification:
+"failed"`, instead:
+
 ```python
 if _flag_enabled("FEATURE_SINGLE_SPEAKER_APPROVAL_UX"):
     if _ownership_verification_failed_entry is not None:
@@ -377,9 +392,13 @@ if _flag_enabled("FEATURE_SINGLE_SPEAKER_APPROVAL_UX"):
         # שכבר נמסרה (הגרסה של מסלול-ההצלחה ב-§1c) לעולם לא תוכפל.
         if _out_meta is not None:
             _out_meta.update({
-                "reply_owner": "unverified",  # שונה מ-"gateway"/"agent" — עובדה, לא טענת-בעלות
+                # במכוון בלי מפתח "reply_owner" — "unverified" אינו בעלים,
+                # ו-reply_owner חייב לשאת רק טענת-בעלות חיובית אמיתית
+                # ("gateway") או להיעדר לגמרי. ownership_verification="failed"
+                # הוא שדה-תצפית נפרד, לא טענת-בעלות.
                 "final_response_count": 1,
                 "canonical_state": "ownership_verification_failed",
+                "ownership_verification": "failed",
             })
         return (
             "" if _ownership_verification_failed_entry.get("owner_notified")
