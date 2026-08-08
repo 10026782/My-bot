@@ -772,10 +772,9 @@ def run_startup_sequence() -> None:
     core/emergency_stop_bootstrap.py's module docstring for the exact
     documented-vs-unexpected distinction.
 
-    Still dual-path after this step: nothing in production — no
-    is_enabled()/set_flag() caller, no tma_api/cost_monitor/scheduler
-    caller — reads from the manager bootstrap_emergency_stop() configures
-    here. Cutover is a separate, later, atomic step.
+    Production EMERGENCY_STOP_* callers use the configured manager: reads go
+    through feature_flags.is_enabled(), and writes use the durable APIs. Other
+    feature flags keep their existing path.
     """
     from core.emergency_stop_bootstrap import bootstrap_emergency_stop
     result = bootstrap_emergency_stop()

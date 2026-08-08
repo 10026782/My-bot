@@ -214,14 +214,15 @@ class EmergencyStopManager:
     Precedence per evaluate(flag_name):
       1. force_stop_provider(flag_name) is True  -> blocked=True, source="env".
          Always wins; never consults the store or the cache.
-      2. Cache holds a value for flag_name:
+      2. The last store read was successful and cache holds a value for flag_name:
          - fresh (age <= ttl_seconds since last successful hydrate)
               -> source="durable" (an accurate reflection of durable state).
          - stale (durable hasn't refreshed successfully within ttl_seconds)
-              -> source="cache" (last-known-good, serving as a fallback).
+              -> source="cache" (last-known-good, still safe to use).
          Either way blocked = the cached boolean.
-      3. No cached value for flag_name at all (never successfully hydrated,
-         or this flag never appeared in a successful read)
+      3. The store is unavailable/invalid, or no cached value exists
+         (never successfully hydrated, or this flag never appeared in a
+         successful read)
               -> source="unknown", blocked=True (fail-closed).
 
     A stale cache triggers exactly one refresh attempt per staleness window
@@ -363,6 +364,20 @@ class EmergencyStopManager:
                 flag_name=flag_name,
                 blocked=True,
                 source="env",
+                store_status=self._last_store_status,
+                last_hydrated_at=self._last_hydrated_at,
+                cache_age_seconds=self._cache_age_locked(),
+                error=self._last_error,
+            )
+
+        # A stale cache is only safe while the last store read was successful.
+        # Once the backing source is unavailable/invalid, the current state is
+        # unknown; never turn a cached False into an effective allow.
+        if self._last_store_status in {"unavailable", "invalid"}:
+            return FlagEvaluation(
+                flag_name=flag_name,
+                blocked=True,
+                source="unknown",
                 store_status=self._last_store_status,
                 last_hydrated_at=self._last_hydrated_at,
                 cache_age_seconds=self._cache_age_locked(),

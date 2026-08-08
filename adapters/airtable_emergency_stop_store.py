@@ -4,11 +4,8 @@
 # Tables.EMERGENCY_STOP_FLAGS, via tools/airtable_gateway.py — the sole
 # sanctioned Airtable I/O path in this codebase (CLAUDE.md "Iron rule").
 #
-# Still inert at this step:
-#   - nothing constructs or calls AirtableEmergencyStopStore yet
-#   - no import from feature_flags.py, no bootstrap, no scheduler wiring,
-#     no endpoint, no change to production behavior
-#   - no network call happens at import time — only at read()/write() call time
+# Wired by core.emergency_stop_bootstrap at runtime. No network call happens
+# at import time — Airtable I/O occurs only at read()/write() call time.
 #
 # core/emergency_stop.py does not import this module (dependency points one
 # way: adapter -> core, never core -> adapter).

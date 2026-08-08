@@ -184,13 +184,13 @@ chk("past TTL, second read succeeded -> source=durable again", ev.source == "dur
 
 
 # ══════════════════════════════════════════════════════════════════
-# 4. Stale-cache fallback: refresh fails, old value still served
+# 4. Stale-cache failure: an unavailable backing source fails closed
 # ══════════════════════════════════════════════════════════════════
-print("\n── stale-cache fallback on refresh failure ──")
+print("\n── stale-cache failure is fail-closed ─────")
 
 clock = FakeClock()
 store = QueueStore([
-    ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": FlagRecord(enabled=True)}),
+    ReadResult(status="ok", flags={"EMERGENCY_STOP_ALL": FlagRecord(enabled=False)}),
     ReadResult(status="unavailable", error="simulated network timeout"),
 ])
 mgr = EmergencyStopManager(store=store, clock=clock, ttl_seconds=7.0)
@@ -199,8 +199,8 @@ mgr.evaluate("EMERGENCY_STOP_ALL")
 clock.advance(10.0)  # now stale
 ev = mgr.evaluate("EMERGENCY_STOP_ALL")
 chk("refresh attempted after staleness", store.call_count == 2)
-chk("refresh failed -> old cached value still returned", ev.blocked is True)
-chk("refresh failed -> source flips to cache (fallback, not durable)", ev.source == "cache")
+chk("refresh failed -> cached False is not treated as safe", ev.blocked is True)
+chk("refresh failed -> source is unknown, not cache", ev.source == "unknown")
 chk("refresh failed -> store_status reflects the failure", ev.store_status == "unavailable")
 chk("refresh failed -> error message surfaced", "timeout" in ev.error)
 chk("last_hydrated_at NOT bumped by the failed attempt",
