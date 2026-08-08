@@ -556,6 +556,19 @@ chk("R1 (flag ON): success branch + projection raises -> Branch B marker produce
     and _outcome_r1_on.get("ok") is False and _outcome_r1_on.get("created_this_turn") is False)
 chk("R1 (flag ON): no reply_owner/action_lifecycle_result claim on the Branch B outcome",
     "reply_owner" not in _outcome_r1_on and "action_lifecycle_result" not in _outcome_r1_on)
+# CodeRabbit round: Branch B is a safety stop on the OWNERSHIP READ, not a
+# claim the contract is invalid — the just-created contract must remain
+# live/pending in the ledger, untouched, and the returned contract_id must
+# still resolve to it. "created_this_turn": False here means "don't count
+# this as PA-01 creation evidence," never "no contract exists."
+_r1_on_contract_id = _outcome_r1_on.get("contract_id")
+_r1_on_real_contract = _real_gw.find_contract(_r1_on_contract_id) if _r1_on_contract_id else None
+chk("R1 (flag ON): Branch B's contract_id still resolves to a real contract "
+    "(no silent loss of the reference)",
+    _r1_on_real_contract is not None)
+chk("R1 (flag ON): the underlying contract remains 'pending' -- Branch B "
+    "performs no revoke/cancel of the contract it couldn't verify ownership for",
+    _r1_on_real_contract is not None and _r1_on_real_contract.status == "pending")
 
 # ---- R2: existing_pending_blocks_agent branch ----------------------------
 

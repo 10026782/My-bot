@@ -2028,6 +2028,15 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
             # להמציא, לעולם לא ליפול לבעלות Agent, לעולם לא
             # _orphan_cleanup_failure_response() (ניסוח שגוי — שום דבר לא
             # בוטל). משתמשת חוזרת באותו _final_message כבר-מחושב.
+            #
+            # CodeRabbit round: ה-contract עצמו (contract_id למעלה) נשאר
+            # חי/pending ב-ledger ב-מכוון — Branch B הוא עצירת-בטיחות של
+            # קריאת-הבעלות בלבד, לא קביעה שה-contract לא-תקין, ולכן אין
+            # כאן revoke/cancel כלשהו. "created_this_turn": False כאן
+            # אומר רק "אל תשתמש בזה כראיית-PA-01 ליצירה מאומתת" — לא
+            # "אין contract". contract_id שמוחזר עדיין פותר ל-contract
+            # אמיתי ופעיל (ראו core/test_tc6_reply_ownership.py ו-
+            # test_tc6_app_reply_ownership.py R1-on לאימות).
             return {
                 "message": _final_message,
                 "contract_id": _contract_id,
@@ -4733,6 +4742,50 @@ def run_agent(
                 # לא reply_owner="unverified" — "unverified" אינו בעלים;
                 # ownership_verification="failed" הוא שדה-תצפית נפרד,
                 # לא טענת-בעלות.
+                #
+                # CodeRabbit round: זהו בדיוק מקרה-הקצה שהמנגנון הזה נועד
+                # לזהות — בלי log ייעודי הוא בלתי-נצפה לחלוטין בפרודקשן
+                # (Branch A רושם OwnershipSignal+evidence-finalizer;
+                # Branch B חוזר לפני שניהם). רושמת log מובנה יחיד, לפני
+                # ה-return.
+                logger.warning(
+                    "[TC6] ownership_verification=failed contract=%s "
+                    "owner_notified=%s intent=%s user=%s — עצירת-בטיחות "
+                    "(Branch B), לא סמכות בעלות שנייה",
+                    _ownership_verification_failed_entry.get("contract_id"),
+                    bool(_ownership_verification_failed_entry.get("owner_notified")),
+                    getattr(route, "intent", "unknown"),
+                    _sanitize_id(identity.memory_key),
+                )
+                # Cross-Layer Impact Matrix (RP5 guard, §1.5): Branch A כבר
+                # צורכת את RP4's shadow evidence classifier
+                # (observe_shadow_finalizer) כדי ש-turn_evidence.
+                # safe_record() יכלול גם turns בבעלות-Gateway — Branch B
+                # היה מדלג על זה במלואו (אף תצפית-shadow, לא רק אף
+                # OwnershipSignal), מה שהיה משאיר בדיוק את מקרה-הקצה
+                # שה-guard נועד לתפוס בלתי-נראה לחלוטין ל-RP4/RP5. לא
+                # מנגנון-הצדקה עצמאי חדש — אותה קריאה קיימת בדיוק ל-RP4's
+                # observe_shadow_finalizer(), shadow-only, לעולם לא חוסמת.
+                try:
+                    _ignored_text, _evidence_comparison = observe_shadow_finalizer(
+                        "",
+                        turn_evidence,
+                        state=get_evidence_finalizer_state(),
+                        approval_prompt_sent=bool(
+                            _ownership_verification_failed_entry.get("owner_notified"),
+                        ),
+                    )
+                    if _out_meta is not None and _evidence_comparison is not None:
+                        _out_meta["evidence_finalizer_shadow"] = {
+                            **_evidence_comparison.safe_record(),
+                            "evidence": turn_evidence.safe_record(),
+                        }
+                except Exception:
+                    logger.debug(
+                        "[EvidenceFinalizerShadow] ownership-verification-failed "
+                        "observation skipped",
+                        exc_info=True,
+                    )
                 if _out_meta is not None:
                     _out_meta.update({
                         "final_response_count": 1,
@@ -4925,14 +4978,25 @@ def run_agent(
                 _signal_correlated_entry.get("action_lifecycle_result")
                 if _signal_correlated_entry is not None else None
             )
-            _signal_reply_owner = (
-                "gateway"
-                if (
-                    _signal_action_lifecycle_result is not None
-                    and getattr(_signal_action_lifecycle_result, "reply_owner", None) == "gateway"
+            if _flag_enabled("FEATURE_SINGLE_SPEAKER_APPROVAL_UX"):
+                _signal_reply_owner = (
+                    "gateway"
+                    if (
+                        _signal_action_lifecycle_result is not None
+                        and getattr(_signal_action_lifecycle_result, "reply_owner", None) == "gateway"
+                    )
+                    else "agent"
                 )
-                else "agent"
-            )
+            else:
+                # תיקון-רולבק (סבב CodeRabbit): כשהדגל כבוי, ה-producer
+                # (_queue_approval_detailed_impl) לעולם לא מצרף
+                # action_lifecycle_result (ראו השערים על _flag בפונקציה
+                # ההיא) — לכן ההיגד לעיל תמיד היה נופל ל-"agent" גם עבור
+                # turn שבו אישור אכן נוצר, מה שהופך כל turn כזה תחת דגל
+                # כבוי מ-"gateway" (ה-legacy) ל-"agent" בשקט. משמרת כאן את
+                # ניבוי-הנוכחות-בלבד המדויק שהיה קיים לפני TC6, כדי
+                # שהתצפית תישאר זהה-בייט כשה-producer עצמו לא השתנה.
+                _signal_reply_owner = "gateway" if _approval_queued_this_turn else "agent"
             _ownership_signal = build_ownership_signal(
                 recognized_intent=getattr(route, "intent", "unknown"),
                 selected_handler=getattr(route, "handler", "unknown"),
