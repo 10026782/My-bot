@@ -12,7 +12,13 @@ import time
 
 import pytest
 
-from core.action_gateway import ActionContract, ActionGateway, ExecutionLedger
+from core.action_gateway import (
+    ActionContract,
+    ActionGateway,
+    ExecutionLedger,
+    _PENDING_STATUS_UNVERIFIABLE_MESSAGE,
+)
+from core.router.ownership_contracts import ActionLifecycleResult
 
 
 def _contract(status: str, *, contract_id: str = "c1", created_at: float | None = None) -> ActionContract:
@@ -58,10 +64,24 @@ def test_reply_ownership_for_contract_covers_terminal_and_pending_states(
     assert result.reply_owner == "gateway"
 
 
-@pytest.mark.parametrize("blank_id", [None, ""])
+@pytest.mark.parametrize("blank_id", [None, "", "   ", "\t\n"])
 def test_reply_ownership_for_contract_blank_id_returns_none(blank_id) -> None:
+    """Whitespace-only ids must normalize to blank, not reach the
+    repository lookup as a literal '   ' key."""
     gateway = ActionGateway()
     assert gateway.reply_ownership_for_contract(blank_id) is None
+
+
+def test_reply_ownership_for_contract_whitespace_padded_id_is_normalized() -> None:
+    """A contract_id with incidental surrounding whitespace must still
+    resolve to the real contract — the normalization strips, not rejects."""
+    gateway = ActionGateway()
+    gateway._ledger.save(_contract("pending", contract_id="c1"))
+
+    result = gateway.reply_ownership_for_contract("  c1  ")
+
+    assert result is not None
+    assert result.contract_ref == "c1"
 
 
 def test_reply_ownership_for_contract_unknown_id_returns_none() -> None:
@@ -133,13 +153,14 @@ def test_ownership_derived_from_exact_touched_contract_not_latest_or_earliest() 
     assert latest_for_user.contract_ref != "A"
 
 
-# ── F. query_execution_status no longer silently discards the projection ──
+# ── F. query_execution_status: the projection now GATES rendering ─────
 
 
 def test_query_execution_status_pending_batch_wording_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The projection is now consumed (logged) rather than discarded, but
-    the actual user-facing text for a multi-pending status query must stay
-    byte-identical to before this change."""
+    """The canonical projection is actually consulted (and must succeed) to
+    reach the legacy renderer at all — but the actual user-facing text for
+    a multi-pending status query must stay byte-identical to before this
+    change once that gate passes."""
     gateway = ActionGateway()
     gateway._ledger.save(_contract("pending", contract_id="p1", created_at=time.time() - 200))
     gateway._ledger.save(_contract("pending", contract_id="p2", created_at=time.time() - 100))
@@ -157,6 +178,7 @@ def test_query_execution_status_pending_batch_wording_unchanged(monkeypatch: pyt
 
     assert calls == ["user-a"], "approval_status() must actually be invoked, not skipped"
     assert text is not None
+    assert text != _PENDING_STATUS_UNVERIFIABLE_MESSAGE
     assert "ממתינות לאישור" in text or "ממתין לאישור" in text
 
 
@@ -177,12 +199,16 @@ def test_query_execution_status_single_pending_wording_unchanged(monkeypatch: py
 
     assert calls == ["user-a"]
     assert text is not None
+    assert text != _PENDING_STATUS_UNVERIFIABLE_MESSAGE
     assert "ממתינה לאישור" in text or "ממתין לאישור" in text
 
 
-def test_log_pending_lifecycle_projection_failure_is_non_blocking(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A failure while building the (now-consumed) projection must not
-    break the actual status query — this helper is observability-only."""
+def test_query_execution_status_projection_failure_fails_closed_not_legacy_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A read failure while building the canonical projection must NOT
+    silently fall through to rendering the legacy pending text anyway — it
+    must return the existing deterministic non-Agent fallback instead."""
     gateway = ActionGateway()
     gateway._ledger.save(_contract("pending", contract_id="p1"))
 
@@ -193,4 +219,45 @@ def test_log_pending_lifecycle_projection_failure_is_non_blocking(monkeypatch: p
 
     text = gateway.query_execution_status("user-a")
 
-    assert text is not None
+    assert text == _PENDING_STATUS_UNVERIFIABLE_MESSAGE
+    # never the legacy pending renderer's own multi/single wording shape
+    assert "שלח מספר" not in text and "יש פעולה שממתינה" not in text and "יש משימה שממתינה" not in text
+
+
+def test_query_execution_status_none_projection_fails_closed_not_legacy_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """approval_status() unexpectedly returning None (despite live being
+    non-empty) must not be treated as license to render the legacy pending
+    text — the returned projection is actually consulted, not merely
+    called."""
+    gateway = ActionGateway()
+    gateway._ledger.save(_contract("pending", contract_id="p1"))
+
+    monkeypatch.setattr(ActionGateway, "approval_status", lambda self, *a, **kw: None)
+
+    text = gateway.query_execution_status("user-a")
+
+    assert text == _PENDING_STATUS_UNVERIFIABLE_MESSAGE
+
+
+def test_query_execution_status_non_gateway_reply_owner_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A projection that does not claim reply_owner=='gateway' must not be
+    allowed to proceed to legacy pending rendering — proves the gate checks
+    the RETURNED projection's content, not merely that a call happened."""
+    gateway = ActionGateway()
+    gateway._ledger.save(_contract("pending", contract_id="p1"))
+
+    def _wrong_owner(self, canonical_user_id, **kwargs):
+        return ActionLifecycleResult(
+            contract_ref="p1", lifecycle_state="pending", approval_state="pending",
+            execution_state="not_started", reply_owner="agent",
+        )
+
+    monkeypatch.setattr(ActionGateway, "approval_status", _wrong_owner)
+
+    text = gateway.query_execution_status("user-a")
+
+    assert text == _PENDING_STATUS_UNVERIFIABLE_MESSAGE

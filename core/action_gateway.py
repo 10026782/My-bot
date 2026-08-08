@@ -99,6 +99,18 @@ def _has_approval_authority(role: str) -> bool:
 
 _APPROVAL_AUTHORIZATION_DENIED_MESSAGE = "⛔ הפעולה דורשת אישור בעלים."
 
+# TC6 review fix: an existing, deterministic, non-Agent fallback for "the
+# canonical WS2 ownership/lifecycle projection could not be confirmed right
+# now" — reuses this file's own established "cannot verify"/"cannot check
+# right now, try again" vocabulary (see _APPROVAL_AUTHORIZATION_DENIED_MESSAGE
+# above, and the identical phrasing already used in propose_action()'s
+# ActionContractLookupError branch / the atomic-claim contention branch)
+# rather than inventing a new canonical state or claiming the pending
+# action's status either way when the projection itself is unverifiable.
+_PENDING_STATUS_UNVERIFIABLE_MESSAGE = (
+    "❌ לא ניתן לאמת כרגע את הסטטוס של הפעולה הממתינה לאישור. נסה שוב בעוד רגע."
+)
+
 
 def _is_internal_role(role: str) -> bool:
     from identity import Role
@@ -3408,9 +3420,10 @@ class ActionGateway:
         בעצמם ולהיכשל-בסגירה לתשובה דטרמיניסטית שאינה-Agent, לעולם לא
         לבעלות-Agent.
         """
-        if not contract_id:
+        normalized_contract_id = str(contract_id or "").strip()
+        if not normalized_contract_id:
             return None
-        contract = self._ledger.find_by_id(contract_id)
+        contract = self._ledger.find_by_id(normalized_contract_id)
         if contract is None:
             return None
         return build_action_lifecycle_result(contract, reply_owner="gateway")
@@ -3469,31 +3482,47 @@ class ActionGateway:
         )
         return "cancelled"
 
-    def _log_pending_lifecycle_projection(
+    def _pending_lifecycle_ownership_or_none(
         self, canonical_user_id: str, live: list["ActionContract"],
-    ) -> None:
-        """TC6: צורכת בפועל את הקרנת ה-WS2 של approval_status() כאן
-        במקום לחשב-ולזרוק (הפער המדויק ש-
-        BUG-162_SINGLE_SPEAKER_CLOSURE_AUDIT_20260807.md תיעד בנקודת-
-        הקריאה הזו בדיוק). במכוון observability-בלבד — רושמת ללוג את
-        ה-lifecycle_state/reply_owner הקנוניים עבור אותם contracts חיים
-        שהקורא עומד לעצב דרך המסלול הישן של
-        build_approval_lifecycle_result(), בלי להזין את ההקרנה הזו לתוך
-        הטקסט המעוצב עצמו (עיצוב נשאר תפקידה של WS3/TC9; TC6 בעלים על
-        מי משיב, לא על הניסוח).
+    ) -> ActionLifecycleResult | None:
+        """TC6 review fix: the canonical WS2 projection must actually GATE
+        the legacy pending renderer, not just be logged alongside it (the
+        exact gap BUG-162_SINGLE_SPEAKER_CLOSURE_AUDIT_20260807.md documented
+        at this call site — ActionLifecycleResult computed then discarded).
+
+        Returns the canonical ``ActionLifecycleResult`` only when it was
+        read successfully AND it claims Gateway ownership
+        (``reply_owner == "gateway"``) for these live contracts. Returns
+        ``None`` on any read failure, an unexpected missing projection, or a
+        non-gateway-owned projection — callers MUST treat ``None`` as "do
+        not render the legacy pending text," never as license to render it
+        anyway. The ActionLifecycleResult decides lifecycle/reply-policy
+        semantics here; the legacy ApprovalLifecycleResult (rendered only
+        after this check succeeds) continues to decide wording only.
         """
         try:
-            _pending_lifecycle = self.approval_status(canonical_user_id, live_contracts=live)
-            logger.info(
-                "[ActionGatewayStatusRoute] pending_lifecycle_state=%s pending_reply_owner=%s",
-                getattr(_pending_lifecycle, "lifecycle_state", None),
-                getattr(_pending_lifecycle, "reply_owner", None),
-            )
+            projection = self.approval_status(canonical_user_id, live_contracts=live)
         except Exception:
-            logger.debug(
-                "[ActionGatewayStatusRoute] pending lifecycle projection failed (non-blocking)",
+            logger.warning(
+                "[ActionGatewayStatusRoute] pending lifecycle projection read "
+                "failed — refusing to render legacy pending text without "
+                "canonical ownership confirmation.",
                 exc_info=True,
             )
+            return None
+        if projection is None or projection.reply_owner != "gateway":
+            logger.warning(
+                "[ActionGatewayStatusRoute] pending lifecycle projection "
+                "missing or non-gateway-owned (reply_owner=%s) — refusing "
+                "to render legacy pending text.",
+                getattr(projection, "reply_owner", None),
+            )
+            return None
+        logger.info(
+            "[ActionGatewayStatusRoute] pending_lifecycle_state=%s pending_reply_owner=%s",
+            projection.lifecycle_state, projection.reply_owner,
+        )
+        return projection
 
     def query_execution_status(
         self, canonical_user_id: str, window_seconds: int = 600,
@@ -3521,7 +3550,8 @@ class ActionGateway:
             # BUG-SB-03: check for pending contracts before returning None
             live = live_contracts if live_contracts is not None else self.find_live_contracts(canonical_user_id)
             if live:
-                self._log_pending_lifecycle_projection(canonical_user_id, live)
+                if self._pending_lifecycle_ownership_or_none(canonical_user_id, live) is None:
+                    return _PENDING_STATUS_UNVERIFIABLE_MESSAGE
                 if len(live) > 1:
                     legacy_text = build_approval_lifecycle_result(contracts=live).safe_user_message
                     return self._render_pending_batch_reply(live, legacy_text)
@@ -3548,7 +3578,8 @@ class ActionGateway:
             # still check pending before giving up
             live = live_contracts if live_contracts is not None else self.find_live_contracts(canonical_user_id)
             if live:
-                self._log_pending_lifecycle_projection(canonical_user_id, live)
+                if self._pending_lifecycle_ownership_or_none(canonical_user_id, live) is None:
+                    return _PENDING_STATUS_UNVERIFIABLE_MESSAGE
                 if len(live) > 1:
                     legacy_text = build_approval_lifecycle_result(contracts=live).safe_user_message
                     return self._render_pending_batch_reply(live, legacy_text)

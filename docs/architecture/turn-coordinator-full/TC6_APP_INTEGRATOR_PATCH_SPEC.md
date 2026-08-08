@@ -23,6 +23,13 @@ preserve **exact turn-to-contract correlation**. The canonical rule:
 - `ActionLifecycleResult` projected from that **exact** contract (via the new
   `ActionGateway.reply_ownership_for_contract(contract_id)`, WS2,
   `core/action_gateway.py`) = the canonical reply-ownership authority.
+- `ActionLifecycleResult` must **only** ever be produced from a real
+  `ActionContract` through that canonical projection — never fabricated
+  inline by a caller as a fallback. A read failure or unexpected `None`
+  must enter an **existing** deterministic non-Agent failure path
+  (`_orphan_cleanup_failure_response()`), never invent a synthetic
+  lifecycle/approval/execution state and never silently default ownership
+  to the Agent (review correction to this spec, see §1d).
 
 ---
 
@@ -64,9 +71,15 @@ _pending_lifecycle = build_approval_lifecycle_result(
     _gw.find_contract(_gw_result.contract_id),
     canonical_state="pending_conflict",
 )
-_action_lifecycle_result = _ownership_for_contract_or_fail_closed(
-    _gw, _gw_result.contract_id,
-)
+_action_lifecycle_result = _ownership_for_contract_or_none(_gw, _gw_result.contract_id)
+if _action_lifecycle_result is None:
+    # TC6 review fix: the ownership authority itself could not be
+    # confirmed for a contract_id this call already believes is real —
+    # fail closed through the SAME existing orphaned/unverified terminal
+    # path this function already uses elsewhere for "contract state
+    # uncertain" (see §1d), never a fabricated ActionLifecycleResult and
+    # never a silent fall-through to Agent ownership.
+    return _orphan_cleanup_failure_response(tool_name, _gw_result.contract_id)
 return {
     "message": _pending_lifecycle.safe_user_message,
     "contract_id": _gw_result.contract_id,
@@ -110,10 +123,15 @@ _generic_lifecycle = (
     build_approval_lifecycle_result(_generic_found_contract, repeated=True)
     if _generic_found_contract else None
 )
-_generic_action_lifecycle_result = (
-    _ownership_for_contract_or_fail_closed(_gw, _generic_contract_id)
-    if _generic_lifecycle else None
-)
+if _generic_lifecycle:
+    _generic_action_lifecycle_result = _ownership_for_contract_or_none(
+        _gw, _generic_contract_id,
+    )
+    if _generic_action_lifecycle_result is None:
+        # Same fail-closed rule as §1a: a verified contract exists
+        # (_generic_found_contract), but the ownership authority itself
+        # could not be confirmed — never fabricate, never default to Agent.
+        return _orphan_cleanup_failure_response(tool_name, _generic_contract_id)
 return {
     "message": (...),
     "contract_id": _generic_contract_id,
@@ -148,9 +166,14 @@ return {
 # AFTER:
 _lifecycle_result = _approval_gateway.lifecycle_result(_contract_id)
 _final_message = _lifecycle_result.safe_user_message
-_action_lifecycle_result = _ownership_for_contract_or_fail_closed(
-    _approval_gateway, _contract_id,
-)
+_action_lifecycle_result = _ownership_for_contract_or_none(_approval_gateway, _contract_id)
+if _action_lifecycle_result is None:
+    # Same fail-closed rule as §1a/§1b: a real contract was just created
+    # (_contract_id is known-real here — this is the success path), but
+    # the ownership authority itself could not be confirmed. Never
+    # fabricate, never default to Agent — fail closed through the same
+    # existing orphaned/unverified terminal path.
+    return _orphan_cleanup_failure_response(tool_name, _contract_id)
 ...
 return {
     ...,
@@ -163,45 +186,42 @@ return {
 
 ### 1d. New local helper (add once near the top of `_queue_approval_detailed_impl()`, or as a module-level `app.py` helper)
 
+**Review correction:** the original version of this spec had this helper
+fabricate a synthetic `ActionLifecycleResult` (`lifecycle_state="unknown"`,
+`reply_owner="gateway"`) whenever the exact-contract read failed or
+returned an unexpected `None`. This was rejected on review — `ActionLifecycleResult`
+must only ever be produced from a real `ActionContract` through the
+canonical WS2 projection (`build_action_lifecycle_result()`), never
+synthesized inline by a caller. The corrected helper below returns `None`
+on failure — nothing else — and every call site (§1a/§1b/§1c) is
+responsible for entering the **existing** deterministic non-Agent failure
+path (`_orphan_cleanup_failure_response()`, already used elsewhere in this
+same function for "contract state uncertain/unverified") when it receives
+`None`, rather than proceeding with any invented ownership claim.
+
 ```python
-def _ownership_for_contract_or_fail_closed(gateway, contract_id: str):
+def _ownership_for_contract_or_none(gateway, contract_id: str):
     """TC6: derive the canonical exact-contract ActionLifecycleResult for a
     contract_id THIS call already knows to be real (it was just
-    created/found by propose_action() in this same function). A read
-    failure or an unexpected None here must fail closed to the SAME
-    non-Agent (gateway-owned) default this call site has always used —
-    never to Agent ownership (design correction requirement 10). This is
-    not a re-introduction of independent per-branch hardcoding: the literal
-    "gateway" below only fires on the narrow exception/inconsistency path,
-    documented as a floor, never as the normal-path source of truth.
+    created/found by propose_action() in this same function).
+
+    Returns ``None`` — never a fabricated ``ActionLifecycleResult`` — on
+    any read failure. Callers MUST treat ``None`` as "enter the existing
+    deterministic non-Agent failure path" (``_orphan_cleanup_failure_
+    response()``), never as license to invent a synthetic lifecycle/
+    approval/execution state, and never as license to silently default
+    reply ownership to the Agent (design correction requirements 10-11:
+    no fabrication, no silent Agent default, no second ownership
+    authority in app.py).
     """
     try:
-        result = gateway.reply_ownership_for_contract(contract_id)
+        return gateway.reply_ownership_for_contract(contract_id)
     except Exception:
         logger.warning(
             "[ActionGateway] TC6 exact-contract ownership read failed for "
-            "contract=%s — failing closed to gateway-owned response.",
-            contract_id, exc_info=True,
+            "contract=%s.", contract_id, exc_info=True,
         )
-        result = None
-    if result is None:
-        # Anomalous: this call site already holds a verified contract_id,
-        # so a clean "no such contract" is unexpected here (as opposed to
-        # the legitimately-empty branches earlier in this function, which
-        # never call this helper at all — see §1's "only where a verified
-        # canonical contract exists" scoping).
-        logger.warning(
-            "[ActionGateway] TC6 exact-contract ownership returned None for "
-            "a known contract_id=%s — failing closed to gateway-owned response.",
-            contract_id,
-        )
-        from core.router.ownership_contracts import ActionLifecycleResult
-        return ActionLifecycleResult(
-            contract_ref=contract_id, lifecycle_state="unknown",
-            approval_state="unknown", execution_state="unknown",
-            reply_owner="gateway", error_replay_classification="ownership_read_anomaly",
-        )
-    return result
+        return None
 ```
 
 The branches that have **no contract at all** (duplicate fingerprint,
@@ -209,7 +229,15 @@ cross-channel dedup, `persistence_lookup_failed`, `bus.request_approval()`
 raising with a successfully-revoked contract) are **unchanged** — they
 correctly omit `reply_owner`/`lifecycle_result`/`action_lifecycle_result`
 entirely today, and must keep doing so (design correction requirement 11:
-no canonical contract exists → do not invent Gateway ownership).
+no canonical contract exists → do not invent Gateway ownership). They also
+never call `_ownership_for_contract_or_none()` at all — only §1a/§1b/§1c,
+which already hold a verified contract_id, do.
+
+`_orphan_cleanup_failure_response()` is already imported at the top of
+`app.py` (`from core.approval_queue_recovery import (..., _orphan_cleanup_
+failure_response)`) and already used by sibling failure branches in this
+same function (e.g. the `bus.request_approval()` exception handler) — no
+new import or new failure-response shape is introduced by this spec.
 
 ---
 
@@ -409,6 +437,21 @@ def test_sentinel_presence_alone_cannot_claim_gateway_ownership():
     observability signal — closing BUG-162 §2.4's duplicate-authority gap
     at its root (a sentinel-only predicate can no longer independently
     claim ownership anywhere)."""
+
+
+def test_ownership_read_failure_does_not_invoke_agent_and_fabricates_nothing(monkeypatch):
+    """When _ownership_for_contract_or_none() (called from
+    _queue_approval_detailed_impl()) hits a read failure for a contract_id
+    it already believes is real: (1) the function must return the existing
+    _orphan_cleanup_failure_response()-shaped outcome, not a success dict;
+    (2) that outcome must carry no reply_owner/lifecycle_result/
+    action_lifecycle_result claiming Gateway ownership; (3) no
+    ActionLifecycleResult object of any kind (real or synthetic) is
+    constructed on this path — assert reply_ownership_for_contract() was
+    the only thing that raised, and no ActionLifecycleResult(...) call
+    happened outside it; (4) the Agent is never invoked/does not become
+    the final speaker for this turn — the orphaned-terminal_outcome message
+    is what reaches the user, not free-form Agent text."""
 
 
 # ── G. Scope guards ──────────────────────────────────────────────────
