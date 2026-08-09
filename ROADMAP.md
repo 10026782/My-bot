@@ -414,6 +414,19 @@ Decision Hub Stage 3 (Readiness Engine, F18): `decision_readiness.py` (`calc_rea
 
 ---
 
+## 🧭 BOSS Core Harness — Program Map
+
+**עבר ל-`docs/governance/BOSS_UNIFIED_MASTER_PLAN.md` §3.5.1** (עודכן 09/08/2026) —
+זהו כעת המקור הקנוני היחיד למצב תכניות-הליבה חוצות-התוכנית (Turn Coordinator
+TC1-TC10, ActionGateway/Approval Runtime, RP4/RP5 Evidence Finalizer, A32,
+F52, F14/Entity Resolution, Agent Cost). `ROADMAP.md` **אינו** מחזיק יותר
+טבלת current-state מקבילה לתכניות האלה — רק milestones/backlog ספציפיים
+לכל C/N/F item, כפי שהיה מאז ומתמיד. לסטטוס עדכני, ל-Master Program Map
+המלא, ל-Target Canonical Harness Authority Chain, ולסדר ה-Next Gates — קרא
+`BOSS_UNIFIED_MASTER_PLAN.md` §3.5.1-§3.5.3.
+
+---
+
 ## C — הושלם
 
 ### CORE — תשתית

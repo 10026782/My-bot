@@ -102,6 +102,94 @@
 
 ---
 
+### 3.5.1 BOSS Core Harness — Program Map (עודכן: 09/08/2026)
+
+**זהו הסעיף הקנוני היחיד** למצב תכניות-הליבה חוצות-התוכנית (Turn Coordinator,
+ActionGateway, RP4/RP5, A32, F52, F14, Agent Cost). כל תכנית שומרת את מפרט
+היישום המפורט שלה במקומה (`docs/architecture/...`) — הסעיף הזה **לא**
+מחליף אותם, רק ממפה איך הם מרכיבים Harness אחד. `ROADMAP.md` **אינו**
+מחזיק טבלת current-state מקבילה — הוא מפנה לכאן (ראה §3.5.1 שם).
+
+**אוצר-מילים מבוקר לעמודת "מצב":** `PLANNING` · `BUILT_UNWIRED` · `MERGED` ·
+`SHADOW` · `ENFORCED` · `RUNTIME_VERIFIED` · `BLOCKED` · `SUPERSEDED`.
+
+**כלל flag-disclosure מחייב לעמודת "Runtime state":** כל flag מדווח בשלושה
+חלקים נפרדים — **code default** (מה `feature_flags.py` מחזיר ללא env var) ·
+**last verified production value** (מה נקרא בפועל מ-Render/לוגים, עם תאריך
+ומקור) · **current production value** — מדווח **רק** אם אומת *עכשיו*,
+בסבב הזה. איפה שלא אומת עכשיו, נכתב במפורש "not reverified in this pass" —
+**אף פעם לא מוסק OFF רק כי code default=false.**
+
+| Program | Canonical authority/docs | Objective | Current implementation state | Runtime state | Verification state | Depends On | Next gate |
+|---|---|---|---|---|---|---|---|
+| **A. Turn Coordinator TC1–TC7** | `docs/architecture/turn-coordinator/README.md` (canonical current-status); `turn-coordinator-full/GAP_ANALYSIS.md` (gap↔workstream ownership) | Intent ownership, entity resolution, canonical proposal construction, reply ownership, per-action evidence | TC1–TC5: MERGED (TC1 admission gate wired only for CREATE_TASK — UPDATE_TASK/COMPLETE_TASK branch is dead code today). TC6: MERGED (PR #566 `684d299`, PR #569 `d0a8620`). TC7-A: MERGED (PR #573 `c16245c`) | `FEATURE_SINGLE_SPEAKER_APPROVAL_UX` — code default `false`; last verified production value **`true`** (09/08/2026, Render dashboard env-var read + live app-log/Telegram transcript, deploy `7dbdddd`); current: not reverified in this pass | TC6: **RUNTIME_VERIFIED** for 3/6 scenarios (09/08/2026 — create→pending, status query, second-create-block; callback-button/RP5-classification/replay still open). TC7-A: unit-tested only, SHADOW-only observability (not wired to `final_reply`) | ActionGateway (B); F14/TC5 (F) for entity resolution | See §3.5.3 Next Gates |
+| **B. ActionGateway / Approval Runtime** | `docs/architecture/action-gateway/`; `core/action_gateway.py` | Canonical business-action lifecycle + approval + atomic execution ownership | MERGED — `ActionContract`, propose/approve/reject/cancel, BUG-157 CAS fingerprint-claim fix | `FEATURE_ACTION_GATEWAY`/`FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS` — code default `false`; last verified production value **`true`** (30/07/2026, `PRODUCTION_30JUL2026_RENDER_VERIFICATION.md`, direct Render env read); current: not reverified in this pass. `FEATURE_ACTION_CONTRACT_PERSISTENCE`/`FEATURE_ATOMIC_CLAIMS` — code default `false`; **no production verification found in either direction** — do not report as off, report as unverified | RUNTIME_VERIFIED for core create/approve/cancel/replay-guard flows (30/07, 07/08) | A32 (D) for evidence validators; TC6 (A) for reply ownership | Staged `FEATURE_ACTION_CONTRACT_PERSISTENCE`/`FEATURE_ATOMIC_CLAIMS` rollout — runbook exists (`docs/PHASE_4B_ROLLOUT_AND_CUTOVER.md`), not executed. Parallel, not a TC7-B blocker |
+| **C. RP4/RP5 Evidence Finalizer** | `core/turn_evidence.py`; `RP5_PREFLIGHT_BLOCKER.md` | Per-turn evidence aggregation (RP4) + claim/evidence enforcement (RP5) | RP4: MERGED, actively maintained. **RP5: no PR has ever merged** — zero implementation | `FEATURE_EVIDENCE_FINALIZER` (three-state off/shadow/enforce) — code default `off`; last verified production value **`shadow`** (28/07/2026, direct Render env read, `SINGLE_SPEAKER_APPROVAL_UX_PRODUCTION_VERIFICATION_PLAN.md`) — **that reading is 12+ days old and must be re-verified, not cited as current**; current: not reverified in this pass. `enforce` today behaves identically to `shadow` (no RP5 code exists to differentiate) | RP4: SHADOW (comparison logging vs. live traffic; BUG-139 open unresolved mismatch). RP5: BLOCKED — no implementation to verify | A32 (D) upstream evidence source; sits alongside TC7 (A) — structurally non-competing by test, no owner-decision doc found reconciling them | RP5 runtime re-verification + enforcement planning — see §3.5.3 |
+| **D. A32 Anti-Hallucination** | `core/anti_hallucination.py` | Post-hoc claim-detection + response sanitization | MERGED, unconditional | No flag — **ENFORCED**, always live | RUNTIME_VERIFIED (`test_a32_enforcement.py`) | None (foundational) — TC7/RP4/RP5 depend on it, not the reverse | None open — stable |
+| **E. F52 Unified Status / MessageContract** | `docs/architecture/f52-unified-approval-runtime/README.md`; `audits/phase-4c/CURRENT_STATE_MAP.md` | Single canonical rendering contract across approval/status surfaces | MERGED — D-001…D-019 decisions, PR1/PR4/PR5/PR6 shadow adapters, D-018 leak fix | `FEATURE_UNIFIED_STATUS_FORMATTER` (three-state off/shadow/on) — code default `off`; last verified production evidence: shadow logging observed live (`[UnifiedStatusFormatterShadow]` entries, 09/08/2026 sampling per `ROADMAP.md` N17 item 4) — **never confirmed `on` anywhere**; current: not reverified in this pass. D-018's tool_name-leak fix is unconditional/live regardless of this flag | SHADOW (log comparison in production); D-018 piece RUNTIME_VERIFIED | TC6 (A) feeds reply-owner; TC7 (A) feeds optional `evidence_status` metadata (non-authoritative, D-013) | F52 rollout prerequisites — parallel track, not a TC7-B blocker |
+| **F. F14 Entity Resolution / TC5** | `ROADMAP.md` §F14; `core/router/entity_resolvers.py` | Bounded, identity-scoped entity resolution + Contact find-or-create gate | F14-A1 (PR #568) + F14-B1 (PR #570): MERGED. TC5 framework: MERGED | Not flag-gated — always-on for the 2 migrated callers only | **BUILT_UNWIRED** — gate covers only `crm_add_contact`/`convert_lead_to_contact`; not reachable from dispatcher/agent tool surface. Unit-tested only | — | F14-B2 (not started) — parallel track, not a TC7-B blocker |
+| **G. Agent Cost / Deterministic Execution** | `cost_monitor.py`, `core/cost_watchdog.py`, `core/usage_telemetry.py` | Measure Claude/Agent token spend; maximize zero-Agent-call routing | MERGED — 3-tier measurement lineage (no duplicate system) | `cost_monitor.py`/`core/cost_watchdog.py` live (write `AI_Usage_Daily`, no flag). `core/usage_telemetry.py`/`usage_events` genuinely SHADOW, confirmed unread by any production code path; PR3 cutover explicitly **owner-blocked** pending real-billing comparison | RUNTIME_VERIFIED (live trigger); usage_telemetry SHADOW | Measures traffic from all other programs; not blocking | POST-TC COST VALIDATION after sufficient post-TC6/TC7 traffic — parallel track, not a TC7-B blocker |
+| **H. Durable State (TC8)** | `turn-coordinator-full/GAP_ANALYSIS.md` (BLOCKER rows) | Single durable turn-ownership/concurrency record, replacing 4 coexisting pending/approval stores | PLANNING | — | — | TC6, TC7-B (A) | Design + implement, after TC7-B |
+| **I. MessageContract full-surface (TC9)** | `turn-coordinator-full/GAP_ANALYSIS.md` (FOLLOW_UP row) | One public composer across Telegram/WhatsApp/TMA | PLANNING | — | — | F52 (E) schema (stable, D-012); TC6/TC7 (A) | Design + implement, after TC8 |
+| **J. Observability closure (TC10)** | `turn-coordinator-full/IMPLEMENTATION_SEQUENCE.md` | Verification harness + rollout/rollback gates | PLANNING — no gap-analysis row exists yet | — | — | TC8, TC9 | Scope, after TC9 |
+| **K. PA-01 Structural Enforcement** | `docs/architecture/turn-coordinator/PA-01_PLANNING_GATE.md` | Block phantom approval-pending claims lacking structural evidence | MERGED (PR #352, `2be2472`) | `FEATURE_PA01_ENFORCEMENT_STATE` (three-state) — code default `off`; **no production verification found in either direction** — do not report as off, report as unverified | BUILT_UNWIRED — not activated in production | Risk router contract-required-intent table | Does not itself close the TC1 CREATE_TASK-only admission gate — that remains open (see A) |
+
+### 3.5.2 Target Canonical Harness Authority Chain
+
+> **⚠️ This is TARGET architecture, not a live end-to-end runtime flow
+> today.** The chain below is the intended shape once TC7-B, TC8, TC9, TC10
+> land. As of 09/08/2026, it is **not one connected pipeline** — several
+> links exist as independently-verified pieces that have not been wired
+> together. In particular: **TC7-A (`EvidenceResult`, per-action) and RP4
+> (`TurnEvidenceSummary`, per-turn) are two separate, MERGED-but-unconnected
+> mechanisms today** — nothing in the code imports across them, and no
+> "claim authorization" step consumes either to gate a reply. **TC7-B is
+> specifically the connection/claim-authorization stage that does not exist
+> yet** — it is what would join per-action evidence (TC7-A) and per-turn
+> aggregation (RP4) into an actual admission decision (RP5). Treat every
+> arrow below as "designed to connect here," not "already connected here."
+
+```
+Ingress/Identity → Intent Ownership/Routing (TC1) → Entity Resolution (TC5/F14)
+  → Canonical Proposal (TC2/TC4) → ActionContract/Approval Runtime (ActionGateway)
+  → Atomic Execution → Execution Evidence (TC7-A, MERGED, standalone)
+  → Turn Evidence Aggregation (RP4, MERGED, standalone)
+  → [ TC7-B — claim authorization / the connector, NOT BUILT ]
+  → Claim Authorization (RP5, NOT BUILT) → Reply Ownership (TC6, ✅ live)
+  → Rendering/MessageContract (F52/TC9) → Observability/Cost (Cost program/TC10)
+```
+
+Live/verified today, independent of this target chain: TC6 reply ownership
+(RUNTIME_VERIFIED), A32's claim-detection/sanitization gate (ENFORCED,
+unconditional — today's actual, only, claim-admission mechanism, not RP5).
+
+### 3.5.3 Next Gates (Core Harness) — ordered
+
+1. ~~TC6 documentation closure~~ — ✅ **done** (PR #574, `612a119`, 09/08/2026).
+2. ~~TC7-A review corrections and merge gate~~ — ✅ **done** (PR #573, `c16245c`, 09/08/2026).
+3. **TC7-B claim-authorization design/implementation — NEXT CORE GATE.**
+4. RP5 runtime/shadow re-verification (current `FEATURE_EVIDENCE_FINALIZER` production value is 12+ days stale) + enforcement planning.
+5. TC8 durable turn state.
+6. TC9 MessageContract full-surface integration.
+7. TC10 observability closure.
+
+**Parallel tracks — explicitly NOT blockers to TC7-B:**
+- Closing the TC1/TC4 `Handler.TOOL` admission gap for UPDATE_TASK/COMPLETE_TASK (currently dead code).
+- F14-B2.
+- F52 `FEATURE_UNIFIED_STATUS_FORMATTER` rollout prerequisites.
+- POST-TC COST VALIDATION (once sufficient post-TC6/TC7 traffic accumulates).
+- `FEATURE_ACTION_CONTRACT_PERSISTENCE`/`FEATURE_ATOMIC_CLAIMS` staged cutover.
+
+### 3.5.4 AI_CONTEXT.md regeneration note
+
+`AI_CONTEXT.md` (PR #572, open, based on stale `main` `7dbdddd` — predates
+PR #573/#574 and this §3.5 update) **should not be merged as-is.** Once this
+§3.5 update merges to `main`, `AI_CONTEXT.md` needs a fresh
+regenerate/rebase pass against the new canonical structure here, not a
+merge of the version currently open in PR #572.
+
+---
+
 ## 4. חוקי המרה בין ישויות דאטה (הובהרו בשיחה, לא היו כתובים באף מקום)
 
 > נמצא בבדיקת `governance_mapping_report.md`: הדוח סימן את אלה כ"כפילות" — הן **לא**. זו הבהרה קבועה שמונעת ניסיון איחוד שגוי בעתיד.

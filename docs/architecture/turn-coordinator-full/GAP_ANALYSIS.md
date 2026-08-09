@@ -24,17 +24,36 @@ flow, סיווג RP5, ו-replay/stale-callback עדיין לא כוסו בסבב
 §Status ו-`../turn-coordinator/README.md`'s 09/08/2026 note (הקובץ הקנוני
 ל-current merge/implementation status).
 
+**עדכון-סטטוס נוסף (09/08/2026, TC7):** PR #573 ("TC7-A: exact-contract
+execution-evidence seam") מוזג ל-`main` (`c16245c`) — `EvidenceResult`
+(`core/evidence_projection.py`, `build_evidence_result_from_outcome()`)
+מוקרן מ-`DispatcherOutcome` ונרשם כלוג `[TC7A][ExecutionEvidence]` בתוך
+`ActionGateway._execute_contract()`'s persist choke point, מתואם ל-
+`ActionContract` המדויק (לא "latest contract for user"). זהו **פרוסה
+ראשונה בלבד ("preflight"→קוד ראשוני), observability-only** — commit
+message מפורש: "app.py untouched," "no change to
+`sanitize_agent_response()`/`final_reply`," "`FEATURE_EVIDENCE_FINALIZER`
+untouched." שלוש שורות ה-TC7 למטה **אינן** נסגרות ע"י PR #573 — ה-BLOCKER
+שתיים (callback fallback dispatch, dispatcher לא-אוכף approval metadata
+באופן אוניברסלי) ושורת ה-FOLLOW_UP (evidence shadow / finalizer) נשארות
+פתוחות במלואן; TC7-A רק מוסיף את שכבת ה-per-action evidence שעליה TC7-B
+(claim authorization, לא התחיל) תיבנה. `EvidenceResult` (TC7-A) ו-
+`TurnEvidenceSummary` (RP4, `core/turn_evidence.py`) נשארים סוגים נפרדים
+במפורש — לא authority מתחרה (`test_tc7a_exact_contract_evidence.py`'s
+assertion #13). ראו `ROADMAP.md`'s "BOSS Core Harness — Program Map" סעיף A
+לתמונת מצב מלאה חוצת-תוכניות.
+
 | Class | Gap | Primary workstream | Current source | Target | Risk | Internal milestone | Evidence |
 |---|---|---|---|---|---|---|---|
-| BLOCKER | callback fallback can dispatch directly when AC lookup fails | Workstream 2 | app.py, callback path | fail closed through Gateway | unauthorized/duplicate write | TC7 | direct verification + callback tests |
+| BLOCKER (unchanged by PR #573 — see 09/08 TC7 note above) | callback fallback can dispatch directly when AC lookup fails | Workstream 2 | app.py, callback path | fail closed through Gateway | unauthorized/duplicate write | TC7 | direct verification + callback tests |
 | BLOCKER | four pending/approval stores coexist | Workstream 2 | app, EventBus, AC, TMA | AC lifecycle + projections only | divergent state/replay | TC8 | bundle + current-state audit |
 | BLOCKER | no durable turn ownership/concurrency record | Workstream 2 | TurnEnvelope is snapshot only | durable identity-scoped turn state | callback/text race | TC8 | turn-envelope docs/code |
 | BEFORE_FLAG_ON | deterministic intents still reach Agent/tool paths | Workstream 1 | router + app | coordinator admission gate | non-deterministic mutation | TC1/TC4 | router and intent tests |
-| BEFORE_FLAG_ON | direct dispatcher does not universally enforce approval metadata | Workstream 2 | dispatcher/registry | execution proof gate | approval bypass | TC7 | phase-4C audit |
+| BEFORE_FLAG_ON (unchanged by PR #573 — see 09/08 TC7 note above) | direct dispatcher does not universally enforce approval metadata | Workstream 2 | dispatcher/registry | execution proof gate | approval bypass | TC7 | phase-4C audit |
 | NEXT_IMPLEMENTATION | canonical builders absent | Workstream 1 | scattered handlers | named typed outputs | positional payload/canonicalization drift | TC2/TC4 | router/current code |
 | NEXT_IMPLEMENTATION | resolver behavior differs by entity/surface | Workstream 1 | adapters, TMA, Agent | bounded identity-scoped map | wrong entity/update | TC3/TC5 | resolver sources |
 | MERGED_AND_PRODUCTION_VERIFIED (PR #566/#569, verified 09/08/2026 for 3 of 6 scenarios — see status note above; callback-button/RP5/replay paths still open) | reply ownership is conditional and renderer paths drift | Workstream 2 | app/Gateway/F52 | explicit reply policy + one speaker | duplicate/conflicting text | TC6 | ownership research; BUG-162 interim patch (superseded): `BUG-162_SINGLE_SPEAKER_CLOSURE_AUDIT_20260807.md` |
-| FOLLOW_UP | evidence shadow observes Gateway-owned turns but is not finalizer | Workstream 2 | app/RP5 | finalizer at execution boundary | false completion claims | TC7 | RP5 node/direct check |
+| FOLLOW_UP (TC7-A per-action evidence seam merged PR #573 09/08/2026 — see note above; finalizer itself still not built) | evidence shadow observes Gateway-owned turns but is not finalizer | Workstream 2 | app/RP5 | finalizer at execution boundary | false completion claims | TC7 | RP5 node/direct check; `core/evidence_projection.py` (TC7-A) |
 | FOLLOW_UP | surface-specific rendering is not one public composer | Workstream 3 | Gateway/F52/formatters | MessageContract at all surfaces | UX inconsistency/leaks | TC9 | F52 docs |
 | FOLLOW_UP | batch/session preview has separate lifecycle semantics | Workstream 1 | lead capture/session | explicit resolver or observation-only | false approval affordance | TC5 | BUG audit |
 | LEGACY_ONLY | legacy EventBus IDs remain presentation pointers | Workstream 2 | EventBus/callback | migrate to exact AC IDs | stale callback | TC8 | approval audit |

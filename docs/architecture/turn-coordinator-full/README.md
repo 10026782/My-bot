@@ -15,7 +15,16 @@ directory remains canonical for the WS1/WS2/WS3 task breakdown, DoD items
 `IMPLEMENTATION_SEQUENCE.md`, `PARALLEL_IMPLEMENTATION_WORKSTREAMS.md`). See
 `DECISION_LOG.md` entry 15 for the full cross-reference.
 
-## Current implementation status — 2026-08-02
+## Historical status snapshot — 2026-08-02 (superseded; not current)
+
+**This section is a dated snapshot, not current status.** It predates TC4/TC5
+(PR #562/#564), TC6 (PR #566/#569, merged+production-verified 09/08/2026),
+and TC7-A (PR #573, merged 09/08/2026). For current status, see
+`../turn-coordinator/README.md` (canonical, per the note above) or
+`ROADMAP.md`'s "🧭 BOSS Core Harness — Program Map" section. Retained here
+only as a point-in-time record of WS1's own closure, not as a live tracker —
+renamed from "Current implementation status" (09/08/2026) to stop it reading
+as current.
 
 - WS1 foundation contracts are merged (`PR #536`).
 - PR #545 was merged via `46db9af` (source head `1d117ab`).
