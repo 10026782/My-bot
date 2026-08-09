@@ -64,13 +64,20 @@ print("\n── TTL valid — no Meta API call ──────")
 
 p1 = RuntimeSchemaProvider(ttl_seconds=300)
 p1._last_good["Leads"] = _fresh_entry()
-with patch.object(p1, "_fetch_live") as mock_fetch:
+with patch.object(p1, "_fetch_live") as mock_fetch, \
+     patch("core.runtime_schema_provider.logger") as mock_logger_1:
     contract = p1.get_table_contract("Leads")
     chk("TTL valid: _fetch_live never called", not mock_fetch.called)
     chk("TTL valid: source=cached", contract["source"] == "cached")
     chk("TTL valid: mode=full", contract["mode"] == "full")
     chk("TTL valid: table_id preserved", contract["table_id"] == "tblAAA")
     chk("TTL valid: fields preserved", "Domain" in contract["fields"])
+    chk("TTL valid: result marker emitted (fresh cached)", mock_logger_1.info.called)
+    _msg1 = mock_logger_1.info.call_args
+    chk(
+        "TTL valid: marker reports table/source/mode/table_id_present",
+        _msg1.args[1:] == ("Leads", "cached", "full", True, True),
+    )
 
 # ══════════════════════════════════════════════════════════════════
 # 2. TTL expired + pull succeeds
@@ -86,10 +93,17 @@ _NEW_ENTRY = {
 }
 import time as _time
 _NEW_ENTRY["fetched_at_mono"] = _time.monotonic()
-with patch.object(p2, "_fetch_live", return_value=_NEW_ENTRY):
+with patch.object(p2, "_fetch_live", return_value=_NEW_ENTRY), \
+     patch("core.runtime_schema_provider.logger") as mock_logger_2:
     contract = p2.get_table_contract("Leads")
     chk("TTL expired + pull success: source=live", contract["source"] == "live")
     chk("TTL expired + pull success: uses fresh fields", "Domain" not in contract["fields"])
+    chk("TTL expired + pull success: result marker emitted (fresh live)", mock_logger_2.info.called)
+    _msg2 = mock_logger_2.info.call_args
+    chk(
+        "live result marker reports table/source/mode/table_id_present",
+        _msg2.args[1:] == ("Leads", "live", "full", True, True),
+    )
 
 # ══════════════════════════════════════════════════════════════════
 # 3. TTL expired + pull fails + last_good exists → cached + WARNING
@@ -105,6 +119,12 @@ with patch.object(p3, "_fetch_live", return_value=None), \
     chk("stale fallback: mode=full (still)", contract["mode"] == "full")
     chk("stale fallback: still serves old fields", contract["table_id"] == "tblAAA")
     chk("stale fallback: logs WARNING", mock_logger.warning.called)
+    chk("stale fallback: result marker also emitted", mock_logger.info.called)
+    _msg3 = mock_logger.info.call_args
+    chk(
+        "stale fallback marker reports source=cached/mode=full/table_id_present=True",
+        _msg3.args[1:] == ("Leads", "cached", "full", True, True),
+    )
 
 # ══════════════════════════════════════════════════════════════════
 # 4. Cold start + no last_good + live fails + snapshot also unavailable
@@ -124,6 +144,12 @@ with patch.object(p4, "_fetch_live", return_value=None), \
     chk("cold start: choices always empty", all(f["choices"] == [] for f in contract["fields"].values()))
     chk("cold start: field names from seed", contract["fields"].keys() == {"Name", "Score"})
     chk("cold start: logs CRITICAL", mock_logger.critical.called)
+    chk("cold start: result marker also emitted (seed)", mock_logger.info.called)
+    _msg4 = mock_logger.info.call_args
+    chk(
+        "seed marker reports source=seed/mode=name_only/table_id_present=False",
+        _msg4.args[1:] == ("Leads", "seed", "name_only", False, False),
+    )
 
 # ══════════════════════════════════════════════════════════════════
 # 4b. PR3B.1 — snapshot tier (tier 3): cold start + live fails +
@@ -187,6 +213,12 @@ with patch.object(p4b, "_fetch_live", return_value=None), \
     chk("PR3B.1: choices preserved from snapshot", contract["fields"]["Domain"]["choices"] == ["Real Estate", "Import"])
     chk("PR3B.1: warning logged (not silent)", mock_logger.warning.called)
     chk("PR3B.1: snapshot result cached into last_good", "Leads" in p4b._last_good)
+    chk("PR3B.1: result marker also emitted (snapshot)", mock_logger.info.called)
+    _msg4b = mock_logger.info.call_args
+    chk(
+        "snapshot marker reports source=snapshot/mode=full/table_id_present=True",
+        _msg4b.args[1:] == ("Leads", "snapshot", "full", True, True),
+    )
 
 # picks the LATEST OK record (by Snapshot Date), not just any OK record
 with patch.object(p4b, "_fetch_live", return_value=None), \

@@ -17,6 +17,7 @@
 #   - malformed row fails safely, never silently dropped, never auto-written
 
 import io
+import logging
 import os
 import sys
 from types import SimpleNamespace
@@ -218,6 +219,59 @@ with patch("core.action_gateway.action_gateway", gw3):
         OWNER_IDENTITY, "chat_c90_3", "telegram", "general", b"", "empty.csv",
     )
 chk("unparseable file produces an explicit error reply", "❌" in error_summary, error_summary)
+
+
+# ══════════════════════════════════════════════════
+# 4c. Track D — [IngressEnvelope] accepted marker for file-row envelopes.
+# The filename is user-controlled and potentially identifying, so the
+# marker must classify it as source_ref_kind=file rather than logging the
+# raw "file:<filename>:row<N>" source_ref, and must never log row PII
+# (name/phone from normalized_text).
+# ══════════════════════════════════════════════════
+class _ListLogHandler(logging.Handler):
+    def __init__(self):
+        super().__init__()
+        self.records = []
+
+    def emit(self, record):
+        self.records.append(record.getMessage())
+
+
+def _capture_logs(logger_name):
+    handler = _ListLogHandler()
+    logger = logging.getLogger(logger_name)
+    logger.addHandler(handler)
+    return logger, handler
+
+
+gw4c = _new_gw(executor=None)
+with patch.object(lch, "_at_find_lead", return_value=None), \
+     patch("core.action_gateway.action_gateway", gw4c), \
+     patch("feature_flags.is_enabled", return_value=False):
+    logger_obs, handler_obs = _capture_logs("app")
+    app._process_structured_file_upload(
+        OWNER_IDENTITY, "chat_c90_4c", "telegram", "general",
+        CSV_2_LEADS.encode("utf-8"), "leads_יוסי_כהן.csv",
+    )
+    logger_obs.removeHandler(handler_obs)
+
+file_marker_lines = [m for m in handler_obs.records if m.startswith("[IngressEnvelope] accepted")]
+chk("one [IngressEnvelope] accepted marker per file row (2 rows)", len(file_marker_lines) == 2, str(file_marker_lines))
+chk(
+    "every file-row marker reports source_channel=file_upload and source_ref_kind=file",
+    all("source_channel=file_upload" in m and "source_ref_kind=file" in m for m in file_marker_lines),
+    str(file_marker_lines),
+)
+chk(
+    "file-row marker never logs the raw filename-bearing source_ref",
+    all("leads_" not in m and "יוסי_כהן" not in m for m in file_marker_lines),
+    str(file_marker_lines),
+)
+chk(
+    "file-row marker never logs row PII (name/phone from normalized_text)",
+    all("משה כהן" not in m and "0501234567" not in m for m in file_marker_lines),
+    str(file_marker_lines),
+)
 
 
 # ══════════════════════════════════════════════════

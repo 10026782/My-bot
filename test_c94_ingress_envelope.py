@@ -355,6 +355,94 @@ except TraceValidationError:
 
 
 # ══════════════════════════════════════════════════
+# 11. Runtime observability — app._log_ingress_envelope_accepted() (Track D)
+#
+# Unit-level proof (see test_c94_stage_c_telegram.py / test_c94_stage_d_
+# whatsapp.py for the same marker exercised end-to-end through the real
+# run_agent() construction points): the marker exposes only safe identity/
+# source metadata, classifies file_upload's filename-bearing source_ref as
+# a safe "file" kind instead of logging the raw value, and never logs
+# normalized_text.
+# ══════════════════════════════════════════════════
+import logging
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(__file__))
+
+os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-c94-obs-test")
+os.environ.setdefault("TELEGRAM_TOKEN", "123456789:C94_OBS_TEST_TOKEN")
+os.environ.setdefault("AIRTABLE_API_KEY", "patC94ObsTest")
+os.environ.setdefault("AIRTABLE_BASE_ID", "appC94ObsTest")
+os.environ.setdefault("RENDER_APP_URL", "https://example.com")
+os.environ.setdefault("SETUP_WEBHOOK", "0")
+
+import app  # noqa: E402  (env vars above must be set before import)
+
+
+class _ListLogHandler(logging.Handler):
+    def __init__(self):
+        super().__init__()
+        self.records = []
+
+    def emit(self, record):
+        self.records.append(record.getMessage())
+
+
+def _capture_logs(logger_name):
+    handler = _ListLogHandler()
+    logger = logging.getLogger(logger_name)
+    logger.addHandler(handler)
+    return logger, handler
+
+
+PII_TEXT = "משה כהן 0501234567"
+
+env_telegram = _envelope(
+    source_channel="telegram", provider="telegram_bot_api",
+    normalized_text=PII_TEXT, source_ref="telegram:msg:upd_obs_1",
+)
+logger_a, handler_a = _capture_logs("app")
+app._log_ingress_envelope_accepted(env_telegram)
+logger_a.removeHandler(handler_a)
+
+chk(
+    "_log_ingress_envelope_accepted() emits the '[IngressEnvelope] accepted' marker",
+    any(m.startswith("[IngressEnvelope] accepted") for m in handler_a.records),
+)
+chk("marker includes envelope_id", any(env_telegram.envelope_id in m for m in handler_a.records))
+chk("marker includes source_channel=telegram", any("source_channel=telegram" in m for m in handler_a.records))
+chk("marker includes provider=telegram_bot_api", any("provider=telegram_bot_api" in m for m in handler_a.records))
+chk(
+    "marker never contains the sensitive normalized_text (PII)",
+    all(PII_TEXT not in m for m in handler_a.records),
+)
+
+# file_upload: source_ref embeds the original filename (potentially
+# identifying) — must classify as a safe kind, never log the raw value.
+env_file = _envelope(
+    source_channel="file_upload", provider="telegram_bot_api",
+    source_ref="file:leads_יוסי_כהן.csv:row3",
+)
+logger_b, handler_b = _capture_logs("app")
+app._log_ingress_envelope_accepted(env_file)
+logger_b.removeHandler(handler_b)
+
+chk(
+    "file_upload envelope marker classifies source_ref_kind=file",
+    any("source_ref_kind=file" in m for m in handler_b.records),
+)
+chk(
+    "file_upload envelope marker never logs the raw filename-bearing source_ref",
+    all("יוסי_כהן" not in m and "leads_" not in m for m in handler_b.records),
+)
+
+chk("telegram source_ref classifies as message_id", app._ingress_source_ref_kind("telegram") == "message_id")
+chk("whatsapp source_ref classifies as message_id", app._ingress_source_ref_kind("whatsapp") == "message_id")
+chk("file_upload source_ref classifies as file", app._ingress_source_ref_kind("file_upload") == "file")
+
+
+# ══════════════════════════════════════════════════
 # Summary
 # ══════════════════════════════════════════════════
 print(f"\n{passed} passed, {failed} failed")

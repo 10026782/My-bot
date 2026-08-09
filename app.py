@@ -3524,6 +3524,27 @@ def _resolve_pr2_deterministic_approval(
         end(token, "text")
 
 
+def _ingress_source_ref_kind(source_channel: str) -> str:
+    """Deterministic, bounded classification of an envelope's source_ref —
+    used instead of logging the raw value, since file_upload's source_ref
+    embeds the original filename (potentially identifying), while telegram/
+    whatsapp's is just an opaque message id."""
+    return "file" if source_channel == "file_upload" else "message_id"
+
+
+def _log_ingress_envelope_accepted(envelope) -> None:
+    """Bounded observability marker for a successfully constructed+validated
+    IngressEnvelope — 'accepted' means construction/validation succeeded
+    only, never approval/routing/write authorization. Safe identity/source
+    metadata only: no normalized_text, no raw source_ref, no attachment
+    content, no sender identity."""
+    logger.info(
+        "[IngressEnvelope] accepted envelope_id=%s source_channel=%s provider=%s source_ref_kind=%s",
+        envelope.envelope_id, envelope.source_channel, envelope.provider,
+        _ingress_source_ref_kind(envelope.source_channel),
+    )
+
+
 def run_agent(
     user_text:           str,
     chat_id:             str,
@@ -4144,6 +4165,7 @@ def run_agent(
                 envelope = build_whatsapp_envelope(identity=identity, raw_event_id=raw_event_id, text=user_text)
             envelope.validate()
             envelope_id = envelope.envelope_id
+            _log_ingress_envelope_accepted(envelope)
         except Exception as exc:
             logger.error(
                 "[C94] %s envelope build/validate failed chat=%s error_type=%s",
@@ -5260,6 +5282,7 @@ def _process_structured_file_upload(
         )
         try:
             envelope.validate()
+            _log_ingress_envelope_accepted(envelope)
         except EnvelopeValidationError as exc:
             logger.error(f"[C94] invalid envelope for {filename} row {row_index}: {exc}")
             failed_count += 1

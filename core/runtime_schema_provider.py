@@ -67,19 +67,25 @@ class RuntimeSchemaProvider:
             entry = self._last_good.get(table)
 
             if entry is not None and (time.monotonic() - entry["fetched_at_mono"]) < self._ttl:
-                return self._contract_from_entry(entry, source="cached")
+                contract = self._contract_from_entry(entry, source="cached")
+                self._log_result(table, contract)
+                return contract
 
             fresh = self._fetch_live(table)
             if fresh is not None:
                 self._last_good[table] = fresh
-                return self._contract_from_entry(fresh, source="live")
+                contract = self._contract_from_entry(fresh, source="live")
+                self._log_result(table, contract)
+                return contract
 
             if entry is not None:
                 age = time.monotonic() - entry["fetched_at_mono"]
                 logger.warning(
                     "[RuntimeSchemaProvider] stale schema used for %s, age=%.0fs", table, age
                 )
-                return self._contract_from_entry(entry, source="cached")
+                contract = self._contract_from_entry(entry, source="cached")
+                self._log_result(table, contract)
+                return contract
 
             snapshot_entry = self._load_snapshot(table)
             if snapshot_entry is not None:
@@ -89,16 +95,37 @@ class RuntimeSchemaProvider:
                     "using canonical snapshot fallback (tier 3, PR3B.1)",
                     table,
                 )
-                return self._contract_from_entry(snapshot_entry, source="snapshot")
+                contract = self._contract_from_entry(snapshot_entry, source="snapshot")
+                self._log_result(table, contract)
+                return contract
 
             logger.critical(
                 "[RuntimeSchemaProvider] no live/cached/snapshot schema for %s — "
                 "falling back to seed, name_only mode",
                 table,
             )
-            return self._seed_contract(table)
+            contract = self._seed_contract(table)
+            self._log_result(table, contract)
+            return contract
 
     # ── Internal ──────────────────────────────────────────────────────
+
+    @staticmethod
+    def _log_result(table: str, contract: dict) -> None:
+        """Bounded, structured observability marker for the final schema
+        result selected by get_table_contract() — emitted AFTER the source
+        has already been chosen, never influencing selection/fallback/TTL/
+        caching. Safe metadata only: no field names, no choices, no
+        credentials, no payloads."""
+        logger.info(
+            "[RuntimeSchemaProvider] result table=%s source=%s mode=%s "
+            "table_id_present=%s fetched_at_present=%s",
+            table,
+            contract["source"],
+            contract["mode"],
+            contract["table_id"] is not None,
+            contract["fetched_at"] is not None,
+        )
 
     @staticmethod
     def _contract_from_entry(entry: dict, source: str) -> dict:
