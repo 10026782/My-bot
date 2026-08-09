@@ -40,6 +40,11 @@ from core.dispatcher_outcome import DispatcherOutcome
 from core.evidence_projection import build_evidence_result, build_evidence_result_from_outcome
 from core.lifecycle_projection import build_action_lifecycle_result
 from core.router.ownership_contracts import ActionLifecycleResult, EvidenceResult
+from core.turn_evidence import (
+    TurnEvidenceSummary,
+    observe_shadow_finalizer,
+    project_evidence_result,
+)
 from tool_registry import needs_approval
 
 logger = logging.getLogger(__name__)
@@ -1385,6 +1390,20 @@ class ActionGateway:
         # cleared on next route_disambiguation() call regardless of outcome.
         self._disambiguation: dict[str, list[ActionContract]] = {}
         self._disambiguation_lock = threading.Lock()
+        # TC7-B — thread-local handoff of this call's execution-shadow
+        # evidence from _execute_contract() (where the real same-turn
+        # DispatcherOutcome lives) out to approve_with_lifecycle_result()
+        # (where the real user-visible reply text is rendered -- a DIFFERENT
+        # string than _execute_contract()'s own return, see that method's
+        # docstring). Thread-local, not an instance dict keyed by contract_id,
+        # because the producer (_execute_contract, via approve()) and the one
+        # consumer that matters (approve_with_lifecycle_result) always run
+        # synchronously on the same thread within one call -- no concurrent
+        # request can interleave between them. approve_with_lifecycle_result()
+        # clears this at the START of every call before doing anything else,
+        # so a stale value left by an earlier, unrelated call on a reused
+        # worker thread can never leak into this call's observation.
+        self._execution_shadow_tls = threading.local()
         # BUG-149: same dependency-injection pattern as tool_executor above —
         # keeps this module free of any memory_store import. None (the
         # default) means "no projection wired" — _emit_resolution() is then
@@ -1967,26 +1986,60 @@ class ActionGateway:
     def approve_with_lifecycle_result(
         self, contract_id: str, *, approver: str, approver_role: str,
     ) -> ApprovalLifecycleResult:
-        """Approve through the existing lifecycle boundary, then render safely."""
+        """Approve through the existing lifecycle boundary, then render safely.
+
+        TC7-B: both live approval-execution routes -- the Telegram
+        callback-button handler and the text confirm-word handler (via
+        route_confirmation_word() -> _resolve_single_contract()) -- funnel
+        through this exact method, and this is where the real user-visible
+        reply text is decided (self.approve()'s own return string is
+        deliberately NOT used below; it is re-rendered through
+        build_approval_lifecycle_result() instead). RP4/RP5 shadow
+        observation must run against THAT rendered text, not against
+        _execute_contract()'s internal return string, which no caller here
+        actually shows to the user.
+        """
+        # Discard any stale handoff from an earlier, unrelated call that may
+        # have used this same (possibly thread-pool-reused) thread -- must
+        # never let a previous contract's evidence attach to this call.
+        self._execution_shadow_tls.pending = None
+
+        def _finish(result: ApprovalLifecycleResult) -> ApprovalLifecycleResult:
+            pending = getattr(self._execution_shadow_tls, "pending", None)
+            self._execution_shadow_tls.pending = None
+            if pending is not None:
+                _summary, _state = pending
+                try:
+                    observe_shadow_finalizer(
+                        result.safe_user_message, _summary,
+                        state=_state, approval_prompt_sent=False,
+                    )
+                except Exception:
+                    logger.debug(
+                        "[TC7B][ExecutionShadow] observation skipped: contract=%s",
+                        contract_id, exc_info=True,
+                    )
+            return result
+
         before = self._ledger.find_by_id(contract_id)
         if before is None:
-            return build_approval_lifecycle_result(canonical_state="no_contract")
+            return _finish(build_approval_lifecycle_result(canonical_state="no_contract"))
         if before.status != "pending":
-            return build_approval_lifecycle_result(before, repeated=True)
+            return _finish(build_approval_lifecycle_result(before, repeated=True))
 
         approval_message = self.approve(
             contract_id, approver=approver, approver_role=approver_role,
         )
         after = self._ledger.find_by_id(contract_id)
         if after is None:
-            return build_approval_lifecycle_result(canonical_state="no_contract")
+            return _finish(build_approval_lifecycle_result(canonical_state="no_contract"))
         if after.status == "pending":
             if approval_message == _APPROVAL_AUTHORIZATION_DENIED_MESSAGE:
-                return build_approval_lifecycle_result(
+                return _finish(build_approval_lifecycle_result(
                     after, canonical_state="authorization_denied",
-                )
-            return build_approval_lifecycle_result(after, canonical_state="failed")
-        return build_approval_lifecycle_result(after, repeated=False)
+                ))
+            return _finish(build_approval_lifecycle_result(after, canonical_state="failed"))
+        return _finish(build_approval_lifecycle_result(after, repeated=False))
 
     def reject_with_lifecycle_result(
         self, contract_id: str, *, rejected_by: str,
@@ -2925,7 +2978,7 @@ class ActionGateway:
         Identity from frozen contract must be preserved through atomic wrapper.
         Dispatcher result must be classified explicitly (not just exception-based).
         """
-        from feature_flags import is_enabled
+        from feature_flags import get_evidence_finalizer_state, is_enabled
 
         _EXECUTION_OUTCOME_MAP = {
             "completed":       ActionResolutionOutcome.COMPLETED,
@@ -2964,41 +3017,67 @@ class ActionGateway:
             # by its exact id (never "latest for user") so the projection
             # sees the status just persisted above, regardless of whether
             # update_status() mutated `contract` in place or cached a fresh
-            # object. Same-turn projection only, logged for observability —
-            # not yet consumed anywhere for claim authorization/enforcement
-            # (that is TC7-B's job, not this PR's). CodeRabbit round: gated
-            # behind isEnabledFor(INFO) — under a durable repository this is
-            # an extra find_by_id() read on the execution request thread
-            # (_emit_resolution() above already does its own for the same
-            # contract), and nothing consumes the projection but this log
-            # line in this PR, so skip the read entirely when INFO logging
-            # is disabled rather than computing evidence no one will see.
-            if logger.isEnabledFor(logging.INFO):
+            # object. Same-turn projection only.
+            #
+            # TC7-B: evidence computation is decoupled from logger level.
+            # PR #573 gated the whole block behind isEnabledFor(INFO) because
+            # the only consumer was the informational log line below. Now
+            # that RP4/RP5 shadow also consumes this same projection (handed
+            # off via self._execution_shadow_tls to approve_with_lifecycle_
+            # result(), which renders the real user-visible text -- see that
+            # method's own docstring), the extra find_by_id() read must
+            # happen whenever EITHER consumer needs it, never only when INFO
+            # happens to be enabled -- or flipping the logger to WARNING
+            # would silently blind RP5.
+            _rp5_state = get_evidence_finalizer_state()
+            _want_evidence = logger.isEnabledFor(logging.INFO) or _rp5_state in ("shadow", "enforce")
+            if _want_evidence:
+                _evidence: EvidenceResult | None = None
                 try:
                     _evidence = self.evidence_for_contract(
                         contract.contract_id, dispatcher_outcome=dispatcher_outcome,
                     )
-                    if _evidence is not None:
-                        # _evidence.error can carry the provider's own
-                        # free-text message (verify_execution()'s failure
-                        # reason is raw result content, truncated but not
-                        # redacted) — may embed business data (lead names,
-                        # phone numbers, task content). Mirrors this file's
-                        # own shadow-comparison logging rule elsewhere (see
-                        # _log_shadow_comparison above): log presence/state
-                        # only, never text that may embed business data.
-                        logger.info(
-                            "[TC7A][ExecutionEvidence] contract=%s result=%s verified=%s "
-                            "outcome_unknown=%s evidence_ref_present=%s error_present=%s",
-                            contract.contract_id, _evidence.result, _evidence.verified,
-                            _evidence.outcome_unknown, bool(_evidence.evidence_ref),
-                            bool(_evidence.error),
-                        )
                 except Exception:
                     logger.debug(
                         "[TC7A][ExecutionEvidence] projection skipped: contract=%s",
                         contract.contract_id, exc_info=True,
                     )
+                if _evidence is not None and logger.isEnabledFor(logging.INFO):
+                    # _evidence.error can carry the provider's own free-text
+                    # message (verify_execution()'s failure reason is raw
+                    # result content, truncated but not redacted) — may
+                    # embed business data (lead names, phone numbers, task
+                    # content). Mirrors this file's own shadow-comparison
+                    # logging rule elsewhere (see _log_shadow_comparison
+                    # above): log presence/state only, never text that may
+                    # embed business data.
+                    logger.info(
+                        "[TC7A][ExecutionEvidence] contract=%s result=%s verified=%s "
+                        "outcome_unknown=%s evidence_ref_present=%s error_present=%s",
+                        contract.contract_id, _evidence.result, _evidence.verified,
+                        _evidence.outcome_unknown, bool(_evidence.evidence_ref),
+                        bool(_evidence.error),
+                    )
+                if _rp5_state in ("shadow", "enforce"):
+                    if _evidence is not None:
+                        _summary = project_evidence_result(_evidence)
+                    else:
+                        # TC7-B fail-closed rule: a real contract WAS just
+                        # persisted above, so a projection failure here must
+                        # not disappear silently. This means only "canonical
+                        # execution evidence could not be positively
+                        # projected" — never provider failure, never a
+                        # manufactured success.
+                        _summary = TurnEvidenceSummary()
+                        _summary.record_unverified_effect()
+                    # Handed off to approve_with_lifecycle_result(), the one
+                    # place that knows the real final user-visible text for
+                    # both the Telegram callback-button and text-confirm-word
+                    # execution paths (both funnel through it) -- never
+                    # observed here against this function's OWN return
+                    # string, which neither of those two callers actually
+                    # shows to the user.
+                    self._execution_shadow_tls.pending = (_summary, _rp5_state)
             return True
 
         # Phase 4B0 atomic claim gate (if flag enabled)

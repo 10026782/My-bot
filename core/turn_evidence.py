@@ -12,6 +12,7 @@ import re
 from dataclasses import asdict, dataclass
 
 from core.dispatcher_outcome import DispatcherOutcome
+from core.router.ownership_contracts import EvidenceResult
 
 
 logger = logging.getLogger(__name__)
@@ -91,6 +92,43 @@ class TurnEvidenceSummary:
     def safe_record(self) -> dict[str, int | str]:
         """Return counts/classification only: no IDs, payloads, tools, or secrets."""
         return {"classification": self.classification(), **asdict(self)}
+
+
+# ══════════════════════════════════════════════════
+# TC7-B — RP4/RP5 shadow projection of TC7-A EvidenceResult
+# ══════════════════════════════════════════════════
+#
+# TC7-A's EvidenceResult (core/evidence_projection.py) is the sole execution-
+# evidence authority for approval-gated Gateway executions. This function is
+# a thin, one-way, read-only projection of that already-correlated result
+# into RP4/RP5's own aggregate shape -- it never re-derives evidence from a
+# raw DispatcherOutcome a second time, never inspects user-facing text, and
+# never widens what counts as "verified" beyond what TC7-A itself decided.
+def project_evidence_result(evidence: EvidenceResult) -> TurnEvidenceSummary:
+    """Project one TC7-A EvidenceResult into a fresh, single-component summary.
+
+    Always returns a brand-new TurnEvidenceSummary scoped to exactly the one
+    contract resolution this EvidenceResult came from -- callers must never
+    reuse or accumulate this across turns or contracts (mirrors
+    ActionGateway.evidence_for_contract()'s own exact-contract-only
+    guarantee, never "latest for user"). A `result == "success"` without
+    `verified == True` is treated as an anomaly -- TC7-A's own
+    build_evidence_result_from_outcome() never constructs that combination --
+    and falls closed to unverified_effect rather than being silently
+    accepted as a verified write.
+    """
+    summary = TurnEvidenceSummary()
+    if evidence.outcome_unknown or evidence.result == "outcome_unknown":
+        summary.outcome_unknown += 1
+    elif evidence.result == "success" and evidence.verified:
+        summary.verified_writes += 1
+    elif evidence.result == "failed":
+        summary.failed_calls += 1
+    else:
+        # Anomalous/unrecognized shape (e.g. "success" without verified=True)
+        # -- never manufacture success from something TC7-A didn't verify.
+        summary.record_unverified_effect()
+    return summary
 
 
 @dataclass(frozen=True)
