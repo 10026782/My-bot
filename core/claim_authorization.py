@@ -96,7 +96,11 @@ def authorize_claim(
         return MessageState.APPROVAL_PENDING, "lifecycle_pending"
 
     if lifecycle in _IN_PROGRESS_LIFECYCLE:
-        return MessageState.OUTCOME_UNKNOWN, "lifecycle_not_terminal"
+        # Matches core.message_contract._state_from_lifecycle()'s own
+        # approved/executing -> APPROVED_PROCESSING mapping exactly (no
+        # conflict with TC7-B policy here, unlike the read-only case above --
+        # reuse the canonical value rather than inventing a divergent one).
+        return MessageState.APPROVED_PROCESSING, "lifecycle_not_terminal"
 
     if lifecycle in _UNRESOLVED_LIFECYCLE:
         return MessageState.OUTCOME_UNKNOWN, "lifecycle_unresolved"

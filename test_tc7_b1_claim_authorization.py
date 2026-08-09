@@ -108,7 +108,18 @@ def test_in_progress_lifecycle_cannot_claim_success_regardless_of_evidence():
         for evidence in _ALL_EVIDENCE_STATES:
             state, reason = authorize_claim(evidence, lifecycle)
             assert state != MessageState.SUCCESS, (lifecycle, evidence, state)
-            assert state == MessageState.OUTCOME_UNKNOWN and reason == "lifecycle_not_terminal"
+            assert state == MessageState.APPROVED_PROCESSING and reason == "lifecycle_not_terminal"
+
+
+def test_approved_and_executing_match_canonical_message_contract_mapping():
+    # core.message_contract._state_from_lifecycle() maps both "approved" and
+    # "executing" to MessageState.APPROVED_PROCESSING -- unlike the
+    # verified_read_only override, there is no TC7-B policy conflict here,
+    # so this module must reuse the canonical value exactly, not invent one.
+    for lifecycle in ("approved", "executing"):
+        state, reason = authorize_claim("verified_write_success", lifecycle)
+        assert state == MessageState.APPROVED_PROCESSING, (lifecycle, state)
+        assert reason == "lifecycle_not_terminal"
 
 
 def test_unsupported_evidence_string_fails_closed():
