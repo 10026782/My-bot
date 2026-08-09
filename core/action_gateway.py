@@ -36,7 +36,8 @@ from core.action_contract_repository import (
 # set_resolution_sink(), is the only thing allowed to know about
 # memory_store).
 from core.action_resolution_event import ActionResolutionEvent, ActionResolutionOutcome
-from core.evidence_projection import build_evidence_result
+from core.dispatcher_outcome import DispatcherOutcome
+from core.evidence_projection import build_evidence_result, build_evidence_result_from_outcome
 from core.lifecycle_projection import build_action_lifecycle_result
 from core.router.ownership_contracts import ActionLifecycleResult, EvidenceResult
 from tool_registry import needs_approval
@@ -2933,7 +2934,9 @@ class ActionGateway:
             "outcome_unknown": ActionResolutionOutcome.OUTCOME_UNKNOWN,
         }
 
-        def _persist_execution_status(status: str) -> bool:
+        def _persist_execution_status(
+            status: str, *, dispatcher_outcome: DispatcherOutcome | None = None,
+        ) -> bool:
             try:
                 persisted = self._ledger.update_status(contract.contract_id, status)
             except ActionContractTransitionError as exc:
@@ -2957,6 +2960,30 @@ class ActionGateway:
             _outcome = _EXECUTION_OUTCOME_MAP.get(status)
             if _outcome is not None:
                 self._emit_resolution(contract.contract_id, _outcome)
+            # TC7-A — exact-contract execution evidence. Re-reads the contract
+            # by its exact id (never "latest for user") so the projection
+            # sees the status just persisted above, regardless of whether
+            # update_status() mutated `contract` in place or cached a fresh
+            # object. Same-turn projection only, logged for observability —
+            # not yet consumed anywhere for claim authorization/enforcement
+            # (that is TC7-B's job, not this PR's).
+            try:
+                _evidence = self.evidence_for_contract(
+                    contract.contract_id, dispatcher_outcome=dispatcher_outcome,
+                )
+                if _evidence is not None:
+                    logger.info(
+                        "[TC7A][ExecutionEvidence] contract=%s result=%s verified=%s "
+                        "outcome_unknown=%s evidence_ref_present=%s error=%s",
+                        contract.contract_id, _evidence.result, _evidence.verified,
+                        _evidence.outcome_unknown, bool(_evidence.evidence_ref),
+                        _evidence.error,
+                    )
+            except Exception:
+                logger.debug(
+                    "[TC7A][ExecutionEvidence] projection skipped: contract=%s",
+                    contract.contract_id, exc_info=True,
+                )
             return True
 
         # Phase 4B0 atomic claim gate (if flag enabled)
@@ -3029,7 +3056,9 @@ class ActionGateway:
                     from core.dispatcher_outcome import DispatcherOutcome
                     if isinstance(result, DispatcherOutcome):
                         terminal_status = result.result
-                        if not _persist_execution_status(terminal_status):
+                        if not _persist_execution_status(
+                            terminal_status, dispatcher_outcome=result,
+                        ):
                             return (
                                 "⚠️ תוצאת הביצוע סווגה כ־"
                                 f"{terminal_status}, אך לא נשמרה באופן עמיד. "
@@ -3099,7 +3128,9 @@ class ActionGateway:
         from core.dispatcher_outcome import DispatcherOutcome
         if isinstance(raw, DispatcherOutcome):
             if raw.is_failed() or raw.is_outcome_unknown():
-                if not _persist_execution_status(raw.result):
+                if not _persist_execution_status(
+                    raw.result, dispatcher_outcome=raw,
+                ):
                     return (
                         "⚠️ תוצאת הביצוע סווגה כ־"
                         f"{raw.result}, אך לא נשמרה באופן עמיד. "
@@ -3119,7 +3150,17 @@ class ActionGateway:
             from core.anti_hallucination import verify_execution
             check = verify_execution(contract.tool_name, raw)
             if check.status == "failed":
-                if not _persist_execution_status("failed"):
+                if not _persist_execution_status(
+                    "failed",
+                    dispatcher_outcome=DispatcherOutcome(
+                        result="failed",
+                        user_message=(
+                            raw.get("user_message", "") if isinstance(raw, dict) else ""
+                        ),
+                        error=check.reason,
+                        raw_response=raw if isinstance(raw, dict) else None,
+                    ),
+                ):
                     return (
                         "❌ לא נמצאה הוכחת ביצוע, וגם סטטוס הכשל לא נשמר באופן עמיד. "
                         "אין לנסות שוב עד לבדיקת המערכת."
@@ -3138,7 +3179,15 @@ class ActionGateway:
         success_status = (
             "completed" if getattr(self._ledger, "_repository", None) else "executed"
         )
-        if not _persist_execution_status(success_status):
+        if not _persist_execution_status(
+            success_status,
+            dispatcher_outcome=DispatcherOutcome(
+                result="completed",
+                user_message=raw.get("user_message", "") if isinstance(raw, dict) else "",
+                external_id=ext_id,
+                raw_response=raw if isinstance(raw, dict) else None,
+            ),
+        ):
             return (
                 f"⚠️ הספק החזיר הצלחה מפורשת, אך סטטוס {success_status} לא נשמר "
                 "באופן עמיד. אין לנסות שוב עד לבדיקת המערכת."
@@ -3433,6 +3482,58 @@ class ActionGateway:
         if latest is None:
             return None
         return build_evidence_result(latest)
+
+    # ── TC7-A — סמכות-ראיה לפי contract מדויק ──────────────────────
+    # execution_status()/terminal_status() לעיל תחומי-משתמש: הם עונים על
+    # "מהו ה-contract החי/הטרמינלי האחרון של הזהות הזו" — בדיוק אותה בעיית
+    # קורלציה ש-TC6's reply_ownership_for_contract() תיקן עבור בעלות-תשובה
+    # (ראו ההערה מעל reply_ownership_for_contract למעלה). בנוסף, שני אלה
+    # קוראים ל-build_evidence_result() בלי provider evidence כלשהו — כך
+    # ש-contract "completed" אמיתי עדיין נכשל-בסגירה ל-outcome_unknown
+    # (ראו build_evidence_result()'s own docstring: "success requires both a
+    # terminal successful contract and verified evidence"). זו סיבה נוספת,
+    # לא רק user-scope, שלמנוע שימוש בהם כסמכות-אכיפה.
+    #
+    # evidence_for_contract() עונה על שאלה צרה ובטוחה-ל-turn: "עבור ה-
+    # contract_id המדויק הזה, ועם ה-DispatcherOutcome המדויק (אם יש) שביצוע
+    # ה-contract הזה עצמו הפיק ב-turn הזה, מהי ה-EvidenceResult הקנונית" —
+    # הקורא אחראי לספק את ה-contract_id וה-outcome המדויקים של ה-turn הזה
+    # עצמו, לעולם לא "latest for user".
+
+    def evidence_for_contract(
+        self,
+        contract_id: str | None,
+        *,
+        dispatcher_outcome: DispatcherOutcome | None = None,
+    ) -> EvidenceResult | None:
+        """הקרנת ראיית-ביצוע לפי contract מדויק (TC7-A).
+
+        מחזירה ``None`` עבור ``contract_id`` ריק/חסר, או כזה שאין לו
+        ``ActionContract`` תואם — שני המקרים אומרים "אין כאן ראיה לפי
+        contract מדויק", לעולם לא "הפעולה בוצעה/נכשלה". קוראים אסור להם
+        להתייחס ל-``None`` כהוכחת כישלון; זה רק אומר שלפונקציה הזו אין מה
+        לומר, כך שברירת-המחדל של הקורא עצמו (שנכשלת-בסגירה) חלה.
+
+        ``dispatcher_outcome``, כשמסופק, חייב להיות ה-DispatcherOutcome
+        שביצוע ה-contract המדויק הזה עצמו הפיק באותו turn — לעולם לא
+        outcome של contract אחר. ללא ``dispatcher_outcome``, ואפילו אם
+        ``contract.status`` הוא "completed", התוצאה נכשלת-בסגירה ל-
+        outcome_unknown — מצב-contract לבדו אינו מספיק להצלחה מאומתת
+        (ראו build_evidence_result_from_outcome()'s docstring).
+
+        במכוון לא תופסת exceptions מ-``self._ledger.find_by_id`` — אותו
+        טעם בדיוק כמו ב-``reply_ownership_for_contract`` למעלה: מבדילה בין
+        "לא נמצא" אמיתי (``None`` נקי) לבין כשל קריאה מה-repository. קוראים
+        חייבים לתפוס כל exception מהפונקציה הזו בעצמם ולהיכשל-בסגירה,
+        לעולם לא לפרש exception כ"אין ראיה == לא בוצע".
+        """
+        normalized_contract_id = str(contract_id or "").strip()
+        if not normalized_contract_id:
+            return None
+        contract = self._ledger.find_by_id(normalized_contract_id)
+        if contract is None:
+            return None
+        return build_evidence_result_from_outcome(contract, dispatcher_outcome)
 
     def pending_queue_query(self, canonical_user_id: str) -> list[ActionLifecycleResult]:
         """Return the WS2 lifecycle projections for all pending contracts."""
