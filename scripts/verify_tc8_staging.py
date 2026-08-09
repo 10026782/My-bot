@@ -23,6 +23,11 @@ ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "core" / "migrations" / "002_durable_turn_state.sql"
 EXPECTED_COMMIT = os.getenv("TC8_EXPECTED_SHA", "").strip()
 
+# When invoked as ``python scripts/verify_tc8_staging.py``, Python puts the
+# scripts directory—not the repository root—on sys.path.  The verification
+# imports the repository's real core package, so make that path explicit.
+sys.path.insert(0, str(ROOT))
+
 REGRESSION_GROUPS = {
     "Callback hardening": "test_bug_approval_callback_hardening.py",
     "PR-0C callbacks": "test_pr0c_telegram_callback_gateway.py",
