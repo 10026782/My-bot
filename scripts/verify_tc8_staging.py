@@ -112,7 +112,9 @@ def _connect():
 
 def _preflight(evidence: dict) -> None:
     sha = _deploy_sha()
-    if EXPECTED_COMMIT and sha != EXPECTED_COMMIT:
+    if EXPECTED_COMMIT and not (
+        sha == EXPECTED_COMMIT or sha.startswith(EXPECTED_COMMIT)
+    ):
         raise VerificationFailure(
             f"deploy SHA mismatch: expected {EXPECTED_COMMIT}, got {sha}"
         )
