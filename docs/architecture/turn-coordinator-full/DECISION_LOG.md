@@ -95,3 +95,29 @@
     bundle-building still does not surface this directory. A future fix
     would need to work the token/document budgets across every affected
     profile query deliberately, not as a side effect of an unrelated PR.
+
+## Implementation status update — 2026-08-09
+
+16. TC6 is merged (PR #566 `684d299`, PR #569 `d0a8620`) and
+    production-verified for three scenarios (create→pending, status query,
+    blocked second create) via Render dashboard + live application logs +
+    Telegram transcript, contract `90671635-7dd9-42c7-a467-cc928b18a2a4`,
+    deploy `7dbddddbe84bbdffd813704094a7d583d948ea96` (live 03:25). See
+    `../turn-coordinator/README.md`'s 09/08/2026 note (canonical current
+    merge/implementation status) and `TC6_APP_INTEGRATOR_PATCH_SPEC.md`
+    §Status for full evidence and exact scope. Callback-button flow, RP5
+    classification, and replay/stale-callback were not covered and remain
+    open per `GAP_ANALYSIS.md`.
+17. `FEATURE_SINGLE_SPEAKER_APPROVAL_UX`'s code fallback/default remains
+    `false` (unchanged by PR #569); documentation across this repo was
+    previously stale in describing TC6 as gated behind a flag that was "not
+    yet activated" — the active deployed production runtime has carried this
+    flag as `true` since before TC6 (per
+    `docs/architecture/action-gateway/PRODUCTION_30JUL2026_RENDER_VERIFICATION.md`,
+    30–31/07/2026) and still does as of 09/08/2026. TC6 enforcement is
+    therefore live now, not pending future activation. Flag OFF remains the
+    verified rollback/kill-switch path.
+18. Per this log's own entry 9 DAG
+    (`TC1 → TC2 → TC3 → TC5 → TC4 → TC6 → TC7/TC8 → TC9 → TC10`), TC6's
+    closure means TC7 ("evidence finalizer and dispatcher proof") preflight
+    may begin. No TC7 implementation has started as of this entry.

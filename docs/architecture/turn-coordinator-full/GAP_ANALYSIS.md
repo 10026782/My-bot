@@ -13,6 +13,17 @@ SINGLE_SPEAKER_CLOSURE_AUDIT_20260807.md`). TC6 עצמו **נשאר `NEXT_IMPLEM
 כשקוד TC6 עצמו יתחיל, השינוי הנקודתי הזה ב-`app.py` צריך להיסקר/להתאחד לתוכו,
 לא להישאר side-patch נפרד לצמיתות.
 
+**עדכון-סטטוס (09/08/2026):** TC6 עצמו מוזג (PR #566 — WS2 projection
+`reply_ownership_for_contract()`; PR #569 — integrator cutover ב-`app.py`)
+ואומת ב-production runtime (Render dashboard + לוגים חיים + תמלול Telegram,
+contract `90671635-7dd9-42c7-a467-cc928b18a2a4`) עבור שלושה תרחישים:
+יצירה→pending, status query, וחסימת יצירה שנייה (BUG-122). TC6 **אינו**
+`NEXT_IMPLEMENTATION` יותר — שורת הטבלה למטה עודכנה בהתאם. callback-button
+flow, סיווג RP5, ו-replay/stale-callback עדיין לא כוסו בסבב אימות זה ונשארים
+פתוחים (ראו `ROADMAP.md` N17 item 4). ראו גם `TC6_APP_INTEGRATOR_PATCH_SPEC.md`
+§Status ו-`../turn-coordinator/README.md`'s 09/08/2026 note (הקובץ הקנוני
+ל-current merge/implementation status).
+
 | Class | Gap | Primary workstream | Current source | Target | Risk | Internal milestone | Evidence |
 |---|---|---|---|---|---|---|---|
 | BLOCKER | callback fallback can dispatch directly when AC lookup fails | Workstream 2 | app.py, callback path | fail closed through Gateway | unauthorized/duplicate write | TC7 | direct verification + callback tests |
@@ -22,7 +33,7 @@ SINGLE_SPEAKER_CLOSURE_AUDIT_20260807.md`). TC6 עצמו **נשאר `NEXT_IMPLEM
 | BEFORE_FLAG_ON | direct dispatcher does not universally enforce approval metadata | Workstream 2 | dispatcher/registry | execution proof gate | approval bypass | TC7 | phase-4C audit |
 | NEXT_IMPLEMENTATION | canonical builders absent | Workstream 1 | scattered handlers | named typed outputs | positional payload/canonicalization drift | TC2/TC4 | router/current code |
 | NEXT_IMPLEMENTATION | resolver behavior differs by entity/surface | Workstream 1 | adapters, TMA, Agent | bounded identity-scoped map | wrong entity/update | TC3/TC5 | resolver sources |
-| NEXT_IMPLEMENTATION (interim patch applied 07/08/2026, gap not closed — see note above) | reply ownership is conditional and renderer paths drift | Workstream 2 | app/Gateway/F52 | explicit reply policy + one speaker | duplicate/conflicting text | TC6 | ownership research; BUG-162 interim patch: `BUG-162_SINGLE_SPEAKER_CLOSURE_AUDIT_20260807.md` |
+| MERGED_AND_PRODUCTION_VERIFIED (PR #566/#569, verified 09/08/2026 for 3 of 6 scenarios — see status note above; callback-button/RP5/replay paths still open) | reply ownership is conditional and renderer paths drift | Workstream 2 | app/Gateway/F52 | explicit reply policy + one speaker | duplicate/conflicting text | TC6 | ownership research; BUG-162 interim patch (superseded): `BUG-162_SINGLE_SPEAKER_CLOSURE_AUDIT_20260807.md` |
 | FOLLOW_UP | evidence shadow observes Gateway-owned turns but is not finalizer | Workstream 2 | app/RP5 | finalizer at execution boundary | false completion claims | TC7 | RP5 node/direct check |
 | FOLLOW_UP | surface-specific rendering is not one public composer | Workstream 3 | Gateway/F52/formatters | MessageContract at all surfaces | UX inconsistency/leaks | TC9 | F52 docs |
 | FOLLOW_UP | batch/session preview has separate lifecycle semantics | Workstream 1 | lead capture/session | explicit resolver or observation-only | false approval affordance | TC5 | BUG audit |

@@ -30,6 +30,21 @@ agent-prompt/Librarian-bundle/integrator-review workflow this plan defines
 file ownership map) — flagged here so TC6's actual implementer is aware of
 it and does not discover it as an unexplained drift later.
 
+**TC6 status update (09/08/2026):** TC6 is now implemented and merged — WS2's
+exact-contract reply-ownership projection (`reply_ownership_for_contract()`,
+PR #566, `684d299`) and the `app.py` integrator cutover (PR #569, `d0a8620`)
+both landed on `origin/main`. This supersedes the interim BUG-162 patch
+described above. Production verification was performed the same day (Render
+dashboard: `FEATURE_SINGLE_SPEAKER_APPROVAL_UX=true`; live deploy
+`7dbddddbe84bbdffd813704094a7d583d948ea96`; application logs + Telegram
+transcript, contract `90671635-7dd9-42c7-a467-cc928b18a2a4`) for three
+scenarios: create→pending, status query, and blocked second create.
+Callback-button flow, RP5 classification, and replay/stale-callback were not
+covered by this round and remain open (`GAP_ANALYSIS.md`, `ROADMAP.md` N17
+item 4). Per `DECISION_LOG.md` entry 9's DAG
+(`TC1 → TC2 → TC3 → TC5 → TC4 → TC6 → TC7/TC8 → TC9 → TC10`), TC7 preflight
+may now proceed.
+
 This is an internal milestone view of exactly three implementation
 workstreams—not ten independent tracks: TC1–TC4 belong to Workstream 1,
 TC5–TC8 to Workstream 2, and TC9–TC10 to Workstream 3. Development may run in

@@ -2,7 +2,7 @@
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
 עודכן: 09/08/2026 — **תיעוד PR #562–#570 (8 substantive PRs) + BUG-105 verification:**
 **Substantive PRs merged 08/08–09/08/2026:** TC5 entity resolver (PR #562, 08/08/2026), TC4 lead builders (PR #564, 08/08/2026), TC4 task-integration hardening (PR #565, 08/08/2026), TC6 WS2 reply-ownership (PR #566, 08/08/2026), Emergency Stop backing hardening (PR #567, 08/08/2026), F14-A1 contact gate (PR #568, 09/08/2026), TC6 integrator app.py cutover (PR #569, 09/08/2026 — ראו TC6_APP_INTEGRATOR_PATCH_SPEC.md §0 Cross-Layer Impact Matrix), F14-B1 legacy caller migration (PR #570, 09/08/2026). כל שמונה PRs מוזגו בפועל ואומתו ב-`git log origin/main` / `git merge-base --is-ancestor`.
-**BUG-105 verification (docs-only):** אומת מחדש מול `origin/main` (`38d9226`), כבר מכוסה ב-code — אין שינוי קוד פתוח. BUG-105: regex לפני/אחרי זהה; 204 suites + 11 בדיקות מטריצת פורמטים עברו. **F14 Discovery/Planning** הוא תיעוד היסטורי של מפת נתיבי הכתיבה: שני נתיבי Contact creation בפועל (`crm_add_contact` legacy, `airtable_add` generic), ללא dedup; import scripts ו-`session_store.py`/`contact_resolver.py` אינם gates. **מאז:** F14-A מוזג (#568), F14-B1 מעביר `crm_add_contact()` ו-`convert_lead_to_contact()` דרך אותו gate; F14-B2 עדיין לא התחיל. **TC, Emergency Stop, F14 phases A-B1 status:** פרט ל-TC6 (flag-gated default-off), אף אחד מ-8 PRs לא שינה behavior חי בעת ההפעלה; TC6 בעתיד ימחליף ה-approval reply-ownership projection בעת הפעלת `FEATURE_SINGLE_SPEAKER_APPROVAL_UX`; F14/TC4/TC5/Emergency-Stop/TC6-WS2 are structural/foundational, live but enforcement/integration/flag-activation deferred.
+**BUG-105 verification (docs-only):** אומת מחדש מול `origin/main` (`38d9226`), כבר מכוסה ב-code — אין שינוי קוד פתוח. BUG-105: regex לפני/אחרי זהה; 204 suites + 11 בדיקות מטריצת פורמטים עברו. **F14 Discovery/Planning** הוא תיעוד היסטורי של מפת נתיבי הכתיבה: שני נתיבי Contact creation בפועל (`crm_add_contact` legacy, `airtable_add` generic), ללא dedup; import scripts ו-`session_store.py`/`contact_resolver.py` אינם gates. **מאז:** F14-A מוזג (#568), F14-B1 מעביר `crm_add_contact()` ו-`convert_lead_to_contact()` דרך אותו gate; F14-B2 עדיין לא התחיל. **TC, Emergency Stop, F14 phases A-B1 status:** TC6 (PR #566/#569) מחליף בפועל את ה-approval reply-ownership projection תחת `FEATURE_SINGLE_SPEAKER_APPROVAL_UX` — ברירת המחדל בקוד נשארת `false`, אך ב-runtime הפרוס בפועל הדגל `true` (אומת מול Render dashboard + לוגי production חיים + תמלול Telegram, 09/08/2026 — ראו `docs/architecture/turn-coordinator-full/TC6_APP_INTEGRATOR_PATCH_SPEC.md` §Status ו-N17 item 4 למטה לתחולה המדויקת); אכיפת TC6 reply-ownership פעילה כעת בפרודקשן. שאר 7 ה-PRs לא שינו behavior חי בעת המיזוג; F14/TC4/TC5/Emergency-Stop נשארים structural/foundational, live אך enforcement/integration נדחה.
 עודכן קודם: 07/08/2026 — **תיעוד PR #525–#552 (פער-תיעוד, נסגר ישירות מ-`git log origin/main`,
 לא הועלה כ-PR נפרד ע"י מי שביצע אותם):** 28 PRs נוספים מוזגו ל-`main` בין 05–06/08/2026 בלי
 עדכון ROADMAP נלווה — אומת ישירות ב-`git log`/`git merge-base --is-ancestor` על `origin/main`
@@ -1065,6 +1065,27 @@ evidence. תועד `selection_terms`/`query_terms` כ-controlled vocabulary יח
 לכל טענה: required evidence, why required, environment, test date, exact scope, supplied
 evidence, missing evidence, allowed status. **אין לעדכן את הספרן ל-`production_verified` ללא
 ראיה ישירה.**
+
+**עדכון 09/08/2026 — סבב ראשון של live production verification עבור TC6/`FEATURE_SINGLE_SPEAKER_APPROVAL_UX`:**
+הבעלים סיפק Render dashboard env-var read, live application-log excerpt, ו-Telegram
+transcript עבור contract `90671635-7dd9-42c7-a467-cc928b18a2a4` על deploy
+`7dbddddbe84bbdffd813704094a7d583d948ea96` (live 03:25). מכסה בראיה ישירה:
+- (1) הדגל פעיל ב-production בפועל — **כן**, מאומת (screenshot של env var `=true`).
+- (2) מתקבלת תשובה סופית אחת בלבד בפועל — **כן**, בשלושת התרחישים שנבדקו (יצירה→pending,
+  שאילתת סטטוס פעמיים, חסימת יצירה שנייה דרך BUG-122); הלוגים מראים `reply_owner=gateway`
+  ו-`agent_calls=0`/`duplicate_reply_suppressed=true` בכל תרחיש.
+- (4) identifiers פנימיים לא הופיעו בלוגים שנבדקו — **כן**, חלקית: לוג
+  `[UnifiedStatusFormatterShadow]` מראה `record_id_leak=False tool_name_leak=False
+  contract_id_leak=False` בשני התרחישים שהפיקו אותו לוג.
+
+**לא כוסה בסבב הזה — נשאר `לא בוצע`:**
+- (3) callback עם `action_id:contract_id` end-to-end — רק flow טקסטואלי (הודעות "מאשר"/"בטל")
+  נבדק, לא כפתורי inline-callback אישור/דחייה.
+- (5) האם RP5 מסווג נכון Gateway-owned approval turns — לא נצפה לוג RP5 ישיר בחלון הזה.
+- (6) replay/stale callback אינם גורמים לביצוע נוסף — לא נבדק בסבב הזה.
+
+**מסקנה:** אין לסמן את כל חמשת סעיפי ה-checklist כ-`production_verified` — רק (1),(2),(4) יש
+להם ראיה ישירה מהתאריך הזה. (3),(5),(6) נשארים פתוחים לסבב אימות נפרד.
 
 **5. Multi-session coordination — טרם תוכנן, לא בוצע.**
 ארכיטקטורה עתידית שבה Session A (research/librarian verification) ו-Session B

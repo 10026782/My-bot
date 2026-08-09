@@ -1,6 +1,39 @@
 # TurnCoordinator + TurnEnvelope
 
-## Current implementation status — 2026-08-07
+## Current implementation status — 2026-08-09 (supersedes the TC6/flag claims in the 07/08/2026 note below)
+
+**TC6 is merged and production-verified as of today.** WS2's exact-contract
+reply-ownership projection (`reply_ownership_for_contract()` in
+`core/action_gateway.py`, PR #566, merge `684d299`) and the `app.py`
+integrator cutover (PR #569, merge `d0a8620`) both landed on `origin/main`
+09/08/2026. This replaces the 07/08/2026 "TC6 remains `NEXT_IMPLEMENTATION`"
+claim below and the BUG-162 note's framing — TC6 itself, not just the BUG-162
+interim patch, is now live.
+
+`FEATURE_SINGLE_SPEAKER_APPROVAL_UX`: the code fallback/default remains
+`false` (`feature_flags.py`), and that does not change with PR #569 — this
+PR does not touch the environment variable itself. But the **active deployed
+production runtime has this flag set to `true`**, confirmed via a read-only
+Render dashboard environment-variable check and a live application-log +
+Telegram transcript check performed by the owner on 09/08/2026 against the
+deployed commit (`origin/main` HEAD `7dbddddbe84bbdffd813704094a7d583d948ea96`,
+deploy live 03:25). TC6 reply-ownership enforcement is therefore **live**,
+not pending activation. Turning the flag OFF remains the verified rollback/
+kill-switch path and restores the pre-TC6 legacy producer/tool-loop
+behavior (`build_approval_lifecycle_result()`).
+
+This round of verification covered three scenarios end-to-end (fresh
+create → pending; status query for the same pending contract; a second
+create blocked by BUG-122's pending gate) for a single ActionContract
+(`90671635-7dd9-42c7-a467-cc928b18a2a4`) and confirmed the Gateway was the
+sole reply owner with the Agent suppressed in each. It did **not** cover:
+the Telegram callback-button (approve/reject) path, RP5's classification of
+these turns, or replay/stale-callback behavior — those remain open per
+`../turn-coordinator-full/GAP_ANALYSIS.md` and `ROADMAP.md`'s N17 item 4
+checklist, and per this repo's own Rule 15/GOVERNANCE_RULES.md should not be
+described as verified until they have their own direct evidence.
+
+## Current implementation status — 2026-08-07 (TC6/flag status above is newer; rest of this note still applies)
 
 The architecture documents remain the authority for the staged Turn
 Coordinator plan. WS1 foundation contracts were merged in PR #536. The narrow
@@ -42,14 +75,17 @@ yet," since its own status notes drift between updates (see its
 `DECISION_LOG.md` entry 15 for the same cross-reference in the other
 direction). Neither directory supersedes the other's own domain.
 
-**BUG-162 note:** WS2's TC6 ("explicit reply ownership") is what generalizes
-PR #471's conditional mechanism described below — it remains
-`NEXT_IMPLEMENTATION` (`turn-coordinator-full/GAP_ANALYSIS.md`), not done. A
-narrow **interim tactical patch** (not TC6 itself) was applied 07/08/2026 to
-the legacy `_queue_approval_detailed_impl()` path this file already
-describes as still authoritative for reply text — see
+**BUG-162 note (historical — see the 09/08/2026 status above for current
+state):** WS2's TC6 ("explicit reply ownership") generalizes PR #471's
+conditional mechanism described below. As of 07/08/2026 it was still
+`NEXT_IMPLEMENTATION`, and a narrow **interim tactical patch** (not TC6
+itself) was applied that day to the legacy `_queue_approval_detailed_impl()`
+path — see
 `docs/architecture/action-gateway/BUG-162_SINGLE_SPEAKER_CLOSURE_AUDIT_20260807.md`
-and `turn-coordinator-full/DECISION_LOG.md` entry 14.
+and `turn-coordinator-full/DECISION_LOG.md` entry 14. TC6 itself merged and
+was production-verified 09/08/2026 (PR #566/#569); the real cutover now
+supersedes this interim patch, which has not yet had a separate cleanup pass
+to confirm it was fully absorbed rather than left as a parallel mechanism.
 
 ## Purpose
 

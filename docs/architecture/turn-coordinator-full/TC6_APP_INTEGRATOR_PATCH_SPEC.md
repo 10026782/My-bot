@@ -1,9 +1,20 @@
 # TC6 — `app.py` Integrator Patch Spec
 
-**Status:** merged to `origin/main` commit d0a8620 (PR #569 merged
-2026-08-08) — do not read this as "applied in production"; per this
-repo's own Rule 15/GOVERNANCE_RULES.md, production verification is
-distinct from code merge and has not occurred yet.
+**Status:** merged to `origin/main` commit d0a8620 (PR #569). **Production
+verification performed 09/08/2026** — Render dashboard confirms
+`FEATURE_SINGLE_SPEAKER_APPROVAL_UX=true` in the live environment; the
+integrator cutover's deploy (`origin/main` HEAD
+`7dbddddbe84bbdffd813704094a7d583d948ea96`) went live 03:25; application
+logs plus a Telegram transcript for contract
+`90671635-7dd9-42c7-a467-cc928b18a2a4` confirm the Gateway was the sole
+reply owner (Agent suppressed) across three scenarios: fresh create →
+pending, a status query on the same pending contract, and a second create
+blocked by BUG-122's pending gate. This round did **not** cover the
+Telegram callback-button (approve/reject) path, RP5's classification of
+these turns, or replay/stale-callback behavior — those remain unverified;
+see `ROADMAP.md`'s N17 item 4 checklist for exact scope. Per this repo's
+own Rule 15/GOVERNANCE_RULES.md, do not read the above as blanket
+"production verified" beyond the three scenarios actually evidenced.
 `app.py` is Integrator-only per `PARALLEL_IMPLEMENTATION_WORKSTREAMS.md`'s
 file ownership map — the TC6 WS2 branch (`claude/tc6-explicit-reply-
 ownership`, merged as PR #566) did not edit this file directly. This
