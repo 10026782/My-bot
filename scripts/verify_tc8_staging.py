@@ -345,12 +345,15 @@ def _run_test(path: str, pytest_mode: bool = False) -> tuple[bool, str]:
     return result.returncode == 0, summary
 
 
-def _run_regressions(evidence: dict) -> None:
+def _run_regressions(evidence: dict) -> bool:
     print("\nRegression groups")
+    group_failures = []
     for label, filename in REGRESSION_GROUPS.items():
         ok, summary = _run_test(filename)
         evidence[label] = {"status": "PASS" if ok else "FAIL", "detail": summary}
         print(f"{label:<28} {'PASS' if ok else 'FAIL'} — {summary}")
+        if not ok:
+            group_failures.append(label)
     print("\nFull regression matrix")
     failures = []
     for filename in FULL_REGRESSION:
@@ -364,6 +367,7 @@ def _run_regressions(evidence: dict) -> None:
         "detail": f"{len(FULL_REGRESSION) - len(failures)}/{len(FULL_REGRESSION)} passed",
         "failures": failures,
     }
+    return not group_failures and not failures
 
 
 def main() -> int:
@@ -388,7 +392,8 @@ def main() -> int:
                 evidence[label] = {"status": "PASS", "detail": "real PostgreSQL"}
                 print(f"{label:<28} PASS — {detail}")
             _check("Authority invariants", _authority_check, evidence)
-            _run_regressions(evidence)
+            if not _run_regressions(evidence):
+                failed = True
     except Exception as exc:
         failed = True
         evidence["fatal"] = {"status": "FAIL", "detail": f"{type(exc).__name__}: {exc}"}
