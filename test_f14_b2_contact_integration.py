@@ -119,6 +119,7 @@ class F14B2ContactIntegrationTests(unittest.TestCase):
                 patch.object(crm, "_get", return_value=[]), \
                 patch.object(crm, "_post") as legacy_post, \
                 patch("tools.airtable_gateway.airtable_create", return_value=provider) as gateway, \
+                patch("tools.dispatcher.audit_log_airtable") as audit, \
                 patch("tools.dispatcher.airtable_add", side_effect=AssertionError("bypass")), \
                 patch("tools.dispatcher._ff.is_enabled", return_value=False):
             from tools.dispatcher import dispatch_tool
@@ -127,6 +128,7 @@ class F14B2ContactIntegrationTests(unittest.TestCase):
         self.assertEqual(result["external_id"], "recNEW")
         gateway.assert_called_once()
         legacy_post.assert_not_called()
+        audit.assert_called_once()
 
     def test_generic_uncertain_outcome_is_forwarded_without_retry(self):
         from core.dispatcher_outcome import DispatcherOutcome
@@ -136,12 +138,47 @@ class F14B2ContactIntegrationTests(unittest.TestCase):
         with patch.object(crm, "_creds_ok", return_value=True), \
                 patch.object(crm, "_get", return_value=[]), \
                 patch("tools.airtable_gateway.airtable_create", return_value=provider) as gateway, \
+                patch("tools.dispatcher.audit_log_airtable") as audit, \
                 patch("tools.dispatcher._ff.is_enabled", return_value=False):
             from tools.dispatcher import dispatch_tool
             result = dispatch_tool("airtable_add", {"table": Tables.CONTACTS, "fields": fields}, self.identity)
         self.assertIsInstance(result, DispatcherOutcome)
         self.assertTrue(result.is_outcome_unknown())
         gateway.assert_called_once()
+        audit.assert_called_once()
+
+    def test_generic_existing_audits_once_without_writes(self):
+        fields = {ContactFields.NAME: "Dana", ContactFields.PHONE: "+972548212778"}
+        with patch.object(crm, "_creds_ok", return_value=True), \
+                patch.object(crm, "_get", return_value=[{"id": "recOLD"}]), \
+                patch.object(crm, "_post") as legacy_post, \
+                patch("tools.airtable_gateway.airtable_create") as gateway, \
+                patch("tools.dispatcher.audit_log_airtable") as audit, \
+                patch("tools.dispatcher._ff.is_enabled", return_value=False):
+            from tools.dispatcher import dispatch_tool
+            result = dispatch_tool("airtable_add", {"table": Tables.CONTACTS, "fields": fields}, self.identity)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["external_id"], "recOLD")
+        gateway.assert_not_called()
+        legacy_post.assert_not_called()
+        audit.assert_called_once()
+
+    def test_generic_definite_failure_audits_once_without_retry(self):
+        fields = {ContactFields.NAME: "Dana", ContactFields.PHONE: "+972548212778"}
+        provider = AirtableCreateOutcome("failed", error="HTTP 422")
+        with patch.object(crm, "_creds_ok", return_value=True), \
+                patch.object(crm, "_get", return_value=[]), \
+                patch.object(crm, "_post") as legacy_post, \
+                patch("tools.airtable_gateway.airtable_create", return_value=provider) as gateway, \
+                patch("tools.dispatcher.audit_log_airtable") as audit, \
+                patch("tools.dispatcher._ff.is_enabled", return_value=False):
+            from tools.dispatcher import dispatch_tool
+            result = dispatch_tool("airtable_add", {"table": Tables.CONTACTS, "fields": fields}, self.identity)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["evidence"]["contact_status"], "create_error")
+        gateway.assert_called_once()
+        legacy_post.assert_not_called()
+        audit.assert_called_once()
 
     def test_distinct_contracts_can_race_between_lookup_and_create(self):
         """Documents F14's known check-then-create limitation; no locking in B2."""
