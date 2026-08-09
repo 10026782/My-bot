@@ -95,7 +95,8 @@ class TurnEvidenceSummary:
 
 
 # ══════════════════════════════════════════════════
-# TC7-B — RP4/RP5 shadow projection of TC7-A EvidenceResult
+# TC7/RP5 execution-shadow wiring — RP4/RP5 shadow projection of
+# TC7-A's EvidenceResult
 # ══════════════════════════════════════════════════
 #
 # TC7-A's EvidenceResult (core/evidence_projection.py) is the sole execution-

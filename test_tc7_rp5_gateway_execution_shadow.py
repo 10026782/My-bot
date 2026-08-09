@@ -1,24 +1,30 @@
 #!/usr/bin/env python3
 """
-test_tc7b_gateway_execution_shadow.py — TC7-B RP4/RP5 execution-shadow wiring.
+test_tc7_rp5_gateway_execution_shadow.py — TC7/RP5 execution-shadow wiring.
 
 Covers the new seam only: TC7-A's EvidenceResult stays execution-evidence
 authority (see test_tc7a_exact_contract_evidence.py, untouched); this file
 covers core/turn_evidence.py::project_evidence_result() and its wiring into
-core/action_gateway.py's ActionGateway._execute_contract()/
-_persist_execution_status() (evidence capture, log-level independence,
-fail-closed projection failure) and ActionGateway.approve_with_lifecycle_
-result() (the actual seam that observes shadow evidence against the REAL
-user-visible reply text -- both the Telegram callback-button path and the
-text confirm-word path funnel through this one method; NOT against
-_execute_contract()'s own internal return string, which neither caller
-actually shows to the user).
+core/action_gateway.py's ActionGateway._execute_contract() (the UNIVERSAL
+execution-shadow boundary -- observes automatically against its own return
+text for any direct caller: ActionGateway.approve() called directly, e.g.
+tma_api.py's TMA REST route, or route_override_word()'s direct
+_execute_contract() call) and ActionGateway.approve_with_lifecycle_result()
+(the one deliberate exception -- both the Telegram callback-button path and
+the text confirm-word path funnel through it; it discards
+_execute_contract()'s own return string and re-renders its own via
+build_approval_lifecycle_result(), so it marks the thread "deferred" and
+consumes the handed-off evidence exactly once against its real
+safe_user_message instead).
 
-Does NOT test: RP5 enforcement (not implemented), final_reply mutation (RP4
-invariant explicitly forbids it and is asserted here to still hold), the
+Does NOT test: TC7-B claim authorization (not implemented -- this PR is
+execution-shadow observability only, not claim authorization; the TC7-B
+name was deliberately dropped from this file for that reason), RP5
+enforcement (not implemented), final_reply mutation (RP4 invariant
+explicitly forbids it and is asserted here to still hold), the
 sheets_append/Tasks canonicalization bug (separate follow-up, untouched).
 
-Run: python3 test_tc7b_gateway_execution_shadow.py
+Run: python3 test_tc7_rp5_gateway_execution_shadow.py
 Pass condition: exit code 0, all assertions green.
 """
 
@@ -544,11 +550,248 @@ check(
 
 
 # ═════════════════════════════════════════════════════════════════
+# 14-16: DIRECT ActionGateway.approve() calls (the tma_api.py-style route,
+# and route_override_word()'s direct _execute_contract() call) reach the
+# SAME seam automatically, observed against approve()'s OWN return text --
+# without touching tma_api.py or route_override_word() at all. This is the
+# corrected design's whole point: _execute_contract() is the universal
+# execution-shadow boundary, approve_with_lifecycle_result() is the one
+# deliberate (deferred) exception.
+# ═════════════════════════════════════════════════════════════════
+
+with _rp5_state("shadow"):
+    gw = ActionGateway(ledger=ExecutionLedger())
+    contract = _contract(contract_id="direct-succ-1")
+    gw._ledger.save(contract)
+    gw._tool_executor = _ok_executor
+    calls, original = _spy_observe_shadow_finalizer()
+    try:
+        reply_text = gw.approve("direct-succ-1", approver="user-a", approver_role="owner")
+        check("(14) direct approve() success -> exactly one observation", len(calls) == 1)
+        if calls:
+            check("(14) evidence_status=verified_write_success", calls[0]["comparison"].evidence_status == "verified_write_success")
+            check("(14) observed text is approve()'s OWN returned string", calls[0]["final_text"] == reply_text)
+    finally:
+        ag_module.observe_shadow_finalizer = original
+
+with _rp5_state("shadow"):
+    gw = ActionGateway(ledger=ExecutionLedger())
+    contract = _contract(contract_id="direct-fail-1")
+    gw._ledger.save(contract)
+    gw._tool_executor = _raising_executor
+    calls, original = _spy_observe_shadow_finalizer()
+    try:
+        gw.approve("direct-fail-1", approver="user-a", approver_role="owner")
+        check("(15) direct approve() failure -> exactly one observation", len(calls) == 1)
+        if calls:
+            check("(15) evidence_status=failure", calls[0]["comparison"].evidence_status == "failure")
+    finally:
+        ag_module.observe_shadow_finalizer = original
+
+with _rp5_state("shadow"):
+    gw = ActionGateway(ledger=ExecutionLedger())
+    contract = _contract(contract_id="direct-unk-1")
+    gw._ledger.save(contract)
+    gw._tool_executor = _outcome_unknown_executor
+    calls, original = _spy_observe_shadow_finalizer()
+    try:
+        gw.approve("direct-unk-1", approver="user-a", approver_role="owner")
+        check("(16) direct approve() outcome_unknown -> exactly one observation", len(calls) == 1)
+        if calls:
+            check("(16) evidence_status=outcome_unknown", calls[0]["comparison"].evidence_status == "outcome_unknown")
+    finally:
+        ag_module.observe_shadow_finalizer = original
+
+
+# ═════════════════════════════════════════════════════════════════
+# 17: No double count -- one direct approve() and one wrapped
+# approve_with_lifecycle_result() call in the SAME spy session produce
+# exactly two observations total (one each), each against the correct
+# text for its own path.
+# ═════════════════════════════════════════════════════════════════
+
+with _rp5_state("shadow"):
+    gw = ActionGateway(ledger=ExecutionLedger())
+    c_direct = _contract(contract_id="nodup-direct")
+    c_wrapped = _contract(contract_id="nodup-wrapped")
+    gw._ledger.save(c_direct)
+    gw._ledger.save(c_wrapped)
+    gw._tool_executor = _ok_executor
+    calls, original = _spy_observe_shadow_finalizer()
+    try:
+        direct_text = gw.approve("nodup-direct", approver="user-a", approver_role="owner")
+        wrapped_result = gw.approve_with_lifecycle_result("nodup-wrapped", approver="user-a", approver_role="owner")
+        check("(17) exactly two observations total -- no double count on either path", len(calls) == 2)
+        if len(calls) == 2:
+            check("(17) direct call observed against approve()'s own text", calls[0]["final_text"] == direct_text)
+            check("(17) wrapped call observed against the re-rendered safe_user_message, not approve()'s text",
+                  calls[1]["final_text"] == wrapped_result.safe_user_message)
+    finally:
+        ag_module.observe_shadow_finalizer = original
+
+
+# ═════════════════════════════════════════════════════════════════
+# 18: Defer state is cleared even if approve() or lifecycle rendering
+# raises inside approve_with_lifecycle_result() -- proven by a SUBSEQUENT
+# direct call on the same gw/thread still observing immediately (not
+# deferring/hanging) rather than silently swallowing the next contract's
+# evidence into a stale "deferred" mode.
+# ═════════════════════════════════════════════════════════════════
+
+with _rp5_state("shadow"):
+    gw = ActionGateway(ledger=ExecutionLedger())
+    contract = _contract(contract_id="raise-in-approve")
+    gw._ledger.save(contract)
+    gw._tool_executor = _ok_executor
+
+    def _raising_approve(contract_id, approver, approver_role=""):
+        raise RuntimeError("simulated approve() failure mid-flight")
+
+    gw.approve = _raising_approve
+    try:
+        gw.approve_with_lifecycle_result("raise-in-approve", approver="user-a", approver_role="owner")
+        check("(18a) approve() raising inside the wrapper -> exception did NOT propagate here (unexpected)", False)
+    except RuntimeError:
+        check("(18a) approve() raising inside the wrapper propagates as-is (not silently swallowed)", True)
+    check("(18a) defer flag reset to False after the raise (finally ran)",
+          getattr(gw._execution_shadow_tls, "defer", False) is False)
+    check("(18a) pending cleared to None after the raise (finally ran)",
+          getattr(gw._execution_shadow_tls, "pending", None) is None)
+
+    # Prove it in practice, not just by reading the flag: a fresh DIRECT
+    # call on the same gw/thread right after must still observe immediately.
+    contract2 = _contract(contract_id="after-raise-direct")
+    gw._ledger.save(contract2)
+    del gw.approve  # restore the real class-level approve()
+    calls, original = _spy_observe_shadow_finalizer()
+    try:
+        gw.approve("after-raise-direct", approver="user-a", approver_role="owner")
+        check("(18b) a direct call right after a raised wrapper call still observes immediately (not deferred/lost)", len(calls) == 1)
+    finally:
+        ag_module.observe_shadow_finalizer = original
+
+# Same proof, but the raise happens AFTER self.approve() succeeds (during
+# the lifecycle-rendering side), which is where evidence actually gets
+# handed off into .pending -- the riskier case for a leak.
+with _rp5_state("shadow"):
+    gw = ActionGateway(ledger=ExecutionLedger())
+    contract = _contract(contract_id="raise-after-approve")
+    gw._ledger.save(contract)
+    gw._tool_executor = _ok_executor
+
+    _real_build = ag_module.build_approval_lifecycle_result
+
+    def _raising_build_approval_lifecycle_result(*args, **kwargs):
+        raise RuntimeError("simulated lifecycle-rendering failure")
+
+    ag_module.build_approval_lifecycle_result = _raising_build_approval_lifecycle_result
+    try:
+        try:
+            gw.approve_with_lifecycle_result("raise-after-approve", approver="user-a", approver_role="owner")
+            check("(18c) rendering raising after approve() succeeded -> exception did NOT propagate here (unexpected)", False)
+        except RuntimeError:
+            check("(18c) rendering raising after approve() succeeded propagates as-is", True)
+    finally:
+        ag_module.build_approval_lifecycle_result = _real_build
+
+    check("(18c) defer flag reset to False even though evidence was already handed off to .pending",
+          getattr(gw._execution_shadow_tls, "defer", False) is False)
+    check("(18c) pending cleared to None (evidence from the failed call never leaks forward)",
+          getattr(gw._execution_shadow_tls, "pending", None) is None)
+
+    contract2 = _contract(contract_id="after-raise-wrapped")
+    gw._ledger.save(contract2)
+    calls, original = _spy_observe_shadow_finalizer()
+    try:
+        gw.approve_with_lifecycle_result("after-raise-wrapped", approver="user-a", approver_role="owner")
+        check("(18d) the NEXT wrapped call is unaffected -- exactly one fresh observation, not stale evidence", len(calls) == 1)
+        if calls:
+            check("(18d) fresh observation reflects the NEW contract's own evidence", calls[0]["comparison"].evidence_status == "verified_write_success")
+    finally:
+        ag_module.observe_shadow_finalizer = original
+
+
+# ═════════════════════════════════════════════════════════════════
+# 19: Sequential DIRECT -> WRAPPED and WRAPPED -> DIRECT executions on the
+# same thread/gw instance cannot reuse stale TLS evidence.
+# ═════════════════════════════════════════════════════════════════
+
+with _rp5_state("shadow"):
+    # direct, then wrapped
+    gw = ActionGateway(ledger=ExecutionLedger())
+    c1 = _contract(contract_id="order-a-direct")
+    c2 = _contract(contract_id="order-a-wrapped")
+    gw._ledger.save(c1)
+    gw._ledger.save(c2)
+    gw._tool_executor = _ok_executor
+    calls, original = _spy_observe_shadow_finalizer()
+    try:
+        gw.approve("order-a-direct", approver="user-a", approver_role="owner")
+        result2 = gw.approve_with_lifecycle_result("order-a-wrapped", approver="user-a", approver_role="owner")
+        check("(19a) direct-then-wrapped: exactly two independent observations", len(calls) == 2)
+        if len(calls) == 2:
+            check("(19a) the wrapped call's observation is against ITS OWN text, not leftover from the direct call",
+                  calls[1]["final_text"] == result2.safe_user_message)
+    finally:
+        ag_module.observe_shadow_finalizer = original
+
+with _rp5_state("shadow"):
+    # wrapped, then direct
+    gw = ActionGateway(ledger=ExecutionLedger())
+    c1 = _contract(contract_id="order-b-wrapped")
+    c2 = _contract(contract_id="order-b-direct")
+    gw._ledger.save(c1)
+    gw._ledger.save(c2)
+    gw._tool_executor = _ok_executor
+    calls, original = _spy_observe_shadow_finalizer()
+    try:
+        gw.approve_with_lifecycle_result("order-b-wrapped", approver="user-a", approver_role="owner")
+        direct_text2 = gw.approve("order-b-direct", approver="user-a", approver_role="owner")
+        check("(19b) wrapped-then-direct: exactly two independent observations", len(calls) == 2)
+        if len(calls) == 2:
+            check("(19b) defer correctly reset to False after the wrapped call, so the direct call observes immediately",
+                  calls[1]["final_text"] == direct_text2)
+    finally:
+        ag_module.observe_shadow_finalizer = original
+
+
+# ═════════════════════════════════════════════════════════════════
+# 20: Direct-path variant of projection failure -- evidence_for_contract()
+# raising while RP5 shadow active, reached via a DIRECT approve() call
+# (not the lifecycle wrapper) -- still becomes unverified_effect, never
+# silently dropped, never manufactured success.
+# ═════════════════════════════════════════════════════════════════
+
+with _rp5_state("shadow"):
+    gw = ActionGateway(ledger=ExecutionLedger())
+    contract = _contract(contract_id="direct-raise-1")
+    gw._ledger.save(contract)
+    gw._tool_executor = _ok_executor
+
+    def _raising_evidence_for_contract2(contract_id, *, dispatcher_outcome=None):
+        raise RuntimeError("simulated projection failure (direct path)")
+
+    gw.evidence_for_contract = _raising_evidence_for_contract2
+    calls, original = _spy_observe_shadow_finalizer()
+    try:
+        reply_text = gw.approve("direct-raise-1", approver="user-a", approver_role="owner")
+        check("(20) direct path: execution still succeeded despite projection failure",
+              gw._ledger.find_by_id("direct-raise-1").status in ("completed", "executed"))
+        check("(20) direct path: original approve() reply still returned unmodified",
+              bool(reply_text) and "הושלמ" in reply_text)
+        check("(20) direct path: exactly one observation still fired (fail-closed)", len(calls) == 1)
+        if calls:
+            check("(20) direct path: evidence_status=unverified_effect", calls[0]["comparison"].evidence_status == "unverified_effect")
+    finally:
+        ag_module.observe_shadow_finalizer = original
+
+
+# ═════════════════════════════════════════════════════════════════
 # Summary
 # ═════════════════════════════════════════════════════════════════
 
 print(f"\n{'═'*60}")
-print(f"TC7-B execution-shadow wiring: {_passed}/{_passed + _failed} passed")
+print(f"TC7/RP5 execution-shadow wiring: {_passed}/{_passed + _failed} passed")
 if _failed:
     print(f"FAILED: {_failed} test(s)")
 sys.exit(0 if _failed == 0 else 1)
