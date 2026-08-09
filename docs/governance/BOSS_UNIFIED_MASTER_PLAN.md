@@ -2,7 +2,7 @@
 
 **Status:** שכבת-על יחידה — מאחד את `BOSS_ROADMAP_CONTINUATION.md` ו-`BOSS_UNIFIED_MASTER_PLAN_v2.md`.
 **לא מחליף את `ROADMAP.md`** — אינו נוגע, משנה, או ממספר מחדש שום C/N/F קיים שם. רק מפנה אליהם.
-**עודכן:** 27/07/2026 | **Owner:** אליהו
+**עודכן:** 09/08/2026 | **Owner:** אליהו
 
 ---
 
@@ -99,6 +99,33 @@
 | UX-01 — Unified BOSS Experience | Product/UI | H6 (Product UI) | **📋 PLANNED, לא התחיל** (נרשם 12/07/2026 ב-ROADMAP.md F-section, spec מלא שם). שכבת ניסוח/הצגה אחידה לכל הודעות BOSS (Telegram/WhatsApp/Mini App/Daily Digest) — `UXMessage`/`MessageType`/`BusinessDescription`/`ChannelRenderer`, בלי מזהים טכניים (`record_id`/`contract_id`/`tool_name`) בהודעות משתמש. **סדר תלות מחייב: ייצוב Pending Approval (✅ הושלם) → סגירת U1 (🟡 פתוח) → ואז UX-01.** אין לגעת בניסוחי-הודעות בקוד עד ש-U1 סגור — כדי לא לקבל טלאים שונים בין ערוצים תוך-כדי תיקוני-באגים נפרדים. | לא להתחיל לפני שU1 מוכרע. |
 
 **חובה:** כל פעם שמתחילים לעבוד בפועל על שורה מהטבלה, לעדכן את עמודת "שלב נוכחי" **באותו commit/שיחה** — לא בדיעבד. אם שורה "בעבודה" בפועל אבל לא מעודכנת כאן במשך יותר משבוע — זה סימן שנוצר שוב מסלול נשכח.
+
+### 3.5 Runtime Capability Status — verified 09/08/2026
+
+המסמך המפורט והראיות נמצאים ב־[`docs/audit/RUNTIME_CAPABILITY_AUDIT_20260809.md`](../audit/RUNTIME_CAPABILITY_AUDIT_20260809.md). זהו snapshot סטטוס תפעולי קצר; הדוח המפורט הוא מקור הראיות.
+
+**ACTIVE:** Core routing, TurnEnvelope, ActionGateway, approval boundary, deterministic approval cost-cut, gateway/single-speaker ownership on verified paths, IngressEnvelope, Emergency Stop durable persistence, and deterministic `CREATE_TASK`. Staging additionally verifies successful ActionGateway execution. Production verifies proposal and approval-boundary activity, but no successful Production execution occurred in the available export. Single-speaker ownership is verified only on observed paths, not as a global invariant.
+
+**SHADOW:** RuntimeSchemaProvider — `RUNTIME PATH VERIFIED — COMPONENT LOGGING NOT OBSERVABLE`; EvidenceFinalizer — `SHADOW VERIFIED`.
+
+**OFF:** Production `COST_WATCHDOG_LIVE`, `INTERACTION_INTELLIGENCE`, Emergency Window, Knowledge Engine, Creative Generator, and other capabilities already established as effectively/configured OFF. Production watchdog OFF / Staging watchdog ON is an **EXPECTED ENVIRONMENT DIFFERENCE**, not drift.
+
+**CODE-ONLY / RUNTIME UNVERIFIED:** Profile, Project Timeline, Tenant Provisioner, Knowledge Router, Tenant Config/providers, OTP, and Financial Gate. They are not labeled disconnected without positive evidence.
+
+**UNKNOWN / PARTIAL:** Production successful approval execution inside the current export, learning-cycle execution, full usage-telemetry consumption, deterministic PA-01 behavior for `UPDATE_TASK`, and `COMPLETE_TASK` runtime behavior.
+
+**VERIFIED ARCHITECTURAL DRIFT:** `INTERACTION_INTELLIGENCE` scheduler gating reads the environment variable directly instead of the centralized feature-flag accessor — **ARCHITECTURAL DRIFT VERIFIED — NO CURRENT RUNTIME CONFLICT**. No correction is made here.
+
+**OBSERVABILITY DEBT:** RuntimeSchemaProvider lacks source/result logging sufficient to distinguish `live`/`cached`/`snapshot`/`seed`; IngressEnvelope lacks direct envelope ID/source-reference logging. These are observability gaps, not runtime failures.
+
+**OPEN RUNTIME FOLLOW-UPS:** `UPDATE_TASK` PA-01 comparison, `COMPLETE_TASK` verification, Staging `sheets_append → Tasks` canonicalization failure, learning/usage-telemetry verification, and runtime verification of remaining code-present secondary systems. Do not treat these registry entries as implementation authorization.
+
+**Supersession note:** the older Airtable Schema Refresh row above used
+`contract mode="full" מאושר live` as a current runtime claim. The 09/08/2026
+verified audit supersedes that wording: the current evidence establishes the
+RuntimeSchemaProvider path in `SHADOW`, but current logs do not expose the
+provider result/source. The detailed evidence and this §3.5 snapshot are the
+current status source.
 
 ---
 
