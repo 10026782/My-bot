@@ -1,7 +1,15 @@
 # PA-01 Planning Gate — Phantom Approval Prompt Structural Enforcement
 
 Program: TurnCoordinator
-Status: **PLANNING ONLY.** No code written, no branch opened, no implementation started.
+Status: **BUILT_UNWIRED.** Implemented and merged to `main` (PR #352, squash
+`2be2472`) — see `ROADMAP.md`'s "PA-01 — Phantom Approval Prompt Structural
+Enforcement" entry for the full 6-round implementation record. Gated by
+`FEATURE_PA01_ENFORCEMENT_STATE` (three-state off/shadow/enforce), default
+`off` — not activated in production. This header previously read "PLANNING
+ONLY, no code written," which was stale from before implementation; corrected
+09/08/2026 as part of the Core Harness roadmap consolidation. The design
+content below (revision notes, decision rationale) remains the accurate
+record of *how* PA-01 was designed and stays unchanged.
 Baseline: `main` `f2f7093` (2026-07-15).
 Scope: **PA-01 only**, per explicit instruction. OH-01 (Reply Ownership claim), OS-01 (false
 cancellation/completion), RC-01 (concurrency protection) remain research-only — see

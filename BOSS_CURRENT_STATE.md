@@ -1,5 +1,13 @@
 # BOSS CURRENT STATE
 
+> **⚠️ STALE (flagged 09/08/2026):** this file was last updated 26/06/2026 —
+> roughly 6 weeks and 150+ merged PRs behind `origin/main`. Despite its name,
+> it is **not** the current-state authority. For current core-program status,
+> read `ROADMAP.md`'s "🧭 BOSS Core Harness — Program Map" section first;
+> `AI_CONTEXT.md` is the live operational-state briefing `CLAUDE.md`
+> designates for "is X active in production" questions. This file is kept
+> as a historical snapshot of its own dated period, not updated further.
+
 Last updated: 26/06/2026
 Reflects: Stabilization Sprint + W0/W1 + Security Audit Fixes (H1-H3) + TIER read-only fix + Game Dashboard fix + Daily Digest Live + Repo Docs + C52 Customer Output Gateway + C53 Screen Filter Gateway + O4 Finance Pulse + C53-A structured tool returns + F52 audit maps + Fxx Safe Document Converter
 
