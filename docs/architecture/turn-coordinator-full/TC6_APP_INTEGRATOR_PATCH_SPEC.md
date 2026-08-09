@@ -1,9 +1,9 @@
 # TC6 — `app.py` Integrator Patch Spec
 
-**Status:** implemented, **not yet merged to `origin/main`** (CodeRabbit
-review round, PR #569 — do not read this as "applied in production"; per
-this repo's own Rule 15/GOVERNANCE_RULES.md, that claim requires merge +
-deploy + production verification, none of which have happened yet).
+**Status:** merged to `origin/main` commit d0a8620 (PR #569 merged
+2026-08-08) — do not read this as "applied in production"; per this
+repo's own Rule 15/GOVERNANCE_RULES.md, production verification is
+distinct from code merge and has not occurred yet.
 `app.py` is Integrator-only per `PARALLEL_IMPLEMENTATION_WORKSTREAMS.md`'s
 file ownership map — the TC6 WS2 branch (`claude/tc6-explicit-reply-
 ownership`, merged as PR #566) did not edit this file directly. This
