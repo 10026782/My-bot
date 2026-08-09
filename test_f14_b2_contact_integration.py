@@ -117,6 +117,7 @@ class F14B2ContactIntegrationTests(unittest.TestCase):
         provider = AirtableCreateOutcome("created", {"id": "recNEW"})
         with patch.object(crm, "_creds_ok", return_value=True), \
                 patch.object(crm, "_get", return_value=[]), \
+                patch.object(crm, "_post") as legacy_post, \
                 patch("tools.airtable_gateway.airtable_create", return_value=provider) as gateway, \
                 patch("tools.dispatcher.airtable_add", side_effect=AssertionError("bypass")), \
                 patch("tools.dispatcher._ff.is_enabled", return_value=False):
@@ -125,6 +126,7 @@ class F14B2ContactIntegrationTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["external_id"], "recNEW")
         gateway.assert_called_once()
+        legacy_post.assert_not_called()
 
     def test_generic_uncertain_outcome_is_forwarded_without_retry(self):
         from core.dispatcher_outcome import DispatcherOutcome
