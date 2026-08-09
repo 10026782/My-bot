@@ -414,107 +414,16 @@ Decision Hub Stage 3 (Readiness Engine, F18): `decision_readiness.py` (`calc_rea
 
 ---
 
-## 🧭 BOSS Core Harness — Program Map (עודכן: 09/08/2026)
+## 🧭 BOSS Core Harness — Program Map
 
-זהו סעיף-הכניסה היחיד למצב תכניות-הליבה חוצות-התוכנית (Turn Coordinator,
-ActionGateway, RP4/RP5, A32, F52, F14, Agent Cost). כל תכנית שומרת את מפרט
-היישום המפורט שלה במקומה (`docs/architecture/...`) — הסעיף הזה **לא** מחליף
-אותם, רק ממפה איך הם מרכיבים Harness אחד. סוכן עתידי צריך להיות מסוגל לענות
-"מה המצב של כל תכניות הליבה ומה השלב הבא?" מקריאת הסעיף הזה בלבד, ורק אז
-לעקוב לינקים למפרטי-התכנית המלאים.
-
-**אוצר-מילים מבוקר לעמודת "מצב":** `PLANNING` · `BUILT_UNWIRED` · `MERGED` ·
-`SHADOW` · `ENFORCED` · `RUNTIME_VERIFIED` · `BLOCKED` · `SUPERSEDED`.
-
-### שרשרת הסמכות (Ingress → Rendering)
-
-```
-Ingress/Identity → Intent Ownership/Routing (TC1) → Entity Resolution (TC5/F14)
-  → Canonical Proposal (TC2/TC4) → ActionContract/Approval Runtime (ActionGateway)
-  → Atomic Execution → Execution Evidence (TC7-A) → Turn Evidence Aggregation (RP4)
-  → Claim Authorization (RP5/TC7-B, לא בנוי) → Reply Ownership (TC6)
-  → Rendering/MessageContract (F52/TC9) → Observability/Cost (Cost program/TC10)
-```
-
-### Master Program Map
-
-| Program | Canonical authority/docs | Objective | Current implementation state | Runtime state | Verification state | Depends on | Next gate |
-|---|---|---|---|---|---|---|---|
-| **A. Turn Coordinator TC1–TC7** | `docs/architecture/turn-coordinator/README.md` (canonical current-status); `turn-coordinator-full/GAP_ANALYSIS.md` (gap↔workstream ownership) | Own intent-ownership, entity resolution, canonical proposal construction, reply ownership, and per-action evidence | TC1–TC5: MERGED (TC1 admission gate wired only for CREATE_TASK — UPDATE_TASK/COMPLETE_TASK branch is dead code today). TC6: MERGED (PR #566 `684d299`, PR #569 `d0a8620`). TC7-A: MERGED (PR #573 `c16245c`) | `FEATURE_SINGLE_SPEAKER_APPROVAL_UX=true` in production (manual override; code default off) | TC6: **RUNTIME_VERIFIED** for 3/6 scenarios (09/08/2026 — create→pending, status query, second-create-block; callback-button/RP5-classification/replay still open). TC7-A: unit-tested only, SHADOW-only observability (not wired to `final_reply`) | ActionGateway (B); F14/TC5 (F) for entity resolution | Close TC1/TC4 `Handler.TOOL` gap for UPDATE_TASK/COMPLETE_TASK; TC7-B claim authorization |
-| **B. ActionGateway / Approval Runtime** | `docs/architecture/action-gateway/` (dated incident records); `core/action_gateway.py` | Canonical business-action lifecycle + approval + atomic execution ownership | MERGED — `ActionContract`, propose/approve/reject/cancel, BUG-157 CAS fingerprint-claim fix | `FEATURE_ACTION_GATEWAY`/`FEATURE_SINGLE_SPEAKER_APPROVAL_UX`/`FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS` = **manually true in production** (code default off). `FEATURE_ACTION_CONTRACT_PERSISTENCE`/`FEATURE_ATOMIC_CLAIMS` = OFF, no production override found | RUNTIME_VERIFIED for core create/approve/cancel/replay-guard flows (30/07, 07/08) | A32 (D) for evidence validators; TC6 (A) for reply ownership | Staged `FEATURE_ACTION_CONTRACT_PERSISTENCE`/`FEATURE_ATOMIC_CLAIMS` rollout — runbook exists (`docs/PHASE_4B_ROLLOUT_AND_CUTOVER.md`), not executed |
-| **C. RP4/RP5 Evidence Finalizer** | `core/turn_evidence.py`; `RP5_PREFLIGHT_BLOCKER.md` | Per-turn evidence aggregation (RP4) + claim/evidence enforcement (RP5) | RP4: MERGED, actively maintained. **RP5: no PR has ever merged** — zero implementation, `enforce` flag value behaves identically to `shadow` today | `FEATURE_EVIDENCE_FINALIZER` last confirmed production value: `shadow` (28/07 reading — **12 days stale, must be re-verified before being cited as current**) | RP4: SHADOW (comparison logging vs. live traffic; BUG-139 open unresolved mismatch). RP5: BLOCKED — no implementation to verify | A32 (D) upstream evidence source; sits alongside TC7 (A), not competing with it (proven structurally by test, no owner-decision doc found) | Re-verify current `FEATURE_EVIDENCE_FINALIZER` production value; only then scope RP5 implementation |
-| **D. A32 Anti-Hallucination** | `core/anti_hallucination.py` | Post-hoc claim-detection + response sanitization — "if the tool didn't confirm it, the agent didn't do it" | MERGED, unconditional | **ENFORCED** — no flag, always live | RUNTIME_VERIFIED (`test_a32_enforcement.py`, production "Iron rule") | None (foundational) — TC7/RP4/RP5 depend on it, not the reverse | None open — stable |
-| **E. F52 Unified Status / MessageContract** | `docs/architecture/f52-unified-approval-runtime/README.md`; `audits/phase-4c/CURRENT_STATE_MAP.md` | Single canonical rendering contract (`MessageContract`) across approval/status surfaces | MERGED — D-001…D-019 decisions, PR1/PR4/PR5/PR6 shadow adapters, D-018 leak fix | `FEATURE_UNIFIED_STATUS_FORMATTER` = off/shadow (three-state) — **never confirmed "on" anywhere**. D-018 fix itself is unconditional/live | SHADOW (log comparison in production); D-018 piece RUNTIME_VERIFIED | TC6 (A) feeds reply-owner; TC7 (A) feeds optional `evidence_status` metadata (non-authoritative, D-013) | TC9 (I) full-surface rollout; `FEATURE_UNIFIED_STATUS_FORMATTER=on` activation is a separate, not-yet-authorized decision (D-019) |
-| **F. F14 Entity Resolution / TC5** | `ROADMAP.md` §F14 (below); `core/router/entity_resolvers.py` | Bounded, identity-scoped entity resolution (task/lead/contact/deal/AC/session/callback) + Contact find-or-create gate | F14-A1 (PR #568) + F14-B1 (PR #570): MERGED. TC5 framework: MERGED | **BUILT_UNWIRED** — gate covers only 2 internal Python callers (`crm_add_contact`, `convert_lead_to_contact`); not reachable from dispatcher/agent tool surface. Live agent-callable `resolve_contact` tool is still the old unbounded fuzzy matcher. One confirmed broken port: `core/reasoning_ports.py`'s `_ProductionContacts.find_or_create` (nonexistent import, silent stub fallback) | Unit-tested only, not production-verified end-to-end through the gate | — | F14-B2 (not started); TC5 routing-integration gap (`GAP_ANALYSIS.md` still `NEXT_IMPLEMENTATION`) |
-| **G. Agent Cost / Deterministic Execution** | `cost_monitor.py`, `core/cost_watchdog.py`, `core/usage_telemetry.py` | Measure Claude/Agent token spend; maximize zero-Agent-call routing | MERGED — 3-tier measurement lineage (no duplicate system); deterministic zero-Agent-call paths (`parse_deterministic_create_task()`, 4-branch `_resolve_pr2_deterministic_approval()`, `core/approval_turn_metrics.py`) | `cost_monitor.py`/`core/cost_watchdog.py` live (write `AI_Usage_Daily`); `core/usage_telemetry.py`/`usage_events` genuinely SHADOW, confirmed unread | RUNTIME_VERIFIED (live trigger); usage_telemetry SHADOW, PR3 cutover explicitly **owner-blocked** pending real-billing comparison | Measures traffic from all other programs; not blocking | POST-TC COST VALIDATION (§ below) after sufficient post-TC6/7 traffic |
-| **H. Durable State (TC8)** | `turn-coordinator-full/GAP_ANALYSIS.md` (BLOCKER rows) | Single durable turn-ownership/concurrency record, replacing 4 coexisting pending/approval stores | PLANNING | — | — | TC6, TC7 (A) | Design + implement |
-| **I. MessageContract full-surface (TC9)** | `turn-coordinator-full/GAP_ANALYSIS.md` (FOLLOW_UP row) | One public composer across Telegram/WhatsApp/TMA | PLANNING | — | — | F52 (E) schema (stable, D-012); TC6/TC7 (A) | Design + implement |
-| **J. Observability closure (TC10)** | `turn-coordinator-full/IMPLEMENTATION_SEQUENCE.md` | Verification harness + rollout/rollback gates | PLANNING — no gap-analysis row exists yet | — | — | TC8, TC9 | Scope |
-| **K. PA-01 Structural Enforcement** | `docs/architecture/turn-coordinator/PA-01_PLANNING_GATE.md` | Block phantom approval-pending claims lacking structural evidence | MERGED (PR #352, `2be2472`) | `FEATURE_PA01_ENFORCEMENT_STATE` = off (code live behind flag since PR #487) | BUILT_UNWIRED — not activated in production | Risk router contract-required-intent table | Does not itself close the TC1 CREATE_TASK-only admission gap — that remains open (see A) |
-
-### Cross-program flow map
-
-| Harness boundary | Current owner | Program |
-|---|---|---|
-| Intent ownership | `core/turn_coordinator_runtime.py` `TASK_OWNERSHIP` registry, router | TC1 |
-| Entity resolution | `core/router/entity_resolvers.py` bounded resolvers | TC5 / F14 |
-| Proposal construction | canonical builders (`task_builders.py`, lead builders) | TC2 / TC4 |
-| Business-action truth | `ActionContract` | ActionGateway |
-| Approval lifecycle | `ActionGateway` propose/approve/reject/cancel | Approval Runtime |
-| Execution ownership | `ExecutionLedger` fingerprint CAS (default); PostgreSQL atomic claim (when `FEATURE_ATOMIC_CLAIMS` on — currently off) | Atomic Runtime |
-| Per-action execution truth | `EvidenceResult` (`core/evidence_projection.py`) | TC7-A |
-| Per-turn evidence aggregation | `TurnEvidenceSummary` (`core/turn_evidence.py`) | RP4 |
-| Agent claim admission | **not yet built as RP5** — today's de-facto gate is A32's `sanitize_agent_response()`/NO-TOOL-EVIDENCE check | TC7-B / RP5 (target, not started) |
-| Reply ownership | `reply_ownership_for_contract()` (exact-contract, not "latest contract for user") | TC6 |
-| Final rendering | `MessageContract` / `format_agent_message()` | F52 / TC9 |
-| Cost measurement | `cost_monitor.py` + `core/cost_watchdog.py` (live); `core/usage_telemetry.py` (shadow) | Cost program |
-| Durable turn state | none yet — 4 coexisting pending/approval stores | TC8 (target) |
-| Full observability closure | none yet | TC10 (target) |
-
-### Program relationships — who answers what question
-
-- **TC1/routing/builders/resolvers** — WHAT is the user requesting, and WHAT exact entity/action does it refer to?
-- **ActionGateway** — WHAT business action/lifecycle exists?
-- **Atomic execution** — WHO owns execution, and WHAT dispatch outcome occurred?
-- **A32** — WAS the claim ever supported by a real tool result? (today's actual, only, claim-admission gate)
-- **TC7 (EvidenceResult)** — WHAT actually happened, for this exact action?
-- **RP4 (TurnEvidenceSummary)** — WHAT evidence exists across this whole turn?
-- **RP5 (target, not built)** — DOES the claim match the evidence — may this claim pass?
-- **TC6** — WHO may speak, for this exact contract?
-- **F52/TC9** — HOW is the authoritative result rendered?
-- **Cost program** — HOW MUCH model/Agent execution is this architecture consuming?
-
-These share one architecture and must not become duplicate authorities — RP4/RP5 are declared a cross-cutting guard, never a fifth authoritative layer (`CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` §1.5); `EvidenceResult`/`TurnEvidenceSummary` are structurally distinct types (test-enforced), not competing sources of "what happened."
-
-### Dependency map
-
-**Serial (Turn Coordinator core chain):** TC1 → TC2/TC3/TC5 → ActionGateway proposal → TC6 (✅ done) → TC7-A (✅ done, observability only) → TC7-B claim authorization → TC8 durable state → TC9 full-surface MessageContract → TC10 observability closure.
-
-**Parallel (do not force into the serial chain):**
-- F14-B2 + TC5 routing-integration wiring (F) — uses TC5's framework but is its own phase, does not block TC7-10.
-- `FEATURE_UNIFIED_STATUS_FORMATTER=on` activation decision (E) — independent of TC9's full build; D-019 explicitly does not authorize it.
-- POST-TC COST VALIDATION (G) — runs after sufficient post-TC6/7 traffic; independent measurement track.
-- `FEATURE_ACTION_CONTRACT_PERSISTENCE`/`FEATURE_ATOMIC_CLAIMS` staged cutover (B) — its own infra rollout decision, runbook exists unexecuted.
-- RP5 (C) scoping — technically wants TC7 more mature first, but can be scoped independently of TC8-10.
-
-### Next gates (ordered)
-
-1. ~~TC6 documentation closure~~ — **already done** (PR #574, `612a119`, 09/08/2026) — correcting an earlier assumption that this was still pending.
-2. ~~TC7-A review corrections and merge gate~~ — **already done** (PR #573 `c16245c`, 09/08/2026; CodeRabbit findings fixed pre-merge) — correcting an earlier assumption that this PR was still Draft.
-3. Close the TC1/TC4 `Handler.TOOL` admission gap for `UPDATE_TASK`/`COMPLETE_TASK` — currently dead code despite TC3/TC5 machinery already existing to serve it.
-4. TC7-B claim-authorization design/implementation.
-5. Re-verify current `FEATURE_EVIDENCE_FINALIZER` production value (last confirmed reading is 12 days stale) before scoping RP5 enforcement.
-6. TC8 durable turn state.
-7. TC9 MessageContract full-surface integration.
-8. TC10 observability closure.
-
-**Parallel tracks, not forced into the above order:** F14 next phases (F14-B2); F52 `FEATURE_UNIFIED_STATUS_FORMATTER=on` rollout prerequisites; POST-TC COST VALIDATION once sufficient post-TC6/7 traffic accumulates; `FEATURE_ACTION_CONTRACT_PERSISTENCE`/`FEATURE_ATOMIC_CLAIMS` staged cutover.
-
-### Cost program alignment
-
-`cost_monitor.py` + the `AI_Usage_Daily` Airtable table (via `core/cost_watchdog.py`) remain the **sole live measurement authority** — no new cost-measurement subsystem is proposed here. `core/usage_telemetry.py`/`usage_events` (PostgreSQL) is a genuinely shadow-only extension of the *same* lineage, confirmed unread by any production code path; its eventual cutover of the `EMERGENCY_STOP_AI` trigger remains explicitly owner-blocked pending a real-billing comparison — unchanged by this consolidation.
-
-**Future validation gate — POST-TC COST VALIDATION:** run after sufficient post-TC6/TC7 traffic has accumulated. Compare before/after by intent, not only total spend — at minimum: `agent_calls`/turn, % turns with `agent_calls=0`, second-Agent-round rate, input tokens, output tokens, cost/turn, model-escalation rate, deterministic-route share. Keep infrastructure-call efficiency (Sessions reads, ActionContracts reads, Airtable metadata reads, duplicate DB/API calls) tracked separately from LLM cost unless the existing schema already mixes them.
+**עבר ל-`docs/governance/BOSS_UNIFIED_MASTER_PLAN.md` §3.5.1** (עודכן 09/08/2026) —
+זהו כעת המקור הקנוני היחיד למצב תכניות-הליבה חוצות-התוכנית (Turn Coordinator
+TC1-TC10, ActionGateway/Approval Runtime, RP4/RP5 Evidence Finalizer, A32,
+F52, F14/Entity Resolution, Agent Cost). `ROADMAP.md` **אינו** מחזיק יותר
+טבלת current-state מקבילה לתכניות האלה — רק milestones/backlog ספציפיים
+לכל C/N/F item, כפי שהיה מאז ומתמיד. לסטטוס עדכני, ל-Master Program Map
+המלא, ל-Target Canonical Harness Authority Chain, ולסדר ה-Next Gates — קרא
+`BOSS_UNIFIED_MASTER_PLAN.md` §3.5.1-§3.5.3.
 
 ---
 
