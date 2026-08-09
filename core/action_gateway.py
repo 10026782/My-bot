@@ -1390,19 +1390,32 @@ class ActionGateway:
         # cleared on next route_disambiguation() call regardless of outcome.
         self._disambiguation: dict[str, list[ActionContract]] = {}
         self._disambiguation_lock = threading.Lock()
-        # TC7-B — thread-local handoff of this call's execution-shadow
-        # evidence from _execute_contract() (where the real same-turn
-        # DispatcherOutcome lives) out to approve_with_lifecycle_result()
-        # (where the real user-visible reply text is rendered -- a DIFFERENT
-        # string than _execute_contract()'s own return, see that method's
-        # docstring). Thread-local, not an instance dict keyed by contract_id,
-        # because the producer (_execute_contract, via approve()) and the one
-        # consumer that matters (approve_with_lifecycle_result) always run
+        # TC7/RP5 execution-shadow wiring — thread-local coordination between
+        # _execute_contract() (the universal execution-shadow boundary: any
+        # direct caller of approve()/_execute_contract(), e.g. tma_api.py's
+        # direct approve() call or this file's own route_override_word(), is
+        # observed automatically right there, against its own real return
+        # text) and approve_with_lifecycle_result() (the one deliberate
+        # exception -- it discards _execute_contract()'s return string and
+        # re-renders its own, a DIFFERENT string, see that method's
+        # docstring). Two attributes:
+        #   .defer  -- set True only for the duration of approve_with_
+        #              lifecycle_result()'s own self.approve() call, always
+        #              reset to False in that method's `finally`. Tells
+        #              _execute_contract() to hand evidence off instead of
+        #              observing it prematurely against a string that
+        #              method is about to throw away.
+        #   .pending -- the handed-off (summary, state) tuple, consumed
+        #              exactly once by approve_with_lifecycle_result().
+        # Thread-local, not an instance dict keyed by contract_id, because
+        # producer and the one consumer that matters always run
         # synchronously on the same thread within one call -- no concurrent
-        # request can interleave between them. approve_with_lifecycle_result()
-        # clears this at the START of every call before doing anything else,
-        # so a stale value left by an earlier, unrelated call on a reused
-        # worker thread can never leak into this call's observation.
+        # request can interleave between them. approve_with_lifecycle_
+        # result() clears both attributes at the start of every call AND in
+        # `finally`, so a stale value left by an earlier, unrelated call on
+        # a reused worker thread can never leak into this call's
+        # observation, and no exception/early return can leak deferred
+        # state past this call either.
         self._execution_shadow_tls = threading.local()
         # BUG-149: same dependency-injection pattern as tool_executor above —
         # keeps this module free of any memory_store import. None (the
@@ -1988,58 +2001,76 @@ class ActionGateway:
     ) -> ApprovalLifecycleResult:
         """Approve through the existing lifecycle boundary, then render safely.
 
-        TC7-B: both live approval-execution routes -- the Telegram
-        callback-button handler and the text confirm-word handler (via
-        route_confirmation_word() -> _resolve_single_contract()) -- funnel
-        through this exact method, and this is where the real user-visible
-        reply text is decided (self.approve()'s own return string is
-        deliberately NOT used below; it is re-rendered through
-        build_approval_lifecycle_result() instead). RP4/RP5 shadow
-        observation must run against THAT rendered text, not against
-        _execute_contract()'s internal return string, which no caller here
-        actually shows to the user.
+        TC7/RP5 execution-shadow wiring: both live approval-execution routes
+        that go through approve() -- the Telegram callback-button handler
+        and the text confirm-word handler (via route_confirmation_word() ->
+        _resolve_single_contract()) -- funnel through this exact method, and
+        this is where the real user-visible reply text is decided
+        (self.approve()'s own return string is deliberately NOT used below;
+        it is re-rendered through build_approval_lifecycle_result()
+        instead). RP4/RP5 shadow observation must run against THAT rendered
+        text, not against _execute_contract()'s internal return string,
+        which no caller here actually shows to the user.
+
+        _execute_contract() is the universal execution-shadow boundary by
+        default: any OTHER direct caller of approve()/_execute_contract()
+        (e.g. tma_api.py's direct ActionGateway.approve() call, or this
+        file's own route_override_word()'s direct _execute_contract() call)
+        is observed automatically, right there, against its own real return
+        text -- see _execute_contract()'s own _finish() helper. This method
+        is the one deliberate exception: it marks the current thread's
+        execution-shadow context as "deferred" for the duration of its own
+        self.approve() call below, so _execute_contract() hands the
+        evidence off instead of observing it prematurely against a string
+        this method is about to discard. The defer flag and any pending
+        handoff are always cleared in `finally`, so no exception or early
+        return can leak deferred state into a later, unrelated execution on
+        a reused thread.
         """
-        # Discard any stale handoff from an earlier, unrelated call that may
-        # have used this same (possibly thread-pool-reused) thread -- must
-        # never let a previous contract's evidence attach to this call.
         self._execution_shadow_tls.pending = None
+        self._execution_shadow_tls.defer = True
+        try:
+            def _finish(result: ApprovalLifecycleResult) -> ApprovalLifecycleResult:
+                pending = getattr(self._execution_shadow_tls, "pending", None)
+                self._execution_shadow_tls.pending = None
+                if pending is not None:
+                    _summary, _state = pending
+                    try:
+                        observe_shadow_finalizer(
+                            result.safe_user_message, _summary,
+                            state=_state, approval_prompt_sent=False,
+                        )
+                    except Exception:
+                        logger.debug(
+                            "[TC7/RP5][ExecutionShadow] observation skipped: contract=%s",
+                            contract_id, exc_info=True,
+                        )
+                return result
 
-        def _finish(result: ApprovalLifecycleResult) -> ApprovalLifecycleResult:
-            pending = getattr(self._execution_shadow_tls, "pending", None)
+            before = self._ledger.find_by_id(contract_id)
+            if before is None:
+                return _finish(build_approval_lifecycle_result(canonical_state="no_contract"))
+            if before.status != "pending":
+                return _finish(build_approval_lifecycle_result(before, repeated=True))
+
+            approval_message = self.approve(
+                contract_id, approver=approver, approver_role=approver_role,
+            )
+            after = self._ledger.find_by_id(contract_id)
+            if after is None:
+                return _finish(build_approval_lifecycle_result(canonical_state="no_contract"))
+            if after.status == "pending":
+                if approval_message == _APPROVAL_AUTHORIZATION_DENIED_MESSAGE:
+                    return _finish(build_approval_lifecycle_result(
+                        after, canonical_state="authorization_denied",
+                    ))
+                return _finish(build_approval_lifecycle_result(after, canonical_state="failed"))
+            return _finish(build_approval_lifecycle_result(after, repeated=False))
+        finally:
+            # Always cleared, even on an unexpected exception -- deferred
+            # state must never survive past this call on a reused thread.
+            self._execution_shadow_tls.defer = False
             self._execution_shadow_tls.pending = None
-            if pending is not None:
-                _summary, _state = pending
-                try:
-                    observe_shadow_finalizer(
-                        result.safe_user_message, _summary,
-                        state=_state, approval_prompt_sent=False,
-                    )
-                except Exception:
-                    logger.debug(
-                        "[TC7B][ExecutionShadow] observation skipped: contract=%s",
-                        contract_id, exc_info=True,
-                    )
-            return result
-
-        before = self._ledger.find_by_id(contract_id)
-        if before is None:
-            return _finish(build_approval_lifecycle_result(canonical_state="no_contract"))
-        if before.status != "pending":
-            return _finish(build_approval_lifecycle_result(before, repeated=True))
-
-        approval_message = self.approve(
-            contract_id, approver=approver, approver_role=approver_role,
-        )
-        after = self._ledger.find_by_id(contract_id)
-        if after is None:
-            return _finish(build_approval_lifecycle_result(canonical_state="no_contract"))
-        if after.status == "pending":
-            if approval_message == _APPROVAL_AUTHORIZATION_DENIED_MESSAGE:
-                return _finish(build_approval_lifecycle_result(
-                    after, canonical_state="authorization_denied",
-                ))
-            return _finish(build_approval_lifecycle_result(after, canonical_state="failed"))
-        return _finish(build_approval_lifecycle_result(after, repeated=False))
 
     def reject_with_lifecycle_result(
         self, contract_id: str, *, rejected_by: str,
@@ -2987,9 +3018,19 @@ class ActionGateway:
             "outcome_unknown": ActionResolutionOutcome.OUTCOME_UNKNOWN,
         }
 
+        # TC7/RP5 execution-shadow state, scoped to this one call. Set inside
+        # _persist_execution_status() below, exactly once, only for whichever
+        # terminal status actually gets durably persisted this call (never
+        # "latest for user", never accumulated across calls/turns — a fresh
+        # TurnEvidenceSummary per contract resolution). Read back by _finish()
+        # at whichever single return statement this call ends up taking.
+        _last_evidence_summary: TurnEvidenceSummary | None = None
+        _last_evidence_state: str | None = None
+
         def _persist_execution_status(
             status: str, *, dispatcher_outcome: DispatcherOutcome | None = None,
         ) -> bool:
+            nonlocal _last_evidence_summary, _last_evidence_state
             try:
                 persisted = self._ledger.update_status(contract.contract_id, status)
             except ActionContractTransitionError as exc:
@@ -3019,16 +3060,15 @@ class ActionGateway:
             # update_status() mutated `contract` in place or cached a fresh
             # object. Same-turn projection only.
             #
-            # TC7-B: evidence computation is decoupled from logger level.
+            # TC7/RP5: evidence computation is decoupled from logger level.
             # PR #573 gated the whole block behind isEnabledFor(INFO) because
             # the only consumer was the informational log line below. Now
-            # that RP4/RP5 shadow also consumes this same projection (handed
-            # off via self._execution_shadow_tls to approve_with_lifecycle_
-            # result(), which renders the real user-visible text -- see that
-            # method's own docstring), the extra find_by_id() read must
-            # happen whenever EITHER consumer needs it, never only when INFO
-            # happens to be enabled -- or flipping the logger to WARNING
-            # would silently blind RP5.
+            # that RP4/RP5 shadow also consumes this same projection (via
+            # _finish() below, or handed off to approve_with_lifecycle_
+            # result() when deferred -- see that method's own docstring),
+            # the extra find_by_id() read must happen whenever EITHER
+            # consumer needs it, never only when INFO happens to be enabled
+            # -- or flipping the logger to WARNING would silently blind RP5.
             _rp5_state = get_evidence_finalizer_state()
             _want_evidence = logger.isEnabledFor(logging.INFO) or _rp5_state in ("shadow", "enforce")
             if _want_evidence:
@@ -3062,7 +3102,7 @@ class ActionGateway:
                     if _evidence is not None:
                         _summary = project_evidence_result(_evidence)
                     else:
-                        # TC7-B fail-closed rule: a real contract WAS just
+                        # TC7/RP5 fail-closed rule: a real contract WAS just
                         # persisted above, so a projection failure here must
                         # not disappear silently. This means only "canonical
                         # execution evidence could not be positively
@@ -3070,15 +3110,45 @@ class ActionGateway:
                         # manufactured success.
                         _summary = TurnEvidenceSummary()
                         _summary.record_unverified_effect()
-                    # Handed off to approve_with_lifecycle_result(), the one
-                    # place that knows the real final user-visible text for
-                    # both the Telegram callback-button and text-confirm-word
-                    # execution paths (both funnel through it) -- never
-                    # observed here against this function's OWN return
-                    # string, which neither of those two callers actually
-                    # shows to the user.
-                    self._execution_shadow_tls.pending = (_summary, _rp5_state)
+                    _last_evidence_summary = _summary
+                    _last_evidence_state = _rp5_state
             return True
+
+        def _finish(text: str) -> str:
+            """_execute_contract() is the universal execution-shadow
+            boundary: any direct caller of approve()/_execute_contract()
+            (tma_api.py's direct ActionGateway.approve() call,
+            route_override_word()'s direct _execute_contract() call, or any
+            future direct caller) is observed automatically, right here,
+            against its OWN real return text -- a no-op when no terminal
+            status was durably persisted this call (_last_evidence_summary
+            stays None), e.g. when _persist_execution_status() itself failed
+            or was never reached on this return path.
+
+            The one deliberate exception is approve_with_lifecycle_result(),
+            which discards this function's return text and re-renders its
+            own (see that method's docstring) -- it marks the current
+            thread as "deferred" before calling approve(), so this function
+            hands the evidence off instead of observing it here against a
+            string that method is about to throw away. Exactly one
+            observation happens either way: here (default) or there
+            (deferred) — never both, never neither, for a resolved
+            contract."""
+            if _last_evidence_summary is not None and _last_evidence_state is not None:
+                if getattr(self._execution_shadow_tls, "defer", False):
+                    self._execution_shadow_tls.pending = (_last_evidence_summary, _last_evidence_state)
+                else:
+                    try:
+                        observe_shadow_finalizer(
+                            text, _last_evidence_summary,
+                            state=_last_evidence_state, approval_prompt_sent=False,
+                        )
+                    except Exception:
+                        logger.debug(
+                            "[TC7/RP5][ExecutionShadow] observation skipped: contract=%s",
+                            contract.contract_id, exc_info=True,
+                        )
+            return text
 
         # Phase 4B0 atomic claim gate (if flag enabled)
         if is_enabled("FEATURE_ATOMIC_CLAIMS"):
@@ -3118,11 +3188,11 @@ class ActionGateway:
                     contract.actor_user_id,
                 )
                 if not _persist_execution_status("failed"):
-                    return (
+                    return _finish(
                         "❌ לא ניתן לאמת את זהות המבקש, וגם סטטוס הכשל לא נשמר "
                         "באופן עמיד. אין לנסות שוב עד לבדיקת המערכת."
                     )
-                return "❌ שגיאת זהות: לא ניתן לאמת את הזהות של המבקש. פנה לתמיכה טכנית."
+                return _finish("❌ שגיאת זהות: לא ניתן לאמת את הזהות של המבקש. פנה לתמיכה טכנית.")
 
             # Deterministic idempotency key: hash(contract_id + approved_by)
             # Same contract + same approver → same key → ALREADY_CLAIMED on retry
@@ -3153,13 +3223,13 @@ class ActionGateway:
                         if not _persist_execution_status(
                             terminal_status, dispatcher_outcome=result,
                         ):
-                            return (
+                            return _finish(
                                 "⚠️ תוצאת הביצוע סווגה כ־"
                                 f"{terminal_status}, אך לא נשמרה באופן עמיד. "
                                 "אין לנסות שוב עד לבדיקת המערכת."
                             )
                         if result.is_outcome_unknown():
-                            return (
+                            return _finish(
                                 result.user_message
                                 or "⚠️ תוצאת הפעולה אינה ידועה. אין לנסות שוב אוטומטית."
                             )
@@ -3167,7 +3237,7 @@ class ActionGateway:
                         "[ActionGateway] atomic claim failed: contract=%s error=%s",
                         contract.contract_id, error,
                     )
-                    return f"❌ ביצוע נכשל: {error}"
+                    return _finish(f"❌ ביצוע נכשל: {error}")
 
                 # Phase 4B0: result is DispatcherOutcome when flag enabled
                 # Extract structured fields and convert to dict for downstream processing
@@ -3186,7 +3256,7 @@ class ActionGateway:
             except Exception as exc:
                 # No exception fallback to direct dispatch when flag is ON — fail closed
                 if not _persist_execution_status("failed"):
-                    return (
+                    return _finish(
                         "❌ המבצע האטומי נכשל, וגם סטטוס הכשל לא נשמר באופן עמיד. "
                         "אין לנסות שוב עד לבדיקת המערכת."
                     )
@@ -3194,7 +3264,7 @@ class ActionGateway:
                     "[ActionGateway] atomic executor raised: contract=%s error=%s",
                     contract.contract_id, exc,
                 )
-                return f"❌ ביצוע נכשל: {exc}"
+                return _finish(f"❌ ביצוע נכשל: {exc}")
         else:
             # Flag OFF: legacy direct dispatch (no claim creation, no atomic coordination)
             # _tool_executor reconstructs identity from contract using contract_id
@@ -3206,7 +3276,7 @@ class ActionGateway:
                 )
             except Exception as exc:
                 if not _persist_execution_status("failed"):
-                    return (
+                    return _finish(
                         "❌ הביצוע נכשל, וגם סטטוס הכשל לא נשמר באופן עמיד. "
                         "אין לנסות שוב עד לבדיקת המערכת."
                     )
@@ -3214,7 +3284,7 @@ class ActionGateway:
                     "[ActionGateway] execution failed: contract=%s error=%s",
                     contract.contract_id, exc,
                 )
-                return f"❌ ביצוע נכשל: {exc}"
+                return _finish(f"❌ ביצוע נכשל: {exc}")
 
         # A legacy/direct executor may already expose the same structured
         # outcome contract used by the atomic path. Preserve ambiguity rather
@@ -3225,14 +3295,14 @@ class ActionGateway:
                 if not _persist_execution_status(
                     raw.result, dispatcher_outcome=raw,
                 ):
-                    return (
+                    return _finish(
                         "⚠️ תוצאת הביצוע סווגה כ־"
                         f"{raw.result}, אך לא נשמרה באופן עמיד. "
                         "אין לנסות שוב עד לבדיקת המערכת."
                     )
                 if raw.is_outcome_unknown():
-                    return raw.user_message or "⚠️ תוצאת הפעולה אינה ידועה. אין לנסות שוב אוטומטית."
-                return f"❌ ביצוע נכשל: {raw.error or raw.user_message}"
+                    return _finish(raw.user_message or "⚠️ תוצאת הפעולה אינה ידועה. אין לנסות שוב אוטומטית.")
+                return _finish(f"❌ ביצוע נכשל: {raw.error or raw.user_message}")
             raw = raw.raw_response or {
                 "ok": True,
                 "external_id": raw.external_id,
@@ -3255,7 +3325,7 @@ class ActionGateway:
                         raw_response=raw if isinstance(raw, dict) else None,
                     ),
                 ):
-                    return (
+                    return _finish(
                         "❌ לא נמצאה הוכחת ביצוע, וגם סטטוס הכשל לא נשמר באופן עמיד. "
                         "אין לנסות שוב עד לבדיקת המערכת."
                     )
@@ -3263,7 +3333,7 @@ class ActionGateway:
                     "[ActionGateway] evidence missing: contract=%s tool=%s reason=%s",
                     contract.contract_id, contract.tool_name, check.reason,
                 )
-                return f"❌ הפעולה לא הושלמה: {check.reason}"
+                return _finish(f"❌ הפעולה לא הושלמה: {check.reason}")
         except Exception as verify_exc:
             logger.warning("[ActionGateway] verify_execution import failed: %s", verify_exc)
 
@@ -3282,7 +3352,7 @@ class ActionGateway:
                 raw_response=raw if isinstance(raw, dict) else None,
             ),
         ):
-            return (
+            return _finish(
                 f"⚠️ הספק החזיר הצלחה מפורשת, אך סטטוס {success_status} לא נשמר "
                 "באופן עמיד. אין לנסות שוב עד לבדיקת המערכת."
             )
@@ -3321,7 +3391,7 @@ class ActionGateway:
         # logged above) for verification/audit — it is simply never
         # surfaced a second time in the user-facing text.
         gateway_reply = self.compose_status_reply(fact)
-        return gateway_reply.text
+        return _finish(gateway_reply.text)
 
     # ── §15.2 — compose_status_reply ────────────────────────────────
     # הפונקציה היחידה בכל הקוד שמותר לה לייצר טקסט סטטוס-פעולה.
