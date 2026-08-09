@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import os
 import urllib.parse
+from dataclasses import dataclass
 
 import httpx
 
@@ -18,6 +19,15 @@ import schema_validator as _sv
 from airtable_schema import FIELD_ALIASES
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class AirtableCreateOutcome:
+    """Opt-in POST classification for callers that must preserve uncertainty."""
+
+    status: str  # created | failed | outcome_unknown
+    record: dict | None = None
+    error: str = ""
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -374,12 +384,17 @@ def airtable_create(
     source: str = "unknown",
     *,
     timeout: float = 10,
-) -> dict | None:
+    return_outcome: bool = False,
+) -> dict | None | AirtableCreateOutcome:
     """
     POST a new Airtable record.
     normalize → validate → audit → httpx POST
-    Returns the full Airtable record dict {"id": "recXXX", "fields": {...}} or None.
+    Returns the full Airtable record dict or None.  With return_outcome=True,
+    returns an explicit created/failed/outcome_unknown classification.
     """
+    def outcome(status: str, record: dict | None = None, error: str = ""):
+        return AirtableCreateOutcome(status, record, error) if return_outcome else record
+
     fields = normalize_airtable_fields(table, fields)
     clean, errors = validate_airtable_fields(table, fields)
 
@@ -391,7 +406,7 @@ def airtable_create(
             source, table, sorted(dropped), errors,
         )
         _audit_log(source, table, "create", "", [], ok=False)
-        return None
+        return outcome("failed")
 
     if not clean:
         logger.warning(
@@ -399,7 +414,7 @@ def airtable_create(
             source, table,
         )
         _audit_log(source, table, "create", "", [], ok=False)
-        return None
+        return outcome("failed")
 
     logger.debug("[gateway:%s] POST %s keys=%s", source, table, list(clean.keys()))
 
@@ -411,10 +426,20 @@ def airtable_create(
             timeout=timeout,
         )
         ok = r.status_code in (200, 201)
-        rec_id = r.json().get("id", "?") if ok else ""
-        _audit_log(source, table, "create", rec_id, list(clean.keys()), ok=ok)
         if ok:
-            return r.json()
+            response = r.json()
+            rec_id = response.get("id", "?")
+            _audit_log(source, table, "create", rec_id, list(clean.keys()), ok=True)
+            if return_outcome:
+                if not rec_id or rec_id == "?":
+                    return AirtableCreateOutcome(
+                        "outcome_unknown", response,
+                        "provider accepted POST without record id",
+                    )
+                return AirtableCreateOutcome("created", response)
+            return response
+
+        _audit_log(source, table, "create", "", list(clean.keys()), ok=False)
         body = r.text[:300]
         if r.status_code == 422:
             try:
@@ -425,10 +450,17 @@ def airtable_create(
             "[gateway:%s] POST %s → %d: %s",
             source, table, r.status_code, body,
         )
+        if return_outcome:
+            status = "failed" if 400 <= r.status_code < 500 else "outcome_unknown"
+            return AirtableCreateOutcome(
+                status, error=f"provider returned HTTP {r.status_code}"
+            )
         return None
     except Exception as e:
         logger.warning("[gateway:%s] POST %s error: %s", source, table, e)
         _audit_log(source, table, "create", "", [], ok=False)
+        if return_outcome:
+            return AirtableCreateOutcome("outcome_unknown", error=str(e))
         return None
 
 

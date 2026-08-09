@@ -345,6 +345,50 @@ def dispatch_tool(
                     # blocked-write failure, never ok=True.
                     return _tool_result(ok=False, tool="airtable_add", user_message=str(e))
 
+                if _ALIAS_MAP.get(table, table) == "אנשי קשר (Contacts)":
+                    from airtable_schema import ContactFields, Tables
+                    import crm
+                    from core.dispatcher_outcome import DispatcherOutcome
+                    from tools.airtable_gateway import airtable_create
+
+                    def _finish_contact(result, audit_result=None):
+                        audit_log_airtable(
+                            "airtable_add", identity,
+                            {"table": table, "fields_keys": list(fields.keys())},
+                            result if audit_result is None else audit_result,
+                        )
+                        return result
+
+                    contact = crm.find_or_create_contact(
+                        fields.get(ContactFields.PHONE), fields.get(ContactFields.NAME),
+                        email=fields.get(ContactFields.EMAIL, ""),
+                        company=fields.get(ContactFields.COMPANY, ""),
+                        contact_type=fields.get(ContactFields.ROLE_CATEGORY, "Client"),
+                        identity=identity,
+                        source="agent",
+                        create_writer=lambda create_fields: airtable_create(
+                            Tables.CONTACTS, create_fields, source="agent", return_outcome=True
+                        ),
+                    )
+                    evidence = {"record_id": contact.record_id, "table": table,
+                                "contact_status": contact.status}
+                    if contact.status == "outcome_unknown":
+                        result = _tool_result(ok=False, tool="airtable_add", evidence=evidence,
+                                              user_message="⚠️ תוצאת יצירת איש הקשר אינה ידועה. אין לנסות שוב אוטומטית.")
+                        outcome = DispatcherOutcome("outcome_unknown", result["user_message"],
+                                                    error=contact.error, raw_response=result)
+                        return _finish_contact(outcome, result)
+                    if contact.status in ("created", "existing"):
+                        return _finish_contact(_tool_result(
+                            ok=True, tool="airtable_add", external_id=contact.record_id,
+                            evidence=evidence,
+                            user_message="✅ איש הקשר נוצר" if contact.status == "created" else "✅ איש הקשר כבר קיים",
+                        ))
+                    return _finish_contact(_tool_result(
+                        ok=False, tool="airtable_add", evidence=evidence,
+                        user_message=f"❌ יצירת איש הקשר נכשלה: {contact.status}",
+                    ))
+
                 result = airtable_add(table, fields)
                 audit_log_airtable("airtable_add", identity, {"table": table, "fields_keys": list(fields.keys())}, result)
                 return result

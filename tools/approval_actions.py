@@ -361,13 +361,41 @@ def tma_write(
     approved_by = _approved_by
 
     if op == "post":
-        rec = airtable_create(table, fields, source="tma_write")
-        if not rec:
-            return _tool_result(
-                ok=False, tool="tma_write",
-                user_message=f"❌ יצירת רשומה נכשלה ב-{table}",
+        if table in (Tables.CONTACTS, "Contacts"):
+            import crm
+            from core.dispatcher_outcome import DispatcherOutcome
+            from tools.airtable_gateway import airtable_create
+            from airtable_schema import ContactFields
+
+            contact = crm.find_or_create_contact(
+                fields.get(ContactFields.PHONE), fields.get(ContactFields.NAME),
+                email=fields.get(ContactFields.EMAIL, ""),
+                company=fields.get(ContactFields.COMPANY, ""),
+                contact_type=fields.get(ContactFields.ROLE_CATEGORY, "Client"),
+                identity=identity,
+                source="tma_write",
+                create_writer=lambda create_fields: airtable_create(
+                    Tables.CONTACTS, create_fields, source="tma_write", return_outcome=True
+                ),
             )
-        result_record_id = rec.get("id", "") or ""
+            if contact.status == "outcome_unknown":
+                result = _tool_result(ok=False, tool="tma_write",
+                                      evidence={"table": table, "contact_status": contact.status},
+                                      user_message="⚠️ תוצאת יצירת איש הקשר אינה ידועה. אין לנסות שוב אוטומטית.")
+                return DispatcherOutcome("outcome_unknown", result["user_message"],
+                                          error=contact.error, raw_response=result)
+            if contact.status not in ("created", "existing"):
+                return _tool_result(ok=False, tool="tma_write",
+                                    user_message=f"❌ יצירת איש הקשר נכשלה: {contact.status}")
+            result_record_id = contact.record_id
+        else:
+            rec = airtable_create(table, fields, source="tma_write")
+            if not rec:
+                return _tool_result(
+                    ok=False, tool="tma_write",
+                    user_message=f"❌ יצירת רשומה נכשלה ב-{table}",
+                )
+            result_record_id = rec.get("id", "") or ""
     elif op == "patch":
         result_record_id = record_id
         cleaned_fields = _clean_tma_write_fields(table, fields)

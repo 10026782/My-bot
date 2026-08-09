@@ -144,7 +144,7 @@ def _contact_phone_equivalents(normalized: str) -> tuple:
 
 def find_or_create_contact(phone, name, *, email="", company="",
                            contact_type="Client", notes="", lead_source_id="",
-                           identity=None, source="") -> ContactResult:
+                           identity=None, source="", create_writer=None) -> ContactResult:
     """Find exactly by canonical phone, creating only when lookup is empty."""
     normalized = _normalize_contact_phone(phone)
     if not normalized or not name:
@@ -192,12 +192,30 @@ def find_or_create_contact(phone, name, *, email="", company="",
     if lead_source_id:
         fields[ContactFields.ORIGIN_LEAD] = [lead_source_id]
     try:
-        record_id = _post(Tables.CONTACTS, fields).get("id", "")
+        if create_writer is None:
+            record = _post(Tables.CONTACTS, fields)
+        else:
+            provider_result = create_writer(fields)
+            outcome = getattr(provider_result, "status", "")
+            if outcome == "outcome_unknown":
+                return ContactResult("outcome_unknown", normalized_phone=normalized,
+                                     error=getattr(provider_result, "error", ""))
+            if outcome == "failed":
+                return ContactResult("create_error", normalized_phone=normalized,
+                                     error=getattr(provider_result, "error", ""))
+            if outcome and outcome != "created":
+                return ContactResult("create_error", normalized_phone=normalized,
+                                     error=f"unexpected provider outcome: {outcome}")
+            record = getattr(provider_result, "record", provider_result)
+        record_id = (record or {}).get("id", "")
     except Exception as exc:
-        return ContactResult("lookup_error", normalized_phone=normalized,
-                             error=str(exc))
+        if create_writer is not None:
+            return ContactResult("outcome_unknown", normalized_phone=normalized,
+                                 error=str(exc))
+        return ContactResult("lookup_error", normalized_phone=normalized, error=str(exc))
     if not record_id:
-        return ContactResult("lookup_error", normalized_phone=normalized,
+        status = "outcome_unknown" if create_writer is not None else "lookup_error"
+        return ContactResult(status, normalized_phone=normalized,
                              error="Contact create returned no record id")
     return ContactResult("created", record_id=record_id,
                          normalized_phone=normalized)
