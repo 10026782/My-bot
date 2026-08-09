@@ -17,6 +17,7 @@ from airtable_schema import (
     PaymentFields, PaymentStatus,
     validate_funding_cost,
 )
+from tools.airtable_gateway import airtable_create, airtable_patch
 
 logger = logging.getLogger(__name__)
 
@@ -69,24 +70,15 @@ def _get(table: str, formula: str = "", fields: list = None, identity=None) -> l
     return r.json().get("records", [])
 
 def _post(table: str, fields: dict) -> dict:
-    r = httpx.post(_base_url(table), headers=_headers(),
-                   json={"fields": fields}, timeout=10)
-    if r.status_code == 401:
-        raise RuntimeError("AIRTABLE_API_KEY לא תקין או פג — עדכן ב-Render")
-    if r.status_code == 403:
-        raise RuntimeError(f"אין הרשאה לטבלה '{table}' — בדוק שהטבלה קיימת ושה-token מורשה")
-    r.raise_for_status()
-    return r.json()
+    record = airtable_create(table, fields, source="crm")
+    if record is None:
+        raise RuntimeError(f"Airtable create failed for table '{table}'")
+    return record
 
 def _patch(table: str, record_id: str, fields: dict) -> dict:
-    r = httpx.patch(f"{_base_url(table)}/{record_id}", headers=_headers(),
-                    json={"fields": fields}, timeout=10)
-    if r.status_code == 401:
-        raise RuntimeError("AIRTABLE_API_KEY לא תקין או פג — עדכן ב-Render")
-    if r.status_code == 403:
-        raise RuntimeError(f"אין הרשאה לטבלה '{table}' / רשומה '{record_id}'")
-    r.raise_for_status()
-    return r.json()
+    if not airtable_patch(table, record_id, fields, source="crm"):
+        raise RuntimeError(f"Airtable update failed for table '{table}', record '{record_id}'")
+    return {"id": record_id}
 
 def _fmt_date(iso: str) -> str:
     try:
