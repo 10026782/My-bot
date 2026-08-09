@@ -456,6 +456,69 @@ for tool_name, valid_raw, expected_ref, _invalid_raw in _ALT_EVIDENCE_CASES:
 
 
 # ═════════════════════════════════════════════════════════════════
+# RE-REVIEW FIX — ok=False gate. extract_canonical_evidence_ref() must
+# never yield a ref (and build_evidence_result_from_outcome() must never
+# report success) for a raw result whose top-level ok is False, even when
+# its nested evidence dict is otherwise well-formed/valid-looking. Without
+# this gate the same raw result could be "failed" to verify_execution() and
+# "success" to TC7-A — exactly the two-authority inconsistency this whole
+# seam exists to prevent. Parametrized across every _ALT_EVIDENCE_CASES
+# tool (Airtable, Calendar, Gmail draft/send, Drive, send_followup).
+# ═════════════════════════════════════════════════════════════════
+
+for tool_name, valid_raw, expected_ref, _invalid_raw in _ALT_EVIDENCE_CASES:
+    # Same evidence dict as the positive alt-evidence case above, but ok=False.
+    not_ok_raw = {**valid_raw, "ok": False}
+
+    check_result = verify_execution(tool_name, not_ok_raw)
+    check(
+        f"(ok-gate {tool_name}) verify_execution() rejects ok=False regardless of evidence shape",
+        check_result.status == "failed",
+    )
+
+    ref = extract_canonical_evidence_ref(tool_name, not_ok_raw)
+    check(
+        f"(ok-gate {tool_name}) extract_canonical_evidence_ref() yields no ref when ok=False "
+        f"even though the same evidence shape is valid when ok=True (would be {expected_ref!r})",
+        ref == "",
+    )
+
+    contract = _contract("completed", contract_id=f"okgate-{tool_name}", tool_name=tool_name)
+    outcome = DispatcherOutcome(result="completed", user_message="", external_id="", raw_response=not_ok_raw)
+    evidence = build_evidence_result_from_outcome(contract, outcome)
+    check(
+        f"(ok-gate {tool_name}) build_evidence_result_from_outcome() never reports success when ok=False "
+        "-- the same raw result cannot be failed to verify_execution() and success to TC7-A",
+        evidence.result != "success",
+    )
+    check(f"(ok-gate {tool_name}) falls closed to outcome_unknown, not a fabricated failure/success", evidence.result == "outcome_unknown")
+
+# Exact reproduction of the reviewer's own example: Airtable, ok=False, a
+# genuinely-valid-shaped record_id nested in evidence.
+_airtable_ok_false_valid_shape = {
+    "ok": False,
+    "evidence": {"record_id": _REC_A},
+}
+check(
+    "(ok-gate airtable_add exact repro) verify_execution() -> failed",
+    verify_execution("airtable_add", _airtable_ok_false_valid_shape).status == "failed",
+)
+check(
+    "(ok-gate airtable_add exact repro) extract_canonical_evidence_ref() -> ''",
+    extract_canonical_evidence_ref("airtable_add", _airtable_ok_false_valid_shape) == "",
+)
+_repro_contract = _contract("completed", contract_id="okgate-airtable-repro", tool_name="airtable_add")
+_repro_outcome = DispatcherOutcome(
+    result="completed", user_message="", external_id="", raw_response=_airtable_ok_false_valid_shape,
+)
+_repro_evidence = build_evidence_result_from_outcome(_repro_contract, _repro_outcome)
+check(
+    "(ok-gate airtable_add exact repro) build_evidence_result_from_outcome() never success",
+    _repro_evidence.result != "success",
+)
+
+
+# ═════════════════════════════════════════════════════════════════
 # 13: TurnEvidenceSummary / RP4 untouched — structural non-regression
 # ═════════════════════════════════════════════════════════════════
 

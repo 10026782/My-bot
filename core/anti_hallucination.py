@@ -205,17 +205,24 @@ def extract_canonical_evidence_ref(tool_name: str, raw_output: Any) -> str:
     the change from this single place automatically.
 
     Returns "" for a missing/invalid/malformed-shape result, an
-    unrecognized tool, or a non-dict input — never raises, never reads
-    user_message. Callers must independently confirm raw_output.get("ok")
-    and any dispatcher-level success classification themselves; this
-    function only answers "is there a real structured provider reference,
-    and what is it" for tools with a registered validator, falling back to
-    the plain external_id field for any other tool (read-only tools, or a
-    write tool not yet registered — the latter already fails closed inside
-    verify_execution() itself via _WRITE_ACTION_TOOLS, so this fallback
-    never needs to gate anything on its own).
+    unrecognized tool, a non-dict input, or ok is not True — mirrors
+    verify_execution()'s own ok-gate-before-validator order exactly, so
+    verify_execution()=="ok" and "this function can yield a non-empty ref"
+    are the same guarantee, not merely two functions that happen to read the
+    same fields. A result with ok=False can never yield a ref here even if
+    its evidence dict is otherwise well-formed — the same raw result must
+    never be "failed" to verify_execution() and "success" to TC7-A. Never
+    raises, never reads user_message. This function only answers "is there
+    a real structured provider reference, and what is it" for tools with a
+    registered validator, falling back to the plain external_id field for
+    any other tool (read-only tools, or a write tool not yet registered —
+    the latter already fails closed inside verify_execution() itself via
+    _WRITE_ACTION_TOOLS, so this fallback never needs to gate anything on
+    its own).
     """
     if not isinstance(raw_output, dict):
+        return ""
+    if not raw_output.get("ok"):
         return ""
     validator = _EVIDENCE_VALIDATORS.get(tool_name)
     if validator is None:
