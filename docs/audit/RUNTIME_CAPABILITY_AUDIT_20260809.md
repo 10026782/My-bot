@@ -75,7 +75,8 @@ ownership is verified only on observed paths: Production reports
 
 ### RuntimeSchemaProvider
 
-Final classification: **SHADOW — RUNTIME PATH VERIFIED — COMPONENT LOGGING NOT OBSERVABLE**.
+Original classification (09/08/2026 evidence-only audit, superseded below):
+**SHADOW — RUNTIME PATH VERIFIED — COMPONENT LOGGING NOT OBSERVABLE**.
 
 Configuration is `FEATURE_AIRTABLE_RUNTIME_SCHEMA_PROVIDER_STATE=shadow` in
 both environments. Current code establishes:
@@ -108,7 +109,7 @@ below at the code level; a fresh Render log pull is still needed to
 re-verify `live`/`cached`/`snapshot`/`seed` selection in Production/Staging
 against this new marker.
 
-**Updated classification (09/08/2026):** per this document's own evidence
+**Current classification (09/08/2026, Track D — supersedes the original classification above):** per this document's own evidence
 hierarchy (`runtime evidence > Render config > current code > documentation`),
 implemented-and-tested code is not itself runtime evidence. Status is
 **CODE OBSERVABILITY IMPLEMENTED + TESTED — NEW MARKER NOT YET OBSERVED IN
@@ -118,7 +119,8 @@ result ...` line.
 
 ### IngressEnvelope
 
-Final classification: **ACTIVE — RUNTIME PATH VERIFIED — COMPONENT LOGGING NOT OBSERVABLE**.
+Original classification (09/08/2026 evidence-only audit, superseded below):
+**ACTIVE — RUNTIME PATH VERIFIED — COMPONENT LOGGING NOT OBSERVABLE**.
 
 The Telegram webhook passes `raw_event_id=str(update.update_id)` into
 `run_agent()` ([app.py](</home/elichazan/My-bot/app.py:5808>)). With the effective
@@ -153,7 +155,7 @@ below at the code level; a fresh Render log pull is still needed to
 re-verify envelope ID/source visibility in Production/Staging against this
 new marker.
 
-**Updated classification (09/08/2026):** per this document's own evidence
+**Current classification (09/08/2026, Track D — supersedes the original classification above):** per this document's own evidence
 hierarchy (`runtime evidence > Render config > current code > documentation`),
 implemented-and-tested code is not itself runtime evidence. Status is
 **CODE OBSERVABILITY IMPLEMENTED + TESTED — NEW MARKER NOT YET OBSERVED IN
