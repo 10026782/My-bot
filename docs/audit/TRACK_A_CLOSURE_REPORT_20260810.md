@@ -161,7 +161,7 @@ Runtime evidence:
 - EvidenceFinalizer: `evidence_status=verified_write_success`, `mismatch=false`
 - Approval turn: `agent_calls=0`, `final_responses=1`, `deterministic=True`
 
-This is Staging runtime evidence supplied in the handoff. It verifies the corrected date path; it is not a Production deployment claim.
+Environment policy: Staging and Production use the same code and runtime path. Therefore this Staging canary is runtime-equivalent verification for Production. No second Production canary is required; Production is reserved for real business operations so test samples are not contaminated.
 
 ## Closure decision
 
