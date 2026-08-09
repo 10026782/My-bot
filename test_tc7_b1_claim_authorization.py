@@ -148,13 +148,30 @@ def test_incomplete_lifecycle_compatible_evidence_resolves_to_pending():
         assert authorize_claim("approval_pending", lifecycle) == (ClaimCategory.PENDING, "lifecycle_in_progress")
 
 
-# 9. rejected/cancelled cannot authorize SUCCESS
-def test_rejected_and_cancelled_never_authorize_success():
+# 9. rejected/cancelled cannot authorize SUCCESS or FAILURE -- cancellation
+# means execution did not proceed, which is a distinct claim from "execution
+# was attempted and failed" (only an actually-failed lifecycle asserts that).
+def test_rejected_and_cancelled_never_authorize_success_or_failure():
     for lifecycle in ("rejected", "cancelled"):
         for evidence in _ALL_EVIDENCE_STATES:
             state, reason = authorize_claim(evidence, lifecycle)
-            assert state == ClaimCategory.FAILURE, (lifecycle, evidence, state)
+            assert state == ClaimCategory.NEUTRAL, (lifecycle, evidence, state)
+            assert state != ClaimCategory.SUCCESS
+            assert state != ClaimCategory.FAILURE
             assert reason == "lifecycle_terminal_non_success"
+
+
+def test_rejected_and_cancelled_with_success_shaped_evidence_is_neutral():
+    assert authorize_claim("verified_write_success", "rejected") == (ClaimCategory.NEUTRAL, "lifecycle_terminal_non_success")
+    assert authorize_claim("verified_write_success", "cancelled") == (ClaimCategory.NEUTRAL, "lifecycle_terminal_non_success")
+
+
+def test_rejected_and_cancelled_with_failure_evidence_is_neutral_not_failure():
+    # Terminal rejection/cancellation means "no execution claim to make", not
+    # "execution was attempted and failed" -- evidence-side failure text must
+    # not leak through into a FAILURE claim once lifecycle says cancelled.
+    assert authorize_claim("failure", "rejected") == (ClaimCategory.NEUTRAL, "lifecycle_terminal_non_success")
+    assert authorize_claim("failure", "cancelled") == (ClaimCategory.NEUTRAL, "lifecycle_terminal_non_success")
 
 
 def test_failed_lifecycle_is_always_failure_regardless_of_evidence():

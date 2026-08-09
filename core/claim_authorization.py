@@ -137,9 +137,12 @@ def authorize_claim(
 
     # Terminal lifecycle authority wins outright; evidence is never
     # consulted, matching the "terminal lifecycle discards evidence"
-    # precedent used elsewhere in the WS2/TC6 family.
+    # precedent used elsewhere in the WS2/TC6 family. Cancellation/rejection
+    # means execution did not proceed -- that is not the same claim as
+    # "execution was attempted and failed", so it resolves to NEUTRAL, not
+    # FAILURE. Only an actually-failed lifecycle authorizes a FAILURE claim.
     if lifecycle_state in _TERMINAL_NON_SUCCESS_LIFECYCLE:
-        return ClaimCategory.FAILURE, "lifecycle_terminal_non_success"
+        return ClaimCategory.NEUTRAL, "lifecycle_terminal_non_success"
 
     if lifecycle_state in _FAILED_LIFECYCLE:
         return ClaimCategory.FAILURE, "lifecycle_failed"
@@ -171,7 +174,9 @@ if __name__ == "__main__":
     assert authorize_claim("verified_write_success", "completed") == (ClaimCategory.SUCCESS, None)
     assert authorize_claim("verified_write_success") == (ClaimCategory.SUCCESS, None)
     assert authorize_claim("verified_read_only", "completed")[0] == ClaimCategory.NEUTRAL
-    assert authorize_claim("verified_write_success", "rejected")[0] == ClaimCategory.FAILURE
+    assert authorize_claim("verified_write_success", "rejected")[0] == ClaimCategory.NEUTRAL
+    assert authorize_claim("failure", "cancelled")[0] == ClaimCategory.NEUTRAL
+    assert authorize_claim("failure", "failed")[0] == ClaimCategory.FAILURE
     assert authorize_claim("verified_write_success", "pending")[0] != ClaimCategory.SUCCESS
     assert authorize_claim("failure", "pending")[0] != ClaimCategory.PENDING
     assert authorize_claim(" VERIFIED_WRITE_SUCCESS ", "completed")[0] != ClaimCategory.SUCCESS
