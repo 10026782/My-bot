@@ -28,8 +28,8 @@ Missing logs are not evidence that a subsystem is OFF or disconnected.
 | Execution / completion | NOT OBSERVED | VERIFIED | ACTIVE | Staging claim → dispatch → success; no successful Production execution in export |
 | Single-speaker / reply ownership | Observed path | Observed path | ACTIVE | VERIFIED IN BOTH — observed paths only |
 | Deterministic approval cost-cut | VERIFIED | VERIFIED | ACTIVE | `agent_calls=0` observed in both |
-| RuntimeSchemaProvider | PATH VERIFIED | PATH VERIFIED | SHADOW | RUNTIME PATH VERIFIED — SOURCE/RESULT OBSERVABLE (Track D, see addendum) |
-| IngressEnvelope | PATH VERIFIED | PATH VERIFIED | ACTIVE | RUNTIME PATH VERIFIED — SOURCE/RESULT OBSERVABLE (Track D, see addendum) |
+| RuntimeSchemaProvider | PATH VERIFIED | PATH VERIFIED | SHADOW | RUNTIME PATH VERIFIED — OBSERVABILITY IMPLEMENTED; RUNTIME MARKER RE-VERIFICATION PENDING (Track D, see addendum) |
+| IngressEnvelope | PATH VERIFIED | PATH VERIFIED | ACTIVE | RUNTIME PATH VERIFIED — ID/SOURCE OBSERVABILITY IMPLEMENTED; RUNTIME MARKER RE-VERIFICATION PENDING (Track D, see addendum) |
 | Emergency Stop durable persistence | VERIFIED | Bootstrap verified | ACTIVE | VERIFIED IN PROD — CURRENT |
 | `COST_WATCHDOG_LIVE` | VERIFIED OFF | VERIFIED ACTIVE | OFF / ACTIVE | EXPECTED ENVIRONMENT DIFFERENCE |
 | `INTERACTION_INTELLIGENCE` | VERIFIED OFF | VERIFIED OFF | OFF | OFF VERIFIED IN BOTH |
@@ -108,6 +108,14 @@ below at the code level; a fresh Render log pull is still needed to
 re-verify `live`/`cached`/`snapshot`/`seed` selection in Production/Staging
 against this new marker.
 
+**Updated classification (09/08/2026):** per this document's own evidence
+hierarchy (`runtime evidence > Render config > current code > documentation`),
+implemented-and-tested code is not itself runtime evidence. Status is
+**CODE OBSERVABILITY IMPLEMENTED + TESTED — NEW MARKER NOT YET OBSERVED IN
+RUNTIME**. This upgrades to "OBSERVABLE IN RUNTIME" only after a deploy +
+canary run whose Render logs actually show the new `[RuntimeSchemaProvider]
+result ...` line.
+
 ### IngressEnvelope
 
 Final classification: **ACTIVE — RUNTIME PATH VERIFIED — COMPONENT LOGGING NOT OBSERVABLE**.
@@ -144,6 +152,17 @@ unit-level by `test_c94_ingress_envelope.py`. This closes follow-up item 2
 below at the code level; a fresh Render log pull is still needed to
 re-verify envelope ID/source visibility in Production/Staging against this
 new marker.
+
+**Updated classification (09/08/2026):** per this document's own evidence
+hierarchy (`runtime evidence > Render config > current code > documentation`),
+implemented-and-tested code is not itself runtime evidence. Status is
+**CODE OBSERVABILITY IMPLEMENTED + TESTED — NEW MARKER NOT YET OBSERVED IN
+RUNTIME**. Note this is identity/source observability (envelope ID, channel,
+provider, a bounded source-reference classification) — there is no "result"
+concept for IngressEnvelope the way there is for RuntimeSchemaProvider's
+selected schema source; the matrix wording above reflects that distinction.
+This upgrades to "OBSERVABLE IN RUNTIME" only after a deploy + canary run
+whose Render logs actually show the new `[IngressEnvelope] accepted ...` line.
 
 ### EvidenceFinalizer
 
@@ -255,3 +274,11 @@ otherwise unmodified — its Render-log evidence and conclusions stand as
 written; only the two logging gaps it identified have since been closed in
 code, and the usage-telemetry/`INTERACTION_INTELLIGENCE` rows now carry an
 explicit classification.
+
+**Ownership note:** this work is externally tracked as `Track D` — Runtime
+Observability/Reliability — per current branch/task naming, which is
+distinct from the separately-tracked `Track C` (TC8/TC9/TC10). See
+`docs/planning/CORE_COMPLETION_MASTER_PLAN_20260809.md`'s naming-collision
+note under its own internal "### C — Runtime observability / telemetry /
+drift" section: that document's internal letter "C" predates and is
+unrelated to the external `Track C`/`Track D` convention used here.

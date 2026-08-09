@@ -10,7 +10,7 @@
 |---|---|
 | `BLOCKER` | TC7-B claim authorization; RP5 evidence-finalizer path; PA-01 coverage for `UPDATE_TASK`/`COMPLETE_TASK`; Staging ActionGateway canonicalization failure |
 | `REQUIRED` | Production ActionGateway execution proof; atomic claims/persistence verification; TC8 durable state; TC9 MessageContract full surface; TC10 operational verification harness; CORE-vs-POST-CORE decisions |
-| `HARDENING` | ~~RuntimeSchemaProvider source logging~~ (closed in code, 09/08/2026 — see audit addendum); ~~IngressEnvelope ID/source logging~~ (closed in code, 09/08/2026 — see audit addendum); full usage-telemetry consumption (explicitly classified NOT IMPLEMENTED, 09/08/2026 — remains open, no consumer built); `INTERACTION_INTELLIGENCE` accessor drift (re-verified 09/08/2026 — equivalence not provable, remains open, documented as accepted drift); broader EvidenceFinalizer sample coverage |
+| `HARDENING` | ~~RuntimeSchemaProvider source logging~~ (external `Track D`, closed in code 09/08/2026, runtime marker re-verification pending — see audit addendum); ~~IngressEnvelope ID/source logging~~ (external `Track D`, closed in code 09/08/2026, runtime marker re-verification pending — see audit addendum); full usage-telemetry consumption (external `Track D`, explicitly classified NOT IMPLEMENTED, 09/08/2026 — remains open, no consumer built); `INTERACTION_INTELLIGENCE` accessor drift (external `Track D`, re-verified 09/08/2026 — equivalence not provable, remains open, documented as accepted drift); broader EvidenceFinalizer sample coverage |
 | `POST-CORE` | Profile, Project Timeline, Tenant Provisioner, Knowledge Router, Tenant Config/providers, OTP, Financial Gate, Creative Generator, Knowledge Engine, Emergency Window, learning-cycle activation, F14-B2 |
 
 ## Parallel tracks
@@ -39,6 +39,18 @@
 
 ### C — Runtime observability / telemetry / drift
 
+> **Naming-collision note (added 09/08/2026, not a scope change):** this
+> document's internal letter **"C"** was assigned when this plan was
+> drafted and predates the external `Track A`–`Track E` naming currently
+> used in branch names and task assignments, where **`Track C` = TC8/TC9/
+> TC10** and **`Track D` = Runtime Observability/Reliability** (this
+> section's actual subject). The two lettering schemes have drifted apart
+> and this document has not been renumbered to reconcile them. The
+> "Progress" entry below is **external `Track D`** work — filed under this
+> internal "C" heading only because its *content* matches this section's
+> own Scope description, not because it is the externally-tracked
+> `Track C` (TC8/TC9/TC10). Do not read it as TC8/TC9/TC10 progress.
+
 - **Scope:** Add provider source/result observability, envelope ID/source-reference observability, decide or complete usage-telemetry consumption, and resolve/document centralized feature-flag drift.
 - **Owner:** Reliability / observability owner.
 - **Dependencies:** Stable provider, ingress, and evidence interfaces.
@@ -47,14 +59,19 @@
 - **Verification gate:** Logs distinguish `live`/`cached`/`snapshot`/`seed`; envelope fields are observable without sensitive data; telemetry has a verified consumer or explicit deferral; drift is resolved or accepted.
 - **Effort estimate:** 3–5 engineering days.
 - **Merge order:** Parallel; merge after Tracks A/B stabilize interfaces.
-- **Progress (09/08/2026):** RuntimeSchemaProvider `live`/`cached`/`snapshot`/`seed`
-  logging and IngressEnvelope ID/source logging are implemented and tested
-  (see `docs/audit/RUNTIME_CAPABILITY_AUDIT_20260809.md`'s Track D addendum);
-  usage-telemetry has an explicit producer-ACTIVE/consumer-NOT-IMPLEMENTED
-  classification, with no consumer built (deliberately out of scope);
-  `INTERACTION_INTELLIGENCE` accessor drift was re-verified as not safely
-  resolvable (semantic mismatch on `"1"`/`"yes"`/`"on"`/`"enabled"`) and left
-  unchanged, accepted drift. EvidenceFinalizer sample coverage is untouched.
+- **Progress (09/08/2026, external `Track D` — Runtime Observability/
+  Reliability; see naming-collision note above — NOT the externally-tracked
+  `Track C`/TC8-TC10):** RuntimeSchemaProvider `live`/`cached`/`snapshot`/
+  `seed` logging and IngressEnvelope ID/source logging are implemented and
+  tested, code-level only — no fresh runtime/Render evidence yet (see
+  `docs/audit/RUNTIME_CAPABILITY_AUDIT_20260809.md`'s Track D addendum for
+  the precise "CODE OBSERVABILITY IMPLEMENTED + TESTED — NEW MARKER NOT YET
+  OBSERVED IN RUNTIME" status); usage-telemetry has an explicit
+  producer-ACTIVE/consumer-NOT-IMPLEMENTED classification, with no consumer
+  built (deliberately out of scope); `INTERACTION_INTELLIGENCE` accessor
+  drift was re-verified as not safely resolvable (semantic mismatch on
+  `"1"`/`"yes"`/`"on"`/`"enabled"`) and left unchanged, accepted drift.
+  EvidenceFinalizer sample coverage is untouched.
 
 ### D — Secondary audit and CORE-vs-POST-CORE decisions
 
