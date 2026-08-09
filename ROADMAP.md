@@ -1074,9 +1074,10 @@ transcript עבור contract `90671635-7dd9-42c7-a467-cc928b18a2a4` על deploy
 - (2) מתקבלת תשובה סופית אחת בלבד בפועל — **כן**, בשלושת התרחישים שנבדקו (יצירה→pending,
   שאילתת סטטוס פעמיים, חסימת יצירה שנייה דרך BUG-122); הלוגים מראים `reply_owner=gateway`
   ו-`agent_calls=0`/`duplicate_reply_suppressed=true` בכל תרחיש.
-- (4) identifiers פנימיים לא הופיעו בלוגים שנבדקו — **כן**, חלקית: לוג
-  `[UnifiedStatusFormatterShadow]` מראה `record_id_leak=False tool_name_leak=False
-  contract_id_leak=False` בשני התרחישים שהפיקו אותו לוג.
+- (4) identifiers פנימיים — שני לוגי `[UnifiedStatusFormatterShadow]` שנדגמו (שני התרחישים
+  שהפיקו לוג כזה) דיווחו `record_id_leak=False tool_name_leak=False contract_id_leak=False`;
+  זו הראיה המדויקת, לא הוכחה שאף identifier לא הופיע באיזשהו לוג יישום בחלון הזה — רק
+  בשני הלוגים הספציפיים שנדגמו.
 
 **לא כוסה בסבב הזה — נשאר `לא בוצע`:**
 - (3) callback עם `action_id:contract_id` end-to-end — רק flow טקסטואלי (הודעות "מאשר"/"בטל")
@@ -1084,7 +1085,7 @@ transcript עבור contract `90671635-7dd9-42c7-a467-cc928b18a2a4` על deploy
 - (5) האם RP5 מסווג נכון Gateway-owned approval turns — לא נצפה לוג RP5 ישיר בחלון הזה.
 - (6) replay/stale callback אינם גורמים לביצוע נוסף — לא נבדק בסבב הזה.
 
-**מסקנה:** אין לסמן את כל חמשת סעיפי ה-checklist כ-`production_verified` — רק (1),(2),(4) יש
+**מסקנה:** אין לסמן את כל ששת סעיפי ה-checklist כ-`production_verified` — רק (1),(2),(4) יש
 להם ראיה ישירה מהתאריך הזה. (3),(5),(6) נשארים פתוחים לסבב אימות נפרד.
 
 **5. Multi-session coordination — טרם תוכנן, לא בוצע.**
