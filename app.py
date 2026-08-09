@@ -2788,6 +2788,57 @@ def _deliver_callback_final(
         end(_callback_token, "callback")
 
 
+def _tc8_claim_contract(contract, *, owner_kind: str, turn_id: str):
+    """Claim ingress ownership before an existing lifecycle call."""
+    from core.turn_state_repository import TurnStateRepository
+
+    tenant_id = getattr(contract, "tenant_id", None) or "boss_hq"
+    canonical_user_id = getattr(contract, "canonical_user_id", "")
+    contract_id = getattr(contract, "contract_id", "")
+    repository = TurnStateRepository()
+    state = repository.begin_or_get(
+        tenant_id, canonical_user_id, turn_id, contract_id,
+    )
+    operation_id = f"{owner_kind}:{uuid.uuid4()}"
+    claimed = repository.claim(
+        tenant_id, canonical_user_id,
+        expected_version=state.version,
+        operation_id=operation_id,
+        owner_kind=owner_kind,
+    )
+    return repository, tenant_id, canonical_user_id, operation_id, claimed.state
+
+
+def _tc8_finish_contract(tc8_context, contract, *, failure: bool = False) -> None:
+    """Close coordination after the authoritative lifecycle call."""
+    if tc8_context is None:
+        return
+    repository, tenant_id, canonical_user_id, operation_id, claimed = tc8_context
+    from core.turn_state_repository import TurnStateError
+
+    status = getattr(contract, "status", "")
+    terminal = status in {
+        "approved", "completed", "executed", "rejected", "failed", "outcome_unknown",
+    }
+    try:
+        if terminal and not failure:
+            repository.finalize(
+                tenant_id, canonical_user_id,
+                expected_version=claimed.version,
+                operation_id=operation_id,
+                terminal_reason=status,
+            )
+        else:
+            repository.release(
+                tenant_id, canonical_user_id,
+                expected_version=claimed.version,
+                operation_id=operation_id,
+                terminal_reason="lifecycle_not_terminal",
+            )
+    except TurnStateError:
+        logger.error("[TC8] unable to close coordination state", exc_info=True)
+
+
 def _handle_approval_callback_impl(cq) -> None:
     """מטפל בלחיצה על ✅/❌ של בקשת אישור."""
     from event_bus import bus
@@ -2992,6 +3043,7 @@ def _handle_approval_callback_impl(cq) -> None:
             _gw_terminal_reply = None
             _gw_terminal_contract_id = None
             _gw_terminal_status = None
+            _tc8_context = None
             if _flag_enabled("FEATURE_ACTION_GATEWAY"):
                 try:
                     from core.action_gateway import action_gateway as _gw_exec
@@ -3054,6 +3106,24 @@ def _handle_approval_callback_impl(cq) -> None:
 
             if _gw_contract_id:
                 from core.action_gateway import action_gateway as _gw_exec
+                try:
+                    _tc8_context = _tc8_claim_contract(
+                        _contract_exec,
+                        owner_kind="callback",
+                        turn_id=f"callback:{cq.id}",
+                    )
+                except Exception:
+                    logger.warning(
+                        "[TC8] callback approval ownership unavailable; refusing mutation",
+                        exc_info=True,
+                    )
+                    bot.answer_callback_query(cq.id, "⏳ הפעולה כבר בטיפול או אינה זמינה.")
+                    _notify_stale_or_resolved_callback(
+                        cq, notify_chat_id=approver_chat_id,
+                        label=item.get("label") or _describe_tool_call(tool_name, tool_inputs),
+                        state_text="כבר בטיפול או אינה זמינה",
+                    )
+                    return
                 _gw_approval_result = _gw_exec.approve_with_lifecycle_result(
                     _gw_contract_id,
                     approver=approver_identity.memory_key or approver_identity.user_id,
@@ -3061,6 +3131,7 @@ def _handle_approval_callback_impl(cq) -> None:
                 )
                 result = _gw_approval_result.safe_user_message
                 _contract_after = _gw_exec._ledger.find_by_id(_gw_contract_id)
+                _tc8_finish_contract(_tc8_context, _contract_after, failure=_contract_after is None)
                 exec_failed = not (
                     _contract_after and _contract_after.status in ("completed", "executed")
                 )
@@ -3275,12 +3346,30 @@ def _handle_approval_callback_impl(cq) -> None:
                     state_text="כבר טופלה או שאין לה רישום אישור פעיל",
                 )
                 return
+            try:
+                _reject_context = _tc8_claim_contract(
+                    _reject_contract,
+                    owner_kind="callback",
+                    turn_id=f"callback:{cq.id}",
+                )
+            except Exception:
+                logger.warning(
+                    "[TC8] callback rejection ownership unavailable; refusing mutation",
+                    exc_info=True,
+                )
+                bot.answer_callback_query(cq.id, "⏳ הפעולה כבר בטיפול או אינה זמาบילה.")
+                _notify_stale_or_resolved_callback(
+                    cq, notify_chat_id=approver_chat_id, label=label,
+                    state_text="כבר בטיפול או אינה זמינה",
+                )
+                return
             _reject_result = _gw_reject.reject_with_lifecycle_result(
                 _reject_contract.contract_id,
                 rejected_by=approver_identity.memory_key or approver_identity.user_id,
             )
             _reject_reply = _reject_result.safe_user_message
             _reject_after = _gw_reject._ledger.find_by_id(_reject_contract.contract_id)
+            _tc8_finish_contract(_reject_context, _reject_after, failure=_reject_after is None)
             if not _reject_after or _reject_after.status != "rejected":
                 logger.error(
                     "[ActionGateway] reject callback durable transition failed "
@@ -4030,8 +4119,31 @@ def run_agent(
             # statically asserts this exact call appears here, ahead of the
             # FEATURE_ACTION_GATEWAY flag branch — an intentional structural
             # invariant, not incidental text.
-            if _gw_cw.find_live_contracts(identity.memory_key):
+            _live_confirmation_contracts = _gw_cw.find_live_contracts(identity.memory_key)
+            if _live_confirmation_contracts:
+                _tc8_context = None
+                if len(_live_confirmation_contracts) == 1:
+                    try:
+                        _tc8_context = _tc8_claim_contract(
+                            _live_confirmation_contracts[0],
+                            owner_kind="text",
+                            turn_id=f"text:{uuid.uuid4()}",
+                        )
+                    except Exception:
+                        logger.warning(
+                            "[TC8] text confirmation ownership unavailable; refusing mutation",
+                            exc_info=True,
+                        )
+                        return "⏳ הפעולה כבר בטיפול או אינה זמינה."
                 _gw_reply = _gw_cw.route_confirmation_word(identity.memory_key, approver_role=identity.role)
+                if _tc8_context is not None:
+                    _tc8_contract_after = _gw_cw.find_contract(
+                        _live_confirmation_contracts[0].contract_id,
+                    )
+                    _tc8_finish_contract(
+                        _tc8_context, _tc8_contract_after,
+                        failure=_tc8_contract_after is None,
+                    )
                 logger.info(
                     "[ActionGateway] route_confirmation_word: user=%s reply=%.60s",
                     identity.memory_key, _gw_reply,
@@ -4111,9 +4223,32 @@ def run_agent(
             # אסור לו לעולם לשחזר contract טרמינלי לפי recency בלבד. המסלול
             # הזה רץ כברירת מחדל תמיד כשהדגל של PR2 כבוי — זו הייתה החשיפה
             # החיה, הלא-מוגנת.
+            _cancel_context = None
+            _cancel_live_contracts = _gw_cancel.find_live_contracts(identity.memory_key)
+            if len(_cancel_live_contracts) == 1:
+                try:
+                    _cancel_context = _tc8_claim_contract(
+                        _cancel_live_contracts[0],
+                        owner_kind="text",
+                        turn_id=f"text:{uuid.uuid4()}",
+                    )
+                except Exception:
+                    logger.warning(
+                        "[TC8] text cancellation ownership unavailable; refusing mutation",
+                        exc_info=True,
+                    )
+                    return "⏳ הפעולה כבר בטיפול או אינה זמינה."
             _cancel_reply = _gw_cancel.route_cancellation_word(
                 identity.memory_key, recent_terminal=None,
             )
+            if _cancel_context is not None:
+                _cancel_contract_after = _gw_cancel.find_contract(
+                    _cancel_live_contracts[0].contract_id,
+                )
+                _tc8_finish_contract(
+                    _cancel_context, _cancel_contract_after,
+                    failure=_cancel_contract_after is None,
+                )
             if _cancel_reply is not None:
                 logger.info(
                     "[ActionGateway] route_cancellation_word: user=%s reply=%.60s",
