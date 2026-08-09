@@ -1,16 +1,8 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 09/08/2026 — **תיעוד F14/BUG-105 (docs-only):**
-BUG-105 אומת מחדש מול `origin/main` (`38d9226`) וכבר מכוסה שם — אין שינוי קוד פתוח.
-נשמרו ראיות BUG-101 ושאר משפחת ה-regressions ב-`BUG_AUDIT_LOG.md`.
-BUG-105: לא בוצע שינוי קוד; regex לפני/אחרי זהה; 204 suites ועוד 11 בדיקות מטריצת פורמטים עברו.
-F14 Discovery/Planning הוא תיעוד היסטורי של מפת נתיבי הכתיבה: נמצאו שני נתיבי
-Contact creation בפועל (`crm_add_contact` legacy וה-generic `airtable_add`), ללא
-Contact phone dedup; import scripts מייצרים CSV בלבד, ו-`session_store.py`/
-`contact_resolver.py` אינם Contact creation gates. מאז, F14-A מוזג ב-PR #568
-ו-F14-B1 מעביר את `crm_add_contact()` ואת `lead_conversion.py::convert_lead_to_contact()`
-דרך אותו gate. F14-B2 עדיין לא התחיל; אין להסיק מהתיעוד ההיסטורי ש-F14 planning-only.
-
+עודכן: 09/08/2026 — **תיעוד PR #562–#570 (8 substantive PRs) + BUG-105 verification:**
+**Substantive PRs merged 08/08–09/08/2026:** TC5 entity resolver (PR #562, 08/08/2026), TC4 lead builders (PR #564, 08/08/2026), TC4 task-integration hardening (PR #565, 08/08/2026), TC6 WS2 reply-ownership (PR #566, 08/08/2026), Emergency Stop backing hardening (PR #567, 08/08/2026), F14-A1 contact gate (PR #568, 09/08/2026), TC6 integrator app.py cutover (PR #569, 09/08/2026 — ראו TC6_APP_INTEGRATOR_PATCH_SPEC.md §0 Cross-Layer Impact Matrix), F14-B1 legacy caller migration (PR #570, 09/08/2026). כל שמונה PRs מוזגו בפועל ואומתו ב-`git log origin/main` / `git merge-base --is-ancestor`.
+**BUG-105 verification (docs-only):** אומת מחדש מול `origin/main` (`38d9226`), כבר מכוסה ב-code — אין שינוי קוד פתוח. BUG-105: regex לפני/אחרי זהה; 204 suites + 11 בדיקות מטריצת פורמטים עברו. **F14 Discovery/Planning** הוא תיעוד היסטורי של מפת נתיבי הכתיבה: שני נתיבי Contact creation בפועל (`crm_add_contact` legacy, `airtable_add` generic), ללא dedup; import scripts ו-`session_store.py`/`contact_resolver.py` אינם gates. **מאז:** F14-A מוזג (#568), F14-B1 מעביר `crm_add_contact()` ו-`convert_lead_to_contact()` דרך אותו gate; F14-B2 עדיין לא התחיל. **TC, Emergency Stop, F14 phases A-B1 status:** פרט ל-TC6 (flag-gated default-off), אף אחד מ-8 PRs לא שינה behavior חי בעת ההפעלה; TC6 בעתיד ימחליף ה-approval reply-ownership projection בעת הפעלת `FEATURE_SINGLE_SPEAKER_APPROVAL_UX`; F14/TC4/TC5/Emergency-Stop/TC6-WS2 are structural/foundational, live but enforcement/integration/flag-activation deferred.
 עודכן קודם: 07/08/2026 — **תיעוד PR #525–#552 (פער-תיעוד, נסגר ישירות מ-`git log origin/main`,
 לא הועלה כ-PR נפרד ע"י מי שביצע אותם):** 28 PRs נוספים מוזגו ל-`main` בין 05–06/08/2026 בלי
 עדכון ROADMAP נלווה — אומת ישירות ב-`git log`/`git merge-base --is-ancestor` על `origin/main`
