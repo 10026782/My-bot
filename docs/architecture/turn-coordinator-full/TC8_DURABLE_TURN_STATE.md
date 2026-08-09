@@ -43,3 +43,43 @@ the existing authoritative lifecycle call, then finalizes/releases from the
 read-back ActionContract status. It does not edit ActionGateway, EventBus, or
 TMA lifecycle semantics. If PostgreSQL/schema access is unavailable, those
 mutation paths fail closed instead of falling back to in-memory ownership.
+
+## Closure evidence — 2026-08-10
+
+TC8 implementation and staging runtime verification were completed on the
+dedicated staging deployment at commit
+`2750f8ca9b4f052e5c64adbb20459e97ed56b64f`.
+
+Verified against the non-production PostgreSQL database
+`my_bot_atomic_claims_staging`:
+
+- PostgreSQL connection and `psycopg2` 2.9.12: PASS.
+- Migration `002_durable_turn_state.sql`: PASS.
+- Migration idempotency: PASS.
+- Table, primary key, state/claimed/version constraints, and contract index:
+  PASS.
+- Persistence/reconstruction: PASS.
+- CAS race and two independent repository instances: PASS.
+- Tenant isolation: PASS.
+- Replay/stale rejection: PASS.
+- Terminal/release behavior: PASS.
+- ActionContract lifecycle authority invariant: PASS.
+- Staging callback/text lifecycle smoke verification: PASS.
+
+The full regression matrix was not used as TC8 closure evidence. It was run
+against shared staging Airtable state and encountered pre-existing external
+ActionContracts, including `BUG-122 proposal_boundary_blocked`. The matrix is
+therefore contaminated by external state and cannot distinguish a test-harness
+failure from a TC8 runtime defect. TC8 does not weaken BUG-122, change PA-01,
+or add isolation architecture to compensate.
+
+### TC10 handoff
+
+TC10 owns the missing deterministic regression harness: an isolated Airtable
+test base or complete mock boundary, unique test identities, controlled
+external ActionContract state, cleanup by test-owned namespace, and a repeatable
+full regression run. TC10 must rerun the callback-hardening, PR-0C, BUG-158,
+and complete regression matrix there. Until that handoff is complete, the
+classification is:
+
+`TC8 — IMPLEMENTATION AND STAGING VERIFIED / FINAL REGRESSION GATE DEFERRED TO TC10 HARNESS`
