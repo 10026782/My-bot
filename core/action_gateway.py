@@ -2966,24 +2966,39 @@ class ActionGateway:
             # update_status() mutated `contract` in place or cached a fresh
             # object. Same-turn projection only, logged for observability —
             # not yet consumed anywhere for claim authorization/enforcement
-            # (that is TC7-B's job, not this PR's).
-            try:
-                _evidence = self.evidence_for_contract(
-                    contract.contract_id, dispatcher_outcome=dispatcher_outcome,
-                )
-                if _evidence is not None:
-                    logger.info(
-                        "[TC7A][ExecutionEvidence] contract=%s result=%s verified=%s "
-                        "outcome_unknown=%s evidence_ref_present=%s error=%s",
-                        contract.contract_id, _evidence.result, _evidence.verified,
-                        _evidence.outcome_unknown, bool(_evidence.evidence_ref),
-                        _evidence.error,
+            # (that is TC7-B's job, not this PR's). CodeRabbit round: gated
+            # behind isEnabledFor(INFO) — under a durable repository this is
+            # an extra find_by_id() read on the execution request thread
+            # (_emit_resolution() above already does its own for the same
+            # contract), and nothing consumes the projection but this log
+            # line in this PR, so skip the read entirely when INFO logging
+            # is disabled rather than computing evidence no one will see.
+            if logger.isEnabledFor(logging.INFO):
+                try:
+                    _evidence = self.evidence_for_contract(
+                        contract.contract_id, dispatcher_outcome=dispatcher_outcome,
                     )
-            except Exception:
-                logger.debug(
-                    "[TC7A][ExecutionEvidence] projection skipped: contract=%s",
-                    contract.contract_id, exc_info=True,
-                )
+                    if _evidence is not None:
+                        # _evidence.error can carry the provider's own
+                        # free-text message (verify_execution()'s failure
+                        # reason is raw result content, truncated but not
+                        # redacted) — may embed business data (lead names,
+                        # phone numbers, task content). Mirrors this file's
+                        # own shadow-comparison logging rule elsewhere (see
+                        # _log_shadow_comparison above): log presence/state
+                        # only, never text that may embed business data.
+                        logger.info(
+                            "[TC7A][ExecutionEvidence] contract=%s result=%s verified=%s "
+                            "outcome_unknown=%s evidence_ref_present=%s error_present=%s",
+                            contract.contract_id, _evidence.result, _evidence.verified,
+                            _evidence.outcome_unknown, bool(_evidence.evidence_ref),
+                            bool(_evidence.error),
+                        )
+                except Exception:
+                    logger.debug(
+                        "[TC7A][ExecutionEvidence] projection skipped: contract=%s",
+                        contract.contract_id, exc_info=True,
+                    )
             return True
 
         # Phase 4B0 atomic claim gate (if flag enabled)

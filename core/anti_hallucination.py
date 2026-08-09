@@ -214,11 +214,14 @@ def extract_canonical_evidence_ref(tool_name: str, raw_output: Any) -> str:
     never be "failed" to verify_execution() and "success" to TC7-A. Never
     raises, never reads user_message. This function only answers "is there
     a real structured provider reference, and what is it" for tools with a
-    registered validator, falling back to the plain external_id field for
-    any other tool (read-only tools, or a write tool not yet registered —
-    the latter already fails closed inside verify_execution() itself via
-    _WRITE_ACTION_TOOLS, so this fallback never needs to gate anything on
-    its own).
+    registered validator, falling back to the plain external_id field only
+    for a genuine non-write tool (read-only/listing tools verify_execution()
+    itself accepts without a validator). A write/action tool with no
+    registered validator (per _WRITE_ACTION_TOOLS) yields "" here too — the
+    exact same fail-closed rule verify_execution() applies for that case —
+    so this function can never be more permissive than verify_execution()
+    even for a future tool added to _WRITE_ACTION_TOOLS before its
+    validator exists.
     """
     if not isinstance(raw_output, dict):
         return ""
@@ -226,6 +229,10 @@ def extract_canonical_evidence_ref(tool_name: str, raw_output: Any) -> str:
         return ""
     validator = _EVIDENCE_VALIDATORS.get(tool_name)
     if validator is None:
+        if tool_name in _WRITE_ACTION_TOOLS:
+            # Mirrors verify_execution()'s fail-closed rule for a write tool
+            # with no registered validator — never a permissive fallback.
+            return ""
         return str(raw_output.get("external_id", "") or "")
     ref, check = validator(tool_name, raw_output)
     return ref if check is None else ""

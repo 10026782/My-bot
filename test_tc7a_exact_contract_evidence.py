@@ -22,6 +22,7 @@ Pass condition: exit code 0, all assertions green.
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 import time
@@ -34,6 +35,16 @@ os.environ.setdefault("ANTHROPIC_API_KEY", "stub")
 from unittest.mock import MagicMock
 for _mod in ["telebot", "anthropic", "httpx"]:
     sys.modules.setdefault(_mod, MagicMock())
+
+# core.action_gateway's TC7-A seam is gated behind
+# logger.isEnabledFor(logging.INFO) (CodeRabbit round) -- production runs at
+# INFO (every [ActionGateway]/[Approval] log line observed in the real
+# deployment evidence for TC6 was INFO-level), but this script's default
+# ambient level (no explicit config) would otherwise suppress it, silently
+# skipping the seam entirely rather than testing it. Set explicitly so the
+# tests below exercise the real runtime condition, not an artifact of this
+# script's own default logging level.
+logging.getLogger("core.action_gateway").setLevel(logging.INFO)
 
 from core.action_gateway import ActionContract, ActionGateway, ExecutionLedger
 from core.dispatcher_outcome import DispatcherOutcome
@@ -515,6 +526,57 @@ _repro_evidence = build_evidence_result_from_outcome(_repro_contract, _repro_out
 check(
     "(ok-gate airtable_add exact repro) build_evidence_result_from_outcome() never success",
     _repro_evidence.result != "success",
+)
+
+
+# ═════════════════════════════════════════════════════════════════
+# CodeRabbit nitpick fix — a write/action tool registered in
+# _WRITE_ACTION_TOOLS but with no entry in _EVIDENCE_VALIDATORS (a future
+# tool added to the "Future tools" placeholder before its validator exists)
+# must fail closed in extract_canonical_evidence_ref() exactly like
+# verify_execution() already does, not fall back to a permissive bare
+# external_id read. Today _WRITE_ACTION_TOOLS == frozenset(_EVIDENCE_
+# VALIDATORS) exactly (no such tool exists yet), so this is exercised via a
+# monkeypatched module-level set, restored immediately after.
+# ═════════════════════════════════════════════════════════════════
+
+import core.anti_hallucination as _ah_module
+
+_FUTURE_TOOL = "future_write_tool_no_validator_yet"
+_original_write_action_tools = _ah_module._WRITE_ACTION_TOOLS
+_ah_module._WRITE_ACTION_TOOLS = _original_write_action_tools | frozenset({_FUTURE_TOOL})
+try:
+    _future_raw = {"ok": True, "external_id": "some-looking-id-123"}
+    _future_check = verify_execution(_FUTURE_TOOL, _future_raw)
+    check(
+        "(unregistered-write-tool) verify_execution() fails closed (no validator registered)",
+        _future_check.status == "failed",
+    )
+    _future_ref = extract_canonical_evidence_ref(_FUTURE_TOOL, _future_raw)
+    check(
+        "(unregistered-write-tool) extract_canonical_evidence_ref() also fails closed -> ''",
+        _future_ref == "",
+    )
+    _future_contract = _contract("completed", contract_id="unregistered-write-tool", tool_name=_FUTURE_TOOL)
+    _future_outcome = DispatcherOutcome(
+        result="completed", user_message="", external_id="", raw_response=_future_raw,
+    )
+    _future_evidence = build_evidence_result_from_outcome(_future_contract, _future_outcome)
+    check(
+        "(unregistered-write-tool) build_evidence_result_from_outcome() never success for an "
+        "unvalidated write tool, even with a plausible-looking external_id",
+        _future_evidence.result != "success",
+    )
+finally:
+    _ah_module._WRITE_ACTION_TOOLS = _original_write_action_tools
+
+# Control: the SAME unregistered-tool name, but genuinely non-write (not in
+# _WRITE_ACTION_TOOLS) -- the plain external_id fallback still applies, since
+# that path is for read-only/listing tools that verify_execution() itself
+# already accepts without a validator.
+check(
+    "(non-write unregistered tool) extract_canonical_evidence_ref() still falls back to external_id",
+    extract_canonical_evidence_ref(_FUTURE_TOOL, {"ok": True, "external_id": "read-only-id"}) == "read-only-id",
 )
 
 
