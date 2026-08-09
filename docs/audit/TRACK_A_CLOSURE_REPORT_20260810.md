@@ -133,38 +133,42 @@ No database URL or credential is included in this report.
 | Task create ActionGateway runtime | PASS |
 | Atomic claim lifecycle runtime | PASS |
 | PostgreSQL-backed claim evidence | PASS |
-| Tasks date canonicalization | PASS locally; live Staging verification pending |
+| Tasks date canonicalization | PASS — verified in Staging |
 | TC integration | TC-owned dependency only |
 
-## Final Staging verification required
+## Final Staging verification — completed
 
-After merge/deploy, run exactly one canary:
+Fresh Staging canary evidence was supplied for `2026-08-10 01:25:59–01:26:46 +0300`.
+
+Input:
 
 ```text
-צור משימה להתקשר לספק מחר
+צור משימה להתקשר לאורי מחר
 ```
 
-After approval, verify fresh runtime evidence shows:
+Runtime evidence:
 
-- ActionContract `tool=airtable_add`
-- canonical Tasks table
-- clean title `להתקשר לספק`
-- separate due-date field for tomorrow
-- atomic claim acquired
-- execution succeeds
-- terminal claim `outcome=completed`
-- TC7-A `result=success verified=True`
-- EvidenceFinalizer `verified_write_success`
-- `mismatch=false`
+- Contract: `30757910-3afd-4aeb-aac4-6a8524565e7c`
+- Approval: `2026-08-10 01:26:00 +0300`
+- Proposal: `tool=airtable_add`, `table=משימות (Tasks)`
+- Atomic execution ID: `ce1debe6-4630-4ff4-886d-5cd1e25697a9`
+- Dispatcher payload: `fields={'כותרת המשימה': 'להתקשר לאורי', 'תאריך יעד': '2026-08-11'}`, `table=משימות (Tasks)`
+- Provider POST: HTTP `200 OK`
+- Created record: `recIH2H16fO5OOHs2`
+- Execution: `Execution succeeded (explicit)` at `2026-08-10 01:26:01 +0300`
+- Claim terminal state: `outcome=completed` at `2026-08-10 01:26:01 +0300`
+- TC7-A: `result=success verified=True outcome_unknown=False evidence_ref_present=True`
+- EvidenceFinalizer: `evidence_status=verified_write_success`, `mismatch=false`
+- Approval turn: `agent_calls=0`, `final_responses=1`, `deterministic=True`
+
+Environment policy: Staging and Production use the same code and runtime path. Therefore this Staging canary is runtime-equivalent verification for Production. No second Production canary is required; Production is reserved for real business operations so test samples are not contaminated.
 
 ## Closure decision
 
-Current status: `TRACK A — NOT CLOSED`
+Current status: `TRACK A — COMPLETE / TC-OWNED REGRESSION DEPENDENCY ONLY`
 
-Reason: the Track A code fix and local regressions pass, but the corrected date path has not yet been observed in post-fix Staging runtime. Once that canary passes, the remaining item is only:
+The Track A-owned defect is closed by the fresh Staging canary. The only remaining item is:
 
 `CROSS-TRACK TC DEPENDENCY OPEN`
 
-At that point Track A may be recorded as:
-
-`TRACK A — COMPLETE / TC-OWNED REGRESSION DEPENDENCY ONLY`
+The known TC-owned 39/40 integration stub remains intentionally unchanged.
