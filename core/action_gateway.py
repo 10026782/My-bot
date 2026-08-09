@@ -80,10 +80,21 @@ def _canonical_task_payload(payload: dict) -> dict:
     result = dict(payload or {})
     fields = result.get("fields")
     if isinstance(fields, dict):
-        result["fields"] = {
+        fields = {
             key: _canonical_business_text(value) if isinstance(value, str) else value
             for key, value in fields.items()
         }
+        name_key = "כותרת המשימה" if "כותרת המשימה" in fields else "title"
+        due_key = "תאריך יעד" if name_key == "כותרת המשימה" else "due_date"
+        task_title = fields.get(name_key)
+        if name_key in fields and due_key not in fields and isinstance(task_title, str):
+            match = re.fullmatch(r"(.+?)\s+מחר", task_title)
+            if match:
+                from datetime import date, timedelta
+
+                fields[name_key] = match.group(1).strip()
+                fields[due_key] = (date.today() + timedelta(days=1)).isoformat()
+        result["fields"] = fields
     return result
 
 
