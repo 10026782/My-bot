@@ -216,6 +216,65 @@ chk(
 
 
 # ══════════════════════════════════════════════════
+# 7. [IngressEnvelope] accepted marker (Track D observability) — Telegram
+# ══════════════════════════════════════════════════
+TELEGRAM_IDENTITY = Identity(
+    user_id="owner_1", role=Role.OWNER, tenant_id="boss_hq",
+    channel="telegram", external_id="111",
+)
+# Ambiguous phrase → Handler.CLARIFY, short-circuits before Claude/dispatch —
+# same technique as test_c94_stage_d_whatsapp.py's end-to-end run_agent() proof.
+OBS_AMBIGUOUS_TEXT = "בדיקת מערכת"
+
+with patch.object(app, "resolve_identity", return_value=TELEGRAM_IDENTITY):
+    baseline_reply = app.run_agent(OBS_AMBIGUOUS_TEXT, "111", channel="telegram")
+    logger_obs, handler_obs = _capture_logs("app")
+    obs_reply = app.run_agent(OBS_AMBIGUOUS_TEXT, "111", channel="telegram", raw_event_id="upd_obs_1")
+    logger_obs.removeHandler(handler_obs)
+
+chk("adding the marker does not change the reply (equivalence with the no-envelope baseline)", obs_reply == baseline_reply)
+
+marker_lines = [m for m in handler_obs.records if m.startswith("[IngressEnvelope] accepted")]
+chk(
+    "run_agent() emits exactly one [IngressEnvelope] accepted marker for a valid Telegram envelope",
+    len(marker_lines) == 1, str(marker_lines),
+)
+chk(
+    "marker includes source_channel=telegram and provider=telegram_bot_api",
+    bool(marker_lines) and "source_channel=telegram" in marker_lines[0] and "provider=telegram_bot_api" in marker_lines[0],
+    str(marker_lines),
+)
+chk(
+    "marker classifies source_ref_kind=message_id (never logs the raw source_ref)",
+    bool(marker_lines) and "source_ref_kind=message_id" in marker_lines[0],
+    str(marker_lines),
+)
+chk(
+    "marker never contains the user's message text",
+    all(OBS_AMBIGUOUS_TEXT not in m for m in marker_lines),
+    str(marker_lines),
+)
+
+# Envelope build/validate failure → no marker logged, reply unaffected (degrades gracefully)
+with patch.object(app, "resolve_identity", return_value=TELEGRAM_IDENTITY), \
+     patch("core.telegram_ingress_adapter.build_telegram_envelope", side_effect=RuntimeError("boom")):
+    logger_fail, handler_fail = _capture_logs("app")
+    fail_reply = app.run_agent(OBS_AMBIGUOUS_TEXT, "111", channel="telegram", raw_event_id="upd_obs_fail")
+    logger_fail.removeHandler(handler_fail)
+
+chk(
+    "no [IngressEnvelope] accepted marker is emitted when envelope construction fails",
+    not any(m.startswith("[IngressEnvelope] accepted") for m in handler_fail.records),
+    str(handler_fail.records),
+)
+chk(
+    "reply is unaffected by an envelope build failure (same as the no-raw_event_id baseline)",
+    fail_reply == baseline_reply,
+    f"{fail_reply!r} vs {baseline_reply!r}",
+)
+
+
+# ══════════════════════════════════════════════════
 # Summary
 # ══════════════════════════════════════════════════
 print(f"\n{passed} passed, {failed} failed")

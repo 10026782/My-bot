@@ -23,6 +23,7 @@
 # and its wiring into run_agent()/the Twilio webhook.
 
 import inspect
+import logging
 import os
 import sys
 from unittest.mock import patch
@@ -52,6 +53,22 @@ def chk(desc: str, cond: bool, extra: str = "") -> None:
     else:
         print(f"❌ {desc}{(' — ' + extra) if extra else ''}")
         failed += 1
+
+
+class _ListLogHandler(logging.Handler):
+    def __init__(self):
+        super().__init__()
+        self.records = []
+
+    def emit(self, record):
+        self.records.append(record.getMessage())
+
+
+def _capture_logs(logger_name):
+    handler = _ListLogHandler()
+    logger = logging.getLogger(logger_name)
+    logger.addHandler(handler)
+    return logger, handler
 
 
 OWNER_WHATSAPP_IDENTITY = Identity(
@@ -142,6 +159,54 @@ _twilio_source = inspect.getsource(app._webhook_whatsapp_impl)
 chk(
     "_webhook_whatsapp_impl() (Twilio) DOES pass raw_event_id=msg_sid",
     "raw_event_id" in _twilio_source and "msg_sid" in _twilio_source,
+)
+
+
+# ══════════════════════════════════════════════════
+# 6. [IngressEnvelope] accepted marker (Track D observability) — WhatsApp
+# ══════════════════════════════════════════════════
+with patch.object(app, "resolve_identity", return_value=OWNER_WHATSAPP_IDENTITY):
+    logger_obs, handler_obs = _capture_logs("app")
+    obs_reply = app.run_agent(
+        AMBIGUOUS_TEXT, "+972500000000", channel="whatsapp", raw_event_id="SM_obs_1",
+    )
+    logger_obs.removeHandler(handler_obs)
+
+wa_marker_lines = [m for m in handler_obs.records if m.startswith("[IngressEnvelope] accepted")]
+chk(
+    "run_agent() emits exactly one [IngressEnvelope] accepted marker for a valid WhatsApp envelope",
+    len(wa_marker_lines) == 1, str(wa_marker_lines),
+)
+chk(
+    "marker includes source_channel=whatsapp and provider=twilio_whatsapp",
+    bool(wa_marker_lines) and "source_channel=whatsapp" in wa_marker_lines[0] and "provider=twilio_whatsapp" in wa_marker_lines[0],
+    str(wa_marker_lines),
+)
+chk(
+    "marker classifies source_ref_kind=message_id (never logs the raw source_ref)",
+    bool(wa_marker_lines) and "source_ref_kind=message_id" in wa_marker_lines[0],
+    str(wa_marker_lines),
+)
+chk(
+    "marker never contains the user's message text",
+    all(AMBIGUOUS_TEXT not in m for m in wa_marker_lines),
+    str(wa_marker_lines),
+)
+chk(
+    "adding the marker does not change the reply (equivalence with the no-raw_event_id baseline)",
+    obs_reply == reply_no_envelope,
+)
+
+# Envelope build/validate failure → no marker logged (reuses section 3's failure patch)
+with patch.object(app, "resolve_identity", return_value=OWNER_WHATSAPP_IDENTITY), \
+     patch("core.whatsapp_ingress_adapter.build_whatsapp_envelope", side_effect=RuntimeError("boom")):
+    logger_fail, handler_fail = _capture_logs("app")
+    app.run_agent(AMBIGUOUS_TEXT, "+972500000000", channel="whatsapp", raw_event_id="SM_obs_fail")
+    logger_fail.removeHandler(handler_fail)
+chk(
+    "no [IngressEnvelope] accepted marker is emitted when WhatsApp envelope construction fails",
+    not any(m.startswith("[IngressEnvelope] accepted") for m in handler_fail.records),
+    str(handler_fail.records),
 )
 
 
