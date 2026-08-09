@@ -6,8 +6,7 @@ run directly: python3 test_tc7_b1_claim_authorization.py
 
 import ast
 
-from core.claim_authorization import authorize_claim
-from core.message_contract import MessageState
+from core.claim_authorization import ClaimCategory, authorize_claim
 
 _ALL_EVIDENCE_STATES = (
     "no_evidence",
@@ -21,138 +20,207 @@ _ALL_EVIDENCE_STATES = (
     "mixed_with_unknown",
 )
 
+# Required Blocker 2 table: evidence alone (no lifecycle).
+_EXPECTED_EVIDENCE_ONLY = {
+    "no_evidence": ClaimCategory.NEUTRAL,
+    "verified_read_only": ClaimCategory.NEUTRAL,
+    "verified_write_success": ClaimCategory.SUCCESS,
+    "failure": ClaimCategory.FAILURE,
+    "outcome_unknown": ClaimCategory.UNKNOWN,
+    "approval_pending": ClaimCategory.PENDING,
+    "unverified_effect": ClaimCategory.UNKNOWN,
+    "mixed": ClaimCategory.MIXED,
+    "mixed_with_unknown": ClaimCategory.MIXED,
+}
+
 _EXPECTED_FOR_COMPLETED = {
-    "verified_write_success": MessageState.SUCCESS,
-    "verified_read_only": MessageState.NEUTRAL,
-    "failure": MessageState.FAILURE,
-    "outcome_unknown": MessageState.OUTCOME_UNKNOWN,
-    "approval_pending": MessageState.APPROVAL_PENDING,
-    "unverified_effect": MessageState.UNVERIFIED_EFFECT,
-    "mixed": MessageState.MIXED,
-    "mixed_with_unknown": MessageState.MIXED_WITH_UNKNOWN,
-    "no_evidence": MessageState.OUTCOME_UNKNOWN,
+    "no_evidence": ClaimCategory.UNKNOWN,
+    "verified_read_only": ClaimCategory.NEUTRAL,
+    "verified_write_success": ClaimCategory.SUCCESS,
+    "failure": ClaimCategory.FAILURE,
+    "outcome_unknown": ClaimCategory.UNKNOWN,
+    "approval_pending": ClaimCategory.UNKNOWN,  # conflict, not PENDING
+    "unverified_effect": ClaimCategory.UNKNOWN,
+    "mixed": ClaimCategory.MIXED,
+    "mixed_with_unknown": ClaimCategory.MIXED,
 }
 
 
-def test_all_9_evidence_states_resolve_for_completed_and_executed():
-    for lifecycle in ("completed", "executed"):
-        for evidence in _ALL_EVIDENCE_STATES:
+# 1. all 9 evidence-only mappings with lifecycle=None
+def test_all_9_evidence_only_mappings_with_no_lifecycle():
+    for evidence in _ALL_EVIDENCE_STATES:
+        state, _ = authorize_claim(evidence)
+        assert state == _EXPECTED_EVIDENCE_ONLY[evidence], (evidence, state)
+        state2, _ = authorize_claim(evidence, None)
+        assert state2 == _EXPECTED_EVIDENCE_ONLY[evidence]
+
+
+# 2. only verified_write_success -> SUCCESS
+def test_only_verified_write_success_is_success():
+    for evidence in _ALL_EVIDENCE_STATES:
+        for lifecycle in (None, "completed", "executed"):
             state, _ = authorize_claim(evidence, lifecycle)
-            assert state == _EXPECTED_FOR_COMPLETED[evidence], (lifecycle, evidence, state)
+            if evidence == "verified_write_success" and lifecycle in (None, "completed", "executed"):
+                assert state == ClaimCategory.SUCCESS, (evidence, lifecycle, state)
+            else:
+                assert state != ClaimCategory.SUCCESS, (evidence, lifecycle, state)
 
 
-def test_verified_write_success_is_success():
-    assert authorize_claim("verified_write_success", "completed") == (MessageState.SUCCESS, None)
-
-
+# 3. verified_read_only -> NEUTRAL
 def test_verified_read_only_is_neutral():
-    state, reason = authorize_claim("verified_read_only", "completed")
-    assert state == MessageState.NEUTRAL
-    assert reason == "verified_read_only"
+    assert authorize_claim("verified_read_only") == (ClaimCategory.NEUTRAL, "verified_read_only")
+    assert authorize_claim("verified_read_only", "completed") == (ClaimCategory.NEUTRAL, "verified_read_only")
 
 
 def test_verified_read_only_never_authorizes_success():
-    for lifecycle in ("completed", "executed", "pending", "approved", "executing", "failed", "rejected", "cancelled"):
+    for lifecycle in (None, "completed", "executed", "pending", "approved", "executing", "failed", "rejected", "cancelled"):
         state, _ = authorize_claim("verified_read_only", lifecycle)
-        assert state != MessageState.SUCCESS, (lifecycle, state)
+        assert state != ClaimCategory.SUCCESS, (lifecycle, state)
 
 
-def test_failure_beats_optimistic_lifecycle():
-    state, _ = authorize_claim("failure", "completed")
-    assert state == MessageState.FAILURE
+# 4. completed/executed + verified_write_success -> SUCCESS
+def test_completed_and_executed_with_verified_write_success_is_success():
+    for lifecycle in ("completed", "executed"):
+        assert authorize_claim("verified_write_success", lifecycle) == (ClaimCategory.SUCCESS, None)
 
 
-def test_outcome_unknown():
-    state, _ = authorize_claim("outcome_unknown", "completed")
-    assert state == MessageState.OUTCOME_UNKNOWN
+# 5. pending + failure does not resolve to PENDING
+def test_pending_plus_failure_is_not_pending():
+    state, reason = authorize_claim("failure", "pending")
+    assert state != ClaimCategory.PENDING
+    assert state == ClaimCategory.UNKNOWN
+    assert reason == "conflict_incomplete_lifecycle_with_failure_evidence"
 
 
-def test_unverified_effect():
-    state, _ = authorize_claim("unverified_effect", "completed")
-    assert state == MessageState.UNVERIFIED_EFFECT
-
-
-def test_mixed():
-    state, _ = authorize_claim("mixed", "completed")
-    assert state == MessageState.MIXED
-
-
-def test_mixed_with_unknown():
-    state, _ = authorize_claim("mixed_with_unknown", "completed")
-    assert state == MessageState.MIXED_WITH_UNKNOWN
-
-
-def test_no_evidence_is_outcome_unknown():
-    state, reason = authorize_claim("no_evidence", "completed")
-    assert state == MessageState.OUTCOME_UNKNOWN
-    assert reason == "no_evidence"
-
-
-def test_rejected_and_cancelled_never_become_success_even_with_verified_write_success():
-    for lifecycle in ("rejected", "cancelled"):
-        state, reason = authorize_claim("verified_write_success", lifecycle)
-        assert state == MessageState.CANCELLED, (lifecycle, state)
-        assert reason == "lifecycle_terminal_non_success"
-
-
-def test_pending_lifecycle_cannot_claim_success_regardless_of_evidence():
-    for evidence in _ALL_EVIDENCE_STATES:
-        state, _ = authorize_claim(evidence, "pending")
-        assert state != MessageState.SUCCESS, (evidence, state)
-    # "pending" itself resolves deterministically to APPROVAL_PENDING.
-    assert authorize_claim("verified_write_success", "pending") == (MessageState.APPROVAL_PENDING, "lifecycle_pending")
-
-
-def test_in_progress_lifecycle_cannot_claim_success_regardless_of_evidence():
+# 6. approved/executing + failure does not resolve to the in-progress baseline
+def test_approved_and_executing_plus_failure_is_not_pending():
     for lifecycle in ("approved", "executing"):
+        state, reason = authorize_claim("failure", lifecycle)
+        assert state != ClaimCategory.PENDING, (lifecycle, state)
+        assert state == ClaimCategory.UNKNOWN
+        assert reason == "conflict_incomplete_lifecycle_with_failure_evidence"
+
+
+# 7. completed + approval_pending is a conflict, not PENDING
+def test_completed_plus_approval_pending_is_a_conflict():
+    state, reason = authorize_claim("approval_pending", "completed")
+    assert state != ClaimCategory.PENDING
+    assert state == ClaimCategory.UNKNOWN
+    assert reason == "conflict_completed_with_approval_pending"
+    for lifecycle in ("completed", "executed"):
+        state, _ = authorize_claim("approval_pending", lifecycle)
+        assert state == ClaimCategory.UNKNOWN
+
+
+# 8. unknown/unverified evidence cannot be hidden by optimistic lifecycle
+def test_outcome_unknown_and_unverified_effect_never_hidden():
+    for evidence in ("outcome_unknown", "unverified_effect"):
+        for lifecycle in (None, "completed", "executed", "pending", "approved", "executing"):
+            state, _ = authorize_claim(evidence, lifecycle)
+            assert state == ClaimCategory.UNKNOWN, (evidence, lifecycle, state)
+            assert state != ClaimCategory.SUCCESS
+            assert state != ClaimCategory.PENDING
+
+
+# additional explicit conflict cases from the review
+def test_pending_approved_executing_plus_outcome_unknown_or_unverified_effect_conflicts():
+    for lifecycle in ("pending", "approved", "executing"):
+        for evidence in ("outcome_unknown", "unverified_effect"):
+            state, reason = authorize_claim(evidence, lifecycle)
+            assert state == ClaimCategory.UNKNOWN, (lifecycle, evidence, state)
+            assert reason == "conflict_incomplete_lifecycle_with_uncertain_evidence"
+
+
+def test_incomplete_lifecycle_plus_completed_shaped_evidence_conflicts():
+    for lifecycle in ("pending", "approved", "executing"):
+        for evidence in ("verified_write_success", "verified_read_only", "mixed", "mixed_with_unknown"):
+            state, reason = authorize_claim(evidence, lifecycle)
+            assert state != ClaimCategory.SUCCESS
+            assert state == ClaimCategory.UNKNOWN, (lifecycle, evidence, state)
+            assert reason == "conflict_incomplete_lifecycle_with_completed_evidence"
+
+
+def test_incomplete_lifecycle_compatible_evidence_resolves_to_pending():
+    assert authorize_claim("no_evidence", "pending") == (ClaimCategory.PENDING, "lifecycle_pending")
+    assert authorize_claim("approval_pending", "pending") == (ClaimCategory.PENDING, "lifecycle_pending")
+    for lifecycle in ("approved", "executing"):
+        assert authorize_claim("no_evidence", lifecycle) == (ClaimCategory.PENDING, "lifecycle_in_progress")
+        assert authorize_claim("approval_pending", lifecycle) == (ClaimCategory.PENDING, "lifecycle_in_progress")
+
+
+# 9. rejected/cancelled cannot authorize SUCCESS
+def test_rejected_and_cancelled_never_authorize_success():
+    for lifecycle in ("rejected", "cancelled"):
         for evidence in _ALL_EVIDENCE_STATES:
             state, reason = authorize_claim(evidence, lifecycle)
-            assert state != MessageState.SUCCESS, (lifecycle, evidence, state)
-            assert state == MessageState.APPROVED_PROCESSING and reason == "lifecycle_not_terminal"
-
-
-def test_approved_and_executing_match_canonical_message_contract_mapping():
-    # core.message_contract._state_from_lifecycle() maps both "approved" and
-    # "executing" to MessageState.APPROVED_PROCESSING -- unlike the
-    # verified_read_only override, there is no TC7-B policy conflict here,
-    # so this module must reuse the canonical value exactly, not invent one.
-    for lifecycle in ("approved", "executing"):
-        state, reason = authorize_claim("verified_write_success", lifecycle)
-        assert state == MessageState.APPROVED_PROCESSING, (lifecycle, state)
-        assert reason == "lifecycle_not_terminal"
-
-
-def test_unsupported_evidence_string_fails_closed():
-    state, reason = authorize_claim("some_made_up_status", "completed")
-    assert state == MessageState.OUTCOME_UNKNOWN
-    assert reason == "unsupported_evidence_status"
-
-
-def test_unsupported_lifecycle_string_fails_closed():
-    state, reason = authorize_claim("verified_write_success", "some_made_up_lifecycle")
-    assert state == MessageState.OUTCOME_UNKNOWN
-    assert reason == "unsupported_lifecycle_state"
-    assert state != MessageState.SUCCESS
-
-
-def test_none_and_missing_values_fail_closed():
-    assert authorize_claim(None, None) == (MessageState.OUTCOME_UNKNOWN, "unsupported_lifecycle_state")
-    assert authorize_claim(None, "completed") == (MessageState.OUTCOME_UNKNOWN, "no_evidence")
-    assert authorize_claim("verified_write_success", None)[0] != MessageState.SUCCESS
-
-
-def test_missing_and_expired_lifecycle_fail_closed():
-    for lifecycle in ("missing", "expired"):
-        state, _ = authorize_claim("verified_write_success", lifecycle)
-        assert state != MessageState.SUCCESS
-        assert state == MessageState.OUTCOME_UNKNOWN
+            assert state == ClaimCategory.FAILURE, (lifecycle, evidence, state)
+            assert reason == "lifecycle_terminal_non_success"
 
 
 def test_failed_lifecycle_is_always_failure_regardless_of_evidence():
     for evidence in _ALL_EVIDENCE_STATES:
         state, reason = authorize_claim(evidence, "failed")
-        assert state == MessageState.FAILURE, (evidence, state)
+        assert state == ClaimCategory.FAILURE, (evidence, state)
         assert reason == "lifecycle_failed"
+
+
+def test_missing_and_expired_lifecycle_fail_closed():
+    for lifecycle in ("missing", "expired"):
+        state, reason = authorize_claim("verified_write_success", lifecycle)
+        assert state == ClaimCategory.UNKNOWN
+        assert reason == "lifecycle_unresolved"
+
+
+# 10. whitespace/case variants of lifecycle/evidence fail closed
+def test_whitespace_and_case_variants_fail_closed():
+    noncanonical_evidence = (" verified_write_success", "verified_write_success ", "VERIFIED_WRITE_SUCCESS", "Verified_Write_Success")
+    for value in noncanonical_evidence:
+        state, reason = authorize_claim(value, "completed")
+        assert state != ClaimCategory.SUCCESS, value
+        assert state == ClaimCategory.UNKNOWN
+        assert reason == "unsupported_evidence_status"
+
+    noncanonical_lifecycle = (" completed", "completed ", "COMPLETED", "Completed")
+    for value in noncanonical_lifecycle:
+        state, reason = authorize_claim("verified_write_success", value)
+        assert state != ClaimCategory.SUCCESS, value
+        assert state == ClaimCategory.UNKNOWN
+        assert reason == "unsupported_lifecycle_state"
+
+
+def test_unsupported_evidence_string_fails_closed():
+    state, reason = authorize_claim("some_made_up_status", "completed")
+    assert state == ClaimCategory.UNKNOWN
+    assert reason == "unsupported_evidence_status"
+    state, reason = authorize_claim("some_made_up_status")
+    assert state == ClaimCategory.UNKNOWN
+    assert reason == "unsupported_evidence_status"
+
+
+def test_unsupported_lifecycle_string_fails_closed():
+    state, reason = authorize_claim("verified_write_success", "some_made_up_lifecycle")
+    assert state == ClaimCategory.UNKNOWN
+    assert reason == "unsupported_lifecycle_state"
+
+
+def test_none_and_missing_values_fail_closed():
+    assert authorize_claim(None, None) == (ClaimCategory.UNKNOWN, "unsupported_evidence_status")
+    assert authorize_claim(None, "completed")[0] != ClaimCategory.SUCCESS
+    assert authorize_claim("verified_write_success", None)[0] == ClaimCategory.SUCCESS  # lifecycle genuinely optional
+
+
+# 11. no MessageState/MessageContract production dependency
+def test_no_message_contract_or_message_state_dependency():
+    with open("core/claim_authorization.py", "r", encoding="utf-8") as f:
+        tree = ast.parse(f.read())
+    imported_modules = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported_modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported_modules.add(node.module)
+    assert imported_modules == {"__future__", "enum"}, imported_modules
+    assert "message_contract" not in " ".join(imported_modules)
 
 
 def test_no_raw_dispatcher_provider_or_text_parsing_imports():
@@ -164,7 +232,6 @@ def test_no_raw_dispatcher_provider_or_text_parsing_imports():
             imported_modules.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module:
             imported_modules.add(node.module)
-    assert imported_modules == {"core.message_contract", "__future__"}, imported_modules
     banned_substrings = ("dispatcher", "provider", "re", "regex", "action_gateway", "turn_evidence", "app")
     for module in imported_modules:
         for banned in banned_substrings:
@@ -172,18 +239,13 @@ def test_no_raw_dispatcher_provider_or_text_parsing_imports():
 
 
 def test_no_private_f52_tc9_helper_imports():
-    # Documentation prose may name these symbols (to explain the known
-    # conflict); the module must never import or call them. Checked via
-    # AST import nodes, not a raw substring scan of the whole file.
     with open("core/claim_authorization.py", "r", encoding="utf-8") as f:
         tree = ast.parse(f.read())
     forbidden = {
-        "_state_from_lifecycle",
-        "_lifecycle_projection",
-        "_VERIFIED_SUCCESS_EVIDENCE",
-        "_COMPLETED_EVIDENCE_STATES",
-        "from_action_lifecycle_result",
-        "lifecycle_message_adapter",
+        "_state_from_lifecycle", "_lifecycle_projection",
+        "_VERIFIED_SUCCESS_EVIDENCE", "_COMPLETED_EVIDENCE_STATES",
+        "from_action_lifecycle_result", "lifecycle_message_adapter",
+        "MessageState", "MessageContract", "message_contract",
     }
     imported_names = set()
     for node in ast.walk(tree):
@@ -195,6 +257,15 @@ def test_no_private_f52_tc9_helper_imports():
     assert not (imported_names & forbidden), imported_names & forbidden
 
 
+# 12. no runtime wiring
+def test_no_runtime_wiring():
+    with open("core/claim_authorization.py", "r", encoding="utf-8") as f:
+        source = f.read()
+    for forbidden in ("app.py", "action_gateway", "dispatch_tool", "run_agent"):
+        assert forbidden not in source, forbidden
+
+
+# 13. no new feature flag
 def test_no_new_feature_flag():
     with open("core/claim_authorization.py", "r", encoding="utf-8") as f:
         source = f.read()
@@ -202,15 +273,10 @@ def test_no_new_feature_flag():
     assert "FEATURE_" not in source
 
 
-def test_message_state_enum_unchanged():
-    expected = {
-        "needs_input", "approval_pending", "approval_pending_batch",
-        "approved_processing", "success", "failure", "outcome_unknown",
-        "unverified_effect", "mixed", "mixed_with_unknown", "cancelled",
-        "already_completed", "already_cancelled", "no_pending_action", "neutral",
+def test_claim_category_enum_is_the_required_six_values():
+    assert {member.value for member in ClaimCategory} == {
+        "neutral", "success", "failure", "unknown", "pending", "mixed",
     }
-    actual = {member.value for member in MessageState}
-    assert actual == expected, actual
 
 
 def _run_all():
