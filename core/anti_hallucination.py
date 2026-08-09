@@ -27,26 +27,34 @@ logger = logging.getLogger(__name__)
 _REC_PATTERN = re.compile(r'^rec[A-Za-z0-9]{14}$')
 
 
-def _validate_airtable_evidence(tool_name: str, result: dict) -> "VerifyResult | None":
+# Each validator now returns (canonical_ref, VerifyResult | None): the ref is
+# the exact structured value the validator itself decided was real evidence
+# (never user_message text), and None-check means "valid, caller returns ok".
+# One computation, two consumers — verify_execution() below uses the check
+# half; extract_canonical_evidence_ref() (TC7-A) uses the ref half. This is
+# the single source of truth for "what counts as real provider evidence" —
+# there is no second, independently-maintained notion of it anywhere else.
+
+def _validate_airtable_evidence(tool_name: str, result: dict) -> tuple[str, "VerifyResult | None"]:
     external_id = str(result.get("external_id", "") or "")
     evidence = result.get("evidence", {})
     record_id = str(evidence.get("record_id", "") if isinstance(evidence, dict) else "") or external_id
     rec_id = external_id or record_id
     if not rec_id:
-        return VerifyResult("failed", f"{tool_name}: missing external_id/record_id in structured result")
+        return "", VerifyResult("failed", f"{tool_name}: missing external_id/record_id in structured result")
     if not _REC_PATTERN.match(rec_id):
-        return VerifyResult(
+        return "", VerifyResult(
             "failed",
             f"{tool_name}: external_id '{rec_id[:30]}' is not a valid Airtable record_id "
             f"(expected ^rec[A-Za-z0-9]{{14}}$)"
         )
-    return None
+    return rec_id, None
 
 
-def _validate_sheets_evidence(tool_name: str, result: dict) -> "VerifyResult | None":
+def _validate_sheets_evidence(tool_name: str, result: dict) -> tuple[str, "VerifyResult | None"]:
     evidence = result.get("evidence", {}) or {}
     ext = result.get("external_id", "")
-    has = (
+    ref = (
         result.get("spreadsheet_id")
         or (isinstance(evidence, dict) and (
             evidence.get("spreadsheet_id") or evidence.get("sheet_id")
@@ -54,50 +62,50 @@ def _validate_sheets_evidence(tool_name: str, result: dict) -> "VerifyResult | N
         ))
         or ext
     )
-    if not has:
-        return VerifyResult(
+    if not ref:
+        return "", VerifyResult(
             "failed",
             f"{tool_name}: missing spreadsheet_id/sheet_id/updated_range/rows_appended in evidence"
         )
-    return None
+    return str(ref), None
 
 
-def _validate_drive_evidence(tool_name: str, result: dict) -> "VerifyResult | None":
+def _validate_drive_evidence(tool_name: str, result: dict) -> tuple[str, "VerifyResult | None"]:
     evidence = result.get("evidence", {}) or {}
     ext = result.get("external_id", "")
-    has = (
+    ref = (
         ext
         or (isinstance(evidence, dict) and (evidence.get("file_id") or evidence.get("drive_url")))
     )
-    if not has:
-        return VerifyResult(
+    if not ref:
+        return "", VerifyResult(
             "failed",
             f"{tool_name}: missing file_id or drive_url in evidence"
         )
-    return None
+    return str(ref), None
 
 
-def _validate_gmail_evidence(tool_name: str, result: dict) -> "VerifyResult | None":
+def _validate_gmail_evidence(tool_name: str, result: dict) -> tuple[str, "VerifyResult | None"]:
     external_id = str(result.get("external_id", "") or "")
     evidence = result.get("evidence", {}) or {}
-    has = (
+    ref = (
         external_id
         or (isinstance(evidence, dict) and (evidence.get("draft_id") or evidence.get("message_id")))
     )
-    if not has:
-        return VerifyResult(
+    if not ref:
+        return "", VerifyResult(
             "failed",
             f"{tool_name}: missing external_id/draft_id/message_id in structured result"
         )
-    return None
+    return str(ref), None
 
 
-def _validate_calendar_evidence(tool_name: str, result: dict) -> "VerifyResult | None":
+def _validate_calendar_evidence(tool_name: str, result: dict) -> tuple[str, "VerifyResult | None"]:
     external_id = str(result.get("external_id", "") or "")
     evidence = result.get("evidence", {}) or {}
     has_id = external_id or (isinstance(evidence, dict) and evidence.get("event_id"))
     if not has_id:
-        return VerifyResult(
+        return "", VerifyResult(
             "failed",
             f"{tool_name}: missing external_id/event_id in structured result"
         )
@@ -107,47 +115,47 @@ def _validate_calendar_evidence(tool_name: str, result: dict) -> "VerifyResult |
     else:
         html_link = ""
     if not html_link:
-        return VerifyResult("failed", f"{tool_name}: missing evidence.htmlLink")
-    return None
+        return "", VerifyResult("failed", f"{tool_name}: missing evidence.htmlLink")
+    return str(has_id), None
 
 
-def _validate_crm_payment_evidence(tool_name: str, result: dict) -> "VerifyResult | None":
+def _validate_crm_payment_evidence(tool_name: str, result: dict) -> tuple[str, "VerifyResult | None"]:
     external_id = str(result.get("external_id", "") or "")
     evidence = result.get("evidence", {}) or {}
-    has = (
+    ref = (
         external_id
         or (isinstance(evidence, dict) and (
             evidence.get("payment_id") or evidence.get("record_id")
             or evidence.get("updated_at") or evidence.get("paid_at")
         ))
     )
-    if not has:
-        return VerifyResult(
+    if not ref:
+        return "", VerifyResult(
             "failed",
             f"{tool_name}: missing payment_id/record_id/paid_at in evidence"
         )
-    return None
+    return str(ref), None
 
 
-def _validate_media_memory_evidence(tool_name: str, result: dict) -> "VerifyResult | None":
+def _validate_media_memory_evidence(tool_name: str, result: dict) -> tuple[str, "VerifyResult | None"]:
     external_id = str(result.get("external_id", "") or "")
     evidence = result.get("evidence", {}) or {}
-    has = external_id or (isinstance(evidence, dict) and evidence.get("record_id"))
-    if not has:
-        return VerifyResult("failed", f"{tool_name}: missing external_id/record_id in structured result")
-    return None
+    ref = external_id or (isinstance(evidence, dict) and evidence.get("record_id"))
+    if not ref:
+        return "", VerifyResult("failed", f"{tool_name}: missing external_id/record_id in structured result")
+    return str(ref), None
 
 
-def _validate_owner_draft_evidence(tool_name: str, result: dict) -> "VerifyResult | None":
+def _validate_owner_draft_evidence(tool_name: str, result: dict) -> tuple[str, "VerifyResult | None"]:
     """send_followup/send_recovery: evidence is the output_gateway audit_id proving
     the draft delivery to the owner was actually attempted and audited — there is
     no external record_id since these never write to Airtable."""
     external_id = str(result.get("external_id", "") or "")
     evidence = result.get("evidence", {}) or {}
-    has = external_id or (isinstance(evidence, dict) and evidence.get("audit_id"))
-    if not has:
-        return VerifyResult("failed", f"{tool_name}: missing external_id/audit_id in structured result")
-    return None
+    ref = external_id or (isinstance(evidence, dict) and evidence.get("audit_id"))
+    if not ref:
+        return "", VerifyResult("failed", f"{tool_name}: missing external_id/audit_id in structured result")
+    return str(ref), None
 
 
 # Registry: tool_name → evidence validator function.
@@ -181,6 +189,54 @@ _WRITE_ACTION_TOOLS: frozenset[str] = frozenset(_EVIDENCE_VALIDATORS) | frozense
 
 # Keep for backward-compat with any code that still imports this name.
 _STRUCTURED_ID_TOOLS = {k: "external_id" for k in _EVIDENCE_VALIDATORS}
+
+
+def extract_canonical_evidence_ref(tool_name: str, raw_output: Any) -> str:
+    """The one canonical structured-evidence reference for a tool's raw result.
+
+    TC7-A (core/evidence_projection.py::build_evidence_result_from_outcome())
+    calls this to derive EvidenceResult.evidence_ref — the exact same
+    ref/validity decision _EVIDENCE_VALIDATORS makes for verify_execution()
+    above, via the exact same registry lookup and the exact same per-tool
+    functions (each now returns (ref, check) — one computation, two
+    consumers). There is no second, independently-maintained notion of "what
+    counts as real evidence" anywhere in this codebase; if a tool's
+    evidence shape ever changes, both verify_execution() and TC7-A pick up
+    the change from this single place automatically.
+
+    Returns "" for a missing/invalid/malformed-shape result, an
+    unrecognized tool, a non-dict input, or ok is not True — mirrors
+    verify_execution()'s own ok-gate-before-validator order exactly, so
+    verify_execution()=="ok" and "this function can yield a non-empty ref"
+    are the same guarantee, not merely two functions that happen to read the
+    same fields. A result with ok=False can never yield a ref here even if
+    its evidence dict is otherwise well-formed — the same raw result must
+    never be "failed" to verify_execution() and "success" to TC7-A. Never
+    raises, never reads user_message. This function only answers "is there
+    a real structured provider reference, and what is it" for tools with a
+    registered validator, falling back to the plain external_id field only
+    for a genuine non-write tool (read-only/listing tools verify_execution()
+    itself accepts without a validator). A write/action tool with no
+    registered validator (per _WRITE_ACTION_TOOLS) yields "" here too — the
+    exact same fail-closed rule verify_execution() applies for that case —
+    so this function can never be more permissive than verify_execution()
+    even for a future tool added to _WRITE_ACTION_TOOLS before its
+    validator exists.
+    """
+    if not isinstance(raw_output, dict):
+        return ""
+    if not raw_output.get("ok"):
+        return ""
+    validator = _EVIDENCE_VALIDATORS.get(tool_name)
+    if validator is None:
+        if tool_name in _WRITE_ACTION_TOOLS:
+            # Mirrors verify_execution()'s fail-closed rule for a write tool
+            # with no registered validator — never a permissive fallback.
+            return ""
+        return str(raw_output.get("external_id", "") or "")
+    ref, check = validator(tool_name, raw_output)
+    return ref if check is None else ""
+
 
 # ══════════════════════════════════════════════════
 # "No tool was called" detection patterns.
@@ -402,7 +458,7 @@ def verify_execution(tool_name: str, raw_output: Any) -> VerifyResult:
             return VerifyResult("failed", _content_text(raw_output)[:160])
 
         if validator:
-            result = validator(tool_name, raw_output)
+            _ref, result = validator(tool_name, raw_output)
             if result is not None:
                 return result
             return VerifyResult("ok")
