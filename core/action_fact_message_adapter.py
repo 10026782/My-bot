@@ -1,20 +1,16 @@
 """Pure ActionFact to MessageContract adapter (D-012 PR C).
 
 Translates the existing internal ``ActionFact`` execution fact into the
-canonical ``MessageContract`` envelope. This module performs no I/O, holds no
-state, and has zero production callers — see
-``docs/architecture/message_contract/ACTION_FACT_GATEWAY_REPLY_ADAPTER_SPEC.md``
-for the full Planning Gate. It does not modify, wire, or call
-``core/action_gateway.py``'s ``ActionFact``, ``GatewayReply``, or
-``compose_status_reply()`` in any way.
+canonical ``MessageContract`` envelope. This module performs no I/O and holds
+no state. It is called at the ActionGateway status-reply boundary; the adapter
+does not own lifecycle, evidence, or reply-ownership decisions.
 
 State resolution is delegated entirely to
 ``core.message_contract.build_message_contract()``'s existing
 ``lifecycle_state``/``_state_from_lifecycle()`` precedence chain —
-``ActionFact.outcome``'s closed four-value vocabulary
-(``executed``/``failed``/``pending``/``rejected``) is a strict subset of what
-that helper already accepts, so this adapter defines no competing state
-table.
+``ActionFact.outcome`` is validated against the supported execution vocabulary
+(``executed``/``failed``/``pending``/``rejected``/``outcome_unknown``), so this
+adapter defines no competing state table.
 """
 
 from __future__ import annotations
@@ -31,7 +27,7 @@ from core.message_contract import (
 ADAPTER_SOURCE_MODULE = "core.action_fact_message_adapter"
 
 _REPLY_OWNER = "gateway"
-_VALID_OUTCOMES = frozenset({"executed", "failed", "pending", "rejected"})
+_VALID_OUTCOMES = frozenset({"executed", "failed", "pending", "rejected", "outcome_unknown"})
 _REJECTED_REASON_CODE = "ACTION_REJECTED"
 
 
@@ -60,8 +56,10 @@ def from_action_fact(
     description: str | None = None,
     entity_type: str | None = None,
     evidence_status: str | None = None,
+    evidence_ref: str | None = None,
     execution_verified: bool | None = None,
     occurred_at: str | None = None,
+    turn_id: str | None = None,
 ) -> MessageContract:
     outcome = fact.outcome
     if not isinstance(outcome, str) or outcome not in _VALID_OUTCOMES:
@@ -70,6 +68,15 @@ def from_action_fact(
         raise MessageContractValidationError("description must be a string or None")
     if entity_type is not None and not isinstance(entity_type, str):
         raise MessageContractValidationError("entity_type must be a string or None")
+
+    evidence_status = evidence_status if evidence_status is not None else getattr(fact, "evidence_status", None)
+    evidence_ref = evidence_ref if evidence_ref is not None else getattr(fact, "evidence_ref", None)
+    execution_verified = (
+        execution_verified if execution_verified is not None
+        else getattr(fact, "execution_verified", None)
+    )
+    occurred_at = occurred_at if occurred_at is not None else getattr(fact, "occurred_at", None)
+    turn_id = turn_id if turn_id is not None else getattr(fact, "turn_id", None)
 
     reason_code = _reason_code_for(outcome, fact.error_code)
     entity_name = description if (description and description.strip()) else None
@@ -87,9 +94,9 @@ def from_action_fact(
         reply_owner=_REPLY_OWNER,
         turn_context_source=TurnContextSource.LEGACY_INGRESS,
         source_module=ADAPTER_SOURCE_MODULE,
-        turn_id=None,
+        turn_id=turn_id,
         evidence_status=evidence_status,
-        evidence_ref=None,
+        evidence_ref=evidence_ref,
         reason_code=reason_code,
         execution_verified=execution_verified,
         occurred_at=occurred_at,
