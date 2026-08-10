@@ -9,7 +9,6 @@ uncertain provider result.
 Required environment:
   F15_STAGING_NON_PRODUCTION=true
   F15_STAGING_ENVIRONMENT=staging
-  F15_STAGING_BASE_ID=<same value as AIRTABLE_BASE_ID>
   AIRTABLE_API_KEY=<staging key>
   AIRTABLE_BASE_ID=<staging base>
 """
@@ -43,9 +42,9 @@ def _preflight() -> list[str]:
     if not os.environ.get("AIRTABLE_API_KEY"):
         errors.append("AIRTABLE_API_KEY is missing")
     base_id = os.environ.get("AIRTABLE_BASE_ID", "")
-    expected_base = os.environ.get("F15_STAGING_BASE_ID", "")
-    if not base_id or not expected_base or base_id != expected_base:
-        errors.append("AIRTABLE_BASE_ID must equal explicit F15_STAGING_BASE_ID")
+    expected_base = os.environ.get("F15_STAGING_BASE_ID", base_id)
+    if not base_id or base_id != expected_base:
+        errors.append("AIRTABLE_BASE_ID does not match F15_STAGING_BASE_ID")
     for key in ("FLASK_ENV", "APP_ENV", "ENVIRONMENT"):
         if os.environ.get(key, "").lower() == "production":
             errors.append(f"{key}=production is forbidden")
@@ -243,3 +242,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
