@@ -129,7 +129,7 @@ current status source.
 
 ---
 
-### 3.5.1 BOSS Core Harness — Program Map (עודכן: 10/08/2026 — rows A/F/H/I/J updated for PR #577/#579/#583/#585/#587/#588; §3.5.2/3.5.3 not yet re-walked, see notes there)
+### 3.5.1 BOSS Core Harness — Program Map (עודכן: 10/08/2026 — rows A/F/H/I/J and §3.5.3 Next Gates updated for PR #577/#579/#583/#585/#587/#588; §3.5.2's target chain diagram and §3.5's Runtime Capability Status snapshot remain dated 09/08/2026, not re-walked in this pass)
 
 **זהו הסעיף הקנוני היחיד** למצב תכניות-הליבה חוצות-התוכנית (Turn Coordinator,
 ActionGateway, RP4/RP5, A32, F52, F14, Agent Cost). כל תכנית שומרת את מפרט
