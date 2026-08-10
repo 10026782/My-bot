@@ -67,9 +67,11 @@ verification"):
 
 This script requires real staging DATABASE_URL / AIRTABLE_API_KEY /
 AIRTABLE_BASE_ID / TELEGRAM_TOKEN in its environment and a network path to
-the real staging Airtable base. It has NOT been executed as part of this
-TC10 change — no staging credentials are available in the environment that
-authored it. Run it from a machine with staging secrets and keep the
+the real staging Airtable base. First real-staging run (2026-08-10, from
+the Render staging shell) caught a bug in this file's own preflight check
+before reaching any of the actual pending/executed/failed/turn_id checks
+— see the AIRTABLE_BASE_ID comment above. Re-run after that fix to get
+real coverage evidence, and keep the
 printed evidence as the "Staging runtime evidence" artifact TC10 requires;
 do not label its output "Production evidence."
 """
@@ -115,20 +117,20 @@ def _preflight(evidence: dict) -> None:
             "production"
         )
     # The confirmation env var above is caller-controlled and, on its own,
-    # proves nothing — a shell could export it alongside real production
-    # DATABASE_URL/AIRTABLE_BASE_ID by mistake. Require the target's own
-    # identifiers to also look non-production, the same defense-in-depth
-    # naming heuristic scripts/verify_tc8_staging.py's _preflight() already
-    # uses for DATABASE_URL.
-    base = os.getenv("AIRTABLE_BASE_ID", "")
+    # proves nothing for DATABASE_URL — a shell could export it alongside a
+    # real production DATABASE_URL by mistake. Require DATABASE_URL to also
+    # look non-production, the same defense-in-depth naming heuristic
+    # scripts/verify_tc8_staging.py's _preflight() already uses. There is no
+    # equivalent check for AIRTABLE_BASE_ID: Airtable base ids are always an
+    # opaque `appXXXXXXXXXXXXXXXX` token (confirmed against this repo's real
+    # staging base while writing this) — no naming convention could ever be
+    # satisfied there, staging included, so a name check on it would just be
+    # dead code that fails every real run. AIRTABLE_API_KEY/AIRTABLE_BASE_ID
+    # non-emptiness is already required above; the confirmation flag is the
+    # only signal available for them, matching verify_tc8_staging.py's own
+    # precedent of not attempting to name-check Airtable at all.
     db_url = os.getenv("DATABASE_URL", "")
     non_prod_tokens = ("staging", "sandbox", "test", "dev")
-    if not any(token in base.lower() for token in non_prod_tokens):
-        raise VerificationFailure(
-            f"AIRTABLE_BASE_ID ({base!r}) does not look like a non-production "
-            "base (expected one of staging/sandbox/test/dev in the name) — "
-            "refusing to run even with TC9_STAGING_NON_PRODUCTION=true"
-        )
     if not any(token in db_url.lower() for token in non_prod_tokens):
         raise VerificationFailure(
             "DATABASE_URL does not look like a non-production database "
@@ -137,9 +139,9 @@ def _preflight(evidence: dict) -> None:
         )
     evidence["Preflight"] = {
         "status": "PASS",
-        "detail": f"non-production confirmation + base={base!r} name heuristic",
+        "detail": "non-production confirmation + DATABASE_URL name heuristic",
     }
-    print(f"{'Preflight':<40} PASS — non-production confirmation + base name heuristic")
+    print(f"{'Preflight':<40} PASS — non-production confirmation + DATABASE_URL name heuristic")
 
 
 def main() -> int:
