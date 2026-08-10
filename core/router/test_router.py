@@ -103,6 +103,44 @@ TESTS = [
         "✅ בוצע: משימה 1\n✅ בוצע: משימה 2\n❌ נכשל: הוסף משימה חדשה ללקוח\n",
         "telegram", "owner", "", Intent.CREATE_TASK, RouterDomain.CRM, Handler.CLARIFY,
     ),
+
+    # ── PA-01 — UPDATE_TASK / COMPLETE_TASK deterministic routing ──────────
+    # Certain, structured requests must reach Handler.TOOL (the previously
+    # missing gate — was falling to Handler.AGENT for all real traffic).
+    (
+        "PA-01 certain update_task → tool",
+        "עדכן את המשימה בדיקה-PA01 לסטטוס בוצע",
+        "telegram", "owner", "", Intent.UPDATE_TASK, RouterDomain.GENERAL, Handler.TOOL,
+    ),
+    (
+        "PA-01 certain complete_task (סמן) → tool",
+        "סמן את המשימה בדיקה-PA01 כבוצעה",
+        "telegram", "owner", "", Intent.COMPLETE_TASK, RouterDomain.GENERAL, Handler.TOOL,
+    ),
+    (
+        "PA-01 certain complete_task (סגור) → tool",
+        "סגור משימה בדיקה-PA01",
+        "telegram", "owner", "", Intent.COMPLETE_TASK, RouterDomain.GENERAL, Handler.TOOL,
+    ),
+    # Ambiguous — intent-level match only (word appears mid-sentence, not a
+    # structured verb-noun-reference command) must NOT become Handler.TOOL.
+    (
+        "PA-01 ambiguous update_task (mid-sentence) → not tool",
+        "אני חושב שכדאי לעדכן את המשימה הזו בעתיד",
+        "telegram", "owner", "", Intent.UPDATE_TASK, RouterDomain.GENERAL, Handler.AGENT,
+    ),
+    (
+        "PA-01 ambiguous complete_task (no reference) → not tool",
+        "סגור משימה",
+        "telegram", "owner", "", Intent.COMPLETE_TASK, RouterDomain.GENERAL, Handler.AGENT,
+    ),
+    # Role gate mirrors CREATE_TASK's — external roles never get Handler.TOOL
+    # even for an otherwise-certain structured request.
+    (
+        "PA-01 certain update_task, lead role → agent (never tool)",
+        "עדכן את המשימה בדיקה-PA01 לסטטוס בוצע",
+        "telegram", "lead", "", Intent.UPDATE_TASK, RouterDomain.GENERAL, Handler.AGENT,
+    ),
 ]
 
 
