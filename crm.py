@@ -12,11 +12,12 @@ from datetime import datetime, date, timedelta
 
 from airtable_schema import (
     Tables,
-    ContactFields, ContactType, ContactStatus,
+    ContactFields, ContactType, ContactRoleCategory, ContactStatus,
     DealFields, DealStage, DealStatus, RiskLevel,
     PaymentFields, PaymentStatus,
     validate_funding_cost,
 )
+from tools.airtable_gateway import airtable_create, airtable_patch
 
 logger = logging.getLogger(__name__)
 
@@ -69,24 +70,15 @@ def _get(table: str, formula: str = "", fields: list = None, identity=None) -> l
     return r.json().get("records", [])
 
 def _post(table: str, fields: dict) -> dict:
-    r = httpx.post(_base_url(table), headers=_headers(),
-                   json={"fields": fields}, timeout=10)
-    if r.status_code == 401:
-        raise RuntimeError("AIRTABLE_API_KEY לא תקין או פג — עדכן ב-Render")
-    if r.status_code == 403:
-        raise RuntimeError(f"אין הרשאה לטבלה '{table}' — בדוק שהטבלה קיימת ושה-token מורשה")
-    r.raise_for_status()
-    return r.json()
+    record = airtable_create(table, fields, source="crm")
+    if record is None:
+        raise RuntimeError(f"Airtable create failed for table '{table}'")
+    return record
 
 def _patch(table: str, record_id: str, fields: dict) -> dict:
-    r = httpx.patch(f"{_base_url(table)}/{record_id}", headers=_headers(),
-                    json={"fields": fields}, timeout=10)
-    if r.status_code == 401:
-        raise RuntimeError("AIRTABLE_API_KEY לא תקין או פג — עדכן ב-Render")
-    if r.status_code == 403:
-        raise RuntimeError(f"אין הרשאה לטבלה '{table}' / רשומה '{record_id}'")
-    r.raise_for_status()
-    return r.json()
+    if not airtable_patch(table, record_id, fields, source="crm"):
+        raise RuntimeError(f"Airtable update failed for table '{table}', record '{record_id}'")
+    return {"id": record_id}
 
 def _fmt_date(iso: str) -> str:
     try:
@@ -187,8 +179,15 @@ def find_or_create_contact(phone, name, *, email="", company="",
         fields[ContactFields.EMAIL] = email
     if company:
         fields[ContactFields.COMPANY] = company
-    if contact_type:
-        fields[ContactFields.ROLE_CATEGORY] = contact_type
+    contact_role = {
+        ContactType.CLIENT: ContactRoleCategory.CLIENT,
+        ContactType.SUPPLIER: ContactRoleCategory.SUPPLIER,
+        ContactType.PARTNER: ContactRoleCategory.PARTNER,
+        ContactType.LAWYER: ContactRoleCategory.EXPERT,
+        ContactType.ACCOUNTANT: ContactRoleCategory.EXPERT,
+    }.get(contact_type, contact_type)
+    if contact_role:
+        fields[ContactFields.ROLE_CATEGORY] = contact_role
     if lead_source_id:
         fields[ContactFields.ORIGIN_LEAD] = [lead_source_id]
     try:
@@ -319,7 +318,7 @@ def crm_add_deal(name: str, address: str, price: float,
         fields = {
             DealFields.NAME:         name,
             DealFields.ADDRESS:      address,
-            DealFields.STATUS:       DealStatus.PROSPECT,
+            DealFields.STATUS:       DealStage.OPPORTUNITY,
             DealFields.PRICE:        price,
             DealFields.FUNDING_COST: funding_cost_pct,
             DealFields.ROI:          roi,
@@ -343,12 +342,19 @@ def crm_add_deal(name: str, address: str, price: float,
 
 
 def crm_update_deal_status(record_id: str, status: str, notes: str = "") -> str:
+    canonical_status = {
+        DealStatus.PROSPECT: DealStage.OPPORTUNITY,
+        DealStatus.DUE_DILIGENCE: DealStage.NEGOTIATION,
+        DealStatus.ACTIVE: DealStage.NEGOTIATION,
+        DealStatus.CLOSED: DealStage.CLOSED_WIN,
+        DealStatus.CANCELLED: DealStage.CLOSED_LOSS,
+    }.get(status, status)
     valid = [DealStatus.PROSPECT, DealStatus.DUE_DILIGENCE,
              DealStatus.ACTIVE, DealStatus.CLOSED, DealStatus.CANCELLED]
     if status not in valid:
         return f"❌ סטטוס לא חוקי. אפשרויות: {', '.join(valid)}"
     try:
-        fields = {DealFields.STATUS: status}
+        fields = {DealFields.STATUS: canonical_status}
         if notes: fields[DealFields.NOTES] = notes
         _patch(Tables.DEALS, record_id, fields)
         return f"✅ עסקה `{record_id}` עודכנה → *{status}*"

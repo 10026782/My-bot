@@ -230,7 +230,7 @@ class DealFields:
     # backwards compat — crm.py uses these
     STATUS          = "שלב"
     PRICE           = "סכום"
-    ADDRESS         = "Adress"
+    ADDRESS         = "Address"
     FUNDING_COST    = "Funding Cost"
     ROI             = "Roi"
     RISK_LEVEL      = "Risk Level"
