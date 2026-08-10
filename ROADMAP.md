@@ -10,9 +10,10 @@ regression matrix against real shared staging Airtable (the root cause of
 the BUG-122 contamination TC8 handed off). The isolated runner's own first
 version regressed 2 test files by over-scoping its credential override
 (Telegram, not just Airtable); caught by this PR's real CI + review,
-root-caused and fixed within the same PR — corrected local evidence is
-21/21 full matrix, stable across 2 repeated runs; a fresh real-CI
-confirmation on the corrected commit is the pending next step. See
+root-caused and fixed within the same PR — 21/21 full matrix, stable
+across 2 repeated runs, confirmed both locally and by this PR's own real
+GitHub Actions `backend-ci` run on the corrected commit (`2b6ecb3`, run
+31362450916, `FINAL: PASS`). See
 `docs/architecture/turn-coordinator-full/TC10_OPERATIONAL_VERIFICATION_HARNESS.md`
 for the full audit/evidence. No ActionGateway/TC7/TC8/TC9/F14/router/
 approval-policy runtime code changed.

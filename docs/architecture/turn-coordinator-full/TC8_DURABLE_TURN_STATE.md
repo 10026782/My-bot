@@ -98,17 +98,18 @@ credentials). See
 for the full audit, isolation strategy, and evidence.
 
 Callback hardening (39/39), PR-0C callbacks (8/8), and BUG-158 recovery
-(11/11) all pass isolated, reproduced twice with stable results in this
-session's local verification, as does the full 21-file `FULL_REGRESSION`
-set (21/21, stable across 2 runs) — after this session found and fixed an
-over-broad credential override in its own runner that had regressed 2 of
-those files (see the harness doc §6.1 for the full account, including the
-real-CI-confirmed root cause). A fresh real-CI run against the corrected
-commit is the next confirmation step and had not landed as of this writing
-— this contract does not treat "isolated regression gate satisfied" as
-established until that lands, matching the local-vs-CI evidence distinction
-the harness doc itself requires.
+(11/11) all pass isolated, reproduced twice with stable results, as does
+the full 21-file `FULL_REGRESSION` set (21/21, stable across 2 runs) — both
+in local verification and, now, in a confirmed real CI run (PR #590 commit
+`2b6ecb3`, `backend-ci` run 31362450916, `FINAL: PASS`; see harness doc
+§6.2 for the linked evidence). This followed this session finding and
+fixing an over-broad credential override in its own runner that had
+regressed 2 of those files — the harness doc §6.1 records the full account,
+including the real-CI-confirmed root cause and the real-CI-confirmed fix.
+The isolated regression gate is satisfied with CI evidence, not merely
+local evidence — matching the evidence-classification discipline the
+harness doc itself requires.
 
 Revised classification:
 
-`TC8 — IMPLEMENTATION AND STAGING VERIFIED / ISOLATED REGRESSION HARNESS BUILT, LOCAL EVIDENCE 21/21 STABLE, CI CONFIRMATION PENDING / REAL-STAGING TC9 CANARY STILL PENDING`
+`TC8 — IMPLEMENTATION AND STAGING VERIFIED / ISOLATED REGRESSION GATE SATISFIED AND CI-CONFIRMED (TC10) / REAL-STAGING TC9 CANARY STILL PENDING`

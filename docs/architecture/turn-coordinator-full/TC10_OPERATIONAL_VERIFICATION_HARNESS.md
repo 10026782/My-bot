@@ -249,6 +249,24 @@ matrix tally an explicit, visible CI check on every PR and every push to
 test_*.py` loop. It requires no new secrets — same fake-credential
 convention the job already used.
 
+**Confirmed real CI result** (this is CI evidence, not local evidence —
+GitHub Actions hosted runner, PR #590, commit `2b6ecb3`, `backend-ci` job
+`93373876198`, run
+[31362450916](https://github.com/10026782/My-bot/actions/runs/31362450916/job/93373876198),
+completed `2026-08-10T06:38:03Z`, conclusion `success`): the "TC10 isolated
+regression matrix" step's own printed output reads
+
+```
+Repeated-run stability (2 runs): STABLE — per-file outcomes identical across runs, tallies: ['21/21', '21/21']
+FINAL: PASS
+```
+
+with `test_tc6_app_reply_ownership.py` (52/52) and
+`test_pa01_phantom_approval_enforcement.py` (108/108) both passing — the
+exact two files the pre-fix version of this runner had regressed (§6.1).
+This closes the "fresh CI run on the corrected commit" gap this document
+previously listed as outstanding. §10's verdict is updated accordingly.
+
 ### 6.3 Staging runtime evidence
 
 Not produced by this session — this sandbox has no real staging
@@ -342,18 +360,22 @@ corrected commit).
 
 **TC10 — IMPLEMENTATION COMPLETE / STAGING VERIFICATION PENDING**
 
-Isolated regression mode is built, wired into CI, and has produced real,
-repeated, stable local evidence for the required named gates (39/39, 8/8,
-11/11) and the full 21/21 matrix (§6.1) — after finding, and correcting
-within this same PR, an over-broad credential override that had regressed
-2 files, confirmed against this PR's own real GitHub Actions run. A fresh
-CI run on the corrected commit is the next confirmation step and is not yet
-in hand as of this writing. The TC8 handoff's specific contamination bug is
-fixed at its root cause. The TC9 staging runtime canary is written,
-API-correct, and structurally validated end-to-end (including its
-duplicate-dispatch and false-pass fixes, §6.1) against a local stand-in, but
-has not been run against real staging — that remains an explicit, stated
-pending item, not a silent gap.
+Isolated regression mode is built, wired into CI, and now has both real,
+repeated, stable local evidence AND confirmed real-CI evidence (§6.2, PR
+#590 commit `2b6ecb3`, `backend-ci` run 31362450916, `FINAL: PASS`, `21/21`
+stable across 2 runs) for the required named gates (39/39, 8/8, 11/11) and
+the full matrix — including `test_tc6_app_reply_ownership.py` and
+`test_pa01_phantom_approval_enforcement.py`, the two files an earlier,
+over-broad credential override in this same PR had regressed and which
+this PR's own CI history shows failing (44/52) and then passing (52/52) on
+the commit that fixed it. The isolated regression gate this document's
+first draft prematurely claimed "satisfied" (§8) is now actually satisfied,
+with CI evidence to show it — not merely local evidence. The TC8 handoff's
+specific contamination bug is fixed at its root cause. The TC9 staging
+runtime canary is written, API-correct, and structurally validated
+end-to-end (including its duplicate-dispatch and false-pass fixes, §6.1)
+against a local stand-in, but has not been run against real staging — that
+remains an explicit, stated pending item, not a silent gap.
 
 **CORE OPERATIONAL VERIFICATION GATE — NOT YET READY** (blocked only on the
 real-staging run of `scripts/verify_tc9_staging.py` and
