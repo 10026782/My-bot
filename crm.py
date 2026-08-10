@@ -311,7 +311,7 @@ def crm_add_deal(name: str, address: str, price: float,
         fields = {
             DealFields.NAME:         name,
             DealFields.ADDRESS:      address,
-            DealFields.STATUS:       DealStatus.PROSPECT,
+            DealFields.STATUS:       DealStage.OPPORTUNITY,
             DealFields.PRICE:        price,
             DealFields.FUNDING_COST: funding_cost_pct,
             DealFields.ROI:          roi,
@@ -335,12 +335,19 @@ def crm_add_deal(name: str, address: str, price: float,
 
 
 def crm_update_deal_status(record_id: str, status: str, notes: str = "") -> str:
+    canonical_status = {
+        DealStatus.PROSPECT: DealStage.OPPORTUNITY,
+        DealStatus.DUE_DILIGENCE: DealStage.NEGOTIATION,
+        DealStatus.ACTIVE: DealStage.NEGOTIATION,
+        DealStatus.CLOSED: DealStage.CLOSED_WIN,
+        DealStatus.CANCELLED: DealStage.CLOSED_LOSS,
+    }.get(status, status)
     valid = [DealStatus.PROSPECT, DealStatus.DUE_DILIGENCE,
              DealStatus.ACTIVE, DealStatus.CLOSED, DealStatus.CANCELLED]
     if status not in valid:
         return f"❌ סטטוס לא חוקי. אפשרויות: {', '.join(valid)}"
     try:
-        fields = {DealFields.STATUS: status}
+        fields = {DealFields.STATUS: canonical_status}
         if notes: fields[DealFields.NOTES] = notes
         _patch(Tables.DEALS, record_id, fields)
         return f"✅ עסקה `{record_id}` עודכנה → *{status}*"
