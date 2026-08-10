@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import crm
-from airtable_schema import DealFields, DealStatus, PaymentFields, PaymentStatus, RiskLevel, Tables
+from airtable_schema import DealFields, DealStage, DealStatus, PaymentFields, PaymentStatus, RiskLevel, Tables
 
 
 def test_crm_create_uses_gateway_and_preserves_record_id():
@@ -19,7 +19,7 @@ def test_crm_create_uses_gateway_and_preserves_record_id():
     assert fields == {
         DealFields.NAME: "Deal",
         DealFields.ADDRESS: "Address",
-        DealFields.STATUS: DealStatus.PROSPECT,
+        DealFields.STATUS: DealStage.OPPORTUNITY,
         DealFields.PRICE: 100,
         DealFields.FUNDING_COST: 5,
         DealFields.ROI: 15.0,
@@ -36,7 +36,7 @@ def test_crm_update_uses_gateway_with_record_id():
     update.assert_called_once_with(
         Tables.DEALS,
         "recDEAL",
-        {DealFields.STATUS: "Active", DealFields.NOTES: "note"},
+        {DealFields.STATUS: DealStage.NEGOTIATION, DealFields.NOTES: "note"},
         source="crm",
     )
 
