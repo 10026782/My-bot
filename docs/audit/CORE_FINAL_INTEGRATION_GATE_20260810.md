@@ -1,5 +1,10 @@
 # CORE Final Integration Gate — 10/08/2026
 
+**Historical audit artifact.** The canonical current CORE completion source is
+`docs/audit/CORE_COMPLETION_AUDIT_20260810.md`. This report is preserved for
+historical evidence and must not be used as the current CORE status source.
+
+
 Scope: final CORE integration gate only, covering Track A, Track C (TC8/TC9/TC10),
 Track D, F14, F15, TC7-A/B1/B1.1/B2. No implementation work performed; no runtime
 behavior changed to make this gate pass.
