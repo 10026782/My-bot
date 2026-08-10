@@ -4,6 +4,14 @@
 **לא מחליף את `ROADMAP.md`** — אינו נוגע, משנה, או ממספר מחדש שום C/N/F קיים שם. רק מפנה אליהם.
 **עודכן:** 09/08/2026 | **Owner:** אליהו
 
+**Canonical CORE completion status (10/08/2026):** `CORE v1 — COMPLETE /
+READY TO FREEZE`. See
+`docs/audit/CORE_COMPLETION_AUDIT_20260810.md` for the current evidence and
+limitations. The four-layer program remains **PARTIAL / NON-BLOCKING** because
+formal Layer 2 TurnCoordinator implementation is absent. Dated registry
+snapshots below are historical evidence and must not override the canonical
+audit. Freeze remains an owner/governance decision.
+
 ---
 
 ## 0. למה המסמך הזה קיים, ומה קרה למסמכים הקודמים

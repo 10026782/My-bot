@@ -1,27 +1,20 @@
 # CROSS_LAYER_AUTHORITY_CONTRACT_V1.md
 
-**סטטוס:** MANDATORY GATE — חוסם כל planning/implementation שנוגע באחת מ-4 השכבות למטה, ללא Cross-Layer Impact Matrix מלא.
-**מקור:** נוצר בעקבות הבקשה לאשר את `TURN_COORDINATOR_BEHAVIOR_CONTRACT_V1.md` — זוהה הצורך בשער חוצה-שכבות *לפני* שאישור כזה ניתן, לא רק בשביל TurnCoordinator עצמו.
-**מי כפוף לזה:** כל מחקר, מסקנה, מימוש, bug fix, או PR שנוגע — ישירות או בעקיפין — באחת מ-4 השכבות ב-§1. "נוגע בעקיפין" כולל: שינוי contract/schema/flag/identifier ששכבה אחרת קוראת אותו, לא רק קריאה ישירה לפונקציה בשכבה האחרת.
+**Status:** MANDATORY CROSS-LAYER GOVERNANCE BOUNDARY
+
+The current classification and review policy is
+`docs/governance/CROSS_LAYER_GOVERNANCE_REVISED_PLANNING_GATE.md`.
+Every implementation requires a Cross-Layer Assessment. A full Impact Matrix
+is required only for the risk triggers defined by that policy. Local changes may
+use `Cross-Layer Impact: NONE`; owned single-layer contract changes may use
+`SINGLE-LAYER`; uncertainty fails closed to `FULL`.
+
+This document remains authoritative for architectural ownership boundaries and
+prohibitions. Its matrix fields are the required evidence format when the
+revised policy classifies a change as `FULL`. It no longer imposes a blanket
+full-matrix requirement on every change touching a named layer.
 
 ---
-
-## 0. הכלל המחייב (Mandatory Rule)
-
-> אף מחקר, החלטת-מימוש, תיקון-באג, או PR שנוגעים באחת מ-4 השכבות ב-§1 לא רשאים להתקדם ללא **Cross-Layer Impact Matrix** (§3) שממלא את כל 4 השכבות — כולל השכבות שה-PR "לא נוגע בהן".
-
-**אם שינוי טוען שרק שכבה אחת מושפעת — הוא חייב להוכיח במפורש ש-3 החוזים האחרים נשארים ללא שינוי (§6), לא רק להצהיר את זה.**
-
-**ללא Cross-Layer Impact Matrix מלא:**
-
-```
-STATUS = PLANNING BLOCKED
-```
-
-אסור: קוד runtime, PR מימוש, או סטטוס "תוקן"/"✅ Fixed" — עד שה-matrix הושלם ותועד.
-
----
-
 ## 1. ארבע השכבות הסמכותיות (כפי שהן קיימות היום — מבוסס grep, לא הנחה)
 
 כל שכבה: מה היא **אמורה** לבעול (per היעד הארכיטקטוני) מול מה היא **בפועל** בעולה היום (עם gap מפורש כשיש).
@@ -100,7 +93,7 @@ STATUS = PLANNING BLOCKED
 
 ## 2. Cross-Layer Impact Matrix — שדות חובה לכל שכבה
 
-לכל אחת מ-4 השכבות ב-§1, כל שינוי (מחקר/מימוש/תיקון/PR) חייב למלא את כל 9 השדות הבאים — כולל שכבות שהשינוי "לא נוגע בהן" (שם התשובה יכולה להיות "לא נוגע", אבל **חייבת** להיות מפורשת, לא שורה חסרה):
+לכאשר השינוי מסווג כ-`Cross-Layer Impact: FULL`, יש למלא לכל אחת מ-4 השכבות ב-§1 את כל 9 השדות הבאים — כולל שכבות שהשינוי "לא נוגע בהן". עבור `NONE` או `SINGLE-LAYER`, יש להשתמש בראיות הקצרות הנדרשות במדיניות המעודכנת.
 
 | שדה | מה נדרש |
 |---|---|
@@ -198,21 +191,16 @@ ActionContract.status / outcome_unknown / reply grounding / ניסוח-פונה-
 
 ---
 
-## 6. אכיפה
+## 6. Enforcement
 
-```
-STATUS = PLANNING BLOCKED
-```
+The revised planning gate is mandatory. A change is blocked only when a
+required assessment is missing, a FULL trigger has not received its reviewed
+matrix, or uncertainty has not been resolved through the FULL path or
+architecture review. A PR must declare exactly one classification:
+`NONE`, `SINGLE-LAYER`, or `FULL`, with the corresponding evidence.
 
-עד שה-Cross-Layer Impact Matrix (§2) הושלם במלואו (4 שכבות × 9 שדות, כולל proof-of-non-impact לכל שכבה שמסומנת "לא נוגע", **וגם** שדה ה-applicability של ה-RP5 Evidence Finalization guard, §1.5) — אין:
-- קוד runtime חדש הנוגע לאחת מ-4 השכבות,
-- PR מימוש שממזג שינוי לאחת מ-4 השכבות,
-- הצהרת "תוקן"/"✅ Fixed"/"מוכן לאכיפה" על עבודה שנוגעת לאחת מ-4 השכבות.
+## 7. Historical matrices
 
----
-
-## 7. איפה השער הזה חייב להיות מוזכר (מחייב)
-
-- `CLAUDE.md` — סעיף "Planning & docs conventions" — הפניה תמציתית (ראה עדכון מלווה).
-- `TURN_COORDINATOR_BEHAVIOR_CONTRACT_V1.md` — הפניה מפורשת בכותרת: אישור סופי של אותו מסמך חוזה **תלוי** ב-Cross-Layer Impact Matrix מלא (ראה עדכון מלווה).
-- **כל** מסמך Planning Gate עתידי שנוגע ב-reasoning, routing, tools/actions, approvals, או execution — חייב לפתוח בהפניה מפורשת למסמך הזה ולא להתקדם בלי Impact Matrix מלא, באותו אופן בדיוק כמו `TURN_COORDINATOR_BEHAVIOR_CONTRACT_V1.md`. זה כלל עומד (standing rule) — לא נדרש לעדכן את המסמך הזה שוב בכל פעם שנוצר Planning Gate חדש; זו אחריות המסמך **החדש** להפנות לכאן.
+Existing matrices remain valid evidence for the changes they describe. They do
+not create a retroactive requirement for unrelated changes and do not override
+the current revised planning policy.

@@ -1057,7 +1057,7 @@ cursor/phase-1-stability-5fb2
 
 ### C83 — BUG-IC-01B: prefixed ambiguous phrase routing (04/07/2026)
 קבצים: `core/router/intent_router.py`, `core/router/test_router.py` | PR #220 | באג: BUG-061
-`_AMBIGUOUS_PHRASES` מזהה כעת גם ביטויים דו-משמעיים עם prefix טבעי ("אני צריך למלא משימות", "צריך סטטוס" וכו') ולא רק גרסאות חשופות (BUG-048/BUG-IC-01) — מנתב ל-`Handler.CLARIFY` במקום Agent עם כלים מלאים. 44/44 בדיקות.
+`_AMBIGUOUS_PHRASES` מזהה כעת גם ביטויים דו-משמעיים עם prefix טבעי ("אני צריך למלא משימות", "צריך סטטוס" וכו') ולא רק גרסאות ~~~~~~ (BUG-048/BUG-IC-01) — מנתב ל-`Handler.CLARIFY` במקום Agent עם כלים מלאים. 44/44 בדיקות.
 **Merged:** כן (`b76e6d5`) | **Verified בפרודקשן:** לא עדיין
 
 ### C84 — BUG-SESSIONS-ROOT: fail-closed על Session lookup מובנה (04/07/2026)
@@ -2057,3 +2057,15 @@ Deploy gap closure and runtime verification for TC8/TC9/Track D/RP5.
 - RP5 enforcement/RP5 full (not just shadow) — blocked on sufficient production sample accumulation across B2/B3 classification states + owner authorization before enforcement implementation PR
 - PA-01 UPDATE/COMPLETE handler routing (router.py gap)
 - F52 PR1/PR4/PR5/PR6/Lane-A Cross-Layer Impact Matrix compliance (structural gap)
+
+
+### C190 — Canonical CORE Completion Audit (10/08/2026)
+The final CORE Completion Audit is canonicalized at
+`docs/audit/CORE_COMPLETION_AUDIT_20260810.md`, based on main
+`134148e42e1c15975858b58f5c22c3a512846129`.
+
+**Final verdict:** CORE COMPLETION AUDIT — PASS WITH NON-BLOCKING DEFERRED ITEMS;
+CORE v1 — COMPLETE; CORE v1 — READY TO FREEZE. Freeze remains an
+owner/governance decision. This entry supersedes earlier current-status
+snapshots where their deployment or PA-01/TC8/TC9/Track D wording predates the
+final audit; those entries remain historical evidence.

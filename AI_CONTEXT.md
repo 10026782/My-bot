@@ -1,5 +1,18 @@
 # AI CONTEXT
 
+## Canonical CORE status — 10/08/2026
+
+`CORE v1 — COMPLETE / READY TO FREEZE`
+
+Current source: `docs/audit/CORE_COMPLETION_AUDIT_20260810.md`.
+The four-layer verdict remains **PARTIAL / NON-BLOCKING** because formal Layer
+2 TurnCoordinator implementation is absent. TC8 reject/cancel evidence remains
+partial, TC7-B2 has zero observed shadow markers, TC7-B3/RP5 enforcement is
+deferred, and Context Librarian catalog debt remains current. PA-01 is merged,
+wired, deployed, and staging-runtime-verified. Dated sections below are
+historical snapshots and must not override the canonical audit.
+
+
 > קרא אותי לפני כל דבר אחר. זהו מסמך תדרוך תמציתי, לא תיעוד מלא.
 > למקורות הקנוניים ראו `ROADMAP.md`, `CHANGELOG.md`, `BUG_AUDIT_LOG.md`,
 > `CHANGE_CONTROL_LOG.md`, `docs/governance/BOSS_UNIFIED_MASTER_PLAN.md` §3.5
