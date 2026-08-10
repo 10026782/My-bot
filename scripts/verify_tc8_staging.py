@@ -353,7 +353,7 @@ def main() -> int:
         "(callback hardening, PR-0C callbacks, BUG-158 recovery, and the "
         "broader FULL_REGRESSION set) intentionally does not run from this "
         "script. Run it isolated instead: "
-        "python scripts/run_isolated_regression.py — see "
+        "python3 scripts/run_isolated_regression.py — see "
         "scripts/regression_matrix.py and this script's module docstring "
         "for why (BUG-122 staging contamination, TC10 handoff)."
     )

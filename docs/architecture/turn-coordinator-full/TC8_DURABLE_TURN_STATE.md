@@ -99,11 +99,16 @@ for the full audit, isolation strategy, and evidence.
 
 Callback hardening (39/39), PR-0C callbacks (8/8), and BUG-158 recovery
 (11/11) all pass isolated, reproduced twice with stable results in this
-session's local verification. 17/19 of the broader `FULL_REGRESSION` set
-passed in the same run; the remaining 2 were root-caused to a sandbox-local
-network restriction unrelated to TC8/TC9 code (see the harness doc §6.1) —
-not a defect in this contract.
+session's local verification, as does the full 21-file `FULL_REGRESSION`
+set (21/21, stable across 2 runs) — after this session found and fixed an
+over-broad credential override in its own runner that had regressed 2 of
+those files (see the harness doc §6.1 for the full account, including the
+real-CI-confirmed root cause). A fresh real-CI run against the corrected
+commit is the next confirmation step and had not landed as of this writing
+— this contract does not treat "isolated regression gate satisfied" as
+established until that lands, matching the local-vs-CI evidence distinction
+the harness doc itself requires.
 
 Revised classification:
 
-`TC8 — IMPLEMENTATION AND STAGING VERIFIED / ISOLATED REGRESSION GATE SATISFIED (TC10) / REAL-STAGING TC9 CANARY STILL PENDING`
+`TC8 — IMPLEMENTATION AND STAGING VERIFIED / ISOLATED REGRESSION HARNESS BUILT, LOCAL EVIDENCE 21/21 STABLE, CI CONFIRMATION PENDING / REAL-STAGING TC9 CANARY STILL PENDING`

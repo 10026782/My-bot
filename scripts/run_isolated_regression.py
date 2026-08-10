@@ -2,33 +2,59 @@
 """TC10 — isolated regression mode runner.
 
 Runs the Turn Coordinator / ActionGateway regression matrix
-(scripts/regression_matrix.py) with a forced, disposable environment that
-cannot reach real Airtable or real Telegram, regardless of what is already
-exported in the calling shell.
+(scripts/regression_matrix.py) with Airtable credentials forced to a
+disposable, non-functional value regardless of what is already exported in
+the calling shell.
 
 This is the fix for the exact contamination documented in
 docs/architecture/turn-coordinator-full/TC8_DURABLE_TURN_STATE.md's "TC10
 handoff": scripts/verify_tc8_staging.py used to run this same file list as
 subprocesses that inherited the *ambient* environment
-(``env = os.environ.copy()``). Individual test files only set fake
-Airtable/Telegram credentials via ``os.environ.setdefault(...)``, which is a
-no-op when the ambient shell already has real staging (or worse,
-production-shaped) secrets exported — as it typically does when someone is
-about to run a staging verification pass. Real credentials meant "propose
-boundary" checks and owner-notify calls in these tests could reach real
-Airtable/Telegram, using the small set of fixed identity strings baked into
-each test file, so a second run collided with the first run's leftover
-ActionContracts (BUG-122 proposal_boundary_blocked).
+(``env = os.environ.copy()``). Individual test files only set fake Airtable
+credentials via ``os.environ.setdefault(...)``, which is a no-op when the
+ambient shell already has real staging (or worse, production-shaped)
+secrets exported — as it typically does when someone is about to run a
+staging verification pass. Real credentials meant "propose boundary" checks
+in these tests could reach real Airtable, using the small set of fixed
+identity strings baked into each test file, so a second run collided with
+the first run's leftover ActionContracts (BUG-122
+proposal_boundary_blocked).
 
-This runner closes that gap by constructing the subprocess environment from
-scratch (``_ISOLATED_ENV`` below), overriding — never merely defaulting —
-every credential-shaped variable. No test in this matrix can reach a real
-external system no matter what the caller's shell holds.
+This runner closes that gap by hard-overriding — never merely defaulting —
+``AIRTABLE_API_KEY``/``AIRTABLE_BASE_ID`` for every subprocess. No test in
+this matrix can reach real Airtable no matter what the caller's shell
+holds; that credential is the one this repo's own CI convention
+(``.github/workflows/ci.yml``) already treats as unsafe to hold real values
+in a unit-test job, for the same BUG-122-shaped reason.
+
+TELEGRAM_TOKEN / ELIYAHU_CHAT_ID / ANTHROPIC_API_KEY are deliberately left
+untouched — this runner passes through whatever the calling environment
+already provides for them, exactly like CI's pre-existing "Run test_*.py
+scripts" step does (which sources them from ``secrets.TELEGRAM_TOKEN``/
+``secrets.ANTHROPIC_API_KEY``). This was learned the hard way: an earlier
+version of this script also force-overrode ``TELEGRAM_TOKEN``/
+``ELIYAHU_CHAT_ID`` to fake values as a defense-in-depth measure, on the
+theory that no test should be able to reach real Telegram. That broke
+test_tc6_app_reply_ownership.py and test_pa01_phantom_approval_enforcement.py
+(52/52 -> 44/52 and similar), which have several scenarios that
+deliberately exercise the real (unmocked) owner-notify call and assert on
+it *succeeding* — confirmed by comparing this PR's own CI run of both the
+pre-existing step (52/52, real secrets.TELEGRAM_TOKEN) and this script
+(44/52, forced-fake token) on the same commit. Overriding Telegram
+credentials here would silently change what these tests exercise, which is
+exactly the kind of "weakening a suite to get to green" this harness is
+required not to do — so the safer fix is to match the trust boundary this
+repository's CI already accepts for Telegram/Anthropic (dedicated,
+repo-scoped secrets, not "whatever happens to be in the shell"), and keep
+the hard override narrowly scoped to the one credential with a proven
+contamination mechanism (Airtable). If you run this locally, do not export
+real production Telegram credentials into that shell first — the same
+caution that already applies to running any of these test files directly.
 
 Usage:
-    python scripts/run_isolated_regression.py
-    python scripts/run_isolated_regression.py --repeat 2
-    python scripts/run_isolated_regression.py --evidence-path out.json
+    python3 scripts/run_isolated_regression.py
+    python3 scripts/run_isolated_regression.py --repeat 2
+    python3 scripts/run_isolated_regression.py --evidence-path out.json
 """
 
 from __future__ import annotations
@@ -51,19 +77,14 @@ from scripts.regression_matrix import (  # noqa: E402
     REGRESSION_GROUPS,
 )
 
-# Hard overrides — these values win regardless of the ambient shell
-# environment. This is the isolation guarantee: this runner is safe to
-# invoke even from a shell that has real staging or production secrets
-# exported for an unrelated task.
+# Hard override — wins regardless of the ambient shell environment. This is
+# the isolation guarantee for the one credential with a proven cross-run
+# contamination mechanism (BUG-122, see module docstring). TELEGRAM_TOKEN /
+# ELIYAHU_CHAT_ID / ANTHROPIC_API_KEY are intentionally NOT here — see the
+# module docstring for why forcing those broke real test assertions.
 _ISOLATED_ENV_OVERRIDES: dict[str, str] = {
     "AIRTABLE_API_KEY": "fake-isolated-regression-key-not-real",
     "AIRTABLE_BASE_ID": "appISOLATEDREGRESSI0N",
-    "TELEGRAM_TOKEN": "123456789:ISOLATEDregressionNOTrealTOKEN00",
-    "ELIYAHU_CHAT_ID": "999999999",
-    "ANTHROPIC_API_KEY": "sk-ant-isolated-regression-not-real",
-    "RENDER_APP_URL": "https://isolated-regression.invalid",
-    "SETUP_WEBHOOK": "0",
-    "GOOGLE_REFRESH_TOKEN": "",
     "TC10_ISOLATED_REGRESSION": "1",
 }
 
@@ -149,10 +170,13 @@ def main() -> int:
     parser.add_argument("--evidence-path", type=Path)
     args = parser.parse_args()
 
+    if args.repeat < 1:
+        parser.error("--repeat must be >= 1 (0 or negative would run nothing and report a false PASS)")
+
     print("TC10 ISOLATED REGRESSION MATRIX\n")
-    print("Isolation: AIRTABLE_API_KEY/AIRTABLE_BASE_ID/TELEGRAM_TOKEN/ANTHROPIC_API_KEY")
-    print("forced to disposable fake values for every subprocess — ambient shell")
-    print("credentials (including real staging/production secrets) are never used.\n")
+    print("Isolation: AIRTABLE_API_KEY/AIRTABLE_BASE_ID forced to disposable fake")
+    print("values for every subprocess, regardless of ambient shell credentials —")
+    print("this is the proven BUG-122 contamination fix (see module docstring).\n")
 
     runs = []
     all_ok = True
@@ -163,12 +187,20 @@ def main() -> int:
         runs.append(evidence)
         all_ok = all_ok and ok
 
+    def _outcomes(evidence: dict) -> dict[str, str]:
+        outcomes = {label: item["status"] for label, item in evidence["groups"].items()}
+        outcomes.update(
+            (filename, item["status"]) for filename, item in evidence["full_regression"].items()
+        )
+        return outcomes
+
     stable = True
     if len(runs) > 1:
-        baseline = runs[0]["full_regression_tally"]
-        stable = all(r["full_regression_tally"] == baseline for r in runs)
-        print(f"\nRepeated-run stability ({len(runs)} runs): {'STABLE' if stable else 'UNSTABLE'} — tallies: "
-              f"{[r['full_regression_tally'] for r in runs]}")
+        baseline = _outcomes(runs[0])
+        stable = all(_outcomes(r) == baseline for r in runs[1:])
+        tallies = [r["full_regression_tally"] for r in runs]
+        print(f"\nRepeated-run stability ({len(runs)} runs): {'STABLE' if stable else 'UNSTABLE'} — "
+              f"per-file outcomes {'identical' if stable else 'DIFFERED'} across runs, tallies: {tallies}")
 
     result = {
         "runs": runs,

@@ -40,6 +40,8 @@ FULL_REGRESSION: list[str] = [
     "test_bug056_legacy_cancel_replay_guard.py",
     "test_pa01_phantom_approval_enforcement.py",
     "test_pr1_single_speaker_approval_ux.py",
+    "test_tc8_runtime_integration.py",
+    "test_turn_state_repository.py",
 ]
 
 # Run under `python -m pytest -q <file>` instead of `python <file>` — these

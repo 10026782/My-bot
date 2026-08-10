@@ -40,8 +40,14 @@ _NAMESPACE_PREFIX = "tc10verify"
 
 
 def new_run_namespace() -> str:
-    """A fresh, sortable, collision-resistant identifier for one verification run."""
-    return f"{_NAMESPACE_PREFIX}-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{uuid.uuid4().hex[:8]}"
+    """A fresh, sortable, collision-resistant identifier for one verification run.
+
+    Uses the full UUID4 (not a truncated prefix) — a cleanup call scoped to
+    the wrong namespace due to a collision would delete another run's
+    ActionContracts, so this namespace keeps the UUID's complete entropy
+    rather than trading it away for a shorter string.
+    """
+    return f"{_NAMESPACE_PREFIX}-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{uuid.uuid4().hex}"
 
 
 def unique_identity(

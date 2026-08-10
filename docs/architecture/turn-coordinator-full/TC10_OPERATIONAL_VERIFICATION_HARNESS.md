@@ -157,35 +157,76 @@ Named regression gates
   PR-0C callbacks          PASS — 8 passed, 0 failed
   BUG-158 recovery         PASS — 11 passed, 0 failed
 
-Full isolated regression matrix: 17/19 passed (both runs — stable)
-  FAIL: test_tc6_app_reply_ownership.py (44 passed, 8 failed)
-  FAIL: test_pa01_phantom_approval_enforcement.py
+Full isolated regression matrix: 21/21 passed (both runs — stable)
 ```
 
 Repeated-run stability: **STABLE** — both runs produced the identical
-17/19 tally and the identical two failing files.
+21/21 tally.
 
-**The two failures are a local-sandbox network artifact, not a code
-defect**, root-caused during this session: this execution environment
-routes all outbound HTTPS through a proxy that returns `403 Forbidden` /
-`ProxyError` for any connection attempt to `api.telegram.org` (not
-whitelisted here). `test_tc6_app_reply_ownership.py` and
-`test_pa01_phantom_approval_enforcement.py` are the two files in the matrix
-that deliberately do not mock `app.bot` around certain seed/setup calls —
-by design, to exercise the real owner-notify path — so in this sandbox that
-real call fails at the TCP/proxy level (a connection exception), which
-`app.py`'s own fail-safe correctly treats as `owner_notify_failed` and
-revokes the just-created contract, which then makes the test's own
-downstream assertions about that contract fail. A real CI runner (GitHub
-Actions hosted) has open internet access to `api.telegram.org`; a fake
-token there gets a real (fast) API rejection, not a connection-level
-failure, which is the scenario these tests were written against — and this
-exact file list is already unconditionally run by the pre-existing "Run
-test_*.py scripts" CI step on `main` today, so if this were a real defect
-`main`'s own required CI would already be red. **This is recorded as a
-finding for anyone reproducing this session in a similarly egress-restricted
-sandbox, not as a TC10 regression finding.** §8 records the real-CI
-confirmation once this branch's CI has run.
+**Correction, recorded rather than silently overwritten:** the first
+version of this runner pushed to this branch's PR reported a stable
+`17/19`, with `test_tc6_app_reply_ownership.py` and
+`test_pa01_phantom_approval_enforcement.py` failing every time — both
+locally and, once pushed, in this PR's own real GitHub Actions CI run. This
+document's first draft attributed that to a local-sandbox network
+restriction ("`api.telegram.org` blocked by this sandbox's proxy") and
+predicted real CI would be green. **That prediction was checked against
+this PR's actual CI run and was wrong.** Real CI failed identically
+(`test_tc6_app_reply_ownership.py`: 44/52, same reason,
+`owner_notify_failed`), which disproved the sandbox-artifact theory and
+pointed at the runner itself.
+
+Root cause: the first version of `_ISOLATED_ENV_OVERRIDES` force-overrode
+`TELEGRAM_TOKEN` and `ELIYAHU_CHAT_ID` to fake values, on a defense-in-depth
+theory (no test in an "isolated" matrix should be able to reach real
+Telegram). `test_tc6_app_reply_ownership.py` and
+`test_pa01_phantom_approval_enforcement.py` have scenarios that deliberately
+leave `app.bot` unmocked around certain seed calls, by design, to exercise
+the real owner-notify path and assert it *succeeds* (the contract must stay
+`pending`, not get revoked by the `owner_notify_failed` fail-safe). Forcing
+those two variables made every one of those calls fail — comparing this
+PR's own CI run of the pre-existing "Run test_*.py scripts" step (which
+uses real `secrets.TELEGRAM_TOKEN` and gets 52/52 on that file) against this
+runner's step on the identical commit (44/52, forced-fake token) confirmed
+it precisely.
+
+Fix: `TELEGRAM_TOKEN`/`ELIYAHU_CHAT_ID`/`ANTHROPIC_API_KEY` are no longer
+overridden at all — they pass through from the ambient environment exactly
+like the pre-existing CI step already does. The hard override stays scoped
+to `AIRTABLE_API_KEY`/`AIRTABLE_BASE_ID` only — the one credential with a
+*proven* cross-run contamination mechanism (§3); Telegram never had one.
+With ambient `TELEGRAM_TOKEN`/`ELIYAHU_CHAT_ID` unset (this sandbox has
+neither), `app.py`'s own notify path has nothing to send to and no longer
+attempts a network call at all, so both files now pass locally too — the
+21/21 reported above. Real CI (real `secrets.TELEGRAM_TOKEN`) reaches the
+same passing outcome by a different, equally legitimate path (the call
+actually succeeds). Overriding Telegram credentials here would have
+silently narrowed what these tests exercise — exactly the "weaken a suite
+to reach green" failure mode this harness is required not to introduce; the
+correct fix was recognizing the override was wrong, not adjusting the tests.
+
+A second-pass code review (CodeRabbit, on this PR) additionally found and
+this session fixed: `test_tc8_runtime_integration.py` and
+`test_turn_state_repository.py` were listed in
+`scripts/regression_matrix.py`'s `PYTEST_MODE_FILES` but never actually in
+`FULL_REGRESSION`, making them dead/unreachable entries (now added — both
+pass, 9/9 combined); `--repeat 0` would have silently reported `PASS` having
+run nothing (now rejected); repeated-run stability compared only the
+aggregate tally, so two runs with different failing files but the same
+count would have reported `STABLE` (now compares the full per-file outcome
+set); `scripts/staging_identity.py`'s run namespace kept only 32 bits of the
+run UUID (now the full value); `scripts/verify_tc9_staging.py` dispatched
+the tool a second time after `gw.approve()` already executes it internally
+— a real duplicate write against staging Airtable on every run (removed —
+the executed/failed checks now derive their `ActionFact` from the contract's
+real post-`approve()` status instead); its `_failed_check()` counted a
+structural proposal-boundary rejection as if it had verified
+`MessageState.FAILURE`, which it hadn't (now recorded as a distinct,
+honestly-labeled `INCONCLUSIVE` outcome unless a real failure lifecycle is
+reached); and its `_preflight()` trusted a caller-set boolean alone (now
+also requires `AIRTABLE_BASE_ID`/`DATABASE_URL` to name-match
+staging/sandbox/test/dev, matching `verify_tc8_staging.py`'s existing
+heuristic).
 
 `test_phase_4b0_1a_atomic_claims.py` required the same
 `NO_DATABASE_URL_FILES` handling CI already special-cases (it asserts the
@@ -216,13 +257,17 @@ expected network/auth failures once real Airtable is actually needed):
   regression-matrix removal (`python -m py_compile` + structural review;
   its PG-only checks are unchanged from the version TC8 already closed
   staging verification with).
-- `scripts/verify_tc9_staging.py`'s pending/turn_id checks ran to
-  completion against a real (local, disposable) `ActionGateway` singleton
-  and real `compose_status_reply()` — both `PASS`ed structurally. The
-  executed/failed checks reached real `approve()` -> real
-  `tools.dispatcher.dispatch_tool()` -> real Airtable-field-normalization
-  code before failing on the fake base's absent schema, which is the
-  expected boundary for a sandbox with no real Airtable base to write to.
+- `scripts/verify_tc9_staging.py` ran end-to-end against a real (local,
+  disposable) `ActionGateway` singleton, real `compose_status_reply()`, and
+  a real local PostgreSQL — pending, turn_id, executed, and failed checks
+  all completed. Against the fake local Airtable base, `gw.approve()`'s
+  internal execution (the *only* dispatch call this script makes — it does
+  not call the dispatcher a second time, see §6.1) correctly landed in
+  `contract.status == "failed"` both times it ran (once via the intended
+  "Executed" scenario, once via the intended "Failed" scenario), and the
+  script correctly asserted `MessageState.FAILURE` for both rather than
+  fabricating a success — real staging Airtable is needed to also observe
+  the true-success branch, which this sandbox cannot provide.
 
 **A human (or a session holding real staging secrets) must run**
 `TC9_STAGING_NON_PRODUCTION=true python scripts/verify_tc9_staging.py` and
@@ -241,7 +286,7 @@ does not claim otherwise.
 | outcome_unknown | **not attempted against staging** — no safe, deterministic way to force it without fabricating evidence or destabilizing staging (explicitly disallowed by this task) | `test_tc9_messagecontract_runtime_wiring.py` (isolated unit evidence only — accepted, stated limitation) |
 | turn_id propagated when real | `scripts/verify_tc9_staging.py` — asserts a real-shaped id passed through `compose_status_reply()` is returned unmodified | isolated-integration (done) / staging (pending) |
 | turn_id never fabricated when absent | same check, asserts `None` stays `None` | isolated-integration (done) / staging (pending) |
-| exactly one final response | existing coverage: `test_turn_envelope.py`, TC6/PA-01 ownership tests already assert single-final-response invariants at the `app.py` integration boundary; `scripts/verify_tc9_staging.py` mocks `app.bot` and would show a call-count mismatch as a hard failure if this ever regressed | isolated-integration |
+| exactly one final response | existing coverage only: `test_turn_envelope.py`, TC6/PA-01 ownership tests already assert single-final-response invariants at the `app.py` integration boundary. `scripts/verify_tc9_staging.py` calls `core.action_gateway.action_gateway` directly and never reaches `app.py`'s callback/text handlers or `app.bot`, so it has nothing meaningful to assert a call count on — it does not add coverage here, and its module docstring says so explicitly rather than implying otherwise | isolated-integration |
 
 ## 7. Documentation updates
 
@@ -264,6 +309,18 @@ ActionGateway/TC9 semantics). No ActionGateway, TC7 evidence authority,
 TC8 persistence, TC9 schema, F14, router, or approval-policy code was
 touched by this change.
 
+TC10's own first draft introduced (and then corrected within the same PR,
+before merge) a self-inflicted regression in the isolated runner itself
+(§6.1: forcing `TELEGRAM_TOKEN`/`ELIYAHU_CHAT_ID` broke two real,
+previously-passing tests). That is recorded here rather than smoothed over,
+per the same evidence-honesty standard this harness holds everything else
+to — a claim of "isolated regression gate satisfied" was made in this
+document's first draft against a run that was, in fact, 17/19, and that
+claim was wrong. It is corrected in §6.1 and this verdict now reflects only
+what has actually been reproduced (locally, stably, 21/21) and what is
+still pending independent confirmation (a fresh real-CI run on the
+corrected commit).
+
 ## 9. Confirmation — no runtime contract weakened
 
 - No file under `core/action_gateway.py`, `core/message_contract.py`,
@@ -282,13 +339,16 @@ touched by this change.
 
 Isolated regression mode is built, wired into CI, and has produced real,
 repeated, stable local evidence for the required named gates (39/39, 8/8,
-11/11) and 17/19 of the full matrix, with the remaining 2 diagnosed as a
-sandbox-local network artifact pending confirmation against this branch's
-real CI run (§6.1). The TC8 handoff's specific contamination bug is fixed
-at its root cause. The TC9 staging runtime canary is written, API-correct,
-and structurally validated end-to-end against a local stand-in, but has not
-been run against real staging — that remains an explicit, stated pending
-item, not a silent gap.
+11/11) and the full 21/21 matrix (§6.1) — after finding, and correcting
+within this same PR, an over-broad credential override that had regressed
+2 files, confirmed against this PR's own real GitHub Actions run. A fresh
+CI run on the corrected commit is the next confirmation step and is not yet
+in hand as of this writing. The TC8 handoff's specific contamination bug is
+fixed at its root cause. The TC9 staging runtime canary is written,
+API-correct, and structurally validated end-to-end (including its
+duplicate-dispatch and false-pass fixes, §6.1) against a local stand-in, but
+has not been run against real staging — that remains an explicit, stated
+pending item, not a silent gap.
 
 **CORE OPERATIONAL VERIFICATION GATE — NOT YET READY** (blocked only on the
 real-staging run of `scripts/verify_tc9_staging.py` and
