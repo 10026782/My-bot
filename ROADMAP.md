@@ -1,6 +1,34 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
-עודכן: 09/08/2026 — **תיעוד PR #562–#570 (8 substantive PRs) + BUG-105 verification:**
+עודכן: 10/08/2026 — **תיעוד PR #572–#588 (17 מספרי PR ברצף, כולל #576 שהוחלף
+ע"י #579 באותו branch — לא deliverable נפרד; פער-תיעוד, נסגר ישירות מ-`git log
+origin/main`, לא הועלה כ-PR נפרד ע"י מי שביצע אותם):** אומת ישירות ב-`git log`/
+`git show --stat`/grep על `origin/main` (`cec3f83`), לא לפי claim. תמצית (לפירוט
+מלא ומאומת-קוד ראו `CHANGELOG.md` ו-`AI_CONTEXT.md`, 10/08/2026): **TC7-B1/B1.1**
+(#583/#587) — מוסיף `core/claim_authorization.py`, **grep מאשר אפס קוראים** מחוץ
+למודול/לטסט שלו; למרות השם "TC7-B", **אינו** מחבר בפועל את TC7-A ל-RP4 לכדי החלטת
+claim-authorization חיה — עדיין unwired. **TC7/RP5 execution-shadow** (#579,
+מחליף #576) — מחבר את TC7-A ל-RP4 בפועל תחת `FEATURE_EVIDENCE_FINALIZER` (כבוי
+כברירת מחדל), אך זו RP4 shadow logging, לא claim-authorization. **TC8** (#585) —
+`core/turn_state_repository.py` חדש, **ללא flag, חי ומחווט בפועל** בארבע נקודות
+callback/text ב-`app.py` (approve/reject/cancel), fail-closed בכשל; "staging
+verified" הוא טענה בתיעוד בלבד, לא artifact מאומת. **TC9** (#588) — `ActionFact`/
+`GatewayReply` מקבלים שדות MessageContract, בנייה חיה תמיד, אך המרת-הטקסט בפועל
+עדיין מאחורי `FEATURE_UNIFIED_STATUS_FORMATTER` כבוי. **TC7-A** (#573) — סגירת
+review, unit-tested, shadow-only. **F14-B2** (#577, לא #572 שהיה docs-only) —
+שני קוראים חדשים ל-`find_or_create_contact()` (`dispatcher.py` ה-`airtable_add`
+path, `approval_actions.py`'s `tma_write`), אך **עדיין אין gate מרכזי ב-
+`ActionGateway`/dispatcher** — נקודות-יירוט קשיחות נוספות, לא ריכוזי. **Track A**
+(#581/#582) — קנוניזציה צרה של "מחר" בכותרת משימה ל-due-date, ללא flag, חי; #582
+מספק ראיית staging ומכריז "COMPLETE". **Track D** (#580) — logging חדש ואמיתי
+ל-RuntimeSchemaProvider/IngressEnvelope (סוגר "OBSERVABILITY DEBT" שתועד ב-
+`BOSS_UNIFIED_MASTER_PLAN.md` §3.5), אך **לא** אומת עדיין מול deploy/Render חי.
+שאר הפרים (#572/#574/#575/#578, docs; #584/#586, CI/test hardening) ללא שינוי
+runtime. **חשוב:** `docs/governance/BOSS_UNIFIED_MASTER_PLAN.md` §3.5.1 (Program
+Map) **עודכן באותו סבב** (10/08/2026) לשורות A/F/H/I/J מול הממצאים לעיל — אך
+§3.5.2 (target chain diagram) ו-§3.5 (Runtime Capability Status snapshot) שם
+**נשארו מתוארכים 09/08/2026 ולא נסקרו מחדש בסבב הזה** — לא לצטט אותם כעדכניים.
+עודכן קודם: 09/08/2026 — **תיעוד PR #562–#570 (8 substantive PRs) + BUG-105 verification:**
 **Substantive PRs merged 08/08–09/08/2026:** TC5 entity resolver (PR #562, 08/08/2026), TC4 lead builders (PR #564, 08/08/2026), TC4 task-integration hardening (PR #565, 08/08/2026), TC6 WS2 reply-ownership (PR #566, 08/08/2026), Emergency Stop backing hardening (PR #567, 08/08/2026), F14-A1 contact gate (PR #568, 09/08/2026), TC6 integrator app.py cutover (PR #569, 09/08/2026 — ראו TC6_APP_INTEGRATOR_PATCH_SPEC.md §0 Cross-Layer Impact Matrix), F14-B1 legacy caller migration (PR #570, 09/08/2026). כל שמונה PRs מוזגו בפועל ואומתו ב-`git log origin/main` / `git merge-base --is-ancestor`.
 **BUG-105 verification (docs-only):** אומת מחדש מול `origin/main` (`38d9226`), כבר מכוסה ב-code — אין שינוי קוד פתוח. BUG-105: regex לפני/אחרי זהה; 204 suites + 11 בדיקות מטריצת פורמטים עברו. **F14 Discovery/Planning** הוא תיעוד היסטורי של מפת נתיבי הכתיבה: שני נתיבי Contact creation בפועל (`crm_add_contact` legacy, `airtable_add` generic), ללא dedup; import scripts ו-`session_store.py`/`contact_resolver.py` אינם gates. **מאז:** F14-A מוזג (#568), F14-B1 מעביר `crm_add_contact()` ו-`convert_lead_to_contact()` דרך אותו gate; F14-B2 עדיין לא התחיל. **TC, Emergency Stop, F14 phases A-B1 status:** TC6 (PR #566/#569) מחליף בפועל את ה-approval reply-ownership projection תחת `FEATURE_SINGLE_SPEAKER_APPROVAL_UX` — ברירת המחדל בקוד נשארת `false`, אך ב-runtime הפרוס בפועל הדגל `true` (אומת מול Render dashboard + לוגי production חיים + תמלול Telegram, 09/08/2026 — ראו `docs/architecture/turn-coordinator-full/TC6_APP_INTEGRATOR_PATCH_SPEC.md` §Status ו-N17 item 4 למטה לתחולה המדויקת); אכיפת TC6 reply-ownership פעילה כעת בפרודקשן. שאר 7 ה-PRs לא שינו behavior חי בעת המיזוג; F14/TC4/TC5/Emergency-Stop נשארים structural/foundational, live אך enforcement/integration נדחה.
 עודכן קודם: 07/08/2026 — **תיעוד PR #525–#552 (פער-תיעוד, נסגר ישירות מ-`git log origin/main`,
