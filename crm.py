@@ -12,7 +12,7 @@ from datetime import datetime, date, timedelta
 
 from airtable_schema import (
     Tables,
-    ContactFields, ContactType, ContactStatus,
+    ContactFields, ContactType, ContactRoleCategory, ContactStatus,
     DealFields, DealStage, DealStatus, RiskLevel,
     PaymentFields, PaymentStatus,
     validate_funding_cost,
@@ -179,8 +179,15 @@ def find_or_create_contact(phone, name, *, email="", company="",
         fields[ContactFields.EMAIL] = email
     if company:
         fields[ContactFields.COMPANY] = company
-    if contact_type:
-        fields[ContactFields.ROLE_CATEGORY] = contact_type
+    contact_role = {
+        ContactType.CLIENT: ContactRoleCategory.CLIENT,
+        ContactType.SUPPLIER: ContactRoleCategory.SUPPLIER,
+        ContactType.PARTNER: ContactRoleCategory.PARTNER,
+        ContactType.LAWYER: ContactRoleCategory.EXPERT,
+        ContactType.ACCOUNTANT: ContactRoleCategory.EXPERT,
+    }.get(contact_type, contact_type)
+    if contact_role:
+        fields[ContactFields.ROLE_CATEGORY] = contact_role
     if lead_source_id:
         fields[ContactFields.ORIGIN_LEAD] = [lead_source_id]
     try:
