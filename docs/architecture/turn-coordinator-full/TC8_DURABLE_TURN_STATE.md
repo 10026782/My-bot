@@ -110,6 +110,18 @@ The isolated regression gate is satisfied with CI evidence, not merely
 local evidence — matching the evidence-classification discipline the
 harness doc itself requires.
 
-Revised classification:
+The real-staging TC9 canary this section's TC10 handoff also called for ran
+on 2026-08-10 against the actual deployed staging environment (Render
+shell, `agent/f15-crm-write-migration` rebased onto `main`) —
+`scripts/verify_tc8_staging.py` itself (`FINAL: TC8: DONE`, deploy SHA
+matched, all PostgreSQL checks pass) and `scripts/verify_tc9_staging.py`
+(`FINAL: TC9 STAGING CANARY: DONE` — pending/turn_id/a real successful
+execution/failed/cleanup all confirmed against real staging Airtable and
+PostgreSQL) both ran clean. See harness doc §6.3 for the full evidence,
+including the one honest caveat it records (Airtable base-id non-production
+status rests on operator confirmation, not an independently-verifiable
+naming check, since Airtable base ids are opaque).
 
-`TC8 — IMPLEMENTATION AND STAGING VERIFIED / ISOLATED REGRESSION GATE SATISFIED AND CI-CONFIRMED (TC10) / REAL-STAGING TC9 CANARY STILL PENDING`
+Final classification:
+
+`TC8 — IMPLEMENTATION AND STAGING VERIFIED / ISOLATED REGRESSION GATE SATISFIED AND CI-CONFIRMED (TC10) / REAL-STAGING TC9 CANARY CONFIRMED (TC10, 2026-08-10)`
