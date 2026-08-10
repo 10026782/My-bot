@@ -299,7 +299,7 @@ def main() -> int:
                     f"rejected before a contract existed, FAILURE MessageState not exercised: {propose2.reason}"
                 )
                 return
-            ok, real_status, approve_msg, fact = _approve_and_derive_fact(
+            ok, real_status, _approve_msg, fact = _approve_and_derive_fact(
                 propose2.contract_id, approver_role=owner.role,
             )
             reply = gw.compose_status_reply(fact)
@@ -348,8 +348,14 @@ def main() -> int:
                 evidence["cleanup"] = {"status": "PASS", "detail": f"deleted={deleted}"}
                 print(f"{'Cleanup':<40} PASS — deleted={deleted} record(s) for run_id={run_id}")
             except Exception as exc:
+                failed = True
                 evidence["cleanup"] = {"status": "FAIL", "detail": f"{type(exc).__name__}: {exc}"}
                 print(f"{'Cleanup':<40} FAIL — {type(exc).__name__}: {exc}")
+                print(
+                    "  -> cleanup failure means canary-created records may "
+                    f"still exist in staging under run_id={run_id} — this "
+                    "must not be silently reported as a passing run"
+                )
 
     if args.evidence_path:
         args.evidence_path.write_text(json.dumps(evidence, indent=2, ensure_ascii=False), encoding="utf-8")

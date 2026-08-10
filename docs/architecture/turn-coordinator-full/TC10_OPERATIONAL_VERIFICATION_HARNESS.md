@@ -198,12 +198,17 @@ to `AIRTABLE_API_KEY`/`AIRTABLE_BASE_ID` only — the one credential with a
 With ambient `TELEGRAM_TOKEN`/`ELIYAHU_CHAT_ID` unset (this sandbox has
 neither), `app.py`'s own notify path has nothing to send to and no longer
 attempts a network call at all, so both files now pass locally too — the
-21/21 reported above. Real CI (real `secrets.TELEGRAM_TOKEN`) reaches the
-same passing outcome by a different, equally legitimate path (the call
-actually succeeds). Overriding Telegram credentials here would have
-silently narrowed what these tests exercise — exactly the "weaken a suite
-to reach green" failure mode this harness is required not to introduce; the
-correct fix was recognizing the override was wrong, not adjusting the tests.
+21/21 reported above, this session's own local evidence, reproduced on this
+corrected commit. Real CI (real `secrets.TELEGRAM_TOKEN`) is *expected* to
+reach the same passing outcome by a different, equally legitimate path (the
+call actually succeeding rather than never being attempted) — that is a
+prediction from reading the code path, not yet a confirmed CI result; §10
+states plainly that a fresh CI run on this corrected commit had not landed
+as of this writing, and this section should not be read as claiming
+otherwise. Overriding Telegram credentials here would have silently
+narrowed what these tests exercise — exactly the "weaken a suite to reach
+green" failure mode this harness is required not to introduce; the correct
+fix was recognizing the override was wrong, not adjusting the tests.
 
 A second-pass code review (CodeRabbit, on this PR) additionally found and
 this session fixed: `test_tc8_runtime_integration.py` and
