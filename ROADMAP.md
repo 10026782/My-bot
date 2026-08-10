@@ -1,5 +1,15 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
+עודכן: 10/08/2026 — **TC10 COMPLETE AND VERIFIED**: real-staging run
+(`scripts/verify_tc8_staging.py` + `scripts/verify_tc9_staging.py`, Render
+staging shell) confirmed `FINAL: DONE` on both — pending/turn_id/real
+successful execution/failed/clean-cleanup all verified against real
+staging Airtable+PostgreSQL. One more self-caught bug fixed along the way
+(PR #592 — an Airtable-base-id name check that could never pass for any
+real base). `CORE OPERATIONAL VERIFICATION GATE — READY`. See
+`docs/architecture/turn-coordinator-full/TC10_OPERATIONAL_VERIFICATION_HARNESS.md`
+§6.3/§10.
+
 עודכן: 10/08/2026 — **TC10 operational verification harness (implementation
 complete, staging verification pending)**: `scripts/run_isolated_regression.py`
 + `scripts/regression_matrix.py` + `scripts/staging_identity.py` (new

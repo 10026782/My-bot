@@ -269,46 +269,71 @@ previously listed as outstanding. §10's verdict is updated accordingly.
 
 ### 6.3 Staging runtime evidence
 
-Not produced by this session — this sandbox has no real staging
-`DATABASE_URL`/`AIRTABLE_API_KEY`/`AIRTABLE_BASE_ID`/`TELEGRAM_TOKEN`, and
-none should ever be placed in an unattended agent session. What this
-session did verify, dry-run, against a local Postgres + deliberately-fake
-Airtable base (confirming no `AttributeError`/API-mismatch — only the
-expected network/auth failures once real Airtable is actually needed):
+**Confirmed real staging evidence (2026-08-10)** — run by the operator from
+the deployed Render staging shell (`~/project/src`, deploy SHA
+`f8686a58` = `agent/f15-crm-write-migration` rebased onto `main`),
+`DATABASE_URL`/`AIRTABLE_API_KEY`/`AIRTABLE_BASE_ID`/`TELEGRAM_TOKEN` real,
+pasted output relayed back to this session (no secrets in the pasted
+output — the scripts never print them, per design):
 
-- `scripts/verify_tc8_staging.py` still imports and runs cleanly after the
-  regression-matrix removal (`python -m py_compile` + structural review;
-  its PG-only checks are unchanged from the version TC8 already closed
-  staging verification with).
-- `scripts/verify_tc9_staging.py` ran end-to-end against a real (local,
-  disposable) `ActionGateway` singleton, real `compose_status_reply()`, and
-  a real local PostgreSQL — pending, turn_id, executed, and failed checks
-  all completed. Against the fake local Airtable base, `gw.approve()`'s
-  internal execution (the *only* dispatch call this script makes — it does
-  not call the dispatcher a second time, see §6.1) correctly landed in
-  `contract.status == "failed"` both times it ran (once via the intended
-  "Executed" scenario, once via the intended "Failed" scenario), and the
-  script correctly asserted `MessageState.FAILURE` for both rather than
-  fabricating a success — real staging Airtable is needed to also observe
-  the true-success branch, which this sandbox cannot provide.
+`TC8_NON_PRODUCTION=true python3 scripts/verify_tc8_staging.py`:
+`FINAL: TC8: DONE` — Deploy SHA matched, `database=my_bot_atomic_claims_staging`
+(a genuinely dedicated non-production PostgreSQL — this is independently
+verifiable from the connection string itself, not just the operator's
+say-so), migration/schema/persistence/CAS-race/tenant-isolation/replay/
+terminal/authority checks all `PASS`.
 
-**A human (or a session holding real staging secrets) must run**
-`TC9_STAGING_NON_PRODUCTION=true python scripts/verify_tc9_staging.py` and
-`TC8_NON_PRODUCTION=true python scripts/verify_tc8_staging.py` against real
-staging and attach the resulting evidence JSON. Until that happens, TC9's
-runtime-wiring closure gate is **PENDING**, not verified — this document
-does not claim otherwise.
+`TC9_STAGING_NON_PRODUCTION=true python3 scripts/verify_tc9_staging.py`
+(run_id `tc10verify-20260810T141048Z-c450d8e8…`): `FINAL: TC9 STAGING
+CANARY: DONE` —
+
+- Pending: `PASS`, `MessageState.APPROVAL_PENDING`.
+- turn_id: `PASS`, propagated when real, never fabricated when absent.
+- Executed: `PASS`, real success this time (unlike the earlier dry run) —
+  `ok=True real_status=completed state=MessageState.SUCCESS`, a genuine
+  Airtable `Tasks` record was created (`recxu9l3SwAzmqjkA`) and the
+  `MessageContract`'s evidence_ref reflected it.
+- Failed: `PASS`, `real_status=failed state=MessageState.FAILURE` via the
+  deliberately-invalid-table path — no false success.
+- outcome_unknown: `DEFERRED` as designed, pointing at
+  `test_tc9_messagecontract_runtime_wiring.py`.
+- Cleanup: `PASS`, `deleted=2` — both `ActionContracts` records this run
+  created (the pending-seed and the failed-seed; the `Tasks` record from
+  the successful execution is real created business data, same as any
+  other successful `airtable_add`, and is correctly *not* deleted by
+  cleanup) were removed, scoped to this run's own `tenant_id`, confirmed by
+  the DELETE requests and the `deleted=2` count in the pasted log.
+
+**One honest caveat, not glossed over**: `DATABASE_URL`'s non-production
+status is independently verifiable (the name itself says
+`..._staging`, matching `verify_tc8_staging.py`'s heuristic). Airtable base
+ids are opaque (`app4bcgoX7t0HUVnm` here — see §6.1/PR #592) — there is no
+equivalent independent check for whether that specific base is a genuinely
+separate non-production Airtable instance or the single shared base this
+repo's own TC8 doc calls "shared Airtable Staging." This document does not
+claim to have independently verified that distinction; it relies on the
+operator's `TC9_STAGING_NON_PRODUCTION=true` assertion for it, exactly as
+the script's own preflight documents. What *is* independently confirmed
+from the pasted evidence: the canary's actual write footprint was fully
+disposable and fully cleaned up (2 created, 2 deleted, 0 residue) except
+for the one real `Tasks` record its own "Executed" scenario is designed to
+create — the same footprint any single real approved `airtable_add` action
+leaves, not an accumulating or contamination-prone one.
+
+Both `tc8_evidence.json` and `tc9_evidence.json` were written on the
+staging host; this document quotes the pasted stdout, not those files
+directly (they were not transferred into this session).
 
 ### 6.4 TC9 MessageContract coverage summary
 
 | State | Where verified | Class |
 |---|---|---|
-| pending | `scripts/verify_tc9_staging.py` (structurally proven this session against real ActionGateway + local PG; needs a real staging run for the "Staging runtime evidence" class) | isolated-integration (done) / staging (pending) |
-| executed/completed | same script, evidence preserved, canonical path asserted | isolated-integration (structurally proven to the Airtable-write boundary) / staging (pending) |
-| failed | same script, deterministic (bad table name, rejected before any write) | staging (pending) |
+| pending | `scripts/verify_tc9_staging.py`, `MessageState.APPROVAL_PENDING` | isolated-integration + **staging (confirmed 2026-08-10)** |
+| executed/completed | same script — real `airtable_add` write, real record `recxu9l3SwAzmqjkA` created, `MessageState.SUCCESS`, evidence_ref preserved | isolated-integration + **staging (confirmed, real success — not just the failure branch the pre-fix sandbox run could reach)** |
+| failed | same script, deterministic (bad table name), `MessageState.FAILURE`, no false success | isolated-integration + **staging (confirmed)** |
 | outcome_unknown | **not attempted against staging** — no safe, deterministic way to force it without fabricating evidence or destabilizing staging (explicitly disallowed by this task) | `test_tc9_messagecontract_runtime_wiring.py` (isolated unit evidence only — accepted, stated limitation) |
-| turn_id propagated when real | `scripts/verify_tc9_staging.py` — asserts a real-shaped id passed through `compose_status_reply()` is returned unmodified | isolated-integration (done) / staging (pending) |
-| turn_id never fabricated when absent | same check, asserts `None` stays `None` | isolated-integration (done) / staging (pending) |
+| turn_id propagated when real | `scripts/verify_tc9_staging.py` — asserts a real-shaped id passed through `compose_status_reply()` is returned unmodified | isolated-integration + **staging (confirmed)** |
+| turn_id never fabricated when absent | same check, asserts `None` stays `None` | isolated-integration + **staging (confirmed)** |
 | exactly one final response | existing coverage only: `test_turn_envelope.py`, TC6/PA-01 ownership tests already assert single-final-response invariants at the `app.py` integration boundary. `scripts/verify_tc9_staging.py` calls `core.action_gateway.action_gateway` directly and never reaches `app.py`'s callback/text handlers or `app.bot`, so it has nothing meaningful to assert a call count on — it does not add coverage here, and its module docstring says so explicitly rather than implying otherwise | isolated-integration |
 
 ## 7. Documentation updates
@@ -358,27 +383,34 @@ corrected commit).
 
 ## 10. Final verdict
 
-**TC10 — IMPLEMENTATION COMPLETE / STAGING VERIFICATION PENDING**
+**TC10 — COMPLETE AND VERIFIED**
 
-Isolated regression mode is built, wired into CI, and now has both real,
-repeated, stable local evidence AND confirmed real-CI evidence (§6.2, PR
-#590 commit `2b6ecb3`, `backend-ci` run 31362450916, `FINAL: PASS`, `21/21`
-stable across 2 runs) for the required named gates (39/39, 8/8, 11/11) and
-the full matrix — including `test_tc6_app_reply_ownership.py` and
+Isolated regression mode is built, wired into CI, and has confirmed real-CI
+evidence (§6.2, PR #590 commit `2b6ecb3`, `backend-ci` run 31362450916,
+`FINAL: PASS`, `21/21` stable across 2 runs) for the required named gates
+(39/39, 8/8, 11/11) and the full matrix — including
+`test_tc6_app_reply_ownership.py` and
 `test_pa01_phantom_approval_enforcement.py`, the two files an earlier,
-over-broad credential override in this same PR had regressed and which
-this PR's own CI history shows failing (44/52) and then passing (52/52) on
-the commit that fixed it. The isolated regression gate this document's
-first draft prematurely claimed "satisfied" (§8) is now actually satisfied,
-with CI evidence to show it — not merely local evidence. The TC8 handoff's
-specific contamination bug is fixed at its root cause. The TC9 staging
-runtime canary is written, API-correct, and structurally validated
-end-to-end (including its duplicate-dispatch and false-pass fixes, §6.1)
-against a local stand-in, but has not been run against real staging — that
-remains an explicit, stated pending item, not a silent gap.
+over-broad credential override in this same PR had regressed. The TC8
+handoff's specific contamination bug is fixed at its root cause.
 
-**CORE OPERATIONAL VERIFICATION GATE — NOT YET READY** (blocked only on the
-real-staging run of `scripts/verify_tc9_staging.py` and
-`scripts/verify_tc8_staging.py`, both of which now require an explicit
-non-production confirmation and neither of which any session in this
-conversation has credentials to run).
+The TC9 staging runtime canary was run against real staging on 2026-08-10
+(§6.3) — `FINAL: TC9 STAGING CANARY: DONE` — pending, turn_id, a real
+successful execution (genuine Airtable write, not just the failure branch
+the earlier sandbox dry run could reach), the deterministic failure branch,
+and clean scoped cleanup (2 created, 2 deleted, 0 residue) all confirmed.
+`scripts/verify_tc8_staging.py` also ran clean against real staging in the
+same session (§6.3) — migration/schema/persistence/CAS-race/tenant-
+isolation/replay/terminal/authority all `PASS`, deploy SHA matched. Getting
+there took two self-caught bugs along the way — an over-broad Telegram
+credential override (§6.1, fixed in PR #590) and an Airtable-base-id name
+check that could never pass for any real base (§6.1/PR #592) — both
+root-caused from real failures, not assumed, and both fixed at the
+credential/check level rather than by loosening what the scripts verify.
+
+**CORE OPERATIONAL VERIFICATION GATE — READY.** Isolated regression: CI
+gate. TC8 handoff's deferred regression matrix: closed. TC9 MessageContract
+runtime wiring: confirmed on real staging for every state that can safely
+be forced there; `outcome_unknown` remains isolated-unit-only by design,
+stated as an accepted limitation, not a gap. No ActionGateway/TC7/TC8/TC9/
+F14/router/approval-policy runtime code was touched anywhere in TC10.
