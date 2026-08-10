@@ -66,6 +66,7 @@ from core.anti_hallucination import (
     _SINGLE_SPEAKER_FALLBACK, _has_write_tool_evidence,
 )
 from core.turn_evidence import TurnEvidenceSummary, observe_shadow_finalizer
+from core.claim_authorization_shadow import observe_claim_authorization_shadow
 from health_monitor import get_health_status
 from feature_flags import is_enabled as _flag_enabled, get_evidence_finalizer_state
 import cost_monitor
@@ -4924,10 +4925,11 @@ def run_agent(
                 # מנגנון-הצדקה עצמאי חדש — אותה קריאה קיימת בדיוק ל-RP4's
                 # observe_shadow_finalizer(), shadow-only, לעולם לא חוסמת.
                 try:
+                    _evidence_finalizer_state = get_evidence_finalizer_state()
                     _ignored_text, _evidence_comparison = observe_shadow_finalizer(
                         "",
                         turn_evidence,
-                        state=get_evidence_finalizer_state(),
+                        state=_evidence_finalizer_state,
                         approval_prompt_sent=bool(
                             _ownership_verification_failed_entry.get("owner_notified"),
                         ),
@@ -4937,6 +4939,16 @@ def run_agent(
                             **_evidence_comparison.safe_record(),
                             "evidence": turn_evidence.safe_record(),
                         }
+                    if _evidence_comparison is not None:
+                        # TC7-B2: no ActionLifecycleResult (real or invented)
+                        # stands behind Branch B (see comment above) -- an
+                        # RP4 agent-loop surface with no correlated
+                        # lifecycle, exactly TC7-B1's lifecycle_state=None case.
+                        observe_claim_authorization_shadow(
+                            _evidence_comparison,
+                            lifecycle_state=None,
+                            state=_evidence_finalizer_state,
+                        )
                 except Exception:
                     logger.debug(
                         "[EvidenceFinalizerShadow] ownership-verification-failed "
@@ -4978,10 +4990,11 @@ def run_agent(
                         exc_info=True,
                     )
                 try:
+                    _evidence_finalizer_state = get_evidence_finalizer_state()
                     _ignored_text, _evidence_comparison = observe_shadow_finalizer(
                         "",
                         turn_evidence,
-                        state=get_evidence_finalizer_state(),
+                        state=_evidence_finalizer_state,
                         approval_prompt_sent=bool(_gateway_owned.get("owner_notified")),
                     )
                     if _out_meta is not None and _evidence_comparison is not None:
@@ -4989,6 +5002,22 @@ def run_agent(
                             **_evidence_comparison.safe_record(),
                             "evidence": turn_evidence.safe_record(),
                         }
+                    if _evidence_comparison is not None:
+                        # TC7-B2: the exact, already-correlated WS2
+                        # ActionLifecycleResult for this turn's contract is
+                        # already in memory (_gateway_owned's own
+                        # "action_lifecycle_result", the same object that
+                        # granted reply_owner=="gateway" above) -- its
+                        # .lifecycle_state, never the F52 canonical_state
+                        # used for _out_meta above. No repository read.
+                        observe_claim_authorization_shadow(
+                            _evidence_comparison,
+                            lifecycle_state=getattr(
+                                _gateway_owned.get("action_lifecycle_result"),
+                                "lifecycle_state", None,
+                            ),
+                            state=_evidence_finalizer_state,
+                        )
                 except Exception:
                     logger.debug(
                         "[EvidenceFinalizerShadow] gateway-owned observation skipped",
@@ -5258,10 +5287,11 @@ def run_agent(
                 r.get("tool") == "__approval_queued__" and r.get("owner_notified")
                 for r in tool_results_log
             )
+            _evidence_finalizer_state = get_evidence_finalizer_state()
             final_reply, _evidence_comparison = observe_shadow_finalizer(
                 final_reply,
                 turn_evidence,
-                state=get_evidence_finalizer_state(),
+                state=_evidence_finalizer_state,
                 approval_prompt_sent=_approval_prompt_sent_this_turn,
             )
             if _out_meta is not None and _evidence_comparison is not None:
@@ -5269,6 +5299,18 @@ def run_agent(
                     **_evidence_comparison.safe_record(),
                     "evidence": turn_evidence.safe_record(),
                 }
+            if _evidence_comparison is not None:
+                # TC7-B2: this is the general Agent-loop turn path -- no
+                # single ActionContract is necessarily correlated to the
+                # whole turn here (it may span zero, one, or several tool
+                # calls). No repository read is added to derive one;
+                # lifecycle_state=None is exactly TC7-B1's designed-for
+                # RP4 agent-loop-surface case.
+                observe_claim_authorization_shadow(
+                    _evidence_comparison,
+                    lifecycle_state=None,
+                    state=_evidence_finalizer_state,
+                )
         except Exception as _evidence_exc:
             logger.warning(
                 "[EvidenceFinalizerShadow] observer_failed error_type=%s",
