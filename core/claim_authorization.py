@@ -69,12 +69,21 @@ _TERMINAL_NON_SUCCESS_LIFECYCLE = frozenset({"rejected", "cancelled"})
 _FAILED_LIFECYCLE = frozenset({"failed"})
 _IN_PROGRESS_LIFECYCLE = frozenset({"pending", "approved", "executing"})
 _UNRESOLVED_LIFECYCLE = frozenset({"missing", "expired"})
+# TC7-B1.1: core.lifecycle_projection.build_action_lifecycle_result() emits
+# lifecycle_state="outcome_unknown" for an ActionContract whose durable
+# status is "outcome_unknown" -- a distinct, valid WS2/TC6 lifecycle value,
+# not a malformed/unsupported one. It carries no positive signal either way
+# (neither "execution didn't happen" nor "execution definitely failed"), so
+# it wins outright over evidence, same as the other lifecycle-authority
+# branches, and always resolves to UNKNOWN -- never SUCCESS.
+_OUTCOME_UNKNOWN_LIFECYCLE = frozenset({"outcome_unknown"})
 _KNOWN_LIFECYCLE_STATES = (
     _SUCCESS_ELIGIBLE_LIFECYCLE
     | _TERMINAL_NON_SUCCESS_LIFECYCLE
     | _FAILED_LIFECYCLE
     | _IN_PROGRESS_LIFECYCLE
     | _UNRESOLVED_LIFECYCLE
+    | _OUTCOME_UNKNOWN_LIFECYCLE
 )
 
 # Evidence-only mapping: used verbatim when lifecycle_state is None, and
@@ -150,6 +159,9 @@ def authorize_claim(
     if lifecycle_state in _UNRESOLVED_LIFECYCLE:
         return ClaimCategory.UNKNOWN, "lifecycle_unresolved"
 
+    if lifecycle_state in _OUTCOME_UNKNOWN_LIFECYCLE:
+        return ClaimCategory.UNKNOWN, "lifecycle_outcome_unknown"
+
     if evidence_status not in _EVIDENCE_STATES:
         return ClaimCategory.UNKNOWN, "unsupported_evidence_status"
 
@@ -177,6 +189,7 @@ if __name__ == "__main__":
     assert authorize_claim("verified_write_success", "rejected")[0] == ClaimCategory.NEUTRAL
     assert authorize_claim("failure", "cancelled")[0] == ClaimCategory.NEUTRAL
     assert authorize_claim("failure", "failed")[0] == ClaimCategory.FAILURE
+    assert authorize_claim("verified_write_success", "outcome_unknown") == (ClaimCategory.UNKNOWN, "lifecycle_outcome_unknown")
     assert authorize_claim("verified_write_success", "pending")[0] != ClaimCategory.SUCCESS
     assert authorize_claim("failure", "pending")[0] != ClaimCategory.PENDING
     assert authorize_claim(" VERIFIED_WRITE_SUCCESS ", "completed")[0] != ClaimCategory.SUCCESS

@@ -188,6 +188,42 @@ def test_missing_and_expired_lifecycle_fail_closed():
         assert reason == "lifecycle_unresolved"
 
 
+# TC7-B1.1: core.lifecycle_projection.build_action_lifecycle_result() emits
+# lifecycle_state="outcome_unknown" for an ActionContract whose durable
+# status is "outcome_unknown" -- this must be a recognized lifecycle value,
+# not fall through to "unsupported_lifecycle_state", and must never
+# authorize SUCCESS regardless of evidence_status.
+def test_outcome_unknown_lifecycle_is_recognized_and_always_unknown():
+    for evidence in _ALL_EVIDENCE_STATES:
+        state, reason = authorize_claim(evidence, "outcome_unknown")
+        assert state == ClaimCategory.UNKNOWN, (evidence, state)
+        assert state != ClaimCategory.SUCCESS
+        assert reason == "lifecycle_outcome_unknown", (evidence, reason)
+
+
+def test_verified_write_success_plus_outcome_unknown_lifecycle_is_unknown():
+    assert authorize_claim("verified_write_success", "outcome_unknown") == (
+        ClaimCategory.UNKNOWN, "lifecycle_outcome_unknown",
+    )
+
+
+def test_outcome_unknown_lifecycle_does_not_alter_evidence_only_table():
+    # lifecycle_state=None must still resolve evidence "outcome_unknown"
+    # through the untouched evidence-only table (reason
+    # "evidence_outcome_unknown"), not the new lifecycle-authority reason.
+    assert authorize_claim("outcome_unknown") == (ClaimCategory.UNKNOWN, "evidence_outcome_unknown")
+    assert authorize_claim("outcome_unknown", None) == (ClaimCategory.UNKNOWN, "evidence_outcome_unknown")
+
+
+def test_outcome_unknown_lifecycle_whitespace_and_case_variants_fail_closed():
+    noncanonical = (" outcome_unknown", "outcome_unknown ", "OUTCOME_UNKNOWN", "Outcome_Unknown", "outcome-unknown")
+    for value in noncanonical:
+        state, reason = authorize_claim("verified_write_success", value)
+        assert state != ClaimCategory.SUCCESS, value
+        assert state == ClaimCategory.UNKNOWN
+        assert reason == "unsupported_lifecycle_state", (value, reason)
+
+
 # 10. whitespace/case variants of lifecycle/evidence fail closed
 def test_whitespace_and_case_variants_fail_closed():
     noncanonical_evidence = (" verified_write_success", "verified_write_success ", "VERIFIED_WRITE_SUCCESS", "Verified_Write_Success")
