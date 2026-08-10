@@ -40,6 +40,50 @@ _CREATE_TASK_DATE_WORD_MARKER_RE = re.compile(r"\bעד\b")
 _CREATE_TASK_DATE_PREFIX_MARKER_RE = re.compile(r"ל[\u05be\-\u2013\u2014]\s*$")
 _CREATE_TASK_QUOTE_PAIRS = (("\"", "\""), ("'", "'"), ("(", ")"), ("[", "]"), ("{", "}"))
 
+# PA-01 — same fail-closed shape as _STRUCTURED_CREATE_TASK_RE above: the
+# ENTIRE message must be "<verb> [את ][ה]משימה[/טאסק/task] <reference>", not
+# just a loose intent-regex match somewhere in a longer sentence. Verb group
+# mirrors intent_router.py's UPDATE_TASK/COMPLETE_TASK rules (עדכן/שנה/
+# תעדכן/סגור/סיים/השלם/סמן/mark/complete/update) — intent detection already
+# guarantees one of those verbs plus a task noun matched *somewhere*; this
+# only additionally requires the strict verb-noun-reference order and a
+# non-empty reference before Handler.TOOL is safe to assign.
+_STRUCTURED_TASK_REF_RE = re.compile(
+    r"^\s*(?:עדכן|תעדכן|שנה|תשנה|סגור|תסגור|סיים|תסיים|השלם|תשלים|סמן|תסמן"
+    r"|mark|complete|update)\s+(?:את\s+)?(?:ה)?(?:משימ(?:ה|ת)|טאסק|task)"
+    r"\s*:?\s*(?P<reference>.+?)\s*$",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class DeterministicTaskRefParse:
+    reference: str | None = None
+    matched:   bool = False
+    uncertain: bool = False
+
+    @property
+    def certain(self) -> bool:
+        return self.matched and not self.uncertain and bool(self.reference)
+
+
+def parse_deterministic_task_reference(text: str) -> DeterministicTaskRefParse:
+    """UPDATE_TASK/COMPLETE_TASK counterpart of parse_deterministic_create_task.
+
+    Only classifies whether the message is a structured enough task
+    reference for the router to hand off deterministically — actual entity
+    resolution (0/1/many matches) stays owned by task_resolvers.resolve_task
+    downstream, unchanged.
+    """
+    normalized = _normalize_create_task_input(text)
+    match = _STRUCTURED_TASK_REF_RE.fullmatch(normalized)
+    if not match:
+        return DeterministicTaskRefParse()
+    reference = match.group("reference").strip()
+    if not reference:
+        return DeterministicTaskRefParse(matched=True, uncertain=True)
+    return DeterministicTaskRefParse(reference=reference, matched=True)
+
 
 @dataclass(frozen=True)
 class DeterministicTaskParse:
@@ -253,6 +297,19 @@ def route_request(
     ):
         risk, handler, needs_approval = Risk.NEEDS_APPROVAL, Handler.TOOL, True
 
+    # PA-01: same deterministic gate, reused for the entity-dependent task
+    # intents. Downstream (task_integration.prepare_task_proposal →
+    # task_resolvers.resolve_task) still owns 0/many-match resolution and
+    # fails closed there — this only decides whether the message is
+    # structured enough to be worth handing to that path at all.
+    _task_ref_parse = parse_deterministic_task_reference(text)
+    if (
+        intent in (Intent.UPDATE_TASK, Intent.COMPLETE_TASK)
+        and _task_ref_parse.certain
+        and identity.role not in ("lead", "guest", "readonly")
+    ):
+        risk, handler, needs_approval = Risk.NEEDS_APPROVAL, Handler.TOOL, True
+
     # 4b. Capture Policy (Stage 3 / C89 integration) — observability only.
     # Gate is identity.is_internal alone, with NO intent filter — this must
     # match app.py's real invocation condition for handle_lead_candidate()
@@ -335,6 +392,14 @@ def route_request(
         response_override = (
             "לא בטוח שהבנתי את כותרת המשימה או את התאריך/שעה. "
             "נא לנסח מחדש, בלי תיקון אוטומטי של שגיאות כתיב."
+        )
+
+    elif intent in (Intent.UPDATE_TASK, Intent.COMPLETE_TASK) and _task_ref_parse.uncertain:
+        handler = Handler.CLARIFY
+        tool_allowed = False
+        needs_approval = False
+        response_override = (
+            "לא בטוח לאיזו משימה התכוונת. נא לציין את שם המשימה במדויק."
         )
 
     elif risk == Risk.NEEDS_APPROVAL and confidence < 0.85 and not restricted:
