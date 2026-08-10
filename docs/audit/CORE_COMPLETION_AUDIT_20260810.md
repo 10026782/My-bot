@@ -163,7 +163,7 @@ CORE COMPLETION AUDIT — PASS WITH NON-BLOCKING DEFERRED ITEMS
 
 CORE v1 — COMPLETE
 
-CORE v1 — READY TO FREEZE — functional evidence supports this; the CI red (catalog drift) and Layer 2 gap are both non-blocking hardening/architecture items, not correctness defects. I am not declaring CORE v1 — FROZEN — per your own instruction, that's an owner/governance decision, not something this audit makes for you.
+CORE v1 — READY TO FREEZE — functional evidence supports this; the CI red (catalog drift) and Layer 2 gap are both non-blocking hardening/architecture items, not correctness defects. I am not declaring freeze status is intentionally not declared — per your own instruction, that's an owner/governance decision, not something this audit makes for you.
 
 
 ---
@@ -177,4 +177,4 @@ CORE v1 — COMPLETE
 CORE v1 — READY TO FREEZE
 
 Freeze remains an owner/governance decision. This document does not declare
-CORE v1 — FROZEN.
+freeze status is intentionally not declared.
