@@ -3,6 +3,25 @@
 This script is intentionally staging-only.  It applies only migration 002,
 uses the existing PostgreSQL connection mechanism, and never prints secrets.
 It does not mutate ActionContracts or change runtime authority.
+
+TC10 note (2026-08-10): this script used to also run the full Turn
+Coordinator / ActionGateway regression matrix as subprocesses here, against
+whatever environment the caller's shell had exported. Because those
+subprocesses inherited the ambient environment verbatim and the individual
+test files only set fake Airtable credentials via ``os.environ.setdefault``
+(a no-op once real staging credentials are already exported — exactly the
+case when someone is mid staging-verification), a small set of fixed
+identity strings baked into those test files collided with leftover
+ActionContracts from a previous run against the same shared staging
+Airtable base (see BUG-122 proposal_boundary_blocked in
+docs/architecture/turn-coordinator-full/TC8_DURABLE_TURN_STATE.md's TC10
+handoff section). That is not a valid deterministic regression environment,
+so the full matrix no longer runs from this script at all — it runs
+isolated, with credentials forced (not defaulted) to fake values regardless
+of ambient environment, via ``scripts/run_isolated_regression.py``. This
+script now covers only what is actually safe to exercise against a real,
+dedicated, non-production PostgreSQL staging database: migration/schema
+verification and the real repository/concurrency checks below.
 """
 
 from __future__ import annotations
@@ -10,7 +29,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import subprocess
 import sys
 import threading
@@ -27,34 +45,6 @@ EXPECTED_COMMIT = os.getenv("TC8_EXPECTED_SHA", "").strip()
 # scripts directory—not the repository root—on sys.path.  The verification
 # imports the repository's real core package, so make that path explicit.
 sys.path.insert(0, str(ROOT))
-
-REGRESSION_GROUPS = {
-    "Callback hardening": "test_bug_approval_callback_hardening.py",
-    "PR-0C callbacks": "test_pr0c_telegram_callback_gateway.py",
-    "BUG-158 recovery": "test_bug158_approval_callback_eventbus_ttl_recovery.py",
-}
-
-FULL_REGRESSION = [
-    "test_turn_envelope.py",
-    "test_approval_concurrency.py",
-    "test_pr0c_action_contract_repository.py",
-    "test_pr0c_action_contracts_persistence.py",
-    "test_phase_4b0_1a_atomic_claims.py",
-    "test_bug_approval_callback_hardening.py",
-    "test_bug_stale_callback_ux.py",
-    "test_bug_post_completion_callback_fallthrough.py",
-    "test_hotfix_e_shared_replay_policy.py",
-    "test_tc6_app_reply_ownership.py",
-    "test_tc7_rp5_gateway_execution_shadow.py",
-    "test_pr0c_telegram_callback_gateway.py",
-    "test_bug127a_stale_lifecycle_version_retry.py",
-    "test_bug157_atomic_fingerprint_claim.py",
-    "test_bug158_approval_callback_eventbus_ttl_recovery.py",
-    "test_single_speaker_fallback_and_duplication.py",
-    "test_bug056_legacy_cancel_replay_guard.py",
-    "test_pa01_phantom_approval_enforcement.py",
-    "test_pr1_single_speaker_approval_ux.py",
-]
 
 
 class VerificationFailure(RuntimeError):
@@ -325,51 +315,6 @@ def _authority_check() -> str:
     return "ActionContract lifecycle authority unchanged"
 
 
-def _run_test(path: str, pytest_mode: bool = False) -> tuple[bool, str]:
-    command = [sys.executable]
-    if pytest_mode:
-        command += ["-m", "pytest", "-q"]
-    command.append(path)
-    env = os.environ.copy()
-    env["PYTHONIOENCODING"] = "utf-8"
-    env["PYTHONUTF8"] = "1"
-    result = subprocess.run(
-        command, cwd=ROOT, env=env, text=True,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=300,
-    )
-    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
-    summary = next(
-        (line for line in reversed(lines) if re.search(r"passed|failed|PASSED|FAILED", line)),
-        f"exit={result.returncode}",
-    )
-    return result.returncode == 0, summary
-
-
-def _run_regressions(evidence: dict) -> bool:
-    print("\nRegression groups")
-    group_failures = []
-    for label, filename in REGRESSION_GROUPS.items():
-        ok, summary = _run_test(filename)
-        evidence[label] = {"status": "PASS" if ok else "FAIL", "detail": summary}
-        print(f"{label:<28} {'PASS' if ok else 'FAIL'} — {summary}")
-        if not ok:
-            group_failures.append(label)
-    print("\nFull regression matrix")
-    failures = []
-    for filename in FULL_REGRESSION:
-        pytest_mode = filename in {"test_tc8_runtime_integration.py", "test_turn_state_repository.py"}
-        ok, summary = _run_test(filename, pytest_mode=pytest_mode)
-        if not ok:
-            failures.append(filename)
-        print(f"{filename:<52} {'PASS' if ok else 'FAIL'} — {summary}")
-    evidence["Full regression matrix"] = {
-        "status": "PASS" if not failures else "FAIL",
-        "detail": f"{len(FULL_REGRESSION) - len(failures)}/{len(FULL_REGRESSION)} passed",
-        "failures": failures,
-    }
-    return not group_failures and not failures
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--evidence-path", type=Path)
@@ -392,8 +337,6 @@ def main() -> int:
                 evidence[label] = {"status": "PASS", "detail": "real PostgreSQL"}
                 print(f"{label:<28} PASS — {detail}")
             _check("Authority invariants", _authority_check, evidence)
-            if not _run_regressions(evidence):
-                failed = True
     except Exception as exc:
         failed = True
         evidence["fatal"] = {"status": "FAIL", "detail": f"{type(exc).__name__}: {exc}"}
@@ -405,6 +348,15 @@ def main() -> int:
         )
         print(f"Evidence written to {args.evidence_path}")
 
+    print(
+        "\nNote: the full Turn Coordinator / ActionGateway regression matrix "
+        "(callback hardening, PR-0C callbacks, BUG-158 recovery, and the "
+        "broader FULL_REGRESSION set) intentionally does not run from this "
+        "script. Run it isolated instead: "
+        "python scripts/run_isolated_regression.py — see "
+        "scripts/regression_matrix.py and this script's module docstring "
+        "for why (BUG-122 staging contamination, TC10 handoff)."
+    )
     print("\nFINAL:")
     print("TC8: FAIL" if failed else "TC8: DONE")
     return 1 if failed else 0

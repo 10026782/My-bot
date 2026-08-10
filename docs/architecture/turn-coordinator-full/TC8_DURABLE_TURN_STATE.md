@@ -83,3 +83,27 @@ and complete regression matrix there. Until that handoff is complete, the
 classification is:
 
 `TC8 — IMPLEMENTATION AND STAGING VERIFIED / FINAL REGRESSION GATE DEFERRED TO TC10 HARNESS`
+
+### TC10 handoff closure — 2026-08-10
+
+TC10 built the isolated regression harness this section asked for:
+`scripts/run_isolated_regression.py` (matrix definitions extracted to
+`scripts/regression_matrix.py`), `scripts/staging_identity.py` for unique
+per-run test identities and scoped cleanup, and a root-cause fix to
+`scripts/verify_tc8_staging.py` itself — it no longer runs the full
+regression matrix against real staging at all (that was the actual
+contamination vector: subprocess env inherited the ambient shell's real
+credentials). See
+`docs/architecture/turn-coordinator-full/TC10_OPERATIONAL_VERIFICATION_HARNESS.md`
+for the full audit, isolation strategy, and evidence.
+
+Callback hardening (39/39), PR-0C callbacks (8/8), and BUG-158 recovery
+(11/11) all pass isolated, reproduced twice with stable results in this
+session's local verification. 17/19 of the broader `FULL_REGRESSION` set
+passed in the same run; the remaining 2 were root-caused to a sandbox-local
+network restriction unrelated to TC8/TC9 code (see the harness doc §6.1) —
+not a defect in this contract.
+
+Revised classification:
+
+`TC8 — IMPLEMENTATION AND STAGING VERIFIED / ISOLATED REGRESSION GATE SATISFIED (TC10) / REAL-STAGING TC9 CANARY STILL PENDING`

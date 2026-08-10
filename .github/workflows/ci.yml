@@ -111,6 +111,19 @@ jobs:
             echo "::endgroup::"
           done
 
+      - name: TC10 isolated regression matrix (Turn Coordinator / ActionGateway)
+        run: |
+          python scripts/run_isolated_regression.py --repeat 2 \
+            --evidence-path tc10_isolated_regression_evidence.json
+
+      - name: Upload TC10 isolated regression evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tc10-isolated-regression-evidence
+          path: tc10_isolated_regression_evidence.json
+          retention-days: 30
+
       - name: Schema governance (warning only, never blocks)
         run: python tools/schema_governance.py || true
 

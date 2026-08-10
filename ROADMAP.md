@@ -1,5 +1,17 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
+עודכן: 10/08/2026 — **TC10 operational verification harness (implementation
+complete, staging verification pending)**: `scripts/run_isolated_regression.py`
++ `scripts/regression_matrix.py` + `scripts/staging_identity.py` (new
+isolated-regression mode, immune to ambient credentials), `scripts/verify_tc9_staging.py`
+(new TC9 MessageContract staging canary — written, not yet run against real
+staging), `scripts/verify_tc8_staging.py` fixed to stop running the full
+regression matrix against real shared staging Airtable (the root cause of
+the BUG-122 contamination TC8 handed off). See
+`docs/architecture/turn-coordinator-full/TC10_OPERATIONAL_VERIFICATION_HARNESS.md`
+for the full audit/evidence. No ActionGateway/TC7/TC8/TC9/F14/router/
+approval-policy runtime code changed.
+
 עודכן: 10/08/2026 — **תיעוד PR #572–#588 (17 מספרי PR ברצף, כולל #576 שהוחלף
 ע"י #579 באותו branch — לא deliverable נפרד; פער-תיעוד, נסגר ישירות מ-`git log
 origin/main`, לא הועלה כ-PR נפרד ע"י מי שביצע אותם):** אומת ישירות ב-`git log`/
