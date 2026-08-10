@@ -327,8 +327,8 @@ def test_pending_message_contract_observability_is_explicit():
     assert F_PEND.outcome == "pending"
 
 
-def test_only_failed_and_pending_outcomes_use_message_contract_runtime_adapter():
-    """PR D + PR E scope: only failed/pending leave the legacy path."""
+def test_tc9_structured_outcomes_use_message_contract_runtime_adapter():
+    """TC9 wires executed, failed, and pending through the adapter."""
     from unittest.mock import patch
     import core.action_fact_message_adapter as adapter_module
 
@@ -344,11 +344,11 @@ def test_only_failed_and_pending_outcomes_use_message_contract_runtime_adapter()
         for fact in (F_EXEC, F_FAIL, F_PEND, F_REJ, F_UNK):
             gw._compose_status_reply_unified(fact)
 
-    assert calls == ["failed", "pending"]
+    assert calls == ["executed", "failed", "pending"]
 
 
-def test_failed_remains_pr_d_path_and_other_outcomes_remain_legacy():
-    """The PR E expansion must not broaden the existing PR D boundary."""
+def test_tc9_keeps_rejected_and_unrecognized_outcomes_on_legacy_fallback():
+    """TC9 preserves legacy wording for rejected/unrecognized outcomes."""
     from unittest.mock import patch
     import core.action_fact_message_adapter as adapter_module
 
@@ -364,7 +364,7 @@ def test_failed_remains_pr_d_path_and_other_outcomes_remain_legacy():
         for fact in (F_FAIL, F_PEND, F_EXEC, F_REJ, F_UNK):
             gw._compose_status_reply_unified(fact)
 
-    assert calls == ["failed", "pending"]
+    assert calls == ["failed", "pending", "executed"]
 
 
 def test_on_pending_and_rejected_and_unknown():

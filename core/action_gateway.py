@@ -323,10 +323,15 @@ class ActionFact:
     """מבני בלבד. אין בו משפט בשפה טבעית. אסור להעביר אותו ישירות לשליחה."""
     tool_name:         str
     contract_id:       str
-    outcome:           str    # "executed" | "failed" | "pending" | "rejected"
+    outcome:           str    # "executed" | "failed" | "pending" | "rejected" | "outcome_unknown"
     record_id:         str | None
     error_code:        str | None
     raw_tool_response: dict
+    evidence_status:   str | None = None
+    evidence_ref:      str | None = None
+    execution_verified: bool | None = None
+    occurred_at:       str | None = None
+    turn_id:           str | None = None
 
 
 @dataclass(frozen=True)
@@ -335,6 +340,7 @@ class GatewayReply:
     מיוצר אך ורק מתוך ActionFact ע"י compose_status_reply()."""
     text: str
     fact: ActionFact
+    contract: "MessageContract | None" = None
 
 
 @dataclass(frozen=True)
@@ -3020,7 +3026,11 @@ class ActionGateway:
         Identity from frozen contract must be preserved through atomic wrapper.
         Dispatcher result must be classified explicitly (not just exception-based).
         """
-        from feature_flags import get_evidence_finalizer_state, is_enabled
+        from feature_flags import (
+            get_evidence_finalizer_state,
+            get_unified_status_formatter_state,
+            is_enabled,
+        )
 
         _EXECUTION_OUTCOME_MAP = {
             "completed":       ActionResolutionOutcome.COMPLETED,
@@ -3037,11 +3047,12 @@ class ActionGateway:
         # at whichever single return statement this call ends up taking.
         _last_evidence_summary: TurnEvidenceSummary | None = None
         _last_evidence_state: str | None = None
+        _last_evidence: EvidenceResult | None = None
 
         def _persist_execution_status(
             status: str, *, dispatcher_outcome: DispatcherOutcome | None = None,
         ) -> bool:
-            nonlocal _last_evidence_summary, _last_evidence_state
+            nonlocal _last_evidence_summary, _last_evidence_state, _last_evidence
             try:
                 persisted = self._ledger.update_status(contract.contract_id, status)
             except ActionContractTransitionError as exc:
@@ -3081,7 +3092,11 @@ class ActionGateway:
             # consumer needs it, never only when INFO happens to be enabled
             # -- or flipping the logger to WARNING would silently blind RP5.
             _rp5_state = get_evidence_finalizer_state()
-            _want_evidence = logger.isEnabledFor(logging.INFO) or _rp5_state in ("shadow", "enforce")
+            _want_evidence = (
+                logger.isEnabledFor(logging.INFO)
+                or _rp5_state in ("shadow", "enforce")
+                or get_unified_status_formatter_state() in ("shadow", "on")
+            )
             if _want_evidence:
                 _evidence: EvidenceResult | None = None
                 try:
@@ -3093,6 +3108,7 @@ class ActionGateway:
                         "[TC7A][ExecutionEvidence] projection skipped: contract=%s",
                         contract.contract_id, exc_info=True,
                     )
+                _last_evidence = _evidence
                 if _evidence is not None and logger.isEnabledFor(logging.INFO):
                     # _evidence.error can carry the provider's own free-text
                     # message (verify_execution()'s failure reason is raw
@@ -3384,6 +3400,18 @@ class ActionGateway:
             list(contract.normalized_payload.keys()),
         )
         # §15.2 — compose_status_reply is the single source of status text
+        _fact_evidence_status = None
+        _fact_evidence_ref = None
+        _fact_execution_verified = None
+        if _last_evidence is not None:
+            _fact_evidence_ref = _last_evidence.evidence_ref or None
+            _fact_execution_verified = _last_evidence.verified
+            if _last_evidence.result == "success" and _last_evidence.verified:
+                _fact_evidence_status = "verified_write_success"
+            elif _last_evidence.result in {"failed", "failure"}:
+                _fact_evidence_status = "failure"
+            else:
+                _fact_evidence_status = "outcome_unknown"
         fact = ActionFact(
             tool_name=contract.tool_name,
             contract_id=contract.contract_id,
@@ -3391,6 +3419,9 @@ class ActionGateway:
             record_id=ext_id or None,
             error_code=None,
             raw_tool_response=raw if isinstance(raw, dict) else {"raw": str(raw)},
+            evidence_status=_fact_evidence_status,
+            evidence_ref=_fact_evidence_ref,
+            execution_verified=_fact_execution_verified,
         )
         # BUG-SS-DOUBLE-SUCCESS: compose_status_reply() is documented above
         # (§15.2) as "the only function allowed to produce action-status
@@ -3421,8 +3452,37 @@ class ActionGateway:
     # The legacy renderer (_compose_status_reply_legacy) is retained only as the
     # flag-off fallback and is slated for removal after the cutover.
 
+    def _message_contract_for_fact(self, fact: ActionFact):
+        """Build the canonical presentation contract from one ActionFact.
+
+        ActionFact remains the execution boundary's input.  This helper only
+        projects its already-structured fields; it never reads provider state,
+        infers evidence, or changes lifecycle semantics.
+        """
+        if fact.outcome not in ("executed", "failed", "pending", "outcome_unknown"):
+            return None
+        try:
+            from core.action_fact_message_adapter import from_action_fact
+
+            contract = self._ledger.find_by_id(fact.contract_id) if fact.contract_id else None
+            is_task = contract is not None and _is_task_creation_contract(contract)
+            description = (
+                _safe_task_title(contract) if is_task
+                else _safe_contract_business_description(contract) if contract else None
+            )
+            entity_type = "task" if is_task else None
+            return from_action_fact(fact, description=description, entity_type=entity_type)
+        except Exception as exc:
+            logger.warning(
+                "[MessageContract] projection failed: outcome=%s error_type=%s",
+                getattr(fact, "outcome", "unknown"), type(exc).__name__,
+            )
+            return None
+
     def compose_status_reply(self, fact: ActionFact) -> GatewayReply:
+        message_contract = self._message_contract_for_fact(fact)
         legacy = self._compose_status_reply_legacy(fact)
+        legacy = GatewayReply(text=legacy.text, fact=fact, contract=message_contract)
 
         try:
             from feature_flags import get_unified_status_formatter_state
@@ -3434,7 +3494,9 @@ class ActionGateway:
             return legacy
 
         try:
-            unified_text, meta = self._compose_status_reply_unified(fact)
+            unified_text, meta = self._compose_status_reply_unified(
+                fact, message_contract=message_contract,
+            )
         except Exception as exc:
             # The live status path must never break because of the formatter.
             contract_path = (
@@ -3453,7 +3515,7 @@ class ActionGateway:
             return legacy
 
         # state == "on"
-        return GatewayReply(text=unified_text, fact=fact)
+        return GatewayReply(text=unified_text, fact=fact, contract=message_contract)
 
     # ── F52 PR4 — safe shadow comparison logging ────────────────────
     # Logs only booleans/counts/state-names, never the rendered text itself
@@ -3542,40 +3604,32 @@ class ActionGateway:
                                "reason": "הפעולה בוטלה."}
         return "outcome_unknown", {}
 
-    def _compose_status_reply_unified(self, fact: ActionFact) -> tuple[str, dict]:
+    def _compose_status_reply_unified(
+        self, fact: ActionFact, *, message_contract=None,
+    ) -> tuple[str, dict]:
         """Returns (text, meta). meta is the formatter's own observability
         record (message_state, formatter_version, fallback_used,
         redaction_count) — safe to log as-is, never contains raw text/ids."""
-        # PR D/PR E חיווטים בכוונה שני outcomes בלבד: failed (PR D) ו-pending
-        # (PR E). שניהם יכולים לחצות את גבול ה-MessageContract בלי לשנות
-        # evidence authority. שאר ה-outcomes נשארים במסלול הקיים שלהם עד
-        # סקירה נפרדת.
-        if fact.outcome in ("failed", "pending"):
-            from core.action_fact_message_adapter import from_action_fact
-            from core.message_contract import format_message_contract_with_meta
+        if message_contract is None and fact.outcome != "rejected":
+            message_contract = self._message_contract_for_fact(fact)
 
-            contract = self._ledger.find_by_id(fact.contract_id) if fact.contract_id else None
-            # PR E parity fix: a still-pending Task-creation contract must
-            # describe itself the same way build_approval_lifecycle_result()
-            # already does at the real send site (app.py's
-            # _queue_approval_detailed_impl(), via ApprovalLifecycleResult.
-            # safe_user_message) — the task's own title, not the generic
-            # table-agnostic "הוספת רשומה: ..." business description. Scoped
-            # to the same is_task_creation check that helper already uses;
-            # no new task-detection rule invented here.
-            is_task = contract is not None and _is_task_creation_contract(contract)
-            if is_task:
-                description = _safe_task_title(contract) or None
-            else:
-                description = _safe_contract_business_description(contract) if contract else None
-            # D-014 (F52 Decision Log): entity_type="task" lets the shared
-            # formatter's approval_pending renderer say "משימה" instead of
-            # the generic "פעולה" for a Task-creation contract, mirroring
-            # build_approval_lifecycle_result()'s existing noun distinction.
-            # No effect on "failed" (_render_failure ignores entity_type).
-            entity_type = "task" if is_task else None
-            message = from_action_fact(fact, description=description, entity_type=entity_type)
-            text, contract_meta = format_message_contract_with_meta(message)
+        # All structured outcomes now cross the same MessageContract boundary.
+        # A completed/executed fact without explicit evidence keeps the legacy
+        # wording fallback: the attached contract is still outcome_unknown and
+        # cannot silently upgrade an unverified result to success.
+        has_explicit_execution_evidence = (
+            fact.evidence_status is not None or fact.execution_verified is not None
+        )
+        use_message_contract = (
+            message_contract is not None
+            and (
+                fact.outcome in ("pending", "failed", "outcome_unknown")
+                or has_explicit_execution_evidence
+            )
+        )
+        if use_message_contract:
+            from core.message_contract import format_message_contract_with_meta
+            text, contract_meta = format_message_contract_with_meta(message_contract)
             # שומר על צורת ה-observability של ה-helper הפרטי הקיים יציבה;
             # metadata של MessageContract נשאר זמין בגבול שלו.
             return text, {
