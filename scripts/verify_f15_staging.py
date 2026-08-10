@@ -139,7 +139,7 @@ def verify() -> dict:
         run["verdict"] = "F15 — STAGING VERIFICATION FAILED"
         return run
 
-    from airtable_schema import ContactFields, DealFields, PaymentFields, Tables
+    from airtable_schema import ContactFields, DealFields, DealStage, PaymentFields, Tables
     import crm
     from tools import airtable_gateway
 
@@ -198,7 +198,7 @@ def verify() -> dict:
             deal_update_audit = _audit_for(audit, audit_start, op="patch", table=Tables.DEALS)
             deal_after = _fetch_by_id(airtable_gateway.at_list_by_formula, Tables.DEALS, deal_id)
             _operation(run, "deal_update", Tables.DEALS, record_id=deal_id, result=deal_update_result, gateway_result=deal_update_audit, record_after_update=deal_after)
-            _gate(run, "deal_update_same_id", len(deal_update_audit) == 1 and deal_update_audit[0]["ok"] and deal_update_audit[0]["record"] == deal_id and (deal_after or {}).get("fields", {}).get(DealFields.STATUS) == "Active", json.dumps(deal_update_audit, ensure_ascii=False))
+            _gate(run, "deal_update_same_id", len(deal_update_audit) == 1 and deal_update_audit[0]["ok"] and deal_update_audit[0]["record"] == deal_id and (deal_after or {}).get("fields", {}).get(DealFields.STATUS) == DealStage.NEGOTIATION, json.dumps(deal_update_audit, ensure_ascii=False))
 
         payment_name = f"F15 staging payment {run['run_id']}"
         if _assert_unique(airtable_gateway.at_list_by_formula, Tables.PAYMENTS, PaymentFields.NAME, payment_name):
