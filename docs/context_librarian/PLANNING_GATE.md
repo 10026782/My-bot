@@ -1,5 +1,8 @@
 # Context Librarian planning gate
 
+For cross-layer architectural impact classification, use the mandatory assessment and conditional matrix in `docs/governance/CROSS_LAYER_GOVERNANCE_REVISED_PLANNING_GATE.md`. Stale metadata alone does not force a full matrix; authority, contract, lifecycle, evidence, persistence, runtime-wiring, fallback, and multi-layer impact do.
+
+
 The librarian may stop a dangerous change, but it must not stop planning because
 of ordinary GitHub activity.
 
