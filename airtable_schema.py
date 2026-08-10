@@ -231,8 +231,8 @@ class DealFields:
     STATUS          = "שלב"
     PRICE           = "סכום"
     ADDRESS         = "Address"
-    FUNDING_COST    = "Funding Cost %"
-    ROI             = "ROI %"
+    FUNDING_COST    = "Funding Cost"
+    ROI             = "Roi"
     RISK_LEVEL      = "Risk Level"
     CONTACT         = "מקושר לאנשי קשר"
     DEADLINE        = "תאריך סגירה"
@@ -966,11 +966,11 @@ def validate_import_payment(advance_pct: float, balance_pct: float) -> tuple[boo
 # ══════════════════════════════════════════════════
 
 class ContactType:
-    CLIENT      = "Client"
-    SUPPLIER    = "Supplier"
-    PARTNER     = "Partner"
-    LAWYER      = "Lawyer"
-    ACCOUNTANT  = "Accountant"
+    CLIENT      = "client"
+    SUPPLIER    = "supplier"
+    PARTNER     = "partner"
+    LAWYER      = "expert"
+    ACCOUNTANT  = "expert"
 
 
 class ContactRoleCategory:
