@@ -47,9 +47,9 @@
     ],
     "עסקאות (Deals)": [
       "Address",
-      "Funding Cost %",
+      "Funding Cost",
       "Notes",
-      "ROI %",
+      "Roi",
       "Risk Level",
       "מקושר לאנשי קשר",
       "משימות (Tasks)",
@@ -93,7 +93,7 @@
       "תאריך"
     ],
     "אנשי קשר (Contacts)": [
-      "Type",
+      "Role Category",
       "אימייל",
       "חברה",
       "טלפון",
@@ -189,3 +189,4 @@
   "fetched_at": "seed-from-schema-py",
   "note": "seed — run schema_audit.py to refresh from live Airtable"
 }
+
