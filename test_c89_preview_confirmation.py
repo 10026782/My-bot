@@ -7,6 +7,7 @@
 # cancel-word handling checks Gateway live contracts first (regardless of
 # FEATURE_ACTION_GATEWAY, which defaults off).
 
+import ast
 import os, sys
 os.environ.setdefault("ANTHROPIC_API_KEY", "sk-test")
 os.environ.setdefault("TELEGRAM_TOKEN", "123456789:TEST")
@@ -245,28 +246,44 @@ def test_app_py_confirm_word_checks_gateway_before_flag_branch():
     contracts BEFORE the FEATURE_ACTION_GATEWAY-gated branch, so LCH's
     always-on-Gateway preview contracts resolve regardless of the flag."""
     src = open(os.path.join(os.path.dirname(__file__), "app.py"), encoding="utf-8").read()
-    marker = 'elif _lower in _CONFIRM_WORDS:'
-    idx = src.index(marker)
-    # BUG-058: window widened — a Tier-2 batch-preview resolver check
-    # (core/lead_candidate_handler.resolve_pending_lead_preview) was added
-    # between the find_live_contracts() check and the FEATURE_ACTION_GATEWAY
-    # flag branch, pushing the flag check further from the marker.
-    # BUG-117: widened again — a recency precedence check
-    # (core/lead_candidate_handler.should_prefer_batch_preview) was added
-    # BEFORE find_live_contracts() itself, pushing everything after it
-    # further still. The invariant being asserted (find_live_contracts()
-    # textually precedes the FEATURE_ACTION_GATEWAY flag branch) is
-    # unchanged — only the window size needed to see both.
-    # Hotfix E: widened once more — describe_superseded_reason() was added
-    # alongside the Stage A describe_no_pending_reason() fallback (inside the
-    # confirm-word block, before the _CANCEL_WORDS marker), pushing that
-    # marker further from the start. Same invariant, same window-only fix.
-    block = src[idx: idx + 5000]
-    gw_check_idx = block.index("find_live_contracts")
-    flag_check_idx = block.index('_flag_cw("FEATURE_ACTION_GATEWAY")')
-    assert gw_check_idx < flag_check_idx, \
+    tree = ast.parse(src, filename="app.py")
+
+    def _matching_if(fragment):
+        return [
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.If)
+            and fragment in (ast.get_source_segment(src, node.test) or "")
+        ]
+
+    confirm_nodes = _matching_if("_lower in _CONFIRM_WORDS")
+    cancel_nodes = _matching_if("_lower in _CANCEL_WORDS")
+    assert len(confirm_nodes) == 1, "app.py must have one confirm-word branch"
+
+    confirm = confirm_nodes[0]
+    assert any(node.lineno > confirm.lineno for node in cancel_nodes), \
+        "cancel-word branch must exist alongside confirm-word"
+    calls = [
+        call for statement in confirm.body
+        for call in ast.walk(statement)
+        if isinstance(call, ast.Call)
+    ]
+    gateway_checks = [
+        call for call in calls
+        if isinstance(call.func, ast.Attribute)
+        and call.func.attr == "find_live_contracts"
+    ]
+    flag_checks = [
+        call for call in calls
+        if isinstance(call.func, ast.Name)
+        and call.func.id == "_flag_cw"
+        and len(call.args) == 1
+        and isinstance(call.args[0], ast.Constant)
+        and call.args[0].value == "FEATURE_ACTION_GATEWAY"
+    ]
+    assert len(gateway_checks) == 1, "confirm-word branch must check Gateway live contracts"
+    assert len(flag_checks) == 1, "confirm-word branch must retain the FEATURE_ACTION_GATEWAY branch"
+    assert gateway_checks[0].lineno < flag_checks[0].lineno, \
         "find_live_contracts() check must come before the FEATURE_ACTION_GATEWAY flag branch"
-    assert "_CANCEL_WORDS" in src[idx: idx + 7500], "cancel-word branch must exist alongside confirm-word"
     return "OK"
 
 
