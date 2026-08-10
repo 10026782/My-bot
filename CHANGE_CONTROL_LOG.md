@@ -2006,3 +2006,54 @@ PR #490 (בטווח המספרים בין אלה) **אינו** חלק מהרשו
 
 **Merged:** ✅ כן — PR #498 (`850a575`) + PR #499 (`b872e46`), שניהם אומתו ב-grep ישיר על `origin/main`.
 **✅ Verified בפרודקשן (30/07/2026):** הבעלים שלח "תייצר משימה לבדוק את הדוח החודשי" — לוג הראה `intent=create_task confidence=0.95` דרך הכלל `(פתח|צור|\bתייצר\b|הוסף|תוסיף).*(משימ|טאסק|task)` (מוודא שהגרסה הפרוסה היא זו של PR #499, עם ה-`\b`, לא רק PR #498), ונוצר `ActionContract` תקין (`tool=airtable_add`, `table=Tasks`, `status=pending`).
+
+---
+
+## Core Program Status Update — 10/08/2026
+
+Deploy gap closure and runtime verification for TC8/TC9/Track D/RP5.
+
+### C185 — PR #585: TC8 durable turn-state, ✅ DEPLOYED (03:56 UTC 10/08/2026)
+**Merged:** ✅ כן — PR #585, commit `a945ee7`, אומת ב-grep ישיר על `origin/main`.
+**Deployed:** ✅ כן — Render event log, auto-deploy (08:32–03:56 UTC 10/08/2026), live for `a945ee7` (TC8) confirmed 03:56 UTC.
+**WIRED:** ✅ כן — מחובר ב-4 נקודות בקוד (approve/reject/cancel text & callback) ב-`app.py:3110/3134/3350/3372/4127/4143/4230/4248`, no feature flag. `_tc8_claim_contract()` / `_tc8_finish_contract()` קרויות unconditionally.
+**Runtime Verified:** ❌ לא עדיין — DEPLOYED כן, אך אין ייצוא Render log עדכני לאחר ה-deployment (חלון ה-09/08 audit קדם לפריסה). צריך ייצוא Render טרי שמראה בפועל `[TC8]` מסגים/סטייג'ינג אחרי 03:56.
+
+### C186 — PR #588: TC9 MessageContract wiring, ✅ DEPLOYED (08:32 UTC 10/08/2026)
+**Merged:** ✅ כן — PR #588, commit `cec3f83`, אומת ב-grep ישיר על `origin/main`.
+**Deployed:** ✅ כן — Render event log, auto-deploy (rollback+redeploy 03:58→08:32 UTC 10/08/2026), live for `cec3f83` confirmed 08:32 UTC.
+**WIRED:** ✅ כן — `_message_contract_for_fact()` בנוי unconditionally ב-`ActionGateway.compose_status_reply()` (~3483). טקסט ה-user קשור לנקודות output-gate בעבור `FEATURE_UNIFIED_STATUS_FORMATTER` (כבוי). `GatewayReply.contract` שדה קיים, כרגע אין קוראים downstream.
+**Runtime Verified:** ❌ לא עדיין — DEPLOYED כן (08:32), אך אין ייצוא Render log עדכני שמראה בפועל בנייה/מזגי TC9 אחרי ה-deployment.
+
+### C187 — PR #580: Track D observability (RuntimeSchemaProvider/IngressEnvelope), MERGED + WIRED (DEPLOYED verification pending)
+**Merged:** ✅ כן — PR #580, commit `f38c5e4` (09/08/2026), אומת ב-grep על `origin/main`.
+**WIRED:** ✅ כן — `_log_result()` static method ב-`core/runtime_schema_provider.py` emits `[RuntimeSchemaProvider] result table=... source=... mode=...` unconditionally לכל 4 sources (live/cached/snapshot/seed). `[IngressEnvelope]` marker emitted ב-2 בנייה נקודות ב-`app.py:3631`. Code-tested ✅ (`test_runtime_schema_provider.py`).
+**Deployed:** ❌ לא עדיין — PR merged to `main` אבל commit שלו לא נכנס עדיין לפריסה אחת שהיא "live". הפריסה אחרונה (`08:32`) היא `cec3f83` (TC9), שקודם ל-`f38c5e4`.
+**Runtime Verified:** ❌ לא עדיין — צריך deploy + ייצוא Render log שיראה את הסימנים החדשים בפועל.
+
+### C188 — PR #579: TC7/RP5 execution-shadow wiring, MERGED + WIRED, RUNTIME VERIFIED shadow (09/08/2026 audit)
+**Merged:** ✅ כן — PR #579 (supersedes #576), commit `2603b44`, אומת ב-grep על `origin/main`.
+**WIRED:** ✅ כן — `project_evidence_result()` קרוי מ-`_persist_execution_status()` ב-`core/action_gateway.py`, gated by `get_evidence_finalizer_state() in ("shadow","enforce")`. `FEATURE_EVIDENCE_FINALIZER` code default OFF.
+**Deployed:** ✅ כן — Render live per `RUNTIME_CAPABILITY_AUDIT_20260809.md` (09/08/2026 evidence from Production/Staging logs, spanning 2026-08-02–09/08). Log entries `[EvidenceFinalizerShadow] state=shadow` observed בפרודקשן ובסטייג'ינג.
+**Runtime Verified:** ✅ SHADOW VERIFIED — ראיות log אמיתיות שצפו בשני environments. זו RP4 shadow-comparison logging (לא claim-authorization enforcement). **Blocker for RP5 enforcement:** לא "להדליק shadow" (כבר בפעולה עם ראיות production אמיתיות), אלא לאסוף דוגמאות sufficient מ-B2/B3 classification states כדי להרשות החלטת enforcement — מעבר מ-shadow-only לשינוי `final_reply` בפועל. דורש ניטור operator מתמשך + אישור ממצא לפני שPR יישום RP5 יוכל להתחיל.
+
+### C189 — PA-01 Task Deterministic Paths (UPDATE_TASK/COMPLETE_TASK), clarification & status correction
+**Builders/Registry/Wiring Status:** קוד ממשי קיים וכן ממוזג (PR #564/#565/#567 core/router/): `build_update_task_proposal()` / `build_complete_task_proposal()` קיימים ב-`core/router/task_builders.py`; `prepare_task_proposal()` integration ב-`core/router/task_integration.py`; `TASK_OWNERSHIP` registry ב-`core/turn_coordinator_runtime.py` + `gateway_call()` wiring; `_queue_deterministic_task_update()` ב-`app.py:1045` + קריאה אמיתית `app.py:4369`.
+**Merged:** ✅ כן — (כל הקוד) יחידים, אומתו ב-grep על `origin/main`.
+**Gap הנשאר (לא "אין קוד"):** Router.py line 248–254 קובע `Handler.TOOL` רק עבור `Intent.CREATE_TASK` (דטרמיניסטי). עבור `Intent.UPDATE_TASK`/`COMPLETE_TASK` אין כלל-קלאסיפיקציה דומה ב-router — שום מקום לא משדרג להם `Handler.TOOL`, כך שהעצמה המחוברת ב-`app.py:4369` לעולם לא מגיעה מ-route החי. `RUNTIME_CAPABILITY_AUDIT_20260809.md` מאשר: Staging UPDATE_TASK observed with `handler=agent` (לא TOOL); COMPLETE_TASK אין ראיות חדשות.
+**Required Fix:** הוסף כלל-דטרמיניסטי ב-`core/router/router.py` (מקביל ל-CREATE_TASK במקום 254) שקובע `Handler.TOOL` עבור UPDATE_TASK/COMPLETE_TASK — תלוי על התנאים (intent match + role/domain gates + capable-this-turn check).
+
+---
+
+## Gap Summary (10/08/2026 close)
+
+**Closed:**
+- TC8 DEPLOYED ✅ (Render 03:56, 10/08)
+- TC9 DEPLOYED ✅ (Render 08:32, 10/08)
+- RP5 RUNTIME VERIFIED shadow ✅ (09/08 audit with production evidence)
+
+**Still Open:**
+- TC8/TC9/Track D RUNTIME VERIFIED (need fresh Render export post-deploy)
+- RP5 enforcement/RP5 full (not just shadow) — blocked on sufficient production sample accumulation across B2/B3 classification states + owner authorization before enforcement implementation PR
+- PA-01 UPDATE/COMPLETE handler routing (router.py gap)
+- F52 PR1/PR4/PR5/PR6/Lane-A Cross-Layer Impact Matrix compliance (structural gap)
