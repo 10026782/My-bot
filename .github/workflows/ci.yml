@@ -8,7 +8,24 @@ on:
 jobs:
   backend-ci:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: boss_bot_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d boss_bot_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
+      # Test-only PostgreSQL service for the durable turn-state contract.
+      # This is never a production or staging credential.
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/boss_bot_ci
       # PATCH 3B Step 6 prerequisite: these are NOT real credentials. A real
       # AIRTABLE_API_KEY/AIRTABLE_BASE_ID (secrets.*) used to be wired here,
       # and a test-isolation bug in test_emergency_stop_bootstrap.py (fixed
@@ -59,6 +76,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Initialize PostgreSQL schema
+        run: python -m core.database_migrations
+
       - name: Syntax check (compileall)
         run: python -m compileall -q .
 
@@ -80,7 +100,14 @@ jobs:
           set -e
           for f in test_*.py; do
             echo "::group::$f"
-            python "$f"
+            if [ "$f" = "test_phase_4b0_1a_atomic_claims.py" ]; then
+              # This infrastructure test intentionally verifies the no-DB
+              # fail-closed path; keep the CI service available to all other
+              # backend tests without changing that explicit scenario.
+              env -u DATABASE_URL python "$f"
+            else
+              python "$f"
+            fi
             echo "::endgroup::"
           done
 
