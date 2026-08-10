@@ -37,6 +37,7 @@ from core.action_contract_repository import (
 # memory_store).
 from core.action_resolution_event import ActionResolutionEvent, ActionResolutionOutcome
 from core.dispatcher_outcome import DispatcherOutcome
+from core.claim_authorization_shadow import observe_claim_authorization_shadow
 from core.evidence_projection import build_evidence_result, build_evidence_result_from_outcome
 from core.lifecycle_projection import build_action_lifecycle_result
 from core.router.ownership_contracts import ActionLifecycleResult, EvidenceResult
@@ -2051,12 +2052,18 @@ class ActionGateway:
                 pending = getattr(self._execution_shadow_tls, "pending", None)
                 self._execution_shadow_tls.pending = None
                 if pending is not None:
-                    _summary, _state = pending
+                    _summary, _state, _lifecycle_state = pending
                     try:
-                        observe_shadow_finalizer(
+                        _returned_text, _legacy_comparison = observe_shadow_finalizer(
                             result.safe_user_message, _summary,
                             state=_state, approval_prompt_sent=False,
                         )
+                        if _legacy_comparison is not None:
+                            observe_claim_authorization_shadow(
+                                _legacy_comparison,
+                                lifecycle_state=_lifecycle_state,
+                                state=_state,
+                            )
                     except Exception:
                         logger.debug(
                             "[TC7/RP5][ExecutionShadow] observation skipped: contract=%s",
@@ -3048,11 +3055,16 @@ class ActionGateway:
         _last_evidence_summary: TurnEvidenceSummary | None = None
         _last_evidence_state: str | None = None
         _last_evidence: EvidenceResult | None = None
+        # TC7-B2: the exact durable lifecycle status this call persists,
+        # carried alongside the evidence summary above -- never re-read from
+        # the ledger a second time. Scoped fresh to this one call, same as
+        # the fields above, so it can never leak between contracts.
+        _last_lifecycle_state: str | None = None
 
         def _persist_execution_status(
             status: str, *, dispatcher_outcome: DispatcherOutcome | None = None,
         ) -> bool:
-            nonlocal _last_evidence_summary, _last_evidence_state, _last_evidence
+            nonlocal _last_evidence_summary, _last_evidence_state, _last_evidence, _last_lifecycle_state
             try:
                 persisted = self._ledger.update_status(contract.contract_id, status)
             except ActionContractTransitionError as exc:
@@ -3139,6 +3151,11 @@ class ActionGateway:
                         _summary.record_unverified_effect()
                     _last_evidence_summary = _summary
                     _last_evidence_state = _rp5_state
+                    # TC7-B2: `status` is the exact value just durably
+                    # persisted above via self._ledger.update_status() --
+                    # the same WS2/TC6 lifecycle vocabulary
+                    # core.lifecycle_projection produces, no translation.
+                    _last_lifecycle_state = status
             return True
 
         def _finish(text: str) -> str:
@@ -3163,13 +3180,21 @@ class ActionGateway:
             contract."""
             if _last_evidence_summary is not None and _last_evidence_state is not None:
                 if getattr(self._execution_shadow_tls, "defer", False):
-                    self._execution_shadow_tls.pending = (_last_evidence_summary, _last_evidence_state)
+                    self._execution_shadow_tls.pending = (
+                        _last_evidence_summary, _last_evidence_state, _last_lifecycle_state,
+                    )
                 else:
                     try:
-                        observe_shadow_finalizer(
+                        _returned_text, _legacy_comparison = observe_shadow_finalizer(
                             text, _last_evidence_summary,
                             state=_last_evidence_state, approval_prompt_sent=False,
                         )
+                        if _legacy_comparison is not None:
+                            observe_claim_authorization_shadow(
+                                _legacy_comparison,
+                                lifecycle_state=_last_lifecycle_state,
+                                state=_last_evidence_state,
+                            )
                     except Exception:
                         logger.debug(
                             "[TC7/RP5][ExecutionShadow] observation skipped: contract=%s",
