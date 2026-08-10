@@ -258,22 +258,27 @@
     },
     {
       "id": "decision.cross_layer_authority",
-      "name": "Cross-layer authority matrix is mandatory",
+      "name": "Cross-layer assessment is mandatory; full matrix is risk-triggered",
       "type": "decision",
       "status": "active",
       "authority_level": "canonical_contract",
       "source_of_truth": {
         "is_authority": true,
         "scope": "changes spanning reasoning, routing, approvals, tools, UX, or evidence",
-        "precedence": "complete impact matrix and proof of non-impact before implementation"
+        "precedence": "mandatory assessment before implementation; reviewed full matrix only for defined architectural-risk triggers; uncertainty fails closed"
       },
       "owner": "governance",
       "code_paths": [],
       "test_paths": [],
       "canonical_docs": [
         {
+          "path": "docs/governance/CROSS_LAYER_GOVERNANCE_REVISED_PLANNING_GATE.md",
+          "role": "current cross-layer classification and review policy",
+          "status": "active"
+        },
+        {
           "path": "docs/architecture/CROSS_LAYER_AUTHORITY_CONTRACT_V1.md",
-          "role": "cross-layer authority contract",
+          "role": "architectural ownership boundaries and prohibitions",
           "status": "active"
         }
       ],
@@ -283,7 +288,8 @@
       "last_verified_commit": "59e74be",
       "confidence": 1.0,
       "notes": [
-        "Layer numbering aliases must not overwrite semantic ownership boundaries."
+        "Layer numbering aliases must not overwrite semantic ownership boundaries.",
+        "The full matrix is conditional; local and single-layer changes use the revised gate classifications."
       ]
     },
     {
