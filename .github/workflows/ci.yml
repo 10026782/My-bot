@@ -100,7 +100,14 @@ jobs:
           set -e
           for f in test_*.py; do
             echo "::group::$f"
-            python "$f"
+            if [ "$f" = "test_phase_4b0_1a_atomic_claims.py" ]; then
+              # This infrastructure test intentionally verifies the no-DB
+              # fail-closed path; keep the CI service available to all other
+              # backend tests without changing that explicit scenario.
+              env -u DATABASE_URL python "$f"
+            else
+              python "$f"
+            fi
             echo "::endgroup::"
           done
 
