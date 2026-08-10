@@ -1,5 +1,12 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
+
+**CORE status (10/08/2026):** `CORE v1 — COMPLETE` / `READY TO FREEZE`.
+Canonical current source:
+`docs/audit/CORE_COMPLETION_AUDIT_20260810.md`. The four-layer verdict is
+**PARTIAL / NON-BLOCKING**; formal Layer 2 TurnCoordinator implementation is
+not complete. Freeze remains an owner/governance decision. Dated status
+snapshots below are historical evidence and do not override this audit.
 עודכן: 10/08/2026 — **F15 (crm.py → airtable_gateway) — עדות Staging אמיתית
 נוספה**: `scripts/verify_f15_staging.py` הורץ מ-Render staging shell,
 `run_id=f15-20260810T142420Z-01c6bc0a1f`, `F15 — COMPLETE AND STAGING
