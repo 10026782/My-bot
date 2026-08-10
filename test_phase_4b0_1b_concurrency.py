@@ -29,7 +29,8 @@ Expected results (all 17 tests):
 Verification checklist after staging test run:
   ☐ All 17 tests pass
   ☐ Exactly one ACQUIRED per contract
-  ☐ All other callers get ALREADY_CLAIMED
+  ☐ Same-key retries get ALREADY_CLAIMED; different identities get
+    CONTRACT_IDENTITY_CONFLICT
   ☐ Durable row visible in PostgreSQL (status=executing)
   ☐ Idempotency key prevents duplicates
   ☐ Fail-closed: unavailable never acquired
@@ -216,10 +217,13 @@ def test_concurrent_claims_real_postgresql():
     acquired = [r for r in results if r.is_acquired()]
     chk(f"Real PostgreSQL concurrency: exactly one acquired (got {len(acquired)})", len(acquired) == 1)
 
-    # Verify other got already_claimed
-    already_claimed_results = [r for r in results if r.is_already_claimed()]
-    chk("Real PostgreSQL concurrency: non-winner got already_claimed",
-        len(already_claimed_results) == 1)
+    # Different idempotency keys for the same contract are a distinct
+    # execution identity and must fail closed as a contract identity conflict.
+    identity_conflict_results = [
+        r for r in results if r.is_contract_identity_conflict()
+    ]
+    chk("Real PostgreSQL concurrency: non-winner got contract_identity_conflict",
+        len(identity_conflict_results) == 1)
 
     # Verify claim has correct status in DB
     if acquired:
@@ -356,8 +360,14 @@ def test_strict_concurrency_with_barrier():
     acquired = [r for _, r in results if r.is_acquired()]
     chk(f"Strict concurrency: exactly one acquired (got {len(acquired)})", len(acquired) == 1)
 
-    already_claimed = [r for _, r in results if r.is_already_claimed()]
-    chk(f"Strict concurrency: exactly one already_claimed (got {len(already_claimed)})", len(already_claimed) == 1)
+    identity_conflicts = [
+        r for _, r in results if r.is_contract_identity_conflict()
+    ]
+    chk(
+        "Strict concurrency: exactly one contract_identity_conflict "
+        f"(got {len(identity_conflicts)})",
+        len(identity_conflicts) == 1,
+    )
 
 
 # ══════════════════════════════════════════════════════════════════
