@@ -966,11 +966,11 @@ def validate_import_payment(advance_pct: float, balance_pct: float) -> tuple[boo
 # ══════════════════════════════════════════════════
 
 class ContactType:
-    CLIENT      = "client"
-    SUPPLIER    = "supplier"
-    PARTNER     = "partner"
-    LAWYER      = "expert"
-    ACCOUNTANT  = "expert"
+    CLIENT      = "Client"
+    SUPPLIER    = "Supplier"
+    PARTNER     = "Partner"
+    LAWYER      = "Lawyer"
+    ACCOUNTANT  = "Accountant"
 
 
 class ContactRoleCategory:
