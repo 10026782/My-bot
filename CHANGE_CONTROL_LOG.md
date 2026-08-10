@@ -2035,7 +2035,7 @@ Deploy gap closure and runtime verification for TC8/TC9/Track D/RP5.
 **Merged:** ✅ כן — PR #579 (supersedes #576), commit `2603b44`, אומת ב-grep על `origin/main`.
 **WIRED:** ✅ כן — `project_evidence_result()` קרוי מ-`_persist_execution_status()` ב-`core/action_gateway.py`, gated by `get_evidence_finalizer_state() in ("shadow","enforce")`. `FEATURE_EVIDENCE_FINALIZER` code default OFF.
 **Deployed:** ✅ כן — Render live per `RUNTIME_CAPABILITY_AUDIT_20260809.md` (09/08/2026 evidence from Production/Staging logs, spanning 2026-08-02–09/08). Log entries `[EvidenceFinalizerShadow] state=shadow` observed בפרודקשן ובסטייג'ינג.
-**Runtime Verified:** ✅ SHADOW VERIFIED — ראיות log אמיתיות שצפו בשני environments. זו RP4 shadow-comparison logging (לא claim-authorization enforcement). RP5 enforcement (שינוי `final_reply` בפועל בהתבסס על ה-finalizer) עדיין לא proven/verified.
+**Runtime Verified:** ✅ SHADOW VERIFIED — ראיות log אמיתיות שצפו בשני environments. זו RP4 shadow-comparison logging (לא claim-authorization enforcement). **Blocker for RP5 enforcement:** לא "להדליק shadow" (כבר בפעולה עם ראיות production אמיתיות), אלא לאסוף דוגמאות sufficient מ-B2/B3 classification states כדי להרשות החלטת enforcement — מעבר מ-shadow-only לשינוי `final_reply` בפועל. דורש ניטור operator מתמשך + אישור ממצא לפני שPR יישום RP5 יוכל להתחיל.
 
 ### C189 — PA-01 Task Deterministic Paths (UPDATE_TASK/COMPLETE_TASK), clarification & status correction
 **Builders/Registry/Wiring Status:** קוד ממשי קיים וכן ממוזג (PR #564/#565/#567 core/router/): `build_update_task_proposal()` / `build_complete_task_proposal()` קיימים ב-`core/router/task_builders.py`; `prepare_task_proposal()` integration ב-`core/router/task_integration.py`; `TASK_OWNERSHIP` registry ב-`core/turn_coordinator_runtime.py` + `gateway_call()` wiring; `_queue_deterministic_task_update()` ב-`app.py:1045` + קריאה אמיתית `app.py:4369`.
@@ -2054,6 +2054,6 @@ Deploy gap closure and runtime verification for TC8/TC9/Track D/RP5.
 
 **Still Open:**
 - TC8/TC9/Track D RUNTIME VERIFIED (need fresh Render export post-deploy)
-- RP5 enforcement/RP5 full (not just shadow) — blocked on `FEATURE_EVIDENCE_FINALIZER=shadow` operator action + production shadow sample accumulation
+- RP5 enforcement/RP5 full (not just shadow) — blocked on sufficient production sample accumulation across B2/B3 classification states + owner authorization before enforcement implementation PR
 - PA-01 UPDATE/COMPLETE handler routing (router.py gap)
 - F52 PR1/PR4/PR5/PR6/Lane-A Cross-Layer Impact Matrix compliance (structural gap)
