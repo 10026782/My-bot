@@ -73,7 +73,16 @@
   `airtable_add`→Contacts, `tma_write` Contacts POST) — **עדיין אין gate מרכזי**
   ב-`ActionGateway`/dispatcher; נתיבי agent-tool אחרים ל-Contacts לא מוגנים.
 - F52 Unified Status Formatter — shadow/comparison בלבד, מאחורי flag כבוי.
-- TC10 — עדיין PLANNING, אפס קוד; תלויות (TC8/TC9) כעת סגורות.
+- **TC10 — עודכן (מסבב תיעוד זה)**: כבר לא PLANNING/אפס-קוד. הרמוניית
+  isolated regression נבנתה (`scripts/run_isolated_regression.py` +
+  `scripts/regression_matrix.py` + `scripts/staging_identity.py`), תוקן
+  ה-root-cause של זיהום ה-BUG-122 ב-`scripts/verify_tc8_staging.py`
+  (הרצת FULL_REGRESSION כבר לא נעשית מול staging בכלל), ונוסף
+  `scripts/verify_tc9_staging.py` (canary ל-MessageContract, טרם הורץ מול
+  staging אמיתי — נדרשים secrets אמיתיים). ראו
+  `docs/architecture/turn-coordinator-full/TC10_OPERATIONAL_VERIFICATION_HARNESS.md`.
+  סטטוס: **IMPLEMENTATION COMPLETE / STAGING VERIFICATION PENDING** — אימות
+  Staging אמיתי (TC9 canary + TC8 PG checks) עדיין לא בוצע בסבב הזה.
 
 **חסום:** BUG-130/134/136/137/140/150/152 (וכן 126/127B/127C/138/139/142/148) —
 ממתינים להחלטת owner; חלקם חסומים ע"י `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`.

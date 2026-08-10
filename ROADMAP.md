@@ -1,5 +1,23 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
+עודכן: 10/08/2026 — **TC10 operational verification harness (implementation
+complete, staging verification pending)**: `scripts/run_isolated_regression.py`
++ `scripts/regression_matrix.py` + `scripts/staging_identity.py` (new
+isolated-regression mode, immune to ambient credentials), `scripts/verify_tc9_staging.py`
+(new TC9 MessageContract staging canary — written, not yet run against real
+staging), `scripts/verify_tc8_staging.py` fixed to stop running the full
+regression matrix against real shared staging Airtable (the root cause of
+the BUG-122 contamination TC8 handed off). The isolated runner's own first
+version regressed 2 test files by over-scoping its credential override
+(Telegram, not just Airtable); caught by this PR's real CI + review,
+root-caused and fixed within the same PR — 21/21 full matrix, stable
+across 2 repeated runs, confirmed both locally and by this PR's own real
+GitHub Actions `backend-ci` run on the corrected commit (`2b6ecb3`, run
+31362450916, `FINAL: PASS`). See
+`docs/architecture/turn-coordinator-full/TC10_OPERATIONAL_VERIFICATION_HARNESS.md`
+for the full audit/evidence. No ActionGateway/TC7/TC8/TC9/F14/router/
+approval-policy runtime code changed.
+
 עודכן: 10/08/2026 — **תיעוד PR #572–#588 (17 מספרי PR ברצף, כולל #576 שהוחלף
 ע"י #579 באותו branch — לא deliverable נפרד; פער-תיעוד, נסגר ישירות מ-`git log
 origin/main`, לא הועלה כ-PR נפרד ע"י מי שביצע אותם):** אומת ישירות ב-`git log`/
