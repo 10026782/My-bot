@@ -157,7 +157,8 @@ def verify() -> dict:
 
         # Contact create + duplicate check + update. crm_add_contact delegates to
         # find_or_create_contact, which is the F14 deduplication authority.
-        phone = f"+972599{uuid.uuid4().hex[:6]}"
+        phone_suffix = str(uuid.uuid4().int % 1_000_000).zfill(6)
+        phone = f"+972599{phone_suffix}"
         name = f"F15 staging {run['run_id']}"
         if _assert_unique(airtable_gateway.at_list_by_formula, Tables.CONTACTS, ContactFields.PHONE, phone):
             raise RuntimeError("unique Contact phone was already present before the run")
