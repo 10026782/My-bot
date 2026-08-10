@@ -384,7 +384,7 @@ def test_estimate_all_profiles_covers_every_profile_sorted(catalog):
     assert len(results) == len(catalog.profiles)
     for r in results:
         assert isinstance(r, BundleEstimate)
-        assert r.fits == (r.actual_tokens <= r.token_budget)
+        assert r.fits == (r.actual_tokens <= r.token_budget and r.selected_documents <= r.document_budget)
 
 
 def test_document_budget_is_enforced(catalog):
