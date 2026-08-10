@@ -1,5 +1,12 @@
 # BOSS Bot — ROADMAP
 **מקור האמת היחיד. כל מסמך תכנון אחר הוא ARCHIVE.**
+עודכן: 10/08/2026 — **F15 (crm.py → airtable_gateway) — עדות Staging אמיתית
+נוספה**: `scripts/verify_f15_staging.py` הורץ מ-Render staging shell,
+`run_id=f15-20260810T142420Z-01c6bc0a1f`, `F15 — COMPLETE AND STAGING
+VERIFIED`, כל 13 gates `PASS` (כולל `f14_gate_path` — אישור אינטגרציה חיה
+עם F14 Contact Gate, ו-`crm_static_no_direct_http_writes`). פירוט מלא
+בסעיף F15 למטה.
+
 עודכן: 10/08/2026 — **TC10 operational verification harness (implementation
 complete, staging verification pending)**: `scripts/run_isolated_regression.py`
 + `scripts/regression_matrix.py` + `scripts/staging_identity.py` (new
@@ -1647,7 +1654,25 @@ F14-A מוזג ב-PR #568. F14-B1 מעביר את `crm_add_contact()` ואת `le
 מה: החלפת `_post` / `_patch` הישירים ב-`crm.py` בקריאות ל-`airtable_gateway.upsert()`.
 סיבה: `crm.py` עוקף את כלל הברזל — "ALL writes go through airtable_gateway.py". drift מודע.
 Piggyback trigger: כשנוגעים ב-`crm.py` לסיבה אחרת (F14 או lead→contact).
-קבצים: crm.py, airtable_gateway.py
+קבצים: crm.py, airtable_gateway.py, `scripts/verify_f15_staging.py` (חדש)
+
+**עדות Staging אמיתית (10/08/2026)** — `F15_STAGING_NON_PRODUCTION=true
+F15_STAGING_ENVIRONMENT=staging python3 scripts/verify_f15_staging.py`,
+הורץ מ-Render staging shell, `run_id=f15-20260810T142420Z-01c6bc0a1f`.
+תוצאה: `F15 — COMPLETE AND STAGING VERIFIED`, כל 13 ה-gates `PASS`:
+`staging_preflight`, `gateway_table_preflight`,
+`contact_create_id`/`contact_create_gateway`, `contact_gate_no_duplicate`
+(בדיקת כפילות אמיתית — יצירה שנייה עם אותו טלפון החזירה `status='existing'`
+על אותו `record_id`, לא רשומה חדשה), `contact_update_same_id`,
+`deal_create_gateway`/`deal_update_same_id`,
+`payment_create_gateway`/`payment_update_same_id`,
+`crm_static_no_direct_http_writes` (אימות סטטי — `crm.py` לא מכיל
+`httpx.post()`/`httpx.patch()` ישירים יותר), ו-`f14_gate_path` (יצירת
+Contact עברה דרך `crm_add_contact`/`find_or_create_contact` — מאשר
+אינטגרציה חיה עם F14 Contact Gate, לא רק F15 בבידוד). שלוש רשומות אמיתיות
+נוצרו ב-Airtable staging (Contact `recysbBSKfxQ9uRoC`, Deal
+`receo6WZ06VzcOIzS`, Payment `recrxDHC47wCmbG1t`) ונוקו בסוף הריצה
+(`cleanup_owned_records: PASS`, 3/3).
 
 ### F12 — Model Provider Adapter
 ⚠️ **STATUS: ABSORBED BY F13 — לא ייבנה בנפרד.** הכרעת בעלים סופית (07/07/2026): F13 סופגת את F12; F12 נגנז כתכנון עצמאי. נשאר בתיעוד כהיסטוריה/הקשר-כוונה בלבד — ה-`providers/` overlap שתועד למטה (F13) הוכרע לטובת F13.
