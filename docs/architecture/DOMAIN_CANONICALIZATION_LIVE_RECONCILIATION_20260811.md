@@ -2,9 +2,8 @@
 
 Base inspected: `app4bcgoX7t0HUVnm`.
 
-Status: **LIVE SCHEMA/DATA VERIFIED** for read-only inspection. Mutation is
-blocked because the connected Airtable update-field operation rejects select
-option updates; no live writes were performed.
+Status: **LIVE SCHEMA/DATA VERIFIED** by read-only inspection after the manual
+Airtable updates. No Airtable writes were performed by this verification.
 
 ## Canonical business domain
 
@@ -13,55 +12,38 @@ option updates; no live writes were performed.
 `crm` and `internal` remain Router-only namespaces. Decisions remain a
 separate Decision Hub taxonomy.
 
-## Live inventory
+## Live fields verified
 
-| Table / field | Live type and options | Record values / count | Classification |
-|---|---|---|---|
-| Projects.Domain | singleSelect: General, Saas, Real Estate␠, Import, Recruitment | 0 | legacy storage; no records |
-| Loans.Domain | singleSelect: Finance | 0 | incomplete/legacy; no records |
-| Contacts.Domain | singleSelect: SaaS␠, General, Real Estate␠, ␠Recruitment␠, Import | empty 421 | legacy storage; no values to migrate |
-| Deals.Domain | singleSelect: Real Estate␠, General, SaaS, Recruitment, Import | empty 2 | legacy storage; no values to migrate |
-| Tasks.Domain | singleSelect: Real Estate, Income Properties, Recruitment, Import, Saas | empty 119, Recruitment 2 | legacy task vocabulary; preserve |
-| Expenses.domain | singleSelect: ␠General, Real Estate␠, SaaS␠, Recruitment␠, Import | empty 1 | legacy storage; no values to migrate |
-| Payments.domain | singleSelect: ␠General, SaaS␠, Real Estate␠, Recruitment␠, Import | empty 1 | legacy storage; no values to migrate |
-| Learnings.domain | singleSelect: General, Real Estate␠, SaaS␠, Recruitment, Import | empty 1 | legacy storage; no values to migrate |
-| Leads.domain | singleLineText | recruitment 19, general 3 | canonical business domain |
-| Leads.Domain category | singleSelect classification | empty 22 | different semantics; untouched |
-| Leads.Domain risk assessment | singleSelect classification | empty 22 | different semantics; untouched |
-| Leads.Domain summary | aiText from Leads.domain | empty/stale 22 | different semantics; untouched |
-| ProjectsHub.domain | singleSelect: saas, real_estate, import, recruitment, finance, general | import 1, finance 1, recruitment 1, saas 1, real_estate 1 | canonical business domain |
-| Assets.Domain | singleSelect: Finance, Personal | Personal 7, empty 2 | different asset classification; untouched |
-| Business Memory.Domain | singleSelect: General, Real Estate␠, Saas, Import, Media, Finance | empty 34 | legacy storage; add Recruitment option when write capability exists |
-| Interaction Log.Domain | singleSelect: ␠General, ␠SaaS␠, Real Estate␠, Recruitment␠, Import | empty 385 | legacy storage; no values to migrate |
-| Ventures.Domain | singleSelect: Real Estate, Import, SaaS, Recruitment, General | Import 1, Recruitment 1, General 1 | legacy storage; adapter required |
-| Lead Events.Domain | singleSelect: real_estate, import, recruiting, general, saas, recruitment, media, crm | general 39, recruitment 14, real_estate 8 | canonical records; `recruiting` and `crm` remain legacy options |
-| Media Files.Domain | singleLineText | general 9, empty 1 | canonicalized on writes; keep free text |
-| Marketing Demand.Domain | singleSelect: real_estate, import, media, saas, finance, general | 0 | canonical; add recruitment option |
-| TRAFFIC_SOURCES.Suitable Domains | multipleSelects: real_estate, import, media, saas, finance, general | 0 | canonical business-domain eligibility; add recruitment |
-| Decisions.Domain | singleSelect: ייבוא, גיוס, שותפות, כללי, media | 0 | different Decision Hub taxonomy; untouched |
+| Table / field | Verified live options | Records | Result |
+|---|---|---:|---|
+| Marketing Demand.Domain | `real_estate`, `import`, `media`, `saas`, `finance`, `general`, `recruitment` | 0 | canonical option present |
+| TRAFFIC_SOURCES.Suitable Domains | `real_estate`, `import`, `media`, `saas`, `finance`, `general`, `recruitment` | 0 | canonical eligibility option present |
+| Business Memory.Domain | `General`, `Real Estate `, `Saas`, `Import`, `Media`, `Finance`, `recruitment` | 34, empty | live recruitment storage option is lowercase |
+| Lead Events.Domain | includes `recruitment` and legacy `recruiting` | 61 | new writes use canonical `recruitment`; legacy option retained |
 
-Additional domain-shaped fields `email_domain`, `actor_domain_id`, and
-`actor_allowed_domains` are not business-domain fields and were not migrated.
+## Business Memory adapter contract
 
-## Required mutation preview
+`domain_utils.py` keeps `recruitment` as the canonical business value.
 
-| Field | Current | Records affected | Proposed change | Rollback |
-|---|---|---:|---|---|
-| Marketing Demand.Domain | six canonical choices | 0 | add `recruitment` | restore six-choice list |
-| TRAFFIC_SOURCES.Suitable Domains | six canonical choices | 0 | add `recruitment` | restore six-choice list |
-| Business Memory.Domain | six legacy display choices | 0 | add `Recruitment` legacy storage choice | restore six-choice list |
+- `business_domain_to_airtable(..., vocabulary="business_memory_legacy")`
+  emits live lowercase `recruitment`.
+- `business_domain_from_airtable(..., vocabulary="business_memory_legacy")`
+  accepts lowercase `recruitment` and legacy title-case `Recruitment` through
+  the adapter's case-insensitive read path.
+- No Marketing-local domain mapping was introduced.
 
-No records require rewriting. Lead Events `recruiting` remains a read-compatible
-legacy option because its record count is zero and removing it would shorten the
-compatibility window without benefit.
+## Post-manual-update status
 
-## Compatibility and exceptions
+No schema mutation remains pending for these D1 fields. No records require
+rewriting. Lead Events `recruiting` remains a read-compatible legacy option;
+its record count is zero, and it is not emitted by current writers.
 
-- `domain_utils.py` accepts canonical and observed aliases and provides explicit
-  `business_memory_legacy`, `venture_legacy`, and `decision_legacy` adapters.
-- Marketing code files named in the brief (`marketing_gateway.py`,
-  `marketing_domain_profiles.py`, `marketing_brief_composer.py`, and
-  `cmd_marketing.py`) are absent from this worktree, so M1 code compatibility
-  could not be runtime-checked here.
-- No table, field, field type, unrelated option, or Decision vocabulary was
-  changed.
+Other legacy display values in Ventures, Tasks, and Business Memory remain
+behind their explicit adapters. Decision Hub values and unrelated fields such
+as Assets.Domain were not migrated.
+
+## Scope notes
+
+Marketing implementation files named in the brief were absent from this
+worktree, so no M1 runtime behavior was added or changed here. This document
+records only the D1 live schema/data reconciliation.
