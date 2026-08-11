@@ -361,6 +361,35 @@ def check_decision_hub_call_sites() -> str:
     return f"{len(DECISION_HUB_ENTRYPOINTS)} Decision Hub entrypoints match their declared wiring state"
 
 
+def check_marketing_capture_ownership() -> str:
+    """F23: a pending /marketing_new MarketingCaptureState must claim the
+    user's next text before run_agent() ever sees it (mirrors cmd_update's
+    has_pending_text_capture() ownership check) — otherwise every wizard
+    reply silently leaks to the general Agent. Static source-order check
+    (no live webhook harness exists) so this can't regress unnoticed if
+    _webhook_telegram_impl is reordered or the check is deleted.
+    """
+    source = (ROOT / "app.py").read_text(encoding="utf-8")
+
+    impl_start = source.index("def _webhook_telegram_impl():")
+    next_def = source.index("\ndef ", impl_start + 1)
+    impl_body = source[impl_start:next_def]
+
+    ownership_pos = impl_body.find("has_pending_capture(")
+    # "reply = run_agent(" (the actual call), not just any "run_agent(" —
+    # several comments above it mention "run_agent()" in prose and would
+    # otherwise match first.
+    run_agent_pos = impl_body.find("reply = run_agent(")
+
+    assert ownership_pos != -1, "cmd_marketing.has_pending_capture(...) call missing from _webhook_telegram_impl"
+    assert run_agent_pos != -1, "the 'reply = run_agent(...)' call missing from _webhook_telegram_impl"
+    assert ownership_pos < run_agent_pos, (
+        "has_pending_capture(...) must be checked before run_agent(...) in "
+        "_webhook_telegram_impl, or pending Marketing wizard replies leak to the Agent"
+    )
+    return "has_pending_capture() ownership check precedes run_agent() in _webhook_telegram_impl"
+
+
 def main() -> int:
     checks = [
         ("Import test", check_imports),
@@ -370,6 +399,7 @@ def main() -> int:
         ("Daily digest sanity", check_daily_digest),
         ("Safety checks", check_safety),
         ("Decision Hub call-site governance", check_decision_hub_call_sites),
+        ("Marketing capture ownership governance", check_marketing_capture_ownership),
     ]
 
     print("BOSS automated smoke tests")
