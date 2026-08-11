@@ -7,7 +7,26 @@ Canonical current source:
 **PARTIAL / NON-BLOCKING**; formal Layer 2 TurnCoordinator implementation is
 not complete. Freeze remains an owner/governance decision. Dated status
 snapshots below are historical evidence and do not override this audit.
-עודכן: 10/08/2026 — **F15 (crm.py → airtable_gateway) — עדות Staging אמיתית
+עודכן: 11/08/2026 — **תיעוד PR #595–#597 (פער-תיעוד, נסגר ישירות מ-`git log
+origin/main`, לא הועלה כ-PR נפרד ע"י מי שביצע אותם):** אומת ישירות ב-`git
+log`/`git show --stat` על `origin/main` (`f69d7b3`), לא לפי claim. תמצית
+(לפירוט מלא ראו `CHANGELOG.md`, 11/08/2026): **PR #595 — PA-01**: `Intent.
+UPDATE_TASK`/`COMPLETE_TASK` מקבלים כעת `Handler.TOOL` דטרמיניסטי דרך
+`parse_deterministic_task_reference()` חדש ב-`core/router/router.py` (אותה
+תבנית fail-closed כמו CREATE_TASK) — סגר את ה-CORE blocker האחרון שנותר;
+הקוד ה-downstream (`app.py`'s `_queue_deterministic_task_update()`) כבר היה
+קיים אך לא היה נגיש מניתוב חי. ללא flag; פרוס ל-Production 15:57 UTC
+10/08/2026 (מאומת מול Render API), Staging-verified מ-15:30 UTC (pre-merge,
+content-identical). **PR #596 — Canonical CORE Completion Audit**
+(`docs/audit/CORE_COMPLETION_AUDIT_20260810.md`) — verdict סופי: `CORE v1 —
+COMPLETE` / `READY TO FREEZE` (freeze עצמו נשאר החלטת owner, לא מוכרז).
+שני פערים לא-חוסמים נותרים: main's CI אדום על שער ה-freshness של Context
+Librarian (governance, לא regression פונקציונלי — דורש
+`refresh-after-merge --apply`), ו-Layer 2 (`TurnCoordinator` פורמלי) עדיין
+ללא מימוש כלל בקוד — מוחלף היום ע"י `router.py::route_request()`. מסמך זה
+הוא ה-CORE status הקנוני המצוטט בראש הקובץ הזה (שורות 4–9). **PR #597** —
+תיקון טסט חד-שורתי ל-Context Librarian budget assertion, ללא שינוי runtime.
+עודכן קודם: 10/08/2026 — **F15 (crm.py → airtable_gateway) — עדות Staging אמיתית
 נוספה**: `scripts/verify_f15_staging.py` הורץ מ-Render staging shell,
 `run_id=f15-20260810T142420Z-01c6bc0a1f`, `F15 — COMPLETE AND STAGING
 VERIFIED`, כל 13 gates `PASS` (כולל `f14_gate_path` — אישור אינטגרציה חיה
