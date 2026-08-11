@@ -12,24 +12,17 @@ from __future__ import annotations
 
 import logging
 
+from domain_utils import normalize_business_domain
+
 logger = logging.getLogger(__name__)
 
-# Lead Events.Domain live singleSelect options (verified via Airtable MCP
-# get_table_schema against the live base) that this writer is allowed to
-# pass through as-is. Leads.domain is a free-text field; any value outside
-# this allowlist (including empty/missing) falls back to "general" rather
-# than inventing a new select option.
-_ALLOWED_DOMAINS = frozenset({
-    "real_estate", "saas", "import", "recruitment", "general", "media", "crm",
-})
 _FALLBACK_DOMAIN = "general"
 
 
 def _normalize_domain(raw: str | None) -> str:
     if not raw or not isinstance(raw, str):
         return _FALLBACK_DOMAIN
-    normalized = raw.strip().lower()
-    return normalized if normalized in _ALLOWED_DOMAINS else _FALLBACK_DOMAIN
+    return normalize_business_domain(raw) or _FALLBACK_DOMAIN
 
 
 def _resolve_domain(lead_id: str, lead_domain: str | None) -> str:

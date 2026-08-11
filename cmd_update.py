@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 # Business Memory יתאמו בפועל ל-identity.domain_id בעת context injection.
 
 DOMAINS = [
+    ("Recruitment", "recruitment"),
     ("נדל\"ן", "real_estate"),
     ("ייבוא",   "import"),
     ("מדיה",    "media"),
@@ -364,6 +365,7 @@ _VALID_TAGS = {
 # בכלל). בזרימה הרגילה הערך החי נלקח דינמית מ-resolve_business_memory_domain(),
 # לא מהמילון הזה — ראה BUG-081 (5 תיקונים חוזרים על מיפוי סטטי שיצא מסונכרן).
 _DOMAIN_TO_AIRTABLE = {
+    "recruitment": "recruitment",
     "real_estate": "Real Estate",
     "import":      "Import",
     "media":       "Media",

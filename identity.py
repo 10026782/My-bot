@@ -47,9 +47,10 @@ class Domain:
     MEDIA       = "media"
     SAAS        = "saas"
     FINANCE     = "finance"
+    RECRUITMENT = "recruitment"
     GENERAL     = "general"
 
-    ALL = {REAL_ESTATE, IMPORT, MEDIA, SAAS, FINANCE, GENERAL}
+    ALL = {REAL_ESTATE, IMPORT, MEDIA, SAAS, FINANCE, RECRUITMENT, GENERAL}
 
 
 # ══════════════════════════════════════════════════

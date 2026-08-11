@@ -14,12 +14,15 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+from domain_utils import normalize_business_domain
+
 logger = logging.getLogger(__name__)
 
 _IL_TZ = ZoneInfo("Asia/Jerusalem")
 
 # תיוג ידידותי לפי domain — תואם ל-Domain.ALL / cmd_update.py's DOMAINS
 _DOMAIN_LABELS = {
+    "recruitment": "Recruitment",
     "real_estate": "🏠 נדל\"ן",
     "import":      "📦 ייבוא",
     "media":       "📺 מדיה",
@@ -129,7 +132,7 @@ def _normalize_domain_key(raw_value: str) -> str:
     """
     if not raw_value:
         return "general"
-    return re.sub(r"\s+", "_", raw_value.strip().lower())
+    return normalize_business_domain(raw_value) or "general"
 
 
 def _group_by_domain(entries: list[dict]) -> dict[str, list[dict]]:

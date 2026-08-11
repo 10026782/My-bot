@@ -65,6 +65,9 @@ class Tables:
     EMERGENCY_WINDOW = "Emergency_Window"  # חריג מבוקר ל-High מהטלפון — ראה Approval_Policy_Spec.md
     # F16 — Media Layer
     MEDIA_FILES      = "Media Files"       # F16 — voice notes + file uploads (drive_url + metadata). Must be created manually in Airtable.
+    MARKETING_DEMAND = "Marketing Demand"  # M1 — existing live table; do not recreate
+    MARKETING_CREATIVES = "Marketing Creatives"  # M1 — existing live table; do not recreate
+    MARKETING_PUBLICATIONS = "Marketing Publications"  # M1 — existing live table; do not recreate
     # Decision Hub (Stage 0) — created manually in Airtable base app4bcgoX7t0HUVnm. See SPEC_Decision_Hub_Stage0.md.
     DECISIONS              = "Decisions"
     DECISION_EVENTS         = "Decision Events"
@@ -391,7 +394,7 @@ class BusinessMemoryFields:
     EVENT_TYPE      = "Event Type"      # Milestone|Decision|Crisis|Announcement|Learning|Other
     LEARNINGS_LINK  = "Related Learnings & Insights"
     TAGS            = "Tags"            # multi-select list field
-    DOMAIN          = "Domain"          # singleSelect — Airtable-confirmed live options
+    DOMAIN          = "Domain"          # canonical business domain; adapters handle legacy options
 
 
 class InteractionLogFields:
@@ -615,6 +618,56 @@ class MediaFileFields:
     CREATED_BY            = "Created By"
     TELEGRAM_FILE_ID      = "Telegram File ID"
     LINKED_LEAD           = "Linked Lead"         # multipleRecordLinks → Leads, always written as [rec_id]
+    LINKED_DEMAND         = "Linked Demand"       # existing live M1 field
+    LINKED_CREATIVE       = "Linked Creative"     # existing live M1 field
+    APPROVAL_STATUS       = "Approval Status"     # existing live M1 field
+
+
+class MarketingDemandFields:
+    """Existing live M1 table; schema declaration only, no M1 behavior."""
+    NAME              = "Demand Title"
+    DOMAIN            = "Domain"                 # canonical business domain
+    DEMAND_TYPE       = "Demand Type"            # profile selector, not a domain
+    TARGET_AUDIENCE   = "Target Audience"
+    LOCATION          = "Location"
+    GOAL              = "Goal"
+    CONSTRAINTS       = "Constraints"
+    CURRENT_STAGE     = "Current Stage"
+    NEXT_ACTION       = "Next Action"
+    STATUS            = "Status"
+    CREATIVES         = "Marketing Creatives"
+    PUBLICATIONS      = "Marketing Publications"
+    MEDIA_FILES       = "Media Files"
+
+
+class MarketingCreativesFields:
+    """Existing live M1 table; schema declaration only, no M1 behavior."""
+    NAME              = "Title"
+    LINKED_DEMAND     = "Linked Demand"
+    IDEA_1            = "Idea 1"
+    IDEA_2            = "Idea 2"
+    IDEA_3            = "Idea 3"
+    REVIEWER_NOTES    = "Reviewer Notes"
+    SELECTED_IDEA     = "Selected Idea"
+    SELECTION_STATUS  = "Selection Status"
+    BRIEF_USED        = "Brief Used"
+    PRODUCTION_HANDOFF = "Production Handoff"
+    MEDIA_FILES       = "Media Files"
+
+
+class MarketingPublicationFields:
+    """Existing live M1 table; schema declaration only, no M1 behavior."""
+    NAME              = "Title"
+    DEMAND            = "Demand"
+    ASSET             = "Asset"
+    CHANNEL           = "Channel"
+    PUBLISHED_AT      = "Published At"
+    SOURCE_CODE       = "Source Code"
+    RESPONSES         = "Responses"
+    QUALIFIED_RESPONSES = "Qualified Responses"
+    PASSED_FORWARD    = "Passed Forward"
+    SPEND             = "Spend"
+    NOTES             = "Notes"
 
 
 class ApprovalsFields:
@@ -1309,6 +1362,14 @@ class TrafficSourcesFields:
     STATUS       = "Status"
     NOTES        = "Notes"
     ROI          = "ROI"          # formula — (Revenue - Cost) / Cost
+    URL                 = "URL"
+    LOCATION            = "Location"
+    SUITABLE_DOMAINS    = "Suitable Domains"       # canonical business-domain multiple select
+    FREE_PAID           = "Free/Paid"
+    SUITABLE_DEMAND_TYPES = "Suitable Demand Types" # Demand Type taxonomy, not Domain
+    POSTING_RULES       = "Posting Rules"
+    LAST_PUBLISHED_AT   = "Last Published At"
+    QUALITY_NOTES       = "Quality Notes"
 
 
 # ══════════════════════════════════════════════════
@@ -1331,7 +1392,7 @@ class LeadEventFields:
     NAME         = "Name"           # Primary Field — כותרת האירוע
     LEAD_LINK    = "Lead"           # Linked record → Tables.LEADS
     EVENT_TYPE   = "Event Type"     # singleSelect — ראה LeadEventType
-    DOMAIN       = "Domain"         # singleSelect — domain שזוהה
+    DOMAIN       = "Domain"         # canonical business domain; legacy values read through domain_utils
     MESSAGE      = "Message"        # הודעה מלאה (עד 5000 תווים)
     SUMMARY      = "Summary"        # תקציר קצר (עד 200 תווים)
     CHANNEL      = "Channel"        # whatsapp | telegram
