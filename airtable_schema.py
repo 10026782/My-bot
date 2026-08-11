@@ -65,9 +65,12 @@ class Tables:
     EMERGENCY_WINDOW = "Emergency_Window"  # חריג מבוקר ל-High מהטלפון — ראה Approval_Policy_Spec.md
     # F16 — Media Layer
     MEDIA_FILES      = "Media Files"       # F16 — voice notes + file uploads (drive_url + metadata). Must be created manually in Airtable.
-    MARKETING_DEMAND = "Marketing Demand"  # M1 — existing live table; do not recreate
-    MARKETING_CREATIVES = "Marketing Creatives"  # M1 — existing live table; do not recreate
-    MARKETING_PUBLICATIONS = "Marketing Publications"  # M1 — existing live table; do not recreate
+    # F23 — BOSS Marketing Bridge (M1). קיים חי בבסיס Airtable app4bcgoX7t0HUVnm
+    # (tbljxJMyeSlF4VC42 / tblLWwYRntaZtpVgW / tblUhWCdS8s4H1aS7). אין ליצור מחדש.
+    # ראה marketing_gateway.py / marketing_brief_composer.py / cmd_marketing.py.
+    MARKETING_DEMAND       = "Marketing Demand"
+    MARKETING_CREATIVES    = "Marketing Creatives"
+    MARKETING_PUBLICATIONS = "Marketing Publications"
     # Decision Hub (Stage 0) — created manually in Airtable base app4bcgoX7t0HUVnm. See SPEC_Decision_Hub_Stage0.md.
     DECISIONS              = "Decisions"
     DECISION_EVENTS         = "Decision Events"
@@ -618,56 +621,71 @@ class MediaFileFields:
     CREATED_BY            = "Created By"
     TELEGRAM_FILE_ID      = "Telegram File ID"
     LINKED_LEAD           = "Linked Lead"         # multipleRecordLinks → Leads, always written as [rec_id]
-    LINKED_DEMAND         = "Linked Demand"       # existing live M1 field
-    LINKED_CREATIVE       = "Linked Creative"     # existing live M1 field
-    APPROVAL_STATUS       = "Approval Status"     # existing live M1 field
+    LINKED_DEMAND         = "Linked Demand"       # שדה חי קיים M1, multipleRecordLinks → Marketing Demand
+    LINKED_CREATIVE       = "Linked Creative"     # שדה חי קיים M1, multipleRecordLinks → Marketing Creatives
+    APPROVAL_STATUS       = "Approval Status"     # שדה חי קיים M1, singleSelect: Pending|Approved|Rejected
 
 
 class MarketingDemandFields:
-    """Existing live M1 table; schema declaration only, no M1 behavior."""
+    """
+    F23 — BOSS Marketing Bridge (M1). טבלה: Tables.MARKETING_DEMAND ("Marketing Demand").
+    Domain הוא תחום העסקי הקנוני (ראה domain_utils.py / identity.Domain) — אין להוסיף
+    כאן ערכים אד-הוק. Demand Type הוא enum נפרד, בבעלות Marketing, שבוחר איזה
+    DomainProfile לטעון (marketing_domain_profiles.py) — נפרד מ-Domain בכוונה.
+    """
     NAME              = "Demand Title"
-    DOMAIN            = "Domain"                 # canonical business domain
-    DEMAND_TYPE       = "Demand Type"            # profile selector, not a domain
+    DOMAIN            = "Domain"                 # תחום עסקי קנוני (domain_utils.py)
+    DEMAND_TYPE       = "Demand Type"            # בורר פרופיל, לא תחום: recruitment|furniture_import|fiber_equipment|real_estate_listing|service
     TARGET_AUDIENCE   = "Target Audience"
     LOCATION          = "Location"
     GOAL              = "Goal"
     CONSTRAINTS       = "Constraints"
-    CURRENT_STAGE     = "Current Stage"
+    CURRENT_STAGE     = "Current Stage"          # intake|brief_composed|ideas_generated|selected|handoff_sent|published|closed — ראה MarketingDemandStage
     NEXT_ACTION       = "Next Action"
-    STATUS            = "Status"
-    CREATIVES         = "Marketing Creatives"
-    PUBLICATIONS      = "Marketing Publications"
-    MEDIA_FILES       = "Media Files"
+    STATUS            = "Status"                 # Active|Paused|Done|Cancelled
+    CREATIVES         = "Marketing Creatives"    # שדה קישור הפוך שנוצר אוטומטית (Marketing Creatives.Linked Demand)
+    PUBLICATIONS      = "Marketing Publications" # שדה קישור הפוך שנוצר אוטומטית (Marketing Publications.Demand)
+    MEDIA_FILES       = "Media Files"            # שדה קישור הפוך שנוצר אוטומטית (Media Files.Linked Demand)
+
+
+class MarketingDemandStage:
+    INTAKE           = "intake"
+    BRIEF_COMPOSED   = "brief_composed"
+    IDEAS_GENERATED  = "ideas_generated"
+    SELECTED         = "selected"
+    HANDOFF_SENT     = "handoff_sent"
+    PUBLISHED        = "published"
+    CLOSED           = "closed"
 
 
 class MarketingCreativesFields:
-    """Existing live M1 table; schema declaration only, no M1 behavior."""
+    """F23 — BOSS Marketing Bridge (M1). טבלה: Tables.MARKETING_CREATIVES ("Marketing Creatives")."""
     NAME              = "Title"
-    LINKED_DEMAND     = "Linked Demand"
+    LINKED_DEMAND     = "Linked Demand"    # multipleRecordLinks → Marketing Demand
     IDEA_1            = "Idea 1"
     IDEA_2            = "Idea 2"
     IDEA_3            = "Idea 3"
     REVIEWER_NOTES    = "Reviewer Notes"
-    SELECTED_IDEA     = "Selected Idea"
-    SELECTION_STATUS  = "Selection Status"
+    SELECTED_IDEA     = "Selected Idea"    # singleSelect: Idea 1|Idea 2|Idea 3|None
+    SELECTION_STATUS  = "Selection Status" # singleSelect: Pending Review|Selected|Rejected All
     BRIEF_USED        = "Brief Used"
     PRODUCTION_HANDOFF = "Production Handoff"
-    MEDIA_FILES       = "Media Files"
+    MEDIA_FILES       = "Media Files"      # שדה קישור הפוך שנוצר אוטומטית (Media Files.Linked Creative)
 
 
 class MarketingPublicationFields:
-    """Existing live M1 table; schema declaration only, no M1 behavior."""
-    NAME              = "Title"
-    DEMAND            = "Demand"
-    ASSET             = "Asset"
-    CHANNEL           = "Channel"
-    PUBLISHED_AT      = "Published At"
-    SOURCE_CODE       = "Source Code"
-    RESPONSES         = "Responses"
-    QUALIFIED_RESPONSES = "Qualified Responses"
-    PASSED_FORWARD    = "Passed Forward"
-    SPEND             = "Spend"
-    NOTES             = "Notes"
+    """F23 — BOSS Marketing Bridge (M1). טבלה: Tables.MARKETING_PUBLICATIONS ("Marketing Publications")."""
+    NAME                 = "Title"
+    DEMAND               = "Demand"          # multipleRecordLinks → Marketing Demand
+    ASSET                = "Asset"           # multipleRecordLinks → Media Files
+    CHANNEL              = "Channel"         # multipleRecordLinks → TRAFFIC_SOURCES
+    PUBLISHED_AT         = "Published At"
+    SOURCE_CODE          = "Source Code"
+    RESPONSES            = "Responses"
+    QUALIFIED_RESPONSES  = "Qualified Responses"
+    PASSED_FORWARD       = "Passed Forward"
+    SPEND                = "Spend"
+    NOTES                = "Notes"
 
 
 class ApprovalsFields:
@@ -1362,14 +1380,15 @@ class TrafficSourcesFields:
     STATUS       = "Status"
     NOTES        = "Notes"
     ROI          = "ROI"          # formula — (Revenue - Cost) / Cost
-    URL                 = "URL"
-    LOCATION            = "Location"
-    SUITABLE_DOMAINS    = "Suitable Domains"       # canonical business-domain multiple select
-    FREE_PAID           = "Free/Paid"
-    SUITABLE_DEMAND_TYPES = "Suitable Demand Types" # Demand Type taxonomy, not Domain
-    POSTING_RULES       = "Posting Rules"
-    LAST_PUBLISHED_AT   = "Last Published At"
-    QUALITY_NOTES       = "Quality Notes"
+    # F23 — BOSS Marketing Bridge (M1) additions
+    URL                    = "URL"
+    LOCATION               = "Location"
+    SUITABLE_DOMAINS       = "Suitable Domains"        # multipleSelects: canonical business domains (domain_utils.py)
+    FREE_PAID              = "Free/Paid"               # singleSelect: Free|Paid
+    SUITABLE_DEMAND_TYPES  = "Suitable Demand Types"   # multipleSelects: recruitment|furniture_import|fiber_equipment|real_estate_listing|service
+    POSTING_RULES          = "Posting Rules"
+    LAST_PUBLISHED_AT      = "Last Published At"
+    QUALITY_NOTES          = "Quality Notes"
 
 
 # ══════════════════════════════════════════════════
