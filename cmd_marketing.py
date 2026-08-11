@@ -1,7 +1,19 @@
 # cmd_marketing.py — F23 BOSS Marketing Bridge (M1)
-# /marketing_new — wizard: Domain -> Demand Type -> Target Audience -> Location
-# -> Goal -> Constraints -> creates the Demand, composes a brief, makes one AI
-# call for 3 ideas, then presents them as buttons to tap.
+# /marketing_new — wizard: Domain -> Demand Type -> per-type intake questions
+# -> Constraints -> creates the Demand, composes a brief, makes one AI call
+# for 3 ideas, then presents them as buttons to tap.
+#
+# Ownership: while a MarketingCaptureState is pending for a user (any step),
+# app.py's webhook must route that user's next text to this module — see
+# has_pending_capture() below and its call site in app.py's
+# _webhook_telegram_impl (mirrors cmd_update.has_pending_text_capture(),
+# which is the reason free text mid-/update doesn't leak to run_agent()).
+# Before this was added, every free-text reply to /marketing_new fell
+# straight through to run_agent() (the general Agent), because
+# bot.process_new_updates() — the only thing that ever fires this module's
+# @bot.message_handler-registered functions — was only called for slash
+# commands or for cmd_update's own pending state.
+#
 # Feature flag: FEATURE_MARKETING_BRIDGE (default OFF)
 #
 # No Airtable record ID is ever typed by the user or shown as visible text —
@@ -46,9 +58,99 @@ DEMAND_TYPES = [
 ]
 
 # ── State store — key: telegram user_id (str) ───────────────────
+# MarketingCaptureState shape (plain dict, matches cmd_update.py/
+# cmd_decision.py convention — no new state engine):
+#   step: "domain" | "demand_type" | "intake" | "constraints"
+#   domain, demand_type: str
+#   q_index: int                 — position in INTAKE_QUESTIONS[demand_type]
+#   answers: dict[str, str]      — semantic_key -> free-text answer
+#   created_at: float
 _pending: dict[str, dict] = {}
 
-_FREE_TEXT_STEPS = ("target_audience", "location", "goal", "constraints")
+_CONSTRAINTS_PROMPT = (
+    "✍️ אילוצים ספציפיים לדרישה הזו? (למשל: לא להזכיר מחיר, קריאה לפעולה "
+    "בטלפון בלבד — אם אין, כתוב \"אין\")"
+)
+
+# Per Demand Type: a short, relevant question list — (semantic_key, prompt).
+# Keys are named for what they actually ask, not for the existing Demand
+# field they'll eventually compose into (see _materialize_demand_fields) —
+# forcing e.g. "מחיר ומטרת הפרסום" into a key literally called
+# "target_audience" would be a silent semantic mismatch just to avoid a
+# schema change. Constraints is a universal trailing question, appended by
+# the walker below, not authored per type.
+INTAKE_QUESTIONS: dict[str, list[tuple[str, str]]] = {
+    "recruitment": [
+        ("role_experience", "✍️ איזה תפקיד/ניסיון אתה מחפש? (למשל: מתקין סיבים, ניסיון 3+ שנים)"),
+        ("area", "✍️ אזור עבודה?"),
+        ("quantity_deadline", "✍️ כמה מועמדים צריך ועד מתי?"),
+    ],
+    "furniture_import": [
+        ("product_category", "✍️ אילו רהיטים/קטגוריה?"),
+        ("sales_area", "✍️ איזור מכירה/משלוח?"),
+        ("objective", "✍️ מה המטרה? (למשל: X יחידות תוך חודש)"),
+    ],
+    "fiber_equipment": [
+        ("equipment_project", "✍️ איזה ציוד/פרויקט?"),
+        ("project_area", "✍️ איזור הפרויקט?"),
+        ("objective", "✍️ מה המטרה? (למשל: איתור קבלן, X יחידות ציוד)"),
+    ],
+    "real_estate_listing": [
+        ("property_type_rooms", "✍️ סוג נכס וחדרים?"),
+        ("property_location", "✍️ מיקום הנכס?"),
+        ("price_purpose", "✍️ מחיר ומטרת הפרסום?"),
+    ],
+    "service": [
+        ("service_type", "✍️ איזה שירות?"),
+        ("service_area", "✍️ איזור שירות?"),
+        ("objective", "✍️ מה המטרה? (למשל: X פניות תוך שבוע)"),
+    ],
+}
+
+
+def _materialize_demand_fields(demand_type: str, answers: dict) -> dict:
+    """
+    Composes the semantic intake answers into DemandRecord's existing
+    target_audience/location/goal fields (no schema change available).
+    Explicit per-type mapping, not a generic rename — where a semantic key's
+    meaning doesn't natively match the field it must land in (e.g. a
+    property's type/rooms is not really a "target audience"), the composed
+    text is labeled inline so the brief/summary downstream stays accurate
+    instead of silently misrepresenting the content under the field's
+    literal name.
+    """
+    a = answers
+    if demand_type == "recruitment":
+        return {
+            "target_audience": a.get("role_experience", ""),
+            "location": a.get("area", ""),
+            "goal": a.get("quantity_deadline", ""),
+        }
+    if demand_type == "furniture_import":
+        return {
+            "target_audience": a.get("product_category", ""),
+            "location": a.get("sales_area", ""),
+            "goal": a.get("objective", ""),
+        }
+    if demand_type == "fiber_equipment":
+        return {
+            "target_audience": a.get("equipment_project", ""),
+            "location": a.get("project_area", ""),
+            "goal": a.get("objective", ""),
+        }
+    if demand_type == "real_estate_listing":
+        return {
+            "target_audience": f"פרטי הנכס: {a.get('property_type_rooms', '')}",
+            "location": a.get("property_location", ""),
+            "goal": a.get("price_purpose", ""),
+        }
+    if demand_type == "service":
+        return {
+            "target_audience": a.get("service_type", ""),
+            "location": a.get("service_area", ""),
+            "goal": a.get("objective", ""),
+        }
+    raise KeyError(f"no field mapping for demand_type={demand_type!r}")
 
 
 # ── Registration ─────────────────────────────────────────────────
@@ -109,11 +211,15 @@ def register_marketing_command(bot, get_identity):
         if not state or state.get("step") != "demand_type":
             bot.answer_callback_query(call.id, "פג תוקף — נסה /marketing_new מחדש.")
             return
-        state["demand_type"] = call.data.split(":", 1)[1]
-        state["step"] = "target_audience"
+        demand_type = call.data.split(":", 1)[1]
+        state["demand_type"] = demand_type
+        state["step"] = "intake"
+        state["q_index"] = 0
+        state["answers"] = {}
         _pending[uid] = state
+        first_prompt = INTAKE_QUESTIONS[demand_type][0][1]
         bot.edit_message_text(
-            f"✅ סוג: {_label(DEMAND_TYPES, state['demand_type'])}\n\n✍️ קהל יעד? (למשל: ניסיון 3+ שנים)",
+            f"✅ סוג: {_label(DEMAND_TYPES, demand_type)}\n\n{first_prompt}",
             call.message.chat.id, call.message.message_id,
         )
         bot.answer_callback_query(call.id)
@@ -136,11 +242,15 @@ def register_marketing_command(bot, get_identity):
             f"✅ נבחר רעיון {idea_num}\n\nProduction Handoff:\n\n{ok['handoff']}",
         )
 
-    # ── לכידת טקסט חופשי לשלבי _FREE_TEXT_STEPS ──────────────────
+    # ── לכידת טקסט חופשי — כל עוד יש MarketingCaptureState פעיל, שום דבר
+    # אחר (Agent, מילות אישור, וכו') לא נוגע בהודעה הבאה של המשתמש. תופס
+    # לפי has_pending_capture() בלבד (לא לפי step ספציפי) כדי שגם טקסט תועה
+    # בשלבי domain/demand_type (שאמורים להיענות בכפתורים) יטופל כאן ולא
+    # יזלוג ל-Agent — ראה has_pending_capture() למטה ואת ה-call site שלה
+    # ב-app.py.
     @bot.message_handler(
         func=lambda m: (
-            _pending.get(str(m.from_user.id), {}).get("step")
-            in _FREE_TEXT_STEPS
+            has_pending_capture(str(m.from_user.id))
             and bool(getattr(m, "text", None))
             and not m.text.startswith("/")
         )
@@ -153,29 +263,23 @@ def register_marketing_command(bot, get_identity):
             return
 
         step = state["step"]
-        if step == "target_audience":
-            state["target_audience"] = msg.text.strip()
-            state["step"] = "location"
-            _pending[uid] = state
-            bot.send_message(msg.chat.id, "✍️ מיקום?")
+
+        if step in ("domain", "demand_type"):
+            bot.send_message(msg.chat.id, "בחר אחת מהאפשרויות בכפתורים למעלה 👆")
             return
 
-        if step == "location":
-            state["location"] = msg.text.strip()
-            state["step"] = "goal"
-            _pending[uid] = state
-            bot.send_message(msg.chat.id, "✍️ מה המטרה? (למשל: 10 מועמדים תוך שבוע)")
-            return
-
-        if step == "goal":
-            state["goal"] = msg.text.strip()
-            state["step"] = "constraints"
-            _pending[uid] = state
-            bot.send_message(
-                msg.chat.id,
-                "✍️ אילוצים ספציפיים לדרישה הזו? (למשל: לא להזכיר מחיר, קריאה "
-                "לפעולה בטלפון בלבד — אם אין, כתוב \"אין\")",
-            )
+        if step == "intake":
+            questions = INTAKE_QUESTIONS[state["demand_type"]]
+            key, _ = questions[state["q_index"]]
+            state["answers"][key] = msg.text.strip()
+            state["q_index"] += 1
+            if state["q_index"] < len(questions):
+                _pending[uid] = state
+                bot.send_message(msg.chat.id, questions[state["q_index"]][1])
+            else:
+                state["step"] = "constraints"
+                _pending[uid] = state
+                bot.send_message(msg.chat.id, _CONSTRAINTS_PROMPT)
             return
 
         # step == "constraints" — השלב האחרון: יוצר Demand, מרכיב brief, קורא ל-AI
@@ -185,7 +289,7 @@ def register_marketing_command(bot, get_identity):
             _pending.pop(uid, None)
             return
 
-        state["constraints"] = msg.text.strip()
+        state["answers"]["constraints"] = msg.text.strip()
         _pending.pop(uid, None)
         bot.send_message(msg.chat.id, "⏳ יוצר דרישה ומרכיב 3 רעיונות...")
 
@@ -251,6 +355,22 @@ def _get_valid_state(uid: str) -> dict | None:
     return state
 
 
+def has_pending_capture(user_id: str) -> bool:
+    """
+    app.py's webhook only calls bot.process_new_updates() (the only thing
+    that fires this module's @bot.message_handler-registered functions) for
+    slash-command text — free text never reaches it otherwise, so this must
+    be checked in app.py's ingress and, if True, bot.process_new_updates()
+    called explicitly. Mirrors cmd_update.has_pending_text_capture() exactly.
+
+    True for ANY pending step (not just intake/constraints) — a stray text
+    reply while the domain/demand_type keyboards are showing must also be
+    claimed here (capture_text redirects the user to the buttons) rather
+    than falling through to run_agent().
+    """
+    return _get_valid_state(user_id) is not None
+
+
 def _label(pairs: list[tuple[str, str]], key: str) -> str:
     return next((label for label, k in pairs if k == key), key)
 
@@ -304,14 +424,15 @@ def _create_demand_and_generate_ideas(state: dict, triggered_by: str = "unknown"
     from llm_fallback import call_anthropic_text
     from marketing_brief_composer import compose_brief
 
+    fields = _materialize_demand_fields(state["demand_type"], state["answers"])
     demand_record = marketing_gateway.DemandRecord(
-        title=f"{_label(DEMAND_TYPES, state['demand_type'])} — {state.get('location', '')}".strip(" —"),
+        title=f"{_label(DEMAND_TYPES, state['demand_type'])} — {fields['location']}".strip(" —"),
         domain=state["domain"],
         demand_type=state["demand_type"],
-        target_audience=state.get("target_audience", ""),
-        location=state.get("location", ""),
-        goal=state.get("goal", ""),
-        constraints=state.get("constraints", ""),
+        target_audience=fields["target_audience"],
+        location=fields["location"],
+        goal=fields["goal"],
+        constraints=state["answers"].get("constraints", ""),
     )
     demand_id = marketing_gateway.create_demand(demand_record)
     if not demand_id:
@@ -428,8 +549,44 @@ if __name__ == "__main__":
     assert _label(DOMAINS, "recruitment") == "גיוס"
     assert _label(DEMAND_TYPES, "service") == "עסק שירותים"
 
-    assert _FREE_TEXT_STEPS == ("target_audience", "location", "goal", "constraints")
-    assert _FREE_TEXT_STEPS[-1] == "constraints", "constraints must be the terminal free-text step"
+    # every Demand Type has its own 3-question intake list
+    assert set(INTAKE_QUESTIONS.keys()) == {k for _, k in DEMAND_TYPES}
+    for dt, questions in INTAKE_QUESTIONS.items():
+        assert len(questions) == 3, f"{dt} should have exactly 3 intake questions"
+        keys = [k for k, _ in questions]
+        assert len(set(keys)) == 3, f"{dt} has duplicate semantic keys"
+
+    # _materialize_demand_fields: every type maps to the 3 existing Demand
+    # fields, and real_estate_listing's non-audience answer is labeled, not
+    # silently renamed
+    for dt in INTAKE_QUESTIONS:
+        answers = {key: f"<{key}>" for key, _ in INTAKE_QUESTIONS[dt]}
+        fields = _materialize_demand_fields(dt, answers)
+        assert set(fields.keys()) == {"target_audience", "location", "goal"}
+        assert all(fields.values()), f"{dt} produced an empty composed field"
+    re_fields = _materialize_demand_fields(
+        "real_estate_listing", {"property_type_rooms": "3 חדרים", "property_location": "x", "price_purpose": "y"},
+    )
+    assert "פרטי הנכס" in re_fields["target_audience"], "real_estate_listing content must stay labeled, not silently pass as literal target_audience"
+
+    try:
+        _materialize_demand_fields("not_a_real_type", {})
+        raise AssertionError("expected KeyError")
+    except KeyError:
+        pass
+
+    # has_pending_capture: True for ANY step while state is live, False once
+    # popped/expired — this is what app.py's ingress checks before letting
+    # run_agent() see the message
+    _pending["_selftest_uid"] = {"step": "domain", "created_at": _now_ts()}
+    assert has_pending_capture("_selftest_uid") is True
+    _pending["_selftest_uid"]["step"] = "intake"
+    assert has_pending_capture("_selftest_uid") is True
+    _pending.pop("_selftest_uid")
+    assert has_pending_capture("_selftest_uid") is False
+    _pending["_selftest_uid"] = {"step": "constraints", "created_at": 0.0}  # expired
+    assert has_pending_capture("_selftest_uid") is False
+    _pending.pop("_selftest_uid", None)
 
     # callback_data length sanity — Telegram caps at 64 bytes
     longest = f"mkt_select:recXXXXXXXXXXXXXXX:3"

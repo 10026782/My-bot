@@ -5983,6 +5983,18 @@ def _webhook_telegram_impl():
         except Exception as e:
             logger.error(f"[/update] text capture routing failed: {e}", exc_info=True)
 
+        # F23 — same reasoning as the cmd_update check above: a pending
+        # /marketing_new MarketingCaptureState must claim the user's next
+        # text itself, or it silently falls through to idempotency/run_agent
+        # and the wizard is orphaned until its TTL expires.
+        try:
+            from cmd_marketing import has_pending_capture
+            if has_pending_capture(sender_user_id):
+                bot.process_new_updates([update])
+                return "", 200
+        except Exception as e:
+            logger.error(f"[F23] text capture routing failed: {e}", exc_info=True)
+
         # ── Decision Hub Stage 0.6 — "זה הנספח" attachment reference ──
         # SPEC_File_Context_Reference.md, Rule 10: max one linking question.
         # Telegram-specific (inline keyboards) — handled here, not in the
