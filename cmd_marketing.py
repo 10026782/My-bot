@@ -1,7 +1,7 @@
 # cmd_marketing.py — F23 BOSS Marketing Bridge (M1)
 # /marketing_new — wizard: Domain -> Demand Type -> Target Audience -> Location
-# -> Goal -> creates the Demand, composes a brief, makes one AI call for 3
-# ideas, then presents them as buttons to tap.
+# -> Goal -> Constraints -> creates the Demand, composes a brief, makes one AI
+# call for 3 ideas, then presents them as buttons to tap.
 # Feature flag: FEATURE_MARKETING_BRIDGE (default OFF)
 #
 # No Airtable record ID is ever typed by the user or shown as visible text —
@@ -47,6 +47,8 @@ DEMAND_TYPES = [
 
 # ── State store — key: telegram user_id (str) ───────────────────
 _pending: dict[str, dict] = {}
+
+_FREE_TEXT_STEPS = ("target_audience", "location", "goal", "constraints")
 
 
 # ── Registration ─────────────────────────────────────────────────
@@ -134,11 +136,11 @@ def register_marketing_command(bot, get_identity):
             f"✅ נבחר רעיון {idea_num}\n\nProduction Handoff:\n\n{ok['handoff']}",
         )
 
-    # ── לכידת טקסט חופשי לשלבי target_audience/location/goal ──────
+    # ── לכידת טקסט חופשי לשלבי _FREE_TEXT_STEPS ──────────────────
     @bot.message_handler(
         func=lambda m: (
             _pending.get(str(m.from_user.id), {}).get("step")
-            in ("target_audience", "location", "goal")
+            in _FREE_TEXT_STEPS
             and bool(getattr(m, "text", None))
             and not m.text.startswith("/")
         )
@@ -165,14 +167,25 @@ def register_marketing_command(bot, get_identity):
             bot.send_message(msg.chat.id, "✍️ מה המטרה? (למשל: 10 מועמדים תוך שבוע)")
             return
 
-        # step == "goal" — השלב האחרון: יוצר Demand, מרכיב brief, קורא ל-AI
+        if step == "goal":
+            state["goal"] = msg.text.strip()
+            state["step"] = "constraints"
+            _pending[uid] = state
+            bot.send_message(
+                msg.chat.id,
+                "✍️ אילוצים ספציפיים לדרישה הזו? (למשל: לא להזכיר מחיר, קריאה "
+                "לפעולה בטלפון בלבד — אם אין, כתוב \"אין\")",
+            )
+            return
+
+        # step == "constraints" — השלב האחרון: יוצר Demand, מרכיב brief, קורא ל-AI
         identity = get_identity("telegram", uid)
         if not identity or not (identity.is_owner or identity.role in _ALLOWED_ROLES):
             bot.send_message(msg.chat.id, "אין הרשאה לפקודה זו.")
             _pending.pop(uid, None)
             return
 
-        state["goal"] = msg.text.strip()
+        state["constraints"] = msg.text.strip()
         _pending.pop(uid, None)
         bot.send_message(msg.chat.id, "⏳ יוצר דרישה ומרכיב 3 רעיונות...")
 
@@ -298,6 +311,7 @@ def _create_demand_and_generate_ideas(state: dict, triggered_by: str = "unknown"
         target_audience=state.get("target_audience", ""),
         location=state.get("location", ""),
         goal=state.get("goal", ""),
+        constraints=state.get("constraints", ""),
     )
     demand_id = marketing_gateway.create_demand(demand_record)
     if not demand_id:
@@ -413,6 +427,9 @@ if __name__ == "__main__":
 
     assert _label(DOMAINS, "recruitment") == "גיוס"
     assert _label(DEMAND_TYPES, "service") == "עסק שירותים"
+
+    assert _FREE_TEXT_STEPS == ("target_audience", "location", "goal", "constraints")
+    assert _FREE_TEXT_STEPS[-1] == "constraints", "constraints must be the terminal free-text step"
 
     # callback_data length sanity — Telegram caps at 64 bytes
     longest = f"mkt_select:recXXXXXXXXXXXXXXX:3"
