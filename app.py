@@ -731,6 +731,15 @@ try:
 except Exception as _e:
     logger.warning(f"[DecisionHub] /decision registration failed: {_e}")
 
+# ── F23: BOSS Marketing Bridge — /marketing_brief, /marketing_handoff ────
+try:
+    from cmd_marketing import register_marketing_command
+    result = register_marketing_command(bot, resolve_identity)
+    logger.info("[F23] /marketing_brief, /marketing_handoff registered")
+    logger.info(f"[app] register_marketing_command returned: {result}")
+except Exception as _e:
+    logger.warning(f"[F23] /marketing_brief registration failed: {_e}")
+
 # ── C22: weekly summary callbacks ────────────────────────────────
 try:
     from weekly_summary import register_weekly_callbacks

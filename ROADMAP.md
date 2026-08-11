@@ -1541,6 +1541,45 @@ point: call append_reasoning_block() from ...`).
 הוא מיובא רק מתוך `decision_adapter.py` (לא ישירות מקובץ entrypoint חי), והבדיקה בודקת ייבוא
 ישיר בלבד, לא טרנזיטיבי.
 
+### F23 — BOSS Marketing Bridge (M1: Core Marketing Exit)
+**מה:** Demand → Brief (דטרמיניסטי) → AI חיצוני (קריאה יחידה) → 3 רעיונות → בחירה אנושית
+(עריכה ישירה ב-Airtable) → Production Handoff (דטרמיניסטי) → Asset (Media Files/Drive קיימים,
+ללא שינוי) → Publication ידנית → Attribution (Source Code). נבנה אחרי audit מקיף שבדק reuse
+מול Ventures/Decisions/Interaction Log/Sessions — כולם נפסלו מסיבה מבנית (ראה ה-audit
+בשיחה/BOSS_MEDIA_MARKETING_AUDIT.md); רק 3 טבלאות חדשות קטנות נוצרו בפועל.
+**טבלאות Airtable חדשות** (base `app4bcgoX7t0HUVnm`): `Marketing Demand` (`tbljxJMyeSlF4VC42`),
+`Marketing Creatives` (`tblLWwYRntaZtpVgW`), `Marketing Publications` (`tblUhWCdS8s4H1aS7`).
+**הרחבות לטבלאות קיימות:** `Media Files` (+Linked Demand/+Linked Creative/+Approval Status),
+`TRAFFIC_SOURCES` (+URL/+Location/+Suitable Domains/+Free-Paid/+Suitable Demand Types/
++Posting Rules/+Last Published At/+Quality Notes).
+**Domain vs. Demand Type:** `Marketing Demand.Domain` משתמש אך ורק ב-6 הערכים הקנוניים של
+`identity.Domain` (real_estate/import/media/saas/finance/general) — לא נוספה טקסונומיה
+חדשה. `Demand Type` (recruitment/furniture_import/fiber_equipment/real_estate_listing/
+service) הוא שדה נפרד, Marketing-owned, שבוחר איזה `DomainProfile` לטעון
+(`marketing_domain_profiles.py`) — לא Domain.
+**Marketing Rules:** מאוחסנים ב-`Business Memory` הקיים (Event Type="Other", תחילית כותרת
+"[Marketing Rule]" — לא נוסף Tags choice חדש כי כלי ה-MCP הזמינים לא תומכים בעריכת
+choices לשדה select קיים). קריאה/כתיבה דרך `marketing_gateway.get_marketing_rules`/
+`save_marketing_rule`.
+**קבצים חדשים:** `marketing_domain_profiles.py` (GLOBAL_RULES + 5 DomainProfile, כולל תוכן
+שהוצל מ-`creative_generator.py` — אותו קובץ עצמו נשאר ללא caller, לא בוטל), 
+`marketing_brief_composer.py` (compose_brief/compose_production_handoff — פונקציות טהורות,
+ללא I/O וללא קריאת AI), `marketing_gateway.py` (מראה את `media_gateway.py` — dataclass →
+fields → `airtable_gateway.airtable_create/patch`), `cmd_marketing.py` (`/marketing_brief`
+ו-`/marketing_handoff` — handler ישיר בסגנון `cmd_update.py`/`cmd_decision.py`, **לא**
+dispatcher tool/ActionGateway — ה-Canonical Reuse Gate קבע שזו הפעולה הנכונה לפעולות
+מופעלות-פקודה-ישירה שבהן המשתמש האנושי עצמו הוא האישור).
+**Flag:** `FEATURE_MARKETING_BRIDGE`, כבוי כברירת מחדל.
+**M1 scope:** יצירת Demand, בחירת קריאייטיב, ורישום Publication — כולם ידניים דרך Airtable
+ישירות. הקוד היחיד שנבנה הוא שתי הפעולות הדטרמיניסטיות+AI: compose brief → קריאת AI יחידה
+ל-3 רעיונות → שמירה; ו-compose production handoff. ממשק Bot מלא (רשימת דרישות, Next Action
+כפקודת שאילתה, TMA) נדחה ל-M2 במפורש.
+**Deferred (לא נבנה כלל ב-M1):** פרסום אוטומטי, scheduler/queue חדשים, מנוע memory/approval/
+router/Airtable-gateway חדשים, עורך גרפי/production/AI runtime פנימיים, recommendation
+engine, Marketing Intelligence.
+STATUS: 🟡 CODE DONE, NOT VERIFIED — קוד+סכימה נוצרו, טרם נבדק end-to-end מול Telegram חי
+ולא נפרס (Render).
+
 **C60 — Tool Context Awareness (PR #152, מוזג ל-`main`, commit `2d85b84`/merge `3e0094b`):**
 לפי `SPEC_C59_Tool_Context_Awareness.md` (הועלה ע"י הבעלים בלי טקסט מלווה; אישור דרך
 `AskUserQuestion`: "Yes, implement now"). ⚠️ **ID collision מתועד** — הספק תייג עצמו "C59",
