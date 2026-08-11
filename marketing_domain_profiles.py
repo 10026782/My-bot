@@ -3,9 +3,16 @@
 # Static, code-owned reference data consumed by marketing_brief_composer.py.
 # GLOBAL_RULES applies to every Marketing Demand regardless of domain.
 # PROFILES is keyed by Demand Type (MarketingDemandFields.DEMAND_TYPE), not by
-# Domain — Demand Type selects reusable domain knowledge (persona, key points,
-# tone), Domain stays identity.Domain's canonical values (domain_utils.py). Two different
-# fields on purpose (see BOSS_MEDIA_MARKETING audit — Domain vocabulary drift).
+# Domain — Demand Type selects reusable domain knowledge (persona,
+# business_rules), Domain stays identity.Domain's canonical values
+# (domain_utils.py). Two different fields on purpose (see BOSS_MEDIA_MARKETING
+# audit — Domain vocabulary drift).
+#
+# business_rules deliberately does NOT restate generic professional/copywriting
+# knowledge — the AI model already has that. It holds only what the model
+# cannot know on its own: our concrete constraints/preferences for this
+# business. Where we don't yet have real rules for a demand type, use
+# _NO_KNOWN_RULES rather than inventing plausible-sounding placeholder content.
 #
 # Some persona/instruction text below is hand-ported (not imported) from
 # creative_generator.py's TEMPLATES/_PERSONA — that module stays untouched
@@ -32,9 +39,16 @@ GLOBAL_RULES = (
 class DomainProfile:
     demand_type: str
     persona: str
-    key_points: str
-    default_tone: str = "professional"
+    business_rules: str
 
+
+# ערך ניטרלי לסוגי דרישה שעדיין אין להם חוקי עסק ייחודיים ומאומתים — במכוון
+# לא ממציאים ידע עסקי מדומה. ראה ה-M1 spec: Manual Context Brain צריך להכיל
+# רק מה שאנחנו באמת יודעים, לא placeholder שמתחזה לידע אמיתי.
+_NO_KNOWN_RULES = (
+    "אין כרגע חוקי עסק ייחודיים מעבר לפרטי ה-Demand וה-Constraints. "
+    "אין להמציא פרטים שלא נמסרו."
+)
 
 PROFILES: dict[str, DomainProfile] = {
     "recruitment": DomainProfile(
@@ -43,10 +57,14 @@ PROFILES: dict[str, DomainProfile] = {
             "אתה מגייס מקצועי המנסח מודעות דרושים בעברית שמושכות מועמדים "
             "איכותיים ורלוונטיים."
         ),
-        key_points=(
-            "כלול: תיאור תפקיד תמציתי, דרישות מרכזיות (ניסיון/כישורים), "
-            "יתרונות/תנאים בולטים, קריאה ברורה ליצירת קשר. הימנע ממונחים "
-            "מקצועיים שדוחפים החוצה מועמדים טובים."
+        business_rules=(
+            "אל תציין את שם החברה אלא אם ה-Demand אומר במפורש אחרת. אל "
+            "תציין שכר או מספרי שכר אלא אם הם הוזנו ואושרו במפורש ב-Demand. "
+            "דרישות כמו רכב, אזור פעילות וניסיון חייבות להגיע מה-"
+            "Demand/Constraints ולא להיות מומצאות. ניסיון יוצג כחובה רק "
+            "כאשר הוא הוגדר כחובה; אחרת אין להקשיח אותו לבד. אל תמציא "
+            "תנאים, הטבות או דרישות שלא נמסרו. שמור את הפרטים הטכניים "
+            "המדויקים של הדרישה כפי שנמסרו."
         ),
     ),
     "furniture_import": DomainProfile(
@@ -55,10 +73,7 @@ PROFILES: dict[str, DomainProfile] = {
             "אתה קופירייטר עסקי המתמחה בייבוא רהיטים וסחורות. הסגנון: ישיר, "
             "שכנועי, ממוקד בתועלת ללקוח."
         ),
-        key_points=(
-            "הדגש: איכות המוצר, מחיר תחרותי, אמינות הספק, זמינות/משלוח. "
-            "עד 100 מילה אלא אם הפלטפורמה דורשת אחרת."
-        ),
+        business_rules=_NO_KNOWN_RULES,
     ),
     "fiber_equipment": DomainProfile(
         demand_type="fiber_equipment",
@@ -66,10 +81,7 @@ PROFILES: dict[str, DomainProfile] = {
             "אתה קופירייטר B2B המתמחה בציוד תשתיות סיבים אופטיים, פונה "
             "לאנשי מקצוע (קבלנים/טכנאים/רוכשים)."
         ),
-        key_points=(
-            "הדגש: מפרט טכני מדויק, תאימות תקנים, זמינות מלאי, יתרון תחרותי "
-            "מול ספקים אחרים. טון מקצועי, לא שיווקי-רועש."
-        ),
+        business_rules=_NO_KNOWN_RULES,
     ),
     "real_estate_listing": DomainProfile(
         demand_type="real_estate_listing",
@@ -77,9 +89,7 @@ PROFILES: dict[str, DomainProfile] = {
             "אתה קופירייטר עסקי דובר עברית ברמה גבוהה, המתמחה בנדל\"ן. הסגנון: "
             "ישיר, שכנועי, ללא מילים מיותרות, ממוקד בתועלת ללקוח."
         ),
-        key_points=(
-            "כלול: כותרת חזקה, 3 יתרונות מפתח, קריאה לפעולה. עד 120 מילה."
-        ),
+        business_rules=_NO_KNOWN_RULES,
     ),
     "service": DomainProfile(
         demand_type="service",
@@ -87,10 +97,7 @@ PROFILES: dict[str, DomainProfile] = {
             "אתה קופירייטר עסקי המנסח פרסום לעסק שירותים מקומי, בגובה העיניים "
             "וללא ז'רגון."
         ),
-        key_points=(
-            "הדגש: מה השירות פותר ללקוח, למה לבחור בנו עכשיו, קריאה ברורה "
-            "ליצירת קשר/הזמנה."
-        ),
+        business_rules=_NO_KNOWN_RULES,
     ),
 }
 
@@ -113,6 +120,10 @@ if __name__ == "__main__":
         "real_estate_listing", "service",
     }
     assert get_profile("recruitment").demand_type == "recruitment"
+    for dt, profile in PROFILES.items():
+        assert profile.business_rules, f"{dt} missing business_rules"
+    assert "שם החברה" in PROFILES["recruitment"].business_rules
+    assert PROFILES["service"].business_rules == _NO_KNOWN_RULES
     try:
         get_profile("not_a_real_type")
         raise AssertionError("expected KeyError")

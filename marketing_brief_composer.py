@@ -93,7 +93,7 @@ def compose_brief(
     ]
     if domain_rules:
         parts.append(f"[חוקי תחום] {domain_rules}")
-    parts.append(f"[נקודות מפתח] {profile.key_points}")
+    parts.append(f"[חוקי עסק] {profile.business_rules}")
     parts.append(f"[משימה] {_TASK_INSTRUCTIONS[task_type]}")
     parts.append(f"[פרטי הדרישה]\n{_demand_summary(demand)}")
     if selected_creative:
@@ -152,6 +152,7 @@ if __name__ == "__main__":
     assert b1 == b2, "compose_brief must be deterministic for identical inputs"
     assert "מתקינים" in b1
     assert "תמיד לציין שכר" in b1
+    assert "[חוקי עסק]" in b1, "business_rules section label missing from composed brief"
     import sys
     assert "llm_fallback" not in sys.modules, "compose_brief must never trigger an AI-call import"
 
