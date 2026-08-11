@@ -1,146 +1,121 @@
 # AI CONTEXT
 
-## Canonical CORE status — 10/08/2026
-
-`CORE v1 — COMPLETE / READY TO FREEZE`
-
-Current source: `docs/audit/CORE_COMPLETION_AUDIT_20260810.md`.
-The four-layer verdict remains **PARTIAL / NON-BLOCKING** because formal Layer
-2 TurnCoordinator implementation is absent. TC8 reject/cancel evidence remains
-partial, TC7-B2 has zero observed shadow markers, TC7-B3/RP5 enforcement is
-deferred, and Context Librarian catalog debt remains current. PA-01 is merged,
-wired, deployed, and staging-runtime-verified. Dated sections below are
-historical snapshots and must not override the canonical audit.
-
+**עודכן:** 11/08/2026 · **origin/main:** `f69d7b3` (PR #597).
 
 > קרא אותי לפני כל דבר אחר. זהו מסמך תדרוך תמציתי, לא תיעוד מלא.
-> למקורות הקנוניים ראו `ROADMAP.md`, `CHANGELOG.md`, `BUG_AUDIT_LOG.md`,
-> `CHANGE_CONTROL_LOG.md`, `docs/governance/BOSS_UNIFIED_MASTER_PLAN.md` §3.5
-> ומסמכי הארכיטקטורה. `CANONICAL_STATE.md` **לא קיים**.
-> `BOSS_CURRENT_STATE.md` מסומן **stale** (26/06/2026) בראש הקובץ עצמו — ארכיון היסטורי בלבד.
-> **main גובר על מסמכי תכנון בכל סתירה. "תוקן" ≠ "מאומת בפרודקשן".**
-
-**עודכן:** 10/08/2026 · **origin/main:** `cec3f83` (PR #588). `ROADMAP.md`/
-`CHANGELOG.md`/`BOSS_UNIFIED_MASTER_PLAN.md` §3.5.1 מעודכנים עד commit זה באותו
-סבב תיעוד — אין פער תיעוד ידוע כרגע. **גם** `docs/governance/BOSS_UNIFIED_MASTER_PLAN.md`
-§3.5.2 (target chain diagram) ו-§3.5 (Runtime Capability Status) נשארו
-מתוארכים 09/08/2026 — לא עודכנו בסבב הזה, לא לצטט כעדכניים מעבר למה ש-§3.5.1 קובע במפורש.
+> למקור האמת ראו `ROADMAP.md` (קודם כול), `CHANGELOG.md`, ו-
+> `docs/audit/CORE_COMPLETION_AUDIT_20260810.md` (קנוני ל-CORE, מבוסס main
+> `134148e`; ללא drift פונקציונלי מאז — שאר commits עד `f69d7b3` הם docs בלבד).
+> `BOSS_CURRENT_STATE.md` **stale מ-26/06/2026** — ארכיון היסטורי, לא לצטט
+> כמצב נוכחי. **main גובר על מסמכי תכנון בכל סתירה. "מוזג" ≠ "פרוס" ≠
+> "מאומת בפרודקשן."**
 
 ## 1. Executive Summary
 
-- הבוט חי בפרודקשן (Telegram + WhatsApp/Twilio), Identity→Router→Context→Agent, Airtable כ-CRM.
-- **פער deploy ממשיך לגדול, לא נסגר:** אחרון-פרוס מאומת נשאר `44fe0fb` (07/08, עד
-  PR #557) — **ללא שינוי מאז אתמול**. PR #558–#588 (31 PRs, כולל BUG-160–163,
-  TC5/TC4/TC6/F14/Emergency-Stop, וכעת גם TC7-A/B/B1/B1.1, TC8, TC9, Track A/D)
-  מוזגו ל-`main` אך **UNVERIFIED כפרוסים** — לא אומת מול Render מאז 07/08.
-- **17 PRs נוספים מוזגו מאז אתמול (#572–#588)** — עדכון משמעותי בהיקף Turn
-  Coordinator: **TC8 (durable turn-state) ו-TC9 (MessageContract boundary) עברו
-  מ-PLANNING ל-MERGED**, TC8 **חי וללא flag** (מחווט לכל 4 נקודות
-  approve/reject/cancel ב-`app.py`). TC7-B1/B1.1 (`core/claim_authorization.py`)
-  גם מוזג — אך **grep מאשר אפס קוראים בפועל**; למרות השם, עדיין לא מחבר את TC7-A
-  ל-RP4 לכדי החלטה חיה (המטרה הארכיטקטונית של TC7-B). ראו סעיף 3 לפירוט מלא.
-- שרשרת BUG-153/154/155/156/158/159 — כולם ✅ **מוזגו + פרוסו + VERIFIED IN
-  PROD**. BUG-157 (race ב-`propose_action()`) מוזג+פרוס, test-evidence בלבד — נשאר 🟡.
-- BUG-160/161/162/163 — **מוזגו ל-`main`, טרם deployed/verified בפרודקשן.** ללא שינוי מאז אתמול.
-- ממצא ארכיטקטוני קריטי שלא נסגר: `Handler.TOOL` דטרמיניסטי קיים רק ל-
-  `CREATE_TASK`, לא ל-`UPDATE_TASK`/`COMPLETE_TASK` — `PA-01_PLANNING_GATE.md`
-  עדיין **PLANNING ONLY**, אין קוד runtime.
-- BUG-152 — עדיין פתוח, לא root-caused, ללא שינוי.
-- `docs/governance/BOSS_UNIFIED_MASTER_PLAN.md` §3.5.1 (Program Map) עודכן
-  היום לשורות A/F/H/I/J בלבד; §3.5/§3.5.2 (Runtime Capability Status, target
-  chain diagram) **נשארו מתוארכים 09/08** — לא נסקרו מחדש בסבב הזה.
+- הבוט חי בפרודקשן (Telegram + WhatsApp/Twilio): Identity → Router →
+  Context → Agent, Airtable כ-CRM.
+- **CORE v1 — COMPLETE / READY TO FREEZE** (freeze עצמו = החלטת owner, לא
+  מוכרז). קנוני: `docs/audit/CORE_COMPLETION_AUDIT_20260810.md`, נבנה מול
+  main `134148e`, כולל אימות Production+Staging חי (Render API + logs
+  טריים, לא רק claim).
+- **PA-01 (PR #595) סגר את ה-CORE blocker האחרון**: `UPDATE_TASK`/
+  `COMPLETE_TASK` מנותבים כעת ל-`Handler.TOOL` דטרמיניסטי במקום נפילה
+  אוטומטית ל-Agent. ללא flag, פרוס ל-Production 15:57 UTC 10/08/2026.
+- **פער ה-deploy שדווח בסבבים קודמים נסגר**: Production מאומת חי בדיוק על
+  `134148e` (Render API), לא ancestor-lag כמו קודם — כל ה-PRs עד לשם, כולל
+  BUG-160–163, כעת deployed בפועל (verification-in-prod ללוגים ספציפיים של
+  אותם באגים עדיין לא רוענן).
+- שני פערים לא-חוסמים נותרים: (1) CI של `main` אדום על שער ה-freshness של
+  Context Librarian (governance, לא regression פונקציוני); (2)
+  `TurnCoordinator` הפורמלי (Layer 2 של מודל ארבע-השכבות) — אפס מימוש
+  כלשהו בקוד, מוחלף היום ע"י `router.py::route_request()`.
+- TC7-B2 (dual-signal shadow) — קוד חי, אך **אפס תצפיות log** בחלון הנשמר;
+  root-caused כ"אין עדיין traffic post-deploy," **לא** wiring bug.
+- RP5 enforcement ו-F52 unification (`FEATURE_UNIFIED_STATUS_FORMATTER`) —
+  עדיין shadow/כבוי כברירת מחדל, לא הופעלו.
 
 ## 2. Current System State
 
-**תפעולי (מאומת ב-grep/`git show` על `main`):**
+**תפעולי** (מאומת ב-grep/log/Render API על `main`):
 
-- ActionContracts הוא מקור האמת היחיד למחזור-חיי approval; TC6 reply-ownership
-  (`FEATURE_SINGLE_SPEAKER_APPROVAL_UX`, verified `true` בפרוד 09/08, לא אומת
-  מחדש היום) — **VERIFIED IN PROD** (חלקי, 3/6 תרחישים).
-- **TC8 durable turn-state (PR #585) — חי, ללא flag**, `core/turn_state_repository.py`
-  מחווט ל-4 נקודות approve/reject/cancel ב-`app.py`, fail-closed בכשל. "Staging
-  verified" הוא טענת-תיעוד בלבד, לא artifact מאומת — טעון אימות עצמאי.
-- **TC9 MessageContract (PR #588) — בנייה חיה תמיד**, אך המרת-הטקסט בפועל עדיין
-  מאחורי `FEATURE_UNIFIED_STATUS_FORMATTER` (כבוי כברירת מחדל); `GatewayReply.contract`
-  ללא קורא downstream.
-- **Track A** (PR #581/#582) — קנוניזציה של "מחר" בכותרת משימה ל-due-date, ללא
-  flag, חי; staging-verified, מוכרז "COMPLETE".
-- **Track D** (PR #580) — logging חדש אמיתי ל-RuntimeSchemaProvider/IngressEnvelope
-  (סוגר observability gap שתועד ב-§3.5), אך code/test-verified בלבד — לא production-verified.
-- Emergency Stop — fail-closed (PR #567). `prepare_task_proposal()` מאמת גם
-  `decision.owner` (PR #565). Airtable Gateway — נתיב הכתיבה היחיד, ללא שינוי.
+- ActionGateway/ActionContract lifecycle — מקור אמת יחיד, חי, ✅ בשני
+  environments.
+- Approval/reject — ✅ מאומת; cancel — לא נצפה בחלון הלוגים הנשמר (היעדר
+  תעבורה, לא כשל).
+- Atomic execution claims (`FEATURE_ATOMIC_CLAIMS=true` חי משני
+  environments) — ✅.
+- TC6 reply-ownership, TC8 durable turn-state (ללא flag, מחווט ב-4 נקודות
+  approve/reject/cancel ב-`app.py`), TC9 MessageContract construction — ✅
+  פרוסים; המרת-הטקסט בפועל ל-TC9 עדיין מאחורי `FEATURE_UNIFIED_STATUS_
+  FORMATTER` כבוי.
+- Track D observability (RuntimeSchemaProvider/IngressEnvelope) — ✅ פרוס,
+  Staging-fresh; Production ללא traffic טרי עדיין לאימות עצמאי.
+- F14 Contact Gate + F15 CRM one-write-path — ✅ Staging RUNTIME VERIFIED,
+  אפס write-bypasses (25 read-only bypasses ידועים, לא כתיבה).
+- **PA-01 — ניתוב UPDATE/COMPLETE_TASK — ✅ חי כעת** (ראו סעיף 3).
 
 **מיושם חלקית / לא production-active:**
 
-- **TC7-B1/B1.1** (`core/claim_authorization.py`, PR #583/#587) — **BUILT_UNWIRED**,
-  grep מאשר אפס קוראים מחוץ למודול/לטסט. אינו מחבר TC7-A ל-RP4 בפועל.
-- **TC7/RP5 execution-shadow** (PR #579) — מחבר בפועל את TC7-A ל-RP4 (shadow
-  comparison logging) תחת `FEATURE_EVIDENCE_FINALIZER` (כבוי כברירת מחדל,
-  production value לא אומת מ-28/07). זה **לא** claim-authorization — מנגנון
-  נפרד מ-TC7-B1 לעיל.
-- **PA-01 Planning Gate** (Handler.TOOL ל-update/complete task) — **PLANNING
-  ONLY**, אין קוד runtime.
-- **TC5/TC4** — קוד structural מוזג, ללא חיווט לניתוב חי.
-- **F14** — A1/B1/**B2 (PR #577, חדש)** מוזגו: `find_or_create_contact()` מכסה
-  עכשיו 4 קוראים (`crm_add_contact`, `convert_lead_to_contact`, dispatcher
-  `airtable_add`→Contacts, `tma_write` Contacts POST) — **עדיין אין gate מרכזי**
-  ב-`ActionGateway`/dispatcher; נתיבי agent-tool אחרים ל-Contacts לא מוגנים.
-- F52 Unified Status Formatter — shadow/comparison בלבד, מאחורי flag כבוי.
-- **TC10 — עודכן (מסבב תיעוד זה)**: כבר לא PLANNING/אפס-קוד. הרמוניית
-  isolated regression נבנתה (`scripts/run_isolated_regression.py` +
-  `scripts/regression_matrix.py` + `scripts/staging_identity.py`), תוקן
-  ה-root-cause של זיהום ה-BUG-122 ב-`scripts/verify_tc8_staging.py`
-  (הרצת FULL_REGRESSION כבר לא נעשית מול staging בכלל), ונוסף
-  `scripts/verify_tc9_staging.py` (canary ל-MessageContract, טרם הורץ מול
-  staging אמיתי — נדרשים secrets אמיתיים). ראו
-  `docs/architecture/turn-coordinator-full/TC10_OPERATIONAL_VERIFICATION_HARNESS.md`.
-  סטטוס: **IMPLEMENTATION COMPLETE / STAGING VERIFICATION PENDING** — אימות
-  Staging אמיתי (TC9 canary + TC8 PG checks) עדיין לא בוצע בסבב הזה.
+- TC7-B1/B1.1 (`core/claim_authorization.py`) — בנוי, **אפס קוראים חיים**
+  — לא מחבר בפועל את TC7-A ל-RP4 להחלטת claim-authorization.
+- TC7-B2 dual-signal shadow — פרוס, ללא תצפיות log עדיין (ראו סעיף 1).
+- RP4/RP5 shadow (`FEATURE_EVIDENCE_FINALIZER=shadow`, חי משני
+  environments) — shadow-comparison logging בלבד; enforcement חסום עד
+  הצטברות מדגם B2/B3 מספיק + אישור owner מפורש.
+- F52 Unified Status Formatter — shadow/comparison בלבד, כבוי כברירת מחדל.
+- ws2/ws3 evidence/lifecycle projection modules (`core/evidence_projection.py`
+  וכו') — מוזגים, **לא מחווטים** ל-`core/action_gateway.py` (grep מאשר אפס
+  קריאות), לא רשומים ב-Context Librarian catalog — סיכון authority כפול
+  עתידי אם יחוברו בלי Planning Gate מפורש.
 
-**חסום:** BUG-130/134/136/137/140/150/152 (וכן 126/127B/127C/138/139/142/148) —
-ממתינים להחלטת owner; חלקם חסומים ע"י `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`.
+**חסום:**
 
-| באג | Severity | קוד מוזג ל-main | Deployed | Production-verified |
-|---|---|---|---|---|
-| BUG-153/154/155/156 | גבוה/קריטי | ✅ (PR #550) | ✅ | ✅ |
-| BUG-157 | גבוה, נגיש בפועל | ✅ (PR #552/#555) | ✅ | ❌ (test-only) |
-| BUG-158 | גבוה | ✅ (PR #556) | ✅ | ✅ |
-| BUG-159 | בינוני-גבוה | ✅ (PR #557) | ✅ | ✅ |
-| BUG-160/161/162/163 | גבוה-בינוני | ✅ (PR #560) | ❌ UNVERIFIED | ❌ |
+- `TurnCoordinator` הפורמלי (Layer 2) — אפס מימוש; חוזה קפוא ממתין לאישור
+  owner. De-facto substitute היום: `router.py::route_request()` +
+  `lead_candidate_handler.py`.
+- BUG-130/134/136/137/140/150/152 (וכן 126/127B/127C/138/139/142/148) —
+  ממתינים להחלטת owner; חלקם חסומים ע"י
+  `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`.
+- Context Librarian catalog refresh — CI push-to-main אדום
+  (`CHANGES_REQUIRED`: 4 STOP / 21 REVIEW_REQUIRED / 98 WARNING) — לא חוסם
+  פונקציונלי, אך דורש הרצת `refresh-after-merge --apply`.
 
-## 3. Completed Since Last Update (מאז 09/08/2026, `7dbdddd..cec3f83`, PR #572–#588)
+## 3. Completed Since Last Update (מאז 10/08/2026, `cec3f83..f69d7b3`, PR #595–#597)
 
-- **PR #583/#587 — TC7-B1/B1.1: claim-authorization module** — `core/claim_authorization.py`
-  חדש (`authorize_claim()`); **grep מאשר: אפס קוראים חיים**. לא סוגר את הפער
-  הארכיטקטוני שתועד ב-§3.5.2 (חיבור TC7-A↔RP4).
-- **PR #579 (מחליף #576) — TC7/RP5 execution-shadow wiring** — מחבר TC7-A
-  ל-RP4 בפועל, shadow, תחת `FEATURE_EVIDENCE_FINALIZER` (כבוי).
-- **PR #585 — TC8: durable turn-state** — `core/turn_state_repository.py`, **חי
-  ללא flag**, מחווט ל-4 נקודות ב-`app.py`. Staging-verified claim לא-מאומת עצמאית.
-- **PR #588 — TC9: MessageContract at ActionGateway boundary** — בנייה חיה,
-  פלט-טקסט עדיין מאחורי flag כבוי.
-- **PR #577 — F14-B2** — שני קוראים חדשים ל-`find_or_create_contact()`; עדיין
-  אין gate מרכזי.
-- **PR #581/#582 — Track A** — קנוניזציית "מחר" ב-due-date, ללא flag, חי,
-  staging-verified, סגור.
-- **PR #580 — Track D** — logging חדש אמיתי ל-RuntimeSchemaProvider/IngressEnvelope.
-- **PR #573/#574/#575/#578 — TC7-A closure, TC6 docs closure, Program Map
-  consolidation, runtime-audit docs** — כולם docs/review, ללא שינוי runtime.
-- **PR #584/#586 — CI/test hardening** — Postgres service ל-CI, בדיקת confirmation
-  AST-based במקום string-match.
-- **תיעוד:** ROADMAP.md/CHANGELOG.md/`BOSS_UNIFIED_MASTER_PLAN.md` §3.5.1 עודכנו
-  היום (10/08) לסגור את פער התיעוד לכל 17 ה-PRs הנ"ל.
+- **PR #595 — PA-01 router wiring**: `parse_deterministic_task_reference()`
+  חדש ב-`core/router/router.py`; `Intent.UPDATE_TASK`/`COMPLETE_TASK` עם
+  reference תקין → `Handler.TOOL` (קודם תמיד `Handler.AGENT`). קוד
+  ה-downstream (`app.py`'s `_queue_deterministic_task_update()`) כבר היה
+  קיים (PR #564/#565/#567) אך בלתי-נגיש מהניתוב החי — נסגר עכשיו.
+  Ambiguous match → `Handler.CLARIFY` fail-closed, אותה תבנית כמו
+  CREATE_TASK. ללא flag. פרוס Production 15:57 UTC 10/08.
+- **PR #596 — Canonical CORE Completion Audit**:
+  `docs/audit/CORE_COMPLETION_AUDIT_20260810.md` (מבוסס `134148e`) מכריז
+  `PASS WITH NON-BLOCKING DEFERRED ITEMS`; מחליף את הדוח הקודם-באותו-יום
+  (`CORE_FINAL_INTEGRATION_GATE_20260810.md`, שכבר תוקן פעם אחת תוך-יומי
+  בעצמו — מסומן היסטורי כעת). כולל מטריצת runtime-verification מלאה
+  (ActionGateway, TC6–TC10, F14/F15, Track D, RP4/RP5) מול Staging טרי +
+  Production deploy-SHA (Render API), ואודיט cross-layer authority (ממצא
+  יחיד לא-חוסם: ws2/ws3 מוזג-ולא-מחווט).
+- **PR #597 — Context Librarian test fix**: תיקון assertion חד-שורתי,
+  ללא שינוי התנהגות/CI-gate.
+- (PR #572–#588 מהסבב הקודם — TC7-B1/B1.1, TC8, TC9, F14-B2, Track A/D —
+  עדיין בתוקף כפי שתועד, ללא שינוי בסבב הזה; ראו `CHANGELOG.md` לפירוט.)
 
 ## 4. Next Priorities
 
-1. **סגור את פער ה-deploy שהולך וגדל** — 31 PRs (#558–#588) מוזגו אך לא אומתו
-   כפרוסים מאז 07/08; לאמת commit נוכחי מול Render לפני כל טענת "פרוס".
-2. **חבר בפועל את TC7-B1 (`authorize_claim()`) לצרכן אמיתי** — הקוד קיים אך לא
-   קורא לו אף אחד; זו עדיין ה-gate המרכזית החסרה בשרשרת claim-authorization.
-3. **תעדוף PA-01 Planning Gate** (`Handler.TOOL` ל-`UPDATE_TASK`/`COMPLETE_TASK`) —
-   דורש Cross-Layer Impact Matrix לפני כל קוד runtime.
-4. **אימות production עצמאי ל-TC8** — הטענה ל-staging closure בתיעוד בלבד, לא
-   artifact; TC8 כבר חי בפרודקשן ללא flag, אז זו לא "בחירה", אלא חוב-אימות דחוף.
-5. **רענון מלא של §3.5/§3.5.2 ב-`BOSS_UNIFIED_MASTER_PLAN.md`** (Runtime
-   Capability Status + target chain diagram) — עודכנו רק שורות ספציפיות ב-§3.5.1
-   היום; שאר המסמך עדיין מתוארך 09/08.
+1. **סגור את שני הפערים הלא-חוסמים מה-audit הקנוני** — הרץ
+   `python -m tools.context_librarian refresh-after-merge --apply` לניקוי
+   ה-CI האדום; קבע/דחה במפורש מול owner את מעמד `TurnCoordinator` הפורמלי
+   (Layer 2).
+2. **חבר TC7-B1 (`authorize_claim()`) לצרכן אמיתי** — עדיין 0 קוראים; זו
+   ה-gate המרכזית החסרה בשרשרת claim-authorization.
+3. **אימות production טרי ל-Track D ול-TC8 reject/cancel** — קוד פרוס, אין
+   ראיות log לאחר ה-deploy האחרון (היעדר תעבורה, לא כשל) — נדרש ייצוא
+   Render עדכני.
+4. **הכרע גורל ws2/ws3 evidence/lifecycle projection** — מוזג, לא מחווט,
+   לא רשום ב-catalog; סמן היסטורי במפורש או חבר דרך Planning Gate לפני
+   שנהיה מקור-אמת כפול בשוגג.
+5. **המשך ניטור B2/B3 להתקדמות RP5 enforcement**, ותעדוף החלטת owner על
+   freeze (`CORE v1 — READY TO FREEZE` הוכרז מבחינה עובדתית, אך ה-freeze
+   עצמו לא הוחלט).
