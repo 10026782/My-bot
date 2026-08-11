@@ -112,6 +112,7 @@ class RouterDomain:
     MEDIA       = "media"
     SAAS        = "saas"
     FINANCE     = "finance"
+    RECRUITMENT = "recruitment"
     CRM         = "crm"
     GENERAL     = "general"
     INTERNAL    = "internal"  # הנדסי/מטא — לא דומיין עסקי

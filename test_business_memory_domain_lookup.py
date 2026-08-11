@@ -146,6 +146,13 @@ with patch("core.runtime_schema_provider.get_provider", side_effect=Exception("b
     chk("provider raising also falls back to static dict (never crashes)", r["ok"] is True)
 
 with _patched([], mode="name_only"):
+    r = cmd_update.resolve_business_memory_domain("recruitment")
+    chk(
+        "recruitment static fallback is live lowercase 'recruitment', not legacy 'Recruitment'",
+        r == {"ok": True, "value": "recruitment"},
+    )
+
+with _patched([], mode="name_only"):
     r = cmd_update.resolve_business_memory_domain("totally_unknown_key")
     chk("provider unavailable + no static mapping → structured error", r["ok"] is False)
     chk("error mentions no live schema and no static mapping", "no static mapping" in r["error"])

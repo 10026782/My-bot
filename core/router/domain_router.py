@@ -32,6 +32,9 @@ _DOMAIN_RULES: list[tuple[str, str, float]] = [
     (r"(כסף|תזרים|מזומן|הכנסה|הוצאה|רווח|הפסד|חשבון|תשלום|חשבונית|מע.מ|מס)", RouterDomain.FINANCE, 0.95),
     (r"(finance|cash.flow|revenue|expense|profit|invoice|payment|tax|vat)", RouterDomain.FINANCE, 0.95),
 
+    # ── Recruitment ────────────────────────────────────────────────────────
+    (r"(גיוס|גיוסים|מגייס|מגייסת|recruiting|recruitment)", RouterDomain.RECRUITMENT, 0.95),
+
     # ── Media ────────────────────────────────────
     (r"(שיווק|מדיה|קמפיין|פרסום|תוכן|סושיאל|אינסטגרם|פייסבוק|יוטיוב|טיקטוק)", RouterDomain.MEDIA, 0.90),
     (r"(marketing|media|campaign|content|social|instagram|facebook|youtube|tiktok)", RouterDomain.MEDIA, 0.90),
