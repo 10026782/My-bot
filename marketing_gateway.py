@@ -134,7 +134,12 @@ def save_creative_ideas(
         logger.warning("[marketing_gateway] save_creative_ideas failed for demand_id=%s", demand_id)
         return None
     creative_id = record.get("id")
-    update_demand_stage(demand_id, MarketingDemandStage.IDEAS_GENERATED)
+    if not update_demand_stage(demand_id, MarketingDemandStage.IDEAS_GENERATED):
+        logger.warning(
+            "[marketing_gateway] creative_id=%s saved but demand_id=%s stage update to "
+            "IDEAS_GENERATED failed — Current Stage is now stale, fix manually in Airtable",
+            creative_id, demand_id,
+        )
     return creative_id
 
 
@@ -202,8 +207,14 @@ def record_publication(pub: PublicationRecord) -> str | None:
     if not record:
         logger.warning("[marketing_gateway] record_publication failed for demand_id=%s", pub.demand_id)
         return None
-    update_demand_stage(pub.demand_id, MarketingDemandStage.PUBLISHED)
-    return record.get("id")
+    publication_id = record.get("id")
+    if not update_demand_stage(pub.demand_id, MarketingDemandStage.PUBLISHED):
+        logger.warning(
+            "[marketing_gateway] publication_id=%s saved but demand_id=%s stage update to "
+            "PUBLISHED failed — Current Stage is now stale, fix manually in Airtable",
+            publication_id, pub.demand_id,
+        )
+    return publication_id
 
 
 # ══════════════════════════════════════════════════

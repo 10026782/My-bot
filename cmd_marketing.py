@@ -31,8 +31,10 @@ def register_marketing_command(bot, get_identity):
         if not is_enabled("FEATURE_MARKETING_BRIDGE"):
             logger.info("[F23] FEATURE_MARKETING_BRIDGE=off — /marketing_brief not registered")
             return
-    except ImportError:
-        pass  # dev mode
+    except ImportError as e:
+        # dev mode — feature_flags module unavailable (e.g. isolated unit test),
+        # not a real production path. Matches cmd_update.py's existing behavior.
+        logger.warning("[F23] feature_flags unavailable, registering unconditionally: %s", e)
 
     @bot.message_handler(commands=["marketing_brief"])
     def cmd_marketing_brief(msg):
@@ -44,7 +46,7 @@ def register_marketing_command(bot, get_identity):
             bot.send_message(msg.chat.id, "שימוש: /marketing_brief <Demand Record ID>")
             return
         result = generate_ideas_for_demand(demand_id, triggered_by=f"telegram:{identity.user_id}")
-        bot.send_message(msg.chat.id, _format_ideas_result(result), parse_mode="Markdown")
+        bot.send_message(msg.chat.id, _format_ideas_result(result))
 
     @bot.message_handler(commands=["marketing_handoff"])
     def cmd_marketing_handoff(msg):
@@ -56,7 +58,7 @@ def register_marketing_command(bot, get_identity):
             bot.send_message(msg.chat.id, "שימוש: /marketing_handoff <Creative Record ID>")
             return
         result = generate_handoff_for_creative(creative_id)
-        bot.send_message(msg.chat.id, _format_handoff_result(result), parse_mode="Markdown")
+        bot.send_message(msg.chat.id, _format_handoff_result(result))
 
     logger.info("[F23] /marketing_brief, /marketing_handoff registered successfully")
 
@@ -80,11 +82,17 @@ def _parse_arg(msg) -> str:
 
 
 def _format_ideas_result(result: dict) -> str:
+    """
+    Plain text, no Telegram parse_mode — `ideas`/`handoff` contain
+    AI-generated free text that may include unescaped Markdown special
+    characters (*, _, `, [), which would otherwise make Telegram reject the
+    whole sendMessage call with a 400.
+    """
     if not result["ok"]:
         return f"❌ {result['error']}"
-    lines = [f"✅ נשמרו 3 רעיונות — creative_id: `{result['creative_id']}`", ""]
+    lines = [f"✅ נשמרו 3 רעיונות — creative_id: {result['creative_id']}", ""]
     for i, idea in enumerate(result["ideas"], start=1):
-        lines.append(f"*רעיון {i}:*\n{idea}\n")
+        lines.append(f"רעיון {i}:\n{idea}\n")
     lines.append("בחר רעיון ישירות ב-Airtable (שדה Selected Idea), ואז /marketing_handoff <creative_id>.")
     return "\n".join(lines)
 
@@ -92,7 +100,7 @@ def _format_ideas_result(result: dict) -> str:
 def _format_handoff_result(result: dict) -> str:
     if not result["ok"]:
         return f"❌ {result['error']}"
-    return f"✅ *Production Handoff נשמר:*\n\n{result['handoff']}"
+    return f"✅ Production Handoff נשמר:\n\n{result['handoff']}"
 
 
 # ── Core logic — importable/testable without a bot instance ─────────
@@ -197,7 +205,11 @@ def generate_handoff_for_creative(creative_id: str) -> dict:
     if not marketing_gateway.save_production_handoff(creative_id, handoff):
         return {"ok": False, "error": "save_production_handoff failed"}
 
-    marketing_gateway.update_demand_stage(demand_ids[0], MarketingDemandStage.HANDOFF_SENT)
+    if not marketing_gateway.update_demand_stage(demand_ids[0], MarketingDemandStage.HANDOFF_SENT):
+        logger.warning(
+            "[F23] handoff saved but demand_id=%s stage update to HANDOFF_SENT failed — "
+            "Current Stage is now stale, fix manually in Airtable", demand_ids[0],
+        )
 
     logger.info("[F23] handoff saved creative_id=%s demand_id=%s", creative_id, demand_ids[0])
     return {"ok": True, "handoff": handoff}
