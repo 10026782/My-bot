@@ -1,148 +1,280 @@
-# אודיט UX/UI ל־TMA של BOSS
+# TMA UX Audit — Follow-up / Correction Pass
 
-תאריך: 11/08/2026  
-היקף: אודיט משולב — UX, ארכיטקטורת מסכים, עקביות ו־Accessibility בסיסי  
-מקור: `tma-frontend/src`, `BOSS_Refactor_Plan.md`, והרצה מקומית של ה־frontend.
+**תאריך:** 11/08/2026
+**סטטוס:** `WIP DESIGN EVIDENCE / SCREEN ARCHITECTURE EXPLORATION`
+**היקף:** current-state UX/UI, screen qualification, עקביות, נגישות בסיסית וארכיטקטורת מסכים עתידית.
+**מקורות:** `tma-frontend/src`, `tma_api.py`, `BOSS_Refactor_Plan.md`, והרצת UI מקומית עם 12 צילומי המסך שבתיקייה זו.
 
-## סיכום מנהלים
+> המסמך אינו מפרסם ארכיטקטורת יעד סופית. הוא מפריד בין עובדות שנצפו, החלטות עיצוב בטוחות, מועמדים חזקים, שאלות פתוחות ומועמדי איחוד עתידיים. אין למחוק מסכים או לשנות production כחלק מהאודיט הזה.
 
-הכיוון בתכנית נכון: לעבור מ־11 מסכים מפוזרים ל־8 עולמות, להפוך את BOSS לשכבה רוחבית, ולמזג Command Center / Insights / System. בפועל, הקוד עדיין מתנהג כמו אוסף של 11 views נפרדים: ב־Hub יש 10 כפתורי אייקון בשורת הכותרת, אין ניווט ראשי יציב, וחלק מהמסכים מתחרים על אותה תשובה — “מה דורש ממני תשומת לב עכשיו?”.
+## 1. סיכום מנהלים
 
-המלצת היעד שלי: לא לבנות 8 פריטי ניווט. לבנות 5 אזורי ניווט ראשיים בלבד, ועוד 3 שכבות/תצוגות הקשריות:
+המערכת הקיימת מציגה אוסף של מסכים ועולמות עסקיים אמיתיים, אבל הם אינם נראים או מתנהגים עדיין כמו מערכת אחת. הבעיה המרכזית אינה רק מספר המסכים; היא היעדר חוזה משותף ל־BOSS: היררכיית כותרת, ניווט, פעולות, סטטוסים, מצבי טעינה/שגיאה, detail, אישור ו־receipt.
 
-1. **Command Center** — ברירת המחדל: היום, חריגים, אישורים, KPI ו־BOSS Bar.
-2. **Pipeline** — Ventures + Leads + Lead Detail, עם טאבים/מסננים לפי שלב ולא מסכים נפרדים.
-3. **Operations** — Projects + Tasks + Personal assets, עם מעבר הקשרי לפרויקט.
-4. **Finance** — Finance Pulse; יישאר אזור עצמאי כי הוא עונה על שאלה עסקית שונה.
-5. **Relationship & Knowledge** — Activity Feed, Interaction Log, Memory ו־Insights.
-6. **System** — מסך משנה מתוך תפריט Owner/Settings, לא אייקון ראשי.
-7. **BOSS** — שכבה רוחבית; Check-in ו־Game כ־drawer/drill-down, לא שני יעדי ניווט.
-8. **Approvals** — תיבת משימות/מצב בתוך Command Center ובתוך System, לא מסך מקביל נוסף.
+העיקרון המנחה לסבב הבא הוא:
 
-כלל מוצרי מומלץ: מסך ראשי אחד לכל שאלה; כל השאר הם view, tab, drawer או detail בתוך אותו עולם.
+> **ONE BOSS SCREEN SYSTEM** — מאחדים את שפת המסכים וההתנהגות לפני שמאחדים או מצמצמים את המסכים עצמם.
 
-## מפת הקיים מול היעד
+מסקנות בעלות ביטחון גבוה כרגע:
 
-| קיים היום | בעיה | יעד מומלץ | פעולה |
-|---|---|---|---|
-| Projects Hub | Hub + 10 אייקונים, בלי ניווט יציב | Command Center + Operations | למזג KPI/alerts; פרויקטים עוברים ל־Operations |
-| Owner Control Center | חופף ל־Hub ול־Digest | Command Center | להפוך למסך הבית האמיתי, עם sections קצרים וקישורי drill-down |
-| BossDigest | חופף ל־Command Center | Command Center | להפוך ל־Today summary בתוך הבית |
-| Ventures | נכון כישות נפרדת, אבל נכנס גם ל־OCC | Pipeline | להשאיר detail מלא; ב־OCC להציג רק count/alert |
-| LeadPipeline + LeadDetail | אותה זרימת מכירה, אבל מעבר מסך קשיח | Pipeline | רשימה + detail panel/route יחיד |
-| PersonalMode | מבודד מהקשר העסקי | Operations | לשלב כ־Assets בתוך Operations; לא “מצב” נפרד |
-| FinancePulse | תחום עסקי ברור | Finance | להשאיר מסך עצמאי |
-| ActivityFeed | Feed פסיבי, חסר הקשר | Relationship & Knowledge | להפוך ל־timeline מסונן לפי קשר/פרויקט/ליד |
-| SystemHealth + Approvals | חפיפה תפעולית; approvals מופיעים בעוד מקומות | System + Command Center | System = בריאות/הרשאות; approvals = queue אחת |
-| GameScreen + BossCheckin | חפיפת endpoint ושני מודלים מנטליים | BOSS Layer | `BossBar` רוחבי + Check-in/Game כ־drawer |
+- `Owner Control / Command Center`, `Ventures`, `Marketing / Media`, `Finance` ו־`Leads / CRM` הם מועמדי CORE חזקים.
+- `Actions / My Work` הוא דרישת שימוש חזקה, אך פני השטח הסופיים שלו עדיין פתוחים.
+- `Operations` הוא מועמד CORE סביר, אך הגבולות מול Ventures, Projects ו־My Work עדיין דורשים בדיקה.
+- `Approvals`, `Activity / Business Memory`, `Digest`, `Emergency Stop`, פרטי ישויות ו־System Health אינם מצדיקים כרגע הנחה של יעד ניווט ראשי עצמאי.
+- אין לקבע 5/6/7 tabs או מפת ניווט סופית לפני Screen Qualification ו־validation של החפיפות.
 
-## עקרונות UX ליעד
+## 2. Current-state audit
 
-- **ניווט:** עד 5 פריטים ראשיים במובייל; System/Settings בתפריט משני; אין 10 אייקונים צפופים בכותרת.
-- **היררכיה:** בכל מסך כותרת, משפט “מה אפשר לעשות כאן”, KPI אחד או שניים, פעולה ראשית אחת, ואז רשימה.
-- **מצבי מערכת:** loading, empty, error, stale ו־saved צריכים להיות רכיבים אחידים עם copy עברי ברור.
-- **פעולות:** כל פעולה מסוכנת/כותבת מציגה preview → אישור → receipt; לא מפזרים אישור במסך נפרד אם הוא שייך להקשר.
-- **RTL:** `dir="rtl"`, יישור עקבי, חיצי חזרה בצד הנכון, ותמיכה ב־safe-area של Telegram.
-- **שפה:** לבחור עברית כממשק ברירת מחדל. להשאיר מונחים טכניים באנגלית רק כשאין חלופה מוסכמת, עם תווית עברית מסבירה.
-- **צפיפות:** כרטיס אחד = החלטה אחת. לא להציב KPI, חריג, סטטוס ושתי פעולות באותו כרטיס קטן.
-- **צבע:** צבע סטטוס לא יכול להיות האות היחיד; להוסיף label/icon וטקסט.
+### מה נצפה בממשק הקיים
 
-## ממצאים לפי מסך/שלב
+- ה־Projects Hub מציג KPI, חריגים וכרטיסי פרויקט, ובכותרת יש ריבוי קיצורי דרך אייקוניים.
+- `App.tsx` מנהל views נפרדים עבור Hub, Leads, Activity, Approvals, Finance, Personal, System Health, Game, Check-in, Digest, Owner Control ו־Ventures.
+- Lead Pipeline ו־Lead Detail הם כבר בפועל זרימת master-detail, אך מוצגים כחוויות נפרדות ועמוסות.
+- Owner Control ו־BossDigest מציגים חפיפה סביב תשומת לב, חריגים, approvals ו־next actions.
+- Ventures כבר קיים כקומפוננטה וכמקור נתונים נפרד; הוא אינו רק וריאציה של CRM.
+- Finance עונה על שאלות עסקיות שונות מ־CRM/Operations.
+- Activity מוצג כ־feed כללי, אך מקור הנתונים והמשמעות העסקית שלו אינם מסבירים מספיק אם מדובר בזיכרון, אינטראקציות, receipts או שילוב.
+- Check-in ו־Game משתמשים באותה שכבת חוויה רוחבית רעיונית, אך Check-in הוא מסך פעולה ו־Game הוא שכבת engagement.
+- Marketing / Media קיים כרעיון עסקי, טבלאות/מושגים ו־Media upload עתידי, אך אינו מיוצג כיום כ־workspace מלא.
 
-### 1. Projects Hub — בריאות: חלש מבנית, בסיס נתונים טוב
+### ראיות וסייגים
 
-![Hub](01-hub.png)
+- צילומי המסך נלכדו באודיט זה עם API דמה סינתטי, לאחר שה־API החי החזיר `401` בסביבת הבדיקה.
+- לכן הממצאים על היררכיה, צפיפות, naming וזרימות נצפות; הם אינם הוכחה לשימוש בפועל, לנתוני Airtable חיים, להרשאות, ל־latency או ל־production.
+- לא בוצעה בדיקת keyboard, קורא מסך, contrast מדוד, safe-area או touch targets במכשיר Telegram אמיתי.
 
-- חוזקות: KPI גלובליים, חריגים וכרטיסי פרויקט הם בסיס טוב ל־Command Center.
-- סיכון מרכזי: 10 כפתורי header באותה שורה יוצרים עומס, גלילה אופקית וחוסר עדיפות. האייקונים בלבד דורשים זכירה; OC, Ventures, Digest, Check-in ו־Game אינם מובנים באותה רמת מיידיות.
-- המלצה: להפוך את ה־Hub לבית עם 3 אזורים: “לטפל עכשיו”, “סטטוס עסקי”, “קיצורי דרך”. להעביר את כל היעדים ל־bottom navigation או לתפריט More.
+## 3. בעיות UX שאומתו
 
-### 2. Approvals — בריאות: שימושי אך מבודד
+1. **עומס ניווט בכותרת:** כפתורי אייקון רבים באותה שורה מקטינים discoverability ויוצרים עדיפות לא ברורה במסך מובייל. (01-hub)
+2. **חפיפת שאלות:** Hub, Owner Control ו־Digest מתחרים על “מה דורש ממני תשומת לב עכשיו?”. (01, 06, 09)
+3. **פעולה ראשית לא עקבית:** במסכי detail וב־Approvals יש מספר פעולות משמעותיות ללא pattern אחיד של primary action, preview, אישור ו־receipt. (02, 12)
+4. **קונטקסט חסר ב־Activity:** feed כללי ללא סינון/קישור ישיר לישות או לפרויקט מקשה להפוך אירוע להחלטה. (05)
+5. **Lead Detail עמוס:** Ask AI, score, task, outcome ו־follow-up מתחרים על היררכיה אחת. (12)
+6. **ערבוב בין עבודה עסקית לעבודה אישית:** Personal/Assets מנותק מהקשר של פרויקט ותפעול, אך גם אינו עונה על אותו צורך כמו My Work. (04)
+7. **מצבי שמירה לא מספיק ברורים:** Check-in דורש הבחנה גלויה בין “נשמר”, “שומר” ו־“לא נשמר”. (07)
+8. **תלות בצבע/Emoji:** סטטוסים ואייקונים אינם צריכים להיות האות היחיד למשמעות; נדרשים label, טקסט או icon נגיש. (01–12)
+9. **RTL ושפה:** ערבוב עברית/אנגלית וניסוחים טכניים מגדילים עומס קריאה; נדרש contract לשפה, יישור וחיצי חזרה.
 
-![Approvals](02-approvals.png)
+## 4. Unified Screen System — ההמלצה הראשונה
 
-- חוזקות: מספר ממתינים, רמת סיכון ופעולות אשר/דחה ברורות.
-- סיכון: אין תיאור מספיק של ההשלכה העסקית של האישור ואין receipt/מצב לאחר פעולה במסך עצמו.
-- המלצה: queue אחת בתוך Command Center וב־System. לכל פריט: “מה יקרה”, מי ביקש, מתי, רמת סיכון, preview, אישור/דחייה ו־receipt.
+לפני איחוד או מחיקה, להגדיר ספריית BOSS משותפת ו־screen contract. הדומיינים יכולים להיות שונים במבנה, אך לא להיראות כמו אפליקציות נפרדות.
 
-### 3. Finance / Assets / Activity — בריאות: בינוני, פיצול גבוה
+### חוזה המסך המשותף
 
-![Finance](03-finance.png)
-![Assets](04-assets.png)
-![Activity](05-activity.png)
+| שכבה | כלל אחיד מוצע |
+|---|---|
+| App shell | RTL, safe-area, רוחב תוכן, scroll, חזרה ו־global quick-create באותו pattern |
+| Global navigation | מספר מצומצם של workspaces ראשיים; More/contextual access נשארים אפשריים ולא נקבעים כאן |
+| Page header | title, subtitle של “מה אפשר לעשות כאן”, back/context ו־primary action אחת |
+| Actions | primary/secondary/rare actions עם naming, מיקום ו־disabled states אחידים |
+| KPI / summary strip | מעט מדדים שמובילים להחלטה, עם drill-down ברור ולא dashboard עמוס |
+| Content patterns | Cards, lists, boards, timelines, search, filters, tabs ו־saved views לפי הצורך העסקי |
+| Status | Badge עם label וטקסט; צבע אינו האות היחיד |
+| State patterns | loading, empty, error, stale, saved, retry ו־permission states עם copy עברי עקבי |
+| Detail | drawer או page לפי עומק, עם header, summary, next action, timeline/related ו־More |
+| Action lifecycle | intent/preview → confirmation אם נדרש → execution → receipt/result/error |
+| Mobile | spacing, target size, sticky action bar, keyboard/focus ו־dynamic viewport מוגדרים מראש |
+| Visual tokens | typography, spacing, radius, shadows/elevation, colors, icons ו־density נשלטים מטוקנים משותפים |
+| BOSS layer | BossBar רוחבי אופציונלי; Check-in/Game אינם חייבים להיות destinations ראשיים |
+| Quick create | pattern גלובלי ליצירת Lead, Task, Marketing Demand, brief או record רלוונטי |
 
-- Finance עונה על שאלה נפרדת ולכן ראוי להישאר עצמאי.
-- Assets הוא תת־אזור של Operations, לא “מצב” מקביל.
-- Activity כרגע הוא feed פסיבי; בלי פילטר לפי פרויקט/ליד/קשר הוא פחות שימושי לקבלת החלטה.
-- המלצה: Finance עם tabs קבועים: Pulse / Payments / Expenses. Operations עם Projects / Tasks / Assets. Relationship עם Activity / Interactions / Memory.
+הכלל: Ventures יכול להיות board/lifecycle, Finance יכול להיות KPI + ledger, Marketing יכול להיות workflow, Leads יכול להיות list/pipeline/detail ו־Actions יכול להיות work queue. כולם צריכים לחלוק את אותה שפת BOSS.
 
-### 4. Digest / Check-in / Game — בריאות: חפיפה גבוהה
+## 5. מפת confidence נוכחית
 
-![Digest](06-digest.png)
-![Check-in](07-checkin.png)
-![Game](08-game.png)
+| תחום | ביטחון נוכחי | עמדה באודיט הזה |
+|---|---|---|
+| Owner Control / Command Center | חזק | CORE SCREEN candidate; קורא: מה דורש את תשומת הלב של הבעלים עכשיו? |
+| Ventures | חזק | CORE SCREEN candidate; להרחיב כ־upstream business-development workspace |
+| Marketing / Media | חזק | CORE SCREEN candidate; להוסיף כיוון מוצרי משמעותי |
+| Finance | חזק | CORE SCREEN candidate עצמאי |
+| Leads / CRM | חזק | CORE DOMAIN — REDESIGN REQUIRED |
+| Actions / My Work | דרישה חזקה | surface פתוח: screen, `+`, queue, hybrid או שילוב |
+| Operations | סביר | core workspace אפשרי; גבולות פתוחים |
+| Approvals | capability קיים, surface לא | demote from primary assumption; state בתוך lifecycle |
+| Activity / Business Memory | capability קיים, surface לא | contextualize/demote; verify source and use |
+| Digest | חפיפה נצפית | candidate לשילוב ב־Command Center, לא יעד סופי |
+| Emergency Stop | capability בטיחותי | system/action surface עם prominence; לא primary screen |
+| Lead Detail / Project Detail | detail patterns | contextual layer, לא destinations נפרדים כברירת מחדל |
+| Media Files | asset layer | embed בתוך Marketing; raw collection אינה primary assumption |
+| System Health | system/admin | More/System/Command Center context; לא primary assumption |
+| Game / Check-in | BOSS layer | drill-down או drawer עד שיוכח אחרת |
 
-- Digest ו־Command Center מתחרים על אותו “מה השתנה ומה לעשות”.
-- Check-in מציג שלושה task rows, ולכל אחד הרבה selectors; זה מתאים למסך עריכה עמוק, לא ל־daily action קצר.
-- Game מציג progress/coins/quests; כ־layer הוא יכול לחזק התנהגות, אבל כיעד ניווט עצמאי הוא מגדיל עומס.
-- המלצה: `BossBar` קבוע ודק בראש כל מסך, עם CTA אחד “התחל את היום”. לחיצה פותחת Check-in drawer; Game נפתח מ־BossBar או מ־Today, ללא icon ראשי.
-- חובה: להציג “נשמר / לא נשמר / שומר…” באופן חד־משמעי, כפי שהתכנית כבר מזהה.
+## 6. Screen Qualification Matrix
 
-### 5. Owner Control / Ventures — בריאות: תוכן טוב, שכפול אחריות
+הטבלה היא qualification של המצב והכיוונים, לא החלטת ניווט סופית.
 
-![Owner Control](09-owner-control.png)
-![Ventures](10-ventures.png)
+| מסך קיים | שאלה עסקית | נתונים/ישויות | פעולות עיקריות | ערך שימוש | כפילות | סוג | בעיות UX | סיווג | ביטחון | שאלות פתוחות |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Projects Hub | מה מצב הפרויקטים עכשיו? | ProjectsHub, KPI, חריגים, Leads | פתיחת פרויקט/ליד, drill-down | גבוה | OCC/Digest/Operations | Dashboard / Workspace | header צפוף, שאלות רבות | `REDESIGN` | בינוני | מה נשאר כ־summary ומה עובר ל־Operations? |
+| Owner Control | מה דורש מהבעלים החלטה? | health, approvals, ventures summary, alerts | פתיחת החלטה, Ventures, approvals | גבוה | Hub/Digest/System | Dashboard / Command Center | יותר מדי תפקידים במסך אחד | `EXPAND` | גבוה | אילו widgets באמת תומכים בהחלטה? |
+| BossDigest | מה השתנה ומה לעשות היום? | health, approvals, daily digest | review, follow-up, approval | בינוני-גבוה | Command Center | Dashboard / Contextual Layer | duplicate destination | `EMBED / CONTEXTUALIZE` | בינוני | האם summary יומי נפרד עדיין משרת צורך? |
+| Ventures | האם ההזדמנות בשלה? | Ventures, participants, docs, assumptions, risks | create, evaluate, due diligence, next decision, convert | גבוה | Strategic summary ב־OCC; לא CRM | Workspace / Board / Detail | lifecycle עדיין לא מלא בממשק | `EXPAND` | גבוה | מהו readiness gate ומהי המרה מאושרת? |
+| Lead Pipeline | איזה Lead דורש פעולה? | Leads, stage, score, next action | search, filter, stage update, open detail | גבוה | Lead Detail ו־Activity | Entity Collection / Workspace | מעבר קשיח לעומק | `REDESIGN` | גבוה | Contacts/Deals tabs או entities נפרדים? |
+| Lead Detail | מה ידוע ומה הצעד הבא? | Lead, timeline, outcomes, tasks | update, next action, task, follow-up | גבוה | Pipeline/Activity | Record Detail | action overload | `EMBED / CONTEXTUALIZE` | גבוה | אילו פעולות primary ואילו More? |
+| Personal Mode | מה יש לי אישית לבצע/להחזיק? | Units, assets, personal fields | view/update assets | בינוני | Operations/My Work | Workspace / Collection | מנותק מהקשר עסקי, schema drift risk | `MERGE CANDIDATE` | בינוני | האם “My Work” הוא task view או domain? |
+| Finance Pulse | האם הכסף בשליטה? | payments, expenses, income, balances | review, filter, open record | גבוה | מעטה; שונה מ־CRM | Workspace / Dashboard | צריך היררכיית KPI + ledger עקבית | `KEEP` | גבוה | אילו פעולות הן review ואילו write? |
+| Activity Feed | מה קרה בקשרים ובעסק? | מקור לאומת במלואו; Activity/Interaction/Memory אפשריים | filter, open context | בינוני | Lead/Project timelines, Digest | Contextual Layer / Collection | feed פסיבי וחסר הקשר | `OPEN / NEEDS MORE OBSERVATION` | נמוך-בינוני | מה המקור המדויק ומהו ה־global use case? |
+| Approvals | מה ממתין להחלטה? | approval projection, lifecycle state, risk/context | preview, approve, reject, receipt | גבוה אך תדירות נמוכה | Command Center/Actions | Action Surface / System | מבודד; receipt והשלכה עסקית לא מספיקים | `DEMOTE FROM PRIMARY NAV` | גבוה | queue אחת או surfaces contextual? |
+| System Health | האם המערכת תקינה? | health, permissions, service states | inspect, retry, admin action | נקודתי | Owner Control | System/Admin | לא business workspace יומי | `DEMOTE FROM PRIMARY NAV` | בינוני-גבוה | מה owner צריך לראות מול admin בלבד? |
+| Boss Check-in | מה אני מסמן/מעדכן היום? | daily tasks, status, streak | update, save, continue | בינוני-גבוה | Digest/BossBar/Game | Action Surface / Contextual Layer | עריכה עמוקה מדי ל־quick action; save state | `EMBED / CONTEXTUALIZE` | בינוני | drawer, My Work או Today? |
+| Game Screen | איך ה־BOSS engagement מתקדם? | worlds, quests, coins, progress | view progress, quest, drill-down | משלים | BossBar/Check-in | Contextual Layer | יעד ניווט נוסף, לא business question | `DEMOTE FROM PRIMARY NAV` | בינוני | מה הערך התפעולי ומה ניתן להסתיר? |
+| Marketing / Media (מועמד חדש) | מה מייצרים, מפרסמים ומה התוצאה? | Marketing Demand, Creatives, Publications, Media Files, Traffic Sources | demand, creative brief, attach/select/approve asset, prepare publication, view results | גבוה | חלקית Leads/Operations; lifecycle שונה | Workspace / Workflow | אינו קיים כמסך מלא כיום | `EXPAND` | גבוה | בעלות על publication/result והאם approval נדרש בכל asset? |
 
-- Owner Control הוא cockpit עשיר, אבל מכיל גם System Health, Approvals, Strategic Pipeline, Permissions ו־Business Language — יותר מדי שאלות למסך מובייל אחד.
-- Ventures הוא מסך עצמאי מוצדק לפי התכנית, אך ה־Strategic Pipeline מופיע גם ב־OCC.
-- המלצה: Command Center מציג רק health score, blockers, approvals ו־next actions. Ventures מציג את כל ה־pipeline, עם stage tabs ופילטרים. לחיצה על count תמיד מובילה לאותו source of truth.
+## 7. Marketing / Media — תיקון והרחבה
 
-### 6. Pipeline / Lead Detail — בריאות: הליבה החזקה ביותר, דורשת איחוד
+זהו מועמד CORE חזק שחסר באודיט הקודם. הוא אינו “עוד Leads” ואינו רק אוסף קבצים. מחזור החיים העסקי המוצע לבדיקה הוא:
 
-![Pipeline](11-lead-pipeline.png)
-![Lead detail](12-lead-detail.png)
+`Demand → Creative Options → Selected Creative → Media Assets → Publication → Results / Next Action`
 
-- חוזקות: workflow מפורש, next action, outcome עסקי, היסטוריה ופעולות follow-up/task.
-- סיכון: יותר מדי פעולות באותו detail, כולל Ask AI, שינוי score, יצירת task, outcome ו־follow-up; היררכיית הפעולה הראשית לא תמיד חד־משמעית.
-- המלצה: שלוש שכבות בלבד: header עם stage/score, פעולה ראשית אחת לפי next action, ו־timeline. פעולות נדירות/מתקדמות נכנסות ל־More. Pipeline ו־Lead Detail צריכים להיתפס כ־master-detail אחד, לא כשני מסכים בלתי קשורים.
+ה־Marketing workspace צריך לאפשר לענות על שש שאלות:
 
-## Accessibility וסיכוני נראות שנצפו
+1. מה אנחנו מנסים לשווק?
+2. איזה כיוון יצירתי נבחר ולמה?
+3. אילו assets קיימים ומה עדיין חסר?
+4. היכן פורסם ובאיזה סטטוס?
+5. מה קרה אחרי הפרסום — תוצאה, מקור תנועה, CPL/המרה אם קיים?
+6. מהו ה־next action?
 
-- סרגל הכותרת הצפוף מגדיל סיכון למטרות לחיצה קטנות ולגלילה אופקית.
-- Emoji בלבד אינם תחליף לתווית גלויה; `aria-label` קיים בחלק מהכפתורים אך אינו פותר discoverability.
-- צבעי סטטוס צריכים להגיע עם טקסט/אייקון נוסף; אין להסתמך על ירוק/צהוב/אדום בלבד.
-- יש ערבוב עברית/אנגלית ומספר מסכים עם ניסוח טכני, מה שמעלה עומס קריאה ב־RTL.
-- נדרש לבדוק בפועל keyboard/focus, contrast, screen reader, zoom, Telegram safe-area ו־dynamic viewport; אי אפשר לאשר WCAG מלא מצילומי מסך בלבד.
+פעולות מועמדות: create Marketing Demand; request/generate creative ideas; create media prompt/brief; attach/upload asset; select creative; approve asset כשנדרש; prepare publication; view publication status/results.
 
-## השוואה לדפוסים מקובלים
+`Media Files` הוא בדרך כלל asset layer בתוך Marketing ולא מסך top-level עצמאי. עדיין צריך להציג אותו במפורש דרך asset picker, סטטוס production, preview, metadata ו־publication links. אין לממש את הזרימה בשלב הזה.
 
-ההשוואה כאן היא לפי דפוסי IA ולא לפי העתקת עיצוב:
+## 8. Ventures — תיקון
 
-- Linear מרכזת עבודה סביב sidebar, projects, views, filters ו־saved views; היא לא הופכת כל וריאציה של אותה רשימה ליעד ניווט נפרד. [Linear Custom Views](https://linear.app/docs/custom-views)
-- Linear מציגה project overview כמרחב אחד עם properties, resources ו־milestones, ומעמיקה דרך sidebar/detail במקום לפתוח מסך נפרד לכל פרט. [Linear Project Overview](https://linear.app/docs/project-overview)
-- דפוסי CRM מודרניים בנויים סביב רשימה/תצוגה מסוננת → detail → timeline/action, ולא סביב עשרות dashboards קטנים. לכן ל־TMA עדיף master-detail עבור Pipeline ו־Operations.
+אין למזג Ventures אוטומטית ל־Leads/Pipeline. העסק עשוי להתחיל ב־opportunity או idea לפני שקיים Lead.
 
-המסקנה: ביחס למקובל, 5 אזורי ניווט ראשיים הם יעד סביר ל־TMA קטן/בינוני; 10 אייקונים בכותרת הם מעל הצפיפות המקובלת. גם 8 עולמות בתכנית יכולים להיות הגיוניים כמודל דומיינים, אבל לא כ־8 פריטי ניווט נגישים בו־זמנית.
+המרחב צריך לחקור lifecycle של:
 
-## סדר עדיפויות לביצוע
+`Opportunity / Idea → Discovery → Information Gathering → Business Feasibility → Financial Examination → Commercial Negotiation → Legal/Business Closure → Readiness → Project / Marketing Activation → First Leads → CRM / Operations`
 
-1. **P0 — IA:** להחליף את 10 כפתורי ה־header ב־5 אזורי ניווט + More; להגדיר Command Center כבית.
-2. **P0 — איחוד BOSS:** לבנות `BossBar`; לאחד Check-in/Game סביב מודל נתונים ושכבת שירות משותפת.
-3. **P0 — אישורים:** queue קנונית אחת, עם preview ו־receipt.
-4. **P1 — Pipeline:** master-detail אחד ל־Leads ו־Lead Detail; פעולה ראשית לפי next action.
-5. **P1 — Operations:** Projects/Tasks/Assets תחת עולם אחד; לא “Personal Mode” כיעד עצמאי.
-6. **P1 — עקביות:** להגדיר AppShell, PageHeader, Section, Card, StatusBadge, EmptyState, ErrorState, Toast ו־BottomNav משותפים.
-7. **P2 — Relationship/Insights:** להפוך Activity ל־Relationship Hub מסונן, ולשלב Digest בתוך Command Center.
-8. **P2 — polish:** RTL, typography, contrast, target size, loading/saved/error states, ו־responsive audit ב־Telegram.
+המסך צריך לתת מקום ל־discovery, business case, documents, participants, financial assumptions, risks, next decision, due diligence, negotiation status, legal/commercial status ו־readiness gates. המרה ל־Project, Marketing Demand או execution היא transition שצריך להיות מפורש ומאומת, לא shortcut שמוחק את ההבחנה בין Venture ל־CRM.
 
-## מגבלות הראיות
+## 9. Command Center ו־Actions / My Work
 
-- המסכים נטענו מקומית עם API דמה סינתטי כדי לאפשר בדיקת UI; לא נעשה שימוש בנתוני לקוחות או credentials.
-- ה־API החי החזיר 401 בסביבת הבדיקה, לכן לא אימתתי הרשאות, נתוני Airtable אמיתיים, latency, receipt persistence או מצב production.
-- חלק מהמסכים נבדקו עם נתונים מלאים וחלק עם empty states; נדרש סבב נוסף עם נתוני אמת/שמות ארוכים/שגיאות/מסכים קטנים.
-- לא בוצעה בדיקת קורא מסך, keyboard, contrast מדוד או touch targets במכשיר Telegram אמיתי.
+### Command Center — Read / Understand / Decide
+
+השאלה: **מה דורש את תשומת הלב של הבעלים עכשיו?**
+
+מועמדים לתוכן: exceptions חשובים, critical next actions, overdue items, business alerts, selected KPIs, pending decisions, cross-business summary והמלצות BOSS. Digest עשוי להשתלב כאן, אך exact widgets עדיין פתוחים. Command Center אינו צריך לשכפל את כל העבודה בכל workspace.
+
+### Actions / My Work — Create / Execute / Continue
+
+זו דרישה פונקציונלית חזקה: create lead/task/record, create Marketing Demand, request media prompt/brief, search lead/task/contact, continue unfinished actions, rare approvals ו־Emergency Stop בולט ובטוח.
+
+המשטח הסופי פתוח בין:
+
+- primary Actions screen;
+- global `+` opening an Action Center;
+- My Work queue plus global quick-create;
+- hybrid.
+
+אין לקבע את הבחירה לפני בדיקת תדירות, זמני השלמה, mobile discoverability ו־transition בין Create ל־Continue. Emergency Stop יכול לחיות בתוך Actions/System Actions, ללא מסך ראשי עצמאי.
+
+## 10. Leads / CRM — פישוט ללא מחיקה
+
+Leads נשאר CORE DOMAIN, אך דורש redesign. המודל הפשוט לבדיקה:
+
+`Lead collection / list / pipeline → Lead detail → Next Action → Timeline / related information`
+
+לא ליצור destinations ראשיים נפרדים לכל מידע ששייך ל־Lead detail. Pipeline ו־Detail צריכים להרגיש כמו master-detail אחד. Contacts ו־Deals נשארים שאלה פתוחה: tabs, views או entities נפרדים. לא להסיק זאת רק ממספר המסכים.
+
+## 11. Approvals / Activity — demotion analysis
+
+### Approvals
+
+Approval הוא בעיקר **state בתוך lifecycle של action**, לא בהכרח עולם ניווט. היכולת נשארת: preview, risk/context, approve/reject, execution status ו־receipt. המיקומים העתידיים האפשריים הם Actions/My Work, contextual approval, Command Center notification או System/Admin detail. תדירות נמוכה לבדה אינה סיבה למחוק את היכולת.
+
+### Activity / Business Memory
+
+השם Activity מטעה עד שלא יאומת מהו המקור בפועל. יש לבדוק האם הוא מציג Business Memory, Interaction Log, receipts או נתונים מעורבים; אילו פריטים צריכים להופיע ב־entity timelines; ומה שייך ל־Knowledge/Memory בעתיד. הכיוון החזק כרגע הוא `Activity as context/timeline/memory layer`, לא primary destination אוטומטי. הסיווג נשאר open עד verification של מקור הנתונים והשימוש.
+
+## 12. Operations — נשאר תחת evaluation
+
+Operations הוא מועמד workspace סביר עבור Projects, execution state, operational tasks ו־assets. יש להבחין בינו לבין:
+
+- Ventures — מה בודקים ומבשילים לפני execution;
+- Actions/My Work — מה אני אישית צריך לבצע עכשיו;
+- Leads — מה קורה ב־CRM;
+- Projects Hub — summary מול execution detail;
+- Personal/Assets — הקשר של נכס מול עבודה תפעולית.
+
+הכלל לבדיקה: `Operations = what is being executed in the business`; `My Work = what I personally need to do`. אין למזג אותם לפני mapping של capabilities ו־transitions.
+
+## 13. שאלות ארכיטקטורה פתוחות
+
+- אילו workspaces יגיעו ל־primary navigation, ומה יעבור ל־More, context או `+`?
+- האם Actions הוא screen, Action Center, My Work או hybrid?
+- האם Command Center ו־Digest חולקים summary יחיד או שני מצבי קריאה?
+- מהי סמכות המקור של Activity, ומהו הגבול בין Memory, Interaction ו־timeline?
+- מהו boundary מוסכם בין Ventures, Projects, Marketing activation ו־Operations?
+- האם Contacts ו־Deals הם tabs, views או entities נפרדים בתוך CRM?
+- אילו approvals מצריכים אישור בכל שלב, ואילו רק state/receipt?
+- מתי Media Files מוצגים asset layer ומתי יש צורך ב־asset management עמוק יותר?
+- אילו widgets ב־Command Center באמת מובילים להחלטה ולא רק מוסיפים מידע?
+- אילו מסכים דורשים page מלא, drawer או side panel במובייל?
+- אילו token values ו־content rules יוגדרו ב־BOSS Design System?
+
+## 14. סדר עבודה מומלץ — ללא destructive IA changes
+
+### Phase 1 — Unified Screen / Design System
+
+להגדיר את חוזה BOSS המשותף: shell, navigation primitives, header, actions, KPI, cards, lists, boards, timelines, search, filters, tabs, badges, states, detail, action lifecycle, mobile tokens ו־quick-create. לא למחוק או למזג מסכים.
+
+### Phase 2 — Screen Qualification
+
+להריץ את המטריצה על כל מסך קיים, לאמת source/entities/actions, לתעד תדירות ושימוש, ולסמן confidence/open questions.
+
+### Phase 3 — Prototype strong core screens
+
+לבנות prototypes בלבד ל־Command Center, Ventures, Marketing/Media, Finance ו־Leads/CRM באמצעות אותה מערכת מסכים. Actions/My Work ו־Operations נבחנים כזרימות, בלי לנעול surface.
+
+### Phase 4 — Validate overlaps
+
+לבדוק transitions אמיתיים וחפיפות: Venture→Project/Marketing, Lead→Next Action, Command Center→Action, Activity→entity timeline, Operations↔My Work ו־Media→Publication/Results.
+
+### Phase 5 — Consolidation
+
+רק לאחר שהחלופה מוגדרת, הפונקציונליות ממופה, הניווט החלופי קיים ואין אובדן capability — לסמן מסכים כ־merge, demote או retire. כל שינוי production דורש עבודה נפרדת ואישור.
+
+## 15. Design reference tooling
+
+`UIDrop` / design-system extraction יכול לשמש כלי תומך בשלב ה־Design System: inspect SaaS references, לחלץ tokens/patterns ולהשוות density, hierarchy ו־interaction conventions. אין להשתמש בו להעתקה עיוורת. התוצר צריך להיות BOSS-owned design system עם החלטות מקומיות, לא אוסף סגנונות מועתקים.
+
+## 16. Change report
+
+### נוספו או עודכנו
+
+- סטטוס מפורש: `WIP DESIGN EVIDENCE / SCREEN ARCHITECTURE EXPLORATION`.
+- Current-state audit ו־Verified UX Problems.
+- Unified Screen System / Screen Contract לפני consolidation.
+- Current decision-confidence map.
+- Screen Qualification Matrix לכל מסך קיים ולמועמד Marketing/Media.
+- Marketing / Media כמועמד CORE משמעותי, עם lifecycle ופעולות מועמדות.
+- Ventures כמועמד CORE upstream, ללא מיזוג אוטומטי ל־Leads.
+- Actions / My Work כהכרח פונקציונלי עם surface פתוח.
+- Leads כ־CORE DOMAIN עם redesign, לא מחיקה.
+- Approvals ו־Activity כיכולות שימור עם demotion/contextualization שנשארים לבדיקה.
+- Operations תחת evaluation והפרדה בין business execution ל־personal work.
+- שאלות ארכיטקטורה פתוחות וסדר חמשת השלבים.
+- UIDrop ככלי עזר אפשרי בלבד.
+
+### תוקן או הורד בדרגת ודאות
+
+- מפת “5 אזורי ניווט” הוחלפה ב־navigation questions פתוחות.
+- “Ventures בתוך Pipeline” הוחלף ב־Ventures עצמאי/מורחב כמועמד CORE.
+- “Marketing/Media כחלק משני” הוחלף במועמד CORE.
+- “Approvals כמסך” הוחלף ב־approval state בתוך action lifecycle.
+- “Activity כ־primary destination” הוחלף ב־context/timeline/memory candidate.
+- המלצות merge/retire הוגדרו כמועמדים בלבד, בכפוף ל־qualification ו־validation.
+
+### גבולות השינוי
+
+- לא שונו screenshots; לא נדרשו צילומים נוספים כדי לתמוך בממצאי התיקון.
+- לא שונה production code, runtime behavior, API, routing, Airtable schema או business logic.
+- אין במסמך טענה לארכיטקטורת מסכים סופית.
+- PR #600 לא מוזג; התוצר נשאר Draft/WIP.
 
 ## קבצי ראיות
 
-כל צילומי המסך נשמרו תחת `reports/tma-audit/`, וכוללים את המצבים שנלכדו באודיט זה בלבד.
-
+כל צילומי המסך נשמרו תחת `reports/tma-audit/` ונלכדו באודיט זה. הם משמשים ראיות ל־current-state בלבד, לא למסך יעד סופי.
