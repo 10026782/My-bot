@@ -181,30 +181,32 @@ class F14B2ContactIntegrationTests(unittest.TestCase):
         audit.assert_called_once()
 
     def test_distinct_contracts_can_race_between_lookup_and_create(self):
-        """Documents F14's known check-then-create limitation; no locking in B2."""
-        writers_started = threading.Barrier(2)
+        """Concurrent callers serialize lookup+create at the canonical gate."""
         created = []
 
         def writer(fields):
-            writers_started.wait(timeout=2)
             record_id = f"rec{len(created) + 1}"
-            created.append(record_id)
+            created.append({"id": record_id, "fields": fields})
             return AirtableCreateOutcome("created", {"id": record_id})
 
-        def run():
-            return crm.find_or_create_contact(
-                "+972548212778", "Dana", create_writer=writer)
+        def lookup(*_args, **_kwargs):
+            return list(created)
 
+        def run():
+            results.append(crm.find_or_create_contact(
+                "+972548212778", "Dana", create_writer=writer))
+
+        results = []
         with patch.object(crm, "_creds_ok", return_value=True), \
-                patch.object(crm, "_get", return_value=[]):
-            results = [threading.Thread(target=run) for _ in range(2)]
-            for thread in results:
+                patch.object(crm, "_get", side_effect=lookup):
+            threads = [threading.Thread(target=run) for _ in range(2)]
+            for thread in threads:
                 thread.start()
-            for thread in results:
+            for thread in threads:
                 thread.join(timeout=3)
 
-        # Both distinct approved Contracts may observe zero before either POST.
-        self.assertEqual(created, ["rec1", "rec2"])
+        self.assertEqual(len(created), 1)
+        self.assertCountEqual([result.status for result in results], ["created", "existing"])
 
     def test_tma_contact_post_uses_the_same_gate(self):
         fields = {ContactFields.NAME: "Dana", ContactFields.PHONE: "+972548212778"}

@@ -70,6 +70,20 @@ def create_demand(demand: DemandRecord) -> str | None:
     return record.get("id")
 
 
+def list_demands(status: str = "Active", limit: int = 15) -> list[dict]:
+    """Read-only bounded list of Marketing Demand records."""
+    try:
+        safe_status = _safe_formula_param(status)
+        return at_list_by_formula(
+            Tables.MARKETING_DEMAND,
+            f"{{{MDF.STATUS}}}='{safe_status}'",
+            max_records=limit,
+        )
+    except Exception as exc:
+        logger.warning("[marketing_gateway] list_demands failed: %s", exc)
+        return []
+
+
 def update_demand_stage(demand_id: str, stage: str, next_action: str = "") -> bool:
     fields: dict = {MDF.CURRENT_STAGE: stage}
     if next_action:

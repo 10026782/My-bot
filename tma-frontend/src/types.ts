@@ -23,6 +23,22 @@ export interface ProjectsResponse {
   projects: ProjectCard[];
 }
 
+export interface MarketingDemandStatus {
+  title: string;
+  domain: string;
+  stage: string;
+  status: string;
+  next_action: string;
+  detail: string;
+  pending_creative_count: number;
+  consistency_state: "consistent" | "inconsistent";
+}
+
+export interface MarketingStatusResponse {
+  count: number;
+  demands: MarketingDemandStatus[];
+}
+
 export interface AuthResponse {
   ok: boolean;
   role: string;
@@ -297,4 +313,3 @@ export interface VenturesResponse {
   count: number;
   ventures: Venture[];
 }
-

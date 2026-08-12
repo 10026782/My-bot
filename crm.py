@@ -7,6 +7,7 @@ import re
 import httpx
 import logging
 import urllib.parse
+import threading
 from dataclasses import dataclass
 from datetime import datetime, date, timedelta
 
@@ -20,6 +21,10 @@ from airtable_schema import (
 from tools.airtable_gateway import airtable_create, airtable_patch
 
 logger = logging.getLogger(__name__)
+
+# ponytail: one process-local lock prevents duplicate Contact creates; a
+# cross-process guarantee requires a datastore-level unique constraint.
+_CONTACT_DEDUP_LOCK = threading.Lock()
 
 
 # ══════════════════════════════════════════════════
@@ -134,9 +139,9 @@ def _contact_phone_equivalents(normalized: str) -> tuple:
     return (normalized,)
 
 
-def find_or_create_contact(phone, name, *, email="", company="",
-                           contact_type="Client", notes="", lead_source_id="",
-                           identity=None, source="", create_writer=None) -> ContactResult:
+def _find_or_create_contact_unlocked(phone, name, *, email="", company="",
+                                     contact_type="Client", notes="", lead_source_id="",
+                                     identity=None, source="", create_writer=None) -> ContactResult:
     """Find exactly by canonical phone, creating only when lookup is empty."""
     normalized = _normalize_contact_phone(phone)
     if not normalized or not name:
@@ -218,6 +223,19 @@ def find_or_create_contact(phone, name, *, email="", company="",
                              error="Contact create returned no record id")
     return ContactResult("created", record_id=record_id,
                          normalized_phone=normalized)
+
+
+def find_or_create_contact(phone, name, *, email="", company="",
+                           contact_type="Client", notes="", lead_source_id="",
+                           identity=None, source="", create_writer=None) -> ContactResult:
+    """Find or create a Contact through the canonical, serialized gate."""
+    with _CONTACT_DEDUP_LOCK:
+        return _find_or_create_contact_unlocked(
+            phone, name,
+            email=email, company=company, contact_type=contact_type,
+            notes=notes, lead_source_id=lead_source_id,
+            identity=identity, source=source, create_writer=create_writer,
+        )
 
 def crm_add_contact(name: str, phone: str = "", email: str = "",
                     contact_type: str = ContactType.CLIENT,
