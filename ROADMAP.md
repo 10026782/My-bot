@@ -1722,11 +1722,14 @@ read-pull-only לגביו בכוונה, כמו ה-orchestrator עצמו.
 `test_integration.py` נשארו ירוקים ללא שינוי.
 
 STATUS: 🟡 CODE DONE, NOT VERIFIED
-EVIDENCE: קוד נכתב ונבדק מקומית (self-tests + `test_marketing_orchestrator.py`/
-`test_cmd_marketing_status.py` עוברים, `smoke_tests.py`/`test_integration.py` ירוקים) —
-טרם נדחף/מוזג/נפרס. עדכון ✅ VERIFIED IN PROD ידרוש `git log -1`/`git push` בפועל +
-regression חי מול `/telegram` (זהירות: לחיצה על רעיון ב-`ideas_generated` מפעילה כתיבת
-production אמיתית — לבדוק מול Demand ייעודי לבדיקה, לא רשומה אמיתית באמצע תהליך).
+EVIDENCE: `git log -1` = `d2cfb8b` ("F23 M2 (Telegram slice): /marketing_status list +
+Next Action query command") על branch `claude/continue-f23-dmbgr7`, `git push -u origin
+claude/continue-f23-dmbgr7` בוצע בפועל (הפלט אישר `[new branch]`). קוד נבדק מקומית
+(self-tests + `test_marketing_orchestrator.py`/`test_cmd_marketing_status.py` עוברים,
+`smoke_tests.py`/`test_integration.py` ירוקים). **עדיין לא**: מוזג ל-`main`, נפרס
+ל-Render, או מאומת חי. עדכון ✅ VERIFIED IN PROD ידרוש merge + deploy + regression חי
+מול `/telegram` (זהירות: לחיצה על רעיון ב-`ideas_generated` מפעילה כתיבת production
+אמיתית — לבדוק מול Demand ייעודי לבדיקה, לא רשומה אמיתית באמצע תהליך).
 
 **C60 — Tool Context Awareness (PR #152, מוזג ל-`main`, commit `2d85b84`/merge `3e0094b`):**
 לפי `SPEC_C59_Tool_Context_Awareness.md` (הועלה ע"י הבעלים בלי טקסט מלווה; אישור דרך
