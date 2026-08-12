@@ -37,7 +37,7 @@ _TASK_INSTRUCTIONS: dict[str, str] = {
     ),
     "production_handoff": (
         "המשימה: זהו תדריך הפקה (Production Handoff) — לא טקסט לפרסום. פרט "
-        "מה בדיוק צריך להיווצר: סוג נכס, פלטפורמת יעד, טקסט חובה, מידות/פורמט "
+        "מה בדיוק צריך להיווצר: סוג תוצר, פלטפורמת יעד, טקסט חובה, מידות/פורמט "
         "אם רלוונטי, וקריאה לפעולה."
     ),
     "publishing_plan": (
@@ -102,6 +102,25 @@ def compose_brief(
     return "\n\n".join(parts)
 
 
+# ערך מפורש לכל קלט הפקה שלא סופק בפועל — העובד החיצוני חייב לראות "לא סופק"
+# ולא לנחש/להשלים ערך בעצמו. שם קבוע כדי שה-self-tests יוכלו לבדוק כנגדו.
+_NOT_SUPPLIED = "לא סופק"
+
+_INVENT_CONTRACT = (
+    "אין להמציא עובדות עסקיות, תנאים, הטבות, ערוצים, מחירים, אמצעי יצירת "
+    'קשר, בחירת פלטפורמה, פורמטים או דרישות הפקה שלא סופקו. כל שדה קלט '
+    f'שמסומן למטה כ-"{_NOT_SUPPLIED}" נשאר "{_NOT_SUPPLIED}" — אין לנחש לו '
+    "ערך. אם ערך שכן סופק נראה לא תקין או חסר-פרטים, אין להפוך אותו "
+    "אוטומטית לעובדה מאושרת — יש להשאירו כפי שנמסר ולסמן שהוא טעון בדיקה."
+)
+
+_CREATIVE_DIRECTION_NOTE = (
+    "זהו כיוון קריאייטיבי בלבד, לא מקור אמת לעובדות עסקיות. עובדה עסקית "
+    "נחשבת מאושרת רק אם היא נתמכת ב-[פרטי הדרישה]/[חוקי תחום]/[חוקי עסק] "
+    "או ב-[קלטי הפקה] שסופקו במפורש למטה — לא בניסוח היצירתי של הרעיון."
+)
+
+
 def compose_production_handoff(
     *,
     demand: dict,
@@ -109,14 +128,26 @@ def compose_production_handoff(
     domain_rules: str = "",
     target_platform: str = "",
     required_asset_type: str = "",
+    format_spec: str = "",
+    cta_destination: str = "",
+    contact_method: str = "",
+    production_requirements: str = "",
 ) -> str:
     """
-    Pure function — provider-neutral text handed to an external production
-    worker (ChatGPT/Adobe/other). Never mentions a provider name.
+    פונקציה טהורה — טקסט provider-neutral שנמסר לעובד הפקה חיצוני
+    (ChatGPT/Adobe/אחר). אף פעם לא מזכירה שם ספק.
+
+    כל קלט הפקה (target_platform/required_asset_type/format_spec/
+    cta_destination/contact_method/production_requirements) שהקורא לא סיפק
+    מוצג במפורש כ-"לא סופק" ולא מושמט — העובד החיצוני אסור לו להתייחס לקלט
+    חסר כרשות להמציא ערך.
     """
     from airtable_schema import MarketingDemandFields as MDF
 
     profile = get_profile(demand.get(MDF.DEMAND_TYPE, ""))
+
+    def _known(value: str) -> str:
+        return value if value else _NOT_SUPPLIED
 
     parts = [
         f"[persona] {profile.persona}",
@@ -124,13 +155,22 @@ def compose_production_handoff(
     ]
     if domain_rules:
         parts.append(f"[חוקי תחום] {domain_rules}")
+    parts.append(f"[חוקי עסק] {profile.business_rules}")
     parts.append(f"[משימה] {_TASK_INSTRUCTIONS['production_handoff']}")
     parts.append(f"[פרטי הדרישה]\n{_demand_summary(demand)}")
-    parts.append(f"[הרעיון שנבחר]\n{selected_creative}")
-    if target_platform:
-        parts.append(f"[פלטפורמת יעד] {target_platform}")
-    if required_asset_type:
-        parts.append(f"[סוג נכס נדרש] {required_asset_type}")
+    parts.append(
+        f"[הרעיון שנבחר]\n{selected_creative}\n\n{_CREATIVE_DIRECTION_NOTE}"
+    )
+    parts.append(
+        "[קלטי הפקה]\n"
+        f"פלטפורמת יעד: {_known(target_platform)}\n"
+        f"סוג תוצר: {_known(required_asset_type)}\n"
+        f"פורמט/מידות: {_known(format_spec)}\n"
+        f"יעד קריאה לפעולה (CTA): {_known(cta_destination)}\n"
+        f"אמצעי יצירת קשר: {_known(contact_method)}\n"
+        f"דרישות הפקה נוספות: {_known(production_requirements)}"
+    )
+    parts.append(f"[כלל מחייב] {_INVENT_CONTRACT}")
 
     return "\n\n".join(parts)
 
@@ -162,10 +202,60 @@ if __name__ == "__main__":
     except ValueError:
         pass
 
+    # --- compose_production_handoff() — F23 grounding fix self-tests ---
+
     handoff = compose_production_handoff(
         demand=demand, selected_creative="רעיון לדוגמה", target_platform="Telegram",
     )
-    assert "רעיון לדוגמה" in handoff
+    handoff_again = compose_production_handoff(
+        demand=demand, selected_creative="רעיון לדוגמה", target_platform="Telegram",
+    )
+    assert handoff == handoff_again, "compose_production_handoff must be deterministic for identical inputs"
+    assert "llm_fallback" not in sys.modules, "compose_production_handoff must never trigger an AI-call import"
     assert "Claude" not in handoff and "Anthropic" not in handoff and "Adobe" not in handoff
+
+    assert "רעיון לדוגמה" in handoff
+
+    # 1) business_rules (Manual Context Brain) must now flow into the handoff.
+    assert "[חוקי עסק]" in handoff, "business_rules section label missing from Production Handoff"
+    assert "שם החברה" in handoff, "recruitment's real business_rules content missing from Production Handoff"
+
+    # 2+3) demand-neutral wording: no "סוג נכס" (real-estate-flavored) even for
+    # a recruitment demand — the generic term "סוג תוצר" must be used instead.
+    assert "סוג נכס" not in handoff, 'recruitment Production Handoff must not say "סוג נכס"'
+    assert "סוג תוצר" in handoff, 'Production Handoff must use the generic term "סוג תוצר"'
+
+    # 4) production inputs the caller didn't supply must be explicitly marked,
+    # never silently omitted (which would invite the external worker to guess).
+    assert handoff.count(_NOT_SUPPLIED) >= 5, "unsupplied production inputs must be marked as 'לא סופק'"
+    assert f"פורמט/מידות: {_NOT_SUPPLIED}" in handoff
+    assert f"יעד קריאה לפעולה (CTA): {_NOT_SUPPLIED}" in handoff
+    assert f"אמצעי יצירת קשר: {_NOT_SUPPLIED}" in handoff
+    assert f"דרישות הפקה נוספות: {_NOT_SUPPLIED}" in handoff
+    # a supplied input is used as-is, not replaced with "לא סופק".
+    assert "פלטפורמת יעד: Telegram" in handoff
+
+    # 5) explicit "do not invent" contract must be present.
+    assert "[כלל מחייב]" in handoff and "אין להמציא" in handoff, "do-not-invent contract missing from Production Handoff"
+
+    # 6) selected creative must be labeled as creative direction, not fact.
+    assert "כיוון קריאייטיבי בלבד" in handoff, "selected_creative must be marked as creative direction, not a source of business facts"
+
+    # fully-supplied production inputs render as given, not as "לא סופק".
+    full_handoff = compose_production_handoff(
+        demand=demand,
+        selected_creative="רעיון לדוגמה",
+        target_platform="Telegram",
+        required_asset_type="באנר",
+        format_spec="1080x1080",
+        cta_destination="קישור לטופס",
+        contact_method="וואטסאפ",
+        production_requirements="לוגו בפינה",
+    )
+    assert f"פורמט/מידות: {_NOT_SUPPLIED}" not in full_handoff
+    assert f"יעד קריאה לפעולה (CTA): {_NOT_SUPPLIED}" not in full_handoff
+    assert f"אמצעי יצירת קשר: {_NOT_SUPPLIED}" not in full_handoff
+    assert f"דרישות הפקה נוספות: {_NOT_SUPPLIED}" not in full_handoff
+    assert "1080x1080" in full_handoff and "לוגו בפינה" in full_handoff
 
     print("marketing_brief_composer.py self-test OK")
