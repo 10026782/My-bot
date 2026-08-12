@@ -3367,7 +3367,7 @@ def _handle_approval_callback_impl(cq) -> None:
                     "[TC8] callback rejection ownership unavailable; refusing mutation",
                     exc_info=True,
                 )
-                bot.answer_callback_query(cq.id, "⏳ הפעולה כבר בטיפול או אינה זמาบילה.")
+                bot.answer_callback_query(cq.id, "⏳ הפעולה כבר בטיפול או אינה זמינה.")
                 _notify_stale_or_resolved_callback(
                     cq, notify_chat_id=approver_chat_id, label=label,
                     state_text="כבר בטיפול או אינה זמינה",
