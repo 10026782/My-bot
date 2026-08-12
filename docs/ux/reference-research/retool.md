@@ -1,6 +1,6 @@
 # Retool — Reference Inspection
 
-**Inspected:** 12/08/2026  
+**Inspected:** 13/08/2026  
 **URL:** https://retool.com/  
 **Viewport:** browser default desktop; exact viewport not captured  
 **Evidence:** no screenshot saved; DOM observation only
@@ -14,6 +14,7 @@
 - `OBSERVED`: a prompt input is presented as an entry point for building an app, with starter prompts and a disabled submit state before input.
 - `OBSERVED`: the page groups integrations and workflows around internal business software.
 - `OBSERVED`: search is exposed in the global header with a keyboard shortcut hint.
+- `OBSERVED`: the public page separates global search, prompt entry, disabled-before-input readiness, starter prompts and integrations/workflow grouping as distinct product-entry states.
 - `NOT VERIFIED`: actual operations dashboard, data-table behavior, action lifecycle, restricted UX and responsive behavior.
 
 ## SCOREBOS mapping

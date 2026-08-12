@@ -1,6 +1,6 @@
 # Raycast — Reference Inspection
 
-**Inspected:** 12/08/2026  
+**Inspected:** 13/08/2026  
 **URL:** https://www.raycast.com/  
 **Viewport:** browser default desktop; exact viewport not captured  
 **Evidence:** `docs/ux/reference-evidence/raycast/raycast-home-viewport.png`
@@ -15,6 +15,7 @@
 - `OBSERVED`: the page visibly communicates keyboard-first behavior and shortcut affordances.
 - `OBSERVED`: extensions are organized by functional categories such as Productivity, Engineering, Design and Writing.
 - `OBSERVED`: extensions expose direct verbs such as create/search/modify issues, control music, navigate tabs or retrieve credentials.
+- `OBSERVED`: the public page presents a catalog state, a launcher/shortcut state, a category state, and verb-oriented action examples as separate public product states.
 - `NOT VERIFIED`: command palette search ranking, keyboard navigation, action confirmation, error feedback and mobile behavior.
 
 ## SCOREBOS mapping

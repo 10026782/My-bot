@@ -7,6 +7,7 @@ These entries are access records, not UX findings. They are explicitly `NOT VERI
 | Reference | URL attempted | Result |
 |---|---|---|
 | Linear Mobile | https://linear.app/ | `OBSERVED`: public responsive pass at 390x844; native/authenticated mobile remains `NOT VERIFIED`. |
+| Attio responsive | https://attio.com/ | `OBSERVED`: public responsive pass at 390x844; authenticated/native mobile remains `NOT VERIFIED`. |
 | Intercom | https://www.intercom.com/ | Blocked by Nativ policy page. |
 | Airtable Interfaces | https://www.airtable.com/interfaces | Rendered Airtable 404 page; target path unavailable. |
 | Stripe Dashboard | https://dashboard.stripe.com/ | Redirected to login; no authenticated account used. |

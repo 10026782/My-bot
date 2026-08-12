@@ -13,9 +13,9 @@ This document does not reopen the SCOREBOS UX Constitution, select screens, defi
 | Reference | Rendered states observed | Viewport / access boundary |
 |---|---|---|
 | Linear | Public homepage; embedded issue-detail demonstration; public responsive pass | Desktop public page and 390x844 public responsive viewport. Native/authenticated mobile app is not verified. |
-| Attio | Public CRM/company demonstration; company fields, scores, owner and pipeline question/AI answer | Public demonstration only; authenticated workspace behavior is not verified. |
-| Raycast | Public launcher/extension navigation concept; command/action catalog framing | Public marketing/demo presentation; real execution and permissions are not verified. |
-| Retool | Public global header/search; prompt/input readiness state; app-builder framing | Public product presentation; operations dashboard behavior is not verified. |
+| Attio | Public Home/work overview; Companies collection; meeting/transcript; pipeline/deal context; AI/action entry | Desktop and 390x844 public responsive pass. Authenticated workspace behavior and native mobile are not verified. |
+| Raycast | Launcher/command entry; extension catalog; category grouping; verb-oriented action examples | Public marketing/demo presentation; real execution and permissions are not verified. |
+| Retool | Global search; prompt entry; disabled-before-input state; starter prompts; integrations/workflow grouping | Public product presentation; operations dashboard behavior is not verified. |
 | Pipedrive | Public product-family collection; sales-feature collection; public AI Sales Advisor / demo entry | Public product pages; authenticated pipeline, entity and action behavior are not verified. |
 | monday CRM | Public CRM job entry; revenue-lifecycle tabs; agent-role panels | Public CRM demonstration; authenticated collection, entity and action behavior are not verified. |
 | Linear Mobile | Public responsive rendering of the Linear homepage and embedded issue example | 390x844 public viewport; this is not native/authenticated mobile evidence. |
@@ -23,7 +23,7 @@ This document does not reopen the SCOREBOS UX Constitution, select screens, defi
 ### Remaining limitations
 
 - Authenticated collection/detail behavior is not covered meaningfully across the reference set.
-- Native or authenticated mobile workflow coverage is not broad; the Linear result is a public responsive page only.
+- Native or authenticated mobile workflow coverage is not broad; Linear and Attio results are public responsive pages only.
 - HubSpot is blocked by the local Nativ policy page.
 - Intercom and Notion are blocked by the local Nativ policy page.
 - Stripe Dashboard is login-only in this environment.

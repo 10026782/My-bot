@@ -2,7 +2,7 @@
 
 **Status:** `OBSERVED` for public product examples; authenticated CRM behavior remains `NOT VERIFIED`.
 **URL:** https://www.pipedrive.com/  
-**Date:** 12/08/2026
+**Date:** 13/08/2026
 
 ## Access result
 

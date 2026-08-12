@@ -2,7 +2,7 @@
 
 **Status:** `OBSERVED` for public CRM demo presentation; authenticated CRM behavior remains `NOT VERIFIED`.
 **URL:** https://monday.com/crm  
-**Date:** 12/08/2026
+**Date:** 13/08/2026
 
 ## Access result
 
