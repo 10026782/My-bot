@@ -7,7 +7,22 @@ Canonical current source:
 **PARTIAL / NON-BLOCKING**; formal Layer 2 TurnCoordinator implementation is
 not complete. Freeze remains an owner/governance decision. Dated status
 snapshots below are historical evidence and do not override this audit.
-עודכן: 11/08/2026 — **תיעוד PR #595–#597 (פער-תיעוד, נסגר ישירות מ-`git log
+עודכן: 12/08/2026 — **F23 (BOSS Marketing Bridge M1) — 3 PR נוספים מוזגו ל-`main`
+ואומתו חי בפרודקשן, כולל תיקון bug ארכיטקטוני אמיתי שנמצא רק בבדיקה חיה.** תמצית
+מלאה בסעיף F23 למטה; כאן רק ה-headline: (1) PR #602 — redesign ל-`/marketing_new`
+wizard ללא Airtable record IDs גלויים (invoked `decision.ux_no_internal_ids`).
+(2) PR #603 — "Manual Context Brain": `DomainProfile.business_rules` עם תוכן אמיתי
+ל-recruitment (לא placeholder), ושלב `Constraints` חדש ב-wizard. (3) PR #604 —
+**תיקון קריטי**: כל טקסט חופשי שנשלח ל-wizard (כולל "כן"/מספרים) היה נופל בשקט
+ל-`run_agent()` (ה-Agent הכללי) במקום להיתפס ע"י `cmd_marketing.py`, כי
+`app.py`'s `_webhook_telegram_impl` בדק בעלות (`has_pending_text_capture`) רק
+עבור `cmd_update`, לא עבור `cmd_marketing`. נמצא ע"י הבעלים בבדיקה חיה אמיתית
+(לא ע"י review), תוקן ע"י הוספת `cmd_marketing.has_pending_capture()` +
+governance check סטטי חדש ב-`smoke_tests.py` שמונע רגרסיה שקטה. **אומת חי**:
+webhook regression אמיתי מול production (`recfrUEj6e7uHEEf9`) — "כן"/"3 שנים"
+נתפסו נכון כתשובות intake, לא דלפו ל-Agent. `STATUS` בסעיף F23 עודכן ל-✅
+VERIFIED IN PROD.
+עודכן קודם: 11/08/2026 — **תיעוד PR #595–#597 (פער-תיעוד, נסגר ישירות מ-`git log
 origin/main`, לא הועלה כ-PR נפרד ע"י מי שביצע אותם):** אומת ישירות ב-`git
 log`/`git show --stat` על `origin/main` (`f69d7b3`), לא לפי claim. תמצית
 (לפירוט מלא ראו `CHANGELOG.md`, 11/08/2026): **PR #595 — PA-01**: `Intent.
@@ -1542,43 +1557,124 @@ point: call append_reasoning_block() from ...`).
 ישיר בלבד, לא טרנזיטיבי.
 
 ### F23 — BOSS Marketing Bridge (M1: Core Marketing Exit)
-**מה:** Demand → Brief (דטרמיניסטי) → AI חיצוני (קריאה יחידה) → 3 רעיונות → בחירה אנושית
-(עריכה ישירה ב-Airtable) → Production Handoff (דטרמיניסטי) → Asset (Media Files/Drive קיימים,
-ללא שינוי) → Publication ידנית → Attribution (Source Code). נבנה אחרי audit מקיף שבדק reuse
-מול Ventures/Decisions/Interaction Log/Sessions — כולם נפסלו מסיבה מבנית (ראה ה-audit
-בשיחה/BOSS_MEDIA_MARKETING_AUDIT.md); רק 3 טבלאות חדשות קטנות נוצרו בפועל.
-**טבלאות Airtable חדשות** (base `app4bcgoX7t0HUVnm`): `Marketing Demand` (`tbljxJMyeSlF4VC42`),
+
+**מה זה, בקצרה:** Demand → intake conversational (שאלות ספציפיות לפי Demand Type) →
+Brief (דטרמיניסטי) → AI חיצוני (קריאה יחידה) → 3 רעיונות → בחירה אנושית (כפתור בטלגרם) →
+Production Handoff (דטרמיניסטי) → Asset (Media Files/Drive קיימים) → Publication ידנית →
+Attribution (Source Code). נבנה אחרי audit מקיף שבדק reuse מול Ventures/Decisions/
+Interaction Log/Sessions — כולם נפסלו מסיבה מבנית (ראה ה-audit בשיחה/
+`BOSS_MEDIA_MARKETING_AUDIT.md`, קיים רק בברנץ' `docs/media-marketing-enablement-audit`,
+לא מוזג); רק 3 טבלאות חדשות קטנות נוצרו בפועל.
+
+**נקודת כניסה חיה:** `/marketing_new` בטלגרם (wizard, לא ID-argument commands — ראה למטה).
+
+**היסטוריית build, PR-by-PR (חשוב לקרוא בסדר — כל PR תיקן פער אמיתי בקודם):**
+- **PR #601** (`5774db6`/`f33fc43`) — הבנייה הראשונית: טבלאות, gateway, brief composer,
+  ופקודות `/marketing_brief`+`/marketing_handoff` שדרשו **Airtable record ID כארגומנט
+  גלוי בטקסט**.
+- **PR #602** (`ca05628`) — **תוקן ע"י הבעלים בבדיקה חיה, לא ע"י review**: חשיפת
+  record ID גלוי מפרה עיקרון נעול בקודבייס (`decision.ux_no_internal_ids`,
+  `docs/architecture/f52-unified-approval-runtime/spec/UNIFIED_MESSAGE_UX_STANDARD.md`).
+  נבנה מחדש כ-wizard `/marketing_new` ללא ID גלוי בכלל — ה-ID עובר רק בתוך
+  `callback_data` הבלתי-נראה של טלגרם, בדיוק כמו `cmd_update.py`.
+- **PR #603** — "Manual Context Brain": שכבת ה-`DomainProfile` הייתה כמעט ריקה (משפט
+  persona גנרי אחד + משפט key_points גנרי אחד שחוזר על ידע קופירייטינג שהמודל כבר יודע
+  לבד) — ולכן 3 הרעיונות שה-AI מייצר יצאו דומים מדי ושטחיים. הוחלף `key_points` ב-
+  `business_rules` — כללים עסקיים **אמיתיים וייחודיים** (recruitment בלבד יש לו תוכן
+  אמיתי כרגע; שאר 4 סוגי הדרישה מחזיקים ערך ניטרלי מפורש "אין כרגע חוקי עסק ייחודיים...
+  אין להמציא פרטים" — **במכוון לא placeholder מזויף**). נוסף שלב `Constraints` ל-wizard
+  (השדה כבר היה קיים ב-schema/gateway, רק לא נאסף). `compose_production_handoff()`
+  **נשאר דטרמיניסטי במכוון** — לא נוסף call AI שני (הבעלים דחה זאת מפורשות: ה-M1 spec
+  מגדיר Production Handoff כטקסט provider-neutral ל-worker חיצוני, לא כמחולל מודעות פנימי).
+- **PR #604** — **באג ארכיטקטוני אמיתי, נמצא רק בבדיקה חיה**: כל טקסט חופשי שנשלח
+  ל-wizard (למשל "כן", "3 שנים") נפל בשקט ל-`run_agent()` (ה-Agent הכללי, כולל
+  `_CONFIRM_WORDS` matching) במקום להיתפס ע"י `cmd_marketing.py`. שורש הבעיה:
+  `app.py`'s `_webhook_telegram_impl()` קורא ל-`bot.process_new_updates()` (הדבר היחיד
+  שמפעיל handlers רשומים דרך `@bot.message_handler`) רק עבור slash commands, או כש-
+  `cmd_update.has_pending_text_capture()` מחזיר True — לא הייתה בדיקה מקבילה ל-
+  `cmd_marketing`. תוקן ע"י הוספת `cmd_marketing.has_pending_capture(user_id)` (True
+  לכל step פעיל, לא רק free-text steps) + קריאה מקבילה ב-`app.py` מיד אחרי בדיקת
+  `cmd_update` הקיימת. גם עודכן ה-intake עצמו: מרשימת שדות שטוחה
+  (target_audience/location/goal/constraints זהה לכל הסוגים) ל-`INTAKE_QUESTIONS` —
+  3 שאלות עם **מפתחות סמנטיים** ספציפיות לכל Demand Type (למשל `real_estate_listing`
+  שואל "סוג נכס וחדרים"/"מיקום"/"מחיר ומטרת הפרסום", לא "קהל יעד"). `_materialize_
+  demand_fields()` מרכיב את התשובות הסמנטיות לתוך שדות ה-Demand הקיימים (`target_
+  audience`/`location`/`goal`, ללא שינוי schema) עם תיוג מפורש איפה שהמשמעות לא תואמת
+  באמת (`real_estate_listing`'s "פרטי הנכס: ..." בתוך שדה שנקרא ספרותית target_audience).
+  נוסף governance check סטטי חדש ב-`smoke_tests.py` (`check_marketing_capture_ownership`)
+  שאוכף ש-`has_pending_capture(` מופיע **לפני** `run_agent(` ב-`_webhook_telegram_impl` —
+  מונע רגרסיה שקטה אם מישהו יסדר מחדש/ימחק את הבדיקה בעתיד.
+
+**אימות חי (12/08/2026):** simulated webhook POSTs אמיתיים מול `/telegram` בפרודקשן
+(identity אמיתי, Airtable אמיתי, קריאת Anthropic אמיתית) — נשלחו בדיוק המחרוזות ששברו
+קודם ("כן"/"3 שנים"), נוצר רשומת Demand אמיתית (`recfrUEj6e7uHEEf9`) עם השדות המדויקים
+שהתקבלו כתשובות intake (לא כטקסט Agent), וה-flow השלים עד `Current Stage=ideas_generated`
+כולל Creative record (`recMyaGzpIvYfNX0i`) עם 3 רעיונות. Render logs מאותו חלון זמן:
+אפס פעילות `run_agent`/Router — קריאת Anthropic יחידה בלבד (`llm_fallback` שלנו).
+
+**טבלאות Airtable** (base `app4bcgoX7t0HUVnm`): `Marketing Demand` (`tbljxJMyeSlF4VC42`),
 `Marketing Creatives` (`tblLWwYRntaZtpVgW`), `Marketing Publications` (`tblUhWCdS8s4H1aS7`).
 **הרחבות לטבלאות קיימות:** `Media Files` (+Linked Demand/+Linked Creative/+Approval Status),
 `TRAFFIC_SOURCES` (+URL/+Location/+Suitable Domains/+Free-Paid/+Suitable Demand Types/
 +Posting Rules/+Last Published At/+Quality Notes).
+
 **Domain vs. Demand Type:** `Marketing Demand.Domain` משתמש אך ורק ב-6 הערכים הקנוניים של
 `identity.Domain` (real_estate/import/media/saas/finance/general) — לא נוספה טקסונומיה
 חדשה. `Demand Type` (recruitment/furniture_import/fiber_equipment/real_estate_listing/
-service) הוא שדה נפרד, Marketing-owned, שבוחר איזה `DomainProfile` לטעון
-(`marketing_domain_profiles.py`) — לא Domain.
-**Marketing Rules:** מאוחסנים ב-`Business Memory` הקיים (Event Type="Other", תחילית כותרת
-"[Marketing Rule]" — לא נוסף Tags choice חדש כי כלי ה-MCP הזמינים לא תומכים בעריכת
-choices לשדה select קיים). קריאה/כתיבה דרך `marketing_gateway.get_marketing_rules`/
-`save_marketing_rule`.
-**קבצים חדשים:** `marketing_domain_profiles.py` (GLOBAL_RULES + 5 DomainProfile, כולל תוכן
-שהוצל מ-`creative_generator.py` — אותו קובץ עצמו נשאר ללא caller, לא בוטל), 
-`marketing_brief_composer.py` (compose_brief/compose_production_handoff — פונקציות טהורות,
-ללא I/O וללא קריאת AI), `marketing_gateway.py` (מראה את `media_gateway.py` — dataclass →
-fields → `airtable_gateway.airtable_create/patch`), `cmd_marketing.py` (`/marketing_brief`
-ו-`/marketing_handoff` — handler ישיר בסגנון `cmd_update.py`/`cmd_decision.py`, **לא**
-dispatcher tool/ActionGateway — ה-Canonical Reuse Gate קבע שזו הפעולה הנכונה לפעולות
-מופעלות-פקודה-ישירה שבהן המשתמש האנושי עצמו הוא האישור).
-**Flag:** `FEATURE_MARKETING_BRIDGE`, כבוי כברירת מחדל.
-**M1 scope:** יצירת Demand, בחירת קריאייטיב, ורישום Publication — כולם ידניים דרך Airtable
-ישירות. הקוד היחיד שנבנה הוא שתי הפעולות הדטרמיניסטיות+AI: compose brief → קריאת AI יחידה
-ל-3 רעיונות → שמירה; ו-compose production handoff. ממשק Bot מלא (רשימת דרישות, Next Action
-כפקודת שאילתה, TMA) נדחה ל-M2 במפורש.
-**Deferred (לא נבנה כלל ב-M1):** פרסום אוטומטי, scheduler/queue חדשים, מנוע memory/approval/
+service) הוא שדה נפרד, Marketing-owned, שבוחר איזה `DomainProfile`/`INTAKE_QUESTIONS`
+לטעון — לא Domain.
+
+**Marketing Rules (Business Memory) — עדיין ריק, לא שכבה פעילה כרגע:** מתוכנן להיות
+מאוחסן ב-`Business Memory` הקיים (Event Type="Other", תחילית כותרת "[Marketing Rule]").
+`marketing_gateway.save_marketing_rule()`/`get_marketing_rules()` קיימים, אבל
+`save_marketing_rule()` **ללא caller בכלל בקוד החי** — אין שום מסלול, אנושי או
+אוטומטי, שממלא את השכבה הזו כרגע. הוחלט במפורש (12/08/2026) לדחות את זה ל-"Later —
+Structured Company Brain" — לא M1. אם מישהו יחזור לזה: צריך קודם להחליט מנגנון
+כתיבה (Airtable ידני עם ה-prefix convention? פקודת טלגרם חדשה?).
+
+**קבצים:** `marketing_domain_profiles.py` (GLOBAL_RULES + 5 DomainProfile עם
+`persona`/`business_rules` — `default_tone`/`key_points` הוסרו, היו dead
+code/גנריים), `marketing_brief_composer.py` (compose_brief/compose_production_handoff —
+פונקציות טהורות, ללא I/O וללא קריאת AI — `_TASK_INSTRUCTIONS["creative_ideas"]` **לא
+שונה** מאז ה-build המקורי, במכוון: הבעיה הייתה בהקשר העסקי החסר, לא בניסוח ההוראה),
+`marketing_gateway.py` (מראה את `media_gateway.py` — dataclass → fields →
+`airtable_gateway.airtable_create/patch`), `cmd_marketing.py` (`/marketing_new` wizard —
+handler ישיר בסגנון `cmd_update.py`/`cmd_decision.py`, **לא** dispatcher tool/
+ActionGateway — ה-Canonical Reuse Gate קבע שזו הפעולה הנכונה לפעולות מופעלות-פקודה-ישירה
+שבהן המשתמש האנושי עצמו הוא האישור; מחזיק `INTAKE_QUESTIONS`/`_materialize_demand_fields`/
+`has_pending_capture`), `app.py` (רישום + ownership check ב-`_webhook_telegram_impl`,
+מראה את בדיקת `cmd_update` הקיימת בדיוק), `smoke_tests.py` (`check_marketing_capture_
+ownership`).
+
+**Flag:** `FEATURE_MARKETING_BRIDGE` — **דלוק בפרודקשן כרגע** (הודלק לבדיקה חיה
+ולא כובה מאז; לא ברירת המחדל בקוד, שנשארת כבויה).
+
+**M1 scope (מומש בפועל):** `/marketing_new` wizard מקצה לקצה — יצירת Demand דרך intake
+conversational, קריאת AI יחידה ל-3 רעיונות, בחירה בכפתור, Production Handoff דטרמיניסטי.
+בחירת קריאייטיב וקישור ל-Publication נשארים ידניים דרך Airtable ישירות. ממשק מלא (רשימת
+דרישות, Next Action כפקודת שאילתה, TMA) נדחה ל-M2 במפורש — לא התחיל.
+
+**Deferred (לא נבנה כלל):** פרסום אוטומטי, scheduler/queue חדשים, מנוע memory/approval/
 router/Airtable-gateway חדשים, עורך גרפי/production/AI runtime פנימיים, recommendation
-engine, Marketing Intelligence.
-STATUS: 🟡 CODE DONE, NOT VERIFIED — קוד+סכימה נוצרו, טרם נבדק end-to-end מול Telegram חי
-ולא נפרס (Render).
+engine, Marketing Intelligence, Drive prompt-library (הוזכר באודיט כ-gap, לא נבנה, לא
+צריך ל-M1), Business Memory Marketing Rules writer (ראה למעלה), Prompt 2 כ-AI call שני
+(נדחה במפורש ע"י הבעלים).
+
+**מה עשוי להיות הצעד הבא (לא הוחלט, לא מאושר לביצוע):** תוכן `business_rules` אמיתי
+לארבעת סוגי הדרישה הנותרים (furniture_import/fiber_equipment/real_estate_listing/
+service) — דורש ידע עסקי אמיתי מהבעלים, לא ניתן להמציא. עד אז הם ישתמשו בערך הניטרלי
+המפורש. אם התוכן העשיר יותר עדיין לא משפר את איכות הרעיונות לאחר שיתווסף, הצעד הבא
+המוצע (שהוצג לבעלים אך טרם אושר ליישום) הוא חוזה output מובנה יותר ל-Prompt 1
+(Creative Director עם 7 שדות: שם כיוון/hook/רעיון מרכזי/הבטחה/למה זה יעבוד/מבנה
+מסר/מה מבדיל) — **לא ליישם בלי אישור מפורש**.
+
+STATUS: ✅ VERIFIED IN PROD
+EVIDENCE: PR #601 (`f982217`-adjacent merge)/#602 (`ca57b29`, `2026-08-11T13:20:02Z`)/
+#603 (`59a38e9`, `2026-08-11T14:38:35Z`)/#604 (`a1caa82`, `2026-08-11T23:47:16Z`) —
+כולם ממוזגים ל-`main`, Render deploy `dep-d9tr91jl550s738take0`=`live` (מאומת מול
+Render API). Live regression מפורט למעלה. `FEATURE_MARKETING_BRIDGE=true` בפרודקשן
+כרגע — אם מכבים אותו, `/marketing_new` לא יירשם (fail-safe, ראה `register_marketing_
+command`).
 
 **C60 — Tool Context Awareness (PR #152, מוזג ל-`main`, commit `2d85b84`/merge `3e0094b`):**
 לפי `SPEC_C59_Tool_Context_Awareness.md` (הועלה ע"י הבעלים בלי טקסט מלווה; אישור דרך
