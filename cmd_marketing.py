@@ -26,8 +26,18 @@
 # Per the M1 spec's Canonical Reuse Gate: this is a direct, human-triggered
 # command handler (same shape as cmd_update.py/cmd_decision.py) — not an
 # agent-invoked dispatcher tool, no tool_registry/ActionGateway involvement,
-# because the human running the wizard IS the authorization. Listing/query
-# commands (list demands, next action, etc.) remain M2 scope, not built here.
+# because the human running the wizard IS the authorization.
+#
+# M2 (Telegram slice — list + Next Action query, TMA screen tracked
+# separately): /marketing_status lists Demands the caller is authorized to
+# see (identity.can_access_domain(), re-checked again on the callback — never
+# rely on the record id being merely hidden inside callback_data), then
+# renders a status card via marketing_orchestrator.compute_next_action()
+# (pure, pull-only, mirrors decision_orchestrator.py — never writes canonical
+# state). When exactly one Creative is pending review, the card reuses the
+# *existing* mkt_select:/_idea_keyboard() write path below as-is — M2 adds no
+# new write implementation, only a new authorized entry point into the M1
+# selection/handoff flow that was already live.
 
 from __future__ import annotations
 
@@ -186,6 +196,33 @@ def register_marketing_command(bot, get_identity):
             bot.send_message(msg.chat.id, "✅ בוטל.")
         else:
             bot.send_message(msg.chat.id, "אין תהליך פתוח לביטול.")
+
+    @bot.message_handler(commands=["marketing_status", "מצב_שיווק"])
+    def cmd_marketing_status(msg):
+        identity = _authorized(bot, msg, get_identity)
+        if not identity:
+            return
+        records = _authorized_demand_list(identity)
+        if not records:
+            bot.send_message(msg.chat.id, "אין דרישות שיווק פעילות שאתה מורשה לראות כרגע.")
+            return
+        bot.send_message(
+            msg.chat.id, f"📋 דרישות שיווק פעילות ({len(records)}):",
+            reply_markup=_demand_list_keyboard(records),
+        )
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("mkt_status:"))
+    def cb_status(call):
+        identity = _authorized_callback(bot, call, get_identity)
+        if not identity:
+            return
+        demand_id = call.data.split(":", 1)[1]
+        bot.answer_callback_query(call.id)
+        result = _get_next_action_card(demand_id, identity)
+        if not result["ok"]:
+            bot.send_message(call.message.chat.id, f"❌ {result['error']}")
+            return
+        bot.send_message(call.message.chat.id, result["text"], reply_markup=result.get("keyboard"))
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("mkt_domain:"))
     def cb_domain(call):
@@ -405,7 +442,75 @@ def _idea_keyboard(creative_id: str):
     return markup
 
 
+def _demand_list_keyboard(records: list[dict]):
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    from airtable_schema import MarketingDemandFields as MDF
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(*[
+        InlineKeyboardButton(
+            f"{_label(DOMAINS, r.get('fields', {}).get(MDF.DOMAIN, ''))} · "
+            f"{r.get('fields', {}).get(MDF.NAME, r['id'])}"[:60],
+            callback_data=f"mkt_status:{r['id']}",
+        )
+        for r in records
+    ])
+    return markup
+
+
 # ── Core logic — importable/testable without a bot instance ─────────
+
+def _authorized_demand_list(identity) -> list[dict]:
+    """
+    Read-only. Demands the caller is authorized to see, filtered by
+    identity.can_access_domain() (owner: all, partner: only
+    identity.allowed_domains, other internal roles: unrestricted today — see
+    identity.py). limit=10 bounds the Telegram inline keyboard size.
+    """
+    import marketing_gateway
+    from airtable_schema import MarketingDemandFields as MDF
+
+    records = marketing_gateway.list_demands(limit=10)
+    return [
+        r for r in records
+        if identity.can_access_domain(r.get("fields", {}).get(MDF.DOMAIN, ""))
+    ]
+
+
+def _truncate_for_telegram(text: str, limit: int = 3500) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "…\n(קוצר — הטקסט המלא שמור ב-Airtable, Marketing Creatives → Production Handoff)"
+
+
+def _get_next_action_card(demand_id: str, identity) -> dict:
+    """
+    Returns {"ok": True, "text": str, "keyboard": InlineKeyboardMarkup|None}
+    or {"ok": False, "error": str}. Re-checks identity.can_access_domain()
+    against the fetched Demand independently of the list-time filter — a
+    stale/replayed callback_data for a demand the caller has since lost
+    access to must still fail closed, and a missing vs. unauthorized demand
+    return the exact same generic error so neither leaks which case it was.
+    """
+    import marketing_gateway
+    import marketing_orchestrator
+    from airtable_schema import MarketingDemandFields as MDF
+
+    demand = marketing_gateway.get_demand(demand_id)
+    if not demand or not identity.can_access_domain(demand.get(MDF.DOMAIN, "")):
+        return {"ok": False, "error": "הדרישה לא נמצאה"}
+
+    creative_ids = demand.get(MDF.CREATIVES) or []
+    creatives = {}
+    for cid in creative_ids:
+        fields = marketing_gateway.get_creative(cid)
+        if fields:
+            creatives[cid] = fields
+
+    result = marketing_orchestrator.compute_next_action(demand_id, demand, creatives)
+    text = _truncate_for_telegram(marketing_orchestrator.format_status_card(result))
+    keyboard = _idea_keyboard(result.creative_id) if result.show_ideas and result.creative_id else None
+    return {"ok": True, "text": text, "keyboard": keyboard}
+
 
 def _parse_three_ideas(raw: str) -> list[str]:
     parts = re.split(r"רעיון\s*\d\s*:", raw)
@@ -591,5 +696,14 @@ if __name__ == "__main__":
     # callback_data length sanity — Telegram caps at 64 bytes
     longest = f"mkt_select:recXXXXXXXXXXXXXXX:3"
     assert len(longest.encode()) <= 64, f"callback_data too long: {len(longest.encode())} bytes"
+    longest_status = "mkt_status:recXXXXXXXXXXXXXXX"
+    assert len(longest_status.encode()) <= 64, f"callback_data too long: {len(longest_status.encode())} bytes"
+
+    # _truncate_for_telegram: short text passes through, long text is cut with a note
+    assert _truncate_for_telegram("short") == "short"
+    long_text = "x" * 4000
+    truncated = _truncate_for_telegram(long_text, limit=100)
+    assert len(truncated) < len(long_text)
+    assert "קוצר" in truncated
 
     print("cmd_marketing.py self-test OK")
