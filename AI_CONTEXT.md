@@ -25,8 +25,11 @@ batch, internal history #601–#604).
   הנוכחי — נוספה רשומה מתאימה (ראו סעיף 3), אז ה-cross-doc gap כבר סגור.
 - שני פערים לא-חוסמים ב-CORE נותרים ללא שינוי: (1) CI של `main` אדום על
   שער ה-freshness של Context Librarian (governance, לא regression
-  פונקציונלי); (2) `TurnCoordinator` הפורמלי (Layer 2) — אפס מימוש,
-  מוחלף כיום ע"י `router.py::route_request()`.
+  פונקציונלי); (2) `TurnCoordinator` הפורמלי (Layer 2) — zero implementation,
+  formal component not in code. De-facto handled by router.py::route_request() +
+  lead_candidate_handler.py. TC2-TC10 functional machinery (merged PRs #562–#588,
+  verified in staging 2026-08-10) handles routing/ownership dispersedly, not yet
+  unified under formal TurnCoordinator class (frozen spec, awaiting owner decision).
 - TC7-B1 (`core/claim_authorization.py`) — עדיין **אפס קוראים חיים**, ללא
   שינוי מהסבב הקודם.
 - RP5 enforcement ו-F52 unification (`FEATURE_UNIFIED_STATUS_FORMATTER`) —
@@ -66,9 +69,9 @@ batch, internal history #601–#604).
   real_estate_listing/service) מחזיקים ערך ניטרלי מפורש, ממתינים לקלט
   עסקי מה-owner.
 
-**חסום:**
+**חסום (architectural decision, not implementation blocker):**
 
-- `TurnCoordinator` הפורמלי (Layer 2) — אפס מימוש; ממתין להחלטת owner.
+- Formal TurnCoordinator class (Layer 2) — zero implementation (class TurnCoordinator does not exist). Frozen contract spec awaiting owner approval. TC2-TC10 machinery handles responsibilities de-facto; this is non-blocking for CORE but represents architectural gap (per CORE_COMPLETION_AUDIT_20260810.md §8). No new implementation-blocker found.
 - BUG-130/134/136/137/140/150/152 (וכן 126/127B/127C/138/139/142/148) —
   ממתינים להחלטת owner; חלקם חסומים ע"י
   `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`.
