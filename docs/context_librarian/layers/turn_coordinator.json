@@ -20,7 +20,17 @@
         "core/router/route_decision.py",
         "core/lead_candidate_handler.py",
         "feature_flags.py",
-        "app.py"
+        "app.py",
+        "core/router/entity_resolvers.py",
+        "core/router/lead_builders.py",
+        "core/router/lead_integration.py",
+        "core/router/ownership_contracts.py",
+        "core/router/task_builders.py",
+        "core/router/task_integration.py",
+        "core/router/task_resolvers.py",
+        "core/turn_coordinator_runtime.py",
+        "core/turn_state_repository.py",
+        "core/migrations/002_durable_turn_state.sql"
       ],
       "test_paths": [
         "test_turn_envelope.py",
@@ -34,7 +44,12 @@
         "test_pr2_deterministic_approval_cost_cuts.py",
         "test_pending_contract_read_amplification.py",
         "test_bug056_legacy_cancel_replay_guard.py",
-        "test_hotfix_e_shared_replay_policy.py"
+        "test_hotfix_e_shared_replay_policy.py",
+        "scripts/regression_matrix.py",
+        "scripts/run_isolated_regression.py",
+        "scripts/staging_identity.py",
+        "scripts/verify_tc8_staging.py",
+        "scripts/verify_tc9_staging.py"
       ],
       "canonical_docs": [
         {
@@ -104,7 +119,7 @@
         }
       ],
       "valid_from": "2026-07-28",
-      "last_verified_commit": "7f4f0e80317fc1b8b43ccb097ec3e75e1a054d90",
+      "last_verified_commit": "c70d7d73a3e053eb136c0de27e2a0abfbc83c69e",
       "confidence": 0.85,
       "notes": [
         "BUG_AUDIT_LOG.md added as a canonical doc 2026-07-28 (N17 pilot Task 3 fix): BUG-130 (line 3056, create-vs-update misroute in core/lead_candidate_handler.py) and BUG-140 (line 3198, unrelated-lead overwrite risk, still pending) are both registered, unfixed, and 142 lines apart in the same log section — the pilot's Librarian-track investigation grepped BUG-130 and never read far enough to find BUG-140. See task_profiles/profiles.json's `turn_coordinator_routing.bounded_local_expansions`, which now inlines both entries into the bundle so this cannot be missed by stopping at the first match.",
@@ -113,7 +128,8 @@
         "The coordinator consumes typed signals and must not invent business state or approval policy.",
         "PR #471 changed who legitimately owns a turn's final reply, not just how routing is observed: when FEATURE_SINGLE_SPEAKER_APPROVAL_UX is on and this turn queued an approval, run_agent() hands the reply to the Gateway (reply_owner=\"gateway\") and returns immediately without a further Agent turn (app.py:3802 as of ffa678a7; line drifts with unrelated wording-only edits elsewhere in the file, e.g. PR #479/#480 — re-verified this audit that the boundary logic itself is unchanged). This is a conditional, code-level ownership assignment for approval-queuing turns specifically — it does not create a general reply_owner claim mechanism and does not resolve the concurrency race (a callback and a concurrent text turn for the same identity) described in docs/architecture/turn-coordinator/REPLY_OWNERSHIP_AND_APPROVAL_AUTHORITY_RESEARCH.md §1.3c, which remains unmitigated and research-only.",
         "The same handoff path still invokes the RP5 shadow observer (observe_shadow_finalizer, app.py:3813 as of ffa678a7) on the Gateway-owned reply before returning — RP5's classification runs even though the Agent's own LLM text is never produced for that turn; see layer.rp5's notes.",
-        "First real consumption pilot re-verification against a89fc67: PR2 added an early, anchored approval-lifecycle resolver ahead of lead capture, Session, Router, Business Memory, and Agent. It is a specialized deterministic bypass, not a general TurnCoordinator implementation. Unrecognized text falls through to the existing route; the formal coordinator remains planning-only."
+        "First real consumption pilot re-verification against a89fc67: PR2 added an early, anchored approval-lifecycle resolver ahead of lead capture, Session, Router, Business Memory, and Agent. It is a specialized deterministic bypass, not a general TurnCoordinator implementation. Unrecognized text falls through to the existing route; the formal coordinator remains planning-only.",
+        "Registration-only pass (backend-ci Context Librarian catalog freshness fix): code_paths/test_paths above were extended to cover the TC2-TC10 canonical-builders/bounded-resolvers/ownership-contracts/durable-turn-state files under docs/architecture/turn-coordinator-full/ (a separate, newer planning tree from the turn-coordinator/ docs already listed as canonical_docs here) plus their TC10 staging/regression scripts. This pass registers paths only — it does not re-verify or update this node's own status/source_of_truth/notes/canonical_docs narrative above, several of which (e.g. \"No class TurnCoordinator exists on main\", status=\"shadow\") predate this newer work and may now be stale. That re-verification is a separate, larger judgment call flagged for a follow-up review, not resolved by this registration pass."
       ],
       "extensions": {
         "boss.layer_aliases": [

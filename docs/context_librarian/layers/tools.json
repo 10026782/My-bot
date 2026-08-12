@@ -78,7 +78,7 @@
         }
       ],
       "valid_from": "2026-07-23",
-      "last_verified_commit": "7f4f0e80317fc1b8b43ccb097ec3e75e1a054d90",
+      "last_verified_commit": "c70d7d73a3e053eb136c0de27e2a0abfbc83c69e",
       "confidence": 0.94,
       "notes": [
         "Permission, availability, dispatch, approval, and evidence validation are separate boundaries.",

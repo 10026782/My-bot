@@ -30,7 +30,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-06-30",
-      "last_verified_commit": "7f4f0e80317fc1b8b43ccb097ec3e75e1a054d90",
+      "last_verified_commit": "c70d7d73a3e053eb136c0de27e2a0abfbc83c69e",
       "confidence": 1.0,
       "notes": [
         "A generated bundle or planning document cannot override main."
@@ -80,7 +80,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-23",
-      "last_verified_commit": "7f4f0e80317fc1b8b43ccb097ec3e75e1a054d90",
+      "last_verified_commit": "c70d7d73a3e053eb136c0de27e2a0abfbc83c69e",
       "confidence": 1.0,
       "notes": [
         "Legacy IDs may resolve an existing contract but never create, infer, or repair one."
@@ -115,7 +115,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-23",
-      "last_verified_commit": "59e74be",
+      "last_verified_commit": "c70d7d73a3e053eb136c0de27e2a0abfbc83c69e",
       "confidence": 1.0,
       "notes": [
         "The Context Librarian is metadata and references only."
@@ -149,7 +149,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-23",
-      "last_verified_commit": "7f4f0e80317fc1b8b43ccb097ec3e75e1a054d90",
+      "last_verified_commit": "c70d7d73a3e053eb136c0de27e2a0abfbc83c69e",
       "confidence": 1.0,
       "notes": [
         "A code default is not evidence of the current deployed environment."
@@ -184,7 +184,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-06-30",
-      "last_verified_commit": "7f4f0e80317fc1b8b43ccb097ec3e75e1a054d90",
+      "last_verified_commit": "c70d7d73a3e053eb136c0de27e2a0abfbc83c69e",
       "confidence": 1.0,
       "notes": [
         "Without all three gates report Implemented but not yet verified."
@@ -214,7 +214,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-23",
-      "last_verified_commit": "7f4f0e80317fc1b8b43ccb097ec3e75e1a054d90",
+      "last_verified_commit": "c70d7d73a3e053eb136c0de27e2a0abfbc83c69e",
       "confidence": 0.98,
       "notes": [
         "Preserve historical failures as evidence, but do not treat them as current state without re-verification."
@@ -250,7 +250,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-23",
-      "last_verified_commit": "7f4f0e80317fc1b8b43ccb097ec3e75e1a054d90",
+      "last_verified_commit": "c70d7d73a3e053eb136c0de27e2a0abfbc83c69e",
       "confidence": 1.0,
       "notes": [
         "Do not expose record IDs, contract IDs, payloads, credentials, or internal tool names."
@@ -285,7 +285,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-23",
-      "last_verified_commit": "59e74be",
+      "last_verified_commit": "c70d7d73a3e053eb136c0de27e2a0abfbc83c69e",
       "confidence": 1.0,
       "notes": [
         "Layer numbering aliases must not overwrite semantic ownership boundaries.",
@@ -336,7 +336,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-30",
-      "last_verified_commit": "7f4f0e80317fc1b8b43ccb097ec3e75e1a054d90",
+      "last_verified_commit": "c70d7d73a3e053eb136c0de27e2a0abfbc83c69e",
       "confidence": 1.0,
       "notes": [
         "Added after the first real Consumption Enforcement pilot (docs/governance/librarian/FIRST_REAL_CONSUMPTION_PILOT.md) found these five sources missing from cross_layer_architecture's mandatory tier despite being materially load-bearing for the recommendation.",
@@ -403,7 +403,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-30",
-      "last_verified_commit": "7f4f0e80317fc1b8b43ccb097ec3e75e1a054d90",
+      "last_verified_commit": "c70d7d73a3e053eb136c0de27e2a0abfbc83c69e",
       "confidence": 1.0,
       "notes": [
         "Added after the first real Consumption Enforcement pilot found these sources missing from cross_layer_architecture's mandatory tier, despite Stage 3A's own recommendation resting on this exact contract.",

@@ -721,6 +721,24 @@ _AUTHORITY_TERMS = frozenset({
 })
 
 
+def _is_consumption_ledger_artifact(catalog: Catalog, raw_path: str) -> bool:
+    """קובץ JSON שמכיל את כל שדות ה-ledger הקנוניים (LEDGER_TOP_LEVEL_REQUIRED_FIELDS,
+    למטה) הוא פלט שנוצר ע"י verify-consumption/pilot_preflight — ראיית consumption/
+    governance (ומפורשות לא production: הוא כולל תמיד "production_claim"), לא קוד
+    ולא production evidence. בודקת מבנה בפועל ולא רק שם קובץ, כך שקובץ אחר עם
+    "ledger"/"approval" בשם אך בלי המבנה הזה עדיין ייתפס כרגיל (STOP/REVIEW_REQUIRED),
+    וקובץ עם המבנה הזה ייתפס גם אם שמו לא מרמז עליו."""
+    full_path = catalog.repo_root / raw_path
+    try:
+        data = json.loads(full_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return isinstance(data, dict) and LEDGER_TOP_LEVEL_REQUIRED_FIELDS <= set(data)
+
+
+_NON_BLOCKING_NEW_SOURCE_CLASSIFICATIONS = frozenset({"WARNING", "GOVERNANCE_ARTIFACT"})
+
+
 def classify_new_sources(
     catalog: Catalog, paths: Iterable[str]
 ) -> list[dict[str, str]]:
@@ -730,6 +748,17 @@ def classify_new_sources(
     for raw_path in sorted({path.replace("\\", "/") for path in paths} - registered):
         lower = raw_path.casefold()
         name = PurePosixPath(lower).name
+        if lower.endswith(".json") and _is_consumption_ledger_artifact(catalog, raw_path):
+            result.append({
+                "path": raw_path,
+                "classification": "GOVERNANCE_ARTIFACT",
+                "reason": (
+                    "generated Context Librarian consumption ledger — governance/"
+                    "review evidence, not a runtime or production source; no layer "
+                    "classification required"
+                ),
+            })
+            continue
         if name.startswith("test_") or "/test" in lower or lower.startswith("test"):
             classification, reason = "WARNING", "new test source"
         elif lower.endswith((".md", ".rst", ".txt")) or any(
@@ -798,7 +827,8 @@ def refresh_proposal(catalog: Catalog, *, main_ref: str = "origin/main") -> dict
             })
     new_sources = discover_new_sources(catalog, main_ref=main_ref)
     has_blocking_new_sources = any(
-        item["classification"] != "WARNING" for item in new_sources
+        item["classification"] not in _NON_BLOCKING_NEW_SOURCE_CLASSIFICATIONS
+        for item in new_sources
     )
     status = (
         "CHANGES_REQUIRED"
@@ -813,7 +843,10 @@ def refresh_proposal(catalog: Catalog, *, main_ref: str = "origin/main") -> dict
         "canonical_main_sha": main_sha,
         "updates": updates,
         "new_sources": new_sources,
-        "authority_review_required": any(item["classification"] != "WARNING" for item in new_sources),
+        "authority_review_required": any(
+            item["classification"] not in _NON_BLOCKING_NEW_SOURCE_CLASSIFICATIONS
+            for item in new_sources
+        ),
     }
 
 
