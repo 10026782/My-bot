@@ -31,9 +31,16 @@ This is a shortlist for later UX synthesis, not a final design decision and not 
 **Reuse:** `MAP TO EXISTING SCOREBOS PATTERN`.  
 **Why:** reinforces clear working, readiness and feedback states.
 
+### 5. Public lifecycle grouping as an inspection candidate — monday CRM + Pipedrive
+
+`OBSERVED`: monday exposes revenue lifecycle stages and role-specific agent panels in a public demo; Pipedrive exposes product/feature groupings around activity-based selling and lead-to-deal work.
+**Mapping:** DEC-UX-09, DEC-UX-10, DEC-UX-11.
+**Reuse:** `USE AS COMPOSITION INSPIRATION` only; authenticated workflow states remain unverified.
+**Why:** candidate for later comparison of lifecycle framing and domain grouping, without deciding SCOREBOS navigation or screen architecture.
+
 ## Not candidates yet
 
-No pattern from Intercom, Airtable Interfaces, Stripe, HubSpot, Pipedrive, monday, Notion, Vercel, Figma or Tana is shortlisted because the required rendered state was not verified in this run.
+No pattern from Intercom, Airtable Interfaces, Stripe, HubSpot, Notion, Vercel, Figma or Tana is shortlisted because the required rendered product state was not verified. Pipedrive and monday are listed only as public-example candidates with explicit evidence boundaries.
 
 ## Stop condition
 
