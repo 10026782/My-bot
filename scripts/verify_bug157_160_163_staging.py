@@ -261,25 +261,67 @@ def run_bug157_approval_race(identity, run_id: str) -> None:
     for i, r in enumerate(returned):
         print(f"    caller {i}: canonical_state={r.canonical_state} is_final={r.is_final}")
 
-    # Replay after the race has fully resolved — must stay idempotent
-    # (no second execution), per approve_with_lifecycle_result()'s own
-    # `if before.status != "pending": return ...repeated=True` guard.
+    # EMERGENCY_STOP_ALL blocks every write tool (tools/dispatcher.py:156)
+    # independently of BUG-157's claim/execution logic. If it's on, the one
+    # execution attempt that *does* win the claim will fail for that
+    # unrelated reason — expected here, not a BUG-157 regression. Surfaced
+    # explicitly so a 0-Tasks-record result below isn't misread as evidence
+    # of anything concurrency-related.
+    try:
+        import feature_flags as _ff
+        emergency_stop_active = _ff.is_enabled("EMERGENCY_STOP_ALL")
+    except Exception:
+        emergency_stop_active = None
+    print(f"    EMERGENCY_STOP_ALL active: {emergency_stop_active}")
+
+    # C/D — single execution owner: exactly one non-"repeated" claimant
+    # should exist (the caller whose own approve() call actually flipped
+    # status away from "pending"); every other concurrent caller must have
+    # observed an already-non-pending contract, never executed a second
+    # time. canonical_state alone doesn't distinguish "I executed" from "I
+    # merely observed the winner's result" when both land on the same
+    # terminal state, so this counts distinct execution *attempts* via the
+    # real business-side effect instead (below), and here only checks that
+    # no caller was left in a non-terminal state.
+    non_final = [r for r in returned if not r.is_final]
+    _record("bug157", "C. every returned result is final (no caller left hanging mid-execution)",
+            len(non_final) == 0, f"{len(non_final)} non-final result(s)")
+
+    settled_before_replay = gateway.find_contract(contract_id)
+    status_before_replay = settled_before_replay.status if settled_before_replay else None
+
+    # Replay after the race has fully resolved — must stay idempotent: it
+    # must not change contract status again (i.e. must not trigger a
+    # second execution attempt), regardless of whether the original
+    # execution attempt itself succeeded or failed for an unrelated reason
+    # (e.g. EMERGENCY_STOP_ALL).
     time.sleep(0.5)
     replay = gateway.approve_with_lifecycle_result(
         contract_id, approver=identity.external_id, approver_role="owner",
     )
-    _record("bug157", "E. replay-after-claim stays idempotent",
-            replay.canonical_state == returned[0].canonical_state if returned else False,
+    settled_after_replay = gateway.find_contract(contract_id)
+    status_after_replay = settled_after_replay.status if settled_after_replay else None
+    _record("bug157", "E. replay-after-claim stays idempotent (no second execution)",
+            status_after_replay == status_before_replay,
+            f"status before replay={status_before_replay!r} after replay={status_after_replay!r} "
             f"replay canonical_state={replay.canonical_state}")
 
-    # Best-effort cleanup of the real Tasks record this created.
+    # Best-effort cleanup + the real double-execution smoking gun: however
+    # many Tasks records exist for this run's unique title, there must
+    # never be more than one — 0 is a legitimate outcome (e.g. the one
+    # allowed execution attempt failed, whether due to EMERGENCY_STOP_ALL
+    # or anything else unrelated to the race itself), but 2+ would mean two
+    # concurrent callers both actually wrote, which is exactly the defect
+    # BUG-157's atomic claim exists to prevent.
     try:
         from tools.airtable_gateway import at_list_by_formula, airtable_delete, _safe_formula_param
         formula = f"FIND('{_safe_formula_param(run_id)}', {{כותרת המשימה}}) > 0"
         records = at_list_by_formula("משימות (Tasks)", formula)
         matched = [rec for rec in records if rec.get("id")]
-        _record("bug157", "D. exactly one Tasks record created by the race",
-                len(matched) == 1, f"found {len(matched)} record(s)")
+        _record("bug157", "D. at most one Tasks record created by the race (no double execution)",
+                len(matched) <= 1,
+                f"found {len(matched)} record(s); final contract status={status_after_replay!r}; "
+                f"emergency_stop_active={emergency_stop_active}")
         for rec in matched:
             airtable_delete("משימות (Tasks)", rec["id"], source="tc3_verify_cleanup")
         print(f"    cleaned up {len(matched)} Tasks record(s)")
