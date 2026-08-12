@@ -100,6 +100,20 @@ def get_demand(demand_id: str) -> dict | None:
     return record.get("fields") if record else None
 
 
+def list_demands(status: str = "Active", limit: int = 15) -> list[dict]:
+    """
+    Read-only. Full Airtable records ({"id", "fields"}) for Marketing Demand,
+    filtered by Status (default "Active"; pass "" for no filter). Empty list
+    on any failure — never raises, matches get_marketing_rules()'s contract.
+    """
+    formula = f"{{{MDF.STATUS}}}='{_safe_formula_param(status)}'" if status else ""
+    try:
+        return at_list_by_formula(Tables.MARKETING_DEMAND, formula, max_records=limit)
+    except Exception as e:
+        logger.warning("[marketing_gateway] list_demands failed: %s", e)
+        return []
+
+
 def get_creative(creative_id: str) -> dict | None:
     """Returns the Creative record's `fields` dict, or None if not found/error."""
     record = _get_by_id(Tables.MARKETING_CREATIVES, creative_id)

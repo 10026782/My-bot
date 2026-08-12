@@ -7,7 +7,21 @@ Canonical current source:
 **PARTIAL / NON-BLOCKING**; formal Layer 2 TurnCoordinator implementation is
 not complete. Freeze remains an owner/governance decision. Dated status
 snapshots below are historical evidence and do not override this audit.
-עודכן: 12/08/2026 — **F23 (BOSS Marketing Bridge M1) — 3 PR נוספים מוזגו ל-`main`
+עודכן: 12/08/2026 — **F23 (BOSS Marketing Bridge M2, Telegram slice) — `/marketing_status`
+נוסף.** רשימת Demands מורשית (`identity.can_access_domain()`, נבדק גם ב-list וגם שוב
+ב-callback — לא מסתמכים על הסתרת ה-ID בתוך `callback_data` כאבטחה) + כרטיס "Next Action"
+לכל דרישה, מחושב ע"י מודול חדש `marketing_orchestrator.py` (pure/pull-only, אותו חוזה כמו
+`decision_orchestrator.py` — לעולם לא כותב canonical state). כשיש בדיוק Creative אחד
+Pending Review, הכרטיס משתמש מחדש ב-`_idea_keyboard()`/`mkt_select:` הקיימים מ-M1 —
+**M2 לא מוסיף מסלול כתיבה חדש, רק נקודת כניסה מורשית נוספת לזה הקיים.** יותר מ-Creative
+אחד ממתין נחשב מצב לא עקבי ונכשל בבטחה (לא בוחר "הראשון" שרירותית) — לא לנחש; שלבים
+שמורים-בסכמה-אך-לא-חיים (`brief_composed`/`selected`/`closed`) מקבלים כרטיס "לא מטופל
+אוטומטית", לא behavior מומצא. TMA screen (החלק השני של M2 לפי הסעיף למטה) **לא נבנה
+בשינוי הזה במפורש** — נשאר לתכנית נפרדת. קבצים: `marketing_orchestrator.py` (חדש),
+`marketing_gateway.list_demands()` (חדש), `cmd_marketing.py` (`/marketing_status`+
+`מצב_שיווק`, `mkt_status:` callback). בדיקות: `test_marketing_orchestrator.py`,
+`test_cmd_marketing_status.py` (חדשים) + self-tests מורחבים.
+עודכן קודם: 12/08/2026 — **F23 (BOSS Marketing Bridge M1) — 3 PR נוספים מוזגו ל-`main`
 ואומתו חי בפרודקשן, כולל תיקון bug ארכיטקטוני אמיתי שנמצא רק בבדיקה חיה.** תמצית
 מלאה בסעיף F23 למטה; כאן רק ה-headline: (1) PR #602 — redesign ל-`/marketing_new`
 wizard ללא Airtable record IDs גלויים (invoked `decision.ux_no_internal_ids`).
@@ -22,7 +36,7 @@ governance check סטטי חדש ב-`smoke_tests.py` שמונע רגרסיה ש�
 webhook regression אמיתי מול production (`recfrUEj6e7uHEEf9`) — "כן"/"3 שנים"
 נתפסו נכון כתשובות intake, לא דלפו ל-Agent. `STATUS` בסעיף F23 עודכן ל-✅
 VERIFIED IN PROD.
-עודכן קודם: 11/08/2026 — **תיעוד PR #595–#597 (פער-תיעוד, נסגר ישירות מ-`git log
+עודכן קודם יותר: 11/08/2026 — **תיעוד PR #595–#597 (פער-תיעוד, נסגר ישירות מ-`git log
 origin/main`, לא הועלה כ-PR נפרד ע"י מי שביצע אותם):** אומת ישירות ב-`git
 log`/`git show --stat` על `origin/main` (`f69d7b3`), לא לפי claim. תמצית
 (לפירוט מלא ראו `CHANGELOG.md`, 11/08/2026): **PR #595 — PA-01**: `Intent.
@@ -1652,7 +1666,8 @@ ownership`).
 **M1 scope (מומש בפועל):** `/marketing_new` wizard מקצה לקצה — יצירת Demand דרך intake
 conversational, קריאת AI יחידה ל-3 רעיונות, בחירה בכפתור, Production Handoff דטרמיניסטי.
 בחירת קריאייטיב וקישור ל-Publication נשארים ידניים דרך Airtable ישירות. ממשק מלא (רשימת
-דרישות, Next Action כפקודת שאילתה, TMA) נדחה ל-M2 במפורש — לא התחיל.
+דרישות, Next Action כפקודת שאילתה, TMA) נדחה ל-M2 — חלק Telegram (רשימה + Next Action)
+מומש (ראה להלן); ה-TMA screen נשאר בתכנית נפרדת, לא התחיל כאן.
 
 **Deferred (לא נבנה כלל):** פרסום אוטומטי, scheduler/queue חדשים, מנוע memory/approval/
 router/Airtable-gateway חדשים, עורך גרפי/production/AI runtime פנימיים, recommendation
@@ -1675,6 +1690,43 @@ EVIDENCE: PR #601 (`f982217`-adjacent merge)/#602 (`ca57b29`, `2026-08-11T13:20:
 Render API). Live regression מפורט למעלה. `FEATURE_MARKETING_BRIDGE=true` בפרודקשן
 כרגע — אם מכבים אותו, `/marketing_new` לא יירשם (fail-safe, ראה `register_marketing_
 command`).
+
+**M2 — Telegram slice (רשימת דרישות + Next Action כפקודת שאילתה; TMA screen לא בסקופ,
+תכנית נפרדת):** `/marketing_status`/`מצב_שיווק` — רשימת Demands מורשית לפי
+`identity.can_access_domain()` (owner: הכל; partner: רק `identity.allowed_domains`;
+שאר תפקידים פנימיים: ללא הגבלה כרגע, לפי `identity.py`), נבדק גם בזמן הרשימה וגם שוב
+ב-`mkt_status:` callback — לא מסתמכים על כך שה-record id רק "מוסתר" בתוך `callback_data`
+כאבטחה; מזהה שגוי/לא מורשה מחזירים אותה הודעה גנרית ("הדרישה לא נמצאה") כדי לא לחשוף
+אילו records קיימים. מודול חדש `marketing_orchestrator.py` (pure, pull-only — אותו
+חוזה בדיוק כמו `decision_orchestrator.py`, לעולם לא כותב canonical state) מחשב כרטיס
+Next Action לפי `Current Stage`/`Status`: `published`→מעקב ידני; `handoff_sent`→מציג את
+טקסט ה-Production Handoff השמור; `ideas_generated`→אם יש **בדיוק** Creative אחד
+Pending Review, מציג את 3 הרעיונות ומשתמש מחדש ב-`_idea_keyboard()`/`mkt_select:`
+**הקיימים מ-M1** (M2 לא מוסיף מסלול כתיבה חדש, רק נקודת כניסה מורשית נוספת לזה הקיים —
+`select_creative()`→`save_production_handoff()`→`update_demand_stage(HANDOFF_SENT)`);
+0 או **יותר מ-1** Creative ממתין נחשבים fail-closed (לא בוחרים "הראשון" שרירותית, מדווחים
+"מצב לא עקבי"). שלבים שמורים-בסכמה-אך-לא-חיים כרגע (`brief_composed`/`selected`/`closed`)
+מקבלים כרטיס מפורש "לא מטופל אוטומטית" — לא הסקה/ניחוש של behavior שלא קיים בקוד החי.
+`marketing_gateway.list_demands()` חדש (עטיפה דקה על `at_list_by_formula`, `limit=15`
+ברירת מחדל; הקריאה בפועל מ-`cmd_marketing.py` מגבילה ל-10 כדי לשמור על גודל סביר
+ל-inline keyboard). `Marketing Demand.Next Action` (השדה הקיים ב-Airtable) עדיין לא
+נכתב ע"י אף caller חי — `marketing_gateway.py` תומך בכתיבה אליו
+(`DemandRecord.next_action`/`update_demand_stage(..., next_action=...)`) אך M2 נשאר
+read-pull-only לגביו בכוונה, כמו ה-orchestrator עצמו.
+**קבצים:** `marketing_orchestrator.py` (חדש), `marketing_gateway.list_demands()` (חדש),
+`cmd_marketing.py` (`/marketing_status`+`מצב_שיווק`, `mkt_status:` callback,
+`_authorized_demand_list`/`_get_next_action_card`/`_truncate_for_telegram`).
+**בדיקות:** `test_marketing_orchestrator.py`, `test_cmd_marketing_status.py` (חדשים,
+מריצים ישירות `python3 <file>.py` כמו שאר הבדיקות בריפו) + self-tests מורחבים
+ב-`marketing_orchestrator.py`/`cmd_marketing.py` עצמם. `smoke_tests.py`/
+`test_integration.py` נשארו ירוקים ללא שינוי.
+
+STATUS: 🟡 CODE DONE, NOT VERIFIED
+EVIDENCE: קוד נכתב ונבדק מקומית (self-tests + `test_marketing_orchestrator.py`/
+`test_cmd_marketing_status.py` עוברים, `smoke_tests.py`/`test_integration.py` ירוקים) —
+טרם נדחף/מוזג/נפרס. עדכון ✅ VERIFIED IN PROD ידרוש `git log -1`/`git push` בפועל +
+regression חי מול `/telegram` (זהירות: לחיצה על רעיון ב-`ideas_generated` מפעילה כתיבת
+production אמיתית — לבדוק מול Demand ייעודי לבדיקה, לא רשומה אמיתית באמצע תהליך).
 
 **C60 — Tool Context Awareness (PR #152, מוזג ל-`main`, commit `2d85b84`/merge `3e0094b`):**
 לפי `SPEC_C59_Tool_Context_Awareness.md` (הועלה ע"י הבעלים בלי טקסט מלווה; אישור דרך
