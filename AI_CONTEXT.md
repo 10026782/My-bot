@@ -21,10 +21,8 @@ batch, internal history #601–#604).
 - **חדש: F23 — BOSS Marketing Bridge M1** (`/marketing_new` wizard ב-
   Telegram) מוזג ומדווח **✅ VERIFIED IN PROD** ב-ROADMAP, עם ראיה ישירה
   (רשומת Demand אמיתית, deploy-SHA מול Render API — ראו סעיף 3). **פער
-  ממשל:** `CHANGELOG.md` **עדיין לא מעודכן** לבאץ' הזה (0 hits ל-
-  "F23"/"#602"/"#603"/"#604") — עד לעדכון, יש להתייחס לסטטוס כ-**UNVERIFIED
-  by cross-doc**, לא CRITICAL (הראיות עצמן חזקות, זו רק אי-התאמה בין
-  מסמכים).
+  ממשל שנסגר בסבב הזה:** `CHANGELOG.md` לא כלל רשומה לבאץ' הזה עד לעדכון
+  הנוכחי — נוספה רשומה מתאימה (ראו סעיף 3), אז ה-cross-doc gap כבר סגור.
 - שני פערים לא-חוסמים ב-CORE נותרים ללא שינוי: (1) CI של `main` אדום על
   שער ה-freshness של Context Librarian (governance, לא regression
   פונקציונלי); (2) `TurnCoordinator` הפורמלי (Layer 2) — אפס מימוש,
@@ -46,7 +44,7 @@ batch, internal history #601–#604).
   דטרמיניסטי. `FEATURE_MARKETING_BRIDGE=true` **דלוק בפרודקשן כרגע** (לא
   ברירת מחדל בקוד — הודלק לבדיקה חיה ולא כובה מאז). בחירת קריאייטיב וקישור
   Publication נשארים ידניים דרך Airtable; UI מלא/TMA נדחו ל-M2 (לא התחיל).
-  ✅ תפעולי לפי ROADMAP+ראיה ישירה; ⚠️ ראו פער CHANGELOG בסעיף 1.
+  ✅ תפעולי לפי ROADMAP+ראיה ישירה.
 
 **מיושם חלקית / לא production-active:**
 
@@ -57,9 +55,12 @@ batch, internal history #601–#604).
 - ws2/ws3 evidence/lifecycle projection modules — מוזגים, לא מחווטים
   ל-`core/action_gateway.py`, לא רשומים ב-Context Librarian catalog.
 - **F23 Marketing Rules (Business Memory)** — `marketing_gateway.
-  save_marketing_rule()`/`get_marketing_rules()` קיימים אך **אפס caller
-  בקוד החי** — שכבה ריקה, נדחתה במפורש (12/08/2026) ל-"Later — Structured
-  Company Brain", לא M1.
+  save_marketing_rule()` קיימת אך **אפס caller בקוד החי** — אין מסלול
+  שכותב אליה, שכבה ריקה בפועל. `get_marketing_rules()` **כן נקראת בפועל**
+  (`cmd_marketing.py:445`/`:513`, לפני הרכבת ה-Brief/Production Handoff)
+  אך תמיד מחזירה ריק כרגע כי אין רשומות — לא unwired, פשוט ללא תוכן. כתיבה
+  לשכבה זו נדחתה במפורש (12/08/2026) ל-"Later — Structured Company Brain",
+  לא M1.
 - **F23 `business_rules` תוכן עסקי** — רק ל-recruitment יש תוכן אמיתי;
   4 סוגי דרישה נותרים (furniture_import/fiber_equipment/
   real_estate_listing/service) מחזיקים ערך ניטרלי מפורש, ממתינים לקלט
@@ -93,21 +94,19 @@ batch, internal history #601–#604).
   Creative (`recMyaGzpIvYfNX0i`) עם 3 רעיונות, Render logs מאשרים אפס
   פעילות `run_agent`/Router (קריאת Anthropic יחידה בלבד). Render deploy
   `dep-d9tr91jl550s738take0`=`live`.
-- **פער ממשל שנפתח בסבב הזה**: `CHANGELOG.md` לא עודכן לבאץ' F23/PR
-  #601–605 — ראו סעיף 1/4.
+- **פער ממשל שנסגר בסבב הזה**: `CHANGELOG.md` לא כלל רשומה לבאץ' F23/PR
+  #601–605 עד לעדכון הזה — נוספה רשומה מתאימה (ראו `CHANGELOG.md`
+  "Unreleased").
 
 ## 4. Next Priorities
 
-1. **עדכן את `CHANGELOG.md` לבאץ' F23 (PR #601–605)** — סוגר את פער
-   ה-cross-doc; ROADMAP מכריז ✅ VERIFIED IN PROD אך CHANGELOG שותק על כך
-   כרגע.
-2. **סגור את שני הפערים הלא-חוסמים מה-audit הקנוני** — הרץ
+1. **סגור את שני הפערים הלא-חוסמים מה-audit הקנוני** — הרץ
    `python -m tools.context_librarian refresh-after-merge --apply`; קבע/
    דחה במפורש מול owner את מעמד `TurnCoordinator` הפורמלי (Layer 2).
-3. **חבר TC7-B1 (`authorize_claim()`) לצרכן אמיתי** — עדיין 0 קוראים.
-4. **F23: קלט עסקי אמיתי ל-`business_rules`** מה-owner לארבעת סוגי
-   הדרישה הנותרים; **אל תיישם** את שכבת Marketing Rules (Business
+2. **חבר TC7-B1 (`authorize_claim()`) לצרכן אמיתי** — עדיין 0 קוראים.
+3. **F23: קלט עסקי אמיתי ל-`business_rules`** מה-owner לארבעת סוגי
+   הדרישה הנותרים; **אל תיישם** כתיבה לשכבת Marketing Rules (Business
    Memory) או Prompt 2 כקריאת AI שנייה בלי אישור owner מפורש (נדחו
    במכוון מ-M1).
-5. **אימות production טרי ל-Track D ול-TC8 reject/cancel** — קוד פרוס,
+4. **אימות production טרי ל-Track D ול-TC8 reject/cancel** — קוד פרוס,
    אין ראיות log לאחר ה-deploy האחרון (היעדר תעבורה, לא כשל).
