@@ -178,8 +178,8 @@ def _fully_reviewed_ledger(
     )
 
 
-def test_catalog_and_all_seven_profiles_validate(catalog):
-    assert len(catalog.layer_nodes) == 6
+def test_catalog_and_all_eight_profiles_validate(catalog):
+    assert len(catalog.layer_nodes) == 7
     assert set(catalog.profiles) == {
         "approval_ux",
         "tool_execution",
@@ -188,6 +188,7 @@ def test_catalog_and_all_seven_profiles_validate(catalog):
         "rp5_evidence_mismatch",
         "ux_f52_message",
         "cross_layer_architecture",
+        "marketing_change",
     }
 
 
@@ -299,7 +300,6 @@ def test_output_is_deterministic(catalog):
     kwargs = {
         "task_type": "approval_ux",
         "query": "repeated approval returns wrong message",
-        "max_tokens": 7500,
     }
     assert build_bundle(catalog, **kwargs) == build_bundle(catalog, **kwargs)
 
@@ -1870,6 +1870,65 @@ def test_librarian_infrastructure_files_are_not_domain_sources(catalog):
         "tools/context_librarian/refresh_after_merge.py",
     ]
     assert classify_new_sources(catalog, infrastructure) == []
+
+
+def test_consumption_ledger_artifacts_are_governance_not_blocking(catalog):
+    # Real ledger files already in the repo (verify-consumption output,
+    # LEDGER_TOP_LEVEL_REQUIRED_FIELDS-shaped) — one at repo root, one nested
+    # under docs/architecture/ — proving the check is structural, not path-based.
+    result = classify_new_sources(
+        catalog,
+        [
+            "ledger-premerge-approval-ux.json",
+            "docs/architecture/turn-coordinator-full/CONSUMPTION_LEDGER.json",
+        ],
+    )
+    by_path = {item["path"]: item for item in result}
+    for path in (
+        "ledger-premerge-approval-ux.json",
+        "docs/architecture/turn-coordinator-full/CONSUMPTION_LEDGER.json",
+    ):
+        assert by_path[path]["classification"] == "GOVERNANCE_ARTIFACT"
+        assert "consumption ledger" in by_path[path]["reason"]
+        assert "not a runtime or production source" in by_path[path]["reason"]
+
+
+def test_json_with_authority_terms_but_not_ledger_shaped_still_stops(catalog):
+    # A same-named-pattern file ("approval" in the name, like the real ledger)
+    # that does NOT have the ledger's required top-level fields must still be
+    # caught as a genuinely unregistered, unknown-shape source — proving the
+    # governance-artifact exemption is keyed on structure, not filename guessing.
+    # Written directly under the real repo root (what catalog.repo_root actually
+    # is) since _is_consumption_ledger_artifact reads the file from disk; always
+    # removed afterward regardless of outcome.
+    probe_path = REPO_ROOT / "not-a-ledger-approval-file.json"
+    probe_path.write_text(json.dumps({"some_other_shape": True}), encoding="utf-8")
+    try:
+        result = classify_new_sources(catalog, ["not-a-ledger-approval-file.json"])
+    finally:
+        probe_path.unlink()
+    assert len(result) == 1
+    assert result[0]["classification"] == "STOP"
+    assert result[0]["reason"] == "unregistered source may change authority"
+
+
+def test_refresh_proposal_treats_governance_artifact_as_non_blocking(catalog, monkeypatch):
+    monkeypatch.setattr(librarian, "_git_output", lambda _root, _args: "main-sha")
+    monkeypatch.setattr(librarian, "_node_changed_between", lambda *_args: set())
+    monkeypatch.setattr(
+        librarian,
+        "discover_new_sources",
+        lambda *_args, **_kwargs: [
+            {
+                "path": "some/new/ledger.json",
+                "classification": "GOVERNANCE_ARTIFACT",
+                "reason": "generated Context Librarian consumption ledger",
+            }
+        ],
+    )
+    proposal = refresh_proposal(catalog)
+    assert proposal["status"] == "WARNING"
+    assert proposal["authority_review_required"] is False
 
 
 @pytest.mark.parametrize("merge_shape", ["normal", "squash"])

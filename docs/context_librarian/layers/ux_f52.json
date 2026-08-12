@@ -22,7 +22,10 @@
         "core/action_gateway.py",
         "core/approval_turn_metrics.py",
         "app.py",
-        "tma-frontend/src/components/Approvals.tsx"
+        "tma-frontend/src/components/Approvals.tsx",
+        "core/evidence_message_adapter.py",
+        "core/lifecycle_message_adapter.py",
+        "core/message_surface_harness.py"
       ],
       "test_paths": [
         "test_message_contract.py",
@@ -110,7 +113,8 @@
         "PR #471 added ApprovalLifecycleResult (core/action_gateway.py) as a second, narrower canonical renderer specifically for approval lifecycle turns: build_approval_lifecycle_result() maps an ActionContract's canonical_state to one fixed, redacted safe_user_message. It sits alongside, and is not a replacement for, GatewayReply/compose_status_reply() and display_payload/agent_message_formatter.py's own contract; UNIFIED_MESSAGE_UX_STANDARD.md now records this renderer drift via an erratum note (added by this same audit), while the document's own 'one public message-composition API' principle remains unmet as of a885561d.",
         "Redaction (raw tool_name, ActionContract UUID, ActionContract record ID, Airtable business record ID) in the ApprovalLifecycleResult path is unconditional — it does not depend on FEATURE_SINGLE_SPEAKER_APPROVAL_UX or FEATURE_UNIFIED_STATUS_FORMATTER being on.",
         "PR #479/#480 (merged): the 'no internal tool names' rule above is now also enforced against raw Airtable table names, which previously leaked in several approval-message renderers (_safe_contract_business_description(), _describe_tool_call(), _describe_contract_for_reconfirmation()/_for_disambiguation()) — e.g. 'הוספה ב-Tasks: ...' became 'יצירת משימה: ...' for the Tasks table and a generic table-agnostic phrase for every other table. Rejected-state wording was also normalized from 'נדחתה' to 'בוטלה' throughout build_approval_lifecycle_result(). Both are rendering-only changes; ApprovalLifecycleResult's canonical_state mapping and redaction conditionality are unchanged. Re-verified directly against ffa678a7.",
-        "Reverified at a89fc67: PR2 reuses ApprovalLifecycleResult; the formatter is unchanged, metrics are observation-only, and renderer drift remains."
+        "Reverified at a89fc67: PR2 reuses ApprovalLifecycleResult; the formatter is unchanged, metrics are observation-only, and renderer drift remains.",
+        "Registration-only pass (backend-ci Context Librarian catalog freshness fix): core/evidence_message_adapter.py and core/lifecycle_message_adapter.py (WS2 pure projections into MessageContract, same pattern as approval_lifecycle_message_adapter.py/action_fact_message_adapter.py above) and core/message_surface_harness.py (WS3 verification harness against the frozen MessageContract, no lifecycle/evidence/app.py access) were added to code_paths. Paths only; wiring status of these WS2/WS3 modules into the live runtime was not re-verified here."
       ],
       "extensions": {
         "boss.layer_aliases": [

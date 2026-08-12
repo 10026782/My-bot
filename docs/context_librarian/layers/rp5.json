@@ -18,7 +18,10 @@
         "core/turn_evidence.py",
         "core/anti_hallucination.py",
         "core/dispatcher_outcome.py",
-        "app.py"
+        "app.py",
+        "core/claim_authorization.py",
+        "core/claim_authorization_shadow.py",
+        "core/evidence_projection.py"
       ],
       "test_paths": [
         "test_turn_evidence_shadow.py",
@@ -75,7 +78,8 @@
         "Historical mismatch samples do not override later verified evidence.",
         "PR #471: when FEATURE_SINGLE_SPEAKER_APPROVAL_UX is on and a turn's reply is Gateway-owned, run_agent() still calls observe_shadow_finalizer() (app.py:3813 as of ffa678a7) before its early return, passing an empty agent-text string and approval_prompt_sent derived from the Gateway's own owner_notified flag. RP5's evidence classification is therefore exercised on Gateway-owned approval turns too, not only on Agent-authored text turns. This audit updated turn_coordinator_routing to carry rp5 as conditional optional evidence instead of hard-excluding it (task_profiles/profiles.json) precisely because of this reachability; treat any remaining profile that still hard-excludes rp5 from an approval/turn-ownership-scoped task as a scoping simplification to re-check, not proof RP5 is never invoked on that path.",
         "N17 non-inferiority pilot advancement re-verification (ffa678a7): this layer's code_paths were flagged stale only because app.py changed (PR #479/#480, wording-only edits to approval-message rendering elsewhere in the same file) — RP5's own classification code (core/turn_evidence.py, core/anti_hallucination.py, core/dispatcher_outcome.py) was not touched. Claims above re-verified accurate; only the observe_shadow_finalizer() line citation shifted.",
-        "Reverified at a89fc67: RP5 core code is unchanged; app.py still calls the comparison-only observer."
+        "Reverified at a89fc67: RP5 core code is unchanged; app.py still calls the comparison-only observer.",
+        "Registration-only pass (backend-ci Context Librarian catalog freshness fix): core/claim_authorization.py (TC7-B1, pure claim-category projection over an already-computed WS2/TC6 lifecycle state plus RP4/core.turn_evidence.TurnEvidenceSummary.classification()), core/claim_authorization_shadow.py (TC7-B2, observability-only dual-signal comparison, reuses the FEATURE_EVIDENCE_FINALIZER gate, never influences execution/lifecycle/reply ownership), and core/evidence_projection.py (projects core.dispatcher_outcome.DispatcherOutcome into core.router.ownership_contracts.EvidenceResult) were added to code_paths. Paths only; this node's own status/notes/production_evidence narrative was not re-verified as part of this pass."
       ],
       "extensions": {
         "boss.layer_aliases": [
