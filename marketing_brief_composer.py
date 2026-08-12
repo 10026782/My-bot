@@ -134,13 +134,13 @@ def compose_production_handoff(
     production_requirements: str = "",
 ) -> str:
     """
-    Pure function — provider-neutral text handed to an external production
-    worker (ChatGPT/Adobe/other). Never mentions a provider name.
+    פונקציה טהורה — טקסט provider-neutral שנמסר לעובד הפקה חיצוני
+    (ChatGPT/Adobe/אחר). אף פעם לא מזכירה שם ספק.
 
-    Every production input (target_platform/required_asset_type/format_spec/
-    cta_destination/contact_method/production_requirements) that the caller
-    doesn't supply is rendered explicitly as "לא סופק" rather than omitted —
-    the external worker must never treat a missing input as free to invent.
+    כל קלט הפקה (target_platform/required_asset_type/format_spec/
+    cta_destination/contact_method/production_requirements) שהקורא לא סיפק
+    מוצג במפורש כ-"לא סופק" ולא מושמט — העובד החיצוני אסור לו להתייחס לקלט
+    חסר כרשות להמציא ערך.
     """
     from airtable_schema import MarketingDemandFields as MDF
 
