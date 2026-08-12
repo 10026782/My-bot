@@ -119,7 +119,7 @@
         }
       ],
       "valid_from": "2026-07-28",
-      "last_verified_commit": "7f4f0e80317fc1b8b43ccb097ec3e75e1a054d90",
+      "last_verified_commit": "c70d7d73a3e053eb136c0de27e2a0abfbc83c69e",
       "confidence": 0.85,
       "notes": [
         "BUG_AUDIT_LOG.md added as a canonical doc 2026-07-28 (N17 pilot Task 3 fix): BUG-130 (line 3056, create-vs-update misroute in core/lead_candidate_handler.py) and BUG-140 (line 3198, unrelated-lead overwrite risk, still pending) are both registered, unfixed, and 142 lines apart in the same log section — the pilot's Librarian-track investigation grepped BUG-130 and never read far enough to find BUG-140. See task_profiles/profiles.json's `turn_coordinator_routing.bounded_local_expansions`, which now inlines both entries into the bundle so this cannot be missed by stopping at the first match.",
