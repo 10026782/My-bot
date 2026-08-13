@@ -135,8 +135,38 @@ python3 scripts/verify_bug161_162_callback_staging.py
 ```
 **מגבלה מאומתת (13/08/2026, מקומית, credentials מזויפים):** רץ עד הסוף
 ללא crash על כל 6 החלקים, לא נכנס ל-CI (יוצר רשומות אמיתיות ב-Airtable —
-לא מתאים ל-CI). לא הורץ עדיין מול staging אמיתי — זה עדיין העבודה
-שנותרה, לא ראיית-production.
+לא מתאים ל-CI).
+
+**הורץ בפועל מול staging אמיתי, 13/08/2026, שני סבבים:**
+
+**סבב 1** (commit `cc82792`, לפני תיקון dispatch-counting): חשף ש-`EmergencyStop`
+פעיל כרגע ב-staging וחוסם כל `airtable_add` בפועל
+(`[CRITICAL] tools.dispatcher: [EmergencyStop] BLOCKED airtable_add`) — כל
+contract שהגיע ל-dispatch נחת על `status=failed`, לא `completed`. זה חשף
+גם באג אמיתי בסקריפט עצמו: הבדיקות הסתמכו על ספירת רשומות Tasks שנוצרו
+בפועל — אינדיקטור מת כש-EmergencyStop חוסם כתיבה בכל מקרה, בלי קשר לכמה
+פעמים dispatch נקרא.
+
+**סבב 2** (commit `63280e2`, אחרי התיקון — dispatch_tool נספר ישירות
+בנקודת ה-import של `core/action_gateway.py`'s `_executor()`, לא מוסק
+מ-Tasks records): **26/26 checks PASSED, exit=0.** כולל הראיה המרכזית
+ל-TC-12/BUG-162:
+
+| חלק | ממצא |
+|---|---|
+| 1. Approve happy path | `dispatch_tool` נקרא בדיוק פעם אחת; תשובה יחידה |
+| 2. Reject | `dispatch_tool` לא נקרא כלל |
+| 3. Duplicate — double-press רציף | `dispatch_tool` נקרא **לכל היותר פעם אחת** למרות הלחיצה הכפולה |
+| 3b. Duplicate — 3 threads אמיתיים במקביל | `dispatch_tool` נקרא **פעם אחת בדיוק מתוך 3 לחיצות מקבילות אמיתיות**; שתי הלחיצות האחרות נחסמו ב-`TurnStateConflictError` (`core/turn_state_repository.py`'s `claim()`) **לפני** שהגיעו קרוב ל-dispatch — ראיה ישירה, תחת race אמיתי על PostgreSQL אמיתי, ש-TC8's claim מונע כל אפשרות ל-second speaker/double-dispatch |
+| 4. Stale/already-resolved | הלחיצה השנייה: `dispatch_tool` לא נקרא כלל, contract status ללא שינוי |
+| 5. TTL expiry | contract נסגר `rejected` (BUG-155, לא נשאר תקוע pending), `dispatch_tool` לא נקרא כלל |
+
+**הסתייגות פתוחה:** כל הריצה בוצעה עם `EmergencyStop` פעיל — לא נצפה
+תרחיש "completed" אמיתי מקצה-לקצה (כתיבה אמיתית שהצליחה). זה לא פוגם
+בראיית ה-single-speaker/single-dispatch (זה בדיוק מה שהסקריפט מודד
+ישירות, לא תלוי בהצלחת הכתיבה) — אבל "approve מלא, כולל כתיבה מוצלחת
+בפועל" עדיין לא אומת באותה ריצה. הרצה נוספת עם `EmergencyStop` כבוי
+(בהחלטת owner, לא בהחלטתי) תסגור גם את הפער הזה.
 
 ---
 
@@ -165,9 +195,17 @@ Telegram transcript: <טקסט/screenshot>
 תוצאה: PASS | FAIL — <תיאור>
 ```
 
-**STATUS: 🟡 PLAN + AUTOMATION READY, NOT YET RUN AGAINST STAGING — 0/6 תרחישים בוצעו בפועל.**
-**EVIDENCE: preflight §0 (Render API, read-only, 13/08/2026); automation for
-2.1-2.5 written and smoke-tested locally with fake credentials (no crash,
-structurally sound) — `scripts/verify_bug161_162_callback_staging.py`,
-commit `89087b4`. Not yet executed against real staging — running it there
-is the actual remaining evidence gap, not code.**
+**STATUS: 🟢 VERIFIED AGAINST REAL STAGING for 2.1-2.5 (5/6 scenarios) — 26/26
+checks PASSED, exit=0. 2.6 (clarification/BUG-122) remains the one
+manual-only scenario (text-turn, not callback — see §2.6).**
+**EVIDENCE: preflight §0 (Render API, read-only, 13/08/2026); real staging
+run 13/08/2026 (`my-bot-approval-staging`, `srv-d99uq63eo5us73967cj0`),
+commit `63280e2`, `scripts/verify_bug161_162_callback_staging.py`, exit=0,
+26/26 checks PASSED — see §3 table above for the per-scenario dispatch-count
+findings, including the real 3-way concurrent-thread claim race
+(`3b. dispatch_tool called at most once across 3 concurrent presses`).
+Open caveat: run performed with `EmergencyStop` active on staging, so no
+scenario reached a genuinely successful "completed" write — see §3's
+"הסתייגות פתוחה." Owner ran the script directly on Render's staging shell;
+I ran the read-only Render API preflight and wrote/fixed the script from
+this session, but did not execute it myself (no staging shell access).**
