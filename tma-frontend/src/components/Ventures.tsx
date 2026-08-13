@@ -26,7 +26,9 @@ type StatusTone = "neutral" | "info" | "warning" | "success" | "danger";
 const STAGES = [
   "Research", "Supplier/Source Contact", "Due Diligence", "Legal/Tax Review",
   "Smoke Test", "GO", "NO-GO", "Converted",
-];
+] as const;
+
+type VentureStage = (typeof STAGES)[number];
 
 const STAGE_TONE: Record<string, StatusTone> = {
   Research: "neutral",
@@ -59,14 +61,20 @@ function stageTone(stage: string): StatusTone {
   return STAGE_TONE[stage] ?? "neutral";
 }
 
+function isVentureStage(stage: string): stage is VentureStage {
+  return STAGES.some((item) => item === stage);
+}
+
 function LifecycleRail({
   selectedStage,
   onSelect,
   includeAll = false,
+  counts,
 }: {
   selectedStage: string;
   onSelect: (stage: string) => void;
   includeAll?: boolean;
+  counts?: Partial<Record<VentureStage, number>>;
 }) {
   return (
     <div className="ventures-lifecycle" aria-label="שלבי Venture">
@@ -81,7 +89,7 @@ function LifecycleRail({
           aria-pressed={selectedStage === ""}
         >
           <span className="ventures-lifecycle__index">כל</span>
-          <span>כל השלבים</span>
+          <span className="ventures-lifecycle__label">כל השלבים</span>
         </button>
       )}
       {STAGES.map((stage, index) => (
@@ -96,7 +104,12 @@ function LifecycleRail({
           aria-pressed={selectedStage === stage}
         >
           <span className="ventures-lifecycle__index">{index + 1}</span>
-          <span>{stage}</span>
+          <span className="ventures-lifecycle__label">{stage}</span>
+          {counts?.[stage] !== undefined && (
+            <span className="ventures-lifecycle__count" aria-label={`${counts[stage]} הזדמנויות`}>
+              {counts[stage]}
+            </span>
+          )}
         </button>
       ))}
     </div>
@@ -403,6 +416,28 @@ export function Ventures({ onBack }: Props) {
   const totalPotential = d?.ventures.reduce((sum, venture) => sum + (venture.estimated_potential || 0), 0) ?? 0;
   const venturesWithNextAction = d?.ventures.filter((venture) => Boolean(venture.next_action)).length ?? 0;
   const currentViewLabel = stageFilter || "כל השלבים";
+  const stageCounts = d && !stageFilter
+    ? STAGES.reduce<Partial<Record<VentureStage, number>>>((counts, stage) => {
+        counts[stage] = d.ventures.filter((venture) => venture.stage === stage).length;
+        return counts;
+      }, {})
+    : undefined;
+  const ventureGroups = d
+    ? [
+        ...STAGES.map((stage, index) => ({
+          key: stage,
+          stage,
+          index: index + 1,
+          ventures: d.ventures.filter((venture) => venture.stage === stage),
+        })).filter((group) => group.ventures.length > 0),
+        {
+          key: "uncategorized",
+          stage: null,
+          index: null,
+          ventures: d.ventures.filter((venture) => !isVentureStage(venture.stage)),
+        },
+      ].filter((group) => group.ventures.length > 0)
+    : [];
 
   return (
     <main className="ventures-screen">
@@ -446,6 +481,7 @@ export function Ventures({ onBack }: Props) {
           <LifecycleRail
             includeAll
             selectedStage={stageFilter}
+            counts={stageCounts}
             onSelect={(stage) => { setStageFilter(stage); load(stage || undefined); }}
           />
         </Surface>
@@ -457,6 +493,22 @@ export function Ventures({ onBack }: Props) {
             context={d ? `${d.count} פריטים · ${currentViewLabel}` : currentViewLabel}
             titleId="ventures-collection-title"
           />
+
+          {stageFilter && state.status !== "loading" && (
+            <div className="ventures-filter-context">
+              <div>
+                <span className="ventures-filter-context__label">מסנן פעיל</span>
+                <strong>{stageFilter}</strong>
+              </div>
+              <button
+                type="button"
+                className="boss-button boss-button--quiet ventures-filter-context__reset"
+                onClick={() => { setStageFilter(""); load(); }}
+              >
+                הצגת כל השלבים
+              </button>
+            </div>
+          )}
 
           {state.status === "loading" && <ScreenState state="loading" message="טוען הזדמנויות" />}
           {state.status === "error" && (
@@ -472,37 +524,74 @@ export function Ventures({ onBack }: Props) {
           )}
 
           {d && d.ventures.length === 0 && (
-            <ScreenState state="empty" title="אין הזדמנויות בשלב הזה" message="אפשר לבחור שלב אחר או ליצור Venture חדש." />
+            <ScreenState
+              state="empty"
+              title={stageFilter ? "אין הזדמנויות בשלב הזה" : "אין עדיין הזדמנויות"}
+              message={stageFilter ? "אפשר לאפס את המסנן ולחזור לכל השלבים." : "אפשר ליצור Venture ראשון כדי להתחיל לבחון הזדמנות."}
+              action={stageFilter ? (
+                <button type="button" onClick={() => { setStageFilter(""); load(); }} className="boss-button boss-button--quiet">
+                  הצגת כל השלבים
+                </button>
+              ) : undefined}
+            />
           )}
 
           {d && d.ventures.length > 0 && (
-            <Surface padding="none" className="ventures-collection">
-              <div className="ventures-list">
-                {d.ventures.map((venture) => (
-                  <button type="button" key={venture.id} className="ventures-card" onClick={() => setSelectedId(venture.id)}>
-                    <div className="ventures-card__body">
-                      <div className="ventures-card__heading">
-                        <p className="ventures-card__name">{venture.name || "—"}</p>
-                        {venture.estimated_potential > 0 && <p className="ventures-card__value">{fmt(venture.estimated_potential)}</p>}
+            <div className="ventures-stage-groups">
+              {ventureGroups.map((group) => (
+                <section className="ventures-stage-group" key={group.key} aria-labelledby={`ventures-stage-${group.index ?? "uncategorized"}`}>
+                  <div className="ventures-stage-group__header">
+                    <div className="ventures-stage-group__identity">
+                      {group.index && <span className="ventures-stage-group__index" aria-hidden="true">{group.index}</span>}
+                      <div>
+                        <p className="ventures-stage-group__eyebrow">{group.stage ? "Lifecycle stage" : "Data check"}</p>
+                        <h3 id={`ventures-stage-${group.index ?? "uncategorized"}`} className="ventures-stage-group__title">
+                          {group.stage || "ללא שלב קנוני"}
+                        </h3>
                       </div>
-                      <div className="ventures-card__meta">
-                        {venture.domain && <span className="ventures-meta">{venture.domain}</span>}
-                        <StatusBadge tone={stageTone(venture.stage)}>{venture.stage}</StatusBadge>
-                        {venture.conviction && (
-                          <StatusBadge tone={CONVICTION_TONE[venture.conviction] ?? "neutral"}>{venture.conviction}</StatusBadge>
-                        )}
-                      </div>
-                      {venture.next_action && <p className="ventures-next-action">הצעד הבא: {venture.next_action}</p>}
                     </div>
-                    <div className="ventures-card__aside">
-                      <p className="ventures-card__aside-label">החלטה משוערת</p>
-                      <p className="ventures-card__aside-value">{venture.target_decision_date || "—"}</p>
-                      <span className="ventures-card__open">פתיחת Venture</span>
+                    <span className="ventures-stage-group__count">{group.ventures.length}</span>
+                  </div>
+
+                  <Surface padding="none" className="ventures-collection">
+                    <div className="ventures-list">
+                      {group.ventures.map((venture) => (
+                        <button type="button" key={venture.id} className="ventures-card" onClick={() => setSelectedId(venture.id)}>
+                          <div className="ventures-card__body">
+                            <div className="ventures-card__heading">
+                              <p className="ventures-card__name">{venture.name || "—"}</p>
+                              <StatusBadge tone={stageTone(venture.stage)}>
+                                {isVentureStage(venture.stage) ? venture.stage : "שלב לא מוכר"}
+                              </StatusBadge>
+                            </div>
+
+                            {venture.next_action && (
+                              <div className="ventures-next-action">
+                                <span className="ventures-next-action__label">הצעד הבא</span>
+                                <span className="ventures-next-action__text">{venture.next_action}</span>
+                              </div>
+                            )}
+
+                            <div className="ventures-card__meta">
+                              {venture.domain && <span className="ventures-meta">{venture.domain}</span>}
+                              {venture.conviction && (
+                                <StatusBadge tone={CONVICTION_TONE[venture.conviction] ?? "neutral"}>{venture.conviction}</StatusBadge>
+                              )}
+                              {venture.estimated_potential > 0 && <span className="ventures-card__value">{fmt(venture.estimated_potential)}</span>}
+                            </div>
+                          </div>
+                          <div className="ventures-card__aside">
+                            <p className="ventures-card__aside-label">החלטה משוערת</p>
+                            <p className="ventures-card__aside-value">{venture.target_decision_date || "—"}</p>
+                            <span className="ventures-card__open">פתיחת Venture</span>
+                          </div>
+                        </button>
+                      ))}
                     </div>
-                  </button>
-                ))}
-              </div>
-            </Surface>
+                  </Surface>
+                </section>
+              ))}
+            </div>
           )}
         </section>
       </div>
