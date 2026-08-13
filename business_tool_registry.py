@@ -104,7 +104,7 @@ TOOL_REGISTRY: tuple[BusinessTool, ...] = (
           "medium", "aggregated or redacted exports", "raw customer, financial, or identifying datasets", None,
           domains=("marketing", "operations")),
     _tool("csv-repair", "csv.repair", "https://www.csv.repair/", ("data",),
-          ("repair csv", "validate csv", "inspect csv"), ("broken csv", "invalid csv", "csv not opening", "repair csv", "csv לא תקין", "csv לא נפתח", "שלא נפתח", "קובץ csv שבור"),
+          ("repair csv", "validate csv", "inspect csv"), ("broken csv", "invalid csv", "csv not opening", "repair csv", "csv לא תקין", "csv לא נפתח", "שלא נפתח", "קובץ csv שבור", "csv שבור"),
           "Inspect and repair malformed CSV files.",
           "A CSV that fails to open or imports incorrectly.", "Do not upload sensitive exports without approval and redaction.",
           "low/medium", "synthetic or redacted CSV; approved non-sensitive export", "leads, credentials, IDs, customer exports without approval", None,
