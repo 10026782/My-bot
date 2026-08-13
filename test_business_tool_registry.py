@@ -6,6 +6,11 @@ def test_task_matching_returns_canonical_approved_tools():
     assert find_recommended_tools("יש לי קובץ CSV שלא נפתח טוב")[0].tool_id == "csv-repair"
     assert maybe_recommend("יש לי CSV שבור") and "csv.repair" in maybe_recommend("יש לי CSV שבור")
     assert find_recommended_tools("אני צריך להקטין תמונה לפני שליחה")[0].tool_id == "squoosh"
+    assert maybe_recommend("תקטין לי תמונה לוואטסאפ") and "Squoosh" in maybe_recommend("תקטין לי תמונה לוואטסאפ")
+    assert maybe_recommend("הקובץ CSV לא נפתח באקסל") and "csv.repair" in maybe_recommend("הקובץ CSV לא נפתח באקסל")
+    assert find_recommended_tools("צריך לכווץ לוגו SVG")[0].tool_id == "svgomg"
+    assert find_recommended_tools("אני רוצה לשאול שאלה על CSV")[0].tool_id == "sql-for-files"
+    assert find_recommended_tools("צריך לנקות לוג לפני שליחה")[0].tool_id == "shareclean"
     assert find_recommended_tools("אני רוצה ליצור גרף מהנתונים")[0].tool_id == "rawgraphs"
     assert find_recommended_tools("יש לי JSON מסובך שאני רוצה להבין")[0].tool_id == "json-crack"
 
