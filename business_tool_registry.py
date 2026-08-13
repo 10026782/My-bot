@@ -283,6 +283,7 @@ def find_recommended_tools(task: str, *, limit: int = 3) -> list[BusinessTool]:
         terms = tool.tasks + tool.capabilities + tool.categories + (tool.name.lower(), tool.tool_id)
         score = sum(3 if _normalize(term) in normalized else 0 for term in tool.tasks)
         score += sum(1 if _normalize(term) in normalized else 0 for term in tool.capabilities + tool.categories)
+        score += 3 if _normalize(tool.name) in normalized or _normalize(tool.tool_id) in normalized else 0
         if score:
             matches.append((-score, position, tool))
     matches.sort(key=lambda item: (item[0], item[1]))
