@@ -104,11 +104,49 @@ Bot API ישירות — ראו §3 להצעת automation ל-replay מדויק).
 ActionContract ו-legacy — חפש את שניהם).
 **לתעד:** ההודעה "⏰ פג תוקף — הפעולה לא בוצעה", contract לא בוצע.
 
-### 2.6 Clarification / multi-contract conflict (BUG-122)
+### 2.6 Clarification / multi-contract conflict (BUG-122) — ✅ נסגר 13/08/2026, marker תוקן
+
 👤 עם ≥1 בקשה pending כבר קיימת, שלח בקשה חדשה דומה (fingerprint שונה
 אך intent זהה, כדי להגיע ל-BUG-122 gate, לא ל-dedup).
-**Marker:** `[BUG-122] pending_gate_decision=ask_queue_resolution`
-**לתעד:** ההודעה מבקשת *מאשר*/*בטל* מפורש, לא מבטיחה פעולה.
+
+**⚠️ תיקון-marker (13/08/2026):** ה-marker שתועד כאן במקור
+(`[BUG-122] pending_gate_decision=ask_queue_resolution`, `app.py:5099`,
+מקוד commit `3935091` מ-20/07/2026) **לעולם לא יופיע בפועל.** ארבעה
+ימים אחרי אותו commit, `006506d` ("Fix July 24 sampling blockers",
+24/07/2026) הוסיף שער מוקדם יותר — `[BUG-122] pending_gate_decision=
+block_new_action` (`app.py:4343-4368`) — שבודק **בדיוק אותו תנאי-על**
+(`_live_contracts_snapshot` לא-ריק + `intent_requires_contract_for_
+success(route.intent)`), אבל *לפני* ש-Router מסיים ואפילו לפני
+ש-Agent/Anthropic נקראים בכלל, ומחזיר מיד. מכיוון ש-`_live_contracts_
+snapshot`/`route.intent` לא משתנים בין שתי הנקודות באותו turn, כל
+מצב שהיה מפעיל את `ask_queue_resolution` (5063-5108) כבר גרם ל-return
+מוקדם יותר ב-4364 — **`ask_queue_resolution` הוא dead code, בלתי-
+נגיש, מ-24/07/2026.** אומת סטטית (route/live_contracts_snapshot לא
+מוקצים מחדש בין שתי הבדיקות) וגם אמפירית: הרצת `test_bug122_pending_
+queue_ux.py` מקומית (13/08/2026) מראה בלוג `pending_gate_decision=
+block_new_action` יורה עבור תרחיש (b) — לא `ask_queue_resolution`
+כפי שה-docstring של הטסט טוען — והפונקציה חוזרת *לפני* שורת הלוג
+"[Agent] owner |" (כלומר Anthropic מעולם לא נקרא). ראיה תואמת קיימת
+כבר גם ב-`BUG_AUDIT_LOG.md` (חקירת BUG-155, 03-04/08/2026, staging
+אמיתי: `pending_gate_decision=block_new_action` ו-`live_contracts_
+count=1`, עם הטקסט המדויק שהוצג למשתמש בפועל — ראה שם).
+
+**Marker הנכון לחיפוש:** `[BUG-122] pending_gate_decision=block_new_action`
+(לא `ask_queue_resolution`).
+**לתעד:** ההודעה מבקשת *מאשר*/*בטל* מפורש, לא מבטיחה פעולה — מתקיים
+(גם בראיית staging האמיתית מ-BUG-155 וגם ב-unit test המקומי).
+
+**סיווג (defect / missing-verification / test-fixture-gap / expected):**
+לא product defect — ה-invariant של BUG-161 ("Agent לעולם לא מבטיח
+פעולה שלא קיימת") **מתקיים באופן חזק יותר** דרך `block_new_action`
+(מחזיר לפני שה-Agent בכלל רץ, לא רק אחרי שהתשובה שלו סוננה). כן
+test-fixture gap: `test_bug122_pending_queue_ux.py`'s חלק (b) בודק
+בפועל את `block_new_action`, לא את מה שה-docstring שלו טוען
+(`ask_queue_resolution`) — הטסט **עדיין ירוק** (8/8) כי שני הענפים
+מפיקים טקסט דומה מספיק לעבור את ה-assertions, אבל התיעוד הפנימי שלו
+מיושן. לא תוקן כאן (ה-behavior תקין, אין סיבה ל-patch; ה-docstring/
+dead-code cleanup הם refactor נפרד, לא בסקופ של סבב זה — "אם ההתנהגות
+עוברת, לתעד ראיה בלבד").
 
 ---
 
@@ -195,17 +233,36 @@ Telegram transcript: <טקסט/screenshot>
 תוצאה: PASS | FAIL — <תיאור>
 ```
 
-**STATUS: 🟢 VERIFIED AGAINST REAL STAGING for 2.1-2.5 (5/6 scenarios) — 26/26
-checks PASSED, exit=0. 2.6 (clarification/BUG-122) remains the one
-manual-only scenario (text-turn, not callback — see §2.6).**
+**STATUS: 🟢 VERIFIED — 6/6 scenarios (2.1-2.6).** 2.1-2.5: real staging,
+26/26 automated checks PASSED, exit=0 (`scripts/verify_bug161_162_
+callback_staging.py`, 13/08/2026). 2.6: closed 13/08/2026 (Agent 2 cycle)
+after correcting the scenario's expected marker — see §2.6's "תיקון-
+marker" — via (a) pre-existing real staging log evidence in
+`BUG_AUDIT_LOG.md`'s BUG-155 write-up (03-04/08/2026, `pending_gate_
+decision=block_new_action`, exact user-facing text quoted) and (b) a
+fresh local run of the pre-existing `test_bug122_pending_queue_ux.py`
+(8/8 passed, real `run_agent()`/`ActionGateway`/`ExecutionLedger` code,
+mocked Anthropic/Router/Identity only). No code change was required —
+behavior already satisfies BUG-161's invariant (block_new_action returns
+*before* the Agent runs at all, a stronger guarantee than the originally-
+documented ask_queue_resolution path, which is dead code since commit
+`006506d`, 24/07/2026 — see §2.6). Two non-blocking findings recorded,
+not fixed (out of scope — "no opportunistic refactor"): `app.py:5063-5108`
+(`ask_queue_resolution` branch) is unreachable dead code; `test_bug122_
+pending_queue_ux.py`'s part (b) docstring describes testing a path it no
+longer actually exercises (test itself is correct/green, only its stated
+intent is stale).
 **EVIDENCE: preflight §0 (Render API, read-only, 13/08/2026); real staging
 run 13/08/2026 (`my-bot-approval-staging`, `srv-d99uq63eo5us73967cj0`),
 commit `63280e2`, `scripts/verify_bug161_162_callback_staging.py`, exit=0,
 26/26 checks PASSED — see §3 table above for the per-scenario dispatch-count
 findings, including the real 3-way concurrent-thread claim race
 (`3b. dispatch_tool called at most once across 3 concurrent presses`).
-Open caveat: run performed with `EmergencyStop` active on staging, so no
-scenario reached a genuinely successful "completed" write — see §3's
-"הסתייגות פתוחה." Owner ran the script directly on Render's staging shell;
-I ran the read-only Render API preflight and wrote/fixed the script from
-this session, but did not execute it myself (no staging shell access).**
+2.6: `BUG_AUDIT_LOG.md` BUG-155 section (real staging, 03-04/08/2026) +
+local `test_bug122_pending_queue_ux.py` run (13/08/2026, 8/8 passed).
+Open caveat (2.1-2.5 only): run performed with `EmergencyStop` active on
+staging, so no scenario reached a genuinely successful "completed" write
+— see §3's "הסתייגות פתוחה." Owner ran the script directly on Render's
+staging shell; I ran the read-only Render API preflight and wrote/fixed
+the script from this session, but did not execute it myself (no staging
+shell access).**
