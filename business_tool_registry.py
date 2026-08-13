@@ -86,7 +86,7 @@ TOOL_REGISTRY: tuple[BusinessTool, ...] = (
           "low/medium", "synthetic or approved non-sensitive files", "identity, contract, lead and confidential files", True,
           domains=("documents", "marketing")),
     _tool("squoosh", "Squoosh", "https://squoosh.app/", ("images",),
-          ("compress image", "resize image", "optimize image"), ("shrink image", "compress photo", "reduce image", "להקטין תמונה", "להקטין תמונות", "לדחוס תמונה"),
+          ("compress image", "resize image", "optimize image"), ("shrink image", "compress photo", "reduce image", "להקטין תמונה", "להקטין תמונות", "לדחוס תמונה", "תקטין לי תמונה", "תמונה לוואטסאפ"),
           "Compress and resize images before sharing or uploading.",
           "Photos and graphics that need a smaller file size.", "Never use as a substitute for preserving the original asset.",
           "low", "non-sensitive images and copies", "original evidence, private IDs, or files needing forensic integrity", True,
@@ -110,7 +110,7 @@ TOOL_REGISTRY: tuple[BusinessTool, ...] = (
           "low/medium", "synthetic or redacted CSV; approved non-sensitive export", "leads, credentials, IDs, customer exports without approval", None,
           domains=("operations", "data")),
     _tool("sql-for-files", "SQL for Files", "https://sqlforfiles.app/", ("data",),
-          ("query csv", "query json", "join files", "profile data"), ("query csv", "join csv", "analyze file", "לנתח קובץ", "לשאול על csv", "לחבר csv"),
+          ("query csv", "query json", "join files", "profile data"), ("query csv", "join csv", "analyze file", "לנתח קובץ", "לשאול על csv", "לשאול שאלה על csv", "לחבר csv"),
           "Query, join and profile local CSV, JSON and Parquet files.",
           "Ad-hoc analysis without creating a new data store.", "Do not use as SCOREBOS source of truth or upload confidential data.",
           "low", "browser-local copies and redacted exports", "production databases, secrets, raw PII, canonical records", True,
@@ -122,7 +122,7 @@ TOOL_REGISTRY: tuple[BusinessTool, ...] = (
           "low", "synthetic, redacted, or explicitly approved values", "passwords, API keys, tokens, private keys", True,
           domains=("operations",)),
     _tool("svgomg", "SVGOMG", "https://jakearchibald.github.io/svgomg/", ("images", "design"),
-          ("optimize svg", "shrink svg"), ("clean svg", "compress svg", "optimize logo", "לכווץ svg", "לנקות svg"),
+          ("optimize svg", "shrink svg"), ("clean svg", "compress svg", "optimize logo", "לכווץ svg", "לנקות svg", "לכווץ לוגו svg"),
           "Clean and shrink SVG assets.", "Optimizing logos and icons before handoff.", "Keep the original asset and review visual output.",
           "low", "public or approved design assets", "assets containing sensitive embedded data", True,
           domains=("marketing",)),
@@ -142,7 +142,7 @@ TOOL_REGISTRY: tuple[BusinessTool, ...] = (
           "low/medium", "copies of approved files", "original evidence or files requiring provenance preservation", None,
           status="approved_with_restrictions", domains=("security",)),
     _tool("shareclean", "ShareClean", "https://pypi.org/project/shareclean/", ("privacy", "security"),
-          ("redact text", "remove secrets", "sanitize logs"), ("clean logs", "redact config", "sanitize text"),
+          ("redact text", "remove secrets", "sanitize logs"), ("clean logs", "redact config", "sanitize text", "לנקות לוג", "לנקות לוג לפני שליחה"),
           "Sanitize pasted text before sharing it externally.", "Preparing logs, configs or text for a vendor or support request.", "Never assume detection is complete; review the output.",
           "medium", "synthetic, redacted, or explicitly approved text", "live secrets, credentials, tokens, raw PII", None,
           status="approved_with_restrictions", domains=("security", "operations")),
@@ -227,11 +227,12 @@ def maybe_recommend(task: str) -> str | None:
     """Keep normal conversation untouched unless the message is a tool-seeking request."""
     normalized = _normalize(task)
     intent_markers = ("איזה כלי", "יש לי", "אני צריך", "אני רוצה", "איך ", "כלי ל")
-    if not any(marker in normalized for marker in intent_markers):
+    matches = find_recommended_tools(task)
+    if not any(marker in normalized for marker in intent_markers) and not matches:
         return None
     if "כלים עסקיים" in normalized and ("איזה" in normalized or "מה" in normalized):
         return format_recommendation(task, list_tools()[:10])
-    return format_recommendation(task, find_recommended_tools(task))
+    return format_recommendation(task, matches)
 
 
 if __name__ == "__main__":
