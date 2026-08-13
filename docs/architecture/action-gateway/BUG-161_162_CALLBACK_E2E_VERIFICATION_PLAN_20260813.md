@@ -165,17 +165,9 @@ Telegram transcript: <טקסט/screenshot>
 תוצאה: PASS | FAIL — <תיאור>
 ```
 
-**STATUS: 🟢 VERIFIED AGAINST REAL STAGING for 2.1-2.5 (5/6 scenarios) — 26/26
-checks PASSED, exit=0. 2.6 (clarification/BUG-122) remains the one
-manual-only scenario (text-turn, not callback — see §2.6).**
-**EVIDENCE: preflight §0 (Render API, read-only, 13/08/2026); real staging
-run 13/08/2026 (`my-bot-approval-staging`, `srv-d99uq63eo5us73967cj0`),
-commit `63280e2`, `scripts/verify_bug161_162_callback_staging.py`, exit=0,
-26/26 checks PASSED — see §3 table above for the per-scenario dispatch-count
-findings, including the real 3-way concurrent-thread claim race
-(`3b. dispatch_tool called at most once across 3 concurrent presses`).
-Open caveat: run performed with `EmergencyStop` active on staging, so no
-scenario reached a genuinely successful "completed" write — see §3's
-"הסתייגות פתוחה." Owner ran the script directly on Render's staging shell;
-I ran the read-only Render API preflight and wrote/fixed the script from
-this session, but did not execute it myself (no staging shell access).**
+**STATUS: 🟡 PLAN + AUTOMATION READY, NOT YET RUN AGAINST STAGING — 0/6 תרחישים בוצעו בפועל.**
+**EVIDENCE: preflight §0 (Render API, read-only, 13/08/2026); automation for
+2.1-2.5 written and smoke-tested locally with fake credentials (no crash,
+structurally sound) — `scripts/verify_bug161_162_callback_staging.py`,
+commit `89087b4`. Not yet executed against real staging — running it there
+is the actual remaining evidence gap, not code.**
