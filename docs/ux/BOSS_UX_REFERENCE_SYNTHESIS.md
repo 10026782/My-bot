@@ -124,6 +124,7 @@ Airtable Interfaces, Figma, HubSpot, Intercom, Notion, Stripe Dashboard, Tana, V
 - `docs/ux/reference-evidence/uidrop/owner-supplied-visual-token-extraction.md`
 - `docs/ux/reference-evidence/uidrop/owner-supplied-balanced-rounded-extraction.md`
 - `docs/ux/reference-evidence/uidrop/owner-supplied-light-layered-extraction.md`
+- `docs/ux/reference-evidence/uidrop/owner-supplied-vibrant-collage-extraction.md`
 - `docs/ux/PUBLIC_REFERENCE_SYNTHESIS.md`
 - `docs/ux/AGENT4_REFERENCE_EXTRACTION.md`
 - `docs/ux/REFERENCE_INSPECTION_PHASE_START.md`

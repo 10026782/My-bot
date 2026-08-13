@@ -1,7 +1,7 @@
 # BOSS Design System v1
 
 **Date:** 13/08/2026
-**Status:** `V1 PROPOSAL — THREE UIDROP REFERENCES SYNTHESIZED; IMPLEMENTATION QA PENDING`
+**Status:** `V1 PROPOSAL — FOUR UIDROP REFERENCES CLASSIFIED; IMPLEMENTATION QA PENDING`
 **Authority:** Implements the owner-approved SCOREBOS UX Constitution and BOSS Unified Screen Contract. It does not change product navigation, schema, runtime, permissions, or action authority.
 
 ## 1. System rule
@@ -186,7 +186,7 @@ Rules:
 
 ## 6. UIDrop input disposition
 
-Three owner-supplied UIDrop inputs have been normalized into the BOSS-owned foundations above. Their evidence boundaries are recorded in `docs/ux/reference-evidence/uidrop/owner-supplied-visual-token-extraction.md`, `docs/ux/reference-evidence/uidrop/owner-supplied-balanced-rounded-extraction.md`, and `docs/ux/reference-evidence/uidrop/owner-supplied-light-layered-extraction.md`. The extractions are evidence for design language, not permission to copy source branding or library internals.
+Four owner-supplied UIDrop inputs have been classified against the BOSS-owned foundations above. Their evidence boundaries are recorded in `docs/ux/reference-evidence/uidrop/owner-supplied-visual-token-extraction.md`, `docs/ux/reference-evidence/uidrop/owner-supplied-balanced-rounded-extraction.md`, `docs/ux/reference-evidence/uidrop/owner-supplied-light-layered-extraction.md`, and `docs/ux/reference-evidence/uidrop/owner-supplied-vibrant-collage-extraction.md`. The extractions are evidence for design language, not permission to copy source branding or library internals.
 
 | Input area | Disposition | BOSS decision | Remaining verification |
 |---|---|---|---|
@@ -200,6 +200,7 @@ Three owner-supplied UIDrop inputs have been normalized into the BOSS-owned foun
 | Breakpoints/layers | `REJECT` raw values; normalize | 560/640/768/1024/1280 and 0/10/100/200/300 layers | Confirm against real TMA content, not source selectors |
 | Source CSS/library names | `REJECT` | BOSS semantic names only | None |
 | Light layered reference | `REFERENCE ONLY` foundation; `ADAPT` overlays | Keep dark app foundation; use 16px temporary overlays, 6px inputs, and restrained Elevation 2 | Verify focus trap, dismissal, keyboard order, and dark-surface contrast |
+| Vibrant collage reference | `REFERENCE ONLY` | Future onboarding/empty-state composition with original BOSS assets; no Ventures token change | Validate only if a real explanatory/empty-state need emerges |
 
 ### Supported now vs waiting for visual QA
 
