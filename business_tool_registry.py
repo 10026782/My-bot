@@ -202,9 +202,17 @@ def _normalize(text: str) -> str:
 
 
 def list_tools(*, tool_class: str = "business", include_disabled: bool = False) -> tuple[BusinessTool, ...]:
+    if not include_disabled:
+        try:
+            from tools.tool_runtime_snapshot import load_tool_runtime_snapshot
+            visible = {item["tool_id"] for item in load_tool_runtime_snapshot()["tools"] if item["runtime_visible"]}
+        except Exception:
+            return ()
+    else:
+        visible = {tool.tool_id for tool in TOOL_REGISTRY}
     return tuple(
         tool for tool in TOOL_REGISTRY
-        if tool.tool_class == tool_class and (include_disabled or tool.enabled)
+        if tool.tool_class == tool_class and (include_disabled or (tool.enabled and tool.tool_id in visible))
     )
 
 
@@ -276,6 +284,12 @@ def find_recommended_tools(task: str, *, limit: int = 3) -> list[BusinessTool]:
     normalized = _normalize(task)
     if not normalized.strip() or limit <= 0:
         return []
+    try:
+        from tools.tool_runtime_snapshot import _capability_id, load_tool_runtime_snapshot
+        relations = load_tool_runtime_snapshot()["tool_capabilities"]
+        eligible = {(r["tool_id"], r["capability_id"]) for r in relations if r["enabled"] and r["lifecycle_status"] == "APPROVED" and r["verification_status"] == "VERIFIED"}
+    except Exception:
+        return []
     matches: list[tuple[int, int, BusinessTool]] = []
     for position, tool in enumerate(list_tools(), start=1):
         if tool.verification_status not in {"verified", "approved_with_restrictions"}:
@@ -284,6 +298,7 @@ def find_recommended_tools(task: str, *, limit: int = 3) -> list[BusinessTool]:
         score = sum(3 if _normalize(term) in normalized else 0 for term in tool.tasks)
         score += sum(1 if _normalize(term) in normalized else 0 for term in tool.capabilities + tool.categories)
         score += 3 if _normalize(tool.name) in normalized or _normalize(tool.tool_id) in normalized else 0
+        score += sum(2 for capability in tool.capabilities if (tool.tool_id, _capability_id(capability)) in eligible and _normalize(capability) in normalized)
         if score:
             matches.append((-score, position, tool))
     matches.sort(key=lambda item: (item[0], item[1]))
