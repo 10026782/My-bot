@@ -67,10 +67,12 @@ unrelated commits land on `main`.
 
 ### F15 write-path migration — ALREADY_SATISFIED
 
-Recorded here as the second worked example, in place of the "Unified
-Formatter" example referenced when this gate was requested — no artifact by
-that name was found in this repository (searched docs and code), so
-fabricating an example would violate this same document's own rule.
+F15 is retained as the second worked example because the exact historical gap
+behind the earlier request for a "Unified Formatter" example cannot be
+reconstructed safely from current sources. The current `main` does contain
+`FEATURE_UNIFIED_STATUS_FORMATTER`, its formatter implementation, and focused
+tests; this document does not infer a historical requirement from that
+present-day implementation.
 F15 (`crm.py` → `airtable_gateway.py` write-path migration, `ROADMAP.md`
 around line 1905) is a real, already-resolved case of the same discipline:
 it was an open COVERAGE_GAP (`crm.py` bypassed the "all writes go through
