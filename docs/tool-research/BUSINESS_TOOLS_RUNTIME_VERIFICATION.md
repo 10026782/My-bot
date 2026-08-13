@@ -115,13 +115,13 @@ The initial dogfooding pass found five narrow misses:
 4. `אני רוצה לשאול שאלה על CSV ו-JSON` lacked the SQL-for-Files Hebrew phrase.
 5. `צריך לנקות לוג לפני שליחה לתמיכה` lacked the ShareClean Hebrew phrase.
 
-These are local, uncommitted fixes at the time of this report. They are not part of the current merged `main` SHA above.
+These fixes are included in this review branch but are not part of the current merged `main` SHA above until this PR is merged.
 
 Final dogfooding misses after the local fixes: **0**.
 
 ## 8. Exact Fixes Made
 
-Local bounded changes only:
+Bounded changes included in this PR:
 
 - Added two concrete Squoosh aliases for WhatsApp image reduction.
 - Added one concrete SVGOMG alias for logo compression.
@@ -161,7 +161,7 @@ The recommendation path is **locally verified in isolation and by static inspect
 | RUNTIME VERIFIED | No production evidence available |
 | LOCAL VERIFIED | Yes for registry/matcher path and regression matrix |
 
-The local fixes in Section 8 remain `Implemented but not yet verified` until merged and then re-run against the resulting `main`.
+The fixes remain `Implemented but not yet verified` against `main` until this PR is merged and the matrix is re-run against the resulting `main`.
 
 ## 11. Mini-App Decision
 
@@ -177,7 +177,7 @@ Evidence: this task found matching/wording gaps, not stale-source or maintenance
 
 ## 13. Next Smallest Step
 
-Review and merge the five bounded matcher fixes, then rerun this same local matrix against the resulting `main`. Do not add a Mini-App or crawler until browsing demand or freshness pain is measured.
+After merge, rerun this same matrix against the resulting `main`. Do not add a Mini-App or crawler until browsing demand or freshness pain is measured.
 
 ## VERDICT
 
@@ -211,4 +211,4 @@ Review and merge the five bounded matcher fixes, then rerun this same local matr
 
 ### NEXT SMALLEST STEP
 
-Merge the five bounded alias/intent fixes and rerun the existing 27-test suite plus the dogfooding matrix.
+Merge the five bounded alias/intent fixes, then rerun the existing 27-test suite plus the dogfooding matrix on `main`.
