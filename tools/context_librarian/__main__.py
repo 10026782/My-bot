@@ -252,7 +252,10 @@ def main(argv: list[str] | None = None) -> int:
                     return 1
                 print("CLEAN: post-apply verification passed")
                 return 0
-            print(f"outcome: {result.outcome}")
+            # Plain --check output on stdout must be JSON only: the workflow's
+            # check job redirects this exact invocation to a file and parses
+            # it with json.load() immediately after. Status goes to stderr.
+            print(f"outcome: {result.outcome}", file=sys.stderr)
             if result.outcome == OWNER_DECISION_REQUIRED:
                 return 1
             return 0

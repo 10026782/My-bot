@@ -8,6 +8,7 @@ docs/context_librarian/RECONCILIATION.md.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 
@@ -261,12 +262,24 @@ def test_apply_auto_maintenance_requires_head_at_canonical_sha(catalog, policies
 
 
 def test_policy_approved_new_source_registers_and_reconciles_clean(catalog, policies, monkeypatch, tmp_path):
+    # scripts/verify_bug157_160_163_staging.py -- this test's original
+    # example -- was registered for real by PR #628 (a prerequisite this
+    # branch rebases onto, see docs/context_librarian/RECONCILIATION.md), so
+    # it is no longer a real "new source". Use
+    # scripts/research_crawler_poc/reconcile_test_fixture.py instead: a real,
+    # permanent, deliberately-unregistered fixture file kept for exactly this
+    # test (same precedent as tc8_test_repo_stub.py), so this stays a genuine
+    # real-file, real-classification, real-predicate end-to-end proof instead
+    # of depending on which repository registration gaps happen to still be
+    # open.
+    #
     # Classification against the real (module-scoped) catalog fixture --
     # _catalog_referenced_paths() resolves paths relative to catalog.repo_root,
     # which only holds for the real repo layout, not an isolated tmp copy
     # whose catalog_root lives outside repo_root.
-    assert "scripts/verify_bug157_160_163_staging.py" not in catalog.nodes["layer.approvals"]["test_paths"]
-    new_sources = classify_new_sources(catalog, ["scripts/verify_bug157_160_163_staging.py"])
+    fixture_path = "scripts/research_crawler_poc/reconcile_test_fixture.py"
+    assert fixture_path not in catalog.nodes["decision.offline_research_support_tool"]["code_paths"]
+    new_sources = classify_new_sources(catalog, [fixture_path])
 
     isolated = _isolated_catalog(monkeypatch, tmp_path)
     main_sha = "b2c3d4e5f6070000000000000000000000000000"
@@ -280,14 +293,14 @@ def test_policy_approved_new_source_registers_and_reconciles_clean(catalog, poli
     first = reconcile(isolated, policies, main_ref="origin/main")
     assert first.outcome == AUTO_MAINTENANCE_REQUIRED
     assert len(first.auto_maintenance_sources) == 1
-    assert first.auto_maintenance_sources[0]["policy_id"] == "STAGING_VERIFICATION_APPROVALS_BUG_FAMILY"
-    assert first.auto_maintenance_sources[0]["target_field"] == "test_paths"
+    assert first.auto_maintenance_sources[0]["policy_id"] == "OFFLINE_RESEARCH_TOOL"
+    assert first.auto_maintenance_sources[0]["target_field"] == "code_paths"
 
     applied = apply_auto_maintenance(isolated, policies, first)
-    assert "layer.approvals.test_paths:scripts/verify_bug157_160_163_staging.py" in applied["registered"]
+    assert f"decision.offline_research_support_tool.code_paths:{fixture_path}" in applied["registered"]
 
     reloaded = load_catalog(REPO_ROOT)
-    assert "scripts/verify_bug157_160_163_staging.py" in reloaded.nodes["layer.approvals"]["test_paths"]
+    assert fixture_path in reloaded.nodes["decision.offline_research_support_tool"]["code_paths"]
 
     monkeypatch.setattr(reconcile_module, "_scan_new_sources", lambda *_a, **_k: [])
     second = reconcile(reloaded, policies, main_ref="origin/main")
@@ -337,10 +350,34 @@ def test_authority_named_path_never_auto_approved_even_with_hypothetical_policy_
 # --- E: policy match with a target that does not exist -> OWNER_DECISION_REQUIRED ---
 
 
+def _with_missing_target(policies, policy_id):
+    """Returns a copy of `policies` with `policy_id`'s eligible_target
+    redirected to a guaranteed-nonexistent node id, keeping everything else
+    (id, real path_patterns, real target_field) intact. Used to prove the
+    "target must exist" gate deterministically instead of depending on
+    which real catalog decision nodes happen to not exist yet -- PR #628
+    (a prerequisite this branch rebases onto) already created the specific
+    real target nodes this test originally relied on being absent."""
+    real_policy = next(p for p in policies if p.id == policy_id)
+    missing_target_policy = dataclasses.replace(
+        real_policy, eligible_target="decision.__nonexistent_test_target__"
+    )
+    return tuple(missing_target_policy if p.id == policy_id else p for p in policies)
+
+
 def test_policy_match_with_nonexistent_target_requires_owner_decision(catalog, policies):
-    assert "decision.business_domain_vocabulary" not in catalog.nodes
-    new_sources = _classify(catalog, ["domain_utils.py"])
-    result = _reconcile_with_fakes(catalog, policies, new_sources=new_sources)
+    # decision.business_domain_vocabulary now exists for real (PR #628), and
+    # domain_utils.py is registered under it, so it's no longer a real "new
+    # source" either -- hand-build the classification item to still exercise
+    # CROSS_LAYER_SUPPORTING_METADATA's real glob match, against a policy
+    # copy whose target is synthetically forced missing (see
+    # _with_missing_target).
+    assert "decision.business_domain_vocabulary" in catalog.nodes
+    patched_policies = _with_missing_target(policies, "CROSS_LAYER_SUPPORTING_METADATA")
+    new_sources = [
+        {"path": "domain_utils.py", "classification": "REVIEW_REQUIRED", "reason": "new runtime source"}
+    ]
+    result = _reconcile_with_fakes(catalog, patched_policies, new_sources=new_sources)
     assert len(result.auto_maintenance_sources) == 0
     assert len(result.decision_queue) == 1
     item = result.decision_queue[0]
@@ -350,12 +387,22 @@ def test_policy_match_with_nonexistent_target_requires_owner_decision(catalog, p
 
 
 def test_staging_verification_f15_requires_target_to_exist(catalog, policies):
-    # decision.f15_staging_verification_artifact is introduced by PR #628,
-    # not by this branch -- until it is created and this branch rebased,
-    # a match must not be silently trusted.
-    assert "decision.f15_staging_verification_artifact" not in catalog.nodes
-    new_sources = _classify(catalog, ["scripts/verify_f15_staging.py"])
-    result = _reconcile_with_fakes(catalog, policies, new_sources=new_sources)
+    # decision.f15_staging_verification_artifact now exists for real (PR
+    # #628, a prerequisite this branch rebases onto), and
+    # scripts/verify_f15_staging.py is registered under it -- see
+    # test_policy_match_with_nonexistent_target_requires_owner_decision
+    # above for why this uses a hand-built classification item and a
+    # synthetically target-missing policy copy instead.
+    assert "decision.f15_staging_verification_artifact" in catalog.nodes
+    patched_policies = _with_missing_target(policies, "STAGING_VERIFICATION_F15")
+    new_sources = [
+        {
+            "path": "scripts/verify_f15_staging.py",
+            "classification": "REVIEW_REQUIRED",
+            "reason": "new runtime source",
+        }
+    ]
+    result = _reconcile_with_fakes(catalog, patched_policies, new_sources=new_sources)
     assert len(result.auto_maintenance_sources) == 0
     item = result.decision_queue[0]
     assert item["policy_id"] == "STAGING_VERIFICATION_F15"
@@ -444,7 +491,18 @@ def test_reference_evidence_image_stays_non_blocking(catalog, policies):
 
 
 def test_staging_verification_approvals_bug_family_is_auto_maintenance_eligible(catalog, policies):
-    new_sources = _classify(catalog, ["scripts/verify_bug161_162_callback_staging.py"])
+    # scripts/verify_bug161_162_callback_staging.py was registered for real
+    # by PR #628 (a prerequisite this branch rebases onto), so it is no
+    # longer a real "new source" via classify_new_sources -- hand-build the
+    # classification item to still exercise this policy's real glob match
+    # and real predicate against the file's real (unchanged) content.
+    new_sources = [
+        {
+            "path": "scripts/verify_bug161_162_callback_staging.py",
+            "classification": "REVIEW_REQUIRED",
+            "reason": "new runtime source",
+        }
+    ]
     result = _reconcile_with_fakes(catalog, policies, new_sources=new_sources)
     assert len(result.decision_queue) == 0
     assert len(result.auto_maintenance_sources) == 1
