@@ -59,8 +59,13 @@ def _slug(value: str) -> str:
     return value
 
 
-def _capability_id(value: str) -> str:
+def normalize_capability_id(value: str) -> str:
+    """Return the stable public capability ID for an existing seed phrase."""
     return _CAPABILITY_OVERRIDES.get(value.lower(), _slug(value))
+
+
+# Backward-compatible internal alias for the generator's existing callers.
+_capability_id = normalize_capability_id
 
 
 def _playbook(tool):
@@ -89,18 +94,21 @@ def generate_snapshot(*, source_revision: str | None = None, generated_at: str |
         execution = "GUIDED_EXTERNAL" if tool.tool_class == "business" else "OPERATOR_ONLY" if tool.tool_class == "operator" else "POC_ONLY"
         decision = "KEEP_EXTERNAL" if tool.tool_class in {"business", "operator", "research_crawler"} else "INTEGRATE_LATER"
         verified = tool.verification_status in {"verified", "approved_with_restrictions"}
+        verification_status = "VERIFIED" if tool.verification_status == "verified" else "APPROVED_WITH_RESTRICTIONS" if tool.verification_status == "approved_with_restrictions" else "UNVERIFIED"
         runtime_visible = tool.tool_class == "business" and verified and tool.enabled
         tools.append({
             "tool_id": tool.tool_id, "name": tool.name, "canonical_url": tool.url,
             "tool_class": tool.tool_class, "tags": sorted(set(tool.categories + tool.domain_tags)),
+            "tasks": list(tool.tasks),
+            "capability_ids": sorted({normalize_capability_id(raw) for raw in tool.capabilities}),
             "execution_mode": execution, "agent_mode": "OPTIONAL_AGENT" if tool.playbook and tool.playbook.agent_mode == "optional_agent" else "NO_AGENT",
             "lifecycle_status": status, "decision": decision, "privacy_class": getattr(tool.playbook, "privacy_class", "OTHER_BOUNDED_WARNING") if tool.playbook else "OTHER_BOUNDED_WARNING",
-            "enabled": bool(tool.enabled), "verification_status": "VERIFIED" if verified else "UNVERIFIED",
+            "enabled": bool(tool.enabled), "verification_status": verification_status,
             "last_verified_at": tool.last_verified_at, "next_verification_at": None,
             "playbook": _playbook(tool), "runtime_visible": runtime_visible,
         })
         for raw in tool.capabilities:
-            capability_id = _capability_id(raw)
+            capability_id = normalize_capability_id(raw)
             capabilities.setdefault(capability_id, {"capability_id": capability_id, "name": raw, "tags": [], "lifecycle_status": "VERIFIED"})
             relation_id = f"{tool.tool_id}:{capability_id}"
             if any(item["tool_capability_id"] == relation_id for item in relations):
@@ -108,7 +116,7 @@ def generate_snapshot(*, source_revision: str | None = None, generated_at: str |
             relations.append({
                 "tool_capability_id": relation_id, "tool_id": tool.tool_id, "capability_id": capability_id,
                 "execution_mode": execution, "agent_mode": tools[-1]["agent_mode"], "lifecycle_status": status,
-                "verification_status": "VERIFIED" if verified else "UNVERIFIED", "enabled": runtime_visible,
+                "verification_status": verification_status, "enabled": runtime_visible,
                 "priority": 50 if runtime_visible else 0,
             })
     snapshot = {
@@ -143,13 +151,13 @@ def validate_snapshot(snapshot: dict) -> None:
         parsed = urlparse(tool["canonical_url"])
         if parsed.scheme != "https" or not parsed.netloc: raise SnapshotValidationError("malformed URL")
         if tool["execution_mode"] not in _EXECUTION or tool["agent_mode"] not in _AGENT or tool["lifecycle_status"] not in _STATUS or tool["decision"] not in _DECISIONS: raise SnapshotValidationError("unknown enum value")
-        if tool["runtime_visible"] and (not tool["enabled"] or tool["lifecycle_status"] != "APPROVED" or tool["verification_status"] != "VERIFIED" or tool["execution_mode"] in {"OPERATOR_ONLY", "POC_ONLY"} or tool["decision"] == "REJECT"): raise SnapshotValidationError("ineligible runtime-visible tool")
+        if tool["runtime_visible"] and (not tool["enabled"] or tool["lifecycle_status"] != "APPROVED" or tool["verification_status"] not in {"VERIFIED", "APPROVED_WITH_RESTRICTIONS"} or tool["execution_mode"] in {"OPERATOR_ONLY", "POC_ONLY"} or tool["decision"] == "REJECT"): raise SnapshotValidationError("ineligible runtime-visible tool")
     for relation in relations:
         if relation.get("tool_id") not in tool_ids or relation.get("capability_id") not in cap_ids: raise SnapshotValidationError("broken relation")
         if relation.get("tool_capability_id") != f"{relation.get('tool_id')}:{relation.get('capability_id')}": raise SnapshotValidationError("unstable relation ID")
         if relation.get("execution_mode") not in _EXECUTION or relation.get("agent_mode") not in _AGENT or relation.get("lifecycle_status") not in _STATUS: raise SnapshotValidationError("unknown relation enum")
         parent = next(x for x in tools if x["tool_id"] == relation["tool_id"])
-        if relation.get("enabled") and relation.get("lifecycle_status") == "APPROVED" and relation.get("verification_status") == "VERIFIED" and not parent["runtime_visible"]: raise SnapshotValidationError("eligible relation has ineligible parent")
+        if relation.get("enabled") and relation.get("lifecycle_status") == "APPROVED" and relation.get("verification_status") in {"VERIFIED", "APPROVED_WITH_RESTRICTIONS"} and not parent["runtime_visible"]: raise SnapshotValidationError("eligible relation has ineligible parent")
 
 
 def load_tool_runtime_snapshot(path: str | Path | None = None) -> dict:
