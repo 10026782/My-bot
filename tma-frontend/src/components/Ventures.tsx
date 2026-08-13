@@ -54,7 +54,7 @@ const STAGE_TONE: Record<string, StatusTone> = {
 
 const CONVICTION_TONE: Record<string, StatusTone> = {
   Low: "neutral",
-  Medium: "warning",
+  Medium: "neutral",
   High: "success",
 };
 
