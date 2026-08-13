@@ -200,7 +200,7 @@ Future actions must use the existing BOSS Action UX contract and existing runtim
 |---|---|---|---|---|
 | App entry/navigation | Boolean Ventures view in `App.tsx`; Owner Control link | Existing entry/back callbacks | Shared depth/navigation state later | Final AppShell/navigation contract |
 | Header | Inline header with back/count/create | Business title/count/action | Shared PageHeader, RTL arrow, target sizes | Global/context action placement decision |
-| Tokens/styles | Tailwind defaults; repeated gray/white/blue recipes | Existing 4/8/12/16 spacing, radius, neutral surfaces | BOSS semantic token roles in CSS/Tailwind | Brand palette/UIDrop values |
+| Tokens/styles | Tailwind defaults; repeated gray/white/blue recipes | Existing 4/8/12/16 spacing and neutral surfaces | Implement the normalized BOSS dark-canvas/light-surface/blue-action tokens, 4px rhythm, restrained radii, flat elevation, focus, and motion recipes | Screenshot-level density calibration; semantic status palette |
 | Collection | Venture list/cards and stage filter | Field hierarchy and load flow | Shared list/card/status primitives; preserve context | Search/sort/pagination/board |
 | Detail | Facts, decision log, edit controls | Current data/state/refetch | Shared detail hierarchy; move next action upward | Timeline/related projections/receipt |
 | Create | Name/domain sheet | Existing POST and form | Shared Confirmation/Sheet/validation states | Broader business intake fields if approved |

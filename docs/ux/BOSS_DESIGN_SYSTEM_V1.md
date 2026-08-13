@@ -1,80 +1,88 @@
 # BOSS Design System v1
 
 **Date:** 13/08/2026
-**Status:** `V1 PROPOSAL — CONCRETE INTERACTION CONTRACT; VISUAL CALIBRATION PENDING UIDROP`
+**Status:** `V1 PROPOSAL — UIDROP TOKEN INPUT INTEGRATED; SCREENSHOT CALIBRATION PENDING`
 **Authority:** Implements the owner-approved SCOREBOS UX Constitution and BOSS Unified Screen Contract. It does not change product navigation, schema, runtime, permissions, or action authority.
 
 ## 1. System rule
 
 Core contracts are uniform across SCOREBOS. A workspace may vary only through approved composition and density modes. New screens must reuse these foundations and components before proposing a new pattern.
 
-The first proving surface is Ventures. Values below are deliberately small and anchored to the current TMA Tailwind vocabulary. UIDrop may calibrate visual values, but may not reopen the interaction, semantic, accessibility, action, or responsive contracts.
+The first proving surface is Ventures. The visual direction is vibrant, modern, compact, and flat: a dark application canvas, bright work surfaces, restrained rounding, and a blue action accent. The values below adapt the owner-supplied UIDrop extraction into BOSS-owned semantic tokens; source-library names, brand identity, and one-off implementation artifacts are not part of the system.
+
+The token extraction was supplied without its referenced screenshot. Exact hierarchy and density therefore remain a visual QA item, while the normalized token set is sufficient for the first implementation PR. UIDrop input may calibrate visual values, but may not reopen the interaction, semantic, accessibility, action, or responsive contracts.
 
 ## 2. Foundations
 
 ### 2.1 Spacing
 
-Use one six-step spacing scale:
+Use a 4px base grid. The core component rhythm is 4/8/12/16/20/24; larger layout steps are permitted only for page composition.
 
-| Token | Provisional value | Use |
+| Token | Value | Use |
 |---|---:|---|
+| `space-0` | 0px | Reset only |
+| `space-hairline` | 2px | Optical/border adjustment; never general layout |
 | `space-1` | 4px | icon/label micro-gap |
 | `space-2` | 8px | compact control gap |
 | `space-3` | 12px | row/card internal gap |
 | `space-4` | 16px | default card and mobile page padding |
+| `space-5` | 20px | comfortable card/page recipe |
 | `space-6` | 24px | section separation |
 | `space-8` | 32px | major page separation |
+| `space-10` | 40px | large layout separation only |
+| `space-12` | 48px | page-level separation only |
 
-Do not introduce local 6px/10px/14px/18px spacing unless a shared component documents the exception. Density modes change component recipes, not the base scale.
+Do not introduce local 6px/10px/14px/18px spacing unless a shared component documents the exception. Density modes change component recipes, not the base scale. The source-style names (`toolbox-spacing-*`) are evidence only and must not become public BOSS token names.
 
 ### 2.2 Typography
 
-| Role | Provisional size/line-height | Weight | Rule |
+| Role | Size/line-height | Weight | Rule |
 |---|---|---:|---|
 | Page Title | 24/32 | 700–800 | One per screen |
 | Section Title | 18/26 | 700 | Names a decision/work group |
 | Entity/Card Title | 16/24 | 600–700 | May wrap to two lines |
-| Body | 14/22 | 400 | Default Hebrew reading text |
+| Body | 14/22.4 | 350–400 | Default Hebrew reading text; `1.6` line-height |
 | Label/Action | 14/20 | 600 | Controls and important labels |
 | Metadata | 12/18 | 400–500 | Never carries the only critical meaning |
 | KPI | 30/36 | 700–800 | Must include a semantic label and drill-down purpose |
 | Status | 12/18 | 600 | Text label required; color is secondary |
 
-Use semantic roles, not local font sizes. Hebrew line-height must allow niqqud-free text, mixed numbers, and two-line labels without clipping. Final font family and exact optical weights are UIDrop/brand inputs.
+Use `Inter var`, with the current system sans-serif stack as fallback. Use semantic roles, not local font sizes. Hebrew line-height must allow niqqud-free text, mixed numbers, and two-line labels without clipping. Because variable weight `350` is not equally legible in every Hebrew rendering environment, implementation must compare `350` and `400` at 390px before fixing the body weight.
 
 ### 2.3 Radius
 
-Use four roles only:
+Use four BOSS roles only:
 
-- `radius-control`: 8px for inputs and compact controls.
-- `radius-surface`: 12px for cards, list rows, alerts, and sections.
-- `radius-overlay`: 16px for sheets/drawers/modals.
-- `radius-pill`: fully rounded for status and filter chips only.
+- `radius-chip`: 4px for status and filter chips.
+- `radius-control`: 6px for buttons, inputs, and compact controls.
+- `radius-surface`: 8px for cards, list rows, alerts, and sections.
+- `radius-overlay`: 12px for sheets, drawers, and modals.
 
-These values match recurring current TMA shapes and remain provisional pending UIDrop comparison.
+Pill geometry is not a default token. It is allowed only when a component contract explicitly requires a capsule shape. This keeps the system subtly rounded instead of drifting back to the current oversized-card vocabulary.
 
 ### 2.4 Surface hierarchy
 
-| Level | Purpose | Current anchor |
+| Level | Purpose | BOSS token/value |
 |---|---|---|
-| Canvas | App background and scroll field | neutral gray (`gray-100`) |
-| Surface | Cards, sections, headers | white |
-| Subtle | Grouping inside a surface | neutral gray (`gray-50/100`) |
-| Raised | Sticky action area, drawer, overlay | white + border/elevation |
-| Inverse | High-emphasis system/action surface | near-black (`gray-900`) |
+| Canvas | App background and scroll field | `canvas: #222222` |
+| Surface | Cards, sections, data work | `surface: #FBFCFC` |
+| Subtle | Grouping inside a light surface | `surface-subtle: #F6F6F6` |
+| Raised | Sticky action area, drawer, overlay | `surface-raised: #FFFFFF` + border |
+| Inverse | High-emphasis system/action surface | `surface-inverse: #0D0D0D` |
 
-Surface level communicates hierarchy; card type does not invent a new background. Exact colors remain UIDrop/brand inputs.
+Text tokens are contextual: `text-on-dark: #FFFFFF`, `text-on-light: #222222`, `text-muted-on-dark: #B3B3B3`, and `text-muted-on-light: #555555`. The extracted `#838383` may be used for non-text decoration or large secondary text only; it does not meet the 4.5:1 body-text target on either `#222222` or `#FBFCFC`.
+
+Action tokens are `action-primary: #5EB1EF`, `action-hover: #7EC1F2`, `action-pressed: #3C92DC`, and `action-soft: #DBEAFE`. Primary button text is `#222222`, not the extracted `#D5EFFF`: the supplied pairing measures approximately 1.96:1, while `#222222` on `#5EB1EF` measures approximately 6.83:1. Color remains secondary to labels for status meaning.
 
 ### 2.5 Borders and elevation
 
-- Border: one semantic 1px neutral border for separation, with info/success/warning/danger variants only when meaning requires it.
-- Elevation 0: canvas/subtle grouping.
-- Elevation 1: clickable card or sticky header.
-- Elevation 2: sheet/drawer/action bar.
-- Elevation 3: temporary critical overlay only.
+- Border: one semantic 1px neutral border (`#DFDFDF` on light surfaces; `#555555` on dark surfaces), with semantic variants only when meaning requires them.
+- Elevation 0: default cards, rows, sections, and controls; no shadow.
+- Elevation 1: interactive lift or sticky separation; `0 1px 2px rgba(0, 0, 0, .05)`.
+- Elevation 2: sheet/drawer/action bar; `0 2px 6px rgba(0, 0, 0, .12), 0 6px 12px rgba(55, 55, 55, .08)`.
+- Elevation 3: temporary modal/critical overlay only; use the supplied large shadow recipe, never on ordinary cards.
+- `shadow-inner` is reserved for pressed/inset controls. Extra-large shadow is not admitted into v1.
 - Do not combine heavy shadow, strong border, and colored background unless the state is critical.
-
-Exact shadow blur, spread, and opacity remain UIDrop inputs.
 
 ### 2.6 Icons and touch targets
 
@@ -115,6 +123,16 @@ Business status, execution state, and presentation state remain separate. Domain
 - Detail opens as a bottom/full-height sheet for quick review and as a dedicated depth surface only for extended work.
 - Primary action remains visible without covering content; secondary/rare actions move to an overflow/action sheet.
 - Long Hebrew titles, empty/error states, focus order, and screen-reader labels are acceptance criteria.
+
+### 2.10 Focus, motion, layers, and responsive normalization
+
+- Focus ring: `2px solid #BFDBFE` with a 2px dark or light offset chosen for the current surface. Focus must never depend on shadow alone.
+- Motion: `150ms ease-out` for open/close and hover transitions; `75ms ease-out` for press feedback. Under `prefers-reduced-motion`, remove non-essential movement and retain immediate state changes.
+- Hover may add Elevation 1 and a subtle color shift. Do not apply `opacity: .5` to the whole control because it weakens text/icon contrast; reserve reduced opacity for disabled states.
+- Layer tokens: `content: 0`, `sticky: 10`, `dropdown: 100`, `modal: 200`, `tooltip: 300`. Source values such as `100001` and `2147483647` are rejected as implementation leakage.
+- Canonical breakpoints: `compact: 576px`, `wide-mobile: 640px`, `tablet: 768px`, and `content-max: 800px`. Near-duplicate source queries at 575/576, 650/651, 767/768, and 780px are normalized rather than copied.
+- The primary content frame is `min(100%, 800px)`. Mobile uses at least 16px inline page padding; the extracted 8px gutter is permitted only inside dense nested grids, not at the viewport edge.
+- Radix UI is a candidate implementation substrate for accessible overlays, menus, tabs, and focus management. It is not a visual identity and is not required for VUX-0 unless dependency review approves adding it.
 
 ## 3. Approved variation
 
@@ -165,27 +183,27 @@ Rules:
 - High-risk or irreversible transitions require an approved business contract before UI controls exist.
 - Internal IDs, Airtable table names, tool names, payloads, and raw errors are never user-facing.
 
-## 6. UIDROP INPUT REQUIRED
+## 6. UIDrop input disposition
 
-UIDrop is needed to calibrate visual tokens, not to decide product behavior.
+Owner-supplied UIDrop token input has been normalized into the BOSS-owned foundations above. The raw evidence boundary is recorded in `docs/ux/reference-evidence/uidrop/owner-supplied-visual-token-extraction.md`. The extraction is evidence for design language, not permission to copy source branding or library internals.
 
-| Decision still requiring extraction | Best reference to Snap | What to measure | What is already decided |
+| Input area | Disposition | BOSS decision | Remaining verification |
 |---|---|---|---|
-| Exact surface/card radius | Linear entity surface + Attio collection/detail | card, row, drawer, control radii | Four BOSS radius roles only |
-| Default card/list padding | Attio collection and Linear entity detail | internal padding at mobile/desktop densities | Six-step BOSS spacing scale and semantic recipes |
-| Button/control height | Retool input/readiness surface + Raycast action entry | default, compact, sticky action controls | Minimum 44×44 mobile target and one-primary-action rule |
-| Type scale and Hebrew rhythm | Linear hierarchy + Attio dense business fields | title/body/metadata/KPI ratios; then validate in Hebrew | Semantic typography roles and no local font scale |
-| Shadow/elevation strength | Linear/Attio layered detail states | header, card, drawer, sticky bar shadow values | Four elevation roles and restrained use |
-| Surface/background colors | Attio light surfaces + current TMA screenshot | canvas/surface/subtle/border contrast | Semantic surface hierarchy; final palette remains BOSS-owned |
-| Input styling and validation | Retool readiness states + JSON Crack validation | focus, invalid, disabled, ready treatments | Canonical readiness/validation semantics |
-| Density recipes | BentoPDF compact/full-width controls + Attio collection | row height, metadata count, comfortable/standard/dense deltas | Only three approved density modes; switch UI not approved |
-| Search/action entry styling | Raycast launcher + Retool search | field prominence, shortcut hint, result grouping | Global/context action concepts; mobile remains touch-first |
+| Radius | `ADAPT` | chip 4px, control 6px, surface 8px, overlay 12px | Check sheet/card hierarchy against the missing screenshot |
+| Spacing | `ADOPT` core; `ADAPT` extended | 4px grid with 4–24px core and 32–48px layout steps | Validate Hebrew density at 390px |
+| Typography | `ADAPT` | Inter var; 14px body at 1.6; semantic role scale | Compare Hebrew body weight 350 vs 400 |
+| Palette | `ADAPT` | dark canvas, light work surfaces, BOSS blue actions | Validate full semantic status palette and contrast |
+| Elevation | `ADAPT` | flat by default; small/medium only for interaction and overlays | Compare sticky/detail separation visually |
+| Inputs/focus | `ADOPT` focus concept | 6px controls; 2px `#BFDBFE` ring with offset | Capture default/hover/focus/invalid/disabled states |
+| Motion | `ADOPT` | 150ms/75ms ease-out with reduced-motion fallback | Verify no essential meaning depends on motion |
+| Breakpoints/layers | `REJECT` raw values; normalize | 576/640/768/800 and 0/10/100/200/300 layers | Confirm against real TMA content, not source selectors |
+| Source CSS/library names | `REJECT` | BOSS semantic names only | None |
 
-### Supported now vs waiting for UIDrop
+### Supported now vs waiting for visual QA
 
-Supported now: hierarchy, component responsibilities, action lifecycle, status semantics, mobile/RTL rules, density modes, collection/detail continuity, validation, receipts, and accessibility contracts.
+Supported now: hierarchy, component responsibilities, action lifecycle, status semantics, mobile/RTL rules, density modes, collection/detail continuity, validation, receipts, accessibility contracts, and the normalized visual token direction.
 
-Waiting for UIDrop: exact radius, padding, control height, type scale calibration, shadow strength, surface palette, and detailed input/search visual styling.
+Waiting for screenshot/implementation QA: hierarchy and density fidelity, Hebrew weight calibration, semantic status colors, and complete input/search state captures. The screenshot referenced by the supplied brief was not attached to this task, so no claim of visual match is made.
 
 UIDrop findings must be recorded as BOSS-owned tokens and reviewed against Hebrew text, 390px mobile, contrast, and Telegram safe-area behavior. They cannot be copied wholesale from a reference.
 

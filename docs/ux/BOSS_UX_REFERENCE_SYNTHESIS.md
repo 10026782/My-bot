@@ -96,6 +96,7 @@ Airtable Interfaces, Figma, HubSpot, Intercom, Notion, Stripe Dashboard, Tana, V
 - Semantic status labels that never rely on color or emoji alone.
 - Canonical action lifecycle: intent → validation/preview → execute/approve → verified result → receipt/error.
 - Reuse of existing TMA domain content and useful component concepts before introducing replacements.
+- BOSS-owned visual direction: dark application canvas, light work surfaces, blue action accent, 4px rhythm, restrained rounding, and flat-by-default elevation. This is an adaptation of owner-supplied token evidence, not a copy of source identity or CSS names.
 
 ## 7. Explicitly open
 
@@ -105,7 +106,7 @@ Airtable Interfaces, Figma, HubSpot, Intercom, Notion, Stripe Dashboard, Tana, V
 - Contacts/Deals placement.
 - Business Memory/Activity source and surface.
 - Deletion, merge, or retirement of legacy screens.
-- Final brand palette and exact visual token values.
+- Final semantic status palette and screenshot-level hierarchy/density calibration. The owner supplied a token extraction, but the referenced screenshot was not attached.
 - Venture financial-review, negotiation, readiness, GO/NO-GO, and conversion business rules beyond the current schema.
 
 ## 8. Source research consumed
@@ -120,6 +121,7 @@ Airtable Interfaces, Figma, HubSpot, Intercom, Notion, Stripe Dashboard, Tana, V
 
 ### Consolidated research and matrices
 
+- `docs/ux/reference-evidence/uidrop/owner-supplied-visual-token-extraction.md`
 - `docs/ux/PUBLIC_REFERENCE_SYNTHESIS.md`
 - `docs/ux/AGENT4_REFERENCE_EXTRACTION.md`
 - `docs/ux/REFERENCE_INSPECTION_PHASE_START.md`

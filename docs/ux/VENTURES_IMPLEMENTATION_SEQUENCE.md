@@ -20,14 +20,14 @@
 
 **Exact intended files**
 
-- Modify `tma-frontend/src/index.css` — add BOSS semantic CSS custom properties/recipes for spacing, surfaces, border, radius, elevation, focus, safe-area, and touch targets using current values.
+- Modify `tma-frontend/src/index.css` — add the approved BOSS semantic CSS custom properties/recipes from `BOSS_DESIGN_SYSTEM_V1.md`: 4px spacing rhythm, dark canvas/light work surfaces, blue action colors, border/radius/elevation, focus, motion, safe-area, and touch targets. Do not import source-library token names.
 - Add `tma-frontend/src/components/ui/PageHeader.tsx`.
 - Add `tma-frontend/src/components/ui/Surface.tsx` (`Section`/`Card` variants only).
 - Add `tma-frontend/src/components/ui/StatusBadge.tsx`.
 - Add `tma-frontend/src/components/ui/ScreenState.tsx` (loading, empty, error with retry).
 - Modify `tma-frontend/src/components/Ventures.tsx` to consume only those primitives while preserving data calls and behavior.
 
-**Dependency:** Review/acceptance of `BOSS_DESIGN_SYSTEM_V1.md`; UIDrop exact values are not blocking because current values remain provisional tokens.
+**Dependency:** Review/acceptance of `BOSS_DESIGN_SYSTEM_V1.md`. The owner-supplied UIDrop values are normalized and no longer block VUX-0; the missing reference screenshot blocks only a claim of visual fidelity, not implementation of the token foundation.
 
 **Deliberately out of scope**
 
@@ -43,6 +43,8 @@
 - Back/create/retry controls have accessible names and ≥44px mobile targets.
 - Existing list, detail, create, edit, stage filter, and refetch behavior remains available.
 - No primitive contains Venture-specific business semantics.
+- Primary button text uses the accessible BOSS on-action token; the extracted low-contrast `#D5EFFF`/`#5EB1EF` pairing is not implemented.
+- Default cards remain flat; shadows appear only for interactive lift, sticky separation, or overlays.
 
 **Tests**
 
@@ -253,7 +255,7 @@
 
 | Dependency/blocker | Blocks | Resolution owner/input |
 |---|---|---|
-| UIDrop exact visual tokens | Final visual polish, not VUX-0 structure | Design/owner review of requested Snaps |
+| Referenced UIDrop screenshot not attached | Screenshot-level hierarchy/density fidelity only; does not block VUX-0 tokens | Attach the source screenshot for same-viewport visual QA before claiming a match |
 | No frontend component-test harness identified | Automated UI coverage | Separate tooling decision or use existing CI/build/manual evidence |
 | Venture writes bypass centralized ActionGateway according to current audit | VUX-5 canonical actions/receipts | Existing Action/runtime authority; separate reviewed backend work |
 | No structured Venture timeline projection | VUX-4 Timeline | Business Memory/Interaction/receipt authority decision |
