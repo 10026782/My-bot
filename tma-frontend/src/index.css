@@ -1,3 +1,611 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  --boss-color-canvas: #08090a;
+  --boss-color-surface: #1c1d1e;
+  --boss-color-surface-subtle: #141516;
+  --boss-color-surface-raised: #242526;
+  --boss-color-text: #f7f8f8;
+  --boss-color-text-muted: #8a8f98;
+  --boss-color-border: rgba(255, 255, 255, 0.12);
+  --boss-color-border-strong: rgba(255, 255, 255, 0.2);
+  --boss-color-primary: #e5e5e6;
+  --boss-color-primary-text: #08090a;
+  --boss-color-accent: #5e6ad2;
+  --boss-color-accent-readable: #7e88db;
+  --boss-color-accent-soft: #c2d2f2;
+  --boss-color-success: #6ee7a0;
+  --boss-color-warning: #f6c86e;
+  --boss-color-danger: #ff8b8b;
+  --boss-space-1: 4px;
+  --boss-space-2: 8px;
+  --boss-space-3: 12px;
+  --boss-space-4: 16px;
+  --boss-space-5: 20px;
+  --boss-space-6: 24px;
+  --boss-space-8: 32px;
+  --boss-space-12: 48px;
+  --boss-radius-card: 4px;
+  --boss-radius-input: 6px;
+  --boss-radius-overlay: 16px;
+  --boss-radius-pill: 9999px;
+  --boss-motion-fast: 100ms;
+  --boss-motion-base: 160ms;
+  --boss-ease: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.ventures-screen,
+.ventures-screen * {
+  box-sizing: border-box;
+}
+
+.ventures-screen {
+  min-height: 100vh;
+  direction: rtl;
+  color: var(--boss-color-text);
+  background:
+    radial-gradient(circle at 82% -8%, rgba(94, 106, 210, 0.18), transparent 30rem),
+    var(--boss-color-canvas);
+  font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.ventures-screen--detail {
+  padding-bottom: 264px;
+}
+
+.ventures-shell {
+  width: min(100%, 800px);
+  margin-inline: auto;
+  padding: 0 var(--boss-space-4) var(--boss-space-8);
+}
+
+.boss-page-header {
+  padding: var(--boss-space-5) 0 var(--boss-space-6);
+  border-bottom: 1px solid var(--boss-color-border);
+  margin-bottom: var(--boss-space-5);
+}
+
+.boss-page-header__topline,
+.boss-page-header__title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--boss-space-3);
+}
+
+.boss-page-header__topline {
+  min-height: 36px;
+  margin-bottom: var(--boss-space-6);
+}
+
+.boss-page-header__spacer {
+  flex: 1;
+}
+
+.boss-page-header__copy {
+  min-width: 0;
+}
+
+.boss-page-header__title-row {
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.boss-eyebrow {
+  margin: 0 0 var(--boss-space-2);
+  color: var(--boss-color-accent-readable);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.boss-page-title {
+  margin: 0;
+  color: var(--boss-color-text);
+  font-size: clamp(28px, 7vw, 40px);
+  font-weight: 510;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+}
+
+.boss-page-subtitle {
+  margin: var(--boss-space-2) 0 0;
+  color: var(--boss-color-text-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.boss-button,
+.ventures-filter,
+.ventures-card,
+.ventures-choice {
+  appearance: none;
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+  transition:
+    color var(--boss-motion-fast) var(--boss-ease),
+    background-color var(--boss-motion-base) var(--boss-ease),
+    border-color var(--boss-motion-base) var(--boss-ease),
+    opacity var(--boss-motion-fast) var(--boss-ease);
+}
+
+.boss-button {
+  min-height: 36px;
+  padding: 7px var(--boss-space-4);
+  border-radius: var(--boss-radius-pill);
+  font-size: 13px;
+  font-weight: 510;
+  line-height: 20px;
+}
+
+.boss-button--primary {
+  color: var(--boss-color-primary-text);
+  background: var(--boss-color-primary);
+}
+
+.boss-button--quiet {
+  color: var(--boss-color-text);
+  background: transparent;
+  border: 1px solid var(--boss-color-border);
+}
+
+.boss-button:hover,
+.ventures-filter:hover,
+.ventures-card:hover,
+.ventures-choice:hover {
+  opacity: 0.82;
+}
+
+.boss-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.boss-button:focus-visible,
+.ventures-filter:focus-visible,
+.ventures-card:focus-visible,
+.ventures-choice:focus-visible,
+.boss-input:focus-visible,
+.boss-select:focus-visible {
+  outline: 2px solid var(--boss-color-accent-readable);
+  outline-offset: 2px;
+}
+
+.boss-surface {
+  border: 1px solid var(--boss-color-border);
+  border-radius: var(--boss-radius-card);
+  background: var(--boss-color-surface);
+}
+
+.boss-surface--subtle {
+  background: var(--boss-color-surface-subtle);
+}
+
+.boss-surface--raised {
+  background: var(--boss-color-surface-raised);
+}
+
+.boss-surface--none {
+  padding: 0;
+}
+
+.boss-surface--compact {
+  padding: var(--boss-space-3);
+}
+
+.boss-surface--comfortable {
+  padding: var(--boss-space-4);
+}
+
+.boss-status-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 2px 9px;
+  border: 1px solid var(--boss-color-border-strong);
+  border-radius: var(--boss-radius-pill);
+  color: var(--boss-color-text-muted);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 12px;
+  font-weight: 510;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.boss-status-badge--info {
+  color: #cbd0ff;
+  border-color: rgba(126, 136, 219, 0.5);
+  background: rgba(94, 106, 210, 0.16);
+}
+
+.boss-status-badge--warning {
+  color: var(--boss-color-warning);
+  border-color: rgba(246, 200, 110, 0.42);
+  background: rgba(246, 200, 110, 0.1);
+}
+
+.boss-status-badge--success {
+  color: var(--boss-color-success);
+  border-color: rgba(110, 231, 160, 0.4);
+  background: rgba(110, 231, 160, 0.1);
+}
+
+.boss-status-badge--danger {
+  color: var(--boss-color-danger);
+  border-color: rgba(255, 139, 139, 0.42);
+  background: rgba(255, 139, 139, 0.1);
+}
+
+.boss-screen-state {
+  display: grid;
+  justify-items: center;
+  gap: var(--boss-space-4);
+  min-height: 220px;
+  padding: var(--boss-space-12) var(--boss-space-6);
+  border: 1px solid var(--boss-color-border);
+  border-radius: var(--boss-radius-card);
+  color: var(--boss-color-text-muted);
+  background: var(--boss-color-surface-subtle);
+  text-align: center;
+}
+
+.boss-screen-state--error {
+  border-color: rgba(255, 139, 139, 0.35);
+}
+
+.boss-screen-state__loader {
+  width: 28px;
+  height: 28px;
+  border: 2px solid rgba(126, 136, 219, 0.24);
+  border-top-color: var(--boss-color-accent-readable);
+  border-radius: 50%;
+  animation: boss-spin 800ms linear infinite;
+}
+
+.boss-screen-state__title {
+  margin: 0;
+  color: var(--boss-color-text);
+  font-size: 16px;
+  font-weight: 510;
+}
+
+.boss-screen-state__message {
+  max-width: 38ch;
+  margin: var(--boss-space-1) 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.ventures-filters {
+  display: flex;
+  gap: var(--boss-space-2);
+  margin: 0 0 var(--boss-space-4);
+  padding: 0 0 var(--boss-space-1);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.ventures-filters::-webkit-scrollbar {
+  display: none;
+}
+
+.ventures-filter,
+.ventures-choice {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 5px var(--boss-space-3);
+  border: 1px solid var(--boss-color-border);
+  border-radius: var(--boss-radius-pill);
+  color: var(--boss-color-text-muted);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 12px;
+  font-weight: 510;
+  line-height: 20px;
+}
+
+.ventures-filter[aria-pressed="true"],
+.ventures-choice[aria-pressed="true"] {
+  color: var(--boss-color-text);
+  border-color: var(--boss-color-accent-readable);
+  background: rgba(94, 106, 210, 0.28);
+}
+
+.ventures-list {
+  display: grid;
+  gap: var(--boss-space-2);
+}
+
+.ventures-card {
+  width: 100%;
+  padding: var(--boss-space-4);
+  color: inherit;
+  border: 1px solid var(--boss-color-border);
+  border-radius: var(--boss-radius-card);
+  background: var(--boss-color-surface);
+  text-align: start;
+}
+
+.ventures-card__heading,
+.ventures-card__meta,
+.ventures-detail-grid,
+.ventures-form-actions,
+.ventures-action-row {
+  display: flex;
+  align-items: center;
+  gap: var(--boss-space-2);
+}
+
+.ventures-card__heading {
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--boss-space-4);
+}
+
+.ventures-card__name,
+.ventures-card__value,
+.ventures-detail-value,
+.ventures-section-title {
+  margin: 0;
+  color: var(--boss-color-text);
+}
+
+.ventures-card__name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 510;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ventures-card__value {
+  flex: 0 0 auto;
+  font-size: 14px;
+  font-weight: 510;
+}
+
+.ventures-card__meta {
+  flex-wrap: wrap;
+  margin-top: var(--boss-space-2);
+}
+
+.ventures-meta,
+.ventures-next-action,
+.ventures-date,
+.ventures-detail-label,
+.ventures-section-label {
+  color: var(--boss-color-text-muted);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.ventures-next-action,
+.ventures-date {
+  margin: var(--boss-space-2) 0 0;
+}
+
+.ventures-next-action {
+  color: #c8cad0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ventures-date {
+  margin-top: var(--boss-space-1);
+}
+
+.ventures-detail-stack {
+  display: grid;
+  gap: var(--boss-space-3);
+}
+
+.ventures-section-label {
+  margin: 0 0 var(--boss-space-4);
+  font-weight: 510;
+}
+
+.ventures-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--boss-space-5) var(--boss-space-6);
+}
+
+.ventures-detail-label {
+  margin: 0 0 var(--boss-space-1);
+}
+
+.ventures-detail-value {
+  font-size: 15px;
+  font-weight: 510;
+  overflow-wrap: anywhere;
+}
+
+.ventures-detail-copy {
+  margin: 0;
+  color: #d6d7da;
+  font-size: 14px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.ventures-action-bar {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 50;
+  padding: var(--boss-space-3) var(--boss-space-4) max(var(--boss-space-4), env(safe-area-inset-bottom));
+  border-top: 1px solid var(--boss-color-border-strong);
+  background: rgba(20, 21, 22, 0.96);
+  box-shadow: 0 -12px 36px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(18px);
+}
+
+.ventures-action-bar__inner {
+  display: grid;
+  width: min(100%, 768px);
+  margin-inline: auto;
+  gap: var(--boss-space-2);
+}
+
+.ventures-action-row {
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.ventures-action-row::-webkit-scrollbar {
+  display: none;
+}
+
+.ventures-action-row--equal .ventures-choice {
+  flex: 1 1 0;
+}
+
+.boss-input,
+.boss-select {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px var(--boss-space-3);
+  color: var(--boss-color-text);
+  border: 1px solid var(--boss-color-border);
+  border-radius: var(--boss-radius-input);
+  outline: 0;
+  background: var(--boss-color-surface);
+  font: inherit;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.boss-input::placeholder {
+  color: #727780;
+}
+
+.ventures-action-row .boss-input {
+  min-width: 0;
+}
+
+.ventures-action-row .boss-button {
+  flex: 0 0 auto;
+}
+
+.ventures-toast {
+  position: fixed;
+  top: var(--boss-space-4);
+  inset-inline: var(--boss-space-4);
+  z-index: 80;
+  width: min(calc(100% - 32px), 480px);
+  margin-inline: auto;
+  padding: var(--boss-space-3) var(--boss-space-4);
+  border: 1px solid var(--boss-color-border-strong);
+  border-radius: var(--boss-radius-input);
+  color: var(--boss-color-text);
+  background: var(--boss-color-surface-raised);
+  font-size: 13px;
+  font-weight: 510;
+  text-align: center;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
+}
+
+.ventures-toast--error {
+  border-color: rgba(255, 139, 139, 0.55);
+}
+
+.ventures-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: end center;
+  padding: var(--boss-space-4);
+  background: rgba(0, 0, 0, 0.72);
+}
+
+.ventures-modal__panel {
+  width: min(100%, 560px);
+  padding: var(--boss-space-5);
+  border: 1px solid var(--boss-color-border-strong);
+  border-radius: var(--boss-radius-overlay);
+  background: var(--boss-color-surface-raised);
+  box-shadow: 0 20px 56px rgba(0, 0, 0, 0.42);
+}
+
+.ventures-modal__title {
+  margin: 0 0 var(--boss-space-4);
+  font-size: 20px;
+  font-weight: 510;
+  letter-spacing: -0.02em;
+}
+
+.ventures-form-stack {
+  display: grid;
+  gap: var(--boss-space-3);
+}
+
+.ventures-form-error {
+  margin: 0;
+  color: var(--boss-color-danger);
+  font-size: 12px;
+}
+
+.ventures-form-actions .boss-button {
+  flex: 1;
+}
+
+@keyframes boss-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (min-width: 768px) {
+  .ventures-shell {
+    padding-inline: var(--boss-space-6);
+  }
+
+  .boss-page-header {
+    padding-top: var(--boss-space-8);
+    margin-bottom: var(--boss-space-6);
+  }
+
+  .ventures-list {
+    gap: var(--boss-space-3);
+  }
+
+  .ventures-card {
+    padding: var(--boss-space-5);
+  }
+
+  .ventures-modal {
+    place-items: center;
+  }
+}
+
+@media (max-width: 420px) {
+  .boss-page-header__topline {
+    margin-bottom: var(--boss-space-5);
+  }
+
+  .ventures-detail-grid {
+    grid-template-columns: 1fr;
+    gap: var(--boss-space-4);
+  }
+
+  .ventures-action-row {
+    gap: var(--boss-space-1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ventures-screen *,
+  .ventures-screen *::before,
+  .ventures-screen *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
