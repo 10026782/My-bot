@@ -5047,6 +5047,25 @@ zero-match) שויך ל-BUG-126/BUG-127C הקיימים (shadow-only, אין ת�
 
 ---
 
+### BUG-164 — F23 Creative Ideas (Prompt 1) מעוות/ממציא עובדות כמותיות מה-Demand
+
+- **דווח:** 13/08/2026, ע"י הבעלים — נצפה תוך כדי live regression אמיתי של F23 M2 ב-`/telegram` production (ראה `ROADMAP.md` §F23 M2 STATUS)
+- **סביבה:** Production — Demand אמיתי ("דרישה למתקינים - בית שמש (בדיקת M1 חיה)", `Domain=general`, `Demand Type=recruitment`)
+- **מסך / מודול:** `cmd_marketing.py::_create_demand_and_generate_ideas()` — קריאת ה-AI היחידה ל-Prompt 1 (`marketing_brief_composer.compose_brief(task_type="creative_ideas")` → `llm_fallback.call_anthropic_text()`)
+- **תיאור:** הרעיון שנוצר (רעיון 2, שנבחר בפועל) עיוות עובדה כמותית מה-Demand: `Goal="10 מועמדים תוך שבוע"` (יעד גיוס — כמה מועמדים צריך) הפך בטקסט הרעיון ל-**"10 משרות פתוחות"** (ניסוח שונה מהותית — "10 משרות" ≠ "10 מועמדים תוך שבוע"), בנוסף לניסוחים נוספים ("תנאים טובים", "התחלה מיידית") שלא הופיעו ב-`[פרטי הדרישה]`/`Constraints`. **בניגוד ל-Production Handoff** (דטרמיניסטי לחלוטין, `compose_production_handoff()` — ללא קריאת AI, שדות לא-ידועים מסומנים "לא סופק" במפורש, אין אפשרות מבנית להמצאה) — Prompt 1 הוא generative (קריאת Anthropic יחידה) וללא grounding/fact-check אחרי היצירה.
+- **Severity:** Medium — יש רשת ביטחון: ה-Production Handoff מתייג את הרעיון במפורש כ"כיוון קריאייטיבי בלבד, לא מקור אמת לעובדות עסקיות" ומחייב בדיקה אנושית לפני production. אבל תוכן הרעיון עצמו (שגם מוצג למשתמש כטקסט מוכן, כולל ב-`/marketing_status`) עלול להטעות אם לא נקרא בעיון לפני העברה להפקה.
+- **Root Cause:** `marketing_domain_profiles.py`'s `business_rules`/`GLOBAL_RULES` המוזרקים ל-brief אוסרים "המצאת" תנאים/הטבות, אבל אין הנחיה מפורשת נגד **שינוי/עיוות** של ערכים כמותיים שכן נמסרו ב-Demand (המספר "10" עצמו נשמר נכון — רק המשמעות שלו שונתה מ"יעד גיוס" ל"מספר משרות"), ואין שום שלב grounding/fact-check אחרי קבלת תשובת ה-AI ב-`_create_demand_and_generate_ideas()` (בניגוד ל-`compose_production_handoff()` שהוא דטרמיניסטי-לחלוטין ולכן חסין מבנית לתופעה הזו). לא אומת מול `_TASK_INSTRUCTIONS["creative_ideas"]` בפועל — טרם נבדק אם ניסוח ההוראה עצמו תורם לבעיה או שזו רק תוצאה סטטיסטית של מודל יחיד ללא בדיקה חוזרת.
+- **תוקן ב-commit:** —
+- **תוקן ב-branch:** —
+- **Merged:** לא
+- **Deployed:** לא
+- **Verified בפרודקשן:** לא — זהו הדיווח הראשוני, לא תיקון
+- **Verification ראיה:** תמלול live production מלא (הודעת הבעלים, 13/08/2026) — הרעיון שנבחר + ה-Production Handoff המלא שנוצר ממנו, מציג את שני הצדדים (הרעיון המעוות מול ה-Handoff הנכון) באותה אינטראקציה
+- **מפורש: לא חוסם/לא פותח מחדש את F23 M2** — M2 (orchestration/runtime, `/marketing_status`, `marketing_orchestrator.py`) עצמו נשאר ✅ CLOSED/VERIFIED; זהו ממצא נפרד ב-M1's Prompt 1 (creative-ideas generation) ש-M2 רק חשף מחדש דרך הצגה חוזרת של תוכן קיים, לא יצר. אין fix מוצע/מאושר עדיין.
+- **סטטוס:** Open
+
+---
+
 ## F14-B1 — Legacy Caller Migration
 
 - **תאריך:** 09/08/2026

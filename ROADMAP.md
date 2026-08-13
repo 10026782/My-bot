@@ -12,8 +12,10 @@ Render deploy `98f3626` מאשר את הקוד חי (ancestry מאומת), וה�
 אמיתי ב-`/telegram` production מול Demand ייעודי לבדיקה: `/marketing_status` הציג רשימה
 נכונה, כרטיס Next Action לשלב `ideas_generated` תאם בדיוק ל-`compute_next_action()`, ובחירת
 רעיון הפעילה בהצלחה את מסלול הכתיבה הקיים מ-M1 (`mkt_select:`→`select_creative()`→
-`save_production_handoff()`→`update_demand_stage`) והפיקה Production Handoff תקין. פירוט
-מלא בסעיף F23 למטה.
+`save_production_handoff()`→`update_demand_stage`) והפיקה Production Handoff תקין. **מאותה
+בדיקה חיה נפתח גם ממצא נפרד, לא-חוסם**: הרעיון שה-AI יצר (Prompt 1) עיוות עובדה כמותית
+מה-Demand — נרשם כ-`BUG-164` (Creative Ideas grounding), במפורש לא כ-regression של M2
+ולא מעכב את הסטטוס VERIFIED שלו. פירוט מלא בסעיף F23 למטה.
 עודכן קודם: 12/08/2026 — **F23 (BOSS Marketing Bridge M2, Telegram slice) — `/marketing_status`
 נוסף.** רשימת Demands מורשית (`identity.can_access_domain()`, נבדק גם ב-list וגם שוב
 ב-callback — לא מסתמכים על הסתרת ה-ID בתוך `callback_data` כאבטחה) + כרטיס "Next Action"
@@ -1741,9 +1743,16 @@ Render deploy מאומת: commit חי `98f3626` (הודעת deploy אמיתית 
 (3) לחיצה על "רעיון 2" הפעילה את מסלול הכתיבה **הקיים** מ-M1 (`mkt_select:` →
 `select_creative()`→`save_production_handoff()`→`update_demand_stage(HANDOFF_SENT)`)
 בהצלחה — "✅ נבחר רעיון 2" + טקסט Production Handoff מלא ותקין (persona/חוקים/פרטי
-הדרישה/הרעיון שנבחר/קלטי הפקה מסומנים "לא סופק" כנדרש, ללא המצאת עובדות). מוכיח גם
-שהמסלול החדש (`mkt_status:`) וגם הישן (`mkt_select:`) פעילים זה לצד זה בפרודקשן ללא
-התנגשות, בדיוק כפי שהוכח סטטית לפני המיזוג.
+הדרישה/קלטי הפקה מסומנים "לא סופק" כנדרש — **החלק הדטרמיניסטי הזה, שנוצר ב-
+`compose_production_handoff()` ללא קריאת AI, ללא המצאת עובדות**). מוכיח גם שהמסלול
+החדש (`mkt_status:`) וגם הישן (`mkt_select:`) פעילים זה לצד זה בפרודקשן ללא התנגשות,
+בדיוק כפי שהוכח סטטית לפני המיזוג.
+
+**הפרדת ממצאים (13/08/2026, מבדיקת ה-live regression עצמה) — שלושה thread נפרדים,
+בכוונה לא מעורבבים:**
+1. **F23 M2 orchestration/runtime — ✅ CLOSED.** `/marketing_status`/`marketing_orchestrator.py`/רשימה/authorization/callback lifecycle — מאומת חי, ללא regression (ראה אודיט למעלה). לא נפתח מחדש.
+2. **Production Handoff grounding — ✅ RUNTIME VERIFIED.** ה-wrapper הדטרמיניסטי (`compose_production_handoff()`) התנהג בדיוק כמתוכנן בלייב: תייג את הרעיון כ"כיוון קריאייטיבי בלבד, לא מקור אמת", סימן כל קלט הפקה לא-ידוע כ"לא סופק", ולא המציא דבר בעצמו.
+3. **Creative Ideas grounding (Prompt 1) — 🟡 באג נפרד, פתוח — `BUG-164`.** הרעיון שה-AI יצר (קריאה יחידה, `_create_demand_and_generate_ideas()`) עיוות עובדה כמותית מה-Demand ("10 מועמדים תוך שבוע" → "10 משרות פתוחות") + הוסיף ניסוחים לא-נתמכים. נצפה באותה בדיקה חיה, אך זהו gap ב-M1 (Prompt 1 אין לו grounding/fact-check אחרי היצירה, בניגוד ל-Handoff הדטרמיניסטי) — **לא regression מ-M2** (M2 לא קורא ל-AI כלל, רק חשף מחדש תוכן קיים). ראה `BUG_AUDIT_LOG.md::BUG-164` לפרטים מלאים ו-root cause. אין fix מוצע/מאושר עדיין — לא נפתח מחדש M2 בגללו.
 
 **C60 — Tool Context Awareness (PR #152, מוזג ל-`main`, commit `2d85b84`/merge `3e0094b`):**
 לפי `SPEC_C59_Tool_Context_Awareness.md` (הועלה ע"י הבעלים בלי טקסט מלווה; אישור דרך
