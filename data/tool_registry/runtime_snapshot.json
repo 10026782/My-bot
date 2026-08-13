@@ -1,0 +1,1069 @@
+{
+  "schema_version": "1",
+  "generated_at": "2026-08-13T23:41:25Z",
+  "source_revision": "78848b580796cc1736e2251fc08e0202936060bd",
+  "tools": [
+    {
+      "tool_id": "bentopdf",
+      "name": "BentoPDF",
+      "canonical_url": "https://bentopdf.com/",
+      "tool_class": "business",
+      "tags": [
+        "documents",
+        "operations",
+        "pdf",
+        "real_estate"
+      ],
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "decision": "KEEP_EXTERNAL",
+      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "enabled": true,
+      "verification_status": "VERIFIED",
+      "last_verified_at": "2026-08-13",
+      "next_verification_at": null,
+      "playbook": {
+        "purpose": "הכנת PDF לשליחה או ארכיון",
+        "steps": [
+          "פתח את BentoPDF.",
+          "העלה את עותקי ה־PDF.",
+          "בחר Merge, סדר ובדוק את התוצאה.",
+          "הורד את הקובץ החדש ושמור את המקור."
+        ],
+        "privacy_guidance": "עבוד על עותקים בלבד; אל תעלה מסמכים רגישים ללא אישור.",
+        "agent_mode": "NO_AGENT",
+        "agent_assist_capabilities": []
+      },
+      "runtime_visible": true
+    },
+    {
+      "tool_id": "checkly",
+      "name": "Checkly",
+      "canonical_url": "https://www.checklyhq.com/",
+      "tool_class": "infrastructure_candidate",
+      "tags": [
+        "monitoring",
+        "testing"
+      ],
+      "execution_mode": "POC_ONLY",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "DEFERRED",
+      "decision": "INTEGRATE_LATER",
+      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "enabled": true,
+      "verification_status": "UNVERIFIED",
+      "last_verified_at": "2026-08-13",
+      "next_verification_at": null,
+      "playbook": null,
+      "runtime_visible": false
+    },
+    {
+      "tool_id": "csv-repair",
+      "name": "csv.repair",
+      "canonical_url": "https://www.csv.repair/",
+      "tool_class": "business",
+      "tags": [
+        "data",
+        "operations"
+      ],
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "decision": "KEEP_EXTERNAL",
+      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "enabled": true,
+      "verification_status": "VERIFIED",
+      "last_verified_at": "2026-08-13",
+      "next_verification_at": null,
+      "playbook": {
+        "purpose": "בדיקה ותיקון של CSV שלא נפתח",
+        "steps": [
+          "פתח את csv.repair.",
+          "העלה את העותק.",
+          "בדוק את השגיאות והחל את התיקון.",
+          "הורד ופתח מחדש בכלי היעד."
+        ],
+        "privacy_guidance": "אין להעלות ייצוא לקוחות גולמי ללא אישור; העדף נתונים מושחרים.",
+        "agent_mode": "NO_AGENT",
+        "agent_assist_capabilities": []
+      },
+      "runtime_visible": true
+    },
+    {
+      "tool_id": "cyberchef",
+      "name": "CyberChef",
+      "canonical_url": "https://gchq.github.io/CyberChef/",
+      "tool_class": "business",
+      "tags": [
+        "data",
+        "operations",
+        "security"
+      ],
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "decision": "KEEP_EXTERNAL",
+      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "enabled": true,
+      "verification_status": "VERIFIED",
+      "last_verified_at": "2026-08-13",
+      "next_verification_at": null,
+      "playbook": {
+        "purpose": "טרנספורמציה ובדיקה של טקסט",
+        "steps": [
+          "פתח את CyberChef.",
+          "בחר recipe מתאים.",
+          "הדבק ערך לא־רגיש ובדוק את הפלט.",
+          "העתק רק את התוצאה המאושרת."
+        ],
+        "privacy_guidance": "לעולם לא להדביק סיסמאות, מפתחות או tokens חיים.",
+        "agent_mode": "NO_AGENT",
+        "agent_assist_capabilities": []
+      },
+      "runtime_visible": true
+    },
+    {
+      "tool_id": "hoppscotch",
+      "name": "Hoppscotch",
+      "canonical_url": "https://hoppscotch.io/",
+      "tool_class": "operator",
+      "tags": [
+        "developer",
+        "http",
+        "operator"
+      ],
+      "execution_mode": "OPERATOR_ONLY",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "decision": "KEEP_EXTERNAL",
+      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "enabled": true,
+      "verification_status": "VERIFIED",
+      "last_verified_at": "2026-08-13",
+      "next_verification_at": null,
+      "playbook": null,
+      "runtime_visible": false
+    },
+    {
+      "tool_id": "json-crack",
+      "name": "JSON Crack",
+      "canonical_url": "https://jsoncrack.com/",
+      "tool_class": "business",
+      "tags": [
+        "data",
+        "operations"
+      ],
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "OPTIONAL_AGENT",
+      "lifecycle_status": "APPROVED",
+      "decision": "KEEP_EXTERNAL",
+      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "enabled": true,
+      "verification_status": "VERIFIED",
+      "last_verified_at": "2026-08-13",
+      "next_verification_at": null,
+      "playbook": {
+        "purpose": "הבנת מבנה JSON מקונן",
+        "steps": [
+          "פתח את JSON Crack.",
+          "הדבק את ה־JSON.",
+          "נווט בעץ ובדוק את הקשרים.",
+          "הסר את התוכן מהכלי לאחר השימוש."
+        ],
+        "privacy_guidance": "אין להדביק tokens, credentials או PII.",
+        "agent_mode": "OPTIONAL_AGENT",
+        "agent_assist_capabilities": [
+          "הסבר מבנה JSON"
+        ]
+      },
+      "runtime_visible": true
+    },
+    {
+      "tool_id": "log-voyager",
+      "name": "Log Voyager",
+      "canonical_url": "https://www.logvoyager.cc/",
+      "tool_class": "operator",
+      "tags": [
+        "developer",
+        "logs",
+        "operator"
+      ],
+      "execution_mode": "OPERATOR_ONLY",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "decision": "KEEP_EXTERNAL",
+      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "enabled": true,
+      "verification_status": "VERIFIED",
+      "last_verified_at": "2026-08-13",
+      "next_verification_at": null,
+      "playbook": null,
+      "runtime_visible": false
+    },
+    {
+      "tool_id": "metadata-remover",
+      "name": "Metadata Remover",
+      "canonical_url": "https://vaulternal.com/metadata-remover/",
+      "tool_class": "business",
+      "tags": [
+        "images",
+        "privacy",
+        "security"
+      ],
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "decision": "KEEP_EXTERNAL",
+      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "enabled": true,
+      "verification_status": "VERIFIED",
+      "last_verified_at": "2026-08-13",
+      "next_verification_at": null,
+      "playbook": {
+        "purpose": "הסרת metadata לפני שיתוף",
+        "steps": [
+          "פתח את Metadata Remover.",
+          "טען עותק.",
+          "הסר metadata ובדוק את התוצאה.",
+          "שתף רק את העותק לאחר בדיקה."
+        ],
+        "privacy_guidance": "לא לשמר את התוצאה כראיה מקורית; זו אינה הבטחת אנונימיזציה מלאה.",
+        "agent_mode": "NO_AGENT",
+        "agent_assist_capabilities": []
+      },
+      "runtime_visible": true
+    },
+    {
+      "tool_id": "mr-data-converter",
+      "name": "Mr. Data Converter",
+      "canonical_url": "https://shancarter.github.io/mr-data-converter/",
+      "tool_class": "business",
+      "tags": [
+        "data",
+        "operations"
+      ],
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "decision": "KEEP_EXTERNAL",
+      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "enabled": true,
+      "verification_status": "VERIFIED",
+      "last_verified_at": "2026-08-13",
+      "next_verification_at": null,
+      "playbook": {
+        "purpose": "המרת טבלה לפורמט אחר",
+        "steps": [
+          "פתח את Mr. Data Converter.",
+          "הדבק את הטבלה.",
+          "בחר פורמט יעד.",
+          "בדוק את המבנה והעתק את התוצאה."
+        ],
+        "privacy_guidance": "אין להשתמש בייצוא עסקי גולמי או במידע אישי.",
+        "agent_mode": "NO_AGENT",
+        "agent_assist_capabilities": []
+      },
+      "runtime_visible": true
+    },
+    {
+      "tool_id": "pairdrop",
+      "name": "PairDrop",
+      "canonical_url": "https://pairdrop.net/",
+      "tool_class": "business",
+      "tags": [
+        "operations",
+        "transfer"
+      ],
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "decision": "KEEP_EXTERNAL",
+      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "enabled": true,
+      "verification_status": "VERIFIED",
+      "last_verified_at": "2026-08-13",
+      "next_verification_at": null,
+      "playbook": {
+        "purpose": "העברה חד־פעמית בין מכשירים קרובים",
+        "steps": [
+          "פתח את PairDrop בשני המכשירים.",
+          "ודא את שם המכשיר השני.",
+          "שלח את הקובץ ואשר את הקבלה."
+        ],
+        "privacy_guidance": "בדוק את היעד לפני שליחה; לא להשתמש כאחסון או ארכיון.",
+        "agent_mode": "NO_AGENT",
+        "agent_assist_capabilities": []
+      },
+      "runtime_visible": true
+    },
+    {
+      "tool_id": "rawgraphs",
+      "name": "RAWGraphs",
+      "canonical_url": "https://rawgraphs.io/",
+      "tool_class": "business",
+      "tags": [
+        "charts",
+        "data",
+        "marketing",
+        "operations"
+      ],
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "OPTIONAL_AGENT",
+      "lifecycle_status": "APPROVED",
+      "decision": "KEEP_EXTERNAL",
+      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "enabled": true,
+      "verification_status": "VERIFIED",
+      "last_verified_at": "2026-08-13",
+      "next_verification_at": null,
+      "playbook": {
+        "purpose": "יצירת תרשים מהיר מנתונים",
+        "steps": [
+          "פתח את RAWGraphs.",
+          "הדבק או העלה את הנתונים.",
+          "בחר תרשים ושייך עמודות.",
+          "בדוק תוויות וייצא את התרשים."
+        ],
+        "privacy_guidance": "השתמש בנתונים מצטברים או מושחרים; זה לא מקור האמת.",
+        "agent_mode": "OPTIONAL_AGENT",
+        "agent_assist_capabilities": [
+          "הצעת סוג תרשים"
+        ]
+      },
+      "runtime_visible": true
+    },
+    {
+      "tool_id": "sentry",
+      "name": "Sentry",
+      "canonical_url": "https://sentry.io/",
+      "tool_class": "infrastructure_candidate",
+      "tags": [
+        "diagnostics",
+        "monitoring"
+      ],
+      "execution_mode": "POC_ONLY",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "DEFERRED",
+      "decision": "INTEGRATE_LATER",
+      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "enabled": true,
+      "verification_status": "UNVERIFIED",
+      "last_verified_at": "2026-08-13",
+      "next_verification_at": null,
+      "playbook": null,
+      "runtime_visible": false
+    },
+    {
+      "tool_id": "shareclean",
+      "name": "ShareClean",
+      "canonical_url": "https://pypi.org/project/shareclean/",
+      "tool_class": "business",
+      "tags": [
+        "operations",
+        "privacy",
+        "security"
+      ],
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "OPTIONAL_AGENT",
+      "lifecycle_status": "APPROVED",
+      "decision": "KEEP_EXTERNAL",
+      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "enabled": true,
+      "verification_status": "VERIFIED",
+      "last_verified_at": "2026-08-13",
+      "next_verification_at": null,
+      "playbook": {
+        "purpose": "ניקוי טקסט לפני שיתוף חיצוני",
+        "steps": [
+          "פתח את ShareClean.",
+          "הדבק עותק של הטקסט.",
+          "הרץ ניקוי ובדוק ידנית את הפלט.",
+          "שתף רק לאחר אישור אנושי."
+        ],
+        "privacy_guidance": "הכלי אינו מבטיח זיהוי מלא; אין להדביק secrets חיים.",
+        "agent_mode": "OPTIONAL_AGENT",
+        "agent_assist_capabilities": [
+          "הצעת נקודות לבדיקה ידנית"
+        ]
+      },
+      "runtime_visible": true
+    },
+    {
+      "tool_id": "socket",
+      "name": "Socket",
+      "canonical_url": "https://socket.dev/",
+      "tool_class": "infrastructure_candidate",
+      "tags": [
+        "dependencies",
+        "security"
+      ],
+      "execution_mode": "POC_ONLY",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "DEFERRED",
+      "decision": "INTEGRATE_LATER",
+      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "enabled": true,
+      "verification_status": "UNVERIFIED",
+      "last_verified_at": "2026-08-13",
+      "next_verification_at": null,
+      "playbook": null,
+      "runtime_visible": false
+    },
+    {
+      "tool_id": "sql-for-files",
+      "name": "SQL for Files",
+      "canonical_url": "https://sqlforfiles.app/",
+      "tool_class": "business",
+      "tags": [
+        "data",
+        "operations"
+      ],
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "OPTIONAL_AGENT",
+      "lifecycle_status": "APPROVED",
+      "decision": "KEEP_EXTERNAL",
+      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "enabled": true,
+      "verification_status": "VERIFIED",
+      "last_verified_at": "2026-08-13",
+      "next_verification_at": null,
+      "playbook": {
+        "purpose": "שאילתות וחיבור של קבצים מקומיים",
+        "steps": [
+          "פתח את SQL for Files.",
+          "טען עותקים מקומיים.",
+          "הרץ שאילתה לקריאה בלבד.",
+          "ייצא תוצאה זמנית ובדוק אותה."
+        ],
+        "privacy_guidance": "אין להשתמש במסד ייצור, סודות או רשומות קנוניות.",
+        "agent_mode": "OPTIONAL_AGENT",
+        "agent_assist_capabilities": [
+          "עזרה בניסוח שאילתה"
+        ]
+      },
+      "runtime_visible": true
+    },
+    {
+      "tool_id": "squoosh",
+      "name": "Squoosh",
+      "canonical_url": "https://squoosh.app/",
+      "tool_class": "business",
+      "tags": [
+        "images",
+        "marketing",
+        "real_estate"
+      ],
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "decision": "KEEP_EXTERNAL",
+      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "enabled": true,
+      "verification_status": "VERIFIED",
+      "last_verified_at": "2026-08-13",
+      "next_verification_at": null,
+      "playbook": {
+        "purpose": "הקטנת תמונות לפני שיתוף או העלאה",
+        "steps": [
+          "פתח את Squoosh.",
+          "גרור עותק של התמונה.",
+          "בחר איכות וגודל, השווה תצוגה מקדימה.",
+          "הורד את התוצאה ושמור את המקור."
+        ],
+        "privacy_guidance": "עבוד על עותק; לא על ראיה מקורית או מסמך מזהה.",
+        "agent_mode": "NO_AGENT",
+        "agent_assist_capabilities": []
+      },
+      "runtime_visible": true
+    },
+    {
+      "tool_id": "svgomg",
+      "name": "SVGOMG",
+      "canonical_url": "https://jakearchibald.github.io/svgomg/",
+      "tool_class": "business",
+      "tags": [
+        "design",
+        "images",
+        "marketing"
+      ],
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "decision": "KEEP_EXTERNAL",
+      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "enabled": true,
+      "verification_status": "VERIFIED",
+      "last_verified_at": "2026-08-13",
+      "next_verification_at": null,
+      "playbook": {
+        "purpose": "ניקוי והקטנת SVG",
+        "steps": [
+          "פתח את SVGOMG.",
+          "טען את העותק.",
+          "בדוק אפשרויות אופטימיזציה ותצוגה.",
+          "הורד ושמור לצד המקור."
+        ],
+        "privacy_guidance": "השתמש בנכסי עיצוב מאושרים בלבד.",
+        "agent_mode": "NO_AGENT",
+        "agent_assist_capabilities": []
+      },
+      "runtime_visible": true
+    },
+    {
+      "tool_id": "uptimerobot",
+      "name": "UptimeRobot",
+      "canonical_url": "https://uptimerobot.com/",
+      "tool_class": "infrastructure_candidate",
+      "tags": [
+        "monitoring"
+      ],
+      "execution_mode": "POC_ONLY",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "DEFERRED",
+      "decision": "INTEGRATE_LATER",
+      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "enabled": true,
+      "verification_status": "UNVERIFIED",
+      "last_verified_at": "2026-08-13",
+      "next_verification_at": null,
+      "playbook": null,
+      "runtime_visible": false
+    },
+    {
+      "tool_id": "vert",
+      "name": "VERT",
+      "canonical_url": "https://vert.sh/",
+      "tool_class": "business",
+      "tags": [
+        "documents",
+        "marketing",
+        "media"
+      ],
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "decision": "KEEP_EXTERNAL",
+      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "enabled": true,
+      "verification_status": "VERIFIED",
+      "last_verified_at": "2026-08-13",
+      "next_verification_at": null,
+      "playbook": {
+        "purpose": "המרת פורמט לקובץ",
+        "steps": [
+          "פתח את VERT.",
+          "בחר את פורמט המקור והיעד.",
+          "העלה את הקובץ והורד את התוצאה."
+        ],
+        "privacy_guidance": "השתמש בקובץ סינתטי או לא־רגיש עד שאופן הטיפול מאושר.",
+        "agent_mode": "NO_AGENT",
+        "agent_assist_capabilities": []
+      },
+      "runtime_visible": true
+    }
+  ],
+  "capabilities": [
+    {
+      "capability_id": "api_inspection",
+      "name": "api inspection",
+      "tags": [],
+      "lifecycle_status": "VERIFIED"
+    },
+    {
+      "capability_id": "api_testing",
+      "name": "synthetic api testing",
+      "tags": [],
+      "lifecycle_status": "VERIFIED"
+    },
+    {
+      "capability_id": "browser_testing",
+      "name": "browser testing",
+      "tags": [],
+      "lifecycle_status": "VERIFIED"
+    },
+    {
+      "capability_id": "csv_repair",
+      "name": "repair csv",
+      "tags": [],
+      "lifecycle_status": "VERIFIED"
+    },
+    {
+      "capability_id": "csv_validate",
+      "name": "validate csv",
+      "tags": [],
+      "lifecycle_status": "VERIFIED"
+    },
+    {
+      "capability_id": "data_chart",
+      "name": "chart",
+      "tags": [],
+      "lifecycle_status": "VERIFIED"
+    },
+    {
+      "capability_id": "data_profile",
+      "name": "profile data",
+      "tags": [],
+      "lifecycle_status": "VERIFIED"
+    },
+    {
+      "capability_id": "dependency_scan",
+      "name": "supply chain scan",
+      "tags": [],
+      "lifecycle_status": "VERIFIED"
+    },
+    {
+      "capability_id": "error_tracking",
+      "name": "error tracking",
+      "tags": [],
+      "lifecycle_status": "VERIFIED"
+    },
+    {
+      "capability_id": "file_convert",
+      "name": "convert",
+      "tags": [],
+      "lifecycle_status": "VERIFIED"
+    },
+    {
+      "capability_id": "file_join",
+      "name": "join files",
+      "tags": [],
+      "lifecycle_status": "VERIFIED"
+    },
+    {
+      "capability_id": "file_query",
+      "name": "query csv",
+      "tags": [],
+      "lifecycle_status": "VERIFIED"
+    },
+    {
+      "capability_id": "file_transfer",
+      "name": "device transfer",
+      "tags": [],
+      "lifecycle_status": "VERIFIED"
+    },
+    {
+      "capability_id": "image_compress",
+      "name": "compress image",
+      "tags": [],
+      "lifecycle_status": "VERIFIED"
+    },
+    {
+      "capability_id": "image_resize",
+      "name": "resize image",
+      "tags": [],
+      "lifecycle_status": "VERIFIED"
+    },
+    {
+      "capability_id": "json_visualize",
+      "name": "visualize json",
+      "tags": [],
+      "lifecycle_status": "VERIFIED"
+    },
+    {
+      "capability_id": "log_inspection",
+      "name": "inspect logs",
+      "tags": [],
+      "lifecycle_status": "VERIFIED"
+    },
+    {
+      "capability_id": "log_sanitize",
+      "name": "sanitize logs",
+      "tags": [],
+      "lifecycle_status": "VERIFIED"
+    },
+    {
+      "capability_id": "metadata_remove",
+      "name": "remove metadata",
+      "tags": [],
+      "lifecycle_status": "VERIFIED"
+    },
+    {
+      "capability_id": "pdf_compress",
+      "name": "compress",
+      "tags": [],
+      "lifecycle_status": "VERIFIED"
+    },
+    {
+      "capability_id": "pdf_merge",
+      "name": "merge",
+      "tags": [],
+      "lifecycle_status": "VERIFIED"
+    },
+    {
+      "capability_id": "pdf_split",
+      "name": "split",
+      "tags": [],
+      "lifecycle_status": "VERIFIED"
+    },
+    {
+      "capability_id": "redact",
+      "name": "redact",
+      "tags": [],
+      "lifecycle_status": "VERIFIED"
+    },
+    {
+      "capability_id": "svg_optimize",
+      "name": "optimize svg",
+      "tags": [],
+      "lifecycle_status": "VERIFIED"
+    },
+    {
+      "capability_id": "text_redact",
+      "name": "redact text",
+      "tags": [],
+      "lifecycle_status": "VERIFIED"
+    },
+    {
+      "capability_id": "text_transform",
+      "name": "encode",
+      "tags": [],
+      "lifecycle_status": "VERIFIED"
+    },
+    {
+      "capability_id": "uptime_monitoring",
+      "name": "uptime monitoring",
+      "tags": [],
+      "lifecycle_status": "VERIFIED"
+    },
+    {
+      "capability_id": "webhook_inspection",
+      "name": "webhook inspection",
+      "tags": [],
+      "lifecycle_status": "VERIFIED"
+    }
+  ],
+  "tool_capabilities": [
+    {
+      "tool_capability_id": "bentopdf:file_convert",
+      "tool_id": "bentopdf",
+      "capability_id": "file_convert",
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "verification_status": "VERIFIED",
+      "enabled": true,
+      "priority": 50
+    },
+    {
+      "tool_capability_id": "bentopdf:pdf_compress",
+      "tool_id": "bentopdf",
+      "capability_id": "pdf_compress",
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "verification_status": "VERIFIED",
+      "enabled": true,
+      "priority": 50
+    },
+    {
+      "tool_capability_id": "bentopdf:pdf_merge",
+      "tool_id": "bentopdf",
+      "capability_id": "pdf_merge",
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "verification_status": "VERIFIED",
+      "enabled": true,
+      "priority": 50
+    },
+    {
+      "tool_capability_id": "bentopdf:pdf_split",
+      "tool_id": "bentopdf",
+      "capability_id": "pdf_split",
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "verification_status": "VERIFIED",
+      "enabled": true,
+      "priority": 50
+    },
+    {
+      "tool_capability_id": "bentopdf:redact",
+      "tool_id": "bentopdf",
+      "capability_id": "redact",
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "verification_status": "VERIFIED",
+      "enabled": true,
+      "priority": 50
+    },
+    {
+      "tool_capability_id": "checkly:api_testing",
+      "tool_id": "checkly",
+      "capability_id": "api_testing",
+      "execution_mode": "POC_ONLY",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "DEFERRED",
+      "verification_status": "UNVERIFIED",
+      "enabled": false,
+      "priority": 0
+    },
+    {
+      "tool_capability_id": "checkly:browser_testing",
+      "tool_id": "checkly",
+      "capability_id": "browser_testing",
+      "execution_mode": "POC_ONLY",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "DEFERRED",
+      "verification_status": "UNVERIFIED",
+      "enabled": false,
+      "priority": 0
+    },
+    {
+      "tool_capability_id": "csv-repair:csv_repair",
+      "tool_id": "csv-repair",
+      "capability_id": "csv_repair",
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "verification_status": "VERIFIED",
+      "enabled": true,
+      "priority": 50
+    },
+    {
+      "tool_capability_id": "csv-repair:csv_validate",
+      "tool_id": "csv-repair",
+      "capability_id": "csv_validate",
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "verification_status": "VERIFIED",
+      "enabled": true,
+      "priority": 50
+    },
+    {
+      "tool_capability_id": "cyberchef:text_transform",
+      "tool_id": "cyberchef",
+      "capability_id": "text_transform",
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "verification_status": "VERIFIED",
+      "enabled": true,
+      "priority": 50
+    },
+    {
+      "tool_capability_id": "hoppscotch:api_inspection",
+      "tool_id": "hoppscotch",
+      "capability_id": "api_inspection",
+      "execution_mode": "OPERATOR_ONLY",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "verification_status": "VERIFIED",
+      "enabled": false,
+      "priority": 0
+    },
+    {
+      "tool_capability_id": "hoppscotch:webhook_inspection",
+      "tool_id": "hoppscotch",
+      "capability_id": "webhook_inspection",
+      "execution_mode": "OPERATOR_ONLY",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "verification_status": "VERIFIED",
+      "enabled": false,
+      "priority": 0
+    },
+    {
+      "tool_capability_id": "json-crack:json_visualize",
+      "tool_id": "json-crack",
+      "capability_id": "json_visualize",
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "OPTIONAL_AGENT",
+      "lifecycle_status": "APPROVED",
+      "verification_status": "VERIFIED",
+      "enabled": true,
+      "priority": 50
+    },
+    {
+      "tool_capability_id": "log-voyager:log_inspection",
+      "tool_id": "log-voyager",
+      "capability_id": "log_inspection",
+      "execution_mode": "OPERATOR_ONLY",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "verification_status": "VERIFIED",
+      "enabled": false,
+      "priority": 0
+    },
+    {
+      "tool_capability_id": "metadata-remover:metadata_remove",
+      "tool_id": "metadata-remover",
+      "capability_id": "metadata_remove",
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "verification_status": "VERIFIED",
+      "enabled": true,
+      "priority": 50
+    },
+    {
+      "tool_capability_id": "mr-data-converter:file_convert",
+      "tool_id": "mr-data-converter",
+      "capability_id": "file_convert",
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "verification_status": "VERIFIED",
+      "enabled": true,
+      "priority": 50
+    },
+    {
+      "tool_capability_id": "pairdrop:file_transfer",
+      "tool_id": "pairdrop",
+      "capability_id": "file_transfer",
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "verification_status": "VERIFIED",
+      "enabled": true,
+      "priority": 50
+    },
+    {
+      "tool_capability_id": "rawgraphs:data_chart",
+      "tool_id": "rawgraphs",
+      "capability_id": "data_chart",
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "OPTIONAL_AGENT",
+      "lifecycle_status": "APPROVED",
+      "verification_status": "VERIFIED",
+      "enabled": true,
+      "priority": 50
+    },
+    {
+      "tool_capability_id": "sentry:error_tracking",
+      "tool_id": "sentry",
+      "capability_id": "error_tracking",
+      "execution_mode": "POC_ONLY",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "DEFERRED",
+      "verification_status": "UNVERIFIED",
+      "enabled": false,
+      "priority": 0
+    },
+    {
+      "tool_capability_id": "shareclean:log_sanitize",
+      "tool_id": "shareclean",
+      "capability_id": "log_sanitize",
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "OPTIONAL_AGENT",
+      "lifecycle_status": "APPROVED",
+      "verification_status": "VERIFIED",
+      "enabled": true,
+      "priority": 50
+    },
+    {
+      "tool_capability_id": "shareclean:text_redact",
+      "tool_id": "shareclean",
+      "capability_id": "text_redact",
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "OPTIONAL_AGENT",
+      "lifecycle_status": "APPROVED",
+      "verification_status": "VERIFIED",
+      "enabled": true,
+      "priority": 50
+    },
+    {
+      "tool_capability_id": "socket:dependency_scan",
+      "tool_id": "socket",
+      "capability_id": "dependency_scan",
+      "execution_mode": "POC_ONLY",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "DEFERRED",
+      "verification_status": "UNVERIFIED",
+      "enabled": false,
+      "priority": 0
+    },
+    {
+      "tool_capability_id": "sql-for-files:data_profile",
+      "tool_id": "sql-for-files",
+      "capability_id": "data_profile",
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "OPTIONAL_AGENT",
+      "lifecycle_status": "APPROVED",
+      "verification_status": "VERIFIED",
+      "enabled": true,
+      "priority": 50
+    },
+    {
+      "tool_capability_id": "sql-for-files:file_join",
+      "tool_id": "sql-for-files",
+      "capability_id": "file_join",
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "OPTIONAL_AGENT",
+      "lifecycle_status": "APPROVED",
+      "verification_status": "VERIFIED",
+      "enabled": true,
+      "priority": 50
+    },
+    {
+      "tool_capability_id": "sql-for-files:file_query",
+      "tool_id": "sql-for-files",
+      "capability_id": "file_query",
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "OPTIONAL_AGENT",
+      "lifecycle_status": "APPROVED",
+      "verification_status": "VERIFIED",
+      "enabled": true,
+      "priority": 50
+    },
+    {
+      "tool_capability_id": "squoosh:image_compress",
+      "tool_id": "squoosh",
+      "capability_id": "image_compress",
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "verification_status": "VERIFIED",
+      "enabled": true,
+      "priority": 50
+    },
+    {
+      "tool_capability_id": "squoosh:image_resize",
+      "tool_id": "squoosh",
+      "capability_id": "image_resize",
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "verification_status": "VERIFIED",
+      "enabled": true,
+      "priority": 50
+    },
+    {
+      "tool_capability_id": "svgomg:svg_optimize",
+      "tool_id": "svgomg",
+      "capability_id": "svg_optimize",
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "verification_status": "VERIFIED",
+      "enabled": true,
+      "priority": 50
+    },
+    {
+      "tool_capability_id": "uptimerobot:uptime_monitoring",
+      "tool_id": "uptimerobot",
+      "capability_id": "uptime_monitoring",
+      "execution_mode": "POC_ONLY",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "DEFERRED",
+      "verification_status": "UNVERIFIED",
+      "enabled": false,
+      "priority": 0
+    },
+    {
+      "tool_capability_id": "vert:file_convert",
+      "tool_id": "vert",
+      "capability_id": "file_convert",
+      "execution_mode": "GUIDED_EXTERNAL",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "verification_status": "VERIFIED",
+      "enabled": true,
+      "priority": 50
+    }
+  ],
+  "content_hash": "94f1bc704db99971749979a0d6d6d015bdd258a2a5a69258d3677338c4472b59"
+}
