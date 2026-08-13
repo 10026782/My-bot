@@ -38,9 +38,16 @@ This is a shortlist for later UX synthesis, not a final design decision and not 
 **Reuse:** `USE AS COMPOSITION INSPIRATION` only; authenticated workflow states remain unverified.
 **Why:** candidate for later comparison of lifecycle framing and domain grouping, without deciding SCOREBOS navigation or screen architecture.
 
+### 6. Visible readiness and tool grouping — JSON Crack + BentoPDF
+
+`OBSERVED`: JSON Crack exposes a compact editor shell with `Valid` and `Live Transform` states; BentoPDF exposes searchable tools plus explicit compact/full-width display controls.
+**Mapping:** DEC-UX-07, DEC-UX-12, DEC-UX-16.
+**Reuse:** `MAP TO EXISTING SCOREBOS PATTERN` for readiness/search; `USE AS COMPOSITION INSPIRATION` for density controls. The density pattern is a `SINGLE-REFERENCE CANDIDATE` until validated with SCOREBOS operators and responsive evidence.
+**Why:** these public states show how a tool-rich system can make readiness, discoverability and density choices visible without adding a new domain model.
+
 ## Not candidates yet
 
-No pattern from Intercom, Airtable Interfaces, Stripe, HubSpot, Notion, Vercel, Figma or Tana is shortlisted because the required rendered product state was not verified. Pipedrive and monday are listed only as public-example candidates with explicit evidence boundaries.
+No pattern from Intercom, Airtable Interfaces, Stripe, HubSpot, Notion, Vercel, Figma, Tana, Hoppscotch, RAWGraphs, CSV Repair or Excalidraw is shortlisted because the required stable rendered product state was not verified. Pipedrive and monday are listed only as public-example candidates with explicit evidence boundaries.
 
 ## Stop condition
 
