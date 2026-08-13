@@ -1852,6 +1852,27 @@ def test_new_source_classification_never_auto_registers(catalog):
     assert by_path["core/authority.py"] == "STOP"
 
 
+def test_image_assets_never_stop_on_authority_term_path_substring(catalog):
+    # Regression for a false positive: a directory literally named
+    # "reference-evidence" (inert UX design screenshots) tripped STOP
+    # because "evidence" is an _AUTHORITY_TERMS substring of the path.
+    # Images can't carry authority/dispatch logic, so they must classify
+    # like docs (WARNING) regardless of naming coincidence — while a real
+    # .py file with "authority"/"evidence" in its path must still STOP.
+    result = classify_new_sources(
+        catalog,
+        [
+            "docs/ux/reference-evidence/attio/attio-home-desktop.png",
+            "docs/ux/reference-evidence/uidrop/owner-supplied-workbench-reference.jpg",
+            "core/evidence_authority.py",
+        ],
+    )
+    by_path = {item["path"]: item["classification"] for item in result}
+    assert by_path["docs/ux/reference-evidence/attio/attio-home-desktop.png"] == "WARNING"
+    assert by_path["docs/ux/reference-evidence/uidrop/owner-supplied-workbench-reference.jpg"] == "WARNING"
+    assert by_path["core/evidence_authority.py"] == "STOP"
+
+
 def test_catalog_metadata_files_are_not_classified_as_new_sources(catalog):
     result = classify_new_sources(
         catalog,

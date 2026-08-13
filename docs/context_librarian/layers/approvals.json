@@ -50,7 +50,10 @@
         "scripts/run_isolated_regression.py",
         "scripts/staging_identity.py",
         "scripts/verify_tc8_staging.py",
-        "scripts/verify_tc9_staging.py"
+        "scripts/verify_tc9_staging.py",
+        "scripts/verify_bug157_160_163_staging.py",
+        "scripts/verify_bug161_162_callback_staging.py",
+        "tc8_test_repo_stub.py"
       ],
       "canonical_docs": [
         {
@@ -136,7 +139,7 @@
         }
       ],
       "valid_from": "2026-07-28",
-      "last_verified_commit": "f14190de8ee4311b0efc46a74be240c38169d173",
+      "last_verified_commit": "6ecdaa98d778858e32f87fc8f055d000aa06f771",
       "confidence": 0.9,
       "notes": [
         "PARALLEL APPROVAL MECHANISMS (2026-07-28 N17 pilot Task 1 finding, directly re-verified): ActionContracts is the canonical lifecycle authority, but 4 coexisting, independently-reachable approve/reject mechanisms are live on main, not 1: (1) ActionContract/ActionGateway itself — durable, `ActionContractRepository` (core/action_contract_repository.py), TTL `CONTRACT_PENDING_TTL_SECONDS=24h` (core/action_contract_repository.py:84); (2) EventBus's `PendingActionsStore` — pure in-memory dict, no durable backing, class at event_bus.py:28, TTL `PENDING_TTL_MINUTES=30` (event_bus.py:26); populated unconditionally from `_queue_approval_detailed_impl` even when the Gateway already approved, i.e. it runs alongside (1), not instead of it; (3) app.py's router-level `_pending_approvals` dict — a second, separate pure in-memory store (app.py:170, lock at app.py:174), TTL `_PENDING_APPROVAL_TTL=600s` (app.py:228), drives the text-based כן/לא confirmation flow; (4) the TMA dashboard's Airtable-backed Approvals-table flow (tma_api.py, routes registered app.py:427) with its own TTL `_TMA_APPROVAL_TTL_SECONDS=24h` (tma_api.py:2162), though execution is delegated back to ActionGateway. A symptom like 'repeated approval returns the wrong message' can originate in any of these four, not only in ActionContract state. `core/approvals_projection.py`'s own module docstring says it is unwired/dead code; it is not a 5th live mechanism. `session_store.py`'s `pending_lead_preview` is a separate lead-classification confirmation flow, not an approval mechanism — easy to conflate with the four above, but out of this layer's scope.",
@@ -149,7 +152,8 @@
         "PR #479/#480 (merged, N17 re-verification): changed only the rendered wording of build_approval_lifecycle_result() and _describe_tool_call() (rejected-state phrasing normalized to 'בוטלה', task-creation gets dedicated business wording, raw Airtable table names no longer leak into any approval message) — no lifecycle, callback-resolution, or authority change. Architectural claims in this node were directly re-verified against ffa678a7 and remain accurate; only code line-number citations shifted.",
         "The 2026-07-23 staging evidence predates the ffa678a7 audit; the separately scoped 2026-07-30 owner-reported evidence was added during the a89fc67 refresh.",
         "First real consumption pilot re-verification against a89fc67: PR2 added a narrow early deterministic lifecycle resolver, request-local observability counters, a single supplied live-contract snapshot, and a default-off dependent flag. Subsequent hotfixes narrowed replay and canonicalization behavior. ActionContracts remains lifecycle authority; metrics are observation-only. Focused PR2, read-amplification, session, pending-query, single-speaker, callback, and replay-policy suites passed locally.",
-        "Registration-only pass (backend-ci Context Librarian catalog freshness fix): core/lifecycle_projection.py (builds ActionLifecycleResult from core/router/ownership_contracts.py's frozen type) and the 5 TC10 staging/regression scripts under scripts/ were added to code_paths/test_paths — dual-registered here and under layer.turn_coordinator since their own docstrings frame them as \"Turn Coordinator / ActionGateway\" regression coverage. Paths only; this node's own status/notes/production_evidence narrative was not re-verified as part of this pass."
+        "Registration-only pass (backend-ci Context Librarian catalog freshness fix): core/lifecycle_projection.py (builds ActionLifecycleResult from core/router/ownership_contracts.py's frozen type) and the 5 TC10 staging/regression scripts under scripts/ were added to code_paths/test_paths — dual-registered here and under layer.turn_coordinator since their own docstrings frame them as \"Turn Coordinator / ActionGateway\" regression coverage. Paths only; this node's own status/notes/production_evidence narrative was not re-verified as part of this pass.",
+        "Registration-only pass (post-#611 catalog freshness correction): scripts/verify_bug157_160_163_staging.py and scripts/verify_bug161_162_callback_staging.py (BUG-157/160/163 and BUG-161/162 staging-only verification CLIs, same non-production, run-from-Render-shell genre as verify_tc8_staging.py/verify_tc9_staging.py above) and tc8_test_repo_stub.py (shared TurnStateRepository test double for the callback-path regression suite, deliberately named without a test_ prefix so CI's file-glob test loop doesn't execute it standalone) were added to test_paths — none are runtime authority, all are verification/test-support artifacts for the approval-callback and claim/idempotency path. Dual-registered here and under layer.turn_coordinator for the same reason as the pre-existing scripts."
       ],
       "extensions": {
         "boss.layer_aliases": [

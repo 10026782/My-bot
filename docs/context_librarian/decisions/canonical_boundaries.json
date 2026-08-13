@@ -410,6 +410,84 @@
         "Stage 3A (PR #506, merge 6201e86) implements this decision: core/message_contract.py is the canonical MessageContract (15 MessageState values, frozen V1/D-012 schema); D-013 ratifies evidence_status as optional non-authoritative metadata (never determines/upgrades MessageState, fails closed on unknown values); build_message_contract() and the formatter wrapper are pure with zero production imports/callers/wiring/output change. test_message_contract.py is the test authority (41/41 passing).",
         "PR B (#509, merge 1c51570) registers a pure, unwired ApprovalLifecycleResult adapter that delegates to the canonical builder; PR C (ActionFact/GatewayReply adapter) remains pending."
       ]
+    },
+    {
+      "id": "decision.business_domain_vocabulary",
+      "name": "domain_utils.py is supporting cross-layer vocabulary, not a new source of truth",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "canonical_contract",
+      "source_of_truth": {
+        "is_authority": true,
+        "scope": "canonicalization of free-text/legacy business-domain vocabulary into identity.Domain / core.router.route_decision.RouterDomain values",
+        "precedence": "identity.Domain and RouterDomain remain the canonical business-domain enums; domain_utils.py is a supporting alias/canonicalization layer over them, consumed by callers in more than one layer, and does not itself decide or own a domain value"
+      },
+      "owner": "governance",
+      "code_paths": [
+        "domain_utils.py"
+      ],
+      "test_paths": [],
+      "canonical_docs": [],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-08-13",
+      "last_verified_commit": "6ecdaa98d778858e32f87fc8f055d000aa06f771",
+      "confidence": 0.85,
+      "notes": [
+        "Registered to resolve a Context Librarian REVIEW_REQUIRED finding: domain_utils.py is consumed by marketing_gateway.py (layer.marketing), core/lead_event_writer.py, and weekly_summary.py — no single existing catalog layer owns all three callers, so it does not belong exclusively in layer.marketing's code_paths.",
+        "This node registers the module as cross-layer supporting metadata, not as a new runtime authority: it must never be extended to originate a domain value that identity.Domain/RouterDomain do not already define (see UnknownBusinessDomain in domain_utils.py, which fails closed on an unapproved alias).",
+        "core/lead_event_writer.py and weekly_summary.py remain outside all 7 existing catalog layers as of this registration — that gap is unrelated to domain_utils.py itself and is not resolved by this decision."
+      ],
+      "extensions": {
+        "context_librarian.registration": {
+          "classification": "REGISTER_SUPPORTING",
+          "role": "supporting_metadata",
+          "authority": false,
+          "purpose": "canonicalizes free-text/legacy business-domain vocabulary into identity.Domain/RouterDomain values for marketing, lead-event, and reporting call sites; not itself a runtime authority",
+          "runtime_consumed": true
+        }
+      }
+    },
+    {
+      "id": "decision.tma_shared_ui_primitives",
+      "name": "TMA presentational UI primitives are shared frontend infrastructure, not layer-owned",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "canonical_contract",
+      "source_of_truth": {
+        "is_authority": false,
+        "scope": "generic, stateless React presentational components under tma-frontend/src/components/ui/",
+        "precedence": "the feature screens that consume them (e.g. Ventures.tsx) own business behavior; these primitives own layout/markup only and decide nothing"
+      },
+      "owner": "governance",
+      "code_paths": [
+        "tma-frontend/src/components/ui/PageHeader.tsx",
+        "tma-frontend/src/components/ui/ScreenState.tsx",
+        "tma-frontend/src/components/ui/StatusBadge.tsx",
+        "tma-frontend/src/components/ui/Surface.tsx"
+      ],
+      "test_paths": [],
+      "canonical_docs": [],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-08-13",
+      "last_verified_commit": "6ecdaa98d778858e32f87fc8f055d000aa06f771",
+      "confidence": 0.85,
+      "notes": [
+        "Registered to resolve a Context Librarian REVIEW_REQUIRED finding after PR #625 (VUX-0 Ventures foundations): these 4 files are pure, prop-driven React components (no fetch/API/state/side effects — verified by inspection) currently consumed only by Ventures.tsx.",
+        "None of the 7 existing catalog layers legitimately own generic TMA UI primitives — layer.marketing's MarketingStatus.tsx precedent is domain-specific (F23 Marketing Bridge status surface), not a generic-component precedent, so folding these in there would be a false assignment. layer.ux_f52's scope is backend user-message formatting/channel rendering, not TMA screen markup.",
+        "This node registers the files as non-authoritative shared frontend infrastructure only, mirroring decision.business_domain_vocabulary's pattern — it does not create a new runtime layer and does not claim ownership of Ventures.tsx or any other consumer screen. Ventures.tsx itself predates this catalog's anchor commits and remains unregistered in all 7 layers — a pre-existing gap, unrelated to and not resolved by this decision.",
+        "Scope is deliberately the 4 named files only, not a blanket exemption for tma-frontend/src/components/ui/ — future additions to that directory must be evaluated individually, not assumed to fall under this node."
+      ],
+      "extensions": {
+        "context_librarian.registration": {
+          "classification": "REGISTER_SUPPORTING",
+          "role": "supporting_metadata",
+          "authority": false,
+          "purpose": "generic presentational UI primitives (layout/markup only, no business logic or I/O) shared across TMA screens; not itself a runtime authority for any business domain",
+          "runtime_consumed": true
+        }
+      }
     }
   ],
   "edges": [
