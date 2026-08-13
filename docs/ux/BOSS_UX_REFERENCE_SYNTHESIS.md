@@ -106,7 +106,7 @@ Airtable Interfaces, Figma, HubSpot, Intercom, Notion, Stripe Dashboard, Tana, V
 - Contacts/Deals placement.
 - Business Memory/Activity source and surface.
 - Deletion, merge, or retirement of legacy screens.
-- Final semantic status palette and screenshot-level hierarchy/density calibration. The owner supplied a token extraction, but the referenced screenshot was not attached.
+- Final semantic status palette, dark-theme behavior, and Ventures-specific hierarchy/density calibration. The supplied 720×450 workbench screenshot supports flat split-pane composition and compact chrome, but not exact colors, mobile behavior, or a same-screen Ventures match.
 - Venture financial-review, negotiation, readiness, GO/NO-GO, and conversion business rules beyond the current schema.
 
 ## 8. Source research consumed

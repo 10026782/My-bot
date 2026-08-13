@@ -2,9 +2,11 @@
 
 **Date received:** 13/08/2026
 
-**Evidence status:** `OWNER-SUPPLIED EXTRACTION — SCREENSHOT NOT ATTACHED`
+**Evidence status:** `OWNER-SUPPLIED EXTRACTION + SCREENSHOT — PARTIAL VISUAL SUPPORT`
 
 **Use:** visual-language calibration only; never product/runtime authority.
+
+**Screenshot:** `owner-supplied-workbench-reference.jpg` (`720×450`, JPEG, SHA-256 `201358d56d1a404e46b149677c0e78e15ee57cdb45664445ffd3240b5634480f`)
 
 ## Direction supplied
 
@@ -28,6 +30,32 @@ The user explicitly requested inspiration without copying brand assets, logos, i
 - colors and geometry are mapped to semantic BOSS roles rather than copied as a source palette API;
 - duplicate breakpoints and extreme z-index values are treated as extraction artifacts;
 - supplied color pairings remain subject to WCAG contrast checks;
-- the absent screenshot prevents any claim that hierarchy, density, or overall visual feel has been visually matched.
+- the screenshot supports only the visible desktop workbench state described below; it cannot prove mobile behavior, focus/hover states, color tokens hidden outside the crop, or full-product consistency.
+
+## Screenshot review
+
+### Directly observed
+
+- A desktop workbench split into a narrow control/conversation pane and a wider preview pane, separated by a thin vertical divider.
+- Compact top bars and tabs, with small labels and controls rather than oversized navigation.
+- Flat surfaces and border-led separation. No visible card shadow system drives the hierarchy.
+- Subtle rounding on the preview canvas and lower input surface.
+- A large calm work area with a small centered loading state; secondary chrome stays visually quiet.
+- Generous empty space inside the preview pane despite dense controls around it.
+
+### Not supported by this screenshot
+
+- The screenshot is predominantly light and does not visually confirm the extracted `#222222` dark background direction.
+- The primary button is clipped at the upper-right edge, so its text color, size, and full geometry cannot be measured.
+- The capture is compressed/washed out; exact neutral colors, border contrast, font weights, and shadow opacity cannot be sampled reliably.
+- No mobile state, modal, tooltip, menu, focused control, hover state, error state, or populated data collection is visible.
+- The image appears to show a builder/workbench context, not a Ventures lifecycle workspace. Its split-pane hierarchy may inspire desktop composition, but its labels, brand, and tool-specific structure must not be copied.
+
+### BOSS disposition
+
+- `ADOPT`: quiet chrome, compact hierarchy, flat border-led separation, and large focused work area.
+- `ADAPT`: the desktop split-pane idea into collection/detail continuity for Ventures; do not copy the builder layout literally.
+- `REFERENCE ONLY`: light neutral treatment, because it conflicts with the supplied dark palette and the screenshot is too washed out for color calibration.
+- `REJECT`: source labels, brand/tool identity, tiny text/touch targets, and any assumption that this desktop crop defines mobile behavior.
 
 The canonical disposition of this evidence is recorded in `docs/ux/BOSS_DESIGN_SYSTEM_V1.md`.

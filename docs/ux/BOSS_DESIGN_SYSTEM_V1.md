@@ -1,7 +1,7 @@
 # BOSS Design System v1
 
 **Date:** 13/08/2026
-**Status:** `V1 PROPOSAL — UIDROP TOKEN INPUT INTEGRATED; SCREENSHOT CALIBRATION PENDING`
+**Status:** `V1 PROPOSAL — UIDROP TOKENS INTEGRATED; LIMITED SCREENSHOT CALIBRATION COMPLETE`
 **Authority:** Implements the owner-approved SCOREBOS UX Constitution and BOSS Unified Screen Contract. It does not change product navigation, schema, runtime, permissions, or action authority.
 
 ## 1. System rule
@@ -10,7 +10,7 @@ Core contracts are uniform across SCOREBOS. A workspace may vary only through ap
 
 The first proving surface is Ventures. The visual direction is vibrant, modern, compact, and flat: a dark application canvas, bright work surfaces, restrained rounding, and a blue action accent. The values below adapt the owner-supplied UIDrop extraction into BOSS-owned semantic tokens; source-library names, brand identity, and one-off implementation artifacts are not part of the system.
 
-The token extraction was supplied without its referenced screenshot. Exact hierarchy and density therefore remain a visual QA item, while the normalized token set is sufficient for the first implementation PR. UIDrop input may calibrate visual values, but may not reopen the interaction, semantic, accessibility, action, or responsive contracts.
+The supplied 720×450 screenshot has now been reviewed. It supports compact desktop hierarchy, a narrow-control/wide-work split, quiet chrome, flat border-led separation, subtle rounding, and a large focused work area. It does not support exact color calibration: the capture is predominantly light and washed out, the primary action is clipped, and no mobile or interaction states are visible. The normalized token set remains sufficient for the first implementation PR, while exact same-viewport fidelity must be proven on the implemented Ventures screen rather than inferred from this crop.
 
 ## 2. Foundations
 
@@ -189,7 +189,7 @@ Owner-supplied UIDrop token input has been normalized into the BOSS-owned founda
 
 | Input area | Disposition | BOSS decision | Remaining verification |
 |---|---|---|---|
-| Radius | `ADAPT` | chip 4px, control 6px, surface 8px, overlay 12px | Check sheet/card hierarchy against the missing screenshot |
+| Radius | `ADAPT` | chip 4px, control 6px, surface 8px, overlay 12px | Screenshot supports subtle rounding but cannot distinguish exact values |
 | Spacing | `ADOPT` core; `ADAPT` extended | 4px grid with 4–24px core and 32–48px layout steps | Validate Hebrew density at 390px |
 | Typography | `ADAPT` | Inter var; 14px body at 1.6; semantic role scale | Compare Hebrew body weight 350 vs 400 |
 | Palette | `ADAPT` | dark canvas, light work surfaces, BOSS blue actions | Validate full semantic status palette and contrast |
@@ -203,7 +203,9 @@ Owner-supplied UIDrop token input has been normalized into the BOSS-owned founda
 
 Supported now: hierarchy, component responsibilities, action lifecycle, status semantics, mobile/RTL rules, density modes, collection/detail continuity, validation, receipts, accessibility contracts, and the normalized visual token direction.
 
-Waiting for screenshot/implementation QA: hierarchy and density fidelity, Hebrew weight calibration, semantic status colors, and complete input/search state captures. The screenshot referenced by the supplied brief was not attached to this task, so no claim of visual match is made.
+Screenshot-supported now: compact chrome, border-led hierarchy, restrained rounding, flat default surfaces, a narrow-control/wide-work desktop composition, and generous whitespace around the primary work state.
+
+Waiting for implementation QA: Ventures-specific hierarchy and density, dark-palette behavior, Hebrew weight calibration, semantic status colors, and complete input/search interaction states. The supplied screenshot is evidence for design language, not a same-screen reference, so no claim of visual match is made.
 
 UIDrop findings must be recorded as BOSS-owned tokens and reviewed against Hebrew text, 390px mobile, contrast, and Telegram safe-area behavior. They cannot be copied wholesale from a reference.
 

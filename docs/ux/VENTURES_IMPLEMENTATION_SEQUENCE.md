@@ -27,7 +27,7 @@
 - Add `tma-frontend/src/components/ui/ScreenState.tsx` (loading, empty, error with retry).
 - Modify `tma-frontend/src/components/Ventures.tsx` to consume only those primitives while preserving data calls and behavior.
 
-**Dependency:** Review/acceptance of `BOSS_DESIGN_SYSTEM_V1.md`. The owner-supplied UIDrop values are normalized and no longer block VUX-0; the missing reference screenshot blocks only a claim of visual fidelity, not implementation of the token foundation.
+**Dependency:** Review/acceptance of `BOSS_DESIGN_SYSTEM_V1.md`. The owner-supplied UIDrop values and screenshot are normalized and no longer block VUX-0. The screenshot is a low-resolution desktop workbench rather than a Ventures screen, so same-screen fidelity must be evaluated against VUX-0 captures, not claimed from the source crop.
 
 **Deliberately out of scope**
 
@@ -255,7 +255,7 @@
 
 | Dependency/blocker | Blocks | Resolution owner/input |
 |---|---|---|
-| Referenced UIDrop screenshot not attached | Screenshot-level hierarchy/density fidelity only; does not block VUX-0 tokens | Attach the source screenshot for same-viewport visual QA before claiming a match |
+| UIDrop screenshot is 720×450, cropped, washed out, and not a Ventures screen | Exact color sampling and source-to-Ventures fidelity claims; does not block VUX-0 | Use it only for flat hierarchy/split-pane cues; validate the implemented Ventures screen at 390×844, tablet, and desktop |
 | No frontend component-test harness identified | Automated UI coverage | Separate tooling decision or use existing CI/build/manual evidence |
 | Venture writes bypass centralized ActionGateway according to current audit | VUX-5 canonical actions/receipts | Existing Action/runtime authority; separate reviewed backend work |
 | No structured Venture timeline projection | VUX-4 Timeline | Business Memory/Interaction/receipt authority decision |
