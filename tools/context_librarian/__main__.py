@@ -16,6 +16,8 @@ from .librarian import (
     suggest_profiles,
     verify_consumption,
 )
+from .policy_registry import load_policy_registry
+from .reconcile import reconcile, stamp_observed
 
 
 def _repo_root() -> Path:
@@ -124,6 +126,29 @@ def _parser() -> argparse.ArgumentParser:
     discover = sub.add_parser("discover-sources", help="Classify new unregistered sources")
     discover.add_argument("--main-ref", default="origin/main")
 
+    reconcile_cmd = sub.add_parser(
+        "reconcile",
+        help=(
+            "Three-outcome reconciliation (CLEAN / AUTO_MAINTENANCE_REQUIRED / "
+            "OWNER_DECISION_REQUIRED), reusing the policy registry instead of "
+            "re-asking a previously-decided source class"
+        ),
+    )
+    reconcile_cmd.add_argument("--main-ref", default="origin/main")
+    reconcile_mode = reconcile_cmd.add_mutually_exclusive_group()
+    reconcile_mode.add_argument(
+        "--check", action="store_true", help="Report only; never writes (default)"
+    )
+    reconcile_mode.add_argument(
+        "--apply-observed",
+        action="store_true",
+        help=(
+            "Write last_observed_commit mechanical provenance only. Requires "
+            "checkout branch main at the canonical main SHA. Never adds/edits "
+            "code_paths, test_paths, canonical_docs, edges, or nodes."
+        ),
+    )
+
     verify = sub.add_parser(
         "verify-consumption",
         help=(
@@ -172,6 +197,27 @@ def main(argv: list[str] | None = None) -> int:
                     "unregistered sources; review before merge",
                     file=sys.stderr,
                 )
+                return 1
+            return 0
+
+        if args.command == "reconcile":
+            policies = load_policy_registry(_repo_root())
+            result = reconcile(catalog, policies, main_ref=args.main_ref)
+            print(json.dumps(result.to_json(), ensure_ascii=False, indent=2, sort_keys=True))
+            if args.apply_observed:
+                if result.outcome == "OWNER_DECISION_REQUIRED":
+                    print(
+                        "OWNER_DECISION_REQUIRED: refusing to write mechanical "
+                        "provenance while a genuine owner decision is outstanding "
+                        "-- resolve the decision_queue first",
+                        file=sys.stderr,
+                    )
+                    return 1
+                written = stamp_observed(catalog, result.canonical_main_sha)
+                print(f"stamped last_observed_commit on {len(written)} node(s): {', '.join(written) or '(none)'}")
+                return 0
+            print(f"outcome: {result.outcome}")
+            if result.outcome == "OWNER_DECISION_REQUIRED":
                 return 1
             return 0
 

@@ -1,0 +1,89 @@
+name: Context Librarian Reconciliation
+
+# Runs after every push to main. Never pushes to main and never merges
+# anything -- see docs/context_librarian/RECONCILIATION.md section D.
+#
+# - CLEAN: no-op.
+# - AUTO_MAINTENANCE_REQUIRED: pushes a NEW branch
+#   (context-librarian/auto-maintenance-<sha>) containing only mechanical
+#   last_observed_commit bumps, and opens a PR against main for a human to
+#   review and merge. Never writes to main directly.
+# - OWNER_DECISION_REQUIRED: opens no PR. Prints the compact decision queue
+#   to the job summary and fails the job so it stays visible.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Reconcile (check only)
+        id: reconcile
+        run: |
+          set -euo pipefail
+          set +e
+          python -m tools.context_librarian reconcile --check --main-ref origin/main > reconcile.json
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          set -e
+          outcome="$(python -c "import json;print(json.load(open('reconcile.json'))['outcome'])")"
+          echo "outcome=$outcome" >> "$GITHUB_OUTPUT"
+
+      - name: Report owner decisions needed
+        if: steps.reconcile.outputs.outcome == 'OWNER_DECISION_REQUIRED'
+        run: |
+          {
+            echo "## Context Librarian — owner decision required"
+            echo
+            python - <<'PY'
+import json
+data = json.load(open("reconcile.json"))
+for item in data["decision_queue"]:
+    label = item.get("policy_id", "no matching policy")
+    print(f"- `{item['path']}` — {item['classification']} ({label})")
+PY
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Prepare bounded maintenance branch (never pushes to main, never merges)
+        if: steps.reconcile.outputs.outcome == 'AUTO_MAINTENANCE_REQUIRED'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          branch="context-librarian/auto-maintenance-${sha:0:12}"
+          git checkout -b "$branch"
+          python -m tools.context_librarian reconcile --apply-observed --main-ref origin/main
+          if git diff --quiet -- docs/context_librarian; then
+            echo "nothing to commit -- outcome was AUTO_MAINTENANCE_REQUIRED but stamp_observed found no drift"
+            exit 0
+          fi
+          git config user.name "context-librarian-bot"
+          git config user.email "context-librarian-bot@users.noreply.github.com"
+          git add docs/context_librarian
+          git commit -m "chore(context-librarian): mechanical provenance refresh"
+          git push origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "chore(context-librarian): mechanical provenance refresh" \
+            --body "Automated, mechanical-only catalog provenance update (last_observed_commit) prepared by the Context Librarian reconciliation workflow after this push to main. Never pushed to main directly, never merged automatically — requires human review like any other PR. See docs/context_librarian/RECONCILIATION.md section D."
+
+      - name: Fail visibly on owner decision required
+        if: steps.reconcile.outputs.outcome == 'OWNER_DECISION_REQUIRED'
+        run: exit 1

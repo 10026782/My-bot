@@ -48,11 +48,24 @@ NODE_FIELDS = frozenset(
         "feature_flags",
         "valid_from",
         "last_verified_commit",
+        "last_observed_commit",
+        "last_semantic_review_commit",
         "confidence",
         "notes",
         "extensions",
     }
 )
+# Additive, optional, backward-compatible split introduced alongside
+# reconcile.py (see docs/context_librarian/RECONCILIATION.md): existing
+# `last_verified_commit` keeps its exact current meaning and writers
+# (librarian.refresh_after_merge's --write path, and the local post-merge
+# git hook via tools/context_librarian/refresh_after_merge.py --apply) —
+# neither is touched by this change. `last_observed_commit` is a purely
+# mechanical "last commit the reconcile engine scanned this node against"
+# marker, written only by reconcile.py. `last_semantic_review_commit` is
+# manual-only — a human explicitly re-examined this node's authority/
+# ownership boundary as of that commit; nothing writes it automatically.
+_OPTIONAL_COMMIT_FIELDS = ("last_observed_commit", "last_semantic_review_commit")
 EDGE_FIELDS = frozenset({"from", "to", "type", "notes", "extensions"})
 PROFILE_FIELDS = frozenset(
     {
@@ -175,6 +188,11 @@ def _validate_node(
         )
     if not re.fullmatch(schema["commit_pattern"], str(node["last_verified_commit"])):
         raise ContextLibrarianError(f"{label}: invalid last_verified_commit")
+    for optional_field in _OPTIONAL_COMMIT_FIELDS:
+        if optional_field in node and not re.fullmatch(
+            schema["commit_pattern"], str(node[optional_field])
+        ):
+            raise ContextLibrarianError(f"{label}: invalid {optional_field}")
     low, high = schema["confidence_range"]
     if not isinstance(node["confidence"], (int, float)) or not low <= node["confidence"] <= high:
         raise ContextLibrarianError(f"{label}: confidence outside {low}..{high}")

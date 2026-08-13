@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "kind": "context_librarian_policy_schema",
+  "required": [
+    "id", "description", "path_patterns", "runtime_consumed", "authority",
+    "eligible_target", "auto_registration_allowed", "classification_when_matched"
+  ],
+  "allowed": [
+    "id", "description", "path_patterns", "runtime_consumed", "authority",
+    "eligible_target", "auto_registration_allowed", "classification_when_matched",
+    "notes"
+  ],
+  "classification_when_matched_values": [
+    "ALREADY_SATISFIED",
+    "AUTO_MAINTENANCE_ELIGIBLE"
+  ],
+  "id_pattern": "^[A-Z][A-Z0-9_]*$",
+  "extension_policy": {
+    "purpose": "Reusable, explicit classification decisions for already-approved source classes (RECONCILIATION.md section B). A policy only ever *reuses* a decision an owner already made -- it never grants a new one.",
+    "matching": "path_patterns are glob patterns (fnmatch semantics) matched against the full repo-relative path. No substring/keyword matching against arbitrary path text is permitted here -- that is exactly the failure mode this registry exists to replace.",
+    "eligible_target": "a decision.*/layer.* node id this policy's matches are attributed to for traceability. Not required to already exist as a loaded catalog node -- a policy MAY be added in the same PR as, or before, the node it references.",
+    "unknown_policy_fields": "rejected"
+  }
+}

@@ -1,0 +1,103 @@
+{
+  "schema_version": "1.0",
+  "policies": [
+    {
+      "id": "DOCUMENTATION_REFERENCE_ASSET",
+      "description": "Inert raster image evidence/reference assets under docs/ -- cannot carry dispatch/approval/authority logic, so a path-substring hit on an authority-sounding directory name (e.g. \"reference-evidence\") is a naming coincidence, not a real authority signal.",
+      "path_patterns": [
+        "docs/*.png", "docs/*.jpg", "docs/*.jpeg", "docs/*.gif",
+        "docs/*.webp", "docs/*.ico", "docs/*.bmp"
+      ],
+      "runtime_consumed": false,
+      "authority": false,
+      "eligible_target": null,
+      "auto_registration_allowed": false,
+      "classification_when_matched": "AUTO_MAINTENANCE_ELIGIBLE",
+      "notes": [
+        "eligible_target is null and auto_registration_allowed is false because these assets need no catalog node at all -- classify_new_sources() already treats *.png/*.jpg/etc as WARNING (never blocking) for any path via extension, not just docs/. This policy exists to make that decision explicit/reusable rather than only implicit in the classifier, per RECONCILIATION.md section B."
+      ]
+    },
+    {
+      "id": "STAGING_VERIFICATION_ARTIFACT",
+      "description": "Bounded, manually-invoked staging-only verification scripts -- produce evidence, originate no business state, require explicit *_STAGING_NON_PRODUCTION env gating to run at all.",
+      "path_patterns": ["scripts/verify_*_staging.py"],
+      "runtime_consumed": false,
+      "authority": false,
+      "eligible_target": "decision.f15_staging_verification_artifact",
+      "auto_registration_allowed": true,
+      "classification_when_matched": "AUTO_MAINTENANCE_ELIGIBLE",
+      "notes": [
+        "Matches scripts/verify_f15_staging.py plus the pre-existing scripts/verify_bug157_160_163_staging.py and scripts/verify_bug161_162_callback_staging.py precedents (registered separately under layer.approvals/layer.turn_coordinator test_paths). A future verify_<X>_staging.py is mechanically eligible for the same treatment without a fresh owner decision."
+      ]
+    },
+    {
+      "id": "TEST_SUPPORT_ARTIFACT",
+      "description": "Test-fixture/repo-stub helper files whose name does not start with test_ (so the generic test-file heuristic misses them) but which exist purely to support another suite's fixtures.",
+      "path_patterns": ["*_test_repo_stub.py"],
+      "runtime_consumed": false,
+      "authority": false,
+      "eligible_target": null,
+      "auto_registration_allowed": false,
+      "classification_when_matched": "AUTO_MAINTENANCE_ELIGIBLE",
+      "notes": [
+        "Matches the tc8_test_repo_stub.py precedent (registered under layer.approvals/layer.turn_coordinator test_paths). eligible_target is left null and auto_registration_allowed false because, unlike the other policies, this class has no single owning layer -- which suite(s) a new stub supports is still a per-file judgment call; this policy only guarantees the file is never escalated to STOP on an authority-term coincidence and is never treated as an unknown-role REVIEW_REQUIRED runtime source."
+      ]
+    },
+    {
+      "id": "SHARED_UI_PRIMITIVE",
+      "description": "Generic, stateless, prop-driven TMA presentational components with no fetch/API/state/side effects.",
+      "path_patterns": ["tma-frontend/src/components/ui/*.tsx"],
+      "runtime_consumed": true,
+      "authority": false,
+      "eligible_target": "decision.tma_shared_ui_primitives",
+      "auto_registration_allowed": false,
+      "classification_when_matched": "AUTO_MAINTENANCE_ELIGIBLE",
+      "notes": [
+        "auto_registration_allowed is false: a new file matching this path still needs a human to confirm it is actually pure/stateless (no fetch/API/state) before folding it in -- the pattern narrows *where* to look, it does not itself prove the file has no side effects. Reconcile still routes a match here to the decision queue, but pre-labelled with the applicable policy and target node so the owner decision is a one-line confirmation, not a fresh investigation."
+      ]
+    },
+    {
+      "id": "CROSS_LAYER_SUPPORTING_METADATA",
+      "description": "A specific, named module consumed by callers in more than one existing catalog layer, with no single layer that legitimately owns all of them.",
+      "path_patterns": ["domain_utils.py"],
+      "runtime_consumed": true,
+      "authority": false,
+      "eligible_target": "decision.business_domain_vocabulary",
+      "auto_registration_allowed": true,
+      "classification_when_matched": "AUTO_MAINTENANCE_ELIGIBLE",
+      "notes": [
+        "Deliberately an exact-path policy, not a wildcard: \"consumed by more than one layer with no single legitimate owner\" is a per-file semantic fact that cannot be safely generalized to a directory or naming pattern. A different file making the same claim still requires a fresh OWNER_DECISION."
+      ]
+    },
+    {
+      "id": "OFFLINE_RESEARCH_TOOL",
+      "description": "Standalone, manually-invoked offline tools that self-declare (or are otherwise established to be) outside the live SCOREBOS runtime path -- research harnesses, one-off CSV/contact-merge utilities.",
+      "path_patterns": [
+        "scripts/research_crawler_poc/*",
+        "contact_merge.py",
+        "scripts/classify_contacts_for_airtable.py"
+      ],
+      "runtime_consumed": false,
+      "authority": false,
+      "eligible_target": "decision.offline_research_support_tool",
+      "auto_registration_allowed": true,
+      "classification_when_matched": "AUTO_MAINTENANCE_ELIGIBLE",
+      "notes": [
+        "contact_merge.py and scripts/classify_contacts_for_airtable.py are pre-existing files of this class (both predate every current catalog anchor commit, so neither has ever appeared as a blocking new_source) -- listed here so a future rename/move/copy of either is still recognized under this bucket instead of re-litigating 'is this a standalone offline tool' from scratch."
+      ]
+    },
+    {
+      "id": "EXTERNAL_RECOMMENDATION_CATALOG",
+      "description": "Read-only, curated catalogs of approved external tools/resources and their recommendation metadata -- explicitly not the internal execution Tool Registry, cannot dispatch or execute, cannot grant ActionGateway/tool-execution authority.",
+      "path_patterns": ["business_tool_registry.py", "test_business_tool_registry.py"],
+      "runtime_consumed": true,
+      "authority": true,
+      "eligible_target": "decision.external_business_tool_recommendation_catalog",
+      "auto_registration_allowed": true,
+      "classification_when_matched": "AUTO_MAINTENANCE_ELIGIBLE",
+      "notes": [
+        "authority is true because this file IS the source of truth for which external tools are approved for recommendation (a real, narrow authority) -- but that authority is explicitly scoped away from tool_registry.py's internal-execution authority, per decision.external_business_tool_recommendation_catalog's source_of_truth.precedence."
+      ]
+    }
+  ]
+}
