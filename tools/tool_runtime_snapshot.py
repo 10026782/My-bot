@@ -17,9 +17,6 @@ from urllib.parse import urlparse
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-if __package__ in {None, ""}:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
 SCHEMA_VERSION = "1"
 DEFAULT_PATH = Path(__file__).resolve().parents[1] / "data/tool_registry/runtime_snapshot.json"
 _STATUS = {"DISCOVERED", "RESEARCHING", "VERIFIED", "APPROVED", "DEFERRED", "REJECTED", "DEPRECATED"}
