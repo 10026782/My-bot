@@ -20,14 +20,14 @@
 
 **Exact intended files**
 
-- Modify `tma-frontend/src/index.css` — add the approved BOSS semantic CSS custom properties/recipes from `BOSS_DESIGN_SYSTEM_V1.md`: 4px spacing rhythm, dark canvas/light work surfaces, blue action colors, border/radius/elevation, focus, motion, safe-area, and touch targets. Do not import source-library token names.
+- Modify `tma-frontend/src/index.css` — add the approved BOSS semantic CSS custom properties/recipes from `BOSS_DESIGN_SYSTEM_V1.md`: 4px rhythm, near-black canvas, dark work surfaces, light pill actions, violet-blue accent, border-led flat elevation, focus, motion, safe-area, and touch targets. Do not import source-library token names.
 - Add `tma-frontend/src/components/ui/PageHeader.tsx`.
 - Add `tma-frontend/src/components/ui/Surface.tsx` (`Section`/`Card` variants only).
 - Add `tma-frontend/src/components/ui/StatusBadge.tsx`.
 - Add `tma-frontend/src/components/ui/ScreenState.tsx` (loading, empty, error with retry).
 - Modify `tma-frontend/src/components/Ventures.tsx` to consume only those primitives while preserving data calls and behavior.
 
-**Dependency:** Review/acceptance of `BOSS_DESIGN_SYSTEM_V1.md`. The owner-supplied UIDrop values and screenshot are normalized and no longer block VUX-0. The screenshot is a low-resolution desktop workbench rather than a Ventures screen, so same-screen fidelity must be evaluated against VUX-0 captures, not claimed from the source crop.
+**Dependency:** Review/acceptance of `BOSS_DESIGN_SYSTEM_V1.md`. Both owner-supplied references are normalized and no longer block VUX-0. One screenshot is a low-resolution workbench and the other is a marketing landing page, so same-screen fidelity must be evaluated against VUX-0 captures, not claimed from either source.
 
 **Deliberately out of scope**
 
@@ -43,8 +43,9 @@
 - Back/create/retry controls have accessible names and ≥44px mobile targets.
 - Existing list, detail, create, edit, stage filter, and refetch behavior remains available.
 - No primitive contains Venture-specific business semantics.
-- Primary button text uses the accessible BOSS on-action token; the extracted low-contrast `#D5EFFF`/`#5EB1EF` pairing is not implemented.
+- Primary buttons use the accessible light-surface/dark-text BOSS action pair. Accent text/icons use `#7E88DB`; the lower-contrast `#5E6AD2` is not used for normal text.
 - Default cards remain flat; shadows appear only for interactive lift, sticky separation, or overlays.
+- Pill geometry is limited to actions and compact selections; cards and rows remain 4px surfaces.
 
 **Tests**
 
@@ -255,7 +256,7 @@
 
 | Dependency/blocker | Blocks | Resolution owner/input |
 |---|---|---|
-| UIDrop screenshot is 720×450, cropped, washed out, and not a Ventures screen | Exact color sampling and source-to-Ventures fidelity claims; does not block VUX-0 | Use it only for flat hierarchy/split-pane cues; validate the implemented Ventures screen at 390×844, tablet, and desktop |
+| UIDrop screenshots are a cropped workbench and a marketing landing page, not Ventures | Source-to-Ventures fidelity claims; does not block VUX-0 | Use them for palette/hierarchy/spacing cues only; validate Ventures at 390×844, tablet, and desktop |
 | No frontend component-test harness identified | Automated UI coverage | Separate tooling decision or use existing CI/build/manual evidence |
 | Venture writes bypass centralized ActionGateway according to current audit | VUX-5 canonical actions/receipts | Existing Action/runtime authority; separate reviewed backend work |
 | No structured Venture timeline projection | VUX-4 Timeline | Business Memory/Interaction/receipt authority decision |

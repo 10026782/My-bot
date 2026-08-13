@@ -96,7 +96,7 @@ Airtable Interfaces, Figma, HubSpot, Intercom, Notion, Stripe Dashboard, Tana, V
 - Semantic status labels that never rely on color or emoji alone.
 - Canonical action lifecycle: intent → validation/preview → execute/approve → verified result → receipt/error.
 - Reuse of existing TMA domain content and useful component concepts before introducing replacements.
-- BOSS-owned visual direction: dark application canvas, light work surfaces, blue action accent, 4px rhythm, restrained rounding, and flat-by-default elevation. This is an adaptation of owner-supplied token evidence, not a copy of source identity or CSS names.
+- BOSS-owned visual direction: near-black application canvas, quiet dark work surfaces, high-contrast text, selective light pill actions, violet-blue accent, 4px rhythm, minimally rounded cards, and flat border-led elevation. This synthesizes two owner-supplied references without copying source identity, brand assets, marketing composition, or CSS names.
 
 ## 7. Explicitly open
 
@@ -106,7 +106,7 @@ Airtable Interfaces, Figma, HubSpot, Intercom, Notion, Stripe Dashboard, Tana, V
 - Contacts/Deals placement.
 - Business Memory/Activity source and surface.
 - Deletion, merge, or retirement of legacy screens.
-- Final semantic status palette, dark-theme behavior, and Ventures-specific hierarchy/density calibration. The supplied 720×450 workbench screenshot supports flat split-pane composition and compact chrome, but not exact colors, mobile behavior, or a same-screen Ventures match.
+- Final semantic status palette and Ventures-specific hierarchy/density calibration. The 720×450 workbench screenshot supports split-pane discipline; the 1024×505 dark landing screenshot supports palette, quiet chrome, pill CTA, and whitespace. Neither proves mobile behavior or a same-screen Ventures match.
 - Venture financial-review, negotiation, readiness, GO/NO-GO, and conversion business rules beyond the current schema.
 
 ## 8. Source research consumed
@@ -122,6 +122,7 @@ Airtable Interfaces, Figma, HubSpot, Intercom, Notion, Stripe Dashboard, Tana, V
 ### Consolidated research and matrices
 
 - `docs/ux/reference-evidence/uidrop/owner-supplied-visual-token-extraction.md`
+- `docs/ux/reference-evidence/uidrop/owner-supplied-balanced-rounded-extraction.md`
 - `docs/ux/PUBLIC_REFERENCE_SYNTHESIS.md`
 - `docs/ux/AGENT4_REFERENCE_EXTRACTION.md`
 - `docs/ux/REFERENCE_INSPECTION_PHASE_START.md`

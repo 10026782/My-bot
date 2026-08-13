@@ -1,16 +1,16 @@
 # BOSS Design System v1
 
 **Date:** 13/08/2026
-**Status:** `V1 PROPOSAL — UIDROP TOKENS INTEGRATED; LIMITED SCREENSHOT CALIBRATION COMPLETE`
+**Status:** `V1 PROPOSAL — TWO UIDROP REFERENCES SYNTHESIZED; IMPLEMENTATION QA PENDING`
 **Authority:** Implements the owner-approved SCOREBOS UX Constitution and BOSS Unified Screen Contract. It does not change product navigation, schema, runtime, permissions, or action authority.
 
 ## 1. System rule
 
 Core contracts are uniform across SCOREBOS. A workspace may vary only through approved composition and density modes. New screens must reuse these foundations and components before proposing a new pattern.
 
-The first proving surface is Ventures. The visual direction is vibrant, modern, compact, and flat: a dark application canvas, bright work surfaces, restrained rounding, and a blue action accent. The values below adapt the owner-supplied UIDrop extraction into BOSS-owned semantic tokens; source-library names, brand identity, and one-off implementation artifacts are not part of the system.
+The first proving surface is Ventures. The visual direction is balanced, modern, dark, and flat: a near-black application canvas, quiet dark work surfaces, high-contrast typography, compact information density, selective pill actions, restrained card rounding, and a violet-blue accent. The values below synthesize two owner-supplied UIDrop references into BOSS-owned semantic tokens; source-library names, brand identity, marketing copy, and one-off implementation artifacts are not part of the system.
 
-The supplied 720×450 screenshot has now been reviewed. It supports compact desktop hierarchy, a narrow-control/wide-work split, quiet chrome, flat border-led separation, subtle rounding, and a large focused work area. It does not support exact color calibration: the capture is predominantly light and washed out, the primary action is clipped, and no mobile or interaction states are visible. The normalized token set remains sufficient for the first implementation PR, while exact same-viewport fidelity must be proven on the implemented Ventures screen rather than inferred from this crop.
+The first 720×450 workbench screenshot supports compact split-pane hierarchy but is washed out. The second 1024×505 landing-page screenshot clearly supports the dark canvas, quiet chrome, high-contrast text, light pill CTA, flat borders, and generous decision-level whitespace. Neither screenshot is a Ventures workspace or mobile flow. The normalized token set is sufficient for the first implementation PR, while application density and same-viewport behavior must be proven on the implemented Ventures screen.
 
 ## 2. Foundations
 
@@ -29,8 +29,9 @@ Use a 4px base grid. The core component rhythm is 4/8/12/16/20/24; larger layout
 | `space-5` | 20px | comfortable card/page recipe |
 | `space-6` | 24px | section separation |
 | `space-8` | 32px | major page separation |
-| `space-10` | 40px | large layout separation only |
 | `space-12` | 48px | page-level separation only |
+| `space-24` | 96px | marketing/display composition only; not workspace rhythm |
+| `space-32` | 128px | marketing/display composition only; not workspace rhythm |
 
 Do not introduce local 6px/10px/14px/18px spacing unless a shared component documents the exception. Density modes change component recipes, not the base scale. The source-style names (`toolbox-spacing-*`) are evidence only and must not become public BOSS token names.
 
@@ -38,47 +39,47 @@ Do not introduce local 6px/10px/14px/18px spacing unless a shared component docu
 
 | Role | Size/line-height | Weight | Rule |
 |---|---|---:|---|
-| Page Title | 24/32 | 700–800 | One per screen |
-| Section Title | 18/26 | 700 | Names a decision/work group |
-| Entity/Card Title | 16/24 | 600–700 | May wrap to two lines |
-| Body | 14/22.4 | 350–400 | Default Hebrew reading text; `1.6` line-height |
-| Label/Action | 14/20 | 600 | Controls and important labels |
-| Metadata | 12/18 | 400–500 | Never carries the only critical meaning |
-| KPI | 30/36 | 700–800 | Must include a semantic label and drill-down purpose |
-| Status | 12/18 | 600 | Text label required; color is secondary |
+| Page Title | 28/34 | 510–600 | One per application screen; 64px source display is not used in workspaces |
+| Section Title | 20/28 | 510–600 | Names a decision/work group |
+| Entity/Card Title | 16/24 | 510–600 | May wrap to two lines |
+| Body | 16/24 | 400 | Default reading text; `1.5` line-height |
+| Label/Action | 14/20 | 510–600 | Controls and important labels |
+| Metadata/Eyebrow | 13/20 | 400–510 | Never carries the only critical meaning |
+| KPI | 32/38 | 510–600 | Must include a semantic label and drill-down purpose |
+| Status | 13/20 | 510–600 | Text label required; color is secondary |
 
-Use `Inter var`, with the current system sans-serif stack as fallback. Use semantic roles, not local font sizes. Hebrew line-height must allow niqqud-free text, mixed numbers, and two-line labels without clipping. Because variable weight `350` is not equally legible in every Hebrew rendering environment, implementation must compare `350` and `400` at 390px before fixing the body weight.
+Use `Inter var`, with the current system sans-serif stack as fallback. Use semantic roles, not local font sizes. Hebrew line-height must allow niqqud-free text, mixed numbers, and two-line labels without clipping. The supplied 64/40px display scale is admitted only for future marketing/editorial surfaces; Ventures uses the application roles above.
 
 ### 2.3 Radius
 
 Use four BOSS roles only:
 
-- `radius-chip`: 4px for status and filter chips.
-- `radius-control`: 6px for buttons, inputs, and compact controls.
-- `radius-surface`: 8px for cards, list rows, alerts, and sections.
+- `radius-surface`: 4px for cards, list rows, alerts, and sections.
+- `radius-control`: 6px for inputs and compact controls.
 - `radius-overlay`: 12px for sheets, drawers, and modals.
+- `radius-pill`: 9999px for primary/secondary buttons and compact filter chips only.
 
-Pill geometry is not a default token. It is allowed only when a component contract explicitly requires a capsule shape. This keeps the system subtly rounded instead of drifting back to the current oversized-card vocabulary.
+Pill geometry communicates an action or compact selection; it is never applied to cards, sheets, data rows, or every surface. This preserves the reference's rounded/flat balance without turning the workspace into a field of capsules.
 
 ### 2.4 Surface hierarchy
 
 | Level | Purpose | BOSS token/value |
 |---|---|---|
-| Canvas | App background and scroll field | `canvas: #222222` |
-| Surface | Cards, sections, data work | `surface: #FBFCFC` |
-| Subtle | Grouping inside a light surface | `surface-subtle: #F6F6F6` |
-| Raised | Sticky action area, drawer, overlay | `surface-raised: #FFFFFF` + border |
-| Inverse | High-emphasis system/action surface | `surface-inverse: #0D0D0D` |
+| Canvas | App background and scroll field | `canvas: #08090A` |
+| Surface | Cards, sections, data work | `surface: #1C1D1E` |
+| Subtle | Grouping inside a surface | `surface-subtle: #141516` |
+| Raised | Sticky action area, drawer, overlay | `surface-raised: #242526` + border |
+| Contrast | High-emphasis CTA/content | `surface-contrast: #E5E5E6` |
 
-Text tokens are contextual: `text-on-dark: #FFFFFF`, `text-on-light: #222222`, `text-muted-on-dark: #B3B3B3`, and `text-muted-on-light: #555555`. The extracted `#838383` may be used for non-text decoration or large secondary text only; it does not meet the 4.5:1 body-text target on either `#222222` or `#FBFCFC`.
+Text tokens are `text-primary: #F7F8F8`, `text-muted: #8A8F98`, and `text-on-contrast: #08090A`. The supplied muted text measures approximately 6.13:1 against the canvas and remains secondary rather than carrying critical meaning.
 
-Action tokens are `action-primary: #5EB1EF`, `action-hover: #7EC1F2`, `action-pressed: #3C92DC`, and `action-soft: #DBEAFE`. Primary button text is `#222222`, not the extracted `#D5EFFF`: the supplied pairing measures approximately 1.96:1, while `#222222` on `#5EB1EF` measures approximately 6.83:1. Color remains secondary to labels for status meaning.
+Action tokens are `action-primary: #E5E5E6`, `action-primary-text: #08090A`, `accent: #5E6AD2`, `accent-readable: #7E88DB`, and `accent-soft: #C2D2F2`. Neutral primary actions use the high-contrast light pill. `#5E6AD2` is reserved for non-text selection/fill or large text; it measures only about 4.42:1 against `#F7F8F8`. Text/icons on the dark canvas use `#7E88DB` when accent color is required. Color remains secondary to labels for status meaning.
 
 ### 2.5 Borders and elevation
 
-- Border: one semantic 1px neutral border (`#DFDFDF` on light surfaces; `#555555` on dark surfaces), with semantic variants only when meaning requires them.
+- Border: `1px solid rgba(255, 255, 255, .12)` on dark surfaces. The extracted `0.666667px` value is normalized to a stable device-independent pixel.
 - Elevation 0: default cards, rows, sections, and controls; no shadow.
-- Elevation 1: interactive lift or sticky separation; `0 1px 2px rgba(0, 0, 0, .05)`.
+- Elevation 1: interactive/sticky separation via border or background shift; no default shadow.
 - Elevation 2: sheet/drawer/action bar; `0 2px 6px rgba(0, 0, 0, .12), 0 6px 12px rgba(55, 55, 55, .08)`.
 - Elevation 3: temporary modal/critical overlay only; use the supplied large shadow recipe, never on ordinary cards.
 - `shadow-inner` is reserved for pressed/inset controls. Extra-large shadow is not admitted into v1.
@@ -126,12 +127,12 @@ Business status, execution state, and presentation state remain separate. Domain
 
 ### 2.10 Focus, motion, layers, and responsive normalization
 
-- Focus ring: `2px solid #BFDBFE` with a 2px dark or light offset chosen for the current surface. Focus must never depend on shadow alone.
-- Motion: `150ms ease-out` for open/close and hover transitions; `75ms ease-out` for press feedback. Under `prefers-reduced-motion`, remove non-essential movement and retain immediate state changes.
-- Hover may add Elevation 1 and a subtle color shift. Do not apply `opacity: .5` to the whole control because it weakens text/icon contrast; reserve reduced opacity for disabled states.
+- Focus ring: `2px solid #7E88DB` with a 2px `#08090A` offset. The source's shadow-only focus recipe is insufficient and is not adopted.
+- Motion: `160ms cubic-bezier(.25, .46, .45, .94)` for open/close and `100ms` for press/hover feedback. The completed curve is a BOSS inference because the supplied source value was truncated. Under `prefers-reduced-motion`, remove non-essential movement and retain immediate state changes.
+- Hover uses a subtle color/border shift and at most `translateY(-1px)`. The extracted `translateY(16px); opacity: 0` is treated as an exit/entrance artifact and rejected as hover behavior.
 - Layer tokens: `content: 0`, `sticky: 10`, `dropdown: 100`, `modal: 200`, `tooltip: 300`. Source values such as `100001` and `2147483647` are rejected as implementation leakage.
-- Canonical breakpoints: `compact: 576px`, `wide-mobile: 640px`, `tablet: 768px`, and `content-max: 800px`. Near-duplicate source queries at 575/576, 650/651, 767/768, and 780px are normalized rather than copied.
-- The primary content frame is `min(100%, 800px)`. Mobile uses at least 16px inline page padding; the extracted 8px gutter is permitted only inside dense nested grids, not at the viewport edge.
+- Canonical breakpoints: `compact: 560px`, `wide-mobile: 640px`, `tablet: 768px`, `desktop: 1024px`, and `wide: 1280px`. Intermediate source queries at 600/1120/1536px require a component-specific reason before admission.
+- The application shell is `min(100%, 1264px)`; focused reading/form content remains capped at 800px. Mobile uses at least 16px inline page padding. A 4px gutter is an internal-grid token, never viewport padding.
 - Radix UI is a candidate implementation substrate for accessible overlays, menus, tabs, and focus management. It is not a visual identity and is not required for VUX-0 unless dependency review approves adding it.
 
 ## 3. Approved variation
@@ -185,27 +186,27 @@ Rules:
 
 ## 6. UIDrop input disposition
 
-Owner-supplied UIDrop token input has been normalized into the BOSS-owned foundations above. The raw evidence boundary is recorded in `docs/ux/reference-evidence/uidrop/owner-supplied-visual-token-extraction.md`. The extraction is evidence for design language, not permission to copy source branding or library internals.
+Two owner-supplied UIDrop inputs have been normalized into the BOSS-owned foundations above. Their evidence boundaries are recorded in `docs/ux/reference-evidence/uidrop/owner-supplied-visual-token-extraction.md` and `docs/ux/reference-evidence/uidrop/owner-supplied-balanced-rounded-extraction.md`. The extractions are evidence for design language, not permission to copy source branding or library internals.
 
 | Input area | Disposition | BOSS decision | Remaining verification |
 |---|---|---|---|
-| Radius | `ADAPT` | chip 4px, control 6px, surface 8px, overlay 12px | Screenshot supports subtle rounding but cannot distinguish exact values |
-| Spacing | `ADOPT` core; `ADAPT` extended | 4px grid with 4–24px core and 32–48px layout steps | Validate Hebrew density at 390px |
-| Typography | `ADAPT` | Inter var; 14px body at 1.6; semantic role scale | Compare Hebrew body weight 350 vs 400 |
-| Palette | `ADAPT` | dark canvas, light work surfaces, BOSS blue actions | Validate full semantic status palette and contrast |
+| Radius | `ADAPT` | 4px surfaces, 6px inputs, 12px overlays, pill actions/chips | Validate pills do not overwhelm dense mobile rows |
+| Spacing | `ADOPT` core; `ADAPT` extended | 4px grid with 4–24px core and 32–48px app layout steps; 96/128 display-only | Validate Hebrew density at 390px |
+| Typography | `ADAPT` | Inter var; 16/24 body and application-specific role scale | Validate Hebrew text at 390px; keep 64/40 display sizes out of Ventures |
+| Palette | `ADAPT` | `#08090A` canvas, `#1C1D1E` surfaces, light CTA, violet-blue accent | Validate full semantic status palette and contrast |
 | Elevation | `ADAPT` | flat by default; small/medium only for interaction and overlays | Compare sticky/detail separation visually |
-| Inputs/focus | `ADOPT` focus concept | 6px controls; 2px `#BFDBFE` ring with offset | Capture default/hover/focus/invalid/disabled states |
-| Motion | `ADOPT` | 150ms/75ms ease-out with reduced-motion fallback | Verify no essential meaning depends on motion |
-| Breakpoints/layers | `REJECT` raw values; normalize | 576/640/768/800 and 0/10/100/200/300 layers | Confirm against real TMA content, not source selectors |
+| Inputs/focus | `ADAPT` | 6px inputs; visible 2px `#7E88DB` ring and offset | Capture default/hover/focus/invalid/disabled states |
+| Motion | `ADAPT` | 160ms/100ms inferred ease-out curve; disappearing hover rejected | Verify no essential meaning depends on motion |
+| Breakpoints/layers | `REJECT` raw values; normalize | 560/640/768/1024/1280 and 0/10/100/200/300 layers | Confirm against real TMA content, not source selectors |
 | Source CSS/library names | `REJECT` | BOSS semantic names only | None |
 
 ### Supported now vs waiting for visual QA
 
 Supported now: hierarchy, component responsibilities, action lifecycle, status semantics, mobile/RTL rules, density modes, collection/detail continuity, validation, receipts, accessibility contracts, and the normalized visual token direction.
 
-Screenshot-supported now: compact chrome, border-led hierarchy, restrained rounding, flat default surfaces, a narrow-control/wide-work desktop composition, and generous whitespace around the primary work state.
+Screenshot-supported now: compact chrome, border-led hierarchy, flat default surfaces, a narrow-control/wide-work desktop composition, near-black canvas, high-contrast typography, selective pill actions, and generous whitespace around the primary decision/work state.
 
-Waiting for implementation QA: Ventures-specific hierarchy and density, dark-palette behavior, Hebrew weight calibration, semantic status colors, and complete input/search interaction states. The supplied screenshot is evidence for design language, not a same-screen reference, so no claim of visual match is made.
+Waiting for implementation QA: Ventures-specific hierarchy and density, Hebrew rendering, semantic status colors, pill frequency, and complete input/search interaction states. Both supplied screenshots are evidence for design language, not same-screen references, so no claim of visual match is made.
 
 UIDrop findings must be recorded as BOSS-owned tokens and reviewed against Hebrew text, 390px mobile, contrast, and Telegram safe-area behavior. They cannot be copied wholesale from a reference.
 
