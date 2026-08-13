@@ -1,0 +1,2 @@
+# Optional isolated POC dependency. Do not add to production requirements.
+crawl4ai>=0.9,<1
