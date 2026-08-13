@@ -1,16 +1,16 @@
 # BOSS Design System v1
 
 **Date:** 13/08/2026
-**Status:** `V1 PROPOSAL — TWO UIDROP REFERENCES SYNTHESIZED; IMPLEMENTATION QA PENDING`
+**Status:** `V1 PROPOSAL — THREE UIDROP REFERENCES SYNTHESIZED; IMPLEMENTATION QA PENDING`
 **Authority:** Implements the owner-approved SCOREBOS UX Constitution and BOSS Unified Screen Contract. It does not change product navigation, schema, runtime, permissions, or action authority.
 
 ## 1. System rule
 
 Core contracts are uniform across SCOREBOS. A workspace may vary only through approved composition and density modes. New screens must reuse these foundations and components before proposing a new pattern.
 
-The first proving surface is Ventures. The visual direction is balanced, modern, dark, and flat: a near-black application canvas, quiet dark work surfaces, high-contrast typography, compact information density, selective pill actions, restrained card rounding, and a violet-blue accent. The values below synthesize two owner-supplied UIDrop references into BOSS-owned semantic tokens; source-library names, brand identity, marketing copy, and one-off implementation artifacts are not part of the system.
+The first proving surface is Ventures. The visual direction is balanced, modern, dark, and flat: a near-black application canvas, quiet dark work surfaces, high-contrast typography, compact information density, selective pill actions, restrained card rounding, a violet-blue accent, and layered elevation only for temporary overlays. The values below synthesize three owner-supplied UIDrop references into BOSS-owned semantic tokens; source-library names, brand identity, marketing copy, and one-off implementation artifacts are not part of the system.
 
-The first 720×450 workbench screenshot supports compact split-pane hierarchy but is washed out. The second 1024×505 landing-page screenshot clearly supports the dark canvas, quiet chrome, high-contrast text, light pill CTA, flat borders, and generous decision-level whitespace. Neither screenshot is a Ventures workspace or mobile flow. The normalized token set is sufficient for the first implementation PR, while application density and same-viewport behavior must be proven on the implemented Ventures screen.
+The first 720×450 workbench screenshot supports compact split-pane hierarchy but is washed out. The second 1024×505 landing-page screenshot clearly supports the dark canvas, quiet chrome, high-contrast text, light pill CTA, flat borders, and generous decision-level whitespace. The third 720×450 light marketing screenshot supports whitespace-led grouping, rounded temporary layers, 6px inputs, and restrained overlay shadow, but not a light app theme. None is a Ventures workspace or mobile flow. The normalized token set is sufficient for the first implementation PR, while application density and same-viewport behavior must be proven on the implemented Ventures screen.
 
 ## 2. Foundations
 
@@ -56,7 +56,7 @@ Use four BOSS roles only:
 
 - `radius-surface`: 4px for cards, list rows, alerts, and sections.
 - `radius-control`: 6px for inputs and compact controls.
-- `radius-overlay`: 12px for sheets, drawers, and modals.
+- `radius-overlay`: 16px for sheets, drawers, menus, and modals.
 - `radius-pill`: 9999px for primary/secondary buttons and compact filter chips only.
 
 Pill geometry communicates an action or compact selection; it is never applied to cards, sheets, data rows, or every surface. This preserves the reference's rounded/flat balance without turning the workspace into a field of capsules.
@@ -80,7 +80,7 @@ Action tokens are `action-primary: #E5E5E6`, `action-primary-text: #08090A`, `ac
 - Border: `1px solid rgba(255, 255, 255, .12)` on dark surfaces. The extracted `0.666667px` value is normalized to a stable device-independent pixel.
 - Elevation 0: default cards, rows, sections, and controls; no shadow.
 - Elevation 1: interactive/sticky separation via border or background shift; no default shadow.
-- Elevation 2: sheet/drawer/action bar; `0 2px 6px rgba(0, 0, 0, .12), 0 6px 12px rgba(55, 55, 55, .08)`.
+- Elevation 2: sheet/drawer/menu/action bar; `0 8px 32px rgba(0, 0, 0, .12)`.
 - Elevation 3: temporary modal/critical overlay only; use the supplied large shadow recipe, never on ordinary cards.
 - `shadow-inner` is reserved for pressed/inset controls. Extra-large shadow is not admitted into v1.
 - Do not combine heavy shadow, strong border, and colored background unless the state is critical.
@@ -186,7 +186,7 @@ Rules:
 
 ## 6. UIDrop input disposition
 
-Two owner-supplied UIDrop inputs have been normalized into the BOSS-owned foundations above. Their evidence boundaries are recorded in `docs/ux/reference-evidence/uidrop/owner-supplied-visual-token-extraction.md` and `docs/ux/reference-evidence/uidrop/owner-supplied-balanced-rounded-extraction.md`. The extractions are evidence for design language, not permission to copy source branding or library internals.
+Three owner-supplied UIDrop inputs have been normalized into the BOSS-owned foundations above. Their evidence boundaries are recorded in `docs/ux/reference-evidence/uidrop/owner-supplied-visual-token-extraction.md`, `docs/ux/reference-evidence/uidrop/owner-supplied-balanced-rounded-extraction.md`, and `docs/ux/reference-evidence/uidrop/owner-supplied-light-layered-extraction.md`. The extractions are evidence for design language, not permission to copy source branding or library internals.
 
 | Input area | Disposition | BOSS decision | Remaining verification |
 |---|---|---|---|
@@ -199,14 +199,15 @@ Two owner-supplied UIDrop inputs have been normalized into the BOSS-owned founda
 | Motion | `ADAPT` | 160ms/100ms inferred ease-out curve; disappearing hover rejected | Verify no essential meaning depends on motion |
 | Breakpoints/layers | `REJECT` raw values; normalize | 560/640/768/1024/1280 and 0/10/100/200/300 layers | Confirm against real TMA content, not source selectors |
 | Source CSS/library names | `REJECT` | BOSS semantic names only | None |
+| Light layered reference | `REFERENCE ONLY` foundation; `ADAPT` overlays | Keep dark app foundation; use 16px temporary overlays, 6px inputs, and restrained Elevation 2 | Verify focus trap, dismissal, keyboard order, and dark-surface contrast |
 
 ### Supported now vs waiting for visual QA
 
 Supported now: hierarchy, component responsibilities, action lifecycle, status semantics, mobile/RTL rules, density modes, collection/detail continuity, validation, receipts, accessibility contracts, and the normalized visual token direction.
 
-Screenshot-supported now: compact chrome, border-led hierarchy, flat default surfaces, a narrow-control/wide-work desktop composition, near-black canvas, high-contrast typography, selective pill actions, and generous whitespace around the primary decision/work state.
+Screenshot-supported now: compact chrome, border-led hierarchy, flat default surfaces, a narrow-control/wide-work desktop composition, near-black canvas, high-contrast typography, selective pill actions, generous whitespace around the primary decision/work state, and clearly layered temporary overlays.
 
-Waiting for implementation QA: Ventures-specific hierarchy and density, Hebrew rendering, semantic status colors, pill frequency, and complete input/search interaction states. Both supplied screenshots are evidence for design language, not same-screen references, so no claim of visual match is made.
+Waiting for implementation QA: Ventures-specific hierarchy and density, Hebrew rendering, semantic status colors, pill frequency, overlay focus/dismissal, and complete input/search interaction states. The supplied screenshots are evidence for design language, not same-screen references, so no claim of visual match is made.
 
 UIDrop findings must be recorded as BOSS-owned tokens and reviewed against Hebrew text, 390px mobile, contrast, and Telegram safe-area behavior. They cannot be copied wholesale from a reference.
 

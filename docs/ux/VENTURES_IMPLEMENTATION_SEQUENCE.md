@@ -46,6 +46,7 @@
 - Primary buttons use the accessible light-surface/dark-text BOSS action pair. Accent text/icons use `#7E88DB`; the lower-contrast `#5E6AD2` is not used for normal text.
 - Default cards remain flat; shadows appear only for interactive lift, sticky separation, or overlays.
 - Pill geometry is limited to actions and compact selections; cards and rows remain 4px surfaces.
+- Light-reference gradients, Poppins display scale, and 16–24px marketing cards are not part of VUX-0; only 16px temporary overlays and the restrained overlay shadow are admitted.
 
 **Tests**
 
@@ -256,7 +257,7 @@
 
 | Dependency/blocker | Blocks | Resolution owner/input |
 |---|---|---|
-| UIDrop screenshots are a cropped workbench and a marketing landing page, not Ventures | Source-to-Ventures fidelity claims; does not block VUX-0 | Use them for palette/hierarchy/spacing cues only; validate Ventures at 390×844, tablet, and desktop |
+| UIDrop screenshots show a workbench and two marketing states, not Ventures | Source-to-Ventures fidelity claims; does not block VUX-0 | Use them for palette/hierarchy/spacing/overlay cues only; validate Ventures at 390×844, tablet, and desktop |
 | No frontend component-test harness identified | Automated UI coverage | Separate tooling decision or use existing CI/build/manual evidence |
 | Venture writes bypass centralized ActionGateway according to current audit | VUX-5 canonical actions/receipts | Existing Action/runtime authority; separate reviewed backend work |
 | No structured Venture timeline projection | VUX-4 Timeline | Business Memory/Interaction/receipt authority decision |
