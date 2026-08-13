@@ -3685,6 +3685,18 @@ def run_agent(
             f"msg='{user_text[:60]}'"
         )
 
+    # Read-only discovery path: recommendations come only from the canonical
+    # external-tool catalog; no upload, execution, approval, or new source of truth.
+    try:
+        from business_tool_registry import maybe_recommend
+        _tool_recommendation = maybe_recommend(user_text)
+    except Exception:
+        _tool_recommendation = None
+    if _tool_recommendation:
+        if _out_meta is not None:
+            _out_meta["source_module"] = "business_tool_registry"
+        return _tool_recommendation
+
     # PR2 קובע את ה-snapshot הקנוני של ActionContracts לפני כל עבודת lead
     # capture, Session, Router, Business Memory, או Agent. מסלולים ישנים
     # משתמשים חוזר באותו snapshot בהמשך הטורן.
