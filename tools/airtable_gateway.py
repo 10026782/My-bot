@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import urllib.parse
 from dataclasses import dataclass
 
@@ -19,6 +20,30 @@ import schema_validator as _sv
 from airtable_schema import FIELD_ALIASES
 
 logger = logging.getLogger(__name__)
+
+# Bounded observability for RuntimeSchemaProvider's state at the one point
+# where "off" bypasses it entirely (see _log_schema_provider_validation_path
+# below) — a set of already-logged state strings, not a per-call log. Cardinality
+# is bounded by _SCHEMA_PROVIDER_STATES (3: off/shadow/enforce), so this never
+# grows unbounded. Lock only guards the log-once check itself; never gates or
+# delays the actual validation path.
+_schema_provider_states_logged: set[str] = set()
+_schema_provider_states_lock = threading.Lock()
+
+
+def _log_schema_provider_validation_path(state: str) -> None:
+    """Emits '[RuntimeSchemaProvider] validation_path state=<off|shadow|enforce>'
+    at INFO once per distinct state value observed in this process — proves the
+    validation path was reached and which state it saw, without one log line per
+    write. Metadata only (the state string itself): no table name, no field
+    names/values, no payload. Purely observational — never calls into
+    RuntimeSchemaProvider/get_table_contract() itself, so state=="off" still
+    means zero provider invocation, unchanged."""
+    with _schema_provider_states_lock:
+        if state in _schema_provider_states_logged:
+            return
+        _schema_provider_states_logged.add(state)
+    logger.info("[RuntimeSchemaProvider] validation_path state=%s", state)
 
 
 @dataclass(frozen=True)
@@ -145,6 +170,7 @@ def validate_airtable_fields(table: str, fields: dict) -> tuple[dict, list[str]]
     # RuntimeSchemaProvider going forward.
     from feature_flags import get_runtime_schema_provider_state
     state = get_runtime_schema_provider_state()
+    _log_schema_provider_validation_path(state)
 
     legacy_unknown = _sv.validate_fields(table, clean)
 

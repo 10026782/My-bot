@@ -306,6 +306,81 @@ with patch("tools.airtable_gateway.httpx.patch", side_effect=fake_patch_t5), \
     ok = airtable_patch("Leads", "recABC123", {"Score": 80}, source="tma")
     chk("T5: fully valid payload → still succeeds (no regression)", ok is True)
 
+
+# ══════════════════════════════════════════════════════════════════
+# T6 (Agent 2 observability) — RuntimeSchemaProvider bounded
+# "validation_path" marker. Proves: fires once per distinct state value
+# (not per validate_airtable_fields() call), state=off still never invokes
+# the provider (no behavior change), and the marker carries no table/field
+# metadata — state only.
+# ══════════════════════════════════════════════════════════════════
+
+print("\n── T6: RuntimeSchemaProvider bounded validation_path marker ──")
+
+import tools.airtable_gateway as _ag
+
+
+class _T6LogHandler(logging.Handler):
+    def __init__(self):
+        super().__init__()
+        self.records: list[str] = []
+
+    def emit(self, record):
+        self.records.append(record.getMessage())
+
+
+def _t6_capture():
+    h = _T6LogHandler()
+    lg = logging.getLogger("tools.airtable_gateway")
+    lg.setLevel(logging.INFO)
+    lg.addHandler(h)
+    return lg, h
+
+
+# state=off: bounded (2 calls -> 1 marker) AND the provider is never touched.
+_ag._schema_provider_states_logged.clear()
+with patch("feature_flags.get_runtime_schema_provider_state", return_value="off"), \
+     patch("core.runtime_schema_provider.get_provider") as _mock_get_provider_t6:
+    lg6, h6 = _t6_capture()
+    validate_airtable_fields("Leads", {"Score": 80})
+    validate_airtable_fields("Leads", {"Score": 81})
+    lg6.removeHandler(h6)
+
+marker_off = [m for m in h6.records if m.startswith("[RuntimeSchemaProvider] validation_path")]
+chk(
+    f"state=off: validation_path marker fires exactly once across 2 calls (bounded, not per-call) — {marker_off}",
+    len(marker_off) == 1,
+)
+chk(
+    f"state=off: marker carries only the state value — no table/field metadata — {marker_off}",
+    marker_off == ["[RuntimeSchemaProvider] validation_path state=off"],
+)
+chk(
+    "state=off: RuntimeSchemaProvider.get_provider() is never called (unchanged 'off' behavior)",
+    _mock_get_provider_t6.call_count == 0,
+)
+
+# state=shadow: a genuinely new state value still logs once (bounded per
+# distinct value, not a one-time-ever latch) — off from the block above is
+# not re-logged.
+_SHADOW_CONTRACT_T6 = _contract({"Score": {"field_id": "fldS", "type": "number", "choices": []}})
+with patch("feature_flags.get_runtime_schema_provider_state", return_value="shadow"), \
+     patch("core.runtime_schema_provider.get_provider", return_value=_FakeProvider(_SHADOW_CONTRACT_T6)):
+    lg7, h7 = _t6_capture()
+    validate_airtable_fields("Leads", {"Score": 80})
+    validate_airtable_fields("Leads", {"Score": 81})
+    lg7.removeHandler(h7)
+
+marker_shadow = [m for m in h7.records if m.startswith("[RuntimeSchemaProvider] validation_path")]
+chk(
+    f"state=shadow: validation_path marker fires exactly once across 2 calls — {marker_shadow}",
+    len(marker_shadow) == 1,
+)
+chk(
+    f"state=shadow: marker text is 'state=shadow' (off from the earlier block is not re-logged) — {marker_shadow}",
+    marker_shadow == ["[RuntimeSchemaProvider] validation_path state=shadow"],
+)
+
 # ══════════════════════════════════════════════════════════════════
 # Summary
 # ══════════════════════════════════════════════════════════════════

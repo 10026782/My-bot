@@ -5501,6 +5501,16 @@ def _process_structured_file_upload(
                 envelope.envelope_id, row_index, type(exc).__name__,
             )
             trace.record_classification(classification_error=type(exc).__name__)
+            # Sanitized INFO counterpart to the debug row-trace lines below —
+            # bounded metadata only (status is a fixed enum, raw_ref_present
+            # is a bool), never raw_ref itself, never exception text. Exists
+            # because logger.debug() never emits at this app's default INFO
+            # level (logging.basicConfig above) — without this, a recorded
+            # EvidenceTrace produces zero visible runtime evidence.
+            logger.info(
+                "[C94] trace_marker envelope_id=%s status=%s raw_ref_present=%s",
+                envelope.envelope_id, trace.status, trace.raw_ref is not None,
+            )
             failed_count += 1
             continue
         trace.record_classification(
@@ -5509,6 +5519,10 @@ def _process_structured_file_upload(
         )
         logger.debug(
             f"[C94] row trace: envelope_id={envelope.envelope_id} tier={ic.tier} raw_ref={trace.raw_ref}"
+        )
+        logger.info(
+            "[C94] trace_marker envelope_id=%s status=%s tier=%s raw_ref_present=%s",
+            envelope.envelope_id, trace.status, ic.tier, trace.raw_ref is not None,
         )
 
         tier_counts[ic.tier] = tier_counts.get(ic.tier, 0) + 1
