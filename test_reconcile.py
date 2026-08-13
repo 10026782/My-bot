@@ -505,6 +505,64 @@ def test_workflow_has_idempotency_guard_and_split_permissions():
     assert "needs.check.outputs.outcome == 'AUTO_MAINTENANCE_REQUIRED'" in text
 
 
+# --- Follow-up correction: crash-recovery idempotency (branch pushed but --
+
+def test_workflow_yaml_parses():
+    """The workflow must be syntactically valid YAML with correctly
+    de-indented block-scalar content -- a flush-left python heredoc body
+    embedded in an indented `run: |` block is invalid YAML (breaks the
+    block scalar at the first under-indented line) even though it can look
+    fine to a human skim. Parse it for real rather than grepping text."""
+    import yaml
+
+    workflow = REPO_ROOT / ".github/workflows/context-librarian-reconcile.yml"
+    data = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+    assert data["jobs"]["check"]["steps"]
+    assert data["jobs"]["prepare-maintenance-pr"]["steps"]
+
+
+def test_workflow_distinguishes_four_crash_recovery_cases():
+    """PR that failed before gh pr create is not the same as a fully
+    handled SHA -- 'branch exists' alone must not collapse into a single
+    skip=true, per the AGENT 1 'FINAL TWO FIXES' correction."""
+    workflow = REPO_ROOT / ".github/workflows/context-librarian-reconcile.yml"
+    text = workflow.read_text(encoding="utf-8")
+    for case in ("absent", "complete", "missing_pr", "unprovable"):
+        assert f"case == '{case}'" in text
+
+    # case 3 (missing_pr): recovers by creating only the missing PR, must
+    # never re-create the branch or re-run apply-auto.
+    missing_pr_step = text.split("case == 'missing_pr'")[1].split("- name:")[0]
+    assert "gh pr create" in missing_pr_step
+    assert "checkout -b" not in missing_pr_step
+    assert "apply-auto" not in missing_pr_step
+    assert "git push" not in missing_pr_step
+
+    # case 4 (unprovable): fails closed, never mutates the branch.
+    unprovable_step = text.split("case == 'unprovable'")[1].split("- name:")[0]
+    assert "exit 1" in unprovable_step
+    assert "git push" not in unprovable_step
+    assert "checkout -b" not in unprovable_step
+    assert "git push --force" not in unprovable_step
+
+    # case 2 (complete): pure no-op, no mutating commands at all.
+    complete_step = text.split("case == 'complete'")[1].split("- name:")[0]
+    assert "gh pr create" not in complete_step
+    assert "git push" not in complete_step
+
+
+def test_workflow_branch_provenance_check_proves_single_bot_commit_on_canonical_sha():
+    """The 'unprovable' classification must be driven by an actual proof --
+    exactly one commit ahead of the canonical SHA, authored by the bot
+    identity used elsewhere in this same workflow -- not just branch-name
+    pattern matching, which an attacker or unrelated branch could satisfy."""
+    workflow = REPO_ROOT / ".github/workflows/context-librarian-reconcile.yml"
+    text = workflow.read_text(encoding="utf-8")
+    assert 'rev-list --count "${sha}..${head_sha}"' in text
+    assert 'rev-parse "${head_sha}^"' in text
+    assert "context-librarian-bot@users.noreply.github.com" in text
+
+
 # --- H / I: automation never writes semantic-review provenance ------------
 
 
