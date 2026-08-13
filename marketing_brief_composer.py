@@ -89,6 +89,22 @@ def _demand_summary(demand: dict) -> str:
     return "\n".join(lines)
 
 
+# BUG-164 fix: compose_brief() (creative_ideas/creative_review/ad_package/
+# publishing_plan) had no equivalent of compose_production_handoff()'s
+# _INVENT_CONTRACT — nothing told the model that quantitative facts in
+# [פרטי הדרישה] (goals, timeframes, counts) must survive creative rewording
+# unchanged. Observed in production: Demand.Goal "10 מועמדים תוך שבוע" was
+# creatively rewritten into the unrelated claim "10 משרות פתוחות" by a
+# creative_ideas call. This rule closes that gap at the shared composer so
+# every task_type routed through compose_brief() carries the same guarantee.
+_DEMAND_FIDELITY_RULE = (
+    "אין לשנות, לעגל, להמיר או להמציא נתונים כמותיים, יעדים, לוחות זמנים, "
+    "כמויות או עובדות עסקיות אחרות המופיעות ב-[פרטי הדרישה]. מותר לנסח באופן "
+    "יצירתי ושונה בכל רעיון, אך העובדות עצמן (מספרים, זמנים, כמויות) חייבות "
+    "להישאר זהות למקור."
+)
+
+
 def compose_brief(
     *,
     demand: dict,
@@ -122,6 +138,7 @@ def compose_brief(
     parts.append(f"[פרטי הדרישה]\n{_demand_summary(demand)}")
     if selected_creative:
         parts.append(f"[הרעיון שנבחר]\n{selected_creative}")
+    parts.append(f"[כלל מחייב] {_DEMAND_FIDELITY_RULE}")
 
     return "\n\n".join(parts)
 
@@ -217,6 +234,19 @@ if __name__ == "__main__":
     assert "מתקינים" in b1
     assert "תמיד לציין שכר" in b1
     assert "[חוקי עסק]" in b1, "business_rules section label missing from composed brief"
+
+    # BUG-164 regression: quantitative facts from the Demand must appear
+    # verbatim in the composed brief, and the fidelity rule forbidding their
+    # alteration must be present, for every task_type routed through
+    # compose_brief() — not just production_handoff.
+    assert "10 מועמדים תוך שבוע" in b1, "Demand.Goal must appear verbatim in the composed brief"
+    assert "[כלל מחייב]" in b1 and "אין לשנות" in b1, "demand fidelity rule missing from compose_brief() output"
+    for tt in ("creative_ideas", "creative_review", "ad_package", "publishing_plan"):
+        brief_tt = compose_brief(demand=demand, task_type=tt)
+        assert "אין לשנות" in brief_tt and "להמציא" in brief_tt, (
+            f"demand fidelity rule missing for task_type={tt!r}"
+        )
+        assert "10 מועמדים תוך שבוע" in brief_tt, f"Demand.Goal missing verbatim for task_type={tt!r}"
     import sys
     assert "llm_fallback" not in sys.modules, "compose_brief must never trigger an AI-call import"
 
