@@ -46,6 +46,7 @@ import os
 import sys
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from unittest.mock import patch, MagicMock
@@ -193,7 +194,11 @@ def test_concurrent_claims_real_postgresql():
     """
     from core.atomic_claim_repository import claim_contract_execution
 
-    contract_id = f"test-contract-real-{int(time.time())}"
+    # uuid4, not int(time.time()): this file's rows are never truncated
+    # between runs (repeated CI --repeat invocations, or repeated local
+    # runs, share one long-lived Postgres service), and second-granularity
+    # ids collide with a prior run's already-committed row.
+    contract_id = f"test-contract-real-{uuid.uuid4().hex}"
     results = []
     results_lock = threading.Lock()
 
@@ -202,7 +207,7 @@ def test_concurrent_claims_real_postgresql():
         result = claim_contract_execution(
             contract_id=contract_id,
             claimant_id=f"boss_hq:user_{thread_id}",
-            idempotency_key=f"idem-key-{thread_id}",
+            idempotency_key=f"idem-key-{contract_id}-{thread_id}",
         )
         with results_lock:
             results.append(result)
@@ -244,8 +249,10 @@ def test_idempotency_key_prevents_duplicates():
     """
     from core.atomic_claim_repository import claim_contract_execution
 
-    contract_id = f"test-contract-idempotency-{int(time.time())}"
-    idempotency_key = f"idem-key-{int(time.time())}"
+    # uuid4, not int(time.time()) — see the matching note in
+    # test_concurrent_claims_real_postgresql above.
+    contract_id = f"test-contract-idempotency-{uuid.uuid4().hex}"
+    idempotency_key = f"idem-key-{uuid.uuid4().hex}"
 
     # First attempt
     result1 = claim_contract_execution(
@@ -331,7 +338,9 @@ def test_strict_concurrency_with_barrier():
     """
     from core.atomic_claim_repository import claim_contract_execution
 
-    contract_id = f"test-contract-barrier-{int(time.time())}"
+    # uuid4, not int(time.time()) — see the matching note in
+    # test_concurrent_claims_real_postgresql above.
+    contract_id = f"test-contract-barrier-{uuid.uuid4().hex}"
     barrier = SynchronizationBarrier()
     results = []
     results_lock = threading.Lock()
