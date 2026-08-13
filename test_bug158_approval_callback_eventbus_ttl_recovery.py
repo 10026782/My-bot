@@ -48,8 +48,6 @@ os.environ.setdefault("RENDER_APP_URL", "https://example.com")
 os.environ.setdefault("SETUP_WEBHOOK", "0")
 
 import app  # noqa: E402
-import tc8_test_repo_stub  # noqa: E402
-tc8_test_repo_stub.patch_turn_state_repository()
 from identity import Identity, Role  # noqa: E402
 from core.action_gateway import action_gateway as _real_gw  # noqa: E402
 from event_bus import bus as _real_bus  # noqa: E402
