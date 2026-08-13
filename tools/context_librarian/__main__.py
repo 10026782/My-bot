@@ -17,7 +17,7 @@ from .librarian import (
     verify_consumption,
 )
 from .policy_registry import load_policy_registry
-from .reconcile import reconcile, stamp_observed
+from .reconcile import AUTO_MAINTENANCE_REQUIRED, CLEAN, OWNER_DECISION_REQUIRED, apply_auto_maintenance, reconcile, stamp_observed
 
 
 def _repo_root() -> Path:
@@ -148,6 +148,17 @@ def _parser() -> argparse.ArgumentParser:
             "code_paths, test_paths, canonical_docs, edges, or nodes."
         ),
     )
+    reconcile_mode.add_argument(
+        "--apply-auto",
+        action="store_true",
+        help=(
+            "Apply the full AUTO_MAINTENANCE_REQUIRED surface: last_observed_commit "
+            "bumps, last_source_scan_commit advance, and policy-pre-approved "
+            "registrations. Requires HEAD to equal the canonical main SHA and a "
+            "clean working tree. Refuses unless outcome is AUTO_MAINTENANCE_REQUIRED. "
+            "Re-verifies CLEAN after writing before exiting 0."
+        ),
+    )
 
     verify = sub.add_parser(
         "verify-consumption",
@@ -205,7 +216,7 @@ def main(argv: list[str] | None = None) -> int:
             result = reconcile(catalog, policies, main_ref=args.main_ref)
             print(json.dumps(result.to_json(), ensure_ascii=False, indent=2, sort_keys=True))
             if args.apply_observed:
-                if result.outcome == "OWNER_DECISION_REQUIRED":
+                if result.outcome == OWNER_DECISION_REQUIRED:
                     print(
                         "OWNER_DECISION_REQUIRED: refusing to write mechanical "
                         "provenance while a genuine owner decision is outstanding "
@@ -216,8 +227,33 @@ def main(argv: list[str] | None = None) -> int:
                 written = stamp_observed(catalog, result.canonical_main_sha)
                 print(f"stamped last_observed_commit on {len(written)} node(s): {', '.join(written) or '(none)'}")
                 return 0
+            if args.apply_auto:
+                if result.outcome != AUTO_MAINTENANCE_REQUIRED:
+                    print(
+                        f"{result.outcome}: refusing --apply-auto unless outcome is "
+                        f"{AUTO_MAINTENANCE_REQUIRED}",
+                        file=sys.stderr,
+                    )
+                    return 1
+                applied = apply_auto_maintenance(catalog, result)
+                print(json.dumps(applied, ensure_ascii=False, indent=2, sort_keys=True))
+                verify_catalog = load_catalog(_repo_root())
+                verify_result = reconcile(verify_catalog, policies, main_ref=args.main_ref)
+                if verify_result.outcome != CLEAN:
+                    print(
+                        f"POST-APPLY VERIFICATION FAILED: expected CLEAN, got "
+                        f"{verify_result.outcome}",
+                        file=sys.stderr,
+                    )
+                    print(
+                        json.dumps(verify_result.to_json(), ensure_ascii=False, indent=2, sort_keys=True),
+                        file=sys.stderr,
+                    )
+                    return 1
+                print("CLEAN: post-apply verification passed")
+                return 0
             print(f"outcome: {result.outcome}")
-            if result.outcome == "OWNER_DECISION_REQUIRED":
+            if result.outcome == OWNER_DECISION_REQUIRED:
                 return 1
             return 0
 

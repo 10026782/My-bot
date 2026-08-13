@@ -11,23 +11,59 @@
       "runtime_consumed": false,
       "authority": false,
       "eligible_target": null,
+      "target_field": null,
       "auto_registration_allowed": false,
       "classification_when_matched": "AUTO_MAINTENANCE_ELIGIBLE",
       "notes": [
-        "eligible_target is null and auto_registration_allowed is false because these assets need no catalog node at all -- classify_new_sources() already treats *.png/*.jpg/etc as WARNING (never blocking) for any path via extension, not just docs/. This policy exists to make that decision explicit/reusable rather than only implicit in the classifier, per RECONCILIATION.md section B."
+        "eligible_target/target_field are null and auto_registration_allowed is false because these assets need no catalog node at all -- classify_new_sources() already treats *.png/*.jpg/etc as WARNING (never blocking) for any path via extension, not just docs/. This policy exists to make that decision explicit/reusable rather than only implicit in the classifier, per RECONCILIATION.md section B."
       ]
     },
     {
-      "id": "STAGING_VERIFICATION_ARTIFACT",
-      "description": "Bounded, manually-invoked staging-only verification scripts -- produce evidence, originate no business state, require explicit *_STAGING_NON_PRODUCTION env gating to run at all.",
-      "path_patterns": ["scripts/verify_*_staging.py"],
+      "id": "STAGING_VERIFICATION_F15",
+      "description": "F15 staging verification boundary -- exact-file policy, not a scripts/verify_*_staging.py catch-all. Verification CLASS (bounded, manually-invoked, *_STAGING_NON_PRODUCTION-gated) is reusable, but registration OWNER/TARGET is domain-specific and must never be inferred from the shared verify_*_staging.py naming convention alone.",
+      "path_patterns": ["scripts/verify_f15_staging.py"],
       "runtime_consumed": false,
       "authority": false,
       "eligible_target": "decision.f15_staging_verification_artifact",
+      "target_field": "test_paths",
       "auto_registration_allowed": true,
       "classification_when_matched": "AUTO_MAINTENANCE_ELIGIBLE",
       "notes": [
-        "Matches scripts/verify_f15_staging.py plus the pre-existing scripts/verify_bug157_160_163_staging.py and scripts/verify_bug161_162_callback_staging.py precedents (registered separately under layer.approvals/layer.turn_coordinator test_paths). A future verify_<X>_staging.py is mechanically eligible for the same treatment without a fresh owner decision."
+        "Requires decision.f15_staging_verification_artifact to actually be a loaded catalog node before reconcile() will route a match here into auto_maintenance_sources -- until that node exists (e.g. before PR #628 merges), a match falls to the decision queue with an explicit 'target does not exist yet' note instead of being silently treated as safe."
+      ]
+    },
+    {
+      "id": "STAGING_VERIFICATION_APPROVALS_BUG_FAMILY",
+      "description": "Bounded staging verification scripts for the specific approval-callback bug family they were written for -- owned by the Approvals/ActionContracts layer, the same layer their subject bugs live in.",
+      "path_patterns": [
+        "scripts/verify_bug157_160_163_staging.py",
+        "scripts/verify_bug161_162_callback_staging.py"
+      ],
+      "runtime_consumed": false,
+      "authority": false,
+      "eligible_target": "layer.approvals",
+      "target_field": "test_paths",
+      "auto_registration_allowed": true,
+      "classification_when_matched": "AUTO_MAINTENANCE_ELIGIBLE",
+      "notes": [
+        "Named family, not a scripts/verify_*_staging.py wildcard: these two files are individually named because they were individually reviewed and assigned to layer.approvals. A new verify_bugNNN_staging.py for a different bug is NOT assumed to belong here -- it falls to OWNER_DECISION_REQUIRED with no policy match until an owner extends this list or adds a new family policy."
+      ]
+    },
+    {
+      "id": "STAGING_VERIFICATION_TURN_COORDINATOR",
+      "description": "TC8/TC9 staging verification scripts -- owned by the Turn Coordinator layer.",
+      "path_patterns": [
+        "scripts/verify_tc8_staging.py",
+        "scripts/verify_tc9_staging.py"
+      ],
+      "runtime_consumed": false,
+      "authority": false,
+      "eligible_target": "layer.turn_coordinator",
+      "target_field": "test_paths",
+      "auto_registration_allowed": true,
+      "classification_when_matched": "AUTO_MAINTENANCE_ELIGIBLE",
+      "notes": [
+        "Both paths are already registered today (layer.turn_coordinator.test_paths and layer.approvals.test_paths), so this policy is precedent/traceability documentation, not an active registration path in practice -- classify_new_sources() already excludes registered paths before reconcile ever sees them."
       ]
     },
     {
@@ -37,10 +73,11 @@
       "runtime_consumed": false,
       "authority": false,
       "eligible_target": null,
+      "target_field": null,
       "auto_registration_allowed": false,
       "classification_when_matched": "AUTO_MAINTENANCE_ELIGIBLE",
       "notes": [
-        "Matches the tc8_test_repo_stub.py precedent (registered under layer.approvals/layer.turn_coordinator test_paths). eligible_target is left null and auto_registration_allowed false because, unlike the other policies, this class has no single owning layer -- which suite(s) a new stub supports is still a per-file judgment call; this policy only guarantees the file is never escalated to STOP on an authority-term coincidence and is never treated as an unknown-role REVIEW_REQUIRED runtime source."
+        "Matches the tc8_test_repo_stub.py precedent (registered under layer.approvals/layer.turn_coordinator test_paths). eligible_target/target_field are left null and auto_registration_allowed false because, unlike the other policies, this class has no single owning layer -- which suite(s) a new stub supports is still a per-file judgment call; this policy only guarantees the file is never escalated to STOP on an authority-term coincidence and is never treated as an unknown-role REVIEW_REQUIRED runtime source."
       ]
     },
     {
@@ -50,6 +87,7 @@
       "runtime_consumed": true,
       "authority": false,
       "eligible_target": "decision.tma_shared_ui_primitives",
+      "target_field": "code_paths",
       "auto_registration_allowed": false,
       "classification_when_matched": "AUTO_MAINTENANCE_ELIGIBLE",
       "notes": [
@@ -63,10 +101,12 @@
       "runtime_consumed": true,
       "authority": false,
       "eligible_target": "decision.business_domain_vocabulary",
+      "target_field": "code_paths",
       "auto_registration_allowed": true,
       "classification_when_matched": "AUTO_MAINTENANCE_ELIGIBLE",
       "notes": [
-        "Deliberately an exact-path policy, not a wildcard: \"consumed by more than one layer with no single legitimate owner\" is a per-file semantic fact that cannot be safely generalized to a directory or naming pattern. A different file making the same claim still requires a fresh OWNER_DECISION."
+        "Deliberately an exact-path policy, not a wildcard: \"consumed by more than one layer with no single legitimate owner\" is a per-file semantic fact that cannot be safely generalized to a directory or naming pattern. A different file making the same claim still requires a fresh OWNER_DECISION.",
+        "decision.business_domain_vocabulary does not exist as a catalog node yet on any branch as of this policy's authoring -- until it is created, reconcile() routes a domain_utils.py match to the decision queue with a 'target does not exist yet' note rather than silently claiming AUTO."
       ]
     },
     {
@@ -80,23 +120,42 @@
       "runtime_consumed": false,
       "authority": false,
       "eligible_target": "decision.offline_research_support_tool",
+      "target_field": "code_paths",
       "auto_registration_allowed": true,
       "classification_when_matched": "AUTO_MAINTENANCE_ELIGIBLE",
       "notes": [
-        "contact_merge.py and scripts/classify_contacts_for_airtable.py are pre-existing files of this class (both predate every current catalog anchor commit, so neither has ever appeared as a blocking new_source) -- listed here so a future rename/move/copy of either is still recognized under this bucket instead of re-litigating 'is this a standalone offline tool' from scratch."
+        "contact_merge.py and scripts/classify_contacts_for_airtable.py are pre-existing files of this class (both predate every current catalog anchor commit, so neither has ever appeared as a blocking new_source) -- listed here so a future rename/move/copy of either is still recognized under this bucket instead of re-litigating 'is this a standalone offline tool' from scratch.",
+        "decision.offline_research_support_tool is introduced by PR #628, not by this branch -- until that PR merges and this branch is rebased onto it, a match here falls to the decision queue with a 'target does not exist yet' note."
       ]
     },
     {
       "id": "EXTERNAL_RECOMMENDATION_CATALOG",
-      "description": "Read-only, curated catalogs of approved external tools/resources and their recommendation metadata -- explicitly not the internal execution Tool Registry, cannot dispatch or execute, cannot grant ActionGateway/tool-execution authority.",
-      "path_patterns": ["business_tool_registry.py", "test_business_tool_registry.py"],
+      "description": "Read-only, curated catalog of approved external tools/resources and their recommendation metadata -- explicitly not the internal execution Tool Registry, cannot dispatch or execute, cannot grant ActionGateway/tool-execution authority.",
+      "path_patterns": ["business_tool_registry.py"],
       "runtime_consumed": true,
       "authority": true,
       "eligible_target": "decision.external_business_tool_recommendation_catalog",
+      "target_field": "code_paths",
       "auto_registration_allowed": true,
       "classification_when_matched": "AUTO_MAINTENANCE_ELIGIBLE",
       "notes": [
-        "authority is true because this file IS the source of truth for which external tools are approved for recommendation (a real, narrow authority) -- but that authority is explicitly scoped away from tool_registry.py's internal-execution authority, per decision.external_business_tool_recommendation_catalog's source_of_truth.precedence."
+        "authority is true because this file IS the source of truth for which external tools are approved for recommendation (a real, narrow authority) -- but that authority is explicitly scoped away from tool_registry.py's internal-execution authority, per decision.external_business_tool_recommendation_catalog's source_of_truth.precedence.",
+        "Split from its test file into a separate policy (EXTERNAL_RECOMMENDATION_CATALOG_TEST) because the two register into different target_field values (code_paths vs test_paths) -- one policy cannot declare two target fields, and target_field is never inferred from a test_/non-test_ filename convention.",
+        "decision.external_business_tool_recommendation_catalog is introduced by PR #628, not by this branch -- until that PR merges and this branch is rebased onto it, a match here falls to the decision queue with a 'target does not exist yet' note."
+      ]
+    },
+    {
+      "id": "EXTERNAL_RECOMMENDATION_CATALOG_TEST",
+      "description": "Test suite for business_tool_registry.py -- same authority boundary as EXTERNAL_RECOMMENDATION_CATALOG, registered into test_paths instead of code_paths.",
+      "path_patterns": ["test_business_tool_registry.py"],
+      "runtime_consumed": true,
+      "authority": false,
+      "eligible_target": "decision.external_business_tool_recommendation_catalog",
+      "target_field": "test_paths",
+      "auto_registration_allowed": true,
+      "classification_when_matched": "AUTO_MAINTENANCE_ELIGIBLE",
+      "notes": [
+        "See EXTERNAL_RECOMMENDATION_CATALOG for why this is a separate policy rather than a second pattern on the same one."
       ]
     }
   ]

@@ -37,6 +37,7 @@ class Policy:
     runtime_consumed: bool
     authority: bool
     eligible_target: str | None
+    target_field: str | None
     auto_registration_allowed: bool
     classification_when_matched: str
     notes: tuple[str, ...]
@@ -69,6 +70,7 @@ def load_policy_registry(repo_root: Path | str) -> tuple[Policy, ...]:
     required = set(schema["required"])
     allowed = set(schema["allowed"])
     valid_classifications = set(schema["classification_when_matched_values"])
+    valid_target_fields = set(schema["target_field_values"])
 
     data = _load_json(repo_root / POLICY_REGISTRY_RELATIVE_PATH)
     if not isinstance(data, dict):
@@ -99,6 +101,25 @@ def load_policy_registry(repo_root: Path | str) -> tuple[Policy, ...]:
                 f"policy {policy_id}: unknown classification_when_matched "
                 f"{raw['classification_when_matched']!r}"
             )
+        eligible_target = raw["eligible_target"]
+        target_field = raw["target_field"]
+        # target_field is never inferred from path/filename prose -- it is an
+        # explicit, owner-authored field. The only structural rule enforced
+        # here is consistency with eligible_target's nullability.
+        if eligible_target is None and target_field is not None:
+            raise ContextLibrarianError(
+                f"policy {policy_id}: target_field must be null when eligible_target is null"
+            )
+        if eligible_target is not None and target_field not in valid_target_fields:
+            raise ContextLibrarianError(
+                f"policy {policy_id}: target_field must be one of {sorted(valid_target_fields)} "
+                "when eligible_target is set"
+            )
+        if eligible_target is None and bool(raw["auto_registration_allowed"]):
+            raise ContextLibrarianError(
+                f"policy {policy_id}: auto_registration_allowed cannot be true "
+                "without an eligible_target/target_field to register into"
+            )
         policies.append(
             Policy(
                 id=policy_id,
@@ -106,7 +127,8 @@ def load_policy_registry(repo_root: Path | str) -> tuple[Policy, ...]:
                 path_patterns=tuple(raw["path_patterns"]),
                 runtime_consumed=bool(raw["runtime_consumed"]),
                 authority=bool(raw["authority"]),
-                eligible_target=raw["eligible_target"],
+                eligible_target=eligible_target,
+                target_field=target_field,
                 auto_registration_allowed=bool(raw["auto_registration_allowed"]),
                 classification_when_matched=raw["classification_when_matched"],
                 notes=tuple(raw.get("notes", [])),
@@ -121,9 +143,17 @@ def match_policy(path: str, policies: tuple[Policy, ...]) -> Policy | None:
     Policies are checked in registry-declaration order; a path is expected
     to match at most one policy class in practice (the registry's patterns
     are deliberately narrow/non-overlapping), so first-match is equivalent
-    to unique-match for every policy defined today.
+    to unique-match for every policy defined today. Callers that need to
+    detect ambiguity (more than one matching policy) should use
+    matching_policies() instead -- this function alone cannot distinguish
+    "one clean match" from "first of several conflicting matches".
     """
     for policy in policies:
         if policy.matches(path):
             return policy
     return None
+
+
+def matching_policies(path: str, policies: tuple[Policy, ...]) -> tuple[Policy, ...]:
+    """Returns every policy whose path_patterns match `path`, in registry order."""
+    return tuple(policy for policy in policies if policy.matches(path))

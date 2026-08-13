@@ -719,7 +719,10 @@ def _catalog_referenced_paths(catalog: Catalog) -> set[str]:
             "docs/context_librarian/generated/.gitkeep",
             "docs/context_librarian/schema/edge_schema.json",
             "docs/context_librarian/schema/node_schema.json",
+            "docs/context_librarian/schema/policy_schema.json",
             "docs/context_librarian/task_profiles/profiles.json",
+            "docs/context_librarian/policies/policy_registry.json",
+            "docs/context_librarian/reconciliation_state.json",
             "tools/context_librarian/__init__.py",
             "tools/context_librarian/__main__.py",
             "tools/context_librarian/benchmark_token_estimate.py",
@@ -728,6 +731,10 @@ def _catalog_referenced_paths(catalog: Catalog) -> set[str]:
             "tools/context_librarian/manage_hooks.py",
             "tools/context_librarian/pilot_preflight.py",
             "tools/context_librarian/refresh_after_merge.py",
+            "tools/context_librarian/policy_registry.py",
+            "tools/context_librarian/reconcile.py",
+            "tools/context_librarian/reconciliation_state.py",
+            ".github/workflows/context-librarian-reconcile.yml",
         }
     )
     return {path.replace("\\", "/") for path in paths}
