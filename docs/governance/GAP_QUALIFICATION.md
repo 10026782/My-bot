@@ -32,7 +32,7 @@ Every open item must be classified into exactly one of:
 
 ## Worked examples
 
-### F14 Contact Gate — cross-instance dedup: CONDITIONAL_GAP
+### F14 Contact Gate — cross-instance dedup: EVIDENCE_GAP
 
 `find_or_create_contact()` (`crm.py:228`) serializes contact creation through
 `_CONTACT_DEDUP_LOCK = threading.Lock()` (`crm.py:27`) — an **in-process**
@@ -41,22 +41,29 @@ requests handled by the *same* Python process. It provides **no** protection
 against a race between two *separate* OS processes each holding their own
 lock instance.
 
-Current deployment (`docs/operations/DEPLOYMENT.md:85`): Start Command is
-`gunicorn app:app` with no `--workers` flag — gunicorn defaults to a single
-worker, and there is currently one Render service instance. Under that
-shape, "in-process lock" and "cross-request lock" are the same guarantee, so
-today's hardening is sufficient. This is not a defect: it's correct for the
-current deployment contract, not for all conceivable ones.
+Current launch command (`docs/operations/DEPLOYMENT.md:85`) proves that no
+explicit multi-worker gunicorn configuration is present. It does not prove
+the actual current Render service instance count. Therefore the repository
+cannot prove that the cross-instance trigger is currently inactive.
 
-**Activation trigger** (either flips this to ACTIVE_DEFECT and requires a
-real fix — e.g. an Airtable-side unique-phone constraint, a DB-backed
-lock/advisory lock, or routing dedup through a single-writer service):
-- gunicorn `--workers` set above 1, **or**
-- Render deployment instance count set above 1
+**Known:**
+- coordination in `find_or_create_contact()` is process-local;
+- the current launch command has no explicit multi-worker gunicorn setting.
 
-**Until then:** no code change. Re-check this classification specifically
-when either trigger is crossed — not on a calendar schedule, not because
-main advanced for unrelated reasons.
+**Unknown:**
+- the actual current deployment instance count.
+
+**Reclassification rule:**
+- if runtime/deployment evidence proves `workers == 1` **and** `instances == 1`,
+  reclassify as `CONDITIONAL_GAP`;
+- if runtime/deployment evidence proves `workers > 1` **or** `instances > 1`
+  while no durable cross-process dedup exists, reclassify as
+  `ACTIVE_DEFECT` / scaling blocker;
+- until topology evidence exists, retain `EVIDENCE_GAP`.
+
+No code change is authorized by this classification. Re-check when qualifying
+runtime/deployment topology evidence becomes available, not merely because
+unrelated commits land on `main`.
 
 ### F15 write-path migration — ALREADY_SATISFIED
 
