@@ -59,6 +59,8 @@ import app  # noqa: E402
 
 import emergency_stop_test_support  # noqa: E402
 emergency_stop_test_support.configure_all_clear_emergency_stop()
+import tc8_test_repo_stub  # noqa: E402
+tc8_test_repo_stub.patch_turn_state_repository()
 from identity import Identity, Role  # noqa: E402
 from core.action_gateway import (  # noqa: E402
     action_gateway as _real_gw,
