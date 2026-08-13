@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { fetchVentures, fetchVenture, createVenture, updateVenture } from "../api";
 import type { Venture, VenturesResponse } from "../types";
+import { PageHeader } from "./ui/PageHeader";
+import { ScreenState } from "./ui/ScreenState";
+import { StatusBadge } from "./ui/StatusBadge";
+import { Surface } from "./ui/Surface";
 
 interface Props {
   onBack: () => void;
@@ -17,38 +21,28 @@ type DetailState =
   | { status: "error"; message: string };
 
 type Toast = { type: "ok" | "err"; text: string };
+type StatusTone = "neutral" | "info" | "warning" | "success" | "danger";
 
 const STAGES = [
   "Research", "Supplier/Source Contact", "Due Diligence", "Legal/Tax Review",
   "Smoke Test", "GO", "NO-GO", "Converted",
 ];
 
-const STAGE_ICON: Record<string, string> = {
-  "Research": "🔍",
-  "Supplier/Source Contact": "🤝",
-  "Due Diligence": "🕵️",
-  "Legal/Tax Review": "⚖️",
-  "Smoke Test": "🧪",
-  "GO": "✅",
-  "NO-GO": "🛑",
-  "Converted": "🚀",
+const STAGE_TONE: Record<string, StatusTone> = {
+  Research: "neutral",
+  "Supplier/Source Contact": "info",
+  "Due Diligence": "warning",
+  "Legal/Tax Review": "info",
+  "Smoke Test": "warning",
+  GO: "success",
+  "NO-GO": "danger",
+  Converted: "success",
 };
 
-const STAGE_COLOR: Record<string, string> = {
-  "Research": "bg-gray-100 text-gray-700",
-  "Supplier/Source Contact": "bg-blue-100 text-blue-700",
-  "Due Diligence": "bg-yellow-100 text-yellow-700",
-  "Legal/Tax Review": "bg-purple-100 text-purple-700",
-  "Smoke Test": "bg-orange-100 text-orange-700",
-  "GO": "bg-green-100 text-green-700",
-  "NO-GO": "bg-red-100 text-red-700",
-  "Converted": "bg-emerald-100 text-emerald-700",
-};
-
-const CONVICTION_COLOR: Record<string, string> = {
-  Low: "text-gray-400",
-  Medium: "text-yellow-600",
-  High: "text-green-600",
+const CONVICTION_TONE: Record<string, StatusTone> = {
+  Low: "neutral",
+  Medium: "warning",
+  High: "success",
 };
 
 const DOMAINS = ["Real Estate", "Import", "SaaS", "Recruitment", "General"];
@@ -61,8 +55,9 @@ function fmt(n: number): string {
   return `₪${n.toLocaleString("he-IL")}`;
 }
 
-function stageIcon(s: string) { return STAGE_ICON[s] ?? "❔"; }
-function stageBadge(s: string) { return STAGE_COLOR[s] ?? "bg-gray-100 text-gray-600"; }
+function stageTone(stage: string): StatusTone {
+  return STAGE_TONE[stage] ?? "neutral";
+}
 
 // ── Venture Detail ──────────────────────────────────────────────
 
@@ -108,7 +103,7 @@ function VentureDetail({ ventureId, onBack }: { ventureId: string; onBack: () =>
 
       if (Object.keys(fields).length === 0) { showToast("ok", "אין שינויים"); return; }
       await updateVenture(ventureId, fields);
-      showToast("ok", "נשמר ✓");
+      showToast("ok", "נשמר");
       const updated = await fetchVenture(ventureId);
       setState({ status: "ok", data: updated });
       setEditStage(updated.stage);
@@ -125,115 +120,111 @@ function VentureDetail({ ventureId, onBack }: { ventureId: string; onBack: () =>
   const d = state.status === "ok" ? state.data : null;
 
   return (
-    <div className="min-h-screen bg-gray-100 pb-56">
-      <div className="bg-white px-4 pt-5 pb-4 mb-3 shadow-sm flex items-center gap-3">
-        <button onClick={onBack} className="text-blue-500 text-xl font-medium leading-none">←</button>
-        <div className="flex-1 min-w-0">
-          <h1 className="text-lg font-black text-gray-900 truncate">
-            {d ? `${stageIcon(d.stage)} ${d.name}` : "Venture"}
-          </h1>
-          <p className="text-xs text-gray-400">{d?.domain || "Venture Card"}</p>
-        </div>
-        {d?.stage && (
-          <span className={`text-xs px-2 py-1 rounded-full font-medium ${stageBadge(d.stage)}`}>
-            {d.stage}
-          </span>
+    <main className="ventures-screen ventures-screen--detail">
+      <div className="ventures-shell">
+        <PageHeader
+          onBack={onBack}
+          eyebrow="Venture card"
+          title={d?.name || "Venture"}
+          subtitle={d?.domain || "Strategic Layer"}
+          badge={d?.stage ? <StatusBadge tone={stageTone(d.stage)}>{d.stage}</StatusBadge> : undefined}
+        />
+
+        {toast && (
+          <div className={`ventures-toast ${toast.type === "err" ? "ventures-toast--error" : ""}`} role="status">
+            {toast.text}
+          </div>
+        )}
+
+        {state.status === "loading" && <ScreenState state="loading" message="טוען את כרטיס ההזדמנות" />}
+        {state.status === "error" && <ScreenState state="error" message={state.message} />}
+
+        {d && (
+          <div className="ventures-detail-stack">
+            <Surface>
+              <p className="ventures-section-label">פרטי החלטה</p>
+              <div className="ventures-detail-grid">
+                <div>
+                  <p className="ventures-detail-label">פוטנציאל משוער</p>
+                  <p className="ventures-detail-value">{fmt(d.estimated_potential)}</p>
+                </div>
+                <div>
+                  <p className="ventures-detail-label">ביטחון</p>
+                  <StatusBadge tone={CONVICTION_TONE[d.conviction] ?? "neutral"}>{d.conviction || "—"}</StatusBadge>
+                </div>
+                <div>
+                  <p className="ventures-detail-label">תאריך החלטה משוער</p>
+                  <p className="ventures-detail-value">{d.target_decision_date || "—"}</p>
+                </div>
+                <div>
+                  <p className="ventures-detail-label">תחום</p>
+                  <p className="ventures-detail-value">{d.domain || "—"}</p>
+                </div>
+              </div>
+            </Surface>
+
+            {d.decision_log && (
+              <Surface variant="subtle">
+                <p className="ventures-section-label">Decision Log</p>
+                <p className="ventures-detail-copy">{d.decision_log}</p>
+              </Surface>
+            )}
+          </div>
         )}
       </div>
 
-      {toast && (
-        <div className={`fixed top-4 left-4 right-4 z-50 rounded-xl px-4 py-3 text-sm font-medium shadow-lg text-center
-          ${toast.type === "ok" ? "bg-green-500 text-white" : "bg-red-500 text-white"}`}>
-          {toast.text}
-        </div>
-      )}
-
-      {state.status === "loading" && (
-        <div className="flex justify-center pt-16">
-          <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-        </div>
-      )}
-      {state.status === "error" && (
-        <div className="mx-4 bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">{state.message}</div>
-      )}
-
       {d && (
-        <div className="flex flex-col gap-3 px-4">
-          <div className="bg-white rounded-xl shadow-sm p-4">
-            <p className="text-xs text-gray-400 mb-3">פרטים</p>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-              <div>
-                <p className="text-[10px] text-gray-400">פוטנציאל משוער</p>
-                <p className="text-base font-bold text-gray-900">{fmt(d.estimated_potential)}</p>
-              </div>
-              <div>
-                <p className="text-[10px] text-gray-400">ביטחון</p>
-                <p className={`text-base font-bold ${CONVICTION_COLOR[d.conviction] ?? "text-gray-600"}`}>{d.conviction || "—"}</p>
-              </div>
-              <div>
-                <p className="text-[10px] text-gray-400">תאריך החלטה משוער</p>
-                <p className="text-sm font-semibold text-gray-700">{d.target_decision_date || "—"}</p>
-              </div>
-              <div>
-                <p className="text-[10px] text-gray-400">תחום</p>
-                <p className="text-sm font-semibold text-gray-700">{d.domain || "—"}</p>
-              </div>
+        <div className="ventures-action-bar">
+          <div className="ventures-action-bar__inner">
+            <div className="ventures-action-row" aria-label="שלב">
+              {STAGES.map((stage) => (
+                <button
+                  type="button"
+                  key={stage}
+                  onClick={() => setEditStage(stage)}
+                  className="ventures-choice"
+                  aria-pressed={editStage === stage}
+                >
+                  {stage}
+                </button>
+              ))}
+            </div>
+            <div className="ventures-action-row ventures-action-row--equal" aria-label="רמת ביטחון">
+              {CONVICTIONS.map((conviction) => (
+                <button
+                  type="button"
+                  key={conviction}
+                  onClick={() => setEditConviction(conviction)}
+                  className="ventures-choice"
+                  aria-pressed={editConviction === conviction}
+                >
+                  {conviction}
+                </button>
+              ))}
+            </div>
+            <input
+              type="text"
+              value={editNextAction}
+              onChange={(event) => setEditNextAction(event.target.value)}
+              placeholder="הצעד הבא"
+              className="boss-input"
+            />
+            <div className="ventures-action-row">
+              <input
+                type="text"
+                value={editNotes}
+                onChange={(event) => setEditNotes(event.target.value)}
+                placeholder="הערות"
+                className="boss-input"
+              />
+              <button type="button" onClick={handleSave} disabled={saving} className="boss-button boss-button--primary">
+                {saving ? "שומר…" : "שמור"}
+              </button>
             </div>
           </div>
-
-          {d.decision_log && (
-            <div className="bg-white rounded-xl shadow-sm p-4">
-              <p className="text-xs text-gray-400 mb-2">Decision Log</p>
-              <p className="text-sm text-gray-700 whitespace-pre-wrap">{d.decision_log}</p>
-            </div>
-          )}
         </div>
       )}
-
-      {/* ── Fixed action bar ── */}
-      {d && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 pt-3 pb-4 flex flex-col gap-2.5 shadow-xl">
-          {/* Stage chips */}
-          <div className="flex gap-1.5 overflow-x-auto">
-            {STAGES.map((s) => (
-              <button
-                key={s}
-                onClick={() => setEditStage(s)}
-                className={`flex-shrink-0 text-[11px] px-2.5 py-1.5 rounded-full font-medium transition-all
-                  ${editStage === s ? "bg-blue-500 text-white shadow" : stageBadge(s)}`}
-              >
-                {stageIcon(s)} {s}
-              </button>
-            ))}
-          </div>
-          {/* Conviction chips */}
-          <div className="flex gap-2">
-            {CONVICTIONS.map((c) => (
-              <button
-                key={c}
-                onClick={() => setEditConviction(c)}
-                className={`flex-1 text-xs py-1.5 rounded-full font-medium transition-all
-                  ${editConviction === c ? "bg-blue-500 text-white shadow" : "bg-gray-100 text-gray-600"}`}
-              >
-                {c}
-              </button>
-            ))}
-          </div>
-          {/* Next action */}
-          <input type="text" value={editNextAction} onChange={(e) => setEditNextAction(e.target.value)}
-            placeholder="הצעד הבא" className="bg-gray-100 rounded-xl px-3 py-2 text-sm outline-none placeholder-gray-400" />
-          {/* Notes + Save */}
-          <div className="flex gap-2">
-            <input type="text" value={editNotes} onChange={(e) => setEditNotes(e.target.value)}
-              placeholder="הערות" className="flex-1 bg-gray-100 rounded-xl px-3 py-2 text-sm outline-none placeholder-gray-400" />
-            <button onClick={handleSave} disabled={saving}
-              className="bg-blue-500 text-white rounded-xl px-5 py-2 text-sm font-medium disabled:opacity-40 active:opacity-70">
-              {saving ? "…" : "שמור"}
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
+    </main>
   );
 }
 
@@ -260,30 +251,27 @@ function NewVentureForm({ onCreated, onCancel }: { onCreated: (v: Venture) => vo
   }
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-40 flex items-end" onClick={onCancel}>
-      <div className="bg-white rounded-t-2xl w-full p-4 flex flex-col gap-3" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-base font-bold text-gray-900">🔭 Venture חדש</h2>
-        <input type="text" value={name} onChange={(e) => setName(e.target.value)}
-          placeholder="שם ההזדמנות" className="bg-gray-100 rounded-xl px-3 py-2 text-sm outline-none placeholder-gray-400" />
-        <div className="flex gap-2 overflow-x-auto">
-          {DOMAINS.map((dm) => (
-            <button
-              key={dm}
-              onClick={() => setDomain(dm)}
-              className={`flex-shrink-0 text-xs px-3 py-1.5 rounded-full font-medium transition-all
-                ${domain === dm ? "bg-blue-500 text-white shadow" : "bg-gray-100 text-gray-600"}`}
-            >
-              {dm}
+    <div className="ventures-modal" onClick={onCancel} role="presentation">
+      <div className="ventures-modal__panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="new-venture-title">
+        <h2 id="new-venture-title" className="ventures-modal__title">Venture חדש</h2>
+        <div className="ventures-form-stack">
+          <input
+            type="text"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="שם ההזדמנות"
+            className="boss-input"
+          />
+          <select value={domain} onChange={(event) => setDomain(event.target.value)} className="boss-select" aria-label="תחום">
+            {DOMAINS.map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+          {error && <p className="ventures-form-error" role="alert">{error}</p>}
+          <div className="ventures-form-actions">
+            <button type="button" onClick={onCancel} className="boss-button boss-button--quiet">ביטול</button>
+            <button type="button" onClick={handleCreate} disabled={saving || !name.trim()} className="boss-button boss-button--primary">
+              {saving ? "יוצר…" : "צור"}
             </button>
-          ))}
-        </div>
-        {error && <p className="text-xs text-red-600">{error}</p>}
-        <div className="flex gap-2">
-          <button onClick={onCancel} className="flex-1 bg-gray-100 text-gray-600 rounded-xl py-2 text-sm font-medium">ביטול</button>
-          <button onClick={handleCreate} disabled={saving || !name.trim()}
-            className="flex-1 bg-blue-500 text-white rounded-xl py-2 text-sm font-medium disabled:opacity-40">
-            {saving ? "…" : "צור"}
-          </button>
+          </div>
         </div>
       </div>
     </div>
@@ -319,102 +307,88 @@ export function Ventures({ onBack }: Props) {
   const d = state.status === "ok" ? state.data : null;
 
   return (
-    <div className="min-h-screen bg-gray-100 pb-8">
-      <div className="bg-white px-4 pt-5 pb-4 mb-3 shadow-sm flex items-center gap-3">
-        <button onClick={onBack} className="text-blue-500 text-xl font-medium leading-none">←</button>
-        <div className="flex-1">
-          <h1 className="text-lg font-black text-gray-900">🔭 Ventures</h1>
-          <p className="text-xs text-gray-400">
-            {d ? `${d.count} הזדמנויות` : "Strategic Layer"}
-          </p>
-        </div>
-        <button onClick={() => setShowNew(true)}
-          className="bg-blue-500 text-white rounded-full px-3 py-1.5 text-xs font-medium active:opacity-70">
-          + חדש
-        </button>
-      </div>
-
-      {/* Stage filter chips */}
-      <div className="flex gap-1.5 overflow-x-auto px-4 mb-3">
-        <button
-          onClick={() => { setStageFilter(""); load(); }}
-          className={`flex-shrink-0 text-[11px] px-2.5 py-1.5 rounded-full font-medium transition-all
-            ${stageFilter === "" ? "bg-blue-500 text-white shadow" : "bg-gray-200 text-gray-600"}`}
-        >
-          הכל
-        </button>
-        {STAGES.map((s) => (
-          <button
-            key={s}
-            onClick={() => { setStageFilter(s); load(s); }}
-            className={`flex-shrink-0 text-[11px] px-2.5 py-1.5 rounded-full font-medium transition-all
-              ${stageFilter === s ? "bg-blue-500 text-white shadow" : stageBadge(s)}`}
-          >
-            {stageIcon(s)} {s}
-          </button>
-        ))}
-      </div>
-
-      {state.status === "loading" && (
-        <div className="flex justify-center pt-16">
-          <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-        </div>
-      )}
-      {state.status === "error" && (
-        <div className="mx-4 bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">{state.message}</div>
-      )}
-
-      {d && (
-        <div className="flex flex-col gap-3 px-4">
-          {d.ventures.length === 0 ? (
-            <p className="text-center text-gray-400 text-sm pt-8">אין הזדמנויות רשומות</p>
-          ) : (
-            d.ventures.map((v) => (
-              <div
-                key={v.id}
-                className="bg-white rounded-xl shadow-sm p-4 active:opacity-70 cursor-pointer"
-                onClick={() => setSelectedId(v.id)}
-              >
-                <div className="flex items-start gap-3">
-                  <div className="text-2xl flex-shrink-0 mt-0.5">{stageIcon(v.stage)}</div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="font-semibold text-gray-900 truncate">{v.name || "—"}</p>
-                      {v.estimated_potential > 0 && (
-                        <p className="text-sm font-bold text-gray-900 flex-shrink-0">{fmt(v.estimated_potential)}</p>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 mt-1">
-                      {v.domain && <span className="text-[10px] text-gray-400">{v.domain}</span>}
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${stageBadge(v.stage)}`}>
-                        {v.stage}
-                      </span>
-                      {v.conviction && (
-                        <span className={`text-[10px] font-bold ${CONVICTION_COLOR[v.conviction] ?? "text-gray-400"}`}>
-                          {v.conviction}
-                        </span>
-                      )}
-                    </div>
-                    {v.next_action && (
-                      <p className="text-xs text-gray-500 mt-1.5 truncate">→ {v.next_action}</p>
-                    )}
-                    {v.target_decision_date && (
-                      <p className="text-[10px] text-gray-400 mt-0.5">🎯 {v.target_decision_date}</p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))
+    <main className="ventures-screen">
+      <div className="ventures-shell">
+        <PageHeader
+          onBack={onBack}
+          eyebrow="Strategic Layer"
+          title="Ventures"
+          subtitle={d ? `${d.count} הזדמנויות במעקב` : "בחינת הזדמנויות מהשערה להחלטה"}
+          action={(
+            <button type="button" onClick={() => setShowNew(true)} className="boss-button boss-button--primary">
+              Venture חדש
+            </button>
           )}
+        />
+
+        <div className="ventures-filters" aria-label="סינון לפי שלב">
+          <button
+            type="button"
+            onClick={() => { setStageFilter(""); load(); }}
+            className="ventures-filter"
+            aria-pressed={stageFilter === ""}
+          >
+            הכל
+          </button>
+          {STAGES.map((stage) => (
+            <button
+              type="button"
+              key={stage}
+              onClick={() => { setStageFilter(stage); load(stage); }}
+              className="ventures-filter"
+              aria-pressed={stageFilter === stage}
+            >
+              {stage}
+            </button>
+          ))}
         </div>
-      )}
+
+        {state.status === "loading" && <ScreenState state="loading" message="טוען הזדמנויות" />}
+        {state.status === "error" && (
+          <ScreenState
+            state="error"
+            message={state.message}
+            action={(
+              <button type="button" onClick={() => load(stageFilter || undefined)} className="boss-button boss-button--quiet">
+                ניסיון נוסף
+              </button>
+            )}
+          />
+        )}
+
+        {d && d.ventures.length === 0 && (
+          <ScreenState state="empty" title="אין הזדמנויות בשלב הזה" message="אפשר לבחור שלב אחר או ליצור Venture חדש." />
+        )}
+
+        {d && d.ventures.length > 0 && (
+          <div className="ventures-list">
+            {d.ventures.map((venture) => (
+              <button type="button" key={venture.id} className="ventures-card" onClick={() => setSelectedId(venture.id)}>
+                <div className="ventures-card__heading">
+                  <p className="ventures-card__name">{venture.name || "—"}</p>
+                  {venture.estimated_potential > 0 && <p className="ventures-card__value">{fmt(venture.estimated_potential)}</p>}
+                </div>
+                <div className="ventures-card__meta">
+                  {venture.domain && <span className="ventures-meta">{venture.domain}</span>}
+                  <StatusBadge tone={stageTone(venture.stage)}>{venture.stage}</StatusBadge>
+                  {venture.conviction && (
+                    <StatusBadge tone={CONVICTION_TONE[venture.conviction] ?? "neutral"}>{venture.conviction}</StatusBadge>
+                  )}
+                </div>
+                {venture.next_action && <p className="ventures-next-action">הצעד הבא: {venture.next_action}</p>}
+                {venture.target_decision_date && <p className="ventures-date">תאריך החלטה: {venture.target_decision_date}</p>}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       {showNew && (
         <NewVentureForm
           onCancel={() => setShowNew(false)}
-          onCreated={(v) => { setShowNew(false); setSelectedId(v.id); }}
+          onCreated={(venture) => { setShowNew(false); setSelectedId(venture.id); }}
         />
       )}
-    </div>
+    </main>
   );
 }
