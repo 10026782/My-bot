@@ -46,22 +46,46 @@ _TASK_INSTRUCTIONS: dict[str, str] = {
 }
 
 
-def _demand_summary(demand: dict) -> str:
+def protected_demand_fields(demand: dict) -> dict[str, str]:
+    """
+    Slot-keyed raw field values pulled from a canonical Demand record's
+    `fields` dict. Single source of truth for "what fields does a Demand
+    have" — shared by _demand_summary() below (AI-facing prompt rendering)
+    and marketing_fact_authority.extract_protected_facts() (BUG-164 grounding
+    layer), so the prompt and the enforcement layer can never drift on what a
+    Demand's fields actually are. Falsy values are omitted, not included as
+    empty strings.
+    """
     from airtable_schema import MarketingDemandFields as MDF
 
+    fields = {
+        "domain": demand.get(MDF.DOMAIN, ""),
+        "demand_type": demand.get(MDF.DEMAND_TYPE, ""),
+        "topic": demand.get(MDF.NAME, ""),
+        "audience": demand.get(MDF.TARGET_AUDIENCE, ""),
+        "location": demand.get(MDF.LOCATION, ""),
+        "goal": demand.get(MDF.GOAL, ""),
+        "constraints": demand.get(MDF.CONSTRAINTS, ""),
+    }
+    return {k: v for k, v in fields.items() if v}
+
+
+def _demand_summary(demand: dict) -> str:
+    fields = protected_demand_fields(demand)
+
     lines = [
-        f"תחום: {demand.get(MDF.DOMAIN, '')}",
-        f"סוג דרישה: {demand.get(MDF.DEMAND_TYPE, '')}",
-        f"נושא/הצעה: {demand.get(MDF.NAME, '')}",
+        f"תחום: {fields.get('domain', '')}",
+        f"סוג דרישה: {fields.get('demand_type', '')}",
+        f"נושא/הצעה: {fields.get('topic', '')}",
     ]
-    if demand.get(MDF.TARGET_AUDIENCE):
-        lines.append(f"קהל יעד: {demand[MDF.TARGET_AUDIENCE]}")
-    if demand.get(MDF.LOCATION):
-        lines.append(f"מיקום: {demand[MDF.LOCATION]}")
-    if demand.get(MDF.GOAL):
-        lines.append(f"מטרה: {demand[MDF.GOAL]}")
-    if demand.get(MDF.CONSTRAINTS):
-        lines.append(f"אילוצים: {demand[MDF.CONSTRAINTS]}")
+    if fields.get("audience"):
+        lines.append(f"קהל יעד: {fields['audience']}")
+    if fields.get("location"):
+        lines.append(f"מיקום: {fields['location']}")
+    if fields.get("goal"):
+        lines.append(f"מטרה: {fields['goal']}")
+    if fields.get("constraints"):
+        lines.append(f"אילוצים: {fields['constraints']}")
     return "\n".join(lines)
 
 
