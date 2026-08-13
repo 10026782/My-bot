@@ -59,6 +59,72 @@ function stageTone(stage: string): StatusTone {
   return STAGE_TONE[stage] ?? "neutral";
 }
 
+function LifecycleRail({
+  selectedStage,
+  onSelect,
+  includeAll = false,
+}: {
+  selectedStage: string;
+  onSelect: (stage: string) => void;
+  includeAll?: boolean;
+}) {
+  return (
+    <div className="ventures-lifecycle" aria-label="שלבי Venture">
+      {includeAll && (
+        <button
+          type="button"
+          onClick={(event) => {
+            onSelect("");
+            event.currentTarget.scrollIntoView({ block: "nearest", inline: "center" });
+          }}
+          className="ventures-lifecycle__stage ventures-lifecycle__stage--all"
+          aria-pressed={selectedStage === ""}
+        >
+          <span className="ventures-lifecycle__index">כל</span>
+          <span>כל השלבים</span>
+        </button>
+      )}
+      {STAGES.map((stage, index) => (
+        <button
+          type="button"
+          key={stage}
+          onClick={(event) => {
+            onSelect(stage);
+            event.currentTarget.scrollIntoView({ block: "nearest", inline: "center" });
+          }}
+          className="ventures-lifecycle__stage"
+          aria-pressed={selectedStage === stage}
+        >
+          <span className="ventures-lifecycle__index">{index + 1}</span>
+          <span>{stage}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function WorkspaceHeading({
+  eyebrow,
+  title,
+  context,
+  titleId,
+}: {
+  eyebrow: string;
+  title: string;
+  context?: string;
+  titleId?: string;
+}) {
+  return (
+    <div className="ventures-workspace-heading">
+      <div>
+        <p className="ventures-workspace-eyebrow">{eyebrow}</p>
+        <h2 id={titleId} className="ventures-workspace-title">{title}</h2>
+      </div>
+      {context && <p className="ventures-workspace-context">{context}</p>}
+    </div>
+  );
+}
+
 // ── Venture Detail ──────────────────────────────────────────────
 
 function VentureDetail({ ventureId, onBack }: { ventureId: string; onBack: () => void }) {
@@ -120,13 +186,14 @@ function VentureDetail({ ventureId, onBack }: { ventureId: string; onBack: () =>
   const d = state.status === "ok" ? state.data : null;
 
   return (
-    <main className="ventures-screen ventures-screen--detail">
-      <div className="ventures-shell">
+    <main className="ventures-screen">
+      <div className="ventures-shell ventures-shell--workspace">
         <PageHeader
           onBack={onBack}
-          eyebrow="Venture card"
+          backLabel="לכל ה־Ventures"
+          eyebrow="Venture workspace"
           title={d?.name || "Venture"}
-          subtitle={d?.domain || "Strategic Layer"}
+          subtitle={d ? `${d.domain || "ללא תחום"} · מרחב החלטה` : "טוען מרחב החלטה"}
           badge={d?.stage ? <StatusBadge tone={stageTone(d.stage)}>{d.stage}</StatusBadge> : undefined}
         />
 
@@ -140,90 +207,118 @@ function VentureDetail({ ventureId, onBack }: { ventureId: string; onBack: () =>
         {state.status === "error" && <ScreenState state="error" message={state.message} />}
 
         {d && (
-          <div className="ventures-detail-stack">
-            <Surface>
-              <p className="ventures-section-label">פרטי החלטה</p>
-              <div className="ventures-detail-grid">
-                <div>
-                  <p className="ventures-detail-label">פוטנציאל משוער</p>
-                  <p className="ventures-detail-value">{fmt(d.estimated_potential)}</p>
+          <div className="ventures-detail-workspace">
+            <div className="ventures-detail-main">
+              <Surface>
+                <WorkspaceHeading
+                  eyebrow="Context"
+                  title="תמונת מצב"
+                  context="הנתונים הקיימים של ההזדמנות"
+                />
+                <div className="ventures-detail-grid">
+                  <div>
+                    <p className="ventures-detail-label">פוטנציאל משוער</p>
+                    <p className="ventures-detail-value ventures-detail-value--large">{fmt(d.estimated_potential)}</p>
+                  </div>
+                  <div>
+                    <p className="ventures-detail-label">ביטחון</p>
+                    <StatusBadge tone={CONVICTION_TONE[d.conviction] ?? "neutral"}>{d.conviction || "—"}</StatusBadge>
+                  </div>
+                  <div>
+                    <p className="ventures-detail-label">תאריך החלטה משוער</p>
+                    <p className="ventures-detail-value">{d.target_decision_date || "—"}</p>
+                  </div>
+                  <div>
+                    <p className="ventures-detail-label">תחום</p>
+                    <p className="ventures-detail-value">{d.domain || "—"}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="ventures-detail-label">ביטחון</p>
-                  <StatusBadge tone={CONVICTION_TONE[d.conviction] ?? "neutral"}>{d.conviction || "—"}</StatusBadge>
+              </Surface>
+
+              <Surface variant="subtle">
+                <WorkspaceHeading
+                  eyebrow="Decision context"
+                  title="החלטה וצעד הבא"
+                />
+                <div className="ventures-decision-context">
+                  <div>
+                    <p className="ventures-detail-label">הצעד הבא</p>
+                    <p className="ventures-detail-copy">{d.next_action || "לא הוגדר צעד הבא"}</p>
+                  </div>
+                  {d.decision_log && (
+                    <div>
+                      <p className="ventures-detail-label">Decision Log</p>
+                      <p className="ventures-detail-copy">{d.decision_log}</p>
+                    </div>
+                  )}
+                  {d.notes && (
+                    <div>
+                      <p className="ventures-detail-label">הערות</p>
+                      <p className="ventures-detail-copy">{d.notes}</p>
+                    </div>
+                  )}
                 </div>
-                <div>
-                  <p className="ventures-detail-label">תאריך החלטה משוער</p>
-                  <p className="ventures-detail-value">{d.target_decision_date || "—"}</p>
-                </div>
-                <div>
-                  <p className="ventures-detail-label">תחום</p>
-                  <p className="ventures-detail-value">{d.domain || "—"}</p>
+              </Surface>
+            </div>
+
+            <Surface variant="raised" className="ventures-editor">
+              <WorkspaceHeading
+                eyebrow="Current lifecycle"
+                title="עדכון Venture"
+                context="השינויים נשמרים יחד"
+              />
+
+              <div className="ventures-editor__section">
+                <p className="ventures-field-label">שלב</p>
+                <LifecycleRail selectedStage={editStage} onSelect={setEditStage} />
+              </div>
+
+              <div className="ventures-editor__section">
+                <p className="ventures-field-label">רמת ביטחון</p>
+                <div className="ventures-action-row ventures-action-row--equal" aria-label="רמת ביטחון">
+                  {CONVICTIONS.map((conviction) => (
+                    <button
+                      type="button"
+                      key={conviction}
+                      onClick={() => setEditConviction(conviction)}
+                      className="ventures-choice"
+                      aria-pressed={editConviction === conviction}
+                    >
+                      {conviction}
+                    </button>
+                  ))}
                 </div>
               </div>
-            </Surface>
 
-            {d.decision_log && (
-              <Surface variant="subtle">
-                <p className="ventures-section-label">Decision Log</p>
-                <p className="ventures-detail-copy">{d.decision_log}</p>
-              </Surface>
-            )}
+              <label className="ventures-field">
+                <span className="ventures-field-label">הצעד הבא</span>
+                <input
+                  type="text"
+                  value={editNextAction}
+                  onChange={(event) => setEditNextAction(event.target.value)}
+                  placeholder="הצעד הבא"
+                  className="boss-input"
+                />
+              </label>
+
+              <label className="ventures-field">
+                <span className="ventures-field-label">הערות</span>
+                <input
+                  type="text"
+                  value={editNotes}
+                  onChange={(event) => setEditNotes(event.target.value)}
+                  placeholder="הערות"
+                  className="boss-input"
+                />
+              </label>
+
+              <button type="button" onClick={handleSave} disabled={saving} className="boss-button boss-button--primary ventures-editor__save">
+                {saving ? "שומר…" : "שמור שינויים"}
+              </button>
+            </Surface>
           </div>
         )}
       </div>
-
-      {d && (
-        <div className="ventures-action-bar">
-          <div className="ventures-action-bar__inner">
-            <div className="ventures-action-row" aria-label="שלב">
-              {STAGES.map((stage) => (
-                <button
-                  type="button"
-                  key={stage}
-                  onClick={() => setEditStage(stage)}
-                  className="ventures-choice"
-                  aria-pressed={editStage === stage}
-                >
-                  {stage}
-                </button>
-              ))}
-            </div>
-            <div className="ventures-action-row ventures-action-row--equal" aria-label="רמת ביטחון">
-              {CONVICTIONS.map((conviction) => (
-                <button
-                  type="button"
-                  key={conviction}
-                  onClick={() => setEditConviction(conviction)}
-                  className="ventures-choice"
-                  aria-pressed={editConviction === conviction}
-                >
-                  {conviction}
-                </button>
-              ))}
-            </div>
-            <input
-              type="text"
-              value={editNextAction}
-              onChange={(event) => setEditNextAction(event.target.value)}
-              placeholder="הצעד הבא"
-              className="boss-input"
-            />
-            <div className="ventures-action-row">
-              <input
-                type="text"
-                value={editNotes}
-                onChange={(event) => setEditNotes(event.target.value)}
-                placeholder="הערות"
-                className="boss-input"
-              />
-              <button type="button" onClick={handleSave} disabled={saving} className="boss-button boss-button--primary">
-                {saving ? "שומר…" : "שמור"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </main>
   );
 }
@@ -305,15 +400,19 @@ export function Ventures({ onBack }: Props) {
   }
 
   const d = state.status === "ok" ? state.data : null;
+  const totalPotential = d?.ventures.reduce((sum, venture) => sum + (venture.estimated_potential || 0), 0) ?? 0;
+  const venturesWithNextAction = d?.ventures.filter((venture) => Boolean(venture.next_action)).length ?? 0;
+  const currentViewLabel = stageFilter || "כל השלבים";
 
   return (
     <main className="ventures-screen">
-      <div className="ventures-shell">
+      <div className="ventures-shell ventures-shell--workspace">
         <PageHeader
           onBack={onBack}
-          eyebrow="Strategic Layer"
+          eyebrow="Strategic workspace"
           title="Ventures"
-          subtitle={d ? `${d.count} הזדמנויות במעקב` : "בחינת הזדמנויות מהשערה להחלטה"}
+          subtitle="מרחב עבודה לבחינת הזדמנויות מהשערה להחלטה"
+          badge={d ? <StatusBadge tone="info">{d.count} בתצוגה</StatusBadge> : undefined}
           action={(
             <button type="button" onClick={() => setShowNew(true)} className="boss-button boss-button--primary">
               Venture חדש
@@ -321,66 +420,91 @@ export function Ventures({ onBack }: Props) {
           )}
         />
 
-        <div className="ventures-filters" aria-label="סינון לפי שלב">
-          <button
-            type="button"
-            onClick={() => { setStageFilter(""); load(); }}
-            className="ventures-filter"
-            aria-pressed={stageFilter === ""}
-          >
-            הכל
-          </button>
-          {STAGES.map((stage) => (
-            <button
-              type="button"
-              key={stage}
-              onClick={() => { setStageFilter(stage); load(stage); }}
-              className="ventures-filter"
-              aria-pressed={stageFilter === stage}
-            >
-              {stage}
-            </button>
-          ))}
-        </div>
+        {d && (
+          <section className="ventures-summary" aria-label="סיכום תצוגה">
+            <Surface variant="subtle" padding="compact" className="ventures-summary__item">
+              <p className="ventures-summary__label">הזדמנויות בתצוגה</p>
+              <p className="ventures-summary__value">{d.count}</p>
+            </Surface>
+            <Surface variant="subtle" padding="compact" className="ventures-summary__item">
+              <p className="ventures-summary__label">פוטנציאל בתצוגה</p>
+              <p className="ventures-summary__value">{fmt(totalPotential)}</p>
+            </Surface>
+            <Surface variant="subtle" padding="compact" className="ventures-summary__item">
+              <p className="ventures-summary__label">עם צעד הבא</p>
+              <p className="ventures-summary__value">{venturesWithNextAction}</p>
+            </Surface>
+          </section>
+        )}
 
-        {state.status === "loading" && <ScreenState state="loading" message="טוען הזדמנויות" />}
-        {state.status === "error" && (
-          <ScreenState
-            state="error"
-            message={state.message}
-            action={(
-              <button type="button" onClick={() => load(stageFilter || undefined)} className="boss-button boss-button--quiet">
-                ניסיון נוסף
-              </button>
-            )}
+        <Surface variant="subtle" className="ventures-lifecycle-panel">
+          <WorkspaceHeading
+            eyebrow="Lifecycle"
+            title="מסלול ההזדמנות"
+            context={`תצוגה נוכחית: ${currentViewLabel}`}
           />
-        )}
+          <LifecycleRail
+            includeAll
+            selectedStage={stageFilter}
+            onSelect={(stage) => { setStageFilter(stage); load(stage || undefined); }}
+          />
+        </Surface>
 
-        {d && d.ventures.length === 0 && (
-          <ScreenState state="empty" title="אין הזדמנויות בשלב הזה" message="אפשר לבחור שלב אחר או ליצור Venture חדש." />
-        )}
+        <section className="ventures-work-area" aria-labelledby="ventures-collection-title">
+          <WorkspaceHeading
+            eyebrow="Collection"
+            title="הזדמנויות"
+            context={d ? `${d.count} פריטים · ${currentViewLabel}` : currentViewLabel}
+            titleId="ventures-collection-title"
+          />
 
-        {d && d.ventures.length > 0 && (
-          <div className="ventures-list">
-            {d.ventures.map((venture) => (
-              <button type="button" key={venture.id} className="ventures-card" onClick={() => setSelectedId(venture.id)}>
-                <div className="ventures-card__heading">
-                  <p className="ventures-card__name">{venture.name || "—"}</p>
-                  {venture.estimated_potential > 0 && <p className="ventures-card__value">{fmt(venture.estimated_potential)}</p>}
-                </div>
-                <div className="ventures-card__meta">
-                  {venture.domain && <span className="ventures-meta">{venture.domain}</span>}
-                  <StatusBadge tone={stageTone(venture.stage)}>{venture.stage}</StatusBadge>
-                  {venture.conviction && (
-                    <StatusBadge tone={CONVICTION_TONE[venture.conviction] ?? "neutral"}>{venture.conviction}</StatusBadge>
-                  )}
-                </div>
-                {venture.next_action && <p className="ventures-next-action">הצעד הבא: {venture.next_action}</p>}
-                {venture.target_decision_date && <p className="ventures-date">תאריך החלטה: {venture.target_decision_date}</p>}
-              </button>
-            ))}
-          </div>
-        )}
+          {state.status === "loading" && <ScreenState state="loading" message="טוען הזדמנויות" />}
+          {state.status === "error" && (
+            <ScreenState
+              state="error"
+              message={state.message}
+              action={(
+                <button type="button" onClick={() => load(stageFilter || undefined)} className="boss-button boss-button--quiet">
+                  ניסיון נוסף
+                </button>
+              )}
+            />
+          )}
+
+          {d && d.ventures.length === 0 && (
+            <ScreenState state="empty" title="אין הזדמנויות בשלב הזה" message="אפשר לבחור שלב אחר או ליצור Venture חדש." />
+          )}
+
+          {d && d.ventures.length > 0 && (
+            <Surface padding="none" className="ventures-collection">
+              <div className="ventures-list">
+                {d.ventures.map((venture) => (
+                  <button type="button" key={venture.id} className="ventures-card" onClick={() => setSelectedId(venture.id)}>
+                    <div className="ventures-card__body">
+                      <div className="ventures-card__heading">
+                        <p className="ventures-card__name">{venture.name || "—"}</p>
+                        {venture.estimated_potential > 0 && <p className="ventures-card__value">{fmt(venture.estimated_potential)}</p>}
+                      </div>
+                      <div className="ventures-card__meta">
+                        {venture.domain && <span className="ventures-meta">{venture.domain}</span>}
+                        <StatusBadge tone={stageTone(venture.stage)}>{venture.stage}</StatusBadge>
+                        {venture.conviction && (
+                          <StatusBadge tone={CONVICTION_TONE[venture.conviction] ?? "neutral"}>{venture.conviction}</StatusBadge>
+                        )}
+                      </div>
+                      {venture.next_action && <p className="ventures-next-action">הצעד הבא: {venture.next_action}</p>}
+                    </div>
+                    <div className="ventures-card__aside">
+                      <p className="ventures-card__aside-label">החלטה משוערת</p>
+                      <p className="ventures-card__aside-value">{venture.target_decision_date || "—"}</p>
+                      <span className="ventures-card__open">פתיחת Venture</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </Surface>
+          )}
+        </section>
       </div>
 
       {showNew && (
