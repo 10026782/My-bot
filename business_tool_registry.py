@@ -1,0 +1,240 @@
+"""Canonical, read-only catalog of curated external SCOREBOS tools."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+import re
+import unicodedata
+
+
+ToolClass = str
+VerificationStatus = str
+
+
+@dataclass(frozen=True)
+class BusinessTool:
+    tool_id: str
+    name: str
+    url: str
+    tool_class: ToolClass
+    categories: tuple[str, ...]
+    capabilities: tuple[str, ...]
+    tasks: tuple[str, ...]
+    short_description: str
+    when_to_use: str
+    when_not_to_use: str
+    privacy_level: str
+    allowed_data: str
+    forbidden_data: str
+    local_processing: bool | None
+    signup_required: bool
+    free_status: str
+    verification_status: VerificationStatus
+    last_verified_at: str
+    source: str
+    enabled: bool = True
+    domain_tags: tuple[str, ...] = ()
+
+
+_SOURCE = "docs/tool-research/NOSIGNUPS_BUSINESS_TOOLBOX.md"
+_VERIFIED = "2026-08-13"
+
+
+def _tool(
+    tool_id: str,
+    name: str,
+    url: str,
+    categories: tuple[str, ...],
+    capabilities: tuple[str, ...],
+    tasks: tuple[str, ...],
+    description: str,
+    use: str,
+    avoid: str,
+    privacy: str,
+    allowed: str,
+    forbidden: str,
+    local: bool | None,
+    *,
+    tool_class: str = "business",
+    status: str = "verified",
+    domains: tuple[str, ...] = (),
+    free: str = "no signup; free direct use",
+) -> BusinessTool:
+    return BusinessTool(
+        tool_id=tool_id, name=name, url=url, tool_class=tool_class,
+        categories=categories, capabilities=capabilities, tasks=tasks,
+        short_description=description, when_to_use=use, when_not_to_use=avoid,
+        privacy_level=privacy, allowed_data=allowed, forbidden_data=forbidden,
+        local_processing=local, signup_required=False, free_status=free,
+        verification_status=status, last_verified_at=_VERIFIED, source=_SOURCE,
+        domain_tags=domains,
+    )
+
+
+TOOL_REGISTRY: tuple[BusinessTool, ...] = (
+    _tool("bentopdf", "BentoPDF", "https://bentopdf.com/", ("documents", "pdf"),
+          ("merge", "split", "compress", "convert", "redact"),
+          ("merge pdf", "unite pdf", "compress pdf", "split pdf", "לאחד pdf", "איחוד pdf", "לדחוס pdf", "לפצל pdf"),
+          "Merge, split, compress and organize PDF files.",
+          "PDF preparation before sending or archiving.", "Sensitive files when local behavior is uncertain.",
+          "low", "non-sensitive or approved browser-local files", "secrets, credentials, IDs, unapproved customer files", True,
+          domains=("real_estate", "operations", "documents")),
+    _tool("vert", "VERT", "https://vert.sh/", ("documents", "media"),
+          ("convert", "format conversion"), ("convert file", "convert document", "convert image", "להמיר קובץ", "המרת קובץ"),
+          "Convert common document and media formats in the browser.",
+          "A quick format conversion without installing software.", "Sensitive files or video until handling is confirmed.",
+          "low/medium", "synthetic or approved non-sensitive files", "identity, contract, lead and confidential files", True,
+          domains=("documents", "marketing")),
+    _tool("squoosh", "Squoosh", "https://squoosh.app/", ("images",),
+          ("compress image", "resize image", "optimize image"), ("shrink image", "compress photo", "reduce image", "להקטין תמונה", "להקטין תמונות", "לדחוס תמונה"),
+          "Compress and resize images before sharing or uploading.",
+          "Photos and graphics that need a smaller file size.", "Never use as a substitute for preserving the original asset.",
+          "low", "non-sensitive images and copies", "original evidence, private IDs, or files needing forensic integrity", True,
+          domains=("marketing", "real_estate")),
+    _tool("pairdrop", "PairDrop", "https://pairdrop.net/", ("transfer",),
+          ("device transfer", "peer transfer"), ("transfer file", "move file", "phone to computer", "להעביר קובץ", "להעביר מהמכשיר למחשב"),
+          "Transfer a file between nearby devices without an account.",
+          "A one-off device-to-device transfer.", "Do not use as storage, archive, or approval path.",
+          "medium", "non-sensitive files after verifying the peer", "unapproved confidential or regulated data", None,
+          domains=("operations",)),
+    _tool("rawgraphs", "RAWGraphs", "https://rawgraphs.io/", ("data", "charts"),
+          ("chart", "visualize csv", "visualize data"), ("create graph", "graph from csv", "chart data", "ליצור גרף", "גרף מהנתונים", "תרשים מהנתונים"),
+          "Create quick charts from a small CSV export.",
+          "Exploratory or presentation-ready visualizations.", "Do not treat output as the system of record or dashboard.",
+          "medium", "aggregated or redacted exports", "raw customer, financial, or identifying datasets", None,
+          domains=("marketing", "operations")),
+    _tool("csv-repair", "csv.repair", "https://www.csv.repair/", ("data",),
+          ("repair csv", "validate csv", "inspect csv"), ("broken csv", "invalid csv", "csv not opening", "repair csv", "csv לא תקין", "csv לא נפתח", "שלא נפתח", "קובץ csv שבור"),
+          "Inspect and repair malformed CSV files.",
+          "A CSV that fails to open or imports incorrectly.", "Do not upload sensitive exports without approval and redaction.",
+          "low/medium", "synthetic or redacted CSV; approved non-sensitive export", "leads, credentials, IDs, customer exports without approval", None,
+          domains=("operations", "data")),
+    _tool("sql-for-files", "SQL for Files", "https://sqlforfiles.app/", ("data",),
+          ("query csv", "query json", "join files", "profile data"), ("query csv", "join csv", "analyze file", "לנתח קובץ", "לשאול על csv", "לחבר csv"),
+          "Query, join and profile local CSV, JSON and Parquet files.",
+          "Ad-hoc analysis without creating a new data store.", "Do not use as SCOREBOS source of truth or upload confidential data.",
+          "low", "browser-local copies and redacted exports", "production databases, secrets, raw PII, canonical records", True,
+          domains=("operations", "data")),
+    _tool("cyberchef", "CyberChef", "https://gchq.github.io/CyberChef/", ("data", "security"),
+          ("encode", "decode", "hash", "transform text"), ("decode text", "transform data", "inspect encoded value", "לפענח טקסט", "להמיר טקסט"),
+          "Transform and inspect text or structured values in the browser.",
+          "Technical text/data inspection by an operator.", "Do not paste live secrets or credentials.",
+          "low", "synthetic, redacted, or explicitly approved values", "passwords, API keys, tokens, private keys", True,
+          domains=("operations",)),
+    _tool("svgomg", "SVGOMG", "https://jakearchibald.github.io/svgomg/", ("images", "design"),
+          ("optimize svg", "shrink svg"), ("clean svg", "compress svg", "optimize logo", "לכווץ svg", "לנקות svg"),
+          "Clean and shrink SVG assets.", "Optimizing logos and icons before handoff.", "Keep the original asset and review visual output.",
+          "low", "public or approved design assets", "assets containing sensitive embedded data", True,
+          domains=("marketing",)),
+    _tool("mr-data-converter", "Mr. Data Converter", "https://shancarter.github.io/mr-data-converter/", ("data",),
+          ("convert csv", "convert tabular data"), ("csv to json", "spreadsheet to json", "csv to xml", "להמיר csv ל json"),
+          "Convert small tabular data snippets to JSON or XML.", "A quick format handoff or inspection.", "Do not use for sensitive exports.",
+          "low/medium", "synthetic or redacted samples", "raw business exports and personal data", None,
+          domains=("operations",)),
+    _tool("json-crack", "JSON Crack", "https://jsoncrack.com/", ("data",),
+          ("visualize json", "understand json"), ("understand json", "visualize json", "json structure", "להבין json", "json מסובך", "להציג json"),
+          "Visualize nested JSON structures.", "Understanding an API or export shape quickly.", "Do not paste secrets or unredacted customer data.",
+          "low/medium", "synthetic or redacted JSON", "tokens, credentials, PII, private API responses", None,
+          status="approved_with_restrictions", domains=("operations", "data")),
+    _tool("metadata-remover", "Metadata Remover", "https://vaulternal.com/metadata-remover/", ("privacy", "images"),
+          ("remove metadata", "strip exif"), ("remove photo metadata", "strip gps", "clean image"),
+          "Remove common GPS, author and device metadata before sharing.", "A sharing safeguard for a copy of an image or document.", "It is not a complete anonymization guarantee.",
+          "low/medium", "copies of approved files", "original evidence or files requiring provenance preservation", None,
+          status="approved_with_restrictions", domains=("security",)),
+    _tool("shareclean", "ShareClean", "https://pypi.org/project/shareclean/", ("privacy", "security"),
+          ("redact text", "remove secrets", "sanitize logs"), ("clean logs", "redact config", "sanitize text"),
+          "Sanitize pasted text before sharing it externally.", "Preparing logs, configs or text for a vendor or support request.", "Never assume detection is complete; review the output.",
+          "medium", "synthetic, redacted, or explicitly approved text", "live secrets, credentials, tokens, raw PII", None,
+          status="approved_with_restrictions", domains=("security", "operations")),
+    _tool("hoppscotch", "Hoppscotch", "https://hoppscotch.io/", ("operator", "http"),
+          ("api inspection", "webhook inspection"), ("inspect api", "inspect webhook"),
+          "Inspect safe staging HTTP requests and responses.", "Operator-only staging diagnostics.", "Production mutations, live credentials and customer payloads.",
+          "medium", "synthetic payloads and fake credentials", "production secrets and customer data", None,
+          tool_class="operator", status="approved_with_restrictions", domains=("developer",)),
+    _tool("log-voyager", "Log Voyager", "https://www.logvoyager.cc/", ("operator", "logs"),
+          ("inspect logs", "search logs"), ("inspect error logs", "search log export"),
+          "Inspect already-authorized log exports locally.", "Operator-only local log triage.", "Unapproved hosted uploads or treating visual inspection as incident authority.",
+          "medium", "approved sanitized local exports", "unapproved live logs and retained raw screenshots", True,
+          tool_class="operator", status="approved_with_restrictions", domains=("developer",)),
+    _tool("uptimerobot", "UptimeRobot", "https://uptimerobot.com/", ("monitoring",),
+          ("uptime monitoring", "heartbeat"), ("monitor endpoint", "heartbeat"),
+          "External uptime and heartbeat monitoring.", "Infrastructure POC evaluation only.", "Normal business recommendations and incident authority.",
+          "medium", "public health endpoints only", "private URLs, credentials and business data", None,
+          tool_class="infrastructure_candidate", status="deferred", free="POC decision required"),
+    _tool("checkly", "Checkly", "https://www.checklyhq.com/", ("monitoring", "testing"),
+          ("synthetic api testing", "browser testing"), ("test api", "test browser flow"),
+          "Synthetic API and browser checks.", "Infrastructure POC evaluation only.", "Normal business recommendations and production writes.",
+          "medium", "synthetic tenant and redacted responses", "customer data, live credentials and mutation tests", None,
+          tool_class="infrastructure_candidate", status="deferred", free="POC decision required"),
+    _tool("sentry", "Sentry", "https://sentry.io/", ("monitoring", "diagnostics"),
+          ("error tracking", "exception grouping"), ("track error", "group exceptions"),
+          "Group diagnostic exceptions and release context.", "Infrastructure POC evaluation only.", "Audit history, action evidence or normal business recommendations.",
+          "high", "redacted exceptions without payloads", "tokens, prompts, PII and business records", None,
+          tool_class="infrastructure_candidate", status="deferred", free="POC decision required"),
+    _tool("socket", "Socket", "https://socket.dev/", ("security", "dependencies"),
+          ("supply chain scan", "dependency scan"), ("scan dependencies", "dependency security"),
+          "Evaluate dependency and supply-chain risk.", "Infrastructure/security POC evaluation only.", "Normal business recommendations or automatic dependency changes.",
+          "medium", "repository metadata and approved manifests", "secrets and production data", None,
+          tool_class="infrastructure_candidate", status="deferred", free="POC decision required"),
+)
+
+
+def _normalize(text: str) -> str:
+    text = unicodedata.normalize("NFKC", str(text or "")).lower()
+    return re.sub(r"[^\w\s-]", " ", text, flags=re.UNICODE)
+
+
+def list_tools(*, tool_class: str = "business", include_disabled: bool = False) -> tuple[BusinessTool, ...]:
+    return tuple(
+        tool for tool in TOOL_REGISTRY
+        if tool.tool_class == tool_class and (include_disabled or tool.enabled)
+    )
+
+
+def find_recommended_tools(task: str, *, limit: int = 3) -> list[BusinessTool]:
+    """Return deterministic, eligible business matches; never returns verify-first tools."""
+    normalized = _normalize(task)
+    if not normalized.strip() or limit <= 0:
+        return []
+    matches: list[tuple[int, int, BusinessTool]] = []
+    for position, tool in enumerate(list_tools(), start=1):
+        if tool.verification_status not in {"verified", "approved_with_restrictions"}:
+            continue
+        terms = tool.tasks + tool.capabilities + tool.categories
+        score = sum(3 if _normalize(term) in normalized else 0 for term in tool.tasks)
+        score += sum(1 if _normalize(term) in normalized else 0 for term in tool.capabilities + tool.categories)
+        if score:
+            matches.append((-score, position, tool))
+    matches.sort(key=lambda item: (item[0], item[1]))
+    return [tool for _, _, tool in matches[:limit]]
+
+
+def format_recommendation(task: str, tools: list[BusinessTool]) -> str | None:
+    if not tools:
+        return None
+    lines = ["יש לי כלי מתאים לזה:"]
+    for index, tool in enumerate(tools, start=1):
+        restriction = " שימוש רק עם מידע לא־רגיש/מאושר." if tool.verification_status == "approved_with_restrictions" else ""
+        lines.extend((
+            f"\n{index}. {tool.name}",
+            f"{tool.short_description} {tool.when_to_use}{restriction}",
+            f"פרטיות: {tool.privacy_level}. לפתיחה: {tool.url}",
+        ))
+    return "\n".join(lines)
+
+
+def maybe_recommend(task: str) -> str | None:
+    """Keep normal conversation untouched unless the message is a tool-seeking request."""
+    normalized = _normalize(task)
+    intent_markers = ("איזה כלי", "יש לי", "אני צריך", "אני רוצה", "איך ", "כלי ל")
+    if not any(marker in normalized for marker in intent_markers):
+        return None
+    if "כלים עסקיים" in normalized and ("איזה" in normalized or "מה" in normalized):
+        return format_recommendation(task, list_tools()[:10])
+    return format_recommendation(task, find_recommended_tools(task))
+
+
+if __name__ == "__main__":
+    assert find_recommended_tools("אני צריך לאחד כמה קבצי PDF")[0].tool_id == "bentopdf"
+    assert find_recommended_tools("יש לי CSV לא תקין")[0].tool_id == "csv-repair"
+    assert not find_recommended_tools("סוד token api_key")
