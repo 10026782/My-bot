@@ -1,16 +1,16 @@
 # BOSS Design System v1
 
-**Date:** 13/08/2026
-**Status:** `V1 PROPOSAL — FOUR UIDROP REFERENCES CLASSIFIED; IMPLEMENTATION QA PENDING`
+**Date:** 14/08/2026
+**Status:** `V1 CALIBRATION — VUX-2.5 OWNER VISUAL REVIEW REQUIRED`
 **Authority:** Implements the owner-approved SCOREBOS UX Constitution and BOSS Unified Screen Contract. It does not change product navigation, schema, runtime, permissions, or action authority.
 
 ## 1. System rule
 
 Core contracts are uniform across SCOREBOS. A workspace may vary only through approved composition and density modes. New screens must reuse these foundations and components before proposing a new pattern.
 
-The first proving surface is Ventures. The visual direction is balanced, modern, dark, and flat: a near-black application canvas, quiet dark work surfaces, high-contrast typography, compact information density, selective pill actions, restrained card rounding, a violet-blue accent, and layered elevation only for temporary overlays. The values below synthesize three owner-supplied UIDrop references into BOSS-owned semantic tokens; source-library names, brand identity, marketing copy, and one-off implementation artifacts are not part of the system.
+The first proving surface is Ventures. VUX-2.5 calibrates the visual direction to feel alive, floating, soft, layered, tactile, and modern while retaining professional SaaS density. Base canvases remain flat; sections, interactive bubbles, selected states, and temporary layers use four controlled elevation levels. Light and dark themes share the same semantic token contract, vivid blue accent family, hierarchy, and interaction states. Source-library names, brand identity, marketing copy, and one-off implementation artifacts are not part of the system.
 
-The first 720×450 workbench screenshot supports compact split-pane hierarchy but is washed out. The second 1024×505 landing-page screenshot clearly supports the dark canvas, quiet chrome, high-contrast text, light pill CTA, flat borders, and generous decision-level whitespace. The third 720×450 light marketing screenshot supports whitespace-led grouping, rounded temporary layers, 6px inputs, and restrained overlay shadow, but not a light app theme. None is a Ventures workspace or mobile flow. The normalized token set is sufficient for the first implementation PR, while application density and same-viewport behavior must be proven on the implemented Ventures screen.
+The owner-directed VUX-2.5 calibration supersedes the earlier dark-only/flat-only application constraint. The prior references still inform hierarchy, whitespace, and restraint, but neither theme copies a source product. None of the references is a Ventures workspace or mobile flow, so both themes require same-viewport review on the implemented Ventures screen.
 
 ## 2. Foundations
 
@@ -52,38 +52,43 @@ Use `Inter var`, with the current system sans-serif stack as fallback. Use seman
 
 ### 2.3 Radius
 
-Use four BOSS roles only:
+Use five BOSS roles only:
 
-- `radius-surface`: 4px for cards, list rows, alerts, and sections.
-- `radius-control`: 6px for inputs and compact controls.
-- `radius-overlay`: 16px for sheets, drawers, menus, and modals.
+- `radius-section`: 24px for low-elevation sections and state surfaces.
+- `radius-surface`: 26px for interactive entity cards and large bubbles.
+- `radius-control`: 16px for inputs and compact controls.
+- `radius-chip`: 14px for compact lifecycle/status controls that are not full pills.
+- `radius-overlay`: 28px for sheets, drawers, menus, and modals.
 - `radius-pill`: 9999px for primary/secondary buttons and compact filter chips only.
 
-Pill geometry communicates an action or compact selection; it is never applied to cards, sheets, data rows, or every surface. This preserves the reference's rounded/flat balance without turning the workspace into a field of capsules.
+Pill geometry communicates an action or compact selection; it is never applied to cards, sheets, data rows, or every surface. Sections, interactive cards, controls, and overlays remain visibly distinct rather than becoming equally rounded.
 
 ### 2.4 Surface hierarchy
 
-| Level | Purpose | BOSS token/value |
+| Role | Light | Dark |
 |---|---|---|
-| Canvas | App background and scroll field | `canvas: #08090A` |
-| Surface | Cards, sections, data work | `surface: #1C1D1E` |
-| Subtle | Grouping inside a surface | `surface-subtle: #141516` |
-| Raised | Sticky action area, drawer, overlay | `surface-raised: #242526` + border |
-| Contrast | High-emphasis CTA/content | `surface-contrast: #E5E5E6` |
+| Canvas | `#F2F6FF` | `#0B1020` |
+| Section surface | `#FFFFFF` / `#F7F9FF` | `#151C2F` / `#11182A` |
+| Interactive surface | `#FBFCFF` | `#192238` |
+| Inset surface | `#EDF2FF` | `#10182B` |
+| Raised surface | `#FFFFFF` | `#1C2740` |
+| Primary text | `#17213A` | `#F7F9FF` |
+| Secondary text | `#3F4C68` | `#D8DEEC` |
+| Muted text | `#68758E` | `#9BA8C1` |
+| Primary action/accent | `#315EF8` | `#6D8CFF` |
+| Readable accent text | `#274FD2` | `#9BB0FF` |
 
-Text tokens are `text-primary: #F7F8F8`, `text-muted: #8A8F98`, and `text-on-contrast: #08090A`. The supplied muted text measures approximately 6.13:1 against the canvas and remains secondary rather than carrying critical meaning.
-
-Action tokens are `action-primary: #E5E5E6`, `action-primary-text: #08090A`, `accent: #5E6AD2`, `accent-readable: #7E88DB`, and `accent-soft: #C2D2F2`. Neutral primary actions use the high-contrast light pill. `#5E6AD2` is reserved for non-text selection/fill or large text; it measures only about 4.42:1 against `#F7F8F8`. Text/icons on the dark canvas use `#7E88DB` when accent color is required. Color remains secondary to labels for status meaning.
+Theme selection follows `prefers-color-scheme` for the Ventures proof. Theme values are scoped semantic tokens; components consume roles such as canvas, section, interactive, inset, raised, text, border, status, and accent rather than hardcoded theme colors. Color remains secondary to labels for status meaning.
 
 ### 2.5 Borders and elevation
 
-- Border: `1px solid rgba(255, 255, 255, .12)` on dark surfaces. The extracted `0.666667px` value is normalized to a stable device-independent pixel.
-- Elevation 0: default cards, rows, sections, and controls; no shadow.
-- Elevation 1: interactive/sticky separation via border or background shift; no default shadow.
-- Elevation 2: sheet/drawer/menu/action bar; `0 8px 32px rgba(0, 0, 0, .12)`.
-- Elevation 3: temporary modal/critical overlay only; use the supplied large shadow recipe, never on ordinary cards.
-- `shadow-inner` is reserved for pressed/inset controls. Extra-large shadow is not admitted into v1.
-- Do not combine heavy shadow, strong border, and colored background unless the state is critical.
+- Elevation 0 — Base background: flat canvas, no shadow.
+- Elevation 1 — Section surface: soft outer shadow plus a subtle inner highlight; used for summary, grouping, and screen states.
+- Elevation 2 — Interactive card/bubble: stronger but diffuse shadow; used for Venture cards, lifecycle bubbles, and actionable controls.
+- Elevation 3 — Selected/modal/important action: accent halo or high diffuse shadow; reserved for selected lifecycle state, modal, raised editor, toast, and primary action.
+- Borders use theme-semantic low/strong contrast tokens; dark and light values differ while component rules remain identical.
+- Pressed state uses the semantic inset/pressed shadow and moves down by at most 1px.
+- Do not combine strong glow, heavy border, saturated gradient, and high shadow on the same element. Gradients remain near-flat surface shifts only.
 
 ### 2.6 Icons and touch targets
 
@@ -128,7 +133,7 @@ Business status, execution state, and presentation state remain separate. Domain
 ### 2.10 Focus, motion, layers, and responsive normalization
 
 - Focus ring: `2px solid #7E88DB` with a 2px `#08090A` offset. The source's shadow-only focus recipe is insufficient and is not adopted.
-- Motion: `160ms cubic-bezier(.25, .46, .45, .94)` for open/close and `100ms` for press/hover feedback. The completed curve is a BOSS inference because the supplied source value was truncated. Under `prefers-reduced-motion`, remove non-essential movement and retain immediate state changes.
+- Motion: `220ms cubic-bezier(.25, .46, .45, .94)` for elevation/surface changes and `180ms` for compact feedback. Under `prefers-reduced-motion`, remove non-essential movement and retain immediate state changes.
 - Hover uses a subtle color/border shift and at most `translateY(-1px)`. The extracted `translateY(16px); opacity: 0` is treated as an exit/entrance artifact and rejected as hover behavior.
 - Layer tokens: `content: 0`, `sticky: 10`, `dropdown: 100`, `modal: 200`, `tooltip: 300`. Source values such as `100001` and `2147483647` are rejected as implementation leakage.
 - Canonical breakpoints: `compact: 560px`, `wide-mobile: 640px`, `tablet: 768px`, `desktop: 1024px`, and `wide: 1280px`. Intermediate source queries at 600/1120/1536px require a component-specific reason before admission.
@@ -190,25 +195,25 @@ Four owner-supplied UIDrop inputs have been classified against the BOSS-owned fo
 
 | Input area | Disposition | BOSS decision | Remaining verification |
 |---|---|---|---|
-| Radius | `ADAPT` | 4px surfaces, 6px inputs, 12px overlays, pill actions/chips | Validate pills do not overwhelm dense mobile rows |
+| Radius | `ADAPT` | 24px sections, 26px interactive surfaces, 16px controls, 14px compact chips, 28px overlays, pill actions | Validate soft geometry does not overwhelm dense mobile rows |
 | Spacing | `ADOPT` core; `ADAPT` extended | 4px grid with 4–24px core and 32–48px app layout steps; 96/128 display-only | Validate Hebrew density at 390px |
 | Typography | `ADAPT` | Inter var; 16/24 body and application-specific role scale | Validate Hebrew text at 390px; keep 64/40 display sizes out of Ventures |
-| Palette | `ADAPT` | `#08090A` canvas, `#1C1D1E` surfaces, light CTA, violet-blue accent | Validate full semantic status palette and contrast |
-| Elevation | `ADAPT` | flat by default; small/medium only for interaction and overlays | Compare sticky/detail separation visually |
-| Inputs/focus | `ADAPT` | 6px inputs; visible 2px `#7E88DB` ring and offset | Capture default/hover/focus/invalid/disabled states |
-| Motion | `ADAPT` | 160ms/100ms inferred ease-out curve; disappearing hover rejected | Verify no essential meaning depends on motion |
+| Palette | `ADAPT` | semantic light/dark themes with bright/deep canvases and one vivid blue accent family | Validate full semantic status palette and contrast in both themes |
+| Elevation | `ADAPT` | four levels: flat base, low section, medium interactive bubble, high selected/modal/action | Compare lifecycle/card separation visually |
+| Inputs/focus | `ADAPT` | 16px controls; visible 2px readable-accent ring and theme-aware offset | Capture default/hover/focus/invalid/disabled states |
+| Motion | `ADAPT` | 220ms/180ms ease-out; -1px hover and +1px press; disappearing hover rejected | Verify no essential meaning depends on motion |
 | Breakpoints/layers | `REJECT` raw values; normalize | 560/640/768/1024/1280 and 0/10/100/200/300 layers | Confirm against real TMA content, not source selectors |
 | Source CSS/library names | `REJECT` | BOSS semantic names only | None |
-| Light layered reference | `REFERENCE ONLY` foundation; `ADAPT` overlays | Keep dark app foundation; use 16px temporary overlays, 6px inputs, and restrained Elevation 2 | Verify focus trap, dismissal, keyboard order, and dark-surface contrast |
+| Light layered reference | `REFERENCE ONLY`; `ADAPT` theme roles | Admit a light application theme through BOSS semantic tokens; no source palette or identity copying | Verify focus, status contrast, and hierarchy in both themes |
 | Vibrant collage reference | `REFERENCE ONLY` | Future onboarding/empty-state composition with original BOSS assets; no Ventures token change | Validate only if a real explanatory/empty-state need emerges |
 
 ### Supported now vs waiting for visual QA
 
 Supported now: hierarchy, component responsibilities, action lifecycle, status semantics, mobile/RTL rules, density modes, collection/detail continuity, validation, receipts, accessibility contracts, and the normalized visual token direction.
 
-Screenshot-supported now: compact chrome, border-led hierarchy, flat default surfaces, a narrow-control/wide-work desktop composition, near-black canvas, high-contrast typography, selective pill actions, generous whitespace around the primary decision/work state, and clearly layered temporary overlays.
+Screenshot-supported now: compact chrome, preserved workspace hierarchy, selective pill actions, high-contrast typography, generous whitespace around the primary decision/work state, and four semantic elevation levels across light and dark Ventures captures.
 
-Waiting for implementation QA: Ventures-specific hierarchy and density, Hebrew rendering, semantic status colors, pill frequency, overlay focus/dismissal, and complete input/search interaction states. The supplied screenshots are evidence for design language, not same-screen references, so no claim of visual match is made.
+Waiting for owner visual QA: whether the 24–28px geometry and diffuse shadows are sufficiently lively without becoming toy-like; semantic status contrast, pill frequency, overlay focus/dismissal, and complete input/search interaction states remain implementation QA. The supplied screenshots are evidence for design language, not same-screen references, so no claim of source fidelity is made.
 
 UIDrop findings must be recorded as BOSS-owned tokens and reviewed against Hebrew text, 390px mobile, contrast, and Telegram safe-area behavior. They cannot be copied wholesale from a reference.
 
