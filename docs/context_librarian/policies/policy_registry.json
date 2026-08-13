@@ -3,10 +3,16 @@
   "policies": [
     {
       "id": "DOCUMENTATION_REFERENCE_ASSET",
+      "policy_version": 1,
       "description": "Inert raster image evidence/reference assets under docs/ -- cannot carry dispatch/approval/authority logic, so a path-substring hit on an authority-sounding directory name (e.g. \"reference-evidence\") is a naming coincidence, not a real authority signal.",
       "path_patterns": [
-        "docs/*.png", "docs/*.jpg", "docs/*.jpeg", "docs/*.gif",
-        "docs/*.webp", "docs/*.ico", "docs/*.bmp"
+        "docs/*.png",
+        "docs/*.jpg",
+        "docs/*.jpeg",
+        "docs/*.gif",
+        "docs/*.webp",
+        "docs/*.ico",
+        "docs/*.bmp"
       ],
       "runtime_consumed": false,
       "authority": false,
@@ -20,8 +26,11 @@
     },
     {
       "id": "STAGING_VERIFICATION_F15",
+      "policy_version": 1,
       "description": "F15 staging verification boundary -- exact-file policy, not a scripts/verify_*_staging.py catch-all. Verification CLASS (bounded, manually-invoked, *_STAGING_NON_PRODUCTION-gated) is reusable, but registration OWNER/TARGET is domain-specific and must never be inferred from the shared verify_*_staging.py naming convention alone.",
-      "path_patterns": ["scripts/verify_f15_staging.py"],
+      "path_patterns": [
+        "scripts/verify_f15_staging.py"
+      ],
       "runtime_consumed": false,
       "authority": false,
       "eligible_target": "decision.f15_staging_verification_artifact",
@@ -34,6 +43,7 @@
     },
     {
       "id": "STAGING_VERIFICATION_APPROVALS_BUG_FAMILY",
+      "policy_version": 1,
       "description": "Bounded staging verification scripts for the specific approval-callback bug family they were written for -- owned by the Approvals/ActionContracts layer, the same layer their subject bugs live in.",
       "path_patterns": [
         "scripts/verify_bug157_160_163_staging.py",
@@ -51,6 +61,7 @@
     },
     {
       "id": "STAGING_VERIFICATION_TURN_COORDINATOR",
+      "policy_version": 1,
       "description": "TC8/TC9 staging verification scripts -- owned by the Turn Coordinator layer.",
       "path_patterns": [
         "scripts/verify_tc8_staging.py",
@@ -68,8 +79,11 @@
     },
     {
       "id": "TEST_SUPPORT_ARTIFACT",
+      "policy_version": 1,
       "description": "Test-fixture/repo-stub helper files whose name does not start with test_ (so the generic test-file heuristic misses them) but which exist purely to support another suite's fixtures.",
-      "path_patterns": ["*_test_repo_stub.py"],
+      "path_patterns": [
+        "*_test_repo_stub.py"
+      ],
       "runtime_consumed": false,
       "authority": false,
       "eligible_target": null,
@@ -82,8 +96,11 @@
     },
     {
       "id": "SHARED_UI_PRIMITIVE",
+      "policy_version": 1,
       "description": "Generic, stateless, prop-driven TMA presentational components with no fetch/API/state/side effects.",
-      "path_patterns": ["tma-frontend/src/components/ui/*.tsx"],
+      "path_patterns": [
+        "tma-frontend/src/components/ui/*.tsx"
+      ],
       "runtime_consumed": true,
       "authority": false,
       "eligible_target": "decision.tma_shared_ui_primitives",
@@ -96,8 +113,11 @@
     },
     {
       "id": "CROSS_LAYER_SUPPORTING_METADATA",
+      "policy_version": 1,
       "description": "A specific, named module consumed by callers in more than one existing catalog layer, with no single layer that legitimately owns all of them.",
-      "path_patterns": ["domain_utils.py"],
+      "path_patterns": [
+        "domain_utils.py"
+      ],
       "runtime_consumed": true,
       "authority": false,
       "eligible_target": "decision.business_domain_vocabulary",
@@ -111,6 +131,7 @@
     },
     {
       "id": "OFFLINE_RESEARCH_TOOL",
+      "policy_version": 1,
       "description": "Standalone, manually-invoked offline tools that self-declare (or are otherwise established to be) outside the live SCOREBOS runtime path -- research harnesses, one-off CSV/contact-merge utilities.",
       "path_patterns": [
         "scripts/research_crawler_poc/*",
@@ -130,8 +151,11 @@
     },
     {
       "id": "EXTERNAL_RECOMMENDATION_CATALOG",
+      "policy_version": 1,
       "description": "Read-only, curated catalog of approved external tools/resources and their recommendation metadata -- explicitly not the internal execution Tool Registry, cannot dispatch or execute, cannot grant ActionGateway/tool-execution authority.",
-      "path_patterns": ["business_tool_registry.py"],
+      "path_patterns": [
+        "business_tool_registry.py"
+      ],
       "runtime_consumed": true,
       "authority": true,
       "eligible_target": "decision.external_business_tool_recommendation_catalog",
@@ -146,8 +170,11 @@
     },
     {
       "id": "EXTERNAL_RECOMMENDATION_CATALOG_TEST",
+      "policy_version": 1,
       "description": "Test suite for business_tool_registry.py -- same authority boundary as EXTERNAL_RECOMMENDATION_CATALOG, registered into test_paths instead of code_paths.",
-      "path_patterns": ["test_business_tool_registry.py"],
+      "path_patterns": [
+        "test_business_tool_registry.py"
+      ],
       "runtime_consumed": true,
       "authority": false,
       "eligible_target": "decision.external_business_tool_recommendation_catalog",

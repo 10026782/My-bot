@@ -732,6 +732,7 @@ def _catalog_referenced_paths(catalog: Catalog) -> set[str]:
             "tools/context_librarian/pilot_preflight.py",
             "tools/context_librarian/refresh_after_merge.py",
             "tools/context_librarian/policy_registry.py",
+            "tools/context_librarian/policy_validators.py",
             "tools/context_librarian/reconcile.py",
             "tools/context_librarian/reconciliation_state.py",
             ".github/workflows/context-librarian-reconcile.yml",

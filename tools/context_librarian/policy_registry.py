@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from tools.context_librarian.librarian import ContextLibrarianError
+from tools.context_librarian.policy_validators import VALIDATORS
 
 POLICY_REGISTRY_RELATIVE_PATH = Path("docs/context_librarian/policies/policy_registry.json")
 POLICY_SCHEMA_RELATIVE_PATH = Path("docs/context_librarian/schema/policy_schema.json")
@@ -32,6 +33,7 @@ _SUPPORTED_SCHEMA_MAJOR = 1
 @dataclass(frozen=True)
 class Policy:
     id: str
+    policy_version: int
     description: str
     path_patterns: tuple[str, ...]
     runtime_consumed: bool
@@ -120,9 +122,23 @@ def load_policy_registry(repo_root: Path | str) -> tuple[Policy, ...]:
                 f"policy {policy_id}: auto_registration_allowed cannot be true "
                 "without an eligible_target/target_field to register into"
             )
+        if bool(raw["auto_registration_allowed"]) and policy_id not in VALIDATORS:
+            # Message E correction item 1: a path glob is candidate selection
+            # only -- an auto-registration policy without a deterministic
+            # structural/content predicate can never prove a match still
+            # belongs to its approved class.
+            raise ContextLibrarianError(
+                f"policy {policy_id}: auto_registration_allowed is true but no "
+                "structural/content predicate is registered for it in "
+                "tools/context_librarian/policy_validators.py"
+            )
+        policy_version = raw["policy_version"]
+        if not isinstance(policy_version, int) or isinstance(policy_version, bool) or policy_version < 1:
+            raise ContextLibrarianError(f"policy {policy_id}: policy_version must be a positive integer")
         policies.append(
             Policy(
                 id=policy_id,
+                policy_version=policy_version,
                 description=raw["description"],
                 path_patterns=tuple(raw["path_patterns"]),
                 runtime_consumed=bool(raw["runtime_consumed"]),

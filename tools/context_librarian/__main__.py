@@ -235,7 +235,7 @@ def main(argv: list[str] | None = None) -> int:
                         file=sys.stderr,
                     )
                     return 1
-                applied = apply_auto_maintenance(catalog, result)
+                applied = apply_auto_maintenance(catalog, policies, result)
                 print(json.dumps(applied, ensure_ascii=False, indent=2, sort_keys=True))
                 verify_catalog = load_catalog(_repo_root())
                 verify_result = reconcile(verify_catalog, policies, main_ref=args.main_ref)

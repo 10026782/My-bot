@@ -35,6 +35,7 @@ Provenance model (Message D correction, see RECONCILIATION.md):
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -43,6 +44,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from tools.context_librarian import policy_validators
 from tools.context_librarian.librarian import (
     Catalog,
     ContextLibrarianError,
@@ -53,6 +55,7 @@ from tools.context_librarian.librarian import (
 from tools.context_librarian.policy_registry import Policy, load_policy_registry, matching_policies
 from tools.context_librarian.reconciliation_state import (
     load_reconciliation_state,
+    update_auto_registrations,
     write_source_scan_commit,
 )
 
@@ -77,6 +80,7 @@ class ReconcileResult:
     auto_maintenance_sources: tuple[dict[str, Any], ...]
     decision_queue: tuple[dict[str, Any], ...]
     non_blocking_sources: tuple[dict[str, Any], ...]
+    revalidation_flags: tuple[dict[str, Any], ...] = ()
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -87,6 +91,7 @@ class ReconcileResult:
             "auto_maintenance_sources": list(self.auto_maintenance_sources),
             "decision_queue": list(self.decision_queue),
             "non_blocking_sources": list(self.non_blocking_sources),
+            "revalidation_flags": list(self.revalidation_flags),
         }
 
 
@@ -177,6 +182,100 @@ def _scan_new_sources(catalog: Catalog, main_sha: str, main_ref: str) -> list[di
     return classify_new_sources(catalog, added)
 
 
+def _content_hash(path: Path) -> str:
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _scan_auto_registrations(
+    catalog: Catalog, policies: tuple[Policy, ...], main_sha: str
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    """Read-only continuous-revalidation pass over every previously
+    auto-registered path (Message E correction items 3/4/8) -- registration
+    is not permanent proof, so this re-checks it every reconcile() call, not
+    just once at registration time.
+
+    Returns (stale_flags, refreshed_entries):
+    - stale_flags: entries whose content/policy/validator changed AND no
+      longer satisfy their policy's CURRENT predicate. These force
+      reconcile()'s outcome to OWNER_DECISION_REQUIRED (never silently
+      re-approved) and the path is never removed from its node's
+      code_paths/test_paths by this function -- quarantine, not deletion;
+      an owner resolves it explicitly.
+    - refreshed_entries: entries whose content/policy/validator changed but
+      STILL satisfy the current predicate -- the same approved contract,
+      freshly re-proven, safe for apply_auto_maintenance to mechanically
+      persist (never a new architectural decision, so this never touches
+      last_semantic_review_commit).
+
+    A policy_version bump on any policy is caught here automatically on the
+    very next call, for every path ever registered under it -- POLICY
+    CHANGE REVALIDATES HISTORY, not just future matches.
+    """
+    policies_by_id = {p.id: p for p in policies}
+    state = load_reconciliation_state(catalog.catalog_root)
+    stale: list[dict[str, Any]] = []
+    refreshed: dict[str, dict[str, Any]] = {}
+    for path, entry in sorted(state.get("auto_registrations", {}).items()):
+        target = entry.get("target_node")
+        field = entry.get("target_field")
+        if target not in catalog.nodes or path not in catalog.nodes[target].get(field, []):
+            # No longer registered anywhere this engine controls (manually
+            # removed/reclassified elsewhere) -- out of scope for this pass.
+            continue
+        full_path = catalog.repo_root / path
+        if not full_path.exists():
+            stale.append({
+                "path": path, "status": "STALE_REVALIDATION_REQUIRED",
+                "previous_policy": entry.get("policy_id"),
+                "failed_predicate": "registered file no longer exists on disk",
+                "changed_commit": main_sha, "current_target": target,
+            })
+            continue
+        current_hash = _content_hash(full_path)
+        policy = policies_by_id.get(entry.get("policy_id"))
+        unchanged = (
+            policy is not None
+            and current_hash == entry.get("content_hash")
+            and policy.policy_version == entry.get("policy_version")
+            and policy_validators.VALIDATOR_VERSION == entry.get("validator_version")
+        )
+        if unchanged:
+            continue
+        if policy is None:
+            stale.append({
+                "path": path, "status": "STALE_REVALIDATION_REQUIRED",
+                "previous_policy": entry.get("policy_id"),
+                "failed_predicate": "policy no longer exists in the registry",
+                "changed_commit": main_sha, "current_target": target,
+            })
+            continue
+        ok = policy_validators.validate_predicate(policy.id, catalog.repo_root, path)
+        if ok is not True:
+            stale.append({
+                "path": path, "status": "STALE_REVALIDATION_REQUIRED",
+                "previous_policy": entry.get("policy_id"),
+                "policy_version_then": entry.get("policy_version"),
+                "policy_version_now": policy.policy_version,
+                "failed_predicate": (
+                    "structural/content predicate failed" if ok is False
+                    else "predicate could not be proven"
+                ),
+                "changed_commit": main_sha, "current_target": target,
+            })
+            continue
+        refreshed[path] = {
+            "policy_id": policy.id,
+            "policy_version": policy.policy_version,
+            "target_node": target,
+            "target_field": field,
+            "validated_at_commit": main_sha,
+            "content_hash": current_hash,
+            "validator_version": policy_validators.VALIDATOR_VERSION,
+            "classification_mode": "AUTO",
+        }
+    return stale, refreshed
+
+
 def _resolve_policy(path: str, policies: tuple[Policy, ...]) -> tuple[Policy | None, bool]:
     """Returns (policy, ambiguous). Ambiguous=True (policy=None) when more
     than one policy matches the same path with differing (eligible_target,
@@ -200,6 +299,7 @@ def reconcile(
     main_sha = _resolve_main_sha(catalog.repo_root, main_ref)
     mechanical_updates = _mechanical_drift(catalog, main_sha)
     new_sources = _scan_new_sources(catalog, main_sha, main_ref)
+    stale_flags, refreshed_entries = _scan_auto_registrations(catalog, policies, main_sha)
 
     auto_maintenance: list[dict[str, Any]] = []
     decision_queue: list[dict[str, Any]] = []
@@ -264,11 +364,29 @@ def reconcile(
             )
             continue
 
+        # Message E correction items 1/6: a path glob is candidate selection
+        # only -- never sufficient by itself for runtime-consumed code. Fail
+        # closed (route to decision_queue) unless the policy's deterministic
+        # structural/content predicate proves the match, never inferring
+        # purity/authority from filename, directory, or naming convention.
+        predicate_result = policy_validators.validate_predicate(
+            policy.id, catalog.repo_root, item["path"]
+        )
+        if predicate_result is not True:
+            decision_queue.append(
+                {**enriched, "policy_note": (
+                    "policy structural/content predicate failed"
+                    if predicate_result is False
+                    else "policy structural/content predicate could not be proven"
+                )}
+            )
+            continue
+
         auto_maintenance.append(enriched)
 
-    if decision_queue:
+    if decision_queue or stale_flags:
         outcome = OWNER_DECISION_REQUIRED
-    elif mechanical_updates or auto_maintenance:
+    elif mechanical_updates or auto_maintenance or refreshed_entries:
         outcome = AUTO_MAINTENANCE_REQUIRED
     else:
         outcome = CLEAN
@@ -281,6 +399,7 @@ def reconcile(
         auto_maintenance_sources=tuple(auto_maintenance),
         decision_queue=tuple(decision_queue),
         non_blocking_sources=tuple(non_blocking),
+        revalidation_flags=tuple(stale_flags),
     )
 
 
@@ -454,19 +573,34 @@ def _apply_registration_plan(catalog: Catalog, plan: list[tuple[str, str, str]])
     return written
 
 
-def apply_auto_maintenance(catalog: Catalog, result: ReconcileResult) -> dict[str, Any]:
+def apply_auto_maintenance(
+    catalog: Catalog, policies: tuple[Policy, ...], result: ReconcileResult
+) -> dict[str, Any]:
     """The only bounded write path for AUTO_MAINTENANCE_REQUIRED. Performs,
     in order: (A) mechanical last_observed_commit bumps for drifted nodes,
     (C) policy-pre-approved registration of auto-maintenance sources into
-    their declared target_field, then (B) advances last_source_scan_commit
-    to the reconciled main SHA. B is last and unconditional on A/C succeeding
-    (they raise on failure, rolling back their own file writes) so the scan
-    baseline only ever advances past a window that was fully applied.
+    their declared target_field -- recording full classification provenance
+    (policy_id, policy_version, classification_mode, validated_at_commit,
+    content_hash, validator_version, target_node, target_field) for every
+    newly registered path, plus a mechanical refresh of that same provenance
+    for already-registered paths whose content/policy/validator drifted but
+    still satisfy their policy's current predicate -- then (B) advances
+    last_source_scan_commit to the reconciled main SHA. B is last and
+    unconditional on A/C succeeding (they raise on failure, rolling back
+    their own file writes) so the scan baseline only ever advances past a
+    window that was fully applied.
+
+    Never writes last_semantic_review_commit or last_verified_commit: a
+    passing revalidation proves "this source still satisfies its
+    previously-approved contract", never "the architectural contract itself
+    was semantically re-approved" -- those two fields stay human-only.
 
     Refuses outright unless result.outcome == AUTO_MAINTENANCE_REQUIRED --
     by construction that outcome never coexists with a non-empty
-    decision_queue (OWNER_DECISION_REQUIRED always wins), so this can never
-    silently skip an unresolved owner decision.
+    decision_queue OR any STALE_REVALIDATION_REQUIRED flag (both force
+    OWNER_DECISION_REQUIRED), so this can never silently skip an unresolved
+    owner decision or silently re-approve a source that stopped satisfying
+    its policy.
 
     Safety invariant is HEAD == the canonical main SHA this result was
     computed against, plus a clean working tree -- deliberately NOT "local
@@ -495,11 +629,39 @@ def apply_auto_maintenance(catalog: Catalog, result: ReconcileResult) -> dict[st
     reloaded = load_catalog(catalog.repo_root)
     plan = _build_registration_plan(reloaded, result.auto_maintenance_sources)
     registered = _apply_registration_plan(reloaded, plan)
+    reloaded = load_catalog(catalog.repo_root) if registered else reloaded
+
+    policies_by_id = {p.id: p for p in policies}
+    sources_by_path = {item["path"]: item for item in result.auto_maintenance_sources}
+    new_provenance: dict[str, dict[str, Any]] = {}
+    for target, field, path in plan:
+        item = sources_by_path[path]
+        new_provenance[path] = {
+            "policy_id": item["policy_id"],
+            "policy_version": policies_by_id[item["policy_id"]].policy_version,
+            "target_node": target,
+            "target_field": field,
+            "validated_at_commit": result.canonical_main_sha,
+            "content_hash": _content_hash(catalog.repo_root / path),
+            "validator_version": policy_validators.VALIDATOR_VERSION,
+            "classification_mode": "AUTO",
+        }
+
+    # Mechanical refresh only -- _scan_auto_registrations() only returns a
+    # path here if its predicate still passes under the CURRENT policy; a
+    # failing one would already have forced result.outcome to
+    # OWNER_DECISION_REQUIRED and this function would have refused above.
+    _, refreshed_entries = _scan_auto_registrations(reloaded, policies, result.canonical_main_sha)
+
+    if new_provenance or refreshed_entries:
+        update_auto_registrations(catalog.catalog_root, {**new_provenance, **refreshed_entries})
 
     write_source_scan_commit(catalog.catalog_root, result.canonical_main_sha)
 
     return {
         "stamped_nodes": stamped,
         "registered": registered,
+        "provenance_recorded": sorted(new_provenance),
+        "provenance_refreshed": sorted(refreshed_entries),
         "source_scan_commit": result.canonical_main_sha,
     }

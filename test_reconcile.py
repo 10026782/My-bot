@@ -8,10 +8,12 @@ docs/context_librarian/RECONCILIATION.md.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
+from tools.context_librarian import policy_validators
 from tools.context_librarian import reconcile as reconcile_module
 from tools.context_librarian.librarian import ContextLibrarianError, classify_new_sources, load_catalog
 from tools.context_librarian.policy_registry import Policy, load_policy_registry, match_policy
@@ -23,6 +25,7 @@ from tools.context_librarian.reconcile import (
     reconcile,
     stamp_observed,
 )
+from tools.context_librarian.reconciliation_state import load_reconciliation_state, update_auto_registrations
 
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -83,6 +86,40 @@ def _isolated_catalog(monkeypatch, tmp_path):
     shutil.copytree(REPO_ROOT / "docs/context_librarian", target)
     monkeypatch.setattr(librarian, "CATALOG_RELATIVE_ROOT", target)
     return load_catalog(REPO_ROOT)
+
+
+# A real, already-unregistered-on-main file used across the revalidation
+# (Message E) tests below -- its real content genuinely satisfies
+# STAGING_VERIFICATION_APPROVALS_BUG_FAMILY's predicate (has a __main__
+# entrypoint, never referenced by tools/dispatcher.py or app.py), so tests
+# that don't deliberately fake the predicate result exercise the real
+# validator against real content, not a mock of it.
+_SEED_PATH = "scripts/verify_bug157_160_163_staging.py"
+_SEED_NODE = "layer.approvals"
+_SEED_FIELD = "test_paths"
+_SEED_POLICY_ID = "STAGING_VERIFICATION_APPROVALS_BUG_FAMILY"
+
+
+def _seed_registration(monkeypatch, tmp_path, *, entry, node_id=_SEED_NODE, field=_SEED_FIELD, path=_SEED_PATH):
+    """Builds an isolated catalog (real repo_root, tmp catalog_root) where
+    `path` is already present in `node_id`'s `field`, with a matching
+    auto_registrations provenance entry in the isolated reconciliation_state.json
+    -- simulating "a previous cycle already auto-registered this path"
+    without ever writing to the real repo's catalog files."""
+    isolated = _isolated_catalog(monkeypatch, tmp_path)
+    files = reconcile_module._catalog_node_files(isolated)
+    file_path = files[node_id]
+    data = json.loads(file_path.read_text(encoding="utf-8"))
+    for node in data["nodes"]:
+        if node["id"] == node_id and path not in node[field]:
+            node[field].append(path)
+    file_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    update_auto_registrations(isolated.catalog_root, {path: entry})
+    return load_catalog(REPO_ROOT)
+
+
+def _real_content_hash(path=_SEED_PATH):
+    return reconcile_module._content_hash(REPO_ROOT / path)
 
 
 # --- Policy registry basics ---------------------------------------------
@@ -184,7 +221,7 @@ def test_apply_auto_maintenance_then_reconcile_is_clean_across_two_reload_cycles
     assert first.outcome == AUTO_MAINTENANCE_REQUIRED
     assert any(u["node_id"] == some_node["id"] for u in first.mechanical_updates)
 
-    applied = apply_auto_maintenance(isolated, first)
+    applied = apply_auto_maintenance(isolated, policies, first)
     assert some_node["id"] in applied["stamped_nodes"]
     assert applied["source_scan_commit"] == main_sha
 
@@ -205,7 +242,7 @@ def test_apply_auto_maintenance_refuses_unless_outcome_is_auto_maintenance_requi
     clean_result = _reconcile_with_fakes(catalog, policies)
     assert clean_result.outcome == CLEAN
     with pytest.raises(ContextLibrarianError):
-        apply_auto_maintenance(catalog, clean_result)
+        apply_auto_maintenance(catalog, policies, clean_result)
 
 
 def test_apply_auto_maintenance_requires_head_at_canonical_sha(catalog, policies, monkeypatch):
@@ -216,7 +253,7 @@ def test_apply_auto_maintenance_requires_head_at_canonical_sha(catalog, policies
     assert result.outcome == AUTO_MAINTENANCE_REQUIRED
     monkeypatch.setattr(reconcile_module, "_current_branch_and_commit", lambda _root: ("main", "wrong-sha"))
     with pytest.raises(ContextLibrarianError):
-        apply_auto_maintenance(catalog, result)
+        apply_auto_maintenance(catalog, policies, result)
 
 
 # --- B: policy-approved new source -> AUTO -> apply-auto -> registered into
@@ -246,7 +283,7 @@ def test_policy_approved_new_source_registers_and_reconciles_clean(catalog, poli
     assert first.auto_maintenance_sources[0]["policy_id"] == "STAGING_VERIFICATION_APPROVALS_BUG_FAMILY"
     assert first.auto_maintenance_sources[0]["target_field"] == "test_paths"
 
-    applied = apply_auto_maintenance(isolated, first)
+    applied = apply_auto_maintenance(isolated, policies, first)
     assert "layer.approvals.test_paths:scripts/verify_bug157_160_163_staging.py" in applied["registered"]
 
     reloaded = load_catalog(REPO_ROOT)
@@ -268,7 +305,7 @@ def test_unknown_runtime_python_file_requires_owner_decision_and_apply_auto_refu
     assert "policy_id" not in result.decision_queue[0]
     assert result.outcome == OWNER_DECISION_REQUIRED
     with pytest.raises(ContextLibrarianError):
-        apply_auto_maintenance(catalog, result)
+        apply_auto_maintenance(catalog, policies, result)
 
 
 # --- D: STOP source -> OWNER_DECISION_REQUIRED even with a catch-all policy ---
@@ -287,7 +324,7 @@ def test_authority_named_path_never_auto_approved_even_with_hypothetical_policy_
     # matches every path must never move a STOP classification into
     # auto-maintenance.
     catch_all = Policy(
-        id="CATCH_ALL_TEST_ONLY", description="test-only", path_patterns=("*",),
+        id="CATCH_ALL_TEST_ONLY", policy_version=1, description="test-only", path_patterns=("*",),
         runtime_consumed=True, authority=False, eligible_target=None, target_field=None,
         auto_registration_allowed=True, classification_when_matched="AUTO_MAINTENANCE_ELIGIBLE",
         notes=(),
@@ -332,13 +369,13 @@ def test_staging_verification_f15_requires_target_to_exist(catalog, policies):
 
 def test_multiple_conflicting_policy_matches_require_owner_decision(catalog, policies):
     conflict_a = Policy(
-        id="CONFLICT_A", description="t", path_patterns=("some/conflicting/*.py",),
+        id="CONFLICT_A", policy_version=1, description="t", path_patterns=("some/conflicting/*.py",),
         runtime_consumed=True, authority=False, eligible_target="layer.approvals",
         target_field="test_paths", auto_registration_allowed=True,
         classification_when_matched="AUTO_MAINTENANCE_ELIGIBLE", notes=(),
     )
     conflict_b = Policy(
-        id="CONFLICT_B", description="t", path_patterns=("some/conflicting/*.py",),
+        id="CONFLICT_B", policy_version=1, description="t", path_patterns=("some/conflicting/*.py",),
         runtime_consumed=True, authority=False, eligible_target="layer.turn_coordinator",
         target_field="test_paths", auto_registration_allowed=True,
         classification_when_matched="AUTO_MAINTENANCE_ELIGIBLE", notes=(),
@@ -351,19 +388,25 @@ def test_multiple_conflicting_policy_matches_require_owner_decision(catalog, pol
     assert result.outcome == OWNER_DECISION_REQUIRED
 
 
-def test_multiple_policy_matches_agreeing_on_identical_target_are_not_ambiguous(catalog, policies):
+def test_multiple_policy_matches_agreeing_on_identical_target_are_not_ambiguous(
+    catalog, policies, monkeypatch
+):
     agree_a = Policy(
-        id="AGREE_A", description="t", path_patterns=("some/agree/*.py",),
+        id="AGREE_A", policy_version=1, description="t", path_patterns=("some/agree/*.py",),
         runtime_consumed=True, authority=False, eligible_target="layer.approvals",
         target_field="test_paths", auto_registration_allowed=True,
         classification_when_matched="AUTO_MAINTENANCE_ELIGIBLE", notes=(),
     )
     agree_b = Policy(
-        id="AGREE_B", description="t", path_patterns=("some/agree/*.py",),
+        id="AGREE_B", policy_version=1, description="t", path_patterns=("some/agree/*.py",),
         runtime_consumed=True, authority=False, eligible_target="layer.approvals",
         target_field="test_paths", auto_registration_allowed=True,
         classification_when_matched="AUTO_MAINTENANCE_ELIGIBLE", notes=(),
     )
+    # A synthetic predicate for this test-only policy id -- reconcile()'s
+    # fail-closed predicate gate (item 1/6) requires one for any policy with
+    # auto_registration_allowed=True, same as the real registry loader does.
+    monkeypatch.setitem(reconcile_module.policy_validators.VALIDATORS, "AGREE_A", lambda *_a: True)
     new_sources = _classify(catalog, ["some/agree/newfile.py"])
     result = _reconcile_with_fakes(catalog, (agree_a, agree_b), new_sources=new_sources)
     assert len(result.auto_maintenance_sources) == 1
@@ -563,3 +606,294 @@ def test_scan_new_sources_baseline_already_at_target_sha_finds_nothing(catalog, 
     )
     result = reconcile_module._scan_new_sources(catalog, "samesha0000000000000000000000000000000000", "origin/main")
     assert result == []
+
+
+# =====================================================================
+# Message E correction: continuous revalidation of already-auto-registered
+# paths (items 1-8) -- required tests A-H.
+# =====================================================================
+
+
+def _revalidate_only(catalog, policies, main_sha="deadbee00000000000000000000000000000000"):
+    """Runs reconcile() with mechanical drift and new-source scanning both
+    faked to empty, isolating the revalidation pass (_scan_auto_registrations)
+    as the only thing that can produce a non-CLEAN outcome."""
+    return _reconcile_with_fakes(catalog, policies, main_sha=main_sha)
+
+
+# --- A: AUTO-registered file under Policy V1 -> reload -> unchanged file remains valid ---
+
+
+def test_A_unchanged_registered_file_remains_valid(monkeypatch, tmp_path, policies):
+    entry = {
+        "policy_id": _SEED_POLICY_ID,
+        "policy_version": 1,
+        "target_node": _SEED_NODE,
+        "target_field": _SEED_FIELD,
+        "validated_at_commit": "priorsha0000000000000000000000000000000",
+        "content_hash": _real_content_hash(),
+        "validator_version": policy_validators.VALIDATOR_VERSION,
+        "classification_mode": "AUTO",
+    }
+    isolated = _seed_registration(monkeypatch, tmp_path, entry=entry)
+    result = _revalidate_only(isolated, policies)
+    assert result.revalidation_flags == ()
+    assert result.outcome == CLEAN
+
+    # Reload -- a second, entirely separate cycle sees the same thing.
+    reloaded = load_catalog(REPO_ROOT)
+    result_2 = _revalidate_only(reloaded, policies)
+    assert result_2.outcome == CLEAN
+
+
+# --- B: modify the file but stay within V1 predicates -> automatic revalidation PASS ---
+
+
+def test_B_changed_content_still_satisfying_predicate_auto_refreshes(monkeypatch, tmp_path, policies):
+    entry = {
+        "policy_id": _SEED_POLICY_ID,
+        "policy_version": 1,
+        "target_node": _SEED_NODE,
+        "target_field": _SEED_FIELD,
+        # Deliberately stale/wrong hash -- simulates "the file changed since
+        # this was registered" without actually touching the real file.
+        "validated_at_commit": "priorsha0000000000000000000000000000000",
+        "content_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "validator_version": policy_validators.VALIDATOR_VERSION,
+        "classification_mode": "AUTO",
+    }
+    isolated = _seed_registration(monkeypatch, tmp_path, entry=entry)
+    main_sha = "b000000000000000000000000000000000000000"
+    result = _revalidate_only(isolated, policies, main_sha=main_sha)
+    assert result.revalidation_flags == ()  # predicate still passes on real content
+    assert result.outcome == AUTO_MAINTENANCE_REQUIRED
+
+    monkeypatch.setattr(reconcile_module, "_current_branch_and_commit", lambda _root: ("main", main_sha))
+    monkeypatch.setattr(reconcile_module, "_working_tree_is_clean", lambda _root: True)
+    applied = apply_auto_maintenance(isolated, policies, result)
+    assert _SEED_PATH in applied["provenance_refreshed"]
+
+    reloaded_state = load_reconciliation_state(isolated.catalog_root)
+    refreshed_entry = reloaded_state["auto_registrations"][_SEED_PATH]
+    assert refreshed_entry["content_hash"] == _real_content_hash()
+    assert refreshed_entry["validated_at_commit"] == main_sha
+
+    # Next cycle: content_hash now matches -> CLEAN.
+    reloaded = load_catalog(REPO_ROOT)
+    result_2 = _revalidate_only(reloaded, policies, main_sha=main_sha)
+    assert result_2.outcome == CLEAN
+
+
+# --- C: modify content so one required predicate fails -> OWNER_DECISION_REQUIRED ---
+
+
+def test_C_predicate_failure_forces_owner_decision_and_blocks_apply_auto(
+    monkeypatch, tmp_path, policies
+):
+    entry = {
+        "policy_id": _SEED_POLICY_ID,
+        "policy_version": 1,
+        "target_node": _SEED_NODE,
+        "target_field": _SEED_FIELD,
+        "validated_at_commit": "priorsha0000000000000000000000000000000",
+        "content_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "validator_version": policy_validators.VALIDATOR_VERSION,
+        "classification_mode": "AUTO",
+    }
+    isolated = _seed_registration(monkeypatch, tmp_path, entry=entry)
+    # Simulate the file having changed in a way that now trips the
+    # predicate -- e.g. it got wired into the live dispatcher.
+    monkeypatch.setitem(policy_validators.VALIDATORS, _SEED_POLICY_ID, lambda *_a: False)
+
+    result = _revalidate_only(isolated, policies)
+    assert len(result.revalidation_flags) == 1
+    flag = result.revalidation_flags[0]
+    assert flag["path"] == _SEED_PATH
+    assert flag["status"] == "STALE_REVALIDATION_REQUIRED"
+    assert flag["previous_policy"] == _SEED_POLICY_ID
+    assert flag["failed_predicate"] == "structural/content predicate failed"
+    assert result.outcome == OWNER_DECISION_REQUIRED
+
+    with pytest.raises(ContextLibrarianError):
+        apply_auto_maintenance(isolated, policies, result)
+
+    # Quarantine, not deletion: the path is still registered in the node.
+    assert _SEED_PATH in isolated.nodes[_SEED_NODE][_SEED_FIELD]
+
+
+# --- D: Policy V1 -> V2 -> every V1-classified source is revalidated ---
+
+
+def test_D_policy_version_bump_revalidates_every_historical_match(monkeypatch, tmp_path, policies):
+    entry = {
+        "policy_id": _SEED_POLICY_ID,
+        "policy_version": 1,
+        "target_node": _SEED_NODE,
+        "target_field": _SEED_FIELD,
+        "validated_at_commit": "priorsha0000000000000000000000000000000",
+        "content_hash": _real_content_hash(),
+        "validator_version": policy_validators.VALIDATOR_VERSION,
+        "classification_mode": "AUTO",
+    }
+    isolated = _seed_registration(monkeypatch, tmp_path, entry=entry)
+    bumped = next(p for p in policies if p.id == _SEED_POLICY_ID)
+    bumped_v2 = Policy(
+        id=bumped.id, policy_version=2, description=bumped.description,
+        path_patterns=bumped.path_patterns, runtime_consumed=bumped.runtime_consumed,
+        authority=bumped.authority, eligible_target=bumped.eligible_target,
+        target_field=bumped.target_field, auto_registration_allowed=bumped.auto_registration_allowed,
+        classification_when_matched=bumped.classification_when_matched, notes=bumped.notes,
+    )
+    # content_hash is unchanged -- only the policy_version differs -- and the
+    # revalidation pass must still trigger, proving POLICY CHANGE REVALIDATES
+    # HISTORY rather than only applying V2 to future matches.
+    result = _revalidate_only(isolated, (bumped_v2,))
+    assert result.revalidation_flags == ()
+    assert result.outcome == AUTO_MAINTENANCE_REQUIRED
+
+    monkeypatch.setattr(
+        reconcile_module, "_current_branch_and_commit", lambda _root: ("main", result.canonical_main_sha)
+    )
+    monkeypatch.setattr(reconcile_module, "_working_tree_is_clean", lambda _root: True)
+    applied = apply_auto_maintenance(isolated, (bumped_v2,), result)
+    assert _SEED_PATH in applied["provenance_refreshed"]
+    reloaded_state = load_reconciliation_state(isolated.catalog_root)
+    assert reloaded_state["auto_registrations"][_SEED_PATH]["policy_version"] == 2
+
+
+# --- E: one historical V1 source fails V2 -> surfaced, not silently grandfathered ---
+
+
+def test_E_historical_source_failing_new_policy_version_is_surfaced(monkeypatch, tmp_path, policies):
+    entry = {
+        "policy_id": _SEED_POLICY_ID,
+        "policy_version": 1,
+        "target_node": _SEED_NODE,
+        "target_field": _SEED_FIELD,
+        "validated_at_commit": "priorsha0000000000000000000000000000000",
+        "content_hash": _real_content_hash(),
+        "validator_version": policy_validators.VALIDATOR_VERSION,
+        "classification_mode": "AUTO",
+    }
+    isolated = _seed_registration(monkeypatch, tmp_path, entry=entry)
+    bumped = next(p for p in policies if p.id == _SEED_POLICY_ID)
+    bumped_v2 = Policy(
+        id=bumped.id, policy_version=2, description=bumped.description,
+        path_patterns=bumped.path_patterns, runtime_consumed=bumped.runtime_consumed,
+        authority=bumped.authority, eligible_target=bumped.eligible_target,
+        target_field=bumped.target_field, auto_registration_allowed=bumped.auto_registration_allowed,
+        classification_when_matched=bumped.classification_when_matched, notes=bumped.notes,
+    )
+    # V2's predicate is stricter and this historical source no longer meets it.
+    monkeypatch.setitem(policy_validators.VALIDATORS, _SEED_POLICY_ID, lambda *_a: False)
+
+    result = _revalidate_only(isolated, (bumped_v2,))
+    assert len(result.revalidation_flags) == 1
+    flag = result.revalidation_flags[0]
+    assert flag["policy_version_then"] == 1
+    assert flag["policy_version_now"] == 2
+    assert result.outcome == OWNER_DECISION_REQUIRED
+    with pytest.raises(ContextLibrarianError):
+        apply_auto_maintenance(isolated, (bumped_v2,), result)
+
+
+# --- F: registered path never reappears as "new", but DOES revalidate -----
+
+
+def test_F_registered_path_excluded_from_new_sources_but_still_revalidated(
+    monkeypatch, tmp_path, policies
+):
+    entry = {
+        "policy_id": _SEED_POLICY_ID,
+        "policy_version": 1,
+        "target_node": _SEED_NODE,
+        "target_field": _SEED_FIELD,
+        "validated_at_commit": "priorsha0000000000000000000000000000000",
+        "content_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "validator_version": policy_validators.VALIDATOR_VERSION,
+        "classification_mode": "AUTO",
+    }
+    isolated = _seed_registration(monkeypatch, tmp_path, entry=entry)
+    # Structurally, "not new" means "already present in some node's
+    # code_paths/test_paths" -- classify_new_sources()'s exclusion set is
+    # built from exactly this (see test_registered_path_never_reappears_as_new_source
+    # for the direct classify_new_sources() proof on the real, un-isolated
+    # catalog; isolated catalog_root/repo_root are decoupled by design in
+    # this test file's isolation helper, which classify_new_sources()'s own
+    # infra-path resolution isn't compatible with).
+    assert _SEED_PATH in isolated.nodes[_SEED_NODE][_SEED_FIELD]
+
+    result = _revalidate_only(isolated, policies)
+    # Not in decision_queue (that's for NEW sources) -- but the stale hash
+    # still drove a real revalidation outcome (AUTO_MAINTENANCE_REQUIRED,
+    # since the real predicate still passes on real content).
+    assert all(item["path"] != _SEED_PATH for item in result.decision_queue)
+    assert result.outcome == AUTO_MAINTENANCE_REQUIRED
+
+
+# --- G: last_semantic_review_commit byte-identical before/after automatic runs ---
+
+
+def test_G_last_semantic_review_commit_untouched_by_any_automatic_run(monkeypatch, tmp_path, policies):
+    entry = {
+        "policy_id": _SEED_POLICY_ID,
+        "policy_version": 1,
+        "target_node": _SEED_NODE,
+        "target_field": _SEED_FIELD,
+        "validated_at_commit": "priorsha0000000000000000000000000000000",
+        "content_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "validator_version": policy_validators.VALIDATOR_VERSION,
+        "classification_mode": "AUTO",
+    }
+    isolated = _seed_registration(monkeypatch, tmp_path, entry=entry)
+
+    # Hand-inject a human semantic review marker on the target node, exactly
+    # as an owner would when registering/re-confirming a decision.
+    files = reconcile_module._catalog_node_files(isolated)
+    file_path = files[_SEED_NODE]
+    data = json.loads(file_path.read_text(encoding="utf-8"))
+    marker = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"  # valid commit_pattern hex, human-review marker
+    for node in data["nodes"]:
+        if node["id"] == _SEED_NODE:
+            node["last_semantic_review_commit"] = marker
+    file_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    isolated = load_catalog(REPO_ROOT)
+    assert isolated.nodes[_SEED_NODE]["last_semantic_review_commit"] == marker
+
+    main_sha = "6000000000000000000000000000000000000006"
+    monkeypatch.setattr(reconcile_module, "_current_branch_and_commit", lambda _root: ("main", main_sha))
+    monkeypatch.setattr(reconcile_module, "_working_tree_is_clean", lambda _root: True)
+    result = _revalidate_only(isolated, policies, main_sha=main_sha)
+    assert result.outcome == AUTO_MAINTENANCE_REQUIRED
+
+    apply_auto_maintenance(isolated, policies, result)
+    reloaded = load_catalog(REPO_ROOT)
+    assert reloaded.nodes[_SEED_NODE]["last_semantic_review_commit"] == marker
+
+    stamp_observed(reloaded, main_sha)
+    reloaded_again = load_catalog(REPO_ROOT)
+    assert reloaded_again.nodes[_SEED_NODE]["last_semantic_review_commit"] == marker
+
+
+# --- H: a mistaken broad glob cannot override a failed structural predicate ---
+
+
+def test_H_broad_glob_cannot_override_failed_structural_predicate(catalog, policies, monkeypatch):
+    broad = Policy(
+        id="BROAD_GLOB_TEST_ONLY", policy_version=1, description="deliberately over-broad",
+        path_patterns=("*",), runtime_consumed=True, authority=False,
+        eligible_target="layer.approvals", target_field="test_paths",
+        auto_registration_allowed=True, classification_when_matched="AUTO_MAINTENANCE_ELIGIBLE",
+        notes=(),
+    )
+    # Its predicate correctly refuses everything -- proving the glob match
+    # alone (which would otherwise happily claim any path) cannot smuggle a
+    # registration past a failing structural check.
+    monkeypatch.setitem(policy_validators.VALIDATORS, "BROAD_GLOB_TEST_ONLY", lambda *_a: False)
+
+    new_sources = _classify(catalog, ["totally_new_unclassified_module.py"])
+    result = _reconcile_with_fakes(catalog, (broad,), new_sources=new_sources)
+    assert len(result.auto_maintenance_sources) == 0
+    assert result.decision_queue[0]["policy_id"] == "BROAD_GLOB_TEST_ONLY"
+    assert "predicate failed" in result.decision_queue[0]["policy_note"]
+    assert result.outcome == OWNER_DECISION_REQUIRED

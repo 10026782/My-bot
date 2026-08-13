@@ -172,13 +172,16 @@ node's `code_paths`/`test_paths`, and only for items already routed into
 that list have already passed every one of: classification isn't `STOP`;
 policy matched unambiguously; `auto_registration_allowed` is `true`;
 `eligible_target` exists as a loaded catalog node; `target_field` is a real,
-declared, non-inferred field. At apply time it additionally: skips a path
-already present (idempotent no-op), deterministically sorts/dedupes the
-plan, and reloads+validates the catalog after writing. `--apply-auto`'s CLI
-handler then reruns `reconcile()` against the freshly mutated tree and
-refuses to exit 0 unless that second pass is `CLEAN` — the workflow in
-section D only ever opens a PR after this second-pass check has already
-passed inside the CLI call itself.
+declared, non-inferred field; **the policy's structural/content predicate
+(section E.1) returned `True`** — a glob match alone is never sufficient.
+At apply time it additionally: skips a path already present (idempotent
+no-op), deterministically sorts/dedupes the plan, records full
+classification provenance for every newly-registered path, and
+reloads+validates the catalog after writing. `--apply-auto`'s CLI handler
+then reruns `reconcile()` against the freshly mutated tree and refuses to
+exit 0 unless that second pass is `CLEAN` — the workflow in section D only
+ever opens a PR after this second-pass check has already passed inside the
+CLI call itself.
 
 ## C. Three outcomes
 
@@ -280,6 +283,81 @@ and the semantic step are split:
   covering the class. The next instance of that class then classifies
   deterministically as `AUTO_MAINTENANCE_REQUIRED` instead of reopening the
   same question.
+
+## E.1 Continuous revalidation and registration provenance (Message E correction)
+
+**`REGISTRATION IS NOT PERMANENT PROOF.`** A first cut of this engine
+recorded a path once and never looked at it again — a policy that was
+correct on the day of registration could silently stop being true (a file
+edited to add dispatch/execution wiring, a policy predicate tightened) and
+the catalog would keep treating the old registration as valid forever. The
+corrected model:
+
+`OWNER DECIDES THE SEMANTIC CONTRACT. AUTOMATION REUSES IT ONLY WHILE ITS
+PROOF STILL HOLDS. AUTO MAY REUSE A DECISION. AUTO MAY NOT PRESERVE A
+DECISION AFTER ITS PROOF NO LONGER HOLDS. POLICY CHANGE REVALIDATES HISTORY.`
+
+**Policy != path glob.** A policy's `path_patterns` is candidate selection
+only. Every `auto_registration_allowed=true` policy must additionally have
+a deterministic structural/content predicate registered in
+`tools/context_librarian/policy_validators.py`
+(`policy_registry.py`'s loader refuses to load the registry otherwise) —
+"path match alone" is never sufficient to auto-register runtime-consumed
+code. Predicates check real wiring (does `tools/dispatcher.py`/`app.py`
+ever reference this module by name?), not vocabulary (a bounded staging
+verification script legitimately mentions `ActionGateway` — that's its
+whole purpose, not an authority grant, so predicates never reject on
+keyword presence alone for that class). A predicate that cannot be
+evaluated (unreadable file, no registered predicate for the policy id)
+returns `None`, which every caller treats identically to `False` — fail
+closed on validator uncertainty, never infer purity from filename,
+directory, naming convention, or the mere fact of a prior registration.
+
+**Classification provenance.** `docs/context_librarian/reconciliation_state.json`'s
+`auto_registrations` map records, per auto-registered path: `policy_id`,
+`policy_version`, `classification_mode` (currently always `"AUTO"`),
+`validated_at_commit`, `content_hash` (sha256 of the file's bytes),
+`validator_version` (`policy_validators.VALIDATOR_VERSION`), `target_node`,
+`target_field`. Nothing is ever registered without this record — it is what
+makes the decision explainable and reproducible after the fact, and what
+the revalidation pass below diffs against.
+
+**Continuous revalidation, every `reconcile()` call.** `_scan_auto_registrations()`
+re-derives the current content hash for every path in `auto_registrations`
+and compares it (plus the matching policy's current `policy_version` and
+`policy_validators.VALIDATOR_VERSION`) against the stored record:
+
+- **Unchanged** (hash, policy_version, and validator_version all still
+  match): skipped — no I/O beyond the hash, no predicate re-run.
+- **Changed but the current predicate still passes**: a mechanical
+  *refresh* — the exact same approved contract, freshly re-proven. Safe for
+  `apply_auto_maintenance()` to persist a fresh provenance record. This
+  never touches `last_semantic_review_commit`: passing revalidation proves
+  "this source still satisfies its previously-approved contract", never
+  "the architectural contract itself was semantically re-approved" — that
+  distinction is exactly why those two concepts have separate fields (see
+  section A).
+- **Changed and the current predicate now fails**: `STALE_REVALIDATION_REQUIRED`.
+  Never silently re-approved, never silently deleted — the path stays
+  registered (quarantined) and the flag forces `reconcile()`'s outcome to
+  `OWNER_DECISION_REQUIRED` with the previous policy, the failed predicate,
+  the commit the change was observed at, and the current target, so an
+  owner has everything needed to resolve it without re-deriving it.
+
+Because every already-registered path is rescanned on every call (not just
+newly-touched ones), a `policy_version` bump on any policy is caught
+automatically for **every** path ever registered under it the very next
+time `reconcile()` runs — `POLICY CHANGE REVALIDATES HISTORY`, not only
+future matches. `VALIDATOR_VERSION` gives the same guarantee when a
+predicate function's own logic changes without a `policy_version` bump.
+
+**Revocation states.** For an existing auto-classified entry: `VALID`
+(nothing surfaced — either unchanged, or changed-and-refreshed) or
+`STALE_REVALIDATION_REQUIRED` (surfaced in `revalidation_flags`, forcing
+`reconcile()`'s outcome to `OWNER_DECISION_REQUIRED`). There is no
+automatic third "delete/revoke" action — quarantine-and-report only; an
+owner decides whether to fix the source, re-scope the policy, or manually
+remove the registration.
 
 ## Worked example
 
