@@ -4,6 +4,7 @@ from business_tool_registry import find_recommended_tools, list_tools, maybe_rec
 def test_task_matching_returns_canonical_approved_tools():
     assert find_recommended_tools("אני צריך לאחד כמה קבצי PDF")[0].tool_id == "bentopdf"
     assert find_recommended_tools("יש לי קובץ CSV שלא נפתח טוב")[0].tool_id == "csv-repair"
+    assert maybe_recommend("יש לי CSV שבור") and "csv.repair" in maybe_recommend("יש לי CSV שבור")
     assert find_recommended_tools("אני צריך להקטין תמונה לפני שליחה")[0].tool_id == "squoosh"
     assert find_recommended_tools("אני רוצה ליצור גרף מהנתונים")[0].tool_id == "rawgraphs"
     assert find_recommended_tools("יש לי JSON מסובך שאני רוצה להבין")[0].tool_id == "json-crack"
