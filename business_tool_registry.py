@@ -2,13 +2,28 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import re
 import unicodedata
 
 
 ToolClass = str
 VerificationStatus = str
+
+
+@dataclass(frozen=True)
+class ToolPlaybook:
+    purpose: str
+    supported_tasks: tuple[str, ...]
+    prerequisites: tuple[str, ...]
+    steps: tuple[str, ...]
+    expected_output: str
+    privacy_guidance: str
+    common_mistakes: tuple[str, ...]
+    agent_mode: str = "no_agent"
+    agent_assist_capabilities: tuple[str, ...] = ()
+    capability_type: str = "GUIDED_EXTERNAL_TOOL"
+    internalization: str = "KEEP EXTERNAL"
 
 
 @dataclass(frozen=True)
@@ -34,6 +49,7 @@ class BusinessTool:
     source: str
     enabled: bool = True
     domain_tags: tuple[str, ...] = ()
+    playbook: ToolPlaybook | None = None
 
 
 _SOURCE = "docs/tool-research/NOSIGNUPS_BUSINESS_TOOLBOX.md"
@@ -98,7 +114,7 @@ TOOL_REGISTRY: tuple[BusinessTool, ...] = (
           "medium", "non-sensitive files after verifying the peer", "unapproved confidential or regulated data", None,
           domains=("operations",)),
     _tool("rawgraphs", "RAWGraphs", "https://rawgraphs.io/", ("data", "charts"),
-          ("chart", "visualize csv", "visualize data"), ("create graph", "graph from csv", "chart data", "ליצור גרף", "גרף מהנתונים", "תרשים מהנתונים"),
+          ("chart", "visualize csv", "visualize data"), ("create graph", "graph from csv", "chart data", "ליצור גרף", "גרף מהנתונים", "תרשים מהנתונים", "איזה גרף"),
           "Create quick charts from a small CSV export.",
           "Exploratory or presentation-ready visualizations.", "Do not treat output as the system of record or dashboard.",
           "medium", "aggregated or redacted exports", "raw customer, financial, or identifying datasets", None,
@@ -191,6 +207,30 @@ def list_tools(*, tool_class: str = "business", include_disabled: bool = False) 
     )
 
 
+_PLAYBOOKS: dict[str, ToolPlaybook] = {
+    "bentopdf": ToolPlaybook("הכנת PDF לשליחה או ארכיון", ("איחוד", "פיצול", "דחיסה"), ("עותקי PDF מאושרים",), ("פתח את BentoPDF.", "העלה את עותקי ה־PDF.", "בחר Merge, סדר ובדוק את התוצאה.", "הורד את הקובץ החדש ושמור את המקור."), "קובץ PDF מאוחד או מעובד", "עבוד על עותקים בלבד; אל תעלה מסמכים רגישים ללא אישור.", ("מחיקת המקור לפני בדיקת התוצאה",)),
+    "vert": ToolPlaybook("המרת פורמט לקובץ", ("המרת מסמך", "המרת תמונה"), ("קובץ שאינו סודי",), ("פתח את VERT.", "בחר את פורמט המקור והיעד.", "העלה את הקובץ והורד את התוצאה.",), "קובץ בפורמט היעד", "השתמש בקובץ סינתטי או לא־רגיש עד שאופן הטיפול מאושר.", ("החלפת המקור בתוצאה בלי בדיקה",)),
+    "squoosh": ToolPlaybook("הקטנת תמונות לפני שיתוף או העלאה", ("דחיסה", "שינוי גודל"), ("עותק של התמונה",), ("פתח את Squoosh.", "גרור עותק של התמונה.", "בחר איכות וגודל, השווה תצוגה מקדימה.", "הורד את התוצאה ושמור את המקור."), "תמונה קטנה יותר", "עבוד על עותק; לא על ראיה מקורית או מסמך מזהה.", ("דריסת המקור",)),
+    "pairdrop": ToolPlaybook("העברה חד־פעמית בין מכשירים קרובים", ("העברת קובץ",), ("שני מכשירים ברשת מאומתת",), ("פתח את PairDrop בשני המכשירים.", "ודא את שם המכשיר השני.", "שלח את הקובץ ואשר את הקבלה."), "עותק של הקובץ במכשיר היעד", "בדוק את היעד לפני שליחה; לא להשתמש כאחסון או ארכיון.", ("שליחה למכשיר שגוי",)),
+    "rawgraphs": ToolPlaybook("יצירת תרשים מהיר מנתונים", ("בחירת תרשים", "המחשת CSV"), ("ייצוא קטן, מאוחד או מושחר",), ("פתח את RAWGraphs.", "הדבק או העלה את הנתונים.", "בחר תרשים ושייך עמודות.", "בדוק תוויות וייצא את התרשים."), "תרשים לייצוא או להצגה", "השתמש בנתונים מצטברים או מושחרים; זה לא מקור האמת.", ("הסקת מסקנות מנתונים חלקיים",), "optional_agent", ("הצעת סוג תרשים",)),
+    "csv-repair": ToolPlaybook("בדיקה ותיקון של CSV שלא נפתח", ("תיקון CSV", "בדיקת מפרידים"), ("עותק CSV סינתטי או מושחר",), ("פתח את csv.repair.", "העלה את העותק.", "בדוק את השגיאות והחל את התיקון.", "הורד ופתח מחדש בכלי היעד."), "CSV תקין לייבוא", "אין להעלות ייצוא לקוחות גולמי ללא אישור; העדף נתונים מושחרים.", ("להניח שכל שורה תוקנה בלי בדיקת ספירה",)),
+    "sql-for-files": ToolPlaybook("שאילתות וחיבור של קבצים מקומיים", ("שאילתת CSV", "חיבור קבצים"), ("קבצים מקומיים מושחרים",), ("פתח את SQL for Files.", "טען עותקים מקומיים.", "הרץ שאילתה לקריאה בלבד.", "ייצא תוצאה זמנית ובדוק אותה."), "תוצאה זמנית של שאילתה", "אין להשתמש במסד ייצור, סודות או רשומות קנוניות.", ("להתייחס לתוצאה כמקור אמת",), "optional_agent", ("עזרה בניסוח שאילתה",)),
+    "cyberchef": ToolPlaybook("טרנספורמציה ובדיקה של טקסט", ("פענוח", "קידוד", "hash"), ("ערך סינתטי או מושחר",), ("פתח את CyberChef.", "בחר recipe מתאים.", "הדבק ערך לא־רגיש ובדוק את הפלט.", "העתק רק את התוצאה המאושרת."), "ערך שעבר טרנספורמציה", "לעולם לא להדביק סיסמאות, מפתחות או tokens חיים.", ("להניח שפענוח מאמת מקור",)),
+    "svgomg": ToolPlaybook("ניקוי והקטנת SVG", ("אופטימיזציית לוגו",), ("עותק של SVG",), ("פתח את SVGOMG.", "טען את העותק.", "בדוק אפשרויות אופטימיזציה ותצוגה.", "הורד ושמור לצד המקור."), "SVG קטן יותר", "השתמש בנכסי עיצוב מאושרים בלבד.", ("אי־בדיקת המראה אחרי האופטימיזציה",)),
+    "mr-data-converter": ToolPlaybook("המרת טבלה לפורמט אחר", ("CSV ל־JSON", "CSV ל־XML"), ("דוגמה קטנה ומושחרת",), ("פתח את Mr. Data Converter.", "הדבק את הטבלה.", "בחר פורמט יעד.", "בדוק את המבנה והעתק את התוצאה."), "נתונים בפורמט היעד", "אין להשתמש בייצוא עסקי גולמי או במידע אישי.", ("הדבקת עמודות לא תואמות",)),
+    "json-crack": ToolPlaybook("הבנת מבנה JSON מקונן", ("המחשת JSON", "הבנת API"), ("JSON סינתטי או מושחר",), ("פתח את JSON Crack.", "הדבק את ה־JSON.", "נווט בעץ ובדוק את הקשרים.", "הסר את התוכן מהכלי לאחר השימוש."), "תצוגת מבנה JSON", "אין להדביק tokens, credentials או PII.", ("להניח שהתצוגה מאמתת את הנתונים",), "optional_agent", ("הסבר מבנה JSON",)),
+    "metadata-remover": ToolPlaybook("הסרת metadata לפני שיתוף", ("ניקוי EXIF", "הסרת GPS"), ("עותק של הקובץ",), ("פתח את Metadata Remover.", "טען עותק.", "הסר metadata ובדוק את התוצאה.", "שתף רק את העותק לאחר בדיקה."), "קובץ עם פחות metadata", "לא לשמר את התוצאה כראיה מקורית; זו אינה הבטחת אנונימיזציה מלאה.", ("מחיקת המקור או provenance",)),
+    "shareclean": ToolPlaybook("ניקוי טקסט לפני שיתוף חיצוני", ("ניקוי לוג", "השחרת secrets"), ("עותק טקסט מאושר",), ("פתח את ShareClean.", "הדבק עותק של הטקסט.", "הרץ ניקוי ובדוק ידנית את הפלט.", "שתף רק לאחר אישור אנושי."), "טקסט מושחר לשיתוף", "הכלי אינו מבטיח זיהוי מלא; אין להדביק secrets חיים.", ("לסמוך על זיהוי אוטומטי בלבד",), "optional_agent", ("הצעת נקודות לבדיקה ידנית",)),
+}
+
+
+def _attach_playbooks(tools: tuple[BusinessTool, ...]) -> tuple[BusinessTool, ...]:
+    return tuple(replace(tool, playbook=_PLAYBOOKS.get(tool.tool_id)) for tool in tools)
+
+
+TOOL_REGISTRY = _attach_playbooks(TOOL_REGISTRY)
+
+
 def find_recommended_tools(task: str, *, limit: int = 3) -> list[BusinessTool]:
     """Return deterministic, eligible business matches; never returns verify-first tools."""
     normalized = _normalize(task)
@@ -200,7 +240,7 @@ def find_recommended_tools(task: str, *, limit: int = 3) -> list[BusinessTool]:
     for position, tool in enumerate(list_tools(), start=1):
         if tool.verification_status not in {"verified", "approved_with_restrictions"}:
             continue
-        terms = tool.tasks + tool.capabilities + tool.categories
+        terms = tool.tasks + tool.capabilities + tool.categories + (tool.name.lower(), tool.tool_id)
         score = sum(3 if _normalize(term) in normalized else 0 for term in tool.tasks)
         score += sum(1 if _normalize(term) in normalized else 0 for term in tool.capabilities + tool.categories)
         if score:
@@ -209,16 +249,27 @@ def find_recommended_tools(task: str, *, limit: int = 3) -> list[BusinessTool]:
     return [tool for _, _, tool in matches[:limit]]
 
 
+def get_playbook(tool_ref: str) -> BusinessTool | None:
+    """Resolve a user-facing name or id to the same canonical registry record."""
+    normalized = _normalize(tool_ref)
+    return next((tool for tool in list_tools()
+                 if _normalize(tool.name) in normalized or _normalize(tool.tool_id) in normalized), None)
+
+
 def format_recommendation(task: str, tools: list[BusinessTool]) -> str | None:
     if not tools:
         return None
     lines = ["יש לי כלי מתאים לזה:"]
-    for index, tool in enumerate(tools, start=1):
-        restriction = " שימוש רק עם מידע לא־רגיש/מאושר." if tool.verification_status == "approved_with_restrictions" else ""
+    for tool in tools:
+        playbook = tool.playbook
+        if not playbook:
+            continue
+        optional = " אפשר לבקש ממני עזרה בהכנת הקלט." if playbook.agent_mode == "optional_agent" else ""
         lines.extend((
-            f"\n{index}. {tool.name}",
-            f"{tool.short_description} {tool.when_to_use}{restriction}",
-            f"פרטיות: {tool.privacy_level}. לפתיחה: {tool.url}",
+            f"\n[{tool.name}]({tool.url})",
+            f"מה זה עוזר: {playbook.purpose}.",
+            "איך להשתמש: " + " ".join(f"{i}. {step}" for i, step in enumerate(playbook.steps, 1)),
+            f"חשוב: {playbook.privacy_guidance}{optional}",
         ))
     return "\n".join(lines)
 
