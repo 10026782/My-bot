@@ -1,7 +1,7 @@
 # BOSS Design System v1
 
 **Date:** 14/08/2026
-**Status:** `V1 CALIBRATION — VUX-2.5 OWNER VISUAL REVIEW REQUIRED`
+**Status:** `V1 CALIBRATION — VUX-2.5B OWNER VISUAL REVIEW REQUIRED`
 **Authority:** Implements the owner-approved SCOREBOS UX Constitution and BOSS Unified Screen Contract. It does not change product navigation, schema, runtime, permissions, or action authority.
 
 ## 1. System rule
@@ -11,6 +11,8 @@ Core contracts are uniform across SCOREBOS. A workspace may vary only through ap
 The first proving surface is Ventures. VUX-2.5 calibrates the visual direction to feel alive, floating, soft, layered, tactile, and modern while retaining professional SaaS density. Base canvases remain flat; sections, interactive bubbles, selected states, and temporary layers use four controlled elevation levels. Light and dark themes share the same semantic token contract, vivid blue accent family, hierarchy, and interaction states. Source-library names, brand identity, marketing copy, and one-off implementation artifacts are not part of the system.
 
 The owner-directed VUX-2.5 calibration supersedes the earlier dark-only/flat-only application constraint. The prior references still inform hierarchy, whitespace, and restraint, but neither theme copies a source product. None of the references is a Ventures workspace or mobile flow, so both themes require same-viewport review on the implemented Ventures screen.
+
+VUX-2.5b normalizes Ventures interface copy to Hebrew. Canonical API values and raw business data remain unchanged; presentation helpers translate supported lifecycle and confidence values without changing their stored semantics.
 
 ## 2. Foundations
 
@@ -89,6 +91,18 @@ Theme selection follows `prefers-color-scheme` for the Ventures proof. Theme val
 - Borders use theme-semantic low/strong contrast tokens; dark and light values differ while component rules remain identical.
 - Pressed state uses the semantic inset/pressed shadow and moves down by at most 1px.
 - Do not combine strong glow, heavy border, saturated gradient, and high shadow on the same element. Gradients remain near-flat surface shifts only.
+
+### 2.5.1 Bubble semantics
+
+`Depth != Clickability`. Shape and elevation establish hierarchy; they never imply interaction by themselves. Ventures uses three canonical classes:
+
+| Class | Role | Required interaction contract |
+|---|---|---|
+| `boss-bubble--action` | Primary/secondary actions and explicit entity-open affordances | Stronger accent/elevation plus visible hover, press, and focus. Mobile never depends on hover. |
+| `boss-bubble--selectable` | Lifecycle stages, filters, and finite choices | Softer default depth than an action; selected state uses a restrained semantic halo/outline; hover, press, and focus remain visible. |
+| `boss-bubble--information` | KPIs, summaries, and read-only context | Soft section depth only. No hover lift, action glow, pressed motion, pointer cursor, or other click signal. |
+
+Every clickable bubble must expose at least one additional interaction signal beyond radius and shadow: an action label, selected state, focus ring, hover/press response, or a combination appropriate to the input method.
 
 ### 2.6 Icons and touch targets
 

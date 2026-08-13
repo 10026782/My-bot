@@ -23,7 +23,7 @@ export function PageHeader({
     <header className="boss-page-header">
       <div className="boss-page-header__topline">
         {onBack && (
-          <button type="button" onClick={onBack} className="boss-button boss-button--quiet">
+          <button type="button" onClick={onBack} className="boss-button boss-button--quiet boss-bubble--action">
             {backLabel}
           </button>
         )}
