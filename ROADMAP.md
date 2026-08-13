@@ -7,7 +7,14 @@ Canonical current source:
 **PARTIAL / NON-BLOCKING**; formal Layer 2 TurnCoordinator implementation is
 not complete. Freeze remains an owner/governance decision. Dated status
 snapshots below are historical evidence and do not override this audit.
-עודכן: 12/08/2026 — **F23 (BOSS Marketing Bridge M2, Telegram slice) — `/marketing_status`
+עודכן: 13/08/2026 — **F23 M2 (Telegram slice) — ✅ VERIFIED IN PROD.** PR #613 מוזג,
+Render deploy `98f3626` מאשר את הקוד חי (ancestry מאומת), והבעלים הריץ live regression
+אמיתי ב-`/telegram` production מול Demand ייעודי לבדיקה: `/marketing_status` הציג רשימה
+נכונה, כרטיס Next Action לשלב `ideas_generated` תאם בדיוק ל-`compute_next_action()`, ובחירת
+רעיון הפעילה בהצלחה את מסלול הכתיבה הקיים מ-M1 (`mkt_select:`→`select_creative()`→
+`save_production_handoff()`→`update_demand_stage`) והפיקה Production Handoff תקין. פירוט
+מלא בסעיף F23 למטה.
+עודכן קודם: 12/08/2026 — **F23 (BOSS Marketing Bridge M2, Telegram slice) — `/marketing_status`
 נוסף.** רשימת Demands מורשית (`identity.can_access_domain()`, נבדק גם ב-list וגם שוב
 ב-callback — לא מסתמכים על הסתרת ה-ID בתוך `callback_data` כאבטחה) + כרטיס "Next Action"
 לכל דרישה, מחושב ע"י מודול חדש `marketing_orchestrator.py` (pure/pull-only, אותו חוזה כמו
@@ -1721,15 +1728,22 @@ read-pull-only לגביו בכוונה, כמו ה-orchestrator עצמו.
 ב-`marketing_orchestrator.py`/`cmd_marketing.py` עצמם. `smoke_tests.py`/
 `test_integration.py` נשארו ירוקים ללא שינוי.
 
-STATUS: 🟡 CODE DONE, NOT VERIFIED
-EVIDENCE: `git log -1` = `d2cfb8b` ("F23 M2 (Telegram slice): /marketing_status list +
-Next Action query command") על branch `claude/continue-f23-dmbgr7`, `git push -u origin
-claude/continue-f23-dmbgr7` בוצע בפועל (הפלט אישר `[new branch]`). קוד נבדק מקומית
-(self-tests + `test_marketing_orchestrator.py`/`test_cmd_marketing_status.py` עוברים,
-`smoke_tests.py`/`test_integration.py` ירוקים). **עדיין לא**: מוזג ל-`main`, נפרס
-ל-Render, או מאומת חי. עדכון ✅ VERIFIED IN PROD ידרוש merge + deploy + regression חי
-מול `/telegram` (זהירות: לחיצה על רעיון ב-`ideas_generated` מפעילה כתיבת production
-אמיתית — לבדוק מול Demand ייעודי לבדיקה, לא רשומה אמיתית באמצע תהליך).
+STATUS: ✅ VERIFIED IN PROD
+EVIDENCE: PR #613 מוזג ל-`main` (`d5e8369`→`89087b4`, `merged_by=10026782`,
+`merged_at=2026-08-12T21:24:17Z`, אומת דרך `pull_request_read` — לא רק `git log`).
+Render deploy מאומת: commit חי `98f3626` (הודעת deploy אמיתית מהבוט), `git merge-base
+--is-ancestor 89087b4 98f3626` מאשר שקוד ה-PR נכלל בפריסה החיה. **Live regression חי
+בפועל ע"י הבעלים ב-`/telegram` production** (12-13/08/2026), מול Demand ייעודי לבדיקה
+("דרישה למתקינים - בית שמש (בדיקת M1 חיה)", בדיוק לפי הזהירות שנרשמה כאן): (1)
+`/marketing_status` החזיר "📋 דרישות שיווק פעילות (2):" עם רשימה אמיתית; (2) לחיצה על
+הדרישה החזירה כרטיס Next Action מדויק לפי `compute_next_action()` לשלב `ideas_generated`
+("🔄 שלב: ideas_generated | סטטוס: Active" + "➡️ צעד הבא: בחר אחד מ-3 הרעיונות למטה");
+(3) לחיצה על "רעיון 2" הפעילה את מסלול הכתיבה **הקיים** מ-M1 (`mkt_select:` →
+`select_creative()`→`save_production_handoff()`→`update_demand_stage(HANDOFF_SENT)`)
+בהצלחה — "✅ נבחר רעיון 2" + טקסט Production Handoff מלא ותקין (persona/חוקים/פרטי
+הדרישה/הרעיון שנבחר/קלטי הפקה מסומנים "לא סופק" כנדרש, ללא המצאת עובדות). מוכיח גם
+שהמסלול החדש (`mkt_status:`) וגם הישן (`mkt_select:`) פעילים זה לצד זה בפרודקשן ללא
+התנגשות, בדיוק כפי שהוכח סטטית לפני המיזוג.
 
 **C60 — Tool Context Awareness (PR #152, מוזג ל-`main`, commit `2d85b84`/merge `3e0094b`):**
 לפי `SPEC_C59_Tool_Context_Awareness.md` (הועלה ע"י הבעלים בלי טקסט מלווה; אישור דרך
