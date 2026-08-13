@@ -1118,7 +1118,17 @@ def test_single_layer_note_is_rendered_without_truncation(catalog):
     assert "single fixture note" in bundle
 
 
-def test_layer_notes_fixture_rendering_matches_existing_format(catalog):
+def test_layer_notes_fixture_rendering_matches_existing_format(catalog, monkeypatch):
+    # This test exists to prove the exact layer-notes rendering FORMAT, not
+    # to assert that layer.core_reasoning happens to be fresh on whatever
+    # commit main is at when the suite runs -- staleness is real, mechanical
+    # git-diff-derived state (see librarian._freshness) that legitimately
+    # flips as later commits touch the node's own code_paths (e.g. tma_api.py
+    # in commit bc40792) without a corresponding last_verified_commit bump.
+    # Pin _git_changed_paths to "nothing changed" so the freshness label is
+    # deterministic, matching the pattern used by
+    # test_stale_detection_uses_code_diffs_not_path_existence and friends.
+    monkeypatch.setattr(librarian, "_git_changed_paths", lambda _root, _commit: set())
     node = catalog.nodes["layer.core_reasoning"]
     notes = iter(node["notes"])
     first_note = next(notes)
