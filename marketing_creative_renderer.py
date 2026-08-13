@@ -30,6 +30,16 @@
 # pure, independently tested contract only. No CandidateFact
 # solicitation/confirmation flow exists in this PR (or in PR2) — see
 # BUG_AUDIT_LOG.md BUG-164 for why that's explicitly out of scope for now.
+#
+# Marketing Claim Policy note: this fail-closed gate applies only to
+# fact_order/emphasis_fact_keys, i.e. references into ProtectedDemandFacts —
+# it never restricts angle_id/opening_style/cta_style selection itself.
+# Persuasive, non-factual creative framing (tone, hooks, CTA style, generic
+# urgency/social-proof angle choice) is not required to trace back to the
+# Demand and is never rejected for that reason — see the ClaimType note at
+# the top of marketing_creative_templates.py for the full three-way
+# CREATIVE_DEVICE / BOUNDED_CLAIM / BUSINESS_FACT split this registry
+# enforces on its own static text.
 
 from __future__ import annotations
 

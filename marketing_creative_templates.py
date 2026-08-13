@@ -19,6 +19,31 @@
 # PR1 scope: this registry is not yet wired into cmd_marketing.py or the
 # creative_ideas prompt (BUG-164 PR2). It ships here as a pure, independently
 # tested contract.
+#
+# Marketing Claim Policy (three classes every piece of generated text falls
+# into — see BUG_AUDIT_LOG.md BUG-164 "MARKETING CLAIM POLICY" correction):
+#   CREATIVE_DEVICE — non-factual persuasive language (hooks, tone, CTA
+#     style, generic urgency/scarcity framing with no concrete claim). No
+#     canonical source required. This is ALL a static template fragment in
+#     this file is allowed to be — enforced by the self-test below.
+#   BOUNDED_CLAIM — a promotional claim whose truth depends on time/state
+#     ("רק השבוע", "עד יום חמישי", limited-availability language). Requires
+#     system-owned valid_from/valid_until/claim_type/state metadata and must
+#     stop rendering once expired. No such governance exists yet (that's a
+#     future Marketing Claim Registry / weekly audit layer, explicitly out of
+#     scope for BUG-164 PR1/PR2) — so no BOUNDED_CLAIM content may appear as
+#     static template text today.
+#   BUSINESS_FACT — concrete/verifiable business information (price,
+#     quantity, customer count, location, experience requirement, etc.).
+#     Requires canonical authority. In this registry, BUSINESS_FACT content
+#     enters *only* via ProtectedFact.value interpolation in _PHRASE_BUILDERS
+#     (governed by marketing_fact_authority.py's authority/usage checks) —
+#     never as static lead-in/CTA text. A static fragment must never assert a
+#     fact (a count, a date, an unsourced promise) on its own.
+# "Creative" does not mean "anything the AI wants" (angle/opening/CTA
+# selection is still bounded by TEMPLATE_REGISTRY). "Canonical" does not mean
+# "all marketing must be dry" (CREATIVE_DEVICE framing is fully allowed and
+# does not need to trace back to the Demand).
 
 from __future__ import annotations
 
@@ -27,6 +52,12 @@ from enum import Enum
 from typing import Callable
 
 from marketing_fact_authority import ProtectedFact
+
+
+class ClaimType(str, Enum):
+    CREATIVE_DEVICE = "creative_device"
+    BOUNDED_CLAIM = "bounded_claim"
+    BUSINESS_FACT = "business_fact"
 
 RenderFn = Callable[[dict[str, ProtectedFact], tuple[str, ...]], str]
 
@@ -98,10 +129,15 @@ _PHRASE_BUILDERS: dict[str, dict[str, Callable[[str], str]]] = {
     },
 }
 
+# NOTE: URGENCY/SOCIAL_PROOF deliberately avoid any concrete time/date or
+# quantity claim ("רק השבוע" / "כבר עשרות לקוחות" would be a BOUNDED_CLAIM and
+# a BUSINESS_FACT respectively — see the Marketing Claim Policy note above).
+# The *angle itself* (urgency/social-proof as a persuasion strategy) is a
+# legitimate CREATIVE_DEVICE; only an ungoverned concrete claim is not.
 _ANGLE_LEAD_IN: dict[AngleId, str] = {
     AngleId.BENEFIT_FIRST: "",
-    AngleId.URGENCY: "רק השבוע! ",
-    AngleId.SOCIAL_PROOF: "כבר עשרות לקוחות בחרו בנו. ",
+    AngleId.URGENCY: "אל תפספסו! ",
+    AngleId.SOCIAL_PROOF: "הצטרפו למי שכבר בחרו בנו. ",
     AngleId.DIRECT_OFFER: "",
 }
 
@@ -110,6 +146,17 @@ _CTA_TEXT: dict[CtaStyle, str] = {
     CtaStyle.LEARN_MORE: "לפרטים נוספים לחצו כאן.",
     CtaStyle.APPLY_NOW: "הצטרפו אלינו עכשיו!",
     CtaStyle.SCHEDULE_VISIT: "קבעו ביקור עוד היום!",
+}
+
+# Every static fragment above is CREATIVE_DEVICE by construction. Kept as an
+# explicit, per-entry map (not a blanket assumption) so a future contributor
+# adding a BOUNDED_CLAIM/BUSINESS_FACT fragment must consciously override it
+# here, and the self-test below fails loudly instead of silently allowing it.
+_ANGLE_LEAD_IN_CLAIM_TYPE: dict[AngleId, ClaimType] = {
+    angle: ClaimType.CREATIVE_DEVICE for angle in _ANGLE_LEAD_IN
+}
+_CTA_TEXT_CLAIM_TYPE: dict[CtaStyle, ClaimType] = {
+    cta: ClaimType.CREATIVE_DEVICE for cta in _CTA_TEXT
 }
 
 # The single closed list of (angle_id, opening_style, cta_style) combos
@@ -184,6 +231,21 @@ if __name__ == "__main__":
             assert (dt, *combo) in TEMPLATE_REGISTRY
 
     assert allowed_combinations("not_a_real_type") == ()
+
+    # Marketing Claim Policy: every static template fragment shipped in PR1
+    # must be CREATIVE_DEVICE -- no BOUNDED_CLAIM/BUSINESS_FACT content until
+    # a validity-window/claim-registry layer exists to govern it.
+    assert all(v is ClaimType.CREATIVE_DEVICE for v in _ANGLE_LEAD_IN_CLAIM_TYPE.values())
+    assert all(v is ClaimType.CREATIVE_DEVICE for v in _CTA_TEXT_CLAIM_TYPE.values())
+    assert set(_ANGLE_LEAD_IN_CLAIM_TYPE) == set(_ANGLE_LEAD_IN)
+    assert set(_CTA_TEXT_CLAIM_TYPE) == set(_CTA_TEXT)
+    # no leftover concrete time-bound/quantity claims in the static fragments.
+    # ("קבעו ביקור עוד היום!" 's "היום" is a CTA action verb -- "come today" --
+    # not a validity-window promise like "עד היום"/"רק היום"; still checked
+    # for a literal digit or "השבוע", neither of which it contains.)
+    for _text in (*_ANGLE_LEAD_IN.values(), *_CTA_TEXT.values()):
+        assert "השבוע" not in _text, _text
+        assert not any(digit in _text for digit in "0123456789"), _text
 
     # BUG-164 proof: the full canonical goal value is interpolated atomically
     # -- "10" can never appear detached from "מועמדים תוך שבוע".

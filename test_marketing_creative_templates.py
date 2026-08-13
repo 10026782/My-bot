@@ -4,8 +4,13 @@
 from marketing_creative_templates import (
     TEMPLATE_REGISTRY,
     AngleId,
+    ClaimType,
     CtaStyle,
     OpeningStyle,
+    _ANGLE_LEAD_IN,
+    _ANGLE_LEAD_IN_CLAIM_TYPE,
+    _CTA_TEXT,
+    _CTA_TEXT_CLAIM_TYPE,
     allowed_combinations,
 )
 from marketing_fact_authority import FactAuthority, FactUsage, ProtectedFact, SemanticType
@@ -62,10 +67,42 @@ def test_render_uses_only_facts_present_in_order():
     print("test_render_uses_only_facts_present_in_order OK")
 
 
+def test_all_static_fragments_classified_creative_device():
+    """Marketing Claim Policy: no BOUNDED_CLAIM/BUSINESS_FACT static template
+    text may ship without a validity-window/canonical-authority governance
+    layer, which doesn't exist yet (future Marketing Claim Registry)."""
+    assert set(_ANGLE_LEAD_IN_CLAIM_TYPE) == set(_ANGLE_LEAD_IN)
+    assert set(_CTA_TEXT_CLAIM_TYPE) == set(_CTA_TEXT)
+    assert all(v is ClaimType.CREATIVE_DEVICE for v in _ANGLE_LEAD_IN_CLAIM_TYPE.values())
+    assert all(v is ClaimType.CREATIVE_DEVICE for v in _CTA_TEXT_CLAIM_TYPE.values())
+    print("test_all_static_fragments_classified_creative_device OK")
+
+
+def test_static_fragments_contain_no_bounded_time_or_quantity_claim():
+    for text in (*_ANGLE_LEAD_IN.values(), *_CTA_TEXT.values()):
+        assert "השבוע" not in text, text  # e.g. "רק השבוע" -- BOUNDED_CLAIM example
+        assert not any(digit in text for digit in "0123456789"), text
+    print("test_static_fragments_contain_no_bounded_time_or_quantity_claim OK")
+
+
+def test_urgency_and_social_proof_lead_ins_make_no_concrete_claim():
+    # Regression for the Marketing Claim Policy correction: URGENCY/SOCIAL_PROOF
+    # previously used "רק השבוע!" (BOUNDED_CLAIM) and "כבר עשרות לקוחות בחרו בנו"
+    # (BUSINESS_FACT: customer count) with no governance backing either.
+    urgency_text = _ANGLE_LEAD_IN[AngleId.URGENCY]
+    social_proof_text = _ANGLE_LEAD_IN[AngleId.SOCIAL_PROOF]
+    assert "רק השבוע" not in urgency_text
+    assert "עשרות" not in social_proof_text and "לקוחות בחרו" not in social_proof_text
+    print("test_urgency_and_social_proof_lead_ins_make_no_concrete_claim OK")
+
+
 if __name__ == "__main__":
     test_every_demand_type_has_registered_combinations()
     test_unknown_demand_type_returns_no_combinations()
     test_registry_is_only_source_of_valid_combinations()
     test_bug164_goal_value_renders_atomically()
     test_render_uses_only_facts_present_in_order()
+    test_all_static_fragments_classified_creative_device()
+    test_static_fragments_contain_no_bounded_time_or_quantity_claim()
+    test_urgency_and_social_proof_lead_ins_make_no_concrete_claim()
     print("test_marketing_creative_templates.py: ALL TESTS PASSED")
