@@ -1,7 +1,7 @@
 # AI CONTEXT
 
-**עודכן:** 12/08/2026 · **origin/main:** `4c94d68` (PR #605 — merge of F23 M1
-batch, internal history #601–#604).
+**עודכן:** 13/08/2026 · **origin/main:** `98f3626` (PR #620 — Track 2 TC8/BUG-158
+regression-harness fixture fix v2; latest of a ~10-PR run since PR #605).
 
 > קרא אותי לפני כל דבר אחר. זהו מסמך תדרוך תמציתי, לא תיעוד מלא.
 > למקור האמת ראו `ROADMAP.md` (קודם כול), `CHANGELOG.md`, ו-
@@ -13,27 +13,30 @@ batch, internal history #601–#604).
 ## 1. Executive Summary
 
 - הבוט חי בפרודקשן (Telegram + WhatsApp/Twilio): Identity → Router →
-  Context → Agent, Airtable כ-CRM.
+  Context → Agent, Airtable כ-CRM. ללא שינוי.
 - **CORE v1 — COMPLETE / READY TO FREEZE** (freeze עצמו = החלטת owner, לא
-  מוכרז). קנוני: `docs/audit/CORE_COMPLETION_AUDIT_20260810.md`, נבנה מול
-  main `134148e`, כולל אימות Production+Staging חי (Render API + logs).
-  ללא שינוי בסבב הזה.
-- **חדש: F23 — BOSS Marketing Bridge M1** (`/marketing_new` wizard ב-
-  Telegram) מוזג ומדווח **✅ VERIFIED IN PROD** ב-ROADMAP, עם ראיה ישירה
-  (רשומת Demand אמיתית, deploy-SHA מול Render API — ראו סעיף 3). **פער
-  ממשל שנסגר בסבב הזה:** `CHANGELOG.md` לא כלל רשומה לבאץ' הזה עד לעדכון
-  הנוכחי — נוספה רשומה מתאימה (ראו סעיף 3), אז ה-cross-doc gap כבר סגור.
-- שני פערים לא-חוסמים ב-CORE נותרים ללא שינוי: (1) CI של `main` אדום על
-  שער ה-freshness של Context Librarian (governance, לא regression
-  פונקציונלי); (2) `TurnCoordinator` הפורמלי (Layer 2) — zero implementation,
-  formal component not in code. De-facto handled by router.py::route_request() +
-  lead_candidate_handler.py. TC2-TC10 functional machinery (merged PRs #562–#588,
-  verified in staging 2026-08-10) handles routing/ownership dispersedly, not yet
-  unified under formal TurnCoordinator class (frozen spec, awaiting owner decision).
-- TC7-B1 (`core/claim_authorization.py`) — עדיין **אפס קוראים חיים**, ללא
-  שינוי מהסבב הקודם.
-- RP5 enforcement ו-F52 unification (`FEATURE_UNIFIED_STATUS_FORMATTER`) —
-  עדיין shadow/כבוי כברירת מחדל, לא הופעלו.
+  מוכרז) — ללא שינוי, קנוני: `docs/audit/CORE_COMPLETION_AUDIT_20260810.md`.
+- **F23 Marketing Bridge M1** (`/marketing_new`) — ✅ VERIFIED IN PROD,
+  ללא שינוי. **F23 M2** (`/marketing_status`, כרטיס Next Action) **מוזג
+  ל-`main` היום** (PR #613) אך **טרם פרוס/מאומת בפרודקשן** — 🟡 CODE DONE,
+  NOT VERIFIED.
+- אחד משני הפערים הלא-חוסמים ב-CORE **נסגר בסבב הזה**: רישום Context
+  Librarian ל-מקורות TC2-TC10/marketing (PR #611) — טיפל בשער ה-freshness
+  שהיה אדום ב-CI. הפער השני (מחלקת `TurnCoordinator` פורמלית, Layer 2)
+  **נשאר לא ממומש** — רק תועד/הובהר (PR #612), אין שינוי קוד.
+- **חדש: אימות Staging אמיתי (לא production) ל-3 באגים שהיו "קוד תוקן, לא
+  מאומת"** — BUG-157 (concurrency race ב-`propose_action()`), BUG-160
+  (עקיפת parser דטרמיניסטי ע"י מרכאה לא מאוזנת), BUG-163 (כיסוי intent
+  חסר ל-complete_task/update_task) — כולם עברו ל-✅ **STAGING VERIFIED**
+  (13/08/2026, TRACK 3), מול `ActionGateway` אמיתי ב-`my-bot-approval-
+  staging`. **אימות production עדיין לא בוצע** במכוון (race test
+  ב-production דורש החלטה נפרדת, מחוץ להיקף הסבב הזה).
+- BUG-161 (reconfirmation לא עקבי במסלול Agent) ו-BUG-162 (הפרת
+  turn-ownership) — נשארים פתוחים, ממתינים להחלטת מדיניות מפורשת של
+  ה-owner. ללא שינוי.
+- שני ה-merge-ים האחרונים (PR #619/#620) הם **fixture fixes בטסטים בלבד**
+  בתוך ה-harness המבודד של TC10 (BUG-158 recovery + TC8 callback
+  R11/R13/R16) — לא נגעו בקוד runtime/מוצר.
 
 ## 2. Current System State
 
@@ -41,75 +44,71 @@ batch, internal history #601–#604).
 
 - ActionGateway/ActionContract lifecycle — מקור אמת יחיד, חי, ✅.
 - CORE v1 (ActionGateway, TC6/TC8/TC9, F14/F15, PA-01, Track D, RP4/RP5
-  shadow) — ✅ כפי שתועד בסבבים קודמים, ללא שינוי.
-- **F23 M1 (`/marketing_new`)** — Demand→intake conversational→Brief
-  דטרמיניסטי→קריאת AI יחידה→3 רעיונות→בחירה בכפתור→Production Handoff
-  דטרמיניסטי. `FEATURE_MARKETING_BRIDGE=true` **דלוק בפרודקשן כרגע** (לא
-  ברירת מחדל בקוד — הודלק לבדיקה חיה ולא כובה מאז). בחירת קריאייטיב וקישור
-  Publication נשארים ידניים דרך Airtable; UI מלא/TMA נדחו ל-M2 (לא התחיל).
-  ✅ תפעולי לפי ROADMAP+ראיה ישירה.
+  shadow) — ✅ ללא שינוי מהסבבים הקודמים.
+- **F23 M1** (`/marketing_new`) — ✅ חי בפרודקשן,
+  `FEATURE_MARKETING_BRIDGE=true` דלוק בפרודקשן כרגע.
+- **F23 M2** (`/marketing_status`/`מצב_שיווק`) — קוד מוזג ל-`main`
+  (`d2cfb8b`/PR #613), **לא פרוס ל-Render, לא מאומת חי**.
 
 **מיושם חלקית / לא production-active:**
 
-- TC7-B1/B1.1 (`core/claim_authorization.py`) — בנוי, אפס קוראים חיים.
-- RP4/RP5 shadow (`FEATURE_EVIDENCE_FINALIZER=shadow`) — comparison
-  logging בלבד; enforcement חסום עד אישור owner מפורש.
-- F52 Unified Status Formatter — shadow/comparison בלבד, כבוי כברירת מחדל.
-- ws2/ws3 evidence/lifecycle projection modules — מוזגים, לא מחווטים
-  ל-`core/action_gateway.py`, לא רשומים ב-Context Librarian catalog.
-- **F23 Marketing Rules (Business Memory)** — `marketing_gateway.
-  save_marketing_rule()` קיימת אך **אפס caller בקוד החי** — אין מסלול
-  שכותב אליה, שכבה ריקה בפועל. `get_marketing_rules()` **כן נקראת בפועל**
-  (`cmd_marketing.py:445`/`:513`, לפני הרכבת ה-Brief/Production Handoff)
-  אך תמיד מחזירה ריק כרגע כי אין רשומות — לא unwired, פשוט ללא תוכן. כתיבה
-  לשכבה זו נדחתה במפורש (12/08/2026) ל-"Later — Structured Company Brain",
-  לא M1.
-- **F23 `business_rules` תוכן עסקי** — רק ל-recruitment יש תוכן אמיתי;
-  4 סוגי דרישה נותרים (furniture_import/fiber_equipment/
-  real_estate_listing/service) מחזיקים ערך ניטרלי מפורש, ממתינים לקלט
-  עסקי מה-owner.
+- BUG-157/160/163 — מוזגים+פרוסים ל-`main` מזמן, כעת גם ✅ STAGING
+  VERIFIED (13/08) מול race/regression אמיתי; **verification בפרודקשן
+  עדיין לא בוצע** (במכוון, לא באג).
+- TC7-B1 (`core/claim_authorization.py`) — עדיין אפס קוראים חיים, ללא
+  שינוי.
+- RP4/RP5 shadow, F52 Unified Status Formatter — עדיין shadow/כבוי
+  כברירת מחדל, ללא שינוי.
+- F23 Marketing Rules (Business Memory writer) — עדיין אפס caller,
+  נדחה במפורש ל-"Later".
+- F23 `business_rules` — רק ל-recruitment תוכן אמיתי; 4 סוגי דרישה
+  נותרים עם ערך ניטרלי מפורש. PR #606 חיזק את ה-anti-invention contract
+  ב-Production Handoff סביב זה, אך לא הוסיף תוכן עסקי חסר.
 
-**חסום (architectural decision, not implementation blocker):**
+**חסום (החלטה ארכיטקטונית/owner, לא implementation blocker):**
 
-- Formal TurnCoordinator class (Layer 2) — zero implementation (class TurnCoordinator does not exist). Frozen contract spec awaiting owner approval. TC2-TC10 machinery handles responsibilities de-facto; this is non-blocking for CORE but represents architectural gap (per CORE_COMPLETION_AUDIT_20260810.md §8). No new implementation-blocker found.
-- BUG-130/134/136/137/140/150/152 (וכן 126/127B/127C/138/139/142/148) —
-  ממתינים להחלטת owner; חלקם חסומים ע"י
-  `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md`.
-- Context Librarian catalog refresh — CI push-to-main אדום (4 STOP / 21
-  REVIEW_REQUIRED / 98 WARNING) — לא חוסם פונקציונלי, דורש הרצת
-  `refresh-after-merge --apply`.
+- מחלקת `TurnCoordinator` פורמלית (Layer 2) — אפס מימוש, ממתינה להחלטת
+  owner; PR #612 רק הבהיר תיעוד, לא קוד.
+- BUG-161/BUG-162 — ממתינים להחלטת מדיניות owner (reconfirmation
+  ב-Agent path / turn-ownership).
+- BUG-148/150/152 — נרשמו, לא תוקנו, ללא שינוי.
 
-## 3. Completed Since Last Update (מאז 11/08/2026, `f69d7b3..4c94d68`)
+## 3. Completed Since Last Update (מאז 12/08/2026 `4c94d68` → 13/08/2026
+`98f3626`, 34 commits / כ-10 PRs)
 
-- **F23 — BOSS Marketing Bridge M1**, נבנה ב-4 PRs (מתועד ב-ROADMAP כ-#601–
-  #604, ממוזג ל-`main` דרך PR #605): #601 בנייה ראשונית עם record ID גלוי
-  בטקסט (הפר עקרון `ux_no_internal_ids`); **#602 — תוקן ע"י הבעלים
-  בבדיקה חיה (לא ע"י review)**: נבנה מחדש כ-wizard `/marketing_new` ללא ID
-  גלוי, ה-ID עובר רק ב-`callback_data` הבלתי-נראה של טלגרם; #603 — הוחלף
-  `key_points` הגנרי ב-`business_rules` אמיתי (recruitment) + נוסף שלב
-  `Constraints` ל-wizard; **#604 — באג ארכיטקטוני אמיתי, נמצא רק בבדיקה
-  חיה**: טקסט חופשי (למשל "כן") נפל בשקט ל-`run_agent()` הכללי במקום
-  ל-`cmd_marketing.py` — תוקן ע"י `cmd_marketing.has_pending_capture()` +
-  בדיקה מקבילה ב-`app.py`, עם governance check חדש ב-`smoke_tests.py`
-  שמונע רגרסיה שקטה של סדר הבדיקות.
-- **אימות חי (12/08/2026)**: simulated webhook POSTs אמיתיים מול
-  `/telegram` בפרודקשן — רשומת Demand אמיתית (`recfrUEj6e7uHEEf9`) +
-  Creative (`recMyaGzpIvYfNX0i`) עם 3 רעיונות, Render logs מאשרים אפס
-  פעילות `run_agent`/Router (קריאת Anthropic יחידה בלבד). Render deploy
-  `dep-d9tr91jl550s738take0`=`live`.
-- **פער ממשל שנסגר בסבב הזה**: `CHANGELOG.md` לא כלל רשומה לבאץ' F23/PR
-  #601–605 עד לעדכון הזה — נוספה רשומה מתאימה (ראו `CHANGELOG.md`
-  "Unreleased").
+- **F23 M2 מוזג** (PR #613): `/marketing_status`+`מצב_שיווק` — רשימת
+  Demands מורשית + כרטיס Next Action ע"י `marketing_orchestrator.py`
+  חדש (pure/pull-only), משתמש מחדש במסלול הכתיבה הקיים מ-M1 (לא נוסף
+  מסלול חדש). Fail-closed על 0 או 2+ Creatives ממתינים. **טרם פרוס/מאומת.**
+- **F23 Production Handoff grounding** (PR #606): anti-invention
+  contract, ניסוח ניטרלי ל-demand types בלי `business_rules` אמיתי,
+  known/unknown production inputs מפורשים.
+- **ממשל**: רישום Context Librarian ל-מקורות TC2-TC10 + marketing
+  (PR #610/#611) — סוגר אחד משני הפערים הלא-חוסמים מה-audit הקנוני.
+- **תיעוד**: הבהרת הפער בין מנגנוני TC2-TC10 הפועלים בפועל לבין מחלקת
+  `TurnCoordinator` הפורמלית שעדיין לא נבנתה (PR #612) — ללא שינוי runtime.
+- **תיעוד**: אושר ונוסף מסמך "SCOREBOS UX constitution" (PR #609).
+- **TRACK 3 — אימות Staging אמיתי**: BUG-157 (race של 5 קריאות
+  `propose_action()` מקבילות + race של 3 קריאות `approve` מקבילות,
+  invariants A–E כולם PASS), BUG-160 (תיקון עקיפת quote), BUG-163 (תיקון
+  כיסוי intent) — כולם עברו מ-"קוד תוקן, לא מאומת" ל-✅ STAGING VERIFIED
+  מול `ActionGateway`/Airtable אמיתיים ב-`my-bot-approval-staging` (לא
+  mock, לא production).
+- **טסטים בלבד**: תוקנו fixture stubs בהרנס הרגרסיה המבודד של TC10
+  (BUG-158 recovery + TC8 callback R11/R13/R16, PR #619/#620) — קוד
+  מוצר/runtime לא נגע.
 
 ## 4. Next Priorities
 
-1. **סגור את שני הפערים הלא-חוסמים מה-audit הקנוני** — הרץ
-   `python -m tools.context_librarian refresh-after-merge --apply`; קבע/
-   דחה במפורש מול owner את מעמד `TurnCoordinator` הפורמלי (Layer 2).
-2. **חבר TC7-B1 (`authorize_claim()`) לצרכן אמיתי** — עדיין 0 קוראים.
-3. **F23: קלט עסקי אמיתי ל-`business_rules`** מה-owner לארבעת סוגי
-   הדרישה הנותרים; **אל תיישם** כתיבה לשכבת Marketing Rules (Business
-   Memory) או Prompt 2 כקריאת AI שנייה בלי אישור owner מפורש (נדחו
-   במכוון מ-M1).
-4. **אימות production טרי ל-Track D ול-TC8 reject/cancel** — קוד פרוס,
-   אין ראיות log לאחר ה-deploy האחרון (היעדר תעבורה, לא כשל).
+1. **פרוס ואמת בפרודקשן את F23 M2** (`/marketing_status`) — מוזג אך לא
+   חי/מאומת עדיין.
+2. **קבל החלטת owner מפורשת** ל-BUG-161 (מדיניות reconfirmation במסלול
+   Agent) ו-BUG-162 (הפרת turn-ownership) — שניהם חוסמים סגירה סופית של
+   אצווית BUG-160/161/162/163.
+3. **תזמן/בצע אימות production** ל-BUG-157/160/163 (Staging-only כרגע) —
+   דורש החלטה מפורשת על race test בפרודקשן, כרגע מחוץ להיקף כברירת מחדל.
+4. **מחלקת TurnCoordinator פורמלית (Layer 2)** — עדיין החלטת ארכיטקטורה
+   של owner, לא חסם implementation.
+5. **F23: תוכן `business_rules` אמיתי** לארבעת סוגי הדרישה הנותרים
+   (furniture_import/fiber_equipment/real_estate_listing/service) מה-owner
+   — אין לנחש/להמציא.
