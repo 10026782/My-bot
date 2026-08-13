@@ -112,14 +112,31 @@ ActionContract ו-legacy — חפש את שניהם).
 
 ---
 
-## 3. הצעה ל-automation חלקי (TC-12's המלצה המתועדת)
+## 3. Automation חלקי (TC-12's המלצה המתועדת) — מומש 13/08/2026
 
-`BUG_AUDIT_LOG.md` שורה 4824 כבר ממליץ במפורש: integration test שקורא
-ל-`_handle_approval_callback_impl` **ישירות פעמיים** (לא דרך Telegram UI)
-כדי לעקוף את מגבלת "הכפתור מתבטל אחרי שימוש". זה סוגר את 2.3 ברמת
-unit/integration — לא תחליף לראיית-production, אבל מוריד את התלות
-המלאה בתזמון-אצבע אנושי מדויק. **לא מומש בסבב הזה** (מחוץ להיקף
-שנתבקש — "hardening + evidence בלבד").
+`BUG_AUDIT_LOG.md` שורה 4824 כבר המליצה במפורש: integration test שקורא
+ל-`_handle_approval_callback_impl` **ישירות** (לא דרך Telegram UI) כדי
+לעקוף את מגבלת "הכפתור מתבטל אחרי שימוש". **מומש**:
+`scripts/verify_bug161_162_callback_staging.py` — קורא ל-handler האמיתי
+in-process, מול ה-`ActionGateway`/`TurnStateRepository`/Airtable *האמיתיים*
+של staging (לא test doubles), עם `app.bot`/`app.resolve_identity` מדומים
+בלבד (אותה טכניקה בדיוק ש-`test_bug_stale_callback_ux.py` כבר משתמש בה).
+מכסה 2.1 (approve), 2.2 (reject), 2.3 (duplicate — גם רצף מיידי וגם race
+של threads אמיתי דרך `TC8`'s claim), 2.4 (stale/resolved), ו-2.5 (TTL,
+באותה טכניקת backdating כמו `test_bug112_telegram_approval_ttl.py`). **לא
+מכסה 2.6** (clarification/BUG-122) — זה תרחיש ברמת `run_agent()`/טקסט, לא
+callback, ונשאר ב-§2.6 כתרחיש-ידני.
+
+**הרצה** (על Render staging shell, לא מקומית — התלות ב-`DATABASE_URL`/
+Airtable/Render env האמיתיים של staging, כמו `scripts/verify_bug157_160_
+163_staging.py`'s docstring):
+```bash
+python3 scripts/verify_bug161_162_callback_staging.py
+```
+**מגבלה מאומתת (13/08/2026, מקומית, credentials מזויפים):** רץ עד הסוף
+ללא crash על כל 6 החלקים, לא נכנס ל-CI (יוצר רשומות אמיתיות ב-Airtable —
+לא מתאים ל-CI). לא הורץ עדיין מול staging אמיתי — זה עדיין העבודה
+שנותרה, לא ראיית-production.
 
 ---
 
@@ -148,5 +165,9 @@ Telegram transcript: <טקסט/screenshot>
 תוצאה: PASS | FAIL — <תיאור>
 ```
 
-**STATUS: 🟡 PLAN ONLY — 0/6 תרחישים בוצעו בפועל.**
-**EVIDENCE: preflight §0 בלבד (Render API, read-only, 13/08/2026).**
+**STATUS: 🟡 PLAN + AUTOMATION READY, NOT YET RUN AGAINST STAGING — 0/6 תרחישים בוצעו בפועל.**
+**EVIDENCE: preflight §0 (Render API, read-only, 13/08/2026); automation for
+2.1-2.5 written and smoke-tested locally with fake credentials (no crash,
+structurally sound) — `scripts/verify_bug161_162_callback_staging.py`,
+commit `89087b4`. Not yet executed against real staging — running it there
+is the actual remaining evidence gap, not code.**
