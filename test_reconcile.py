@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -565,18 +566,56 @@ def test_workflow_has_idempotency_guard_and_split_permissions():
 
 # --- Follow-up correction: crash-recovery idempotency (branch pushed but --
 
-def test_workflow_yaml_parses():
-    """The workflow must be syntactically valid YAML with correctly
-    de-indented block-scalar content -- a flush-left python heredoc body
-    embedded in an indented `run: |` block is invalid YAML (breaks the
-    block scalar at the first under-indented line) even though it can look
-    fine to a human skim. Parse it for real rather than grepping text."""
-    import yaml
-
+def test_workflow_run_blocks_have_consistent_indentation():
+    """Every `run: |` block scalar's content indentation is fixed by its
+    first non-blank line: a later line that is more indented than the
+    `run:` key itself but less indented than that first content line
+    invalidates the block under the YAML spec -- confirmed with PyYAML when
+    this exact bug (a flush-left python heredoc body embedded in an
+    indented `run: |` block) broke this workflow, even though it looked
+    fine to a human skim. This repo has no PyYAML dependency (grepped: no
+    other file imports it, not in requirements.txt), so this reimplements
+    the one structural rule that bit us rather than doing full YAML
+    parsing or adding a dependency for one test."""
     workflow = REPO_ROOT / ".github/workflows/context-librarian-reconcile.yml"
-    data = yaml.safe_load(workflow.read_text(encoding="utf-8"))
-    assert data["jobs"]["check"]["steps"]
-    assert data["jobs"]["prepare-maintenance-pr"]["steps"]
+    lines = workflow.read_text(encoding="utf-8").splitlines()
+    # A line at or below the run: key's own indentation only legitimately
+    # ends the block scalar if it is itself a new YAML mapping key or
+    # sequence item (e.g. the next "- name: ..." step) -- anything else at
+    # that indentation (like a heredoc body's "import json" at column 0) is
+    # leftover block content that dedented too far, which is exactly the
+    # real bug this test caught (PyYAML raised "could not find expected
+    # ':'" on the next line for that exact reason).
+    new_yaml_entry = re.compile(r"^-\s|^[A-Za-z_][\w.-]*\s*:")
+    checked_any = False
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].strip()
+        if stripped == "run: |" or stripped.startswith("run: |"):
+            run_indent = len(lines[i]) - len(lines[i].lstrip(" "))
+            content_indent = None
+            j = i + 1
+            while j < len(lines):
+                candidate = lines[j]
+                if candidate.strip() == "":
+                    j += 1
+                    continue
+                indent = len(candidate) - len(candidate.lstrip(" "))
+                if indent <= run_indent and new_yaml_entry.match(candidate.strip()):
+                    break  # block scalar genuinely ended here
+                if content_indent is None:
+                    content_indent = indent
+                assert indent >= content_indent, (
+                    f"line {j + 1} ({candidate!r}) is indented less than this "
+                    f"run: | block's established content indentation "
+                    f"({content_indent} spaces) -- invalid YAML block scalar"
+                )
+                j += 1
+            checked_any = True
+            i = j
+            continue
+        i += 1
+    assert checked_any, "expected at least one 'run: |' block in this workflow"
 
 
 def test_workflow_distinguishes_four_crash_recovery_cases():
