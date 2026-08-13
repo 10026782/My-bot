@@ -12,10 +12,13 @@ Render deploy `98f3626` מאשר את הקוד חי (ancestry מאומת), וה�
 אמיתי ב-`/telegram` production מול Demand ייעודי לבדיקה: `/marketing_status` הציג רשימה
 נכונה, כרטיס Next Action לשלב `ideas_generated` תאם בדיוק ל-`compute_next_action()`, ובחירת
 רעיון הפעילה בהצלחה את מסלול הכתיבה הקיים מ-M1 (`mkt_select:`→`select_creative()`→
-`save_production_handoff()`→`update_demand_stage`) והפיקה Production Handoff תקין. **מאותה
-בדיקה חיה נפתח גם ממצא נפרד, לא-חוסם**: הרעיון שה-AI יצר (Prompt 1) עיוות עובדה כמותית
-מה-Demand — נרשם כ-`BUG-164` (Creative Ideas grounding), במפורש לא כ-regression של M2
-ולא מעכב את הסטטוס VERIFIED שלו. פירוט מלא בסעיף F23 למטה.
+`save_production_handoff()`→`update_demand_stage`) והפיקה Production Handoff — **החלקים
+הדטרמיניסטיים שלו** (persona/חוקים/פרטי הדרישה/קלטי הפקה מסומנים "לא סופק") נכונים
+ומאומתים; **תוכן `[הרעיון שנבחר]` המוטמע בתוכו אינו מאומת/מוגן** ומכיל עיוות עובדתי
+אמיתי. **מאותה בדיקה חיה נפתח גם ממצא נפרד, לא-חוסם**: הרעיון שה-AI יצר (Prompt 1) עיוות
+עובדה כמותית מה-Demand — נרשם כ-`BUG-164` (Creative Ideas grounding), במפורש לא
+כ-regression של M2 ולא מעכב את הסטטוס VERIFIED שלו (שמכסה orchestration/runtime, לא את
+תוכן הרעיונות שה-AI מייצר). פירוט מלא בסעיף F23 למטה.
 עודכן קודם: 12/08/2026 — **F23 (BOSS Marketing Bridge M2, Telegram slice) — `/marketing_status`
 נוסף.** רשימת Demands מורשית (`identity.can_access_domain()`, נבדק גם ב-list וגם שוב
 ב-callback — לא מסתמכים על הסתרת ה-ID בתוך `callback_data` כאבטחה) + כרטיס "Next Action"
@@ -1742,9 +1745,10 @@ Render deploy מאומת: commit חי `98f3626` (הודעת deploy אמיתית 
 ("🔄 שלב: ideas_generated | סטטוס: Active" + "➡️ צעד הבא: בחר אחד מ-3 הרעיונות למטה");
 (3) לחיצה על "רעיון 2" הפעילה את מסלול הכתיבה **הקיים** מ-M1 (`mkt_select:` →
 `select_creative()`→`save_production_handoff()`→`update_demand_stage(HANDOFF_SENT)`)
-בהצלחה — "✅ נבחר רעיון 2" + טקסט Production Handoff מלא ותקין (persona/חוקים/פרטי
-הדרישה/קלטי הפקה מסומנים "לא סופק" כנדרש — **החלק הדטרמיניסטי הזה, שנוצר ב-
-`compose_production_handoff()` ללא קריאת AI, ללא המצאת עובדות**). מוכיח גם שהמסלול
+בהצלחה — "✅ נבחר רעיון 2" + טקסט Production Handoff. **החלק הדטרמיניסטי** (persona/חוקים/
+פרטי הדרישה/קלטי הפקה מסומנים "לא סופק" כנדרש), שנוצר ב-`compose_production_handoff()`
+ללא קריאת AI, תקין וללא המצאת עובדות — **אך `[הרעיון שנבחר]` המוטמע בתוכו אינו מאומת
+ומכיל עיוות עובדתי אמיתי (ראה `BUG-164` למטה)**, כך שהמסמך כולו אינו "תקין" גורף. מוכיח גם שהמסלול
 החדש (`mkt_status:`) וגם הישן (`mkt_select:`) פעילים זה לצד זה בפרודקשן ללא התנגשות,
 בדיוק כפי שהוכח סטטית לפני המיזוג.
 
