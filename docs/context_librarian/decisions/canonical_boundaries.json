@@ -30,7 +30,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-06-30",
-      "last_verified_commit": "c70d7d73a3e053eb136c0de27e2a0abfbc83c69e",
+      "last_verified_commit": "f14190de8ee4311b0efc46a74be240c38169d173",
       "confidence": 1.0,
       "notes": [
         "A generated bundle or planning document cannot override main."
@@ -149,7 +149,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-23",
-      "last_verified_commit": "c70d7d73a3e053eb136c0de27e2a0abfbc83c69e",
+      "last_verified_commit": "f14190de8ee4311b0efc46a74be240c38169d173",
       "confidence": 1.0,
       "notes": [
         "A code default is not evidence of the current deployed environment."
@@ -214,7 +214,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-23",
-      "last_verified_commit": "c70d7d73a3e053eb136c0de27e2a0abfbc83c69e",
+      "last_verified_commit": "f14190de8ee4311b0efc46a74be240c38169d173",
       "confidence": 0.98,
       "notes": [
         "Preserve historical failures as evidence, but do not treat them as current state without re-verification."
@@ -336,7 +336,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-30",
-      "last_verified_commit": "c70d7d73a3e053eb136c0de27e2a0abfbc83c69e",
+      "last_verified_commit": "f14190de8ee4311b0efc46a74be240c38169d173",
       "confidence": 1.0,
       "notes": [
         "Added after the first real Consumption Enforcement pilot (docs/governance/librarian/FIRST_REAL_CONSUMPTION_PILOT.md) found these five sources missing from cross_layer_architecture's mandatory tier despite being materially load-bearing for the recommendation.",

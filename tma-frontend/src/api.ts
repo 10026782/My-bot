@@ -1,4 +1,4 @@
-import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse } from "./types";
+import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse } from "./types";
 
 const BASE = (import.meta.env.VITE_API_URL as string) ?? "";
 const DEV_ID = (import.meta.env.VITE_DEV_TELEGRAM_ID as string) ?? "";
@@ -43,6 +43,12 @@ export async function fetchProjects(): Promise<ProjectsResponse> {
   const r = await fetch(`${BASE}/api/projects`, { headers: authHeaders() });
   if (!r.ok) throw new Error(`API ${r.status}`);
   return r.json() as Promise<ProjectsResponse>;
+}
+
+export async function fetchMarketingStatus(): Promise<MarketingStatusResponse> {
+  const r = await fetch(`${BASE}/api/marketing/demands`, { headers: authHeaders() });
+  if (!r.ok) await throwApiError(r, `API ${r.status}`);
+  return r.json() as Promise<MarketingStatusResponse>;
 }
 
 export async function fetchTmaAuth(): Promise<AuthResponse | null> {

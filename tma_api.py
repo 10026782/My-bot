@@ -138,6 +138,7 @@ def _cors(response):
 @tma_api.route("/api/approvals", methods=["OPTIONS"])
 @tma_api.route("/api/approvals/bulk", methods=["OPTIONS"])
 @tma_api.route("/api/finance/pulse", methods=["OPTIONS"])
+@tma_api.route("/api/marketing/demands", methods=["OPTIONS"])
 @tma_api.route("/api/owner/control-center", methods=["OPTIONS"])
 @tma_api.route("/api/owner/health", methods=["OPTIONS"])
 @tma_api.route("/api/tma/upload", methods=["OPTIONS"])
@@ -1007,6 +1008,50 @@ def tma_auth():
         "allowed_domains": identity.allowed_domains,
         "modes_available": modes,
     })
+
+
+def _marketing_status_payload(identity) -> dict:
+    """Read-only TMA view over the same Marketing authority as Telegram."""
+    import marketing_gateway
+    import marketing_orchestrator
+    from airtable_schema import MarketingCreativesFields as MCF, MarketingDemandFields as MDF
+
+    demands = []
+    for record in marketing_gateway.list_demands(limit=10):
+        fields = record.get("fields", {})
+        if not identity.can_access_domain(fields.get(MDF.DOMAIN, "")):
+            continue
+        demand_id = record.get("id", "")
+        creative_ids = fields.get(MDF.CREATIVES) or []
+        creatives = {
+            creative_id: creative_fields
+            for creative_id in creative_ids
+            if (creative_fields := marketing_gateway.get_creative(creative_id))
+        }
+        result = marketing_orchestrator.compute_next_action(demand_id, fields, creatives)
+        pending_count = sum(
+            1 for creative in creatives.values()
+            if creative.get(MCF.SELECTION_STATUS) == "Pending Review"
+        )
+        consistency = "inconsistent" if pending_count > 1 else "consistent"
+        demands.append({
+            "title": result.title,
+            "domain": fields.get(MDF.DOMAIN, ""),
+            "stage": result.stage,
+            "status": result.status,
+            "next_action": result.next_step.action,
+            "detail": result.next_step.detail,
+            "pending_creative_count": pending_count,
+            "consistency_state": consistency,
+        })
+    return {"count": len(demands), "demands": demands}
+
+
+@tma_api.route("/api/marketing/demands", methods=["GET"])
+@require_tma_auth
+def get_marketing_demands(identity):
+    """Marketing status only; no writes and no internal IDs in the payload."""
+    return jsonify(_marketing_status_payload(identity))
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -3983,4 +4028,3 @@ def tma_upload(identity):
         "drive_url":  result.drive_url,
         "file_size_tier": result.file_size_tier,
     })
-

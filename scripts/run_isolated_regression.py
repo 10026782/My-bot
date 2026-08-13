@@ -75,6 +75,7 @@ from scripts.regression_matrix import (  # noqa: E402
     NO_DATABASE_URL_FILES,
     PYTEST_MODE_FILES,
     REGRESSION_GROUPS,
+    SCENARIO_MATRIX,
 )
 
 # Hard override — wins regardless of the ambient shell environment. This is
@@ -135,12 +136,18 @@ def _run_one(filename: str) -> RegressionResult:
 
 
 def _run_matrix() -> tuple[bool, dict]:
-    evidence: dict = {"groups": {}, "full_regression": {}}
+    evidence: dict = {"groups": {}, "full_regression": {}, "scenarios": {}}
     ok = True
+    file_results: dict[str, RegressionResult] = {}
+
+    def run_cached(filename: str) -> RegressionResult:
+        if filename not in file_results:
+            file_results[filename] = _run_one(filename)
+        return file_results[filename]
 
     print("Named regression gates")
     for label, filename in REGRESSION_GROUPS.items():
-        res = _run_one(filename)
+        res = run_cached(filename)
         evidence["groups"][label] = {
             "file": filename, "status": "PASS" if res.ok else "FAIL", "detail": res.summary,
         }
@@ -150,7 +157,7 @@ def _run_matrix() -> tuple[bool, dict]:
     print("\nFull isolated regression matrix")
     failures = []
     for filename in FULL_REGRESSION:
-        res = _run_one(filename)
+        res = run_cached(filename)
         evidence["full_regression"][filename] = {
             "status": "PASS" if res.ok else "FAIL", "detail": res.summary,
         }
@@ -159,8 +166,23 @@ def _run_matrix() -> tuple[bool, dict]:
             failures.append(filename)
             ok = False
 
+    print("\n28-scenario acceptance matrix")
+    scenario_failures = []
+    for scenario in SCENARIO_MATRIX:
+        res = run_cached(scenario["file"])
+        status = "PASS" if res.ok else "FAIL"
+        evidence["scenarios"][scenario["id"]] = {
+            **scenario, "status": status, "detail": res.summary,
+        }
+        print(f"  {scenario['id']} {scenario['category']:<11} {scenario['name']:<34} {status}")
+        if not res.ok:
+            scenario_failures.append(scenario["id"])
+            ok = False
+
     evidence["full_regression_tally"] = f"{len(FULL_REGRESSION) - len(failures)}/{len(FULL_REGRESSION)}"
     evidence["full_regression_failures"] = failures
+    evidence["scenario_tally"] = f"{len(SCENARIO_MATRIX) - len(scenario_failures)}/{len(SCENARIO_MATRIX)}"
+    evidence["scenario_failures"] = scenario_failures
     return ok, evidence
 
 
@@ -191,6 +213,10 @@ def main() -> int:
         outcomes = {label: item["status"] for label, item in evidence["groups"].items()}
         outcomes.update(
             (filename, item["status"]) for filename, item in evidence["full_regression"].items()
+        )
+        outcomes.update(
+            (scenario_id, item["status"])
+            for scenario_id, item in evidence["scenarios"].items()
         )
         return outcomes
 
