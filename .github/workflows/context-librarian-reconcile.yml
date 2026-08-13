@@ -1,0 +1,213 @@
+name: Context Librarian Reconciliation
+
+# Runs after every push to main. Never pushes to main and never merges
+# anything -- see docs/context_librarian/RECONCILIATION.md section D.
+#
+# - CLEAN: no-op.
+# - AUTO_MAINTENANCE_REQUIRED: applies the bounded --apply-auto surface
+#   (mechanical last_observed_commit bumps, last_source_scan_commit advance,
+#   policy-pre-approved registrations) on a NEW branch
+#   (context-librarian/auto-maintenance-<sha>) and opens a PR against main
+#   for a human to review and merge. Never writes to main directly.
+# - OWNER_DECISION_REQUIRED: opens no PR. Prints the compact decision queue
+#   to the job summary and fails the job so it stays visible.
+#
+# Two jobs, split by privilege: `check` only ever reads (contents: read,
+# persist-credentials: false) -- it cannot push or open a PR even if
+# something in reconcile.py's classification path were compromised. Only
+# `prepare-maintenance-pr`, gated on check's AUTO_MAINTENANCE_REQUIRED
+# outcome, is granted contents: write / pull-requests: write.
+
+on:
+  push:
+    branches: [main]
+
+# A second push landing mid-run must not race the first run's branch/PR
+# creation for the same target state -- see test_reconcile_workflow_* in
+# test_reconcile.py for the textual guarantees checked on this file.
+concurrency:
+  group: context-librarian-reconcile
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      outcome: ${{ steps.reconcile.outputs.outcome }}
+      sha: ${{ steps.reconcile.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Reconcile (check only)
+        id: reconcile
+        run: |
+          set -euo pipefail
+          set +e
+          python -m tools.context_librarian reconcile --check --main-ref origin/main > reconcile.json
+          set -e
+          outcome="$(python -c "import json;print(json.load(open('reconcile.json'))['outcome'])")"
+          sha="$(python -c "import json;print(json.load(open('reconcile.json'))['canonical_main_sha'])")"
+          echo "outcome=$outcome" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Report owner decisions needed
+        if: steps.reconcile.outputs.outcome == 'OWNER_DECISION_REQUIRED'
+        run: |
+          {
+            echo "## Context Librarian — owner decision required"
+            echo
+            python - <<'PY'
+          import json
+          data = json.load(open("reconcile.json"))
+          for item in data["decision_queue"]:
+              label = item.get("policy_id", "no matching policy")
+              note = item.get("policy_note", "")
+              suffix = f" -- {note}" if note else ""
+              print(f"- `{item['path']}` — {item['classification']} ({label}){suffix}")
+          PY
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail visibly on owner decision required
+        if: steps.reconcile.outputs.outcome == 'OWNER_DECISION_REQUIRED'
+        run: exit 1
+
+  prepare-maintenance-pr:
+    needs: check
+    if: needs.check.outputs.outcome == 'AUTO_MAINTENANCE_REQUIRED'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      MAINTENANCE_PR_BODY: "Automated, policy-bounded catalog maintenance (mechanical last_observed_commit/last_source_scan_commit provenance plus policy-pre-approved registrations only) prepared by the Context Librarian reconciliation workflow after this push to main. Re-verified CLEAN before this PR was opened. Never pushed to main directly, never merged automatically — requires human review like any other PR. See docs/context_librarian/RECONCILIATION.md section D."
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # This job is the only one in this workflow with write access, and
+          # only reaches here on AUTO_MAINTENANCE_REQUIRED.
+          persist-credentials: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # Crash-recovery idempotency: "branch exists on origin" alone is not
+      # proof a prior run finished cleanly -- a prior run may have pushed
+      # the branch and then died before `gh pr create`. Distinguish four
+      # cases instead of a single skip/proceed flag:
+      #   absent      -- no branch for this SHA yet -> normal apply/push/PR
+      #   complete     -- branch + matching open PR both exist -> no-op
+      #   missing_pr   -- branch exists, is provably a single bot commit on
+      #                   top of this exact canonical SHA, but has no open
+      #                   PR -> a prior run died between push and PR
+      #                   creation; create ONLY the missing PR, never
+      #                   reapply or re-push
+      #   unprovable   -- branch exists but its head cannot be proven to be
+      #                   exactly one context-librarian-bot commit on top of
+      #                   this canonical SHA -> fail closed, never
+      #                   overwrite/rebase/force-push it
+      - name: Determine crash-recovery case
+        id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha="${{ needs.check.outputs.sha }}"
+          branch="context-librarian/auto-maintenance-${sha:0:12}"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+
+          if ! git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            echo "case=absent" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git fetch origin "$branch" --no-tags
+          head_sha="$(git rev-parse FETCH_HEAD)"
+          ahead_count="$(git rev-list --count "${sha}..${head_sha}" 2>/dev/null || echo -1)"
+          tip_parent="$(git rev-parse "${head_sha}^" 2>/dev/null || echo "")"
+          tip_author_email="$(git log -1 --format=%ae "$head_sha" 2>/dev/null || echo "")"
+
+          if [ "$ahead_count" != "1" ] || [ "$tip_parent" != "$sha" ] || [ "$tip_author_email" != "context-librarian-bot@users.noreply.github.com" ]; then
+            echo "case=unprovable" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          existing_pr="$(gh pr list --head "$branch" --base main --state open --json number --jq '.[0].number' || true)"
+          if [ -n "$existing_pr" ]; then
+            echo "case=complete" >> "$GITHUB_OUTPUT"
+            echo "pr=$existing_pr" >> "$GITHUB_OUTPUT"
+          else
+            echo "case=missing_pr" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: No-op -- matching open PR already exists for this SHA
+        if: steps.guard.outputs.case == 'complete'
+        run: echo "PR #${{ steps.guard.outputs.pr }} already open for ${{ steps.guard.outputs.branch }} -- nothing to do"
+
+      - name: Fail closed -- branch exists but its provenance cannot be proven
+        if: steps.guard.outputs.case == 'unprovable'
+        run: |
+          echo "::error::branch ${{ steps.guard.outputs.branch }} exists on origin but its head cannot be proven to be exactly one context-librarian-bot commit on top of canonical SHA ${{ needs.check.outputs.sha }}. Refusing to overwrite, rebase, or force-push it, and refusing to open a PR against it. This needs manual investigation."
+          exit 1
+
+      - name: Recover from crash before PR creation -- branch pushed, PR missing
+        if: steps.guard.outputs.case == 'missing_pr'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          branch="${{ steps.guard.outputs.branch }}"
+          echo "branch $branch already exists on origin with exactly the expected single bot commit on top of ${{ needs.check.outputs.sha }} but no open PR -- a prior run pushed the branch and then failed/was interrupted before gh pr create. Creating only the missing PR; not reapplying or re-pushing."
+          gh pr create --base main --head "$branch" \
+            --title "chore(context-librarian): bounded auto-maintenance" \
+            --body "$MAINTENANCE_PR_BODY"
+
+      - name: Apply bounded auto-maintenance (never pushes to main, never merges)
+        if: steps.guard.outputs.case == 'absent'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha="${{ needs.check.outputs.sha }}"
+          branch="${{ steps.guard.outputs.branch }}"
+          # Correct order (Message D correction, item 5): apply --apply-auto
+          # while HEAD is still the plain checked-out main SHA (its own
+          # safety check is HEAD==canonical SHA + clean tree, not a literal
+          # branch name), THEN create the maintenance branch from the
+          # already-mutated worktree -- not before.
+          python -m tools.context_librarian reconcile --apply-auto --main-ref origin/main
+          git checkout -b "$branch"
+          if git diff --quiet -- docs/context_librarian; then
+            echo "nothing to commit -- outcome was AUTO_MAINTENANCE_REQUIRED but apply-auto found no drift"
+            exit 0
+          fi
+          git config user.name "context-librarian-bot"
+          git config user.email "context-librarian-bot@users.noreply.github.com"
+          git add docs/context_librarian
+          git commit -m "chore(context-librarian): bounded auto-maintenance (provenance + policy-pre-approved registrations)"
+          git push origin "$branch"
+          existing_pr="$(gh pr list --head "$branch" --base main --state open --json number --jq '.[0].number' || true)"
+          if [ -n "$existing_pr" ]; then
+            echo "PR #$existing_pr already open for $branch -- not creating a duplicate"
+          else
+            gh pr create --base main --head "$branch" \
+              --title "chore(context-librarian): bounded auto-maintenance" \
+              --body "$MAINTENANCE_PR_BODY"
+          fi

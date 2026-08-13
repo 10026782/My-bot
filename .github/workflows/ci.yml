@@ -91,9 +91,15 @@ jobs:
       - name: Context Librarian catalog validation (N17 item 4 — CI drift detection)
         run: python -m tools.context_librarian validate
 
-      - name: Context Librarian authoritative post-merge refresh check
+      # Three-outcome reconciliation (CLEAN / AUTO_MAINTENANCE_REQUIRED /
+      # OWNER_DECISION_REQUIRED) replaces the old binary CHANGES_REQUIRED
+      # gate here — see docs/context_librarian/RECONCILIATION.md. Only
+      # OWNER_DECISION_REQUIRED blocks: an unrelated main SHA advance, an
+      # inert doc/image appearing, or a source matching an already-approved
+      # policy class must never fail this job by themselves.
+      - name: Context Librarian authoritative post-merge reconciliation
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: python -m tools.context_librarian refresh-after-merge --check
+        run: python -m tools.context_librarian reconcile --check
 
       - name: Run test_*.py scripts
         run: |
@@ -173,6 +179,9 @@ jobs:
 
       - name: pytest context librarian freshness automation
         run: python -m pytest test_refresh_after_merge.py -x --tb=short -q
+
+      - name: pytest context librarian reconciliation
+        run: python -m pytest test_reconcile.py -x --tb=short -q
 
       # Verification only — never mutates the catalog in CI. Reports whether
       # any file this PR touched is registered somewhere in the Context

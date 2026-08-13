@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0",
+  "kind": "context_librarian_policy_schema",
+  "required": [
+    "id", "policy_version", "description", "path_patterns", "runtime_consumed",
+    "authority", "eligible_target", "target_field", "auto_registration_allowed",
+    "classification_when_matched"
+  ],
+  "allowed": [
+    "id", "policy_version", "description", "path_patterns", "runtime_consumed",
+    "authority", "eligible_target", "target_field", "auto_registration_allowed",
+    "classification_when_matched", "notes"
+  ],
+  "classification_when_matched_values": [
+    "ALREADY_SATISFIED",
+    "AUTO_MAINTENANCE_ELIGIBLE"
+  ],
+  "target_field_values": ["code_paths", "test_paths"],
+  "id_pattern": "^[A-Z][A-Z0-9_]*$",
+  "extension_policy": {
+    "purpose": "Reusable, explicit classification decisions for already-approved source classes (RECONCILIATION.md section B). A policy only ever *reuses* a decision an owner already made -- it never grants a new one.",
+    "matching": "path_patterns are glob patterns (fnmatch semantics) matched against the full repo-relative path. No substring/keyword matching against arbitrary path text is permitted here -- that is exactly the failure mode this registry exists to replace.",
+    "eligible_target": "a decision.*/layer.* node id this policy's matches are attributed to for traceability. Not required to already exist as a loaded catalog node -- a policy MAY be added in the same PR as, or before, the node it references. When null, this policy is mechanical-only (no node to register into) and auto_registration_allowed must be false.",
+    "target_field": "the exact code_paths/test_paths array a matched path is registered into when auto_registration_allowed is true. Required whenever eligible_target is non-null; must be null when eligible_target is null. Never inferred from filename/path prose -- always an explicit, owner-authored field on the policy.",
+    "policy_version": "a positive integer, bumped by an owner whenever this policy's predicate/scope changes meaningfully. reconcile.py's revalidation pass re-runs every already-registered path's predicate the moment its stored policy_version no longer matches this value -- POLICY CHANGE REVALIDATES HISTORY, not just future matches. A structural/content predicate for the id must exist in tools/context_librarian/policy_validators.py before auto_registration_allowed may be true for it.",
+    "unknown_policy_fields": "rejected"
+  }
+}
