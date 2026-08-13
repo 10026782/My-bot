@@ -63,3 +63,43 @@ if __name__ == "__main__":
     test_task_matching_returns_canonical_approved_tools()
     test_restricted_is_explicit_and_infrastructure_is_not_business_result()
     test_unknown_and_normal_conversation_do_not_get_invented_or_interrupted()
+
+
+def test_shared_formatter_is_compact_and_telegram_ready():
+    reply = maybe_recommend("אני צריך לאחד כמה מסמכי PDF")
+    assert reply.splitlines()[:2] == ["יש לי כלי מתאים לזה:", ""]
+    assert "[BentoPDF](https://bentopdf.com/)" in reply
+    assert "מה הוא עושה" in reply and "איך משתמשים" in reply
+    assert "מה זה עוזר" not in reply
+    assert "ללא אישור" not in reply
+    assert "איך להשתמש:" not in reply
+    assert "1. " not in reply
+    assert reply.count("https://bentopdf.com/") == 1
+
+
+def test_no_agent_has_no_assistance_heading():
+    reply = maybe_recommend("אני צריך להקטין תמונה")
+    assert "עזרה נוספת" not in reply
+    assert "Agent" not in reply and "AI" not in reply
+
+
+def test_optional_agent_has_one_bounded_assistance_line():
+    reply = maybe_recommend("אני רוצה ליצור גרף מהנתונים")
+    assert reply.count("עזרה נוספת") == 1
+    assert reply.count("אם תרצה") == 1
+
+
+def test_direct_and_need_lookup_share_the_same_render_contract():
+    need = maybe_recommend("אני צריך לאחד PDF")
+    direct = maybe_recommend("איך משתמשים ב-BentoPDF?")
+    assert need == direct
+
+
+def test_every_approved_business_tool_renders_without_internal_wording():
+    for tool in list_tools():
+        reply = maybe_recommend(f"אני צריך {tool.name}")
+        assert reply is not None, tool.tool_id
+        assert f"[{tool.name}]({tool.url})" in reply
+        assert "מה זה עוזר" not in reply
+        assert "מקור אמת" not in reply
+        assert "ללא אישור" not in reply

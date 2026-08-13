@@ -6037,9 +6037,11 @@ def _webhook_telegram_impl():
         )
         typing_thread.start()
 
+        _reply_meta = {}
         try:
             reply = run_agent(
                 text, sender_user_id, channel="telegram", raw_event_id=str(update.update_id),
+                _out_meta=_reply_meta,
                 _live_contracts_snapshot=_live_contracts_for_turn,
             )
         except Exception as e:
@@ -6061,7 +6063,12 @@ def _webhook_telegram_impl():
         # an empty reply must never be sent as a blank Telegram message.
         if reply:
             try:
-                bot.send_message(reply_chat_id, reply)
+                _business_tool_reply = _reply_meta.get("source_module") == "business_tool_registry"
+                _send_kwargs = (
+                    {"parse_mode": "Markdown", "disable_web_page_preview": True}
+                    if _business_tool_reply else {}
+                )
+                bot.send_message(reply_chat_id, reply, **_send_kwargs)
             except Exception as e:
                 logger.error(f"[Telegram] send error: {e}")
         return "", 200
