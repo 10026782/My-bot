@@ -43,6 +43,37 @@ def test_registry_is_only_source_of_valid_combinations():
     print("test_registry_is_only_source_of_valid_combinations OK")
 
 
+def test_every_template_declares_semantic_contract():
+    # Template Semantic Contract (FINAL CORRECTION PASS): every registered
+    # Template must declare required/allowed fact keys and an expected
+    # semantic_type for every allowed key. "goal" is always required; topic
+    # is never allowed (ROUTING_ONLY, not proven-publishable copy).
+    for key, template in TEMPLATE_REGISTRY.items():
+        assert "goal" in template.required_fact_keys, key
+        assert template.required_fact_keys <= template.allowed_fact_keys, key
+        assert "topic" not in template.allowed_fact_keys, key
+        assert set(template.fact_semantic_types) == template.allowed_fact_keys, key
+    print("test_every_template_declares_semantic_contract OK")
+
+
+def test_semantic_contract_matches_fact_authority_resolution():
+    # cross-check: the semantic_type each Template expects for goal/location/
+    # audience matches what marketing_fact_authority.extract_protected_facts
+    # actually resolves for that demand_type -- the two files must agree.
+    from marketing_fact_authority import extract_protected_facts
+
+    demand = {
+        "Domain": "general", "Target Audience": "x", "Location": "y", "Goal": "z",
+    }
+    for dt in _ALL_DEMAND_TYPES:
+        pdf = extract_protected_facts("recDemo", dict(demand, **{"Demand Type": dt, "Demand Title": "t"}))
+        for combo in allowed_combinations(dt):
+            template = TEMPLATE_REGISTRY[(dt, *combo)]
+            for key in ("goal", "location", "audience"):
+                assert template.fact_semantic_types[key] == pdf.facts[key].semantic_type, (dt, key)
+    print("test_semantic_contract_matches_fact_authority_resolution OK")
+
+
 def test_bug164_goal_value_renders_atomically():
     goal_fact = ProtectedFact(
         key="goal", value="10 מועמדים תוך שבוע", source="Demand.goal",
@@ -100,6 +131,8 @@ if __name__ == "__main__":
     test_every_demand_type_has_registered_combinations()
     test_unknown_demand_type_returns_no_combinations()
     test_registry_is_only_source_of_valid_combinations()
+    test_every_template_declares_semantic_contract()
+    test_semantic_contract_matches_fact_authority_resolution()
     test_bug164_goal_value_renders_atomically()
     test_render_uses_only_facts_present_in_order()
     test_all_static_fragments_classified_creative_device()

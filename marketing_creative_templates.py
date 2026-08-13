@@ -51,7 +51,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Callable
 
-from marketing_fact_authority import ProtectedFact
+from marketing_fact_authority import ProtectedFact, SemanticType
 
 
 class ClaimType(str, Enum):
@@ -88,44 +88,102 @@ class Template:
     angle_id: AngleId
     opening_style: OpeningStyle
     cta_style: CtaStyle
+    required_fact_keys: frozenset[str]
+    allowed_fact_keys: frozenset[str]
+    fact_semantic_types: dict[str, SemanticType]  # expected semantic_type per allowed key
     render: RenderFn
 
 
+# Template Semantic Contract (FINAL CORRECTION PASS): one declaration per
+# demand_type (not per angle/opening/cta combo -- these don't vary by style
+# choice), consumed by every Template built for that demand_type below and
+# enforced independently by marketing_creative_renderer.authority_filter_and_
+# render(). A matching key name alone is not enough to authorize a render --
+# the referenced ProtectedFact's semantic_type must match what this contract
+# declares for that key, or the render fails closed (semantic_mismatch).
+#
+# Topic is never in allowed_fact_keys: marketing_fact_authority.py classifies
+# it ROUTING_ONLY (an internal record label, not proven-publishable copy), so
+# no template may reference it as copy.
+_DEMAND_TYPE_FACT_CONTRACT: dict[str, dict] = {
+    "recruitment": {
+        "required": frozenset({"goal"}),
+        "allowed": frozenset({"goal", "location", "audience"}),
+        "semantic_types": {
+            "goal": SemanticType.RECRUITMENT_GOAL,
+            "location": SemanticType.RECRUITMENT_WORK_AREA,
+            "audience": SemanticType.RECRUITMENT_ROLE_REQUIREMENTS,
+        },
+    },
+    "furniture_import": {
+        "required": frozenset({"goal"}),
+        "allowed": frozenset({"goal", "location", "audience"}),
+        "semantic_types": {
+            "goal": SemanticType.SALES_GOAL,
+            "location": SemanticType.FURNITURE_SALES_AREA,
+            "audience": SemanticType.FURNITURE_PRODUCT_CATEGORY,
+        },
+    },
+    "fiber_equipment": {
+        "required": frozenset({"goal"}),
+        "allowed": frozenset({"goal", "location", "audience"}),
+        "semantic_types": {
+            "goal": SemanticType.SALES_GOAL,
+            "location": SemanticType.FIBER_PROJECT_AREA,
+            "audience": SemanticType.FIBER_EQUIPMENT_PROJECT_CONTEXT,
+        },
+    },
+    "real_estate_listing": {
+        "required": frozenset({"goal"}),
+        "allowed": frozenset({"goal", "location", "audience"}),
+        "semantic_types": {
+            "goal": SemanticType.LISTING_GOAL,
+            "location": SemanticType.LISTING_PROPERTY_LOCATION,
+            "audience": SemanticType.LISTING_PROPERTY_DETAILS,
+        },
+    },
+    "service": {
+        "required": frozenset({"goal"}),
+        "allowed": frozenset({"goal", "location", "audience"}),
+        "semantic_types": {
+            "goal": SemanticType.SERVICE_GOAL,
+            "location": SemanticType.SERVICE_AREA,
+            "audience": SemanticType.SERVICE_TYPE_CONTEXT,
+        },
+    },
+}
+
 # Fixed, developer-authored connector phrasing per RENDERABLE fact key, per
-# demand_type. Deliberately references only topic/audience/location/goal —
-# never constraints/domain/demand_type (those are INSTRUCTION_ONLY/
-# ROUTING_ONLY, enforced independently by the renderer regardless of what's
-# defined here). Wraps the fact's full value verbatim — never a substring.
+# demand_type. Deliberately references only audience/location/goal — never
+# topic/constraints/domain/demand_type (those are ROUTING_ONLY/
+# INSTRUCTION_ONLY, enforced independently by the renderer regardless of
+# what's defined here). Wraps the fact's full value verbatim — never a
+# substring.
 _PHRASE_BUILDERS: dict[str, dict[str, Callable[[str], str]]] = {
     "recruitment": {
         "goal": lambda v: f"מחפשים {v}",
         "location": lambda v: f"ב{v}",
         "audience": lambda v: f"({v})",
-        "topic": lambda v: v,
     },
     "furniture_import": {
         "goal": lambda v: v,
         "location": lambda v: f"זמין ב{v}",
         "audience": lambda v: f"מיועד ל{v}",
-        "topic": lambda v: v,
     },
     "fiber_equipment": {
         "goal": lambda v: v,
         "location": lambda v: f"פעילים באזור {v}",
         "audience": lambda v: f"עבור {v}",
-        "topic": lambda v: v,
     },
     "real_estate_listing": {
         "goal": lambda v: v,
         "location": lambda v: f"ב{v}",
         "audience": lambda v: f"מתאים ל{v}",
-        "topic": lambda v: v,
     },
     "service": {
         "goal": lambda v: v,
         "location": lambda v: f"באזור {v}",
         "audience": lambda v: f"עבור {v}",
-        "topic": lambda v: v,
     },
 }
 
@@ -209,9 +267,12 @@ def _build_render_fn(demand_type: str, angle_id: AngleId, opening_style: Opening
 
 TEMPLATE_REGISTRY: dict[tuple[str, AngleId, OpeningStyle, CtaStyle], Template] = {}
 for _demand_type, _combos in _SUPPORTED_COMBOS.items():
+    _contract = _DEMAND_TYPE_FACT_CONTRACT[_demand_type]
     for _angle, _opening, _cta in _combos:
         TEMPLATE_REGISTRY[(_demand_type, _angle, _opening, _cta)] = Template(
             demand_type=_demand_type, angle_id=_angle, opening_style=_opening, cta_style=_cta,
+            required_fact_keys=_contract["required"], allowed_fact_keys=_contract["allowed"],
+            fact_semantic_types=_contract["semantic_types"],
             render=_build_render_fn(_demand_type, _angle, _opening, _cta),
         )
 
@@ -231,6 +292,15 @@ if __name__ == "__main__":
             assert (dt, *combo) in TEMPLATE_REGISTRY
 
     assert allowed_combinations("not_a_real_type") == ()
+
+    # Template Semantic Contract: every registered Template carries the
+    # demand_type's declared required/allowed/semantic_types, "topic" is
+    # never an allowed key anywhere, and "goal" is always required.
+    for _key, _tmpl in TEMPLATE_REGISTRY.items():
+        assert "topic" not in _tmpl.allowed_fact_keys, _key
+        assert "goal" in _tmpl.required_fact_keys, _key
+        assert _tmpl.required_fact_keys <= _tmpl.allowed_fact_keys, _key
+        assert set(_tmpl.fact_semantic_types) == _tmpl.allowed_fact_keys, _key
 
     # Marketing Claim Policy: every static template fragment shipped in PR1
     # must be CREATIVE_DEVICE -- no BOUNDED_CLAIM/BUSINESS_FACT content until
